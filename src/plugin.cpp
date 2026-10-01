@@ -1,5 +1,5 @@
-// EDF6VehicleImpact: when a Balam lands a melee hit, spawn a configurable bullet
-// (default: a timed-fuse grenade blast) at the fist.
+// EDF6VehicleImpact: when a Balam lands a melee hit, detonate an explosion at the fist;
+// when a Balam is destroyed, detonate a bigger one where it stands.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46; see docs/re-notes.md.
 #include <Windows.h>
 #include <intrin.h>
@@ -9,7 +9,6 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
-#include <new>
 #pragma warning(push)
 #pragma warning(disable:4201)
 #include "PluginAPI.h"
@@ -22,27 +21,15 @@ HMODULE module=nullptr;
 wchar_t logPath[MAX_PATH]{};
 wchar_t iniPath[MAX_PATH]{};
 
-// Ammo_CustomParameter as a raw SGO node tree: {type,a,b}; type 0 = array (count a,
-// children at node+b), type 2 = float. Every weapon in the game hands its bullet such a
-// node, an empty array when it has nothing to say; an absent one (tag 0xFFFF) throws
-// bad_variant_access in the bullet ctor. Bullets keep a pointer to the tree, so it is
-// never freed once published, even after the ini is reloaded.
-constexpr int kMaxCustom=16;
-struct CustomParam { std::int32_t nodes[(kMaxCustom+1)*3]; };
-
 struct Config {
     bool enabled=true;
-    bool playerOnly=false;    // false: NPC-driven Balams trigger too
-    float damageScale=0.5f;   // blast damage = punch damage * scale
-    float explosion=30.0f;    // blast radius in metres (AmmoExplosion)
-    float size=2.0f;          // AmmoSize
-    float speed=3.0f;         // metres per frame, fired straight down
-    float lift=3.0f;          // start this far above the hit point so it strikes the target
-    int aliveFrames=8;
-    float color[4]={1.0f,1.0f,1.0f,1.0f};
-    DWORD cooldownMs=250;     // per vehicle
-    wchar_t bullet[64]=L"SolidExpBullet01";  // impact-fused, needs no AmmoModel
-    const CustomParam* custom=nullptr;
+    bool playerOnly=false;        // false: NPC-driven Balams trigger the punch blast too
+    float damageScale=0.5f;       // punch blast damage = punch damage * scale
+    float explosion=30.0f;        // punch blast radius in metres
+    DWORD cooldownMs=250;         // per vehicle
+    float deathExplosion=100.0f;  // destruction blast radius; 0 disables it
+    float deathDamage=2000.0f;
+    float deathLift=10.0f;        // metres above the wreck's origin
 };
 Config cfg{};
 FILETIME iniStamp{};
@@ -53,23 +40,40 @@ constexpr unsigned kHitCall=0x60C017,kHitTarget=0x6C7DB0;   // Vehicle501 Update
 constexpr unsigned kSystem=0x20B2958,kGetFactory=0x1195C50,kSpawn=0x1194280;
 constexpr unsigned kIpCtor=0x1001D0,kIpDtor=0x101510;
 constexpr unsigned kSoldierVtables[]={0x17CDF28,0x17D0FF8,0x17CF100,0x17CF5B8};
-// Vehicle501_FortressRobo
+// Vehicle501_FortressRobo; vtable slot 9 is its message handler (damage arrives there)
+constexpr unsigned kBalamVtable=0x17D98C8,kBalamMessage=0x60ACC0;
+constexpr std::size_t kMessageSlot=9;
 constexpr std::size_t kAttackComp=0x2350,kSeats=0x608,kRider=0x260,kSelfPtr=0x28,kSelfCtrl=0x30;
-constexpr std::size_t kObjectId=0x314;
+// GameObjectBase
+constexpr std::size_t kPosition=0x90,kObjectId=0x314,kDead=0x2E8;
 // AttackColl group node (std::map node, value inline)
 constexpr std::size_t kNodeActive=0x138,kNodeFlags=0x63,kNodePos=0x90,kNodeDamage=0xB0;
 constexpr std::uint8_t kFlagHit=0x20;
 // BulletBase::InitParam (0x1E0 bytes)
 constexpr std::size_t kIpSize=0x1E0,kIpOwner=0x38,kIpOwnerCtrl=0x40,kIpFrame=0x70,kIpShooterId=0x90;
-constexpr std::size_t kIpSpeed=0x94,kIpAlive=0x98,kIpDamage=0x9C,kIpExplosion=0xB0,kIpSize_=0xC0;
-constexpr std::size_t kIpColor=0xD0,kIpGravity=0xE0,kIpCustom=0xE8,kIpCustomTag=0xF8,kIpSeed=0x1A0;
+constexpr std::size_t kIpSpeed=0x94,kIpAlive=0x98,kIpDamage=0x9C,kIpExplosion=0xB0;
+constexpr std::size_t kIpGravity=0xE0,kIpCustom=0xE8,kIpCustomTag=0xF8,kIpSeed=0x1A0;
+// SolidExpBullet01: needs no AmmoModel and carries an explosion. Its BulletBase flags live
+// at bullet+0xC34; bit 0x20 makes the end-of-life path detonate in place (EDF+0x2363B0)
+// instead of vanishing, which SolidExp alone never sets (it only bursts on contact).
+const wchar_t kBlastBullet[]=L"SolidExpBullet01";
+constexpr unsigned kBlastVtable=0x17A4498;
+constexpr std::size_t kBulletFlags=0xC34;
+constexpr std::uint32_t kDetonateOnExpiry=0x20;
 
 using HitFlagsFn=std::uint8_t*(__fastcall*)(void*,std::uint8_t*);
+using MessageFn=bool(__fastcall*)(void*,std::uintptr_t,std::uintptr_t,std::uintptr_t);
 using GetFactoryFn=void*(__fastcall*)(void*,const wchar_t*);
 using SpawnFn=void*(__fastcall*)(void*,const float*,void*,void*);
 using IpCtorFn=void*(__fastcall*)(void*);
 using IpDtorFn=void*(__fastcall*)(void*,unsigned);
 HitFlagsFn originalHitFlags=nullptr;
+MessageFn originalMessage=nullptr;
+
+// Ammo_CustomParameter as a raw SGO node: {type 0 = array, count 0, children at +12}.
+// Every weapon hands its bullet such a node; an absent one (tag 0xFFFF) throws
+// bad_variant_access in the bullet ctor.
+const std::int32_t kEmptyCustom[3]={0,0,12};
 
 // Follow-frame matrices handed to bullets via ip+0x70; a ring so live bullets keep theirs.
 alignas(16) float frames[32][16]{};
@@ -117,24 +121,14 @@ bool CoolingDown(const void* vehicle,ULONGLONG now) noexcept {
     *slot={vehicle,now};return false;
 }
 
-// Row-major world matrix: right, up, forward, position. Bullets fly along forward * speed
-// (BulletBase init, EDF+0x231DC7), so forward points down onto the hit point: the round
-// meets the punched target (or the ground under it) and detonates on contact.
-void BuildMatrix(const float* position,float* m) noexcept {
-    const float down[16]={1,0,0,0, 0,0,1,0, 0,-1,0,0, position[0],position[1]+cfg.lift,position[2],1};
-    std::memcpy(m,down,sizeof(down));
-}
-
-void FillParam(unsigned char* ip,const unsigned char* vehicle,float damage,const float* frame) noexcept {
+void FillParam(unsigned char* ip,const unsigned char* vehicle,float damage,float radius,const float* frame) noexcept {
     Put<std::uint32_t>(ip,kIpShooterId,At<std::uint32_t>(vehicle,kObjectId)); // never hits its own vehicle
-    Put<float>(ip,kIpSpeed,cfg.speed);
-    Put<std::int32_t>(ip,kIpAlive,cfg.aliveFrames);
+    Put<float>(ip,kIpSpeed,0.0f);
+    Put<std::int32_t>(ip,kIpAlive,1);     // expires on its first update
     Put<float>(ip,kIpDamage,damage);
-    Put<float>(ip,kIpExplosion,cfg.explosion);
-    Put<float>(ip,kIpSize_,cfg.size);
-    std::memcpy(ip+kIpColor,cfg.color,sizeof(cfg.color));
+    Put<float>(ip,kIpExplosion,radius);
     Put<float>(ip,kIpGravity,0.0f);
-    Put<const void*>(ip,kIpCustom,cfg.custom->nodes);
+    Put<const void*>(ip,kIpCustom,kEmptyCustom);
     Put<std::uint16_t>(ip,kIpCustomTag,1);
     Put<const float*>(ip,kIpFrame,frame);
     Put<std::uint64_t>(ip,kIpSeed,__rdtsc());
@@ -147,20 +141,25 @@ void FillParam(unsigned char* ip,const unsigned char* vehicle,float damage,const
     }
 }
 
-void* SpawnWave(const unsigned char* vehicle,const float* position,float damage) noexcept {
+// A motionless one-frame explosive round at `position`: on its first update it expires
+// and detonates in place through the game's own explosion path, so the blast is immediate.
+void* Detonate(const unsigned char* vehicle,const float* position,float damage,float radius) noexcept {
     __try {
         void* system=At<void*>(image,kSystem);
-        if(!system || !cfg.custom)return nullptr;
-        void* factory=reinterpret_cast<GetFactoryFn>(image+kGetFactory)(system,cfg.bullet);
-        if(!factory){Log("no bullet factory named %ls",cfg.bullet);return nullptr;}
+        if(!system)return nullptr;
+        void* factory=reinterpret_cast<GetFactoryFn>(image+kGetFactory)(system,kBlastBullet);
+        if(!factory){Log("no bullet factory named %ls",kBlastBullet);return nullptr;}
         float* frame=frames[nextFrame++%32];
-        BuildMatrix(position,frame);
-        alignas(16) float matrix[16];std::memcpy(matrix,frame,sizeof(matrix));
+        const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, position[0],position[1],position[2],1};
+        std::memcpy(frame,m,sizeof(m));
+        alignas(16) float matrix[16];std::memcpy(matrix,m,sizeof(m));
         alignas(16) unsigned char ip[kIpSize];
         reinterpret_cast<IpCtorFn>(image+kIpCtor)(ip);
-        FillParam(ip,vehicle,damage,frame);
-        void* bullet=reinterpret_cast<SpawnFn>(image+kSpawn)(system,matrix,factory,ip);
+        FillParam(ip,vehicle,damage,radius,frame);
+        auto bullet=static_cast<unsigned char*>(reinterpret_cast<SpawnFn>(image+kSpawn)(system,matrix,factory,ip));
         reinterpret_cast<IpDtorFn>(image+kIpDtor)(ip,0);
+        if(bullet && At<const unsigned char*>(bullet,0)==image+kBlastVtable)
+            Put<std::uint32_t>(bullet,kBulletFlags,At<std::uint32_t>(bullet,kBulletFlags)|kDetonateOnExpiry);
         return bullet;
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("SPAWN faulted");return nullptr;}
 }
@@ -195,10 +194,21 @@ void OnHit(void* comp) noexcept {
         float position[4];std::memcpy(position,group+kNodePos,sizeof(position));
         for(float v:position)if(!std::isfinite(v))return;
         const float damage=At<float>(group,kNodeDamage)*cfg.damageScale;
-        void* bullet=SpawnWave(vehicle,position,damage);
-        Log("BLAST %ls at (%.1f, %.1f, %.1f) player=%d damage=%.0f explosion=%.1f bullet=%p",
-            cfg.bullet,position[0],position[1],position[2],player,damage,cfg.explosion,bullet);
+        void* bullet=Detonate(vehicle,position,damage,cfg.explosion);
+        Log("BLAST at (%.1f, %.1f, %.1f) player=%d damage=%.0f explosion=%.1f bullet=%p",
+            position[0],position[1],position[2],player,damage,cfg.explosion,bullet);
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("OnHit faulted");}
+}
+
+void OnDeath(const unsigned char* vehicle) noexcept {
+    __try {
+        float position[4];std::memcpy(position,vehicle+kPosition,sizeof(position));
+        position[1]+=cfg.deathLift;
+        for(int i=0;i<3;++i)if(!std::isfinite(position[i]))return;
+        void* bullet=Detonate(vehicle,position,cfg.deathDamage,cfg.deathExplosion);
+        Log("DEATH BLAST at (%.1f, %.1f, %.1f) damage=%.0f explosion=%.1f bullet=%p",
+            position[0],position[1],position[2],cfg.deathDamage,cfg.deathExplosion,bullet);
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("OnDeath faulted");}
 }
 
 void ReloadConfigIfChanged() noexcept;
@@ -207,6 +217,19 @@ std::uint8_t* __fastcall HookHitFlags(void* comp,std::uint8_t* out) {
     auto result=originalHitFlags(comp,out);
     if(*out&kFlagHit)ReloadConfigIfChanged();
     if(cfg.enabled && (*out&kFlagHit))OnHit(comp);
+    return result;
+}
+
+// Damage reaches GameObjectBase through the message handler (EDF+0x54A530), which sets the
+// dead byte at +0x2E8 when life runs out. A 0 -> 1 change across the call is the kill.
+bool __fastcall HookMessage(void* object,std::uintptr_t message,std::uintptr_t param,std::uintptr_t extra) {
+    const auto vehicle=static_cast<const unsigned char*>(object);
+    const bool wasDead=vehicle[kDead]!=0;
+    const bool result=originalMessage(object,message,param,extra);
+    if(!wasDead && vehicle[kDead]) {
+        ReloadConfigIfChanged();
+        if(cfg.enabled && cfg.deathExplosion>0.0f)OnDeath(vehicle);
+    }
     return result;
 }
 
@@ -230,13 +253,27 @@ bool CheckProfile(HMODULE handle) noexcept {
         const unsigned char spawn[]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x40,0x49};
         const unsigned char ipCtor[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x48,0x89};
         const unsigned char ipDtor[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x8B,0xDA};
+        const unsigned char message[]={0x48,0x89,0x5C,0x24,0x20,0x57,0x48,0x81,0xEC,0x80,0x00,0x00};
+        const unsigned char deadByte[]={0x0F,0xB6,0x9F,0xE8,0x02,0x00,0x00};     // movzx ebx,[rdi+2E8]
+        const unsigned char blastFlags[]={0x83,0xA7,0x34,0x0C,0x00,0x00,0xEF};   // and [rdi+C34],~10
+        const unsigned char expiryTest[]={0xF6,0xC1,0x20};                      // test cl,20
         const bool ok=Matches(kHitCall,hitCall,sizeof(hitCall)) && Matches(kHitTarget,hitFlags,sizeof(hitFlags))
             && Matches(kGetFactory,getFactory,sizeof(getFactory)) && Matches(kSpawn,spawn,sizeof(spawn))
             && Matches(kIpCtor,ipCtor,sizeof(ipCtor)) && Matches(kIpDtor,ipDtor,sizeof(ipDtor))
-            && std::wcscmp(reinterpret_cast<const wchar_t*>(image+0x17A28B8),L"ShockWaveBullet01Exp")==0;
+            && Matches(kBalamMessage,message,sizeof(message)) && Matches(0x54A579,deadByte,sizeof(deadByte))
+            && Matches(0x28DD06,blastFlags,sizeof(blastFlags)) && Matches(0x2363B0,expiryTest,sizeof(expiryTest));
         if(!ok)image=nullptr;
         return ok;
     } __except(EXCEPTION_EXECUTE_HANDLER){image=nullptr;return false;}
+}
+
+// Swap one vtable entry, only if it still holds the expected function.
+bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept {
+    DWORD old=0;
+    if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))return false;
+    const bool ok=InterlockedCompareExchangePointer(slot,replacement,expected)==expected;
+    VirtualProtect(slot,sizeof(void*),old,&old);
+    return ok;
 }
 
 // Comma-separated floats; returns how many were parsed (at most max).
@@ -260,51 +297,19 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     return ReadFloats(key,&value,1)==1 ? value : fallback;
 }
 
-// count 0 yields the empty array most weapons carry.
-const CustomParam* BuildCustom(const float* values,int count) noexcept {
-    auto tree=new(std::nothrow) CustomParam{};  // never freed: live bullets point at it
-    if(!tree)return nullptr;
-    std::int32_t* n=tree->nodes;
-    n[0]=0;n[1]=count;n[2]=12;
-    for(int i=0;i<count;++i) {
-        n[3+i*3]=2;n[4+i*3]=0;std::memcpy(&n[5+i*3],&values[i],sizeof(float));
-    }
-    return tree;
-}
-
-// These bullet classes copy AmmoModel handles out of InitParam+0x180/+0x190 and
-// dereference them every frame (GrenadeBullet01 update -> EDF+0x1100B90). The plugin
-// has no model to give them, so they would crash on the first hit.
-bool NeedsModel(const wchar_t* bullet) noexcept {
-    static const wchar_t* const kModelBullets[]={L"GrenadeBullet01",L"GrenadeBullet01_MapNoDamage",
-        L"BombBullet01",L"BombBullet02",L"MissileBullet01"};
-    for(auto name:kModelBullets)if(_wcsicmp(bullet,name)==0)return true;
-    return false;
-}
-
 void LoadConfig() noexcept {
     Config next{};
     next.enabled=GetPrivateProfileIntW(L"VehicleImpact",L"Enabled",1,iniPath)!=0;
     next.playerOnly=GetPrivateProfileIntW(L"VehicleImpact",L"PlayerOnly",0,iniPath)!=0;
     next.damageScale=ReadFloat(L"DamageScale",next.damageScale);
     next.explosion=ReadFloat(L"Explosion",next.explosion);
-    next.size=ReadFloat(L"Size",next.size);
-    next.speed=ReadFloat(L"Speed",next.speed);
-    next.lift=ReadFloat(L"Lift",next.lift);
-    next.aliveFrames=static_cast<int>(GetPrivateProfileIntW(L"VehicleImpact",L"AliveFrames",next.aliveFrames,iniPath));
     next.cooldownMs=GetPrivateProfileIntW(L"VehicleImpact",L"CooldownMs",next.cooldownMs,iniPath);
-    ReadFloats(L"Color",next.color,4);
-    GetPrivateProfileStringW(L"VehicleImpact",L"Bullet",Config{}.bullet,next.bullet,64,iniPath);
-    if(NeedsModel(next.bullet)) {
-        Log("Bullet=%ls needs an AmmoModel the plugin cannot supply; using %ls",next.bullet,Config{}.bullet);
-        wcscpy_s(next.bullet,Config{}.bullet);
-    }
-    float custom[kMaxCustom]{};
-    const int count=ReadFloats(L"CustomParameter",custom,kMaxCustom);
-    next.custom=BuildCustom(custom,count);
+    next.deathExplosion=ReadFloat(L"DeathExplosion",next.deathExplosion);
+    next.deathDamage=ReadFloat(L"DeathDamage",next.deathDamage);
+    next.deathLift=ReadFloat(L"DeathLift",next.deathLift);
     cfg=next;
-    Log("CONFIG enabled=%d playerOnly=%d bullet=%ls explosion=%.1f size=%.1f speed=%.2f lift=%.1f alive=%d damageScale=%.2f custom=%d",
-        cfg.enabled,cfg.playerOnly,cfg.bullet,cfg.explosion,cfg.size,cfg.speed,cfg.lift,cfg.aliveFrames,cfg.damageScale,count);
+    Log("CONFIG enabled=%d playerOnly=%d explosion=%.1f damageScale=%.2f death=%.1f deathDamage=%.0f deathLift=%.1f",
+        cfg.enabled,cfg.playerOnly,cfg.explosion,cfg.damageScale,cfg.deathExplosion,cfg.deathDamage,cfg.deathLift);
 }
 
 FILETIME IniStamp() noexcept {
@@ -312,7 +317,7 @@ FILETIME IniStamp() noexcept {
     return GetFileAttributesExW(iniPath,GetFileExInfoStandard,&data) ? data.ftLastWriteTime : FILETIME{};
 }
 
-// Edits to the ini apply on the next hit; no game restart needed.
+// Edits to the ini apply on the next hit or kill; no game restart needed.
 void ReloadConfigIfChanged() noexcept {
     const auto now=GetTickCount64();
     if(now-iniCheckedAt<1000)return;
@@ -332,17 +337,20 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
-    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Impact";info->version=PLUG_VER(0,2,1,0);
-    Log("EDF6VehicleImpact 0.2.1 loading");
+    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Impact";info->version=PLUG_VER(0,3,0,0);
+    Log("EDF6VehicleImpact 0.3.0 loading");
     iniStamp=IniStamp();
     LoadConfig();
     if(!CheckProfile(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll or conflicting patch");return false;}
     originalHitFlags=reinterpret_cast<HitFlagsFn>(image+kHitTarget);
     bool changed=false;
-    const bool ok=RedirectCall(image+kHitCall,reinterpret_cast<void*>(originalHitFlags),
-                               reinterpret_cast<void*>(&HookHitFlags),changed);
-    Log("HOOK ready=%d changed=%d site=60C017",ok,changed);
-    return ok || changed;  // never unload code a patched call points at
+    const bool hit=RedirectCall(image+kHitCall,reinterpret_cast<void*>(originalHitFlags),
+                                reinterpret_cast<void*>(&HookHitFlags),changed);
+    originalMessage=reinterpret_cast<MessageFn>(image+kBalamMessage);
+    auto slot=reinterpret_cast<void**>(image+kBalamVtable)+kMessageSlot;
+    const bool death=PatchVtableSlot(slot,reinterpret_cast<void*>(originalMessage),reinterpret_cast<void*>(&HookMessage));
+    Log("HOOK hit=%d changed=%d site=60C017 death=%d",hit,changed,death);
+    return hit || changed || death;  // never unload code a patched call or slot points at
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {

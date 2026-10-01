@@ -38,3 +38,16 @@ team value, owner = vehicle vs pilot, ip+0x70 nullable?, fake cp read-back, real
 - SolidExpBullet01 (AWEAPON001 etc., AmmoModel 0, Ammo_CustomParameter []) has no model reads
   and detonates on contact with radius AmmoExplosion. RocketBullet01 and ShockWaveBullet01Exp
   also have no model reads.
+
+## Instant detonation and death blast (v0.3.0)
+
+- The v0.2.1 delay: SolidExpBullet01 only bursts on contact; with alive>1 and speed it travelled
+  before hitting anything. Expiry path EDF+0x236385/0x236899 (age [+0xAF8] vs alive [+0xA08])
+  tests BulletBase flag 0x20 (`test cl,20` at 0x2363B0): set -> explode in place via
+  0x542670/0x542490, clear -> vanish. Flags live at bullet+0xC34 (BulletBase subobject +0x140,
+  field +0xAF4). Only grenades/Volcanicrock set 0x20. v0.3.0 spawns speed 0, alive 1 and ORs 0x20
+  after Spawn (vtable check 0x17A4498) -> detonates on its first update.
+- Death: Balam vtable 0x17D98C8 slot 9 = 0x60ACC0 (message handler, bool) -> VehicleBase 0x62ECB0
+  -> GameObjectBase 0x54A530, which calls damage 0x547C30 and sets dead byte +0x2E8
+  (`movzx ebx,[rdi+2E8]` at 0x54A579). The plugin swaps slot 9 and fires once on 0 -> 1.
+  Position +0x90, object id +0x314. Only fires where the damage message is processed locally.
