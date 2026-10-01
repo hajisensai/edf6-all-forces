@@ -23,7 +23,9 @@ wchar_t logPath[MAX_PATH]{};
 wchar_t iniPath[MAX_PATH]{};
 
 // Ammo_CustomParameter as a raw SGO node tree: {type,a,b}; type 0 = array (count a,
-// children at node+b), type 2 = float. Bullets keep a pointer to it, so a tree is
+// children at node+b), type 2 = float. Every weapon in the game hands its bullet such a
+// node, an empty array when it has nothing to say; an absent one (tag 0xFFFF) throws
+// bad_variant_access in the bullet ctor. Bullets keep a pointer to the tree, so it is
 // never freed once published, even after the ini is reloaded.
 constexpr int kMaxCustom=16;
 struct CustomParam { std::int32_t nodes[(kMaxCustom+1)*3]; };
@@ -34,11 +36,12 @@ struct Config {
     float damageScale=0.5f;   // blast damage = punch damage * scale
     float explosion=30.0f;    // blast radius in metres (AmmoExplosion)
     float size=2.0f;          // AmmoSize
-    float speed=0.0f;
-    int aliveFrames=2;        // timed fuse: detonate almost immediately
+    float speed=3.0f;         // metres per frame, fired straight down
+    float lift=3.0f;          // start this far above the hit point so it strikes the target
+    int aliveFrames=8;
     float color[4]={1.0f,1.0f,1.0f,1.0f};
     DWORD cooldownMs=250;     // per vehicle
-    wchar_t bullet[64]=L"GrenadeBullet01";
+    wchar_t bullet[64]=L"SolidExpBullet01";  // impact-fused, needs no AmmoModel
     const CustomParam* custom=nullptr;
 };
 Config cfg{};
@@ -52,7 +55,7 @@ constexpr unsigned kIpCtor=0x1001D0,kIpDtor=0x101510;
 constexpr unsigned kSoldierVtables[]={0x17CDF28,0x17D0FF8,0x17CF100,0x17CF5B8};
 // Vehicle501_FortressRobo
 constexpr std::size_t kAttackComp=0x2350,kSeats=0x608,kRider=0x260,kSelfPtr=0x28,kSelfCtrl=0x30;
-constexpr std::size_t kMatrix=0x60,kObjectId=0x314;
+constexpr std::size_t kObjectId=0x314;
 // AttackColl group node (std::map node, value inline)
 constexpr std::size_t kNodeActive=0x138,kNodeFlags=0x63,kNodePos=0x90,kNodeDamage=0xB0;
 constexpr std::uint8_t kFlagHit=0x20;
@@ -114,16 +117,12 @@ bool CoolingDown(const void* vehicle,ULONGLONG now) noexcept {
     *slot={vehicle,now};return false;
 }
 
-// Row-major world matrix: right, up, forward, position. Rotation comes from the vehicle.
-void BuildMatrix(const unsigned char* vehicle,const float* position,float* m) noexcept {
-    std::memcpy(m,vehicle+kMatrix,sizeof(float)*16);
-    for(int row=0;row<3;++row) {
-        float* r=m+row*4;
-        const float len=std::sqrt(r[0]*r[0]+r[1]*r[1]+r[2]*r[2]);
-        if(len>1e-4f){r[0]/=len;r[1]/=len;r[2]/=len;}
-        r[3]=0.0f;
-    }
-    m[12]=position[0];m[13]=position[1];m[14]=position[2];m[15]=1.0f;
+// Row-major world matrix: right, up, forward, position. Bullets fly along forward * speed
+// (BulletBase init, EDF+0x231DC7), so forward points down onto the hit point: the round
+// meets the punched target (or the ground under it) and detonates on contact.
+void BuildMatrix(const float* position,float* m) noexcept {
+    const float down[16]={1,0,0,0, 0,0,1,0, 0,-1,0,0, position[0],position[1]+cfg.lift,position[2],1};
+    std::memcpy(m,down,sizeof(down));
 }
 
 void FillParam(unsigned char* ip,const unsigned char* vehicle,float damage,const float* frame) noexcept {
@@ -135,10 +134,8 @@ void FillParam(unsigned char* ip,const unsigned char* vehicle,float damage,const
     Put<float>(ip,kIpSize_,cfg.size);
     std::memcpy(ip+kIpColor,cfg.color,sizeof(cfg.color));
     Put<float>(ip,kIpGravity,0.0f);
-    if(cfg.custom) {
-        Put<const void*>(ip,kIpCustom,cfg.custom->nodes);
-        Put<std::uint16_t>(ip,kIpCustomTag,1);
-    }
+    Put<const void*>(ip,kIpCustom,cfg.custom->nodes);
+    Put<std::uint16_t>(ip,kIpCustomTag,1);
     Put<const float*>(ip,kIpFrame,frame);
     Put<std::uint64_t>(ip,kIpSeed,__rdtsc());
     // Owner weak_ptr = the vehicle's own weak self reference; the IP dtor releases it.
@@ -153,11 +150,11 @@ void FillParam(unsigned char* ip,const unsigned char* vehicle,float damage,const
 void* SpawnWave(const unsigned char* vehicle,const float* position,float damage) noexcept {
     __try {
         void* system=At<void*>(image,kSystem);
-        if(!system)return nullptr;
+        if(!system || !cfg.custom)return nullptr;
         void* factory=reinterpret_cast<GetFactoryFn>(image+kGetFactory)(system,cfg.bullet);
         if(!factory){Log("no bullet factory named %ls",cfg.bullet);return nullptr;}
         float* frame=frames[nextFrame++%32];
-        BuildMatrix(vehicle,position,frame);
+        BuildMatrix(position,frame);
         alignas(16) float matrix[16];std::memcpy(matrix,frame,sizeof(matrix));
         alignas(16) unsigned char ip[kIpSize];
         reinterpret_cast<IpCtorFn>(image+kIpCtor)(ip);
@@ -263,8 +260,8 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     return ReadFloats(key,&value,1)==1 ? value : fallback;
 }
 
+// count 0 yields the empty array most weapons carry.
 const CustomParam* BuildCustom(const float* values,int count) noexcept {
-    if(count<=0)return nullptr;
     auto tree=new(std::nothrow) CustomParam{};  // never freed: live bullets point at it
     if(!tree)return nullptr;
     std::int32_t* n=tree->nodes;
@@ -275,6 +272,16 @@ const CustomParam* BuildCustom(const float* values,int count) noexcept {
     return tree;
 }
 
+// These bullet classes copy AmmoModel handles out of InitParam+0x180/+0x190 and
+// dereference them every frame (GrenadeBullet01 update -> EDF+0x1100B90). The plugin
+// has no model to give them, so they would crash on the first hit.
+bool NeedsModel(const wchar_t* bullet) noexcept {
+    static const wchar_t* const kModelBullets[]={L"GrenadeBullet01",L"GrenadeBullet01_MapNoDamage",
+        L"BombBullet01",L"BombBullet02",L"MissileBullet01"};
+    for(auto name:kModelBullets)if(_wcsicmp(bullet,name)==0)return true;
+    return false;
+}
+
 void LoadConfig() noexcept {
     Config next{};
     next.enabled=GetPrivateProfileIntW(L"VehicleImpact",L"Enabled",1,iniPath)!=0;
@@ -283,16 +290,21 @@ void LoadConfig() noexcept {
     next.explosion=ReadFloat(L"Explosion",next.explosion);
     next.size=ReadFloat(L"Size",next.size);
     next.speed=ReadFloat(L"Speed",next.speed);
+    next.lift=ReadFloat(L"Lift",next.lift);
     next.aliveFrames=static_cast<int>(GetPrivateProfileIntW(L"VehicleImpact",L"AliveFrames",next.aliveFrames,iniPath));
     next.cooldownMs=GetPrivateProfileIntW(L"VehicleImpact",L"CooldownMs",next.cooldownMs,iniPath);
     ReadFloats(L"Color",next.color,4);
-    GetPrivateProfileStringW(L"VehicleImpact",L"Bullet",L"GrenadeBullet01",next.bullet,64,iniPath);
+    GetPrivateProfileStringW(L"VehicleImpact",L"Bullet",Config{}.bullet,next.bullet,64,iniPath);
+    if(NeedsModel(next.bullet)) {
+        Log("Bullet=%ls needs an AmmoModel the plugin cannot supply; using %ls",next.bullet,Config{}.bullet);
+        wcscpy_s(next.bullet,Config{}.bullet);
+    }
     float custom[kMaxCustom]{};
     const int count=ReadFloats(L"CustomParameter",custom,kMaxCustom);
     next.custom=BuildCustom(custom,count);
     cfg=next;
-    Log("CONFIG enabled=%d playerOnly=%d bullet=%ls explosion=%.1f size=%.1f speed=%.2f alive=%d damageScale=%.2f custom=%d",
-        cfg.enabled,cfg.playerOnly,cfg.bullet,cfg.explosion,cfg.size,cfg.speed,cfg.aliveFrames,cfg.damageScale,count);
+    Log("CONFIG enabled=%d playerOnly=%d bullet=%ls explosion=%.1f size=%.1f speed=%.2f lift=%.1f alive=%d damageScale=%.2f custom=%d",
+        cfg.enabled,cfg.playerOnly,cfg.bullet,cfg.explosion,cfg.size,cfg.speed,cfg.lift,cfg.aliveFrames,cfg.damageScale,count);
 }
 
 FILETIME IniStamp() noexcept {
@@ -320,8 +332,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
-    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Impact";info->version=PLUG_VER(0,2,0,0);
-    Log("EDF6VehicleImpact 0.2.0 loading");
+    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Impact";info->version=PLUG_VER(0,2,1,0);
+    Log("EDF6VehicleImpact 0.2.1 loading");
     iniStamp=IniStamp();
     LoadConfig();
     if(!CheckProfile(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll or conflicting patch");return false;}

@@ -24,3 +24,17 @@ Speed 2.0, Penetration 1, Color [1.3,1.5,1,1], Ammo_CustomParameter [1.0, 30.0].
 
 ## Open questions (cdb)
 team value, owner = vehicle vs pilot, ip+0x70 nullable?, fake cp read-back, real damage at +0x69799F, thread safety.
+
+## Explosion bullets (v0.2.1)
+
+- Bullet velocity = matrix row 2 (forward) * InitParam speed (BulletBase init, EDF+0x231DC7).
+- Every bullet ctor reads Ammo_CustomParameter through a variant whose tag lives at
+  InitParam+0xF8. Tag 0xFFFF (absent) throws bad_variant_access (SolidExpBullet01 ctor ->
+  0x28E405/0x28E483 -> 0x12DA768). Weapons always pass a node; most pass an empty array.
+  The plugin therefore always publishes an array node, with zero children when the ini is empty.
+- GrenadeBullet01(+_MapNoDamage), BombBullet01/02 and MissileBullet01 copy AmmoModel handles
+  from InitParam+0x180/+0x190 and dereference them every frame (Grenade update 0x2648F0 ->
+  0x1100B90 with rcx=[bullet+0x1170]=null => AV). The plugin has no model, so these are refused.
+- SolidExpBullet01 (AWEAPON001 etc., AmmoModel 0, Ammo_CustomParameter []) has no model reads
+  and detonates on contact with radius AmmoExplosion. RocketBullet01 and ShockWaveBullet01Exp
+  also have no model reads.
