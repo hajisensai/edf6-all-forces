@@ -1,5 +1,5 @@
-// EDF6VehicleImpact: when a player-driven Balam lands a melee hit, spawn the
-// Fencer hammer's charged shockwave bullet (ShockWaveBullet01Exp) at the fist.
+// EDF6VehicleImpact: when a Balam lands a melee hit, spawn a configurable bullet
+// (default: a timed-fuse grenade blast) at the fist.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46; see docs/re-notes.md.
 #include <Windows.h>
 #include <intrin.h>
@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <new>
 #pragma warning(push)
 #pragma warning(disable:4201)
 #include "PluginAPI.h"
@@ -21,16 +22,28 @@ HMODULE module=nullptr;
 wchar_t logPath[MAX_PATH]{};
 wchar_t iniPath[MAX_PATH]{};
 
+// Ammo_CustomParameter as a raw SGO node tree: {type,a,b}; type 0 = array (count a,
+// children at node+b), type 2 = float. Bullets keep a pointer to it, so a tree is
+// never freed once published, even after the ini is reloaded.
+constexpr int kMaxCustom=16;
+struct CustomParam { std::int32_t nodes[(kMaxCustom+1)*3]; };
+
 struct Config {
     bool enabled=true;
-    float damageScale=0.5f;   // shockwave damage = punch damage * scale
-    float radius=12.0f;       // explosion radius in metres
-    float speed=2.0f;         // hammer default
-    int aliveFrames=60;       // hammer charged knock
+    bool playerOnly=false;    // false: NPC-driven Balams trigger too
+    float damageScale=0.5f;   // blast damage = punch damage * scale
+    float explosion=30.0f;    // blast radius in metres (AmmoExplosion)
+    float size=2.0f;          // AmmoSize
+    float speed=0.0f;
+    int aliveFrames=2;        // timed fuse: detonate almost immediately
+    float color[4]={1.0f,1.0f,1.0f,1.0f};
     DWORD cooldownMs=250;     // per vehicle
-    wchar_t bullet[64]=L"ShockWaveBullet01Exp";
+    wchar_t bullet[64]=L"GrenadeBullet01";
+    const CustomParam* custom=nullptr;
 };
 Config cfg{};
+FILETIME iniStamp{};
+ULONGLONG iniCheckedAt=0;
 
 // --- EDF.dll layout ---
 constexpr unsigned kHitCall=0x60C017,kHitTarget=0x6C7DB0;   // Vehicle501 Update -> AttackColl::GetHitFlags
@@ -45,9 +58,8 @@ constexpr std::size_t kNodeActive=0x138,kNodeFlags=0x63,kNodePos=0x90,kNodeDamag
 constexpr std::uint8_t kFlagHit=0x20;
 // BulletBase::InitParam (0x1E0 bytes)
 constexpr std::size_t kIpSize=0x1E0,kIpOwner=0x38,kIpOwnerCtrl=0x40,kIpFrame=0x70,kIpShooterId=0x90;
-constexpr std::size_t kIpSpeed=0x94,kIpAlive=0x98,kIpDamage=0x9C,kIpSize_=0xC0,kIpHitSizeAdj=0xC4;
+constexpr std::size_t kIpSpeed=0x94,kIpAlive=0x98,kIpDamage=0x9C,kIpExplosion=0xB0,kIpSize_=0xC0;
 constexpr std::size_t kIpColor=0xD0,kIpGravity=0xE0,kIpCustom=0xE8,kIpCustomTag=0xF8,kIpSeed=0x1A0;
-constexpr float kHitSizeAdjust=1.75f,kExpRadiusMul=1.25f;
 
 using HitFlagsFn=std::uint8_t*(__fastcall*)(void*,std::uint8_t*);
 using GetFactoryFn=void*(__fastcall*)(void*,const wchar_t*);
@@ -56,9 +68,6 @@ using IpCtorFn=void*(__fastcall*)(void*);
 using IpDtorFn=void*(__fastcall*)(void*,unsigned);
 HitFlagsFn originalHitFlags=nullptr;
 
-// Ammo_CustomParameter [1.0, 30.0] as a raw SGO node tree: {type,a,b}, type 0 = array
-// (count a, children at node+b), type 2 = float. The bullet keeps a pointer to it.
-const std::int32_t kCustomParam[9]={0,2,12, 2,0,0x3F800000, 2,0,0x41F00000};
 // Follow-frame matrices handed to bullets via ip+0x70; a ring so live bullets keep theirs.
 alignas(16) float frames[32][16]{};
 unsigned nextFrame=0;
@@ -122,13 +131,14 @@ void FillParam(unsigned char* ip,const unsigned char* vehicle,float damage,const
     Put<float>(ip,kIpSpeed,cfg.speed);
     Put<std::int32_t>(ip,kIpAlive,cfg.aliveFrames);
     Put<float>(ip,kIpDamage,damage);
-    Put<float>(ip,kIpSize_,cfg.radius/(kHitSizeAdjust*kExpRadiusMul));
-    Put<float>(ip,kIpHitSizeAdj,kHitSizeAdjust);
-    const float color[4]={1.3f,1.5f,1.0f,1.0f};
-    std::memcpy(ip+kIpColor,color,sizeof(color));
+    Put<float>(ip,kIpExplosion,cfg.explosion);
+    Put<float>(ip,kIpSize_,cfg.size);
+    std::memcpy(ip+kIpColor,cfg.color,sizeof(cfg.color));
     Put<float>(ip,kIpGravity,0.0f);
-    Put<const void*>(ip,kIpCustom,kCustomParam);
-    Put<std::uint16_t>(ip,kIpCustomTag,1);
+    if(cfg.custom) {
+        Put<const void*>(ip,kIpCustom,cfg.custom->nodes);
+        Put<std::uint16_t>(ip,kIpCustomTag,1);
+    }
     Put<const float*>(ip,kIpFrame,frame);
     Put<std::uint64_t>(ip,kIpSeed,__rdtsc());
     // Owner weak_ptr = the vehicle's own weak self reference; the IP dtor releases it.
@@ -182,22 +192,23 @@ void OnHit(void* comp) noexcept {
     __try {
         const auto vehicle=static_cast<const unsigned char*>(comp)-kAttackComp;
         const bool player=PlayerDriven(vehicle);
-        static unsigned seen=0;
-        if(seen<16){++seen;Log("HIT vehicle=%p playerDriven=%d",vehicle,player);}
-        if(!player)return;
+        if(cfg.playerOnly && !player)return;
         const auto group=HitGroup(static_cast<const unsigned char*>(comp));
         if(!group || CoolingDown(vehicle,GetTickCount64()))return;
         float position[4];std::memcpy(position,group+kNodePos,sizeof(position));
         for(float v:position)if(!std::isfinite(v))return;
         const float damage=At<float>(group,kNodeDamage)*cfg.damageScale;
         void* bullet=SpawnWave(vehicle,position,damage);
-        Log("WAVE at (%.1f, %.1f, %.1f) damage=%.0f radius=%.1f bullet=%p",
-            position[0],position[1],position[2],damage,cfg.radius,bullet);
+        Log("BLAST %ls at (%.1f, %.1f, %.1f) player=%d damage=%.0f explosion=%.1f bullet=%p",
+            cfg.bullet,position[0],position[1],position[2],player,damage,cfg.explosion,bullet);
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("OnHit faulted");}
 }
 
+void ReloadConfigIfChanged() noexcept;
+
 std::uint8_t* __fastcall HookHitFlags(void* comp,std::uint8_t* out) {
     auto result=originalHitFlags(comp,out);
+    if(*out&kFlagHit)ReloadConfigIfChanged();
     if(cfg.enabled && (*out&kFlagHit))OnHit(comp);
     return result;
 }
@@ -231,22 +242,73 @@ bool CheckProfile(HMODULE handle) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){image=nullptr;return false;}
 }
 
+// Comma-separated floats; returns how many were parsed (at most max).
+int ReadFloats(const wchar_t* key,float* out,int max) noexcept {
+    wchar_t text[256]{};
+    GetPrivateProfileStringW(L"VehicleImpact",key,L"",text,256,iniPath);
+    int count=0;
+    for(wchar_t* p=text;*p && count<max;) {
+        wchar_t* end=nullptr;
+        const float value=std::wcstof(p,&end);
+        if(end==p || !std::isfinite(value))break;
+        out[count++]=value;
+        p=end;
+        while(*p==L',' || *p==L' ' || *p==L'\t')++p;
+    }
+    return count;
+}
+
 float ReadFloat(const wchar_t* key,float fallback) noexcept {
-    wchar_t text[32]{};
-    GetPrivateProfileStringW(L"VehicleImpact",key,L"",text,32,iniPath);
-    if(!text[0])return fallback;
-    const float value=static_cast<float>(_wtof(text));
-    return std::isfinite(value) && value>0.0f ? value : fallback;
+    float value=fallback;
+    return ReadFloats(key,&value,1)==1 ? value : fallback;
+}
+
+const CustomParam* BuildCustom(const float* values,int count) noexcept {
+    if(count<=0)return nullptr;
+    auto tree=new(std::nothrow) CustomParam{};  // never freed: live bullets point at it
+    if(!tree)return nullptr;
+    std::int32_t* n=tree->nodes;
+    n[0]=0;n[1]=count;n[2]=12;
+    for(int i=0;i<count;++i) {
+        n[3+i*3]=2;n[4+i*3]=0;std::memcpy(&n[5+i*3],&values[i],sizeof(float));
+    }
+    return tree;
 }
 
 void LoadConfig() noexcept {
-    cfg.enabled=GetPrivateProfileIntW(L"VehicleImpact",L"Enabled",1,iniPath)!=0;
-    cfg.damageScale=ReadFloat(L"DamageScale",cfg.damageScale);
-    cfg.radius=ReadFloat(L"Radius",cfg.radius);
-    cfg.speed=ReadFloat(L"Speed",cfg.speed);
-    cfg.aliveFrames=static_cast<int>(GetPrivateProfileIntW(L"VehicleImpact",L"AliveFrames",cfg.aliveFrames,iniPath));
-    cfg.cooldownMs=GetPrivateProfileIntW(L"VehicleImpact",L"CooldownMs",cfg.cooldownMs,iniPath);
-    GetPrivateProfileStringW(L"VehicleImpact",L"Bullet",L"ShockWaveBullet01Exp",cfg.bullet,64,iniPath);
+    Config next{};
+    next.enabled=GetPrivateProfileIntW(L"VehicleImpact",L"Enabled",1,iniPath)!=0;
+    next.playerOnly=GetPrivateProfileIntW(L"VehicleImpact",L"PlayerOnly",0,iniPath)!=0;
+    next.damageScale=ReadFloat(L"DamageScale",next.damageScale);
+    next.explosion=ReadFloat(L"Explosion",next.explosion);
+    next.size=ReadFloat(L"Size",next.size);
+    next.speed=ReadFloat(L"Speed",next.speed);
+    next.aliveFrames=static_cast<int>(GetPrivateProfileIntW(L"VehicleImpact",L"AliveFrames",next.aliveFrames,iniPath));
+    next.cooldownMs=GetPrivateProfileIntW(L"VehicleImpact",L"CooldownMs",next.cooldownMs,iniPath);
+    ReadFloats(L"Color",next.color,4);
+    GetPrivateProfileStringW(L"VehicleImpact",L"Bullet",L"GrenadeBullet01",next.bullet,64,iniPath);
+    float custom[kMaxCustom]{};
+    const int count=ReadFloats(L"CustomParameter",custom,kMaxCustom);
+    next.custom=BuildCustom(custom,count);
+    cfg=next;
+    Log("CONFIG enabled=%d playerOnly=%d bullet=%ls explosion=%.1f size=%.1f speed=%.2f alive=%d damageScale=%.2f custom=%d",
+        cfg.enabled,cfg.playerOnly,cfg.bullet,cfg.explosion,cfg.size,cfg.speed,cfg.aliveFrames,cfg.damageScale,count);
+}
+
+FILETIME IniStamp() noexcept {
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    return GetFileAttributesExW(iniPath,GetFileExInfoStandard,&data) ? data.ftLastWriteTime : FILETIME{};
+}
+
+// Edits to the ini apply on the next hit; no game restart needed.
+void ReloadConfigIfChanged() noexcept {
+    const auto now=GetTickCount64();
+    if(now-iniCheckedAt<1000)return;
+    iniCheckedAt=now;
+    const auto stamp=IniStamp();
+    if(CompareFileTime(&stamp,&iniStamp)==0)return;
+    iniStamp=stamp;
+    LoadConfig();
 }
 }  // namespace vimpact
 
@@ -258,10 +320,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
+    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Impact";info->version=PLUG_VER(0,2,0,0);
+    Log("EDF6VehicleImpact 0.2.0 loading");
+    iniStamp=IniStamp();
     LoadConfig();
-    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Impact";info->version=PLUG_VER(0,1,0,0);
-    Log("EDF6VehicleImpact 0.1.0 loading; enabled=%d bullet=%ls radius=%.1f damageScale=%.2f",
-        cfg.enabled,cfg.bullet,cfg.radius,cfg.damageScale);
     if(!CheckProfile(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll or conflicting patch");return false;}
     originalHitFlags=reinterpret_cast<HitFlagsFn>(image+kHitTarget);
     bool changed=false;
