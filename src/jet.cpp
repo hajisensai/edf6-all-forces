@@ -150,6 +150,16 @@ constexpr ULONGLONG kMissileMs=2500,kLockMs=700,kSalvoMs=900,kCrankMs=4500,kPull
 // ready again kRearmMs later. A drone shot down is lost.
 constexpr int kCarrierDrones=6;
 constexpr ULONGLONG kLaunchGapMs=1500,kRearmMs=10000,kDroneSortieMs=30000,kIdleMs=4000,kDroneOut=~0ull;
+// A drone shot down (out, but no jet of its carrier's has its place): the carrier has a new one this
+// much later.
+constexpr ULONGLONG kReplaceMs=30000;
+// The way back: a drone far off heads for a point kDockBehind behind and kDockUnder under the dock (along
+// the carrier's track), drawn in to the dock itself as it nears (kDockLine metres out), so it comes in
+// from behind and below instead of through the carrier's body.
+constexpr float kDockBehind=80.0f,kDockUnder=25.0f,kDockLine=200.0f;
+// Missiles with no lock: once the game has had nothing in the missile's lock list for kNoLockMs while
+// the jet stood off, it goes in with the guns for kGunSpellMs, then tries the missiles again.
+constexpr ULONGLONG kNoLockMs=10000,kGunSpellMs=15000;
 constexpr float kLaunchBelow=25.0f,kDockBelow=15.0f,kDockDist=25.0f;
 // Fighter: lead pursuit at the target's speed plus chaseOver; closer than overrun it breaks off
 // (extends kRunOutMs) so it does not ram or sit on its tail.
@@ -296,6 +306,8 @@ struct Jet {
     int slot;                // ...its place on the carrier
     ULONGLONG dock[kCarrierDrones];   // a carrier's drones: game ms each is ready (kDroneOut: out)
     ULONGLONG launchAt;      // a carrier's last launch
+    ULONGLONG lockSeen;      // standing off with missiles: game ms the lock list last held a target (0: not)
+    ULONGLONG gunsUntil;     // no lock came (kNoLockMs): guns only until then
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
 Jet jets[kMaxJets]{};
@@ -856,7 +868,11 @@ bool Recover(const Jet& d,const Jet& mother,const float* pos,float* want,float* 
     const float to[3]={dock[0]-pos[0],dock[1]-pos[1],dock[2]-pos[2]};
     const float dist=Len(to),own=Len(mother.vel);
     if(dist<kDockDist)return true;
-    Toward(pos,dock,want);
+    float track[3]={mother.vel[0],0.0f,mother.vel[2]};
+    if(!Normalize(track)){track[0]=0;track[2]=0;}
+    const float out=Clamp(dist/kDockLine,0.0f,1.0f);
+    const float in[3]={dock[0]-track[0]*kDockBehind*out,dock[1]-kDockUnder*out,dock[2]-track[2]*kDockBehind*out};
+    Toward(pos,in,want);
     *speed=Clamp(own+dist*0.25f,own+10.0f,KindOf(d).attack);
     return false;
 }
@@ -1175,6 +1191,16 @@ unsigned char* BayMake(const BombLoad& l,float perFrame,float* fireDist) noexcep
 // A carrier's launch (see kCarrierDrones): a ready drone every kLaunchGapMs while it has a target, from
 // kLaunchBelow under it along its heading, faster than it, in its flight.
 void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexcept {
+    for(int i=0;i<kCarrierDrones;++i) {
+        if(c.dock[i]!=kDroneOut)continue;
+        bool out=false;
+        for(const auto& d:jets)
+            out|=d.vehicle && d.mother==c.ctrl && d.slot==i && !d.reap && ms-d.seen<=kStaleMs &&
+                 Readable(d.vehicle,kDead+1) && !d.vehicle[kDead];
+        if(out)continue;
+        c.dock[i]=ms+kReplaceMs;
+        Log("JET v=%p carrier: drone %d lost, a new one in %.0f s",c.vehicle,i,static_cast<float>(kReplaceMs)*0.001f);
+    }
     if(!c.target || c.mode==Mode::withdraw || ms-c.launchAt<kLaunchGapMs)return;
     int i=0;
     while(i<kCarrierDrones && c.dock[i]>ms)++i;
@@ -1427,8 +1453,16 @@ void JetFrame(unsigned char* v) noexcept {
     default:
         if(!j->target || !kind.attacks) {
             if(j->mode!=Mode::patrol)SetMode(*j,Mode::patrol,ms);
+            j->lockSeen=0;
             speed=Patrol(*j,pos,anchor,height,want);
-        } else if(arms.missiles>0 && kind.missileRange>0.0f) {
+        } else if(arms.missiles>0 && kind.missileRange>0.0f && ms>=j->gunsUntil) {
+            if(!j->lockSeen || arms.locked>0)j->lockSeen=ms;
+            if(ms-j->lockSeen>kNoLockMs) {
+                Log("JET v=%p no missile lock in %.0f s: guns for %.0f s",v,static_cast<float>(kNoLockMs)*0.001f,
+                    static_cast<float>(kGunSpellMs)*0.001f);
+                j->gunsUntil=ms+kGunSpellMs;j->lockSeen=0;
+                if(j->mode==Mode::missile || j->mode==Mode::crank)SetMode(*j,Mode::patrol,ms);
+            }
             Missile(*j,pos,height,ms,want,&speed);
             missileOk=j->mode==Mode::missile;
         } else if(j->flyer)gunsOk=Chase(*j,pos,lead,ms,want,&speed);
