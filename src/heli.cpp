@@ -117,14 +117,20 @@ bool profileOk=false;
 
 // Obstacle avoidance casts rays at the map: terrain and buildings, never units (docs/raycast-re.md).
 // EDF.dll's wrapper of the Havok ray cast takes the world wrapper *(image+kHavokGlobal)+0x10, the ray
-// (filter 0x16: layer 22, the game's own map-only layer) and a stack hknpClosestHitCollector, which keeps
-// the nearest hit: count at +0x0C, point at +0x30, fraction of the segment at +0x50.
+// (filter 0x16: layer 22, the game's map layer) and a stack collector: count at +0x0C, point at +0x30,
+// fraction of the segment at +0x50, flags at +0x9C. Layer 22 also meets other bodies (the 15:06 round:
+// each heli's roof probe hit its wingman, and the pair climbed each other to 90 m), so like the game's
+// own internal_GetGroundPosition it uses that function's collector, whose addHit (kGroundAdd) keeps only
+// hits with flags & 2 and lets the ray go on past the rest. kHitVtbl, the plain nearest-hit collector,
+// only feeds the log (what the filter skipped).
 constexpr std::size_t kHavokGlobal=0x20B2958,kCastRay=0x11A7EE0,kHitVtbl=0x1768B78,kHitReset=0xFDF00;
-constexpr std::size_t kHitSlot0=0x978880,kHitAdd=0xD93980;
+constexpr std::size_t kHitSlot0=0x978880,kHitAdd=0xD93980,kGroundVtbl=0x179CBE8,kGroundAdd=0x208850;
 const Signature kRaySignatures[]={
     {kCastRay,{0x40,0x53,0x56,0x57,0x48,0x81,0xEC,0xA0,0x00,0x00,0x00,0x48,0x8B,0x05,0x66,0x71},16},
     {kHitReset,{0x33,0xD2,0xB8,0xFF,0xFF,0x00,0x00,0x89,0x51,0x0C,0x0F,0x28,0x05,0x1F,0x4B,0xE8},16},
     {kHitAdd,{0xF3,0x0F,0x10,0x4A,0x20,0x0F,0x10,0x41,0x10,0x0F,0xC6,0xC9,0x00,0x0F,0x2E,0xC1},16},
+    // test byte [rdx+0x6C],2; jne kHitAdd; ret
+    {kGroundAdd,{0xF6,0x42,0x6C,0x02,0x0F,0x85,0x26,0xB1,0xB8,0x00,0xC3},11},
 };
 bool rayOk=false;
 struct alignas(16) RayInput { float from[4],to[4]; std::uint32_t filter,unk24; std::uint64_t pad; };
@@ -132,20 +138,21 @@ static_assert(sizeof(RayInput)==0x30,"EdfRayInput");
 struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 
 // Metres along a->b to the nearest terrain/building, or -1 with none (or no physics world). `hit`
-// receives the point.
-float CastRay(const float* a,const float* b,float* hit=nullptr) noexcept {
+// receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
+float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
     const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},0x16,0,0};
     RayHits col{};
-    *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
+    *reinterpret_cast<const void**>(col.raw)=image+(any ? kHitVtbl : kGroundVtbl);
     reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
     reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
     if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
     const float f=*reinterpret_cast<const float*>(col.raw+0x50);
     if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
     if(hit)std::memcpy(hit,col.raw+0x30,12);
+    if(flags)std::memcpy(flags,col.raw+0x9C,4);
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
     return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
 }
@@ -423,16 +430,18 @@ float Engage(Heli& h,const float* pos,const float* aim,float range,float dip,int
 //   veers to the clearer side.
 constexpr float kLookAhead=3.0f,kLookMin=25.0f,kAvoidSide=0.52f;   // s; m; rad (30 deg)
 constexpr float kGroundClear=6.0f,kRoofClear=10.0f,kRoofProbe=150.0f,kAvoidStop=12.0f,kAvoidSteer=8.0f;
-struct Avoidance { float ahead,clear; };   // metres to the wall ahead and over the ground; -1: none seen
+// metres to the wall ahead and over the ground (-1: none seen); for the log, the roof ahead and the
+// nearest hit of any kind there with its flags (-1e9: none)
+struct Avoidance { float ahead,clear,roof,anyRoof; std::uint32_t anyFlags; };
 
-float RoofBelow(const float* at,float top) noexcept {
+float RoofBelow(const float* at,float top,bool any=false,std::uint32_t* flags=nullptr) noexcept {
     const float a[3]={at[0],top,at[2]},b[3]={at[0],top-kRoofProbe*2.0f,at[2]};
     float hit[3];
-    return CastRay(a,b,hit)>=0.0f ? hit[1] : -1e9f;
+    return CastRay(a,b,hit,any,flags)>=0.0f ? hit[1] : -1e9f;
 }
 
 Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land) noexcept {
-    Avoidance r{-1.0f,-1.0f};
+    Avoidance r{-1.0f,-1.0f,-1e9f,-1e9f,0};
     if(!cfg.heliAvoid || !rayOk)return r;
     const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
     float hit[3];
@@ -452,6 +461,8 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
     const float top=(pos[1]>*height ? pos[1] : *height)+kRoofProbe;
     const float ahead[3]={pos[0]+dir[0]*look,0,pos[2]+dir[2]*look};
     const float roof=RoofBelow(ahead,top);
+    r.roof=roof;
+    if(cfg.debug)r.anyRoof=RoofBelow(ahead,top,true,&r.anyFlags);
     if(*height<roof+kGroundClear)*height=roof+kGroundClear;
     // Walls: straight ahead and to both sides.
     float dist[3];
@@ -659,12 +670,12 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
-        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f lift=%.0f%s%s",
+        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
             v,land ? "land" : engage ? (h.back ? "back" : aiming ? "aim" : "wait") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
             wing,pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
-            speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi,avoid.ahead,avoid.clear,h.losLift,hidden ? " hidden" : "",wallAhead ? " wall" : "");
+            speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi,avoid.ahead,avoid.clear,avoid.roof,avoid.anyRoof,avoid.anyFlags,h.losLift,hidden ? " hidden" : "",wallAhead ? " wall" : "");
     }
 }
 }  // namespace
@@ -704,7 +715,10 @@ bool CheckHeliProfile() noexcept {
         profileOk=true;
         // Avoidance has its own check: without it the helis still fly, just blind.
         rayOk=Readable(image+kHitVtbl,0x28) && At<const unsigned char*>(image,kHitVtbl)==image+kHitSlot0 &&
-              At<const unsigned char*>(image,kHitVtbl+0x20)==image+kHitAdd;
+              At<const unsigned char*>(image,kHitVtbl+0x20)==image+kHitAdd &&
+              Readable(image+kGroundVtbl,0x28) && At<const unsigned char*>(image,kGroundVtbl)==image+kHitSlot0 &&
+              At<const unsigned char*>(image,kGroundVtbl+0x10)==image+kHitReset &&
+              At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
         return true;
