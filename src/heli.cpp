@@ -79,7 +79,14 @@ constexpr ULONGLONG kExtendMs=10000; // it turns back in after this long at most
 // lifts its run kLosClimb m/s until it sees over (at most kLosMax), easing back down at kLosSink once
 // clear. It does not fire at the wall.
 constexpr float kAimWall=25.0f,kLosSlack=3.0f,kLosClimb=4.0f,kLosSink=1.5f,kLosMax=40.0f;
-constexpr float kWingStep=3.0f;      // m: wingmen run 0/1/2 steps higher, so they do not share one height
+// Contact: veh+0x1580 bit 1 is set by any contact whose normal points up, not only the ground: a heli
+// sitting on another one has it too, and slot 57 then ignores its tilt, yaw and horizontal input (see
+// docs/heli-input-re.md 2a). In the 15:44 round a 506 and a 409 running in on one target at heights 3 m
+// apart met at 30 m and hung there together for 45 s. So the runs stack like the formation (kGroupStep
+// per flight, kWingLift per wing), targets are shared out (kShareTarget), and a heli in contact more than
+// kGroundContact above the ground (a ray) is perched on another body: the higher of the two climbs
+// kUnstick metres, the lower one sinks.
+constexpr float kWingLift=4.0f,kGroundContact=4.0f,kUnstick=12.0f,kShareTarget=40.0f;
 constexpr float kSidestep=6.0f;      // m/s around the target while its burst would pass the player
 constexpr float kHitRadius=3.0f;     // m: the cone widens up close so a miss of this much at the target still fires
 constexpr float kMissileCone=10.0f;  // deg: the missile homes (LockonType 1), so a rough aim is enough
@@ -101,6 +108,7 @@ constexpr float kTurretReach=70.0f;
 constexpr ULONGLONG kReloadGunMs=8000,kReloadAltMs=15000,kBurstMs=2000,kBurstRest=1000;
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
 constexpr float kKeepTarget=30.0f;   // m: the current target counts this much nearer (less switching)
+// (kShareTarget: a target counts this much farther per other heli already on it)
 constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at counts this much farther
 // Formation: the helis fly in flights of one type each (see FlightOf), so a flight shares one top speed
 // and turn. A flight is a V, kWingGap metres per place; flights escort kGroupGap apart and hover
@@ -280,6 +288,7 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
         if(object==h.target)score-=kKeepTarget;
+        for(const auto& o:helis)if(&o!=&h && o.vehicle && o.target==object && GetTickCount64()-o.seen<2000)score+=kShareTarget;
         if(std::sqrt(Dot2(f,f))<minHoriz)score+=kTooClose;
         if(!bestObject || score<best){best=score;bestObject=object;std::memcpy(bestAim,a,12);}
     }
@@ -325,6 +334,11 @@ Flight FlightOf(const Heli& h,ULONGLONG ms) noexcept {
         ++f.count;
     }
     return f;
+}
+
+// Metres a heli flies above the formation or run height: its flight's step plus its place in the flight.
+float Stack(const Flight& fl) noexcept {
+    return kGroupStep*static_cast<float>(fl.group)+kWingLift*static_cast<float>(fl.wing);
 }
 
 float Dist2(const float* a,const float* b) noexcept {
@@ -376,7 +390,7 @@ void Arrive(const Heli& h,const float* pos,const float* goal,const float* goalVe
 float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl,ULONGLONG ms,float* vel,float* height) noexcept {
     const float* first=fl.first ? fl.first->pos : pos;
     const float group=static_cast<float>(fl.group),wing=static_cast<float>(fl.wing);
-    *height=player.pos[1]+cfg.heliHeight+kGroupStep*group+4.0f*wing;
+    *height=player.pos[1]+cfg.heliHeight+Stack(fl);
     if(ms-stillAt<kMovingMs) {
         // Each flight a V: the first flight on the side the first heli is on, heliFollow out and
         // kEscortAhead forward, the second on the other side, the next ones kGroupGap farther out,
@@ -412,17 +426,17 @@ float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl
     return std::fabs(dist-r);
 }
 
-// Engaged (see kMaxTilt): a strafing run. The height is heliFireHeight (plus kWingStep per wing, three
-// steps) above the target, or the player if higher. Running in, it flies at the target at full speed (its
+// Engaged (see kMaxTilt): a strafing run. The height is heliFireHeight (plus its Stack) above the target, or the player if higher. Running in, it flies at the target at full speed (its
 // velocity on top) and, while its burst would pass the player, slides around the target away from them.
 // It breaks off (h.extend) once the dip onto the lead point passes kMaxDip or a wall is ahead, and flies
 // on at full speed to a point kExtend past the target, slanted kExtendTurn off the way it broke (to the
 // side of its wing), kept within heliCombatRange of the player when following; there, or after
 // kExtendMs, it turns back in. Returns how far it is from where it is going.
-float Engage(Heli& h,const float* pos,const float* aim,float dipWant,bool wall,int wing,bool follow,ULONGLONG ms,
+float Engage(Heli& h,const float* pos,const float* aim,float dipWant,bool wall,const Flight& fl,bool follow,ULONGLONG ms,
              float* vel,float* height) noexcept {
     const float ground=follow && player.pos[1]>aim[1] ? player.pos[1] : aim[1];
-    *height=ground+cfg.heliFireHeight+kWingStep*static_cast<float>(wing%3);
+    *height=ground+cfg.heliFireHeight+Stack(fl);
+    const int wing=fl.wing;
     float to[3]={aim[0]-pos[0],0,aim[2]-pos[2]};
     const float horiz=std::sqrt(Dot2(to,to));
     if(horiz<0.1f){to[0]=0;to[2]=1;}
@@ -607,7 +621,15 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const float dt=Clamp(static_cast<float>(now.QuadPart-h.last.QuadPart)/static_cast<float>(freq.QuadPart),0.004f,0.1f);
     h.last=now;
     for(int i=0;i<3;++i){const float raw=(pos[i]-h.prev[i])/dt;h.vel[i]+= (raw-h.vel[i])*0.3f;h.prev[i]=pos[i];}
-    const bool grounded=(v[kContact]&kContactGround)!=0;
+    // In contact (see kGroundContact): on the ground, or perched on another body.
+    const bool contact=(v[kContact]&kContactGround)!=0;
+    bool grounded=contact;
+    if(contact && cfg.heliAvoid && rayOk) {
+        const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
+        const float below=CastRay(pos,down);
+        grounded=below>=0.0f && below<kGroundContact;
+    }
+    const bool perched=contact && !grounded;
 
     // Learn the yaw sign from the turn the last input produced.
     const float turned=Wrap(heading-h.prevHeading);h.prevHeading=heading;
@@ -695,7 +717,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         off=Dist2(pos,spot);
         height=player.pos[1]-10.0f;   // below the ground: it descends until it touches down
     } else if(engage) {
-        off=Engage(h,pos,aim,dist<aimRange ? dipWant : 0.0f,wallAhead,wing,follow,ms,want,&height);
+        off=Engage(h,pos,aim,dist<aimRange ? dipWant : 0.0f,wallAhead,flight,follow,ms,want,&height);
     } else if(follow) {
         off=Formation(h,pos,fwd,flight,ms,want,&height);
     } else {
@@ -705,6 +727,17 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(!land)Separate(h,pos,want,ms);
     h.losLift=Clamp(h.losLift+(hidden || wallAhead ? kLosClimb : -kLosSink)*dt,0.0f,kLosMax);
     if(engage)height+=h.losLift;
+    if(perched) {
+        // The higher of it and the nearest other heli climbs off, the lower one sinks away.
+        const Heli* by=nullptr;float nearest=0.0f;
+        for(const auto& o:helis) {
+            if(&o==&h || !o.vehicle || ms-o.seen>2000)continue;
+            const float d=Dist2(pos,o.pos);
+            if(!by || d<nearest){by=&o;nearest=d;}
+        }
+        const bool above=!by || nearest>30.0f || pos[1]>by->pos[1] || (pos[1]==by->pos[1] && &h<by);
+        height=pos[1]+(above ? kUnstick : -kUnstick);
+    }
     const Avoidance avoid=Avoid(pos,h.vel,want,&height,land);
     if(follow || engage)std::memcpy(h.hold,pos,12);
     const bool aiming=engage && !h.extend && dist<aimRange;
@@ -793,8 +826,8 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
-        Log("HELI v=%p %s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
-            v,land ? "land" : engage ? (h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
+        Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
+            v,perched ? "perched " : "",land ? "land" : engage ? (h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
             flight.group,wing,arms.ammo[0],arms.ammo[1],arms.ammo[2],pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
