@@ -132,7 +132,7 @@ def _rebone(v, names: set[str]):
 JET_BODY_BONE = 'bomber501'
 
 
-def _jet_ragdoll(blob: bytes) -> bytes:
+def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE) -> bytes:
     """The ragdoll's embedded binding SGO with every model-side bone one the bomber has.
     RagdollController::BindDependency (0x6E6A50): each animation_from_ragdoll entry looks its model bone
     up (0x6E7B98); found, the proxy's record gets the bone (+0x60, first entry wins) and the bone gets the
@@ -142,17 +142,19 @@ def _jet_ragdoll(blob: bytes) -> bytes:
     (the rotor proxies spin); ragdoll_from_animation has them all follow it."""
     import sgowrite
     version, inner = sgowrite.read(blob)
-    inner['ragdoll_from_animation'] = [[[JET_BODY_BONE, e[0][1]]] + e[1:] for e in inner['ragdoll_from_animation']]
+    inner['ragdoll_from_animation'] = [[[body, e[0][1]]] + e[1:] for e in inner['ragdoll_from_animation']]
     drive: dict[str, list] = {}
     for e in inner['animation_from_ragdoll']:
-        drive.setdefault(e[0][0], [[e[0][0], JET_BODY_BONE]] + e[1:])   # globalSRT: a second body entry, dropped
+        drive.setdefault(e[0][0], [[e[0][0], body]] + e[1:])   # globalSRT: a second body entry, dropped
     body = drive.pop('RagDollProxys.body')
     inner['animation_from_ragdoll'] = list(drive.values()) + [body]
     return sgowrite.write(version, inner)
 
 
-def jet_sgo(game: Game, name: str, model: list[str] | None = None) -> bytes:
-    """`model`: the model archive and file (default JET_MODEL, the stock bomber)."""
+def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = JET_BODY_BONE,
+            rigid: list[list[float]] | None = None) -> bytes:
+    """`model`: the model archive and file (default JET_MODEL, the stock bomber); `body`: its mesh bone, which
+    the root and the ragdoll drive; `rigid`: the collision box [centre, half extents] (default JET_RIGID_BODY)."""
     import sgowrite
     jet = JETS[name]
     version, m = sgowrite.read(game.read('OBJECT', DERIVED[name] + '.SGO'))
@@ -170,16 +172,17 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None) -> bytes:
     for at, old in JET_MAB_BONES:
         mab = sgowrite.replace_utf16(mab, at, old, JET_ROOT_BONE)
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
-    m['animation_model_bone_mapping'] = [JET_ROOT_BONE, 'bomber501']
+    m['animation_model_bone_mapping'] = [JET_ROOT_BONE, body]
     bones = {'body', 'rotor', 'tailRotor'}
     m['vehicle_weapon_setting'] = [[JET_ROOT_BONE, 0]] * len(jet.weapons) + [[JET_ROOT_BONE, -1]]
     m['vehicle_dead_effect'] = _rebone(m['vehicle_dead_effect'], bones)
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
-    m['heli_rigid_body'] = [JET_RIGID_BODY[0], JET_RIGID_BODY[1], rb[2]]
+    box = JET_RIGID_BODY if rigid is None else rigid
+    m['heli_rigid_body'] = [box[0], box[1], rb[2]]
     rag = m['ragdoll']
-    m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1])]
+    m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
     return sgowrite.write(version, m)
 
 # (sgo, label, flying)

@@ -24,7 +24,7 @@ constexpr unsigned kIfcStart=0x2B5DA0,kRadioCall=0x6A8DFB;
 constexpr std::size_t kIfcPlanes=0x80,kStartTarget=0x50;
 constexpr unsigned kBomberInit=0x5AABB0,kRadioBomber=0x2B924E,kMissionBomber=0x5B4423;
 constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=0x118A1B0;
-constexpr std::size_t kPlaneVelocity=0xB80;
+constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
 constexpr float kApproach=1000.0f,kAboveTarget=150.0f,kWingSpacing=70.0f,kWingStep=15.0f;
 constexpr float kLookRadius=350.0f,kFlyerClear=15.0f;
 
@@ -106,9 +106,11 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
     __try {
         const float* from=reinterpret_cast<const float*>(plane+kPosition);
         const float* heading=reinterpret_cast<const float*>(plane+kPlaneVelocity);
-        if(!std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source))return;
+        const JetBody body=BomberBody(plane+kPlaneModel);
+        if(!std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source,body))return;
         doomed[doomNext++%32]=At<const void*>(plane,kSelfCtrl);
-        Log("AIRSTRIKE %s bomber %p: its jet drops the bombs",who,plane);
+        Log("AIRSTRIKE %s bomber %p (%s model): its jet drops the bombs",who,plane,
+            body==JetBody::bomber401 ? "bomber401" : body==JetBody::bomber501_2 ? "bomber501_2" : "bomber501 / unknown");
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 

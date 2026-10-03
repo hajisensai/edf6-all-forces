@@ -99,6 +99,61 @@ int ClassOf(const void* object) noexcept {
 
 const void* RiderObject(const unsigned char* seat) noexcept { return At<const void*>(seat,kSeatRider); }
 
+// Aim lines (docs/aim-line-re.md): the red line out of a vehicle gun's muzzle. Weapon_VehicleShoot's ctor
+// (0x6B3250, also VehicleMaser / RailGun / SwingShoot) makes a WeaponAimLine (vtable kAimLineVtable) of
+// custom_parameter[0] segments and keeps it at weapon+kWeaponAimLine; each frame 0x6899F0 builds the line
+// from its segment count (+kAimLineSegments, 0: no line). An NPC's seat gets 0; a player in the seat gets
+// the count back.
+constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
+constexpr std::size_t kWeaponAimLine=0x1638,kAimLineSegments=0x130;
+constexpr unsigned kAimLineVtable=0x17E2418;
+struct HiddenLine { unsigned char* line; std::int32_t segments; };
+HiddenLine hiddenLines[64]{};
+unsigned hiddenNext=0;
+
+HiddenLine* HiddenOf(const unsigned char* line) noexcept {
+    for(auto& h:hiddenLines)if(h.line==line)return &h;
+    return nullptr;
+}
+
+// The aim line of a seat's weapon `i`, or nullptr.
+unsigned char* AimLineOf(unsigned char* const* holders,std::uint64_t i) noexcept {
+    if(!Readable(holders[i],kHolderWeapon+8))return nullptr;
+    const auto weapon=At<unsigned char*>(holders[i],kHolderWeapon);
+    if(!Readable(weapon,kWeaponAimLine+8))return nullptr;
+    const auto line=At<unsigned char*>(weapon,kWeaponAimLine);
+    if(!Readable(line,kAimLineSegments+4,true) || At<const unsigned char*>(line,0)!=image+kAimLineVtable)return nullptr;
+    return line;
+}
+
+void SetLine(unsigned char* line,Rider rider) noexcept {
+    const auto segments=At<std::int32_t>(line,kAimLineSegments);
+    HiddenLine* h=HiddenOf(line);
+    if(rider==Rider::dummy && segments>0) {
+        if(!h)h=&hiddenLines[hiddenNext++%64];
+        *h=HiddenLine{line,segments};
+        Put<std::int32_t>(line,kAimLineSegments,0);
+    } else if(rider==Rider::player && h) {
+        Put<std::int32_t>(line,kAimLineSegments,h->segments);
+        *h=HiddenLine{};
+    }
+}
+
+// Every seat's guns: no line while an NPC holds the seat, the stock line while the player does.
+void AimLines(unsigned char* vehicle) noexcept {
+    const unsigned count=SeatCount(vehicle);
+    for(unsigned i=0;i<count && i<16;++i) {
+        auto seat=SeatAt(vehicle,i);
+        const Rider rider=SeatRider(seat);
+        if(rider!=Rider::dummy && rider!=Rider::player)continue;
+        const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+        const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+        if(n>8 || !Readable(holders,n*8))continue;
+        for(std::uint64_t w=0;w<n;++w)
+            if(auto line=AimLineOf(holders,w))SetLine(line,rider);
+    }
+}
+
 // Run `check` with the NPC riders of the vehicle's NPC-held seats hidden and the vehicle on its own
 // team (see OwnTeam); restores both before returning.
 template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcept {
@@ -146,7 +201,8 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     if(seat || !cfg.enabled || !cfg.bump)return seat;
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
-        if(!IsPlayer(static_cast<const unsigned char*>(human)))return nullptr;
+        // The jets are NPC aircraft: their pilot is never bumped for the player (they have no other seat).
+        if(!IsPlayer(static_cast<const unsigned char*>(human)) || IsJet(v))return nullptr;
         const unsigned count=SeatCount(v);
         for(unsigned i=0;i<count;++i) {
             auto s=SeatAt(v,i);
@@ -173,7 +229,7 @@ void __fastcall PromptHook(void* functor,void* object) {
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         JetReap(object);   // a withdrawn jet with no other vehicle about (the player on foot)
         if(!inputsHooked)InstallInputs();   // first mission frame: every plugin has loaded by now
-        if(!cfg.bump || f[kFunctorResult] || ClassOf(object)<0)return;
+        if(!cfg.bump || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
         for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy;
@@ -243,6 +299,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput)
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
         Crew(v,I);
+        AimLines(v);
         JetReap(v);
         if(IsHelicopter(v))HeliFrame(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}

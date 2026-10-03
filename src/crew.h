@@ -141,7 +141,13 @@ bool JetLaunch(bool fighter,const float* from,const float* heading,const float* 
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };
 // A strike jet that flies the bomber's run from `from` along `heading` over `target` and drops its bombs
 // itself; false (the caller keeps the stock bomber) when it or its bay cannot be made.
-bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec,const void* source) noexcept;
+// `body`: the model it flies in (BomberBody of the bomber's model instance).
+enum class JetBody { kind=-1, bomber401=2, bomber501_2=3 };
+bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec,const void* source,
+                     JetBody body) noexcept;
+// Which bomber body a BombingPlane's model instance (plane+0x660, embedded) is: kind (the BOMBER501 look,
+// the strike jet's) unless its bones name BOMBER401's or BOMBER501_2's model.
+JetBody BomberBody(const unsigned char* inst) noexcept;
 // Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames, heli.cpp).
 bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
 
