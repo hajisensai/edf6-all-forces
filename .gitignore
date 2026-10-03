@@ -6,6 +6,9 @@ dist/Mods/*
 dist/Mods/Plugins/*
 !dist/Mods/Plugins/EDF6VehicleCrew.dll
 !dist/Mods/Plugins/EDF6VehicleCrew.ini
+!dist/Mods/Plugins/EDF6AutoTurret.dll
+!dist/Mods/Plugins/EDF6AutoTurret.ini
+*.pyc
 backup/
 probe/
 __pycache__/

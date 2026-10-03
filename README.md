@@ -3,6 +3,23 @@
 EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Steam 版）。版本不符或代码签名对不上时，
 插件只写一行 `REFUSED` 日志后自行退出，不改动游戏的任何内容。
 
+## 仓库里的两个插件
+
+| 插件 | 目录 | 做什么 |
+|---|---|---|
+| `EDF6VehicleCrew` | `src/` | NPC 开载具 / 开直升机，玩家随时顶替（本文下面全部内容） |
+| `EDF6AutoTurret` | `autoturret/` | 防空车（KG6 克卜勒系）改高射炮并自瞄、玻尔斯对地自瞄；泰坦和带炮手座坦克的两门副炮自瞄，炮手座没人时自动开火（算驾驶员的）；关卡里 NPC 开的防空车换成 mod 版防空车，NPC 泰坦补上副炮。说明见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md) |
+
+两个插件各自独立，可以只装一个。根目录 `build.cmd` 一次构建两个，DLL 都输出到 `dist/Mods/Plugins/`。
+`EDF6AutoTurret` 的武器 / 载具数据由你自己的游戏数据生成，不进仓库：
+
+```
+set EDF6_DIR=D:\steam\steamapps\common\EARTH DEFENSE FORCE 6
+python autoturret\tools\build.py --out "%EDF6_DIR%\Mods"
+```
+
+它写 `Mods/WEAPON/`（防空车、玻尔斯的呼叫和炮）、`Mods/OBJECT/`（关卡防空车 `V603_FLAK_*`、NPC 泰坦 `VEHICLE404_BIGTANK_AI`）以及 `WEAPONTEXT` 里这几辆车的说明行，只改自己的行。
+
 ## 功能
 
 1. **NPC 自动上车**：己方空载具空置 `CrewDelayMs`（默认 3 秒）后，会来一名 NPC 驾驶。用的是任务脚本让 NPC 坦克队出动的同一个原生调用
