@@ -119,7 +119,15 @@ class Jet:
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
 # BOMBER501 model, flown by the plugin. The 506 fires 0x2020 -> weapons 0 and 1, 0x2021 -> weapon 2.
-_GUNS = ('app:/weapon/v_506heli_gatling01_l.sgo', 'app:/weapon/v_506heli_gatling01_r.sgo')
+# The guns are the 506's gatlings with a jet's reach (jet_guns): stock they fly 4 m a frame for 40 frames,
+# 160 m, inside every role's gun pass (src/jet.cpp kKinds gunOpen 350-500 m, Fire takes the nearer of the
+# two): a jet diving at 160 m/s had 0.3 s between their reach and its pull-out, and 7 of a drone's 130 gun
+# chances fired on 2026-10-03 (the rest held, the nose not yet on the lead); the strike, interceptor and
+# multirole jets fired none. Faster and longer lived they reach JET_GUN_REACH; damage and rate stay stock.
+JET_GUN_FILES = {'EDF6VC_JET_GUN_L.SGO': 'V_506HELI_GATLING01_L.SGO', 'EDF6VC_JET_GUN_R.SGO': 'V_506HELI_GATLING01_R.SGO'}
+JET_GUN_SPEED, JET_GUN_ALIVE = 10.0, 60.0   # m a frame, frames: 600 m/s, 600 m
+JET_GUN_REACH = JET_GUN_SPEED * JET_GUN_ALIVE
+_GUNS = tuple('app:/weapon/' + f.lower() for f in JET_GUN_FILES)
 _MISSILE = 'app:/weapon/v_506heli_missile01.sgo'
 _ARMS = _GUNS + (_MISSILE,)
 # Model sizes and boxes: tools/jet_models.py (bind-pose vertices after scaling).
@@ -245,8 +253,13 @@ ENEMIES: list[tuple[str, str, bool]] = [
     ('e507_goldufo', '金色 UFO（飞）', True),
     ('e515_imperialufo', '帝国 UFO（飞）', True),
     ('dragonsmall401', '小龙（飞）', True),
-    ('shootingtarget', '训练靶子（不动）', False),
+    ('shootingtarget', '训练靶子（地面 + 空中，不动）', False),
 ]
+# The targets (enemy TARGET): one at a time on the enemy spots, every other spot raised TARGET_AIR m
+# (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. Whether the game
+# keeps a target up there or drops it to the ground shows in EDF6VehicleCrew.log: a jet's target marked (air).
+TARGET = 'shootingtarget'
+TARGET_AIR = 80.0
 
 
 @dataclass
@@ -355,6 +368,11 @@ def layout(points: list[rmpa.Point], need: int = 0) -> Layout:
     return Layout(player, spots, enemies)
 
 
+def air_targets(lay: Layout) -> list[rmpa.Point]:
+    """The enemy spots raised for targets in the air (TARGET): every other one."""
+    return lay.enemy_points[1::2]
+
+
 def _q(text: str) -> str:
     return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
@@ -365,6 +383,7 @@ def script(plan: Plan, lay: Layout) -> str:
     if len(chosen) > len(lay.vehicle_points):
         raise ValueError(f'载具太多：这张地图玩家附近只有 {len(lay.vehicle_points)} 个空位')
     w = plan.waves
+    targets = w.enemy == TARGET
     flying = next((f for s, _, f in ENEMIES if s == w.enemy), False)
     preload = sorted({f'app:/object/{s}.sgo' for s, _ in chosen} | ({f'app:/object/{w.enemy}.sgo'} if w.enabled else set()))
     lines = [
@@ -433,7 +452,23 @@ def script(plan: Plan, lay: Layout) -> str:
             lines.append(f'\tCreateFriend({_q(point.name)}, {path}, {plan.vehicle_level:.2f}, false);')
         else:
             lines.append(f'\tCreateVehicle2({_q(point.name)}, {path}, {plan.vehicle_level:.2f});')
-    if w.enabled and lay.enemy_points:
+    if w.enabled and lay.enemy_points and targets:
+        pts = ', '.join(_q(p.name) for p in lay.enemy_points)
+        lines += [
+            '',
+            '\t// Targets, one at a time, until max_alive stand (every other spot is up in the air).',
+            f'\tarray<string> spots = {{ {pts} }};',
+            '\tuint next = 0;',
+            f'\tWait({w.first_delay:.1f});',
+            '\twhile( true ) {',
+            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {int(w.max_alive)} ) {{',
+            f'\t\t\tCreateEnemy(spots[next % spots.length()], {_q("app:/object/" + w.enemy + ".sgo")}, {w.level:.2f}, true);',
+            '\t\t\tnext++;',
+            '\t\t}',
+            '\t\tWait(1.0);',
+            '\t}',
+        ]
+    elif w.enabled and lay.enemy_points:
         spawn = 'CreateEnemyGroup'
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
         lines += [
@@ -544,10 +579,44 @@ def object_dir(game_root: str) -> str:
     return os.path.join(game_root, 'Mods', 'OBJECT')
 
 
+def weapon_dir(game_root: str) -> str:
+    return os.path.join(game_root, 'Mods', 'WEAPON')
+
+
+def jet_guns(game: Game) -> dict[str, bytes]:
+    """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'autoturret', 'tools'))
+    import dsgo
+    out = {}
+    for name, stock in JET_GUN_FILES.items():
+        doc = dsgo.parse(game.read('WEAPON', stock))
+        r = doc.root
+        if r.get('AmmoClass') != 'SolidBullet01' or r.get('AmmoSpeed') * r.get('AmmoAlive') >= JET_GUN_REACH:
+            raise ValueError(f'{stock} 不是预期的直升机机炮')
+        r.set('AmmoSpeed', JET_GUN_SPEED)
+        r.set('AmmoAlive', JET_GUN_ALIVE)
+        out[name] = dsgo.write(doc)
+    return out
+
+
+def write_jet_guns(game_root: str, game: Game) -> list[str]:
+    """Writes the jets' guns into Mods/WEAPON (only these EDF6VC_ files); returns the paths."""
+    os.makedirs(weapon_dir(game_root), exist_ok=True)
+    paths = []
+    for name, data in jet_guns(game).items():
+        path = os.path.join(weapon_dir(game_root), name)
+        with open(path, 'wb') as f:
+            f.write(data)
+        paths.append(path)
+    return paths
+
+
 def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only)."""
     _remove_derived(game_root, keep=wanted)
     jet_models(game_root, game, {JETS[n].file for n in wanted if n in JETS and JETS[n].file})
+    if wanted & JETS.keys():
+        write_jet_guns(game_root, game)
     elevons = os.path.isfile(os.path.join(object_dir(game_root), JET_ELEVON_FILE))
     for name in sorted(wanted):
         os.makedirs(object_dir(game_root), exist_ok=True)
@@ -608,6 +677,8 @@ def install(game_root: str, plan: Plan) -> list[str]:
     points_file = game.read(f'MISSION/EDF6/{SOURCE}', 'MISSION.RMPA')
     lay = layout(rmpa.points(points_file), len(placements(plan)))
     text = script(plan, lay)
+    if plan.waves.enabled and plan.waves.enemy == TARGET:
+        points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
     os.makedirs(out, exist_ok=True)
     _write_derived(game_root, game, {s for s, _ in placements(plan) if s in DERIVED})
     with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:

@@ -37,14 +37,15 @@ def _names(data: bytes) -> dict[int, str]:
     return out
 
 
-def points(data: bytes) -> list[Point]:
+def _records(data: bytes) -> list[tuple[int, Point]]:
+    """Every point record: its offset and the point."""
     names = _names(data)
     # The name table follows the shape-type names; offsets before it are record bytes that
     # happen to decode as text.
     table = data.find('Cylinder'.encode('utf-16-be'))
     if table > 0:
         names = {k: v for k, v in names.items() if k >= table}
-    found: dict[str, Point] = {}
+    out: list[tuple[int, Point]] = []
     for c in range(0, len(data) - 0x2C, 4):
         length, rel = struct.unpack_from('>II', data, c + 0x24)
         if not rel or not 0 < length < 64:
@@ -55,5 +56,25 @@ def points(data: bytes) -> list[Point]:
         pos = struct.unpack_from('>3f', data, c + 4)
         face = struct.unpack_from('>3f', data, c + 0x14)
         if all(abs(v) < 1e5 for v in pos + face):
-            found.setdefault(name, Point(name, pos, face))
+            out.append((c, Point(name, pos, face)))
+    return out
+
+
+def points(data: bytes) -> list[Point]:
+    found: dict[str, Point] = {}
+    for _, p in _records(data):
+        found.setdefault(p.name, p)
     return list(found.values())
+
+
+def raised(data: bytes, names: set[str], dy: float) -> bytes:
+    """`data` with the points named in `names` (every record of each) and the points they face dy higher."""
+    out = bytearray(data)
+    hit = set()
+    for c, p in _records(data):
+        if p.name in names:
+            struct.pack_into('>f', out, c + 8, p.pos[1] + dy)
+            struct.pack_into('>f', out, c + 0x18, p.face[1] + dy)
+            hit.add(p.name)
+    assert hit == names, f'points not found: {sorted(names - hit)}'
+    return bytes(out)

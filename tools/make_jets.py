@@ -3,8 +3,9 @@ EDF6VC_JET_STRIKE.SGO and EDF6VC_JET_FIGHTER.SGO (and EDF6VC_BOMBER401 / _501_2.
 bombers' own models), made from this machine's own V506_HELI.SGO and
 BOMBER501 model exactly like the test range's jets (testrange/gen.py: jet_sgo), and EDF6VC_JET.MRAB: the
 stock BOMBER501.MRAB with its model split into elevon bones the plugin moves (tools/mdb_jet.py,
-docs/mdb-format.md), which only these two SGOs use (the stock bombers keep theirs). Without the SGOs the
-plugin leaves the stock bombers alone.
+docs/mdb-format.md), which only these two SGOs use (the stock bombers keep theirs), and their guns into
+<game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO (gen.jet_guns). Without the SGOs the plugin leaves the stock
+bombers alone.
 
   python tools/make_jets.py [game dir]            write / refresh
   python tools/make_jets.py [game dir] --remove   delete them (only the files this script writes)
@@ -47,14 +48,16 @@ def main(argv: list[str]) -> int:
     root = args[0] if args else gen.DEFAULT_GAME
     out = gen.object_dir(root)
     if '--remove' in argv:
-        for name in [*FILES, *BOMBERS, MODEL_FILE, *MODEL_FILES]:
-            path = os.path.join(out, name)
+        paths = [os.path.join(out, n) for n in [*FILES, *BOMBERS, MODEL_FILE, *MODEL_FILES]]
+        for path in paths + [os.path.join(gen.weapon_dir(root), n) for n in gen.JET_GUN_FILES]:
             if os.path.exists(path):
                 os.remove(path)
                 print('删除', path)
         return 0
     game = gen.Game(root)
     os.makedirs(out, exist_ok=True)
+    for path in gen.write_jet_guns(root, game):
+        print('写入', path)
     arc = mdb_jet.jet_archive()[0]
     path = os.path.join(out, MODEL_FILE)
     with open(path, 'wb') as f:
