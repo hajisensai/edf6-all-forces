@@ -81,6 +81,7 @@ struct Sub {
     ULONGLONG gaugeTick;          // GetTickCount64 of the last frame (the gauge may be drawn on another thread)
     LARGE_INTEGER last;
     float post[3];
+    float floor;                  // the lowest its origin goes: a mission's own height for it (-inf: called in)
     float lin[3],ang[3];
     bool moving,ready,launched;
     std::int32_t full[4];         // each seat weapon's ammo when first seen
@@ -237,7 +238,9 @@ void Follow(Sub& s,float dt) noexcept {
     s.post[0]+=d[0]/dist*step;s.post[2]+=d[2]/dist*step;
 }
 
-// The velocity toward its post (level, at most kCruise), holding the hull kClear over the ground.
+// The velocity toward its post (level, at most kCruise), holding the hull kClear over the ground and the
+// origin at s.floor at least: a mission puts it where it floats (M082: -130, its deck at sea), and over a
+// sea the ray finds only the seabed, far under it.
 void Drive(Sub& s,const float* pos,const float* nose,float dt) noexcept {
     float want[3]={(s.post[0]-pos[0])*kPosGain,0.0f,(s.post[2]-pos[2])*kPosGain};
     const float speed=Len(want);
@@ -245,7 +248,10 @@ void Drive(Sub& s,const float* pos,const float* nose,float dt) noexcept {
     s.lin[0]=Approach(s.lin[0],want[0],kAccel*dt);
     s.lin[2]=Approach(s.lin[2],want[2],kAccel*dt);
     float ground=0.0f;
-    const float wantY=GroundUnder(pos,nose,&ground) ? Clamp((ground+kHullBottom+kClear-pos[1])*1.0f,-kSink,kClimb) : 0.0f;
+    const bool seen=GroundUnder(pos,nose,&ground);
+    float hold=seen ? ground+kHullBottom+kClear : s.floor;
+    if(hold<s.floor)hold=s.floor;
+    const float wantY=std::isfinite(hold) ? Clamp(hold-pos[1],-kSink,kClimb) : 0.0f;
     s.lin[1]=Approach(s.lin[1],wantY,kClimbAccel*dt);
 }
 
@@ -409,6 +415,57 @@ bool IsSub(const void* vehicle) noexcept {
     return Readable(v,kSpeedGain+4) && At<const unsigned char*>(v,0)==image+kHeli506 && At<float>(v,kSpeedGain)==kSubMark;
 }
 
+namespace {
+// The rigid box (testrange/gen.py 'edf6tr_sub_carrier_mission' rigid): centre (0, 13.25, -7.58), half sizes
+// (121, 179.83, 832) in the body frame, so its top, the main deck the model has at y≈193 (§1.1), is kDeckTop
+// over the origin. The bow (z > 280) is flat there and about ±69 wide: a deck point is taken on it, between
+// kDeckAft and kDeckFore along the nose and within kDeckSide of the keel line, nearest to the asker.
+constexpr float kDeckTop=13.25f+179.83f,kBoxHalfX=121.0f,kBoxHalfZ=832.0f,kBoxCentreZ=-7.58f;
+constexpr float kDeckAft=320.0f,kDeckFore=700.0f,kDeckSide=40.0f;
+
+// The live carrier nearest (horizontally) to `from`, or nullptr; `dist` gets the distance.
+const Sub* NearestSub(const float* from,float* dist) noexcept {
+    const ULONGLONG ms=GameMs();
+    const Sub* best=nullptr;
+    for(const auto& s:subs) {
+        if(!s.vehicle || ms-s.seen>kStaleMs || !Readable(s.vehicle,kSpeedGain+4) || s.vehicle[kDead] || SelfCtrl(s.vehicle)!=s.ctrl)continue;
+        const float* p=reinterpret_cast<const float*>(s.vehicle+kPosition);
+        const float d=std::sqrt((p[0]-from[0])*(p[0]-from[0])+(p[2]-from[2])*(p[2]-from[2]));
+        if(!best || d<*dist){best=&s;*dist=d;}
+    }
+    return best;
+}
+}  // namespace
+
+bool SubDeck(const float* from,float* deck) noexcept {
+    __try {
+        float dist=0.0f;
+        const Sub* s=NearestSub(from,&dist);
+        if(!s)return false;
+        const float* m=reinterpret_cast<const float*>(s->vehicle+kMatrix);
+        const float* pos=m+12;
+        const float rel[3]={from[0]-pos[0],from[1]-pos[1],from[2]-pos[2]};
+        const float x=Clamp(Dot(rel,m),-kDeckSide,kDeckSide),z=Clamp(Dot(rel,m+8),kDeckAft,kDeckFore);
+        for(int i=0;i<3;++i)deck[i]=pos[i]+m[i]*x+m[4+i]*kDeckTop+m[8+i]*z;
+        return std::isfinite(deck[0]+deck[1]+deck[2]);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+float SubHullGap(const float* p) noexcept {
+    __try {
+        float dist=0.0f;
+        const Sub* s=NearestSub(p,&dist);
+        if(!s)return -1.0f;
+        const float* m=reinterpret_cast<const float*>(s->vehicle+kMatrix);
+        const float rel[3]={p[0]-m[12],0.0f,p[2]-m[14]};
+        float right[3]={m[0],0.0f,m[2]},nose[3]={m[8],0.0f,m[10]};
+        if(!Normalize(right) || !Normalize(nose))return -1.0f;
+        const float x=std::fabs(Dot(rel,right))-kBoxHalfX,z=std::fabs(Dot(rel,nose)-kBoxCentreZ)-kBoxHalfZ;
+        const float ox=x>0.0f ? x : 0.0f,oz=z>0.0f ? z : 0.0f;
+        return std::sqrt(ox*ox+oz*oz);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1.0f;}
+}
+
 void PreloadSub() noexcept {
     __try {
         preloaded=false;
@@ -446,7 +503,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         }
         Sub* s=FreeSub(v,ms);
         if(s) {
-            *s=Sub{};s->vehicle=v;s->ctrl=SelfCtrl(v);s->seen=s->bornAt=ms;s->launched=true;
+            *s=Sub{};s->vehicle=v;s->ctrl=SelfCtrl(v);s->seen=s->bornAt=ms;s->launched=true;s->floor=-INFINITY;
             QueryPerformanceCounter(&s->last);
             std::memcpy(s->post,start,12);
         }
@@ -468,7 +525,8 @@ void SubFrame(unsigned char* v) noexcept {
         *s=Sub{};s->vehicle=v;s->ctrl=SelfCtrl(v);s->bornAt=ms;
         QueryPerformanceCounter(&s->last);
         std::memcpy(s->post,pos,12);
-        Log("SUB v=%p crewed (placed by the mission): hp=%.0f/%.0f",v,At<float>(v,kHp),At<float>(v,kHpMax));
+        s->floor=pos[1];
+        Log("SUB v=%p crewed (placed by the mission) at y=%.0f: hp=%.0f/%.0f",v,pos[1],At<float>(v,kHp),At<float>(v,kHpMax));
     }
     s->seen=ms;s->gaugeTick=GetTickCount64();
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);

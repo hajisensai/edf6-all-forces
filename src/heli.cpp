@@ -1043,6 +1043,111 @@ const char* LeaveReason(const Heli& h,const unsigned char* v,const Loadout& l) n
     return armed && left==0 ? "out of ammo" : nullptr;
 }
 
+// ---- Sea rescue (docs/rescue-re.md) ----
+// A local player on foot below cfg.rescueBelow for kWetMs, with a submarine carrier out (SubDeck): one Brute
+// (410) is launched over the carrier's deck and flies to them (pickup), comes down so a free door seat's
+// riding point is over the swimmer, and hovers there. The player boards it with their own board button
+// (the stock reach, never from farther); with cfg.rescueAutoBoard the plugin presses it for them through
+// the stock board path (0x56D700) once that seat is within the stock reach. Aboard in a door seat, it flies
+// them to the deck (ferry) and hovers kDeckHover over it until they jump off; then it leaves (StartLeave).
+// The player is never moved by the plugin: only the stock boarding seats them, and they get off themselves.
+// The 410, not the 506: the 506 has one seat (V506_HELI vehicle_riding_position: the driver only), so a
+// player boarding it would bump the NPC pilot out and fly it themselves; the 410 has two door gunner seats.
+// While it waits it is on team kTeamVehicle (5, nobody's): the stock seat check lets a human of another team
+// into a seat only with bit 7 of its masks, which none of the 410's seats have (masks 9 / 15), and the call
+// helis are team 2 (friend). Its own team is given back when it leaves.
+constexpr float kSeaY=0.0f;            // the sea surface on ig_SteepCoast (about y = 0: the user's, not read from the map)
+constexpr ULONGLONG kWetMs=1500;       // in the sea this long before a heli is sent
+constexpr ULONGLONG kRetryMs=10000;    // after a launch could not be made, or the heli was lost
+constexpr ULONGLONG kAgainMs=30000;    // after a rescue ended: not another heli each few seconds for one who will not board
+constexpr float kRescueApproach=40.0f; // m: farther out it flies kRescueCruise over the sea, nearer it comes down
+constexpr float kRescueCruise=20.0f;
+constexpr float kSkid=1.5f;            // m: its origin no lower than this over the sea (the 410 box bottom is 0.1 m over it)
+constexpr float kSeatAbove=0.5f;       // m: the door seat's riding point this far over the swimmer (or the sea)
+constexpr ULONGLONG kBoardTryMs=500,kPickupMs=120000,kDryMs=3000,kOverDeckLogMs=10000;
+constexpr DWORD kRescueFuelSec=900;
+constexpr float kDeckHover=8.0f;       // m over the deck it hovers at for the player to jump off
+constexpr float kFerrySpeed=15.0f;     // m/s at most while it carries them
+constexpr float kHullMargin=80.0f;     // m: lower than the deck and this near the hull it climbs before it closes in
+constexpr float kOverDeck=15.0f;
+// The stock seat check (CanRideSeat 0x6346D0): a seat's riding point is the MAB point *(seat+0x1E0) (local
+// position at record + *(int*)(record+0xC)) on the bone *(seat+0x1E8) (rows +0xB0..+0xE0, as 0x6BB420 builds
+// it), and a human whose position is within the point's radius (record+0x10) plus kReachSlack (0x1C36990) of
+// it is in reach. The class mask: (human+0x31C & seat+0x34) & seat+0x30, as dwords (0x6346FC).
+constexpr std::size_t kSeatPoint=0x1E0,kSeatPointBone=0x1E8,kPointLocal=0xC,kPointRadius=0x10;
+constexpr std::size_t kSeatMask=0x30,kSeatClassMask=0x34,kHumanRideMask=0x31C;
+constexpr unsigned kReachSlackRva=0x1C36990;
+constexpr float kReachSlack=0.5f;
+// The board button: 0x59B417 tests human+0xD78 and calls 0x56D700(human): nothing if the human is in a
+// vehicle (+0x1550) or in some states (+0x128 bit 0, +0x5D0 bit 2, +0x39C != 0), else a visitor over the
+// vehicles (team 5, then the human's side) calls each one's slot 49 (FindSeat) until one gives a seat it may
+// take, reserves it and rides (0x5763E0). FindSeat only offers a seat in the reach above.
+constexpr unsigned kBoardButton=0x56D700;
+const Signature kRescueSignatures[]={
+    {kBoardButton,{0x40,0x53,0x48,0x83,0xEC,0x40,0x48,0x8B,0xD9,0x48,0x8B,0x81,0x50,0x15,0x00,0x00},16},
+    {0x59B417,{0x44,0x38,0xBB,0x78,0x0D,0x00,0x00,0x74,0x08,0x48,0x8B,0xCB,0xE8,0xD8,0x22,0xFD},16},   // button -> 0x56D700(human)
+    {0x572610,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57},16},   // its visitor
+    {0x6346FC,{0x8B,0x82,0x1C,0x03,0x00,0x00,0x41,0x23,0x40,0x34,0x41,0x85,0x40,0x30},14},             // class mask
+    {0x634726,{0x48,0x89,0x5C,0x24,0x40,0x48,0x8D,0x54,0x24,0x20,0x49,0x8D,0x98,0xE0,0x01,0x00},16},   // seat+0x1E0
+    {0x634758,{0xF3,0x0F,0x10,0x58,0x10,0xF3,0x0F,0x58,0x1D,0x2B,0x22,0x60,0x01},13},                  // radius + slack
+    {0x6BB420,{0x4C,0x8B,0x01,0x49,0x63,0x40,0x0C,0x42,0x0F,0x10,0x14,0x00,0x48,0x8B,0x41,0x08},16},   // the point
+};
+bool reachOk=false,boardOk=false;   // the seat reach can be read / the board button can be pressed
+
+enum class RescuePhase { none, pickup, ferry };
+struct Rescue {
+    RescuePhase phase;
+    unsigned char* vehicle;
+    const void* ctrl;
+    std::int32_t team;                  // the heli's own team, given back when it leaves
+    ULONGLONG wetSince,retryAt,startedAt,nearAt,boardTryAt,dryAt,overDeckAt,loggedAt,tickAt;
+    int tries,seat;
+    float seatDist,seatReach;           // the free door seat's riding point to the player, and its stock reach
+    // What Fly flies to (RescueGoal): a point and height; `climb`: no horizontal move yet; `slow`: kFerrySpeed;
+    // `low`: down to the swimmer, under the kGroundClear that Avoid keeps over the ground (or the sea) below.
+    float goal[3],height;
+    bool climb,slow,low,warned;
+};
+Rescue rescue{};
+
+// A seat's riding point and its stock reach (see kSeatPoint); false when they cannot be read.
+bool RidingPoint(const unsigned char* seat,float* at,float* reach) noexcept {
+    const auto record=At<const unsigned char*>(seat,kSeatPoint),bone=At<const unsigned char*>(seat,kSeatPointBone);
+    if(!Readable(record,kPointRadius+4) || !Readable(bone,kBoneRows+0x40))return false;
+    const auto local=record+At<std::int32_t>(record,kPointLocal);
+    if(!Readable(local,16))return false;
+    float l[4],b[4][4];
+    std::memcpy(l,local,16);std::memcpy(b,bone+kBoneRows,sizeof(b));
+    for(int c=0;c<3;++c)at[c]=l[0]*b[0][c]+l[1]*b[1][c]+l[2]*b[2][c]+l[3]*b[3][c];
+    *reach=At<float>(record,kPointRadius)+kReachSlack;
+    return std::isfinite(at[0]+at[1]+at[2]+*reach) && *reach>=0.0f && *reach<200.0f;
+}
+
+// The free seat other than the pilot's that `human` may take (class mask) whose riding point is nearest to
+// them: its index, point and reach; -1 with none.
+int DoorSeat(unsigned char* v,const unsigned char* human,float* at,float* reach) noexcept {
+    const float* p=reinterpret_cast<const float*>(human+kPosition);
+    const std::uint32_t mask=At<std::uint32_t>(human,kHumanRideMask);
+    int best=-1;float bestDist=0.0f;
+    for(unsigned i=1;i<SeatCount(v);++i) {
+        const auto seat=SeatAt(v,i);
+        float a[3],r=0.0f;
+        if(SeatRider(seat)!=Rider::none || !(mask&At<std::uint32_t>(seat,kSeatClassMask)&At<std::uint32_t>(seat,kSeatMask)))continue;
+        if(!RidingPoint(seat,a,&r))continue;
+        const float d[3]={a[0]-p[0],a[1]-p[1],a[2]-p[2]};
+        const float dist=std::sqrt(Dot3(d,d));
+        if(best<0 || dist<bestDist){best=static_cast<int>(i);bestDist=dist;std::memcpy(at,a,12);*reach=r;}
+    }
+    return best;
+}
+
+// Whether `v` is the rescue heli flying a rescue, and where to (see Rescue::goal).
+bool RescueGoal(const unsigned char* v,float* goal,float* height,bool* climb,bool* slow,bool* low) noexcept {
+    if(rescue.phase==RescuePhase::none || rescue.vehicle!=v)return false;
+    std::memcpy(goal,rescue.goal,12);*height=rescue.height;*climb=rescue.climb;*slow=rescue.slow;*low=rescue.low;
+    return true;
+}
+
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -1095,7 +1200,10 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const Flight flight=FlightOf(h,ms);
     const int wing=flight.wing;
     if(h.leaving && !playerAboard && (Dist2(pos,player.pos)>kGoneFar || GameMs()-h.leftAt>kLeaveMaxMs))h.reap=true;
-    const bool follow=!playerAboard && player.at && ms-player.at<10000 && !h.guard && !h.leaving;
+    // A sea rescue (RescueTick) flies to its goal, fighting nothing, following nobody.
+    float rescueGoal[3]{},rescueHeight=0.0f;bool rescueClimb=false,rescueSlow=false,rescueLow=false;
+    const bool rescuing=!h.leaving && RescueGoal(v,rescueGoal,&rescueHeight,&rescueClimb,&rescueSlow,&rescueLow);
+    const bool follow=!rescuing && !playerAboard && player.at && ms-player.at<10000 && !h.guard && !h.leaving;
     if(follow)TrackPlayerStill();
     if(follow && player.at!=h.playerAt) {
         const float pdt=h.playerAt ? static_cast<float>(player.at-h.playerAt)*0.001f : 0.0f;
@@ -1107,7 +1215,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     float aim[3]{};
     // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
     const float pick=follow && cfg.heliCombatRange+GunRange(v)<cfg.heliRange ? cfg.heliCombatRange+GunRange(v) : cfg.heliRange;
-    const bool engage=!h.leaving && PickTarget(h,v,anchor,pos,pick,aim);
+    const bool engage=!rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,aim);
     if(engage) {
         TrackVelocity(h.tgtPrev,h.tgtVel,aim,dt,40.0f,h.tracked!=h.target);
         h.tracked=h.target;
@@ -1115,7 +1223,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         h.tracked=nullptr;h.extend=false;
     }
     const Loadout arms=Arms(h,v,ms);
-    if(h.called && !h.leaving && !playerAboard)
+    if(h.called && !h.leaving && !playerAboard && !rescuing)
         if(const char* why=LeaveReason(h,v,arms))StartLeave(h,pos,fwd,why);
     const bool is409=At<const unsigned char*>(v,0)==image+kHeli409;
     const bool is410=At<const unsigned char*>(v,0)==image+kHeli410;
@@ -1167,7 +1275,11 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     // rocket run broke off, and while its rockets are spent (see kTurretCircleMs).
     const bool rocketsLeft=arms.rockets && arms.rocketAmmo>0;
     bool circling=false;
-    if(land) {
+    if(rescuing) {
+        Arrive(h,pos,rescueClimb ? pos : rescueGoal,rest,want);
+        Limit2(want,rescueSlow && kFerrySpeed<h.top ? kFerrySpeed : h.top);
+        off=Dist2(pos,rescueGoal);height=rescueHeight;
+    } else if(land) {
         float dir[3]={pos[0]-player.pos[0],0,pos[2]-player.pos[2]};
         float len=std::sqrt(Dot2(dir,dir));
         if(len<1.0f){dir[0]=-fwd[0];dir[2]=-fwd[2];len=1.0f;}
@@ -1213,7 +1325,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         const bool above=!by || nearest>30.0f || pos[1]>by->pos[1] || (pos[1]==by->pos[1] && &h<by);
         height=pos[1]+(above ? kUnstick : -kUnstick);
     }
-    const Avoidance avoid=Avoid(pos,h.vel,want,&height,land,h.stopDecel);
+    const Avoidance avoid=Avoid(pos,h.vel,want,&height,land || (rescuing && rescueLow),h.stopDecel);
     if((follow || engage) && !h.guard && !h.leaving)std::memcpy(h.hold,pos,12);
     // Aim only once the nose has come round: with the target behind, the dip stick flew it away.
     const float bearingOff=engage ? Wrap(std::atan2(lead[0]-pos[0],lead[2]-pos[2])-heading) : kPi;
@@ -1298,13 +1410,13 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     } else h.firing=false;
     if(!is410){v[kFireGun]=gun;v[kFireMissile]=missile;}   // the 410 fires through its door gun blocks
     else if(doorOk && cfg.heliDoorGuns && SeatCount(v)>=3)
-        for(int i=0;i<2;++i)DoorGun(h,v,i,grounded || land,dt,ms);
+        for(int i=0;i<2;++i)DoorGun(h,v,i,grounded || land || rescuing,dt,ms);
 
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
         Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
-            v,perched ? "perched " : "",land ? "land" : engage ? (circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (roaming ? "escort" : "orbit") : "hold",
+            v,perched ? "perched " : "",rescuing ? "rescue" : land ? "land" : engage ? (circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (roaming ? "escort" : "orbit") : "hold",
             flight.group,wing,arms.ammo[0],arms.ammo[1],arms.ammo[2],pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
@@ -1361,6 +1473,7 @@ void HeliCrewed(const void* vehicle) noexcept {
 
 void HeliFrame(unsigned char* vehicle) noexcept {
     if(!profileOk || vehicle[kDead])return;
+    RescueTick();   // every NPC-crewed vehicle's frame (the carrier's too): at most once a frame
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
     if(IsJet(vehicle)){if(cfg.jetPilot)JetFrame(vehicle);return;}
     if(IsSub(vehicle)){SubFrame(vehicle);return;}   // the submarine carrier (subcarrier.cpp)
@@ -1413,6 +1526,193 @@ void HeliReap(const void* self) noexcept {
             Log("HELI v=%p gone (deleted)",v);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+namespace {
+// The rescue heli as it was launched: the same object, alive.
+bool RescueHeliAlive() noexcept {
+    const auto v=rescue.vehicle;
+    return Readable(v,kSeats+8) && !v[kDead] && At<const void*>(v,kSelfCtrl)==rescue.ctrl && IsHelicopter(v);
+}
+
+// The seat the player holds in the rescue heli, or -1.
+int PlayerSeat() noexcept {
+    for(unsigned i=0;i<SeatCount(rescue.vehicle);++i)
+        if(SeatRider(SeatAt(rescue.vehicle,i))==Rider::player)return static_cast<int>(i);
+    return -1;
+}
+
+bool OnFoot(const unsigned char* human) noexcept {
+    const auto ctrl=At<const unsigned char*>(human,kHumanVehicleCtrl);
+    return !ctrl || (Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)==0);
+}
+
+// Ends the rescue; `leave`: the heli (alive) gets its own team back and flies off (StartLeave), else it is
+// left as it is (the player took its pilot seat: theirs now).
+void EndRescue(const char* why,bool leave,ULONGLONG ms) noexcept {
+    Log("RESCUE over: %s (heli %p)",why,rescue.vehicle);
+    if(leave && RescueHeliAlive()) {
+        auto v=rescue.vehicle;
+        Put<std::int32_t>(v,kTeam,rescue.team);
+        if(!Find(v))HeliCalled(v,false,reinterpret_cast<const float*>(v+kPosition),kRescueFuelSec);   // re-crewed meanwhile
+        float fwd[3];
+        if(Heli* h=Find(v); h && Row(v,kHeadForward,fwd))StartLeave(*h,reinterpret_cast<const float*>(v+kPosition),fwd,why);
+    }
+    rescue=Rescue{};rescue.retryAt=ms+kAgainMs;
+}
+
+// Presses the board button for `human` (see kBoardButton), with the bump off: it takes a free seat in the
+// stock reach or nothing, never the NPC pilot's.
+void PressBoard(unsigned char* human) noexcept {
+    const bool bump=cfg.bump;
+    cfg.bump=false;
+    __try { reinterpret_cast<void(__fastcall*)(void*)>(image+kBoardButton)(human); }
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE board button: fault");boardOk=false;}
+    cfg.bump=bump;
+}
+
+// No rescue yet: the player on foot in the sea for kWetMs with a carrier out launches one.
+void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
+    const float* p=reinterpret_cast<const float*>(human+kPosition);
+    if(!cfg.seaRescue || !OnFoot(human) || !(p[1]<cfg.rescueBelow)){rescue.wetSince=0;rescue.warned=false;return;}
+    if(!rescue.wetSince)rescue.wetSince=ms;
+    if(ms-rescue.wetSince<kWetMs || ms<rescue.retryAt)return;
+    float deck[3];
+    if(!SubDeck(p,deck)) {
+        if(!rescue.warned)Log("RESCUE player in the sea at (%.0f,%.1f,%.0f), but no submarine carrier out: no rescue",p[0],p[1],p[2]);
+        rescue.warned=true;rescue.retryAt=ms+kRetryMs;
+        return;
+    }
+    const float from[3]={deck[0],deck[1]+60.0f,deck[2]};
+    float dir[3]={p[0]-deck[0],0.0f,p[2]-deck[2]};
+    const float away=std::sqrt(Dot2(dir,dir));
+    if(away>1.0f){dir[0]/=away;dir[2]/=away;}else{dir[0]=0.0f;dir[2]=1.0f;}
+    unsigned char* const v=HeliLaunch(HeliBody::brute410,from,dir);
+    if(!v) {
+        Log("RESCUE no heli could be made (EDF6VC_HELI_410.SGO not installed or not preloaded this mission): retry in %llus",kRetryMs/1000);
+        rescue.retryAt=ms+kRetryMs;
+        return;
+    }
+    HeliCalled(v,false,p,kRescueFuelSec);
+    const ULONGLONG wet=ms-rescue.wetSince;
+    rescue=Rescue{};
+    rescue.phase=RescuePhase::pickup;rescue.vehicle=v;rescue.ctrl=At<const void*>(v,kSelfCtrl);rescue.team=At<std::int32_t>(v,kTeam);
+    rescue.startedAt=ms;rescue.seat=-1;
+    std::memcpy(rescue.goal,p,12);rescue.height=from[1];
+    Log("RESCUE launched: heli %p (410) over the carrier deck (%.0f,%.0f,%.0f), %.0f m from the player at (%.0f,%.1f,%.0f) in the sea %.1fs; seats=%u reach=%d autoBoard=%d",
+        v,deck[0],deck[1],deck[2],away,p[0],p[1],p[2],static_cast<float>(wet)*0.001f,SeatCount(v),reachOk,cfg.rescueAutoBoard && boardOk);
+}
+
+// Pickup: the heli flies to the player and brings a free door seat's riding point over them.
+void Pickup(unsigned char* human,ULONGLONG ms) noexcept {
+    auto v=rescue.vehicle;
+    const float* p=reinterpret_cast<const float*>(human+kPosition);
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    Put<std::int32_t>(v,kTeam,kTeamVehicle);   // see the Rescue comment
+    if(!OnFoot(human)){EndRescue("the player boarded another vehicle",true,ms);return;}
+    if(p[1]>=cfg.rescueBelow) {
+        if(!rescue.dryAt)rescue.dryAt=ms;
+        if(ms-rescue.dryAt>kDryMs){EndRescue("the player is out of the sea",true,ms);return;}
+    } else rescue.dryAt=0;
+    const float surface=p[1]>kSeaY ? p[1] : kSeaY;
+    const float away=Dist2(pos,p);
+    float at[3]{},reach=0.0f;
+    const int seat=reachOk ? DoorSeat(v,human,at,&reach) : -1;
+    rescue.climb=false;rescue.slow=false;rescue.low=false;
+    if(away>kRescueApproach || seat<0) {
+        // Out there, or no door seat to bring over them: over the sea next to them.
+        std::memcpy(rescue.goal,p,12);
+        rescue.height=surface+(away>kRescueApproach ? kRescueCruise : kSkid+2.0f);
+    } else {
+        // The seat's point (it moves with the heli) over the swimmer: the heli kSeatAbove higher than that.
+        rescue.goal[0]=p[0]-(at[0]-pos[0]);rescue.goal[1]=p[1];rescue.goal[2]=p[2]-(at[2]-pos[2]);
+        rescue.height=surface+kSeatAbove-(at[1]-pos[1]);
+        // Under kGroundClear only once over the spot (the walls are not looked for then: the steep coast).
+        rescue.low=Dist2(pos,rescue.goal)<10.0f;
+    }
+    if(rescue.height<kSeaY+kSkid)rescue.height=kSeaY+kSkid;
+    if(away<=kRescueApproach && !rescue.nearAt){rescue.nearAt=ms;Log("RESCUE heli %p beside the player (%.0f m), coming down",v,away);}
+    if(rescue.nearAt && ms-rescue.nearAt>kPickupMs){EndRescue("not boarded in 120 s",true,ms);return;}
+    rescue.seat=seat;
+    if(seat>=0) {
+        const float d[3]={at[0]-p[0],at[1]-p[1],at[2]-p[2]};
+        rescue.seatDist=std::sqrt(Dot3(d,d));rescue.seatReach=reach;
+    }
+    const bool inReach=seat>=0 && rescue.seatDist<=reach;
+    if(inReach && cfg.rescueAutoBoard && boardOk && ms-rescue.boardTryAt>=kBoardTryMs) {
+        rescue.boardTryAt=ms;++rescue.tries;
+        Log("RESCUE board try %d: seat %d riding point %.2f m from the player (stock reach %.2f), heli %.1f m over them",
+            rescue.tries,seat,rescue.seatDist,reach,pos[1]-p[1]);
+        PressBoard(human);
+        return;
+    }
+    if(ms-rescue.loggedAt>2000) {
+        rescue.loggedAt=ms;
+        Log("RESCUE pickup: heli %.0f m from the player, y=%.1f (player %.1f, goal %.1f), seat %d point %.2f m (stock reach %.2f)%s",
+            away,pos[1],p[1],rescue.height,seat,seat>=0 ? rescue.seatDist : -1.0f,seat>=0 ? reach : -1.0f,
+            inReach ? (cfg.rescueAutoBoard && boardOk ? " in reach" : " in reach: waiting for the player's board button") : "");
+    }
+}
+
+// Ferry: the player in a door seat; to the nearest carrier's deck, kDeckHover over it, until they get off.
+void Ferry(ULONGLONG ms) noexcept {
+    auto v=rescue.vehicle;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    Put<std::int32_t>(v,kTeam,kTeamVehicle);   // a door seat the player takes back after a stray exit
+    float deck[3];
+    rescue.slow=true;rescue.climb=false;rescue.low=false;
+    if(!SubDeck(pos,deck)) {   // the carrier is gone: it holds where it is
+        if(ms-rescue.loggedAt>kOverDeckLogMs){rescue.loggedAt=ms;Log("RESCUE ferry: no carrier out, holding at (%.0f,%.0f,%.0f)",pos[0],pos[1],pos[2]);}
+        std::memcpy(rescue.goal,pos,12);rescue.height=pos[1];
+        return;
+    }
+    std::memcpy(rescue.goal,deck,12);rescue.height=deck[1]+kDeckHover;
+    const float gap=SubHullGap(pos);
+    rescue.climb=pos[1]<deck[1]+5.0f && gap>=0.0f && gap<kHullMargin;   // not into the hull's side
+    const bool over=Dist2(pos,deck)<kOverDeck && std::fabs(pos[1]-rescue.height)<4.0f;
+    if(over && !rescue.overDeckAt) {
+        rescue.overDeckAt=rescue.loggedAt=ms;
+        Log("RESCUE over the carrier deck (%.0f,%.0f,%.0f), %.1f m above it: the player can jump off",deck[0],deck[1],deck[2],pos[1]-deck[1]);
+    } else if(ms-rescue.loggedAt>(rescue.overDeckAt ? kOverDeckLogMs : 2000)) {
+        rescue.loggedAt=ms;
+        Log("RESCUE ferry: %.0f m to the deck, y=%.1f (deck %.1f)%s%s",Dist2(pos,deck),pos[1],deck[1],rescue.climb ? " climbing clear of the hull" : "",
+            rescue.overDeckAt ? ", over it: waiting for the player to jump off" : "");
+    }
+}
+}  // namespace
+
+void RescueTick() noexcept {
+    __try {
+        const ULONGLONG tick=GetTickCount64();
+        if(tick-rescue.tickAt<10)return;   // once a frame of the helis that call it
+        rescue.tickAt=tick;
+        const ULONGLONG ms=GameMs();
+        unsigned char* const human=PlayerHuman();
+        if(rescue.phase==RescuePhase::none) {
+            if(human)StartRescue(human,ms);
+            return;
+        }
+        if(!RescueHeliAlive()){Log("RESCUE heli %p lost (shot down or gone)",rescue.vehicle);rescue=Rescue{};rescue.retryAt=ms+kRetryMs;return;}
+        if(!human){EndRescue("the player is not seen (dead, or the mission over)",true,ms);return;}
+        const int seat=PlayerSeat();
+        const float* p=reinterpret_cast<const float*>(human+kPosition);
+        if(seat==0){EndRescue("the player took the pilot seat: the heli is theirs",false,ms);return;}
+        if(rescue.phase==RescuePhase::pickup) {
+            if(seat<0){Pickup(human,ms);return;}
+            Log("RESCUE boarded: seat %d after %d presses, its riding point was %.2f m from the player (stock reach %.2f); ferrying to the carrier",
+                seat,rescue.tries,rescue.seatDist,rescue.seatReach);
+            rescue.phase=RescuePhase::ferry;rescue.loggedAt=0;
+        }
+        if(seat<0) {
+            const float* pos=reinterpret_cast<const float*>(rescue.vehicle+kPosition);
+            float deck[3];
+            const bool sub=SubDeck(pos,deck);
+            Log("RESCUE player got off at (%.0f,%.1f,%.0f)%s%.1f m over the deck",p[0],p[1],p[2],sub ? ", " : " (no carrier) ",sub ? p[1]-deck[1] : 0.0f);
+            EndRescue("the player got off",true,ms);
+            return;
+        }
+        Ferry(ms);
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault");rescue=Rescue{};}
 }
 
 namespace {
@@ -1500,6 +1800,15 @@ bool CheckHeliProfile() noexcept {
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
+        // The sea rescue: the seat reach is read for the pickup, the board button pressed with RescueAutoBoard.
+        reachOk=Readable(image+kReachSlackRva,4) && At<float>(image,kReachSlackRva)==kReachSlack;
+        for(std::size_t i=3;i<sizeof(kRescueSignatures)/sizeof(kRescueSignatures[0]);++i)
+            reachOk=reachOk && Matches(kRescueSignatures[i].rva,kRescueSignatures[i].bytes,kRescueSignatures[i].size);
+        boardOk=reachOk;
+        for(std::size_t i=0;i<3;++i)
+            boardOk=boardOk && Matches(kRescueSignatures[i].rva,kRescueSignatures[i].bytes,kRescueSignatures[i].size);
+        Log("RESCUE seat reach=%d board button=%d (sea rescue %s, auto board %s)",reachOk,boardOk,cfg.seaRescue ? "on" : "off",
+            cfg.rescueAutoBoard ? (boardOk ? "on" : "off: unexpected EDF.dll code") : "off: the player boards with their own button");
         InstallJets();
         InstallSub();   // after the jets: it chains onto their physics hook
         return true;

@@ -118,6 +118,9 @@ void LoadConfig() noexcept {
     n.groundFire=ReadBool(L"GroundFire",n.groundFire);
     n.callNextKey=GetPrivateProfileIntW(L"VehicleCrew",L"CallNextKey",n.callNextKey,iniPath);
     n.callPrevKey=GetPrivateProfileIntW(L"VehicleCrew",L"CallPrevKey",n.callPrevKey,iniPath);
+    n.seaRescue=ReadBool(L"SeaRescue",n.seaRescue);
+    n.rescueBelow=ReadFloat(L"RescueBelow",n.rescueBelow);
+    n.rescueAutoBoard=ReadBool(L"RescueAutoBoard",n.rescueAutoBoard);
     cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
@@ -129,6 +132,7 @@ void LoadConfig() noexcept {
         cfg.jetSortieSec,cfg.jetAirRaider,cfg.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",cfg.groundPilot,cfg.groundFollow,
         cfg.groundRange,cfg.groundLeash,cfg.groundFire);
+    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",cfg.seaRescue,cfg.rescueBelow,cfg.rescueAutoBoard);
 }
 
 FILETIME IniStamp() noexcept {
@@ -190,8 +194,42 @@ Rider SeatRider(const unsigned char* seat) noexcept {
     return IsPlayer(rider) ? Rider::player : Rider::other;
 }
 
+// The player's human. SeePlayer gets a position inside an object: the human's own (the on-foot ride prompt,
+// crew.cpp PromptHook) or the vehicle's they ride (crew.cpp Crew). A vehicle is told by the player in one
+// of its seats (the seat's rider is the human); else the object is the human if it is the player (pad and
+// player flag) and its weak-this points at itself. Kept with its weak-this control block, so a new object
+// at the same address (the next mission) is not taken for it.
+namespace {
+constexpr ULONGLONG kPlayerHumanMs=2000;
+unsigned char* playerHuman=nullptr;
+const void* playerHumanCtrl=nullptr;
+ULONGLONG playerHumanAt=0;
+
+unsigned char* HumanOf(unsigned char* object) noexcept {
+    const unsigned n=SeatCount(object);
+    for(unsigned i=0;i<n;++i)
+        if(SeatRider(SeatAt(object,i))==Rider::player)return At<unsigned char*>(SeatAt(object,i),kSeatRider);
+    return IsPlayer(object) && At<const void*>(object,kSelf)==object ? object : nullptr;
+}
+}  // namespace
+
 void SeePlayer(const float* pos,std::int32_t team) noexcept {
     std::memcpy(player.pos,pos,sizeof(player.pos));player.team=team;player.at=GetTickCount64();
+    __try {
+        auto object=const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(pos))-kPosition;
+        if(auto human=HumanOf(object)) {
+            playerHuman=human;playerHumanCtrl=At<const void*>(human,kSelfCtrl);playerHumanAt=player.at;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+unsigned char* PlayerHuman() noexcept {
+    __try {
+        if(!playerHuman || GetTickCount64()-playerHumanAt>kPlayerHumanMs)return nullptr;
+        if(!Readable(playerHuman,kHumanVehicleCtrl+8) || At<const void*>(playerHuman,kSelfCtrl)!=playerHumanCtrl ||
+           !IsPlayer(playerHuman))return nullptr;
+        return playerHuman;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
 }  // namespace crew
 

@@ -50,6 +50,9 @@ struct Config {
     bool groundFire=true;
     DWORD callNextKey=0xDD;    // in a mission: the next call every call weapon brings (VK_OEM_6 `]`; 0 = off)
     DWORD callPrevKey=0xDB;    // ...the one before (VK_OEM_4 `[`)
+    bool seaRescue=true;       // a heli comes for a local player in the sea and ferries them to a submarine carrier's deck
+    float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
+    bool rescueAutoBoard=false;// ...and, in the stock board reach of a free door seat, boards them by the stock board path
 };
 extern Config cfg;
 
@@ -196,4 +199,15 @@ void PreloadSub() noexcept;                       // from the mission's player p
 // its hull), its bow along `heading` (horizontal part used), friend, NPC pilot: the vehicle, or nullptr (its
 // files not installed or not preloaded this mission, three already out, the game failed to build it).
 unsigned char* SubLaunch(const float* pos,const float* heading) noexcept;
+// The live carrier nearest to `from`: a point on its flat bow deck (the hull box top, 193 m over its origin)
+// nearest to `from`, into `deck`; false with no carrier out.
+bool SubDeck(const float* from,float* deck) noexcept;
+// Horizontal metres from `p` to the nearest live carrier's hull footprint (0 over it), -1 with none.
+float SubHullGap(const float* p) noexcept;
+
+// The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
+// kPlayerHumanMs or no longer the same live player object.
+unsigned char* PlayerHuman() noexcept;
+// Sea rescue (heli.cpp): from every flown helicopter's frame (HeliFrame), at most once per game frame.
+void RescueTick() noexcept;
 }  // namespace crew
