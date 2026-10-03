@@ -72,6 +72,32 @@ using InputFn=void(__fastcall*)(void*,std::uintptr_t);
 using TriggerFn=void(__fastcall*)(void*);
 InputFn original403=nullptr,original404=nullptr;
 
+// Weapon user: the vehicle's interface at +0x120 answers who operates one of its weapons (0x62D950,
+// slot 11 of that interface's vtable): the rider of the seat holding it, else the seat's +0x300
+// object, else null. Every weapon step asks it, and the fire step (0x690BB0, and the spawn 0x690CC0)
+// refuses a null answer, as well as one with bit 0 of +8 set (an object another machine runs). An
+// empty gunner seat answers null, so its gun could never fire. With GunnerAI on, such a gun is
+// operated by whoever operates the driver's gun: a local driver fires it here, a remote driver's
+// machine fires it there. The driver's own gun answering null stays null.
+constexpr unsigned kUserIface403Vtable=0x17D9238,kUserIface404Vtable=0x17D96F0,kWeaponUser=0x62D950;
+constexpr std::size_t kUserIface=0x120,kUserSlot=0x58/8;
+using UserFn=const void*(__fastcall*)(void*,const void*);
+UserFn originalUser=nullptr;
+
+const void* DriverWeapon(const unsigned char* vehicle) noexcept {
+    const auto seat=At<const unsigned char*>(vehicle,kSeats);
+    if(!seat || At<std::uint32_t>(vehicle,kSeatCount)==0 || At<std::uint64_t>(seat,kSeatWeaponCount)==0)return nullptr;
+    const auto holder=At<const unsigned char*>(At<const unsigned char*>(seat,kSeatWeapons),0);
+    return holder ? At<const void*>(holder,kHolderWeapon) : nullptr;
+}
+
+const void* __fastcall WeaponUser(void* iface,const void* weapon) {
+    const auto user=originalUser(iface,weapon);
+    if(user || !cfg.enabled || !cfg.gunnerAi)return user;
+    const auto driverWeapon=DriverWeapon(static_cast<unsigned char*>(iface)-kUserIface);
+    return driverWeapon && driverWeapon!=weapon ? originalUser(iface,driverWeapon) : nullptr;
+}
+
 enum class Crew { none, ai, player };
 
 // A side gun as the aim sees it this frame: its trigger, round and muzzle in the world.
@@ -404,13 +430,22 @@ const Signature kSignatures[]={
     {0x696A3D,{0x44,0x0F,0x10,0x82,0xE0,0x00,0x00,0x00},8},
     {0x697019,{0x48,0xF7,0xB1,0xE0,0x01,0x00,0x00},7},                    // fire: muzzle count +1E0
     {0x697022,{0x48,0x69,0xD8,0xF0,0x00,0x00,0x00,0x48,0x03,0x99,0xD0,0x01,0x00,0x00},14},   // stride F0, array +1D0
+    // weapon user: seats at iface+0x4E8 (vehicle+0x608), count +0x4F8, stride 0x340
+    {kWeaponUser,{0x41,0x57,0x48,0x83,0xEC,0x30,0x4C,0x69,0x99,0xF8,0x04,0x00,0x00,0x40,0x03,0x00,0x00,
+                  0x4C,0x8B,0x81,0xE8,0x04,0x00,0x00,0x4C,0x8B,0xD2},27},
+    // ... holders seat+0xC8, count +0xD8, the weapon at holder+0x10
+    {0x62D980,{0x4D,0x8B,0x88,0xD8,0x00,0x00,0x00,0x49,0x8B,0xD7,0x4D,0x85,0xC9,0x74,0x1C,0x49,0x8B,0x80,
+               0xC8,0x00,0x00,0x00,0x48,0x8B,0x08,0x4C,0x3B},27},
+    {0x690C0E,{0xFF,0x50,0x58,0x48,0x85,0xC0,0x0F,0x84,0x92,0x00,0x00,0x00},12},   // fire: null user -> no shot
 };
 
 bool CheckGunnerProfile() noexcept {
     __try {
         for(const auto& s:kSignatures)if(!Matches(s.rva,s.bytes,s.size))return false;
         return reinterpret_cast<void**>(image+kTank403Vtable)[kInputSlot]==image+kTank403Input
-            && reinterpret_cast<void**>(image+kTank404Vtable)[kInputSlot]==image+kTank404Input;
+            && reinterpret_cast<void**>(image+kTank404Vtable)[kInputSlot]==image+kTank404Input
+            && reinterpret_cast<void**>(image+kUserIface403Vtable)[kUserSlot]==image+kWeaponUser
+            && reinterpret_cast<void**>(image+kUserIface404Vtable)[kUserSlot]==image+kWeaponUser;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 }  // namespace
@@ -421,7 +456,10 @@ bool HookGunners() noexcept {
     original404=reinterpret_cast<InputFn>(image+kTank404Input);
     const bool tank=PatchVtableSlot(reinterpret_cast<void**>(image+kTank403Vtable)+kInputSlot,image+kTank403Input,reinterpret_cast<void*>(&Hook403));
     const bool titan=PatchVtableSlot(reinterpret_cast<void**>(image+kTank404Vtable)+kInputSlot,image+kTank404Input,reinterpret_cast<void*>(&Hook404));
-    Log("HOOK gunners tank403=%d titan404=%d",tank,titan);
+    originalUser=reinterpret_cast<UserFn>(image+kWeaponUser);
+    const bool user=PatchVtableSlot(reinterpret_cast<void**>(image+kUserIface403Vtable)+kUserSlot,image+kWeaponUser,reinterpret_cast<void*>(&WeaponUser))
+        && PatchVtableSlot(reinterpret_cast<void**>(image+kUserIface404Vtable)+kUserSlot,image+kWeaponUser,reinterpret_cast<void*>(&WeaponUser));
+    Log("HOOK gunners tank403=%d titan404=%d user=%d",tank,titan,user);
     return tank || titan;
 }
 }  // namespace autoturret
