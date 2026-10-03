@@ -130,15 +130,21 @@ JET_BODY_BONE = 'bomber501'
 
 
 def _jet_ragdoll(blob: bytes) -> bytes:
-    """The ragdoll's embedded binding SGO with every model-side bone one the bomber has. The binder
-    (RagdollController::BindDependency 0x6E6A50) does not survive a missing bone: an entry left unbound
-    crashes it at 0x6E8284 while the vehicle is built (seen 2026-10-03 with the V506 names). Every proxy
-    follows the fuselage bone; only the body proxy drives it (the rotor proxies spin)."""
+    """The ragdoll's embedded binding SGO with every model-side bone one the bomber has.
+    RagdollController::BindDependency (0x6E6A50): each animation_from_ragdoll entry looks its model bone
+    up (0x6E7B98); found, the proxy's record gets the bone (+0x60, first entry wins) and the bone gets the
+    proxy (+8, last entry wins). Every proxy must end up with a bone: the loop at 0x6E8280 reads each
+    record's +0x60 unchecked (crashed 2026-10-03 with the V506 bone names, then with only the body proxy
+    bound). So every proxy is bound to the fuselage bone, the body proxy last so it is what drives it
+    (the rotor proxies spin); ragdoll_from_animation has them all follow it."""
     import sgowrite
     version, inner = sgowrite.read(blob)
     inner['ragdoll_from_animation'] = [[[JET_BODY_BONE, e[0][1]]] + e[1:] for e in inner['ragdoll_from_animation']]
-    inner['animation_from_ragdoll'] = [[[e[0][0], JET_BODY_BONE]] + e[1:]
-                                       for e in inner['animation_from_ragdoll'] if e[0][1] == 'body']
+    drive: dict[str, list] = {}
+    for e in inner['animation_from_ragdoll']:
+        drive.setdefault(e[0][0], [[e[0][0], JET_BODY_BONE]] + e[1:])   # globalSRT: a second body entry, dropped
+    body = drive.pop('RagDollProxys.body')
+    inner['animation_from_ragdoll'] = list(drive.values()) + [body]
     return sgowrite.write(version, inner)
 
 
