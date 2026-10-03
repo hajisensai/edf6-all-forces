@@ -84,7 +84,8 @@ constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
 constexpr float kDiveCone=0.52f;
 constexpr float kGunCone=0.035f,kHitRadius=4.0f;   // rad (2 deg), or what puts kHitRadius on the target
 // The guns fire only flying where the nose points (cos 10 deg off): never flank first. And never with a
-// friend (another jet within kJetSpan, a heli, the player) along the rounds' path (FriendInLine).
+// wingman (another jet within kJetSpan) or the player along the rounds' path (FriendInLine); other friends
+// are hit as the stock game hits them.
 constexpr float kGunSlip=0.985f,kJetSpan=20.0f;
 constexpr float kMissileCone=0.2f,kMissileMin=120.0f,kMissileMax=500.0f;
 constexpr ULONGLONG kMissileMs=2500,kPullMs=7000,kExtendMs=12000;

@@ -119,8 +119,8 @@ bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noe
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
 // Whether `point` is within `radius` of the segment from->to (between its ends).
 bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept;
-// Whether a burst from->to would pass by a friend: the player, or a heli or jet the plugin flies other
-// than `self` (heli.cpp, which asks JetInLine for the jets).
+// Whether a burst from->to would pass by the player (as the helis' guns check) or a jet the plugin flies
+// other than `self` (JetInLine). Other friends are hit as the stock game hits them.
 bool FriendInLine(const float* from,const float* to,const void* self) noexcept;
 
 // jet.cpp
