@@ -41,9 +41,8 @@ struct Config {
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
     DWORD jetFuelSec=120;      // a jet withdraws after this long in the air
     DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover
-    bool jetAirRaider=true;    // the Air Raider's bomber calls send jets instead
+    bool jetAirRaider=true;    // the Air Raider's bomber calls send jets instead, and its call weapons (airstrike.cpp) work
     bool jetMissionStrike=true;// the missions' strafing-plane airstrikes (DemoAirStrike) send jets instead
-    int jetMaxPerCall=4;       // at most this many jets per bomber call
 };
 extern Config cfg;
 
@@ -129,6 +128,7 @@ bool JetInLine(const float* from,const float* to,const void* self) noexcept;   /
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused or loading
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
+void HeliReap(const void* self) noexcept;          // ...and called helis that have left (heli.cpp)
 bool InstallJets() noexcept;
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
@@ -136,8 +136,17 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // `source`: what launched it (any fixed address per kind of source); jets from one source in a row fly
 // as one flight, whose rounds pass through each other.
 // `role`: the jet.cpp Role it flies as (same order); one whose SGO is not installed flies as a fighter.
+// `escort`: it works round the player (while seen), not round `target`.
 enum class JetRole { strike, fighter, interceptor, multirole, carrier };
-bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept;
+bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
+               bool escort=false) noexcept;
+// A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
+// friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
+enum class HeliBody { brute410, eros506 };
+unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
+// A heli the Air Raider called (heli.cpp): `guard` holds over `post` and fights round it, else it follows
+// the player; after `sortieSec` it flies off away from the player and is deleted far from them.
+void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD sortieSec) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };

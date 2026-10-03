@@ -39,6 +39,12 @@ BOMBERS: dict[str, tuple[list[str], str, list[list[float]] | None]] = {
     'EDF6VC_BOMBER401.SGO': (['app:/object/bomber401.mrab', 'bomber401.mdb'], 'bomber401', [[0.0, 2.14, 0.0], [2.5, 2.0, 8.0]]),
     'EDF6VC_BOMBER501_2.SGO': (['app:/object/bomber501.mrab', 'bomber501_2.mdb'], 'bomber501', None),
 }
+# The helis the Air Raider's call weapons bring (src/jet.cpp HeliLaunch, tools/call_weapons.py): the stock
+# call-in helis made script-placeable (gen.as_mission_sgo), so RideAi(true) gives them their weapons.
+HELIS: dict[str, str] = {
+    'EDF6VC_HELI_410.SGO': 'VEHICLE410_HELI',
+    'EDF6VC_HELI_506.SGO': 'V506_HELI',
+}
 MODEL_FILE = gen.JET_ELEVON_FILE
 MODEL = gen.JET_ELEVON_MODEL
 
@@ -48,7 +54,7 @@ def main(argv: list[str]) -> int:
     root = args[0] if args else gen.DEFAULT_GAME
     out = gen.object_dir(root)
     if '--remove' in argv:
-        paths = [os.path.join(out, n) for n in [*FILES, *BOMBERS, MODEL_FILE, *MODEL_FILES]]
+        paths = [os.path.join(out, n) for n in [*FILES, *BOMBERS, *HELIS, MODEL_FILE, *MODEL_FILES]]
         for path in paths + [os.path.join(gen.weapon_dir(root), n) for n in gen.JET_GUN_FILES]:
             if os.path.exists(path):
                 os.remove(path)
@@ -77,6 +83,12 @@ def main(argv: list[str]) -> int:
         print('写入', path, len(data), '字节')
     for name, (model, body, rigid) in BOMBERS.items():
         data = gen.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid)
+        path = os.path.join(out, name)
+        with open(path, 'wb') as f:
+            f.write(data)
+        print('写入', path, len(data), '字节')
+    for name, stock in HELIS.items():
+        data = gen.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
         path = os.path.join(out, name)
         with open(path, 'wb') as f:
             f.write(data)

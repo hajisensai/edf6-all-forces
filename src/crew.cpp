@@ -240,6 +240,7 @@ void __fastcall PromptHook(void* functor,void* object) {
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         JetReap(object);   // a withdrawn jet with no other vehicle about (the player on foot)
+        HeliReap(object);  // ...and a called heli that left
         if(!inputsHooked)InstallInputs();   // first mission frame: every plugin has loaded by now
         if(!cfg.bump || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object))return;
         auto v=static_cast<unsigned char*>(object);
@@ -314,6 +315,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput)
         Crew(v,I);
         AimLines(v);
         JetReap(v);
+        HeliReap(v);
         if(IsHelicopter(v))HeliFrame(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }

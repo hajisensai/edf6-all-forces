@@ -11,15 +11,20 @@
 //    its jet's bay is gone (JetHolds), as the stock plane deletes itself once its bombs are. The call's
 //    target marker lasts as long as its planes (deleting the plane at once took it down before a bomb
 //    fell), and the DemoAirStrike deletes itself once its plane is gone.
-//  - The Air Raider's call (its one call of IFC_Start, 0x6A8DFB): with enemies in the air round the
-//    target, fighters go along as escorts (up to cfg.jetMaxPerCall), from 1 km behind the target as seen
-//    from the player.
-// When no jet can be launched (the jet SGOs missing or not preloaded this mission) the stock bombers fly.
+//  - The Air Raider's call weapons (tools/call_weapons.py: EDF6VC_CALL_*, KM6 bomber calls told apart by
+//    their AmmoHitSizeAdjust, weapon+0x8C4, kCalls' marks): at the call (its one call of IFC_Start,
+//    0x6A8DFB) the plugin launches that call's jets or helis instead of its bombers, which it keeps home
+//    (the call's plane count, ifc+0x80, set to 0 after IFC_Start: the call is spent, its state machine
+//    goes back to idle). A guard call works round its marker, a follow call round the player. Only the
+//    caller's game does this: in an online game the others see the stock bombers.
+// When no jet can be launched (the jet SGOs missing or not preloaded this mission) the stock bombers fly;
+// without the plugin the call weapons are plain KM6 calls.
 // The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
+#include <cwchar>
 
 namespace crew {
 namespace {
@@ -29,7 +34,9 @@ constexpr unsigned kBomberInit=0x5AABB0,kRadioBomber=0x2B924E,kMissionBomber=0x5
 constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=0x118A1B0;
 constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
 constexpr float kApproach=1000.0f,kAboveTarget=150.0f,kWingSpacing=70.0f,kWingStep=15.0f;
-constexpr float kLookRadius=350.0f,kFlyerClear=15.0f;
+constexpr float kHeliApproach=300.0f,kHeliSpacing=40.0f;
+// The weapon a radio call's IndirectFireControl is in (ifc = weapon+0x1660), and its AmmoHitSizeAdjust.
+constexpr std::size_t kWeaponIfc=0x1660,kWeaponHitSize=0x8C4;
 
 const unsigned char kIfcStartSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05};
 // call IFC_Start; then the caller marks the call active and copies the plane count (+0x16E0 -> +0x16E4)
@@ -47,7 +54,7 @@ using PlaneUpdateFn=void(__fastcall*)(unsigned char*,const void*);
 using DeleteFn=void(*)(void*);
 PlaneUpdateFn nextPlaneUpdate=nullptr;
 
-// Launch sources (JetLaunch): an Air Raider's call (its escorts and bombers), a mission's strike.
+// Launch sources (JetLaunch): an Air Raider's call (its jets and bombers), a mission's strike.
 const char kRadioSource='r',kMissionSource='m';   // distinct values: identical constants may be folded
 
 // Bombers whose jets fly instead, by their weak-this control block: hidden at their first update, deleted
@@ -72,60 +79,112 @@ Held* FreeHeld(ULONGLONG ms) noexcept {
 constexpr unsigned kPlaneHide=0x6C04B0,kPlaneUnlist=0x54DDB0;
 constexpr std::size_t kPlaneSpeed=0xB90,kPlaneDraw=0x5C0;
 
-// Enemies round the target: those well off the ground count as flyers.
-struct Census { const float* at; int flyers,ground; };
-void Count(void* ctx,const void*,const float* p) noexcept {
-    auto& c=*static_cast<Census*>(ctx);
-    const float dx=p[0]-c.at[0],dz=p[2]-c.at[2];
-    if(dx*dx+dz*dz>kLookRadius*kLookRadius)return;
-    const float down[3]={p[0],p[1]-200.0f,p[2]};
-    float hit[3];
-    const bool flying=MapRay(p,down,hit)<0.0f || p[1]-hit[1]>kFlyerClear;
-    (flying ? c.flyers : c.ground)+=1;
+// The call weapons (tools/call_weapons.py writes the same marks, counts and sorties): per role a guard
+// call (round its marker) and a follow call (round the player), the follow one dearer (its reload). The
+// stronger the call, the fewer and the longer it reloads; the carrier is one, its drones do the work.
+struct Call { float mark; bool heli; JetRole role; HeliBody body; int count; DWORD sortieSec; bool follow; const char* name;
+              const wchar_t* id; };
+const Call kCalls[]={
+    {7101.0f,false,JetRole::interceptor,HeliBody::eros506,2,45,false,"interceptors (guard)",L"EDF6VC_CALL_INTERCEPTOR"},
+    {7102.0f,false,JetRole::interceptor,HeliBody::eros506,2,45,true,"interceptors (follow)",L"EDF6VC_CALL_INTERCEPTOR_F"},
+    {7103.0f,false,JetRole::strike,HeliBody::eros506,3,60,false,"strike jets (guard)",L"EDF6VC_CALL_STRIKE"},
+    {7104.0f,false,JetRole::strike,HeliBody::eros506,3,60,true,"strike jets (follow)",L"EDF6VC_CALL_STRIKE_F"},
+    {7105.0f,false,JetRole::multirole,HeliBody::eros506,3,90,false,"multirole jets (guard)",L"EDF6VC_CALL_MULTIROLE"},
+    {7106.0f,false,JetRole::multirole,HeliBody::eros506,3,90,true,"multirole jets (follow)",L"EDF6VC_CALL_MULTIROLE_F"},
+    {7107.0f,false,JetRole::fighter,HeliBody::eros506,4,90,false,"fighters (guard)",L"EDF6VC_CALL_FIGHTER"},
+    {7108.0f,false,JetRole::fighter,HeliBody::eros506,4,90,true,"fighters (follow)",L"EDF6VC_CALL_FIGHTER_F"},
+    {7109.0f,false,JetRole::carrier,HeliBody::eros506,1,120,false,"carrier (guard)",L"EDF6VC_CALL_CARRIER"},
+    {7110.0f,false,JetRole::carrier,HeliBody::eros506,1,120,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
+    {7111.0f,true,JetRole::fighter,HeliBody::brute410,2,120,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
+    {7112.0f,true,JetRole::fighter,HeliBody::eros506,2,120,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
+};
+
+// Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
+bool HoldsId(const unsigned char* data,std::size_t size,const wchar_t* id) noexcept {
+    const std::size_t len=(std::wcslen(id)+1)*sizeof(wchar_t);
+    for(std::size_t i=0;i+len<=size;i+=2)
+        if((i<2 || (data[i-2]==0 && data[i-1]==0)) && std::memcmp(data+i,id,len)==0)return true;
+    return false;
 }
 
-// The escorts' roles, wingman by wingman: fighter, interceptor, multirole in turn, and with four or more
-// the last is a carrier (its drones go in instead of it).
-JetRole EscortRole(int i,int n) noexcept {
-    if(n>=4 && i==n-1)return JetRole::carrier;
-    constexpr JetRole kMix[3]={JetRole::fighter,JetRole::interceptor,JetRole::multirole};
-    return kMix[i%3];
+// The weapon table the game loads (Mods/WEAPON/WEAPONTABLE.SGO) must list the call weapons
+// (tools/call_weapons.py install): a mod that writes its own table over it drops their rows, and the
+// weapons are gone from the game. Checked once at load and logged with the fix (the table is a shared
+// file and the game reads it while the plugin loads: the plugin never writes it).
+void CheckCallTable() noexcept {
+    wchar_t path[MAX_PATH];
+    const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
+    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
+    if(!slash)return;
+    *slash=0;
+    if(wcscat_s(path,L"\\Mods\\WEAPON\\WEAPONTABLE.SGO")!=0)return;
+    const HANDLE f=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
+    if(f==INVALID_HANDLE_VALUE){Log("CALLS no Mods weapon table: the call weapons are not installed (python tools/call_weapons.py install)");return;}
+    LARGE_INTEGER size{};
+    unsigned char* data=nullptr;
+    DWORD got=0;
+    if(GetFileSizeEx(f,&size) && size.QuadPart>0 && size.QuadPart<(64<<20)) {
+        data=static_cast<unsigned char*>(HeapAlloc(GetProcessHeap(),0,static_cast<SIZE_T>(size.QuadPart)));
+        if(data && !ReadFile(f,data,static_cast<DWORD>(size.QuadPart),&got,nullptr))got=0;
+    }
+    CloseHandle(f);
+    if(!data)return;
+    int missing=0;
+    for(const auto& c:kCalls)
+        if(!HoldsId(data,got,c.id)){++missing;Log("CALLS %ls missing from the weapon table",c.id);}
+    HeapFree(GetProcessHeap(),0,data);
+    if(missing)Log("CALLS %d of %d call weapons missing: with the game closed run python tools/call_weapons.py install",
+                   missing,static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0])));
+    else Log("CALLS all %d call weapons in the weapon table",static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0])));
 }
 
-// Escort fighters for a bomber call of `planes` at `target` (see the file comment): all of them when the
-// enemies there mostly fly, one when some do; how many went.
-int LaunchEscorts(int planes,const float* target) noexcept {
-    Census census{target,0,0};
-    VisitEnemiesOf(player.at ? player.team : 0,&Count,&census);
-    const int cap=planes<1 ? 1 : planes>cfg.jetMaxPerCall ? cfg.jetMaxPerCall : planes;
-    const int n=census.flyers==0 ? 0 : census.flyers>census.ground ? cap : 1;
-    if(n==0)return 0;
+// The call weapon `ifc` is in, or nullptr (a stock call).
+const Call* CallOf(const void* ifc) noexcept {
+    const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
+    if(!Readable(w+kWeaponHitSize,4))return nullptr;
+    const float mark=At<float>(w,kWeaponHitSize);
+    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return &c;
+    return nullptr;
+}
+
+// The call's jets or helis at `target`, coming from behind it as the player sees it (jets kApproach out
+// and kAboveTarget up, helis kHeliApproach out), side by side; how many came.
+int LaunchCall(const Call& c,const float* target) noexcept {
     float dir[3]={0,0,1};
     if(player.at && GetTickCount64()-player.at<10000) {
         const float dx=target[0]-player.pos[0],dz=target[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
         if(l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
     }
     const float side[3]={dir[2],0,-dir[0]};
+    const float back=c.heli ? kHeliApproach : kApproach,spacing=c.heli ? kHeliSpacing : kWingSpacing;
+    const float up=c.heli ? cfg.heliHeight : kAboveTarget;
     int launched=0;
-    for(int i=0;i<n;++i) {
-        const float off=(static_cast<float>(i)-static_cast<float>(n-1)*0.5f)*kWingSpacing;
-        const float from[3]={target[0]-dir[0]*kApproach+side[0]*off,target[1]+kAboveTarget+kWingStep*static_cast<float>(i),
-                             target[2]-dir[2]*kApproach+side[2]*off};
-        if(JetLaunch(EscortRole(i,n),from,dir,target,cfg.jetSortieSec,&kRadioSource))++launched;
+    for(int i=0;i<c.count;++i) {
+        const float off=(static_cast<float>(i)-static_cast<float>(c.count-1)*0.5f)*spacing;
+        const float from[3]={target[0]-dir[0]*back+side[0]*off,target[1]+up+kWingStep*static_cast<float>(i),
+                             target[2]-dir[2]*back+side[2]*off};
+        if(!c.heli) {
+            launched+=JetLaunch(c.role,from,dir,target,c.sortieSec,&kRadioSource,c.follow) ? 1 : 0;
+            continue;
+        }
+        unsigned char* const v=HeliLaunch(c.body,from,dir);
+        if(!v)continue;
+        HeliCalled(v,!c.follow,target,c.sortieSec);
+        ++launched;
     }
-    Log("AIRSTRIKE escorts: %d/%d fighters (enemies there: %d flying, %d on the ground) at (%.0f,%.0f,%.0f)",
-        launched,n,census.flyers,census.ground,target[0],target[1],target[2]);
+    Log("AIRSTRIKE call: %d/%d %s at (%.0f,%.0f,%.0f) for %lus",launched,c.count,c.name,target[0],target[1],target[2],c.sortieSec);
     return launched;
 }
 
 // The Air Raider's bomber call (redirected call at kRadioCall): IFC_Start(ifc = weapon+0x1660, params).
+// A call weapon's: its jets or helis, and no bombers (when none could be launched the bombers fly).
 std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
     const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
     if(!cfg.enabled || !cfg.jetAirRaider)return result;
     __try {
-        const std::int32_t planes=At<std::int32_t>(ifc,kIfcPlanes);
+        const Call* const c=CallOf(ifc);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
-        if(planes>0 && std::isfinite(target[0]+target[1]+target[2]))LaunchEscorts(planes,target);
+        if(c && std::isfinite(target[0]+target[1]+target[2]) && LaunchCall(*c,target)>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return result;
 }
@@ -193,12 +252,13 @@ bool Redirect(unsigned site,const unsigned char* sig,std::size_t size,void* hook
 }  // namespace
 
 bool InstallAirstrikes() noexcept {
+    CheckCallTable();
     __try {
-        bool escorts=false,radio=false,mission=false;
+        bool calls=false,radio=false,mission=false;
         if(Matches(kIfcStart,kIfcStartSig,sizeof(kIfcStartSig)) && Matches(kRadioCall,kRadioCallSig,sizeof(kRadioCallSig))) {
             bool changed=false;
-            escorts=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);
-            if(!escorts && changed)Log("AIRSTRIKE radio call half patched");
+            calls=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);
+            if(!calls && changed)Log("AIRSTRIKE radio call half patched");
         } else Log("AIRSTRIKE bomber call: profile mismatch");
         // The plane update first: a bomber taken over must never fly.
         const auto slot=reinterpret_cast<void**>(image+kPlaneUpdateSlot);
@@ -213,8 +273,8 @@ bool InstallAirstrikes() noexcept {
             radio=Redirect(kRadioBomber,kRadioBomberSig,sizeof(kRadioBomberSig),reinterpret_cast<void*>(&RadioBomberHook),"air raider bomber");
             mission=Redirect(kMissionBomber,kMissionBomberSig,sizeof(kMissionBomberSig),reinterpret_cast<void*>(&MissionBomberHook),"mission bomber");
         }
-        Log("HOOK airstrikes escorts=%d airRaiderBombers=%d missionBombers=%d",escorts,radio,mission);
-        return escorts || radio || mission;
+        Log("HOOK airstrikes calls=%d airRaiderBombers=%d missionBombers=%d",calls,radio,mission);
+        return calls || radio || mission;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 }  // namespace crew

@@ -23,6 +23,10 @@
 // strafes; the 409 (Nereid) makes rocket runs and circles the target for its turret in between; the 410
 // (Brute), whose guns are in its doors, circles the target and its door guns aim and fire (DoorGuns).
 // Speed: see Tune.
+// Called helis (HeliCalled: the Air Raider's call weapons, airstrike.cpp): a guard heli holds cfg.heliHeight
+// over its call's marker (its post) and fights what comes within heliRange of it, never following nor
+// landing; a follow heli flies like any NPC heli. After its sortie each flies off away from the player
+// (StartLeave), fighting no more, and is deleted (HeliReap) kGoneFar from them or kLeaveMaxMs after.
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
@@ -279,6 +283,12 @@ struct Heli {
     float params[4];
     ULONGLONG circleUntil;// 409: circling for its turret until then (see kTurretCircleMs)
     Door doors[2];        // 410: left, right
+    // A called heli (HeliCalled): which object, its post (guard), when its sortie ends (game ms), leaving
+    // since leftAt, and deleted from another object's update once reap is set (HeliReap).
+    const void* ctrl;
+    bool called,guard,leaving,reap;
+    float post[3];
+    ULONGLONG leaveAt,leftAt;
 };
 Heli helis[16]{};
 // The player's last move: they count as standing still once within 3 m of `still` since `stillAt`
@@ -998,6 +1008,19 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
 
 bool doorOk=false;   // the 410 layout DoorGun writes matched (CheckHeliProfile)
 
+// A called heli leaving: kLeaveOut away from the player (or on along its heading), kLeaveClimb higher.
+constexpr float kLeaveOut=3000.0f,kLeaveClimb=60.0f,kGoneFar=1000.0f;
+constexpr ULONGLONG kLeaveMaxMs=90000;
+void StartLeave(Heli& h,const float* pos,const float* fwd) noexcept {
+    float d[3]={pos[0]-player.pos[0],0.0f,pos[2]-player.pos[2]};
+    float l=std::sqrt(Dot2(d,d));
+    if(!player.at || l<1.0f){d[0]=fwd[0];d[2]=fwd[2];l=std::sqrt(Dot2(d,d));}
+    if(l<1e-3f){d[0]=0.0f;d[2]=1.0f;l=1.0f;}
+    h.hold[0]=pos[0]+d[0]/l*kLeaveOut;h.hold[1]=pos[1]+kLeaveClimb;h.hold[2]=pos[2]+d[2]/l*kLeaveOut;
+    h.leaving=true;h.leftAt=GameMs();h.target=nullptr;h.extend=false;
+    Log("HELI v=%p sortie over: leaving towards (%.0f,%.0f)",h.vehicle,h.hold[0],h.hold[2]);
+}
+
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -1006,7 +1029,8 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const float heading=std::atan2(fwd[0],fwd[2]);
     std::memcpy(h.pos,pos,12);
     if(!h.started) {
-        h.started=true;h.last=now;std::memcpy(h.prev,pos,12);std::memcpy(h.hold,pos,12);
+        h.started=true;h.last=now;std::memcpy(h.prev,pos,12);
+        if(!h.guard)std::memcpy(h.hold,pos,12);   // a guard heli's is its post (HeliCalled)
         const float rotor=At<float>(v,kRotor);
         h.hover=std::isfinite(rotor) && rotor>0.2f && rotor<1.0f ? rotor : 0.5f;
         h.prevHeading=heading;h.yawSign=1;
@@ -1048,7 +1072,9 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const ULONGLONG ms=GetTickCount64();
     const Flight flight=FlightOf(h,ms);
     const int wing=flight.wing;
-    const bool follow=!playerAboard && player.at && ms-player.at<10000;
+    if(h.called && !h.leaving && !playerAboard && GameMs()>=h.leaveAt)StartLeave(h,pos,fwd);
+    if(h.leaving && !playerAboard && (Dist2(pos,player.pos)>kGoneFar || GameMs()-h.leftAt>kLeaveMaxMs))h.reap=true;
+    const bool follow=!playerAboard && player.at && ms-player.at<10000 && !h.guard && !h.leaving;
     if(follow)TrackPlayerStill();
     if(follow && player.at!=h.playerAt) {
         const float pdt=h.playerAt ? static_cast<float>(player.at-h.playerAt)*0.001f : 0.0f;
@@ -1056,11 +1082,11 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         h.playerAt=player.at;
     }
     if(!follow){h.pVel[0]=h.pVel[1]=h.pVel[2]=0.0f;h.playerAt=0;}
-    const float* anchor=follow ? player.pos : pos;
+    const float* anchor=follow ? player.pos : h.guard ? h.post : pos;
     float aim[3]{};
     // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
     const float pick=follow && cfg.heliCombatRange+GunRange(v)<cfg.heliRange ? cfg.heliCombatRange+GunRange(v) : cfg.heliRange;
-    const bool engage=PickTarget(h,v,anchor,pos,pick,aim);
+    const bool engage=!h.leaving && PickTarget(h,v,anchor,pos,pick,aim);
     if(engage) {
         TrackVelocity(h.tgtPrev,h.tgtVel,aim,dt,40.0f,h.tracked!=h.target);
         h.tracked=h.target;
@@ -1165,7 +1191,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         height=pos[1]+(above ? kUnstick : -kUnstick);
     }
     const Avoidance avoid=Avoid(pos,h.vel,want,&height,land,h.stopDecel);
-    if(follow || engage)std::memcpy(h.hold,pos,12);
+    if((follow || engage) && !h.guard && !h.leaving)std::memcpy(h.hold,pos,12);
     // Aim only once the nose has come round: with the target behind, the dip stick flew it away.
     const float bearingOff=engage ? Wrap(std::atan2(lead[0]-pos[0],lead[2]-pos[2])-heading) : kPi;
     const bool aiming=engage && !h.extend && !circling && dist<aimRange && std::fabs(bearingOff)<kAimOff;
@@ -1321,6 +1347,48 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     bool playerAboard=false;
     for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || SeatRider(SeatAt(vehicle,i))==Rider::player;
     Fly(*h,vehicle,playerAboard);
+}
+
+void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD sortieSec) noexcept {
+    __try {
+        HeliCrewed(vehicle);
+        Heli* const h=Find(vehicle);
+        if(!h)return;
+        h->ctrl=At<const void*>(vehicle,kSelfCtrl);h->called=true;h->guard=guard;
+        std::memcpy(h->post,post,12);
+        h->hold[0]=post[0];h->hold[1]=post[1]+cfg.heliHeight;h->hold[2]=post[2];
+        h->leaveAt=GameMs()+static_cast<ULONGLONG>(sortieSec)*1000;
+        // Spawned in the air with the rotor still: it starts at the rotor Fly assumes for hover, so it
+        // does not drop while the rotor spins up.
+        const float rotor=At<float>(vehicle,kRotor);
+        if(!(std::isfinite(rotor) && rotor>0.2f))Put<float>(vehicle,kRotor,0.5f);
+        Log("HELI v=%p called: %s at (%.0f,%.0f,%.0f) for %lus",vehicle,guard ? "guard" : "follow",post[0],post[1],post[2],sortieSec);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+void HeliReap(const void* self) noexcept {
+    using DeleteFn=void(*)(void*);
+    using KickFn=void(*)(void*,void*);
+    constexpr unsigned kDelete=0x118A1B0;
+    constexpr std::size_t kObjFlags=0x18;
+    constexpr unsigned char kObjDeleted=4;
+    __try {
+        for(auto& h:helis) {
+            if(!h.vehicle || !h.reap || h.vehicle==self)continue;
+            auto v=static_cast<unsigned char*>(const_cast<void*>(h.vehicle));
+            const void* const ctrl=h.ctrl;
+            h=Heli{};
+            // Only the same object, alive: one shot down or gone meanwhile is the game's to clean up.
+            if(!Readable(v,kSeats+8) || v[kDead] || (v[kObjFlags]&kObjDeleted) || At<const void*>(v,kSelfCtrl)!=ctrl ||
+               !IsHelicopter(v))continue;
+            bool aboard=false;
+            for(unsigned i=0;i<SeatCount(v);++i)aboard=aboard || SeatRider(SeatAt(v,i))==Rider::player;
+            if(aboard)continue;   // the player took it: theirs now (the entry is gone, it flies as any NPC heli)
+            if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
+            reinterpret_cast<DeleteFn>(image+kDelete)(v);
+            Log("HELI v=%p gone (deleted)",v);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 namespace {

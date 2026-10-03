@@ -231,15 +231,18 @@ constexpr std::int32_t kTeamFriend=2;
 // The bodies (JetBody, Kind::body) a jet launched at run time flies in: the strike and fighter jets (the
 // BOMBER501 model, with elevons), the strike jets that take over a BOMBER401 or BOMBER501_2 in that
 // bomber's own model, and the other roles' (tools/make_jets.py writes those launched at run time: the
-// drone; the others only a mission places).
-constexpr int kBodyCount=8;
+// drone; the others only a mission places). After them the helis the Air Raider calls (HeliLaunch,
+// kFirstHeli on, in HeliBody's order): stock helis whose vehicle_setup is renamed mission_setup.
+constexpr int kBodyCount=10,kFirstHeli=8;
 const wchar_t* const kJetSgo[kBodyCount]={L"app:/object/edf6vc_jet_strike.sgo",L"app:/object/edf6vc_jet_fighter.sgo",
                                           L"app:/object/edf6vc_bomber401.sgo",L"app:/object/edf6vc_bomber501_2.sgo",
                                           L"app:/object/edf6vc_jet_interceptor.sgo",L"app:/object/edf6vc_jet_multirole.sgo",
-                                          L"app:/object/edf6vc_jet_carrier.sgo",L"app:/object/edf6vc_jet_drone.sgo"};
+                                          L"app:/object/edf6vc_jet_carrier.sgo",L"app:/object/edf6vc_jet_drone.sgo",
+                                          L"app:/object/edf6vc_heli_410.sgo",L"app:/object/edf6vc_heli_506.sgo"};
 const wchar_t* const kJetFile[kBodyCount]={L"EDF6VC_JET_STRIKE.SGO",L"EDF6VC_JET_FIGHTER.SGO",L"EDF6VC_BOMBER401.SGO",
                                            L"EDF6VC_BOMBER501_2.SGO",L"EDF6VC_JET_INTERCEPTOR.SGO",L"EDF6VC_JET_MULTIROLE.SGO",
-                                           L"EDF6VC_JET_CARRIER.SGO",L"EDF6VC_JET_DRONE.SGO"};
+                                           L"EDF6VC_JET_CARRIER.SGO",L"EDF6VC_JET_DRONE.SGO",L"EDF6VC_HELI_410.SGO",
+                                           L"EDF6VC_HELI_506.SGO"};
 // A bomber's model -> its body: the mesh bone that names it (bone records as kInstBones says).
 struct BomberModel { const wchar_t* bone; JetBody body; };
 const BomberModel kBomberModels[]={{L"bomber501_2",JetBody::bomber501_2},{L"bomber401",JetBody::bomber401}};
@@ -282,6 +285,7 @@ struct Jet {
     bool reap;               // withdrawn: delete from another object's update (JetReap)
     const char* why;         // why it withdrew
     bool launched;           // made by JetLaunch: anchor is its strike point
+    bool escort;             // ...or the player, while seen (a call's follow variant; anchor: where they were last)
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
     const unsigned char* model;   // the bone array its elevons were found in (null: not looked yet)
     unsigned char* elevon[2];     // their bone records, null without (a model without elevons)
@@ -1117,18 +1121,18 @@ void PreloadJets() noexcept {
             preloaded[k]=mgr && !broken[k] && JetFileThere(k);
             if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kJetSgo[k],2,-1);
         }
-        Log("JET preload strike=%d fighter=%d bomber401=%d bomber501_2=%d interceptor=%d multirole=%d carrier=%d drone=%d",
-            preloaded[0],preloaded[1],preloaded[2],preloaded[3],preloaded[4],preloaded[5],preloaded[6],preloaded[7]);
+        Log("JET preload strike=%d fighter=%d bomber401=%d bomber501_2=%d interceptor=%d multirole=%d carrier=%d drone=%d heli410=%d heli506=%d",
+            preloaded[0],preloaded[1],preloaded[2],preloaded[3],preloaded[4],preloaded[5],preloaded[6],preloaded[7],preloaded[8],preloaded[9]);
     } __except(EXCEPTION_EXECUTE_HANDLER){for(auto& p:preloaded)p=false;}
 }
 
 namespace {
-// Raises `p` to at least kLaunchClear over the ground (terrain or buildings) under it: the jet has a
-// rigid body, unlike the rail planes whose start points it takes.
-void ClearGround(float* p) noexcept {
+// Raises `p` to at least `clear` over the ground (terrain or buildings) under it: the jet has a rigid
+// body, unlike the rail planes whose start points it takes.
+void ClearGround(float* p,float clear=kLaunchClear) noexcept {
     const float top[3]={p[0],p[1]+600.0f,p[2]},bottom[3]={p[0],p[1]-1500.0f,p[2]};
     float hit[3];
-    if(MapRay(top,bottom,hit)>=0.0f && p[1]<hit[1]+kLaunchClear)p[1]=hit[1]+kLaunchClear;
+    if(MapRay(top,bottom,hit)>=0.0f && p[1]<hit[1]+clear)p[1]=hit[1]+clear;
 }
 
 // CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not
@@ -1185,8 +1189,10 @@ unsigned char* SpawnJet(int body,const float* m) noexcept {
     FixBodyPart(v);
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
     reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
-    if(IsJetVehicle(v,nullptr))return v;
-    Log("JET launch: %p is no jet (mark %.0f): deleted",v,At<float>(v,kSpeedGain));
+    // A jet body must be a jet, a heli body a heli that is none.
+    const bool jet=body<kFirstHeli;
+    if(IsJetVehicle(v,nullptr)==jet && (jet || IsHelicopter(v)))return v;
+    Log("JET launch: %p (%ls) is no %s (mark %.0f): deleted",v,kJetFile[body],jet ? "jet" : "heli",At<float>(v,kSpeedGain));
     reinterpret_cast<DeleteFn>(image+kDelete)(v);
     return nullptr;
 }
@@ -1288,11 +1294,35 @@ void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexce
 
 static_assert(static_cast<int>(JetRole::carrier)==static_cast<int>(Role::carrier),"JetRole follows Role");
 
-bool JetLaunch(JetRole as,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept {
+bool JetLaunch(JetRole as,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
+               bool escort) noexcept {
     Role role=static_cast<Role>(static_cast<int>(as));
     if(!preloaded[kKinds[static_cast<int>(role)].body])role=Role::fighter;
-    __try { return Launch(role,from,heading,target,fuelSec,kKinds[static_cast<int>(role)].cruise,source)!=nullptr; }
+    __try {
+        Jet* const j=Launch(role,from,heading,target,fuelSec,kKinds[static_cast<int>(role)].cruise,source);
+        if(j)j->escort=escort;
+        return j!=nullptr;
+    }
     __except(EXCEPTION_EXECUTE_HANDLER){Log("JET launch: fault");return false;}
+}
+
+// The heli starts kHeliClear over the ground: high enough that it does not hit it while its rotor spins
+// up (heli.cpp gives it the hover rotor at once), low enough that it is soon at its working height.
+constexpr float kHeliClear=40.0f;
+
+unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {
+    const int b=kFirstHeli+static_cast<int>(as);
+    if(!spawnOk || !preloaded[b] || !At<void*>(image,kObjectMgr))return nullptr;
+    __try {
+        float fwd[3]={heading[0],0.0f,heading[2]};
+        if(!Normalize(fwd)){fwd[0]=0;fwd[2]=1;}
+        float start[3]={from[0],from[1],from[2]};
+        ClearGround(start,kHeliClear);
+        alignas(16) const float m[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, start[0],start[1],start[2],1};
+        unsigned char* const v=SpawnJet(b,m);
+        if(v)Log("HELI v=%p launched: %ls at (%.0f,%.0f,%.0f)",v,kJetFile[b],start[0],start[1],start[2]);
+        return v;
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("HELI launch: fault");return nullptr;}
 }
 
 JetBody BomberBody(const unsigned char* inst) noexcept {
@@ -1447,6 +1477,7 @@ void JetFrame(unsigned char* v) noexcept {
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
     Jet* const mother=MotherOf(*j,ms);
+    if(j->escort && follow)std::memcpy(j->anchor,player.pos,12);
     const float* anchor=mother ? reinterpret_cast<const float*>(mother->vehicle+kPosition) : follow && !j->launched ? player.pos : j->anchor;
     const float* viewer=follow ? player.pos : anchor;
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
