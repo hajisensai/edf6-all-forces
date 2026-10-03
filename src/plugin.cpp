@@ -561,7 +561,8 @@ bool IdentifyImage(HMODULE handle) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){image=nullptr;return false;}
 }
 
-// The flak's code, unpatched by anyone else.
+// The flak's code, unpatched by anyone else (its input slot may hold another plugin's hook that ends
+// in it: EDF6VehicleCrew chains the same slots on the first mission frame).
 bool CheckProfile() noexcept {
     __try {
         const unsigned char input[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x0F,0xB6,0xDA};
@@ -571,8 +572,7 @@ bool CheckProfile() noexcept {
         const unsigned char lockType[]={0x89,0x86,0xB0,0x06,0x00,0x00};          // mov [rsi+6B0],eax
         const bool ok=Matches(kFlakInput,input,sizeof(input)) && Matches(0x6214D8,stick,sizeof(stick))
             && Matches(0x6214E7,turn,sizeof(turn)) && Matches(0x621872,apply,sizeof(apply))
-            && Matches(0x68D124,lockType,sizeof(lockType))
-            && reinterpret_cast<void**>(image+kFlakVtable)[kInputSlot]==image+kFlakInput;
+            && Matches(0x68D124,lockType,sizeof(lockType));
         return ok;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -701,9 +701,11 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // leaves only that one stock.
     bool hooked=false;
     if(CheckProfile()) {
-        originalInput=reinterpret_cast<InputFn>(image+kFlakInput);
         auto slot=reinterpret_cast<void**>(image+kFlakVtable)+kInputSlot;
-        hooked=PatchVtableSlot(slot,reinterpret_cast<void*>(originalInput),reinterpret_cast<void*>(&HookInput));
+        void* const current=*slot;
+        if(current!=image+kFlakInput)Log("HOOK flak input: chaining onto %p (another plugin)",current);
+        originalInput=reinterpret_cast<InputFn>(current);
+        hooked=current && PatchVtableSlot(slot,current,reinterpret_cast<void*>(&HookInput));
         const bool gate=PatchFireGate();
         Log("HOOK flak input slot=%d fire-gate(type4 free fire)=%d",hooked,gate);
         HookGrenade();

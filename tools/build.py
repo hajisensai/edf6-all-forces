@@ -3,7 +3,8 @@ self-aiming ground-attack launcher, into dist/Mods.
 
   python tools/build.py [--out dist/Mods] [--no-text]
 
-Overrides the Kepler / Bohr call SGOs and their gun pairs. The guns get flak rounds and the
+Overrides the Kepler / Bohr call SGOs and their gun pairs, and the Keplers missions place (NPC and
+boardable) in OBJECT. The guns get flak rounds and the
 LockonType 4 marker the EDF6AutoTurret plugin aims; the calls get more durability and a faster
 turret. No weapon rows are added. The vehicles' own WEAPONTEXT rows are rewritten to show the new
 numbers, on top of the tables already in --out, so other mods' rows are kept (see describe.py).
@@ -13,6 +14,7 @@ from __future__ import annotations
 import argparse
 import copy
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -38,6 +40,14 @@ TURRET = [65.0, 0.3, 0.3]  # gun-L turret params, the DLC Kepler YF-HV's: the st
 # Each gun fires every 6 frames instead of 3 at twice the damage per round: the same damage per
 # second on paper, half the bursts on screen. The real gain is the blast and the proximity fuse.
 FIRE_SLOWDOWN = 2.0
+
+# The Keplers the missions place: NPC-crewed (_AI, _WEAK_AI) and boardable (_MISSION). The AI ones
+# mount their own AI guns (600-round bursts of 1-damage shot); all three become the modded tier-1
+# Kepler, so an NPC Kepler is the same flak vehicle the player calls. Their own mission multipliers
+# (WEAK_AI's halved damage) stay.
+FLAK_OBJECTS = ('V603_FLAK_AI.SGO', 'V603_FLAK_WEAK_AI.SGO', 'V603_FLAK_MISSION.SGO')
+AI_GUN = re.compile(r'v603_flak_gun01_([lr])_ai\.sgo', re.IGNORECASE)
+PLAYER_GUN = r'v603_flak_gun01_\1.sgo'
 
 # The DLC Kepler YF-HV keeps its high-velocity solid shot, durability and fast turret (already the
 # buffed Kepler); its guns only get the auto-aim marker.
@@ -159,6 +169,24 @@ def build_call(name: str, turret: list[float] | None, resources: list[str]) -> b
     return dsgo.write(doc)
 
 
+def build_object(name: str) -> bytes:
+    """An NPC / mission Kepler (OBJECT/V603_FLAK_*.SGO) made the modded tier-1 Kepler: the flak guns
+    in place of the AI guns, the same durability scale and fast turret as the calls."""
+    doc = load('OBJECT', name)
+    r = doc.root
+    setup = r.get('mission_setup')
+    mul = setup.items[0]
+    mul.items[0] = mul.items[0] * DURABILITY_SCALE
+    guns = setup.items[2]
+    for gun in guns.items:
+        gun.items[0] = AI_GUN.sub(PLAYER_GUN, gun.items[0])
+    guns.items[0].items[2] = py(TURRET)
+    res = r.get('resource')
+    res.items = [AI_GUN.sub(PLAYER_GUN, x) for x in res.items]
+    res.items += [x for x in GUN_AMMO['resource'] if x not in res.items]
+    return dsgo.write(doc)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default=os.path.join(os.path.dirname(__file__), '..', 'dist', 'Mods'))
@@ -173,6 +201,8 @@ def main() -> None:
             files[f'WEAPON/V603_FLAK_GUN{tier}_{side}.SGO'] = build_gun(tier, side)
     for side in SIDES:
         files[f'WEAPON/{HV_GUN.format(side=side)}'] = build_hv_gun(side)
+    for name in FLAK_OBJECTS:
+        files[f'OBJECT/{name}'] = build_object(name)
     for name in BOHR_CALLS:
         files[f'WEAPON/{name}'] = build_call(name, None, [])   # its turret is already the fast DLC one
     for side in SIDES:

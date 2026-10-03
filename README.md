@@ -26,9 +26,11 @@ It has two parts:
 | Vehicle | Change |
 |---|---|
 | KG6 Kepler, E, F, YE, YF | Flak: exploding rounds (8 m blast), proximity / time / contact fuses, 480 m range. Half the fire rate at twice the damage per round (same damage per second on paper, half the bursts on screen). Durability x2. DLC YF-HV turret speed. Air targets first. |
+| Keplers the missions place (NPC-crewed, and the boardable mission ones) | The modded KG6 Kepler: its flak guns (in place of the NPC Keplers' own 1-damage guns), durability x2 on top of the mission's own multiplier, the fast turret. |
 | KG6 Kepler YF-HV (DLC) | Auto-aim only; keeps its high-velocity solid shot, durability and turret. |
 | KG7 Bohr, Bohr B (DLC) | Auto-aim in ground mode: ground targets first, lobbed rounds aimed on their arc, stock impact fuse. Durability x2, blast 4 m -> 6 m, and the blasts now wreck buildings. |
-| Titan (all, incl. DLC side cannons) | Plugin only: both side cannons aim themselves; with no player in a gunner seat they also fire. Main cannon untouched. |
+| Titan (all, incl. DLC side cannons) | Plugin only: both side cannons aim themselves; with no player in a gunner seat they also fire, as the driver's (player or NPC). Main cannon untouched. |
+| NPC Titan (e.g. mission 64) | Optional data (`tools/titan_ai.py`): the stock NPC Titan has empty side-cannon mounts; this gives it the player Titan's two side cannons, which the plugin then aims and fires. |
 | Ranger tanks with gunner seats (Vehicle403) | Plugin only: both side machine guns, as above. Single-seat tanks (Air Raider's, Vehicle601) have no side guns. |
 
 Why: the stock Keplers deal a third to a half of the damage per second of same-level tanks and
@@ -49,10 +51,13 @@ Requires EDF6 (Steam) with [EDFModLoader](https://github.com/BlueAmulet/EDFModLo
    python tools\build.py --out "%EDF6_DIR%\Mods"
    ```
 
-   It writes the vehicles' own call and gun files under `Mods\WEAPON\` and their eight rows of
+   It writes the vehicles' own call and gun files under `Mods\WEAPON\`, the mission Keplers under
+   `Mods\OBJECT\`, and their eight rows of
    the `WEAPONTEXT.*.SGO` tables there; it reads the game's `Root.cpk` and never modifies it. Run it
    while the game is closed, and again after installing another mod that replaces `WEAPONTEXT`.
    `--no-text` leaves the text tables alone.
+3. Optional, the NPC Titan's side cannons: `python tools\titan_ai.py` writes
+   `dist\Mods\OBJECT\VEHICLE404_BIGTANK_AI.SGO`; copy it to `<EDF6>\Mods\OBJECT\`.
 
 To uninstall, delete those files and the plugin (delete the `WEAPONTEXT` files only if no other
 mod installed them; otherwise reinstall that mod's). Settings are in `EDF6AutoTurret.ini` and apply
@@ -73,8 +78,12 @@ The DLL lands in `dist\Mods\Plugins\`. CI builds it on every push.
 Built against EDF.dll with TimeDateStamp `0x678CCB46`. The plugin checks the code it patches and
 turns itself off if the game has changed.
 
-The tank gunners are checked against the game code but have not been tested in a running game yet:
-treat them as experimental, and send a `Debug=1` log if a side gun misbehaves. In co-op, a remote
+The tank gunners were tested on the Titan (NPC driver, both gunner seats empty): both side
+cannons fired at ants, 40 -> 28 rounds. The Ranger tanks' side guns have not been tested against
+live enemies yet; send a `Debug=1` log if a side gun misbehaves. The stock game leaves an empty
+gunner seat's gun silent because the gun asks the vehicle who operates it and an empty seat answers
+no one; the plugin answers with the driver (see the re-notes). The input hooks chain onto whatever
+another plugin (e.g. EDF6VehicleCrew) put in the same slot, so load order does not matter. In co-op, a remote
 player in a gunner seat may look like an empty seat to your machine, so set `GunnerAI=0` online.
 
 Online play is untested. The mod adds no weapon rows, so players without it never meet a row they

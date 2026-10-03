@@ -50,6 +50,31 @@ Game data: the Titan's side cannons are subCannon (RocketBullet01, 4 m/f, 600 f,
 403's side guns are SolidBullet01 machine guns (6 m/f, 35 f, no gravity), roll -5..160 / -160..5 deg.
 None reloads (ReloadTime -1).
 
+## Who operates a weapon (why an empty gunner seat never fired)
+
+Every weapon step asks its owner who operates the weapon: `owner = weapon+0x120` (the vehicle),
+`iface = owner+0x120` (its second base, vtables 403 `0x17D9238` / 404 `0x17D96F0`), virtual
+`+0x58` (slot 11) = `0x62D950(iface, weapon)`. It walks the seats (`iface+0x4E8` = vehicle+0x608,
+count `+0x4F8`, stride `0x340`), finds the seat whose holders (`seat+0xC8`, count `+0xD8`,
+weapon at `holder+0x10`) contain the weapon, and returns that seat's rider (`seat+0x260`, weak_ptr
+ctrl `+0x268`) as `object+0x120`, else the seat's `+0x300` object (weak_ptr ctrl `+0x308`), else null.
+
+Fire-start `0x690BB0` (and the round spawn `0x690CC0`) return without firing when the answer is
+null, or when bit 0 of `answer+8` is set: an object another machine runs online. The other askers
+(`0x690420`, `0x691240`, `0x691DC0`, `0x694730`, `0x695240`, `0x6963A0`, `0x696FD0`, `0x6B2EC0`)
+read the same bit, falling back to a global network check (`0x784210`) on null.
+
+An empty gunner seat answers null, so a pulled trigger was consumed (`weapon+0x139` -> held
+`+0x13A`) and the gun still never fired: measured over 4344 log lines, ammo `+0xBE8` stayed at 40
+(SubCannon's count; it falls by one per shot). The plugin hooks slot 11 of both interfaces: a null
+answer for any weapon becomes the answer for the driver's gun (seat 0, first holder). A local
+driver's machine fires the side guns; a remote driver's answer carries bit 0, so this machine
+leaves the shot to theirs. With the hook, the user's hand-played round logged 334 lines all
+answering 0, ammo 40 -> 28.
+
+Other gates the fire path checks, all clear on the side guns: ammo `+0xBE8 > 0`, `+0x144 == 0`,
+cooldown `+0xE0C` spent, `+0x145C` bit 0 clear, and LockonType `+0x6B0` 0 or 5 (or a lock).
+
 ## Weapon (fields filled from the SGO at `0x68D4A0`)
 
 | Field | Offset |

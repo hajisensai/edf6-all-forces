@@ -49,28 +49,12 @@ constexpr float kMuzzleReach=30.0f;         // a muzzle farther than this from t
 constexpr float kSettleFrames=6.0f;
 constexpr float kHoldCone=2.0f;             // a firing gun keeps firing until it is this many cones off
 constexpr std::size_t kWeaponFire=0x139;    // the trigger 0x62C000 sets; the weapon update reads and clears it
-// What 0x6911A0 (checked first by the fire test 0x6922A0) blocks firing on: reload countdown, a
-// hold flag and the rounds left in the magazine (+0x20C, or +0xE68 without a magazine object).
-constexpr std::size_t kWeaponReload=0xBE8,kWeaponHold=0x140,kWeaponRounds=0x20C,kWeaponMagazine=0xE68;
-// Weapon_VehicleShoot fires from its update callback (0x6B3970) through 0x690BB0, which also needs
-// +0x144 clear, the cooldown +0xE0C spent, +0x145C bit 0 clear, and the owner's interface
-// (weapon+0x120, then +0x120 in it, virtual +0x58(weapon)) to answer with bit 0 of +8 clear.
-constexpr std::size_t kWeaponBusy=0x144,kWeaponCooldown=0xE0C,kWeaponFlags=0x145C,kWeaponOwner=0x120,kOwnerUse=0x120;
-constexpr std::size_t kWeaponBurst=0x370,kWeaponEdge=0x143;
-
-// Debug: what the owner's use query answers for this weapon (-1 = no owner, -2 = null answer).
-int OwnerUse(const unsigned char* weapon) noexcept {
-    const auto owner=At<unsigned char*>(weapon,kWeaponOwner);
-    if(!owner)return -1;
-    using UseFn=const unsigned char*(__fastcall*)(void*,const void*);
-    void* use=owner+kOwnerUse;
-    const auto answer=(*reinterpret_cast<UseFn* const*>(use))[0x58/8](use,weapon);
-    return answer ? answer[8] : -2;
-}
+// Rounds left: 0x690BB0 fires only while this is above zero; it counts down per shot.
+constexpr std::size_t kWeaponAmmo=0xBE8;
 
 using InputFn=void(__fastcall*)(void*,std::uintptr_t);
 using TriggerFn=void(__fastcall*)(void*);
-InputFn original403=nullptr,original404=nullptr;
+InputFn next403=nullptr,next404=nullptr;
 
 // Weapon user: the vehicle's interface at +0x120 answers who operates one of its weapons (0x62D950,
 // slot 11 of that interface's vtable): the rider of the seat holding it, else the seat's +0x300
@@ -82,7 +66,7 @@ InputFn original403=nullptr,original404=nullptr;
 constexpr unsigned kUserIface403Vtable=0x17D9238,kUserIface404Vtable=0x17D96F0,kWeaponUser=0x62D950;
 constexpr std::size_t kUserIface=0x120,kUserSlot=0x58/8;
 using UserFn=const void*(__fastcall*)(void*,const void*);
-UserFn originalUser=nullptr;
+UserFn nextUser[2]{};   // 403, 404
 
 const void* DriverWeapon(const unsigned char* vehicle) noexcept {
     const auto seat=At<const unsigned char*>(vehicle,kSeats);
@@ -91,11 +75,11 @@ const void* DriverWeapon(const unsigned char* vehicle) noexcept {
     return holder ? At<const void*>(holder,kHolderWeapon) : nullptr;
 }
 
-const void* __fastcall WeaponUser(void* iface,const void* weapon) {
-    const auto user=originalUser(iface,weapon);
+template<int I> const void* __fastcall WeaponUser(void* iface,const void* weapon) {
+    const auto user=nextUser[I](iface,weapon);
     if(user || !cfg.enabled || !cfg.gunnerAi)return user;
     const auto driverWeapon=DriverWeapon(static_cast<unsigned char*>(iface)-kUserIface);
-    return driverWeapon && driverWeapon!=weapon ? originalUser(iface,driverWeapon) : nullptr;
+    return driverWeapon && driverWeapon!=weapon ? nextUser[I](iface,driverWeapon) : nullptr;
 }
 
 enum class Crew { none, ai, player };
@@ -338,13 +322,10 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down) noexcept 
     track.firing=fire;
     if(cfg.debug && now-track.loggedAt>500) {
         track.loggedAt=now;
-        Log("GUNNER v=%p seat=%u %s t=%p dist=%.0f flight=%.0ff barrel=(%.3f,%.3f) want=(%.3f,%.3f) axis=(%.3f,%.3f)->(%.3f,%.3f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d pulls=%u stale=%u w=%p vt=+0x%llX ammo=%d hold=%d busy=%d cool=%.3f flags=%d owner=%d lockon=%d burst=%d edge=%d",
+        Log("GUNNER v=%p seat=%u %s t=%p dist=%.0f flight=%.0ff barrel=(%.3f,%.3f) want=(%.3f,%.3f) axis=(%.3f,%.3f)->(%.3f,%.3f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d pulls=%u stale=%u ammo=%d",
             vehicle,s,crew==Crew::player?"player":"ai",target,distance,time,aim.barrel[0],aim.barrel[1],want[0],want[1],
             aim.angle[0],aim.angle[1],axis[0],axis[1],aim.sign[0],aim.sign[1],track.k[0],track.k[1],in[0],in[1],fire,track.pulls,track.stale,
-            gun.weapon,static_cast<unsigned long long>(At<const unsigned char*>(gun.weapon,0)-image),At<std::int32_t>(gun.weapon,kWeaponReload),
-            gun.weapon[kWeaponHold],At<std::int32_t>(gun.weapon,kWeaponBusy),At<float>(gun.weapon,kWeaponCooldown),
-            At<std::int32_t>(gun.weapon,kWeaponFlags),OwnerUse(gun.weapon),At<std::int32_t>(gun.weapon,kLockonType),
-            At<std::int32_t>(gun.weapon,kWeaponBurst),gun.weapon[kWeaponEdge]);
+            At<std::int32_t>(gun.weapon,kWeaponAmmo));
         track.pulls=0;track.stale=0;
     }
 }
@@ -391,8 +372,8 @@ void Run(void* vehicle) noexcept {
 
 // The stock input runs first in both: it zeroes or fills every seat's turn input and handles the
 // riders' own triggers; the gunners only overwrite seats 1 and 2 after it.
-void __fastcall Hook403(void* vehicle,std::uintptr_t hasInput) { original403(vehicle,hasInput);Run(vehicle); }
-void __fastcall Hook404(void* vehicle,std::uintptr_t hasInput) { original404(vehicle,hasInput);Run(vehicle); }
+void __fastcall Hook403(void* vehicle,std::uintptr_t hasInput) { next403(vehicle,hasInput);Run(vehicle); }
+void __fastcall Hook404(void* vehicle,std::uintptr_t hasInput) { next404(vehicle,hasInput);Run(vehicle); }
 
 struct Signature { std::size_t rva; unsigned char bytes[27]; std::size_t size; };
 
@@ -442,23 +423,29 @@ const Signature kSignatures[]={
 bool CheckGunnerProfile() noexcept {
     __try {
         for(const auto& s:kSignatures)if(!Matches(s.rva,s.bytes,s.size))return false;
-        return reinterpret_cast<void**>(image+kTank403Vtable)[kInputSlot]==image+kTank403Input
-            && reinterpret_cast<void**>(image+kTank404Vtable)[kInputSlot]==image+kTank404Input
-            && reinterpret_cast<void**>(image+kUserIface403Vtable)[kUserSlot]==image+kWeaponUser
-            && reinterpret_cast<void**>(image+kUserIface404Vtable)[kUserSlot]==image+kWeaponUser;
+        return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// Hooks one slot on top of whatever it holds: the stock function (checked by the signatures above),
+// or another plugin's hook that ends in it (EDF6VehicleCrew chains the same input slots on the first
+// mission frame), so the load order does not matter. `next` is what the hook calls through.
+template<class Fn> bool Chain(unsigned vtable,std::size_t index,unsigned stock,Fn& next,Fn hook,const char* name) noexcept {
+    const auto slot=reinterpret_cast<void**>(image+vtable)+index;
+    void* const current=*slot;
+    if(!current)return false;
+    if(current!=image+stock)Log("HOOK gunners %s: chaining onto %p (another plugin)",name,current);
+    next=reinterpret_cast<Fn>(current);
+    return PatchVtableSlot(slot,current,reinterpret_cast<void*>(hook));
 }
 }  // namespace
 
 bool HookGunners() noexcept {
     if(!image || !CheckGunnerProfile()){Log("HOOK gunners: unexpected layout, tank gunners off");return false;}
-    original403=reinterpret_cast<InputFn>(image+kTank403Input);
-    original404=reinterpret_cast<InputFn>(image+kTank404Input);
-    const bool tank=PatchVtableSlot(reinterpret_cast<void**>(image+kTank403Vtable)+kInputSlot,image+kTank403Input,reinterpret_cast<void*>(&Hook403));
-    const bool titan=PatchVtableSlot(reinterpret_cast<void**>(image+kTank404Vtable)+kInputSlot,image+kTank404Input,reinterpret_cast<void*>(&Hook404));
-    originalUser=reinterpret_cast<UserFn>(image+kWeaponUser);
-    const bool user=PatchVtableSlot(reinterpret_cast<void**>(image+kUserIface403Vtable)+kUserSlot,image+kWeaponUser,reinterpret_cast<void*>(&WeaponUser))
-        && PatchVtableSlot(reinterpret_cast<void**>(image+kUserIface404Vtable)+kUserSlot,image+kWeaponUser,reinterpret_cast<void*>(&WeaponUser));
+    const bool tank=Chain(kTank403Vtable,kInputSlot,kTank403Input,next403,&Hook403,"403 input");
+    const bool titan=Chain(kTank404Vtable,kInputSlot,kTank404Input,next404,&Hook404,"404 input");
+    const bool user=Chain(kUserIface403Vtable,kUserSlot,kWeaponUser,nextUser[0],&WeaponUser<0>,"403 weapon user")
+        && Chain(kUserIface404Vtable,kUserSlot,kWeaponUser,nextUser[1],&WeaponUser<1>,"404 weapon user");
     Log("HOOK gunners tank403=%d titan404=%d user=%d",tank,titan,user);
     return tank || titan;
 }
