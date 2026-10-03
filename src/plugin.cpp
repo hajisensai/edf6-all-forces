@@ -154,17 +154,20 @@ void Log(const char* format,...) noexcept {
     // One handle kept open, appended to (each line one WriteFile: whole lines from any thread, and in the
     // file even if the game dies next). Opening and closing the file per line, on the game thread, with
     // the virus scanner looking at each close, was the hitch when a mission starts and logs hundreds of lines.
-    static HANDLE file=INVALID_HANDLE_VALUE;
-    if(file==INVALID_HANDLE_VALUE) {
-        file=CreateFileW(logPath,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_ALWAYS,
-                         FILE_ATTRIBUTE_NORMAL,nullptr);
-        if(file==INVALID_HANDLE_VALUE)return;
+    // The first lines may come from two threads at once: one handle is published, a second one opened in the
+    // race is closed again. No FILE_SHARE_DELETE: a log deleted while the game runs would take the rest unseen.
+    static HANDLE file=nullptr;
+    HANDLE h=file;
+    if(!h) {
+        h=CreateFileW(logPath,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(h==INVALID_HANDLE_VALUE)return;
+        if(HANDLE was=InterlockedCompareExchangePointer(&file,h,nullptr)){CloseHandle(h);h=was;}
     }
     SYSTEMTIME t{};GetLocalTime(&t);
     char line[1100];
     const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
     DWORD wrote=0;
-    if(n>0)WriteFile(file,line,static_cast<DWORD>(n),&wrote,nullptr);
+    if(n>0)WriteFile(h,line,static_cast<DWORD>(n),&wrote,nullptr);
 }
 
 void ReloadConfigIfChanged() noexcept {

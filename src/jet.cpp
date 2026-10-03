@@ -338,6 +338,7 @@ struct Jet {
     ULONGLONG bombClear;     // game ms until which the owner's rounds still pass its flight (0: bay open)
     float groundY;           // the surface under it when a ray last found one (groundSeen): off the map's
     bool groundSeen;         // terrain no ray finds any, and that is where it is held over (Guard, HoldOffGround)
+    ULONGLONG floorLogAt;    // when HoldOffGround last logged it (once a second)
     float top;               // m/s it never goes past: its kind's, or a faster bomber's speed
     float prevPos[3];        // where the body was at prevAt (Sense)
     ULONGLONG prevAt,blockedFor;
@@ -441,9 +442,11 @@ void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept {
 // kNoGround with none seen. Under the ground a ray down sees nothing, so a jet that went through it was once
 // taken for one over a void, Guard let it be, and it flew on under the map (2026-10-03: a fighter 5 s down to
 // -109, drones to -310); a ray from kUnderProbe over it finds the surface then.
-constexpr float kNoGround=-1e9f,kUnderProbe=600.0f;
+constexpr float kNoGround=-1e9f,kUnderProbe=600.0f,kGroundProbe=3000.0f;
 float Clearance(const float* p) noexcept {
-    const float down[3]={p[0],p[1]-400.0f,p[2]};
+    // Down to kGroundProbe: a jet over a valley deeper than a short ray reaches must still see its floor, so
+    // that kNoGround means no terrain under it at all (off the map's edge), the only case groundY is for.
+    const float down[3]={p[0],p[1]-kGroundProbe,p[2]};
     float hit[3];
     if(MapRay(p,down,hit)>=0.0f)return p[1]-hit[1];
     const float top[3]={p[0],p[1]+kUnderProbe,p[2]};
@@ -820,27 +823,35 @@ void Guard(const Jet& j,const float* pos,float* want) noexcept {
 
 // The ground as a hard floor. The plugin sets the body's velocity, and at 150-200 m/s (2.5-3.5 m a frame) a dive
 // went through the terrain and on under it (2026-10-04: a fighter inverted at 120 m/s to -460, doll drones half
-// under the ground over their targets); under it rays down see nothing. So after the frame's steering: where
-// the next kFloorSweep frames of its track (dropped by kFloorGap) meet the ground, or below the surface last
-// seen under it, its climb is raised to keep its root kFloorGap over it, at most kFloorClimb (a jet already
-// under the ground comes up at that). `clear` is Clearance(pos) (kNoGround: none found).
+// under the ground over their targets). So after the frame's steering:
+//  - over the ground, its descent is cut to stop kFloorGap over the floor: the surface under it, or where the
+//    next kFloorSweep frames of its track meet the ground. Only the descent: it is not lifted (a carrier or a
+//    jet standing on the ground stays put; terrain rising ahead is Guard's);
+//  - under the ground (Clearance found the surface above it: clear < 0; or no ground under it at all and
+//    below the surface last seen under it, off the map's edge) it climbs at kFloorClimb at least.
+// `clear` is Clearance(pos) (kNoGround: none found).
 constexpr float kFloorGap=1.0f,kFloorClimb=80.0f,kFloorSweep=3.0f;
-void HoldOffGround(Jet& j,const float* pos,float clear,float dt) noexcept {
+void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept {
     if(clear!=kNoGround){j.groundY=pos[1]-clear;j.groundSeen=true;}
     if(!j.groundSeen)return;
-    float floorY=j.groundY;
-    if(j.vel[1]<0.0f || clear<kFloorGap*4.0f) {
+    const bool under=clear!=kNoGround ? clear<0.0f : pos[1]<j.groundY;
+    float floorY=j.groundY,need=kFloorClimb;
+    if(!under) {
+        if(j.vel[1]>=0.0f)return;
         const float end[3]={pos[0]+j.vel[0]*dt*kFloorSweep,pos[1]+j.vel[1]*dt*kFloorSweep-kFloorGap,pos[2]+j.vel[2]*dt*kFloorSweep};
         float hit[3];
-        if(MapRay(pos,end,hit)>=0.0f && hit[1]>floorY)floorY=hit[1];
+        if(MapRay(pos,end,hit)>=0.0f && hit[1]>floorY && hit[1]<pos[1])floorY=hit[1];
+        need=(floorY+kFloorGap-pos[1])/dt;
+        if(need>0.0f)need=0.0f;
     }
-    const float short_=floorY+kFloorGap-(pos[1]+j.vel[1]*dt);
-    if(short_<=0.0f)return;
+    if(j.vel[1]>=need)return;
     const float was=j.vel[1];
-    j.vel[1]+=short_/dt;
-    if(j.vel[1]>kFloorClimb)j.vel[1]=was>kFloorClimb ? was : kFloorClimb;
-    if(cfg.debug && (pos[1]<floorY-kFloorGap || was<-20.0f))
-        Log("JET v=%p held off the ground: y=%.0f floor=%.0f vy %.1f -> %.1f",j.vehicle,pos[1],floorY,was,j.vel[1]);
+    j.vel[1]=need;
+    if(cfg.debug && ms-j.floorLogAt>=1000) {
+        j.floorLogAt=ms;
+        Log("JET v=%p held off the ground%s: y=%.0f floor=%.0f vy %.1f -> %.1f",j.vehicle,under ? " (under it)" : "",
+            pos[1],floorY,was,j.vel[1]);
+    }
 }
 
 // A rotor craft (Hovers): no wing, so it goes where it wants at any speed, hovering still over its station.
@@ -1856,7 +1867,7 @@ void JetFrame(unsigned char* v) noexcept {
         Attitude(*j,kind,v,dir,up);
         Elevons(*j,kind,v,dt);
     }
-    HoldOffGround(*j,pos,clear,dt);
+    HoldOffGround(*j,pos,clear,dt,ms);
     j->ready=true;
     BayFrame(*j,pos,nose);
     Fire(*j,v,pos,nose,lead,gunsOk,missileOk,arms,ms);

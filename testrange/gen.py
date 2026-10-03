@@ -524,8 +524,9 @@ def script(plan: Plan, lay: Layout) -> str:
     ]
     # The NPC vehicles come out SPAWN_BATCH at a time, SPAWN_GAP s apart: 37 of them created in the first frame
     # (each a model, a body and a plugin entry set up at once) were the hitch the mission started with.
+    # The player's own vehicles first, all at once: only the NPC ones wait.
     friends = 0
-    for sgo, npc, point in placed:
+    for sgo, npc, point in sorted(placed, key=lambda e: bool(e[1])):
         path = _q('app:/object/' + sgo + '.sgo')
         if npc:   # last argument: does it join the player's squad (no: the plugin flies/drives it)
             if friends and friends % SPAWN_BATCH == 0:
