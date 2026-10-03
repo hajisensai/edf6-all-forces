@@ -336,6 +336,8 @@ struct Jet {
     const void* hold;        // the stock bomber kept (hidden) while the bay is there: its call's marker stays up
     const void* bombOwner;   // whose bombs the bay drops (the caller: the bomb rounds' owner)
     ULONGLONG bombClear;     // game ms until which the owner's rounds still pass its flight (0: bay open)
+    float groundY;           // the surface under it when a ray last found one (groundSeen): off the map's
+    bool groundSeen;         // terrain no ray finds any, and that is where it is held over (Guard, HoldOffGround)
     float top;               // m/s it never goes past: its kind's, or a faster bomber's speed
     float prevPos[3];        // where the body was at prevAt (Sense)
     ULONGLONG prevAt,blockedFor;
@@ -796,7 +798,10 @@ void Guard(const Jet& j,const float* pos,float* want) noexcept {
     const float ahead[3]={pos[0]+j.vel[0]*kLookAhead,pos[1]+j.vel[1]*kLookAhead,pos[2]+j.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
     const float here=Clearance(pos),there=Clearance(probe);
-    const float lowest=there!=kNoGround ? probe[1]-there : -1e9f;
+    // Neither ray finding ground (past the map's terrain) left it no floor at all: an interceptor rolled over
+    // there and flew on to -1100 (2026-10-04). It keeps the surface it last saw under it then.
+    const float seen=j.groundSeen ? j.groundY : -1e9f;
+    const float lowest=there!=kNoGround ? probe[1]-there : seen;
     const float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
     float bottom=pos[1];
     if(s>1.0f && j.vel[1]<0.0f) {
@@ -811,6 +816,31 @@ void Guard(const Jet& j,const float* pos,float* want) noexcept {
     const float top=Ceiling()-kCeilingGap;
     const float rising=pos[1]+(j.vel[1]>0.0f ? j.vel[1]*kLookAhead : 0.0f);
     if(rising>top && want[1]>-0.15f){want[1]=-0.15f;Normalize(want);}
+}
+
+// The ground as a hard floor. The plugin sets the body's velocity, and at 150-200 m/s (2.5-3.5 m a frame) a dive
+// went through the terrain and on under it (2026-10-04: a fighter inverted at 120 m/s to -460, doll drones half
+// under the ground over their targets); under it rays down see nothing. So after the frame's steering: where
+// the next kFloorSweep frames of its track (dropped by kFloorGap) meet the ground, or below the surface last
+// seen under it, its climb is raised to keep its root kFloorGap over it, at most kFloorClimb (a jet already
+// under the ground comes up at that). `clear` is Clearance(pos) (kNoGround: none found).
+constexpr float kFloorGap=1.0f,kFloorClimb=80.0f,kFloorSweep=3.0f;
+void HoldOffGround(Jet& j,const float* pos,float clear,float dt) noexcept {
+    if(clear!=kNoGround){j.groundY=pos[1]-clear;j.groundSeen=true;}
+    if(!j.groundSeen)return;
+    float floorY=j.groundY;
+    if(j.vel[1]<0.0f || clear<kFloorGap*4.0f) {
+        const float end[3]={pos[0]+j.vel[0]*dt*kFloorSweep,pos[1]+j.vel[1]*dt*kFloorSweep-kFloorGap,pos[2]+j.vel[2]*dt*kFloorSweep};
+        float hit[3];
+        if(MapRay(pos,end,hit)>=0.0f && hit[1]>floorY)floorY=hit[1];
+    }
+    const float short_=floorY+kFloorGap-(pos[1]+j.vel[1]*dt);
+    if(short_<=0.0f)return;
+    const float was=j.vel[1];
+    j.vel[1]+=short_/dt;
+    if(j.vel[1]>kFloorClimb)j.vel[1]=was>kFloorClimb ? was : kFloorClimb;
+    if(cfg.debug && (pos[1]<floorY-kFloorGap || was<-20.0f))
+        Log("JET v=%p held off the ground: y=%.0f floor=%.0f vy %.1f -> %.1f",j.vehicle,pos[1],floorY,was,j.vel[1]);
 }
 
 // A rotor craft (Hovers): no wing, so it goes where it wants at any speed, hovering still over its station.
@@ -1826,6 +1856,7 @@ void JetFrame(unsigned char* v) noexcept {
         Attitude(*j,kind,v,dir,up);
         Elevons(*j,kind,v,dt);
     }
+    HoldOffGround(*j,pos,clear,dt);
     j->ready=true;
     BayFrame(*j,pos,nose);
     Fire(*j,v,pos,nose,lead,gunsOk,missileOk,arms,ms);

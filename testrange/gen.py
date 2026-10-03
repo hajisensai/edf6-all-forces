@@ -451,6 +451,9 @@ def _q(text: str) -> str:
     return '"' + text.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
+SPAWN_BATCH, SPAWN_GAP = 4, 0.25
+
+
 def script(plan: Plan, lay: Layout) -> str:
     """The mission script. Same skeleton as the stock generated scripts (event 0 = Main)."""
     chosen = placements(plan)
@@ -519,9 +522,15 @@ def script(plan: Plan, lay: Layout) -> str:
         f'\tMap({_q(MAP)}, {_q(WEATHER)});',
         f'\tCreatePlayer({_q(lay.player.name)});',
     ]
+    # The NPC vehicles come out SPAWN_BATCH at a time, SPAWN_GAP s apart: 37 of them created in the first frame
+    # (each a model, a body and a plugin entry set up at once) were the hitch the mission started with.
+    friends = 0
     for sgo, npc, point in placed:
         path = _q('app:/object/' + sgo + '.sgo')
         if npc:   # last argument: does it join the player's squad (no: the plugin flies/drives it)
+            if friends and friends % SPAWN_BATCH == 0:
+                lines.append(f'\tWait({SPAWN_GAP:.2f});')
+            friends += 1
             lines.append(f'\tCreateFriend({_q(point.name)}, {path}, {plan.vehicle_level:.2f}, false);')
         else:
             lines.append(f'\tCreateVehicle2({_q(point.name)}, {path}, {plan.vehicle_level:.2f});')

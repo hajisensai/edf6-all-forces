@@ -151,9 +151,20 @@ FILETIME IniStamp() noexcept {
 void Log(const char* format,...) noexcept {
     if(!logPath[0])return;
     char text[1000]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
-    FILE* f=nullptr;if(_wfopen_s(&f,logPath,L"ab") || !f)return;
+    // One handle kept open, appended to (each line one WriteFile: whole lines from any thread, and in the
+    // file even if the game dies next). Opening and closing the file per line, on the game thread, with
+    // the virus scanner looking at each close, was the hitch when a mission starts and logs hundreds of lines.
+    static HANDLE file=INVALID_HANDLE_VALUE;
+    if(file==INVALID_HANDLE_VALUE) {
+        file=CreateFileW(logPath,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_ALWAYS,
+                         FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(file==INVALID_HANDLE_VALUE)return;
+    }
     SYSTEMTIME t{};GetLocalTime(&t);
-    fprintf(f,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);fclose(f);
+    char line[1100];
+    const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
+    DWORD wrote=0;
+    if(n>0)WriteFile(file,line,static_cast<DWORD>(n),&wrote,nullptr);
 }
 
 void ReloadConfigIfChanged() noexcept {
