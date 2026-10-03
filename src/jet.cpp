@@ -103,6 +103,13 @@ constexpr ULONGLONG kStuckMs=60000;
 // ground, is learned as a wall (a vertical plane) that Guard turns off before.
 constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.0f;
 constexpr ULONGLONG kBlockedMs=250;
+// The map's edge (docs/map-edge-re.md): the heli input (slot 55, 0x6543A0) clamps the body into the
+// mission's move area shrunk by veh+kAreaInset (0x5A9E50) and teleports it back, every frame, so a jet at
+// the edge stopped dead and slid flank first. A jet's inset is set to kNoInset (the box grown 1e6 m: no
+// clamp; the stock bombers are never clamped either). Out there the Havok broadphase ends at 3000 m a
+// side: walls at kWorldWall keep the jets in, and one past kWorldGone is deleted.
+constexpr std::size_t kAreaInset=0xE00;
+constexpr float kNoInset=-1.0e6f,kWorldWall=2400.0f,kWorldGone=2700.0f;
 constexpr ULONGLONG kStaleMs=1500;   // game ms: a table entry not flown this long is free
 constexpr ULONGLONG kFlyerMemoMs=500;
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus kReact seconds of
@@ -727,7 +734,12 @@ bool JetFileThere(int kind) noexcept {
 
 void PreloadJets() noexcept {
     __try {
-        wallCount=0;wallNext=0;   // a new mission, a new map
+        // A new mission, a new map: only the world's walls (see kWorldWall).
+        wallCount=0;wallNext=0;
+        for(int i=0;i<4;++i) {
+            const float x=i<2 ? (i==0 ? 1.0f : -1.0f) : 0.0f,z=i<2 ? 0.0f : (i==2 ? 1.0f : -1.0f);
+            walls[wallCount++]=Wall{{x*kWorldWall,0.0f,z*kWorldWall},{x,0.0f,z}};
+        }
         if(!spawnOk)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         for(int k=0;k<2;++k) {
@@ -864,6 +876,11 @@ void JetFrame(unsigned char* v) noexcept {
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,j->fighter ? "fighter" : "strike",At<float>(v,kHp),Ceiling());
     }
     j->seen=ms;
+    Put<float>(v,kAreaInset,kNoInset);
+    if(std::fabs(pos[0])>kWorldGone || std::fabs(pos[2])>kWorldGone) {
+        if(!j->reap)Log("JET v=%p at the world's edge (%.0f,%.0f): deleting",v,pos[0],pos[2]);
+        j->reap=true;
+    }
     const float dt=Clamp(static_cast<float>(now.QuadPart-j->last.QuadPart)/static_cast<float>(freq.QuadPart),0.004f,0.1f);
     j->last=now;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
