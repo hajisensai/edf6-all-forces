@@ -53,7 +53,8 @@ bool RedirectCall(unsigned char* callSite,void* expectedTarget,void* replacement
     changed=false;
     __try {
         if(!callSite || !expectedTarget || !replacement) return false;
-        if(!Readable(callSite,5) || callSite[0]!=0xE8) return false;
+        // A call (E8) or a tail jump (E9): the same rel32, the hook returns where the target would.
+        if(!Readable(callSite,5) || (callSite[0]!=0xE8 && callSite[0]!=0xE9)) return false;
         std::int32_t relative=0;
         std::memcpy(&relative,callSite+1,sizeof(relative));
         if(callSite+5+relative!=static_cast<unsigned char*>(expectedTarget)) return false;

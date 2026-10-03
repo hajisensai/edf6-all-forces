@@ -17,8 +17,14 @@
 //    (the call's plane count, ifc+0x80, set to 0 after IFC_Start: the call is spent, its state machine
 //    goes back to idle). A guard call works round its marker, a follow call round the player. Only the
 //    caller's game does this: in an online game the others see the stock bombers.
+//  - The call weapons are owned from the start (docs/loadout-re.md section 8): before the game's own
+//    "grant the installed DLC weapons" step (0xDC550, UnlockDownloadContents: after every save load, and
+//    in a new game's reset; its two entries, a call at 0xDC348 and the script thunk's jump at 0x70FF87,
+//    are redirected) every weapon table row named EDF6VC_CALL_* gets the owned bit, as that step gives a
+//    DLC weapon its: NEW and 0 stars the first time, stars left alone after. Before it, so its "equipped
+//    but not owned: back to the default weapon" pass keeps them on the soldiers that carry them.
 // When no jet can be launched (the jet SGOs missing or not preloaded this mission) the stock bombers fly;
-// without the plugin the call weapons are plain KM6 calls.
+// without the plugin the call weapons are plain KM6 calls (still owned: the bit is in the save).
 // The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
@@ -35,6 +41,17 @@ constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=
 constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
 constexpr float kApproach=1000.0f,kAboveTarget=150.0f,kWingSpacing=70.0f,kWingStep=15.0f;
 constexpr float kHeliApproach=300.0f,kHeliSpacing=40.0f;
+// Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
+// once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
+// bytes, 0x800 of them.
+constexpr unsigned kUnlockDlc=0xDC550,kUnlockDlcCall=0xDC348,kUnlockDlcJump=0x70FF87;
+constexpr unsigned kRowCount=0xE23F0,kGetRow=0xE1CF0;
+constexpr std::size_t kCfg=0x130,kTableRef=0x188,kFlags=0xEB50,kStars=0xEB54,kRecord=12;
+constexpr std::uint32_t kMaxRecords=0x800;
+constexpr unsigned char kUnlockDlcSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,
+                                         0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+constexpr unsigned char kUnlockThunkSig[]={0x48,0x8B,0x0D};   // 0x70FF80: mov rcx,[GS]; jmp 0xDC550
+constexpr wchar_t kCallPrefix[]=L"EDF6VC_CALL_";
 // The weapon a radio call's IndirectFireControl is in (ifc = weapon+0x1660), and its AmmoHitSizeAdjust.
 constexpr std::size_t kWeaponIfc=0x1660,kWeaponHitSize=0x8C4;
 
@@ -244,6 +261,60 @@ void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
     nextPlaneUpdate(plane,frame);
 }
 
+using UnlockFn=void(__fastcall*)(unsigned char*);
+using RowCountFn=std::uint32_t(__fastcall*)(void*);
+using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
+
+// Every EDF6VC_CALL_* row owned (see the file comment); how many were not yet.
+int GrantCalls(unsigned char* gs) noexcept {
+    if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return -1;
+    void* const table=gs+kCfg;
+    if(!At<void*>(table,kTableRef))return -1;             // no weapon table yet
+    std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
+    if(n>kMaxRecords)n=kMaxRecords;
+    alignas(8) unsigned char row[0x100];
+    const std::size_t prefix=sizeof(kCallPrefix)/sizeof(wchar_t)-1;
+    int granted=0;
+    for(std::uint32_t id=0;id<n;++id) {
+        reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
+        const auto name=At<const wchar_t*>(row,0);
+        if(!name || !Readable(name,prefix*sizeof(wchar_t)) || std::wcsncmp(name,kCallPrefix,prefix)!=0)continue;
+        auto& flags=*reinterpret_cast<std::uint32_t*>(gs+kFlags+id*kRecord);
+        if(!(flags&1)) {
+            flags|=4;
+            std::memset(gs+kStars+id*kRecord,0,8);
+            ++granted;
+        }
+        flags|=1;
+    }
+    return granted;
+}
+
+void __fastcall UnlockDlcHook(unsigned char* gs) {
+    __try {
+        const int granted=GrantCalls(gs);
+        if(granted>0)Log("CALLS %d call weapons owned now",granted);
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("CALLS granting failed");}
+    reinterpret_cast<UnlockFn>(image+kUnlockDlc)(gs);
+}
+
+// Both entries of 0xDC550 redirected to UnlockDlcHook; whether both are.
+bool InstallOwnership() noexcept {
+    if(!Matches(kUnlockDlc,kUnlockDlcSig,sizeof(kUnlockDlcSig)) || !Matches(kUnlockDlcJump-7,kUnlockThunkSig,sizeof(kUnlockThunkSig))) {
+        Log("CALLS ownership: profile mismatch");
+        return false;
+    }
+    bool ok=true;
+    const unsigned sites[]={kUnlockDlcCall,kUnlockDlcJump};
+    for(const unsigned site:sites) {
+        bool changed=false;
+        if(RedirectCall(image+site,image+kUnlockDlc,reinterpret_cast<void*>(&UnlockDlcHook),changed))continue;
+        ok=false;
+        Log("CALLS ownership: %s at %X",changed ? "half patched" : "not patched",site);
+    }
+    return ok;
+}
+
 bool Redirect(unsigned site,const unsigned char* sig,std::size_t size,void* hook,const char* name) noexcept {
     if(!Matches(site,sig,size)){Log("AIRSTRIKE %s: profile mismatch",name);return false;}
     bool changed=false;
@@ -257,6 +328,7 @@ bool InstallAirstrikes() noexcept {
     CheckCallTable();
     __try {
         bool calls=false,radio=false,mission=false;
+        const bool owned=InstallOwnership();
         if(Matches(kIfcStart,kIfcStartSig,sizeof(kIfcStartSig)) && Matches(kRadioCall,kRadioCallSig,sizeof(kRadioCallSig))) {
             bool changed=false;
             calls=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);
@@ -275,7 +347,7 @@ bool InstallAirstrikes() noexcept {
             radio=Redirect(kRadioBomber,kRadioBomberSig,sizeof(kRadioBomberSig),reinterpret_cast<void*>(&RadioBomberHook),"air raider bomber");
             mission=Redirect(kMissionBomber,kMissionBomberSig,sizeof(kMissionBomberSig),reinterpret_cast<void*>(&MissionBomberHook),"mission bomber");
         }
-        Log("HOOK airstrikes calls=%d airRaiderBombers=%d missionBombers=%d",calls,radio,mission);
+        Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d",calls,owned,radio,mission);
         return calls || radio || mission;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
