@@ -108,8 +108,10 @@ constexpr float kMissileCone=10.0f;  // deg: the missile homes (LockonType 1), s
 // weapon (+0x894 m/frame, gravity factor +0x8E0 of kGravity). The 409's rockets fly straight (no
 // LockonType) and accelerate: kRocketStart m/frame plus kRocketAccel per frame (V409 rocket SGO), so
 // their lead takes the flight frames of that; they fire only kRocketCone off and within kRocketRange.
-// The 409's gun sits in a turret that turns onto any enemy within ~kTurretReach by itself (pitch
-// 0..-90: below only), so there it fires whatever the nose does.
+// The 409's gun sits in a turret that turns onto enemies within ~kTurretReach by itself (pitch 0..-90:
+// below only), so there it fires when the barrel, wherever the nose is, points at the lead point. (It
+// fired whenever a target was below in reach, and the turret cannot turn everywhere: 2026-10-03 it
+// fired with the target 70-140 degrees off the nose, into the air.)
 constexpr std::size_t kWeaponLockon=0x6B0,kWeaponSpeed=0x894,kWeaponGravity=0x8E0,kWeaponAmmo=0xBE8;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr std::int32_t kHoming=1;
@@ -653,9 +655,10 @@ float Circle(const Heli& h,const float* pos,const float* fwd,const float* centre
 // The weapons in the pilot's seat (seat 0): the gun (fastest straight round), the homing missile
 // (LockonType 1) and the straight rockets (slow, accelerating rounds). Refills an emptied one (see
 // kReloadGunMs). Reads the gun's round speed and drop for the lead.
-struct Loadout { float gunSpeed,gunGravity,rocketGravity; bool gun,missile,rockets; std::int32_t ammo[4],rocketAmmo; };
+struct Loadout { float gunSpeed,gunGravity,rocketGravity; bool gun,missile,rockets; std::int32_t ammo[4],rocketAmmo;
+                 const unsigned char* gunWeapon; };   // the fastest gun (its barrel: the 409's turret)
 Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
-    Loadout l{kBulletSpeed,0.0f,1.0f,false,false,false,{-1,-1,-1,-1},0};
+    Loadout l{kBulletSpeed,0.0f,1.0f,false,false,false,{-1,-1,-1,-1},0,nullptr};
     if(SeatCount(v)==0)return l;
     const auto seat=SeatAt(v,0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
@@ -684,6 +687,7 @@ Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
         else if(rocket){l.rockets=true;l.rocketAmmo+=ammo>0 ? ammo : 0;if(std::isfinite(gravity))l.rocketGravity=gravity;}
         else if(std::isfinite(speed) && speed>best) {
             best=speed;l.gun=true;l.gunSpeed=speed;l.gunGravity=std::isfinite(gravity) && gravity>0.0f ? gravity : 0.0f;
+            l.gunWeapon=weapon;
         }
     }
     return l;
@@ -854,6 +858,18 @@ bool Barrel(const unsigned char* v,const unsigned char* weapon,float* pos,float*
     const float* at=reinterpret_cast<const float*>(v+kPosition);
     const float d[3]={pos[0]-at[0],pos[1]-at[1],pos[2]-at[2]};
     return Dot3(d,d)<kMuzzleReach*kMuzzleReach;
+}
+
+// Whether the gun's barrel (the mean of its muzzles) points at `lead` within the fire cone at `dist`.
+bool TurretOn(const unsigned char* v,const unsigned char* gun,const float* lead,float dist) noexcept {
+    float at[3],dir[3];
+    if(!gun || !Barrel(v,gun,at,dir))return false;
+    float to[3]={lead[0]-at[0],lead[1]-at[1],lead[2]-at[2]};
+    const float l=std::sqrt(Dot3(to,to));
+    if(l<1.0f)return true;
+    const float off=std::acos(Clamp(Dot3(to,dir)/l,-1.0f,1.0f))*180.0f/kPi;
+    const float wide=dist>1.0f ? std::atan(kHitRadius/dist)*180.0f/kPi : 90.0f;
+    return off<(wide>cfg.heliFireCone ? wide : cfg.heliFireCone);
 }
 
 // A door gun's axes this frame and where its barrel points (geometric, vehicle frame).
@@ -1209,7 +1225,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         cone=coneAt(cfg.heliFireCone,gunDist);
     }
     if(engage && cfg.heliFire && !grounded && !land && !hidden && !PlayerInLine(pos,lead)) {
-        const bool turret=is409 && gunDist<kTurretReach && aim[1]<pos[1];
+        const bool turret=is409 && gunDist<kTurretReach && aim[1]<pos[1] && TurretOn(v,arms.gunWeapon,gunLead,gunDist);
         gun=(miss<cone && gunDist<range) || turret;
         if(gun && !h.firing){h.firing=true;h.burstAt=ms;}
         if(h.firing && ms-h.burstAt>kBurstMs){h.firing=false;h.restUntil=ms+kBurstRest;}

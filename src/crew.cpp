@@ -139,12 +139,16 @@ void SetLine(unsigned char* line,Rider rider) noexcept {
     }
 }
 
-// Every seat's guns: no line while an NPC holds the seat, the stock line while the player does.
+// Every seat's guns: no line while an NPC holds the seat, or while it is empty in a vehicle an NPC
+// drives (the 410's door guns, aimed by the plugin with nobody in them); the stock line while the player
+// holds it.
 void AimLines(unsigned char* vehicle) noexcept {
     const unsigned count=SeatCount(vehicle);
+    const bool npcDriven=count>0 && SeatRider(SeatAt(vehicle,0))==Rider::dummy;
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
-        const Rider rider=SeatRider(seat);
+        Rider rider=SeatRider(seat);
+        if(rider==Rider::none && npcDriven)rider=Rider::dummy;
         if(rider!=Rider::dummy && rider!=Rider::player)continue;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);

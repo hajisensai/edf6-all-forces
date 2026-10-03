@@ -76,6 +76,10 @@ constexpr float kTurnBleed=3.0f;
 // turn and then snapping onto it (as before) asked full bank one frame and none the next: in the patrol
 // circle the jets flicked between level and knife edge.
 constexpr float kSteerTau=0.5f;
+// On the bombing run it turns at most kBombG and closes on the line over kBombTau: the stock bomber flies
+// dead straight; at the strike jet's 5 g and 0.5 s the BOMBER401 (120 m/s) rolled past 90 degrees
+// righting its line on 2026-10-03.
+constexpr float kBombG=1.5f,kBombTau=2.0f;
 // m/s no jet is commanded past. Havok caps every dynamic body at its motion properties' maxLinearSpeed
 // (hknpMotionProperties+0x10, 200 m/s in the preset the vehicles use): the 18:58 run's jets commanded
 // 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never flown.
@@ -378,12 +382,14 @@ const Kind& KindOf(const Jet& j) noexcept { return kKinds[j.fighter ? 1 : 0]; }
 // then turns, like a wing, instead of sliding round. The speed closes on `speed` at thrust/brake, while
 // gravity along the path takes it off climbing and adds it diving.
 void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const float* want,float speed,float dt,float* up) noexcept {
+    const bool bombing=j.mode==Mode::bomb;
+    const float maxG=bombing ? kBombG : k.maxG,tau=bombing ? kBombTau : kSteerTau;
     float dir[3]={j.vel[0],j.vel[1],j.vel[2]};
     float s=Len(dir);
     if(s<1.0f || !Normalize(dir)){std::memcpy(dir,fwd,12);s=k.minSpeed;}
-    const float most=k.maxG*kG/(s>k.minSpeed ? s : k.minSpeed)*dt;
+    const float most=maxG*kG/(s>k.minSpeed ? s : k.minSpeed)*dt;
     const float angle=std::acos(Clamp(Dot(dir,want),-1.0f,1.0f));
-    const float eased=angle*(dt<kSteerTau ? dt/kSteerTau : 1.0f);
+    const float eased=angle*(dt<tau ? dt/tau : 1.0f);
     const float turn=eased<most ? eased : most;
     float next[3];
     if(angle<1e-5f)std::memcpy(next,want,12);
@@ -401,7 +407,7 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     std::memcpy(up,lift,12);
     if(!Normalize(up)){up[0]=0;up[1]=1;up[2]=0;}
     // What the wing gives along the body's up now, and the path that bends.
-    const float pull=Clamp(Dot(lift,bodyUp),-kNegG*kG,k.maxG*kG);
+    const float pull=Clamp(Dot(lift,bodyUp),-kNegG*kG,(bombing ? maxG+1.0f : maxG)*kG);
     float acc[3]={bodyUp[0]*pull,bodyUp[1]*pull-kG,bodyUp[2]*pull};
     const float accAlong=Dot(acc,dir);
     for(int i=0;i<3;++i)next[i]=dir[i]+(acc[i]-dir[i]*accAlong)*dt/s;
@@ -707,6 +713,7 @@ void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noex
     const float dir[3]={j.bombDir[0]-side[0]*c,0,j.bombDir[2]-side[2]*c};
     Level(pos,dir,j.bombAlt,want);
     *speed=j.bombSpeed;
+    if(cfg.debug && ms-j.gateAt>1000){j.gateAt=ms;Log("JET v=%p bomb run: %.0f m to the target, %.0f m off the line",j.vehicle,along,off);}
     if(!j.bombing && along<j.fireDist+j.bombSpeed/60.0f) {
         reinterpret_cast<void(*)(void*)>(image+kIfcOpen)(j.ifc);
         j.bombing=true;
@@ -727,12 +734,15 @@ void BayFree(unsigned char*& ifc) noexcept {
 }
 
 // A frame of the open bay: drop point and release point as the bomber's update sets them, one step; torn
-// down once the last bomb is out and none it tracks is left.
-void BayFrame(Jet& j,const float* pos,const float* nose) noexcept {
+// down once the last bomb is out and none it tracks is left. The stock bomber (0x5AB240) aims
+// target_distance ahead of itself on its straight line from its start to the target (Init 0x5AABB0 points
+// it there); the drop point is that, from where the jet is along the line: off the nose, every swing of
+// the jet's heading swept the drop point sideways and the bombs covered a far wider area than the stock.
+void BayFrame(Jet& j,const float* pos,const float*) noexcept {
     if(!j.ifc || !j.bombing)return;
-    float flat[3]={nose[0],0,nose[2]};
-    if(!Normalize(flat))std::memcpy(flat,j.bombDir,12);
-    alignas(16) const float aim[4]={pos[0]+flat[0]*j.reach,j.bombAt[1],pos[2]+flat[2]*j.reach,1.0f};
+    const float rel[3]={pos[0]-j.bombAt[0],0,pos[2]-j.bombAt[2]};
+    const float along=Dot(rel,j.bombDir)+j.reach;
+    alignas(16) const float aim[4]={j.bombAt[0]+j.bombDir[0]*along,j.bombAt[1],j.bombAt[2]+j.bombDir[2]*along,1.0f};
     alignas(16) const float from[4]={pos[0],pos[1],pos[2],1.0f};
     std::memcpy(j.ifc+kIfcAim,aim,16);std::memcpy(j.ifc+kIfcFrom,from,16);
     const float frame=1.0f;
