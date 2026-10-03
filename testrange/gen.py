@@ -107,13 +107,12 @@ class Jet:
     durability: float
     weapons: tuple[str, ...]
     # Its own model (tools/jet_models.py writes the archive, `file`, into Mods/OBJECT), or None: the bomber
-    # (JET_MODEL / JET_ELEVON_MODEL). `body`: the mesh bone; `root`: the model's root bone, which the
-    # V506 body bone maps to; `anchor`: the bone the V506 locators, weapons and dead effect hang on (it
-    # replaces their names in place, so it is at most 4 characters: `body`).
+    # (JET_MODEL / JET_ELEVON_MODEL). `body`: the mesh bone; `anchor`: the bone the V506 locators, weapons
+    # and dead effect hang on (it replaces their names in place, so it is at most 4 characters: `body`).
+    # The model's root bone is always JET_ROOT_BONE (see JET_MAB_BONES).
     model: tuple[str, str] | None = None
     file: str | None = None
     body: str = 'bomber501'
-    root: str = 'mdl'
     anchor: str = 'mdl'
     rigid: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
 
@@ -138,7 +137,7 @@ JETS: dict[str, Jet] = {
                                       'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
     # the airstrike drone x 3: 5.7 m long; only carriers launch it (tools/make_jets.py EDF6VC_JET_DRONE.SGO)
     'edf6tr_jet_drone': Jet(7006.0, 300.0, _ARMS, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
-                            'EDF6VC_DRONE.MRAB', 'body', 'pd607_Drone_airstrike', 'body',
+                            'EDF6VC_DRONE.MRAB', 'body', 'body',
                             rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
 }
 JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI'}   # jets that are no range vehicle
@@ -150,6 +149,13 @@ JET_ROOT_BONE = 'mdl'
 # The V506 MAB block's locator parent names (UTF-16, block offsets), shortened in place to JET_ROOT_BONE:
 # the bomber has only `mdl` and `bomber501` (docs/jet-model-re.md §1, §3.3).
 JET_MAB_BONES = ((0x360, 'body'), (0x372, 'rotor'), (0x37E, 'tailRotor'))
+# The fourth parent name, the root, stays: (0x36A, 'mdl') has no room for a longer name, so every jet model's
+# root bone is JET_ROOT_BONE (tools/jet_models.py renames the drone's `pd607_Drone_airstrike`). A model
+# without it leaves the riding-position locators (vehicle_riding_position) without a parent: the vehicle
+# init (0x62B430, from 0x629450) then reads a null locator (EDF+0x62B619), CreateObject comes back with a
+# half-made vehicle, and its first crash step reads a dead effect never set up (EDF+0x5F866C; 2026-10-03,
+# a carrier's drone).
+JET_MAB_ROOT = (0x36A, JET_ROOT_BONE)
 # Fuselage only (half extents; the 25 m wingspan left out so low passes do not scrape), centre as the model.
 JET_RIGID_BODY = [[0.0, 0.34, 2.6], [2.0, 1.6, 13.0]]
 
@@ -190,11 +196,14 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     A jet with its own model (Jet.model) always flies it: these three come from the Jet then."""
     import sgowrite
     jet = JETS[name]
-    root = anchor = JET_ROOT_BONE
+    root = anchor = JET_ROOT_BONE   # root: see JET_MAB_ROOT
     if jet.model is not None:
         model, body, rigid = list(jet.model), jet.body, [list(x) for x in jet.rigid] if jet.rigid else None
-        root, anchor = jet.root, jet.anchor
+        anchor = jet.anchor
     version, m = sgowrite.read(game.read('OBJECT', (DERIVED.get(name) or JET_BASE[name]) + '.SGO'))
+    at, want = JET_MAB_ROOT
+    if m['animation_model'][2][at:at + 2 * len(want) + 2] != want.encode('utf-16le') + b'\0\0':
+        raise ValueError(f'V506 MAB 的根骨骼名不在 {at:#x}')
     if 'vehicle_setup' not in m or 'mission_setup' in m:
         raise ValueError('V506_HELI 没有 vehicle_setup')
     setup = m.pop('vehicle_setup')

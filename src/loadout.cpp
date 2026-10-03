@@ -19,8 +19,8 @@ constexpr unsigned kReloadAll=0x5A1060;   // (SoldierBase*): reload-complete on 
 constexpr std::size_t kWeaponList=0x1950,kWeaponCount=0x1960;
 constexpr unsigned kPreloadCalls[]={0x1B8F52,0x225FB5};
 // Online (GameStatus+0x38 != -1) the scripts' PreloadPlayerResource (0x1B8CC0) preloads each session
-// player through 0x59DC90 instead and never reaches 0x1B8F52; that marks an online mission, whose
-// jets stay off (PreloadJets).
+// player through 0x59DC90 instead and never reaches 0x1B8F52; the jets are preloaded there too, or an
+// airstrike takeover finds nothing preloaded online and the stock bombers come.
 constexpr unsigned kPreloadSession=0x59DC90;
 constexpr unsigned kSessionCalls[]={0x1B8E98,0x225FAC};
 constexpr unsigned kCreateCalls[]={0xA153A,0xA1879,0x1DC539,0x22AE3D,0x5A51C5};
@@ -98,13 +98,13 @@ std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uin
     const bool applied=Apply(a,u,"preload");
     const auto result=preloadOrig(a,b,c,d);
     if(applied)Restore(u);
-    PreloadJets(false);   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
+    PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     return result;
 }
 
 std::uintptr_t __fastcall SessionPreloadHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
     const auto result=sessionOrig(a,b,c,d);
-    PreloadJets(true);
+    PreloadJets();
     return result;
 }
 

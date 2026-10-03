@@ -8,7 +8,10 @@ name inside the archive, CMPL-compressed like tools/mdb_jet.py does); every othe
   EDF6VC_INTERCEPTOR.MRAB  BOMBER501.MRAB         bomber501_2.mdb  elevon split (mdb_jet.build), x 0.65
   EDF6VC_MULTIROLE.MRAB    BOMBER401.MRAB         bomber401.mdb    x 0.5
   EDF6VC_CARRIER.MRAB      V508_TRANSPORT.MRAB    v508_transport.mdb  x 1.6
-  EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0
+  EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0, root bone renamed `mdl`
+
+Every jet model's root bone is `mdl` (testrange/gen.py JET_MAB_ROOT: the V506 locators hang on that name), so
+a model whose root is called otherwise gets it renamed (Recipe.root; only that bone uses the name).
 
 Facts relied on (checked by the asserts / `check` below):
   * Every bone matrix (local and inverse bind) is affine, row-vector convention, row 3 = translation. A uniform
@@ -50,13 +53,14 @@ class Recipe:
     scale: float
     split: bool = False     # elevon split (mdb_jet.build) before scaling
     fuselage_x: float | None = None   # rigid box from the vertices with |x| <= this (source metres); None = all
+    root: str | None = None   # the root bone's new name (see the docstring); None = kept
 
 
 MODELS: dict[str, Recipe] = {
     'EDF6VC_INTERCEPTOR.MRAB': Recipe('BOMBER501.MRAB', 'bomber501_2.mdb', 0.65, split=True, fuselage_x=2.0),
     'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5),
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
-    'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0),
+    'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl'),
 }
 
 PACK = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B'}
@@ -153,9 +157,22 @@ def rigid_box(points: list[tuple[float, float, float]], fx: float | None) -> lis
 
 # ------------------------------------------------------------------------------------------ build
 
+def rename_root(md: Mdb, name: str) -> Mdb:
+    """`md` with its root bone called `name`: the root's name entry is rewritten, which no other bone, object
+    or material may share."""
+    i = md.bones[0].name
+    users = [b.index for b in md.bones if b.name == i] + [o.name for o in md.objects if o.name == i] + \
+            [m.name for m in md.materials if m.name == i]
+    assert md.bones[0].parent == -1 and users == [0], f'root name entry {i} shared: {users}'
+    names = list(md.names)
+    names[i] = name
+    return replace(md, names=names)
+
+
 def make_model(src: Mdb, r: Recipe) -> Mdb:
     if not r.split:
-        return scale_mdb(src, r.scale)
+        md = scale_mdb(src, r.scale)
+        return rename_root(md, r.root) if r.root else md
     split, surfaces, _stats = mdb_jet.build(collapse_501_2(src))
     mdb_jet.self_check(mdb_write(split), surfaces)        # hinge / bind checks on the unscaled split model
     return scale_mdb(split, r.scale)
@@ -208,10 +225,12 @@ def check(raw: bytes, arc: bytes, r: Recipe) -> None:
 
     ref = mdb_jet.build(collapse_501_2(src))[0] if r.split else src     # the unscaled model it was made from
     names = [ref.name_of(x.name) for x in ref.bones]
+    if r.root:
+        names[0] = r.root
     assert [new.name_of(x.name) for x in new.bones] == names
     assert [x.parent for x in new.bones] == [x.parent for x in ref.bones]
     if not r.split:
-        assert names == [src.name_of(x.name) for x in src.bones]
+        assert names[1:] == [src.name_of(x.name) for x in src.bones][1:]
     lo0, hi0 = bbox(bind_positions(src))
     lo1, hi1 = bbox(bind_positions(new))
     for i in range(3):

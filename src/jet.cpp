@@ -1060,6 +1060,7 @@ const Sig kBaySigs[]={
     {kIfcDone,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89}},
 };
 bool preloaded[kBodyCount]{};   // the jet SGOs were preloaded for this mission (PreloadJets)
+bool broken[kBodyCount]{};      // its spawn faulted in the game's init (CreateJet): off until the game restarts
 
 // InitParamBase as DemoAirStrike's ctor builds it on its stack (0x5B433A): the vtable, the rest zero.
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
@@ -1080,11 +1081,8 @@ bool JetFileThere(int kind) noexcept {
 }
 }  // namespace
 
-// Online the jets stay off: a V506 jet is walked into an online-only event path (heli slot 5 ->
-// slot 61 mode 1, 0x6536B3 -> 0x650010) that reads heli parts the jet has not and crashed the game twice
-// on 2026-10-03 (0x650137, then 0x5F866C past the body-part fix). Every flag is cleared, so an offline
-// mission's preload never carries over: the airstrikes stay stock.
-void PreloadJets(bool online) noexcept {
+// Every flag is cleared first: a jet not preloaded for this mission is never spawned (the stock planes come).
+void PreloadJets() noexcept {
     __try {
         // A new mission, a new map: only the world's walls (see kWorldWall).
         wallCount=0;wallNext=0;
@@ -1093,11 +1091,10 @@ void PreloadJets(bool online) noexcept {
             walls[wallCount++]=Wall{{x*kWorldWall,0.0f,z*kWorldWall},{x,0.0f,z}};
         }
         for(auto& p:preloaded)p=false;
-        if(online){Log("JET online mission: jets off, the airstrikes stay stock");return;}
         if(!spawnOk)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         for(int k=0;k<kBodyCount;++k) {
-            preloaded[k]=mgr && JetFileThere(k);
+            preloaded[k]=mgr && !broken[k] && JetFileThere(k);
             if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kJetSgo[k],2,-1);
         }
         Log("JET preload strike=%d fighter=%d bomber401=%d bomber501_2=%d interceptor=%d multirole=%d carrier=%d drone=%d",
@@ -1118,8 +1115,9 @@ void ClearGround(float* p) noexcept {
 // a jet after all (an SGO without the mark), or nullptr.
 // The heli's "body" part: its init (0x64E9D1) looks the part up by that name in the vehicle's parts
 // (vehicle+0x1320, 0x6EA4B0(parts, name) -> index or -1) and keeps the index at +0x1530, which slot 61
-// mode 1 (0x650119, reached online through slot 5) reads unchecked: -1 -> a null part -> crash at
-// 0x650137 (2026-10-03, a fighter in an online mission). The jets' fuselage bone is their model's own
+// mode 1 (0x650119: the crash step a downed heli runs from its update, slot 5) reads unchecked: -1 -> a
+// null part -> crash at 0x650137 (2026-10-03, a fighter going down in an online mission; offline no jet
+// had gone down yet). The parts are the V506 MAB's six nodes, then the model's bones (mdl 6, its body 7). The jets' fuselage bone is their model's own
 // (bomber501 / bomber401; the carrier and the drone call theirs body), so it is looked up by that.
 constexpr unsigned kFindPart=0x6EA4B0,kBodyPartUse=0x650119,kBodyPartInit=0x64E9C9;
 constexpr std::size_t kParts=0x1320,kBodyPart=0x1530;
@@ -1139,12 +1137,30 @@ void FixBodyPart(unsigned char* v) noexcept {
         if(cfg.debug)Log("JET v=%p body part: %ls (%d)",v,name,i);
         return;
     }
-    Log("JET v=%p has no body part (online it would crash)",v);
+    Log("JET v=%p has no body part (going down it would crash)",v);
+}
+
+// A jet SGO the game cannot build (its model lacks a bone the V506 parts hang on: the drone's root until
+// 2026-10-03, testrange/gen.py JET_MAB_ROOT) faults inside CreateObject's init and leaves a half-made vehicle
+// in the world, which crashes the game a moment later. Unseen, the input hook's handler swallowed the
+// fault and the carrier tried again every 1.5 s. Now it is logged and that jet is off until a restart.
+int JetFault(int body,const EXCEPTION_POINTERS* e) noexcept {
+    const auto r=e->ExceptionRecord;
+    const auto at=static_cast<const unsigned char*>(r->ExceptionAddress);
+    Log("JET %ls: the game faulted building it (%08lX at EDF+%llX): this jet is off until the game restarts",
+        kJetFile[body],r->ExceptionCode,static_cast<unsigned long long>(at-image));
+    broken[body]=true;preloaded[body]=false;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+unsigned char* CreateJet(int body,const float* m,InitParam* param) noexcept {
+    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,kJetSgo[body],param); }
+    __except(JetFault(body,GetExceptionInformation())) { return nullptr; }
 }
 
 unsigned char* SpawnJet(int body,const float* m) noexcept {
     InitParam param{image+kInitParamVtable,{}};
-    unsigned char* v=reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,kJetSgo[body],&param);
+    unsigned char* v=CreateJet(body,m,&param);
     if(!v)return nullptr;
     FixBodyPart(v);
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
