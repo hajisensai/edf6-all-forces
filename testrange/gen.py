@@ -70,6 +70,8 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_jet_blast_carrier_mission', '自爆无人机母舰（插件驾驶，测试场生成）'),
     ('edf6tr_jet_doll_carrier_mission', '人偶无人机母舰（插件驾驶，测试场生成）'),
     ('edf6tr_sub_carrier_mission', '航空潜舰（插件驾驶，原尺寸 1664 米，放在最远的点；测试场生成）'),
+    ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
+    ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
@@ -106,6 +108,8 @@ DERIVED: dict[str, str] = {
     'edf6tr_jet_blast_carrier_mission': 'V506_HELI',
     'edf6tr_jet_doll_carrier_mission': 'V506_HELI',
     'edf6tr_sub_carrier_mission': 'V506_HELI',
+    'edf6tr_pjet_fighter_mission': 'V506_HELI',
+    'edf6tr_pjet_strike_mission': 'V506_HELI',
     # Ground vehicles with no stock `_mission` SGO: the call-in one, vehicle_setup renamed (same layout).
     'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
     'edf6tr_vehicle502_groundrobo_mission': 'VEHICLE502_GROUNDROBO',
@@ -130,6 +134,11 @@ class Jet:
     rigid: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
     # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: all on `anchor`.
     weapon_bones: tuple[str, ...] = ()
+    # A player jet (src/playerjet.cpp): the player flies it. Its SGO keeps `vehicle_setup` beside
+    # `mission_setup` (the Air Raider's call weapon brings it like a stock heli, tools/call_weapons.py), and
+    # `camera` replaces game_object_camera_setting's offset (the stock heli's (0, 5.5, -11.5) is inside a jet).
+    player: bool = False
+    camera: tuple[float, float, float] | None = None
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
@@ -194,6 +203,12 @@ JETS: dict[str, Jet] = {
     'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _ARMS, ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
                                       'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 178.08, -7.58), (121.0, 15.0, 832.0)),
                                       weapon_bones=('gunA_tilt_l', 'gunB_tilt_l', 'missle_l')),
+    # Player jets (src/playerjet.cpp kKinds): the fighter in the interceptor's dark bomber501_2 (16 m across),
+    # the strike jet in the elevon bomber (25 m across); empty until the player boards them.
+    'edf6tr_pjet_fighter_mission': Jet(7201.0, 1400.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
+                                       'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45)),
+                                       player=True, camera=(0.0, 6.0, -24.0)),
+    'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _ARMS, player=True, camera=(0.0, 8.0, -32.0)),
 }
 JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI', 'edf6tr_jet_blast': 'V506_HELI',
                             'edf6tr_jet_doll': 'V506_HELI'}   # jets that are no range vehicle
@@ -267,6 +282,12 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     stock = {w[0]: w for w in setup[3]}   # each weapon keeps its stock per-weapon parameters
     setup[3] = [stock.get(w, [w, [0.0001, 0.1]]) for w in jet.weapons] + [stock['app:/weapon/v_fuel01.sgo']]
     m['mission_setup'] = setup
+    if jet.player:
+        import copy
+        m['vehicle_setup'] = copy.deepcopy(setup)
+        cam = m['game_object_camera_setting']
+        if jet.camera is not None:
+            m['game_object_camera_setting'] = [cam[0], [float(x) for x in jet.camera]]
     m['game_object_durability'] = jet.durability
     model_ref = model
     model = m['animation_model']
@@ -335,9 +356,10 @@ class Plan:
 
 
 def placements(plan: Plan) -> list[tuple[str, bool]]:
-    """(sgo, NPC-driven) for every vehicle to place, empty ones first, the BIG ones last."""
+    """(sgo, NPC-driven) for every vehicle to place, empty ones first, the BIG ones last. A player jet
+    (Jet.player) is always placed empty: it is the player's to fly, and an NPC in it would be flown as a heli."""
     chosen = ([(s, False) for s, n in plan.vehicles.items() for _ in range(max(0, n))] +
-              [(s, True) for s, n in plan.friends.items() for _ in range(max(0, n))])
+              [(s, not (s in JETS and JETS[s].player)) for s, n in plan.friends.items() for _ in range(max(0, n))])
     return [c for c in chosen if c[0] not in BIG] + [c for c in chosen if c[0] in BIG]
 
 

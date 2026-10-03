@@ -1643,6 +1643,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
     if(IsJet(vehicle)){if(cfg.jetPilot)JetFrame(vehicle);return;}
     if(IsSub(vehicle)){SubFrame(vehicle);CarrierLaserFrame(vehicle);return;}   // the submarine carrier (subcarrier.cpp, carrierlaser.cpp)
+    if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(!cfg.heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){HeliCrewed(vehicle);h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
@@ -2004,6 +2005,7 @@ bool CheckHeliProfile() noexcept {
             cfg.rescueAutoBoard ? (boardOk ? "on" : "off: unexpected EDF.dll code") : "off: the player boards with their own button");
         InstallJets();
         InstallSub();   // after the jets: it chains onto their physics hook
+        InstallPlayerJets();   // after the carrier: the same slot
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

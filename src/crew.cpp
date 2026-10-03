@@ -298,7 +298,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
         SeePlayer(reinterpret_cast<const float*>(vehicle+kPosition),At<std::int32_t>(vehicle,kTeam));
         return;
     }
-    if(driver || !cfg.autoCrew){st.emptySince=0;return;}
+    if(driver || !cfg.autoCrew || IsPlayerJet(vehicle)){st.emptySince=0;return;}   // a player jet waits for the player
     if(!st.emptySince)st.emptySince=now;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
@@ -349,6 +349,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
         AimLines(v);
         JetReap(v);
         HeliReap(v);
+        PlayerJetFrame(v);
         if(IsHelicopter(v))HeliFrame(v);
         if(IsGroundRobo(v))GroundFrame(v);
         HudSee(v);

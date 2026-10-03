@@ -64,6 +64,8 @@ struct Config {
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
     float vehicleHudRange=500.0f;// ...within this many metres of the player
+    bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
+    bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
 };
 extern Config cfg;
 
@@ -251,6 +253,11 @@ struct JetHudInfo { const char* role; float fuelSec; int drones; bool leaving; }
 bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // A called heli's fuel (heli.cpp, game thread): seconds until it flies off (0: leaving); false with no limit.
 bool HeliFuel(const void* vehicle,float* sec) noexcept;
+// playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
+// The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
+bool IsPlayerJet(const void* vehicle) noexcept;
+void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
+bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
