@@ -32,6 +32,9 @@ constexpr unsigned kPullTrigger=0x62C000;   // (trigger): fire this frame if the
 // +0x10 the weapon. Trigger i belongs to seat i (the Titan's 3..5 are the seats' secondary weapons).
 constexpr std::size_t kTriggers=0x638,kTriggerCount=0x648,kTriggerStride=0x48,kTriggerCtrl=0x8,kTriggerWeapon=0x10;
 constexpr std::size_t kRider=0x260,kRiderCtrl=0x268,kRiderPad=0x340,kRiderPlayer=0x354;
+// A weapon's operator is its rider's network object (rider+0x120); bit 0 of that +8 (rider+0x128) set
+// means another machine runs it (the fire step 0x690C1A refuses such an operator).
+constexpr std::size_t kNetFlags=0x8,kRiderNet=0x120;
 // Weapon muzzles: array at +0x1D0, count at +0x1E0, stride 0xF0. Muzzle +0 is its bone (world rows
 // right/up/forward/position at +0xB0..+0xEF, updated every frame), +0x10 its local 4x4 matrix,
 // +0xE0 how fire orients it (0x696B70): mode 0 takes the weapon's own world rows (weapon+0x150,
@@ -68,21 +71,33 @@ constexpr std::size_t kUserIface=0x120,kUserSlot=0x58/8;
 using UserFn=const void*(__fastcall*)(void*,const void*);
 UserFn nextUser[2]{};   // 403, 404
 
-const void* DriverWeapon(const unsigned char* vehicle) noexcept {
-    const auto seat=At<const unsigned char*>(vehicle,kSeats);
-    if(!seat || At<std::uint32_t>(vehicle,kSeatCount)==0 || At<std::uint64_t>(seat,kSeatWeaponCount)==0)return nullptr;
-    const auto holder=At<const unsigned char*>(At<const unsigned char*>(seat,kSeatWeapons),0);
-    return holder ? At<const void*>(holder,kHolderWeapon) : nullptr;
+const unsigned char* SeatGun(const unsigned char* seat) noexcept;
+
+bool RemoteUser(const void* user) noexcept {
+    const auto u=static_cast<const unsigned char*>(user);
+    return Readable(u,kNetFlags+1) && (u[kNetFlags]&1)!=0;
 }
 
+// An empty gunner seat's gun is operated by the first seat (the driver's first) whose operator this
+// machine runs: a remote driver's machine would fire it there, and an unmodded one never does, so a
+// local NPC or player aboard takes it instead.
 template<int I> const void* __fastcall WeaponUser(void* iface,const void* weapon) {
     const auto user=nextUser[I](iface,weapon);
     if(user || !cfg.enabled || !cfg.gunnerAi)return user;
-    const auto driverWeapon=DriverWeapon(static_cast<unsigned char*>(iface)-kUserIface);
-    return driverWeapon && driverWeapon!=weapon ? nextUser[I](iface,driverWeapon) : nullptr;
+    const auto vehicle=static_cast<const unsigned char*>(iface)-kUserIface;
+    const auto seats=At<const unsigned char*>(vehicle,kSeats);
+    const unsigned count=At<std::uint32_t>(vehicle,kSeatCount);
+    if(!seats || count>8 || !Readable(seats,count*kSeatStride))return nullptr;
+    for(unsigned s=0;s<count;++s) {
+        const auto gun=SeatGun(seats+s*kSeatStride);
+        if(!gun || gun==weapon)continue;
+        const auto other=nextUser[I](iface,gun);
+        if(other && !RemoteUser(other))return other;
+    }
+    return nullptr;
 }
 
-enum class Crew { none, ai, player };
+enum class Crew { none, ai, player, remote };   // remote: a rider another machine runs
 
 // A side gun as the aim sees it this frame: its trigger, round and muzzle in the world.
 struct Gun {
@@ -118,6 +133,7 @@ Crew SeatCrew(const unsigned char* seat) noexcept {
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return Crew::none;
     const auto rider=At<const unsigned char*>(seat,kRider);
     if(!Readable(rider,kRiderPlayer+1))return Crew::ai;
+    if(RemoteUser(rider+kRiderNet))return Crew::remote;   // its own machine aims it
     return rider[kRiderPlayer] && At<const void*>(rider,kRiderPad) ? Crew::player : Crew::ai;
 }
 
@@ -374,6 +390,8 @@ void LogSkip(const unsigned char* vehicle,const char* why) noexcept {
         At<std::uint32_t>(vehicle,kSeatCount),static_cast<unsigned long long>(At<std::uint64_t>(vehicle,kTriggerCount)));
 }
 
+bool Wanted(Crew c) noexcept { return c==Crew::player ? cfg.gunnerAssist : c!=Crew::remote && cfg.gunnerAi; }
+
 void Gunners(unsigned char* vehicle) noexcept {
     if(!Readable(vehicle,kTurn+kGunnerSeats*kTurnStride,true) || vehicle[kDead])return;
     if(At<std::uint32_t>(vehicle,kSeatCount)<kGunnerSeats){LogSkip(vehicle,"no gunner seats");return;}
@@ -385,13 +403,12 @@ void Gunners(unsigned char* vehicle) noexcept {
     if(!crewed){LogSkip(vehicle,"nobody aboard");return;}   // a parked tank stays quiet
     bool any=false;
     for(unsigned s=1;s<kGunnerSeats;++s)
-        any=any || (crew[s]==Crew::player ? cfg.gunnerAssist : cfg.gunnerAi);
+        any=any || Wanted(crew[s]);
     if(!any)return;
     ScanEnemies(vehicle,cfg.gunnerRange+kMuzzleReach);
     const float down=Down(vehicle);
     for(unsigned s=1;s<kGunnerSeats;++s) {
-        const bool wanted=crew[s]==Crew::player ? cfg.gunnerAssist : cfg.gunnerAi;
-        if(wanted)SteerSeat(vehicle,s,crew[s]==Crew::player ? Crew::player : Crew::ai,down);
+        if(Wanted(crew[s]))SteerSeat(vehicle,s,crew[s]==Crew::player ? Crew::player : Crew::ai,down);
     }
 }
 
