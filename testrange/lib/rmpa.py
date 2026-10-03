@@ -88,3 +88,17 @@ def raised(data: bytes, names: set[str], dy: float) -> bytes:
             hit.add(p.name)
     assert hit == names, f'points not found: {sorted(names - hit)}'
     return bytes(out)
+
+
+def moved(data: bytes, to: dict[str, tuple[tuple[float, float, float], tuple[float, float, float]]]) -> bytes:
+    """`data` with each point named in `to` (every record of it) at a new (position, point it faces)."""
+    out = bytearray(data)
+    hit = set()
+    for c, p in _records(data):
+        if p.name in to:
+            pos, face = to[p.name]
+            struct.pack_into('>3f', out, c + 4, *pos)
+            struct.pack_into('>3f', out, c + 0x14, *face)
+            hit.add(p.name)
+    assert hit == set(to), f'points not found: {sorted(set(to) - hit)}'
+    return bytes(out)
