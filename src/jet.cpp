@@ -98,7 +98,7 @@ constexpr Kind kKinds[kRoleCount]={
     {"multirole",7004.0f,Prefer::any,true, 170.0f,190.0f,100.0f, 12.0f,18.0f, 6.0f,2.0f, 280.0f, 900.0f,75.0f,1600.0f, 500.0f,60.0f,
      1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f,5},
     {"carrier",7005.0f,Prefer::any,false, 60.0f,60.0f,40.0f, 4.0f,4.0f, 1.3f,0.35f, 230.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
-     1300.0f,100.0f, 0.0f,0.0f, 1800.0f, 0.0f,4.0f,6},
+     450.0f,80.0f, 0.0f,0.0f, 1800.0f, 0.0f,4.0f,6},   // over its anchor, its drones do the reaching (2026-10-03: 1300 m out)
     {"drone",7006.0f,Prefer::any,true, 140.0f,160.0f,60.0f, 25.0f,25.0f, 8.0f,3.5f, 120.0f, 500.0f,35.0f,700.0f, 350.0f,30.0f,
      300.0f,40.0f, 50.0f,20.0f, 1800.0f, 0.0f,1.0f,7},
 };
