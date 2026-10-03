@@ -27,6 +27,7 @@
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
+#include <cwchar>
 #include <malloc.h>
 
 namespace crew {
@@ -118,6 +119,15 @@ constexpr ULONGLONG kStaleMs=1500;
 // addBody kAddBody) leaves out the body of a wingman (kBodyObject: body id -> object) when the bullet's
 // owner (core = collector+kCollectorCore, owner at core+kBulletOwner) is a jet of the same flight; all
 // else is the stock function's (friendly fire stays as it is).
+// Elevons (EDF6VC_JET.MRAB, tools/mdb_jet.py, docs/mdb-format.md §3-4): the tailless bomber's outer
+// trailing edges, bones elevon_L/R under bomber501, hinged along their local X. The model instance is at
+// veh+kModelInst (bone records at +kInstBones, kBoneStride each, name at +0, local 4x4 at +kBoneLocal,
+// count at +kInstBoneCount); local = Rx(theta) x bind (row vectors), theta > 0 = trailing edge up. Both up
+// pitch the nose up, opposite they roll: kElevonMax at the full pitch rate (maxG) or roll rate, moved at
+// most kElevonRate. The engine makes world = local x parent world each frame.
+constexpr std::size_t kModelInst=0xEE0,kInstBones=0x10,kInstBoneCount=0x20,kBoneStride=0x110,kBoneAuto=0x8,kBoneLocal=0x70;
+constexpr float kElevonMax=0.35f,kElevonRate=2.0f;
+const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 constexpr unsigned kPlacedFlight=1;
 constexpr ULONGLONG kFlightGapMs=20000;
 constexpr unsigned kAddBodySlot=0x179E128,kAddBody=0x232AA0,kBodyObject=0x108260;
@@ -175,6 +185,10 @@ struct Jet {
     const char* why;         // why it withdrew
     bool launched;           // made by JetLaunch: anchor is its strike point
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
+    const unsigned char* model;   // the model instance its elevons were found in (null: not looked yet)
+    unsigned char* elevon[2];     // their bone records, null without (a model without elevons)
+    float elevonBind[2][16],elevonAt[2],elevonSet[2][16];
+    bool elevonWritten,elevonLogged;
     ULONGLONG fuelMs;
     unsigned char* ifc;      // the bomb bay (see kIfcCtor), or nullptr
     float bombAt[3],bombDir[3],bombAlt,bombSpeed,fireDist,reach;
@@ -388,6 +402,65 @@ void Attitude(Jet& j,const Kind& k,const unsigned char* v,const float* nose,cons
     const float l=Len(w);
     if(l>k.roll)for(int i=0;i<3;++i)w[i]*=k.roll/l;
     std::memcpy(j.omega,w,12);
+}
+
+// The bone record named `name` in model instance `inst`, or nullptr.
+unsigned char* BoneRecord(const unsigned char* inst,const wchar_t* name) noexcept {
+    if(!Readable(inst,kInstBoneCount+4))return nullptr;
+    const auto count=At<std::int32_t>(inst,kInstBoneCount);
+    const auto bones=At<unsigned char*>(inst,kInstBones);
+    if(count<=0 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return nullptr;
+    for(std::int32_t i=0;i<count;++i) {
+        unsigned char* rec=bones+static_cast<std::size_t>(i)*kBoneStride;
+        const auto n=At<const wchar_t*>(rec,0);
+        if(n && Readable(n,32) && std::wcsncmp(n,name,16)==0)return rec;
+    }
+    return nullptr;
+}
+
+// The elevons after the commanded turn (see kElevonMax).
+void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
+    const auto inst=At<const unsigned char*>(v,kModelInst);
+    if(!inst)return;
+    if(inst!=j.model) {
+        j.model=inst;j.elevonWritten=false;
+        for(int i=0;i<2;++i) {
+            j.elevon[i]=BoneRecord(inst,kElevonNames[i]);
+            if(j.elevon[i])std::memcpy(j.elevonBind[i],j.elevon[i]+kBoneLocal,64);
+            j.elevonAt[i]=0.0f;
+        }
+        Log("JET v=%p elevons: %s (auto %d/%d)",v,j.elevon[0] && j.elevon[1] ? "found" : "none in this model",
+            j.elevon[0] ? j.elevon[0][kBoneAuto] : -1,j.elevon[1] ? j.elevon[1][kBoneAuto] : -1);
+    }
+    if(!j.elevon[0] || !j.elevon[1])return;
+    // Something else writing them (the animation) would undo every frame: said once.
+    if(j.elevonWritten && !j.elevonLogged && (std::memcmp(j.elevon[0]+kBoneLocal,j.elevonSet[0],64) ||
+                                             std::memcmp(j.elevon[1]+kBoneLocal,j.elevonSet[1],64))) {
+        j.elevonLogged=true;
+        Log("JET v=%p elevons: their local matrices were rewritten by the game between frames",v);
+    }
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const float* r=m;const float* u=m+4;const float* f=m+8;   // r: the model's +x, the right wing
+    float c[3];
+    Cross(j.omega,f,c);const float pitch=Dot(c,u);             // nose toward the body's up
+    Cross(j.omega,r,c);const float roll=-Dot(c,u);             // right wing going down
+    const float s=Len(j.vel),pitchMax=k.maxG*kG/(s>k.minSpeed ? s : k.minSpeed);
+    const float p=Clamp(pitch/pitchMax,-1.0f,1.0f),q=Clamp(roll/k.roll,-1.0f,1.0f);
+    const float want[2]={Clamp((p-q)*kElevonMax,-kElevonMax,kElevonMax),Clamp((p+q)*kElevonMax,-kElevonMax,kElevonMax)};
+    for(int i=0;i<2;++i) {
+        j.elevonAt[i]+=Clamp(want[i]-j.elevonAt[i],-kElevonRate*dt,kElevonRate*dt);
+        const float co=std::cos(j.elevonAt[i]),si=std::sin(j.elevonAt[i]);
+        const float* b=j.elevonBind[i];
+        float* o=j.elevonSet[i];
+        for(int x=0;x<4;++x) {
+            o[x]=b[x];
+            o[4+x]=co*b[4+x]+si*b[8+x];
+            o[8+x]=-si*b[4+x]+co*b[8+x];
+            o[12+x]=b[12+x];
+        }
+        std::memcpy(j.elevon[i]+kBoneLocal,o,64);
+    }
+    j.elevonWritten=true;
 }
 
 // A unit direction to `goal` whose climb is limited to `maxClimb` (sine).
@@ -1045,6 +1118,7 @@ void JetFrame(unsigned char* v) noexcept {
     float dir[3]={j->vel[0],j->vel[1],j->vel[2]};
     if(!Normalize(dir))std::memcpy(dir,nose,12);
     Attitude(*j,kind,v,dir,up);
+    Elevons(*j,kind,v,dt);
     j->ready=true;
     BayFrame(*j,pos,nose);
     Fire(*j,v,pos,nose,lead,gunsOk,arms,ms);

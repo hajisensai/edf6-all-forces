@@ -111,6 +111,9 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _GUNS + (_MISSILE,)),
 }
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
+# The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
+JET_ELEVON_FILE = 'EDF6VC_JET.MRAB'
+JET_ELEVON_MODEL = ['app:/object/edf6vc_jet.mrab', 'bomber501.mdb']
 JET_ROOT_BONE = 'mdl'
 # The V506 MAB block's locator parent names (UTF-16, block offsets), shortened in place to JET_ROOT_BONE:
 # the bomber has only `mdl` and `bomber501` (docs/jet-model-re.md §1, §3.3).
@@ -148,7 +151,8 @@ def _jet_ragdoll(blob: bytes) -> bytes:
     return sgowrite.write(version, inner)
 
 
-def jet_sgo(game: Game, name: str) -> bytes:
+def jet_sgo(game: Game, name: str, model: list[str] | None = None) -> bytes:
+    """`model`: the model archive and file (default JET_MODEL, the stock bomber)."""
     import sgowrite
     jet = JETS[name]
     version, m = sgowrite.read(game.read('OBJECT', DERIVED[name] + '.SGO'))
@@ -160,11 +164,12 @@ def jet_sgo(game: Game, name: str) -> bytes:
     setup[3] = [stock.get(w, [w, [0.0001, 0.1]]) for w in jet.weapons] + [stock['app:/weapon/v_fuel01.sgo']]
     m['mission_setup'] = setup
     m['game_object_durability'] = jet.durability
+    model_ref = model
     model = m['animation_model']
     mab = model[2]
     for at, old in JET_MAB_BONES:
         mab = sgowrite.replace_utf16(mab, at, old, JET_ROOT_BONE)
-    m['animation_model'] = [list(JET_MODEL), model[1], mab]
+    m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
     m['animation_model_bone_mapping'] = [JET_ROOT_BONE, 'bomber501']
     bones = {'body', 'rotor', 'tailRotor'}
     m['vehicle_weapon_setting'] = [[JET_ROOT_BONE, 0]] * len(jet.weapons) + [[JET_ROOT_BONE, -1]]
@@ -453,10 +458,10 @@ def _utf16_at(buf: bytes, off: int) -> str:
     return buf[off:end].decode('utf-16le')
 
 
-def vehicle_sgo(game: Game, sgo_name: str) -> bytes:
+def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
     if sgo_name in JETS:
-        return jet_sgo(game, sgo_name)
+        return jet_sgo(game, sgo_name, jet_model)
     stock = DERIVED.get(sgo_name)
     if stock:
         return as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
@@ -479,10 +484,11 @@ def object_dir(game_root: str) -> str:
 def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only)."""
     _remove_derived(game_root, keep=wanted)
+    elevons = os.path.isfile(os.path.join(object_dir(game_root), JET_ELEVON_FILE))
     for name in sorted(wanted):
         os.makedirs(object_dir(game_root), exist_ok=True)
         with open(os.path.join(object_dir(game_root), name.upper() + '.SGO'), 'wb') as f:
-            f.write(vehicle_sgo(game, name))
+            f.write(vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None))
 
 
 def _remove_derived(game_root: str, keep: set[str] = frozenset()) -> bool:
