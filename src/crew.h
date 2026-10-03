@@ -59,6 +59,9 @@ struct Config {
     bool carrierLaser=true;    // with a submarine carrier out, the e508 teleportation ships charge and fire a portal laser (carrierlaser.cpp)
     float carrierLaserDamage=2500.0f;// the main beam's damage
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
+    bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
+    int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
+    float vehicleHudRange=500.0f;// ...within this many metres of the player
 };
 extern Config cfg;
 
@@ -227,6 +230,25 @@ float SubHullGap(const float* p) noexcept;
 bool InstallLaser() noexcept;                         // at load
 void PreloadLaser() noexcept;                         // from the mission's player preload
 void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
+
+// hud.cpp: the vehicle HUD (docs/hud-re.md), drawn from the follower gauge's call (subcarrier.cpp GaugeHook).
+bool InstallHud() noexcept;                         // at load: checks the draw and text functions it calls
+void HudSee(unsigned char* vehicle) noexcept;       // from every vehicle's input hook (game thread): a readout's data
+// A carrier's panel (subcarrier.cpp fills it every draw from its game-thread copies): the hull, each deck part.
+struct CarrierPanel {
+    float hull,hullMax;
+    int parts;
+    struct Part { const char* name; float hp,max,repairSec; bool down; } part[4];
+};
+// From the follower gauge's draw (any thread): the readouts and `count` carrier panels. `viewProj`, `ctx` and
+// `viewport` as the gauge drawer 0x804300 gets them.
+void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept;
+// What jet.cpp flies a jet as (game thread): its role's name, seconds of fuel left (-1: none, a carrier's drone),
+// a carrier's drone launches left (-1: not a carrier), whether it is withdrawing; false when it does not fly it.
+struct JetHudInfo { const char* role; float fuelSec; int drones; bool leaving; };
+bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
+// A called heli's fuel (heli.cpp, game thread): seconds until it flies off (0: leaving); false with no limit.
+bool HeliFuel(const void* vehicle,float* sec) noexcept;
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.

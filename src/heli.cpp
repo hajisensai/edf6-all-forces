@@ -1567,6 +1567,16 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+bool HeliFuel(const void* vehicle,float* sec) noexcept {
+    for(const auto& h:helis) {
+        if(h.vehicle!=vehicle || !h.called || h.ctrl!=At<const void*>(vehicle,kSelfCtrl))continue;
+        const ULONGLONG ms=GameMs();
+        *sec=h.leaving || ms>=h.leaveAt ? 0.0f : static_cast<float>(h.leaveAt-ms)*0.001f;
+        return true;
+    }
+    return false;
+}
+
 void HeliReap(const void* self) noexcept {
     using DeleteFn=void(*)(void*);
     using KickFn=void(*)(void*,void*);

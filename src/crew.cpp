@@ -351,6 +351,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
         HeliReap(v);
         if(IsHelicopter(v))HeliFrame(v);
         if(IsGroundRobo(v))GroundFrame(v);
+        HudSee(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     QueryPerformanceCounter(&t2);
     SlowLog(I,vehicle,t1.QuadPart-t0.QuadPart,t2.QuadPart-t1.QuadPart);
