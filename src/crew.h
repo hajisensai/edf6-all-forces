@@ -128,7 +128,6 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
 // be made (not preloaded this mission, profile mismatch): the caller keeps the stock behaviour then.
 bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec) noexcept;
-void JetBoard(unsigned char* vehicle) noexcept;    // from its own input hook: seats a launched jet's pilot
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;

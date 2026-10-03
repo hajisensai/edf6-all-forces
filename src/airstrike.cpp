@@ -23,7 +23,7 @@ constexpr std::size_t kIfcPlanes=0x80,kIfcLeft=0x84,kStartTarget=0x50;
 constexpr unsigned kStrikeFactorySlot=0x17D46B0,kStrikeCreate=0x5B3F00,kStrikePlaneStore=0x5B4481;
 constexpr unsigned kBombingPlaneVtable=0x17D3A30,kDelete=0x118A1B0;
 constexpr std::size_t kStrikePlane=0x168,kStrikePlaneCtrl=0x170,kCtrlUses=8;
-constexpr float kApproach=1000.0f,kAboveTarget=150.0f,kMinClear=100.0f,kWingSpacing=70.0f,kWingStep=15.0f;
+constexpr float kApproach=1000.0f,kAboveTarget=150.0f,kWingSpacing=70.0f,kWingStep=15.0f;
 constexpr float kLookRadius=350.0f,kFlyerClear=15.0f;
 
 const unsigned char kIfcStartSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05};
@@ -52,13 +52,6 @@ void Count(void* ctx,const void*,const float* p) noexcept {
     (flying ? c.flyers : c.ground)+=1;
 }
 
-// Raises `p` to at least kMinClear over the ground (terrain or buildings) under it.
-void ClearGround(float* p) noexcept {
-    const float top[3]={p[0],p[1]+600.0f,p[2]},bottom[3]={p[0],p[1]-1500.0f,p[2]};
-    float hit[3];
-    if(MapRay(top,bottom,hit)>=0.0f && p[1]<hit[1]+kMinClear)p[1]=hit[1]+kMinClear;
-}
-
 // Launches up to `planes` jets at `target` (see the file comment); how many went.
 int LaunchFlight(int planes,const float* target) noexcept {
     const int n=planes<1 ? 1 : planes>cfg.jetMaxPerCall ? cfg.jetMaxPerCall : planes;
@@ -76,7 +69,6 @@ int LaunchFlight(int planes,const float* target) noexcept {
         const float off=(static_cast<float>(i)-static_cast<float>(n-1)*0.5f)*kWingSpacing;
         float from[3]={target[0]-dir[0]*kApproach+side[0]*off,target[1]+kAboveTarget+kWingStep*static_cast<float>(i),
                        target[2]-dir[2]*kApproach+side[2]*off};
-        ClearGround(from);
         const bool fighter=i<fighters;
         if(JetLaunch(fighter,from,dir,target,cfg.jetSortieSec) || (fighter && JetLaunch(false,from,dir,target,cfg.jetSortieSec)))++launched;
     }

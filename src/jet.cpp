@@ -13,9 +13,14 @@
 // of ammo, out of fuel (cfg.jetFuelSec, a launched sortie cfg.jetSortieSec) or below kWithdrawHp of its HP
 // it flies off and is deleted out of the player's sight.
 // Two ways in: a mission places one (the test range's CreateFriend: it guards the player), or JetLaunch
-// makes one at run time (the airstrike takeovers, airstrike.cpp): created like the script's CreateFriend
-// (CreateObject on the preloaded SGO, team friend), it flies at its strike point from the first frame and
-// gets its NPC pilot (RideAi) on its own first update, not inside whatever update launched it.
+// makes one at run time (the airstrike takeovers, airstrike.cpp) exactly like the script's CreateFriend:
+// CreateObject on the preloaded SGO, team friend, RideAi(true). Only RideAi with true reads the SGO's
+// mission_setup (0x633063 -> slot 46), which is what writes the jet mark, the weapons and the heli
+// parameters; it then flies at its strike point from the first frame.
+// Time is the plugin's game clock (GameMs): wall time that stops while no vehicle updates (pause menu,
+// loading), so a pause neither burns fuel nor makes a jet look gone. A table entry belongs to one object:
+// the control block of its weak-this (object +0x30, what Delete 0x118A1B0 hands the manager), which a new
+// object at a freed jet's address does not share.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "memory.h"
@@ -45,6 +50,7 @@ constexpr float kAttGain=6.0f;         // 1/s: the nose closes on where it shoul
 constexpr float kMaxOmega=4.0f;        // rad/s
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this
 constexpr float kLookAhead=2.5f;       // s: the ground and the ceiling are checked this far ahead too
+constexpr float kLaunchClear=100.0f;   // a launched jet starts at least this high over the ground
 constexpr float kCeilingGap=12.0f;
 constexpr float kStrikeAlt=160.0f,kFighterAlt=220.0f;
 constexpr float kPatrolRadius=300.0f,kPatrolStep=60.0f;   // per jet, so they do not share one circle
@@ -67,8 +73,13 @@ constexpr float kStrikeRange=600.0f,kFighterRange=900.0f;   // m from the anchor
 // kGoneStuck after kStuckMs of withdrawing.
 constexpr float kWithdrawHp=0.25f,kGone=1000.0f,kGoneStuck=600.0f,kWithdrawClimb=300.0f;
 constexpr ULONGLONG kStuckMs=60000;
-constexpr ULONGLONG kStaleMs=1500;   // a table entry not flown this long is another object's now
-constexpr ULONGLONG kBoardMs=3000;   // a launched jet not boarded by then is dropped from the table
+constexpr ULONGLONG kStaleMs=1500;   // game ms: a table entry not flown this long is free
+constexpr ULONGLONG kPauseMs=250;    // a wall-clock gap between updates longer than this was a pause
+constexpr ULONGLONG kFlyerMemoMs=500;
+// Diving it must keep the height a kMaxG pull-out takes (v^2/(n g) (1 - cos dive)) plus kReact seconds of sink.
+constexpr float kReact=0.5f;
+constexpr std::size_t kSelfCtrl=0x30,kObjFlags=0x18;
+constexpr unsigned char kObjDeleted=4;
 
 // Run-time spawning (docs/mission-airstrike-re.md §3): the preload manager *(image+kPreloadMgr), the
 // object manager *(image+kObjectMgr), CreateObject(manager, &matrix, path, &InitParam) -> the object (the
@@ -84,6 +95,7 @@ const char* const kModeNames[]={"takeoff","patrol","approach","dive","pull","ext
 
 struct Jet {
     unsigned char* vehicle;
+    const void* ctrl;        // the vehicle's weak-this control block: which object this entry is
     bool fighter;
     Mode mode;
     ULONGLONG bornAt,seen,modeAt,missileAt,loggedAt;
@@ -95,12 +107,44 @@ struct Jet {
     bool flyer;
     float aim[3],tgtPrev[3],tgtVel[3];
     float out[3];            // extend / run-out direction
-    bool reap;               // withdrawn: delete from another vehicle's update (JetReap)
+    bool reap;               // withdrawn: delete from another object's update (JetReap)
     const char* why;         // why it withdrew
-    bool launched;           // made by JetLaunch: anchor is its strike point, boarded by JetBoard
+    bool launched;           // made by JetLaunch: anchor is its strike point
     ULONGLONG fuelMs;
 };
 Jet jets[16]{};
+
+// The game clock (see the file comment); every jet entry point reads it.
+ULONGLONG clockWall=0,clockGame=0;
+ULONGLONG GameMs() noexcept {
+    const ULONGLONG wall=GetTickCount64();
+    if(clockWall) {
+        const ULONGLONG d=wall-clockWall;
+        clockGame+=d>kPauseMs ? 16 : d;
+    }
+    clockWall=wall;
+    return clockGame;
+}
+
+const void* SelfCtrl(const unsigned char* v) noexcept { return At<const void*>(v,kSelfCtrl); }
+
+// The entry flying `v` (the same object, flown within kStaleMs), or nullptr.
+Jet* FindJet(const unsigned char* v,ULONGLONG ms) noexcept {
+    for(auto& j:jets)
+        if(j.vehicle==v && j.ctrl==SelfCtrl(v) && ms-j.seen<=kStaleMs)return &j;
+    return nullptr;
+}
+
+// A slot for a new jet: an empty one, else one not flown for kStaleMs; every other entry of `v` is
+// cleared. nullptr with all 16 flying.
+Jet* FreeSlot(const unsigned char* v,ULONGLONG ms) noexcept {
+    Jet* free=nullptr;
+    for(auto& j:jets) {
+        if(j.vehicle==v)j=Jet{};
+        if(!free && (!j.vehicle || ms-j.seen>kStaleMs))free=&j;
+    }
+    return free;
+}
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 float Len(const float* a) noexcept { return std::sqrt(Dot(a,a)); }
@@ -126,11 +170,6 @@ bool IsJetVehicle(const unsigned char* v,bool* fighter) noexcept {
     const float k=At<float>(v,kSpeedGain);
     if(fighter)*fighter=k==kFighterMark;
     return k==kStrikeMark || k==kFighterMark;
-}
-
-Jet* FindJet(const void* v) noexcept {
-    for(auto& j:jets)if(j.vehicle==v)return &j;
-    return nullptr;
 }
 
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept {
@@ -195,13 +234,24 @@ void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float
 // The target: flyers first for a fighter (any enemy more than kFlyerClear over the ground), ground
 // enemies first for a strike jet; nearest to the jet among those within `range` of `anchor`, the current
 // one counting 100 m nearer.
-struct Pick { Jet* j; const float* pos; const float* anchor; float range; const void* best; float score,aim[3]; bool flyer; };
+struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; const void* best; float score,aim[3]; bool flyer; };
+// Whether `object` at `p` flies (no ground within the probe, or more than kFlyerClear over it); one ray
+// per object per kFlyerMemoMs, shared by every jet.
+struct FlyerMemo { const void* object; ULONGLONG at; bool flyer; };
+FlyerMemo flyerMemo[256]{};
+bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
+    auto& m=flyerMemo[(reinterpret_cast<std::uintptr_t>(object)>>4)&255];
+    if(m.object==object && ms-m.at<kFlyerMemoMs)return m.flyer;
+    const float clear=Clearance(p);
+    m={object,ms,clear<0.0f || clear>kFlyerClear};
+    return m.flyer;
+}
+
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     auto& k=*static_cast<Pick*>(ctx);
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
     if(Dot(d,d)>k.range*k.range)return;
-    const float clear=Clearance(p);
-    const bool flyer=clear>kFlyerClear;
+    const bool flyer=Flies(object,p,k.ms);
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
     if(object==k.j->target)score-=100.0f;
@@ -271,7 +321,10 @@ void Level(const float* pos,const float* dir,float height,float* out) noexcept {
     Normalize(out);
 }
 
-// Keeps `want` off the ground and under the ceiling, now and kLookAhead seconds out.
+// Keeps `want` off the ground and under the ceiling. The ground is the highest under it now and
+// kLookAhead seconds along its track; sinking, the lowest it gets is where a kMaxG pull-out started
+// kReact seconds from now bottoms out (so a dive runs down to kMinAlt instead of pulling up 100 m early);
+// climbing, the ceiling is checked kLookAhead seconds out.
 void Guard(const Jet& j,const float* pos,float* want) noexcept {
     const float s=Len(j.vel);
     const float ahead[3]={pos[0]+j.vel[0]*kLookAhead,pos[1]+j.vel[1]*kLookAhead,pos[2]+j.vel[2]*kLookAhead};
@@ -279,13 +332,18 @@ void Guard(const Jet& j,const float* pos,float* want) noexcept {
     const float here=Clearance(pos),there=Clearance(probe);
     const float lowest=probe[1]-(there>=0.0f ? there : 1e9f);
     const float floorY=(here>=0.0f ? pos[1]-here : -1e9f)>lowest ? pos[1]-here : lowest;
-    const float predicted=pos[1]+(s>1.0f ? j.vel[1]*kLookAhead : 0.0f);
-    if(predicted<floorY+kMinAlt || pos[1]<floorY+kMinAlt) {
-        const float need=Clamp((floorY+kMinAlt-predicted)/40.0f,0.3f,0.8f);
+    float bottom=pos[1];
+    if(s>1.0f && j.vel[1]<0.0f) {
+        const float sinDive=Clamp(-j.vel[1]/s,0.0f,1.0f),cosDive=std::sqrt(1.0f-sinDive*sinDive);
+        bottom-=s*s/(kMaxG*kG)*(1.0f-cosDive)-j.vel[1]*kReact;
+    }
+    if(bottom<floorY+kMinAlt) {
+        const float need=Clamp((floorY+kMinAlt-bottom)/40.0f,0.3f,0.8f);
         if(want[1]<need){want[1]=need;Normalize(want);}
     }
     const float top=Ceiling()-kCeilingGap;
-    if(predicted>top && want[1]>-0.15f){want[1]=-0.15f;Normalize(want);}
+    const float rising=pos[1]+(j.vel[1]>0.0f ? j.vel[1]*kLookAhead : 0.0f);
+    if(rising>top && want[1]>-0.15f){want[1]=-0.15f;Normalize(want);}
 }
 
 // The circle round the anchor, kPatrolRadius out (plus kPatrolStep per jet), counterclockwise.
@@ -398,8 +456,9 @@ void __fastcall PhysicsHook(void* vehicle) {
     nextPhysics(vehicle);
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
-        Jet* j=FindJet(v);
-        if(!j || !j->ready || v[kDead] || GetTickCount64()-j->seen>200 || !IsJetVehicle(v,nullptr))return;
+        const ULONGLONG ms=GameMs();
+        Jet* j=FindJet(v,ms);
+        if(!j || !j->ready || v[kDead] || ms-j->seen>200 || !IsJetVehicle(v,nullptr))return;
         const auto body=At<void*>(v,kBody);
         if(!body)return;
         alignas(16) float lin[4]={j->vel[0],j->vel[1],j->vel[2],0.0f},ang[4]={j->omega[0],j->omega[1],j->omega[2],0.0f};
@@ -451,41 +510,54 @@ void PreloadJets() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){preloaded[0]=preloaded[1]=false;}
 }
 
+namespace {
+// Raises `p` to at least kLaunchClear over the ground (terrain or buildings) under it: the jet has a
+// rigid body, unlike the rail planes whose start points it takes.
+void ClearGround(float* p) noexcept {
+    const float top[3]={p[0],p[1]+600.0f,p[2]},bottom[3]={p[0],p[1]-1500.0f,p[2]};
+    float hit[3];
+    if(MapRay(top,bottom,hit)>=0.0f && p[1]<hit[1]+kLaunchClear)p[1]=hit[1]+kLaunchClear;
+}
+
+// CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not
+// a jet after all (an SGO without the mark), or nullptr.
+unsigned char* SpawnJet(int kind,const float* m) noexcept {
+    InitParam param{image+kInitParamVtable,{}};
+    unsigned char* v=reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,kJetSgo[kind],&param);
+    if(!v)return nullptr;
+    reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
+    reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
+    if(IsJetVehicle(v,nullptr))return v;
+    Log("JET launch: %p is no jet (mark %.0f): deleted",v,At<float>(v,kSpeedGain));
+    reinterpret_cast<DeleteFn>(image+kDelete)(v);
+    return nullptr;
+}
+}  // namespace
+
 bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec) noexcept {
     const int kind=fighter ? 1 : 0;
-    if(!spawnOk || !cfg.jetPilot || !preloaded[kind])return false;
+    if(!spawnOk || !cfg.jetPilot || !preloaded[kind] || !At<void*>(image,kObjectMgr))return false;
     __try {
-        const auto mgr=At<void*>(image,kObjectMgr);
-        if(!mgr)return false;
+        const ULONGLONG ms=GameMs();
+        Jet* j=FreeSlot(nullptr,ms);
+        if(!j){Log("JET launch: 16 jets flying");return false;}
         float fwd[3]={heading[0],0.0f,heading[2]};
         if(!Normalize(fwd)){fwd[0]=0;fwd[2]=1;}
+        float start[3]={from[0],from[1],from[2]};
+        ClearGround(start);
         // Rows right, up, forward, position, as BombingPlane_Init builds its matrix (right = up x forward).
-        alignas(16) const float m[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, from[0],from[1],from[2],1};
-        InitParam param{image+kInitParamVtable,{}};
-        unsigned char* v=reinterpret_cast<CreateObjectFn>(image+kCreateObject)(mgr,m,kJetSgo[kind],&param);
-        if(!v || !IsJetVehicle(v,nullptr)){Log("JET launch: CreateObject gave %p",v);return false;}
-        reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
-        Jet* j=&jets[0];
-        for(auto& o:jets)if(!o.vehicle || o.seen<j->seen)j=&o;
-        const ULONGLONG ms=GetTickCount64();
-        *j=Jet{};j->vehicle=v;j->fighter=fighter;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;
+        alignas(16) const float m[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, start[0],start[1],start[2],1};
+        unsigned char* v=SpawnJet(kind,m);
+        if(!v)return false;
+        FreeSlot(v,ms);   // entries left at this address by a jet shot down there
+        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);j->fighter=fighter;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;
         QueryPerformanceCounter(&j->last);
         std::memcpy(j->anchor,target,12);j->mode=Mode::patrol;j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
         for(int i=0;i<3;++i)j->vel[i]=fwd[i]*kCruise;
-        Log("JET v=%p launched: %s from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) fuel=%lus",v,fighter ? "fighter" : "strike",
-            from[0],from[1],from[2],target[0],target[1],target[2],fuelSec);
+        Log("JET v=%p launched: %s from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) fuel=%lus driver=%d",v,fighter ? "fighter" : "strike",
+            start[0],start[1],start[2],target[0],target[1],target[2],fuelSec,SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET launch: fault");return false;}
-}
-
-void JetBoard(unsigned char* v) noexcept {
-    Jet* j=FindJet(v);
-    if(!j || !j->launched || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::none)return;
-    const ULONGLONG ms=GetTickCount64();
-    if(ms-j->bornAt>kBoardMs){Log("JET v=%p never boarded: dropped",v);*j=Jet{};return;}
-    reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,false);
-    j->seen=ms;
-    Log("JET v=%p boarded: driver=%d",v,SeatRider(SeatAt(v,0))==Rider::dummy);
 }
 
 bool IsJet(const void* vehicle) noexcept {
@@ -494,17 +566,14 @@ bool IsJet(const void* vehicle) noexcept {
 
 void JetFrame(unsigned char* v) noexcept {
     if(!physicsOk)return;
-    const ULONGLONG ms=GetTickCount64();
-    Jet* j=FindJet(v);
-    if(j && ms-j->seen>kStaleMs)*j=Jet{};   // a new object at a dead jet's address
-    if(j && !j->vehicle)j=nullptr;
+    const ULONGLONG ms=GameMs();
+    Jet* j=FindJet(v,ms);
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     if(!j) {
-        j=&jets[0];
-        for(auto& o:jets)if(!o.vehicle || o.seen<j->seen)j=&o;
-        if(j->vehicle && !j->reap)Log("JET table full: dropping v=%p",j->vehicle);
-        *j=Jet{};j->vehicle=v;IsJetVehicle(v,&j->fighter);j->bornAt=j->modeAt=ms;j->last=now;
+        j=FreeSlot(v,ms);
+        if(!j)return;   // 16 jets flying: this one hovers until a slot frees
+        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->fighter);j->bornAt=j->modeAt=ms;j->last=now;
         std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->fuelMs=static_cast<ULONGLONG>(cfg.jetFuelSec)*1000;
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,j->fighter ? "fighter" : "strike",At<float>(v,kHp),Ceiling());
     }
@@ -530,7 +599,7 @@ void JetFrame(unsigned char* v) noexcept {
     else if(arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile))Withdraw(*j,"out of ammo",ms);
 
     // The target and its motion.
-    Pick pick{j,pos,anchor,j->fighter ? kFighterRange : kStrikeRange,nullptr,0.0f,{},false};
+    Pick pick{j,pos,anchor,j->fighter ? kFighterRange : kStrikeRange,ms,nullptr,0.0f,{},false};
     if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff)VisitEnemies(v,&VisitTarget,&pick);
     if(pick.best) {
         const bool same=pick.best==j->target;
@@ -589,13 +658,16 @@ void JetFrame(unsigned char* v) noexcept {
 }
 
 void JetReap(const void* self) noexcept {
+    const ULONGLONG ms=GameMs();
     for(auto& j:jets) {
         if(!j.vehicle || !j.reap || j.vehicle==self)continue;
         unsigned char* v=j.vehicle;
-        // Only one flown a moment ago: a jet shot down meanwhile is the game's to clean up (and may be gone).
-        const bool live=GetTickCount64()-j.seen<200;
+        // Only the same object, flown a moment ago (game time): a jet shot down meanwhile is the game's to
+        // clean up (and may be gone).
+        const bool live=ms-j.seen<=kStaleMs && Readable(v,kSeats+8) && SelfCtrl(v)==j.ctrl;
+        const void* const ctrl=j.ctrl;
         j=Jet{};
-        if(!live || !Readable(v,kSeats+8) || v[kDead] || !IsJetVehicle(v,nullptr))continue;
+        if(!live || v[kDead] || (v[kObjFlags]&kObjDeleted) || SelfCtrl(v)!=ctrl || !IsJetVehicle(v,nullptr))continue;
         if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
         reinterpret_cast<DeleteFn>(image+kDelete)(v);
         Log("JET v=%p gone (deleted)",v);
