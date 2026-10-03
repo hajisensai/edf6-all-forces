@@ -35,12 +35,13 @@ class Slot:
     label: str
 
 
-# Slots, by their position in the in-game offline mission list (checked by playing them; the order
-# in MISSIONLIST.OFFLINE.LIST.SGO is not the on-screen order). The opening missions are the ruined
-# world, where the Air Raider's vehicle and air support requests are accepted but never arrive.
-# Item 14 「转机」 is M045, the plain the range is built from, and requests do arrive there.
+# Slots, by their position in the in-game offline mission list: item N is entry N-1 of
+# MISSION/MISSIONLIST.OFFLINE.LIST.SGO, and its title is entry N-1 of MISSIONLIST.OFFLINE.TXT.*.SGO
+# (item 14 「转机」 = RM015, item 2 「非法入侵者」 = M001). The range only borrows the slot: its map and
+# points are always M045's (SOURCE). The opening missions are the ruined world, where the Air Raider's
+# vehicle and air support requests are accepted but never arrive; in item 14 they do.
 SLOTS = [
-    Slot('M045', 14, '列表第 14 项「转机」（M045）：空袭兵能呼叫载具和空中支援'),
+    Slot('RM015', 14, '列表第 14 项「转机」（RM015）：空袭兵能呼叫载具和空中支援'),
     Slot('M001', 2, '列表第 2 项「非法入侵者」（M001）：新存档也能进，但前期剧情叫不来载具和空中支援'),
 ]
 DEFAULT_SLOT = SLOTS[0].mission
