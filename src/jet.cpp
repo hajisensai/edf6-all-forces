@@ -1080,7 +1080,11 @@ bool JetFileThere(int kind) noexcept {
 }
 }  // namespace
 
-void PreloadJets() noexcept {
+// Online the jets stay off: a V506 jet is walked into an online-only event path (heli slot 5 ->
+// slot 61 mode 1, 0x6536B3 -> 0x650010) that reads heli parts the jet has not and crashed the game twice
+// on 2026-10-03 (0x650137, then 0x5F866C past the body-part fix). Every flag is cleared, so an offline
+// mission's preload never carries over: the airstrikes stay stock.
+void PreloadJets(bool online) noexcept {
     __try {
         // A new mission, a new map: only the world's walls (see kWorldWall).
         wallCount=0;wallNext=0;
@@ -1088,6 +1092,8 @@ void PreloadJets() noexcept {
             const float x=i<2 ? (i==0 ? 1.0f : -1.0f) : 0.0f,z=i<2 ? 0.0f : (i==2 ? 1.0f : -1.0f);
             walls[wallCount++]=Wall{{x*kWorldWall,0.0f,z*kWorldWall},{x,0.0f,z}};
         }
+        for(auto& p:preloaded)p=false;
+        if(online){Log("JET online mission: jets off, the airstrikes stay stock");return;}
         if(!spawnOk)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         for(int k=0;k<kBodyCount;++k) {

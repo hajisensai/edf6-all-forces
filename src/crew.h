@@ -130,7 +130,7 @@ void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed
 ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused or loading
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 bool InstallJets() noexcept;
-void PreloadJets() noexcept;                       // from the mission's player preload
+void PreloadJets(bool online) noexcept;            // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
 // be made (not preloaded this mission, profile mismatch): the caller keeps the stock behaviour then.
 // `source`: what launched it (any fixed address per kind of source); jets from one source in a row fly
