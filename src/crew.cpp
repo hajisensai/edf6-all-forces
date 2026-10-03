@@ -206,7 +206,7 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
         // The jets are NPC aircraft: their pilot is never bumped for the player (they have no other seat).
-        if(!IsPlayer(static_cast<const unsigned char*>(human)) || IsJet(v))return nullptr;
+        if(!IsPlayer(static_cast<const unsigned char*>(human)) || IsJet(v) || IsSub(v))return nullptr;
         // An NPC still aboard (one moved to a gunner seat, the player gone again) keeps the vehicle on
         // its team, and the stock check then refuses even a free seat: ask again on the vehicle's own.
         const auto team=At<std::int32_t>(v,kTeam),own=OwnTeam(v);
@@ -242,7 +242,7 @@ void __fastcall PromptHook(void* functor,void* object) {
         JetReap(object);   // a withdrawn jet with no other vehicle about (the player on foot)
         HeliReap(object);  // ...and a called heli that left
         if(!inputsHooked)InstallInputs();   // first mission frame: every plugin has loaded by now
-        if(!cfg.bump || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object))return;
+        if(!cfg.bump || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object) || IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
         for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy;

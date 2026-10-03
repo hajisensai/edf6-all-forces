@@ -1350,7 +1350,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
 }  // namespace
 
 void HeliCrewed(const void* vehicle) noexcept {
-    if(IsJet(vehicle))return;   // flown by jet.cpp
+    if(IsJet(vehicle) || IsSub(vehicle))return;   // flown by jet.cpp / subcarrier.cpp
     Heli* slot=Find(vehicle);
     if(!slot){slot=&helis[0];for(auto& h:helis)if(h.seen<slot->seen)slot=&h;}
     *slot=Heli{};slot->vehicle=vehicle;slot->kind=At<const void*>(vehicle,0);slot->crewedAt=slot->seen=GetTickCount64();
@@ -1363,6 +1363,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(!profileOk || vehicle[kDead])return;
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
     if(IsJet(vehicle)){if(cfg.jetPilot)JetFrame(vehicle);return;}
+    if(IsSub(vehicle)){SubFrame(vehicle);return;}   // the submarine carrier (subcarrier.cpp)
     if(!cfg.heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){HeliCrewed(vehicle);h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
@@ -1500,6 +1501,7 @@ bool CheckHeliProfile() noexcept {
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
         InstallJets();
+        InstallSub();   // after the jets: it chains onto their physics hook
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

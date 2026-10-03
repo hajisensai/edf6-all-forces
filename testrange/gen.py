@@ -67,6 +67,7 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_jet_interceptor_mission', '截击机（远程导弹，插件驾驶，测试场生成）'),
     ('edf6tr_jet_multirole_mission', '多用途战斗机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_carrier_mission', '空中航母（放攻击无人机，插件驾驶，测试场生成）'),
+    ('edf6tr_sub_carrier_mission', '航空潜舰（插件驾驶，200 米长，建议单独放；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
     ('v505_tank_mission', '坦克 505'),
@@ -98,6 +99,7 @@ DERIVED: dict[str, str] = {
     'edf6tr_jet_interceptor_mission': 'V506_HELI',
     'edf6tr_jet_multirole_mission': 'V506_HELI',
     'edf6tr_jet_carrier_mission': 'V506_HELI',
+    'edf6tr_sub_carrier_mission': 'V506_HELI',
 }
 
 
@@ -115,6 +117,8 @@ class Jet:
     body: str = 'bomber501'
     anchor: str = 'mdl'
     rigid: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+    # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: all on `anchor`.
+    weapon_bones: tuple[str, ...] = ()
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
@@ -147,6 +151,12 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_drone': Jet(7006.0, 300.0, _ARMS, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                             'EDF6VC_DRONE.MRAB', 'body', 'body',
                             rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
+    # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
+    # object EV603_MARINE's model x 0.12, 200 m long; the box is its hull up to the main deck (the tower
+    # above is not solid). Guns on its forward turrets' (left) barrels, the missile on its missile bay.
+    'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _ARMS, ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
+                                      'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 1.59, -0.91), (14.52, 21.58, 99.84)),
+                                      weapon_bones=('gunA_tilt_l', 'gunB_tilt_l', 'missle_l')),
 }
 JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI'}   # jets that are no range vehicle
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
@@ -228,7 +238,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
-    m['vehicle_weapon_setting'] = [[anchor, 0]] * len(jet.weapons) + [[anchor, -1]]
+    m['vehicle_weapon_setting'] = [[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))] + [[anchor, -1]]
     m['vehicle_dead_effect'] = _rebone(m['vehicle_dead_effect'], bones, anchor)
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
@@ -644,7 +654,8 @@ def jet_models(game_root: str, game: Game, files: set[str]) -> None:
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
     import jet_models
     os.makedirs(object_dir(game_root), exist_ok=True)
-    for f, data in jet_models.build(game).items():
+    models = {f: r for f, r in {**jet_models.MODELS, **jet_models.SUB_MODELS}.items() if f in missing}
+    for f, data in jet_models.build(game, models).items():
         if f in missing:
             with open(os.path.join(object_dir(game_root), f), 'wb') as out:
                 out.write(data)
