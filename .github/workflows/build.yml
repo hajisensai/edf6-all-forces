@@ -1,0 +1,57 @@
+name: Build
+
+# Builds both plugins (EDF6VehicleCrew.dll, EDF6AutoTurret.dll) on every push and pull request.
+# Push a tag vX.Y.Z to also publish a GitHub Release with the plugins and the data builder; the
+# weapon and object files themselves are derived from the game's data and are built by each player
+# from their own install.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build plugins
+        shell: cmd
+        run: call build.cmd
+
+      - name: Check data tools compile
+        shell: pwsh
+        run: python -m py_compile (Get-ChildItem autoturret/tools/*.py, autoturret/third_party/edf6-cpk/*.py).FullName
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "build-$($env:GITHUB_SHA.Substring(0,7))" }
+          $name = "EDF6Vehicles-$version"
+          $root = Join-Path 'build' $name
+          New-Item -ItemType Directory -Force "$root/Mods/Plugins", "$root/tools", "$root/third_party/edf6-cpk" | Out-Null
+          Copy-Item dist/Mods/Plugins/EDF6VehicleCrew.dll, dist/Mods/Plugins/EDF6VehicleCrew.ini, dist/Mods/Plugins/EDF6AutoTurret.dll, dist/Mods/Plugins/EDF6AutoTurret.ini "$root/Mods/Plugins/"
+          Copy-Item autoturret/tools/*.py "$root/tools/"
+          Copy-Item autoturret/third_party/edf6-cpk/*.py, autoturret/third_party/edf6-cpk/LICENSE "$root/third_party/edf6-cpk/"
+          Copy-Item README.md, autoturret/LICENSE $root
+          Copy-Item autoturret/README.md "$root/README.autoturret.md"
+          Copy-Item autoturret/README.zh-CN.md "$root/README.autoturret.zh-CN.md"
+          Compress-Archive -Path "$root/*" -DestinationPath "build/$name.zip"
+          "PACKAGE=$name" >> $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}
+          path: build/${{ env.PACKAGE }}.zip
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME "build/$env:PACKAGE.zip" --title $env:GITHUB_REF_NAME --generate-notes
