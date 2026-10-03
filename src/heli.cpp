@@ -88,9 +88,12 @@ constexpr float kMissileCone=10.0f;  // deg: the missile homes (LockonType 1), s
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
 constexpr float kKeepTarget=30.0f;   // m: the current target counts this much nearer (less switching)
 constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at counts this much farther
-// Formation: a V, kWingGap metres per place; all flown helis keep kSeparation metres apart, pushed by
-// kSeparationGain m/s per metre of overlap.
+// Formation: the helis fly in flights of one type each (see FlightOf), so a flight shares one top speed
+// and turn. A flight is a V, kWingGap metres per place; flights escort kGroupGap apart and hover
+// kGroupStep apart in height. All flown helis keep kSeparation metres apart, pushed by kSeparationGain
+// m/s per metre of overlap.
 constexpr float kWingGap=25.0f,kSeparation=25.0f,kSeparationGain=0.4f;
+constexpr float kGroupGap=60.0f,kGroupStep=10.0f;
 // With no enemy: while the player moves (a 3 m step within kMovingMs) the helis escort in a V on their
 // flank, kEscortAhead metres forward: the player's velocity plus kSlotGain m/s per metre off the slot
 // (at most kSlotCatch). While they stand they orbit them heliFollow metres out at kOrbitSpeed: tangent
@@ -161,6 +164,7 @@ float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,st
 
 struct Heli {
     const void* vehicle;
+    const void* kind;     // its vtable: the type its flight is made of
     ULONGLONG crewedAt,seen,loggedAt,missileAt,targetAt,groundAt;
     LARGE_INTEGER last;
     float prev[3],vel[3];
@@ -283,11 +287,25 @@ bool PlayerInLine(const float* from,const float* to) noexcept {
     return c[0]*c[0]+c[1]*c[1]+c[2]*c[2]<64.0f;
 }
 
-// This heli's place in the formation: how many helis flown right now come before it in `helis`.
-int WingIndex(const Heli& h,ULONGLONG ms) noexcept {
-    int n=0;
-    for(const auto& o:helis){if(&o==&h)break;if(o.vehicle && ms-o.seen<2000)++n;}
-    return n;
+// This heli's flight: the helis flown right now of its type, in `helis` order (the first one leads);
+// `group` numbers the flights in the order their first heli comes, `first` is the first heli of all.
+struct Flight { int group,groups,wing,count; const Heli* leader; const Heli* first; };
+Flight FlightOf(const Heli& h,ULONGLONG ms) noexcept {
+    Flight f{0,0,0,0,nullptr,nullptr};
+    const void* kinds[16];
+    for(const auto& o:helis) {
+        if(!o.vehicle || ms-o.seen>=2000)continue;
+        if(!f.first)f.first=&o;
+        int g=0;
+        while(g<f.groups && kinds[g]!=o.kind)++g;
+        if(g==f.groups)kinds[f.groups++]=o.kind;
+        if(o.kind!=h.kind)continue;
+        f.group=g;
+        if(!f.leader)f.leader=&o;
+        if(&o==&h)f.wing=f.count;
+        ++f.count;
+    }
+    return f;
 }
 
 float Dist2(const float* a,const float* b) noexcept {
@@ -334,28 +352,22 @@ void Arrive(const Heli& h,const float* pos,const float* goal,const float* goalVe
     out[0]+=e[0]/len*want;out[2]+=e[2]/len*want;
 }
 
-// The helis flown right now: how many, and the first of them (the formation leader).
-int ActiveHelis(ULONGLONG ms,const Heli** leader) noexcept {
-    int n=0;*leader=nullptr;
-    for(const auto& o:helis)if(o.vehicle && ms-o.seen<2000){if(!n)*leader=&o;++n;}
-    return n;
-}
-
 // No target: escort the moving player, or orbit the standing one (see kMovingMs). Sets the wanted
 // velocity and height; returns how far it is off its slot (escort) or radius (orbit).
-float Formation(const Heli& h,const float* pos,const float* fwd,int wing,ULONGLONG ms,float* vel,float* height) noexcept {
-    const Heli* leader=nullptr;
-    const int count=ActiveHelis(ms,&leader);
-    const float* lead=leader ? leader->pos : pos;
-    *height=player.pos[1]+cfg.heliHeight+4.0f*static_cast<float>(wing);
+float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl,ULONGLONG ms,float* vel,float* height) noexcept {
+    const float* first=fl.first ? fl.first->pos : pos;
+    const float group=static_cast<float>(fl.group),wing=static_cast<float>(fl.wing);
+    *height=player.pos[1]+cfg.heliHeight+kGroupStep*group+4.0f*wing;
     if(ms-stillAt<kMovingMs) {
-        // A V on the side the leader is on, heliFollow out and kEscortAhead forward; wing n takes
-        // place (n+1)/2 on alternating sides, kWingGap metres back and out per place.
+        // Each flight a V: the first flight on the side the first heli is on, heliFollow out and
+        // kEscortAhead forward, the second on the other side, the next ones kGroupGap farther out,
+        // alternating. Wing n takes place (n+1)/2 on alternating sides, kWingGap back and out per place.
         const float perp[2]={moveDir[2],-moveDir[0]};
-        const float toLead[2]={lead[0]-player.pos[0],lead[2]-player.pos[2]};
-        const float flank=toLead[0]*perp[0]+toLead[1]*perp[1]<0 ? -1.0f : 1.0f;
-        const float place=static_cast<float>((wing+1)/2),side=wing%2 ? 1.0f : -1.0f;
-        const float out=cfg.heliFollow+side*place*kWingGap,ahead=kEscortAhead-place*kWingGap;
+        const float toFirst[2]={first[0]-player.pos[0],first[2]-player.pos[2]};
+        const float flank=(toFirst[0]*perp[0]+toFirst[1]*perp[1]<0 ? -1.0f : 1.0f)*(fl.group%2 ? -1.0f : 1.0f);
+        const float place=static_cast<float>((fl.wing+1)/2),side=fl.wing%2 ? 1.0f : -1.0f;
+        const float out=cfg.heliFollow+kGroupGap*static_cast<float>(fl.group/2)+side*place*kWingGap;
+        const float ahead=kEscortAhead-place*kWingGap;
         float fix[3]={player.pos[0]+perp[0]*flank*out+moveDir[0]*ahead-pos[0],0,
                       player.pos[2]+perp[1]*flank*out+moveDir[2]*ahead-pos[2]};
         const float off=std::sqrt(Dot2(fix,fix));
@@ -363,8 +375,9 @@ float Formation(const Heli& h,const float* pos,const float* fwd,int wing,ULONGLO
         vel[0]=h.pVel[0]+fix[0];vel[1]=0;vel[2]=h.pVel[2]+fix[2];
         return off;
     }
-    // Orbit (counterclockwise in atan2(x, z)): tangent at kOrbitSpeed, pulled onto the radius; a wingman
-    // runs faster or slower until it sits its share of the circle behind the leader.
+    // Orbit (counterclockwise in atan2(x, z)): tangent at kOrbitSpeed, pulled onto the radius. The flights
+    // share the circle out evenly from the first heli; in a flight each wingman trails the one before
+    // it kWingGap along the circle. A heli runs faster or slower until it sits at its place.
     const float r=cfg.heliFollow>10.0f ? cfg.heliFollow : 10.0f;
     float out[3]={pos[0]-player.pos[0],0,pos[2]-player.pos[2]};
     float dist=std::sqrt(Dot2(out,out));
@@ -372,8 +385,8 @@ float Formation(const Heli& h,const float* pos,const float* fwd,int wing,ULONGLO
     else{out[0]/=dist;out[2]/=dist;}
     const float tangent[3]={out[2],0,-out[0]};   // d/d(angle) of (sin, cos)
     const float angle=std::atan2(out[0],out[2]);
-    const float want=std::atan2(lead[0]-player.pos[0],lead[2]-player.pos[2])+
-        2.0f*kPi*static_cast<float>(wing)/static_cast<float>(count>0 ? count : 1);
+    const float want=std::atan2(first[0]-player.pos[0],first[2]-player.pos[2])+
+        2.0f*kPi*group/static_cast<float>(fl.groups>0 ? fl.groups : 1)-wing*kWingGap/r;
     const float speed=kOrbitSpeed*(1.0f+Clamp(Wrap(want-angle)*kPhaseGain,-kPhaseMax,kPhaseMax));
     const float radial=Clamp((r-dist)*kRadialGain,-kOrbitSpeed,kOrbitSpeed);
     vel[0]=h.pVel[0]+tangent[0]*speed+out[0]*radial;vel[1]=0;vel[2]=h.pVel[2]+tangent[2]*speed+out[2]*radial;
@@ -533,7 +546,8 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
 
     // Who to follow, what to shoot, and how they move.
     const ULONGLONG ms=GetTickCount64();
-    const int wing=WingIndex(h,ms);
+    const Flight flight=FlightOf(h,ms);
+    const int wing=flight.wing;
     const bool follow=!playerAboard && player.at && ms-player.at<10000;
     if(follow)TrackPlayerStill();
     if(follow && player.at!=h.playerAt) {
@@ -589,7 +603,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     } else if(engage) {
         off=Engage(h,pos,aim,range,dipWant,wing,follow,want,&height);
     } else if(follow) {
-        off=Formation(h,pos,fwd,wing,ms,want,&height);
+        off=Formation(h,pos,fwd,flight,ms,want,&height);
     } else {
         Arrive(h,pos,h.hold,rest,want);
         off=Dist2(pos,h.hold);height=h.hold[1];
@@ -673,9 +687,9 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
-        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
+        Log("HELI v=%p %s flight=%d.%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
             v,land ? "land" : engage ? (h.back ? "back" : aiming ? "aim" : "wait") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
-            wing,pos[1],height,h.vel[1],throttle,h.hover,rotor,
+            flight.group,wing,pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
             speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi,avoid.ahead,avoid.clear,avoid.roof,avoid.anyRoof,avoid.anyFlags,h.losLift,hidden ? " hidden" : "",wallAhead ? " wall" : "");
@@ -693,7 +707,7 @@ bool IsHelicopter(const void* vehicle) noexcept {
 void HeliCrewed(const void* vehicle) noexcept {
     Heli* slot=Find(vehicle);
     if(!slot){slot=&helis[0];for(auto& h:helis)if(h.seen<slot->seen)slot=&h;}
-    *slot=Heli{};slot->vehicle=vehicle;slot->crewedAt=slot->seen=GetTickCount64();
+    *slot=Heli{};slot->vehicle=vehicle;slot->kind=At<const void*>(vehicle,0);slot->crewedAt=slot->seen=GetTickCount64();
     // The flight gains slot 57 uses (docs/heli-input-re.md; set from the SGO, values not traced): per frame
     // v = damp*v + blend*(speedGain*stick - damp*v), so full stick tops out at blend*speedGain/(1-(1-blend)*damp).
     const auto c=static_cast<const unsigned char*>(vehicle);
