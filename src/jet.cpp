@@ -1495,6 +1495,26 @@ bool JetLaunch(JetRole as,const float* from,const float* heading,const float* ta
     __except(EXCEPTION_EXECUTE_HANDLER){Log("JET launch: fault");return false;}
 }
 
+unsigned char* JetLaunchDrone(const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
+                              bool escort) noexcept {
+    __try {
+        Jet* const j=Launch(Role::drone,from,heading,target,fuelSec,kKinds[static_cast<int>(Role::drone)].cruise,source);
+        if(!j)return nullptr;
+        j->escort=escort;
+        return j->vehicle;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("JET drone launch: fault");return nullptr;}
+}
+
+bool JetFlying(const void* vehicle,const void* ctrl) noexcept {
+    if(!vehicle)return false;
+    const ULONGLONG ms=GameMs();
+    for(const auto& j:jets)
+        if(j.vehicle==vehicle && j.ctrl==ctrl && ms-j.seen<=kStaleMs && !j.reap && j.mode!=Mode::withdraw &&
+           Readable(j.vehicle,kDead+1) && !j.vehicle[kDead])return true;
+    return false;
+}
+
 // The heli starts kHeliClear over the ground: high enough that it does not hit it while its rotor spins
 // up (heli.cpp gives it the hover rotor at once), low enough that it is soon at its working height.
 constexpr float kHeliClear=40.0f;
