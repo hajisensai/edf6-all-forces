@@ -123,6 +123,9 @@ void LoadConfig() noexcept {
     n.rescueAutoBoard=ReadBool(L"RescueAutoBoard",n.rescueAutoBoard);
     n.subHullHp=ReadFloat(L"SubHullHp",n.subHullHp);
     n.subHeavyHit=ReadFloat(L"SubHeavyHit",n.subHeavyHit);
+    n.carrierLaser=ReadBool(L"CarrierLaser",n.carrierLaser);
+    n.carrierLaserDamage=ReadFloat(L"CarrierLaserDamage",n.carrierLaserDamage);
+    n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
     cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
@@ -136,6 +139,7 @@ void LoadConfig() noexcept {
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",cfg.groundPilot,cfg.groundFollow,
         cfg.groundRange,cfg.groundLeash,cfg.groundFire);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",cfg.seaRescue,cfg.rescueBelow,cfg.rescueAutoBoard);
+    Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",cfg.carrierLaser,cfg.carrierLaserDamage,cfg.carrierLaserBreak);
 }
 
 FILETIME IniStamp() noexcept {
@@ -252,6 +256,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
     Log("HELI profile=%d",CheckHeliProfile());
     Log("GROUND profile=%d",CheckGroundProfile());
+    InstallLaser();
     InstallLoadout(iniPath);   // independent of the crew hooks
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     StartCallPicker();

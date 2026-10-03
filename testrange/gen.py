@@ -700,6 +700,56 @@ def write_jet_guns(game_root: str, game: Game) -> list[str]:
     return paths
 
 
+# The teleportation ships' portal laser (src/carrierlaser.cpp): two DemoIndirectFire objects (the class of
+# the missions' DEMOSATELLITELASER*: an IndirectFireControl at +0x170 that fires indirect_fire_param's
+# rounds at its own position, docs/carrier-laser-re.md), made from DEMOSATELLITELASER18.SGO. The plugin
+# fires them from the ship's hatch (IFC +0x2F9 / +0x300) at its target and sets their damage itself.
+# indirect_fire_param (index: meaning, from the IFC's parser 0x2B5F40): 2 rounds, 3 frames between rounds,
+# 4 bullet class, 5 speed (m a frame), 7 beam size, 9 hit impulse, 10 life (frames), 11 penetrates,
+# 12 colour, 14 explosion, 15 frames before the first round, 16 fire sound looped, 17 fire sound, 18 hit sound.
+PORTAL_LASER_STOCK = 'DEMOSATELLITELASER18.SGO'
+# name -> (rounds, gap, size, life, colour, fire sound once)
+PORTAL_LASER_FILES: dict[str, tuple[int, int, float, int, tuple[float, float, float, float], bool]] = {
+    # The aim light: a thin red beam, a round every frame living 6 (so it follows the aim), 4.5 s of rounds at
+    # most (the charge is 4 s; the plugin ends it sooner), no damage (the plugin sets 0).
+    'EDF6VC_PORTAL_SIGHT.SGO': (270, 0, 1.5, 6, (3.0, 0.15, 0.1, 1.0), True),
+    # The main shot: one wide violet beam living 45 frames (0.75 s); its damage is CarrierLaserDamage.
+    'EDF6VC_PORTAL_LASER.SGO': (1, 0, 8.0, 45, (2.5, 0.4, 3.0, 1.0), False),
+}
+
+
+def portal_lasers(game: Game) -> dict[str, bytes]:
+    """The portal laser's two DemoIndirectFire SGOs (PORTAL_LASER_FILES)."""
+    import sgowrite
+    out = {}
+    for name, (rounds, gap, size, life, colour, once) in PORTAL_LASER_FILES.items():
+        version, m = sgowrite.read(game.read('OBJECT', PORTAL_LASER_STOCK))
+        p = m['indirect_fire_param']
+        if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+                or p[4] != 'LaserBullet02'):
+            raise ValueError(f'{PORTAL_LASER_STOCK} 不是预期的卫星激光')
+        p[2], p[3], p[7], p[9], p[10] = rounds, gap, size, 0.0, life
+        p[12] = list(colour)
+        p[14], p[15], p[16] = 0, 0, 0
+        if isinstance(p[17], list) and p[17]:
+            p[17][0] = 1.0 if once else 0   # 1: the fire sound once for all rounds (the player's satellite)
+        m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
+        out[name] = sgowrite.write(version, m)
+    return out
+
+
+def write_portal_lasers(game_root: str, game: Game) -> list[str]:
+    """Writes the portal laser's SGOs into Mods/OBJECT (only these EDF6VC_ files); returns the paths."""
+    os.makedirs(object_dir(game_root), exist_ok=True)
+    paths = []
+    for name, data in portal_lasers(game).items():
+        path = os.path.join(object_dir(game_root), name)
+        with open(path, 'wb') as f:
+            f.write(data)
+        paths.append(path)
+    return paths
+
+
 def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only)."""
     _remove_derived(game_root, keep=wanted)

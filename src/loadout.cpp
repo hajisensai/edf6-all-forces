@@ -100,6 +100,7 @@ std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uin
     if(applied)Restore(u);
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)
+    PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
     return result;
 }
 
@@ -107,6 +108,7 @@ std::uintptr_t __fastcall SessionPreloadHook(std::uintptr_t a,std::uintptr_t b,s
     const auto result=sessionOrig(a,b,c,d);
     PreloadJets();
     PreloadSub();
+    PreloadLaser();
     return result;
 }
 

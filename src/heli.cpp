@@ -1476,7 +1476,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     RescueTick();   // every NPC-crewed vehicle's frame (the carrier's too): at most once a frame
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
     if(IsJet(vehicle)){if(cfg.jetPilot)JetFrame(vehicle);return;}
-    if(IsSub(vehicle)){SubFrame(vehicle);return;}   // the submarine carrier (subcarrier.cpp)
+    if(IsSub(vehicle)){SubFrame(vehicle);CarrierLaserFrame(vehicle);return;}   // the submarine carrier (subcarrier.cpp, carrierlaser.cpp)
     if(!cfg.heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){HeliCrewed(vehicle);h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
