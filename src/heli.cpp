@@ -110,6 +110,12 @@ constexpr float kTurretReach=70.0f;
 constexpr ULONGLONG kReloadGunMs=8000,kReloadAltMs=15000,kBurstMs=2000,kBurstRest=1000;
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
 constexpr float kKeepTarget=30.0f;   // m: the current target counts this much nearer (less switching)
+// Target after target: the one it just broke off from counts kPassed farther for kPassedMs, and every
+// target kTurnCost farther per rad its bearing is off the way the heli flies, so after a pass it takes the
+// next one ahead. During the extension, a new target within kAhead of the way it flies and far enough out
+// to aim at ends the extension at once (the 15:49 round: it flew out and round to come back to one ant).
+constexpr float kPassed=200.0f,kTurnCost=50.0f,kAhead=0.87f;
+constexpr ULONGLONG kPassedMs=6000;
 // (kShareTarget: a target counts this much farther per other heli already on it)
 constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at counts this much farther
 // Formation: the helis fly in flights of one type each (see FlightOf), so a flight shares one top speed
@@ -204,6 +210,8 @@ struct Heli {
     float extendTo[3];    // where it extends to
     struct Arm { unsigned char* weapon; std::int32_t full; ULONGLONG emptyAt; } arms[4];
     ULONGLONG burstAt,restUntil;   // the gun's current burst began / it rests until
+    const void* passed;   // the target it last broke off from (see kPassedMs)
+    ULONGLONG passedUntil;
     bool firing;
     float losLift;        // metres its engaged hover is raised to see over the map (see kAimWall)
     const void* tracked;  // the target tgtPrev/tgtVel belong to
@@ -274,6 +282,8 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     const auto head=At<const unsigned char*>(registry,kRegList);
     if(!Readable(head,0x10))return false;
     const float minHoriz=MinAimHoriz();
+    const ULONGLONG now=GetTickCount64();
+    const float speed=std::sqrt(Dot2(h.vel,h.vel));
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
     int n=0;
     for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
@@ -290,6 +300,9 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
         if(object==h.target)score-=kKeepTarget;
+        if(object==h.passed && now<h.passedUntil)score+=kPassed;
+        if(speed>3.0f && Dot2(f,f)>1.0f)
+            score+=kTurnCost*std::fabs(Wrap(std::atan2(f[0],f[2])-std::atan2(h.vel[0],h.vel[2])));
         for(const auto& o:helis)if(&o!=&h && o.vehicle && o.target==object && GetTickCount64()-o.seen<2000)score+=kShareTarget;
         if(std::sqrt(Dot2(f,f))<minHoriz)score+=kTooClose;
         if(!bestObject || score<best){best=score;bestObject=object;std::memcpy(bestAim,a,12);}
@@ -447,7 +460,7 @@ float Engage(Heli& h,const float* pos,const float* aim,float dipWant,bool wall,c
     if(horiz<0.1f){to[0]=0;to[2]=1;}
     else{to[0]/=horiz;to[2]/=horiz;}
     if(!h.extend && (dipWant>kMaxDip || wall)) {
-        h.extend=true;h.extendAt=ms;
+        h.extend=true;h.extendAt=ms;h.passed=h.target;h.passedUntil=ms+kPassedMs;
         float dir[3]={h.vel[0],0,h.vel[2]};
         const float speed=std::sqrt(Dot2(dir,dir));
         if(speed>3.0f){dir[0]/=speed;dir[2]/=speed;}
@@ -463,7 +476,10 @@ float Engage(Heli& h,const float* pos,const float* aim,float dipWant,bool wall,c
     if(h.extend) {
         float e[3]={h.extendTo[0]-pos[0],0,h.extendTo[2]-pos[2]};
         const float off=std::sqrt(Dot2(e,e));
-        if(off<20.0f || horiz>kExtend || ms-h.extendAt>kExtendMs)h.extend=false;
+        const float speed=std::sqrt(Dot2(h.vel,h.vel));
+        const bool ahead=h.target!=h.passed && speed>3.0f && horiz>MinAimHoriz()+20.0f &&
+            std::fabs(Wrap(std::atan2(to[0],to[2])-std::atan2(h.vel[0],h.vel[2])))<kAhead;
+        if(ahead || off<20.0f || horiz>kExtend || ms-h.extendAt>kExtendMs)h.extend=false;
         else {
             vel[0]=e[0]/off*kTopSpeed;vel[1]=0;vel[2]=e[2]/off*kTopSpeed;
             return off;
