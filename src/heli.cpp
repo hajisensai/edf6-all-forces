@@ -40,6 +40,10 @@ constexpr float kPi=3.14159265f;
 constexpr float kBoardRange=25.0f;   // a landed heli stays down while the player is this close
 constexpr float kLandDistance=20.0f; // it lands this far from a player standing still
 constexpr float kRotorGain=4.0f;     // throttle per unit the rotor is off the wanted rotor
+// Take-off: no horizontal stick on the ground and for kLiftOffMs after leaving it, so it climbs straight
+// up. (With full forward stick before the rotor spun up, a heli slid along the ground into a tank and both
+// blew up.)
+constexpr ULONGLONG kLiftOffMs=1500;
 // The 506 gatling's rounds live 40 frames at 4 m/frame (V_506HELI_GATLING01_*.SGO): 160 m. The 409 and
 // 410 guns reach 480 m and 720 m, so for those heliRange is the limit.
 constexpr float kGun506Range=150.0f;
@@ -55,7 +59,12 @@ constexpr float kDiveTan=0.364f;     // tan 20 deg: the glide slope of a run
 constexpr float kBreak=45.0f;        // a run ends this close (horizontally) to the target
 constexpr float kRunMax=200.0f;      // longest run-in, for the long-range guns
 constexpr float kEntryReached=25.0f; // the run starts this close to the entry point
-constexpr ULONGLONG kRunMs=15000;    // a run that takes longer than this is broken off
+// A run closes at only about 5 m/s and starts with a turn to the target, so it is given kRunMs; the
+// entry is kRunIn of the gun range out, so the target is in reach as soon as it faces it (from 135 m out
+// and 55 m up, 165 m away, it took 7 s to get within the 506's 150 m and timed out at 15 s two seconds
+// later: one or two seconds of fire per run).
+constexpr ULONGLONG kRunMs=25000;
+constexpr float kRunIn=0.8f;
 constexpr float kMaxTilt=0.55f;      // nose dip at full forward stick (about 31 deg in the logs)
 constexpr float kPitchGain=1.0f;     // forward stick per rad the nose is above the slope
 constexpr float kRunAlign=0.35f;     // rad (20 deg): on the run it dives only once facing the target this well
@@ -83,7 +92,7 @@ bool profileOk=false;
 
 struct Heli {
     const void* vehicle;
-    ULONGLONG crewedAt,seen,loggedAt,missileAt,targetAt;
+    ULONGLONG crewedAt,seen,loggedAt,missileAt,targetAt,groundAt;
     LARGE_INTEGER last;
     float prev[3],vel[3];
     float hover;          // learned rotor speed that holds height
@@ -215,7 +224,7 @@ void Separate(const Heli& h,const float* pos,float* goal,ULONGLONG ms) noexcept 
 
 // An attack run on `aim` (see Phase): sets the goal and whether it is on the run now.
 bool Attack(Heli& h,const float* pos,const float* aim,float range,int wing,ULONGLONG ms,float* goal) noexcept {
-    const float runIn=Clamp(range*0.9f,kBreak+40.0f,kRunMax);
+    const float runIn=Clamp(range*kRunIn,kBreak+40.0f,kRunMax);
     if(h.runTarget!=h.target) {
         // Attack headings run across the player's front (perpendicular to player -> target), so the
         // rounds never head at them; wingmen alternate sides and spread kWingSpread apart.
@@ -366,13 +375,15 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const float want=Clamp(h.hover+err*cfg.heliClimbGain,0.0f,1.0f);
     const float rotor=At<float>(v,kRotor);
     float throttle=std::isfinite(rotor) ? Clamp(want+(want-rotor)*kRotorGain,0.0f,1.0f) : want;
+    if(grounded)h.groundAt=ms;
     if(land && grounded){throttle=0.0f;forward=lateral=0.0f;}
+    else if(ms-h.groundAt<kLiftOffMs){forward=lateral=0.0f;}
 
     // Yaw: face the target on the run, else where it is going, else the player. (Turning to the target
     // before the entry point made it crawl there sideways and drift back out: it never got in.)
     float face[3]={0,0,0};
     if(run){face[0]=aim[0]-pos[0];face[2]=aim[2]-pos[2];}
-    else if(std::sqrt(Dot2(c,c))>0.3f){face[0]=c[0];face[2]=c[2];}
+    else if(std::sqrt(Dot2(c,c))>0.3f){face[0]=c[0]*100.0f;face[2]=c[2]*100.0f;}   // c is at most unit length
     else if(follow){face[0]=player.pos[0]-pos[0];face[2]=player.pos[2]-pos[2];}
     float yaw=0.0f,off=kPi;
     if(Dot2(face,face)>1.0f) {
