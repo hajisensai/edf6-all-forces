@@ -61,26 +61,28 @@ constexpr float kStopDecel=1.2f,kStopLag=1.5f;
 // steady forward stick s flies the heli at kTopSpeed * s. So a fixed glide slope at dip d means a speed of
 // ~0.49 m/s per degree and a sink rate of speed * tan(d); the rotor sinks at most ~1.8 m/s (logs), which
 // caps the slope at ~14 deg and ~7 m/s: slower than the ants it chases (runs: 0-5 shots per round).
-// Instead it hovers heliFireHeight above the target at a station beside the player (whom the ants come
-// for), turns the nose onto the target and dips it just as far as the target is below: 12 m up, a
-// target 40-150 m out needs 5-17 deg, half stick at most, which creeps forward at a few m/s. When the
-// creep has carried it kLeash beyond the station, or the target is so close below that the dip would
-// pass kMaxDip, it flies back to the station (no aiming) and starts over.
+// Instead it hovers heliFireHeight above the target, turns the nose onto it and dips it just as far as the
+// target is below: 12 m up, a target 40-150 m out needs 5-17 deg, half stick at most, which creeps forward
+// at a few m/s. It fights from where it is (see Engage): a station beside the player, as before, jumped
+// sides whenever the target or the player moved, and the heli (8-12 m/s, half a minute to top speed)
+// spent 80% of the 15:19 round flying after it.
 constexpr float kMaxTilt=0.61f;      // rad: nose dip at full forward stick (35 deg in the logs)
 constexpr float kPitchGain=1.0f;     // extra dip asked per rad the nose lags the wanted dip (halves the ~3 s lag)
 constexpr float kMaxDip=0.52f;       // rad (30 deg): the deepest dip it aims with, short of full stick
 constexpr float kDipMargin=0.09f;    // rad: back at the station it aims again once the dip is this far under kMaxDip
-constexpr float kLeash=30.0f;        // m the aiming creep may carry it beyond the station
 // Engaged, the map must not be in the way (rays, see Avoid). Aiming, the forward stick holds the nose dip
 // and the heli creeps along the nose, so it cannot brake for a wall: a wall within kAimWall along the
 // nose sends it back to its station instead, and like a target hidden behind terrain or a building
 // (the line to it hits the map more than kLosSlack short), lifts its hover kLosClimb m/s until it sees
 // over (at most kLosMax), easing back down at kLosSink once clear. It does not fire at the wall.
 constexpr float kAimWall=25.0f,kLosSlack=3.0f,kLosClimb=4.0f,kLosSink=1.5f,kLosMax=40.0f;
-constexpr float kStationReached=10.0f;
 constexpr float kTransit=60.0f;      // beyond this from the station it faces the way it flies, not the target
-constexpr float kStandoff=0.6f;      // gunship mode (player aboard): the station is this share of the gun range out
+constexpr float kStandoff=0.6f;      // the band (see Engage) reaches this share of the gun range out
 constexpr float kStandoffMax=120.0f;
+constexpr float kBandSlack=10.0f;    // m: inner band edge margin, and how far out of the band it may drift aiming
+constexpr float kBandMin=30.0f;      // m: the band is at least this deep
+constexpr float kWingStep=3.0f;      // m: wingmen hover 0/1/2 steps higher, so they do not share one height
+constexpr float kSidestep=6.0f;      // m/s around the target while its burst would pass the player
 constexpr float kHitRadius=3.0f;     // m: the cone widens up close so a miss of this much at the target still fires
 constexpr float kMissileCone=10.0f;  // deg: the missile homes (LockonType 1), so a rough aim is enough
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
@@ -378,47 +380,39 @@ float Formation(const Heli& h,const float* pos,const float* fwd,int wing,ULONGLO
     return std::fabs(dist-r);
 }
 
-// Engaged (see kMaxTilt): the station is beside the player, heliFollow out across the line from them to
-// the target on the leader's side (wingmen alternate sides, kWingGap farther out per place), so the
-// rounds pass clear of them; with the player aboard it is kStandoff of the gun range out from the target
-// on the heli's side. Either way at least 1.5 x the closest aimable distance from the target. Sets the
-// wanted velocity (arrive at the station), the height (heliFireHeight above the target, or the player if
-// higher) and h.back; returns the distance to the station.
-float Engage(Heli& h,const float* pos,const float* aim,float range,float dip,int wing,ULONGLONG ms,bool follow,
+// Engaged (see kMaxTilt): it fights from where it is. Horizontally it keeps to a band around the target:
+// no nearer than the dip onto the target stays kDipMargin under kMaxDip (plus kBandSlack), no farther
+// than kStandoff of the gun range (at most kStandoffMax, at least kBandMin deep). Inside the band its
+// station is where it is; outside, the nearest edge of the band on its side, which moves with the target.
+// The height is heliFireHeight (plus kWingStep per wing, three steps) above the target, or the player
+// if higher. While its burst would pass the player it slides around the target, away from them.
+// h.back (fly, do not aim) once it is kBandSlack out of the band or the dip passes kMaxDip; it aims
+// again back inside with the dip kDipMargin under. Returns how far it is out of the band.
+float Engage(Heli& h,const float* pos,const float* aim,float range,float dip,int wing,bool follow,
              float* vel,float* height) noexcept {
-    float station[3];
-    if(follow) {
-        const Heli* leader=nullptr;ActiveHelis(ms,&leader);
-        const float* lead=leader ? leader->pos : pos;
-        float axis[3]={aim[0]-player.pos[0],0,aim[2]-player.pos[2]};
-        float len=std::sqrt(Dot2(axis,axis));
-        if(len<1.0f){axis[0]=0;axis[2]=1;len=1.0f;}
-        const float perp[3]={axis[2]/len,0,-axis[0]/len};
-        const float toLead[3]={lead[0]-player.pos[0],0,lead[2]-player.pos[2]};
-        const float side=(Dot2(toLead,perp)<0 ? -1.0f : 1.0f)*(wing%2 ? -1.0f : 1.0f);
-        const float out=cfg.heliFollow+kWingGap*static_cast<float>((wing+1)/2);
-        station[0]=player.pos[0]+perp[0]*side*out;station[2]=player.pos[2]+perp[2]*side*out;
-    } else {
-        float from[3]={pos[0]-aim[0],0,pos[2]-aim[2]};
-        float len=std::sqrt(Dot2(from,from));
-        if(len<1.0f){from[0]=0;from[2]=1;len=1.0f;}
-        const float out=Clamp(range*kStandoff,0.0f,kStandoffMax);
-        station[0]=aim[0]+from[0]/len*out;station[2]=aim[2]+from[2]/len*out;
-    }
-    float away[3]={station[0]-aim[0],0,station[2]-aim[2]};
-    const float awayLen=std::sqrt(Dot2(away,away)),minAway=1.5f*MinAimHoriz();
-    if(awayLen<minAway) {
-        if(awayLen<0.1f){away[0]=pos[0]-aim[0];away[2]=pos[2]-aim[2];}
-        const float l=std::sqrt(Dot2(away,away))>0.1f ? std::sqrt(Dot2(away,away)) : 1.0f;
-        station[0]=aim[0]+away[0]/l*minAway;station[2]=aim[2]+away[2]/l*minAway;
-    }
     const float ground=follow && player.pos[1]>aim[1] ? player.pos[1] : aim[1];
-    *height=ground+cfg.heliFireHeight+3.0f*static_cast<float>(wing);
-    const float off=Dist2(pos,station);
-    if(off>kLeash || dip>kMaxDip)h.back=true;
-    else if(h.back && off<kStationReached && dip<kMaxDip-kDipMargin)h.back=false;
-    const float still2[3]={0,0,0};
-    Arrive(h,pos,station,follow ? h.pVel : still2,vel);
+    *height=ground+cfg.heliFireHeight+kWingStep*static_cast<float>(wing%3);
+    float from[3]={pos[0]-aim[0],0,pos[2]-aim[2]};
+    const float horiz=std::sqrt(Dot2(from,from));
+    if(horiz<0.1f){from[0]=0;from[2]=1;}
+    else{from[0]/=horiz;from[2]/=horiz;}
+    const float above=*height-aim[1]>1.0f ? *height-aim[1] : 1.0f;
+    const float nearest=above/std::tan(kMaxDip-kDipMargin)+kBandSlack;
+    const float reach=Clamp(range*kStandoff,0.0f,kStandoffMax);
+    const float farthest=reach>nearest+kBandMin ? reach : nearest+kBandMin;
+    const float keep=Clamp(horiz,nearest,farthest);
+    const float station[3]={aim[0]+from[0]*keep,0,aim[2]+from[2]*keep};
+    const float off=std::fabs(horiz-keep);
+    if(off>kBandSlack || dip>kMaxDip)h.back=true;
+    else if(h.back && off<1.0f && dip<kMaxDip-kDipMargin)h.back=false;
+    const float targetVel[3]={h.tgtVel[0],0,h.tgtVel[2]};
+    Arrive(h,pos,station,targetVel,vel);
+    if(follow && PlayerInLine(pos,aim)) {
+        const float tangent[3]={from[2],0,-from[0]};
+        const float toPlayer[3]={player.pos[0]-aim[0],0,player.pos[2]-aim[2]};
+        const float away=Dot2(tangent,toPlayer)>0.0f ? -kSidestep : kSidestep;
+        vel[0]+=tangent[0]*away;vel[2]+=tangent[2]*away;
+    }
     return off;
 }
 
@@ -584,7 +578,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         off=Dist2(pos,spot);
         height=player.pos[1]-10.0f;   // below the ground: it descends until it touches down
     } else if(engage) {
-        off=Engage(h,pos,aim,range,dipWant,wing,ms,follow,want,&height);
+        off=Engage(h,pos,aim,range,dipWant,wing,follow,want,&height);
     } else if(follow) {
         off=Formation(h,pos,fwd,wing,ms,want,&height);
     } else {
