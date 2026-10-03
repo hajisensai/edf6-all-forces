@@ -1185,6 +1185,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
 }  // namespace
 
 void HeliCrewed(const void* vehicle) noexcept {
+    if(IsJet(vehicle))return;   // flown by jet.cpp
     Heli* slot=Find(vehicle);
     if(!slot){slot=&helis[0];for(auto& h:helis)if(h.seen<slot->seen)slot=&h;}
     *slot=Heli{};slot->vehicle=vehicle;slot->kind=At<const void*>(vehicle,0);slot->crewedAt=slot->seen=GetTickCount64();
@@ -1196,6 +1197,7 @@ void HeliCrewed(const void* vehicle) noexcept {
 void HeliFrame(unsigned char* vehicle) noexcept {
     if(!profileOk || !cfg.heliPilot || vehicle[kDead])return;
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
+    if(IsJet(vehicle)){if(cfg.jetPilot)JetFrame(vehicle);return;}
     Heli* h=Find(vehicle);
     if(!h){HeliCrewed(vehicle);h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
     h->seen=GetTickCount64();
@@ -1250,6 +1252,14 @@ void InstallDoorGuns() noexcept {
 }
 }  // namespace
 
+float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+
+bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept {
+    return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
+}
+
+bool BurstHitsPlayer(const float* from,const float* to) noexcept { return PlayerInLine(from,to); }
+
 bool CheckHeliProfile() noexcept {
     __try {
         for(const auto& s:kHeliSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("HELI profile mismatch at %#zx",s.rva);return false;}
@@ -1264,6 +1274,7 @@ bool CheckHeliProfile() noexcept {
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
+        InstallJets();
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

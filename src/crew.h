@@ -38,6 +38,8 @@ struct Config {
     float heliAgility=4.0f;    // seconds (time constant) to reach it
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
+    bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
+    DWORD jetFuelSec=120;      // a jet withdraws after this long in the air
 };
 extern Config cfg;
 
@@ -105,4 +107,16 @@ bool IsHelicopter(const void* vehicle) noexcept;
 void HeliCrewed(const void* vehicle) noexcept;      // the plugin seated an NPC pilot: it flies this heli
 void HeliFrame(unsigned char* vehicle) noexcept;   // after the stock input, NPC-crewed helicopters only
 bool CheckHeliProfile() noexcept;
+// Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point),
+// every enemy lock point of `vehicle`'s side, and whether a burst from->to passes by the player.
+float MapRay(const float* a,const float* b,float* hit) noexcept;
+using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
+bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
+bool BurstHitsPlayer(const float* from,const float* to) noexcept;
+
+// jet.cpp
+bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
+void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
+void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
+bool InstallJets() noexcept;
 }  // namespace crew
