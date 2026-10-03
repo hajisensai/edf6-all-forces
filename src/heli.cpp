@@ -132,7 +132,7 @@ constexpr ULONGLONG kPassedMs=6000;
 constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at counts this much farther
 // Formation: the helis fly in flights of one type each (see FlightOf), so a flight shares one top speed
 // and turn. A flight is a V, WingGap metres per place; flights escort kGroupGap apart and hover
-// kGroupStep apart in height. All flown helis keep their reaches (Reach) plus kClearAir apart, pushed by
+// kGroupStep apart in height. All flown helis keep their reaches (Span) plus kClearAir apart, pushed by
 // kSeparationGain m/s per metre of overlap (more than the pull onto a slot, so it wins).
 // Reach: how far rotor, nose and tail go round the rotor shaft (the MDB bones' extents): the 410's rotor
 // is 20 m across and its tail 13.6 m back; the 506's and 409's about 9 m. At 25 m apart (the old gap)
@@ -446,12 +446,12 @@ bool PlayerInLine(const float* from,const float* to) noexcept {
 struct Flight { int group,groups,wing,count; const Heli* leader; const Heli* first; };
 
 // See kReach410.
-float Reach(const Heli& h) noexcept {
+float Span(const Heli& h) noexcept {
     return h.kind==image+kHeli410 ? kReach410 : kReachOther;
 }
 // A flight's helis (one type) WingGap apart: two reaches plus kClearAir.
 float WingGap(const Heli& h) noexcept {
-    return 2.0f*Reach(h)+kClearAir;
+    return 2.0f*Span(h)+kClearAir;
 }
 Flight FlightOf(const Heli& h,ULONGLONG ms) noexcept {
     Flight f{0,0,0,0,nullptr,nullptr};
@@ -487,7 +487,7 @@ void Separate(const Heli& h,const float* pos,float* vel,ULONGLONG ms) noexcept {
     for(const auto& o:helis) {
         if(&o==&h || !o.vehicle || ms-o.seen>2000)continue;
         const float d[3]={pos[0]-o.pos[0],0,pos[2]-o.pos[2]};
-        const float len=std::sqrt(Dot2(d,d)),keep=Reach(h)+Reach(o)+kClearAir;
+        const float len=std::sqrt(Dot2(d,d)),keep=Span(h)+Span(o)+kClearAir;
         if(len<0.1f || len>keep)continue;
         vel[0]+=d[0]/len*(keep-len)*kSeparationGain;vel[2]+=d[2]/len*(keep-len)*kSeparationGain;
     }
@@ -1247,6 +1247,10 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     }
 }
 }  // namespace
+
+bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept {
+    __try { return Barrel(v,weapon,pos,dir); } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
 
 bool IsHelicopter(const void* vehicle) noexcept {
     if(!Readable(vehicle,8))return false;

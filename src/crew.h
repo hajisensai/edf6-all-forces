@@ -135,6 +135,8 @@ struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; con
 // A strike jet that flies the bomber's run from `from` along `heading` over `target` and drops its bombs
 // itself; false (the caller keeps the stock bomber) when it or its bay cannot be made.
 bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec) noexcept;
+// Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames, heli.cpp).
+bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;

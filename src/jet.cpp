@@ -619,6 +619,23 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
         v,j.fighter ? "fighter" : "strike",kModeNames[static_cast<int>(j.mode)],pos[1],clear,Ceiling(),Len(j.vel),speed,j.vel[1],
         j.target,j.flyer ? "(air)" : "",d,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile]);
+    // Each weapon's barrel against the nose: the guns must point where the nose does.
+    if(SeatCount(const_cast<unsigned char*>(v))==0)return;
+    const auto seat=SeatAt(const_cast<unsigned char*>(v),0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(count>8 || !Readable(holders,count*8))return;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    for(std::uint64_t i=0;i<count;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
+        float at[3],dir[3];
+        if(!w)continue;
+        if(!GunBarrel(v,w,at,dir)){Log("JET v=%p gun %llu: no barrel frame",v,static_cast<unsigned long long>(i));continue;}
+        Log("JET v=%p gun %llu: dir=(%.2f,%.2f,%.2f) nose=(%.2f,%.2f,%.2f) dot=%.2f at=(%.1f,%.1f,%.1f) from the body",v,
+            static_cast<unsigned long long>(i),dir[0],dir[1],dir[2],m[8],m[9],m[10],dir[0]*m[8]+dir[1]*m[9]+dir[2]*m[10],
+            at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]);
+    }
 }
 
 using PhysicsFn=void(__fastcall*)(void*);   // slot 57: void(vehicle)
