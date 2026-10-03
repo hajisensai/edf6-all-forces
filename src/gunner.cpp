@@ -49,6 +49,9 @@ constexpr float kMuzzleReach=30.0f;         // a muzzle farther than this from t
 constexpr float kSettleFrames=6.0f;
 constexpr float kHoldCone=2.0f;             // a firing gun keeps firing until it is this many cones off
 constexpr std::size_t kWeaponFire=0x139;    // the trigger 0x62C000 sets; the weapon update reads and clears it
+// What 0x6911A0 (checked first by the fire test 0x6922A0) blocks firing on: reload countdown, a
+// hold flag and the rounds left in the magazine (+0x20C, or +0xE68 without a magazine object).
+constexpr std::size_t kWeaponReload=0xBE8,kWeaponHold=0x140,kWeaponRounds=0x20C,kWeaponMagazine=0xE68;
 
 using InputFn=void(__fastcall*)(void*,std::uintptr_t);
 using TriggerFn=void(__fastcall*)(void*);
@@ -294,22 +297,36 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down) noexcept 
     track.firing=fire;
     if(cfg.debug && now-track.loggedAt>500) {
         track.loggedAt=now;
-        Log("GUNNER v=%p seat=%u %s t=%p dist=%.0f flight=%.0ff barrel=(%.3f,%.3f) want=(%.3f,%.3f) axis=(%.3f,%.3f)->(%.3f,%.3f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d pulls=%u stale=%u",
+        Log("GUNNER v=%p seat=%u %s t=%p dist=%.0f flight=%.0ff barrel=(%.3f,%.3f) want=(%.3f,%.3f) axis=(%.3f,%.3f)->(%.3f,%.3f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d pulls=%u stale=%u w=%p vt=+0x%llX reload=%d hold=%d rounds=%d mag=%d",
             vehicle,s,crew==Crew::player?"player":"ai",target,distance,time,aim.barrel[0],aim.barrel[1],want[0],want[1],
-            aim.angle[0],aim.angle[1],axis[0],axis[1],aim.sign[0],aim.sign[1],track.k[0],track.k[1],in[0],in[1],fire,track.pulls,track.stale);
+            aim.angle[0],aim.angle[1],axis[0],axis[1],aim.sign[0],aim.sign[1],track.k[0],track.k[1],in[0],in[1],fire,track.pulls,track.stale,
+            gun.weapon,static_cast<unsigned long long>(At<const unsigned char*>(gun.weapon,0)-image),At<std::int32_t>(gun.weapon,kWeaponReload),
+            gun.weapon[kWeaponHold],At<std::int32_t>(gun.weapon,kWeaponRounds),At<std::int32_t>(gun.weapon,kWeaponMagazine));
         track.pulls=0;track.stale=0;
     }
 }
 
+// Debug: say once per vehicle why it has no gunners to steer.
+void LogSkip(const unsigned char* vehicle,const char* why) noexcept {
+    static const void* logged[16]={};
+    static unsigned next=0;
+    if(!cfg.debug)return;
+    for(const void* v:logged)if(v==vehicle)return;
+    logged[next++%16]=vehicle;
+    Log("GUNNER v=%p vt=+0x%llX skipped: %s seats=%u triggers=%llu",vehicle,
+        static_cast<unsigned long long>(At<const unsigned char*>(vehicle,0)-image),why,
+        At<std::uint32_t>(vehicle,kSeatCount),static_cast<unsigned long long>(At<std::uint64_t>(vehicle,kTriggerCount)));
+}
+
 void Gunners(unsigned char* vehicle) noexcept {
     if(!Readable(vehicle,kTurn+kGunnerSeats*kTurnStride,true) || vehicle[kDead])return;
-    if(At<std::uint32_t>(vehicle,kSeatCount)<kGunnerSeats)return;
+    if(At<std::uint32_t>(vehicle,kSeatCount)<kGunnerSeats){LogSkip(vehicle,"no gunner seats");return;}
     const auto seats=At<const unsigned char*>(vehicle,kSeats);
     if(!Readable(seats,kGunnerSeats*kSeatStride))return;
     Crew crew[kGunnerSeats];
     bool crewed=false;
     for(unsigned s=0;s<kGunnerSeats;++s){crew[s]=SeatCrew(seats+s*kSeatStride);crewed=crewed || crew[s]!=Crew::none;}
-    if(!crewed)return;                  // a parked tank stays quiet
+    if(!crewed){LogSkip(vehicle,"nobody aboard");return;}   // a parked tank stays quiet
     bool any=false;
     for(unsigned s=1;s<kGunnerSeats;++s)
         any=any || (crew[s]==Crew::player ? cfg.gunnerAssist : cfg.gunnerAi);
