@@ -24,7 +24,13 @@ import mdb_jet  # noqa: E402  (tools/mdb_jet.py)
 FILES: dict[str, str] = {
     'EDF6VC_JET_STRIKE.SGO': 'edf6tr_jet_strike_mission',
     'EDF6VC_JET_FIGHTER.SGO': 'edf6tr_jet_fighter_mission',
+    'EDF6VC_JET_INTERCEPTOR.SGO': 'edf6tr_jet_interceptor_mission',
+    'EDF6VC_JET_MULTIROLE.SGO': 'edf6tr_jet_multirole_mission',
+    'EDF6VC_JET_CARRIER.SGO': 'edf6tr_jet_carrier_mission',
+    'EDF6VC_JET_DRONE.SGO': 'edf6tr_jet_drone',
 }
+# Their own models (tools/jet_models.py).
+MODEL_FILES = sorted({gen.JETS[j].file for j in FILES.values() if gen.JETS[j].file})
 # The strike jets that take over a BOMBER401 or BOMBER501_2 (src/jet.cpp kJetSgo): that bomber's own model,
 # its mesh bone, and a box round its fuselage (bomber401: wings 52 m across but a fuselage about 5 x 4 x 16 m
 # centred 2.14 m up; bomber501_2 is BOMBER501's mesh in another paint: the strike jet's box).
@@ -41,7 +47,7 @@ def main(argv: list[str]) -> int:
     root = args[0] if args else gen.DEFAULT_GAME
     out = gen.object_dir(root)
     if '--remove' in argv:
-        for name in [*FILES, *BOMBERS, MODEL_FILE]:
+        for name in [*FILES, *BOMBERS, MODEL_FILE, *MODEL_FILES]:
             path = os.path.join(out, name)
             if os.path.exists(path):
                 os.remove(path)
@@ -54,6 +60,12 @@ def main(argv: list[str]) -> int:
     with open(path, 'wb') as f:
         f.write(arc)
     print('写入', path, len(arc), '字节')
+    import jet_models  # noqa: E402  (tools/jet_models.py)
+    for name, data in jet_models.build(game).items():
+        path = os.path.join(out, name)
+        with open(path, 'wb') as f:
+            f.write(data)
+        print('写入', path, len(data), '字节')
     for name, jet in FILES.items():
         data = gen.jet_sgo(game, jet, MODEL)
         path = os.path.join(out, name)
@@ -67,7 +79,7 @@ def main(argv: list[str]) -> int:
             f.write(data)
         print('写入', path, len(data), '字节')
     # The test range's jets, when installed, get the elevon model too.
-    for jet in gen.JETS:
+    for jet in gen.DERIVED.keys() & gen.JETS.keys():
         path = os.path.join(out, jet.upper() + '.SGO')
         if os.path.isfile(path):
             data = gen.jet_sgo(game, jet, MODEL)

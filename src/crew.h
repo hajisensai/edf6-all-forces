@@ -135,7 +135,9 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // be made (not preloaded this mission, profile mismatch): the caller keeps the stock behaviour then.
 // `source`: what launched it (any fixed address per kind of source); jets from one source in a row fly
 // as one flight, whose rounds pass through each other.
-bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept;
+// `role`: the jet.cpp Role it flies as (same order); one whose SGO is not installed flies as a fighter.
+enum class JetRole { strike, fighter, interceptor, multirole, carrier };
+bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };

@@ -64,6 +64,9 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_v602_heli_mission', '直升机 602 Heron（测试场生成）'),
     ('edf6tr_jet_strike_mission', '对地攻击机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_fighter_mission', '制空战斗机（插件驾驶，测试场生成）'),
+    ('edf6tr_jet_interceptor_mission', '截击机（远程导弹，插件驾驶，测试场生成）'),
+    ('edf6tr_jet_multirole_mission', '多用途战斗机（插件驾驶，测试场生成）'),
+    ('edf6tr_jet_carrier_mission', '空中航母（放攻击无人机，插件驾驶，测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
     ('v505_tank_mission', '坦克 505'),
@@ -92,6 +95,9 @@ DERIVED: dict[str, str] = {
     'edf6tr_v602_heli_mission': 'V602_HELI',
     'edf6tr_jet_strike_mission': 'V506_HELI',
     'edf6tr_jet_fighter_mission': 'V506_HELI',
+    'edf6tr_jet_interceptor_mission': 'V506_HELI',
+    'edf6tr_jet_multirole_mission': 'V506_HELI',
+    'edf6tr_jet_carrier_mission': 'V506_HELI',
 }
 
 
@@ -100,16 +106,42 @@ class Jet:
     mark: float        # mission_setup[1][0], the speed gain k: how EDF6VehicleCrew (src/jet.cpp) tells a jet
     durability: float
     weapons: tuple[str, ...]
+    # Its own model (tools/jet_models.py writes the archive, `file`, into Mods/OBJECT), or None: the bomber
+    # (JET_MODEL / JET_ELEVON_MODEL). `body`: the mesh bone; `root`: the model's root bone, which the
+    # V506 body bone maps to; `anchor`: the bone the V506 locators, weapons and dead effect hang on (it
+    # replaces their names in place, so it is at most 4 characters: `body`).
+    model: tuple[str, str] | None = None
+    file: str | None = None
+    body: str = 'bomber501'
+    root: str = 'mdl'
+    anchor: str = 'mdl'
+    rigid: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
 # BOMBER501 model, flown by the plugin. The 506 fires 0x2020 -> weapons 0 and 1, 0x2021 -> weapon 2.
 _GUNS = ('app:/weapon/v_506heli_gatling01_l.sgo', 'app:/weapon/v_506heli_gatling01_r.sgo')
 _MISSILE = 'app:/weapon/v_506heli_missile01.sgo'
+_ARMS = _GUNS + (_MISSILE,)
+# Model sizes and boxes: tools/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
-    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _GUNS + (_MISSILE,)),
-    'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _GUNS + (_MISSILE,)),
+    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _ARMS),
+    'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _ARMS),
+    # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
+    'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
+                                          'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
+    # bomber401 x 0.5: 26 m across
+    'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _ARMS, ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
+                                        'EDF6VC_MULTIROLE.MRAB', 'bomber401', rigid=((0.0, 1.07, 0.0), (1.25, 1.0, 4.0))),
+    # the EDF transport x 1.6: 59 x 77 m; it never fires (its drones do)
+    'edf6tr_jet_carrier_mission': Jet(7005.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
+                                      'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
+    # the airstrike drone x 3: 5.7 m long; only carriers launch it (tools/make_jets.py EDF6VC_JET_DRONE.SGO)
+    'edf6tr_jet_drone': Jet(7006.0, 300.0, _ARMS, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+                            'EDF6VC_DRONE.MRAB', 'body', 'pd607_Drone_airstrike', 'body',
+                            rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
 }
+JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI'}   # jets that are no range vehicle
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
 JET_ELEVON_FILE = 'EDF6VC_JET.MRAB'
@@ -122,11 +154,11 @@ JET_MAB_BONES = ((0x360, 'body'), (0x372, 'rotor'), (0x37E, 'tailRotor'))
 JET_RIGID_BODY = [[0.0, 0.34, 2.6], [2.0, 1.6, 13.0]]
 
 
-def _rebone(v, names: set[str]):
-    """`v` with every string in `names` replaced by JET_ROOT_BONE (deep)."""
+def _rebone(v, names: set[str], to: str = JET_ROOT_BONE):
+    """`v` with every string in `names` replaced by `to` (deep)."""
     if isinstance(v, list):
-        return [_rebone(c, names) for c in v]
-    return JET_ROOT_BONE if isinstance(v, str) and v in names else v
+        return [_rebone(c, names, to) for c in v]
+    return to if isinstance(v, str) and v in names else v
 
 
 JET_BODY_BONE = 'bomber501'
@@ -154,10 +186,15 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE) -> bytes:
 def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = JET_BODY_BONE,
             rigid: list[list[float]] | None = None) -> bytes:
     """`model`: the model archive and file (default JET_MODEL, the stock bomber); `body`: its mesh bone, which
-    the root and the ragdoll drive; `rigid`: the collision box [centre, half extents] (default JET_RIGID_BODY)."""
+    the root and the ragdoll drive; `rigid`: the collision box [centre, half extents] (default JET_RIGID_BODY).
+    A jet with its own model (Jet.model) always flies it: these three come from the Jet then."""
     import sgowrite
     jet = JETS[name]
-    version, m = sgowrite.read(game.read('OBJECT', DERIVED[name] + '.SGO'))
+    root = anchor = JET_ROOT_BONE
+    if jet.model is not None:
+        model, body, rigid = list(jet.model), jet.body, [list(x) for x in jet.rigid] if jet.rigid else None
+        root, anchor = jet.root, jet.anchor
+    version, m = sgowrite.read(game.read('OBJECT', (DERIVED.get(name) or JET_BASE[name]) + '.SGO'))
     if 'vehicle_setup' not in m or 'mission_setup' in m:
         raise ValueError('V506_HELI 没有 vehicle_setup')
     setup = m.pop('vehicle_setup')
@@ -170,12 +207,12 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     model = m['animation_model']
     mab = model[2]
     for at, old in JET_MAB_BONES:
-        mab = sgowrite.replace_utf16(mab, at, old, JET_ROOT_BONE)
+        mab = sgowrite.replace_utf16(mab, at, old, anchor)
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
-    m['animation_model_bone_mapping'] = [JET_ROOT_BONE, body]
+    m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
-    m['vehicle_weapon_setting'] = [[JET_ROOT_BONE, 0]] * len(jet.weapons) + [[JET_ROOT_BONE, -1]]
-    m['vehicle_dead_effect'] = _rebone(m['vehicle_dead_effect'], bones)
+    m['vehicle_weapon_setting'] = [[anchor, 0]] * len(jet.weapons) + [[anchor, -1]]
+    m['vehicle_dead_effect'] = _rebone(m['vehicle_dead_effect'], bones, anchor)
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
@@ -501,11 +538,27 @@ def object_dir(game_root: str) -> str:
 def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only)."""
     _remove_derived(game_root, keep=wanted)
+    jet_models(game_root, game, {JETS[n].file for n in wanted if n in JETS and JETS[n].file})
     elevons = os.path.isfile(os.path.join(object_dir(game_root), JET_ELEVON_FILE))
     for name in sorted(wanted):
         os.makedirs(object_dir(game_root), exist_ok=True)
         with open(os.path.join(object_dir(game_root), name.upper() + '.SGO'), 'wb') as f:
             f.write(vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None))
+
+
+def jet_models(game_root: str, game: Game, files: set[str]) -> None:
+    """Writes the jet model archives in `files` (tools/jet_models.py, EDF6VC_ files of tools/make_jets.py)
+    that Mods/OBJECT does not have yet."""
+    missing = {f for f in files if not os.path.isfile(os.path.join(object_dir(game_root), f))}
+    if not missing:
+        return
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    import jet_models
+    os.makedirs(object_dir(game_root), exist_ok=True)
+    for f, data in jet_models.build(game).items():
+        if f in missing:
+            with open(os.path.join(object_dir(game_root), f), 'wb') as out:
+                out.write(data)
 
 
 def _remove_derived(game_root: str, keep: set[str] = frozenset()) -> bool:

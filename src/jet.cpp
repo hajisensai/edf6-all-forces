@@ -1,7 +1,7 @@
 // NPC jets (docs/jet-plan.md). The game has no fighter, so a jet is a Vehicle506_Helicopter body (rigid
 // body and .cas collision, HP, weapons on the "body" bone, the stock crash and wreck) spawned from a
 // derived SGO (testrange/gen.py: edf6tr_jet_*), told apart by its speed gain k (veh+0x162C), which the
-// derived SGO sets to kStrikeMark or kFighterMark (no stock heli is anywhere near). Its NPC pilot does
+// derived SGO sets to its role's mark (Kind::mark, 7001-7006: no stock heli is anywhere near). Its NPC pilot does
 // nothing; the plugin flies it in two stages a frame:
 //  - input (slot 55, from HeliFrame): the target, the guidance step (JetSteer: a wing's lift along the
 //    body's up, at most its kind's maxG, so it banks before it turns; thrust and gravity along the path
@@ -10,10 +10,15 @@
 //  - physics (slot 57, after the stock code wrote the heli's velocity and spin): the body's linear
 //    velocity (0x11B18F0) and an angular velocity (0x11B1760) that turns the nose onto that velocity,
 //    banked into the turn.
-// Roles (Kind): strike (dive attacks on ground targets; JetLaunchBomber's bombers first fly the stock
-// bomber's run and drop its bombs) and fighter (flying targets first). Neither reloads; out
-// of ammo, out of fuel (cfg.jetFuelSec, a launched sortie cfg.jetSortieSec) or below kWithdrawHp of its HP
-// it flies off and is deleted out of the player's sight.
+// Roles (Kind): strike (ground targets first; JetLaunchBomber's bombers first fly the stock bomber's run
+// and drop its bombs), fighter and interceptor (flying targets first; the interceptor faster, higher,
+// farther out, its missiles from farther), multirole (the nearest target, either), carrier (big and slow:
+// circles and sends its drones, kCarrierDrones of them, at what is in its range) and drone (from its
+// carrier: attacks, and back to it after kDroneSortieMs, damaged or out of ammo, where it docks and is
+// rearmed kRearmMs later). With missiles a jet stands off (Missile): it fires them from its role's
+// missileRange and turns away, and closes in with the guns only once they are spent. None reloads; out of
+// ammo, out of fuel (cfg.jetFuelSec times its role's fuel, a launched sortie cfg.jetSortieSec) or below
+// kWithdrawHp of its HP it flies off and is deleted out of the player's sight.
 // Two ways in: a mission places one (the test range's CreateFriend: it guards the player), or JetLaunch
 // makes one at run time (the airstrike takeovers, airstrike.cpp) exactly like the script's CreateFriend:
 // CreateObject on the preloaded SGO, team friend, RideAi(true). Only RideAi with true reads the SGO's
@@ -35,7 +40,6 @@ namespace {
 constexpr unsigned kHeli506=0x17DB238,kPhysics506=0x61B710;   // slot 57 of the 506
 constexpr std::size_t kSlotPhysics=57;
 constexpr std::size_t kSpeedGain=0x162C,kBody=0x1650;
-constexpr float kStrikeMark=7001.0f,kFighterMark=7002.0f;
 constexpr unsigned kSetLinearVelocity=0x11B18F0,kSetAngularVelocity=0x11B1760,kDelete=0x118A1B0;
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
@@ -50,10 +54,18 @@ constexpr std::uint64_t kGunWeapons=2;
 constexpr std::size_t kCeiling=0x20B2998,kCeilingY=0x3C;
 constexpr float kPi=3.14159265f,kG=9.8f,kGravity=14.7f;
 
-// Flight, per kind (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
+// Flight, per role (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
 // it first flew). The stock bombers fly 3 m a frame (180 m/s): the strike jet attacks at that, the fighter
 // is faster and pulls harder. Every distance of an attack scales with the turn radius v^2/(n g).
+enum class Role { strike, fighter, interceptor, multirole, carrier, drone };
+constexpr int kRoleCount=6;
+// What a role goes for first: ground or flying targets (the other only with none of its own), or either.
+enum class Prefer { ground, air, any };
 struct Kind {
+    const char* name;
+    float mark;                     // the speed gain k its derived SGO sets (testrange/gen.py JETS)
+    Prefer prefer;
+    bool attacks;                   // flies at its targets (the carrier sends its drones instead)
     float cruise,attack,minSpeed;   // m/s
     float thrust,brake;             // m/s^2 toward the wanted speed (gravity along the path comes on top)
     float maxG;                     // lift: at most this many g
@@ -64,10 +76,23 @@ struct Kind {
     float patrol,patrolStep;        // m: patrol circle, plus this per jet
     float overrun,chaseOver;        // Chase
     float range;                    // m from the anchor it takes targets in
+    float missileRange;             // m: it fires its missiles from here in, standing off (0: never)
+    float fuel;                     // its time in the air, times cfg.jetFuelSec
+    int body;                       // its own body (kJetSgo)
 };
-constexpr Kind kKinds[2]={
-    {150.0f,180.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 250.0f, 850.0f,70.0f,1500.0f, 500.0f,60.0f, 1000.0f,120.0f, 120.0f,30.0f, 1200.0f},
-    {180.0f,195.0f,110.0f,15.0f,20.0f, 7.0f,2.4f, 320.0f, 950.0f,80.0f,1700.0f, 500.0f,60.0f, 1400.0f,150.0f, 160.0f,40.0f, 1800.0f},
+constexpr Kind kKinds[kRoleCount]={
+    {"strike",7001.0f,Prefer::ground,true, 150.0f,180.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 250.0f, 850.0f,70.0f,1500.0f, 500.0f,60.0f,
+     1000.0f,120.0f, 120.0f,30.0f, 1200.0f, 800.0f,1.0f,0},
+    {"fighter",7002.0f,Prefer::air,true, 180.0f,195.0f,110.0f, 15.0f,20.0f, 7.0f,2.4f, 320.0f, 950.0f,80.0f,1700.0f, 500.0f,60.0f,
+     1400.0f,150.0f, 160.0f,40.0f, 1800.0f, 1100.0f,1.0f,1},
+    {"interceptor",7003.0f,Prefer::air,true, 192.0f,195.0f,120.0f, 25.0f,20.0f, 6.0f,2.0f, 340.0f, 1000.0f,90.0f,2000.0f, 450.0f,80.0f,
+     1900.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f,4},
+    {"multirole",7004.0f,Prefer::any,true, 170.0f,190.0f,100.0f, 12.0f,18.0f, 6.0f,2.0f, 280.0f, 900.0f,75.0f,1600.0f, 500.0f,60.0f,
+     1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f,5},
+    {"carrier",7005.0f,Prefer::any,false, 60.0f,60.0f,40.0f, 4.0f,4.0f, 1.3f,0.35f, 230.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
+     1300.0f,100.0f, 0.0f,0.0f, 1800.0f, 0.0f,4.0f,6},
+    {"drone",7006.0f,Prefer::any,true, 140.0f,160.0f,60.0f, 25.0f,25.0f, 8.0f,3.5f, 120.0f, 500.0f,35.0f,700.0f, 350.0f,30.0f,
+     300.0f,40.0f, 50.0f,20.0f, 1800.0f, 0.0f,1.0f,7},
 };
 // m/s^2 of speed lost per g pulled over 1 (induced drag): with thrust that sustains 1 + thrust/kTurnBleed
 // g (strike ~4.3, fighter 6); harder it slows, and the turn tightens, as a wing does.
@@ -103,11 +128,30 @@ constexpr float kGunCone=0.035f,kHitRadius=4.0f;   // rad (2 deg), or what puts 
 // player along the rounds' path, or a wingman (kJetSpan) when its rounds cannot pass through (FriendInLine);
 // other friends are hit as the stock game hits them.
 constexpr float kGunSlip=0.985f,kJetSpan=20.0f;
-constexpr float kMissileCone=0.2f,kMissileMin=120.0f,kMissileMax=500.0f;
-constexpr ULONGLONG kMissileMs=2500,kPullMs=7000,kExtendMs=12000;
+// Missiles (Missile, Fire): fired with the nose within kMissileCone of the target (its lock point, not
+// the guns' lead) for kLockMs (the weapon's LockonTime, 30 frames, and a margin), from kMissileMin out to
+// the role's missileRange; kSalvoMs later (a salvo is 4 rounds 10 frames apart) it cranks kCrankAngle off
+// the line for kCrankMs, and closer than kStandoffIn of its range it turns away (kTurnAwayAngle) the same.
+// (Until 2026-10-03 the fighter fired only inside 500 m, the nose on the guns' lead point, while flying a
+// gun pass at the target: the missiles went at 430 m and it closed in to 120 m all the same.)
+constexpr float kMissileCone=0.15f,kMissileMin=150.0f,kStandoffIn=0.45f,kCrankAngle=1.2f,kTurnAwayAngle=2.6f;
+constexpr ULONGLONG kMissileMs=2500,kLockMs=700,kSalvoMs=900,kCrankMs=4500,kPullMs=7000,kExtendMs=12000;
+// The carrier and its drones (LaunchDrones, Recover): one drone every kLaunchGapMs while the carrier has a
+// target, from kLaunchBelow under it; back after kDroneSortieMs out (or damaged, out of ammo or fuel, no
+// target for kIdleMs, the carrier leaving), docked within kDockDist of the point kDockBelow under it,
+// ready again kRearmMs later. A drone shot down is lost.
+constexpr int kCarrierDrones=6;
+constexpr ULONGLONG kLaunchGapMs=1500,kRearmMs=10000,kDroneSortieMs=30000,kIdleMs=4000,kDroneOut=~0ull;
+constexpr float kLaunchBelow=25.0f,kDockBelow=15.0f,kDockDist=25.0f;
 // Fighter: lead pursuit at the target's speed plus chaseOver; closer than overrun it breaks off
 // (extends kRunOutMs) so it does not ram or sit on its tail.
-constexpr float kFlyerClear=15.0f;
+// A flyer: its root (object+kPosition: a walker's feet, however tall it is) more than kFlyerClear over the
+// ground found by a ray from kFlyerProbe over it. (By its lock point the queen ant, whose lock points
+// are high on its body, flew: fighters made gun passes at it, back and forth over it, 2026-10-03.)
+constexpr float kFlyerClear=15.0f,kFlyerProbe=30.0f;
+// The current target counts as kKeepScale of its distance less kKeepTarget: another must be much nearer
+// to take its place (a fighter switched every 11 s among 32 in one fight, turning hard each time).
+constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
 constexpr ULONGLONG kRunOutMs=3000;
 // Withdrawing it climbs toward the ceiling and flies away from the player at full speed; it is deleted
 // only out there (never in front of the player): kGone from the player, or, held in by the map's edge,
@@ -164,19 +208,25 @@ constexpr unsigned char kObjDeleted=4;
 constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kSetTeam=0x54EE70,kInitParamVtable=0x1762068;
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
-// The bodies (JetBody): the strike and fighter jets (the BOMBER501 model, with elevons), and the strike
-// jets that take over a BOMBER401 or BOMBER501_2 in that bomber's own model (tools/make_jets.py).
-constexpr int kBodyCount=4;
+// The bodies (JetBody, Kind::body) a jet launched at run time flies in: the strike and fighter jets (the
+// BOMBER501 model, with elevons), the strike jets that take over a BOMBER401 or BOMBER501_2 in that
+// bomber's own model, and the other roles' (tools/make_jets.py writes those launched at run time: the
+// drone; the others only a mission places).
+constexpr int kBodyCount=8;
 const wchar_t* const kJetSgo[kBodyCount]={L"app:/object/edf6vc_jet_strike.sgo",L"app:/object/edf6vc_jet_fighter.sgo",
-                                          L"app:/object/edf6vc_bomber401.sgo",L"app:/object/edf6vc_bomber501_2.sgo"};
+                                          L"app:/object/edf6vc_bomber401.sgo",L"app:/object/edf6vc_bomber501_2.sgo",
+                                          L"app:/object/edf6vc_jet_interceptor.sgo",L"app:/object/edf6vc_jet_multirole.sgo",
+                                          L"app:/object/edf6vc_jet_carrier.sgo",L"app:/object/edf6vc_jet_drone.sgo"};
 const wchar_t* const kJetFile[kBodyCount]={L"EDF6VC_JET_STRIKE.SGO",L"EDF6VC_JET_FIGHTER.SGO",L"EDF6VC_BOMBER401.SGO",
-                                           L"EDF6VC_BOMBER501_2.SGO"};
+                                           L"EDF6VC_BOMBER501_2.SGO",L"EDF6VC_JET_INTERCEPTOR.SGO",L"EDF6VC_JET_MULTIROLE.SGO",
+                                           L"EDF6VC_JET_CARRIER.SGO",L"EDF6VC_JET_DRONE.SGO"};
 // A bomber's model -> its body: the mesh bone that names it (bone records as kInstBones says).
 struct BomberModel { const wchar_t* bone; JetBody body; };
 const BomberModel kBomberModels[]={{L"bomber501_2",JetBody::bomber501_2},{L"bomber401",JetBody::bomber401}};
 
-enum class Mode { takeoff, patrol, approach, dive, pull, extend, chase, runOut, withdraw, bomb };
-const char* const kModeNames[]={"takeoff","patrol","approach","dive","pull","extend","chase","runOut","withdraw","bomb"};
+enum class Mode { takeoff, patrol, approach, dive, pull, extend, chase, runOut, withdraw, bomb, missile, crank, recover };
+const char* const kModeNames[]={"takeoff","patrol","approach","dive","pull","extend","chase","runOut","withdraw","bomb","missile",
+                                "crank","recover"};
 
 // The bomb bay of a jet that takes over a bomber (JetLaunchBomber): an IndirectFireControl of its own, set
 // up as BombingPlane_Init (0x5AABB0) sets up the bomber's (plane+0xC20) and driven as the bomber's update
@@ -198,7 +248,7 @@ constexpr ULONGLONG kBombClearMs=15000;   // m off the bombing line that turn it
 struct Jet {
     unsigned char* vehicle;
     const void* ctrl;        // the vehicle's weak-this control block: which object this entry is
-    bool fighter;
+    Role role;
     Mode mode;
     ULONGLONG bornAt,seen,modeAt,missileAt,loggedAt;
     LARGE_INTEGER last;
@@ -232,6 +282,12 @@ struct Jet {
     float prevPos[3];        // where the body was at prevAt (Sense)
     ULONGLONG prevAt,blockedFor;
     float real;              // m/s the body really flies (game time, smoothed): against Len(vel), what it is told
+    ULONGLONG lockAt;        // game ms the nose came onto the target within kMissileCone (0: not on it)
+    ULONGLONG seenTarget;    // game ms it last had a target
+    const void* mother;      // a drone's carrier (its control block), or nullptr
+    int slot;                // ...its place on the carrier
+    ULONGLONG dock[kCarrierDrones];   // a carrier's drones: game ms each is ready (kDroneOut: out)
+    ULONGLONG launchAt;      // a carrier's last launch
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
 Jet jets[kMaxJets]{};
@@ -287,11 +343,15 @@ float HorizDist(const float* a,const float* b) noexcept {
     return std::sqrt(dx*dx+dz*dz);
 }
 
-bool IsJetVehicle(const unsigned char* v,bool* fighter) noexcept {
+bool IsJetVehicle(const unsigned char* v,Role* role) noexcept {
     if(!Readable(v,kSpeedGain+4) || At<const unsigned char*>(v,0)!=image+kHeli506)return false;
     const float k=At<float>(v,kSpeedGain);
-    if(fighter)*fighter=k==kFighterMark;
-    return k==kStrikeMark || k==kFighterMark;
+    for(int i=0;i<kRoleCount;++i) {
+        if(k!=kKinds[i].mark)continue;
+        if(role)*role=static_cast<Role>(i);
+        return true;
+    }
+    return false;
 }
 
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept {
@@ -342,30 +402,40 @@ Arms ReadArms(unsigned char* v) noexcept {
     return a;
 }
 
-// Where to point the guns to hit `aim` moving at `tv` from `from` (round flight time and drop).
+// Where to point the guns to hit `aim` moving at `tv` from `from` (round flight time and drop). Farther
+// than the guns reach it leads by their reach's flight time only: at 900 m the rounds' 3.75 s times the
+// target's speed (as noisy as its lock point bobs) swung the jet's heading from side to side.
 void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float* out) noexcept {
     std::memcpy(out,aim,12);
     for(int pass=0;pass<2;++pass) {
         const float d[3]={out[0]-from[0],out[1]-from[1],out[2]-from[2]};
-        const float t=Len(d)/a.gunSpeed;
+        const float l=Len(d),t=(l<a.gunRange ? l : a.gunRange)/a.gunSpeed;
         for(int i=0;i<3;++i)out[i]=aim[i]+tv[i]*t;
         out[1]+=0.5f*a.gunGravity*kGravity*t*t;
     }
 }
 
-// The target: flyers first for a fighter (any enemy more than kFlyerClear over the ground), ground
-// enemies first for a strike jet; nearest to the jet among those within `range` of `anchor`, the current
-// one counting 100 m nearer.
+// The target: as the role prefers (Kind::prefer), nearest to the jet among those within `range` of
+// `anchor`, the current one counting nearer (kKeepScale, kKeepTarget).
 struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; const void* best; float score,aim[3]; bool flyer; };
-// Whether `object` at `p` flies (no ground within the probe, or more than kFlyerClear over it); one ray
-// per object per kFlyerMemoMs, shared by every jet.
+// Whether `object` (lock point `p`) flies: its root more than kFlyerClear over the ground, or no ground
+// under it (see kFlyerProbe); one ray per object per kFlyerMemoMs, shared by every jet.
 struct FlyerMemo { const void* object; ULONGLONG at; bool flyer; };
 FlyerMemo flyerMemo[256]{};
 bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
     auto& m=flyerMemo[(reinterpret_cast<std::uintptr_t>(object)>>4)&255];
     if(m.object==object && ms-m.at<kFlyerMemoMs)return m.flyer;
-    const float clear=Clearance(p);
-    m={object,ms,clear<0.0f || clear>kFlyerClear};
+    const bool first=m.object!=object;
+    const auto o=static_cast<const unsigned char*>(object);
+    const float* root=Readable(o+kPosition,12) ? reinterpret_cast<const float*>(o+kPosition) : p;
+    const float off[3]={root[0]-p[0],root[1]-p[1],root[2]-p[2]};
+    if(!std::isfinite(Dot(off,off)) || Dot(off,off)>300.0f*300.0f)root=p;   // not where its lock point is
+    const float top[3]={root[0],root[1]+kFlyerProbe,root[2]},bottom[3]={root[0],root[1]-400.0f,root[2]};
+    float hit[3];
+    const bool ground=MapRay(top,bottom,hit)>=0.0f;
+    m={object,ms,!ground || root[1]-hit[1]>kFlyerClear};
+    if(first && cfg.debug)Log("JET target %p: root y=%.0f, lock point y=%.0f, ground %s: %s",object,root[1],p[1],
+                              ground ? "under it" : "none seen",m.flyer ? "flies" : "on the ground");
     return m.flyer;
 }
 
@@ -376,12 +446,13 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     const bool flyer=Flies(object,p,k.ms);
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
-    if(object==k.j->target)score-=100.0f;
-    if(flyer!=k.j->fighter)score+=2000.0f;   // the other role's kind of target: only with none of its own
+    if(object==k.j->target)score=score*kKeepScale-kKeepTarget;
+    const Prefer prefer=kKinds[static_cast<int>(k.j->role)].prefer;
+    if(prefer!=Prefer::any && flyer!=(prefer==Prefer::air))score+=2000.0f;   // the other kind: only with none of its own
     if(!k.best || score<k.score){k.best=object;k.score=score;std::memcpy(k.aim,p,12);k.flyer=flyer;}
 }
 
-const Kind& KindOf(const Jet& j) noexcept { return kKinds[j.fighter ? 1 : 0]; }
+const Kind& KindOf(const Jet& j) noexcept { return kKinds[static_cast<int>(j.role)]; }
 
 // A wing's flight step. The lift it wants: gravity held up plus the turn toward `want` (unit), at most
 // maxG; `up` gets that lift's direction across the path, where Attitude rolls the body. The lift it gets
@@ -707,6 +778,60 @@ bool Chase(Jet& j,const float* pos,const float* lead,ULONGLONG ms,float* want,fl
     return true;
 }
 
+// Missiles from standoff (see kMissileCone): at the target until it is within missileRange (level at its
+// height over a ground target), then the nose on it, which Fire locks and fires on; once its salvo is
+// away (kSalvoMs), or nearer than kStandoffIn of the range, it cranks: level, kCrankAngle (kTurnAwayAngle)
+// off the line to the target on the side it flies, for kCrankMs, and comes round again.
+void Missile(Jet& j,const float* pos,float height,ULONGLONG ms,float* want,float* speed) noexcept {
+    const Kind& k=KindOf(j);
+    const float d[3]={j.aim[0]-pos[0],j.aim[1]-pos[1],j.aim[2]-pos[2]};
+    const float dist=Len(d),level=j.flyer ? j.aim[1] : height;
+    *speed=k.attack;
+    if(j.mode==Mode::crank && ms-j.modeAt<kCrankMs){Level(pos,j.out,level,want);return;}
+    if(j.mode!=Mode::missile)SetMode(j,Mode::missile,ms);
+    const bool fired=j.missileAt>=j.modeAt && ms-j.missileAt>kSalvoMs,close=dist<k.missileRange*kStandoffIn;
+    if(fired || close) {
+        float to[3]={d[0],0.0f,d[2]};
+        if(!Normalize(to)){to[0]=0;to[2]=1;}
+        const float side=j.vel[0]*to[2]-j.vel[2]*to[0]>=0.0f ? 1.0f : -1.0f;   // flying off the (to.z,-to.x) side or not
+        const float a=close ? kTurnAwayAngle : kCrankAngle,c=std::cos(a),s=std::sin(a)*side;
+        j.out[0]=to[0]*c+to[2]*s;j.out[1]=0.0f;j.out[2]=to[2]*c-to[0]*s;
+        SetMode(j,Mode::crank,ms);
+        Level(pos,j.out,level,want);
+        return;
+    }
+    if(dist>k.missileRange && !j.flyer){Level(pos,d,height,want);return;}
+    Toward(pos,j.aim,want);
+}
+
+// A drone's carrier: flown (kStaleMs), not shot down or leaving for good.
+Jet* MotherOf(const Jet& d,ULONGLONG ms) noexcept {
+    if(!d.mother)return nullptr;
+    for(auto& c:jets)
+        if(c.vehicle && c.ctrl==d.mother && ms-c.seen<=kStaleMs && !c.reap && Readable(c.vehicle,kDead+1) && !c.vehicle[kDead])return &c;
+    return nullptr;
+}
+
+// A drone's way back (Mode::recover): at the point kDockBelow under its carrier where the carrier will be
+// half a second on, at the carrier's speed plus what the distance adds; true once within kDockDist.
+bool Recover(const Jet& d,const Jet& mother,const float* pos,float* want,float* speed) noexcept {
+    const float* mp=reinterpret_cast<const float*>(mother.vehicle+kPosition);
+    const float dock[3]={mp[0]+mother.vel[0]*0.5f,mp[1]-kDockBelow+mother.vel[1]*0.5f,mp[2]+mother.vel[2]*0.5f};
+    const float to[3]={dock[0]-pos[0],dock[1]-pos[1],dock[2]-pos[2]};
+    const float dist=Len(to),own=Len(mother.vel);
+    if(dist<kDockDist)return true;
+    Toward(pos,dock,want);
+    *speed=Clamp(own+dist*0.25f,own+10.0f,KindOf(d).attack);
+    return false;
+}
+
+// Docked: the drone is deleted (JetReap) and its place on the carrier ready kRearmMs on.
+void Dock(Jet& d,Jet& mother,ULONGLONG ms) noexcept {
+    if(d.slot>=0 && d.slot<kCarrierDrones)mother.dock[d.slot]=ms+kRearmMs;
+    Log("JET v=%p docked on carrier %p (place %d), ready again in %.0f s",d.vehicle,mother.vehicle,d.slot,static_cast<float>(kRearmMs)*0.001f);
+    d.reap=true;d.mother=nullptr;
+}
+
 // The bombing run (Mode::bomb): level at bombAlt along the bomber's line through the target at its speed,
 // turning back onto the line when off it; the bay opens fireDist (and a frame) short of the target, and
 // with the last bomb gone it flies on (extend) and goes on as a strike jet.
@@ -771,10 +896,13 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
     Log("JET v=%p withdraws: %s",j.vehicle,why);
 }
 
-// The fire bytes: guns while the nose is on the lead point within reach, the missile on a rough aim.
-void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float* lead,bool gunsOk,const Arms& a,ULONGLONG ms) noexcept {
+// The fire bytes: guns while the nose is on the lead point within reach; the missile (`missileOk`: on its
+// standoff run) once the nose has been on the target itself kLockMs, inside the role's missileRange.
+void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float* lead,bool gunsOk,bool missileOk,const Arms& a,
+          ULONGLONG ms) noexcept {
     bool gun=false,missile=false;
-    if(j.target && cfg.heliFire && j.mode!=Mode::withdraw) {
+    if(!missileOk)j.lockAt=0;
+    if(j.target && cfg.heliFire && j.mode!=Mode::withdraw && j.mode!=Mode::recover && KindOf(j).attacks) {
         const float d[3]={lead[0]-pos[0],lead[1]-pos[1],lead[2]-pos[2]};
         const float dist=Len(d);
         const float miss=dist>1.0f ? std::acos(Clamp(Dot(d,nose)/dist,-1.0f,1.0f)) : 0.0f;
@@ -792,9 +920,17 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
                 kModeNames[static_cast<int>(j.mode)],dist,miss*180.0f/kPi,(wide>kGunCone ? wide : kGunCone)*180.0f/kPi,
                 Dot(flight,nose),friendly,gunsOk);
         }
-        missile=a.missiles>0 && dist>kMissileMin && dist<kMissileMax && miss<kMissileCone && ms-j.missileAt>kMissileMs &&
-                !FriendInLine(pos,lead,v);
-        if(missile)j.missileAt=ms;
+        const float t[3]={j.aim[0]-pos[0],j.aim[1]-pos[1],j.aim[2]-pos[2]};
+        const float tdist=Len(t),off=tdist>1.0f ? std::acos(Clamp(Dot(t,nose)/tdist,-1.0f,1.0f)) : 0.0f;
+        if(!missileOk || off>kMissileCone)j.lockAt=0;
+        else if(!j.lockAt)j.lockAt=ms;
+        missile=missileOk && a.missiles>0 && j.lockAt && ms-j.lockAt>=kLockMs && tdist>kMissileMin && tdist<k.missileRange &&
+                ms-j.missileAt>kMissileMs && !FriendInLine(pos,j.aim,v);
+        if(missile) {
+            j.missileAt=ms;
+            if(cfg.debug)Log("JET v=%p missiles: %.0f m, %.1f deg off the nose, held %.1f s",v,tdist,off*180.0f/kPi,
+                             static_cast<float>(ms-j.lockAt)*0.001f);
+        }
     }
     v[kFireGun]=gun;v[kFireMissile]=missile;
 }
@@ -803,7 +939,7 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     const float d=j.target ? std::sqrt((j.aim[0]-pos[0])*(j.aim[0]-pos[0])+(j.aim[1]-pos[1])*(j.aim[1]-pos[1])+(j.aim[2]-pos[2])*(j.aim[2]-pos[2])) : 0.0f;
     Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f real=%.0f vy=%.1f bank=%.0f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d",
-        v,j.fighter ? "fighter" : "strike",kModeNames[static_cast<int>(j.mode)],pos[1],clear,Ceiling(),Len(j.vel),speed,j.real,j.vel[1],std::acos(Clamp(At<float>(v,kMatrix+0x14)/std::sqrt(1.0f-At<float>(v,kMatrix+0x24)*At<float>(v,kMatrix+0x24)+1e-6f),-1.0f,1.0f))*180.0f/kPi,
+        v,KindOf(j).name,kModeNames[static_cast<int>(j.mode)],pos[1],clear,Ceiling(),Len(j.vel),speed,j.real,j.vel[1],std::acos(Clamp(At<float>(v,kMatrix+0x14)/std::sqrt(1.0f-At<float>(v,kMatrix+0x24)*At<float>(v,kMatrix+0x24)+1e-6f),-1.0f,1.0f))*180.0f/kPi,
         j.target,j.flyer ? "(air)" : "",d,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile]);
     // Each weapon's barrel against the nose: the guns must point where the nose does.
@@ -906,7 +1042,8 @@ void PreloadJets() noexcept {
             preloaded[k]=mgr && JetFileThere(k);
             if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kJetSgo[k],2,-1);
         }
-        Log("JET preload strike=%d fighter=%d bomber401=%d bomber501_2=%d",preloaded[0],preloaded[1],preloaded[2],preloaded[3]);
+        Log("JET preload strike=%d fighter=%d bomber401=%d bomber501_2=%d interceptor=%d multirole=%d carrier=%d drone=%d",
+            preloaded[0],preloaded[1],preloaded[2],preloaded[3],preloaded[4],preloaded[5],preloaded[6],preloaded[7]);
     } __except(EXCEPTION_EXECUTE_HANDLER){for(auto& p:preloaded)p=false;}
 }
 
@@ -947,10 +1084,10 @@ unsigned FlightFor(const void* source,ULONGLONG ms) noexcept {
     return l.flight;
 }
 
-// `body`: a bomber's own (JetBody), else the kind's; a bomber body not preloaded falls back to the kind's.
-Jet* Launch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source,
+// `body`: a bomber's own (JetBody), else the role's; a bomber body not preloaded falls back to the role's.
+Jet* Launch(Role role,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source,
             JetBody body=JetBody::kind) noexcept {
-    const int kind=fighter ? 1 : 0;
+    const int kind=kKinds[static_cast<int>(role)].body;
     int b=body==JetBody::kind ? kind : static_cast<int>(body);
     if(!preloaded[b])b=kind;
     if(!spawnOk || !cfg.jetPilot || !preloaded[b] || !At<void*>(image,kObjectMgr))return nullptr;
@@ -966,13 +1103,13 @@ Jet* Launch(bool fighter,const float* from,const float* heading,const float* tar
     unsigned char* v=SpawnJet(b,m);
     if(!v)return nullptr;
     FreeSlot(v,ms);   // entries left at this address by a jet shot down there
-    *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);j->fighter=fighter;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;
+    *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);j->role=role;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;
     QueryPerformanceCounter(&j->last);
     std::memcpy(j->anchor,target,12);j->mode=Mode::patrol;j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
     j->flight=FlightFor(source,ms);
     for(int i=0;i<3;++i)j->vel[i]=fwd[i]*speed;
     Log("JET v=%p launched: %s (%ls) flight %u from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d",v,
-        fighter ? "fighter" : "strike",kJetFile[b],j->flight,
+        kKinds[static_cast<int>(role)].name,kJetFile[b],j->flight,
         start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
     return j;
 }
@@ -998,10 +1135,32 @@ unsigned char* BayMake(const BombLoad& l,float perFrame,float* fireDist) noexcep
         return nullptr;
     }
 }
+
+// A carrier's launch (see kCarrierDrones): a ready drone every kLaunchGapMs while it has a target, from
+// kLaunchBelow under it along its heading, faster than it, in its flight.
+void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexcept {
+    if(!c.target || c.mode==Mode::withdraw || ms-c.launchAt<kLaunchGapMs)return;
+    int i=0;
+    while(i<kCarrierDrones && c.dock[i]>ms)++i;
+    if(i==kCarrierDrones)return;
+    c.launchAt=ms;
+    float heading[3]={c.vel[0],0.0f,c.vel[2]};
+    if(!Normalize(heading)){heading[0]=nose[0];heading[1]=0.0f;heading[2]=nose[2];}
+    const float from[3]={pos[0],pos[1]-kLaunchBelow,pos[2]};
+    const float least=kKinds[static_cast<int>(Role::drone)].minSpeed,s=Len(c.vel)+20.0f;
+    Jet* d=Launch(Role::drone,from,heading,c.aim,cfg.jetFuelSec,s>least ? s : least,c.vehicle);
+    if(!d)return;
+    d->mother=c.ctrl;d->slot=i;d->flight=c.flight;c.dock[i]=kDroneOut;
+    Log("JET v=%p carrier %p launched drone %d at %p",d->vehicle,c.vehicle,i,c.target);
+}
 }  // namespace
 
-bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept {
-    __try { return Launch(fighter,from,heading,target,fuelSec,kKinds[fighter ? 1 : 0].cruise,source)!=nullptr; }
+static_assert(static_cast<int>(JetRole::carrier)==static_cast<int>(Role::carrier),"JetRole follows Role");
+
+bool JetLaunch(JetRole as,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept {
+    Role role=static_cast<Role>(static_cast<int>(as));
+    if(!preloaded[kKinds[static_cast<int>(role)].body])role=Role::fighter;
+    __try { return Launch(role,from,heading,target,fuelSec,kKinds[static_cast<int>(role)].cruise,source)!=nullptr; }
     __except(EXCEPTION_EXECUTE_HANDLER){Log("JET launch: fault");return false;}
 }
 
@@ -1023,7 +1182,7 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
                      JetBody body,const void* hold) noexcept {
     if(!bayOk)return false;
     __try {
-        const Kind& k=kKinds[0];
+        const Kind& k=kKinds[static_cast<int>(Role::strike)];
         const float stock=load.speed*60.0f;
         // The bomber's own speed, whatever kind it is (most fly 180 m/s, the Kamui 450).
         const float own=std::isfinite(stock) && stock>k.minSpeed ? stock : k.attack;
@@ -1031,7 +1190,7 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
         float fireDist=0.0f;
         unsigned char* ifc=BayMake(load,speed/60.0f,&fireDist);
         if(!ifc)return false;
-        Jet* j=Launch(false,from,heading,target,fuelSec,speed,source,body);
+        Jet* j=Launch(Role::strike,from,heading,target,fuelSec,speed,source,body);
         if(!j){BayFree(ifc);return false;}
         float dir[3]={heading[0],0.0f,heading[2]};
         if(!Normalize(dir)){dir[0]=0;dir[2]=1;}
@@ -1131,9 +1290,10 @@ void JetFrame(unsigned char* v) noexcept {
     if(!j) {
         j=FreeSlot(v,ms);
         if(!j)return;   // kMaxJets flying: this one hovers until a slot frees
-        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->fighter);j->bornAt=j->modeAt=ms;j->last=now;
-        std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->flight=kPlacedFlight;j->fuelMs=static_cast<ULONGLONG>(cfg.jetFuelSec)*1000;
-        Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,j->fighter ? "fighter" : "strike",At<float>(v,kHp),Ceiling());
+        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->role);j->bornAt=j->modeAt=ms;j->last=now;
+        std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->flight=kPlacedFlight;
+        j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(cfg.jetFuelSec)*KindOf(*j).fuel*1000.0f);
+        Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,KindOf(*j).name,At<float>(v,kHp),Ceiling());
     }
     j->seen=ms;
     Put<float>(v,kAreaInset,kNoInset);
@@ -1152,21 +1312,34 @@ void JetFrame(unsigned char* v) noexcept {
 
     const Arms arms=ReadArms(v);
     const bool follow=player.at && ms-player.at<10000;
-    // A launched jet works round its strike point; a placed one guards the player. Either withdraws away
-    // from the player (`viewer`), so it is deleted out of their sight.
-    const float* anchor=follow && !j->launched ? player.pos : j->anchor;
+    // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
+    // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
+    Jet* const mother=MotherOf(*j,ms);
+    const float* anchor=mother ? reinterpret_cast<const float*>(mother->vehicle+kPosition) : follow && !j->launched ? player.pos : j->anchor;
     const float* viewer=follow ? player.pos : anchor;
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
-    if(ms-j->bornAt>j->fuelMs)Withdraw(*j,"fuel",ms);
-    else if(hpMax>0.0f && hp<hpMax*kWithdrawHp)Withdraw(*j,"damaged",ms);
-    else if(arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile))Withdraw(*j,"out of ammo",ms);
+    const char* why=ms-j->bornAt>j->fuelMs ? "fuel" : hpMax>0.0f && hp<hpMax*kWithdrawHp ? "damaged" :
+                    arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile) ? "out of ammo" : nullptr;
+    // A drone goes back to its carrier instead, and after kDroneSortieMs, half its HP gone, the carrier
+    // leaving, or kIdleMs with nothing to attack; with the carrier gone it withdraws.
+    if(j->mother && !mother && !why)why="carrier lost";
+    else if(mother) {
+        if(j->mode!=Mode::recover && j->mode!=Mode::withdraw) {
+            const char* back=why ? why : ms-j->bornAt>kDroneSortieMs ? "sortie over" : hpMax>0.0f && hp<hpMax*0.5f ? "damaged" :
+                             mother->mode==Mode::withdraw ? "carrier leaving" :
+                             ms-(j->seenTarget ? j->seenTarget : j->bornAt)>kIdleMs ? "nothing to attack" : nullptr;
+            if(back){Log("JET v=%p back to carrier %p: %s",v,mother->vehicle,back);SetMode(*j,Mode::recover,ms);}
+        }
+        why=nullptr;
+    }
+    if(why)Withdraw(*j,why,ms);
 
     const bool walled=Sense(*j,pos,ms);
 
     // The target and its motion.
     const Kind& kind=KindOf(*j);
     Pick pick{j,pos,anchor,kind.range,ms,nullptr,0.0f,{},false};
-    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff)VisitEnemies(v,&VisitTarget,&pick);
+    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)VisitEnemies(v,&VisitTarget,&pick);
     if(pick.best) {
         const bool same=pick.best==j->target;
         for(int i=0;i<3;++i) {
@@ -1174,7 +1347,7 @@ void JetFrame(unsigned char* v) noexcept {
             j->tgtVel[i]=same && std::fabs(raw)<80.0f ? j->tgtVel[i]+(raw-j->tgtVel[i])*0.2f : 0.0f;
         }
         std::memcpy(j->tgtPrev,pick.aim,12);std::memcpy(j->aim,pick.aim,12);
-        j->target=pick.best;j->flyer=pick.flyer;
+        j->target=pick.best;j->flyer=pick.flyer;j->seenTarget=ms;
     } else j->target=nullptr;
     float lead[3];
     if(j->target)Lead(pos,j->aim,j->tgtVel,arms,lead);
@@ -1185,7 +1358,7 @@ void JetFrame(unsigned char* v) noexcept {
     const float base=j->target && !j->flyer ? j->aim[1] : anchor[1];
     const float height=base+kind.alt;
     float want[3]={nose[0],0,nose[2]},speed=kind.cruise;
-    bool gunsOk=false;
+    bool gunsOk=false,missileOk=false;
     switch(j->mode) {
     case Mode::takeoff:
         want[0]=nose[0];want[1]=0.6f;want[2]=nose[2];Normalize(want);
@@ -1193,6 +1366,9 @@ void JetFrame(unsigned char* v) noexcept {
         break;
     case Mode::bomb:
         BombRun(*j,pos,ms,want,&speed);
+        break;
+    case Mode::recover:
+        if(mother && Recover(*j,*mother,pos,want,&speed))Dock(*j,*mother,ms);
         break;
     case Mode::withdraw: {
         // A bomber flies on along its run; the others away from the player.
@@ -1212,9 +1388,12 @@ void JetFrame(unsigned char* v) noexcept {
         break;
     }
     default:
-        if(!j->target) {
+        if(!j->target || !kind.attacks) {
             if(j->mode!=Mode::patrol)SetMode(*j,Mode::patrol,ms);
             speed=Patrol(*j,pos,anchor,height,want);
+        } else if(arms.missiles>0 && kind.missileRange>0.0f) {
+            Missile(*j,pos,height,ms,want,&speed);
+            missileOk=j->mode==Mode::missile;
         } else if(j->flyer)gunsOk=Chase(*j,pos,lead,ms,want,&speed);
         else gunsOk=Strike(*j,pos,lead,height,ms,want,&speed);
         break;
@@ -1230,7 +1409,8 @@ void JetFrame(unsigned char* v) noexcept {
     Elevons(*j,kind,v,dt);
     j->ready=true;
     BayFrame(*j,pos,nose);
-    Fire(*j,v,pos,nose,lead,gunsOk,arms,ms);
+    Fire(*j,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
+    if(j->role==Role::carrier)LaunchDrones(*j,pos,nose,ms);
     if(cfg.debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
 

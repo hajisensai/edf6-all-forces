@@ -84,6 +84,14 @@ void Count(void* ctx,const void*,const float* p) noexcept {
     (flying ? c.flyers : c.ground)+=1;
 }
 
+// The escorts' roles, wingman by wingman: fighter, interceptor, multirole in turn, and with four or more
+// the last is a carrier (its drones go in instead of it).
+JetRole EscortRole(int i,int n) noexcept {
+    if(n>=4 && i==n-1)return JetRole::carrier;
+    constexpr JetRole kMix[3]={JetRole::fighter,JetRole::interceptor,JetRole::multirole};
+    return kMix[i%3];
+}
+
 // Escort fighters for a bomber call of `planes` at `target` (see the file comment): all of them when the
 // enemies there mostly fly, one when some do; how many went.
 int LaunchEscorts(int planes,const float* target) noexcept {
@@ -103,7 +111,7 @@ int LaunchEscorts(int planes,const float* target) noexcept {
         const float off=(static_cast<float>(i)-static_cast<float>(n-1)*0.5f)*kWingSpacing;
         const float from[3]={target[0]-dir[0]*kApproach+side[0]*off,target[1]+kAboveTarget+kWingStep*static_cast<float>(i),
                              target[2]-dir[2]*kApproach+side[2]*off};
-        if(JetLaunch(true,from,dir,target,cfg.jetSortieSec,&kRadioSource))++launched;
+        if(JetLaunch(EscortRole(i,n),from,dir,target,cfg.jetSortieSec,&kRadioSource))++launched;
     }
     Log("AIRSTRIKE escorts: %d/%d fighters (enemies there: %d flying, %d on the ground) at (%.0f,%.0f,%.0f)",
         launched,n,census.flyers,census.ground,target[0],target[1],target[2]);
