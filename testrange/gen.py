@@ -62,6 +62,8 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_vehicle409_heli_mission', '直升机 409 Nereid（测试场生成）'),
     ('edf6tr_vehicle410_heli_mission', '直升机 410 Brute（测试场生成）'),
     ('edf6tr_v602_heli_mission', '直升机 602 Heron（测试场生成）'),
+    ('edf6tr_jet_strike_mission', '对地攻击机（插件驾驶，测试场生成）'),
+    ('edf6tr_jet_fighter_mission', '制空战斗机（插件驾驶，测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
     ('v505_tank_mission', '坦克 505'),
@@ -88,7 +90,68 @@ DERIVED: dict[str, str] = {
     'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
     'edf6tr_vehicle410_heli_mission': 'VEHICLE410_HELI',
     'edf6tr_v602_heli_mission': 'V602_HELI',
+    'edf6tr_jet_strike_mission': 'V506_HELI',
+    'edf6tr_jet_fighter_mission': 'V506_HELI',
 }
+
+
+@dataclass(frozen=True)
+class Jet:
+    mark: float        # mission_setup[1][0], the speed gain k: how EDF6VehicleCrew (src/jet.cpp) tells a jet
+    durability: float
+    weapons: tuple[str, ...]
+
+
+# Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
+# BOMBER501 model, flown by the plugin. The 506 fires 0x2020 -> weapons 0 and 1, 0x2021 -> weapon 2.
+_GUNS = ('app:/weapon/v_506heli_gatling01_l.sgo', 'app:/weapon/v_506heli_gatling01_r.sgo')
+_MISSILE = 'app:/weapon/v_506heli_missile01.sgo'
+JETS: dict[str, Jet] = {
+    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _GUNS + (_MISSILE,)),
+    'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _GUNS + (_MISSILE,)),
+}
+JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
+JET_ROOT_BONE = 'mdl'
+# The V506 MAB block's locator parent names (UTF-16, block offsets), shortened in place to JET_ROOT_BONE:
+# the bomber has only `mdl` and `bomber501` (docs/jet-model-re.md §1, §3.3).
+JET_MAB_BONES = ((0x360, 'body'), (0x372, 'rotor'), (0x37E, 'tailRotor'))
+# Fuselage only (half extents; the 25 m wingspan left out so low passes do not scrape), centre as the model.
+JET_RIGID_BODY = [[0.0, 0.34, 2.6], [2.0, 1.6, 13.0]]
+
+
+def _rebone(v, names: set[str]):
+    """`v` with every string in `names` replaced by JET_ROOT_BONE (deep)."""
+    if isinstance(v, list):
+        return [_rebone(c, names) for c in v]
+    return JET_ROOT_BONE if isinstance(v, str) and v in names else v
+
+
+def jet_sgo(game: Game, name: str) -> bytes:
+    import sgowrite
+    jet = JETS[name]
+    version, m = sgowrite.read(game.read('OBJECT', DERIVED[name] + '.SGO'))
+    if 'vehicle_setup' not in m or 'mission_setup' in m:
+        raise ValueError('V506_HELI 没有 vehicle_setup')
+    setup = m.pop('vehicle_setup')
+    setup[1][0] = jet.mark
+    stock = {w[0]: w for w in setup[3]}   # each weapon keeps its stock per-weapon parameters
+    setup[3] = [stock.get(w, [w, [0.0001, 0.1]]) for w in jet.weapons] + [stock['app:/weapon/v_fuel01.sgo']]
+    m['mission_setup'] = setup
+    m['game_object_durability'] = jet.durability
+    model = m['animation_model']
+    mab = model[2]
+    for at, old in JET_MAB_BONES:
+        mab = sgowrite.replace_utf16(mab, at, old, JET_ROOT_BONE)
+    m['animation_model'] = [list(JET_MODEL), model[1], mab]
+    m['animation_model_bone_mapping'] = [JET_ROOT_BONE, 'bomber501']
+    bones = {'body', 'rotor', 'tailRotor'}
+    m['vehicle_weapon_setting'] = [[JET_ROOT_BONE, 0]] * len(jet.weapons) + [[JET_ROOT_BONE, -1]]
+    m['vehicle_dead_effect'] = _rebone(m['vehicle_dead_effect'], bones)
+    m['roter_contact_damage_scale'] = 0.0
+    m['heli_contact_damage_scale'] = 0.0005
+    rb = m['heli_rigid_body']
+    m['heli_rigid_body'] = [JET_RIGID_BODY[0], JET_RIGID_BODY[1], rb[2]]
+    return sgowrite.write(version, m)
 
 # (sgo, label, flying)
 ENEMIES: list[tuple[str, str, bool]] = [
@@ -368,6 +431,8 @@ def _utf16_at(buf: bytes, off: int) -> str:
 
 def vehicle_sgo(game: Game, sgo_name: str) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
+    if sgo_name in JETS:
+        return jet_sgo(game, sgo_name)
     stock = DERIVED.get(sgo_name)
     if stock:
         return as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
