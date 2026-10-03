@@ -88,6 +88,12 @@ constexpr ULONGLONG kRunOutMs=3000;
 // kGoneStuck after kStuckMs of withdrawing.
 constexpr float kWithdrawHp=0.25f,kGone=1600.0f,kGoneStuck=900.0f,kWithdrawClimb=300.0f;
 constexpr ULONGLONG kStuckMs=60000;
+// The body is held back by what the plugin does not see (the map's edge, buildings, other jets): it is
+// blocked once for kBlockedMs it made less than kBlockedPart of the commanded way along it. The command
+// then follows the body (along what holds it), and the obstacle, unless another jet or something near the
+// ground, is learned as a wall (a vertical plane) that Guard turns off before.
+constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.0f;
+constexpr ULONGLONG kBlockedMs=250;
 constexpr ULONGLONG kStaleMs=1500;   // game ms: a table entry not flown this long is free
 constexpr ULONGLONG kFlyerMemoMs=500;
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus kReact seconds of
@@ -142,8 +148,16 @@ struct Jet {
     float bombAt[3],bombDir[3],bombAlt,bombSpeed,fireDist,reach;
     bool bombing;            // the bay is open
     float top;               // m/s it never goes past: its kind's, or a faster bomber's speed
+    float prevPos[3];        // where the body was at prevAt (Sense)
+    ULONGLONG prevAt,blockedFor;
 };
 Jet jets[16]{};
+
+// Walls learned this mission (see kBlockedPart): where one was met and its horizontal normal, into it.
+struct Wall { float at[3],n[3]; };
+Wall walls[16]{};
+int wallCount=0;
+unsigned wallNext=0;
 
 
 const void* SelfCtrl(const unsigned char* v) noexcept { return At<const void*>(v,kSelfCtrl); }
@@ -357,12 +371,84 @@ void Level(const float* pos,const float* dir,float height,float* out) noexcept {
     Normalize(out);
 }
 
+// Learns the wall met at `at` facing `n`, or moves up the one it is (same facing, within kWallSame).
+void LearnWall(const float* at,const float* n) noexcept {
+    for(int i=0;i<wallCount;++i) {
+        Wall& w=walls[i];
+        if(Dot(w.n,n)<0.9f || std::fabs((at[0]-w.at[0])*w.n[0]+(at[2]-w.at[2])*w.n[2])>kWallSame)continue;
+        std::memcpy(w.at,at,12);
+        return;
+    }
+    Wall& w=walls[wallCount<16 ? wallCount++ : static_cast<int>(wallNext++%16)];
+    std::memcpy(w.at,at,12);std::memcpy(w.n,n,12);
+    Log("JET wall learned at (%.0f,%.0f,%.0f) facing (%.2f,%.2f)",at[0],at[1],at[2],n[0],n[2]);
+}
+
+// Another jet within kWallJet of `pos` (what a jet runs into is no wall).
+bool JetNear(const Jet& self,const float* pos,ULONGLONG ms) noexcept {
+    for(const auto& o:jets) {
+        if(&o==&self || !o.vehicle || ms-o.seen>kStaleMs)continue;
+        const float d[3]={o.prevPos[0]-pos[0],o.prevPos[1]-pos[1],o.prevPos[2]-pos[2]};
+        if(Dot(d,d)<kWallJet*kWallJet)return true;
+    }
+    return false;
+}
+
+// The way the body went since the last frame against the commanded velocity (see kBlockedPart). Blocked,
+// the command turns along what holds it, so the nose never points where the jet cannot go. Returns
+// whether it was blocked this frame.
+bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
+    const ULONGLONG since=j.prevAt ? ms-j.prevAt : 0;
+    const float moved[3]={pos[0]-j.prevPos[0],pos[1]-j.prevPos[1],pos[2]-j.prevPos[2]};
+    std::memcpy(j.prevPos,pos,12);j.prevAt=ms;
+    // The game steps a frame at a time: a slow frame moves the body no more than 1/60 s of the way.
+    const float wall=static_cast<float>(since)*0.001f,s=Len(j.vel),dt=wall<1.0f/60.0f ? wall : 1.0f/60.0f;
+    if(!since || !j.ready || s<1.0f)return false;
+    const float dir[3]={j.vel[0]/s,j.vel[1]/s,j.vel[2]/s};
+    if(Dot(moved,dir)>=s*dt*kBlockedPart){j.blockedFor=0;return false;}
+    j.blockedFor+=since;
+    if(j.blockedFor<kBlockedMs)return false;
+    j.blockedFor=0;
+    float n[3]={dir[0]*s-moved[0]/dt,0.0f,dir[2]*s-moved[2]/dt};
+    if(Len(n)<s*0.3f || !Normalize(n))return false;   // held from below or above: Guard's
+    const float clear=Clearance(pos);
+    const bool jet=JetNear(j,pos,ms);
+    if(!jet && (clear<0.0f || clear>kWallGround))LearnWall(pos,n);
+    float slide[3]={dir[0],dir[1],dir[2]};
+    const float into=Dot(slide,n);
+    for(int i=0;i<3;++i)slide[i]-=n[i]*into;
+    if(!Normalize(slide)){slide[0]=n[2];slide[1]=0;slide[2]=-n[0];}
+    for(int i=0;i<3;++i)j.vel[i]=slide[i]*s;
+    Log("JET v=%p blocked (%.0f of %.0f m/s)%s: turned along it",j.vehicle,Dot(moved,dir)/dt,s,jet ? " by a jet" : "");
+    return true;
+}
+
+// A learned wall within `range` ahead of `pos`.
+bool NearWall(const float* pos,float range) noexcept {
+    for(int i=0;i<wallCount;++i)
+        if((walls[i].at[0]-pos[0])*walls[i].n[0]+(walls[i].at[2]-pos[2])*walls[i].n[2]<range)return true;
+    return false;
+}
+
 // Keeps `want` off the ground and under the ceiling. The ground is the highest under it now and
 // kLookAhead seconds along its track; sinking, the lowest it gets is where a maxG pull-out started
 // kReact seconds from now bottoms out (so a dive runs down to kMinAlt instead of pulling up 100 m early);
 // climbing, the ceiling is checked kLookAhead seconds out.
 void Guard(const Jet& j,const float* pos,float* want) noexcept {
     const float s=Len(j.vel);
+    // Learned walls: turned off from a turn's radius out (more closing fast), never flown into.
+    const float r=s*s/(KindOf(j).maxG*kG);
+    for(int i=0;i<wallCount;++i) {
+        const Wall& w=walls[i];
+        const float gap=(w.at[0]-pos[0])*w.n[0]+(w.at[2]-pos[2])*w.n[2];
+        const float closing=j.vel[0]*w.n[0]+j.vel[2]*w.n[2];
+        const float reach=r*1.5f+(closing>0.0f ? closing*kReact : 0.0f);
+        if(gap>reach)continue;
+        const float push=Clamp(1.0f-gap/reach,0.2f,1.0f),into=want[0]*w.n[0]+want[2]*w.n[2];
+        if(into<=-push)continue;
+        want[0]-=w.n[0]*(into+push);want[2]-=w.n[2]*(into+push);
+        Normalize(want);
+    }
     const float ahead[3]={pos[0]+j.vel[0]*kLookAhead,pos[1]+j.vel[1]*kLookAhead,pos[2]+j.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
     const float here=Clearance(pos),there=Clearance(probe);
@@ -457,6 +543,8 @@ bool Chase(Jet& j,const float* pos,const float* lead,ULONGLONG ms,float* want,fl
 // The bombing run (Mode::bomb): level at bombAlt along the bomber's line through the target at its speed,
 // turning back onto the line when off it; the bay opens fireDist (and a frame) short of the target, and
 // with the last bomb gone it flies on (extend) and goes on as a strike jet.
+void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept;
+
 void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noexcept {
     const float rel[3]={j.bombAt[0]-pos[0],0,j.bombAt[2]-pos[2]};
     const float side[3]={j.bombDir[2],0,-j.bombDir[0]};
@@ -472,7 +560,7 @@ void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noex
     }
     if(j.bombing && At<std::int32_t>(j.ifc,kIfcShots)<=0) {
         Log("JET v=%p bombs away",j.vehicle);
-        std::memcpy(j.out,j.bombDir,12);SetMode(j,Mode::extend,ms);
+        std::memcpy(j.out,j.bombDir,12);Withdraw(j,"bombs dropped",ms);
     }
 }
 
@@ -602,6 +690,7 @@ bool JetFileThere(int kind) noexcept {
 
 void PreloadJets() noexcept {
     __try {
+        wallCount=0;wallNext=0;   // a new mission, a new map
         if(!spawnOk)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         for(int k=0;k<2;++k) {
@@ -751,6 +840,8 @@ void JetFrame(unsigned char* v) noexcept {
     else if(hpMax>0.0f && hp<hpMax*kWithdrawHp)Withdraw(*j,"damaged",ms);
     else if(arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile))Withdraw(*j,"out of ammo",ms);
 
+    const bool walled=Sense(*j,pos,ms);
+
     // The target and its motion.
     const Kind& kind=KindOf(*j);
     Pick pick{j,pos,anchor,kind.range,ms,nullptr,0.0f,{},false};
@@ -783,13 +874,17 @@ void JetFrame(unsigned char* v) noexcept {
         BombRun(*j,pos,ms,want,&speed);
         break;
     case Mode::withdraw: {
+        // A bomber flies on along its run; the others away from the player.
+        const bool bomber=j->bombSpeed>0.0f;
         float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
+        if(bomber)std::memcpy(away,j->bombDir,12);
         if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
         const float top=Ceiling()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
-        Level(pos,away,climb<top ? climb : top,want);speed=kind.attack;
+        Level(pos,away,climb<top ? climb : top,want);speed=bomber && j->bombSpeed>kind.attack ? j->bombSpeed : kind.attack;
         const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
-        const float gone=Len(d);
-        if(gone>kGone || (ms-j->modeAt>kStuckMs && gone>kGoneStuck)){
+        const float gone=Len(d),turn=Len(j->vel)*Len(j->vel)/(kind.maxG*kG);
+        const bool edge=walled || NearWall(pos,turn*1.5f);
+        if(gone>kGone || (gone>kGoneStuck && (edge || ms-j->modeAt>kStuckMs))){
             if(!j->reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",v,gone);
             j->reap=true;
         }
