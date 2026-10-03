@@ -34,30 +34,43 @@ ULONGLONG GameMs() noexcept {
 namespace {
 using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
 using RideAiFn=void(__fastcall*)(void*,bool);
-using InputFn=void(__fastcall*)(void*,std::uintptr_t);
+// Forwarded with all four register arguments: CarBase's input (slot 55) also reads r8 (its drive block)
+// and the 502's pre-update (slot 4) takes `this` alone.
+using InputFn=void(__fastcall*)(void*,std::uintptr_t,void*,void*);
 using PromptFn=void(__fastcall*)(void*,void*);
 using CanRideSeatFn=bool(__fastcall*)(void*,void*,void*);
 using CanRideFn=bool(__fastcall*)(void*,void*);
 using SeatRideFn=unsigned char*(__fastcall*)(void*,void*,int,bool);
 using SeatFn=void(__fastcall*)(void*,void*);
 
-// Every vehicle class whose slot 49 is the stock FindSeat (vtable RVA, stock slot 55, name).
-struct VehicleClass { unsigned vtable; unsigned input; const char* name; };
+// Every vehicle class we crew: vtable RVA, the stock function in its input slot (0: not hooked), name,
+// its stock slot 49 (FindSeat), the slot we chain its per-frame input on, and whether only an armed one
+// (a weapon holder, veh+0x648) gets an NPC driver.
+// The 502 has the 54-slot VehicleBase vtable: no slot 55, its per-frame input copy is slot 4 (0x612D20).
+// Vehicle_Car (the Grape, also the unarmed 512 Kei truck and 513 trailer cab) has its own slot 49
+// (0x65B910, a preferred-seat wrapper round the stock one) and its CarBase input in slot 55 (0x65A390).
+struct VehicleClass {
+    unsigned vtable; unsigned input; const char* name;
+    unsigned findSeat=kFindSeat; std::size_t inputSlot=kSlotInput; bool armedOnly=false;
+};
+constexpr std::size_t kHolderCount=0x648;
 const VehicleClass kClasses[]={
     {0x17D8B50,0x5FD8E0,"402_Rocket"},{0x17D8FA0,0x5FEBE0,"403_Tank"},{0x17D9458,0x5FFC50,"404_Tank"},
-    {0x17D98C8,0,"501_FortressRobo"},{0x17DA028,0,"502_GroundRobo"},{0x17DA508,0x6178B0,"503_Bike"},
+    {0x17D98C8,0,"501_FortressRobo"},{0x17DA028,0x612D20,"502_GroundRobo",kFindSeat,4},{0x17DA508,0x6178B0,"503_Bike"},
     {0x17DA960,0x63C1C0,"504_begaruta"},{0x17DADB0,0x61ACD0,"505_Tank"},{0x17DB238,0x61B8F0,"506_Helicopter"},
     {0x17DB9D8,0x61DDF0,"510_Maser"},{0x17DBDF8,0x61F080,"511_Bike"},{0x17DC250,0x620790,"601_Tank"},
     {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x63C1C0,"612_nix"},{0x17DD720,0,"VehicleBase"},
     {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0,"BigBegaruta"},{0x17DEF98,0x64C020,"Helicopter409"},
     {0x17DF338,0x64E080,"Helicopter410"},{0x17DF790,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
     {0x17E0A80,0,"CarBase"},{0x17E1828,0,"TankBase"},
+    {0x17E01B0,0x65A390,"Car",0x65B910,kSlotInput,true},
 };
 constexpr int kClassCount=static_cast<int>(sizeof(kClasses)/sizeof(kClasses[0]));
 // The next function in each patched input slot: the stock one, or another plugin's hook
 // (EDF6AutoTurret hooks 403/404/603) that ran its patch before ours.
 InputFn nextInput[kClassCount]{};
-FindSeatFn originalFindSeat=nullptr;
+// Each class's own slot 49, which our FindSeat hook calls through (null: that class not hooked).
+FindSeatFn originalFindSeat_[kClassCount]{};
 PromptFn originalPrompt=nullptr;
 bool inputsHooked=false;
 
@@ -201,6 +214,8 @@ void Bump(unsigned char* vehicle,unsigned index) noexcept {
 }
 
 unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
+    const int cls=ClassOf(vehicle);
+    const FindSeatFn originalFindSeat=cls>=0 && originalFindSeat_[cls] ? originalFindSeat_[cls] : reinterpret_cast<FindSeatFn>(image+kFindSeat);
     auto seat=originalFindSeat(vehicle,human);
     if(seat || !cfg.enabled || !cfg.bump)return seat;
     __try {
@@ -295,6 +310,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     const auto team=OwnTeam(vehicle);
     if(!player.at || now-player.at>10000 || (team!=player.team && team!=kTeamVehicle))return;
     if(cfg.crewRange>0.0f && Distance2(vehicle,player.pos)>cfg.crewRange*cfg.crewRange)return;
+    // An unarmed truck of an armed vehicle's class: nothing for a driver to do.
+    if(kClasses[cls].armedOnly && At<std::uint64_t>(vehicle,kHolderCount)==0)return;
     // The NPC that moved to a gunner seat when the player boarded goes with the driver seat:
     // the vehicle gets a fresh driver from the stock RideAi rather than a hand-moved one.
     for(unsigned i=0;i<count && dummies;++i)
@@ -306,8 +323,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     Log("CREW v=%p %s seats=%u driver=%d",vehicle,kClasses[cls].name,count,SeatRider(SeatAt(vehicle,0))==Rider::dummy);
 }
 
-template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput) {
-    nextInput[I](vehicle,hasInput);
+template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
+    nextInput[I](vehicle,hasInput,a3,a4);
     if(!cfg.enabled)return;
     ReloadConfigIfChanged();
     __try {
@@ -317,11 +334,12 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput)
         JetReap(v);
         HeliReap(v);
         if(IsHelicopter(v))HeliFrame(v);
+        if(IsGroundRobo(v))GroundFrame(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 template<int... I> struct Hooks { static constexpr InputFn table[]={&InputHook<I>...}; };
-using AllHooks=Hooks<0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22>;
+using AllHooks=Hooks<0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23>;
 static_assert(sizeof(AllHooks::table)/sizeof(AllHooks::table[0])==kClassCount,"one hook per class");
 
 // Chains every concrete class's input slot. Runs on the game thread, first mission frame.
@@ -329,8 +347,8 @@ void InstallInputs() noexcept {
     inputsHooked=true;
     int hooked=0;
     for(int i=0;i<kClassCount;++i) {
-        if(!kClasses[i].input)continue;   // abstract bases and classes we leave alone
-        auto slot=reinterpret_cast<void**>(image+kClasses[i].vtable)+kSlotInput;
+        if(!kClasses[i].input || !originalFindSeat_[i])continue;   // abstract bases, classes we leave alone or could not hook
+        auto slot=reinterpret_cast<void**>(image+kClasses[i].vtable)+kClasses[i].inputSlot;
         void* current=*slot;
         nextInput[i]=reinterpret_cast<InputFn>(current);
         if(current!=image+kClasses[i].input)Log("HOOK input %s: chaining onto %p (another plugin)",kClasses[i].name,current);
@@ -341,15 +359,20 @@ void InstallInputs() noexcept {
 }  // namespace
 
 bool InstallCrew() noexcept {
-    // Slot 49 of every class must still be the stock FindSeat, and the prompt visitor stock.
-    for(const auto& c:kClasses)
-        if(reinterpret_cast<void**>(image+c.vtable)[kSlotFindSeat]!=image+kFindSeat){Log("HOOK crew: %s slot 49 not stock",c.name);return false;}
+    // The prompt visitor must be stock; a class whose slot 49 is not its own stock FindSeat (another
+    // plugin's) is left alone, seats and input both.
     if(reinterpret_cast<void**>(image+kPromptFunctorVtable)[1]!=image+kPromptVisit){Log("HOOK crew: prompt visitor not stock");return false;}
-    originalFindSeat=reinterpret_cast<FindSeatFn>(image+kFindSeat);
     originalPrompt=reinterpret_cast<PromptFn>(image+kPromptVisit);
     int seats=0;
-    for(const auto& c:kClasses)
-        seats+=PatchVtableSlot(reinterpret_cast<void**>(image+c.vtable)+kSlotFindSeat,image+kFindSeat,reinterpret_cast<void*>(&FindSeatHook));
+    for(int i=0;i<kClassCount;++i) {
+        const auto& c=kClasses[i];
+        void* stock=image+c.findSeat;
+        auto slot=reinterpret_cast<void**>(image+c.vtable)+kSlotFindSeat;
+        if(*slot!=stock){Log("HOOK crew: %s slot 49 not stock, class skipped",c.name);continue;}
+        if(!PatchVtableSlot(slot,stock,reinterpret_cast<void*>(&FindSeatHook)))continue;
+        originalFindSeat_[i]=reinterpret_cast<FindSeatFn>(stock);
+        ++seats;
+    }
     const bool prompt=PatchVtableSlot(reinterpret_cast<void**>(image+kPromptFunctorVtable)+1,image+kPromptVisit,reinterpret_cast<void*>(&PromptHook));
     Log("HOOK crew findSeat=%d/%d prompt=%d (inputs on the first mission frame)",seats,kClassCount,prompt);
     return seats>0 || prompt;

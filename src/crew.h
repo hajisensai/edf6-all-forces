@@ -43,6 +43,11 @@ struct Config {
     DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover
     bool jetAirRaider=true;    // the Air Raider's bomber calls send jets instead, and its call weapons (airstrike.cpp) work
     bool jetMissionStrike=true;// the missions' strafing-plane airstrikes (DemoAirStrike) send jets instead
+    bool groundPilot=true;     // NPC-crewed Depth Crawlers (502, no stock AI) are driven by the plugin (ground.cpp)
+    float groundFollow=20.0f;  // metres from the player it stops at with no enemy
+    float groundRange=200.0f;  // it engages enemies within this distance
+    float groundLeash=100.0f;  // it goes no further than this from the player while it has one
+    bool groundFire=true;
 };
 extern Config cfg;
 
@@ -169,4 +174,9 @@ bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,flo
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
+
+// ground.cpp: the Depth Crawler (502), which has no stock AI
+bool IsGroundRobo(const void* vehicle) noexcept;
+void GroundFrame(unsigned char* vehicle) noexcept;   // after its stock pre-update, NPC-driven crawlers only
+bool CheckGroundProfile() noexcept;
 }  // namespace crew
