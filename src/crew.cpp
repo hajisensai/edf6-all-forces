@@ -188,7 +188,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(st.playerAt>since)since=st.playerAt;
     if(st.bumpedAt>since)since=st.bumpedAt;
     if(now-since<cfg.crewDelayMs)return;
-    if(!player.at || now-player.at>10000 || At<std::int32_t>(vehicle,kTeam)!=player.team)return;
+    const auto team=At<std::int32_t>(vehicle,kTeam);
+    if(!player.at || now-player.at>10000 || (team!=player.team && team!=kTeamVehicle))return;
     if(cfg.crewRange>0.0f && Distance2(vehicle,player.pos)>cfg.crewRange*cfg.crewRange)return;
     // The NPC that moved to a gunner seat when the player boarded goes with the driver seat:
     // the vehicle gets a fresh driver from the stock RideAi rather than a hand-moved one.

@@ -39,6 +39,9 @@ extern Config cfg;
 constexpr std::size_t kSelf=0x28,kSelfCtrl=0x30;
 // Vehicle
 constexpr std::size_t kMatrix=0x60,kPosition=0x90,kDead=0x2E8,kTeam=0x314;
+// Teams (mission AsCommon.h): player 0, enemy 1, friend 2, neutral 3, vehicle 5 = nobody's vehicle,
+// which anyone may board (CanRideSeat skips the team test for it).
+constexpr std::int32_t kTeamVehicle=5;
 constexpr std::size_t kSeats=0x608,kSeatCount=0x618,kSeatStride=0x340;
 // Seat: rider object / its weak_ptr control block (occupied while the use count is non-zero)
 constexpr std::size_t kSeatRider=0x260,kSeatRiderCtrl=0x268;

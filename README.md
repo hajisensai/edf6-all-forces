@@ -54,6 +54,18 @@ EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Stea
 - **水平冲过头 / 来回晃**：把 `HeliBrakeGain` 调大，或把 `HeliMoveGain` 调小；
 - **飞不起来**：看 `rotor` 和 `thr` 两项。
 
+## 测试场（testrange/）
+
+双击 `testrange/测试场.bat` 打开启动器（需要 Python 3，自带的 tkinter 即可）：
+
+- **载具**：每种填数量，放在玩家出生点 30–160 米的平地上（最多 12 台）。可以设等级。
+- **敌人波次**：选种类、每波数量、场上少于几只才刷下一波、开局延迟、间隔、等级。开局先留 30 秒给你试车。
+- **安装到第 1 关**：生成 `Mods/MISSION/EDF6/M001/MISSION.AC`，地图用 M045 那片平原（`ig_Heigen601`，阴天）。
+  它的点位文件 `MISSION.RMPA` 会从你本机的 `Root.cpk` 里取出来一起放进去。进游戏后选 **离线 → 第 1 关**，难度随意。
+  这一关不会自己结束，测完从暂停菜单撤退即可。
+- **卸载**：删掉整个 `M001` 目录，第 1 关恢复原样。目录里有 `EDF6TestRange.txt` 才会删；别的 mod 放在那里的文件不会动。
+- 设置保存在 `testrange/testrange.json`，下次打开会还原。
+
 ## 源码
 
 - `src/plugin.cpp`：入口、配置、日志、代码签名检查。
@@ -61,4 +73,5 @@ EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Stea
 - `src/heli.cpp`：直升机自动驾驶。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
 - 构建：`build.cmd`（MSVC x64 + Ninja，RelWithDebInfo），产物输出到 `dist/Mods/Plugins/`。
+- `testrange/`：测试场启动器（`gen.py` 生成脚本，`lib/` 是读 `Root.cpk` / RMPA 的工具，edf6-cpk 部分的许可见 `lib/LICENSE.edf6-cpk`）。
 - `probe/`：早期调研用的任务脚本探针（用 CreateFriend 生成直升机），已不需要，也未安装。

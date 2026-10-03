@@ -10,3 +10,5 @@ backup/
 probe/
 __pycache__/
 *.log
+__pycache__/
+testrange/testrange.json

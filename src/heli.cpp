@@ -100,7 +100,9 @@ const std::int32_t* Relations(std::int32_t team) noexcept {
 // The enemy lock point to engage: the current target while it stays in range, else the nearest
 // one within `range` of `around`. Returns false with none.
 bool PickTarget(Heli& h,const unsigned char* v,const float* around,float range,float* aim) noexcept {
-    const auto relation=Relations(At<std::int32_t>(v,kTeam));
+    auto team=At<std::int32_t>(v,kTeam);
+    if(team==kTeamVehicle)team=player.team;   // nobody's vehicle: fight the player's enemies
+    const auto relation=Relations(team);
     const auto registry=At<const unsigned char*>(image,kRegistry);
     if(!relation || !Readable(registry,kRegList+0x10))return false;
     const auto head=At<const unsigned char*>(registry,kRegList);
@@ -112,8 +114,8 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,float range,f
         if(!target || target[0]!=0 || !target[kTargetValid] || !target[kTargetLockable])continue;
         const auto object=At<const unsigned char*>(target,kTargetObject);
         if(!object || object==v || object[kDead])continue;
-        const auto team=At<std::int32_t>(object,kTeam);
-        if(team<0 || team>=kMaxTeam || relation[team]!=kEnemyRelation)continue;
+        const auto other=At<std::int32_t>(object,kTeam);
+        if(other<0 || other>=kMaxTeam || relation[other]!=kEnemyRelation)continue;
         const float* a=reinterpret_cast<const float*>(target+kTargetAim);
         if(!std::isfinite(a[0]) || !std::isfinite(a[1]) || !std::isfinite(a[2]))continue;
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
