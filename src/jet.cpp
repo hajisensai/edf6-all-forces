@@ -12,10 +12,11 @@
 //    banked into the turn.
 // Roles (Kind): strike (ground targets first; JetLaunchBomber's bombers first fly the stock bomber's run
 // and drop its bombs), fighter and interceptor (flying targets first; the interceptor faster, higher,
-// farther out, its missiles from farther), multirole (the nearest target, either), carrier (big and slow:
-// circles and sends its drones, kCarrierDrones of them, at what is in its range) and drone (from its
+// farther out, its missiles from farther), multirole (the nearest target, either), carrier (the V508
+// transport's four rotors: it hovers over its anchor (Hover) and sends its drones, kCarrierDrones of them,
+// at what is in its range) and drone (from its
 // carrier: attacks, and back to it after kDroneSortieMs, damaged or out of ammo, where it docks and is
-// rearmed kRearmMs later). With missiles a jet stands off (Missile): it fires them from its role's
+// rearmed kRearmMs later; a carrier has kCarrierSorties launches, its ammo). With missiles a jet stands off (Missile): it fires them from its role's
 // missileRange and turns away, and closes in with the guns only once they are spent. None reloads; out of
 // ammo, out of fuel (cfg.jetFuelSec times its role's fuel, a launched sortie cfg.jetSortieSec) or below
 // kWithdrawHp of its HP it flies off and is deleted out of the player's sight.
@@ -97,7 +98,7 @@ constexpr Kind kKinds[kRoleCount]={
      1900.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f,4},
     {"multirole",7004.0f,Prefer::any,true, 170.0f,190.0f,100.0f, 12.0f,18.0f, 6.0f,2.0f, 280.0f, 900.0f,75.0f,1600.0f, 500.0f,60.0f,
      1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f,5},
-    {"carrier",7005.0f,Prefer::any,false, 60.0f,60.0f,40.0f, 4.0f,4.0f, 1.3f,0.35f, 230.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
+    {"carrier",7005.0f,Prefer::any,false, 60.0f,60.0f,40.0f, 4.0f,4.0f, 1.3f,0.35f, 150.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
      450.0f,80.0f, 0.0f,0.0f, 1800.0f, 0.0f,4.0f,6},   // over its anchor, its drones do the reaching (2026-10-03: 1300 m out)
     {"drone",7006.0f,Prefer::any,true, 140.0f,160.0f,60.0f, 25.0f,25.0f, 8.0f,3.5f, 120.0f, 500.0f,35.0f,700.0f, 350.0f,30.0f,
      300.0f,40.0f, 50.0f,20.0f, 1800.0f, 0.0f,1.0f,7},
@@ -153,6 +154,9 @@ constexpr ULONGLONG kLaunchGapMs=1500,kRearmMs=10000,kDroneSortieMs=30000,kIdleM
 // A drone shot down (out, but no jet of its carrier's has its place): the carrier has a new one this
 // much later.
 constexpr ULONGLONG kReplaceMs=30000;
+// A carrier's ammo: this many drone launches. With none left and every drone back (docked or lost) it
+// withdraws "out of drones", as a jet out of ammo does.
+constexpr int kCarrierSorties=18;
 // The way back: a drone far off heads for a point kDockBehind behind and kDockUnder under the dock (along
 // the carrier's track), drawn in to the dock itself as it nears (kDockLine metres out), so it comes in
 // from behind and below instead of through the carrier's body.
@@ -312,6 +316,7 @@ struct Jet {
     int slot;                // ...its place on the carrier
     ULONGLONG dock[kCarrierDrones];   // a carrier's drones: game ms each is ready (kDroneOut: out)
     ULONGLONG launchAt;      // a carrier's last launch
+    int sorties;             // a carrier's launches left (kCarrierSorties)
     ULONGLONG lockSeen;      // standing off with missiles: game ms the lock list last held a target (0: not)
     ULONGLONG gunsUntil;     // no lock came (kNoLockMs): guns only until then
 };
@@ -762,6 +767,50 @@ void Guard(const Jet& j,const float* pos,float* want) noexcept {
     const float top=Ceiling()-kCeilingGap;
     const float rising=pos[1]+(j.vel[1]>0.0f ? j.vel[1]*kLookAhead : 0.0f);
     if(rising>top && want[1]>-0.15f){want[1]=-0.15f;Normalize(want);}
+}
+
+// A rotor craft (Hovers): no wing, so it goes where it wants at any speed, hovering still over its station.
+// Its velocity closes on the one that stops it at `goal` (at most `speed`, braking at its kind's brake: the
+// speed that can still stop there, sqrt(2 brake d)) at its thrust; its body leans into that acceleration
+// (up = acceleration + gravity, as a rotor's thrust does) at most kHoverLean, the nose on `face`.
+constexpr float kHoverLean=0.35f;      // rad: the most it tilts
+constexpr float kHoverClimb=12.0f;     // m/s up or down at the most
+constexpr float kHoverLeave=500.0f;    // m: leaving, it heads this far along its way out
+bool Hovers(const Jet& j) noexcept { return j.role==Role::carrier; }
+
+void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float dt) noexcept {
+    float to[3]={goal[0]-pos[0],0.0f,goal[2]-pos[2]};
+    const float d=Len(to);
+    float wantV[3]={0.0f,0.0f,0.0f};
+    if(Normalize(to)) {
+        const float stop=std::sqrt(2.0f*k.brake*d),s=stop<speed ? stop : speed;
+        wantV[0]=to[0]*s;wantV[2]=to[2]*s;
+    }
+    wantV[1]=Clamp((goal[1]-pos[1])*0.5f,-kHoverClimb,kHoverClimb);
+    float acc[3];
+    for(int i=0;i<3;++i)acc[i]=(wantV[i]-j.vel[i])/dt;
+    const float a=Len(acc),most=k.thrust;
+    if(a>most)for(int i=0;i<3;++i)acc[i]*=most/a;
+    for(int i=0;i<3;++i)j.vel[i]+=acc[i]*dt;
+    // The lean: the horizontal acceleration against gravity, at most kHoverLean.
+    float up[3]={acc[0],kG,acc[2]};
+    const float lean=std::atan2(std::sqrt(acc[0]*acc[0]+acc[2]*acc[2]),kG);
+    if(lean>kHoverLean) {
+        const float h=std::tan(kHoverLean)*kG/std::sqrt(acc[0]*acc[0]+acc[2]*acc[2]);
+        up[0]*=h;up[2]*=h;
+    }
+    Normalize(up);
+    float nose[3]={face[0]-pos[0],0.0f,face[2]-pos[2]};
+    if(!Normalize(nose)) {
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        nose[0]=m[8];nose[1]=0.0f;nose[2]=m[10];
+        if(!Normalize(nose)){nose[0]=0;nose[2]=1;}
+    }
+    // The nose across `up` (the body's forward lies in the plane the lean makes).
+    const float along=Dot(nose,up);
+    for(int i=0;i<3;++i)nose[i]-=up[i]*along;
+    Normalize(nose);
+    Attitude(j,k,v,nose,up);
 }
 
 // The circle round the anchor, patrol out (plus patrolStep per jet, so they do not share one circle),
@@ -1230,7 +1279,7 @@ Jet* Launch(Role role,const float* from,const float* heading,const float* target
     unsigned char* v=SpawnJet(b,m);
     if(!v)return nullptr;
     FreeSlot(v,ms);   // entries left at this address by a jet shot down there
-    *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);j->role=role;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;
+    *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);j->role=role;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;j->sorties=kCarrierSorties;
     QueryPerformanceCounter(&j->last);
     std::memcpy(j->anchor,target,12);j->mode=Mode::patrol;j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
     j->flight=FlightFor(source,ms);
@@ -1276,7 +1325,7 @@ void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexce
         c.dock[i]=ms+kReplaceMs;
         Log("JET v=%p carrier: drone %d lost, a new one in %.0f s",c.vehicle,i,static_cast<float>(kReplaceMs)*0.001f);
     }
-    if(!c.target || c.mode==Mode::withdraw || ms-c.launchAt<kLaunchGapMs)return;
+    if(!c.target || c.mode==Mode::withdraw || c.sorties<=0 || ms-c.launchAt<kLaunchGapMs)return;
     int i=0;
     while(i<kCarrierDrones && c.dock[i]>ms)++i;
     if(i==kCarrierDrones)return;
@@ -1287,7 +1336,7 @@ void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexce
     const float least=kKinds[static_cast<int>(Role::drone)].minSpeed,s=Len(c.vel)+20.0f;
     Jet* d=Launch(Role::drone,from,heading,c.aim,cfg.jetFuelSec,s>least ? s : least,c.vehicle);
     if(!d)return;
-    d->mother=c.ctrl;d->slot=i;d->flight=c.flight;c.dock[i]=kDroneOut;
+    d->mother=c.ctrl;d->slot=i;d->flight=c.flight;c.dock[i]=kDroneOut;--c.sorties;
     Log("JET v=%p carrier %p launched drone %d at %p",d->vehicle,c.vehicle,i,c.target);
 }
 }  // namespace
@@ -1451,7 +1500,7 @@ void JetFrame(unsigned char* v) noexcept {
     if(!j) {
         j=FreeSlot(v,ms);
         if(!j)return;   // kMaxJets flying: this one hovers until a slot frees
-        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->role);j->bornAt=j->modeAt=ms;j->last=now;
+        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->role);j->bornAt=j->modeAt=ms;j->last=now;j->sorties=kCarrierSorties;
         std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->flight=kPlacedFlight;
         j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(cfg.jetFuelSec)*KindOf(*j).fuel*1000.0f);
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,KindOf(*j).name,At<float>(v,kHp),Ceiling());
@@ -1486,6 +1535,11 @@ void JetFrame(unsigned char* v) noexcept {
     // A drone goes back to its carrier instead, and after kDroneSortieMs, half its HP gone, the carrier
     // leaving, or kIdleMs with nothing to attack; with the carrier gone it withdraws.
     if(j->mother && !mother && !why)why="carrier lost";
+    if(!why && j->role==Role::carrier && j->sorties<=0) {
+        bool out=false;
+        for(const auto at:j->dock)out|=at==kDroneOut;
+        if(!out)why="out of drones";
+    }
     else if(mother) {
         if(j->mode!=Mode::recover && j->mode!=Mode::withdraw) {
             const char* back=why ? why : ms-j->bornAt>kDroneSortieMs ? "sortie over" : hpMax>0.0f && hp<hpMax*0.5f ? "damaged" :
@@ -1569,15 +1623,28 @@ void JetFrame(unsigned char* v) noexcept {
         else gunsOk=Strike(*j,pos,lead,height,ms,want,&speed);
         break;
     }
-    Guard(*j,pos,want);
-    float up[3];
-    float bodyUp[3]={m[4],m[5],m[6]};
-    if(!Normalize(bodyUp)){bodyUp[0]=0;bodyUp[1]=1;bodyUp[2]=0;}
-    JetSteer(*j,kind,nose,bodyUp,want,speed,dt,up);
-    float dir[3]={j->vel[0],j->vel[1],j->vel[2]};
-    if(!Normalize(dir))std::memcpy(dir,nose,12);
-    Attitude(*j,kind,v,dir,up);
-    Elevons(*j,kind,v,dt);
+    if(Hovers(*j)) {
+        // Over its anchor (kind.alt up, kMinAlt over the ground there at least), facing its target; leaving,
+        // along `want` (Withdraw's way out, climbing).
+        float goal[3]={anchor[0],height,anchor[2]};
+        if(j->mode==Mode::withdraw)for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
+        else {
+            const float top[3]={goal[0],goal[1]+600.0f,goal[2]},bottom[3]={goal[0],goal[1]-1500.0f,goal[2]};
+            float hit[3];
+            if(MapRay(top,bottom,hit)>=0.0f && goal[1]<hit[1]+kMinAlt*2.0f)goal[1]=hit[1]+kMinAlt*2.0f;
+        }
+        Hover(*j,kind,v,pos,goal,j->target ? j->aim : goal,kind.cruise,dt);
+    } else {
+        Guard(*j,pos,want);
+        float up[3];
+        float bodyUp[3]={m[4],m[5],m[6]};
+        if(!Normalize(bodyUp)){bodyUp[0]=0;bodyUp[1]=1;bodyUp[2]=0;}
+        JetSteer(*j,kind,nose,bodyUp,want,speed,dt,up);
+        float dir[3]={j->vel[0],j->vel[1],j->vel[2]};
+        if(!Normalize(dir))std::memcpy(dir,nose,12);
+        Attitude(*j,kind,v,dir,up);
+        Elevons(*j,kind,v,dt);
+    }
     j->ready=true;
     BayFrame(*j,pos,nose);
     Fire(*j,v,pos,nose,lead,gunsOk,missileOk,arms,ms);

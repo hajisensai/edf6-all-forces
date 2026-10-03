@@ -25,7 +25,8 @@
 // Speed: see Tune.
 // Called helis (HeliCalled: the Air Raider's call weapons, airstrike.cpp): a guard heli holds cfg.heliHeight
 // over its call's marker (its post) and fights what comes within heliRange of it, never following nor
-// landing; a follow heli flies like any NPC heli. After its sortie each flies off away from the player
+// landing; a follow heli flies like any NPC heli. Its weapons are not refilled: with every round fired,
+// its fuel (HeliCalled's fuelSec) gone or below kLeaveHp of its HP it flies off away from the player
 // (StartLeave), fighting no more, and is deleted (HeliReap) kGoneFar from them or kLeaveMaxMs after.
 #include "crew.h"
 #include "memory.h"
@@ -117,6 +118,7 @@ constexpr float kMissileCone=10.0f;  // deg: the missile homes (LockonType 1), s
 // fired whenever a target was below in reach, and the turret cannot turn everywhere: 2026-10-03 it
 // fired with the target 70-140 degrees off the nose, into the air.)
 constexpr std::size_t kWeaponLockon=0x6B0,kWeaponSpeed=0x894,kWeaponGravity=0x8E0,kWeaponAmmo=0xBE8;
+constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;   // the vehicle's HP (as jet.cpp)
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr std::int32_t kHoming=1;
 constexpr float kGravity=14.7f;      // m/s^2 (measured, autoturret re-notes)
@@ -692,7 +694,7 @@ Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
         if(ammo>arm.full)arm.full=ammo;
         const float speed=At<float>(weapon,kWeaponSpeed)*60.0f,gravity=At<float>(weapon,kWeaponGravity);
         const bool homing=At<std::int32_t>(weapon,kWeaponLockon)==kHoming,rocket=!homing && speed<120.0f;
-        if(ammo<=0 && arm.full>0) {
+        if(ammo<=0 && arm.full>0 && !h.called) {
             if(!arm.emptyAt)arm.emptyAt=ms;
             else if(ms-arm.emptyAt>((homing || rocket) ? kReloadAltMs : kReloadGunMs)) {
                 Put<std::int32_t>(weapon,kWeaponAmmo,arm.full);arm.emptyAt=0;
@@ -927,7 +929,7 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     const std::int32_t ammo=At<std::int32_t>(weapon,kWeaponAmmo);
     if(g.weapon!=weapon){g.weapon=weapon;g.full=ammo;g.emptyAt=0;}
     if(ammo>g.full)g.full=ammo;
-    if(ammo<=0 && g.full>0) {
+    if(ammo<=0 && g.full>0 && !h.called) {
         if(!g.emptyAt)g.emptyAt=ms;
         else if(ms-g.emptyAt>kReloadGunMs){Put<std::int32_t>(weapon,kWeaponAmmo,g.full);g.emptyAt=0;}
     } else g.emptyAt=0;
@@ -1011,14 +1013,34 @@ bool doorOk=false;   // the 410 layout DoorGun writes matched (CheckHeliProfile)
 // A called heli leaving: kLeaveOut away from the player (or on along its heading), kLeaveClimb higher.
 constexpr float kLeaveOut=3000.0f,kLeaveClimb=60.0f,kGoneFar=1000.0f;
 constexpr ULONGLONG kLeaveMaxMs=90000;
-void StartLeave(Heli& h,const float* pos,const float* fwd) noexcept {
+constexpr float kLeaveHp=0.25f;
+void StartLeave(Heli& h,const float* pos,const float* fwd,const char* why) noexcept {
     float d[3]={pos[0]-player.pos[0],0.0f,pos[2]-player.pos[2]};
     float l=std::sqrt(Dot2(d,d));
     if(!player.at || l<1.0f){d[0]=fwd[0];d[2]=fwd[2];l=std::sqrt(Dot2(d,d));}
     if(l<1e-3f){d[0]=0.0f;d[2]=1.0f;l=1.0f;}
     h.hold[0]=pos[0]+d[0]/l*kLeaveOut;h.hold[1]=pos[1]+kLeaveClimb;h.hold[2]=pos[2]+d[2]/l*kLeaveOut;
     h.leaving=true;h.leftAt=GameMs();h.target=nullptr;h.extend=false;
-    Log("HELI v=%p sortie over: leaving towards (%.0f,%.0f)",h.vehicle,h.hold[0],h.hold[2]);
+    Log("HELI v=%p %s: leaving towards (%.0f,%.0f)",h.vehicle,why,h.hold[0],h.hold[2]);
+}
+
+// Why a called heli leaves now (see the file comment), or nullptr: the weapons Arms read (`l`) and the
+// door guns all empty (once any was seen loaded), fuel, damage.
+const char* LeaveReason(const Heli& h,const unsigned char* v,const Loadout& l) noexcept {
+    if(GameMs()>=h.leaveAt)return "out of fuel";
+    const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
+    if(hpMax>0.0f && hp<hpMax*kLeaveHp)return "damaged";
+    bool armed=false;
+    std::int32_t left=0;
+    for(int i=0;i<4;++i)
+        if(h.arms[i].weapon && h.arms[i].full>0){armed=true;left+=l.ammo[i]>0 ? l.ammo[i] : 0;}
+    for(const auto& d:h.doors)
+        if(d.weapon && d.full>0 && Readable(d.weapon,kWeaponAmmo+4)) {
+            armed=true;
+            const std::int32_t a=At<std::int32_t>(d.weapon,kWeaponAmmo);
+            left+=a>0 ? a : 0;
+        }
+    return armed && left==0 ? "out of ammo" : nullptr;
 }
 
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
@@ -1072,7 +1094,6 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const ULONGLONG ms=GetTickCount64();
     const Flight flight=FlightOf(h,ms);
     const int wing=flight.wing;
-    if(h.called && !h.leaving && !playerAboard && GameMs()>=h.leaveAt)StartLeave(h,pos,fwd);
     if(h.leaving && !playerAboard && (Dist2(pos,player.pos)>kGoneFar || GameMs()-h.leftAt>kLeaveMaxMs))h.reap=true;
     const bool follow=!playerAboard && player.at && ms-player.at<10000 && !h.guard && !h.leaving;
     if(follow)TrackPlayerStill();
@@ -1094,6 +1115,8 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         h.tracked=nullptr;h.extend=false;
     }
     const Loadout arms=Arms(h,v,ms);
+    if(h.called && !h.leaving && !playerAboard)
+        if(const char* why=LeaveReason(h,v,arms))StartLeave(h,pos,fwd,why);
     const bool is409=At<const unsigned char*>(v,0)==image+kHeli409;
     const bool is410=At<const unsigned char*>(v,0)==image+kHeli410;
     // Lead the target by the rounds' flight time and drop: the gun's, and the rockets' for the 409, whose
@@ -1349,7 +1372,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     Fly(*h,vehicle,playerAboard);
 }
 
-void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD sortieSec) noexcept {
+void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept {
     __try {
         HeliCrewed(vehicle);
         Heli* const h=Find(vehicle);
@@ -1357,12 +1380,12 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD sortie
         h->ctrl=At<const void*>(vehicle,kSelfCtrl);h->called=true;h->guard=guard;
         std::memcpy(h->post,post,12);
         h->hold[0]=post[0];h->hold[1]=post[1]+cfg.heliHeight;h->hold[2]=post[2];
-        h->leaveAt=GameMs()+static_cast<ULONGLONG>(sortieSec)*1000;
+        h->leaveAt=GameMs()+static_cast<ULONGLONG>(fuelSec)*1000;
         // Spawned in the air with the rotor still: it starts at the rotor Fly assumes for hover, so it
         // does not drop while the rotor spins up.
         const float rotor=At<float>(vehicle,kRotor);
         if(!(std::isfinite(rotor) && rotor>0.2f))Put<float>(vehicle,kRotor,0.5f);
-        Log("HELI v=%p called: %s at (%.0f,%.0f,%.0f) for %lus",vehicle,guard ? "guard" : "follow",post[0],post[1],post[2],sortieSec);
+        Log("HELI v=%p called: %s at (%.0f,%.0f,%.0f), fuel %lus",vehicle,guard ? "guard" : "follow",post[0],post[1],post[2],fuelSec);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 

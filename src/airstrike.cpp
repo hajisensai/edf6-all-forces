@@ -79,24 +79,26 @@ Held* FreeHeld(ULONGLONG ms) noexcept {
 constexpr unsigned kPlaneHide=0x6C04B0,kPlaneUnlist=0x54DDB0;
 constexpr std::size_t kPlaneSpeed=0xB90,kPlaneDraw=0x5C0;
 
-// The call weapons (tools/call_weapons.py writes the same marks, counts and sorties): per role a guard
-// call (round its marker) and a follow call (round the player), the follow one dearer (its reload). The
-// stronger the call, the fewer and the longer it reloads; the carrier is one, its drones do the work.
-struct Call { float mark; bool heli; JetRole role; HeliBody body; int count; DWORD sortieSec; bool follow; const char* name;
+// The call weapons (tools/call_weapons.py writes the same marks and counts): per role a guard call (round
+// its marker) and a follow call (round the player), the follow one dearer (its reload). The stronger the
+// call, the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts
+// is its ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of
+// fuel (fuelSec) or badly damaged each leaves.
+struct Call { float mark; bool heli; JetRole role; HeliBody body; int count; DWORD fuelSec; bool follow; const char* name;
               const wchar_t* id; };
 const Call kCalls[]={
-    {7101.0f,false,JetRole::interceptor,HeliBody::eros506,2,45,false,"interceptors (guard)",L"EDF6VC_CALL_INTERCEPTOR"},
-    {7102.0f,false,JetRole::interceptor,HeliBody::eros506,2,45,true,"interceptors (follow)",L"EDF6VC_CALL_INTERCEPTOR_F"},
-    {7103.0f,false,JetRole::strike,HeliBody::eros506,3,60,false,"strike jets (guard)",L"EDF6VC_CALL_STRIKE"},
-    {7104.0f,false,JetRole::strike,HeliBody::eros506,3,60,true,"strike jets (follow)",L"EDF6VC_CALL_STRIKE_F"},
-    {7105.0f,false,JetRole::multirole,HeliBody::eros506,3,90,false,"multirole jets (guard)",L"EDF6VC_CALL_MULTIROLE"},
-    {7106.0f,false,JetRole::multirole,HeliBody::eros506,3,90,true,"multirole jets (follow)",L"EDF6VC_CALL_MULTIROLE_F"},
-    {7107.0f,false,JetRole::fighter,HeliBody::eros506,4,90,false,"fighters (guard)",L"EDF6VC_CALL_FIGHTER"},
-    {7108.0f,false,JetRole::fighter,HeliBody::eros506,4,90,true,"fighters (follow)",L"EDF6VC_CALL_FIGHTER_F"},
-    {7109.0f,false,JetRole::carrier,HeliBody::eros506,1,120,false,"carrier (guard)",L"EDF6VC_CALL_CARRIER"},
-    {7110.0f,false,JetRole::carrier,HeliBody::eros506,1,120,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
-    {7111.0f,true,JetRole::fighter,HeliBody::brute410,2,120,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
-    {7112.0f,true,JetRole::fighter,HeliBody::eros506,2,120,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
+    {7101.0f,false,JetRole::interceptor,HeliBody::eros506,2,240,false,"interceptors (guard)",L"EDF6VC_CALL_INTERCEPTOR"},
+    {7102.0f,false,JetRole::interceptor,HeliBody::eros506,2,240,true,"interceptors (follow)",L"EDF6VC_CALL_INTERCEPTOR_F"},
+    {7103.0f,false,JetRole::strike,HeliBody::eros506,3,240,false,"strike jets (guard)",L"EDF6VC_CALL_STRIKE"},
+    {7104.0f,false,JetRole::strike,HeliBody::eros506,3,240,true,"strike jets (follow)",L"EDF6VC_CALL_STRIKE_F"},
+    {7105.0f,false,JetRole::multirole,HeliBody::eros506,3,300,false,"multirole jets (guard)",L"EDF6VC_CALL_MULTIROLE"},
+    {7106.0f,false,JetRole::multirole,HeliBody::eros506,3,300,true,"multirole jets (follow)",L"EDF6VC_CALL_MULTIROLE_F"},
+    {7107.0f,false,JetRole::fighter,HeliBody::eros506,4,300,false,"fighters (guard)",L"EDF6VC_CALL_FIGHTER"},
+    {7108.0f,false,JetRole::fighter,HeliBody::eros506,4,300,true,"fighters (follow)",L"EDF6VC_CALL_FIGHTER_F"},
+    {7109.0f,false,JetRole::carrier,HeliBody::eros506,1,600,false,"carrier (guard)",L"EDF6VC_CALL_CARRIER"},
+    {7110.0f,false,JetRole::carrier,HeliBody::eros506,1,600,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
+    {7111.0f,true,JetRole::fighter,HeliBody::brute410,2,360,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
+    {7112.0f,true,JetRole::fighter,HeliBody::eros506,2,360,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
 };
 
 // Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
@@ -164,15 +166,15 @@ int LaunchCall(const Call& c,const float* target) noexcept {
         const float from[3]={target[0]-dir[0]*back+side[0]*off,target[1]+up+kWingStep*static_cast<float>(i),
                              target[2]-dir[2]*back+side[2]*off};
         if(!c.heli) {
-            launched+=JetLaunch(c.role,from,dir,target,c.sortieSec,&kRadioSource,c.follow) ? 1 : 0;
+            launched+=JetLaunch(c.role,from,dir,target,c.fuelSec,&kRadioSource,c.follow) ? 1 : 0;
             continue;
         }
         unsigned char* const v=HeliLaunch(c.body,from,dir);
         if(!v)continue;
-        HeliCalled(v,!c.follow,target,c.sortieSec);
+        HeliCalled(v,!c.follow,target,c.fuelSec);
         ++launched;
     }
-    Log("AIRSTRIKE call: %d/%d %s at (%.0f,%.0f,%.0f) for %lus",launched,c.count,c.name,target[0],target[1],target[2],c.sortieSec);
+    Log("AIRSTRIKE call: %d/%d %s at (%.0f,%.0f,%.0f), fuel %lus",launched,c.count,c.name,target[0],target[1],target[2],c.fuelSec);
     return launched;
 }
 

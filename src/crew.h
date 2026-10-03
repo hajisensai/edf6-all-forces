@@ -145,8 +145,9 @@ bool JetLaunch(JetRole role,const float* from,const float* heading,const float* 
 enum class HeliBody { brute410, eros506 };
 unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A heli the Air Raider called (heli.cpp): `guard` holds over `post` and fights round it, else it follows
-// the player; after `sortieSec` it flies off away from the player and is deleted far from them.
-void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD sortieSec) noexcept;
+// the player; its weapons are not refilled, and out of ammo, after `fuelSec` or badly damaged it flies off
+// away from the player and is deleted far from them.
+void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };
