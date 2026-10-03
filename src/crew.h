@@ -53,6 +53,9 @@ struct Config {
     bool seaRescue=true;       // a heli comes for a local player in the sea and ferries them to a submarine carrier's deck
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool rescueAutoBoard=false;// ...and, in the stock board reach of a free door seat, boards them by the stock board path
+    float subHullHp=100000.0f; // a submarine carrier's hull HP (raised to this from its SGO's 30000; 0 = the SGO's)
+    float subHeavyHit=1500.0f; // a hit on its hull (no deck part) counts only from a heavy source, or from this much
+                               // damage in one hit (0 = only the listed heavy sources, subcarrier.cpp kHeavy)
 };
 extern Config cfg;
 
@@ -152,6 +155,14 @@ void PreloadJets() noexcept;                       // from the mission's player 
 enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier };
 bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort=false) noexcept;
+// A gun drone (the carrier's drone body, EDF6VC_JET_DRONE.SGO) with no carrier: launched as JetLaunch launches
+// a jet, it works round `target` (the player while seen, `escort`) and withdraws, to be deleted, as a launched
+// jet does (fuel, damage, ammo). The vehicle, or nullptr (not preloaded this mission, kMaxJets flying).
+unsigned char* JetLaunchDrone(const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
+                              bool escort) noexcept;
+// Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
+// withdrawing.
+bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
 // A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
 // friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
 enum class HeliBody { brute410, eros506 };

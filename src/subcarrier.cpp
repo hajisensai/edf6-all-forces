@@ -17,10 +17,18 @@
 // follower of the player, 0x804300): the plugin calls that drawer once more with a stand-in owner whose
 // follower list holds a stand-in object per carrier (only +0x90 position, +0x2F4 / +0x2F8 HP and +0x550,
 // an empty follower list, are read).
+// Its HP is split into the hull and four deck parts (kSystems: two turrets, the missile bay, the drone bay),
+// docs/subcarrier-re.md §8: every hit reaches it as the damage message through the 506's slot 9, which the
+// plugin hooks for carriers only. A hit within a part's reach wears that part (its own HP, its own gauge) and
+// not the hull; any other hit on the hull counts only from a heavy source (kHeavy: the Mothership's Genocide
+// cannon, the dropships' portal laser) or a single hit of cfg.subHeavyHit. A worn-out part stops working (its
+// gun or missiles go dry, the bay launches no drones) until the crew repairs it kRepairMs on. The drone bay
+// launches jet.cpp's gun drones (JetLaunchDrone) while it has a target.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
+#include <cstring>
 #include <cwchar>
 
 namespace crew {
@@ -49,6 +57,27 @@ constexpr std::size_t kParts=0x1320,kBodyPart=0x1530;
 // drawer at kGaugeCall: (hud, view-projection, owner, r9, 5th) -> a gauge per object in owner+0x550's list.
 constexpr unsigned kGaugeHud=0x17F6C08,kGaugeDraw=0x8040E0,kGaugeCall=0x8042AD,kGaugeFn=0x804300;
 constexpr std::size_t kFollowers=0x550,kProxySize=0x560;
+// Damage (docs/subcarrier-re.md §8): 0x543920 sends each queued hit to its object as message kMsgDamage (slot 10,
+// then slot 9, then slot 11; the message data the GameDamageInfo); the 506's slot 9 (0x652E70) passes it to
+// 0x62ECB0 -> 0x54A530 -> 0x547C30, which takes the damage at +0x50 off the HP +0x2F8 (friends' rounds left out).
+constexpr std::size_t kSlotMessage=9;
+constexpr unsigned kMessage506=0x652E70;
+constexpr std::uint32_t kMsgDamage=0x10000000;
+// GameDamageInfo: the attacker (weak_ptr: object, control block, its use count at +8), its team, where it hit
+// (the round's position, or the blast's centre), the damage.
+constexpr std::size_t kDmgAttacker=0x10,kDmgAttackerCtrl=0x18,kDmgTeam=0x24,kDmgAt=0x30,kDmgAmount=0x50,kCtrlUses=8;
+// TeamManager (*(image+kTeams), heli.cpp): rows at +kTeamRows, kTeamStride each, the row's relations (int[]) at +0x18.
+constexpr std::size_t kTeams=0x20B2978,kTeamRows=0x38,kTeamStride=0x38,kTeamRelation=0x18;
+constexpr std::int32_t kEnemyRelation=2,kMaxTeam=64;   // heli.cpp Relations
+// The heavy sources: an attacker of these classes (the vtable, checked against its RTTI name at install) hits the
+// hull in full. The Genocide cannon (e511_mothership_genocide_l / _s.sgo: UfoMother511CoreBigCannon / Small), the
+// Mothership (should its parts' rounds be owned by it), the e508 dropship (UfoCarrier508: it fires nothing in the
+// stock game, so its rounds are the portal laser, EDF6VC_PORTAL_LASER.SGO, if it is fired as the dropship's own).
+struct Heavy { unsigned vtable; const char* rtti; };
+const Heavy kHeavy[]={{0x17CACC0,".?AVUfoMother511CoreBigCannon@@"},{0x17CB0A0,".?AVUfoMother511CoreSmallCannon@@"},
+                      {0x17CA278,".?AVUfoMother511@@"},{0x17C9DC0,".?AVUfoCarrier508@@"}};
+constexpr int kHeavyCount=sizeof(kHeavy)/sizeof(kHeavy[0]);
+constexpr std::uintptr_t kImageSpan=0x3000000;   // past EDF.dll's last section
 
 constexpr float kSubMark=7101.0f;            // testrange/gen.py JETS['edf6tr_sub_carrier_mission'].mark
 const wchar_t* const kSubSgo=L"app:/object/edf6vc_sub_carrier.sgo";
@@ -74,6 +103,27 @@ constexpr float kLockMargin=1.15f,kLockAngle=1.2f,kLockSpeed=2.0f;
 constexpr ULONGLONG kMissileMs=2500,kReloadMs=12000,kStaleMs=1500,kGaugeMs=1000;
 constexpr float kPi=3.14159265f;
 
+// The deck parts: each a capsule (segment a-b, `reach` round it) in the body frame (the model's metres, rows
+// right, up, nose; docs/subcarrier-re.md §1.1 / §8), its HP and the seat weapon it is (-1: none). The turrets'
+// capsules run from the deck (the hull box top kDeckTop: nothing above it collides) up to their tilt bones
+// (gunA/gunB_tilt_l, seat weapons 0 and 1); the missile bay spans missle_l..missle_r (172 m up, under the bow
+// deck at 193; seat weapon 2); the drone bay is a stretch of the after deck the plugin picks (no bone there).
+// Rounds collide with the hull box only (its top the deck): what hits a part lands on the deck round it.
+// `gauge` is where its HP gauge stands, `launch` where the bay's drones start.
+enum System { turretA, turretB, missiles, droneBay, kSystemCount };
+struct SystemSpec { const char* name; float a[3],b[3]; float reach,hp; int weapon; float gauge[3]; };
+const SystemSpec kSystems[kSystemCount]={
+    {"turretA",{17.7f,193.08f,-16.3f},{17.7f,229.5f,-16.3f},20.0f,6000.0f,0,{17.7f,255.0f,-16.3f}},
+    {"turretB",{17.7f,193.08f,-52.2f},{17.7f,245.9f,-52.2f},20.0f,6000.0f,1,{17.7f,271.0f,-52.2f}},
+    {"missiles",{-56.5f,172.0f,592.0f},{56.5f,172.0f,592.0f},30.0f,5000.0f,2,{0.0f,215.0f,592.0f}},
+    {"dronebay",{0.0f,193.08f,-560.0f},{0.0f,193.08f,-640.0f},35.0f,5000.0f,-1,{0.0f,215.0f,-600.0f}},
+};
+constexpr float kBayLaunch[3]={0.0f,253.0f,-600.0f};   // 60 m over the bay
+constexpr ULONGLONG kRepairMs=90000;           // a worn-out part is repaired this long on (game time)
+constexpr int kBayDrones=4;                    // the drone bay keeps at most this many out...
+constexpr ULONGLONG kBayGapMs=10000;           // ...launching one this often while it has a target
+constexpr ULONGLONG kHitLogMs=1000;
+
 struct Sub {
     unsigned char* vehicle;
     const void* ctrl;
@@ -88,14 +138,32 @@ struct Sub {
     ULONGLONG emptyAt[4];
     float target[3];
     bool hasTarget;
+    float wear[kSystemCount];         // damage each deck part took: worn out at its hp
+    bool down[kSystemCount];          // worn out (since downAt, game ms)
+    ULONGLONG downAt[kSystemCount];
+    bool bayLogged;                   // the bay's launch failure was logged
+    unsigned char* drone[kBayDrones]; // the bay's drones out (and their control blocks)
+    const void* droneCtrl[kBayDrones];
+    ULONGLONG droneAt;
+    // Hits since hitLogAt (the "SUB hit" line): on parts, on the hull (taken, held off), the last one.
+    unsigned hits;
+    float partDmg,hullDmg,heldDmg,lastDmg;
+    int lastPart;                     // -1: the hull
+    std::uintptr_t lastFrom;          // the last attacker's vtable RVA (0: none)
+    float lastAt[3];                  // where it hit (body frame)
+    bool lastHeavy;
+    ULONGLONG hitLogAt;
 };
 Sub subs[kMaxSubs]{};
-// The gauge's stand-in objects (see the top): one per carrier, its position and HP copied every frame.
-alignas(16) unsigned char proxies[kMaxSubs][kProxySize]{};
+// The gauges' stand-in objects (see the top): per carrier the hull's and each part's, position and HP copied
+// every frame.
+constexpr int kGauges=1+kSystemCount;
+alignas(16) unsigned char proxies[kMaxSubs][kGauges][kProxySize]{};
+bool heavyOk[kHeavyCount]{};
 struct Node { Node* next; Node* prev; void* object; };   // the game's list node: next, prev, value at +0x10
 Node noFollowers{};
 
-bool spawnOk=false,physicsOk=false,gaugeOk=false,bodyPartOk=false;
+bool spawnOk=false,physicsOk=false,gaugeOk=false,bodyPartOk=false,damageOk=false;
 bool preloaded=false,broken=false;
 
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
@@ -108,7 +176,9 @@ using SetVecFn=void(*)(void*,const float*);
 using PhysicsFn=void(__fastcall*)(void*);
 using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
 using GaugeFn=void(__fastcall*)(void*,void*,void*,void*,void*);
+using MessageFn=bool(__fastcall*)(void*,std::uint32_t,void*);
 PhysicsFn nextPhysics=nullptr;
+MessageFn nextMessage=nullptr;
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 float Len(const float* a) noexcept { return std::sqrt(Dot(a,a)); }
@@ -146,6 +216,165 @@ int LiveSubs(ULONGLONG ms) noexcept {
     int n=0;
     for(const auto& s:subs)n+=s.vehicle && ms-s.seen<=kStaleMs ? 1 : 0;
     return n;
+}
+
+// Body frame (m: rows right, up, nose, position) <-> world.
+void Local(const float* m,const float* p,float* out) noexcept {
+    const float rel[3]={p[0]-m[12],p[1]-m[13],p[2]-m[14]};
+    out[0]=Dot(rel,m);out[1]=Dot(rel,m+4);out[2]=Dot(rel,m+8);
+}
+void World(const float* m,const float* l,float* out) noexcept {
+    for(int i=0;i<3;++i)out[i]=m[12+i]+m[i]*l[0]+m[4+i]*l[1]+m[8+i]*l[2];
+}
+// How far body-frame point `p` is from part `k`'s segment, in its reaches (<= 1: within it).
+float Reaches(const SystemSpec& k,const float* p) noexcept {
+    const float ab[3]={k.b[0]-k.a[0],k.b[1]-k.a[1],k.b[2]-k.a[2]},ap[3]={p[0]-k.a[0],p[1]-k.a[1],p[2]-k.a[2]};
+    const float len2=Dot(ab,ab);
+    const float t=len2>0.0f ? Clamp(Dot(ap,ab)/len2,0.0f,1.0f) : 0.0f;
+    const float d[3]={ap[0]-ab[0]*t,ap[1]-ab[1]*t,ap[2]-ab[2]*t};
+    return Len(d)/k.reach;
+}
+// The working part a hit at body-frame `p` lands on (the one it is fewest reaches from), or -1: the hull.
+int PartAt(const Sub& s,const float* p) noexcept {
+    int best=-1;
+    float nearest=1.0f;
+    for(int k=0;k<kSystemCount;++k) {
+        const float r=s.down[k] ? INFINITY : Reaches(kSystems[k],p);
+        if(r<=nearest){nearest=r;best=k;}
+    }
+    return best;
+}
+
+// Whether side `team` is the enemy of `v`'s (the TeamManager's relation; unreadable: any other side).
+bool Hostile(const unsigned char* v,std::int32_t team) noexcept {
+    const auto own=At<std::int32_t>(v,kTeam);
+    if(team==own)return false;
+    if(own<0 || own>=kMaxTeam || team<0 || team>=kMaxTeam)return true;
+    const auto mgr=At<const unsigned char*>(image,kTeams);
+    if(!Readable(mgr,kTeamRows+8))return true;
+    const auto row=At<const unsigned char*>(mgr,kTeamRows)+own*kTeamStride;
+    if(!Readable(row,kTeamStride))return true;
+    const auto relation=At<const std::int32_t*>(row,kTeamRelation);
+    return !Readable(relation+team,4) || relation[team]==kEnemyRelation;
+}
+// The live attacker's vtable RVA (0: none, gone, or no EDF.dll class).
+std::uintptr_t Attacker(const unsigned char* gdi) noexcept {
+    const auto obj=At<const unsigned char*>(gdi,kDmgAttacker);
+    const auto ctrl=At<const unsigned char*>(gdi,kDmgAttackerCtrl);
+    if(!obj || !Readable(ctrl,kCtrlUses+4) || At<std::int32_t>(ctrl,kCtrlUses)<=0 || !Readable(obj,8))return 0;
+    const auto vtable=At<const unsigned char*>(obj,0);
+    return vtable>image && vtable<image+kImageSpan ? static_cast<std::uintptr_t>(vtable-image) : 0;
+}
+bool HeavySource(std::uintptr_t from) noexcept {
+    for(int k=0;k<kHeavyCount;++k)
+        if(heavyOk[k] && from==kHeavy[k].vtable)return true;
+    return false;
+}
+
+void Wear(Sub& s,int k,float dmg) noexcept {
+    s.partDmg+=dmg;
+    s.wear[k]+=dmg;
+    if(s.wear[k]<kSystems[k].hp)return;
+    s.wear[k]=kSystems[k].hp;s.down[k]=true;s.downAt[k]=GameMs();
+    Log("SUB v=%p part %s destroyed (the crew repairs it in %llus)",s.vehicle,kSystems[k].name,kRepairMs/1000);
+}
+
+// A damage message to a carrier, routed (see the top): its damage cut to 0 when a part takes it or the hull holds it
+// off. Returns where to put the damage back after the stock handler (`was`), or nullptr: the message as it came.
+float* Route(unsigned char* v,unsigned char* gdi,float* was) noexcept {
+    if(At<float>(v,kSpeedGain)!=kSubMark || v[kDead] || !Readable(gdi,kDmgAmount+4,true))return nullptr;
+    Sub* s=FindSub(v,GameMs());
+    const float dmg=At<float>(gdi,kDmgAmount);
+    // Heals (< 0) and friends' rounds (the stock rule) are left alone.
+    if(!s || !s->ready || !(dmg>0.0f) || !std::isfinite(dmg) || !Hostile(v,At<std::int32_t>(gdi,kDmgTeam)))return nullptr;
+    float at[3];
+    Local(reinterpret_cast<const float*>(v+kMatrix),reinterpret_cast<const float*>(gdi+kDmgAt),at);
+    const int part=PartAt(*s,at);
+    const std::uintptr_t from=Attacker(gdi);
+    const bool heavy=HeavySource(from) || (cfg.subHeavyHit>0.0f && dmg>=cfg.subHeavyHit);
+    ++s->hits;s->lastDmg=dmg;s->lastPart=part;s->lastFrom=from;s->lastHeavy=heavy;
+    std::memcpy(s->lastAt,at,12);
+    if(part<0 && heavy){s->hullDmg+=dmg;return nullptr;}
+    if(part>=0)Wear(*s,part,dmg);
+    else s->heldDmg+=dmg;
+    *was=dmg;
+    Put<float>(gdi,kDmgAmount,0.0f);
+    return reinterpret_cast<float*>(gdi+kDmgAmount);
+}
+
+// The 506's slot 9 (every message to it): damage to a carrier routed first. The damage is put back after (the
+// queue's own copy: nothing reads it on, but the message is left as it came).
+bool __fastcall MessageHook(void* obj,std::uint32_t msg,void* data) {
+    float* back=nullptr;
+    float was=0.0f;
+    if(msg==kMsgDamage) {
+        __try { back=Route(static_cast<unsigned char*>(obj),static_cast<unsigned char*>(data),&was); }
+        __except(EXCEPTION_EXECUTE_HANDLER){back=nullptr;}
+    }
+    const bool handled=nextMessage(obj,msg,data);
+    if(back) {
+        __try { *back=was; } __except(EXCEPTION_EXECUTE_HANDLER){}
+    }
+    return handled;
+}
+
+// The hull made as thick as cfg.subHullHp (its HP raised in proportion), once per carrier.
+void Thicken(unsigned char* v) noexcept {
+    const float max=At<float>(v,kHpMax),hp=At<float>(v,kHp);
+    if(!(cfg.subHullHp>max) || !(max>0.0f))return;
+    Put<float>(v,kHpMax,cfg.subHullHp);
+    Put<float>(v,kHp,hp/max*cfg.subHullHp);
+    Log("SUB v=%p hull hp %.0f/%.0f -> %.0f/%.0f",v,hp,max,At<float>(v,kHp),cfg.subHullHp);
+}
+
+// Worn-out parts back in order kRepairMs after they wore out.
+void Repair(Sub& s,ULONGLONG ms) noexcept {
+    for(int k=0;k<kSystemCount;++k) {
+        if(!s.down[k] || ms-s.downAt[k]<kRepairMs)continue;
+        s.down[k]=false;s.wear[k]=0.0f;
+        Log("SUB v=%p part %s repaired (hp %.0f)",s.vehicle,kSystems[k].name,kSystems[k].hp);
+    }
+}
+
+// Whether seat weapon `w`'s part is worn out.
+bool WeaponDown(const Sub& s,int w) noexcept {
+    for(int k=0;k<kSystemCount;++k)
+        if(kSystems[k].weapon==w && s.down[k])return true;
+    return false;
+}
+
+// The drone bay: while it works and the carrier has a target, a gun drone every kBayGapMs, kBayDrones out at most;
+// they guard the carrier (their anchor the launch point) and go when jet.cpp withdraws them.
+void Bay(Sub& s,const float* m,ULONGLONG ms) noexcept {
+    int out=0;
+    for(int k=0;k<kBayDrones;++k) {
+        if(s.drone[k] && !JetFlying(s.drone[k],s.droneCtrl[k])){s.drone[k]=nullptr;s.droneCtrl[k]=nullptr;}
+        out+=s.drone[k] ? 1 : 0;
+    }
+    if(s.down[droneBay] || !s.hasTarget || out>=kBayDrones || ms-s.droneAt<kBayGapMs)return;
+    s.droneAt=ms;
+    float from[3];
+    World(m,kBayLaunch,from);
+    const float nose[3]={m[8],m[9],m[10]};
+    unsigned char* d=JetLaunchDrone(from,nose,from,cfg.jetFuelSec,s.vehicle,false);
+    if(!d) {
+        if(!s.bayLogged)Log("SUB v=%p drone bay: no drone launched (JetPilot off, EDF6VC_JET_DRONE.SGO not preloaded, or jets full)",s.vehicle);
+        s.bayLogged=true;
+        return;
+    }
+    for(int k=0;k<kBayDrones;++k)
+        if(!s.drone[k]){s.drone[k]=d;s.droneCtrl[k]=SelfCtrl(d);break;}
+    Log("SUB v=%p drone bay launched %p (%d out)",s.vehicle,d,out+1);
+}
+
+// "SUB hit": the hits since the last line, at most one a kHitLogMs.
+void HitLog(Sub& s,ULONGLONG ms) noexcept {
+    if(!s.hits || ms-s.hitLogAt<kHitLogMs)return;
+    s.hitLogAt=ms;
+    Log("SUB v=%p hit x%u: parts %.0f, hull %.0f, held off %.0f; last %.0f on %s at (%.0f,%.0f,%.0f) from EDF+%llX%s",s.vehicle,s.hits,
+        s.partDmg,s.hullDmg,s.heldDmg,s.lastDmg,s.lastPart>=0 ? kSystems[s.lastPart].name : "hull",s.lastAt[0],s.lastAt[1],s.lastAt[2],
+        static_cast<unsigned long long>(s.lastFrom),s.lastHeavy ? " heavy" : "");
+    s.hits=0;s.partDmg=s.hullDmg=s.heldDmg=0.0f;
 }
 
 bool FilesThere() noexcept {
@@ -205,6 +434,10 @@ void Arm(Sub& s,unsigned char* v,ULONGLONG ms,std::int32_t* guns,std::int32_t* m
         if(i==3 || (!homing && i>=2))continue;        // the fuel tank (v_fuel01) after the missile
         std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
         if(ammo>s.full[i])s.full[i]=ammo;
+        if(WeaponDown(s,static_cast<int>(i))) {   // its part worn out: dry, reloaded kReloadMs after the repair
+            Put<std::int32_t>(w,kWeaponAmmo,0);s.emptyAt[i]=ms;
+            continue;
+        }
         if(ammo>0)s.emptyAt[i]=0;
         else if(!s.emptyAt[i])s.emptyAt[i]=ms;
         else if(ms-s.emptyAt[i]>=kReloadMs && s.full[i]>0) {
@@ -318,15 +551,21 @@ void Fire(Sub& s,unsigned char* v,const float* pos,const float* m,ULONGLONG ms) 
     v[kFireGun]=gun;v[kFireMissile]=missile;
 }
 
-// The gauge's stand-in for `s`: over the tower, its HP.
-void Proxy(int i,const unsigned char* v,const float* pos,const float* m) noexcept {
-    unsigned char* p=proxies[i];
+// A gauge stand-in: at body-frame `at`, hp of max.
+void Gauge(unsigned char* p,const float* m,const float* at,float max,float hp) noexcept {
     Put<void*>(p,kFollowers,&noFollowers);
-    const float at[4]={pos[0]+m[4]*kTop,pos[1]+m[5]*kTop,pos[2]+m[6]*kTop,1.0f};
-    std::memcpy(p+kPosition,at,16);
-    const float hpMax=At<float>(v,kHpMax);
-    Put<float>(p,kHpMax,hpMax>1.0f ? hpMax : 1.0f);
-    Put<float>(p,kHp,Clamp(At<float>(v,kHp),0.0f,hpMax>1.0f ? hpMax : 1.0f));
+    float w[4]={0.0f,0.0f,0.0f,1.0f};
+    World(m,at,w);
+    std::memcpy(p+kPosition,w,16);
+    const float top=max>1.0f ? max : 1.0f;
+    Put<float>(p,kHpMax,top);
+    Put<float>(p,kHp,Clamp(hp,0.0f,top));
+}
+// The gauges' stand-ins for carrier i: the hull's over the tower, then each part's.
+void Proxy(int i,const Sub& s,const unsigned char* v,const float* m) noexcept {
+    const float tower[3]={0.0f,kTop,0.0f};
+    Gauge(proxies[i][0],m,tower,At<float>(v,kHpMax),At<float>(v,kHp));
+    for(int k=0;k<kSystemCount;++k)Gauge(proxies[i][1+k],m,kSystems[k].gauge,kSystems[k].hp,kSystems[k].hp-s.wear[k]);
 }
 
 int SubFault(const EXCEPTION_POINTERS* e) noexcept {
@@ -372,16 +611,18 @@ void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fi
     __try {
         alignas(16) unsigned char stand[kProxySize]{};
         Node head{};head.next=&head;head.prev=&head;
-        Node nodes[kMaxSubs]{};
+        Node nodes[kMaxSubs*kGauges]{};
         const ULONGLONG tick=GetTickCount64();
         int n=0;
         for(int i=0;i<kMaxSubs;++i) {
             const Sub& s=subs[i];
             if(!s.vehicle || !s.ready || tick-s.gaugeTick>kGaugeMs)continue;
-            Node& node=nodes[n++];
-            node.object=proxies[i];
-            node.prev=head.prev;node.next=&head;
-            head.prev->next=&node;head.prev=&node;
+            for(int g=0;g<kGauges;++g) {
+                Node& node=nodes[n++];
+                node.object=proxies[i][g];
+                node.prev=head.prev;node.next=&head;
+                head.prev->next=&node;head.prev=&node;
+            }
         }
         if(!n)return;
         Put<void*>(stand,kFollowers,&head);
@@ -408,6 +649,26 @@ const Sig kGaugeSigs[]={
     {kGaugeCall,{0xE8,0x4E,0x00,0x00,0x00},5},
     {kGaugeDraw,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74},8},
 };
+// The damage path (docs/subcarrier-re.md §8) the hook stands on.
+const Sig kDamageSigs[]={
+    {kMessage506,{0x48,0x89,0x5C,0x24,0x08,0x55,0x56,0x57},8},
+    {0x652E8E,{0x81,0xFA,0x25,0x00,0x00,0x10},6},               // cmp edx,10000025h: the rest to 0x62ECB0
+    {0x543AB9,{0xC7,0x45,0x6F,0x00,0x00,0x00,0x10},7},          // the flush's message: 10000000h...
+    {0x543ADE,{0xFF,0x50,0x48},3},                              // ...sent through slot 9
+    {0x54A586,{0xE8,0xA5,0xD6,0xFF,0xFF},5},                    // 0x54A530, that message: call 0x547C30
+    {0x547C70,{0x4C,0x8B,0xEA},3},                              // mov r13,rdx: the GameDamageInfo
+    {0x547DB7,{0x49,0x63,0x45,0x24},4},                         // its team
+    {0x547DBF,{0x4C,0x63,0x87,0x14,0x03,0x00,0x00},7},          // the object's team (+0x314)
+    {0x548109,{0xF3,0x41,0x0F,0x10,0x75,0x50},6},               // its damage
+};
+// Whether the vtable at RVA `vtable` is of the class `rtti` (its CompleteObjectLocator's TypeDescriptor name).
+bool ClassIs(unsigned vtable,const char* rtti) noexcept {
+    const auto col=At<const unsigned char*>(image,vtable-8);
+    if(col<image || col>=image+kImageSpan || !Readable(col,0x10))return false;
+    const unsigned char* name=image+At<std::uint32_t>(col,0xC)+0x10;
+    const std::size_t n=std::strlen(rtti)+1;
+    return Readable(name,n) && std::memcmp(name,rtti,n)==0;
+}
 }  // namespace
 
 bool IsSub(const void* vehicle) noexcept {
@@ -507,6 +768,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
             QueryPerformanceCounter(&s->last);
             std::memcpy(s->post,start,12);
         }
+        Thicken(v);
         Log("SUB v=%p launched at (%.0f,%.0f,%.0f) heading (%.2f,%.2f) hp=%.0f driver=%d",v,start[0],start[1],start[2],fwd[0],fwd[2],
             At<float>(v,kHp),SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
         return v;
@@ -527,6 +789,7 @@ void SubFrame(unsigned char* v) noexcept {
         std::memcpy(s->post,pos,12);
         s->floor=pos[1];
         Log("SUB v=%p crewed (placed by the mission) at y=%.0f: hp=%.0f/%.0f",v,pos[1],At<float>(v,kHp),At<float>(v,kHpMax));
+        Thicken(v);
     }
     s->seen=ms;s->gaugeTick=GetTickCount64();
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
@@ -547,8 +810,11 @@ void SubFrame(unsigned char* v) noexcept {
     Heading(*s,pos,m,want);
     Steer(*s,m,want);
     s->ready=true;
+    Repair(*s,ms);
     Fire(*s,v,pos,m,ms);
-    Proxy(static_cast<int>(s-subs),v,pos,m);
+    Bay(*s,m,ms);
+    HitLog(*s,ms);
+    Proxy(static_cast<int>(s-subs),*s,v,m);
     if(cfg.debug && ms-s->logAt>2000) {
         s->logAt=ms;
         float ground=0.0f;
@@ -579,7 +845,22 @@ bool InstallSub() noexcept {
         noFollowers.next=&noFollowers;noFollowers.prev=&noFollowers;
         bool changed=false;
         gaugeOk=gauge && RedirectCall(image+kGaugeCall,image+kGaugeFn,reinterpret_cast<void*>(&GaugeHook),changed);
-        Log("HOOK sub physics=%d spawn=%d gauge=%d (chained physics onto %p)",physicsOk,spawnOk,gaugeOk,current);
+        // Slot 9 of the 506, after whatever is there (no other hook takes it today).
+        bool damage=physicsOk;
+        for(const auto& d:kDamageSigs)damage=damage && Matches(d.rva,d.bytes,d.size);
+        const auto message=reinterpret_cast<void**>(image+kHeli506)+kSlotMessage;
+        void* const was=*message;
+        if(damage && was!=image+kMessage506)Log("SUB damage: 506 slot 9 is %p, not EDF+%X: chained onto it",was,kMessage506);
+        nextMessage=reinterpret_cast<MessageFn>(was);
+        damageOk=damage && PatchVtableSlot(message,was,reinterpret_cast<void*>(&MessageHook));
+        int heavy=0;
+        for(int k=0;k<kHeavyCount;++k) {
+            heavyOk[k]=ClassIs(kHeavy[k].vtable,kHeavy[k].rtti);
+            heavy+=heavyOk[k] ? 1 : 0;
+            if(!heavyOk[k])Log("SUB heavy source %s: no such vtable at EDF+%X",kHeavy[k].rtti,kHeavy[k].vtable);
+        }
+        Log("HOOK sub physics=%d spawn=%d gauge=%d damage=%d heavy=%d/%d (chained physics onto %p)",physicsOk,spawnOk,gaugeOk,damageOk,
+            heavy,kHeavyCount,current);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
