@@ -46,8 +46,10 @@ constexpr float kGun506Range=150.0f;
 // Attack runs ("running fire", as real gunships do): the guns are fixed along the nose and the nose only
 // dips when the heli flies forward, so it fires while flying at the target down a fixed glide slope,
 // its forward stick setting the nose dip to the slope. Phase setup: fly to the entry point (runIn metres
-// out on the attack bearing, on the slope). Phase run: straight at the target, firing; kBreak metres
-// short of it the run ends and it flies through to set up from the opposite bearing.
+// out on the attack bearing, on the slope), facing the way it flies. Phase run: it reaches the entry
+// flying away from the target, so it first brakes and turns to face it (within kRunAlign), then flies
+// straight at it, firing; kBreak metres short of it the run ends and it flies through to set up from the
+// opposite bearing.
 enum class Phase : int { setup, run };
 constexpr float kDiveTan=0.364f;     // tan 20 deg: the glide slope of a run
 constexpr float kBreak=45.0f;        // a run ends this close (horizontally) to the target
@@ -56,6 +58,7 @@ constexpr float kEntryReached=25.0f; // the run starts this close to the entry p
 constexpr ULONGLONG kRunMs=15000;    // a run that takes longer than this is broken off
 constexpr float kMaxTilt=0.55f;      // nose dip at full forward stick (about 31 deg in the logs)
 constexpr float kPitchGain=1.0f;     // forward stick per rad the nose is above the slope
+constexpr float kRunAlign=0.35f;     // rad (20 deg): on the run it dives only once facing the target this well
 constexpr float kWingSpread=0.5f;    // rad between the attack bearings of successive wingmen
 // Formation: a V, kWingGap metres per place; all flown helis keep kSeparation metres apart.
 constexpr float kWingGap=25.0f,kSeparation=25.0f;
@@ -64,7 +67,9 @@ constexpr float kWingGap=25.0f,kSeparation=25.0f;
 // kOrbitSpeed, spread evenly round the circle (the leader sets the angle, the others keep station).
 constexpr ULONGLONG kMovingMs=2000;
 constexpr float kEscortAhead=15.0f,kOrbitSpeed=10.0f,kOrbitLead=2.0f;   // m/s; seconds of orbit to aim ahead
-constexpr float kYawDamp=0.6f;       // yaw input per rad/s of turn rate (the yaw rate lags the input)
+// Yaw input per rad/s of turn rate. Full yaw turns about 45 deg/s and the turn lags the input by about
+// 0.8 s (the logs: 0.6 overshot by 38 deg), so it has to start easing off about 36 deg early.
+constexpr float kYawDamp=1.2f;
 
 struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
 const Signature kHeliSignatures[]={
@@ -338,10 +343,13 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const float horiz=Dist2(pos,aim);
     if(run) {
         // On the run the forward stick sets the nose dip to the glide slope (the nose dips
-        // kMaxTilt at full stick); sideways drift is braked.
+        // kMaxTilt at full stick); sideways drift is braked. Until it faces the target the stick
+        // brakes instead: forward stick would fly it along the nose, away from the target.
+        const float offTarget=Wrap(std::atan2(aim[0]-pos[0],aim[2]-pos[2])-heading);
         const float slope=std::atan2(pos[1]-aim[1],horiz);
         const float dip=-std::asin(Clamp(nose[1],-1.0f,1.0f));
-        forward=Clamp(slope/kMaxTilt+(slope-dip)*kPitchGain,0.0f,1.0f);
+        forward=std::fabs(offTarget)<kRunAlign ? Clamp(slope/kMaxTilt+(slope-dip)*kPitchGain,0.0f,1.0f)
+                                                : Clamp(-Dot2(h.vel,fwd)*cfg.heliBrakeGain,-1.0f,1.0f);
         lateral=Clamp(-Dot2(h.vel,right)*cfg.heliBrakeGain,-1.0f,1.0f);
     }
 
@@ -360,9 +368,10 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     float throttle=std::isfinite(rotor) ? Clamp(want+(want-rotor)*kRotorGain,0.0f,1.0f) : want;
     if(land && grounded){throttle=0.0f;forward=lateral=0.0f;}
 
-    // Yaw: face the target when on the run or near the entry point, else where it is going, else the player.
+    // Yaw: face the target on the run, else where it is going, else the player. (Turning to the target
+    // before the entry point made it crawl there sideways and drift back out: it never got in.)
     float face[3]={0,0,0};
-    if(engage && (run || Dist2(pos,goal)<60.0f)){face[0]=aim[0]-pos[0];face[2]=aim[2]-pos[2];}
+    if(run){face[0]=aim[0]-pos[0];face[2]=aim[2]-pos[2];}
     else if(std::sqrt(Dot2(c,c))>0.3f){face[0]=c[0];face[2]=c[2];}
     else if(follow){face[0]=player.pos[0]-pos[0];face[2]=player.pos[2]-pos[2];}
     float yaw=0.0f,off=kPi;
@@ -394,9 +403,9 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
 
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
-        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d",
+        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d",
             v,land ? "land" : run ? "run" : engage ? "setup" : follow ? "follow" : "hold",wing,pos[1],goal[1],h.vel[1],throttle,h.hover,rotor,
-            forward,lateral,yaw,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,Dist2(pos,goal),grounded,
+            forward,lateral,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,Dist2(pos,goal),grounded,
             engage ? h.target : nullptr,dist,off*180.0f/kPi,miss,std::asin(Clamp(nose[1],-1.0f,1.0f))*180.0f/kPi,gun,missile);
     }
 }
