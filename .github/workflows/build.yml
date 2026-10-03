@@ -33,13 +33,17 @@ jobs:
       - name: Check data tools compile
         shell: pwsh
         run: |
-          $files = git ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk | Where-Object { $_ -like '*.py' }
+          # git prints paths in UTF-8, unquoted (quotepath off): testrange/测试场.bat is one of them.
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
+          $files = git -c core.quotepath=off ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk | Where-Object { $_ -like '*.py' }
           python -m py_compile @files
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Package
         shell: pwsh
         run: |
+          # git prints paths in UTF-8, unquoted (quotepath off): testrange/测试场.bat is one of them.
+          [Console]::OutputEncoding = [Text.Encoding]::UTF8
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "build-$($env:GITHUB_SHA.Substring(0,7))" }
           $name = "EDF6AllForces-$version"
           $root = Join-Path 'build' $name
@@ -47,7 +51,7 @@ jobs:
           Copy-Item dist/Mods/Plugins/EDF6VehicleCrew.dll, dist/Mods/Plugins/EDF6VehicleCrew.ini, dist/Mods/Plugins/EDF6AutoTurret.dll, dist/Mods/Plugins/EDF6AutoTurret.ini "$root/Mods/Plugins/"
           # The data builders find each other by relative path (../testrange, ../autoturret/tools): the
           # tracked files keep the repository's layout.
-          foreach ($f in git ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk) {
+          foreach ($f in git -c core.quotepath=off ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk) {
             $to = Join-Path $root $f
             New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
             Copy-Item -LiteralPath $f $to
