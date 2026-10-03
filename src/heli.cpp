@@ -124,6 +124,12 @@ constexpr float kTurretReach=70.0f;
 constexpr ULONGLONG kReloadGunMs=8000,kReloadAltMs=15000,kBurstMs=2000,kBurstRest=1000;
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
 constexpr float kKeepTarget=30.0f;   // m: the current target counts this much nearer (less switching)
+// The 410 circles its target (kGunshipRadius) and its door guns pick their own: the target is only the
+// circle's centre, so it keeps it unless another is kCircleKeep nearer, and the turn (kTurnCost) does not
+// count, as its heading goes round with the circle. With both, its velocity swinging round the circle
+// re-ranked the enemies every second or two (2026-10-03: 8 targets in 20 s), each new centre 100 m and
+// more off, and it swung its yaw and stick full left and right.
+constexpr float kCircleKeep=150.0f;
 // Target after target: the one it just broke off from counts kPassed farther for kPassedMs, and every
 // target kTurnCost farther per rad its bearing is off the way the heli flies, so after a pass it takes the
 // next one ahead. During the extension, a new target within kAhead of the way it flies and far enough out
@@ -403,6 +409,7 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
 // `from` (the heli: the shortest turn and flight), the current one counting kKeepTarget nearer and one
 // too close below to aim at kTooClose farther. Returns false with none.
 bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* from,float range,float* aim) noexcept {
+    const bool circler=At<const unsigned char*>(v,0)==image+kHeli410;
     const float minHoriz=MinAimHoriz();
     const ULONGLONG now=GetTickCount64();
     const float speed=std::sqrt(Dot2(h.vel,h.vel));
@@ -412,9 +419,9 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
         if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
-        if(object==h.target)score-=kKeepTarget;
+        if(object==h.target)score-=circler ? kCircleKeep : kKeepTarget;
         if(object==h.passed && now<h.passedUntil)score+=kPassed;
-        if(speed>3.0f && Dot2(f,f)>1.0f)
+        if(!circler && speed>3.0f && Dot2(f,f)>1.0f)
             score+=kTurnCost*std::fabs(Wrap(std::atan2(f[0],f[2])-std::atan2(h.vel[0],h.vel[2])));
         for(const auto& o:helis)if(&o!=&h && o.vehicle && o.target==object && now-o.seen<2000)score+=kShareTarget;
         if(std::sqrt(Dot2(f,f))<minHoriz)score+=kTooClose;
