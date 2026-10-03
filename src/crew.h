@@ -38,6 +38,8 @@ struct Config {
     float heliAgility=4.0f;    // seconds (time constant) to reach it
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
+    float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
+    float heliGuardSpeed=12.0f;// ...at this speed (m/s; at most 80% of its top speed)
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
     DWORD jetFuelSec=120;      // a jet withdraws after this long in the air
     DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover

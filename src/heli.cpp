@@ -23,9 +23,9 @@
 // strafes; the 409 (Nereid) makes rocket runs and circles the target for its turret in between; the 410
 // (Brute), whose guns are in its doors, circles the target and its door guns aim and fire (DoorGuns).
 // Speed: see Tune.
-// Called helis (HeliCalled: the Air Raider's call weapons, airstrike.cpp): a guard heli holds cfg.heliHeight
-// over its call's marker (its post) and fights what comes within heliRange of it, never following nor
-// landing; a follow heli flies like any NPC heli. Its weapons are not refilled: with every round fired,
+// Called helis (HeliCalled: the Air Raider's call weapons, airstrike.cpp): a guard heli circles its call's
+// marker (its post) cfg.heliGuardRadius out, cfg.heliHeight over it (GuardOrbit), and fights what comes
+// within heliRange of it, never following nor landing; a follow heli flies like any NPC heli. Its weapons are not refilled: with every round fired,
 // its fuel (HeliCalled's fuelSec) gone or below kLeaveHp of its HP it flies off away from the player
 // (StartLeave), fighting no more, and is deleted (HeliReap) kGoneFar from them or kLeaveMaxMs after.
 #include "crew.h"
@@ -354,6 +354,11 @@ struct Heli {
     bool called,guard,leaving,reap;
     float post[3];
     ULONGLONG leaveAt,leftAt;
+    // A guard heli's orbit (GuardOrbit): the centre it flies round (eased toward where it should be), whether
+    // it orbits now (for the log of each change), and its last orbit log.
+    float orbitCentre[3];
+    bool orbitSet,orbiting;
+    ULONGLONG orbitLogAt;
 };
 Heli helis[16]{};
 // The player's last move: they count as standing still once within 3 m of `still` since `stillAt`
@@ -732,6 +737,69 @@ float Circle(const Heli& h,const float* pos,const float* fwd,const float* centre
     const float radial=Clamp((r-dist)*kRadialGain,-h.top,h.top);
     vel[0]=cv[0]+out[2]*along+out[0]*radial;vel[1]=0;vel[2]=cv[2]-out[0]*along+out[2]*radial;
     return std::fabs(dist-r);
+}
+
+// Guard orbit: a guard heli (HeliCalled) circles its post cfg.heliGuardRadius out at cfg.heliGuardSpeed (at
+// most kGuardTopShare of its top speed) instead of hovering over it, counterclockwise like Circle, nose along
+// the circle (Fly faces the way it flies), so the 410's door gun on the inside of the turn bears on the post
+// all the way round (a pylon turn). It enters the circle from wherever it is: from beyond 2r it closes
+// straight in, between 2r and r the tangent speed fades in, so it curves onto the circle instead of meeting
+// it head on. Guard helis on one post (within kSamePost) share the circle out evenly: each trails the first
+// by its share, speeding up or slowing down kPhaseGain per rad (as the player orbit does). Engaged, the 410
+// keeps orbiting, but the centre moves from the post toward the target until the target lies kGuardBear of
+// the radius from it (60-180 m from the heli at the default radius, well inside its door guns' reach); the
+// centre moves at most kCentreSpeed, so a new target does not jerk the circle. The 506 and 409, whose guns
+// are along the nose, fly their gun runs as before and come back to the circle (see Fly).
+constexpr float kGuardTopShare=0.8f,kSamePost=30.0f,kGuardBear=0.5f,kCentreSpeed=10.0f;
+struct Orbit { float dist,angle,want,speed; int place,count; };
+
+// Where the guard orbit's centre should be: the post, moved toward `aim` (engaged 410, or nullptr) so `aim`
+// lies kGuardBear * radius from it. Returns how far it moved off the post.
+float OrbitCentre(const Heli& h,const float* aim,float* centre) noexcept {
+    std::memcpy(centre,h.post,12);
+    if(!aim)return 0.0f;
+    const float d[3]={aim[0]-h.post[0],0,aim[2]-h.post[2]};
+    const float len=std::sqrt(Dot2(d,d)),shift=len-cfg.heliGuardRadius*kGuardBear;
+    if(shift<=0.0f || len<0.1f)return 0.0f;
+    centre[0]+=d[0]/len*shift;centre[2]+=d[2]/len*shift;
+    return shift;
+}
+
+Orbit GuardOrbit(Heli& h,const float* pos,const float* fwd,const float* centre,float dt,ULONGLONG ms,float* vel) noexcept {
+    float cv[3]={0,0,0};
+    if(!h.orbitSet){std::memcpy(h.orbitCentre,centre,12);h.orbitSet=true;}
+    else {
+        float m[3]={centre[0]-h.orbitCentre[0],0,centre[2]-h.orbitCentre[2]};
+        Limit2(m,kCentreSpeed*dt);
+        h.orbitCentre[0]+=m[0];h.orbitCentre[1]=centre[1];h.orbitCentre[2]+=m[2];
+        cv[0]=m[0]/dt;cv[2]=m[2]/dt;
+    }
+    const float r=cfg.heliGuardRadius;
+    float out[3]={pos[0]-h.orbitCentre[0],0,pos[2]-h.orbitCentre[2]};
+    float dist=std::sqrt(Dot2(out,out));
+    if(dist<1.0f){out[0]=-fwd[0];out[2]=-fwd[2];dist=1.0f;}
+    else{out[0]/=dist;out[2]/=dist;}
+    Orbit o{dist,std::atan2(out[0],out[2]),0.0f,cfg.heliGuardSpeed,0,0};
+    if(o.speed>h.top*kGuardTopShare)o.speed=h.top*kGuardTopShare;
+    if(o.speed<1.0f)o.speed=1.0f;
+    o.want=o.angle;
+    const Heli* first=nullptr;
+    for(const auto& g:helis) {
+        if(!g.vehicle || ms-g.seen>2000 || !g.guard || g.leaving || Dist2(g.post,h.post)>kSamePost)continue;
+        if(!first)first=&g;
+        if(&g==&h)o.place=o.count;
+        ++o.count;
+    }
+    if(first && first!=&h && o.count>1) {
+        const float fo[3]={first->pos[0]-h.orbitCentre[0],0,first->pos[2]-h.orbitCentre[2]};
+        o.want=Wrap(std::atan2(fo[0],fo[2])-2.0f*kPi*static_cast<float>(o.place)/static_cast<float>(o.count));
+        o.speed*=1.0f+Clamp(Wrap(o.want-o.angle)*kPhaseGain,-kPhaseMax,kPhaseMax);
+    }
+    const float along=o.speed*Clamp((2.0f*r-dist)/r,0.0f,1.0f);
+    const float radial=Clamp((r-dist)*kRadialGain,-h.top,h.top);
+    vel[0]=cv[0]+out[2]*along+out[0]*radial;vel[1]=0;vel[2]=cv[2]-out[0]*along+out[2]*radial;
+    Limit2(vel,h.top);
+    return o;
 }
 
 // The weapons in the pilot's seat (seat 0): the gun (fastest straight round), the homing missile
@@ -1335,10 +1403,14 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const float aimRange=range<kRunAim ? range : kRunAim;
     float want[3]={0,0,0},height=pos[1],off=0.0f;
     const float rest[3]={0,0,0};
-    // Engaged, the 410 always circles (its guns are in its doors); the 409 circles for its turret after a
-    // rocket run broke off, and while its rockets are spent (see kTurretCircleMs).
+    // Engaged, the 410 always circles (its guns are in its doors): the target, or as a guard its orbit round
+    // a centre moved toward the target (GuardOrbit); the 409 circles for its turret after a rocket run broke
+    // off, and while its rockets are spent (see kTurretCircleMs).
     const bool rocketsLeft=arms.rockets && arms.rocketAmmo>0;
     bool circling=false;
+    // A guard heli circles its post (GuardOrbit); the engaged 410 too, round a centre moved toward the target.
+    const bool guardOrbit=h.guard && !h.leaving && !rescuing && cfg.heliGuardRadius>0.0f;
+    bool orbiting=false;Orbit orbit{};float orbitShift=0.0f;
     if(rescuing) {
         Arrive(h,pos,rescueClimb ? pos : rescueGoal,rest,want);
         Limit2(want,rescueSlow && kFerrySpeed<h.top ? kFerrySpeed : h.top);
@@ -1363,7 +1435,15 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
             off=Engage(h,pos,aim,dist<aimRange ? dipWant : 0.0f,wallAhead,flight,follow,is409,ms,want,&height);
             circling=is409 && h.circleUntil>ms;
         }
-        if(circling) {
+        if(circling && guardOrbit && is410) {
+            h.extend=false;orbiting=true;
+            float centre[3];
+            orbitShift=OrbitCentre(h,aim,centre);
+            orbit=GuardOrbit(h,pos,fwd,centre,dt,ms,want);
+            off=std::fabs(orbit.dist-cfg.heliGuardRadius);
+            const float over=aim[1]+kGunshipHeight;
+            height=(h.hold[1]>over ? h.hold[1] : over)+Stack(flight);
+        } else if(circling) {
             h.extend=false;
             const float ground=follow && player.pos[1]>aim[1] ? player.pos[1] : aim[1];
             height=ground+(is410 ? kGunshipHeight : kTurretHeight)+Stack(flight);
@@ -1371,6 +1451,12 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         }
     } else if(follow) {
         off=Formation(h,pos,fwd,flight,want,&height);
+    } else if(guardOrbit) {
+        orbiting=true;
+        float centre[3];
+        OrbitCentre(h,nullptr,centre);
+        orbit=GuardOrbit(h,pos,fwd,centre,dt,ms,want);
+        off=std::fabs(orbit.dist-cfg.heliGuardRadius);height=h.hold[1]+Stack(flight);
     } else {
         Arrive(h,pos,h.hold,rest,want);
         off=Dist2(pos,h.hold);height=h.hold[1];
@@ -1476,11 +1562,27 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     else if(doorOk && cfg.heliDoorGuns && SeatCount(v)>=3)
         for(int i=0;i<2;++i)DoorGun(h,v,i,grounded || land || rescuing,dt,ms);
 
+    // The guard orbit (GuardOrbit): every change logged, and with Debug its state each second.
+    if(h.guard && orbiting!=h.orbiting) {
+        h.orbiting=orbiting;
+        if(orbiting)Log("HELI v=%p guard orbit on: post (%.0f,%.0f,%.0f), radius %.0f m, speed %.1f m/s, %.0f m from the post",
+                        v,h.post[0],h.post[1],h.post[2],cfg.heliGuardRadius,orbit.speed,Dist2(pos,h.post));
+        else Log("HELI v=%p guard orbit off: %s",v,h.leaving ? "leaving" : rescuing ? "rescue" : engage ? "gun run (fixed guns)" :
+                 "hold");
+    }
+    if(orbiting && cfg.debug && ms-h.orbitLogAt>1000) {
+        h.orbitLogAt=ms;
+        Log("HELI v=%p guard orbit%s: centre=(%.0f,%.0f) shift=%.0f r=%.0f dist=%.0f angle=%.0f want=%.0f place=%d/%d spd=%.1f/%.1f y=%.1f goal=%.1f target=%p tdist=%.0f",
+            v,engage ? " (fighting)" : "",h.orbitCentre[0],h.orbitCentre[2],orbitShift,cfg.heliGuardRadius,orbit.dist,orbit.angle*180.0f/kPi,
+            orbit.want*180.0f/kPi,orbit.place,orbit.count,std::sqrt(Dot2(h.vel,h.vel)),orbit.speed,pos[1],height,engage ? h.target : nullptr,
+            engage ? Dist2(pos,aim) : 0.0f);
+    }
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
         Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
-            v,perched ? "perched " : "",rescuing ? "rescue" : land ? "land" : engage ? (circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (roaming ? "escort" : "orbit") : "hold",
+            v,perched ? "perched " : "",rescuing ? "rescue" : land ? "land" : engage ? (orbiting ? "guard-fight" : circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") :
+            follow ? (roaming ? "escort" : "orbit") : orbiting ? "guard" : "hold",
             flight.group,wing,arms.ammo[0],arms.ammo[1],arms.ammo[2],pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,

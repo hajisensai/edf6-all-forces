@@ -106,6 +106,8 @@ void LoadConfig() noexcept {
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
+    n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
+    n.heliGuardSpeed=ReadFloat(L"HeliGuardSpeed",n.heliGuardSpeed);
     n.jetPilot=ReadBool(L"JetPilot",n.jetPilot);
     n.jetFuelSec=GetPrivateProfileIntW(L"VehicleCrew",L"JetFuelSec",n.jetFuelSec,iniPath);
     n.jetSortieSec=GetPrivateProfileIntW(L"VehicleCrew",L"JetSortieSec",n.jetSortieSec,iniPath);
@@ -132,7 +134,8 @@ void LoadConfig() noexcept {
         cfg.heliPilot,cfg.heliHeight,cfg.heliFollow,cfg.heliRange,cfg.heliFire);
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f standoff=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
         cfg.heliCombatRange,cfg.heliAvoid,cfg.heliFireHeight,cfg.heliStandoff,cfg.heliFireCone,cfg.heliMissile,cfg.heliMissileMs,cfg.heliMoveGain,cfg.heliBrakeGain,cfg.heliClimbGain,cfg.heliHoverLearn,cfg.heliLandMs);
-    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d",cfg.heliSpeed,cfg.heliAgility,cfg.heliYawRate,cfg.heliDoorGuns);
+    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",cfg.heliSpeed,cfg.heliAgility,cfg.heliYawRate,cfg.heliDoorGuns,
+        cfg.heliGuardRadius,cfg.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",cfg.subHullHp,cfg.subHeavyHit);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",cfg.jetPilot,cfg.jetFuelSec,
         cfg.jetSortieSec,cfg.jetAirRaider,cfg.jetMissionStrike);
