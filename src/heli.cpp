@@ -55,7 +55,10 @@ constexpr float kGun506Range=150.0f;
 // straight at it, firing; kBreak metres short of it the run ends and it flies through to set up from the
 // opposite bearing.
 enum class Phase : int { setup, run };
-constexpr float kDiveTan=0.364f;     // tan 20 deg: the glide slope of a run
+// tan 27 deg: the glide slope of a run. The nose dip is the forward stick, so the slope is also the
+// speed: at 20 deg the stick sat at 0.5 and the heli closed so slowly that ants running away outpaced it.
+// 27 deg is near full stick (kMaxTilt) with a little left to correct the pitch.
+constexpr float kDiveTan=0.51f;
 constexpr float kBreak=45.0f;        // a run ends this close (horizontally) to the target
 constexpr float kRunMax=200.0f;      // longest run-in, for the long-range guns
 constexpr float kEntryReached=25.0f; // the run starts this close to the entry point
@@ -65,6 +68,7 @@ constexpr float kEntryReached=25.0f; // the run starts this close to the entry p
 // later: one or two seconds of fire per run).
 constexpr ULONGLONG kRunMs=25000;
 constexpr float kRunIn=0.8f;
+constexpr float kRunLost=30.0f;      // a run is abandoned once the target is this far beyond the entry distance
 constexpr float kMaxTilt=0.55f;      // nose dip at full forward stick (about 31 deg in the logs)
 constexpr float kPitchGain=1.0f;     // forward stick per rad the nose is above the slope
 constexpr float kRunAlign=0.35f;     // rad (20 deg): on the run it dives only once facing the target this well
@@ -149,9 +153,10 @@ const std::int32_t* Relations(std::int32_t team) noexcept {
     return Readable(relation,kMaxTeam*4) ? relation : nullptr;
 }
 
-// The enemy lock point to engage: the current target while it stays in range, else the nearest
-// one within `range` of `around`. Returns false with none.
-bool PickTarget(Heli& h,const unsigned char* v,const float* around,float range,float* aim) noexcept {
+// The enemy lock point to engage, among the enemies within `range` of `around`: the current target
+// while it stays among them, else the one nearest to `from` (the heli: the shortest flight). Returns
+// false with none.
+bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* from,float range,float* aim) noexcept {
     auto team=At<std::int32_t>(v,kTeam);
     if(team==kTeamVehicle)team=player.team;   // nobody's vehicle: fight the player's enemies
     const auto relation=Relations(team);
@@ -159,7 +164,7 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,float range,f
     if(!relation || !Readable(registry,kRegList+0x10))return false;
     const auto head=At<const unsigned char*>(registry,kRegList);
     if(!Readable(head,0x10))return false;
-    float best=range*range,bestAim[3]{};const void* bestObject=nullptr;bool kept=false;
+    float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;bool kept=false;
     int n=0;
     for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
         const auto target=At<const unsigned char*>(node,kNodeTarget);
@@ -173,8 +178,10 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,float range,f
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const float d2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
         if(d2>range*range)continue;
-        if(object==h.target && !kept){kept=true;bestObject=object;std::memcpy(bestAim,a,12);best=-1.0f;continue;}
-        if(!kept && d2<best){best=d2;bestObject=object;std::memcpy(bestAim,a,12);}
+        if(object==h.target && !kept){kept=true;bestObject=object;std::memcpy(bestAim,a,12);continue;}
+        const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
+        const float f2=f[0]*f[0]+f[1]*f[1]+f[2]*f[2];
+        if(!kept && (!bestObject || f2<best)){best=f2;bestObject=object;std::memcpy(bestAim,a,12);}
     }
     if(!bestObject)return false;
     if(bestObject!=h.target)h.targetAt=GetTickCount64();
@@ -235,6 +242,10 @@ bool Attack(Heli& h,const float* pos,const float* aim,float range,int wing,ULONG
     }
     const float horiz=Dist2(pos,aim);
     if(h.phase==Phase::run && (horiz<kBreak || ms-h.phaseAt>kRunMs)){h.phase=Phase::setup;h.bearing+=kPi;}
+    if(h.phase==Phase::run && horiz>runIn+kRunLost) {
+        // It runs away faster than the heli closes (ants do): give it up; next frame the nearest is picked.
+        h.target=nullptr;h.runTarget=nullptr;h.phase=Phase::setup;
+    }
     const float entry[3]={aim[0]+std::sin(h.bearing)*runIn,aim[1]+runIn*kDiveTan,aim[2]+std::cos(h.bearing)*runIn};
     if(h.phase==Phase::setup && Dist2(pos,entry)<kEntryReached){h.phase=Phase::run;h.phaseAt=ms;}
     if(h.phase==Phase::run){goal[0]=aim[0];goal[1]=aim[1]+horiz*kDiveTan;goal[2]=aim[2];}
@@ -317,7 +328,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(follow)TrackPlayerStill();
     const float* anchor=follow ? player.pos : pos;
     float aim[3]{};
-    const bool engage=PickTarget(h,v,anchor,cfg.heliRange,aim);
+    const bool engage=PickTarget(h,v,anchor,pos,cfg.heliRange,aim);
     if(!engage)h.runTarget=nullptr;
     const float toPlayer[3]={player.pos[0]-pos[0],0,player.pos[2]-pos[2]};
     const bool byPlayer=follow && Dot2(toPlayer,toPlayer)<kBoardRange*kBoardRange;
