@@ -54,11 +54,14 @@ def slot_of(mission: str) -> Slot:
 # CreateVehicle2 reads it, and a player call-in SGO without it crashes the game (EDF.dll+0x52E44).
 # Stock missions place the `_mission` variants. No helicopter has one, so the range makes its own
 # (see DERIVED): the call-in SGO with `vehicle_setup` renamed to `mission_setup` (same layout).
-# V602_HELI is a DSGO, which as_mission_sgo does not handle, so it is left out.
+# Four heli bodies: V506 Eros (and its DLC No. 6 body), VEHICLE409 Nereid, VEHICLE410 Brute, V602 Heron
+# (a DSGO; class Vehicle506_Helicopter like the Eros, two nose gatlings and a missile).
 VEHICLES: list[tuple[str, str]] = [
-    ('edf6tr_v506_heli_mission', '直升机 506（测试场生成）'),
-    ('edf6tr_vehicle409_heli_mission', '直升机 409（测试场生成）'),
-    ('edf6tr_vehicle410_heli_mission', '直升机 410（测试场生成）'),
+    ('edf6tr_v506_heli_mission', '直升机 506 Eros（测试场生成）'),
+    ('edf6tr_v506_heli_edf6benefits_mission', '直升机 Eros No.6（测试场生成）'),
+    ('edf6tr_vehicle409_heli_mission', '直升机 409 Nereid（测试场生成）'),
+    ('edf6tr_vehicle410_heli_mission', '直升机 410 Brute（测试场生成）'),
+    ('edf6tr_v602_heli_mission', '直升机 602 Heron（测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
     ('v505_tank_mission', '坦克 505'),
@@ -81,8 +84,10 @@ VEHICLES: list[tuple[str, str]] = [
 DERIVED_PREFIX = 'edf6tr_'
 DERIVED: dict[str, str] = {
     'edf6tr_v506_heli_mission': 'V506_HELI',
+    'edf6tr_v506_heli_edf6benefits_mission': 'V506_HELI_EDF6BENEFITS',
     'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
     'edf6tr_vehicle410_heli_mission': 'VEHICLE410_HELI',
+    'edf6tr_v602_heli_mission': 'V602_HELI',
 }
 
 # (sgo, label, flying)
@@ -310,15 +315,18 @@ def script(plan: Plan, lay: Layout) -> str:
 
 def as_mission_sgo(data: bytes) -> bytes:
     """A call-in vehicle SGO turned into a script-placeable one: its `vehicle_setup` name becomes
-    `mission_setup` (same length, same value layout) and the name table is re-sorted. Little-endian SGO
-    only: header {count, data offset, name count, name table offset} at 8, names {string offset from
-    the entry, member index}."""
-    if data[:4] != b'SGO\0':
-        raise ValueError('不是小端 SGO')
+    `mission_setup` (same length, same value layout) and the name table is re-sorted. Little-endian SGO:
+    header {count, data offset, name count, name table offset} at 8, names {string offset from the entry,
+    member index}. DSGO: see _sort_dsgo_names."""
     old, new = 'vehicle_setup'.encode('utf-16le') + b'\0\0', 'mission_setup'.encode('utf-16le') + b'\0\0'
+    if data[:4] not in (b'SGO\0', b'DSGO'):
+        raise ValueError('不是小端 SGO / DSGO')
     if data.count(old) != 1 or new in data:
         raise ValueError('vehicle_setup 不唯一或已有 mission_setup')
     buf = bytearray(data.replace(old, new))
+    if data[:4] == b'DSGO':
+        _sort_dsgo_names(buf)
+        return bytes(buf)
     _, _, name_count, name_off = struct.unpack_from('<4I', buf, 8)
     entries = []
     for i in range(name_count):
@@ -329,6 +337,26 @@ def as_mission_sgo(data: bytes) -> bytes:
         p = name_off + i * 8
         struct.pack_into('<iI', buf, p, at - p, idx)
     return bytes(buf)
+
+
+def _sort_dsgo_names(buf: bytearray) -> None:
+    """Re-sort the top-level dictionary's name table of a DSGO (see lib/sgo.py): node 0 at the node
+    table is that dictionary, {name table offset, name count, ...} at node + value; names are {string
+    offset from the entry, member position}, kept sorted like the stock files."""
+    table = struct.unpack_from('<I', buf, 4)[0]
+    raw, typ = struct.unpack_from('<QI', buf, table)
+    if typ != 3:
+        raise ValueError('DSGO 顶层不是字典')
+    d = table + raw
+    name_off, name_count = struct.unpack_from('<II', buf, d)
+    entries = []
+    for k in range(name_count):
+        e = d + name_off + k * 8
+        so, member = struct.unpack_from('<II', buf, e)
+        entries.append((_utf16_at(buf, e + so), e + so, member))
+    for k, (_, at, member) in enumerate(sorted(entries)):
+        e = d + name_off + k * 8
+        struct.pack_into('<II', buf, e, at - e, member)
 
 
 def _utf16_at(buf: bytes, off: int) -> str:
