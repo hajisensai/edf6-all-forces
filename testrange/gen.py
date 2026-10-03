@@ -67,7 +67,11 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_jet_interceptor_mission', '截击机（远程导弹，插件驾驶，测试场生成）'),
     ('edf6tr_jet_multirole_mission', '多用途战斗机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_carrier_mission', '空中航母（放攻击无人机，插件驾驶，测试场生成）'),
-    ('edf6tr_sub_carrier_mission', '航空潜舰（插件驾驶，200 米长，建议单独放；测试场生成）'),
+    ('edf6tr_jet_blast_carrier_mission', '自爆无人机母舰（插件驾驶，测试场生成）'),
+    ('edf6tr_jet_doll_carrier_mission', '人偶无人机母舰（插件驾驶，测试场生成）'),
+    ('edf6tr_sub_carrier_mission', '航空潜舰（插件驾驶，原尺寸 1664 米，放在最远的点；测试场生成）'),
+    ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
+    ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
     ('v505_tank_mission', '坦克 505'),
@@ -99,8 +103,15 @@ DERIVED: dict[str, str] = {
     'edf6tr_jet_interceptor_mission': 'V506_HELI',
     'edf6tr_jet_multirole_mission': 'V506_HELI',
     'edf6tr_jet_carrier_mission': 'V506_HELI',
+    'edf6tr_jet_blast_carrier_mission': 'V506_HELI',
+    'edf6tr_jet_doll_carrier_mission': 'V506_HELI',
     'edf6tr_sub_carrier_mission': 'V506_HELI',
+    # Ground vehicles with no stock `_mission` SGO: the call-in one, vehicle_setup renamed (same layout).
+    'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
+    'edf6tr_vehicle502_groundrobo_mission': 'VEHICLE502_GROUNDROBO',
 }
+# Vehicles too big for a spot by the player (the 1664 m submarine): they take the farthest free points.
+BIG = frozenset({'edf6tr_sub_carrier_mission'})
 
 
 @dataclass(frozen=True)
@@ -159,6 +170,11 @@ JETS: dict[str, Jet] = {
     # the EDF transport x 1.6: 59 x 77 m; it never fires (its drones do)
     'edf6tr_jet_carrier_mission': Jet(7005.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
                                       'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
+    # the same carrier sending blast / doll drones (src/jet.cpp kCarrierMarks)
+    'edf6tr_jet_blast_carrier_mission': Jet(7009.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
+                                            'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
+    'edf6tr_jet_doll_carrier_mission': Jet(7010.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
+                                           'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
     # the airstrike drone x 3: 5.7 m long; only carriers launch it (tools/make_jets.py EDF6VC_JET_DRONE.SGO)
     'edf6tr_jet_drone': Jet(7006.0, 300.0, _ARMS, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                             'EDF6VC_DRONE.MRAB', 'body', 'body',
@@ -170,10 +186,10 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                            'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
-    # object EV603_MARINE's model x 0.12, 200 m long; the box is its hull up to the main deck (the tower
-    # above is not solid). Guns on its forward turrets' (left) barrels, the missile on its missile bay.
+    # object EV603_MARINE's model at its own size, 1664 m long; the box is its hull up to the main deck (the
+    # tower above is not solid). Guns on its forward turrets' (left) barrels, the missile on its missile bay.
     'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _ARMS, ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
-                                      'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 1.59, -0.91), (14.52, 21.58, 99.84)),
+                                      'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 13.25, -7.58), (121.0, 179.83, 832.0)),
                                       weapon_bones=('gunA_tilt_l', 'gunB_tilt_l', 'missle_l')),
 }
 JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI', 'edf6tr_jet_blast': 'V506_HELI',
@@ -316,9 +332,14 @@ class Plan:
 
 
 def placements(plan: Plan) -> list[tuple[str, bool]]:
-    """(sgo, NPC-driven) for every vehicle to place, empty ones first."""
-    return ([(s, False) for s, n in plan.vehicles.items() for _ in range(max(0, n))] +
-            [(s, True) for s, n in plan.friends.items() for _ in range(max(0, n))])
+    """(sgo, NPC-driven) for every vehicle to place, empty ones first, the BIG ones last."""
+    chosen = ([(s, False) for s, n in plan.vehicles.items() for _ in range(max(0, n))] +
+              [(s, True) for s, n in plan.friends.items() for _ in range(max(0, n))])
+    return [c for c in chosen if c[0] not in BIG] + [c for c in chosen if c[0] in BIG]
+
+
+def small_count(plan: Plan) -> int:
+    return sum(1 for s, _ in placements(plan) if s not in BIG)
 
 
 def save_plan(path: str, plan: Plan) -> None:
@@ -399,6 +420,22 @@ def layout(points: list[rmpa.Point], need: int = 0) -> Layout:
     return Layout(player, spots, enemies, far)
 
 
+def spots_for(plan: Plan, lay: Layout) -> list[tuple[str, bool, rmpa.Point]]:
+    """Each placement's point: the small ones the vehicle spots, nearest first; the BIG ones the farthest
+    free points (taken out of the target spots)."""
+    chosen = placements(plan)
+    small = [c for c in chosen if c[0] not in BIG]
+    big = [c for c in chosen if c[0] in BIG]
+    if len(small) > len(lay.vehicle_points):
+        raise ValueError(f'载具太多：这张地图玩家附近只有 {len(lay.vehicle_points)} 个空位')
+    if len(big) > len(lay.far_points):
+        raise ValueError(f'大型载具太多：这张地图远处只有 {len(lay.far_points)} 个空位')
+    far = lay.far_points[::-1][:len(big)]
+    lay.far_points = [p for p in lay.far_points if p not in far]
+    return ([(s, npc, p) for (s, npc), p in zip(small, lay.vehicle_points)] +
+            [(s, npc, p) for (s, npc), p in zip(big, far)])
+
+
 def target_spots(lay: Layout) -> list[rmpa.Point]:
     """Where targets (TARGET) stand: the enemy spots and the free points past them (the plain has 48 points,
     the vehicles take most: 7 enemy spots were too few)."""
@@ -417,8 +454,7 @@ def _q(text: str) -> str:
 def script(plan: Plan, lay: Layout) -> str:
     """The mission script. Same skeleton as the stock generated scripts (event 0 = Main)."""
     chosen = placements(plan)
-    if len(chosen) > len(lay.vehicle_points):
-        raise ValueError(f'载具太多：这张地图玩家附近只有 {len(lay.vehicle_points)} 个空位')
+    placed = spots_for(plan, lay)
     w = plan.waves
     targets = w.enemy == TARGET
     flying = next((f for s, _, f in ENEMIES if s == w.enemy), False)
@@ -483,7 +519,7 @@ def script(plan: Plan, lay: Layout) -> str:
         f'\tMap({_q(MAP)}, {_q(WEATHER)});',
         f'\tCreatePlayer({_q(lay.player.name)});',
     ]
-    for (sgo, npc), point in zip(chosen, lay.vehicle_points):
+    for sgo, npc, point in placed:
         path = _q('app:/object/' + sgo + '.sgo')
         if npc:   # last argument: does it join the player's squad (no: the plugin flies/drives it)
             lines.append(f'\tCreateFriend({_q(point.name)}, {path}, {plan.vehicle_level:.2f}, false);')
@@ -729,8 +765,9 @@ def install(game_root: str, plan: Plan) -> list[str]:
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     points_file = game.read(f'MISSION/EDF6/{SOURCE}', 'MISSION.RMPA')
-    lay = layout(rmpa.points(points_file), len(placements(plan)))
+    lay = layout(rmpa.points(points_file), small_count(plan))
     text = script(plan, lay)
+    placed = [(s, npc, p) for s, npc, p in spots_for(plan, layout(rmpa.points(points_file), small_count(plan)))]
     if plan.waves.enabled and plan.waves.enemy == TARGET:
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
     os.makedirs(out, exist_ok=True)
@@ -744,7 +781,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
     for other in SLOTS:
         if other.mission != plan.slot:
             _remove(game_root, other.mission)
-    return [f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for (s, npc), p in zip(placements(plan), lay.vehicle_points)]
+    return [f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for s, npc, p in placed]
 
 
 def uninstall(game_root: str) -> bool:

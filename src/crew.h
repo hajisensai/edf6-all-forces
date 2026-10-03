@@ -48,6 +48,8 @@ struct Config {
     float groundRange=200.0f;  // it engages enemies within this distance
     float groundLeash=100.0f;  // it goes no further than this from the player while it has one
     bool groundFire=true;
+    DWORD callNextKey=0xDD;    // in a mission: the next call every call weapon brings (VK_OEM_6 `]`; 0 = off)
+    DWORD callPrevKey=0xDB;    // ...the one before (VK_OEM_4 `[`)
 };
 extern Config cfg;
 
@@ -176,6 +178,8 @@ bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,flo
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
+void CallPick(int step,wchar_t* out,std::size_t size) noexcept;   // airstrike.cpp
+void StartCallPicker() noexcept;                                    // overlay.cpp
 
 // ground.cpp: the Depth Crawler (502), which has no stock AI
 bool IsGroundRobo(const void* vehicle) noexcept;

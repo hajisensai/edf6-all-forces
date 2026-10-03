@@ -29,6 +29,7 @@
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
 #include "memory.h"
+#include <atomic>
 #include <cmath>
 #include <cwchar>
 
@@ -41,7 +42,7 @@ constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=
 constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
 constexpr float kApproach=1000.0f,kAboveTarget=150.0f,kWingSpacing=70.0f,kWingStep=15.0f;
 constexpr float kHeliApproach=300.0f,kHeliSpacing=40.0f;
-constexpr float kSubAhead=150.0f;
+constexpr float kSubAhead=1000.0f;   // the 1664 m hull (half 832) clear of the caller
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
 // once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
 // bytes, 0x800 of them.
@@ -123,10 +124,21 @@ const Call kCalls[]={
     {7114.0f,Brings::jets,JetRole::blastCarrier,HeliBody::eros506,1,600,true,"blast drone carrier (follow)",L"EDF6VC_CALL_BLAST_CARRIER_F"},
     {7115.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,false,"doll drone carrier (guard)",L"EDF6VC_CALL_DOLL_CARRIER"},
     {7116.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,true,"doll drone carrier (follow)",L"EDF6VC_CALL_DOLL_CARRIER_F"},
-    // The submarine carrier surfaces kSubAhead past the marker (its 200 m hull clear of the caller) and stays
+    // The submarine carrier surfaces kSubAhead past the marker (its 1664 m hull clear of the caller) and stays
     // the mission, following the player (subcarrier.cpp; three at most).
     {7117.0f,Brings::sub,JetRole::fighter,HeliBody::eros506,1,0,true,"submarine carrier",L"EDF6VC_CALL_SUB"},
 };
+constexpr int kCallCount=static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0]));
+// kCalls' names on the in-mission pick's banner (tools/call_weapons.py KINDS' SC names).
+const wchar_t* const kCallLabels[]={
+    L"截击机·守点",L"截击机·跟随",L"对地攻击机·守点",L"对地攻击机·跟随",L"多用途机·守点",L"多用途机·跟随",
+    L"制空战斗机·守点",L"制空战斗机·跟随",L"无人机母舰·守点",L"无人机母舰·跟随",L"武装直升机·守点",L"武装直升机·跟随",
+    L"自爆无人机母舰·守点",L"自爆无人机母舰·跟随",L"人偶无人机母舰·守点",L"人偶无人机母舰·跟随",L"潜水母舰支援",
+};
+static_assert(sizeof(kCallLabels)/sizeof(kCallLabels[0])==kCallCount,"a label per call");
+// The in-mission pick (CallPick, overlay.cpp's keys): -1 = every call weapon brings its own call, else
+// every call weapon brings kCalls[picked].
+std::atomic<int> picked{-1};
 
 // Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
 bool HoldsId(const unsigned char* data,std::size_t size,const wchar_t* id) noexcept {
@@ -167,12 +179,13 @@ void CheckCallTable() noexcept {
     else Log("CALLS all %d call weapons in the weapon table",static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0])));
 }
 
-// The call weapon `ifc` is in, or nullptr (a stock call).
+// The call weapon `ifc` is in, or nullptr (a stock call): what it brings is the picked call, if any.
 const Call* CallOf(const void* ifc) noexcept {
     const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
     if(!Readable(w+kWeaponHitSize,4))return nullptr;
     const float mark=At<float>(w,kWeaponHitSize);
-    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return &c;
+    const int p=picked.load();
+    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return p>=0 ? &kCalls[p] : &c;
     return nullptr;
 }
 
@@ -340,6 +353,16 @@ bool Redirect(unsigned site,const unsigned char* sig,std::size_t size,void* hook
     return ok;
 }
 }  // namespace
+
+// One step through "each its own" and kCalls; `out` gets the banner text.
+void CallPick(int step,wchar_t* out,std::size_t size) noexcept {
+    const int n=kCallCount+1;
+    const int p=((picked.load()+1+step)%n+n)%n-1;
+    picked.store(p);
+    if(p<0)swprintf_s(out,size,L"空袭呼叫：按各武器原样  [ / ]");
+    else swprintf_s(out,size,L"空袭呼叫：%ls（%d/%d）  [ / ]",kCallLabels[p],p+1,kCallCount);
+    Log("CALLS pick %d: %s",p,p<0 ? "each its own" : kCalls[p].name);
+}
 
 bool InstallAirstrikes() noexcept {
     CheckCallTable();

@@ -408,9 +408,19 @@ float HorizDist(const float* a,const float* b) noexcept {
     return std::sqrt(dx*dx+dz*dz);
 }
 
-bool IsJetVehicle(const unsigned char* v,Role* role) noexcept {
+// The mission-placed blast and doll carriers (testrange/gen.py JETS): carriers with those drones.
+struct CarrierMark { float mark; Role drones; };
+constexpr CarrierMark kCarrierMarks[]={{7009.0f,Role::blast},{7010.0f,Role::doll}};
+
+bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones=nullptr) noexcept {
     if(!Readable(v,kSpeedGain+4) || At<const unsigned char*>(v,0)!=image+kHeli506)return false;
     const float k=At<float>(v,kSpeedGain);
+    for(const auto& c:kCarrierMarks) {
+        if(k!=c.mark)continue;
+        if(role)*role=Role::carrier;
+        if(drones)*drones=c.drones;
+        return true;
+    }
     for(int i=0;i<kRoleCount;++i) {
         if(k!=kKinds[i].mark)continue;
         if(role)*role=static_cast<Role>(i);
@@ -1630,7 +1640,7 @@ void JetFrame(unsigned char* v) noexcept {
     if(!j) {
         j=FreeSlot(v,ms);
         if(!j)return;   // kMaxJets flying: this one hovers until a slot frees
-        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->role);j->bornAt=j->modeAt=ms;j->last=now;j->sorties=kCarrierSorties;
+        *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->role,&j->drones);j->bornAt=j->modeAt=ms;j->last=now;j->sorties=kCarrierSorties;
         std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->flight=kPlacedFlight;
         j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(cfg.jetFuelSec)*KindOf(*j).fuel*1000.0f);
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,KindOf(*j).name,At<float>(v,kHp),Ceiling());

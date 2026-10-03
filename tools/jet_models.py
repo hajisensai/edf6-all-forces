@@ -67,10 +67,10 @@ MODELS: dict[str, Recipe] = {
     'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
 }
 # The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,
-# 1664 m long in the missions, x 0.12 (200 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
+# at its size in the missions (x 1: 1664 m long, 355 m wide, hull bottom to main deck 360 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
 # drone's. Kept out of MODELS so tools/make_jets.py does not write it; build(game, SUB_MODELS) does.
 SUB_MODELS: dict[str, Recipe] = {
-    'EDF6VC_SUB.MRAB': Recipe('EV603_MARINE.MRAB', 'ev603_marine.mdb', 0.12, root='mdl', level='body'),
+    'EDF6VC_SUB.MRAB': Recipe('EV603_MARINE.MRAB', 'ev603_marine.mdb', 1.0, root='mdl', level='body'),
 }
 
 PACK = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B'}

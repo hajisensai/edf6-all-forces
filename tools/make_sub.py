@@ -1,7 +1,7 @@
 """Writes the submarine carrier (src/subcarrier.cpp SubLaunch, docs/subcarrier-re.md) into <game>/Mods:
 
   Mods/OBJECT/EDF6VC_SUB.MRAB          the mission object EV603_MARINE's model (the 潜水母艦 of M082 / M092 /
-                                       M123) x 0.12, root bone renamed `mdl`, `body` levelled (tools/jet_models.py
+                                       M123) at its own size (1664 m), root bone renamed `mdl`, `body` levelled (tools/jet_models.py
                                        SUB_MODELS); every other member of the stock archive byte-identical
   Mods/OBJECT/EDF6VC_SUB_CARRIER.SGO   a Vehicle506_Helicopter body with that model (testrange/gen.py jet_sgo:
                                        'edf6tr_sub_carrier_mission', mark 7101, HP 30000, the hull's box)
@@ -32,7 +32,7 @@ MODEL_FILE = 'EDF6VC_SUB.MRAB'
 PREFIX = 'EDF6VC_SUB'
 # Hull box (half extents) the plugin's SubFrame and the SGO agree on: its bottom is kHullBottom metres under
 # the body origin (src/subcarrier.cpp).
-HULL_BOTTOM = 19.99
+HULL_BOTTOM = 166.58
 
 
 def check_sgo(data: bytes) -> None:

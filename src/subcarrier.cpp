@@ -3,8 +3,8 @@
 // own) made a friendly NPC vehicle. Like the jets (jet.cpp) it is a Vehicle506_Helicopter body from a
 // derived SGO (tools/make_sub.py EDF6VC_SUB_CARRIER.SGO, testrange/gen.py 'edf6tr_sub_carrier_mission'):
 // the stock HP (+0x2F4 / +0x2F8), the crash and wreck, the seat weapons, and the hull's rigid box, which
-// is what bullets hit and what soldiers stand on. Its model is EV603_MARINE's x 0.12 (200 m), told apart
-// by its speed gain k (veh+0x162C) = kSubMark (the jets use 7001-7006).
+// is what bullets hit and what soldiers stand on. Its model is EV603_MARINE at the missions' size (1664 m),
+// told apart by its speed gain k (veh+0x162C) = kSubMark (the jets use 7001-7010).
 // The plugin drives it, as jet.cpp drives a jet, in two stages a frame:
 //  - input (slot 55, from HeliFrame, NPC pilot only): it sits surfaced (hull bottom kClear over the highest
 //    ground under it), holds its post and follows the player at a ship's pace once they are kLeash away,
@@ -57,18 +57,19 @@ const wchar_t* const kSubFiles[]={L"\\Mods\\OBJECT\\EDF6VC_SUB_CARRIER.SGO",L"\\
                                   L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_L.SGO",L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_R.SGO"};
 constexpr int kMaxSubs=3;                     // M123: three carriers attack at once (BE151_157)
 
-// The hull (the SGO's box, model x 0.12): its bottom kHullBottom under the body origin, kHalfLength fore
-// and aft; the tower top kTop over it; the turrets' guns kGunHeight over it.
-constexpr float kHullBottom=19.99f,kHalfLength=95.0f,kHalfWidth=14.0f,kTop=44.0f,kGunHeight=29.0f;
+// The hull (the SGO's box, the model at its own size): its bottom kHullBottom under the body origin,
+// kHalfLength fore and aft; the tower top kTop over it; the turrets' guns kGunHeight over it.
+constexpr float kHullBottom=166.58f,kHalfLength=790.0f,kHalfWidth=116.0f,kTop=366.0f,kGunHeight=241.0f;
 // Driving: metres, m/s, m/s^2, rad/s.
 constexpr float kClear=0.6f;                 // hull bottom over the highest ground under it
-constexpr float kLeash=300.0f,kStop=150.0f;  // it sets off after a player this far from its post, stops this near
-constexpr float kCruise=10.0f,kAccel=1.5f,kClimb=8.0f,kSink=4.0f,kClimbAccel=6.0f,kPosGain=0.2f;
-constexpr float kTurnRate=0.14f,kTurnGain=0.8f,kRollGain=1.5f,kMaxPitch=0.14f;   // 8 deg/s, 8 deg
+// A player on its deck is up to 830 m from its post: it sets off only past the hull.
+constexpr float kLeash=1500.0f,kStop=1000.0f;  // it sets off after a player this far from its post, stops this near
+constexpr float kCruise=25.0f,kAccel=3.0f,kClimb=8.0f,kSink=4.0f,kClimbAccel=6.0f,kPosGain=0.2f;
+constexpr float kTurnRate=0.05f,kTurnGain=0.8f,kRollGain=1.5f,kMaxPitch=0.05f;   // 3 deg/s, 3 deg
 // Combat.
-constexpr float kRange=900.0f;               // it engages enemies this far from it
+constexpr float kRange=2000.0f;              // it engages enemies this far from it
 constexpr float kGunRange=580.0f,kGunCone=0.07f;   // the guns' reach (gen.JET_GUN_REACH 600), 4 deg
-constexpr float kMissileRange=1000.0f,kMissileMin=60.0f;
+constexpr float kMissileRange=2000.0f,kMissileMin=60.0f;
 constexpr float kLockMargin=1.15f,kLockAngle=1.2f,kLockSpeed=2.0f;
 constexpr ULONGLONG kMissileMs=2500,kReloadMs=12000,kStaleMs=1500,kGaugeMs=1000;
 constexpr float kPi=3.14159265f;
@@ -168,7 +169,7 @@ bool GroundUnder(const float* pos,const float* nose,float* ground) noexcept {
     bool any=false;
     for(int i=0;i<5;++i) {
         const float x=pos[0]+nose[0]*along[i]+side[0]*across[i],z=pos[2]+nose[2]*along[i]+side[2]*across[i];
-        const float top[3]={x,pos[1]+300.0f,z},bottom[3]={x,pos[1]-900.0f,z};
+        const float top[3]={x,pos[1]+kTop,z},bottom[3]={x,pos[1]-kHullBottom-900.0f,z};
         float hit[3];
         if(MapRay(top,bottom,hit)<0.0f)continue;
         if(!any || hit[1]>*ground)*ground=hit[1];

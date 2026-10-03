@@ -116,6 +116,8 @@ void LoadConfig() noexcept {
     n.groundRange=ReadFloat(L"GroundRange",n.groundRange);
     n.groundLeash=ReadFloat(L"GroundLeash",n.groundLeash);
     n.groundFire=ReadBool(L"GroundFire",n.groundFire);
+    n.callNextKey=GetPrivateProfileIntW(L"VehicleCrew",L"CallNextKey",n.callNextKey,iniPath);
+    n.callPrevKey=GetPrivateProfileIntW(L"VehicleCrew",L"CallPrevKey",n.callPrevKey,iniPath);
     cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
@@ -211,6 +213,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("GROUND profile=%d",CheckGroundProfile());
     InstallLoadout(iniPath);   // independent of the crew hooks
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
+    StartCallPicker();
     return InstallCrew();   // never unload code a patched slot points at
 }
 
