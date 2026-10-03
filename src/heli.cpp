@@ -72,7 +72,9 @@ constexpr float kMaxDip=0.52f;       // rad (30 deg): the deepest dip it aims wi
 constexpr float kRunAim=160.0f;      // m: it aims from this close in (or the gun range, if less)
 constexpr float kExtend=140.0f;      // m: after the break it flies on until this far from the target
 constexpr float kExtendTurn=0.7f;    // rad: the extension slants this far off the way it broke
-constexpr ULONGLONG kExtendMs=10000; // it turns back in after this long at most
+constexpr ULONGLONG kExtendMs=12000; // it turns back in after this long at most
+constexpr float kRunStack=5.0f,kRunWing=3.0f;   // m: run height per flight and per wing
+constexpr float kAimOff=0.6f;        // rad (35 deg): it aims only with the nose this near the target's bearing
 // Engaged, the map must not be in the way (rays, see Avoid). Aiming, the forward stick holds the nose dip,
 // so it cannot brake for a wall: a wall within kAimWall along the nose makes it break off instead, and like
 // a target hidden behind terrain or a building (the line to it hits the map more than kLosSlack short),
@@ -430,12 +432,15 @@ float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl
 // velocity on top) and, while its burst would pass the player, slides around the target away from them.
 // It breaks off (h.extend) once the dip onto the lead point passes kMaxDip or a wall is ahead, and flies
 // on at full speed to a point kExtend past the target, slanted kExtendTurn off the way it broke (to the
-// side of its wing), kept within heliCombatRange of the player when following; there, or after
-// kExtendMs, it turns back in. Returns how far it is from where it is going.
+// side of the player when following, else of its wing; there, or after kExtendMs, it turns back in. The
+// extension may leave heliCombatRange: clamped to it (as at first), the point often lay by the target, it
+// never got far enough out to turn, and it came back in with the target behind it (the 15:49 round).
+// Runs stack lower than the formation (kRunStack/kRunWing): stacked 10 m per flight, the top flight
+// passed 30 deg of dip 85 m out and hardly aimed at all. Returns how far it is from where it is going.
 float Engage(Heli& h,const float* pos,const float* aim,float dipWant,bool wall,const Flight& fl,bool follow,ULONGLONG ms,
              float* vel,float* height) noexcept {
     const float ground=follow && player.pos[1]>aim[1] ? player.pos[1] : aim[1];
-    *height=ground+cfg.heliFireHeight+Stack(fl);
+    *height=ground+cfg.heliFireHeight+kRunStack*static_cast<float>(fl.group)+kRunWing*static_cast<float>(fl.wing);
     const int wing=fl.wing;
     float to[3]={aim[0]-pos[0],0,aim[2]-pos[2]};
     const float horiz=std::sqrt(Dot2(to,to));
@@ -447,13 +452,13 @@ float Engage(Heli& h,const float* pos,const float* aim,float dipWant,bool wall,c
         const float speed=std::sqrt(Dot2(dir,dir));
         if(speed>3.0f){dir[0]/=speed;dir[2]/=speed;}
         else{dir[0]=to[0];dir[2]=to[2];}
-        const float a=wing%2 ? -kExtendTurn : kExtendTurn,c=std::cos(a),s=std::sin(a);
-        h.extendTo[0]=aim[0]+(dir[0]*c+dir[2]*s)*kExtend;h.extendTo[1]=0;h.extendTo[2]=aim[2]+(dir[2]*c-dir[0]*s)*kExtend;
-        if(follow) {
-            const float out[3]={h.extendTo[0]-player.pos[0],0,h.extendTo[2]-player.pos[2]};
-            const float len=std::sqrt(Dot2(out,out)),leash=cfg.heliCombatRange>10.0f ? cfg.heliCombatRange : 10.0f;
-            if(len>leash){h.extendTo[0]=player.pos[0]+out[0]/len*leash;h.extendTo[2]=player.pos[2]+out[2]/len*leash;}
+        float a=wing%2 ? -kExtendTurn : kExtendTurn;
+        if(follow) {   // the side nearer the player: (dir rotated by +a) vs (by -a), dotted with the way to them
+            const float side[3]={dir[2],0,-dir[0]},toPlayer[3]={player.pos[0]-aim[0],0,player.pos[2]-aim[2]};
+            a=Dot2(side,toPlayer)>0.0f ? kExtendTurn : -kExtendTurn;
         }
+        const float c=std::cos(a),s=std::sin(a);
+        h.extendTo[0]=aim[0]+(dir[0]*c+dir[2]*s)*kExtend;h.extendTo[1]=0;h.extendTo[2]=aim[2]+(dir[2]*c-dir[0]*s)*kExtend;
     }
     if(h.extend) {
         float e[3]={h.extendTo[0]-pos[0],0,h.extendTo[2]-pos[2]};
@@ -740,7 +745,9 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     }
     const Avoidance avoid=Avoid(pos,h.vel,want,&height,land);
     if(follow || engage)std::memcpy(h.hold,pos,12);
-    const bool aiming=engage && !h.extend && dist<aimRange;
+    // Aim only once the nose has come round: with the target behind, the dip stick flew it away.
+    const float bearingOff=engage ? Wrap(std::atan2(lead[0]-pos[0],lead[2]-pos[2])-heading) : kPi;
+    const bool aiming=engage && !h.extend && dist<aimRange && std::fabs(bearingOff)<kAimOff;
 
     // Horizontal: the stick for the wanted velocity (full stick flies kTopSpeed) plus heliBrakeGain per
     // m/s it is off, on the heading rows.
