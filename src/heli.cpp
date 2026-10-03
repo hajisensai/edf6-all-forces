@@ -1994,6 +1994,7 @@ bool CheckHeliProfile() noexcept {
             cfg.rescueAutoBoard ? (boardOk ? "on" : "off: unexpected EDF.dll code") : "off: the player boards with their own button");
         InstallJets();
         InstallSub();   // after the jets: it chains onto their physics hook
+        InstallPlayerJets();   // after the carrier: the same slot
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

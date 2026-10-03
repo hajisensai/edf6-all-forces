@@ -61,6 +61,8 @@ struct Config {
     bool carrierLaser=true;    // with a submarine carrier out, the e508 teleportation ships charge and fire a portal laser (carrierlaser.cpp)
     float carrierLaserDamage=2500.0f;// the main beam's damage
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
+    bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
+    bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
 };
 extern Config cfg;
 
@@ -229,6 +231,12 @@ float SubHullGap(const float* p) noexcept;
 bool InstallLaser() noexcept;                         // at load
 void PreloadLaser() noexcept;                         // from the mission's player preload
 void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
+
+// playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
+// The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
+bool IsPlayerJet(const void* vehicle) noexcept;
+void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
+bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
