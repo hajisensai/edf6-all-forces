@@ -456,12 +456,12 @@ def script(plan: Plan, lay: Layout) -> str:
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
         lines += [
             '',
-            '\t// Targets, one at a time, until max_alive stand (every other spot is up in the air).',
+            '\t// Targets, one at a time, until max_alive stand (at most one a spot; every other spot is up in the air).',
             f'\tarray<string> spots = {{ {pts} }};',
             '\tuint next = 0;',
             f'\tWait({w.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {int(w.max_alive)} ) {{',
+            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {min(int(w.max_alive), len(lay.enemy_points))} ) {{',
             f'\t\t\tCreateEnemy(spots[next % spots.length()], {_q("app:/object/" + w.enemy + ".sgo")}, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             '\t\t}',
