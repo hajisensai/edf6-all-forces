@@ -164,6 +164,10 @@ Sub subs[kMaxSubs]{};
 // every frame.
 constexpr int kGauges=1+kSystemCount;
 alignas(16) unsigned char proxies[kMaxSubs][kGauges][kProxySize]{};
+// The carrier's HUD panel (hud.cpp): each part's name there, and the seconds each worn-out part has until it is
+// repaired (game time, written with the stand-ins).
+const char* const kPartNames[kSystemCount]={"TURRET A","TURRET B","MISSILES","DRONE BAY"};
+float repairLeft[kMaxSubs][kSystemCount]{};
 bool heavyOk[kHeavyCount]{};
 struct Node { Node* next; Node* prev; void* object; };   // the game's list node: next, prev, value at +0x10
 Node noFollowers{};
@@ -586,11 +590,23 @@ void Gauge(unsigned char* p,const float* m,const float* at,float max,float hp) n
     Put<float>(p,kHpMax,top);
     Put<float>(p,kHp,Clamp(hp,0.0f,top));
 }
-// The gauges' stand-ins for carrier i: the hull's over the tower, then each part's.
-void Proxy(int i,const Sub& s,const unsigned char* v,const float* m) noexcept {
+// The gauges' stand-ins for carrier i: the hull's over the tower, then each part's; the parts' repair times.
+void Proxy(int i,const Sub& s,const unsigned char* v,const float* m,ULONGLONG ms) noexcept {
     const float tower[3]={0.0f,kTop,0.0f};
     Gauge(proxies[i][0],m,tower,At<float>(v,kHpMax),At<float>(v,kHp));
-    for(int k=0;k<kSystemCount;++k)Gauge(proxies[i][1+k],m,kSystems[k].gauge,kSystems[k].hp,kSystems[k].hp-s.wear[k]);
+    for(int k=0;k<kSystemCount;++k) {
+        Gauge(proxies[i][1+k],m,kSystems[k].gauge,kSystems[k].hp,kSystems[k].hp-s.wear[k]);
+        const ULONGLONG done=s.downAt[k]+kRepairMs;
+        repairLeft[i][k]=s.down[k] && done>ms ? static_cast<float>(done-ms)*0.001f : 0.0f;
+    }
+}
+
+// Carrier i's HUD panel, from its stand-ins (what the draw may read: never the vehicle).
+void PanelOf(int i,const Sub& s,CarrierPanel& p) noexcept {
+    p.hull=At<float>(proxies[i][0],kHp);p.hullMax=At<float>(proxies[i][0],kHpMax);
+    p.parts=kSystemCount;
+    for(int k=0;k<kSystemCount;++k)
+        p.part[k]={kPartNames[k],At<float>(proxies[i][1+k],kHp),At<float>(proxies[i][1+k],kHpMax),repairLeft[i][k],s.down[k]};
 }
 
 int SubFault(const EXCEPTION_POINTERS* e) noexcept {
@@ -629,7 +645,8 @@ void __fastcall PhysicsHook(void* vehicle) {
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
-// The follower gauges as the game draws them, then one per live carrier (see the top).
+// The follower gauges as the game draws them, then one per live carrier (see the top), then the vehicle HUD
+// (hud.cpp: the readouts and a panel per live carrier).
 void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fifth) {
     const auto draw=reinterpret_cast<GaugeFn>(image+kGaugeFn);
     draw(hud,viewProj,owner,r9,fifth);
@@ -649,9 +666,17 @@ void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fi
                 head.prev->next=&node;head.prev=&node;
             }
         }
-        if(!n)return;
-        Put<void*>(stand,kFollowers,&head);
-        draw(hud,viewProj,stand,r9,fifth);
+        if(n) {
+            Put<void*>(stand,kFollowers,&head);
+            draw(hud,viewProj,stand,r9,fifth);
+        }
+        CarrierPanel panels[kMaxSubs]{};
+        int count=0;
+        for(int i=0;i<kMaxSubs;++i) {
+            const Sub& s=subs[i];
+            if(s.vehicle && s.ready && tick-s.gaugeTick<=kGaugeMs)PanelOf(i,s,panels[count++]);
+        }
+        HudDraw(static_cast<const float*>(viewProj),r9,fifth,panels,count);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
@@ -852,7 +877,7 @@ void SubFrame(unsigned char* v) noexcept {
     Fire(*s,v,pos,m,ms);
     Bay(*s,m,ms);
     HitLog(*s,ms);
-    Proxy(static_cast<int>(s-subs),*s,v,m);
+    Proxy(static_cast<int>(s-subs),*s,v,m,ms);
     if(cfg.debug && ms-s->logAt>2000) {
         s->logAt=ms;
         float ground=0.0f;

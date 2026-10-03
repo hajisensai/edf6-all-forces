@@ -1860,6 +1860,18 @@ bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr);
 }
 
+bool JetHud(const void* vehicle,JetHudInfo* out) noexcept {
+    const ULONGLONG ms=GameMs();
+    const Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle),ms);
+    if(!j)return false;
+    const ULONGLONG flown=ms-j->bornAt;
+    out->role=KindOf(*j).name;
+    out->fuelSec=j->mother ? -1.0f : j->fuelMs>flown ? static_cast<float>(j->fuelMs-flown)*0.001f : 0.0f;
+    out->drones=j->role==Role::carrier ? j->sorties : -1;
+    out->leaving=j->mode==Mode::withdraw;
+    return true;
+}
+
 void JetFrame(unsigned char* v) noexcept {
     if(!physicsOk)return;
     const ULONGLONG ms=GameMs();
