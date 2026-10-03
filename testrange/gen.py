@@ -190,6 +190,7 @@ ENEMIES: list[tuple[str, str, bool]] = [
     ('giantant01', '巨蚁', False),
     ('e650_giantant01', '巨蚁（EDF6）', False),
     ('giantspider01', '巨蜘蛛', False),
+    ('giantantqueen', '母体（女王巨蚁）', False),
     ('e651_spider01_light', '蜘蛛（轻）', False),
     ('e503_frog_af_leader', '青蛙兵', False),
     ('e503_armorfrog_af', '装甲青蛙', False),
@@ -282,16 +283,29 @@ class Layout:
     enemy_points: list[rmpa.Point]
 
 
-def layout(points: list[rmpa.Point]) -> Layout:
-    """Vehicle spots: flat points 30-160 m from the player start, 15 m apart; enemy spots 180-450 m."""
+# How far out vehicle spots are taken, ring by ring, until there are as many as wanted: the plain has 12
+# within 160 m, 21 within 300 m, 39 within 450 m and 44 within 800 m.
+SPOT_RINGS = (160.0, 300.0, 450.0, 800.0)
+
+
+def layout(points: list[rmpa.Point], need: int = 0) -> Layout:
+    """Vehicle spots: flat points from 30 m off the player start, 15 m apart, nearest first, out to
+    160 m or as far out (SPOT_RINGS) as `need` of them takes; enemy spots 180-450 m, those a vehicle
+    takes left out (all of them when that leaves none)."""
     player = next(p for p in points if p.name == 'プレイヤー')
     by_distance = sorted(points, key=lambda p: math.dist(p.pos, player.pos))
     spots: list[rmpa.Point] = []
-    for p in by_distance:
-        d = math.dist(p.pos, player.pos)
-        if 30 <= d <= 160 and abs(p.pos[1] - player.pos[1]) < 4 and all(math.dist(p.pos, s.pos) >= 15 for s in spots):
-            spots.append(p)
-    enemies = [p for p in by_distance if 180 <= math.dist(p.pos, player.pos) <= 450]
+    for far in SPOT_RINGS:
+        for p in by_distance:
+            d = math.dist(p.pos, player.pos)
+            if (30 <= d <= far and abs(p.pos[1] - player.pos[1]) < 4 and p not in spots
+                    and all(math.dist(p.pos, s.pos) >= 15 for s in spots)):
+                spots.append(p)
+        if len(spots) >= need:
+            break
+    taken = {p.name for p in spots[:need]}
+    ring = [p for p in by_distance if 180 <= math.dist(p.pos, player.pos) <= 450]
+    enemies = [p for p in ring if p.name not in taken] or ring
     return Layout(player, spots, enemies)
 
 
@@ -530,7 +544,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     points_file = game.read(f'MISSION/EDF6/{SOURCE}', 'MISSION.RMPA')
-    lay = layout(rmpa.points(points_file))
+    lay = layout(rmpa.points(points_file), len(placements(plan)))
     text = script(plan, lay)
     os.makedirs(out, exist_ok=True)
     _write_derived(game_root, game, {s for s, _ in placements(plan) if s in DERIVED})
