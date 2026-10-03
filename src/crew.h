@@ -71,6 +71,8 @@ template<class T> void Put(void* base,std::size_t offset,T value) noexcept {
 }
 
 void Log(const char* format,...) noexcept;
+// Forced test-range loadout (loadout.cpp); off unless EDF6TestRange.loadout.ini says Enabled=1.
+bool InstallLoadout(const wchar_t* pluginIni) noexcept;
 void ReloadConfigIfChanged() noexcept;
 bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept;
 bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept;

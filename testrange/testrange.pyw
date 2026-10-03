@@ -1,4 +1,4 @@
-"""EDF6 测试场启动器：勾选载具与敌人波次，一键装进第 1 关。"""
+"""EDF6 测试场启动器：勾选载具、敌人波次和强制装备，一键装进第 1 关。"""
 from __future__ import annotations
 
 import os
@@ -9,9 +9,12 @@ from tkinter import messagebox, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gen  # noqa: E402
+import weapons  # noqa: E402
 
 PLAN_FILE = os.path.join(gen.HERE, 'testrange.json')
 LOG_FILE = ('Mods', 'Plugins', 'EDF6VehicleCrew.log')
+TITLE = 'EDF6 测试场'
+KEEP = '（保持存档里的）'
 
 
 def game_running() -> bool:
@@ -23,10 +26,16 @@ def game_running() -> bool:
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title('EDF6 测试场')
+        self.title(TITLE)
         self.plan = gen.load_plan(PLAN_FILE)
         self.game = tk.StringVar(value=os.environ.get('EDF6_DIR', gen.DEFAULT_GAME))
         self.counts: dict[str, tk.IntVar] = {}
+        self.weapon_error = ''
+        try:
+            self.weapons = weapons.load(self.game.get())
+        except Exception as e:  # the range still works without the loadout part
+            self.weapons = []
+            self.weapon_error = str(e)
         self._build()
         self._refresh_status()
 
@@ -88,10 +97,83 @@ class App(tk.Tk):
         return box
 
     def _loadout(self, parent: tk.Widget) -> ttk.LabelFrame:
-        box = ttk.LabelFrame(parent, text='装备')
-        ttk.Label(box, wraplength=320, justify='left',
-                  text='进关时用的是你在出击前选的兵种和武器（游戏原版行为）。').pack(anchor='w', padx=4, pady=4)
+        box = ttk.LabelFrame(parent, text='强制装备（插件在进关时装上，出关后存档不变）')
+        if not self.weapons:
+            ttk.Label(box, wraplength=340, text=f'读不到武器表：{self.weapon_error}').pack(anchor='w')
+            return box
+        l = {'enabled': False, 'class': 0, 'slots': [''] * 6, 'stars': -1, **self.plan.loadout}
+        self.l_on = tk.BooleanVar(value=l['enabled'])
+        ttk.Checkbutton(box, text='启用（不勾 = 用出击前自己选的装备）', variable=self.l_on).grid(
+            row=0, column=0, columnspan=2, sticky='w')
+        ttk.Label(box, text='兵种').grid(row=1, column=0, sticky='w')
+        self.l_class = ttk.Combobox(box, values=weapons.CLASSES, state='readonly', width=28)
+        self.l_class.current(int(l['class']))
+        self.l_class.grid(row=1, column=1, sticky='w', pady=1)
+        self.l_class.bind('<<ComboboxSelected>>', lambda _e: self._fill_slots([''] * 6))
+        self.slot_labels: list[ttk.Label] = []
+        self.slot_boxes: list[ttk.Combobox] = []
+        for i in range(6):
+            lab = ttk.Label(box)
+            lab.grid(row=2 + i, column=0, sticky='w')
+            cb = ttk.Combobox(box, width=40)
+            cb.grid(row=2 + i, column=1, sticky='w', pady=1)
+            cb.bind('<KeyRelease>', lambda e, i=i: self._filter(i, e))
+            self.slot_labels.append(lab)
+            self.slot_boxes.append(cb)
+        ttk.Label(box, text='星级（属性等级）').grid(row=8, column=0, sticky='w')
+        self.l_stars = ttk.Combobox(box, state='readonly', width=28,
+                                    values=['保持存档里的（没拿过的武器是 0 星）'] + [f'全部 {n} 星' for n in range(11)])
+        self.l_stars.current(int(l['stars']) + 1)
+        self.l_stars.grid(row=8, column=1, sticky='w', pady=1)
+        ttk.Label(box, wraplength=340, foreground='#555', justify='left',
+                  text='下拉框里可以直接打字筛选。选「保持存档里的」的格子不改。只对离线 1P 生效，'
+                       '而且对所有任务都生效：不用时取消勾选再点安装，或点卸载。').grid(
+            row=9, column=0, columnspan=2, sticky='w', pady=(4, 0))
+        self._fill_slots(l['slots'])
         return box
+
+    def _slot_count(self) -> int:
+        return len(weapons.SLOT_NAMES[self.l_class.current()])
+
+    def _slot_choices(self, i: int) -> list[weapons.Weapon]:
+        return weapons.for_slot(self.weapons, self.l_class.current(), i)
+
+    def _fill_slots(self, names: list[str]) -> None:
+        cls = self.l_class.current()
+        for i, (lab, cb) in enumerate(zip(self.slot_labels, self.slot_boxes)):
+            if i >= self._slot_count():
+                lab.config(text='')
+                cb.set('')
+                cb.config(values=[], state='disabled')
+                continue
+            choices = self._slot_choices(i)
+            lab.config(text=weapons.SLOT_NAMES[cls][i])
+            cb.config(values=[KEEP] + [w.label() for w in choices], state='normal')
+            chosen = next((w for w in choices if i < len(names) and w.sgo == names[i]), None)
+            cb.set(chosen.label() if chosen else KEEP)
+
+    def _filter(self, i: int, event: tk.Event) -> None:
+        if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab'):
+            return
+        text = self.slot_boxes[i].get().strip().lower()
+        labels = [w.label() for w in self._slot_choices(i)]
+        self.slot_boxes[i].config(values=[KEEP] + [x for x in labels if text in x.lower()])
+
+    def _loadout_choice(self) -> dict:
+        if not self.weapons:
+            return self.plan.loadout
+        slots = []
+        for i, cb in enumerate(self.slot_boxes):
+            if i >= self._slot_count() or cb.get() in ('', KEEP):
+                slots.append('')
+                continue
+            match = next((w for w in self._slot_choices(i) if w.label() == cb.get()), None)
+            if match is None:
+                name = weapons.SLOT_NAMES[self.l_class.current()][i]
+                raise ValueError(f'{name}：「{cb.get()}」不是列表里的武器，请从下拉框里选')
+            slots.append(match.sgo)
+        return {'enabled': bool(self.l_on.get()), 'class': self.l_class.current(), 'slots': slots,
+                'stars': self.l_stars.current() - 1}
 
     # ---------- actions ----------
     def _collect(self) -> gen.Plan:
@@ -101,29 +183,39 @@ class App(tk.Tk):
         enemy = next(s for s, l, _ in gen.ENEMIES if l == self.w_enemy.get())
         plan.waves = gen.Waves(enabled=bool(self.w_on.get()), enemy=enemy,
                                **{k: v.get() for k, v in self.w_vars.items()})
-        plan.loadout = self.plan.loadout
+        plan.loadout = self._loadout_choice()
         return plan
 
     def install(self) -> None:
         try:
             plan = self._collect()
-        except (tk.TclError, ValueError) as e:
-            messagebox.showerror('EDF6 测试场', f'有一项不是数字：{e}')
+        except tk.TclError as e:
+            messagebox.showerror(TITLE, f'有一项不是数字：{e}')
+            return
+        except ValueError as e:
+            messagebox.showerror(TITLE, str(e))
             return
         gen.save_plan(PLAN_FILE, plan)
         try:
             placed = gen.install(self.game.get(), plan)
+            equip = weapons.write_loadout(self.game.get(), plan.loadout)
         except Exception as e:  # shown to the user as-is
-            messagebox.showerror('EDF6 测试场', str(e))
+            messagebox.showerror(TITLE, str(e))
+            self._refresh_status()
             return
-        note = '\n\n游戏正在运行：重新进入第 1 关即生效。' if game_running() else ''
-        messagebox.showinfo('EDF6 测试场', '已装到第 1 关（离线 → 第 1 关，难度随意）。\n\n'
-                            + ('\n'.join(placed) or '（没有放载具）') + note)
+        lines = ['已装到第 1 关（离线 → 第 1 关，难度随意）。', '']
+        lines += placed or ['（没有放载具）']
+        lines += ['', '强制装备：'] + equip if equip else ['', '装备：用出击前自己选的']
+        if game_running():
+            lines += ['', '游戏正在运行：重新进入第 1 关即生效。']
+        messagebox.showinfo(TITLE, '\n'.join(lines))
         self._refresh_status()
 
     def uninstall(self) -> None:
-        msg = '已删除，第 1 关恢复原样。' if gen.uninstall(self.game.get()) else '没装过测试场，什么都没动。'
-        messagebox.showinfo('EDF6 测试场', msg)
+        weapons.remove_loadout(self.game.get())
+        removed = gen.uninstall(self.game.get())
+        messagebox.showinfo(TITLE, '已删除，第 1 关恢复原样，强制装备已关闭。' if removed
+                            else '没装过测试场；强制装备已关闭。')
         self._refresh_status()
 
     def open_log(self) -> None:
@@ -131,11 +223,12 @@ class App(tk.Tk):
         if os.path.isfile(path):
             os.startfile(path)
         else:
-            messagebox.showinfo('EDF6 测试场', f'还没有日志：{path}')
+            messagebox.showinfo(TITLE, f'还没有日志：{path}')
 
     def _refresh_status(self) -> None:
         state = '已安装' if gen.installed(self.game.get()) else '未安装'
-        self.status.config(text=f'测试场：{state}　　设置保存在 {PLAN_FILE}')
+        forced = '开' if os.path.isfile(weapons.loadout_path(self.game.get())) else '关'
+        self.status.config(text=f'测试场：{state}　强制装备：{forced}　　设置保存在 {PLAN_FILE}')
 
 
 if __name__ == '__main__':

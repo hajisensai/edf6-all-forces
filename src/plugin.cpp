@@ -186,6 +186,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(!IdentifyImage(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll");return false;}
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
     Log("HELI profile=%d",CheckHeliProfile());
+    InstallLoadout(iniPath);   // independent of the crew hooks
     return InstallCrew();   // never unload code a patched slot points at
 }
 

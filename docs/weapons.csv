@@ -1,0 +1,1565 @@
+﻿id,class_id,class,category,category_name,slot_indices,sgo_name,name_en,name_ja,level_raw,acquire,col3,col7,col8
+0,0,Ranger,0,Weapon_AssaultRifle,0|1,AssultRifle01,Broken PA-11,ＰＡ－１１ Broken,0.0,1,1,1,0
+1,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon001,Minion Buster,ミニオンバスター,0.02,0,1,1,0
+2,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon002,Slugger NN1,スラッガーＮＮ１,0.05,0,1,1,0
+3,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon003,PA-11 LS,ＰＡ－１１ＬＳ,0.07,0,1,1,0
+4,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon004,G&M-21S,Ｇ＆Ｍ－２１Ｓ,0.1,0,1,1,0
+5,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon005,M1 Raven,Ｍ１レイヴン,0.15,0,1,1,0
+6,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon006,PA-11 SLS,ＰＡ－１１ＳＬＳ,0.2,0,1,1,0
+7,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon007,T1 Stork,Ｔ１ストーク,0.25,0,1,1,0
+8,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon008,G&M-22S,Ｇ＆Ｍ－２２Ｓ,0.3,0,1,1,0
+9,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon009,Minion Buster Burst,ミニオンバスターバースト,0.4,0,1,1,0
+10,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon010,M1 Raven LS,Ｍ１レイヴンＬＳ,0.49,0,1,1,0
+11,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon011,T1 Stork S,Ｔ１ストークＳ,0.57,0,1,1,0
+12,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon012,G&M-A23,Ｇ＆Ｍ－Ａ２３,0.67,0,1,1,0
+13,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon013,T1 Stork LS,Ｔ１ストークＬＳ,0.78,0,1,1,0
+14,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon014,Blazer,ブレイザー,0.8,0,1,1,0
+15,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon015,Minion Buster MK2,ミニオンバスターＭＫ２,0.85,0,1,1,0
+16,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon016,M2 Raven,Ｍ２レイヴン,0.89,0,1,1,0
+17,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon017,T2 Stork,Ｔ２ストーク,0.94,0,1,1,0
+18,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon018,Slugger NN2,スラッガーＮＮ２,0.98,0,1,1,0
+19,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon019,T2 Stork KF,Ｔ２ストークＫＦ,1.05,0,1,1,0
+20,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon020,M2R Raven,Ｍ２Ｒレイヴン,1.07,0,1,1,0
+21,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon021,G&M-A23 LS,Ｇ＆Ｍ－Ａ２３ＬＳ,1.18,0,1,1,0
+22,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon022,M2RER Raven,Ｍ２ＲＥＲレイヴン,1.24,0,1,1,0
+23,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon023,T3 Stork,Ｔ３ストーク,1.26,0,1,1,0
+24,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon024,Slugger NN3,スラッガーＮＮ３,1.37,0,1,1,0
+25,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon025,T3 Stork Burst,Ｔ３ストーク バースト,1.47,0,1,1,0
+26,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon026,Minion Buster MK3,ミニオンバスターＭＫ３,1.57,0,1,1,0
+27,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon027,MXR Sirius,ＭＸＲシリウス,1.68,0,1,1,0
+28,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon028,G&M-24S,Ｇ＆Ｍ－２４Ｓ,1.77,0,1,1,0
+29,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon029,Slugger NN3 SLS,スラッガーＮＮ３ＳＬＳ,1.88,0,1,1,0
+30,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon030,Minion Blast,ミニオンブラスト,1.97,0,1,1,0
+31,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon031,T4 Stork,Ｔ４ストーク,2.07,0,1,1,0
+32,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon032,M3 Raven,Ｍ３レイヴン,2.2,0,1,1,0
+33,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon033,X400-Orchid,Ｘ４００－オーキッド,2.3,0,1,1,0
+34,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon034,T4 Stork AE,Ｔ４ストークＡＥ,2.35,0,1,1,0
+35,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon035,Slugger NN4,スラッガーＮＮ４,2.48,0,1,1,0
+36,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon036,M4 Raven,Ｍ４レイヴン,2.58,0,1,1,0
+37,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon037,G&M-A25,Ｇ＆Ｍ－Ａ２５,2.7,0,1,1,0
+38,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon038,T4 Stork MK2,Ｔ４ストークＭＫ２,2.79,0,1,1,0
+39,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon039,X500-Orchid,Ｘ５００－オーキッド,2.87,0,1,1,0
+40,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon040,M3 Raven SLS,Ｍ３レイヴンＳＬＳ,2.94,0,1,1,0
+41,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon041,T5 Stork,Ｔ５ストーク,3.01,0,1,1,0
+42,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon042,Minion Buster MKX,ミニオンバスターＭＫＸ,3.07,0,1,1,0
+43,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon043,G&M-A29,Ｇ＆Ｍ－Ａ２９,3.18,0,1,1,0
+44,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon044,M5 Raven,Ｍ５レイヴン,3.28,0,1,1,0
+45,0,Ranger,0,Weapon_AssaultRifle,0|1,aWeapon045,TZ Stork,ＴＺストーク,3.39,0,1,1,0
+46,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon046,Slaughter E20,スローターＥ２０,0.0,1,1,1,0
+47,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon047,SGN-7,ＳＧＮ－７,0.04,0,1,1,0
+48,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon048,Slugger Shot,スラッグショット,0.09,0,1,1,0
+49,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon049,Slaughter E20 LS,スローターＥ２０ＬＳ,0.18,0,1,1,0
+50,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon050,G1 Herring,Ｇ１へリング,0.27,0,1,1,0
+51,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon051,Slaughter E21 LS,スローターＥ２１ＬＳ,0.36,0,1,1,0
+52,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon052,D35 Breacher,Ｄ３５ブリーチャー,0.45,0,1,1,0
+53,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon053,Slugger Shot 2,スラッグショット２,0.5,0,1,1,0
+54,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon054,Slaughter E22,スローターＥ２２,0.58,0,1,1,0
+55,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon055,SGN-8,ＳＧＮ－８,0.69,0,1,1,0
+56,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon056,Slaughter E22 GA,スローターＥ２２ＧＡ,0.86,0,1,1,0
+57,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon057,Monsoon,モンスーン,0.99,0,1,1,0
+58,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon058,D55 Breacher,Ｄ５５ブリーチャー,1.19,0,1,1,0
+59,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon059,Slaughter E22 TS,スローターＥ２２ＴＳ,1.27,0,1,1,0
+60,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon060,Slugger Shot 3,スラッグショット３,1.45,0,1,1,0
+61,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon061,Slaughter E23,スローターＥ２３,1.63,0,1,1,0
+62,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon062,SGN-K9,ＳＧＮ－Ｋ９,1.73,0,1,1,0
+63,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon063,Monsoon M2,モンスーンＭ２,1.87,0,1,1,0
+64,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon064,Slaughter E23 DA,スローターＥ２３ＤＡ,2.0,0,1,1,0
+65,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon065,SGN-10A,ＳＧＮ－１０Ａ,2.11,0,1,1,0
+66,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon066,Slugger Shot 4,スラッグショット４,2.23,0,1,1,0
+67,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon067,Monsoon M3,モンスーンＭ３,2.42,0,1,1,0
+68,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon068,SGN-11A,ＳＧＮ－１１Ａ,2.62,0,1,1,0
+69,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon069,Slaughter E23 SAS,スローターＥ２３ＳＡＳ,2.75,0,1,1,0
+70,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon070,D79 Breacher,Ｄ７９ブリーチャー,2.9,0,1,1,0
+71,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon071,Slugger Shot 5,スラッグショット５,2.97,0,1,1,0
+72,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon072,Monsoon MZ,モンスーンＭＺ,3.08,0,1,1,0
+73,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon073,D110 Breacher,Ｄ１１０ブリーチャー,3.2,0,1,1,0
+74,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon074,SGN-K12,ＳＧＮ－Ｋ１２,3.29,0,1,1,0
+75,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon075,Slugger Shot Z6,スラッグショットＺ６,3.35,0,1,1,0
+76,0,Ranger,1,Weapon_Shotgun,0|1,aWeapon076,Slaughter EZ,スローターＥＺ,3.41,0,1,1,0
+77,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon077,KFF 50,ＫＦＦ５０,0.0,1,1,1,0
+78,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon078,NP3-A,ＮＰ３－Ａ,0.05,0,1,1,0
+79,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon079,Flounder 4,フラウンダー４,0.1,0,1,1,0
+80,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon080,Prototype Lysander,試作型ライサンダー,0.19,0,1,1,0
+81,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon081,KFF 50 LS,ＫＦＦ５０ＬＳ,0.26,0,1,1,0
+82,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon082,MR98 Fang,ＭＲ９８ファング,0.42,0,1,1,0
+83,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon083,Dunkel N202,ドゥンケルＮ２０２,0.51,0,1,1,0
+84,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon084,Eagle G1,イーグルＧ１,0.59,0,1,1,0
+85,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon085,NP3-B,ＮＰ３－Ｂ,0.7,0,1,1,0
+86,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon086,Lysander,ライサンダー,0.79,0,1,1,0
+87,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon087,KFF 51 LS,ＫＦＦ５１ＬＳ,0.92,0,1,1,0
+88,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon088,Flounder 8,フラウンダー８,1.0,0,1,1,0
+89,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon089,Dunkel N213,ドゥンケルＮ２１３,1.1,0,1,1,0
+90,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon090,Eagle G2,イーグルＧ２,1.2,0,1,1,0
+91,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon091,KFF 60 LS,ＫＦＦ６０ＬＳ,1.28,0,1,1,0
+92,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon092,MR99 Fang,ＭＲ９９ファング,1.39,0,1,1,0
+93,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon093,Ptarmigan HA1,ターミガンＨＡ１,1.48,0,1,1,0
+94,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon094,KFF 60 RE,ＫＦＦ６０ＲＥ,1.65,0,1,1,0
+95,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon095,Pylon A1,パイロンＡ１,1.8,0,1,1,0
+96,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon096,Dunkel N224,ドゥンケルＮ２２４,1.89,0,1,1,0
+97,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon097,NP3-C,ＮＰ３－Ｃ,1.99,0,1,1,0
+98,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon098,Penetrator,ペネトレイター,2.12,0,1,1,0
+99,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon099,Dunkel N236,ドゥンケルＮ２３６,2.49,0,1,1,0
+100,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon100,Lysander F,ライサンダーＦ,2.26,0,1,1,0
+101,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon101,Ptarmigan HA2,ターミガンＨＡ２,2.67,0,1,1,0
+102,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon102,Flounder 12,フラウンダー１２,2.91,0,1,1,0
+103,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon103,NP4-SA,ＮＰ４－ＳＡ,3.0,0,1,1,0
+104,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon104,Penetrator F,ペネトレイターＦ,3.09,0,1,1,0
+105,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon105,KFF 70,ＫＦＦ７０,3.21,0,1,1,0
+106,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon106,Lysander Z,ライサンダーＺ,3.3,0,1,1,0
+107,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon107,Ptarmigan HAZ,ターミガンＨＡＺ,3.36,0,1,1,0
+108,0,Ranger,2,Weapon_SniperRifle,0|1,aWeapon108,MR111 Fang,ＭＲ１１１ファング,3.6,0,1,1,0
+109,0,Ranger,3,Weapon_RocketLauncher,0|1,RocketLauncher01,Grant M31,グラントＭ３１,0.0,1,1,1,0
+110,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon109,Cascade 0,カスケード０,0.043,0,1,1,0
+111,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon110,Leopard Guided Rocket Launcher,レパード誘導ロケット,0.11,0,1,1,0
+112,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon111,Goliath D1,ゴリアスＤ１,0.2,0,1,1,0
+113,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon112,Grant M32,グラントＭ３２,0.33,0,1,1,0
+114,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon113,Cascade 1,カスケード１,0.43,0,1,1,0
+115,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon114,Grant M33,グラントＭ３３,0.45,0,1,1,0
+116,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon115,E9 Hornet,Ｅ９ホーネット,0.52,0,1,1,0
+117,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon116,Volcano 6,ボルケーノ６,0.62,0,1,1,0
+118,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon117,Leopard Guided Rocket Launcher M2,レパード誘導ロケットＭ２,0.72,0,1,1,0
+119,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon118,Grant M40,グラントＭ４０,0.82,0,1,1,0
+120,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon119,Goliath D2,ゴリアスＤ２,0.93,0,1,1,0
+121,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon120,E10 Hornet,Ｅ１０ホーネット,0.97,0,1,1,0
+122,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon121,Volcano V12,ボルケーノＶ１２,1.0,0,1,1,0
+123,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon122,Leopard Guided Rocket Launcher M3,レパード誘導ロケットＭ３,1.13,0,1,1,0
+124,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon123,Cascade 2,カスケード２,1.22,0,1,1,0
+125,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon124,Grant M41,グラントＭ４１,1.31,0,1,1,0
+126,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon125,Goliath D3,ゴリアスＤ３,1.43,0,1,1,0
+127,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon126,Ibis Guided Rocket,アイビス誘導ロケット,1.51,0,1,1,0
+128,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon127,E11 Hornet,Ｅ１１ホーネット,1.62,0,1,1,0
+129,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon128,Grant MA50,グラントＭＡ５０,1.67,0,1,1,0
+130,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon129,Leopard Guided Rocket Launcher M4,レパード誘導ロケットＭ４,1.83,0,1,1,0
+131,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon130,Cascade 3,カスケード３,2.01,0,1,1,0
+132,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon131,Grant M42S,グラントＭ４２Ｓ,2.22,0,1,1,0
+133,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon132,Volcano W20,ボルケーノＷ２０,2.32,0,1,1,0
+134,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon133,E12 Hornet,Ｅ１２ホーネット,2.52,0,1,1,0
+135,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon134,Leopard Guided Rocket Launcher M9,レパード誘導ロケットＭ９,2.6,0,1,1,0
+136,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon135,Goliath DMX,ゴリアスＤＭＸ,2.81,0,1,1,0
+137,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon136,Grant MT51,グラントＭＴ５１,2.93,0,1,1,0
+138,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon137,Cascade FA,カスケードＦＡ,2.99,0,1,1,0
+139,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon138,Leopard Guided Rocket Launcher Model 0,レパード誘導ロケット零式,3.06,0,1,1,0
+140,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon139,E20 Hornet,Ｅ２０ホーネット,3.13,0,1,1,0
+141,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon140,Volcano W30,ボルケーノＷ３０,3.17,0,1,1,0
+142,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon141,Goliath ZD,ゴリアスＺＤ,3.23,0,1,1,0
+143,0,Ranger,3,Weapon_RocketLauncher,0|1,aWeapon142,Grant MTX,グラントＭＴＸ,3.25,0,1,1,0
+144,0,Ranger,4,Weapon_MissleLauncher,0|1,Missile_EM0,ME1 Emerald,ＭＥ１エメロード,0.0,0,1,1,0
+145,0,Ranger,4,Weapon_MissleLauncher,0|1,Missile_SkyTT,Air Tortoise 01,エアトータス０１,0.03,0,1,1,0
+146,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon143,MLRA,ＭＬＲＡ,0.06,0,1,1,0
+147,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon144,ME2 Emerald,ＭＥ２エメロード,0.13,0,1,1,0
+148,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon145,FORK-A15,ＦＯＲＫ－Ａ１５,0.16,0,1,1,0
+149,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon146,Air Tortoise 02,エアトータス０２,0.31,0,1,1,0
+150,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon147,MLRA-2,ＭＬＲＡ－２,0.38,0,1,1,0
+151,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon148,Prominence M1,プロミネンスＭ１,0.55,0,1,1,0
+152,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon149,ME3 Emerald,ＭＥ３エメロード,0.69,0,1,1,0
+153,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon150,MLRA-30,ＭＬＲＡ－３０,0.87,0,1,1,0
+154,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon151,Prominence M2,プロミネンスＭ２,0.95,0,1,1,0
+155,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon152,FORK-A20,ＦＯＲＫ－Ａ２０,1.16,0,1,1,0
+156,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon153,ME4 Emerald,ＭＥ４エメロード,1.42,0,1,1,0
+157,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon154,Air Tortoise ME,エアトータスＭＥ,1.72,0,1,1,0
+158,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon155,MLRA-TW,ＭＬＲＡ－ＴＷ,1.91,0,1,1,0
+159,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon156,ME4R Emerald S,ＭＥ４ＲエメロードＳ,2.1,0,1,1,0
+160,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon157,Prominence M3,プロミネンスＭ３,2.46,0,1,1,0
+161,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon158,FORK-X20,ＦＯＲＫ－Ｘ２０,2.72,0,1,1,0
+162,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon159,MLRA-TF,ＭＬＲＡ－ＴＦ,3.02,0,1,1,0
+163,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon160,MEX5 Emerald,ＭＥＸ５エメロード,3.11,0,1,1,0
+164,0,Ranger,4,Weapon_MissleLauncher,0|1,aWeapon161,Prominence MA,プロミネンスＭＡ,3.31,0,1,1,0
+165,0,Ranger,5,Weapon_Grenade,0|1,aGrenadeLauncher01,Grenade Launcher UM1,グレネードランチャーＵＭ１,0.0,1,1,1,0
+166,0,Ranger,5,Weapon_Grenade,0|1,aWeapon162,Volatile Napalm,ヴァラトル·ナパーム,0.05,0,1,1,0
+167,0,Ranger,5,Weapon_Grenade,0|1,aWeapon163,Grenade Launcher UM1-J,グレネードランチャーＵＭ１－Ｊ,0.1,0,1,1,0
+168,0,Ranger,5,Weapon_Grenade,0|1,aWeapon164,Grenade Launcher UM2,グレネードランチャーＵＭ２,0.15,0,1,1,0
+169,0,Ranger,5,Weapon_Grenade,0|1,aWeapon165,Stampede M1,スタンピードＭ１,0.21,0,1,1,0
+170,0,Ranger,5,Weapon_Grenade,0|1,aWeapon166,Grenade Launcher UM3,グレネードランチャーＵＭ３,0.28,0,1,1,0
+171,0,Ranger,5,Weapon_Grenade,0|1,aWeapon167,Grenade Launcher UM3-J,グレネードランチャーＵＭ３－Ｊ,0.46,0,1,1,0
+172,0,Ranger,5,Weapon_Grenade,0|1,aWeapon168,Volatile Napalm B,ヴァラトル·ナパームＢ,0.54,0,1,1,0
+173,0,Ranger,5,Weapon_Grenade,0|1,aWeapon169,Grenade Launcher UMRA ,グレネードランチャーＵＭＲＡ,0.63,0,1,1,0
+174,0,Ranger,5,Weapon_Grenade,0|1,aWeapon170,Grenade Launcher UM4-J,グレネードランチャーＵＭ４－Ｊ,0.76,0,1,1,0
+175,0,Ranger,5,Weapon_Grenade,0|1,aWeapon171,Grenade Launcher UM4,グレネードランチャーＵＭ４,0.85,0,1,1,0
+176,0,Ranger,5,Weapon_Grenade,0|1,aWeapon172,Splash Grenade,スプラッシュグレネード,0.9,0,1,1,0
+177,0,Ranger,5,Weapon_Grenade,0|1,aWeapon173,Sticky Grenade Prototype,スティッキーグレネード試作型,1.01,0,1,1,0
+178,0,Ranger,5,Weapon_Grenade,0|1,aWeapon174,Flame Geyser,フレイム·ガイザー,1.1,0,1,1,0
+179,0,Ranger,5,Weapon_Grenade,0|1,aWeapon175,Grenade Launcher UM5,グレネードランチャーＵＭ５,1.14,0,1,1,0
+180,0,Ranger,5,Weapon_Grenade,0|1,aWeapon176,BRUTE-J Triple Grenade Launcher,３連ＧランチャーＢＲＵＴＥＪ,1.25,0,1,1,0
+181,0,Ranger,5,Weapon_Grenade,0|1,aWeapon177,Splash Grenade α,スプラッシュグレネードα,1.53,0,1,1,0
+182,0,Ranger,5,Weapon_Grenade,0|1,aWeapon178,Volatile Napalm D,ヴァラトル·ナパームＤ,1.59,0,1,1,0
+183,0,Ranger,5,Weapon_Grenade,0|1,aWeapon179,BRUTE Triple Grenade Launcher ,３連ＧランチャーＢＲＵＴＥ,1.66,0,1,1,0
+184,0,Ranger,5,Weapon_Grenade,0|1,aWeapon180,Sticky Grenade,スティッキーグレネード,1.74,0,1,1,0
+185,0,Ranger,5,Weapon_Grenade,0|1,aWeapon181,Grenade Launcher UMAX ,グレネードランチャーＵＭＡＸ,1.84,0,1,1,0
+186,0,Ranger,5,Weapon_Grenade,0|1,aWeapon182,Stampede M2,スタンピードＭ２,1.95,0,1,1,0
+187,0,Ranger,5,Weapon_Grenade,0|1,aWeapon183,CRUMBLE Twin Grenade Launcher ,２連ＧランチャーＣＲＵＭＢＬＥ,2.1,0,1,1,0
+188,0,Ranger,5,Weapon_Grenade,0|1,aWeapon184,Volcanic Napalm,ヴォルカニック·ナパーム,2.18,0,1,1,0
+189,0,Ranger,5,Weapon_Grenade,0|1,aWeapon185,Sticky Grenade α,スティッキーグレネードα,2.45,0,1,1,0
+190,0,Ranger,5,Weapon_Grenade,0|1,aWeapon186,Grenade Launcher UMAZ,グレネードランチャーＵＭＡＺ,2.69,0,1,1,0
+191,0,Ranger,5,Weapon_Grenade,0|1,aWeapon187,Flame Geyser DA,フレイム·ガイザーＤＡ,2.77,0,1,1,0
+192,0,Ranger,5,Weapon_Grenade,0|1,aWeapon188,Stampede XM,スタンピードＸＭ,2.85,0,1,1,0
+193,0,Ranger,5,Weapon_Grenade,0|1,aWeapon189,Volatile Napalm ZD,ヴァラトル·ナパームＺＤ,3.19,0,1,1,0
+194,0,Ranger,5,Weapon_Grenade,0|1,aWeapon190,Grenade Launcher UMFF,グレネードランチャーＵＭＦＦ,3.65,0,1,1,0
+195,0,Ranger,6,Weapon_Special,0|1,aWeapon191,Acid Shower Prototype,アシッド·シャワー試作型,0.34,0,1,1,0
+196,0,Ranger,6,Weapon_Special,0|1,aWeapon192,Acid Gun,アシッドガン,0.83,0,1,1,0
+197,0,Ranger,6,Weapon_Special,0|1,aWeapon193,Acid Shower,アシッド·シャワー,1.52,0,1,1,0
+198,0,Ranger,6,Weapon_Special,0|1,aWeapon194,Wide Acid Gun,ワイド·アシッドガン,2.13,0,1,1,0
+199,0,Ranger,6,Weapon_Special,0|1,aWeapon195,Super Acid Gun,スーパー·アシッドガン,2.33,0,1,1,0
+200,0,Ranger,6,Weapon_Special,0|1,aWeapon196,Burner,バーナー,0.01,0,1,1,0
+201,0,Ranger,6,Weapon_Special,0|1,aWeapon197,Flamethrower,火炎放射器,0.07,0,1,1,0
+202,0,Ranger,6,Weapon_Special,0|1,aWeapon198,Type 2 Flamethrower,二式 火炎放射器,0.21,0,1,1,0
+203,0,Ranger,6,Weapon_Special,0|1,aWeapon199,Type 3 Flamethrower,三式 火炎放射器,0.621,0,1,1,0
+204,0,Ranger,6,Weapon_Special,0|1,aWeapon200,Flamethrower α,火炎放射器α,1.17,0,1,1,0
+205,0,Ranger,6,Weapon_Special,0|1,aWeapon201,Flame Cannon,火炎砲,2.24,0,1,1,0
+206,0,Ranger,6,Weapon_Special,0|1,aWeapon202,Magma Cannon,マグマ砲,3.32,0,1,1,0
+207,0,Ranger,6,Weapon_Special,0|1,aWeapon203,H88 Bound Gun,Ｈ８８バウンドガン,0.14,0,1,1,0
+208,0,Ranger,6,Weapon_Special,0|1,aWeapon204,HR89 Bound Gun,ＨＲ８９バウンドガン,0.43,0,1,1,0
+209,0,Ranger,6,Weapon_Special,0|1,aWeapon205,HL90 Bound Gun,ＨＬ９０バウンドガン,1.35,0,1,1,0
+210,0,Ranger,6,Weapon_Special,0|1,aWeapon206,HS99 Bound Gun,ＨＳ９９バウンドガン,2.37,0,1,1,0
+211,0,Ranger,6,Weapon_Special,0|1,aWeapon207,HX50 Bound Shotgun,ＨＸ５０バウンドショット,2.95,0,1,1,0
+212,0,Ranger,6,Weapon_Special,0|1,aWeapon208,Proto Reverser,プロト·リバーサー,0.0,0,1,1,0
+213,0,Ranger,6,Weapon_Special,0|1,aWeapon209,Reverser,リバーサー,0.05,0,1,1,0
+214,0,Ranger,6,Weapon_Special,0|1,aWeapon210,Reverse Gun,リバースガン,0.53,0,1,1,0
+215,0,Ranger,6,Weapon_Special,0|1,aWeapon211,High Cycle Reverser,ハイサイクル·リバーサー,0.84,0,1,1,0
+216,0,Ranger,6,Weapon_Special,0|1,aWeapon212,Reverser M2,リバーサーＭ２,1.15,0,1,1,0
+217,0,Ranger,6,Weapon_Special,0|1,aWeapon213,Reverse Shooter T1,リバースシューターＴ１,1.44,0,1,1,0
+218,0,Ranger,6,Weapon_Special,0|1,aWeapon214,Reverser M3,リバーサーＭ３,1.71,0,1,1,0
+219,0,Ranger,6,Weapon_Special,0|1,aWeapon215,Reverse Bomber,リバースボンバー,1.93,0,1,1,0
+220,0,Ranger,6,Weapon_Special,0|1,aWeapon216,High Cycle Reverser D,ハイサイクル·リバーサーＤ,2.04,0,1,1,0
+221,0,Ranger,6,Weapon_Special,0|1,aWeapon217,Reverse Shooter T2,リバースシューターＴ２,2.53,0,1,1,0
+222,0,Ranger,6,Weapon_Special,0|1,aWeapon218,Reverser X,リバーサーＸ,2.82,0,1,1,0
+223,0,Ranger,6,Weapon_Special,0|1,aWeapon219,Reverse Shooter X,リバースシューターＸ,3.14,0,1,1,0
+224,0,Ranger,6,Weapon_Special,0|1,aWeapon220,High Cycle Reverser ZD,ハイサイクル·リバーサーＺＤ,3.24,0,1,1,0
+225,0,Ranger,20,Weapon_SupportGrenade,2,aHandGrenade01,MG11,ＭＧ１１,0.0,1,1,1,0
+226,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon221,MG11J,ＭＧ１１Ｊ,0.0,0,1,1,0
+227,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon222,T5 Mouse,Ｔ５マウス,0.05,0,1,1,0
+228,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon223,DNG1,ＤＮＧ１,0.1,0,1,1,0
+229,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon224,Firecracker 1,１号弾,0.17,0,1,1,0
+230,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon225,MG12,ＭＧ１２,0.22,0,1,1,0
+231,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon226,MG13,ＭＧ１３,0.34,0,1,1,0
+232,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon227,T44 Mouse,Ｔ４４マウス,0.4,0,1,1,0
+233,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon228,MG13JA,ＭＧ１３ＪＡ,0.48,0,1,1,0
+234,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon229,MG14,ＭＧ１４,0.56,0,1,1,0
+235,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon230,MG14J,ＭＧ１４Ｊ,0.68,0,1,1,0
+236,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon231,Firecracker 2,２号弾,0.74,0,1,1,0
+237,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon232,T6 Mouse,Ｔ６マウス,0.8,0,1,1,0
+238,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon233,DNG2,ＤＮＧ２,0.87,0,1,1,0
+239,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon234,MG15,ＭＧ１５,0.91,0,1,1,0
+240,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon235,MG20,ＭＧ２０,1.09,0,1,1,0
+241,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon236,Firecracker 3,３号弾,1.03,0,1,1,0
+242,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon237,TJ444 Mouse,ＴＪ４４４マウス,1.2,0,1,1,0
+243,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon238,MG21J,ＭＧ２１Ｊ,1.55,0,1,1,0
+244,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon239,MG21,ＭＧ２１,1.6,0,1,1,0
+245,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon240,DNG3,ＤＮＧ３,1.65,0,1,1,0
+246,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon241,Firecracker 4,４号弾,1.78,0,1,1,0
+247,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon242,MG22,ＭＧ２２,1.95,0,1,1,0
+248,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon243,Bound Grenade,バウンド·グレネード,2.09,0,1,1,0
+249,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon244,MG30,ＭＧ３０,2.16,0,1,1,0
+250,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon245,TJO Mouse,ＴＪＯマウス,2.23,0,1,1,0
+251,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon246,Firecracker 0,零号弾,2.37,0,1,1,0
+252,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon247,DNG9,ＤＮＧ９,2.53,0,1,1,0
+253,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon248,MG40,ＭＧ４０,2.8,0,1,1,0
+254,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon249,TZ6 Mouse,ＴＺ６マウス,2.9,0,1,1,0
+255,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon250,MG50,ＭＧ５０,3.12,0,1,1,0
+256,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon251,DNG10,ＤＮＧ１０,3.04,0,1,1,0
+257,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon252,Firecracker 1000,千号弾,3.16,0,1,1,0
+258,0,Ranger,20,Weapon_SupportGrenade,2,aWeapon253,TZ8 Mouse,ＴＺ８マウス,3.21,0,1,1,0
+259,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon254,Thermite Round,テルミット弾,0.06,0,1,1,0
+260,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon255,Nanothermite Round,ナノテルミット弾,0.34,0,1,1,0
+261,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon256,M2 Thermite Round,Ｍ２テルミット弾,0.84,0,1,1,0
+262,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon257,BX Nanothermite Round,ＢＸナノテルミット弾,1.38,0,1,1,0
+263,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon258,Metathermite Round,メタテルミット弾,1.8,0,1,1,0
+264,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon259,M3 Thermite Round,Ｍ３テルミット弾,2.5,0,1,1,0
+265,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon260,M9 Thermite Round,Ｍ９テルミット弾,3.3,0,1,1,0
+266,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon261,Aerial Reverser M1,エリアル リバーサーＭ１,0.2,0,1,1,0
+267,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon262,Aerial Reverser M3,エリアル リバーサーＭ３,0.85,0,1,1,0
+268,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon263,Aerial Reverser M4,エリアル リバーサーＭ４,1.3,0,1,1,0
+269,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon264,Aerial Reverser M9,エリアル リバーサーＭ９,2.5,0,1,1,0
+270,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon265,Aerial Reverser MD,エリアル リバーサーＭＤ,3.4,0,1,1,0
+271,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon266,A61 Binary Round,Ａ６１バイナリー弾,0.25,0,1,1,0
+272,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon267,A62 Binary Round,Ａ６２バイナリー弾,0.75,0,1,1,0
+273,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon268,A71 Binary Round,Ａ７１バイナリー弾,1.7,0,1,1,0
+274,0,Ranger,23,Weapon_SupportGrenade2,2,aWeapon269,A72 Binary Round,Ａ７２バイナリー弾,2.5,0,1,1,0
+275,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon270,CA20 Bomb,ＣＡ２０爆弾,0.07,0,1,1,0
+276,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon271,CA21 Bomb,ＣＡ２１爆弾,0.66,0,1,1,0
+277,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon272,CA5 Special Bomb,ＣＡ５特殊爆弾,1.32,0,1,1,0
+278,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon273,CA80 Bomb,ＣＡ８０爆弾,1.86,0,1,1,0
+279,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon274,CA90 Bomb,ＣＡ９０爆弾,2.64,0,1,1,0
+280,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon275,Impulse Y8,インパルス Ｙ８,0.01,0,1,1,0
+281,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon276,Y9 Anti-Aircraft Impulse,Ｙ９ エアインパルス,0.14,0,1,1,0
+282,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon277,Y10 Impulse,Ｙ１０インパルス,0.35,0,1,1,0
+283,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon278,Y10 Anti-Aircraft Impulse,Ｙ１０対空インパルス,0.52,0,1,1,0
+284,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon279,Y10 Wide Impulse,Ｙ１０ワイド·インパルス,0.86,0,1,1,0
+285,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon280,Y11 Impulse,Ｙ１１インパルス,1.23,0,1,1,0
+286,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon281,Y11 Anti-Aircraft Impulse,Ｙ１１対空インパルス,1.75,0,1,1,0
+287,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon282,YA20 Impulse,ＹＡ２０インパルス,1.95,0,1,1,0
+288,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon283,YDX Anti-Aircraft Impulse,ＹＤＸ対空インパルス,2.54,0,1,1,0
+289,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon284,YDX Strike Impulse,ＹＤＸストライク·インパルス,2.84,0,1,1,0
+290,0,Ranger,21,Weapon_SupportPlaceBomb,2,aWeapon285,YA21 Impulse,ＹＡ２１インパルス,3.04,0,1,1,0
+291,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon286,FZ-Gun,ＦＺ－ＧＵＮ,0.1,0,1,1,0
+292,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon288,FZ-Gun 2,ＦＺ－ＧＵＮ２,0.3,0,1,1,0
+293,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon290,ZER-Gun,ＺＥＲ－ＧＵＮ,0.46,0,1,1,0
+294,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon291,FZ-Gun D,ＦＺ－ＧＵＮ Ｄ,0.65,0,1,1,0
+295,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon292,ZE Sniper,ＺＥスナイパー,0.76,0,1,1,0
+296,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon293,ZE Launcher,ＺＥランチャー,1.05,0,1,1,0
+297,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon294,FZ-Gun 4,ＦＺ－ＧＵＮ４,1.4,0,1,1,0
+298,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon295,ZERA-Gun,ＺＥＲＡ－ＧＵＮ,1.85,0,1,1,0
+299,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon296,FZ-Gun MD,ＦＺ－ＧＵＮ ＭＤ,2.12,0,1,1,0
+300,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon297,ZE-Gun 10,ＺＥ－ＧＵＮ１０,2.52,0,1,1,0
+301,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon298,FZ-Gun MDX,ＦＺ－ＧＵＮ ＭＤＸ,2.65,0,1,1,0
+302,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon299,ZEX Launcher,ＺＥＸランチャー,2.88,0,1,1,0
+303,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon300,ZEXR-Gun,ＺＥＸＲ－ＧＵＮ,3.19,0,1,1,0
+304,0,Ranger,22,Weapon_SupportPlaceGun,2,aWeapon301,FZ-Gun LE,ＦＺ－ＧＵＮ ＬＥ,3.55,0,1,1,0
+305,0,Ranger,7,Weapon_Support1,3,aSupportNone,No Equipment,装備しない,0.0,1,1,1,0
+306,0,Ranger,7,Weapon_Support1,3,aWeapon302,Lightweight Protector,軽量プロテクター,0.01,0,1,1,0
+307,0,Ranger,7,Weapon_Support1,3,aWeapon303,Liquid Armor,リキッドアーマー,0.04,0,1,1,0
+308,0,Ranger,7,Weapon_Support1,3,aWeapon304,Solid Protector,ソリッドプロテクター,0.07,0,1,1,0
+309,0,Ranger,7,Weapon_Support1,3,aWeapon305,Hybrid Protector,ハイブリッドプロテクター,0.21,0,1,1,0
+310,0,Ranger,7,Weapon_Support1,3,aWeapon306,Lightweight Liquid Armor,軽量リキッドアーマー,0.31,0,1,1,0
+311,0,Ranger,7,Weapon_Support1,3,aWeapon307,Under Assist,アンダーアシスト,0.47,0,1,1,0
+312,0,Ranger,7,Weapon_Support1,3,aWeapon308,Lightweight Protector E2,軽量プロテクターＥ２,0.65,0,1,1,0
+313,0,Ranger,7,Weapon_Support1,3,aWeapon309,Perfect Liquid Armor,パーフェクト·リキッドアーマー,0.8,0,1,1,0
+314,0,Ranger,7,Weapon_Support1,3,aWeapon310,Hybrid Liquid Armor,ハイブリッド·リキッドアーマー,1.21,0,1,1,0
+315,0,Ranger,7,Weapon_Support1,3,aWeapon311,Explosion-proof Suit,耐爆スーツ,1.4,0,1,1,0
+316,0,Ranger,7,Weapon_Support1,3,aWeapon312,Hybrid Protector E2,ハイブリッドプロテクターＥ２,1.49,0,1,1,0
+317,0,Ranger,7,Weapon_Support1,3,aWeapon313,Under Assist E2,アンダーアシストＥ２,1.7,0,1,1,0
+318,0,Ranger,7,Weapon_Support1,3,aWeapon314,Lightweight Liquid Armor E2,軽量リキッドアーマーＥ２,1.9,0,1,1,0
+319,0,Ranger,7,Weapon_Support1,3,aWeapon315,Lightweight Protector E3,軽量プロテクターＥ３,2.21,0,1,1,0
+320,0,Ranger,7,Weapon_Support1,3,aWeapon316,Hybrid Explosion-proof Suit,ハイブリッド耐爆スーツ,2.4,0,1,1,0
+321,0,Ranger,7,Weapon_Support1,3,aWeapon317,Under Assist E3,アンダーアシストＥ３,2.71,0,1,1,0
+322,0,Ranger,7,Weapon_Support1,3,aWeapon318,Lightweight Liquid Armor E3,軽量リキッドアーマーＥ３,2.92,0,1,1,0
+323,0,Ranger,7,Weapon_Support1,3,aWeapon319,Hybrid Protector E9,ハイブリッドプロテクターＥ９,3.3,0,1,1,0
+324,0,Ranger,7,Weapon_Support1,3,aWeapon320,Multiple Lock-on Device L1,多重ロックオン装置Ｌ１,0.15,0,1,1,0
+325,0,Ranger,7,Weapon_Support1,3,aWeapon321,Radar Support System,レーダー支援システム,0.39,0,1,1,0
+326,0,Ranger,7,Weapon_Support1,3,aWeapon322,Multiple Lock-on Device L2,多重ロックオン装置Ｌ２,0.71,0,1,1,0
+327,0,Ranger,7,Weapon_Support1,3,aWeapon323,E2 Radar Support System,Ｅ２レーダー支援システム,1.3,0,1,1,0
+328,0,Ranger,7,Weapon_Support1,3,aWeapon324,Multiple Lock-on Device L3,多重ロックオン装置Ｌ３,1.6,0,1,1,0
+329,0,Ranger,7,Weapon_Support1,3,aWeapon325,E3 Radar Support System,Ｅ３レーダー支援システム,2.28,0,1,1,0
+330,0,Ranger,7,Weapon_Support1,3,aWeapon326,Multiple Lock-on Device LX,多重ロックオン装置ＬＸ,2.8,0,1,1,0
+331,0,Ranger,7,Weapon_Support1,3,aWeapon327,EX Radar Support System,ＥＸレーダー支援システム,3.15,0,1,1,0
+332,0,Ranger,7,Weapon_Support1,3,aWeapon328,Relief Assistance Equipment 1,救護支援装備１,0.11,0,1,1,0
+333,0,Ranger,7,Weapon_Support1,3,aWeapon329,Relief Assistance Equipment 2,救護支援装備２,0.6,0,1,1,0
+334,0,Ranger,7,Weapon_Support1,3,aWeapon330,Relief Assistance Equipment 3,救護支援装備３,1.41,0,1,1,0
+335,0,Ranger,7,Weapon_Support1,3,aWeapon331,Relief Assistance Equipment 4,救護支援装備４,2.5,0,1,1,0
+336,0,Ranger,7,Weapon_Support1,3,aWeapon332,Relief Assistance Equipment 5,救護支援装備５,3.22,0,1,1,0
+337,0,Ranger,7,Weapon_Support1,3,aWeapon333,Probe Type 1,探知機１型,0.05,0,1,1,0
+338,0,Ranger,7,Weapon_Support1,3,aWeapon334,Probe Type 2,探知機２型,0.55,0,1,1,0
+339,0,Ranger,7,Weapon_Support1,3,aWeapon335,Probe Type 3,探知機３型,1.11,0,1,1,0
+340,0,Ranger,7,Weapon_Support1,3,aWeapon336,Probe Type 4,探知機４型,1.82,0,1,1,0
+341,0,Ranger,7,Weapon_Support1,3,aWeapon337,Probe Type 5,探知機５型,2.65,0,1,1,0
+342,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon338,Freed 1,フリージャー１,0.12,0,1,1,0
+343,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon339,Freed 2,フリージャー タイプ２,0.71,0,1,1,0
+344,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon340,Freed Mad Custom ,フリージャー·マッドカスタム,1.12,0,1,1,0
+345,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon341,Freed 3,フリージャー タイプ３,1.64,0,1,1,0
+346,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon342,Freed War Custom ,フリージャー·ウォーカスタム,2.31,0,1,1,0
+347,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon343,Freed Type-X,フリージャー タイプＸ,2.44,0,1,1,0
+348,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon344,Freed Hell Custom ,フリージャー·ヘルカスタム,2.55,0,1,1,0
+349,0,Ranger,10,Weapon_Ranger_Vehicle3,3,aWeapon345,Freed Type-Z,フリージャー タイプＺ,3.05,0,1,1,0
+350,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon346,KG6 Kepler,ＫＧ６ケブラー,0.12,0,1,0,0
+351,0,Ranger,8,Weapon_Ranger_Vehicle1,3,eVehicle_Tank01,Blacker E1,ブラッカーＥ１,0.24,0,1,0,0
+352,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon347,Epsilon Self-Propelled Railgun,イプシロン自走レールガン,0.4,0,1,0,0
+353,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon348,EMC,ＥＭＣ,0.48,0,1,0,0
+354,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon349,KG6 Kepler E,ＫＧ６ケブラーＥ,0.54,0,1,0,0
+355,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon350,Epsilon Self-Propelled Railgun M2,イプシロン自走レールガンＭ２,0.77,0,1,0,0
+356,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon351,Varius TZ1,バリアスＴＺ１,0.8,0,1,0,0
+357,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon352,KG6 Kepler F,ＫＧ６ケブラーＦ,1.2,0,1,0,0
+358,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon353,Menace Self-Propelled Railgun,メナス自走レールガン,1.2,0,1,0,0
+359,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon354,Menace Self-Propelled Railgun M2,メナス自走レールガンＭ２,1.65,0,1,0,0
+360,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon355,Varius TZ2,バリアスＴＺ２,1.7,0,1,0,0
+361,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon356,Menace 4D Self-Propelled Railgun,メナス４Ｄ自走レールガン,2.2,0,1,0,0
+362,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon357,Varius TZ2E,バリアスＴＺ２Ｅ,2.4,0,1,0,0
+363,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon358,EMCS,ＥＭＣＳ,2.48,0,1,0,0
+364,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon359,KG6 Kepler YE,ＫＧ６ケブラーＹＥ,2.5,0,1,0,0
+365,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon360,Epsilon Blast Proto Railgun,イプシロンブラスト　プロトレールガン,2.77,0,1,0,0
+366,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon361,KG6 Kepler YF,ＫＧ６ケブラーＹＦ,3.2,0,1,0,0
+367,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon362,Epsilon Blast Self-Propelled Railgun,イプシロンブラスト自走レールガン,3.37,0,1,0,0
+368,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon363,EMCX,ＥＭＣＸ,3.48,0,1,0,0
+369,0,Ranger,8,Weapon_Ranger_Vehicle1,3,aWeapon364,Varius TZ3,バリアスＴＺ３,3.6,0,1,0,0
+370,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon365,N9 Eros,Ｎ９エウロス,0.44,0,1,0,0
+371,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon366,EF31 Nereid,ＥＦ３１ネレイド,0.6,0,1,0,0
+372,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon367,HU04 Brute,ＨＵ０４ブルート,0.7,0,1,0,0
+373,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon368,Heron YG10,ヘロンＹＧ１０,0.85,0,1,0,0
+374,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon369,EF31 Nereid 2,ＥＦ３１ネレイド２,1.45,0,1,0,0
+375,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon370,HU04 Brute Hell Flame,ＨＵ０４ブルート ヘルフレイム,1.55,0,1,0,0
+376,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon371,Heron YG10E,ヘロンＹＧ１０Ｅ,1.7,0,1,0,0
+377,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon372,EF31 Fire Nereid,ＥＦ３１ファイアーネレイド,2.25,0,1,0,0
+378,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon373,Heron YG20,ヘロンＹＧ２０,2.6,0,1,0,0
+379,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon374,HU04 Brute D7,ＨＵ０４ブルートＤ７,2.55,0,1,0,0
+380,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon375,EF31 Nereid S,ＥＦ３１ネレイドＳ,2.8,0,1,0,0
+381,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon376,HU04 Brute SA9,ＨＵ０４ブルートＳＡ９,3.25,0,1,0,0
+382,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon377,EF31 Nereid Angel,ＥＦ３１ネレイド エンジェル,3.33,0,1,0,0
+383,0,Ranger,9,Weapon_Ranger_Vehicle2,3,aWeapon378,Heron YG20E,ヘロンＹＧ２０Ｅ,3.5,0,1,0,0
+384,1,WingDiver,100,Weapon_Pale_Short,0|1,pRapier01,Rapier,レイピア,0.0,1,1,1,0
+385,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon001,Power Lance,パワーランス,0.01,1,1,1,0
+386,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon002,Spark Vine Y3,スパークバインＹ３,0.01,0,1,1,0
+387,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon003,Phalanx,ファランクス,0.03,0,1,1,0
+388,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon004,Dragoon Lance,ドラグーンランス,0.06,0,1,1,0
+389,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon005,Spark Vine Y6,スパークバインＹ６,0.14,0,1,1,0
+390,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon006,Phalanx W1,ファランクスＷ１,0.16,0,1,1,0
+391,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon007,Power Lance LD,パワーランスＬＤ,0.27,0,1,1,0
+392,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon008,Rapier D,レイピアＤ,0.32,0,1,1,0
+393,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon009,Dragoon Lance DA,ドラグーンランスＤＡ,0.37,0,1,1,0
+394,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon010,Spark Whip,スパークウィップ,0.43,0,1,1,0
+395,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon011,Double Lance,ダブルランス,0.47,0,1,1,0
+396,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon012,Phalanx M2,ファランクスＭ２,0.58,0,1,1,0
+397,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon013,Rapier G,レイピアＧ,0.66,0,1,1,0
+398,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon014,Dragoon Lance LE,ドラグーンランスＬＥ,0.77,0,1,1,0
+399,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon015,Spark Foil Y6,スパークフルーレＹ６,0.87,0,1,1,0
+400,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon016,M2 Rapier,Ｍ２レイピア,1.0,0,1,1,0
+401,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon017,Double Lance LD,ダブルランスＬＤ,1.07,0,1,1,0
+402,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon018,Spark Vine YA6,スパークバインＹＡ６,1.24,0,1,1,0
+403,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon019,Phalanx U1,ファランクスＵ１,1.27,0,1,1,0
+404,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon020,Dragoon Lance M2,ドラグーンランスＭ２,1.36,0,1,1,0
+405,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon021,Power Lance FD,パワーランスＦＤ,1.48,0,1,1,0
+406,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon022,Phalanx M3,ファランクスＭ３,1.56,0,1,1,0
+407,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon023,M3 Rapier,Ｍ３レイピア,1.69,0,1,1,0
+408,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon024,Spark Whip W3,スパークウィップＷ３,1.77,0,1,1,0
+409,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon025,Dragoon Lance W,ドラグーンランスＷ,1.85,0,1,1,0
+410,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon026,Dragoon Lance M3,ドラグーンランスＭ３,1.96,0,1,1,0
+411,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon027,M4 Rapier,Ｍ４レイピア,2.06,0,1,1,0
+412,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon028,Triple Lance,トリプルランス,2.17,0,1,1,0
+413,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon029,Phalanx M4,ファランクスＭ４,2.27,0,1,1,0
+414,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon030,Spark Foil Y8,スパークフルーレＹ８,2.35,0,1,1,0
+415,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon031,Dragoon Lance M4,ドラグーンランスＭ４,2.45,0,1,1,0
+416,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon032,Phalanx W2,ファランクスＷ２,2.57,0,1,1,0
+417,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon033,Spark Whip W5,スパークウィップＷ５,2.71,0,1,1,0
+418,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon034,M5 Rapier,Ｍ５レイピア,2.76,0,1,1,0
+419,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon035,Twin Lance,ツインランス,2.94,0,1,1,0
+420,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon036,Star Rapier,スターレイピア,2.96,0,1,1,0
+421,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon037,Dragoon Lance Tri,ドラグーンランス·トライ,3.06,0,1,1,0
+422,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon038,Spark Vine Y12,スパークバインＹ１２,3.15,0,1,1,0
+423,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon039,Power Lance ZA,パワーランスＺＡ,3.26,0,1,1,0
+424,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon040,Phalanx M5,ファランクスＭ５,3.37,0,1,1,0
+425,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon041,Triple Lance ZD,トリプルランスＺＤ,3.45,0,1,1,0
+426,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon042,Rapier Nova,レイピア·ノヴァ,3.47,0,1,1,0
+427,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon043,Spark Whip ZY,スパークウィップＺＹ,3.6,0,1,1,0
+428,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon044,Dragoon Lance ZM,ドラグーンランスＺＭ,3.7,0,1,1,0
+429,1,WingDiver,100,Weapon_Pale_Short,0|1,pWeapon045,Phalanx ZT,ファランクスＺＴ,3.8,0,1,1,0
+430,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,LAZR01,Mag Blaster,マグ·ブラスター,0.0,0,1,1,0
+431,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon046,Destroyer Blaster,デスト·ブラスター,0.15,0,1,1,0
+432,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon047,Mag Blaster A1,マグ·ブラスターＡ１,0.23,0,1,1,0
+433,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon048,Mag Blaster A2,マグ·ブラスターＡ２,0.45,0,1,1,0
+434,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon049,Destroyer Blaster 2,デスト·ブラスター２,0.48,0,1,1,0
+435,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon050,Reflectron Laser,リフレクトロン·レーザー,0.59,0,1,1,0
+436,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon051,Mag Blaster V1,マグ·ブラスターＶ１,0.68,0,1,1,0
+437,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon052,Spine Blaster,スパイン·ブラスター,0.78,0,1,1,0
+438,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon053,Mag Blaster B1,マグ·ブラスターＢ１,0.89,0,1,1,0
+439,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon054,Mag Blaster B2,マグ·ブラスターＢ２,0.98,0,1,1,0
+440,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon055,Spine Blaster E2,スパイン·ブラスターＥ２,1.08,0,1,1,0
+441,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon056,Mag Blaster DA,マグ·ブラスターＤＡ,1.15,0,1,1,0
+442,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon057,Reflectron V Laser,リフレクトロン·Ｖレーザー,1.3,0,1,1,0
+443,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon058,Mag Blaster G1,マグ·ブラスターＧ１,1.43,0,1,1,0
+444,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon059,Mag Blaster G2,マグ·ブラスターＧ２,1.58,0,1,1,0
+445,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon060,Destroyer Blaster F,デスト·ブラスターＦ,1.7,0,1,1,0
+446,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon061,Mag Blaster DN,マグ·ブラスターＤＮ,1.79,0,1,1,0
+447,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon062,Reflectron Laser D,リフレクトロン·レーザーＤ,1.87,0,1,1,0
+448,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon063,Mag Blaster G3,マグ·ブラスターＧ３,1.98,0,1,1,0
+449,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon064,Spine Blaster E3,スパイン·ブラスターＥ３,2.08,0,1,1,0
+450,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon065,Mag Blaster BX,マグ·ブラスターＢＸ,2.18,0,1,1,0
+451,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon066,Mag Blaster W,マグ·ブラスターＷ,2.37,0,1,1,0
+452,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon067,Mag Blaster SP1,マグ·ブラスターＳＰ１,2.59,0,1,1,0
+453,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon068,Destroyer Blaster W,デスト·ブラスターＷ,2.66,0,1,1,0
+454,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon069,Reflectron 5-Way Laser,リフレクトロン·５ＷＡＹレーザー,2.78,0,1,1,0
+455,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon070,Mag Blaster SP2,マグ·ブラスターＳＰ２,2.84,0,1,1,0
+456,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon071,Mag Blaster ZA,マグ·ブラスターＺＡ,2.98,0,1,1,0
+457,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon072,Spine Blaster ZM,スパイン·ブラスターＺＭ,3.07,0,1,1,0
+458,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon073,Reflectron 5-Way Laser ZD,リフレクトロン·５ＷＡＹレーザーＺＤ,3.28,0,1,1,0
+459,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon074,Mag Blaster DX,マグ·ブラスターＤＸ,3.17,0,1,1,0
+460,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon075,Destroyer Blaster FE,デスト·ブラスターＦＥ,3.29,0,1,1,0
+461,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,pWeapon076,Mag Blaster ZM,マグ·ブラスターＺＭ,3.39,0,1,1,0
+462,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pPulse01,Pulse Machine Gun,パルス·マシンガン,0.0,1,1,1,0
+463,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon077,Pulse Machine Gun R,パルス·マシンガンＲ,0.1,0,1,1,0
+464,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon078,Stardust Cannon Zero,スターダスト·キャノン零型,0.15,0,1,1,0
+465,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon079,3-Way Pulse Machine Gun,３ＷＡＹ·パルスマシンガン,0.25,0,1,1,0
+466,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon080,Pulse Rapid Gun,パルス·ラピッドガン,0.5,0,1,1,0
+467,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon081,4-Way Pulse Machine Gun,４ＷＡＹ·パルスマシンガン,0.7,0,1,1,0
+468,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon082,Stardust Cannon,スターダスト·キャノン,0.8,0,1,1,0
+469,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon083,5-Way Pulse Machine Gun,５ＷＡＹ·パルスマシンガン,0.95,0,1,1,0
+470,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon084,Pulse Machine Gun M2,パルス·マシンガンＭ２,1.01,0,1,1,0
+471,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon085,Pulse Buster,パルス·バスター,1.17,0,1,1,0
+472,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon086,6-Way Pulse Machine Gun,６ＷＡＹ·パルスマシンガン,1.42,0,1,1,0
+473,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon087,Stardust Cannon A,スターダスト·キャノンＡ型,1.5,0,1,1,0
+474,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon088,Pulse Machine Gun M3,パルス·マシンガンＭ３,1.71,0,1,1,0
+475,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon089,Pulse Buster α,パルス·バスターα,1.94,0,1,1,0
+476,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon090,Pulse Rapid Gun DE,パルス·ラピッドガンＤＥ,2.0,0,1,1,0
+477,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon091,8-Way Pulse Machine Gun,８ＷＡＹ·パルスマシンガン,2.2,0,1,1,0
+478,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon092,Stardust Cannon D,スターダスト·キャノンＤ型,2.39,0,1,1,0
+479,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon093,Pulse Machine Gun M4,パルス·マシンガンＭ４,2.6,0,1,1,0
+480,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon094,9-Way Pulse Machine Gun,９ＷＡＹ·パルスマシンガン,2.81,0,1,1,0
+481,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon095,Pulse Machine Gun M5,パルス·マシンガンＭ５,3.0,0,1,1,0
+482,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon096,Pulse Buster β,パルス·バスターβ,3.09,0,1,1,0
+483,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon097,10-Way Pulse Machine Gun,１０ＷＡＹ·パルスマシンガン,3.19,0,1,1,0
+484,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon098,Stardust Cannon F,スターダスト·キャノンＦ型,3.4,0,1,1,0
+485,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,pWeapon099,Pulse Machine Gun ZDM,パルス·マシンガンＺＤＭ,3.48,0,1,1,0
+486,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon100,Lightning Bow,ライトニング·ボウ,0.0,0,1,1,0
+487,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon101,Bolt Gun,ボルトガン,0.07,0,1,1,0
+488,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon102,Thunder Crossbow,サンダーボウガン,0.1,0,1,1,0
+489,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon103,Lightning Bow M2,ライトニング·ボウＭ２,0.2,0,1,1,0
+490,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon104,Thunder Crossbow 2,サンダーボウガン２,0.29,0,1,1,0
+491,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon105,Bolt Gun A1,ボルトガンＡ１,0.51,0,1,1,0
+492,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon106,Lightning Bow M3,ライトニング·ボウＭ３,0.71,0,1,1,0
+493,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon107,Thunder Crossbow 3,サンダーボウガン３,0.9,0,1,1,0
+494,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon108,Bolt Gun RA,ボルトガンＲＡ,1.01,0,1,1,0
+495,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon109,Lightning Rapid Bow,ライトニング·ラピッドボウ,1.19,0,1,1,0
+496,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon110,Thunder Crossbow RA,サンダーボウガンＲＡ,1.44,0,1,1,0
+497,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon111,Lightning Bow M4,ライトニング·ボウＭ４,1.6,0,1,1,0
+498,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon112,Thunder Crossbow 4,サンダーボウガン４,1.73,0,1,1,0
+499,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon113,Bolt Gun A2,ボルトガンＡ２,1.92,0,1,1,0
+500,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon114,Thunder Crossbow W,サンダーボウガンＷ,2.01,0,1,1,0
+501,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon115,Lightning Bow M5,ライトニング·ボウＭ５,2.1,0,1,1,0
+502,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon116,Bolt Gun RB,ボルトガンＲＢ,2.29,0,1,1,0
+503,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon117,Lightning Rapid Bow T2,ライトニング·ラピッドボウＴ２,2.47,0,1,1,0
+504,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon118,Bolt Power Gun,ボルトパワーガン,2.69,0,1,1,0
+505,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon119,Thunder Crossbow DZ,サンダーボウガンＤＺ,2.87,0,1,1,0
+506,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon120,Lightning Bow GD,ライトニング·ボウＧＤ,3.01,0,1,1,0
+507,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon121,Bolt Gun AZ,ボルトガンＡＺ,3.1,0,1,1,0
+508,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon122,Thunder Crossbow WZ,サンダーボウガンＷＺ,3.25,0,1,1,0
+509,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon123,Bolt Maximum Gun,ボルト·マキシマムガン,3.3,0,1,1,0
+510,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon124,Lightning Bow ZA,ライトニング·ボウＺＡ,3.41,0,1,1,0
+511,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,pWeapon125,Thunder Crossbow RZ,サンダーボウガンＲＺ,3.5,0,1,1,0
+512,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon126,Closed Laser,クローズ·レーザー,0.0,0,1,1,0
+513,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon127,Bolt Shooter,ボルト·シューター,0.1,0,1,1,0
+514,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon128,Closed Laser M2,クローズ·レーザーＭ２,0.31,0,1,1,0
+515,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon129,Monster Zero,ＭＯＮＳＴＥＲ　ＺＥＲＯ,0.53,0,1,1,0
+516,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon130,Bolt Shooter 2,ボルト·シューター２,0.65,0,1,1,0
+517,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon131,Monster,ＭＯＮＳＴＥＲ,0.75,0,1,1,0
+518,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon132,Closed Laser M3,クローズ·レーザーＭ３,0.91,0,1,1,0
+519,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon133,Closed Laser MA,クローズ·レーザーＭＡ,1.02,0,1,1,0
+520,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon134,Bolt Shooter RA,ボルト·シューターＲＡ,1.2,0,1,1,0
+521,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon135,Raijin,ライジン,1.45,0,1,1,0
+522,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon136,Closed Laser MSA,クローズ·レーザーＭＳＡ,1.62,0,1,1,0
+523,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon137,Bolt Shooter 3,ボルト·シューター３,1.81,0,1,1,0
+524,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon138,Bolt Shooter DA,ボルト·シューターＤＡ,2.02,0,1,1,0
+525,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon139,Monster GA,ＭＯＮＳＴＥＲ ＧＡ,2.21,0,1,1,0
+526,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon140,Closed Laser MX,クローズ·レーザーＭＸ,2.3,0,1,1,0
+527,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon141,Closed Laser MZ,クローズ·レーザーＭＺ,2.62,0,1,1,0
+528,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon142,Bolt Shooter RF,ボルト·シューターＲＦ,2.82,0,1,1,0
+529,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon143,Closed Long Laser,クローズ·ロングレーザー,3.02,0,1,1,0
+530,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon144,Bolt Shooter ZF,ボルト·シューターＺＦ,3.11,0,1,1,0
+531,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon145,Monster GZ,ＭＯＮＳＴＥＲ ＧＺ,3.21,0,1,1,0
+532,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon146,Closed Laser F,クローズ·レーザーＦ,3.31,0,1,1,0
+533,1,WingDiver,104,Weapon_Pale_Long,0|1,pWeapon147,Raijin α,ライジンα,3.42,0,1,1,0
+534,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pPlasmaLauncher01,Plasma Cannon,プラズマ·キャノン,0.0,1,1,1,0
+535,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon148,Grit Shot,グリット·ショット,0.02,0,1,1,0
+536,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon149,Plasma Big Cannon,プラズマ·ビッグキャノン,0.05,0,1,1,0
+537,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon150,Plasmafall,プラズマ·フォール,0.13,0,1,1,0
+538,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon151,Plasma Burst Cannon 2,プラズマ·バーストキャノン２,0.18,0,1,1,0
+539,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon152,Plasma Cannon B,プラズマ·キャノンＢ型,0.25,0,1,1,0
+540,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon153,Splasher,スプラッシャー,0.32,0,1,1,0
+541,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon154,Plasma Big Cannon M2,プラズマ·ビッグキャノンＭ２,0.4,0,1,1,0
+542,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon155,Grit Gun,グリットガン,0.54,0,1,1,0
+543,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon156,Plasma Heavy Cannon,プラズマ·ヘビーキャノン,0.6,0,1,1,0
+544,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon157,Plasmafall F6,プラズマ·フォールＦ６,0.72,0,1,1,0
+545,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon158,Plasma Burst Cannon 3,プラズマ·バーストキャノン３,0.81,0,1,1,0
+546,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon159,Plasma Cannon C,プラズマ·キャノンＣ型,1.04,0,1,1,0
+547,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon160,Grit Shot W10,グリット·ショットＷ１０,1.1,0,1,1,0
+548,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon161,Plasmafall DA,プラズマ·フォールＤＡ,1.22,0,1,1,0
+549,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon162,Grit Gun MA,グリットガンＭＡ,1.34,0,1,1,0
+550,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon163,Triple Plasma Cannon,トリプル·プラズマキャノン,1.4,0,1,1,0
+551,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon164,Plasma Cannon CR,プラズマ·キャノンＣＲ,1.53,0,1,1,0
+552,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon165,Plasma Burst Cannon 2D,プラズマ·バーストキャノン２Ｄ,1.74,0,1,1,0
+553,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon166,Plasmafall F10,プラズマ·フォールＦ１０,1.83,0,1,1,0
+554,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon167,Splasher AZ,スプラッシャーＡＺ,2.04,0,1,1,0
+555,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon168,Plasma Big Cannon M3,プラズマ·ビッグキャノンＭ３,2.12,0,1,1,0
+556,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon169,Plasma Great Cannon,プラズマ·グレートキャノン,2.23,0,1,1,0
+557,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon170,Plasma Cannon D,プラズマ·キャノンＤ型,2.31,0,1,1,0
+558,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon171,Double Plasma Cannon,ダブル·プラズマキャノン,2.41,0,1,1,0
+559,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon172,Grit Shot W15,グリット·ショットＷ１５,2.5,0,1,1,0
+560,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon173,Plasma Cannon E,プラズマ·キャノンＥ型,2.67,0,1,1,0
+561,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon174,Plasma Burst Cannon 4D,プラズマ·バーストキャノン４Ｄ,2.79,0,1,1,0
+562,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon175,Plasma Cannon F,プラズマ·キャノンＦ型,3.03,0,1,1,0
+563,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon176,Plasma Burst Cannon 4Z,プラズマ·バーストキャノン４Ｚ,3.23,0,1,1,0
+564,1,WingDiver,105,Weapon_Pale_Explosive,0|1,pWeapon177,Plasmafall F20,プラズマ·フォールＦ２０,3.4,0,1,1,0
+565,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon178,Mirage Zero,ミラージュ·ゼロ,0.0,0,1,1,0
+566,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon179,Geist,ガイスト,0.11,0,1,1,0
+567,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon180,Rapid Mirage,ラピッド·ミラージュ,0.22,0,1,1,0
+568,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon181,Mirage 5-Way,ミラージュ５ＷＡＹ,0.35,0,1,1,0
+569,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon182,Geist 2,ガイスト２,0.55,0,1,1,0
+570,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon183,Mirage 5-Way B,ミラージュ５ＷＡＹ－Ｂ,0.73,0,1,1,0
+571,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon184,Ghost Chaser,ゴースト·チェイサー,0.85,0,1,1,0
+572,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon185,Mirage Rumble,ミラージュ·ランブル,1.03,0,1,1,0
+573,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon186,Mirage 15,ミラージュ１５,1.12,0,1,1,0
+574,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon187,Psiblade,サイ·ブレード,1.24,0,1,1,0
+575,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon188,Geist 3,ガイスト３,1.46,0,1,1,0
+576,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon189,Mirage 15S,ミラージュ１５Ｓ,1.72,0,1,1,0
+577,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon190,Fenrir,フェンリル,2.14,0,1,1,0
+578,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon191,Mirage 5-Way S,ミラージュ５ＷＡＹ－Ｓ,2.25,0,1,1,0
+579,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon192,Psiblade α,サイ·ブレードα,2.43,0,1,1,0
+580,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon193,Geist D,ガイストＤ,2.55,0,1,1,0
+581,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon194,Ghost Chaser DA,ゴースト·チェイサーＤＡ,2.73,0,1,1,0
+582,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon195,Mirage 15WR,ミラージュ１５ＷＲ,3.05,0,1,1,0
+583,1,WingDiver,106,Weapon_Pale_Homing,0|1,pWeapon196,Fenrir 3-Way,フェンリル３ＷＡＹ,3.33,0,1,1,0
+584,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pHandGrenade01,Blink Ball α,ブリンク·ボールα,0.0,1,1,1,0
+585,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon197,Starmine,スターマイン,0.01,0,1,1,0
+586,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon198,Blink Ball,ブリンク·ボール,0.25,0,1,1,0
+587,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon199,Split Ball,スプリット·ボール,0.5,0,1,1,0
+588,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon200,Blink Ball B,ブリンク·ボールＢ,0.75,0,1,1,0
+589,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon201,Starmine 2,スターマイン２型,0.85,0,1,1,0
+590,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon202,Blink Ball C,ブリンク·ボールＣ,1.16,0,1,1,0
+591,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon203,Blink Fork,ブリンク·フォーク,1.64,0,1,1,0
+592,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon204,Starmine F,スターマインＦ,1.9,0,1,1,0
+593,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon205,Blink Ball D,ブリンク·ボールＤ,2.15,0,1,1,0
+594,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon206,Split Ball AT,スプリット·ボールＡＴ,2.6,0,1,1,0
+595,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon207,Starmine Z,スターマインＺ,3.01,0,1,1,0
+596,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,pWeapon208,Blink Ball FZ,ブリンク·ボールＦＺ,3.12,0,1,1,0
+597,1,WingDiver,113,Weapon_Pale_SupportShield,2,pEnergyShield01,Luminous Shield,ルミナス･シールド,0.0,1,1,1,0
+598,1,WingDiver,113,Weapon_Pale_SupportShield,2,pWeapon209,Harmonic Shield,ハーモニック･シールド,0.052,0,1,1,0
+599,1,WingDiver,113,Weapon_Pale_SupportShield,2,pWeapon210,Luminous Wide Shield,ルミナス･ワイドシールド,0.347,0,1,1,0
+600,1,WingDiver,113,Weapon_Pale_SupportShield,2,pWeapon211,Harmonic Shield W,ハーモニック･シールドＷ,0.612,0,1,1,0
+601,1,WingDiver,113,Weapon_Pale_SupportShield,2,pWeapon212,Luminous Twin Shield,ルミナス･ツインシールド,1.43,0,1,1,0
+602,1,WingDiver,113,Weapon_Pale_SupportShield,2,pWeapon213,Harmonic Shield S,ハーモニック･シールドＳ,1.7,0,1,1,0
+603,1,WingDiver,113,Weapon_Pale_SupportShield,2,pWeapon214,Luminous Shield Z4,ルミナス･シールドＺ４,2.32,0,1,1,0
+604,1,WingDiver,113,Weapon_Pale_SupportShield,2,pWeapon215,Harmonic Shield Z5,ハーモニック･シールドＺ５,3.1,0,1,1,0
+605,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon216,Handy Saber,ハンディセイバー,0.25,0,1,1,0
+606,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon217,Short Saber,ショートセイバー,0.4754,0,1,1,0
+607,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon218,Handy Saber 2,ハンディセイバー２,0.765,0,1,1,0
+608,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon219,Handy Saber 3,ハンディセイバー３,1.14,0,1,1,0
+609,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon220,Short Saber 2,ショートセイバー２,1.65,0,1,1,0
+610,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon221,Power Saber,パワーセイバー,2.14,0,1,1,0
+611,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon222,Handy Saber S,ハンディセイバーＳ,2.76,0,1,1,0
+612,1,WingDiver,111,Weapon_Pale_SupportShort,2,pWeapon223,Valiant Saber,ヴァリアントセイバー,3.12,0,1,1,0
+613,1,WingDiver,115,Weapon_Pale_SupportHorming,2,pWeapon224,Guided Grenade 4,誘導グレネード４,0.06,0,1,1,0
+614,1,WingDiver,115,Weapon_Pale_SupportHorming,2,pWeapon225,Guided Grenade 6,誘導グレネード６,0.45,0,1,1,0
+615,1,WingDiver,115,Weapon_Pale_SupportHorming,2,pWeapon226,Guided Grenade 10,誘導グレネード１０,0.9,0,1,1,0
+616,1,WingDiver,115,Weapon_Pale_SupportHorming,2,pWeapon227,Guided Grenade 6D,誘導グレネード６Ｄ,1.4,0,1,1,0
+617,1,WingDiver,115,Weapon_Pale_SupportHorming,2,pWeapon228,Guided Grenade 8,誘導グレネード８,2.3,0,1,1,0
+618,1,WingDiver,115,Weapon_Pale_SupportHorming,2,pWeapon229,Guided Grenade 12,誘導グレネード１２,3.1,0,1,1,0
+619,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon230,Electromagnetic Shaft 1 (↑),電磁シャフト１〔↑〕,0.01,1,1,1,0
+620,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon231,Electromagnetic Shaft 2 (←→),電磁シャフト２〔←→〕,0.213,0,1,1,0
+621,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon232,Electromagnetic Shaft 2 (V),電磁シャフト２〔Ｖ〕,0.376,0,1,1,0
+622,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon233,Electromagnetic Shaft 3 (T),電磁シャフト３〔Ｔ〕,0.64,0,1,1,0
+623,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon234,Electromagnetic Shaft 4 (x),電磁シャフト４〔×〕,0.867,0,1,1,0
+624,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon235,Electromagnetic Shaft 2 + (←→),電磁シャフト２＋〔←→〕,1.8,0,1,1,0
+625,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon236,Electromagnetic Shaft 3 (Ψ),電磁シャフト３〔Ψ〕,2.2,0,1,1,0
+626,1,WingDiver,112,Weapon_Pale_SupportTrap,2,pWeapon237,Electromagnetic Shaft 4 + (x),電磁シャフト４＋〔×〕,3.13,0,1,1,0
+627,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon238,Pulsar Spear M1,パルサースピアＭ１,0.093,0,1,1,0
+628,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon239,Glow Spear,グロースピア,0.313,0,1,1,0
+629,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon240,Pulsar Spear M2,パルサースピアＭ２,0.5743,0,1,1,0
+630,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon241,Pulsar Spear M3,パルサースピアＭ３,0.758,0,1,1,0
+631,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon242,Power Spear,パワースピア,1.15,0,1,1,0
+632,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon243,Pulsar Spear M4,パルサースピアＭ４,1.5,0,1,1,0
+633,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon244,Glow Spear S,グロースピアＳ,2.65,0,1,1,0
+634,1,WingDiver,116,Weapon_Pale_SupportCannon,2,pWeapon245,Power Spear S3,パワースピアＳ３,3.3,0,1,1,0
+635,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon246,Diffuser,ディフューザー,0.08,0,1,1,0
+636,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon247,Gleipnir,グレイプニール,0.21,0,1,1,0
+637,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon248,Thunder Cluster,サンダークラスター,0.33,0,1,1,0
+638,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon249,Diffuser Anti-Air Custom,ディフューザー対空カスタム,0.52,0,1,1,0
+639,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon250,Gleipnir β,グレイプニールβ,0.65,0,1,1,0
+640,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon251,α Diffuser,αディフューザー,0.83,0,1,1,0
+641,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon252,Heaven's Gate,ヘブンズ·ゲート,0.96,0,1,1,0
+642,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon253,Psi Cluster,サイ·クラスター,1.05,0,1,1,0
+643,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon254,Diffuser Air-to-Surface Custom,ディフューザー対地カスタム,1.39,0,1,1,0
+644,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon255,Psi Cluster α,サイ·クラスターα,1.67,0,1,1,0
+645,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon256,Ex Gleipnir,ＥＸグレイプニール,1.95,0,1,1,0
+646,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon257,Heaven's Gate 10,ヘブンズ·ゲート１０,2.05,0,1,1,0
+647,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon258,Thunder Cluster α,サンダークラスターα,2.24,0,1,1,0
+648,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon259,Diffuser Anti-Air Custom D,ディフューザー対空カスタムＤ,2.55,0,1,1,0
+649,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon260,Heaven's Gate D10,ヘブンズ·ゲートＤ１０,2.85,0,1,1,0
+650,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon261,Gleipnir α,グレイプニールα,3.24,0,1,1,0
+651,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon262,Diffuser Air-to-Surface Custom D,ディフューザー対地カスタムＤ,3.39,0,1,1,0
+652,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon263,Thunder Orb,サンダーオーブ,3.51,0,1,1,0
+653,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,pWeapon264,Final Days,エンドオブアース,3.53,0,1,1,0
+654,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pSupportNone,Plasma Core,プラズマコア,0.0,1,1,1,0
+655,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon265,Turbo Core,ターボコア,0.04,0,1,1,0
+656,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon266,Plasma Core B,プラズマコアＢ,0.11,0,1,1,0
+657,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon267,Loading Core,ローディングコア,0.14,0,1,1,0
+658,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon268,Reverse Core,リバースコア,0.17,0,1,1,0
+659,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon269,Rush Core,ラッシュコア,0.2,0,1,1,0
+660,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon270,V2 Plasma Core,Ｖ２プラズマコア,0.31,0,1,1,0
+661,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon271,V2 Plasma Core B,Ｖ２プラズマコアＢ型,0.48,0,1,1,0
+662,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon272,V2 Turbo Core,Ｖ２ターボコア,0.61,0,1,1,0
+663,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon273,Loading Core A,ローディングコアＡ型,0.72,0,1,1,0
+664,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon274,V2 Rush Core,Ｖ２ラッシュコア,0.8,0,1,1,0
+665,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon275,Jet Core,ジェットコア,0.88,0,1,1,0
+666,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon276,V2 Plasma Core C,Ｖ２プラズマコアＣ型,0.97,0,1,1,0
+667,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon277,V2 Reverse Core,Ｖ２リバースコア,1.09,0,1,1,0
+668,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon278,V3 Plasma Core,Ｖ３プラズマコア,1.16,0,1,1,0
+669,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon279,Big Core,ビッグコア,1.32,0,1,1,0
+670,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon280,V3 Turbo Core,Ｖ３ターボコア,1.44,0,1,1,0
+671,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon281,V3 Plasma Core B,Ｖ３プラズマコアＢ型,1.55,0,1,1,0
+672,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon282,V3 Rush Core,Ｖ３ラッシュコア,1.65,0,1,1,0
+673,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon283,Sky-High Core,スカイハイ·コア,1.75,0,1,1,0
+674,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon284,V3 Plasma Core C,Ｖ３プラズマコアＣ型,1.9,0,1,1,0
+675,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon285,V4 Plasma Core,Ｖ４プラズマコア,2.05,0,1,1,0
+676,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon286,Bird Core,バードコア,2.23,0,1,1,0
+677,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon287,Return Core,リターンコア,2.35,0,1,1,0
+678,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon288,V4 Plasma Core B,Ｖ４プラズマコアＢ型,2.44,0,1,1,0
+679,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon289,Loading Core B,ローディングコアＢ型,2.53,0,1,1,0
+680,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon290,V4 Turbo Core,Ｖ４ターボコア,2.61,0,1,1,0
+681,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon291,V4 Plasma Core C,Ｖ４プラズマコアＣ型,2.74,0,1,1,0
+682,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon292,V5 Plasma Core,Ｖ５プラズマコア,2.85,0,1,1,0
+683,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon293,VA Rush Core,ＶＡラッシュコア,2.93,0,1,1,0
+684,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon294,V5 Plasma Core B,Ｖ５プラズマコアＢ型,3.04,0,1,1,0
+685,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon295,Big Bang Core,ビッグバン·コア,3.14,0,1,1,0
+686,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon296,EX Bird Core,ＥＸバードコア,3.23,0,1,1,0
+687,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon297,VM Rush Core,ＶＭラッシュコア,3.35,0,1,1,0
+688,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon298,VM Jet Core,ＶＭジェットコア,3.43,0,1,1,0
+689,1,WingDiver,120,Weapon_Pale_EnergyCore,3,pWeapon299,VZ Plasma Core,ＶＺプラズマコア,3.55,0,1,1,0
+690,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hImpactHammer01,Vibro Hammer,ヴィブロ·ハンマー,0.0,1,1,1,0
+691,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon001,Vibro Hammer F3,ヴィブロ·ハンマーＦ３,0.04,0,1,1,0
+692,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon002,Force Blade,フォース·ブレード,0.08,0,1,1,0
+693,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon003,Vibro Roller,ヴィブロ·ローラー,0.18,0,1,1,0
+694,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon004,Vibro Hammer FA,ヴィブロ·ハンマーＦＡ,0.38,0,1,1,0
+695,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon005,Force Blade D,フォース·ブレードＤ,0.44,0,1,1,0
+696,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon006,Vibro Haken,ヴィブロ·ハーケン,0.53,0,1,1,0
+697,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon007,Vulcan Hammer,ボルケーン·ハンマー,0.6,0,1,1,0
+698,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon008,Dynamo Blade,ダイナモ·ブレード,0.76,0,1,1,0
+699,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon009,Vibro Hammer FE,ヴィブロ·ハンマーＦＥ,0.85,0,1,1,0
+700,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon010,Vibro Roller D2,ヴィブロ·ローラーＤ２,1.2,0,1,1,0
+701,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon011,Vibro Hammer FV,ヴィブロ·ハンマーＦＶ,1.41,0,1,1,0
+702,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon012,Force Ax,フォース·アックス,1.56,0,1,1,0
+703,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon013,Quake Haken,クエイク·ハーケン,1.64,0,1,1,0
+704,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon014,Vulcan Hammer D,ボルケーン·ハンマーＤ,1.75,0,1,1,0
+705,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon015,Vibro Roller D3,ヴィブロ·ローラーＤ３,1.84,0,1,1,0
+706,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon016,Dynamo Blade M2,ダイナモ·ブレードＭ２,2.01,0,1,1,0
+707,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon017,Quake Haken ZD,クエイク·ハーケンＺＤ,2.17,0,1,1,0
+708,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon018,Vulcan Hammer ZD,ボルケーン·ハンマーＺＤ,2.26,0,1,1,0
+709,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon019,Force Blade MA,フォース·ブレードＭＡ,2.46,0,1,1,0
+710,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon020,Force Ax G2,フォース·アックスＧ２,2.67,0,1,1,0
+711,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon021,Finest Hammer,ファイネスト·ハンマー,2.76,0,1,1,0
+712,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon022,Force Ax G3,フォース·アックスＧ３,3.07,0,1,1,0
+713,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon023,Vibro Roller D9,ヴィブロ·ローラーＤ９,3.18,0,1,1,0
+714,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,hWeapon024,Dyna Force Blade,ダイナ·フォースブレード,3.1,0,1,1,0
+715,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hPileBanker01,Blasthole Spear,ブラストホール·スピア,0.0,1,1,1,0
+716,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon025,Flashing Spear,フラッシング·スピア,0.15,0,1,1,0
+717,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon026,Jackhammer,ジャックハンマー,0.26,0,1,1,0
+718,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon027,Power Blade 1,電刃刀 一式,0.35,0,1,1,0
+719,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon028,Spine Driver,スパインドライバー,0.46,0,1,1,0
+720,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon029,Blasthole Spear M2,ブラストホール·スピアＭ２,0.66,0,1,1,0
+721,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon030,Power Blade 2,電刃刀 二式,0.75,0,1,1,0
+722,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon031,Blast Twin Spears,ブラスト·ツインスピア,0.82,0,1,1,0
+723,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon032,Flashing Spear M2,フラッシング·スピアＭ２,0.9,0,1,1,0
+724,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon033,Jackhammer M2,ジャックハンマーＭ２,1.04,0,1,1,0
+725,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon034,Power Blade 3,電刃刀 三式,1.14,0,1,1,0
+726,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon035,Spine Driver M2,スパインドライバーＭ２,1.25,0,1,1,0
+727,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon036,Flashing Spear M3,フラッシング·スピアＭ３,1.4,0,1,1,0
+728,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon037,Blasthole Spear M3,ブラストホール·スピアＭ３,1.46,0,1,1,0
+729,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon038,Blast Twin Spears M2,ブラスト·ツインスピアＭ２,1.54,0,1,1,0
+730,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon039,Power Blade 4,電刃刀 四式,1.66,0,1,1,0
+731,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon040,Blasthole Spear M4,ブラストホール·スピアＭ４,1.78,0,1,1,0
+732,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon041,Jackhammer M3,ジャックハンマーＭ３,1.86,0,1,1,0
+733,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon042,Spine Driver M3,スパインドライバーＭ３,2.02,0,1,1,0
+734,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon043,Flashing Spear M4,フラッシング·スピアＭ４,2.06,0,1,1,0
+735,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon044,Blasthole Spear M5,ブラストホール·スピアＭ５,2.2,0,1,1,0
+736,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon045,Jackhammer M4,ジャックハンマーＭ４,2.38,0,1,1,0
+737,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon046,Power Blade 5,電刃刀 五式,2.54,0,1,1,0
+738,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon047,Blast Twin Spears M3,ブラスト·ツインスピアＭ３,2.55,0,1,1,0
+739,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon048,Blasthole Spear M6,ブラストホール·スピアＭ６,2.7,0,1,1,0
+740,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon049,Spine Driver M4,スパインドライバーＭ４,2.78,0,1,1,0
+741,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon050,Jackhammer MA,ジャックハンマーＭＡ,3.08,0,1,1,0
+742,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon051,Blasthole Spear MS,ブラストホール·スピアＭＳ,3.14,0,1,1,0
+743,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon052,Blast Twin Spears M4,ブラスト·ツインスピアＭ４,3.2,0,1,1,0
+744,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon053,Flashing Spear M5,フラッシング·スピアＭ５,3.26,0,1,1,0
+745,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon054,Spine Driver MA,スパインドライバーＭＡ,3.36,0,1,1,0
+746,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,hWeapon055,Power Blade X,電刃刀 極式,3.5,0,1,1,0
+747,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hShield01,Deflection Shield,ディフレクション·シールド,0.0,1,1,1,0
+748,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hBbuckler01,Ion Mirror Shield,イオンミラー·シールド,0.01,0,1,1,0
+749,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hTowershield01,Tower Shield,タワーシールド,0.09,0,1,1,0
+750,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon056,Deflection Shield 2,ディフレクション·シールド２,0.2,0,1,1,0
+751,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon057,Ion Mirror Shield 2E,イオンミラー·シールド２Ｅ,0.28,0,1,1,0
+752,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon058,Deflection Shield 3,ディフレクション·シールド３,0.52,0,1,1,0
+753,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon059,Reflector,リフレクター,0.6,0,1,1,0
+754,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon060,Tower Shield 2E,タワーシールド２Ｅ,0.68,0,1,1,0
+755,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon061,Deflection Shield 4,ディフレクション·シールド４,0.86,0,1,1,0
+756,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon062,Ion Mirror Shield 3E,イオンミラー·シールド３Ｅ,1.01,0,1,1,0
+757,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon063,Reflector 2,リフレクター２,1.08,0,1,1,0
+758,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon064,Deflection Shield 5,ディフレクション·シールド５,1.36,0,1,1,0
+759,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon065,Tower Shield 3E,タワーシールド３Ｅ,1.48,0,1,1,0
+760,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon066,Deflection Shield 6,ディフレクション·シールド６,1.58,0,1,1,0
+761,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon067,Ion Mirror Shield 4E,イオンミラー·シールド４Ｅ,1.88,0,1,1,0
+762,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon068,Deflection Shield 7,ディフレクション·シールド７,2.08,0,1,1,0
+763,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon069,Tower Shield 4E,タワーシールド４Ｅ,2.29,0,1,1,0
+764,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon070,Ion Mirror Shield 5E,イオンミラー·シールド５Ｅ,2.4,0,1,1,0
+765,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon071,Deflection Shield MA,ディフレクション·シールドＭＡ,2.57,0,1,1,0
+766,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon072,Powered Reflector,パワード·リフレクター,2.72,0,1,1,0
+767,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon073,Deflection Shield MGX,ディフレクション·シールドＭＧＸ,2.86,0,1,1,0
+768,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon074,Ion Mirror Shield MG,イオンミラー·シールドＭＧ,3.01,0,1,1,0
+769,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon075,Master Shield,マスター·シールド,3.16,0,1,1,0
+770,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,hWeapon076,Great Shield,グレート·シールド,3.4,0,1,1,0
+771,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hGatling01,FG7 Hand Gatling,ＦＧ７ハンドガトリング,0.0,1,1,1,0
+772,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon077,Galleon Lightweight Cannon,ガリオン軽量機関砲,0.03,0,1,1,0
+773,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon078,Dexter Automatic Shotgun,デクスター自動散弾銃,0.07,0,1,1,0
+774,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon079,Flame Revolver,フレイムリボルバー,0.22,0,1,1,0
+775,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon080,FG8 Hand Gatling,ＦＧ８ハンドガトリング,0.3,0,1,1,0
+776,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon081,Galleon Rapid Fire Cannon,ガリオン速射機関砲,0.4,0,1,1,0
+777,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon082,Dexter Automatic Shotgun D1,デクスター自動散弾銃Ｄ１,0.48,0,1,1,0
+778,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon083,Flame Revolver D,フレイムリボルバーＤ,0.7,0,1,1,0
+779,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon084,UT1 Hand Gatling,ＵＴ１ハンドガトリング,0.78,0,1,1,0
+780,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon085,Galleon Lightweight Cannon M2,ガリオン軽量機関砲Ｍ２,0.84,0,1,1,0
+781,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon086,Disruptor,ディスラプター,0.92,0,1,1,0
+782,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon087,FG9 Hand Gatling,ＦＧ９ハンドガトリング,1.1,0,1,1,0
+783,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon088,FGS Diffusion Gatling,ＦＧＳ拡散ガトリング,1.28,0,1,1,0
+784,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon089,Dexter Automatic Shotgun D2,デクスター自動散弾銃Ｄ２,1.43,0,1,1,0
+785,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon090,Galleon Triple Burst Cannon,ガリオン３バースト機関砲,1.5,0,1,1,0
+786,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon091,Flame Revolver DC1,フレイムリボルバーＤＣ１,1.6,0,1,1,0
+787,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon092,UT2 Hand Gatling,ＵＴ２ハンドガトリング,1.68,0,1,1,0
+788,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon093,Galleon Lightweight Cannon M3,ガリオン軽量機関砲Ｍ３,1.8,0,1,1,0
+789,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon094,Dexter Automatic Shotgun G,デクスター自動散弾銃Ｇ,2.03,0,1,1,0
+790,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon095,FG10 Hand Gatling,ＦＧ１０ハンドガトリング,2.1,0,1,1,0
+791,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon096,Galleon 3R Burst Cannon,ガリオン３Ｒバースト機関砲,2.3,0,1,1,0
+792,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon097,Flame Revolver DC2,フレイムリボルバーＤＣ２,2.43,0,1,1,0
+793,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon098,Power Disruptor,パワーディスラプター,2.49,0,1,1,0
+794,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon099,FG20 Hand Gatling,ＦＧ２０ハンドガトリング,2.6,0,1,1,0
+795,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon100,Galleon Rapid Fire Cannon M2,ガリオン速射機関砲Ｍ２,2.74,0,1,1,0
+796,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon101,Dexter Automatic Shotgun ZA,デクスター自動散弾銃ＺＡ,2.8,0,1,1,0
+797,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon102,UT3 Hand Gatling,ＵＴ３ハンドガトリング,2.88,0,1,1,0
+798,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon103,Galleon Armor-Piercing Cannon,ガリオン徹甲機関砲,3.02,0,1,1,0
+799,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon104,Maximum Disruptor,マキシマム ディスラプター,3.05,0,1,1,0
+800,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon105,Dexter Automatic Shotgun ZG,デクスター自動散弾銃ＺＧ,3.1,0,1,1,0
+801,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon106,FGZ Hand Gatling,ＦＧＺハンドガトリング,3.22,0,1,1,0
+802,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,hWeapon107,Hell Flame Revolver,ヘルフレイムリボルバー,3.3,0,1,1,0
+803,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hCannon01,NC101 Hand Cannon,ＮＣ１０１ハンドキャノン,0.0,0,1,1,0
+804,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon108,30mm Gallic Heavy Cannon,３０ミリ ガリア重キャノン砲,0.05,0,1,1,0
+805,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon109,Powerdyne,パワーダイン,0.1,0,1,1,0
+806,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon110,NCS1 Cannon Shot,ＮＣＳ１キャノンショット,0.25,0,1,1,0
+807,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon111,30mm Gallic Heavy Cannon M2,３０ミリ ガリア重キャノン砲Ｍ２,0.42,0,1,1,0
+808,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon113,25mm Light Canister Cannon,２５ミリ軽量キャニスター砲,0.64,0,1,1,0
+809,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon114,NC102 Hand Cannon,ＮＣ１０２ハンドキャノン,0.8,0,1,1,0
+810,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon115,30mm Gallic Heavy Cannon M3,３０ミリ ガリア重キャノン砲Ｍ３,0.9,0,1,1,0
+811,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon116,NC103 Hand Cannon,ＮＣ１０３ハンドキャノン,1.12,0,1,1,0
+812,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon117,30mm Gallic Heavy Cannon M4,３０ミリ ガリア重キャノン砲Ｍ４,1.32,0,1,1,0
+813,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon119,NC104 Hand Cannon,ＮＣ１０４ハンドキャノン,1.62,0,1,1,0
+814,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon120,32mm Gallic Heavy Cannon,３２ミリ ガリア重キャノン砲,1.7,0,1,1,0
+815,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon121,NCS2 Cannon Shot,ＮＣＳ２キャノンショット,1.82,0,1,1,0
+816,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon122,NC201 Hand Cannon,ＮＣ２０１ハンドキャノン,2.04,0,1,1,0
+817,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon124,30mm Canister Cannon,３０ミリキャニスター砲,2.32,0,1,1,0
+818,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon125,NC202 Hand Cannon,ＮＣ２０２ハンドキャノン,2.62,0,1,1,0
+819,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon126,35mm Gallic Heavy Cannon,３５ミリ ガリア重キャノン砲,2.82,0,1,1,0
+820,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon128,NCSS Cannon Shot,ＮＣＳＳキャノンショット,3.03,0,1,1,0
+821,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon129,NC290 Hand Cannon,ＮＣ２９０ハンドキャノン,3.12,0,1,1,0
+822,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon130,35mm Battle Cannon,３５ミリ バトルキャノン砲,3.28,0,1,1,0
+823,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon131,FH10 Light Mortar,ＦＨ１０軽量迫撃砲,0.02,0,1,1,0
+824,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon132,YH1 Dispersal Mortar,ＹＨ１散弾迫撃砲,0.17,0,1,1,0
+825,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon133,FHD1 Heavy Mortar,ＦＨＤ１重迫撃砲,0.36,0,1,1,0
+826,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon134,YH2 Dispersal Mortar,ＹＨ２散弾迫撃砲,0.5,0,1,1,0
+827,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon135,FH11 Light Mortar,ＦＨ１１軽量迫撃砲,0.6,0,1,1,0
+828,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon136,FHD2 Heavy Mortar,ＦＨＤ２重迫撃砲,0.72,0,1,1,0
+829,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon137,FH12 Light Mortar,ＦＨ１２軽量迫撃砲,1.14,0,1,1,0
+830,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon138,FHD3 Heavy Mortar,ＦＨＤ３重迫撃砲,1.34,0,1,1,0
+831,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon139,FH21 Light Mortar,ＦＨ２１軽量迫撃砲,1.52,0,1,1,0
+832,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon140,YH3 Dispersal Mortar,ＹＨ３散弾迫撃砲,1.7,0,1,1,0
+833,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon141,FH22 Mortar,ＦＨ２２迫撃砲,2.15,0,1,1,0
+834,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon142,FHER Explosion Mortar,ＦＨＥＲ重爆迫撃砲,2.5,0,1,1,0
+835,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon143,FH29 Mortar,ＦＨ２９迫撃砲,3.15,0,1,1,0
+836,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon144,YH7 Dispersal Mortar,ＹＨ７散弾迫撃砲,3.34,0,1,1,0
+837,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,hWeapon145,FHEZ Super-Heavy Mortar,ＦＨＥＺ超重迫撃砲,3.5,0,1,1,0
+838,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon147,Arm Hound,アームハウンド,0.06,0,1,1,0
+839,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hClusterMissile01,Blood Storm,ブラッドストーム,0.1,0,1,1,0
+840,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon148,Leviathan,リバイアサン,0.14,0,1,1,0
+841,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon149,Haytal Multi-Missile Launcher,ハイタイル多弾ミサイル,0.33,0,1,1,0
+842,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon150,Arcane 6-Barrel Launcher,アーケイン６連ミサイル,0.28,0,1,1,0
+843,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon151,G2 Arm Hound,Ｇ２アームハウンド,0.55,0,1,1,0
+844,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon152,FG01 High Altitude Impact Launcher,ＦＧ０１高高度強襲ミサイル,0.74,0,1,1,0
+845,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon153,Phoenix,フェニックス,0.88,0,1,1,0
+846,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon154,Arcane 6-Barrel Launcher G2,アーケイン６連ミサイルＧ２,0.9,0,1,1,0
+847,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon155,G3 Arm Hound,Ｇ３アームハウンド,1.16,0,1,1,0
+848,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon156,Haytal Multi-Missile Launcher M2,ハイタイル多弾ミサイルＭ２,1.23,0,1,1,0
+849,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon157,M2 Blood Storm,Ｍ２ブラッドストーム,1.3,0,1,1,0
+850,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon158,Leviathan MA,リバイアサンＭＡ,1.38,0,1,1,0
+851,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon159,FG02 High Altitude Impact Launcher,ＦＧ０２高高度強襲ミサイル,1.54,0,1,1,0
+852,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon160,Phoenix 2,フェニックス２,1.72,0,1,1,0
+853,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon161,Arcane 6-Barrel Launcher G3,アーケイン６連ミサイルＧ３,1.9,0,1,1,0
+854,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon162,Haytal Multi-Missile Launcher MA,ハイタイル多弾ミサイルＭＡ,2.05,0,1,1,0
+855,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon163,M3 Blood Storm,Ｍ３ブラッドストーム,2.1,0,1,1,0
+856,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon164,G4 Arm Hound,Ｇ４アームハウンド,2.23,0,1,1,0
+857,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon165,Wild Leviathan,ワイルド リバイアサン,2.35,0,1,1,0
+858,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon166,Phoenix X,フェニックスＸ,2.53,0,1,1,0
+859,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon167,Arcane 6-Barrel Launcher GA,アーケイン６連ミサイルＧＡ,2.64,0,1,1,0
+860,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon168,FGX High Altitude Impact Launcher,ＦＧＸ高高度強襲ミサイル,2.84,0,1,1,0
+861,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon169,GX Arm Hound,ＧＸアームハウンド,3.23,0,1,1,0
+862,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon170,Haytal Multi-Missile Launcher WX,ハイタイル多弾ミサイルＷＸ,3.24,0,1,1,0
+863,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon171,Arcane 6-Barrel Launcher GX,アーケイン６連ミサイルＧＸ,3.31,0,1,1,0
+864,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon172,Phoenix WX,フェニックスＷＸ,3.38,0,1,1,0
+865,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,hWeapon173,MV Blood Storm,ＭＶブラッドストーム,3.48,0,1,1,0
+866,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hSupportNone0,Not Equipped,装備しない,0.0,1,1,1,0
+867,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hSupportNone1,Not Equipped,装備しない,0.0,1,1,1,0
+868,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon174,Dash Cell 1,ダッシュセル１,0.1,0,1,1,0
+869,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon175,Dash Cell 2,ダッシュセル２,0.7,0,1,1,0
+870,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon176,Dash Cell 3,ダッシュセル３,1.6,0,1,1,0
+871,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon177,Dash Cell 4,ダッシュセル４,2.7,0,1,1,0
+872,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon178,Dash Cell 5,ダッシュセル５,3.1,0,1,1,0
+873,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon179,Add Booster 1,アドブースター１,0.05,0,1,1,0
+874,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon180,Add Booster 2,アドブースター２,0.45,0,1,1,0
+875,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon181,Add Booster 3,アドブースター３,1.1,0,1,1,0
+876,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon182,Add Booster 4,アドブースター４,2.5,0,1,1,0
+877,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon183,Add Booster 5,アドブースター５,2.9,0,1,1,0
+878,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon184,Multi-Charger 3-3,マルチチャージャー３－３,0.8,0,1,1,0
+879,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon185,Multi-Charger 3-4,マルチチャージャー３－４,1.4,0,1,1,0
+880,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon186,Multi-Charger 4-3,マルチチャージャー４－３,1.8,0,1,1,0
+881,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon187,Multi-Charger 4-4,マルチチャージャー４－４,2.2,0,1,1,0
+882,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon188,Multi-Charger 4-5,マルチチャージャー４－５,3.3,0,1,1,0
+883,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon189,Multi-Charger 5-4,マルチチャージャー５－４,3.5,0,1,1,0
+884,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon190,Convertible Side Thruster 1,換装式サイドスラスター１,0.29,0,1,1,0
+885,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon191,Convertible Side Thruster 2,換装式サイドスラスター２,1.15,0,1,1,0
+886,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon192,Convertible Side Thruster 3,換装式サイドスラスター３,2.05,0,1,1,0
+887,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon193,Convertible Side Thruster 4,換装式サイドスラスター４,3.3,0,1,1,0
+888,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon194,Convertible Jump Booster 1,換装式ジャンプブースター１,0.17,0,1,1,0
+889,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon195,Convertible Jump Booster 2,換装式ジャンプブースター２,0.9,0,1,1,0
+890,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon196,Convertible Jump Booster 3,換装式ジャンプブースター３,1.8,0,1,1,0
+891,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,hWeapon197,Convertible Jump Booster 4,換装式ジャンプブースター４,3.05,0,1,1,0
+892,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon198,Deflect Cell,ディフレクト·セル,0.01,0,1,1,0
+893,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon199,Shield Protection Armor,シールド保護装甲,0.15,0,1,1,0
+894,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon200,Barricade System 1,バリケードシステム１,0.25,0,1,1,0
+895,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon201,Deflect Cell A2,ディフレクト·セルＡ２,0.4,0,1,1,0
+896,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon202,Barricade System 2,バリケードシステム２,0.9,0,1,1,0
+897,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon203,Shield Protection Armor B,シールド保護装甲Ｂ型,1.25,0,1,1,0
+898,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon204,Deflect Cell A3,ディフレクト·セルＡ３,1.5,0,1,1,0
+899,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon205,Barricade System 3,バリケードシステム３,1.7,0,1,1,0
+900,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon206,Shield Protection Armor F,シールド保護装甲Ｆ型,2.1,0,1,1,0
+901,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon207,Deflect Cell AX,ディフレクト·セルＡＸ,2.5,0,1,1,0
+902,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon208,Barricade System X,バリケードシステムＸ,3.13,0,1,1,0
+903,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,hWeapon209,Shield Protection Armor Y,シールド保護装甲Ｙ型,3.24,0,1,1,0
+904,3,Fencer,208,Weapon_Heavy_Support_Aiming,4|5,hWeapon210,Muzzle Stabilizer,砲口安定化装置,0.05,0,1,1,0
+905,3,Fencer,208,Weapon_Heavy_Support_Aiming,4|5,hWeapon211,Muzzle Stabilizer 2,砲口安定化装置２式,0.2,0,1,1,0
+906,3,Fencer,208,Weapon_Heavy_Support_Aiming,4|5,hWeapon212,Muzzle Stabilizer 3,砲口安定化装置３式,0.5,0,1,1,0
+907,3,Fencer,208,Weapon_Heavy_Support_Aiming,4|5,hWeapon213,Muzzle Stabilizer 4,砲口安定化装置４式,1.2,0,1,1,0
+908,3,Fencer,208,Weapon_Heavy_Support_Aiming,4|5,hWeapon214,Muzzle Stabilizer 5,砲口安定化装置５式,1.75,0,1,1,0
+909,3,Fencer,208,Weapon_Heavy_Support_Aiming,4|5,hWeapon215,Muzzle Stabilizer 6,砲口安定化装置６式,2.3,0,1,1,0
+910,3,Fencer,208,Weapon_Heavy_Support_Aiming,4|5,hWeapon216,Muzzle Stabilizer S,砲口安定化装置Ｓ式,3.05,0,1,1,0
+911,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon217,V1 Exoskeleton,Ｖ１スケルトン,0.0,0,1,1,0
+912,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon218,V1 Leg Exoskeleton,Ｖ１レッグスケルトン,0.02,0,1,1,0
+913,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon219,V1 Arm Exoskeleton,Ｖ１アームスケルトン,0.1,0,1,1,0
+914,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon220,V2 Leg Exoskeleton,Ｖ２レッグスケルトン,0.3,0,1,1,0
+915,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon221,V2 Arm Exoskeleton,Ｖ２アームスケルトン,0.6,0,1,1,0
+916,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon222,V2 Exoskeleton,Ｖ２スケルトン,1.3,0,1,1,0
+917,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon223,V3 Leg Exoskeleton,Ｖ３レッグスケルトン,1.9,0,1,1,0
+918,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon224,V3 Arm Exoskeleton,Ｖ３アームスケルトン,2.15,0,1,1,0
+919,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon225,V3 Exoskeleton,Ｖ３スケルトン,2.6,0,1,1,0
+920,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon226,V4 Leg Exoskeleton,Ｖ４レッグスケルトン,2.8,0,1,1,0
+921,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon227,V4 Arm Exoskeleton,Ｖ４アームスケルトン,3.17,0,1,1,0
+922,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,hWeapon228,VZ Exoskeleton,ＶＺスケルトン,3.4,0,1,1,0
+923,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon002,Mortar,迫撃砲,0.24,0,1,0,0
+924,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eRequestMortar01,Howitzer,榴弾砲,0.4,0,1,0,0
+925,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eRequestMortar02,Cannon A,カノン砲Ａ,0.49,0,1,0,0
+926,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon003,Mortar Concentrated Fire Strategy,迫撃砲 集中運用戦術,0.6,0,1,0,0
+927,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon004,Cannon B,カノン砲Ｂ,0.81,0,1,0,0
+928,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon005,B1 Mortar,Ｂ１迫撃砲,0.95,0,1,0,0
+929,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon006,Large Howitzer,大型榴弾砲,1.28,0,1,0,0
+930,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon007,B2 Mortar,Ｂ２迫撃砲,1.42,0,1,0,0
+931,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon008,Cannon C,カノン砲Ｃ,1.58,0,1,0,0
+932,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon009,B3 Mortar Concentrated Fire Strategy,Ｂ３迫撃砲 集中運用戦術,1.82,0,1,0,0
+933,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon010,Cannon D,カノン砲Ｄ,2.21,0,1,0,0
+934,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon011,B4 Mortar,Ｂ４迫撃砲,2.4,0,1,0,0
+935,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon012,Enhanced Howitzer,強化榴弾砲,2.75,0,1,0,0
+936,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon013,Gigantic Howitzer,巨大榴弾砲,3.11,0,1,0,0
+937,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon014,B9 Mortar,Ｂ９迫撃砲,3.22,0,1,0,0
+938,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon015,Cannon DZ,カノン砲ＤＺ,3.32,0,1,0,0
+939,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon017,Rocket Cannon A,ロケット砲Ａ,0.08,0,1,0,0
+940,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon018,150mm Single-Barreled Cannon B,１５０ミリ単装砲Ｂ,0.12,0,1,0,0
+941,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon019,120mm Neutralize Cannon A,１２０ミリ制圧砲Ａ,0.12,0,1,0,0
+942,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon020,180mm Cannon,１８０ミリ砲,0.17,0,1,0,0
+943,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon021,105mm Rapid-fire Cannon B,１０５ミリ速射砲Ｂ,0.2,0,1,0,0
+944,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon022,Rocket Cannon B,ロケット砲Ｂ,0.28,0,1,0,0
+945,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon023,Autocannon B,機関砲Ｂ,0.4,0,1,0,0
+946,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon024,120mm Neutralize Cannon B,１２０ミリ制圧砲Ｂ,0.52,0,1,0,0
+947,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon025,150mm Cannon Lapis 1,１５０ミリ砲ラピス１,0.6,0,1,0,0
+948,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon026,Rocket Cannon C,ロケット砲Ｃ,0.68,0,1,0,0
+949,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon027,Autocannon C,機関砲Ｃ,0.76,0,1,0,0
+950,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon028,105mm Rapid-fire Cannon C,１０５ミリ速射砲Ｃ,0.84,0,1,0,0
+951,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon029,150mm Single-Barreled Cannon C,１５０ミリ単装砲Ｃ,1.01,0,1,0,0
+952,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon030,A1 Minigun,Ａ１ミニガン,1.09,0,1,0,0
+953,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon031,120mm Neutralize Cannon C,１２０ミリ制圧砲Ｃ,1.15,0,1,0,0
+954,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon032,105mm Consecutive Rapid-fire Cannon,１０５ミリ連式速射砲,1.2,0,1,0,0
+955,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon033,150mm Triple-Barreled Cannon,１５０ミリ３連装砲,1.4,0,1,0,0
+956,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon034,A2 Minigun,Ａ２ミニガン,1.55,0,1,0,0
+957,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon035,Rocket Cannon D4,ロケット砲Ｄ４,1.6,0,1,0,0
+958,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon036,105mm Rapid-fire Cannon D,１０５ミリ速射砲Ｄ,1.72,0,1,0,0
+959,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon037,150mm Single-Barreled Cannon Lapis 2,１５０ミリ単装砲ラピス２,1.88,0,1,0,0
+960,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon038,105mm Consecutive Destruction Rapid-fire Cannon,１０５ミリ連式破砕速射砲,2.01,0,1,0,0
+961,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon039,190mm Cannon,１９０ミリ砲,2.2,0,1,0,0
+962,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon040,120mm Neutralize Cannon D,１２０ミリ制圧砲Ｄ,2.34,0,1,0,0
+963,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon041,105mm Rapid-fire Cannon Y,１０５ミリ速射砲Ｙ,2.48,0,1,0,0
+964,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon042,Vulcan Cannon M1,バルカン砲Ｍ１,2.56,0,1,0,0
+965,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon043,T1 Rocket Cannon,Ｔ１ロケット砲,2.68,0,1,0,0
+966,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon044,150mm Quadruple-Barreled Cannon,１５０ミリ４連装砲,2.83,0,1,0,0
+967,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon045,120mm Neutralize Destruction Cannon,１２０ミリ制圧破砕砲,3.11,0,1,0,0
+968,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon046,Vulcan Cannon M2,バルカン砲Ｍ２,3.26,0,1,0,0
+969,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon047,150mm Cannon D,１５０ミリ砲Ｄ,3.3,0,1,0,0
+970,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon048,105mm Rapid-fire Cannon Z,１０５ミリ速射砲Ｚ,3.37,0,1,0,0
+971,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon049,T2 Rocket Cannon,Ｔ２ロケット砲,3.46,0,1,0,0
+972,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon050,150mm Cannon ν Lapis,１５０ミリ砲νラピス,3.5,0,1,0,0
+973,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon051,Combat Bomber KM6,戦闘爆撃機ＫＭ６,0.01,0,1,0,0
+974,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eRequestBomber01,Scout Bomber,偵察爆撃機,0.05,0,1,0,0
+975,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon052,Combat Bomber Kamuy,戦闘爆撃機カムイ,0.12,0,1,0,0
+976,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon053,Heavy Bomber Vesta,重爆撃機ウェスタ,0.24,0,1,0,0
+977,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon054,Combat Bomber KM6 Plan 3,戦闘爆撃機ＫＭ６ プラン３,0.36,0,1,0,0
+978,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon055,Heavy Bomber Phobos,重爆撃機フォボス,0.56,0,1,0,0
+979,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon056,Combat Bomber KM6 Plan X2,戦闘爆撃機ＫＭ６ プランＸ２,0.68,0,1,0,0
+980,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon057,Heavy Bomber Phobos Plan 2,重爆撃機フォボス プラン２,0.8,0,1,0,0
+981,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon058,Heavy Bomber Vesta B,重爆撃機ウェスタＢ,0.84,0,1,0,0
+982,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon059,Combat Bomber KM6 Plan W2,戦闘爆撃機ＫＭ６ プランＷ２,0.92,0,1,0,0
+983,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon060,Combat Bomber Kamuy B,戦闘爆撃機カムイＢ,0.96,0,1,0,0
+984,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon061,Heavy Bomber Phobos Plan 3,重爆撃機フォボス プラン３,1.1,0,1,0,0
+985,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon062,Combat Bomber KM6 Plan X4,戦闘爆撃機ＫＭ６ プランＸ４,1.28,0,1,0,0
+986,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon063,Combat Bomber Kamuy B2M,戦闘爆撃機カムイＢ２Ｍ,1.35,0,1,0,0
+987,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon064,High-Speed Bomber KM6 F1,高速爆撃機ＫＭ６Ｆ１,1.52,0,1,0,0
+988,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon065,Heavy Bomber Phobos Plan 4,重爆撃機フォボス プラン４,1.72,0,1,0,0
+989,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon066,Heavy Bomber Vesta B Plan X2,重爆撃機ウェスタＢ プランＸ２,1.84,0,1,0,0
+990,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon067,Combat Bomber KM6 Plan X9,戦闘爆撃機ＫＭ６ プランＸ９,1.92,0,1,0,0
+991,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon068,High-Speed Bomber KM6 F2,高速爆撃機ＫＭ６Ｆ２,2.02,0,1,0,0
+992,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon069,Combat Bomber Kamuy C1,戦闘爆撃機カムイＣ１,2.12,0,1,0,0
+993,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon070,Heavy Bomber Phobos Plan 10,重爆撃機フォボス プラン１０,2.24,0,1,0,0
+994,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon071,Heavy Bomber Phobos BX,重爆撃機フォボスＢＸ,2.32,0,1,0,0
+995,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon072,Combat Bomber KM6 Plan W3,戦闘爆撃機ＫＭ６ プランＷ３,2.4,0,1,0,0
+996,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon073,Heavy Bomber Phobos Cluster Bombs,重爆撃機フォボス クラスター弾,2.44,0,1,0,0
+997,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon074,High-Speed Bomber KM6 F2 Plan W2,高速爆撃機ＫＭ６Ｆ２ プランＷ２,2.5,0,1,0,0
+998,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon075,Heavy Bomber Vesta C Plan W2,重爆撃機ウェスタＣ プランＷ２,2.66,0,1,0,0
+999,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon076,Heavy Bomber Phobos Z,重爆撃機フォボスＺ,2.85,0,1,0,0
+1000,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon077,Combat Bomber KM6 Plan X5,戦闘爆撃機ＫＭ６ プランＸ５,3.01,0,1,0,0
+1001,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon078,Combat Bomber Kamuy CX,戦闘爆撃機カムイＣＸ,3.08,0,1,0,0
+1002,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon079,High-Speed Bomber KM6 FX,高速爆撃機ＫＭ６ＦＸ,3.2,0,1,0,0
+1003,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon080,Heavy Bomber Vesta DA,重爆撃機ウェスタＤＡ,3.36,0,1,0,0
+1004,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon081,Combat Bomber KM6 Plan Z4,戦闘爆撃機ＫＭ６ プランＺ４,3.45,0,1,0,0
+1005,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon082,Heavy Bomber Phobos Z Plan 4,重爆撃機フォボスＺ プラン４,3.55,0,1,0,0
+1006,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon083,AH Cruise Missiles,ＡＨ巡航ミサイル,0.1,0,1,0,0
+1007,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon084,AH High-Speed Missile Group,ＡＨ高速ミサイル群,0.28,0,1,0,0
+1008,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon085,AHM Cruise Missiles,ＡＨＭ巡航ミサイル,0.52,0,1,0,0
+1009,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon086,Lionic U20,ライオニックＵ２０,0.64,0,1,0,0
+1010,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon087,Tempest A1,テンペストＡ１,0.68,0,1,0,0
+1011,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon088,Lionic U30,ライオニックＵ３０,1.02,0,1,0,0
+1012,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon089,Tempest A2,テンペストＡ２,1.28,0,1,0,0
+1013,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon090,N5 Cruise Missiles,Ｎ５巡航ミサイル,1.5,0,1,0,0
+1014,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon091,Lionic UA35,ライオニックＵＡ３５,1.72,0,1,0,0
+1015,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon093,N6 Cruise Missiles,Ｎ６巡航ミサイル,2.28,0,1,0,0
+1016,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon094,Tempest A3,テンペストＡ３,2.88,0,1,0,0
+1017,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon095,Tempest AT,テンペストＡＴ,3.01,0,1,0,0
+1018,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon096,Lionic UA45,ライオニックＵＡ４５,3.2,0,1,0,0
+1019,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon097,N6 AT Cruise Missiles,Ｎ６ＡＴ巡航ミサイル,3.32,0,1,0,0
+1020,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon098,Tempest ATS,テンペストＡＴＳ,3.48,0,1,0,0
+1021,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon099,Bulge Laser A,バルジレーザーＡ,0.16,0,1,0,0
+1022,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon100,Bulge Laser B,バルジレーザーＢ,0.29,0,1,0,0
+1023,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon101,Spritefall A,スプライトフォールＡ,0.32,0,1,0,0
+1024,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon102,Bulge Laser C,バルジレーザーＣ,0.44,0,1,0,0
+1025,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon103,Bulge Laser D,バルジレーザーＤ,0.72,0,1,0,0
+1026,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon104,Spritefall B,スプライトフォールＢ,0.88,0,1,0,0
+1027,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon105,Bulge Laser R1,バルジレーザーＲ１,1.04,0,1,0,0
+1028,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon106,Spritefall Shooting Mode β,スプライトフォール射撃モードβ,1.2,0,1,0,0
+1029,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon107,Bulge Laser R2,バルジレーザーＲ２,1.4,0,1,0,0
+1030,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon108,Spritefall C,スプライトフォールＣ,1.6,0,1,0,0
+1031,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon109,Bulge Laser Beam Mode S,バルジレーザー照射モードＳ,1.8,0,1,0,0
+1032,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon110,Spritefall R,スプライトフォールＲ,2.16,0,1,0,0
+1033,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon111,Bulge Laser Beam Mode D,バルジレーザー照射モードＤ,2.4,0,1,0,0
+1034,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon112,Spritefall Power Mode,スプライトフォール パワーモード,2.52,0,1,0,0
+1035,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon113,Spritefall Shooting Mode β2,スプライトフォール射撃モードβ２,2.64,0,1,0,0
+1036,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon114,Bulge Laser Beam Mode F,バルジレーザー照射モードＦ,2.82,0,1,0,0
+1037,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon115,Spritefall Maximum,スプライトフォール マキシマム,2.88,0,1,0,0
+1038,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon116,Spritefall Destroy,スプライトフォール デストロイ,3.05,0,1,0,0
+1039,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon117,Spritefall Shooting Mode β3,スプライトフォール射撃モードβ３,3.32,0,1,0,0
+1040,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon118,Bulge Laser Beam Mode Z,バルジレーザー照射モードＺ,3.6,0,1,0,0
+1041,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eLimpetGun01,Limpet Gun,リムペットガン,0.0,1,1,1,0
+1042,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon120,Limpet Sniper,リムペット·スナイプガン,0.05,1,1,1,0
+1043,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon121,Limpet Gun D,リムペットガンＤ,0.11,0,1,1,0
+1044,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon122,Limpet Sniper A2,リムペット·スナイプガンＡ２,0.15,0,1,1,0
+1045,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon124,Limpet Gun M2,リムペットガンＭ２,0.34,0,1,1,0
+1046,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon125,Limpet Sniper D,リムペット·スナイプガンＤ,0.5,0,1,1,0
+1047,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon126,Limpet Splendor,リムペット·スプレンダー,0.62,0,1,1,0
+1048,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon129,Limpet Gun M3,リムペットガンＭ３,0.88,0,1,1,0
+1049,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon130,Splendor Shot,スプレンダー·ショット,1.04,0,1,1,0
+1050,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon132,Limpet Chain Gun,リムペット·チェーンガン,1.25,0,1,1,0
+1051,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon133,Limpet Sniper A3,リムペット·スナイプガンＡ３,1.35,0,1,1,0
+1052,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon134,Limpet Detector,リムペット·ディテクター,1.52,0,1,1,0
+1053,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon135,Limpet Shot,リムペット·ショット,1.74,0,1,1,0
+1054,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon136,Buster Bomb,バスターボム,1.9,0,1,1,0
+1055,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon137,Limpet Splendor ME,リムペット·スプレンダーＭＥ,2.1,0,1,1,0
+1056,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon138,Limpet Sniper F3,リムペット·スナイプガンＦ３,2.2,0,1,1,0
+1057,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon140,Limpet Detector ME,リムペット·ディテクターＭＥ,2.47,0,1,1,0
+1058,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon141,Limpet Gun MA,リムペットガンＭＡ,2.62,0,1,1,0
+1059,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon142,Limpet Sniper ME,リムペット·スナイプガンＭＥ,2.7,0,1,1,0
+1060,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon144,Limpet Gun MT,リムペットガンＭＴ,3.12,0,1,1,0
+1061,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon147,Limpet Splendor ZD,リムペット·スプレンダーＺＤ,3.4,0,1,1,0
+1062,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon148,Limpet Sniper ZD,リムペット·スナイプガンＺＤ,3.5,0,1,1,0
+1063,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,eWeapon149,Limpet Chain Gun ZD,リムペット·チェーンガンＺＤ,3.56,0,1,1,0
+1064,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eLockonMarkerL01,Laser Guide Kit,レーザー誘導装置,0.04,0,1,1,0
+1065,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon150,High-Speed Laser Guide Kit,高速レーザー誘導装置,0.26,0,1,1,0
+1066,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon151,Laser Guide Kit T2,レーザー誘導装置Ｔ２,1.38,0,1,1,0
+1067,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon152,Laser Guide Kit T3,レーザー誘導装置Ｔ３,2.28,0,1,1,0
+1068,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon153,Laser Guide Kit T4,レーザー誘導装置Ｔ４,3.24,0,1,1,0
+1069,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eBeconGun,Guide Beacon Gun,誘導ビーコンガン,0.08,0,1,1,0
+1070,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon154,Guide Beacon Gun M2,誘導ビーコンガンＭ２,0.56,0,1,1,0
+1071,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon155,High Output Beacon Gun,高出力ビーコンガン,1.63,0,1,1,0
+1072,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon156,Guide Beacon Gun M3,誘導ビーコンガンＭ３,2.06,0,1,1,0
+1073,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon157,Power Beacon Gun,パワービーコンガン,2.56,0,1,1,0
+1074,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon158,Guide Beacon Gun MA,誘導ビーコンガンＭＡ,3.08,0,1,1,0
+1075,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon159,Suppress Gun,サプレスガン,0.08,0,1,1,0
+1076,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon160,Suppress Gun B2,サプレスガンＢ２,0.56,0,1,1,0
+1077,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon161,Suppress Gun GA,サプレスガンＧＡ,1.26,0,1,1,0
+1078,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon162,Suppress Gun MH,サプレスガンＭＨ,2.43,0,1,1,0
+1079,2,AirRaider,305,Weapon_Engineer_Special,0|1|2,eWeapon163,Suppress Gun MH2,サプレスガンＭＨ２,3.14,0,1,1,0
+1080,2,AirRaider,302,Weapon_Engineer_Support,3,eLifeBender,Life Vendor,ライフベンダー,0.0,1,1,1,0
+1081,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon164,Life Vendor M2,ライフベンダーＭ２,0.2,0,1,1,0
+1082,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon165,Life Vendor M3,ライフベンダーＭ３,0.67,0,1,1,0
+1083,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon168,Life Vendor MA,ライフベンダーＭＡ,1.47,0,1,1,0
+1084,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon169,Life Vendor MH,ライフベンダーＭＨ,2.03,0,1,1,0
+1085,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon171,Life Vendor ZD,ライフベンダーＺＤ,3.1,0,1,1,0
+1086,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon183,Power Post,パワーポスト,0.4,0,1,1,0
+1087,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon184,Power Post M2,パワーポストＭ２,1.01,0,1,1,0
+1088,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon186,Offensive Territory,オフェンシブテリトリー,2.36,0,1,1,0
+1089,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon188,Power Post ZM,パワーポストＺＭ,3.36,0,1,1,0
+1090,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon189,Guard Post,ガードポスト,0.06,0,1,1,0
+1091,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon191,Guard Post M2,ガードポストＭ２,0.7,0,1,1,0
+1092,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon192,Zone Protector,ゾーンプロテクター,1.27,0,1,1,0
+1093,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon194,Guard Post M3,ガードポストＭ３,2.58,0,1,1,0
+1094,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon195,Zone Protector ZM,ゾーンプロテクターＺＭ,3.01,0,1,1,0
+1095,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon196,Electromagnetic Bunker,電磁トーチカ,0.0,1,1,1,0
+1096,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon197,Decoy [Green],デコイ〔グリーン〕,0.32,0,1,1,0
+1097,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon198,Anti-Aircraft Bunker,対空防護トーチカ,0.54,0,1,1,0
+1098,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon199,Heavy Bunker,ワイドウォールトーチカ,0.84,0,1,1,0
+1099,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon200,Decoy [Blue],デコイ〔ブルー〕,1.16,0,1,1,0
+1100,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon201,Electromagnetic Bunker M2,電磁トーチカＭ２,1.3,0,1,1,0
+1101,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon202,Personal Shelter,パーソナル シェルター,1.6,0,1,1,0
+1102,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon203,Electromagnetic Prison,電磁プリズン,2.25,0,1,1,0
+1103,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon204,Decoy [Yellow],デコイ〔イエロー〕,2.54,0,1,1,0
+1104,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon205,Anti-Aircraft Bunker ME,対空防護トーチカＭＥ,2.78,0,1,1,0
+1105,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon206,Electromagnetic Bunker GH,電磁トーチカＧＨ,2.9,0,1,1,0
+1106,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon207,Borderline,ボーダーライン,3.13,0,1,1,0
+1107,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon208,Decoy [Black],デコイ〔ブラック〕,3.3,0,1,1,0
+1108,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon209,Electromagnetic Wall,電磁城壁,3.52,0,1,1,0
+1109,2,AirRaider,302,Weapon_Engineer_Support,3,eWeapon210,Absolute Bunker,アブソリュート·トーチカ,3.58,0,1,1,0
+1110,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eRUMBA0,Robot Bomb,ロボットボム,0.0,0,1,1,0
+1111,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon211,Type B Robot Bomb,Ｂ型ロボットボム,0.25,0,1,1,0
+1112,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon212,Insect Bomb,インセクトボム,0.31,0,1,1,0
+1113,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon213,Type C Robot Bomb,Ｃ型ロボットボム,0.5,0,1,1,0
+1114,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon214,Type D Robot Bomb,Ｄ型ロボットボム,0.75,0,1,1,0
+1115,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon215,Insect Bomb MK2,インセクトボムＭＫ２,0.85,0,1,1,0
+1116,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon216,Robot Bomb DX,ロボットボムＤＸ,1.14,0,1,1,0
+1117,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon217,Patroller,パトローラー,1.55,0,1,1,0
+1118,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon218,Insect Bomb MK3,インセクトボムＭＫ３,1.7,0,1,1,0
+1119,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon219,Robot Bomb DZ,ロボットボムＤＺ,2.14,0,1,1,0
+1120,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon220,Insect Bomb SB10,インセクトボムＳＢ１０,2.42,0,1,1,0
+1121,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon221,Speed Star,スピードスター,2.5,0,1,1,0
+1122,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon222,Robot Bomb ZX,ロボットボムＺＸ,3.07,0,1,1,0
+1123,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,eWeapon223,Patroller DA,パトローラーＤＡ,3.28,0,1,1,0
+1124,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eDrone_sa01,Guard Capsule A,警護･カプセル Ａ,0.0,1,1,1,0
+1125,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon224,Guard Capsule S,警護･カプセル Ｓ,0.07,0,1,1,0
+1126,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon225,Guard Capsule R,警護･カプセル Ｒ,0.16,0,1,1,0
+1127,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon226,Guard Capsule FW,警護･カプセル ＦＷ,0.25,0,1,1,0
+1128,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon227,Guard Capsule A2W,警護･カプセル Ａ２Ｗ,0.4,0,1,1,0
+1129,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon228,Guard Capsule R2,警護･カプセル Ｒ２,0.8,0,1,1,0
+1130,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon229,Guard Capsule S2,警護･カプセル Ｓ２,1.16,0,1,1,0
+1131,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon230,Guard Capsule G,警護･カプセル Ｇ,1.4,0,1,1,0
+1132,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon231,Guard Capsule S3W,警護･カプセル Ｓ３Ｗ,2.1,0,1,1,0
+1133,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon232,Guard Capsule A3,警護･カプセル Ａ３,2.35,0,1,1,0
+1134,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon233,Guard Capsule F2W,警護･カプセル Ｆ２Ｗ,2.6,0,1,1,0
+1135,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,eWeapon234,Guard Capsule A4W,警護･カプセル Ａ４Ｗ,3.4,0,1,1,0
+1136,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon235,Tracer Capsule A3,追走･カプセル Ａ３,0.08,0,1,1,0
+1137,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon236,Tracer Capsule S3,追走･カプセル Ｓ３,0.18,0,1,1,0
+1138,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon237,Tracer Capsule A5,追走･カプセル Ａ５,0.265,0,1,1,0
+1139,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon238,Tracer Capsule S3X,追走･カプセル Ｓ３Ｘ,0.4,0,1,1,0
+1140,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon239,Tracer Capsule A6,追走･カプセル Ａ６,0.643,0,1,1,0
+1141,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon240,Tracer Capsule Z4,追走･カプセル Ｚ４,0.85,0,1,1,0
+1142,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon241,Tracer Capsule S5,追走･カプセル Ｓ５,1.13,0,1,1,0
+1143,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon242,Tracer Capsule A8,追走･カプセル Ａ８,1.43,0,1,1,0
+1144,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon243,Tracer Capsule A10,追走･カプセル Ａ１０,2.03,0,1,1,0
+1145,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon244,Tracer Capsule Z6,追走･カプセル Ｚ６,2.73,0,1,1,0
+1146,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,eWeapon245,Tracer Capsule A12,追走･カプセル Ａ１２,3.13,0,1,1,0
+1147,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon246,Shooter Capsule A,射撃･カプセル Ａ,0.05,0,1,1,0
+1148,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon247,Shooter Capsule A2,射撃･カプセル Ａ２,0.3,0,1,1,0
+1149,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon248,Shooter Capsule P,射撃･カプセル Ｐ,0.55,0,1,1,0
+1150,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon249,Shooter Capsule A3,射撃･カプセル Ａ３,0.8,0,1,1,0
+1151,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon250,Shooter Capsule A4,射撃･カプセル Ａ４,1.2,0,1,1,0
+1152,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon251,Shooter Capsule A5,射撃･カプセル Ａ５,1.7,0,1,1,0
+1153,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon252,Shooter Capsule P2,射撃･カプセル Ｐ２,2.2,0,1,1,0
+1154,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon253,Shooter Capsule A6,射撃･カプセル Ａ６,2.7,0,1,1,0
+1155,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,eWeapon254,Shooter Capsule A7,射撃･カプセル Ａ７,3.3,0,1,1,0
+1156,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,eWeapon255,Assault Aircraft F,強襲エアクラフトＦ,0.15,0,1,1,0
+1157,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,eWeapon256,Assault Aircraft F2,強襲エアクラフトＦ２,0.45,0,1,1,0
+1158,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,eWeapon257,Assault Aircraft Z,強襲エアクラフトＺ,0.75,0,1,1,0
+1159,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,eWeapon258,Assault Aircraft F3,強襲エアクラフトＦ３,1.1,0,1,1,0
+1160,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,eWeapon259,Assault Aircraft Z2,強襲エアクラフトＺ２,1.65,0,1,1,0
+1161,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,eWeapon260,Assault Aircraft F4,強襲エアクラフトＦ４,2.5,0,1,1,0
+1162,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,eWeapon261,Assault Aircraft Z3,強襲エアクラフトＺ３,3.2,0,1,1,0
+1163,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eDrone_morter01,Armed Multicopter M1 (Mortars),武装マルチコプターＭ１〔迫撃砲〕,0.0,1,1,1,0
+1164,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon262,Armed Multicopter M1E (Mortars),武装マルチコプターＭ１Ｅ〔迫撃砲〕,0.13,0,1,1,0
+1165,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon263,Armed Multicopter M2 (Mortars),武装マルチコプターＭ２〔迫撃砲〕,0.26,0,1,1,0
+1166,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon264,Heavy Armed Multicopter MH (Mortars),重武装マルチコプターＭＨ〔迫撃砲〕,0.52,0,1,1,0
+1167,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon265,Armed Multicopter M3 (Mortars),武装マルチコプターＭ３〔迫撃砲〕,0.78,0,1,1,0
+1168,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon266,Armed Multicopter M4 (Mortars),武装マルチコプターＭ４〔迫撃砲〕,1.36,0,1,1,0
+1169,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon267,Armed Multicopter M5 (Mortars),武装マルチコプターＭ５〔迫撃砲〕,1.86,0,1,1,0
+1170,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon268,Armed Multicopter M6 (Mortars),武装マルチコプターＭ６〔迫撃砲〕,2.04,0,1,1,0
+1171,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon269,Armed Multicopter M7 (Mortars),武装マルチコプターＭ７〔迫撃砲〕,2.56,0,1,1,0
+1172,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon270,Heavy Armed Multicopter MHE (Mortars),重武装マルチコプターＭＨＥ〔迫撃砲〕,3.01,0,1,1,0
+1173,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,eWeapon271,Armed Multicopter MZ (Mortars),武装マルチコプターＭＺ〔迫撃砲〕,3.3,0,1,1,0
+1174,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eDrone_attacker01,A4 Armed Multicopter (Machine Gun),Ａ４武装マルチコプター〔機銃〕,0.0,1,1,1,0
+1175,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon272,T4 Hammer Copter (Large Caliber),Ｔ４ハンマーコプター〔大型弾〕,0.03,0,1,1,0
+1176,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon273,N1 Silent Copter (Sniper),Ｎ１サイレントコプター〔狙撃銃〕,0.06,0,1,1,0
+1177,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon274,A4+ Armed Multicopter (Machine Gun),Ａ４＋武装マルチコプター〔機銃〕,0.1,0,1,1,0
+1178,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon275,E2 Stun Copter (Shock),Ｅ２スタンコプター〔電流〕,0.15,0,1,1,0
+1179,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon276,A4α Armed Multicopter (Machine Gun),Ａ４α武装マルチコプター〔機銃〕,0.2,0,1,1,0
+1180,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon277,R3+ Light Armed Multicopter (Machine Gun),Ｒ３＋軽武装マルチコプター〔機銃〕,0.9,0,1,1,0
+1181,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon278,H4 Metal Shot Copter (Iron Shot),Ｈ４メタルショットコプター〔鉄塊弾〕,0.3,0,1,1,0
+1182,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon279,R3 Light Armed Multicopter (Machine Gun),Ｒ３軽武装マルチコプター〔機銃〕,0.4,0,1,1,0
+1183,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon280,N2 Silent Copter (Sniper),Ｎ２サイレントコプター〔狙撃銃〕,0.45,0,1,1,0
+1184,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon281,S4 Shotgun Multicopter (Buckshot),Ｓ４散弾マルチコプター〔散弾銃〕,0.5,0,1,1,0
+1185,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon282,A5 Armed Multicopter (Machine Gun),Ａ５武装マルチコプター〔機銃〕,0.6,0,1,1,0
+1186,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon283,T4+ Hammer Copter (Large Caliber),Ｔ４＋ハンマーコプター〔大型弾〕,0.7,0,1,1,0
+1187,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon284,E2+ Stun Copter (Shock),Ｅ２＋スタンコプター〔電流〕,0.75,0,1,1,0
+1188,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon285,A6 Armed Multicopter (Machine Gun),Ａ６武装マルチコプター〔機銃〕,0.8,0,1,1,0
+1189,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon286,A5+ Armed Multicopter (Machine Gun),Ａ５＋武装マルチコプター〔機銃〕,1.05,0,1,1,0
+1190,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon287,N1+ Silent Copter (Sniper),Ｎ１＋サイレントコプター〔狙撃銃〕,1.1,0,1,1,0
+1191,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon288,R3α Light Armed Multicopter (Machine Gun),Ｒ３α軽武装マルチコプター〔機銃〕,1.45,0,1,1,0
+1192,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon289,H3 Metal Shot Copter (Iron Shot),Ｈ３メタルショットコプター〔鉄塊弾〕,1.5,0,1,1,0
+1193,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon290,E2α Stun Copter (Shock),Ｅ２αスタンコプター〔電流〕,1.6,0,1,1,0
+1194,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon291,A7 Heavy Armed Multicopter (Machine Gun),Ａ７重武装マルチコプター〔機銃〕,1.7,0,1,1,0
+1195,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon292,T4α Hammer Copter (Large Caliber),Ｔ４αハンマーコプター〔大型弾〕,1.8,0,1,1,0
+1196,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon293,A5 Rapid-Fire Multicopter (Machine Gun),Ａ５速射マルチコプター〔機銃〕,2.2,0,1,1,0
+1197,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon294,N1α Silent Copter (Sniper),Ｎ１αサイレントコプター〔狙撃銃〕,2.35,0,1,1,0
+1198,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon295,S4+ Shotgun Multicopter (Buckshot),Ｓ４＋散弾マルチコプター〔散弾銃〕,2.5,0,1,1,0
+1199,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon296,R4 Light Armed Multicopter (Machine Gun),Ｒ４軽武装マルチコプター〔機銃〕,2.6,0,1,1,0
+1200,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon297,E2β Stun Copter (Shock),Ｅ２βスタンコプター〔電流〕,2.7,0,1,1,0
+1201,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon298,T4β Hammer Copter (Large Caliber),Ｔ４βハンマーコプター〔大型弾〕,2.9,0,1,1,0
+1202,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon299,A7γ Armed Multicopter (Machine Gun),Ａ７γ武装マルチコプター〔機銃〕,3.2,0,1,1,0
+1203,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon300,N1β Silent Copter (Sniper),Ｎ１βサイレントコプター〔狙撃銃〕,3.3,0,1,1,0
+1204,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon301,H2 Metal Shot Copter (Iron Shot),Ｈ２メタルショットコプター〔鉄塊弾〕,3.4,0,1,1,0
+1205,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,eWeapon302,T4γ Hammer Copter (Large Caliber),Ｔ４γハンマーコプター〔大型弾〕,3.5,0,1,1,0
+1206,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eDrone_airstrike01,G3 Portable Attack Aircraft (Machine Gun),Ｇ３ポータブル攻撃機〔機関砲〕,0.0,1,1,1,0
+1207,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon303,R1 Portable Attack Aircraft (Rapid-Fire),Ｒ１ポータブル攻撃機〔速射砲〕,0.07,0,1,1,0
+1208,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon304,G3+ Portable Attack Aircraft (Machine Gun),Ｇ３＋ポータブル攻撃機〔機関砲〕,0.2,0,1,1,0
+1209,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon305,B1 Portable Bomber (Bomber),Ｂ１ポータブル爆撃機〔爆撃〕,0.15,0,1,1,0
+1210,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon306,R2 Portable Attack Aircraft (Rapid-Fire),Ｒ２ポータブル攻撃機〔速射砲〕,0.4,0,1,1,0
+1211,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon307,B1+ Portable Bomber (Bomber),Ｂ１＋ポータブル爆撃機〔爆撃〕,0.5,0,1,1,0
+1212,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon308,G4 Portable Low-Speed Strafer (Machine Gun),Ｇ４ポータブル低速掃射編隊〔機関砲〕,0.6,0,1,1,0
+1213,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon309,F1 Portable Flamethrower (Fire),Ｆ１ポータブル炎熱攻撃機〔火炎〕,0.8,0,1,1,0
+1214,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon310,B2X Portable Bomber (Bomber),Ｂ２Ｘポータブル爆撃機〔爆撃〕,0.7,0,1,1,0
+1215,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon311,G4W Portable Attack Aircraft (Machine Gun),Ｇ４Ｗポータブル攻撃機〔機関砲〕,0.9,0,1,1,0
+1216,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon312,R2+ Portable Attack Aircraft (Rapid-Fire),Ｒ２＋ポータブル攻撃機〔速射砲〕,1.2,0,1,1,0
+1217,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon313,G3α Portable Attack Aircraft (Machine Gun),Ｇ３αポータブル攻撃機〔機関砲〕,1.4,0,1,1,0
+1218,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon314,B1α Portable Bomber (Bomber),Ｂ１αポータブル爆撃機〔爆撃〕,1.6,0,1,1,0
+1219,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon315,G4H Portable Attack Aircraft (Machine Gun),Ｇ４Ｈポータブル攻撃機〔機関砲〕,1.8,0,1,1,0
+1220,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon316,G3β Portable Attack Aircraft (Machine Gun),Ｇ３βポータブル攻撃機〔機関砲〕,2.1,0,1,1,0
+1221,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon317,B2V Portable Bomber (Bomber),Ｂ２Ｖポータブル爆撃機〔爆撃〕,2.2,0,1,1,0
+1222,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon318,F1+ Portable Flamethrower (Fire),Ｆ１＋ポータブル炎熱攻撃機〔火炎〕,2.35,0,1,1,0
+1223,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon319,G8W Portable Low-Speed Strafer (Machine Gun),Ｇ８Ｗポータブル低速掃射編隊〔機関砲〕,2.5,0,1,1,0
+1224,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon320,R2α Portable Attack Aircraft (Rapid-Fire),Ｒ２αポータブル攻撃機〔速射砲〕,2.7,0,1,1,0
+1225,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon321,G8U Portable Low-Speed Strafer (Machine Gun),Ｇ８Ｕポータブル低速掃射編隊〔機関砲〕,3.1,0,1,1,0
+1226,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon322,F1α Portable Flamethrower (Fire),Ｆ１αポータブル炎熱攻撃機〔火炎〕,3.2,0,1,1,0
+1227,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon323,R2β Portable Attack Aircraft (Rapid-Fire),Ｒ２βポータブル攻撃機〔速射砲〕,3.3,0,1,1,0
+1228,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon324,B1β Portable Bomber (Bomber),Ｂ１βポータブル爆撃機〔爆撃〕,3.4,0,1,1,0
+1229,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,eWeapon325,G4γ Portable Attack Aircraft (Machine Gun),Ｇ４γポータブル攻撃機〔機関砲〕,3.5,0,1,1,0
+1230,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eDrone_suicider01,Killer Copter 4,キラーコプター４,0.05,0,1,1,0
+1231,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon326,Magnum Copter 8,マグナムコプター８,0.15,0,1,1,0
+1232,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon327,Gigantocopter 2,ギガントコプター２,0.3,0,1,1,0
+1233,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon328,Killer Copter 4+,キラーコプター４＋,0.5,0,1,1,0
+1234,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon329,Magnum Copter 10,マグナムコプター１０,0.75,0,1,1,0
+1235,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon330,Gigantocopter 2+,ギガントコプター２＋,0.85,0,1,1,0
+1236,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon331,Magnum Copter 12,マグナムコプター１２,0.95,0,1,1,0
+1237,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon332,Killer Copter 4α,キラーコプター４α,1.04,0,1,1,0
+1238,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon333,Gigantocopter 2α,ギガントコプター２α,1.3,0,1,1,0
+1239,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon334,Magnum Copter 16,マグナムコプター１６,1.6,0,1,1,0
+1240,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon335,Gigantocopter 3,ギガントコプター３,2.3,0,1,1,0
+1241,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon336,Magnum Copter 12+,マグナムコプター１２＋,2.7,0,1,1,0
+1242,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon337,Killer Copter 6,キラーコプター６,3.1,0,1,1,0
+1243,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon338,Magnum Copter 24,マグナムコプター２４,3.2,0,1,1,0
+1244,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,eWeapon339,Gigantocopter 3γ,ギガントコプター３γ,3.3,0,1,1,0
+1245,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eDrone_exposure01,Beam Carrier M1 (Beam Cannon),ビームキャリアＭ１〔ビーム砲〕,0.1,0,1,1,0
+1246,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon340,Electron Copter M1 (Shock),エレクトロン コプターＭ１〔放電〕,0.3,0,1,1,0
+1247,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon341,Beam Carrier M2L (Beam Cannon),ビームキャリアＭ２Ｌ〔ビーム砲〕,0.6,0,1,1,0
+1248,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon342,Death Bird M1 (Gas),デスバードＭ１〔腐食ガス〕,0.75,0,1,1,0
+1249,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon343,Electron Copter M2 (Shock),エレクトロン コプターＭ２〔放電〕,0.8,0,1,1,0
+1250,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon344,Beam Carrier M3 (Beam Cannon),ビームキャリアＭ３〔ビーム砲〕,0.9,0,1,1,0
+1251,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon345,Beam Carrier M4 (Beam Cannon),ビームキャリアＭ４〔ビーム砲〕,1.2,0,1,1,0
+1252,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon346,Electron Copter M3 (Shock),エレクトロン コプターＭ３〔放電〕,1.4,0,1,1,0
+1253,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon347,Death Bird M2 (Gas),デスバードＭ２〔腐食ガス〕,1.6,0,1,1,0
+1254,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon348,Beam Carrier M5L (Beam Cannon),ビームキャリアＭ５Ｌ〔ビーム砲〕,1.8,0,1,1,0
+1255,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon349,Electron Copter M4 (Shock),エレクトロン コプターＭ４〔放電〕,2.1,0,1,1,0
+1256,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon350,Beam Carrier M6 (Beam Cannon),ビームキャリアＭ６〔ビーム砲〕,2.2,0,1,1,0
+1257,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon351,Death Bird M3 (Gas),デスバードＭ３〔腐食ガス〕,2.5,0,1,1,0
+1258,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon352,Beam Carrier M7 (Beam Cannon),ビームキャリアＭ７〔ビーム砲〕,2.7,0,1,1,0
+1259,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon353,Electron Copter M5 (Shock),エレクトロン コプターＭ５〔放電〕,3.1,0,1,1,0
+1260,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon354,Beam Carrier M8L (Beam Cannon),ビームキャリアＭ８Ｌ〔ビーム砲〕,3.4,0,1,1,0
+1261,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,eWeapon355,Death Bird M4 (Gas),デスバードＭ４〔腐食ガス〕,3.6,0,1,1,0
+1262,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eVehicleNone,Not Equipped,装備しない,0.0,1,1,1,0
+1263,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon356,Powered Exoskeleton Nix A,コンバットフレーム ニクスＡ,0.1,0,1,0,0
+1264,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon357,Nix Grenadier,ニクス グレネーダー,0.2,0,1,0,0
+1265,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon358,Powered Exoskeleton Nix A2,コンバットフレーム ニクスＡ２,0.3,0,1,0,0
+1266,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon359,Nix Red Coat,ニクス レッドボディ,0.42,0,1,0,0
+1267,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon360,Powered Exoskeleton Nix B,コンバットフレーム ニクスＢ,0.65,0,1,0,0
+1268,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon361,Powered Exoskeleton Eiren,コンバットフレーム エイレン,0.75,0,1,0,0
+1269,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon362,Nix Battle Cannon,ニクス バトルキャノン,0.81,0,1,0,0
+1270,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon363,Powered Exoskeleton Nix C1,コンバットフレーム ニクスＣ１,1.1,0,1,0,0
+1271,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon364,Nix Missile Gun,ニクス ミサイルガン,1.4,0,1,0,0
+1272,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon365,Powered Exoskeleton Nix C2,コンバットフレーム ニクスＣ２,1.63,0,1,0,0
+1273,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon366,Nix Grenadier M2,ニクス グレネーダーＭ２,1.75,0,1,0,0
+1274,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon367,Powered Exoskeleton Eiren II,コンバットフレーム エイレンⅡ,1.75,0,1,0,0
+1275,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon368,Nix Red Shadow,ニクス レッドシャドゥ,1.8,0,1,0,0
+1276,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon369,Nix Buster Cannon,ニクス バスターキャノン,2.1,0,1,0,0
+1277,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon370,Powered Exoskeleton Nix C3,コンバットフレーム ニクスＣ３,2.3,0,1,0,0
+1278,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon371,Nix Revolver Custom,ニクス リボルバーカスタム,2.53,0,1,0,0
+1279,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon372,Nix Red Armor,ニクス レッドアーマー,2.75,0,1,0,0
+1280,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon373,Powered Exoskeleton Eiren III,コンバットフレーム エイレンⅢ,2.75,0,1,0,0
+1281,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon374,Nix Destroy Cannon,ニクス デストロイキャノン,3.01,0,1,0,0
+1282,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon375,Nix Red Guard,ニクス レッドガード,3.2,0,1,0,0
+1283,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon376,Nix Grenadier EZ,ニクス グレネーダーＥＺ,3.35,0,1,0,0
+1284,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon377,Powered Exoskeleton Nix ZC,コンバットフレーム ニクスＺＣ,3.5,0,1,0,0
+1285,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,eWeapon378,Powered Exoskeleton Eiren IV,コンバットフレーム エイレンⅣ,3.5,0,1,0,0
+1286,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,GroundRobo01,Depth Crawler I,デプスクロウラーⅠ,0.07,0,1,1,0
+1287,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon379,Depth Crawler Flame,デプスクロウラー フレイム,0.45,0,1,1,0
+1288,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon380,Depth Crawler II,デプスクロウラーⅡ,0.78,0,1,1,0
+1289,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon381,Depth Crawler Heavy Custom,デプスクロウラー ヘビーカスタム,1.25,0,1,1,0
+1290,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon382,Depth Crawler III,デプスクロウラーⅢ,1.85,0,1,1,0
+1291,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon383,Depth Crawler S Range Custom,デプスクロウラー Ｓレンジカスタム,2.12,0,1,1,0
+1292,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon384,Depth Crawler L Range Custom,デプスクロウラー Ｌレンジカスタム,2.68,0,1,1,0
+1293,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon385,Depth Crawler IV ,デプスクロウラーⅣ,3.1,0,1,1,0
+1294,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon386,Depth Crawler IV Custom,デプスクロウラーⅣカスタム,3.4,0,1,1,0
+1295,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon387,BMX10 Proteus,ＢＭＸ１０プロテウス,0.9,0,1,0,0
+1296,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon388,BMX10F Proteus,ＢＭＸ１０Ｆプロテウス,1.4,0,1,0,0
+1297,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon389,Gigantic Unloader Barga,ギガンティック·アンローダー バルガ,1.87,0,1,0,0
+1298,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon390,BMX10 Proteus Burst,ＢＭＸ１０プロテウスバースト,2.15,0,1,0,0
+1299,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon391,Gigantic Unloader Barga Type G,ギガンティック·アンローダー バルガＧ型,2.65,0,1,0,0
+1300,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon392,BMX10 Proteus Sigma,ＢＭＸ１０プロテウスシグマ,3.2,0,1,0,0
+1301,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,eWeapon393,War Barga,ウォーバルガ,3.5,0,1,0,0
+1302,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,eWeapon394,N9 Eros,Ｎ９エウロス,0.44,0,1,0,0
+1303,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,eWeapon395,N9 Eros Vulture,Ｎ９エウロス·バルチャー,0.88,0,1,0,0
+1304,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,eWeapon396,N9 Eros Blaze,Ｎ９エウロス·ブレイズ,1.5,0,1,0,0
+1305,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,eWeapon397,N9 Eros Vulture D,Ｎ９エウロス·バルチャーＤ,2.73,0,1,0,0
+1306,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,eWeapon398,N9 Eros Vulture ZA,Ｎ９エウロス·バルチャーＺＡ,3.16,0,1,0,0
+1307,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,eWeapon399,N9 Eros Σ,Ｎ９エウロスΣ,3.42,0,1,0,0
+1308,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eVehicle_Striker01,Armored Vehicle Grape,武装装甲車両グレイプ,0.11,0,1,0,0
+1309,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon400,Caliban Armored Vehicle,キャリバン装甲救護車両,0.24,0,1,0,0
+1310,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon401,Naegling Self-Propelled Missile Launcher,ネグリング自走ミサイル,0.27,0,1,0,0
+1311,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon402,Armored Vehicle Grape M2,武装装甲車両グレイプＭ２,0.35,0,1,0,0
+1312,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon403,Armored Vehicle Grape AP1,武装装甲車両グレイプＡＰ１,0.66,0,1,0,0
+1313,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon404,Caliban Armored Vehicle CS,キャリバン装甲救護車両ＣＳ,0.725,0,1,0,0
+1314,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon405,Naegling Self-Propelled Missile Launcher XM,ネグリング自走ミサイルＸＭ,0.85,0,1,0,0
+1315,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon406,Armored Vehicle Grape M3,武装装甲車両グレイプＭ３,1.3,0,1,0,0
+1316,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon407,Armored Vehicle Grape RA,武装装甲車両グレイプＲＡ,1.5,0,1,0,0
+1317,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon408,Caliban Armored Vehicle M2,キャリバン装甲救護車両Ｍ２,1.57,0,1,0,0
+1318,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon409,Naegling Self-Propelled Missile Launcher D1,ネグリング自走ミサイルＤ１,1.75,0,1,0,0
+1319,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon410,Armored Vehicle Grape AP2,武装装甲車両グレイプＡＰ２,2.01,0,1,0,0
+1320,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon411,Caliban Armored Vehicle Turbo,キャリバン装甲救護車両ターボ,2.35,0,1,0,0
+1321,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon412,Naegling Self-Propelled Missile Launcher D2,ネグリング自走ミサイルＤ２,2.6,0,1,0,0
+1322,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon413,Armored Vehicle Grape M9,武装装甲車両グレイプＭ９,2.65,0,1,0,0
+1323,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon414,Caliban Armored Vehicle M3,キャリバン装甲救護車両Ｍ３,2.9,0,1,0,0
+1324,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon415,Caliban Armored Vehicle S Turbo,キャリバン装甲救護車両Ｓターボ,3.07,0,1,0,0
+1325,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon416,Armored Vehicle Grape RZ,武装装甲車両グレイプＲＺ,3.1,0,1,0,0
+1326,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,eWeapon417,Naegling Self-Propelled Missile Launcher XEM,ネグリング自走ミサイルＸＥＭ,3.23,0,1,0,0
+1327,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon418,Blacker E1,ブラッカーＥ１,0.24,0,1,0,0
+1328,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon419,Blacker A1,ブラッカーＡ１,0.28,0,1,0,0
+1329,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon420,B651 Titan,Ｂ６５１タイタン,0.48,0,1,0,0
+1330,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon421,Blacker E2,ブラッカーＥ２,0.64,0,1,0,0
+1331,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon422,Blacker A2,ブラッカーＡ２,0.7,0,1,0,0
+1332,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon423,Melt Buster,メルトバスター,0.74,0,1,0,0
+1333,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon424,Blacker SPC,ブラッカーＳＰＣ,0.96,0,1,0,0
+1334,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon425,Blacker E2D,ブラッカーＥ２Ｄ,1.02,0,1,0,0
+1335,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon426,B651 Titan M2,Ｂ６５１タイタンＭ２,1.3,0,1,0,0
+1336,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon427,Blacker A2D,ブラッカーＡ２Ｄ,1.6,0,1,0,0
+1337,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon428,Blacker E3,ブラッカーＥ３,1.92,0,1,0,0
+1338,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon429,Blacker SPS,ブラッカーＳＰＳ,2.15,0,1,0,0
+1339,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon430,Blacker A3,ブラッカーＡ３,2.35,0,1,0,0
+1340,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon431,Blacker E3G1,ブラッカーＥ３Ｇ１,2.51,0,1,0,0
+1341,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon432,Blacker E3G2,ブラッカーＥ３Ｇ２,2.86,0,1,0,0
+1342,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon433,Blacker E4,ブラッカーＥ４,3.12,0,1,0,0
+1343,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon434,B651 Titan M3,Ｂ６５１タイタンＭ３,3.35,0,1,0,0
+1344,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon435,Blacker A9,ブラッカーＡ９,3.45,0,1,0,0
+1345,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,eWeapon436,Blacker E9,ブラッカーＥ９,3.5,0,1,0,0
+1346,0,Ranger,22,Weapon_SupportPlaceGun,2,DLC_holo_decoy_ayame,Recruiter (Ayame Nakiri),リクルーター〔百鬼あやめ〕,0.3201,3,1,1,0
+1347,0,Ranger,22,Weapon_SupportPlaceGun,2,DLC_holo_decoy_mio,Recruiter (Mio Ookami),リクルーター〔大神ミオ〕,0.3202,3,1,1,0
+1348,0,Ranger,22,Weapon_SupportPlaceGun,2,DLC_holo_decoy_fubuki,Recruiter (Fubuki Shirakami),リクルーター〔白上フブキ〕,0.32,3,1,1,0
+1349,0,Ranger,10,Weapon_Ranger_Vehicle3,3,DLC_Vehicle_Bike_edf6benefits,Freed No. 6,フリージャー ナンバー６,0.5,3,1,1,0
+1350,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,DLC_Vehicle_heli_edf6benefits,Eros No. 6,エウロス ナンバー６,0.25,3,1,0,0
+1351,0,Ranger,8,Weapon_Ranger_Vehicle1,3,DLC_Vehicle_v505_tank_edf6benefits,Blacker No. 6,ブラッカー ナンバー６,0.24,3,1,0,0
+1352,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,DLC_Vehicle_V402_Rocket_edf6benefits,Naegling No. 6,ネグリング ナンバー６,0.24,3,1,0,0
+1353,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,DLC_Vehicle_v504_begaruta_gold,Powered Exoskeleton Nix Metal Coat,コンバットフレーム ニクス メタルコート,0.1,3,1,0,0
+1354,0,Ranger,2,Weapon_SniperRifle,0|1,DLC_a_brokenFang,Broken MR98 Fang,ＭＲ９８ファング Broken,0.15,3,1,1,0
+1355,0,Ranger,23,Weapon_SupportGrenade2,2,DLC_a_GasGrenade_proto,A60 Binary Round,Ａ６０バイナリー弾,0.1,3,1,1,0
+1356,0,Ranger,23,Weapon_SupportGrenade2,2,DLC_a_ArearReverserProto,Aerial Reverser M0,エリアルリバーサーＭ０,0.1,3,1,1,0
+1357,1,WingDiver,111,Weapon_Pale_SupportShort,2,DLC_p_saber,Handy Saber Type 0,ハンディセイバー タイプ０,0.0,3,1,1,0
+1358,1,WingDiver,120,Weapon_Pale_EnergyCore,3,DLC_p_ReverseCoreS,Reverse Core N,リバースコアＮ型,0.3,3,1,1,0
+1359,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,DLC_h_impact_dakimakura_onee01,Disguised Body Pillow,偽装抱き枕,0.0,3,1,1,0
+1360,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,DLC_h_Katana01,Power Blade Zero,電刃刀 零式,0.02,3,1,1,0
+1361,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,DLC_h_ProtoReflector,Proto Reflector,プロト·リフレクター,0.2,3,1,1,0
+1362,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,DLC_h_ShootingSkelton,Gunner's Exoskeleton,ガンナーズ スケルトン,0.25,3,1,1,0
+1363,0,Ranger,0,Weapon_AssaultRifle,0|1,add001,Omega Blazer,オメガ ブレイザー,2.74,0,1,1,0
+1364,0,Ranger,0,Weapon_AssaultRifle,0|1,add002,EXA Blazer,ＥＸＡブレイザー,3.8,0,1,1,0
+1365,0,Ranger,1,Weapon_Shotgun,0|1,add003,Destruction Blazer,デストラクション ブレイザー,1.8,0,1,1,0
+1366,0,Ranger,1,Weapon_Shotgun,0|1,add004,Destruction Blazer G,デストラクション ブレイザーＧ,3.6,0,1,1,0
+1367,2,AirRaider,331,Weapon_Engineer_SupportBomb,3,add005,Insect Bomb SG15,インセクトボムＳＧ１５,3.42,0,1,1,0
+1368,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,add006,Cosmic Hammer,コズミック·ハンマー,3.5,0,1,1,0
+1369,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,add007,Blasthole Spear MSXE,ブラストホール·スピアＭＳＸＥ,3.6,0,1,1,0
+1370,0,Ranger,23,Weapon_SupportGrenade2,2,add008,Aerial Reverser M2,エリアル リバーサーＭ２,0.45,0,1,1,0
+1371,0,Ranger,0,Weapon_AssaultRifle,0|1,dayone001,X900-Orchid,Ｘ９００－オーキッド,3.2,0,1,1,0
+1372,0,Ranger,2,Weapon_SniperRifle,0|1,dayone002,MR100 Fang,ＭＲ１００ファング,2.77,0,1,1,0
+1373,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,dayone003,EXA Force Blade,ＥＸＡフォースブレード,3.32,0,1,1,0
+1374,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,dayone004,EXA Vulcan Hammer,ＥＸＡボルケーン·ハンマー,3.2,0,1,1,0
+1375,0,Ranger,0,Weapon_AssaultRifle,0|1,MPACK_A_Weapon001,MA9E Slade,ＭＡ９Ｅスレイド,4.05,0,3,1,1
+1376,0,Ranger,0,Weapon_AssaultRifle,0|1,MPACK_A_Weapon002,Slugger NN5,スラッガーＮＮ５,4.2,0,3,1,1
+1377,0,Ranger,1,Weapon_Shotgun,0|1,MPACK_A_Weapon003,Buster Shot,バスターショット,4.15,0,3,1,1
+1378,0,Ranger,1,Weapon_Shotgun,0|1,MPACK_A_Weapon004,SGN-DAT,ＳＧＮ－ＤＡＴ,4.01,0,3,1,1
+1379,0,Ranger,1,Weapon_Shotgun,0|1,MPACK_A_Weapon005,Slugger Shot Z7,スラッグショットＺ７,4.2,0,3,1,1
+1380,0,Ranger,2,Weapon_SniperRifle,0|1,MPACK_A_Weapon006,Dunkel N236R,ドゥンケルＮ２３６Ｒ,4.05,0,3,1,1
+1381,0,Ranger,2,Weapon_SniperRifle,0|1,MPACK_A_Weapon007,Planet Sniper Cannon,プラネット·スナイパーカノン,4.2,0,3,1,1
+1382,0,Ranger,3,Weapon_RocketLauncher,0|1,MPACK_A_Weapon008,Goliath ZDMY,ゴリアスＺＤＭＹ,4.1,0,3,1,1
+1383,0,Ranger,3,Weapon_RocketLauncher,0|1,MPACK_A_Weapon009,Dead Volcano,デッド·ボルケーノ,4.24,0,3,1,1
+1384,0,Ranger,5,Weapon_Grenade,0|1,MPACK_A_Weapon010,Flame Geyser F,フレイム·ガイザーＦ,4.25,0,3,1,1
+1385,0,Ranger,20,Weapon_SupportGrenade,2,MPACK_A_Weapon011,MG60,ＭＧ６０,4.07,0,3,1,1
+1386,0,Ranger,23,Weapon_SupportGrenade2,2,MPACK_A_Weapon012,A81 Binary Round,Ａ８１バイナリー弾,4.2,0,3,1,1
+1387,0,Ranger,21,Weapon_SupportPlaceBomb,2,MPACK_A_Weapon013,YDX-F Anti- Aircraft Impulse,ＹＤＸ－Ｆ対空インパルス,4.01,0,3,1,1
+1388,0,Ranger,22,Weapon_SupportPlaceGun,2,MPACK_A_Weapon014,ZEX Rapid Launcher,ＺＥＸラピッドランチャー,4.2,0,3,1,1
+1389,0,Ranger,7,Weapon_Support1,3,MPACK_A_Weapon015,Lightweight Liquid Armor E9,軽量リキッドアーマーＥ９,4.25,0,3,1,1
+1390,0,Ranger,8,Weapon_Ranger_Vehicle1,3,MPACK_A_Weapon016,KG6 Kepler YF-HV,ＫＧ６ケブラーＹＦ－ＨＶ,4.12,0,3,0,1
+1391,0,Ranger,8,Weapon_Ranger_Vehicle1,3,MPACK_A_Weapon017,Varius TZ4,バリアスＴＺ４,4.24,0,3,0,1
+1392,1,WingDiver,100,Weapon_Pale_Short,0|1,MPACK_A_Weapon018,Rapier Supernova,レイピア·スーパーノヴァ,4.05,0,3,1,1
+1393,1,WingDiver,100,Weapon_Pale_Short,0|1,MPACK_A_Weapon019,Spark Whip ZAM,スパークウィップＺＡＭ,4.0,0,3,1,1
+1394,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,MPACK_A_Weapon020,Mag Blaster FDX,マグ·ブラスターＦＤＸ,4.15,0,3,1,1
+1395,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,MPACK_A_Weapon021,Reflectron 3-Way Blaster,３ＷＡＹリフレクトロン·ブラスター,4.23,0,3,1,1
+1396,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,MPACK_A_Weapon022,Stardust Fall,スターダスト·フォール,4.2,0,3,1,1
+1397,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,MPACK_A_Weapon023,Lightning Bow ZAMD,ライトニング·ボウＺＡＭＤ,4.1,0,3,1,1
+1398,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,MPACK_A_Weapon024,Thunder Crossbow RZ-W,サンダーボウガンＲＺ－Ｗ,4.2,0,3,1,1
+1399,1,WingDiver,104,Weapon_Pale_Long,0|1,MPACK_A_Weapon025,Closed Laser Delta,クローズレーザー·デルタ,4.05,0,3,1,1
+1400,1,WingDiver,104,Weapon_Pale_Long,0|1,MPACK_A_Weapon026,Monster GZX,ＭＯＮＳＴＥＲ ＧＺＸ,4.2,0,3,1,1
+1401,1,WingDiver,106,Weapon_Pale_Homing,0|1,MPACK_A_Weapon027,Mirage 5-Way Z,ミラージュ５ＷＡＹ－Ｚ,4.05,0,3,1,1
+1402,1,WingDiver,106,Weapon_Pale_Homing,0|1,MPACK_A_Weapon028,Geist G,ガイストＧ,4.25,0,3,1,1
+1403,1,WingDiver,105,Weapon_Pale_Explosive,0|1,MPACK_A_Weapon029,Plasma Cannon G,プラズマ·キャノンＧ型,4.1,0,3,1,1
+1404,1,WingDiver,105,Weapon_Pale_Explosive,0|1,MPACK_A_Weapon030,Plasma Big Cannon M4,プラズマ·ビッグキャノンＭ４,4.2,0,3,1,1
+1405,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,MPACK_A_Weapon031,Split Ball ZT,スプリット·ボールＺＴ,4.05,0,3,1,1
+1406,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,MPACK_A_Weapon032,Hyper Blink Ball,ハイパー·ブリンクボール,4.2,0,3,1,1
+1407,1,WingDiver,111,Weapon_Pale_SupportShort,2,MPACK_A_Weapon033,Planet Saber,プラネット·セイバー,4.01,0,3,1,1
+1408,1,WingDiver,115,Weapon_Pale_SupportHorming,2,MPACK_A_Weapon034,Guided Grenade 4D,誘導グレネード４Ｄ,4.15,0,3,1,1
+1409,1,WingDiver,112,Weapon_Pale_SupportTrap,2,MPACK_A_Weapon035,Electromagnetic Shaft 2L〔←－－→〕,電磁シャフト２Ｌ〔←－－→〕,4.2,0,3,1,1
+1410,1,WingDiver,116,Weapon_Pale_SupportCannon,2,MPACK_A_Weapon036,Glow Spear Twin,グロースピア·ツイン,4.15,0,3,1,1
+1411,1,WingDiver,120,Weapon_Pale_EnergyCore,3,MPACK_A_Weapon037,Loading Core G,ローディングコアＧ型,4.0,0,3,1,1
+1412,1,WingDiver,120,Weapon_Pale_EnergyCore,3,MPACK_A_Weapon038,VG Rush Core,ＶＧラッシュコア,4.25,0,3,1,1
+1413,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,MPACK_A_Weapon039,Force Blade MAXE,フォース·ブレードＭＡＸＥ,4.0,0,3,1,1
+1414,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_A_Weapon040,Jackhammer MBF,ジャックハンマーＭＢＦ,4.1,0,3,1,1
+1415,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_A_Weapon041,Blast Twin Spears M5,ブラスト·ツインスピアＭ５,4.05,0,3,1,1
+1416,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_A_Weapon042,Power Blade Omega,電刃刀 終式,4.15,0,3,1,1
+1417,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_A_Weapon043,Flashing Spear MW6,フラッシング·スピアＭＷ６,4.23,0,3,1,1
+1418,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,MPACK_A_Weapon044,Dexter Automatic Shotgun ZGXE,デクスター自動散弾銃ＺＧＸＥ,4.17,0,3,1,1
+1419,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,MPACK_A_Weapon045,Red Blast Gatling,レッドブラスト·ガトリング,4.02,0,3,1,1
+1420,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,MPACK_A_Weapon046,Galleon No-Recoil Machine Gun,ガリオン無反動機関砲,4.12,0,3,1,1
+1421,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,MPACK_A_Weapon047,38mm Rage Cannon,３８ミリ レイジキャノン砲,4.025,0,3,1,1
+1422,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,MPACK_A_Weapon048,NC300 Hand Cannon,ＮＣ３００ハンドキャノン,4.1,0,3,1,1
+1423,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,MPACK_A_Weapon049,Planet Cannon,プラネット·キャノン,4.2,0,3,1,1
+1424,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,MPACK_A_Weapon050,FH29RE Mortar,ＦＨ２９ＲＥ迫撃砲,4.05,0,3,1,1
+1425,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,MPACK_A_Weapon051,M4 Blood Storm,Ｍ４ブラッドストーム,4.0,0,3,1,1
+1426,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,MPACK_A_Weapon052,Perfect Reflector,パーフェクト·リフレクター,4.1,0,3,1,1
+1427,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,MPACK_A_Weapon053,Perfect Shield,パーフェクト·シールド,4.2,0,3,1,1
+1428,3,Fencer,207,Weapon_Heavy_Support_Shield,4|5,MPACK_A_Weapon054,Deflect Cell AXE,ディフレクト·セルＡＸＥ,4.25,0,3,1,1
+1429,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,MPACK_A_Weapon055,Battle Exoskeleton,バトル·スケルトン,4.05,0,3,1,1
+1430,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,MPACK_A_Weapon056,Gale Exoskeleton,ゲイル·スケルトン,4.15,0,3,1,1
+1431,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,MPACK_A_Weapon057,B10R Mortar,Ｂ１０Ｒ迫撃砲,4.0,0,3,0,1
+1432,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,MPACK_A_Weapon058,Heavy Bomber Phobos J Cluster Round,重爆撃機フォボス Ｊクラスター弾,4.1,0,3,0,1
+1433,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,MPACK_A_Weapon059,Lionic UA45XF,ライオニックＵＡ４５ＸＦ,4.2,0,3,0,1
+1434,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,MPACK_A_Weapon060,Spritefall Super Destroy,スプライトフォール スーパーデストロイ,4.25,0,3,0,1
+1435,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,MPACK_A_Weapon061,Heavy Armed Multicopter MHF (Mortars),重武装マルチコプターＭＨＦ〔迫撃砲〕,4.01,0,3,1,1
+1436,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,MPACK_A_Weapon062,N1γ Silent Copter (Sniper),Ｎ１γサイレントコプター〔狙撃銃〕,4.15,0,3,1,1
+1437,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,MPACK_A_Weapon063,H2α Metal Shot Copter (Iron Shot),Ｈ２αメタルショットコプター〔鉄塊弾〕,4.1,0,3,1,1
+1438,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,MPACK_A_Weapon064,F1β Portable Flamethrower (Fire),Ｆ１βポータブル炎熱高速攻撃機〔火炎〕,4.07,0,3,1,1
+1439,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,MPACK_A_Weapon065,B1γ Portable Bomber (Bomber),Ｂ１γポータブル爆撃機〔爆撃〕,4.25,0,3,1,1
+1440,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,MPACK_A_Weapon066,Killer Attack Copter,キラーアタックコプター,4.06,0,3,1,1
+1441,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,MPACK_A_Weapon067,Planet Beam Carrier,プラネットビームキャリア,4.14,0,3,1,1
+1442,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,MPACK_A_Weapon068,Planet Death Bird,プラネットデスバード,4.24,0,3,1,1
+1443,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,MPACK_A_Weapon069,Tracer Capsule A12α,追走･カプセル Ａ１２α,4.1,0,3,1,1
+1444,2,AirRaider,334,Weapon_Engineer_CounterDrone,3,MPACK_A_Weapon070,Assault Aircraft Z4,強襲エアクラフトＺ４,4.2,0,3,1,1
+1445,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,MPACK_A_Weapon071,Caliban Armored Vehicle SA Turbo,キャリバン装甲救護車両ＳＡターボ,4.05,0,3,0,1
+1446,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,MPACK_A_Weapon072,Blacker E10,ブラッカーＥ１０,4.25,0,3,0,1
+1447,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,MPACK_A_Weapon073,Powered Titan,パワード·タイタン,4.1,0,3,0,1
+1448,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,MPACK_A_Weapon074,Depth Crawler V,デプスクロウラーⅤ,4.15,0,3,1,1
+1449,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,MPACK_A_Weapon075,Powered Exoskeleton Gravis,コンバットフレーム グラビス,4.0,0,3,0,1
+1450,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,MPACK_A_Weapon076,Saber Eiren,セイバー·エイレン,4.25,0,3,0,1
+1451,0,Ranger,0,Weapon_AssaultRifle,0|1,MPACK_B_Weapon001,MA10E Slade,ＭＡ１０Ｅスレイド,4.3,0,3,1,2
+1452,0,Ranger,0,Weapon_AssaultRifle,0|1,MPACK_B_Weapon002,M9 Raven,Ｍ９レイヴン,4.37,0,3,1,2
+1453,0,Ranger,0,Weapon_AssaultRifle,0|1,MPACK_B_Weapon003,Planet Blazer,プラネット·ブレイザー,4.5,0,3,1,2
+1454,0,Ranger,6,Weapon_Special,0|1,MPACK_B_Weapon004,Flamethrower Omega,火炎放射器オメガ,4.28,0,3,1,2
+1455,0,Ranger,1,Weapon_Shotgun,0|1,MPACK_B_Weapon005,Fracture,フラクチャー,4.251,0,3,1,2
+1456,0,Ranger,1,Weapon_Shotgun,0|1,MPACK_B_Weapon006,Burst Blazer,バースト·ブレイザー,4.5,0,3,1,2
+1457,0,Ranger,2,Weapon_SniperRifle,0|1,MPACK_B_Weapon007,KFF 71S,ＫＦＦ７１Ｓ,4.26,0,3,1,2
+1458,0,Ranger,2,Weapon_SniperRifle,0|1,MPACK_B_Weapon008,Lysander ZF,ライサンダーＺＦ,4.35,0,3,1,2
+1459,0,Ranger,2,Weapon_SniperRifle,0|1,MPACK_B_Weapon009,Planet Super Cannon,プラネット·スーパーカノン,4.5,0,3,1,2
+1460,0,Ranger,3,Weapon_RocketLauncher,0|1,MPACK_B_Weapon010,E21 Hornet,Ｅ２１ホーネット,4.3,0,3,1,2
+1461,0,Ranger,3,Weapon_RocketLauncher,0|1,MPACK_B_Weapon011,Grant MTZ,グラントＭＴＺ,4.5,0,3,1,2
+1462,0,Ranger,5,Weapon_Grenade,0|1,MPACK_B_Weapon012,Grenade Launcher UMFF-J,グレネードランチャーＵＭＦＦ－Ｊ,4.3,0,3,1,2
+1463,0,Ranger,5,Weapon_Grenade,0|1,MPACK_B_Weapon013,Stampede XAM,スタンピードＸＡＭ,4.4,0,3,1,2
+1464,0,Ranger,4,Weapon_MissleLauncher,0|1,MPACK_B_Weapon014,MS Falcon,ＭＳファルコン,4.3,0,3,1,2
+1465,0,Ranger,4,Weapon_MissleLauncher,0|1,MPACK_B_Weapon015,FORK-Z20,ＦＯＲＫ－Ｚ２０,4.5,0,3,1,2
+1466,0,Ranger,6,Weapon_Special,0|1,MPACK_B_Weapon016,Extreme Acid Gun,エクストリーム·アシッドガン,4.7,0,3,1,2
+1467,0,Ranger,23,Weapon_SupportGrenade2,2,MPACK_B_Weapon017,High-Metathermite Round,ハイメタ テルミット弾,4.3,0,3,1,2
+1468,0,Ranger,23,Weapon_SupportGrenade2,2,MPACK_B_Weapon018,Aerial Reverser MX,エリアル リバーサーＭＸ,4.4,0,3,1,2
+1469,0,Ranger,22,Weapon_SupportPlaceGun,2,MPACK_B_Weapon019,ZE Sniper S,ＺＥスナイパーＳ,4.27,0,3,1,2
+1470,0,Ranger,22,Weapon_SupportPlaceGun,2,MPACK_B_Weapon020,ZE Blaster,ＺＥブラスター,4.45,0,3,1,2
+1471,0,Ranger,20,Weapon_SupportGrenade,2,MPACK_B_Weapon021,Firecracker 1001,千一号弾,4.6,0,3,1,2
+1472,0,Ranger,21,Weapon_SupportPlaceBomb,2,MPACK_B_Weapon022,YA22 Impulse,ＹＡ２２インパルス,4.35,0,3,1,2
+1473,0,Ranger,7,Weapon_Support1,3,MPACK_B_Weapon023,Special First-Aid Kit,特型救護装置,4.251,0,3,1,2
+1474,0,Ranger,7,Weapon_Support1,3,MPACK_B_Weapon024,Hybrid Protector XE,ハイブリッドプロテクターＸＥ,4.29,0,3,1,2
+1475,0,Ranger,8,Weapon_Ranger_Vehicle1,3,MPACK_B_Weapon025,KG7 Volus,ＫＧ７ボルス,4.28,0,3,0,2
+1476,0,Ranger,8,Weapon_Ranger_Vehicle1,3,MPACK_B_Weapon026,Varius TZ4-R,バリアスＴＺ４－Ｒ,4.35,0,3,0,2
+1477,0,Ranger,8,Weapon_Ranger_Vehicle1,3,MPACK_B_Weapon027,Nu Epsilon Self-Propelled Railgun,Ｎｕイプシロン自走レールガン,4.45,0,3,0,2
+1478,0,Ranger,8,Weapon_Ranger_Vehicle1,3,MPACK_B_Weapon028,KG7 Volus B,ＫＧ７ボルスＢ,4.48,0,3,0,2
+1479,0,Ranger,8,Weapon_Ranger_Vehicle1,3,MPACK_B_Weapon029,Varius TZ4-S,バリアスＴＺ４－Ｓ,4.65,0,3,0,2
+1480,1,WingDiver,100,Weapon_Pale_Short,0|1,MPACK_B_Weapon030,Phalanx ZAT,ファランクスＺＡＴ,4.26,0,3,1,2
+1481,1,WingDiver,100,Weapon_Pale_Short,0|1,MPACK_B_Weapon031,Power Lance Z-EXT,パワーランスＺ－ＥＸＴ,4.35,0,3,1,2
+1482,1,WingDiver,100,Weapon_Pale_Short,0|1,MPACK_B_Weapon032,Dragoon Lance Z-EXT,ドラグーンランスＺ－ＥＸＴ,4.45,0,3,1,2
+1483,1,WingDiver,100,Weapon_Pale_Short,0|1,MPACK_B_Weapon033,Monster Lance,モンスターランス,4.6,0,3,1,2
+1484,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,MPACK_B_Weapon034,Spine Blaster ZAM4,スパイン·ブラスターＺＡＭ４,4.251,0,3,1,2
+1485,1,WingDiver,101,Weapon_Pale_MiddleLaser,0|1,MPACK_B_Weapon035,Maximum Mag Blaster,マキシマム·マグブラスター,4.5,0,3,1,2
+1486,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,MPACK_B_Weapon036,High-Pulse Machine Gun,ハイパルス·マシンガン,4.3,0,3,1,2
+1487,1,WingDiver,103,Weapon_Pale_MiddleBeam,0|1,MPACK_B_Weapon037,8-Way High-Pulse Machine Gun,８ＷＡＹ ハイパルス·マシンガン,4.4,0,3,1,2
+1488,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,MPACK_B_Weapon038,Bolt Break Gun,ボルト·ブレイクガン,4.251,0,3,1,2
+1489,1,WingDiver,102,Weapon_Pale_MiddleThunder,0|1,MPACK_B_Weapon039,Thunder Crossbow RZAM,サンダーボウガンＲＺＡＭ,4.4,0,3,1,2
+1490,1,WingDiver,104,Weapon_Pale_Long,0|1,MPACK_B_Weapon040,Cosmic Laser,コズミック·レーザー,4.3,0,3,1,2
+1491,1,WingDiver,104,Weapon_Pale_Long,0|1,MPACK_B_Weapon041,Raijin Limit Custom,ライジン·リミットカスタム,4.45,0,3,1,2
+1492,1,WingDiver,104,Weapon_Pale_Long,0|1,MPACK_B_Weapon042,Cosmic Laser EXT,コズミック·レーザーＥＸＴ,4.6,0,3,1,2
+1493,1,WingDiver,106,Weapon_Pale_Homing,0|1,MPACK_B_Weapon043,Fenrir 5-Way,フェンリル５ＷＡＹ,4.43,0,3,1,2
+1494,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,MPACK_B_Weapon044,Starmine Z-EXT,スターマインＺ－ＥＸＴ,4.3,0,3,1,2
+1495,1,WingDiver,110,Weapon_Pale_SupportGrenade,2,MPACK_B_Weapon045,Extreme Blink Ball,エクストリーム·ブリンクボール,4.5,0,3,1,2
+1496,1,WingDiver,116,Weapon_Pale_SupportCannon,2,MPACK_B_Weapon046,Power Spear EX3,パワースピアＥＸ３,4.5,0,3,1,2
+1497,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,MPACK_B_Weapon047,Psi Blast Wall,サイブラスト·ウォール,4.3,0,3,1,2
+1498,1,WingDiver,111,Weapon_Pale_SupportShort,2,MPACK_B_Weapon048,Galactic Saber,ギャラクティック·セイバー,4.31,0,3,1,2
+1499,1,WingDiver,114,Weapon_Pale_SupportSpecial,2,MPACK_B_Weapon049,Volcanic Firecracker ZM,ヴォルケイニア·クラッカーＺＭ,4.45,0,3,1,2
+1500,1,WingDiver,112,Weapon_Pale_SupportTrap,2,MPACK_B_Weapon050,Electromagnetic Shaft 5L 〔←＼↑／→〕,電磁シャフト５Ｌ〔←＼↑／→〕,4.6,0,3,1,2
+1501,1,WingDiver,113,Weapon_Pale_SupportShield,2,MPACK_B_Weapon051,Luminous Shield ZR3,ルミナス･シールドＺＲ３,4.28,0,3,1,2
+1502,1,WingDiver,113,Weapon_Pale_SupportShield,2,MPACK_B_Weapon052,Harmonic Shield SX3,ハーモニック·シールドＳＸ３,4.43,0,3,1,2
+1503,1,WingDiver,120,Weapon_Pale_EnergyCore,3,MPACK_B_Weapon053,EXAM Bird Core,ＥＸＡＭバードコア,4.252,0,3,1,2
+1504,1,WingDiver,120,Weapon_Pale_EnergyCore,3,MPACK_B_Weapon054,Return Core G,リターンコアＧ,4.3,0,3,1,2
+1505,1,WingDiver,120,Weapon_Pale_EnergyCore,3,MPACK_B_Weapon055,Mighty Core,マイティコア,4.4,0,3,1,2
+1506,1,WingDiver,120,Weapon_Pale_EnergyCore,3,MPACK_B_Weapon056,EXAM Jet Core,ＥＸＡＭジェットコア,4.5,0,3,1,2
+1507,1,WingDiver,120,Weapon_Pale_EnergyCore,3,MPACK_B_Weapon057,EXAM Plasma Core,ＥＸＡＭプラズマコア,4.6,0,3,1,2
+1508,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,MPACK_B_Weapon058,Quake Haken ZDXE,クエイク·ハーケンＺＤＸＥ,4.251,0,3,1,2
+1509,3,Fencer,200,Weapon_Heavy_ShortHammer,0|1|2|3,MPACK_B_Weapon059,Finest Hammer XE,ファイネスト·ハンマーＸＥ,4.35,0,3,1,2
+1510,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_B_Weapon060,Blasthole Spear MSXX,ブラストホール·スピアＭＳＸＸ,4.4,0,3,1,2
+1511,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_B_Weapon061,Flashing Spear M7L,フラッシング·スピアＭ７Ｌ,4.35,0,3,1,2
+1512,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_B_Weapon062,Spine Driver 3-Attack,スパインドライバー ３アタック,4.6,0,3,1,2
+1513,3,Fencer,201,Weapon_Heavy_ShortPile,0|1|2|3,MPACK_B_Weapon063,Power Blade 8,電刃刀 八閃,4.5,0,3,1,2
+1514,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,MPACK_B_Weapon064,FGZF Hand Gatling,ＦＧＺＦハンドガトリング,4.35,0,3,1,2
+1515,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,MPACK_B_Weapon065,Dexter Automatic Shotgun ZGXX,デクスター自動散弾銃ＺＧＸＸ,4.4,0,3,1,2
+1516,3,Fencer,203,Weapon_Heavy_Middle,0|1|2|3,MPACK_B_Weapon066,Fire Blast Gatling,ファイアブラスト·ガトリング,4.5,0,3,1,2
+1517,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,MPACK_B_Weapon067,NCXE Cannon Shot,ＮＣＸＥキャノンショット,4.3,0,3,1,2
+1518,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,MPACK_B_Weapon068,FHEZZZ Super-Heavy Mortar,超重粉砕迫撃砲,4.4,0,3,1,2
+1519,3,Fencer,204,Weapon_Heavy_Cannon,0|1|2|3,MPACK_B_Weapon069,Planet Buster Cannon,プラネットバスター·キャノン,4.5,0,3,1,2
+1520,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,MPACK_B_Weapon070,High-Cycle Hound,ハイサイクル·ハウンド,4.28,0,3,1,2
+1521,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,MPACK_B_Weapon071,Lonely Phoenix,ロンリー フェニックス,4.32,0,3,1,2
+1522,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,MPACK_B_Weapon072,FGXR High Altitude Impact Launcher,ＦＧＸＲ高高度強襲ミサイル,4.45,0,3,1,2
+1523,3,Fencer,205,Weapon_Heavy_Homing,0|1|2|3,MPACK_B_Weapon073,Lone Leviathan,ローン リバイアサン,4.5,0,3,1,2
+1524,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,MPACK_B_Weapon074,Ion Mirror Shield WE,イオンミラー·シールドＷＥ,4.3,0,3,1,2
+1525,3,Fencer,202,Weapon_Heavy_Sheild,0|1|2|3,MPACK_B_Weapon075,Nu Tower Shield,Ｎｕタワーシールド,4.5,0,3,1,2
+1526,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,MPACK_B_Weapon076,Dash Cell G,ダッシュセルＧ,4.251,0,3,1,2
+1527,3,Fencer,206,Weapon_Heavy_Support_Booster,4|5,MPACK_B_Weapon077,Add Booster G,アドブースターＧ,4.3,0,3,1,2
+1528,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,MPACK_B_Weapon078,Bombard Exoskeleton,ボンバード·スケルトン,4.25,0,3,1,2
+1529,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,MPACK_B_Weapon079,Tiger Exoskeleton,タイガー·スケルトン,4.26,0,3,1,2
+1530,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,MPACK_B_Weapon080,Radar Exoskeleton,レーダー·スケルトン,4.35,0,3,1,2
+1531,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,MPACK_B_Weapon081,Rescue Exoskeleton,レスキュー·スケルトン,4.45,0,3,1,2
+1532,3,Fencer,209,Weapon_Heavy_Support_Actuater,4|5,MPACK_B_Weapon082,Tiger Exoskeleton 2,タイガー·スケルトン２,4.6,0,3,1,2
+1533,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,MPACK_B_Weapon083,T2HS Rocket Cannon,Ｔ２ＨＳロケット砲,4.35,0,3,0,2
+1534,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,MPACK_B_Weapon084,Combat Bomber KM6 Plan X18,戦闘爆撃機ＫＭ６ プランＸ１８,4.251,0,3,0,2
+1535,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,MPACK_B_Weapon085,Heavy Bomber Vesta E Plan X2,重爆撃機ウェスタＥ プランＸ２,4.4,0,3,0,2
+1536,2,AirRaider,303,Weapon_Engineer_Bomb,0|1|2,MPACK_B_Weapon086,Limpet Splendor ZAM,リムペット·スプレンダーＺＡＭ,4.3,0,3,1,2
+1537,2,AirRaider,302,Weapon_Engineer_Support,3,MPACK_B_Weapon087,Absolute DZ Bunker,アブソリュートＤＺトーチカ,4.5,0,3,1,2
+1538,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,MPACK_B_Weapon088,LR4 Light Armed Multicopter (Laser Gun),ＬＲ４軽武装マルチコプター〔レーザー銃〕,4.3,0,3,1,2
+1539,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,MPACK_B_Weapon089,E4 Stun Copter (Shock),Ｅ４スタンコプター〔電流〕,4.4,0,3,1,2
+1540,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,MPACK_B_Weapon090,T4 Delta Hammer Copter (Large Caliber),Ｔ４デルタ ハンマーコプター〔大型弾〕,4.5,0,3,1,2
+1541,2,AirRaider,311,Weapon_Engineer_Call_Gunship,0|1|2,MPACK_B_Weapon091,LA8 Armed Multicopter (Laser Gun),ＬＡ８武装マルチコプター〔レーザー銃〕,4.6,0,3,1,2
+1542,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,MPACK_B_Weapon092,G4 Delta Portable Attack Aircraft (Machine Gun),Ｇ４デルタ ポータブル攻撃機〔機関砲〕,4.27,0,3,1,2
+1543,2,AirRaider,312,Weapon_Engineer_Call_Attacker,0|1|2,MPACK_B_Weapon093,LG10U Portable Low-Speed Strafer (Laser Gun),ＬＧ１０Ｕポータブル低速掃射編隊〔レーザー銃〕,4.5,0,3,1,2
+1544,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,MPACK_B_Weapon094,Magnum Copter 24+,マグナムコプター２４＋,4.28,0,3,1,2
+1545,2,AirRaider,313,Weapon_Engineer_Call_Missile,0|1|2,MPACK_B_Weapon095,Gigantocopter 3 Delta,ギガントコプター３デルタ,4.3,0,3,1,2
+1546,2,AirRaider,314,Weapon_Engineer_Call_Satellite,0|1|2,MPACK_B_Weapon096,Electron Copter M6 (Shock),エレクトロン コプターＭ６〔放電〕,4.5,0,3,1,2
+1547,2,AirRaider,310,Weapon_Engineer_Call_Cannon,0|1|2,MPACK_B_Weapon097,Heavy Armed Multicopter EC (Shock Bomb),重武装マルチコプターＥＣ〔電磁爆雷〕,4.4,0,3,1,2
+1548,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,MPACK_B_Weapon098,Master Shooter Capsule A8S,マスター 射撃･カプセル Ａ８Ｓ,4.27,0,3,1,2
+1549,2,AirRaider,332,Weapon_Engineer_TraceDrone,3,MPACK_B_Weapon099,Master Tracer Capsule Z6S,マスター 追走･カプセル Ｚ６Ｓ,4.31,0,3,1,2
+1550,2,AirRaider,333,Weapon_Engineer_ShootingDrone,3,MPACK_B_Weapon100,Battle Array Capsule Z4,戦列･カプセル Ｚ４,4.48,0,3,1,2
+1551,2,AirRaider,330,Weapon_Engineer_SupportDrone,3,MPACK_B_Weapon101,Master Guard Capsule A5W,マスター 警護･カプセル Ａ５Ｗ,4.6,0,3,1,2
+1552,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,MPACK_B_Weapon102,Armored Vehicle Grape Early,武装装甲車両グレイプ アーリー,4.35,0,3,0,2
+1553,2,AirRaider,306,Weapon_Engineer_Vehicle1,4,MPACK_B_Weapon103,Blacker E11 Early,ブラッカーＥ１１アーリー,4.45,0,3,0,2
+1554,2,AirRaider,308,Weapon_Engineer_Vehicle3,4,MPACK_B_Weapon104,N9 Eros Vulture ZAM,Ｎ９エウロス·バルチャーＺＡＭ,4.3,0,3,0,2
+1555,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,MPACK_B_Weapon105,Armament Barga,アーマメント·バルガ,4.4,0,3,0,2
+1556,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,MPACK_B_Weapon106,Combat Wagon,コンバット·ワゴン,4.6,0,3,0,2
+1557,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,MPACK_B_Weapon107,Caliban Armored Vehicle Early,キャリバン装甲救護車両アーリー,4.35,0,3,0,2
+1558,2,AirRaider,307,Weapon_Engineer_Vehicle2,4,MPACK_B_Weapon108,Trinity Self-Propelled Wave Cannon,トリニティ自走誘導波砲,4.45,0,3,0,2
+1559,2,AirRaider,309,Weapon_Engineer_Vehicle4,4,MPACK_B_Weapon109,Eiren Assault,エイレン·アサルト,4.5,0,3,0,2
+1560,2,AirRaider,320,Weapon_Engineer_Vehicle5,4,MPACK_B_Weapon110,Depth Crawler V2,デプスクロウラーⅤ２,4.3,0,3,1,2
+1561,0,Ranger,22,Weapon_SupportPlaceGun,2,INDLC_holo_decoy_gura,Recruiter (Gawr Gura),リクルーター〔がうる·ぐら〕,0.3204,3,1,1,0
+1562,0,Ranger,22,Weapon_SupportPlaceGun,2,INDLC_holo_decoy_kiara,Recruiter (Takanashi Kiara),リクルーター〔小鳥遊キアラ〕,0.3203,3,1,1,0
+1563,0,Ranger,22,Weapon_SupportPlaceGun,2,INDLC_holo_decoy_irys,Recruiter (IRyS),リクルーター〔IRyS〕,0.3205,3,1,1,0

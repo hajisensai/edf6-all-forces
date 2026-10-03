@@ -47,6 +47,9 @@ EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Stea
 | 9 | 站着不动 6 秒 | 降落到你身边 | `land`，`ground=1` |
 | 10 | 走过去按上车 | 你坐上驾驶位，NPC 挪到副座（如有） | `BUMP` |
 | 11 | 坐到 NPC 直升机的副座 | 炮艇模式：NPC 飞去打最近的敌人 | `HELI ... gunship` |
+| 12 | 启动器勾强制装备（例如空袭兵 + 载具格选一台车），安装，进第 1 关 | 兵种和武器是启动器选的；呼叫的载具是选的那台 | 启动时 `HOOK loadout preload=2/2 create=5/5`，进关 `LOADOUT preload ...` 和 `LOADOUT create ...` |
+| 13 | 撤退回主菜单，看装备界面 | 还是你原来的装备（强制装备没进存档） | — |
+| 14 | 任务中重试（暂停菜单） | 强制装备仍在 | 又一对 `LOADOUT` |
 
 如果直升机飞得不对，把整个 `.log` 发回来。飞控每秒记录高度、爬升率、油门、悬停油门、旋翼转速、三个摇杆量和偏航学习状态，靠这些就能调参，不必再跑一遍。常见现象：
 - **一直原地打转**：偏航方向学反了，日志里应能看到 `yaw sign flipped`；
@@ -65,12 +68,17 @@ EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Stea
   这一关不会自己结束，测完从暂停菜单撤退即可。
 - **卸载**：删掉整个 `M001` 目录，第 1 关恢复原样。目录里有 `EDF6TestRange.txt` 才会删；别的 mod 放在那里的文件不会动。
 - 设置保存在 `testrange/testrange.json`，下次打开会还原。
+- **强制装备**：勾「启用」后选兵种和每一格的武器 / 支援装备 / 载具（下拉框可打字筛选，列表来自当前生效的武器表，中文名）和星级。
+  启动器在 `Mods/Plugins/` 写一个 `EDF6TestRange.loadout.ini`，插件在任务预加载和建人这两次调用里临时把装备写进内存、调用完立刻还原，
+  所以**存档、主菜单、出击前的装备界面都看不到改动**，没拥有的武器也能装。只对离线 1P 生效，**而且对所有任务都生效**：
+  不用时取消勾选再点安装，或点卸载（两者都会删掉这个 ini）。日志里每次生效有一行 `LOADOUT preload/create class=...`。
 
 ## 源码
 
 - `src/plugin.cpp`：入口、配置、日志、代码签名检查。
 - `src/crew.cpp`：NPC 上车（Vehicle_RideAi）、顶替（slot 49 FindSeat + 上车提示访问器）、每帧入口（slot 55 串接）。
 - `src/heli.cpp`：直升机自动驾驶。
+- `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
 - 构建：`build.cmd`（MSVC x64 + Ninja，RelWithDebInfo），产物输出到 `dist/Mods/Plugins/`。
 - `testrange/`：测试场启动器（`gen.py` 生成脚本，`lib/` 是读 `Root.cpk` / RMPA 的工具，edf6-cpk 部分的许可见 `lib/LICENSE.edf6-cpk`）。
