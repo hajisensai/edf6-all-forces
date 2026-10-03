@@ -214,8 +214,10 @@ const unsigned char kAddBodySig[]={0x48,0x89,0x4C,0x24,0x08,0x53,0x55,0x56,0x57,
 const unsigned char kBodyObjectSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x05};
 const unsigned char kBodyObjectSig2[]={0x8B,0xD1,0x48,0x8D,0x48,0x10,0xE8};   // at +11   // game ms: a table entry not flown this long is free
 constexpr ULONGLONG kFlyerMemoMs=500;
-// Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus kReact seconds of
-// sink: the time to roll the lift round before it pulls.
+// Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus the sink (gravity
+// along the path speeding it up) while it gets ready: kReact seconds, and the roll that turns its lift up
+// (RollToLift). With kReact alone a fighter diving inverted at an air target began to pull at 75 m, 92 m/s
+// down, and went through the ground (2026-10-03).
 constexpr float kReact=1.0f;
 constexpr std::size_t kSelfCtrl=0x30,kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
@@ -380,11 +382,17 @@ void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept {
     j.mode=m;j.modeAt=ms;
 }
 
-// Metres of ground (terrain, buildings) under `p`, or -1 with none seen.
+// Metres of ground (terrain, buildings) under `p`, negative under the ground (the surface over it), or
+// kNoGround with none seen. Under the ground a ray down sees nothing, so a jet that went through it was once
+// taken for one over a void, Guard let it be, and it flew on under the map (2026-10-03: a fighter 5 s down to
+// -109, drones to -310); a ray from kUnderProbe over it finds the surface then.
+constexpr float kNoGround=-1e9f,kUnderProbe=600.0f;
 float Clearance(const float* p) noexcept {
     const float down[3]={p[0],p[1]-400.0f,p[2]};
     float hit[3];
-    return MapRay(p,down,hit)>=0.0f ? p[1]-hit[1] : -1.0f;
+    if(MapRay(p,down,hit)>=0.0f)return p[1]-hit[1];
+    const float top[3]={p[0],p[1]+kUnderProbe,p[2]};
+    return MapRay(top,p,hit)>=0.0f ? p[1]-hit[1] : kNoGround;
 }
 
 float Ceiling() noexcept {
@@ -682,7 +690,7 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
     if(Len(n)<s*0.3f || !Normalize(n))return false;   // held from below or above: Guard's
     const float clear=Clearance(pos);
     const bool jet=JetNear(j,pos,ms);
-    if(!jet && (clear<0.0f || clear>kWallGround))LearnWall(pos,n);
+    if(!jet && (clear==kNoGround || clear>kWallGround))LearnWall(pos,n);
     float slide[3]={dir[0],dir[1],dir[2]};
     const float into=Dot(slide,n);
     for(int i=0;i<3;++i)slide[i]-=n[i]*into;
@@ -700,6 +708,17 @@ bool NearWall(const float* pos,float range) noexcept {
     for(int i=0;i<wallCount;++i)
         if((walls[i].at[0]-pos[0])*walls[i].n[0]+(walls[i].at[2]-pos[2])*walls[i].n[2]<range)return true;
     return false;
+}
+
+// Radians the body must roll before its lift points up out of a dive: from its up to the world's up square
+// to its track. Inverted (bank 160-180) that is near pi, 1.2-1.3 s for a fighter, all of it falling.
+float RollToLift(const Jet& j) noexcept {
+    const float* m=reinterpret_cast<const float*>(j.vehicle+kMatrix);
+    float up[3]={m[4],m[5],m[6]},dir[3]={j.vel[0],j.vel[1],j.vel[2]};
+    if(!Normalize(up) || !Normalize(dir))return 0.0f;
+    float lift[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};
+    if(!Normalize(lift))return 0.0f;   // straight down: any roll pulls out
+    return std::acos(Clamp(Dot(up,lift),-1.0f,1.0f));
 }
 
 // Keeps `want` off the ground and under the ceiling. The ground is the highest under it now and
@@ -724,12 +743,13 @@ void Guard(const Jet& j,const float* pos,float* want) noexcept {
     const float ahead[3]={pos[0]+j.vel[0]*kLookAhead,pos[1]+j.vel[1]*kLookAhead,pos[2]+j.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
     const float here=Clearance(pos),there=Clearance(probe);
-    const float lowest=probe[1]-(there>=0.0f ? there : 1e9f);
-    const float floorY=(here>=0.0f ? pos[1]-here : -1e9f)>lowest ? pos[1]-here : lowest;
+    const float lowest=there!=kNoGround ? probe[1]-there : -1e9f;
+    const float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
     float bottom=pos[1];
     if(s>1.0f && j.vel[1]<0.0f) {
         const float sinDive=Clamp(-j.vel[1]/s,0.0f,1.0f),cosDive=std::sqrt(1.0f-sinDive*sinDive);
-        bottom-=s*s/(KindOf(j).maxG*kG)*(1.0f-cosDive)-j.vel[1]*kReact;
+        const float t=kReact+RollToLift(j)/KindOf(j).roll;
+        bottom-=s*s/(KindOf(j).maxG*kG)*(1.0f-cosDive)-j.vel[1]*t+0.5f*kGravity*sinDive*sinDive*t*t;
     }
     if(bottom<floorY+kMinAlt) {
         const float need=Clamp((floorY+kMinAlt-bottom)/40.0f,0.3f,0.8f);
@@ -1474,7 +1494,7 @@ void JetFrame(unsigned char* v) noexcept {
     switch(j->mode) {
     case Mode::takeoff:
         want[0]=nose[0];want[1]=0.6f;want[2]=nose[2];Normalize(want);
-        if(clear>kTakeoffClear || clear<0.0f)SetMode(*j,Mode::patrol,ms);
+        if(clear>kTakeoffClear || clear==kNoGround)SetMode(*j,Mode::patrol,ms);
         break;
     case Mode::bomb:
         BombRun(*j,pos,ms,want,&speed);

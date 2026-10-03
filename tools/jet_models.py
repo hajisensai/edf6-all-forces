@@ -8,10 +8,13 @@ name inside the archive, CMPL-compressed like tools/mdb_jet.py does); every othe
   EDF6VC_INTERCEPTOR.MRAB  BOMBER501.MRAB         bomber501_2.mdb  elevon split (mdb_jet.build), x 0.65
   EDF6VC_MULTIROLE.MRAB    BOMBER401.MRAB         bomber401.mdb    x 0.5
   EDF6VC_CARRIER.MRAB      V508_TRANSPORT.MRAB    v508_transport.mdb  x 1.6
-  EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0, root bone renamed `mdl`
+  EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0, root bone renamed `mdl`, `body` levelled
 
 Every jet model's root bone is `mdl` (testrange/gen.py JET_MAB_ROOT: the V506 locators hang on that name), so
 a model whose root is called otherwise gets it renamed (Recipe.root; only that bone uses the name).
+The V506 animation drives the model's `body` bone with the heli body's own pose (level, nose +z), in place of the
+bone's bind local: the drone's `body` is bound turned (nose -> -y), so it flew nose down, upright, on 2026-10-03.
+Its turn goes into its children instead (Recipe.level, level_bone); the mesh is skinned in model space, untouched.
 
 Facts relied on (checked by the asserts / `check` below):
   * Every bone matrix (local and inverse bind) is affine, row-vector convention, row 3 = translation. A uniform
@@ -38,7 +41,7 @@ from dataclasses import dataclass, replace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from mdb import (Bone, Mat, Mdb, Mesh, Object, bind_world, cmpl_compress, cmpl_decompress, ident, mdb_read,  # noqa: E402
+from mdb import (Bone, Mat, Mdb, Mesh, Object, bind_world, cmpl_compress, cmpl_decompress, ident, inverse_affine, mdb_read,  # noqa: E402
                  mdb_write, mmul, rab_read, rab_write, read_elem, verify)
 import mdb_jet  # noqa: E402
 
@@ -54,13 +57,14 @@ class Recipe:
     split: bool = False     # elevon split (mdb_jet.build) before scaling
     fuselage_x: float | None = None   # rigid box from the vertices with |x| <= this (source metres); None = all
     root: str | None = None   # the root bone's new name (see the docstring); None = kept
+    level: str | None = None  # a bone turned level (level_bone): the one the V506 body drives, if its bind is turned
 
 
 MODELS: dict[str, Recipe] = {
     'EDF6VC_INTERCEPTOR.MRAB': Recipe('BOMBER501.MRAB', 'bomber501_2.mdb', 0.65, split=True, fuselage_x=2.0),
     'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5),
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
-    'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl'),
+    'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
 }
 
 PACK = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B'}
@@ -169,9 +173,34 @@ def rename_root(md: Mdb, name: str) -> Mdb:
     return replace(md, names=names)
 
 
+def level_bone(md: Mdb, name: str) -> Mdb:
+    """`md` with bone `name` turned level (its bind rotation taken out, its translation kept) and the turn put
+    into its children's locals instead, so every other bone's bind matrix and every vertex stay where they
+    were. Only a signed axis permutation, on a bone that carries no rigid mesh (its bounds are permuted with it)."""
+    k = next(b.index for b in md.bones if md.name_of(b.name) == name)
+    assert not any(o.bone == k for o in md.objects), f'{name} carries a rigid mesh'
+    w = bind_world(md)
+    rot = w[k][:12] + [0.0, 0.0, 0.0, 1.0]
+    rows = [rot[i * 4:i * 4 + 3] for i in range(3)]
+    assert all(sorted(abs(v) for v in row) == [0.0, 0.0, 1.0] for row in rows), f'{name}: not an axis permutation'
+    flat = ident()[:12] + w[k][12:16]
+    parent = ident() if md.bones[k].parent < 0 else w[md.bones[k].parent]
+    bones = list(md.bones)
+    bones[k] = replace(bones[k], local=mmul(flat, inverse_affine(parent)), inv_bind=inverse_affine(flat),
+                       half=[sum(abs(bones[k].half[i] * rows[i][c]) for i in range(3)) for c in range(3)] + [bones[k].half[3]],
+                       centre=[sum(bones[k].centre[i] * rows[i][c] for i in range(3)) for c in range(3)] + [bones[k].centre[3]])
+    for b in md.bones:
+        if b.parent == k:
+            bones[b.index] = replace(b, local=mmul(b.local, rot))
+    out = replace(md, bones=bones)
+    w1 = bind_world(out)
+    assert all(max(abs(x - y) for x, y in zip(w[i], w1[i])) < 1e-5 for i in range(len(w)) if i != k), 'bind moved'
+    return out
+
+
 def make_model(src: Mdb, r: Recipe) -> Mdb:
     if not r.split:
-        md = scale_mdb(src, r.scale)
+        md = scale_mdb(level_bone(src, r.level) if r.level else src, r.scale)
         return rename_root(md, r.root) if r.root else md
     split, surfaces, _stats = mdb_jet.build(collapse_501_2(src))
     mdb_jet.self_check(mdb_write(split), surfaces)        # hinge / bind checks on the unscaled split model
@@ -224,6 +253,8 @@ def check(raw: bytes, arc: bytes, r: Recipe) -> None:
     assert mdb_write(new) == data, 'new model does not round-trip'
 
     ref = mdb_jet.build(collapse_501_2(src))[0] if r.split else src     # the unscaled model it was made from
+    if r.level:
+        ref = level_bone(ref, r.level)
     names = [ref.name_of(x.name) for x in ref.bones]
     if r.root:
         names[0] = r.root
