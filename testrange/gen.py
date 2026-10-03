@@ -255,9 +255,9 @@ ENEMIES: list[tuple[str, str, bool]] = [
     ('dragonsmall401', '小龙（飞）', True),
     ('shootingtarget', '训练靶子（地面 + 空中，不动）', False),
 ]
-# The targets (enemy TARGET): one at a time on the enemy spots, every other spot raised TARGET_AIR m
-# (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. Whether the game
-# keeps a target up there or drops it to the ground shows in EDF6VehicleCrew.log: a jet's target marked (air).
+# The targets (enemy TARGET): groups of per_wave on the target spots (target_spots), every other spot raised
+# TARGET_AIR m (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. One
+# target a raised spot stayed up there on 2026-10-03 (EDF6VehicleCrew.log: its jets' targets marked (air)).
 TARGET = 'shootingtarget'
 TARGET_AIR = 80.0
 
@@ -340,6 +340,7 @@ class Layout:
     player: rmpa.Point
     vehicle_points: list[rmpa.Point]
     enemy_points: list[rmpa.Point]
+    far_points: list[rmpa.Point] = field(default_factory=list)   # free points past the enemy ring
 
 
 # How far out vehicle spots are taken, ring by ring, until there are as many as wanted: the plain has 12
@@ -365,12 +366,19 @@ def layout(points: list[rmpa.Point], need: int = 0) -> Layout:
     taken = {p.name for p in spots[:need]}
     ring = [p for p in by_distance if 180 <= math.dist(p.pos, player.pos) <= 450]
     enemies = [p for p in ring if p.name not in taken] or ring
-    return Layout(player, spots, enemies)
+    far = [p for p in by_distance if math.dist(p.pos, player.pos) > 450 and p.name not in taken]
+    return Layout(player, spots, enemies, far)
+
+
+def target_spots(lay: Layout) -> list[rmpa.Point]:
+    """Where targets (TARGET) stand: the enemy spots and the free points past them (the plain has 48 points,
+    the vehicles take most: 7 enemy spots were too few)."""
+    return lay.enemy_points + lay.far_points
 
 
 def air_targets(lay: Layout) -> list[rmpa.Point]:
-    """The enemy spots raised for targets in the air (TARGET): every other one."""
-    return lay.enemy_points[1::2]
+    """The target spots raised for targets in the air (TARGET): every other one."""
+    return target_spots(lay)[1::2]
 
 
 def _q(text: str) -> str:
@@ -452,17 +460,20 @@ def script(plan: Plan, lay: Layout) -> str:
             lines.append(f'\tCreateFriend({_q(point.name)}, {path}, {plan.vehicle_level:.2f}, false);')
         else:
             lines.append(f'\tCreateVehicle2({_q(point.name)}, {path}, {plan.vehicle_level:.2f});')
-    if w.enabled and lay.enemy_points and targets:
-        pts = ', '.join(_q(p.name) for p in lay.enemy_points)
+    if w.enabled and target_spots(lay) and targets:
+        spots = target_spots(lay)
+        per = max(1, int(w.per_wave))
+        pts = ', '.join(_q(p.name) for p in spots)
         lines += [
             '',
-            '\t// Targets, one at a time, until max_alive stand (at most one a spot; every other spot is up in the air).',
+            '\t// Targets, per_wave to a spot within 30 m, until max_alive stand (at most one group a spot;',
+            '\t// every other spot is up in the air).',
             f'\tarray<string> spots = {{ {pts} }};',
             '\tuint next = 0;',
             f'\tWait({w.first_delay:.1f});',
             '\twhile( true ) {',
-            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {min(int(w.max_alive), len(lay.enemy_points))} ) {{',
-            f'\t\t\tCreateEnemy(spots[next % spots.length()], {_q("app:/object/" + w.enemy + ".sgo")}, {w.level:.2f}, true);',
+            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) + {per} <= {min(int(w.max_alive), len(spots) * per)} ) {{',
+            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], 30, {_q("app:/object/" + w.enemy + ".sgo")}, {per}, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             '\t\t}',
             '\t\tWait(1.0);',
