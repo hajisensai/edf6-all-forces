@@ -1,0 +1,12 @@
+build/
+dist/*
+!dist/Mods/
+dist/Mods/*
+!dist/Mods/Plugins/
+dist/Mods/Plugins/*
+!dist/Mods/Plugins/EDF6VehicleCrew.dll
+!dist/Mods/Plugins/EDF6VehicleCrew.ini
+backup/
+probe/
+__pycache__/
+*.log
