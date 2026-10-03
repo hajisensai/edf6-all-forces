@@ -91,6 +91,9 @@ constexpr int kMaxSubs=3;                     // M123: three carriers attack at 
 constexpr float kHullBottom=166.58f,kHalfLength=790.0f,kHalfWidth=116.0f,kTop=366.0f,kGunHeight=241.0f;
 // Driving: metres, m/s, m/s^2, rad/s.
 constexpr float kClear=0.6f;                 // hull bottom over the highest ground under it
+// Afloat, its origin this far under the water's surface: where M082 puts the stock carrier (origin -130,
+// its main deck at about +63; the sea there assumed at y=0, docs/water-re.md has the log that checks it).
+constexpr float kDraft=130.0f;
 // A player on its deck is up to 830 m from its post: it sets off only past the hull.
 constexpr float kLeash=1500.0f,kStop=1000.0f;  // it sets off after a player this far from its post, stops this near
 constexpr float kCruise=25.0f,kAccel=3.0f,kClimb=8.0f,kSink=4.0f,kClimbAccel=6.0f,kPosGain=0.2f;
@@ -134,6 +137,7 @@ struct Sub {
     float floor;                  // the lowest its origin goes: a mission's own height for it (-inf: called in)
     float lin[3],ang[3];
     bool moving,ready,launched;
+    bool sea;                     // called in afloat: it keeps to the water (Follow)
     std::int32_t full[4];         // each seat weapon's ammo when first seen
     ULONGLONG emptyAt[4];
     float target[3];
@@ -459,7 +463,9 @@ void Arm(Sub& s,unsigned char* v,ULONGLONG ms,std::int32_t* guns,std::int32_t* m
     }
 }
 
-// Its post follows the player at a ship's pace once they are kLeash from it, until kStop.
+// Its post follows the player at a ship's pace once they are kLeash from it, until kStop. A called-in
+// carrier (afloat: s.sea) keeps to the water: its post does not move onto a spot with none (it waits at
+// the shore), and over water it floats kDraft under that spot's surface.
 void Follow(Sub& s,float dt) noexcept {
     if(!player.at || GetTickCount64()-player.at>5000)return;
     const float d[3]={player.pos[0]-s.post[0],0.0f,player.pos[2]-s.post[2]};
@@ -468,7 +474,14 @@ void Follow(Sub& s,float dt) noexcept {
     if(dist<kStop)s.moving=false;
     if(!s.moving || dist<1.0f)return;
     const float step=kCruise*dt;
-    s.post[0]+=d[0]/dist*step;s.post[2]+=d[2]/dist*step;
+    const float x=s.post[0]+d[0]/dist*step,z=s.post[2]+d[2]/dist*step;
+    if(s.sea) {
+        float surface=0.0f;
+        const Sea sea=SeaAt(x,z,&surface);
+        if(sea==Sea::land)return;
+        if(sea==Sea::water)s.floor=surface-kDraft;
+    }
+    s.post[0]=x;s.post[2]=z;
 }
 
 // The velocity toward its post (level, at most kCruise), holding the hull kClear over the ground and the
@@ -746,9 +759,16 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         if(LiveSubs(ms)>=kMaxSubs){Log("SUB launch: %d carriers out already",kMaxSubs);return nullptr;}
         float fwd[3]={heading[0],0.0f,heading[2]};
         if(!Normalize(fwd)){fwd[0]=0.0f;fwd[2]=1.0f;}
+        // Only where there is water: on a map without any, or over land, nothing comes (the call fails).
+        // Afloat its origin is kDraft under the surface (and Drive holds it there: s.floor); with the probe
+        // off (unknown) it surfaces on the ground as before.
+        float surface=0.0f;
+        const Sea sea=SeaAt(pos[0],pos[2],&surface);
+        if(sea==Sea::land){Log("SUB launch: no water at (%.0f,%.0f): the carrier stays away",pos[0],pos[2]);return nullptr;}
         float start[3]={pos[0],pos[1]+kHullBottom+kClear,pos[2]};
         float ground=0.0f;
         if(GroundUnder(pos,fwd,&ground))start[1]=ground+kHullBottom+kClear;
+        if(sea==Sea::water && start[1]<surface-kDraft)start[1]=surface-kDraft;
         // Rows right, up, forward, position (jet.cpp Launch).
         alignas(16) const float m[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, start[0],start[1],start[2],1};
         InitParam param{image+kInitParamVtable,{}};
@@ -764,13 +784,14 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         }
         Sub* s=FreeSub(v,ms);
         if(s) {
-            *s=Sub{};s->vehicle=v;s->ctrl=SelfCtrl(v);s->seen=s->bornAt=ms;s->launched=true;s->floor=-INFINITY;
+            *s=Sub{};s->vehicle=v;s->ctrl=SelfCtrl(v);s->seen=s->bornAt=ms;s->launched=true;
+            s->sea=sea==Sea::water;s->floor=s->sea ? surface-kDraft : -INFINITY;
             QueryPerformanceCounter(&s->last);
             std::memcpy(s->post,start,12);
         }
         Thicken(v);
-        Log("SUB v=%p launched at (%.0f,%.0f,%.0f) heading (%.2f,%.2f) hp=%.0f driver=%d",v,start[0],start[1],start[2],fwd[0],fwd[2],
-            At<float>(v,kHp),SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
+        Log("SUB v=%p launched at (%.0f,%.0f,%.0f) heading (%.2f,%.2f) %s hp=%.0f driver=%d",v,start[0],start[1],start[2],fwd[0],fwd[2],
+            sea==Sea::water ? "afloat" : "on the ground (water unknown)",At<float>(v,kHp),SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
         return v;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }

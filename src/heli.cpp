@@ -239,6 +239,69 @@ float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,st
     return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
 }
 
+// Water (docs/water-re.md): not map geometry (a layer-22 ray over the sea finds the seabed) but trigger
+// bodies on layer 25 that the map load makes, one per water area, kept in MoveAreaManager's std::list at
+// mgr+0x30 (mgr = *(image+kMoveAreas)-8; a node: +0 next, +0x10 the area; the area's body id at
+// *(area+0x58)+0xF0). Each frame the game finds a soldier's water surface with a vertical ray cast against
+// that one body (kCastRayBodies: wrapper, collector, ray with filter 0, body ids, count); the plugin asks
+// the same way. kWaterSignatures: that function's entry and the manager getter 0x11BD90 (mov rax,[rip ->
+// kMoveAreas]; test; jz; add rax,-8).
+constexpr std::size_t kMoveAreas=0x20B2998,kCastRayBodies=0x11A7480;
+const Signature kWaterSignatures[]={
+    {kCastRayBodies,{0x4C,0x89,0x4C,0x24,0x20,0x4C,0x89,0x44,0x24,0x18,0x48,0x89,0x54,0x24,0x10,0x48},16},
+    {0x11BD90,{0x48,0x8B,0x05,0x01,0x6C,0xF9,0x01,0x48,0x85,0xC0,0x74,0x05,0x48,0x83,0xC0,0xF8},16},
+};
+bool waterOk=false;
+
+// One play's rays settle the unverified parts (the list's layout at run time, the surface heights): each
+// different answer is logged once.
+void LogSea(Sea sea,std::size_t areas,float y) noexcept {
+    static Sea lastSea=Sea::unknown;static std::size_t lastAreas=~std::size_t{0};static float lastY=0.0f;
+    if(sea==lastSea && areas==lastAreas && std::fabs(y-lastY)<0.5f)return;
+    lastSea=sea;lastAreas=areas;lastY=y;
+    Log("WATER %s: %zu water area(s) on the map%s%.1f",sea==Sea::water ? "sea" : sea==Sea::land ? "no water here" : "unknown",
+        areas,sea==Sea::water ? ", surface y=" : "",sea==Sea::water ? y : 0.0f);
+}
+
+Sea SeaProbe(float x,float z,float* surface) noexcept {
+    if(!rayOk || !waterOk)return Sea::unknown;
+    __try {
+        const auto g=At<unsigned char*>(image,kHavokGlobal);
+        const auto top=At<unsigned char*>(image,kMoveAreas);
+        if(!Readable(g,0x70) || !At<const void*>(g,0x68) || !top)return Sea::unknown;
+        const auto mgr=top-8;
+        if(!Readable(mgr+0x30,0x10))return Sea::unknown;
+        const auto head=At<unsigned char*>(mgr,0x30);
+        const auto count=At<std::uint64_t>(mgr,0x38);
+        if(!Readable(head,8) || count>256)return Sea::unknown;
+        bool found=false;float best=0.0f;
+        std::uint64_t n=0;
+        for(auto node=At<unsigned char*>(head,0);node!=head && n<count;node=At<unsigned char*>(node,0),++n) {
+            if(!Readable(node,0x18))return Sea::unknown;
+            const auto area=At<unsigned char*>(node,0x10);
+            if(!Readable(area,0x60))continue;
+            const auto holder=At<unsigned char*>(area,0x58);
+            if(!Readable(holder,0xF4))continue;
+            const std::uint32_t id=At<std::uint32_t>(holder,0xF0);
+            const RayInput in{{x,4000.0f,z,1.0f},{x,-4000.0f,z,1.0f},0,0,0};
+            RayHits col{};
+            *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
+            reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+            reinterpret_cast<void(*)(void*,void*,const RayInput*,const std::uint32_t*,int)>(image+kCastRayBodies)(g+0x10,&col,&in,&id,1);
+            if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)continue;
+            const float y=*reinterpret_cast<const float*>(col.raw+0x34);
+            if(!std::isfinite(y))continue;
+            if(!found || y>best)best=y;
+            found=true;
+        }
+        if(n!=count)return Sea::unknown;
+        const Sea sea=found ? Sea::water : Sea::land;
+        LogSea(sea,static_cast<std::size_t>(count),best);
+        if(found && surface)*surface=best;
+        return sea;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return Sea::unknown;}
+}
+
 // One 410 door gun as DoorGun drives it (see there).
 struct Door {
     const unsigned char* weapon;
@@ -1762,6 +1825,7 @@ void InstallDoorGuns() noexcept {
 }  // namespace
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+Sea SeaAt(float x,float z,float* surface) noexcept { return SeaProbe(x,z,surface); }
 
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept {
     return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
@@ -1800,6 +1864,9 @@ bool CheckHeliProfile() noexcept {
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
+        waterOk=true;
+        for(const auto& s:kWaterSignatures)waterOk=waterOk && Matches(s.rva,s.bytes,s.size);
+        Log("WATER probe=%d%s",waterOk,waterOk ? "" : " (unexpected EDF.dll code: the carrier surfaces anywhere)");
         // The sea rescue: the seat reach is read for the pickup, the board button pressed with RescueAutoBoard.
         reachOk=Readable(image+kReachSlackRva,4) && At<float>(image,kReachSlackRva)==kReachSlack;
         for(std::size_t i=3;i<sizeof(kRescueSignatures)/sizeof(kRescueSignatures[0]);++i)

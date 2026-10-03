@@ -129,6 +129,10 @@ bool CheckHeliProfile() noexcept;
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point),
 // every enemy lock point of `vehicle`'s side.
 float MapRay(const float* a,const float* b,float* hit) noexcept;
+// Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
+// highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
+enum class Sea { unknown, land, water };
+Sea SeaAt(float x,float z,float* surface) noexcept;
 using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
