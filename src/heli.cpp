@@ -15,6 +15,9 @@
 // close, so they can walk up and bump the NPC pilot.
 // With the player aboard (in a gunner seat) it does not follow itself: it holds position and closes in
 // on the nearest enemy instead.
+// Aim: the guns are fixed along the nose, and the nose is level in a hover, so engaging it drops to a
+// shallow angle over the target and fires only when the 3D nose line is within heliFireCone of it and
+// the target is within the guns' reach (the 506 gatling's rounds die at 160 m).
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
@@ -22,7 +25,7 @@
 namespace crew {
 namespace {
 constexpr unsigned kHeliVtables[]={0x17DB238,0x17DEF98,0x17DF338,0x17DF790};   // 506, 409, 410, base
-constexpr unsigned kHeli410=0x17DF338;
+constexpr unsigned kHeli506=0x17DB238,kHeli410=0x17DF338;
 // Input block, heading basis, contact byte, rotor speed
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
@@ -38,6 +41,13 @@ constexpr float kPi=3.14159265f;
 constexpr float kBoardRange=25.0f;   // a landed heli stays down while the player is this close
 constexpr float kLandDistance=20.0f; // it lands this far from a player standing still
 constexpr float kRotorGain=4.0f;     // throttle per unit the rotor is off the wanted rotor
+// The 506 gatling's rounds live 40 frames at 4 m/frame (V_506HELI_GATLING01_*.SGO): 160 m. The 409 and
+// 410 guns reach 480 m and 720 m, so for those heliRange is the limit.
+constexpr float kGun506Range=150.0f;
+// The guns are fixed along the nose, which is level in a hover. Engaging, it flies low enough that the
+// target is at most this far below the nose (tan 8 deg), but never lower than kEngageAbove over it.
+constexpr float kEngageDipTan=0.14f,kEngageAbove=8.0f;
+constexpr float kYawDamp=0.6f;       // yaw input per rad/s of turn rate (the yaw rate lags the input)
 
 struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
 const Signature kHeliSignatures[]={
@@ -55,7 +65,7 @@ struct Heli {
     LARGE_INTEGER last;
     float prev[3],vel[3];
     float hover;          // learned rotor speed that holds height
-    float prevHeading,lastYaw;
+    float prevHeading,lastYaw,yawRate;
     int yawSign,votes;    // +1: a positive yaw input increases atan2(fwd.x, fwd.z)
     bool yawLocked,started;
     const void* target;
@@ -132,6 +142,17 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,float range,f
 }
 
 // Would a burst from `from` towards `to` pass within 8 m of the player before reaching the target?
+float GunRange(const unsigned char* v) noexcept {
+    return At<const unsigned char*>(v,0)==image+kHeli506 && kGun506Range<cfg.heliRange ? kGun506Range : cfg.heliRange;
+}
+
+// Height to engage `aim` from `at`: low enough that the target is within kEngageDipTan of the level nose.
+float EngageHeight(const float* at,const float* aim) noexcept {
+    const float d[3]={aim[0]-at[0],0,aim[2]-at[2]};
+    const float dip=std::sqrt(Dot2(d,d))*kEngageDipTan;
+    return aim[1]+(dip>kEngageAbove ? dip : kEngageAbove);
+}
+
 bool PlayerInLine(const float* from,const float* to) noexcept {
     if(!player.at || GetTickCount64()-player.at>2000)return false;
     const float d[3]={to[0]-from[0],to[1]-from[1],to[2]-from[2]};
@@ -164,6 +185,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
 
     // Learn the yaw sign from the turn the last input produced.
     const float turned=Wrap(heading-h.prevHeading);h.prevHeading=heading;
+    h.yawRate+=(turned/dt-h.yawRate)*0.3f;
     if(!grounded && !h.yawLocked && std::fabs(h.lastYaw)>0.3f && std::fabs(turned)>0.0005f) {
         h.votes+=(turned>0)==(h.lastYaw*static_cast<float>(h.yawSign)>0) ? 1 : -1;   // did it turn the way we meant?
         if(h.votes<=-15){h.yawSign=-h.yawSign;h.votes=0;Log("HELI v=%p yaw sign flipped to %d",v,h.yawSign);}
@@ -189,7 +211,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         float len=std::sqrt(Dot2(dir,dir));
         if(len<1.0f){dir[0]=-fwd[0];dir[2]=-fwd[2];len=1.0f;}
         goal[0]=player.pos[0]+dir[0]/len*cfg.heliFollow;goal[2]=player.pos[2]+dir[2]/len*cfg.heliFollow;
-        goal[1]=player.pos[1]+cfg.heliHeight;
+        goal[1]=engage ? EngageHeight(goal,aim) : player.pos[1]+cfg.heliHeight;
         if(land) {
             const float r=cfg.heliFollow<kLandDistance ? cfg.heliFollow : kLandDistance;
             goal[0]=player.pos[0]+dir[0]/len*r;goal[2]=player.pos[2]+dir[2]/len*r;
@@ -197,12 +219,12 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         }
         std::memcpy(h.hold,pos,12);
     } else if(engage) {
-        // Gunship: close to heliStandoff metres of the target, heliHeight above it.
+        // Gunship: close to heliStandoff metres of the target, low enough for the level guns.
         float dir[3]={pos[0]-aim[0],0,pos[2]-aim[2]};
         float len=std::sqrt(Dot2(dir,dir));
         if(len<1.0f){dir[0]=-fwd[0];dir[2]=-fwd[2];len=1.0f;}
         goal[0]=aim[0]+dir[0]/len*cfg.heliStandoff;goal[2]=aim[2]+dir[2]/len*cfg.heliStandoff;
-        goal[1]=aim[1]+cfg.heliHeight;
+        goal[1]=EngageHeight(goal,aim);
         std::memcpy(h.hold,goal,12);
     } else {
         std::memcpy(goal,h.hold,12);
@@ -236,20 +258,26 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     float yaw=0.0f,off=kPi;
     if(Dot2(face,face)>1.0f) {
         off=Wrap(std::atan2(face[0],face[2])-heading);
-        yaw=Clamp(off*1.5f,-1.0f,1.0f)*static_cast<float>(h.yawSign);
+        yaw=Clamp(off*1.5f-h.yawRate*kYawDamp,-1.0f,1.0f)*static_cast<float>(h.yawSign);
     }
     h.lastYaw=yaw;
 
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInThrottle,throttle);
     Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
 
-    // Fire: lined up, in range, not too steep, not through the player.
-    bool gun=false,missile=false;float dist=0.0f;
-    if(engage && cfg.heliFire && !grounded && !land) {
+    // Fire: the nose (the guns are fixed along it, pitch included) within heliFireCone of the target,
+    // the target within the guns' reach, and not through the player.
+    bool gun=false,missile=false;float dist=0.0f,miss=180.0f;
+    const float* nose=reinterpret_cast<const float*>(v+kMatrix+0x20);
+    if(engage) {
         const float d[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
-        const float flat=std::sqrt(Dot2(d,d));dist=std::sqrt(flat*flat+d[1]*d[1]);
-        const bool lined=std::fabs(off)<cfg.heliFireCone*kPi/180.0f && std::atan2(-d[1],flat)<0.7f;
-        gun=lined && dist<cfg.heliRange && !PlayerInLine(pos,aim);
+        dist=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        const float n=std::sqrt(nose[0]*nose[0]+nose[1]*nose[1]+nose[2]*nose[2]);
+        if(dist>1.0f && n>0.5f && std::isfinite(n))
+            miss=std::acos(Clamp((d[0]*nose[0]+d[1]*nose[1]+d[2]*nose[2])/(dist*n),-1.0f,1.0f))*180.0f/kPi;
+    }
+    if(engage && cfg.heliFire && !grounded && !land) {
+        gun=miss<cfg.heliFireCone && dist<GunRange(v) && !PlayerInLine(pos,aim);
         missile=gun && cfg.heliMissile && dist>50.0f && ms-h.missileAt>cfg.heliMissileMs;
         if(missile)h.missileAt=ms;
     }
@@ -259,11 +287,11 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
 
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
-        Log("HELI v=%p %s y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg gun=%d msl=%d",
+        Log("HELI v=%p %s y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d",
             v,land ? "land" : follow ? "follow" : engage ? "gunship" : "hold",pos[1],goal[1],h.vel[1],throttle,h.hover,At<float>(v,kRotor),
             forward,lateral,yaw,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,
             std::sqrt((goal[0]-pos[0])*(goal[0]-pos[0])+(goal[2]-pos[2])*(goal[2]-pos[2])),grounded,
-            engage ? h.target : nullptr,dist,off*180.0f/kPi,gun,missile);
+            engage ? h.target : nullptr,dist,off*180.0f/kPi,miss,std::asin(Clamp(nose[1],-1.0f,1.0f))*180.0f/kPi,gun,missile);
     }
 }
 }  // namespace

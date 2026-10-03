@@ -13,6 +13,9 @@
 //   board:  the same check per seat; on a hit the NPC moves to a free gunner seat (seat + clear,
 //           neither tells the rider anything) or, with none free, is kicked (it dies), and the stock
 //           slot 49 then reserves the now-free seat for the player.
+// Team: RideAi puts the vehicle on its NPC rider's team (2), and the stock seat check (0x6346D0) only
+// lets a human board a vehicle of their own team or the unowned team 5. A vehicle crewed here keeps
+// the team it had before (State::ownTeam): both checks run with it, and the bump gives it back.
 // The NPC in a gunner seat stays until the player leaves; then the vehicle is crewed afresh.
 #include "crew.h"
 #include "memory.h"
@@ -49,8 +52,24 @@ FindSeatFn originalFindSeat=nullptr;
 PromptFn originalPrompt=nullptr;
 bool inputsHooked=false;
 
-struct State { const void* vehicle; ULONGLONG emptySince,playerAt,bumpedAt,crewedAt,loggedAt,seen; };
+struct State {
+    const void* vehicle;
+    ULONGLONG emptySince,playerAt,bumpedAt,crewedAt,loggedAt,seen;
+    std::int32_t ownTeam;   // the vehicle's team before we crewed it (valid when crewedAt != 0)
+};
 State states[64]{};
+
+// The state of a vehicle we track, without claiming a slot for one we do not.
+State* FindState(const void* vehicle) noexcept {
+    for(auto& s:states)if(s.vehicle==vehicle)return &s;
+    return nullptr;
+}
+
+// The team a player boards it as: the team it had before we crewed it, else its own.
+std::int32_t OwnTeam(const unsigned char* vehicle) noexcept {
+    const State* st=FindState(vehicle);
+    return st && st->crewedAt ? st->ownTeam : At<std::int32_t>(vehicle,kTeam);
+}
 
 State& StateFor(const void* vehicle) noexcept {
     State* slot=&states[0];
@@ -71,8 +90,11 @@ int ClassOf(const void* object) noexcept {
 
 const void* RiderObject(const unsigned char* seat) noexcept { return At<const void*>(seat,kSeatRider); }
 
-// Run `check` with the NPC riders of the vehicle's NPC-held seats hidden; restores them before returning.
+// Run `check` with the NPC riders of the vehicle's NPC-held seats hidden and the vehicle on its own
+// team (see OwnTeam); restores both before returning.
 template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcept {
+    const std::int32_t team=At<std::int32_t>(vehicle,kTeam);
+    Put<std::int32_t>(vehicle,kTeam,OwnTeam(vehicle));
     void* saved[16]{};
     const unsigned count=SeatCount(vehicle);
     for(unsigned i=0;i<count && i<16;++i) {
@@ -83,6 +105,7 @@ template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcep
     bool ok=false;
     __try { ok=check(); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
     for(unsigned i=0;i<count && i<16;++i)if(saved[i])Put<void*>(SeatAt(vehicle,i),kSeatRiderCtrl,saved[i]);
+    Put<std::int32_t>(vehicle,kTeam,team);
     return ok;
 }
 
@@ -95,6 +118,7 @@ int FreeGunnerSeat(unsigned char* vehicle,unsigned skip) noexcept {
 
 // Free the NPC-held seat `index` for the player: move the NPC to a free gunner seat, else kick it.
 void Bump(unsigned char* vehicle,unsigned index) noexcept {
+    Put<std::int32_t>(vehicle,kTeam,OwnTeam(vehicle));   // the stock slot 49 re-checks the team next
     auto seat=SeatAt(vehicle,index);
     auto rider=const_cast<void*>(RiderObject(seat));
     const int gunner=cfg.bumpToGunner ? FreeGunnerSeat(vehicle,index) : -1;
@@ -197,7 +221,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
         if(SeatRider(SeatAt(vehicle,i))==Rider::dummy)reinterpret_cast<SeatFn>(image+kSeatKick)(vehicle,SeatAt(vehicle,i));
     auto rideAi=reinterpret_cast<RideAiFn*>(At<void**>(vehicle,0))[kSlotRideAi];
     rideAi(vehicle,false);
-    st.crewedAt=now;st.emptySince=0;
+    st.crewedAt=now;st.emptySince=0;st.ownTeam=team;
     if(IsHelicopter(vehicle))HeliCrewed(vehicle);
     Log("CREW v=%p %s seats=%u driver=%d",vehicle,kClasses[cls].name,count,SeatRider(SeatAt(vehicle,0))==Rider::dummy);
 }

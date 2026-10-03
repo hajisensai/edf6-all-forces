@@ -16,6 +16,7 @@ import argparse
 import ctypes
 import ctypes.wintypes as wt
 import os
+import re
 import subprocess
 import sys
 import time
@@ -50,7 +51,8 @@ LIMIT = {'footer': 10, 'hq': 6, 'mission': 10}
 BRIEFING = (730, 425, 1000, 500)   # the selected mission's briefing text (the preview above it is a video)
 HELI_LOADOUT = {'enabled': True, 'class': 2, 'slots': ['', '', '', '', 'eWeapon394'], 'stars': 10,
                 'refill': True}
-HELI_PLAN_VEHICLES: dict[str, int] = {}
+# The heli is placed on the map (a generated `_mission` SGO, see gen.DERIVED), not called in.
+HELI_PLAN_VEHICLES: dict[str, int] = {'edf6tr_v506_heli_mission': 1}
 
 KEYS_OF_INTEREST = ('HOOK', 'LOADOUT', 'CREW', 'HELI', 'BUMP', 'ERROR', 'WARN', 'crash', 'fail')
 
@@ -275,11 +277,27 @@ def summarize(lines: list[str]) -> list[str]:
         if len(hit) > 8:
             out.append('    ...')
             out += ['    ' + l for l in hit[-4:]]
+    out += aim_stats(lines)
     bad = [l for l in lines if any(t in l for t in ('ERROR', 'WARN', 'fail'))]
     if bad:
         out.append(f'错误/警告: {len(bad)} 行')
         out += ['    ' + l for l in bad[:10]]
     return out
+
+
+def aim_stats(lines: list[str]) -> list[str]:
+    """Per-second HELI samples with a target: how often the guns fire and how far off the nose was."""
+    rows = []
+    for l in lines:
+        m = re.search(r'target=(\w+) dist=(\d+) off=\S+ miss=([\d.]+)deg pitch=(-?\d+)deg gun=(\d) msl=(\d)', l)
+        if m and int(m.group(1), 16) and ' land ' not in l:
+            rows.append((float(m.group(2)), float(m.group(3)), int(m.group(4)), int(m.group(5)), int(m.group(6))))
+    if not rows:
+        return ['瞄准：没有交战样本']
+    mid = lambda xs: sorted(xs)[len(xs) // 2]
+    return [f'瞄准：交战样本 {len(rows)} 个，机枪开火 {sum(r[3] for r in rows)} 个，导弹 {sum(r[4] for r in rows)} 个；'
+            f'距离中位数 {mid([r[0] for r in rows]):.0f} 米，机头偏差中位数 {mid([r[1] for r in rows]):.1f} 度，'
+            f'俯仰中位数 {mid([r[2] for r in rows])} 度']
 
 
 # ---------- flow ----------
@@ -433,7 +451,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--game', default=os.environ.get('EDF6_DIR', gen.DEFAULT_GAME))
     ap.add_argument('--plan', help='testrange.json 一类的方案文件；不给就不重装')
-    ap.add_argument('--heli', action='store_true', help='空袭兵 + 载具格 N9 Eros 直升机，不放脚本载具')
+    ap.add_argument('--heli', action='store_true', help='空袭兵；地图上直接放一架 506 直升机（载具格仍是 N9 Eros，可再叫一架）')
     ap.add_argument('--slot', choices=[x.mission for x in gen.SLOTS], help='测试场装进哪一关（默认沿用方案/现装的）')
     ap.add_argument('--enemies', action='store_true', help='和 --heli 一起用：也刷敌人波次')
     ap.add_argument('--seconds', type=float, default=60, help='进关后停留秒数（--act 跑完后剩余时间）')

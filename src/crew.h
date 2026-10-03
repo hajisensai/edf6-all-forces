@@ -23,7 +23,7 @@ struct Config {
     float heliRange=350.0f;    // it engages enemies within this distance
     bool heliFire=true;
     float heliStandoff=80.0f;  // with the player aboard: how close it closes on its target
-    float heliFireCone=10.0f;  // degrees off the nose it still fires at
+    float heliFireCone=4.0f;   // degrees between the nose (pitch included) and the target it still fires at
     bool heliMissile=true;
     DWORD heliMissileMs=4000;  // minimum gap between missiles
     float heliMoveGain=0.04f;  // stick per metre off the goal

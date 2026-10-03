@@ -11,6 +11,7 @@ import json
 import math
 import os
 import shutil
+import struct
 import sys
 from dataclasses import dataclass, field
 
@@ -50,9 +51,13 @@ def slot_of(mission: str) -> Slot:
 
 # (sgo, label). Only SGOs with a `mission_setup` block (weapon set-up for script-placed vehicles):
 # CreateVehicle2 reads it, and a player call-in SGO without it crashes the game (EDF.dll+0x52E44).
-# Stock missions place the `_mission` variants. No helicopter has one: call those in through the
-# forced loadout (Air Raider vehicle slot) instead.
+# Stock missions place the `_mission` variants. No helicopter has one, so the range makes its own
+# (see DERIVED): the call-in SGO with `vehicle_setup` renamed to `mission_setup` (same layout).
+# V602_HELI is a DSGO, which as_mission_sgo does not handle, so it is left out.
 VEHICLES: list[tuple[str, str]] = [
+    ('edf6tr_v506_heli_mission', '直升机 506（测试场生成）'),
+    ('edf6tr_vehicle409_heli_mission', '直升机 409（测试场生成）'),
+    ('edf6tr_vehicle410_heli_mission', '直升机 410（测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
     ('v505_tank_mission', '坦克 505'),
@@ -69,6 +74,15 @@ VEHICLES: list[tuple[str, str]] = [
     ('v613_bike', '摩托 613'),
     ('v512_keitruck', '轻卡车 512'),
 ]
+
+# Vehicles the range generates into Mods/OBJECT (name -> stock SGO it is made from). The DERIVED_PREFIX
+# marks them as ours: install/uninstall only ever touch files with it.
+DERIVED_PREFIX = 'edf6tr_'
+DERIVED: dict[str, str] = {
+    'edf6tr_v506_heli_mission': 'V506_HELI',
+    'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
+    'edf6tr_vehicle410_heli_mission': 'VEHICLE410_HELI',
+}
 
 # (sgo, label, flying)
 ENEMIES: list[tuple[str, str, bool]] = [
@@ -278,13 +292,76 @@ def script(plan: Plan, lay: Layout) -> str:
     return '\n'.join(lines)
 
 
+def as_mission_sgo(data: bytes) -> bytes:
+    """A call-in vehicle SGO turned into a script-placeable one: its `vehicle_setup` name becomes
+    `mission_setup` (same length, same value layout) and the name table is re-sorted. Little-endian SGO
+    only: header {count, data offset, name count, name table offset} at 8, names {string offset from
+    the entry, member index}."""
+    if data[:4] != b'SGO\0':
+        raise ValueError('不是小端 SGO')
+    old, new = 'vehicle_setup'.encode('utf-16le') + b'\0\0', 'mission_setup'.encode('utf-16le') + b'\0\0'
+    if data.count(old) != 1 or new in data:
+        raise ValueError('vehicle_setup 不唯一或已有 mission_setup')
+    buf = bytearray(data.replace(old, new))
+    _, _, name_count, name_off = struct.unpack_from('<4I', buf, 8)
+    entries = []
+    for i in range(name_count):
+        p = name_off + i * 8
+        rel, idx = struct.unpack_from('<iI', buf, p)
+        entries.append((_utf16_at(buf, p + rel), p + rel, idx))
+    for i, (_, at, idx) in enumerate(sorted(entries)):
+        p = name_off + i * 8
+        struct.pack_into('<iI', buf, p, at - p, idx)
+    return bytes(buf)
+
+
+def _utf16_at(buf: bytes, off: int) -> str:
+    end = off
+    while buf[end:end + 2] != b'\0\0':
+        end += 2
+    return buf[off:end].decode('utf-16le')
+
+
+def vehicle_sgo(game: Game, sgo_name: str) -> bytes:
+    """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
+    stock = DERIVED.get(sgo_name)
+    if stock:
+        return as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
+    return game.read('OBJECT', sgo_name.upper() + '.SGO')
+
+
 def has_mission_setup(game: Game, sgo_name: str) -> bool:
     import sgo
     try:
-        values = sgo.load(data=game.read('OBJECT', sgo_name.upper() + '.SGO'))
-    except KeyError:
+        values = sgo.load(data=vehicle_sgo(game, sgo_name))
+    except (KeyError, ValueError):
         return False
     return isinstance(values, dict) and 'mission_setup' in values
+
+
+def object_dir(game_root: str) -> str:
+    return os.path.join(game_root, 'Mods', 'OBJECT')
+
+
+def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
+    """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only)."""
+    _remove_derived(game_root, keep=wanted)
+    for name in sorted(wanted):
+        os.makedirs(object_dir(game_root), exist_ok=True)
+        with open(os.path.join(object_dir(game_root), name.upper() + '.SGO'), 'wb') as f:
+            f.write(vehicle_sgo(game, name))
+
+
+def _remove_derived(game_root: str, keep: set[str] = frozenset()) -> bool:
+    d = object_dir(game_root)
+    if not os.path.isdir(d):
+        return False
+    gone = [f for f in os.listdir(d) if f.lower().startswith(DERIVED_PREFIX) and f.lower()[:-4] not in keep]
+    for f in gone:
+        os.remove(os.path.join(d, f))
+    if not os.listdir(d):
+        os.rmdir(d)
+    return bool(gone)
 
 
 def mission_dir(game_root: str, mission: str) -> str:
@@ -314,6 +391,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
     lay = layout(rmpa.points(points_file))
     text = script(plan, lay)
     os.makedirs(out, exist_ok=True)
+    _write_derived(game_root, game, {s for s, n in plan.vehicles.items() if n > 0 and s in DERIVED})
     with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
         f.write(b'\xef\xbb\xbf' + text.encode('utf-8'))
     with open(os.path.join(out, 'MISSION.RMPA'), 'wb') as f:
@@ -328,7 +406,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
 
 
 def uninstall(game_root: str) -> bool:
-    return any([_remove(game_root, x.mission) for x in SLOTS])
+    return any([_remove(game_root, x.mission) for x in SLOTS] + [_remove_derived(game_root)])
 
 
 def _remove(game_root: str, mission: str) -> bool:
