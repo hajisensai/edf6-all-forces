@@ -102,12 +102,17 @@ void LoadConfig() noexcept {
     n.heliClimbGain=ReadFloat(L"HeliClimbGain",n.heliClimbGain);
     n.heliHoverLearn=ReadFloat(L"HeliHoverLearn",n.heliHoverLearn);
     n.heliLandMs=GetPrivateProfileIntW(L"VehicleCrew",L"HeliLandMs",n.heliLandMs,iniPath);
+    n.heliSpeed=ReadFloat(L"HeliSpeed",n.heliSpeed);
+    n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
+    n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
+    n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
     cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
         cfg.heliPilot,cfg.heliHeight,cfg.heliFollow,cfg.heliRange,cfg.heliFire);
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f standoff=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
         cfg.heliCombatRange,cfg.heliAvoid,cfg.heliFireHeight,cfg.heliStandoff,cfg.heliFireCone,cfg.heliMissile,cfg.heliMissileMs,cfg.heliMoveGain,cfg.heliBrakeGain,cfg.heliClimbGain,cfg.heliHoverLearn,cfg.heliLandMs);
+    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d",cfg.heliSpeed,cfg.heliAgility,cfg.heliYawRate,cfg.heliDoorGuns);
 }
 
 FILETIME IniStamp() noexcept {

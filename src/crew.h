@@ -34,6 +34,10 @@ struct Config {
     float heliClimbGain=0.08f; // rotor speed per m/s of climb-rate error
     float heliHoverLearn=0.03f;// how fast it learns the hover rotor speed
     DWORD heliLandMs=6000;     // it lands by a player who stood still this long; 0 = never lands
+    float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
+    float heliAgility=4.0f;    // seconds (time constant) to reach it
+    float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
+    bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
 };
 extern Config cfg;
 
