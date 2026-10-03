@@ -34,6 +34,16 @@ python autoturret\tools\build.py --out "%EDF6_DIR%\Mods"
    - **降落**：玩家原地站着不动 `HeliLandMs`（默认 6 秒）后，直升机降落在玩家身边约 20 米处。玩家在 25 米内时它不起飞，方便走过去顶掉 NPC、自己开；
    - **炮艇模式**：玩家坐在直升机副座、由 NPC 驾驶时，它不再跟随玩家（玩家就在机上），而是主动飞到离最近的敌人 `HeliStandoff` 米处攻击。
    - 只接管本插件派了 NPC 的直升机。任务脚本里的直升机（演出机、运输机）不受影响。
+4. **战斗机**（`src/jet.cpp`，计划见 `docs/jet-plan.md`）：游戏里没有能被打中的固定翼飞机，插件用 506 直升机的机体（刚体、碰撞、HP、武器、坠毁）套上 BOMBER501 的外形，每帧直接写刚体的速度和角速度来飞：
+   - **对地攻击机**：在 160 米高接近，目标进入约 450 米且在机头前方时俯冲（约 20–30 度），对准提前量点开机炮、发导弹，改出后爬升、飞出一段再转回来；
+   - **制空战斗机**：优先打飞行敌人，按提前量追击，冲过头先拉开再回来；没有飞行敌人才去打地面；
+   - 转弯最大 5 g，最低离地 25 米，不会飞到天花板以上；
+   - 不补弹。弹药打光、燃料用完（`JetFuelSec`）或血量低于 25% 时，爬升并朝远离玩家的方向全速飞走，**离玩家 1 公里以外才删除**（被地图边缘挡住时，60 秒后、600 米以外删除），不会在面前消失。
+5. **空袭接管**（`src/airstrike.cpp`，逆向笔记 `docs/mission-airstrike-re.md`）：需要先运行一次 `python tools/make_jets.py`，在 `Mods/OBJECT` 生成 `EDF6VC_JET_STRIKE.SGO` / `EDF6VC_JET_FIGHTER.SGO`。
+   - **空袭兵的轰炸机支援**（KM6、神威、维斯塔、火卫一等）：原版轰炸机不再出现，改为从玩家身后方向、目标 1 公里外飞来最多 `JetMaxPerCall` 架战斗机，在目标附近作战 `JetSortieSec` 秒后返航；目标附近飞行敌人多时派制空机；
+   - **任务脚本的低空扫射机**（RM034A/B、M116、M118）：每架原版飞机换成一架攻击机，从原版飞机的进场点沿原航向飞来；
+   - 炮击、导弹、卫星激光这类「天降弹」没有飞机，保持原版；
+   - 没生成 SGO、或这一关没能预载时，自动退回原版轰炸机。
 
 所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。
 
@@ -115,6 +125,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/plugin.cpp`：入口、配置、日志、代码签名检查。
 - `src/crew.cpp`：NPC 上车（Vehicle_RideAi）、顶替（slot 49 FindSeat + 上车提示访问器）、每帧入口（slot 55 串接）。
 - `src/heli.cpp`：直升机自动驾驶。
+- `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管；`tools/make_jets.py`：生成战斗机 SGO（`testrange/sgowrite.py` 读写 SGO）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
 - 构建：`build.cmd`（MSVC x64 + Ninja，RelWithDebInfo），产物输出到 `dist/Mods/Plugins/`。
