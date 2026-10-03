@@ -602,7 +602,22 @@ def as_mission_sgo(data: bytes) -> bytes:
     for i, (_, at, idx) in enumerate(sorted(entries)):
         p = name_off + i * 8
         struct.pack_into('<iI', buf, p, at - p, idx)
-    return bytes(buf)
+    return _without_ai_obstacle(bytes(buf))
+
+
+def _without_ai_obstacle(data: bytes) -> bytes:
+    """`data` without its `ai_obstacle` member. A script-placed vehicle is AI-driven, and only then does the
+    game (EDF+62C990, under EDF+6747F2's flag test) look each ai_obstacle name up in the vehicle's collision
+    bodies (+0xE40) and read the result without a null check. The call-in Grape 401 lists one the placed
+    vehicle does not have (2026-10-04: EXCEPTION at EDF+62CB9C, rbx=5 entries, r15=4); the stock game never
+    places a 401 from a script, so it never hit it. Without the member the loop is skipped (as for the 502,
+    which has none). SGOs without it come back unchanged."""
+    import sgowrite
+    version, m = sgowrite.read(data)
+    if 'ai_obstacle' not in m:
+        return data
+    del m['ai_obstacle']
+    return sgowrite.write(version, m)
 
 
 def _sort_dsgo_names(buf: bytearray) -> None:
@@ -710,9 +725,10 @@ def write_jet_guns(game_root: str, game: Game) -> list[str]:
 PORTAL_LASER_STOCK = 'DEMOSATELLITELASER18.SGO'
 # name -> (rounds, gap, size, life, colour, fire sound once)
 PORTAL_LASER_FILES: dict[str, tuple[int, int, float, int, tuple[float, float, float, float], bool]] = {
-    # The aim light: a thin red beam, a round every frame living 6 (so it follows the aim), 4.5 s of rounds at
-    # most (the charge is 4 s; the plugin ends it sooner), no damage (the plugin sets 0).
-    'EDF6VC_PORTAL_SIGHT.SGO': (270, 0, 1.5, 6, (3.0, 0.15, 0.1, 1.0), True),
+    # The aim light: a thin red beam, a round every frame living 6 (so it follows the aim), 12.5 s of rounds at
+    # most (the charge is 12 s, src/carrierlaser.cpp kChargeMs; the plugin ends it sooner), no damage (the
+    # plugin sets 0).
+    'EDF6VC_PORTAL_SIGHT.SGO': (750, 0, 1.5, 6, (3.0, 0.15, 0.1, 1.0), True),
     # The main shot: one wide violet beam living 45 frames (0.75 s); its damage is CarrierLaserDamage.
     'EDF6VC_PORTAL_LASER.SGO': (1, 0, 8.0, 45, (2.5, 0.4, 3.0, 1.0), False),
 }

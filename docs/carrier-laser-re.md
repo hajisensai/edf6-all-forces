@@ -41,10 +41,10 @@ EDF.dll TimeDateStamp 0x678CCB46，均为 RVA。置信度：H = 反汇编直接�
 ## 4. 插件做法
 
 - 派生 SGO（`python tools/make_jets.py`，testrange/gen.py `portal_lasers`）：
-  - `EDF6VC_PORTAL_SIGHT.SGO`：瞄准光，红色细光束，每帧一发、存活 6 帧，最多 270 发；伤害 0。
+  - `EDF6VC_PORTAL_SIGHT.SGO`：瞄准光，红色细光束，每帧一发、存活 6 帧，最多 750 发（12.5 s，盖住 12 s 的充能）；伤害 0。
   - `EDF6VC_PORTAL_LASER.SGO`：主炮，单发、粗 8、存活 45 帧；伤害由插件写（CarrierLaserDamage）。
 - 预载 0x7A3780 后，用 CreateObject 0x11945E0 在目标点生成，然后：owner = 传送舰的 weak-this，伤害写 +0xDC，`+0x2F9 = 1`，+0x300 = 舱口，+0x20 = 目标；瞄准光每帧更新这两点。
-- 充能 4 s，最后 1 s 锁定瞄准点；充能期间舰损失 ≥ CarrierLaserBreak × 最大 HP 或被击落 → 打断。
+- 充能 12 s，最后 1 s 锁定瞄准点；充能期间舰损失 ≥ CarrierLaserBreak × 最大 HP 或被击落 → 打断。
 
 ## 5. 未验证
 

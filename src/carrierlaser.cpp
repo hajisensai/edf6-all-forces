@@ -39,7 +39,7 @@ constexpr unsigned char kObjDeleted=4;
 constexpr float kHatchBelow=20.0f;     // metres under the ship's origin the beams start (the portal's mouth)
 constexpr float kPlayerRange=400.0f;   // the player within this of the ship is its target, else the carrier's deck
 constexpr float kShipRange=1500.0f;    // ships further than this from the carrier never charge
-constexpr ULONGLONG kChargeMs=4000,kLockMs=1000;   // the charge; the aim is held for its last kLockMs
+constexpr ULONGLONG kChargeMs=12000,kLockMs=1000;   // the charge; the aim is held for its last kLockMs
 constexpr ULONGLONG kCoolMinMs=30000,kCoolMaxMs=45000,kFirstMs=12000;   // the gap between a ship's charges; the first after kFirstMs+
 constexpr ULONGLONG kGapMs=6000;       // after any charge ends, no ship starts one for this long
 constexpr ULONGLONG kStaleMs=1500;     // a ship not seen for this long is forgotten
