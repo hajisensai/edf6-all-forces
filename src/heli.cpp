@@ -139,6 +139,8 @@ constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at co
 // the 410s' rotors overlapped and the others had 7 m between them (the 17:25 runs: pairs 9-16 m apart).
 constexpr float kReach410=14.0f,kReachOther=9.0f,kClearAir=20.0f,kSeparationGain=0.8f;
 constexpr float kGroupGap=110.0f,kGroupStep=10.0f;
+// A gun holds fire while a friendly heli is within its reach (Span) plus kFriendMargin of the line of fire.
+constexpr float kFriendMargin=6.0f;
 // With no enemy: while the player travels (see kRoamSpan) the helis escort in a V on their flank,
 // kEscortAhead metres forward: the player's velocity plus kSlotGain m/s per metre off the slot (at most
 // kSlotCatch). Otherwise (standing, or moving about a small area) they fly an ellipse round where the
@@ -431,14 +433,7 @@ float GunRange(const unsigned char* v) noexcept {
 // Would a burst from `from` towards `to` pass within 8 m of the player before reaching the target?
 bool PlayerInLine(const float* from,const float* to) noexcept {
     if(!player.at || GetTickCount64()-player.at>2000)return false;
-    const float d[3]={to[0]-from[0],to[1]-from[1],to[2]-from[2]};
-    const float p[3]={player.pos[0]-from[0],player.pos[1]-from[1],player.pos[2]-from[2]};
-    const float dd=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
-    if(dd<1.0f)return false;
-    const float t=(p[0]*d[0]+p[1]*d[1]+p[2]*d[2])/dd;
-    if(t<0.0f || t>1.0f)return false;
-    const float c[3]={p[0]-d[0]*t,p[1]-d[1]*t,p[2]-d[2]*t};
-    return c[0]*c[0]+c[1]*c[1]+c[2]*c[2]<64.0f;
+    return NearLine(from,to,player.pos,8.0f);
 }
 
 // This heli's flight: the helis flown right now of its type, in `helis` order (the first one leads);
@@ -966,7 +961,7 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
         }
         const float wide=dist>1.0f ? std::atan(kHitRadius/dist) : 1.0f;
         const float cone=(wide>kDoorCone ? wide : kDoorCone)*(g.firing ? kDoorHold : 1.0f);
-        fire=!hold && cfg.heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin && !PlayerInLine(gp,lead);
+        fire=!hold && cfg.heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin && !FriendInLine(gp,lead,v);
     } else g.target=nullptr;
     Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);blk[kDoorPull]=fire ? 1 : 0;
     g.firing=fire;
@@ -1215,7 +1210,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         miss=missOf(gunLead,&gunDist);
         cone=coneAt(cfg.heliFireCone,gunDist);
     }
-    if(engage && cfg.heliFire && !grounded && !land && !hidden && !PlayerInLine(pos,lead)) {
+    if(engage && cfg.heliFire && !grounded && !land && !hidden && !FriendInLine(pos,lead,v)) {
         const bool turret=is409 && gunDist<kTurretReach && aim[1]<pos[1];
         gun=(miss<cone && gunDist<range) || turret;
         if(gun && !h.firing){h.firing=true;h.burstAt=ms;}
@@ -1363,7 +1358,24 @@ bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {
     return ForEachEnemyOf(team,nullptr,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
-bool BurstHitsPlayer(const float* from,const float* to) noexcept { return PlayerInLine(from,to); }
+bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept {
+    const float d[3]={to[0]-from[0],to[1]-from[1],to[2]-from[2]};
+    const float p[3]={point[0]-from[0],point[1]-from[1],point[2]-from[2]};
+    const float dd=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+    if(dd<1.0f)return false;
+    const float t=(p[0]*d[0]+p[1]*d[1]+p[2]*d[2])/dd;
+    if(t<0.0f || t>1.0f)return false;
+    const float c[3]={p[0]-d[0]*t,p[1]-d[1]*t,p[2]-d[2]*t};
+    return c[0]*c[0]+c[1]*c[1]+c[2]*c[2]<radius*radius;
+}
+
+bool FriendInLine(const float* from,const float* to,const void* self) noexcept {
+    if(PlayerInLine(from,to))return true;
+    const ULONGLONG now=GetTickCount64();
+    for(const auto& h:helis)
+        if(h.vehicle && h.vehicle!=self && now-h.seen<2000 && NearLine(from,to,h.pos,Span(h)+kFriendMargin))return true;
+    return JetInLine(from,to,self);
+}
 
 bool CheckHeliProfile() noexcept {
     __try {

@@ -112,15 +112,20 @@ void HeliCrewed(const void* vehicle) noexcept;      // the plugin seated an NPC 
 void HeliFrame(unsigned char* vehicle) noexcept;   // after the stock input, NPC-crewed helicopters only
 bool CheckHeliProfile() noexcept;
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point),
-// every enemy lock point of `vehicle`'s side, and whether a burst from->to passes by the player.
+// every enemy lock point of `vehicle`'s side.
 float MapRay(const float* a,const float* b,float* hit) noexcept;
 using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
-bool BurstHitsPlayer(const float* from,const float* to) noexcept;
+// Whether `point` is within `radius` of the segment from->to (between its ends).
+bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept;
+// Whether a burst from->to would pass by a friend: the player, or a heli or jet the plugin flies other
+// than `self` (heli.cpp, which asks JetInLine for the jets).
+bool FriendInLine(const float* from,const float* to,const void* self) noexcept;
 
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
+bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a flying jet but `self` by the segment
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused or loading
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update

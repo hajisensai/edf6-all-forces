@@ -42,6 +42,9 @@ constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr std::size_t kWeaponLockon=0x6B0,kWeaponSpeed=0x894,kWeaponAlive=0x898,kWeaponGravity=0x8E0,kWeaponAmmo=0xBE8;
 constexpr std::int32_t kHoming=1;
+// The guns are seat weapons 0 and 1 (what 0x2020 fires, testrange/gen.py); after the missile gen.py puts
+// the 506's fuel tank (v_fuel01, its "ammo" ~1e6 burnt by the throttle), which is no gun.
+constexpr std::uint64_t kGunWeapons=2;
 // The stock input (0x6543A0) pushes the body under the ceiling *(*(image+kCeiling)+0x3C) every frame.
 constexpr std::size_t kCeiling=0x20B2998,kCeilingY=0x3C;
 constexpr float kPi=3.14159265f,kG=9.8f,kGravity=14.7f;
@@ -62,9 +65,12 @@ struct Kind {
     float range;                    // m from the anchor it takes targets in
 };
 constexpr Kind kKinds[2]={
-    {150.0f,180.0f,85.0f, 16.0f,20.0f, 5.0f,1.6f, 250.0f, 850.0f,70.0f,1500.0f, 500.0f,60.0f, 700.0f,120.0f, 120.0f,30.0f, 1200.0f},
-    {210.0f,260.0f,110.0f,30.0f,30.0f, 8.0f,3.2f, 320.0f, 950.0f,80.0f,1700.0f, 500.0f,60.0f, 900.0f,150.0f, 160.0f,40.0f, 1800.0f},
+    {150.0f,180.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 250.0f, 850.0f,70.0f,1500.0f, 500.0f,60.0f, 700.0f,120.0f, 120.0f,30.0f, 1200.0f},
+    {210.0f,260.0f,110.0f,15.0f,20.0f, 7.0f,2.4f, 320.0f, 950.0f,80.0f,1700.0f, 500.0f,60.0f, 900.0f,150.0f, 160.0f,40.0f, 1800.0f},
 };
+// m/s^2 of speed lost per g pulled over 1 (induced drag): with thrust that sustains 1 + thrust/kTurnBleed
+// g (strike ~4.3, fighter 6); harder it slows, and the turn tightens, as a wing does.
+constexpr float kTurnBleed=3.0f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on the attitude it should have this fast
 constexpr float kNegG=1.0f;            // g: the most it pushes (lift down the body's up)
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this
@@ -77,6 +83,9 @@ constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
 // pullAlt over the target or gunClose from it, climb back, fly on extendOut and turn in.
 constexpr float kDiveCone=0.52f;
 constexpr float kGunCone=0.035f,kHitRadius=4.0f;   // rad (2 deg), or what puts kHitRadius on the target
+// The guns fire only flying where the nose points (cos 10 deg off): never flank first. And never with a
+// friend (another jet within kJetSpan, a heli, the player) along the rounds' path (FriendInLine).
+constexpr float kGunSlip=0.985f,kJetSpan=20.0f;
 constexpr float kMissileCone=0.2f,kMissileMin=120.0f,kMissileMax=500.0f;
 constexpr ULONGLONG kMissileMs=2500,kPullMs=7000,kExtendMs=12000;
 // Fighter: lead pursuit at the target's speed plus chaseOver; closer than overrun it breaks off
@@ -150,6 +159,7 @@ struct Jet {
     float top;               // m/s it never goes past: its kind's, or a faster bomber's speed
     float prevPos[3];        // where the body was at prevAt (Sense)
     ULONGLONG prevAt,blockedFor;
+    float real;              // m/s the body really flies (game time, smoothed): against Len(vel), what it is told
 };
 Jet jets[16]{};
 
@@ -247,7 +257,7 @@ Arms ReadArms(unsigned char* v) noexcept {
         const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
         if(At<std::int32_t>(w,kWeaponLockon)==kHoming){a.hasMissile=true;a.missiles+=ammo>0 ? ammo : 0;continue;}
         const float speed=At<float>(w,kWeaponSpeed)*60.0f,reach=At<float>(w,kWeaponSpeed)*static_cast<float>(At<std::int32_t>(w,kWeaponAlive));
-        if(!std::isfinite(speed) || speed<=1.0f)continue;
+        if(i>=kGunWeapons || !std::isfinite(speed) || speed<=1.0f)continue;
         a.guns+=ammo>0 ? ammo : 0;
         if(!a.hasGun || speed>a.gunSpeed) {
             a.hasGun=true;a.gunSpeed=speed;
@@ -332,7 +342,8 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     const float accAlong=Dot(acc,dir);
     for(int i=0;i<3;++i)next[i]=dir[i]+(acc[i]-dir[i]*accAlong)*dt/s;
     if(!Normalize(next))std::memcpy(next,dir,12);
-    s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt)-kG*next[1]*dt;
+    const float bleed=pull>kG ? (pull/kG-1.0f)*kTurnBleed : 0.0f;
+    s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt)-(kG*next[1]+bleed)*dt;
     s=Clamp(s,k.minSpeed*0.8f,j.top>0.0f ? j.top : k.attack*1.3f);
     for(int i=0;i<3;++i)j.vel[i]=next[i]*s;
 }
@@ -403,6 +414,7 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
     std::memcpy(j.prevPos,pos,12);j.prevAt=ms;
     // The game steps a frame at a time: a slow frame moves the body no more than 1/60 s of the way.
     const float wall=static_cast<float>(since)*0.001f,s=Len(j.vel),dt=wall<1.0f/60.0f ? wall : 1.0f/60.0f;
+    if(since)j.real+=(Len(moved)/(static_cast<float>(since)*0.001f)-j.real)*0.1f;
     if(!since || !j.ready || s<1.0f)return false;
     const float dir[3]={j.vel[0]/s,j.vel[1]/s,j.vel[2]/s};
     if(Dot(moved,dir)>=s*dt*kBlockedPart){j.blockedFor=0;return false;}
@@ -418,8 +430,11 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
     const float into=Dot(slide,n);
     for(int i=0;i<3;++i)slide[i]-=n[i]*into;
     if(!Normalize(slide)){slide[0]=n[2];slide[1]=0;slide[2]=-n[0];}
-    for(int i=0;i<3;++i)j.vel[i]=slide[i]*s;
-    Log("JET v=%p blocked (%.0f of %.0f m/s)%s: turned along it",j.vehicle,Dot(moved,dir)/dt,s,jet ? " by a jet" : "");
+    // Along it at the speed the body kept (at least the least it flies at), not at the commanded speed:
+    // a jump to that sideways is the snap that slid the body flank first.
+    const float kept=Clamp(Dot(moved,slide)/dt,KindOf(j).minSpeed,s);
+    for(int i=0;i<3;++i)j.vel[i]=slide[i]*kept;
+    Log("JET v=%p blocked (%.0f of %.0f m/s)%s: turned along it at %.0f",j.vehicle,Dot(moved,dir)/dt,s,jet ? " by a jet" : "",kept);
     return true;
 }
 
@@ -605,8 +620,13 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float wide=dist>1.0f ? std::atan(kHitRadius/dist) : 1.0f;
         const Kind& k=KindOf(j);
         const float reach=a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen;
-        gun=gunsOk && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !BurstHitsPlayer(pos,lead);
-        missile=a.missiles>0 && dist>kMissileMin && dist<kMissileMax && miss<kMissileCone && ms-j.missileAt>kMissileMs && !BurstHitsPlayer(pos,lead);
+        const float path[3]={pos[0]+nose[0]*a.gunRange,pos[1]+nose[1]*a.gunRange,pos[2]+nose[2]*a.gunRange};
+        float flight[3]={j.vel[0],j.vel[1],j.vel[2]};
+        const bool straight=Normalize(flight) && Dot(flight,nose)>kGunSlip;
+        gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) &&
+            !FriendInLine(pos,path,v);
+        missile=a.missiles>0 && dist>kMissileMin && dist<kMissileMax && miss<kMissileCone && ms-j.missileAt>kMissileMs &&
+                !FriendInLine(pos,lead,v);
         if(missile)j.missileAt=ms;
     }
     v[kFireGun]=gun;v[kFireMissile]=missile;
@@ -615,8 +635,8 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
 void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,float speed,float clear,ULONGLONG ms) noexcept {
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     const float d=j.target ? std::sqrt((j.aim[0]-pos[0])*(j.aim[0]-pos[0])+(j.aim[1]-pos[1])*(j.aim[1]-pos[1])+(j.aim[2]-pos[2])*(j.aim[2]-pos[2])) : 0.0f;
-    Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f vy=%.1f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d",
-        v,j.fighter ? "fighter" : "strike",kModeNames[static_cast<int>(j.mode)],pos[1],clear,Ceiling(),Len(j.vel),speed,j.vel[1],
+    Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f real=%.0f vy=%.1f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d",
+        v,j.fighter ? "fighter" : "strike",kModeNames[static_cast<int>(j.mode)],pos[1],clear,Ceiling(),Len(j.vel),speed,j.real,j.vel[1],
         j.target,j.flyer ? "(air)" : "",d,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile]);
     // Each weapon's barrel against the nose: the guns must point where the nose does.
@@ -817,6 +837,13 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
             j->bombAlt-target[1],fireDist,At<std::int32_t>(ifc,kIfcShots),load.damage,load.spread);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET bomber launch: fault");return false;}
+}
+
+bool JetInLine(const float* from,const float* to,const void* self) noexcept {
+    const ULONGLONG ms=GameMs();
+    for(const auto& o:jets)
+        if(o.vehicle && o.vehicle!=self && o.prevAt && ms-o.seen<=kStaleMs && NearLine(from,to,o.prevPos,kJetSpan))return true;
+    return false;
 }
 
 bool IsJet(const void* vehicle) noexcept {
