@@ -71,6 +71,12 @@ constexpr float kPitchGain=1.0f;     // extra dip asked per rad the nose lags th
 constexpr float kMaxDip=0.52f;       // rad (30 deg): the deepest dip it aims with, short of full stick
 constexpr float kDipMargin=0.09f;    // rad: back at the station it aims again once the dip is this far under kMaxDip
 constexpr float kLeash=30.0f;        // m the aiming creep may carry it beyond the station
+// Engaged, the map must not be in the way (rays, see Avoid). Aiming, the forward stick holds the nose dip
+// and the heli creeps along the nose, so it cannot brake for a wall: a wall within kAimWall along the
+// nose sends it back to its station instead, and like a target hidden behind terrain or a building
+// (the line to it hits the map more than kLosSlack short), lifts its hover kLosClimb m/s until it sees
+// over (at most kLosMax), easing back down at kLosSink once clear. It does not fire at the wall.
+constexpr float kAimWall=25.0f,kLosSlack=3.0f,kLosClimb=4.0f,kLosSink=1.5f,kLosMax=40.0f;
 constexpr float kStationReached=10.0f;
 constexpr float kTransit=60.0f;      // beyond this from the station it faces the way it flies, not the target
 constexpr float kStandoff=0.6f;      // gunship mode (player aboard): the station is this share of the gun range out
@@ -157,6 +163,7 @@ struct Heli {
     float hold[3];        // where it holds when it has nobody to follow
     float pos[3];         // last position, for the other helis' formation and separation
     bool back;            // engaged: flying back to the station (see Engage), not aiming
+    float losLift;        // metres its engaged hover is raised to see over the map (see kAimWall)
     const void* tracked;  // the target tgtPrev/tgtVel belong to
     float tgtPrev[3],tgtVel[3];
     ULONGLONG playerAt;   // the player fix pVel was last updated from
@@ -574,6 +581,16 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         off=Dist2(pos,h.hold);height=h.hold[1];
     }
     if(!land)Separate(h,pos,want,ms);
+    bool hidden=false,wallAhead=false;
+    if(engage && cfg.heliAvoid && rayOk) {
+        const float nosePt[3]={pos[0]+fwd[0]*kAimWall,pos[1],pos[2]+fwd[2]*kAimWall};
+        wallAhead=CastRay(pos,nosePt)>=0.0f;
+        if(wallAhead)h.back=true;
+        const float seen=CastRay(pos,lead);
+        hidden=seen>=0.0f && seen<dist-kLosSlack;
+    }
+    h.losLift=Clamp(h.losLift+(hidden || wallAhead ? kLosClimb : -kLosSink)*dt,0.0f,kLosMax);
+    if(engage)height+=h.losLift;
     const Avoidance avoid=Avoid(pos,h.vel,want,&height,land);
     if(follow || engage)std::memcpy(h.hold,pos,12);
     const bool aiming=engage && !h.back && dist<range;
@@ -631,8 +648,8 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         if(wide>cone)cone=wide;
     }
     if(engage && cfg.heliFire && !grounded && !land && !PlayerInLine(pos,lead)) {
-        gun=miss<cone && dist<range;
-        missile=cfg.heliMissile && miss<kMissileCone && dist>kMissileMin && dist<cfg.heliRange && ms-h.missileAt>cfg.heliMissileMs;
+        gun=miss<cone && dist<range && !hidden;
+        missile=cfg.heliMissile && !hidden && miss<kMissileCone && dist>kMissileMin && dist<cfg.heliRange && ms-h.missileAt>cfg.heliMissileMs;
         if(missile)h.missileAt=ms;
     }
     if(At<const unsigned char*>(v,0)!=image+kHeli410) {   // 410 fires through per-gunner-seat blocks
@@ -642,12 +659,12 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
-        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f",
+        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f lift=%.0f%s%s",
             v,land ? "land" : engage ? (h.back ? "back" : aiming ? "aim" : "wait") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
             wing,pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
-            speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi,avoid.ahead,avoid.clear);
+            speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi,avoid.ahead,avoid.clear,h.losLift,hidden ? " hidden" : "",wallAhead ? " wall" : "");
     }
 }
 }  // namespace
