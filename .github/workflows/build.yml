@@ -1,9 +1,11 @@
 name: Build
 
-# Builds both plugins (EDF6VehicleCrew.dll, EDF6AutoTurret.dll) on every push and pull request.
-# Push a tag vX.Y.Z to also publish a GitHub Release with the plugins and the data builder; the
-# weapon and object files themselves are derived from the game's data and are built by each player
-# from their own install.
+# EDF 全军出击 (edf6-all-forces): builds both plugins (EDF6VehicleCrew.dll, EDF6AutoTurret.dll) on every
+# push and pull request and packages them with the data builders (tools/, testrange/, autoturret/tools/:
+# the weapon and object files are derived from the game's data, so each player builds them from their own
+# install). Releases, automatically:
+#  - every push to main replaces the rolling prerelease `nightly` (its tag moved to that commit);
+#  - a pushed tag vX.Y.Z publishes that version as the latest release.
 on:
   push:
     branches: ['**']
@@ -13,6 +15,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -26,18 +32,26 @@ jobs:
 
       - name: Check data tools compile
         shell: pwsh
-        run: python -m py_compile (Get-ChildItem autoturret/tools/*.py, autoturret/third_party/edf6-cpk/*.py).FullName
+        run: |
+          $files = git ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk | Where-Object { $_ -like '*.py' }
+          python -m py_compile @files
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Package
         shell: pwsh
         run: |
           $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "build-$($env:GITHUB_SHA.Substring(0,7))" }
-          $name = "EDF6Vehicles-$version"
+          $name = "EDF6AllForces-$version"
           $root = Join-Path 'build' $name
-          New-Item -ItemType Directory -Force "$root/Mods/Plugins", "$root/tools", "$root/third_party/edf6-cpk" | Out-Null
+          New-Item -ItemType Directory -Force "$root/Mods/Plugins" | Out-Null
           Copy-Item dist/Mods/Plugins/EDF6VehicleCrew.dll, dist/Mods/Plugins/EDF6VehicleCrew.ini, dist/Mods/Plugins/EDF6AutoTurret.dll, dist/Mods/Plugins/EDF6AutoTurret.ini "$root/Mods/Plugins/"
-          Copy-Item autoturret/tools/*.py "$root/tools/"
-          Copy-Item autoturret/third_party/edf6-cpk/*.py, autoturret/third_party/edf6-cpk/LICENSE "$root/third_party/edf6-cpk/"
+          # The data builders find each other by relative path (../testrange, ../autoturret/tools): the
+          # tracked files keep the repository's layout.
+          foreach ($f in git ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk) {
+            $to = Join-Path $root $f
+            New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
+            Copy-Item -LiteralPath $f $to
+          }
           Copy-Item README.md, autoturret/LICENSE $root
           Copy-Item autoturret/README.md "$root/README.autoturret.md"
           Copy-Item autoturret/README.zh-CN.md "$root/README.autoturret.zh-CN.md"
@@ -49,9 +63,20 @@ jobs:
           name: ${{ env.PACKAGE }}
           path: build/${{ env.PACKAGE }}.zip
 
+      - name: Publish nightly
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes 2>$null
+          $global:LASTEXITCODE = 0
+          $notes = "main 最新构建（$($env:GITHUB_SHA.Substring(0,7))），每次推送 main 自动更新。正式版见 v* 版本。`n`n$(git log -1 --pretty=%s)"
+          gh release create nightly "build/$env:PACKAGE.zip" --target $env:GITHUB_SHA --prerelease --title "nightly ($($env:GITHUB_SHA.Substring(0,7)))" --notes $notes
+
       - name: Publish release
         if: github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME "build/$env:PACKAGE.zip" --title $env:GITHUB_REF_NAME --generate-notes
+        run: gh release create $env:GITHUB_REF_NAME "build/$env:PACKAGE.zip" --title $env:GITHUB_REF_NAME --generate-notes --latest
