@@ -44,6 +44,9 @@ using PlaneUpdateFn=void(__fastcall*)(unsigned char*,const void*);
 using DeleteFn=void(*)(void*);
 PlaneUpdateFn nextPlaneUpdate=nullptr;
 
+// Launch sources (JetLaunch): an Air Raider's call (its escorts and bombers), a mission's strike.
+const char kRadioSource='r',kMissionSource='m';   // distinct values: identical constants may be folded
+
 // Bombers whose jets fly instead, by their weak-this control block: deleted at their first update.
 const void* doomed[32]{};
 unsigned doomNext=0;
@@ -79,7 +82,7 @@ int LaunchEscorts(int planes,const float* target) noexcept {
         const float off=(static_cast<float>(i)-static_cast<float>(n-1)*0.5f)*kWingSpacing;
         const float from[3]={target[0]-dir[0]*kApproach+side[0]*off,target[1]+kAboveTarget+kWingStep*static_cast<float>(i),
                              target[2]-dir[2]*kApproach+side[2]*off};
-        if(JetLaunch(true,from,dir,target,cfg.jetSortieSec))++launched;
+        if(JetLaunch(true,from,dir,target,cfg.jetSortieSec,&kRadioSource))++launched;
     }
     Log("AIRSTRIKE escorts: %d/%d fighters (enemies there: %d flying, %d on the ground) at (%.0f,%.0f,%.0f)",
         launched,n,census.flyers,census.ground,target[0],target[1],target[2]);
@@ -99,11 +102,11 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
 }
 
 // After the stock init of `plane`: its jet, and the plane doomed (see the file comment).
-void TakeOver(const char* who,unsigned char* plane,const float* target,const BombLoad& load) noexcept {
+void TakeOver(const char* who,unsigned char* plane,const float* target,const BombLoad& load,const void* source) noexcept {
     __try {
         const float* from=reinterpret_cast<const float*>(plane+kPosition);
         const float* heading=reinterpret_cast<const float*>(plane+kPlaneVelocity);
-        if(!std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec))return;
+        if(!std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source))return;
         doomed[doomNext++%32]=At<const void*>(plane,kSelfCtrl);
         Log("AIRSTRIKE %s bomber %p: its jet drops the bombs",who,plane);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -112,13 +115,13 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
 void __fastcall RadioBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                 float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(cfg.enabled && cfg.jetAirRaider)TakeOver("air raider",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed});
+    if(cfg.enabled && cfg.jetAirRaider)TakeOver("air raider",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kRadioSource);
 }
 
 void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                   float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(cfg.enabled && cfg.jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed});
+    if(cfg.enabled && cfg.jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
 }
 
 // BombingPlane slot 5 (update): a doomed plane is deleted instead.

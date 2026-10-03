@@ -83,9 +83,9 @@ constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
 // pullAlt over the target or gunClose from it, climb back, fly on extendOut and turn in.
 constexpr float kDiveCone=0.52f;
 constexpr float kGunCone=0.035f,kHitRadius=4.0f;   // rad (2 deg), or what puts kHitRadius on the target
-// The guns fire only flying where the nose points (cos 10 deg off): never flank first. And never with a
-// wingman (another jet within kJetSpan) or the player along the rounds' path (FriendInLine); other friends
-// are hit as the stock game hits them.
+// The guns fire only flying where the nose points (cos 10 deg off): never flank first. And never with the
+// player along the rounds' path, or a wingman (kJetSpan) when its rounds cannot pass through (FriendInLine);
+// other friends are hit as the stock game hits them.
 constexpr float kGunSlip=0.985f,kJetSpan=20.0f;
 constexpr float kMissileCone=0.2f,kMissileMin=120.0f,kMissileMax=500.0f;
 constexpr ULONGLONG kMissileMs=2500,kPullMs=7000,kExtendMs=12000;
@@ -111,7 +111,21 @@ constexpr ULONGLONG kBlockedMs=250;
 // side: walls at kWorldWall keep the jets in, and one past kWorldGone is deleted.
 constexpr std::size_t kAreaInset=0xE00;
 constexpr float kNoInset=-1.0e6f,kWorldWall=2400.0f,kWorldGone=2700.0f;
-constexpr ULONGLONG kStaleMs=1500;   // game ms: a table entry not flown this long is free
+constexpr ULONGLONG kStaleMs=1500;
+// Flights (docs/bullet-pass-re.md): the jets a mission places are one flight; launched jets from one
+// source (an Air Raider's call, a mission's strike) within kFlightGapMs of the last are one. A jet's rounds
+// pass through the other jets of its flight: the bullets' candidate collector (vtable kAddBodySlot, slot 0
+// addBody kAddBody) leaves out the body of a wingman (kBodyObject: body id -> object) when the bullet's
+// owner (core = collector+kCollectorCore, owner at core+kBulletOwner) is a jet of the same flight; all
+// else is the stock function's (friendly fire stays as it is).
+constexpr unsigned kPlacedFlight=1;
+constexpr ULONGLONG kFlightGapMs=20000;
+constexpr unsigned kAddBodySlot=0x179E128,kAddBody=0x232AA0,kBodyObject=0x108260;
+constexpr std::size_t kCollectorCore=0x88,kBulletOwner=0x9A8;
+const unsigned char kAddBodySig[]={0x48,0x89,0x4C,0x24,0x08,0x53,0x55,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,
+                                   0x83,0xEC,0x30,0x4C,0x8B,0xF1,0x45,0x33,0xE4,0x44,0x89,0xA4,0x24,0x80,0x00,0x00};
+const unsigned char kBodyObjectSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x05};
+const unsigned char kBodyObjectSig2[]={0x8B,0xD1,0x48,0x8D,0x48,0x10,0xE8};   // at +11   // game ms: a table entry not flown this long is free
 constexpr ULONGLONG kFlyerMemoMs=500;
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus kReact seconds of
 // sink: the time to roll the lift round before it pulls.
@@ -160,6 +174,7 @@ struct Jet {
     bool reap;               // withdrawn: delete from another object's update (JetReap)
     const char* why;         // why it withdrew
     bool launched;           // made by JetLaunch: anchor is its strike point
+    unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
     ULONGLONG fuelMs;
     unsigned char* ifc;      // the bomb bay (see kIfcCtor), or nullptr
     float bombAt[3],bombDir[3],bombAlt,bombSpeed,fireDist,reach;
@@ -777,7 +792,18 @@ unsigned char* SpawnJet(int kind,const float* m) noexcept {
 
 namespace {
 // JetLaunch's work: the new jet's entry, flying along `heading` at `speed`, or nullptr.
-Jet* Launch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed) noexcept {
+// The flight a jet launched now from `source` joins (see kFlightGapMs).
+unsigned FlightFor(const void* source,ULONGLONG ms) noexcept {
+    static struct { const void* source; unsigned flight; ULONGLONG at; } last[4]{};
+    static unsigned next=kPlacedFlight+1;
+    for(auto& l:last)
+        if(l.source==source && ms-l.at<kFlightGapMs){l.at=ms;return l.flight;}
+    auto& l=last[next%4];
+    l.source=source;l.flight=next++;l.at=ms;
+    return l.flight;
+}
+
+Jet* Launch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source) noexcept {
     const int kind=fighter ? 1 : 0;
     if(!spawnOk || !cfg.jetPilot || !preloaded[kind] || !At<void*>(image,kObjectMgr))return nullptr;
     const ULONGLONG ms=GameMs();
@@ -795,8 +821,9 @@ Jet* Launch(bool fighter,const float* from,const float* heading,const float* tar
     *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);j->fighter=fighter;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;
     QueryPerformanceCounter(&j->last);
     std::memcpy(j->anchor,target,12);j->mode=Mode::patrol;j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
+    j->flight=FlightFor(source,ms);
     for(int i=0;i<3;++i)j->vel[i]=fwd[i]*speed;
-    Log("JET v=%p launched: %s from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d",v,fighter ? "fighter" : "strike",
+    Log("JET v=%p launched: %s flight %u from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d",v,fighter ? "fighter" : "strike",j->flight,
         start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
     return j;
 }
@@ -824,12 +851,12 @@ unsigned char* BayMake(const BombLoad& l,float perFrame,float* fireDist) noexcep
 }
 }  // namespace
 
-bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec) noexcept {
-    __try { return Launch(fighter,from,heading,target,fuelSec,kKinds[fighter ? 1 : 0].cruise)!=nullptr; }
+bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept {
+    __try { return Launch(fighter,from,heading,target,fuelSec,kKinds[fighter ? 1 : 0].cruise,source)!=nullptr; }
     __except(EXCEPTION_EXECUTE_HANDLER){Log("JET launch: fault");return false;}
 }
 
-bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec) noexcept {
+bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec,const void* source) noexcept {
     if(!bayOk)return false;
     __try {
         const Kind& k=kKinds[0];
@@ -839,7 +866,7 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
         float fireDist=0.0f;
         unsigned char* ifc=BayMake(load,speed/60.0f,&fireDist);
         if(!ifc)return false;
-        Jet* j=Launch(false,from,heading,target,fuelSec,speed);
+        Jet* j=Launch(false,from,heading,target,fuelSec,speed,source);
         if(!j){BayFree(ifc);return false;}
         float dir[3]={heading[0],0.0f,heading[2]};
         if(!Normalize(dir)){dir[0]=0;dir[2]=1;}
@@ -852,12 +879,62 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET bomber launch: fault");return false;}
 }
 
+namespace {
+bool passOk=false;
+}  // namespace
+
+// Only without the pass-through (passOk): a wingman of `self`'s flight by the segment.
 bool JetInLine(const float* from,const float* to,const void* self) noexcept {
+    if(passOk)return false;
     const ULONGLONG ms=GameMs();
+    const Jet* me=nullptr;
+    for(const auto& o:jets)if(o.vehicle==self)me=&o;
+    if(!me)return false;
     for(const auto& o:jets)
-        if(o.vehicle && o.vehicle!=self && o.prevAt && ms-o.seen<=kStaleMs && NearLine(from,to,o.prevPos,kJetSpan))return true;
+        if(o.vehicle && &o!=me && o.flight==me->flight && o.prevAt && ms-o.seen<=kStaleMs && NearLine(from,to,o.prevPos,kJetSpan))return true;
     return false;
 }
+
+namespace {
+using AddBodyFn=void(__fastcall*)(void*,std::uint32_t);
+using BodyObjectFn=const void*(__fastcall*)(std::uint32_t);
+AddBodyFn nextAddBody=nullptr;
+struct PassLog { ULONGLONG at; unsigned passed,strangers; } passLog{};
+
+const Jet* FlownJet(const void* v,ULONGLONG ms) noexcept {
+    if(!v)return nullptr;
+    for(const auto& j:jets)if(j.vehicle==v && ms-j.seen<=kStaleMs)return &j;
+    return nullptr;
+}
+
+// Whether the bullet whose candidate collector this is, fired by a jet, would take in `body` of a wingman.
+bool Wingman(void* collector,std::uint32_t body) noexcept {
+    const ULONGLONG ms=GameMs();
+    bool any=false;
+    for(const auto& j:jets)any=any || (j.vehicle && ms-j.seen<=kStaleMs);
+    if(!any)return false;
+    const auto core=At<const unsigned char*>(collector,kCollectorCore);
+    if(!core)return false;
+    const void* const owner=At<const void*>(core,kBulletOwner);
+    const Jet* target=FlownJet(reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body),ms);
+    if(!target)return false;
+    const Jet* shooter=FlownJet(owner,ms);
+    const bool pass=shooter && shooter!=target && shooter->flight==target->flight;
+    if(pass)++passLog.passed;
+    else if(!shooter && owner)++passLog.strangers;
+    if(cfg.debug && ms-passLog.at>2000 && (passLog.passed || passLog.strangers)) {
+        Log("BULLET through wingmen: %u candidates passed, %u near a jet from a non-jet owner (last %p)",passLog.passed,passLog.strangers,owner);
+        passLog=PassLog{ms,0,0};
+    }
+    return pass;
+}
+
+void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
+    bool pass=false;
+    __try { pass=Wingman(collector,body); } __except(EXCEPTION_EXECUTE_HANDLER) { pass=false; }
+    if(!pass)nextAddBody(collector,body);
+}
+}  // namespace
 
 bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr);
@@ -873,7 +950,7 @@ void JetFrame(unsigned char* v) noexcept {
         j=FreeSlot(v,ms);
         if(!j)return;   // 16 jets flying: this one hovers until a slot frees
         *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->fighter);j->bornAt=j->modeAt=ms;j->last=now;
-        std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->fuelMs=static_cast<ULONGLONG>(cfg.jetFuelSec)*1000;
+        std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->flight=kPlacedFlight;j->fuelMs=static_cast<ULONGLONG>(cfg.jetFuelSec)*1000;
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,j->fighter ? "fighter" : "strike",At<float>(v,kHp),Ceiling());
     }
     j->seen=ms;
@@ -1008,7 +1085,15 @@ bool InstallJets() noexcept {
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
         bayOk=spawnOk;
         for(const auto& b:kBaySigs)bayOk=bayOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
-        Log("HOOK jets physics=%d spawn=%d bay=%d",physicsOk,spawnOk,bayOk);
+        const auto passSlot=reinterpret_cast<void**>(image+kAddBodySlot);
+        if(Matches(kAddBody,kAddBodySig,sizeof(kAddBodySig)) && Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) &&
+           Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2)) && *passSlot) {
+            void* const was=*passSlot;
+            if(was!=image+kAddBody)Log("JET bullets: addBody chaining onto %p (another plugin)",was);
+            nextAddBody=reinterpret_cast<AddBodyFn>(was);
+            passOk=PatchVtableSlot(passSlot,was,reinterpret_cast<void*>(&AddBodyHook));
+        }
+        Log("HOOK jets physics=%d spawn=%d bay=%d wingmenPass=%d",physicsOk,spawnOk,bayOk,passOk);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

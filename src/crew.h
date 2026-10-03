@@ -125,7 +125,7 @@ bool FriendInLine(const float* from,const float* to,const void* self) noexcept;
 
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
-bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a flying jet but `self` by the segment
+bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a wingman in the way (no pass-through)
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused or loading
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
@@ -133,13 +133,15 @@ bool InstallJets() noexcept;
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
 // be made (not preloaded this mission, profile mismatch): the caller keeps the stock behaviour then.
-bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec) noexcept;
+// `source`: what launched it (any fixed address per kind of source); jets from one source in a row fly
+// as one flight, whose rounds pass through each other.
+bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };
 // A strike jet that flies the bomber's run from `from` along `heading` over `target` and drops its bombs
 // itself; false (the caller keeps the stock bomber) when it or its bay cannot be made.
-bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec) noexcept;
+bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec,const void* source) noexcept;
 // Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames, heli.cpp).
 bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
 
