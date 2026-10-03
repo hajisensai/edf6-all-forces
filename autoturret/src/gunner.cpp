@@ -390,6 +390,58 @@ void LogSkip(const unsigned char* vehicle,const char* why) noexcept {
         At<std::uint32_t>(vehicle,kSeatCount),static_cast<unsigned long long>(At<std::uint64_t>(vehicle,kTriggerCount)));
 }
 
+// The seat's second weapon (holder 1): the Titan M2/M3 side missiles (Weapon_VehicleShoot,
+// MissileBullet01, LockonType 1). The game locks them itself, NPC or empty seat alike (the lock tick
+// 0x6963A0 in every weapon update), along the main turret's yaw (they hang on smorkG_l/r under
+// cannon_main), and a pull fires as many rounds as there are locks (0x690C48: burst = +0xC68), then
+// cools 720 frames; with no lock the fire step returns at once (0x690C3D). So an AI seat pulls only
+// once the locks are full (+0x6DC, min(ammo, burst)) or have stopped growing for kMissileSettleMs,
+// never mid-burst (+0xE18), and never with the HoldTime (300 frames) about to drop them.
+// The other second weapons (the grenades, LockonType 0) leave along the main turret too, which the
+// side gunner can't aim: left to the player.
+constexpr std::size_t kLockonType=0x6B0,kLockMax=0x6DC,kLocked=0xC68,kBurstLeft=0xE18;
+constexpr std::int32_t kHoming=1;
+constexpr ULONGLONG kMissileSettleMs=600,kMissileHoldMs=4000;
+struct MissileLock { const void* weapon; std::uint64_t count; ULONGLONG grewAt,firstAt; };
+MissileLock missileLocks[32]{};
+
+MissileLock& LockFor(const void* weapon) noexcept {
+    MissileLock* slot=&missileLocks[0];
+    for(auto& m:missileLocks) {
+        if(m.weapon==weapon)return m;
+        if(m.grewAt<slot->grewAt)slot=&m;
+    }
+    *slot=MissileLock{weapon,0,0,0};
+    return *slot;
+}
+
+void FireMissiles(unsigned char* vehicle,const unsigned char* seat,unsigned s) noexcept {
+    const auto holders=At<const unsigned char* const*>(seat,kSeatWeapons);
+    if(At<std::uint64_t>(seat,kSeatWeaponCount)<2 || !Readable(holders,16) || !Readable(holders[1],kHolderWeapon+8))return;
+    const auto weapon=At<const unsigned char*>(holders[1],kHolderWeapon);
+    if(!Readable(weapon,kBurstLeft+4) || At<std::int32_t>(weapon,kLockonType)!=kHoming)return;
+    const auto triggers=At<unsigned char*>(vehicle,kTriggers);
+    const auto count=At<std::uint64_t>(vehicle,kTriggerCount);
+    if(count>16 || !Readable(triggers,count*kTriggerStride))return;
+    unsigned char* trigger=nullptr;
+    for(std::uint64_t i=0;i<count && !trigger;++i)
+        if(At<const unsigned char*>(triggers+i*kTriggerStride,kTriggerWeapon)==weapon)trigger=triggers+i*kTriggerStride;
+    if(!trigger)return;
+    MissileLock& m=LockFor(weapon);
+    const auto now=GetTickCount64();
+    const auto locked=At<std::uint64_t>(weapon,kLocked);
+    if(locked==0 || locked>64 || At<std::int32_t>(weapon,kWeaponAmmo)<=0 || At<std::int32_t>(weapon,kBurstLeft)>0) {
+        m.count=0;m.firstAt=0;return;
+    }
+    if(locked!=m.count){m.grewAt=now;if(!m.count)m.firstAt=now;m.count=locked;}
+    const auto full=static_cast<std::uint64_t>(At<std::int32_t>(weapon,kLockMax));
+    if(locked<full && now-m.grewAt<kMissileSettleMs && now-m.firstAt<kMissileHoldMs)return;
+    reinterpret_cast<TriggerFn>(image+kPullTrigger)(trigger);
+    if(cfg.debug)Log("GUNNER v=%p seat=%u missiles: %llu locked (of %llu), ammo=%d",vehicle,s,
+                     static_cast<unsigned long long>(locked),static_cast<unsigned long long>(full),At<std::int32_t>(weapon,kWeaponAmmo));
+    m.count=0;m.firstAt=0;
+}
+
 bool Wanted(Crew c) noexcept { return c==Crew::player ? cfg.gunnerAssist : c!=Crew::remote && cfg.gunnerAi; }
 
 void Gunners(unsigned char* vehicle) noexcept {
@@ -409,6 +461,7 @@ void Gunners(unsigned char* vehicle) noexcept {
     const float down=Down(vehicle);
     for(unsigned s=1;s<kGunnerSeats;++s) {
         if(Wanted(crew[s]))SteerSeat(vehicle,s,crew[s]==Crew::player ? Crew::player : Crew::ai,down);
+        if(Wanted(crew[s]) && crew[s]!=Crew::player)FireMissiles(vehicle,seats+s*kSeatStride,s);
     }
 }
 
