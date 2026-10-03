@@ -18,6 +18,11 @@ constexpr unsigned kGameStatus=0x20B2890,kPreloadPlayer=0x59DE50,kCreateLocal=0x
 constexpr unsigned kReloadAll=0x5A1060;   // (SoldierBase*): reload-complete on each weapon in +0x1950[+0x1960]
 constexpr std::size_t kWeaponList=0x1950,kWeaponCount=0x1960;
 constexpr unsigned kPreloadCalls[]={0x1B8F52,0x225FB5};
+// Online (GameStatus+0x38 != -1) the scripts' PreloadPlayerResource (0x1B8CC0) preloads each session
+// player through 0x59DC90 instead and never reaches 0x1B8F52; the jets are preloaded there too, or an
+// airstrike takeover finds nothing preloaded online and the stock bombers come.
+constexpr unsigned kPreloadSession=0x59DC90;
+constexpr unsigned kSessionCalls[]={0x1B8E98,0x225FAC};
 constexpr unsigned kCreateCalls[]={0xA153A,0xA1879,0x1DC539,0x22AE3D,0x5A51C5};
 // GameStatus: per local player (stride 0x3E60) the class, then 6 weapon ids per class;
 // per weapon id (stride 12) a flags word and 8 star bytes.
@@ -27,7 +32,7 @@ constexpr int kSlotsPerClass[4]={4,4,5,6};
 constexpr int kMaxWeapon=0x800;   // GameStatus has room for this many weapon records
 
 wchar_t loadoutPath[MAX_PATH]{};
-Fn preloadOrig=nullptr,createOrig=nullptr;
+Fn preloadOrig=nullptr,createOrig=nullptr,sessionOrig=nullptr;
 void(__fastcall* reloadAll)(void*)=nullptr;
 
 struct Loadout { int cls=-1; int weapon[6]{-1,-1,-1,-1,-1,-1}; int stars=-1; };
@@ -97,6 +102,12 @@ std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uin
     return result;
 }
 
+std::uintptr_t __fastcall SessionPreloadHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
+    const auto result=sessionOrig(a,b,c,d);
+    PreloadJets();
+    return result;
+}
+
 // (slot, transform, mode): mode 1/2 are the scripts' CreatePlayer_NoWeapon / _InitWeapon; leave those alone.
 // The new soldier's weapon list must look like one before the game's own loop walks it.
 void Refill(std::uintptr_t soldier) noexcept {
@@ -138,6 +149,12 @@ bool InstallLoadout(const wchar_t* pluginIni) noexcept {
     auto slash=wcsrchr(loadoutPath,L'\\');
     if(!slash)return false;
     wcscpy_s(slash+1,MAX_PATH-(slash+1-loadoutPath),L"EDF6TestRange.loadout.ini");
+    static const unsigned char session[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x81,0xEC,0x80,0x00,0x00,0x00};
+    if(Matches(kPreloadSession,session,sizeof(session))) {
+        sessionOrig=reinterpret_cast<Fn>(image+kPreloadSession);
+        const int n=Redirect(kSessionCalls,std::size(kSessionCalls),kPreloadSession,reinterpret_cast<void*>(&SessionPreloadHook));
+        Log("HOOK online jet preload=%d/%zu",n,std::size(kSessionCalls));
+    } else Log("HOOK online jet preload: profile mismatch");
     static const unsigned char preload[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57};
     static const unsigned char create[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x60,0x41,0x8B,0xD8,0x48,0x8B,0xFA};
     if(!Matches(kPreloadPlayer,preload,sizeof(preload)) || !Matches(kCreateLocal,create,sizeof(create))) {
