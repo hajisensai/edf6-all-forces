@@ -111,6 +111,11 @@ void LoadConfig() noexcept {
     n.jetSortieSec=GetPrivateProfileIntW(L"VehicleCrew",L"JetSortieSec",n.jetSortieSec,iniPath);
     n.jetAirRaider=ReadBool(L"JetAirRaider",n.jetAirRaider);
     n.jetMissionStrike=ReadBool(L"JetMissionStrike",n.jetMissionStrike);
+    n.groundPilot=ReadBool(L"GroundPilot",n.groundPilot);
+    n.groundFollow=ReadFloat(L"GroundFollow",n.groundFollow);
+    n.groundRange=ReadFloat(L"GroundRange",n.groundRange);
+    n.groundLeash=ReadFloat(L"GroundLeash",n.groundLeash);
+    n.groundFire=ReadBool(L"GroundFire",n.groundFire);
     cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
@@ -120,6 +125,8 @@ void LoadConfig() noexcept {
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d",cfg.heliSpeed,cfg.heliAgility,cfg.heliYawRate,cfg.heliDoorGuns);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",cfg.jetPilot,cfg.jetFuelSec,
         cfg.jetSortieSec,cfg.jetAirRaider,cfg.jetMissionStrike);
+    Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",cfg.groundPilot,cfg.groundFollow,
+        cfg.groundRange,cfg.groundLeash,cfg.groundFire);
 }
 
 FILETIME IniStamp() noexcept {
@@ -201,6 +208,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(!IdentifyImage(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll");return false;}
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
     Log("HELI profile=%d",CheckHeliProfile());
+    Log("GROUND profile=%d",CheckGroundProfile());
     InstallLoadout(iniPath);   // independent of the crew hooks
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     return InstallCrew();   // never unload code a patched slot points at
