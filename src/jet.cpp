@@ -1110,10 +1110,37 @@ void ClearGround(float* p) noexcept {
 
 // CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not
 // a jet after all (an SGO without the mark), or nullptr.
+// The heli's "body" part: its init (0x64E9D1) looks the part up by that name in the vehicle's parts
+// (vehicle+0x1320, 0x6EA4B0(parts, name) -> index or -1) and keeps the index at +0x1530, which slot 61
+// mode 1 (0x650119, reached online through slot 5) reads unchecked: -1 -> a null part -> crash at
+// 0x650137 (2026-10-03, a fighter in an online mission). The jets' fuselage bone is their model's own
+// (bomber501 / bomber401; the carrier and the drone call theirs body), so it is looked up by that.
+constexpr unsigned kFindPart=0x6EA4B0,kBodyPartUse=0x650119,kBodyPartInit=0x64E9C9;
+constexpr std::size_t kParts=0x1320,kBodyPart=0x1530;
+const unsigned char kFindPartSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x56,0x48,0x83,0xEC,0x50};
+const unsigned char kBodyPartUseSig[]={0x8B,0x81,0x30,0x15,0x00,0x00};
+const unsigned char kBodyPartInitSig[]={0x49,0x8D,0x8C,0x24,0x20,0x13,0x00,0x00};
+const wchar_t* const kFuselageBones[]={L"bomber501",L"bomber401",L"body"};
+bool bodyPartOk=false;
+using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
+
+void FixBodyPart(unsigned char* v) noexcept {
+    if(!bodyPartOk || At<std::int32_t>(v,kBodyPart)!=-1)return;
+    for(const auto name:kFuselageBones) {
+        const auto i=reinterpret_cast<FindPartFn>(image+kFindPart)(v+kParts,name);
+        if(i<0)continue;
+        Put<std::int32_t>(v,kBodyPart,i);
+        if(cfg.debug)Log("JET v=%p body part: %ls (%d)",v,name,i);
+        return;
+    }
+    Log("JET v=%p has no body part (online it would crash)",v);
+}
+
 unsigned char* SpawnJet(int body,const float* m) noexcept {
     InitParam param{image+kInitParamVtable,{}};
     unsigned char* v=reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,kJetSgo[body],&param);
     if(!v)return nullptr;
+    FixBodyPart(v);
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
     reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
     if(IsJetVehicle(v,nullptr))return v;
@@ -1518,6 +1545,9 @@ bool InstallJets() noexcept {
         spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
         bayOk=spawnOk;
+        bodyPartOk=spawnOk && Matches(kFindPart,kFindPartSig,sizeof(kFindPartSig)) &&
+                   Matches(kBodyPartUse,kBodyPartUseSig,sizeof(kBodyPartUseSig)) && Matches(kBodyPartInit,kBodyPartInitSig,sizeof(kBodyPartInitSig));
+        if(!bodyPartOk)spawnOk=false;   // a jet without its body part crashes online: none at all
         for(const auto& b:kBaySigs)bayOk=bayOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
         const auto passSlot=reinterpret_cast<void**>(image+kAddBodySlot);
         if(Matches(kAddBody,kAddBodySig,sizeof(kAddBodySig)) && Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) &&
@@ -1527,7 +1557,7 @@ bool InstallJets() noexcept {
             nextAddBody=reinterpret_cast<AddBodyFn>(was);
             passOk=PatchVtableSlot(passSlot,was,reinterpret_cast<void*>(&AddBodyHook));
         }
-        Log("HOOK jets physics=%d spawn=%d bay=%d wingmenPass=%d",physicsOk,spawnOk,bayOk,passOk);
+        Log("HOOK jets physics=%d spawn=%d bay=%d wingmenPass=%d bodyPart=%d",physicsOk,spawnOk,bayOk,passOk,bodyPartOk);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
