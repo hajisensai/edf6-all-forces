@@ -192,3 +192,50 @@ bomber401 是飞翼（半宽 26 m），不适合当战斗机。
 4. v506_heli 是同一套约定：尾桨 `tailRotor` 在 z = −7.15，后轮 `rearWheelSus` 在 z = −7.25，所以机头是 +Z。这和插件把 `veh+0x80` 当前向的做法一致。
 
 对插件的影响：直接把速度方向写进 row2（`+0x80`）即可，row0 = row1 × row2，不要取反。bomber501 包围盒中心 z = +2.6 只说明前后不对称，这个结论不依赖它。
+
+## 6. 空中航母的推力矢量舱（V508 的四个 booster）
+
+插件实现：`src/jet.cpp` `Thrusters()`、`kThrustBack` 一段注释。数据来源：`python tools/mdb.py dump V508_TRANSPORT.MRAB`，`V508_TRANSPORT.SGO` / `V508_TRANSPORT.CAS`（Root.cpk 只读），`tools/edfre.py` 查字符串。
+
+### 骨骼（H）
+
+`v508_transport.mdb`：`mdl → globalSRT → body → boosterB_l / boosterB_r / boosterF_l / boosterF_r`，另有网格骨骼 `v508_transport`（挂在 `mdl` 下）。
+
+| 骨骼 | 绑定局部矩阵（未缩放） | 包围盒半尺寸 / 中心（骨骼自身坐标） |
+|---|---|---|
+| boosterB_l / _r | 旋转 = 单位阵，平移 (±6.32, 4.50, −19.57) | (2.41, 2.22, 4.17) / (±2.55, 0, −0.70) |
+| boosterF_l / _r | 旋转 = 单位阵，平移 (±13.57, 3.47, 2.64) | (2.41, 4.92, 8.13) / (±2.58, 0, −0.71) |
+
+- 骨骼原点就是舱的转轴（挂点），绑定姿态是**水平**的（舱长轴沿局部 z，机头 +z）。
+- 航母模型是这个 mdb ×1.6（`tools/jet_models.py`），只改平移，旋转不变，所以下面的角度原样适用。
+- 名字带 `_l` 的在 +x。插件不依赖 l/r 的含义，按绑定平移的 x 正负决定偏航差动的方向。
+
+### 原版怎么动它们：只有 CAS 动画片段（H）
+
+- EDF.dll 里**没有** `boosterF_l` 等任何 booster 骨骼名（窄、宽字符串都查过，只有无关的 `booster`）。Transporter508（`xgs_scene_object_class`）不按名字用代码驱动这些骨骼。
+- `V508_TRANSPORT.CAS` 里的片段：`default`、`hover_start`、`hover_end`、`fly`（还有 `t_fly` / `t_hover_start` / `t_hover_end`）。
+- 四根 booster 的轨道都是绕局部 X 的四元数 (x, 0, 0, w)：
+  - `hover_start`：(0,0,0,1) → (−0.7071, 0, 0, 0.7071)，也就是 0° → **−90°**，末尾有一点过冲（−0.7117）再回到 −90°。
+  - `hover_end`：−90° → 0°。
+- 按 DirectX 行向量约定，绕 X 转 θ 是 `[[1,0,0],[0,c,s],[0,−s,c]]`，和 `Elevons()` 用的 `local = Rx(θ) × bind` 同形（M：四元数转矩阵的约定按 DirectX 推断，没有反汇编 CAS 求值代码）。
+- θ = −90° 时，舱的 +z（机头）转到父骨骼 +y：机头朝上、喷口朝下，推力沿机身向上，是悬停姿态；θ = 0 是平飞姿态（M：方向由上面的约定推出）。
+- SGO 里还有 `boosts`（6 条：名字、两个 float、一个开关），多半是喷口特效的挂点表，属于 Transporter508 类，航母用的 V506 壳不会读它（L：没有追代码）。
+
+### 航母为什么从来不动舱（H）
+
+- 航母的 SGO 是 V506 改的（`testrange/gen.py` `jet_sgo`）：`animation_model = [航母 mrab, v506_heli.cas, 改过的 V506 MAB]`。V508 的 CAS 根本没加载，`hover_start` 永远不会播放。
+- V506 的 CAS 只驱动它自己的节点名（`body` / `rotor` / `tailRotor` 等），booster 骨骼没有轨道，局部矩阵一直是绑定值。
+
+### 插件直接写骨骼局部矩阵是可行的（H）
+
+- 方法同升降副翼（`docs/mdb-format.md` §3）：骨骼记录 `+0x70` 写 `Rx(θ) × bind`，引擎每帧 `world = local × parent.world`。
+- 证据：本机 `EDF6VehicleCrew.log` 里 `elevons: found` 出现 236 次，「rewritten by the game between frames」0 次——没有动画轨道的骨骼，局部矩阵不会被游戏改回去。推力舱沿用同一检测并会记日志。
+- 画面上的效果（舱是否真的转、转向是否与预期一致）**未在游戏里看过**（L）。
+
+### 插件的映射
+
+- 推力向量 T = Hover 给的加速度 + 重力 + 演示用阻力 `kThrustDrag × 速度`（插件直接设速度，没有阻力；不加的话匀速飞行时舱会竖着）。
+- T 换到机身坐标：`θ = atan2(−T·up, T·forward)`，限制在 [−110°, 0°]，每秒最多转 `kThrustRate`。悬停 −90°；前飞、加速往 0° 倾；刹车超过 −90°（向后）。
+- 舱只能在机身的俯仰平面里转：侧向加速仍靠机身横滚；前后方向机身只承担 `kCarrierPitchShare`（1/4），其余由舱承担。
+- 偏航：位于 x 的舱向前倾产生绕机身 up 的力矩 −x·Fz（r × F），所以要按 `ω·up` 转时，两侧舱反向各倾 `kThrustYaw`（倾转旋翼机悬停时的偏航方式）。
+- 爬升、下降改变 T 的竖直分量，相同前后加速下爬升时舱更竖、下降时更倾。推力大小本身（喷口火焰）没有表现，见上面 `boosts`。

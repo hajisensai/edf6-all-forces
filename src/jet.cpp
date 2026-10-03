@@ -13,8 +13,9 @@
 // Roles (Kind): strike (ground targets first; JetLaunchBomber's bombers first fly the stock bomber's run
 // and drop its bombs), fighter and interceptor (flying targets first; the interceptor faster, higher,
 // farther out, its missiles from farther), multirole (the nearest target, either), carrier (the V508
-// transport's four rotors: it hovers over its anchor (Hover) and sends its drones, kCarrierDrones of them,
-// at what is in its range) and drone (from its
+// transport's four nacelles, tilted along its thrust (Thrusters): it circles a station off its anchor toward
+// its target (CarrierGoal, Hover), holds still for a drone docking, sidesteps when hit, and sends its drones,
+// kCarrierDrones of them, at what is in its range) and drone (from its
 // carrier: attacks, and back to it after kDroneSortieMs, damaged or out of ammo, where it docks and is
 // rearmed kRearmMs later; a carrier has kCarrierSorties launches, its ammo), blast and doll (a blast or doll
 // carrier's drones: rotor drones that fly at the enemy and blow up next to it, the doll one carrying a
@@ -224,6 +225,20 @@ constexpr ULONGLONG kStaleMs=1500;
 constexpr std::size_t kModelInst=0xEE0,kInstBones=0x10,kInstBoneCount=0x20,kBoneStride=0x110,kBoneAuto=0x8,kBoneLocal=0x70;
 constexpr float kElevonMax=0.35f,kElevonRate=2.0f;
 const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
+// The carrier's thrusters (docs/jet-model-re.md §6): the V508 transport's four nacelles, bones boosterF_l/r and
+// boosterB_l/r under body, each bound level (nose +z) at its mount, hinged along its local X like the elevons.
+// The stock Transporter508 tilts them only by its CAS clips (hover_start: 0 -> -90 deg about X, the nacelle's
+// nose up, its thrust along the body's up; hover_end back; fly level), which the carrier (the V506's CAS) never
+// plays. The plugin poses them (Thrusters) along the thrust its flight asks for: theta = atan2(-up, forward) of
+// that thrust in the body (-90 deg hovering, toward 0 flying forward, past -90 braking), within
+// [-kThrustBack, 0], at most kThrustRate; turning, the nacelles on either side tilt kThrustYaw apart (a
+// tilt-rotor's yaw in the hover). Its flight has no drag (the plugin sets the velocity), so the thrust a real
+// one needs to hold its speed, kThrustDrag per m/s, is added for the look.
+constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f,kThrustDrag=0.12f;
+const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
+// The carrier's fuselage leans only this share of the fore-and-aft thrust (the nacelles take it); sideways,
+// which the nacelles cannot vector, it rolls as before.
+constexpr float kCarrierPitchShare=0.25f;
 constexpr unsigned kPlacedFlight=1;
 constexpr ULONGLONG kFlightGapMs=20000;
 constexpr unsigned kAddBodySlot=0x179E128,kAddBody=0x232AA0,kBodyObject=0x108260;
@@ -302,6 +317,16 @@ constexpr float kLineGain=250.0f;
 // ms the bay's last bombs (and a cluster's bomblets) still pass the bomber's flight after it closes.
 constexpr ULONGLONG kBombClearMs=15000;   // m off the bombing line that turn it back at the most
 
+// Bones the plugin hinges along their local X (elevons, thrusters): their records, bind locals, angles.
+constexpr int kMaxSurfaces=4;
+struct Surfaces {
+    const unsigned char* model;   // the bone array they were looked up in (null: not looked yet)
+    unsigned char* rec[kMaxSurfaces];   // null: not in this model
+    float bind[kMaxSurfaces][16],at[kMaxSurfaces],set[kMaxSurfaces][16];
+    int count;                    // all `count` found, else 0
+    bool fresh,written,logged;    // fresh: the first pose snaps to the angle wanted
+};
+
 struct Jet {
     unsigned char* vehicle;
     const void* ctrl;        // the vehicle's weak-this control block: which object this entry is
@@ -321,10 +346,15 @@ struct Jet {
     bool launched;           // made by JetLaunch: anchor is its strike point
     bool escort;             // ...or the player, while seen (a call's follow variant; anchor: where they were last)
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
-    const unsigned char* model;   // the bone array its elevons were found in (null: not looked yet)
-    unsigned char* elevon[2];     // their bone records, null without (a model without elevons)
-    float elevonBind[2][16],elevonAt[2],elevonSet[2][16];
-    bool elevonWritten,elevonLogged;
+    Surfaces surf;                // its elevons, or a carrier's thrusters (Elevons, Thrusters)
+    float thrust[3];              // a rotor craft's (Hover): the thrust its flight asks for, world, m/s^2
+    ULONGLONG thrustLogAt;        // Thrusters' last log
+    // A carrier's work (CarrierGoal): hit (hpSeen fell) it sidesteps to evadeTo until evadeUntil, and not again
+    // before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
+    float hpSeen,evadeTo[3];
+    ULONGLONG evadeUntil,evadeAgain;
+    bool docking;
+    const void* stationFor;
     ULONGLONG gateAt;             // the last gun gate log (Fire)
     ULONGLONG fuelMs;
     unsigned char* ifc;      // the bomb bay (see kIfcCtor), or nullptr
@@ -644,28 +674,55 @@ unsigned char* BoneRecord(const unsigned char* inst,const wchar_t* name) noexcep
     return nullptr;
 }
 
-// The elevons after the commanded turn (see kElevonMax).
-void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
+// The `n` bones `names` of v's model (looked up again only when the model's bone array changes): true with all
+// of them there. `what` names them in the log.
+bool FindSurfaces(Jet& j,const unsigned char* v,const wchar_t* const* names,int n,const char* what) noexcept {
     const unsigned char* inst=v+kModelInst;
     const auto bones=At<const unsigned char*>(inst,kInstBones);
-    if(!bones)return;
-    if(bones!=j.model) {
-        j.model=bones;j.elevonWritten=false;
-        for(int i=0;i<2;++i) {
-            j.elevon[i]=BoneRecord(inst,kElevonNames[i]);
-            if(j.elevon[i])std::memcpy(j.elevonBind[i],j.elevon[i]+kBoneLocal,64);
-            j.elevonAt[i]=0.0f;
-        }
-        Log("JET v=%p elevons: %s (auto %d/%d) among %d bones",v,j.elevon[0] && j.elevon[1] ? "found" : "none in this model",
-            j.elevon[0] ? j.elevon[0][kBoneAuto] : -1,j.elevon[1] ? j.elevon[1][kBoneAuto] : -1,At<std::int32_t>(inst,kInstBoneCount));
+    if(!bones)return false;
+    Surfaces& s=j.surf;
+    if(bones==s.model)return s.count==n;
+    s=Surfaces{};s.model=bones;s.fresh=true;
+    int found=0;
+    for(int i=0;i<n;++i) {
+        s.rec[i]=BoneRecord(inst,names[i]);
+        if(!s.rec[i])continue;
+        std::memcpy(s.bind[i],s.rec[i]+kBoneLocal,64);
+        ++found;
     }
-    if(!j.elevon[0] || !j.elevon[1])return;
+    s.count=found==n ? n : 0;
+    Log("JET v=%p %s: %d of %d found (auto %d/%d) among %d bones",v,what,found,n,s.rec[0] ? s.rec[0][kBoneAuto] : -1,
+        s.rec[n-1] ? s.rec[n-1][kBoneAuto] : -1,At<std::int32_t>(inst,kInstBoneCount));
+    return s.count==n;
+}
+
+// Each found surface turned toward want[i] (rad about its local X, theta > 0: its -z end up) at most `rate`:
+// local = Rx(theta) x bind (row vectors; see kElevonMax). The first pose after FindSurfaces snaps.
+void PoseSurfaces(Jet& j,const float* want,float rate,float dt,const char* what) noexcept {
+    Surfaces& s=j.surf;
     // Something else writing them (the animation) would undo every frame: said once.
-    if(j.elevonWritten && !j.elevonLogged && (std::memcmp(j.elevon[0]+kBoneLocal,j.elevonSet[0],64) ||
-                                             std::memcmp(j.elevon[1]+kBoneLocal,j.elevonSet[1],64))) {
-        j.elevonLogged=true;
-        Log("JET v=%p elevons: their local matrices were rewritten by the game between frames",v);
+    bool rewritten=false;
+    for(int i=0;i<s.count;++i)rewritten|=s.written && std::memcmp(s.rec[i]+kBoneLocal,s.set[i],64)!=0;
+    if(rewritten && !s.logged){s.logged=true;Log("JET v=%p %s: their local matrices were rewritten by the game between frames",j.vehicle,what);}
+    for(int i=0;i<s.count;++i) {
+        s.at[i]=s.fresh ? want[i] : s.at[i]+Clamp(want[i]-s.at[i],-rate*dt,rate*dt);
+        const float co=std::cos(s.at[i]),si=std::sin(s.at[i]);
+        const float* b=s.bind[i];
+        float* o=s.set[i];
+        for(int x=0;x<4;++x) {
+            o[x]=b[x];
+            o[4+x]=co*b[4+x]+si*b[8+x];
+            o[8+x]=-si*b[4+x]+co*b[8+x];
+            o[12+x]=b[12+x];
+        }
+        std::memcpy(s.rec[i]+kBoneLocal,o,64);
     }
+    s.fresh=false;s.written=s.count>0;
+}
+
+// The elevons after the commanded turn (see kElevonMax).
+void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
+    if(!FindSurfaces(j,v,kElevonNames,2,"elevons"))return;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const float* r=m;const float* u=m+4;const float* f=m+8;   // r: the model's +x, the right wing
     float c[3];
@@ -674,20 +731,33 @@ void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
     const float s=Len(j.vel),pitchMax=k.maxG*kG/(s>k.minSpeed ? s : k.minSpeed);
     const float p=Clamp(pitch/pitchMax,-1.0f,1.0f),q=Clamp(roll/k.roll,-1.0f,1.0f);
     const float want[2]={Clamp((p-q)*kElevonMax,-kElevonMax,kElevonMax),Clamp((p+q)*kElevonMax,-kElevonMax,kElevonMax)};
-    for(int i=0;i<2;++i) {
-        j.elevonAt[i]+=Clamp(want[i]-j.elevonAt[i],-kElevonRate*dt,kElevonRate*dt);
-        const float co=std::cos(j.elevonAt[i]),si=std::sin(j.elevonAt[i]);
-        const float* b=j.elevonBind[i];
-        float* o=j.elevonSet[i];
-        for(int x=0;x<4;++x) {
-            o[x]=b[x];
-            o[4+x]=co*b[4+x]+si*b[8+x];
-            o[8+x]=-si*b[4+x]+co*b[8+x];
-            o[12+x]=b[12+x];
-        }
-        std::memcpy(j.elevon[i]+kBoneLocal,o,64);
+    PoseSurfaces(j,want,kElevonRate,dt,"elevons");
+}
+
+// The carrier's nacelles along the thrust Hover asked for (see kThrustBack). A nacelle's thrust, along its nose
+// (local +z) turned theta about X, is (0, -sin theta, cos theta) in the body: theta = atan2(-up, forward). Its
+// yaw: a nacelle at body x tilted forward pushes the body round its up by -x times that (r x F), so to turn at
+// the yaw rate the body is told (omega . up) each nacelle tilts -sign(x) of kThrustYaw forward.
+void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noexcept {
+    if(!FindSurfaces(j,v,kThrusterNames,4,"thrusters"))return;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    float u[3]={m[4],m[5],m[6]},f[3]={m[8],m[9],m[10]};
+    if(!Normalize(u) || !Normalize(f))return;
+    const float up=Dot(j.thrust,u),fwd=Dot(j.thrust,f);
+    const float tilt=Clamp(std::atan2(-up,fwd),-kThrustBack,0.0f);
+    const float yaw=Clamp(Dot(j.omega,u)/k.roll,-1.0f,1.0f)*kThrustYaw;
+    float want[4];
+    for(int i=0;i<4;++i) {
+        const float side=j.surf.bind[i][12]>=0.0f ? 1.0f : -1.0f;   // the nacelle's x in the body
+        want[i]=Clamp(tilt-side*yaw,-kThrustBack,0.0f);
     }
-    j.elevonWritten=true;
+    PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
+    if(cfg.debug && ms-j.thrustLogAt>1000) {
+        j.thrustLogAt=ms;
+        Log("JET v=%p thrusters: thrust %.1f m/s^2 (up %.1f, fwd %.1f) tilt %.0f deg, yaw %.0f deg, at F %.0f/%.0f B %.0f/%.0f",v,
+            Len(j.thrust),up,fwd,tilt*180.0f/kPi,yaw*180.0f/kPi,j.surf.at[0]*180.0f/kPi,j.surf.at[1]*180.0f/kPi,
+            j.surf.at[2]*180.0f/kPi,j.surf.at[3]*180.0f/kPi);
+    }
 }
 
 // A unit direction to `goal` whose climb is limited to `maxClimb` (sine).
@@ -865,9 +935,16 @@ constexpr float kHoverLeave=500.0f;    // m: leaving, it heads this far along it
 float Trigger(Role r) noexcept { return r==Role::blast ? kBlastTrigger : r==Role::doll ? kDollTrigger : 0.0f; }
 bool Hovers(const Jet& j) noexcept { return j.role==Role::carrier || Trigger(j.role)>0.0f; }
 
-// `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster).
+// How a rotor craft shows its thrust: `pitchShare` of the fore-and-aft part leans its body (1: all, as a
+// drone's rotors; the carrier's nacelles take the rest, kCarrierPitchShare), and `drag` m/s^2 per m/s of its
+// speed is the thrust that would hold that speed (kThrustDrag; 0: none shown).
+struct Lean { float pitchShare,drag; };
+constexpr Lean kRotorLean{1.0f,0.0f},kCarrierLean{kCarrierPitchShare,kThrustDrag};
+
+// `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.thrust gets the thrust
+// asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
-           float dt) noexcept {
+           const Lean& how,float dt) noexcept {
     float to[3]={goal[0]-pos[0],0.0f,goal[2]-pos[2]};
     const float d=Len(to);
     float wantV[3]={0.0f,0.0f,0.0f};
@@ -881,20 +958,24 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
     const float a=Len(acc),most=k.thrust;
     if(a>most)for(int i=0;i<3;++i)acc[i]*=most/a;
     for(int i=0;i<3;++i)j.vel[i]+=acc[i]*dt;
-    // The lean: the horizontal acceleration against gravity, at most kHoverLean.
-    float up[3]={acc[0],kG,acc[2]};
-    const float lean=std::atan2(std::sqrt(acc[0]*acc[0]+acc[2]*acc[2]),kG);
-    if(lean>kHoverLean) {
-        const float h=std::tan(kHoverLean)*kG/std::sqrt(acc[0]*acc[0]+acc[2]*acc[2]);
-        up[0]*=h;up[2]*=h;
-    }
-    Normalize(up);
+    for(int i=0;i<3;++i)j.thrust[i]=acc[i]+j.vel[i]*how.drag;
+    j.thrust[1]+=kG;
     float nose[3]={face[0]-pos[0],0.0f,face[2]-pos[2]};
     if(!Normalize(nose)) {
         const float* m=reinterpret_cast<const float*>(v+kMatrix);
         nose[0]=m[8];nose[1]=0.0f;nose[2]=m[10];
         if(!Normalize(nose)){nose[0]=0;nose[2]=1;}
     }
+    // The lean: the horizontal thrust against gravity (its fore-and-aft part times pitchShare), at most kHoverLean.
+    const float ahead=(j.thrust[0]*nose[0]+j.thrust[2]*nose[2])*(how.pitchShare-1.0f);
+    const float side[3]={j.thrust[0]+nose[0]*ahead,0.0f,j.thrust[2]+nose[2]*ahead};
+    float up[3]={side[0],kG,side[2]};
+    const float flat=std::sqrt(side[0]*side[0]+side[2]*side[2]);
+    if(std::atan2(flat,kG)>kHoverLean) {
+        const float h=std::tan(kHoverLean)*kG/flat;
+        up[0]*=h;up[2]*=h;
+    }
+    Normalize(up);
     // The nose across `up` (the body's forward lies in the plane the lean makes).
     const float along=Dot(nose,up);
     for(int i=0;i<3;++i)nose[i]-=up[i]*along;
@@ -1044,6 +1125,93 @@ void Dock(Jet& d,Jet& mother,ULONGLONG ms) noexcept {
     if(d.slot>=0 && d.slot<kCarrierDrones)mother.dock[d.slot]=ms+kRearmMs;
     Log("JET v=%p docked on carrier %p (place %d), ready again in %.0f s",d.vehicle,mother.vehicle,d.slot,static_cast<float>(kRearmMs)*0.001f);
     d.reap=true;d.mother=nullptr;
+}
+
+// The carrier's work (CarrierGoal), instead of hovering still over its anchor:
+//  - its station: over its anchor, moved up to kStationShift toward its target, but kept kStandoff from it
+//    (out of the fight its drones are sent into);
+//  - it circles the station slowly (kCarrierOrbit, kOrbitSpeed, carrots kOrbitLead ahead on the circle; the
+//    carriers of even and odd entries the other way round), facing its target, or along its way with none;
+//    for kLaunchHoldMs after a launch it slows to kLaunchSpeed (the drone leaves along its track);
+//  - while a drone of its own comes back within kDockHold, it holds still (stops over where it is);
+//  - hit (its HP fallen kEvadeHit of its most since the last sidestep), it sidesteps kEvadeShift across the line
+//    from its target (or its track), the way it was drifting, for kEvadeMs, then not again for kEvadeGapMs.
+// Withdrawing (damaged, fuel, out of drones) stays Withdraw's.
+constexpr float kCarrierOrbit=260.0f,kOrbitLead=0.5f,kOrbitSpeed=15.0f,kLaunchSpeed=6.0f;
+constexpr float kStationShift=500.0f,kStandoff=700.0f,kDockHold=300.0f,kEvadeShift=180.0f,kEvadeHit=0.003f;
+constexpr ULONGLONG kLaunchHoldMs=1200,kEvadeMs=5000,kEvadeGapMs=6000;
+
+// Its station (see kStationShift) at `height`, logged when its target changes.
+void CarrierStation(Jet& c,const float* pos,const float* anchor,float height,float* st) noexcept {
+    st[0]=anchor[0];st[1]=height;st[2]=anchor[2];
+    if(c.target) {
+        float away[3]={anchor[0]-c.aim[0],0.0f,anchor[2]-c.aim[2]};
+        const float apart=Len(away);
+        if(!Normalize(away)) {
+            away[0]=pos[0]-c.aim[0];away[1]=0.0f;away[2]=pos[2]-c.aim[2];
+            if(!Normalize(away)){away[0]=1;away[1]=0;away[2]=0;}
+        }
+        const float keep=apart-kStationShift>kStandoff ? apart-kStationShift : kStandoff;   // from the target
+        st[0]=c.aim[0]+away[0]*keep;st[2]=c.aim[2]+away[2]*keep;
+    }
+    if(c.target==c.stationFor)return;
+    c.stationFor=c.target;
+    if(cfg.debug)Log("JET v=%p carrier: station (%.0f,%.0f), %.0f m from its anchor%s",c.vehicle,st[0],st[2],HorizDist(st,anchor),
+                     c.target ? ", off its target" : " (no target)");
+}
+
+// Whether a drone of the carrier's is coming back within kDockHold of it.
+bool DroneDocking(const Jet& c,const float* pos,ULONGLONG ms) noexcept {
+    for(const auto& d:jets) {
+        if(!d.vehicle || d.mother!=c.ctrl || d.mode!=Mode::recover || d.reap || ms-d.seen>kStaleMs)continue;
+        const float to[3]={d.prevPos[0]-pos[0],d.prevPos[1]-pos[1],d.prevPos[2]-pos[2]};
+        if(Dot(to,to)<kDockHold*kDockHold)return true;
+    }
+    return false;
+}
+
+// Hit: the sidestep (see kEvadeShift) starts. Returns whether it is sidestepping.
+bool CarrierEvade(Jet& c,const float* pos,float height,float hp,float hpMax,ULONGLONG ms) noexcept {
+    // hpSeen: its HP since the last sidestep (or healing): small hits add up.
+    const bool hit=hpMax>0.0f && hp<c.hpSeen-hpMax*kEvadeHit;
+    if(hp>c.hpSeen || hit || ms<c.evadeAgain)c.hpSeen=hp;
+    if(hit && ms>=c.evadeAgain) {
+        float line[3]={c.vel[0],0.0f,c.vel[2]};
+        if(c.target){line[0]=pos[0]-c.aim[0];line[2]=pos[2]-c.aim[2];}
+        float side[3]={line[2],0.0f,-line[0]};
+        if(!Normalize(side)){side[0]=1;side[2]=0;}
+        if(side[0]*c.vel[0]+side[2]*c.vel[2]<0.0f){side[0]=-side[0];side[2]=-side[2];}
+        c.evadeTo[0]=pos[0]+side[0]*kEvadeShift;c.evadeTo[1]=height;c.evadeTo[2]=pos[2]+side[2]*kEvadeShift;
+        c.evadeUntil=ms+kEvadeMs;c.evadeAgain=c.evadeUntil+kEvadeGapMs;
+        if(cfg.debug)Log("JET v=%p carrier hit (hp %.0f/%.0f): sidesteps %.0f m to (%.0f,%.0f)",c.vehicle,hp,hpMax,kEvadeShift,
+                         c.evadeTo[0],c.evadeTo[2]);
+    }
+    return ms<c.evadeUntil;
+}
+
+// Where the carrier flies this frame (`goal`, at `height`), what it faces and how fast (see kCarrierOrbit).
+void CarrierGoal(Jet& c,const Kind& k,const float* pos,const float* anchor,float height,float hp,float hpMax,ULONGLONG ms,
+                 float* goal,float* face,float* speed) noexcept {
+    float st[3];
+    CarrierStation(c,pos,anchor,height,st);
+    const bool evading=CarrierEvade(c,pos,height,hp,hpMax,ms);
+    const bool docking=!evading && DroneDocking(c,pos,ms);
+    if(docking!=c.docking) {
+        c.docking=docking;
+        if(cfg.debug)Log("JET v=%p carrier: %s",c.vehicle,docking ? "a drone is coming in: holds still" : "back on its orbit");
+    }
+    if(evading) {
+        std::memcpy(goal,c.evadeTo,12);*speed=k.cruise;
+    } else if(docking) {
+        goal[0]=pos[0];goal[1]=height;goal[2]=pos[2];*speed=0.0f;
+    } else {
+        const float rel[3]={pos[0]-st[0],0.0f,pos[2]-st[2]};
+        const float dist=Len(rel),way=(&c-jets)%2 ? 1.0f : -1.0f;
+        const float a=(dist>1.0f ? std::atan2(rel[2],rel[0]) : 0.0f)+kOrbitLead*way;
+        goal[0]=st[0]+std::cos(a)*kCarrierOrbit;goal[1]=height;goal[2]=st[2]+std::sin(a)*kCarrierOrbit;
+        *speed=dist>kCarrierOrbit*1.5f ? k.cruise : ms-c.launchAt<kLaunchHoldMs ? kLaunchSpeed : kOrbitSpeed;
+    }
+    std::memcpy(face,c.target ? c.aim : goal,12);
 }
 
 // The bombing run (Mode::bomb): level at bombAlt along the bomber's line through the target at its speed,
@@ -1837,10 +2005,11 @@ void JetFrame(unsigned char* v) noexcept {
         break;
     }
     if(Hovers(*j)) {
-        // Over its anchor (kind.alt up, kMinAlt over the ground there at least), facing its target; leaving,
-        // along `want` (Withdraw's way out, climbing).
-        float goal[3]={anchor[0],height,anchor[2]};
-        float climb=kHoverClimb;
+        // kind.alt over its anchor, facing its target: a carrier about its station, a blast or doll drone at its
+        // target; leaving, along `want` (Withdraw's way out, climbing). A carrier's nacelles follow its thrust.
+        float goal[3]={anchor[0],height,anchor[2]},face[3];
+        float climb=kHoverClimb,hoverSpeed=kind.cruise;
+        bool faced=false;
         if(j->mode==Mode::withdraw)for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
         else if(Trigger(j->role)>0.0f) {
             // A blast or doll drone: at its target; going back, at its carrier's dock; else under the carrier.
@@ -1851,11 +2020,16 @@ void JetFrame(unsigned char* v) noexcept {
             } else if(j->target)std::memcpy(goal,j->aim,12);
             else{goal[0]=anchor[0];goal[1]=anchor[1]-kDockBelow*2.0f;goal[2]=anchor[2];}
         } else {
+            // The carrier: about its station (CarrierGoal), kMinAlt*2 over the ground there at least.
+            faced=j->role==Role::carrier;
+            if(faced)CarrierGoal(*j,kind,pos,anchor,height,hp,hpMax,ms,goal,face,&hoverSpeed);
             const float top[3]={goal[0],goal[1]+600.0f,goal[2]},bottom[3]={goal[0],goal[1]-1500.0f,goal[2]};
             float hit[3];
             if(MapRay(top,bottom,hit)>=0.0f && goal[1]<hit[1]+kMinAlt*2.0f)goal[1]=hit[1]+kMinAlt*2.0f;
         }
-        Hover(*j,kind,v,pos,goal,j->target ? j->aim : goal,kind.cruise,climb,dt);
+        if(!faced)std::memcpy(face,j->target ? j->aim : goal,12);
+        Hover(*j,kind,v,pos,goal,face,hoverSpeed,climb,j->role==Role::carrier ? kCarrierLean : kRotorLean,dt);
+        if(j->role==Role::carrier)Thrusters(*j,kind,v,dt,ms);
     } else {
         Guard(*j,pos,want);
         float up[3];
