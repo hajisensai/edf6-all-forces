@@ -41,6 +41,7 @@ constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=
 constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
 constexpr float kApproach=1000.0f,kAboveTarget=150.0f,kWingSpacing=70.0f,kWingStep=15.0f;
 constexpr float kHeliApproach=300.0f,kHeliSpacing=40.0f;
+constexpr float kSubAhead=150.0f;
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
 // once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
 // bytes, 0x800 of them.
@@ -101,25 +102,30 @@ constexpr std::size_t kPlaneSpeed=0xB90,kPlaneDraw=0x5C0;
 // call, the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts
 // is its ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of
 // fuel (fuelSec) or badly damaged each leaves.
-struct Call { float mark; bool heli; JetRole role; HeliBody body; int count; DWORD fuelSec; bool follow; const char* name;
+// What a call brings: jets (JetLaunch), helis (HeliLaunch) or the submarine carrier (SubLaunch).
+enum class Brings { jets, helis, sub };
+struct Call { float mark; Brings brings; JetRole role; HeliBody body; int count; DWORD fuelSec; bool follow; const char* name;
               const wchar_t* id; };
 const Call kCalls[]={
-    {7101.0f,false,JetRole::interceptor,HeliBody::eros506,2,240,false,"interceptors (guard)",L"EDF6VC_CALL_INTERCEPTOR"},
-    {7102.0f,false,JetRole::interceptor,HeliBody::eros506,2,240,true,"interceptors (follow)",L"EDF6VC_CALL_INTERCEPTOR_F"},
-    {7103.0f,false,JetRole::strike,HeliBody::eros506,3,240,false,"strike jets (guard)",L"EDF6VC_CALL_STRIKE"},
-    {7104.0f,false,JetRole::strike,HeliBody::eros506,3,240,true,"strike jets (follow)",L"EDF6VC_CALL_STRIKE_F"},
-    {7105.0f,false,JetRole::multirole,HeliBody::eros506,3,300,false,"multirole jets (guard)",L"EDF6VC_CALL_MULTIROLE"},
-    {7106.0f,false,JetRole::multirole,HeliBody::eros506,3,300,true,"multirole jets (follow)",L"EDF6VC_CALL_MULTIROLE_F"},
-    {7107.0f,false,JetRole::fighter,HeliBody::eros506,4,300,false,"fighters (guard)",L"EDF6VC_CALL_FIGHTER"},
-    {7108.0f,false,JetRole::fighter,HeliBody::eros506,4,300,true,"fighters (follow)",L"EDF6VC_CALL_FIGHTER_F"},
-    {7109.0f,false,JetRole::carrier,HeliBody::eros506,1,600,false,"carrier (guard)",L"EDF6VC_CALL_CARRIER"},
-    {7110.0f,false,JetRole::carrier,HeliBody::eros506,1,600,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
-    {7111.0f,true,JetRole::fighter,HeliBody::brute410,2,360,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
-    {7112.0f,true,JetRole::fighter,HeliBody::eros506,2,360,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
-    {7113.0f,false,JetRole::blastCarrier,HeliBody::eros506,1,600,false,"blast drone carrier (guard)",L"EDF6VC_CALL_BLAST_CARRIER"},
-    {7114.0f,false,JetRole::blastCarrier,HeliBody::eros506,1,600,true,"blast drone carrier (follow)",L"EDF6VC_CALL_BLAST_CARRIER_F"},
-    {7115.0f,false,JetRole::dollCarrier,HeliBody::eros506,1,600,false,"doll drone carrier (guard)",L"EDF6VC_CALL_DOLL_CARRIER"},
-    {7116.0f,false,JetRole::dollCarrier,HeliBody::eros506,1,600,true,"doll drone carrier (follow)",L"EDF6VC_CALL_DOLL_CARRIER_F"},
+    {7101.0f,Brings::jets,JetRole::interceptor,HeliBody::eros506,2,240,false,"interceptors (guard)",L"EDF6VC_CALL_INTERCEPTOR"},
+    {7102.0f,Brings::jets,JetRole::interceptor,HeliBody::eros506,2,240,true,"interceptors (follow)",L"EDF6VC_CALL_INTERCEPTOR_F"},
+    {7103.0f,Brings::jets,JetRole::strike,HeliBody::eros506,3,240,false,"strike jets (guard)",L"EDF6VC_CALL_STRIKE"},
+    {7104.0f,Brings::jets,JetRole::strike,HeliBody::eros506,3,240,true,"strike jets (follow)",L"EDF6VC_CALL_STRIKE_F"},
+    {7105.0f,Brings::jets,JetRole::multirole,HeliBody::eros506,3,300,false,"multirole jets (guard)",L"EDF6VC_CALL_MULTIROLE"},
+    {7106.0f,Brings::jets,JetRole::multirole,HeliBody::eros506,3,300,true,"multirole jets (follow)",L"EDF6VC_CALL_MULTIROLE_F"},
+    {7107.0f,Brings::jets,JetRole::fighter,HeliBody::eros506,4,300,false,"fighters (guard)",L"EDF6VC_CALL_FIGHTER"},
+    {7108.0f,Brings::jets,JetRole::fighter,HeliBody::eros506,4,300,true,"fighters (follow)",L"EDF6VC_CALL_FIGHTER_F"},
+    {7109.0f,Brings::jets,JetRole::carrier,HeliBody::eros506,1,600,false,"carrier (guard)",L"EDF6VC_CALL_CARRIER"},
+    {7110.0f,Brings::jets,JetRole::carrier,HeliBody::eros506,1,600,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
+    {7111.0f,Brings::helis,JetRole::fighter,HeliBody::brute410,2,360,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
+    {7112.0f,Brings::helis,JetRole::fighter,HeliBody::eros506,2,360,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
+    {7113.0f,Brings::jets,JetRole::blastCarrier,HeliBody::eros506,1,600,false,"blast drone carrier (guard)",L"EDF6VC_CALL_BLAST_CARRIER"},
+    {7114.0f,Brings::jets,JetRole::blastCarrier,HeliBody::eros506,1,600,true,"blast drone carrier (follow)",L"EDF6VC_CALL_BLAST_CARRIER_F"},
+    {7115.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,false,"doll drone carrier (guard)",L"EDF6VC_CALL_DOLL_CARRIER"},
+    {7116.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,true,"doll drone carrier (follow)",L"EDF6VC_CALL_DOLL_CARRIER_F"},
+    // The submarine carrier surfaces kSubAhead past the marker (its 200 m hull clear of the caller) and stays
+    // the mission, following the player (subcarrier.cpp; three at most).
+    {7117.0f,Brings::sub,JetRole::fighter,HeliBody::eros506,1,0,true,"submarine carrier",L"EDF6VC_CALL_SUB"},
 };
 
 // Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
@@ -178,15 +184,22 @@ int LaunchCall(const Call& c,const float* target) noexcept {
         const float dx=target[0]-player.pos[0],dz=target[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
         if(l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
     }
+    if(c.brings==Brings::sub) {
+        const float at[3]={target[0]+dir[0]*kSubAhead,target[1],target[2]+dir[2]*kSubAhead};
+        const bool ok=SubLaunch(at,dir)!=nullptr;
+        Log("AIRSTRIKE call: %s %s at (%.0f,%.0f,%.0f)",c.name,ok ? "surfaced" : "failed",at[0],at[1],at[2]);
+        return ok ? 1 : 0;
+    }
+    const bool heli=c.brings==Brings::helis;
     const float side[3]={dir[2],0,-dir[0]};
-    const float back=c.heli ? kHeliApproach : kApproach,spacing=c.heli ? kHeliSpacing : kWingSpacing;
-    const float up=c.heli ? cfg.heliHeight : kAboveTarget;
+    const float back=heli ? kHeliApproach : kApproach,spacing=heli ? kHeliSpacing : kWingSpacing;
+    const float up=heli ? cfg.heliHeight : kAboveTarget;
     int launched=0;
     for(int i=0;i<c.count;++i) {
         const float off=(static_cast<float>(i)-static_cast<float>(c.count-1)*0.5f)*spacing;
         const float from[3]={target[0]-dir[0]*back+side[0]*off,target[1]+up+kWingStep*static_cast<float>(i),
                              target[2]-dir[2]*back+side[2]*off};
-        if(!c.heli) {
+        if(!heli) {
             launched+=JetLaunch(c.role,from,dir,target,c.fuelSec,&kRadioSource,c.follow) ? 1 : 0;
             continue;
         }

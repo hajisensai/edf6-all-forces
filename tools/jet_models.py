@@ -66,6 +66,12 @@ MODELS: dict[str, Recipe] = {
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
     'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
 }
+# The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,
+# 1664 m long in the missions, x 0.12 (200 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
+# drone's. Kept out of MODELS so tools/make_jets.py does not write it; build(game, SUB_MODELS) does.
+SUB_MODELS: dict[str, Recipe] = {
+    'EDF6VC_SUB.MRAB': Recipe('EV603_MARINE.MRAB', 'ev603_marine.mdb', 0.12, root='mdl', level='body'),
+}
 
 PACK = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B'}
 
@@ -218,10 +224,10 @@ def replace_member(raw: bytes, model: str, data: bytes) -> bytes:
     return rab_write(rab)
 
 
-def build(game) -> dict[str, bytes]:  # noqa: ANN001 - testrange/gen.py Game (read-only Root.cpk view)
-    """Output file name -> archive bytes, every one checked (`check`)."""
+def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  # noqa: ANN001 - testrange/gen.py Game
+    """Output file name -> archive bytes, every one checked (`check`); `models` default MODELS."""
     out: dict[str, bytes] = {}
-    for name, r in MODELS.items():
+    for name, r in (MODELS if models is None else models).items():
         raw = game.read('OBJECT', r.archive)
         src = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data)
         data = mdb_write(make_model(src, r))

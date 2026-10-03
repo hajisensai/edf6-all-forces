@@ -181,4 +181,15 @@ bool InstallAirstrikes() noexcept;
 bool IsGroundRobo(const void* vehicle) noexcept;
 void GroundFrame(unsigned char* vehicle) noexcept;   // after its stock pre-update, NPC-driven crawlers only
 bool CheckGroundProfile() noexcept;
+// subcarrier.cpp: the submarine carrier (潜水母艦, docs/subcarrier-re.md), a 506 body from EDF6VC_SUB_CARRIER.SGO
+// (tools/make_sub.py) driven by the plugin: it sits surfaced, follows the player at a ship's pace, turns its bow
+// on the nearest enemy, fires its turret guns and homing missiles, reloads aboard; its HP shows as a follower gauge.
+bool IsSub(const void* vehicle) noexcept;         // a 506 body with the carrier's mark
+void SubFrame(unsigned char* vehicle) noexcept;   // from HeliFrame, NPC-crewed carriers only
+bool InstallSub() noexcept;                       // after InstallJets (it chains onto the 506 physics slot)
+void PreloadSub() noexcept;                       // from the mission's player preload
+// A carrier made at run time on the ground at `pos` (metres; it is raised to sit on the highest ground under
+// its hull), its bow along `heading` (horizontal part used), friend, NPC pilot: the vehicle, or nullptr (its
+// files not installed or not preloaded this mission, three already out, the game failed to build it).
+unsigned char* SubLaunch(const float* pos,const float* heading) noexcept;
 }  // namespace crew

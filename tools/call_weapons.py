@@ -1,10 +1,10 @@
-"""Air Raider call weapons for the plugin's jets and helicopters: 16 rows appended to the shared
+"""Air Raider call weapons for the plugin's jets and helicopters: 17 rows appended to the shared
 weapon table, each weapon a clone of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
 category 312) with a marker in its SGO's AmmoHitSizeAdjust. The plugin reads the marker (weapon +0x8C4)
 and flies its own planes for the call; the field does nothing for a RadioContact weapon, so without the
 plugin the weapon is simply a working KM6 bomber call.
 
-  python tools/call_weapons.py build OUTDIR [--game DIR]     write the 16 SGOs + the stacked tables into OUTDIR
+  python tools/call_weapons.py build OUTDIR [--game DIR]     write the 17 SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
   python tools/call_weapons.py uninstall --unequipped [--force] [--game DIR]
   python tools/call_weapons.py check [--game DIR]
@@ -86,6 +86,8 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_BLAST_CARRIER_F', 7114, 'blast_carrier', True, 1, 3800, 2.2),
     Call('EDF6VC_CALL_DOLL_CARRIER', 7115, 'doll_carrier', False, 1, 3600, 2.2),
     Call('EDF6VC_CALL_DOLL_CARRIER_F', 7116, 'doll_carrier', True, 1, 4100, 2.4),
+    # Appended 2026-10-04: the submarine carrier (src/subcarrier.cpp): one, it stays the mission.
+    Call('EDF6VC_CALL_SUB', 7117, 'sub', True, 1, 7200, 3.0),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 
@@ -126,6 +128,12 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'CN': ('自爆無人機母艦', '呼叫自爆無人機母艦：懸停在空中，放出近炸無人機，衝到敵人身邊自爆。'),
         'JA': ('自爆ドローン母艦', '自爆ドローン母艦を要請する。上空に滞空し、敵に突っ込んで近接起爆するドローンを放つ。'),
         'EN': ('Blast Drone Carrier', 'Calls a carrier that hovers overhead and sends drones that dive at the enemy and blow up next to it.'),
+    },
+    'sub': {
+        'SC': ('潜水母舰支援', '呼叫潜水母舰在信号弹前方浮上：舰身可以站人，炮塔机炮和导弹自动攻击，导弹在舰内装填，随玩家移动，留到任务结束（同时最多 3 艘）。'),
+        'CN': ('潛水母艦支援', '呼叫潛水母艦在信號彈前方浮上：艦身可以站人，砲塔機砲和飛彈自動攻擊，飛彈在艦內裝填，隨玩家移動，留到任務結束（同時最多 3 艘）。'),
+        'JA': ('潜水母艦支援', '潜水母艦を信号弾の先に浮上させる。甲板に乗れ、砲塔の機関砲とミサイルで自動攻撃する。ミサイルの装填は潜水母艦内でおこなわれる。プレイヤーに随伴し、作戦終了まで留まる（同時に3隻まで）。'),
+        'EN': ('Submarine Carrier', 'Surfaces a submarine carrier past the flare: stand on its deck while its turret guns and missiles attack on their own (missiles reload aboard). It follows you for the rest of the mission (three at most).'),
     },
     'doll_carrier': {
         'SC': ('人偶无人机母舰', '呼叫人偶无人机母舰：放出挂着会唱歌跳舞的人偶的无人机，慢慢飞到敌人中间吸引火力，然后自爆。'),
