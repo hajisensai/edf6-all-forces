@@ -323,8 +323,24 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     Log("CREW v=%p %s seats=%u driver=%d",vehicle,kClasses[cls].name,count,SeatRider(SeatAt(vehicle,0))==Rider::dummy);
 }
 
+// A vehicle's input step that took kSlowMs or more (the stock one, the plugin's) is logged (Debug=1, once a
+// second at most): the hitch at a mission's start with the submarine carrier out, to tell whose it is.
+constexpr double kSlowMs=8.0;
+void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
+    static ULONGLONG at=0;
+    LARGE_INTEGER f;QueryPerformanceFrequency(&f);
+    const double s=static_cast<double>(stock)*1000.0/static_cast<double>(f.QuadPart),p=static_cast<double>(plugin)*1000.0/static_cast<double>(f.QuadPart);
+    if(!cfg.debug || (s<kSlowMs && p<kSlowMs))return;
+    const ULONGLONG now=GetTickCount64();
+    if(now-at<1000)return;
+    at=now;
+    Log("SLOW v=%p %s: stock input %.1f ms, plugin %.1f ms",v,kClasses[cls].name,s,p);
+}
+
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
+    LARGE_INTEGER t0,t1,t2;QueryPerformanceCounter(&t0);
     nextInput[I](vehicle,hasInput,a3,a4);
+    QueryPerformanceCounter(&t1);
     if(!cfg.enabled)return;
     ReloadConfigIfChanged();
     __try {
@@ -336,6 +352,8 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
         if(IsHelicopter(v))HeliFrame(v);
         if(IsGroundRobo(v))GroundFrame(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    QueryPerformanceCounter(&t2);
+    SlowLog(I,vehicle,t1.QuadPart-t0.QuadPart,t2.QuadPart-t1.QuadPart);
 }
 
 template<int... I> struct Hooks { static constexpr InputFn table[]={&InputHook<I>...}; };

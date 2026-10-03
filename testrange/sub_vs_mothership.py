@@ -64,6 +64,9 @@ SUB_POINT = '潜水母艦近５'
 CARRIERS = ('輸送船01', '輸送船02', '輸送船03')
 BEE_POINT = '潜水母艦'
 kDeck = 193.08          # the top of the submarine's collision box over its origin (gen.JETS' sub rigid)
+kSeaY = 14.0            # the sea's surface here: the y of the water areas' messages (docs/water-re.md) as the
+                        # 2026-10-04 run hit the hull (the plugin floats it on the surface it finds anyway)
+kFreeboard = 15.0       # its deck this far over the water (src/subcarrier.cpp kFreeboard)
 kDrop = 12.0            # the player starts this far over the deck
 kPlayerAft = 300.0      # ...and this far back from the hull's middle
 kCarrierUp = 160.0      # the dropships hover this far over the deck...
@@ -83,13 +86,16 @@ def points(stock: bytes) -> bytes:
     fx, fz = sub.face[0] - sub.pos[0], sub.face[2] - sub.pos[2]
     n = math.hypot(fx, fz)
     fx, fz = fx / n, fz / n
-    deck = sub.pos[1] + kDeck
+    # Its origin kDeck - kFreeboard under the sea, as the plugin floats it (the stock point has -130).
+    origin = kSeaY + kFreeboard - kDeck
+    deck = origin + kDeck
 
     def along(d: float, y: float) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
         pos = (sub.pos[0] + fx * d, y, sub.pos[2] + fz * d)
         return pos, (pos[0] + fx * 100.0, y, pos[2] + fz * 100.0)
 
-    to = {'プレイヤー': along(-kPlayerAft, deck + kDrop)}
+    to = {SUB_POINT: ((sub.pos[0], origin, sub.pos[2]), (sub.face[0], origin, sub.face[2])),
+          'プレイヤー': along(-kPlayerAft, deck + kDrop)}
     for name, d in zip(CARRIERS, kCarrierAlong):
         to[name] = along(d, deck + kCarrierUp)
     bee = at[BEE_POINT]

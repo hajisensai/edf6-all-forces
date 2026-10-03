@@ -88,12 +88,13 @@ constexpr int kMaxSubs=3;                     // M123: three carriers attack at 
 
 // The hull (the SGO's box, the model at its own size): its bottom kHullBottom under the body origin,
 // kHalfLength fore and aft; the tower top kTop over it; the turrets' guns kGunHeight over it.
-constexpr float kHullBottom=166.58f,kHalfLength=790.0f,kHalfWidth=116.0f,kTop=366.0f,kGunHeight=241.0f;
+constexpr float kHullBottom=-163.08f,kHalfLength=790.0f,kHalfWidth=116.0f,kTop=366.0f,kGunHeight=241.0f;
 // Driving: metres, m/s, m/s^2, rad/s.
 constexpr float kClear=0.6f;                 // hull bottom over the highest ground under it
-// Afloat, its origin this far under the water's surface: where M082 puts the stock carrier (origin -130,
-// its main deck at about +63; the sea there assumed at y=0, docs/water-re.md has the log that checks it).
-constexpr float kDraft=130.0f;
+// Afloat, its main deck (kDeckTop, 193.08 over the origin) kFreeboard over the water: deeper than the stock
+// carrier sits in M082 (deck some 49 m up), the user's ask. Its box is only the slab under the deck, so the
+// hull under the water never meets the seabed.
+constexpr float kFreeboard=15.0f,kDraft=193.08f-kFreeboard;
 // A player on its deck is up to 830 m from its post: it sets off only past the hull.
 constexpr float kLeash=1500.0f,kStop=1000.0f;  // it sets off after a player this far from its post, stops this near
 constexpr float kCruise=25.0f,kAccel=3.0f,kClimb=8.0f,kSink=4.0f,kClimbAccel=6.0f,kPosGain=0.2f;
@@ -308,7 +309,16 @@ float* Route(unsigned char* v,unsigned char* gdi,float* was) noexcept {
 
 // The 506's slot 9 (every message to it): damage to a carrier routed first. The damage is put back after (the
 // queue's own copy: nothing reads it on, but the message is left as it came).
+// The water message (docs/water-re.md: the game's water areas send it to what touches them, the surface y
+// with it): the 506's handler takes it as a heli ditching and sends itself twice its HP in damage, each frame
+// (M082, 2026-10-04: 60 hits a second, the hull sinking). A carrier is a ship: it never reaches the 506.
+constexpr std::uint32_t kMsgWater=0x10000025;
 bool __fastcall MessageHook(void* obj,std::uint32_t msg,void* data) {
+    if(msg==kMsgWater) {
+        bool sub=false;
+        __try { sub=At<float>(static_cast<const unsigned char*>(obj),kSpeedGain)==kSubMark; } __except(EXCEPTION_EXECUTE_HANDLER){}
+        if(sub)return true;
+    }
     float* back=nullptr;
     float was=0.0f;
     if(msg==kMsgDamage) {
@@ -485,8 +495,8 @@ void Follow(Sub& s,float dt) noexcept {
 }
 
 // The velocity toward its post (level, at most kCruise), holding the hull kClear over the ground and the
-// origin at s.floor at least: a mission puts it where it floats (M082: -130, its deck at sea), and over a
-// sea the ray finds only the seabed, far under it.
+// origin at s.floor at least: a mission puts it where it floats. Afloat (s.sea) only the water holds it: its
+// origin at s.floor, kDraft under the surface, whatever the ground (a ship does not climb the shore).
 void Drive(Sub& s,const float* pos,const float* nose,float dt) noexcept {
     float want[3]={(s.post[0]-pos[0])*kPosGain,0.0f,(s.post[2]-pos[2])*kPosGain};
     const float speed=Len(want);
@@ -495,8 +505,8 @@ void Drive(Sub& s,const float* pos,const float* nose,float dt) noexcept {
     s.lin[2]=Approach(s.lin[2],want[2],kAccel*dt);
     float ground=0.0f;
     const bool seen=GroundUnder(pos,nose,&ground);
-    float hold=seen ? ground+kHullBottom+kClear : s.floor;
-    if(hold<s.floor)hold=s.floor;
+    float hold=seen && !s.sea ? ground+kHullBottom+kClear : s.floor;
+    if(hold<s.floor || s.sea)hold=s.floor;
     const float wantY=std::isfinite(hold) ? Clamp(hold-pos[1],-kSink,kClimb) : 0.0f;
     s.lin[1]=Approach(s.lin[1],wantY,kClimbAccel*dt);
 }
@@ -523,8 +533,10 @@ void Steer(Sub& s,const float* m,const float* want) noexcept {
 
 // Where the bow wants to point: the target (from the turrets, pitch within kMaxPitch), else the way it
 // moves, else as it is (level).
+// Afloat it keeps its heading and stays level: people stand on its deck, and turning a 1664 m hull onto
+// each target swung the deck under them (2026-10-04: ±3 deg/s back and forth, the bow up and down 40 m).
 void Heading(const Sub& s,const float* pos,const float* m,float* want) noexcept {
-    if(s.hasTarget) {
+    if(s.hasTarget && !s.sea) {
         float d[3]={s.target[0]-pos[0],s.target[1]-(pos[1]+kGunHeight),s.target[2]-pos[2]};
         const float flat=std::sqrt(d[0]*d[0]+d[2]*d[2]);
         if(flat>1.0f) {
@@ -690,11 +702,11 @@ bool IsSub(const void* vehicle) noexcept {
 }
 
 namespace {
-// The rigid box (testrange/gen.py 'edf6tr_sub_carrier_mission' rigid): centre (0, 13.25, -7.58), half sizes
-// (121, 179.83, 832) in the body frame, so its top, the main deck the model has at y≈193 (§1.1), is kDeckTop
+// The rigid box (testrange/gen.py 'edf6tr_sub_carrier_mission' rigid): centre (0, 178.08, -7.58), half sizes
+// (121, 15, 832) in the body frame, so its top, the main deck the model has at y≈193 (§1.1), is kDeckTop
 // over the origin. The bow (z > 280) is flat there and about ±69 wide: a deck point is taken on it, between
 // kDeckAft and kDeckFore along the nose and within kDeckSide of the keel line, nearest to the asker.
-constexpr float kDeckTop=13.25f+179.83f,kBoxHalfX=121.0f,kBoxHalfZ=832.0f,kBoxCentreZ=-7.58f;
+constexpr float kDeckTop=178.08f+15.0f,kBoxHalfX=121.0f,kBoxHalfZ=832.0f,kBoxCentreZ=-7.58f;
 constexpr float kDeckAft=320.0f,kDeckFore=700.0f,kDeckSide=40.0f;
 
 // The live carrier nearest (horizontally) to `from`, or nullptr; `dist` gets the distance.
@@ -809,7 +821,12 @@ void SubFrame(unsigned char* v) noexcept {
         QueryPerformanceCounter(&s->last);
         std::memcpy(s->post,pos,12);
         s->floor=pos[1];
-        Log("SUB v=%p crewed (placed by the mission) at y=%.0f: hp=%.0f/%.0f",v,pos[1],At<float>(v,kHp),At<float>(v,kHpMax));
+        // On water it floats there (kDraft under the surface), whatever height the mission gave it.
+        float surface=0.0f;
+        s->sea=SeaAt(pos[0],pos[2],&surface)==Sea::water;
+        if(s->sea)s->floor=surface-kDraft;
+        Log("SUB v=%p crewed (placed by the mission) at y=%.0f: %s y=%.0f, hp=%.0f/%.0f",v,pos[1],s->sea ? "afloat at" : "held at",
+            s->floor,At<float>(v,kHp),At<float>(v,kHpMax));
         Thicken(v);
     }
     s->seen=ms;s->gaugeTick=GetTickCount64();

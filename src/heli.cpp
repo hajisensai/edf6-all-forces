@@ -1119,7 +1119,8 @@ const char* LeaveReason(const Heli& h,const unsigned char* v,const Loadout& l) n
 // While it waits it is on team kTeamVehicle (5, nobody's): the stock seat check lets a human of another team
 // into a seat only with bit 7 of its masks, which none of the 410's seats have (masks 9 / 15), and the call
 // helis are team 2 (friend). Its own team is given back when it leaves.
-constexpr float kSeaY=0.0f;            // the sea surface on ig_SteepCoast (about y = 0: the user's, not read from the map)
+constexpr float kSeaY=0.0f;            // the sea surface when the water probe is off (SeaAt unknown): about y = 0, a guess
+constexpr float kUnderSurface=1.0f;     // in the sea: this far under the water's surface at least
 constexpr ULONGLONG kWetMs=1500;       // in the sea this long before a heli is sent
 constexpr ULONGLONG kRetryMs=10000;    // after a launch could not be made, or the heli was lost
 constexpr ULONGLONG kAgainMs=30000;    // after a rescue ended: not another heli each few seconds for one who will not board
@@ -1634,10 +1635,22 @@ void PressBoard(unsigned char* human) noexcept {
     cfg.bump=bump;
 }
 
+// Whether `p` is in the sea, and the surface there: under a water area's surface (SeaAt) by kUnderSurface;
+// with the probe off, below cfg.rescueBelow (the surface taken as kSeaY). On M082 the sea is at about y = 14
+// (2026-10-04): a swimmer at y -1 was taken for out of it by the fixed height, and the rescue gave up.
+bool InSea(const float* p,float* surface) noexcept {
+    float y=kSeaY;
+    const Sea sea=SeaProbe(p[0],p[2],&y);
+    *surface=sea==Sea::water ? y : kSeaY;
+    if(sea==Sea::unknown)return p[1]<cfg.rescueBelow;
+    return sea==Sea::water && p[1]<y-kUnderSurface;
+}
+
 // No rescue yet: the player on foot in the sea for kWetMs with a carrier out launches one.
 void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
     const float* p=reinterpret_cast<const float*>(human+kPosition);
-    if(!cfg.seaRescue || !OnFoot(human) || !(p[1]<cfg.rescueBelow)){rescue.wetSince=0;rescue.warned=false;return;}
+    float sea=kSeaY;
+    if(!cfg.seaRescue || !OnFoot(human) || !InSea(p,&sea)){rescue.wetSince=0;rescue.warned=false;return;}
     if(!rescue.wetSince)rescue.wetSince=ms;
     if(ms-rescue.wetSince<kWetMs || ms<rescue.retryAt)return;
     float deck[3];
@@ -1673,11 +1686,12 @@ void Pickup(unsigned char* human,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     Put<std::int32_t>(v,kTeam,kTeamVehicle);   // see the Rescue comment
     if(!OnFoot(human)){EndRescue("the player boarded another vehicle",true,ms);return;}
-    if(p[1]>=cfg.rescueBelow) {
+    float sea=kSeaY;
+    if(!InSea(p,&sea)) {
         if(!rescue.dryAt)rescue.dryAt=ms;
         if(ms-rescue.dryAt>kDryMs){EndRescue("the player is out of the sea",true,ms);return;}
     } else rescue.dryAt=0;
-    const float surface=p[1]>kSeaY ? p[1] : kSeaY;
+    const float surface=p[1]>sea ? p[1] : sea;
     const float away=Dist2(pos,p);
     float at[3]{},reach=0.0f;
     const int seat=reachOk ? DoorSeat(v,human,at,&reach) : -1;
@@ -1693,7 +1707,7 @@ void Pickup(unsigned char* human,ULONGLONG ms) noexcept {
         // Under kGroundClear only once over the spot (the walls are not looked for then: the steep coast).
         rescue.low=Dist2(pos,rescue.goal)<10.0f;
     }
-    if(rescue.height<kSeaY+kSkid)rescue.height=kSeaY+kSkid;
+    if(rescue.height<sea+kSkid)rescue.height=sea+kSkid;
     if(away<=kRescueApproach && !rescue.nearAt){rescue.nearAt=ms;Log("RESCUE heli %p beside the player (%.0f m), coming down",v,away);}
     if(rescue.nearAt && ms-rescue.nearAt>kPickupMs){EndRescue("not boarded in 120 s",true,ms);return;}
     rescue.seat=seat;

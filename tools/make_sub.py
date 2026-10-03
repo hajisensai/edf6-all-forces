@@ -31,8 +31,8 @@ SGO_FILE = 'EDF6VC_SUB_CARRIER.SGO'
 MODEL_FILE = 'EDF6VC_SUB.MRAB'
 PREFIX = 'EDF6VC_SUB'
 # Hull box (half extents) the plugin's SubFrame and the SGO agree on: its bottom is kHullBottom metres under
-# the body origin (src/subcarrier.cpp).
-HULL_BOTTOM = 166.58
+# the body origin (src/subcarrier.cpp; negative: the box is the slab under the deck, over the origin).
+HULL_BOTTOM = -163.08
 
 
 def check_sgo(data: bytes) -> None:

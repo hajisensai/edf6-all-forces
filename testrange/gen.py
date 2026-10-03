@@ -186,10 +186,13 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                            'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
-    # object EV603_MARINE's model at its own size, 1664 m long; the box is its hull up to the main deck (the
-    # tower above is not solid). Guns on its forward turrets' (left) barrels, the missile on its missile bay.
+    # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
+    # deck (y 163.08..193.08 over the origin; the tower above is not solid). Not the whole hull: afloat its
+    # keel is 340 m down and EDF's seas are some 30 m deep (M082, 2026-10-04): a hull box stuck in the seabed,
+    # was pushed 215 m off its point and fought the ground every frame. Guns on its forward turrets' (left)
+    # barrels, the missile on its missile bay.
     'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _ARMS, ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
-                                      'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 13.25, -7.58), (121.0, 179.83, 832.0)),
+                                      'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 178.08, -7.58), (121.0, 15.0, 832.0)),
                                       weapon_bones=('gunA_tilt_l', 'gunB_tilt_l', 'missle_l')),
 }
 JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI', 'edf6tr_jet_blast': 'V506_HELI',
