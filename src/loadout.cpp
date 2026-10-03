@@ -3,6 +3,8 @@
 // preload (0x59DE50) and in offline player creation (0x591410). Both calls are wrapped: the wanted
 // loadout is written just before the call and the old values put back right after it, so nothing
 // forced is left for the menus or the autosave to see. Layout: docs/loadout-re.md.
+// Refill=1 also fills every weapon of the new player at once (the developer command weapon_reload's
+// per-soldier call), which makes an Air Raider's vehicles callable without earning points first.
 #include "crew.h"
 #include "memory.h"
 #include <cwchar>
@@ -13,6 +15,8 @@ namespace {
 using Fn=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,std::uintptr_t,std::uintptr_t);
 
 constexpr unsigned kGameStatus=0x20B2890,kPreloadPlayer=0x59DE50,kCreateLocal=0x591410;
+constexpr unsigned kReloadAll=0x5A1060;   // (SoldierBase*): reload-complete on each weapon in +0x1950[+0x1960]
+constexpr std::size_t kWeaponList=0x1950,kWeaponCount=0x1960;
 constexpr unsigned kPreloadCalls[]={0x1B8F52,0x225FB5};
 constexpr unsigned kCreateCalls[]={0xA153A,0xA1879,0x1DC539,0x22AE3D,0x5A51C5};
 // GameStatus: per local player (stride 0x3E60) the class, then 6 weapon ids per class;
@@ -24,6 +28,7 @@ constexpr int kMaxWeapon=0x800;   // GameStatus has room for this many weapon re
 
 wchar_t loadoutPath[MAX_PATH]{};
 Fn preloadOrig=nullptr,createOrig=nullptr;
+void(__fastcall* reloadAll)(void*)=nullptr;
 
 struct Loadout { int cls=-1; int weapon[6]{-1,-1,-1,-1,-1,-1}; int stars=-1; };
 
@@ -92,11 +97,27 @@ std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uin
 }
 
 // (slot, transform, mode): mode 1/2 are the scripts' CreatePlayer_NoWeapon / _InitWeapon; leave those alone.
+// The new soldier's weapon list must look like one before the game's own loop walks it.
+void Refill(std::uintptr_t soldier) noexcept {
+    if(!reloadAll || !GetPrivateProfileIntW(L"Loadout",L"Refill",0,loadoutPath))return;
+    auto obj=reinterpret_cast<unsigned char*>(soldier);
+    if(!Readable(obj,kWeaponCount+8))return;
+    auto list=At<void* const*>(obj,kWeaponList);
+    const auto count=At<std::uint64_t>(obj,kWeaponCount);
+    if(count==0 || count>16 || !Readable(list,count*sizeof(void*)))return;
+    for(std::uint64_t i=0;i<count;++i)if(!Readable(list[i],0xE80))return;
+    reloadAll(obj);
+    if(cfg.debug)Log("LOADOUT refill weapons=%llu",static_cast<unsigned long long>(count));
+}
+
 std::uintptr_t __fastcall CreateHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
     Undo u;
     const bool applied=static_cast<std::int32_t>(c)==0 && Apply(a,u,"create");
     const auto result=createOrig(a,b,c,d);
-    if(applied)Restore(u);
+    if(applied) {
+        Restore(u);
+        Refill(result);
+    }
     return result;
 }
 
@@ -122,6 +143,9 @@ bool InstallLoadout(const wchar_t* pluginIni) noexcept {
         Log("LOADOUT profile mismatch, forced loadout off");
         return false;
     }
+    static const unsigned char reload[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0x99,0x50,0x19,0x00,0x00};
+    if(Matches(kReloadAll,reload,sizeof(reload)))reloadAll=reinterpret_cast<void(__fastcall*)(void*)>(image+kReloadAll);
+    else Log("LOADOUT reload profile mismatch, Refill off");
     preloadOrig=reinterpret_cast<Fn>(image+kPreloadPlayer);
     createOrig=reinterpret_cast<Fn>(image+kCreateLocal);
     const int p=Redirect(kPreloadCalls,std::size(kPreloadCalls),kPreloadPlayer,reinterpret_cast<void*>(&PreloadHook));

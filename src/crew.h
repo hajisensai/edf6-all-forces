@@ -28,8 +28,8 @@ struct Config {
     DWORD heliMissileMs=4000;  // minimum gap between missiles
     float heliMoveGain=0.04f;  // stick per metre off the goal
     float heliBrakeGain=0.12f; // stick per m/s of speed (damping)
-    float heliClimbGain=0.08f; // throttle per m/s of climb-rate error
-    float heliHoverLearn=0.03f;// how fast it learns the hover throttle
+    float heliClimbGain=0.08f; // rotor speed per m/s of climb-rate error
+    float heliHoverLearn=0.03f;// how fast it learns the hover rotor speed
     DWORD heliLandMs=6000;     // it lands by a player who stood still this long; 0 = never lands
 };
 extern Config cfg;

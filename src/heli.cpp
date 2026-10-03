@@ -8,8 +8,8 @@
 //
 // Flight: the heli holds a point heliFollow metres from the player (on the enemy side when it is
 // engaging), heliHeight metres up. Horizontal = PD on position projected onto the heading rows, so its
-// signs are right by construction. Altitude = vertical-speed loop on the throttle with an integrator
-// that learns the hover throttle (the rotor lags the throttle by seconds). The world sign of yaw was
+// signs are right by construction. Altitude = climb-rate loop on the rotor speed (the lift, which
+// lags the throttle by seconds) with a throttle loop under it that drives the rotor there. The world sign of yaw was
 // not provable statically, so it is learned online from how the heading actually turns.
 // When the player stands still for heliLandMs it lands next to them and stays down while they are
 // close, so they can walk up and bump the NPC pilot.
@@ -37,6 +37,7 @@ constexpr int kMaxNodes=8192;
 constexpr float kPi=3.14159265f;
 constexpr float kBoardRange=25.0f;   // a landed heli stays down while the player is this close
 constexpr float kLandDistance=20.0f; // it lands this far from a player standing still
+constexpr float kRotorGain=4.0f;     // throttle per unit the rotor is off the wanted rotor
 
 struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
 const Signature kHeliSignatures[]={
@@ -53,7 +54,7 @@ struct Heli {
     ULONGLONG crewedAt,seen,loggedAt,missileAt,targetAt;
     LARGE_INTEGER last;
     float prev[3],vel[3];
-    float hover;          // learned hover throttle
+    float hover;          // learned rotor speed that holds height
     float prevHeading,lastYaw;
     int yawSign,votes;    // +1: a positive yaw input increases atan2(fwd.x, fwd.z)
     bool yawLocked,started;
@@ -213,12 +214,18 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const float cl=std::sqrt(Dot2(c,c));
     if(cl>1.0f){c[0]/=cl;c[2]/=cl;}
 
-    // Vertical: climb-rate loop on the throttle; the integrator settles on the hover throttle.
-    const float climb=Clamp((goal[1]-pos[1])*0.3f,-4.0f,5.0f);
+    // Vertical: the rotor (kRotor) is the lift, and it trails the throttle by seconds (spooling down
+    // slower than up). So altitude -> climb rate -> wanted rotor -> a throttle that drives the rotor
+    // there. h.hover is the rotor that holds height; it is learned only near the goal, where the
+    // climb rate is not saturated (learning on the climb winds it up to 1 and it overshoots by 20 m).
+    const float dy=goal[1]-pos[1];
+    const float climb=Clamp(dy*0.25f,-3.0f,3.0f);
     const float err=climb-h.vel[1];
-    h.hover=Clamp(h.hover+err*cfg.heliHoverLearn*dt,0.1f,1.0f);
-    float throttle=Clamp(h.hover+err*cfg.heliClimbGain,0.0f,1.0f);
-    if(land && grounded){throttle=0.0f;h.hover=0.1f;c[0]=c[2]=0.0f;}
+    if(std::fabs(dy)<6.0f)h.hover=Clamp(h.hover+err*cfg.heliHoverLearn*dt,0.1f,1.0f);
+    const float want=Clamp(h.hover+err*cfg.heliClimbGain,0.0f,1.0f);
+    const float rotor=At<float>(v,kRotor);
+    float throttle=std::isfinite(rotor) ? Clamp(want+(want-rotor)*kRotorGain,0.0f,1.0f) : want;
+    if(land && grounded){throttle=0.0f;c[0]=c[2]=0.0f;}
 
     // Yaw: face the target, else where it is going, else the player.
     float face[3]={0,0,0};
