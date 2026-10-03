@@ -126,6 +126,22 @@ def _rebone(v, names: set[str]):
     return JET_ROOT_BONE if isinstance(v, str) and v in names else v
 
 
+JET_BODY_BONE = 'bomber501'
+
+
+def _jet_ragdoll(blob: bytes) -> bytes:
+    """The ragdoll's embedded binding SGO with every model-side bone one the bomber has. The binder
+    (RagdollController::BindDependency 0x6E6A50) does not survive a missing bone: an entry left unbound
+    crashes it at 0x6E8284 while the vehicle is built (seen 2026-10-03 with the V506 names). Every proxy
+    follows the fuselage bone; only the body proxy drives it (the rotor proxies spin)."""
+    import sgowrite
+    version, inner = sgowrite.read(blob)
+    inner['ragdoll_from_animation'] = [[[JET_BODY_BONE, e[0][1]]] + e[1:] for e in inner['ragdoll_from_animation']]
+    inner['animation_from_ragdoll'] = [[[e[0][0], JET_BODY_BONE]] + e[1:]
+                                       for e in inner['animation_from_ragdoll'] if e[0][1] == 'body']
+    return sgowrite.write(version, inner)
+
+
 def jet_sgo(game: Game, name: str) -> bytes:
     import sgowrite
     jet = JETS[name]
@@ -151,6 +167,8 @@ def jet_sgo(game: Game, name: str) -> bytes:
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
     m['heli_rigid_body'] = [JET_RIGID_BODY[0], JET_RIGID_BODY[1], rb[2]]
+    rag = m['ragdoll']
+    m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1])]
     return sgowrite.write(version, m)
 
 # (sgo, label, flying)

@@ -70,7 +70,7 @@ V602 的根骨骼不叫 `mdl`，所以它的 SGO 里有 `animation_model_bone_ma
 | 根骨骼，`R+0x14` = veh+`0x1574`（默认查 `mdl`） | `0x650560` → `0x11002A0`，找不到返回 -1 | 每帧在 `0x651B8F` 用它的位置做地面射线，结果写 veh+`0x1C40`/`0x1C44`。`0x1100280` 不检查 -1，会越界读到垃圾。bomber 有 `mdl`，所以没问题 | H |
 | rotor 骨骼，`R+0x10` = veh+`0x1570`（默认查 `rotor`） | 同上 | bomber 没有这根骨骼，结果是 -1，会越界读到骨骼数组前面的堆内存：<br>- 初始化时 `0x64EBE2` 取记录 `+0xF0` 当 rotor 半径，交给 `0x650D40` 建 Havok 形状。<br>- 每帧 `0x6519E7` 取 `+0xB0` 当世界矩阵，在 `0x651B45` 做 rotor 接触查询。<br>- `0x653AF6`、`0x65567A` 也会用到。<br>结果是垃圾半径和垃圾矩阵，**可能崩**。**必须映射到一根存在的骨骼** | H（无检查） / M（后果） |
 | ragdoll 记录 `'body'` | `0x6EA4B0` 在 ragdoll 自己的哈希表里查（名字来自 .shkt，不是模型骨骼），结果写 veh+`0x1530` | slot 61（`0x650010`，经 `0x61B6E0` 调用）在 edx=1 时，如果下标是 -1，会执行 `mov rdx,[0+0x50]`，**空指针崩溃**。保留 `Ragdoll_v506_heli.shkt` 就不会有问题 | H |
-| `animation_from_ragdoll` / `ragdoll_from_animation` 映射里的模型骨骼 | `0x6E6A50`，绑定在 `0x6E7C6C` 附近 | 找不到时打 `RagdollController::BindDependency( ragdoll to an...` 日志，然后**跳过这一项**。ragdoll 照样存在，只是不驱动模型骨骼 | M |
+| `animation_from_ragdoll` / `ragdoll_from_animation` 映射里的模型骨骼 | `0x6E6A50`（BindDependency） | **实测崩溃（2026-10-03）**：原样带 V506 的映射配 bomber 模型时，载具构造在 `0x629912 → 0x6EB4C0 → 0x6E8284` 读空指针（映射表项 `+0x60` 为空）。之前「找不到只跳过」的判断是错的。映射里每个模型侧骨骼都必须存在 | H |
 | MAB 定位点的父骨骼（`animation_model[2]`） | `0x6BADD0`：先按名字找定位点，再用 `0x11002A0` 找父骨骼；任何一步失败都返回 false，句柄是 {0,0} | `0x62B430`（riding position）**不检查返回值**。之后 `0x629CEE` 在座位循环里调 `0x6BB420(seat+0x1E0)` 读 `[bone+0xB0..]`，也不判空，**父骨骼缺失就在 VehicleBase 构造时崩溃** | H（无检查） / M（必崩） |
 | MAB 定位点，damage effect 用 | `0x6C74E0` → `0x11001F0`（会返回 null） | 存下的骨骼指针可能是 null，消费方没查 | L |
 | `vehicle_weapon_setting` 的骨骼名（查 **MDB 骨骼**，不是 MAB） | `0x629450` → `0x11001F0` | 找不到时打 `weapon node not found` 日志（release 版里日志函数 `0x3E4A0` 是空函数）。之后**跳过**：holder 的节点（+0x18）和 owner（+0x38）都没设置，也没有登记到座位。后续用到时可能空指针 | H（跳过） / M（后续） |
@@ -99,8 +99,8 @@ V602 的根骨骼不叫 `mdl`，所以它的 SGO 里有 `animation_model_bone_ma
 4. `vehicle_weapon_setting`：四项的骨骼名都从 `'body'` 改成 `'mdl'` 或 `'bomber501'`（H：查的是 MDB 骨骼）。枪口偏移要按 bomber 的尺寸重新填。
 5. `roter_contact_damage_scale = 0`。如果不想被撞伤，`heli_contact_damage_scale` 也一起降低（M）。
 6. `vehicle_dead_effect`：其中的 `body` / `rotor` / `tailRotor` 全部改成 `mdl`（M）。
-7. `ragdoll`：原样保留 `[Ragdoll_v506_heli.shkt, 内嵌 SGO]`（H：slot 61 需要它）。
-   - 内嵌映射里的骨骼找不到时只跳过（M）。
+7. `ragdoll`：保留 `Ragdoll_v506_heli.shkt`（H：slot 61 需要它，缺字段会抛 bad_variant_access），但内嵌 SGO 的映射要改写：`ragdoll_from_animation` 的模型侧全部改成 `bomber501`，`animation_from_ragdoll` 只留 body→`bomber501` 一项（gen.py `_jet_ragdoll`）。
+   - 内嵌映射里的骨骼找不到会让构造崩溃（见上表，实测）。
    - 坠毁时 ragdoll 的体积是直升机大小，与 bomber 模型不符，只影响外观（L）。
 8. `heli_rigid_body`：用机身盒，**不要把翼展算进去**，否则低空时翼尖会一直接触地面和建筑。
    - 建议值 `[[0, 0.34, 2.6], [2.0, 1.6, 13.0], 0.305]`，第三个值沿用原版，含义未确认（M）。
