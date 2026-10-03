@@ -853,11 +853,9 @@ void JetFrame(unsigned char* v) noexcept {
     const float* anchor=follow && !j->launched ? player.pos : j->anchor;
     const float* viewer=follow ? player.pos : anchor;
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
-    // A placed jet patrols with the player and never leaves; a launched one (a bomber, an escort) does.
-    const bool leaves=j->launched;
-    if(leaves && ms-j->bornAt>j->fuelMs)Withdraw(*j,"fuel",ms);
-    else if(leaves && hpMax>0.0f && hp<hpMax*kWithdrawHp)Withdraw(*j,"damaged",ms);
-    else if(leaves && arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile))Withdraw(*j,"out of ammo",ms);
+    if(ms-j->bornAt>j->fuelMs)Withdraw(*j,"fuel",ms);
+    else if(hpMax>0.0f && hp<hpMax*kWithdrawHp)Withdraw(*j,"damaged",ms);
+    else if(arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile))Withdraw(*j,"out of ammo",ms);
 
     const bool walled=Sense(*j,pos,ms);
 
