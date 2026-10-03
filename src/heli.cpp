@@ -136,12 +136,21 @@ constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at co
 // m/s per metre of overlap.
 constexpr float kWingGap=25.0f,kSeparation=25.0f,kSeparationGain=0.4f;
 constexpr float kGroupGap=60.0f,kGroupStep=10.0f;
-// With no enemy: while the player moves (a 3 m step within kMovingMs) the helis escort in a V on their
-// flank, kEscortAhead metres forward: the player's velocity plus kSlotGain m/s per metre off the slot
-// (at most kSlotCatch). While they stand they orbit them heliFollow metres out at kOrbitSpeed: tangent
-// speed plus kRadialGain m/s per metre off the radius; wingmen hold their share of the circle from the
-// leader by speeding up or slowing down kPhaseGain of kOrbitSpeed per rad behind or ahead.
+// With no enemy: while the player travels (see kRoamSpan) the helis escort in a V on their flank,
+// kEscortAhead metres forward: the player's velocity plus kSlotGain m/s per metre off the slot (at most
+// kSlotCatch). Otherwise (standing, or moving about a small area) they fly an ellipse round where the
+// player has been the last kTrackMs, heliFollow metres outside it, at kOrbitSpeed (more on a larger
+// one): tangent speed plus kRadialGain m/s per metre off the ellipse; wingmen hold their share of it
+// from the leader by speeding up or slowing down kPhaseGain of kOrbitSpeed per rad behind or ahead.
+// A standing player's ellipse is a circle heliFollow out.
 constexpr ULONGLONG kMovingMs=2000;
+// The player's track: a sample every kTrackStepMs over the last kTrackMs (game clock). They travel once
+// it spans more than kRoamSpan along its long axis and the net move is kRoamStraight of that span (one
+// way, not back and forth); they stop travelling under kRoamKeep of either, or kMovingMs after their
+// last step. moveDir is their net move over the last kDirMs.
+constexpr ULONGLONG kTrackMs=10000,kTrackStepMs=250,kDirMs=3000;
+constexpr int kTrackSize=static_cast<int>(kTrackMs/kTrackStepMs)+1;
+constexpr float kRoamSpan=70.0f,kRoamStraight=0.7f,kRoamKeep=0.7f,kEllipseSpeedMax=2.5f;
 constexpr float kEscortAhead=15.0f,kSlotGain=0.33f;   // the slot is caught at most at the heli's top speed
 constexpr float kOrbitSpeed=10.0f,kRadialGain=0.3f,kPhaseGain=1.0f,kPhaseMax=0.5f;
 constexpr float kFaceSpeed=3.0f;     // m/s: slower than this it faces the player instead of the way it flies
@@ -263,16 +272,61 @@ struct Heli {
 Heli helis[16]{};
 // The player's last move: they count as standing still once within 3 m of `still` since `stillAt`
 // (game clock: a pause does not count as standing still).
-// moveDir is the horizontal direction of that last 3 m step.
+// moveDir: see kDirMs.
 float still[3]{},moveDir[3]{0,0,1};ULONGLONG stillAt=0;
 
-void TrackPlayerStill() noexcept {
-    const float d[3]={player.pos[0]-still[0],player.pos[1]-still[1],player.pos[2]-still[2]};
-    if(stillAt && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>9.0f) {
-        const float len=std::sqrt(d[0]*d[0]+d[2]*d[2]);
-        if(len>1.0f){moveDir[0]=d[0]/len;moveDir[1]=0;moveDir[2]=d[2]/len;}
+// Where the player has been (see kTrackMs), and the ellipse's area round it: centre (x, z), unit long
+// axis u and w (u turned a right angle), the half spans along both, and the net move over the track.
+struct TrackPoint { float x,z; ULONGLONG at; };
+TrackPoint track[kTrackSize]{};int trackHead=0,trackCount=0;
+struct Area { float centre[2],u[2],w[2],halfU,halfW,net; };
+Area area{{0,0},{0,1},{1,0},0,0,0};
+bool roaming=false;   // the player travels: the helis escort (else they fly the ellipse)
+
+const TrackPoint& TrackAt(int back) noexcept { return track[(trackHead-1-back+2*kTrackSize)%kTrackSize]; }
+
+// The area of the track: the long axis from the samples' covariance, centred on their extent.
+Area AreaOf() noexcept {
+    Area a{{player.pos[0],player.pos[2]},{moveDir[0],moveDir[2]},{moveDir[2],-moveDir[0]},0,0,0};
+    if(trackCount<2)return a;
+    float mx=0,mz=0;
+    for(int i=0;i<trackCount;++i){mx+=TrackAt(i).x;mz+=TrackAt(i).z;}
+    mx/=static_cast<float>(trackCount);mz/=static_cast<float>(trackCount);
+    float cxx=0,cxz=0,czz=0;
+    for(int i=0;i<trackCount;++i){const float dx=TrackAt(i).x-mx,dz=TrackAt(i).z-mz;cxx+=dx*dx;cxz+=dx*dz;czz+=dz*dz;}
+    const float axis=0.5f*std::atan2(2.0f*cxz,cxx-czz);   // the major axis, from x toward z
+    a.u[0]=std::cos(axis);a.u[1]=std::sin(axis);a.w[0]=a.u[1];a.w[1]=-a.u[0];
+    float lo[2]={1e9f,1e9f},hi[2]={-1e9f,-1e9f};
+    for(int i=0;i<trackCount;++i) {
+        const float dx=TrackAt(i).x-mx,dz=TrackAt(i).z-mz;
+        const float p[2]={dx*a.u[0]+dz*a.u[1],dx*a.w[0]+dz*a.w[1]};
+        for(int k=0;k<2;++k){lo[k]=p[k]<lo[k] ? p[k] : lo[k];hi[k]=p[k]>hi[k] ? p[k] : hi[k];}
     }
-    if(!stillAt || d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>9.0f){std::memcpy(still,player.pos,12);stillAt=GameMs();}
+    const float cu=0.5f*(lo[0]+hi[0]),cw=0.5f*(lo[1]+hi[1]);
+    a.centre[0]=mx+a.u[0]*cu+a.w[0]*cw;a.centre[1]=mz+a.u[1]*cu+a.w[1]*cw;
+    a.halfU=0.5f*(hi[0]-lo[0]);a.halfW=0.5f*(hi[1]-lo[1]);
+    const TrackPoint& oldest=TrackAt(trackCount-1);
+    a.net=std::sqrt((player.pos[0]-oldest.x)*(player.pos[0]-oldest.x)+(player.pos[2]-oldest.z)*(player.pos[2]-oldest.z));
+    return a;
+}
+
+// The player's last step (stillAt), their track every kTrackStepMs, and from it moveDir, the area and
+// whether they travel (see kRoamSpan).
+void TrackPlayerStill() noexcept {
+    const ULONGLONG ms=GameMs();
+    const float d[3]={player.pos[0]-still[0],player.pos[1]-still[1],player.pos[2]-still[2]};
+    if(!stillAt || d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>9.0f){std::memcpy(still,player.pos,12);stillAt=ms;}
+    if(trackCount && ms-TrackAt(0).at<kTrackStepMs)return;
+    while(trackCount && ms-TrackAt(trackCount-1).at>kTrackMs)--trackCount;
+    track[trackHead]={player.pos[0],player.pos[2],ms};
+    trackHead=(trackHead+1)%kTrackSize;
+    if(trackCount<kTrackSize)++trackCount;
+    const int back=static_cast<int>(kDirMs/kTrackStepMs)<trackCount-1 ? static_cast<int>(kDirMs/kTrackStepMs) : trackCount-1;
+    const float mx=player.pos[0]-TrackAt(back).x,mz=player.pos[2]-TrackAt(back).z,len=std::sqrt(mx*mx+mz*mz);
+    if(len>3.0f){moveDir[0]=mx/len;moveDir[1]=0;moveDir[2]=mz/len;}
+    area=AreaOf();
+    const float span=2.0f*area.halfU,keep=roaming ? kRoamKeep : 1.0f;
+    roaming=ms-stillAt<kMovingMs && span>kRoamSpan*keep && area.net>span*kRoamStraight*keep;
 }
 
 Heli* Find(const void* vehicle) noexcept {
@@ -454,13 +508,20 @@ void Arrive(const Heli& h,const float* pos,const float* goal,const float* goalVe
     out[0]+=e[0]/len*want;out[2]+=e[2]/len*want;
 }
 
-// No target: escort the moving player, or orbit the standing one (see kMovingMs). Sets the wanted
-// velocity and height; returns how far it is off its slot (escort) or radius (orbit).
+// `p` in the area's frame (along u, w from its centre), scaled by 1/a and 1/b: on the unit circle when on
+// the ellipse with those semi-axes.
+void Unit(const float* p,float a,float b,float* q) noexcept {
+    const float dx=p[0]-area.centre[0],dz=p[2]-area.centre[1];
+    q[0]=(dx*area.u[0]+dz*area.u[1])/a;q[1]=(dx*area.w[0]+dz*area.w[1])/b;
+}
+
+// No target: escort the travelling player, or fly the ellipse round the area they are about (see
+// kRoamSpan). Sets the wanted velocity and height; returns how far it is off its slot or the ellipse.
 float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl,float* vel,float* height) noexcept {
     const float* first=fl.first ? fl.first->pos : pos;
     const float group=static_cast<float>(fl.group),wing=static_cast<float>(fl.wing);
     *height=player.pos[1]+cfg.heliHeight+Stack(fl);
-    if(GameMs()-stillAt<kMovingMs) {
+    if(roaming) {
         // Each flight a V: the first flight on the side the first heli is on, heliFollow out and
         // kEscortAhead forward, the second on the other side, the next ones kGroupGap farther out,
         // alternating. Wing n takes place (n+1)/2 on alternating sides, kWingGap back and out per place.
@@ -477,22 +538,32 @@ float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl
         vel[0]=h.pVel[0]+fix[0];vel[1]=0;vel[2]=h.pVel[2]+fix[2];
         return off;
     }
-    // Orbit (counterclockwise in atan2(x, z)): tangent at kOrbitSpeed, pulled onto the radius. The flights
-    // share the circle out evenly from the first heli; in a flight each wingman trails the one before
-    // it kWingGap along the circle. A heli runs faster or slower until it sits at its place.
+    // The ellipse (see kTrackMs): semi-axes A, B heliFollow outside the area's half spans, flown one way
+    // round (its parameter t grows, from u toward w), so a player turning about inside the area never
+    // turns the helis about. The area's centre drifts slowly and is not added in, so their steps do not
+    // shake it. Tangent at kOrbitSpeed scaled with its size (at most kEllipseSpeedMax), pulled onto it by
+    // kRadialGain. The flights share it out evenly in t from the first heli; in a flight each wingman
+    // trails the one before it kWingGap; a heli runs faster or slower until it sits at its place.
     const float r=cfg.heliFollow>10.0f ? cfg.heliFollow : 10.0f;
-    float out[3]={pos[0]-player.pos[0],0,pos[2]-player.pos[2]};
-    float dist=std::sqrt(Dot2(out,out));
-    if(dist<1.0f){out[0]=-fwd[0];out[2]=-fwd[2];dist=1.0f;}
-    else{out[0]/=dist;out[2]/=dist;}
-    const float tangent[3]={out[2],0,-out[0]};   // d/d(angle) of (sin, cos)
-    const float angle=std::atan2(out[0],out[2]);
-    const float want=std::atan2(first[0]-player.pos[0],first[2]-player.pos[2])+
-        2.0f*kPi*group/static_cast<float>(fl.groups>0 ? fl.groups : 1)-wing*kWingGap/r;
-    const float speed=kOrbitSpeed*(1.0f+Clamp(Wrap(want-angle)*kPhaseGain,-kPhaseMax,kPhaseMax));
-    const float radial=Clamp((r-dist)*kRadialGain,-kOrbitSpeed,kOrbitSpeed);
-    vel[0]=h.pVel[0]+tangent[0]*speed+out[0]*radial;vel[1]=0;vel[2]=h.pVel[2]+tangent[2]*speed+out[2]*radial;
-    return std::fabs(dist-r);
+    const float A=area.halfU+r,B=area.halfW+r,mean=0.5f*(A+B);
+    float q[2],qf[2];
+    Unit(pos,A,B,q);Unit(first,A,B,qf);
+    if(q[0]*q[0]+q[1]*q[1]<1e-4f){q[0]=-(fwd[0]*area.u[0]+fwd[2]*area.u[1]);q[1]=-(fwd[0]*area.w[0]+fwd[2]*area.w[1]);}
+    const float t=std::atan2(q[1],q[0]);
+    const float want=std::atan2(qf[1],qf[0])+2.0f*kPi*group/static_cast<float>(fl.groups>0 ? fl.groups : 1)-wing*kWingGap/mean;
+    const float scale=Clamp(mean/r,1.0f,kEllipseSpeedMax);
+    const float speed=kOrbitSpeed*scale*(1.0f+Clamp(Wrap(want-t)*kPhaseGain,-kPhaseMax,kPhaseMax));
+    // The point at t, and the unit tangent there (d/dt of A cos t u + B sin t w).
+    const float ct=std::cos(t),st=std::sin(t);
+    const float on[3]={area.centre[0]+area.u[0]*A*ct+area.w[0]*B*st,0,area.centre[1]+area.u[1]*A*ct+area.w[1]*B*st};
+    float tangent[3]={-area.u[0]*A*st+area.w[0]*B*ct,0,-area.u[1]*A*st+area.w[1]*B*ct};
+    const float tl=std::sqrt(Dot2(tangent,tangent));
+    if(tl>1e-3f){tangent[0]/=tl;tangent[2]/=tl;}
+    float fix[3]={on[0]-pos[0],0,on[2]-pos[2]};
+    const float off=std::sqrt(Dot2(fix,fix));
+    fix[0]*=kRadialGain;fix[2]*=kRadialGain;Limit2(fix,kOrbitSpeed*scale);
+    vel[0]=tangent[0]*speed+fix[0];vel[1]=0;vel[2]=tangent[2]*speed+fix[2];
+    return off;
 }
 
 // Breaks off a run (see Engage): it flies on at full speed to a point kExtend past the target, slanted
@@ -1156,7 +1227,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
         Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
-            v,perched ? "perched " : "",land ? "land" : engage ? (circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (GameMs()-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
+            v,perched ? "perched " : "",land ? "land" : engage ? (circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (roaming ? "escort" : "orbit") : "hold",
             flight.group,wing,arms.ammo[0],arms.ammo[1],arms.ammo[2],pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
