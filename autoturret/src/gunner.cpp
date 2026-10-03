@@ -156,10 +156,42 @@ bool Barrel(const unsigned char* vehicle,const unsigned char* weapon,float* pos,
     return Dot(d,d)<kMuzzleReach*kMuzzleReach;
 }
 
-bool ReadGun(const unsigned char* vehicle,unsigned s,float down,Gun& gun) noexcept {
+// The seat's own gun: the weapon in its first holder (seat+0xC8, the one its aim controller turns).
+const unsigned char* SeatGun(const unsigned char* seat) noexcept {
+    const auto holders=At<const unsigned char* const*>(seat,kSeatWeapons);
+    if(At<std::uint64_t>(seat,kSeatWeaponCount)==0 || !Readable(holders,8) || !Readable(holders[0],kHolderWeapon+8))return nullptr;
+    return At<const unsigned char*>(holders[0],kHolderWeapon);
+}
+
+// The trigger that pulls seat s's gun: the one holding the seat's own weapon. Trigger s is that one on
+// the stock Titan and 403, but not on every variant: on one (2026-10-03, a 500-round side gun) trigger 2
+// held another weapon, so the aim steered by a barrel that seat 2's turn input never moved (its axis
+// stayed 0 at full input for two minutes) and the right gun never got on target. Trigger s only when
+// the seat's weapon is in none of them.
+std::uint64_t SeatTrigger(const unsigned char* vehicle,const unsigned char* seat,unsigned s) noexcept {
+    const auto triggers=At<const unsigned char*>(vehicle,kTriggers);
+    const auto count=At<std::uint64_t>(vehicle,kTriggerCount);
+    const auto weapon=SeatGun(seat);
+    if(!weapon || count>16 || !Readable(triggers,count*kTriggerStride))return s;
+    for(std::uint64_t i=0;i<count;++i)
+        if(At<const unsigned char*>(triggers+i*kTriggerStride,kTriggerWeapon)==weapon) {
+            if(i!=s && cfg.debug) {
+                static const void* logged[16]={};
+                static unsigned next=0;
+                bool seen=false;
+                for(const void* v:logged)seen=seen || v==seat;
+                if(!seen){logged[next++%16]=seat;Log("GUNNER v=%p seat=%u: its gun is trigger %llu",vehicle,s,static_cast<unsigned long long>(i));}
+            }
+            return i;
+        }
+    return s;
+}
+
+bool ReadGun(const unsigned char* vehicle,const unsigned char* seat,unsigned s,float down,Gun& gun) noexcept {
     const auto triggers=At<unsigned char*>(vehicle,kTriggers);
-    if(At<std::uint64_t>(vehicle,kTriggerCount)<=s || !Readable(triggers+s*kTriggerStride,kTriggerStride))return false;
-    gun.trigger=triggers+s*kTriggerStride;
+    const std::uint64_t t=SeatTrigger(vehicle,seat,s);
+    if(At<std::uint64_t>(vehicle,kTriggerCount)<=t || !Readable(triggers+t*kTriggerStride,kTriggerStride))return false;
+    gun.trigger=triggers+t*kTriggerStride;
     const auto ctrl=At<const unsigned char*>(gun.trigger,kTriggerCtrl);
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return false;
     gun.weapon=At<const unsigned char*>(gun.trigger,kTriggerWeapon);
@@ -284,7 +316,7 @@ bool OnTarget(const Gun& gun,const float* error,float distance,float widen) noex
 void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down) noexcept {
     const auto seat=At<const unsigned char*>(vehicle,kSeats)+s*kSeatStride;
     Gun gun{};Aim aim{};
-    if(!ReadGun(vehicle,s,down,gun))return;
+    if(!ReadGun(vehicle,seat,s,down,gun))return;
     Track& track=TrackFor(seat);
     const auto now=GetTickCount64();
     if(!ReadAim(vehicle,seat,gun,track,aim))return;
