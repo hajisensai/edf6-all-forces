@@ -4,7 +4,8 @@ bombers' own models), made from this machine's own V506_HELI.SGO and
 BOMBER501 model exactly like the test range's jets (testrange/gen.py: jet_sgo), and EDF6VC_JET.MRAB: the
 stock BOMBER501.MRAB with its model split into elevon bones the plugin moves (tools/mdb_jet.py,
 docs/mdb-format.md), which only these two SGOs use (the stock bombers keep theirs), and their guns into
-<game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO (gen.jet_guns). Without the SGOs the plugin leaves the stock
+<game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO and the blast drones' charges EDF6VC_BLAST_CHARGE /
+EDF6VC_DOLL_CHARGE.SGO (gen.jet_guns). Without the SGOs the plugin leaves the stock
 bombers alone.
 
   python tools/make_jets.py [game dir]            write / refresh
@@ -29,6 +30,8 @@ FILES: dict[str, str] = {
     'EDF6VC_JET_MULTIROLE.SGO': 'edf6tr_jet_multirole_mission',
     'EDF6VC_JET_CARRIER.SGO': 'edf6tr_jet_carrier_mission',
     'EDF6VC_JET_DRONE.SGO': 'edf6tr_jet_drone',
+    'EDF6VC_JET_BLAST.SGO': 'edf6tr_jet_blast',
+    'EDF6VC_JET_DOLL.SGO': 'edf6tr_jet_doll',
 }
 # Their own models (tools/jet_models.py).
 MODEL_FILES = sorted({gen.JETS[j].file for j in FILES.values() if gen.JETS[j].file})
@@ -55,7 +58,7 @@ def main(argv: list[str]) -> int:
     out = gen.object_dir(root)
     if '--remove' in argv:
         paths = [os.path.join(out, n) for n in [*FILES, *BOMBERS, *HELIS, MODEL_FILE, *MODEL_FILES]]
-        for path in paths + [os.path.join(gen.weapon_dir(root), n) for n in gen.JET_GUN_FILES]:
+        for path in paths + [os.path.join(gen.weapon_dir(root), n) for n in gen.JET_WEAPON_FILES]:
             if os.path.exists(path):
                 os.remove(path)
                 print('删除', path)

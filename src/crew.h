@@ -137,7 +137,9 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // as one flight, whose rounds pass through each other.
 // `role`: the jet.cpp Role it flies as (same order); one whose SGO is not installed flies as a fighter.
 // `escort`: it works round the player (while seen), not round `target`.
-enum class JetRole { strike, fighter, interceptor, multirole, carrier };
+// blastCarrier / dollCarrier: a carrier whose drones blow up next to the enemy (the doll ones carrying a
+// singing, dancing hololive doll); after `carrier`, as they are no role of their own.
+enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier };
 bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort=false) noexcept;
 // A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,

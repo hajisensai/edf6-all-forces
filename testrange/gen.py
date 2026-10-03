@@ -130,6 +130,18 @@ JET_GUN_REACH = JET_GUN_SPEED * JET_GUN_ALIVE
 _GUNS = tuple('app:/weapon/' + f.lower() for f in JET_GUN_FILES)
 _MISSILE = 'app:/weapon/v_506heli_missile01.sgo'
 _ARMS = _GUNS + (_MISSILE,)
+# The blast drones' charge (src/jet.cpp Detonate: weapon 2, fired by 0x2021 once next to the enemy): the
+# 409's unguided bomb (GrenadeBullet01) made a point charge (docs/decoy-blast-re.md 1.4): CP#0 = 1 bursts
+# when its life runs out (0x26543E), CP#3 = 0 no bounce, CP#5 = 0 no random life; it barely moves, lives
+# JET_BLAST_ALIVE frames, so it goes off where the drone is. One round, one shot. (damage, radius m).
+JET_BLAST_STOCK = 'V_409HELI_BOMB01.SGO'
+JET_BLAST_FILES: dict[str, tuple[float, float]] = {
+    'EDF6VC_BLAST_CHARGE.SGO': (1200.0, 15.0),   # the blast drone: fast, many
+    'EDF6VC_DOLL_CHARGE.SGO': (3000.0, 25.0),    # the doll drone: slow, draws the enemy in first
+}
+JET_BLAST_ALIVE = 2.0
+_BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES)
 # Model sizes and boxes: tools/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
     'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _ARMS),
@@ -147,8 +159,15 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_drone': Jet(7006.0, 300.0, _ARMS, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                             'EDF6VC_DRONE.MRAB', 'body', 'body',
                             rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
+    # Blast and doll drones (src/jet.cpp Role::blast / doll): the drone with a charge for its missile; only
+    # the blast and doll carriers launch them (their guns never fire).
+    'edf6tr_jet_blast': Jet(7007.0, 250.0, _GUNS + (_BLAST[0],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+                            'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
+    'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+                           'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
 }
-JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI'}   # jets that are no range vehicle
+JET_BASE: dict[str, str] = {'edf6tr_jet_drone': 'V506_HELI', 'edf6tr_jet_blast': 'V506_HELI',
+                            'edf6tr_jet_doll': 'V506_HELI'}   # jets that are no range vehicle
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
 JET_ELEVON_FILE = 'EDF6VC_JET.MRAB'
@@ -595,7 +614,8 @@ def weapon_dir(game_root: str) -> str:
 
 
 def jet_guns(game: Game) -> dict[str, bytes]:
-    """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE."""
+    """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE; and the
+    blast drones' charges (JET_BLAST_FILES)."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'autoturret', 'tools'))
     import dsgo
     out = {}
@@ -606,6 +626,18 @@ def jet_guns(game: Game) -> dict[str, bytes]:
             raise ValueError(f'{stock} 不是预期的直升机机炮')
         r.set('AmmoSpeed', JET_GUN_SPEED)
         r.set('AmmoAlive', JET_GUN_ALIVE)
+        out[name] = dsgo.write(doc)
+    for name, (damage, radius) in JET_BLAST_FILES.items():
+        doc = dsgo.parse(game.read('WEAPON', JET_BLAST_STOCK))
+        r = doc.root
+        cp = r.get('Ammo_CustomParameter')
+        if r.get('AmmoClass') != 'GrenadeBullet01' or len(cp.items) != 6:
+            raise ValueError(f'{JET_BLAST_STOCK} 不是预期的直升机炸弹')
+        cp.items[0], cp.items[3], cp.items[5] = 1.0, 0.0, 0.0
+        for key, value in (('AmmoCount', 1.0), ('FireCount', 1.0), ('FireBurstCount', 1.0), ('FireInterval', 1.0),
+                           ('AmmoSpeed', 0.01), ('AmmoGravityFactor', 0.0), ('AmmoAlive', JET_BLAST_ALIVE),
+                           ('AmmoDamage', damage), ('AmmoExplosion', radius)):
+            r.set(key, value)
         out[name] = dsgo.write(doc)
     return out
 

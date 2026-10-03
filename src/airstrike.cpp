@@ -116,6 +116,10 @@ const Call kCalls[]={
     {7110.0f,false,JetRole::carrier,HeliBody::eros506,1,600,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
     {7111.0f,true,JetRole::fighter,HeliBody::brute410,2,360,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
     {7112.0f,true,JetRole::fighter,HeliBody::eros506,2,360,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
+    {7113.0f,false,JetRole::blastCarrier,HeliBody::eros506,1,600,false,"blast drone carrier (guard)",L"EDF6VC_CALL_BLAST_CARRIER"},
+    {7114.0f,false,JetRole::blastCarrier,HeliBody::eros506,1,600,true,"blast drone carrier (follow)",L"EDF6VC_CALL_BLAST_CARRIER_F"},
+    {7115.0f,false,JetRole::dollCarrier,HeliBody::eros506,1,600,false,"doll drone carrier (guard)",L"EDF6VC_CALL_DOLL_CARRIER"},
+    {7116.0f,false,JetRole::dollCarrier,HeliBody::eros506,1,600,true,"doll drone carrier (follow)",L"EDF6VC_CALL_DOLL_CARRIER_F"},
 };
 
 // Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
