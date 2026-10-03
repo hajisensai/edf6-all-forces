@@ -131,11 +131,14 @@ constexpr ULONGLONG kPassedMs=6000;
 // (kShareTarget: a target counts this much farther per other heli already on it)
 constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at counts this much farther
 // Formation: the helis fly in flights of one type each (see FlightOf), so a flight shares one top speed
-// and turn. A flight is a V, kWingGap metres per place; flights escort kGroupGap apart and hover
-// kGroupStep apart in height. All flown helis keep kSeparation metres apart, pushed by kSeparationGain
-// m/s per metre of overlap.
-constexpr float kWingGap=25.0f,kSeparation=25.0f,kSeparationGain=0.4f;
-constexpr float kGroupGap=60.0f,kGroupStep=10.0f;
+// and turn. A flight is a V, WingGap metres per place; flights escort kGroupGap apart and hover
+// kGroupStep apart in height. All flown helis keep their reaches (Reach) plus kClearAir apart, pushed by
+// kSeparationGain m/s per metre of overlap (more than the pull onto a slot, so it wins).
+// Reach: how far rotor, nose and tail go round the rotor shaft (the MDB bones' extents): the 410's rotor
+// is 20 m across and its tail 13.6 m back; the 506's and 409's about 9 m. At 25 m apart (the old gap)
+// the 410s' rotors overlapped and the others had 7 m between them (the 17:25 runs: pairs 9-16 m apart).
+constexpr float kReach410=14.0f,kReachOther=9.0f,kClearAir=20.0f,kSeparationGain=0.8f;
+constexpr float kGroupGap=110.0f,kGroupStep=10.0f;
 // With no enemy: while the player travels (see kRoamSpan) the helis escort in a V on their flank,
 // kEscortAhead metres forward: the player's velocity plus kSlotGain m/s per metre off the slot (at most
 // kSlotCatch). Otherwise (standing, or moving about a small area) they fly an ellipse round where the
@@ -441,6 +444,15 @@ bool PlayerInLine(const float* from,const float* to) noexcept {
 // This heli's flight: the helis flown right now of its type, in `helis` order (the first one leads);
 // `group` numbers the flights in the order their first heli comes, `first` is the first heli of all.
 struct Flight { int group,groups,wing,count; const Heli* leader; const Heli* first; };
+
+// See kReach410.
+float Reach(const Heli& h) noexcept {
+    return h.kind==image+kHeli410 ? kReach410 : kReachOther;
+}
+// A flight's helis (one type) WingGap apart: two reaches plus kClearAir.
+float WingGap(const Heli& h) noexcept {
+    return 2.0f*Reach(h)+kClearAir;
+}
 Flight FlightOf(const Heli& h,ULONGLONG ms) noexcept {
     Flight f{0,0,0,0,nullptr,nullptr};
     const void* kinds[16];
@@ -469,15 +481,15 @@ float Dist2(const float* a,const float* b) noexcept {
     return std::sqrt(Dot2(d,d));
 }
 
-// Adds to the wanted velocity `vel` a push away from the other helis flown right now, so they keep
-// kSeparation metres apart.
+// Adds to the wanted velocity `vel` a push away from the other helis flown right now, so they keep their
+// reaches plus kClearAir apart.
 void Separate(const Heli& h,const float* pos,float* vel,ULONGLONG ms) noexcept {
     for(const auto& o:helis) {
         if(&o==&h || !o.vehicle || ms-o.seen>2000)continue;
         const float d[3]={pos[0]-o.pos[0],0,pos[2]-o.pos[2]};
-        const float len=std::sqrt(Dot2(d,d));
-        if(len<0.1f || len>kSeparation)continue;
-        vel[0]+=d[0]/len*(kSeparation-len)*kSeparationGain;vel[2]+=d[2]/len*(kSeparation-len)*kSeparationGain;
+        const float len=std::sqrt(Dot2(d,d)),keep=Reach(h)+Reach(o)+kClearAir;
+        if(len<0.1f || len>keep)continue;
+        vel[0]+=d[0]/len*(keep-len)*kSeparationGain;vel[2]+=d[2]/len*(keep-len)*kSeparationGain;
     }
 }
 
@@ -524,13 +536,13 @@ float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl
     if(roaming) {
         // Each flight a V: the first flight on the side the first heli is on, heliFollow out and
         // kEscortAhead forward, the second on the other side, the next ones kGroupGap farther out,
-        // alternating. Wing n takes place (n+1)/2 on alternating sides, kWingGap back and out per place.
+        // alternating. Wing n takes place (n+1)/2 on alternating sides, WingGap back and out per place.
         const float perp[2]={moveDir[2],-moveDir[0]};
         const float toFirst[2]={first[0]-player.pos[0],first[2]-player.pos[2]};
         const float flank=(toFirst[0]*perp[0]+toFirst[1]*perp[1]<0 ? -1.0f : 1.0f)*(fl.group%2 ? -1.0f : 1.0f);
         const float place=static_cast<float>((fl.wing+1)/2),side=fl.wing%2 ? 1.0f : -1.0f;
-        const float out=cfg.heliFollow+kGroupGap*static_cast<float>(fl.group/2)+side*place*kWingGap;
-        const float ahead=kEscortAhead-place*kWingGap;
+        const float out=cfg.heliFollow+kGroupGap*static_cast<float>(fl.group/2)+side*place*WingGap(h);
+        const float ahead=kEscortAhead-place*WingGap(h);
         float fix[3]={player.pos[0]+perp[0]*flank*out+moveDir[0]*ahead-pos[0],0,
                       player.pos[2]+perp[1]*flank*out+moveDir[2]*ahead-pos[2]};
         const float off=std::sqrt(Dot2(fix,fix));
@@ -543,14 +555,14 @@ float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl
     // turns the helis about. The area's centre drifts slowly and is not added in, so their steps do not
     // shake it. Tangent at kOrbitSpeed scaled with its size (at most kEllipseSpeedMax), pulled onto it by
     // kRadialGain. The flights share it out evenly in t from the first heli; in a flight each wingman
-    // trails the one before it kWingGap; a heli runs faster or slower until it sits at its place.
+    // trails the one before it WingGap; a heli runs faster or slower until it sits at its place.
     const float r=cfg.heliFollow>10.0f ? cfg.heliFollow : 10.0f;
     const float A=area.halfU+r,B=area.halfW+r,mean=0.5f*(A+B);
     float q[2],qf[2];
     Unit(pos,A,B,q);Unit(first,A,B,qf);
     if(q[0]*q[0]+q[1]*q[1]<1e-4f){q[0]=-(fwd[0]*area.u[0]+fwd[2]*area.u[1]);q[1]=-(fwd[0]*area.w[0]+fwd[2]*area.w[1]);}
     const float t=std::atan2(q[1],q[0]);
-    const float want=std::atan2(qf[1],qf[0])+2.0f*kPi*group/static_cast<float>(fl.groups>0 ? fl.groups : 1)-wing*kWingGap/mean;
+    const float want=std::atan2(qf[1],qf[0])+2.0f*kPi*group/static_cast<float>(fl.groups>0 ? fl.groups : 1)-wing*WingGap(h)/mean;
     const float scale=Clamp(mean/r,1.0f,kEllipseSpeedMax);
     const float speed=kOrbitSpeed*scale*(1.0f+Clamp(Wrap(want-t)*kPhaseGain,-kPhaseMax,kPhaseMax));
     // The point at t, and the unit tangent there (d/dt of A cos t u + B sin t w).
@@ -1095,8 +1107,8 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         float len=std::sqrt(Dot2(dir,dir));
         if(len<1.0f){dir[0]=-fwd[0];dir[2]=-fwd[2];len=1.0f;}
         const float r=cfg.heliFollow<kLandDistance ? cfg.heliFollow : kLandDistance;
-        const float spot[3]={player.pos[0]+dir[0]/len*(r+kWingGap*static_cast<float>(wing)),0,
-                             player.pos[2]+dir[2]/len*(r+kWingGap*static_cast<float>(wing))};
+        const float spot[3]={player.pos[0]+dir[0]/len*(r+WingGap(h)*static_cast<float>(wing)),0,
+                             player.pos[2]+dir[2]/len*(r+WingGap(h)*static_cast<float>(wing))};
         Arrive(h,pos,spot,rest,want);
         off=Dist2(pos,spot);
         height=player.pos[1]-10.0f;   // below the ground: it descends until it touches down
