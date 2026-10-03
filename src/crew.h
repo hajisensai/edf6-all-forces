@@ -21,6 +21,7 @@ struct Config {
     float heliHeight=35.0f;    // metres above the player the helicopter holds
     float heliFollow=45.0f;    // horizontal distance it keeps from the player
     float heliRange=350.0f;    // it engages enemies within this distance
+    float heliCombatRange=120.0f;// engaged (player on foot), it stays within this of the player
     bool heliFire=true;
     float heliStandoff=80.0f;  // unused since the attack runs (kept so old ini files still load)
     bool heliAvoid=true;       // helis steer and climb clear of terrain and buildings (map rays)

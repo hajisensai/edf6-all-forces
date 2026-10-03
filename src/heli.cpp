@@ -386,6 +386,8 @@ float Formation(const Heli& h,const float* pos,const float* fwd,int wing,ULONGLO
 // station is where it is; outside, the nearest edge of the band on its side, which moves with the target.
 // The height is heliFireHeight (plus kWingStep per wing, three steps) above the target, or the player
 // if higher. While its burst would pass the player it slides around the target, away from them.
+// Following the player, the station never leaves heliCombatRange of them (pulled in to that circle, it
+// shoots from the edge if the gun reaches).
 // h.back (fly, do not aim) once it is kBandSlack out of the band or the dip passes kMaxDip; it aims
 // again back inside with the dip kDipMargin under. Returns how far it is out of the band.
 float Engage(Heli& h,const float* pos,const float* aim,float range,float dip,int wing,bool follow,
@@ -401,8 +403,13 @@ float Engage(Heli& h,const float* pos,const float* aim,float range,float dip,int
     const float reach=Clamp(range*kStandoff,0.0f,kStandoffMax);
     const float farthest=reach>nearest+kBandMin ? reach : nearest+kBandMin;
     const float keep=Clamp(horiz,nearest,farthest);
-    const float station[3]={aim[0]+from[0]*keep,0,aim[2]+from[2]*keep};
-    const float off=std::fabs(horiz-keep);
+    float station[3]={aim[0]+from[0]*keep,0,aim[2]+from[2]*keep};
+    if(follow) {
+        const float out[3]={station[0]-player.pos[0],0,station[2]-player.pos[2]};
+        const float len=std::sqrt(Dot2(out,out)),leash=cfg.heliCombatRange>10.0f ? cfg.heliCombatRange : 10.0f;
+        if(len>leash){station[0]=player.pos[0]+out[0]/len*leash;station[2]=player.pos[2]+out[2]/len*leash;}
+    }
+    const float off=Dist2(pos,station);
     if(off>kBandSlack || dip>kMaxDip)h.back=true;
     else if(h.back && off<1.0f && dip<kMaxDip-kDipMargin)h.back=false;
     const float targetVel[3]={h.tgtVel[0],0,h.tgtVel[2]};
@@ -537,7 +544,9 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(!follow){h.pVel[0]=h.pVel[1]=h.pVel[2]=0.0f;h.playerAt=0;}
     const float* anchor=follow ? player.pos : pos;
     float aim[3]{};
-    const bool engage=PickTarget(h,v,anchor,pos,cfg.heliRange,aim);
+    // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
+    const float pick=follow && cfg.heliCombatRange+GunRange(v)<cfg.heliRange ? cfg.heliCombatRange+GunRange(v) : cfg.heliRange;
+    const bool engage=PickTarget(h,v,anchor,pos,pick,aim);
     if(engage) {
         TrackVelocity(h.tgtPrev,h.tgtVel,aim,dt,40.0f,h.tracked!=h.target);
         h.tracked=h.target;
