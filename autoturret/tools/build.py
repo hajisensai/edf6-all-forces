@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import dsgo  # noqa: E402
 import describe  # noqa: E402
 import gamefs  # noqa: E402
+import sgo_write  # noqa: E402
+import titan_ai  # noqa: E402
 from dsgo import Node  # noqa: E402
 
 # The five stock KG6 Kepler calls and the guns each one mounts (GUN02 / GUN03 are shared by two tiers).
@@ -189,7 +191,7 @@ def build_object(name: str) -> bytes:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument('--out', default=os.path.join(os.path.dirname(__file__), '..', 'dist', 'Mods'))
+    ap.add_argument('--out', default=os.path.join(os.path.dirname(__file__), '..', '..', 'dist', 'Mods'))
     ap.add_argument('--no-text', action='store_true', help='leave the WEAPONTEXT tables alone')
     args = ap.parse_args()
     out = os.path.abspath(args.out)
@@ -203,6 +205,7 @@ def main() -> None:
         files[f'WEAPON/{HV_GUN.format(side=side)}'] = build_hv_gun(side)
     for name in FLAK_OBJECTS:
         files[f'OBJECT/{name}'] = build_object(name)
+    files[f'OBJECT/{titan_ai.NAME}'] = titan_ai.build()
     for name in BOHR_CALLS:
         files[f'WEAPON/{name}'] = build_call(name, None, [])   # its turret is already the fast DLC one
     for side in SIDES:
@@ -213,7 +216,8 @@ def main() -> None:
         vehicles += [describe.Vehicle(c, BOHR_GUN.format(side='L'), 'ground') for c in BOHR_CALLS]
         files.update(describe.build_texts(vehicles, files, out))
     for rel, data in files.items():
-        dsgo.parse(data)
+        # the stock NPC Titan is a classic SGO, everything else DSGO; each must read back
+        (sgo_write.parse if data[:4] == b'SGO\0' else dsgo.parse)(data)
         path = os.path.join(out, rel)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb') as f:

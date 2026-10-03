@@ -30,7 +30,7 @@ It has two parts:
 | KG6 Kepler YF-HV (DLC) | Auto-aim only; keeps its high-velocity solid shot, durability and turret. |
 | KG7 Bohr, Bohr B (DLC) | Auto-aim in ground mode: ground targets first, lobbed rounds aimed on their arc, stock impact fuse. Durability x2, blast 4 m -> 6 m, and the blasts now wreck buildings. |
 | Titan (all, incl. DLC side cannons) | Plugin only: both side cannons aim themselves; with no player in a gunner seat they also fire, as the driver's (player or NPC). Main cannon untouched. |
-| NPC Titan (e.g. mission 64) | Optional data (`tools/titan_ai.py`): the stock NPC Titan has empty side-cannon mounts; this gives it the player Titan's two side cannons, which the plugin then aims and fires. |
+| NPC Titan (e.g. mission 64) | Data: the stock NPC Titan has empty side-cannon mounts; `build.py` gives it the player Titan's two side cannons, which the plugin then aims and fires. |
 | Ranger tanks with gunner seats (Vehicle403) | Plugin only: both side machine guns, as above. Single-seat tanks (Air Raider's, Vehicle601) have no side guns. |
 
 Why: the stock Keplers deal a third to a half of the damage per second of same-level tanks and
@@ -51,13 +51,11 @@ Requires EDF6 (Steam) with [EDFModLoader](https://github.com/BlueAmulet/EDFModLo
    python tools\build.py --out "%EDF6_DIR%\Mods"
    ```
 
-   It writes the vehicles' own call and gun files under `Mods\WEAPON\`, the mission Keplers under
-   `Mods\OBJECT\`, and their eight rows of
-   the `WEAPONTEXT.*.SGO` tables there; it reads the game's `Root.cpk` and never modifies it. Run it
-   while the game is closed, and again after installing another mod that replaces `WEAPONTEXT`.
+   It writes the vehicles' own call and gun files under `Mods\WEAPON\`, the mission Keplers and
+   the NPC Titan under `Mods\OBJECT\`, and their eight rows of the `WEAPONTEXT.*.SGO` tables
+   there; it reads the game's `Root.cpk` and never modifies it. Run it while the game is closed, and
+   again after installing another mod that replaces `WEAPONTEXT`.
    `--no-text` leaves the text tables alone.
-3. Optional, the NPC Titan's side cannons: `python tools\titan_ai.py` writes
-   `dist\Mods\OBJECT\VEHICLE404_BIGTANK_AI.SGO`; copy it to `<EDF6>\Mods\OBJECT\`.
 
 To uninstall, delete those files and the plugin (delete the `WEAPONTEXT` files only if no other
 mod installed them; otherwise reinstall that mod's). Settings are in `EDF6AutoTurret.ini` and apply
@@ -92,5 +90,5 @@ Keplers will not behave the same for everyone. Have every player install it. Rev
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled: `third_party/EDFModLoader/PluginAPI.h` (MIT) and
+MIT, see [LICENSE](LICENSE). Bundled: `third_party/EDFModLoader/PluginAPI.h` at the repository root (MIT) and
 `third_party/edf6-cpk` (CPK / CRILAYLA readers from EDF6MultiSlot by momotori01, public domain).
