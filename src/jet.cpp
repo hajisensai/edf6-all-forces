@@ -47,6 +47,14 @@ constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr std::size_t kWeaponLockon=0x6B0,kWeaponSpeed=0x894,kWeaponAlive=0x898,kWeaponGravity=0x8E0,kWeaponAmmo=0xBE8;
 constexpr std::int32_t kHoming=1;
+// The homing weapon's lock-on (Weapon_VehicleShoot: its lock tick 0x6963A0 runs for AI riders too; the
+// test 0x22DF30 wants the target within LockonRange and LockonAngle of the arms bone). The stock 506
+// missile locks within 500 m and +-0.15/0.2 rad in 30 frames; unlocked, its rounds fly straight on
+// (MissileBullet01 mode 1 steers only at a target the lock list gave it). A jet's missile gets its
+// role's missileRange (and a margin), a wider cone and twice the lock speed; it fires only once the game
+// has a target in its lock list (kWeaponLocked), which it keeps HoldTime (600 frames) nose or not.
+constexpr std::size_t kWeaponLockAngle=0x6C0,kWeaponLockRange=0x6D0,kWeaponLockSpeed=0x790,kWeaponLocked=0xC68;
+constexpr float kLockMargin=1.15f,kLockAngle=0.35f,kLockSpeed=2.0f;
 // The guns are seat weapons 0 and 1 (what 0x2020 fires, testrange/gen.py); after the missile gen.py puts
 // the 506's fuel tank (v_fuel01, its "ammo" ~1e6 burnt by the throttle), which is no gun.
 constexpr std::uint64_t kGunWeapons=2;
@@ -375,9 +383,9 @@ float Ceiling() noexcept {
 }
 
 // The pilot's seat weapons: guns (straight, fastest round speed for the lead), the homing missile.
-struct Arms { float gunSpeed,gunGravity,gunRange; std::int32_t guns,missiles; bool hasGun,hasMissile; };
+struct Arms { float gunSpeed,gunGravity,gunRange; std::int32_t guns,missiles,locked; bool hasGun,hasMissile; };
 Arms ReadArms(unsigned char* v) noexcept {
-    Arms a{240.0f,0.0f,400.0f,0,0,false,false};
+    Arms a{240.0f,0.0f,400.0f,0,0,0,false,false};
     if(SeatCount(v)==0)return a;
     const auto seat=SeatAt(v,0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
@@ -386,9 +394,14 @@ Arms ReadArms(unsigned char* v) noexcept {
     for(std::uint64_t i=0;i<count;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
-        if(!Readable(w,kWeaponAmmo+4))continue;
+        if(!Readable(w,kWeaponLocked+8))continue;
         const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
-        if(At<std::int32_t>(w,kWeaponLockon)==kHoming){a.hasMissile=true;a.missiles+=ammo>0 ? ammo : 0;continue;}
+        if(At<std::int32_t>(w,kWeaponLockon)==kHoming) {
+            a.hasMissile=true;a.missiles+=ammo>0 ? ammo : 0;
+            const auto locked=At<std::uint64_t>(w,kWeaponLocked);
+            a.locked+=locked<64 ? static_cast<std::int32_t>(locked) : 0;
+            continue;
+        }
         const float speed=At<float>(w,kWeaponSpeed)*60.0f,reach=At<float>(w,kWeaponSpeed)*static_cast<float>(At<std::int32_t>(w,kWeaponAlive));
         if(i>=kGunWeapons || !std::isfinite(speed) || speed<=1.0f)continue;
         a.guns+=ammo>0 ? ammo : 0;
@@ -400,6 +413,29 @@ Arms ReadArms(unsigned char* v) noexcept {
         }
     }
     return a;
+}
+
+// The jet's homing weapons lock as far out as `range` (see kWeaponLockRange); never narrower or slower
+// than stock.
+void ExtendLock(unsigned char* v,float range) noexcept {
+    if(range<=0.0f || SeatCount(v)==0)return;
+    const auto seat=SeatAt(v,0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(count>8 || !Readable(holders,count*8))return;
+    for(std::uint64_t i=0;i<count;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto w=At<unsigned char*>(holders[i],kHolderWeapon);
+        if(!Readable(w,kWeaponLocked+8) || At<std::int32_t>(w,kWeaponLockon)!=kHoming)continue;
+        auto& r=*reinterpret_cast<float*>(w+kWeaponLockRange);
+        if(r<range*kLockMargin)r=range*kLockMargin;
+        for(int k=0;k<2;++k) {
+            auto& a=*reinterpret_cast<float*>(w+kWeaponLockAngle+4*k);
+            if(a<kLockAngle)a=kLockAngle;
+        }
+        auto& s=*reinterpret_cast<float*>(w+kWeaponLockSpeed);
+        if(s<kLockSpeed)s=kLockSpeed;
+    }
 }
 
 // Where to point the guns to hit `aim` moving at `tv` from `from` (round flight time and drop). Farther
@@ -924,12 +960,12 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float tdist=Len(t),off=tdist>1.0f ? std::acos(Clamp(Dot(t,nose)/tdist,-1.0f,1.0f)) : 0.0f;
         if(!missileOk || off>kMissileCone)j.lockAt=0;
         else if(!j.lockAt)j.lockAt=ms;
-        missile=missileOk && a.missiles>0 && j.lockAt && ms-j.lockAt>=kLockMs && tdist>kMissileMin && tdist<k.missileRange &&
+        missile=missileOk && a.missiles>0 && a.locked>0 && j.lockAt && ms-j.lockAt>=kLockMs && tdist>kMissileMin && tdist<k.missileRange &&
                 ms-j.missileAt>kMissileMs && !FriendInLine(pos,j.aim,v);
         if(missile) {
             j.missileAt=ms;
-            if(cfg.debug)Log("JET v=%p missiles: %.0f m, %.1f deg off the nose, held %.1f s",v,tdist,off*180.0f/kPi,
-                             static_cast<float>(ms-j.lockAt)*0.001f);
+            if(cfg.debug)Log("JET v=%p missiles: %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,tdist,off*180.0f/kPi,
+                             static_cast<float>(ms-j.lockAt)*0.001f,a.locked);
         }
     }
     v[kFireGun]=gun;v[kFireMissile]=missile;
@@ -1310,6 +1346,7 @@ void JetFrame(unsigned char* v) noexcept {
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,1.0f);Put<float>(v,kInW,1.0f);
 
+    ExtendLock(v,KindOf(*j).missileRange);
     const Arms arms=ReadArms(v);
     const bool follow=player.at && ms-player.at<10000;
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
