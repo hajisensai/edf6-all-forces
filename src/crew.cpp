@@ -207,6 +207,14 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
         auto v=static_cast<unsigned char*>(vehicle);
         // The jets are NPC aircraft: their pilot is never bumped for the player (they have no other seat).
         if(!IsPlayer(static_cast<const unsigned char*>(human)) || IsJet(v))return nullptr;
+        // An NPC still aboard (one moved to a gunner seat, the player gone again) keeps the vehicle on
+        // its team, and the stock check then refuses even a free seat: ask again on the vehicle's own.
+        const auto team=At<std::int32_t>(v,kTeam),own=OwnTeam(v);
+        if(team!=own) {
+            Put<std::int32_t>(v,kTeam,own);
+            if(auto free=originalFindSeat(vehicle,human))return free;
+            Put<std::int32_t>(v,kTeam,team);
+        }
         const unsigned count=SeatCount(v);
         for(unsigned i=0;i<count;++i) {
             auto s=SeatAt(v,i);
@@ -282,7 +290,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(st.playerAt>since)since=st.playerAt;
     if(st.bumpedAt>since)since=st.bumpedAt;
     if(now-since<cfg.crewDelayMs)return;
-    const auto team=At<std::int32_t>(vehicle,kTeam);
+    // Its own team, not the one an NPC left aboard (in a gunner seat) holds it on.
+    const auto team=OwnTeam(vehicle);
     if(!player.at || now-player.at>10000 || (team!=player.team && team!=kTeamVehicle))return;
     if(cfg.crewRange>0.0f && Distance2(vehicle,player.pos)>cfg.crewRange*cfg.crewRange)return;
     // The NPC that moved to a gunner seat when the player boarded goes with the driver seat:
