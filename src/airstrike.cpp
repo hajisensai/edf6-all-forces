@@ -51,11 +51,22 @@ PlaneUpdateFn nextPlaneUpdate=nullptr;
 const char kRadioSource='r',kMissionSource='m';   // distinct values: identical constants may be folded
 
 // Bombers whose jets fly instead, by their weak-this control block: hidden at their first update, deleted
-// once the jet lets go of them (JetHolds), or kHoldMaxMs after.
+// once the jet lets go of them (JetHolds), or kHoldMaxMs after. As many as jets can fly (jet.cpp
+// kMaxJets); with none free the bomber is not taken over and flies stock. (A ring of 32 overwrote held
+// planes with more than 32 jets bombing: the overwritten plane was updated again, opened its own bay and
+// dropped its bombs a second time, unseen.)
 struct Held { const void* ctrl; ULONGLONG since; bool hidden; };
-Held held[32]{};
-unsigned heldNext=0;
+constexpr int kMaxHeld=64;
+Held held[kMaxHeld]{};
 constexpr ULONGLONG kHoldMaxMs=180000;
+// An entry past kHoldMaxMs (and a margin) is free: its plane, still updated, was deleted at kHoldMaxMs, or
+// is gone (the mission ended) without an update to delete it.
+constexpr ULONGLONG kHeldStaleMs=kHoldMaxMs+10000;
+
+Held* FreeHeld(ULONGLONG ms) noexcept {
+    for(auto& h:held)if(!h.ctrl || ms-h.since>kHeldStaleMs)return &h;
+    return nullptr;
+}
 // The plane's last state's entry (0x5AB9A0): speed 0, its draw component off (0x6C04B0(plane+0x5C0, 0)),
 // off the radar (0x54DDB0).
 constexpr unsigned kPlaneHide=0x6C04B0,kPlaneUnlist=0x54DDB0;
@@ -118,8 +129,11 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
         const float* heading=reinterpret_cast<const float*>(plane+kPlaneVelocity);
         const JetBody body=BomberBody(plane+kPlaneModel);
         const void* const ctrl=At<const void*>(plane,kSelfCtrl);
-        if(!std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source,body,ctrl))return;
-        held[heldNext++%32]=Held{ctrl,GameMs(),false};
+        const ULONGLONG ms=GameMs();
+        Held* const h=FreeHeld(ms);
+        if(!h){Log("AIRSTRIKE %s bomber %p: %d bombers held, it flies stock",who,plane,kMaxHeld);return;}
+        if(!ctrl || !std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source,body,ctrl))return;
+        *h=Held{ctrl,ms,false};
         Log("AIRSTRIKE %s bomber %p (%s model): its jet drops the bombs",who,plane,
             body==JetBody::bomber401 ? "bomber401" : body==JetBody::bomber501_2 ? "bomber501_2" : "bomber501 / unknown");
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
