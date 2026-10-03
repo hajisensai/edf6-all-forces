@@ -66,12 +66,19 @@ struct Kind {
     float range;                    // m from the anchor it takes targets in
 };
 constexpr Kind kKinds[2]={
-    {150.0f,180.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 250.0f, 850.0f,70.0f,1500.0f, 500.0f,60.0f, 700.0f,120.0f, 120.0f,30.0f, 1200.0f},
-    {210.0f,260.0f,110.0f,15.0f,20.0f, 7.0f,2.4f, 320.0f, 950.0f,80.0f,1700.0f, 500.0f,60.0f, 900.0f,150.0f, 160.0f,40.0f, 1800.0f},
+    {150.0f,180.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 250.0f, 850.0f,70.0f,1500.0f, 500.0f,60.0f, 1000.0f,120.0f, 120.0f,30.0f, 1200.0f},
+    {180.0f,195.0f,110.0f,15.0f,20.0f, 7.0f,2.4f, 320.0f, 950.0f,80.0f,1700.0f, 500.0f,60.0f, 1400.0f,150.0f, 160.0f,40.0f, 1800.0f},
 };
 // m/s^2 of speed lost per g pulled over 1 (induced drag): with thrust that sustains 1 + thrust/kTurnBleed
 // g (strike ~4.3, fighter 6); harder it slows, and the turn tightens, as a wing does.
 constexpr float kTurnBleed=3.0f;
+// m/s no jet is commanded past. Havok caps every dynamic body at its motion properties' maxLinearSpeed
+// (hknpMotionProperties+0x10, 200 m/s in the preset the vehicles use): the 18:58 run's jets commanded
+// 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never flown.
+constexpr float kBodyTop=195.0f;
+// Patrol: the speed that holds the patrol circle at a 45 degree bank (tan 1), between kLoiterMin times the
+// stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time.
+constexpr float kLoiterTan=1.0f,kLoiterMin=1.15f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on the attitude it should have this fast
 constexpr float kNegG=1.0f;            // g: the most it pushes (lift down the body's up)
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this
@@ -185,10 +192,11 @@ struct Jet {
     const char* why;         // why it withdrew
     bool launched;           // made by JetLaunch: anchor is its strike point
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
-    const unsigned char* model;   // the model instance its elevons were found in (null: not looked yet)
+    const unsigned char* model;   // the bone array its elevons were found in (null: not looked yet)
     unsigned char* elevon[2];     // their bone records, null without (a model without elevons)
     float elevonBind[2][16],elevonAt[2],elevonSet[2][16];
     bool elevonWritten,elevonLogged;
+    ULONGLONG gateAt;             // the last gun gate log (Fire)
     ULONGLONG fuelMs;
     unsigned char* ifc;      // the bomb bay (see kIfcCtor), or nullptr
     float bombAt[3],bombDir[3],bombAlt,bombSpeed,fireDist,reach;
@@ -381,7 +389,8 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     if(!Normalize(next))std::memcpy(next,dir,12);
     const float bleed=pull>kG ? (pull/kG-1.0f)*kTurnBleed : 0.0f;
     s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt)-(kG*next[1]+bleed)*dt;
-    s=Clamp(s,k.minSpeed*0.8f,j.top>0.0f ? j.top : k.attack*1.3f);
+    const float top=j.top>0.0f ? j.top : k.attack*1.3f;
+    s=Clamp(s,k.minSpeed*0.8f,top<kBodyTop ? top : kBodyTop);
     for(int i=0;i<3;++i)j.vel[i]=next[i]*s;
 }
 
@@ -420,17 +429,18 @@ unsigned char* BoneRecord(const unsigned char* inst,const wchar_t* name) noexcep
 
 // The elevons after the commanded turn (see kElevonMax).
 void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
-    const auto inst=At<const unsigned char*>(v,kModelInst);
-    if(!inst)return;
-    if(inst!=j.model) {
-        j.model=inst;j.elevonWritten=false;
+    const unsigned char* inst=v+kModelInst;
+    const auto bones=At<const unsigned char*>(inst,kInstBones);
+    if(!bones)return;
+    if(bones!=j.model) {
+        j.model=bones;j.elevonWritten=false;
         for(int i=0;i<2;++i) {
             j.elevon[i]=BoneRecord(inst,kElevonNames[i]);
             if(j.elevon[i])std::memcpy(j.elevonBind[i],j.elevon[i]+kBoneLocal,64);
             j.elevonAt[i]=0.0f;
         }
-        Log("JET v=%p elevons: %s (auto %d/%d)",v,j.elevon[0] && j.elevon[1] ? "found" : "none in this model",
-            j.elevon[0] ? j.elevon[0][kBoneAuto] : -1,j.elevon[1] ? j.elevon[1][kBoneAuto] : -1);
+        Log("JET v=%p elevons: %s (auto %d/%d) among %d bones",v,j.elevon[0] && j.elevon[1] ? "found" : "none in this model",
+            j.elevon[0] ? j.elevon[0][kBoneAuto] : -1,j.elevon[1] ? j.elevon[1][kBoneAuto] : -1,At<std::int32_t>(inst,kInstBoneCount));
     }
     if(!j.elevon[0] || !j.elevon[1])return;
     // Something else writing them (the animation) would undo every frame: said once.
@@ -580,8 +590,8 @@ void Guard(const Jet& j,const float* pos,float* want) noexcept {
 }
 
 // The circle round the anchor, patrol out (plus patrolStep per jet, so they do not share one circle),
-// counterclockwise.
-void Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept {
+// counterclockwise. Returns the speed to fly it at (see kLoiterTan).
+float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept {
     const Kind& k=KindOf(j);
     const float r=k.patrol+k.patrolStep*static_cast<float>(&j-jets);
     float out[3]={pos[0]-anchor[0],0,pos[2]-anchor[2]};
@@ -591,6 +601,20 @@ void Patrol(const Jet& j,const float* pos,const float* anchor,float height,float
     const float pull=Clamp((r-dist)/r,-1.5f,1.5f);
     const float dir[3]={tangent[0]+out[0]*pull,0,tangent[2]+out[2]*pull};
     Level(pos,dir,height,want);
+    return Clamp(std::sqrt(r*kG*kLoiterTan),k.minSpeed*kLoiterMin,k.cruise);
+}
+
+// Whether `at` lies inside the circle the jet turns on toward it (level, at its kind's g, at its speed):
+// it cannot bring the nose onto it without flying out first.
+bool InsideTurn(const Jet& j,const float* pos,const float* at) noexcept {
+    const Kind& k=KindOf(j);
+    const float s=Len(j.vel),r=s*s/(kG*std::sqrt(k.maxG*k.maxG-1.0f));
+    float v[3]={j.vel[0],0,j.vel[2]};
+    if(!Normalize(v))return false;
+    const float to[3]={at[0]-pos[0],0,at[2]-pos[2]};
+    const float side=to[0]*v[2]-to[2]*v[0]>=0.0f ? 1.0f : -1.0f;   // the target off the (v.z,-v.x) side or not
+    const float c[3]={pos[0]+v[2]*side*r-at[0],0,pos[2]-v[0]*side*r-at[2]};
+    return Dot(c,c)<r*r;
 }
 
 // Strike attack (see kDiveCone). Returns whether the guns may fire (diving at the lead point).
@@ -624,7 +648,7 @@ bool Strike(Jet& j,const float* pos,const float* lead,float height,ULONGLONG ms,
     }
     // Approach: at the target at height; dive once in the window, else fly out and come round.
     if(dh<=k.diveStart && dh>k.gunClose*2.0f && off<kDiveCone && over>k.pullAlt+30.0f){SetMode(j,Mode::dive,ms);Toward(pos,lead,want);return true;}
-    if(dh<=k.diveStart*0.8f && off>kDiveCone){std::memcpy(j.out,vdir,12);SetMode(j,Mode::extend,ms);Level(pos,vdir,height,want);return false;}
+    if(off>kDiveCone && InsideTurn(j,pos,lead)){std::memcpy(j.out,vdir,12);SetMode(j,Mode::extend,ms);Level(pos,vdir,height,want);return false;}
     Level(pos,to,height,want);
     *speed=k.cruise;
     return false;
@@ -719,8 +743,14 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float path[3]={pos[0]+nose[0]*a.gunRange,pos[1]+nose[1]*a.gunRange,pos[2]+nose[2]*a.gunRange};
         float flight[3]={j.vel[0],j.vel[1],j.vel[2]};
         const bool straight=Normalize(flight) && Dot(flight,nose)>kGunSlip;
-        gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) &&
-            !FriendInLine(pos,path,v);
+        const bool friendly=FriendInLine(pos,path,v);
+        gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !friendly;
+        if(cfg.debug && dist<reach && ms-j.gateAt>250) {
+            j.gateAt=ms;
+            Log("JET v=%p gun gate: %s mode=%s dist=%.0f miss=%.1f cone=%.1f deg slip=%.3f friend=%d aimed=%d",v,gun ? "FIRE" : "hold",
+                kModeNames[static_cast<int>(j.mode)],dist,miss*180.0f/kPi,(wide>kGunCone ? wide : kGunCone)*180.0f/kPi,
+                Dot(flight,nose),friendly,gunsOk);
+        }
         missile=a.missiles>0 && dist>kMissileMin && dist<kMissileMax && miss<kMissileCone && ms-j.missileAt>kMissileMs &&
                 !FriendInLine(pos,lead,v);
         if(missile)j.missileAt=ms;
@@ -935,7 +965,8 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
         const Kind& k=kKinds[0];
         const float stock=load.speed*60.0f;
         // The bomber's own speed, whatever kind it is (most fly 180 m/s, the Kamui 450).
-        const float speed=std::isfinite(stock) && stock>k.minSpeed ? stock : k.attack;
+        const float own=std::isfinite(stock) && stock>k.minSpeed ? stock : k.attack;
+        const float speed=own<kBodyTop ? own : kBodyTop;
         float fireDist=0.0f;
         unsigned char* ifc=BayMake(load,speed/60.0f,&fireDist);
         if(!ifc)return false;
@@ -946,7 +977,7 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
         j->ifc=ifc;std::memcpy(j->bombAt,target,12);std::memcpy(j->bombDir,dir,12);
         j->bombAlt=At<float>(j->vehicle,kPosition+4);j->bombSpeed=speed;j->fireDist=fireDist;j->reach=load.reach;
         j->mode=Mode::bomb;j->top=speed*1.1f>k.attack*1.3f ? speed*1.1f : k.attack*1.3f;
-        Log("JET v=%p bomber: %.0f m/s at %.0f m, bay opens %.0f m short, %d to drop, damage %.0f spread %.0f",j->vehicle,speed,
+        Log("JET v=%p bomber: %.0f m/s (its own %.0f) at %.0f m, bay opens %.0f m short, %d to drop, damage %.0f spread %.0f",j->vehicle,speed,own,
             j->bombAlt-target[1],fireDist,At<std::int32_t>(ifc,kIfcShots),load.damage,load.spread);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET bomber launch: fault");return false;}
@@ -1105,7 +1136,7 @@ void JetFrame(unsigned char* v) noexcept {
     default:
         if(!j->target) {
             if(j->mode!=Mode::patrol)SetMode(*j,Mode::patrol,ms);
-            Patrol(*j,pos,anchor,height,want);
+            speed=Patrol(*j,pos,anchor,height,want);
         } else if(j->flyer)gunsOk=Chase(*j,pos,lead,ms,want,&speed);
         else gunsOk=Strike(*j,pos,lead,height,ms,want,&speed);
         break;

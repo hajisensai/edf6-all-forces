@@ -211,14 +211,14 @@ layout 项（0x10）：`i32 格式`、`i32 顶点内偏移`、`i32 channel`、`i
 - 0x483F2A、0x6BF970–0x6BF9B7：保存 `rec+8`、清零、直接写 world、调 0x1100BD0、恢复标志。
 - 0x57F6B1：写 `rec+0xB0`（world）后调 0x1100BD0。
 
-载具：模型实例指针在 **veh+0xEE0**。证据：0x6519E7 以 veh+0x1570 为旋翼骨骼序号、读 `rec+0xB0` 当 world；0x607750 拿 `rec+0xE0` 与 veh+0x90（世界坐标）比较。
+载具：模型实例**内嵌**在 **veh+0xEE0**（不是指针：0x6519ED `add rcx, 0xEE0` 后直接当 inst 传给 0x1100280；2026-10-03 按指针读，实测找不到任何骨骼）。证据：0x6519E7 以 veh+0x1570 为旋翼骨骼序号、读 `rec+0xB0` 当 world；0x607750 拿 `rec+0xE0` 与 veh+0x90（世界坐标）比较。
 EDF.dll 里 `rotor`/`mdl` 字符串只出现在 0x650560；`tailRotor`、`bend_roterA` 根本不在 dll 里 → 旋翼/尾桨的转动纯由 CAS 动画驱动。
 CAS：CASController::Initialize 0x1167520，绑定槽 0x1168540。**CAS 每帧写 local 还是 world、是否会碰没有绑定动画轨道的骨骼——未确认 [L]**。
 
 ### 3.1 插件驱动舵面的做法（建议，未在游戏内跑过）
 
 ```
-inst = *(void**)(veh + 0xEE0)
+inst = veh + 0xEE0                          // 内嵌，不是指针
 idx  = BoneIndex(inst, L"elevon_R")        // 0x11002A0；-1 = 模型不是新版，跳过
 rec  = inst->bones + idx * 0x110
 rec->local(+0x70) = Rx(theta) × bind_local // bind_local 在加载后从 rec+0x70 抓一次缓存
