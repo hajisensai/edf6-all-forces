@@ -92,3 +92,11 @@ RideVehicle 碰到有人的座位时，会先调 `0x6313C0` 请对方下车，�
 
 - 地面车的 AI 在第 72 槽：CarBase 系是 `0x661440`，机甲是 `0x773B50`。
 - 直升机的 vtable 只到第 61–63 槽，后面跟着的是 `veh+0x120` 处 NetworkObject 子对象的 vtable。直升机没有 AI。
+
+## 原版物理：载具车身质量档（physics.cpp）
+
+- hknp 默认 body quality 表在 0xE13BA0，库对象 +0x40+0x30*i 是 requestedFlags，库指针在 world+0x930。
+  DYNAMIC(3) 无焊接；VEHICLE(9) 0x180 = NEIGHBOR|MOTION 焊接；CHARACTER(10) 0x80 = 只有 NEIGHBOR。两档迭代次数相同。
+- 轮式车身在 0x656E90 建体（调用点 0x64E9B6 / 0x650AA6），0x6571AD `C6 85 86 00 00 00 0A` 把 cinfo+0x86 的 quality 写成 CHARACTER。
+  缺 MOTION 焊接，车身高速滑过地形三角面接缝撞上内棱（ghost contact）被弹起——这就是「开过不平的地面弹飞」。
+- 修法：校验那 7 字节后把立即数 0x6571B3 改成 0x09（VEHICLE）。只影响这一个建体函数。

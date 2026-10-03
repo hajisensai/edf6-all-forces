@@ -61,6 +61,7 @@ struct Config {
     bool carrierLaser=true;    // with a submarine carrier out, the e508 teleportation ships charge and fire a portal laser (carrierlaser.cpp)
     float carrierLaserDamage=2500.0f;// the main beam's damage
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
+    bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
 };
 extern Config cfg;
 
@@ -229,6 +230,8 @@ float SubHullGap(const float* p) noexcept;
 bool InstallLaser() noexcept;                         // at load
 void PreloadLaser() noexcept;                         // from the mission's player preload
 void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
+// physics.cpp: stock EDF6 physics defects, patched at load (needs a game restart to toggle)
+bool InstallPhysics() noexcept;
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
