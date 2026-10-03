@@ -52,6 +52,21 @@ constexpr std::size_t kWeaponFire=0x139;    // the trigger 0x62C000 sets; the we
 // What 0x6911A0 (checked first by the fire test 0x6922A0) blocks firing on: reload countdown, a
 // hold flag and the rounds left in the magazine (+0x20C, or +0xE68 without a magazine object).
 constexpr std::size_t kWeaponReload=0xBE8,kWeaponHold=0x140,kWeaponRounds=0x20C,kWeaponMagazine=0xE68;
+// Weapon_VehicleShoot fires from its update callback (0x6B3970) through 0x690BB0, which also needs
+// +0x144 clear, the cooldown +0xE0C spent, +0x145C bit 0 clear, and the owner's interface
+// (weapon+0x120, then +0x120 in it, virtual +0x58(weapon)) to answer with bit 0 of +8 clear.
+constexpr std::size_t kWeaponBusy=0x144,kWeaponCooldown=0xE0C,kWeaponFlags=0x145C,kWeaponOwner=0x120,kOwnerUse=0x120;
+constexpr std::size_t kWeaponBurst=0x370,kWeaponEdge=0x143;
+
+// Debug: what the owner's use query answers for this weapon (-1 = no owner, -2 = null answer).
+int OwnerUse(const unsigned char* weapon) noexcept {
+    const auto owner=At<unsigned char*>(weapon,kWeaponOwner);
+    if(!owner)return -1;
+    using UseFn=const unsigned char*(__fastcall*)(void*,const void*);
+    void* use=owner+kOwnerUse;
+    const auto answer=(*reinterpret_cast<UseFn* const*>(use))[0x58/8](use,weapon);
+    return answer ? answer[8] : -2;
+}
 
 using InputFn=void(__fastcall*)(void*,std::uintptr_t);
 using TriggerFn=void(__fastcall*)(void*);
@@ -297,11 +312,13 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down) noexcept 
     track.firing=fire;
     if(cfg.debug && now-track.loggedAt>500) {
         track.loggedAt=now;
-        Log("GUNNER v=%p seat=%u %s t=%p dist=%.0f flight=%.0ff barrel=(%.3f,%.3f) want=(%.3f,%.3f) axis=(%.3f,%.3f)->(%.3f,%.3f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d pulls=%u stale=%u w=%p vt=+0x%llX reload=%d hold=%d rounds=%d mag=%d",
+        Log("GUNNER v=%p seat=%u %s t=%p dist=%.0f flight=%.0ff barrel=(%.3f,%.3f) want=(%.3f,%.3f) axis=(%.3f,%.3f)->(%.3f,%.3f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d pulls=%u stale=%u w=%p vt=+0x%llX ammo=%d hold=%d busy=%d cool=%.3f flags=%d owner=%d lockon=%d burst=%d edge=%d",
             vehicle,s,crew==Crew::player?"player":"ai",target,distance,time,aim.barrel[0],aim.barrel[1],want[0],want[1],
             aim.angle[0],aim.angle[1],axis[0],axis[1],aim.sign[0],aim.sign[1],track.k[0],track.k[1],in[0],in[1],fire,track.pulls,track.stale,
             gun.weapon,static_cast<unsigned long long>(At<const unsigned char*>(gun.weapon,0)-image),At<std::int32_t>(gun.weapon,kWeaponReload),
-            gun.weapon[kWeaponHold],At<std::int32_t>(gun.weapon,kWeaponRounds),At<std::int32_t>(gun.weapon,kWeaponMagazine));
+            gun.weapon[kWeaponHold],At<std::int32_t>(gun.weapon,kWeaponBusy),At<float>(gun.weapon,kWeaponCooldown),
+            At<std::int32_t>(gun.weapon,kWeaponFlags),OwnerUse(gun.weapon),At<std::int32_t>(gun.weapon,kLockonType),
+            At<std::int32_t>(gun.weapon,kWeaponBurst),gun.weapon[kWeaponEdge]);
         track.pulls=0;track.stale=0;
     }
 }
