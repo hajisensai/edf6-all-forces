@@ -7,6 +7,8 @@ docs/mdb-format.md), which only these two SGOs use (the stock bombers keep their
 <game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO and the blast drones' charges EDF6VC_BLAST_CHARGE /
 EDF6VC_DOLL_CHARGE.SGO (gen.jet_guns). Without the SGOs the plugin leaves the stock
 bombers alone.
+Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
+EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (gen.portal_lasers).
 
   python tools/make_jets.py [game dir]            write / refresh
   python tools/make_jets.py [game dir] --remove   delete them (only the files this script writes)
@@ -57,7 +59,7 @@ def main(argv: list[str]) -> int:
     root = args[0] if args else gen.DEFAULT_GAME
     out = gen.object_dir(root)
     if '--remove' in argv:
-        paths = [os.path.join(out, n) for n in [*FILES, *BOMBERS, *HELIS, MODEL_FILE, *MODEL_FILES]]
+        paths = [os.path.join(out, n) for n in [*FILES, *BOMBERS, *HELIS, MODEL_FILE, *MODEL_FILES, *gen.PORTAL_LASER_FILES]]
         for path in paths + [os.path.join(gen.weapon_dir(root), n) for n in gen.JET_WEAPON_FILES]:
             if os.path.exists(path):
                 os.remove(path)
@@ -66,6 +68,8 @@ def main(argv: list[str]) -> int:
     game = gen.Game(root)
     os.makedirs(out, exist_ok=True)
     for path in gen.write_jet_guns(root, game):
+        print('写入', path)
+    for path in gen.write_portal_lasers(root, game):
         print('写入', path)
     arc = mdb_jet.jet_archive()[0]
     path = os.path.join(out, MODEL_FILE)

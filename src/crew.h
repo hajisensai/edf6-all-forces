@@ -53,6 +53,9 @@ struct Config {
     bool seaRescue=true;       // a heli comes for a local player in the sea and ferries them to a submarine carrier's deck
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool rescueAutoBoard=false;// ...and, in the stock board reach of a free door seat, boards them by the stock board path
+    bool carrierLaser=true;    // with a submarine carrier out, the e508 teleportation ships charge and fire a portal laser (carrierlaser.cpp)
+    float carrierLaserDamage=2500.0f;// the main beam's damage
+    float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
 };
 extern Config cfg;
 
@@ -204,6 +207,11 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept;
 bool SubDeck(const float* from,float* deck) noexcept;
 // Horizontal metres from `p` to the nearest live carrier's hull footprint (0 over it), -1 with none.
 float SubHullGap(const float* p) noexcept;
+// carrierlaser.cpp: the e508 teleportation ships' portal laser (warning beam, interruptible charge, main beam)
+// while a submarine carrier is out; its SGOs from tools/make_jets.py (EDF6VC_PORTAL_SIGHT / _LASER.SGO).
+bool InstallLaser() noexcept;                         // at load
+void PreloadLaser() noexcept;                         // from the mission's player preload
+void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
