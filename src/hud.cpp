@@ -167,7 +167,8 @@ struct Text {
     unsigned char* mgr;
     unsigned char* renderer;      // kRendererSize bytes, 16-aligned (the caller's stack)
     unsigned char* font;          // kFontSize bytes, 16-aligned
-    bool made;
+    bool made;                    // the renderer made (on the first line measured: none when nothing is shown)
+    bool begun;                   // between a Begin and its End: a fault in between still owes the End
 };
 void Font(Text& t,float scale) noexcept {
     std::memset(t.font,0,kFontSize);
@@ -183,8 +184,10 @@ void Font(Text& t,float scale) noexcept {
 void Measure(Text& t,Line& l) noexcept {
     Font(t,l.scale);
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
+    t.begun=true;
     alignas(16) float size[4]{};
     reinterpret_cast<TextMeasureFn>(image+kTextMeasure)(t.renderer,size,l.text,-1,false);
+    t.begun=false;
     reinterpret_cast<TextEndFn>(image+kTextEnd)(t.renderer,t.ctx);
     l.w=std::isfinite(size[0]) && size[0]>0.0f ? size[0] : 0.0f;
     l.h=std::isfinite(size[1]) && size[1]>0.0f ? size[1] : 0.0f;
@@ -192,8 +195,10 @@ void Measure(Text& t,Line& l) noexcept {
 void Draw(Text& t,const Line& l) noexcept {
     Font(t,l.scale);
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
+    t.begun=true;
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, l.x,l.y,0.0f,1.0f};
     reinterpret_cast<TextDrawFn>(image+kTextDraw)(t.renderer,t.ctx,m,l.rgba,l.text,-1);
+    t.begun=false;
     reinterpret_cast<TextEndFn>(image+kTextEnd)(t.renderer,t.ctx);
 }
 
@@ -211,13 +216,26 @@ bool MakeText(Text& t) noexcept {
         return true;
     } __except(TextFault(GetExceptionInformation())) { return false; }
 }
+// A fault between a Begin and its End (the text path off by then): the End it owes, once, guarded on its own
+// (a renderer left begun may hold the game's text batch for its own text after).
+void EndOwed(Text& t) noexcept {
+    if(!t.begun)return;
+    t.begun=false;
+    __try { reinterpret_cast<TextEndFn>(image+kTextEnd)(t.renderer,t.ctx); }
+    __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
 void MeasureAll(Text& t,Line* lines,int n) noexcept {
-    __try { for(int i=0;i<n;++i)Measure(t,lines[i]); }
+    if(n<=0 || !textOk || !t.mgr)return;
+    if(!t.made && !MakeText(t))return;
+    __try { for(int i=0;i<n && textOk;++i)Measure(t,lines[i]); }
     __except(TextFault(GetExceptionInformation())) {}
+    EndOwed(t);
 }
 void DrawAll(Text& t,const Line* lines,int n) noexcept {
-    __try { for(int i=0;i<n;++i)if(textOk)Draw(t,lines[i]); }
+    if(!t.made)return;
+    __try { for(int i=0;i<n && textOk;++i)Draw(t,lines[i]); }
     __except(TextFault(GetExceptionInformation())) {}
+    EndOwed(t);
 }
 void FreeText(Text& t) noexcept {
     if(!t.made)return;
@@ -434,7 +452,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
         Text text{};
         text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);
-        Text* const t=textOk && text.mgr && MakeText(text) ? &text : nullptr;
+        Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines];
         int at=0,shown=0;
         const ULONGLONG tick=GetTickCount64();

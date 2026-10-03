@@ -1138,7 +1138,7 @@ void Dock(Jet& d,Jet& mother,ULONGLONG ms) noexcept {
 //    from its target (or its track), the way it was drifting, for kEvadeMs, then not again for kEvadeGapMs.
 // Withdrawing (damaged, fuel, out of drones) stays Withdraw's.
 constexpr float kCarrierOrbit=260.0f,kOrbitLead=0.5f,kOrbitSpeed=15.0f,kLaunchSpeed=6.0f;
-constexpr float kStationShift=500.0f,kStandoff=700.0f,kDockHold=300.0f,kEvadeShift=180.0f,kEvadeHit=0.003f;
+constexpr float kStationShift=500.0f,kStandoff=700.0f,kDockHold=300.0f,kEvadeShift=180.0f,kEvadeHit=0.01f;
 constexpr ULONGLONG kLaunchHoldMs=1200,kEvadeMs=5000,kEvadeGapMs=6000;
 
 // Its station (see kStationShift) at `height`, logged when its target changes.
@@ -1170,12 +1170,13 @@ bool DroneDocking(const Jet& c,const float* pos,ULONGLONG ms) noexcept {
     return false;
 }
 
-// Hit: the sidestep (see kEvadeShift) starts. Returns whether it is sidestepping.
-bool CarrierEvade(Jet& c,const float* pos,float height,float hp,float hpMax,ULONGLONG ms) noexcept {
+// Hit: the sidestep (see kEvadeShift) starts, unless `hold` (a drone docking: a sidestep then dragged out its
+// last approach). Returns whether it is sidestepping.
+bool CarrierEvade(Jet& c,const float* pos,float height,float hp,float hpMax,bool hold,ULONGLONG ms) noexcept {
     // hpSeen: its HP since the last sidestep (or healing): small hits add up.
     const bool hit=hpMax>0.0f && hp<c.hpSeen-hpMax*kEvadeHit;
     if(hp>c.hpSeen || hit || ms<c.evadeAgain)c.hpSeen=hp;
-    if(hit && ms>=c.evadeAgain) {
+    if(hit && !hold && ms>=c.evadeAgain) {
         float line[3]={c.vel[0],0.0f,c.vel[2]};
         if(c.target){line[0]=pos[0]-c.aim[0];line[2]=pos[2]-c.aim[2];}
         float side[3]={line[2],0.0f,-line[0]};
@@ -1194,8 +1195,9 @@ void CarrierGoal(Jet& c,const Kind& k,const float* pos,const float* anchor,float
                  float* goal,float* face,float* speed) noexcept {
     float st[3];
     CarrierStation(c,pos,anchor,height,st);
-    const bool evading=CarrierEvade(c,pos,height,hp,hpMax,ms);
-    const bool docking=!evading && DroneDocking(c,pos,ms);
+    const bool coming=DroneDocking(c,pos,ms);
+    const bool evading=CarrierEvade(c,pos,height,hp,hpMax,coming,ms);
+    const bool docking=!evading && coming;
     if(docking!=c.docking) {
         c.docking=docking;
         if(cfg.debug)Log("JET v=%p carrier: %s",c.vehicle,docking ? "a drone is coming in: holds still" : "back on its orbit");

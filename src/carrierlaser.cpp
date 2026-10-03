@@ -258,7 +258,7 @@ void __fastcall ShipAiHook(void* object,const void* context) {
     __try {
         auto const o=static_cast<unsigned char*>(object);
         for(auto& s:ships)
-            if(s.ship==o && s.steer){Fly(o,s,GameMs());break;}
+            if(s.ship==o && s.steer && s.ctrl==At<const void*>(o,kSelfCtrl)){Fly(o,s,GameMs());break;}
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("LASER fault flying a ship: the flight is off until the game restarts");flyOk=false;}
 }
 
@@ -495,6 +495,7 @@ void PreloadLaser() noexcept {
         for(auto& s:ships)s=Ship{};   // a new mission: the old objects are gone with the old one
         for(auto& c:carriers)c=Carrier{};
         quietUntil=0;
+        aiDead=false;   // a mission without its 508s on the AI list does not take the flights off the next one's
         if(!sigOk || broken || !cfg.carrierLaser)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         preloaded=mgr && FilesThere();
