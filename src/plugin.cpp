@@ -93,6 +93,7 @@ void LoadConfig() noexcept {
     n.heliStandoff=ReadFloat(L"HeliStandoff",n.heliStandoff);
     n.heliFireCone=ReadFloat(L"HeliFireCone",n.heliFireCone);
     n.heliFireHeight=ReadFloat(L"HeliFireHeight",n.heliFireHeight);
+    n.heliAvoid=ReadBool(L"HeliAvoid",n.heliAvoid);
     n.heliMissile=ReadBool(L"HeliMissile",n.heliMissile);
     n.heliMissileMs=GetPrivateProfileIntW(L"VehicleCrew",L"HeliMissileMs",n.heliMissileMs,iniPath);
     n.heliMoveGain=ReadFloat(L"HeliMoveGain",n.heliMoveGain);
@@ -104,8 +105,8 @@ void LoadConfig() noexcept {
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
         cfg.heliPilot,cfg.heliHeight,cfg.heliFollow,cfg.heliRange,cfg.heliFire);
-    Log("CONFIG heli fireHeight=%.0f standoff=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
-        cfg.heliFireHeight,cfg.heliStandoff,cfg.heliFireCone,cfg.heliMissile,cfg.heliMissileMs,cfg.heliMoveGain,cfg.heliBrakeGain,cfg.heliClimbGain,cfg.heliHoverLearn,cfg.heliLandMs);
+    Log("CONFIG heli avoid=%d fireHeight=%.0f standoff=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
+        cfg.heliAvoid,cfg.heliFireHeight,cfg.heliStandoff,cfg.heliFireCone,cfg.heliMissile,cfg.heliMissileMs,cfg.heliMoveGain,cfg.heliBrakeGain,cfg.heliClimbGain,cfg.heliHoverLearn,cfg.heliLandMs);
 }
 
 FILETIME IniStamp() noexcept {

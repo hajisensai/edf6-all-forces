@@ -109,6 +109,41 @@ const Signature kHeliSignatures[]={
 };
 bool profileOk=false;
 
+// Obstacle avoidance casts rays at the map: terrain and buildings, never units (docs/raycast-re.md).
+// EDF.dll's wrapper of the Havok ray cast takes the world wrapper *(image+kHavokGlobal)+0x10, the ray
+// (filter 0x16: layer 22, the game's own map-only layer) and a stack hknpClosestHitCollector, which keeps
+// the nearest hit: count at +0x0C, point at +0x30, fraction of the segment at +0x50.
+constexpr std::size_t kHavokGlobal=0x20B2958,kCastRay=0x11A7EE0,kHitVtbl=0x1768B78,kHitReset=0xFDF00;
+constexpr std::size_t kHitSlot0=0x978880,kHitAdd=0xD93980;
+const Signature kRaySignatures[]={
+    {kCastRay,{0x40,0x53,0x56,0x57,0x48,0x81,0xEC,0xA0,0x00,0x00,0x00,0x48,0x8B,0x05,0x66,0x71},16},
+    {kHitReset,{0x33,0xD2,0xB8,0xFF,0xFF,0x00,0x00,0x89,0x51,0x0C,0x0F,0x28,0x05,0x1F,0x4B,0xE8},16},
+    {kHitAdd,{0xF3,0x0F,0x10,0x4A,0x20,0x0F,0x10,0x41,0x10,0x0F,0xC6,0xC9,0x00,0x0F,0x2E,0xC1},16},
+};
+bool rayOk=false;
+struct alignas(16) RayInput { float from[4],to[4]; std::uint32_t filter,unk24; std::uint64_t pad; };
+static_assert(sizeof(RayInput)==0x30,"EdfRayInput");
+struct alignas(16) RayHits { unsigned char raw[0xA0]; };
+
+// Metres along a->b to the nearest terrain/building, or -1 with none (or no physics world). `hit`
+// receives the point.
+float CastRay(const float* a,const float* b,float* hit=nullptr) noexcept {
+    if(!rayOk)return -1.0f;
+    const auto g=At<unsigned char*>(image,kHavokGlobal);
+    if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},0x16,0,0};
+    RayHits col{};
+    *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
+    reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
+    reinterpret_cast<void(*)(void*,void*,const RayInput*)>(image+kCastRay)(g+0x10,&col,&in);
+    if(*reinterpret_cast<const std::int32_t*>(col.raw+0x0C)==0)return -1.0f;
+    const float f=*reinterpret_cast<const float*>(col.raw+0x50);
+    if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
+    if(hit)std::memcpy(hit,col.raw+0x30,12);
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+    return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
+
 struct Heli {
     const void* vehicle;
     ULONGLONG crewedAt,seen,loggedAt,missileAt,targetAt,groundAt;
@@ -373,6 +408,76 @@ float Engage(Heli& h,const float* pos,const float* aim,float range,float dip,int
     return off;
 }
 
+// Obstacle avoidance, applied to the wanted velocity and height of every mode but landing:
+// - the height stays kGroundClear over the ground below and over whatever lies kLookAhead seconds ahead
+//   (a ray down from high above that point finds hill tops and roofs alike);
+// - a ray straight along the way it flies (and two kAvoidSide to the sides) finds walls: the speed into
+//   one is cut to what stops it kAvoidStop short, the height goes kRoofClear over the wall's top, and it
+//   veers to the clearer side.
+constexpr float kLookAhead=3.0f,kLookMin=25.0f,kAvoidSide=0.52f;   // s; m; rad (30 deg)
+constexpr float kGroundClear=6.0f,kRoofClear=10.0f,kRoofProbe=150.0f,kAvoidStop=12.0f,kAvoidSteer=8.0f;
+struct Avoidance { float ahead,clear; };   // metres to the wall ahead and over the ground; -1: none seen
+
+float RoofBelow(const float* at,float top) noexcept {
+    const float a[3]={at[0],top,at[2]},b[3]={at[0],top-kRoofProbe*2.0f,at[2]};
+    float hit[3];
+    return CastRay(a,b,hit)>=0.0f ? hit[1] : -1e9f;
+}
+
+Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool land) noexcept {
+    Avoidance r{-1.0f,-1.0f};
+    if(!cfg.heliAvoid || !rayOk)return r;
+    const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
+    float hit[3];
+    if(CastRay(pos,down,hit)>=0.0f) {
+        r.clear=pos[1]-hit[1];
+        if(!land && *height<hit[1]+kGroundClear)*height=hit[1]+kGroundClear;
+    }
+    if(land)return r;
+    // The way it flies: where it wants to go, or where it drifts.
+    float dir[3]={want[0],0,want[2]};
+    if(Dot2(dir,dir)<4.0f){dir[0]=vel[0];dir[2]=vel[2];}
+    const float dl=std::sqrt(Dot2(dir,dir));
+    if(dl<2.0f)return r;
+    dir[0]/=dl;dir[2]/=dl;
+    const float speed=std::sqrt(Dot2(vel,vel));
+    const float look=speed*kLookAhead>kLookMin ? speed*kLookAhead : kLookMin;
+    const float top=(pos[1]>*height ? pos[1] : *height)+kRoofProbe;
+    const float ahead[3]={pos[0]+dir[0]*look,0,pos[2]+dir[2]*look};
+    const float roof=RoofBelow(ahead,top);
+    if(*height<roof+kGroundClear)*height=roof+kGroundClear;
+    // Walls: straight ahead and to both sides.
+    float dist[3];
+    for(int i=0;i<3;++i) {
+        const float a=static_cast<float>(i-1)*kAvoidSide,c=std::cos(a),s=std::sin(a);
+        const float d[3]={dir[0]*c+dir[2]*s,0,dir[2]*c-dir[0]*s};
+        const float end[3]={pos[0]+d[0]*look,pos[1],pos[2]+d[2]*look};
+        dist[i]=CastRay(pos,end,i==1 ? hit : nullptr);
+    }
+    const float centre=dist[1];
+    if(centre>=0.0f) {
+        r.ahead=centre;
+        const float beyond[3]={hit[0]+dir[0]*3.0f,0,hit[2]+dir[2]*3.0f};
+        const float wall=RoofBelow(beyond,top);
+        if(*height<wall+kRoofClear)*height=wall+kRoofClear;
+        const float room=centre-kAvoidStop;
+        const float allowed=room>0.0f ? std::sqrt(2.0f*kStopDecel*room) : 0.0f;
+        const float into=Dot2(want,dir);
+        if(into>allowed){want[0]-=dir[0]*(into-allowed);want[2]-=dir[2]*(into-allowed);}
+    }
+    // Veer to the clearer side (a side with no hit is clear for the whole look).
+    const float left=dist[0]<0.0f ? look : dist[0],rightSide=dist[2]<0.0f ? look : dist[2];
+    if(centre>=0.0f || left<look || rightSide<look) {
+        const float side=left>rightSide ? -1.0f : 1.0f;   // -1: toward the first ray (negative angle)
+        const float s=std::sin(side*kAvoidSide*3.0f),c=std::cos(side*kAvoidSide*3.0f);   // 90 deg off
+        const float perp[3]={dir[0]*c+dir[2]*s,0,dir[2]*c-dir[0]*s};
+        const float nearest=centre>=0.0f ? centre : (left<rightSide ? left : rightSide);
+        const float push=kAvoidSteer*(1.0f-nearest/look);
+        want[0]+=perp[0]*push;want[2]+=perp[2]*push;
+    }
+    return r;
+}
+
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -469,6 +574,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         off=Dist2(pos,h.hold);height=h.hold[1];
     }
     if(!land)Separate(h,pos,want,ms);
+    const Avoidance avoid=Avoid(pos,h.vel,want,&height,land);
     if(follow || engage)std::memcpy(h.hold,pos,12);
     const bool aiming=engage && !h.back && dist<range;
 
@@ -536,12 +642,12 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
-        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s",
+        Log("HELI v=%p %s wing=%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f",
             v,land ? "land" : engage ? (h.back ? "back" : aiming ? "aim" : "wait") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
             wing,pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
-            speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi);
+            speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi,avoid.ahead,avoid.clear);
     }
 }
 }  // namespace
@@ -579,6 +685,11 @@ bool CheckHeliProfile() noexcept {
     __try {
         for(const auto& s:kHeliSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("HELI profile mismatch at %#zx",s.rva);return false;}
         profileOk=true;
+        // Avoidance has its own check: without it the helis still fly, just blind.
+        rayOk=Readable(image+kHitVtbl,0x28) && At<const unsigned char*>(image,kHitVtbl)==image+kHitSlot0 &&
+              At<const unsigned char*>(image,kHitVtbl+0x20)==image+kHitAdd;
+        for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
+        Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
