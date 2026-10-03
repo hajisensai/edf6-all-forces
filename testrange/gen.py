@@ -1,5 +1,5 @@
 """EDF6 test range: builds a mission script from the chosen vehicles and enemy waves and installs it
-over mission 1 (M001) through EDFModLoader's file redirect.
+over one offline mission (see SLOTS) through EDFModLoader's file redirect.
 
 The range is the open plain of mission M045 (map ig_Heigen601): its point file (MISSION.RMPA) is
 copied next to the generated script, so every point the script names exists. Both files are made on
@@ -21,36 +21,52 @@ import crilayla  # noqa: E402
 import rmpa  # noqa: E402
 
 DEFAULT_GAME = r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
-TARGET = 'M001'            # mission 1: unlocked on every save
 SOURCE = 'M045'            # the plain whose map and points the range uses
 MAP = 'app:/Map/ig_Heigen601.mac'
 WEATHER = 'cloudy'
 MARKER = 'EDF6TestRange.txt'
-MISSION_DIR = ('Mods', 'MISSION', 'EDF6', TARGET)
 
-# (sgo, label). Player versions of every vehicle the game has.
+
+@dataclass(frozen=True)
+class Slot:
+    mission: str
+    item: int          # position in the offline mission list (1-based)
+    label: str
+
+
+# Slots, by their position in the in-game offline mission list (checked by playing them; the order
+# in MISSIONLIST.OFFLINE.LIST.SGO is not the on-screen order). The opening missions are the ruined
+# world, where the Air Raider's vehicle and air support requests are accepted but never arrive.
+# Item 14 「转机」 is M045, the plain the range is built from, and requests do arrive there.
+SLOTS = [
+    Slot('M045', 14, '列表第 14 项「转机」（M045）：空袭兵能呼叫载具和空中支援'),
+    Slot('M001', 2, '列表第 2 项「非法入侵者」（M001）：新存档也能进，但前期剧情叫不来载具和空中支援'),
+]
+DEFAULT_SLOT = SLOTS[0].mission
+
+
+def slot_of(mission: str) -> Slot:
+    return next(x for x in SLOTS if x.mission == mission)
+
+# (sgo, label). Only SGOs with a `mission_setup` block (weapon set-up for script-placed vehicles):
+# CreateVehicle2 reads it, and a player call-in SGO without it crashes the game (EDF.dll+0x52E44).
+# Stock missions place the `_mission` variants. No helicopter has one: call those in through the
+# forced loadout (Air Raider vehicle slot) instead.
 VEHICLES: list[tuple[str, str]] = [
-    ('v602_heli', '直升机 V602（插件驾驶）'),
-    ('v506_heli', '直升机 V506'),
-    ('vehicle409_heli', '直升机 409'),
-    ('vehicle410_heli', '直升机 410（多炮手位）'),
-    ('vehicle403_tank', '坦克 403（AutoTurret 副炮）'),
+    ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
-    ('v505_tank', '坦克 505'),
-    ('v601_tank', '坦克 601'),
-    ('v603_flak', '高射炮车 603（AutoTurret）'),
-    ('vehicle402_rocket', '火箭车 402'),
-    ('v510_maser', 'EMC 510'),
-    ('v504_begaruta', '机甲 Begaruta 504'),
-    ('vehicle407_bigbegaruta', '大型机甲 407'),
-    ('v612_nix', '机甲 Nix 612'),
-    ('v614_proteus_mk2', '机甲 Proteus 614'),
-    ('v515_retrobalam', '巨型机甲 Balam 515（VehicleImpact）'),
-    ('vehicle502_groundrobo', '机甲 502'),
+    ('v505_tank_mission', '坦克 505'),
+    ('v603_flak_mission', '高射炮车 603（AutoTurret）'),
+    ('v510_maser_mission', 'EMC 510'),
+    ('v605_barga_cannon_mission', '巴尔加炮 605'),
+    ('v504_begaruta_mission', '机甲 Begaruta 504'),
+    ('vehicle407_bigbegaruta_mission', '大型机甲 407'),
+    ('v612_nix_g_mission', '机甲 Nix G 612'),
+    ('v614_proteus_mk2_mission', '机甲 Proteus 614'),
+    ('v608_oldrobot_g_mission', '旧型机甲 608'),
+    ('v515_retrobalam_mission', '巨型机甲 Balam 515（VehicleImpact）'),
     ('v503_bike', '摩托 503'),
     ('v613_bike', '摩托 613'),
-    ('vehicle401_striker', '装甲车 401'),
-    ('v507_rescuetank', '救援车 507'),
     ('v512_keitruck', '轻卡车 512'),
 ]
 
@@ -85,15 +101,16 @@ class Waves:
 @dataclass
 class Plan:
     vehicles: dict[str, int] = field(default_factory=lambda: {
-        'v602_heli': 1, 'vehicle403_tank': 1, 'v603_flak': 1, 'v504_begaruta': 1})
+        'vehicle403_tank_mission': 1, 'v603_flak_mission': 1, 'v504_begaruta_mission': 1})
     vehicle_level: float = 1.0
     waves: Waves = field(default_factory=Waves)
     loadout: dict = field(default_factory=dict)
+    slot: str = DEFAULT_SLOT
 
 
 def save_plan(path: str, plan: Plan) -> None:
     data = {'vehicles': plan.vehicles, 'vehicle_level': plan.vehicle_level,
-            'waves': plan.waves.__dict__, 'loadout': plan.loadout}
+            'waves': plan.waves.__dict__, 'loadout': plan.loadout, 'slot': plan.slot}
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -105,10 +122,13 @@ def load_plan(path: str) -> Plan:
     except (OSError, ValueError):
         return Plan()
     plan = Plan()
-    plan.vehicles = {k: int(v) for k, v in data.get('vehicles', plan.vehicles).items()}
+    known = {sgo for sgo, _ in VEHICLES}
+    plan.vehicles = {k: int(v) for k, v in data.get('vehicles', plan.vehicles).items() if k in known}
     plan.vehicle_level = float(data.get('vehicle_level', plan.vehicle_level))
     plan.waves = Waves(**{k: v for k, v in data.get('waves', {}).items() if k in Waves.__dataclass_fields__})
     plan.loadout = data.get('loadout', {})
+    if data.get('slot') in {x.mission for x in SLOTS}:
+        plan.slot = data['slot']
     return plan
 
 
@@ -258,20 +278,38 @@ def script(plan: Plan, lay: Layout) -> str:
     return '\n'.join(lines)
 
 
-def mission_dir(game_root: str) -> str:
-    return os.path.join(game_root, *MISSION_DIR)
+def has_mission_setup(game: Game, sgo_name: str) -> bool:
+    import sgo
+    try:
+        values = sgo.load(data=game.read('OBJECT', sgo_name.upper() + '.SGO'))
+    except KeyError:
+        return False
+    return isinstance(values, dict) and 'mission_setup' in values
 
 
-def installed(game_root: str) -> bool:
-    return os.path.isfile(os.path.join(mission_dir(game_root), MARKER))
+def mission_dir(game_root: str, mission: str) -> str:
+    return os.path.join(game_root, 'Mods', 'MISSION', 'EDF6', mission)
+
+
+def ours(game_root: str, mission: str) -> bool:
+    return os.path.isfile(os.path.join(mission_dir(game_root, mission), MARKER))
+
+
+def installed(game_root: str) -> Slot | None:
+    """The slot the range is installed in now, if any."""
+    return next((x for x in SLOTS if ours(game_root, x.mission)), None)
 
 
 def install(game_root: str, plan: Plan) -> list[str]:
-    """Writes the range over mission 1. Refuses to touch a folder another mod put there."""
-    out = mission_dir(game_root)
-    if os.path.isdir(out) and os.listdir(out) and not installed(game_root):
+    """Writes the range over plan.slot (and removes it from the other slot). Refuses to touch a
+    folder another mod put there."""
+    out = mission_dir(game_root, plan.slot)
+    if os.path.isdir(out) and os.listdir(out) and not ours(game_root, plan.slot):
         raise RuntimeError(f'{out} 已有别的 mod 的文件，不覆盖。请先手动处理。')
     game = Game(game_root)
+    for sgo_name in {s for s, n in plan.vehicles.items() if n > 0}:
+        if not has_mission_setup(game, sgo_name):
+            raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     points_file = game.read(f'MISSION/EDF6/{SOURCE}', 'MISSION.RMPA')
     lay = layout(rmpa.points(points_file))
     text = script(plan, lay)
@@ -281,14 +319,21 @@ def install(game_root: str, plan: Plan) -> list[str]:
     with open(os.path.join(out, 'MISSION.RMPA'), 'wb') as f:
         f.write(points_file)
     with open(os.path.join(out, MARKER), 'w', encoding='utf-8') as f:
-        f.write('EDF6 测试场（EDF6VehicleCrew/testrange）。删除本目录即恢复第 1 关。\n')
+        f.write('EDF6 测试场（EDF6VehicleCrew/testrange）。删除本目录即恢复这一关。\n')
+    for other in SLOTS:
+        if other.mission != plan.slot:
+            _remove(game_root, other.mission)
     chosen = [sgo for sgo, n in plan.vehicles.items() for _ in range(max(0, n))]
     return [f'{p.name}: {s}' for s, p in zip(chosen, lay.vehicle_points)]
 
 
 def uninstall(game_root: str) -> bool:
-    out = mission_dir(game_root)
-    if not installed(game_root):
+    return any([_remove(game_root, x.mission) for x in SLOTS])
+
+
+def _remove(game_root: str, mission: str) -> bool:
+    out = mission_dir(game_root, mission)
+    if not ours(game_root, mission):
         return False
     shutil.rmtree(out)
     parent = os.path.dirname(out)

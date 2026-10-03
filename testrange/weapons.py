@@ -108,6 +108,10 @@ def write_loadout(game_root: str, loadout: dict) -> list[str]:
         shown.append(f'{SLOT_NAMES[cls][i]}：{w.name}')
     stars = int(loadout.get('stars', -1))
     lines.append(f'Stars={stars}')
+    refill = bool(loadout.get('refill', False))
+    lines.append(f'Refill={int(refill)}')
+    if refill:
+        shown.append('开局补满：武器弹药、空袭兵载具（不用先攒点数）')
     if stars >= 0:
         shown.append(f'星级全部 {stars}')
     with open(path, 'w', encoding='utf-16') as f:   # GetPrivateProfile* reads UTF-16 with a BOM
