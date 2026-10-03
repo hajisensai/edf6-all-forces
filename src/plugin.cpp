@@ -108,6 +108,10 @@ void LoadConfig() noexcept {
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
     n.jetPilot=ReadBool(L"JetPilot",n.jetPilot);
     n.jetFuelSec=GetPrivateProfileIntW(L"VehicleCrew",L"JetFuelSec",n.jetFuelSec,iniPath);
+    n.jetSortieSec=GetPrivateProfileIntW(L"VehicleCrew",L"JetSortieSec",n.jetSortieSec,iniPath);
+    n.jetAirRaider=ReadBool(L"JetAirRaider",n.jetAirRaider);
+    n.jetMissionStrike=ReadBool(L"JetMissionStrike",n.jetMissionStrike);
+    n.jetMaxPerCall=GetPrivateProfileIntW(L"VehicleCrew",L"JetMaxPerCall",n.jetMaxPerCall,iniPath);
     cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
@@ -115,7 +119,8 @@ void LoadConfig() noexcept {
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f standoff=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
         cfg.heliCombatRange,cfg.heliAvoid,cfg.heliFireHeight,cfg.heliStandoff,cfg.heliFireCone,cfg.heliMissile,cfg.heliMissileMs,cfg.heliMoveGain,cfg.heliBrakeGain,cfg.heliClimbGain,cfg.heliHoverLearn,cfg.heliLandMs);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d",cfg.heliSpeed,cfg.heliAgility,cfg.heliYawRate,cfg.heliDoorGuns);
-    Log("CONFIG jet pilot=%d fuel=%lus",cfg.jetPilot,cfg.jetFuelSec);
+    Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d maxPerCall=%d",cfg.jetPilot,cfg.jetFuelSec,
+        cfg.jetSortieSec,cfg.jetAirRaider,cfg.jetMissionStrike,cfg.jetMaxPerCall);
 }
 
 FILETIME IniStamp() noexcept {
@@ -198,6 +203,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
     Log("HELI profile=%d",CheckHeliProfile());
     InstallLoadout(iniPath);   // independent of the crew hooks
+    Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     return InstallCrew();   // never unload code a patched slot points at
 }
 

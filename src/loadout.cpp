@@ -93,6 +93,7 @@ std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uin
     const bool applied=Apply(a,u,"preload");
     const auto result=preloadOrig(a,b,c,d);
     if(applied)Restore(u);
+    PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     return result;
 }
 

@@ -313,8 +313,7 @@ float MinAimHoriz() noexcept { return cfg.heliFireHeight/std::tan(kMaxDip); }
 // Calls f(object, lock point) for every valid, lockable lock point of an enemy of `v`'s side (a vehicle
 // nobody owns fights the player's enemies); an object can own several. False when the lock registry or
 // the team relations cannot be read.
-template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
-    auto team=At<std::int32_t>(v,kTeam);
+template<class F> bool ForEachEnemyOf(std::int32_t team,const void* v,F&& f) noexcept {
     if(team==kTeamVehicle)team=player.team;
     const auto relation=Relations(team);
     const auto registry=At<const unsigned char*>(image,kRegistry);
@@ -334,6 +333,9 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
         f(static_cast<const void*>(object),a);
     }
     return true;
+}
+template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
+    return ForEachEnemyOf(At<std::int32_t>(v,kTeam),v,static_cast<F&&>(f));
 }
 
 // The enemy lock point to engage, among the enemies within `range` of `around`: the one nearest to
@@ -1195,9 +1197,10 @@ void HeliCrewed(const void* vehicle) noexcept {
 }
 
 void HeliFrame(unsigned char* vehicle) noexcept {
-    if(!profileOk || !cfg.heliPilot || vehicle[kDead])return;
+    if(!profileOk || vehicle[kDead])return;
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
     if(IsJet(vehicle)){if(cfg.jetPilot)JetFrame(vehicle);return;}
+    if(!cfg.heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){HeliCrewed(vehicle);h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
     h->seen=GetTickCount64();
@@ -1256,6 +1259,10 @@ float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay
 
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept {
     return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
+}
+
+bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {
+    return ForEachEnemyOf(team,nullptr,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
 }
 
 bool BurstHitsPlayer(const float* from,const float* to) noexcept { return PlayerInLine(from,to); }

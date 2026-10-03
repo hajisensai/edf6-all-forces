@@ -234,7 +234,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput)
         auto v=static_cast<unsigned char*>(vehicle);
         Crew(v,I);
         JetReap(v);
-        if(IsHelicopter(v))HeliFrame(v);
+        if(IsHelicopter(v)){JetBoard(v);HeliFrame(v);}
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 

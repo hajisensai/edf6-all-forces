@@ -40,6 +40,10 @@ struct Config {
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
     DWORD jetFuelSec=120;      // a jet withdraws after this long in the air
+    DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover
+    bool jetAirRaider=true;    // the Air Raider's bomber calls send jets instead
+    bool jetMissionStrike=true;// the missions' strafing-plane airstrikes (DemoAirStrike) send jets instead
+    int jetMaxPerCall=4;       // at most this many jets per bomber call
 };
 extern Config cfg;
 
@@ -112,6 +116,7 @@ bool CheckHeliProfile() noexcept;
 float MapRay(const float* a,const float* b,float* hit) noexcept;
 using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
+bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
 bool BurstHitsPlayer(const float* from,const float* to) noexcept;
 
 // jet.cpp
@@ -119,4 +124,12 @@ bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 bool InstallJets() noexcept;
+void PreloadJets() noexcept;                       // from the mission's player preload
+// A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
+// be made (not preloaded this mission, profile mismatch): the caller keeps the stock behaviour then.
+bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec) noexcept;
+void JetBoard(unsigned char* vehicle) noexcept;    // from its own input hook: seats a launched jet's pilot
+
+// airstrike.cpp
+bool InstallAirstrikes() noexcept;
 }  // namespace crew

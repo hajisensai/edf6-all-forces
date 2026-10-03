@@ -10,7 +10,12 @@
 //    velocity (0x11B18F0) and an angular velocity (0x11B1760) that turns the nose onto that velocity,
 //    banked into the turn.
 // Roles: strike (dive attacks on ground targets) and fighter (flying targets first). Neither reloads; out
-// of ammo, out of fuel (cfg.jetFuelSec) or below kWithdrawHp of its HP it leaves and is deleted.
+// of ammo, out of fuel (cfg.jetFuelSec, a launched sortie cfg.jetSortieSec) or below kWithdrawHp of its HP
+// it flies off and is deleted out of the player's sight.
+// Two ways in: a mission places one (the test range's CreateFriend: it guards the player), or JetLaunch
+// makes one at run time (the airstrike takeovers, airstrike.cpp): created like the script's CreateFriend
+// (CreateObject on the preloaded SGO, team friend), it flies at its strike point from the first frame and
+// gets its NPC pilot (RideAi) on its own first update, not inside whatever update launched it.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "memory.h"
@@ -63,6 +68,16 @@ constexpr float kStrikeRange=600.0f,kFighterRange=900.0f;   // m from the anchor
 constexpr float kWithdrawHp=0.25f,kGone=1000.0f,kGoneStuck=600.0f,kWithdrawClimb=300.0f;
 constexpr ULONGLONG kStuckMs=60000;
 constexpr ULONGLONG kStaleMs=1500;   // a table entry not flown this long is another object's now
+constexpr ULONGLONG kBoardMs=3000;   // a launched jet not boarded by then is dropped from the table
+
+// Run-time spawning (docs/mission-airstrike-re.md §3): the preload manager *(image+kPreloadMgr), the
+// object manager *(image+kObjectMgr), CreateObject(manager, &matrix, path, &InitParam) -> the object (the
+// manager owns it), SetTeam(object, team, 1).
+constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kSetTeam=0x54EE70,kInitParamVtable=0x1762068;
+constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
+constexpr std::int32_t kTeamFriend=2;
+const wchar_t* const kJetSgo[2]={L"app:/object/edf6vc_jet_strike.sgo",L"app:/object/edf6vc_jet_fighter.sgo"};
+const wchar_t* const kJetFile[2]={L"EDF6VC_JET_STRIKE.SGO",L"EDF6VC_JET_FIGHTER.SGO"};
 
 enum class Mode { takeoff, patrol, approach, dive, pull, extend, chase, runOut, withdraw };
 const char* const kModeNames[]={"takeoff","patrol","approach","dive","pull","extend","chase","runOut","withdraw"};
@@ -82,6 +97,8 @@ struct Jet {
     float out[3];            // extend / run-out direction
     bool reap;               // withdrawn: delete from another vehicle's update (JetReap)
     const char* why;         // why it withdrew
+    bool launched;           // made by JetLaunch: anchor is its strike point, boarded by JetBoard
+    ULONGLONG fuelMs;
 };
 Jet jets[16]{};
 
@@ -367,7 +384,7 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
     Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f vy=%.1f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d",
         v,j.fighter ? "fighter" : "strike",kModeNames[static_cast<int>(j.mode)],pos[1],clear,Ceiling(),Len(j.vel),speed,j.vel[1],
         j.target,j.flyer ? "(air)" : "",d,a.guns,a.missiles,hp,hpMax,
-        static_cast<float>(cfg.jetFuelSec)-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile]);
+        static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile]);
 }
 
 using PhysicsFn=void(__fastcall*)(void*);   // slot 57: void(vehicle)
@@ -397,7 +414,79 @@ const unsigned char kPhysicsSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,
 const unsigned char kSetLinSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xA8,0x00,0x00};
 const unsigned char kSetAngSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xB0,0x00,0x00};
 const unsigned char kDeleteSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x60,0x48};
+const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
+const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
+const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
+bool spawnOk=false;      // the spawn functions matched (InstallJets)
+bool preloaded[2]{};     // the jet SGOs were preloaded for this mission (PreloadJets)
+
+// InitParamBase as DemoAirStrike's ctor builds it on its stack (0x5B433A): the vtable, the rest zero.
+struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
+using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
+using CreateObjectFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
+using SetTeamFn=void(*)(void*,std::int32_t,bool);
+using RideAiFn=void(*)(void*,bool);
+
+// Whether Mods/OBJECT (next to the game's exe) holds the jet SGO: tools/make_jets.py writes them.
+bool JetFileThere(int kind) noexcept {
+    wchar_t path[MAX_PATH];
+    const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
+    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
+    if(!slash)return false;
+    *slash=0;
+    if(wcscat_s(path,L"\\Mods\\OBJECT\\")!=0 || wcscat_s(path,kJetFile[kind])!=0)return false;
+    return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES;
+}
 }  // namespace
+
+void PreloadJets() noexcept {
+    __try {
+        if(!spawnOk)return;
+        const auto mgr=At<void*>(image,kPreloadMgr);
+        for(int k=0;k<2;++k) {
+            preloaded[k]=mgr && JetFileThere(k);
+            if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kJetSgo[k],2,-1);
+        }
+        Log("JET preload strike=%d fighter=%d",preloaded[0],preloaded[1]);
+    } __except(EXCEPTION_EXECUTE_HANDLER){preloaded[0]=preloaded[1]=false;}
+}
+
+bool JetLaunch(bool fighter,const float* from,const float* heading,const float* target,DWORD fuelSec) noexcept {
+    const int kind=fighter ? 1 : 0;
+    if(!spawnOk || !cfg.jetPilot || !preloaded[kind])return false;
+    __try {
+        const auto mgr=At<void*>(image,kObjectMgr);
+        if(!mgr)return false;
+        float fwd[3]={heading[0],0.0f,heading[2]};
+        if(!Normalize(fwd)){fwd[0]=0;fwd[2]=1;}
+        // Rows right, up, forward, position, as BombingPlane_Init builds its matrix (right = up x forward).
+        alignas(16) const float m[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, from[0],from[1],from[2],1};
+        InitParam param{image+kInitParamVtable,{}};
+        unsigned char* v=reinterpret_cast<CreateObjectFn>(image+kCreateObject)(mgr,m,kJetSgo[kind],&param);
+        if(!v || !IsJetVehicle(v,nullptr)){Log("JET launch: CreateObject gave %p",v);return false;}
+        reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
+        Jet* j=&jets[0];
+        for(auto& o:jets)if(!o.vehicle || o.seen<j->seen)j=&o;
+        const ULONGLONG ms=GetTickCount64();
+        *j=Jet{};j->vehicle=v;j->fighter=fighter;j->launched=true;j->bornAt=j->modeAt=j->seen=ms;
+        QueryPerformanceCounter(&j->last);
+        std::memcpy(j->anchor,target,12);j->mode=Mode::patrol;j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
+        for(int i=0;i<3;++i)j->vel[i]=fwd[i]*kCruise;
+        Log("JET v=%p launched: %s from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) fuel=%lus",v,fighter ? "fighter" : "strike",
+            from[0],from[1],from[2],target[0],target[1],target[2],fuelSec);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET launch: fault");return false;}
+}
+
+void JetBoard(unsigned char* v) noexcept {
+    Jet* j=FindJet(v);
+    if(!j || !j->launched || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::none)return;
+    const ULONGLONG ms=GetTickCount64();
+    if(ms-j->bornAt>kBoardMs){Log("JET v=%p never boarded: dropped",v);*j=Jet{};return;}
+    reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,false);
+    j->seen=ms;
+    Log("JET v=%p boarded: driver=%d",v,SeatRider(SeatAt(v,0))==Rider::dummy);
+}
 
 bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr);
@@ -416,7 +505,7 @@ void JetFrame(unsigned char* v) noexcept {
         for(auto& o:jets)if(!o.vehicle || o.seen<j->seen)j=&o;
         if(j->vehicle && !j->reap)Log("JET table full: dropping v=%p",j->vehicle);
         *j=Jet{};j->vehicle=v;IsJetVehicle(v,&j->fighter);j->bornAt=j->modeAt=ms;j->last=now;
-        std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;
+        std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->fuelMs=static_cast<ULONGLONG>(cfg.jetFuelSec)*1000;
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,j->fighter ? "fighter" : "strike",At<float>(v,kHp),Ceiling());
     }
     j->seen=ms;
@@ -431,9 +520,12 @@ void JetFrame(unsigned char* v) noexcept {
 
     const Arms arms=ReadArms(v);
     const bool follow=player.at && ms-player.at<10000;
-    const float* anchor=follow ? player.pos : j->anchor;
+    // A launched jet works round its strike point; a placed one guards the player. Either withdraws away
+    // from the player (`viewer`), so it is deleted out of their sight.
+    const float* anchor=follow && !j->launched ? player.pos : j->anchor;
+    const float* viewer=follow ? player.pos : anchor;
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
-    if(ms-j->bornAt>static_cast<ULONGLONG>(cfg.jetFuelSec)*1000)Withdraw(*j,"fuel",ms);
+    if(ms-j->bornAt>j->fuelMs)Withdraw(*j,"fuel",ms);
     else if(hpMax>0.0f && hp<hpMax*kWithdrawHp)Withdraw(*j,"damaged",ms);
     else if(arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile))Withdraw(*j,"out of ammo",ms);
 
@@ -465,11 +557,11 @@ void JetFrame(unsigned char* v) noexcept {
         if(clear>kTakeoffClear || clear<0.0f)SetMode(*j,Mode::patrol,ms);
         break;
     case Mode::withdraw: {
-        float away[3]={pos[0]-anchor[0],0,pos[2]-anchor[2]};
+        float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
         if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
-        const float top=Ceiling()-kCeilingGap*2.0f,climb=anchor[1]+kWithdrawClimb;
+        const float top=Ceiling()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
         Level(pos,away,climb<top ? climb : top,want);speed=kAttack+10.0f;
-        const float d[3]={pos[0]-anchor[0],pos[1]-anchor[1],pos[2]-anchor[2]};
+        const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
         const float gone=Len(d);
         if(gone>kGone || (ms-j->modeAt>kStuckMs && gone>kGoneStuck)){
             if(!j->reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",v,gone);
@@ -520,7 +612,9 @@ bool InstallJets() noexcept {
         if(current!=image+kPhysics506)Log("JET physics: chaining onto %p (another plugin)",current);
         nextPhysics=reinterpret_cast<PhysicsFn>(current);
         physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
-        Log("HOOK jets physics=%d",physicsOk);
+        spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
+                Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
+        Log("HOOK jets physics=%d spawn=%d",physicsOk,spawnOk);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
