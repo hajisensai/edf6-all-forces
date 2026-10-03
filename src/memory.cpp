@@ -45,8 +45,8 @@ bool Readable(const void* ptr,std::size_t size,bool writable) noexcept {
     }
     return true;
 }
-void* AllocateNearThunk(const void* anchor,void* target) noexcept {
-    if(!anchor || !target) return nullptr;
+void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept {
+    if(!anchor || !code || !size || size>0x1000) return nullptr;
     SYSTEM_INFO info{};
     GetSystemInfo(&info);
     const auto granularity=info.dwAllocationGranularity ? info.dwAllocationGranularity : 0x10000;
@@ -63,17 +63,21 @@ void* AllocateNearThunk(const void* anchor,void* target) noexcept {
                 MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     }
     if(!page) return nullptr;
-    const unsigned char thunk[]={0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
-    std::memcpy(page,thunk,sizeof(thunk));
-    const auto address=reinterpret_cast<std::uintptr_t>(target);
-    std::memcpy(page+2,&address,sizeof(address));
+    std::memcpy(page,code,size);
     DWORD previous=0;
     if(!VirtualProtect(page,0x1000,PAGE_EXECUTE_READ,&previous)) {
         VirtualFree(page,0,MEM_RELEASE);
         return nullptr;
     }
-    FlushInstructionCache(GetCurrentProcess(),page,sizeof(thunk));
+    FlushInstructionCache(GetCurrentProcess(),page,size);
     return page;
+}
+void* AllocateNearThunk(const void* anchor,void* target) noexcept {
+    if(!target) return nullptr;
+    unsigned char thunk[]={0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    const auto address=reinterpret_cast<std::uintptr_t>(target);
+    std::memcpy(thunk+2,&address,sizeof(address));
+    return AllocateNearCode(anchor,thunk,sizeof(thunk));
 }
 
 bool RedirectCall(unsigned char* callSite,void* expectedTarget,void* replacement,bool& changed) noexcept {

@@ -100,3 +100,22 @@ RideVehicle 碰到有人的座位时，会先调 `0x6313C0` 请对方下车，�
 - 轮式车身在 0x656E90 建体（调用点 0x64E9B6 / 0x650AA6），0x6571AD `C6 85 86 00 00 00 0A` 把 cinfo+0x86 的 quality 写成 CHARACTER。
   缺 MOTION 焊接，车身高速滑过地形三角面接缝撞上内棱（ghost contact）被弹起——这就是「开过不平的地面弹飞」。
 - 修法：校验那 7 字节后把立即数 0x6571B3 改成 0x09（VEHICLE）。只影响这一个建体函数。
+
+## 原版物理：巨型单位垂直接触冲量无上限（physics.cpp）
+
+- 角色代理的垂直接触在 0x11DDFD0 里组约束块 [rsp+0x40] = {0 或 1.0, maxImpulse, 1.0}；
+  0x11DE049 `movss xmm0,[0x18474B0]` 无条件把 maxImpulse 装成 HK_REAL_HIGH（无穷大）。
+- 角色的 maxForce 在 [character+0x70]（构造 0x11DD07F/0x11DD085 从 cinfo+0x98 拷入，默认 1000），这条路径从不使用它。
+  5 代 hkp 角色对动态物体的接触限制在 maxForce×dt；6 代 hknp 丢了这一步，巴尔加/巨大怪物站在（或压在）运动中的母体、
+  布娃娃、碎片上时吃到无限冲量——被顶飞，或被反向压进地面。
+- 判据取引擎自己的：0xD95D38 角色推物体时取 body → `test [body+0x54],5`（STATIC|KEYFRAMED 跳过）→ `test 2`（DYNAMIC）→ 用 [rdi+0x70] 推。
+  hknpBody 标志 +0x54：STATIC=1 DYNAMIC=2 KEYFRAMED=4 ACTIVE=8。只有 `flags&7 == 2` 才限，静态地形与关键帧物体保持无限支撑。
+- 对方 body id 在接触点 [rbx+0x20]；body 管理器 [character+0x28]，vtable image+0x18BC9C0，
+  vt+0x68 = 0xDAC200（有效性：idx=id&0xFFFFFF、idx<[mgr+0x20]、[body+0x50]==id），vt+0x80 = 0xDAB170 纯 getter [mgr+0x18]+idx*0xB0。
+  插件只在 vtable 恰为 0x18BC9C0 时内联计算，不调虚函数（0x11DE0E2 调 vt+0x80 后丢弃返回值，别的实现可能成对 acquire/release）。
+- dt：checkSupport（槽 image+0x1AE4D50 → 0x11DE5B0，rdx=hkStepInfo，dt 在 +8）先于接触构建运行，钩它记下步长。
+- 修法：校验 0x11DE042 起 16 字节，把 0x11DE049 的 8 字节 movss 换成 `E9 rel32 + 3×NOP` 跳到近页 cave；
+  cave 保存 flags（0x11DE042 的 cmp 要活到 0x11DE078 的 jne）、rax（0x11DE051 要存 eax）、其余易失寄存器与 xmm1-5，
+  以 rcx=rdi(角色)、rdx=rbx(接触点) 调 helper，xmm0 带回上限后跳回 0x11DE051。
+  该处 rsp ≡ 0 mod 16（3 push + sub 0x170），pushfq+7 push+sub 0x80 保持调用对齐并留 0x20 影子空间。
+- 开关 `GiantContactCap`（默认 1）。
