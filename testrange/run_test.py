@@ -51,8 +51,8 @@ LIMIT = {'footer': 10, 'hq': 6, 'mission': 10}
 BRIEFING = (730, 425, 1000, 500)   # the selected mission's briefing text (the preview above it is a video)
 HELI_LOADOUT = {'enabled': True, 'class': 2, 'slots': ['', '', '', '', 'eWeapon394'], 'stars': 10,
                 'refill': True}
-# The heli is placed on the map (a generated `_mission` SGO, see gen.DERIVED), not called in.
-HELI_PLAN_VEHICLES: dict[str, int] = {'edf6tr_v506_heli_mission': 1}
+# Two helis spawned with NPC pilots (a generated `_mission` SGO, see gen.DERIVED): a formation.
+HELI_PLAN_FRIENDS: dict[str, int] = {'edf6tr_v506_heli_mission': 2}
 
 KEYS_OF_INTEREST = ('HOOK', 'LOADOUT', 'CREW', 'HELI', 'BUMP', 'ERROR', 'WARN', 'crash', 'fail')
 
@@ -437,7 +437,8 @@ def install(args: argparse.Namespace) -> list[str]:
         return ['测试场/装备：保持现在装的']
     plan = gen.load_plan(args.plan) if args.plan else gen.Plan()
     if args.heli:
-        plan.vehicles = dict(HELI_PLAN_VEHICLES)
+        plan.vehicles = {}
+        plan.friends = dict(HELI_PLAN_FRIENDS)
         plan.loadout = dict(HELI_LOADOUT)
         plan.waves.enabled = args.enemies
     if args.slot:
@@ -451,7 +452,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--game', default=os.environ.get('EDF6_DIR', gen.DEFAULT_GAME))
     ap.add_argument('--plan', help='testrange.json 一类的方案文件；不给就不重装')
-    ap.add_argument('--heli', action='store_true', help='空袭兵；地图上直接放一架 506 直升机（载具格仍是 N9 Eros，可再叫一架）')
+    ap.add_argument('--heli', action='store_true', help='空袭兵；地图上生成两架 NPC 驾驶的 506 直升机（编队）；载具格仍是 N9 Eros')
     ap.add_argument('--slot', choices=[x.mission for x in gen.SLOTS], help='测试场装进哪一关（默认沿用方案/现装的）')
     ap.add_argument('--enemies', action='store_true', help='和 --heli 一起用：也刷敌人波次')
     ap.add_argument('--seconds', type=float, default=60, help='进关后停留秒数（--act 跑完后剩余时间）')

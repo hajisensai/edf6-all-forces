@@ -30,6 +30,7 @@ class App(tk.Tk):
         self.plan = gen.load_plan(PLAN_FILE)
         self.game = tk.StringVar(value=os.environ.get('EDF6_DIR', gen.DEFAULT_GAME))
         self.counts: dict[str, tk.IntVar] = {}
+        self.npc_counts: dict[str, tk.IntVar] = {}
         self.weapon_error = ''
         try:
             self.weapons = weapons.load(self.game.get())
@@ -69,15 +70,21 @@ class App(tk.Tk):
 
     def _vehicles(self, parent: tk.Widget) -> ttk.LabelFrame:
         box = ttk.LabelFrame(parent, text='载具（数量，0 = 不放；地图上最多 12 台）')
-        for row, (sgo, label) in enumerate(gen.VEHICLES):
+        ttk.Label(box, text='空车').grid(row=0, column=0)
+        ttk.Label(box, text='NPC 驾驶').grid(row=0, column=1)
+        for row, (sgo, label) in enumerate(gen.VEHICLES, start=1):
             var = tk.IntVar(value=self.plan.vehicles.get(sgo, 0))
+            npc = tk.IntVar(value=self.plan.friends.get(sgo, 0))
             self.counts[sgo] = var
+            self.npc_counts[sgo] = npc
             ttk.Spinbox(box, from_=0, to=4, width=3, textvariable=var).grid(row=row, column=0, padx=4, pady=1)
-            ttk.Label(box, text=label).grid(row=row, column=1, sticky='w')
+            ttk.Spinbox(box, from_=0, to=4, width=3, textvariable=npc).grid(row=row, column=1, padx=4, pady=1)
+            ttk.Label(box, text=label).grid(row=row, column=2, sticky='w')
+        last = len(gen.VEHICLES) + 1
         self.vlevel = tk.DoubleVar(value=self.plan.vehicle_level)
-        ttk.Label(box, text='载具等级（1 = 普通，越高越硬）').grid(row=len(gen.VEHICLES), column=1, sticky='w', pady=(6, 0))
+        ttk.Label(box, text='载具等级（1 = 普通，越高越硬）').grid(row=last, column=2, sticky='w', pady=(6, 0))
         ttk.Spinbox(box, from_=0.5, to=5, increment=0.5, width=5, textvariable=self.vlevel).grid(
-            row=len(gen.VEHICLES), column=0, pady=(6, 0))
+            row=last, column=0, columnspan=2, pady=(6, 0))
         return box
 
     def _waves(self, parent: tk.Widget) -> ttk.LabelFrame:
@@ -186,6 +193,7 @@ class App(tk.Tk):
     def _collect(self) -> gen.Plan:
         plan = gen.Plan()
         plan.vehicles = {s: int(v.get()) for s, v in self.counts.items() if int(v.get()) > 0}
+        plan.friends = {s: int(v.get()) for s, v in self.npc_counts.items() if int(v.get()) > 0}
         plan.vehicle_level = float(self.vlevel.get())
         enemy = next(s for s, l, _ in gen.ENEMIES if l == self.w_enemy.get())
         plan.waves = gen.Waves(enabled=bool(self.w_on.get()), enemy=enemy,
