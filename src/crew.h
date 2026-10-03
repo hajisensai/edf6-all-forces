@@ -143,8 +143,12 @@ struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; con
 // itself; false (the caller keeps the stock bomber) when it or its bay cannot be made.
 // `body`: the model it flies in (BomberBody of the bomber's model instance).
 enum class JetBody { kind=-1, bomber401=2, bomber501_2=3 };
+// `hold`: the stock bomber's token (its weak-this control block) JetHolds answers for.
 bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec,const void* source,
-                     JetBody body) noexcept;
+                     JetBody body,const void* hold) noexcept;
+// Whether the jet launched with `hold` still has its bay (not yet open, open, or its bombs still tracked):
+// false once the bay is gone, the jet shot down or no longer flown.
+bool JetHolds(const void* hold) noexcept;
 // Which bomber body a BombingPlane's model instance (plane+0x660, embedded) is: kind (the BOMBER501 look,
 // the strike jet's) unless its bones name BOMBER401's or BOMBER501_2's model.
 JetBody BomberBody(const unsigned char* inst) noexcept;

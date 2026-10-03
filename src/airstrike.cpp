@@ -5,9 +5,12 @@
 //    call (from its IndirectFireControl's step, 0x2B924E) and the missions' strafing planes
 //    (DemoAirStrike's ctor, 0x5B4423: RM034A/B, M116, M118). After the stock init the plugin launches a
 //    bomber jet where the plane starts, along its heading, carrying its payload (JetLaunchBomber: the
-//    same bombs, damage, spread, seed and owner, released from the jet), and the plane is deleted at its
-//    first update (its vtable's slot 5), before it moves or drops a thing. The DemoAirStrike deletes
-//    itself once its plane is gone; the Air Raider's call keeps no hold of its planes.
+//    same bombs, damage, spread, seed and owner, released from the jet). At its first update (its
+//    vtable's slot 5), before it moves or drops a thing, the plane is hidden as its own last state hides
+//    it (0x5AB9A0: stopped, drawn no more, off the radar), and from then on not updated; it is deleted once
+//    its jet's bay is gone (JetHolds), as the stock plane deletes itself once its bombs are. The call's
+//    target marker lasts as long as its planes (deleting the plane at once took it down before a bomb
+//    fell), and the DemoAirStrike deletes itself once its plane is gone.
 //  - The Air Raider's call (its one call of IFC_Start, 0x6A8DFB): with enemies in the air round the
 //    target, fighters go along as escorts (up to cfg.jetMaxPerCall), from 1 km behind the target as seen
 //    from the player.
@@ -47,9 +50,16 @@ PlaneUpdateFn nextPlaneUpdate=nullptr;
 // Launch sources (JetLaunch): an Air Raider's call (its escorts and bombers), a mission's strike.
 const char kRadioSource='r',kMissionSource='m';   // distinct values: identical constants may be folded
 
-// Bombers whose jets fly instead, by their weak-this control block: deleted at their first update.
-const void* doomed[32]{};
-unsigned doomNext=0;
+// Bombers whose jets fly instead, by their weak-this control block: hidden at their first update, deleted
+// once the jet lets go of them (JetHolds), or kHoldMaxMs after.
+struct Held { const void* ctrl; ULONGLONG since; bool hidden; };
+Held held[32]{};
+unsigned heldNext=0;
+constexpr ULONGLONG kHoldMaxMs=180000;
+// The plane's last state's entry (0x5AB9A0): speed 0, its draw component off (0x6C04B0(plane+0x5C0, 0)),
+// off the radar (0x54DDB0).
+constexpr unsigned kPlaneHide=0x6C04B0,kPlaneUnlist=0x54DDB0;
+constexpr std::size_t kPlaneSpeed=0xB90,kPlaneDraw=0x5C0;
 
 // Enemies round the target: those well off the ground count as flyers.
 struct Census { const float* at; int flyers,ground; };
@@ -107,8 +117,9 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
         const float* from=reinterpret_cast<const float*>(plane+kPosition);
         const float* heading=reinterpret_cast<const float*>(plane+kPlaneVelocity);
         const JetBody body=BomberBody(plane+kPlaneModel);
-        if(!std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source,body))return;
-        doomed[doomNext++%32]=At<const void*>(plane,kSelfCtrl);
+        const void* const ctrl=At<const void*>(plane,kSelfCtrl);
+        if(!std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source,body,ctrl))return;
+        held[heldNext++%32]=Held{ctrl,GameMs(),false};
         Log("AIRSTRIKE %s bomber %p (%s model): its jet drops the bombs",who,plane,
             body==JetBody::bomber401 ? "bomber401" : body==JetBody::bomber501_2 ? "bomber501_2" : "bomber501 / unknown");
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -126,13 +137,23 @@ void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const
     if(cfg.enabled && cfg.jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
 }
 
-// BombingPlane slot 5 (update): a doomed plane is deleted instead.
+// BombingPlane slot 5 (update): a held plane is hidden and left as it is while its jet holds it, then
+// deleted.
 void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
     __try {
         const void* const ctrl=At<const void*>(plane,kSelfCtrl);
-        for(auto& d:doomed) {
-            if(!ctrl || d!=ctrl)continue;
-            d=nullptr;
+        for(auto& h:held) {
+            if(!ctrl || h.ctrl!=ctrl)continue;
+            if(!h.hidden) {
+                h.hidden=true;
+                Put<float>(plane,kPlaneSpeed,0.0f);
+                reinterpret_cast<void(__fastcall*)(void*,std::uint8_t)>(image+kPlaneHide)(plane+kPlaneDraw,0);
+                reinterpret_cast<void(__fastcall*)(void*)>(image+kPlaneUnlist)(plane);
+            }
+            const ULONGLONG ms=GameMs();
+            if(JetHolds(ctrl) && ms-h.since<kHoldMaxMs)return;
+            Log("AIRSTRIKE bomber %p let go after %.1f s: deleted",plane,static_cast<float>(ms-h.since)*0.001f);
+            h=Held{};
             reinterpret_cast<DeleteFn>(image+kDelete)(plane);
             return;
         }

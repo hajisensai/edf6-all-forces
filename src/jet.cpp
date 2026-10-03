@@ -181,9 +181,12 @@ const char* const kModeNames[]={"takeoff","patrol","approach","dive","pull","ext
 // The bomb bay of a jet that takes over a bomber (JetLaunchBomber): an IndirectFireControl of its own, set
 // up as BombingPlane_Init (0x5AABB0) sets up the bomber's (plane+0xC20) and driven as the bomber's update
 // (0x5AB240) drives it: opened (0x2B4340) when the target is fireDist ahead along the line, which is what
-// the bomber computes into +0xC14 (frames of fire (0x2B8470) x speed a frame x target_adjust +
-// target_distance), then stepped once a frame (0x2B95A0) with the drop point target_distance ahead of the
-// nose at the target's height (+0x20) and the release point the jet itself (+0x300, used as +0x2F9 says).
+// the bomber computes into +0xC14 (frames of fire (0x2B8470: (shots-1) x (interval+1)) x speed a frame x
+// target_adjust + target_distance), then stepped once a frame (0x2B95A0) with the drop point (+0x20, each
+// bomb lands on it within the spread: the shot is solved ballistically onto it) and the release point the
+// jet itself (+0x300, used as +0x2F9 says). The stock bomber moves its fixed speed a frame (0x5AB240), so
+// its drop point does too and the carpet is frames x speed a frame long; ours moves the same, a step at a
+// time (BayFrame), whatever the jet's real flight does meanwhile.
 // The bombs are the bomber's: its bombing_plane_param, damage, spread, seed and owner.
 constexpr unsigned kIfcCtor=0x2B3940,kIfcDtor=0x2B3C90,kIfcConfig=0x2B5F40,kIfcOwner=0x2B8390,kIfcDamage=0x2B82E0,
                    kIfcSpread=0x2B8460,kIfcFrames=0x2B8470,kIfcOpen=0x2B4340,kIfcStep=0x2B95A0,kIfcDone=0x2B7B90;
@@ -219,6 +222,10 @@ struct Jet {
     unsigned char* ifc;      // the bomb bay (see kIfcCtor), or nullptr
     float bombAt[3],bombDir[3],bombAlt,bombSpeed,fireDist,reach;
     bool bombing;            // the bay is open
+    float bayFrom;           // m along the line (from the target, + past it) where the bay opened
+    std::int32_t baySteps;   // steps of the open bay: its drop point is bayFrom+reach+baySteps x speed a frame
+    ULONGLONG bayOpenAt;     // game ms the bay opened
+    const void* hold;        // the stock bomber kept (hidden) while the bay is there: its call's marker stays up
     const void* bombOwner;   // whose bombs the bay drops (the caller: the bomb rounds' owner)
     ULONGLONG bombClear;     // game ms until which the owner's rounds still pass its flight (0: bay open)
     float top;               // m/s it never goes past: its kind's, or a faster bomber's speed
@@ -716,7 +723,7 @@ void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noex
     if(cfg.debug && ms-j.gateAt>1000){j.gateAt=ms;Log("JET v=%p bomb run: %.0f m to the target, %.0f m off the line",j.vehicle,along,off);}
     if(!j.bombing && along<j.fireDist+j.bombSpeed/60.0f) {
         reinterpret_cast<void(*)(void*)>(image+kIfcOpen)(j.ifc);
-        j.bombing=true;
+        j.bombing=true;j.bayFrom=-along;j.baySteps=0;j.bayOpenAt=ms;
         Log("JET v=%p bay open: %.0f m short of the target, %.0f m off the line, %d to drop",j.vehicle,along,off,At<std::int32_t>(j.ifc,kIfcShots));
     }
     if(j.bombing && At<std::int32_t>(j.ifc,kIfcShots)<=0) {
@@ -736,21 +743,25 @@ void BayFree(unsigned char*& ifc) noexcept {
 // A frame of the open bay: drop point and release point as the bomber's update sets them, one step; torn
 // down once the last bomb is out and none it tracks is left. The stock bomber (0x5AB240) aims
 // target_distance ahead of itself on its straight line from its start to the target (Init 0x5AABB0 points
-// it there); the drop point is that, from where the jet is along the line: off the nose, every swing of
-// the jet's heading swept the drop point sideways and the bombs covered a far wider area than the stock.
+// it there), and moves its speed a frame: the drop point here is where that would be this step, on the
+// line from where the bay opened. Off the nose, every swing of the jet's heading swept it sideways; off the
+// jet's position, the carpet stretched with however far the jet really flew a step.
 void BayFrame(Jet& j,const float* pos,const float*) noexcept {
     if(!j.ifc || !j.bombing)return;
-    const float rel[3]={pos[0]-j.bombAt[0],0,pos[2]-j.bombAt[2]};
-    const float along=Dot(rel,j.bombDir)+j.reach;
+    const float perFrame=j.bombSpeed/60.0f;
+    const float along=j.bayFrom+j.reach+static_cast<float>(j.baySteps)*perFrame;
     alignas(16) const float aim[4]={j.bombAt[0]+j.bombDir[0]*along,j.bombAt[1],j.bombAt[2]+j.bombDir[2]*along,1.0f};
     alignas(16) const float from[4]={pos[0],pos[1],pos[2],1.0f};
     std::memcpy(j.ifc+kIfcAim,aim,16);std::memcpy(j.ifc+kIfcFrom,from,16);
     const float frame=1.0f;
     reinterpret_cast<void(*)(void*,const float*)>(image+kIfcStep)(j.ifc,&frame);
+    if(At<std::int32_t>(j.ifc,kIfcShots)>0)++j.baySteps;
     if(At<std::int32_t>(j.ifc,kIfcShots)<=0 && reinterpret_cast<bool(*)(void*)>(image+kIfcDone)(j.ifc)) {
         BayFree(j.ifc);
-        j.bombClear=GameMs()+kBombClearMs;
-        Log("JET v=%p bay closed",j.vehicle);
+        const ULONGLONG ms=GameMs();
+        j.bombClear=ms+kBombClearMs;
+        Log("JET v=%p bay closed: dropped over %d steps (%.0f m from %.0f m to %.0f m along the line) in %.1f s",j.vehicle,j.baySteps,
+            static_cast<float>(j.baySteps)*perFrame,j.bayFrom+j.reach,along,static_cast<float>(ms-j.bayOpenAt)*0.001f);
     }
 }
 
@@ -1009,7 +1020,7 @@ JetBody BomberBody(const unsigned char* inst) noexcept {
 }
 
 bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec,const void* source,
-                     JetBody body) noexcept {
+                     JetBody body,const void* hold) noexcept {
     if(!bayOk)return false;
     __try {
         const Kind& k=kKinds[0];
@@ -1025,13 +1036,21 @@ bool JetLaunchBomber(const float* from,const float* heading,const float* target,
         float dir[3]={heading[0],0.0f,heading[2]};
         if(!Normalize(dir)){dir[0]=0;dir[2]=1;}
         j->ifc=ifc;std::memcpy(j->bombAt,target,12);std::memcpy(j->bombDir,dir,12);
-        j->bombOwner=Readable(load.owner,8) ? *static_cast<const void* const*>(load.owner) : nullptr;j->bombClear=0;
+        j->bombOwner=Readable(load.owner,8) ? *static_cast<const void* const*>(load.owner) : nullptr;j->bombClear=0;j->hold=hold;
         j->bombAlt=At<float>(j->vehicle,kPosition+4);j->bombSpeed=speed;j->fireDist=fireDist;j->reach=load.reach;
         j->mode=Mode::bomb;j->top=speed*1.1f>k.attack*1.3f ? speed*1.1f : k.attack*1.3f;
         Log("JET v=%p bomber: %.0f m/s (its own %.0f) at %.0f m, bay opens %.0f m short, %d to drop, damage %.0f spread %.0f",j->vehicle,speed,own,
             j->bombAlt-target[1],fireDist,At<std::int32_t>(ifc,kIfcShots),load.damage,load.spread);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET bomber launch: fault");return false;}
+}
+
+bool JetHolds(const void* hold) noexcept {
+    if(!hold)return false;
+    const ULONGLONG ms=GameMs();
+    for(const auto& j:jets)
+        if(j.vehicle && j.hold==hold && j.ifc && ms-j.seen<=kStaleMs)return true;
+    return false;
 }
 
 namespace {
