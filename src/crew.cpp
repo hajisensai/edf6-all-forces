@@ -22,6 +22,15 @@
 #include <cmath>
 
 namespace crew {
+// The game clock: wall time, except that a gap between two reads longer than kPauseMs (the pause menu,
+// loading: nothing is flown or updated) counts as one 16 ms frame.
+namespace { constexpr ULONGLONG kPauseMs=250; ULONGLONG clockWall=0,clockGame=0; }
+ULONGLONG GameMs() noexcept {
+    const ULONGLONG wall=GetTickCount64();
+    if(clockWall)clockGame+=wall-clockWall>kPauseMs ? 16 : wall-clockWall;
+    clockWall=wall;
+    return clockGame;
+}
 namespace {
 using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
 using RideAiFn=void(__fastcall*)(void*,bool);

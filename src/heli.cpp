@@ -252,6 +252,7 @@ struct Heli {
     const void* tracked;  // the target tgtPrev/tgtVel belong to
     float tgtPrev[3],tgtVel[3];
     ULONGLONG playerAt;   // the player fix pVel was last updated from
+    ULONGLONG enemyAt;    // game ms: an enemy was last within heliRange of whom it follows
     float pPrev[3],pVel[3];
     float top,stopDecel;  // m/s at full stick, and the braking it plans with (see Tune)
     bool tuned;           // Fly writes params (k, b, max yaw, yaw smoothing) every frame
@@ -260,7 +261,8 @@ struct Heli {
     Door doors[2];        // 410: left, right
 };
 Heli helis[16]{};
-// The player's last move: they count as standing still once within 3 m of `still` since `stillAt`.
+// The player's last move: they count as standing still once within 3 m of `still` since `stillAt`
+// (game clock: a pause does not count as standing still).
 // moveDir is the horizontal direction of that last 3 m step.
 float still[3]{},moveDir[3]{0,0,1};ULONGLONG stillAt=0;
 
@@ -270,7 +272,7 @@ void TrackPlayerStill() noexcept {
         const float len=std::sqrt(d[0]*d[0]+d[2]*d[2]);
         if(len>1.0f){moveDir[0]=d[0]/len;moveDir[1]=0;moveDir[2]=d[2]/len;}
     }
-    if(!stillAt || d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>9.0f){std::memcpy(still,player.pos,12);stillAt=GetTickCount64();}
+    if(!stillAt || d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>9.0f){std::memcpy(still,player.pos,12);stillAt=GameMs();}
 }
 
 Heli* Find(const void* vehicle) noexcept {
@@ -454,11 +456,11 @@ void Arrive(const Heli& h,const float* pos,const float* goal,const float* goalVe
 
 // No target: escort the moving player, or orbit the standing one (see kMovingMs). Sets the wanted
 // velocity and height; returns how far it is off its slot (escort) or radius (orbit).
-float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl,ULONGLONG ms,float* vel,float* height) noexcept {
+float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl,float* vel,float* height) noexcept {
     const float* first=fl.first ? fl.first->pos : pos;
     const float group=static_cast<float>(fl.group),wing=static_cast<float>(fl.wing);
     *height=player.pos[1]+cfg.heliHeight+Stack(fl);
-    if(ms-stillAt<kMovingMs) {
+    if(GameMs()-stillAt<kMovingMs) {
         // Each flight a V: the first flight on the side the first heli is on, heliFollow out and
         // kEscortAhead forward, the second on the other side, the next ones kGroupGap farther out,
         // alternating. Wing n takes place (n+1)/2 on alternating sides, kWingGap back and out per place.
@@ -987,8 +989,17 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     const float toPlayer[3]={player.pos[0]-pos[0],0,player.pos[2]-pos[2]};
     const bool byPlayer=follow && Dot2(toPlayer,toPlayer)<kBoardRange*kBoardRange;
     // Land by a player who stands still with no enemy about (so they can walk up and take it over),
-    // and stay down while they are next to it.
-    const bool land=follow && !engage && cfg.heliLandMs && (ms-stillAt>cfg.heliLandMs || (grounded && byPlayer));
+    // and stay down while they are next to it. "No enemy about" is none within heliRange of the player
+    // for heliLandMs, not "no target picked this frame": the pick range is narrower while following,
+    // and between two kills there is none, which used to set it down mid-fight.
+    const ULONGLONG game=GameMs();
+    if(!follow)h.enemyAt=game;
+    else ForEachEnemy(v,[&](const void*,const float* p) noexcept {
+        const float d[3]={p[0]-player.pos[0],0,p[2]-player.pos[2]};
+        if(Dot2(d,d)<cfg.heliRange*cfg.heliRange)h.enemyAt=game;
+    });
+    const bool quiet=game-h.enemyAt>cfg.heliLandMs;
+    const bool land=follow && !engage && quiet && cfg.heliLandMs && (game-stillAt>cfg.heliLandMs || (grounded && byPlayer));
 
     // The map between it and the target, and a wall along the nose (see kAimWall).
     bool hidden=false,wallAhead=false;
@@ -1035,7 +1046,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
             off=Circle(h,pos,fwd,aim,h.tgtVel,is410 ? kGunshipRadius : kTurretRadius,is410 ? kGunshipSpeed : kTurretSpeed,want);
         }
     } else if(follow) {
-        off=Formation(h,pos,fwd,flight,ms,want,&height);
+        off=Formation(h,pos,fwd,flight,want,&height);
     } else {
         Arrive(h,pos,h.hold,rest,want);
         off=Dist2(pos,h.hold);height=h.hold[1];
@@ -1145,7 +1156,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
         Log("HELI v=%p %s%s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
-            v,perched ? "perched " : "",land ? "land" : engage ? (circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
+            v,perched ? "perched " : "",land ? "land" : engage ? (circling ? "circle" : h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (GameMs()-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
             flight.group,wing,arms.ammo[0],arms.ammo[1],arms.ammo[2],pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,

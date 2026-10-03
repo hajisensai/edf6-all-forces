@@ -33,7 +33,7 @@ struct Config {
     float heliBrakeGain=0.12f; // stick per m/s of speed (damping)
     float heliClimbGain=0.08f; // rotor speed per m/s of climb-rate error
     float heliHoverLearn=0.03f;// how fast it learns the hover rotor speed
-    DWORD heliLandMs=6000;     // it lands by a player who stood still this long; 0 = never lands
+    DWORD heliLandMs=0;        // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
     float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
@@ -122,6 +122,7 @@ bool BurstHitsPlayer(const float* from,const float* to) noexcept;
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
+ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused or loading
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 bool InstallJets() noexcept;
 void PreloadJets() noexcept;                       // from the mission's player preload

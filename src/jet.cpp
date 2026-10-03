@@ -74,7 +74,6 @@ constexpr float kStrikeRange=600.0f,kFighterRange=900.0f;   // m from the anchor
 constexpr float kWithdrawHp=0.25f,kGone=1000.0f,kGoneStuck=600.0f,kWithdrawClimb=300.0f;
 constexpr ULONGLONG kStuckMs=60000;
 constexpr ULONGLONG kStaleMs=1500;   // game ms: a table entry not flown this long is free
-constexpr ULONGLONG kPauseMs=250;    // a wall-clock gap between updates longer than this was a pause
 constexpr ULONGLONG kFlyerMemoMs=500;
 // Diving it must keep the height a kMaxG pull-out takes (v^2/(n g) (1 - cos dive)) plus kReact seconds of sink.
 constexpr float kReact=0.5f;
@@ -114,17 +113,6 @@ struct Jet {
 };
 Jet jets[16]{};
 
-// The game clock (see the file comment); every jet entry point reads it.
-ULONGLONG clockWall=0,clockGame=0;
-ULONGLONG GameMs() noexcept {
-    const ULONGLONG wall=GetTickCount64();
-    if(clockWall) {
-        const ULONGLONG d=wall-clockWall;
-        clockGame+=d>kPauseMs ? 16 : d;
-    }
-    clockWall=wall;
-    return clockGame;
-}
 
 const void* SelfCtrl(const unsigned char* v) noexcept { return At<const void*>(v,kSelfCtrl); }
 
