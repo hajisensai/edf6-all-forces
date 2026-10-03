@@ -7,8 +7,8 @@
 //   byte veh+0x2020 both gatlings, byte veh+0x2021 missile (506 and 409; 410 fires per gunner seat)
 // Slot 57 (physics + weapons) consumes them the same frame.
 //
-// Flight: with no enemy the helis hold a V formation heliFollow metres from the player, heliHeight
-// metres up; with one they fly attack runs (see Phase). Horizontal = PD on position projected onto the heading rows, so its
+// Flight: with no enemy the helis escort the moving player in a V on their flank, or orbit them while
+// they stand (heliFollow metres out, heliHeight up); with one they fly attack runs (see Phase). Horizontal = PD on position projected onto the heading rows, so its
 // signs are right by construction. Altitude = climb-rate loop on the rotor speed (the lift, which
 // lags the throttle by seconds) with a throttle loop under it that drives the rotor there. The world sign of yaw was
 // not provable statically, so it is learned online from how the heading actually turns.
@@ -59,6 +59,11 @@ constexpr float kPitchGain=1.0f;     // forward stick per rad the nose is above 
 constexpr float kWingSpread=0.5f;    // rad between the attack bearings of successive wingmen
 // Formation: a V, kWingGap metres per place; all flown helis keep kSeparation metres apart.
 constexpr float kWingGap=25.0f,kSeparation=25.0f;
+// With no enemy: while the player moves (a 3 m step within kMovingMs) the helis escort in a V on their
+// flank, kEscortAhead metres forward; while they stand they orbit them heliFollow metres out at
+// kOrbitSpeed, spread evenly round the circle (the leader sets the angle, the others keep station).
+constexpr ULONGLONG kMovingMs=2000;
+constexpr float kEscortAhead=15.0f,kOrbitSpeed=10.0f,kOrbitLead=2.0f;   // m/s; seconds of orbit to aim ahead
 constexpr float kYawDamp=0.6f;       // yaw input per rad/s of turn rate (the yaw rate lags the input)
 
 struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
@@ -90,10 +95,15 @@ struct Heli {
 };
 Heli helis[16]{};
 // The player's last move: they count as standing still once within 3 m of `still` since `stillAt`.
-float still[3]{};ULONGLONG stillAt=0;
+// moveDir is the horizontal direction of that last 3 m step.
+float still[3]{},moveDir[3]{0,0,1};ULONGLONG stillAt=0;
 
 void TrackPlayerStill() noexcept {
     const float d[3]={player.pos[0]-still[0],player.pos[1]-still[1],player.pos[2]-still[2]};
+    if(stillAt && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>9.0f) {
+        const float len=std::sqrt(d[0]*d[0]+d[2]*d[2]);
+        if(len>1.0f){moveDir[0]=d[0]/len;moveDir[1]=0;moveDir[2]=d[2]/len;}
+    }
     if(!stillAt || d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>9.0f){std::memcpy(still,player.pos,12);stillAt=GetTickCount64();}
 }
 
@@ -218,18 +228,39 @@ bool Attack(Heli& h,const float* pos,const float* aim,float range,int wing,ULONG
     return h.phase==Phase::run;
 }
 
-// No target: hold a V behind the follow point heliFollow metres from the player on our bearing,
-// heliHeight up; wing n takes place (n+1)/2 on alternating sides, kWingGap metres per place.
-void Formation(const float* pos,const float* fwd,int wing,float* goal) noexcept {
-    float dir[3]={pos[0]-player.pos[0],0,pos[2]-player.pos[2]};
-    float len=std::sqrt(Dot2(dir,dir));
-    if(len<1.0f){dir[0]=-fwd[0];dir[2]=-fwd[2];len=1.0f;}
-    dir[0]/=len;dir[2]/=len;
-    const float place=static_cast<float>((wing+1)/2),side=wing%2 ? 1.0f : -1.0f;
-    const float perp[2]={dir[2],-dir[0]};
-    goal[0]=player.pos[0]+dir[0]*cfg.heliFollow+perp[0]*side*place*kWingGap+dir[0]*place*kWingGap;
-    goal[2]=player.pos[2]+dir[2]*cfg.heliFollow+perp[1]*side*place*kWingGap+dir[2]*place*kWingGap;
+// The helis flown right now: how many, and the first of them (the formation leader).
+int ActiveHelis(ULONGLONG ms,const Heli** leader) noexcept {
+    int n=0;*leader=nullptr;
+    for(const auto& o:helis)if(o.vehicle && ms-o.seen<2000){if(!n)*leader=&o;++n;}
+    return n;
+}
+
+// No target: escort the moving player, or orbit the standing one (see kMovingMs).
+void Formation(const Heli& h,const float* pos,int wing,ULONGLONG ms,float* goal) noexcept {
+    const Heli* leader=nullptr;
+    const int count=ActiveHelis(ms,&leader);
+    const float* lead=leader ? leader->pos : pos;
     goal[1]=player.pos[1]+cfg.heliHeight+4.0f*static_cast<float>(wing);
+    if(ms-stillAt<kMovingMs) {
+        // A V on the side the leader is on, heliFollow out and kEscortAhead forward; wing n takes
+        // place (n+1)/2 on alternating sides, kWingGap metres back and out per place.
+        const float perp[2]={moveDir[2],-moveDir[0]};
+        const float toLead[2]={lead[0]-player.pos[0],lead[2]-player.pos[2]};
+        const float flank=toLead[0]*perp[0]+toLead[1]*perp[1]<0 ? -1.0f : 1.0f;
+        const float place=static_cast<float>((wing+1)/2),side=wing%2 ? 1.0f : -1.0f;
+        const float out=cfg.heliFollow+side*place*kWingGap,ahead=kEscortAhead-place*kWingGap;
+        goal[0]=player.pos[0]+perp[0]*flank*out+moveDir[0]*ahead;
+        goal[2]=player.pos[2]+perp[1]*flank*out+moveDir[2]*ahead;
+        return;
+    }
+    // Orbit: the leader's bearing from the player, plus this heli's share of the circle, plus the
+    // arc it should cover in kOrbitLead seconds (so it keeps moving round instead of stopping).
+    const float r=cfg.heliFollow>10.0f ? cfg.heliFollow : 10.0f;
+    const float angle=std::atan2(lead[0]-player.pos[0],lead[2]-player.pos[2])+
+        2.0f*kPi*static_cast<float>(wing)/static_cast<float>(count>0 ? count : 1)+kOrbitSpeed*kOrbitLead/r;
+    goal[0]=player.pos[0]+std::sin(angle)*r;
+    goal[2]=player.pos[2]+std::cos(angle)*r;
+    (void)h;
 }
 
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
@@ -291,7 +322,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     } else if(engage) {
         run=Attack(h,pos,aim,GunRange(v),wing,ms,goal);
     } else if(follow) {
-        Formation(pos,fwd,wing,goal);
+        Formation(h,pos,wing,ms,goal);
     } else {
         std::memcpy(goal,h.hold,12);
     }
