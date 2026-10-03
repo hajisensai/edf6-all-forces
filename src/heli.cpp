@@ -17,8 +17,9 @@
 // When the player stands still for heliLandMs it lands next to them and stays down while they are
 // close, so they can walk up and bump the NPC pilot.
 // With the player aboard (in a gunner seat) it does not follow: it attacks the enemies around itself.
-// Attack: low overwatch (see Engage). It fires only when the 3D nose line is within the fire cone of
-// the target's lead point and that is within the guns' reach (the 506 gatling's rounds die at 160 m).
+// Attack: strafing runs (see Engage). It fires only when the 3D nose line is within the fire cone of
+// the target's lead point and that is within the guns' reach (the 506 gatling's rounds die at 160 m);
+// the 409's turret gun also fires on its own up close (see Loadout).
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
@@ -26,7 +27,7 @@
 namespace crew {
 namespace {
 constexpr unsigned kHeliVtables[]={0x17DB238,0x17DEF98,0x17DF338,0x17DF790};   // 506, 409, 410, base
-constexpr unsigned kHeli506=0x17DB238,kHeli410=0x17DF338;
+constexpr unsigned kHeli506=0x17DB238,kHeli409=0x17DEF98,kHeli410=0x17DF338;
 // Input block, heading basis, contact byte, rotor speed
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
@@ -49,7 +50,7 @@ constexpr ULONGLONG kLiftOffMs=1500;
 // The 506 gatling's rounds live 40 frames at 4 m/frame (V_506HELI_GATLING01_*.SGO): 160 m. The 409 and
 // 410 guns reach 480 m and 720 m, so for those heliRange is the limit.
 constexpr float kGun506Range=150.0f;
-constexpr float kBulletSpeed=240.0f; // m/s, the 506 gatling (4 m/frame); used for the lead of all guns
+constexpr float kBulletSpeed=240.0f; // m/s: a gun's round speed when its weapon cannot be read
 // Speed. Slot 57 drives the horizontal velocity towards k * stick along the heading rows, and the nose
 // pitches with the forward stick: the logs (14:33-14:45, VEH positions 5 s apart at fwd=1.00) show
 // pitch = -35 deg * stick (lagging ~3 s) and the speed creeping up to 16-17 m/s over ~30 s, so
@@ -57,34 +58,47 @@ constexpr float kBulletSpeed=240.0f; // m/s, the 506 gatling (4 m/frame); used f
 // leaves margin for the ~1.5 s (kStopLag) it travels before the nose comes up and the brake bites.
 constexpr float kTopSpeed=17.0f;
 constexpr float kStopDecel=1.2f,kStopLag=1.5f;
-// Attack: low overwatch. The guns are fixed along the nose, the nose dips 35 deg * forward stick, and
-// steady forward stick s flies the heli at kTopSpeed * s. So a fixed glide slope at dip d means a speed of
-// ~0.49 m/s per degree and a sink rate of speed * tan(d); the rotor sinks at most ~1.8 m/s (logs), which
-// caps the slope at ~14 deg and ~7 m/s: slower than the ants it chases (runs: 0-5 shots per round).
-// Instead it hovers heliFireHeight above the target, turns the nose onto it and dips it just as far as the
-// target is below: 12 m up, a target 40-150 m out needs 5-17 deg, half stick at most, which creeps forward
-// at a few m/s. It fights from where it is (see Engage): a station beside the player, as before, jumped
-// sides whenever the target or the player moved, and the heli (8-12 m/s, half a minute to top speed)
-// spent 80% of the 15:19 round flying after it.
+// Attack: strafing runs. The guns are fixed along the nose, the nose dips 35 deg * forward stick, and
+// steady forward stick s flies the heli at kTopSpeed * s, so the dip and the speed are one control. Hovering
+// above the target and dipping just as far as it lies below (the old overwatch) crept along at a few m/s and
+// swung the whole airframe after every ant: in the 15:28 round the nose missed by 27-85 deg (median) and
+// six bursts were fired. A run keeps the heli heliFireHeight above the target and flies at it at full
+// speed; from kRunAim out it aims (the stick holds the dip onto the lead point) and coasts in on its
+// momentum, the dip and so the stick growing as it closes. Once the dip passes kMaxDip it breaks off past
+// the target, extends kExtend metres out on a slant (kExtendTurn), turns back, and runs in again.
 constexpr float kMaxTilt=0.61f;      // rad: nose dip at full forward stick (35 deg in the logs)
 constexpr float kPitchGain=1.0f;     // extra dip asked per rad the nose lags the wanted dip (halves the ~3 s lag)
-constexpr float kMaxDip=0.52f;       // rad (30 deg): the deepest dip it aims with, short of full stick
-constexpr float kDipMargin=0.09f;    // rad: back at the station it aims again once the dip is this far under kMaxDip
-// Engaged, the map must not be in the way (rays, see Avoid). Aiming, the forward stick holds the nose dip
-// and the heli creeps along the nose, so it cannot brake for a wall: a wall within kAimWall along the
-// nose sends it back to its station instead, and like a target hidden behind terrain or a building
-// (the line to it hits the map more than kLosSlack short), lifts its hover kLosClimb m/s until it sees
-// over (at most kLosMax), easing back down at kLosSink once clear. It does not fire at the wall.
+constexpr float kMaxDip=0.52f;       // rad (30 deg): the deepest dip it aims with; deeper, it breaks off
+constexpr float kRunAim=160.0f;      // m: it aims from this close in (or the gun range, if less)
+constexpr float kExtend=140.0f;      // m: after the break it flies on until this far from the target
+constexpr float kExtendTurn=0.7f;    // rad: the extension slants this far off the way it broke
+constexpr ULONGLONG kExtendMs=10000; // it turns back in after this long at most
+// Engaged, the map must not be in the way (rays, see Avoid). Aiming, the forward stick holds the nose dip,
+// so it cannot brake for a wall: a wall within kAimWall along the nose makes it break off instead, and like
+// a target hidden behind terrain or a building (the line to it hits the map more than kLosSlack short),
+// lifts its run kLosClimb m/s until it sees over (at most kLosMax), easing back down at kLosSink once
+// clear. It does not fire at the wall.
 constexpr float kAimWall=25.0f,kLosSlack=3.0f,kLosClimb=4.0f,kLosSink=1.5f,kLosMax=40.0f;
-constexpr float kTransit=60.0f;      // beyond this from the station it faces the way it flies, not the target
-constexpr float kStandoff=0.6f;      // the band (see Engage) reaches this share of the gun range out
-constexpr float kStandoffMax=120.0f;
-constexpr float kBandSlack=10.0f;    // m: inner band edge margin, and how far out of the band it may drift aiming
-constexpr float kBandMin=30.0f;      // m: the band is at least this deep
-constexpr float kWingStep=3.0f;      // m: wingmen hover 0/1/2 steps higher, so they do not share one height
+constexpr float kWingStep=3.0f;      // m: wingmen run 0/1/2 steps higher, so they do not share one height
 constexpr float kSidestep=6.0f;      // m/s around the target while its burst would pass the player
 constexpr float kHitRadius=3.0f;     // m: the cone widens up close so a miss of this much at the target still fires
 constexpr float kMissileCone=10.0f;  // deg: the missile homes (LockonType 1), so a rough aim is enough
+// The weapons (seat 0's holders, see Loadout). A gun's lead uses its round speed and drop, read from the
+// weapon (+0x894 m/frame, gravity factor +0x8E0 of kGravity). The 409's rockets fly straight (no
+// LockonType) and accelerate: kRocketStart m/frame plus kRocketAccel per frame (V409 rocket SGO), so
+// their lead takes the flight frames of that; they fire only kRocketCone off and within kRocketRange.
+// The 409's gun sits in a turret that turns onto any enemy within ~kTurretReach by itself (pitch
+// 0..-90: below only), so there it fires whatever the nose does.
+constexpr std::size_t kWeaponLockon=0x6B0,kWeaponSpeed=0x894,kWeaponGravity=0x8E0,kWeaponAmmo=0xBE8;
+constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
+constexpr std::int32_t kHoming=1;
+constexpr float kGravity=14.7f;      // m/s^2 (measured, autoturret re-notes)
+constexpr float kRocketStart=0.5f,kRocketAccel=0.03f,kRocketCone=3.0f,kRocketRange=250.0f;
+constexpr float kTurretReach=70.0f;
+// No weapon of the helis reloads (ReloadTime -1), so like the AI's ground vehicles (whose _ai weapons do)
+// an emptied one is refilled to what it held when first seen, kReloadGunMs / kReloadAltMs after it ran
+// dry. Short of that the guns fire kBurstMs bursts with kBurstRest between.
+constexpr ULONGLONG kReloadGunMs=8000,kReloadAltMs=15000,kBurstMs=2000,kBurstRest=1000;
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
 constexpr float kKeepTarget=30.0f;   // m: the current target counts this much nearer (less switching)
 constexpr float kTooClose=1000.0f;   // m: a target too close below to aim at counts this much farther
@@ -175,7 +189,12 @@ struct Heli {
     const void* target;
     float hold[3];        // where it holds when it has nobody to follow
     float pos[3];         // last position, for the other helis' formation and separation
-    bool back;            // engaged: flying back to the station (see Engage), not aiming
+    bool extend;          // engaged: broke off a run, flying out to turn back in (see Engage)
+    ULONGLONG extendAt;   // when it broke off
+    float extendTo[3];    // where it extends to
+    struct Arm { unsigned char* weapon; std::int32_t full; ULONGLONG emptyAt; } arms[4];
+    ULONGLONG burstAt,restUntil;   // the gun's current burst began / it rests until
+    bool firing;
     float losLift;        // metres its engaged hover is raised to see over the map (see kAimWall)
     const void* tracked;  // the target tgtPrev/tgtVel belong to
     float tgtPrev[3],tgtVel[3];
@@ -393,47 +412,108 @@ float Formation(const Heli& h,const float* pos,const float* fwd,const Flight& fl
     return std::fabs(dist-r);
 }
 
-// Engaged (see kMaxTilt): it fights from where it is. Horizontally it keeps to a band around the target:
-// no nearer than the dip onto the target stays kDipMargin under kMaxDip (plus kBandSlack), no farther
-// than kStandoff of the gun range (at most kStandoffMax, at least kBandMin deep). Inside the band its
-// station is where it is; outside, the nearest edge of the band on its side, which moves with the target.
-// The height is heliFireHeight (plus kWingStep per wing, three steps) above the target, or the player
-// if higher. While its burst would pass the player it slides around the target, away from them.
-// Following the player, the station never leaves heliCombatRange of them (pulled in to that circle, it
-// shoots from the edge if the gun reaches).
-// h.back (fly, do not aim) once it is kBandSlack out of the band or the dip passes kMaxDip; it aims
-// again back inside with the dip kDipMargin under. Returns how far it is out of the band.
-float Engage(Heli& h,const float* pos,const float* aim,float range,float dip,int wing,bool follow,
+// Engaged (see kMaxTilt): a strafing run. The height is heliFireHeight (plus kWingStep per wing, three
+// steps) above the target, or the player if higher. Running in, it flies at the target at full speed (its
+// velocity on top) and, while its burst would pass the player, slides around the target away from them.
+// It breaks off (h.extend) once the dip onto the lead point passes kMaxDip or a wall is ahead, and flies
+// on at full speed to a point kExtend past the target, slanted kExtendTurn off the way it broke (to the
+// side of its wing), kept within heliCombatRange of the player when following; there, or after
+// kExtendMs, it turns back in. Returns how far it is from where it is going.
+float Engage(Heli& h,const float* pos,const float* aim,float dipWant,bool wall,int wing,bool follow,ULONGLONG ms,
              float* vel,float* height) noexcept {
     const float ground=follow && player.pos[1]>aim[1] ? player.pos[1] : aim[1];
     *height=ground+cfg.heliFireHeight+kWingStep*static_cast<float>(wing%3);
-    float from[3]={pos[0]-aim[0],0,pos[2]-aim[2]};
-    const float horiz=std::sqrt(Dot2(from,from));
-    if(horiz<0.1f){from[0]=0;from[2]=1;}
-    else{from[0]/=horiz;from[2]/=horiz;}
-    const float above=*height-aim[1]>1.0f ? *height-aim[1] : 1.0f;
-    const float nearest=above/std::tan(kMaxDip-kDipMargin)+kBandSlack;
-    const float reach=Clamp(range*kStandoff,0.0f,kStandoffMax);
-    const float farthest=reach>nearest+kBandMin ? reach : nearest+kBandMin;
-    const float keep=Clamp(horiz,nearest,farthest);
-    float station[3]={aim[0]+from[0]*keep,0,aim[2]+from[2]*keep};
-    if(follow) {
-        const float out[3]={station[0]-player.pos[0],0,station[2]-player.pos[2]};
-        const float len=std::sqrt(Dot2(out,out)),leash=cfg.heliCombatRange>10.0f ? cfg.heliCombatRange : 10.0f;
-        if(len>leash){station[0]=player.pos[0]+out[0]/len*leash;station[2]=player.pos[2]+out[2]/len*leash;}
+    float to[3]={aim[0]-pos[0],0,aim[2]-pos[2]};
+    const float horiz=std::sqrt(Dot2(to,to));
+    if(horiz<0.1f){to[0]=0;to[2]=1;}
+    else{to[0]/=horiz;to[2]/=horiz;}
+    if(!h.extend && (dipWant>kMaxDip || wall)) {
+        h.extend=true;h.extendAt=ms;
+        float dir[3]={h.vel[0],0,h.vel[2]};
+        const float speed=std::sqrt(Dot2(dir,dir));
+        if(speed>3.0f){dir[0]/=speed;dir[2]/=speed;}
+        else{dir[0]=to[0];dir[2]=to[2];}
+        const float a=wing%2 ? -kExtendTurn : kExtendTurn,c=std::cos(a),s=std::sin(a);
+        h.extendTo[0]=aim[0]+(dir[0]*c+dir[2]*s)*kExtend;h.extendTo[1]=0;h.extendTo[2]=aim[2]+(dir[2]*c-dir[0]*s)*kExtend;
+        if(follow) {
+            const float out[3]={h.extendTo[0]-player.pos[0],0,h.extendTo[2]-player.pos[2]};
+            const float len=std::sqrt(Dot2(out,out)),leash=cfg.heliCombatRange>10.0f ? cfg.heliCombatRange : 10.0f;
+            if(len>leash){h.extendTo[0]=player.pos[0]+out[0]/len*leash;h.extendTo[2]=player.pos[2]+out[2]/len*leash;}
+        }
     }
-    const float off=Dist2(pos,station);
-    if(off>kBandSlack || dip>kMaxDip)h.back=true;
-    else if(h.back && off<1.0f && dip<kMaxDip-kDipMargin)h.back=false;
-    const float targetVel[3]={h.tgtVel[0],0,h.tgtVel[2]};
-    Arrive(h,pos,station,targetVel,vel);
+    if(h.extend) {
+        float e[3]={h.extendTo[0]-pos[0],0,h.extendTo[2]-pos[2]};
+        const float off=std::sqrt(Dot2(e,e));
+        if(off<20.0f || horiz>kExtend || ms-h.extendAt>kExtendMs)h.extend=false;
+        else {
+            vel[0]=e[0]/off*kTopSpeed;vel[1]=0;vel[2]=e[2]/off*kTopSpeed;
+            return off;
+        }
+    }
+    vel[0]=h.tgtVel[0]+to[0]*kTopSpeed;vel[1]=0;vel[2]=h.tgtVel[2]+to[2]*kTopSpeed;
     if(follow && PlayerInLine(pos,aim)) {
-        const float tangent[3]={from[2],0,-from[0]};
+        const float tangent[3]={to[2],0,-to[0]};
         const float toPlayer[3]={player.pos[0]-aim[0],0,player.pos[2]-aim[2]};
         const float away=Dot2(tangent,toPlayer)>0.0f ? -kSidestep : kSidestep;
         vel[0]+=tangent[0]*away;vel[2]+=tangent[2]*away;
     }
-    return off;
+    return horiz;
+}
+
+// The weapons in the pilot's seat (seat 0): the gun (fastest straight round), the homing missile
+// (LockonType 1) and the straight rockets (slow, accelerating rounds). Refills an emptied one (see
+// kReloadGunMs). Reads the gun's round speed and drop for the lead.
+struct Loadout { float gunSpeed,gunGravity,rocketGravity; bool gun,missile,rockets; std::int32_t ammo[4]; };
+Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
+    Loadout l{kBulletSpeed,0.0f,1.0f,false,false,false,{-1,-1,-1,-1}};
+    if(SeatCount(v)==0)return l;
+    const auto seat=SeatAt(v,0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(count>8 || !Readable(holders,count*8))return l;
+    float best=0.0f;
+    for(std::uint64_t i=0;i<count && i<4;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto weapon=At<unsigned char*>(holders[i],kHolderWeapon);
+        if(!Readable(weapon,kWeaponAmmo+4,true))continue;
+        auto& arm=h.arms[i];
+        const std::int32_t ammo=At<std::int32_t>(weapon,kWeaponAmmo);
+        if(arm.weapon!=weapon){arm.weapon=weapon;arm.full=ammo;arm.emptyAt=0;}
+        if(ammo>arm.full)arm.full=ammo;
+        const float speed=At<float>(weapon,kWeaponSpeed)*60.0f,gravity=At<float>(weapon,kWeaponGravity);
+        const bool homing=At<std::int32_t>(weapon,kWeaponLockon)==kHoming,rocket=!homing && speed<120.0f;
+        if(ammo<=0 && arm.full>0) {
+            if(!arm.emptyAt)arm.emptyAt=ms;
+            else if(ms-arm.emptyAt>((homing || rocket) ? kReloadAltMs : kReloadGunMs)) {
+                Put<std::int32_t>(weapon,kWeaponAmmo,arm.full);arm.emptyAt=0;
+                if(cfg.debug)Log("HELI v=%p reloaded weapon %llu (%p) to %d",v,static_cast<unsigned long long>(i),weapon,arm.full);
+            }
+        } else arm.emptyAt=0;
+        l.ammo[i]=ammo;
+        if(homing)l.missile=true;
+        else if(rocket){l.rockets=true;if(std::isfinite(gravity))l.rocketGravity=gravity;}
+        else if(std::isfinite(speed) && speed>best) {
+            best=speed;l.gun=true;l.gunSpeed=speed;l.gunGravity=std::isfinite(gravity) && gravity>0.0f ? gravity : 0.0f;
+        }
+    }
+    return l;
+}
+
+// Seconds the 409's rocket takes to fly `d` metres (see kRocketStart).
+float RocketTime(float d) noexcept {
+    return (-kRocketStart+std::sqrt(kRocketStart*kRocketStart+2.0f*kRocketAccel*d))/kRocketAccel/60.0f;
+}
+
+// Where to point to hit `aim` moving at `tv`: `time(d)` seconds of flight to d metres, falling
+// gravity * kGravity on the way (twice over: the lead point moves the flight time).
+template<class F> void LeadPoint(const float* pos,const float* aim,const float* tv,float gravity,F time,float* out) noexcept {
+    std::memcpy(out,aim,12);
+    for(int pass=0;pass<2;++pass) {
+        const float d[3]={out[0]-pos[0],out[1]-pos[1],out[2]-pos[2]};
+        const float t=time(std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]));
+        for(int i=0;i<3;++i)out[i]=aim[i]+tv[i]*t;
+        out[1]+=0.5f*gravity*kGravity*t*t;
+    }
 }
 
 // Obstacle avoidance, applied to the wanted velocity and height of every mode but landing:
@@ -565,14 +645,18 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         TrackVelocity(h.tgtPrev,h.tgtVel,aim,dt,40.0f,h.tracked!=h.target);
         h.tracked=h.target;
     } else {
-        h.tracked=nullptr;h.back=false;
+        h.tracked=nullptr;h.extend=false;
     }
-    // Lead the target by the rounds' flight time; the nose, the dip and the fire test all use the lead point.
-    float lead[3]{},dist=0.0f,dipWant=0.0f,losRate=0.0f;
+    const Loadout arms=Arms(h,v,ms);
+    const bool is409=At<const unsigned char*>(v,0)==image+kHeli409;
+    // Lead the target by the rounds' flight time and drop: the gun's, and the rockets' for the 409, whose
+    // nose aims them (its gun is in a turret). The nose, the dip and the fire test use the lead point.
+    float lead[3]{},gunLead[3]{},dist=0.0f,dipWant=0.0f,losRate=0.0f;
     if(engage) {
-        const float d0[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
-        const float t=std::sqrt(d0[0]*d0[0]+d0[1]*d0[1]+d0[2]*d0[2])/kBulletSpeed;
-        for(int i=0;i<3;++i)lead[i]=aim[i]+h.tgtVel[i]*t;
+        const float gunSpeed=arms.gunSpeed>1.0f ? arms.gunSpeed : kBulletSpeed;
+        LeadPoint(pos,aim,h.tgtVel,arms.gunGravity,[gunSpeed](float d) noexcept { return d/gunSpeed; },gunLead);
+        if(is409 && arms.rockets)LeadPoint(pos,aim,h.tgtVel,arms.rocketGravity,RocketTime,lead);
+        else std::memcpy(lead,gunLead,12);
         const float d[3]={lead[0]-pos[0],lead[1]-pos[1],lead[2]-pos[2]};
         dist=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
         dipWant=std::atan2(-d[1],std::sqrt(Dot2(d,d)));
@@ -586,8 +670,18 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     // and stay down while they are next to it.
     const bool land=follow && !engage && cfg.heliLandMs && (ms-stillAt>cfg.heliLandMs || (grounded && byPlayer));
 
+    // The map between it and the target, and a wall along the nose (see kAimWall).
+    bool hidden=false,wallAhead=false;
+    if(engage && cfg.heliAvoid && rayOk) {
+        const float nosePt[3]={pos[0]+fwd[0]*kAimWall,pos[1],pos[2]+fwd[2]*kAimWall};
+        wallAhead=!h.extend && CastRay(pos,nosePt)>=0.0f;
+        const float seen=CastRay(pos,lead);
+        hidden=seen>=0.0f && seen<dist-kLosSlack;
+    }
+
     // The wanted horizontal velocity and height.
     const float range=GunRange(v);
+    const float aimRange=range<kRunAim ? range : kRunAim;
     float want[3]={0,0,0},height=pos[1],off=0.0f;
     const float rest[3]={0,0,0};
     if(land) {
@@ -601,7 +695,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         off=Dist2(pos,spot);
         height=player.pos[1]-10.0f;   // below the ground: it descends until it touches down
     } else if(engage) {
-        off=Engage(h,pos,aim,range,dipWant,wing,follow,want,&height);
+        off=Engage(h,pos,aim,dist<aimRange ? dipWant : 0.0f,wallAhead,wing,follow,ms,want,&height);
     } else if(follow) {
         off=Formation(h,pos,fwd,flight,ms,want,&height);
     } else {
@@ -609,19 +703,11 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
         off=Dist2(pos,h.hold);height=h.hold[1];
     }
     if(!land)Separate(h,pos,want,ms);
-    bool hidden=false,wallAhead=false;
-    if(engage && cfg.heliAvoid && rayOk) {
-        const float nosePt[3]={pos[0]+fwd[0]*kAimWall,pos[1],pos[2]+fwd[2]*kAimWall};
-        wallAhead=CastRay(pos,nosePt)>=0.0f;
-        if(wallAhead)h.back=true;
-        const float seen=CastRay(pos,lead);
-        hidden=seen>=0.0f && seen<dist-kLosSlack;
-    }
     h.losLift=Clamp(h.losLift+(hidden || wallAhead ? kLosClimb : -kLosSink)*dt,0.0f,kLosMax);
     if(engage)height+=h.losLift;
     const Avoidance avoid=Avoid(pos,h.vel,want,&height,land);
     if(follow || engage)std::memcpy(h.hold,pos,12);
-    const bool aiming=engage && !h.back && dist<range;
+    const bool aiming=engage && !h.extend && dist<aimRange;
 
     // Horizontal: the stick for the wanted velocity (full stick flies kTopSpeed) plus heliBrakeGain per
     // m/s it is off, on the heading rows.
@@ -649,10 +735,10 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(land && grounded){throttle=0.0f;stickF=stickL=0.0f;}
     else if(ms-h.groundAt<kLiftOffMs){stickF=stickL=0.0f;}
 
-    // Yaw: engaged, onto the target (with its bearing rate fed forward) unless transiting back from
-    // far off; else the way it flies, or the player when slow.
+    // Yaw: running in, onto the target (with its bearing rate fed forward); else the way it flies (so
+    // it banks round), or the player when slow.
     float face[3]={0,0,0},faceRate=0.0f;
-    if(engage && !(h.back && off>kTransit)){face[0]=lead[0]-pos[0];face[2]=lead[2]-pos[2];faceRate=losRate;}
+    if(engage && !h.extend){face[0]=lead[0]-pos[0];face[2]=lead[2]-pos[2];faceRate=losRate;}
     else if(std::sqrt(Dot2(want,want))>kFaceSpeed){face[0]=want[0];face[2]=want[2];}
     else if(follow){face[0]=player.pos[0]-pos[0];face[2]=player.pos[2]-pos[2];}
     float yaw=0.0f,offYaw=kPi;
@@ -665,21 +751,41 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     Put<float>(v,kInLateral,stickL);Put<float>(v,kInForward,stickF);Put<float>(v,kInThrottle,throttle);
     Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
 
-    // Fire: the nose within the cone of the lead point (heliFireCone, wider up close so kHitRadius at
-    // the target still counts), the lead point within the guns' reach, and not through the player.
-    // The missile homes, so it goes with a rough aim and farther.
-    bool gun=false,missile=false;float miss=180.0f,cone=cfg.heliFireCone;
-    if(engage && dist>1.0f) {
-        const float d[3]={lead[0]-pos[0],lead[1]-pos[1],lead[2]-pos[2]};
-        miss=std::acos(Clamp((d[0]*nose[0]+d[1]*nose[1]+d[2]*nose[2])/dist,-1.0f,1.0f))*180.0f/kPi;
-        const float wide=std::atan(kHitRadius/dist)*180.0f/kPi;
-        if(wide>cone)cone=wide;
+    // Fire: the nose within the cone of the gun's lead point (heliFireCone, wider up close so kHitRadius
+    // at the target still counts), that within the guns' reach, and not through the player; the 409's
+    // turret gun also at anything below within kTurretReach. The missile homes, so it goes with a rough
+    // aim and farther; the 409's rockets fly straight, so they want a tight one. Guns fire in bursts.
+    const auto missOf=[&](const float* p,float* along) noexcept {
+        const float d[3]={p[0]-pos[0],p[1]-pos[1],p[2]-pos[2]};
+        *along=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        if(*along<1.0f)return 0.0f;
+        return std::acos(Clamp((d[0]*nose[0]+d[1]*nose[1]+d[2]*nose[2])/ *along,-1.0f,1.0f))*180.0f/kPi;
+    };
+    const auto coneAt=[](float base,float d) noexcept {
+        const float wide=d>1.0f ? std::atan(kHitRadius/d)*180.0f/kPi : 90.0f;
+        return wide>base ? wide : base;
+    };
+    bool gun=false,missile=false;float miss=180.0f,gunDist=0.0f,cone=cfg.heliFireCone;
+    if(engage) {
+        miss=missOf(gunLead,&gunDist);
+        cone=coneAt(cfg.heliFireCone,gunDist);
     }
-    if(engage && cfg.heliFire && !grounded && !land && !PlayerInLine(pos,lead)) {
-        gun=miss<cone && dist<range && !hidden;
-        missile=cfg.heliMissile && !hidden && miss<kMissileCone && dist>kMissileMin && dist<cfg.heliRange && ms-h.missileAt>cfg.heliMissileMs;
-        if(missile)h.missileAt=ms;
-    }
+    if(engage && cfg.heliFire && !grounded && !land && !hidden && !PlayerInLine(pos,lead)) {
+        const bool turret=is409 && gunDist<kTurretReach && aim[1]<pos[1];
+        gun=(miss<cone && gunDist<range) || turret;
+        if(gun && !h.firing){h.firing=true;h.burstAt=ms;}
+        if(h.firing && ms-h.burstAt>kBurstMs){h.firing=false;h.restUntil=ms+kBurstRest;}
+        if(!gun)h.firing=false;
+        if(ms<h.restUntil)gun=false;
+        if(is409 && arms.rockets) {
+            float rocketDist=0.0f;
+            const float rocketMiss=missOf(lead,&rocketDist);
+            missile=rocketMiss<coneAt(kRocketCone,rocketDist) && rocketDist<kRocketRange;
+        } else {
+            missile=cfg.heliMissile && miss<kMissileCone && dist>kMissileMin && dist<cfg.heliRange && ms-h.missileAt>cfg.heliMissileMs;
+            if(missile)h.missileAt=ms;
+        }
+    } else h.firing=false;
     if(At<const unsigned char*>(v,0)!=image+kHeli410) {   // 410 fires through per-gunner-seat blocks
         v[kFireGun]=gun;v[kFireMissile]=missile;
     }
@@ -687,9 +793,9 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     if(cfg.debug && ms-h.loggedAt>1000) {
         h.loggedAt=ms;
         const float speed=std::sqrt(Dot2(h.vel,h.vel)),aimedLead=Dist2(aim,lead);
-        Log("HELI v=%p %s flight=%d.%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
-            v,land ? "land" : engage ? (h.back ? "back" : aiming ? "aim" : "wait") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
-            flight.group,wing,pos[1],height,h.vel[1],throttle,h.hover,rotor,
+        Log("HELI v=%p %s flight=%d.%d ammo=%d/%d/%d y=%.1f goal=%.1f vy=%.2f thr=%.3f hover=%.3f rotor=%.3f fwd=%.2f lat=%.2f yaw=%.2f rate=%.0fdeg/s sign=%d%s votes=%d dGoal=%.0f ground=%d target=%p dist=%.0f off=%.0fdeg miss=%.1fdeg pitch=%.0fdeg gun=%d msl=%d spd=%.1f want=%.1f dipWant=%.0fdeg cone=%.1fdeg lead=%.1f tv=%.1f los=%.0fdeg/s ahead=%.0f clear=%.0f roof=%.0f any=%.0f/%X lift=%.0f%s%s",
+            v,land ? "land" : engage ? (h.extend ? "extend" : aiming ? "aim" : "run") : follow ? (ms-stillAt<kMovingMs ? "escort" : "orbit") : "hold",
+            flight.group,wing,arms.ammo[0],arms.ammo[1],arms.ammo[2],pos[1],height,h.vel[1],throttle,h.hover,rotor,
             stickF,stickL,yaw,h.yawRate*180.0f/kPi,h.yawSign,h.yawLocked ? "(locked)" : "",h.votes,off,grounded,
             engage ? h.target : nullptr,dist,offYaw*180.0f/kPi,miss,-dip*180.0f/kPi,gun,missile,
             speed,std::sqrt(Dot2(want,want)),dipWant*180.0f/kPi,cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),losRate*180.0f/kPi,avoid.ahead,avoid.clear,avoid.roof,avoid.anyRoof,avoid.anyFlags,h.losLift,hidden ? " hidden" : "",wallAhead ? " wall" : "");

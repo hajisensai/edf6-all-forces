@@ -25,7 +25,7 @@ struct Config {
     bool heliFire=true;
     float heliStandoff=80.0f;  // unused since the attack runs (kept so old ini files still load)
     bool heliAvoid=true;       // helis steer and climb clear of terrain and buildings (map rays)
-    float heliFireHeight=12.0f;// engaged, it hovers this far above the target (the lower, the less nose dip)
+    float heliFireHeight=25.0f;// engaged, its strafing runs fly this far above the target
     float heliFireCone=4.0f;   // degrees between the nose (pitch included) and the target it still fires at
     bool heliMissile=true;
     DWORD heliMissileMs=4000;  // minimum gap between missiles
