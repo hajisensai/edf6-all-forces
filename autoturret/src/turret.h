@@ -152,6 +152,7 @@ struct Track {
     float axis[2];         // last yaw/pitch angle
     float in[2];           // last input written
     float k[2];            // learned rad per frame per unit input
+    bool player;           // a player aims with it: never given up for an NPC's seat (TrackFor)
     bool dragging;         // the rider is aiming by hand
     const void* dropped;   // target dragged away from
     ULONGLONG droppedUntil;
@@ -172,7 +173,10 @@ struct Track {
 };
 // The track of `vehicle`'s `seat`, made on first use; nullptr when every track is held by a live vehicle
 // seen within the last kTrackIdleMs (logged), so that seat is left stock this frame.
-Track* TrackFor(const unsigned char* vehicle,unsigned seat) noexcept;
+// The track of `vehicle`'s seat `seat`, made when there is none. `player`: a player aims from that seat; with
+// the table full, a player's seat takes the least recently refreshed NPC seat's track (every NPC tank refreshes
+// its own each frame, so idle ones alone never make room), an NPC's seat gets none.
+Track* TrackFor(const unsigned char* vehicle,unsigned seat,bool player) noexcept;
 
 // A gun's round as the aim sees it: muzzle speed (m/frame), the drop it picks up along the
 // vehicle's down axis (m/frame^2), and whether the gun hunts ground targets first.

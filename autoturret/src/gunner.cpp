@@ -79,18 +79,26 @@ bool RemoteUser(const void* user) noexcept {
 // An empty gunner seat's gun is operated by the first seat (the driver's first) whose operator this
 // machine runs: a remote driver's machine would fire it there, and an unmodded one never does, so a
 // local NPC or player aboard takes it instead.
+// The first seat's operator this machine runs, for an empty seat's `weapon`; nullptr with none. Under __try:
+// the seats are read between Readable's look and the read (its cached answer may be a frame old).
+const void* LocalOperator(UserFn next,void* iface,const void* weapon) noexcept {
+    __try {
+        const auto vehicle=static_cast<unsigned char*>(iface)-kUserIface;
+        const unsigned count=edf::SeatCount(vehicle);
+        for(unsigned s=0;s<count;++s) {
+            const auto gun=SeatGun(edf::SeatAt(vehicle,s));
+            if(!gun || gun==weapon)continue;
+            const auto other=next(iface,gun);
+            if(other && !RemoteUser(other))return other;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return nullptr;
+}
+
 template<int I> const void* __fastcall WeaponUser(void* iface,const void* weapon) {
     const auto user=nextUser[I](iface,weapon);
     if(user || !cfg.enabled || !cfg.gunnerAi)return user;
-    const auto vehicle=static_cast<unsigned char*>(iface)-kUserIface;
-    const unsigned count=edf::SeatCount(vehicle);
-    for(unsigned s=0;s<count;++s) {
-        const auto gun=SeatGun(edf::SeatAt(vehicle,s));
-        if(!gun || gun==weapon)continue;
-        const auto other=nextUser[I](iface,gun);
-        if(other && !RemoteUser(other))return other;
-    }
-    return nullptr;
+    return LocalOperator(nextUser[I],iface,weapon);
 }
 
 enum class Crew { none, ai, player, remote };   // remote: a rider another machine runs
@@ -452,7 +460,7 @@ void Gunners(unsigned char* vehicle) noexcept {
     const float down=Down(vehicle);
     for(unsigned s=1;s<count;++s) {
         if(!gunner[s] || !Wanted(crew[s]))continue;   // an empty gunner seat is wanted: the AI crews it
-        Track* track=TrackFor(vehicle,s);
+        Track* track=TrackFor(vehicle,s,crew[s]==Crew::player);
         if(!track)continue;
         SteerSeat(vehicle,s,crew[s]==Crew::player ? Crew::player : Crew::ai,down,nearby,*track);
         if(crew[s]!=Crew::player)FireMissiles(vehicle,s,*track);

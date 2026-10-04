@@ -144,19 +144,26 @@ bool Same(const void* obj,const void* ctrl) noexcept {
     return Readable(ctrl,edf::kCtrlUses+4) && At<std::int32_t>(ctrl,edf::kCtrlUses)>0;
 }
 
-Track* TrackFor(const unsigned char* vehicle,unsigned seat) noexcept {
+Track* TrackFor(const unsigned char* vehicle,unsigned seat,bool player) noexcept {
     const auto ctrl=At<const void*>(vehicle,kSelfCtrl);
     const auto now=GetTickCount64();
     Track* free=nullptr;
+    Track* npc=nullptr;   // the least recently refreshed NPC seat's: what a player's seat may take
     for(auto& t:tracks) {
-        if(t.vehicle==vehicle && t.ctrl==ctrl && t.seat==seat)return &t;
+        if(t.vehicle==vehicle && t.ctrl==ctrl && t.seat==seat){t.player=player;return &t;}
         if(!free && (!t.vehicle || now-t.at>kTrackIdleMs || !Same(t.vehicle,t.ctrl)))free=&t;
+        if(!t.player && (!npc || t.at<npc->at))npc=&t;
+    }
+    if(!free && player && npc) {
+        Log("TRACK all %d tracks in use: the player's seat (v=%p seat=%u) takes NPC v=%p seat=%u's",kMaxTracks,vehicle,seat,
+            npc->vehicle,npc->seat);
+        free=npc;
     }
     if(!free) {
         if(!tracksFullLogged){tracksFullLogged=true;Log("TRACK all %d tracks in use: v=%p seat=%u left stock",kMaxTracks,vehicle,seat);}
         return nullptr;
     }
-    *free=Track{};free->vehicle=vehicle;free->ctrl=ctrl;free->seat=seat;free->at=now;
+    *free=Track{};free->vehicle=vehicle;free->ctrl=ctrl;free->seat=seat;free->at=now;free->player=player;
     return free;
 }
 
@@ -587,7 +594,7 @@ float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,
 // Aims the ridden flak's turret (seat 0); returns the flight time (frames) to the aim point, the time fuse
 // its rounds get, or -1 (no target, aimed by hand, out of reach: the rounds burst at max range).
 float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
-    Track* track=TrackFor(vehicle,0);
+    Track* track=TrackFor(vehicle,0,true);   // the flak is aimed only for its rider (hasInput)
     if(!track){diag.stop="no-track";return -1.0f;}
     const auto now=GetTickCount64();
     bool armed=false;float world[3]{},local[3]{};Shot shot{};
