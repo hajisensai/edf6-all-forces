@@ -776,6 +776,7 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noex
         want[i]=Clamp(tilt-side*yaw,-kThrustBack,0.0f);
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
+    CarrierFlames(v,j.surf.rec,Clamp(Len(j.thrust)/kG,0.5f,1.0f),ms);   // the stock Booster flame on each nozzle
     if(cfg.debug && ms-j.thrustLogAt>1000) {
         j.thrustLogAt=ms;
         Log("JET v=%p thrusters: thrust %.1f m/s^2 (up %.1f, fwd %.1f) tilt %.0f deg, yaw %.0f deg, at F %.0f/%.0f B %.0f/%.0f",v,
@@ -2133,7 +2134,7 @@ bool InstallJets() noexcept {
         if(current!=image+kPhysics506)Log("JET physics: chaining onto %p (another plugin)",current);
         nextPhysics=reinterpret_cast<PhysicsFn>(current);
         physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
-        if(physicsOk)InstallJetProps();
+        if(physicsOk){InstallJetProps();InstallBoosters();}
         spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
         bayOk=spawnOk;

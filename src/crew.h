@@ -158,6 +158,8 @@ void JetReap(const void* self) noexcept;           // deletes withdrawn jets; ca
 void HeliReap(const void* self) noexcept;          // ...and called helis that have left (heli.cpp)
 bool InstallJets() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
+bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
+void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
