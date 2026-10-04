@@ -317,6 +317,7 @@ void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's 
 // mouse; aiming: in the air the mouse's aim steers it, `aim` the point it aims at, `path` the point it flies at.
 struct PlayerJetReadout {
     float speed,throttle,clear,climb,hp,hpMax,load;
+    float rotate;                // m/s: the speed it can lift off from (the kind's rotate), for the takeoff cue
     bool air,stall,ground,keys,aiming;
     float aim[3],path[3];
     int stores,store;

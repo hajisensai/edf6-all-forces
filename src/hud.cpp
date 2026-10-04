@@ -524,7 +524,13 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Format(info,L"SPD %d km/h    ALT%ls %d m    %ls %d m/s    HP %d%%",static_cast<int>(std::lround(j.speed*3.6f)),
            j.ground ? L"" : L"*",static_cast<int>(std::lround(alt)),j.climb>=0.0f ? L"UP" : L"DOWN",
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
-    Format(thr,L"THROTTLE %d%%    G %.1f%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"");
+    // On the takeoff roll: the speed it may lift off from coming up, then the cue to pull up (the user, 2026-10-05).
+    const int rotateKmh=static_cast<int>(std::lround(j.rotate*3.6f));
+    const bool rolling=j.ground && j.rotate>0.0f && j.speed>1.0f,rotate=rolling && j.speed>=j.rotate;
+    wchar_t cue[64]=L"";
+    if(rotate)std::swprintf(cue,64,L"    ROTATE: PULL UP (W / SPACE)");
+    else if(rolling && j.speed>=j.rotate*0.7f)std::swprintf(cue,64,L"    ROTATE AT %d km/h",rotateKmh);
+    Format(thr,L"THROTTLE %d%%    G %.1f%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"",cue);
     StoresLine(arms,j);
     if(j.keys) {
         wchar_t boost[32],brake[32],swap[32];
@@ -537,17 +543,18 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
             Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target",boost,brake,swap,target);
         } else {
             Format(keys,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",boost,brake);
-            Format(keys2,L"W / SPACE: pull up to take off (from 270 km/h)");
+            Format(keys2,L"W / SPACE: pull up to take off (from %d km/h)",rotateKmh);
         }
     } else if(j.air) {
         Format(keys,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways");
         Format(keys2,L"PITCH, TURN: right stick    LB: switch weapon    X: next target");
     } else {
         Format(keys,L"THROTTLE: forward / ascend = up, back = down    TURN: sticks");
-        Format(keys2,L"TAKE OFF: pull the right stick back (from 270 km/h)");
+        Format(keys2,L"TAKE OFF: pull the right stick back (from %d km/h)",rotateKmh);
     }
     info.scale=kTitleScale;info.rgba=kWhite;
-    thr.scale=kLineScale;thr.rgba=j.stall ? kRed : kCyan;
+    // The rotate cue blinks green (4 Hz) over the throttle line's cyan.
+    thr.scale=kLineScale;thr.rgba=j.stall ? kRed : rotate && (GetTickCount64()/125)%2==0 ? kGreen : rotate ? kYellow : kCyan;
     arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kWhite;
     keys.scale=keys2.scale=kLineScale*0.85f;keys.rgba=keys2.rgba=kWhite;
     info.w=info.h=thr.w=thr.h=arms.w=arms.h=keys.w=keys.h=keys2.w=keys2.h=0.0f;
