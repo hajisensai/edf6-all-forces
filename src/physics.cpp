@@ -191,7 +191,7 @@ void DumpTrack(const Track& t) noexcept {
     }
 }
 
-std::uintptr_t FinalLinProbe(void* body,const float* v) noexcept {
+void RecordLin(void* body,const float* v) noexcept {
     __try {
         if(body && v) {
             Track& t=TrackOf(body);
@@ -214,7 +214,6 @@ std::uintptr_t FinalLinProbe(void* body,const float* v) noexcept {
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
-    return reinterpret_cast<SetVecFn>(image+kSetLinVel)(body,v);
 }
 
 std::uintptr_t FinalAngProbe(void* body,const float* w) noexcept {
@@ -225,10 +224,80 @@ std::uintptr_t FinalAngProbe(void* body,const float* w) noexcept {
     return reinterpret_cast<SetVecFn>(image+kSetAngVel)(body,w);
 }
 
+// Car/tank frame (0x674663): when the chassis has come to rest the game calls setBodyQuality (hknp world
+// iface slot 41, 0xE51280: iface, body id, quality, extra body flags, skip-cache-rebuild) with quality 1
+// at 0x6746A1 -- `mov r8d,1` at 0x674682 -- and no vehicle code ever sets it back. Library entry 1
+// (0xE13C05, flags 0x25808) is the cheap debris preset: no welding, and none of the vehicle's contact
+// handling. So every chassis that has once stood still drives on as debris, and the launch probe saw
+// what that does on uneven ground: one step ends 0.4 m inside the terrain and the push-out throws it up.
+// Two parts, both VEHICLE (9): the rest path asks for it instead of 1, and the moving path (the final
+// setLinVel at 0x6746B5, right before the step) restores it on a chassis still holding another quality
+// -- one spawned from model data (CarBase/TankBase, car_base_body_name) that never rested, or one a
+// previous plugin version left as debris. setBodyQuality returns early when the value is unchanged.
+constexpr std::size_t kRestQualityCheckAt=0x67467B;
+constexpr unsigned char kRestQualityCode[]={0x48,0x8B,0x97,0x98,0x16,0x00,0x00,   // mov rdx,[rdi+0x1698]
+                                            0x41,0xB8,0x01,0x00,0x00,0x00};       // mov r8d,1
+constexpr std::size_t kRestQualityImmediate=0x674684;
+constexpr std::size_t kSetQualitySlot=41,kSetBodyQuality=0xE51280;
+constexpr std::size_t kWrapperId=0xF0,kWrapperWorld=0x100,kWorldOf=0x58,kWorldIface=0x18,kIfaceBodies=0x20;
+constexpr std::size_t kBodyQuality=0x89;
+
+using SetQualityFn=void(*)(void*,std::uint32_t,std::uint8_t,std::uint32_t,std::uint32_t);
+bool keepChassisQuality;
+bool probeChassisVelocity;
+std::atomic<int> qualityLogs{0};
+
+void KeepChassisQuality(unsigned char* wrapper) noexcept {
+    __try {
+        if(!wrapper)return;
+        const auto* worldWrapper=At<unsigned char*>(wrapper,kWrapperWorld);
+        if(!worldWrapper)return;
+        auto* world=At<unsigned char*>(worldWrapper,kWorldOf);
+        if(!world)return;
+        unsigned char* const iface=world+kWorldIface;
+        const auto vtable=At<void**>(iface,0);
+        if(!vtable || vtable[kSetQualitySlot]!=image+kSetBodyQuality)return;
+        const std::uint32_t id=At<std::uint32_t>(wrapper,kWrapperId);
+        const auto* body=At<unsigned char*>(iface,kIfaceBodies)+std::size_t{id&0xFFFFFF}*kBodyStride;
+        if(At<std::uint32_t>(body,0x50)!=id)return;
+        if((At<std::uint32_t>(body,0x54)&kBodyFlagsMotionMask)!=kBodyFlagDynamic)return;
+        const std::uint8_t quality=At<std::uint8_t>(body,kBodyQuality);
+        if(quality==kQualityVehicle)return;
+        if(qualityLogs.fetch_add(1,std::memory_order_relaxed)<32)
+            Log("PHYSICS chassis body %08X quality %u -> %u",id,quality,kQualityVehicle);
+        reinterpret_cast<SetQualityFn>(image+kSetBodyQuality)(iface,id,kQualityVehicle,0,0);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
+std::uintptr_t ChassisSetLinVel(void* body,const float* v) noexcept {
+    if(keepChassisQuality)KeepChassisQuality(static_cast<unsigned char*>(body));
+    if(probeChassisVelocity)RecordLin(body,v);
+    return reinterpret_cast<SetVecFn>(image+kSetLinVel)(body,v);
+}
+
+bool RedirectChassisLinVel() noexcept {
+    static bool redirected=false;
+    bool changed=false;
+    if(!redirected)redirected=RedirectCall(image+kFinalLinSite,image+kSetLinVel,
+                                           reinterpret_cast<void*>(&ChassisSetLinVel),changed);
+    return redirected;
+}
+
+bool KeepVehicleQuality() noexcept {
+    if(!RedirectChassisLinVel())return false;
+    keepChassisQuality=true;
+    PatchCode(kRestQualityCheckAt,kRestQualityCode,sizeof(kRestQualityCode),
+              kRestQualityImmediate,&kQualityVehicle,1);
+    return true;
+}
+
 int ProbeVehicleVelocity() noexcept {
     bool changed=false;
     int done=0;
-    if(RedirectCall(image+kFinalLinSite,image+kSetLinVel,reinterpret_cast<void*>(&FinalLinProbe),changed))++done;
+    if(RedirectChassisLinVel()) {
+        probeChassisVelocity=true;
+        ++done;
+    }
     if(RedirectCall(image+kFinalAngSite,image+kSetAngVel,reinterpret_cast<void*>(&FinalAngProbe),changed))++done;
     return done;
 }
@@ -236,10 +305,11 @@ int ProbeVehicleVelocity() noexcept {
 
 bool InstallPhysics() noexcept {
     const bool welded=cfg.vehicleWelding && WeldVehicleChassis();
+    const bool chassis=cfg.vehicleWelding && KeepVehicleQuality();
     const bool capped=cfg.giantContactCap && CapGiantContact();
     if(cfg.debug)Log("PHYSICS velocity probes=%d",ProbeVehicleVelocity());
-    Log("PHYSICS vehicleWelding=%d giantContactCap=%d (config %d/%d)",welded,capped,
+    Log("PHYSICS vehicleWelding heli=%d chassis=%d giantContactCap=%d (config %d/%d)",welded,chassis,capped,
         cfg.vehicleWelding,cfg.giantContactCap);
-    return welded || capped;
+    return welded || chassis || capped;
 }
 }  // namespace crew
