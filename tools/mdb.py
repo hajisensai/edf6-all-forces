@@ -21,7 +21,9 @@ import struct
 import sys
 from dataclasses import dataclass, field
 
-GAME = r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'testrange', 'lib'))
+import gamedir  # noqa: E402
+GAME = gamedir.find_or_dev()
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # --------------------------------------------------------------------------------------------- CMPL

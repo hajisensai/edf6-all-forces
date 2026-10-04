@@ -16,3 +16,4 @@ __pycache__/
 __pycache__/
 testrange/testrange.json
 testrange/runs/
+release/

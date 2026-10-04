@@ -46,7 +46,9 @@ from mdb import (Bone, Mat, Mdb, Mesh, Object, bind_world, cmpl_compress, cmpl_d
 import mdb_jet  # noqa: E402
 
 Box = tuple[list[float], list[float]]          # (min xyz, max xyz)
-GAME_DIR = r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'testrange', 'lib'))
+import gamedir  # noqa: E402
+GAME_DIR = gamedir.find_or_dev()
 
 
 @dataclass(frozen=True)

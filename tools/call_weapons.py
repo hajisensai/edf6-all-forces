@@ -23,8 +23,8 @@ other row is checked unchanged before anything is written.
 
 install backs up every Mods file it overwrites the first time into Mods/.edf6vc_backup/ and records what it
 wrote in Mods/.edf6vc_calls.json. uninstall cuts only our rows out of the CURRENT shared files (never rolls
-back to the backup: other mods' later edits stay), writes the texts back, and deletes WEAPONTABLE.SGO only
-when we created it and what is left is byte-identical to the stock one.
+back to the backup: other mods' later edits stay) and writes them back, except that a file we created whose
+remainder is byte-identical to the stock one is deleted instead (nobody else's edits are left in it).
 
 A save that still has one of these weapons equipped crashes the game at the main menu once its row is
 gone (the menu looks the weapon up by row index past the table end; see edf6-jaeger tools/install.py):
@@ -568,11 +568,11 @@ def uninstall(game_root: str, unequipped: bool, force: bool) -> None:
         shared = _without_our_rows(game_root, at, n)
     for rel, data in shared.items():
         path = os.path.join(mods, *rel.split('/'))
-        if rel == TABLE and rel in manifest['created'] and data == stock(game_root, rel):
+        if rel in manifest['created'] and data == stock(game_root, rel):
             os.remove(path)
             print(f'removed {rel} (back to stock)')
             continue
-        _write(path, data)  # the texts are always written back: other tools edit them too
+        _write(path, data)  # other tools' rows stay
         print(f'removed our rows from {rel}')
     for call in CALLS:
         rel = sgo_file(call)

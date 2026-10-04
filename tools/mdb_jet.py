@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 from mdb import (HERE, Bone, Mat, Mdb, Mesh, Object, VElem, _load, bind_world, cmpl_compress, cmpl_decompress,
                  depth_of, ident, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write, read_elem)
+import gamedir  # noqa: E402  (testrange/lib, put on sys.path by mdb)
 
 Vec = tuple[float, float, float]
 
@@ -442,7 +443,7 @@ def main(argv: list[str]) -> int:
     args = [a for a in argv if not a.startswith('--')]
     outdir = args[0] if args else os.path.join(HERE, '..', 'build', 'jetmodel')
     outdir = os.path.abspath(outdir)
-    game_dir = os.path.abspath(r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6').lower()
+    game_dir = os.path.abspath(gamedir.find_or_dev()).lower()
     assert not outdir.lower().startswith(game_dir), 'refusing to write into the game directory'
     os.makedirs(outdir, exist_ok=True)
     arc, data, md, surfaces, stats, checks, raw_size = jet_archive()

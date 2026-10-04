@@ -21,7 +21,8 @@ import cpk  # noqa: E402
 import crilayla  # noqa: E402
 import rmpa  # noqa: E402
 
-DEFAULT_GAME = r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
+import gamedir  # noqa: E402
+DEFAULT_GAME = gamedir.find_or_dev()
 SOURCE = 'M045'            # the plain whose map and points the range uses
 MAP = 'app:/Map/ig_Heigen601.mac'
 WEATHER = 'cloudy'
