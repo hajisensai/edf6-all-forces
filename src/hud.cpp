@@ -510,7 +510,8 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
         wchar_t boost[32],brake[32],swap[32];
         KeyName(Cfg().playerJetBoostKey,boost,32);KeyName(Cfg().playerJetBrakeKey,brake,32);KeyName(Cfg().playerJetSwitchKey,swap,32);
         if(j.air) {
-            Format(keys,L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll");
+            Format(keys,Cfg().playerJetMouseFlight ? L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll"
+                                                    : L"W / SPACE: pull up    S: push down    A / D: roll    (let go: wings level)");
             Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon",boost,brake,swap);
         } else {
             Format(keys,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",boost,brake);

@@ -73,6 +73,7 @@ struct Config {
     int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
     int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
+    bool playerJetMouseFlight=false;// ...the mouse's aim steers the plane (off: the keys fly it alone, the mouse is the camera's)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound

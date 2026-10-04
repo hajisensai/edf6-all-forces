@@ -201,6 +201,7 @@ void LoadConfig() noexcept {
     n.playerJetBrakeKey=ReadInt(L"PlayerJetBrakeKey",static_cast<DWORD>(n.playerJetBrakeKey));
     n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
+    n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);

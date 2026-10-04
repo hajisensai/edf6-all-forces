@@ -316,6 +316,9 @@ Stick ReadStick(const unsigned char* seat) noexcept {
     s.keys=At<unsigned char>(seat,kSeatPad)==0;
     s.switchStore=s.keys ? KeyDown(Cfg().playerJetSwitchKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     if(s.keys) {
+        // The mouse steers only with ini PlayerJetMouseFlight; off, the keys fly the plane alone (W / ascend pull, S
+        // push, A / D roll, let go it levels) and the mouse is left to the camera (the user's ask, 2026-10-04).
+        if(!Cfg().playerJetMouseFlight)s.turn=s.lx;
         s.aimX=Raw(seat,kSeatRX);
         s.aimY=Cfg().playerJetInvertPitch ? Raw(seat,kSeatRY) : -Raw(seat,kSeatRY);
         s.pitch=(s.ascend>0.5f || s.ly<-0.3f ? 1.0f : 0.0f)-(s.ly>0.3f ? 1.0f : 0.0f);
@@ -575,7 +578,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     const bool vertical=!Normalize(up) || std::fabs(dir[1])>kVertical;
     if(vertical){up[0]=0;up[1]=1;up[2]=0;}
     // The mouse's aim steers unless W / S / A / D fly it by hand (the aim then follows the nose).
-    const bool aiming=s.keys && std::fabs(s.pitch)<kRollDead && std::fabs(s.roll)<kRollDead;
+    const bool aiming=s.keys && Cfg().playerJetMouseFlight && std::fabs(s.pitch)<kRollDead && std::fabs(s.roll)<kRollDead;
     if(!aiming)Roll(j,v,s,dir,up,vertical,dt);
     const float wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;   // its mass over clean: the same wing lifts less g
@@ -813,7 +816,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             PlayerJetReadout r{};
             r.speed=Len(j.vel);r.throttle=j.throttle;r.clear=ground ? j.clear : pos[1];r.climb=j.climb;
             r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
-            r.air=air;r.stall=air && j.stall;r.ground=ground;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight;
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
