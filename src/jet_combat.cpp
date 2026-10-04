@@ -57,12 +57,28 @@ constexpr float kKeepScale=0.6f,kKeepTarget=100.0f;
 struct Pick { Jet* j; const float* pos; const float* anchor; float range; ULONGLONG ms; const void* best; float score,aim[3]; bool flyer; };
 // Whether `object` (lock point `p`) flies: its root more than kFlyerClear over the ground, or no ground
 // under it (see kFlyerProbe); one ray per object per kFlyerMemoMs, shared by every jet.
+// The memo: kFlyerSets sets of kFlyerWays, an object's set picked by a multiplicative hash of its address (the
+// game allocates objects at a fixed stride: their low address bits alone put whole waves of targets in one slot,
+// which then evicted each other on every look, re-probed and re-logged each frame); a new object takes its set's
+// least recently looked at way.
 struct FlyerMemo { const void* object; ULONGLONG at; bool flyer; };
-FlyerMemo flyerMemo[256]{};
+constexpr int kFlyerSets=128,kFlyerWays=4;
+FlyerMemo flyerMemo[kFlyerSets][kFlyerWays]{};
+FlyerMemo& FlyerSlot(const void* object,bool* first) noexcept {
+    const std::uint64_t h=static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(object))*0x9E3779B97F4A7C15ull;
+    FlyerMemo* const set=flyerMemo[h>>57];   // the top 7 bits: kFlyerSets
+    FlyerMemo* oldest=&set[0];
+    for(int i=0;i<kFlyerWays;++i) {
+        if(set[i].object==object){*first=false;return set[i];}
+        if(set[i].at<oldest->at)oldest=&set[i];
+    }
+    *first=true;
+    return *oldest;
+}
 bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
-    auto& m=flyerMemo[(reinterpret_cast<std::uintptr_t>(object)>>4)&255];
-    if(m.object==object && ms-m.at<kFlyerMemoMs)return m.flyer;
-    const bool first=m.object!=object;
+    bool first=false;
+    auto& m=FlyerSlot(object,&first);
+    if(!first && ms-m.at<kFlyerMemoMs)return m.flyer;
     const auto o=static_cast<const unsigned char*>(object);
     const float* root=Readable(o+kPosition,12) ? reinterpret_cast<const float*>(o+kPosition) : p;
     const float off[3]={root[0]-p[0],root[1]-p[1],root[2]-p[2]};
@@ -362,7 +378,7 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
 
 // A new mission: the flyer memo's objects were the last mission's.
 void ResetTargets() noexcept {
-    for(auto& m:flyerMemo)m=FlyerMemo{};
+    for(auto& set:flyerMemo)for(auto& m:set)m=FlyerMemo{};
 }
 }  // namespace jet
 }  // namespace crew

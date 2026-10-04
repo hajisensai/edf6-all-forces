@@ -54,13 +54,17 @@ struct Kind {
     float ram;           // m: the reach of what it rams (its size: the fighter's model is 16 m across, the strike jet's 25 m)
 };
 constexpr Kind kKinds[]={
-    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,20.0f, 6.0f,2.6f, 130.0f, 10.0f},
-    {"strike", 7202, 60.0f,70.0f,240.0f, 11.0f,15.0f, 5.0f,1.6f, 120.0f, 12.0f},
+    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,2.6f, 130.0f, 10.0f},
+    {"strike", 7202, 60.0f,70.0f,240.0f, 11.0f,26.0f, 5.0f,1.6f, 120.0f, 12.0f},
 };
 constexpr float kAutoRotate=20.0f;     // m/s over rotate: it lifts off without the stick...
 constexpr float kAutoThrottle=0.6f;    // ...with the throttle at least this open (not rolling out a landing)
 constexpr float kLiftOffClimb=5.0f;    // m/s up the moment it lifts off
-constexpr float kThrottleRate=0.6f;    // the throttle lever's travel a second
+constexpr float kThrottleRate=1.0f;    // the throttle lever's travel a second (closed to open in 1 s)
+// In the air the throttle is Ace Combat's: held forward (or ascend) it boosts to full, held back it closes and brakes,
+// let go it returns to kCruiseThrottle; on the ground it stays where the stick left it (taxi, hold, roll out).
+constexpr float kCruiseThrottle=0.55f;
+constexpr float kAirThrottleRate=1.5f;
 constexpr float kDeadZone=0.08f;
 constexpr float kTaxiTurn=0.8f;        // rad/s: the slowest taxi turn rate (the nose wheel), less fast
 constexpr float kTaxiFull=25.0f;       // ...from this ground speed on (rate times kTaxiFull / speed)
@@ -114,6 +118,9 @@ struct PJet {
     bool bodyFixed;
     Phase phase;
     float throttle;              // 0..1, the lever the stick moves
+    float turnIn,pitchIn;        // the stick's turn and pitch, smoothed (SmoothStick)
+    float throttleIn;            // the stick's throttle command last frame (-1, 0, +1): a change is logged
+    float clear,climb;           // its height over the floor and climb last frame (the cockpit readout)
     float vel[3],omega[3];
     float prev[3];               // its position last frame
     bool havePrev;
@@ -231,6 +238,18 @@ Stick ReadStick(const unsigned char* seat) noexcept {
     return s;
 }
 
+// The stick's turn and pitch through a first-order lag of kStickTau (game time). The mouse reaches the heli's
+// right stick as each frame's movement: a run of frames reads 1, 0, 0.6, 0, ... while the hand moves evenly, and
+// fed straight to the flight that shook the plane frame to frame. The lag turns it into the even command the
+// hand meant; a pad's stick, already even, only gains kStickTau of response time.
+constexpr float kStickTau=0.12f;
+void SmoothStick(PJet& j,Stick& s,float dt) noexcept {
+    const float k=1.0f-std::exp(-dt/kStickTau);
+    j.turnIn+=(s.turn-j.turnIn)*k;
+    j.pitchIn+=(s.pitch-j.pitchIn)*k;
+    s.turn=j.turnIn;s.pitch=j.pitchIn;
+}
+
 // The right of a path along `dir`, level: the way a right turn bends it (a heading angle a has its nose at
 // (sin a, 0, cos a) and a right turn lowers a; docs/player-jet-re.md §2).
 void RightOf(const float* dir,float* right) noexcept {
@@ -292,8 +311,17 @@ void Crash(PJet& j,unsigned char* v,float sink,float speed,bool banked,ULONGLONG
 }
 
 // The throttle lever, moved by the stick.
-void Lever(PJet& j,const Stick& s,float dt) noexcept {
-    j.throttle=Clamp(j.throttle+s.throttle*kThrottleRate*dt,0.0f,1.0f);
+void Lever(PJet& j,const unsigned char* v,const Stick& s,float dt) noexcept {
+    if(j.phase==Phase::air) {
+        const float want=s.throttle>0.0f ? 1.0f : s.throttle<0.0f ? 0.0f : kCruiseThrottle;
+        const float step=kAirThrottleRate*dt;
+        j.throttle=j.throttle<want ? (j.throttle+step<want ? j.throttle+step : want) : (j.throttle-step>want ? j.throttle-step : want);
+    } else j.throttle=Clamp(j.throttle+s.throttle*kThrottleRate*dt,0.0f,1.0f);
+    if(s.throttle!=j.throttleIn) {   // what the throttle keys read as, each time it changes: the controls' evidence
+        Log("PJET v=%p throttle %s (LY %.2f ascend %.2f): lever %.2f",v,s.throttle>0.0f ? "up" : s.throttle<0.0f ? "down" : "held",
+            s.ly,s.ascend,j.throttle);
+        j.throttleIn=s.throttle;
+    }
 }
 
 // On the ground: it rolls along its nose (level), turns at the nose wheel's rate, speeds up with the throttle
@@ -445,7 +473,7 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
 }
 
 void Leave(PJet& j,unsigned char* v) noexcept {
-    j.driven=false;j.active=false;
+    j.driven=false;j.active=false;j.turnIn=j.pitchIn=0.0f;
     if(j.insetSaved){Put<float>(v,kAreaInset,j.savedInset);j.insetSaved=false;}
     Log("PJET v=%p left (%s, %.0f m/s)",v,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel));
 }
@@ -483,14 +511,16 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     bool water=false;
     const float clear=Clear(pos,&water);
     if(!j.driven)Board(j,v,pos,clear);
-    const Stick s=ReadStick(SeatAt(v,0));
+    Stick s=ReadStick(SeatAt(v,0));
+    SmoothStick(j,s,dt);
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
     Blocked(j,v,pos,ms);
     if(v[kDead]){j.active=false;return;}
-    Lever(j,s,dt);
+    Lever(j,v,s,dt);
+    j.clear=clear;j.climb=j.vel[1];
     if(j.phase==Phase::air) {
         // In the water, though the surface probe saw none (off, unknown map): it touched it.
         if(wet && !water)Touch(j,v,Len(j.vel),true,ms);
@@ -529,6 +559,20 @@ bool PlayerJetMessage(unsigned char* v,std::uint32_t msg,void* data,MessageResto
     if(!j || !j->driven)return false;   // parked or not flown by the plugin: the stock ditching stands
     j->wetFrame=GameFrame();
     return true;
+}
+
+bool PlayerJetHud(PlayerJetReadout* out) noexcept {
+    if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;
+    for(const auto& j:jets) {
+        if(!j.ref || !j.driven || !j.kind)continue;
+        const unsigned char* v=j.vehicle;
+        __try {
+            if(!j.ref.Is(v) || v[kDead])continue;
+            *out=PlayerJetReadout{Len(j.vel),j.throttle,j.clear,j.climb,At<float>(v,kHp),At<float>(v,kHpMax),j.phase==Phase::air};
+            return true;
+        } __except(EXCEPTION_EXECUTE_HANDLER){continue;}
+    }
+    return false;
 }
 
 bool IsPlayerJet(const void* vehicle) noexcept {

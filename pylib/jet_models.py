@@ -237,6 +237,19 @@ def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  #
     return out
 
 
+def model_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game
+    """[centre, half extents] of the whole of a jet's model as the game draws it (wings, nose and tail): `file` one of
+    MODELS, None the bomber with elevon bones (mdb_jet.jet_archive, the stock bomber501.mdb's geometry). A player
+    jet's collision box (vcobjects.jet_sgo) is this, so it is the plane the player sees."""
+    if file is None:
+        md = mdb_jet.jet_archive(game.read('OBJECT', 'BOMBER501.MRAB'))[2]
+    else:
+        r = MODELS[file]
+        raw = game.read('OBJECT', r.archive)
+        md = make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r)
+    return rigid_box(bind_positions(md), None)
+
+
 # ------------------------------------------------------------------------------------------ checks
 
 def close(a: float, b: float) -> bool:

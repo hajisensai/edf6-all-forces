@@ -119,8 +119,7 @@ JETS: dict[str, Jet] = {
     # Player jets (src/playerjet.cpp kKinds): the fighter in the interceptor's dark bomber501_2 (16 m across),
     # the strike jet in the elevon bomber (25 m across); empty until the player boards them.
     'edf6tr_pjet_fighter_mission': Jet(7201.0, 1400.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
-                                       'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45)),
-                                       player=True, camera=(0.0, 6.0, -24.0)),
+                                       'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', player=True, camera=(0.0, 6.0, -24.0)),
     'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _ARMS, player=True, camera=(0.0, 8.0, -32.0)),
 }
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
@@ -180,6 +179,11 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if jet.model is not None:
         model, body, rigid = list(jet.model), jet.body, [list(x) for x in jet.rigid] if jet.rigid else None
         anchor = jet.anchor
+    if jet.player:
+        # The player sees the whole plane: its box is the model's (wings, nose and tail), measured, not a hand-kept
+        # fuselage box (an NPC jet's stays the fuselage: a formation's wings would catch on each other).
+        import jet_models
+        rigid = jet_models.model_box(game, jet.file)
     version, m = sgo.read(game.read('OBJECT', jet.stock + '.SGO'))
     at, want = JET_MAB_ROOT
     if m['animation_model'][2][at:at + 2 * len(want) + 2] != want.encode('utf-16le') + b'\0\0':

@@ -275,6 +275,9 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
+// The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
+struct PlayerJetReadout { float speed,throttle,clear,climb,hp,hpMax; bool air; };
+bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for

@@ -87,7 +87,7 @@ struct Work { ObjRef ref; ULONGLONG seen; bool logged; Data d; };
 Work work[kEntries]{};
 // The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
 // waits in `middle` (its index, kFresh while the draw has not taken it).
-struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; };
+struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -446,6 +446,43 @@ float Panel(void* drawer,void* ctx,Text* text,const CarrierPanel& p,int index,in
     return bottom;
 }
 
+// The cockpit readout of the jet the player flies (drawn whatever VehicleHud says): at the bottom centre, its
+// speed, height over the floor and climb, the throttle lever as a bar, its HP, and the controls.
+void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
+             int* at) noexcept {
+    if(*at+3>kMaxLines)return;
+    Line& info=lines[(*at)++];
+    Line& thr=lines[(*at)++];
+    Line& keys=lines[(*at)++];
+    Format(info,L"SPD %d km/h    ALT %d m    %ls %d m/s    HP %d%%",static_cast<int>(std::lround(j.speed*3.6f)),
+           static_cast<int>(std::lround(j.clear>9999.0f ? 9999.0f : j.clear)),j.climb>=0.0f ? L"UP" : L"DOWN",
+           static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
+    Format(thr,L"THROTTLE %d%%",static_cast<int>(std::lround(j.throttle*100.0f)));
+    Format(keys,j.air ? L"BOOST: forward / ascend    BRAKE: back    let go: cruise    PITCH, TURN: right stick / mouse"
+                      : L"THROTTLE: forward / ascend = up, back = down    TAKE OFF: pull up    TURN: right stick / mouse");
+    info.scale=kTitleScale;info.rgba=kWhite;
+    thr.scale=kLineScale;thr.rgba=kCyan;
+    keys.scale=kLineScale*0.85f;keys.rgba=kWhite;
+    info.w=info.h=thr.w=thr.h=keys.w=keys.h=0.0f;
+    if(text){MeasureAll(*text,&info,1);MeasureAll(*text,&thr,1);MeasureAll(*text,&keys,1);}
+    const float pad=8.0f*s,gap=5.0f*s,barW=320.0f*s,barH=10.0f*s;
+    float w=barW;
+    const Line* const parts[]={&info,&thr,&keys};
+    for(const Line* l:parts)w=l->w>w ? l->w : w;
+    w+=2.0f*pad;
+    const float lineH=info.h>0.0f ? info.h : 24.0f*s,smallH=thr.h>0.0f ? thr.h : 18.0f*s,keysH=keys.h>0.0f ? keys.h : 16.0f*s;
+    const float h=pad+lineH+gap+smallH+gap*0.5f+barH+gap+keysH+pad;
+    const float x0=(width-w)*0.5f,y0=height*0.80f-h;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kCyan);
+    float y=y0+pad;
+    info.x=(width-info.w)*0.5f;info.y=y;y+=lineH+gap;
+    thr.x=(width-barW)*0.5f;thr.y=y;y+=smallH+gap*0.5f;
+    Bar(drawer,ctx,(width-barW)*0.5f,y,barW,barH,j.throttle,j.throttle,kCyan,s);
+    y+=barH+gap;
+    keys.x=(width-keys.w)*0.5f;keys.y=y;
+}
+
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.
 constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
 void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
@@ -557,6 +594,7 @@ void HudPublish() noexcept {
     s.tick=GetTickCount64();
     std::memcpy(s.me,player.pos,sizeof(s.me));
     s.count=0;
+    s.cockpit=PlayerJetHud(&s.jet);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -577,8 +615,9 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         int at=0,shown=0;
         const ULONGLONG now=GetTickCount64();
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
+        const Snapshot& snap=Latest();
+        if(now-snap.tick<=kFreshMs && snap.cockpit)Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
         if(Cfg().vehicleHud) {
-            const Snapshot& snap=Latest();
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
             for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
