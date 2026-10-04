@@ -10,6 +10,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
 #include "crew.h"
+#include "body506.h"
 #include "memory.h"
 #include <cmath>
 
@@ -378,9 +379,8 @@ inline bool Flown(const Jet& o,ULONGLONG ms) noexcept { return o.ref && ms-o.see
 // --- jet_flight.cpp ---
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept;
 void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept;
-constexpr float kNoGround=-1e9f;
-float Clearance(const float* p) noexcept;
-float Ceiling() noexcept;
+// Clearance / Ceiling / the body part / the attitude command are the 506 body's shared tools (body506.h:
+// GroundClearance, CeilingY, FixBodyPart506, BodyAttitude), the same for the carrier and the player jets.
 void Toward(const float* pos,const float* goal,float* out) noexcept;
 void Level(const float* pos,const float* dir,float height,float* out) noexcept;
 bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept;
@@ -458,7 +458,6 @@ bool ModFileThere(const wchar_t* file) noexcept;   // Mods/OBJECT (next to the g
 // (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets).
 Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source) noexcept;
 void FarRender(Jet& j,unsigned char* v) noexcept;
-void FixBodyPart(unsigned char* v) noexcept;
 bool SpawnReady() noexcept;
 bool InstallSpawn() noexcept;
 bool InstallFarRender() noexcept;

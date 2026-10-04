@@ -337,7 +337,7 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
     const float* aim=j.t.aim;
     const float d=j.t.target ? std::sqrt((aim[0]-pos[0])*(aim[0]-pos[0])+(aim[1]-pos[1])*(aim[1]-pos[1])+(aim[2]-pos[2])*(aim[2]-pos[2])) : 0.0f;
     Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f real=%.0f vy=%.1f bank=%.0f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d",
-        v,KindOf(j).name,kModeNames[static_cast<int>(j.mode)],pos[1],clear,Ceiling(),Len(j.m.vel),speed,j.m.real,j.m.vel[1],
+        v,KindOf(j).name,kModeNames[static_cast<int>(j.mode)],pos[1],clear,CeilingY(),Len(j.m.vel),speed,j.m.real,j.m.vel[1],
         std::acos(Clamp(At<float>(v,kMatrix+0x14)/std::sqrt(1.0f-At<float>(v,kMatrix+0x24)*At<float>(v,kMatrix+0x24)+1e-6f),-1.0f,1.0f))*180.0f/kPi,
         j.t.target,j.t.flyer ? "(air)" : "",d,a.guns,a.missiles,hp,hpMax,
         static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile]);

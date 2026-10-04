@@ -73,11 +73,9 @@ const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 // tilt-rotor's yaw in the hover).
 constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f;
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
-// Metres of ground (terrain, buildings) under `p`, negative under the ground (the surface over it), or
-// kNoGround with none seen. Under the ground a ray down sees nothing, so a jet that went through it was once
-// taken for one over a void, Guard let it be, and it flew on under the map (2026-10-03: a fighter 5 s down to
-// -109, drones to -310); a ray from kUnderProbe over it finds the surface then.
-constexpr float kUnderProbe=600.0f,kGroundProbe=3000.0f;
+// The ground under a jet is body506's GroundClearance: under the ground a ray down sees nothing, so a jet that
+// went through it was once taken for one over a void, Guard let it be, and it flew on under the map
+// (2026-10-03: a fighter 5 s down to -109, drones to -310); its ray from above finds the surface then.
 
 // The walls: the world's four (fixed) and the ones learned this mission (see kWallSpan), where one was met and
 // its horizontal normal, into it.
@@ -199,38 +197,14 @@ void PitchBy(float aoa,float* nose,float* up) noexcept {
     for(int i=0;i<3;++i){const float n=nose[i],u=up[i];nose[i]=n*c+u*s;up[i]=u*c-n*s;}
 }
 
-// The angular velocity that turns the body's rows (right, up, forward at veh+0x60) onto `nose` and
-// `up`: sin(angle) * axis from the three rows, times kAttGain.
+// The angular velocity that turns the body's rows onto `nose` and `up` (body506 BodyAttitude), kAttGain,
+// at most the kind's roll rate.
 void Attitude(Jet& j,const Kind& k,const unsigned char* v,const float* nose,const float* up) noexcept {
-    const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    const float* r=m;const float* u=m+4;const float* f=m+8;
-    float rx[3];Cross(u,f,rx);
-    const float hand=Dot(rx,r)>=0.0f ? 1.0f : -1.0f;   // right = hand * up x forward
-    float right[3];Cross(up,nose,right);
-    for(int i=0;i<3;++i)right[i]*=hand;
-    float w[3]={0,0,0},c[3];
-    Cross(r,right,c);for(int i=0;i<3;++i)w[i]+=c[i];
-    Cross(u,up,c);for(int i=0;i<3;++i)w[i]+=c[i];
-    Cross(f,nose,c);for(int i=0;i<3;++i)w[i]+=c[i];
-    for(int i=0;i<3;++i)w[i]*=0.5f*kAttGain;
-    const float l=Len(w);
-    if(l>k.roll)for(int i=0;i<3;++i)w[i]*=k.roll/l;
-    std::memcpy(j.m.omega,w,12);
+    BodyAttitude(v,nose,up,kAttGain,k.roll,j.m.omega);
 }
 
-// The bone record named `name` in model instance `inst`, or nullptr.
-unsigned char* BoneRecord(const unsigned char* inst,const wchar_t* name) noexcept {
-    if(!Readable(inst,kInstBoneCount+4))return nullptr;
-    const auto count=At<std::int32_t>(inst,kInstBoneCount);
-    const auto bones=At<unsigned char*>(inst,kInstBones);
-    if(count<=0 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return nullptr;
-    for(std::int32_t i=0;i<count;++i) {
-        unsigned char* rec=bones+static_cast<std::size_t>(i)*kBoneStride;
-        const auto n=At<const wchar_t*>(rec,0);
-        if(n && Readable(n,32) && std::wcsncmp(n,name,16)==0)return rec;
-    }
-    return nullptr;
-}
+// The bone record named `name` in model instance `inst`, or nullptr (body506 BoneRecord506).
+unsigned char* BoneRecord(const unsigned char* inst,const wchar_t* name) noexcept { return BoneRecord506(inst,name); }
 
 // The `n` bones `names` of v's model (looked up again only when the model's bone array changes): true with all
 // of them there. `what` names them in the log.
@@ -305,22 +279,6 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
     Log("JET v=%p withdraws: %s",j.Vehicle(),why);
 }
 
-float Clearance(const float* p) noexcept {
-    // Down to kGroundProbe: a jet over a valley deeper than a short ray reaches must still see its floor, so
-    // that kNoGround means no terrain under it at all (off the map's edge), the only case groundY is for.
-    const float down[3]={p[0],p[1]-kGroundProbe,p[2]};
-    float hit[3];
-    if(MapRay(p,down,hit)>=0.0f)return p[1]-hit[1];
-    const float top[3]={p[0],p[1]+kUnderProbe,p[2]};
-    return MapRay(top,p,hit)>=0.0f ? p[1]-hit[1] : kNoGround;
-}
-
-float Ceiling() noexcept {
-    const auto p=At<const unsigned char*>(image,kCeiling);
-    if(!p || !Readable(p+kCeilingY,4))return 1e9f;
-    const float y=At<float>(p,kCeilingY);
-    return std::isfinite(y) ? y : 1e9f;
-}
 
 // The carrier's nacelles along the thrust Hover asked for (see kThrustBack). A nacelle's thrust, along its nose
 // (local +z) turned theta about X, is (0, -sin theta, cos theta) in the body: theta = atan2(-up, forward). Its
@@ -383,7 +341,7 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
     mo.blockedFor=0;
     float n[3]={dir[0]*s-moved[0]/dt,0.0f,dir[2]*s-moved[2]/dt};
     if(Len(n)<s*0.3f || !Normalize(n))return false;   // held from below or above: Guard's
-    const float clear=Clearance(pos);
+    const float clear=GroundClearance(pos);
     const bool jet=JetNear(j,pos,ms);
     if(!jet && (clear==kNoGround || clear>kWallGround))LearnWall(pos,n,ms);
     float slide[3]={dir[0],dir[1],dir[2]};
@@ -418,7 +376,7 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     for(const auto& w:learned)if(Holds(w,pos,ms))TurnOff(w,j,pos,r,want);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
-    const float here=Clearance(pos),there=Clearance(probe);
+    const float here=GroundClearance(pos),there=GroundClearance(probe);
     // Neither ray finding ground (past the map's terrain) left it no floor at all: an interceptor rolled over
     // there and flew on to -1100 (2026-10-04). It keeps the surface it last saw under it then.
     const float seen=j.m.groundSeen ? j.m.groundY : -1e9f;
@@ -434,7 +392,7 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
         const float need=Clamp((floorY+kMinAlt-bottom)/40.0f,0.3f,0.8f);
         if(want[1]<need){want[1]=need;Normalize(want);}
     }
-    const float top=Ceiling()-kCeilingGap;
+    const float top=CeilingY()-kCeilingGap;
     const float rising=pos[1]+(j.m.vel[1]>0.0f ? j.m.vel[1]*kLookAhead : 0.0f);
     if(rising>top && want[1]>-0.15f){want[1]=-0.15f;Normalize(want);}
 }
@@ -451,7 +409,7 @@ void ResetWalls() noexcept {
 //    jet standing on the ground stays put; terrain rising ahead is Guard's);
 //  - under the ground (Clearance found the surface above it: clear < 0; or no ground under it at all and
 //    below the surface last seen under it, off the map's edge) it climbs at kFloorClimb at least.
-// `clear` is Clearance(pos) (kNoGround: none found).
+// `clear` is GroundClearance(pos) (kNoGround: none found).
 constexpr float kFloorGap=1.0f,kFloorClimb=80.0f,kFloorSweep=3.0f;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept {
     Motion& mo=j.m;

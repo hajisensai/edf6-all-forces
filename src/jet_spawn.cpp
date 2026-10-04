@@ -42,7 +42,6 @@ constexpr std::size_t kParts=0x1320,kBodyPart=0x1530;
 const unsigned char kFindPartSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x56,0x48,0x83,0xEC,0x50};
 const unsigned char kBodyPartUseSig[]={0x8B,0x81,0x30,0x15,0x00,0x00};
 const unsigned char kBodyPartInitSig[]={0x49,0x8D,0x8C,0x24,0x20,0x13,0x00,0x00};
-const wchar_t* const kFuselageBones[]={L"bomber501",L"bomber401",L"body"};
 bool bodyPartOk=false;
 using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
 
@@ -123,25 +122,13 @@ void Facing(const float* heading,const float* at,float* m) noexcept {
     std::memcpy(m,r,sizeof(r));
 }
 
-void FixBodyPart(unsigned char* v) noexcept {
-    if(!bodyPartOk || At<std::int32_t>(v,kBodyPart)!=-1)return;
-    for(const auto name:kFuselageBones) {
-        const auto i=reinterpret_cast<FindPartFn>(image+kFindPart)(v+kParts,name);
-        if(i<0)continue;
-        Put<std::int32_t>(v,kBodyPart,i);
-        if(Cfg().debug)Log("JET v=%p body part: %ls (%d)",v,name,i);
-        return;
-    }
-    Log("JET v=%p has no body part (going down it would crash)",v);
-}
-
 // CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not what
 // its body is (a jet SGO without its mark, a heli SGO that is a jet), or nullptr.
 unsigned char* SpawnJet(Body b,const float* m) noexcept {
     InitParam param{image+kInitParamVtable,{}};
     unsigned char* v=CreateJet(b,m,&param);
     if(!v)return nullptr;
-    FixBodyPart(v);
+    if(bodyPartOk)FixBodyPart506(v,"JET");
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
     reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
     const BodyRow& row=Row(b);

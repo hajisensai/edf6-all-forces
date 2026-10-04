@@ -105,7 +105,7 @@ Jet* CrewPlaced(unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;
     JoinFlight(*j,kPlacedFlight);
     j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(Cfg().jetFuelSec)*KindOf(*j).fuel*1000.0f);
-    Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,KindOf(*j).name,At<float>(v,kHp),Ceiling());
+    Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,KindOf(*j).name,At<float>(v,kHp),CeilingY());
     Publish(true);
     return j;
 }
@@ -140,7 +140,7 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
     if(bomber)std::memcpy(away,j.bay.bombDir,12);
     if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
-    const float top=Ceiling()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
+    const float top=CeilingY()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
     Level(pos,away,climb<top ? climb : top,want);
     *speed=bomber && j.bay.bombSpeed>kind.attack ? j.bay.bombSpeed : kind.attack;
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
@@ -380,7 +380,7 @@ void JetFrame(unsigned char* v) noexcept {
     else std::memcpy(lead,pos,12);
 
     // Guidance, then the flight its kind flies.
-    const float clear=Clearance(pos);
+    const float clear=GroundClearance(pos);
     const float base=j->t.target && !j->t.flyer ? j->t.aim[1] : anchor[1];
     const float height=base+kind.alt;
     float want[3]={nose[0],0,nose[2]},speed=kind.cruise;
