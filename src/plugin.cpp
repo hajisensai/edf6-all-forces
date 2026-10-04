@@ -124,6 +124,7 @@ void Validate(Config& n) noexcept {
     n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
+    if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
 }
 
@@ -202,7 +203,7 @@ void LoadConfig() noexcept {
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
-    n.bigWorld=ReadBool(L"BigWorld",n.bigWorld);
+    n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
