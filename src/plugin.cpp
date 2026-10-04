@@ -407,6 +407,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallHud();
     InstallJetSound();
     InstallMissiles();
+    InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
     InstallBigWorld();
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

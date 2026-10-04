@@ -7,6 +7,7 @@ written where, and who owns it, is pylib/ledger.py.
 from __future__ import annotations
 
 import os
+import re
 import struct
 from dataclasses import dataclass
 
@@ -90,15 +91,14 @@ class Missile:
     lock_range: float     # m
     lock_cone: float      # rad off the launcher's nose (a vertical launcher: wide)
     lock_time: float      # frames to lock on
-    rounds: float         # a carrier's load
     burst: float = 1.0    # rounds a trigger pull
     burst_gap: float = 10.0   # frames between them
     interval: float = 45.0    # frames from one shot (or salvo) to the next
     eject: float = 0.3    # m a frame it leaves the rail at, along the launcher's nose, over the launcher's velocity
 
-    def params(self) -> dict[str, float]:
+    def params(self, rounds: int) -> dict[str, float]:
         return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
-                'AmmoDamage': self.damage, 'AmmoExplosion': self.blast, 'AmmoCount': self.rounds,
+                'AmmoDamage': self.damage, 'AmmoExplosion': self.blast, 'AmmoCount': float(rounds),
                 'FireBurstCount': self.burst, 'FireBurstInterval': self.burst_gap, 'FireInterval': self.interval,
                 'LockonRange': self.lock_range, 'LockonTime': self.lock_time}
 
@@ -109,43 +109,104 @@ class Missile:
                 8: MISSILE_NO_STOCK_HOMING, 9: MISSILE_MARK}
 
 
-MISSILES: dict[str, Missile] = {
+@dataclass(frozen=True)
+class Bomb:
+    """A free-fall bomb (GrenadeBullet01, impact fuse: Ammo_CustomParameter[0] 0): released with the launcher's velocity
+    (AmmoOwnerMove 1), falling at the world's gravity (AmmoGravityFactor 1); no drag in the game's model."""
+    model: str
+    damage: float
+    blast: float
+    life: float = 30.0      # s: it bursts on impact long before
+    interval: float = 8.0   # frames between bombs held down (a ripple)
+    eject: float = 0.05     # m a frame, along the launcher's nose
+
+    def params(self, rounds: int) -> dict[str, float]:
+        return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 1.0, 'AmmoAlive': self.life * 60.0,
+                'AmmoDamage': self.damage, 'AmmoExplosion': self.blast, 'AmmoCount': float(rounds),
+                'FireBurstCount': 1.0, 'FireInterval': self.interval, 'LockonType': 0.0, 'LockonRange': 0.0}
+
+
+@dataclass(frozen=True)
+class Store:
+    """What a jet carries besides its guns (STORES): its weapon, its role for the plugin (src/stores.h StoreRole: air
+    and ground missiles, bombs), and what one round adds to the jet: its mass and its drag (a share of the clean jet's
+    parasitic drag, with its pylon)."""
+    name: str               # shown in the cockpit (and the weapon's name.* rows)
+    role: str               # 'air', 'ground', 'bomb'
+    mass: float             # kg a round
+    drag: float             # a round's share of the clean jet's drag
+    weapon: Missile | Bomb
+
+
+STORES: dict[str, Store] = {
     # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead.
-    'EDF6VC_AAM_SHORT.SGO': Missile('AIM-9X', burn=5.0, top=850.0, accel=300.0, max_g=50.0, nav=4.0, life=12.0,
-                                    damage=100.0, blast=8.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0, rounds=4.0),
+    'AAM_S': Store('AIM-9X', 'air', 85.0, 0.006, Missile('AIM-9X', burn=5.0, top=850.0, accel=300.0, max_g=50.0, nav=4.0,
+                   life=12.0, damage=100.0, blast=8.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0)),
     # Medium-range air-to-air, active radar (AIM-120): a long burn, fast.
-    'EDF6VC_JET_MISSILE.SGO': Missile('AIM-120', burn=8.0, top=1200.0, accel=250.0, max_g=40.0, nav=4.0, life=16.0,
-                                      damage=120.0, blast=10.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0, rounds=6.0),
+    'AAM_M': Store('AIM-120', 'air', 152.0, 0.010, Missile('AIM-120', burn=8.0, top=1200.0, accel=250.0, max_g=40.0, nav=4.0,
+                   life=16.0, damage=120.0, blast=10.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0)),
     # Long-range air-to-air (AIM-54): a very long burn, very fast, a big warhead, not agile.
-    'EDF6VC_AAM_LONG.SGO': Missile('AIM-54', burn=20.0, top=1500.0, accel=150.0, max_g=25.0, nav=3.0, life=30.0,
-                                   damage=150.0, blast=12.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, rounds=4.0,
-                                   interval=90.0),
+    'AAM_L': Store('AIM-54', 'air', 450.0, 0.025, Missile('AIM-54', burn=20.0, top=1500.0, accel=150.0, max_g=25.0, nav=3.0,
+                   life=30.0, damage=150.0, blast=12.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, interval=90.0)),
     # Air-to-ground (AGM-65 Maverick): subsonic, a heavy warhead, a slow lock.
-    'EDF6VC_AGM.SGO': Missile('AGM-65', burn=3.5, top=320.0, accel=120.0, max_g=15.0, nav=3.0, life=15.0,
-                              damage=400.0, blast=15.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, rounds=6.0,
-                              interval=60.0),
+    'AGM': Store('AGM-65', 'ground', 300.0, 0.020, Missile('AGM-65', burn=3.5, top=320.0, accel=120.0, max_g=15.0, nav=3.0,
+                 life=15.0, damage=400.0, blast=15.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, interval=60.0)),
     # Light air-to-ground (AGM-114 Hellfire): what a drone carries.
-    'EDF6VC_AGM_LIGHT.SGO': Missile('AGM-114', burn=3.0, top=425.0, accel=180.0, max_g=20.0, nav=3.0, life=12.0,
-                                    damage=250.0, blast=10.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0, rounds=4.0),
-    # Ship-launched air defence from a vertical launcher (RIM-162 ESSM): the bay need not face the target (a wide
-    # cone), very fast, very agile, fired two at a target, a deep magazine (the submarine carrier, src/subcarrier.cpp).
-    'EDF6VC_SUB_MISSILE.SGO': Missile('RIM-162 ESSM', burn=4.0, top=1300.0, accel=400.0, max_g=50.0, nav=4.0, life=15.0,
-                                      damage=120.0, blast=10.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0,
-                                      rounds=32.0, burst=2.0, interval=120.0, eject=0.5),
+    'AGM_L': Store('AGM-114', 'ground', 50.0, 0.004, Missile('AGM-114', burn=3.0, top=425.0, accel=180.0, max_g=20.0, nav=3.0,
+                   life=12.0, damage=250.0, blast=10.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0)),
+    # Ship-launched air defence from a vertical launcher (RIM-162 ESSM): the bay need not face the target (a wide cone),
+    # very fast, very agile, fired two at a target (the submarine carrier, src/subcarrier.cpp: no mass that matters).
+    'ESSM': Store('RIM-162 ESSM', 'air', 0.0, 0.0, Missile('RIM-162 ESSM', burn=4.0, top=1300.0, accel=400.0, max_g=50.0,
+                  nav=4.0, life=15.0, damage=120.0, blast=10.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0, burst=2.0,
+                  interval=120.0, eject=0.5)),
+    # General-purpose 500 lb free-fall bomb (Mk 82): the stock unguided bomb's warhead (V_409HELI_BOMB01: 500, 20 m).
+    'MK82': Store('Mk 82', 'bomb', 230.0, 0.015, Bomb('Mk 82', damage=500.0, blast=25.0)),
 }
-JET_MISSILE_FILE = 'EDF6VC_JET_MISSILE.SGO'
-SUB_MISSILE_FILE = 'EDF6VC_SUB_MISSILE.SGO'
+JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
+
+
+def store_file(kind: str, rounds: int) -> str:
+    """A store's weapon SGO for a load of `rounds` (AmmoCount is the weapon's, so each load is its own file)."""
+    return f'EDF6VC_{kind}_{rounds}.SGO'
 
 
 def _weapon(name: str) -> str:
     return 'app:/weapon/' + name.lower()
 
 
-HOMING_WEAPONS = tuple(_weapon(n) for n in MISSILES)
-_AAM_SHORT, _AAM, _AAM_LONG = _weapon('EDF6VC_AAM_SHORT.SGO'), _weapon(JET_MISSILE_FILE), _weapon('EDF6VC_AAM_LONG.SGO')
-_AGM, _AGM_LIGHT, _SUB_MISSILE = _weapon('EDF6VC_AGM.SGO'), _weapon('EDF6VC_AGM_LIGHT.SGO'), _weapon(SUB_MISSILE_FILE)
-_MISSILE = _AAM
-_ARMS = _GUNS + (_AAM,)
+_STORE_FILE = re.compile(r'app:/weapon/edf6vc_([a-z0-9_]+?)_(\d+)\.sgo$')
+
+
+def store_of(weapon: str) -> tuple[str, int] | None:
+    """(kind, rounds) of a store weapon path (store_file), else None."""
+    m = _STORE_FILE.match(weapon.lower())
+    if not m or m.group(1).upper() not in STORES:
+        return None
+    return m.group(1).upper(), int(m.group(2))
+
+
+def _load(*stores: tuple[str, int]) -> tuple[str, ...]:
+    """The guns, then the stores in the order the cockpit cycles them."""
+    for kind, _ in stores:
+        if kind not in STORES:
+            raise ValueError(kind)
+    return _GUNS + tuple(_weapon(store_file(kind, n)) for kind, n in stores)
+
+
+# Real loads (one jet type each, src/jet_internal.h roles): an air-superiority fighter's 4 AIM-120 + 2 AIM-9X; an
+# interceptor's AIM-54 / AIM-120 / AIM-9X; a multirole fighter swinging both ways; a strike fighter's Mavericks and
+# Mk 82s with two AIM-9X for itself; a drone's Hellfires; the carriers fire nothing (their drones do), they keep a
+# fighter's load so every jet has the 506's four holders at least (src/stores.cpp: without the plugin the game builds
+# just four).
+_FIGHTER = _load(('AAM_M', 4), ('AAM_S', 2))
+_INTERCEPTOR = _load(('AAM_L', 4), ('AAM_M', 2), ('AAM_S', 2))
+_MULTIROLE = _load(('AAM_M', 2), ('AAM_S', 2), ('AGM', 2), ('MK82', 4))
+_STRIKE = _load(('AGM', 6), ('MK82', 6), ('AAM_S', 2))
+_DRONE = _load(('AGM_L', 4))
+_SHIP = _load(('ESSM', 32))
+HOMING_WEAPONS = tuple(w for jet_weapons in (_FIGHTER, _INTERCEPTOR, _MULTIROLE, _STRIKE, _DRONE, _SHIP)
+                       for w in jet_weapons if store_of(w) and STORES[store_of(w)[0]].role != 'bomb')
+_ARMS = _FIGHTER
 # The blast drones' charge (src/jet.cpp Detonate: weapon 2, fired by 0x2021 once next to the enemy): the
 # 409's unguided bomb (GrenadeBullet01) made a point charge (docs/decoy-blast-re.md 1.4): CP#0 = 1 bursts
 # when its life runs out (0x26543E), CP#3 = 0 no bounce, CP#5 = 0 no random life; it barely moves, lives
@@ -157,10 +218,17 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *MISSILES)
+# kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against).
+JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7006.0: 2200.0, 7020.0: 16000.0,
+              7201.0: 16000.0, 7202.0: 22000.0}
+STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP)
+                            if store_of(w)}))
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *STORE_FILES)
 # A derived weapon's stock file: in a vehicle's weapon list it takes the stock one's per-weapon parameters.
 _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
-             for d, st in (*JET_GUN_FILES.items(), *((m, JET_MISSILE_STOCK) for m in MISSILES))}
+             for d, st in (*JET_GUN_FILES.items(),
+                           *((f, JET_BOMB_STOCK if STORES[store_of(_weapon(f))[0]].role == 'bomb' else JET_MISSILE_STOCK)
+                             for f in STORE_FILES))}
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
@@ -168,17 +236,17 @@ JET_SILENT_SE = 'EDF6VC_SILENT'
 JET_ROTOR_SE_ROWS = (0, 1)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
-    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _GUNS + (_AGM,)),
-    'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _ARMS),
+    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _STRIKE),
+    'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _FIGHTER),
     # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
-    'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _GUNS + (_AAM_LONG,), ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
+    'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _INTERCEPTOR, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                           'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
     # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                             'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
     # bomber401 x 0.5: 26 m across
-    'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _GUNS + (_AAM_SHORT,), ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
+    'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _MULTIROLE, ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
                                         'EDF6VC_MULTIROLE.MRAB', 'bomber401', rigid=((0.0, 1.07, 0.0), (1.25, 1.0, 4.0))),
     # the EDF transport x 1.6: 59 x 77 m; it never fires (its drones do)
     'edf6tr_jet_carrier_mission': Jet(7005.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
@@ -189,7 +257,7 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_doll_carrier_mission': Jet(7010.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
                                            'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
     # the airstrike drone x 3: 5.7 m long; only carriers launch it (tools/make_jets.py EDF6VC_JET_DRONE.SGO)
-    'edf6tr_jet_drone': Jet(7006.0, 300.0, _GUNS + (_AGM_LIGHT,), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+    'edf6tr_jet_drone': Jet(7006.0, 300.0, _DRONE, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                             'EDF6VC_DRONE.MRAB', 'body', 'body',
                             rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     # Blast and doll drones (src/jet.cpp Role::blast / doll): the drone with a charge for its missile; only
@@ -204,14 +272,14 @@ JETS: dict[str, Jet] = {
     # keel is 340 m down and EDF's seas are some 30 m deep (M082, 2026-10-04): a hull box stuck in the seabed,
     # was pushed 215 m off its point and fought the ground every frame. Guns on its forward turrets' (left)
     # barrels, the missile on its missile bay.
-    'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _GUNS + (_SUB_MISSILE,), ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
+    'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _SHIP, ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
                                       'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 178.08, -7.58), (121.0, 15.0, 832.0)),
                                       weapon_bones=('gunA_tilt_l', 'gunB_tilt_l', 'missle_l')),
     # Player jets (src/playerjet.cpp kKinds): the fighter in the interceptor's dark bomber501_2 (16 m across),
     # the strike jet in the elevon bomber (25 m across); empty until the player boards them.
     'edf6tr_pjet_fighter_mission': Jet(7201.0, 1400.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                        'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', player=True, camera=(0.0, 6.0, -24.0)),
-    'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _GUNS + (_AGM,), player=True, camera=(0.0, 8.0, -32.0)),
+    'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _STRIKE, player=True, camera=(0.0, 8.0, -32.0)),
 }
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
@@ -318,6 +386,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
     m['vehicle_weapon_setting'] = [[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))] + [[anchor, -1]]
+    # Without the plugin the 506 builds weapons for its first four holders only (src/stores.cpp): fewer would read an
+    # entry that is not there; the plugin builds them all, one an entry, so the two lists must agree.
+    if len(m['vehicle_weapon_setting']) < 4 or len(m['vehicle_weapon_setting']) != len(setup[3]):
+        raise ValueError(f'{name}: {len(setup[3])} weapons for {len(m["vehicle_weapon_setting"])} holders (at least 4)')
     m['vehicle_dead_effect'] = _dead_effect(_rebone(m['vehicle_dead_effect'], bones, anchor))
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
@@ -412,7 +484,7 @@ def weapon_dir(game_root: str) -> str:
 
 def jet_guns(game: Game) -> dict[str, bytes]:
     """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE; the
-    blast drones' charges (JET_BLAST_FILES); the missiles (MISSILES)."""
+    blast drones' charges (JET_BLAST_FILES); the stores (STORE_FILES: missiles and bombs, one file a load)."""
     out = {}
     for name, stock in JET_GUN_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', stock))
@@ -434,27 +506,62 @@ def jet_guns(game: Game) -> dict[str, bytes]:
                            ('AmmoDamage', damage), ('AmmoExplosion', radius)):
             r.set(key, value)
         out[name] = dsgo.write(doc)
-    for name, missile in MISSILES.items():
-        doc = dsgo.parse(game.read('WEAPON', JET_MISSILE_STOCK))
-        r = doc.root
-        fire, cp, cone = r.get('FireSe'), r.get('Ammo_CustomParameter'), r.get('LockonAngle')
-        if (r.get('AmmoClass') != 'MissileBullet01' or len(fire.items) != 6 or len(cp.items) != 12
-                or len(cp.items[11].items) != 6 or len(cp.items[3].items) != 3 or len(cone.items) != 2):
-            raise ValueError(f'{JET_MISSILE_STOCK} 不是预期的直升机导弹')
-        for node, (cue, volume, reach) in ((fire, JET_MISSILE_FIRE_SE), (cp.items[11], JET_MISSILE_FLIGHT_SE)):
-            node.items[1], node.items[2], node.items[5] = cue, volume, reach
-        for key, value in missile.params().items():
-            if r.get(key) is None:
-                raise ValueError(f'{JET_MISSILE_STOCK} 缺少 {key}')
-            r.set(key, value)
-        for i, value in missile.motion().items():
-            if i == 3:
-                cp.items[3].items[0], cp.items[3].items[1], cp.items[3].items[2] = value
-            else:
-                cp.items[i] = value
-        cone.items[0] = cone.items[1] = missile.lock_cone
-        out[name] = dsgo.write(doc)
+    for name in STORE_FILES:
+        kind, rounds = store_of(_weapon(name))
+        store = STORES[kind]
+        if isinstance(store.weapon, Bomb):
+            out[name] = _bomb_sgo(game, store, rounds)
+        else:
+            out[name] = _missile_sgo(game, store, rounds)
     return out
+
+
+def _named(r, name: str) -> None:
+    """Every name.* row of a weapon: the store's name (the stock HUD shows the weapon's, weapon +0x1B0)."""
+    for key in list(r.names.values()):
+        if key.startswith('name.'):
+            r.set(key, name)
+
+
+def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
+    missile = store.weapon
+    doc = dsgo.parse(game.read('WEAPON', JET_MISSILE_STOCK))
+    r = doc.root
+    fire, cp, cone = r.get('FireSe'), r.get('Ammo_CustomParameter'), r.get('LockonAngle')
+    if (r.get('AmmoClass') != 'MissileBullet01' or len(fire.items) != 6 or len(cp.items) != 12
+            or len(cp.items[11].items) != 6 or len(cp.items[3].items) != 3 or len(cone.items) != 2):
+        raise ValueError(f'{JET_MISSILE_STOCK} 不是预期的直升机导弹')
+    for node, (cue, volume, reach) in ((fire, JET_MISSILE_FIRE_SE), (cp.items[11], JET_MISSILE_FLIGHT_SE)):
+        node.items[1], node.items[2], node.items[5] = cue, volume, reach
+    for key, value in missile.params(rounds).items():
+        if r.get(key) is None:
+            raise ValueError(f'{JET_MISSILE_STOCK} 缺少 {key}')
+        r.set(key, value)
+    for i, value in missile.motion().items():
+        if i == 3:
+            cp.items[3].items[0], cp.items[3].items[1], cp.items[3].items[2] = value
+        else:
+            cp.items[i] = value
+    cone.items[0] = cone.items[1] = missile.lock_cone
+    _named(r, store.name)
+    return dsgo.write(doc)
+
+
+def _bomb_sgo(game: Game, store: Store, rounds: int) -> bytes:
+    """The stock unguided bomb (GrenadeBullet01) with an impact fuse (CP[0] 0) and no bounce (CP[3] 0); docs/stores-re.md §5."""
+    bomb = store.weapon
+    doc = dsgo.parse(game.read('WEAPON', JET_BOMB_STOCK))
+    r = doc.root
+    cp = r.get('Ammo_CustomParameter')
+    if r.get('AmmoClass') != 'GrenadeBullet01' or len(cp.items) != 6:
+        raise ValueError(f'{JET_BOMB_STOCK} 不是预期的直升机炸弹')
+    cp.items[0], cp.items[3] = 0.0, 0.0   # no CP[6] in the stock list: no random life
+    for key, value in bomb.params(rounds).items():
+        if r.get(key) is None:
+            raise ValueError(f'{JET_BOMB_STOCK} 缺少 {key}')
+        r.set(key, value)
+    _named(r, store.name)
+    return dsgo.write(doc)
 
 
 # The teleportation ships' portal laser (src/carrierlaser.cpp): two DemoIndirectFire objects (the class of

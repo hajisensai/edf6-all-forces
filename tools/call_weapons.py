@@ -206,6 +206,14 @@ def _object_path(call: Call) -> str:
     return f'app:/object/{call.vehicle.lower()}.sgo'
 
 
+def _with_path(entry, path: str):
+    """A copy of a vehicle weapon list entry ([path, [params]]) for another weapon."""
+    import copy
+    e = copy.deepcopy(entry)
+    e.items[0] = path
+    return e
+
+
 def vehicle_sgo(template: bytes, call: Call) -> bytes:
     """The N9 Eros request bringing the player jet. Ammo_CustomParameter[4] = [transport, box, vehicle SGO,
     vehicle setup [multipliers, heli params (first: the speed gain k = the jet's mark), fuel, weapons],
@@ -219,11 +227,18 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
     setup = req.items[3]
     setup.items[0].items[0], setup.items[0].items[1] = vc.JET_TIER   # the jet's tier (vcobjects.JET_TIER), not the Eros's
     setup.items[1].items[0] = float(call.mark)
-    for w in setup.items[3].items:
-        w.items[0] = _VEHICLE_SWAP.get(w.items[0].lower(), w.items[0])
+    # The jet's own weapons (its guns and stores, vcobjects.JETS), then the Eros's fuel tank: as many entries as the
+    # jet SGO's vehicle_weapon_setting holders (src/stores.cpp builds one weapon a holder from this list).
+    weapons = setup.items[3].items
+    entry, fuel = weapons[0], weapons[-1]
+    if 'fuel' not in str(fuel.items[0]).lower():
+        raise ValueError(f'{VEHICLE_TEMPLATE}: its weapon list does not end in the fuel tank')
+    jet_weapons = vc.JETS[call.jet].weapons
+    setup.items[3].items = [_with_path(entry, w) for w in jet_weapons] + [fuel]
     res = r.get('resource')
     swap = {stock_vehicle.lower(): _object_path(call), **_VEHICLE_SWAP}
-    res.items = [swap.get(x.lower(), x) for x in res.items]
+    items = [swap.get(x.lower(), x) for x in res.items]
+    res.items = items + [w for w in jet_weapons if w not in {x.lower() for x in items}]
     for lang in LANGS:
         key = f'name.{lang.lower()}'
         if key in r.names.values():

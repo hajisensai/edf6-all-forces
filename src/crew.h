@@ -7,6 +7,7 @@
 #include <cstring>
 #include "edf/layout.h"
 #include "edf/patch.h"
+#include "stores.h"
 #include "edf/seat.h"
 
 namespace crew {
