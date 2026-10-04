@@ -28,10 +28,8 @@ struct Config {
     float heliFireCone=4.0f;   // degrees between the nose (pitch included) and the target it still fires at
     bool heliMissile=true;
     DWORD heliMissileMs=4000;  // minimum gap between missiles
-    float heliMoveGain=0.04f;  // stick per metre off the goal
-    float heliBrakeGain=0.12f; // stick per m/s of speed (damping)
-    float heliClimbGain=0.08f; // rotor speed per m/s of climb-rate error
-    float heliHoverLearn=0.03f;// how fast it learns the hover rotor speed
+    // (The flight controller's own gains are constants in heli.cpp; the old HeliMoveGain / HeliBrakeGain /
+    // HeliClimbGain / HeliHoverLearn keys are ignored, plugin.cpp LoadConfig.)
     DWORD heliLandMs=0;        // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
     float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
@@ -66,6 +64,8 @@ struct Config {
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
 };
+// Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
+// the change logged.
 // The live config: an immutable snapshot, swapped whole by the ini reload (plugin.cpp LoadConfig) and read
 // from any thread (game, call picker, HUD draw) without a torn mix of old and new values.
 const Config& Cfg() noexcept;
@@ -86,7 +86,7 @@ ULONGLONG GameFrame() noexcept;
 void SeeFrame(const void* vehicle) noexcept;
 
 // --- Mission lifecycle (mission.cpp) ---
-// The mission's player preload (loadout.cpp hooks it): every table of per-object state from the last
+// The mission's player preload (mission.cpp hooks it): every table of per-object state from the last
 // mission is dropped here, before the new mission's objects (which may reuse the old addresses) exist.
 void MissionStart() noexcept;
 void ResetCrew() noexcept;        // crew.cpp
@@ -147,9 +147,8 @@ struct ObjRef {
     explicit operator bool() const noexcept { return obj!=nullptr; }
 };
 
+// The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
-// Forced test-range loadout (loadout.cpp); off unless EDF6TestRange.loadout.ini says Enabled=1.
-bool InstallLoadout(const wchar_t* pluginIni) noexcept;
 void ReloadConfigIfChanged() noexcept;
 bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept;
 bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept;
@@ -167,37 +166,14 @@ struct PlayerFix { float pos[3]; std::int32_t team; ULONGLONG at; };
 extern PlayerFix player;
 void SeePlayer(const float* pos,std::int32_t team) noexcept;
 
-// crew.cpp
-bool InstallCrew() noexcept;           // prompt + seat hooks, at load
-void CrewFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook
-
-// heli.cpp
-bool IsHelicopter(const void* vehicle) noexcept;
-void HeliCrewed(const void* vehicle) noexcept;      // the plugin seated an NPC pilot: it flies this heli
-void HeliFrame(unsigned char* vehicle) noexcept;   // after the stock input, NPC-crewed helicopters only
-bool CheckHeliProfile() noexcept;
-// Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point),
-// every enemy lock point of `vehicle`'s side.
-float MapRay(const float* a,const float* b,float* hit) noexcept;
-// Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
-// highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
-enum class Sea { unknown, land, water };
-Sea SeaAt(float x,float z,float* surface) noexcept;
-using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
-bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
-bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
-// Whether `point` is within `radius` of the segment from->to (between its ends).
-bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept;
-// Whether a burst from->to would pass by the player (as the helis' guns check) or a jet the plugin flies
-// other than `self` (JetInLine). Other friends are hit as the stock game hits them.
-bool FriendInLine(const float* from,const float* to,const void* self) noexcept;
+// The core modules' own declarations (crew, heli, ground, hud, mission, loadout, overlay) are in their
+// headers, included at the end of this file.
 
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
 bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a wingman in the way (no pass-through)
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
-void HeliReap(const void* self) noexcept;          // ...and called helis that have left (heli.cpp)
 bool InstallJets() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
 bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
@@ -227,10 +203,6 @@ bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
 // friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
 enum class HeliBody { brute410, eros506 };
 unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
-// A heli the Air Raider called (heli.cpp): `guard` holds over `post` and fights round it, else it follows
-// the player; its weapons are not refilled, and out of ammo, after `fuelSec` or badly damaged it flies off
-// away from the player and is deleted far from them.
-void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };
@@ -247,8 +219,6 @@ bool JetHolds(const void* hold) noexcept;
 // Which bomber body a BombingPlane's model instance (plane+0x660, embedded) is: kind (the BOMBER501 look,
 // the strike jet's) unless its bones name BOMBER401's or BOMBER501_2's model.
 JetBody BomberBody(const unsigned char* inst) noexcept;
-// Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames, heli.cpp).
-bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
 
 // body506.cpp: the 506 body the plugin's jets, carriers and player jets fly in. Which one a vehicle is comes
 // from its SGO's mark (veh+0x162C, kMark* in body506.cpp, the one table of them); the 506's physics step
@@ -270,12 +240,7 @@ bool ImpactDamage(const unsigned char* by,const float* at,float damage,float rad
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
 void CallPick(int step,wchar_t* out,std::size_t size) noexcept;   // airstrike.cpp
-void StartCallPicker() noexcept;                                    // overlay.cpp
 
-// ground.cpp: the Depth Crawler (502), which has no stock AI
-bool IsGroundRobo(const void* vehicle) noexcept;
-void GroundFrame(unsigned char* vehicle) noexcept;   // after its stock pre-update, NPC-driven crawlers only
-bool CheckGroundProfile() noexcept;
 // subcarrier.cpp: the submarine carrier (潜水母艦, docs/subcarrier-re.md), a 506 body from EDF6VC_SUB_CARRIER.SGO
 // (tools/make_sub.py) driven by the plugin: it sits surfaced, follows the player at a ship's pace, turns its bow
 // on the nearest enemy, fires its turret guns and homing missiles, reloads aboard; its HP shows as a follower gauge.
@@ -298,24 +263,10 @@ bool InstallLaser() noexcept;                         // at load
 void PreloadLaser() noexcept;                         // from the mission's player preload
 void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
 
-// hud.cpp: the vehicle HUD (docs/hud-re.md), drawn from the follower gauge's call (subcarrier.cpp GaugeHook).
-bool InstallHud() noexcept;                         // at load: checks the draw and text functions it calls
-void HudSee(unsigned char* vehicle) noexcept;       // from every vehicle's input hook (game thread): a readout's data
-// A carrier's panel (subcarrier.cpp fills it every draw from its game-thread copies): the hull, each deck part.
-struct CarrierPanel {
-    float hull,hullMax;
-    int parts;
-    struct Part { const char* name; float hp,max,repairSec; bool down; } part[4];
-};
-// From the follower gauge's draw (any thread): the readouts and `count` carrier panels. `viewProj`, `ctx` and
-// `viewport` as the gauge drawer 0x804300 gets them.
-void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept;
 // What jet.cpp flies a jet as (game thread): its role's name, seconds of fuel left (-1: none, a carrier's drone),
 // a carrier's drone launches left (-1: not a carrier), whether it is withdrawing; false when it does not fly it.
 struct JetHudInfo { const char* role; float fuelSec; int drones; bool leaving; };
 bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
-// A called heli's fuel (heli.cpp, game thread): seconds until it flies off (0: leaving); false with no limit.
-bool HeliFuel(const void* vehicle,float* sec) noexcept;
 // playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
@@ -325,6 +276,10 @@ bool InstallPlayerJets() noexcept;                      // after InstallSub (it 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
 unsigned char* PlayerHuman() noexcept;
-// Sea rescue (heli.cpp): from every flown helicopter's frame (HeliFrame), at most once per game frame.
-void RescueTick() noexcept;
 }  // namespace crew
+
+// The core modules' declarations (self-contained; every file that includes crew.h sees them as before).
+#include "core.h"
+#include "ground.h"
+#include "heli.h"
+#include "hud.h"
