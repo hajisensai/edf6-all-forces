@@ -1,53 +1,63 @@
-"""Air Raider call weapons for the plugin's jets and helicopters: 21 rows appended to the shared
-weapon table. 19 are clones of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
+"""Air Raider call weapons for the plugin's jets and helicopters: the rows tools/calls.py lists, added to the
+shared weapon table. The calls are clones of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
 category 312) with a marker in its SGO's AmmoHitSizeAdjust. The plugin reads the marker (weapon +0x8C4)
 and flies its own planes for the call; the field does nothing for a RadioContact weapon, so without the
 plugin the weapon is simply a working KM6 bomber call.
-The last two (Call.vehicle) are vehicle requests, clones of the stock eWeapon394 (N9 Eros, Weapon_Sub,
+The vehicle requests (Call.brings 'vehicle') are clones of the stock eWeapon394 (N9 Eros, Weapon_Sub,
 category 308): the stock request brings the player jet SGO (tools/make_jets.py EDF6VC_PJET_*.SGO, which
-must be installed too) with the jet's mark and guns in the request's vehicle setup, empty, for the player
+must be installed first) with the jet's mark and guns in the request's vehicle setup, empty, for the player
 to fly (src/playerjet.cpp).
 
-  python tools/call_weapons.py build OUTDIR [--game DIR]     write the 21 SGOs + the stacked tables into OUTDIR
+  python tools/call_weapons.py build OUTDIR [--game DIR]     write the SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
-  python tools/call_weapons.py uninstall --unequipped [--force] [--game DIR]
+  python tools/call_weapons.py uninstall [--delete-rows --unequipped] [--game DIR]
+  python tools/call_weapons.py repair [--game DIR]           the shared files back to before the first install
   python tools/call_weapons.py check [--game DIR]
 
 The weapon table and its texts (WEAPONTEXT.<LANG>.SGO, index-aligned with the table) are shared with
 other mods (autoturret/tools/describe.py rewrites text rows in place), so the base is always the
-installed Mods/WEAPON copy when there is one, else Root.cpk. Our rows are one contiguous block:
-appended on first install, replaced in place on reinstall (saves refer to weapons by row index, so they
-keep their index). New calls are only ever appended to CALLS: an installed block that is a prefix of it
-(an older install) grows in place, as long as no other mod's rows follow it (those would move). Every
-other row is checked unchanged before anything is written.
+installed Mods/WEAPON copy when there is one, else Root.cpk. Saves refer to weapons by row index, and the
+plugin's GrantCalls sets the owned bit by row index too, so a row of ours never moves and its index is never
+given to anything else:
+  - install keeps every row of ours where it is (found by id; tools/calls.py slot_of) and replaces it in place;
+    the calls a table lacks go at its end, in CALLS order. Every other row is checked unchanged before anything
+    is written (verify).
+  - uninstall turns our rows into placeholders (the template's stock row under the id EDF6VC_RETIRED_*, named
+    as uninstalled): the index stays taken, a save with one equipped still has a working stock weapon, and no
+    later mod's row moves or inherits our owned bits. --delete-rows really deletes the rows at the very end of
+    the table (only those: deleting one in the middle would move every row after it), for saves where none of
+    them is equipped (--unequipped: such a save crashes at the main menu once the row is gone, the menu looks
+    the weapon up past the table end; see edf6-jaeger tools/install.py). A later install takes the
+    placeholders' rows back.
 
-install backs up every Mods file it overwrites the first time into Mods/.edf6vc_backup/ and records what it
-wrote in Mods/.edf6vc_calls.json. uninstall cuts only our rows out of the CURRENT shared files (never rolls
-back to the backup: other mods' later edits stay) and writes them back, except that a file we created whose
-remainder is byte-identical to the stock one is deleted instead (nobody else's edits are left in it).
-
-A save that still has one of these weapons equipped crashes the game at the main menu once its row is
-gone (the menu looks the weapon up by row index past the table end; see edf6-jaeger tools/install.py):
-unequip them in every save first and confirm with --unequipped.
+Writes are one transaction: every file the run changes is first copied to Mods/.edf6vc_backup/txn/ and listed
+in a journal (Mods/.edf6vc_calls.txn.json), then each is replaced atomically (temporary file + rename); any
+failure rolls all of them back from the copies, and a run that died on the way (the journal still there) is
+rolled back by the next one before it starts. install also keeps, once, a copy of each shared file as it was
+before our first install (Mods/.edf6vc_backup/), which repair restores when the texts no longer line up with
+the table; Mods/.edf6vc_calls.json records what we wrote (with its SHA-256, to tell what another tool changed
+since) and where each of our rows is.
 """
 from __future__ import annotations
 
 import argparse
 import copy
-import hashlib
 import json
 import os
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'autoturret', 'tools'))
-sys.path.insert(0, os.path.join(HERE, '..', 'testrange'))
+sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+sys.path.insert(0, HERE)
+import calls  # noqa: E402
 import dsgo  # noqa: E402
-import gen  # noqa: E402
+import ledger  # noqa: E402
+import modfiles  # noqa: E402
+import vcobjects as vc  # noqa: E402
+from calls import CALLS, IDS, Call, call_name  # noqa: E402
 from dsgo import Node  # noqa: E402
 
 TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
@@ -58,180 +68,15 @@ TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
 SHARED = [TABLE] + TEXTS
 BACKUP = '.edf6vc_backup'
 MANIFEST = '.edf6vc_calls.json'
+JOURNAL = '.edf6vc_calls.txn.json'
 ACQUIRE = 0.0   # WEAPONTABLE column 5: 0 normal (the plugin makes EDF6VC_CALL_* owned at every save load)
-PROCESS = 'EDF6.exe'
+PROCESS = modfiles.PROCESS
+OWNER = 'calls'  # pylib/ledger.py: the vehicle requests need make_jets' player jet SGOs
 
 
-@dataclass(frozen=True)
-class Call:
-    id: str
-    mark: float          # AmmoHitSizeAdjust; the plugin's call marker
-    kind: str            # key into KINDS
-    follow: bool         # escorts the caller instead of holding the marked point
-    planes: float        # Ammo_CustomParameter[2][1]: the stock bomber fallback's plane count
-    reload: float        # ReloadTime[0], the base of the star curve
-    level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
-    # A vehicle request (VEHICLE_TEMPLATE): the OBJECT SGO it brings (tools/make_jets.py, no extension) and
-    # the testrange/gen.py JETS entry it is made like; `mark` is then the jet's mark (its speed gain k).
-    vehicle: str = ''
-    jet: str = ''
-
-
-CALLS: tuple[Call, ...] = (
-    Call('EDF6VC_CALL_INTERCEPTOR', 7101, 'interceptor', False, 2, 900, 0.3),
-    Call('EDF6VC_CALL_INTERCEPTOR_F', 7102, 'interceptor', True, 2, 1035, 0.5),
-    Call('EDF6VC_CALL_STRIKE', 7103, 'strike', False, 3, 1500, 0.5),
-    Call('EDF6VC_CALL_STRIKE_F', 7104, 'strike', True, 3, 1725, 0.7),
-    Call('EDF6VC_CALL_MULTIROLE', 7105, 'multirole', False, 3, 1800, 0.8),
-    Call('EDF6VC_CALL_MULTIROLE_F', 7106, 'multirole', True, 3, 2070, 1.0),
-    Call('EDF6VC_CALL_FIGHTER', 7107, 'fighter', False, 4, 2000, 1.0),
-    Call('EDF6VC_CALL_FIGHTER_F', 7108, 'fighter', True, 4, 2300, 1.2),
-    Call('EDF6VC_CALL_CARRIER', 7109, 'carrier', False, 1, 3000, 1.8),
-    Call('EDF6VC_CALL_CARRIER_F', 7110, 'carrier', True, 1, 3450, 2.0),
-    Call('EDF6VC_CALL_HELI', 7111, 'heli', False, 2, 1600, 0.4),
-    Call('EDF6VC_CALL_HELI_F', 7112, 'heli', True, 2, 1800, 0.6),
-    # Appended 2026-10-04: carriers whose drones blow themselves up next to the enemy.
-    Call('EDF6VC_CALL_BLAST_CARRIER', 7113, 'blast_carrier', False, 1, 3300, 2.0),
-    Call('EDF6VC_CALL_BLAST_CARRIER_F', 7114, 'blast_carrier', True, 1, 3800, 2.2),
-    Call('EDF6VC_CALL_DOLL_CARRIER', 7115, 'doll_carrier', False, 1, 3600, 2.2),
-    Call('EDF6VC_CALL_DOLL_CARRIER_F', 7116, 'doll_carrier', True, 1, 4100, 2.4),
-    # Appended 2026-10-04: the submarine carrier (src/subcarrier.cpp): one, it stays the mission.
-    Call('EDF6VC_CALL_SUB', 7117, 'sub', True, 1, 7200, 3.0),
-    # Appended 2026-10-04: the gunship (src/jet.cpp GunshipFire), a bomber401 circling and shelling.
-    Call('EDF6VC_CALL_GUNSHIP', 7118, 'gunship', False, 1, 2600, 1.2),
-    Call('EDF6VC_CALL_GUNSHIP_F', 7119, 'gunship', True, 1, 3000, 1.4),
-    # Appended 2026-10-04: the jets the player flies (src/playerjet.cpp), vehicle requests.
-    Call('EDF6VC_CALL_PJET_FIGHTER', 7201, 'pjet_fighter', False, 0, 6000, 1.0,
-         'EDF6VC_PJET_FIGHTER', 'edf6tr_pjet_fighter_mission'),
-    Call('EDF6VC_CALL_PJET_STRIKE', 7202, 'pjet_strike', False, 0, 6500, 0.8,
-         'EDF6VC_PJET_STRIKE', 'edf6tr_pjet_strike_mission'),
-)
-IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
-
-# Per kind: name and what it does, per language (KR reuses EN).
-KINDS: dict[str, dict[str, tuple[str, str]]] = {
-    'pjet_fighter': {
-        'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
-                         '前推左摇杆或按上升键加油门，后拉减油门；右摇杆或鼠标转弯和俯仰。'),
-        'CN': ('玩家戰鬥機', '請求一架由你自己駕駛的戰鬥機，空著送到信號彈處：兩門機砲和飛彈，輕快，轉彎最急。'
-                         '前推左搖桿或按上升鍵加油門，後拉減油門；右搖桿或滑鼠轉彎和俯仰。'),
-        'JA': ('戦闘機（自操縦）', '自分で操縦する戦闘機を信号弾の位置へ要請する。機関砲2門とミサイル、軽快で旋回が鋭い。'
-                              '左スティック前か上昇でスロットルを上げ、後ろで下げる。右スティックかマウスで旋回と上下。'),
-        'EN': ('Fighter (Fly It)', 'Requests a fighter you fly yourself, delivered empty to the flare: two guns and '
-                                   'missiles, light and the tightest turner. Left stick forward or ascend opens the '
-                                   'throttle, back closes it; the right stick or mouse turns and pitches.'),
-    },
-    'pjet_strike': {
-        'SC': ('玩家攻击机', '请求一架由你自己驾驶的攻击机，空着送到信号弹处：两门机炮和导弹，更耐打，速度和转弯不如战斗机。'
-                         '操作同玩家战斗机。'),
-        'CN': ('玩家攻擊機', '請求一架由你自己駕駛的攻擊機，空著送到信號彈處：兩門機砲和飛彈，更耐打，速度和轉彎不如戰鬥機。'
-                         '操作同玩家戰鬥機。'),
-        'JA': ('攻撃機（自操縦）', '自分で操縦する攻撃機を信号弾の位置へ要請する。機関砲2門とミサイル、頑丈だが速度と旋回は'
-                              '戦闘機に劣る。操作は戦闘機（自操縦）と同じ。'),
-        'EN': ('Strike Jet (Fly It)', 'Requests a strike jet you fly yourself, delivered empty to the flare: two guns '
-                                      'and missiles, tougher but slower and wider turning than the fighter. Flown like '
-                                      'the fighter.'),
-    },
-    'interceptor': {
-        'SC': ('截击机', '呼叫截击机，优先攻击空中目标；比制空战斗机飞得更快更高，并从更远处发射导弹。'),
-        'CN': ('截擊機', '呼叫截擊機，優先攻擊空中目標；比制空戰鬥機飛得更快更高，並從更遠處發射飛彈。'),
-        'JA': ('迎撃機', '迎撃機を要請する。空中の敵を優先して攻撃する。制空戦闘機より速く高く飛び、遠くからミサイルを撃つ。'),
-        'EN': ('Interceptors', 'Calls interceptors that attack flying targets first, faster and higher than fighters, firing their missiles from farther out.'),
-    },
-    'strike': {
-        'SC': ('对地攻击机', '呼叫对地攻击机，优先攻击地面目标，俯冲投弹。'),
-        'CN': ('對地攻擊機', '呼叫對地攻擊機，優先攻擊地面目標，俯衝投彈。'),
-        'JA': ('対地攻撃機', '対地攻撃機を要請する。地上の敵を優先し、急降下して爆撃する。'),
-        'EN': ('Strike Fighters', 'Calls strike fighters that attack ground targets first, diving onto them with bombs.'),
-    },
-    'multirole': {
-        'SC': ('多用途机', '呼叫多用途战斗机，攻击最近的目标，空中地面皆可。'),
-        'CN': ('多用途機', '呼叫多用途戰鬥機，攻擊最近的目標，空中地面皆可。'),
-        'JA': ('マルチロール機', 'マルチロール機を要請する。空中・地上を問わず最も近い敵を攻撃する。'),
-        'EN': ('Multirole Fighters', 'Calls multirole fighters that attack the nearest target, in the air or on the ground.'),
-    },
-    'fighter': {
-        'SC': ('制空战斗机', '呼叫制空战斗机，优先攻击空中目标。'),
-        'CN': ('制空戰鬥機', '呼叫制空戰鬥機，優先攻擊空中目標。'),
-        'JA': ('制空戦闘機', '制空戦闘機を要請する。空中の敵を優先して攻撃する。'),
-        'EN': ('Air Superiority Fighters', 'Calls air superiority fighters that attack flying targets first.'),
-    },
-    'carrier': {
-        'SC': ('无人机母舰', '呼叫无人机母舰：在空中盘旋，派出无人机攻击范围内的敌人。'),
-        'CN': ('無人機母艦', '呼叫無人機母艦：在空中盤旋，派出無人機攻擊範圍內的敵人。'),
-        'JA': ('無人機母艦', '無人機母艦を要請する。上空を旋回し、範囲内の敵へ無人機を送り込む。'),
-        'EN': ('Drone Carrier', 'Calls a drone carrier that hovers overhead and sends its drones at enemies in range.'),
-    },
-    'blast_carrier': {
-        'SC': ('自爆无人机母舰', '呼叫自爆无人机母舰：悬停在空中，放出近炸无人机，冲到敌人身边自爆。'),
-        'CN': ('自爆無人機母艦', '呼叫自爆無人機母艦：懸停在空中，放出近炸無人機，衝到敵人身邊自爆。'),
-        'JA': ('自爆ドローン母艦', '自爆ドローン母艦を要請する。上空に滞空し、敵に突っ込んで近接起爆するドローンを放つ。'),
-        'EN': ('Blast Drone Carrier', 'Calls a carrier that hovers overhead and sends drones that dive at the enemy and blow up next to it.'),
-    },
-    'sub': {
-        'SC': ('潜水母舰支援', '呼叫潜水母舰在信号弹前方浮上：舰身可以站人，炮塔机炮和导弹自动攻击，导弹在舰内装填，随玩家移动，留到任务结束（同时最多 3 艘）。'),
-        'CN': ('潛水母艦支援', '呼叫潛水母艦在信號彈前方浮上：艦身可以站人，砲塔機砲和飛彈自動攻擊，飛彈在艦內裝填，隨玩家移動，留到任務結束（同時最多 3 艘）。'),
-        'JA': ('潜水母艦支援', '潜水母艦を信号弾の先に浮上させる。甲板に乗れ、砲塔の機関砲とミサイルで自動攻撃する。ミサイルの装填は潜水母艦内でおこなわれる。プレイヤーに随伴し、作戦終了まで留まる（同時に3隻まで）。'),
-        'EN': ('Submarine Carrier', 'Surfaces a submarine carrier past the flare: stand on its deck while its turret guns and missiles attack on their own (missiles reload aboard). It follows you for the rest of the mission (three at most).'),
-    },
-    'gunship': {
-        'SC': ('炮舰机', '呼叫炮舰机：在目标点上空大圈盘旋，从机上向附近的地面敌人持续炮击，不俯冲。'),
-        'CN': ('砲艦機', '呼叫砲艦機：在目標點上空大圈盤旋，從機上向附近的地面敵人持續砲擊，不俯衝。'),
-        'JA': ('ガンシップ', 'ガンシップを要請する。上空を大きく旋回しながら、付近の地上の敵へ機上から砲撃を続ける。急降下はしない。'),
-        'EN': ('Fixed-wing Gunship', 'Calls a fixed-wing gunship that circles wide overhead and keeps shelling nearby ground enemies from the air, without diving.'),
-    },
-    'doll_carrier': {
-        'SC': ('人偶无人机母舰', '呼叫人偶无人机母舰：放出挂着会唱歌跳舞的人偶的无人机，慢慢飞到敌人中间吸引火力，然后自爆。'),
-        'CN': ('人偶無人機母艦', '呼叫人偶無人機母艦：放出掛著會唱歌跳舞的人偶的無人機，慢慢飛到敵人中間吸引火力，然後自爆。'),
-        'JA': ('人形ドローン母艦', '人形ドローン母艦を要請する。歌って踊る人形を吊るしたドローンが敵の中へ進み、注意を引いてから自爆する。'),
-        'EN': ('Doll Drone Carrier', 'Calls a carrier whose drones carry a singing, dancing doll into the enemy, draw their fire, and blow up.'),
-    },
-    'heli': {
-        'SC': ('武装直升机', '呼叫武装直升机，攻击附近的敌人。'),
-        'CN': ('武裝直升機', '呼叫武裝直升機，攻擊附近的敵人。'),
-        'JA': ('武装ヘリ', '武装ヘリを要請する。付近の敵を攻撃する。'),
-        'EN': ('Gunships', 'Calls gunships that attack nearby enemies.'),
-    },
-}
-MODES: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {  # (hold, follow): (name suffix, sentence)
-    'SC': (('·守点', '守在标记的地点上空。'), ('·跟随', '跟随呼叫者行动。')),
-    'CN': (('·守點', '守在標記的地點上空。'), ('·跟隨', '跟隨呼叫者行動。')),
-    'JA': (('（拠点）', 'マーカーで指定した地点の上空を守る。'), ('（随伴）', '要請した隊員に随伴する。')),
-    'EN': ((' (Hold)', 'They hold the marked point.'), (' (Escort)', 'They escort the caller.')),
-}
-NOTES: dict[str, str] = {
-    'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通 KM6 轰炸。',
-    'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通 KM6 轟炸。',
-    'JA': 'EDF6VehicleCrew プラグインが必要。未導入時は通常の KM6 による爆撃になる。',
-    'EN': 'Needs the EDF6VehicleCrew plugin; without it this is a plain KM6 bomber call.',
-}
-
-
-VEHICLE_NOTES: dict[str, str] = {
-    'SC': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 写入的 EDF6VC_PJET_*.SGO。',
-    'CN': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 寫入的 EDF6VC_PJET_*.SGO。',
-    'JA': 'EDF6VehicleCrew プラグインと tools/make_jets.py が書き出す EDF6VC_PJET_*.SGO が必要。',
-    'EN': 'Needs the EDF6VehicleCrew plugin and the EDF6VC_PJET_*.SGO files tools/make_jets.py writes.',
-}
-
-
-def _lang(lang: str) -> str:
-    return 'EN' if lang == 'KR' else lang
-
-
-def call_name(call: Call, lang: str) -> str:
-    lang = _lang(lang)
-    if call.vehicle:
-        return KINDS[call.kind][lang][0]
-    return KINDS[call.kind][lang][0] + MODES[lang][call.follow][0]
-
-
-def call_description(call: Call, lang: str) -> str:
-    lang = _lang(lang)
-    if call.vehicle:
-        return KINDS[call.kind][lang][1] + '\n\n' + VEHICLE_NOTES[lang]
-    sep = ' ' if lang == 'EN' else ''
-    return KINDS[call.kind][lang][1] + sep + MODES[lang][call.follow][1] + '\n\n' + NOTES[lang]
+class Misaligned(Exception):
+    """The texts no longer have a row per table row: a run of an older version that died half way, or another
+    tool. Nothing can be stacked on it; repair restores the state before our first install."""
 
 
 def sgo_file(call: Call) -> str:
@@ -239,12 +84,16 @@ def sgo_file(call: Call) -> str:
     return f'WEAPON/{call.id.upper()}.SGO'
 
 
+def vehicle_file(call: Call) -> str:
+    return f'OBJECT/{call.vehicle.upper()}.SGO'
+
+
 # ---------------------------------------------------------------- reading the base
 
 
 @lru_cache(maxsize=None)
-def _game(game_root: str) -> gen.Game:
-    return gen.Game(game_root)
+def _game(game_root: str) -> vc.Game:
+    return vc.Game(game_root)
 
 
 def stock(game_root: str, rel: str) -> bytes:
@@ -252,9 +101,13 @@ def stock(game_root: str, rel: str) -> bytes:
     return _game(game_root).read(folder, name)
 
 
+def _mods(game_root: str, *rel: str) -> str:
+    return os.path.join(game_root, 'Mods', *[p for r in rel for p in r.split('/')])
+
+
 def base(game_root: str, rel: str) -> bytes:
     """The installed Mods copy when present, else Root.cpk."""
-    path = os.path.join(game_root, 'Mods', *rel.split('/'))
+    path = _mods(game_root, rel)
     if os.path.isfile(path):
         with open(path, 'rb') as f:
             return f.read()
@@ -269,27 +122,8 @@ def row_ids(table: bytes) -> list[str]:
     return [r.items[0] for r in dsgo.parse(table).root.get('table').items]
 
 
-def our_count(ids: list[str]) -> int:
-    """How many of our rows `ids` holds (an older install holds a prefix of IDS)."""
-    return sum(1 for x in ids if x in IDS)
-
-
-def our_block(ids: list[str]) -> int | None:
-    """Index of our first row, None when none is present. Raises unless the rows there are IDS, or a
-    prefix of it (an older install), contiguous and in order."""
-    present = [i for i, x in enumerate(ids) if x in IDS]
-    if not present:
-        return None
-    at = present[0]
-    n = len(present)
-    if ids[at:at + n] != list(IDS[:n]):
-        raise ValueError(f'our rows are partial or out of order at {present}: '
-                         f'{[ids[i] for i in present]}')
-    return at
-
-
 def template_of(call: Call) -> str:
-    return VEHICLE_TEMPLATE if call.vehicle else TEMPLATE
+    return VEHICLE_TEMPLATE if call.brings == 'vehicle' else TEMPLATE
 
 
 def _template_index(ids: list[str], template: str = TEMPLATE) -> int:
@@ -297,13 +131,73 @@ def _template_index(ids: list[str], template: str = TEMPLATE) -> int:
     return upper.index(template.upper())
 
 
+def check_aligned(game_root: str, n: int) -> None:
+    """Every text has a row per table row (`n`), else Misaligned (with what to do)."""
+    bad = [(rel, len(_rows(dsgo.parse(base(game_root, rel)), rel))) for rel in TEXTS]
+    bad = [(rel, k) for rel, k in bad if k != n]
+    if not bad:
+        return
+    have = os.path.isfile(_manifest_path(game_root))
+    fix = ('run `python tools/call_weapons.py repair` (or the installer, which offers it): it puts the weapon table '
+           'and its texts back as they were before EDF6VehicleCrew first installed (Mods/.edf6vc_backup); then install '
+           'again' if have else 'EDF6VehicleCrew never installed into these files, so it has no copy of them to restore: '
+           'reinstall the mod that wrote them, or delete them from Mods/WEAPON to fall back to the stock ones')
+    raise Misaligned(f'the weapon texts do not line up with the weapon table ({n} rows): '
+                     + ', '.join(f'{rel} has {k}' for rel, k in bad) + f'. To fix it, {fix}.')
+
+
+# ---------------------------------------------------------------- where the rows go
+
+
+@dataclass
+class Plan:
+    at: dict[str, int]      # call id -> its row index in the result
+    appended: list[str]     # the call ids added at the table's end, in that order
+
+
+def plan_rows(ids: list[str]) -> Plan:
+    """Where each call's row goes in a table whose row ids are `ids`: a row of ours already there (or the
+    placeholder an uninstall left) stays where it is, whatever order an older install put them in; the rest go
+    at the end in CALLS order. Raises when a call has two rows."""
+    at: dict[str, int] = {}
+    for i, x in enumerate(ids):
+        c = calls.slot_of(x)
+        if c is None:
+            continue
+        if c in at:
+            raise ValueError(f'{c} has two rows in the weapon table: {at[c]} and {i}')
+        at[c] = i
+    appended = [c for c in IDS if c not in at]
+    for k, c in enumerate(appended):
+        at[c] = len(ids) + k
+    return Plan(at, appended)
+
+
+def tail_start(ids: list[str]) -> int:
+    """Where the run of our rows (or placeholders) that ends the table starts: only those can be deleted
+    without moving another row."""
+    i = len(ids)
+    while i > 0 and calls.slot_of(ids[i - 1]) is not None:
+        i -= 1
+    return i
+
+
+def _put(rows: list, at: int, row: Node) -> None:
+    if at < len(rows):
+        rows[at] = row
+    elif at == len(rows):
+        rows.append(row)
+    else:
+        raise AssertionError(f'row {at} past the end ({len(rows)})')
+
+
 # ---------------------------------------------------------------- building
 
 
-# The stock heli's weapons in the request's vehicle setup and resources -> the player jet's (gen.JETS).
+# The stock heli's weapons in the request's vehicle setup and resources -> the player jet's (vcobjects.JETS).
 _VEHICLE_SWAP = {
-    'app:/weapon/v_506heli_gatling01_l.sgo': gen._GUNS[0],
-    'app:/weapon/v_506heli_gatling01_r.sgo': gen._GUNS[1],
+    'app:/weapon/v_506heli_gatling01_l.sgo': vc._GUNS[0],
+    'app:/weapon/v_506heli_gatling01_r.sgo': vc._GUNS[1],
 }
 
 
@@ -339,11 +233,11 @@ def vehicle_durability(game_root: str, call: Call) -> float:
     """What the menu shows: the jet's durability times the request's HP multiplier."""
     root = dsgo.parse(stock(game_root, f'WEAPON/{VEHICLE_TEMPLATE.upper()}.SGO')).root
     mult = float(root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0])
-    return gen.JETS[call.jet].durability * mult
+    return vc.JETS[call.jet].durability * mult
 
 
 def weapon_sgo(template: bytes, call: Call) -> bytes:
-    if call.vehicle:
+    if call.brings == 'vehicle':
         return vehicle_sgo(template, call)
     doc = dsgo.parse(template)
     r = doc.root
@@ -351,7 +245,7 @@ def weapon_sgo(template: bytes, call: Call) -> bytes:
     reload = r.get('ReloadTime')
     reload.items[0] = float(call.reload)
     custom = r.get('Ammo_CustomParameter').items[2]
-    custom.items[1] = float(call.planes)
+    custom.items[1] = float(call.count)
     for lang in LANGS:
         key = f'name.{lang.lower()}'
         if key in r.names.values():
@@ -374,7 +268,7 @@ def _table_row(template: Node, call: Call) -> Node:
 def _text_row(template: Node, call: Call, lang: str, durability: float | None = None) -> Node:
     row = copy.deepcopy(template)
     row.items[0] = call_name(call, lang)
-    row.items[1] = call_description(call, lang)
+    row.items[1] = calls.call_description(call, lang)
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
@@ -387,115 +281,208 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
     return row
 
 
-def _place(rows: list, new: list, at: int | None, old: int) -> int:
-    """Puts the block of new rows at `at` (replacing our `old` rows) or appends it; returns where it went."""
-    if at is None:
-        at = len(rows)
-        rows.extend(new)
-    else:
-        rows[at:at + old] = new
-    return at
+def _retired_table_row(template: Node, call: Call) -> Node:
+    """The placeholder for an uninstalled call: the template's own stock row (its stock SGO, level, acquire)."""
+    row = copy.deepcopy(template)
+    row.items[0] = calls.retired_id(call.id)
+    return row
+
+
+def _retired_text_row(template: Node, call: Call, lang: str) -> Node:
+    row = copy.deepcopy(template)
+    row.items[0] = calls.retired_name(call, lang)
+    row.items[1] = calls.retired_description(lang, str(template.items[0]))
+    return row
+
+
+@dataclass
+class Shared:
+    """The shared table and its texts as they are now (Mods, else stock), parsed."""
+    table: dsgo.Document
+    texts: dict[str, dsgo.Document]
+
+    @property
+    def rows(self) -> list:
+        return _rows(self.table, TABLE)
+
+    @property
+    def ids(self) -> list[str]:
+        return [r.items[0] for r in self.rows]
+
+    def text_rows(self, rel: str) -> list:
+        return _rows(self.texts[rel], rel)
+
+
+def load_shared(game_root: str) -> Shared:
+    table = dsgo.parse(base(game_root, TABLE))
+    shared = Shared(table, {rel: dsgo.parse(base(game_root, rel)) for rel in TEXTS})
+    check_aligned(game_root, len(shared.rows))
+    return shared
 
 
 def stack(game_root: str) -> dict[str, bytes]:
-    """The SGOs and the shared table + texts with our block in, keyed by path under Mods/."""
-    table_doc = dsgo.parse(base(game_root, TABLE))
-    rows = _rows(table_doc, TABLE)
-    ids = [r.items[0] for r in rows]
-    at = our_block(ids)
-    old = our_count(ids)
-    if at is not None and old < len(IDS) and ids[at + old:]:
-        raise SystemExit(f'our block would grow by {len(IDS) - old} rows and move the rows after it '
-                         f'(saves refer to them by index): {ids[at + old:]}')
-    tpl = {t: _template_index(ids, t) for t in (TEMPLATE, VEHICLE_TEMPLATE)}
-    out: dict[str, bytes] = {}
+    """The SGOs and the shared table + texts with every call in (plan_rows), keyed by path under Mods. Reads
+    only; raises (Misaligned, ValueError) before anything could be written."""
+    s = load_shared(game_root)
+    before = s.ids
+    plan = plan_rows(before)
+    tpl = {t: _template_index(before, t) for t in (TEMPLATE, VEHICLE_TEMPLATE)}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
-    for call in CALLS:
-        out[sgo_file(call)] = weapon_sgo(template_sgo[template_of(call)], call)
-    new_rows = [_table_row(rows[tpl[template_of(call)]], call) for call in CALLS]
-    durability = {c.id: vehicle_durability(game_root, c) if c.vehicle else None for c in CALLS}
-    placed = _place(rows, new_rows, at, old)
-    out[TABLE] = dsgo.write(table_doc)
+    out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c) for c in CALLS}
+    order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
+    rows = s.rows
+    templates = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
+    for c in order:
+        _put(rows, plan.at[c.id], _table_row(templates[c.id], c))
+    out[TABLE] = dsgo.compact(s.table)
+    durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
     for lang, rel in zip(LANGS, TEXTS):
-        doc = dsgo.parse(base(game_root, rel))
-        text = _rows(doc, rel)
-        if len(text) != len(ids):  # text rows are index-aligned with the table
-            raise ValueError(f'{rel}: {len(text)} rows, base table has {len(ids)}')
-        new_text = [_text_row(text[tpl[template_of(call)]], call, lang, durability[call.id]) for call in CALLS]
-        if _place(text, new_text, at, old) != placed:
-            raise AssertionError(rel)
-        out[rel] = dsgo.write(doc)
-    verify(game_root, out)
+        text = s.text_rows(rel)
+        text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
+        for c in order:
+            _put(text, plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id]))
+        out[rel] = dsgo.compact(s.texts[rel])
+    verify(game_root, out, plan)
     return out
 
 
-def verify(game_root: str, out: dict[str, bytes]) -> None:
-    """Before anything is written: every other row unchanged, the table grown by exactly the rows we did
-    not have yet, our block contiguous, the texts as long as the table."""
-    before = [r.items[0] for r in _rows(dsgo.parse(base(game_root, TABLE)), TABLE)]
-    had = our_block(before) is not None
-    old = our_count(before)
-    after_ids = row_ids(out[TABLE])
-    at = our_block(after_ids)
-    if at is None:
-        raise ValueError('our rows missing from the result')
-    grown = len(after_ids) - len(before)
-    if grown != len(IDS) - old:
-        raise ValueError(f'table grew by {grown} rows (had {old} of ours)')
+def verify(game_root: str, out: dict[str, bytes], plan: Plan) -> None:
+    """Before anything is written: every row not ours unchanged at its index, each of ours where plan_rows put
+    it, the table grown by exactly the rows appended, the texts as long as the table."""
+    before = load_shared(game_root)
+    ids = before.ids
+    after = row_ids(out[TABLE])
+    if len(after) != len(ids) + len(plan.appended):
+        raise ValueError(f'the table grew by {len(after) - len(ids)} rows, {len(plan.appended)} were appended')
+    for cid, i in plan.at.items():
+        if after[i] != cid:
+            raise ValueError(f'row {i} is {after[i]}, expected {cid}')
+    ours = set(plan.at.values())
     for rel in SHARED:
-        old_all = [dsgo.to_py(r) for r in _rows(dsgo.parse(base(game_root, rel)), rel)]
+        old = [dsgo.to_py(r) for r in (before.rows if rel == TABLE else before.text_rows(rel))]
         new = [dsgo.to_py(r) for r in _rows(dsgo.parse(out[rel]), rel)]
-        if len(new) != len(after_ids):
-            raise ValueError(f'{rel}: {len(new)} rows, table has {len(after_ids)}')
-        old_rest = old_all[:at] + old_all[at + old:]
-        new_rest = new[:at] + new[at + len(IDS):]
-        if old_rest != new_rest:
-            bad = next(i for i, (a, b) in enumerate(zip(old_rest, new_rest)) if a != b)
-            raise ValueError(f'{rel}: another row changed (row {bad} outside our block)')
+        if len(new) != len(after):
+            raise ValueError(f'{rel}: {len(new)} rows, the table has {len(after)}')
+        for i, row in enumerate(old):
+            if i not in ours and new[i] != row:
+                raise ValueError(f'{rel}: row {i} is not ours and changed')
 
 
-def missing_rows(game_root: str) -> list[str]:
-    """Our weapon ids not in the effective (Mods, else stock) weapon table."""
-    ids = set(row_ids(base(game_root, TABLE)))
-    return [x for x in IDS if x not in ids]
+def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[str]]:
+    """The shared table + texts with every row of ours a placeholder, or (delete_rows) deleted when it is in the
+    run of ours that ends the table. Returns (files, the ids whose rows are deleted)."""
+    s = load_shared(game_root)
+    ids = s.ids
+    plan = plan_rows(ids)
+    present = {c: i for c, i in plan.at.items() if i < len(ids)}
+    cut = tail_start(ids) if delete_rows else len(ids)
+    deleted = sorted((c for c, i in present.items() if i >= cut), key=lambda c: present[c])
+    tpl = {t: _template_index(ids, t) for t in (TEMPLATE, VEHICLE_TEMPLATE)}
+    by_id = {c.id: c for c in CALLS}
+    rows = s.rows
+    for cid, i in present.items():
+        if i < cut:
+            rows[i] = _retired_table_row(rows[tpl[template_of(by_id[cid])]], by_id[cid])
+    del rows[cut:]
+    out = {TABLE: dsgo.compact(s.table)}
+    for lang, rel in zip(LANGS, TEXTS):
+        text = s.text_rows(rel)
+        for cid, i in present.items():
+            if i < cut:
+                text[i] = _retired_text_row(text[tpl[template_of(by_id[cid])]], by_id[cid], lang)
+        del text[cut:]
+        out[rel] = dsgo.compact(s.texts[rel])
+    after = row_ids(out[TABLE])
+    if after[:cut] != [x if calls.slot_of(x) is None else calls.retired_id(calls.slot_of(x)) for x in ids[:cut]]:
+        raise AssertionError('retire moved a row')
+    return out, deleted
 
 
-# ---------------------------------------------------------------- game dir
-
-
-def game_running() -> bool:
-    r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {PROCESS}', '/NH'],
-                       capture_output=True, text=True, errors='replace')
-    return PROCESS.lower() in r.stdout.lower()
-
-
-def _sha(path: str) -> str:
-    with open(path, 'rb') as f:
-        return hashlib.sha256(f.read()).hexdigest()
+# ---------------------------------------------------------------- game dir: transaction, manifest
 
 
 def _manifest_path(game_root: str) -> str:
-    return os.path.join(game_root, 'Mods', MANIFEST)
+    return _mods(game_root, MANIFEST)
 
 
-def _load_manifest(game_root: str) -> dict:
+def load_manifest(game_root: str) -> dict:
     path = _manifest_path(game_root)
+    manifest = {'created': [], 'replaced': [], 'written': {}, 'rows': {}}
     if os.path.isfile(path):
         with open(path, encoding='utf-8') as f:
-            return json.load(f)
-    return {'created': [], 'replaced': [], 'written': {}}
+            manifest.update(json.load(f))
+    return manifest
 
 
 def _save_manifest(game_root: str, manifest: dict) -> None:
-    data = json.dumps(manifest, indent=1).encode('utf-8')
-    with open(_manifest_path(game_root), 'wb') as f:
-        f.write(data)
+    modfiles.atomic_write(_manifest_path(game_root), json.dumps(manifest, indent=1).encode('utf-8'))
 
 
-def _write(path: str, data: bytes) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb') as f:
-        f.write(data)
+def recover(game_root: str) -> bool:
+    """Rolls back a run that died between its first and last write (its journal is still there): every file it
+    listed back as it was before that run. True when there was one."""
+    journal = _mods(game_root, JOURNAL)
+    if not os.path.isfile(journal):
+        return False
+    with open(journal, encoding='utf-8') as f:
+        existed: dict[str, bool] = json.load(f)
+    for rel, had in existed.items():
+        path = _mods(game_root, rel)
+        if had:
+            with open(_mods(game_root, BACKUP, 'txn', rel), 'rb') as f:
+                modfiles.atomic_write(path, f.read())
+        elif os.path.isfile(path):
+            os.remove(path)
+    os.remove(journal)
+    shutil.rmtree(_mods(game_root, BACKUP, 'txn'), ignore_errors=True)
+    return True
+
+
+def commit(game_root: str, changes: dict[str, bytes | None]) -> None:
+    """Writes every file in `changes` (None: delete it) or none: see the module doc."""
+    txn = _mods(game_root, BACKUP, 'txn')
+    shutil.rmtree(txn, ignore_errors=True)
+    existed: dict[str, bool] = {}
+    for rel in changes:
+        path = _mods(game_root, rel)
+        existed[rel] = os.path.isfile(path)
+        if existed[rel]:
+            os.makedirs(os.path.dirname(_mods(game_root, BACKUP, 'txn', rel)), exist_ok=True)
+            shutil.copy2(path, _mods(game_root, BACKUP, 'txn', rel))
+    modfiles.atomic_write(_mods(game_root, JOURNAL), json.dumps(existed, indent=1).encode('utf-8'))
+    try:
+        for rel, data in changes.items():
+            path = _mods(game_root, rel)
+            if data is not None:
+                modfiles.atomic_write(path, data)
+            elif os.path.isfile(path):
+                os.remove(path)
+    except BaseException:
+        recover(game_root)
+        raise
+    os.remove(_mods(game_root, JOURNAL))
+    shutil.rmtree(txn, ignore_errors=True)
+
+
+def _first_backup(game_root: str, manifest: dict, rels: list[str]) -> None:
+    """Keeps, once, each file as it was before our first write to it (repair restores these)."""
+    for rel in rels:
+        if rel in manifest['created'] or rel in manifest['replaced']:
+            continue
+        path = _mods(game_root, rel)
+        if os.path.isfile(path):
+            bak = _mods(game_root, BACKUP, rel)
+            os.makedirs(os.path.dirname(bak), exist_ok=True)
+            shutil.copy2(path, bak)
+            manifest['replaced'].append(rel)
+        else:
+            manifest['created'].append(rel)
+
+
+def changed_since(game_root: str, manifest: dict, rels: list[str]) -> list[str]:
+    """The files among `rels` that are not what we last wrote into them (another tool changed them since)."""
+    return [rel for rel in rels if rel in manifest['written']
+            and modfiles.sha256_file(_mods(game_root, rel)) not in (None, manifest['written'][rel])]
 
 
 def build(game_root: str, outdir: str) -> dict[str, bytes]:
@@ -503,159 +490,178 @@ def build(game_root: str, outdir: str) -> dict[str, bytes]:
         raise SystemExit('build writes outside the game dir; use install for that')
     files = stack(game_root)
     for rel, data in files.items():
-        _write(os.path.join(outdir, *rel.split('/')), data)
+        modfiles.atomic_write(os.path.join(outdir, *rel.split('/')), data)
     return files
 
 
-def install(game_root: str) -> dict[str, str]:
-    """Returns {Mods-relative path: sha256} of the files written."""
-    if game_running():
+def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, str]:
+    """Writes `files` (stack, made now when None) in one transaction; returns {path under Mods: sha256}."""
+    if modfiles.game_running():
         raise SystemExit(f'{PROCESS} is running: close the game first')
-    mods = os.path.join(game_root, 'Mods')
-    manifest = _load_manifest(game_root)
-    files = stack(game_root)
-    for rel in files:  # back up what we overwrite the first time, before writing anything
-        dst = os.path.join(mods, *rel.split('/'))
-        if rel in manifest['created'] or rel in manifest['replaced']:
-            continue
-        if os.path.isfile(dst):
-            bak = os.path.join(mods, BACKUP, *rel.split('/'))
-            os.makedirs(os.path.dirname(bak), exist_ok=True)
-            shutil.copy2(dst, bak)
-            manifest['replaced'].append(rel)
-        else:
-            manifest['created'].append(rel)
+    if recover(game_root):
+        print('rolled back the weapon table files of an earlier run that did not finish')
+    files = stack(game_root) if files is None else files
+    missing = [vehicle_file(c) for c in CALLS if c.vehicle and not os.path.isfile(_mods(game_root, vehicle_file(c)))]
+    if missing:
+        raise SystemExit(f'{", ".join(missing)} not installed: run python tools/make_jets.py first')
+    manifest = load_manifest(game_root)
+    for rel in changed_since(game_root, manifest, list(files)):
+        note = 'its other rows are kept' if rel in SHARED else 'overwritten'
+        print(f'note: {rel} was changed by another tool since our last install ({note})')
+    old_rows = dict(manifest['rows'])
+    _first_backup(game_root, manifest, list(files))
     _save_manifest(game_root, manifest)
-    for rel, data in files.items():
-        dst = os.path.join(mods, *rel.split('/'))
-        _write(dst, data)
-        manifest['written'][rel] = _sha(dst)
-        print(f'installed {rel}')
+    commit(game_root, dict(files))
+    ids = row_ids(files[TABLE])
+    manifest['written'] = {rel: modfiles.sha256(data) for rel, data in files.items()}
+    manifest['rows'] = {c: ids.index(c) for c in IDS}
     _save_manifest(game_root, manifest)
-    return {rel: manifest['written'][rel] for rel in files}
+    moved = {c: (old_rows[c], manifest['rows'][c]) for c in old_rows if old_rows[c] != manifest['rows'].get(c)}
+    for c, (was, now) in moved.items():
+        print(f'WARNING: {c} was row {was}, now {now}: another tool rewrote the weapon table without it; a save '
+              f'that had it equipped or owned refers to row {was}')
+    led = ledger.Ledger(game_root)
+    for c in CALLS:
+        if c.vehicle:
+            led.need(OWNER, vehicle_file(c))
+    return dict(manifest['written'])
 
 
-def _without_our_rows(game_root: str, at: int, n: int) -> dict[str, bytes]:
-    """The shared files as they are now, minus our block."""
-    out: dict[str, bytes] = {}
-    table_rows = -1
-    for rel in SHARED:
-        doc = dsgo.parse(base(game_root, rel))
-        rows = _rows(doc, rel)
-        if rel == TABLE:
-            table_rows = len(rows)
-        elif len(rows) != table_rows:
-            raise SystemExit(f'{rel}: {len(rows)} rows, table has {table_rows}')
-        del rows[at:at + n]
-        out[rel] = _compact(doc)
-    return out
-
-
-def _compact(doc: dsgo.Document) -> bytes:
-    """dsgo.write keeps every pool string it parsed, so our rows' names would stay behind in the pool
-    after the rows are gone. Parsing the output keeps only the referenced strings, in their order, so
-    a table that is back to stock is byte-identical to it again."""
-    return dsgo.write(dsgo.parse(dsgo.write(doc)))
-
-
-def uninstall(game_root: str, unequipped: bool, force: bool) -> None:
-    if not unequipped:
-        raise SystemExit('unequip these call weapons in every save first (a save with one equipped '
-                         'crashes the game once its row is gone), then rerun with --unequipped')
-    if game_running():
+def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = False) -> None:
+    """Our rows become placeholders (or, delete_rows, the ones ending the table are deleted), our SGOs go."""
+    if modfiles.game_running():
         raise SystemExit(f'{PROCESS} is running: close the game first')
-    mods = os.path.join(game_root, 'Mods')
-    manifest = _load_manifest(game_root)
-    ids = row_ids(base(game_root, TABLE))
-    at = our_block(ids)
-    shared: dict[str, bytes] = {}
-    if at is not None:
-        n = our_count(ids)
-        later = ids[at + n:]
-        if later and not force:  # saves refer to rows by index: removing ours shifts these
-            raise SystemExit(f'rows after ours would shift down by {n}: {later}; use --force')
-        shared = _without_our_rows(game_root, at, n)
+    if recover(game_root):
+        print('rolled back the weapon table files of an earlier run that did not finish')
+    manifest = load_manifest(game_root)
+    shared, deleted = retire(game_root, delete_rows)
+    if deleted and not unequipped:
+        raise SystemExit(f'deleting the rows of {", ".join(deleted)}: unequip these weapons in every save first (a '
+                         'save with one equipped crashes the game once its row is gone), then rerun with --unequipped')
+    changes: dict[str, bytes | None] = {}
     for rel, data in shared.items():
-        path = os.path.join(mods, *rel.split('/'))
         if rel in manifest['created'] and data == stock(game_root, rel):
-            os.remove(path)
-            print(f'removed {rel} (back to stock)')
-            continue
-        _write(path, data)  # other tools' rows stay
-        print(f'removed our rows from {rel}')
-    for call in CALLS:
-        rel = sgo_file(call)
-        path = os.path.join(mods, *rel.split('/'))
-        bak = os.path.join(mods, BACKUP, *rel.split('/'))
+            changes[rel] = None   # we made it and nobody else's rows are left in it
+        elif data != base(game_root, rel):
+            changes[rel] = data
+    for c in CALLS:
+        rel = sgo_file(c)
+        path = _mods(game_root, rel)
+        bak = _mods(game_root, BACKUP, rel)
         if rel in manifest['replaced'] and os.path.isfile(bak):
-            shutil.copy2(bak, path)
-            print(f'restored {rel}')
+            with open(bak, 'rb') as f:
+                changes[rel] = f.read()
         elif os.path.isfile(path):
-            os.remove(path)
-            print(f'removed {rel}')
-    shutil.rmtree(os.path.join(mods, BACKUP), ignore_errors=True)
+            if rel in changed_since(game_root, manifest, [rel]):
+                print(f'kept {rel}: another tool changed it since our install')
+                continue
+            changes[rel] = None
+    _first_backup(game_root, manifest, list(shared))
+    _save_manifest(game_root, manifest)
+    commit(game_root, changes)
+    for rel, data in changes.items():
+        print(f'{"removed" if data is None else "wrote"} {rel}')
+    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    ids = row_ids(base(game_root, TABLE))
+    left = [x for x in ids if calls.slot_of(x)]
+    if left:   # placeholders stay ours: a later install takes their rows back, repair can still restore
+        manifest['written'] = {rel: modfiles.sha256(d) for rel, d in changes.items() if d is not None}
+        manifest['rows'] = {calls.slot_of(x): ids.index(x) for x in left}
+        _save_manifest(game_root, manifest)
+        print(f'{len(left)} rows are placeholders now (EDF6VC_RETIRED_*, stock weapons), keeping their row numbers')
+        return
+    shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
     if os.path.isfile(_manifest_path(game_root)):
         os.remove(_manifest_path(game_root))
 
 
+def repair(game_root: str) -> list[str]:
+    """The shared table and texts back to before our first install (the copies install kept), our SGOs gone;
+    returns what it changed. Another tool's later edits to those files are lost (install reports them)."""
+    if modfiles.game_running():
+        raise SystemExit(f'{PROCESS} is running: close the game first')
+    recover(game_root)
+    manifest = load_manifest(game_root)
+    if not os.path.isfile(_manifest_path(game_root)):
+        raise SystemExit('EDF6VehicleCrew never installed its call weapons here: nothing to restore')
+    changes: dict[str, bytes | None] = {}
+    for rel in SHARED + [sgo_file(c) for c in CALLS]:
+        bak = _mods(game_root, BACKUP, rel)
+        if rel in manifest['replaced'] and os.path.isfile(bak):
+            with open(bak, 'rb') as f:
+                changes[rel] = f.read()
+        elif rel in manifest['created'] or (rel not in SHARED and os.path.isfile(_mods(game_root, rel))):
+            changes[rel] = None
+    commit(game_root, changes)
+    shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
+    os.remove(_manifest_path(game_root))
+    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    return sorted(changes)
+
+
 def check(game_root: str) -> bool:
-    """Prints the state of the installed tables; True when our block is in and everything lines up."""
-    ids = row_ids(base(game_root, TABLE))
-    missing = missing_rows(game_root)
-    print(f'{TABLE}: {len(ids)} rows ({"Mods" if os.path.isfile(os.path.join(game_root, "Mods", TABLE)) else "stock"})')
+    """Prints the state of the installed tables; True when every call is in, at the row it was installed at,
+    and everything lines up."""
     ok = True
-    try:
-        at = our_block(ids)
-    except ValueError as e:
-        print(f'  NOT contiguous: {e}')
-        at, ok = None, False
-    if at is None:
-        print(f'  our rows missing: {missing}')
+    if os.path.isfile(_mods(game_root, JOURNAL)):
+        print('an earlier run did not finish: the next install or uninstall rolls it back first')
         ok = False
-    else:
-        n = our_count(ids)
-        print(f'  our rows contiguous at {at}..{at + n - 1}:')
-        for i, x in enumerate(IDS[:n]):
-            print(f'    {at + i:5d} {x}')
-        if n < len(IDS):
-            print(f'  older install: {len(IDS) - n} rows not in yet ({", ".join(IDS[n:])}); rerun install')
-            ok = False
-        later = ids[at + n:]
-        if later:
-            print(f'  rows after ours: {later}')
+    table = dsgo.parse(base(game_root, TABLE))
+    ids = [r.items[0] for r in _rows(table, TABLE)]
+    print(f'{TABLE}: {len(ids)} rows ({"Mods" if os.path.isfile(_mods(game_root, TABLE)) else "stock"})')
     for rel in TEXTS:
         n = len(_rows(dsgo.parse(base(game_root, rel)), rel))
         aligned = n == len(ids)
         ok &= aligned
-        print(f'{rel}: {n} rows {"aligned" if aligned else "NOT ALIGNED with the table"}')
-    for call in CALLS:
-        path = os.path.join(game_root, 'Mods', *sgo_file(call).split('/'))
-        if not os.path.isfile(path):
-            print(f'{sgo_file(call)}: missing')
+        print(f'{rel}: {n} rows {"aligned" if aligned else "NOT ALIGNED with the table (python tools/call_weapons.py repair)"}')
+    try:
+        plan = plan_rows(ids)
+    except ValueError as e:
+        print(f'  {e}')
+        return False
+    rows = load_manifest(game_root)['rows']
+    for c in CALLS:
+        i = plan.at[c.id]
+        state = 'missing' if i >= len(ids) else 'placeholder' if ids[i] != c.id else 'in'
+        moved = f' (installed at {rows[c.id]})' if c.id in rows and rows[c.id] != i and state != 'missing' else ''
+        print(f'  {i if state != "missing" else "-":>5} {c.id}: {state}{moved}')
+        ok &= state == 'in' and not moved
+        if state == 'in' and not os.path.isfile(_mods(game_root, sgo_file(c))):
+            print(f'        {sgo_file(c)} missing')
+            ok = False
+        if state == 'in' and c.vehicle and not os.path.isfile(_mods(game_root, vehicle_file(c))):
+            print(f'        {vehicle_file(c)} missing (python tools/make_jets.py)')
             ok = False
     return ok
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('action', choices=('build', 'install', 'uninstall', 'check'))
+    ap.add_argument('action', choices=('build', 'install', 'uninstall', 'repair', 'check'))
     ap.add_argument('outdir', nargs='?')
-    ap.add_argument('--game', default=gen.DEFAULT_GAME)
-    ap.add_argument('--force', action='store_true')
+    ap.add_argument('--game', default=vc.DEFAULT_GAME)
+    ap.add_argument('--delete-rows', action='store_true', help='delete the rows that end the table instead of '
+                    'leaving placeholders')
     ap.add_argument('--unequipped', action='store_true', help='these weapons are unequipped in every save')
     a = ap.parse_args()
-    if a.action == 'build':
-        if not a.outdir:
-            ap.error('build needs OUTDIR')
-        for rel in build(a.game, a.outdir):
-            print(f'wrote {rel}')
-    elif a.action == 'install':
-        for rel, sha in install(a.game).items():
-            print(f'{sha}  {rel}')
-    elif a.action == 'uninstall':
-        uninstall(a.game, a.unequipped, a.force)
-    else:
-        sys.exit(0 if check(a.game) else 1)
+    try:
+        if a.action == 'build':
+            if not a.outdir:
+                ap.error('build needs OUTDIR')
+            for rel in build(a.game, a.outdir):
+                print(f'wrote {rel}')
+        elif a.action == 'install':
+            for rel, sha in install(a.game).items():
+                print(f'{sha}  {rel}')
+        elif a.action == 'uninstall':
+            uninstall(a.game, a.delete_rows, a.unequipped)
+        elif a.action == 'repair':
+            for rel in repair(a.game):
+                print(f'restored {rel}')
+        else:
+            sys.exit(0 if check(a.game) else 1)
+    except Misaligned as e:
+        raise SystemExit(str(e)) from None
 
 
 if __name__ == '__main__':

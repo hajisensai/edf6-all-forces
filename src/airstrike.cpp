@@ -33,6 +33,7 @@
 #include <atomic>
 #include <cmath>
 #include <cwchar>
+#include <optional>
 
 namespace crew {
 namespace {
@@ -99,48 +100,21 @@ Held* FreeHeld(ULONGLONG ms) noexcept {
 constexpr unsigned kPlaneHide=0x6C04B0,kPlaneUnlist=0x54DDB0;
 constexpr std::size_t kPlaneSpeed=0xB90,kPlaneDraw=0x5C0;
 
-// The call weapons (tools/call_weapons.py writes the same marks and counts): per role a guard call (round
-// its marker) and a follow call (round the player), the follow one dearer (its reload). The stronger the
-// call, the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts
-// is its ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of
-// fuel (fuelSec) or badly damaged each leaves.
-// What a call brings: jets (JetLaunch), helis (HeliLaunch) or the submarine carrier (SubLaunch).
+// The call weapons, made from one table (tools/calls.py): tools/call_weapons.py writes their weapon rows and
+// SGOs, tools/gen_calls.py writes calls.inc below (CI checks it is current). Per role a guard call (round its
+// marker) and a follow call (round the player), the follow one dearer (its reload). The stronger the call,
+// the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts is its
+// ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of fuel
+// (fuelSec) or badly damaged each leaves.
+// What a call brings: jets (JetLaunch, `role`), helis (HeliLaunch, `body`) or the submarine carrier
+// (SubLaunch); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
-struct Call { float mark; Brings brings; JetRole role; HeliBody body; int count; DWORD fuelSec; bool follow; const char* name;
-              const wchar_t* id; };
-const Call kCalls[]={
-    {7101.0f,Brings::jets,JetRole::interceptor,HeliBody::eros506,2,240,false,"interceptors (guard)",L"EDF6VC_CALL_INTERCEPTOR"},
-    {7102.0f,Brings::jets,JetRole::interceptor,HeliBody::eros506,2,240,true,"interceptors (follow)",L"EDF6VC_CALL_INTERCEPTOR_F"},
-    {7103.0f,Brings::jets,JetRole::strike,HeliBody::eros506,3,240,false,"strike jets (guard)",L"EDF6VC_CALL_STRIKE"},
-    {7104.0f,Brings::jets,JetRole::strike,HeliBody::eros506,3,240,true,"strike jets (follow)",L"EDF6VC_CALL_STRIKE_F"},
-    {7105.0f,Brings::jets,JetRole::multirole,HeliBody::eros506,3,300,false,"multirole jets (guard)",L"EDF6VC_CALL_MULTIROLE"},
-    {7106.0f,Brings::jets,JetRole::multirole,HeliBody::eros506,3,300,true,"multirole jets (follow)",L"EDF6VC_CALL_MULTIROLE_F"},
-    {7107.0f,Brings::jets,JetRole::fighter,HeliBody::eros506,4,300,false,"fighters (guard)",L"EDF6VC_CALL_FIGHTER"},
-    {7108.0f,Brings::jets,JetRole::fighter,HeliBody::eros506,4,300,true,"fighters (follow)",L"EDF6VC_CALL_FIGHTER_F"},
-    {7109.0f,Brings::jets,JetRole::carrier,HeliBody::eros506,1,600,false,"carrier (guard)",L"EDF6VC_CALL_CARRIER"},
-    {7110.0f,Brings::jets,JetRole::carrier,HeliBody::eros506,1,600,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
-    {7111.0f,Brings::helis,JetRole::fighter,HeliBody::brute410,2,360,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
-    {7112.0f,Brings::helis,JetRole::fighter,HeliBody::eros506,2,360,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
-    {7113.0f,Brings::jets,JetRole::blastCarrier,HeliBody::eros506,1,600,false,"blast drone carrier (guard)",L"EDF6VC_CALL_BLAST_CARRIER"},
-    {7114.0f,Brings::jets,JetRole::blastCarrier,HeliBody::eros506,1,600,true,"blast drone carrier (follow)",L"EDF6VC_CALL_BLAST_CARRIER_F"},
-    {7115.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,false,"doll drone carrier (guard)",L"EDF6VC_CALL_DOLL_CARRIER"},
-    {7116.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,true,"doll drone carrier (follow)",L"EDF6VC_CALL_DOLL_CARRIER_F"},
-    // The submarine carrier surfaces kSubAhead past the marker (its 1664 m hull clear of the caller) and stays
-    // the mission, following the player (subcarrier.cpp; three at most).
-    {7117.0f,Brings::sub,JetRole::fighter,HeliBody::eros506,1,0,true,"submarine carrier",L"EDF6VC_CALL_SUB"},
-    // The gunship (jet.cpp GunshipFire): a bomber401 circling its point and shelling the ground enemies in reach.
-    {7118.0f,Brings::jets,JetRole::gunship,HeliBody::eros506,1,600,false,"gunship (guard)",L"EDF6VC_CALL_GUNSHIP"},
-    {7119.0f,Brings::jets,JetRole::gunship,HeliBody::eros506,1,600,true,"gunship (follow)",L"EDF6VC_CALL_GUNSHIP_F"},
-};
-constexpr int kCallCount=static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0]));
-// kCalls' names on the in-mission pick's banner (tools/call_weapons.py KINDS' SC names).
-const wchar_t* const kCallLabels[]={
-    L"截击机·守点",L"截击机·跟随",L"对地攻击机·守点",L"对地攻击机·跟随",L"多用途机·守点",L"多用途机·跟随",
-    L"制空战斗机·守点",L"制空战斗机·跟随",L"无人机母舰·守点",L"无人机母舰·跟随",L"武装直升机·守点",L"武装直升机·跟随",
-    L"自爆无人机母舰·守点",L"自爆无人机母舰·跟随",L"人偶无人机母舰·守点",L"人偶无人机母舰·跟随",L"潜水母舰支援",
-    L"炮舰机·守点",L"炮舰机·跟随",
-};
-static_assert(sizeof(kCallLabels)/sizeof(kCallLabels[0])==kCallCount,"a label per call");
+struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
+              bool follow; const char* name; const wchar_t* id; };
+// A weapon table row tools/call_weapons.py installs (a vehicle request too): its id, its SGO in Mods/WEAPON and
+// the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
+struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* objectFile; };
+#include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = every call weapon brings its own call, else
 // every call weapon brings kCalls[picked].
 std::atomic<int> picked{-1};
@@ -218,10 +192,10 @@ int LaunchCall(const Call& c,const float* target) noexcept {
         const float from[3]={target[0]-dir[0]*back+side[0]*off,target[1]+up+kWingStep*static_cast<float>(i),
                              target[2]-dir[2]*back+side[2]*off};
         if(!heli) {
-            launched+=JetLaunch(c.role,from,dir,target,c.fuelSec,&kRadioSource,c.follow) ? 1 : 0;
+            launched+=JetLaunch(*c.role,from,dir,target,c.fuelSec,&kRadioSource,c.follow) ? 1 : 0;
             continue;
         }
-        unsigned char* const v=HeliLaunch(c.body,from,dir);
+        unsigned char* const v=HeliLaunch(*c.body,from,dir);
         if(!v)continue;
         HeliCalled(v,!c.follow,target,c.fuelSec);
         ++launched;

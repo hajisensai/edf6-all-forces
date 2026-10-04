@@ -10,8 +10,10 @@ configure_file(src/version.h.in "${CMAKE_BINARY_DIR}/generated/version.h" @ONLY)
 target_include_directories(EDF6VehicleCrew PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(EDF6VehicleCrew PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6VehicleCrew.pdb)
-set_target_properties(EDF6VehicleCrew PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/dist/Mods/Plugins")
-configure_file(EDF6VehicleCrew.ini "${CMAKE_SOURCE_DIR}/dist/Mods/Plugins/EDF6VehicleCrew.ini" COPYONLY)
+# Build output, never tracked: build/Mods/Plugins holds both plugins and their ini files, laid out as they go
+# into the game (tools/installer.py and tools/build_release.py take them from there).
+set_target_properties(EDF6VehicleCrew PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Mods/Plugins")
+configure_file(EDF6VehicleCrew.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6VehicleCrew.ini" COPYONLY)
 
 # EDF6AutoTurret: the flak / Bohr auto-aim and the tank side guns (autoturret/README.md)
 add_subdirectory(autoturret)

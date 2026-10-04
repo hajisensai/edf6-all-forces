@@ -1,11 +1,11 @@
 """Writes the airstrike takeovers' jet SGOs (src/airstrike.cpp, src/jet.cpp) into <game>/Mods/OBJECT:
 EDF6VC_JET_STRIKE.SGO and EDF6VC_JET_FIGHTER.SGO (and EDF6VC_BOMBER401 / _501_2.SGO, the strike jet in those
 bombers' own models), made from this machine's own V506_HELI.SGO and
-BOMBER501 model exactly like the test range's jets (testrange/gen.py: jet_sgo), and EDF6VC_JET.MRAB: the
-stock BOMBER501.MRAB with its model split into elevon bones the plugin moves (tools/mdb_jet.py,
+BOMBER501 model exactly like the test range's jets (pylib/vcobjects.py jet_sgo), and EDF6VC_JET.MRAB: the
+stock BOMBER501.MRAB with its model split into elevon bones the plugin moves (pylib/mdb_jet.py,
 docs/mdb-format.md), which only these two SGOs use (the stock bombers keep theirs), and their guns into
 <game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO and the blast drones' charges EDF6VC_BLAST_CHARGE /
-EDF6VC_DOLL_CHARGE.SGO (gen.jet_guns). Without the SGOs the plugin leaves the stock
+EDF6VC_DOLL_CHARGE.SGO (vcobjects.jet_guns). Without the SGOs the plugin leaves the stock
 bombers alone.
 Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, which the Air Raider's call
 weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring.
@@ -13,7 +13,12 @@ Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model wi
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
 impact charges a crash sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64.SGO.
 Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
-EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (gen.portal_lasers).
+EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (vcobjects.portal_lasers).
+
+Every file is built in memory first (build: nothing is written unless all of it could be made), then written
+atomically and recorded in the ledger as this tool's (pylib/ledger.py); --remove releases them, so a file
+another tool still uses (the guns, which make_sub and the test range use too; the models the test range's jets
+fly) stays. The test range's own jets are its own: it gives them the elevon model when it installs them.
 
   python tools/make_jets.py [game dir]            write / refresh
   python tools/make_jets.py [game dir] --remove   delete them (only the files this script writes)
@@ -24,10 +29,13 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'testrange'))
-import gen  # noqa: E402
-sys.path.insert(0, HERE)
-import mdb_jet  # noqa: E402  (tools/mdb_jet.py)
+sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import jet_models  # noqa: E402
+import mdb_jet  # noqa: E402
+import ledger  # noqa: E402
+import vcobjects as vc  # noqa: E402
+
+OWNER = 'jets'   # pylib/ledger.py
 
 # file -> the testrange jet it is made like
 FILES: dict[str, str] = {
@@ -48,8 +56,8 @@ FILES: dict[str, str] = {
     'EDF6VC_PJET_FIGHTER.SGO': 'edf6tr_pjet_fighter_mission',
     'EDF6VC_PJET_STRIKE.SGO': 'edf6tr_pjet_strike_mission',
 }
-# Their own models (tools/jet_models.py).
-MODEL_FILES = sorted({gen.JETS[j].file for j in FILES.values() if gen.JETS[j].file})
+# Their own models (pylib/jet_models.py).
+MODEL_FILES = sorted({vc.JETS[j].file for j in FILES.values() if vc.JETS[j].file})
 # The strike jets that take over a BOMBER401 or BOMBER501_2 (src/jet.cpp kJetSgo): that bomber's own model,
 # its mesh bone, and a box round its fuselage (bomber401: wings 52 m across but a fuselage about 5 x 4 x 16 m
 # centred 2.14 m up; bomber501_2 is BOMBER501's mesh in another paint: the strike jet's box).
@@ -74,17 +82,62 @@ IMPACT_FILES: dict[str, float] = {
 }
 IMPACT_LIFE = 2
 # The helis the Air Raider's call weapons bring (src/jet.cpp HeliLaunch, tools/call_weapons.py): the stock
-# call-in helis made script-placeable (gen.as_mission_sgo), so RideAi(true) gives them their weapons.
+# call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true) gives them their weapons.
 HELIS: dict[str, str] = {
     'EDF6VC_HELI_410.SGO': 'VEHICLE410_HELI',
     'EDF6VC_HELI_506.SGO': 'V506_HELI',
 }
-MODEL_FILE = gen.JET_ELEVON_FILE
-MODEL = gen.JET_ELEVON_MODEL
+MODEL_FILE = vc.JET_ELEVON_FILE
+MODEL = vc.JET_ELEVON_MODEL
+
+
+def build(root: str) -> dict[str, bytes]:
+    """Every file this tool writes, {path under Mods: bytes}, made from the game's Root.cpk (only read)."""
+    game = vc.Game(root)
+    out: dict[str, bytes] = {}
+    for name, data in vc.jet_guns(game).items():
+        out[f'WEAPON/{name}'] = data
+    for name, data in vc.portal_lasers(game).items():
+        out[f'OBJECT/{name}'] = data
+    out[f'OBJECT/{MODEL_FILE}'] = mdb_jet.jet_archive(game.read('OBJECT', 'BOMBER501.MRAB'))[0]
+    for name, data in jet_models.build(game).items():
+        out[f'OBJECT/{name}'] = data
+    for name, jet in FILES.items():
+        out[f'OBJECT/{name}'] = vc.jet_sgo(game, jet, MODEL)
+    for name, (model, body, rigid) in BOMBERS.items():
+        out[f'OBJECT/{name}'] = vc.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid)
+    model, body, rigid = BOMBERS['EDF6VC_BOMBER401.SGO']
+    out[f'OBJECT/{GUNSHIP_FILE}'] = with_mark(vc.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid), GUNSHIP_MARK)
+    for name, data in impact_charges(game).items():
+        out[f'OBJECT/{name}'] = data
+    for name, stock in HELIS.items():
+        out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
+    return out
+
+
+def names() -> list[str]:
+    """Every path under Mods this tool writes (whether or not installed)."""
+    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *HELIS, MODEL_FILE, *MODEL_FILES, *vc.PORTAL_LASER_FILES]
+    return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in vc.JET_WEAPON_FILES]
+
+
+def install(root: str, files: dict[str, bytes]) -> list[str]:
+    """Writes `files` (build) as this tool's; what it wrote before and does not now is released."""
+    led = ledger.Ledger(root)
+    before = set(led.owned_by(OWNER))
+    paths = [led.put(OWNER, rel, data) for rel, data in files.items()]
+    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files}))
+    return paths
+
+
+def remove(root: str) -> tuple[list[str], list[str]]:
+    """Releases this tool's files (and ones an install from before the ledger left): (deleted, kept changed)."""
+    led = ledger.Ledger(root)
+    return led.release(OWNER, sorted(set(led.owned_by(OWNER)) | {ledger.key(n) for n in names()}), writer=True)
 
 
 def with_mark(data: bytes, mark: float) -> bytes:
-    """A jet SGO (gen.jet_sgo) with another mark in mission_setup (the speed gain k the plugin reads)."""
+    """A jet SGO (vc.jet_sgo) with another mark in mission_setup (the speed gain k the plugin reads)."""
     import sgowrite
     version, m = sgowrite.read(data)
     m['mission_setup'][1][0] = mark
@@ -99,7 +152,7 @@ def _number(v) -> float | None:
     return float(v) if isinstance(v, int) else None
 
 
-def impact_charges(game: gen.Game) -> dict[str, bytes]:
+def impact_charges(game: vc.Game) -> dict[str, bytes]:
     """The impact charges (IMPACT_FILES) from the stock gunship round."""
     import sgowrite
     out = {}
@@ -119,70 +172,16 @@ def impact_charges(game: gen.Game) -> dict[str, bytes]:
 
 def main(argv: list[str]) -> int:
     args = [a for a in argv if not a.startswith('--')]
-    root = args[0] if args else gen.DEFAULT_GAME
-    out = gen.object_dir(root)
+    root = args[0] if args else vc.DEFAULT_GAME
     if '--remove' in argv:
-        paths = [os.path.join(out, n) for n in [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *HELIS, MODEL_FILE, *MODEL_FILES,
-                                                *gen.PORTAL_LASER_FILES]]
-        for path in paths + [os.path.join(gen.weapon_dir(root), n) for n in gen.JET_WEAPON_FILES]:
-            if os.path.exists(path):
-                os.remove(path)
-                print('删除', path)
+        deleted, kept = remove(root)
+        for path in deleted:
+            print('删除', path)
+        for path in kept:
+            print('保留（已被别人改过）', path)
         return 0
-    game = gen.Game(root)
-    os.makedirs(out, exist_ok=True)
-    for path in gen.write_jet_guns(root, game):
+    for path in install(root, build(root)):
         print('写入', path)
-    for path in gen.write_portal_lasers(root, game):
-        print('写入', path)
-    arc = mdb_jet.jet_archive()[0]
-    path = os.path.join(out, MODEL_FILE)
-    with open(path, 'wb') as f:
-        f.write(arc)
-    print('写入', path, len(arc), '字节')
-    import jet_models  # noqa: E402  (tools/jet_models.py)
-    for name, data in jet_models.build(game).items():
-        path = os.path.join(out, name)
-        with open(path, 'wb') as f:
-            f.write(data)
-        print('写入', path, len(data), '字节')
-    for name, jet in FILES.items():
-        data = gen.jet_sgo(game, jet, MODEL)
-        path = os.path.join(out, name)
-        with open(path, 'wb') as f:
-            f.write(data)
-        print('写入', path, len(data), '字节')
-    for name, (model, body, rigid) in BOMBERS.items():
-        data = gen.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid)
-        path = os.path.join(out, name)
-        with open(path, 'wb') as f:
-            f.write(data)
-        print('写入', path, len(data), '字节')
-    model, body, rigid = BOMBERS['EDF6VC_BOMBER401.SGO']
-    data = with_mark(gen.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid), GUNSHIP_MARK)
-    path = os.path.join(out, GUNSHIP_FILE)
-    with open(path, 'wb') as f:
-        f.write(data)
-    print('写入', path, len(data), '字节')
-    for name, data in impact_charges(game).items():
-        path = os.path.join(out, name)
-        with open(path, 'wb') as f:
-            f.write(data)
-        print('写入', path, len(data), '字节')
-    for name, stock in HELIS.items():
-        data = gen.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
-        path = os.path.join(out, name)
-        with open(path, 'wb') as f:
-            f.write(data)
-        print('写入', path, len(data), '字节')
-    # The test range's jets, when installed, get the elevon model too.
-    for jet in gen.DERIVED.keys() & gen.JETS.keys():
-        path = os.path.join(out, jet.upper() + '.SGO')
-        if os.path.isfile(path):
-            data = gen.jet_sgo(game, jet, MODEL)
-            with open(path, 'wb') as f:
-                f.write(data)
-            print('更新', path, len(data), '字节')
     return 0
 
 

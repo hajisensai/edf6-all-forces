@@ -3,16 +3,20 @@
   Mods/OBJECT/EDF6VC_SUB.MRAB          the mission object EV603_MARINE's model (the 潜水母艦 of M082 / M092 /
                                        M123) at its own size (1664 m), root bone renamed `mdl`, `body` levelled (tools/jet_models.py
                                        SUB_MODELS); every other member of the stock archive byte-identical
-  Mods/OBJECT/EDF6VC_SUB_CARRIER.SGO   a Vehicle506_Helicopter body with that model (testrange/gen.py jet_sgo:
-                                       'edf6tr_sub_carrier_mission', mark 7101, HP 30000, the hull's box)
-  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO  the jets' guns (gen.jet_guns), which its turrets fire; the same bytes
-                                       tools/make_jets.py writes, so they are written but never removed here
+  Mods/OBJECT/EDF6VC_SUB_CARRIER.SGO   a Vehicle506_Helicopter body with that model (pylib/vcobjects.py jet_sgo:
+                                       'edf6tr_sub_carrier_mission', mark 7101, HP 30000 (the plugin raises it
+                                       to SubHullHp), the hull's box)
+  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO  the jets' guns (vcobjects.jet_guns), which its turrets fire; the same
+                                       bytes tools/make_jets.py writes
 
-Only files named EDF6VC_SUB* are ever removed; no shared table (Mods/WEAPON/WEAPONTABLE.SGO, ...) is touched.
-The plugin preloads the sub only while both files and both guns are there.
+All of it is built in memory first, then written atomically and recorded in the ledger as this tool's
+(pylib/ledger.py); --remove releases it, so the guns stay while make_jets or the test range still use them,
+and the sub's own files while testrange/sub_vs_mothership.py's mission does. No shared table
+(Mods/WEAPON/WEAPONTABLE.SGO, ...) is touched. The plugin preloads the sub only while both files and both guns
+are there.
 
   python tools/make_sub.py [game dir]            write / refresh
-  python tools/make_sub.py [game dir] --remove   delete EDF6VC_SUB.MRAB and EDF6VC_SUB_CARRIER.SGO
+  python tools/make_sub.py [game dir] --remove   release them (deleted unless another tool still needs one)
 """
 from __future__ import annotations
 
@@ -20,16 +24,15 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', 'testrange', 'lib'))
-sys.path.insert(0, os.path.join(HERE, '..', 'testrange'))
-import gen  # noqa: E402
-sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import jet_models  # noqa: E402
+import ledger  # noqa: E402
+import vcobjects as vc  # noqa: E402
 
 JET = 'edf6tr_sub_carrier_mission'
 SGO_FILE = 'EDF6VC_SUB_CARRIER.SGO'
 MODEL_FILE = 'EDF6VC_SUB.MRAB'
-PREFIX = 'EDF6VC_SUB'
+OWNER = 'sub'   # pylib/ledger.py
 # Hull box (half extents) the plugin's SubFrame and the SGO agree on: its bottom is kHullBottom metres under
 # the body origin (src/subcarrier.cpp; negative: the box is the slab under the deck, over the origin).
 HULL_BOTTOM = -163.08
@@ -44,7 +47,7 @@ def check_sgo(data: bytes) -> None:
     """The written SGO: the sub's mark, HP, model, box and weapon bones, each bone one the model has."""
     import sgo
     v = sgo.load(data=data)
-    jet = gen.JETS[JET]
+    jet = vc.JETS[JET]
     assert v['mission_setup'][1][0] == jet.mark, 'mark'
     assert v['game_object_durability'] == jet.durability, 'durability'
     assert v['animation_model'][0] == list(jet.model), v['animation_model'][0]
@@ -66,39 +69,47 @@ def check_model(arc: bytes) -> None:
     from mdb import mdb_read, rab_read
     md = mdb_read(next(f for f in rab_read(arc).files if f.name.lower() == 'ev603_marine.mdb').data)
     names = {md.name_of(b.name) for b in md.bones}
-    missing = ({'mdl', 'body'} | set(gen.JETS[JET].weapon_bones)) - names
+    missing = ({'mdl', 'body'} | set(vc.JETS[JET].weapon_bones)) - names
     assert not missing, f'model lacks {missing}'
 
 
-def remove(root: str) -> int:
-    out = gen.object_dir(root)
-    for name in (SGO_FILE, MODEL_FILE):
-        path = os.path.join(out, name)
-        if name.upper().startswith(PREFIX) and os.path.exists(path):
-            os.remove(path)
-            print('删除', path)
-    return 0
+def build(root: str) -> dict[str, bytes]:
+    """Every file this tool writes, {path under Mods: bytes}, checked, from the game's Root.cpk (only read)."""
+    game = vc.Game(root)
+    out = {f'WEAPON/{name}': data for name, data in vc.jet_guns(game).items()}
+    arc = jet_models.build(game, jet_models.SUB_MODELS)[MODEL_FILE]     # checked by jet_models.check
+    check_model(arc)
+    data = vc.jet_sgo(game, JET)
+    check_sgo(data)
+    out[f'OBJECT/{MODEL_FILE}'] = arc
+    out[f'OBJECT/{SGO_FILE}'] = data
+    return out
+
+
+def install(root: str, files: dict[str, bytes]) -> list[str]:
+    led = ledger.Ledger(root)
+    return [led.put(OWNER, rel, data) for rel, data in files.items()]
+
+
+def remove(root: str) -> tuple[list[str], list[str]]:
+    """Releases this tool's files (and the sub's own from before the ledger): (deleted, kept changed)."""
+    led = ledger.Ledger(root)
+    own = {ledger.key(f'OBJECT/{n}') for n in (SGO_FILE, MODEL_FILE)}
+    return led.release(OWNER, sorted(set(led.owned_by(OWNER)) | own), writer=True)
 
 
 def main(argv: list[str]) -> int:
     args = [a for a in argv if not a.startswith('--')]
-    root = args[0] if args else gen.DEFAULT_GAME
+    root = args[0] if args else vc.DEFAULT_GAME
     if '--remove' in argv:
-        return remove(root)
-    game = gen.Game(root)                  # Root.cpk is only read
-    out = gen.object_dir(root)
-    os.makedirs(out, exist_ok=True)
-    for path in gen.write_jet_guns(root, game):
+        deleted, kept = remove(root)
+        for path in deleted:
+            print('删除', path)
+        for path in kept:
+            print('保留（已被别人改过）', path)
+        return 0
+    for path in install(root, build(root)):
         print('写入', path)
-    arc = jet_models.build(game, jet_models.SUB_MODELS)[MODEL_FILE]     # checked by jet_models.check
-    check_model(arc)
-    data = gen.jet_sgo(game, JET)
-    check_sgo(data)
-    for name, blob in ((MODEL_FILE, arc), (SGO_FILE, data)):
-        path = os.path.join(out, name)
-        with open(path, 'wb') as f:
-            f.write(blob)
-        print('写入', path, len(blob), '字节')
     return 0
 
 

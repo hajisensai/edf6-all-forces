@@ -2,46 +2,59 @@
 tools/build_release.py), so players do not need Python.
 
 What install does, with EDF6.exe closed:
-  1. finds the game directory (tools gamedir: next to the exe, then the Steam libraries) or asks for it;
-  2. copies EDF6VehicleCrew.dll into Mods/Plugins (the .ini only when there is none yet: it keeps the
-     player's settings);
-  3. generates the jets, helicopters, drones, submarine carrier and call weapons from the player's own
-     Root.cpk (make_jets, make_sub, call_weapons install). They cannot be shipped prebuilt: they are
-     derived from the game's files, and the weapon table is shared with other mods, so our rows are
-     appended to whatever table this install already has.
+  1. finds the game directory (pylib/gamedir.py: next to the exe, then the Steam libraries) or asks for it;
+  2. makes everything first, in memory, from the player's own Root.cpk (only read): the call weapons stacked
+     onto the shared weapon table (call_weapons.stack, which also checks the table and its texts line up and
+     offers repair when they do not), the jets, helicopters and drones (make_jets.build) and the submarine
+     carrier (make_sub.build). They cannot be shipped prebuilt: they are derived from the game's files, and the
+     weapon table is shared with other mods. Nothing is written unless all of it could be made;
+  3. writes them: the generated objects (each file atomically, recorded in the ownership ledger,
+     pylib/ledger.py), then the weapon table, its texts and the call SGOs in one transaction (all or none,
+     call_weapons.commit), and last the plugin: EDF6VehicleCrew.dll, and the .ini (a new one when there is
+     none; else the player's own, with only the settings this version adds appended: merge_ini).
 
-Uninstall removes only our own files and our own weapon-table rows (call_weapons keeps the others).
+Uninstall removes the plugin and, when asked, the call weapons (their rows become placeholders that keep the
+row numbers saves use) and the generated objects no other tool still needs.
 """
 from __future__ import annotations
 
 import os
-import shutil
+import re
 import sys
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (HERE, os.path.join(HERE, '..', 'testrange'), os.path.join(HERE, '..', 'testrange', 'lib'),
-           os.path.join(HERE, '..', 'autoturret', 'tools')):
+for _p in (HERE, os.path.join(HERE, '..', 'pylib')):
     sys.path.insert(0, os.path.normpath(_p))
 
 import gamedir  # noqa: E402
+import modfiles  # noqa: E402
 
 PLUGIN = 'EDF6VehicleCrew'
-PROCESS = 'EDF6.exe'
+PROCESS = modfiles.PROCESS
+SECTION = 'VehicleCrew'
+ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
 
 
 def bundle_dir() -> str:
-    """Where the shipped plugin files are: inside the onefile exe, else the repo's dist/."""
+    """Where the shipped plugin files are: inside the onefile exe, else the build output (build.cmd)."""
     if getattr(sys, 'frozen', False):
         return os.path.join(sys._MEIPASS, 'plugin')  # type: ignore[attr-defined]
-    return os.path.normpath(os.path.join(HERE, '..', 'dist', 'Mods', 'Plugins'))
+    return os.path.normpath(os.path.join(HERE, '..', 'build', 'Mods', 'Plugins'))
 
 
-def game_running() -> bool:
-    import subprocess
-    r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {PROCESS}', '/NH'],
-                       capture_output=True, text=True, errors='replace')
-    return PROCESS.lower() in r.stdout.lower()
+def plugin_files() -> tuple[bytes, bytes]:
+    """The plugin DLL and its default ini, as shipped (or as build.cmd built them)."""
+    src = bundle_dir()
+    paths = [os.path.join(src, PLUGIN + ext) for ext in ('.dll', '.ini')]
+    missing = [p for p in paths if not os.path.isfile(p)]
+    if missing:
+        raise SystemExit(f'找不到 {", ".join(missing)}：先运行 build.cmd 构建插件')
+    out = []
+    for p in paths:
+        with open(p, 'rb') as f:
+            out.append(f.read())
+    return out[0], out[1]
 
 
 def ask(prompt: str) -> str:
@@ -72,18 +85,83 @@ def check_loader(game: str) -> None:
               '本插件靠它加载，请先装好 EDFModLoader，否则装了也不会生效。')
 
 
-def install_plugin(game: str) -> None:
-    src = bundle_dir()
+# ---------------------------------------------------------------- the ini
+
+_KEY = re.compile(r'^\s*([A-Za-z0-9_]+)\s*=')
+_SECTION = re.compile(r'^\s*\[([^\]]+)\]')
+
+
+def _keys(lines: list[str]) -> dict[str, int]:
+    """Key (lower case) -> its line, within [VehicleCrew]."""
+    out: dict[str, int] = {}
+    section = ''
+    for i, line in enumerate(lines):
+        m = _SECTION.match(line)
+        if m:
+            section = m.group(1).strip()
+            continue
+        m = _KEY.match(line)
+        if m and section == SECTION:
+            out.setdefault(m.group(1).lower(), i)
+    return out
+
+
+def merge_ini(user: str, shipped: str) -> tuple[str, list[str], list[str]]:
+    """The player's ini with every setting of the shipped one it lacks appended to [VehicleCrew] (each with
+    the comment lines above it in the shipped file), and nothing of theirs changed. Returns (text, keys added,
+    keys of theirs the shipped ini no longer has: the plugin ignores them)."""
+    nl = '\r\n' if '\r\n' in user else '\n'
+    have = _keys(user.splitlines())
+    ship_lines = shipped.splitlines()
+    ship = _keys(ship_lines)
+    added: list[str] = []
+    block: list[str] = []
+    for key, i in ship.items():
+        if key in have:
+            continue
+        j = i
+        while j > 0 and ship_lines[j - 1].lstrip().startswith(';') and not ship_lines[j - 1].lstrip().startswith('; ----'):
+            j -= 1
+        block += ship_lines[j:i + 1]
+        added.append(_KEY.match(ship_lines[i]).group(1))
+    gone = [k for k in (_KEY.match(user.splitlines()[i]).group(1) for i in have.values()) if k.lower() not in ship]
+    if not added:
+        return user, added, gone
+    lines = user.splitlines()
+    heads = [(i, m.group(1).strip()) for i, m in ((i, _SECTION.match(x)) for i, x in enumerate(lines)) if m]
+    start = next((i for i, name in heads if name == SECTION), None)
+    if start is None:
+        lines.append(f'[{SECTION}]')
+        start = len(lines) - 1
+    end = next((i for i, _ in heads if i > start), len(lines))   # [VehicleCrew] runs to the next section
+    while end > start + 1 and not lines[end - 1].strip():
+        end -= 1
+    insert = ['', ADDED_HEADER, *block]
+    merged = lines[:end] + insert + lines[end:]
+    return nl.join(merged) + nl, added, gone
+
+
+def install_plugin(game: str, dll: bytes, shipped_ini: bytes) -> None:
     dst = os.path.join(game, 'Mods', 'Plugins')
-    os.makedirs(dst, exist_ok=True)
-    shutil.copy2(os.path.join(src, PLUGIN + '.dll'), os.path.join(dst, PLUGIN + '.dll'))
+    modfiles.atomic_write(os.path.join(dst, PLUGIN + '.dll'), dll)
     print(f'写入 {os.path.join(dst, PLUGIN + ".dll")}')
     ini = os.path.join(dst, PLUGIN + '.ini')
-    if os.path.isfile(ini):
-        print(f'保留已有的 {ini}（你的设置不覆盖）')
-    else:
-        shutil.copy2(os.path.join(src, PLUGIN + '.ini'), ini)
+    if not os.path.isfile(ini):
+        modfiles.atomic_write(ini, shipped_ini)
         print(f'写入 {ini}')
+        return
+    with open(ini, 'rb') as f:
+        raw = f.read()
+    bom = raw.startswith(b'\xef\xbb\xbf')
+    user = raw[3:].decode('utf-8') if bom else raw.decode('utf-8', errors='surrogateescape')
+    text, added, gone = merge_ini(user, shipped_ini.decode('utf-8'))
+    if added:
+        modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8', errors='surrogateescape'))
+        print(f'保留你的 {ini}，补入新版本新增的设置：{", ".join(added)}')
+    else:
+        print(f'保留你的 {ini}（没有需要补的新设置）')
+    if gone:
+        print(f'  其中 {", ".join(gone)} 新版本已不再使用，可以手动删掉')
 
 
 def remove_plugin(game: str) -> None:
@@ -94,18 +172,54 @@ def remove_plugin(game: str) -> None:
             print(f'删除 {path}')
 
 
+# ---------------------------------------------------------------- install / uninstall
+
+
+def stack_weapons(game: str) -> dict[str, bytes] | None:
+    """The call weapons stacked onto the weapon table; when its texts no longer line up, offers to put the
+    files back as they were before the first install (call_weapons.repair) and stacks again. None: cancelled."""
+    import call_weapons
+    try:
+        return call_weapons.stack(game)
+    except call_weapons.Misaligned as e:
+        print(f'\n！ {e}')
+        if not os.path.isfile(os.path.join(game, 'Mods', call_weapons.MANIFEST)):
+            return None
+        manifest = call_weapons.load_manifest(game)
+        later = call_weapons.changed_since(game, manifest, call_weapons.SHARED)
+        if later:
+            print('  注意：这些文件在本插件上次安装之后被别的工具改过，恢复会丢掉那些改动（之后重新运行那个 MOD 的安装即可补回）：'
+                  + '、'.join(later))
+        if ask('输入 y 把武器表和武器说明恢复到第一次安装本插件之前的样子，然后继续安装；其它 = 取消：').lower() != 'y':
+            return None
+        for rel in call_weapons.repair(game):
+            print(f'恢复 {rel}')
+        return call_weapons.stack(game)
+
+
 def install(game: str) -> None:
     import call_weapons
     import make_jets
     import make_sub
     check_loader(game)
-    install_plugin(game)
-    print('\n生成战机、直升机、无人机（读取 Root.cpk，不修改它）……')
-    make_jets.main([game])
-    print('\n生成潜水母舰（约 39 MB）……')
-    make_sub.main([game])
-    print('\n追加空袭兵呼叫武器到武器表（只追加本插件的行，其它行不动）……')
-    call_weapons.install(game)
+    dll, ini = plugin_files()
+    if call_weapons.recover(game):
+        print('上次运行没有完成：已把武器表相关文件恢复到那次运行之前。')
+    print('检查武器表并生成呼叫武器（只读 Root.cpk 与现有武器表）……')
+    weapons = stack_weapons(game)
+    if weapons is None:
+        print('已取消，没有写入任何文件。')
+        return
+    print('生成战机、直升机、无人机（读取 Root.cpk，不修改它）……')
+    jets = make_jets.build(game)
+    print('生成潜水母舰（约 39 MB）……')
+    sub = make_sub.build(game)
+    print('\n全部生成完毕，开始写入。')
+    for path in make_jets.install(game, jets) + make_sub.install(game, sub):
+        print('写入', path)
+    print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
+    call_weapons.install(game, weapons)
+    install_plugin(game, dll, ini)
     print('\n安装完成。启动游戏即可。')
 
 
@@ -113,17 +227,20 @@ def uninstall(game: str) -> None:
     import call_weapons
     import make_jets
     import make_sub
-    print('卸载会从武器表里删掉本插件的呼叫武器。')
-    print('如果有存档的兵种还装备着这些呼叫武器，删掉后进游戏会在主菜单崩溃。')
-    print('只删插件、保留武器的话，这些武器会照原版 KM6 轰炸机呼叫，不影响游玩。')
-    choice = ask('输入 1 = 我已在所有存档卸下这些武器，连武器一起删；输入 2 = 只删插件（武器和生成的模型留着）；其它 = 取消：')
+    print('卸载会删掉插件。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
+    print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
+    choice = ask('输入 1 = 插件和呼叫武器、生成的模型一起删；输入 2 = 只删插件（武器和生成的模型留着，照原版 KM6 呼叫）；其它 = 取消：')
     if choice not in ('1', '2'):
         print('已取消。')
         return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
-        call_weapons.uninstall(game, unequipped=True, force=False)
-        make_sub.remove(game)
-        make_jets.main([game, '--remove'])
+        call_weapons.uninstall(game)
+        for remove in (make_sub.remove, make_jets.remove):
+            deleted, kept = remove(game)
+            for path in deleted:
+                print('删除', path)
+            for path in kept:
+                print('保留（之后被别的工具改过）', path)
     remove_plugin(game)
     print('\n卸载完成。')
 
@@ -136,7 +253,7 @@ def main(argv: list[str]) -> int:
         mode = {'1': 'install', '2': 'uninstall'}.get(pick, '')
         if not mode:
             return 0
-    if game_running():
+    if modfiles.game_running():
         print(f'{PROCESS} 正在运行。请先退出游戏再运行本程序（本程序不会替你关游戏）。')
         return 1
     game = pick_game()
@@ -155,7 +272,8 @@ def run() -> int:
         code = 0 if e.code in (None, 0) else 1
     except Exception:
         traceback.print_exc()
-        print('\n出错了，上面是错误信息。游戏文件可能只写了一部分，修好后重新运行安装即可覆盖。')
+        print('\n出错了，上面是错误信息。武器表和武器说明要么全部写入、要么已恢复原样；'
+              '生成的模型每个文件要么是新的要么是旧的。问题解决后重新运行安装即可。')
         code = 1
     if getattr(sys, 'frozen', False):
         ask('\n按回车关闭窗口……')

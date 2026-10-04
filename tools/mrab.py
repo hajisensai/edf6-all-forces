@@ -19,7 +19,7 @@ MDB ('MDB0', version 0x20): u32 header [2] = name count, [3] = name table offset
   +0xB0 vec4 bounds centre (model space; zero for the root).
 
 Usage: python tools/mrab.py BOMBER501.MRAB [V506_HELI.MRAB ...]
-  Names without a path are read from OBJECT/ in the game's Root.cpk (testrange/lib readers).
+  Names without a path are read from OBJECT/ in the game's Root.cpk (pylib/rootcpk.py).
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ import struct
 import sys
 from dataclasses import dataclass
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'testrange', 'lib'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pylib'))
 import gamedir  # noqa: E402
 GAME = gamedir.find_or_dev()
 
@@ -114,10 +114,7 @@ def _load(arg: str) -> bytes:
     if os.path.exists(arg):
         with open(arg, 'rb') as h:
             return h.read()
-    here = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, os.path.join(here, '..', 'testrange', 'lib'))
-    sys.path.insert(0, os.path.join(here, '..', 'testrange'))
-    from gen import Game  # noqa: E402
+    from rootcpk import Game  # noqa: E402
     return Game(GAME).read('OBJECT', arg)
 
 
