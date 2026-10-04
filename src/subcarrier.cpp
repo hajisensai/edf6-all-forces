@@ -59,7 +59,7 @@ constexpr std::size_t kAreaInset=0xE00;   // jet.cpp: the move-area clamp's inse
 constexpr float kNoInset=-1.0e6f;
 constexpr std::size_t kObjFlags=0x18,kCtrlUses=8;
 constexpr unsigned char kObjDeleted=4;
-constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kSetTeam=0x54EE70,kInitParamVtable=0x1762068;
+constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kInitParamVtable=0x1762068;   // SetTeam: crew.h kSetTeam
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
 // The gauge call (docs/subcarrier-re.md §4): the follower HUD's draw (vtable 0x17F6C08 slot 3) calls the

@@ -29,7 +29,7 @@ constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
 constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
 constexpr std::size_t kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
-constexpr unsigned kDelete=0x118A1B0,kSetTeam=0x54EE70,kCreateObject=0x11945E0,kInitParamVtable=0x1762068;
+constexpr unsigned kDelete=0x118A1B0,kCreateObject=0x11945E0,kInitParamVtable=0x1762068;   // SetTeam: crew.h kSetTeam
 constexpr std::size_t kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
 constexpr std::int32_t kTeamEnemy=1;   // the game's team relations: 0 (player) and 2 (friends) are both hostile to 1

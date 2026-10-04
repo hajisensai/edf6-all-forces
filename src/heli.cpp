@@ -1971,7 +1971,7 @@ void EndRescue(const char* why,bool leave,ULONGLONG ms) noexcept {
     Log("RESCUE over: %s (heli %p)",why,rescue.vehicle);
     if(leave && RescueHeliAlive()) {
         auto v=rescue.vehicle;
-        Put<std::int32_t>(v,kTeam,rescue.team);
+        SetObjectTeam(v,rescue.team);
         if(!Find(v))HeliCalled(v,false,reinterpret_cast<const float*>(v+kPosition),kRescueFuelSec);   // re-crewed meanwhile
         float fwd[3];
         if(Heli* h=Find(v); h && Row(v,kHeadForward,fwd))StartLeave(*h,reinterpret_cast<const float*>(v+kPosition),fwd,why);
@@ -2037,7 +2037,7 @@ void Pickup(unsigned char* human,ULONGLONG ms) noexcept {
     auto v=rescue.vehicle;
     const float* p=reinterpret_cast<const float*>(human+kPosition);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    Put<std::int32_t>(v,kTeam,kTeamVehicle);   // see the Rescue comment
+    SetObjectTeam(v,kTeamVehicle);   // see the Rescue comment
     if(!OnFoot(human)){EndRescue("the player boarded another vehicle",true,ms);return;}
     float sea=kSeaY;
     if(!InSea(p,&sea)) {
@@ -2088,7 +2088,7 @@ void Pickup(unsigned char* human,ULONGLONG ms) noexcept {
 void Ferry(ULONGLONG ms) noexcept {
     auto v=rescue.vehicle;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    Put<std::int32_t>(v,kTeam,kTeamVehicle);   // a door seat the player takes back after a stray exit
+    SetObjectTeam(v,kTeamVehicle);   // a door seat the player takes back after a stray exit
     float deck[3];
     rescue.slow=true;rescue.climb=false;rescue.low=false;
     if(!SubDeck(pos,deck)) {   // the carrier is gone: it holds where it is

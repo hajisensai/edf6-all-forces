@@ -118,6 +118,19 @@ State* FindState(const void* vehicle) noexcept {
     return nullptr;
 }
 
+const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
+bool setTeamOk=false;
+
+}  // namespace
+
+void SetObjectTeam(unsigned char* object,std::int32_t team) noexcept {
+    if(!setTeamOk || At<std::int32_t>(object,kTeam)==team)return;
+    const bool registered=((At<std::uint32_t>(object,kObjectFlags)>>6)&1)!=0;
+    reinterpret_cast<void(__fastcall*)(void*,std::int32_t,bool)>(image+kSetTeam)(object,team,registered);
+}
+
+namespace {
+
 // The team a player boards it as: the team it had before we crewed it, else its own.
 std::int32_t OwnTeam(const unsigned char* vehicle) noexcept {
     const State* st=FindState(vehicle);
@@ -244,7 +257,7 @@ void AimLines(unsigned char* vehicle) noexcept {
 // team (see OwnTeam); restores both before returning.
 template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcept {
     const std::int32_t team=At<std::int32_t>(vehicle,kTeam);
-    Put<std::int32_t>(vehicle,kTeam,OwnTeam(vehicle));
+    SetObjectTeam(vehicle,OwnTeam(vehicle));
     void* saved[16]{};
     const unsigned count=SeatCount(vehicle);
     for(unsigned i=0;i<count && i<16;++i) {
@@ -255,7 +268,7 @@ template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcep
     bool ok=false;
     __try { ok=check(); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
     for(unsigned i=0;i<count && i<16;++i)if(saved[i])Put<void*>(SeatAt(vehicle,i),kSeatRiderCtrl,saved[i]);
-    Put<std::int32_t>(vehicle,kTeam,team);
+    SetObjectTeam(vehicle,team);
     return ok;
 }
 
@@ -284,14 +297,14 @@ bool Bump(unsigned char* vehicle,unsigned index) noexcept {
     auto seat=SeatAt(vehicle,index);
     auto rider=const_cast<void*>(RiderObject(seat));
     const int gunner=Cfg().bumpToGunner ? FreeGunnerSeat(vehicle,index) : -1;
-    Put<std::int32_t>(vehicle,kTeam,own);   // the stock slot 49 re-checks the team next
+    SetObjectTeam(vehicle,own);   // the stock slot 49 re-checks the team next
     bool freed=false;
     if(gunner>=0) {
         if(auto to=reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,gunner,false)) {
             freed=LeaveSeat(vehicle,seat,to);
             Log(freed ? "BUMP v=%p seat=%u -> npc moved to gunner seat %d" : "BUMP v=%p seat=%u -> the move to seat %d faulted: undone",
                 vehicle,index,gunner);
-            if(!freed){Put<std::int32_t>(vehicle,kTeam,team);return false;}   // as it was: the NPC still in its seat
+            if(!freed){SetObjectTeam(vehicle,team);return false;}   // as it was: the NPC still in its seat
         }
     }
     if(!freed) {
@@ -316,9 +329,9 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
         // its team, and the stock check then refuses even a free seat: ask again on the vehicle's own.
         const auto team=At<std::int32_t>(v,kTeam),own=OwnTeam(v);
         if(team!=own) {
-            Put<std::int32_t>(v,kTeam,own);
+            SetObjectTeam(v,own);
             if(auto free=originalFindSeat(vehicle,human))return free;
-            Put<std::int32_t>(v,kTeam,team);
+            SetObjectTeam(v,team);
         }
         const unsigned count=SeatCount(v);
         for(unsigned i=0;i<count;++i) {
@@ -586,6 +599,9 @@ void EnsureInputs() noexcept {
 }
 
 bool InstallCrew() noexcept {
+    // Without the game's SetTeam the plugin does not change a team at all (SetObjectTeam): no crew.
+    setTeamOk=Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig));
+    if(!setTeamOk){Log("HOOK crew: SetTeam not as expected: crew off");return false;}
     // A class whose slot 49 is not its own stock FindSeat (another plugin's) is left alone, seats and input
     // both. The prompt visitor not stock costs only the prompt's part (on-foot prompt for an NPC's seat, the
     // on-foot player fix, the reaps with the player on foot); the board button still bumps.
