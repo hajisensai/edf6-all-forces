@@ -175,6 +175,27 @@ def remove_plugin(game: str) -> None:
 # ---------------------------------------------------------------- install / uninstall
 
 
+def misaligned(game: str, error: Exception) -> bool:
+    """Explains call_weapons.Misaligned (the weapon texts no longer line up with the table). True when
+    call_weapons.repair can fix it (a first install kept the files as they were), after warning what a repair
+    loses."""
+    import call_weapons
+    print(f'\n！ {error}')
+    if not os.path.isfile(os.path.join(game, 'Mods', call_weapons.MANIFEST)):
+        return False
+    later = call_weapons.changed_since(game, call_weapons.load_manifest(game), call_weapons.SHARED)
+    if later:
+        print('  注意：这些文件在本插件上次安装之后被别的工具改过，恢复会丢掉那些改动（之后重新运行那个 MOD 的安装即可补回）：'
+              + '、'.join(later))
+    return True
+
+
+def repair_weapons(game: str) -> None:
+    import call_weapons
+    for rel in call_weapons.repair(game):
+        print(f'恢复 {rel}')
+
+
 def stack_weapons(game: str) -> dict[str, bytes] | None:
     """The call weapons stacked onto the weapon table; when its texts no longer line up, offers to put the
     files back as they were before the first install (call_weapons.repair) and stacks again. None: cancelled."""
@@ -182,19 +203,34 @@ def stack_weapons(game: str) -> dict[str, bytes] | None:
     try:
         return call_weapons.stack(game)
     except call_weapons.Misaligned as e:
-        print(f'\n！ {e}')
-        if not os.path.isfile(os.path.join(game, 'Mods', call_weapons.MANIFEST)):
+        if not misaligned(game, e):
             return None
-        manifest = call_weapons.load_manifest(game)
-        later = call_weapons.changed_since(game, manifest, call_weapons.SHARED)
-        if later:
-            print('  注意：这些文件在本插件上次安装之后被别的工具改过，恢复会丢掉那些改动（之后重新运行那个 MOD 的安装即可补回）：'
-                  + '、'.join(later))
         if ask('输入 y 把武器表和武器说明恢复到第一次安装本插件之前的样子，然后继续安装；其它 = 取消：').lower() != 'y':
             return None
-        for rel in call_weapons.repair(game):
-            print(f'恢复 {rel}')
+        repair_weapons(game)
         return call_weapons.stack(game)
+
+
+def retire_weapons(game: str) -> bool:
+    """Turns the call weapons into placeholders (call_weapons.uninstall). When the weapon texts no longer line
+    up with the table, offers what install offers (repair: the files back to before the first install, which
+    takes the call weapons out too), or to leave the table alone and remove only the plugin and the generated
+    objects. False: cancelled, nothing changed."""
+    import call_weapons
+    try:
+        call_weapons.uninstall(game)
+        return True
+    except call_weapons.Misaligned as e:
+        repairable = misaligned(game, e)
+    print('  也可以跳过武器表：武器表和武器说明一个字节都不动，只删插件和生成的模型（呼叫武器的行留着，照原版 KM6 呼叫；'
+          '玩家喷气机请求要用的模型仍被这些行登记着，会保留）。')
+    prompt = ('输入 y 把武器表和武器说明恢复到第一次安装本插件之前的样子（呼叫武器随之去掉），然后继续卸载；'
+              if repairable else '') + '输入 s 跳过武器表继续卸载；其它 = 取消：'
+    choice = ask(prompt).lower()
+    if choice == 'y' and repairable:
+        repair_weapons(game)
+        return True
+    return choice == 's'
 
 
 def install(game: str) -> None:
@@ -224,7 +260,6 @@ def install(game: str) -> None:
 
 
 def uninstall(game: str) -> None:
-    import call_weapons
     import make_jets
     import make_sub
     print('卸载会删掉插件。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
@@ -234,7 +269,9 @@ def uninstall(game: str) -> None:
         print('已取消。')
         return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
-        call_weapons.uninstall(game)
+        if not retire_weapons(game):
+            print('已取消，没有删除任何文件。')
+            return
         for remove in (make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

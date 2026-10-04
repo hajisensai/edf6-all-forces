@@ -10,24 +10,31 @@
     that died half way;
   - the ownership ledger (pylib/ledger.py) deletes a file only when nobody needs it, and never one someone
     else changed;
-  - the installer's ini merge (installer.merge_ini) only adds settings and changes nothing of the player's.
+  - the installer's ini merge (installer.merge_ini) only adds settings and changes nothing of the player's;
+  - interrupted or refused runs: autoturret/tools/build.py install killed half way still reinstalls and
+    uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
+    uninstall over a misaligned table offers repair or skipping the table instead of failing.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
 import sys
 import tempfile
 import traceback
-from typing import Callable
+from typing import Callable, Iterator
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(ROOT, 'autoturret', 'tools'))
+import build as at_build  # noqa: E402
 import call_weapons as cw  # noqa: E402
 import calls  # noqa: E402
+import dsgo  # noqa: E402
 import gen_calls  # noqa: E402
 import installer  # noqa: E402
 import ledger  # noqa: E402
@@ -293,13 +300,158 @@ def ini_merge_only_adds() -> None:
     assert set(a.lower() for a in added) == set(installer._keys(shipped.splitlines()))
 
 
+# ---------------------------------------------------------------- interrupted runs
+
+
+@contextlib.contextmanager
+def patched(obj: object, **attrs: object) -> Iterator[None]:
+    """Sets attributes of `obj` for the duration of the block, then puts the originals back."""
+    saved = {name: getattr(obj, name) for name in attrs}
+    for name, value in attrs.items():
+        setattr(obj, name, value)
+    try:
+        yield
+    finally:
+        for name, value in saved.items():
+            setattr(obj, name, value)
+
+
+def _failing_write(suffix: str) -> Callable[[str, bytes], None]:
+    """modfiles.atomic_write that runs out of disk on the file whose path ends with `suffix`."""
+    real = modfiles.atomic_write
+
+    def write(path: str, data: bytes) -> None:
+        if path.replace(os.sep, '/').endswith(suffix):
+            raise OSError('disk full (test)')
+        real(path, data)
+    return write
+
+
+AT_FILES = {'WEAPON/AT_A.SGO': b'a', 'WEAPON/AT_B.SGO': b'b', 'WEAPON/AT_C.SGO': b'c'}
+
+
+def _at_build_files(legacy: bool = False) -> dict[str, bytes]:
+    return {rel: b'legacy ' + data for rel, data in AT_FILES.items()} if legacy else dict(AT_FILES)
+
+
+@test
+def autoturret_interrupted_install() -> None:
+    """build.py install dying after some writes: the manifest still agrees with Mods, so a rerun goes on
+    without --force and uninstall removes every file it wrote (the one in flight too)."""
+    mods = tempfile.mkdtemp(prefix='edf6at-selftest-')
+    try:
+        with patched(at_build, build_files=_at_build_files, _refuse_while_running=lambda mods: None):
+            with patched(modfiles, atomic_write=_failing_write('AT_B.SGO')):
+                try:
+                    at_build.install(mods, text=False, force=False)
+                except OSError:
+                    pass
+                else:
+                    raise AssertionError('the failing write did not fail')
+            # Killed right after the write of AT_B landed, before its sha was saved.
+            modfiles.atomic_write(os.path.join(mods, 'WEAPON', 'AT_B.SGO'), b'b')
+            at_build.install(mods, text=False, force=False)   # refused before: "changed since this tool wrote it"
+            for rel, data in AT_FILES.items():
+                assert _read(os.path.join(mods, *rel.split('/'))) == data, rel
+            # The same death, then uninstall instead of a rerun.
+            shutil.rmtree(mods)
+            with patched(modfiles, atomic_write=_failing_write('AT_B.SGO')):
+                try:
+                    at_build.install(mods, text=False, force=False)
+                except OSError:
+                    pass
+            modfiles.atomic_write(os.path.join(mods, 'WEAPON', 'AT_B.SGO'), b'b')
+            at_build.uninstall(mods, force=False)
+            left = [rel for rel in AT_FILES if os.path.exists(os.path.join(mods, *rel.split('/')))]
+            assert not left, f'uninstall left our own files in Mods: {left}'
+            assert not os.path.exists(os.path.join(mods, at_build.MANIFEST))
+    finally:
+        shutil.rmtree(mods, ignore_errors=True)
+
+
+def _sgo_table(key: str, ids: list[str]) -> bytes:
+    """A minimal weapon table (key 'table') or text table (key 'text_table'): one row per id."""
+    return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([dsgo.Node([i]) for i in ids])], {0: key}), []))
+
+
+def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
+    """What call_weapons.stack would give (shape only), and the jets the vehicle requests need."""
+    for c in calls.CALLS:
+        if c.vehicle:
+            modfiles.atomic_write(_mods(game, cw.vehicle_file(c)), b'jet')
+    files = {cw.TABLE: _sgo_table('table', table_ids)}
+    files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
+    files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS})
+    return files
+
+
+@test
+def calls_failed_install_records_nothing() -> None:
+    """A call_weapons.install whose transaction rolled back must not keep its first-backup records: a later
+    install over another mod's table backs that table up, and repair puts it back instead of deleting it."""
+    game = tempfile.mkdtemp(prefix='edf6vc-selftest-')
+    try:
+        with patched(modfiles, game_running=lambda process=modfiles.PROCESS: False):
+            files = _call_files(game, STOCK + list(calls.IDS))
+            with patched(modfiles, atomic_write=_failing_write(cw.sgo_file(calls.CALLS[-1]))):
+                try:
+                    cw.install(game, files)
+                except OSError:
+                    pass
+                else:
+                    raise AssertionError('the failing write did not fail')
+            assert _read(_mods(game, cw.TABLE)) is None, 'not rolled back'
+            assert cw.TABLE not in cw.load_manifest(game)['created'], 'a rolled back install recorded created'
+            other = _sgo_table('table', STOCK + OTHER)
+            modfiles.atomic_write(_mods(game, cw.TABLE), other)   # another mod's table, installed since
+            cw.install(game, _call_files(game, STOCK + OTHER + list(calls.IDS)))
+            cw.repair(game)
+            assert _read(_mods(game, cw.TABLE)) == other, "repair deleted the other mod's table"
+    finally:
+        shutil.rmtree(game, ignore_errors=True)
+
+
+@test
+def uninstall_misaligned_skips_table() -> None:
+    """installer.uninstall over a table whose texts do not line up: no traceback; the player can skip the
+    table and still get the plugin removed."""
+    game = tempfile.mkdtemp(prefix='edf6vc-selftest-')
+    try:
+        modfiles.atomic_write(_mods(game, cw.TABLE), _sgo_table('table', STOCK + list(calls.IDS)))
+        for rel in cw.TEXTS:
+            modfiles.atomic_write(_mods(game, rel), _sgo_table('text_table', STOCK))
+        dll = _mods(game, f'Plugins/{installer.PLUGIN}.dll')
+        modfiles.atomic_write(dll, b'dll')
+        answers = iter(['1', 's'])
+        with patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+                patched(installer, ask=lambda prompt: next(answers)):
+            installer.uninstall(game)
+        assert not os.path.exists(dll), 'the plugin was not removed'
+        assert _read(_mods(game, cw.TABLE)) is not None, 'skipping the table changed it'
+        # Installed by us, then misaligned: the repair install offers is offered here too.
+        shutil.rmtree(game)
+        answers = iter(['1', 'y'])
+        with patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+                patched(installer, ask=lambda prompt: next(answers)):
+            cw.install(game, _call_files(game, STOCK + list(calls.IDS)))
+            for rel in cw.TEXTS:
+                modfiles.atomic_write(_mods(game, rel), _sgo_table('text_table', STOCK))
+            modfiles.atomic_write(dll, b'dll')
+            installer.uninstall(game)
+        assert not os.path.exists(dll), 'the plugin was not removed'
+        assert all(_read(_mods(game, rel)) is None for rel in cw.SHARED), 'repair did not put back the stock tables'
+        assert not os.path.exists(_mods(game, cw.MANIFEST))
+    finally:
+        shutil.rmtree(game, ignore_errors=True)
+
+
 def main() -> int:
     failed = 0
     for fn in TESTS:
         try:
             fn()
             print(f'ok    {fn.__name__}')
-        except Exception:
+        except (Exception, SystemExit):   # the tools report refusals with SystemExit
             failed += 1
             print(f'FAIL  {fn.__name__}')
             traceback.print_exc()

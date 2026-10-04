@@ -1,6 +1,6 @@
 """The Air Raider's call weapons: the one table both sides are made from. tools/call_weapons.py writes the
 weapon rows and SGOs from it; tools/gen_calls.py writes src/calls.inc (the plugin's kCalls, kCallLabels and
-kCallRows, src/airstrike.cpp) from it; tools/selftest_calls.py checks that the generated file is current, that
+kCallRows, src/airstrike.cpp) from it; tools/selftest.py checks that the generated file is current, that
 the hand-kept copies elsewhere agree, and that the order rules below hold (CI runs both).
 
 Row order: saves refer to weapons by their row in the shared weapon table, so a row, once installed, never
@@ -87,7 +87,7 @@ IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
 
 # Every order of CALLS a commit on main installed (git log -p tools/call_weapons.py), frozen: each must stay a
-# prefix of CALLS (tools/selftest_calls.py). A release that adds calls adds its own order here.
+# prefix of CALLS (tools/selftest.py). A release that adds calls adds its own order here.
 RELEASED: dict[str, tuple[str, ...]] = {
     '94808aa (the first 12 calls)': IDS[:12],
     'a1c8dbb (blast and doll drone carriers)': IDS[:16],

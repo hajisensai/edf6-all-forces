@@ -36,7 +36,8 @@ failure rolls all of them back from the copies, and a run that died on the way (
 rolled back by the next one before it starts. install also keeps, once, a copy of each shared file as it was
 before our first install (Mods/.edf6vc_backup/), which repair restores when the texts no longer line up with
 the table; Mods/.edf6vc_calls.json records what we wrote (with its SHA-256, to tell what another tool changed
-since) and where each of our rows is.
+since) and where each of our rows is. The manifest is one of the transaction's files: what it records (the
+first backups above all) is written with the files it describes, or rolled back with them.
 """
 from __future__ import annotations
 
@@ -414,8 +415,10 @@ def load_manifest(game_root: str) -> dict:
     return manifest
 
 
-def _save_manifest(game_root: str, manifest: dict) -> None:
-    modfiles.atomic_write(_manifest_path(game_root), json.dumps(manifest, indent=1).encode('utf-8'))
+def _manifest_bytes(manifest: dict) -> bytes:
+    """The manifest as commit writes it: it is one of the transaction's files, so what it records (the first
+    backups above all) lands with the files it describes, or is rolled back with them."""
+    return json.dumps(manifest, indent=1).encode('utf-8')
 
 
 def recover(game_root: str) -> bool:
@@ -465,7 +468,9 @@ def commit(game_root: str, changes: dict[str, bytes | None]) -> None:
 
 
 def _first_backup(game_root: str, manifest: dict, rels: list[str]) -> None:
-    """Keeps, once, each file as it was before our first write to it (repair restores these)."""
+    """Keeps, once, each file as it was before our first write to it (repair restores these). Only `manifest`
+    in memory records it: the caller commits the manifest with the files, so a run that is rolled back leaves no
+    record (a stale copy here is overwritten by the next first backup)."""
     for rel in rels:
         if rel in manifest['created'] or rel in manifest['replaced']:
             continue
@@ -510,12 +515,10 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
         print(f'note: {rel} was changed by another tool since our last install ({note})')
     old_rows = dict(manifest['rows'])
     _first_backup(game_root, manifest, list(files))
-    _save_manifest(game_root, manifest)
-    commit(game_root, dict(files))
     ids = row_ids(files[TABLE])
     manifest['written'] = {rel: modfiles.sha256(data) for rel, data in files.items()}
     manifest['rows'] = {c: ids.index(c) for c in IDS}
-    _save_manifest(game_root, manifest)
+    commit(game_root, {**files, MANIFEST: _manifest_bytes(manifest)})
     moved = {c: (old_rows[c], manifest['rows'][c]) for c in old_rows if old_rows[c] != manifest['rows'].get(c)}
     for c, (was, now) in moved.items():
         print(f'WARNING: {c} was row {was}, now {now}: another tool rewrote the weapon table without it; a save '
@@ -557,22 +560,19 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
                 continue
             changes[rel] = None
     _first_backup(game_root, manifest, list(shared))
-    _save_manifest(game_root, manifest)
-    commit(game_root, changes)
-    for rel, data in changes.items():
-        print(f'{"removed" if data is None else "wrote"} {rel}')
-    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
-    ids = row_ids(base(game_root, TABLE))
+    ids = row_ids(shared[TABLE])   # the table as this commit leaves it (deleted only when it is stock again)
     left = [x for x in ids if calls.slot_of(x)]
     if left:   # placeholders stay ours: a later install takes their rows back, repair can still restore
         manifest['written'] = {rel: modfiles.sha256(d) for rel, d in changes.items() if d is not None}
         manifest['rows'] = {calls.slot_of(x): ids.index(x) for x in left}
-        _save_manifest(game_root, manifest)
+    commit(game_root, {**changes, MANIFEST: _manifest_bytes(manifest) if left else None})
+    for rel, data in changes.items():
+        print(f'{"removed" if data is None else "wrote"} {rel}')
+    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    if left:
         print(f'{len(left)} rows are placeholders now (EDF6VC_RETIRED_*, stock weapons), keeping their row numbers')
         return
     shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
-    if os.path.isfile(_manifest_path(game_root)):
-        os.remove(_manifest_path(game_root))
 
 
 def repair(game_root: str) -> list[str]:
@@ -592,9 +592,8 @@ def repair(game_root: str) -> list[str]:
                 changes[rel] = f.read()
         elif rel in manifest['created'] or (rel not in SHARED and os.path.isfile(_mods(game_root, rel))):
             changes[rel] = None
-    commit(game_root, changes)
+    commit(game_root, {**changes, MANIFEST: None})
     shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
-    os.remove(_manifest_path(game_root))
     ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
     return sorted(changes)
 

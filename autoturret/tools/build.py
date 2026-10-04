@@ -292,28 +292,44 @@ def _stock_row(rel: str, row_id: str):
     return dsgo.dump(rows[describe.stock_ids().index(row_id)])
 
 
-class Legacy:
-    """What build.py wrote before 0.3.0, built only when a Mods file without a manifest entry has to be
-    told apart from another mod's."""
+class Built:
+    """What this build and the old build.py (before 0.3.0) write, each built only when a Mods file has to be
+    told apart from another mod's (the same game data gives the same bytes)."""
 
-    def __init__(self) -> None:
-        self._files: dict[str, bytes] | None = None
+    def __init__(self, files: dict[str, bytes] | None = None) -> None:
+        self._built: dict[bool, dict[str, bytes] | None] = {False: files, True: None}
 
-    def owns(self, mods: str, rel: str) -> bool:
-        if self._files is None:
-            self._files = build_files(legacy=True)
+    def _files(self, legacy: bool) -> dict[str, bytes]:
+        if self._built[legacy] is None:
+            self._built[legacy] = build_files(legacy=legacy)
+        return self._built[legacy]
+
+    def legacy_owns(self, mods: str, rel: str) -> bool:
+        """The Mods file reads as the old build.py wrote it."""
         data = modfiles.read(_path(mods, rel))
-        return data is not None and data == self._files.get(rel)
+        return data is not None and data == self._files(True).get(rel)
+
+    def owns_unsaved(self, mods: str, rel: str, entry: dict) -> bool:
+        """An entry without a sha is one an install recorded and then died before saving the sha of the file it
+        wrote (install saves each sha right after its write). The file is still ours if it is absent, reads as
+        this build or the old build.py writes it, or is still the Mods file the entry backed up (not written
+        yet)."""
+        data = modfiles.read(_path(mods, rel))
+        if data is None or data == self._files(False).get(rel) or self.legacy_owns(mods, rel):
+            return True
+        return bool(entry['backup']) and data == modfiles.read(_path(mods, f'{BACKUP}/{entry["backup"]}'))
 
 
-def _foreign(mods: str, rel: str, manifest: dict, legacy: Legacy) -> str | None:
+def _foreign(mods: str, rel: str, manifest: dict, built: Built) -> str | None:
     """Why the Mods file at `rel` is not ours to overwrite, or None (absent, ours, or the old build.py's)."""
     sha = modfiles.sha256_file(_path(mods, rel))
     if sha is None:
         return None
     entry = manifest['files'].get(rel)
     if entry is None:
-        return None if legacy.owns(mods, rel) else f'{rel}: already in Mods and not written by this tool (another mod?)'
+        return None if built.legacy_owns(mods, rel) else f'{rel}: already in Mods and not written by this tool (another mod?)'
+    if entry['sha'] is None:
+        return None if built.owns_unsaved(mods, rel, entry) else f'{rel}: changed since this tool wrote it (another mod?)'
     if sha != entry['sha']:
         return f'{rel}: changed since this tool wrote it (another mod?)'
     return None
@@ -335,8 +351,8 @@ def install(mods: str, text: bool, force: bool) -> None:
     manifest = _load_manifest(mods) or {'version': MANIFEST_VERSION, 'files': {}, 'texts': {}}
     files = build_files()
     texts = build_texts(files, mods) if text else describe.Texts({}, {})
-    legacy = Legacy()
-    problems = [p for p in (_foreign(mods, rel, manifest, legacy) for rel in files) if p]
+    built = Built(files)
+    problems = [p for p in (_foreign(mods, rel, manifest, built) for rel in files) if p]
     if problems and not force:
         raise SystemExit('not overwriting files this tool does not own:\n  ' + '\n  '.join(problems)
                          + '\nrerun with --force to back them up (first time only) and overwrite them')
@@ -346,7 +362,7 @@ def install(mods: str, text: bool, force: bool) -> None:
         if rel in manifest['files']:
             continue
         backup = None
-        if os.path.isfile(_path(mods, rel)) and not legacy.owns(mods, rel):
+        if os.path.isfile(_path(mods, rel)) and not built.legacy_owns(mods, rel):
             backup = rel
             dst = _path(mods, f'{BACKUP}/{rel}')
             os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -364,12 +380,15 @@ def install(mods: str, text: bool, force: bool) -> None:
                 original = dsgo.dump(before)
             entry['rows'][row_id] = {'original': original, 'ours': dsgo.dump(written)}
     modfiles.save_json(_manifest_path(mods), manifest)
+    # Each file's sha is saved right after it is written, so a run killed or out of disk at any point leaves a
+    # manifest that agrees with Mods: at most the one file in flight has sha None, which Built.owns_unsaved
+    # still knows as ours (a rerun overwrites it, uninstall removes it).
     for rel, data in {**files, **texts.files}.items():
         modfiles.atomic_write(_path(mods, rel), data)
         if rel in manifest['files']:
             manifest['files'][rel]['sha'] = modfiles.sha256(data)
+            modfiles.save_json(_manifest_path(mods), manifest)
         print(f'{rel:36s} {len(data):>10d}')
-    modfiles.save_json(_manifest_path(mods), manifest)
 
 
 def _restore_texts(mods: str, texts: dict, force: bool) -> dict:
@@ -412,11 +431,13 @@ def uninstall(mods: str, force: bool) -> None:
         uninstall_unrecorded(mods)
         return
     left = {'version': MANIFEST_VERSION, 'files': {}, 'texts': {}}
+    built = Built()
     for rel, entry in manifest['files'].items():
         path = _path(mods, rel)
         backup = _path(mods, f'{BACKUP}/{entry["backup"]}') if entry['backup'] else None
         sha = modfiles.sha256_file(path)
-        if sha is not None and sha != entry['sha'] and not force:
+        ours = sha is None or (built.owns_unsaved(mods, rel, entry) if entry['sha'] is None else sha == entry['sha'])
+        if not ours and not force:
             print(f'{rel}: changed since this tool wrote it (another mod?): left as is (--force restores it)')
             left['files'][rel] = entry
             continue
