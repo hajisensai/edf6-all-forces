@@ -1,5 +1,5 @@
-// The plugin's missiles guided as modern air-to-air missiles: the jets' (pylib/vcobjects.py JET_MISSILE_FILE) and the
-// submarine carrier's (SUB_MISSILE_FILE). The stock MissileBullet01 (vtable 0x17A1C10, update slot 5 0x26A880) is
+// The plugin's missiles guided as modern missiles: every missile store (pylib/vcobjects.py STORES, src/stores.h) the
+// jets and the submarine carrier carry. The stock MissileBullet01 (vtable 0x17A1C10, update slot 5 0x26A880) is
 // pure pursuit: it turns its velocity straight at the lock point, at most Ammo_CustomParameter[5] rad a frame whatever
 // its speed, so a target inside its turning circle is circled for ever (the user's screenshot, 2026-10-04). Our rounds
 // keep the stock motion, motor sound, life and blast, with the stock steering off (CP[8], the homing delay,
@@ -12,7 +12,7 @@
 //  - steers by proportional navigation: an acceleration across its path of its navigation constant times the line
 //    of sight's turn rate crossed with its velocity, at most its g limit: it flies to where the target will be;
 // The burn, the g limit and the navigation constant are the missile's own (Ammo_CustomParameter[3], which the stock
-// round stores at +0x1390 and never reads; vcobjects.py JET_MISSILE_MOTION / SUB_MISSILE_MOTION): an air-to-air
+// round stores at +0x1390 and never reads; vcobjects.py Missile.motion): an air-to-air
 // missile burns long, a ship's missile is another; acceleration and top speed are CP[4] / CP[6] as stock.
 //  - fuses by proximity: closer than kFuseShare of its blast radius (AmmoExplosion) to the target within the coming
 //    frame, it goes off now (core +0xAF4 |= 0x20, its age set to its life: the stock expiry blasts it there).
@@ -32,6 +32,7 @@ const unsigned char kUpdateSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0
 // CP[9]; its core (B + 0x140): position, flags (bit 0 dead, 0x20 blast on expiry), age and life (frames), blast radius.
 constexpr std::size_t kLock=0xB10,kLockAim=0x10,kLockValid=0x29;
 constexpr std::size_t kGuidance=0x1390;   // CP[3]: burn frames, g limit, navigation constant
+constexpr std::size_t kIgnition=0x13AC,kFlown=0x1400;   // CP[7][0] (frames before ignition), frames since launch
 constexpr std::size_t kOwn=0x13D0,kInherited=0x13E0,kAccel=0x13A0,kHomingDelay=0x13B8,kHomingFrames=0x13BC;
 constexpr std::size_t kCore=0x140,kPos=kCore+0xB80,kFlags=kCore+0xAF4,kAge=kCore+0xAF8,kLife=kCore+0xA08,kBlast=kCore+0xA20;
 constexpr std::int32_t kNoStockHoming=1000000,kPluginMark=4242;   // vcobjects.py MISSILE_NO_STOCK_HOMING / MISSILE_MARK
@@ -44,26 +45,31 @@ constexpr float kMinSpeed=1.0f;          // m a frame: no slower (it falls out o
 constexpr float kFuseShare=0.6f,kFuseLeast=4.0f;   // m
 constexpr float kG=9.8f;
 
-// Each round guided: the target where it was last frame (its velocity, m a frame).
-struct Round { const unsigned char* b; std::int32_t age; float last[3]; bool seen; };
-constexpr int kRounds=64;
+// Each round guided: the target where it was last frame (its velocity, m a frame), and the game frame it was last
+// guided in: an entry not guided for kStaleFrames is a round gone (dead rounds are never told of), free again.
+struct Round { const unsigned char* b; std::int32_t age; ULONGLONG frame; float last[3]; bool seen; };
+constexpr int kRounds=128;
+constexpr ULONGLONG kStaleFrames=2;
 Round rounds[kRounds]{};
 
 using UpdateFn=void(__fastcall*)(void*,void*,void*,void*);
 UpdateFn nextUpdate=nullptr;
 bool guideOk=false;
 
-Round& RoundOf(const unsigned char* b,std::int32_t age) noexcept {
+// The entry of round `b` (`age` frames old): its own while it was guided last frame at a younger age; a new round at
+// that address (younger than the entry, or the entry stale) starts afresh in that entry, so no address has two. A
+// new address takes a free or stale entry, else the least recently guided.
+Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept {
     Round* free=nullptr;
     for(auto& r:rounds) {
-        if(r.b==b && age>=r.age)return r;
-        if(!free && (!r.b || r.b==b))free=&r;
+        if(r.b==b) {
+            if(age<r.age || frame-r.frame>kStaleFrames)r=Round{b,age,frame,{},false};
+            return r;
+        }
+        const bool stale=!r.b || frame-r.frame>kStaleFrames;
+        if(!free || (stale && free->b && frame-free->frame<=kStaleFrames) || (!stale && free->b && r.frame<free->frame))free=&r;
     }
-    if(!free) {   // full: the oldest
-        free=&rounds[0];
-        for(auto& r:rounds)if(r.age>free->age)free=&r;
-    }
-    *free=Round{b,age,{},false};
+    *free=Round{b,age,frame,{},false};
     return *free;
 }
 
@@ -77,9 +83,12 @@ void Guide(unsigned char* b) noexcept {
     if(At<const void*>(b,0)!=image+kVtable)return;
     if(At<std::int32_t>(b,kHomingDelay)!=kNoStockHoming || At<std::int32_t>(b,kHomingFrames)!=kPluginMark)return;
     if(At<std::uint32_t>(b,kFlags)&kDead)return;
+    // Before its motor lights (CP[7][0] frames; 0 for every store) the stock code fades and drops what it inherited:
+    // left to it.
+    if(At<std::int32_t>(b,kFlown)<At<std::int32_t>(b,kIgnition))return;
     const std::int32_t age=At<std::int32_t>(b,kAge);
-    Round& round=RoundOf(b,age);
-    round.age=age;
+    Round& round=RoundOf(b,age,GameFrame());
+    round.age=age;round.frame=GameFrame();
     float* own=reinterpret_cast<float*>(b+kOwn);
     float* inherited=reinterpret_cast<float*>(b+kInherited);
     float vel[3];
@@ -121,7 +130,7 @@ void Guide(unsigned char* b) noexcept {
             for(int i=0;i<3;++i)dir[i]=vel[i]+a[i];
             if(!Normalize(dir))return;
         }
-    }
+    } else round.seen=false;   // no lock: the next one starts its target's motion afresh
     // The motor: the stock code adds CP[4] along its velocity after this; past its burn that is taken back here.
     if(static_cast<float>(age)>burn) {
         const float accel=At<float>(b,kAccel);

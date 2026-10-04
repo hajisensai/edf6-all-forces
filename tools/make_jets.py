@@ -4,7 +4,8 @@ bombers' own models), made from this machine's own V506_HELI.SGO and
 BOMBER501 model exactly like the test range's jets (pylib/vcobjects.py jet_sgo), and EDF6VC_JET.MRAB: the
 stock BOMBER501.MRAB with its model split into elevon bones the plugin moves (pylib/mdb_jet.py,
 docs/mdb-format.md), which only these two SGOs use (the stock bombers keep theirs), and their guns into
-<game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO, the missile EDF6VC_JET_MISSILE.SGO (a jet's launch and motor sounds)
+<game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO, the stores EDF6VC_<KIND>_<rounds>.SGO (pylib/vcobjects.py STORES: missiles
+with a jet's launch and motor sounds, bombs)
 and the blast drones' charges EDF6VC_BLAST_CHARGE / EDF6VC_DOLL_CHARGE.SGO (vcobjects.jet_guns). The jets' rotor
 sound is silenced (vcobjects.JET_ROTOR_SE_ROWS): the plugin plays their engine (src/jetsound.cpp). Without the SGOs the plugin leaves the stock
 bombers alone.

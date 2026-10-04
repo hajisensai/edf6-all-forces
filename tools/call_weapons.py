@@ -202,6 +202,11 @@ _VEHICLE_SWAP = {
 }
 
 
+def vehicle_needs(call: Call) -> list[str]:
+    """What a vehicle request's SGO names and so needs installed (by tools/make_jets.py): the jet SGO and its weapons."""
+    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.JETS[call.jet].weapons]
+
+
 def _object_path(call: Call) -> str:
     return f'app:/object/{call.vehicle.lower()}.sgo'
 
@@ -225,16 +230,17 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
     stock_vehicle = req.items[2]
     req.items[2] = _object_path(call)
     setup = req.items[3]
-    setup.items[0].items[0], setup.items[0].items[1] = vc.JET_TIER   # the jet's tier (vcobjects.JET_TIER), not the Eros's
+    setup.items[0].items[0], setup.items[0].items[1] = vc.tier_of(call.jet)   # the jet's tier, not the Eros's
     setup.items[1].items[0] = float(call.mark)
-    # The jet's own weapons (its guns and stores, vcobjects.JETS), then the Eros's fuel tank: as many entries as the
-    # jet SGO's vehicle_weapon_setting holders (src/stores.cpp builds one weapon a holder from this list).
+    # The jet's own weapons (its guns and stores, vcobjects.JETS) with the Eros's fuel tank where the jet SGO has it
+    # (vcobjects.with_fuel): as many entries, in the same order, as its vehicle_weapon_setting holders (src/stores.cpp
+    # builds one weapon a holder from this list).
     weapons = setup.items[3].items
     entry, fuel = weapons[0], weapons[-1]
     if 'fuel' not in str(fuel.items[0]).lower():
         raise ValueError(f'{VEHICLE_TEMPLATE}: its weapon list does not end in the fuel tank')
     jet_weapons = vc.JETS[call.jet].weapons
-    setup.items[3].items = [_with_path(entry, w) for w in jet_weapons] + [fuel]
+    setup.items[3].items = vc.with_fuel([_with_path(entry, w) for w in jet_weapons], fuel)
     res = r.get('resource')
     swap = {stock_vehicle.lower(): _object_path(call), **_VEHICLE_SWAP}
     items = [swap.get(x.lower(), x) for x in res.items]
@@ -249,7 +255,7 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
 def vehicle_durability(game_root: str, call: Call) -> float:
     """What the menu shows: the jet's durability times the request's HP multiplier (vehicle_sgo: its tier)."""
     del game_root
-    return vc.JETS[call.jet].durability * vc.JET_TIER[0]
+    return vc.JETS[call.jet].durability * vc.tier_of(call.jet)[0]
 
 
 def weapon_sgo(template: bytes, call: Call) -> bytes:
@@ -521,7 +527,7 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     if recover(game_root):
         print('rolled back the weapon table files of an earlier run that did not finish')
     files = stack(game_root) if files is None else files
-    missing = [vehicle_file(c) for c in CALLS if c.vehicle and not os.path.isfile(_mods(game_root, vehicle_file(c)))]
+    missing = [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c) if not os.path.isfile(_mods(game_root, rel))]
     if missing:
         raise SystemExit(f'{", ".join(missing)} not installed: run python tools/make_jets.py first')
     manifest = load_manifest(game_root)
@@ -541,7 +547,8 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     led = ledger.Ledger(game_root)
     for c in CALLS:
         if c.vehicle:
-            led.need(OWNER, vehicle_file(c))
+            for rel in vehicle_needs(c):   # what its request names (vehicle_sgo): kept while the request is
+                led.need(OWNER, rel)
     return dict(manifest['written'])
 
 
@@ -583,7 +590,7 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
     commit(game_root, {**changes, MANIFEST: _manifest_bytes(manifest) if left else None})
     for rel, data in changes.items():
         print(f'{"removed" if data is None else "wrote"} {rel}')
-    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    ledger.Ledger(game_root).release(OWNER, [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c)])
     if left:
         print(f'{len(left)} rows are placeholders now (EDF6VC_RETIRED_*, stock weapons), keeping their row numbers')
         return
@@ -609,7 +616,7 @@ def repair(game_root: str) -> list[str]:
             changes[rel] = None
     commit(game_root, {**changes, MANIFEST: None})
     shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
-    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    ledger.Ledger(game_root).release(OWNER, [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c)])
     return sorted(changes)
 
 
@@ -643,7 +650,7 @@ def check(game_root: str) -> bool:
         if state == 'in' and not os.path.isfile(_mods(game_root, sgo_file(c))):
             print(f'        {sgo_file(c)} missing')
             ok = False
-        if state == 'in' and c.vehicle and not os.path.isfile(_mods(game_root, vehicle_file(c))):
+        if state == 'in' and c.vehicle and any(not os.path.isfile(_mods(game_root, rel)) for rel in vehicle_needs(c)):
             print(f'        {vehicle_file(c)} missing (python tools/make_jets.py)')
             ok = False
     return ok

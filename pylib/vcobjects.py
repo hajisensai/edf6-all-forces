@@ -165,6 +165,22 @@ STORES: dict[str, Store] = {
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 
 
+# The fuel tank's place in a jet's weapon list and holders: fourth (index 3, or last with fewer), among the four the
+# 506 builds without the plugin's loop patch (src/stores.cpp), so it is always built; the stores past it are the
+# plugin's alone.
+FUEL_AT = 3
+
+
+def with_fuel(weapons: list, fuel) -> list:
+    at = min(FUEL_AT, len(weapons))
+    return list(weapons[:at]) + [fuel] + list(weapons[at:])
+
+
+def tier_of(name: str) -> tuple[float, float]:
+    """A jet's tier (Jet.tier, else JET_TIER): mission_setup[0], and its vehicle request's multipliers."""
+    return JETS[name].tier or JET_TIER
+
+
 def store_file(kind: str, rounds: int) -> str:
     """A store's weapon SGO for a load of `rounds` (AmmoCount is the weapon's, so each load is its own file)."""
     return f'EDF6VC_{kind}_{rounds}.SGO'
@@ -212,9 +228,10 @@ _ARMS = _FIGHTER
 # when its life runs out (0x26543E), CP#3 = 0 no bounce, CP#5 = 0 no random life; it barely moves, lives
 # JET_BLAST_ALIVE frames, so it goes off where the drone is. One round, one shot. (damage, radius m).
 JET_BLAST_STOCK = 'V_409HELI_BOMB01.SGO'
+# Base damage on the stock scale (JET_TIER multiplies it: 3000 and 7500 at the highest tier).
 JET_BLAST_FILES: dict[str, tuple[float, float]] = {
-    'EDF6VC_BLAST_CHARGE.SGO': (1200.0, 15.0),   # the blast drone: fast, many
-    'EDF6VC_DOLL_CHARGE.SGO': (3000.0, 25.0),    # the doll drone: slow, draws the enemy in first
+    'EDF6VC_BLAST_CHARGE.SGO': (120.0, 15.0),    # the blast drone: fast, many
+    'EDF6VC_DOLL_CHARGE.SGO': (300.0, 25.0),     # the doll drone: slow, draws the enemy in first
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
@@ -365,10 +382,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         raise ValueError('V506_HELI 没有 vehicle_setup')
     setup = m.pop('vehicle_setup')
     setup[1][0] = jet.mark
-    setup[0] = [float(x) for x in (jet.tier or JET_TIER)]
+    setup[0] = [float(x) for x in tier_of(name)]
     stock = {w[0]: w for w in setup[3]}   # each weapon keeps its stock per-weapon parameters (a derived one its stock's)
-    setup[3] = [[w, stock[_STOCK_OF[w]][1]] if _STOCK_OF.get(w) in stock else stock.get(w, [w, [0.0001, 0.1]])
-                for w in jet.weapons] + [stock['app:/weapon/v_fuel01.sgo']]
+    setup[3] = with_fuel([[w, stock[_STOCK_OF[w]][1]] if _STOCK_OF.get(w) in stock else stock.get(w, [w, [0.0001, 0.1]])
+                          for w in jet.weapons], stock['app:/weapon/v_fuel01.sgo'])
     m['mission_setup'] = setup
     if jet.player:
         import copy
@@ -385,9 +402,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
-    m['vehicle_weapon_setting'] = [[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))] + [[anchor, -1]]
+    m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))], [anchor, -1])
     # Without the plugin the 506 builds weapons for its first four holders only (src/stores.cpp): fewer would read an
-    # entry that is not there; the plugin builds them all, one an entry, so the two lists must agree.
+    # entry that is not there; the plugin builds them all, one an entry, so the two lists must agree. The fuel tank is
+    # among the four (with_fuel): built either way.
     if len(m['vehicle_weapon_setting']) < 4 or len(m['vehicle_weapon_setting']) != len(setup[3]):
         raise ValueError(f'{name}: {len(setup[3])} weapons for {len(m["vehicle_weapon_setting"])} holders (at least 4)')
     m['vehicle_dead_effect'] = _dead_effect(_rebone(m['vehicle_dead_effect'], bones, anchor))

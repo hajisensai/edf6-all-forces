@@ -6,7 +6,7 @@
   Mods/OBJECT/EDF6VC_SUB_CARRIER.SGO   a Vehicle506_Helicopter body with that model (pylib/vcobjects.py jet_sgo:
                                        'edf6tr_sub_carrier_mission', mark 7101, HP 30000 (the plugin raises it
                                        to SubHullHp), the hull's box)
-  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO, EDF6VC_SUB_MISSILE.SGO  the jets' guns and its missile (vcobjects.jet_guns), which it fires; the same
+  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO, EDF6VC_ESSM_32.SGO  the jets' guns and its missiles (vcobjects.jet_guns), which it fires; the same
                                        bytes tools/make_jets.py writes
 
 All of it is built in memory first, then written atomically and recorded in the ledger as this tool's
@@ -87,8 +87,12 @@ def build(root: str) -> dict[str, bytes]:
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:
+    """Writes `files` (build) as this tool's; what it wrote before and does not now is released (make_jets.install)."""
     led = ledger.Ledger(root)
-    return [led.put(OWNER, rel, data) for rel, data in files.items()]
+    before = set(led.owned_by(OWNER))
+    paths = [led.put(OWNER, rel, data) for rel, data in files.items()]
+    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files}))
+    return paths
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:

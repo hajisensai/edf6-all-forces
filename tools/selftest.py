@@ -104,6 +104,13 @@ def stores_inc_current() -> None:
         for w in jet.weapons:
             got = vc.store_of(w)
             assert got is None or w.split('/')[-1].upper() in vc.STORE_FILES, (name, w)
+    # The weapons the submarine carrier's launch requires (src/subcarrier.cpp kSubFiles) are the ones it is built with.
+    import re
+    sub = src('src/subcarrier.cpp')
+    listed = re.findall(r'WEAPON\\+([A-Z0-9_]+\.SGO)', sub[sub.index('kSubFiles[]'):sub.index('};', sub.index('kSubFiles[]'))])
+    built = {w.split('/')[-1].upper() for w in vc.JETS['edf6tr_sub_carrier_mission'].weapons}
+    assert listed and set(listed) <= built, (listed, built)
+    assert f'kSgoHull={vc.JETS["edf6tr_sub_carrier_mission"].durability:.1f}f' in sub, 'subcarrier.cpp kSgoHull'
 
 
 @test
@@ -393,7 +400,8 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     """What call_weapons.stack would give (shape only), and the jets the vehicle requests need."""
     for c in calls.CALLS:
         if c.vehicle:
-            modfiles.atomic_write(_mods(game, cw.vehicle_file(c)), b'jet')
+            for rel in cw.vehicle_needs(c):
+                modfiles.atomic_write(_mods(game, rel), b'jet')
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
     files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS})

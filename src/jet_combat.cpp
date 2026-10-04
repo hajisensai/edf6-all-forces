@@ -12,7 +12,7 @@ constexpr std::int32_t kHoming=1;
 // The homing weapon's lock-on (Weapon_VehicleShoot: its lock tick 0x6963A0 runs for AI riders too; the
 // test 0x22DF30 wants the target within LockonRange and LockonAngle of the arms bone); unlocked, its rounds fly
 // straight on (MissileBullet01 mode 1 steers only at a target the lock list gave it). The jets' missile
-// (pylib/vcobjects.py JET_MISSILE_FILE) sets its own range, cone and lock time; a jet fires it within that
+// (pylib/vcobjects.py STORES) sets its own range, cone and lock time; a jet fires it within that
 // range (MissileReach) only once the game has a target in its lock list (kWeaponLocked), which it keeps
 // HoldTime (600 frames) nose or not. (Until 2026-10-04 the plugin raised the stock 500 m lock at run time to
 // each role's missileRange: the weapon's own settings said one thing and the jets did another.)

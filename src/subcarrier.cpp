@@ -86,7 +86,7 @@ const wchar_t* const kSubSgo=L"app:/object/edf6vc_sub_carrier.sgo";
 // What SubLaunch needs in Mods (tools/make_sub.py): the SGO, its model, the turret guns, the missile.
 const wchar_t* const kSubFiles[]={L"\\Mods\\OBJECT\\EDF6VC_SUB_CARRIER.SGO",L"\\Mods\\OBJECT\\EDF6VC_SUB.MRAB",
                                   L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_L.SGO",L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_R.SGO",
-                                  L"\\Mods\\WEAPON\\EDF6VC_SUB_MISSILE.SGO"};
+                                  L"\\Mods\\WEAPON\\EDF6VC_ESSM_32.SGO"};   // vcobjects.store_file('ESSM', 32)
 constexpr int kMaxSubs=3;                     // M123: three carriers attack at once (BE151_157)
 
 // The hull (the SGO's box, the model at its own size): its bottom kHullBottom under the body origin,
@@ -105,7 +105,7 @@ constexpr float kTurnRate=0.05f,kTurnGain=0.8f,kRollGain=1.5f,kMaxPitch=0.05f;  
 // Combat.
 constexpr float kRange=2000.0f;              // it engages enemies this far from it
 // The guns fire within their own reach (Sub::gunReach: their SGO's AmmoSpeed x AmmoAlive, less kGunReachIn), the
-// missiles within their lock range (Sub::missileReach: the carrier's missile SGO, vcobjects.SUB_MISSILE_FILE, sets
+// missiles within their lock range (Sub::missileReach: the carrier's missile SGO, vcobjects STORES['ESSM'], sets
 // it and its wide cone: the missile bay need not face the target).
 constexpr float kGunCone=0.07f,kGunReachIn=0.97f;   // 4 deg off the barrel
 constexpr float kMissileMin=60.0f;
@@ -148,6 +148,7 @@ struct Sub {
     ULONGLONG bornAt,missileAt,logAt,tickMs;
     ULONGLONG frame,fireFrame;   // GameFrame of the last tick, fire step
     float gunReach,missileReach; // m: its guns' reach and its missiles' lock range, as their SGOs set them (Arm)
+    float tier;                  // its HP over its SGO's (Thicken: the request's tier, pylib/vcobjects.py JET_TIER)
     ULONGLONG inputAt;           // GameMs of the last input stage
     float dt;                     // the game's step of the last tick (s)
     bool noInputLogged;
@@ -293,11 +294,14 @@ bool HeavySource(std::uintptr_t from) noexcept {
     return false;
 }
 
+// A part's HP: its own at the base tier, times the carrier's (Thicken).
+float PartHp(const Sub& s,int k) noexcept { return kSystems[k].hp*(s.tier>1.0f ? s.tier : 1.0f); }
+
 void Wear(Sub& s,int k,float dmg) noexcept {
     s.partDmg+=dmg;
     s.wear[k]+=dmg;
-    if(s.wear[k]<kSystems[k].hp)return;
-    s.wear[k]=kSystems[k].hp;s.down[k]=true;s.downAt[k]=GameMs();
+    if(s.wear[k]<PartHp(s,k))return;
+    s.wear[k]=PartHp(s,k);s.down[k]=true;s.downAt[k]=GameMs();
     Log("SUB v=%p part %s destroyed (the crew repairs it in %llus)",s.vehicle,kSystems[k].name,kRepairMs/1000);
 }
 
@@ -324,13 +328,19 @@ float* Route(unsigned char* v,unsigned char* gdi,float* was) noexcept {
     return reinterpret_cast<float*>(gdi+kDmgAmount);
 }
 
-// The hull made as thick as Cfg().subHullHp (its HP raised in proportion), once per carrier.
-void Thicken(unsigned char* v) noexcept {
+// The carrier's tier (its HP over its SGO's kSgoHull: the multiplier its SGO's mission_setup[0] or its request
+// gave, 25 at the highest), and its hull made Cfg().subHullHp at the base tier times that (its HP kept in proportion;
+// 0: the game's). Its parts' HP scale the same (PartHp). Once per carrier.
+constexpr float kSgoHull=30000.0f;   // pylib/vcobjects.py JETS['edf6tr_sub_carrier_mission'].durability
+void Thicken(Sub& s,unsigned char* v) noexcept {
     const float max=At<float>(v,kHpMax),hp=At<float>(v,kHp);
-    if(!(Cfg().subHullHp>max) || !(max>0.0f))return;
-    Put<float>(v,kHpMax,Cfg().subHullHp);
-    Put<float>(v,kHp,hp/max*Cfg().subHullHp);
-    Log("SUB v=%p hull hp %.0f/%.0f -> %.0f/%.0f",v,hp,max,At<float>(v,kHp),Cfg().subHullHp);
+    if(!(max>0.0f))return;
+    s.tier=max/kSgoHull>1.0f ? max/kSgoHull : 1.0f;
+    const float want=Cfg().subHullHp*s.tier;
+    if(!(want>0.0f) || want==max){Log("SUB v=%p tier x%.1f, hull hp %.0f",v,s.tier,max);return;}
+    Put<float>(v,kHpMax,want);
+    Put<float>(v,kHp,hp/max*want);
+    Log("SUB v=%p tier x%.1f, hull hp %.0f/%.0f -> %.0f/%.0f",v,s.tier,hp,max,At<float>(v,kHp),want);
 }
 
 // Worn-out parts back in order kRepairMs after they wore out.
@@ -338,7 +348,7 @@ void Repair(Sub& s,ULONGLONG ms) noexcept {
     for(int k=0;k<kSystemCount;++k) {
         if(!s.down[k] || ms-s.downAt[k]<kRepairMs)continue;
         s.down[k]=false;s.wear[k]=0.0f;
-        Log("SUB v=%p part %s repaired (hp %.0f)",s.vehicle,kSystems[k].name,kSystems[k].hp);
+        Log("SUB v=%p part %s repaired (hp %.0f)",s.vehicle,kSystems[k].name,PartHp(s,k));
     }
 }
 
@@ -769,7 +779,7 @@ void Stage(int i,const Sub& s,const unsigned char* v,const float* m,ULONGLONG ms
         const ULONGLONG done=s.downAt[k]+kRepairMs;
         const float left=s.down[k] && done>ms ? static_cast<float>(done-ms)*0.001f : 0.0f;
         auto& part=p.part[k];
-        part={kPartNames[k],Clamp(kSystems[k].hp-s.wear[k],0.0f,kSystems[k].hp),kSystems[k].hp,left,s.down[k],{}};
+        part={kPartNames[k],Clamp(PartHp(s,k)-s.wear[k],0.0f,PartHp(s,k)),PartHp(s,k),left,s.down[k],{}};
         ToWorld(m,kSystems[k].gauge,part.at);
     }
     g.shown=true;
@@ -870,7 +880,7 @@ Sub* Adopt(unsigned char* v) noexcept {
     FixBodyPart506(v,"SUB");
     Log("SUB v=%p crewed (placed by the mission) at y=%.0f: %s y=%.0f, hp=%.0f/%.0f",v,pos[1],s->sea ? "afloat at" : "held at",
         s->floor,At<float>(v,kHp),At<float>(v,kHpMax));
-    Thicken(v);
+    Thicken(*s,v);
     return s;
 }
 // Carrier v's entry (made if it has none): nullptr when it has none and gets none, or its object is no longer
@@ -1105,7 +1115,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=ms;s->launched=true;s->inputAt=ms;
         s->sea=sea==Sea::water;s->floor=s->sea ? surface-kDraft : -INFINITY;
         std::memcpy(s->post,start,12);
-        Thicken(v);
+        Thicken(*s,v);
         Log("SUB v=%p launched at (%.0f,%.0f,%.0f) heading (%.2f,%.2f) %s hp=%.0f driver=%d",v,start[0],start[1],start[2],fwd[0],fwd[2],
             sea==Sea::water ? "afloat" : "on the ground (water unknown)",At<float>(v,kHp),SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
         return v;
