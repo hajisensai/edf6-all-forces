@@ -119,6 +119,10 @@ class App(tk.Tk):
         ttk.Checkbutton(box, text='刷敌机', variable=self.a_on).grid(row=0, column=0, sticky='w')
         ttk.Button(box, text='空战预设（玩家战斗机 + 3 架友军 + 8 架敌机，之后成波补充）', command=self.air_battle).grid(
             row=0, column=1, sticky='w', padx=6)
+        self.grand = tk.BooleanVar(value=self.plan.scenario == gen.GRAND)
+        ttk.Checkbutton(box, text='大混战（需先用 tools/make_bigmap.py 装大地图）', variable=self.grand).grid(row=9, column=0, sticky='w')
+        ttk.Button(box, text='大混战预设（母舰、传送舰、敌机 vs 我方飞机；地面步兵坦克 vs 外星地面部队）',
+                   command=self.grand_battle).grid(row=9, column=1, sticky='w', padx=6)
         self.a_vars: dict[str, tk.Variable] = {}
         fields = [('per_wave', '每波敌机数', tk.IntVar), ('max_alive', '敌机少于几架时补充', tk.IntVar),
                   ('first_delay', '开局多少秒后开始补充', tk.DoubleVar), ('interval', '两波最短间隔（秒）', tk.DoubleVar)]
@@ -128,6 +132,16 @@ class App(tk.Tk):
             ttk.Label(box, text=text).grid(row=i, column=0, sticky='w')
             ttk.Entry(box, textvariable=var, width=8).grid(row=i, column=1, sticky='w', pady=1)
         return box
+
+    def grand_battle(self) -> None:
+        plan = gen.grand_battle(gen.Plan())
+        for s, var in self.counts.items():
+            var.set(plan.vehicles.get(s, 0))
+        for s, var in self.npc_counts.items():
+            var.set(plan.friends.get(s, 0))
+        self.w_on.set(False)
+        self.a_on.set(False)
+        self.grand.set(True)
 
     def air_battle(self) -> None:
         plan = gen.air_battle(gen.Plan())
@@ -232,6 +246,7 @@ class App(tk.Tk):
         plan.waves = gen.Waves(enabled=bool(self.w_on.get()), enemy=enemy,
                                **{k: v.get() for k, v in self.w_vars.items()})
         plan.air = gen.AirWaves(enabled=bool(self.a_on.get()), **{k: v.get() for k, v in self.a_vars.items()})
+        plan.scenario = gen.GRAND if self.grand.get() else ''
         plan.loadout = self._loadout_choice()
         plan.slot = gen.SLOTS[self.slot.current()].mission
         plan.site = gen.SITES[self.site.current()].source
