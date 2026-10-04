@@ -58,7 +58,7 @@ struct Kind {
     float landMax;       // m/s: the fastest it can touch down without damage
 };
 constexpr Kind kKinds[]={
-    {"fighter",7201.0f, 65.0f,75.0f,195.0f, 16.0f,20.0f, 7.0f,2.6f, 130.0f},
+    {"fighter",7201.0f, 65.0f,75.0f,195.0f, 16.0f,20.0f, 6.0f,2.6f, 130.0f},
     {"strike", 7202.0f, 60.0f,70.0f,180.0f, 11.0f,15.0f, 5.0f,1.6f, 120.0f},
 };
 constexpr float kAutoRotate=20.0f;     // m/s over rotate: it lifts off without the stick...
@@ -74,6 +74,10 @@ constexpr float kTurnShare=0.9f;       // of maxG a full turn stick pulls (the r
 constexpr float kMinUpLift=0.35f;      // g: the body's up never tips below this much lift (pushing it stays upright)
 constexpr float kMaxClimb=0.94f;       // sine of the steepest climb or dive (~70 deg): no loops, no gimbal flip
 constexpr float kTurnBleed=3.0f;       // m/s^2 lost per g pulled over 1 (jet.cpp kTurnBleed)
+// Angle of attack (jet.cpp kAoaPerG): the nose rides this far above the path per g pulled at the middle of
+// the speed range, more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax, eased over kAoaTau s. Only
+// pitch, along the body's up: the nose never slips sideways off the path.
+constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.2f,kAoaTau=0.3f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude this fast (jet.cpp kAttGain)
 constexpr float kBodyTop=195.0f;
 constexpr float kCeilingGap=12.0f;
@@ -116,6 +120,7 @@ struct PJet {
     float prev[3];               // its position last frame
     bool havePrev;
     float sent[3];               // the velocity it was sent with last frame
+    float aoa;                   // the nose above the path (rad, see kAoaPerG)
     float savedInset;
     bool insetSaved;
     LARGE_INTEGER last;
@@ -406,7 +411,17 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,fl
     // The ceiling the stock input holds every body under, and the world's walls: it slides along them.
     if(pos[1]>Ceiling()-kCeilingGap && j.vel[1]>0.0f)j.vel[1]=0.0f;
     for(int i=0;i<3;i+=2)if(std::fabs(pos[i])>kWorldWall && j.vel[i]*pos[i]>0.0f)j.vel[i]=0.0f;
-    Attitude(j,v,next,bodyUp);
+    // The nose above the path by what the wing needs, pitched about the body's right only (no sideslip).
+    const float mid=0.5f*(k.minAir+k.top),slow=mid/speed;
+    const float aoaWant=Clamp(kAoaPerG*g*slow*slow,kAoaMin,kAoaMax);
+    j.aoa+=(aoaWant-j.aoa)*(dt<kAoaTau ? dt/kAoaTau : 1.0f);
+    float nose[3]={next[0],next[1],next[2]};
+    const float along=Dot(bodyUp,nose);
+    for(int i=0;i<3;++i)bodyUp[i]-=nose[i]*along;
+    if(Normalize(bodyUp)){const float c=std::cos(j.aoa),sn=std::sin(j.aoa);
+        for(int i=0;i<3;++i){const float n=nose[i],u=bodyUp[i];nose[i]=n*c+u*sn;bodyUp[i]=u*c-n*sn;}}
+    else std::memcpy(bodyUp,up,12);
+    Attitude(j,v,nose,bodyUp);
     // The ground: under it, out (it went through); touching it or about to within kFloorSweep frames, a
     // landing or a crash, its descent cut to stop kFloorGap over the floor (jet.cpp HoldOffGround).
     if(clear==kNoGround)return;
