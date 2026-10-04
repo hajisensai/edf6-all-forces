@@ -10,7 +10,7 @@
                                        bytes tools/make_jets.py writes
 
 All of it is built in memory first, then written atomically and recorded in the ledger as this tool's
-(pylib/modfiles.py); --remove releases it, so the guns stay while make_jets or the test range still use them,
+(pylib/ledger.py); --remove releases it, so the guns stay while make_jets or the test range still use them,
 and the sub's own files while testrange/sub_vs_mothership.py's mission does. No shared table
 (Mods/WEAPON/WEAPONTABLE.SGO, ...) is touched. The plugin preloads the sub only while both files and both guns
 are there.
@@ -26,13 +26,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import jet_models  # noqa: E402
-import modfiles  # noqa: E402
+import ledger  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 JET = 'edf6tr_sub_carrier_mission'
 SGO_FILE = 'EDF6VC_SUB_CARRIER.SGO'
 MODEL_FILE = 'EDF6VC_SUB.MRAB'
-OWNER = 'sub'   # pylib/modfiles.py
+OWNER = 'sub'   # pylib/ledger.py
 # Hull box (half extents) the plugin's SubFrame and the SGO agree on: its bottom is kHullBottom metres under
 # the body origin (src/subcarrier.cpp; negative: the box is the slab under the deck, over the origin).
 HULL_BOTTOM = -163.08
@@ -79,14 +79,14 @@ def build(root: str) -> dict[str, bytes]:
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:
-    led = modfiles.Ledger(root)
+    led = ledger.Ledger(root)
     return [led.put(OWNER, rel, data) for rel, data in files.items()]
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
     """Releases this tool's files (and the sub's own from before the ledger): (deleted, kept changed)."""
-    led = modfiles.Ledger(root)
-    own = {modfiles.key(f'OBJECT/{n}') for n in (SGO_FILE, MODEL_FILE)}
+    led = ledger.Ledger(root)
+    own = {ledger.key(f'OBJECT/{n}') for n in (SGO_FILE, MODEL_FILE)}
     return led.release(OWNER, sorted(set(led.owned_by(OWNER)) | own), writer=True)
 
 

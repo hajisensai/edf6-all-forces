@@ -2,7 +2,7 @@
 src/playerjet.cpp, src/subcarrier.cpp) as V506 heli SGOs with their own models, their guns and charges, the
 portal laser (src/carrierlaser.cpp) and script-placeable call-in vehicles. Shared by tools/make_jets.py,
 tools/make_sub.py, tools/call_weapons.py and the test range (testrange/gen.py); builders only: what gets
-written where, and who owns it, is pylib/modfiles.py.
+written where, and who owns it, is pylib/ledger.py.
 """
 from __future__ import annotations
 

@@ -13,7 +13,7 @@ Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mo
 EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (vcobjects.portal_lasers).
 
 Every file is built in memory first (build: nothing is written unless all of it could be made), then written
-atomically and recorded in the ledger as this tool's (pylib/modfiles.py); --remove releases them, so a file
+atomically and recorded in the ledger as this tool's (pylib/ledger.py); --remove releases them, so a file
 another tool still uses (the guns, which make_sub and the test range use too; the models the test range's jets
 fly) stays. The test range's own jets are its own: it gives them the elevon model when it installs them.
 
@@ -29,10 +29,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import jet_models  # noqa: E402
 import mdb_jet  # noqa: E402
-import modfiles  # noqa: E402
+import ledger  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
-OWNER = 'jets'   # pylib/modfiles.py
+OWNER = 'jets'   # pylib/ledger.py
 
 # file -> the testrange jet it is made like
 FILES: dict[str, str] = {
@@ -96,17 +96,17 @@ def names() -> list[str]:
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:
     """Writes `files` (build) as this tool's; what it wrote before and does not now is released."""
-    led = modfiles.Ledger(root)
+    led = ledger.Ledger(root)
     before = set(led.owned_by(OWNER))
     paths = [led.put(OWNER, rel, data) for rel, data in files.items()]
-    led.release(OWNER, sorted(before - {modfiles.key(rel) for rel in files}))
+    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files}))
     return paths
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
     """Releases this tool's files (and ones an install from before the ledger left): (deleted, kept changed)."""
-    led = modfiles.Ledger(root)
-    return led.release(OWNER, sorted(set(led.owned_by(OWNER)) | {modfiles.key(n) for n in names()}), writer=True)
+    led = ledger.Ledger(root)
+    return led.release(OWNER, sorted(set(led.owned_by(OWNER)) | {ledger.key(n) for n in names()}), writer=True)
 
 
 def main(argv: list[str]) -> int:

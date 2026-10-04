@@ -8,7 +8,7 @@
     the enum names in src/crew.h, the counts in README.md);
   - the weapon table transaction (call_weapons.commit / recover) writes all or nothing, and rolls back a run
     that died half way;
-  - the ownership ledger (pylib/modfiles.py) deletes a file only when nobody needs it, and never one someone
+  - the ownership ledger (pylib/ledger.py) deletes a file only when nobody needs it, and never one someone
     else changed;
   - the installer's ini merge (installer.merge_ini) only adds settings and changes nothing of the player's.
 """
@@ -30,6 +30,7 @@ import call_weapons as cw  # noqa: E402
 import calls  # noqa: E402
 import gen_calls  # noqa: E402
 import installer  # noqa: E402
+import ledger  # noqa: E402
 import make_jets  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -193,10 +194,10 @@ def commit_all_or_nothing() -> None:
     try:
         before = {'WEAPON/A.SGO': b'a0', 'WEAPON/B.SGO': b'b0', 'WEAPON/D.SGO': b'd0'}
         for rel, data in before.items():
-            modfiles.write_atomic(_mods(game, rel), data)
+            modfiles.atomic_write(_mods(game, rel), data)
         changes: dict[str, bytes | None] = {'WEAPON/A.SGO': b'a1', 'WEAPON/B.SGO': b'b1', 'WEAPON/C.SGO': b'c1',
                                             'WEAPON/D.SGO': None}
-        real = modfiles.write_atomic
+        real = modfiles.atomic_write
         calls_made = []
 
         def failing(path: str, data: bytes) -> None:
@@ -205,7 +206,7 @@ def commit_all_or_nothing() -> None:
                 raise OSError('disk full (test)')
             real(path, data)
 
-        modfiles.write_atomic = failing
+        modfiles.atomic_write = failing
         try:
             cw.commit(game, changes)
         except OSError:
@@ -213,7 +214,7 @@ def commit_all_or_nothing() -> None:
         else:
             raise AssertionError('the failing write did not fail')
         finally:
-            modfiles.write_atomic = real
+            modfiles.atomic_write = real
         for rel, data in before.items():
             assert _read(_mods(game, rel)) == data, f'{rel} not rolled back'
         assert _read(_mods(game, 'WEAPON/C.SGO')) is None
@@ -223,9 +224,9 @@ def commit_all_or_nothing() -> None:
         assert _read(_mods(game, 'WEAPON/A.SGO')) == b'a2'
         os.makedirs(_mods(game, f'{cw.BACKUP}/txn/WEAPON'))
         shutil.copy2(_mods(game, 'WEAPON/A.SGO'), _mods(game, f'{cw.BACKUP}/txn/WEAPON/A.SGO'))
-        modfiles.write_atomic(_mods(game, cw.JOURNAL), b'{"WEAPON/A.SGO": true, "WEAPON/E.SGO": false}')
-        modfiles.write_atomic(_mods(game, 'WEAPON/A.SGO'), b'half')
-        modfiles.write_atomic(_mods(game, 'WEAPON/E.SGO'), b'half')
+        modfiles.atomic_write(_mods(game, cw.JOURNAL), b'{"WEAPON/A.SGO": true, "WEAPON/E.SGO": false}')
+        modfiles.atomic_write(_mods(game, 'WEAPON/A.SGO'), b'half')
+        modfiles.atomic_write(_mods(game, 'WEAPON/E.SGO'), b'half')
         assert cw.recover(game)
         assert _read(_mods(game, 'WEAPON/A.SGO')) == b'a2' and _read(_mods(game, 'WEAPON/E.SGO')) is None
         assert not cw.recover(game)
@@ -240,33 +241,33 @@ def commit_all_or_nothing() -> None:
 def ledger_refcounts() -> None:
     game = tempfile.mkdtemp(prefix='edf6vc-selftest-')
     try:
-        led = modfiles.Ledger(game)
+        led = ledger.Ledger(game)
         led.put('jets', 'WEAPON/GUN.SGO', b'gun')
         led.put('sub', 'WEAPON/GUN.SGO', b'gun')
         led.put('jets', 'OBJECT/MODEL.MRAB', b'model')
         led.need('testrange', 'OBJECT/MODEL.MRAB')
         led.put('jets', 'OBJECT/MINE.SGO', b'mine')
-        deleted, kept = modfiles.Ledger(game).release('jets')
+        deleted, kept = ledger.Ledger(game).release('jets')
         assert [os.path.basename(p) for p in deleted] == ['MINE.SGO'], deleted
         assert os.path.isfile(_mods(game, 'WEAPON/GUN.SGO')) and os.path.isfile(_mods(game, 'OBJECT/MODEL.MRAB'))
         with open(_mods(game, 'OBJECT/MODEL.MRAB'), 'wb') as f:
             f.write(b'changed by someone')
-        deleted, kept = modfiles.Ledger(game).release('testrange')
+        deleted, kept = ledger.Ledger(game).release('testrange')
         assert not deleted and [os.path.basename(p) for p in kept] == ['MODEL.MRAB']
-        deleted, _ = modfiles.Ledger(game).release('sub')
+        deleted, _ = ledger.Ledger(game).release('sub')
         assert [os.path.basename(p) for p in deleted] == ['GUN.SGO']
-        assert not os.path.exists(os.path.join(game, 'Mods', modfiles.MANIFEST)), 'empty ledger left behind'
-        modfiles.write_atomic(_mods(game, 'OBJECT/OLD.SGO'), b'from before the ledger')
-        led = modfiles.Ledger(game)
+        assert not os.path.exists(os.path.join(game, 'Mods', ledger.MANIFEST)), 'empty ledger left behind'
+        modfiles.atomic_write(_mods(game, 'OBJECT/OLD.SGO'), b'from before the ledger')
+        led = ledger.Ledger(game)
         led.need('calls', 'OBJECT/OLD.SGO')
         deleted, _ = led.release('calls', ['OBJECT/OLD.SGO'])
         assert not deleted, 'a file from before the ledger deleted by a tool that only needed it'
-        deleted, _ = modfiles.Ledger(game).release('jets', ['OBJECT/OLD.SGO'], writer=True)
+        deleted, _ = ledger.Ledger(game).release('jets', ['OBJECT/OLD.SGO'], writer=True)
         assert deleted, 'a file from before the ledger is the one of its writer'
-        modfiles.write_atomic(_mods(game, 'OBJECT/OLD2.SGO'), b'from before the ledger')
-        deleted, _ = modfiles.Ledger(game).release('testrange', ['OBJECT/OLD2.SGO'])
+        modfiles.atomic_write(_mods(game, 'OBJECT/OLD2.SGO'), b'from before the ledger')
+        deleted, _ = ledger.Ledger(game).release('testrange', ['OBJECT/OLD2.SGO'])
         assert not deleted, 'a file the ledger does not know deleted by a tool that does not write it'
-        deleted, _ = modfiles.Ledger(game).release('jets', ['OBJECT/OLD2.SGO'], writer=True)
+        deleted, _ = ledger.Ledger(game).release('jets', ['OBJECT/OLD2.SGO'], writer=True)
         assert deleted
     finally:
         shutil.rmtree(game, ignore_errors=True)

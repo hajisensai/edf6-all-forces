@@ -43,7 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import gen  # noqa: E402
-import modfiles  # noqa: E402
+import ledger  # noqa: E402
 import rmpa  # noqa: E402
 
 MISSION = 'M082'
@@ -53,7 +53,7 @@ MAP = 'app:/map/ig_SteepCoast.mac'
 WEATHER = 'afternoon'
 SUB = 'app:/object/edf6vc_sub_carrier.sgo'
 SUB_FILES = ('EDF6VC_SUB_CARRIER.SGO', 'EDF6VC_SUB.MRAB')
-OWNER = 'testrange_sub'   # pylib/modfiles.py: the mission needs make_sub's files while it is installed
+OWNER = 'testrange_sub'   # pylib/ledger.py: the mission needs make_sub's files while it is installed
 MOTHER = 'app:/object/e511_mothership_light.sgo'
 MOTHER2 = 'app:/object/e511_mothership_edf6.sgo'
 UFO = 'app:/object/e507_goldufo.sgo'
@@ -300,7 +300,7 @@ def install(root: str) -> str:
     missing = [f for f in SUB_FILES if not os.path.isfile(os.path.join(gen.object_dir(root), f))]
     if missing:
         raise RuntimeError(f'缺少潜舰文件 {missing}：游戏关闭时先运行 python tools/make_sub.py')
-    led = modfiles.Ledger(root)
+    led = ledger.Ledger(root)
     for f in SUB_FILES:
         led.need(OWNER, f'OBJECT/{f}')
     game = gen.Game(root)
@@ -320,7 +320,7 @@ def remove(root: str) -> bool:
     if not ours(out):
         return False
     shutil.rmtree(out)
-    modfiles.Ledger(root).release(OWNER, [f'OBJECT/{f}' for f in SUB_FILES])
+    ledger.Ledger(root).release(OWNER, [f'OBJECT/{f}' for f in SUB_FILES])
     return True
 
 

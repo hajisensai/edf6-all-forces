@@ -1,34 +1,54 @@
-"""Who owns the files the tools generate under <game>/Mods, so removing one tool's files never pulls a file
-another one still uses (the jet guns are written by make_jets, make_sub and the test range alike; the test
-range's jets fly in the models make_jets writes).
+"""Writing into the game's Mods folder safely: shared by the repo's data installers.
 
-The ledger is Mods/.edf6vc_files.json: per file (its path under Mods, upper case) the owners that need it and
-the SHA-256 of the bytes last written. An owner is a tool (OWNERS): the one that wrote the file, or one whose
-own files refer to it (`need`). `release` drops an owner; a file nobody needs any more is deleted, unless it
-no longer holds what was written (someone else changed it: kept, and reported).
-Files from before the ledger: one that a tool needs gets the owner LEGACY besides (its writer is not known, so
-releasing the need never deletes it); the tool that writes it takes it over when it writes it again (put) or
-releases it as its own (release with writer=True), and a file the ledger does not know at all belongs to the
-writer that releases it, as it did before the ledger.
-
-Every write is atomic: the bytes go to a temporary file next to the target, which then replaces it, so a
-failed or interrupted write leaves the old file whole.
+Everything here is about files the installers own or share with other mods: refuse while the game runs
+(it holds the tables open and would overwrite or crash on half-written files), write each file whole or
+not at all, and fingerprint what was written so a later run can tell our file from another mod's.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import os
+import subprocess
 
-MANIFEST = '.edf6vc_files.json'
-OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls')
-LEGACY = 'legacy'   # a file from before the ledger that a tool needs: its writer is not recorded
+PROCESS = 'EDF6.exe'
 
 
-def write_atomic(path: str, data: bytes) -> None:
-    """`data` into `path`: written to a temporary file beside it, which then replaces it in one step."""
+def game_running(process: str = PROCESS) -> bool:
+    r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {process}', '/NH'],
+                       capture_output=True, text=True, errors='replace')
+    return process.lower() in r.stdout.lower()
+
+
+def refuse_while_running(process: str = PROCESS) -> None:
+    if game_running(process):
+        raise SystemExit(f'{process} is running: close the game first')
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(path: str) -> str | None:
+    """The file's SHA-256, or None when it does not exist."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, 'rb') as f:
+        return sha256(f.read())
+
+
+def read(path: str) -> bytes | None:
+    if not os.path.isfile(path):
+        return None
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def atomic_write(path: str, data: bytes) -> None:
+    """Writes `data` to a temporary file next to `path`, then renames it over `path`: a crash or a full disk
+    leaves either the old file or the new one, never a truncated one."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + '.edf6vc-tmp'
+    tmp = path + '.tmp-edf6'
     with open(tmp, 'wb') as f:
         f.write(data)
         f.flush()
@@ -36,105 +56,12 @@ def write_atomic(path: str, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def file_sha(path: str) -> str | None:
+def load_json(path: str, default: dict) -> dict:
     if not os.path.isfile(path):
-        return None
-    with open(path, 'rb') as f:
-        return sha256(f.read())
+        return default
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
 
 
-def key(rel: str) -> str:
-    """The ledger's name for a path under Mods (Windows paths are case-insensitive)."""
-    return rel.replace('\\', '/').strip('/').upper()
-
-
-class Ledger:
-    """The ownership ledger of one game directory. Every change is saved at once."""
-
-    def __init__(self, game_root: str) -> None:
-        self.mods = os.path.join(game_root, 'Mods')
-        self.path = os.path.join(self.mods, MANIFEST)
-        self.files: dict[str, dict] = {}
-        if os.path.isfile(self.path):
-            with open(self.path, encoding='utf-8') as f:
-                self.files = json.load(f).get('files', {})
-
-    def _save(self) -> None:
-        data = json.dumps({'version': 1, 'files': self.files}, indent=1, sort_keys=True).encode('utf-8')
-        write_atomic(self.path, data)
-
-    def disk(self, rel: str) -> str:
-        return os.path.join(self.mods, *key(rel).split('/'))
-
-    def owners(self, rel: str) -> list[str]:
-        return list(self.files.get(key(rel), {}).get('owners', []))
-
-    def changed(self, rel: str) -> bool:
-        """The file is not what was last written into it (someone else rewrote it since)."""
-        entry = self.files.get(key(rel))
-        return bool(entry) and file_sha(self.disk(rel)) not in (None, entry.get('sha'))
-
-    def put(self, owner: str, rel: str, data: bytes) -> str:
-        """Writes `data` (atomically) and records `owner` as needing it; returns the path written."""
-        assert owner in OWNERS, owner
-        path = self.disk(rel)
-        write_atomic(path, data)
-        entry = self.files.setdefault(key(rel), {'owners': []})
-        if LEGACY in entry['owners']:
-            entry['owners'].remove(LEGACY)
-        if owner not in entry['owners']:
-            entry['owners'].append(owner)
-        entry['sha'] = sha256(data)
-        self._save()
-        return path
-
-    def need(self, owner: str, rel: str) -> None:
-        """Records that `owner`'s own files refer to `rel`, which must exist (written by another owner)."""
-        assert owner in OWNERS, owner
-        path = self.disk(rel)
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f'{key(rel)} is not installed')
-        entry = self.files.setdefault(key(rel), {'owners': [LEGACY], 'sha': file_sha(path)})
-        if owner not in entry['owners']:
-            entry['owners'].append(owner)
-            self._save()
-
-    def owned_by(self, owner: str) -> list[str]:
-        return sorted(k for k, e in self.files.items() if owner in e.get('owners', []))
-
-    def release(self, owner: str, rels: list[str] | None = None, writer: bool = False) -> tuple[list[str], list[str]]:
-        """Drops `owner` from `rels` (default: every file it holds); `writer`: `owner` is the tool that writes
-        them, so they are its own even where the ledger does not say so (from before it). Returns (deleted paths,
-        paths kept although nobody needs them any more because someone else changed them)."""
-        deleted: list[str] = []
-        kept: list[str] = []
-        for k in [key(r) for r in rels] if rels is not None else self.owned_by(owner):
-            path = self.disk(k)
-            entry = self.files.get(k)
-            if entry is None:   # from before the ledger: its writer's alone, as it was
-                if writer and os.path.isfile(path):
-                    os.remove(path)
-                    deleted.append(path)
-                continue
-            for gone in (owner, LEGACY) if writer else (owner,):
-                if gone in entry['owners']:
-                    entry['owners'].remove(gone)
-            if entry['owners']:
-                continue
-            del self.files[k]
-            if not os.path.isfile(path):
-                continue
-            if file_sha(path) != entry.get('sha'):
-                kept.append(path)
-                continue
-            os.remove(path)
-            deleted.append(path)
-        if self.files:
-            self._save()
-        elif os.path.isfile(self.path):
-            os.remove(self.path)
-        return deleted, kept
+def save_json(path: str, value: dict) -> None:
+    atomic_write(path, json.dumps(value, indent=1, ensure_ascii=False).encode('utf-8'))

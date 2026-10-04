@@ -17,13 +17,13 @@ from dataclasses import dataclass, field
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import jet_models  # noqa: E402
-import modfiles  # noqa: E402
+import ledger  # noqa: E402
 import rmpa  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
 from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, Game, as_mission_sgo,  # noqa: E402,F401
                        jet_guns, jet_sgo, object_dir, weapon_dir)
 
-OWNER = 'testrange'   # pylib/modfiles.py: the files the range writes or uses
+OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
 SOURCE = 'M045'            # the plain whose map and points the range uses
 MAP = 'app:/Map/ig_Heigen601.mac'
 WEATHER = 'cloudy'
@@ -431,31 +431,31 @@ def has_mission_setup(game: Game, sgo_name: str) -> bool:
 
 def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only), with the
-    models and guns they use, and records in the ledger (pylib/modfiles.py) every file the range now needs:
+    models and guns they use, and records in the ledger (pylib/ledger.py) every file the range now needs:
     what it wrote and what it uses from tools/make_jets.py (the elevon bomber). What it needed before and does
     not now is released, so a model or gun nobody else needs goes with it."""
-    led = modfiles.Ledger(game_root)
+    led = ledger.Ledger(game_root)
     before = set(led.owned_by(OWNER))
     jets = wanted & JETS.keys()
-    held = {modfiles.key(f'OBJECT/{name.upper()}.SGO') for name in wanted}
+    held = {ledger.key(f'OBJECT/{name.upper()}.SGO') for name in wanted}
     for f in sorted({JETS[n].file for n in jets if JETS[n].file}):
         held.add(_need_model(led, game, f))
     if jets:
         for name, data in jet_guns(game).items():
             led.put(OWNER, f'WEAPON/{name}', data)
-            held.add(modfiles.key(f'WEAPON/{name}'))
+            held.add(ledger.key(f'WEAPON/{name}'))
     elevon = f'OBJECT/{JET_ELEVON_FILE}'
     elevons = os.path.isfile(led.disk(elevon))
     if elevons and any(JETS[n].model is None for n in jets):
         led.need(OWNER, elevon)
-        held.add(modfiles.key(elevon))
+        held.add(ledger.key(elevon))
     for name in sorted(wanted):
         led.put(OWNER, f'OBJECT/{name.upper()}.SGO', vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None))
     led.release(OWNER, sorted(before - held))
     _remove_legacy(game_root, keep=wanted)
 
 
-def _need_model(led: modfiles.Ledger, game: Game, file: str) -> str:
+def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
     """A jet model archive (pylib/jet_models.py): the one tools/make_jets.py or an earlier install wrote, else
     made now; recorded as the range's either way. Returns its ledger key."""
     rel = f'OBJECT/{file}'
@@ -464,7 +464,7 @@ def _need_model(led: modfiles.Ledger, game: Game, file: str) -> str:
     else:
         recipe = {**jet_models.MODELS, **jet_models.SUB_MODELS}[file]
         led.put(OWNER, rel, jet_models.build(game, {file: recipe})[file])
-    return modfiles.key(rel)
+    return ledger.key(rel)
 
 
 def _remove_legacy(game_root: str, keep: set[str] = frozenset()) -> bool:
@@ -472,7 +472,7 @@ def _remove_legacy(game_root: str, keep: set[str] = frozenset()) -> bool:
     d = object_dir(game_root)
     if not os.path.isdir(d):
         return False
-    led = modfiles.Ledger(game_root)
+    led = ledger.Ledger(game_root)
     gone = [f for f in os.listdir(d) if f.lower().startswith(DERIVED_PREFIX) and f.lower()[:-4] not in keep
             and not led.owners(f'OBJECT/{f}')]
     for f in gone:
@@ -527,8 +527,8 @@ def install(game_root: str, plan: Plan) -> list[str]:
 
 def uninstall(game_root: str) -> bool:
     """Removes the range's missions and releases its files: generated vehicles, and the models and guns no other
-    tool needs (pylib/modfiles.py)."""
-    deleted, _ = modfiles.Ledger(game_root).release(OWNER)
+    tool needs (pylib/ledger.py)."""
+    deleted, _ = ledger.Ledger(game_root).release(OWNER)
     return any([_remove(game_root, x.mission) for x in SLOTS] + [_remove_legacy(game_root), bool(deleted)])
 
 

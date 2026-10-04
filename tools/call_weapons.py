@@ -45,7 +45,6 @@ import copy
 import json
 import os
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -55,6 +54,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import calls  # noqa: E402
 import dsgo  # noqa: E402
+import ledger  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
 from calls import CALLS, IDS, Call, call_name  # noqa: E402
@@ -70,8 +70,8 @@ BACKUP = '.edf6vc_backup'
 MANIFEST = '.edf6vc_calls.json'
 JOURNAL = '.edf6vc_calls.txn.json'
 ACQUIRE = 0.0   # WEAPONTABLE column 5: 0 normal (the plugin makes EDF6VC_CALL_* owned at every save load)
-PROCESS = 'EDF6.exe'
-OWNER = 'calls'  # pylib/modfiles.py: the vehicle requests need make_jets' player jet SGOs
+PROCESS = modfiles.PROCESS
+OWNER = 'calls'  # pylib/ledger.py: the vehicle requests need make_jets' player jet SGOs
 
 
 class Misaligned(Exception):
@@ -295,13 +295,6 @@ def _retired_text_row(template: Node, call: Call, lang: str) -> Node:
     return row
 
 
-def _compact(doc: dsgo.Document) -> bytes:
-    """dsgo.write keeps every pool string it parsed, so replaced rows' names would stay behind in the pool.
-    Parsing the output keeps only the referenced strings, in their order, so a table that is back to stock is
-    byte-identical to it again."""
-    return dsgo.write(dsgo.parse(dsgo.write(doc)))
-
-
 @dataclass
 class Shared:
     """The shared table and its texts as they are now (Mods, else stock), parsed."""
@@ -341,14 +334,14 @@ def stack(game_root: str) -> dict[str, bytes]:
     templates = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
     for c in order:
         _put(rows, plan.at[c.id], _table_row(templates[c.id], c))
-    out[TABLE] = _compact(s.table)
+    out[TABLE] = dsgo.compact(s.table)
     durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
         for c in order:
             _put(text, plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id]))
-        out[rel] = _compact(s.texts[rel])
+        out[rel] = dsgo.compact(s.texts[rel])
     verify(game_root, out, plan)
     return out
 
@@ -391,14 +384,14 @@ def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[st
         if i < cut:
             rows[i] = _retired_table_row(rows[tpl[template_of(by_id[cid])]], by_id[cid])
     del rows[cut:]
-    out = {TABLE: _compact(s.table)}
+    out = {TABLE: dsgo.compact(s.table)}
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         for cid, i in present.items():
             if i < cut:
                 text[i] = _retired_text_row(text[tpl[template_of(by_id[cid])]], by_id[cid], lang)
         del text[cut:]
-        out[rel] = _compact(s.texts[rel])
+        out[rel] = dsgo.compact(s.texts[rel])
     after = row_ids(out[TABLE])
     if after[:cut] != [x if calls.slot_of(x) is None else calls.retired_id(calls.slot_of(x)) for x in ids[:cut]]:
         raise AssertionError('retire moved a row')
@@ -406,12 +399,6 @@ def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[st
 
 
 # ---------------------------------------------------------------- game dir: transaction, manifest
-
-
-def game_running() -> bool:
-    r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {PROCESS}', '/NH'],
-                       capture_output=True, text=True, errors='replace')
-    return PROCESS.lower() in r.stdout.lower()
 
 
 def _manifest_path(game_root: str) -> str:
@@ -428,7 +415,7 @@ def load_manifest(game_root: str) -> dict:
 
 
 def _save_manifest(game_root: str, manifest: dict) -> None:
-    modfiles.write_atomic(_manifest_path(game_root), json.dumps(manifest, indent=1).encode('utf-8'))
+    modfiles.atomic_write(_manifest_path(game_root), json.dumps(manifest, indent=1).encode('utf-8'))
 
 
 def recover(game_root: str) -> bool:
@@ -443,7 +430,7 @@ def recover(game_root: str) -> bool:
         path = _mods(game_root, rel)
         if had:
             with open(_mods(game_root, BACKUP, 'txn', rel), 'rb') as f:
-                modfiles.write_atomic(path, f.read())
+                modfiles.atomic_write(path, f.read())
         elif os.path.isfile(path):
             os.remove(path)
     os.remove(journal)
@@ -462,12 +449,12 @@ def commit(game_root: str, changes: dict[str, bytes | None]) -> None:
         if existed[rel]:
             os.makedirs(os.path.dirname(_mods(game_root, BACKUP, 'txn', rel)), exist_ok=True)
             shutil.copy2(path, _mods(game_root, BACKUP, 'txn', rel))
-    modfiles.write_atomic(_mods(game_root, JOURNAL), json.dumps(existed, indent=1).encode('utf-8'))
+    modfiles.atomic_write(_mods(game_root, JOURNAL), json.dumps(existed, indent=1).encode('utf-8'))
     try:
         for rel, data in changes.items():
             path = _mods(game_root, rel)
             if data is not None:
-                modfiles.write_atomic(path, data)
+                modfiles.atomic_write(path, data)
             elif os.path.isfile(path):
                 os.remove(path)
     except BaseException:
@@ -495,7 +482,7 @@ def _first_backup(game_root: str, manifest: dict, rels: list[str]) -> None:
 def changed_since(game_root: str, manifest: dict, rels: list[str]) -> list[str]:
     """The files among `rels` that are not what we last wrote into them (another tool changed them since)."""
     return [rel for rel in rels if rel in manifest['written']
-            and modfiles.file_sha(_mods(game_root, rel)) not in (None, manifest['written'][rel])]
+            and modfiles.sha256_file(_mods(game_root, rel)) not in (None, manifest['written'][rel])]
 
 
 def build(game_root: str, outdir: str) -> dict[str, bytes]:
@@ -503,13 +490,13 @@ def build(game_root: str, outdir: str) -> dict[str, bytes]:
         raise SystemExit('build writes outside the game dir; use install for that')
     files = stack(game_root)
     for rel, data in files.items():
-        modfiles.write_atomic(os.path.join(outdir, *rel.split('/')), data)
+        modfiles.atomic_write(os.path.join(outdir, *rel.split('/')), data)
     return files
 
 
 def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, str]:
     """Writes `files` (stack, made now when None) in one transaction; returns {path under Mods: sha256}."""
-    if game_running():
+    if modfiles.game_running():
         raise SystemExit(f'{PROCESS} is running: close the game first')
     if recover(game_root):
         print('rolled back the weapon table files of an earlier run that did not finish')
@@ -533,7 +520,7 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     for c, (was, now) in moved.items():
         print(f'WARNING: {c} was row {was}, now {now}: another tool rewrote the weapon table without it; a save '
               f'that had it equipped or owned refers to row {was}')
-    led = modfiles.Ledger(game_root)
+    led = ledger.Ledger(game_root)
     for c in CALLS:
         if c.vehicle:
             led.need(OWNER, vehicle_file(c))
@@ -542,7 +529,7 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
 
 def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = False) -> None:
     """Our rows become placeholders (or, delete_rows, the ones ending the table are deleted), our SGOs go."""
-    if game_running():
+    if modfiles.game_running():
         raise SystemExit(f'{PROCESS} is running: close the game first')
     if recover(game_root):
         print('rolled back the weapon table files of an earlier run that did not finish')
@@ -574,7 +561,7 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
     commit(game_root, changes)
     for rel, data in changes.items():
         print(f'{"removed" if data is None else "wrote"} {rel}')
-    modfiles.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
     ids = row_ids(base(game_root, TABLE))
     left = [x for x in ids if calls.slot_of(x)]
     if left:   # placeholders stay ours: a later install takes their rows back, repair can still restore
@@ -591,7 +578,7 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
 def repair(game_root: str) -> list[str]:
     """The shared table and texts back to before our first install (the copies install kept), our SGOs gone;
     returns what it changed. Another tool's later edits to those files are lost (install reports them)."""
-    if game_running():
+    if modfiles.game_running():
         raise SystemExit(f'{PROCESS} is running: close the game first')
     recover(game_root)
     manifest = load_manifest(game_root)
@@ -608,7 +595,7 @@ def repair(game_root: str) -> list[str]:
     commit(game_root, changes)
     shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
     os.remove(_manifest_path(game_root))
-    modfiles.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
     return sorted(changes)
 
 

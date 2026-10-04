@@ -9,7 +9,7 @@ What install does, with EDF6.exe closed:
      carrier (make_sub.build). They cannot be shipped prebuilt: they are derived from the game's files, and the
      weapon table is shared with other mods. Nothing is written unless all of it could be made;
   3. writes them: the generated objects (each file atomically, recorded in the ownership ledger,
-     pylib/modfiles.py), then the weapon table, its texts and the call SGOs in one transaction (all or none,
+     pylib/ledger.py), then the weapon table, its texts and the call SGOs in one transaction (all or none,
      call_weapons.commit), and last the plugin: EDF6VehicleCrew.dll, and the .ini (a new one when there is
      none; else the player's own, with only the settings this version adds appended: merge_ini).
 
@@ -31,7 +31,7 @@ import gamedir  # noqa: E402
 import modfiles  # noqa: E402
 
 PLUGIN = 'EDF6VehicleCrew'
-PROCESS = 'EDF6.exe'
+PROCESS = modfiles.PROCESS
 SECTION = 'VehicleCrew'
 ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
 
@@ -55,13 +55,6 @@ def plugin_files() -> tuple[bytes, bytes]:
         with open(p, 'rb') as f:
             out.append(f.read())
     return out[0], out[1]
-
-
-def game_running() -> bool:
-    import subprocess
-    r = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {PROCESS}', '/NH'],
-                       capture_output=True, text=True, errors='replace')
-    return PROCESS.lower() in r.stdout.lower()
 
 
 def ask(prompt: str) -> str:
@@ -150,11 +143,11 @@ def merge_ini(user: str, shipped: str) -> tuple[str, list[str], list[str]]:
 
 def install_plugin(game: str, dll: bytes, shipped_ini: bytes) -> None:
     dst = os.path.join(game, 'Mods', 'Plugins')
-    modfiles.write_atomic(os.path.join(dst, PLUGIN + '.dll'), dll)
+    modfiles.atomic_write(os.path.join(dst, PLUGIN + '.dll'), dll)
     print(f'写入 {os.path.join(dst, PLUGIN + ".dll")}')
     ini = os.path.join(dst, PLUGIN + '.ini')
     if not os.path.isfile(ini):
-        modfiles.write_atomic(ini, shipped_ini)
+        modfiles.atomic_write(ini, shipped_ini)
         print(f'写入 {ini}')
         return
     with open(ini, 'rb') as f:
@@ -163,7 +156,7 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes) -> None:
     user = raw[3:].decode('utf-8') if bom else raw.decode('utf-8', errors='surrogateescape')
     text, added, gone = merge_ini(user, shipped_ini.decode('utf-8'))
     if added:
-        modfiles.write_atomic(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8', errors='surrogateescape'))
+        modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8', errors='surrogateescape'))
         print(f'保留你的 {ini}，补入新版本新增的设置：{", ".join(added)}')
     else:
         print(f'保留你的 {ini}（没有需要补的新设置）')
@@ -260,7 +253,7 @@ def main(argv: list[str]) -> int:
         mode = {'1': 'install', '2': 'uninstall'}.get(pick, '')
         if not mode:
             return 0
-    if game_running():
+    if modfiles.game_running():
         print(f'{PROCESS} 正在运行。请先退出游戏再运行本程序（本程序不会替你关游戏）。')
         return 1
     game = pick_game()
