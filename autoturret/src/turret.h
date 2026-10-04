@@ -1,14 +1,30 @@
 // Shared by the flak turret (plugin.cpp) and the tank gunners (gunner.cpp): the EDF.dll layout,
 // the config, the enemy scan, the ballistic solve and the turret axis control.
-// All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46; see docs/re-notes.md.
+// All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46; see docs/re-notes.md. The layout facts
+// and the memory / patch / seat code EDF6VehicleCrew shares are in common/ (edf6common).
 #pragma once
 #include <Windows.h>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "edf/layout.h"
+#include "edf/memory.h"
+#include "edf/patch.h"
+#include "edf/seat.h"
 
 namespace autoturret {
+using edf::At;
+using edf::Put;
+using edf::Readable;
+using edf::kMatrix;
+using edf::kPosition;
+using edf::kDead;
+using edf::kTeam;
+using edf::kSeats;
+using edf::kSeatStride;
+using edf::kSelfCtrl;
+using edf::VehicleInputFn;
 extern unsigned char* image;
 
 struct Config {
@@ -46,20 +62,32 @@ extern Config cfg;
 
 // --- EDF.dll layout ---
 constexpr unsigned kFlakVtable=0x17DC620,kFlakInput=0x621460;   // Vehicle603_Flak, slot 55
-constexpr std::size_t kInputSlot=55;
-// Vehicle
-constexpr std::size_t kMatrix=0x60,kPosition=0x90,kDead=0x2E8,kSeats=0x608,kSeatCount=0x618,kTurn=0x2AA0;
+// Vehicle: the turn input the input slot writes (seat i at +0x2AA0 + i*0x10: yaw, pitch)
+constexpr std::size_t kTurn=0x2AA0,kTurnStride=0x10;
 // Seat (stride 0x340): weapon holders, aim controller, rider stick
-constexpr std::size_t kSeatStride=0x340,kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kSeatAim=0xE0,kStick=0x2D0;
+constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kSeatAim=0xE0,kStick=0x2D0;
 constexpr std::size_t kHolderWeapon=0x10;
+constexpr std::uint64_t kMaxHolders=8;
 // VehicleWeaponAim: axes at +0x10, stride 0x40; {min, max, angle, velocity, ...}
 constexpr std::size_t kAimAxes=0x10,kAxisStride=0x40,kAxisMin=0x0,kAxisMax=0x4,kAxisAngle=0x8;
-// Weapon: lock-on profile (LockonType 4 marks our guns)
-// LockonTargetType 1 marks a ground-attack gun: our guns never lock (LockonRange 0), and the only
-// stock reader (0x696792) just picks the lock class from it.
-constexpr std::size_t kLockonType=0x6B0,kLockonTargetType=0x6B4;
-constexpr std::int32_t kOurLockonType=4,kGroundTargetType=1;
-// Weapon ammo parameters, copied into each round when it is fired; speed is metres per frame
+// Weapon lock-on profile, filled from the SGO at 0x68D4A0: LockonType, LockonTargetType, LockonRange.
+constexpr std::size_t kLockonType=0x6B0,kLockonTargetType=0x6B4,kLockonRange=0x6D0;
+// Our guns' marker: LockonTargetType set to one of these by tools/build.py. The only stock reader of the
+// field is the lock query (0x696792, which maps it to a lock class), and our guns never lock: LockonType 0
+// (fire-start 0x690BB0 fires a type 0 gun with or without a lock) and LockonRange 0. So the mark changes
+// nothing in the stock game: with the plugin off, refused or deleted, the guns fire as any no-lock gun.
+// kMarkAir: an anti-air gun (air targets first; GrenadeBullet01 rounds get the fuses). kMarkGround: a
+// ground-attack gun (the Bohr's launchers: ground targets first, lobbed, stock impact fuse).
+constexpr std::int32_t kMarkAir=7301,kMarkGround=7302;
+// Data built before 0.3.0 marked our guns with LockonType 4 (LockonTargetType 1: ground) and needed the fire
+// gate patched (LegacyFireGate in plugin.cpp). Still recognized so an old install keeps working with this
+// DLL; tools/build.py install rewrites the data with the mark above. Drop with the next data break.
+constexpr std::int32_t kLegacyLockonType=4,kLegacyGroundTargetType=1;
+enum class Mark { none, air, ground };
+// Which of our guns `weapon` is; `legacy` (optional) says it carries the pre-0.3.0 mark.
+Mark GunMark(const unsigned char* weapon,bool* legacy=nullptr) noexcept;
+// Weapon ammo parameters, copied into each round when it is fired; speed is metres per frame.
+// Never written by the plugin (a round's own lifetime is set on the round, plugin.cpp Fuze).
 constexpr std::size_t kAmmoSpeed=0x894,kAmmoAlive=0x898,kAmmoDamage=0x89C,kAmmoExplosion=0x8B0,kAmmoGravity=0x8E0;
 // The round factory AmmoClass resolved to (0x68D53A); fire (0x6970A5) spawns rounds through it.
 // Only GrenadeBullet01 rounds can be fused, so only guns with its factory get a time fuse.
@@ -78,9 +106,8 @@ constexpr std::size_t kRegistry=0x20B2AB0,kRegList=0x8,kNodeTarget=0x10;
 constexpr std::size_t kTargetObject=0x8,kTargetAim=0x10,kTargetValid=0x29,kTargetLockable=0x2A;
 // Team relations: manager -> array (stride 0x38) per team -> int relation[team]; 2 = enemy.
 constexpr std::size_t kTeams=0x20B2978,kTeamArray=0x38,kTeamStride=0x38,kTeamRelation=0x18;
-constexpr std::size_t kTeam=0x314;
 constexpr std::int32_t kEnemyRelation=2,kMaxTeam=64;
-constexpr int kMaxEnemies=256,kMaxNodes=8192;
+constexpr int kMaxNodes=8192;
 constexpr float kPi=3.14159265f;
 
 // The turret axes turn at (input x k) rad per frame; measured from the log at ~1.1 rad/s for a
@@ -88,15 +115,34 @@ constexpr float kPi=3.14159265f;
 constexpr float kPitchMargin=0.03f;   // rad past a pitch stop still counted as reachable
 constexpr float kTurnPerInput=1.1f/60.0f,kTurnPerInputMin=0.2f/60.0f,kTurnPerInputMax=6.0f/60.0f;
 
-// Lock points of every enemy within gun range, sampled in the vehicle input phase that runs
-// before the bullet update phase of the same frame. One enemy can own several entries.
-struct Enemy { const void* object; float pos[3]; float origin[3]; };
-constexpr ULONGLONG kEnemyMs=150;
-extern Enemy enemies[kMaxEnemies];
-extern int enemyCount;
+// --- Frames ---
+// The game frame number: it steps when a vehicle's input (slot 55, which every live vehicle gets once a
+// frame) comes round again. Game thread only.
+void SeeVehicle(const void* vehicle) noexcept;
+ULONGLONG Frame() noexcept;
 
+// --- Enemies ---
+// One lock point of an object, as the registry had it this frame. One object can own several.
+struct Enemy { const void* object; std::int32_t team; float pos[3]; float origin[3]; };
+// Every live, valid, lockable lock point in the world (all teams, no range limit), taken once a game frame
+// in the vehicle input phase, which runs before the bullet update phase of the same frame: the vehicles'
+// scans filter it, and the proximity fuse reads it for each round against the enemies of the side that
+// fired it, wherever that vehicle is.
+constexpr int kMaxWorld=1024;
+// The enemies of `vehicle`'s side within `range` of its turret pivot: pointers into the world snapshot,
+// valid for the current vehicle's step only (game thread; the snapshot is retaken next frame).
+constexpr int kMaxEnemies=256;
+struct Nearby { const Enemy* e[kMaxEnemies]; int count; };
+void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept;
+// The relation row of `team` (relation[other] == kEnemyRelation: enemies), or null.
+const std::int32_t* Relations(std::int32_t team) noexcept;
+
+// --- Tracks ---
+// What the aim keeps from frame to frame for one gun position: a flak turret (seat 0) or a tank gunner seat.
 struct Track {
-    const void* vehicle;   // the key: a flak vehicle, or a tank gunner seat
+    const void* vehicle;   // the key: the vehicle (weak-this control block `ctrl`) and the seat index
+    const void* ctrl;
+    unsigned seat;
     const void* target;
     float last[3];
     float vel[3];          // smoothed target velocity, metres per frame
@@ -119,18 +165,19 @@ struct Track {
     bool firing;           // the AI held the trigger last frame
     unsigned pulls;        // trigger pulls since the last log line
     unsigned stale;        // ... of which the previous pull was still unread (the gun is not updating)
+    // Tank gunners: the seat's homing second weapon (gunner.cpp FireMissiles): its lock count, when it last
+    // grew and when the first lock came.
+    std::uint64_t locks;
+    ULONGLONG locksGrewAt,locksFirstAt;
 };
+// The track of `vehicle`'s `seat`, made on first use; nullptr when every track is held by a live vehicle
+// seen within the last kTrackIdleMs (logged), so that seat is left stock this frame.
+Track* TrackFor(const unsigned char* vehicle,unsigned seat) noexcept;
 
 // A gun's round as the aim sees it: muzzle speed (m/frame), the drop it picks up along the
 // vehicle's down axis (m/frame^2), and whether the gun hunts ground targets first.
 struct Shot { float speed; float drop; bool ground; };
 
-template<class T> T At(const void* base,std::size_t offset) noexcept {
-    T value;std::memcpy(&value,static_cast<const unsigned char*>(base)+offset,sizeof(T));return value;
-}
-template<class T> void Put(void* base,std::size_t offset,T value) noexcept {
-    std::memcpy(static_cast<unsigned char*>(base)+offset,&value,sizeof(T));
-}
 inline float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 inline float Clamp(float v,float lo,float hi) noexcept { return v<lo?lo:(v>hi?hi:v); }
 inline float Wrap(float a) noexcept {
@@ -140,16 +187,13 @@ inline float Wrap(float a) noexcept {
 }
 
 void Log(const char* format,...) noexcept;
-Track& TrackFor(const void* key) noexcept;
 bool Finite(const unsigned char* base,std::size_t offset,float* out) noexcept;
-void ScanEnemies(const unsigned char* vehicle,float range) noexcept;
 float Down(const unsigned char* vehicle) noexcept;
 bool Ballistic(const float* local,const Shot& shot,float& elevation,float& time) noexcept;
 float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,float gain) noexcept;
-bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept;
-bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept;
 void ReloadConfigIfChanged() noexcept;
 
-// gunner.cpp: hooks the Titan's and the gunner-seat tanks' input; false when it left them stock
-bool HookGunners() noexcept;
+// gunner.cpp: hooks the Titan's and the gunner-seat tanks' input and weapon-user slots; the number of
+// slots it patched (0: it left them stock).
+int HookGunners() noexcept;
 }  // namespace autoturret

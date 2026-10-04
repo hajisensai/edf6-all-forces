@@ -1,9 +1,7 @@
 """Little-endian SGO (magic 'SGO\\0', version 0x102) round-trip writer. Read-only on game data.
 
-  python -B tools/sgo_write.py roundtrip FILE.SGO
+  python -B pylib/sgo_write.py roundtrip FILE.SGO
       parse FILE and write it back; reports whether the bytes are identical
-  python -B tools/sgo_write.py mainframe-label LYT_MAINFRAME.SGO OUT.SGO
-      adds the MultiSlot menu label (component MSLabel) to the main frame layout
 
 Nodes are 12 bytes {int type, int a, uint b}: 0 array (a = count, b = offset from the node to its
 children), 1 int (b = value), 2 float (b = bits), 3 string (a = length, b = offset to UTF-16), 4 raw
@@ -131,26 +129,6 @@ def write(values):
     return bytes(out)
 
 
-def add_mainframe_label(values):
-    """MSLabel: a TextField in the lower left of the main frame, filled in by EDF6MultiSlot.dll."""
-    table = dict(values)
-    if 'MSLabel' in table:
-        raise ValueError('layout already has MSLabel')
-    tree = table['layout_tree']
-    # layout_tree = [['MainFrame'], [children as name-list / 0 pairs]]
-    if not (tree.kind == 'arr' and len(tree.value) == 2 and tree.value[0] == Arr(Str('MainFrame'))):
-        raise ValueError('unexpected layout_tree shape')
-    children = tree.value[1]
-    children.value.extend([Arr(Str('MSLabel')), Int(0)])
-    label = Arr(
-        Str('TextField'), Str('app:/UI/Transparent_skin.sgo'),
-        Arr(Flt(192.0), Flt(970.0), Flt(0.0)), Arr(Flt(0.0), Flt(0.0), Flt(640.0), Flt(28.0)),
-        Arr(), Int(0), Int(0),
-        Arr(Arr(Str('text_dr'), Str(' ')), Arr(Str('font_size'), Arr(Int(22), Int(22))),
-            Arr(Str('font_border_width'), Flt(2.0))))
-    return values + [('MSLabel', label)]
-
-
 if __name__ == '__main__':
     command = sys.argv[1]
     data = open(sys.argv[2], 'rb').read()
@@ -159,9 +137,5 @@ if __name__ == '__main__':
         again = write(values)
         print('identical' if again == data else f'different ({len(again)} vs {len(data)} bytes)')
         assert parse(again) == values, 'parsed values differ after writing'
-    elif command == 'mainframe-label':
-        result = write(add_mainframe_label(values))
-        check = dict(parse(result))
-        assert check['MSLabel'] == dict(add_mainframe_label(parse(data)))['MSLabel']
-        open(sys.argv[3], 'wb').write(result)
-        print(f'wrote {sys.argv[3]} ({len(result)} bytes)')
+    else:
+        raise SystemExit(f'unknown command {command!r}')

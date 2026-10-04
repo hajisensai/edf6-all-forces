@@ -1,10 +1,23 @@
-"""Read-only access to files inside the game's Root.cpk."""
-import os, sys
+"""Read-only access to files inside the game's Root.cpk.
+
+The game directory is $EDF6_DIR, else what gamedir.find() finds (next to the running program, the Steam
+libraries), else the developer's path. Nothing here writes to the game directory.
+"""
+from __future__ import annotations
+
+import os
 from functools import lru_cache
 
-GAME = os.environ.get('EDF6_DIR', r'C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6')
-sys.path.insert(0, os.environ.get('EDF6_PYTOOLS', os.path.join(os.path.dirname(__file__), '..', 'third_party', 'edf6-cpk')))
-import cpk, crilayla  # noqa: E402
+import cpk
+import crilayla
+import gamedir
+
+
+def game_dir() -> str:
+    return os.environ.get('EDF6_DIR') or gamedir.find_or_dev()
+
+
+GAME = game_dir()   # the directory read from (kept for the callers that name it)
 
 
 @lru_cache(maxsize=None)
@@ -24,6 +37,7 @@ def names(d: str) -> list[str]:
 
 
 def read(d: str, n: str) -> bytes:
+    """The file d/n (folder, name; case-insensitive), decompressed."""
     c = _root()
     e = c.index[_key(d, n)]
     with open(c.path, 'rb') as h:

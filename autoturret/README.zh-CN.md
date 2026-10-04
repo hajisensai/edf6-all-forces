@@ -12,6 +12,7 @@
   高射炮弹带定时引信（目标距离处空爆）、近炸引信和触发引信。按住瞄准摇杆可以手动瞄准，松开后炮塔立即接管。
   还会给**泰坦和游骑兵带炮手座的坦克的副炮**配上炮手：没有玩家的炮手座（空座或坐着 NPC）自己瞄准、自己开火，玩家开的和 NPC 开的坦克都一样；玩家坐炮手座时只帮你瞄准，扳机还是你的。这部分不需要武器文件，原版载具直接生效。
 - **武器数据**：直接覆盖原版载具自己的文件，不新增武器行。`WEAPONTEXT` 里这几辆载具的说明会改成新数值；只改它们自己的行，并叠加在 `Mods` 里已有的表上，改表的 mod 的内容会保留。
+  数据可以单独工作：这些炮是原版游戏照常会开火的普通炮，只带一个只有插件读取的标记。没有插件时（删掉、关掉，或游戏更新后插件拒绝加载），克卜勒和玻尔斯照样能开火、打新炮弹，只是不自瞄，高射炮弹在最大射程处空爆。
 
 ## 改了什么
 
@@ -32,16 +33,16 @@
 需要 Steam 版 EDF6，并已安装 [EDFModLoader](https://github.com/BlueAmulet/EDFModLoader)。
 
 1. 把 release（或 CI 构建产物）里的 `EDF6AutoTurret.dll` 和 `EDF6AutoTurret.ini` 放进 `<EDF6>\Mods\Plugins\`。
-2. 用你自己的游戏数据生成武器文件（它们派生自游戏数据，所以不随包分发），需要 Python 3.10+，直接输出到游戏的 `Mods` 文件夹：
+2. 用你自己的游戏数据生成武器文件（它们派生自游戏数据，所以不随包分发），需要 Python 3.10+，直接装进游戏的 `Mods` 文件夹（在仓库根目录运行；游戏目录取 `EDF6_DIR`，没有就在 Steam 库里找）：
 
    ```
    set EDF6_DIR=C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6
-   python tools\build.py --out "%EDF6_DIR%\Mods"
+   python autoturret\tools\build.py install
    ```
 
-   它在 `Mods\WEAPON\` 下写这几辆载具自己的 call 和炮文件，在 `Mods\OBJECT\` 下写关卡克卜勒和 NPC 泰坦，以及 `WEAPONTEXT.*.SGO` 里它们的 8 行说明；只读取游戏的 `Root.cpk`，不修改它。请在游戏关闭时运行；装了别的会整份替换 `WEAPONTEXT` 的 mod 之后要再运行一次。`--no-text` 不动文本表。
+   它在 `Mods\WEAPON\` 下写这几辆载具自己的 call 和炮文件，在 `Mods\OBJECT\` 下写关卡克卜勒和 NPC 泰坦，以及 `WEAPONTEXT.*.SGO` 里它们的 8 行说明；只读取游戏的 `Root.cpk`，不修改它。游戏运行时它会拒绝执行；`Mods` 里已有别的 mod 放的同名文件时不会覆盖（`--force` 先备份再覆盖）。写了什么、替换了什么记在 `Mods\.edf6at_data.json`（被替换的文件备份在 `Mods\.edf6at_backup\`）。装了别的会整份替换 `WEAPONTEXT` 的 mod 之后要再运行一次。`--no-text` 不动文本表；`check` 查看安装状态。
 
-卸载时删掉这些文件和插件即可（`WEAPONTEXT` 只有在没有别的 mod 装过时才删，否则重装那个 mod 的）。设置在 `EDF6AutoTurret.ini`，游戏运行中保存即生效；`Debug=1` 会把炮塔的行为写进 `EDF6AutoTurret.log`。
+卸载：游戏关闭时运行 `python autoturret\tools\build.py uninstall`，再删掉插件。它恢复被替换的文件、删除自己新建的文件，并把 `WEAPONTEXT` 里那 8 行说明恢复成安装前的原文；别的 mod 的文件和行保持不动（安装后被别人改过的会原样保留，加 `--force` 才恢复）。旧版 `build.py` 装的（没有记录）也能卸，只删除和生成结果逐字节相同的部分。只删插件也安全：数据没有插件照样能用。设置在 `EDF6AutoTurret.ini`，游戏运行中保存即生效；`Debug=1` 会把炮塔的行为写进 `EDF6AutoTurret.log`。
 
 ## 构建插件
 
@@ -55,7 +56,7 @@ DLL 输出到 `dist\Mods\Plugins\`。每次 push 都会由 CI 构建。
 
 ## 兼容性
 
-针对 TimeDateStamp 为 `0x678CCB46` 的 EDF.dll。插件会校验要打补丁的代码，游戏更新后对不上就自动停用。
+针对 TimeDateStamp 为 `0x678CCB46` 的 EDF.dll。插件会校验要打补丁的代码，游戏更新后对不上就自动停用（武器数据没有插件照样能用）。0.3.0 之前的 `build.py` 生成的武器数据在这个插件下仍然能用（插件会像旧版一样改游戏的开火检查）；重新运行 `build.py install` 即可换成新数据。
 
 坦克副炮已在泰坦上实测（NPC 驾驶、两个炮手座空着）：两门副炮打蚂蚁，弹药 40 → 28。游骑兵坦克的副机枪还没在有敌人的局里测过；副炮表现异常时请附上 `Debug=1` 的日志。原版空炮手座的炮打不响，是因为炮会问载具「谁在操作我」，空座位回答「没人」；插件让它回答驾驶员（见逆向笔记）。输入挂钩会串在其他插件（如 EDF6VehicleCrew）挂在同一槽的函数上，加载顺序无所谓。联机合作时，你这边可能把坐在炮手座的远程玩家看成空座，联机请设 `GunnerAI=0`。
 
@@ -63,4 +64,4 @@ DLL 输出到 `dist\Mods\Plugins\`。每次 push 都会由 CI 构建。
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)。随附：仓库根目录的 `third_party/EDFModLoader/PluginAPI.h`（MIT）和 `third_party/edf6-cpk`（来自 momotori01 的 EDF6MultiSlot 的 CPK / CRILAYLA 读取器，公有领域）。
+MIT，见 [LICENSE](LICENSE)。随附：仓库根目录的 `third_party/EDFModLoader/PluginAPI.h`（MIT），以及仓库根目录 `pylib/` 里的 `cpk.py` / `crilayla.py`（来自 momotori01 的 EDF6MultiSlot 的 CPK / CRILAYLA 读取器，公有领域，见 `pylib/LICENSE.edf6-cpk`）。

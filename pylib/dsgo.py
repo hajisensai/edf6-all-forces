@@ -193,3 +193,28 @@ def to_py(v: Value):
     if isinstance(v, Blob):
         return f'<blob {len(v.data)}>'
     return v
+
+
+def dump(v: Value):
+    """A lossless JSON-able form of a value (names, blob kinds and bytes kept), for manifests that must
+    put a value back exactly as it was; load() reverses it."""
+    if isinstance(v, Node):
+        return {'items': [dump(c) for c in v.items], 'names': {str(k): n for k, n in v.names.items()}}
+    if isinstance(v, Blob):
+        return {'blob': v.data.hex(), 'kind': v.kind}
+    return v
+
+
+def load(j) -> Value:
+    if isinstance(j, dict) and 'items' in j:
+        return Node([load(c) for c in j['items']], {int(k): n for k, n in j['names'].items()})
+    if isinstance(j, dict) and 'blob' in j:
+        return Blob(bytes.fromhex(j['blob']), int(j['kind']))
+    return float(j) if isinstance(j, int) and not isinstance(j, bool) else j
+
+
+def compact(doc: Document) -> bytes:
+    """write() keeps every pool string it parsed, so text taken out stays behind in the pool. Parsing the
+    output keeps only the referenced strings, in their order, so a table edited back to stock is
+    byte-identical to it again."""
+    return write(parse(write(doc)))

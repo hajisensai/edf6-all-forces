@@ -5,7 +5,7 @@ The stock AI Titan loads only its main cannon: mission_setup leaves the gunner s
 gunners have nothing to aim. This copies slots 1 and 2 from the player Titan
 (v_404bigtank_subCannon.sgo) and preloads that weapon. Everything else in the file stays stock.
 
-build.py writes it as OBJECT/VEHICLE404_BIGTANK_AI.SGO with the rest of the mod's data.
+build.py installs it as OBJECT/VEHICLE404_BIGTANK_AI.SGO with the rest of the mod's data.
 """
 from __future__ import annotations
 
@@ -17,7 +17,11 @@ SIDE_SLOTS = (1, 2)   # mission_setup[2][i] = weapon of seat i; 0 is the driver'
 
 
 def weapons(values: list) -> list:
-    return dict(values)['mission_setup'].value[2].value
+    """mission_setup's gun mounts ([2], as in every vehicle setup: autoturret/tools/vehicle_setup.py)."""
+    setup = dict(values)['mission_setup']
+    if setup.kind != 'arr' or len(setup.value) < 3 or setup.value[2].kind != 'arr' or len(setup.value[2].value) <= max(SIDE_SLOTS):
+        raise SystemExit(f'{NAME}: mission_setup is not the layout this tool knows')
+    return setup.value[2].value
 
 
 def build() -> bytes:
