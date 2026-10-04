@@ -6,6 +6,7 @@
 #include "memory.h"
 
 #include <atomic>
+#include <cstring>
 
 namespace crew {
 namespace {
@@ -191,6 +192,8 @@ void DumpTrack(const Track& t) noexcept {
     }
 }
 
+void DumpNeighbors(void* wrapper,const float* at) noexcept;
+
 void RecordLin(void* body,const float* v) noexcept {
     __try {
         if(body && v) {
@@ -211,6 +214,7 @@ void RecordLin(void* body,const float* v) noexcept {
                && f.t-t.dumped>2000) {
                 t.dumped=f.t;
                 DumpTrack(t);
+                DumpNeighbors(body,f.pos);
             }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
@@ -266,6 +270,49 @@ void KeepChassisQuality(unsigned char* wrapper) noexcept {
         if(qualityLogs.fetch_add(1,std::memory_order_relaxed)<32)
             Log("PHYSICS chassis body %08X quality %u -> %u",id,quality,kQualityVehicle);
         reinterpret_cast<SetQualityFn>(image+kSetBodyQuality)(iface,id,kQualityVehicle,0,0);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
+// At the launch frame: every body of the chassis' world within kNeighborRadius of it that is not STATIC
+// (a corpse ragdoll, building debris, another vehicle), with flags, quality and inverse mass (motion
+// +0x26, half). Bodies hkArray at iface+0x20/+0x28, motions at iface+0x160 (stride 0x80), as 0xE51280.
+constexpr float kNeighborRadius=12.0f;
+
+float Half(std::uint16_t h) noexcept {
+    const std::uint32_t sign=(h&0x8000u)<<16,exp=(h>>10)&0x1F,man=h&0x3FF;
+    if(!exp)return 0.0f;
+    const std::uint32_t bits=sign|((exp+112)<<23)|(man<<13);
+    float f;
+    std::memcpy(&f,&bits,4);
+    return f;
+}
+
+void DumpNeighbors(void* wrapper,const float* at) noexcept {
+    __try {
+        const auto* worldWrapper=At<unsigned char*>(wrapper,kWrapperWorld);
+        const auto* world=worldWrapper ? At<unsigned char*>(worldWrapper,kWorldOf) : nullptr;
+        if(!world)return;
+        const unsigned char* const iface=world+kWorldIface;
+        const auto* bodies=At<const unsigned char*>(iface,kIfaceBodies);
+        const std::int32_t count=At<std::int32_t>(iface,kIfaceBodies+8);
+        const auto* motions=At<const unsigned char*>(iface,0x160);
+        const std::uint32_t self=At<std::uint32_t>(static_cast<unsigned char*>(wrapper),kWrapperId);
+        int statics=0;
+        for(std::int32_t i=0;i<count && i<0x40000;++i) {
+            const unsigned char* b=bodies+std::size_t(i)*kBodyStride;
+            const std::uint32_t id=At<std::uint32_t>(b,0x50);
+            if((id&0xFFFFFF)!=std::uint32_t(i))continue;
+            const float* p=reinterpret_cast<const float*>(b+0x30);
+            const float dx=p[0]-at[0],dy=p[1]-at[1],dz=p[2]-at[2];
+            if(dx*dx+dy*dy+dz*dz>kNeighborRadius*kNeighborRadius)continue;
+            const std::uint32_t flags=At<std::uint32_t>(b,0x54);
+            if(flags&1){++statics;continue;}
+            const std::uint32_t motion=At<std::uint32_t>(b,0x80);
+            const float invMass=motions && motion ? Half(At<std::uint16_t>(motions+std::size_t(motion)*0x80,0x26)) : 0.0f;
+            Log("VELPROBE2 near %08X%s flags=%08X q=%u motion=%u invMass=%.5f d=(%.2f %.2f %.2f)",id,
+                id==self ? " (self)" : "",flags,At<std::uint8_t>(b,kBodyQuality),motion,invMass,dx,dy,dz);
+        }
+        Log("VELPROBE2 near: %d static bodies within %.0f m",statics,kNeighborRadius);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
