@@ -15,8 +15,8 @@ removed (the cannon_main subtree's geometry: turret, both AA guns, both radars) 
 
 Kept for the stock Vehicle603_Flak class / V603_FLAK.SGO: every bone (names, parents, order, kinds, links), the hull and
 track geometry, every stock material / texture. Changed binds (local + inverse bind consistently, stock rotations):
-cannon_l / cannon_r on the bottom-rear edge of each gun's breech (x on the gun body's axis, y its lowest vertex, z its
-rearmost: no gun vertex below or behind the pivot, so elevating 0..90 deg only raises the gun, hinged on the roof),
+cannon_l / cannon_r at the breech end of each gun, on the gun body's axis (z its rearmost vertex: no gun vertex behind
+the pivot, so elevating 0..90 deg never takes a vertex below the gun's 0 deg underside), held in a cradle,
 cannon_slide_l / _r on the barrel axis at the Barga's own slide station (its cannonSlideF pivot), 0.3 m behind the
 muzzle.
 """
@@ -38,9 +38,15 @@ OUT_ARC = 'EDF6VC_ARTILLERY.MRAB'
 
 TURRET_SCALE = 1.0          # the E551 housing at its own size (M2); the Kepler's hull is 0.94x the E551's
 GUN_SCALE = 0.25            # the Barga cannons (M2)
-GUN_X = 0.56                # each gun's x centre (M2's spacing), right gun mirrored
+GUN_X = 0.68                # each gun's x centre, right gun mirrored (room for the cradle cheeks between the guns)
 GUN_CLEARANCE = 0.03        # m between a gun's lowest vertex and the highest housing vertex under its footprint
 MUZZLE_OUT = 1.6            # m from the housing's nose (max z) to the muzzles (cannon3 front end) at 0 deg
+CRADLE_GAP = 0.01           # m between the cradle base's top and its gun's underside (never entered, 0..90 deg)
+CRADLE_WIDTH = 0.85         # cradle base width / gun body width
+CHEEK_T, CHEEK_GAP = 0.1, 0.02     # m: cradle cheek thickness, and its gap to the gun body's side
+CHEEK_BACK, CHEEK_FWD, CHEEK_UP = 0.3, 0.5, 0.2   # m: cheek extent behind / ahead of / above the pivot
+CRADLE_FRONT = 0.8          # m the cradle reaches past the housing nose, under the gun body
+HULL_GAP = 0.02             # m the cradle's underside keeps above the hull's highest point (it turns over the hull)
 ELEVATIONS = (0.0, 20.0, 40.0, 60.0)    # deg, checked: no gun vertex below the roof under it / the hull top
 
 HOST_TURRET_ROOT = 'cannon_main'
@@ -75,12 +81,28 @@ def member(rab, name: str):  # noqa: ANN001, ANN201 - mdb.Rab / RabFile
 # ------------------------------------------------------------------------------------------ geometry helpers
 
 Rot = tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
-Affine = tuple[Rot, float, Vec3]          # p' = (p * R) * s + t  (row vector)
+Affine = tuple[Rot, float | Vec3, Vec3]  # p' = (p * R) * s + t  (row vector; s uniform or per axis, positive)
+
+
+def scales(s: float | Vec3) -> Vec3:
+    """A scale as per-axis factors (applied after the rotation)."""
+    return (s, s, s) if isinstance(s, (int, float)) else s  # type: ignore[return-value]
 
 
 def apply(a: Affine, p: Vec3) -> Vec3:
     r, s, t = a
-    return tuple(s * (p[0] * r[0][c] + p[1] * r[1][c] + p[2] * r[2][c]) + t[c] for c in range(3))  # type: ignore[return-value]
+    k = scales(s)
+    return tuple(k[c] * (p[0] * r[0][c] + p[1] * r[1][c] + p[2] * r[2][c]) + t[c] for c in range(3))  # type: ignore[return-value]
+
+
+def direction(a: Affine, v: tuple[float, ...], normal: bool) -> tuple[float, ...]:
+    """A direction through `a`'s rotation and scale (a normal by the inverse scale), renormalised; any further
+    components (w: handedness sign, unchanged by positive scales) kept."""
+    k = scales(a[1])
+    d = rotate(a[0], v)
+    d3 = [d[c] / k[c] if normal else d[c] * k[c] for c in range(3)]
+    n = (d3[0] * d3[0] + d3[1] * d3[1] + d3[2] * d3[2]) ** 0.5 or 1.0
+    return tuple(x / n for x in d3) + tuple(v[3:])
 
 
 def rotate(r: Rot, v: tuple[float, ...]) -> tuple[float, ...]:
@@ -160,8 +182,7 @@ def sweep(P: list[Vec3], o: Vec3, grid: dict[tuple[int, int], float], deg: float
 def extract(donor: Mdb, bone_map: dict[int, int], a: Affine) -> list[tuple[int, Mesh]]:
     """graft_pure.extract_meshes with a rotation: every donor skinned mesh's triangles whose vertices are all
     influenced only by `bone_map` bones, blend indices rewritten through it, positions through `a`, normal / binormal /
-    tangent directions through its rotation (uniform scale, proper rotation: handedness signs unchanged)."""
-    r = a[0]
+    tangent directions through its rotation and scale (proper rotation, positive scales: handedness unchanged)."""
     out: list[tuple[int, Mesh]] = []
     for o in donor.objects:
         for me in o.meshes:
@@ -170,7 +191,8 @@ def extract(donor: Mdb, bone_map: dict[int, int], a: Affine) -> list[tuple[int, 
             keys, rows = vertex_table(me)
             bi, bw = g.skin_columns(me)
             pk, bk = g._pos_key(keys), g._bi_key(keys)
-            dk = [k for k, s in enumerate(keys) if s.split(':')[0].lower() in DIRECTIONS]
+            dk = [(k, s.split(':')[0].lower() == 'normal') for k, s in enumerate(keys)
+                  if s.split(':')[0].lower() in DIRECTIONS]
             ok = [g.influences(i, w) <= bone_map.keys() for i, w in zip(bi, bw)]
             tris = [t for t in g.triangles(me) if all(ok[i] for i in t)]
             if not tris:
@@ -180,8 +202,8 @@ def extract(donor: Mdb, bone_map: dict[int, int], a: Affine) -> list[tuple[int, 
                     continue
                 p = row[pk]
                 row[pk] = apply(a, (p[0], p[1], p[2])) + tuple(p[3:])
-                for k in dk:
-                    row[k] = rotate(r, row[k])
+                for k, nrm in dk:
+                    row[k] = direction(a, row[k], nrm)
                 row[bk] = tuple(bone_map[int(x)] if wt > 0 or n == 0 else 0 for n, (x, wt) in enumerate(zip(row[bk], bw[v])))
             new = g.rebuild_mesh(me, rows, tris)
             if new is not None:
@@ -219,7 +241,7 @@ def build_model(game) -> tuple[Mdb, Mdb, object, list[tuple[object, set[int]]], 
     for n in ['cannon_main'] + TURRET_DROP:
         _req(n in tb, f'turret donor bone {n} missing')
     for m in GUN_MAP.values():
-        for n in m:
+        for n in list(m) + ['cannon1_l', 'cannon1_r']:
             _req(n in gb, f'gun donor bone {n} missing')
     turret_sub = g.subtree(host0, hb[HOST_TURRET_ROOT])
 
@@ -271,7 +293,9 @@ def build_model(game) -> tuple[Mdb, Mdb, object, list[tuple[object, set[int]]], 
         v = sides[s]
         r0, s0, t0 = v['a0']
         q = [apply((r0, s0, (t0[0] + v['dx'], t0[1] + lift - v['lo_y'], t0[2] + v['dz'])), p) for p in v['gp']]
-        o = (0.0, min(p[1] for p in q), min(p[2] for p in q))
+        c2 = apply((r0, s0, (t0[0] + v['dx'], t0[1] + lift - v['lo_y'], t0[2] + v['dz'])),
+                   tuple(gw[gb[f'cannon2_{s}']][12:15]))  # type: ignore[arg-type]
+        o = (0.0, c2[1], min(p[2] for p in q))
         lack = max([lack] + [GUN_CLEARANCE - sweep(q, o, grid, e)[1] for e in range(0, 61, 5)])
     lift += lack
     info['sweep_lift'] = lack
@@ -286,11 +310,46 @@ def build_model(game) -> tuple[Mdb, Mdb, object, list[tuple[object, set[int]]], 
         axis_x, axis_z = v['axis']
         body_axis = apply(a_gun, tuple(gw[gb[f'cannon2_{s}']][12:15]))  # type: ignore[arg-type]  # on the body tube
         q = [apply(a_gun, p) for p in v['gp']]
-        pivot = (body_axis[0], min(p[1] for p in q), min(p[2] for p in q))    # the breech's bottom-rear edge
+        pivot = (body_axis[0], body_axis[1], min(p[2] for p in q))    # the breech end, on the gun body's axis
         slide = apply(a_gun, (axis_x, gw[gb[f'cannonSlideF_{s}']][13], axis_z))
         muzzle = apply(a_gun, (axis_x, v['bhi_y'], axis_z))
-        gun_info[s] = {'pivot': pivot, 'slide': slide, 'muzzle': muzzle, 'affine_t': a_gun[2]}
+        gun_info[s] = {'pivot': pivot, 'slide': slide, 'muzzle': muzzle, 'affine_t': a_gun[2], 'box': box(q)}
     info['guns'] = gun_info
+    # 3b. a cradle under each gun, three pieces of the Barga's own gun yoke (cannon1_<s>), turned like the gun and
+    #     scaled per axis into boxes: a base under the gun (CRADLE_WIDTH of its width, from the breech end to
+    #     CRADLE_FRONT past the housing nose, up to CRADLE_GAP under the gun's underside) and two cheeks flanking the
+    #     gun body at the pivot (CHEEK_GAP off its sides, CHEEK_BACK / CHEEK_FWD around the pivot, up to CHEEK_UP above
+    #     it). Every piece starts at the lowest roof point under it, but HULL_GAP above the hull's highest point (they
+    #     turn over the hull). Skinned to cannon_main: they turn with the turret, do not elevate. No piece meets the
+    #     gun at 0..90 deg: the gun has no vertex behind the pivot, so pitching it never takes a vertex below its 0 deg
+    #     underside (the base), and pitching about x keeps every vertex's x (the cheeks lie beside the gun body).
+    cradle_info: dict[str, list[tuple[Vec3, Vec3]]] = {}
+    hull_top = max(p[1] for p in bone_points(md, set(range(len(md.bones))) - turret_sub))
+
+    def floor_under(x0: float, x1: float, z0: float, z1: float) -> float:
+        foot = [h for k, h in grid.items() if x0 <= (k[0] + 0.5) * CELL <= x1 and z0 <= (k[1] + 0.5) * CELL <= z1]
+        return max(min(foot) if foot else hull_top, hull_top + HULL_GAP)
+
+    for s in 'lr':
+        pv, (glo, ghi) = gun_info[s]['pivot'], gun_info[s]['box']
+        cp = bone_points(gun, {gb[f'cannon1_{s}']})
+        r0 = [apply((GUN_ROT, 1.0, (0.0, 0.0, 0.0)), p) for p in cp]
+        lo, hi = box(r0)
+        half_w = (ghi[0] - glo[0]) / 2 * CRADLE_WIDTH
+        zb = (pv[2], nose_z + CRADLE_FRONT)
+        zc = (pv[2] - CHEEK_BACK, pv[2] + CHEEK_FWD)
+        pieces = [((pv[0] - half_w, pv[0] + half_w), zb, glo[1] - CRADLE_GAP),
+                  ((ghi[0] + CHEEK_GAP, ghi[0] + CHEEK_GAP + CHEEK_T), zc, pv[1] + CHEEK_UP),
+                  ((glo[0] - CHEEK_GAP - CHEEK_T, glo[0] - CHEEK_GAP), zc, pv[1] + CHEEK_UP)]
+        cradle_info[s] = []
+        for (x0, x1), (z0, z1), y1 in pieces:
+            y0 = floor_under(x0, x1, z0, z1)
+            _req(y1 - y0 > 0.05, f'cradle piece {x0:.2f}..{x1:.2f}: no room ({y0:.3f}..{y1:.3f})')
+            k = ((x1 - x0) / (hi[0] - lo[0]), (y1 - y0) / (hi[1] - lo[1]), (z1 - z0) / (hi[2] - lo[2]))
+            a_cr: Affine = (GUN_ROT, k, (x0 - k[0] * lo[0], y0 - k[1] * lo[1], z0 - k[2] * lo[2]))
+            gun_meshes += extract(gun, {gb[f'cannon1_{s}']: hb[HOST_TURRET_ROOT]}, a_cr)
+            cradle_info[s].append(box([apply(a_cr, p) for p in cp]))
+    info['cradles'] = cradle_info
     info['roof_under_guns'] = roof
     info['housing_nose_z'] = nose_z
 
@@ -418,7 +477,8 @@ def check(arc: bytes) -> None:
     the muzzle ahead of it; the hull geometry is the stock one; the radars carry no geometry; the turret sits on the
     hull (no turret vertex below the Kepler's turret bottom); each cannon bone at its gun's breech end, each slide
     0.15..0.5 m behind its muzzle, the muzzles >= 1.5 m past the housing nose, and at every ELEVATIONS angle no gun
-    vertex below the housing roof under it or the hull top."""
+    vertex below the housing roof under it or the hull top, nor inside a cradle piece; each gun's cradle has a base
+    under it and a cheek on each side at its pivot reaching above the pivot."""
     rab = rab_read(arc)
     _req(rab_write(rab) == arc, 'archive does not round-trip')
     data = member(rab, HOST_MDB).data
@@ -459,7 +519,8 @@ def check(arc: bytes) -> None:
     for c, k in ((0, -1.0), (1, 1.0), (2, 1.0)):
         _req(abs(pos['cannon_l'][c] - k * pos['cannon_r'][c]) < 2e-3, 'cannon_l / _r not mirrored')
         _req(abs(pos['cannon_slide_l'][c] - k * pos['cannon_slide_r'][c]) < 2e-3, 'cannon_slide_l / _r not mirrored')
-    housing = pts[bi_of[HOST_TURRET_ROOT]]
+    housing, _cradle_pts = turret_parts(md)
+    cradles = cradle_boxes(md)
     nose = max(p[2] for p in housing)
     for s in 'lr':
         blo, bhi = box(pts[bi_of[f'cannon_{s}']])
@@ -471,20 +532,58 @@ def check(arc: bytes) -> None:
         _req(all(slo[c] <= sl[c] <= shi[c] for c in range(2)), f'cannon_slide_{s} outside its barrel section')
         _req(0.15 < shi[2] - sl[2] < 0.5 and sl[2] > t[2], f'cannon_slide_{s}: {shi[2] - sl[2]:.3f} m behind the muzzle')
         _req(shi[2] >= nose + 1.5, f'cannon_{s}: muzzle {shi[2]:.3f} not 1.5 m past the housing nose {nose:.3f}')
-        for e, low, margin, roof in gun_clearance(md, s):
+        # the cradle: a piece under the gun and one on each side of it at the pivot, reaching above the pivot
+        near = [c for c in cradles if c[0][2] - 1e-3 <= t[2] <= c[1][2] + 1e-3]
+        _req(any(c[1][0] < blo[0] and c[1][1] > t[1] for c in near), f'cannon_{s}: no inner cradle cheek at its pivot')
+        _req(any(c[0][0] > bhi[0] and c[1][1] > t[1] for c in near), f'cannon_{s}: no outer cradle cheek at its pivot')
+        _req(any(c[0][0] >= blo[0] and c[1][0] <= bhi[0] and c[1][1] < blo[1] for c in cradles),
+             f'cannon_{s}: no cradle base under it')
+        for e, low, margin, roof, hit in gun_clearance(md, s):
             _req(margin >= 0.0 and low > STOCK_HULL[1][4],
                  f'cannon_{s} at {e:g} deg: a vertex {margin:.3f} m from the roof ({roof:.3f}); lowest {low:.3f}')
+            _req(hit == 0, f'cannon_{s} at {e:g} deg: {hit} gun vertices inside a cradle piece')
 
 
-def gun_clearance(md: Mdb, side: str) -> list[tuple[float, float, float, float]]:
+def turret_parts(md: Mdb) -> tuple[list[Vec3], list[Vec3]]:
+    """(housing, cradles): the cannon_main-skinned vertices, split by material: those of meshes whose material is
+    also a gun mesh's (the Barga's) are the cradles."""
+    main, guns = md.bone_index(HOST_TURRET_ROOT), {md.bone_index('cannon_l'), md.bone_index('cannon_r')}
+    gun_mats = {me.material for o in md.objects for me in o.meshes
+                if any(int(i[0]) in guns for i in g.skin_columns(me)[0])}
+    housing: list[Vec3] = []
+    cradles: list[Vec3] = []
+    for o in md.objects:
+        for me in o.meshes:
+            P, bi = g.mesh_positions(me), g.skin_columns(me)[0]
+            (cradles if me.material in gun_mats else housing).extend(p for p, i in zip(P, bi) if int(i[0]) == main)
+    return housing, cradles
+
+
+def cradle_boxes(md: Mdb) -> list[tuple[Vec3, Vec3]]:
+    """The vertex box of every cradle piece: each mesh skinned only to cannon_main in a gun (Barga) material."""
+    main, guns = md.bone_index(HOST_TURRET_ROOT), {md.bone_index('cannon_l'), md.bone_index('cannon_r')}
+    gun_mats = {me.material for o in md.objects for me in o.meshes
+                if any(int(i[0]) in guns for i in g.skin_columns(me)[0])}
+    return [box(g.mesh_positions(me)) for o in md.objects for me in o.meshes
+            if me.material in gun_mats and all(int(i[0]) == main for i in g.skin_columns(me)[0])]
+
+
+def gun_clearance(md: Mdb, side: str) -> list[tuple[float, float, float, float, int]]:
     """Per ELEVATIONS angle, cannon_<side>'s subtree pitched muzzle-up about the bone: (deg, the gun's lowest vertex y,
-    min over its vertices of y - the housing roof under that vertex (CELL grid), that roof's y)."""
+    min over its vertices of y - the housing roof under that vertex (CELL grid), that roof's y, how many of its
+    vertices lie inside a cradle piece's box)."""
     pts = g.skinned_points(md)
     gi = md.bone_index(f'cannon_{side}')
     o = bind_world(md)[gi][12:15]
     P = [p for b in g.subtree(md, gi) for p in pts.get(b, [])]
-    grid = roof_grid(pts[md.bone_index(HOST_TURRET_ROOT)])
-    return [(e,) + sweep(P, (o[0], o[1], o[2]), grid, e) for e in ELEVATIONS]
+    grid = roof_grid(turret_parts(md)[0])
+    boxes = cradle_boxes(md)
+    out = []
+    for e in ELEVATIONS:
+        Q = pitched(P, (o[0], o[1], o[2]), e)
+        hit = sum(1 for q in Q for lo, hi in boxes if all(lo[c] - 1e-3 < q[c] < hi[c] + 1e-3 for c in range(3)))
+        out.append((e,) + sweep(P, (o[0], o[1], o[2]), grid, e) + (hit,))
+    return out
 
 
 STOCK_BONES = [
