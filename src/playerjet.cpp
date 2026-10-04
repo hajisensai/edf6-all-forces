@@ -116,6 +116,7 @@ constexpr float kStallWarn=1.05f;
 // levels its wings, gently (kLevelRate), and not at all climbing or diving steeper than kAimSteep (sine): letting W go
 // in a steep climb or over the top of a loop keeps the attitude it has (it snapped upright at kRollRate before,
 // 2026-10-04). Under kAimBankMin g of lift it keeps its bank.
+constexpr float kMouseMoved=0.02f;    // a frame's mouse movement past this hands the plane to the aim
 constexpr float kAimPerUnit=0.05f,kAimMaxEl=1.3f,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
 constexpr float kAimMark=800.0f;       // m: the readout's aim and path points ahead of the plane      // the readout's STALL: the most lift under this many times what holds the path
 // Angle of attack (jet.cpp kAoaPerG): the nose rides this far above the path per g pulled at the middle of
@@ -175,6 +176,7 @@ struct PJet {
     float aim[3];                // the mouse's aim, a world direction (AimSteer); hasAim: set
     bool hasAim;
     bool keys;                   // flown on the keyboard and mouse last frame
+    bool mouseFlies;             // ...by the mouse's aim: it moved since a key was last pressed (Air)
     int store;                   // the store the secondary fires (an index into ReadStores' list)
     bool switchHeld;             // the switch key / LB down last frame
     Burden burden;               // what its stores weigh (BurdenOf)
@@ -578,7 +580,13 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     const bool vertical=!Normalize(up) || std::fabs(dir[1])>kVertical;
     if(vertical){up[0]=0;up[1]=1;up[2]=0;}
     // The mouse's aim steers unless W / S / A / D fly it by hand (the aim then follows the nose).
-    const bool aiming=s.keys && Cfg().playerJetMouseFlight && std::fabs(s.pitch)<kRollDead && std::fabs(s.roll)<kRollDead;
+    // Who flies it on the keyboard and mouse: the keys while one is down, and on after they are let go (it levels its
+    // wings) until the mouse moves; from then the mouse's aim, starting on the nose, until a key is pressed again. So
+    // letting a key go hands nothing to an aim the player never touched.
+    const bool keyDown=std::fabs(s.pitch)>=kRollDead || std::fabs(s.roll)>=kRollDead;
+    if(keyDown)j.mouseFlies=false;
+    else if(std::fabs(s.aimX)+std::fabs(s.aimY)>kMouseMoved)j.mouseFlies=true;
+    const bool aiming=s.keys && Cfg().playerJetMouseFlight && j.mouseFlies && !keyDown;
     if(!aiming)Roll(j,v,s,dir,up,vertical,dt);
     const float wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;   // its mass over clean: the same wing lifts less g
@@ -816,7 +824,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             PlayerJetReadout r{};
             r.speed=Len(j.vel);r.throttle=j.throttle;r.clear=ground ? j.clear : pos[1];r.climb=j.climb;
             r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
-            r.air=air;r.stall=air && j.stall;r.ground=ground;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
