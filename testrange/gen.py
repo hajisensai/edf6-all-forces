@@ -22,9 +22,6 @@ import crilayla  # noqa: E402
 import rmpa  # noqa: E402
 
 DEFAULT_GAME = r'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
-SOURCE = 'M045'            # the plain whose map and points the range uses
-MAP = 'app:/Map/ig_Heigen601.mac'
-WEATHER = 'cloudy'
 MARKER = 'EDF6TestRange.txt'
 
 
@@ -38,7 +35,7 @@ class Slot:
 # Slots, by their position in the in-game offline mission list: item N is entry N-1 of
 # MISSION/MISSIONLIST.OFFLINE.LIST.SGO, and its title is entry N-1 of MISSIONLIST.OFFLINE.TXT.*.SGO
 # (item 14 「转机」 = RM015, item 2 「非法入侵者」 = M001). The range only borrows the slot: its map and
-# points are always M045's (SOURCE). The opening missions are the ruined world, where the Air Raider's
+# points are the site's (SITES). The opening missions are the ruined world, where the Air Raider's
 # vehicle and air support requests are accepted but never arrive; in item 14 they do.
 SLOTS = [
     Slot('RM015', 14, '列表第 14 项「转机」（RM015）：空袭兵能呼叫载具和空中支援'),
@@ -49,6 +46,27 @@ DEFAULT_SLOT = SLOTS[0].mission
 
 def slot_of(mission: str) -> Slot:
     return next(x for x in SLOTS if x.mission == mission)
+
+
+@dataclass(frozen=True)
+class Site:
+    source: str        # stock mission whose map, weather and points (MISSION.RMPA) the range uses
+    map: str
+    weather: str
+    label: str
+
+
+# Only missions with a 'プレイヤー' point and room for vehicles around it: of the city missions RM016B
+# (TrainCity) has the most, 11 flat spots within 800 m and 11 enemy spots.
+SITES = [
+    Site('M045', 'app:/Map/ig_Heigen601.mac', 'cloudy', '平原（M045）'),
+    Site('RM016B', 'app:/Map/nw_TrainCity.mac', 'finecloud', '城区（RM016B 列车城）'),
+]
+DEFAULT_SITE = SITES[0].source
+
+
+def site_of(source: str) -> Site:
+    return next(x for x in SITES if x.source == source)
 
 # (sgo, label). Only SGOs with a `mission_setup` block (weapon set-up for script-placed vehicles):
 # CreateVehicle2 reads it, and a player call-in SGO without it crashes the game (EDF.dll+0x52E44).
@@ -329,6 +347,7 @@ class Plan:
     waves: Waves = field(default_factory=Waves)
     loadout: dict = field(default_factory=dict)
     slot: str = DEFAULT_SLOT
+    site: str = DEFAULT_SITE
     # Vehicles spawned with an NPC driver (CreateFriend, as stock missions spawn allied vehicles). An
     # NPC-piloted heli is flown by the plugin, several of them in formation.
     friends: dict[str, int] = field(default_factory=dict)
@@ -348,7 +367,7 @@ def small_count(plan: Plan) -> int:
 def save_plan(path: str, plan: Plan) -> None:
     data = {'vehicles': plan.vehicles, 'vehicle_level': plan.vehicle_level,
             'waves': plan.waves.__dict__, 'loadout': plan.loadout, 'slot': plan.slot,
-            'friends': plan.friends}
+            'site': plan.site, 'friends': plan.friends}
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -368,6 +387,8 @@ def load_plan(path: str) -> Plan:
     plan.loadout = data.get('loadout', {})
     if data.get('slot') in {x.mission for x in SLOTS}:
         plan.slot = data['slot']
+    if data.get('site') in {x.source for x in SITES}:
+        plan.site = data['site']
     return plan
 
 
@@ -460,6 +481,7 @@ SPAWN_BATCH, SPAWN_GAP = 4, 0.25
 def script(plan: Plan, lay: Layout) -> str:
     """The mission script. Same skeleton as the stock generated scripts (event 0 = Main)."""
     chosen = placements(plan)
+    site = site_of(plan.site)
     placed = spots_for(plan, lay)
     w = plan.waves
     targets = w.enemy == TARGET
@@ -498,7 +520,7 @@ def script(plan: Plan, lay: Layout) -> str:
         '\tinternal_InitEventThread(0, ::__0000_data.m_counter, "Main", "開始");',
         '',
         '\tBeginLoading();',
-        f'\tPreloadMap({_q(MAP)}, {_q(WEATHER)}, -1);',
+        f'\tPreloadMap({_q(site.map)}, {_q(site.weather)}, -1);',
         '\tPreload("app:/ui/UiResourceGroup_InMission.sgo", -1);',
         '\tPreload("app:/ui/UiResourceGroup_MissionCleared.sgo", -1);',
         '\tPreload("app:/ui/UiResourceGroup_MissionFailed.sgo", -1);',
@@ -522,7 +544,7 @@ def script(plan: Plan, lay: Layout) -> str:
         '',
         'void Main_usercode()',
         '{',
-        f'\tMap({_q(MAP)}, {_q(WEATHER)});',
+        f'\tMap({_q(site.map)}, {_q(site.weather)});',
         f'\tCreatePlayer({_q(lay.player.name)});',
     ]
     # The NPC vehicles come out SPAWN_BATCH at a time, SPAWN_GAP s apart: 37 of them created in the first frame
@@ -843,7 +865,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
     for sgo_name in {s for s, _ in placements(plan)}:
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
-    points_file = game.read(f'MISSION/EDF6/{SOURCE}', 'MISSION.RMPA')
+    points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
     lay = layout(rmpa.points(points_file), small_count(plan))
     text = script(plan, lay)
     placed = [(s, npc, p) for s, npc, p in spots_for(plan, layout(rmpa.points(points_file), small_count(plan)))]

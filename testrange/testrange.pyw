@@ -58,6 +58,10 @@ class App(tk.Tk):
 
         bar = ttk.Frame(self)
         bar.pack(fill='x', **pad)
+        ttk.Label(bar, text='地图').pack(side='left')
+        self.site = ttk.Combobox(bar, values=[x.label for x in gen.SITES], state='readonly', width=20)
+        self.site.current(next(i for i, x in enumerate(gen.SITES) if x.source == self.plan.site))
+        self.site.pack(side='left', padx=(4, 10))
         ttk.Label(bar, text='装进').pack(side='left')
         self.slot = ttk.Combobox(bar, values=[x.label for x in gen.SLOTS], state='readonly', width=46)
         self.slot.current(next(i for i, x in enumerate(gen.SLOTS) if x.mission == self.plan.slot))
@@ -200,6 +204,7 @@ class App(tk.Tk):
                                **{k: v.get() for k, v in self.w_vars.items()})
         plan.loadout = self._loadout_choice()
         plan.slot = gen.SLOTS[self.slot.current()].mission
+        plan.site = gen.SITES[self.site.current()].source
         return plan
 
     def install(self) -> None:
