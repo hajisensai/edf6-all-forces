@@ -228,75 +228,150 @@ std::uintptr_t FinalAngProbe(void* body,const float* w) noexcept {
     return reinterpret_cast<SetVecFn>(image+kSetAngVel)(body,w);
 }
 
-// Car/tank frame (0x674663): when the chassis has come to rest the game calls setBodyQuality (hknp world
-// iface slot 41, 0xE51280: iface, body id, quality, extra body flags, skip-cache-rebuild) with quality 1
-// at 0x6746A1 -- `mov r8d,1` at 0x674682 -- and no vehicle code ever sets it back. Library entry 1
-// (0xE13C05, flags 0x25808) is the cheap debris preset: no welding, and none of the vehicle's contact
-// handling. So every chassis that has once stood still drives on as debris, and the launch probe saw
-// what that does on uneven ground: one step ends 0.4 m inside the terrain and the push-out throws it up.
-// Two parts, both VEHICLE (9): the rest path asks for it instead of 1, and the moving path (the final
-// setLinVel at 0x6746B5, right before the step) restores it on a chassis still holding another quality
-// -- one spawned from model data (CarBase/TankBase, car_base_body_name) that never rested, or one a
-// previous plugin version left as debris. setBodyQuality returns early when the value is unchanged.
-constexpr std::size_t kRestQualityCheckAt=0x67467B;
-constexpr unsigned char kRestQualityCode[]={0x48,0x8B,0x97,0x98,0x16,0x00,0x00,   // mov rdx,[rdi+0x1698]
-                                            0x41,0xB8,0x01,0x00,0x00,0x00};       // mov r8d,1
-constexpr std::size_t kRestQualityImmediate=0x674684;
-constexpr std::size_t kSetQualitySlot=41,kSetBodyQuality=0xE51280;
+// Car/tank chassis vs rubble. The launch probe named what throws the tank: at the launch step the hull
+// (quality 7, already welded with look-ahead) sat over dynamic rubble -- debris-preset bodies (quality 1)
+// lying under its sides -- and one step turned 5 m/s forward into 5 m/s up. A light body wedged between
+// the static ground and a heavy hull is pushed out of both, and the solver hands the hull the push.
+// hknp has the answer built in and registered by default: hknpMassChangerModifier (vtable 0x17E8B58,
+// added at 0xE838E4 for body/material flag ENABLE_MASS_CHANGER 0x800000). Its Jacobian hook (0xDD4070)
+// fires when one material of the pair is MASS_CHANGER_DEBRIS (category byte +0x30 == 1) and neither
+// body is STATIC; with f = the other material's massChangerHeavyObjectFactor (+0x32, hkHalf = the top 16
+// bits of a float) and a = (f-1)/(f+1) it scales the debris' inverse mass by 1+a and the other's by 1-a.
+// Every stock material is IGNORE with f = 1 (ctor 0xDD0270), so nothing ever used it. Here: the chassis
+// body carries the flag, its material is HEAVY with f = kHeavyFactor, and the rubble near it gets the
+// DEBRIS category on its material -- debris against anything else keeps the other side's f = 1, i.e.
+// stock behaviour.
+// Materials: the body manager (world+0x20, = iface+8) returns its library from vtable slot 5
+// ([mgr+0x900]); materials at [lib+0x48], 0x50 each, indexed by the body's u16 at +0x8A (0xE67C24).
 constexpr std::size_t kWrapperId=0xF0,kWrapperWorld=0x100,kWorldOf=0x58,kWorldIface=0x18,kIfaceBodies=0x20;
-constexpr std::size_t kBodyQuality=0x89;
+constexpr std::size_t kBodyQuality=0x89,kBodyMaterial=0x8A,kBodyFlags=0x54;
+constexpr std::size_t kMgrLibrary=0x900,kLibMaterials=0x48,kLibMaterialCount=0x50,kMaterialStride=0x50;
+constexpr std::size_t kMatFlags=0x14,kMatCategory=0x30,kMatHeavyFactor=0x32;
+constexpr std::uint32_t kFlagMassChanger=0x800000;
+constexpr std::uint8_t kCategoryDebris=1,kCategoryHeavy=2,kQualityDebris=1;
+constexpr std::uint16_t kHeavyFactor=0x42C8;   // 100.0f: the hull keeps 1-a = 2% of a rubble push
+constexpr float kRubbleRadius=15.0f;
+constexpr ULONGLONG kRubbleScanMs=250;
 
-using SetQualityFn=void(*)(void*,std::uint32_t,std::uint8_t,std::uint32_t,std::uint32_t);
-bool keepChassisQuality;
+struct ChassisWorld {
+    unsigned char* iface;
+    unsigned char* body;
+    unsigned char* materials;
+    std::int32_t materialCount;
+};
+
+bool ChassisOf(void* wrapper,ChassisWorld& out) noexcept {
+    const auto* worldWrapper=At<unsigned char*>(wrapper,kWrapperWorld);
+    auto* world=worldWrapper ? At<unsigned char*>(worldWrapper,kWorldOf) : nullptr;
+    if(!world)return false;
+    unsigned char* const iface=world+kWorldIface;
+    const unsigned char* const mgr=iface+8;
+    if(At<const void*>(mgr,0)!=image+kBodyManagerVtable)return false;
+    const std::uint32_t id=At<std::uint32_t>(static_cast<unsigned char*>(wrapper),kWrapperId);
+    if((id&0xFFFFFF)>=At<std::uint32_t>(mgr,0x20))return false;
+    auto* body=At<unsigned char*>(mgr,0x18)+std::size_t{id&0xFFFFFF}*kBodyStride;
+    if(At<std::uint32_t>(body,0x50)!=id)return false;
+    const auto* library=At<const unsigned char*>(mgr,kMgrLibrary);
+    if(!library)return false;
+    out=ChassisWorld{iface,body,At<unsigned char*>(library,kLibMaterials),At<std::int32_t>(library,kLibMaterialCount)};
+    return out.materials && out.materialCount>0;
+}
+
+unsigned char* MaterialOf(const ChassisWorld& w,const unsigned char* body) noexcept {
+    const std::uint16_t id=At<std::uint16_t>(body,kBodyMaterial);
+    return id<w.materialCount ? w.materials+std::size_t{id}*kMaterialStride : nullptr;
+}
+
+std::atomic<int> massLogs{0};
+
+bool MassLog() noexcept { return massLogs.fetch_add(1,std::memory_order_relaxed)<32; }
+
+void MarkHeavy(const ChassisWorld& w) noexcept {
+    unsigned char* const body=w.body;
+    const std::uint32_t flags=At<std::uint32_t>(body,kBodyFlags);
+    if((flags&kBodyFlagsMotionMask)!=kBodyFlagDynamic)return;
+    if(!(flags&kFlagMassChanger))Put<std::uint32_t>(body,kBodyFlags,flags|kFlagMassChanger);
+    unsigned char* const material=MaterialOf(w,body);
+    if(!material)return;
+    const std::uint8_t category=At<std::uint8_t>(material,kMatCategory);
+    if(category==kCategoryHeavy)return;
+    if(category==kCategoryDebris) {
+        if(MassLog())Log("PHYSICS chassis material %u is DEBRIS (shared with rubble): left alone",
+                         At<std::uint16_t>(body,kBodyMaterial));
+        return;
+    }
+    if(MassLog())
+        Log("PHYSICS chassis body %08X material %u: HEAVY factor 100 (was category %u factor %04X flags %08X)",
+            At<std::uint32_t>(body,0x50),At<std::uint16_t>(body,kBodyMaterial),category,
+            At<std::uint16_t>(material,kMatHeavyFactor),At<std::uint32_t>(material,kMatFlags));
+    Put<std::uint16_t>(material,kMatHeavyFactor,kHeavyFactor);
+    Put<std::uint32_t>(material,kMatFlags,At<std::uint32_t>(material,kMatFlags)|kFlagMassChanger);
+    Put<std::uint8_t>(material,kMatCategory,kCategoryHeavy);
+}
+
+// The debris-preset bodies around the chassis: their materials become DEBRIS, once per material; the
+// chassis' own material is never touched here.
+void MarkRubble(const ChassisWorld& w) noexcept {
+    const float* at=reinterpret_cast<const float*>(w.body+0x30);
+    const std::uint16_t own=At<std::uint16_t>(w.body,kBodyMaterial);
+    const auto* bodies=At<const unsigned char*>(w.iface,kIfaceBodies);
+    const std::int32_t count=At<std::int32_t>(w.iface,kIfaceBodies+8);
+    for(std::int32_t i=0;i<count && i<0x40000;++i) {
+        const unsigned char* b=bodies+std::size_t(i)*kBodyStride;
+        if((At<std::uint32_t>(b,0x50)&0xFFFFFF)!=std::uint32_t(i))continue;
+        if((At<std::uint32_t>(b,kBodyFlags)&kBodyFlagsMotionMask)!=kBodyFlagDynamic)continue;
+        if(At<std::uint8_t>(b,kBodyQuality)!=kQualityDebris || At<std::uint16_t>(b,kBodyMaterial)==own)continue;
+        const float* p=reinterpret_cast<const float*>(b+0x30);
+        const float dx=p[0]-at[0],dy=p[1]-at[1],dz=p[2]-at[2];
+        if(dx*dx+dy*dy+dz*dz>kRubbleRadius*kRubbleRadius)continue;
+        unsigned char* const material=MaterialOf(w,b);
+        if(!material || At<std::uint8_t>(material,kMatCategory)!=0)continue;
+        if(MassLog())
+            Log("PHYSICS rubble body %08X material %u: DEBRIS (factor %04X flags %08X)",At<std::uint32_t>(b,0x50),
+                At<std::uint16_t>(b,kBodyMaterial),At<std::uint16_t>(material,kMatHeavyFactor),
+                At<std::uint32_t>(material,kMatFlags));
+        Put<std::uint32_t>(material,kMatFlags,At<std::uint32_t>(material,kMatFlags)|kFlagMassChanger);
+        Put<std::uint8_t>(material,kMatCategory,kCategoryDebris);
+    }
+}
+
+struct RubbleScan { const void* wrapper; ULONGLONG at; };
+RubbleScan rubbleScans[8]{};
+
+bool RubbleDue(const void* wrapper) noexcept {
+    const ULONGLONG now=GetTickCount64();
+    RubbleScan* slot=&rubbleScans[0];
+    for(auto& s:rubbleScans) {
+        if(s.wrapper==wrapper) { slot=&s; break; }
+        if(s.at<slot->at)slot=&s;
+    }
+    if(slot->wrapper==wrapper && now-slot->at<kRubbleScanMs)return false;
+    *slot=RubbleScan{wrapper,now};
+    return true;
+}
+
+bool heavyChassis;
 bool probeChassisVelocity;
-std::atomic<int> qualityLogs{0};
 
-void KeepChassisQuality(unsigned char* wrapper) noexcept {
+void HeavyChassis(void* wrapper) noexcept {
     __try {
-        if(!wrapper)return;
-        const auto* worldWrapper=At<unsigned char*>(wrapper,kWrapperWorld);
-        if(!worldWrapper)return;
-        auto* world=At<unsigned char*>(worldWrapper,kWorldOf);
-        if(!world)return;
-        unsigned char* const iface=world+kWorldIface;
-        const auto vtable=At<void**>(iface,0);
-        if(!vtable || vtable[kSetQualitySlot]!=image+kSetBodyQuality)return;
-        const std::uint32_t id=At<std::uint32_t>(wrapper,kWrapperId);
-        const auto* body=At<unsigned char*>(iface,kIfaceBodies)+std::size_t{id&0xFFFFFF}*kBodyStride;
-        if(At<std::uint32_t>(body,0x50)!=id)return;
-        if((At<std::uint32_t>(body,0x54)&kBodyFlagsMotionMask)!=kBodyFlagDynamic)return;
-        const std::uint8_t quality=At<std::uint8_t>(body,kBodyQuality);
-        if(quality==kQualityVehicle)return;
-        if(qualityLogs.fetch_add(1,std::memory_order_relaxed)<32)
-            Log("PHYSICS chassis body %08X quality %u -> %u",id,quality,kQualityVehicle);
-        reinterpret_cast<SetQualityFn>(image+kSetBodyQuality)(iface,id,kQualityVehicle,0,0);
+        ChassisWorld w{};
+        if(!wrapper || !ChassisOf(wrapper,w))return;
+        MarkHeavy(w);
+        if(RubbleDue(wrapper))MarkRubble(w);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
 // At the launch frame: every body of the chassis' world within kNeighborRadius of it that is not STATIC
-// (a corpse ragdoll, building debris, another vehicle), with flags, quality and inverse mass (motion
-// +0x26, half). Bodies hkArray at iface+0x20/+0x28, motions at iface+0x160 (stride 0x80), as 0xE51280.
+// (rubble, debris, another vehicle), with flags, quality and material (id, category, heavy factor).
 constexpr float kNeighborRadius=12.0f;
-
-float Half(std::uint16_t h) noexcept {
-    const std::uint32_t sign=(h&0x8000u)<<16,exp=(h>>10)&0x1F,man=h&0x3FF;
-    if(!exp)return 0.0f;
-    const std::uint32_t bits=sign|((exp+112)<<23)|(man<<13);
-    float f;
-    std::memcpy(&f,&bits,4);
-    return f;
-}
 
 void DumpNeighbors(void* wrapper,const float* at) noexcept {
     __try {
-        const auto* worldWrapper=At<unsigned char*>(wrapper,kWrapperWorld);
-        const auto* world=worldWrapper ? At<unsigned char*>(worldWrapper,kWorldOf) : nullptr;
-        if(!world)return;
-        const unsigned char* const iface=world+kWorldIface;
-        const auto* bodies=At<const unsigned char*>(iface,kIfaceBodies);
-        const std::int32_t count=At<std::int32_t>(iface,kIfaceBodies+8);
-        const auto* motions=At<const unsigned char*>(iface,0x160);
-        const std::uint32_t self=At<std::uint32_t>(static_cast<unsigned char*>(wrapper),kWrapperId);
+        ChassisWorld w{};
+        if(!ChassisOf(wrapper,w))return;
+        const auto* bodies=At<const unsigned char*>(w.iface,kIfaceBodies);
+        const std::int32_t count=At<std::int32_t>(w.iface,kIfaceBodies+8);
         int statics=0;
         for(std::int32_t i=0;i<count && i<0x40000;++i) {
             const unsigned char* b=bodies+std::size_t(i)*kBodyStride;
@@ -305,19 +380,20 @@ void DumpNeighbors(void* wrapper,const float* at) noexcept {
             const float* p=reinterpret_cast<const float*>(b+0x30);
             const float dx=p[0]-at[0],dy=p[1]-at[1],dz=p[2]-at[2];
             if(dx*dx+dy*dy+dz*dz>kNeighborRadius*kNeighborRadius)continue;
-            const std::uint32_t flags=At<std::uint32_t>(b,0x54);
+            const std::uint32_t flags=At<std::uint32_t>(b,kBodyFlags);
             if(flags&1){++statics;continue;}
-            const std::uint32_t motion=At<std::uint32_t>(b,0x80);
-            const float invMass=motions && motion ? Half(At<std::uint16_t>(motions+std::size_t(motion)*0x80,0x26)) : 0.0f;
-            Log("VELPROBE2 near %08X%s flags=%08X q=%u motion=%u invMass=%.5f d=(%.2f %.2f %.2f)",id,
-                id==self ? " (self)" : "",flags,At<std::uint8_t>(b,kBodyQuality),motion,invMass,dx,dy,dz);
+            const unsigned char* material=MaterialOf(w,b);
+            Log("VELPROBE2 near %08X%s flags=%08X q=%u mat=%u cat=%u f=%04X d=(%.2f %.2f %.2f)",id,
+                b==w.body ? " (self)" : "",flags,At<std::uint8_t>(b,kBodyQuality),At<std::uint16_t>(b,kBodyMaterial),
+                material ? unsigned{At<std::uint8_t>(material,kMatCategory)} : 255u,
+                material ? unsigned{At<std::uint16_t>(material,kMatHeavyFactor)} : 0u,dx,dy,dz);
         }
         Log("VELPROBE2 near: %d static bodies within %.0f m",statics,kNeighborRadius);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
 std::uintptr_t ChassisSetLinVel(void* body,const float* v) noexcept {
-    if(keepChassisQuality)KeepChassisQuality(static_cast<unsigned char*>(body));
+    if(heavyChassis)HeavyChassis(body);
     if(probeChassisVelocity)RecordLin(body,v);
     return reinterpret_cast<SetVecFn>(image+kSetLinVel)(body,v);
 }
@@ -330,11 +406,9 @@ bool RedirectChassisLinVel() noexcept {
     return redirected;
 }
 
-bool KeepVehicleQuality() noexcept {
+bool HeavyVehicleChassis() noexcept {
     if(!RedirectChassisLinVel())return false;
-    keepChassisQuality=true;
-    PatchCode(kRestQualityCheckAt,kRestQualityCode,sizeof(kRestQualityCode),
-              kRestQualityImmediate,&kQualityVehicle,1);
+    heavyChassis=true;
     return true;
 }
 
@@ -352,7 +426,7 @@ int ProbeVehicleVelocity() noexcept {
 
 bool InstallPhysics() noexcept {
     const bool welded=cfg.vehicleWelding && WeldVehicleChassis();
-    const bool chassis=cfg.vehicleWelding && KeepVehicleQuality();
+    const bool chassis=cfg.vehicleWelding && HeavyVehicleChassis();
     const bool capped=cfg.giantContactCap && CapGiantContact();
     if(cfg.debug)Log("PHYSICS velocity probes=%d",ProbeVehicleVelocity());
     Log("PHYSICS vehicleWelding heli=%d chassis=%d giantContactCap=%d (config %d/%d)",welded,chassis,capped,
