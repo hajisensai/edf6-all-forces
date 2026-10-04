@@ -260,6 +260,7 @@ _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
+PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15   # jet_sgo: a player jet's seat
 JET_SILENT_SE = 'EDF6VC_SILENT'
 JET_ROTOR_SE_ROWS = (0, 1)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
@@ -416,6 +417,11 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if jet.player:
         import copy
         m['vehicle_setup'] = copy.deepcopy(setup)
+        # Every class flies it (the user, 2026-10-05: Wing Divers and Fencers too): the seat's class mask (R 1, WD 2,
+        # F 4, AR 8; the 506's 9) to 15, and a driver's pose every class has (the stock gives 15 only to seats like
+        # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9).
+        seat = m['vehicle_riding_position'][0]
+        seat[3], seat[4] = PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES
         cam = m['game_object_camera_setting']
         if jet.camera is not None:
             m['game_object_camera_setting'] = [cam[0], [float(x) for x in jet.camera]]
