@@ -1878,7 +1878,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(!profileOk || vehicle[kDead])return;
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
     if(IsJet(vehicle)){if(Cfg().jetPilot)JetFrame(vehicle);return;}
-    if(IsSub(vehicle)){SubFrame(vehicle);CarrierLaserFrame(vehicle);return;}   // the submarine carrier (subcarrier.cpp, carrierlaser.cpp)
+    if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(!Cfg().heliPilot)return;
     Heli* h=Find(vehicle);

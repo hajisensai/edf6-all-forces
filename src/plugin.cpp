@@ -16,6 +16,7 @@
 #pragma warning(pop)
 #include "crew.h"
 #include "memory.h"
+#include "subcarrier.h"
 #include "version.h"
 
 namespace crew {
@@ -132,6 +133,7 @@ void Validate(Config& n) noexcept {
     Fix("CarrierLaserBreak",n.carrierLaserBreak,0.0f,1.0f);
     Fix("VehicleHudRange",n.vehicleHudRange,0.0f,10000.0f);
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
+    Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -200,6 +202,7 @@ void LoadConfig() noexcept {
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
     n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
     n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
+    n.playerJetRamDamage=ReadFloat(L"PlayerJetRamDamage",n.playerJetRamDamage);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -211,7 +214,7 @@ void LoadConfig() noexcept {
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
-    Log("CONFIG playerJet=%d invertPitch=%d",n.playerJet,n.playerJetInvertPitch);
+    Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f",n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
@@ -395,6 +398,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallLaser();
+    InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

@@ -93,12 +93,10 @@ constexpr float kCrashBase=0.2f,kCrashPerSink=0.04f,kCrashPerSpeed=0.01f,kCrashM
 constexpr ULONGLONG kCrashMs=1000;
 // Blocked (a building, an enemy, the map's own walls): for kBlockedMs it made less than kBlockedPart of the way
 // it was sent, at kBlockedMin m/s or more in the air, kRollBlockedMin rolling; a crash at the speed it lost (and
-// the same share of its max HP, times kRamDamage, to the enemies round the impact); in the air it bounces back
+// the same share of its max HP, times Cfg().playerJetRamDamage, to the enemies round the impact); in the air it bounces back
 // off at minAir, rolling it stops.
 constexpr float kBlockedPart=0.5f,kBlockedMin=40.0f,kRollBlockedMin=20.0f;
 constexpr ULONGLONG kBlockedMs=150;
-// TODO(review): Cfg().playerJetRamDamage (ini PlayerJetRamDamage, default 1.0) once plugin.cpp's Config has it.
-constexpr float kRamDamage=1.0f;
 constexpr ULONGLONG kLogMs=2000;
 // Elevons (jet.cpp Elevons): bones elevon_L/R of the jet model, hinged along their local X.
 constexpr float kElevonMax=0.35f,kElevonRate=2.0f;
@@ -271,8 +269,8 @@ void Kill(PJet& j,unsigned char* v,const char* why) noexcept {
 }
 
 // A hard hit: `sink` m/s into the ground, `speed` over it, `banked` wings too steep. Damage (see kCrashBase). `ram`:
-// where it rammed something (not the ground, not the water): the enemies round it take that much damage (kRamDamage
-// times the share of its own max HP it lost) within its kind's reach. At most one a kCrashMs.
+// where it rammed something (not the ground, not the water): the enemies round it take that much damage (ini
+// PlayerJetRamDamage times the share of its own max HP it lost) within its kind's reach. At most one a kCrashMs.
 void Crash(PJet& j,unsigned char* v,float sink,float speed,bool banked,ULONGLONG ms,const float* ram) noexcept {
     if(ms-j.crashAt<kCrashMs)return;
     j.crashAt=ms;
@@ -283,8 +281,8 @@ void Crash(PJet& j,unsigned char* v,float sink,float speed,bool banked,ULONGLONG
     const float taken=share*(hpMax>0.0f ? hpMax : 1000.0f),left=hp-taken;
     Log("PJET v=%p crash: sink %.1f m/s, speed %.0f m/s%s: %.0f%% of max HP, hp %.0f -> %.0f",v,sink,speed,banked ? ", banked" : "",
         share*100.0f,hp,left>0.0f ? left : 0.0f);
-    if(ram) {
-        const float damage=taken*kRamDamage;
+    if(ram && Cfg().playerJetRamDamage>0.0f) {
+        const float damage=taken*Cfg().playerJetRamDamage;
         const bool dealt=ImpactDamage(v,ram,damage,j.kind->ram);
         Log("PJET v=%p rammed at (%.0f,%.0f,%.0f): %.0f damage within %.0f m%s",v,ram[0],ram[1],ram[2],damage,j.kind->ram,
             dealt ? "" : " (not dealt: no charge this mission)");

@@ -1163,7 +1163,6 @@ bool InstallGauge() noexcept {
 }
 
 bool InstallSub() noexcept {
-    InstallGauge();   // independent of everything below (already in when body506 installed)
     __try {
         if(!Body506Ok()){Log("SUB: no 506 physics hook (body506): carriers off");return false;}
         spawnOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig)) && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) &&

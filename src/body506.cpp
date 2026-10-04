@@ -240,7 +240,6 @@ bool Die506(unsigned char* v) noexcept {
 }
 
 bool InstallBody506() noexcept {
-    InstallGauge();   // the follower gauge and the vehicle HUD (subcarrier.cpp): no part of the 506's profile
     __try {
         const bool sig=Matches(kPhysics506,kPhysicsSig,sizeof(kPhysicsSig)) && Matches(kSetLinearVelocity,kSetLinSig,sizeof(kSetLinSig)) &&
                        Matches(kSetAngularVelocity,kSetAngSig,sizeof(kSetAngSig));

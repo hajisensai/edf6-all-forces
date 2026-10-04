@@ -63,6 +63,7 @@ struct Config {
     float vehicleHudRange=500.0f;// ...within this many metres of the player
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
+    float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -245,7 +246,7 @@ void CallPick(int step,wchar_t* out,std::size_t size) noexcept;   // airstrike.c
 // (tools/make_sub.py) driven by the plugin: it sits surfaced, follows the player at a ship's pace, turns its bow
 // on the nearest enemy, fires its turret guns and homing missiles, reloads aboard; its HP shows as a follower gauge.
 bool IsSub(const void* vehicle) noexcept;         // a 506 body with the carrier's mark
-void SubFrame(unsigned char* vehicle) noexcept;   // from HeliFrame, NPC-crewed carriers only
+void SubFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook (crew.cpp SubStep), carriers only
 bool InstallSub() noexcept;                       // after InstallJets (it chains onto the 506 physics slot)
 void PreloadSub() noexcept;                       // from the mission's player preload
 // A carrier made at run time on the ground at `pos` (metres; it is raised to sit on the highest ground under
