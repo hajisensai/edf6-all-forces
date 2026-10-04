@@ -195,7 +195,7 @@ bomber401 是飞翼（半宽 26 m），不适合当战斗机。
 
 ## 6. 空中航母的推力矢量舱（V508 的四个 booster）
 
-插件实现：`src/jet_flight.cpp` `Thrusters()`、`kThrustBack` 一段注释。数据来源：`python tools/mdb.py dump V508_TRANSPORT.MRAB`，`V508_TRANSPORT.SGO` / `V508_TRANSPORT.CAS`（Root.cpk 只读），`tools/edfre.py` 查字符串。
+插件实现：`src/jet_flight.cpp` `Thrusters()`、`kThrustBack` 一段注释。数据来源：`python pylib/mdb.py dump V508_TRANSPORT.MRAB`，`V508_TRANSPORT.SGO` / `V508_TRANSPORT.CAS`（Root.cpk 只读），`tools/edfre.py` 查字符串。
 
 ### 骨骼（H）
 
@@ -207,7 +207,7 @@ bomber401 是飞翼（半宽 26 m），不适合当战斗机。
 | boosterF_l / _r | 旋转 = 单位阵，平移 (±13.57, 3.47, 2.64) | (2.41, 4.92, 8.13) / (±2.58, 0, −0.71) |
 
 - 骨骼原点就是舱的转轴（挂点），绑定姿态是**水平**的（舱长轴沿局部 z，机头 +z）。
-- 航母模型是这个 mdb ×1.6（`tools/jet_models.py`），只改平移，旋转不变，所以下面的角度原样适用。
+- 航母模型是这个 mdb ×1.6（`pylib/jet_models.py`），只改平移，旋转不变，所以下面的角度原样适用。
 - 名字带 `_l` 的在 +x。插件不依赖 l/r 的含义，按绑定平移的 x 正负决定偏航差动的方向。
 
 ### 原版怎么动它们：只有 CAS 动画片段（H）

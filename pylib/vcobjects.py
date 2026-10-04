@@ -11,7 +11,7 @@ import struct
 from dataclasses import dataclass
 
 import dsgo
-import sgowrite
+import sgo
 from rootcpk import DEFAULT_GAME, Game  # noqa: F401  (re-exported: the tools take both from here)
 
 @dataclass(frozen=True)
@@ -145,14 +145,14 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE) -> bytes:
     record's +0x60 unchecked (crashed 2026-10-03 with the V506 bone names, then with only the body proxy
     bound). So every proxy is bound to the fuselage bone, the body proxy last so it is what drives it
     (the rotor proxies spin); ragdoll_from_animation has them all follow it."""
-    version, inner = sgowrite.read(blob)
+    version, inner = sgo.read(blob)
     inner['ragdoll_from_animation'] = [[[body, e[0][1]]] + e[1:] for e in inner['ragdoll_from_animation']]
     drive: dict[str, list] = {}
     for e in inner['animation_from_ragdoll']:
         drive.setdefault(e[0][0], [[e[0][0], body]] + e[1:])   # globalSRT: a second body entry, dropped
     body = drive.pop('RagDollProxys.body')
     inner['animation_from_ragdoll'] = list(drive.values()) + [body]
-    return sgowrite.write(version, inner)
+    return sgo.write(version, inner)
 
 
 def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = JET_BODY_BONE,
@@ -165,7 +165,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if jet.model is not None:
         model, body, rigid = list(jet.model), jet.body, [list(x) for x in jet.rigid] if jet.rigid else None
         anchor = jet.anchor
-    version, m = sgowrite.read(game.read('OBJECT', jet.stock + '.SGO'))
+    version, m = sgo.read(game.read('OBJECT', jet.stock + '.SGO'))
     at, want = JET_MAB_ROOT
     if m['animation_model'][2][at:at + 2 * len(want) + 2] != want.encode('utf-16le') + b'\0\0':
         raise ValueError(f'V506 MAB 的根骨骼名不在 {at:#x}')
@@ -187,7 +187,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     model = m['animation_model']
     mab = model[2]
     for at, old in JET_MAB_BONES:
-        mab = sgowrite.replace_utf16(mab, at, old, anchor)
+        mab = sgo.replace_utf16(mab, at, old, anchor)
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
@@ -200,7 +200,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
-    return sgowrite.write(version, m)
+    return sgo.write(version, m)
 
 
 def as_mission_sgo(data: bytes) -> bytes:
@@ -236,15 +236,15 @@ def _without_ai_obstacle(data: bytes) -> bytes:
     vehicle does not have (2026-10-04: EXCEPTION at EDF+62CB9C, rbx=5 entries, r15=4); the stock game never
     places a 401 from a script, so it never hit it. Without the member the loop is skipped (as for the 502,
     which has none). SGOs without it come back unchanged."""
-    version, m = sgowrite.read(data)
+    version, m = sgo.read(data)
     if 'ai_obstacle' not in m:
         return data
     del m['ai_obstacle']
-    return sgowrite.write(version, m)
+    return sgo.write(version, m)
 
 
 def _sort_dsgo_names(buf: bytearray) -> None:
-    """Re-sort the top-level dictionary's name table of a DSGO (see lib/sgo.py): node 0 at the node
+    """Re-sort the top-level dictionary's name table of a DSGO (see pylib/dsgo.py): node 0 at the node
     table is that dictionary, {name table offset, name count, ...} at node + value; names are {string
     offset from the entry, member position}, kept sorted like the stock files."""
     table = struct.unpack_from('<I', buf, 4)[0]
@@ -329,7 +329,7 @@ def portal_lasers(game: Game) -> dict[str, bytes]:
     """The portal laser's two DemoIndirectFire SGOs (PORTAL_LASER_FILES)."""
     out = {}
     for name, (rounds, gap, size, life, colour, once) in PORTAL_LASER_FILES.items():
-        version, m = sgowrite.read(game.read('OBJECT', PORTAL_LASER_STOCK))
+        version, m = sgo.read(game.read('OBJECT', PORTAL_LASER_STOCK))
         p = m['indirect_fire_param']
         if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
                 or p[4] != 'LaserBullet02'):
@@ -340,5 +340,5 @@ def portal_lasers(game: Game) -> dict[str, bytes]:
         if isinstance(p[17], list) and p[17]:
             p[17][0] = 1.0 if once else 0   # 1: the fire sound once for all rounds (the player's satellite)
         m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
-        out[name] = sgowrite.write(version, m)
+        out[name] = sgo.write(version, m)
     return out

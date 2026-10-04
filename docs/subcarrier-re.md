@@ -7,7 +7,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址都是 RVA。
 - 插件：`src/subcarrier.cpp`
 - 生成脚本：`tools/make_sub.py`
 - 测试场：`testrange/gen.py` 中的 `edf6tr_sub_carrier_mission`
-- 模型配方：`tools/jet_models.py` 中的 `SUB_MODELS`
+- 模型配方：`pylib/jet_models.py` 中的 `SUB_MODELS`
 
 ---
 
@@ -15,7 +15,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址都是 RVA。
 
 ### 1.1 对象与模型（Root.cpk，H）
 
-**`OBJECT/EV603_MARINE.SGO`**（DSGO 格式，要用 `testrange/lib/sgo.py` 读）
+**`OBJECT/EV603_MARINE.SGO`**（DSGO 格式，要用 `pylib/dsgo.py` 读，`python -B pylib/sgo.py` 可直接打印）
 
 | 字段 | 值 |
 |---|---|

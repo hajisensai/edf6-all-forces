@@ -7,7 +7,7 @@ self-aiming ground-attack launcher, built from the player's own Root.cpk into th
   python autoturret/tools/build.py build OUTDIR [--no-text]     (into a folder outside the game, to look at)
   python autoturret/tools/build.py --out DIR [--no-text]        (the old form: install into DIR)
 
---mods defaults to <game>/Mods (pylib/gamefs.py finds the game). install and uninstall refuse while EDF6.exe
+--mods defaults to <game>/Mods (pylib/rootcpk.py finds the game). install and uninstall refuse while EDF6.exe
 runs.
 
 Overrides the Kepler / Bohr call SGOs and their gun pairs, and the Keplers missions place (NPC and
@@ -46,9 +46,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'pylib'))
 import dsgo  # noqa: E402
 import describe  # noqa: E402
-import gamefs  # noqa: E402
 import modfiles  # noqa: E402
-import sgo_write  # noqa: E402
+import rootcpk  # noqa: E402
+import sgo  # noqa: E402
 import titan_ai  # noqa: E402
 import vehicle_setup  # noqa: E402
 from dsgo import Node  # noqa: E402
@@ -155,7 +155,7 @@ def py(v: object) -> object:
 
 
 def load(d: str, n: str) -> dsgo.Document:
-    return dsgo.parse(gamefs.read(d, n))
+    return dsgo.parse(rootcpk.default().read(d, n))
 
 
 def set_lockon(r: Node, mark: float, legacy: bool) -> None:
@@ -255,7 +255,7 @@ def build_files(legacy: bool = False) -> dict[str, bytes]:
         files[f'WEAPON/{BOHR_GUN.format(side=side)}'] = build_bohr_gun(side, legacy)
     for data in files.values():
         # the stock NPC Titan is a classic SGO, everything else DSGO; each must read back
-        (sgo_write.parse if data[:4] == b'SGO\0' else dsgo.parse)(data)
+        (sgo.read if data[:4] == b'SGO\0' else dsgo.parse)(data)
     return files
 
 
@@ -288,7 +288,7 @@ def _load_manifest(mods: str) -> dict | None:
 
 def _stock_row(rel: str, row_id: str):
     """The stock text row of `row_id` in the WEAPONTEXT table `rel`, dumped."""
-    rows = dsgo.parse(gamefs.read('WEAPON', rel.split('/')[1])).root.get('text_table').items
+    rows = dsgo.parse(rootcpk.default().read('WEAPON', rel.split('/')[1])).root.get('text_table').items
     return dsgo.dump(rows[describe.stock_ids().index(row_id)])
 
 
@@ -320,7 +320,7 @@ def _foreign(mods: str, rel: str, manifest: dict, legacy: Legacy) -> str | None:
 
 
 def _in_game(path: str) -> bool:
-    return os.path.normcase(os.path.abspath(path)).startswith(os.path.normcase(os.path.abspath(gamefs.GAME)))
+    return os.path.normcase(os.path.abspath(path)).startswith(os.path.normcase(os.path.abspath(rootcpk.DEFAULT_GAME)))
 
 
 def _refuse_while_running(mods: str) -> None:
@@ -395,7 +395,7 @@ def _restore_texts(mods: str, texts: dict, force: bool) -> dict:
             rows[at] = dsgo.load(row['original'])
         # Stock again (same values; the string pool's order may differ from the stock file's): we made the
         # file, so it goes.
-        stock = dsgo.parse(gamefs.read('WEAPON', rel.split('/')[1]))
+        stock = dsgo.parse(rootcpk.default().read('WEAPON', rel.split('/')[1]))
         if entry['created'] and rel not in left and dsgo.dump(doc.root) == dsgo.dump(stock.root):
             os.remove(path)
             print(f'removed {rel} (back to stock)')
@@ -500,10 +500,10 @@ def build(outdir: str, text: bool) -> None:
 
 
 def main(argv: list[str]) -> int:
-    default_mods = os.path.join(gamefs.GAME, 'Mods')
+    default_mods = os.path.join(rootcpk.DEFAULT_GAME, 'Mods')
     if not argv or argv[0] in ('--out', '--no-text'):   # the old form: build.py [--out DIR] [--no-text]
         ap = argparse.ArgumentParser(description='the pre-0.3.0 form of: install --mods DIR')
-        ap.add_argument('--out', default=os.path.join(HERE, '..', '..', 'dist', 'Mods'))   # its old default
+        ap.add_argument('--out', default=os.path.join(HERE, '..', '..', 'build', 'Mods'))   # beside the plugins' build output (build/Mods/Plugins)
         ap.add_argument('--no-text', action='store_true')
         args = ap.parse_args(argv)
         install(os.path.abspath(args.out), not args.no_text, force=False)

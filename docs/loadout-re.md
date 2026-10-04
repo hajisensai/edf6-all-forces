@@ -199,8 +199,8 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 （一次性脚本，未落盘、未提交到任何仓库；按下面的逻辑可复现。）
 
 
-逻辑：`gamefs.read('DEFAULTPACKAGE','CONFIG.SGO')` 用 multislot `tools/sgo.py`（大端 SGO）解析 `SoldierInit` / `SoldierWeaponCategory`；
-`WEAPONTABLE.SGO`、`WEAPONTEXT.{EN,JA}.SGO` 用 jaeger `dsgo.py` 解析；category → (class, 槽) 由 SoldierInit 反查。
+逻辑：`rootcpk.default().read('DEFAULTPACKAGE','CONFIG.SGO')`（`pylib/rootcpk.py`）用 `pylib/sgo.py`（大端 SGO 也能读）解析 `SoldierInit` / `SoldierWeaponCategory`；
+`WEAPONTABLE.SGO`、`WEAPONTEXT.{EN,JA}.SGO` 用 `pylib/dsgo.py` 解析；category → (class, 槽) 由 SoldierInit 反查。
 如果装了改 WeaponTable 的 mod，应改读 `Mods\WEAPON\WEAPONTABLE.SGO` / `WEAPONTEXT.*` 重新生成（行号会变）。
 
 ## 7. 未验证 / 待实测
@@ -216,7 +216,7 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 
 目标：12 把呼叫武器（`EDF6VC_CALL_INTERCEPTOR` … `EDF6VC_CALL_HELI_F`，以及以后同前缀新增的行）对玩家默认已拥有，
 装备界面直接可选，不必在任务里捡箱子。下面全部是静态分析（capstone，`tools/edfre.py` + 临时脚本），**未实测**。
-`MAINSCRIPT.AS` 指 Root.cpk 的 `MAINSCRIPT/MAINSCRIPT.AS`（明文 AngelScript 源码，`gamefs.read('MAINSCRIPT','MAINSCRIPT.AS')` 可取出），行号按该文件。
+`MAINSCRIPT.AS` 指 Root.cpk 的 `MAINSCRIPT/MAINSCRIPT.AS`（明文 AngelScript 源码，`pylib/rootcpk.py` 的 `rootcpk.default().read('MAINSCRIPT','MAINSCRIPT.AS')` 可取出），行号按该文件。
 
 ### 8.1 武器表访问函数 [确认]
 
