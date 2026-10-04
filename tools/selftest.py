@@ -55,6 +55,26 @@ def src(rel: str) -> str:
         return f.read()
 
 
+# ---------------------------------------------------------------- the code
+
+
+@test
+def team_changes_go_through_set_team() -> None:
+    """No plugin writes an object's team (+0x314, kTeam) itself: the game's team manager finds the object's set by
+    it, and a raw write leaves the object in its old team's set after it is freed (the crash at the next
+    mission's start, crew.h SetObjectTeam). Every change goes through SetObjectTeam (the game's SetTeam)."""
+    raw = re.compile(r'Put\s*<[^>]*>\s*\([^;]*\bkTeam\s*[,)]')
+    found = []
+    for top in ('src', 'autoturret', 'common'):
+        for folder, _, files in os.walk(os.path.join(ROOT, top)):
+            for name in files:
+                if name.endswith(('.cpp', '.h', '.inc')):
+                    rel = os.path.relpath(os.path.join(folder, name), ROOT).replace(os.sep, '/')
+                    found += [f'{rel}: {m.group(0)}' for m in raw.finditer(src(rel))]
+    assert not found, 'raw team writes (use SetObjectTeam):\n' + '\n'.join(found)
+    assert raw.search('Put<std::int32_t>(v,kTeam,own);'), 'the pattern no longer sees a raw write'
+
+
 # ---------------------------------------------------------------- the data
 
 

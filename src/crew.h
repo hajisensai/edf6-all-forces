@@ -115,6 +115,15 @@ using edf::At; using edf::Put;
 // Teams (mission AsCommon.h): player 0, enemy 1, friend 2, neutral 3, vehicle 5 = nobody's vehicle,
 // which anyone may board (CanRideSeat skips the team test for it).
 constexpr std::int32_t kTeamVehicle=5;
+// The game's SetTeam 0x54EE70(object, team, registered). The team manager (*(image+0x20B2978)) keeps a set of objects
+// per team (+0x38, 0x38 bytes a team) and finds an object's set by its team +0x314, when it adds it (0x5E0B70), takes
+// it out (0x5E1C60: SetTeam, the object's destruction) or walks a team's objects. A write to +0x314 alone leaves the
+// object in its old team's set while everything after looks in the new one's: freed, it stays in the old set, and the
+// next walk of it reads freed memory (the crash at the next mission's start after a crewed 603_Flak, 2026-10-04).
+// Every team change goes through SetTeam, the object's registration (+0x380 bit 6) kept as it is.
+constexpr unsigned kSetTeam=0x54EE70;
+constexpr std::size_t kObjectFlags=0x380;
+void SetObjectTeam(unsigned char* object,std::int32_t team) noexcept;
 // Human: the vehicle it is in (weak_ptr object +0x1548, control block +0x1550)
 constexpr std::size_t kHumanVehicleCtrl=0x1550;
 // VehicleBase virtual slots (input: edf::kSlotInput)
