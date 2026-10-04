@@ -73,6 +73,13 @@ const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 // tilt-rotor's yaw in the hover).
 constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f;
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
+// The Primer fighter's wings (Flap): both beat kFlapAmplitude rad about their bones' local X (the model's forward)
+// kFlapHz times a second, faster (up to kFlapHzMost) the more it climbs or speeds up; each downstroke lifts it
+// (kFlapLift m/s^2 at the stroke's middle, none on the upstroke): it flies in beats. kFlapUp: the sign of theta that
+// raises each wing's tip (pylib/primer_fighter_model.py).
+const wchar_t* const kWingNames[2]={L"wing_l",L"wing_r"};
+constexpr float kFlapAmplitude=0.6f,kFlapHz=2.5f,kFlapHzMost=4.5f,kFlapLift=14.0f;
+constexpr float kFlapUp[2]={1.0f,-1.0f};
 // The ground under a jet is body506's GroundClearance: under the ground a ray down sees nothing, so a jet that
 // went through it was once taken for one over a void, Guard let it be, and it flew on under the map
 // (2026-10-03: a fighter 5 s down to -109, drones to -310); its ray from above finds the surface then.
@@ -262,6 +269,19 @@ void PoseSurfaces(Jet& j,const float* want,float rate,float dt,const char* what)
         std::memcpy(s.rec[i]+kBoneLocal,o,64);
     }
     s.fresh=false;s.written=s.count>0;
+}
+
+// The Primer fighter's wings beating (see kFlapAmplitude); its velocity lifted by each downstroke.
+void Flap(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
+    if(!FindSurfaces(j,v,kWingNames,2,"wings"))return;
+    const float s=Len(j.m.vel),work=Clamp((j.m.vel[1]/10.0f)+(k.attack-s)/k.attack,0.0f,1.0f);
+    j.m.flap+=(kFlapHz+(kFlapHzMost-kFlapHz)*work)*2.0f*kPi*dt;
+    if(j.m.flap>2.0f*kPi)j.m.flap-=2.0f*kPi;
+    const float stroke=std::sin(j.m.flap);   // > 0 going up, < 0 going down
+    const float want[2]={kFlapUp[0]*kFlapAmplitude*stroke,kFlapUp[1]*kFlapAmplitude*stroke};
+    PoseSurfaces(j,want,100.0f,dt,"wings");
+    const float down=-std::cos(j.m.flap);   // the stroke's speed downward: the lift comes then
+    if(down>0.0f)j.m.vel[1]+=kFlapLift*down*dt;
 }
 
 // The elevons after the commanded turn (see kElevonMax).
@@ -532,6 +552,7 @@ void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* no
     PitchBy(j.m.aoa,dir,up);
     Attitude(j,k,v,dir,up);
     if(k.pose==Pose::elevons)Elevons(j,k,v,dt);
+    else if(k.pose==Pose::flap)Flap(j,k,v,dt);
     // The exhaust (booster.cpp JetFlames): burning with the speed between its slowest and its attack speed, the
     // afterburner near the top.
     const float s=Len(j.m.vel),share=k.attack>k.minSpeed ? (s-k.minSpeed)/(k.attack-k.minSpeed) : 1.0f;

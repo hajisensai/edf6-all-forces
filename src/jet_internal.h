@@ -53,8 +53,8 @@ constexpr unsigned kPlacedFlight=1;    // the jets a mission places (see jet_hoo
 // Flight, per role (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
 // it first flew). The stock bombers fly 3 m a frame (180 m/s): the strike jet attacks at that, the fighter
 // is faster and pulls harder. Every distance of an attack scales with the turn radius v^2/(n g).
-enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship };
-constexpr int kRoleCount=9;
+enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship, primer };
+constexpr int kRoleCount=10;
 // What a role goes for first: ground or flying targets (the other only with none of its own), or either.
 enum class Prefer { ground, air, any };
 // How it flies: a wing (JetSteer: lift along its up, it banks to turn) or a rotor craft (Hover: it goes
@@ -64,8 +64,8 @@ enum class FlightModel { wing, rotor };
 // it flies (the gunship: GunshipFire), drones it launches (the carrier: LaunchDrones), or a charge it carries
 // into the enemy (the blast and doll drones: Detonate).
 enum class Weapon { guns, shells, drones, charge };
-// The bones it moves: elevons (Elevons), the carrier's nacelles (Thrusters), or none.
-enum class Pose { none, elevons, thrusters };
+// The bones it moves: elevons (Elevons), the carrier's nacelles (Thrusters), the Primer fighter's wings (Flap), or none.
+enum class Pose { none, elevons, thrusters, flap };
 // How a rotor craft shows its thrust: `pitchShare` of the fore-and-aft part leans its body (1: all, as a
 // drone's rotors; the carrier's nacelles take the rest, kCarrierPitchShare), and `drag` m/s^2 per m/s of its
 // speed is the thrust that would hold that speed (kThrustDrag; 0: none shown). `respond`: s its velocity takes
@@ -89,8 +89,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier, enemyFighter };
-constexpr int kBodyCount=16;
+                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter };
+constexpr int kBodyCount=17;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -126,6 +126,10 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     // The enemy fighter (testrange/gen.py: the interceptor's dark bomber501_2 model, a dogfighter's role).
     {Body::enemyFighter,L"app:/object/edf6vc_jet_enemy_fighter.sgo",L"EDF6VC_JET_ENEMY_FIGHTER.SGO",7020.0f,Role::fighter,Role::drone,
      "enemyFighter",true},
+    // The Primers' fighter (pylib/primer_fighter_model.py: a pod of their new ship with two of its hatch petals for wings),
+    // the enemy's, flapping (Role::primer, Pose::flap).
+    {Body::primerFighter,L"app:/object/edf6vc_jet_primer_fighter.sgo",L"EDF6VC_JET_PRIMER_FIGHTER.SGO",7030.0f,Role::primer,
+     Role::drone,"primerFighter",true},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -202,6 +206,10 @@ inline constexpr Kind kKinds[kRoleCount]={
     // slow, never diving; it shells ground targets in reach from where it flies (GunshipFire).
     {Role::gunship,"gunship",Prefer::ground,FlightModel::wing,Weapon::shells,Pose::elevons,nullptr, 120.0f,120.0f,70.0f, 3.0f,3.0f, 2.0f,0.3f,
      350.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 600.0f,80.0f, 0.0f,0.0f, 1500.0f, 0.0f,3.0f, 0.0f,false,Body::gunship},
+    // The Primer fighter: a flapping dogfighter, slower than ours and nimbler (its wings beat it round: Flap), guns only.
+    {Role::primer,"primer",Prefer::air,FlightModel::wing,Weapon::guns,Pose::flap,nullptr, 170.0f,195.0f,80.0f, 18.0f,22.0f, 7.0f,3.0f,
+     450.0f, 1400.0f,90.0f,2000.0f, 900.0f,100.0f, 1200.0f,120.0f, 120.0f,35.0f, 1800.0f, 0.0f,1.0f, 0.0f,false,
+     Body::primerFighter},
 };
 constexpr bool KindsInOrder() noexcept {
     for(int i=0;i<kRoleCount;++i) {
@@ -256,6 +264,7 @@ constexpr int kCarrierSorties=18;
 struct Motion {
     float vel[3],omega[3];   // what the physics stage writes
     bool ready;              // vel/omega hold this frame's command
+    float flap;              // the Primer fighter's wing-beat phase (rad, Flap)
     float aoa;               // a wing's angle of attack (rad, nose above the path; see kAoaPerG)
     float top;               // m/s it never goes past: its kind's, or a faster bomber's speed
     float prevPos[3];        // where the body was at prevAt (Sense)
