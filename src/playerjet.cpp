@@ -802,7 +802,69 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
         At<float>(v,kHp),At<float>(v,kHpMax),kPhaseNames[static_cast<int>(j.phase)],pos[0],pos[1],pos[2],clear,speed);
 }
 
+// Getting out in the air (the user, 2026-10-05): the player is thrown up as by an ejection seat and comes down under a
+// parachute (docs/player-jet-re.md §9). The soldier's own walk controller (human +0x680) carries its velocity in m/s
+// (+0x6B0/+0x6B4/+0x6B8; in the air only y changes, by gravity each frame); the stock exit zeroes it as its ride
+// state ends (0x57B11A), which also clears the riding bit (+0x380 0x80). Once that bit is clear the launch is the
+// game's own jump request (+0x1294 speed, +0x1290 flag: consumed at 0x575A7A, sent to the other players), with
+// kEjectCarry of the jet's horizontal velocity. Past the top the fall is held at kChuteSink m/s and the horizontal
+// speed bleeds off (kChuteBleed a second, the walk's carried push +0x1210 and the damage shove +0x11F0 too) until
+// the soldier stands (support +0x711 = 2), dies, is thrown as a ragdoll, or flies by itself (a Wing Diver's or
+// Fencer's boost: its vertical speed rising).
+constexpr std::size_t kHumanVel=0x6B0,kHumanSupport=0x711,kHumanFlags=0x380,kHumanAttach=0x39C;
+constexpr std::size_t kJumpFlag=0x1290,kJumpSpeed=0x1294,kWalkPush=0x1210,kDamageShove=0x11F0;
+constexpr std::uint32_t kRiding=0x80;
+constexpr float kEjectUp=25.0f,kEjectCarry=0.3f,kEjectFrom=15.0f;   // m/s up; share of the jet's; m over the ground
+constexpr float kChuteSink=6.0f,kChuteBleed=0.6f,kChuteBoost=3.0f;   // m/s down at most; a second; m/s up in a frame
+constexpr ULONGLONG kEjectWaitMs=2000,kChuteMostMs=180000;
+enum class Eject { none, pending, chute };
+struct Bailout { Eject state; ULONGLONG at; float carry[2],vy; } bail{};
+
+void EjectStart(const PJet& j) noexcept {
+    bail=Bailout{Eject::pending,GameMs(),{j.vel[0]*kEjectCarry,j.vel[2]*kEjectCarry},0.0f};
+}
+
+void EjectTick() noexcept {
+    if(bail.state==Eject::none)return;
+    unsigned char* const h=PlayerHuman();
+    const ULONGLONG ms=GameMs();
+    if(!h || h[kDead] || At<std::int32_t>(h,kHumanAttach)!=0){bail.state=Eject::none;return;}
+    float* const vel=reinterpret_cast<float*>(h+kHumanVel);
+    if(bail.state==Eject::pending) {
+        if(At<std::uint32_t>(h,kHumanFlags)&kRiding) {   // the stock exit not through yet
+            if(ms-bail.at>kEjectWaitMs)bail.state=Eject::none;
+            return;
+        }
+        Put<float>(h,kJumpSpeed,kEjectUp);h[kJumpFlag]=1;
+        vel[0]=bail.carry[0];vel[2]=bail.carry[1];
+        bail.state=Eject::chute;bail.at=ms;bail.vy=kEjectUp;
+        Log("PJET ejected: %.0f m/s up, %.0f m/s carried; the parachute opens past the top",kEjectUp,
+            std::sqrt(bail.carry[0]*bail.carry[0]+bail.carry[1]*bail.carry[1]));
+        return;
+    }
+    const unsigned char support=h[kHumanSupport];
+    if(ms-bail.at>kChuteMostMs || (support==2 && ms-bail.at>300) || vel[1]>bail.vy+kChuteBoost) {
+        Log("PJET parachute: %s",support==2 ? "landed" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
+        bail.state=Eject::none;
+        return;
+    }
+    const float keep=1.0f-kChuteBleed/60.0f;
+    if(vel[1]<-kChuteSink)vel[1]=-kChuteSink;
+    if(vel[1]<0.0f) {
+        vel[0]*=keep;vel[2]*=keep;
+        float* const push=reinterpret_cast<float*>(h+kWalkPush);
+        float* const shove=reinterpret_cast<float*>(h+kDamageShove);
+        push[0]*=keep;push[2]*=keep;shove[0]*=keep;shove[2]*=keep;
+    }
+    bail.vy=vel[1];
+}
+
 void Leave(PJet& j,unsigned char* v) noexcept {
+    if(j.phase==Phase::air) {
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float clear=GroundClearance(pos);
+        if(clear==kNoGround || clear>kEjectFrom)EjectStart(j);
+    }
     j.driven=false;j.active=false;j.turnIn=j.pitchIn=j.yawIn=j.rollIn=0.0f;j.hasUp=false;j.hasAim=false;
     if(j.insetSaved){Put<float>(v,kAreaInset,j.savedInset);j.insetSaved=false;}
     Log("PJET v=%p left (%s, %.0f m/s)",v,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel));
@@ -893,6 +955,8 @@ bool PlayerJetMessage(unsigned char* v,std::uint32_t msg,void* data,MessageResto
     j->wetFrame=GameFrame();
     return true;
 }
+
+void PlayerEjectTick() noexcept { EjectTick(); }
 
 bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;

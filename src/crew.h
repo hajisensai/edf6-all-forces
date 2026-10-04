@@ -332,6 +332,7 @@ struct PlayerJetReadout {
     float lockAt[3],lockProgress;
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
+void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
