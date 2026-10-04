@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 import dsgo
-import gamefs
+import rootcpk
 import vehicle_setup
 from dsgo import Node
 
@@ -95,12 +95,12 @@ def _stat_line(line: str, count: float, damage: float, rng: float, blast: float,
 
 def _built(files: dict[str, bytes], name: str) -> bytes:
     """The rebuilt file, or the stock one for a vehicle whose call is left alone."""
-    return files.get(f'WEAPON/{name}') or gamefs.read('WEAPON', name)
+    return files.get(f'WEAPON/{name}') or rootcpk.default().read('WEAPON', name)
 
 
 def _describe(row: list, v: Vehicle, lang: str, files: dict[str, bytes], blast_tpl: str) -> list:
     name, desc, stats = row
-    old_dmg, old_rng, _, old_count = _gun(gamefs.read('WEAPON', v.gun))
+    old_dmg, old_rng, _, old_count = _gun(rootcpk.default().read('WEAPON', v.gun))
     dmg, rng, blast, count = _gun(_built(files, v.gun))
     lines = list(STATS.finditer(desc))
     shown = [float(x) for x in NUMBER.findall(lines[0].group(0))[:3]]
@@ -114,7 +114,7 @@ def _describe(row: list, v: Vehicle, lang: str, files: dict[str, bytes], blast_t
         out += desc[m.end():lines[i + 1].start()] if i + 1 < len(lines) else ''
     end = lines[-1].end()
     out += '\n\n' + NOTE_FONT.format(NOTES[v.note][lang]) + desc[end:]
-    old_mul = _durability_mul(gamefs.read('WEAPON', v.call), v.call)
+    old_mul = _durability_mul(rootcpk.default().read('WEAPON', v.call), v.call)
     durability = round(float(stats[1][1]) / old_mul * _durability_mul(_built(files, v.call), v.call))
     return [name, out, [stats[0], [stats[1][0], str(durability)]]]
 
@@ -128,12 +128,12 @@ def _installed(mods: str, name: str) -> bytes:
     if os.path.exists(path):
         with open(path, 'rb') as f:
             return f.read()
-    return gamefs.read('WEAPON', name)
+    return rootcpk.default().read('WEAPON', name)
 
 
 @lru_cache(maxsize=None)
 def _stock_ids() -> tuple[str, ...]:
-    return tuple(_row_ids(gamefs.read('WEAPON', 'WEAPONTABLE.SGO')))
+    return tuple(_row_ids(rootcpk.default().read('WEAPON', 'WEAPONTABLE.SGO')))
 
 
 def stock_ids() -> list[str]:
@@ -172,7 +172,7 @@ def build_texts(vehicles: list[Vehicle], files: dict[str, bytes], mods: str) -> 
     for lang in LANGS:
         name = f'WEAPONTEXT.{lang}.SGO'
         rel = text_rel(lang)
-        stock_rows = dsgo.parse(gamefs.read('WEAPON', name)).root.get('text_table').items
+        stock_rows = dsgo.parse(rootcpk.default().read('WEAPON', name)).root.get('text_table').items
         doc = dsgo.parse(_installed(mods, name))
         rows = text_rows(doc, ids, rel)
         blast_tpl = _blast_template(dsgo.to_py(stock_rows[stock.index(BLAST_ROW[:-4])])[1])

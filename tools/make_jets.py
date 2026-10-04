@@ -138,26 +138,26 @@ def remove(root: str) -> tuple[list[str], list[str]]:
 
 def with_mark(data: bytes, mark: float) -> bytes:
     """A jet SGO (vc.jet_sgo) with another mark in mission_setup (the speed gain k the plugin reads)."""
-    import sgowrite
-    version, m = sgowrite.read(data)
+    import sgo
+    version, m = sgo.read(data)
     m['mission_setup'][1][0] = mark
-    return sgowrite.write(version, m)
+    return sgo.write(version, m)
 
 
 def _number(v) -> float | None:
-    """An SGO number node's value (sgowrite: int, or Float keeping its bytes), else None."""
-    import sgowrite
-    if isinstance(v, sgowrite.Float):
+    """An SGO number node's value (pylib/sgo.py: int, or Float keeping its bytes), else None."""
+    import sgo
+    if isinstance(v, sgo.Float):
         return v.value
     return float(v) if isinstance(v, int) else None
 
 
 def impact_charges(game: vc.Game) -> dict[str, bytes]:
     """The impact charges (IMPACT_FILES) from the stock gunship round."""
-    import sgowrite
+    import sgo
     out = {}
     for name, radius in IMPACT_FILES.items():
-        version, m = sgowrite.read(game.read('OBJECT', IMPACT_STOCK))
+        version, m = sgo.read(game.read('OBJECT', IMPACT_STOCK))
         p = m.get('indirect_fire_param')
         if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
                 or p[4] != 'RocketBullet01' or (_number(p[14]) or 0.0) <= 0.0
@@ -166,7 +166,7 @@ def impact_charges(game: vc.Game) -> dict[str, bytes]:
         for i, value in ((2, 1), (3, 0), (10, IMPACT_LIFE), (14, radius), (15, 0)):
             p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
         m['indirect_fire_damage'] = 0.0   # the plugin sets the damage (IFC +0xDC)
-        out[name] = sgowrite.write(version, m)
+        out[name] = sgo.write(version, m)
     return out
 
 

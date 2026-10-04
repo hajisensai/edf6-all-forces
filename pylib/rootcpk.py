@@ -1,7 +1,13 @@
-"""Read-only view of the game's Root.cpk (cpk.py + crilayla.py), and the game directory the tools default to."""
+"""Read-only access to files inside the game's Root.cpk (cpk.py + crilayla.py), and the game directory the
+tools default to.
+
+DEFAULT_GAME is what gamedir.find() finds ($EDF6_DIR, next to the running program, the Steam libraries), else
+the developer's path. Nothing here writes to the game directory.
+"""
 from __future__ import annotations
 
 import os
+from functools import lru_cache
 
 import cpk
 import crilayla
@@ -17,11 +23,26 @@ class Game:
         self.root = root
         self.cpk = cpk.Cpk(os.path.join(root, 'Root.cpk'))
 
-    def read(self, folder: str, name: str) -> bytes:
-        for (d, n), e in self.cpk.index.items():
-            if d.upper() == folder.upper() and n.upper() == name.upper():
-                with open(self.cpk.path, 'rb') as h:
-                    h.seek(self.cpk.base + int(e['FileOffset']))
-                    data = h.read(int(e['FileSize']))
-                return crilayla.decompress(data) if int(e['ExtractSize']) != int(e['FileSize']) else data
+    def _key(self, folder: str, name: str) -> tuple[str, str]:
+        for k in self.cpk.index:
+            if k[0].upper() == folder.upper() and k[1].upper() == name.upper():
+                return k
         raise KeyError(f'{folder}/{name}')
+
+    def names(self, folder: str) -> list[str]:
+        """The file names in `folder` (case-insensitive), sorted."""
+        return sorted(n for d, n in self.cpk.index if d.upper() == folder.upper())
+
+    def read(self, folder: str, name: str) -> bytes:
+        """The file folder/name (case-insensitive), decompressed."""
+        e = self.cpk.index[self._key(folder, name)]
+        with open(self.cpk.path, 'rb') as h:
+            h.seek(self.cpk.base + int(e['FileOffset']))
+            data = h.read(int(e['FileSize']))
+        return crilayla.decompress(data) if int(e['ExtractSize']) != int(e['FileSize']) else data
+
+
+@lru_cache(maxsize=None)
+def default() -> Game:
+    """DEFAULT_GAME's Root.cpk, opened once per process."""
+    return Game(DEFAULT_GAME)
