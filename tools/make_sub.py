@@ -6,7 +6,7 @@
   Mods/OBJECT/EDF6VC_SUB_CARRIER.SGO   a Vehicle506_Helicopter body with that model (pylib/vcobjects.py jet_sgo:
                                        'edf6tr_sub_carrier_mission', mark 7101, HP 30000 (the plugin raises it
                                        to SubHullHp), the hull's box)
-  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO, EDF6VC_JET_MISSILE.SGO  the jets' guns and missile (vcobjects.jet_guns), which it fires; the same
+  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO, EDF6VC_SUB_MISSILE.SGO  the jets' guns and its missile (vcobjects.jet_guns), which it fires; the same
                                        bytes tools/make_jets.py writes
 
 All of it is built in memory first, then written atomically and recorded in the ledger as this tool's
@@ -60,7 +60,7 @@ def check_sgo(data: bytes) -> None:
     assert len(jet.weapon_bones) == len(jet.weapons)
     assert [w[0] for w in v['mission_setup'][3]][:3] == list(jet.weapons)
     assert tuple(jet.weapon_bones) == tuple(b for b, _ in PLUGIN_WEAPONS), (jet.weapon_bones, PLUGIN_WEAPONS)
-    homing = tuple(w == vc._MISSILE for w in jet.weapons)
+    homing = tuple(w in vc.HOMING_WEAPONS for w in jet.weapons)
     assert homing == tuple(h for _, h in PLUGIN_WEAPONS), ('holder order', jet.weapons)
 
 

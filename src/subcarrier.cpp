@@ -47,7 +47,7 @@ constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
 constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr std::size_t kWeaponLockon=0x6B0,kWeaponAmmo=0xBE8;
-constexpr std::size_t kWeaponLockAngle=0x6C0,kWeaponLockRange=0x6D0,kWeaponLockSpeed=0x790,kWeaponLocked=0xC68;
+constexpr std::size_t kWeaponLockRange=0x6D0,kWeaponLocked=0xC68,kWeaponSpeed=0x894,kWeaponAlive=0x898;
 constexpr std::int32_t kHoming=1;
 // A weapon's muzzles (heli.cpp MuzzleFrame, H for the 410's guns): each {bone record, local 4x4 at +0x10, mode
 // +0xE0}; the round leaves at row 3 of local x bone world (+0xB0), along row 2 of the bone's (mode != 0) or of the
@@ -86,7 +86,7 @@ const wchar_t* const kSubSgo=L"app:/object/edf6vc_sub_carrier.sgo";
 // What SubLaunch needs in Mods (tools/make_sub.py): the SGO, its model, the turret guns, the missile.
 const wchar_t* const kSubFiles[]={L"\\Mods\\OBJECT\\EDF6VC_SUB_CARRIER.SGO",L"\\Mods\\OBJECT\\EDF6VC_SUB.MRAB",
                                   L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_L.SGO",L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_R.SGO",
-                                  L"\\Mods\\WEAPON\\EDF6VC_JET_MISSILE.SGO"};
+                                  L"\\Mods\\WEAPON\\EDF6VC_SUB_MISSILE.SGO"};
 constexpr int kMaxSubs=3;                     // M123: three carriers attack at once (BE151_157)
 
 // The hull (the SGO's box, the model at its own size): its bottom kHullBottom under the body origin,
@@ -104,9 +104,11 @@ constexpr float kCruise=25.0f,kAccel=3.0f,kClimb=8.0f,kSink=4.0f,kClimbAccel=6.0
 constexpr float kTurnRate=0.05f,kTurnGain=0.8f,kRollGain=1.5f,kMaxPitch=0.05f;   // 3 deg/s, 3 deg
 // Combat.
 constexpr float kRange=2000.0f;              // it engages enemies this far from it
-constexpr float kGunRange=580.0f,kGunCone=0.07f;   // the guns' reach (gen.JET_GUN_REACH 600), 4 deg off the barrel
-constexpr float kMissileRange=2000.0f,kMissileMin=60.0f;
-constexpr float kLockMargin=1.15f,kLockAngle=1.2f,kLockSpeed=2.0f;
+// The guns fire within their own reach (Sub::gunReach: their SGO's AmmoSpeed x AmmoAlive, less kGunReachIn), the
+// missiles within their lock range (Sub::missileReach: the carrier's missile SGO, vcobjects.SUB_MISSILE_FILE, sets
+// it and its wide cone: the missile bay need not face the target).
+constexpr float kGunCone=0.07f,kGunReachIn=0.97f;   // 4 deg off the barrel
+constexpr float kMissileMin=60.0f;
 constexpr ULONGLONG kMissileMs=2500,kReloadMs=12000,kGaugeMs=1000;
 constexpr float kPi=3.14159265f;
 // The turrets (see Turrets): the arc a barrel turns in (elevation over the deck plane, rad), how fast it turns,
@@ -145,6 +147,7 @@ struct Sub {
     unsigned char* vehicle;
     ULONGLONG bornAt,missileAt,logAt,tickMs;
     ULONGLONG frame,fireFrame;   // GameFrame of the last tick, fire step
+    float gunReach,missileReach; // m: its guns' reach and its missiles' lock range, as their SGOs set them (Arm)
     ULONGLONG inputAt;           // GameMs of the last input stage
     float dt;                     // the game's step of the last tick (s)
     bool noInputLogged;
@@ -494,11 +497,12 @@ void Resolve(Sub& s,unsigned char* v,const float* m) noexcept {
     if(Cfg().debug)Log("SUB v=%p weapons: turretA %p, turretB %p, missiles %p",v,s.weapon[turretA],s.weapon[turretB],s.weapon[missiles]);
 }
 
-// The parts' seat weapons: the homing one locks out to kMissileRange (wider and faster than stock), an empty one is
-// refilled to what it held at first kReloadMs after it ran dry, a worn-out part's is kept dry. Out: each part's
-// ammo, the missiles' locks.
+// The parts' seat weapons: an empty one is refilled to what it held at first kReloadMs after it ran dry, a worn-out
+// part's is kept dry; their reach as their SGOs set it (s.gunReach, s.missileReach). Out: each part's ammo, the
+// missiles' locks.
 void Arm(Sub& s,ULONGLONG ms,std::int32_t* ammoOf,std::int32_t* locked) noexcept {
     *locked=0;
+    s.gunReach=s.missileReach=0.0f;
     for(int k=0;k<kSystemCount;++k) {
         ammoOf[k]=0;
         unsigned char* w=s.weapon[k];
@@ -516,17 +520,15 @@ void Arm(Sub& s,ULONGLONG ms,std::int32_t* ammoOf,std::int32_t* locked) noexcept
             if(Cfg().debug)Log("SUB v=%p %s reloaded aboard: %d",s.vehicle,kSystems[k].name,ammo);
         }
         ammoOf[k]=ammo>0 ? ammo : 0;
-        if(!kSystems[k].homing)continue;
+        if(!kSystems[k].homing) {
+            const float reach=At<float>(w,kWeaponSpeed)*static_cast<float>(At<std::int32_t>(w,kWeaponAlive))*kGunReachIn;
+            if(std::isfinite(reach) && (s.gunReach<=0.0f || reach<s.gunReach))s.gunReach=reach;
+            continue;
+        }
         const auto l=At<std::uint64_t>(w,kWeaponLocked);
         *locked+=l<64 ? static_cast<std::int32_t>(l) : 0;
-        auto& range=*reinterpret_cast<float*>(w+kWeaponLockRange);
-        if(range<kMissileRange*kLockMargin)range=kMissileRange*kLockMargin;
-        for(int a=0;a<2;++a) {
-            auto& angle=*reinterpret_cast<float*>(w+kWeaponLockAngle+4*a);
-            if(angle<kLockAngle)angle=kLockAngle;
-        }
-        auto& speed=*reinterpret_cast<float*>(w+kWeaponLockSpeed);
-        if(speed<kLockSpeed)speed=kLockSpeed;
+        const float range=At<float>(w,kWeaponLockRange);
+        if(std::isfinite(range) && range>s.missileReach)s.missileReach=range;
     }
 }
 
@@ -590,7 +592,7 @@ void Pose(Turret& t,const float* aim) noexcept {
 // The turrets: each turns (at most kTurretSlew) toward the target while it is within its arc (kTurretDip under to
 // kTurretRise over the deck plane, the line not through the hull), else back to the bow; true (into `on`) for each
 // whose barrel, as the game builds its muzzles, points at the target within kGunCone, in range, clear of the hull;
-// each barrel's line (kGunRange along it) into `path` (from, to) where it has one (`hasPath`).
+// each barrel's line (its reach along it) into `path` (from, to) where it has one (`hasPath`).
 // No pose is written for a turret whose bone is not in the model.
 void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasPath,float* path) noexcept {
     const unsigned char* inst=v+kModelInst506;
@@ -610,7 +612,7 @@ void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasP
         float pos[3],dir[3];std::int32_t mode=0;
         const bool barrel=w && Barrel(w,pos,dir,&mode);
         hasPath[t]=barrel;
-        if(barrel)for(int i=0;i<3;++i){path[t*6+i]=pos[i];path[t*6+3+i]=pos[i]+dir[i]*kGunRange;}
+        if(barrel)for(int i=0;i<3;++i){path[t*6+i]=pos[i];path[t*6+3+i]=pos[i]+dir[i]*s.gunReach;}
         float want[3]={0.0f,0.0f,1.0f};   // the bow
         bool engage=false;
         if(barrel && s.hasTarget && !s.down[t]) {
@@ -618,7 +620,7 @@ void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasP
             float local[3]={Dot(to,m),Dot(to,m+4),Dot(to,m+8)};
             if(Normalize(local)) {
                 const float elevation=std::asin(Clamp(local[1],-1.0f,1.0f));
-                engage=elevation>=-kTurretDip && elevation<=kTurretRise && Len(to)<kGunRange && !HullBlocks(m,pos,s.target);
+                engage=elevation>=-kTurretDip && elevation<=kTurretRise && Len(to)<s.gunReach && !HullBlocks(m,pos,s.target);
                 if(engage)std::memcpy(want,local,12);
             }
         }
@@ -743,7 +745,7 @@ void FireStep(Sub& s,unsigned char* v,const float* m,ULONGLONG ms) noexcept {
         const float muzzle[3]={from[0]+m[4]*kGunHeight,from[1]+m[5]*kGunHeight,from[2]+m[6]*kGunHeight};
         const float d[3]={s.target[0]-muzzle[0],s.target[1]-muzzle[1],s.target[2]-muzzle[2]};
         const float dist=Len(d);
-        missile=ammo[missiles]>0 && locked>0 && dist>kMissileMin && dist<kMissileRange && ms-s.missileAt>kMissileMs &&
+        missile=ammo[missiles]>0 && locked>0 && dist>kMissileMin && dist<s.missileReach && ms-s.missileAt>kMissileMs &&
                 !FriendInLine(muzzle,s.target,v);
         if(missile) {
             s.missileAt=ms;

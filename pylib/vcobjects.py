@@ -45,19 +45,43 @@ class Jet:
 # 160 m, inside every role's gun pass (src/jet.cpp kKinds gunOpen 350-500 m, Fire takes the nearer of the
 # two): a jet diving at 160 m/s had 0.3 s between their reach and its pull-out, and 7 of a drone's 130 gun
 # chances fired on 2026-10-03 (the rest held, the nose not yet on the lead); the strike, interceptor and
-# multirole jets fired none. Faster and longer lived they reach JET_GUN_REACH; damage and rate stay stock.
+# multirole jets fired none. Faster and longer lived they reach JET_GUN_REACH (a jet cannon's: ~960 m/s, the
+# reach the jets' fire logic and the submarine carrier read off the weapon itself); damage and rate stay stock.
 JET_GUN_FILES = {'EDF6VC_JET_GUN_L.SGO': 'V_506HELI_GATLING01_L.SGO', 'EDF6VC_JET_GUN_R.SGO': 'V_506HELI_GATLING01_R.SGO'}
-JET_GUN_SPEED, JET_GUN_ALIVE = 10.0, 60.0   # m a frame, frames: 600 m/s, 600 m
+JET_GUN_SPEED, JET_GUN_ALIVE = 16.0, 60.0   # m a frame, frames: 960 m/s, 960 m
 JET_GUN_REACH = JET_GUN_SPEED * JET_GUN_ALIVE
 _GUNS = tuple('app:/weapon/' + f.lower() for f in JET_GUN_FILES)
-# The jets' missile (jet_guns): the 506's homing missile with a jet's sounds (docs/sound-re.md §5): the air raid's
-# missile launch for its shot, and a rocket motor's loop for its flight (the stock one is 1.6 s and stops mid-flight;
-# the bullet fades its loop out when it ends). The sounds are in the always loaded TIKYUUX_SE.ACB.
+# The jets' missile (jet_guns): the 506's homing missile (MissileBullet01) made an air-to-air missile, guided by the
+# plugin (src/missile.cpp, docs/missile-re.md): the stock steering is off (CP[8], its homing delay, never comes) and
+# CP[9] marks the round as the plugin's. It inherits the launcher's velocity vector (AmmoOwnerMove 1), is ejected at
+# AmmoSpeed, accelerates CP[4] m a frame per frame (29 g) to CP[6] (660 m/s), no drop; it locks as its own
+# LockonRange / LockonAngle / LockonTime say (the jets fire within that range: src/jet_combat.cpp MissileReach), one
+# round a shot. Sounds (docs/sound-re.md §5): the air raid's missile launch for its shot, and a rocket motor's loop
+# for its flight (the stock one is 1.6 s and stops mid-flight; the bullet fades its loop out when it ends), from the
+# always loaded TIKYUUX_SE.ACB.
 JET_MISSILE_STOCK = 'V_506HELI_MISSILE01.SGO'
 JET_MISSILE_FILE = 'EDF6VC_JET_MISSILE.SGO'
 JET_MISSILE_FIRE_SE = ('weapon_KUBAKU_missile_shot', 1.0, 80.0)            # cue, volume, metres heard at full
 JET_MISSILE_FLIGHT_SE = ('weapon_KUBAKUBallisticMissle01_go', 0.6, 80.0)
+MISSILE_NO_STOCK_HOMING, MISSILE_MARK = 1000000.0, 4242.0   # src/missile.cpp kNoStockHoming, kPluginMark
+JET_MISSILE_PARAMS = {'AmmoSpeed': 0.3, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': 600.0,
+                      'AmmoDamage': 300.0, 'AmmoExplosion': 15.0, 'AmmoCount': 8.0, 'FireBurstCount': 1.0,
+                      'FireInterval': 45.0, 'LockonRange': 2000.0, 'LockonTime': 20.0}
+JET_MISSILE_CONE = (0.35, 0.35)   # LockonAngle, rad
+# Ammo_CustomParameter: [3] the plugin's guidance, per missile (stored by the stock round, never read by it):
+# [motor burn (frames), the most g across its path, the navigation constant]; [4] its acceleration (m a frame per
+# frame), [6] its top speed (m a frame), [8] / [9] see above. An air-to-air missile: a long burn (6 s).
+JET_MISSILE_MOTION = {3: [360.0, 35.0, 4.0], 4: 0.08, 6: 11.0, 8: MISSILE_NO_STOCK_HOMING, 9: MISSILE_MARK}
+# The submarine carrier's (src/subcarrier.cpp): a ship-launched missile from its bay, which need not face the target
+# (a wide cone): a shorter, gentler burn to a higher top speed, less agile, farther, a salvo of four.
+SUB_MISSILE_FILE = 'EDF6VC_SUB_MISSILE.SGO'
+SUB_MISSILE_PARAMS = {'AmmoCount': 20.0, 'FireBurstCount': 4.0, 'FireBurstInterval': 10.0, 'FireInterval': 300.0,
+                      'LockonRange': 2400.0}
+SUB_MISSILE_CONE = (1.2, 1.2)
+SUB_MISSILE_MOTION = {3: [240.0, 25.0, 3.0], 4: 0.06, 6: 12.0}
 _MISSILE = 'app:/weapon/' + JET_MISSILE_FILE.lower()
+_SUB_MISSILE = 'app:/weapon/' + SUB_MISSILE_FILE.lower()
+HOMING_WEAPONS = (_MISSILE, _SUB_MISSILE)
 _ARMS = _GUNS + (_MISSILE,)
 # The blast drones' charge (src/jet.cpp Detonate: weapon 2, fired by 0x2021 once next to the enemy): the
 # 409's unguided bomb (GrenadeBullet01) made a point charge (docs/decoy-blast-re.md 1.4): CP#0 = 1 bursts
@@ -70,10 +94,10 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, JET_MISSILE_FILE)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, JET_MISSILE_FILE, SUB_MISSILE_FILE)
 # A derived weapon's stock file: in a vehicle's weapon list it takes the stock one's per-weapon parameters.
 _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
-             for d, st in (*JET_GUN_FILES.items(), (JET_MISSILE_FILE, JET_MISSILE_STOCK))}
+             for d, st in (*JET_GUN_FILES.items(), (JET_MISSILE_FILE, JET_MISSILE_STOCK), (SUB_MISSILE_FILE, JET_MISSILE_STOCK))}
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
@@ -117,7 +141,7 @@ JETS: dict[str, Jet] = {
     # keel is 340 m down and EDF's seas are some 30 m deep (M082, 2026-10-04): a hull box stuck in the seabed,
     # was pushed 215 m off its point and fought the ground every frame. Guns on its forward turrets' (left)
     # barrels, the missile on its missile bay.
-    'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _ARMS, ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
+    'edf6tr_sub_carrier_mission': Jet(7101.0, 30000.0, _GUNS + (_SUB_MISSILE,), ('app:/object/edf6vc_sub.mrab', 'ev603_marine.mdb'),
                                       'EDF6VC_SUB.MRAB', 'body', 'body', rigid=((0.0, 178.08, -7.58), (121.0, 15.0, 832.0)),
                                       weapon_bones=('gunA_tilt_l', 'gunB_tilt_l', 'missle_l')),
     # Player jets (src/playerjet.cpp kKinds): the fighter in the interceptor's dark bomber501_2 (16 m across),
@@ -324,7 +348,8 @@ def weapon_dir(game_root: str) -> str:
 
 def jet_guns(game: Game) -> dict[str, bytes]:
     """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE; the
-    blast drones' charges (JET_BLAST_FILES); the jets' missile (JET_MISSILE_FILE)."""
+    blast drones' charges (JET_BLAST_FILES); the jets' and the submarine carrier's missiles (JET_MISSILE_FILE,
+    SUB_MISSILE_FILE)."""
     out = {}
     for name, stock in JET_GUN_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', stock))
@@ -354,7 +379,27 @@ def jet_guns(game: Game) -> dict[str, bytes]:
         raise ValueError(f'{JET_MISSILE_STOCK} 不是预期的直升机导弹')
     for node, (cue, volume, reach) in ((fire, JET_MISSILE_FIRE_SE), (cp.items[11], JET_MISSILE_FLIGHT_SE)):
         node.items[1], node.items[2], node.items[5] = cue, volume, reach
-    out[JET_MISSILE_FILE] = dsgo.write(doc)
+    guidance = cp.items[3]
+    if len(guidance.items) != 3:
+        raise ValueError(f'{JET_MISSILE_STOCK} 的 Ammo_CustomParameter[3] 不是三项')
+    cone = r.get('LockonAngle')
+    if len(cone.items) != 2:
+        raise ValueError(f'{JET_MISSILE_STOCK} 的 LockonAngle 不是两项')
+    for name, params, angles, motion in (
+            (JET_MISSILE_FILE, JET_MISSILE_PARAMS, JET_MISSILE_CONE, JET_MISSILE_MOTION),
+            (SUB_MISSILE_FILE, {**JET_MISSILE_PARAMS, **SUB_MISSILE_PARAMS}, SUB_MISSILE_CONE,
+             {**JET_MISSILE_MOTION, **SUB_MISSILE_MOTION})):
+        for i, value in motion.items():
+            if i == 3:
+                guidance.items[0], guidance.items[1], guidance.items[2] = value
+            else:
+                cp.items[i] = value
+        for key, value in params.items():
+            if r.get(key) is None:
+                raise ValueError(f'{JET_MISSILE_STOCK} 缺少 {key}')
+            r.set(key, value)
+        cone.items[0], cone.items[1] = angles
+        out[name] = dsgo.write(doc)
     return out
 
 

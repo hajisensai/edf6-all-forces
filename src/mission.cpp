@@ -60,6 +60,7 @@ void MissionStart() noexcept {
     ResetLaser();
     ResetHud();
     ResetJetSound();
+    ResetMissiles();
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)
     PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)

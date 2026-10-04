@@ -161,7 +161,8 @@ struct Kind {
     float patrol,patrolStep;        // m: patrol circle, plus this per jet of its flight
     float overrun,chaseOver;        // Chase
     float range;                    // m from the anchor it takes targets in
-    float missileRange;             // m: it fires its missiles from here in, standing off (0: never)
+    float missileRange;             // m: it fires its missiles from here in, standing off (0: never), and never farther
+                                    // than its missile locks (Arms::missileRange: the weapon's own LockonRange)
     float fuel;                     // its time in the air, times Cfg().jetFuelSec
     float trigger;                  // a charge's: m from its target it goes off (see kBlastTrigger), else 0
     bool doll;                      // it carries a hololive doll (DollMake)
@@ -407,9 +408,14 @@ constexpr float kHoverLeave=500.0f;    // m: leaving, it heads this far along it
 
 // --- jet_combat.cpp ---
 // The pilot's seat weapons: guns (straight, fastest round speed for the lead), the homing missile.
-struct Arms { float gunSpeed,gunGravity,gunRange; std::int32_t guns,missiles,locked; bool hasGun,hasMissile; };
+// What its weapons are, as their SGOs set them: the guns' speed, drop and reach (AmmoSpeed x AmmoAlive), the
+// homing weapons' lock range (LockonRange); rounds left, targets locked.
+struct Arms { float gunSpeed,gunGravity,gunRange,missileRange; std::int32_t guns,missiles,locked; bool hasGun,hasMissile; };
 Arms ReadArms(unsigned char* v) noexcept;
-void ExtendLock(unsigned char* v,float range) noexcept;
+// The distance a jet fires its missiles from: its role's standoff, within what its missile locks (0: never).
+inline float MissileReach(const Kind& k,const Arms& a) noexcept {
+    return k.missileRange<a.missileRange ? k.missileRange : a.missileRange;
+}
 void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float* out) noexcept;
 // The target as the role prefers among the enemies within `range` of `anchor` (the current one counting nearer):
 // j.t gets it and its motion, or none.

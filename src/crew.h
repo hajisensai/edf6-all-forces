@@ -111,6 +111,9 @@ void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
+void ResetMissiles() noexcept;    // missile.cpp
+// The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
+bool InstallMissiles() noexcept;
 // The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
 // once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
 bool InstallJetSound() noexcept;

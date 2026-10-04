@@ -365,7 +365,6 @@ void JetFrame(unsigned char* v) noexcept {
     if(j->drone.blastAt){Blast(*j,v,ms);return;}
 
     const Kind& kind=KindOf(*j);
-    ExtendLock(v,kind.missileRange);
     const Arms arms=ReadArms(v);
     const bool follow=player.at && ms-player.at<10000;
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
