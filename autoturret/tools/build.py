@@ -394,6 +394,8 @@ def install(mods: str, text: bool, force: bool) -> None:
 def _restore_texts(mods: str, texts: dict, force: bool) -> dict:
     """Puts the original rows back; returns the entries it had to leave (changed by someone else)."""
     left: dict = {}
+    if not texts:
+        return left   # nothing to put back (installed with --no-text): the game's own table is not needed
     ids = describe.table_ids(mods)
     for rel, entry in texts.items():
         path = _path(mods, rel)
