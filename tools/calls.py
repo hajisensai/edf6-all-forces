@@ -87,6 +87,9 @@ CALLS: tuple[Call, ...] = (
     # Appended 2026-10-05: the Katyusha rocket truck (tools/make_katyusha.py), requested like the Naegling.
     Call('EDF6VC_CALL_KATYUSHA', 0, 'katyusha', False, 0, 7500, 1.0, 'vehicle', vehicle='EDF6VC_KATYUSHA',
          ground='katyusha'),
+    # Appended 2026-10-05: the self-propelled artillery (tools/make_artillery.py), requested like the Kepler.
+    Call('EDF6VC_CALL_ARTILLERY', 0, 'artillery', False, 0, 8000, 1.2, 'vehicle', vehicle='EDF6VC_ARTILLERY',
+         ground='artillery'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -100,6 +103,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     '5d1a3ed / 9233829 (player jets)': IDS[:19],
     '0.7.1 (the gunship after the player jets)': IDS[:21],
     'Katyusha (2026-10-05)': IDS[:22],
+    'artillery (2026-10-05)': IDS[:23],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -125,6 +129,15 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'artillery': {
+        'SC': ('自行榴弹炮', '请求一辆自行榴弹炮：E551 的炮塔装着武装巴尔加的两门大炮，自动瞄准地面目标，每次曲射两发大范围高爆弹。装填较慢。'),
+        'CN': ('自行榴彈砲', '請求一輛自行榴彈砲：E551 的砲塔裝著武裝巴爾加的兩門大砲，自動瞄準地面目標，每次曲射兩發大範圍高爆彈。裝填較慢。'),
+        'JA': ('自走榴弾砲', '自走榴弾砲を要請する。E551 の砲塔に武装バルガの大砲 2 門、地上の目標を自動で狙い、広範囲の榴弾を 2 発ずつ曲射する。'
+                       '装填は遅い。'),
+        'EN': ('Self-Propelled Howitzer', "Requests a self-propelled howitzer: the Armed Barga's two cannons on an E551 "
+                                          'turret, aiming at ground targets by itself and lobbing two wide-blast shells '
+                                          'a salvo. Slow to reload.'),
+    },
     'katyusha': {
         'SC': ('喀秋莎火箭炮车', '请求一辆喀秋莎火箭炮车：卡车车斗上的多管火箭发射架，自动瞄准地面目标，曲射齐射 40 发火箭弹覆盖一片区域。'
                           '装填较慢。'),

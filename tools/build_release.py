@@ -69,7 +69,7 @@ def build_exe() -> str:
            '--specpath', WORK]
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib')):
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'graft_pure', 'calls'):
+    for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'graft_pure', 'primer_fighter_model', 'calls'):
         cmd += ['--hidden-import', mod]
     for mod in ('numpy', 'PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these
         cmd += ['--exclude-module', mod]

@@ -86,6 +86,7 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_jet_fighter_mission', '制空战斗机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_interceptor_mission', '截击机（远程导弹，插件驾驶，测试场生成）'),
     ('edf6tr_jet_enemy_fighter_mission', '敌方战斗机（插件驾驶，敌方阵营：攻击你和友军飞机，测试场生成）'),
+    ('edf6tr_jet_primer_fighter_mission', '星导者扑翼战斗机（插件驾驶，敌方阵营，测试场生成）'),
     ('edf6tr_jet_multirole_mission', '多用途战斗机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_carrier_mission', '空中航母（放攻击无人机，插件驾驶，测试场生成）'),
     ('edf6tr_jet_blast_carrier_mission', '自爆无人机母舰（插件驾驶，测试场生成）'),
@@ -125,6 +126,7 @@ DERIVED: dict[str, str] = {
     'edf6tr_jet_fighter_mission': 'V506_HELI',
     'edf6tr_jet_interceptor_mission': 'V506_HELI',
     'edf6tr_jet_enemy_fighter_mission': 'V506_HELI',
+    'edf6tr_jet_primer_fighter_mission': 'V506_HELI',
     'edf6tr_jet_multirole_mission': 'V506_HELI',
     'edf6tr_jet_carrier_mission': 'V506_HELI',
     'edf6tr_jet_blast_carrier_mission': 'V506_HELI',
@@ -225,7 +227,11 @@ GRAND = 'grand'
 GRAND_SHIPS = (('app:/object/e511_mothership_edf6.sgo', 900.0), ('app:/object/e611_timeship.sgo', 400.0),
                ('app:/object/e508_carrier.sgo', 250.0), ('app:/object/e508_carrier.sgo', 250.0))
 GRAND_GROUND = ('app:/object/e601_martian_gs.sgo', 'app:/object/e602_berserker.sgo', 'app:/object/e601_martian_ls.sgo')
-GRAND_AIR = ('app:/object/' + AIR_ENEMY + '.sgo', 'app:/object/e507_goldufo.sgo', 'app:/object/e605_spinnerufo.sgo')
+# The sky's waves: a pair of jets (CreateFriend: the plugin puts each on the enemy team on first sight, its body hostile)
+# or a group of UFOs, in turn; the Primers' flapping fighters among them.
+PRIMER_FIGHTER = 'edf6tr_jet_primer_fighter_mission'
+GRAND_AIR = ('app:/object/' + AIR_ENEMY + '.sgo', 'app:/object/e507_goldufo.sgo', 'app:/object/' + PRIMER_FIGHTER + '.sgo',
+             'app:/object/e605_spinnerufo.sgo')
 GRAND_SQUADS = 3
 GRAND_SOLDIERS = ('app:/object/AiArmySoldier_S_AF_Leader.sgo', 'app:/object/AiArmySoldier_S_Follower1.sgo')
 GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to (counted together: the cap is the sum)
@@ -574,7 +580,7 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
         '\twhile( true ) {',
         f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {GRAND_GROUND_CAP + GRAND_AIR_CAP} ) {{',
         '\t\t\tstring k = kinds[next % kinds.length()];',
-        f'\t\t\tif( next % kinds.length() == 0 ) {{ CreateFriend(spots[next % spots.length()], k, {lv}, false); '
+        f'\t\t\tif( k.findFirst("edf6tr_jet") >= 0 ) {{ CreateFriend(spots[next % spots.length()], k, {lv}, false); '
         f'CreateFriend(spots[(next + 1) % spots.length()], k, {lv}, false); }}',
         f'\t\t\telse CreateEnemyGroup(spots[next % spots.length()], 40, k, 3, {lv}, true);',
         '\t\t\tnext++;',

@@ -45,6 +45,7 @@ FILES: dict[str, str] = {
     'EDF6VC_JET_FIGHTER.SGO': 'edf6tr_jet_fighter_mission',
     'EDF6VC_JET_INTERCEPTOR.SGO': 'edf6tr_jet_interceptor_mission',
     'EDF6VC_JET_ENEMY_FIGHTER.SGO': 'edf6tr_jet_enemy_fighter_mission',
+    'EDF6VC_JET_PRIMER_FIGHTER.SGO': 'edf6tr_jet_primer_fighter_mission',
     'EDF6VC_JET_MULTIROLE.SGO': 'edf6tr_jet_multirole_mission',
     'EDF6VC_JET_CARRIER.SGO': 'edf6tr_jet_carrier_mission',
     'EDF6VC_JET_DRONE.SGO': 'edf6tr_jet_drone',
@@ -111,6 +112,10 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{MODEL_FILE}'] = jet_models.elevon_archive(game)   # the elevon bomber, grounded
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
+    import primer_fighter_model   # the Primer fighter's own model (not a jet_models recipe)
+    arc = primer_fighter_model.build(game)
+    primer_fighter_model.check(arc)
+    out[f'OBJECT/{vc.JETS["edf6tr_jet_primer_fighter_mission"].file}'] = arc
     for name, jet in FILES.items():
         out[f'OBJECT/{name}'] = vc.jet_sgo(game, jet, MODEL)
     for name, (model, body, rigid) in BOMBERS.items():

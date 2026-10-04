@@ -84,8 +84,9 @@ def calls_table_consistent() -> None:
     ids = [c.id for c in calls.CALLS]
     assert len(set(ids)) == len(ids), 'duplicate ids'
     assert all(i.startswith(calls.ID_PREFIX) for i in ids)
-    marks = [c.mark for c in calls.CALLS]
+    marks = [c.mark for c in calls.CALLS if not c.ground]   # a ground vehicle's request has no mark (0)
     assert len(set(marks)) == len(marks), 'duplicate marks'
+    assert all(c.mark == 0 for c in calls.CALLS if c.ground), 'a ground vehicle request with a mark'
     crew_h = src('src/crew.h')
     roles = set(re.search(r'enum class JetRole \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     bodies = set(re.search(r'enum class HeliBody \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))

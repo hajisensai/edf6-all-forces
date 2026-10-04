@@ -286,6 +286,13 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
                               ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),
+    # The self-propelled artillery (tools/make_artillery.py): the Kepler's class (Vehicle603_Flak: a turret, twin guns),
+    # the E551's turret housing with the Armed Barga's two cannons on it; two large shells a salvo, lobbed, aimed by
+    # EDF6AutoTurret.
+    'artillery': GroundVehicle('EDF6VC_ARTILLERY', 'V603_FLAK', 'AWEAPON346',
+                               ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                               ('app:/weapon/edf6vc_howitzer_l.sgo', 'app:/weapon/edf6vc_howitzer_r.sgo'), 600.0,
+                               'make_artillery'),
 }
 JET_SILENT_SE = 'EDF6VC_SILENT'
 JET_ROTOR_SE_ROWS = (0, 1)
@@ -300,6 +307,11 @@ JETS: dict[str, Jet] = {
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                             'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
+    # The Primers' fighter (pylib/primer_fighter_model.py: a pod of their new ship, two of its hatch petals for flapping
+    # wings, 19.5 m across): the enemy's (src/jet_internal.h Body::primerFighter, Role::primer); its box the fuselage.
+    'edf6tr_jet_primer_fighter_mission': Jet(7030.0, 700.0, _load(('AAM_S', 2)),
+                                             ('app:/object/edf6vc_primer_fighter.mrab', 'edf6vc_primer_fighter.mdb'),
+                                             'EDF6VC_PRIMER_FIGHTER.MRAB', 'body', 'body', ((0.0, 1.619, 0.0), (2.97, 1.62, 5.43))),
     # bomber401 x 0.5: 26 m across
     'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _MULTIROLE, ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
                                         'EDF6VC_MULTIROLE.MRAB', 'bomber401'),
