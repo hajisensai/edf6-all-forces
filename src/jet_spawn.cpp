@@ -159,9 +159,9 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     std::memcpy(j->anchor,target,12);j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
     JoinFlight(*j,FlightFor(source,ms));
     for(int i=0;i<3;++i)j->m.vel[i]=m[8+i]*speed;
-    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d",v,
-        KindOf(*j).name,Row(b).file,j->flight,j->wing,start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,
-        SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
+    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d hp=%.0f/%.0f",
+        v,KindOf(*j).name,Row(b).file,j->flight,j->wing,start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,
+        SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy,At<float>(v,kHp),At<float>(v,kHpMax));
     Publish(true);
     return j;
 }

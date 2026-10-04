@@ -217,6 +217,7 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
     stock_vehicle = req.items[2]
     req.items[2] = _object_path(call)
     setup = req.items[3]
+    setup.items[0].items[0], setup.items[0].items[1] = vc.JET_TIER   # the jet's tier (vcobjects.JET_TIER), not the Eros's
     setup.items[1].items[0] = float(call.mark)
     for w in setup.items[3].items:
         w.items[0] = _VEHICLE_SWAP.get(w.items[0].lower(), w.items[0])
@@ -231,10 +232,9 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
 
 
 def vehicle_durability(game_root: str, call: Call) -> float:
-    """What the menu shows: the jet's durability times the request's HP multiplier."""
-    root = dsgo.parse(stock(game_root, f'WEAPON/{VEHICLE_TEMPLATE.upper()}.SGO')).root
-    mult = float(root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0])
-    return vc.JETS[call.jet].durability * mult
+    """What the menu shows: the jet's durability times the request's HP multiplier (vehicle_sgo: its tier)."""
+    del game_root
+    return vc.JETS[call.jet].durability * vc.JET_TIER[0]
 
 
 def weapon_sgo(template: bytes, call: Call) -> bytes:

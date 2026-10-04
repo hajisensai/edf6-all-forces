@@ -37,6 +37,9 @@ class Jet:
     camera: tuple[float, float, float] | None = None
     # The stock heli SGO it is made from (its body, rigid body, crash and weapons): every jet is a V506.
     stock: str = 'V506_HELI'
+    # mission_setup[0]: the vehicle's tier, the two multipliers the game's vehicle requests scale a vehicle by (its
+    # durability and its weapons' damage): JET_TIER unless set.
+    tier: tuple[float, float] | None = None
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
@@ -51,6 +54,12 @@ JET_GUN_FILES = {'EDF6VC_JET_GUN_L.SGO': 'V_506HELI_GATLING01_L.SGO', 'EDF6VC_JE
 JET_GUN_SPEED, JET_GUN_ALIVE = 16.0, 60.0   # m a frame, frames: 960 m/s, 960 m
 JET_GUN_REACH = JET_GUN_SPEED * JET_GUN_ALIVE
 _GUNS = tuple('app:/weapon/' + f.lower() for f in JET_GUN_FILES)
+# The jets' tier (Jet.tier, mission_setup[0]): the stock game ranks a vehicle by the two multipliers its request
+# carries over its SGO's base durability and its weapons' base damage (vehicle_setup[0]): the N9 Eros 1.3 (level 0.44),
+# the Eros Vulture D 14 (2.73), the Eros Sigma and the EF31 Nereid Angel 25 (3.42 / 3.33, the base game's highest:
+# Inferno). The jets are made at that highest tier for now; their durability and weapons' damage below are base
+# values on the stock vehicles' scale (a heli 600, a vehicle missile 80-120, a tank shell 400, the unguided bomb 500).
+JET_TIER = (25.0, 25.0)
 # The plugin's missiles (jet_guns): each the 506's homing missile (MissileBullet01) remade as a real class of missile,
 # guided by the plugin (src/missile.cpp, docs/missile-re.md): the stock steering is off (CP[8], its homing delay, never
 # comes) and CP[9] marks the round as the plugin's; it inherits the launcher's velocity vector (AmmoOwnerMove 1), no
@@ -103,25 +112,25 @@ class Missile:
 MISSILES: dict[str, Missile] = {
     # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead.
     'EDF6VC_AAM_SHORT.SGO': Missile('AIM-9X', burn=5.0, top=850.0, accel=300.0, max_g=50.0, nav=4.0, life=12.0,
-                                    damage=500.0, blast=10.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0, rounds=4.0),
+                                    damage=100.0, blast=8.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0, rounds=4.0),
     # Medium-range air-to-air, active radar (AIM-120): a long burn, fast.
     'EDF6VC_JET_MISSILE.SGO': Missile('AIM-120', burn=8.0, top=1200.0, accel=250.0, max_g=40.0, nav=4.0, life=16.0,
-                                      damage=600.0, blast=12.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0, rounds=6.0),
+                                      damage=120.0, blast=10.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0, rounds=6.0),
     # Long-range air-to-air (AIM-54): a very long burn, very fast, a big warhead, not agile.
     'EDF6VC_AAM_LONG.SGO': Missile('AIM-54', burn=20.0, top=1500.0, accel=150.0, max_g=25.0, nav=3.0, life=30.0,
-                                   damage=700.0, blast=15.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, rounds=4.0,
+                                   damage=150.0, blast=12.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, rounds=4.0,
                                    interval=90.0),
     # Air-to-ground (AGM-65 Maverick): subsonic, a heavy warhead, a slow lock.
     'EDF6VC_AGM.SGO': Missile('AGM-65', burn=3.5, top=320.0, accel=120.0, max_g=15.0, nav=3.0, life=15.0,
-                              damage=1500.0, blast=18.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, rounds=6.0,
+                              damage=400.0, blast=15.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, rounds=6.0,
                               interval=60.0),
     # Light air-to-ground (AGM-114 Hellfire): what a drone carries.
     'EDF6VC_AGM_LIGHT.SGO': Missile('AGM-114', burn=3.0, top=425.0, accel=180.0, max_g=20.0, nav=3.0, life=12.0,
-                                    damage=800.0, blast=10.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0, rounds=4.0),
+                                    damage=250.0, blast=10.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0, rounds=4.0),
     # Ship-launched air defence from a vertical launcher (RIM-162 ESSM): the bay need not face the target (a wide
     # cone), very fast, very agile, fired two at a target, a deep magazine (the submarine carrier, src/subcarrier.cpp).
     'EDF6VC_SUB_MISSILE.SGO': Missile('RIM-162 ESSM', burn=4.0, top=1300.0, accel=400.0, max_g=50.0, nav=4.0, life=15.0,
-                                      damage=600.0, blast=15.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0,
+                                      damage=120.0, blast=10.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0,
                                       rounds=32.0, burst=2.0, interval=120.0, eject=0.5),
 }
 JET_MISSILE_FILE = 'EDF6VC_JET_MISSILE.SGO'
@@ -288,6 +297,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         raise ValueError('V506_HELI 没有 vehicle_setup')
     setup = m.pop('vehicle_setup')
     setup[1][0] = jet.mark
+    setup[0] = [float(x) for x in (jet.tier or JET_TIER)]
     stock = {w[0]: w for w in setup[3]}   # each weapon keeps its stock per-weapon parameters (a derived one its stock's)
     setup[3] = [[w, stock[_STOCK_OF[w]][1]] if _STOCK_OF.get(w) in stock else stock.get(w, [w, [0.0001, 0.1]])
                 for w in jet.weapons] + [stock['app:/weapon/v_fuel01.sgo']]
