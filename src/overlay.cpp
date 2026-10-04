@@ -78,9 +78,9 @@ DWORD WINAPI PickerThread(void*) {
         while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}
         if(banner && shownAt && GetTickCount64()-shownAt>kBannerMs){ShowWindow(banner,SW_HIDE);shownAt=0;}
         HWND game=nullptr;
-        const bool front=cfg.enabled && GameInFront(&game);
-        const bool next=front && cfg.callNextKey && (GetAsyncKeyState(static_cast<int>(cfg.callNextKey))&0x8000);
-        const bool prev=front && cfg.callPrevKey && (GetAsyncKeyState(static_cast<int>(cfg.callPrevKey))&0x8000);
+        const bool front=Cfg().enabled && GameInFront(&game);
+        const bool next=front && Cfg().callNextKey && (GetAsyncKeyState(static_cast<int>(Cfg().callNextKey))&0x8000);
+        const bool prev=front && Cfg().callPrevKey && (GetAsyncKeyState(static_cast<int>(Cfg().callPrevKey))&0x8000);
         const int step=(next && !nextDown) ? 1 : (prev && !prevDown) ? -1 : 0;
         nextDown=next;prevDown=prev;
         if(step) {
@@ -93,9 +93,9 @@ DWORD WINAPI PickerThread(void*) {
 }  // namespace
 
 void StartCallPicker() noexcept {
-    if(!cfg.callNextKey && !cfg.callPrevKey)return;
+    if(!Cfg().callNextKey && !Cfg().callPrevKey)return;
     const HANDLE t=CreateThread(nullptr,0,PickerThread,nullptr,0,nullptr);
     if(t)CloseHandle(t);
-    Log("CALLS pick keys next=%#lx prev=%#lx%s",cfg.callNextKey,cfg.callPrevKey,t ? "" : " (no thread)");
+    Log("CALLS pick keys next=%#lx prev=%#lx%s",Cfg().callNextKey,Cfg().callPrevKey,t ? "" : " (no thread)");
 }
 }  // namespace crew

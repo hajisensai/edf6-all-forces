@@ -21,7 +21,7 @@
 // docs/subcarrier-re.md §8: every hit reaches it as the damage message through the 506's slot 9, which the
 // plugin hooks for carriers only. A hit within a part's reach wears that part (its own HP, its own gauge) and
 // not the hull; any other hit on the hull counts only from a heavy source (kHeavy: the Mothership's Genocide
-// cannon, the dropships' portal laser) or a single hit of cfg.subHeavyHit. A worn-out part stops working (its
+// cannon, the dropships' portal laser) or a single hit of Cfg().subHeavyHit. A worn-out part stops working (its
 // gun or missiles go dry, the bay launches no drones) until the crew repairs it kRepairMs on. The drone bay
 // launches jet.cpp's gun drones (JetLaunchDrone) while it has a target.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -182,11 +182,9 @@ using SetTeamFn=void(*)(void*,std::int32_t,bool);
 using RideAiFn=void(*)(void*,bool);
 using DeleteFn=void(*)(void*);
 using SetVecFn=void(*)(void*,const float*);
-using PhysicsFn=void(__fastcall*)(void*);
 using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
 using GaugeFn=void(__fastcall*)(void*,void*,void*,void*,void*);
 using MessageFn=bool(__fastcall*)(void*,std::uint32_t,void*);
-PhysicsFn nextPhysics=nullptr;
 MessageFn nextMessage=nullptr;
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -300,7 +298,7 @@ float* Route(unsigned char* v,unsigned char* gdi,float* was) noexcept {
     Local(reinterpret_cast<const float*>(v+kMatrix),reinterpret_cast<const float*>(gdi+kDmgAt),at);
     const int part=PartAt(*s,at);
     const std::uintptr_t from=Attacker(gdi);
-    const bool heavy=HeavySource(from) || (cfg.subHeavyHit>0.0f && dmg>=cfg.subHeavyHit);
+    const bool heavy=HeavySource(from) || (Cfg().subHeavyHit>0.0f && dmg>=Cfg().subHeavyHit);
     ++s->hits;s->lastDmg=dmg;s->lastPart=part;s->lastFrom=from;s->lastHeavy=heavy;
     std::memcpy(s->lastAt,at,12);
     if(part<0 && heavy){s->hullDmg+=dmg;return nullptr;}
@@ -336,13 +334,13 @@ bool __fastcall MessageHook(void* obj,std::uint32_t msg,void* data) {
     return handled;
 }
 
-// The hull made as thick as cfg.subHullHp (its HP raised in proportion), once per carrier.
+// The hull made as thick as Cfg().subHullHp (its HP raised in proportion), once per carrier.
 void Thicken(unsigned char* v) noexcept {
     const float max=At<float>(v,kHpMax),hp=At<float>(v,kHp);
-    if(!(cfg.subHullHp>max) || !(max>0.0f))return;
-    Put<float>(v,kHpMax,cfg.subHullHp);
-    Put<float>(v,kHp,hp/max*cfg.subHullHp);
-    Log("SUB v=%p hull hp %.0f/%.0f -> %.0f/%.0f",v,hp,max,At<float>(v,kHp),cfg.subHullHp);
+    if(!(Cfg().subHullHp>max) || !(max>0.0f))return;
+    Put<float>(v,kHpMax,Cfg().subHullHp);
+    Put<float>(v,kHp,hp/max*Cfg().subHullHp);
+    Log("SUB v=%p hull hp %.0f/%.0f -> %.0f/%.0f",v,hp,max,At<float>(v,kHp),Cfg().subHullHp);
 }
 
 // Worn-out parts back in order kRepairMs after they wore out.
@@ -374,7 +372,7 @@ void Bay(Sub& s,const float* m,ULONGLONG ms) noexcept {
     float from[3];
     World(m,kBayLaunch,from);
     const float nose[3]={m[8],m[9],m[10]};
-    unsigned char* d=JetLaunchDrone(from,nose,from,cfg.jetFuelSec,s.vehicle,false);
+    unsigned char* d=JetLaunchDrone(from,nose,from,Cfg().jetFuelSec,s.vehicle,false);
     if(!d) {
         if(!s.bayLogged)Log("SUB v=%p drone bay: no drone launched (JetPilot off, EDF6VC_JET_DRONE.SGO not preloaded, or jets full)",s.vehicle);
         s.bayLogged=true;
@@ -460,7 +458,7 @@ void Arm(Sub& s,unsigned char* v,ULONGLONG ms,std::int32_t* guns,std::int32_t* m
         else if(!s.emptyAt[i])s.emptyAt[i]=ms;
         else if(ms-s.emptyAt[i]>=kReloadMs && s.full[i]>0) {
             ammo=s.full[i];Put<std::int32_t>(w,kWeaponAmmo,ammo);s.emptyAt[i]=0;
-            if(cfg.debug)Log("SUB v=%p weapon %llu reloaded aboard: %d",v,static_cast<unsigned long long>(i),ammo);
+            if(Cfg().debug)Log("SUB v=%p weapon %llu reloaded aboard: %d",v,static_cast<unsigned long long>(i),ammo);
         }
         if(!homing){*guns+=ammo>0 ? ammo : 0;continue;}
         *missiles+=ammo>0 ? ammo : 0;
@@ -481,7 +479,7 @@ void Arm(Sub& s,unsigned char* v,ULONGLONG ms,std::int32_t* guns,std::int32_t* m
 // carrier (afloat: s.sea) keeps to the water: its post does not move onto a spot with none (it waits at
 // the shore), and over water it floats kDraft under that spot's surface.
 void Follow(Sub& s,float dt) noexcept {
-    if(!player.at || GetTickCount64()-player.at>5000)return;
+    if(!player.at || GameMs()-player.at>5000)return;
     const float d[3]={player.pos[0]-s.post[0],0.0f,player.pos[2]-s.post[2]};
     const float dist=Len(d);
     if(dist>kLeash)s.moving=true;
@@ -560,7 +558,7 @@ void Fire(Sub& s,unsigned char* v,const float* pos,const float* m,ULONGLONG ms) 
     std::int32_t guns=0,missiles=0,locked=0;
     Arm(s,v,ms,&guns,&missiles,&locked);
     bool gun=false,missile=false;
-    if(s.hasTarget && cfg.heliFire) {
+    if(s.hasTarget && Cfg().heliFire) {
         const float up[3]={m[4],m[5],m[6]};
         const float muzzle[3]={pos[0]+up[0]*kGunHeight,pos[1]+up[1]*kGunHeight,pos[2]+up[2]*kGunHeight};
         float nose[3]={m[8],m[9],m[10]};
@@ -574,7 +572,7 @@ void Fire(Sub& s,unsigned char* v,const float* pos,const float* m,ULONGLONG ms) 
                 !FriendInLine(muzzle,s.target,v);
         if(missile) {
             s.missileAt=ms;
-            if(cfg.debug)Log("SUB v=%p missiles: %.0f m, %d locked, %d left",v,dist,locked,missiles);
+            if(Cfg().debug)Log("SUB v=%p missiles: %.0f m, %d locked, %d left",v,dist,locked,missiles);
         }
     }
     v[kFireGun]=gun;v[kFireMissile]=missile;
@@ -630,21 +628,6 @@ void FixBodyPart(unsigned char* v) noexcept {
     else Log("SUB v=%p has no body part (going down it would crash)",v);
 }
 
-void __fastcall PhysicsHook(void* vehicle) {
-    nextPhysics(vehicle);
-    __try {
-        auto v=static_cast<unsigned char*>(vehicle);
-        const ULONGLONG ms=GameMs();
-        Sub* s=FindSub(v,ms);
-        if(!s || !s->ready || v[kDead] || ms-s->seen>200 || !IsSub(v))return;
-        const auto body=At<void*>(v,kBody);
-        if(!body)return;
-        alignas(16) float lin[4]={s->lin[0],s->lin[1],s->lin[2],0.0f},ang[4]={s->ang[0],s->ang[1],s->ang[2],0.0f};
-        reinterpret_cast<SetVecFn>(image+kSetLinearVelocity)(body,lin);
-        reinterpret_cast<SetVecFn>(image+kSetAngularVelocity)(body,ang);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
-}
-
 // The follower gauges as the game draws them, then one per live carrier (see the top), then the vehicle HUD
 // (hud.cpp: the readouts and a panel per live carrier).
 void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fifth) {
@@ -680,9 +663,6 @@ void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fi
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
-const unsigned char kPhysicsSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xE8};
-const unsigned char kSetLinSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xA8,0x00,0x00};
-const unsigned char kSetAngSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xB0,0x00,0x00};
 const unsigned char kDeleteSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x60,0x48};
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
 const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
@@ -720,6 +700,15 @@ bool ClassIs(unsigned vtable,const char* rtti) noexcept {
     return Readable(name,n) && std::memcmp(name,rtti,n)==0;
 }
 }  // namespace
+
+// The 506 physics step (body506.cpp), after the stock one: the carrier's velocity and spin.
+bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
+    const ULONGLONG ms=GameMs();
+    Sub* s=FindSub(v,ms);
+    if(!s || !s->ready || v[kDead] || ms-s->seen>200)return false;
+    for(int i=0;i<3;++i){lin[i]=s->lin[i];ang[i]=s->ang[i];}
+    return true;
+}
 
 bool IsSub(const void* vehicle) noexcept {
     const auto v=static_cast<const unsigned char*>(vehicle);
@@ -878,7 +867,7 @@ void SubFrame(unsigned char* v) noexcept {
     Bay(*s,m,ms);
     HitLog(*s,ms);
     Proxy(static_cast<int>(s-subs),*s,v,m,ms);
-    if(cfg.debug && ms-s->logAt>2000) {
+    if(Cfg().debug && ms-s->logAt>2000) {
         s->logAt=ms;
         float ground=0.0f;
         const bool seen=GroundUnder(pos,nose,&ground);
@@ -891,14 +880,9 @@ void SubFrame(unsigned char* v) noexcept {
 
 bool InstallSub() noexcept {
     __try {
-        const bool sig=Matches(0x61B710,kPhysicsSig,sizeof(kPhysicsSig)) && Matches(kSetLinearVelocity,kSetLinSig,sizeof(kSetLinSig)) &&
-                       Matches(kSetAngularVelocity,kSetAngSig,sizeof(kSetAngSig)) && Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));
-        if(!sig){Log("SUB profile mismatch: carriers off");return false;}
-        // Slot 57 of the 506, after whatever is there (jet.cpp's hook: InstallJets runs first).
-        const auto slot=reinterpret_cast<void**>(image+kHeli506)+kSlotPhysics;
-        void* const current=*slot;
-        nextPhysics=reinterpret_cast<PhysicsFn>(current);
-        physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
+        if(!Body506Ok()){Log("SUB: no 506 physics hook (body506): carriers off");return false;}
+        if(!Matches(kDelete,kDeleteSig,sizeof(kDeleteSig))){Log("SUB profile mismatch: carriers off");return false;}
+        physicsOk=true;
         spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
         bodyPartOk=spawnOk && Matches(kFindPart,kFindPartSig,sizeof(kFindPartSig));
@@ -922,9 +906,10 @@ bool InstallSub() noexcept {
             heavy+=heavyOk[k] ? 1 : 0;
             if(!heavyOk[k])Log("SUB heavy source %s: no such vtable at EDF+%X",kHeavy[k].rtti,kHeavy[k].vtable);
         }
-        Log("HOOK sub physics=%d spawn=%d gauge=%d damage=%d heavy=%d/%d (chained physics onto %p)",physicsOk,spawnOk,gaugeOk,damageOk,
-            heavy,kHeavyCount,current);
+        Log("HOOK sub physics=%d spawn=%d gauge=%d damage=%d heavy=%d/%d",physicsOk,spawnOk,gaugeOk,damageOk,heavy,kHeavyCount);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetSubs() noexcept {}
 }  // namespace crew

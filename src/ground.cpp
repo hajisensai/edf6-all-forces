@@ -14,11 +14,11 @@
 // sign is right by construction; the world sign of the turn and of the aim pitch are learned online from
 // how the heading and the gun barrel actually move (as heli.cpp does for yaw and the 410 door guns).
 //
-// Behaviour: no enemy: it follows the player and stops cfg.groundFollow metres from them. An enemy within
-// cfg.groundRange of it (and not far past the leash round the player): it turns its body and arms onto the
+// Behaviour: no enemy: it follows the player and stops Cfg().groundFollow metres from them. An enemy within
+// Cfg().groundRange of it (and not far past the leash round the player): it turns its body and arms onto the
 // enemy's lock point, closes to about 70% of its guns' reach, and fires each gun whose own barrel is on
 // the target, with a clear map ray and the player not in the line. It never goes more than
-// cfg.groundLeash metres from the player while it has one to follow.
+// Cfg().groundLeash metres from the player while it has one to follow.
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
@@ -141,13 +141,13 @@ struct Goal { bool any; float at[3],stop; };
 
 Goal GoalOf(const float* pos,const float* leader,const void* target,const float* aim,float reach) noexcept {
     Goal g{};
-    const bool leashed=leader && Horiz(pos,leader)>cfg.groundLeash;
+    const bool leashed=leader && Horiz(pos,leader)>Cfg().groundLeash;
     if(target && !leashed) {
         float standoff=reach*kStandoffShare;
         if(standoff<kMinStandoff)standoff=kMinStandoff;
         g.any=true;std::memcpy(g.at,aim,12);g.stop=standoff;
     } else if(leader) {
-        g.any=true;std::memcpy(g.at,leader,12);g.stop=cfg.groundFollow;
+        g.any=true;std::memcpy(g.at,leader,12);g.stop=Cfg().groundFollow;
     }
     return g;
 }
@@ -234,7 +234,7 @@ bool OnTarget(const unsigned char* v,const Gun& g,const float* aim,bool firing,b
 
 void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    const bool hasLeader=player.at && GetTickCount64()-player.at<kPlayerFixMs;
+    const bool hasLeader=player.at && GameMs()-player.at<kPlayerFixMs;
     const float* leader=hasLeader ? player.pos : nullptr;
     Gun guns[kGuns]{};
     const int n=Guns(v,guns);
@@ -245,7 +245,7 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
         if(!ref && guns[i].barrel)ref=&guns[i];
     }
     // The target: the nearest enemy lock point in range (and near enough to the player).
-    Pick p{};p.from=pos;p.leader=leader;p.range=cfg.groundRange;p.leash=cfg.groundLeash;p.keep=r.target;
+    Pick p{};p.from=pos;p.leader=leader;p.range=Cfg().groundRange;p.leash=Cfg().groundLeash;p.keep=r.target;
     if(reach>0.0f)VisitEnemies(v,&Consider,&p);
     r.target=p.best;
     const float* aim=p.best ? p.aim : nullptr;
@@ -261,7 +261,7 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     const float pitch=Pitch(r,v,ref,aim,ms);
     // Fire: one map ray per frame from the reference barrel.
     bool fire[kGuns]{};
-    if(aim && cfg.groundFire && ref) {
+    if(aim && Cfg().groundFire && ref) {
         float hit[3];
         const float d=Dist(ref->pos,aim);
         const float wall=MapRay(ref->pos,aim,hit);
@@ -273,7 +273,7 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     Put<float>(v,kLook,pitch);Put<float>(v,kLook+4,turn);Put<float>(v,kLook+8,0.0f);Put<float>(v,kLook+12,1.0f);
     v[kJump]=0;v[kDash]=0;
     for(int i=0;i<kGuns;++i){v[kFire+i]=fire[i] ? 1 : 0;r.firing[i]=fire[i];}
-    if(cfg.debug && ms-r.loggedAt>1000) {
+    if(Cfg().debug && ms-r.loggedAt>1000) {
         r.loggedAt=ms;
         Log("GROUND v=%p pos=(%.0f,%.0f,%.0f) leader=%.0f target=%p dist=%.0f reach=%.0f goal=%d stop=%.0f moving=%d move=(%.2f,%.2f) turn=%.2f sign=%d%s votes=%d pitch=%.2f aim=%.2f psign=%+.1f fire=%d%d%d",
             v,pos[0],pos[1],pos[2],leader ? Horiz(pos,leader) : -1.0f,p.best,aim ? Dist(pos,aim) : -1.0f,reach,g.any,g.stop,r.moving,
@@ -288,11 +288,11 @@ bool IsGroundRobo(const void* vehicle) noexcept {
 }
 
 void GroundFrame(unsigned char* vehicle) noexcept {
-    if(!profileOk || !cfg.groundPilot || vehicle[kDead])return;
+    if(!profileOk || !Cfg().groundPilot || vehicle[kDead])return;
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC drivers
     const ULONGLONG ms=GameMs();
     Robo& r=RoboFor(vehicle);
-    r.seen=GetTickCount64();
+    r.seen=GameMs();
     Drive(r,vehicle,ms);
 }
 
@@ -303,4 +303,6 @@ bool CheckGroundProfile() noexcept {
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetGround() noexcept {}
 }  // namespace crew

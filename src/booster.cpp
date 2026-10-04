@@ -203,4 +203,6 @@ bool InstallBoosters() noexcept {
         return sigOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetBoosters() noexcept {}
 }  // namespace crew

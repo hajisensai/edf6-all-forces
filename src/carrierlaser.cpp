@@ -126,7 +126,7 @@ Ship ships[kMaxShips]{};
 Carrier carriers[kMaxCarriers]{};
 bool sigOk=false,flyOk=false,preloaded=false,broken=false,aiDead=false;
 ShipAiFn nextShipAi=nullptr;
-ULONGLONG tickAt=0,quietUntil=0;
+ULONGLONG tickFrame=0,quietUntil=0;
 std::uint32_t seed=0;
 
 std::uint32_t Rand() noexcept {
@@ -369,7 +369,7 @@ bool Line(Ship& s,ULONGLONG ms,float* start) noexcept {
 }
 
 void Fire(Ship& s,const float* start,ULONGLONG ms) noexcept {
-    const float damage=cfg.carrierLaserDamage>0.0f ? cfg.carrierLaserDamage : 0.0f;
+    const float damage=Cfg().carrierLaserDamage>0.0f ? Cfg().carrierLaserDamage : 0.0f;
     unsigned char* const o=Beam(kLaserSgo,s.ship,start,s.aim,damage);
     Log("LASER ship=%p %s from (%.0f,%.0f,%.0f) to (%.0f,%.0f,%.0f)%s damage=%.0f beam=%p",s.ship,s.down ? "firing down" : "fire",
         start[0],start[1],start[2],s.aim[0],s.aim[1],s.aim[2],s.down ? "" : s.atPlayer ? " (player)" : " (carrier deck)",damage,o);
@@ -386,14 +386,14 @@ void Charge(Ship& s,ULONGLONG ms) noexcept {
     Log("LASER charge ship=%p %s from (%.0f,%.0f,%.0f) to (%.0f,%.0f,%.0f)%s hp=%.0f/%.0f break=%.0f",s.ship,
         s.down ? "straight down" : "oblique",start[0],start[1],start[2],s.aim[0],s.aim[1],s.aim[2],
         s.down ? "" : s.atPlayer ? " (player)" : " (carrier deck)",s.hpAtCharge,At<float>(s.ship,kHpMax),
-        At<float>(s.ship,kHpMax)*cfg.carrierLaserBreak);
+        At<float>(s.ship,kHpMax)*Cfg().carrierLaserBreak);
 }
 
 // One charging ship's frame: interrupted, beams followed, fired at kChargeMs.
 void Charging(Ship& s,ULONGLONG ms) noexcept {
     const float hp=At<float>(s.ship,kHp),hpMax=At<float>(s.ship,kHpMax);
     if(s.ship[kDead] || hp<=0.0f){Interrupt(s,ms,"shot down");return;}
-    if(s.hpAtCharge-hp>=hpMax*cfg.carrierLaserBreak){Interrupt(s,ms,"took too much damage");return;}
+    if(s.hpAtCharge-hp>=hpMax*Cfg().carrierLaserBreak){Interrupt(s,ms,"took too much damage");return;}
     float start[3];
     if(!Line(s,ms,start)){Interrupt(s,ms,"carrier gone");return;}
     if(ms-s.phaseAt>=kChargeMs){Fire(s,start,ms);return;}
@@ -496,7 +496,7 @@ void PreloadLaser() noexcept {
         for(auto& c:carriers)c=Carrier{};
         quietUntil=0;
         aiDead=false;   // a mission without its 508s on the AI list does not take the flights off the next one's
-        if(!sigOk || broken || !cfg.carrierLaser)return;
+        if(!sigOk || broken || !Cfg().carrierLaser)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         preloaded=mgr && FilesThere();
         if(preloaded) {
@@ -508,12 +508,11 @@ void PreloadLaser() noexcept {
 }
 
 void CarrierLaserFrame(const unsigned char* sub) noexcept {
-    if(!sigOk || !preloaded || broken || !cfg.carrierLaser)return;
+    if(!sigOk || !preloaded || broken || !Cfg().carrierLaser)return;
     __try {
         SeeCarrier(sub,GameMs());   // every carrier, every frame
-        const ULONGLONG tick=GetTickCount64();
-        if(tick-tickAt<10)return;   // once a frame of the carriers that call it
-        tickAt=tick;
+        if(tickFrame==GameFrame())return;   // once a frame of the carriers that call it
+        tickFrame=GameFrame();
         Tick();
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("LASER fault in the frame: off until the game restarts");broken=true;}
 }
@@ -546,8 +545,10 @@ bool InstallLaser() noexcept {
               At<const unsigned char*>(image,kDemoVtable+kDemoUpdateSlot*8)==image+kDemoUpdate &&
               Readable(image+kShipVtable,8) && Readable(image+kInitParamVtable,8);
         flyOk=sigOk && InstallFlight();   // idle unless the laser sends a ship
-        Log("HOOK carrier laser=%d flight=%d (%s)",sigOk,flyOk,!sigOk ? "off: unexpected EDF.dll code" : cfg.carrierLaser ? "on" : "off in the ini");
+        Log("HOOK carrier laser=%d flight=%d (%s)",sigOk,flyOk,!sigOk ? "off: unexpected EDF.dll code" : Cfg().carrierLaser ? "on" : "off in the ini");
         return sigOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetLaser() noexcept {}
 }  // namespace crew

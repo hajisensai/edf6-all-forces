@@ -21,7 +21,7 @@
 // carrier's drones: rotor drones that fly at the enemy and blow up next to it, the doll one carrying a
 // singing, dancing hololive doll that draws the enemy's fire; see kBlastTrigger). With missiles a jet stands off (Missile): it fires them from its role's
 // missileRange and turns away, and closes in with the guns only once they are spent. None reloads; out of
-// ammo, out of fuel (cfg.jetFuelSec times its role's fuel, a launched sortie cfg.jetSortieSec) or below
+// ammo, out of fuel (Cfg().jetFuelSec times its role's fuel, a launched sortie Cfg().jetSortieSec) or below
 // kWithdrawHp of its HP it flies off and is deleted out of the player's sight.
 // Two ways in: a mission places one (the test range's CreateFriend: it guards the player), or JetLaunch
 // makes one at run time (the airstrike takeovers, airstrike.cpp) exactly like the script's CreateFriend:
@@ -89,7 +89,7 @@ struct Kind {
     float overrun,chaseOver;        // Chase
     float range;                    // m from the anchor it takes targets in
     float missileRange;             // m: it fires its missiles from here in, standing off (0: never)
-    float fuel;                     // its time in the air, times cfg.jetFuelSec
+    float fuel;                     // its time in the air, times Cfg().jetFuelSec
     int body;                       // its own body (kJetSgo)
 };
 constexpr Kind kKinds[kRoleCount]={
@@ -485,7 +485,7 @@ bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones=nullptr) noexce
 
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept {
     if(j.mode==m)return;
-    if(cfg.debug)Log("JET v=%p %s -> %s",j.vehicle,kModeNames[static_cast<int>(j.mode)],kModeNames[static_cast<int>(m)]);
+    if(Cfg().debug)Log("JET v=%p %s -> %s",j.vehicle,kModeNames[static_cast<int>(j.mode)],kModeNames[static_cast<int>(m)]);
     j.mode=m;j.modeAt=ms;
 }
 
@@ -599,7 +599,7 @@ bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
     float hit[3];
     const bool ground=MapRay(top,bottom,hit)>=0.0f;
     m={object,ms,!ground || root[1]-hit[1]>kFlyerClear};
-    if(first && cfg.debug)Log("JET target %p: root y=%.0f, lock point y=%.0f, ground %s: %s",object,root[1],p[1],
+    if(first && Cfg().debug)Log("JET target %p: root y=%.0f, lock point y=%.0f, ground %s: %s",object,root[1],p[1],
                               ground ? "under it" : "none seen",m.flyer ? "flies" : "on the ground");
     return m.flyer;
 }
@@ -785,7 +785,7 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noex
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
     CarrierFlames(v,j.surf.rec,Clamp(Len(j.thrust)/kG,0.5f,1.0f),ms);   // the stock Booster flame on each nozzle
-    if(cfg.debug && ms-j.thrustLogAt>1000) {
+    if(Cfg().debug && ms-j.thrustLogAt>1000) {
         j.thrustLogAt=ms;
         Log("JET v=%p thrusters: thrust %.1f m/s^2 (up %.1f, fwd %.1f) tilt %.0f deg, yaw %.0f deg, at F %.0f/%.0f B %.0f/%.0f",v,
             Len(j.thrust),up,fwd,tilt*180.0f/kPi,yaw*180.0f/kPi,j.surf.at[0]*180.0f/kPi,j.surf.at[1]*180.0f/kPi,
@@ -950,7 +950,7 @@ void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) no
     if(j.vel[1]>=need)return;
     const float was=j.vel[1];
     j.vel[1]=need;
-    if(cfg.debug && ms-j.floorLogAt>=1000) {
+    if(Cfg().debug && ms-j.floorLogAt>=1000) {
         j.floorLogAt=ms;
         Log("JET v=%p held off the ground%s: y=%.0f floor=%.0f vy %.1f -> %.1f",j.vehicle,under ? " (under it)" : "",
             pos[1],floorY,was,j.vel[1]);
@@ -1203,7 +1203,7 @@ void CarrierStation(Jet& c,const float* pos,const float* anchor,float height,flo
     }
     if(c.target==c.stationFor)return;
     c.stationFor=c.target;
-    if(cfg.debug)Log("JET v=%p carrier: station (%.0f,%.0f), %.0f m from its anchor%s",c.vehicle,st[0],st[2],HorizDist(st,anchor),
+    if(Cfg().debug)Log("JET v=%p carrier: station (%.0f,%.0f), %.0f m from its anchor%s",c.vehicle,st[0],st[2],HorizDist(st,anchor),
                      c.target ? ", off its target" : " (no target)");
 }
 
@@ -1231,7 +1231,7 @@ bool CarrierEvade(Jet& c,const float* pos,float height,float hp,float hpMax,bool
         if(side[0]*c.vel[0]+side[2]*c.vel[2]<0.0f){side[0]=-side[0];side[2]=-side[2];}
         c.evadeTo[0]=pos[0]+side[0]*kEvadeShift;c.evadeTo[1]=height;c.evadeTo[2]=pos[2]+side[2]*kEvadeShift;
         c.evadeUntil=ms+kEvadeMs;c.evadeAgain=c.evadeUntil+kEvadeGapMs;
-        if(cfg.debug)Log("JET v=%p carrier hit (hp %.0f/%.0f): sidesteps %.0f m to (%.0f,%.0f)",c.vehicle,hp,hpMax,kEvadeShift,
+        if(Cfg().debug)Log("JET v=%p carrier hit (hp %.0f/%.0f): sidesteps %.0f m to (%.0f,%.0f)",c.vehicle,hp,hpMax,kEvadeShift,
                          c.evadeTo[0],c.evadeTo[2]);
     }
     return ms<c.evadeUntil;
@@ -1247,7 +1247,7 @@ void CarrierGoal(Jet& c,const Kind& k,const float* pos,const float* anchor,float
     const bool docking=!evading && coming;
     if(docking!=c.docking) {
         c.docking=docking;
-        if(cfg.debug)Log("JET v=%p carrier: %s",c.vehicle,docking ? "a drone is coming in: holds still" : "back on its orbit");
+        if(Cfg().debug)Log("JET v=%p carrier: %s",c.vehicle,docking ? "a drone is coming in: holds still" : "back on its orbit");
     }
     if(evading) {
         std::memcpy(goal,c.evadeTo,12);*speed=k.cruise;
@@ -1276,7 +1276,7 @@ void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noex
     const float dir[3]={j.bombDir[0]-side[0]*c,0,j.bombDir[2]-side[2]*c};
     Level(pos,dir,j.bombAlt,want);
     *speed=j.bombSpeed;
-    if(cfg.debug && ms-j.gateAt>1000){j.gateAt=ms;Log("JET v=%p bomb run: %.0f m to the target, %.0f m off the line",j.vehicle,along,off);}
+    if(Cfg().debug && ms-j.gateAt>1000){j.gateAt=ms;Log("JET v=%p bomb run: %.0f m to the target, %.0f m off the line",j.vehicle,along,off);}
     if(!j.bombing && along<j.fireDist+j.bombSpeed/60.0f) {
         reinterpret_cast<void(*)(void*)>(image+kIfcOpen)(j.ifc);
         j.bombing=true;j.bayFrom=-along;j.baySteps=0;j.bayOpenAt=ms;
@@ -1333,7 +1333,7 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
           ULONGLONG ms) noexcept {
     bool gun=false,missile=false;
     if(!missileOk)j.lockAt=0;
-    if(j.target && cfg.heliFire && j.mode!=Mode::withdraw && j.mode!=Mode::recover && KindOf(j).attacks) {
+    if(j.target && Cfg().heliFire && j.mode!=Mode::withdraw && j.mode!=Mode::recover && KindOf(j).attacks) {
         const float d[3]={lead[0]-pos[0],lead[1]-pos[1],lead[2]-pos[2]};
         const float dist=Len(d);
         const float miss=dist>1.0f ? std::acos(Clamp(Dot(d,nose)/dist,-1.0f,1.0f)) : 0.0f;
@@ -1346,7 +1346,7 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const bool straight=Normalize(flight) && Dot(flight,nose)>std::cos(std::acos(kGunSlip)+std::fabs(j.aoa));
         const bool friendly=FriendInLine(pos,path,v);
         gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !friendly;
-        if(cfg.debug && dist<reach && ms-j.gateAt>250) {
+        if(Cfg().debug && dist<reach && ms-j.gateAt>250) {
             j.gateAt=ms;
             Log("JET v=%p gun gate: %s mode=%s dist=%.0f miss=%.1f cone=%.1f deg slip=%.3f friend=%d aimed=%d",v,gun ? "FIRE" : "hold",
                 kModeNames[static_cast<int>(j.mode)],dist,miss*180.0f/kPi,(wide>kGunCone ? wide : kGunCone)*180.0f/kPi,
@@ -1360,7 +1360,7 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
                 ms-j.missileAt>kMissileMs && !FriendInLine(pos,j.aim,v);
         if(missile) {
             j.missileAt=ms;
-            if(cfg.debug)Log("JET v=%p missiles: %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,tdist,off*180.0f/kPi,
+            if(Cfg().debug)Log("JET v=%p missiles: %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,tdist,off*180.0f/kPi,
                              static_cast<float>(ms-j.lockAt)*0.001f,a.locked);
         }
     }
@@ -1393,8 +1393,6 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
     }
 }
 
-using PhysicsFn=void(__fastcall*)(void*);   // slot 57: void(vehicle)
-PhysicsFn nextPhysics=nullptr;
 using SetVecFn=void(*)(void*,const float*);
 using DeleteFn=void(*)(void*);
 
@@ -1412,28 +1410,7 @@ const wchar_t kGunshipSgo[]=L"app:/object/demogunshipfiree25.sgo";
 bool gunshipPreloaded=false;              // the shell SGO was preloaded for this mission (PreloadJets)
 using KickFn=void(*)(void*,void*);
 
-// Slot 57 of the 506, after the stock step: the jet's velocity and spin replace the heli's.
-void __fastcall PhysicsHook(void* vehicle) {
-    nextPhysics(vehicle);
-    __try {
-        auto v=static_cast<unsigned char*>(vehicle);
-        const ULONGLONG ms=GameMs();
-        Jet* j=FindJet(v,ms);
-        if(!j || !j->ready || v[kDead] || ms-j->seen>200 || !IsJetVehicle(v,nullptr))return;
-        const auto body=At<void*>(v,kBody);
-        if(!body)return;
-        JetMotionProps(body);
-        alignas(16) float lin[4]={j->vel[0],j->vel[1],j->vel[2],0.0f},ang[4]={j->omega[0],j->omega[1],j->omega[2],0.0f};
-        reinterpret_cast<SetVecFn>(image+kSetLinearVelocity)(body,lin);
-        reinterpret_cast<SetVecFn>(image+kSetAngularVelocity)(body,ang);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
-}
-
 bool physicsOk=false;
-const unsigned char kPhysicsSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xE8};   // 0x61B710: push rbx; sub rsp,20h; mov rbx,rcx; call
-// Both jump through the Havok world interface; only the slot differs (0xA8 linear, 0xB0 angular).
-const unsigned char kSetLinSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xA8,0x00,0x00};
-const unsigned char kSetAngSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xB0,0x00,0x00};
 const unsigned char kDeleteSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x60,0x48};
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
 const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
@@ -1536,7 +1513,7 @@ void FixBodyPart(unsigned char* v) noexcept {
         const auto i=reinterpret_cast<FindPartFn>(image+kFindPart)(v+kParts,name);
         if(i<0)continue;
         Put<std::int32_t>(v,kBodyPart,i);
-        if(cfg.debug)Log("JET v=%p body part: %ls (%d)",v,name,i);
+        if(Cfg().debug)Log("JET v=%p body part: %ls (%d)",v,name,i);
         return;
     }
     Log("JET v=%p has no body part (going down it would crash)",v);
@@ -1677,7 +1654,7 @@ Jet* Launch(Role role,const float* from,const float* heading,const float* target
     const int kind=kKinds[static_cast<int>(role)].body;
     int b=body==JetBody::kind ? kind : static_cast<int>(body);
     if(!preloaded[b])b=kind;
-    if(!spawnOk || !cfg.jetPilot || !preloaded[b] || !At<void*>(image,kObjectMgr))return nullptr;
+    if(!spawnOk || !Cfg().jetPilot || !preloaded[b] || !At<void*>(image,kObjectMgr))return nullptr;
     const ULONGLONG ms=GameMs();
     Jet* j=FreeSlot(nullptr,ms);
     if(!j){Log("JET launch: %d jets flying",kMaxJets);return nullptr;}
@@ -1748,10 +1725,10 @@ void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexce
     const bool own=Trigger(c.drones)>0.0f && preloaded[kKinds[static_cast<int>(c.drones)].body];
     const Role role=own ? c.drones : Role::drone;
     const float least=kKinds[static_cast<int>(role)].minSpeed,s=Len(c.vel)+20.0f;
-    Jet* d=Launch(role,from,heading,c.aim,cfg.jetFuelSec,s>least ? s : least,c.vehicle);
+    Jet* d=Launch(role,from,heading,c.aim,Cfg().jetFuelSec,s>least ? s : least,c.vehicle);
     if(!d)return;
     d->mother=c.ctrl;d->slot=i;d->flight=c.flight;c.dock[i]=kDroneOut;--c.sorties;
-    if(role==Role::doll)DollMake(static_cast<int>(d-jets),d->vehicle,cfg.jetFuelSec);
+    if(role==Role::doll)DollMake(static_cast<int>(d-jets),d->vehicle,Cfg().jetFuelSec);
     Log("JET v=%p carrier %p launched %s %d at %p",d->vehicle,c.vehicle,kKinds[static_cast<int>(role)].name,i,c.target);
 }
 }  // namespace
@@ -1772,7 +1749,7 @@ unsigned char* GunshipCreate(const float* m) noexcept {
 // A gunship's shell every kGunshipGapMs while it has a ground target within kGunshipReach and is not
 // leaving: from the gunship (`pos`) onto the target's lock point (j.aim).
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
-    if(!gunshipPreloaded || !cfg.heliFire || !j.target || j.flyer)return;
+    if(!gunshipPreloaded || !Cfg().heliFire || !j.target || j.flyer)return;
     if(j.mode==Mode::withdraw || j.mode==Mode::recover || j.mode==Mode::takeoff || ms-j.gunAt<kGunshipGapMs)return;
     const float d[3]={j.aim[0]-pos[0],j.aim[1]-pos[1],j.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach || !At<void*>(image,kObjectMgr))return;
@@ -1795,7 +1772,7 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
         const float st[4]={pos[0],pos[1],pos[2],1.0f},am[4]={j.aim[0],j.aim[1],j.aim[2],1.0f};
         std::memcpy(ifc+kIfcFrom,st,16);std::memcpy(ifc+kIfcAim,am,16);
         ++j.gunShots;
-        if(cfg.debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.gunShots,j.target,Len(d));
+        if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.gunShots,j.target,Len(d));
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET gunship shell: fault setting up %p",o);}
 }
 }  // namespace
@@ -1954,7 +1931,7 @@ bool Wingman(void* collector,std::uint32_t body) noexcept {
     const bool pass=shooter ? shooter!=target && shooter->flight==target->flight : owner && BombOf(owner,*target,ms);
     if(pass)++passLog.passed;
     else if(!shooter && owner)++passLog.strangers;
-    if(cfg.debug && ms-passLog.at>2000 && (passLog.passed || passLog.strangers)) {
+    if(Cfg().debug && ms-passLog.at>2000 && (passLog.passed || passLog.strangers)) {
         Log("BULLET through wingmen: %u candidates passed, %u near a jet from a non-jet owner (last %p)",passLog.passed,passLog.strangers,owner);
         passLog=PassLog{ms,0,0};
     }
@@ -1967,6 +1944,18 @@ void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
     if(!pass)nextAddBody(collector,body);
 }
 }  // namespace
+
+// The 506 physics step (body506.cpp), after the stock one: the jet's velocity and spin replace the heli's.
+bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
+    const ULONGLONG ms=GameMs();
+    Jet* j=FindJet(v,ms);
+    if(!j || !j->ready || v[kDead] || ms-j->seen>200)return false;
+    const auto body=At<void*>(v,kBody);
+    if(!body)return false;
+    JetMotionProps(body);
+    for(int i=0;i<3;++i){lin[i]=j->vel[i];ang[i]=j->omega[i];}
+    return true;
+}
 
 bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr);
@@ -2026,7 +2015,7 @@ void JetFrame(unsigned char* v) noexcept {
         if(!j)return;   // kMaxJets flying: this one hovers until a slot frees
         *j=Jet{};j->vehicle=v;j->ctrl=SelfCtrl(v);IsJetVehicle(v,&j->role,&j->drones);j->bornAt=j->modeAt=ms;j->last=now;j->sorties=kCarrierSorties;
         std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;j->flight=kPlacedFlight;
-        j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(cfg.jetFuelSec)*KindOf(*j).fuel*1000.0f);
+        j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(Cfg().jetFuelSec)*KindOf(*j).fuel*1000.0f);
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,KindOf(*j).name,At<float>(v,kHp),Ceiling());
     }
     j->seen=ms;
@@ -2205,7 +2194,7 @@ void JetFrame(unsigned char* v) noexcept {
     if(j->role==Role::carrier)LaunchDrones(*j,pos,nose,ms);
     if(j->role==Role::gunship)GunshipFire(*j,v,pos,ms);
     if(j->role==Role::doll && dolls[j-jets].obj)DollPose(static_cast<int>(j-jets),v);
-    if(cfg.debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
+    if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
 
 void JetReap(const void* self) noexcept {
@@ -2231,14 +2220,9 @@ void JetReap(const void* self) noexcept {
 
 bool InstallJets() noexcept {
     __try {
-        const bool sig=Matches(kPhysics506,kPhysicsSig,sizeof(kPhysicsSig)) && Matches(kSetLinearVelocity,kSetLinSig,sizeof(kSetLinSig)) &&
-                       Matches(kSetAngularVelocity,kSetAngSig,sizeof(kSetAngSig)) && Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));
-        if(!sig){Log("JET profile mismatch: jets off");return false;}
-        const auto slot=reinterpret_cast<void**>(image+kHeli506)+kSlotPhysics;
-        void* const current=*slot;
-        if(current!=image+kPhysics506)Log("JET physics: chaining onto %p (another plugin)",current);
-        nextPhysics=reinterpret_cast<PhysicsFn>(current);
-        physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
+        if(!Body506Ok()){Log("JET: no 506 physics hook (body506): jets off");return false;}
+        if(!Matches(kDelete,kDeleteSig,sizeof(kDeleteSig))){Log("JET profile mismatch: jets off");return false;}
+        physicsOk=true;
         if(physicsOk){InstallJetProps();InstallBoosters();}
         spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
@@ -2261,4 +2245,9 @@ bool InstallJets() noexcept {
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetJets() noexcept {}
+
+// TODO(review): a charge of `by`'s own at `at` (as Blast's), `damage` / `radius`, its side's enemies only.
+bool ImpactDamage(const unsigned char* by,const float* at,float damage,float radius) noexcept { (void)by;(void)at;(void)damage;(void)radius;return false; }
 }  // namespace crew

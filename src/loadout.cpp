@@ -81,7 +81,7 @@ bool Apply(std::uintptr_t slotArg,Undo& u,const char* where) noexcept {
         std::memcpy(u.stars[i],stars,kStarCount);
         std::memset(stars,l.stars,kStarCount);
     }
-    if(cfg.debug)Log("LOADOUT %s class=%d weapons=%d,%d,%d,%d,%d,%d stars=%d",where,l.cls,
+    if(Cfg().debug)Log("LOADOUT %s class=%d weapons=%d,%d,%d,%d,%d,%d stars=%d",where,l.cls,
                      l.weapon[0],l.weapon[1],l.weapon[2],l.weapon[3],l.weapon[4],l.weapon[5],l.stars);
     return true;
 }
@@ -98,17 +98,13 @@ std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uin
     const bool applied=Apply(a,u,"preload");
     const auto result=preloadOrig(a,b,c,d);
     if(applied)Restore(u);
-    PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
-    PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)
-    PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
+    MissionStart();
     return result;
 }
 
 std::uintptr_t __fastcall SessionPreloadHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
     const auto result=sessionOrig(a,b,c,d);
-    PreloadJets();
-    PreloadSub();
-    PreloadLaser();
+    MissionStart();
     return result;
 }
 
@@ -123,7 +119,7 @@ void Refill(std::uintptr_t soldier) noexcept {
     if(count==0 || count>16 || !Readable(list,count*sizeof(void*)))return;
     for(std::uint64_t i=0;i<count;++i)if(!Readable(list[i],0xE80))return;
     reloadAll(obj);
-    if(cfg.debug)Log("LOADOUT refill weapons=%llu",static_cast<unsigned long long>(count));
+    if(Cfg().debug)Log("LOADOUT refill weapons=%llu",static_cast<unsigned long long>(count));
 }
 
 std::uintptr_t __fastcall CreateHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {

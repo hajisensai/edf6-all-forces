@@ -197,7 +197,7 @@ const Call* CallOf(const void* ifc) noexcept {
 // and kAboveTarget up, helis kHeliApproach out), side by side; how many came.
 int LaunchCall(const Call& c,const float* target) noexcept {
     float dir[3]={0,0,1};
-    if(player.at && GetTickCount64()-player.at<10000) {
+    if(player.at && GameMs()-player.at<10000) {
         const float dx=target[0]-player.pos[0],dz=target[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
         if(l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
     }
@@ -210,7 +210,7 @@ int LaunchCall(const Call& c,const float* target) noexcept {
     const bool heli=c.brings==Brings::helis;
     const float side[3]={dir[2],0,-dir[0]};
     const float back=heli ? kHeliApproach : kApproach,spacing=heli ? kHeliSpacing : kWingSpacing;
-    const float up=heli ? cfg.heliHeight : kAboveTarget;
+    const float up=heli ? Cfg().heliHeight : kAboveTarget;
     int launched=0;
     for(int i=0;i<c.count;++i) {
         const float off=(static_cast<float>(i)-static_cast<float>(c.count-1)*0.5f)*spacing;
@@ -233,7 +233,7 @@ int LaunchCall(const Call& c,const float* target) noexcept {
 // A call weapon's: its jets or helis, and no bombers (when none could be launched the bombers fly).
 std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
     const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
-    if(!cfg.enabled || !cfg.jetAirRaider)return result;
+    if(!Cfg().enabled || !Cfg().jetAirRaider)return result;
     __try {
         const Call* const c=CallOf(ifc);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
@@ -252,7 +252,7 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
         const ULONGLONG ms=GameMs();
         Held* const h=FreeHeld(ms);
         if(!h){Log("AIRSTRIKE %s bomber %p: %d bombers held, it flies stock",who,plane,kMaxHeld);return;}
-        if(!ctrl || !std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source,body,ctrl))return;
+        if(!ctrl || !std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,Cfg().jetSortieSec,source,body,ctrl))return;
         *h=Held{ctrl,ms,false};
         Log("AIRSTRIKE %s bomber %p (%s model): its jet drops the bombs",who,plane,
             body==JetBody::bomber401 ? "bomber401" : body==JetBody::bomber501_2 ? "bomber501_2" : "bomber501 / unknown");
@@ -262,13 +262,13 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
 void __fastcall RadioBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                 float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(cfg.enabled && cfg.jetAirRaider)TakeOver("air raider",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kRadioSource);
+    if(Cfg().enabled && Cfg().jetAirRaider)TakeOver("air raider",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kRadioSource);
 }
 
 void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                   float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(cfg.enabled && cfg.jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
+    if(Cfg().enabled && Cfg().jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
 }
 
 // BombingPlane slot 5 (update): a held plane is hidden and left as it is while its jet holds it, then
@@ -395,4 +395,6 @@ bool InstallAirstrikes() noexcept {
         return calls || radio || mission;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetAirstrikes() noexcept {}
 }  // namespace crew

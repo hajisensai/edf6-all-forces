@@ -132,11 +132,9 @@ struct PJet {
 constexpr int kMaxJets=16;
 PJet jets[kMaxJets]{};
 
-using PhysicsFn=void(__fastcall*)(void*);
 using SetVecFn=void(*)(void*,const float*);
 using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
 using DieFn=void(__fastcall*)(void*);
-PhysicsFn nextPhysics=nullptr;
 bool physicsOk=false,bodyPartOk=false,dieOk=false;
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -201,7 +199,7 @@ void FixBodyPart(unsigned char* v) noexcept {
         const auto i=reinterpret_cast<FindPartFn>(image+kFindPart)(v+kParts,name);
         if(i<0)continue;
         Put<std::int32_t>(v,kBodyPart,i);
-        if(cfg.debug)Log("PJET v=%p body part: %ls (%d)",v,name,i);
+        if(Cfg().debug)Log("PJET v=%p body part: %ls (%d)",v,name,i);
         return;
     }
     Log("PJET v=%p has no body part (going down it would crash)",v);
@@ -250,7 +248,7 @@ void Elevons(PJet& j,unsigned char* v,float dt) noexcept {
             if(j.elevon[i])std::memcpy(j.elevonBind[i],j.elevon[i]+kBoneLocal,64);
             j.elevonAt[i]=0.0f;
         }
-        if(cfg.debug)Log("PJET v=%p elevons: %s",v,j.elevon[0] && j.elevon[1] ? "found" : "none in this model");
+        if(Cfg().debug)Log("PJET v=%p elevons: %s",v,j.elevon[0] && j.elevon[1] ? "found" : "none in this model");
     }
     if(!j.elevon[0] || !j.elevon[1])return;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -287,7 +285,7 @@ Stick ReadStick(const unsigned char* seat) noexcept {
     const float a=At<float>(seat,kSeatAscend);
     s.ascend=std::isfinite(a) ? Clamp(a,0.0f,1.0f) : 0.0f;
     s.turn=Clamp(s.rx+s.lx,-1.0f,1.0f);
-    s.pitch=cfg.playerJetInvertPitch ? s.ry : -s.ry;
+    s.pitch=Cfg().playerJetInvertPitch ? s.ry : -s.ry;
     s.throttle=s.ascend>0.5f || s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f;
     return s;
 }
@@ -474,7 +472,7 @@ void Leave(PJet& j,unsigned char* v) noexcept {
 }
 
 void Report(PJet& j,const unsigned char* v,const Stick& s,const float* pos,float clear,ULONGLONG ms) noexcept {
-    if(!cfg.debug || ms-j.logAt<kLogMs)return;
+    if(!Cfg().debug || ms-j.logAt<kLogMs)return;
     j.logAt=ms;
     const float speed=Len(j.vel);
     Log("PJET v=%p %s %.0f m/s climb %.1f thr %.2f pos=(%.0f,%.0f,%.0f) clear %.0f hp %.0f in(turn %.2f pitch %.2f) "
@@ -511,29 +509,22 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
 }
 
 // Slot 57 of the 506, after the hooks before it: a flown player jet's velocity and spin replace the heli's.
-void __fastcall PhysicsHook(void* vehicle) {
-    nextPhysics(vehicle);
-    __try {
-        auto v=static_cast<unsigned char*>(vehicle);
-        const ULONGLONG ms=GameMs();
-        PJet* j=Find(v,ms);
-        if(!j || !j->active || !j->driven || v[kDead] || ms-j->seen>200)return;
-        const auto body=At<void*>(v,kBody);
-        if(!body)return;
-        JetMotionProps(body);
-        alignas(16) float lin[4]={j->vel[0],j->vel[1],j->vel[2],0.0f},ang[4]={j->omega[0],j->omega[1],j->omega[2],0.0f};
-        reinterpret_cast<SetVecFn>(image+kSetLinearVelocity)(body,lin);
-        reinterpret_cast<SetVecFn>(image+kSetAngularVelocity)(body,ang);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
-}
-
-const unsigned char kPhysicsSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xE8};
-const unsigned char kSetLinSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xA8,0x00,0x00};
-const unsigned char kSetAngSig[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C,0x8B,0xC2,0x8B,0x91,0xF0,0x00,0x00,0x00,0x45,0x33,0xC9,0x4C,0x8B,0x50,0x58,0x49,0x8B,0x42,0x18,0x49,0x8D,0x4A,0x18,0x48,0xFF,0xA0,0xB0,0x00,0x00};
 const unsigned char kFindPartSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x56,0x48,0x83,0xEC,0x50};
 // 0x6329B0: mov [rsp+8],rbx; push rdi; sub rsp,20h; imul rax,[rcx+618h],340h (the seat loop)
 const unsigned char kDieSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x69,0x81,0x18,0x06,0x00,0x00,0x40,0x03,0x00,0x00};
 }  // namespace
+
+// The 506 physics step (body506.cpp), after the stock one: the player jet's velocity and spin.
+bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
+    const ULONGLONG ms=GameMs();
+    PJet* j=Find(v,ms);
+    if(!j || !j->active || !j->driven || v[kDead] || ms-j->seen>200)return false;
+    const auto body=At<void*>(v,kBody);
+    if(!body)return false;
+    JetMotionProps(body);
+    for(int i=0;i<3;++i){lin[i]=j->vel[i];ang[i]=j->omega[i];}
+    return true;
+}
 
 bool IsPlayerJet(const void* vehicle) noexcept {
     __try { return KindOf(static_cast<const unsigned char*>(vehicle))!=nullptr; }
@@ -541,7 +532,7 @@ bool IsPlayerJet(const void* vehicle) noexcept {
 }
 
 void PlayerJetFrame(unsigned char* v) noexcept {
-    if(!physicsOk || !cfg.playerJet)return;
+    if(!physicsOk || !Cfg().playerJet)return;
     const Kind* kind=KindOf(v);
     if(!kind || v[kDead])return;
     const ULONGLONG ms=GameMs();
@@ -555,17 +546,14 @@ void PlayerJetFrame(unsigned char* v) noexcept {
 
 bool InstallPlayerJets() noexcept {
     __try {
-        const bool sig=Matches(kPhysics506,kPhysicsSig,sizeof(kPhysicsSig)) && Matches(kSetLinearVelocity,kSetLinSig,sizeof(kSetLinSig)) &&
-                       Matches(kSetAngularVelocity,kSetAngSig,sizeof(kSetAngSig));
-        if(!sig){Log("PJET profile mismatch: player jets off");return false;}
-        const auto slot=reinterpret_cast<void**>(image+kHeli506)+kSlotPhysics;
-        void* const current=*slot;
-        nextPhysics=reinterpret_cast<PhysicsFn>(current);
-        physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
+        if(!Body506Ok()){Log("PJET: no 506 physics hook (body506): player jets off");return false;}
+        physicsOk=true;
         bodyPartOk=physicsOk && Matches(kFindPart,kFindPartSig,sizeof(kFindPartSig));
         dieOk=physicsOk && Matches(kVehicleDie,kDieSig,sizeof(kDieSig));
         Log("HOOK player jets physics=%d bodyPart=%d die=%d",physicsOk,bodyPartOk,dieOk);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetPlayerJets() noexcept {}
 }  // namespace crew

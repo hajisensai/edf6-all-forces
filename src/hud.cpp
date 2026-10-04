@@ -1,5 +1,5 @@
 // The vehicle HUD (docs/hud-re.md, ini VehicleHud / VehicleHudCount / VehicleHudRange).
-//  - Over each of the cfg.vehicleHudCount nearest NPC-driven friendly vehicles within cfg.vehicleHudRange of the
+//  - Over each of the Cfg().vehicleHudCount nearest NPC-driven friendly vehicles within Cfg().vehicleHudRange of the
 //    player, on screen: one line "<kind> <hp>%  G <rounds>  M <missiles>  D <drones>  F m:ss" and an HP bar under
 //    it. The gun / missile counts only for one armed with them (its pilot seat's weapons), the drones only for a
 //    drone carrier, the fuel only where the plugin limits it (jets, called helis; "RTB" once it withdraws).
@@ -284,7 +284,7 @@ const float* HullColour(float share) noexcept { return share>0.5f ? kCyan : shar
 int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int at,
              ULONGLONG tick,int* shown) noexcept {
     Data best[kMaxShown];
-    int most=cfg.vehicleHudCount;
+    int most=Cfg().vehicleHudCount;
     most=most<0 ? 0 : most>kMaxShown ? kMaxShown : most;
     const int n=Nearest(best,most,tick);
     *shown=0;
@@ -378,7 +378,7 @@ void DrawLog(int shown,int panels,const Line* lines,int count,int width,int heig
     static int lastShown=-1,lastPanels=-1;
     static ULONGLONG at=0;
     const ULONGLONG now=GetTickCount64();
-    if(!cfg.debug || (shown==lastShown && panels==lastPanels) || now-at<10000)return;
+    if(!Cfg().debug || (shown==lastShown && panels==lastPanels) || now-at<10000)return;
     at=now;lastShown=shown;lastPanels=panels;
     Log("HUD draw %dx%d: %d readout(s), %d carrier panel(s), text=%d",width,height,shown,panels,textOk);
     for(int i=0;i<count && i<12;++i)Log("HUD   \"%ls\" at (%.0f,%.0f) %.0fx%.0f",lines[i].text,lines[i].x,lines[i].y,lines[i].w,lines[i].h);
@@ -398,7 +398,7 @@ bool InstallHud() noexcept {
 }
 
 void HudSee(unsigned char* v) noexcept {
-    if(!cfg.vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
+    if(!Cfg().vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
     if(SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy)return;   // NPC-driven only
     const std::int32_t team=At<std::int32_t>(v,kTeam);
     if(team!=player.team && team!=kTeamFriend && team!=kTeamVehicle)return;
@@ -406,7 +406,7 @@ void HudSee(unsigned char* v) noexcept {
     if(!player.at || tick-player.at>2000)return;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dx=pos[0]-player.pos[0],dy=pos[1]-player.pos[1],dz=pos[2]-player.pos[2];
-    if(cfg.vehicleHudRange>0.0f && dx*dx+dy*dy+dz*dz>cfg.vehicleHudRange*cfg.vehicleHudRange)return;
+    if(Cfg().vehicleHudRange>0.0f && dx*dx+dy*dy+dz*dz>Cfg().vehicleHudRange*Cfg().vehicleHudRange)return;
     const int i=Slot(v,tick);
     if(i<0)return;
     Data d{};
@@ -435,7 +435,7 @@ void HudSee(unsigned char* v) noexcept {
     std::atomic_thread_fence(std::memory_order_release);
     std::memcpy(&e.d,&d,sizeof(d));
     e.seq.store(seq+2,std::memory_order_release);
-    if(cfg.debug && logged[i]!=v) {
+    if(Cfg().debug && logged[i]!=v) {
         logged[i]=v;
         Log("HUD v=%p %s: hp %.0f/%.0f guns %d missiles %d drones %d fuel %.0fs%s",v,d.kind,d.hp,d.hpMax,d.guns,d.missiles,d.drones,
             d.fuel,d.leaving ? " (leaving)" : "");
@@ -443,7 +443,7 @@ void HudSee(unsigned char* v) noexcept {
 }
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
-    if(!cfg.vehicleHud || !quadOk || !viewProj || !ctx || !viewport)return;
+    if(!Cfg().vehicleHud || !quadOk || !viewProj || !ctx || !viewport)return;
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
         const int w=At<std::int32_t>(viewport,8),h=At<std::int32_t>(viewport,0xC);
@@ -464,4 +464,6 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         DrawLog(shown,count,lines,at,w,h);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
+// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
+void ResetHud() noexcept {}
 }  // namespace crew

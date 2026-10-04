@@ -2,23 +2,36 @@
 // the player can board any seat an NPC holds, bumping the NPC to a gunner seat.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46; see docs/re-notes.md.
 #include <Windows.h>
+#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <new>
 #pragma warning(push)
 #pragma warning(disable:4201)
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
 #include "memory.h"
+#include "version.h"
 
 namespace crew {
 unsigned char* image=nullptr;
-Config cfg{};
 PlayerFix player{};
+namespace {
+// The published config. A reload builds a new one and swaps the pointer; the old one is never freed (a
+// reader on another thread may still hold it, and a reload is a person saving the ini: a few hundred bytes
+// each time), so no reader ever sees a half-written config.
+const Config kDefaults{};
+std::atomic<const Config*> published{&kDefaults};
+thread_local int noBumpDepth=0;
+}  // namespace
+const Config& Cfg() noexcept { return *published.load(std::memory_order_acquire); }
+void SuppressBump(bool on) noexcept { noBumpDepth+=on ? 1 : -1; }
+bool BumpSuppressed() noexcept { return noBumpDepth>0; }
 namespace {
 HMODULE module=nullptr;
 wchar_t logPath[MAX_PATH]{};
@@ -91,7 +104,6 @@ void LoadConfig() noexcept {
     n.heliRange=ReadFloat(L"HeliRange",n.heliRange);
     n.heliCombatRange=ReadFloat(L"HeliCombatRange",n.heliCombatRange);
     n.heliFire=ReadBool(L"HeliFire",n.heliFire);
-    n.heliStandoff=ReadFloat(L"HeliStandoff",n.heliStandoff);
     n.heliFireCone=ReadFloat(L"HeliFireCone",n.heliFireCone);
     n.heliFireHeight=ReadFloat(L"HeliFireHeight",n.heliFireHeight);
     n.heliAvoid=ReadBool(L"HeliAvoid",n.heliAvoid);
@@ -133,23 +145,24 @@ void LoadConfig() noexcept {
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
     n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
     n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
-    cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
-        cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
-        cfg.heliPilot,cfg.heliHeight,cfg.heliFollow,cfg.heliRange,cfg.heliFire);
-    Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f standoff=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
-        cfg.heliCombatRange,cfg.heliAvoid,cfg.heliFireHeight,cfg.heliStandoff,cfg.heliFireCone,cfg.heliMissile,cfg.heliMissileMs,cfg.heliMoveGain,cfg.heliBrakeGain,cfg.heliClimbGain,cfg.heliHoverLearn,cfg.heliLandMs);
-    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",cfg.heliSpeed,cfg.heliAgility,cfg.heliYawRate,cfg.heliDoorGuns,
-        cfg.heliGuardRadius,cfg.heliGuardSpeed);
-    Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",cfg.subHullHp,cfg.subHeavyHit);
-    Log("CONFIG hud vehicles=%d count=%d range=%.0f",cfg.vehicleHud,cfg.vehicleHudCount,cfg.vehicleHudRange);
-    Log("CONFIG playerJet=%d invertPitch=%d",cfg.playerJet,cfg.playerJetInvertPitch);
-    Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",cfg.jetPilot,cfg.jetFuelSec,
-        cfg.jetSortieSec,cfg.jetAirRaider,cfg.jetMissionStrike);
-    Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",cfg.groundPilot,cfg.groundFollow,
-        cfg.groundRange,cfg.groundLeash,cfg.groundFire);
-    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",cfg.seaRescue,cfg.rescueBelow,cfg.rescueAutoBoard);
-    Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",cfg.carrierLaser,cfg.carrierLaserDamage,cfg.carrierLaserBreak);
+        n.enabled,n.debug,n.autoCrew,n.crewDelayMs,n.crewRange,n.bump,n.bumpToGunner,
+        n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
+    Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
+        n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliMoveGain,n.heliBrakeGain,n.heliClimbGain,n.heliHoverLearn,n.heliLandMs);
+    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
+        n.heliGuardRadius,n.heliGuardSpeed);
+    Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
+    Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
+    Log("CONFIG playerJet=%d invertPitch=%d",n.playerJet,n.playerJetInvertPitch);
+    Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
+        n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
+    Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
+        n.groundRange,n.groundLeash,n.groundFire);
+    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
+    Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
+    Config* const fresh=new(std::nothrow) Config(n);
+    if(fresh)published.store(fresh,std::memory_order_release);
 }
 
 FILETIME IniStamp() noexcept {
@@ -245,7 +258,7 @@ unsigned char* HumanOf(unsigned char* object) noexcept {
 }  // namespace
 
 void SeePlayer(const float* pos,std::int32_t team) noexcept {
-    std::memcpy(player.pos,pos,sizeof(player.pos));player.team=team;player.at=GetTickCount64();
+    std::memcpy(player.pos,pos,sizeof(player.pos));player.team=team;player.at=GameMs();
     __try {
         auto object=const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(pos))-kPosition;
         if(auto human=HumanOf(object)) {
@@ -256,7 +269,7 @@ void SeePlayer(const float* pos,std::int32_t team) noexcept {
 
 unsigned char* PlayerHuman() noexcept {
     __try {
-        if(!playerHuman || GetTickCount64()-playerHumanAt>kPlayerHumanMs)return nullptr;
+        if(!playerHuman || GameMs()-playerHumanAt>kPlayerHumanMs)return nullptr;
         if(!Readable(playerHuman,kHumanVehicleCtrl+8) || At<const void*>(playerHuman,kSelfCtrl)!=playerHumanCtrl ||
            !IsPlayer(playerHuman))return nullptr;
         return playerHuman;
@@ -272,12 +285,13 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
-    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(0,1,0,0);
-    Log("EDF6VehicleCrew 0.1.0 loading");
+    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(EDF6VC_VERSION_MAJOR,EDF6VC_VERSION_MINOR,EDF6VC_VERSION_PATCH,0);
+    Log("EDF6VehicleCrew %s loading",EDF6VC_VERSION);
     iniStamp=IniStamp();
     LoadConfig();
     if(!IdentifyImage(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll");return false;}
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
+    InstallBody506();
     Log("HELI profile=%d",CheckHeliProfile());
     Log("GROUND profile=%d",CheckGroundProfile());
     InstallLaser();
