@@ -12,8 +12,10 @@
 //   +0x3F0 decays by +0x3E8 a frame, +0x3F4 counts down and zeroes +0x3EC at 0. (H)
 // The plugin feeds each nozzle's bone world matrix (unit rows: the x1.6 model scale is in the sizes instead)
 // and every frame sets +0x3EC = thrust share, +0x3F0 = 1, +0x3F4 = 3; a carrier gone for kStaleMs, or dead,
-// has its boosters deleted. (H/M) Which way the flame points relative to the bone is not verified in game (L).
+// has its boosters deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the last carrier is gone,
+// when no carrier frame runs). (H/M) Which way the flame points relative to the bone is not verified in game (L).
 #include "crew.h"
+#include "jet_internal.h"   // FaultLog, BoosterSweep
 #include "memory.h"
 #include <cmath>
 #include <cstdint>
@@ -163,7 +165,6 @@ void Sweep(ULONGLONG ms) noexcept {
 }
 
 void Frame(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept {
-    Sweep(ms);
     Carrier* const c=Find(v,ms);
     if(!c)return;
     c->seen=ms;
@@ -190,6 +191,12 @@ void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float inten
     __except(MakeFault(GetExceptionInformation())) {}
 }
 
+void BoosterSweep(ULONGLONG ms) noexcept {
+    if(!sigOk || broken)return;
+    __try { Sweep(ms); }
+    __except(FaultLog("FLAME sweep",GetExceptionInformation())) {}
+}
+
 bool InstallBoosters() noexcept {
     __try {
         sigOk=Matches(kOpNew,kOpNewSig,sizeof(kOpNewSig)) && Matches(kCtor,kCtorSig,sizeof(kCtorSig)) &&
@@ -201,8 +208,11 @@ bool InstallBoosters() noexcept {
               Readable(image+kConstC,16) && Readable(image+kConstD,16);
         Log("HOOK carrier flames=%d%s",sigOk,sigOk ? "" : " (off: unexpected EDF.dll code)");
         return sigOk;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    } __except(FaultLog("FLAME install",GetExceptionInformation())){return false;}
 }
-// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
-void ResetBoosters() noexcept {}
+// A new mission (mission.cpp MissionStart): the carriers and their boosters were the last mission's, gone with
+// it: forgotten, not deleted, their weak references not dropped (their memory may be anyone's now).
+void ResetBoosters() noexcept {
+    for(auto& c:carriers)c=Carrier{};
+}
 }  // namespace crew

@@ -4,6 +4,7 @@
 // body gets a copy of its preset with the speed cap raised, added to the world's motion-properties library
 // (never the shared entry edited in place: every heli and truck uses it).
 #include "crew.h"
+#include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include <cstring>
 
@@ -97,6 +98,6 @@ bool JetMotionProps(void* bodyPtr) noexcept {
             std::memcpy(body+kBodyProps,now+static_cast<std::size_t>(to)*kPropsSize,kPropsSize);
         }
         return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    } __except(FaultLog("JET motion props",GetExceptionInformation())){return false;}
 }
 }  // namespace crew
