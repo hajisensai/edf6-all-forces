@@ -475,6 +475,26 @@ void ImpactMark(void* drawer,void* ctx,const float* vp,float width,float height,
     Rect(drawer,ctx,sx-t*0.5f,sy-r,sx+t*0.5f,sy-g,kYellow);Rect(drawer,ctx,sx-t*0.5f,sy+g,sx+t*0.5f,sy+r,kYellow);
 }
 
+// The picked store's lock: locking, a yellow square closing in as it locks; locked, a red diamond on the target. The
+// missile flies at what this marks (stores.cpp StoreLock reads the same entry the round will hold).
+void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
+    float sx,sy,depth;
+    if(!j.lock || !Project(vp,j.lockAt,width,height,&sx,&sy,&depth))return;
+    const float t=2.0f*s;
+    if(j.lock==1) {
+        const float r=(40.0f-24.0f*j.lockProgress)*s;
+        Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kYellow);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kYellow);
+        Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kYellow);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kYellow);
+        return;
+    }
+    const float r=14.0f*s;
+    for(int k=0;k<6;++k) {   // a diamond from small squares along its four edges
+        const float f=static_cast<float>(k)/6.0f,d=r*f,e=r-d;
+        Rect(drawer,ctx,sx+d-t,sy-e-t,sx+d+t,sy-e+t,kRed);Rect(drawer,ctx,sx-d-t,sy-e-t,sx-d+t,sy-e+t,kRed);
+        Rect(drawer,ctx,sx+d-t,sy+e-t,sx+d+t,sy+e+t,kRed);Rect(drawer,ctx,sx-d-t,sy+e-t,sx-d+t,sy+e+t,kRed);
+    }
+}
+
 // The stores line: each store's name and rounds, the picked one in brackets.
 void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
     wchar_t text[128]=L"";
@@ -513,14 +533,15 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
             Format(keys,Cfg().playerJetMouseFlight ? L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll"
                                                     : L"W / SPACE: pull up    S: push down    A / D: roll    (let go: wings level)");
             if(Cfg().playerJetMouseFlight)Format(keys,L"MOUSE: aim    W / SPACE / S / A / D: fly by hand (the mouse takes over once it moves)");
-            Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon",boost,brake,swap);
+            wchar_t target[32];KeyName(Cfg().playerJetTargetKey,target,32);
+            Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target",boost,brake,swap,target);
         } else {
             Format(keys,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",boost,brake);
             Format(keys2,L"W / SPACE: pull up to take off (from 270 km/h)");
         }
     } else if(j.air) {
         Format(keys,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways");
-        Format(keys2,L"PITCH, TURN: right stick    LB: switch weapon");
+        Format(keys2,L"PITCH, TURN: right stick    LB: switch weapon    X: next target");
     } else {
         Format(keys,L"THROTTLE: forward / ascend = up, back = down    TURN: sticks");
         Format(keys2,L"TAKE OFF: pull the right stick back (from 270 km/h)");
@@ -687,6 +708,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
+            else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
         }
         if(Cfg().vehicleHud) {

@@ -72,6 +72,7 @@ struct Config {
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
     int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
     int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
+    int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
@@ -312,6 +313,8 @@ struct PlayerJetReadout {
     int storeRounds[6];
     bool bomb,hasImpact;
     float impact[3];
+    int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
+    float lockAt[3],lockProgress;
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)

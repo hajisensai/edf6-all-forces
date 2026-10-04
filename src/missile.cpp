@@ -30,7 +30,7 @@ constexpr std::size_t kVtable=0x17A1C10,kUpdate=0x26A880,kSlotUpdate=5;
 const unsigned char kUpdateSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57};
 // The round (B): its lock entry (+0x10 the aim point, +0x29 valid), velocities (m a frame), CP[4] / CP[6] / CP[8] /
 // CP[9]; its core (B + 0x140): position, flags (bit 0 dead, 0x20 blast on expiry), age and life (frames), blast radius.
-constexpr std::size_t kLock=0xB10,kLockAim=0x10,kLockValid=0x29;
+constexpr std::size_t kLock=0xB10,kLockCtrl=0xB18,kLockAim=0x10,kLockValid=0x29;   // B+0xB18: the entry's control block
 constexpr std::size_t kGuidance=0x1390;   // CP[3]: burn frames, g limit, navigation constant
 constexpr std::size_t kIgnition=0x13AC,kFlown=0x1400;   // CP[7][0] (frames before ignition), frames since launch
 constexpr std::size_t kOwn=0x13D0,kInherited=0x13E0,kAccel=0x13A0,kHomingDelay=0x13B8,kHomingFrames=0x13BC;
@@ -103,8 +103,12 @@ void Guide(unsigned char* b) noexcept {
     const float nav=std::isfinite(guidance[2]) ? Clamp(guidance[2],kNavLeast,kNavMost) : kNavLeast;
     // Proportional navigation at the lock point.
     const auto lock=At<const unsigned char*>(b,kLock);
+    const auto ctrl=At<const unsigned char*>(b,kLockCtrl);
     const float* pos=reinterpret_cast<const float*>(b+kPos);
-    if(lock && Readable(lock,kLockValid+1) && lock[kLockValid]) {
+    // As the stock steering takes it (0x269C0A): the entry is the target's (its lock point, rewritten every frame by
+    // its own update, 0x6C7700); the round's reference is weak: with the target gone the point stops, so a dead
+    // entry (use count 0) is no lock, it flies on.
+    if(lock && ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)>0 && Readable(lock,kLockValid+1) && lock[kLockValid]) {
         const float* aim=reinterpret_cast<const float*>(lock+kLockAim);
         float tv[3]={0.0f,0.0f,0.0f};
         if(round.seen)for(int i=0;i<3;++i)tv[i]=aim[i]-round.last[i];

@@ -48,7 +48,7 @@ constexpr unsigned char kObjDeleted=4;
 constexpr std::size_t kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;
 constexpr std::size_t kSeatPad=0x2B0;   // 1: the rider plays on a pad, 0: the keyboard and mouse (heli-input-re.md §4)
 constexpr std::size_t kSeatButtons=0x2E8;   // word: pad A B X Y LB RB L3 R3 (docs/stores-re.md §4)
-constexpr std::uint16_t kButtonLB=0x10;
+constexpr std::uint16_t kButtonLB=0x10,kButtonX=0x04;
 constexpr std::size_t kFireStore=0x2021;    // the 506's secondary fire byte (holder 2)
 // The bomb's fall (Impact): kFallStep s a segment, at most kFallMost s.
 constexpr float kFallStep=0.25f,kFallMost=40.0f;
@@ -185,6 +185,9 @@ struct PJet {
     int storeRounds[kMostStores];
     bool bomb,hasImpact;         // the store picked is a bomb; where it would hit now (Impact)
     float impact[3];
+    bool targetHeld;             // the target key / X down last frame
+    int lock;                    // the picked store's lock (StoreLock), for the cockpit
+    float lockAt[3],lockProgress;
     bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
     float vel[3],omega[3];
     float prev[3];               // its position last frame
@@ -294,7 +297,7 @@ void Elevons(PJet& j,unsigned char* v,float dt) noexcept {
 // air yaw (the right stick: turn) and roll (the left stick's sideways: roll > 0 rolls right) are apart.
 // keys (the keyboard and mouse): pitch from W / ascend (+1) and S (-1), throttle from the ini's boost and brake keys,
 // no yaw: the mouse (aimX, aimY: the frame's movement, no dead zone; aimY > 0 up) moves the aim instead.
-struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; bool switchStore; };
+struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; bool switchStore,nextTarget; };
 
 // Whether the virtual key `vk` is down while the game has the foreground (0: never).
 bool KeyDown(int vk) noexcept {
@@ -317,6 +320,7 @@ Stick ReadStick(const unsigned char* seat) noexcept {
     s.roll=s.lx;
     s.keys=At<unsigned char>(seat,kSeatPad)==0;
     s.switchStore=s.keys ? KeyDown(Cfg().playerJetSwitchKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
+    s.nextTarget=s.keys ? KeyDown(Cfg().playerJetTargetKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonX)!=0;
     if(s.keys) {
         // The mouse steers only with ini PlayerJetMouseFlight; off, the keys fly the plane alone (W / ascend pull, S
         // push, A / D roll, let go it levels) and the mouse is left to the camera (the user's ask, 2026-10-04).
@@ -686,19 +690,25 @@ bool Impact(const PJet& j,const float* pos,float* hit) noexcept {
 void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Store st[kMostStores];
     const int n=ReadStores(v,st,kMostStores);
-    j.stores=n;j.bomb=j.hasImpact=false;
+    j.stores=n;j.bomb=j.hasImpact=false;j.lock=0;
     j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,n);
     if(n==0)return;   // none known: the 506's own fire bytes stand
     if(j.store>=n || j.store<0)j.store=0;
     const bool press=s.switchStore && !j.switchHeld;
     j.switchHeld=s.switchStore;
     if(press || st[j.store].ammo<=0) {
+        const int was=j.store;
         for(int k=1;k<=n;++k) {
             const int at=(j.store+k)%n;
             if(st[at].ammo>0 || k==n){j.store=at;break;}
         }
+        if(j.store!=was){ClearStoreLock(st[was]);ClearStoreLock(st[j.store]);}   // no lock left on the store put away
         if(press)Log("PJET v=%p store: %s (%d left)",v,st[j.store].spec->name,st[j.store].ammo);
     }
+    const bool next=s.nextTarget && !j.targetHeld;
+    j.targetHeld=s.nextTarget;
+    if(next && st[j.store].spec->role!=StoreRole::bomb){NextStoreTarget(st[j.store]);Log("PJET v=%p target: the next one",v);}
+    j.lock=st[j.store].spec->role==StoreRole::bomb ? 0 : StoreLock(st[j.store],j.lockAt,&j.lockProgress);
     const bool fire=v[kFireStore]!=0;
     v[kFireStore]=0;
     if(fire)TriggerStore(st[j.store]);
@@ -831,6 +841,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.stores=j.stores;r.store=j.store;
             for(int i=0;i<j.stores && i<kMostStores;++i){r.storeName[i]=j.storeName[i];r.storeRounds[i]=j.storeRounds[i];}
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
+            r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
             *out=r;
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}

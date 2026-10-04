@@ -100,7 +100,11 @@ class Missile:
         return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
                 'AmmoDamage': self.damage, 'AmmoExplosion': self.blast, 'AmmoCount': float(rounds),
                 'FireBurstCount': self.burst, 'FireBurstInterval': self.burst_gap, 'FireInterval': self.interval,
-                'LockonRange': self.lock_range, 'LockonTime': self.lock_time}
+                'LockonRange': self.lock_range, 'LockonTime': self.lock_time,
+                # A lock lives while its target stays in the cone (Lockon_AutoTimeOut 0: the hold timer restarts
+                # there) and LockonHoldTime frames once it leaves: the nose on another, it locks that one
+                # (docs/stores-re.md §7; stock: 600 frames whatever the nose does, no switching).
+                'Lockon_AutoTimeOut': 0.0, 'LockonHoldTime': 20.0, 'LockonFailedTime': 0.0}
 
     def motion(self) -> dict[int, object]:
         """Ammo_CustomParameter: [3] the plugin's guidance (burn frames, g, navigation constant), [4] acceleration

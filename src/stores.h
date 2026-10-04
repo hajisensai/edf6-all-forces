@@ -34,6 +34,15 @@ void TriggerStore(const Store& s) noexcept;
 // share over clean (>= 0). A mark without a mass: none.
 struct Burden { float mass,drag; };
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept;
-// The 506's weapon build made one weapon a holder (stores.cpp): at load.
+// A homing store's lock as the weapon holds it (docs/stores-re.md §7): 2 locked (`point` its target's lock point), 1
+// locking (`progress` 0..1, `point` the target), 0 none.
+int StoreLock(const Store& s,float* point,float* progress) noexcept;
+// Drops the store's locks now (the weapon relocks on its next tick).
+void ClearStoreLock(const Store& s) noexcept;
+// Drops the store's lock and keeps its target last in the crosshair's order for a while: the next one in the cone
+// is locked (the cockpit's target cycle).
+void NextStoreTarget(const Store& s) noexcept;
+// The 506's weapon build made one weapon a holder, the stores' lock search ordered by the crosshair (stores.cpp): at
+// load.
 bool InstallStores() noexcept;
 }  // namespace crew
