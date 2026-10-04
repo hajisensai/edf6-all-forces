@@ -60,7 +60,7 @@ def check_sgo(data: bytes) -> None:
     assert len(jet.weapon_bones) == len(jet.weapons)
     assert [w[0] for w in v['mission_setup'][3]][:3] == list(jet.weapons)
     assert tuple(jet.weapon_bones) == tuple(b for b, _ in PLUGIN_WEAPONS), (jet.weapon_bones, PLUGIN_WEAPONS)
-    homing = tuple(w == gen._MISSILE for w in jet.weapons)
+    homing = tuple(w == vc._MISSILE for w in jet.weapons)
     assert homing == tuple(h for _, h in PLUGIN_WEAPONS), ('holder order', jet.weapons)
 
 
