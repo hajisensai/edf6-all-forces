@@ -466,15 +466,38 @@ void AimMarks(void* drawer,void* ctx,const float* vp,float width,float height,fl
     }
 }
 
+// A bomb's impact point (CCIP): a cross with a gap at its centre.
+void ImpactMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
+    float sx,sy,depth;
+    if(!j.hasImpact || !Project(vp,j.impact,width,height,&sx,&sy,&depth))return;
+    const float r=16.0f*s,g=5.0f*s,t=2.0f*s;
+    Rect(drawer,ctx,sx-r,sy-t*0.5f,sx-g,sy+t*0.5f,kYellow);Rect(drawer,ctx,sx+g,sy-t*0.5f,sx+r,sy+t*0.5f,kYellow);
+    Rect(drawer,ctx,sx-t*0.5f,sy-r,sx+t*0.5f,sy-g,kYellow);Rect(drawer,ctx,sx-t*0.5f,sy+g,sx+t*0.5f,sy+r,kYellow);
+}
+
+// The stores line: each store's name and rounds, the picked one in brackets.
+void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
+    wchar_t text[128]=L"";
+    std::size_t at=0;
+    for(int i=0;i<j.stores && i<6;++i) {
+        const int n=_snwprintf_s(text+at,_countof(text)-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
+                                 j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
+        if(n<0)break;
+        at+=static_cast<std::size_t>(n);
+    }
+    Format(l,L"%ls",text);
+}
+
 // The cockpit readout of the jet the player flies (drawn whatever VehicleHud says): at the bottom centre, its
 // speed, height over the floor (over the world's zero, ALT*, with no ground under it) and climb, the throttle lever
 // as a bar with the g it pulls (and STALL, red, when its wing cannot hold its path), its HP, and the controls (the
 // pad's or the keyboard and mouse's, as the seat says it is flown).
 void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
              int* at) noexcept {
-    if(*at+4>kMaxLines)return;
+    if(*at+5>kMaxLines)return;
     Line& info=lines[(*at)++];
     Line& thr=lines[(*at)++];
+    Line& arms=lines[(*at)++];
     Line& keys=lines[(*at)++];
     Line& keys2=lines[(*at)++];
     const float alt=std::fmax(-9999.0f,std::fmin(j.clear,99999.0f));
@@ -482,35 +505,37 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
            j.ground ? L"" : L"*",static_cast<int>(std::lround(alt)),j.climb>=0.0f ? L"UP" : L"DOWN",
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
     Format(thr,L"THROTTLE %d%%    G %.1f%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"");
+    StoresLine(arms,j);
     if(j.keys) {
-        wchar_t boost[32],brake[32];
-        KeyName(Cfg().playerJetBoostKey,boost,32);KeyName(Cfg().playerJetBrakeKey,brake,32);
+        wchar_t boost[32],brake[32],swap[32];
+        KeyName(Cfg().playerJetBoostKey,boost,32);KeyName(Cfg().playerJetBrakeKey,brake,32);KeyName(Cfg().playerJetSwitchKey,swap,32);
         if(j.air) {
             Format(keys,L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll");
-            Format(keys2,L"%ls: boost    %ls: brake    (let go: cruise)",boost,brake);
+            Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon",boost,brake,swap);
         } else {
             Format(keys,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",boost,brake);
             Format(keys2,L"W / SPACE: pull up to take off (from 270 km/h)");
         }
     } else if(j.air) {
         Format(keys,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways");
-        Format(keys2,L"PITCH, TURN: right stick");
+        Format(keys2,L"PITCH, TURN: right stick    LB: switch weapon");
     } else {
         Format(keys,L"THROTTLE: forward / ascend = up, back = down    TURN: sticks");
         Format(keys2,L"TAKE OFF: pull the right stick back (from 270 km/h)");
     }
     info.scale=kTitleScale;info.rgba=kWhite;
     thr.scale=kLineScale;thr.rgba=j.stall ? kRed : kCyan;
+    arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kWhite;
     keys.scale=keys2.scale=kLineScale*0.85f;keys.rgba=keys2.rgba=kWhite;
-    info.w=info.h=thr.w=thr.h=keys.w=keys.h=keys2.w=keys2.h=0.0f;
-    if(text){MeasureAll(*text,&info,1);MeasureAll(*text,&thr,1);MeasureAll(*text,&keys,1);MeasureAll(*text,&keys2,1);}
+    info.w=info.h=thr.w=thr.h=arms.w=arms.h=keys.w=keys.h=keys2.w=keys2.h=0.0f;
+    if(text){MeasureAll(*text,&info,1);MeasureAll(*text,&thr,1);MeasureAll(*text,&arms,1);MeasureAll(*text,&keys,1);MeasureAll(*text,&keys2,1);}
     const float pad=8.0f*s,gap=5.0f*s,barW=320.0f*s,barH=10.0f*s;
     float w=barW;
-    const Line* const parts[]={&info,&thr,&keys,&keys2};
+    const Line* const parts[]={&info,&thr,&arms,&keys,&keys2};
     for(const Line* l:parts)w=l->w>w ? l->w : w;
     w+=2.0f*pad;
     const float lineH=info.h>0.0f ? info.h : 24.0f*s,smallH=thr.h>0.0f ? thr.h : 18.0f*s,keysH=keys.h>0.0f ? keys.h : 16.0f*s;
-    const float h=pad+lineH+gap+smallH+gap*0.5f+barH+gap+keysH+gap*0.5f+keysH+pad;
+    const float h=pad+lineH+gap+smallH+gap*0.5f+barH+gap+smallH+gap+keysH+gap*0.5f+keysH+pad;
     const float x0=(width-w)*0.5f,y0=height*0.80f-h;
     Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
     Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kCyan);
@@ -519,6 +544,7 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     thr.x=(width-barW)*0.5f;thr.y=y;y+=smallH+gap*0.5f;
     Bar(drawer,ctx,(width-barW)*0.5f,y,barW,barH,j.throttle,j.throttle,kCyan,s);
     y+=barH+gap;
+    arms.x=(width-arms.w)*0.5f;arms.y=y;y+=smallH+gap;
     keys.x=(width-keys.w)*0.5f;keys.y=y;y+=keysH+gap*0.5f;
     keys2.x=(width-keys2.w)*0.5f;keys2.y=y;
 }
@@ -658,6 +684,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const Snapshot& snap=Latest();
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
+            if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
         }
         if(Cfg().vehicleHud) {

@@ -119,7 +119,7 @@ Jet* CrewPlaced(unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
 // Why it leaves (fuel, damage, ammo, its carrier lost, out of drones), or a drone's way back to its carrier.
 void Leave(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,float hp,float hpMax,ULONGLONG ms) noexcept {
     const char* why=ms-j.bornAt>j.fuelMs ? "fuel" : hpMax>0.0f && hp<hpMax*kWithdrawHp ? "damaged" :
-                    arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile) ? "out of ammo" : nullptr;
+                    arms.guns<=0 && arms.missiles<=0 && arms.bombs<=0 && (arms.hasGun || arms.hasMissile) ? "out of ammo" : nullptr;
     // A drone goes back to its carrier instead, and after kDroneSortieMs, half its HP gone, the carrier
     // leaving, or kIdleMs with nothing to attack; with the carrier gone it withdraws.
     if(j.drone.carried && !mother && !why)why="carrier lost";
@@ -365,7 +365,8 @@ void JetFrame(unsigned char* v) noexcept {
     if(j->drone.blastAt){Blast(*j,v,ms);return;}
 
     const Kind& kind=KindOf(*j);
-    const Arms arms=ReadArms(v);
+    Arms arms=ReadArms(v);
+    j->burden=BurdenOf(BodyMark(v),arms.stores,arms.storeCount);
     const bool follow=player.at && ms-player.at<10000;
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
@@ -380,6 +381,7 @@ void JetFrame(unsigned char* v) noexcept {
     // The target and its motion.
     if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,kind.range,dt,ms);
     else j->t.target=nullptr;
+    if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
         const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};
         const float d=Len(to);

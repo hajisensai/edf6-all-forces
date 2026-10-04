@@ -17,6 +17,7 @@ constexpr std::int32_t kHoming=1;
 // HoldTime (600 frames) nose or not. (Until 2026-10-04 the plugin raised the stock 500 m lock at run time to
 // each role's missileRange: the weapon's own settings said one thing and the jets did another.)
 constexpr std::size_t kWeaponLockRange=0x6D0,kWeaponLocked=0xC68;
+constexpr std::size_t kWeaponBlast=0x830+0x80;   // AmmoExplosion (InitParam +0x80; core +0xA20 = 0x9A0 + 0x80)
 // The guns are seat weapons 0 and 1 (what 0x2020 fires, testrange/gen.py); after the missile gen.py puts
 // the 506's fuel tank (v_fuel01, its "ammo" ~1e6 burnt by the throttle), which is no gun.
 constexpr std::uint64_t kGunWeapons=2;
@@ -205,7 +206,8 @@ void Missile(Jet& j,const float* pos,float height,float range,ULONGLONG ms,float
 }  // namespace
 
 Arms ReadArms(unsigned char* v) noexcept {
-    Arms a{240.0f,0.0f,400.0f,0.0f,0,0,0,false,false};
+    Arms a{};
+    a.gunSpeed=240.0f;a.gunRange=400.0f;a.pick=-1;
     if(SeatCount(v)==0)return a;
     const auto seat=SeatAt(v,0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
@@ -234,7 +236,28 @@ Arms ReadArms(unsigned char* v) noexcept {
             a.gunRange=std::isfinite(reach) && reach>0.0f ? reach : 400.0f;
         }
     }
+    a.storeCount=ReadStores(v,a.stores,kMostStores);
+    for(int i=0;i<a.storeCount;++i)if(a.stores[i].spec->role==StoreRole::bomb)a.bombs+=a.stores[i].ammo;
     return a;
+}
+
+void PickStore(Arms& a,bool flyer,float dist) noexcept {
+    if(a.storeCount==0)return;   // no stores known: every homing weapon, the 506's own fire byte
+    const StoreRole want=flyer ? StoreRole::air : StoreRole::ground;
+    int best=-1;
+    for(int i=0;i<a.storeCount;++i) {
+        const Store& s=a.stores[i];
+        if(s.spec->role!=want || s.ammo<=0 || s.lockRange<=0.0f)continue;
+        if(best<0){best=i;continue;}
+        const Store& b=a.stores[best];
+        const bool reaches=s.lockRange>=dist,bestReaches=b.lockRange>=dist;
+        if(reaches!=bestReaches ? reaches : reaches ? s.lockRange<b.lockRange : s.lockRange>b.lockRange)best=i;
+    }
+    a.pick=best;
+    a.missiles=best<0 ? 0 : a.stores[best].ammo;
+    a.locked=best<0 ? 0 : a.stores[best].locked;
+    a.missileRange=best<0 ? 0.0f : a.stores[best].lockRange;
+    a.hasMissile=best>=0;
 }
 
 // Where to point the guns to hit `aim` moving at `tv` from `from` (round flight time and drop). Farther
@@ -287,6 +310,31 @@ bool WeaponsFree(const Jet& j) noexcept {
     return Cfg().jetPilot && j.t.target && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::takeoff;
 }
 
+// Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (its fall from here
+// at the jet's velocity, the target's height, the target moving on as it falls) is within kBombHit of its blast
+// radius of the target, and the jet is kBombSafe over it (its own blast); one every kBombMs.
+constexpr float kBombHit=1.0f,kBombSafe=100.0f;
+constexpr ULONGLONG kBombMs=400;
+void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) noexcept {
+    const Aim& t=j.t;
+    if(!t.target || t.flyer || a.bombs<=0 || ms-t.bombAt<kBombMs)return;
+    const float over=pos[1]-t.aim[1];
+    if(over<kBombSafe)return;
+    const float vy=j.m.vel[1],fall=(vy+std::sqrt(vy*vy+2.0f*kG*over))/kG;   // s to the target's height
+    for(int i=0;i<a.storeCount;++i) {
+        const Store& s=a.stores[i];
+        if(s.spec->role!=StoreRole::bomb || s.ammo<=0)continue;
+        const float dx=pos[0]+j.m.vel[0]*fall-(t.aim[0]+t.tgtVel[0]*fall),dz=pos[2]+j.m.vel[2]*fall-(t.aim[2]+t.tgtVel[2]*fall);
+        const float miss=std::sqrt(dx*dx+dz*dz),hit=At<float>(s.weapon,kWeaponBlast)*kBombHit;
+        if(!(miss<hit))return;
+        TriggerStore(s);
+        j.t.bombAt=ms;
+        if(Cfg().debug)Log("JET v=%p bomb: %s, %.0f m over the target, falls %.1f s, %.0f m off (%d left)",v,s.spec->name,over,fall,miss,
+                         s.ammo-1);
+        return;
+    }
+}
+
 // The fire bytes: guns while the nose is on the lead point within reach; the missile (`missileOk`: on its
 // standoff run) once the nose has been on the target itself kLockMs, inside MissileReach.
 void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float* lead,bool gunsOk,bool missileOk,const Arms& a,
@@ -321,9 +369,12 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
                 ms-t.missileAt>kMissileMs && !FriendInLine(pos,t.aim,v);
         if(missile) {
             t.missileAt=ms;
-            if(Cfg().debug)Log("JET v=%p missiles: %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,tdist,off*180.0f/kPi,
+            if(Cfg().debug)Log("JET v=%p missiles: %s, %.0f m, %.1f deg off the nose, held %.1f s, %d locked",v,
+                             a.pick>=0 ? a.stores[a.pick].spec->name : "stock",tdist,off*180.0f/kPi,
                              static_cast<float>(ms-t.lockAt)*0.001f,a.locked);
+            if(a.pick>=0){TriggerStore(a.stores[a.pick]);missile=false;}   // its own trigger, not holder 2's byte
         }
+        Bomb(j,v,pos,a,ms);
     }
     v[kFireGun]=gun;v[kFireMissile]=missile;
 }

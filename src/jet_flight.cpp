@@ -151,7 +151,11 @@ float RollToLift(const Jet& j) noexcept {
 // gravity along the path takes it off climbing and adds it diving.
 void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const float* want,float speed,float dt,float* up) noexcept {
     const bool bombing=j.mode==Mode::bomb;
-    const float maxG=bombing ? kBombG : k.maxG,tau=bombing ? kBombTau : kSteerTau;
+    // Its stores (BurdenOf): the same wing lifts fewer g of a heavier jet, the same engine speeds it up less, and
+    // their drag takes off top speed (drag ~ v^2: the speed it can hold falls as the root of 1 + their share).
+    const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
+    const float maxG=(bombing ? kBombG : k.maxG)/mass,tau=bombing ? kBombTau : kSteerTau;
+    speed/=std::sqrt(1.0f+(j.burden.drag>0.0f ? j.burden.drag : 0.0f));
     float dir[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
     float s=Len(dir);
     if(s<1.0f || !Normalize(dir)){std::memcpy(dir,fwd,12);s=k.minSpeed;}
@@ -181,7 +185,7 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     for(int i=0;i<3;++i)next[i]=dir[i]+(acc[i]-dir[i]*accAlong)*dt/s;
     if(!Normalize(next))std::memcpy(next,dir,12);
     const float bleed=pull>kG ? (pull/kG-1.0f)*kTurnBleed : 0.0f;
-    s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt)-(kG*next[1]+bleed)*dt;
+    s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt/mass)-(kG*next[1]+bleed)*dt;
     const float top=j.m.top>0.0f ? j.m.top : k.attack*1.3f;
     s=Clamp(s,k.minSpeed*0.8f,top<kBodyTop ? top : kBodyTop);
     for(int i=0;i<3;++i)j.m.vel[i]=next[i]*s;

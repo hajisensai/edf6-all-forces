@@ -24,8 +24,10 @@
 // however long the frame took, so a slow frame is neither a faster plane nor a wall it was held back by.
 // Water is not ground for it: the 506's ditching (twice its HP in damage every frame, body506.cpp's message hook)
 // never reaches it; touching the water is a crash in the plugin's own model, and afloat it breaks up.
-// The fire bytes stay the stock 506's: the primary trigger fires the two guns (holders 0 and 1), the
-// secondary button the missile (holder 2), along the body's nose (vehicle_weapon_setting on the fuselage).
+// The primary trigger fires the two guns as the stock 506 does (holders 0 and 1, fire byte 0x2020). The secondary
+// fires the store picked (stores.h: its missiles and bombs, one holder each; the switch key or LB cycles them):
+// the stock fire byte 0x2021 (holder 2) is taken and that store's own trigger pulled (Stores). What it carries
+// weighs on its flight (Burden: thrust, lift and drag) and, a bomb picked, the cockpit shows where it would hit.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
 #include "memory.h"
@@ -45,6 +47,11 @@ constexpr unsigned char kObjDeleted=4;
 // collective: analog 0..1 on a pad, 0 or 1 on the keyboard).
 constexpr std::size_t kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;
 constexpr std::size_t kSeatPad=0x2B0;   // 1: the rider plays on a pad, 0: the keyboard and mouse (heli-input-re.md §4)
+constexpr std::size_t kSeatButtons=0x2E8;   // word: pad A B X Y LB RB L3 R3 (docs/stores-re.md §4)
+constexpr std::uint16_t kButtonLB=0x10;
+constexpr std::size_t kFireStore=0x2021;    // the 506's secondary fire byte (holder 2)
+// The bomb's fall (Impact): kFallStep s a segment, at most kFallMost s.
+constexpr float kFallStep=0.25f,kFallMost=40.0f;
 constexpr std::size_t kAreaInset=0xE00;   // jet.cpp kAreaInset: the move-area clamp's inset
 constexpr float kNoInset=-1.0e6f;
 constexpr float kG=9.8f;
@@ -165,6 +172,14 @@ struct PJet {
     float aim[3];                // the mouse's aim, a world direction (AimSteer); hasAim: set
     bool hasAim;
     bool keys;                   // flown on the keyboard and mouse last frame
+    int store;                   // the store the secondary fires (an index into ReadStores' list)
+    bool switchHeld;             // the switch key / LB down last frame
+    Burden burden;               // what its stores weigh (BurdenOf)
+    int stores;                  // what it carries, for the cockpit
+    const char* storeName[kMostStores];
+    int storeRounds[kMostStores];
+    bool bomb,hasImpact;         // the store picked is a bomb; where it would hit now (Impact)
+    float impact[3];
     bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
     float vel[3],omega[3];
     float prev[3];               // its position last frame
@@ -274,7 +289,7 @@ void Elevons(PJet& j,unsigned char* v,float dt) noexcept {
 // air yaw (the right stick: turn) and roll (the left stick's sideways: roll > 0 rolls right) are apart.
 // keys (the keyboard and mouse): pitch from W / ascend (+1) and S (-1), throttle from the ini's boost and brake keys,
 // no yaw: the mouse (aimX, aimY: the frame's movement, no dead zone; aimY > 0 up) moves the aim instead.
-struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; };
+struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; bool switchStore; };
 
 // Whether the virtual key `vk` is down while the game has the foreground (0: never).
 bool KeyDown(int vk) noexcept {
@@ -296,6 +311,7 @@ Stick ReadStick(const unsigned char* seat) noexcept {
     s.turn=Clamp(s.rx+s.lx,-1.0f,1.0f);
     s.roll=s.lx;
     s.keys=At<unsigned char>(seat,kSeatPad)==0;
+    s.switchStore=s.keys ? KeyDown(Cfg().playerJetSwitchKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     if(s.keys) {
         s.aimX=Raw(seat,kSeatRX);
         s.aimY=Cfg().playerJetInvertPitch ? Raw(seat,kSeatRY) : -Raw(seat,kSeatRY);
@@ -408,7 +424,7 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     if(speed<0.0f)speed=0.0f;
     const float want=j.throttle*k.top;
     if(j.throttle<0.02f)speed-=kGroundBrake*dt;
-    else speed+=Clamp(want-speed,-k.brake*dt,k.thrust*dt);
+    else speed+=Clamp(want-speed,-k.brake*dt,k.thrust*dt/(j.burden.mass>1.0f ? j.burden.mass : 1.0f));
     if(speed<0.0f)speed=0.0f;
     // The nose wheel: kTaxiTurn at taxi speeds, less from kTaxiFull on.
     const float rate=kTaxiTurn*(speed>kTaxiFull ? kTaxiFull/speed : 1.0f)*(speed>0.5f || s.throttle>0.0f ? 1.0f : 0.0f);
@@ -556,7 +572,8 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     const bool aiming=s.keys && std::fabs(s.pitch)<kRollDead && std::fabs(s.roll)<kRollDead;
     if(!aiming)Roll(j,v,s,dir,up,vertical,dt);
     const float wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
-    const float most=k.maxG*kG*wing;   // all the wing gives at this speed
+    const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;   // its mass over clean: the same wing lifts less g
+    const float most=k.maxG*kG*wing/mass;   // all the wing gives at this speed
     const float gPerp[3]={dir[0]*kG*dir[1],-kG+dir[1]*kG*dir[1],dir[2]*kG*dir[1]};   // gravity across the path
     const float across=Len(gPerp);   // g * cos(climb)
     const float want=k.minAir+j.throttle*(k.top-k.minAir);
@@ -575,8 +592,8 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     float bodyUp[3];std::memcpy(bodyUp,j.up,12);
     const float g=pitch/kG,top2=k.top*k.top;
     j.load=g;
-    const float thrust=k.thrust*want*want/top2;
-    const float slow=k.corner/speed,drag=k.thrust*speed*speed/top2+kInduced*g*g*slow*slow;
+    const float thrust=k.thrust*want*want/top2/mass;   // the engine's force over a heavier jet
+    const float slow=k.corner/speed,drag=(k.thrust*speed*speed/top2*(1.0f+j.burden.drag))/mass+kInduced*g*g*slow*slow*mass;
     const float airbrake=s.throttle<0.0f ? k.brake*speed*speed/top2 : 0.0f;
     speed+=(thrust-drag-airbrake-kG*next[1])*dt;
     speed=Clamp(speed,kStallFloor,kBodyTop);
@@ -631,6 +648,46 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     float dir[3]={j.vel[0],0.2f*Len(j.vel),j.vel[2]};
     if(!Normalize(dir))return;
     for(int i=0;i<3;++i)j.vel[i]=dir[i]*j.kind->minAir;
+}
+
+// Where a bomb let go now would hit: its fall from `pos` at the jet's velocity under gravity (the game's bomb has no
+// drag), the first ground a map ray finds along it, kFallStep s a segment.
+bool Impact(const PJet& j,const float* pos,float* hit) noexcept {
+    float at[3]={pos[0],pos[1],pos[2]},vel[3]={j.vel[0],j.vel[1],j.vel[2]};
+    for(float t=0.0f;t<kFallMost;t+=kFallStep) {
+        const float next[3]={at[0]+vel[0]*kFallStep,at[1]+(vel[1]-0.5f*kG*kFallStep)*kFallStep,at[2]+vel[2]*kFallStep};
+        if(MapRay(at,next,hit)>=0.0f)return true;
+        std::memcpy(at,next,12);
+        vel[1]-=kG*kFallStep;
+    }
+    return false;
+}
+
+// Its stores (stores.h): the switch (key or LB, on its press) moves to the next with rounds left; one emptied, the
+// next; the secondary fire (the stock fire byte, taken so the 506 does not fire holder 2 itself) pulls the picked
+// one's trigger; what they weigh; the cockpit's list and, a bomb picked, where it would hit.
+void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
+    Store st[kMostStores];
+    const int n=ReadStores(v,st,kMostStores);
+    j.stores=n;j.bomb=j.hasImpact=false;
+    j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,n);
+    if(n==0)return;   // none known: the 506's own fire bytes stand
+    if(j.store>=n || j.store<0)j.store=0;
+    const bool press=s.switchStore && !j.switchHeld;
+    j.switchHeld=s.switchStore;
+    if(press || st[j.store].ammo<=0) {
+        for(int k=1;k<=n;++k) {
+            const int at=(j.store+k)%n;
+            if(st[at].ammo>0 || k==n){j.store=at;break;}
+        }
+        if(press)Log("PJET v=%p store: %s (%d left)",v,st[j.store].spec->name,st[j.store].ammo);
+    }
+    const bool fire=v[kFireStore]!=0;
+    v[kFireStore]=0;
+    if(fire)TriggerStore(st[j.store]);
+    for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;}
+    j.bomb=st[j.store].spec->role==StoreRole::bomb;
+    if(j.bomb && j.phase==Phase::air)j.hasImpact=Impact(j,pos,j.impact);
 }
 
 void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
@@ -689,6 +746,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     Stick s=ReadStick(SeatAt(v,0));
     SmoothStick(j,s,dt);
     j.keys=s.keys;
+    Stores(j,v,s,pos);
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
@@ -753,6 +811,9 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
+            r.stores=j.stores;r.store=j.store;
+            for(int i=0;i<j.stores && i<kMostStores;++i){r.storeName[i]=j.storeName[i];r.storeRounds[i]=j.storeRounds[i];}
+            r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             *out=r;
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}

@@ -36,6 +36,7 @@ import call_weapons as cw  # noqa: E402
 import calls  # noqa: E402
 import dsgo  # noqa: E402
 import gen_calls  # noqa: E402
+import gen_stores  # noqa: E402
 import installer  # noqa: E402
 import ledger  # noqa: E402
 import make_jets  # noqa: E402
@@ -89,6 +90,20 @@ def calls_inc_current() -> None:
     with open(gen_calls.OUT, encoding='utf-8', newline='') as f:
         assert f.read().replace('\r\n', '\n') == gen_calls.render(), 'src/calls.inc is stale: python tools/gen_calls.py'
     assert '#include "calls.inc"' in src('src/airstrike.cpp')
+
+
+@test
+def stores_inc_current() -> None:
+    with open(gen_stores.OUT, encoding='utf-8', newline='') as f:
+        assert f.read().replace('\r\n', '\n') == gen_stores.render(), 'src/stores.inc is stale: python tools/gen_stores.py'
+    assert '#include "stores.inc"' in src('src/stores.cpp')
+    # Every jet: as many weapons as holders, four at least (src/stores.cpp: without the plugin the 506 builds four),
+    # and every store it names is made.
+    for name, jet in vc.JETS.items():
+        assert len(jet.weapons) + 1 >= 4, name
+        for w in jet.weapons:
+            got = vc.store_of(w)
+            assert got is None or w.split('/')[-1].upper() in vc.STORE_FILES, (name, w)
 
 
 @test

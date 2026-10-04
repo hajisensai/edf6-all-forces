@@ -55,6 +55,10 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           git diff --exit-code -- src/calls.inc
           if ($LASTEXITCODE) { Write-Error 'src/calls.inc is stale: run python tools/gen_calls.py and commit it'; exit 1 }
+          python tools/gen_stores.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git diff --exit-code -- src/stores.inc
+          if ($LASTEXITCODE) { Write-Error 'src/stores.inc is stale: run python tools/gen_stores.py and commit it'; exit 1 }
 
       - name: Self-test of the install chain
         shell: pwsh

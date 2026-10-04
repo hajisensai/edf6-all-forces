@@ -278,6 +278,7 @@ struct Aim {
     ULONGLONG lockSeen;      // standing off with missiles: game ms the lock list last held a target (0: not)
     ULONGLONG gunsUntil;     // no lock came (kNoLockMs): guns only until then
     ULONGLONG gateAt;        // the last gun gate log (Fire)
+    ULONGLONG bombAt;        // its last bomb (Fire)
 };
 // A carrier's work (CarrierGoal, LaunchDrones): hit (hpSeen fell) it sidesteps to evadeTo until evadeUntil, and
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
@@ -341,6 +342,7 @@ struct Jet {
     DroneState drone;
     BayState bay;
     ShellState shells;
+    Burden burden{1.0f,0.0f};   // what its stores weigh (BurdenOf; JetSteer)
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -409,9 +411,20 @@ constexpr float kHoverLeave=500.0f;    // m: leaving, it heads this far along it
 // --- jet_combat.cpp ---
 // The pilot's seat weapons: guns (straight, fastest round speed for the lead), the homing missile.
 // What its weapons are, as their SGOs set them: the guns' speed, drop and reach (AmmoSpeed x AmmoAlive), the
-// homing weapons' lock range (LockonRange); rounds left, targets locked.
-struct Arms { float gunSpeed,gunGravity,gunRange,missileRange; std::int32_t guns,missiles,locked; bool hasGun,hasMissile; };
+// homing weapons' lock range (LockonRange); rounds left, targets locked. Its stores (stores.h) besides: until
+// PickStore the missile counts are every homing weapon's; after it, the one store picked for the target's (pick).
+struct Arms {
+    float gunSpeed,gunGravity,gunRange,missileRange;
+    std::int32_t guns,missiles,locked,bombs;
+    bool hasGun,hasMissile;
+    Store stores[kMostStores];
+    int storeCount,pick;     // pick: the missile store PickStore chose (-1: none, or no stores: the stock fire byte)
+};
 Arms ReadArms(unsigned char* v) noexcept;
+// The missile for the target: of the stores of its kind (air-to-air at a flyer, else air-to-ground) with rounds,
+// the one whose lock reaches `dist` with the least to spare (a long-range one far out, a short-range one close in),
+// else the longest. The arms' missile counts become that store's.
+void PickStore(Arms& a,bool flyer,float dist) noexcept;
 // The distance a jet fires its missiles from: its role's standoff, within what its missile locks (0: never).
 inline float MissileReach(const Kind& k,const Arms& a) noexcept {
     return k.missileRange<a.missileRange ? k.missileRange : a.missileRange;
