@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import vcobjects as vc  # noqa: E402
 
 OUT = os.path.normpath(os.path.join(HERE, '..', 'src', 'stores.inc'))
-ROLES = {'air': 'StoreRole::air', 'ground': 'StoreRole::ground', 'bomb': 'StoreRole::bomb'}
+ROLES = {'air': 'StoreRole::air', 'ground': 'StoreRole::ground', 'bomb': 'StoreRole::bomb', 'rocket': 'StoreRole::rocket'}
 
 
 def render() -> str:

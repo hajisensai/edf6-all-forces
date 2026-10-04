@@ -139,3 +139,12 @@ EDF.dll TimeDateStamp 0x678CCB46，RVA。置信度：H 读代码确认，M 推�
 - **插件的做法**：
   - 对我们的挂载武器，和 NPC 座位一样清空这两个 SePreset 的 cue（`jetsound.cpp` `LockQuiet`）。
   - 座舱用插件自己的 XAudio2 声道放锁定音（`jetaudio.cpp` `LockTone`）：锁定中按进度发 70 ms 的 1 kHz 滴声，间隔从 450 ms 缩到 120 ms；锁上后持续 1.6 kHz。0.2 秒没更新就静音。
+
+## 9. 火箭巢（2026-10-05）
+
+- 弹种 `RKT`，参照 Hydra 70，用的模板和导弹相同（`V_506HELI_MISSILE01`），关掉锁定：`LockonType 0`、`LockonRange 0`。
+  - 没有锁定时 `missile.cpp` 只模拟推力段（1.1 s）和滑翔，不做导引，弹体直线飞。
+  - 扣一次扳机齐射 4 发（`FireBurstCount 4`，间隔 4 帧）。
+- 挂载：攻击机 38 发（2 巢），多用途战机 19 发（1 巢）。挂载种类 `StoreRole::rocket`。
+- NPC：俯冲扫射时，机炮提前量点离机头不到 1.5°、距离在 1400 m 到 2.5 倍机炮最近距离之间时，每 0.6 s 齐射一轮，之后照常用机炮（`jet_combat.cpp` `kRocket*`）。
+- 玩家：切到火箭巢，按住开火即按射速齐射，沿机头飞。不显示锁定框。

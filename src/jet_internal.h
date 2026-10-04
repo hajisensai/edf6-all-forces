@@ -281,6 +281,7 @@ struct Aim {
     ULONGLONG gunsUntil;     // no lock came (kNoLockMs): guns only until then
     ULONGLONG gateAt;        // the last gun gate log (Fire)
     ULONGLONG bombAt;        // its last bomb (Fire)
+    ULONGLONG rocketAt;      // its last rocket ripple (Fire)
 };
 // A carrier's work (CarrierGoal, LaunchDrones): hit (hpSeen fell) it sidesteps to evadeTo until evadeUntil, and
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
@@ -422,6 +423,7 @@ struct Arms {
     bool hasGun,hasMissile;
     Store stores[kMostStores];
     int storeCount,pick;     // pick: the missile store PickStore chose (-1: none, or no stores: the stock fire byte)
+    int rocket;              // the rocket store with rounds left (StoreRole::rocket), or -1
 };
 Arms ReadArms(unsigned char* v) noexcept;
 // The missile for the target: of the stores of its kind (air-to-air at a flyer, else air-to-ground) with rounds,

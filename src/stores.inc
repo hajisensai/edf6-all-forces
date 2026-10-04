@@ -7,6 +7,7 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_AGM_L_","AGM-114",StoreRole::ground,50.0f,0.0040f},
     {L"EDF6VC_ESSM_","RIM-162 ESSM",StoreRole::air,0.0f,0.0000f},
     {L"EDF6VC_MK82_","Mk 82",StoreRole::bomb,230.0f,0.0150f},
+    {L"EDF6VC_RKT_","Hydra 70",StoreRole::rocket,32.0f,0.0015f},
 };
 inline constexpr JetMass kJetMasses[]={
     {7001.0f,22000.0f},

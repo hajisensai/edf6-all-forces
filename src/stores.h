@@ -6,7 +6,7 @@
 #include <cstdint>
 
 namespace crew {
-enum class StoreRole { air, ground, bomb };
+enum class StoreRole { air, ground, bomb, rocket };
 struct StoreSpec {
     const wchar_t* prefix;   // its weapon files' names: prefix + rounds + ".SGO" (vcobjects.store_file)
     const char* name;        // shown in the cockpit

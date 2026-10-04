@@ -95,6 +95,7 @@ class Missile:
     burst_gap: float = 10.0   # frames between them
     interval: float = 45.0    # frames from one shot (or salvo) to the next
     eject: float = 0.3    # m a frame it leaves the rail at, along the launcher's nose, over the launcher's velocity
+    guided: bool = True   # False: an unguided rocket (no lock: src/missile.cpp only burns its motor, it flies straight)
 
     def params(self, rounds: int) -> dict[str, float]:
         return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
@@ -104,7 +105,8 @@ class Missile:
                 # A lock lives while its target stays in the cone (Lockon_AutoTimeOut 0: the hold timer restarts
                 # there) and LockonHoldTime frames once it leaves: the nose on another, it locks that one
                 # (docs/stores-re.md §7; stock: 600 frames whatever the nose does, no switching).
-                'Lockon_AutoTimeOut': 0.0, 'LockonHoldTime': 20.0, 'LockonFailedTime': 0.0}
+                'Lockon_AutoTimeOut': 0.0, 'LockonHoldTime': 20.0, 'LockonFailedTime': 0.0,
+                **({} if self.guided else {'LockonType': 0.0, 'LockonRange': 0.0})}
 
     def motion(self) -> dict[int, object]:
         """Ammo_CustomParameter: [3] the plugin's guidance (burn frames, g, navigation constant), [4] acceleration
@@ -136,7 +138,7 @@ class Store:
     and ground missiles, bombs), and what one round adds to the jet: its mass and its drag (a share of the clean jet's
     parasitic drag, with its pylon)."""
     name: str               # shown in the cockpit (and the weapon's name.* rows)
-    role: str               # 'air', 'ground', 'bomb'
+    role: str               # 'air', 'ground', 'bomb', 'rocket'
     mass: float             # kg a round
     drag: float             # a round's share of the clean jet's drag
     weapon: Missile | Bomb
@@ -165,6 +167,12 @@ STORES: dict[str, Store] = {
                   interval=120.0, eject=0.5)),
     # General-purpose 500 lb free-fall bomb (Mk 82): a heavier warhead than the Maverick's, a wider blast.
     'MK82': Store('Mk 82', 'bomb', 230.0, 0.015, Bomb('Mk 82', damage=1500.0, blast=25.0)),
+    # Unguided 70 mm rockets (Hydra 70) from a pod of 19: a short burn to about Mach 2, a light warhead; a trigger pull
+    # ripples 4. Strafing runs fire them before the guns (src/jet_combat.cpp kRocket*); the player fires them along
+    # the nose. A round's mass and drag carry its pod's share.
+    'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0015, Missile('Hydra 70', burn=1.1, top=740.0, accel=650.0, max_g=1.0, nav=1.0,
+                 life=6.0, damage=250.0, blast=6.0, lock_range=0.0, lock_cone=0.3, lock_time=0.0, burst=4.0, burst_gap=4.0,
+                 interval=20.0, eject=0.6, guided=False)),
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 
@@ -220,12 +228,12 @@ def _load(*stores: tuple[str, int]) -> tuple[str, ...]:
 # just four).
 _FIGHTER = _load(('AAM_M', 4), ('AAM_S', 2))
 _INTERCEPTOR = _load(('AAM_L', 4), ('AAM_M', 2), ('AAM_S', 2))
-_MULTIROLE = _load(('AAM_M', 2), ('AAM_S', 2), ('AGM', 2), ('MK82', 4))
-_STRIKE = _load(('AGM', 6), ('MK82', 6), ('AAM_S', 2))
+_MULTIROLE = _load(('AAM_M', 2), ('AAM_S', 2), ('AGM', 2), ('RKT', 19), ('MK82', 4))
+_STRIKE = _load(('AGM', 6), ('RKT', 38), ('MK82', 6), ('AAM_S', 2))
 _DRONE = _load(('AGM_L', 4))
 _SHIP = _load(('ESSM', 32))
 HOMING_WEAPONS = tuple(w for jet_weapons in (_FIGHTER, _INTERCEPTOR, _MULTIROLE, _STRIKE, _DRONE, _SHIP)
-                       for w in jet_weapons if store_of(w) and STORES[store_of(w)[0]].role != 'bomb')
+                       for w in jet_weapons if store_of(w) and STORES[store_of(w)[0]].role in ('air', 'ground'))
 _ARMS = _FIGHTER
 # The blast drones' charge (src/jet.cpp Detonate: weapon 2, fired by 0x2021 once next to the enemy): the
 # 409's unguided bomb (GrenadeBullet01) made a point charge (docs/decoy-blast-re.md 1.4): CP#0 = 1 bursts

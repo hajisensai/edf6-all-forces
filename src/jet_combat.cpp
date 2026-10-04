@@ -258,7 +258,11 @@ Arms ReadArms(unsigned char* v) noexcept {
         }
     }
     a.storeCount=ReadStores(v,a.stores,kMostStores);
-    for(int i=0;i<a.storeCount;++i)if(a.stores[i].spec->role==StoreRole::bomb)a.bombs+=a.stores[i].ammo;
+    a.rocket=-1;
+    for(int i=0;i<a.storeCount;++i) {
+        if(a.stores[i].spec->role==StoreRole::bomb)a.bombs+=a.stores[i].ammo;
+        if(a.stores[i].spec->role==StoreRole::rocket && a.stores[i].ammo>0 && a.rocket<0)a.rocket=i;
+    }
     return a;
 }
 
@@ -334,6 +338,10 @@ bool WeaponsFree(const Jet& j) noexcept {
 // Bombs (stores.h StoreRole::bomb) at a target on the ground: let go once where one would hit (its fall from here
 // at the jet's velocity, the target's height, the target moving on as it falls) is within kBombHit of its blast
 // radius of the target, and the jet is kBombSafe over it (its own blast); one every kBombMs.
+// Rockets (StoreRole::rocket) in a strafing run: a ripple (the store's burst) every kRocketMs while the guns' lead is
+// within kRocketCone of the nose, from kRocketOpen in to kRocketClose times the guns' closest; then the guns go on.
+constexpr float kRocketOpen=1400.0f,kRocketClose=2.5f,kRocketCone=0.026f;   // m, x gunClose, rad (1.5 deg)
+constexpr ULONGLONG kRocketMs=600;
 constexpr float kBombHit=1.0f,kBombSafe=100.0f;
 constexpr ULONGLONG kBombMs=400;
 void Bomb(Jet& j,unsigned char* v,const float* pos,const Arms& a,ULONGLONG ms) noexcept {
@@ -376,6 +384,13 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const bool straight=Normalize(flight) && Dot(flight,nose)>std::cos(std::acos(kGunSlip)+std::fabs(j.m.aoa));
         const bool friendly=FriendInLine(pos,path,v);
         gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !friendly;
+        if(gunsOk && straight && !t.flyer && a.rocket>=0 && dist<kRocketOpen && dist>k.gunClose*kRocketClose && miss<kRocketCone &&
+           !friendly && ms-t.rocketAt>kRocketMs) {
+            TriggerStore(a.stores[a.rocket]);
+            t.rocketAt=ms;
+            if(Cfg().debug)Log("JET v=%p rockets: %s, %.0f m, %.1f deg off (%d left)",v,a.stores[a.rocket].spec->name,dist,
+                             miss*180.0f/kPi,a.stores[a.rocket].ammo);
+        }
         if(Cfg().debug && dist<reach && ms-t.gateAt>250) {
             t.gateAt=ms;
             Log("JET v=%p gun gate: %s mode=%s dist=%.0f miss=%.1f cone=%.1f deg slip=%.3f friend=%d aimed=%d",v,gun ? "FIRE" : "hold",
