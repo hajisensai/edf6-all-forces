@@ -689,7 +689,29 @@ void HudPublish() noexcept {
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
 }
 
+// The last frame's view-projection, for the game thread (the player jet keeps its mouse aim on the screen with it).
+namespace {
+SRWLOCK viewLock=SRWLOCK_INIT;
+float lastViewProj[16];
+bool hasViewProj=false;
+
+void KeepViewProj(const float* viewProj) noexcept {
+    AcquireSRWLockExclusive(&viewLock);
+    std::memcpy(lastViewProj,viewProj,sizeof(lastViewProj));hasViewProj=true;
+    ReleaseSRWLockExclusive(&viewLock);
+}
+}  // namespace
+
+bool LastViewProj(float* out) noexcept {
+    AcquireSRWLockShared(&viewLock);
+    const bool ok=hasViewProj;
+    if(ok)std::memcpy(out,lastViewProj,sizeof(lastViewProj));
+    ReleaseSRWLockShared(&viewLock);
+    return ok;
+}
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
+    if(viewProj)KeepViewProj(viewProj);
     if(!quadOk || !viewProj || !ctx || !viewport)return;   // the carriers' bars are drawn whatever VehicleHud says
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);

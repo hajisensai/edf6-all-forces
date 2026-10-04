@@ -118,6 +118,10 @@ constexpr float kStallWarn=1.05f;
 // 2026-10-04). Under kAimBankMin g of lift it keeps its bank.
 constexpr float kMouseMoved=0.02f;    // a frame's mouse movement past this hands the plane to the aim
 constexpr float kAimPerUnit=0.05f,kAimMaxEl=1.3f,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
+// The mouse's aim stays on the screen: its mark (kAimMark ahead) within kAimOnScreen of the screen's half size
+// (the user, 2026-10-05: the aim ran off the screen and the jet turned on after it, unseen). A frame's mouse that
+// would take it out is not taken; one the camera's turn left outside is drawn back toward the flight path.
+constexpr float kAimOnScreen=0.85f;
 constexpr float kAimMark=800.0f;       // m: the readout's aim and path points ahead of the plane      // the readout's STALL: the most lift under this many times what holds the path
 // Angle of attack (jet.cpp kAoaPerG): the nose rides this far above the path per g pulled at the middle of
 // the speed range, more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax, eased over kAoaTau s. Only
@@ -572,6 +576,30 @@ void MoveAim(PJet& j,const Stick& s) noexcept {
     j.aim[0]=flat[0]*std::cos(el);j.aim[1]=std::sin(el);j.aim[2]=flat[2]*std::cos(el);
 }
 
+// Whether the aim's mark lies within kAimOnScreen of the screen (view-projection `vp`, row vectors).
+bool AimOnScreen(const float* vp,const float* pos,const float* aim) noexcept {
+    const float p[3]={pos[0]+aim[0]*kAimMark,pos[1]+aim[1]*kAimMark,pos[2]+aim[2]*kAimMark};
+    float c[4];
+    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
+    return c[3]>1e-3f && std::fabs(c[0]/c[3])<=kAimOnScreen && std::fabs(c[1]/c[3])<=kAimOnScreen;
+}
+
+// See kAimOnScreen: the aim as it was (`was`) when this frame's mouse took it off the screen; still off (the camera
+// turned), toward the flight path `dir` until it is on.
+void KeepAimOnScreen(PJet& j,const unsigned char* v,const float* dir,const float* was) noexcept {
+    float vp[16];
+    if(!LastViewProj(vp))return;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    if(AimOnScreen(vp,pos,j.aim))return;
+    std::memcpy(j.aim,was,12);
+    for(int step=0;step<10 && !AimOnScreen(vp,pos,j.aim);++step) {
+        float a[3];
+        for(int i=0;i<3;++i)a[i]=j.aim[i]*0.8f+dir[i]*0.2f;
+        if(!Normalize(a))break;
+        std::memcpy(j.aim,a,12);
+    }
+}
+
 // The lift (along the plane's up, as Air's pitch) that turns its path toward the mouse's aim (kSteer) and holds it
 // up (`hold`, Hold's: the same slight sag as the stick let go); the plane banked toward where that lift points. Too
 // slow for it, the wing gives what it can (a turn too tight for it is wider, a climb too steep sinks).
@@ -579,7 +607,9 @@ float AimSteer(PJet& j,const unsigned char* v,const Stick& s,const float* dir,co
                float most,float hold,const float* gPerp,float dt) noexcept {
     EnsureUp(j,v,dir,level,vertical);
     if(!j.hasAim){std::memcpy(j.aim,dir,12);j.hasAim=true;}
+    float was[3];std::memcpy(was,j.aim,12);
     MoveAim(j,s);
+    KeepAimOnScreen(j,v,dir,was);
     const float c=Clamp(Dot(j.aim,dir),-1.0f,1.0f);
     float toward[3]={j.aim[0]-dir[0]*c,j.aim[1]-dir[1]*c,j.aim[2]-dir[2]*c};
     if(!Normalize(toward)) {   // dead ahead: no turn; dead behind: round to the right
