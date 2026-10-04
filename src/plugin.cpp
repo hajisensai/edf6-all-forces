@@ -184,6 +184,8 @@ void LoadConfig() noexcept {
     n.carrierLaser=ReadBool(L"CarrierLaser",n.carrierLaser);
     n.carrierLaserDamage=ReadFloat(L"CarrierLaserDamage",n.carrierLaserDamage);
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
+    n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
+    n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
@@ -212,6 +214,7 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
+    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d",n.vehicleWelding,n.giantContactCap);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }
@@ -391,6 +394,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
+    InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();

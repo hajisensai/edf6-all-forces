@@ -163,9 +163,46 @@ unsigned char* AimLineOf(unsigned char* const* holders,std::uint64_t i) noexcept
     return line;
 }
 
+// The line's points: a std::vector<hkVector4> at line+kAimLinePoints (begin +8, capacity +0x10, size +0x18),
+// built by 0x6899F0 only while the segment count is non-zero. A line hidden from the vehicle's first frame
+// never got one, and the render (0x687F20, on the render thread) reads `segments` points from begin without
+// looking at the size: putting the count back onto a null begin crashed it (EDF.dll+0x6880C1, null read, the
+// frame the player was bumped in). So the buffer is made before the count: grown the way 0x6899F0 grows it
+// (game operator new; 0x1000 bytes and up 32-aligned with the raw pointer at [-8], what the release 0x6895C0
+// frees), every point at the vehicle -- a zero-length line until the next build fills it.
+constexpr std::size_t kAimLinePoints=0x70,kGameNew=0x12D85B0,kPointsRelease=0x6895C0;
+using GameNewFn=void*(*)(std::size_t);
+using PointsReleaseFn=void(*)(void*);
+
+bool EnsurePoints(unsigned char* line,std::int32_t segments,const float* at) noexcept {
+    unsigned char* const vec=line+kAimLinePoints;
+    const auto count=static_cast<std::uint64_t>(segments);
+    if(At<const void*>(vec,8) && At<std::uint64_t>(vec,0x10)>=count)return true;
+    const std::size_t bytes=count*16;
+    const auto gameNew=reinterpret_cast<GameNewFn>(image+kGameNew);
+    float* points=nullptr;
+    if(bytes>=0x1000) {
+        auto* raw=static_cast<unsigned char*>(gameNew(bytes+0x27));
+        if(!raw)return false;
+        points=reinterpret_cast<float*>((reinterpret_cast<std::uintptr_t>(raw)+0x27)&~std::uintptr_t{0x1F});
+        reinterpret_cast<unsigned char**>(points)[-1]=raw;
+    } else {
+        points=static_cast<float*>(gameNew(bytes));
+        if(!points)return false;
+    }
+    for(std::uint64_t i=0;i<count;++i) {
+        points[i*4]=at[0];points[i*4+1]=at[1];points[i*4+2]=at[2];points[i*4+3]=1.0f;
+    }
+    if(At<const void*>(vec,8))reinterpret_cast<PointsReleaseFn>(image+kPointsRelease)(vec);
+    Put<std::uint64_t>(vec,0x18,count);
+    Put<std::uint64_t>(vec,0x10,count);
+    Put<float*>(vec,8,points);
+    return true;
+}
+
 // Hides the line from an NPC (its count kept in the vehicle's state; with no room left the line stays as it
-// is), gives a player back what was taken.
-void SetLine(State& st,unsigned char* line,Rider rider) noexcept {
+// is), gives a player back what was taken (its point buffer first: EnsurePoints).
+void SetLine(State& st,unsigned char* line,Rider rider,const float* at) noexcept {
     const auto segments=At<std::int32_t>(line,kAimLineSegments);
     HiddenLine* h=HiddenOf(st,line);
     if(rider==Rider::dummy && segments>0) {
@@ -174,6 +211,7 @@ void SetLine(State& st,unsigned char* line,Rider rider) noexcept {
         *h=HiddenLine{line,segments};
         Put<std::int32_t>(line,kAimLineSegments,0);
     } else if(rider==Rider::player && h) {
+        if(!EnsurePoints(line,h->segments,at))return;
         Put<std::int32_t>(line,kAimLineSegments,h->segments);
         *h=HiddenLine{};
     }
@@ -196,7 +234,7 @@ void AimLines(unsigned char* vehicle) noexcept {
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(n>8 || !Readable(holders,n*8))continue;
         for(std::uint64_t w=0;w<n;++w)
-            if(auto line=AimLineOf(holders,w))SetLine(*st,line,rider);
+            if(auto line=AimLineOf(holders,w))SetLine(*st,line,rider,reinterpret_cast<const float*>(vehicle+kPosition));
     }
 }
 
