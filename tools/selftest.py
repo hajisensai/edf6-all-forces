@@ -94,7 +94,9 @@ def calls_table_consistent() -> None:
         assert c.brings in ('jets', 'helis', 'sub', 'vehicle'), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
-        assert bool(c.vehicle) == bool(c.jet) == (c.brings == 'vehicle'), c.id
+        assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
+        assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
+        assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
         assert (c.count > 0) == c.flown and bool(c.log) == c.flown, c.id
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
@@ -197,7 +199,7 @@ def hand_copies_agree() -> None:
     # kKinds rows: {"name",mark,...}, the mark an integer or a float literal.
     pjet = dict(re.findall(r'\{"(\w+)",\s*(\d+)(?:\.0f)?\s*,', src('src/playerjet.cpp').split('kKinds[]={', 1)[1].split('};', 1)[0]))
     for c in calls.CALLS:
-        if c.brings != 'vehicle':
+        if c.brings != 'vehicle' or c.ground:
             continue
         jet = vc.JETS[c.jet]
         assert jet.player and jet.mark == c.mark, c.id

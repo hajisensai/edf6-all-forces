@@ -36,6 +36,8 @@ class Call:
     # the pylib/vcobjects.py JETS entry it is made like; `mark` is then that jet's mark (its speed gain k).
     vehicle: str = ''
     jet: str = ''
+    # ...or the pylib/vcobjects.py GROUND_VEHICLES entry it brings (a vehicle request of a ground vehicle; `mark` 0).
+    ground: str = ''
 
     @property
     def flown(self) -> bool:
@@ -82,6 +84,9 @@ CALLS: tuple[Call, ...] = (
     # put these two before the player jets', which moved those rows (WITHDRAWN).
     Call('EDF6VC_CALL_GUNSHIP', 7118, 'gunship', False, 1, 2600, 1.2, 'jets', 'gunship (guard)', 600, 'gunship'),
     Call('EDF6VC_CALL_GUNSHIP_F', 7119, 'gunship', True, 1, 3000, 1.4, 'jets', 'gunship (follow)', 600, 'gunship'),
+    # Appended 2026-10-05: the Katyusha rocket truck (tools/make_katyusha.py), requested like the Naegling.
+    Call('EDF6VC_CALL_KATYUSHA', 0, 'katyusha', False, 0, 7500, 1.0, 'vehicle', vehicle='EDF6VC_KATYUSHA',
+         ground='katyusha'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -94,6 +99,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     '2ce755c (submarine carrier)': IDS[:17],
     '5d1a3ed / 9233829 (player jets)': IDS[:19],
     '0.7.1 (the gunship after the player jets)': IDS[:21],
+    'Katyusha (2026-10-05)': IDS[:22],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -119,6 +125,17 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'katyusha': {
+        'SC': ('喀秋莎火箭炮车', '请求一辆喀秋莎火箭炮车：卡车车斗上的多管火箭发射架，自动瞄准地面目标，曲射齐射 40 发火箭弹覆盖一片区域。'
+                          '装填较慢。'),
+        'CN': ('喀秋莎火箭砲車', '請求一輛喀秋莎火箭砲車：卡車車斗上的多管火箭發射架，自動瞄準地面目標，曲射齊射 40 發火箭彈覆蓋一片區域。'
+                          '裝填較慢。'),
+        'JA': ('カチューシャ ロケット砲車', 'カチューシャ ロケット砲車を要請する。トラックの荷台に多連装ロケット発射機、地上の目標を自動で狙い、'
+                                 '40 発のロケット弾を曲射で斉射して一帯を制圧する。装填は遅い。'),
+        'EN': ('Katyusha Rocket Truck', 'Requests a Katyusha rocket truck: a multiple rocket launcher on a truck bed '
+                                        'that aims at ground targets by itself and lobs a 40-rocket salvo over an area. '
+                                        'Slow to reload.'),
+    },
     'pjet_fighter': {
         'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
                          '前推左摇杆或按上升键加油门，后拉减油门；右摇杆或鼠标转弯和俯仰。'),
@@ -222,6 +239,12 @@ VEHICLE_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグインと tools/make_jets.py が書き出す EDF6VC_PJET_*.SGO が必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the EDF6VC_PJET_*.SGO files tools/make_jets.py writes.',
 }
+GROUND_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
+    'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',
+    'JA': 'EDF6VehicleCrew と EDF6AutoTurret のプラグイン、およびインストーラーが書き出す車両ファイルが必要。',
+    'EN': 'Needs the EDF6VehicleCrew and EDF6AutoTurret plugins and the vehicle files the installer writes.',
+}
 
 
 
@@ -248,7 +271,7 @@ def call_name(call: Call, lang: str) -> str:
 def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
     if call.brings == 'vehicle':
-        return KINDS[call.kind][lang][1] + '\n\n' + VEHICLE_NOTES[lang]
+        return KINDS[call.kind][lang][1] + '\n\n' + (GROUND_NOTES if call.ground else VEHICLE_NOTES)[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

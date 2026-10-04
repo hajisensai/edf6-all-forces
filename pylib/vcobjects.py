@@ -261,6 +261,32 @@ _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
 PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15   # jet_sgo: a player jet's seat
+
+
+@dataclass(frozen=True)
+class GroundVehicle:
+    """A ground vehicle the player requests (tools/calls.py Call.ground), built by its own tool: its stock vehicle SGO
+    (the class and everything it does not change), the stock request it is requested like (the transport and the
+    vehicle setup's layout: tools/call_weapons.py vehicle_sgo; its family's levels set the request's multipliers),
+    the weapons its setup carries, and its base durability."""
+    sgo: str              # Mods/OBJECT file, without extension
+    stock: str            # Root.cpk OBJECT SGO it is made from, without extension
+    request: str          # the stock request weapon it is requested like (its WEAPONTABLE row is the template)
+    family: tuple[str, ...]   # that request and its stronger versions: (level, multipliers) for request_tier
+    weapons: tuple[str, ...]
+    durability: float
+    tool: str             # the tool that writes it (tools/<tool>.py)
+
+
+# The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its
+# wheels), the V607 truck under the Naegling's rack; its rockets are lobbed and the EDF6AutoTurret plugin aims them
+# (LockonTargetType kMarkGround, as the Bohr's).
+KATYUSHA_ROCKETS = 'EDF6VC_KATYUSHA_ROCKETS.SGO'
+GROUND_VEHICLES: dict[str, GroundVehicle] = {
+    'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
+                              ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
+                              ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),
+}
 JET_SILENT_SE = 'EDF6VC_SILENT'
 JET_ROTOR_SE_ROWS = (0, 1)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).

@@ -71,5 +71,6 @@ const CallRow kCallRows[]={
     {L"EDF6VC_CALL_PJET_STRIKE",L"EDF6VC_CALL_PJET_STRIKE.SGO",L"EDF6VC_PJET_STRIKE.SGO"},
     {L"EDF6VC_CALL_GUNSHIP",L"EDF6VC_CALL_GUNSHIP.SGO",nullptr},
     {L"EDF6VC_CALL_GUNSHIP_F",L"EDF6VC_CALL_GUNSHIP_F.SGO",nullptr},
+    {L"EDF6VC_CALL_KATYUSHA",L"EDF6VC_CALL_KATYUSHA.SGO",L"EDF6VC_KATYUSHA.SGO"},
 };
 constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));
