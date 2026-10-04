@@ -74,6 +74,7 @@ struct Config {
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    bool bigWorld=true;             // the physics world +-10000 m instead of +-3000 (bigworld.cpp), from the next mission load
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -112,6 +113,9 @@ void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
 void ResetMissiles() noexcept;    // missile.cpp
+void ResetBigWorld() noexcept;    // bigworld.cpp
+// A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
+bool InstallBigWorld() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
