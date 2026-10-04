@@ -7,9 +7,12 @@
 //    seat (the left and right sticks and the ascend trigger, as the stock heli reads them), the heli's own
 //    input block is zeroed (no rotor lift, no heli steering), and the flight step runs: on the ground it
 //    taxis and rolls along its nose, accelerates with the throttle and lifts off at its rotate speed; in the
-//    air it always flies forward, at least minAir (no stall), Ace Combat's way: the right stick / mouse turns (it
-//    banks into the turn) and pitches along the plane's own up, the left stick's sideways rolls it about its nose
-//    (held with the stick back: a barrel roll; over the top: a loop), let go it levels; touching down gently
+//    air it flies as a wing does (Air): its lift grows with the square of its speed (slow, it cannot hold itself
+//    up: it sinks, a stall), along the plane's own up (banked or inverted, gravity is no longer held off), the
+//    engine pulls against a drag that grows with speed and with the g it pulls (climbs and hard turns cost
+//    speed, dives gain it); Ace Combat's controls: the right stick / mouse turns (it banks into the turn and
+//    pulls to hold its height) and pitches, the left stick's sideways rolls it about its nose, let go it levels
+//    and its flight control holds a little under 1 g (it settles into a shallow sink); touching down gently
 //    it lands and rolls out, hitting the ground (or a building, or anything else in its way) hard it is damaged,
 //    destroyed at 0 HP; what it rams takes damage too (ImpactDamage);
 //  - physics (506 slot 57, body506.cpp -> PlayerJetBodyStep): its linear and angular velocity, as jet.cpp writes
@@ -45,18 +48,20 @@ constexpr float kG=9.8f;
 struct Kind {
     const char* name;
     int mark;            // its SGO's mark (testrange/gen.py JETS; body506.cpp names the range)
-    float minAir;        // m/s: the least it flies at in the air (no stall)
+    float minAir;        // m/s: the speed the engine at idle holds in level flight (slower is kStallFloor's)
     float rotate;        // m/s: it can lift off from here (on its own kAutoRotate faster)
     float top;           // m/s at full throttle (the body's own motion properties lift Havok's 200 m/s: jetprops.cpp)
-    float thrust,brake;  // m/s^2 toward the throttle's speed
-    float maxG;          // the most lift, in g
+    float thrust;        // m/s^2: the engine at full throttle (as much as the drag at `top`: Air)
+    float brake;         // m/s^2: the airbrake (the stick back) at `top`, less as the square of the speed below it
+    float maxG;          // the most lift, in g...
+    float corner;        // m/s: ...from this speed up; below, maxG * (speed / corner)^2 (1 g at corner / sqrt(maxG))
     float roll;          // rad/s: how fast the body turns onto its attitude
     float landMax;       // m/s: the fastest it can touch down without damage
     float ram;           // m: the reach of what it rams (its size: the fighter's model is 16 m across, the strike jet's 25 m)
 };
 constexpr Kind kKinds[]={
-    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,2.6f, 130.0f, 10.0f},
-    {"strike", 7202, 60.0f,70.0f,240.0f, 11.0f,26.0f, 5.0f,1.6f, 120.0f, 12.0f},
+    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,150.0f, 2.6f, 130.0f, 10.0f},   // 1 g at 61 m/s
+    {"strike", 7202, 60.0f,70.0f,240.0f, 11.0f,26.0f, 5.0f,140.0f, 1.6f, 120.0f, 12.0f},   // 1 g at 63 m/s
 };
 constexpr float kAutoRotate=20.0f;     // m/s over rotate: it lifts off without the stick...
 constexpr float kAutoThrottle=0.6f;    // ...with the throttle at least this open (not rolling out a landing)
@@ -71,24 +76,36 @@ constexpr float kTaxiTurn=0.8f;        // rad/s: the slowest taxi turn rate (the
 constexpr float kTaxiFull=25.0f;       // ...from this ground speed on (rate times kTaxiFull / speed)
 constexpr float kGroundBrake=12.0f;    // m/s^2 rolling with the throttle closed
 constexpr float kParkSpeed=0.5f;       // below this, throttle closed: parked (the stock code holds it)
-constexpr float kTurnShare=0.9f;       // of maxG a full turn stick pulls (the rest holds it up)
 // The plane's own up (PJet::up), carried along its path: the roll rotates it about the nose at kRollRate; let go it
-// returns to the bank the turn stick asks for (kTurnBank at full), at most kLevelRate, unless the pitch stick is held
+// returns to the bank the turn stick asks for (kTurnBank at full, a coordinated turn: Air), at most kLevelRate, unless the pitch stick is held
 // (kLevelPull: pulled through the top it loops, as in Ace Combat) or it points
 // within kVertical of straight up or down (no "level" there: it keeps its up).
 constexpr float kRollRate=4.2f;        // rad/s at full roll stick (a full roll in 1.5 s)
 constexpr float kLevelRate=1.8f;       // rad/s
-constexpr float kTurnBank=1.1f;        // rad: the bank of a full turn stick
+constexpr float kTurnBank=1.2f;        // rad (69 deg, 2.8 g to hold the height): the bank of a full turn stick
 constexpr float kRollDead=0.08f;       // the roll stick under this is let go
 constexpr float kLevelPull=0.15f;      // ...and it levels only with the pitch stick under this (held, it loops)
 constexpr float kVertical=0.97f;       // sine of the climb past which there is no level to return to
-constexpr float kTurnBleed=3.0f;       // m/s^2 lost per g pulled over 1 (jet.cpp kTurnBleed)
+// The lift with the stick let go (Air Hold): the flight control holds kHold of what keeps the path from bending
+// (g * cos(climb), along the plane's up), so level flight starts to sink; the nearer the sink to kSettleSink the
+// more it holds, all of it there: level flight settles into a sink of kSettleSink (over ~13 s), a climb bends
+// slowly over, a dive is held. Never more than the wing gives at its speed.
+constexpr float kHold=0.988f,kSettleSink=1.5f;   // m/s
+constexpr float kMinBankCos=0.25f;     // a turn's hold (its lift / cos bank) at most 4 g of it
+constexpr float kPush=0.5f;            // the stick forward: down to kPush of the most lift, negative
+// Drag (Air): parasitic, Kind::thrust * (speed / top)^2 (full throttle levels off at top); induced, kInduced per g^2
+// pulled at the corner speed, more as the square of corner / speed (a 6 g turn at the corner: 11 m/s^2).
+constexpr float kInduced=0.3f;
+constexpr float kStallWarn=1.05f;      // the readout's STALL: the most lift under this many times what holds the path
 // Angle of attack (jet.cpp kAoaPerG): the nose rides this far above the path per g pulled at the middle of
 // the speed range, more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax, eased over kAoaTau s. Only
 // pitch, along the body's up: the nose never slips sideways off the path.
 constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.2f,kAoaTau=0.3f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude this fast (jet.cpp kAttGain)
-constexpr float kBodyTop=260.0f;       // m/s (~940 km/h): no kind flies faster
+// The least speed in the air: its wing gives next to nothing there (6% of 1 g for the fighter), so a plane
+// slowed this far (pulled up too long) has its path fall through: the nose drops and it dives out, a stall.
+constexpr float kStallFloor=25.0f;
+constexpr float kBodyTop=340.0f;       // m/s: the steepest dive's (the drag holds it about there; jetprops.cpp 600)
 constexpr float kCeilingGap=12.0f;
 // The world's walls (jet.cpp kWorldWall: the Havok broadphase ends at 3000 m a side): a path out through one is
 // turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
@@ -133,6 +150,8 @@ struct PJet {
     bool hasUp;
     float throttleIn;            // the stick's throttle command last frame (-1, 0, +1): a change is logged
     float clear,climb;           // its height over the floor and climb last frame (the cockpit readout)
+    float load;                  // the g it pulled last frame (the cockpit readout)
+    bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
     float vel[3],omega[3];
     float prev[3];               // its position last frame
     bool havePrev;
@@ -426,45 +445,62 @@ void Roll(PJet& j,const unsigned char* v,const Stick& s,const float* dir,const f
     Across(j.up,dir);
 }
 
-// In the air: always forward, at least minAir. The pitch stick pulls along the plane's own up (Roll): upright it
-// climbs, inverted it dives, held through the top a loop; the turn stick bends the path sideways (kTurnShare of
-// maxG) and banks the plane into the turn; at most maxG of lift in all. Gravity across the path is held off (an
-// arcade plane flies straight, inverted too, with the sticks let go).
+// The lift (m/s^2, along the plane's up) its flight control asks for with the pitch stick let go (see kHold):
+// `across` the gravity across the path, `sink` m/s down. A turn stick held asks for a coordinated turn: that over
+// the cosine of its bank (its height held as it banks), by how far the stick is over.
+float Hold(const PJet& j,const Stick& s,const float* level,bool vertical,float across,float sink) noexcept {
+    float lift=across*Clamp(1.0f-(1.0f-kHold)*(1.0f-sink/kSettleSink),kHold,1.0f);
+    if(vertical || std::fabs(s.yaw)<kRollDead)return lift;
+    const float bank=Dot(j.up,level);
+    if(bank<=kMinBankCos)return lift;
+    return lift*(1.0f+std::fabs(Clamp(s.yaw,-1.0f,1.0f))*(1.0f/bank-1.0f));
+}
+
+// In the air (see the file comment): at least kStallFloor. Its lift, along the plane's own up (Roll), at most
+// maxG * (speed / corner)^2 g: the pitch stick let go Hold's, pulled more toward the most, pushed toward kPush of
+// it below 0; gravity acts on the path whole (banked it sinks, inverted it falls, a roll costs a little height).
+// Its speed: the engine (the throttle's share of thrust, kept where the parasitic drag levels it off at the
+// throttle's speed), less the drag and the airbrake, less gravity along the path.
 void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bool water,float dt,ULONGLONG ms) noexcept {
     const Kind& k=*j.kind;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     float dir[3]={j.vel[0],j.vel[1],j.vel[2]};
     float speed=Len(dir);
     if(!Normalize(dir)){dir[0]=m[8];dir[1]=m[9];dir[2]=m[10];if(!Normalize(dir)){dir[0]=0;dir[1]=0;dir[2]=1;}}
-    if(speed<k.minAir)speed=k.minAir;
-    float right[3];RightOf(dir,right);   // level: the way a turn bends the path
+    if(speed<kStallFloor)speed=kStallFloor;
     float up[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};   // world up off the path
     const bool vertical=!Normalize(up) || std::fabs(dir[1])>kVertical;
     if(vertical){up[0]=0;up[1]=1;up[2]=0;}
     Roll(j,v,s,dir,up,vertical,dt);
-    const float most=k.maxG*kG;
-    const float pitch=s.pitch*most,turn=vertical ? 0.0f : s.yaw*most*kTurnShare;
+    const float wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
+    const float most=k.maxG*kG*wing;   // all the wing gives at this speed
     const float gPerp[3]={dir[0]*kG*dir[1],-kG+dir[1]*kG*dir[1],dir[2]*kG*dir[1]};   // gravity across the path
+    const float across=Len(gPerp);   // g * cos(climb)
+    const float want=k.minAir+j.throttle*(k.top-k.minAir);
+    const float hold=Clamp(Hold(j,s,up,vertical,across,-dir[1]*speed),0.0f,most);
+    const float pitch=s.pitch>=0.0f ? hold+s.pitch*(most-hold) : hold+s.pitch*(hold+kPush*most);
     float lift[3];
-    for(int i=0;i<3;++i)lift[i]=j.up[i]*pitch+right[i]*turn-gPerp[i];
-    const float pull=Len(lift);
-    if(pull>most)for(int i=0;i<3;++i)lift[i]*=most/pull;
+    for(int i=0;i<3;++i)lift[i]=j.up[i]*pitch;
+    j.stall=most<kStallWarn*across;
     float next[3];
     for(int i=0;i<3;++i)next[i]=dir[i]+(lift[i]+gPerp[i])*dt/speed;
     if(!Normalize(next))std::memcpy(next,dir,12);
     WallTurn(pos,next);
     Across(j.up,next);   // carried along the new path
     float bodyUp[3];std::memcpy(bodyUp,j.up,12);
-    const float g=Len(lift)/kG,bleed=g>1.0f ? (g-1.0f)*kTurnBleed : 0.0f;
-    const float want=k.minAir+j.throttle*(k.top-k.minAir);
-    speed+=Clamp(want-speed,-k.brake*dt,k.thrust*dt)-(kG*next[1]+bleed)*dt;
-    speed=Clamp(speed,k.minAir,k.top<kBodyTop ? k.top : kBodyTop);
+    const float g=pitch/kG,top2=k.top*k.top;
+    j.load=g;
+    const float thrust=k.thrust*want*want/top2;
+    const float slow=k.corner/speed,drag=k.thrust*speed*speed/top2+kInduced*g*g*slow*slow;
+    const float airbrake=s.throttle<0.0f ? k.brake*speed*speed/top2 : 0.0f;
+    speed+=(thrust-drag-airbrake-kG*next[1])*dt;
+    speed=Clamp(speed,kStallFloor,kBodyTop);
     for(int i=0;i<3;++i)j.vel[i]=next[i]*speed;
     // The ceiling the stock input holds every body under: it levels off under it.
     if(pos[1]>CeilingY()-kCeilingGap && j.vel[1]>0.0f)j.vel[1]=0.0f;
     // The nose above the path by what the wing needs, pitched about the body's right only (no sideslip).
-    const float mid=0.5f*(k.minAir+k.top),slow=mid/speed;
-    const float aoaWant=Clamp(kAoaPerG*g*slow*slow,kAoaMin,kAoaMax);
+    const float mid=0.5f*(k.minAir+k.top),past=mid/speed;
+    const float aoaWant=Clamp(kAoaPerG*g*past*past,kAoaMin,kAoaMax);
     j.aoa+=(aoaWant-j.aoa)*(dt<kAoaTau ? dt/kAoaTau : 1.0f);
     float nose[3]={next[0],next[1],next[2]};
     const float along=Dot(bodyUp,nose);
@@ -535,9 +571,10 @@ void Report(PJet& j,const unsigned char* v,const Stick& s,const float* pos,float
     if(!Cfg().debug || ms-j.logAt<kLogMs)return;
     j.logAt=ms;
     const float speed=Len(j.vel);
-    Log("PJET v=%p %s %.0f m/s climb %.1f thr %.2f pos=(%.0f,%.0f,%.0f) clear %.0f%s hp %.0f in(turn %.2f pitch %.2f) "
-        "seat(LX %.2f LY %.2f RX %.2f RY %.2f asc %.2f)",v,kPhaseNames[static_cast<int>(j.phase)],speed,j.vel[1],j.throttle,
-        pos[0],pos[1],pos[2],clear,water ? " (water)" : "",At<float>(v,kHp),s.turn,s.pitch,s.lx,s.ly,s.rx,s.ry,s.ascend);
+    Log("PJET v=%p %s %.0f m/s climb %.1f thr %.2f g %.2f%s pos=(%.0f,%.0f,%.0f) clear %.0f%s hp %.0f in(turn %.2f pitch %.2f "
+        "roll %.2f) seat(LX %.2f LY %.2f RX %.2f RY %.2f asc %.2f)",v,kPhaseNames[static_cast<int>(j.phase)],speed,j.vel[1],j.throttle,
+        j.load,j.stall ? " STALL" : "",pos[0],pos[1],pos[2],clear,water ? " (water)" : "",At<float>(v,kHp),s.turn,s.pitch,s.roll,
+        s.lx,s.ly,s.rx,s.ry,s.ascend);
 }
 
 // How it moved since last frame (see GameStep): `measured`, and the game time the frame stepped.
@@ -621,7 +658,9 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
         const unsigned char* v=j.vehicle;
         __try {
             if(!j.ref.Is(v) || v[kDead])continue;
-            *out=PlayerJetReadout{Len(j.vel),j.throttle,j.clear,j.climb,At<float>(v,kHp),At<float>(v,kHpMax),j.phase==Phase::air};
+            const bool air=j.phase==Phase::air;
+            *out=PlayerJetReadout{Len(j.vel),j.throttle,j.clear,j.climb,At<float>(v,kHp),At<float>(v,kHpMax),air ? j.load : 1.0f,air,
+                                  air && j.stall};
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}
     }

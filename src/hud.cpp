@@ -447,7 +447,8 @@ float Panel(void* drawer,void* ctx,Text* text,const CarrierPanel& p,int index,in
 }
 
 // The cockpit readout of the jet the player flies (drawn whatever VehicleHud says): at the bottom centre, its
-// speed, height over the floor and climb, the throttle lever as a bar, its HP, and the controls.
+// speed, height over the floor and climb, the throttle lever as a bar with the g it pulls (and STALL, red, when
+// its wing cannot hold its path), its HP, and the controls.
 void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
              int* at) noexcept {
     if(*at+3>kMaxLines)return;
@@ -457,11 +458,11 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Format(info,L"SPD %d km/h    ALT %d m    %ls %d m/s    HP %d%%",static_cast<int>(std::lround(j.speed*3.6f)),
            static_cast<int>(std::lround(j.clear>9999.0f ? 9999.0f : j.clear)),j.climb>=0.0f ? L"UP" : L"DOWN",
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
-    Format(thr,L"THROTTLE %d%%",static_cast<int>(std::lround(j.throttle*100.0f)));
+    Format(thr,L"THROTTLE %d%%    G %.1f%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"");
     Format(keys,j.air ? L"BOOST: forward / ascend   BRAKE: back   ROLL: left stick sideways   PITCH, TURN: right stick / mouse"
                       : L"THROTTLE: forward / ascend = up, back = down    TAKE OFF: pull up    TURN: right stick / mouse");
     info.scale=kTitleScale;info.rgba=kWhite;
-    thr.scale=kLineScale;thr.rgba=kCyan;
+    thr.scale=kLineScale;thr.rgba=j.stall ? kRed : kCyan;
     keys.scale=kLineScale*0.85f;keys.rgba=kWhite;
     info.w=info.h=thr.w=thr.h=keys.w=keys.h=0.0f;
     if(text){MeasureAll(*text,&info,1);MeasureAll(*text,&thr,1);MeasureAll(*text,&keys,1);}

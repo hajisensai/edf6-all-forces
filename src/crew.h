@@ -282,7 +282,8 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 bool IsPlayerJet(const void* vehicle) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
-struct PlayerJetReadout { float speed,throttle,clear,climb,hp,hpMax; bool air; };
+// The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path.
+struct PlayerJetReadout { float speed,throttle,clear,climb,hp,hpMax,load; bool air,stall; };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
