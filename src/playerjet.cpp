@@ -1006,6 +1006,8 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     std::memcpy(j.sent,j.vel,12);
     Elevons(j,v,dt);
     Report(j,v,s,pos,clear,water,ms);
+    // The exhaust (booster.cpp JetFlames) with the throttle; the lever full forward is the afterburner.
+    JetFlames(v,j.throttle,j.throttle>0.95f,ms);
 }
 }  // namespace
 

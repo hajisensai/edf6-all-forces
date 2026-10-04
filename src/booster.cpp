@@ -33,7 +33,7 @@ constexpr std::size_t kLevel=0x3EC,kPulse=0x3F0,kHold=0x3F4,kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
 constexpr std::size_t kBoneWorld=0xB0;
 constexpr float kFront[2]={56.0f,16.0f},kBack[2]={40.0f,12.0f};   // V508's 35/10 and 25/7.5, x1.6
-constexpr int kMaxCarriers=8,kNozzles=4;
+constexpr int kMaxCarriers=64,kNozzles=4;   // carriers and jets (JetFlames) alike
 constexpr ULONGLONG kStaleMs=1000;
 
 const unsigned char kOpNewSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xEB,0x0F,0x48,0x8B,0xCB,0xE8,0x47};
@@ -63,6 +63,29 @@ struct Carrier {
 };
 Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
+// The jets' nozzles by their mark (pylib/vcobjects.py JETS; their models' measured boxes, jet_models.model_box: the
+// tail's end, the box's centre height): the bomber501 the strike jets and the player's strike jet fly, the interceptor
+// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones'. Flame length and
+// width in m; with the afterburner (the player's boost) kBurnerLength times as long.
+struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
+constexpr JetNozzles kJetNozzles[]={
+    {7001.0f,2,{{1.2f,1.6f,-12.2f},{-1.2f,1.6f,-12.2f}},{9.0f,1.6f}},
+    {7002.0f,2,{{1.2f,1.6f,-12.2f},{-1.2f,1.6f,-12.2f}},{9.0f,1.6f}},
+    {7202.0f,2,{{1.2f,1.6f,-12.2f},{-1.2f,1.6f,-12.2f}},{9.0f,1.6f}},
+    {7003.0f,2,{{0.7f,1.05f,-7.9f},{-0.7f,1.05f,-7.9f}},{6.0f,1.0f}},
+    {7020.0f,2,{{0.7f,1.05f,-7.9f},{-0.7f,1.05f,-7.9f}},{6.0f,1.0f}},
+    {7201.0f,2,{{0.7f,1.05f,-7.9f},{-0.7f,1.05f,-7.9f}},{6.0f,1.0f}},
+    {7004.0f,2,{{0.5f,1.07f,-3.8f},{-0.5f,1.07f,-3.8f}},{4.0f,0.7f}},
+    {7006.0f,1,{{0.0f,1.04f,-1.7f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
+    {7007.0f,1,{{0.0f,1.04f,-1.7f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
+    {7008.0f,1,{{0.0f,1.04f,-1.7f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
+};
+constexpr float kBurnerLength=1.6f;
+
+const JetNozzles* NozzlesOf(float mark) noexcept {
+    for(const auto& n:kJetNozzles)if(n.mark==mark)return &n;
+    return nullptr;
+}
 
 bool Live(const Nozzle& z) noexcept {
     return z.obj && z.ctrl && Readable(z.obj,kSize) && Readable(z.ctrl,0x10) && At<const void*>(z.obj,0)==image+kVtable &&
@@ -202,6 +225,51 @@ void Frame(const unsigned char* v,unsigned char* const* recs,float intensity,ULO
     }
 }
 }  // namespace
+
+namespace {
+// A jet's exhaust (the user, 2026-10-05: the jets have no flame): the same Booster on each of its nozzles (JetNozzles:
+// by its mark, in its model's frame: x right, y up, z forward), the flame leaving backwards (its matrix: the body's
+// rows turned pi about y, as the carrier's nozzles), `size` its length and width, `intensity` how strongly it burns.
+void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* size,float intensity,ULONGLONG ms) noexcept {
+    Carrier* const c=Find(v,ms);
+    if(!c)return;
+    c->seen=ms;
+    float b[16];
+    std::memcpy(b,v+kMatrix,64);
+    for(int r=0;r<3;++r) {
+        float* const row=b+r*4;
+        const float l=std::sqrt(row[0]*row[0]+row[1]*row[1]+row[2]*row[2]);
+        if(l>1e-4f)for(int k=0;k<3;++k)row[k]/=l;
+    }
+    for(int i=0;i<n && i<kNozzles;++i) {
+        Nozzle& z=c->n[i];
+        const float* t=at[i];
+        for(int k=0;k<3;++k) {
+            z.m[k]=-b[k];z.m[4+k]=b[4+k];z.m[8+k]=-b[8+k];
+            z.m[12+k]=b[12+k]+t[0]*b[k]+t[1]*b[4+k]+t[2]*b[8+k];
+        }
+        z.m[3]=z.m[7]=z.m[11]=0.0f;z.m[15]=1.0f;
+        if(!Live(z)) {
+            DropWeak(z.ctrl);
+            z.obj=nullptr;z.ctrl=nullptr;
+            Make(z,v,size);
+            if(!Live(z))continue;
+        }
+        Put<float>(z.obj,kLevel,intensity);
+        Put<float>(z.obj,kPulse,1.0f);
+        Put<int>(z.obj,kHold,3);
+    }
+}
+}  // namespace
+
+void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept {
+    if(!sigOk || broken || !v)return;
+    const JetNozzles* const nz=NozzlesOf(BodyMark(v));
+    if(!nz)return;
+    const float size[2]={nz->size[0]*(burner ? kBurnerLength : 1.0f),nz->size[1]};
+    __try { JetFrame(v,nz->at,nz->count,size,intensity,ms); }
+    __except(MakeFault(GetExceptionInformation())) {}
+}
 
 void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept {
     if(!sigOk || broken || !v || !recs)return;

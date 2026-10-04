@@ -532,6 +532,10 @@ void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* no
     PitchBy(j.m.aoa,dir,up);
     Attitude(j,k,v,dir,up);
     if(k.pose==Pose::elevons)Elevons(j,k,v,dt);
+    // The exhaust (booster.cpp JetFlames): burning with the speed between its slowest and its attack speed, the
+    // afterburner near the top.
+    const float s=Len(j.m.vel),share=k.attack>k.minSpeed ? (s-k.minSpeed)/(k.attack-k.minSpeed) : 1.0f;
+    JetFlames(v,Clamp(share,0.4f,1.0f),speed>=k.attack-5.0f,ms);
 }
 }  // namespace jet
 }  // namespace crew
