@@ -51,9 +51,9 @@ constexpr ULONGLONG kStuckMs=60000;
 // mission's move area shrunk by veh+kAreaInset (0x5A9E50) and teleports it back, every frame, so a jet at
 // the edge stopped dead and slid flank first. A jet's inset is set to kNoInset (the box grown 1e6 m: no
 // clamp; the stock bombers are never clamped either). Out there the Havok broadphase ends at 3000 m a
-// side: walls (jet_flight.cpp kWorldWall) keep the jets in, and one past kWorldGone is deleted.
+// side: walls (jet_flight.cpp kWorldWallIn inside WorldHalf) keep the jets in, and one past kWorldGoneIn of it is deleted.
 constexpr std::size_t kAreaInset=0xE00;
-constexpr float kNoInset=-1.0e6f,kWorldGone=2700.0f;
+constexpr float kNoInset=-1.0e6f,kWorldGoneIn=300.0f;   // kWorldGoneIn: m inside the world's edge (WorldHalf): 2700 stock
 // A wingman within kJetSpan of a burst's path is in its way when the rounds cannot pass through (JetInLine).
 constexpr float kJetSpan=20.0f;
 constexpr ULONGLONG kFullLogMs=5000;   // wall ms between "the table is full" lines
@@ -350,7 +350,8 @@ void JetFrame(unsigned char* v) noexcept {
     j->seen=ms;
     FarRender(*j,v);
     Put<float>(v,kAreaInset,kNoInset);
-    if(std::fabs(pos[0])>kWorldGone || std::fabs(pos[2])>kWorldGone) {
+    const float gone=WorldHalf()-kWorldGoneIn;
+    if(std::fabs(pos[0])>gone || std::fabs(pos[2])>gone) {
         if(!j->reap)Log("JET v=%p at the world's edge (%.0f,%.0f): deleting",v,pos[0],pos[2]);
         j->reap=true;
     }

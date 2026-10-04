@@ -134,9 +134,9 @@ constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude t
 constexpr float kStallFloor=25.0f;
 constexpr float kBodyTop=340.0f;       // m/s: the steepest dive's (the drag holds it about there; jetprops.cpp 600)
 constexpr float kCeilingGap=12.0f;
-// The world's walls (jet.cpp kWorldWall: the Havok broadphase ends at 3000 m a side): a path out through one is
+// The world's walls (kWorldWallIn inside WorldHalf: the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
 // turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
-constexpr float kWorldWall=2400.0f,kWallIn=0.3f,kWallAlong=0.9f;
+constexpr float kWorldWallIn=600.0f,kWallIn=0.3f,kWallAlong=0.9f;   // kWorldWallIn: m inside the world's edge (WorldHalf)
 // The ground (Clear): the body's origin rests on the ground (the models are grounded and the boxes measured off
 // them, pylib/jet_models.py grounded / vcobjects.on_origin), so under kTouch it is on it; over kOffGround in the air.
 constexpr float kTouch=3.0f,kOffGround=6.0f;
@@ -366,12 +366,12 @@ void RightOf(const float* dir,float* right) noexcept {
     if(!Normalize(right)){right[0]=-1.0f;right[1]=0.0f;right[2]=0.0f;}
 }
 
-// The world's walls (see kWorldWall): a path (unit) out through one beyond it is turned along it (its way along
+// The world's walls (see kWorldWallIn): a path (unit) out through one beyond it is turned along it (its way along
 // kept, or the right of it when it flew straight at the wall) and kWallIn back in. Never less than the speed it has:
 // only the direction turns.
 void WallTurn(const float* pos,float* dir) noexcept {
     for(int i=0;i<3;i+=2) {
-        if(std::fabs(pos[i])<kWorldWall || dir[i]*pos[i]<=0.0f)continue;
+        if(std::fabs(pos[i])<WorldHalf()-kWorldWallIn || dir[i]*pos[i]<=0.0f)continue;
         const int o=2-i;   // the other horizontal axis: along the wall
         const float out=pos[i]>0.0f ? 1.0f : -1.0f;
         float along=dir[o];

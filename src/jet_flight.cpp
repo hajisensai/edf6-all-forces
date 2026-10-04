@@ -26,7 +26,7 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 // commanded 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never
 // flown. Since 2026-10-04 a jet body gets its own copy of the motion properties with a 600 m/s cap
 // (jetprops.cpp), so the old 200 m/s Havok cap no longer binds. Past 250 the 5 g turn radius (1275 m) times the
-// wall margin (Guard) no longer fits inside kWorldWall.
+// wall margin (Guard) no longer fits inside the world walls (kWorldWallIn).
 // Patrol: the speed that holds the patrol circle at a 60 degree bank (tan 1.73, 2 g), between kLoiterMin
 // times the stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time; at
 // 45 degrees (until 2026-10-04) it crawled round at 100 m/s.
@@ -46,9 +46,9 @@ constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.17f,kAoaTau=0.3f;
 // and is forgotten kWallLifeMs after it was last met.
 constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.0f,kWallSpan=400.0f;
 constexpr ULONGLONG kBlockedMs=250,kWallLifeMs=120000;
-// The Havok broadphase ends at 3000 m a side: the world's walls at kWorldWall keep the jets in (jet.cpp deletes
-// one past kWorldGone). They are never forgotten and no learned wall takes their place.
-constexpr float kWorldWall=2400.0f;
+// The Havok broadphase ends at 3000 m a side: the world's walls kWorldWallIn inside the world's edge (WorldHalf: ini BigWorld or 3000) keep the jets in (jet.cpp deletes
+// one past kWorldGoneIn of it). They are never forgotten and no learned wall takes their place.
+constexpr float kWorldWallIn=600.0f;   // m inside the physics world's edge (WorldHalf): 2400 in the stock +-3000
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus the sink (gravity
 // along the path speeding it up) while it gets ready: kReact seconds, and the roll that turns its lift up
 // (RollToLift). With kReact alone a fighter diving inverted at an air target began to pull at 75 m, 92 m/s
@@ -80,8 +80,16 @@ const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l
 // The walls: the world's four (fixed) and the ones learned this mission (see kWallSpan), where one was met and
 // its horizontal normal, into it.
 struct Wall { float at[3],n[3]; ULONGLONG seen; bool on; };
-constexpr Wall kWorldWalls[4]={{{kWorldWall,0.0f,0.0f},{1.0f,0.0f,0.0f},0},{{-kWorldWall,0.0f,0.0f},{-1.0f,0.0f,0.0f},0},
-                               {{0.0f,0.0f,kWorldWall},{0.0f,0.0f,1.0f},0},{{0.0f,0.0f,-kWorldWall},{0.0f,0.0f,-1.0f},0}};
+struct WorldWalls {
+    Wall w[4];
+    WorldWalls() noexcept {
+        const float a=WorldHalf()-kWorldWallIn;
+        w[0]=Wall{{a,0.0f,0.0f},{1.0f,0.0f,0.0f},0,false};w[1]=Wall{{-a,0.0f,0.0f},{-1.0f,0.0f,0.0f},0,false};
+        w[2]=Wall{{0.0f,0.0f,a},{0.0f,0.0f,1.0f},0,false};w[3]=Wall{{0.0f,0.0f,-a},{0.0f,0.0f,-1.0f},0,false};
+    }
+    const Wall* begin() const noexcept { return w; }
+    const Wall* end() const noexcept { return w+4; }
+};
 constexpr int kLearnedWalls=16;
 Wall learned[kLearnedWalls]{};
 
@@ -362,7 +370,7 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
 
 // A wall within `range` ahead of `pos`.
 bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept {
-    for(const auto& w:kWorldWalls)if(Gap(w,pos)<range)return true;
+    for(const auto& w:WorldWalls())if(Gap(w,pos)<range)return true;
     for(const auto& w:learned)if(Holds(w,pos,ms) && Gap(w,pos)<range)return true;
     return false;
 }
@@ -376,7 +384,7 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float s=Len(j.m.vel);
     // Walls: turned off from a turn's radius out (more closing fast), never flown into.
     const float r=s*s/(k.maxG*kG);
-    for(const auto& w:kWorldWalls)TurnOff(w,j,pos,r,want);
+    for(const auto& w:WorldWalls())TurnOff(w,j,pos,r,want);
     for(const auto& w:learned)if(Holds(w,pos,ms))TurnOff(w,j,pos,r,want);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};

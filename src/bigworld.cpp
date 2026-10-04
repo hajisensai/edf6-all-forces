@@ -99,12 +99,36 @@ ULONGLONG probeFrom=0;
 bool probed=false;
 }  // namespace
 
+// The move area (docs/map-edge-re.md §1): the map's own move_limit box (the test range +-999 m) clamps players, NPCs
+// and vehicles; with the world raised (ini BigWorld) it is widened, once a mission when the probe runs, to the
+// world's bounds less kMoveMargin, its centre and height as the map set them (0x5AA5C0(manager, {centre, half})).
+constexpr std::size_t kMoveArea=0x20B2998,kMoveMin=0x10,kMoveMax=0x20;
+constexpr unsigned kSetMoveBox=0x5AA5C0;
+constexpr float kMoveMargin=100.0f;
+const unsigned char kSetMoveBoxSig[]={0x48,0x83,0xEC,0x18,0x0F,0x10,0x12,0x0F,0x28,0xDA,0x0F,0xC6,0xD2,0xFF};
+
+void WidenMoveArea() noexcept {
+    const float want=Cfg().bigWorld-kMoveMargin;
+    if(!(want>1000.0f) || !Matches(kSetMoveBox,kSetMoveBoxSig,sizeof(kSetMoveBoxSig)))return;
+    const auto p=At<unsigned char*>(image,kMoveArea);
+    unsigned char* const m=p ? p-8 : nullptr;
+    if(!m || !Readable(m,kMoveMax+16))return;
+    const float* lo=reinterpret_cast<const float*>(m+kMoveMin);
+    const float* hi=reinterpret_cast<const float*>(m+kMoveMax);
+    alignas(16) float box[8]={(lo[0]+hi[0])*0.5f,(lo[1]+hi[1])*0.5f,(lo[2]+hi[2])*0.5f,1.0f,
+                              want,(hi[1]-lo[1])*0.5f,want,0.0f};
+    const float was[2]={hi[0]-lo[0],hi[2]-lo[2]};
+    reinterpret_cast<void(__fastcall*)(void*,const float*)>(image+kSetMoveBox)(m,box);
+    Log("BIGWORLD move area %.0f x %.0f m -> %.0f x %.0f m (centre %.0f,%.0f)",was[0],was[1],2.0f*want,2.0f*want,box[0],box[2]);
+}
+
 void BigWorldProbe() noexcept {
     const ULONGLONG ms=GameMs();
     if(probed)return;
     if(!probeFrom){probeFrom=ms;return;}
     if(ms-probeFrom<kProbeAfterMs)return;
     probed=true;
+    WidenMoveArea();
     constexpr int n=2*kProbeHalf+1;
     static float height[n][n];
     float low=1e9f,high=-1e9f;
