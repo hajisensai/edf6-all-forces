@@ -21,7 +21,7 @@ import os
 from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_files.json'
-OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha')
+OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap')
 LEGACY = 'legacy'   # a file from before the ledger that a tool needs: its writer is not recorded
 
 
