@@ -408,6 +408,15 @@ void JetFrame(unsigned char* v) noexcept {
     if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
 
+// A reaped jet's NPC pilot is put off and the jet deleted only once the game has taken it as empty: its team then
+// 5 (nobody's vehicle, the stock emptied-vehicle step: 0x118A4B0 state, then SetTeam(5, registered), 0x5E6548 /
+// 0x5E7AE3), or kReapSettleFrames after the kick. The delete (0x118A1B0) takes the object out of its team's set
+// (vtable +0x40, 0x54A290: team -1) while it lives on until the manager frees it; a kick in the same frame had the
+// emptied step run after it and register the deleted jet in team 5's set again, where its address stayed once it
+// was freed: the next walk of team 5 (the on-foot board prompt) read freed memory (crash 2026-10-05 00:19, a jet
+// deleted at the world's edge).
+constexpr ULONGLONG kReapSettleFrames=30;
+
 void JetReap(const void* self) noexcept {
     const ULONGLONG ms=GameMs();
     static ULONGLONG frame=~0ull;
@@ -419,7 +428,15 @@ void JetReap(const void* self) noexcept {
         // Only the same object, still there: one destroyed meanwhile is the game's (its entry just goes).
         unsigned char* const v=j.Vehicle();
         if(Alive(j.ref) && !v[kDead] && crew::BodyOf(v)==PluginBody::jet) {
-            if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
+            // Its rider off first, the delete only once the jet has taken itself as empty (see kReapSettleFrames).
+            if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none) {
+                if(SeatRider(SeatAt(v,0))==Rider::dummy && !j.emptyFrame) {
+                    reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
+                    j.emptyFrame=f;
+                }
+                continue;   // a player aboard (or the NPC not off yet): no delete under them
+            }
+            if(j.emptyFrame && At<std::int32_t>(v,kTeam)!=kTeamVehicle && f-j.emptyFrame<kReapSettleFrames)continue;
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
             Log("JET v=%p gone (deleted%s%s)",v,j.why ? ": " : "",j.why ? j.why : "");
         }

@@ -329,6 +329,7 @@ struct Jet {
     float anchor[3];         // where it patrols when there is no player
     bool reap;               // withdrawn: delete from another object's update (JetReap)
     const char* why;         // why it withdrew
+    ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
     bool escort;             // ...or the player, while seen (a call's follow variant; anchor: where they were last)
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
