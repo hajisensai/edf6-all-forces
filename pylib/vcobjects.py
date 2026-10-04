@@ -50,7 +50,14 @@ JET_GUN_FILES = {'EDF6VC_JET_GUN_L.SGO': 'V_506HELI_GATLING01_L.SGO', 'EDF6VC_JE
 JET_GUN_SPEED, JET_GUN_ALIVE = 10.0, 60.0   # m a frame, frames: 600 m/s, 600 m
 JET_GUN_REACH = JET_GUN_SPEED * JET_GUN_ALIVE
 _GUNS = tuple('app:/weapon/' + f.lower() for f in JET_GUN_FILES)
-_MISSILE = 'app:/weapon/v_506heli_missile01.sgo'
+# The jets' missile (jet_guns): the 506's homing missile with a jet's sounds (docs/sound-re.md §5): the air raid's
+# missile launch for its shot, and a rocket motor's loop for its flight (the stock one is 1.6 s and stops mid-flight;
+# the bullet fades its loop out when it ends). The sounds are in the always loaded TIKYUUX_SE.ACB.
+JET_MISSILE_STOCK = 'V_506HELI_MISSILE01.SGO'
+JET_MISSILE_FILE = 'EDF6VC_JET_MISSILE.SGO'
+JET_MISSILE_FIRE_SE = ('weapon_KUBAKU_missile_shot', 1.0, 80.0)            # cue, volume, metres heard at full
+JET_MISSILE_FLIGHT_SE = ('weapon_KUBAKUBallisticMissle01_go', 0.6, 80.0)
+_MISSILE = 'app:/weapon/' + JET_MISSILE_FILE.lower()
 _ARMS = _GUNS + (_MISSILE,)
 # The blast drones' charge (src/jet.cpp Detonate: weapon 2, fired by 0x2021 once next to the enemy): the
 # 409's unguided bomb (GrenadeBullet01) made a point charge (docs/decoy-blast-re.md 1.4): CP#0 = 1 bursts
@@ -63,7 +70,15 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, JET_MISSILE_FILE)
+# A derived weapon's stock file: in a vehicle's weapon list it takes the stock one's per-weapon parameters.
+_STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
+             for d, st in (*JET_GUN_FILES.items(), (JET_MISSILE_FILE, JET_MISSILE_STOCK))}
+# The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
+# does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
+# (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
+JET_SILENT_SE = 'EDF6VC_SILENT'
+JET_ROTOR_SE_ROWS = (0, 1)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
     'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _ARMS),
@@ -173,8 +188,9 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         raise ValueError('V506_HELI 没有 vehicle_setup')
     setup = m.pop('vehicle_setup')
     setup[1][0] = jet.mark
-    stock = {w[0]: w for w in setup[3]}   # each weapon keeps its stock per-weapon parameters
-    setup[3] = [stock.get(w, [w, [0.0001, 0.1]]) for w in jet.weapons] + [stock['app:/weapon/v_fuel01.sgo']]
+    stock = {w[0]: w for w in setup[3]}   # each weapon keeps its stock per-weapon parameters (a derived one its stock's)
+    setup[3] = [[w, stock[_STOCK_OF[w]][1]] if _STOCK_OF.get(w) in stock else stock.get(w, [w, [0.0001, 0.1]])
+                for w in jet.weapons] + [stock['app:/weapon/v_fuel01.sgo']]
     m['mission_setup'] = setup
     if jet.player:
         import copy
@@ -200,6 +216,11 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
+    se = m.get('heli_se_table')
+    if not isinstance(se, list) or len(se) <= max(JET_ROTOR_SE_ROWS):
+        raise ValueError('V506_HELI 的 heli_se_table 不是预期的样子')
+    for i in JET_ROTOR_SE_ROWS:
+        se[i] = JET_SILENT_SE
     return sgo.write(version, m)
 
 
@@ -280,8 +301,8 @@ def weapon_dir(game_root: str) -> str:
 
 
 def jet_guns(game: Game) -> dict[str, bytes]:
-    """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE; and the
-    blast drones' charges (JET_BLAST_FILES)."""
+    """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE; the
+    blast drones' charges (JET_BLAST_FILES); the jets' missile (JET_MISSILE_FILE)."""
     out = {}
     for name, stock in JET_GUN_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', stock))
@@ -303,6 +324,15 @@ def jet_guns(game: Game) -> dict[str, bytes]:
                            ('AmmoDamage', damage), ('AmmoExplosion', radius)):
             r.set(key, value)
         out[name] = dsgo.write(doc)
+    doc = dsgo.parse(game.read('WEAPON', JET_MISSILE_STOCK))
+    r = doc.root
+    fire, cp = r.get('FireSe'), r.get('Ammo_CustomParameter')
+    if (r.get('AmmoClass') != 'MissileBullet01' or len(fire.items) != 6 or len(cp.items) != 12
+            or len(cp.items[11].items) != 6):
+        raise ValueError(f'{JET_MISSILE_STOCK} 不是预期的直升机导弹')
+    for node, (cue, volume, reach) in ((fire, JET_MISSILE_FIRE_SE), (cp.items[11], JET_MISSILE_FLIGHT_SE)):
+        node.items[1], node.items[2], node.items[5] = cue, volume, reach
+    out[JET_MISSILE_FILE] = dsgo.write(doc)
     return out
 
 

@@ -67,6 +67,8 @@ struct Config {
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
+    bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
+    float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -103,6 +105,12 @@ void ResetSubs() noexcept;        // subcarrier.cpp
 void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
+void ResetJetSound() noexcept;    // jetsound.cpp
+// The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
+// once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
+bool InstallJetSound() noexcept;
+void JetSound(unsigned char* vehicle) noexcept;
+void JetSoundTick() noexcept;
 
 // --- EDF.dll layout ---
 // The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):

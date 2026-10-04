@@ -83,9 +83,10 @@ constexpr int kHeavyCount=sizeof(kHeavy)/sizeof(kHeavy[0]);
 constexpr std::uintptr_t kImageSpan=0x3000000;   // past EDF.dll's last section
 
 const wchar_t* const kSubSgo=L"app:/object/edf6vc_sub_carrier.sgo";
-// What SubLaunch needs in Mods (tools/make_sub.py): the SGO, its model, the turret guns.
+// What SubLaunch needs in Mods (tools/make_sub.py): the SGO, its model, the turret guns, the missile.
 const wchar_t* const kSubFiles[]={L"\\Mods\\OBJECT\\EDF6VC_SUB_CARRIER.SGO",L"\\Mods\\OBJECT\\EDF6VC_SUB.MRAB",
-                                  L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_L.SGO",L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_R.SGO"};
+                                  L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_L.SGO",L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_R.SGO",
+                                  L"\\Mods\\WEAPON\\EDF6VC_JET_MISSILE.SGO"};
 constexpr int kMaxSubs=3;                     // M123: three carriers attack at once (BE151_157)
 
 // The hull (the SGO's box, the model at its own size): its bottom kHullBottom under the body origin,

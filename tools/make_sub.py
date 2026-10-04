@@ -6,7 +6,7 @@
   Mods/OBJECT/EDF6VC_SUB_CARRIER.SGO   a Vehicle506_Helicopter body with that model (pylib/vcobjects.py jet_sgo:
                                        'edf6tr_sub_carrier_mission', mark 7101, HP 30000 (the plugin raises it
                                        to SubHullHp), the hull's box)
-  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO  the jets' guns (vcobjects.jet_guns), which its turrets fire; the same
+  Mods/WEAPON/EDF6VC_JET_GUN_L / _R.SGO, EDF6VC_JET_MISSILE.SGO  the jets' guns and missile (vcobjects.jet_guns), which it fires; the same
                                        bytes tools/make_jets.py writes
 
 All of it is built in memory first, then written atomically and recorded in the ledger as this tool's
