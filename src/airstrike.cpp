@@ -28,6 +28,7 @@
 // The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
+#include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include <atomic>
 #include <cmath>
@@ -238,7 +239,7 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
         const Call* const c=CallOf(ifc);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
         if(c && std::isfinite(target[0]+target[1]+target[2]) && LaunchCall(*c,target)>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) {}
     return result;
 }
 
@@ -256,7 +257,7 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
         *h=Held{ctrl,ms,false};
         Log("AIRSTRIKE %s bomber %p (%s model): its jet drops the bombs",who,plane,
             body==JetBody::bomber401 ? "bomber401" : body==JetBody::bomber501_2 ? "bomber501_2" : "bomber501 / unknown");
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    } __except(FaultLog("AIRSTRIKE takeover (the bomber flies stock)",GetExceptionInformation())) {}
 }
 
 void __fastcall RadioBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
@@ -271,9 +272,10 @@ void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const
     if(Cfg().enabled && Cfg().jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
 }
 
-// BombingPlane slot 5 (update): a held plane is hidden and left as it is while its jet holds it, then
-// deleted.
-void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
+// BombingPlane slot 5 (update), for a held plane: hidden and left as it is while its jet holds it, then
+// deleted. Returns whether the plane is held (its stock update must not run). A fault in here counts as held:
+// handing a taken-over plane back to its stock update would fly it again and drop its bombs a second time.
+bool HeldStep(unsigned char* plane) noexcept {
     __try {
         const void* const ctrl=At<const void*>(plane,kSelfCtrl);
         for(auto& h:held) {
@@ -285,13 +287,18 @@ void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
                 reinterpret_cast<void(__fastcall*)(void*)>(image+kPlaneUnlist)(plane);
             }
             const ULONGLONG ms=GameMs();
-            if(JetHolds(ctrl) && ms-h.since<kHoldMaxMs)return;
+            if(JetHolds(ctrl) && ms-h.since<kHoldMaxMs)return true;
             Log("AIRSTRIKE bomber %p let go after %.1f s: deleted",plane,static_cast<float>(ms-h.since)*0.001f);
             h=Held{};
             reinterpret_cast<DeleteFn>(image+kDelete)(plane);
-            return;
+            return true;
         }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        return false;
+    } __except(FaultLog("AIRSTRIKE plane update (kept as taken over)",GetExceptionInformation())) { return true; }
+}
+
+void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
+    if(HeldStep(plane))return;
     nextPlaneUpdate(plane,frame);
 }
 
@@ -393,8 +400,11 @@ bool InstallAirstrikes() noexcept {
         }
         Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d",calls,owned,radio,mission);
         return calls || radio || mission;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }
-// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
-void ResetAirstrikes() noexcept {}
+// A new mission (mission.cpp MissionStart): the held bombers were the last mission's (their control blocks'
+// addresses may be the new mission's objects'): forgotten, nothing of them touched. The call pick stays.
+void ResetAirstrikes() noexcept {
+    for(auto& h:held)h=Held{};
+}
 }  // namespace crew

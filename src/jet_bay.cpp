@@ -1,0 +1,318 @@
+// The jets' IndirectFireControl users (jet.cpp): the bomb bay of a jet that takes over a bomber, the gunship's
+// shells, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
+// All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "jet_internal.h"
+#include <malloc.h>
+#include <cwchar>
+
+namespace crew {
+namespace jet {
+namespace {
+// The bomb bay of a jet that takes over a bomber (JetLaunchBomber): an IndirectFireControl of its own, set
+// up as BombingPlane_Init (0x5AABB0) sets up the bomber's (plane+0xC20) and driven as the bomber's update
+// (0x5AB240) drives it: opened (0x2B4340) when the target is fireDist ahead along the line, which is what
+// the bomber computes into +0xC14 (frames of fire (0x2B8470: (shots-1) x (interval+1)) x speed a frame x
+// target_adjust + target_distance), then stepped once a frame (0x2B95A0) with the drop point (+0x20, each
+// bomb lands on it within the spread: the shot is solved ballistically onto it) and the release point the
+// jet itself (+0x300, used as +0x2F9 says). The stock bomber moves its fixed speed a frame (0x5AB240), so
+// its drop point does too and the carpet is frames x speed a frame long; ours moves the same, a step at a
+// time (BayFrame), whatever the jet's real flight does meanwhile.
+// The bombs are the bomber's: its bombing_plane_param, damage, spread, seed and owner.
+constexpr unsigned kIfcCtor=0x2B3940,kIfcDtor=0x2B3C90,kIfcConfig=0x2B5F40,kIfcOwner=0x2B8390,kIfcDamage=0x2B82E0,
+                   kIfcSpread=0x2B8460,kIfcFrames=0x2B8470,kIfcOpen=0x2B4340,kIfcStep=0x2B95A0,kIfcDone=0x2B7B90;
+constexpr std::size_t kIfcSize=0x600,kIfcAim=0x20,kIfcShots=0x2F0,kIfcFromJet=0x2F9,kIfcFrom=0x300;
+constexpr float kLineGain=250.0f;   // m off the bombing line that turn it back at the most
+// ms the bay's last bombs (and a cluster's bomblets) still pass the bomber's flight after it closes.
+constexpr ULONGLONG kBombClearMs=15000;
+struct Sig { unsigned rva; unsigned char bytes[12]; };
+const Sig kBaySigs[]={
+    {kIfcCtor,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x4C,0x24,0x08,0x57,0x48}},
+    {kIfcDtor,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,0x48}},
+    {kIfcConfig,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54}},
+    {kIfcOwner,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48}},
+    {kIfcDamage,{0xF3,0x0F,0x11,0x89,0xDC,0x00,0x00,0x00,0xC3,0xCC,0xCC,0xCC}},
+    {kIfcSpread,{0xF3,0x0F,0x11,0x89,0x24,0x02,0x00,0x00,0xC3,0xCC,0xCC,0xCC}},
+    {kIfcFrames,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89}},
+    {kIfcOpen,{0x48,0x8B,0x81,0xC0,0x02,0x00,0x00,0x0F,0x57,0xC0,0x48,0xBA}},
+    {kIfcStep,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18,0x48}},
+    {kIfcDone,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89}},
+};
+bool bayOk=false;        // the spawn functions matched (InstallJets) and the bay's (kBaySigs)
+
+// A bomber's model -> its body: the mesh bone that names it (bone records as jet_flight.cpp's kInstBones says).
+constexpr std::size_t kInstBones=0x10,kInstBoneCount=0x20,kBoneStride=0x110;
+struct BomberModel { const wchar_t* bone; JetBody body; };
+const BomberModel kBomberModels[]={{L"bomber501_2",JetBody::bomber501_2},{L"bomber401",JetBody::bomber401}};
+
+// Shells (Shell): a DemoIndirectFire object (docs/mission-airstrike-re.md, docs/carrier-laser-re.md §2-3) made
+// with CreateObject as carrierlaser.cpp's beams are, and fired once by the plugin's aircraft: owned by it (its IFC
+// takes the owner's team every step: team, kills, its own hull not hit), started from where it says (+0x2F9 /
+// +0x300) and aimed (+0x20), its damage written (+0xDC). The object deletes itself when done. The IFC calls are
+// the bay's (bayOk); the object's class is checked by its vtable.
+constexpr unsigned kDemoVtable=0x17D4B20;
+constexpr std::size_t kDemoIfc=0x170;
+bool shellsOk=false;     // bayOk, and the DemoIndirectFire vtable is there
+// The gunship's shells (GunshipFire): the missions' whale gunship round, DEMOGUNSHIPFIREE25 (one RocketBullet01
+// round at 8 m/frame, 10 m blast, 60 frames before it goes), from the gunship itself at its target's lock
+// point, so it is seen leaving the gunship instead of the stock off-screen sky point.
+constexpr ULONGLONG kGunshipGapMs=2500;   // between shells
+constexpr float kGunshipReach=1800.0f;    // m from the gunship to its target at the most
+constexpr float kGunshipDamage=300.0f;    // a shell's damage (the SGO's own factor is the missions' 250)
+const wchar_t kGunshipSgo[]=L"app:/object/demogunshipfiree25.sgo";
+bool gunshipReady=false;                  // the shell SGO was preloaded for this mission (PreloadShells)
+// Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round (RocketBullet01)
+// made a one-round, no-wait, short-lived shot with its blast radius set to the charge's (indirect_fire_param
+// #14): a blast's radius is the SGO's, so one charge per radius; its damage the plugin writes. Fired from
+// kImpactDrop over the impact point down through it, it bursts on what it meets there (the enemy rammed, the
+// ground); a RocketBullet01 that meets nothing in its short life does not burst (docs/decoy-blast-re.md 1.4).
+struct Charge { const wchar_t* sgo; const wchar_t* file; float radius; };
+const Charge kCharges[]={
+    {L"app:/object/edf6vc_impact_08.sgo",L"EDF6VC_IMPACT_08.SGO",8.0f},
+    {L"app:/object/edf6vc_impact_16.sgo",L"EDF6VC_IMPACT_16.SGO",16.0f},
+    {L"app:/object/edf6vc_impact_32.sgo",L"EDF6VC_IMPACT_32.SGO",32.0f},
+    {L"app:/object/edf6vc_impact_64.sgo",L"EDF6VC_IMPACT_64.SGO",64.0f},
+};
+constexpr int kChargeCount=static_cast<int>(sizeof(kCharges)/sizeof(kCharges[0]));
+bool chargeReady[kChargeCount]{};         // preloaded this mission (PreloadShells)
+constexpr float kImpactDrop=2.0f;
+
+using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
+constexpr unsigned kPreload=0x7A3780;
+
+// A bay set up from a bomber's payload (see kIfcCtor); `fireDist` gets where it opens at `perFrame`
+// metres a frame. nullptr when it cannot be made.
+unsigned char* BayMake(const BombLoad& l,float perFrame,float* fireDist) noexcept {
+    auto ifc=static_cast<unsigned char*>(_aligned_malloc(kIfcSize,16));
+    if(!ifc)return nullptr;
+    std::memset(ifc,0,kIfcSize);
+    __try {
+        reinterpret_cast<void(*)(void*)>(image+kIfcCtor)(ifc);
+        reinterpret_cast<void(*)(void*,const void*,std::int32_t)>(image+kIfcConfig)(ifc,l.param,l.seed);
+        reinterpret_cast<void(*)(void*,const void*)>(image+kIfcOwner)(ifc,l.owner);
+        ifc[kIfcFromJet]=1;
+        reinterpret_cast<void(*)(void*,float)>(image+kIfcDamage)(ifc,l.damage);
+        reinterpret_cast<void(*)(void*,float)>(image+kIfcSpread)(ifc,l.spread);
+        const std::int32_t frames=reinterpret_cast<std::int32_t(*)(void*)>(image+kIfcFrames)(ifc);
+        *fireDist=static_cast<float>(frames)*perFrame*l.adjust+l.reach;
+        return ifc;
+    } __except(FaultLog("JET bay setup (left as is)",GetExceptionInformation())) {
+        return nullptr;
+    }
+}
+
+Body BodyOfBomber(JetBody b) noexcept {
+    switch(b) {
+        case JetBody::bomber401: return Body::bomber401;
+        case JetBody::bomber501_2: return Body::bomber501_2;
+        default: return Body::strike;
+    }
+}
+
+unsigned char* ShellCreate(const wchar_t* sgo,const float* m,bool& ok) noexcept {
+    InitParam param{image+kInitParamVtable,{}};
+    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,sgo,&param); }
+    __except(FaultLog("JET shell create (off for this mission)",GetExceptionInformation())) {
+        ok=false;
+        return nullptr;
+    }
+}
+
+// Shell `sgo` (preloaded: `ok`) fired by `owner` from `from` at `aim` with `damage` (see kDemoVtable): whether
+// it was. `ok` goes false for the mission when the game cannot build it or it is no DemoIndirectFire.
+bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,const char* what) noexcept {
+    if(!ok || !shellsOk || !At<void*>(image,kObjectMgr))return false;
+    alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, aim[0],aim[1],aim[2],1};
+    unsigned char* const o=ShellCreate(sgo,m,ok);
+    if(!o)return false;
+    __try {
+        if(At<const void*>(o,0)!=image+kDemoVtable) {
+            Log("JET %s: %p is no DemoIndirectFire: deleted, off for this mission",what,o);
+            reinterpret_cast<DeleteFn>(image+kDelete)(o);
+            ok=false;
+            return false;
+        }
+        unsigned char* const ifc=o+kDemoIfc;
+        const void* const weak[2]={At<const void*>(owner,kSelf),At<const void*>(owner,kSelfCtrl)};
+        reinterpret_cast<void(*)(void*,const void*)>(image+kIfcOwner)(ifc,weak);
+        reinterpret_cast<void(*)(void*,float)>(image+kIfcDamage)(ifc,damage);
+        ifc[kIfcFromJet]=1;
+        alignas(16) const float st[4]={from[0],from[1],from[2],1.0f},am[4]={aim[0],aim[1],aim[2],1.0f};
+        std::memcpy(ifc+kIfcFrom,st,16);std::memcpy(ifc+kIfcAim,am,16);
+        return true;
+    } __except(FaultLog("JET shell setup",GetExceptionInformation())){return false;}
+}
+
+// The charge for `radius`: the smallest preloaded one at least that wide, else the widest preloaded; -1: none.
+int ChargeFor(float radius) noexcept {
+    int best=-1;
+    for(int i=0;i<kChargeCount;++i) {
+        if(!chargeReady[i])continue;
+        best=i;
+        if(kCharges[i].radius>=radius)return i;
+    }
+    return best;
+}
+}  // namespace
+
+// The bombing run (Mode::bomb): level at bombAlt along the bomber's line through the target at its speed,
+// turning back onto the line when off it; the bay opens fireDist (and a frame) short of the target, and
+// with the last bomb gone it flies on and withdraws.
+void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noexcept {
+    BayState& b=j.bay;
+    const float rel[3]={b.bombAt[0]-pos[0],0,b.bombAt[2]-pos[2]};
+    const float side[3]={b.bombDir[2],0,-b.bombDir[0]};
+    const float along=Dot(rel,b.bombDir),off=-Dot(rel,side);   // ahead to the target; right of the line
+    const float c=Clamp(off/kLineGain,-0.7f,0.7f);
+    const float dir[3]={b.bombDir[0]-side[0]*c,0,b.bombDir[2]-side[2]*c};
+    Level(pos,dir,b.bombAlt,want);
+    *speed=b.bombSpeed;
+    if(Cfg().debug && ms-j.t.gateAt>1000){j.t.gateAt=ms;Log("JET v=%p bomb run: %.0f m to the target, %.0f m off the line",j.Vehicle(),along,off);}
+    // The last bomb out (BayFrame may have torn the bay down already, its bombs gone too): it flies on, leaving.
+    if(b.bombing && (!b.ifc || At<std::int32_t>(b.ifc,kIfcShots)<=0)) {
+        Log("JET v=%p bombs away",j.Vehicle());
+        std::memcpy(j.t.out,b.bombDir,12);Withdraw(j,"bombs dropped",ms);
+        return;
+    }
+    if(b.ifc && !b.bombing && along<b.fireDist+b.bombSpeed/60.0f) {
+        reinterpret_cast<void(*)(void*)>(image+kIfcOpen)(b.ifc);
+        b.bombing=true;b.bayFrom=-along;b.baySteps=0;b.bayOpenAt=ms;
+        Log("JET v=%p bay open: %.0f m short of the target, %.0f m off the line, %d to drop",j.Vehicle(),along,off,At<std::int32_t>(b.ifc,kIfcShots));
+    }
+}
+
+// Tears down the bay (the game's destructor, then the memory). Only for a bay of this mission: the mission's
+// reset forgets the last one's (ResetJets).
+void BayFree(unsigned char*& ifc) noexcept {
+    if(!ifc)return;
+    __try { reinterpret_cast<void(*)(void*)>(image+kIfcDtor)(ifc); } __except(FaultLog("JET bay tear-down",GetExceptionInformation())) {}
+    _aligned_free(ifc);
+    ifc=nullptr;
+}
+
+// A frame of the open bay: drop point and release point as the bomber's update sets them, one step; torn
+// down once the last bomb is out and none it tracks is left. The stock bomber (0x5AB240) aims
+// target_distance ahead of itself on its straight line from its start to the target (Init 0x5AABB0 points
+// it there), and moves its speed a frame: the drop point here is where that would be this step, on the
+// line from where the bay opened. Off the nose, every swing of the jet's heading swept it sideways; off the
+// jet's position, the carpet stretched with however far the jet really flew a step.
+void BayFrame(Jet& j,const float* pos) noexcept {
+    BayState& b=j.bay;
+    if(!b.ifc || !b.bombing)return;
+    const float perFrame=b.bombSpeed/60.0f;
+    const float along=b.bayFrom+b.reach+static_cast<float>(b.baySteps)*perFrame;
+    alignas(16) const float aim[4]={b.bombAt[0]+b.bombDir[0]*along,b.bombAt[1],b.bombAt[2]+b.bombDir[2]*along,1.0f};
+    alignas(16) const float from[4]={pos[0],pos[1],pos[2],1.0f};
+    std::memcpy(b.ifc+kIfcAim,aim,16);std::memcpy(b.ifc+kIfcFrom,from,16);
+    const float frame=1.0f;
+    reinterpret_cast<void(*)(void*,const float*)>(image+kIfcStep)(b.ifc,&frame);
+    if(At<std::int32_t>(b.ifc,kIfcShots)>0)++b.baySteps;
+    if(At<std::int32_t>(b.ifc,kIfcShots)<=0 && reinterpret_cast<bool(*)(void*)>(image+kIfcDone)(b.ifc)) {
+        BayFree(b.ifc);
+        const ULONGLONG ms=GameMs();
+        b.bombClear=ms+kBombClearMs;
+        Log("JET v=%p bay closed: dropped over %d steps (%.0f m from %.0f m to %.0f m along the line) in %.1f s",j.Vehicle(),b.baySteps,
+            static_cast<float>(b.baySteps)*perFrame,b.bayFrom+b.reach,along,static_cast<float>(ms-b.bayOpenAt)*0.001f);
+    }
+}
+
+// A gunship's shell every kGunshipGapMs while its weapons are free (WeaponsFree, as every jet weapon) at a
+// ground target within kGunshipReach: from the gunship (`pos`) onto the target's lock point.
+void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
+    if(!WeaponsFree(j) || j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;
+    const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
+    if(Len(d)>kGunshipReach)return;
+    j.shells.gunAt=ms;
+    if(!Shell(kGunshipSgo,gunshipReady,v,pos,j.t.aim,kGunshipDamage,"gunship shell"))return;
+    ++j.shells.gunShots;
+    if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.shells.gunShots,j.t.target,Len(d));
+}
+
+bool InstallBay(bool spawnOk) noexcept {
+    bayOk=spawnOk;
+    for(const auto& b:kBaySigs)bayOk=bayOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
+    shellsOk=bayOk && Readable(image+kDemoVtable,8);
+    return bayOk;
+}
+
+void PreloadShells(void* mgr,bool gunship) noexcept {
+    gunshipReady=shellsOk && gunship;
+    if(gunshipReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
+    for(int i=0;i<kChargeCount;++i) {
+        chargeReady[i]=shellsOk && ModFileThere(kCharges[i].file);
+        if(chargeReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCharges[i].sgo,2,-1);
+    }
+    Log("JET preload gunship shells=%d impact charges %d/%d/%d/%d",gunshipReady,chargeReady[0],chargeReady[1],chargeReady[2],chargeReady[3]);
+}
+
+void ResetShells() noexcept {
+    gunshipReady=false;
+    for(auto& c:chargeReady)c=false;
+}
+}  // namespace jet
+
+using namespace jet;
+
+JetBody BomberBody(const unsigned char* inst) noexcept {
+    __try {
+        const auto bones=At<const unsigned char*>(inst,kInstBones);
+        const auto count=At<std::int32_t>(inst,kInstBoneCount);
+        if(!bones || count<=0 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return JetBody::kind;
+        for(std::int32_t i=0;i<count;++i) {
+            const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
+            if(!Readable(name,2))continue;
+            for(const auto& m:kBomberModels)if(wcsncmp(name,m.bone,32)==0)return m.body;
+        }
+    } __except(FaultLog("JET bomber body",GetExceptionInformation())) {}
+    return JetBody::kind;
+}
+
+bool JetLaunchBomber(const float* from,const float* heading,const float* target,const BombLoad& load,DWORD fuelSec,const void* source,
+                     JetBody body,const void* hold) noexcept {
+    if(!bayOk)return false;
+    // The bomber's own model when its body is there this mission, else the strike jet's.
+    const Body want=BodyOfBomber(body);
+    const Body b=Preloaded(want) ? want : Body::strike;
+    __try {
+        const Kind& k=KindOf(Row(b).role);
+        const float stock=load.speed*60.0f;
+        // The bomber's own speed, whatever kind it is (most fly 180 m/s, the Kamui 450).
+        const float own=std::isfinite(stock) && stock>k.minSpeed ? stock : k.attack;
+        const float speed=own<kBodyTop ? own : kBodyTop;
+        float fireDist=0.0f;
+        unsigned char* ifc=BayMake(load,speed/60.0f,&fireDist);
+        if(!ifc)return false;
+        Jet* j=Launch(b,from,heading,target,fuelSec,speed,source);
+        if(!j){BayFree(ifc);return false;}
+        float dir[3]={heading[0],0.0f,heading[2]};
+        if(!Normalize(dir)){dir[0]=0;dir[2]=1;}
+        BayState& bay=j->bay;
+        bay.ifc=ifc;std::memcpy(bay.bombAt,target,12);std::memcpy(bay.bombDir,dir,12);
+        bay.bombOwner=Readable(load.owner,8) ? *static_cast<const void* const*>(load.owner) : nullptr;bay.bombClear=0;bay.hold=hold;
+        bay.bombAlt=At<float>(j->Vehicle(),kPosition+4);bay.bombSpeed=speed;bay.fireDist=fireDist;bay.reach=load.reach;
+        j->mode=Mode::bomb;j->m.top=speed*1.1f>k.attack*1.3f ? speed*1.1f : k.attack*1.3f;
+        Log("JET v=%p bomber: %.0f m/s (its own %.0f) at %.0f m, bay opens %.0f m short, %d to drop, damage %.0f spread %.0f",j->Vehicle(),speed,
+            own,bay.bombAlt-target[1],fireDist,At<std::int32_t>(ifc,kIfcShots),load.damage,load.spread);
+        Publish(true);
+        return true;
+    } __except(FaultLog("JET bomber launch",GetExceptionInformation())){return false;}
+}
+
+// An impact of `by` (a crash: jet.cpp, playerjet.cpp) at `at`: the impact charge for `radius` (see kCharges),
+// fired by `by` with `damage`: its team's enemies hurt, its kills, friends spared as the game's team filter
+// spares them for every shell of a side (the IFC's team is its owner's).
+bool ImpactDamage(const unsigned char* by,const float* at,float damage,float radius) noexcept {
+    if(!by || !at || !std::isfinite(at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
+    const int c=ChargeFor(radius);
+    if(c<0) {
+        static ULONGLONG loggedAt=0;
+        const ULONGLONG now=GetTickCount64();
+        if(now-loggedAt>10000){loggedAt=now;Log("JET impact %.0f damage %.0f m: no impact charge preloaded (python tools/make_jets.py)",damage,radius);}
+        return false;
+    }
+    const float from[3]={at[0],at[1]+kImpactDrop,at[2]};
+    const bool fired=Shell(kCharges[c].sgo,chargeReady[c],by,from,at,damage,"impact charge");
+    if(fired && Cfg().debug)Log("JET impact by %p at (%.0f,%.0f,%.0f): %.0f damage, %.0f m charge (asked %.0f m)",by,at[0],at[1],at[2],damage,
+                              kCharges[c].radius,radius);
+    return fired;
+}
+}  // namespace crew
