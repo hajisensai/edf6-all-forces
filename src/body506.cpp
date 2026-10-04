@@ -83,6 +83,10 @@ void __fastcall PhysicsHook(void* vehicle) {
     nextPhysics(vehicle);
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
+        // Every plugin body has its body part, however it came into the world: a jet a mission script placed (the
+        // test range's NPC and enemy jets, src/jet.cpp CrewPlaced) never went through the spawn's fix, and shot down
+        // its 506 crash state (0x650010, state 1) read part -1: EDF+0x650137, 2026-10-04 (FixBodyPart506).
+        if(At<std::int32_t>(v,kBodyPart)==-1 && BodyOf(v)!=PluginBody::none)FixBodyPart506(v,"BODY506");
         const StepFn step=StepOf(BodyOf(v));
         if(!step)return;
         alignas(16) float lin[4]{},ang[4]{};
@@ -188,8 +192,11 @@ bool FixBodyPart506(unsigned char* v,const char* tag) noexcept {
         if(Cfg().debug)Log("%s v=%p body part: %ls (%d)",tag,v,name,i);
         return true;
     }
-    Log("%s v=%p has no body part (going down it would crash)",tag,v);
-    return false;
+    // None of its bones is a fuselage: its root (bone 0), which every model has, so its crash state reads a bone, not
+    // part -1 (EDF+0x650137).
+    Put<std::int32_t>(v,kBodyPart,0);
+    Log("%s v=%p has no fuselage bone: body part 0 (its root)",tag,v);
+    return true;
 }
 
 void BodyAttitude(const unsigned char* v,const float* nose,const float* up,float gain,float maxRate,float* omega) noexcept {

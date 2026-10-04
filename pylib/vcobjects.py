@@ -315,6 +315,18 @@ JET_MAB_ROOT = (0x36A, JET_ROOT_BONE)
 JET_RIGID_BODY = [[0.0, 0.34, 2.6], [2.0, 1.6, 13.0]]
 
 
+def on_origin(box) -> list[list[float]]:
+    """A collision box [centre, half extents] cut off at the body's origin: what is under it goes. The game puts a
+    vehicle's origin on the ground where it spawns it (the stock 506's box is 0 - 2.9 m over it); a box reaching
+    under it starts in the terrain, and the body falls through the terrain's mesh: the player jets' boxes (measured
+    off their models, 0.83 m / 1.29 m under the origin) sank at their spawn (2026-10-04, the test range)."""
+    (cx, cy, cz), (hx, hy, hz) = box
+    bottom, top = cy - hy, cy + hy
+    if bottom >= 0.0:
+        return [list(box[0]), list(box[1])]
+    return [[cx, top / 2.0, cz], [hx, top / 2.0, hz]]
+
+
 def _rebone(v, names: set[str], to: str = JET_ROOT_BONE):
     """`v` with every string in `names` replaced by `to` (deep)."""
     if isinstance(v, list):
@@ -411,7 +423,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
-    box = JET_RIGID_BODY if rigid is None else rigid
+    box = on_origin(JET_RIGID_BODY if rigid is None else rigid)
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
