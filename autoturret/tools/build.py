@@ -111,6 +111,9 @@ GUN_AMMO = {
     'AmmoClass': 'GrenadeBullet01', 'AmmoModel': 'app:/WEAPON/bullet_grenade.rab',
     'AmmoSpeed': 8.0, 'AmmoAlive': 60.0, 'AmmoSize': 0.6, 'AmmoHitSizeAdjust': 1.0,
     'AmmoExplosion': 8.0, 'AmmoIsPenetration': 0.0,
+    # The blast's push on what it hits, times the stock 1.0: the proximity fuse bursts nearly every round next to its
+    # target, and at 1.0 the bursts threw monsters about (the user, 2026-10-05); the damage and the radius stay.
+    'AmmoHitImpulseAdjust': 0.1,
     'AmmoColor': [3.0, 1.6, 0.6, 1.0],
     # [type 1 = burst on expiry, unused, unused, bounce 0 = stick, trail param, trail frames]
     'Ammo_CustomParameter': [1.0, -0.004, 1.0, 0.0, 0.05, 8.0],
