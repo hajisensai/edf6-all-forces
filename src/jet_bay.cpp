@@ -20,7 +20,7 @@ namespace {
 // The bombs are the bomber's: its bombing_plane_param, damage, spread, seed and owner.
 constexpr unsigned kIfcCtor=0x2B3940,kIfcDtor=0x2B3C90,kIfcConfig=0x2B5F40,kIfcOwner=0x2B8390,kIfcDamage=0x2B82E0,
                    kIfcSpread=0x2B8460,kIfcFrames=0x2B8470,kIfcOpen=0x2B4340,kIfcStep=0x2B95A0,kIfcDone=0x2B7B90;
-constexpr std::size_t kIfcSize=0x600,kIfcAim=0x20,kIfcShots=0x2F0,kIfcFromJet=0x2F9,kIfcFrom=0x300;
+constexpr std::size_t kIfcSize=0x600,kIfcAim=0x20,kIfcShots=0x2F0,kIfcBallistic=0x2F8,kIfcFromJet=0x2F9,kIfcFrom=0x300;
 constexpr float kLineGain=250.0f;   // m off the bombing line that turn it back at the most
 // ms the bay's last bombs (and a cluster's bomblets) still pass the bomber's flight after it closes.
 constexpr ULONGLONG kBombClearMs=15000;
@@ -60,11 +60,11 @@ constexpr float kGunshipReach=1800.0f;    // m from the gunship to its target at
 constexpr float kGunshipDamage=300.0f;    // a shell's damage (the SGO's own factor is the missions' 250)
 const wchar_t kGunshipSgo[]=L"app:/object/demogunshipfiree25.sgo";
 bool gunshipReady=false;                  // the shell SGO was preloaded for this mission (PreloadShells)
-// Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round (RocketBullet01)
-// made a one-round, no-wait, short-lived shot with its blast radius set to the charge's (indirect_fire_param
-// #14): a blast's radius is the SGO's, so one charge per radius; its damage the plugin writes. Fired from
-// kImpactDrop over the impact point down through it, it bursts on what it meets there (the enemy rammed, the
-// ground); a RocketBullet01 that meets nothing in its short life does not burst (docs/decoy-blast-re.md 1.4).
+// Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round made a one-round,
+// no-wait GrenadeBullet01 that bursts at the end of its kImpact life (or on what it meets first), its blast
+// radius the charge's (indirect_fire_param #9 AmmoExplosion): a blast's radius is the SGO's, so one charge per
+// radius; its damage the plugin writes. Fired straight (IFC +0x2F8 = 0) from kImpactDrop over the impact point
+// down onto it, it bursts there. The blast spares the owner's team's friends: the IFC's team is its owner's.
 struct Charge { const wchar_t* sgo; const wchar_t* file; float radius; };
 const Charge kCharges[]={
     {L"app:/object/edf6vc_impact_08.sgo",L"EDF6VC_IMPACT_08.SGO",8.0f},
@@ -74,7 +74,7 @@ const Charge kCharges[]={
 };
 constexpr int kChargeCount=static_cast<int>(sizeof(kCharges)/sizeof(kCharges[0]));
 bool chargeReady[kChargeCount]{};         // preloaded this mission (PreloadShells)
-constexpr float kImpactDrop=2.0f;
+constexpr float kImpactDrop=0.5f;   // the charge's 2 frames at 0.25 m a frame (make_jets.py IMPACT_*)
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
@@ -119,7 +119,10 @@ unsigned char* ShellCreate(const wchar_t* sgo,const float* m,bool& ok) noexcept 
 
 // Shell `sgo` (preloaded: `ok`) fired by `owner` from `from` at `aim` with `damage` (see kDemoVtable): whether
 // it was. `ok` goes false for the mission when the game cannot build it or it is no DemoIndirectFire.
-bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,const char* what) noexcept {
+// `straight`: the shot flies the line from `from` to `aim` (IFC +0x2F8 = 0), not the ballistic arc the IFC
+// solves by default.
+bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,bool straight,
+           const char* what) noexcept {
     if(!ok || !shellsOk || !At<void*>(image,kObjectMgr))return false;
     alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, aim[0],aim[1],aim[2],1};
     unsigned char* const o=ShellCreate(sgo,m,ok);
@@ -136,6 +139,7 @@ bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* f
         reinterpret_cast<void(*)(void*,const void*)>(image+kIfcOwner)(ifc,weak);
         reinterpret_cast<void(*)(void*,float)>(image+kIfcDamage)(ifc,damage);
         ifc[kIfcFromJet]=1;
+        if(straight)ifc[kIfcBallistic]=0;
         alignas(16) const float st[4]={from[0],from[1],from[2],1.0f},am[4]={aim[0],aim[1],aim[2],1.0f};
         std::memcpy(ifc+kIfcFrom,st,16);std::memcpy(ifc+kIfcAim,am,16);
         return true;
@@ -222,7 +226,7 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
     j.shells.gunAt=ms;
-    if(!Shell(kGunshipSgo,gunshipReady,v,pos,j.t.aim,kGunshipDamage,"gunship shell"))return;
+    if(!Shell(kGunshipSgo,gunshipReady,v,pos,j.t.aim,kGunshipDamage,false,"gunship shell"))return;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.shells.gunShots,j.t.target,Len(d));
 }
@@ -310,7 +314,7 @@ bool ImpactDamage(const unsigned char* by,const float* at,float damage,float rad
         return false;
     }
     const float from[3]={at[0],at[1]+kImpactDrop,at[2]};
-    const bool fired=Shell(kCharges[c].sgo,chargeReady[c],by,from,at,damage,"impact charge");
+    const bool fired=Shell(kCharges[c].sgo,chargeReady[c],by,from,at,damage,true,"impact charge");
     if(fired && Cfg().debug)Log("JET impact by %p at (%.0f,%.0f,%.0f): %.0f damage, %.0f m charge (asked %.0f m)",by,at[0],at[1],at[2],damage,
                               kCharges[c].radius,radius);
     return fired;

@@ -311,8 +311,9 @@ def jet_guns(game: Game) -> dict[str, bytes]:
 # rounds at its own position, docs/carrier-laser-re.md), made from DEMOSATELLITELASER18.SGO. The plugin
 # fires them from the ship's hatch (IFC +0x2F9 / +0x300) at its target and sets their damage itself.
 # indirect_fire_param (index: meaning, from the IFC's parser 0x2B5F40): 2 rounds, 3 frames between rounds,
-# 4 bullet class, 5 speed (m a frame), 7 beam size, 9 hit impulse, 10 life (frames), 11 penetrates,
-# 12 colour, 14 explosion, 15 frames before the first round, 16 fire sound looped, 17 fire sound, 18 hit sound.
+# 4 bullet class, 5 speed (m a frame), 6 gravity factor, 7 beam size, 8 hit size factor, 9 blast radius
+# (AmmoExplosion; 0: none), 10 life (frames), 11 penetrates, 12 colour, 13 the bullet class's custom parameter,
+# 14 a model of its own (0: none), 15 frames before the first round, 16 fire sound looped, 17 fire sound, 18 hit sound.
 PORTAL_LASER_STOCK = 'DEMOSATELLITELASER18.SGO'
 # name -> (rounds, gap, size, life, colour, fire sound once)
 PORTAL_LASER_FILES: dict[str, tuple[int, int, float, int, tuple[float, float, float, float], bool]] = {
