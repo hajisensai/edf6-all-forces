@@ -24,8 +24,10 @@ bool PatchCode(std::size_t checkRva,const unsigned char* expect,std::size_t expe
     return true;
 }
 
-// The chassis body build (0x656E90, called from 0x64E9B6 / 0x650AA6 for every wheeled vehicle) sets the
-// hknp body quality to CHARACTER (10): `mov byte [rbp+0x86],0x0A` at 0x6571AD. In the default quality
+// The helicopter body build (0x656E90, called from 0x64E9B6 / 0x650AA6) sets the
+// hknp body quality to CHARACTER (10): `mov byte [rbp+0x86],0x0A` at 0x6571AD. NOT the car/tank chassis:
+// CarBase/TankBase take [veh+0x1698] from the model's physics data (car_base_body_name, 0x663A70), so
+// this patch never reaches them. In the default quality
 // library (0xE13BA0) CHARACTER only asks for NEIGHBOR welding (flags 0x80), VEHICLE (9) asks for
 // NEIGHBOR|MOTION (0x180); solver iterations are the same. Without motion welding a fast chassis sliding
 // over the triangle seams of uneven ground meets the inner edges as ghost contacts and is thrown up.
@@ -143,11 +145,49 @@ bool CapGiantContact() noexcept {
     VirtualFree(cave,0,MEM_RELEASE);
     return false;
 }
+
+// Diagnostic (debug only): every game write of a vehicle chassis velocity goes through setLinVel
+// (0x11B18F0). Three call sites in the CarBase/TankBase frame: gravity pre-step (0x673C73), the
+// ground-normal projection (0x678137) and the final write after the slots (0x6746B5). Logging what
+// the physics step left in the body (getLinVel 0x11B1300) next to what the game writes tells whether
+// an upward launch is produced by the hknp step (contacts) or by game code.
+constexpr std::size_t kSetLinVel=0x11B18F0;
+constexpr std::size_t kGetLinVel=0x11B1300;
+constexpr std::size_t kVelocitySites[]={0x673C73,0x678137,0x6746B5};
+constexpr float kLaunchSpeed=3.0f;
+
+using SetLinVelFn=std::uintptr_t(*)(void*,const float*);
+using GetLinVelFn=const float*(*)(void*);
+
+template<int Site>
+std::uintptr_t SetLinVelProbe(void* body,const float* v) noexcept {
+    const auto get=reinterpret_cast<GetLinVelFn>(image+kGetLinVel);
+    const float* phys=body ? get(body) : nullptr;
+    if(phys && v && (phys[1]>kLaunchSpeed || v[1]>kLaunchSpeed)) {
+        Log("VELPROBE site=%#zx t=%llu w=%p phys=(%.2f %.2f %.2f) out=(%.2f %.2f %.2f)",
+            kVelocitySites[Site],static_cast<unsigned long long>(GameMs()),body,
+            phys[0],phys[1],phys[2],v[0],v[1],v[2]);
+    }
+    return reinterpret_cast<SetLinVelFn>(image+kSetLinVel)(body,v);
+}
+
+int ProbeVehicleVelocity() noexcept {
+    void* const probes[]={reinterpret_cast<void*>(&SetLinVelProbe<0>),
+                          reinterpret_cast<void*>(&SetLinVelProbe<1>),
+                          reinterpret_cast<void*>(&SetLinVelProbe<2>)};
+    int done=0;
+    for(std::size_t i=0;i<3;++i) {
+        bool changed=false;
+        if(RedirectCall(image+kVelocitySites[i],image+kSetLinVel,probes[i],changed))++done;
+    }
+    return done;
+}
 }  // namespace
 
 bool InstallPhysics() noexcept {
     const bool welded=cfg.vehicleWelding && WeldVehicleChassis();
     const bool capped=cfg.giantContactCap && CapGiantContact();
+    if(cfg.debug)Log("PHYSICS velocity probes=%d",ProbeVehicleVelocity());
     Log("PHYSICS vehicleWelding=%d giantContactCap=%d (config %d/%d)",welded,capped,
         cfg.vehicleWelding,cfg.giantContactCap);
     return welded || capped;

@@ -97,7 +97,7 @@ RideVehicle 碰到有人的座位时，会先调 `0x6313C0` 请对方下车，�
 
 - hknp 默认 body quality 表在 0xE13BA0，库对象 +0x40+0x30*i 是 requestedFlags，库指针在 world+0x930。
   DYNAMIC(3) 无焊接；VEHICLE(9) 0x180 = NEIGHBOR|MOTION 焊接；CHARACTER(10) 0x80 = 只有 NEIGHBOR。两档迭代次数相同。
-- 轮式车身在 0x656E90 建体（调用点 0x64E9B6 / 0x650AA6），0x6571AD `C6 85 86 00 00 00 0A` 把 cinfo+0x86 的 quality 写成 CHARACTER。
+- 直升机机体在 0x656E90 建体（调用点 0x64E9B6 / 0x650AA6），0x6571AD `C6 85 86 00 00 00 0A` 把 cinfo+0x86 的 quality 写成 CHARACTER。**车/坦克底盘不经此处**：CarBase/TankBase 的 [veh+0x1698] 来自模型物理数据（car_base_body_name，0x663A70），此补丁对坦克与车无效。
   缺 MOTION 焊接，车身高速滑过地形三角面接缝撞上内棱（ghost contact）被弹起——这就是「开过不平的地面弹飞」。
 - 修法：校验那 7 字节后把立即数 0x6571B3 改成 0x09（VEHICLE）。只影响这一个建体函数。
 
