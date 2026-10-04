@@ -220,10 +220,11 @@ void Step() noexcept;
 
 void __fastcall ShipAiHook(void* object,const void* context) {
     nextShipAi(object,context);
+    SeeFrame(object);   // a ship's AI runs once a frame: the frame steps with no vehicle's input running
     if(!flyOk || broken)return;
-    // With no carrier left none steps the state machine (CarrierLaserFrame): it winds down here, its sights deleted.
-    // Only then: beams are made from a carrier's frame, as from the start.
-    if(!Live().n)Step();
+    // With no carrier left (or the laser switched off) none steps the state machine (CarrierLaserFrame): it winds
+    // down here, its sights deleted. Only then: beams are made from a carrier's frame, as from the start.
+    if(!Live().n || !Cfg().enabled || !Cfg().carrierLaser)Step();
     __try {
         auto const o=static_cast<unsigned char*>(object);
         for(auto& s:ships)
@@ -452,10 +453,17 @@ void Tick() noexcept {
 }
 
 // The state machine's step, at most once a game frame (from a carrier's frame, or a 508's AI with none left).
+// Switched off: a ship on its way or charging is let go (its sight deleted); nothing new starts.
+void Off() noexcept {
+    const ULONGLONG ms=GameMs();
+    for(auto& s:ships)
+        if(s.ship && s.phase!=Phase::idle)Interrupt(s,ms,"switched off");
+}
+
 void Step() noexcept {
-    if(!sigOk || !preloaded || broken || !Cfg().carrierLaser || tickFrame==GameFrame())return;
+    if(!sigOk || !preloaded || broken || tickFrame==GameFrame())return;
     tickFrame=GameFrame();
-    __try { Tick(); }
+    __try { if(Cfg().enabled && Cfg().carrierLaser)Tick(); else Off(); }
     __except(EXCEPTION_EXECUTE_HANDLER){Log("LASER fault in the frame: off until the game restarts");broken=true;}
 }
 }  // namespace

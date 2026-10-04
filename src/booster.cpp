@@ -211,8 +211,12 @@ bool InstallBoosters() noexcept {
     } __except(FaultLog("FLAME install",GetExceptionInformation())){return false;}
 }
 // A new mission (mission.cpp MissionStart): the carriers and their boosters were the last mission's, gone with
-// it: forgotten, not deleted, their weak references not dropped (their memory may be anyone's now).
+// it: forgotten, not deleted. Each nozzle's weak reference is dropped: it kept the control block alive, so the
+// block is there to drop it from (jet.cpp ResetJets), and keeping it would leak the block every mission.
 void ResetBoosters() noexcept {
-    for(auto& c:carriers)c=Carrier{};
+    for(auto& c:carriers) {
+        for(auto& z:c.n)DropWeak(z.ctrl);
+        c=Carrier{};
+    }
 }
 }  // namespace crew

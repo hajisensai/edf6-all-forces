@@ -283,7 +283,7 @@ Jet* NewEntry(unsigned char* v,ULONGLONG ms) noexcept {
     j->ref=ref;HoldRef(ref);
     j->role=role;j->carrier.drones=drones;j->carrier.sorties=kCarrierSorties;j->drone.slot=-1;
     j->bornAt=j->modeAt=j->seen=ms;
-    QueryPerformanceCounter(&j->last);
+    j->lastStep=0;   // the first step is a frame long (GameStep)
     return j;
 }
 
@@ -335,7 +335,6 @@ void JetFrame(unsigned char* v) noexcept {
     Jet* j=FindJet(v);
     if(!j)j=CrewPlaced(v,pos,ms);
     if(!j)return;   // kMaxJets flying: this one is not taken over (FreeSlot logged it)
-    LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
     j->seen=ms;
     FarRender(*j,v);
     Put<float>(v,kAreaInset,kNoInset);
@@ -343,8 +342,8 @@ void JetFrame(unsigned char* v) noexcept {
         if(!j->reap)Log("JET v=%p at the world's edge (%.0f,%.0f): deleting",v,pos[0],pos[2]);
         j->reap=true;
     }
-    const float dt=Clamp(static_cast<float>(now.QuadPart-j->last.QuadPart)/static_cast<float>(freq.QuadPart),0.004f,0.1f);
-    j->last=now;
+    const float dt=GameStep(j->lastStep ? ms-j->lastStep : 0);   // a slow frame moves the world no more than 1/60 s
+    j->lastStep=ms;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     float nose[3]={m[8],m[9],m[10]};
     if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
@@ -418,10 +417,11 @@ void JetReap(const void* self) noexcept {
 }
 
 // A new mission (mission.cpp MissionStart): every entry, doll and learned wall of the last one is forgotten.
-// Nothing of it is torn down or deleted (its bays' destructors, its objects' Delete, the weak references' drop):
-// the objects went with that mission and their memory may be anyone's now; what an entry held is left (leaked).
+// Its objects are not touched (their bays' destructors, their Delete): they went with that mission. The weak
+// reference each entry holds is dropped: it is what kept the control block alive (HoldRef), so the block is
+// still there to drop it from, and keeping it would leak the block every mission.
 void ResetJets() noexcept {
-    for(auto& j:jets)j=Jet{};
+    for(auto& j:jets){DropRef(j.ref);j=Jet{};}
     ResetDolls();
     ResetWalls();
     ResetTargets();

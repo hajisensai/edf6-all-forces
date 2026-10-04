@@ -601,7 +601,8 @@ void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasP
     for(int t=0;t<kTurrets;++t) {
         on[t]=false;
         Turret& tu=s.turret[t];
-        if(bones && bones!=tu.bones) {   // a model (again): the bone looked up, its bind pose kept
+        if(!bones){tu.bones=nullptr;tu.rec=nullptr;}   // no model (being rebuilt): its bone record went with it
+        else if(bones!=tu.bones) {   // a model (again): the bone looked up, its bind pose kept
             tu=Turret{};tu.bones=bones;
             tu.rec=BoneRecord506(inst,kSystems[t].bone);
             if(tu.rec)std::memcpy(tu.bind,tu.rec+kBoneLocal506,64);

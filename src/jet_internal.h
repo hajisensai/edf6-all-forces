@@ -317,7 +317,7 @@ struct Jet {
     Role role;
     Mode mode;
     ULONGLONG bornAt,seen,modeAt,loggedAt;
-    LARGE_INTEGER last;
+    ULONGLONG lastStep;   // GameMs of the last frame step (GameStep)
     float anchor[3];         // where it patrols when there is no player
     bool reap;               // withdrawn: delete from another object's update (JetReap)
     const char* why;         // why it withdrew
