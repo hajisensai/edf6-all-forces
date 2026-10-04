@@ -4,7 +4,7 @@
     (withdrawn ones too), with other mods' rows after ours and with uninstall placeholders, keep every row
     where it is (call_weapons.plan_rows / tail_start);
   - the copies kept by hand elsewhere agree with tools/calls.py and pylib/vcobjects.py (the player jets' marks
-    in src/playerjet.cpp, the jets' marks in src/jet.cpp, the jet files in src/jet.cpp and tools/make_jets.py,
+    in src/playerjet.cpp, the jets' marks and files in src/jet* and tools/make_jets.py,
     the enum names in src/crew.h, the counts in README.md);
   - the weapon table transaction (call_weapons.commit / recover) writes all or nothing, and rolls back a run
     that died half way;
@@ -153,18 +153,18 @@ def hand_copies_agree() -> None:
         assert jet.player and jet.mark == c.mark, c.id
         assert float(pjet[c.kind.removeprefix('pjet_')]) == c.mark, f'src/playerjet.cpp kKinds disagrees on {c.id}'
         assert make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
-    jet_cpp = src('src/jet.cpp')
-    kinds = jet_cpp.split('constexpr Kind kKinds[kRoleCount]={', 1)[1].split('};', 1)[0]
-    marks = {float(m) for m in re.findall(r'\{"\w+",(\d+)\.0f,', kinds)}
-    marks |= {float(m) for m in re.findall(r'\{(\d+)\.0f,Role::', jet_cpp.split('kCarrierMarks[]=', 1)[1].split(';', 1)[0])}
+    # The jets' marks and files, wherever src/jet*.cpp / *.h keep their table (kKinds, kCarrierMarks, kJetFile /
+    # kJetSgo, or one body table).
+    jet_src = ''.join(src(f'src/{n}') for n in sorted(os.listdir(os.path.join(ROOT, 'src'))) if n.startswith('jet'))
+    marks = {float(m) for m in re.findall(r'\b(70\d\d)\.0f', jet_src)}
     npc = {name: j.mark for name, j in vc.JETS.items() if not j.player and 7001 <= j.mark <= 7099}
     for name, mark in npc.items():
-        assert mark in marks, f'{name}: mark {mark} not in src/jet.cpp kKinds / kCarrierMarks'
-    files = re.findall(r'L"(EDF6VC_[A-Z0-9_]+\.SGO)"', jet_cpp.split('kJetFile[kBodyCount]={', 1)[1].split('};', 1)[0])
-    sgos = re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_cpp.split('kJetSgo[kBodyCount]={', 1)[1].split('};', 1)[0])
-    assert [f.lower() for f in files] == sgos, 'src/jet.cpp kJetFile and kJetSgo disagree'
-    written = {n.split('/', 1)[1] for n in make_jets.names() if n.startswith('OBJECT/')}
-    assert set(files) <= written, f'src/jet.cpp loads files tools/make_jets.py does not write: {set(files) - written}'
+        assert mark in marks, f'{name}: mark {mark} is in no src/jet* table'
+    files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
+    sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
+    assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
+    written = {n.split('/', 1)[1] for n in make_jets.names()}
+    assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
 @test
