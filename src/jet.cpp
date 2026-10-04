@@ -98,10 +98,16 @@ Jet* FreeSlot() noexcept {
     return nullptr;
 }
 
-// A jet a mission placed, seen for the first time (its pilot just seated): it guards the player.
+// A jet a mission placed, seen for the first time (its pilot just seated): it guards the player; an enemy's jet
+// (HostileJet) joins the enemy team first, so the same flight round the player hunts the player's side: its targets
+// are whatever its team is hostile to (VisitEnemies), its friends the enemy's.
 Jet* CrewPlaced(unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     Jet* const j=NewEntry(v,ms);
     if(!j)return nullptr;
+    if(HostileJet(v)) {
+        SetJetTeam(v,kTeamEnemy);
+        Log("JET v=%p is the enemy's: team %d",v,At<std::int32_t>(v,kTeam));
+    }
     std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;
     JoinFlight(*j,kPlacedFlight);
     j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(Cfg().jetFuelSec)*KindOf(*j).fuel*1000.0f);
@@ -301,6 +307,12 @@ bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept {
         if(drones)*drones=b.drones;
         return true;
     }
+    return false;
+}
+bool HostileJet(const unsigned char* v) noexcept {
+    if(crew::BodyOf(v)!=PluginBody::jet)return false;
+    const float k=BodyMark(v);
+    for(const auto& b:kBodies)if(b.mark>0.0f && k==b.mark)return b.hostile;
     return false;
 }
 }  // namespace jet

@@ -32,6 +32,7 @@ constexpr unsigned char kObjDeleted=4;
 constexpr unsigned kDelete=0x118A1B0,kSetTeam=0x54EE70,kCreateObject=0x11945E0,kInitParamVtable=0x1762068;
 constexpr std::size_t kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
+constexpr std::int32_t kTeamEnemy=1;   // the game's team relations: 0 (player) and 2 (friends) are both hostile to 1
 // InitParamBase as DemoAirStrike's ctor builds it on its stack (0x5B433A): the vtable, the rest zero.
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 using CreateObjectFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
@@ -88,8 +89,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier };
-constexpr int kBodyCount=15;
+                  gunship, blastCarrier, dollCarrier, enemyFighter };
+constexpr int kBodyCount=16;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -98,6 +99,8 @@ struct BodyRow {
     Role role;
     Role drones;                    // a carrier's: what it launches (blast, doll; else the gun drone)
     const char* name;
+    bool hostile=false;             // the enemy's: on first sight it joins the enemy team (CrewPlaced) and hunts the
+                                    // player's side round the player, as a friendly one guards them
 };
 // The strike jets that take over a BOMBER401 or BOMBER501_2 fly that bomber's own model with the strike jet's
 // mark; tools/make_jets.py writes them all (testrange/gen.py JETS has the marks of the mission-placed ones).
@@ -120,6 +123,9 @@ inline constexpr BodyRow kBodies[kBodyCount]={
      "blastCarrier"},
     {Body::dollCarrier,L"app:/object/edf6vc_jet_doll_carrier.sgo",L"EDF6VC_JET_DOLL_CARRIER.SGO",7010.0f,Role::carrier,Role::doll,
      "dollCarrier"},
+    // The enemy fighter (testrange/gen.py: the interceptor's dark bomber501_2 model, a dogfighter's role).
+    {Body::enemyFighter,L"app:/object/edf6vc_jet_enemy_fighter.sgo",L"EDF6VC_JET_ENEMY_FIGHTER.SGO",7020.0f,Role::fighter,Role::drone,
+     "enemyFighter",true},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -373,6 +379,8 @@ Jet* NewEntry(unsigned char* v,ULONGLONG ms) noexcept;
 bool SlotFree() noexcept;                 // NewEntry would find an entry (logged when not, at most every few seconds)
 void JoinFlight(Jet& j,unsigned flight) noexcept;   // its flight and its place in it
 bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept;
+bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's (BodyRow::hostile)
+void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
 inline bool Flown(const Jet& o,ULONGLONG ms) noexcept { return o.ref && ms-o.seen<=kStaleMs; }
 

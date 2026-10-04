@@ -43,6 +43,7 @@ FILES: dict[str, str] = {
     'EDF6VC_JET_STRIKE.SGO': 'edf6tr_jet_strike_mission',
     'EDF6VC_JET_FIGHTER.SGO': 'edf6tr_jet_fighter_mission',
     'EDF6VC_JET_INTERCEPTOR.SGO': 'edf6tr_jet_interceptor_mission',
+    'EDF6VC_JET_ENEMY_FIGHTER.SGO': 'edf6tr_jet_enemy_fighter_mission',
     'EDF6VC_JET_MULTIROLE.SGO': 'edf6tr_jet_multirole_mission',
     'EDF6VC_JET_CARRIER.SGO': 'edf6tr_jet_carrier_mission',
     'EDF6VC_JET_DRONE.SGO': 'edf6tr_jet_drone',

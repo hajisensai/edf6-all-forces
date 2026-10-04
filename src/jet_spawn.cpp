@@ -122,6 +122,10 @@ void Facing(const float* heading,const float* at,float* m) noexcept {
     std::memcpy(m,r,sizeof(r));
 }
 
+void SetJetTeam(unsigned char* v,std::int32_t team) noexcept {
+    if(spawnOk)reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
+}
+
 // CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not what
 // its body is (a jet SGO without its mark, a heli SGO that is a jet), or nullptr.
 unsigned char* SpawnJet(Body b,const float* m) noexcept {
