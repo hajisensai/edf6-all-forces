@@ -72,6 +72,7 @@ struct Config {
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
     int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
     int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
+    bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
@@ -333,6 +334,8 @@ struct PlayerJetReadout {
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
+void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
+namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; }
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for

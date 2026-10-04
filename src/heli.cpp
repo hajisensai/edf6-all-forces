@@ -2182,6 +2182,8 @@ void RescueStep() noexcept {
 }
 }  // namespace
 
+void PressBoardButton(unsigned char* human) noexcept { PressBoard(human); }
+
 void RescueTick() noexcept {
     if(!profileOk || rescue.frame==GameFrame())return;   // it flies the heli through Fly; at most once a frame
     rescue.frame=GameFrame();

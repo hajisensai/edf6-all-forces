@@ -789,6 +789,9 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     if(j.bomb && j.phase==Phase::air)j.hasImpact=Impact(j,pos,j.impact);
 }
 
+// The caught jet's speed for its boarding (see kCatchAfterMs).
+struct CatchBoard { const void* v; float vel[3]; } catchBoard{};   // the caught jet's speed, for Board
+
 void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     j.driven=true;j.blockedSince=0;
     if(!j.insetSaved){j.savedInset=At<float>(v,kAreaInset);j.insetSaved=true;}
@@ -798,6 +801,11 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     j.hasUp=false;j.hasAim=false;
     std::memcpy(j.vel,j.measured,12);
     j.throttle=air ? 0.5f : 0.0f;
+    if(catchBoard.v==v) {   // the catch (EjectTick): it flies on at the old jet's speed, at full throttle
+        std::memcpy(j.vel,catchBoard.vel,12);
+        j.phase=Phase::air;j.throttle=1.0f;
+        catchBoard=CatchBoard{};
+    }
     Log("PJET v=%p boarded: %s, hp %.0f/%.0f, %s at (%.0f,%.0f,%.0f), %.0f m over the ground, %.0f m/s",v,j.kind->name,
         At<float>(v,kHp),At<float>(v,kHpMax),kPhaseNames[static_cast<int>(j.phase)],pos[0],pos[1],pos[2],clear,speed);
 }
@@ -818,10 +826,74 @@ constexpr float kEjectUp=25.0f,kEjectCarry=0.3f,kEjectFrom=15.0f;   // m/s up; s
 constexpr float kChuteSink=6.0f,kChuteBleed=0.6f,kChuteBoost=3.0f;   // m/s down at most; a second; m/s up in a frame
 constexpr ULONGLONG kEjectWaitMs=2000,kChuteMostMs=180000;
 enum class Eject { none, pending, chute };
-struct Bailout { Eject state; ULONGLONG at; float carry[2],vy; } bail{};
+// The catch (Cfg().playerJetCatch; the user: "don't wait till they land, catch them in the air"): kCatchAfterMs into
+// the parachute, with the player kCatchClear over the ground, a jet of the kind they left (its SGO, preloaded at the
+// mission's start: PreloadPlayerJets) is made kCatchBelow under them on the old heading, empty and on nobody's team,
+// at the mission's level (LevelVehicle), and the board button is pressed for them until they are in (kCatchTryMs at
+// most); boarding it (Board) it flies on at the old jet's speed (at least its kind's rotate speed + kCatchOver).
+constexpr ULONGLONG kCatchAfterMs=4000,kCatchTryMs=1500;
+constexpr float kCatchClear=40.0f,kCatchBelow=1.5f,kCatchOver=40.0f;
+struct Bailout {
+    Eject state; ULONGLONG at; float carry[2],vy;
+    float mark,heading[3],speed;     // the jet left: its kind's mark, its nose, its speed (the catch)
+    ObjRef caught; ULONGLONG caughtAt;
+} bail{};
+struct PlayerJetFile { float mark; const wchar_t* sgo; const wchar_t* file; };
+constexpr PlayerJetFile kPlayerJetFiles[]={{7201.0f,L"app:/object/edf6vc_pjet_fighter.sgo",L"EDF6VC_PJET_FIGHTER.SGO"},
+                                          {7202.0f,L"app:/object/edf6vc_pjet_strike.sgo",L"EDF6VC_PJET_STRIKE.SGO"}};
+bool playerJetPreloaded[2]{};
+constexpr unsigned kPreloadFn=0x7A3780,kCreateObjectFn=0x11945E0,kInitParamVt=0x1762068;
+constexpr std::size_t kPreloadMgrAt=0x20B29A8,kObjectMgrAt=0x20B2958;
+struct alignas(16) SpawnParam { const void* vtable; unsigned char rest[0x28]; };
 
-void EjectStart(const PJet& j) noexcept {
-    bail=Bailout{Eject::pending,GameMs(),{j.vel[0]*kEjectCarry,j.vel[2]*kEjectCarry},0.0f};
+unsigned char* SpawnCatchJet(float mark,const float* m) noexcept {
+    for(int i=0;i<2;++i) {
+        if(kPlayerJetFiles[i].mark!=mark || !playerJetPreloaded[i] || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt))continue;
+        SpawnParam param{image+kInitParamVt,{}};
+        unsigned char* v=nullptr;
+        __try {
+            v=reinterpret_cast<unsigned char*(*)(void*,const float*,const wchar_t*,SpawnParam*)>(image+kCreateObjectFn)(
+                At<void*>(image,kObjectMgrAt),m,kPlayerJetFiles[i].sgo,&param);
+        } __except(EXCEPTION_EXECUTE_HANDLER){playerJetPreloaded[i]=false;Log("PJET catch: the game faulted building %ls: off",kPlayerJetFiles[i].file);return nullptr;}
+        if(!v)return nullptr;
+        FixBodyPart506(v,"PJET");
+        SetObjectTeam(v,kTeamVehicle);
+        LevelVehicle(v);
+        return v;
+    }
+    return nullptr;
+}
+
+void Catch(unsigned char* h,ULONGLONG ms) noexcept {
+    if(!bail.caught) {
+        if(!Cfg().playerJetCatch || ms-bail.at<kCatchAfterMs || bail.mark<=0.0f)return;
+        const float* p=reinterpret_cast<const float*>(h+kPosition);
+        const float clear=GroundClearance(p);
+        if(clear!=kNoGround && clear<kCatchClear){bail.mark=0.0f;Log("PJET catch: too low (%.0f m), the parachute goes on",clear);return;}
+        float f[3]={bail.heading[0],0.0f,bail.heading[2]};
+        if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
+        alignas(16) const float m[16]={f[2],0,-f[0],0, 0,1,0,0, f[0],0,f[2],0, p[0],p[1]-kCatchBelow,p[2],1};
+        unsigned char* const v=SpawnCatchJet(bail.mark,m);
+        if(!v){bail.mark=0.0f;Log("PJET catch: no jet of mark %.0f could be made",bail.mark);return;}
+        const Kind* const k=KindOf(v);
+        const float speed=std::fmax(bail.speed,(k ? k->rotate : 75.0f)+kCatchOver);
+        catchBoard=CatchBoard{v,{f[0]*speed,0.0f,f[2]*speed}};
+        bail.caught=ObjRef::Of(v);bail.caughtAt=ms;
+        Log("PJET catch: v=%p made under the player at (%.0f,%.0f,%.0f), %.0f m over the ground, flying on at %.0f m/s",v,p[0],p[1],p[2],
+            clear,speed);
+    }
+    unsigned char* const v=const_cast<unsigned char*>(static_cast<const unsigned char*>(bail.caught.obj));
+    if(!bail.caught.Is(v) || v[kDead]){Log("PJET catch: the jet is gone");bail.state=Eject::none;return;}
+    if(ms-bail.caughtAt>kCatchTryMs){Log("PJET catch: the player did not get in");bail.caught=ObjRef{};bail.mark=0.0f;return;}
+    PressBoardButton(h);
+}
+
+void EjectStart(const PJet& j,const unsigned char* v) noexcept {
+    bail=Bailout{Eject::pending,GameMs(),{j.vel[0]*kEjectCarry,j.vel[2]*kEjectCarry},0.0f,0.0f,{0.0f,0.0f,1.0f},0.0f,ObjRef{},0};
+    if(const Kind* k=KindOf(v))bail.mark=static_cast<float>(k->mark);
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    bail.heading[0]=m[8];bail.heading[1]=m[9];bail.heading[2]=m[10];
+    bail.speed=Len(j.vel);
 }
 
 void EjectTick() noexcept {
@@ -842,6 +914,12 @@ void EjectTick() noexcept {
             std::sqrt(bail.carry[0]*bail.carry[0]+bail.carry[1]*bail.carry[1]));
         return;
     }
+    if(At<std::uint32_t>(h,kHumanFlags)&kRiding) {   // caught: in the new jet
+        Log("PJET catch: the player is in");
+        bail.state=Eject::none;
+        return;
+    }
+    Catch(h,ms);
     const unsigned char support=h[kHumanSupport];
     if(ms-bail.at>kChuteMostMs || (support==2 && ms-bail.at>300) || vel[1]>bail.vy+kChuteBoost) {
         Log("PJET parachute: %s",support==2 ? "landed" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
@@ -863,7 +941,7 @@ void Leave(PJet& j,unsigned char* v) noexcept {
     if(j.phase==Phase::air) {
         const float* pos=reinterpret_cast<const float*>(v+kPosition);
         const float clear=GroundClearance(pos);
-        if(clear==kNoGround || clear>kEjectFrom)EjectStart(j);
+        if(clear==kNoGround || clear>kEjectFrom)EjectStart(j,v);
     }
     j.driven=false;j.active=false;j.turnIn=j.pitchIn=j.yawIn=j.rollIn=0.0f;j.hasUp=false;j.hasAim=false;
     if(j.insetSaved){Put<float>(v,kAreaInset,j.savedInset);j.insetSaved=false;}
@@ -957,6 +1035,20 @@ bool PlayerJetMessage(unsigned char* v,std::uint32_t msg,void* data,MessageResto
 }
 
 void PlayerEjectTick() noexcept { EjectTick(); }
+
+void PreloadPlayerJets() noexcept {
+    for(int i=0;i<2;++i) {
+        playerJetPreloaded[i]=false;
+        const auto mgr=At<void*>(image,kPreloadMgrAt);
+        if(!mgr || !jet::SpawnReady() || !jet::ModFileThere(kPlayerJetFiles[i].file))continue;
+        __try {
+            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kPlayerJetFiles[i].sgo,2,-1);
+            playerJetPreloaded[i]=true;
+        } __except(EXCEPTION_EXECUTE_HANDLER){}
+    }
+    bail=Bailout{};catchBoard=CatchBoard{};
+    Log("PJET preload for the catch: fighter=%d strike=%d",playerJetPreloaded[0],playerJetPreloaded[1]);
+}
 
 bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;
