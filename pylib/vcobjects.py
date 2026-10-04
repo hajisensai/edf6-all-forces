@@ -256,32 +256,31 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _FIGHTER),
     # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
     'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _INTERCEPTOR, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
-                                          'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
+                                          'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
     # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
-                                            'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
+                                            'EDF6VC_INTERCEPTOR.MRAB', 'bomber501'),
     # bomber401 x 0.5: 26 m across
     'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _MULTIROLE, ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
-                                        'EDF6VC_MULTIROLE.MRAB', 'bomber401', rigid=((0.0, 1.07, 0.0), (1.25, 1.0, 4.0))),
+                                        'EDF6VC_MULTIROLE.MRAB', 'bomber401'),
     # the EDF transport x 1.6: 59 x 77 m; it never fires (its drones do)
     'edf6tr_jet_carrier_mission': Jet(7005.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
-                                      'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
+                                      'EDF6VC_CARRIER.MRAB', 'body'),
     # the same carrier sending blast / doll drones (src/jet.cpp kCarrierMarks)
     'edf6tr_jet_blast_carrier_mission': Jet(7009.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
-                                            'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
+                                            'EDF6VC_CARRIER.MRAB', 'body'),
     'edf6tr_jet_doll_carrier_mission': Jet(7010.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
-                                           'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
+                                           'EDF6VC_CARRIER.MRAB', 'body'),
     # the airstrike drone x 3: 5.7 m long; only carriers launch it (tools/make_jets.py EDF6VC_JET_DRONE.SGO)
     'edf6tr_jet_drone': Jet(7006.0, 300.0, _DRONE, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
-                            'EDF6VC_DRONE.MRAB', 'body', 'body',
-                            rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
+                            'EDF6VC_DRONE.MRAB', 'body', 'body'),
     # Blast and doll drones (src/jet.cpp Role::blast / doll): the drone with a charge for its missile; only
     # the blast and doll carriers launch them (their guns never fire).
     'edf6tr_jet_blast': Jet(7007.0, 250.0, _GUNS + (_BLAST[0],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
-                            'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
+                            'EDF6VC_DRONE.MRAB', 'body', 'body'),
     'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
-                           'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
+                           'EDF6VC_DRONE.MRAB', 'body', 'body'),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
     # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
     # deck (y 163.08..193.08 over the origin; the tower above is not solid). Not the whole hull: afloat its
@@ -380,11 +379,15 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if jet.model is not None:
         model, body, rigid = list(jet.model), jet.body, [list(x) for x in jet.rigid] if jet.rigid else None
         anchor = jet.anchor
+    import jet_models
     if jet.player:
-        # The player sees the whole plane: its box is the model's (wings, nose and tail), measured, not a hand-kept
-        # fuselage box (an NPC jet's stays the fuselage: a formation's wings would catch on each other).
-        import jet_models
+        # The player sees the whole plane: its box is the model's (wings, nose and tail), measured, not a fuselage
+        # box (an NPC jet's is the fuselage: a formation's wings would catch on each other).
         rigid = jet_models.model_box(game, jet.file)
+    elif jet.file in jet_models.MODELS:
+        rigid = jet_models.fuselage_box(game, jet.file)   # off its model as made (grounded): never under its origin
+    elif jet.model is None and rigid is None and model == JET_ELEVON_MODEL:
+        rigid = jet_models.fuselage_box(game, None)
     version, m = sgo.read(game.read('OBJECT', jet.stock + '.SGO'))
     at, want = JET_MAB_ROOT
     if m['animation_model'][2][at:at + 2 * len(want) + 2] != want.encode('utf-16le') + b'\0\0':

@@ -108,7 +108,7 @@ def build(root: str) -> dict[str, bytes]:
         out[f'WEAPON/{name}'] = data
     for name, data in vc.portal_lasers(game).items():
         out[f'OBJECT/{name}'] = data
-    out[f'OBJECT/{MODEL_FILE}'] = mdb_jet.jet_archive(game.read('OBJECT', 'BOMBER501.MRAB'))[0]
+    out[f'OBJECT/{MODEL_FILE}'] = jet_models.elevon_archive(game)   # the elevon bomber, grounded
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
     for name, jet in FILES.items():

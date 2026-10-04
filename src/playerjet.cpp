@@ -131,8 +131,8 @@ constexpr float kCeilingGap=12.0f;
 // The world's walls (jet.cpp kWorldWall: the Havok broadphase ends at 3000 m a side): a path out through one is
 // turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
 constexpr float kWorldWall=2400.0f,kWallIn=0.3f,kWallAlong=0.9f;
-// The ground (Clear): the body's origin rests about 1.3 m over the ground (heli_rigid_body: the box from
-// 0.34 - 1.6 m), so under kTouch it is on it; over kOffGround it is in the air.
+// The ground (Clear): the body's origin rests on the ground (the models are grounded and the boxes measured off
+// them, pylib/jet_models.py grounded / vcobjects.on_origin), so under kTouch it is on it; over kOffGround in the air.
 constexpr float kTouch=3.0f,kOffGround=6.0f;
 constexpr float kFloorGap=1.0f,kFloorSweep=3.0f,kUnderClimb=40.0f;
 // Touching down: at most kLandSink m/s down, the wings within kLandBank (cosine of the up row's y), the nose
