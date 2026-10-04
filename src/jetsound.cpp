@@ -11,6 +11,7 @@
 // The stock 506's rotor loop the jets were built on is silenced in their SGOs (tools/make_jets.py).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "layout.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>
@@ -75,6 +76,10 @@ const Sig kSigs[]={
     {0x7AF4E6,{0x49,0x03,0x4E,0x58},4},   // ...and their array: add rcx,[r14+58h]
     {0x705950,{0x48,0x8B,0x0D,0xF1,0xCF,0x9A,0x01},7},   // the frame's update on the SoundSystem: mov rcx,[EDF+0x20B2948]
 };
+
+// The lock-on tick's two plays: lea rcx,[rbx+0CC0h] / lea rcx,[rbx+0D40h] (the presets' places in a weapon).
+const unsigned char kLockSearchSig[]={0x48,0x8D,0x8B,0xC0,0x0C,0x00,0x00};
+const unsigned char kLockDoneSig[]={0x48,0x8D,0x8B,0x40,0x0D,0x00,0x00};
 
 int Fault(const EXCEPTION_POINTERS* e) noexcept {
     const auto r=e->ExceptionRecord;
@@ -191,14 +196,56 @@ void Tick() noexcept {
     for(auto& s:sounds)
         if(s.ref && ms-s.seen>kStaleMs)Silence(s,kStopFrames);   // deleted, wrecked or gone with the mission
 }
+// --- The lock-on beeps ---
+// Every weapon loads two presets at init (0x68A920: 0x68E90B 'ロックオンサーチ' into +0xCC0, 0x68E928 'ロックオン完了'
+// into +0xD40; weapon_Common_lockonSearch / _lockonLocked, heard at full out to 10 km) and its lock-on tick plays them
+// (0x6963A0: 0x69656F / 0x6965D9) unless the weapon's holder (+0x120) runs an AI (+0x1A & 8): a soldier NPC's
+// weapon is quiet, but a vehicle has no such flag, so an NPC-driven vehicle's homing missiles beeped in the player's
+// ears like their own. The plugin gives every weapon of a seat no local player sits in a preset with no cue (bank
+// null at +0x20: 0x7B4510 plays nothing) and a local player's seat its cue back. The cue is the same for every
+// weapon (one SEPRESET entry each): the first one seen is kept to give back.
+constexpr std::size_t kLockPresets[2]={0xCC0,0xD40};
+struct Cue { void* bank; std::uint64_t index; };
+Cue lockCue[2]{};
+bool lockOk=false;
+
+void LockQuiet(unsigned char* v) noexcept {
+    const unsigned count=SeatCount(v);
+    for(unsigned s=0;s<count && s<8;++s) {
+        const auto seat=SeatAt(v,s);
+        const bool quiet=SeatRider(seat)!=Rider::player;
+        const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+        const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+        if(!n || n>8 || !Readable(holders,n*8))continue;
+        for(std::uint64_t i=0;i<n;++i) {
+            if(!Readable(holders[i],kHolderWeapon+8))continue;
+            unsigned char* const w=At<unsigned char*>(holders[i],kHolderWeapon);
+            if(!Readable(w,kLockPresets[1]+kPresetBank+sizeof(Cue)))continue;
+            for(int k=0;k<2;++k) {
+                Cue& c=*reinterpret_cast<Cue*>(w+kLockPresets[k]+kPresetBank);
+                if(c.bank && !lockCue[k].bank)lockCue[k]=c;   // the shared cue, kept to give back
+                if(quiet)c=Cue{};
+                else if(!c.bank && lockCue[k].bank)c=lockCue[k];
+            }
+        }
+    }
+}
 }  // namespace
+
+void LockSound(unsigned char* v) noexcept {
+    if(!lockOk || broken)return;
+    __try { LockQuiet(v); }
+    __except(Fault(GetExceptionInformation())) {}
+}
 
 bool InstallJetSound() noexcept {
     __try {
         bool ok=true;
         for(const auto& g:kSigs)ok=ok && Matches(g.rva,g.bytes,g.size);
         sigOk=ok;
-        Log("HOOK jet sound=%d",sigOk);
+        lockOk=Matches(0x69656F,kLockSearchSig,sizeof(kLockSearchSig)) && Matches(0x6965D9,kLockDoneSig,sizeof(kLockDoneSig)) &&
+               Matches(kPlayPreset,kSigs[1].bytes,kSigs[1].size);
+        Log("HOOK jet sound=%d lock-on beeps (NPC seats quiet)=%d",sigOk,lockOk);
         return sigOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

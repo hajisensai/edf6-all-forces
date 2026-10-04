@@ -387,9 +387,9 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // The per-frame steps, each under its own guard: a fault in one (logged per step at most every kFaultLogMs,
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
-            kStepJetSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepCount };
+            kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
-                                          "jet sound","rescue","hud publish","jet sound tick"};
+                                          "jet sound","lock sound","rescue","hud publish","jet sound tick"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -452,6 +452,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepGround,&GroundStep,v);
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepJetSound,&JetSound,v);
+    Guarded(kStepLockSound,&LockSound,v);
     QueryPerformanceCounter(&t2);
     SlowLog(I,vehicle,t1.QuadPart-t0.QuadPart,t2.QuadPart-t1.QuadPart);
 }

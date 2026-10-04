@@ -111,6 +111,8 @@ void ResetJetSound() noexcept;    // jetsound.cpp
 bool InstallJetSound() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
+// The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
+void LockSound(unsigned char* vehicle) noexcept;
 
 // --- EDF.dll layout ---
 // The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):
