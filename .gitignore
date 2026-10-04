@@ -1,19 +1,14 @@
+# Build output (build.cmd: build/Mods/Plugins holds the plugins and their ini files) and release packages
 build/
-dist/*
-!dist/Mods/
-dist/Mods/*
-!dist/Mods/Plugins/
-dist/Mods/Plugins/*
-!dist/Mods/Plugins/EDF6VehicleCrew.dll
-!dist/Mods/Plugins/EDF6VehicleCrew.ini
-!dist/Mods/Plugins/EDF6AutoTurret.dll
-!dist/Mods/Plugins/EDF6AutoTurret.ini
-*.pyc
+release/
+# The old output directory: the plugins were built into dist/ and tracked there until 0.7.1
+dist/
+# Scratch notes and probes, never tracked (finished notes go to docs/)
+tmp/
 backup/
 probe/
+*.pyc
 __pycache__/
 *.log
-__pycache__/
 testrange/testrange.json
 testrange/runs/
-release/
