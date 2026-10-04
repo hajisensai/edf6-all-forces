@@ -76,7 +76,8 @@ struct Config {
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
-    bool bigWorld=true;             // the physics world +-10000 m instead of +-3000 (bigworld.cpp), from the next mission load
+    bool bigWorld=false;            // the physics world +-10000 m instead of +-3000 (bigworld.cpp), from the next mission load:
+                                    // off, it let parked vehicles fall through the ground (2026-10-04)
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.

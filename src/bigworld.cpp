@@ -6,7 +6,8 @@
 //  - the map's collision pieces (Preload_Fmex, vtable 0x176BF88; slot 0 attaches their havok_Body at +0x1240,
 //    0x17DD40) are logged as they attach: where each is and how many bodies it adds, to find the ground pieces
 //    the next step copies around the map.
-// ini BigWorld (default on). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+// ini BigWorld (default off: with the bounds raised, a parked vehicle (the player jet waiting on the ground)
+// fell through the terrain and was put back by the game again and again, 2026-10-04 test range; under study). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "memory.h"
 #include <cstring>
