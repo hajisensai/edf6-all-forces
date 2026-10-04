@@ -248,8 +248,9 @@ constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f,kThrustDrag=
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
 // The carrier's fuselage leans only this share of the fore-and-aft thrust (the nacelles take it); sideways,
 // which the nacelles cannot vector, it rolls as before. (0.25 until 2026-10-04: it looked to float, the body
-// level whatever it did; now half, and its acceleration eased: see kCarrierLean.)
-constexpr float kCarrierPitchShare=0.5f;
+// level whatever it did; then half, its acceleration eased: see kCarrierLean; still floating, so 0.8, and it
+// banks kCarrierBank times its turn: a heavy craft heels into its orbit instead of sliding round it level.)
+constexpr float kCarrierPitchShare=0.8f,kCarrierBank=2.5f;
 constexpr unsigned kPlacedFlight=1;
 constexpr ULONGLONG kFlightGapMs=20000;
 constexpr unsigned kAddBodySlot=0x179E128,kAddBody=0x232AA0,kBodyObject=0x108260;
@@ -964,10 +965,11 @@ bool Hovers(const Jet& j) noexcept { return j.role==Role::carrier || Trigger(j.r
 // drone's rotors; the carrier's nacelles take the rest, kCarrierPitchShare), and `drag` m/s^2 per m/s of its
 // speed is the thrust that would hold that speed (kThrustDrag; 0: none shown). `respond`: s its velocity takes
 // to close on the one wanted (0: at once, at its thrust), and `jerk` m/s^3 its acceleration changes at most
-// (0: no limit), so a heavy one swings into a move and out of it instead of sliding; `maxLean` rad it tilts.
-struct Lean { float pitchShare,drag,respond,jerk,maxLean; };
-constexpr Lean kRotorLean{1.0f,0.0f,0.0f,0.0f,kHoverLean};
-constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f};
+// (0: no limit), so a heavy one swings into a move and out of it instead of sliding; `maxLean` rad it tilts;
+// `bank` times the sideways thrust it rolls by (1: as the thrust; more: it heels into its turns).
+struct Lean { float pitchShare,drag,respond,jerk,maxLean,bank; };
+constexpr Lean kRotorLean{1.0f,0.0f,0.0f,0.0f,kHoverLean,1.0f};
+constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f,kCarrierBank};
 
 // `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.thrust gets the thrust
 // asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
@@ -1002,9 +1004,11 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
         nose[0]=m[8];nose[1]=0.0f;nose[2]=m[10];
         if(!Normalize(nose)){nose[0]=0;nose[2]=1;}
     }
-    // The lean: the horizontal thrust against gravity (its fore-and-aft part times pitchShare), at most maxLean.
-    const float ahead=(j.thrust[0]*nose[0]+j.thrust[2]*nose[2])*(how.pitchShare-1.0f);
-    const float side[3]={j.thrust[0]+nose[0]*ahead,0.0f,j.thrust[2]+nose[2]*ahead};
+    // The lean: the horizontal thrust against gravity (its fore-and-aft part times pitchShare, the sideways part
+    // times bank), at most maxLean.
+    const float fore=j.thrust[0]*nose[0]+j.thrust[2]*nose[2];
+    const float across[2]={j.thrust[0]-nose[0]*fore,j.thrust[2]-nose[2]*fore};
+    const float side[3]={nose[0]*fore*how.pitchShare+across[0]*how.bank,0.0f,nose[2]*fore*how.pitchShare+across[1]*how.bank};
     float up[3]={side[0],kG,side[2]};
     const float flat=std::sqrt(side[0]*side[0]+side[2]*side[2]);
     if(std::atan2(flat,kG)>how.maxLean) {
