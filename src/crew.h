@@ -170,7 +170,7 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // `escort`: it works round the player (while seen), not round `target`.
 // blastCarrier / dollCarrier: a carrier whose drones blow up next to the enemy (the doll ones carrying a
 // singing, dancing hololive doll); after `carrier`, as they are no role of their own.
-enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier };
+enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship };
 bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort=false) noexcept;
 // A gun drone (the carrier's drone body, EDF6VC_JET_DRONE.SGO) with no carrier: launched as JetLaunch launches

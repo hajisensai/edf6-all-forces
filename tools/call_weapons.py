@@ -1,5 +1,5 @@
-"""Air Raider call weapons for the plugin's jets and helicopters: 19 rows appended to the shared
-weapon table. 17 are clones of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
+"""Air Raider call weapons for the plugin's jets and helicopters: 21 rows appended to the shared
+weapon table. 19 are clones of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
 category 312) with a marker in its SGO's AmmoHitSizeAdjust. The plugin reads the marker (weapon +0x8C4)
 and flies its own planes for the call; the field does nothing for a RadioContact weapon, so without the
 plugin the weapon is simply a working KM6 bomber call.
@@ -8,7 +8,7 @@ category 308): the stock request brings the player jet SGO (tools/make_jets.py E
 must be installed too) with the jet's mark and guns in the request's vehicle setup, empty, for the player
 to fly (src/playerjet.cpp).
 
-  python tools/call_weapons.py build OUTDIR [--game DIR]     write the 19 SGOs + the stacked tables into OUTDIR
+  python tools/call_weapons.py build OUTDIR [--game DIR]     write the 21 SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
   python tools/call_weapons.py uninstall --unequipped [--force] [--game DIR]
   python tools/call_weapons.py check [--game DIR]
@@ -97,6 +97,9 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_DOLL_CARRIER_F', 7116, 'doll_carrier', True, 1, 4100, 2.4),
     # Appended 2026-10-04: the submarine carrier (src/subcarrier.cpp): one, it stays the mission.
     Call('EDF6VC_CALL_SUB', 7117, 'sub', True, 1, 7200, 3.0),
+    # Appended 2026-10-04: the gunship (src/jet.cpp GunshipFire), a bomber401 circling and shelling.
+    Call('EDF6VC_CALL_GUNSHIP', 7118, 'gunship', False, 1, 2600, 1.2),
+    Call('EDF6VC_CALL_GUNSHIP_F', 7119, 'gunship', True, 1, 3000, 1.4),
     # Appended 2026-10-04: the jets the player flies (src/playerjet.cpp), vehicle requests.
     Call('EDF6VC_CALL_PJET_FIGHTER', 7201, 'pjet_fighter', False, 0, 6000, 1.0,
          'EDF6VC_PJET_FIGHTER', 'edf6tr_pjet_fighter_mission'),
@@ -170,6 +173,12 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'CN': ('潛水母艦支援', '呼叫潛水母艦在信號彈前方浮上：艦身可以站人，砲塔機砲和飛彈自動攻擊，飛彈在艦內裝填，隨玩家移動，留到任務結束（同時最多 3 艘）。'),
         'JA': ('潜水母艦支援', '潜水母艦を信号弾の先に浮上させる。甲板に乗れ、砲塔の機関砲とミサイルで自動攻撃する。ミサイルの装填は潜水母艦内でおこなわれる。プレイヤーに随伴し、作戦終了まで留まる（同時に3隻まで）。'),
         'EN': ('Submarine Carrier', 'Surfaces a submarine carrier past the flare: stand on its deck while its turret guns and missiles attack on their own (missiles reload aboard). It follows you for the rest of the mission (three at most).'),
+    },
+    'gunship': {
+        'SC': ('炮舰机', '呼叫炮舰机：在目标点上空大圈盘旋，从机上向附近的地面敌人持续炮击，不俯冲。'),
+        'CN': ('砲艦機', '呼叫砲艦機：在目標點上空大圈盤旋，從機上向附近的地面敵人持續砲擊，不俯衝。'),
+        'JA': ('ガンシップ', 'ガンシップを要請する。上空を大きく旋回しながら、付近の地上の敵へ機上から砲撃を続ける。急降下はしない。'),
+        'EN': ('Fixed-wing Gunship', 'Calls a fixed-wing gunship that circles wide overhead and keeps shelling nearby ground enemies from the air, without diving.'),
     },
     'doll_carrier': {
         'SC': ('人偶无人机母舰', '呼叫人偶无人机母舰：放出挂着会唱歌跳舞的人偶的无人机，慢慢飞到敌人中间吸引火力，然后自爆。'),
