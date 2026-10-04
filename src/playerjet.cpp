@@ -511,6 +511,7 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     PJet* j=Find(v);
     // Only what this frame's (or the last one's) flight step sent: a jet the step no longer runs for (the plugin
     // turned off) is the stock body's again.
+    if(!Cfg().enabled || !Cfg().playerJet)return false;   // handed back to the stock step
     if(!j || !j->active || !j->driven || v[kDead] || j->frame+1<GameFrame())return false;
     const auto body=At<void*>(v,kBody);
     if(!body)return false;
@@ -523,9 +524,10 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
 // ditching, twice its HP in damage every frame): the plugin's crash model has it (Fly).
 bool PlayerJetMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept {
     (void)data;(void)restore;
-    if(msg!=kMsgWater)return false;
+    if(msg!=kMsgWater || !Cfg().enabled || !Cfg().playerJet)return false;
     PJet* j=Find(v);
-    if(j)j->wetFrame=GameFrame();
+    if(!j || !j->driven)return false;   // parked or not flown by the plugin: the stock ditching stands
+    j->wetFrame=GameFrame();
     return true;
 }
 

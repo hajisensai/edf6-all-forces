@@ -158,6 +158,9 @@ using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer;
 struct PlayerFix { float pos[3]; std::int32_t team; ULONGLONG at; };
 extern PlayerFix player;
 void SeePlayer(const float* pos,std::int32_t team) noexcept;
+// A new mission (MissionStart): the last mission's fix and player human are forgotten. GameMs counts the load
+// as one frame, so without this they would pass for fresh at the new mission's start.
+void ResetPlayer() noexcept;
 
 // The core modules' own declarations (crew, heli, ground, hud, mission, loadout, overlay) are in their
 // headers, included at the end of this file.

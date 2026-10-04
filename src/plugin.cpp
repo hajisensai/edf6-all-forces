@@ -300,6 +300,11 @@ void SeePlayer(const float* pos,std::int32_t team) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+void ResetPlayer() noexcept {
+    player=PlayerFix{};
+    playerHuman=nullptr;playerHumanRef=ObjRef{};playerHumanAt=0;
+}
+
 unsigned char* PlayerHuman() noexcept {
     __try {
         if(!playerHuman || GameMs()-playerHumanAt>kPlayerHumanMs)return nullptr;

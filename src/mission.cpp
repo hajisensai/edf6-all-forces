@@ -48,6 +48,7 @@ int Redirect(const unsigned* sites,std::size_t count,unsigned target,void* hook)
 }  // namespace
 
 void MissionStart() noexcept {
+    ResetPlayer();
     ResetCrew();
     ResetHelis();
     ResetGround();

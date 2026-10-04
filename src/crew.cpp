@@ -436,9 +436,9 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
-    if(!Cfg().enabled)return;
     auto v=static_cast<unsigned char*>(vehicle);
-    SeeFrame(v);
+    SeeFrame(v);               // the frame is a clock: it steps with the plugin off too (body506's steps test it)
+    if(!Cfg().enabled)return;
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);
     Guarded(kStepAimLines,&AimLines,v);

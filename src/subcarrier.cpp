@@ -144,7 +144,8 @@ struct Sub {
     ObjRef ref;
     unsigned char* vehicle;
     ULONGLONG bornAt,missileAt,logAt,tickMs;
-    ULONGLONG frame,fireFrame,inputFrame;   // GameFrame of the last tick, fire step, input stage
+    ULONGLONG frame,fireFrame;   // GameFrame of the last tick, fire step
+    ULONGLONG inputAt;           // GameMs of the last input stage
     float dt;                     // the game's step of the last tick (s)
     bool noInputLogged;
     float post[3];
@@ -199,6 +200,9 @@ Node noFollowers{};
 
 bool heavyOk[kHeavyCount]{};
 bool spawnOk=false,gaugeOk=false,gaugeTried=false,damageOk=false;
+bool subOk=false;   // InstallSub ran (the heli profile checked out): carriers are driven at all
+// The input stage missed this long (game clock): the physics step drives the carrier (its seat-0 driver gone).
+constexpr ULONGLONG kNoInputMs=50;
 bool preloaded=false,broken=false;
 
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
@@ -884,7 +888,7 @@ Sub* Adopt(unsigned char* v) noexcept {
         return nullptr;
     }
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=GameMs();s->inputFrame=GameFrame();
+    *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=GameMs();s->inputAt=s->bornAt;
     std::memcpy(s->post,pos,12);
     s->floor=pos[1];
     float surface=0.0f;
@@ -950,7 +954,7 @@ void Tick(Sub& s,unsigned char* v,ULONGLONG ms) noexcept {
 // The 506 physics step (body506.cpp), after the stock one: the carrier driven here while its input stage is missing,
 // its velocity and spin. A carrier without an entry (kMaxSubs out) is held still: never the stock heli's flight.
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
-    if(!Cfg().enabled)return false;       // the plugin off (Enabled=0): as the jets, nothing of it runs
+    if(!subOk || !Cfg().enabled)return false;   // the plugin off (Enabled=0) or the carriers not installed
     if(v[kDead]){Sweep();return false;}   // the wreck falls as the stock 506's does
     Sub* s=Entry(v);
     if(!s) {
@@ -960,7 +964,7 @@ bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     // No input stage last frame or this one (its seat-0 driver gone): the frame and the fire step are this one's.
     // Only then: the input stage is where they ran from the start (map rays, new objects), the physics step only
     // sets the body's velocity.
-    if(s->inputFrame+1<GameFrame()) {
+    if(GameMs()-s->inputAt>kNoInputMs) {
         if(!s->noInputLogged)Log("SUB v=%p: no input stage (its seat-0 driver gone?): driven from its physics step",v);
         s->noInputLogged=true;
         const ULONGLONG ms=GameMs();
@@ -1125,7 +1129,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
             return nullptr;
         }
-        *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=ms;s->launched=true;s->inputFrame=GameFrame();
+        *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=ms;s->launched=true;s->inputAt=ms;
         s->sea=sea==Sea::water;s->floor=s->sea ? surface-kDraft : -INFINITY;
         std::memcpy(s->post,start,12);
         Thicken(v);
@@ -1138,12 +1142,12 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
 // The input stage (HeliFrame, after the stock input, while the NPC driver is aboard): the frame, if the physics step
 // has not done it, and the fire bytes.
 void SubFrame(unsigned char* v) noexcept {
-    if(!Body506Ok())return;
+    if(!subOk || !Body506Ok())return;
     Sub* s=Entry(v);
     if(!s)return;
     const ULONGLONG ms=GameMs();
     if(s->noInputLogged){Log("SUB v=%p: its input stage is back",v);s->noInputLogged=false;}
-    s->inputFrame=GameFrame();
+    s->inputAt=ms;
     Tick(*s,v,ms);
     FireStep(*s,v,reinterpret_cast<const float*>(v+kMatrix),ms);
 }
@@ -1177,6 +1181,7 @@ bool InstallSub() noexcept {
             if(!heavyOk[k])Log("SUB heavy source %s: no such vtable at EDF+%X",kHeavy[k].rtti,kHeavy[k].vtable);
         }
         Log("HOOK sub spawn=%d gauge=%d damage=%d heavy=%d/%d",spawnOk,gaugeOk,damageOk,heavy,kHeavyCount);
+        subOk=true;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
