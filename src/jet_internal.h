@@ -176,15 +176,17 @@ struct Kind {
 constexpr float kBlastTrigger=8.0f,kDollTrigger=6.0f;
 inline constexpr Kind kKinds[kRoleCount]={
     // 2026-10-04: faster (750-900 km/h at the attack; own motion properties lift the 200 m/s cap), higher, about 5 g at most.
+    // 2026-10-05: strafing runs open fire from 1000 m (the guns' reach caps it) and pull out lower (80-100 m over the
+    // target): about 4 s of fire a pass, as a real gun run, not 2.
     {Role::strike,"strike",Prefer::ground,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 190.0f,215.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f,
-     450.0f, 1500.0f,130.0f,2200.0f, 700.0f,120.0f, 1000.0f,120.0f, 120.0f,30.0f, 1200.0f, 800.0f,1.0f, 0.0f,false,Body::strike},
+     450.0f, 1500.0f,80.0f,2200.0f, 1000.0f,120.0f, 1000.0f,120.0f, 120.0f,30.0f, 1200.0f, 800.0f,1.0f, 0.0f,false,Body::strike},
     {Role::fighter,"fighter",Prefer::air,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 210.0f,235.0f,110.0f, 15.0f,20.0f, 5.0f,2.4f,
-     550.0f, 1700.0f,150.0f,2500.0f, 700.0f,120.0f, 1400.0f,150.0f, 160.0f,40.0f, 1800.0f, 1100.0f,1.0f, 0.0f,false,Body::fighter},
+     550.0f, 1700.0f,90.0f,2500.0f, 1000.0f,120.0f, 1400.0f,150.0f, 160.0f,40.0f, 1800.0f, 1100.0f,1.0f, 0.0f,false,Body::fighter},
     {Role::interceptor,"interceptor",Prefer::air,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 220.0f,245.0f,120.0f, 25.0f,20.0f,
-     5.0f,2.0f, 600.0f, 1900.0f,160.0f,2800.0f, 650.0f,130.0f, 1500.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f, 0.0f,false,
+     5.0f,2.0f, 600.0f, 1900.0f,100.0f,2800.0f, 1000.0f,130.0f, 1500.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f, 0.0f,false,
      Body::interceptor},
     {Role::multirole,"multirole",Prefer::any,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 200.0f,225.0f,100.0f, 12.0f,18.0f,
-     5.0f,2.0f, 500.0f, 1600.0f,140.0f,2300.0f, 700.0f,120.0f, 1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f, 0.0f,false,
+     5.0f,2.0f, 500.0f, 1600.0f,90.0f,2300.0f, 1000.0f,120.0f, 1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f, 0.0f,false,
      Body::multirole},
     // Over its anchor, its drones do the reaching (2026-10-03: 1300 m out).
     {Role::carrier,"carrier",Prefer::any,FlightModel::rotor,Weapon::drones,Pose::thrusters,&kCarrierLean, 60.0f,60.0f,40.0f, 4.0f,4.0f,

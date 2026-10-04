@@ -24,7 +24,10 @@ constexpr std::uint64_t kGunWeapons=2;
 // Strike: approach at alt; from diveStart out with the target within kDiveCone of the nose, dive onto the
 // gun's lead point (alt over diveStart: ~15-20 deg), guns from gunOpen in to gunClose; pull out under
 // pullAlt over the target or gunClose from it, climb back, fly on extendOut and turn in.
-constexpr float kDiveCone=0.52f;
+// kDiveCone: the heading off the target it may roll in with (11 deg). At 30 deg (until 2026-10-05) jets of a flight
+// arriving together rolled in from 350-550 m with the nose 15-30 deg off and pulled out before it came on: only the
+// one lined up from 700 m fired. Not lined up, it turns on toward the target, or flies out and comes round.
+constexpr float kDiveCone=0.19f;
 constexpr float kGunCone=0.035f,kHitRadius=4.0f;   // rad (2 deg), or what puts kHitRadius on the target
 // The guns fire only flying where the nose points (cos 10 deg off): never flank first. And never with the
 // player along the rounds' path, or a wingman when its rounds cannot pass through (FriendInLine); other
