@@ -69,7 +69,10 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check pyinstaller
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          $opts = if ($env:GITHUB_REF_TYPE -eq 'tag') { @('--expect', $env:GITHUB_REF_NAME) } else { @("--suffix=-build.$($env:GITHUB_SHA.Substring(0,7))") }
+          # Assigned inside the branches: an `if` expression unrolls a one-element array into a string, which
+          # @opts would then splat one character per argument.
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $opts = @('--expect', $env:GITHUB_REF_NAME) }
+          else { $opts = @("--suffix=-build.$($env:GITHUB_SHA.Substring(0,7))") }
           $out = python tools/build_release.py @opts
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $zip = ($out | Select-Object -Last 1).Trim()
