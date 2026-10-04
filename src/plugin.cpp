@@ -218,17 +218,26 @@ void LoadConfig() noexcept {
 
 }  // namespace
 
-// The log: one handle kept open, appended to (each line one WriteFile: whole lines, and in the file even if
-// the game dies next). Opening and closing the file per line, on the game thread, with the virus scanner
-// looking at each close, was the hitch when a mission starts and logs hundreds of lines. Debug=1 writes the
-// flight data every second, so past kLogMax the file is renamed to .log.1 (the one before replaced) and a new
-// one begun. The handle, its size and the rename are under one lock (lines come from the game thread, the
-// call picker and the draw thread). No FILE_SHARE_DELETE: a log deleted while the game runs would take the
-// rest unseen.
+// The log: lines are copied into a memory buffer on the caller's thread (the game thread, the call picker, the draw
+// thread: one memcpy under a lock) and a writer thread of its own writes the buffer to one handle kept open every
+// kFlushMs. A WriteFile per line on the game thread was the hitch under a burst of lines (an air strike's jets,
+// each logging what it saw: 15000 lines a second, 2026-10-04); opening and closing the file per line before that,
+// with the virus scanner looking at each close, was the hitch when a mission started. A crash takes at most the
+// last kFlushMs of lines. Two buffers of kLogBuffer: the writer takes the full one and the lines go on into the
+// other; a line that does not fit is dropped and counted (said with the next write), never waited for. Debug=1
+// writes the flight data every second, so past kLogMax the file is renamed to .log.1 (the one before replaced) and
+// a new one begun, by the writer. No FILE_SHARE_DELETE: a log deleted while the game runs would take the rest unseen.
 namespace {
 constexpr LONGLONG kLogMax=32ll<<20;
-SRWLOCK logLock=SRWLOCK_INIT;
-HANDLE logFile=nullptr;
+constexpr std::size_t kLogBuffer=1u<<20;
+constexpr DWORD kFlushMs=50;
+SRWLOCK logLock=SRWLOCK_INIT;        // the buffers
+char logBuffer[2][kLogBuffer];
+std::size_t logUsed=0;               // in logBuffer[logActive]
+int logActive=0;
+unsigned logDropped=0;
+INIT_ONCE logWriterOnce=INIT_ONCE_STATIC_INIT;
+HANDLE logFile=nullptr;              // the writer's alone
 LONGLONG logSize=0;
 
 HANDLE OpenLog() noexcept {
@@ -239,8 +248,13 @@ HANDLE OpenLog() noexcept {
     return h;
 }
 
-// Under logLock: the log renamed to .log.1 and a new one opened. A rename that fails (another program holds
-// .log.1, or the log without sharing delete) is said in the log, which then grows another kLogMax first.
+void WriteLog(const char* text,std::size_t n) noexcept {
+    DWORD wrote=0;
+    if(logFile && n && WriteFile(logFile,text,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+}
+
+// The log renamed to .log.1 and a new one opened. A rename that fails (another program holds .log.1, or the log
+// without sharing delete) is said in the log, which then grows another kLogMax first.
 void RotateLog() noexcept {
     CloseHandle(logFile);
     const BOOL moved=MoveFileExW(logPath,logOldPath,MOVEFILE_REPLACE_EXISTING);
@@ -251,8 +265,36 @@ void RotateLog() noexcept {
     const int n=moved ? _snprintf_s(line,sizeof(line),_TRUNCATE,"(log continued: the previous %lld MB are in .log.1)\r\n",kLogMax>>20)
                       : _snprintf_s(line,sizeof(line),_TRUNCATE,"(log rotation failed, error %lu: this file grows on)\r\n",error);
     if(!moved)logSize=0;   // the next try another kLogMax on, not on every line
-    DWORD wrote=0;
-    if(n>0 && WriteFile(logFile,line,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+    if(n>0)WriteLog(line,static_cast<std::size_t>(n));
+}
+
+DWORD WINAPI LogWriter(void*) {
+    for(;;) {
+        Sleep(kFlushMs);
+        AcquireSRWLockExclusive(&logLock);
+        const int full=logActive;
+        const std::size_t n=logUsed;
+        const unsigned dropped=logDropped;
+        logActive^=1;logUsed=0;logDropped=0;
+        ReleaseSRWLockExclusive(&logLock);
+        if(!n && !dropped)continue;
+        if(!logFile)logFile=OpenLog();
+        if(!logFile)continue;
+        if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
+        WriteLog(logBuffer[full],n);
+        if(dropped) {
+            char line[120];
+            const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
+                                    kLogBuffer>>10,kFlushMs);
+            if(k>0)WriteLog(line,static_cast<std::size_t>(k));
+        }
+    }
+}
+
+BOOL CALLBACK StartLogWriter(PINIT_ONCE,void*,void**) {
+    const HANDLE t=CreateThread(nullptr,0,&LogWriter,nullptr,0,nullptr);
+    if(t)CloseHandle(t);
+    return TRUE;
 }
 }  // namespace
 
@@ -263,11 +305,12 @@ void Log(const char* format,...) noexcept {
     char line[1100];
     const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
     if(n<=0)return;
+    InitOnceExecuteOnce(&logWriterOnce,&StartLogWriter,nullptr,nullptr);
     AcquireSRWLockExclusive(&logLock);
-    if(!logFile)logFile=OpenLog();
-    if(logFile && logSize+n>kLogMax)RotateLog();
-    DWORD wrote=0;
-    if(logFile && WriteFile(logFile,line,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+    if(logUsed+static_cast<std::size_t>(n)<=kLogBuffer) {
+        std::memcpy(logBuffer[logActive]+logUsed,line,static_cast<std::size_t>(n));
+        logUsed+=static_cast<std::size_t>(n);
+    } else ++logDropped;
     ReleaseSRWLockExclusive(&logLock);
 }
 
