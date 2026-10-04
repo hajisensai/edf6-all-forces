@@ -12,7 +12,10 @@
 //    engine pulls against a drag that grows with speed and with the g it pulls (climbs and hard turns cost
 //    speed, dives gain it); Ace Combat's controls: the right stick / mouse turns (it banks into the turn and
 //    pulls to hold its height) and pitches, the left stick's sideways rolls it about its nose, let go it levels
-//    and its flight control holds a little under 1 g (it settles into a shallow sink); touching down gently
+//    and its flight control holds a little under 1 g (it settles into a shallow sink). On the keyboard and mouse
+//    (the seat's pad flag off) the mouse moves an aim in the world (heading and elevation: AimSteer) the plane
+//    banks and pulls toward, W / ascend pull up, S pushes down, A / D roll (held, they fly it by hand and the
+//    aim follows the nose), the boost and brake keys (ini) work the throttle; touching down gently
 //    it lands and rolls out, hitting the ground (or a building, or anything else in its way) hard it is damaged,
 //    destroyed at 0 HP; what it rams takes damage too (ImpactDamage);
 //  - physics (506 slot 57, body506.cpp -> PlayerJetBodyStep): its linear and angular velocity, as jet.cpp writes
@@ -41,6 +44,7 @@ constexpr unsigned char kObjDeleted=4;
 // The seat's stick block (docs/heli-input-re.md §4): left stick, right stick, the ascend trigger (the heli's
 // collective: analog 0..1 on a pad, 0 or 1 on the keyboard).
 constexpr std::size_t kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;
+constexpr std::size_t kSeatPad=0x2B0;   // 1: the rider plays on a pad, 0: the keyboard and mouse (heli-input-re.md §4)
 constexpr std::size_t kAreaInset=0xE00;   // jet.cpp kAreaInset: the move-area clamp's inset
 constexpr float kNoInset=-1.0e6f;
 constexpr float kG=9.8f;
@@ -96,7 +100,14 @@ constexpr float kPush=0.5f;            // the stick forward: down to kPush of th
 // Drag (Air): parasitic, Kind::thrust * (speed / top)^2 (full throttle levels off at top); induced, kInduced per g^2
 // pulled at the corner speed, more as the square of corner / speed (a 6 g turn at the corner: 11 m/s^2).
 constexpr float kInduced=0.3f;
-constexpr float kStallWarn=1.05f;      // the readout's STALL: the most lift under this many times what holds the path
+constexpr float kStallWarn=1.05f;
+// The mouse's aim (AimSteer): its heading turns kAimPerUnit rad per unit of a frame's mouse X (the seat's right stick
+// on the keyboard: the frame's movement, at most 1), times ini PlayerJetMouseSpeed, its elevation likewise, within
+// kAimMaxEl of level. The plane turns its path toward it at kSteer times the angle off (rad/s), the lift for that
+// and for holding the path up (Hold) along its up, banked toward it at kRollRate; under kAimBankMin g of lift it
+// keeps its bank.
+constexpr float kAimPerUnit=0.05f,kAimMaxEl=1.3f,kSteer=1.6f,kAimBankMin=0.3f;
+constexpr float kAimMark=800.0f;       // m: the readout's aim and path points ahead of the plane      // the readout's STALL: the most lift under this many times what holds the path
 // Angle of attack (jet.cpp kAoaPerG): the nose rides this far above the path per g pulled at the middle of
 // the speed range, more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax, eased over kAoaTau s. Only
 // pitch, along the body's up: the nose never slips sideways off the path.
@@ -151,6 +162,9 @@ struct PJet {
     float throttleIn;            // the stick's throttle command last frame (-1, 0, +1): a change is logged
     float clear,climb;           // its height over the floor and climb last frame (the cockpit readout)
     float load;                  // the g it pulled last frame (the cockpit readout)
+    float aim[3];                // the mouse's aim, a world direction (AimSteer); hasAim: set
+    bool hasAim;
+    bool keys;                   // flown on the keyboard and mouse last frame
     bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
     float vel[3],omega[3];
     float prev[3];               // its position last frame
@@ -258,14 +272,38 @@ void Elevons(PJet& j,unsigned char* v,float dt) noexcept {
 // > 0: nose up (stick back / mouse up: the right stick's Y is negative pushed up, as LY is for forward);
 // throttle: +1 forward stick or ascend, -1 back stick. turn: either stick sideways (the ground's nose wheel); in the
 // air yaw (the right stick: turn) and roll (the left stick's sideways: roll > 0 rolls right) are apart.
-struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; };
+// keys (the keyboard and mouse): pitch from W / ascend (+1) and S (-1), throttle from the ini's boost and brake keys,
+// no yaw: the mouse (aimX, aimY: the frame's movement, no dead zone; aimY > 0 up) moves the aim instead.
+struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; };
+
+// Whether the virtual key `vk` is down while the game has the foreground (0: never).
+bool KeyDown(int vk) noexcept {
+    if(vk<=0)return false;
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+}
+float Raw(const unsigned char* seat,std::size_t at) noexcept {
+    const float x=At<float>(seat,at);
+    return std::isfinite(x) ? Clamp(x,-1.0f,1.0f) : 0.0f;
+}
+
 Stick ReadStick(const unsigned char* seat) noexcept {
     Stick s{};
     s.lx=Axis(seat,kSeatLX);s.ly=Axis(seat,kSeatLY);s.rx=Axis(seat,kSeatRX);s.ry=Axis(seat,kSeatRY);
     const float a=At<float>(seat,kSeatAscend);
     s.ascend=std::isfinite(a) ? Clamp(a,0.0f,1.0f) : 0.0f;
     s.turn=Clamp(s.rx+s.lx,-1.0f,1.0f);
-    s.yaw=s.rx;s.roll=s.lx;
+    s.roll=s.lx;
+    s.keys=At<unsigned char>(seat,kSeatPad)==0;
+    if(s.keys) {
+        s.aimX=Raw(seat,kSeatRX);
+        s.aimY=Cfg().playerJetInvertPitch ? Raw(seat,kSeatRY) : -Raw(seat,kSeatRY);
+        s.pitch=(s.ascend>0.5f || s.ly<-0.3f ? 1.0f : 0.0f)-(s.ly>0.3f ? 1.0f : 0.0f);
+        s.throttle=(KeyDown(Cfg().playerJetBoostKey) ? 1.0f : 0.0f)-(KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f);
+        return s;
+    }
+    s.yaw=s.rx;
     s.pitch=Cfg().playerJetInvertPitch ? s.ry : -s.ry;
     s.throttle=s.ascend>0.5f || s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f;
     return s;
@@ -382,12 +420,12 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     const float up[3]={0.0f,1.0f,0.0f};
     BodyAttitude(v,turned,up,kAttGain,k.roll,j.omega);
     if(speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
-        j.phase=Phase::air;j.vel[1]=kLiftOffClimb;
+        j.phase=Phase::air;j.vel[1]=kLiftOffClimb;j.hasAim=false;
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
         return;
     }
     if(clear!=kNoGround && clear>kOffGround) {   // rolled off an edge: flying (or falling to minAir)
-        j.phase=Phase::air;
+        j.phase=Phase::air;j.hasAim=false;
         Log("PJET v=%p off the ground at %.0f m/s (%.0f m over it)",v,speed,clear);
         return;
     }
@@ -425,24 +463,67 @@ bool Across(float* u,const float* dir) noexcept {
 
 // The plane's up for this step (see kRollRate): the roll stick turns it about the path, let go it returns toward the
 // bank the turn stick asks for. `level`: the world's up off the path (valid unless `vertical`).
-void Roll(PJet& j,const unsigned char* v,const Stick& s,const float* dir,const float* level,bool vertical,float dt) noexcept {
-    if(!j.hasUp || !Across(j.up,dir)) {   // newly in the air: the body's own up
-        const float* m=reinterpret_cast<const float*>(v+kMatrix);
-        j.up[0]=m[4];j.up[1]=m[5];j.up[2]=m[6];
-        if(!Across(j.up,dir))std::memcpy(j.up,vertical ? m+8 : level,12);
-        if(!Across(j.up,dir)){j.up[0]=0.0f;j.up[1]=1.0f;j.up[2]=0.0f;Across(j.up,dir);}
-    }
+// The plane's up across `dir`: newly in the air, the body's own up.
+void EnsureUp(PJet& j,const unsigned char* v,const float* dir,const float* level,bool vertical) noexcept {
+    if(j.hasUp && Across(j.up,dir))return;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    j.up[0]=m[4];j.up[1]=m[5];j.up[2]=m[6];
+    if(!Across(j.up,dir))std::memcpy(j.up,vertical ? m+8 : level,12);
+    if(!Across(j.up,dir)){j.up[0]=0.0f;j.up[1]=1.0f;j.up[2]=0.0f;Across(j.up,dir);}
     j.hasUp=true;
+}
+
+// `up` (across `dir`) turned about `dir` toward `want` (across it too), at most `most` rad.
+void BankToward(float* up,const float* dir,const float* want,float most) noexcept {
+    float c[3];Cross(up,want,c);
+    Turn(up,dir,Clamp(std::atan2(Dot(c,dir),Dot(up,want)),-most,most));
+    Across(up,dir);
+}
+
+void Roll(PJet& j,const unsigned char* v,const Stick& s,const float* dir,const float* level,bool vertical,float dt) noexcept {
+    EnsureUp(j,v,dir,level,vertical);
     if(std::fabs(s.roll)>kRollDead) {
         Turn(j.up,dir,s.roll*kRollRate*dt);   // dir x up is the right: a right roll tips the up toward it
     } else if(!vertical && std::fabs(s.pitch)<kLevelPull) {   // pulling through the top: a loop, not a half roll
         float want[3];std::memcpy(want,level,12);
         Turn(want,dir,Clamp(s.yaw,-1.0f,1.0f)*kTurnBank);
-        float c[3];Cross(j.up,want,c);
-        const float off=std::atan2(Dot(c,dir),Dot(j.up,want)),most=kLevelRate*dt;
-        Turn(j.up,dir,Clamp(off,-most,most));
+        BankToward(j.up,dir,want,kLevelRate*dt);
     }
     Across(j.up,dir);
+}
+
+// The mouse's aim moved by this frame's mouse (see kAimPerUnit): its heading about the world's up, its elevation.
+void MoveAim(PJet& j,const Stick& s) noexcept {
+    float flat[3]={j.aim[0],0.0f,j.aim[2]};
+    if(!Normalize(flat)){flat[0]=0.0f;flat[2]=1.0f;}
+    const float k=kAimPerUnit*Cfg().playerJetMouseSpeed;
+    float right[3];RightOf(flat,right);
+    const float a=s.aimX*k,co=std::cos(a),si=std::sin(a);
+    for(int i=0;i<3;++i)flat[i]=flat[i]*co+right[i]*si;
+    const float el=Clamp(std::asin(Clamp(j.aim[1],-1.0f,1.0f))+s.aimY*k,-kAimMaxEl,kAimMaxEl);
+    j.aim[0]=flat[0]*std::cos(el);j.aim[1]=std::sin(el);j.aim[2]=flat[2]*std::cos(el);
+}
+
+// The lift (along the plane's up, as Air's pitch) that turns its path toward the mouse's aim (kSteer) and holds it
+// up (`hold`, Hold's: the same slight sag as the stick let go); the plane banked toward where that lift points. Too
+// slow for it, the wing gives what it can (a turn too tight for it is wider, a climb too steep sinks).
+float AimSteer(PJet& j,const unsigned char* v,const Stick& s,const float* dir,const float* level,bool vertical,float speed,
+               float most,float hold,const float* gPerp,float dt) noexcept {
+    EnsureUp(j,v,dir,level,vertical);
+    if(!j.hasAim){std::memcpy(j.aim,dir,12);j.hasAim=true;}
+    MoveAim(j,s);
+    const float c=Clamp(Dot(j.aim,dir),-1.0f,1.0f);
+    float toward[3]={j.aim[0]-dir[0]*c,j.aim[1]-dir[1]*c,j.aim[2]-dir[2]*c};
+    if(!Normalize(toward)) {   // dead ahead: no turn; dead behind: round to the right
+        if(c>0.0f)toward[0]=toward[1]=toward[2]=0.0f;
+        else RightOf(dir,toward);
+    }
+    const float turn=kSteer*std::acos(c)*speed,across=Len(gPerp);
+    float lift[3];
+    for(int i=0;i<3;++i)lift[i]=toward[i]*turn-(across>1e-4f ? gPerp[i]/across*hold : 0.0f);
+    float want[3];std::memcpy(want,lift,12);
+    if(Len(lift)>kAimBankMin*kG && Across(want,dir))BankToward(j.up,dir,want,kRollRate*dt);
+    return Clamp(Dot(lift,j.up),-kPush*most,most);
 }
 
 // The lift (m/s^2, along the plane's up) its flight control asks for with the pitch stick let go (see kHold):
@@ -471,14 +552,17 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     float up[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};   // world up off the path
     const bool vertical=!Normalize(up) || std::fabs(dir[1])>kVertical;
     if(vertical){up[0]=0;up[1]=1;up[2]=0;}
-    Roll(j,v,s,dir,up,vertical,dt);
+    // The mouse's aim steers unless W / S / A / D fly it by hand (the aim then follows the nose).
+    const bool aiming=s.keys && std::fabs(s.pitch)<kRollDead && std::fabs(s.roll)<kRollDead;
+    if(!aiming)Roll(j,v,s,dir,up,vertical,dt);
     const float wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
     const float most=k.maxG*kG*wing;   // all the wing gives at this speed
     const float gPerp[3]={dir[0]*kG*dir[1],-kG+dir[1]*kG*dir[1],dir[2]*kG*dir[1]};   // gravity across the path
     const float across=Len(gPerp);   // g * cos(climb)
     const float want=k.minAir+j.throttle*(k.top-k.minAir);
     const float hold=Clamp(Hold(j,s,up,vertical,across,-dir[1]*speed),0.0f,most);
-    const float pitch=s.pitch>=0.0f ? hold+s.pitch*(most-hold) : hold+s.pitch*(hold+kPush*most);
+    const float pitch=aiming ? AimSteer(j,v,s,dir,up,vertical,speed,most,hold,gPerp,dt)
+                             : s.pitch>=0.0f ? hold+s.pitch*(most-hold) : hold+s.pitch*(hold+kPush*most);
     float lift[3];
     for(int i=0;i<3;++i)lift[i]=j.up[i]*pitch;
     j.stall=most<kStallWarn*across;
@@ -487,6 +571,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     if(!Normalize(next))std::memcpy(next,dir,12);
     WallTurn(pos,next);
     Across(j.up,next);   // carried along the new path
+    if(!aiming){std::memcpy(j.aim,next,12);j.hasAim=s.keys;}
     float bodyUp[3];std::memcpy(bodyUp,j.up,12);
     const float g=pitch/kG,top2=k.top*k.top;
     j.load=g;
@@ -554,7 +639,7 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     const float speed=Len(j.measured);
     const bool air=clear==kNoGround || clear>kOffGround;
     j.phase=air ? Phase::air : speed>kParkSpeed ? Phase::rolling : Phase::parked;
-    j.hasUp=false;
+    j.hasUp=false;j.hasAim=false;
     std::memcpy(j.vel,j.measured,12);
     j.throttle=air ? 0.5f : 0.0f;
     Log("PJET v=%p boarded: %s, hp %.0f/%.0f, %s at (%.0f,%.0f,%.0f), %.0f m over the ground, %.0f m/s",v,j.kind->name,
@@ -562,7 +647,7 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
 }
 
 void Leave(PJet& j,unsigned char* v) noexcept {
-    j.driven=false;j.active=false;j.turnIn=j.pitchIn=j.yawIn=j.rollIn=0.0f;j.hasUp=false;
+    j.driven=false;j.active=false;j.turnIn=j.pitchIn=j.yawIn=j.rollIn=0.0f;j.hasUp=false;j.hasAim=false;
     if(j.insetSaved){Put<float>(v,kAreaInset,j.savedInset);j.insetSaved=false;}
     Log("PJET v=%p left (%s, %.0f m/s)",v,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel));
 }
@@ -603,6 +688,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     if(!j.driven)Board(j,v,pos,clear);
     Stick s=ReadStick(SeatAt(v,0));
     SmoothStick(j,s,dt);
+    j.keys=s.keys;
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
@@ -658,9 +744,16 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
         const unsigned char* v=j.vehicle;
         __try {
             if(!j.ref.Is(v) || v[kDead])continue;
-            const bool air=j.phase==Phase::air;
-            *out=PlayerJetReadout{Len(j.vel),j.throttle,j.clear,j.climb,At<float>(v,kHp),At<float>(v,kHpMax),air ? j.load : 1.0f,air,
-                                  air && j.stall};
+            const bool air=j.phase==Phase::air,ground=j.clear!=kNoGround;
+            const float* pos=reinterpret_cast<const float*>(v+kPosition);
+            PlayerJetReadout r{};
+            r.speed=Len(j.vel);r.throttle=j.throttle;r.clear=ground ? j.clear : pos[1];r.climb=j.climb;
+            r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim;
+            float path[3]={j.vel[0],j.vel[1],j.vel[2]};
+            if(!Normalize(path))std::memcpy(path,j.aim,12);
+            for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
+            *out=r;
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}
     }

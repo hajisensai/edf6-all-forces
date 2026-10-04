@@ -68,6 +68,9 @@ struct Config {
     float vehicleHudRange=500.0f;// ...within this many metres of the player
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
+    int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
+    int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
+    float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
@@ -282,8 +285,14 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 bool IsPlayerJet(const void* vehicle) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
-// The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path.
-struct PlayerJetReadout { float speed,throttle,clear,climb,hp,hpMax,load; bool air,stall; };
+// The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path; clear: its
+// height over the ground, or (ground: false, none under it) over the world's zero; keys: flown with the keyboard and
+// mouse; aiming: in the air the mouse's aim steers it, `aim` the point it aims at, `path` the point it flies at.
+struct PlayerJetReadout {
+    float speed,throttle,clear,climb,hp,hpMax,load;
+    bool air,stall,ground,keys,aiming;
+    float aim[3],path[3];
+};
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
