@@ -1,6 +1,8 @@
-#include "memory.h"
+// Memory primitives shared by EDF6VehicleCrew and EDF6AutoTurret: one copy (the two plugins had drifted
+// apart: only one had the region cache and the E9 tail-jump redirect).
+#include "edf/memory.h"
 #include <cstring>
-namespace crew {
+namespace edf {
 // The plugin asks this many times per object per frame. A VirtualQuery each was a system call each, ~15% of
 // the game thread with 30-odd jets out (2026-10-04 sampling). So each thread keeps the regions it queried
 // (a heap region is megabytes: nearly every pointer falls in one already seen) and forgets them when the
@@ -101,4 +103,4 @@ bool RedirectCall(unsigned char* callSite,void* expectedTarget,void* replacement
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
-}
+}  // namespace edf
