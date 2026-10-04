@@ -33,6 +33,11 @@ PREFIX = 'EDF6VC_SUB'
 # Hull box (half extents) the plugin's SubFrame and the SGO agree on: its bottom is kHullBottom metres under
 # the body origin (src/subcarrier.cpp; negative: the box is the slab under the deck, over the origin).
 HULL_BOTTOM = -163.08
+# The seat weapons as src/subcarrier.cpp kSystems takes them: each part's weapon is the one whose barrel is at the
+# part's bone, and it must be the holder the 506's fire bytes fire for it (0x2020 holders 0 and 1, 0x2021 holder 2)
+# and homing or not as the part fires it. The plugin checks the same at run time and turns a part off that does not
+# match; this keeps the SGO from being written that way.
+PLUGIN_WEAPONS = (('gunA_tilt_l', False), ('gunB_tilt_l', False), ('missle_l', True))
 
 
 def check_sgo(data: bytes) -> None:
@@ -51,6 +56,9 @@ def check_sgo(data: bytes) -> None:
     assert bones == list(jet.weapon_bones) + ['body'], bones
     assert len(jet.weapon_bones) == len(jet.weapons)
     assert [w[0] for w in v['mission_setup'][3]][:3] == list(jet.weapons)
+    assert tuple(jet.weapon_bones) == tuple(b for b, _ in PLUGIN_WEAPONS), (jet.weapon_bones, PLUGIN_WEAPONS)
+    homing = tuple(w == gen._MISSILE for w in jet.weapons)
+    assert homing == tuple(h for _, h in PLUGIN_WEAPONS), ('holder order', jet.weapons)
 
 
 def check_model(arc: bytes) -> None:
