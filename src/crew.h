@@ -157,6 +157,8 @@ ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused 
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 void HeliReap(const void* self) noexcept;          // ...and called helis that have left (heli.cpp)
 bool InstallJets() noexcept;
+bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
+bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
 // be made (not preloaded this mission, profile mismatch): the caller keeps the stock behaviour then.

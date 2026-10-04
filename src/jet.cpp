@@ -93,14 +93,14 @@ struct Kind {
     int body;                       // its own body (kJetSgo)
 };
 constexpr Kind kKinds[kRoleCount]={
-    // 2026-10-04: faster (600-700 km/h; kBodyTop caps them at ~700), higher, about 5 g at most.
-    {"strike",7001.0f,Prefer::ground,true, 170.0f,190.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 450.0f, 1500.0f,130.0f,2200.0f, 700.0f,120.0f,
+    // 2026-10-04: faster (750-900 km/h at the attack; own motion properties lift the 200 m/s cap), higher, about 5 g at most.
+    {"strike",7001.0f,Prefer::ground,true, 190.0f,215.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 450.0f, 1500.0f,130.0f,2200.0f, 700.0f,120.0f,
      1000.0f,120.0f, 120.0f,30.0f, 1200.0f, 800.0f,1.0f,0},
-    {"fighter",7002.0f,Prefer::air,true, 185.0f,195.0f,110.0f, 15.0f,20.0f, 5.0f,2.4f, 550.0f, 1700.0f,150.0f,2500.0f, 700.0f,120.0f,
+    {"fighter",7002.0f,Prefer::air,true, 210.0f,235.0f,110.0f, 15.0f,20.0f, 5.0f,2.4f, 550.0f, 1700.0f,150.0f,2500.0f, 700.0f,120.0f,
      1400.0f,150.0f, 160.0f,40.0f, 1800.0f, 1100.0f,1.0f,1},
-    {"interceptor",7003.0f,Prefer::air,true, 192.0f,195.0f,120.0f, 25.0f,20.0f, 5.0f,2.0f, 600.0f, 1900.0f,160.0f,2800.0f, 650.0f,130.0f,
+    {"interceptor",7003.0f,Prefer::air,true, 220.0f,245.0f,120.0f, 25.0f,20.0f, 5.0f,2.0f, 600.0f, 1900.0f,160.0f,2800.0f, 650.0f,130.0f,
      1500.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f,4},
-    {"multirole",7004.0f,Prefer::any,true, 180.0f,192.0f,100.0f, 12.0f,18.0f, 5.0f,2.0f, 500.0f, 1600.0f,140.0f,2300.0f, 700.0f,120.0f,
+    {"multirole",7004.0f,Prefer::any,true, 200.0f,225.0f,100.0f, 12.0f,18.0f, 5.0f,2.0f, 500.0f, 1600.0f,140.0f,2300.0f, 700.0f,120.0f,
      1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f,5},
     {"carrier",7005.0f,Prefer::any,false, 60.0f,60.0f,40.0f, 4.0f,4.0f, 1.3f,0.35f, 150.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
      450.0f,80.0f, 0.0f,0.0f, 1800.0f, 0.0f,4.0f,6},   // over its anchor, its drones do the reaching (2026-10-03: 1300 m out)
@@ -126,7 +126,11 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 // m/s no jet is commanded past. Havok caps every dynamic body at its motion properties' maxLinearSpeed
 // (hknpMotionProperties+0x10, 200 m/s in the preset the vehicles use): the 18:58 run's jets commanded
 // 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never flown.
-constexpr float kBodyTop=195.0f;
+// Since 2026-10-04:
+// 250 m/s = 900 km/h. A jet body gets its own copy of the motion properties with a 600 m/s cap
+// (jetprops.cpp), so the old 200 m/s Havok cap no longer binds. Past 250 the 5 g turn radius (1275 m)
+// times the wall margin (Guard) no longer fits inside kWorldWall.
+constexpr float kBodyTop=250.0f;
 // Patrol: the speed that holds the patrol circle at a 60 degree bank (tan 1.73, 2 g), between kLoiterMin
 // times the stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time; at
 // 45 degrees (until 2026-10-04) it crawled round at 100 m/s.
@@ -1393,6 +1397,7 @@ void __fastcall PhysicsHook(void* vehicle) {
         if(!j || !j->ready || v[kDead] || ms-j->seen>200 || !IsJetVehicle(v,nullptr))return;
         const auto body=At<void*>(v,kBody);
         if(!body)return;
+        JetMotionProps(body);
         alignas(16) float lin[4]={j->vel[0],j->vel[1],j->vel[2],0.0f},ang[4]={j->omega[0],j->omega[1],j->omega[2],0.0f};
         reinterpret_cast<SetVecFn>(image+kSetLinearVelocity)(body,lin);
         reinterpret_cast<SetVecFn>(image+kSetAngularVelocity)(body,ang);
@@ -2128,6 +2133,7 @@ bool InstallJets() noexcept {
         if(current!=image+kPhysics506)Log("JET physics: chaining onto %p (another plugin)",current);
         nextPhysics=reinterpret_cast<PhysicsFn>(current);
         physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
+        if(physicsOk)InstallJetProps();
         spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
         bayOk=spawnOk;

@@ -51,15 +51,15 @@ struct Kind {
     float mark;          // the speed gain k its SGO sets (testrange/gen.py JETS)
     float minAir;        // m/s: the least it flies at in the air (no stall)
     float rotate;        // m/s: it can lift off from here (on its own kAutoRotate faster)
-    float top;           // m/s at full throttle (Havok caps a body near 200 m/s: jet.cpp kBodyTop)
+    float top;           // m/s at full throttle (the body's own motion properties lift Havok's 200 m/s: jetprops.cpp)
     float thrust,brake;  // m/s^2 toward the throttle's speed
     float maxG;          // the most lift, in g
     float roll;          // rad/s: how fast the body turns onto its attitude
     float landMax;       // m/s: the fastest it can touch down without damage
 };
 constexpr Kind kKinds[]={
-    {"fighter",7201.0f, 65.0f,75.0f,195.0f, 16.0f,20.0f, 6.0f,2.6f, 130.0f},
-    {"strike", 7202.0f, 60.0f,70.0f,180.0f, 11.0f,15.0f, 5.0f,1.6f, 120.0f},
+    {"fighter",7201.0f, 65.0f,75.0f,260.0f, 16.0f,20.0f, 6.0f,2.6f, 130.0f},
+    {"strike", 7202.0f, 60.0f,70.0f,240.0f, 11.0f,15.0f, 5.0f,1.6f, 120.0f},
 };
 constexpr float kAutoRotate=20.0f;     // m/s over rotate: it lifts off without the stick...
 constexpr float kAutoThrottle=0.6f;    // ...with the throttle at least this open (not rolling out a landing)
@@ -79,7 +79,7 @@ constexpr float kTurnBleed=3.0f;       // m/s^2 lost per g pulled over 1 (jet.cp
 // pitch, along the body's up: the nose never slips sideways off the path.
 constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.2f,kAoaTau=0.3f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude this fast (jet.cpp kAttGain)
-constexpr float kBodyTop=195.0f;
+constexpr float kBodyTop=260.0f;      // ~940 km/h
 constexpr float kCeilingGap=12.0f;
 constexpr float kWorldWall=2400.0f;    // jet.cpp kWorldWall: the Havok broadphase ends at 3000 m a side
 // The ground (Clearance): the body's origin rests about 1.3 m over the ground (heli_rigid_body: the box from
@@ -520,6 +520,7 @@ void __fastcall PhysicsHook(void* vehicle) {
         if(!j || !j->active || !j->driven || v[kDead] || ms-j->seen>200)return;
         const auto body=At<void*>(v,kBody);
         if(!body)return;
+        JetMotionProps(body);
         alignas(16) float lin[4]={j->vel[0],j->vel[1],j->vel[2],0.0f},ang[4]={j->omega[0],j->omega[1],j->omega[2],0.0f};
         reinterpret_cast<SetVecFn>(image+kSetLinearVelocity)(body,lin);
         reinterpret_cast<SetVecFn>(image+kSetAngularVelocity)(body,ang);

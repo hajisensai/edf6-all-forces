@@ -239,3 +239,37 @@ bomber401 是飞翼（半宽 26 m），不适合当战斗机。
 - 舱只能在机身的俯仰平面里转：侧向加速仍靠机身横滚；前后方向机身只承担 `kCarrierPitchShare`（1/4），其余由舱承担。
 - 偏航：位于 x 的舱向前倾产生绕机身 up 的力矩 −x·Fz（r × F），所以要按 `ω·up` 转时，两侧舱反向各倾 `kThrustYaw`（倾转旋翼机悬停时的偏航方式）。
 - 爬升、下降改变 T 的竖直分量，相同前后加速下爬升时舱更竖、下降时更倾。推力大小本身（喷口火焰）没有表现，见上面 `boosts`。
+
+## 7. Own motion properties：固定翼自己的 Havok 运动属性（2026-10-04）
+
+### 为什么固定翼被限在 ~200 m/s（H）
+
+所有载具刚体共用同一个 hknpMotionProperties 预设，其 `+0x10` maxLinearSpeed = 200 m/s。插件每帧
+SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那次测试里指令 260-360 m/s 的喷气机实测只飞 200-211。
+这就是「固定翼像套了直升机」的硬上限。原地改这个共享预设不行：所有直升机、卡车都用它。
+
+### 结构（H：读字节；M：字段语义）
+
+- 刚体包装（Vehicle `kBody` 指向的对象）：`+0x60` 它自己的 props 副本（0x70 字节），`+0xF0` bodyId（u32），
+  `+0xF6` propsId（u16），`+0x100` 世界包装，世界包装 `+0x58` = hknpWorld。
+  jet.cpp 的 SetLinearVelocity 签名字节就是这条链：`mov rax,[rcx+100h]; mov edx,[rcx+F0h]; mov r10,[rax+58h]; lea rcx,[r10+18h]`。
+- hknpWorld `+0x18` 是写接口，vtable 槽 32 = `image+0xE50720`：`setBodyMotionProperties(iface, u32 bodyId, u16 propsId)`。
+- hknpWorld `+0x928` 是运动属性库：`+0x40` entries，`+0x48` count，每项 0x70 字节。
+- `image+0xE15190` = `add(library, u16* outId, const props*)`：库满时 outId 写 0xFFFF；可能重新分配 entries（调用后必须重读）。
+  props `+0` 必须为 0 它才会复用相等的已有项（去重）。
+- props `+0x10` maxLinear，`+0x54` = 5/maxLinear，`+0x58` = 0.005/maxLinear（M：两个随 maxLinear 缩放的阻尼/休眠项，按原值比例推出）。
+
+### 插件怎么做（`src/jetprops.cpp`）
+
+1. 安装时核对两个函数的签名，不符就整体不启用（日志 `HOOK jet motion props=0`，喷气机照旧 200 m/s 内）。
+2. 每个物理步、在写速度之前（jet.cpp / playerjet.cpp 的 PhysicsHook）：读该刚体当前 propsId；
+   若已是 600 m/s 的副本直接返回；否则把该预设复制一份，`+0` 清零、maxLinear=600 及两项倒数，`add` 进库，
+   再 `setBodyMotionProperties` 换到新项，并同步包装里的 `+0xF6` / `+0x60` 副本。每个世界每个预设只加一项（缓存 8 条）。
+3. 从不修改库里原有的项。
+
+### 未验证（L）
+
+- 在物理步回调里调 setBodyMotionProperties 是否立即生效、还是被 Havok 推迟/忽略：没有在游戏里测过。
+  失败时的表现应是「没效果、仍 200 m/s」（全部包在 `__try` 里），日志里看 `JET motion props: preset a -> b` 是否出现、
+  以及喷气机实测速度是否超过 211。
+- 速度上限：NPC `kBodyTop` 250 m/s（5 g 转弯半径 1275 m × Guard 的墙裕度要装进 ±2400），玩家 260 m/s。
