@@ -146,40 +146,90 @@ bool CapGiantContact() noexcept {
     return false;
 }
 
-// Diagnostic (debug only): every game write of a vehicle chassis velocity goes through setLinVel
-// (0x11B18F0). Three call sites in the CarBase/TankBase frame: gravity pre-step (0x673C73), the
-// ground-normal projection (0x678137) and the final write after the slots (0x6746B5). Logging what
-// the physics step left in the body (getLinVel 0x11B1300) next to what the game writes tells whether
-// an upward launch is produced by the hknp step (contacts) or by game code.
-constexpr std::size_t kSetLinVel=0x11B18F0;
-constexpr std::size_t kGetLinVel=0x11B1300;
-constexpr std::size_t kVelocitySites[]={0x673C73,0x678137,0x6746B5};
-constexpr float kLaunchSpeed=3.0f;
+// Diagnostic (debug only). The first probe showed every launch starts inside the hknp step: the game's
+// final write (setLinVel at 0x6746B5) is under 3 m/s up, then the body comes back from the step at 8-16.
+// This one keeps, per chassis body, the last frames of what the game wrote (linear 0x6746B5 and angular
+// 0x6746C6, setAngVel 0x11B1760) next to what the step left (getLinVel 0x11B1300, getAngVel 0x11B1060),
+// the body position (0x11B15B0, hknpBody+0x30) and its up axis (rotation column 1), and dumps them at the
+// launch frame: whether the game-forced spin drives the hull into the ground before Havok pushes it out.
+constexpr std::size_t kSetLinVel=0x11B18F0,kGetLinVel=0x11B1300;
+constexpr std::size_t kSetAngVel=0x11B1760,kGetAngVel=0x11B1060,kGetPosition=0x11B15B0;
+constexpr std::size_t kFinalLinSite=0x6746B5,kFinalAngSite=0x6746C6;
+constexpr float kLaunchSpeed=3.0f;   // m/s up out of the step
+constexpr float kLaunchJump=3.0f;    // m/s more than the game wrote before it
+constexpr int kFrames=12;
 
-using SetLinVelFn=std::uintptr_t(*)(void*,const float*);
-using GetLinVelFn=const float*(*)(void*);
+using SetVecFn=std::uintptr_t(*)(void*,const float*);
+using GetVecFn=const float*(*)(void*);
+using GetVecOutFn=const float*(*)(void*,float*);
 
-template<int Site>
-std::uintptr_t SetLinVelProbe(void* body,const float* v) noexcept {
-    const auto get=reinterpret_cast<GetLinVelFn>(image+kGetLinVel);
-    const float* phys=body ? get(body) : nullptr;
-    if(phys && v && (phys[1]>kLaunchSpeed || v[1]>kLaunchSpeed)) {
-        Log("VELPROBE site=%#zx t=%llu w=%p phys=(%.2f %.2f %.2f) out=(%.2f %.2f %.2f)",
-            kVelocitySites[Site],static_cast<unsigned long long>(GameMs()),body,
-            phys[0],phys[1],phys[2],v[0],v[1],v[2]);
+struct Frame { ULONGLONG t; float pos[3],up[3],physLin[3],physAng[3],outLin[3],outAng[3]; };
+struct Track { void* body; int next; ULONGLONG dumped; Frame f[kFrames]; };
+Track tracks[8]{};
+
+Track& TrackOf(void* body) noexcept {
+    for(Track& t:tracks)if(t.body==body)return t;
+    static unsigned victim=0;
+    Track& t=tracks[victim++%8];
+    t=Track{};
+    t.body=body;
+    return t;
+}
+
+void Copy3(float* to,const float* from) noexcept { to[0]=from[0]; to[1]=from[1]; to[2]=from[2]; }
+
+void DumpTrack(const Track& t) noexcept {
+    Log("VELPROBE2 launch w=%p (oldest first)",t.body);
+    for(int i=0;i<kFrames;++i) {
+        const Frame& f=t.f[(t.next+i)%kFrames];
+        if(!f.t)continue;
+        Log("VELPROBE2 t=%llu pos=(%.2f %.2f %.2f) up=(%.2f %.2f %.2f) phys=(%.2f %.2f %.2f) ang=(%.2f %.2f %.2f)"
+            " out=(%.2f %.2f %.2f) outAng=(%.2f %.2f %.2f)",static_cast<unsigned long long>(f.t),
+            f.pos[0],f.pos[1],f.pos[2],f.up[0],f.up[1],f.up[2],f.physLin[0],f.physLin[1],f.physLin[2],
+            f.physAng[0],f.physAng[1],f.physAng[2],f.outLin[0],f.outLin[1],f.outLin[2],
+            f.outAng[0],f.outAng[1],f.outAng[2]);
     }
-    return reinterpret_cast<SetLinVelFn>(image+kSetLinVel)(body,v);
+}
+
+std::uintptr_t FinalLinProbe(void* body,const float* v) noexcept {
+    __try {
+        if(body && v) {
+            Track& t=TrackOf(body);
+            const Frame& last=t.f[(t.next+kFrames-1)%kFrames];
+            Frame& f=t.f[t.next];
+            f=Frame{};
+            f.t=GameMs();
+            const float* pos=reinterpret_cast<GetVecFn>(image+kGetPosition)(body);
+            Copy3(f.pos,pos);
+            Copy3(f.up,pos-0x30/4+0x10/4);   // rotation column 1 of the body transform
+            Copy3(f.physLin,reinterpret_cast<GetVecFn>(image+kGetLinVel)(body));
+            alignas(16) float ang[4]{};
+            Copy3(f.physAng,reinterpret_cast<GetVecOutFn>(image+kGetAngVel)(body,ang));
+            Copy3(f.outLin,v);
+            t.next=(t.next+1)%kFrames;
+            if(last.t && f.physLin[1]>kLaunchSpeed && f.physLin[1]-last.outLin[1]>kLaunchJump
+               && f.t-t.dumped>2000) {
+                t.dumped=f.t;
+                DumpTrack(t);
+            }
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return reinterpret_cast<SetVecFn>(image+kSetLinVel)(body,v);
+}
+
+std::uintptr_t FinalAngProbe(void* body,const float* w) noexcept {
+    __try {
+        if(body && w)for(Track& t:tracks)
+            if(t.body==body)Copy3(t.f[(t.next+kFrames-1)%kFrames].outAng,w);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return reinterpret_cast<SetVecFn>(image+kSetAngVel)(body,w);
 }
 
 int ProbeVehicleVelocity() noexcept {
-    void* const probes[]={reinterpret_cast<void*>(&SetLinVelProbe<0>),
-                          reinterpret_cast<void*>(&SetLinVelProbe<1>),
-                          reinterpret_cast<void*>(&SetLinVelProbe<2>)};
+    bool changed=false;
     int done=0;
-    for(std::size_t i=0;i<3;++i) {
-        bool changed=false;
-        if(RedirectCall(image+kVelocitySites[i],image+kSetLinVel,probes[i],changed))++done;
-    }
+    if(RedirectCall(image+kFinalLinSite,image+kSetLinVel,reinterpret_cast<void*>(&FinalLinProbe),changed))++done;
+    if(RedirectCall(image+kFinalAngSite,image+kSetAngVel,reinterpret_cast<void*>(&FinalAngProbe),changed))++done;
     return done;
 }
 }  // namespace
