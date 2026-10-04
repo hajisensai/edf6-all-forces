@@ -21,6 +21,8 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "body506.h"
+#include "heli.h"
 #include "layout.h"
 #include "memory.h"
 #include <cmath>
@@ -425,9 +427,9 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // The per-frame steps, each under its own guard: a fault in one (logged per step at most every kFaultLogMs,
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
-            kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepCount };
+            kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
-                                          "jet sound","lock sound","rescue","hud publish","jet sound tick"};
+                                          "jet sound","lock sound","rescue","hud publish","jet sound tick","underground"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -463,9 +465,68 @@ void GroundStep(unsigned char* v) noexcept { if(IsGroundRobo(v))GroundFrame(v); 
 // Once a game frame, from the first vehicle input of the frame: what is no one vehicle's (the sea rescue,
 // which needs no heli to exist yet; the HUD's publish of what it gathered last frame).
 ULONGLONG tickFrame=0;
+// Diagnostics of things under the ground (the user, 2026-10-04: everything falls through it now and then, the
+// player too; the RE found no single cause, docs/bigworld-re.md): an object is under the terrain when a map ray
+// from kProbeUp over it comes down on ground more than kUnder over it, and nothing is under it within kUnderFloor
+// (a bridge or a roof over it has ground under it too). Each object's going under and coming back up is logged
+// (UNDERGROUND), at most one line per kUnderLogMs: where, the surface over it, its fall speed, a soldier's support
+// state; coming up, the jump (the game's put-back, 0x5A9E50, moves a vehicle up but keeps its fall speed).
+constexpr float kProbeUp=400.0f,kUnder=2.5f,kUnderFloor=20.0f;
+constexpr ULONGLONG kUnderLogMs=5000,kUnderEveryMs=100;
+constexpr std::size_t kHumanSupport=0x711;   // CharacterControl_Walk +0x91: 2 on the ground, 1 sliding, 0 in the air
+struct UnderWatch { const void* object; float y; ULONGLONG ms,loggedAt; bool under; };
+UnderWatch underWatch[64]{};
+
+UnderWatch& WatchOf(const void* object,ULONGLONG ms) noexcept {
+    UnderWatch* free=&underWatch[0];
+    for(auto& w:underWatch) {
+        if(w.object==object)return w;
+        if(ms-w.ms>kUnderLogMs*4 && ms-free->ms<=kUnderLogMs*4)free=&w;
+    }
+    *free=UnderWatch{object,0.0f,0,0,false};
+    return *free;
+}
+
+bool UnderTerrain(const float* p,float* top) noexcept {
+    const float from[3]={p[0],p[1]+kProbeUp,p[2]},to[3]={p[0],p[1]-1.0f,p[2]};
+    float hit[3];
+    if(MapRay(from,to,hit)<0.0f || !(hit[1]>p[1]+kUnder))return false;
+    const float below=GroundClearance(p);
+    *top=hit[1];
+    return below==kNoGround || below>kUnderFloor;
+}
+
+void WatchUnder(const unsigned char* object,const char* what,const unsigned char* human) noexcept {
+    const float* p=reinterpret_cast<const float*>(object+kPosition);
+    if(!std::isfinite(p[0]+p[1]+p[2]))return;
+    const ULONGLONG ms=GameMs();
+    UnderWatch& w=WatchOf(object,ms);
+    if(w.ms && ms-w.ms<kUnderEveryMs)return;   // two rays an object a kUnderEveryMs, not a frame
+    float top=0.0f;
+    const bool under=UnderTerrain(p,&top);
+    const float dt=w.ms && ms>w.ms ? static_cast<float>(ms-w.ms)*0.001f : 0.0f,vy=dt>0.0f ? (p[1]-w.y)/dt : 0.0f;
+    if(under!=w.under && ms-w.loggedAt>=kUnderLogMs) {
+        w.loggedAt=ms;
+        if(under)Log("UNDERGROUND %s %p went under the ground at (%.1f,%.1f,%.1f): the surface %.1f m over it, falling %.1f m/s%s%d",
+                     what,object,p[0],p[1],p[2],top-p[1],-vy,human ? ", support " : "",human ? At<unsigned char>(human,kHumanSupport) : 0);
+        else Log("UNDERGROUND %s %p came back up to (%.1f,%.1f,%.1f): %.0f m in %.2f s",what,object,p[0],p[1],p[2],p[1]-w.y,dt);
+    }
+    w.under=under;w.y=p[1];w.ms=ms;
+}
+
+void UnderPlayer() noexcept {
+    if(const auto human=PlayerHuman())WatchUnder(human,"player",human);
+}
+
+void UnderVehicle(unsigned char* v) noexcept {
+    const int c=ClassOf(v);
+    WatchUnder(v,c>=0 ? kClasses[c].name : "vehicle",nullptr);
+}
+
 void FrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
+    GuardedTick(kStepUnderground,&UnderPlayer);
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepHudPublish,&HudPublish);
 }
@@ -491,6 +552,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepJetSound,&JetSound,v);
     Guarded(kStepLockSound,&LockSound,v);
+    Guarded(kStepUnderground,&UnderVehicle,v);
     QueryPerformanceCounter(&t2);
     SlowLog(I,vehicle,t1.QuadPart-t0.QuadPart,t2.QuadPart-t1.QuadPart);
 }
