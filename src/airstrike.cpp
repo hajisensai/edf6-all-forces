@@ -55,7 +55,6 @@ constexpr std::uint32_t kMaxRecords=0x800;
 constexpr unsigned char kUnlockDlcSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,
                                          0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
 constexpr unsigned char kUnlockThunkSig[]={0x48,0x8B,0x0D};   // 0x70FF80: mov rcx,[GS]; jmp 0xDC550
-constexpr wchar_t kCallPrefix[]=L"EDF6VC_CALL_";
 // The weapon a radio call's IndirectFireControl is in (ifc = weapon+0x1660), and its AmmoHitSizeAdjust.
 constexpr std::size_t kWeaponIfc=0x1660,kWeaponHitSize=0x8C4;
 
@@ -131,13 +130,25 @@ bool HoldsId(const unsigned char* data,std::size_t size,const wchar_t* id) noexc
 // (tools/call_weapons.py install): a mod that writes its own table over it drops their rows, and the
 // weapons are gone from the game. Checked once at load and logged with the fix (the table is a shared
 // file and the game reads it while the plugin loads: the plugin never writes it).
-void CheckCallTable() noexcept {
+// Whether <game>/Mods/<dir>/<file> is there.
+bool ModFileThere(const wchar_t* game,const wchar_t* dir,const wchar_t* file) noexcept {
     wchar_t path[MAX_PATH];
-    const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
-    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
+    if(swprintf_s(path,L"%ls\\Mods\\%ls\\%ls",game,dir,file)<0)return false;
+    const DWORD a=GetFileAttributesW(path);
+    return a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// Every row tools/call_weapons.py installs (kCallRows, the vehicle requests too): in the weapon table, its
+// weapon SGO in Mods/WEAPON and the vehicle SGO a request brings in Mods/OBJECT. A missing one is said, so a
+// mod that overwrote the shared table or a half install shows in the log.
+void CheckCallTable() noexcept {
+    wchar_t game[MAX_PATH];
+    const DWORD n=GetModuleFileNameW(nullptr,game,MAX_PATH);
+    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(game,L'\\') : nullptr;
     if(!slash)return;
     *slash=0;
-    if(wcscat_s(path,L"\\Mods\\WEAPON\\WEAPONTABLE.SGO")!=0)return;
+    wchar_t path[MAX_PATH];
+    if(swprintf_s(path,L"%ls\\Mods\\WEAPON\\WEAPONTABLE.SGO",game)<0)return;
     const HANDLE f=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
     if(f==INVALID_HANDLE_VALUE){Log("CALLS no Mods weapon table: the call weapons are not installed (python tools/call_weapons.py install)");return;}
     LARGE_INTEGER size{};
@@ -150,12 +161,17 @@ void CheckCallTable() noexcept {
     CloseHandle(f);
     if(!data)return;
     int missing=0;
-    for(const auto& c:kCalls)
-        if(!HoldsId(data,got,c.id)){++missing;Log("CALLS %ls missing from the weapon table",c.id);}
+    for(const auto& r:kCallRows) {
+        const bool row=HoldsId(data,got,r.id),weapon=ModFileThere(game,L"WEAPON",r.weaponFile);
+        const bool object=!r.objectFile || ModFileThere(game,L"OBJECT",r.objectFile);
+        if(row && weapon && object)continue;
+        ++missing;
+        Log("CALLS %ls:%s%s%s",r.id,row ? "" : " not in the weapon table",weapon ? "" : " (its weapon SGO is missing)",
+            object ? "" : " (the vehicle SGO it brings is missing)");
+    }
     HeapFree(GetProcessHeap(),0,data);
-    if(missing)Log("CALLS %d of %d call weapons missing: with the game closed run python tools/call_weapons.py install",
-                   missing,static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0])));
-    else Log("CALLS all %d call weapons in the weapon table",static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0])));
+    if(missing)Log("CALLS %d of %d rows incomplete: with the game closed run the installer (install) again",missing,kCallRowCount);
+    else Log("CALLS all %d rows in the weapon table, their files there",kCallRowCount);
 }
 
 // The call weapon `ifc` is in, or nullptr (a stock call): what it brings is the picked call, if any.
@@ -281,6 +297,16 @@ using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
 
 // Every EDF6VC_CALL_* row owned (see the file comment); how many were not yet.
+// Whether a weapon table row's name is one of ours (kCallRows): exactly, so a retired row (EDF6VC_RETIRED_*,
+// an uninstall's placeholder) or another mod's row is never made owned.
+bool IsCallRow(const wchar_t* name) noexcept {
+    for(const auto& r:kCallRows) {
+        const std::size_t len=std::wcslen(r.id)+1;
+        if(Readable(name,len*sizeof(wchar_t)) && std::wcsncmp(name,r.id,len)==0)return true;
+    }
+    return false;
+}
+
 int GrantCalls(unsigned char* gs) noexcept {
     if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return -1;
     void* const table=gs+kCfg;
@@ -288,12 +314,11 @@ int GrantCalls(unsigned char* gs) noexcept {
     std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
     if(n>kMaxRecords)n=kMaxRecords;
     alignas(8) unsigned char row[0x100];
-    const std::size_t prefix=sizeof(kCallPrefix)/sizeof(wchar_t)-1;
     int granted=0;
     for(std::uint32_t id=0;id<n;++id) {
         reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
         const auto name=At<const wchar_t*>(row,0);
-        if(!name || !Readable(name,prefix*sizeof(wchar_t)) || std::wcsncmp(name,kCallPrefix,prefix)!=0)continue;
+        if(!name || !IsCallRow(name))continue;
         auto& flags=*reinterpret_cast<std::uint32_t*>(gs+kFlags+id*kRecord);
         if(!(flags&1)) {
             flags|=4;
