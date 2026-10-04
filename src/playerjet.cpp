@@ -803,7 +803,7 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
 }
 
 // Getting out in the air (the user, 2026-10-05): the player is thrown up as by an ejection seat and comes down under a
-// parachute (docs/player-jet-re.md §9). The soldier's own walk controller (human +0x680) carries its velocity in m/s
+// parachute (docs/player-jet-re.md §7). The soldier's own walk controller (human +0x680) carries its velocity in m/s
 // (+0x6B0/+0x6B4/+0x6B8; in the air only y changes, by gravity each frame); the stock exit zeroes it as its ride
 // state ends (0x57B11A), which also clears the riding bit (+0x380 0x80). Once that bit is clear the launch is the
 // game's own jump request (+0x1294 speed, +0x1290 flag: consumed at 0x575A7A, sent to the other players), with

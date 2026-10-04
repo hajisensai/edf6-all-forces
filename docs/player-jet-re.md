@@ -81,7 +81,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 
 日志（`Debug=1`）以 `PJET` 开头：`boarded`、`takeoff`、每 2 秒一行状态（相位、速度、爬升率、油门、离地高度（`(water)` = 水面）、HP、以及座位原始 LX/LY/RX/RY/上升量）、`landed`、`crash`、`hit the water`、`blocked`、`rammed`、`destroyed`、`left`。
 
-## 9. 空中弹射和降落伞（2026-10-05）
+## 7. 空中弹射和降落伞（2026-10-05）
 
 全部是静态分析（H 读代码确认，M 推断），尚未在游戏里实测。
 
