@@ -1,15 +1,15 @@
 """EDF6 MDB0 model + RAB/MRAB archive reader/writer (experimental).
 
 Layout and semantics: docs/mdb-format.md. Everything here is checked against the stock files:
-`python tools/mdb.py verify` parses every .mdb inside every OBJECT/*.RAB|*.MRAB of the game's Root.cpk,
+`python pylib/mdb.py verify` parses every .mdb inside every OBJECT/*.RAB|*.MRAB of the game's Root.cpk,
 re-serializes it and compares byte for byte (also re-encodes CMPL and rebuilds whole archives).
 
 Commands:
-  python tools/mdb.py dump BOMBER501.MRAB [bomber501.mdb]   bones / materials / meshes / layouts
-  python tools/mdb.py verify [--cmpl] [NAME ...]            round-trip every stock model + its CMPL stream + the archive
+  python pylib/mdb.py dump BOMBER501.MRAB [bomber501.mdb]   bones / materials / meshes / layouts
+  python pylib/mdb.py verify [--cmpl] [NAME ...]            round-trip every stock model + its CMPL stream + the archive
                                                       (--cmpl: re-encode the textures too; --fast: skip CMPL
                                                        re-encoding, which is pure Python and slow; default: all archives)
-  python tools/mdb.py jet [OUTDIR]                          split bomber501 into control-surface bones
+  python pylib/mdb.py jet [OUTDIR]                          split bomber501 into control-surface bones
 Archive names without a path are read from OBJECT/ in Root.cpk (read only; nothing is written there).
 """
 from __future__ import annotations
@@ -21,8 +21,7 @@ import struct
 import sys
 from dataclasses import dataclass, field
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'testrange', 'lib'))
-import gamedir  # noqa: E402
+import gamedir  # noqa: E402  (pylib)
 GAME = gamedir.find_or_dev()
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -655,12 +654,10 @@ _GAME = None
 
 
 def _game() -> object:
-    """The game's Root.cpk reader (testrange/lib), opened once per process."""
+    """The game's Root.cpk reader (pylib/rootcpk.py), opened once per process."""
     global _GAME
     if _GAME is None:
-        sys.path.insert(0, os.path.join(HERE, '..', 'testrange', 'lib'))
-        sys.path.insert(0, os.path.join(HERE, '..', 'testrange'))
-        from gen import Game  # noqa: E402
+        from rootcpk import Game
         _GAME = Game(GAME)
     return _GAME
 
@@ -789,7 +786,7 @@ def main(argv: list[str]) -> int:
         names = [a for a in rest if not a.startswith('--')] or _stock_archives()
         return 1 if verify(names, cmpl, '--fast' in rest) else 0
     if cmd == 'jet':
-        import mdb_jet  # noqa: E402  (tools/mdb_jet.py)
+        import mdb_jet  # noqa: E402  (pylib/mdb_jet.py)
         return mdb_jet.main(rest)
     print(f'unknown command {cmd}')
     return 2

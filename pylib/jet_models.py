@@ -1,16 +1,16 @@
 """Scaled stock aircraft models for the jet variants (experimental; format in docs/mdb-format.md).
 
-    python tools/jet_models.py [OUTDIR]         (default OUTDIR: build/jetmodels; never the game directory)
+    python pylib/jet_models.py [OUTDIR]         (default OUTDIR: build/jetmodels; never the game directory)
 
 Each output archive is a stock OBJECT/*.MRAB from Root.cpk (read only) with exactly one .mdb replaced (same file
-name inside the archive, CMPL-compressed like tools/mdb_jet.py does); every other member keeps its stored bytes.
+name inside the archive, CMPL-compressed like pylib/mdb_jet.py does); every other member keeps its stored bytes.
 
   EDF6VC_INTERCEPTOR.MRAB  BOMBER501.MRAB         bomber501_2.mdb  elevon split (mdb_jet.build), x 0.65
   EDF6VC_MULTIROLE.MRAB    BOMBER401.MRAB         bomber401.mdb    x 0.5
   EDF6VC_CARRIER.MRAB      V508_TRANSPORT.MRAB    v508_transport.mdb  x 1.6
   EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0, root bone renamed `mdl`, `body` levelled
 
-Every jet model's root bone is `mdl` (testrange/gen.py JET_MAB_ROOT: the V506 locators hang on that name), so
+Every jet model's root bone is `mdl` (pylib/vcobjects.py JET_MAB_ROOT: the V506 locators hang on that name), so
 a model whose root is called otherwise gets it renamed (Recipe.root; only that bone uses the name).
 The V506 animation drives the model's `body` bone with the heli body's own pose (level, nose +z), in place of the
 bone's bind local: the drone's `body` is bound turned (nose -> -y), so it flew nose down, upright, on 2026-10-03.
@@ -40,14 +40,12 @@ import sys
 from dataclasses import dataclass, replace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
 from mdb import (Bone, Mat, Mdb, Mesh, Object, bind_world, cmpl_compress, cmpl_decompress, ident, inverse_affine, mdb_read,  # noqa: E402
                  mdb_write, mmul, rab_read, rab_write, read_elem, verify)
+import gamedir  # noqa: E402
 import mdb_jet  # noqa: E402
 
 Box = tuple[list[float], list[float]]          # (min xyz, max xyz)
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'testrange', 'lib'))
-import gamedir  # noqa: E402
 GAME_DIR = gamedir.find_or_dev()
 
 
@@ -226,7 +224,7 @@ def replace_member(raw: bytes, model: str, data: bytes) -> bytes:
     return rab_write(rab)
 
 
-def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  # noqa: ANN001 - testrange/gen.py Game
+def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game
     """Output file name -> archive bytes, every one checked (`check`); `models` default MODELS."""
     out: dict[str, bytes] = {}
     for name, r in (MODELS if models is None else models).items():
@@ -288,10 +286,8 @@ def check(raw: bytes, arc: bytes, r: Recipe) -> None:
 def main(argv: list[str]) -> int:
     outdir = os.path.abspath(argv[0] if argv else os.path.join(HERE, '..', 'build', 'jetmodels'))
     assert not outdir.lower().startswith(os.path.abspath(GAME_DIR).lower()), 'refusing to write into the game directory'
-    sys.path.insert(0, os.path.join(HERE, '..', 'testrange', 'lib'))
-    sys.path.insert(0, os.path.join(HERE, '..', 'testrange'))
-    import gen  # noqa: E402
-    game = gen.Game(gen.DEFAULT_GAME)
+    from rootcpk import DEFAULT_GAME, Game
+    game = Game(DEFAULT_GAME)
     os.makedirs(outdir, exist_ok=True)
     arcs = build(game)
     for name, arc in arcs.items():

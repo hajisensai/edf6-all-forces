@@ -1,6 +1,6 @@
 """Minimal SGO / DSGO reader, either byte order (SGO format per edf-tools SGO.cpp). Read-only.
 
-  python -B tools/sgo.py CONFIG.SGO [name-regex]
+  python -B pylib/sgo.py CONFIG.SGO [name-regex]
 Prints top-level named values; arrays are expanded recursively.
 
 DSGO (mission lists, most EDF6 object SGOs): header {'DSGO', node table offset, node count, node size}, then

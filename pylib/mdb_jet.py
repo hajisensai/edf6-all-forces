@@ -1,6 +1,6 @@
 """Split the stock bomber501 jet into control-surface bones (experimental; see docs/mdb-format.md).
 
-    python tools/mdb.py jet [OUTDIR] [--png]          (default OUTDIR: build/jetmodel)
+    python pylib/mdb.py jet [OUTDIR] [--png]          (default OUTDIR: build/jetmodel)
 
 Reads BOMBER501.MRAB from the game's Root.cpk (read only), and writes to OUTDIR:
   bomber501.mdb    uncompressed MDB0 with the new skeleton (for inspection / tools)
@@ -30,7 +30,7 @@ from dataclasses import dataclass
 
 from mdb import (HERE, Bone, Mat, Mdb, Mesh, Object, VElem, _load, bind_world, cmpl_compress, cmpl_decompress,
                  depth_of, ident, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write, read_elem)
-import gamedir  # noqa: E402  (testrange/lib, put on sys.path by mdb)
+import gamedir  # noqa: E402
 
 Vec = tuple[float, float, float]
 
@@ -416,10 +416,11 @@ def preview(md: Mdb, surfaces: list[Surface], path: str) -> None:
 
 # ------------------------------------------------------------------------------------------ main
 
-def jet_archive() -> tuple[bytes, bytes, Mdb, list[Surface], dict[str, object], dict[str, object], int]:
-    """The stock BOMBER501.MRAB with bomber501.mdb split (checked): (archive, mdb, model, surfaces, stats,
-    self check, stock archive size)."""
-    raw = _load('BOMBER501.MRAB')
+def jet_archive(raw: bytes | None = None) -> tuple[bytes, bytes, Mdb, list[Surface], dict[str, object], dict[str, object], int]:
+    """The stock BOMBER501.MRAB (`raw`, default: read from the default game's Root.cpk) with bomber501.mdb split
+    (checked): (archive, mdb, model, surfaces, stats, self check, stock archive size)."""
+    if raw is None:
+        raw = _load('BOMBER501.MRAB')
     rab = rab_read(raw)
     assert rab_write(rab) == raw, 'stock archive does not round-trip'
     entry = next(f for f in rab.files if f.name.lower() == 'bomber501.mdb')
@@ -480,5 +481,4 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == '__main__':
-    sys.path.insert(0, HERE)
     sys.exit(main(sys.argv[1:]))
