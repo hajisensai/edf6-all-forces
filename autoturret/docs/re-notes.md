@@ -2,6 +2,9 @@
 
 All addresses are RVAs into `EDF.dll` with TimeDateStamp `0x678CCB46`, SizeOfImage `0x22CE000`.
 `src/plugin.cpp` checks the bytes it relies on (`CheckProfile`) and refuses to load otherwise.
+The layout facts EDF6VehicleCrew relies on too (vehicle, seat, rider, slot 55's signature) and the
+memory / patch / seat code are one copy in `common/` at the repository root (`edf6common`, linked by
+both DLLs).
 
 ## Vehicle603_Flak (Kepler / Bohr chassis)
 
@@ -87,11 +90,18 @@ cooldown `+0xE0C` spent, `+0x145C` bit 0 clear, and LockonType `+0x6B0` 0 or 5 (
 | AmmoGravityFactor | `0x8E0` |
 
 - Fire-start `0x690BB0` refuses a lock-on weapon with an empty lock list unless LockonType is 0 or
-  5. No stock weapon uses 4, so the gate at `0x690C2E` (`cmp eax,5 / je`) is patched to
-  `cmp eax,4 / jae`: type 4 fires with or without a lock. The mod's guns use type 4 with
-  LockonRange 0, so they never lock and never show lock markers.
+  5. The mod's guns are type 0 with LockonRange 0: the stock game fires them with or without a lock,
+  they never lock and never show lock markers, and they need no patch, so the data works without the
+  plugin.
 - The only stock reader of LockonTargetType (`0x696792`) maps it to a lock class (0 -> 3, 1 -> 2);
-  with LockonRange 0 it has no effect, so the mod uses 1 to mark ground-attack guns.
+  a range-0 gun never makes the lock query, so the field has no effect on it. The mod's mark lives
+  there: 7301 = anti-air gun, 7302 = ground-attack gun (`src/turret.h` kMarkAir / kMarkGround,
+  `tools/build.py` MARK_AIR / MARK_GROUND). Needs an in-game check that the SGO's 7301.0 arrives at
+  `+0x6B4` as the int 7301 (the plugin logs `DIAG ... weapons=0` on a flak if it does not).
+- Before 0.3.0 the mark was LockonType 4 (no stock weapon uses it; 1 in LockonTargetType = ground),
+  which only fired with the gate at `0x690C2E` (`cmp eax,5 / je`) patched to `cmp eax,4 / jae`. The
+  plugin still recognizes such data and patches that gate only once it sees a type 4 gun
+  (`LegacyFireGate`); remove with the next data break.
 - Weapon vtable slot 17 = "round spawned" `(weapon, bullet)`, called once per round by fire
   `0x696FD0`, which spawns rounds through the factory at `0x7F8` (`0x6970A5`).
 
@@ -128,3 +138,11 @@ The plugin does the same and takes the lower arc.
 `Ammo_CustomParameter[0] = 1` bursts on expiry (flag `0x20`); bounce 0 sticks the round to what it
 hits. The fuses set age = lifetime before the stock update runs, so the round bursts that frame at
 its (possibly moved) position.
+
+The time fuse is per round: each frame every flak's input stamps its flak guns with the flight time
+to the tracked target and the vehicle's team; the weapon's spawn slot (17) tags the new round with
+its gun's stamp, and the round's first update sets its own lifetime `C+0xA08` to it (never above
+what the data gave it). The weapon's `AmmoAlive` (`+0x898`) is never written: it is shared by every
+round the gun fires and was left shortened when a rider got out. The proximity fuse checks the
+round's flight segment against the enemies of the team that fired it, from one snapshot of the
+lock-target registry taken per frame (all of it, no range limit).

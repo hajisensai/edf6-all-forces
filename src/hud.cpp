@@ -1,5 +1,5 @@
 // The vehicle HUD (docs/hud-re.md, ini VehicleHud / VehicleHudCount / VehicleHudRange).
-//  - Over each of the cfg.vehicleHudCount nearest NPC-driven friendly vehicles within cfg.vehicleHudRange of the
+//  - Over each of the Cfg().vehicleHudCount nearest NPC-driven friendly vehicles within Cfg().vehicleHudRange of the
 //    player, on screen: one line "<kind> <hp>%  G <rounds>  M <missiles>  D <drones>  F m:ss" and an HP bar under
 //    it. The gun / missile counts only for one armed with them (its pilot seat's weapons), the drones only for a
 //    drone carrier, the fuel only where the plugin limits it (jets, called helis; "RTB" once it withdraws).
@@ -8,11 +8,15 @@
 //    Its world gauges (subcarrier.cpp, the follower-gauge style) stay as they are.
 // Both are drawn with the game's own HUD primitives from the follower gauge's call (subcarrier.cpp GaugeHook,
 // after the stock gauges): 0xC2FB0, the quad the gauge bars are made of, and the text sequence the rescue
-// message and the multiplayer name tags use. The data is copied on the game thread (HudSee, from every vehicle's
-// input) into a fixed table that the draw only reads (a seqlock per entry): the draw never touches a vehicle,
-// allocates nothing and asks no VirtualQuery.
+// message and the multiplayer name tags use. The data is gathered on the game thread (HudSee, from every
+// vehicle's input) into a table of its own, keyed by each vehicle's ObjRef; once a frame (HudPublish) the whole
+// of it, with the player's position, is published as one snapshot (a triple buffer: the game thread never waits,
+// the draw thread always has a whole frame's copy, never half of one and half of the next). The draw reads only
+// the snapshot: it never touches a vehicle, allocates nothing and asks no VirtualQuery. The draw thread's clock
+// is the wall clock: a snapshot older than kFreshMs (paused, loading, mission over) is not drawn.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "layout.h"
 #include "memory.h"
 #include <atomic>
 #include <cmath>
@@ -23,10 +27,6 @@
 
 namespace crew {
 namespace {
-constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
-constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10,kWeaponLockon=0x6B0,kWeaponAmmo=0xBE8;
-constexpr std::int32_t kHoming=1,kTeamFriend=2;
-
 // The quad (docs/hud-re.md §1): (drawer, ctx, row-major 4x4 transform, RGBA, topology, xyz vertices, count, texture).
 constexpr unsigned kQuad=0xC2FB0;
 constexpr std::size_t kQuadDrawer=0x2139A78;
@@ -66,21 +66,28 @@ const unsigned kTextCalls[][2]={{0x808611,kTextMake},{0x808622,kTextBegin},{0x80
 
 bool quadOk=false,textOk=false;
 
-// --- What the game thread copies (HudSee) ---
-constexpr ULONGLONG kFreshMs=500;   // a readout whose vehicle has not been seen this long is not drawn
+// --- What the game thread gathers (HudSee) and publishes (HudPublish) ---
+constexpr ULONGLONG kFreshMs=500;   // a readout whose vehicle has not been seen this long (game ms) is not drawn,
+                                    // nor a snapshot this old (wall ms, the draw thread's clock)
 constexpr int kEntries=48,kMaxShown=12;
 struct Data {
-    const void* vehicle;
-    ULONGLONG tick;               // GetTickCount64 when written
     float pos[3],top;             // where it is, and how far over it its readout stands
     float hp,hpMax,fuel;          // fuel: seconds left, <0 none
     std::int32_t guns,missiles,drones;   // <0: it has none of them
     bool leaving;
     char kind[16];
 };
-struct Entry { std::atomic<unsigned> seq; Data d; };
-Entry entries[kEntries];
-const void* logged[kEntries]{};   // game thread: the vehicle each entry last logged
+// Game thread only.
+struct Work { ObjRef ref; ULONGLONG seen; bool logged; Data d; };
+Work work[kEntries]{};
+// The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
+// waits in `middle` (its index, kFresh while the draw has not taken it).
+struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; };
+constexpr unsigned kFresh=4;
+Snapshot snaps[3]{};
+std::atomic<unsigned> middle{1};
+unsigned back=0;    // game thread
+unsigned front=2;   // draw thread
 
 bool CallsTo(unsigned site,unsigned target) noexcept {
     const unsigned char* p=image+site;
@@ -106,13 +113,22 @@ void ReadAmmo(unsigned char* v,Data& d) noexcept {
 
 void Kind(Data& d,const char* kind) noexcept { strncpy_s(d.kind,kind,_TRUNCATE); }
 
-int Slot(const void* v,ULONGLONG tick) noexcept {
-    int free=-1;
-    for(int i=0;i<kEntries;++i) {
-        if(entries[i].d.vehicle==v)return i;
-        if(free<0 && tick-entries[i].d.tick>kFreshMs*4)free=i;
+// The vehicle's entry, a new one in a free slot, the slot of a gone object at the same address or of one not
+// seen for a while; nullptr with every slot a fresh one's (it is not shown).
+Work* WorkFor(const void* v,ULONGLONG ms) noexcept {
+    Work* slot=nullptr;
+    for(auto& w:work) {
+        if(w.ref.Is(v))return &w;
+        if(!slot && (!w.ref || w.ref.obj==v || ms-w.seen>kFreshMs*4))slot=&w;
     }
-    return free;
+    if(slot)*slot=Work{ObjRef::Of(v),ms,false,{}};
+    return slot;
+}
+
+// The draw thread's snapshot: the newest published one.
+const Snapshot& Latest() noexcept {
+    if(middle.load(std::memory_order_acquire)&kFresh)front=middle.exchange(front,std::memory_order_acq_rel)&3u;
+    return snaps[front];
 }
 
 // --- Drawing ---
@@ -255,17 +271,13 @@ bool Project(const float* vp,const float* p,float width,float height,float* sx,f
     return true;
 }
 
-// The fresh entries nearest the player, nearest first.
-int Nearest(Data* out,int most,ULONGLONG tick) noexcept {
-    const float me[3]={player.pos[0],player.pos[1],player.pos[2]};
+// The snapshot's entries nearest the player (as of the snapshot), nearest first.
+int Nearest(const Snapshot& s,Data* out,int most) noexcept {
+    const float* me=s.me;
     float dist[kMaxShown];
     int n=0;
-    for(auto& e:entries) {
-        const unsigned before=e.seq.load(std::memory_order_acquire);
-        if(before&1u)continue;
-        Data d;std::memcpy(&d,&e.d,sizeof(d));
-        std::atomic_thread_fence(std::memory_order_acquire);
-        if(e.seq.load(std::memory_order_relaxed)!=before || !d.vehicle || tick-d.tick>kFreshMs)continue;
+    for(int i=0;i<s.count && i<kEntries;++i) {
+        const Data& d=s.d[i];
         const float dx=d.pos[0]-me[0],dy=d.pos[1]-me[1],dz=d.pos[2]-me[2],r=dx*dx+dy*dy+dz*dz;
         int at=n;
         while(at>0 && dist[at-1]>r)--at;
@@ -282,11 +294,11 @@ const float* HullColour(float share) noexcept { return share>0.5f ? kCyan : shar
 
 // The readouts: a line each over its vehicle, the HP bar under it (bars now, the line later).
 int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int at,
-             ULONGLONG tick,int* shown) noexcept {
+             const Snapshot& snap,int* shown) noexcept {
     Data best[kMaxShown];
-    int most=cfg.vehicleHudCount;
+    int most=Cfg().vehicleHudCount;
     most=most<0 ? 0 : most>kMaxShown ? kMaxShown : most;
-    const int n=Nearest(best,most,tick);
+    const int n=Nearest(snap,best,most);
     *shown=0;
     for(int i=0;i<n && at<kMaxLines;++i) {
         const Data& d=best[i];
@@ -378,7 +390,7 @@ void DrawLog(int shown,int panels,const Line* lines,int count,int width,int heig
     static int lastShown=-1,lastPanels=-1;
     static ULONGLONG at=0;
     const ULONGLONG now=GetTickCount64();
-    if(!cfg.debug || (shown==lastShown && panels==lastPanels) || now-at<10000)return;
+    if(!Cfg().debug || (shown==lastShown && panels==lastPanels) || now-at<10000)return;
     at=now;lastShown=shown;lastPanels=panels;
     Log("HUD draw %dx%d: %d readout(s), %d carrier panel(s), text=%d",width,height,shown,panels,textOk);
     for(int i=0;i<count && i<12;++i)Log("HUD   \"%ls\" at (%.0f,%.0f) %.0fx%.0f",lines[i].text,lines[i].x,lines[i].y,lines[i].w,lines[i].h);
@@ -398,19 +410,18 @@ bool InstallHud() noexcept {
 }
 
 void HudSee(unsigned char* v) noexcept {
-    if(!cfg.vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
+    if(!Cfg().vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
     if(SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy)return;   // NPC-driven only
     const std::int32_t team=At<std::int32_t>(v,kTeam);
     if(team!=player.team && team!=kTeamFriend && team!=kTeamVehicle)return;
-    const ULONGLONG tick=GetTickCount64();
-    if(!player.at || tick-player.at>2000)return;
+    const ULONGLONG ms=GameMs();   // player.at's clock (a wall tick here never matched it: no readout was ever shown)
+    if(!player.at || ms-player.at>2000)return;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dx=pos[0]-player.pos[0],dy=pos[1]-player.pos[1],dz=pos[2]-player.pos[2];
-    if(cfg.vehicleHudRange>0.0f && dx*dx+dy*dy+dz*dz>cfg.vehicleHudRange*cfg.vehicleHudRange)return;
-    const int i=Slot(v,tick);
-    if(i<0)return;
+    if(Cfg().vehicleHudRange>0.0f && dx*dx+dy*dy+dz*dz>Cfg().vehicleHudRange*Cfg().vehicleHudRange)return;
+    Work* const w=WorkFor(v,ms);
+    if(!w)return;
     Data d{};
-    d.vehicle=v;d.tick=tick;
     std::memcpy(d.pos,pos,12);
     d.hp=At<float>(v,kHp);d.hpMax=At<float>(v,kHpMax);
     d.fuel=-1.0f;d.drones=-1;
@@ -429,21 +440,28 @@ void HudSee(unsigned char* v) noexcept {
     } else {
         d.top=4.0f;Kind(d,"npc");
     }
-    Entry& e=entries[i];
-    const unsigned seq=e.seq.load(std::memory_order_relaxed);
-    e.seq.store(seq+1,std::memory_order_relaxed);
-    std::atomic_thread_fence(std::memory_order_release);
-    std::memcpy(&e.d,&d,sizeof(d));
-    e.seq.store(seq+2,std::memory_order_release);
-    if(cfg.debug && logged[i]!=v) {
-        logged[i]=v;
+    w->d=d;w->seen=ms;
+    if(Cfg().debug && !w->logged) {
+        w->logged=true;
         Log("HUD v=%p %s: hp %.0f/%.0f guns %d missiles %d drones %d fuel %.0fs%s",v,d.kind,d.hp,d.hpMax,d.guns,d.missiles,d.drones,
             d.fuel,d.leaving ? " (leaving)" : "");
     }
 }
 
+void HudPublish() noexcept {
+    if(!quadOk)return;
+    const ULONGLONG ms=GameMs();
+    Snapshot& s=snaps[back];
+    s.tick=GetTickCount64();
+    std::memcpy(s.me,player.pos,sizeof(s.me));
+    s.count=0;
+    if(Cfg().vehicleHud)
+        for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
+    back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
+}
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
-    if(!cfg.vehicleHud || !quadOk || !viewProj || !ctx || !viewport)return;
+    if(!Cfg().vehicleHud || !quadOk || !viewProj || !ctx || !viewport)return;
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
         const int w=At<std::int32_t>(viewport,8),h=At<std::int32_t>(viewport,0xC);
@@ -455,13 +473,17 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines];
         int at=0,shown=0;
-        const ULONGLONG tick=GetTickCount64();
-        at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,tick,&shown);
+        const Snapshot& snap=Latest();
+        if(GetTickCount64()-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown);
         float top=height*0.28f;
         for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
         if(t && textOk)DrawAll(*t,lines,at);
         FreeText(text);
         DrawLog(shown,count,lines,at,w,h);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+// A new mission (mission.cpp MissionStart): the last mission's vehicles are gone; the next publish is empty.
+void ResetHud() noexcept {
+    for(auto& w:work)w=Work{};
 }
 }  // namespace crew

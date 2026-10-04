@@ -5,6 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "edf/layout.h"
+#include "edf/patch.h"
+#include "edf/seat.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -23,16 +26,13 @@ struct Config {
     float heliRange=350.0f;    // it engages enemies within this distance
     float heliCombatRange=120.0f;// engaged (player on foot), it stays within this of the player
     bool heliFire=true;
-    float heliStandoff=80.0f;  // unused since the attack runs (kept so old ini files still load)
     bool heliAvoid=true;       // helis steer and climb clear of terrain and buildings (map rays)
     float heliFireHeight=25.0f;// engaged, its strafing runs fly this far above the target
     float heliFireCone=4.0f;   // degrees between the nose (pitch included) and the target it still fires at
     bool heliMissile=true;
     DWORD heliMissileMs=4000;  // minimum gap between missiles
-    float heliMoveGain=0.04f;  // stick per metre off the goal
-    float heliBrakeGain=0.12f; // stick per m/s of speed (damping)
-    float heliClimbGain=0.08f; // rotor speed per m/s of climb-rate error
-    float heliHoverLearn=0.03f;// how fast it learns the hover rotor speed
+    // (The flight controller's own gains are constants in heli.cpp; the old HeliMoveGain / HeliBrakeGain /
+    // HeliClimbGain / HeliHoverLearn keys are ignored, plugin.cpp LoadConfig.)
     DWORD heliLandMs=0;        // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
     float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
@@ -66,27 +66,59 @@ struct Config {
     float vehicleHudRange=500.0f;// ...within this many metres of the player
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
+    float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
 };
-extern Config cfg;
+// Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
+// the change logged.
+// The live config: an immutable snapshot, swapped whole by the ini reload (plugin.cpp LoadConfig) and read
+// from any thread (game, call picker, HUD draw) without a torn mix of old and new values.
+const Config& Cfg() noexcept;
+// Between SuppressBump(true) and SuppressBump(false) on this thread, the player's board button takes no
+// NPC's seat (heli.cpp PressBoard): an override of the call, not a write to the config. (A pair of calls,
+// not a scoped object: the callers run under __try, which allows no destructors.)
+void SuppressBump(bool on) noexcept;
+bool BumpSuppressed() noexcept;
+
+// --- Time ---
+// The game clock, game thread only: wall time, except that a gap between two reads longer than 250 ms
+// (pause menu, loading) counts as one 16 ms frame. Every timer of the plugin's logic, the player fix's
+// included, is on this clock; wall time (GetTickCount64) is for log throttles and other threads only.
+ULONGLONG GameMs() noexcept;
+// The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
+// (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
+ULONGLONG GameFrame() noexcept;
+void SeeFrame(const void* vehicle) noexcept;
+
+// --- Mission lifecycle (mission.cpp) ---
+// The mission's player preload (mission.cpp hooks it): every table of per-object state from the last
+// mission is dropped here, before the new mission's objects (which may reuse the old addresses) exist.
+void MissionStart() noexcept;
+void ResetCrew() noexcept;        // crew.cpp
+void ResetHelis() noexcept;       // heli.cpp (and the player track, the rescue)
+void ResetGround() noexcept;      // ground.cpp
+void ResetJets() noexcept;        // jet.cpp (and the dolls, the walls learned)
+void ResetAirstrikes() noexcept;  // airstrike.cpp
+void ResetBoosters() noexcept;    // booster.cpp
+void ResetSubs() noexcept;        // subcarrier.cpp
+void ResetLaser() noexcept;       // carrierlaser.cpp
+void ResetPlayerJets() noexcept;  // playerjet.cpp
+void ResetHud() noexcept;         // hud.cpp
 
 // --- EDF.dll layout ---
-// GameObject: weak-this at +0x28 (object) / +0x30 (control block, use count at +8)
-constexpr std::size_t kSelf=0x28,kSelfCtrl=0x30;
-// Vehicle
-constexpr std::size_t kMatrix=0x60,kPosition=0x90,kDead=0x2E8,kTeam=0x314;
+// The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):
+// GameObject weak-this +0x28 / +0x30, the vehicle's matrix, position, dead byte, team, seats, the seat's
+// rider weak_ptr, the human's pad / player flag, the dummy rider's vtable, At / Put.
+using edf::kSelf; using edf::kSelfCtrl; using edf::kMatrix; using edf::kPosition; using edf::kDead; using edf::kTeam;
+using edf::kSeats; using edf::kSeatCount; using edf::kSeatStride; using edf::kSeatRider; using edf::kSeatRiderCtrl;
+using edf::kHumanPad; using edf::kHumanPlayer; using edf::kDummyRiderVtable; using edf::kSlotInput;
+using edf::At; using edf::Put;
 // Teams (mission AsCommon.h): player 0, enemy 1, friend 2, neutral 3, vehicle 5 = nobody's vehicle,
 // which anyone may board (CanRideSeat skips the team test for it).
 constexpr std::int32_t kTeamVehicle=5;
-constexpr std::size_t kSeats=0x608,kSeatCount=0x618,kSeatStride=0x340;
-// Seat: rider object / its weak_ptr control block (occupied while the use count is non-zero)
-constexpr std::size_t kSeatRider=0x260,kSeatRiderCtrl=0x268;
-// Human: pad / player-controlled (the test 0x572EFF and 0x673AC2 make before reading a pad),
-// the vehicle it is in (weak_ptr object +0x1548, control block +0x1550)
-constexpr std::size_t kHumanPad=0x340,kHumanPlayer=0x354,kHumanVehicleCtrl=0x1550;
-// The rider RideAi (VehicleBase slot 50, 0x633030) seats: it drives through the vehicle AI
-constexpr unsigned kDummyRiderVtable=0x17D7320;
-// VehicleBase virtual slots
-constexpr std::size_t kSlotFindSeat=49,kSlotRideAi=50,kSlotInput=55;
+// Human: the vehicle it is in (weak_ptr object +0x1548, control block +0x1550)
+constexpr std::size_t kHumanVehicleCtrl=0x1550;
+// VehicleBase virtual slots (input: edf::kSlotInput)
+constexpr std::size_t kSlotFindSeat=49,kSlotRideAi=50;
 constexpr unsigned kFindSeat=0x633B80,kRideAi=0x633030;
 // Seat functions
 constexpr unsigned kCanRideSeat=0x6346D0;   // (vehicle, human, seat) -> bool: team, mask, free, in reach
@@ -98,64 +130,46 @@ constexpr unsigned kSeatKick=0x62E1A0;      // (vehicle, seat): get-off message,
 constexpr unsigned kPromptFunctorVtable=0x17D09B8,kPromptVisit=0x5725A0;
 constexpr std::size_t kFunctorHuman=0x8,kFunctorResult=0x10;
 
-template<class T> T At(const void* base,std::size_t offset) noexcept {
-    T value;std::memcpy(&value,static_cast<const unsigned char*>(base)+offset,sizeof(T));return value;
-}
-template<class T> void Put(void* base,std::size_t offset,T value) noexcept {
-    std::memcpy(static_cast<unsigned char*>(base)+offset,&value,sizeof(T));
-}
+// A game object as the plugin remembers it: its address and its weak-this control block (+0x30). A new
+// object at the same address (the next mission, a respawn) has another control block, so it is not taken
+// for the old one. Read under the caller's __try (the object may be gone).
+struct ObjRef {
+    const void* obj=nullptr;
+    const void* ctrl=nullptr;
+    static ObjRef Of(const void* o) noexcept { return ObjRef{o,o ? At<const void*>(o,kSelfCtrl) : nullptr}; }
+    bool Is(const void* o) const noexcept { return o && o==obj && At<const void*>(o,kSelfCtrl)==ctrl; }
+    explicit operator bool() const noexcept { return obj!=nullptr; }
+};
 
+// The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
-// Forced test-range loadout (loadout.cpp); off unless EDF6TestRange.loadout.ini says Enabled=1.
-bool InstallLoadout(const wchar_t* pluginIni) noexcept;
 void ReloadConfigIfChanged() noexcept;
-bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept;
-bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept;
+// The patch primitives and the seat test are common/'s (shared with EDF6AutoTurret).
+inline bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept { return edf::Matches(image,rva,bytes,size); }
+using edf::PatchVtableSlot;
 
-// What sits in a seat.
-enum class Rider { none, dummy, player, other };
-Rider SeatRider(const unsigned char* seat) noexcept;
-unsigned char* SeatAt(unsigned char* vehicle,unsigned index) noexcept;
-unsigned SeatCount(const unsigned char* vehicle) noexcept;
-bool IsPlayer(const unsigned char* human) noexcept;
+// What sits in a seat (common/seat.cpp).
+using Rider=edf::Rider;
+inline Rider SeatRider(const unsigned char* seat) noexcept { return edf::SeatRider(image,seat); }
+using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer;
 
-// The player as last seen (on foot through the prompt visitor, or riding through a vehicle input).
+// The player as last seen (on foot through the prompt visitor, or riding through a vehicle input); `at` is
+// GameMs (0: never seen).
 struct PlayerFix { float pos[3]; std::int32_t team; ULONGLONG at; };
 extern PlayerFix player;
 void SeePlayer(const float* pos,std::int32_t team) noexcept;
+// A new mission (MissionStart): the last mission's fix and player human are forgotten. GameMs counts the load
+// as one frame, so without this they would pass for fresh at the new mission's start.
+void ResetPlayer() noexcept;
 
-// crew.cpp
-bool InstallCrew() noexcept;           // prompt + seat hooks, at load
-void CrewFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook
-
-// heli.cpp
-bool IsHelicopter(const void* vehicle) noexcept;
-void HeliCrewed(const void* vehicle) noexcept;      // the plugin seated an NPC pilot: it flies this heli
-void HeliFrame(unsigned char* vehicle) noexcept;   // after the stock input, NPC-crewed helicopters only
-bool CheckHeliProfile() noexcept;
-// Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point),
-// every enemy lock point of `vehicle`'s side.
-float MapRay(const float* a,const float* b,float* hit) noexcept;
-// Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
-// highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
-enum class Sea { unknown, land, water };
-Sea SeaAt(float x,float z,float* surface) noexcept;
-using EnemyVisitor=void(*)(void* ctx,const void* object,const float* aim);
-bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept;
-bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept;   // the enemies of a side
-// Whether `point` is within `radius` of the segment from->to (between its ends).
-bool NearLine(const float* from,const float* to,const float* point,float radius) noexcept;
-// Whether a burst from->to would pass by the player (as the helis' guns check) or a jet the plugin flies
-// other than `self` (JetInLine). Other friends are hit as the stock game hits them.
-bool FriendInLine(const float* from,const float* to,const void* self) noexcept;
+// The core modules' own declarations (crew, heli, ground, hud, mission, loadout, overlay) are in their
+// headers, included at the end of this file.
 
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
 bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a wingman in the way (no pass-through)
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
-ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused or loading
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
-void HeliReap(const void* self) noexcept;          // ...and called helis that have left (heli.cpp)
 bool InstallJets() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
 bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
@@ -185,10 +199,6 @@ bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
 // friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
 enum class HeliBody { brute410, eros506 };
 unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
-// A heli the Air Raider called (heli.cpp): `guard` holds over `post` and fights round it, else it follows
-// the player; its weapons are not refilled, and out of ammo, after `fuelSec` or badly damaged it flies off
-// away from the player and is deleted far from them.
-void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
 struct BombLoad { const void* owner; float damage,spread,speed,adjust,reach; const void* param; std::int32_t seed; };
@@ -205,23 +215,33 @@ bool JetHolds(const void* hold) noexcept;
 // Which bomber body a BombingPlane's model instance (plane+0x660, embedded) is: kind (the BOMBER501 look,
 // the strike jet's) unless its bones name BOMBER401's or BOMBER501_2's model.
 JetBody BomberBody(const unsigned char* inst) noexcept;
-// Where a vehicle weapon's barrel is and points (the mean of its muzzles' frames, heli.cpp).
-bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept;
+
+// body506.cpp: the 506 body the plugin's jets, carriers and player jets fly in. Which one a vehicle is comes
+// from its SGO's mark (veh+0x162C, kMark* in body506.cpp, the one table of them); the 506's physics step
+// (slot 57) is hooked once, there, and hands each body to its owner's step, which returns the velocity and
+// spin to set (false: leave the stock step's).
+enum class PluginBody { none, jet, sub, playerJet };
+PluginBody BodyOf(const void* vehicle) noexcept;
+float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
+bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
+bool Body506Ok() noexcept;                         // the physics hook is in
+bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
+bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
+bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
+// An impact `by` the plugin's vehicle (a crash, jet.cpp / playerjet.cpp) at `at`: `damage` to the enemies
+// of its side within `radius` metres (a charge of the vehicle's own, as the blast drones' is: its team, its
+// kills, friends untouched). False when it could not be dealt (no charge preloaded this mission).
+bool ImpactDamage(const unsigned char* by,const float* at,float damage,float radius) noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
 void CallPick(int step,wchar_t* out,std::size_t size) noexcept;   // airstrike.cpp
-void StartCallPicker() noexcept;                                    // overlay.cpp
 
-// ground.cpp: the Depth Crawler (502), which has no stock AI
-bool IsGroundRobo(const void* vehicle) noexcept;
-void GroundFrame(unsigned char* vehicle) noexcept;   // after its stock pre-update, NPC-driven crawlers only
-bool CheckGroundProfile() noexcept;
 // subcarrier.cpp: the submarine carrier (潜水母艦, docs/subcarrier-re.md), a 506 body from EDF6VC_SUB_CARRIER.SGO
 // (tools/make_sub.py) driven by the plugin: it sits surfaced, follows the player at a ship's pace, turns its bow
 // on the nearest enemy, fires its turret guns and homing missiles, reloads aboard; its HP shows as a follower gauge.
 bool IsSub(const void* vehicle) noexcept;         // a 506 body with the carrier's mark
-void SubFrame(unsigned char* vehicle) noexcept;   // from HeliFrame, NPC-crewed carriers only
+void SubFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook (crew.cpp SubStep), carriers only
 bool InstallSub() noexcept;                       // after InstallJets (it chains onto the 506 physics slot)
 void PreloadSub() noexcept;                       // from the mission's player preload
 // A carrier made at run time on the ground at `pos` (metres; it is raised to sit on the highest ground under
@@ -239,24 +259,10 @@ bool InstallLaser() noexcept;                         // at load
 void PreloadLaser() noexcept;                         // from the mission's player preload
 void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
 
-// hud.cpp: the vehicle HUD (docs/hud-re.md), drawn from the follower gauge's call (subcarrier.cpp GaugeHook).
-bool InstallHud() noexcept;                         // at load: checks the draw and text functions it calls
-void HudSee(unsigned char* vehicle) noexcept;       // from every vehicle's input hook (game thread): a readout's data
-// A carrier's panel (subcarrier.cpp fills it every draw from its game-thread copies): the hull, each deck part.
-struct CarrierPanel {
-    float hull,hullMax;
-    int parts;
-    struct Part { const char* name; float hp,max,repairSec; bool down; } part[4];
-};
-// From the follower gauge's draw (any thread): the readouts and `count` carrier panels. `viewProj`, `ctx` and
-// `viewport` as the gauge drawer 0x804300 gets them.
-void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept;
 // What jet.cpp flies a jet as (game thread): its role's name, seconds of fuel left (-1: none, a carrier's drone),
 // a carrier's drone launches left (-1: not a carrier), whether it is withdrawing; false when it does not fly it.
 struct JetHudInfo { const char* role; float fuelSec; int drones; bool leaving; };
 bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
-// A called heli's fuel (heli.cpp, game thread): seconds until it flies off (0: leaving); false with no limit.
-bool HeliFuel(const void* vehicle,float* sec) noexcept;
 // playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
@@ -266,6 +272,10 @@ bool InstallPlayerJets() noexcept;                      // after InstallSub (it 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
 unsigned char* PlayerHuman() noexcept;
-// Sea rescue (heli.cpp): from every flown helicopter's frame (HeliFrame), at most once per game frame.
-void RescueTick() noexcept;
 }  // namespace crew
+
+// The core modules' declarations (self-contained; every file that includes crew.h sees them as before).
+#include "core.h"
+#include "ground.h"
+#include "heli.h"
+#include "hud.h"

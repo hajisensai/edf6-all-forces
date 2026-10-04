@@ -20,6 +20,9 @@ It has two parts:
 - **Weapon data** overriding the stock vehicles' own files. No weapon rows are added. The
   vehicles' descriptions in `WEAPONTEXT` are rewritten with the new numbers; only their own rows
   change, on top of whatever tables are already in `Mods`, so mods that edit the tables keep theirs.
+  The data works on its own: the guns are ordinary guns the stock game fires, carrying a mark only
+  the plugin reads. Without the plugin (removed, disabled, or refused after a game update) the
+  Keplers and Bohrs still fire their new rounds, just unaimed and with the flak bursting at full range.
 
 ## What changes
 
@@ -44,22 +47,29 @@ Requires EDF6 (Steam) with [EDFModLoader](https://github.com/BlueAmulet/EDFModLo
 1. Copy `EDF6AutoTurret.dll` and `EDF6AutoTurret.ini` from a release (or a CI build artifact) into
    `<EDF6>\Mods\Plugins\`.
 2. Build the weapon files from your own game data (they are derived from it, so they are not
-   distributed) with Python 3.10+, straight into the game's `Mods` folder:
+   distributed) with Python 3.10+, straight into the game's `Mods` folder (from the repository root;
+   the game is found through `EDF6_DIR`, else the Steam libraries):
 
    ```
    set EDF6_DIR=C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6
-   python tools\build.py --out "%EDF6_DIR%\Mods"
+   python autoturret\tools\build.py install
    ```
 
    It writes the vehicles' own call and gun files under `Mods\WEAPON\`, the mission Keplers and
    the NPC Titan under `Mods\OBJECT\`, and their eight rows of the `WEAPONTEXT.*.SGO` tables
-   there; it reads the game's `Root.cpk` and never modifies it. Run it while the game is closed, and
-   again after installing another mod that replaces `WEAPONTEXT`.
-   `--no-text` leaves the text tables alone.
+   there; it reads the game's `Root.cpk` and never modifies it. It refuses while the game runs, and
+   will not overwrite a `Mods` file another mod put there (`--force` backs it up and overwrites it).
+   What it wrote and replaced is recorded in `Mods\.edf6at_data.json` (replaced files are backed up
+   in `Mods\.edf6at_backup\`). Run it again after installing another mod that replaces `WEAPONTEXT`.
+   `--no-text` leaves the text tables alone; `check` reports what is installed.
 
-To uninstall, delete those files and the plugin (delete the `WEAPONTEXT` files only if no other
-mod installed them; otherwise reinstall that mod's). Settings are in `EDF6AutoTurret.ini` and apply
-while the game runs; `Debug=1` writes what the turret is doing to `EDF6AutoTurret.log`.
+To uninstall, run `python autoturret\tools\build.py uninstall` (game closed), then delete the plugin.
+It restores the files it replaced, deletes the ones it created and puts the original text back in
+its eight `WEAPONTEXT` rows; other mods' files and rows stay (anything changed since the install is
+left as it is unless you add `--force`). It also cleans up an install made by the old `build.py`
+(no record), removing only what matches the build byte for byte. Removing just the plugin is safe
+too: the data keeps working without it. Settings are in `EDF6AutoTurret.ini` and apply while the
+game runs; `Debug=1` writes what the turret is doing to `EDF6AutoTurret.log`.
 
 ## Build the plugin
 
@@ -69,12 +79,14 @@ Visual Studio 2022 with the C++ x64 tools (CMake and Ninja come with it):
 build.cmd
 ```
 
-The DLL lands in `dist\Mods\Plugins\`. CI builds it on every push.
+The DLL lands in `build\Mods\Plugins\` (a build product, not in the repository). CI builds it on every push.
 
 ## Compatibility
 
 Built against EDF.dll with TimeDateStamp `0x678CCB46`. The plugin checks the code it patches and
-turns itself off if the game has changed.
+turns itself off if the game has changed (the weapon data keeps working without it). Weapon data
+built by `build.py` before 0.3.0 still works with this plugin, which then patches the game's
+fire check as the old one did; rerun `build.py install` to replace it.
 
 The tank gunners were tested on the Titan (NPC driver, both gunner seats empty): both side
 cannons fired at ants, 40 -> 28 rounds. The Ranger tanks' side guns have not been tested against
@@ -90,5 +102,6 @@ Keplers will not behave the same for everyone. Have every player install it. Rev
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Bundled: `third_party/EDFModLoader/PluginAPI.h` at the repository root (MIT) and
-`third_party/edf6-cpk` (CPK / CRILAYLA readers from EDF6MultiSlot by momotori01, public domain).
+MIT, see [LICENSE](LICENSE). Bundled: `third_party/EDFModLoader/PluginAPI.h` at the repository root (MIT) and,
+in `pylib/` at the repository root, `cpk.py` / `crilayla.py` (CPK / CRILAYLA readers from EDF6MultiSlot by
+momotori01, public domain, `pylib/LICENSE.edf6-cpk`).

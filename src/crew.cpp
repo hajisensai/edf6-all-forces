@@ -17,26 +17,40 @@
 // lets a human board a vehicle of their own team or the unowned team 5. A vehicle crewed here keeps
 // the team it had before (State::ownTeam): both checks run with it, and the bump gives it back.
 // The NPC in a gunner seat stays until the player leaves; then the vehicle is crewed afresh.
+// Per vehicle the module keeps a State, keyed by the vehicle's ObjRef (a new object at an old address is a
+// new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
+// per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "layout.h"
 #include "memory.h"
 #include <cmath>
 
 namespace crew {
 // The game clock: wall time, except that a gap between two reads longer than kPauseMs (the pause menu,
 // loading: nothing is flown or updated) counts as one 16 ms frame.
-namespace { constexpr ULONGLONG kPauseMs=250; ULONGLONG clockWall=0,clockGame=0; }
+// The game clock starts an hour in: 0 is "never" for the timestamps it fills (crashAt, missileAt, launchAt, ...).
+namespace { constexpr ULONGLONG kPauseMs=250,kClockStart=3600000; ULONGLONG clockWall=0,clockGame=kClockStart; }
 ULONGLONG GameMs() noexcept {
     const ULONGLONG wall=GetTickCount64();
     if(clockWall)clockGame+=wall-clockWall>kPauseMs ? 16 : wall-clockWall;
     clockWall=wall;
     return clockGame;
 }
+// The frame: every vehicle's input runs once a frame, so the first vehicle of a frame coming round again
+// starts the next one. If it is deleted, the next repeat of any vehicle seen this frame does.
+namespace { constexpr int kFrameSeen=128; const void* frameSeen[kFrameSeen]{}; int frameSeenCount=0; ULONGLONG frame=1; }
+ULONGLONG GameFrame() noexcept { return frame; }
+void SeeFrame(const void* vehicle) noexcept {
+    for(int i=0;i<frameSeenCount;++i)
+        if(frameSeen[i]==vehicle){++frame;frameSeenCount=0;break;}
+    if(frameSeenCount<kFrameSeen)frameSeen[frameSeenCount++]=vehicle;
+}
 namespace {
 using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
 using RideAiFn=void(__fastcall*)(void*,bool);
 // Forwarded with all four register arguments: CarBase's input (slot 55) also reads r8 (its drive block)
 // and the 502's pre-update (slot 4) takes `this` alone.
-using InputFn=void(__fastcall*)(void*,std::uintptr_t,void*,void*);
+using InputFn=edf::VehicleInputFn;   // the slot 55 signature both plugins chain (common/edf/layout.h)
 using PromptFn=void(__fastcall*)(void*,void*);
 using CanRideSeatFn=bool(__fastcall*)(void*,void*,void*);
 using CanRideFn=bool(__fastcall*)(void*,void*);
@@ -53,15 +67,14 @@ struct VehicleClass {
     unsigned vtable; unsigned input; const char* name;
     unsigned findSeat=kFindSeat; std::size_t inputSlot=kSlotInput; bool armedOnly=false;
 };
-constexpr std::size_t kHolderCount=0x648;
 const VehicleClass kClasses[]={
     {0x17D8B50,0x5FD8E0,"402_Rocket"},{0x17D8FA0,0x5FEBE0,"403_Tank"},{0x17D9458,0x5FFC50,"404_Tank"},
-    {0x17D98C8,0,"501_FortressRobo"},{0x17DA028,0x612D20,"502_GroundRobo",kFindSeat,4},{0x17DA508,0x6178B0,"503_Bike"},
-    {0x17DA960,0x63C1C0,"504_begaruta"},{0x17DADB0,0x61ACD0,"505_Tank"},{0x17DB238,0x61B8F0,"506_Helicopter"},
+    {0x17D98C8,0,"501_FortressRobo"},{kVt502,0x612D20,"502_GroundRobo",kFindSeat,4},{0x17DA508,0x6178B0,"503_Bike"},
+    {0x17DA960,0x63C1C0,"504_begaruta"},{0x17DADB0,0x61ACD0,"505_Tank"},{kVt506,0x61B8F0,"506_Helicopter"},
     {0x17DB9D8,0x61DDF0,"510_Maser"},{0x17DBDF8,0x61F080,"511_Bike"},{0x17DC250,0x620790,"601_Tank"},
     {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x63C1C0,"612_nix"},{0x17DD720,0,"VehicleBase"},
-    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0,"BigBegaruta"},{0x17DEF98,0x64C020,"Helicopter409"},
-    {0x17DF338,0x64E080,"Helicopter410"},{0x17DF790,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
+    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0,"BigBegaruta"},{kVt409,0x64C020,"Helicopter409"},
+    {kVt410,0x64E080,"Helicopter410"},{kVtHeliBase,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
     {0x17E0A80,0,"CarBase"},{0x17E1828,0,"TankBase"},
     {0x17E01B0,0x65A390,"Car",0x65B910,kSlotInput,true},
 };
@@ -71,19 +84,35 @@ constexpr int kClassCount=static_cast<int>(sizeof(kClasses)/sizeof(kClasses[0]))
 InputFn nextInput[kClassCount]{};
 // Each class's own slot 49, which our FindSeat hook calls through (null: that class not hooked).
 FindSeatFn originalFindSeat_[kClassCount]{};
-PromptFn originalPrompt=nullptr;
-bool inputsHooked=false;
+PromptFn originalPrompt=nullptr;   // null: the prompt hook is not in (the prompt features are off)
+volatile LONG inputsHooked=0;      // EnsureInputs has run (once)
+
+// Aim lines (docs/aim-line-re.md): the red line out of a vehicle gun's muzzle. Weapon_VehicleShoot's ctor
+// (0x6B3250, also VehicleMaser / RailGun / SwingShoot) makes a WeaponAimLine (vtable kAimLineVtable) of
+// custom_parameter[0] segments and keeps it at weapon+kWeaponAimLine; each frame 0x6899F0 builds the line
+// from its segment count (+kAimLineSegments, 0: no line). An NPC's seat gets 0; a player in the seat gets
+// the count back. The count taken away is kept with its vehicle's State (the lines are its weapons'), so it
+// is never handed to another vehicle's line at a reused address and never overwritten while still owed.
+constexpr std::size_t kWeaponAimLine=0x1638,kAimLineSegments=0x130;
+constexpr unsigned kAimLineVtable=0x17E2418;
+constexpr int kLinesPerVehicle=12;
+struct HiddenLine { const unsigned char* line; std::int32_t segments; };
 
 struct State {
-    const void* vehicle;
+    ObjRef ref;
     ULONGLONG emptySince,playerAt,bumpedAt,crewedAt,loggedAt,seen;
     std::int32_t ownTeam;   // the vehicle's team before we crewed it (valid when crewedAt != 0)
+    HiddenLine lines[kLinesPerVehicle];
 };
-State states[64]{};
+// Every live vehicle runs its input every frame (seen); one not seen for kStaleMs is gone.
+constexpr int kMaxStates=128;
+constexpr ULONGLONG kStaleMs=2000;
+State states[kMaxStates]{};
+ULONGLONG fullLoggedAt=0;
 
 // The state of a vehicle we track, without claiming a slot for one we do not.
 State* FindState(const void* vehicle) noexcept {
-    for(auto& s:states)if(s.vehicle==vehicle)return &s;
+    for(auto& s:states)if(s.ref.Is(vehicle))return &s;
     return nullptr;
 }
 
@@ -93,14 +122,21 @@ std::int32_t OwnTeam(const unsigned char* vehicle) noexcept {
     return st && st->crewedAt ? st->ownTeam : At<std::int32_t>(vehicle,kTeam);
 }
 
-State& StateFor(const void* vehicle) noexcept {
-    State* slot=&states[0];
+// The vehicle's state, a new one for a vehicle not tracked yet: in a free slot, the slot of a gone object at
+// the same address, or one whose vehicle is stale. Never a live vehicle's: with none free, nullptr (the
+// vehicle is left to the stock game, logged).
+State* StateFor(const void* vehicle,ULONGLONG now) noexcept {
+    State* slot=nullptr;
     for(auto& s:states) {
-        if(s.vehicle==vehicle)return s;
-        if(s.seen<slot->seen)slot=&s;
+        if(s.ref.Is(vehicle))return &s;
+        if(!slot && (!s.ref || s.ref.obj==vehicle || now-s.seen>kStaleMs))slot=&s;
     }
-    *slot=State{};slot->vehicle=vehicle;
-    return *slot;
+    if(!slot) {
+        if(now-fullLoggedAt>10000){fullLoggedAt=now;Log("CREW table full (%d live vehicles): v=%p left to the stock game",kMaxStates,vehicle);}
+        return nullptr;
+    }
+    *slot=State{};slot->ref=ObjRef::Of(vehicle);slot->seen=now;
+    return slot;
 }
 
 int ClassOf(const void* object) noexcept {
@@ -112,20 +148,8 @@ int ClassOf(const void* object) noexcept {
 
 const void* RiderObject(const unsigned char* seat) noexcept { return At<const void*>(seat,kSeatRider); }
 
-// Aim lines (docs/aim-line-re.md): the red line out of a vehicle gun's muzzle. Weapon_VehicleShoot's ctor
-// (0x6B3250, also VehicleMaser / RailGun / SwingShoot) makes a WeaponAimLine (vtable kAimLineVtable) of
-// custom_parameter[0] segments and keeps it at weapon+kWeaponAimLine; each frame 0x6899F0 builds the line
-// from its segment count (+kAimLineSegments, 0: no line). An NPC's seat gets 0; a player in the seat gets
-// the count back.
-constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
-constexpr std::size_t kWeaponAimLine=0x1638,kAimLineSegments=0x130;
-constexpr unsigned kAimLineVtable=0x17E2418;
-struct HiddenLine { unsigned char* line; std::int32_t segments; };
-HiddenLine hiddenLines[64]{};
-unsigned hiddenNext=0;
-
-HiddenLine* HiddenOf(const unsigned char* line) noexcept {
-    for(auto& h:hiddenLines)if(h.line==line)return &h;
+HiddenLine* HiddenOf(State& st,const unsigned char* line) noexcept {
+    for(auto& h:st.lines)if(h.line==line)return &h;
     return nullptr;
 }
 
@@ -139,11 +163,14 @@ unsigned char* AimLineOf(unsigned char* const* holders,std::uint64_t i) noexcept
     return line;
 }
 
-void SetLine(unsigned char* line,Rider rider) noexcept {
+// Hides the line from an NPC (its count kept in the vehicle's state; with no room left the line stays as it
+// is), gives a player back what was taken.
+void SetLine(State& st,unsigned char* line,Rider rider) noexcept {
     const auto segments=At<std::int32_t>(line,kAimLineSegments);
-    HiddenLine* h=HiddenOf(line);
+    HiddenLine* h=HiddenOf(st,line);
     if(rider==Rider::dummy && segments>0) {
-        if(!h)h=&hiddenLines[hiddenNext++%64];
+        if(!h)h=HiddenOf(st,nullptr);
+        if(!h)return;
         *h=HiddenLine{line,segments};
         Put<std::int32_t>(line,kAimLineSegments,0);
     } else if(rider==Rider::player && h) {
@@ -154,8 +181,10 @@ void SetLine(unsigned char* line,Rider rider) noexcept {
 
 // Every seat's guns: no line while an NPC holds the seat, or while it is empty in a vehicle an NPC
 // drives (the 410's door guns, aimed by the plugin with nobody in them); the stock line while the player
-// holds it.
+// holds it. Only for a vehicle with a state (Crew made it this frame).
 void AimLines(unsigned char* vehicle) noexcept {
+    State* const st=FindState(vehicle);
+    if(!st)return;
     const unsigned count=SeatCount(vehicle);
     const bool npcDriven=count>0 && SeatRider(SeatAt(vehicle,0))==Rider::dummy;
     for(unsigned i=0;i<count && i<16;++i) {
@@ -167,7 +196,7 @@ void AimLines(unsigned char* vehicle) noexcept {
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(n>8 || !Readable(holders,n*8))continue;
         for(std::uint64_t w=0;w<n;++w)
-            if(auto line=AimLineOf(holders,w))SetLine(line,rider);
+            if(auto line=AimLineOf(holders,w))SetLine(*st,line,rider);
     }
 }
 
@@ -197,27 +226,48 @@ int FreeGunnerSeat(unsigned char* vehicle,unsigned skip) noexcept {
     return -1;
 }
 
-// Free the NPC-held seat `index` for the player: move the NPC to a free gunner seat, else kick it.
-void Bump(unsigned char* vehicle,unsigned index) noexcept {
-    Put<std::int32_t>(vehicle,kTeam,OwnTeam(vehicle));   // the stock slot 49 re-checks the team next
+// The NPC now seated in `to` as well leaves `from`; a fault in that clear takes it out of `to` again, so it
+// is never left in two seats (or the player's seat still held). False then.
+bool LeaveSeat(unsigned char* vehicle,unsigned char* from,unsigned char* to) noexcept {
+    __try { reinterpret_cast<SeatFn>(image+kSeatClear)(vehicle,from); return true; }
+    __except(EXCEPTION_EXECUTE_HANDLER) {}
+    __try { reinterpret_cast<SeatFn>(image+kSeatClear)(vehicle,to); }
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("BUMP v=%p: the move undo faulted too",vehicle);}
+    return false;
+}
+
+// Free the NPC-held seat `index` for the player: move the NPC to a free gunner seat, else kick it. Every
+// choice is made before the first write; the move is seat, then clear (LeaveSeat pairs them). False when the
+// seat could not be freed (the caller then offers the player nothing).
+bool Bump(unsigned char* vehicle,unsigned index) noexcept {
+    const std::int32_t team=At<std::int32_t>(vehicle,kTeam),own=OwnTeam(vehicle);
     auto seat=SeatAt(vehicle,index);
     auto rider=const_cast<void*>(RiderObject(seat));
-    const int gunner=cfg.bumpToGunner ? FreeGunnerSeat(vehicle,index) : -1;
-    if(gunner>=0 && reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,gunner,false)) {
-        reinterpret_cast<SeatFn>(image+kSeatClear)(vehicle,seat);
-        Log("BUMP v=%p seat=%u -> npc moved to gunner seat %d",vehicle,index,gunner);
-    } else {
+    const int gunner=Cfg().bumpToGunner ? FreeGunnerSeat(vehicle,index) : -1;
+    Put<std::int32_t>(vehicle,kTeam,own);   // the stock slot 49 re-checks the team next
+    bool freed=false;
+    if(gunner>=0) {
+        if(auto to=reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,gunner,false)) {
+            freed=LeaveSeat(vehicle,seat,to);
+            Log(freed ? "BUMP v=%p seat=%u -> npc moved to gunner seat %d" : "BUMP v=%p seat=%u -> the move to seat %d faulted: undone",
+                vehicle,index,gunner);
+            if(!freed){Put<std::int32_t>(vehicle,kTeam,team);return false;}   // as it was: the NPC still in its seat
+        }
+    }
+    if(!freed) {
         reinterpret_cast<SeatFn>(image+kSeatKick)(vehicle,seat);
         Log("BUMP v=%p seat=%u -> npc kicked (no free gunner seat)",vehicle,index);
     }
-    StateFor(vehicle).bumpedAt=GetTickCount64();
+    if(State* st=FindState(vehicle))st->bumpedAt=GameMs();
+    return true;
 }
 
 unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
+    EnsureInputs();   // the board button in the first mission (with no prompt hook nor mission start hooked)
     const int cls=ClassOf(vehicle);
     const FindSeatFn originalFindSeat=cls>=0 && originalFindSeat_[cls] ? originalFindSeat_[cls] : reinterpret_cast<FindSeatFn>(image+kFindSeat);
     auto seat=originalFindSeat(vehicle,human);
-    if(seat || !cfg.enabled || !cfg.bump)return seat;
+    if(seat || !Cfg().enabled || !Cfg().bump || BumpSuppressed())return seat;
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
         // The jets are NPC aircraft: their pilot is never bumped for the player (they have no other seat).
@@ -236,19 +286,16 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
             if(SeatRider(s)!=Rider::dummy)continue;
             const bool ok=WithDummiesHidden(v,[&]{ return reinterpret_cast<CanRideSeatFn>(image+kCanRideSeat)(v,human,s); });
             if(!ok)continue;
-            Bump(v,i);
-            return originalFindSeat(vehicle,human);
+            return Bump(v,i) ? originalFindSeat(vehicle,human) : nullptr;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return nullptr;
 }
 
-void InstallInputs() noexcept;
-
 // The on-foot ride prompt, once per object per frame for every human on foot.
 void __fastcall PromptHook(void* functor,void* object) {
     originalPrompt(functor,object);
-    if(!cfg.enabled)return;
+    if(!Cfg().enabled)return;
     __try {
         auto f=static_cast<unsigned char*>(functor);
         auto human=At<unsigned char*>(f,kFunctorHuman);
@@ -256,8 +303,8 @@ void __fastcall PromptHook(void* functor,void* object) {
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         JetReap(object);   // a withdrawn jet with no other vehicle about (the player on foot)
         HeliReap(object);  // ...and a called heli that left
-        if(!inputsHooked)InstallInputs();   // first mission frame: every plugin has loaded by now
-        if(!cfg.bump || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object) || IsSub(object))return;
+        EnsureInputs();    // first mission frame: every plugin has loaded by now
+        if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object) || IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
         for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy;
@@ -274,8 +321,7 @@ float Distance2(const unsigned char* vehicle,const float* pos) noexcept {
 
 void Crew(unsigned char* vehicle,int cls) noexcept {
     if(!Readable(vehicle,kSeatCount+8,true) || vehicle[kDead])return;
-    const auto now=GetTickCount64();
-    State& st=StateFor(vehicle);st.seen=now;
+    const auto now=GameMs();
     const unsigned count=SeatCount(vehicle);
     bool anyPlayer=false,driver=false;
     int dummies=0;
@@ -285,7 +331,12 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
         driver=driver || (i==0 && r!=Rider::none);
         dummies+=r==Rider::dummy;
     }
-    if(cfg.debug && now-st.loggedAt>5000) {
+    // The player riding: their fix, whether or not this vehicle has a state.
+    if(anyPlayer)SeePlayer(reinterpret_cast<const float*>(vehicle+kPosition),At<std::int32_t>(vehicle,kTeam));
+    State* const sp=StateFor(vehicle,now);
+    if(!sp)return;
+    State& st=*sp;st.seen=now;
+    if(Cfg().debug && now-st.loggedAt>5000) {
         st.loggedAt=now;
         char riders[17]{};
         for(unsigned i=0;i<count && i<16;++i)riders[i]="-dPo"[static_cast<int>(SeatRider(SeatAt(vehicle,i)))];
@@ -293,23 +344,19 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
         Log("VEH v=%p %s team=%d playerTeam=%d seats=[%s] pos=(%.0f,%.0f,%.0f) dist=%.0f",vehicle,kClasses[cls].name,
             At<std::int32_t>(vehicle,kTeam),player.team,riders,p[0],p[1],p[2],player.at ? std::sqrt(Distance2(vehicle,player.pos)) : -1.0f);
     }
-    if(anyPlayer) {
-        st.playerAt=now;st.emptySince=0;
-        SeePlayer(reinterpret_cast<const float*>(vehicle+kPosition),At<std::int32_t>(vehicle,kTeam));
-        return;
-    }
-    if(driver || !cfg.autoCrew || IsPlayerJet(vehicle)){st.emptySince=0;return;}   // a player jet waits for the player
+    if(anyPlayer){st.playerAt=now;st.emptySince=0;return;}
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle)){st.emptySince=0;return;}   // a player jet waits for the player
     if(!st.emptySince)st.emptySince=now;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
     ULONGLONG since=st.emptySince;
     if(st.playerAt>since)since=st.playerAt;
     if(st.bumpedAt>since)since=st.bumpedAt;
-    if(now-since<cfg.crewDelayMs)return;
+    if(now-since<Cfg().crewDelayMs)return;
     // Its own team, not the one an NPC left aboard (in a gunner seat) holds it on.
     const auto team=OwnTeam(vehicle);
     if(!player.at || now-player.at>10000 || (team!=player.team && team!=kTeamVehicle))return;
-    if(cfg.crewRange>0.0f && Distance2(vehicle,player.pos)>cfg.crewRange*cfg.crewRange)return;
+    if(Cfg().crewRange>0.0f && Distance2(vehicle,player.pos)>Cfg().crewRange*Cfg().crewRange)return;
     // An unarmed truck of an armed vehicle's class: nothing for a driver to do.
     if(kClasses[cls].armedOnly && At<std::uint64_t>(vehicle,kHolderCount)==0)return;
     // The NPC that moved to a gunner seat when the player boarded goes with the driver seat:
@@ -319,7 +366,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     auto rideAi=reinterpret_cast<RideAiFn*>(At<void**>(vehicle,0))[kSlotRideAi];
     rideAi(vehicle,false);
     st.crewedAt=now;st.emptySince=0;st.ownTeam=team;
-    if(IsHelicopter(vehicle))HeliCrewed(vehicle);
+    if(IsHelicopter(vehicle))HeliCrewed(vehicle);   // false (its table full): logged there, the heli sits
     Log("CREW v=%p %s seats=%u driver=%d",vehicle,kClasses[cls].name,count,SeatRider(SeatAt(vehicle,0))==Rider::dummy);
 }
 
@@ -330,30 +377,79 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
     static ULONGLONG at=0;
     LARGE_INTEGER f;QueryPerformanceFrequency(&f);
     const double s=static_cast<double>(stock)*1000.0/static_cast<double>(f.QuadPart),p=static_cast<double>(plugin)*1000.0/static_cast<double>(f.QuadPart);
-    if(!cfg.debug || (s<kSlowMs && p<kSlowMs))return;
+    if(!Cfg().debug || (s<kSlowMs && p<kSlowMs))return;
     const ULONGLONG now=GetTickCount64();
     if(now-at<1000)return;
     at=now;
     Log("SLOW v=%p %s: stock input %.1f ms, plugin %.1f ms",v,kClasses[cls].name,s,p);
 }
 
+// The per-frame steps, each under its own guard: a fault in one (logged per step at most every kFaultLogMs,
+// with how many so far) skips that step for that vehicle this frame, not every step after it.
+enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
+            kStepRescue, kStepHudPublish, kStepCount };
+const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
+                                          "rescue","hud publish"};
+constexpr ULONGLONG kFaultLogMs=10000;
+struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
+
+int StepFault(int step,const EXCEPTION_POINTERS* e) noexcept {
+    Faults& f=faults[step];
+    ++f.count;
+    const ULONGLONG now=GetTickCount64();
+    if(f.loggedAt && now-f.loggedAt<kFaultLogMs)return EXCEPTION_EXECUTE_HANDLER;
+    f.loggedAt=now;
+    const auto at=static_cast<const unsigned char*>(e->ExceptionRecord->ExceptionAddress);
+    const bool inGame=at>=image && at<image+0x22CE000;
+    Log("FAULT %s: %08lX at %s%llX (%u so far; the step is skipped, the others go on)",kStepNames[step],e->ExceptionRecord->ExceptionCode,
+        inGame ? "EDF+" : "",static_cast<unsigned long long>(inGame ? static_cast<std::uintptr_t>(at-image) : reinterpret_cast<std::uintptr_t>(at)),f.count);
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+using VehicleStep=void(*)(unsigned char*);
+void Guarded(int step,VehicleStep run,unsigned char* v) noexcept {
+    __try { run(v); } __except(StepFault(step,GetExceptionInformation())) {}
+}
+void GuardedTick(int step,void(*run)()) noexcept {
+    __try { run(); } __except(StepFault(step,GetExceptionInformation())) {}
+}
+
+template<int I> void CrewStep(unsigned char* v) noexcept { Crew(v,I); }
+void JetReapStep(unsigned char* v) noexcept { JetReap(v); }
+void HeliReapStep(unsigned char* v) noexcept { HeliReap(v); }
+void HeliStep(unsigned char* v) noexcept { if(IsHelicopter(v))HeliFrame(v); }
+// The submarine carrier is the plugin's own (subcarrier.cpp's registry), driven whoever sits in it: not from
+// HeliFrame, which wants an NPC pilot in seat 0 and the heli profile.
+void SubStep(unsigned char* v) noexcept { if(BodyOf(v)==PluginBody::sub){SubFrame(v);CarrierLaserFrame(v);} }
+void GroundStep(unsigned char* v) noexcept { if(IsGroundRobo(v))GroundFrame(v); }
+
+// Once a game frame, from the first vehicle input of the frame: what is no one vehicle's (the sea rescue,
+// which needs no heli to exist yet; the HUD's publish of what it gathered last frame).
+ULONGLONG tickFrame=0;
+void FrameTick() noexcept {
+    if(tickFrame==GameFrame())return;
+    tickFrame=GameFrame();
+    GuardedTick(kStepRescue,&RescueTick);
+    GuardedTick(kStepHudPublish,&HudPublish);
+}
+
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
     LARGE_INTEGER t0,t1,t2;QueryPerformanceCounter(&t0);
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
-    if(!cfg.enabled)return;
-    ReloadConfigIfChanged();
-    __try {
-        auto v=static_cast<unsigned char*>(vehicle);
-        Crew(v,I);
-        AimLines(v);
-        JetReap(v);
-        HeliReap(v);
-        PlayerJetFrame(v);
-        if(IsHelicopter(v))HeliFrame(v);
-        if(IsGroundRobo(v))GroundFrame(v);
-        HudSee(v);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
+    auto v=static_cast<unsigned char*>(vehicle);
+    SeeFrame(v);               // the frame is a clock: it steps with the plugin off too (body506's steps test it)
+    if(!Cfg().enabled)return;
+    FrameTick();
+    Guarded(kStepCrew,&CrewStep<I>,v);
+    Guarded(kStepAimLines,&AimLines,v);
+    Guarded(kStepJetReap,&JetReapStep,v);
+    Guarded(kStepHeliReap,&HeliReapStep,v);
+    Guarded(kStepPlayerJet,&PlayerJetFrame,v);
+    Guarded(kStepSub,&SubStep,v);
+    Guarded(kStepHeli,&HeliStep,v);
+    Guarded(kStepGround,&GroundStep,v);
+    Guarded(kStepHud,&HudSee,v);
     QueryPerformanceCounter(&t2);
     SlowLog(I,vehicle,t1.QuadPart-t0.QuadPart,t2.QuadPart-t1.QuadPart);
 }
@@ -362,9 +458,8 @@ template<int... I> struct Hooks { static constexpr InputFn table[]={&InputHook<I
 using AllHooks=Hooks<0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23>;
 static_assert(sizeof(AllHooks::table)/sizeof(AllHooks::table[0])==kClassCount,"one hook per class");
 
-// Chains every concrete class's input slot. Runs on the game thread, first mission frame.
+// Chains every concrete class's input slot (see EnsureInputs).
 void InstallInputs() noexcept {
-    inputsHooked=true;
     int hooked=0;
     for(int i=0;i<kClassCount;++i) {
         if(!kClasses[i].input || !originalFindSeat_[i])continue;   // abstract bases, classes we leave alone or could not hook
@@ -378,11 +473,19 @@ void InstallInputs() noexcept {
 }
 }  // namespace
 
+// Not at load: another plugin (EDF6AutoTurret hooks 403/404/603) may patch the same input slots after us, and
+// ours must chain onto theirs. Once, from the first of the mission's start (mission.cpp), the on-foot prompt
+// and the board button, whichever is hooked and comes first: no single hook's failure leaves the per-frame
+// layer off.
+void EnsureInputs() noexcept {
+    if(InterlockedCompareExchange(&inputsHooked,1,0)!=0)return;
+    InstallInputs();
+}
+
 bool InstallCrew() noexcept {
-    // The prompt visitor must be stock; a class whose slot 49 is not its own stock FindSeat (another
-    // plugin's) is left alone, seats and input both.
-    if(reinterpret_cast<void**>(image+kPromptFunctorVtable)[1]!=image+kPromptVisit){Log("HOOK crew: prompt visitor not stock");return false;}
-    originalPrompt=reinterpret_cast<PromptFn>(image+kPromptVisit);
+    // A class whose slot 49 is not its own stock FindSeat (another plugin's) is left alone, seats and input
+    // both. The prompt visitor not stock costs only the prompt's part (on-foot prompt for an NPC's seat, the
+    // on-foot player fix, the reaps with the player on foot); the board button still bumps.
     int seats=0;
     for(int i=0;i<kClassCount;++i) {
         const auto& c=kClasses[i];
@@ -393,8 +496,22 @@ bool InstallCrew() noexcept {
         originalFindSeat_[i]=reinterpret_cast<FindSeatFn>(stock);
         ++seats;
     }
-    const bool prompt=PatchVtableSlot(reinterpret_cast<void**>(image+kPromptFunctorVtable)+1,image+kPromptVisit,reinterpret_cast<void*>(&PromptHook));
-    Log("HOOK crew findSeat=%d/%d prompt=%d (inputs on the first mission frame)",seats,kClassCount,prompt);
-    return seats>0 || prompt;
+    if(!seats)return false;   // no class hooked: no input to chain either (InstallInputs takes the hooked ones)
+    void** const promptSlot=reinterpret_cast<void**>(image+kPromptFunctorVtable)+1;
+    bool prompt=false;
+    if(*promptSlot!=image+kPromptVisit)Log("HOOK crew: prompt visitor not stock: no prompt for an NPC's seat (the board button still bumps)");
+    else {
+        originalPrompt=reinterpret_cast<PromptFn>(image+kPromptVisit);
+        prompt=PatchVtableSlot(promptSlot,image+kPromptVisit,reinterpret_cast<void*>(&PromptHook));
+        if(!prompt){originalPrompt=nullptr;Log("HOOK crew: prompt patch failed: no prompt for an NPC's seat");}
+    }
+    Log("HOOK crew findSeat=%d/%d prompt=%d (inputs at the mission's start or the first prompt / board)",seats,kClassCount,prompt);
+    return true;
+}
+
+// A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
+void ResetCrew() noexcept {
+    for(auto& s:states)s=State{};
+    fullLoggedAt=0;
 }
 }  // namespace crew

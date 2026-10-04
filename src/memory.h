@@ -1,9 +1,9 @@
+// The memory primitives live in common/ (edf6common, shared with EDF6AutoTurret); the plugin's code calls
+// them unqualified from namespace crew.
 #pragma once
-#include <Windows.h>
-#include <cstdint>
-#include <cstddef>
+#include "edf/memory.h"
 namespace crew {
-bool Readable(const void*,std::size_t,bool writable=false) noexcept;
-void* AllocateNearThunk(const void*,void*) noexcept;
-bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept;
-}
+using edf::Readable;
+using edf::AllocateNearThunk;
+using edf::RedirectCall;
+}  // namespace crew

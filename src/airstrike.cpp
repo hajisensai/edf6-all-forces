@@ -28,10 +28,12 @@
 // The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
+#include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include <atomic>
 #include <cmath>
 #include <cwchar>
+#include <optional>
 
 namespace crew {
 namespace {
@@ -53,7 +55,6 @@ constexpr std::uint32_t kMaxRecords=0x800;
 constexpr unsigned char kUnlockDlcSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,
                                          0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
 constexpr unsigned char kUnlockThunkSig[]={0x48,0x8B,0x0D};   // 0x70FF80: mov rcx,[GS]; jmp 0xDC550
-constexpr wchar_t kCallPrefix[]=L"EDF6VC_CALL_";
 // The weapon a radio call's IndirectFireControl is in (ifc = weapon+0x1660), and its AmmoHitSizeAdjust.
 constexpr std::size_t kWeaponIfc=0x1660,kWeaponHitSize=0x8C4;
 
@@ -98,48 +99,21 @@ Held* FreeHeld(ULONGLONG ms) noexcept {
 constexpr unsigned kPlaneHide=0x6C04B0,kPlaneUnlist=0x54DDB0;
 constexpr std::size_t kPlaneSpeed=0xB90,kPlaneDraw=0x5C0;
 
-// The call weapons (tools/call_weapons.py writes the same marks and counts): per role a guard call (round
-// its marker) and a follow call (round the player), the follow one dearer (its reload). The stronger the
-// call, the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts
-// is its ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of
-// fuel (fuelSec) or badly damaged each leaves.
-// What a call brings: jets (JetLaunch), helis (HeliLaunch) or the submarine carrier (SubLaunch).
+// The call weapons, made from one table (tools/calls.py): tools/call_weapons.py writes their weapon rows and
+// SGOs, tools/gen_calls.py writes calls.inc below (CI checks it is current). Per role a guard call (round its
+// marker) and a follow call (round the player), the follow one dearer (its reload). The stronger the call,
+// the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts is its
+// ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of fuel
+// (fuelSec) or badly damaged each leaves.
+// What a call brings: jets (JetLaunch, `role`), helis (HeliLaunch, `body`) or the submarine carrier
+// (SubLaunch); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
-struct Call { float mark; Brings brings; JetRole role; HeliBody body; int count; DWORD fuelSec; bool follow; const char* name;
-              const wchar_t* id; };
-const Call kCalls[]={
-    {7101.0f,Brings::jets,JetRole::interceptor,HeliBody::eros506,2,240,false,"interceptors (guard)",L"EDF6VC_CALL_INTERCEPTOR"},
-    {7102.0f,Brings::jets,JetRole::interceptor,HeliBody::eros506,2,240,true,"interceptors (follow)",L"EDF6VC_CALL_INTERCEPTOR_F"},
-    {7103.0f,Brings::jets,JetRole::strike,HeliBody::eros506,3,240,false,"strike jets (guard)",L"EDF6VC_CALL_STRIKE"},
-    {7104.0f,Brings::jets,JetRole::strike,HeliBody::eros506,3,240,true,"strike jets (follow)",L"EDF6VC_CALL_STRIKE_F"},
-    {7105.0f,Brings::jets,JetRole::multirole,HeliBody::eros506,3,300,false,"multirole jets (guard)",L"EDF6VC_CALL_MULTIROLE"},
-    {7106.0f,Brings::jets,JetRole::multirole,HeliBody::eros506,3,300,true,"multirole jets (follow)",L"EDF6VC_CALL_MULTIROLE_F"},
-    {7107.0f,Brings::jets,JetRole::fighter,HeliBody::eros506,4,300,false,"fighters (guard)",L"EDF6VC_CALL_FIGHTER"},
-    {7108.0f,Brings::jets,JetRole::fighter,HeliBody::eros506,4,300,true,"fighters (follow)",L"EDF6VC_CALL_FIGHTER_F"},
-    {7109.0f,Brings::jets,JetRole::carrier,HeliBody::eros506,1,600,false,"carrier (guard)",L"EDF6VC_CALL_CARRIER"},
-    {7110.0f,Brings::jets,JetRole::carrier,HeliBody::eros506,1,600,true,"carrier (follow)",L"EDF6VC_CALL_CARRIER_F"},
-    {7111.0f,Brings::helis,JetRole::fighter,HeliBody::brute410,2,360,false,"Brute helis (guard)",L"EDF6VC_CALL_HELI"},
-    {7112.0f,Brings::helis,JetRole::fighter,HeliBody::eros506,2,360,true,"Eros helis (follow)",L"EDF6VC_CALL_HELI_F"},
-    {7113.0f,Brings::jets,JetRole::blastCarrier,HeliBody::eros506,1,600,false,"blast drone carrier (guard)",L"EDF6VC_CALL_BLAST_CARRIER"},
-    {7114.0f,Brings::jets,JetRole::blastCarrier,HeliBody::eros506,1,600,true,"blast drone carrier (follow)",L"EDF6VC_CALL_BLAST_CARRIER_F"},
-    {7115.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,false,"doll drone carrier (guard)",L"EDF6VC_CALL_DOLL_CARRIER"},
-    {7116.0f,Brings::jets,JetRole::dollCarrier,HeliBody::eros506,1,600,true,"doll drone carrier (follow)",L"EDF6VC_CALL_DOLL_CARRIER_F"},
-    // The submarine carrier surfaces kSubAhead past the marker (its 1664 m hull clear of the caller) and stays
-    // the mission, following the player (subcarrier.cpp; three at most).
-    {7117.0f,Brings::sub,JetRole::fighter,HeliBody::eros506,1,0,true,"submarine carrier",L"EDF6VC_CALL_SUB"},
-    // The gunship (jet.cpp GunshipFire): a bomber401 circling its point and shelling the ground enemies in reach.
-    {7118.0f,Brings::jets,JetRole::gunship,HeliBody::eros506,1,600,false,"gunship (guard)",L"EDF6VC_CALL_GUNSHIP"},
-    {7119.0f,Brings::jets,JetRole::gunship,HeliBody::eros506,1,600,true,"gunship (follow)",L"EDF6VC_CALL_GUNSHIP_F"},
-};
-constexpr int kCallCount=static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0]));
-// kCalls' names on the in-mission pick's banner (tools/call_weapons.py KINDS' SC names).
-const wchar_t* const kCallLabels[]={
-    L"截击机·守点",L"截击机·跟随",L"对地攻击机·守点",L"对地攻击机·跟随",L"多用途机·守点",L"多用途机·跟随",
-    L"制空战斗机·守点",L"制空战斗机·跟随",L"无人机母舰·守点",L"无人机母舰·跟随",L"武装直升机·守点",L"武装直升机·跟随",
-    L"自爆无人机母舰·守点",L"自爆无人机母舰·跟随",L"人偶无人机母舰·守点",L"人偶无人机母舰·跟随",L"潜水母舰支援",
-    L"炮舰机·守点",L"炮舰机·跟随",
-};
-static_assert(sizeof(kCallLabels)/sizeof(kCallLabels[0])==kCallCount,"a label per call");
+struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
+              bool follow; const char* name; const wchar_t* id; };
+// A weapon table row tools/call_weapons.py installs (a vehicle request too): its id, its SGO in Mods/WEAPON and
+// the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
+struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* objectFile; };
+#include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = every call weapon brings its own call, else
 // every call weapon brings kCalls[picked].
 std::atomic<int> picked{-1};
@@ -156,13 +130,25 @@ bool HoldsId(const unsigned char* data,std::size_t size,const wchar_t* id) noexc
 // (tools/call_weapons.py install): a mod that writes its own table over it drops their rows, and the
 // weapons are gone from the game. Checked once at load and logged with the fix (the table is a shared
 // file and the game reads it while the plugin loads: the plugin never writes it).
-void CheckCallTable() noexcept {
+// Whether <game>/Mods/<dir>/<file> is there.
+bool ModFileThere(const wchar_t* game,const wchar_t* dir,const wchar_t* file) noexcept {
     wchar_t path[MAX_PATH];
-    const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
-    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
+    if(swprintf_s(path,L"%ls\\Mods\\%ls\\%ls",game,dir,file)<0)return false;
+    const DWORD a=GetFileAttributesW(path);
+    return a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// Every row tools/call_weapons.py installs (kCallRows, the vehicle requests too): in the weapon table, its
+// weapon SGO in Mods/WEAPON and the vehicle SGO a request brings in Mods/OBJECT. A missing one is said, so a
+// mod that overwrote the shared table or a half install shows in the log.
+void CheckCallTable() noexcept {
+    wchar_t game[MAX_PATH];
+    const DWORD n=GetModuleFileNameW(nullptr,game,MAX_PATH);
+    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(game,L'\\') : nullptr;
     if(!slash)return;
     *slash=0;
-    if(wcscat_s(path,L"\\Mods\\WEAPON\\WEAPONTABLE.SGO")!=0)return;
+    wchar_t path[MAX_PATH];
+    if(swprintf_s(path,L"%ls\\Mods\\WEAPON\\WEAPONTABLE.SGO",game)<0)return;
     const HANDLE f=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,0,nullptr);
     if(f==INVALID_HANDLE_VALUE){Log("CALLS no Mods weapon table: the call weapons are not installed (python tools/call_weapons.py install)");return;}
     LARGE_INTEGER size{};
@@ -175,12 +161,17 @@ void CheckCallTable() noexcept {
     CloseHandle(f);
     if(!data)return;
     int missing=0;
-    for(const auto& c:kCalls)
-        if(!HoldsId(data,got,c.id)){++missing;Log("CALLS %ls missing from the weapon table",c.id);}
+    for(const auto& r:kCallRows) {
+        const bool row=HoldsId(data,got,r.id),weapon=ModFileThere(game,L"WEAPON",r.weaponFile);
+        const bool object=!r.objectFile || ModFileThere(game,L"OBJECT",r.objectFile);
+        if(row && weapon && object)continue;
+        ++missing;
+        Log("CALLS %ls:%s%s%s",r.id,row ? "" : " not in the weapon table",weapon ? "" : " (its weapon SGO is missing)",
+            object ? "" : " (the vehicle SGO it brings is missing)");
+    }
     HeapFree(GetProcessHeap(),0,data);
-    if(missing)Log("CALLS %d of %d call weapons missing: with the game closed run python tools/call_weapons.py install",
-                   missing,static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0])));
-    else Log("CALLS all %d call weapons in the weapon table",static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0])));
+    if(missing)Log("CALLS %d of %d rows incomplete: with the game closed run the installer (install) again",missing,kCallRowCount);
+    else Log("CALLS all %d rows in the weapon table, their files there",kCallRowCount);
 }
 
 // The call weapon `ifc` is in, or nullptr (a stock call): what it brings is the picked call, if any.
@@ -197,7 +188,7 @@ const Call* CallOf(const void* ifc) noexcept {
 // and kAboveTarget up, helis kHeliApproach out), side by side; how many came.
 int LaunchCall(const Call& c,const float* target) noexcept {
     float dir[3]={0,0,1};
-    if(player.at && GetTickCount64()-player.at<10000) {
+    if(player.at && GameMs()-player.at<10000) {
         const float dx=target[0]-player.pos[0],dz=target[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
         if(l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
     }
@@ -210,17 +201,17 @@ int LaunchCall(const Call& c,const float* target) noexcept {
     const bool heli=c.brings==Brings::helis;
     const float side[3]={dir[2],0,-dir[0]};
     const float back=heli ? kHeliApproach : kApproach,spacing=heli ? kHeliSpacing : kWingSpacing;
-    const float up=heli ? cfg.heliHeight : kAboveTarget;
+    const float up=heli ? Cfg().heliHeight : kAboveTarget;
     int launched=0;
     for(int i=0;i<c.count;++i) {
         const float off=(static_cast<float>(i)-static_cast<float>(c.count-1)*0.5f)*spacing;
         const float from[3]={target[0]-dir[0]*back+side[0]*off,target[1]+up+kWingStep*static_cast<float>(i),
                              target[2]-dir[2]*back+side[2]*off};
         if(!heli) {
-            launched+=JetLaunch(c.role,from,dir,target,c.fuelSec,&kRadioSource,c.follow) ? 1 : 0;
+            launched+=JetLaunch(*c.role,from,dir,target,c.fuelSec,&kRadioSource,c.follow) ? 1 : 0;
             continue;
         }
-        unsigned char* const v=HeliLaunch(c.body,from,dir);
+        unsigned char* const v=HeliLaunch(*c.body,from,dir);
         if(!v)continue;
         HeliCalled(v,!c.follow,target,c.fuelSec);
         ++launched;
@@ -233,12 +224,12 @@ int LaunchCall(const Call& c,const float* target) noexcept {
 // A call weapon's: its jets or helis, and no bombers (when none could be launched the bombers fly).
 std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
     const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
-    if(!cfg.enabled || !cfg.jetAirRaider)return result;
+    if(!Cfg().enabled || !Cfg().jetAirRaider)return result;
     __try {
         const Call* const c=CallOf(ifc);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
         if(c && std::isfinite(target[0]+target[1]+target[2]) && LaunchCall(*c,target)>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) {}
     return result;
 }
 
@@ -252,28 +243,29 @@ void TakeOver(const char* who,unsigned char* plane,const float* target,const Bom
         const ULONGLONG ms=GameMs();
         Held* const h=FreeHeld(ms);
         if(!h){Log("AIRSTRIKE %s bomber %p: %d bombers held, it flies stock",who,plane,kMaxHeld);return;}
-        if(!ctrl || !std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,cfg.jetSortieSec,source,body,ctrl))return;
+        if(!ctrl || !std::isfinite(target[0]+target[1]+target[2]) || !JetLaunchBomber(from,heading,target,load,Cfg().jetSortieSec,source,body,ctrl))return;
         *h=Held{ctrl,ms,false};
         Log("AIRSTRIKE %s bomber %p (%s model): its jet drops the bombs",who,plane,
             body==JetBody::bomber401 ? "bomber401" : body==JetBody::bomber501_2 ? "bomber501_2" : "bomber501 / unknown");
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    } __except(FaultLog("AIRSTRIKE takeover (the bomber flies stock)",GetExceptionInformation())) {}
 }
 
 void __fastcall RadioBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                 float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(cfg.enabled && cfg.jetAirRaider)TakeOver("air raider",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kRadioSource);
+    if(Cfg().enabled && Cfg().jetAirRaider)TakeOver("air raider",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kRadioSource);
 }
 
 void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                   float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(cfg.enabled && cfg.jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
+    if(Cfg().enabled && Cfg().jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
 }
 
-// BombingPlane slot 5 (update): a held plane is hidden and left as it is while its jet holds it, then
-// deleted.
-void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
+// BombingPlane slot 5 (update), for a held plane: hidden and left as it is while its jet holds it, then
+// deleted. Returns whether the plane is held (its stock update must not run). A fault in here counts as held:
+// handing a taken-over plane back to its stock update would fly it again and drop its bombs a second time.
+bool HeldStep(unsigned char* plane) noexcept {
     __try {
         const void* const ctrl=At<const void*>(plane,kSelfCtrl);
         for(auto& h:held) {
@@ -285,13 +277,18 @@ void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
                 reinterpret_cast<void(__fastcall*)(void*)>(image+kPlaneUnlist)(plane);
             }
             const ULONGLONG ms=GameMs();
-            if(JetHolds(ctrl) && ms-h.since<kHoldMaxMs)return;
+            if(JetHolds(ctrl) && ms-h.since<kHoldMaxMs)return true;
             Log("AIRSTRIKE bomber %p let go after %.1f s: deleted",plane,static_cast<float>(ms-h.since)*0.001f);
             h=Held{};
             reinterpret_cast<DeleteFn>(image+kDelete)(plane);
-            return;
+            return true;
         }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        return false;
+    } __except(FaultLog("AIRSTRIKE plane update (kept as taken over)",GetExceptionInformation())) { return true; }
+}
+
+void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
+    if(HeldStep(plane))return;
     nextPlaneUpdate(plane,frame);
 }
 
@@ -300,6 +297,16 @@ using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
 
 // Every EDF6VC_CALL_* row owned (see the file comment); how many were not yet.
+// Whether a weapon table row's name is one of ours (kCallRows): exactly, so a retired row (EDF6VC_RETIRED_*,
+// an uninstall's placeholder) or another mod's row is never made owned.
+bool IsCallRow(const wchar_t* name) noexcept {
+    for(const auto& r:kCallRows) {
+        const std::size_t len=std::wcslen(r.id)+1;
+        if(Readable(name,len*sizeof(wchar_t)) && std::wcsncmp(name,r.id,len)==0)return true;
+    }
+    return false;
+}
+
 int GrantCalls(unsigned char* gs) noexcept {
     if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return -1;
     void* const table=gs+kCfg;
@@ -307,12 +314,11 @@ int GrantCalls(unsigned char* gs) noexcept {
     std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
     if(n>kMaxRecords)n=kMaxRecords;
     alignas(8) unsigned char row[0x100];
-    const std::size_t prefix=sizeof(kCallPrefix)/sizeof(wchar_t)-1;
     int granted=0;
     for(std::uint32_t id=0;id<n;++id) {
         reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
         const auto name=At<const wchar_t*>(row,0);
-        if(!name || !Readable(name,prefix*sizeof(wchar_t)) || std::wcsncmp(name,kCallPrefix,prefix)!=0)continue;
+        if(!name || !IsCallRow(name))continue;
         auto& flags=*reinterpret_cast<std::uint32_t*>(gs+kFlags+id*kRecord);
         if(!(flags&1)) {
             flags|=4;
@@ -393,6 +399,11 @@ bool InstallAirstrikes() noexcept {
         }
         Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d",calls,owned,radio,mission);
         return calls || radio || mission;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
+}
+// A new mission (mission.cpp MissionStart): the held bombers were the last mission's (their control blocks'
+// addresses may be the new mission's objects'): forgotten, nothing of them touched. The call pick stays.
+void ResetAirstrikes() noexcept {
+    for(auto& h:held)h=Held{};
 }
 }  // namespace crew

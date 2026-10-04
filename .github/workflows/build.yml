@@ -1,11 +1,16 @@
 name: Build
 
-# EDF 全军出击 (edf6-all-forces): builds both plugins (EDF6VehicleCrew.dll, EDF6AutoTurret.dll) on every
-# push and pull request and packages them with the data builders (tools/, testrange/, autoturret/tools/:
-# the weapon and object files are derived from the game's data, so each player builds them from their own
-# install). Releases, automatically:
+# EDF 全军出击 (edf6-all-forces): builds both plugins (EDF6VehicleCrew.dll, EDF6AutoTurret.dll) on every push and
+# pull request, checks the install chain (tools/selftest.py) and that the generated src/calls.inc is current,
+# and packages:
+#  - EDF6VehicleCrew-<version>.zip: the unzip-and-run installer (tools/build_release.py: tools/installer.py frozen by
+#    PyInstaller with the plugin inside), what players download; <version> is CMakeLists.txt project(VERSION);
+#  - EDF6AllForces-<version>-tools.zip: both plugins and the data builders as Python sources (tools/, pylib/,
+#    testrange/, autoturret/tools/: the weapon and object files are derived from the game's data, so each player
+#    builds them from their own install), for EDF6AutoTurret and for developers.
+# Releases, automatically:
 #  - every push to main replaces the rolling prerelease `nightly` (its tag moved to that commit);
-#  - a pushed tag vX.Y.Z publishes that version as the latest release.
+#  - a pushed tag vX.Y.Z publishes that version as the latest release (it must be CMakeLists.txt's version).
 on:
   push:
     branches: ['**']
@@ -26,6 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Build plugins
         shell: cmd
         run: call build.cmd
@@ -35,23 +44,53 @@ jobs:
         run: |
           # git prints paths in UTF-8, unquoted (quotepath off): testrange/测试场.bat is one of them.
           [Console]::OutputEncoding = [Text.Encoding]::UTF8
-          $files = git -c core.quotepath=off ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk | Where-Object { $_ -like '*.py' }
+          $files = git -c core.quotepath=off ls-files tools pylib testrange autoturret/tools autoturret/third_party/edf6-cpk | Where-Object { $_ -like '*.py' }
           python -m py_compile @files
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      - name: Package
+      - name: Generated files are current
+        shell: pwsh
+        run: |
+          python tools/gen_calls.py
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git diff --exit-code -- src/calls.inc
+          if ($LASTEXITCODE) { Write-Error 'src/calls.inc is stale: run python tools/gen_calls.py and commit it'; exit 1 }
+
+      - name: Self-test of the install chain
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tools/selftest.py
+
+      - name: Installer package
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # Assigned inside the branches: an `if` expression unrolls a one-element array into a string, which
+          # @opts would then splat one character per argument.
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $opts = @('--expect', $env:GITHUB_REF_NAME) }
+          else { $opts = @("--suffix=-build.$($env:GITHUB_SHA.Substring(0,7))") }
+          $out = python tools/build_release.py @opts
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $zip = ($out | Select-Object -Last 1).Trim()
+          "INSTALLER=$zip" >> $env:GITHUB_ENV
+          "INSTALLER_NAME=$([IO.Path]::GetFileNameWithoutExtension($zip))" >> $env:GITHUB_ENV
+
+      - name: Tools package
         shell: pwsh
         run: |
           # git prints paths in UTF-8, unquoted (quotepath off): testrange/测试场.bat is one of them.
           [Console]::OutputEncoding = [Text.Encoding]::UTF8
-          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "build-$($env:GITHUB_SHA.Substring(0,7))" }
-          $name = "EDF6AllForces-$version"
+          $version = $env:INSTALLER_NAME -replace '^EDF6VehicleCrew-', ''
+          $name = "EDF6AllForces-$version-tools"
           $root = Join-Path 'build' $name
           New-Item -ItemType Directory -Force "$root/Mods/Plugins" | Out-Null
-          Copy-Item dist/Mods/Plugins/EDF6VehicleCrew.dll, dist/Mods/Plugins/EDF6VehicleCrew.ini, dist/Mods/Plugins/EDF6AutoTurret.dll, dist/Mods/Plugins/EDF6AutoTurret.ini "$root/Mods/Plugins/"
-          # The data builders find each other by relative path (../testrange, ../autoturret/tools): the
-          # tracked files keep the repository's layout.
-          foreach ($f in git -c core.quotepath=off ls-files tools testrange autoturret/tools autoturret/third_party/edf6-cpk) {
+          Copy-Item build/Mods/Plugins/EDF6VehicleCrew.dll, build/Mods/Plugins/EDF6VehicleCrew.ini, build/Mods/Plugins/EDF6AutoTurret.dll, build/Mods/Plugins/EDF6AutoTurret.ini "$root/Mods/Plugins/"
+          # The data builders find each other by relative path (../pylib): the tracked files keep the repository's layout.
+          foreach ($f in git -c core.quotepath=off ls-files tools pylib testrange autoturret/tools autoturret/third_party/edf6-cpk) {
             $to = Join-Path $root $f
             New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
             Copy-Item -LiteralPath $f $to
@@ -60,12 +99,18 @@ jobs:
           Copy-Item autoturret/README.md "$root/README.autoturret.md"
           Copy-Item autoturret/README.zh-CN.md "$root/README.autoturret.zh-CN.md"
           Compress-Archive -Path "$root/*" -DestinationPath "build/$name.zip"
-          "PACKAGE=$name" >> $env:GITHUB_ENV
+          "TOOLS=build/$name.zip" >> $env:GITHUB_ENV
+          "TOOLS_NAME=$name" >> $env:GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PACKAGE }}
-          path: build/${{ env.PACKAGE }}.zip
+          name: ${{ env.INSTALLER_NAME }}
+          path: ${{ env.INSTALLER }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TOOLS_NAME }}
+          path: ${{ env.TOOLS }}
 
       - name: Publish nightly
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -75,12 +120,12 @@ jobs:
         run: |
           gh release delete nightly --cleanup-tag --yes 2>$null
           $global:LASTEXITCODE = 0
-          $notes = "main 最新构建（$($env:GITHUB_SHA.Substring(0,7))），每次推送 main 自动更新。正式版见 v* 版本。`n`n$(git log -1 --pretty=%s)"
-          gh release create nightly "build/$env:PACKAGE.zip" --target $env:GITHUB_SHA --prerelease --title "nightly ($($env:GITHUB_SHA.Substring(0,7)))" --notes $notes
+          $notes = "main 最新构建（$($env:GITHUB_SHA.Substring(0,7))），每次推送 main 自动更新。正式版见 v* 版本。玩家下载 EDF6VehicleCrew-*.zip（安装器）。`n`n$(git log -1 --pretty=%s)"
+          gh release create nightly $env:INSTALLER $env:TOOLS --target $env:GITHUB_SHA --prerelease --title "nightly ($($env:GITHUB_SHA.Substring(0,7)))" --notes $notes
 
       - name: Publish release
         if: github.ref_type == 'tag'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME "build/$env:PACKAGE.zip" --title $env:GITHUB_REF_NAME --generate-notes --latest
+        run: gh release create $env:GITHUB_REF_NAME $env:INSTALLER $env:TOOLS --title $env:GITHUB_REF_NAME --generate-notes --latest
