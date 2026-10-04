@@ -4,15 +4,21 @@ Each row is regenerated from the stock text: the gun stat lines get the built gu
 and blast, the durability line the built call's, and a note says what the turret now does. The rows
 are then written into the WEAPONTEXT tables already installed in Mods (stock if none), at the
 same index, so other mods' rows stay as they are and rerunning gives the same result.
+
+The text tables are index-aligned with WEAPONTABLE: a table whose row count differs from the weapon
+table's is refused (rows would land on other weapons). build_texts also hands back each rewritten row
+as it was before and as written, so build.py uninstall can put the original back.
 """
 from __future__ import annotations
 
 import os
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 import dsgo
 import gamefs
+import vehicle_setup
 from dsgo import Node
 
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
@@ -58,8 +64,8 @@ def _row_ids(table: bytes) -> list[str]:
     return [dsgo.to_py(r)[0].upper() for r in dsgo.parse(table).root.get('table').items]
 
 
-def _durability_mul(call: bytes) -> float:
-    return dsgo.parse(call).root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0]
+def _durability_mul(call: bytes, name: str) -> float:
+    return vehicle_setup.durability(vehicle_setup.of_call(dsgo.parse(call).root, name))
 
 
 def _gun(data: bytes) -> tuple[float, float, float, float]:
@@ -108,8 +114,8 @@ def _describe(row: list, v: Vehicle, lang: str, files: dict[str, bytes], blast_t
         out += desc[m.end():lines[i + 1].start()] if i + 1 < len(lines) else ''
     end = lines[-1].end()
     out += '\n\n' + NOTE_FONT.format(NOTES[v.note][lang]) + desc[end:]
-    old_mul = _durability_mul(gamefs.read('WEAPON', v.call))
-    durability = round(float(stats[1][1]) / old_mul * _durability_mul(_built(files, v.call)))
+    old_mul = _durability_mul(gamefs.read('WEAPON', v.call), v.call)
+    durability = round(float(stats[1][1]) / old_mul * _durability_mul(_built(files, v.call), v.call))
     return [name, out, [stats[0], [stats[1][0], str(durability)]]]
 
 
@@ -125,18 +131,58 @@ def _installed(mods: str, name: str) -> bytes:
     return gamefs.read('WEAPON', name)
 
 
-def build_texts(vehicles: list[Vehicle], files: dict[str, bytes], mods: str) -> dict[str, bytes]:
-    stock_ids = _row_ids(gamefs.read('WEAPON', 'WEAPONTABLE.SGO'))
-    ids = _row_ids(_installed(mods, 'WEAPONTABLE.SGO'))
-    out = {}
+@lru_cache(maxsize=None)
+def _stock_ids() -> tuple[str, ...]:
+    return tuple(_row_ids(gamefs.read('WEAPON', 'WEAPONTABLE.SGO')))
+
+
+def stock_ids() -> list[str]:
+    """The stock weapon table's row ids, upper case."""
+    return list(_stock_ids())
+
+
+def text_rel(lang: str) -> str:
+    return f'WEAPON/WEAPONTEXT.{lang}.SGO'
+
+
+def table_ids(mods: str) -> list[str]:
+    """The installed weapon table's row ids (stock when none is installed), upper case."""
+    return _row_ids(_installed(mods, 'WEAPONTABLE.SGO'))
+
+
+def text_rows(doc: dsgo.Document, ids: list[str], rel: str) -> list:
+    """The rows of a WEAPONTEXT table; SystemExit when they are not aligned with the weapon table."""
+    rows = doc.root.get('text_table').items
+    if len(rows) != len(ids):
+        raise SystemExit(f'{rel}: {len(rows)} rows but WEAPONTABLE has {len(ids)}: the tables are not index-aligned '
+                         '(another mod changed one without the other); fix that before installing')
+    return rows
+
+
+@dataclass
+class Texts:
+    files: dict[str, bytes]              # Mods-relative path -> the rewritten table
+    rows: dict[str, dict[str, tuple]]    # path -> row id -> (row before, row written), dsgo values
+
+
+def build_texts(vehicles: list[Vehicle], files: dict[str, bytes], mods: str) -> Texts:
+    stock = stock_ids()
+    ids = table_ids(mods)
+    out = Texts({}, {})
     for lang in LANGS:
         name = f'WEAPONTEXT.{lang}.SGO'
-        stock = dsgo.parse(gamefs.read('WEAPON', name)).root.get('text_table').items
+        rel = text_rel(lang)
+        stock_rows = dsgo.parse(gamefs.read('WEAPON', name)).root.get('text_table').items
         doc = dsgo.parse(_installed(mods, name))
-        rows = doc.root.get('text_table').items
-        blast_tpl = _blast_template(dsgo.to_py(stock[stock_ids.index(BLAST_ROW[:-4])])[1])
+        rows = text_rows(doc, ids, rel)
+        blast_tpl = _blast_template(dsgo.to_py(stock_rows[stock.index(BLAST_ROW[:-4])])[1])
+        changed: dict[str, tuple] = {}
         for v in vehicles:
-            row = dsgo.to_py(stock[stock_ids.index(v.call[:-4])])
-            rows[ids.index(v.call[:-4])] = _node(_describe(row, v, lang, files, blast_tpl))
-        out[f'WEAPON/{name}'] = dsgo.write(doc)
+            row_id = v.call[:-4].upper()
+            at = ids.index(row_id)
+            new = _node(_describe(dsgo.to_py(stock_rows[stock.index(row_id)]), v, lang, files, blast_tpl))
+            changed[row_id] = (rows[at], new)
+            rows[at] = new
+        out.files[rel] = dsgo.compact(doc)   # no stale strings in the pool: a rerun writes the same bytes
+        out.rows[rel] = changed
     return out
