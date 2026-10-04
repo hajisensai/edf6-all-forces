@@ -193,7 +193,7 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
         return;
     }
     case Weapon::guns:
-        if(j.t.target){Attack(j,arms,pos,lead,height,ms,want,speed,gunsOk,missileOk);return;}
+        if(j.t.target){Attack(j,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk);return;}
         Circle(j,pos,anchor,height,ms,want,speed);
         return;
     case Weapon::shells:

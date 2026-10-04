@@ -435,7 +435,7 @@ void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float
 void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,float range,float dt,ULONGLONG ms) noexcept;
 // The guns' and missiles' attack (Weapon::guns, with a target): `want`, `speed`; whether the guns and the
 // missile may fire this frame.
-void Attack(Jet& j,const Arms& arms,const float* pos,const float* lead,float height,ULONGLONG ms,float* want,float* speed,
+void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,ULONGLONG ms,float* want,float* speed,
             bool* gunsOk,bool* missileOk) noexcept;
 // Whether a jet may use its weapons now (every weapon of every kind: guns, missiles, shells): flown by the
 // plugin (JetPilot), a target, and not taking off, going back or leaving.

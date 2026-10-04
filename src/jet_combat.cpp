@@ -42,8 +42,12 @@ constexpr ULONGLONG kMissileMs=2500,kLockMs=700,kSalvoMs=900,kCrankMs=4500,kPull
 // the jet stood off, it goes in with the guns for kGunSpellMs, then tries the missiles again.
 constexpr ULONGLONG kNoLockMs=10000,kGunSpellMs=15000;
 // Fighter: lead pursuit at the target's speed plus chaseOver; closer than overrun it breaks off
-// (extends kRunOutMs) so it does not ram or sit on its tail.
+// (extends kRunOutMs) so it does not ram or sit on its tail. With the lead more than kCornerFrom off the nose it
+// turns at its corner speed (kCornerShare of the way from minSpeed to attack): the same g turns it faster and
+// tighter there (a fighter at 235 m/s pulls 5 g on a 1150 m circle, 12 deg/s; two of them circled each other
+// with the lead 52 deg off the nose, 2 gun bursts in 409 looks, 2026-10-05).
 constexpr ULONGLONG kRunOutMs=3000;
+constexpr float kCornerFrom=0.35f,kCornerShare=0.45f;
 // A flyer: its root (object+kPosition: a walker's feet, however tall it is) more than kFlyerClear over the
 // ground found by a ray from kFlyerProbe over it. (By its lock point the queen ant, whose lock points
 // are high on its body, flew: fighters made gun passes at it, back and forth over it, 2026-10-03.)
@@ -120,8 +124,21 @@ bool InsideTurn(const Jet& j,const float* pos,const float* at) noexcept {
     return Dot(c,c)<r*r;
 }
 
+// Where to steer for the guns: the nose onto `lead`, not the flight path. The guns fire along the nose, which rides
+// the angle of attack above the path (JetSteer); steering the path at the lead kept the nose that far off it (a
+// strike dive held 2.0-2.4 deg off with the gate at 2 deg: half its bursts, 2026-10-05). The path is aimed under
+// the line to the lead by the nose's offset from it now.
+void GunToward(const Jet& j,const float* pos,const float* nose,const float* lead,float* want) noexcept {
+    Toward(pos,lead,want);
+    float path[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
+    if(!Normalize(path))return;
+    float aimed[3];
+    for(int i=0;i<3;++i)aimed[i]=want[i]-(nose[i]-path[i]);
+    if(Normalize(aimed))std::memcpy(want,aimed,12);
+}
+
 // Strike attack (see kDiveCone). Returns whether the guns may fire (diving at the lead point).
-bool Strike(Jet& j,const float* pos,const float* lead,float height,ULONGLONG ms,float* want,float* speed) noexcept {
+bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float height,ULONGLONG ms,float* want,float* speed) noexcept {
     const Kind& k=KindOf(j);
     const float dh=HorizDist(pos,lead),over=pos[1]-lead[1];
     const float to[3]={lead[0]-pos[0],0,lead[2]-pos[2]};
@@ -133,7 +150,7 @@ bool Strike(Jet& j,const float* pos,const float* lead,float height,ULONGLONG ms,
     switch(j.mode) {
     case Mode::dive:
         if(over<k.pullAlt || dh<k.gunClose*0.7f || Len(to)<k.gunClose){SetMode(j,Mode::pull,ms);break;}
-        Toward(pos,lead,want);
+        GunToward(j,pos,nose,lead,want);
         return true;
     case Mode::pull:
         if(pos[1]>=height-20.0f || ms-j.modeAt>kPullMs) {
@@ -150,7 +167,7 @@ bool Strike(Jet& j,const float* pos,const float* lead,float height,ULONGLONG ms,
         break;
     }
     // Approach: at the target at height; dive once in the window, else fly out and come round.
-    if(dh<=k.diveStart && dh>k.gunClose*2.0f && off<kDiveCone && over>k.pullAlt+30.0f){SetMode(j,Mode::dive,ms);Toward(pos,lead,want);return true;}
+    if(dh<=k.diveStart && dh>k.gunClose*2.0f && off<kDiveCone && over>k.pullAlt+30.0f){SetMode(j,Mode::dive,ms);GunToward(j,pos,nose,lead,want);return true;}
     if(off>kDiveCone && InsideTurn(j,pos,lead)){std::memcpy(j.t.out,vdir,12);SetMode(j,Mode::extend,ms);Level(pos,vdir,height,want);return false;}
     Level(pos,to,height,want);
     *speed=k.cruise;
@@ -158,7 +175,7 @@ bool Strike(Jet& j,const float* pos,const float* lead,float height,ULONGLONG ms,
 }
 
 // Air-to-air: lead pursuit; breaks off when it overruns.
-bool Chase(Jet& j,const float* pos,const float* lead,ULONGLONG ms,float* want,float* speed) noexcept {
+bool Chase(Jet& j,const float* pos,const float* nose,const float* lead,ULONGLONG ms,float* want,float* speed) noexcept {
     const Kind& k=KindOf(j);
     const float d[3]={lead[0]-pos[0],lead[1]-pos[1],lead[2]-pos[2]};
     if(j.mode==Mode::runOut) {
@@ -172,9 +189,10 @@ bool Chase(Jet& j,const float* pos,const float* lead,ULONGLONG ms,float* want,fl
         std::memcpy(j.t.out,dir,12);SetMode(j,Mode::runOut,ms);
         std::memcpy(want,dir,12);*speed=k.attack;return false;
     }
-    Toward(pos,lead,want);
-    const float s=Len(j.t.tgtVel)+k.chaseOver;
-    *speed=Clamp(s,k.minSpeed+20.0f,k.attack);
+    GunToward(j,pos,nose,lead,want);
+    const float dist=Len(d),off=dist>1.0f ? std::acos(Clamp(Dot(d,nose)/dist,-1.0f,1.0f)) : 0.0f;
+    const float corner=k.minSpeed+(k.attack-k.minSpeed)*kCornerShare;
+    *speed=off>kCornerFrom ? corner : Clamp(Len(j.t.tgtVel)+k.chaseOver,k.minSpeed+20.0f,k.attack);
     return true;
 }
 
@@ -287,8 +305,8 @@ void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,flo
     t.target=pick.best;t.flyer=pick.flyer;t.seenTarget=ms;
 }
 
-void Attack(Jet& j,const Arms& arms,const float* pos,const float* lead,float height,ULONGLONG ms,float* want,float* speed,
-            bool* gunsOk,bool* missileOk) noexcept {
+void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,ULONGLONG ms,float* want,
+            float* speed,bool* gunsOk,bool* missileOk) noexcept {
     const Kind& kind=KindOf(j);
     Aim& t=j.t;
     const float reach=MissileReach(kind,arms);
@@ -302,8 +320,8 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* lead,float hei
         }
         Missile(j,pos,height,reach,ms,want,speed);
         *missileOk=j.mode==Mode::missile;
-    } else if(t.flyer)*gunsOk=Chase(j,pos,lead,ms,want,speed);
-    else *gunsOk=Strike(j,pos,lead,height,ms,want,speed);
+    } else if(t.flyer)*gunsOk=Chase(j,pos,nose,lead,ms,want,speed);
+    else *gunsOk=Strike(j,pos,nose,lead,height,ms,want,speed);
 }
 
 bool WeaponsFree(const Jet& j) noexcept {
