@@ -121,6 +121,7 @@ void ResetMissiles() noexcept;    // missile.cpp
 // What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
 void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
+void BigWorldProbe() noexcept;    // bigworld.cpp: once a mission, the map's ground on a grid (log)
 // The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
 bool LastViewProj(float* out) noexcept;
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.

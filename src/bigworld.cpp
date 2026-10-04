@@ -10,7 +10,10 @@
 // ini BigWorld (default off: with the bounds raised, a parked vehicle (the player jet waiting on the ground)
 // fell through the terrain and was put back by the game again and again, 2026-10-04 test range; under study). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "body506.h"
+#include "heli.h"
 #include "memory.h"
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -84,7 +87,50 @@ bool InstallBigWorld() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+namespace {
+// The map's ground as the physics sees it (the user, 2026-10-05: the big map; the far ground pieces reach about
+// +-5.6 km in their models, but beyond some distance the map ray finds nothing): once a mission, kProbeAfterMs into
+// it, a ray straight down every kProbeStep m over +-kProbeHalf cells: a log row a cell line, '.' no ground, a digit its
+// height band (kProbeBand m a step from the lowest seen, '+' above 9 bands). The tiling is laid out from this.
+constexpr int kProbeHalf=16;
+constexpr float kProbeStep=500.0f,kProbeTop=3000.0f,kProbeBottom=-3000.0f,kProbeBand=25.0f;
+constexpr ULONGLONG kProbeAfterMs=5000;
+ULONGLONG probeFrom=0;
+bool probed=false;
+}  // namespace
+
+void BigWorldProbe() noexcept {
+    const ULONGLONG ms=GameMs();
+    if(probed)return;
+    if(!probeFrom){probeFrom=ms;return;}
+    if(ms-probeFrom<kProbeAfterMs)return;
+    probed=true;
+    constexpr int n=2*kProbeHalf+1;
+    static float height[n][n];
+    float low=1e9f,high=-1e9f;
+    int found=0;
+    for(int r=0;r<n;++r)for(int c=0;c<n;++c) {
+        const float x=static_cast<float>(c-kProbeHalf)*kProbeStep,z=static_cast<float>(kProbeHalf-r)*kProbeStep;
+        const float a[3]={x,kProbeTop,z},b[3]={x,kProbeBottom,z};
+        float hit[3];
+        height[r][c]=MapRay(a,b,hit)>=0.0f ? hit[1] : kNoGround;
+        if(height[r][c]!=kNoGround){++found;low=std::fmin(low,hit[1]);high=std::fmax(high,hit[1]);}
+    }
+    Log("BIGWORLD probe: %d of %d cells (%.0f m apart, +-%.0f m) have ground, %.0f to %.0f m; rows from +z down, columns from -x;"
+        " digit = %.0f m bands over the lowest",found,n*n,kProbeStep,kProbeStep*kProbeHalf,found ? low : 0.0f,found ? high : 0.0f,kProbeBand);
+    for(int r=0;r<n;++r) {
+        char line[n+1];
+        for(int c=0;c<n;++c) {
+            const float h=height[r][c];
+            const int band=h==kNoGround ? -1 : static_cast<int>((h-low)/kProbeBand);
+            line[c]=band<0 ? '.' : band>9 ? '+' : static_cast<char>('0'+band);
+        }
+        line[n]=0;
+        Log("BIGWORLD probe z=%+6.0f %s",static_cast<float>(kProbeHalf-r)*kProbeStep,line);
+    }
+}
+
 void ResetBigWorld() noexcept {
-    logged=0;
+    logged=0;probeFrom=0;probed=false;
 }
 }  // namespace crew

@@ -542,6 +542,7 @@ void FrameTick() noexcept {
     GuardedTick(kStepUnderground,&UnderPlayer);
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepHudPublish,&HudPublish);
+    GuardedTick(kStepUnderground,&BigWorldProbe);
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
