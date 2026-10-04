@@ -11,9 +11,10 @@
 //   storage outlives the booster (static here). The flame shows while +0x3EC or +0x3F0 is above a threshold;
 //   +0x3F0 decays by +0x3E8 a frame, +0x3F4 counts down and zeroes +0x3EC at 0. (H)
 // The plugin feeds each nozzle's bone world matrix (unit rows: the x1.6 model scale is in the sizes instead)
-// and every frame sets +0x3EC = thrust share, +0x3F0 = 1, +0x3F4 = 3; a carrier gone for kStaleMs, or dead,
+// (turned and moved as the stock nozzle locators are: NozzleMatrix) and every frame sets +0x3EC = thrust share,
+// +0x3F0 = 1, +0x3F4 = 3; a carrier gone for kStaleMs, or dead,
 // has its boosters deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the last carrier is gone,
-// when no carrier frame runs). (H/M) Which way the flame points relative to the bone is not verified in game (L).
+// when no carrier frame runs). (H/M)
 #include "crew.h"
 #include "jet_internal.h"   // FaultLog, BoosterSweep
 #include "memory.h"
@@ -132,13 +133,30 @@ void Make(Nozzle& z,const unsigned char* v,const float* size) noexcept {
 }
 
 // The bone's world matrix with unit-length rows (the carrier's model scale stays out of the flame size).
-void UnitMatrix(float* dst,const unsigned char* rec) noexcept {
-    std::memcpy(dst,rec+kBoneWorld,64);
+// The stock V508's nozzle locators (its SGO's animation_model[2], the embedded MAB: 'ブースト0'..'ブースト3' on
+// boosterF_l, boosterF_r, boosterB_l, boosterB_r, its `boosts` 0..3): each turned pi about its pod bone's y (all
+// four share the euler (0, pi, 0)) and set back along the pod, at these offsets (the stock's, x1.6: the carrier's
+// model is scaled, its bone rows are not). The game makes the flame's matrix L x BoneWorld (0x6BB5A0, row
+// vectors) and the flame leaves along that matrix's +z (the Booster's direction (0,0,1), 0x1765B70): with the bone
+// alone, as here before, it blew out of the pod's front and from its pivot (docs/jet-model-re.md §8.1).
+constexpr float kNozzleAt[kNozzles][3]={{3.44f,-0.064f,-9.52f},{-3.44f,-0.064f,-9.52f},{2.32f,0.0f,-6.88f},{-2.32f,0.0f,-6.88f}};
+
+// Nozzle `i`'s flame matrix from its pod bone's record: the bone's world matrix with unit rows (the scale is in the
+// sizes), turned pi about its y (x and z negated) and moved to the locator's offset.
+void NozzleMatrix(float* dst,const unsigned char* rec,int i) noexcept {
+    float b[16];
+    std::memcpy(b,rec+kBoneWorld,64);
     for(int r=0;r<3;++r) {
-        float* const row=dst+r*4;
+        float* const row=b+r*4;
         const float l=std::sqrt(row[0]*row[0]+row[1]*row[1]+row[2]*row[2]);
         if(l>1e-4f)for(int c=0;c<3;++c)row[c]/=l;
     }
+    const float* t=kNozzleAt[i];
+    for(int c=0;c<3;++c) {
+        dst[c]=-b[c];dst[4+c]=b[4+c];dst[8+c]=-b[8+c];
+        dst[12+c]=b[12+c]+t[0]*b[c]+t[1]*b[4+c]+t[2]*b[8+c];
+    }
+    dst[3]=b[3];dst[7]=b[7];dst[11]=b[11];dst[15]=1.0f;
 }
 
 Carrier* Find(const unsigned char* v,ULONGLONG ms) noexcept {
@@ -171,7 +189,7 @@ void Frame(const unsigned char* v,unsigned char* const* recs,float intensity,ULO
     for(int i=0;i<kNozzles;++i) {
         Nozzle& z=c->n[i];
         if(!recs[i] || !Readable(recs[i]+kBoneWorld,64))continue;
-        UnitMatrix(z.m,recs[i]);
+        NozzleMatrix(z.m,recs[i],i);
         if(!Live(z)) {
             DropWeak(z.ctrl);
             z.obj=nullptr;z.ctrl=nullptr;
