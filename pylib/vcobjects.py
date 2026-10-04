@@ -51,38 +51,92 @@ JET_GUN_FILES = {'EDF6VC_JET_GUN_L.SGO': 'V_506HELI_GATLING01_L.SGO', 'EDF6VC_JE
 JET_GUN_SPEED, JET_GUN_ALIVE = 16.0, 60.0   # m a frame, frames: 960 m/s, 960 m
 JET_GUN_REACH = JET_GUN_SPEED * JET_GUN_ALIVE
 _GUNS = tuple('app:/weapon/' + f.lower() for f in JET_GUN_FILES)
-# The jets' missile (jet_guns): the 506's homing missile (MissileBullet01) made an air-to-air missile, guided by the
-# plugin (src/missile.cpp, docs/missile-re.md): the stock steering is off (CP[8], its homing delay, never comes) and
-# CP[9] marks the round as the plugin's. It inherits the launcher's velocity vector (AmmoOwnerMove 1), is ejected at
-# AmmoSpeed, accelerates CP[4] m a frame per frame (29 g) to CP[6] (660 m/s), no drop; it locks as its own
-# LockonRange / LockonAngle / LockonTime say (the jets fire within that range: src/jet_combat.cpp MissileReach), one
-# round a shot. Sounds (docs/sound-re.md §5): the air raid's missile launch for its shot, and a rocket motor's loop
-# for its flight (the stock one is 1.6 s and stops mid-flight; the bullet fades its loop out when it ends), from the
-# always loaded TIKYUUX_SE.ACB.
+# The plugin's missiles (jet_guns): each the 506's homing missile (MissileBullet01) remade as a real class of missile,
+# guided by the plugin (src/missile.cpp, docs/missile-re.md): the stock steering is off (CP[8], its homing delay, never
+# comes) and CP[9] marks the round as the plugin's; it inherits the launcher's velocity vector (AmmoOwnerMove 1), no
+# drop. Each is modelled on a real missile: its motor's burn, acceleration and top speed, the g it pulls and its
+# navigation constant (CP[3], read by the plugin), its warhead, its seeker (lock range, cone, lock time), how it is
+# fired and how many a carrier holds (JETS: one missile type a carrier: the 506 body has one missile trigger). Lock
+# ranges are the real ones cut down to the game's world (+-2.4 km); the jets fire within them (src/jet_combat.cpp
+# MissileReach). Sounds (docs/sound-re.md §5): the air raid's missile launch for its shot, and a rocket motor's loop
+# for its flight, from the always loaded TIKYUUX_SE.ACB.
 JET_MISSILE_STOCK = 'V_506HELI_MISSILE01.SGO'
-JET_MISSILE_FILE = 'EDF6VC_JET_MISSILE.SGO'
 JET_MISSILE_FIRE_SE = ('weapon_KUBAKU_missile_shot', 1.0, 80.0)            # cue, volume, metres heard at full
 JET_MISSILE_FLIGHT_SE = ('weapon_KUBAKUBallisticMissle01_go', 0.6, 80.0)
 MISSILE_NO_STOCK_HOMING, MISSILE_MARK = 1000000.0, 4242.0   # src/missile.cpp kNoStockHoming, kPluginMark
-JET_MISSILE_PARAMS = {'AmmoSpeed': 0.3, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': 600.0,
-                      'AmmoDamage': 300.0, 'AmmoExplosion': 15.0, 'AmmoCount': 8.0, 'FireBurstCount': 1.0,
-                      'FireInterval': 45.0, 'LockonRange': 2000.0, 'LockonTime': 20.0}
-JET_MISSILE_CONE = (0.35, 0.35)   # LockonAngle, rad
-# Ammo_CustomParameter: [3] the plugin's guidance, per missile (stored by the stock round, never read by it):
-# [motor burn (frames), the most g across its path, the navigation constant]; [4] its acceleration (m a frame per
-# frame), [6] its top speed (m a frame), [8] / [9] see above. An air-to-air missile: a long burn (6 s).
-JET_MISSILE_MOTION = {3: [360.0, 35.0, 4.0], 4: 0.08, 6: 11.0, 8: MISSILE_NO_STOCK_HOMING, 9: MISSILE_MARK}
-# The submarine carrier's (src/subcarrier.cpp): a ship-launched missile from its bay, which need not face the target
-# (a wide cone): a shorter, gentler burn to a higher top speed, less agile, farther, a salvo of four.
+
+
+@dataclass(frozen=True)
+class Missile:
+    """One class of missile. Speeds in m/s and s (written as the game's m a frame and frames)."""
+    model: str            # the real missile it follows
+    burn: float           # s of motor
+    top: float            # m/s
+    accel: float          # m/s^2 while it burns (to its top speed)
+    max_g: float          # g across its path at most
+    nav: float            # the navigation constant
+    life: float           # s it flies before it is gone
+    damage: float
+    blast: float          # m: its blast radius (its proximity fuse goes off within 0.6 of it)
+    lock_range: float     # m
+    lock_cone: float      # rad off the launcher's nose (a vertical launcher: wide)
+    lock_time: float      # frames to lock on
+    rounds: float         # a carrier's load
+    burst: float = 1.0    # rounds a trigger pull
+    burst_gap: float = 10.0   # frames between them
+    interval: float = 45.0    # frames from one shot (or salvo) to the next
+    eject: float = 0.3    # m a frame it leaves the rail at, along the launcher's nose, over the launcher's velocity
+
+    def params(self) -> dict[str, float]:
+        return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
+                'AmmoDamage': self.damage, 'AmmoExplosion': self.blast, 'AmmoCount': self.rounds,
+                'FireBurstCount': self.burst, 'FireBurstInterval': self.burst_gap, 'FireInterval': self.interval,
+                'LockonRange': self.lock_range, 'LockonTime': self.lock_time}
+
+    def motion(self) -> dict[int, object]:
+        """Ammo_CustomParameter: [3] the plugin's guidance (burn frames, g, navigation constant), [4] acceleration
+        (m a frame per frame), [6] top speed (m a frame), [8] / [9] the plugin's (see above)."""
+        return {3: [self.burn * 60.0, self.max_g, self.nav], 4: self.accel / 3600.0, 6: self.top / 60.0,
+                8: MISSILE_NO_STOCK_HOMING, 9: MISSILE_MARK}
+
+
+MISSILES: dict[str, Missile] = {
+    # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead.
+    'EDF6VC_AAM_SHORT.SGO': Missile('AIM-9X', burn=5.0, top=850.0, accel=300.0, max_g=50.0, nav=4.0, life=12.0,
+                                    damage=500.0, blast=10.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0, rounds=4.0),
+    # Medium-range air-to-air, active radar (AIM-120): a long burn, fast.
+    'EDF6VC_JET_MISSILE.SGO': Missile('AIM-120', burn=8.0, top=1200.0, accel=250.0, max_g=40.0, nav=4.0, life=16.0,
+                                      damage=600.0, blast=12.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0, rounds=6.0),
+    # Long-range air-to-air (AIM-54): a very long burn, very fast, a big warhead, not agile.
+    'EDF6VC_AAM_LONG.SGO': Missile('AIM-54', burn=20.0, top=1500.0, accel=150.0, max_g=25.0, nav=3.0, life=30.0,
+                                   damage=700.0, blast=15.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, rounds=4.0,
+                                   interval=90.0),
+    # Air-to-ground (AGM-65 Maverick): subsonic, a heavy warhead, a slow lock.
+    'EDF6VC_AGM.SGO': Missile('AGM-65', burn=3.5, top=320.0, accel=120.0, max_g=15.0, nav=3.0, life=15.0,
+                              damage=1500.0, blast=18.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, rounds=6.0,
+                              interval=60.0),
+    # Light air-to-ground (AGM-114 Hellfire): what a drone carries.
+    'EDF6VC_AGM_LIGHT.SGO': Missile('AGM-114', burn=3.0, top=425.0, accel=180.0, max_g=20.0, nav=3.0, life=12.0,
+                                    damage=800.0, blast=10.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0, rounds=4.0),
+    # Ship-launched air defence from a vertical launcher (RIM-162 ESSM): the bay need not face the target (a wide
+    # cone), very fast, very agile, fired two at a target, a deep magazine (the submarine carrier, src/subcarrier.cpp).
+    'EDF6VC_SUB_MISSILE.SGO': Missile('RIM-162 ESSM', burn=4.0, top=1300.0, accel=400.0, max_g=50.0, nav=4.0, life=15.0,
+                                      damage=600.0, blast=15.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0,
+                                      rounds=32.0, burst=2.0, interval=120.0, eject=0.5),
+}
+JET_MISSILE_FILE = 'EDF6VC_JET_MISSILE.SGO'
 SUB_MISSILE_FILE = 'EDF6VC_SUB_MISSILE.SGO'
-SUB_MISSILE_PARAMS = {'AmmoCount': 20.0, 'FireBurstCount': 4.0, 'FireBurstInterval': 10.0, 'FireInterval': 300.0,
-                      'LockonRange': 2400.0}
-SUB_MISSILE_CONE = (1.2, 1.2)
-SUB_MISSILE_MOTION = {3: [240.0, 25.0, 3.0], 4: 0.06, 6: 12.0}
-_MISSILE = 'app:/weapon/' + JET_MISSILE_FILE.lower()
-_SUB_MISSILE = 'app:/weapon/' + SUB_MISSILE_FILE.lower()
-HOMING_WEAPONS = (_MISSILE, _SUB_MISSILE)
-_ARMS = _GUNS + (_MISSILE,)
+
+
+def _weapon(name: str) -> str:
+    return 'app:/weapon/' + name.lower()
+
+
+HOMING_WEAPONS = tuple(_weapon(n) for n in MISSILES)
+_AAM_SHORT, _AAM, _AAM_LONG = _weapon('EDF6VC_AAM_SHORT.SGO'), _weapon(JET_MISSILE_FILE), _weapon('EDF6VC_AAM_LONG.SGO')
+_AGM, _AGM_LIGHT, _SUB_MISSILE = _weapon('EDF6VC_AGM.SGO'), _weapon('EDF6VC_AGM_LIGHT.SGO'), _weapon(SUB_MISSILE_FILE)
+_MISSILE = _AAM
+_ARMS = _GUNS + (_AAM,)
 # The blast drones' charge (src/jet.cpp Detonate: weapon 2, fired by 0x2021 once next to the enemy): the
 # 409's unguided bomb (GrenadeBullet01) made a point charge (docs/decoy-blast-re.md 1.4): CP#0 = 1 bursts
 # when its life runs out (0x26543E), CP#3 = 0 no bounce, CP#5 = 0 no random life; it barely moves, lives
@@ -94,10 +148,10 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, JET_MISSILE_FILE, SUB_MISSILE_FILE)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *MISSILES)
 # A derived weapon's stock file: in a vehicle's weapon list it takes the stock one's per-weapon parameters.
 _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
-             for d, st in (*JET_GUN_FILES.items(), (JET_MISSILE_FILE, JET_MISSILE_STOCK), (SUB_MISSILE_FILE, JET_MISSILE_STOCK))}
+             for d, st in (*JET_GUN_FILES.items(), *((m, JET_MISSILE_STOCK) for m in MISSILES))}
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
@@ -105,17 +159,17 @@ JET_SILENT_SE = 'EDF6VC_SILENT'
 JET_ROTOR_SE_ROWS = (0, 1)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
-    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _ARMS),
+    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _GUNS + (_AGM,)),
     'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _ARMS),
     # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
-    'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
+    'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _GUNS + (_AAM_LONG,), ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                           'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
-    # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model and arms; the plugin
+    # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
     'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                             'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
     # bomber401 x 0.5: 26 m across
-    'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _ARMS, ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
+    'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _GUNS + (_AAM_SHORT,), ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
                                         'EDF6VC_MULTIROLE.MRAB', 'bomber401', rigid=((0.0, 1.07, 0.0), (1.25, 1.0, 4.0))),
     # the EDF transport x 1.6: 59 x 77 m; it never fires (its drones do)
     'edf6tr_jet_carrier_mission': Jet(7005.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
@@ -126,7 +180,7 @@ JETS: dict[str, Jet] = {
     'edf6tr_jet_doll_carrier_mission': Jet(7010.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
                                            'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
     # the airstrike drone x 3: 5.7 m long; only carriers launch it (tools/make_jets.py EDF6VC_JET_DRONE.SGO)
-    'edf6tr_jet_drone': Jet(7006.0, 300.0, _ARMS, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+    'edf6tr_jet_drone': Jet(7006.0, 300.0, _GUNS + (_AGM_LIGHT,), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                             'EDF6VC_DRONE.MRAB', 'body', 'body',
                             rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     # Blast and doll drones (src/jet.cpp Role::blast / doll): the drone with a charge for its missile; only
@@ -148,7 +202,7 @@ JETS: dict[str, Jet] = {
     # the strike jet in the elevon bomber (25 m across); empty until the player boards them.
     'edf6tr_pjet_fighter_mission': Jet(7201.0, 1400.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                        'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', player=True, camera=(0.0, 6.0, -24.0)),
-    'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _ARMS, player=True, camera=(0.0, 8.0, -32.0)),
+    'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _GUNS + (_AGM,), player=True, camera=(0.0, 8.0, -32.0)),
 }
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
@@ -348,8 +402,7 @@ def weapon_dir(game_root: str) -> str:
 
 def jet_guns(game: Game) -> dict[str, bytes]:
     """The jets' guns (JET_GUN_FILES): the stock gatling with JET_GUN_SPEED and JET_GUN_ALIVE; the
-    blast drones' charges (JET_BLAST_FILES); the jets' and the submarine carrier's missiles (JET_MISSILE_FILE,
-    SUB_MISSILE_FILE)."""
+    blast drones' charges (JET_BLAST_FILES); the missiles (MISSILES)."""
     out = {}
     for name, stock in JET_GUN_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', stock))
@@ -371,34 +424,25 @@ def jet_guns(game: Game) -> dict[str, bytes]:
                            ('AmmoDamage', damage), ('AmmoExplosion', radius)):
             r.set(key, value)
         out[name] = dsgo.write(doc)
-    doc = dsgo.parse(game.read('WEAPON', JET_MISSILE_STOCK))
-    r = doc.root
-    fire, cp = r.get('FireSe'), r.get('Ammo_CustomParameter')
-    if (r.get('AmmoClass') != 'MissileBullet01' or len(fire.items) != 6 or len(cp.items) != 12
-            or len(cp.items[11].items) != 6):
-        raise ValueError(f'{JET_MISSILE_STOCK} 不是预期的直升机导弹')
-    for node, (cue, volume, reach) in ((fire, JET_MISSILE_FIRE_SE), (cp.items[11], JET_MISSILE_FLIGHT_SE)):
-        node.items[1], node.items[2], node.items[5] = cue, volume, reach
-    guidance = cp.items[3]
-    if len(guidance.items) != 3:
-        raise ValueError(f'{JET_MISSILE_STOCK} 的 Ammo_CustomParameter[3] 不是三项')
-    cone = r.get('LockonAngle')
-    if len(cone.items) != 2:
-        raise ValueError(f'{JET_MISSILE_STOCK} 的 LockonAngle 不是两项')
-    for name, params, angles, motion in (
-            (JET_MISSILE_FILE, JET_MISSILE_PARAMS, JET_MISSILE_CONE, JET_MISSILE_MOTION),
-            (SUB_MISSILE_FILE, {**JET_MISSILE_PARAMS, **SUB_MISSILE_PARAMS}, SUB_MISSILE_CONE,
-             {**JET_MISSILE_MOTION, **SUB_MISSILE_MOTION})):
-        for i, value in motion.items():
-            if i == 3:
-                guidance.items[0], guidance.items[1], guidance.items[2] = value
-            else:
-                cp.items[i] = value
-        for key, value in params.items():
+    for name, missile in MISSILES.items():
+        doc = dsgo.parse(game.read('WEAPON', JET_MISSILE_STOCK))
+        r = doc.root
+        fire, cp, cone = r.get('FireSe'), r.get('Ammo_CustomParameter'), r.get('LockonAngle')
+        if (r.get('AmmoClass') != 'MissileBullet01' or len(fire.items) != 6 or len(cp.items) != 12
+                or len(cp.items[11].items) != 6 or len(cp.items[3].items) != 3 or len(cone.items) != 2):
+            raise ValueError(f'{JET_MISSILE_STOCK} 不是预期的直升机导弹')
+        for node, (cue, volume, reach) in ((fire, JET_MISSILE_FIRE_SE), (cp.items[11], JET_MISSILE_FLIGHT_SE)):
+            node.items[1], node.items[2], node.items[5] = cue, volume, reach
+        for key, value in missile.params().items():
             if r.get(key) is None:
                 raise ValueError(f'{JET_MISSILE_STOCK} 缺少 {key}')
             r.set(key, value)
-        cone.items[0], cone.items[1] = angles
+        for i, value in missile.motion().items():
+            if i == 3:
+                cp.items[3].items[0], cp.items[3].items[1], cp.items[3].items[2] = value
+            else:
+                cp.items[i] = value
+        cone.items[0] = cone.items[1] = missile.lock_cone
         out[name] = dsgo.write(doc)
     return out
 
