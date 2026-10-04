@@ -7,6 +7,8 @@ docs/mdb-format.md), which only these two SGOs use (the stock bombers keep their
 <game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO and the blast drones' charges EDF6VC_BLAST_CHARGE /
 EDF6VC_DOLL_CHARGE.SGO (gen.jet_guns). Without the SGOs the plugin leaves the stock
 bombers alone.
+Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, which the Air Raider's call
+weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring.
 Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
 EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (gen.portal_lasers).
 
@@ -34,6 +36,10 @@ FILES: dict[str, str] = {
     'EDF6VC_JET_DRONE.SGO': 'edf6tr_jet_drone',
     'EDF6VC_JET_BLAST.SGO': 'edf6tr_jet_blast',
     'EDF6VC_JET_DOLL.SGO': 'edf6tr_jet_doll',
+    # The jets the player flies (src/playerjet.cpp), which the Air Raider's EDF6VC_CALL_PJET_* weapons bring
+    # (tools/call_weapons.py): with vehicle_setup as well as mission_setup.
+    'EDF6VC_PJET_FIGHTER.SGO': 'edf6tr_pjet_fighter_mission',
+    'EDF6VC_PJET_STRIKE.SGO': 'edf6tr_pjet_strike_mission',
 }
 # Their own models (tools/jet_models.py).
 MODEL_FILES = sorted({gen.JETS[j].file for j in FILES.values() if gen.JETS[j].file})

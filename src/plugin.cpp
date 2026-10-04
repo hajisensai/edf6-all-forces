@@ -130,6 +130,11 @@ void LoadConfig() noexcept {
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
+    n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
+    n.vehicleHudCount=static_cast<int>(GetPrivateProfileIntW(L"VehicleCrew",L"VehicleHudCount",n.vehicleHudCount,iniPath));
+    n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
+    n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
+    n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
     cfg=n;
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         cfg.enabled,cfg.debug,cfg.autoCrew,cfg.crewDelayMs,cfg.crewRange,cfg.bump,cfg.bumpToGunner,
@@ -139,6 +144,8 @@ void LoadConfig() noexcept {
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",cfg.heliSpeed,cfg.heliAgility,cfg.heliYawRate,cfg.heliDoorGuns,
         cfg.heliGuardRadius,cfg.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",cfg.subHullHp,cfg.subHeavyHit);
+    Log("CONFIG hud vehicles=%d count=%d range=%.0f",cfg.vehicleHud,cfg.vehicleHudCount,cfg.vehicleHudRange);
+    Log("CONFIG playerJet=%d invertPitch=%d",cfg.playerJet,cfg.playerJetInvertPitch);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",cfg.jetPilot,cfg.jetFuelSec,
         cfg.jetSortieSec,cfg.jetAirRaider,cfg.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",cfg.groundPilot,cfg.groundFollow,
@@ -278,6 +285,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("GROUND profile=%d",CheckGroundProfile());
     InstallPhysics();
     InstallLaser();
+    InstallHud();
     InstallLoadout(iniPath);   // independent of the crew hooks
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     StartCallPicker();

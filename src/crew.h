@@ -63,6 +63,11 @@ struct Config {
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
+    bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
+    int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
+    float vehicleHudRange=500.0f;// ...within this many metres of the player
+    bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
+    bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
 };
 extern Config cfg;
 
@@ -154,6 +159,8 @@ ULONGLONG GameMs() noexcept;   // the game clock (crew.cpp): stops while paused 
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 void HeliReap(const void* self) noexcept;          // ...and called helis that have left (heli.cpp)
 bool InstallJets() noexcept;
+bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
+bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
 // be made (not preloaded this mission, profile mismatch): the caller keeps the stock behaviour then.
@@ -233,6 +240,30 @@ void PreloadLaser() noexcept;                         // from the mission's play
 void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
 // physics.cpp: stock EDF6 physics defects, patched at load (needs a game restart to toggle)
 bool InstallPhysics() noexcept;
+
+// hud.cpp: the vehicle HUD (docs/hud-re.md), drawn from the follower gauge's call (subcarrier.cpp GaugeHook).
+bool InstallHud() noexcept;                         // at load: checks the draw and text functions it calls
+void HudSee(unsigned char* vehicle) noexcept;       // from every vehicle's input hook (game thread): a readout's data
+// A carrier's panel (subcarrier.cpp fills it every draw from its game-thread copies): the hull, each deck part.
+struct CarrierPanel {
+    float hull,hullMax;
+    int parts;
+    struct Part { const char* name; float hp,max,repairSec; bool down; } part[4];
+};
+// From the follower gauge's draw (any thread): the readouts and `count` carrier panels. `viewProj`, `ctx` and
+// `viewport` as the gauge drawer 0x804300 gets them.
+void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept;
+// What jet.cpp flies a jet as (game thread): its role's name, seconds of fuel left (-1: none, a carrier's drone),
+// a carrier's drone launches left (-1: not a carrier), whether it is withdrawing; false when it does not fly it.
+struct JetHudInfo { const char* role; float fuelSec; int drones; bool leaving; };
+bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
+// A called heli's fuel (heli.cpp, game thread): seconds until it flies off (0: leaving); false with no limit.
+bool HeliFuel(const void* vehicle,float* sec) noexcept;
+// playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
+// The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
+bool IsPlayerJet(const void* vehicle) noexcept;
+void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
+bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.

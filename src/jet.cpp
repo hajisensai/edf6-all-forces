@@ -93,13 +93,14 @@ struct Kind {
     int body;                       // its own body (kJetSgo)
 };
 constexpr Kind kKinds[kRoleCount]={
-    {"strike",7001.0f,Prefer::ground,true, 150.0f,180.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 250.0f, 850.0f,70.0f,1500.0f, 500.0f,60.0f,
+    // 2026-10-04: faster (750-900 km/h at the attack; own motion properties lift the 200 m/s cap), higher, about 5 g at most.
+    {"strike",7001.0f,Prefer::ground,true, 190.0f,215.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f, 450.0f, 1500.0f,130.0f,2200.0f, 700.0f,120.0f,
      1000.0f,120.0f, 120.0f,30.0f, 1200.0f, 800.0f,1.0f,0},
-    {"fighter",7002.0f,Prefer::air,true, 180.0f,195.0f,110.0f, 15.0f,20.0f, 7.0f,2.4f, 320.0f, 950.0f,80.0f,1700.0f, 500.0f,60.0f,
+    {"fighter",7002.0f,Prefer::air,true, 210.0f,235.0f,110.0f, 15.0f,20.0f, 5.0f,2.4f, 550.0f, 1700.0f,150.0f,2500.0f, 700.0f,120.0f,
      1400.0f,150.0f, 160.0f,40.0f, 1800.0f, 1100.0f,1.0f,1},
-    {"interceptor",7003.0f,Prefer::air,true, 192.0f,195.0f,120.0f, 25.0f,20.0f, 6.0f,2.0f, 340.0f, 1000.0f,90.0f,2000.0f, 450.0f,80.0f,
-     1900.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f,4},
-    {"multirole",7004.0f,Prefer::any,true, 170.0f,190.0f,100.0f, 12.0f,18.0f, 6.0f,2.0f, 280.0f, 900.0f,75.0f,1600.0f, 500.0f,60.0f,
+    {"interceptor",7003.0f,Prefer::air,true, 220.0f,245.0f,120.0f, 25.0f,20.0f, 5.0f,2.0f, 600.0f, 1900.0f,160.0f,2800.0f, 650.0f,130.0f,
+     1500.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f,4},
+    {"multirole",7004.0f,Prefer::any,true, 200.0f,225.0f,100.0f, 12.0f,18.0f, 5.0f,2.0f, 500.0f, 1600.0f,140.0f,2300.0f, 700.0f,120.0f,
      1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f,5},
     {"carrier",7005.0f,Prefer::any,false, 60.0f,60.0f,40.0f, 4.0f,4.0f, 1.3f,0.35f, 150.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
      450.0f,80.0f, 0.0f,0.0f, 1800.0f, 0.0f,4.0f,6},   // over its anchor, its drones do the reaching (2026-10-03: 1300 m out)
@@ -125,10 +126,15 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 // m/s no jet is commanded past. Havok caps every dynamic body at its motion properties' maxLinearSpeed
 // (hknpMotionProperties+0x10, 200 m/s in the preset the vehicles use): the 18:58 run's jets commanded
 // 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never flown.
-constexpr float kBodyTop=195.0f;
-// Patrol: the speed that holds the patrol circle at a 45 degree bank (tan 1), between kLoiterMin times the
-// stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time.
-constexpr float kLoiterTan=1.0f,kLoiterMin=1.15f;
+// Since 2026-10-04:
+// 250 m/s = 900 km/h. A jet body gets its own copy of the motion properties with a 600 m/s cap
+// (jetprops.cpp), so the old 200 m/s Havok cap no longer binds. Past 250 the 5 g turn radius (1275 m)
+// times the wall margin (Guard) no longer fits inside kWorldWall.
+constexpr float kBodyTop=250.0f;
+// Patrol: the speed that holds the patrol circle at a 60 degree bank (tan 1.73, 2 g), between kLoiterMin
+// times the stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time; at
+// 45 degrees (until 2026-10-04) it crawled round at 100 m/s.
+constexpr float kLoiterTan=1.73f,kLoiterMin=1.15f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on the attitude it should have this fast
 constexpr float kNegG=1.0f;            // g: the most it pushes (lift down the body's up)
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this
@@ -145,6 +151,10 @@ constexpr float kGunCone=0.035f,kHitRadius=4.0f;   // rad (2 deg), or what puts 
 // player along the rounds' path, or a wingman (kJetSpan) when its rounds cannot pass through (FriendInLine);
 // other friends are hit as the stock game hits them.
 constexpr float kGunSlip=0.985f,kJetSpan=20.0f;
+// Angle of attack (JetSteer, PitchBy): the nose rides kAoaPerG (1.5 deg) above the path per g pulled at cruise,
+// more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax (-3 to 10 deg), eased over kAoaTau s. Only pitch:
+// the body has no sideslip, and its control surfaces/vectoring are not bones it can move (see docs/jet-model-re.md).
+constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.17f,kAoaTau=0.3f;
 // Missiles (Missile, Fire): fired with the nose within kMissileCone of the target (its lock point, not
 // the guns' lead) for kLockMs (the weapon's LockonTime, 30 frames, and a margin), from kMissileMin out to
 // the role's missileRange; kSalvoMs later (a salvo is 4 rounds 10 frames apart) it cranks kCrankAngle off
@@ -237,8 +247,9 @@ const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f,kThrustDrag=0.12f;
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
 // The carrier's fuselage leans only this share of the fore-and-aft thrust (the nacelles take it); sideways,
-// which the nacelles cannot vector, it rolls as before.
-constexpr float kCarrierPitchShare=0.25f;
+// which the nacelles cannot vector, it rolls as before. (0.25 until 2026-10-04: it looked to float, the body
+// level whatever it did; now half, and its acceleration eased: see kCarrierLean.)
+constexpr float kCarrierPitchShare=0.5f;
 constexpr unsigned kPlacedFlight=1;
 constexpr ULONGLONG kFlightGapMs=20000;
 constexpr unsigned kAddBodySlot=0x179E128,kAddBody=0x232AA0,kBodyObject=0x108260;
@@ -384,6 +395,8 @@ struct Jet {
     ULONGLONG gunsUntil;     // no lock came (kNoLockMs): guns only until then
     Role drones;             // a carrier's: what it launches (blast, doll; else the drone)
     ULONGLONG blastAt;       // a blast or doll drone: game ms its charge went (0: not yet)
+    float aoa;               // a wing's angle of attack (rad, nose above the path; see kAoaPerG)
+    float acc[3];            // a carrier's eased acceleration (see Lean::respond)
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
 Jet jets[kMaxJets]{};
@@ -586,7 +599,8 @@ bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     auto& k=*static_cast<Pick*>(ctx);
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
-    if(Dot(d,d)>k.range*k.range)return;
+    // New targets only within the range of the anchor; the current one is chased wherever it goes.
+    if(object!=k.j->target && Dot(d,d)>k.range*k.range)return;
     const bool flyer=Flies(object,p,k.ms);
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
@@ -639,6 +653,16 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     const float top=j.top>0.0f ? j.top : k.attack*1.3f;
     s=Clamp(s,k.minSpeed*0.8f,top<kBodyTop ? top : kBodyTop);
     for(int i=0;i<3;++i)j.vel[i]=next[i]*s;
+    // The nose rides above the path by what the wing needs: more pulling, more slowly (lift ~ aoa * speed^2).
+    const float slow=k.cruise/s;
+    const float aoaWant=Clamp(kAoaPerG*(pull/kG)*slow*slow,kAoaMin,kAoaMax);
+    j.aoa+=(aoaWant-j.aoa)*(dt<kAoaTau ? dt/kAoaTau : 1.0f);
+}
+
+// `nose` and `up` (unit, square) pitched up by `aoa` about their right.
+void PitchBy(float aoa,float* nose,float* up) noexcept {
+    const float c=std::cos(aoa),s=std::sin(aoa);
+    for(int i=0;i<3;++i){const float n=nose[i],u=up[i];nose[i]=n*c+u*s;up[i]=u*c-n*s;}
 }
 
 // The angular velocity that turns the body's rows (right, up, forward at veh+0x60) onto `nose` and
@@ -937,9 +961,12 @@ bool Hovers(const Jet& j) noexcept { return j.role==Role::carrier || Trigger(j.r
 
 // How a rotor craft shows its thrust: `pitchShare` of the fore-and-aft part leans its body (1: all, as a
 // drone's rotors; the carrier's nacelles take the rest, kCarrierPitchShare), and `drag` m/s^2 per m/s of its
-// speed is the thrust that would hold that speed (kThrustDrag; 0: none shown).
-struct Lean { float pitchShare,drag; };
-constexpr Lean kRotorLean{1.0f,0.0f},kCarrierLean{kCarrierPitchShare,kThrustDrag};
+// speed is the thrust that would hold that speed (kThrustDrag; 0: none shown). `respond`: s its velocity takes
+// to close on the one wanted (0: at once, at its thrust), and `jerk` m/s^3 its acceleration changes at most
+// (0: no limit), so a heavy one swings into a move and out of it instead of sliding; `maxLean` rad it tilts.
+struct Lean { float pitchShare,drag,respond,jerk,maxLean; };
+constexpr Lean kRotorLean{1.0f,0.0f,0.0f,0.0f,kHoverLean};
+constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f};
 
 // `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.thrust gets the thrust
 // asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
@@ -954,9 +981,17 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
     }
     wantV[1]=Clamp((goal[1]-pos[1])*0.5f,-climb,climb);
     float acc[3];
-    for(int i=0;i<3;++i)acc[i]=(wantV[i]-j.vel[i])/dt;
+    const float respond=how.respond>dt ? how.respond : dt;
+    for(int i=0;i<3;++i)acc[i]=(wantV[i]-j.vel[i])/respond;
     const float a=Len(acc),most=k.thrust;
     if(a>most)for(int i=0;i<3;++i)acc[i]*=most/a;
+    if(how.jerk>0.0f) {
+        float change[3]={acc[0]-j.acc[0],acc[1]-j.acc[1],acc[2]-j.acc[2]};
+        const float c=Len(change),step=how.jerk*dt;
+        if(c>step)for(int i=0;i<3;++i)change[i]*=step/c;
+        for(int i=0;i<3;++i)acc[i]=j.acc[i]+change[i];
+    }
+    std::memcpy(j.acc,acc,12);
     for(int i=0;i<3;++i)j.vel[i]+=acc[i]*dt;
     for(int i=0;i<3;++i)j.thrust[i]=acc[i]+j.vel[i]*how.drag;
     j.thrust[1]+=kG;
@@ -966,13 +1001,13 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
         nose[0]=m[8];nose[1]=0.0f;nose[2]=m[10];
         if(!Normalize(nose)){nose[0]=0;nose[2]=1;}
     }
-    // The lean: the horizontal thrust against gravity (its fore-and-aft part times pitchShare), at most kHoverLean.
+    // The lean: the horizontal thrust against gravity (its fore-and-aft part times pitchShare), at most maxLean.
     const float ahead=(j.thrust[0]*nose[0]+j.thrust[2]*nose[2])*(how.pitchShare-1.0f);
     const float side[3]={j.thrust[0]+nose[0]*ahead,0.0f,j.thrust[2]+nose[2]*ahead};
     float up[3]={side[0],kG,side[2]};
     const float flat=std::sqrt(side[0]*side[0]+side[2]*side[2]);
-    if(std::atan2(flat,kG)>kHoverLean) {
-        const float h=std::tan(kHoverLean)*kG/flat;
+    if(std::atan2(flat,kG)>how.maxLean) {
+        const float h=std::tan(how.maxLean)*kG/flat;
         up[0]*=h;up[2]*=h;
     }
     Normalize(up);
@@ -1138,7 +1173,7 @@ void Dock(Jet& d,Jet& mother,ULONGLONG ms) noexcept {
 //    from its target (or its track), the way it was drifting, for kEvadeMs, then not again for kEvadeGapMs.
 // Withdrawing (damaged, fuel, out of drones) stays Withdraw's.
 constexpr float kCarrierOrbit=260.0f,kOrbitLead=0.5f,kOrbitSpeed=15.0f,kLaunchSpeed=6.0f;
-constexpr float kStationShift=500.0f,kStandoff=700.0f,kDockHold=300.0f,kEvadeShift=180.0f,kEvadeHit=0.003f;
+constexpr float kStationShift=500.0f,kStandoff=700.0f,kDockHold=300.0f,kEvadeShift=180.0f,kEvadeHit=0.01f;
 constexpr ULONGLONG kLaunchHoldMs=1200,kEvadeMs=5000,kEvadeGapMs=6000;
 
 // Its station (see kStationShift) at `height`, logged when its target changes.
@@ -1170,12 +1205,13 @@ bool DroneDocking(const Jet& c,const float* pos,ULONGLONG ms) noexcept {
     return false;
 }
 
-// Hit: the sidestep (see kEvadeShift) starts. Returns whether it is sidestepping.
-bool CarrierEvade(Jet& c,const float* pos,float height,float hp,float hpMax,ULONGLONG ms) noexcept {
+// Hit: the sidestep (see kEvadeShift) starts, unless `hold` (a drone docking: a sidestep then dragged out its
+// last approach). Returns whether it is sidestepping.
+bool CarrierEvade(Jet& c,const float* pos,float height,float hp,float hpMax,bool hold,ULONGLONG ms) noexcept {
     // hpSeen: its HP since the last sidestep (or healing): small hits add up.
     const bool hit=hpMax>0.0f && hp<c.hpSeen-hpMax*kEvadeHit;
     if(hp>c.hpSeen || hit || ms<c.evadeAgain)c.hpSeen=hp;
-    if(hit && ms>=c.evadeAgain) {
+    if(hit && !hold && ms>=c.evadeAgain) {
         float line[3]={c.vel[0],0.0f,c.vel[2]};
         if(c.target){line[0]=pos[0]-c.aim[0];line[2]=pos[2]-c.aim[2];}
         float side[3]={line[2],0.0f,-line[0]};
@@ -1194,8 +1230,9 @@ void CarrierGoal(Jet& c,const Kind& k,const float* pos,const float* anchor,float
                  float* goal,float* face,float* speed) noexcept {
     float st[3];
     CarrierStation(c,pos,anchor,height,st);
-    const bool evading=CarrierEvade(c,pos,height,hp,hpMax,ms);
-    const bool docking=!evading && DroneDocking(c,pos,ms);
+    const bool coming=DroneDocking(c,pos,ms);
+    const bool evading=CarrierEvade(c,pos,height,hp,hpMax,coming,ms);
+    const bool docking=!evading && coming;
     if(docking!=c.docking) {
         c.docking=docking;
         if(cfg.debug)Log("JET v=%p carrier: %s",c.vehicle,docking ? "a drone is coming in: holds still" : "back on its orbit");
@@ -1293,7 +1330,8 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float reach=a.gunRange<k.gunOpen ? a.gunRange : k.gunOpen;
         const float path[3]={pos[0]+nose[0]*a.gunRange,pos[1]+nose[1]*a.gunRange,pos[2]+nose[2]*a.gunRange};
         float flight[3]={j.vel[0],j.vel[1],j.vel[2]};
-        const bool straight=Normalize(flight) && Dot(flight,nose)>kGunSlip;
+        // The nose rides aoa above the path (JetSteer): the slip allowed is past that.
+        const bool straight=Normalize(flight) && Dot(flight,nose)>std::cos(std::acos(kGunSlip)+std::fabs(j.aoa));
         const bool friendly=FriendInLine(pos,path,v);
         gun=gunsOk && straight && a.guns>0 && dist<reach && dist>k.gunClose*0.8f && miss<(wide>kGunCone ? wide : kGunCone) && !friendly;
         if(cfg.debug && dist<reach && ms-j.gateAt>250) {
@@ -1359,6 +1397,7 @@ void __fastcall PhysicsHook(void* vehicle) {
         if(!j || !j->ready || v[kDead] || ms-j->seen>200 || !IsJetVehicle(v,nullptr))return;
         const auto body=At<void*>(v,kBody);
         if(!body)return;
+        JetMotionProps(body);
         alignas(16) float lin[4]={j->vel[0],j->vel[1],j->vel[2],0.0f},ang[4]={j->omega[0],j->omega[1],j->omega[2],0.0f};
         reinterpret_cast<SetVecFn>(image+kSetLinearVelocity)(body,lin);
         reinterpret_cast<SetVecFn>(image+kSetAngularVelocity)(body,ang);
@@ -1860,6 +1899,18 @@ bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr);
 }
 
+bool JetHud(const void* vehicle,JetHudInfo* out) noexcept {
+    const ULONGLONG ms=GameMs();
+    const Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle),ms);
+    if(!j)return false;
+    const ULONGLONG flown=ms-j->bornAt;
+    out->role=KindOf(*j).name;
+    out->fuelSec=j->mother ? -1.0f : j->fuelMs>flown ? static_cast<float>(j->fuelMs-flown)*0.001f : 0.0f;
+    out->drones=j->role==Role::carrier ? j->sorties : -1;
+    out->leaving=j->mode==Mode::withdraw;
+    return true;
+}
+
 void JetFrame(unsigned char* v) noexcept {
     if(!physicsOk)return;
     const ULONGLONG ms=GameMs();
@@ -2038,6 +2089,7 @@ void JetFrame(unsigned char* v) noexcept {
         JetSteer(*j,kind,nose,bodyUp,want,speed,dt,up);
         float dir[3]={j->vel[0],j->vel[1],j->vel[2]};
         if(!Normalize(dir))std::memcpy(dir,nose,12);
+        PitchBy(j->aoa,dir,up);
         Attitude(*j,kind,v,dir,up);
         Elevons(*j,kind,v,dt);
     }
@@ -2081,6 +2133,7 @@ bool InstallJets() noexcept {
         if(current!=image+kPhysics506)Log("JET physics: chaining onto %p (another plugin)",current);
         nextPhysics=reinterpret_cast<PhysicsFn>(current);
         physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
+        if(physicsOk)InstallJetProps();
         spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
         bayOk=spawnOk;

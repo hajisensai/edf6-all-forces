@@ -1,10 +1,14 @@
-"""Air Raider call weapons for the plugin's jets and helicopters: 17 rows appended to the shared
-weapon table, each weapon a clone of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
+"""Air Raider call weapons for the plugin's jets and helicopters: 19 rows appended to the shared
+weapon table. 17 are clones of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
 category 312) with a marker in its SGO's AmmoHitSizeAdjust. The plugin reads the marker (weapon +0x8C4)
 and flies its own planes for the call; the field does nothing for a RadioContact weapon, so without the
 plugin the weapon is simply a working KM6 bomber call.
+The last two (Call.vehicle) are vehicle requests, clones of the stock eWeapon394 (N9 Eros, Weapon_Sub,
+category 308): the stock request brings the player jet SGO (tools/make_jets.py EDF6VC_PJET_*.SGO, which
+must be installed too) with the jet's mark and guns in the request's vehicle setup, empty, for the player
+to fly (src/playerjet.cpp).
 
-  python tools/call_weapons.py build OUTDIR [--game DIR]     write the 17 SGOs + the stacked tables into OUTDIR
+  python tools/call_weapons.py build OUTDIR [--game DIR]     write the 19 SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
   python tools/call_weapons.py uninstall --unequipped [--force] [--game DIR]
   python tools/call_weapons.py check [--game DIR]
@@ -19,8 +23,8 @@ other row is checked unchanged before anything is written.
 
 install backs up every Mods file it overwrites the first time into Mods/.edf6vc_backup/ and records what it
 wrote in Mods/.edf6vc_calls.json. uninstall cuts only our rows out of the CURRENT shared files (never rolls
-back to the backup: other mods' later edits stay), writes the texts back, and deletes WEAPONTABLE.SGO only
-when we created it and what is left is byte-identical to the stock one.
+back to the backup: other mods' later edits stay) and writes them back, except that a file we created whose
+remainder is byte-identical to the stock one is deleted instead (nobody else's edits are left in it).
 
 A save that still has one of these weapons equipped crashes the game at the main menu once its row is
 gone (the menu looks the weapon up by row index past the table end; see edf6-jaeger tools/install.py):
@@ -47,6 +51,7 @@ import gen  # noqa: E402
 from dsgo import Node  # noqa: E402
 
 TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
+VEHICLE_TEMPLATE = 'eWeapon394'  # N9 Eros (a heli vehicle request)
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
 TABLE = 'WEAPON/WEAPONTABLE.SGO'
 TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
@@ -66,6 +71,10 @@ class Call:
     planes: float        # Ammo_CustomParameter[2][1]: the stock bomber fallback's plane count
     reload: float        # ReloadTime[0], the base of the star curve
     level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
+    # A vehicle request (VEHICLE_TEMPLATE): the OBJECT SGO it brings (tools/make_jets.py, no extension) and
+    # the testrange/gen.py JETS entry it is made like; `mark` is then the jet's mark (its speed gain k).
+    vehicle: str = ''
+    jet: str = ''
 
 
 CALLS: tuple[Call, ...] = (
@@ -88,11 +97,38 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_DOLL_CARRIER_F', 7116, 'doll_carrier', True, 1, 4100, 2.4),
     # Appended 2026-10-04: the submarine carrier (src/subcarrier.cpp): one, it stays the mission.
     Call('EDF6VC_CALL_SUB', 7117, 'sub', True, 1, 7200, 3.0),
+    # Appended 2026-10-04: the jets the player flies (src/playerjet.cpp), vehicle requests.
+    Call('EDF6VC_CALL_PJET_FIGHTER', 7201, 'pjet_fighter', False, 0, 6000, 1.0,
+         'EDF6VC_PJET_FIGHTER', 'edf6tr_pjet_fighter_mission'),
+    Call('EDF6VC_CALL_PJET_STRIKE', 7202, 'pjet_strike', False, 0, 6500, 0.8,
+         'EDF6VC_PJET_STRIKE', 'edf6tr_pjet_strike_mission'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'pjet_fighter': {
+        'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
+                         '前推左摇杆或按上升键加油门，后拉减油门；右摇杆或鼠标转弯和俯仰。'),
+        'CN': ('玩家戰鬥機', '請求一架由你自己駕駛的戰鬥機，空著送到信號彈處：兩門機砲和飛彈，輕快，轉彎最急。'
+                         '前推左搖桿或按上升鍵加油門，後拉減油門；右搖桿或滑鼠轉彎和俯仰。'),
+        'JA': ('戦闘機（自操縦）', '自分で操縦する戦闘機を信号弾の位置へ要請する。機関砲2門とミサイル、軽快で旋回が鋭い。'
+                              '左スティック前か上昇でスロットルを上げ、後ろで下げる。右スティックかマウスで旋回と上下。'),
+        'EN': ('Fighter (Fly It)', 'Requests a fighter you fly yourself, delivered empty to the flare: two guns and '
+                                   'missiles, light and the tightest turner. Left stick forward or ascend opens the '
+                                   'throttle, back closes it; the right stick or mouse turns and pitches.'),
+    },
+    'pjet_strike': {
+        'SC': ('玩家攻击机', '请求一架由你自己驾驶的攻击机，空着送到信号弹处：两门机炮和导弹，更耐打，速度和转弯不如战斗机。'
+                         '操作同玩家战斗机。'),
+        'CN': ('玩家攻擊機', '請求一架由你自己駕駛的攻擊機，空著送到信號彈處：兩門機砲和飛彈，更耐打，速度和轉彎不如戰鬥機。'
+                         '操作同玩家戰鬥機。'),
+        'JA': ('攻撃機（自操縦）', '自分で操縦する攻撃機を信号弾の位置へ要請する。機関砲2門とミサイル、頑丈だが速度と旋回は'
+                              '戦闘機に劣る。操作は戦闘機（自操縦）と同じ。'),
+        'EN': ('Strike Jet (Fly It)', 'Requests a strike jet you fly yourself, delivered empty to the flare: two guns '
+                                      'and missiles, tougher but slower and wider turning than the fighter. Flown like '
+                                      'the fighter.'),
+    },
     'interceptor': {
         'SC': ('截击机', '呼叫截击机，优先攻击空中目标；比制空战斗机飞得更快更高，并从更远处发射导弹。'),
         'CN': ('截擊機', '呼叫截擊機，優先攻擊空中目標；比制空戰鬥機飛得更快更高，並從更遠處發射飛彈。'),
@@ -162,17 +198,29 @@ NOTES: dict[str, str] = {
 }
 
 
+VEHICLE_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 写入的 EDF6VC_PJET_*.SGO。',
+    'CN': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 寫入的 EDF6VC_PJET_*.SGO。',
+    'JA': 'EDF6VehicleCrew プラグインと tools/make_jets.py が書き出す EDF6VC_PJET_*.SGO が必要。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the EDF6VC_PJET_*.SGO files tools/make_jets.py writes.',
+}
+
+
 def _lang(lang: str) -> str:
     return 'EN' if lang == 'KR' else lang
 
 
 def call_name(call: Call, lang: str) -> str:
     lang = _lang(lang)
+    if call.vehicle:
+        return KINDS[call.kind][lang][0]
     return KINDS[call.kind][lang][0] + MODES[lang][call.follow][0]
 
 
 def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
+    if call.vehicle:
+        return KINDS[call.kind][lang][1] + '\n\n' + VEHICLE_NOTES[lang]
     sep = ' ' if lang == 'EN' else ''
     return KINDS[call.kind][lang][1] + sep + MODES[lang][call.follow][1] + '\n\n' + NOTES[lang]
 
@@ -231,15 +279,63 @@ def our_block(ids: list[str]) -> int | None:
     return at
 
 
-def _template_index(ids: list[str]) -> int:
+def template_of(call: Call) -> str:
+    return VEHICLE_TEMPLATE if call.vehicle else TEMPLATE
+
+
+def _template_index(ids: list[str], template: str = TEMPLATE) -> int:
     upper = [x.upper() for x in ids]
-    return upper.index(TEMPLATE.upper())
+    return upper.index(template.upper())
 
 
 # ---------------------------------------------------------------- building
 
 
+# The stock heli's weapons in the request's vehicle setup and resources -> the player jet's (gen.JETS).
+_VEHICLE_SWAP = {
+    'app:/weapon/v_506heli_gatling01_l.sgo': gen._GUNS[0],
+    'app:/weapon/v_506heli_gatling01_r.sgo': gen._GUNS[1],
+}
+
+
+def _object_path(call: Call) -> str:
+    return f'app:/object/{call.vehicle.lower()}.sgo'
+
+
+def vehicle_sgo(template: bytes, call: Call) -> bytes:
+    """The N9 Eros request bringing the player jet. Ammo_CustomParameter[4] = [transport, box, vehicle SGO,
+    vehicle setup [multipliers, heli params (first: the speed gain k = the jet's mark), fuel, weapons],
+    voice lines]; `resource` preloads the same paths."""
+    doc = dsgo.parse(template)
+    r = doc.root
+    r.get('ReloadTime').items[0] = float(call.reload)
+    req = r.get('Ammo_CustomParameter').items[4]
+    stock_vehicle = req.items[2]
+    req.items[2] = _object_path(call)
+    setup = req.items[3]
+    setup.items[1].items[0] = float(call.mark)
+    for w in setup.items[3].items:
+        w.items[0] = _VEHICLE_SWAP.get(w.items[0].lower(), w.items[0])
+    res = r.get('resource')
+    swap = {stock_vehicle.lower(): _object_path(call), **_VEHICLE_SWAP}
+    res.items = [swap.get(x.lower(), x) for x in res.items]
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
+def vehicle_durability(game_root: str, call: Call) -> float:
+    """What the menu shows: the jet's durability times the request's HP multiplier."""
+    root = dsgo.parse(stock(game_root, f'WEAPON/{VEHICLE_TEMPLATE.upper()}.SGO')).root
+    mult = float(root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0])
+    return gen.JETS[call.jet].durability * mult
+
+
 def weapon_sgo(template: bytes, call: Call) -> bytes:
+    if call.vehicle:
+        return vehicle_sgo(template, call)
     doc = dsgo.parse(template)
     r = doc.root
     r.set('AmmoHitSizeAdjust', float(call.mark))
@@ -266,14 +362,18 @@ def _table_row(template: Node, call: Call) -> Node:
     return row
 
 
-def _text_row(template: Node, call: Call, lang: str) -> Node:
+def _text_row(template: Node, call: Call, lang: str, durability: float | None = None) -> Node:
     row = copy.deepcopy(template)
     row.items[0] = call_name(call, lang)
     row.items[1] = call_description(call, lang)
+    # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
+    stats = row.items[2].items
+    if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
+        stats[1].items[1] = f'{durability:.0f}'
     # The stat list stays KM6's, except the reload line's curve, which the game shows as $0pt
     # from that list: it must be the weapon's own ReloadTime or the menu shows KM6's 1020.
     for stat in row.items[2].items:
-        if len(stat.items) == 3 and stat.items[1] == '$0pt' and isinstance(stat.items[2], Node):
+        if len(stat.items) == 3 and str(stat.items[1]).startswith('$0pt') and isinstance(stat.items[2], Node):
             stat.items[2].items[0] = float(call.reload)
     return row
 
@@ -298,12 +398,13 @@ def stack(game_root: str) -> dict[str, bytes]:
     if at is not None and old < len(IDS) and ids[at + old:]:
         raise SystemExit(f'our block would grow by {len(IDS) - old} rows and move the rows after it '
                          f'(saves refer to them by index): {ids[at + old:]}')
-    tpl = _template_index(ids)
+    tpl = {t: _template_index(ids, t) for t in (TEMPLATE, VEHICLE_TEMPLATE)}
     out: dict[str, bytes] = {}
-    template_sgo = stock(game_root, f'WEAPON/{TEMPLATE.upper()}.SGO')
+    template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
     for call in CALLS:
-        out[sgo_file(call)] = weapon_sgo(template_sgo, call)
-    new_rows = [_table_row(rows[tpl], call) for call in CALLS]
+        out[sgo_file(call)] = weapon_sgo(template_sgo[template_of(call)], call)
+    new_rows = [_table_row(rows[tpl[template_of(call)]], call) for call in CALLS]
+    durability = {c.id: vehicle_durability(game_root, c) if c.vehicle else None for c in CALLS}
     placed = _place(rows, new_rows, at, old)
     out[TABLE] = dsgo.write(table_doc)
     for lang, rel in zip(LANGS, TEXTS):
@@ -311,7 +412,7 @@ def stack(game_root: str) -> dict[str, bytes]:
         text = _rows(doc, rel)
         if len(text) != len(ids):  # text rows are index-aligned with the table
             raise ValueError(f'{rel}: {len(text)} rows, base table has {len(ids)}')
-        new_text = [_text_row(text[tpl], call, lang) for call in CALLS]
+        new_text = [_text_row(text[tpl[template_of(call)]], call, lang, durability[call.id]) for call in CALLS]
         if _place(text, new_text, at, old) != placed:
             raise AssertionError(rel)
         out[rel] = dsgo.write(doc)
@@ -467,11 +568,11 @@ def uninstall(game_root: str, unequipped: bool, force: bool) -> None:
         shared = _without_our_rows(game_root, at, n)
     for rel, data in shared.items():
         path = os.path.join(mods, *rel.split('/'))
-        if rel == TABLE and rel in manifest['created'] and data == stock(game_root, rel):
+        if rel in manifest['created'] and data == stock(game_root, rel):
             os.remove(path)
             print(f'removed {rel} (back to stock)')
             continue
-        _write(path, data)  # the texts are always written back: other tools edit them too
+        _write(path, data)  # other tools' rows stay
         print(f'removed our rows from {rel}')
     for call in CALLS:
         rel = sgo_file(call)

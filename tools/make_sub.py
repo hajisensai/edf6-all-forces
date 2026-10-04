@@ -77,7 +77,7 @@ def main(argv: list[str]) -> int:
     root = args[0] if args else gen.DEFAULT_GAME
     if '--remove' in argv:
         return remove(root)
-    game = gen.Game(gen.DEFAULT_GAME)      # Root.cpk is only read
+    game = gen.Game(root)                  # Root.cpk is only read
     out = gen.object_dir(root)
     os.makedirs(out, exist_ok=True)
     for path in gen.write_jet_guns(root, game):

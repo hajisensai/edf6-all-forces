@@ -485,9 +485,11 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
     return ForEachEnemyOf(At<std::int32_t>(v,kTeam),v,static_cast<F&&>(f));
 }
 
-// The enemy lock point to engage, among the enemies within `range` of `around`: the one nearest to
-// `from` (the heli: the shortest turn and flight), the current one counting kKeepTarget nearer and one
-// too close below to aim at kTooClose farther. Returns false with none.
+// The enemy lock point to engage, among the enemies within `range` of `around` (a guard's post, the
+// player it follows) and the current target wherever it has gone (it is chased, not dropped when it
+// leaves the range): the one nearest to `from` (the heli: the shortest turn and flight), the current
+// one counting kKeepTarget nearer and one too close below to aim at kTooClose farther. Returns false
+// with none.
 bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* from,float range,float* aim) noexcept {
     const bool circler=At<const unsigned char*>(v,0)==image+kHeli410;
     const float minHoriz=MinAimHoriz();
@@ -496,7 +498,7 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
     ForEachEnemy(v,[&](const void* object,const float* a) noexcept {
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
-        if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
+        if(object!=h.target && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
         if(object==h.target)score-=circler ? kCircleKeep : kKeepTarget;
@@ -1643,6 +1645,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
     if(IsJet(vehicle)){if(cfg.jetPilot)JetFrame(vehicle);return;}
     if(IsSub(vehicle)){SubFrame(vehicle);CarrierLaserFrame(vehicle);return;}   // the submarine carrier (subcarrier.cpp, carrierlaser.cpp)
+    if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(!cfg.heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){HeliCrewed(vehicle);h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
@@ -1667,6 +1670,16 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
         if(!(std::isfinite(rotor) && rotor>0.2f))Put<float>(vehicle,kRotor,0.5f);
         Log("HELI v=%p called: %s at (%.0f,%.0f,%.0f), fuel %lus",vehicle,guard ? "guard" : "follow",post[0],post[1],post[2],fuelSec);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+bool HeliFuel(const void* vehicle,float* sec) noexcept {
+    for(const auto& h:helis) {
+        if(h.vehicle!=vehicle || !h.called || h.ctrl!=At<const void*>(vehicle,kSelfCtrl))continue;
+        const ULONGLONG ms=GameMs();
+        *sec=h.leaving || ms>=h.leaveAt ? 0.0f : static_cast<float>(h.leaveAt-ms)*0.001f;
+        return true;
+    }
+    return false;
 }
 
 void HeliReap(const void* self) noexcept {
@@ -1994,6 +2007,7 @@ bool CheckHeliProfile() noexcept {
             cfg.rescueAutoBoard ? (boardOk ? "on" : "off: unexpected EDF.dll code") : "off: the player boards with their own button");
         InstallJets();
         InstallSub();   // after the jets: it chains onto their physics hook
+        InstallPlayerJets();   // after the carrier: the same slot
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
