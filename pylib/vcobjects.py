@@ -133,9 +133,8 @@ JET_MAB_BONES = ((0x360, 'body'), (0x372, 'rotor'), (0x37E, 'tailRotor'))
 # The fourth parent name, the root, stays: (0x36A, 'mdl') has no room for a longer name, so every jet model's
 # root bone is JET_ROOT_BONE (pylib/jet_models.py renames the drone's `pd607_Drone_airstrike`). A model
 # without it leaves the riding-position locators (vehicle_riding_position) without a parent: the vehicle
-# init (0x62B430, from 0x629450) then reads a null locator (EDF+0x62B619), CreateObject comes back with a
-# half-made vehicle, and its first crash step reads a dead effect never set up (EDF+0x5F866C; 2026-10-03,
-# a carrier's drone).
+# init (0x62B430, from 0x629450) then reads a null locator (EDF+0x62B619) and CreateObject comes back with a
+# half-made vehicle. (The crash at EDF+0x5F866C first put down to this is the dead effect's: see _dead_effect.)
 JET_MAB_ROOT = (0x36A, JET_ROOT_BONE)
 # Fuselage only (half extents; the 25 m wingspan left out so low passes do not scrape), centre as the model.
 JET_RIGID_BODY = [[0.0, 0.34, 2.6], [2.0, 1.6, 13.0]]
@@ -149,6 +148,21 @@ def _rebone(v, names: set[str], to: str = JET_ROOT_BONE):
 
 
 JET_BODY_BONE = 'bomber501'
+
+
+def _dead_effect(effects: list) -> list:
+    """The V506's dead effect with no part thrown off. Its first step (BrakePartFunc, vtable 0x17D88F0) throws
+    [['rotor', 6]] off and its third (ExplosionAddSelectActivePartFunc) [['tailRotor', 2]]: each name is looked up
+    in the ragdoll (0x6EA4B0), which knows only the bones animation_from_ragdoll binds (a jet's: its body, see
+    _jet_ragdoll); any other name is -1 there, and BrakePartFunc's step 0x5F85A0 reads that record unchecked
+    (EDF+0x5F866C: a player jet crashing into the ground, 2026-10-04). A jet has no rotor to throw: both lists
+    empty (an empty list is the stock second step's own form; the steps then have nothing to do)."""
+    for step, stock in ((0, 'rotor'), (2, 'tailRotor')):
+        parts = effects[step][2]
+        if not (isinstance(parts, list) and len(parts) == 1 and isinstance(parts[0], list)):
+            raise ValueError(f'V506_HELI 的 vehicle_dead_effect[{step}] 不是预期的样子（{stock}）')
+        effects[step][2] = []
+    return effects
 
 
 def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE) -> bytes:
@@ -212,7 +226,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
     m['vehicle_weapon_setting'] = [[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))] + [[anchor, -1]]
-    m['vehicle_dead_effect'] = _rebone(m['vehicle_dead_effect'], bones, anchor)
+    m['vehicle_dead_effect'] = _dead_effect(_rebone(m['vehicle_dead_effect'], bones, anchor))
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
