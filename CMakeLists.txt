@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(EDF6VehicleCrew VERSION 0.7.0 LANGUAGES CXX)
+project(EDF6VehicleCrew VERSION 0.7.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/playerjet.cpp src/jetprops.cpp src/booster.cpp src/mission.cpp src/body506.cpp)
