@@ -458,7 +458,7 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
            static_cast<int>(std::lround(j.clear>9999.0f ? 9999.0f : j.clear)),j.climb>=0.0f ? L"UP" : L"DOWN",
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
     Format(thr,L"THROTTLE %d%%",static_cast<int>(std::lround(j.throttle*100.0f)));
-    Format(keys,j.air ? L"BOOST: forward / ascend    BRAKE: back    let go: cruise    PITCH, TURN: right stick / mouse"
+    Format(keys,j.air ? L"BOOST: forward / ascend   BRAKE: back   ROLL: left stick sideways   PITCH, TURN: right stick / mouse"
                       : L"THROTTLE: forward / ascend = up, back = down    TAKE OFF: pull up    TURN: right stick / mouse");
     info.scale=kTitleScale;info.rgba=kWhite;
     thr.scale=kLineScale;thr.rgba=kCyan;
