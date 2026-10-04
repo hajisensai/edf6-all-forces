@@ -50,11 +50,17 @@ class Jet:
 # two): a jet diving at 160 m/s had 0.3 s between their reach and its pull-out, and 7 of a drone's 130 gun
 # chances fired on 2026-10-03 (the rest held, the nose not yet on the lead); the strike, interceptor and
 # multirole jets fired none. Faster and longer lived they reach JET_GUN_REACH (a jet cannon's: ~960 m/s, the
-# reach the jets' fire logic and the submarine carrier read off the weapon itself); damage and rate stay stock.
+# reach the jets' fire logic and the submarine carrier read off the weapon itself) and JET_GUN_DAMAGE; the rate stays stock.
 JET_GUN_FILES = {'EDF6VC_JET_GUN_L.SGO': 'V_506HELI_GATLING01_L.SGO', 'EDF6VC_JET_GUN_R.SGO': 'V_506HELI_GATLING01_R.SGO'}
 JET_GUN_SPEED, JET_GUN_ALIVE = 16.0, 60.0   # m a frame, frames: 960 m/s, 960 m
+JET_GUN_DAMAGE = 200.0   # a round (the stock heli gun's 10 is nothing at the Inferno tier; its rate stays)
 JET_GUN_REACH = JET_GUN_SPEED * JET_GUN_ALIVE
 _GUNS = tuple('app:/weapon/' + f.lower() for f in JET_GUN_FILES)
+# The values (2026-10-04, the user: "Inferno" values, like the stock weapons of that tier): the stores' damage and
+# blast are set by the stock weapons of level ~3.0-3.5 (the base game's Inferno tier, docs/weapons.csv level_raw) of the
+# same kind -- homing missiles 1000-3000 (Haytal WX 1000 / 7 m, Emerald 1200 / 10, Arcane 1800 / 18, Leopard 2600 / 15,
+# Grant MTX 3000 / 30), the Killer Copter's missile 2200 / 18, grenades and mortars 2500 / 25 - 4500 / 30 -- and the
+# jets' durability by the stock vehicle of that tier, the N9 Eros Sigma (level 3.42): 600 x 25 = 15000.
 # The jets' tier (Jet.tier, mission_setup[0]): the two multipliers (durability, weapons' damage) the stock game puts
 # over a vehicle's SGO values (vehicle_setup[0]: the N9 Eros 1.3 ... the Eros Sigma 25). The jets keep the stock
 # 506's 1: their durability and their weapons' damage below are what they get. (2026-10-04 they were made x25, the
@@ -140,26 +146,26 @@ class Store:
 STORES: dict[str, Store] = {
     # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead.
     'AAM_S': Store('AIM-9X', 'air', 85.0, 0.006, Missile('AIM-9X', burn=5.0, top=850.0, accel=300.0, max_g=50.0, nav=4.0,
-                   life=12.0, damage=500.0, blast=10.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0)),
+                   life=12.0, damage=1000.0, blast=8.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0)),
     # Medium-range air-to-air, active radar (AIM-120): a long burn, fast.
     'AAM_M': Store('AIM-120', 'air', 152.0, 0.010, Missile('AIM-120', burn=8.0, top=1200.0, accel=250.0, max_g=40.0, nav=4.0,
-                   life=16.0, damage=600.0, blast=12.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0)),
+                   life=16.0, damage=1500.0, blast=12.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0)),
     # Long-range air-to-air (AIM-54): a very long burn, very fast, a big warhead, not agile.
     'AAM_L': Store('AIM-54', 'air', 450.0, 0.025, Missile('AIM-54', burn=20.0, top=1500.0, accel=150.0, max_g=25.0, nav=3.0,
-                   life=30.0, damage=700.0, blast=15.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, interval=90.0)),
+                   life=30.0, damage=2600.0, blast=18.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, interval=90.0)),
     # Air-to-ground (AGM-65 Maverick): subsonic, a heavy warhead, a slow lock.
     'AGM': Store('AGM-65', 'ground', 300.0, 0.020, Missile('AGM-65', burn=3.5, top=320.0, accel=120.0, max_g=15.0, nav=3.0,
-                 life=15.0, damage=1500.0, blast=18.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, interval=60.0)),
+                 life=15.0, damage=3000.0, blast=20.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, interval=60.0)),
     # Light air-to-ground (AGM-114 Hellfire): what a drone carries.
     'AGM_L': Store('AGM-114', 'ground', 50.0, 0.004, Missile('AGM-114', burn=3.0, top=425.0, accel=180.0, max_g=20.0, nav=3.0,
-                   life=12.0, damage=800.0, blast=10.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0)),
+                   life=12.0, damage=2000.0, blast=12.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0)),
     # Ship-launched air defence from a vertical launcher (RIM-162 ESSM): the bay need not face the target (a wide cone),
     # very fast, very agile, fired two at a target (the submarine carrier, src/subcarrier.cpp: no mass that matters).
     'ESSM': Store('RIM-162 ESSM', 'air', 0.0, 0.0, Missile('RIM-162 ESSM', burn=4.0, top=1300.0, accel=400.0, max_g=50.0,
-                  nav=4.0, life=15.0, damage=600.0, blast=15.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0, burst=2.0,
+                  nav=4.0, life=15.0, damage=1500.0, blast=15.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0, burst=2.0,
                   interval=120.0, eject=0.5)),
     # General-purpose 500 lb free-fall bomb (Mk 82): a heavier warhead than the Maverick's, a wider blast.
-    'MK82': Store('Mk 82', 'bomb', 230.0, 0.015, Bomb('Mk 82', damage=1500.0, blast=25.0)),
+    'MK82': Store('Mk 82', 'bomb', 230.0, 0.015, Bomb('Mk 82', damage=4000.0, blast=28.0)),
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 
@@ -228,8 +234,8 @@ _ARMS = _FIGHTER
 # JET_BLAST_ALIVE frames, so it goes off where the drone is. One round, one shot. (damage, radius m).
 JET_BLAST_STOCK = 'V_409HELI_BOMB01.SGO'
 JET_BLAST_FILES: dict[str, tuple[float, float]] = {
-    'EDF6VC_BLAST_CHARGE.SGO': (1200.0, 15.0),   # the blast drone: fast, many
-    'EDF6VC_DOLL_CHARGE.SGO': (3000.0, 25.0),    # the doll drone: slow, draws the enemy in first
+    'EDF6VC_BLAST_CHARGE.SGO': (2000.0, 15.0),   # the blast drone: fast, many
+    'EDF6VC_DOLL_CHARGE.SGO': (5000.0, 25.0),    # the doll drone: slow, draws the enemy in first
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
@@ -251,35 +257,35 @@ JET_SILENT_SE = 'EDF6VC_SILENT'
 JET_ROTOR_SE_ROWS = (0, 1)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
-    'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _STRIKE),
-    'edf6tr_jet_fighter_mission': Jet(7002.0, 1000.0, _FIGHTER),
+    'edf6tr_jet_strike_mission': Jet(7001.0, 18000.0, _STRIKE),
+    'edf6tr_jet_fighter_mission': Jet(7002.0, 12000.0, _FIGHTER),
     # bomber501_2 (dark paint) with elevons, x 0.65: 16 m across
-    'edf6tr_jet_interceptor_mission': Jet(7003.0, 900.0, _INTERCEPTOR, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
+    'edf6tr_jet_interceptor_mission': Jet(7003.0, 10000.0, _INTERCEPTOR, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                           'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
     # The enemy fighter (src/jet_internal.h kBodies Body::enemyFighter): the interceptor's model, a fighter's arms; the plugin
     # puts it on the enemy team on first sight, so it fights the player and their jets.
-    'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 900.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
+    'edf6tr_jet_enemy_fighter_mission': Jet(7020.0, 10000.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                             'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', rigid=((0.0, 0.22, 1.69), (1.3, 1.04, 8.45))),
     # bomber401 x 0.5: 26 m across
-    'edf6tr_jet_multirole_mission': Jet(7004.0, 1300.0, _MULTIROLE, ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
+    'edf6tr_jet_multirole_mission': Jet(7004.0, 15000.0, _MULTIROLE, ('app:/object/edf6vc_multirole.mrab', 'bomber401.mdb'),
                                         'EDF6VC_MULTIROLE.MRAB', 'bomber401', rigid=((0.0, 1.07, 0.0), (1.25, 1.0, 4.0))),
     # the EDF transport x 1.6: 59 x 77 m; it never fires (its drones do)
-    'edf6tr_jet_carrier_mission': Jet(7005.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
+    'edf6tr_jet_carrier_mission': Jet(7005.0, 60000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
                                       'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
     # the same carrier sending blast / doll drones (src/jet.cpp kCarrierMarks)
-    'edf6tr_jet_blast_carrier_mission': Jet(7009.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
+    'edf6tr_jet_blast_carrier_mission': Jet(7009.0, 60000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
                                             'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
-    'edf6tr_jet_doll_carrier_mission': Jet(7010.0, 8000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
+    'edf6tr_jet_doll_carrier_mission': Jet(7010.0, 60000.0, _ARMS, ('app:/object/edf6vc_carrier.mrab', 'v508_transport.mdb'),
                                            'EDF6VC_CARRIER.MRAB', 'body', rigid=((0.0, 6.75, -3.11), (7.09, 6.77, 38.42))),
     # the airstrike drone x 3: 5.7 m long; only carriers launch it (tools/make_jets.py EDF6VC_JET_DRONE.SGO)
-    'edf6tr_jet_drone': Jet(7006.0, 300.0, _DRONE, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+    'edf6tr_jet_drone': Jet(7006.0, 3000.0, _DRONE, ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                             'EDF6VC_DRONE.MRAB', 'body', 'body',
                             rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     # Blast and doll drones (src/jet.cpp Role::blast / doll): the drone with a charge for its missile; only
     # the blast and doll carriers launch them (their guns never fire).
-    'edf6tr_jet_blast': Jet(7007.0, 250.0, _GUNS + (_BLAST[0],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+    'edf6tr_jet_blast': Jet(7007.0, 2500.0, _GUNS + (_BLAST[0],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                             'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
-    'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
+    'edf6tr_jet_doll': Jet(7008.0, 8000.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                            'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
     # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
@@ -292,9 +298,9 @@ JETS: dict[str, Jet] = {
                                       weapon_bones=('gunA_tilt_l', 'gunB_tilt_l', 'missle_l')),
     # Player jets (src/playerjet.cpp kKinds): the fighter in the interceptor's dark bomber501_2 (16 m across),
     # the strike jet in the elevon bomber (25 m across); empty until the player boards them.
-    'edf6tr_pjet_fighter_mission': Jet(7201.0, 1400.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
+    'edf6tr_pjet_fighter_mission': Jet(7201.0, 15000.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                        'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', player=True, camera=(0.0, 6.0, -24.0)),
-    'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _STRIKE, player=True, camera=(0.0, 8.0, -32.0)),
+    'edf6tr_pjet_strike_mission': Jet(7202.0, 22000.0, _STRIKE, player=True, camera=(0.0, 8.0, -32.0)),
 }
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
@@ -509,6 +515,7 @@ def jet_guns(game: Game) -> dict[str, bytes]:
             raise ValueError(f'{stock} 不是预期的直升机机炮')
         r.set('AmmoSpeed', JET_GUN_SPEED)
         r.set('AmmoAlive', JET_GUN_ALIVE)
+        r.set('AmmoDamage', JET_GUN_DAMAGE)
         out[name] = dsgo.write(doc)
     for name, (damage, radius) in JET_BLAST_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', JET_BLAST_STOCK))
