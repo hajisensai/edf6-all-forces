@@ -109,11 +109,14 @@ constexpr float kPush=0.5f;            // the stick forward: down to kPush of th
 constexpr float kInduced=0.3f;
 constexpr float kStallWarn=1.05f;
 // The mouse's aim (AimSteer): its heading turns kAimPerUnit rad per unit of a frame's mouse X (the seat's right stick
-// on the keyboard: the frame's movement, at most 1), times ini PlayerJetMouseSpeed, its elevation likewise, within
-// kAimMaxEl of level. The plane turns its path toward it at kSteer times the angle off (rad/s), the lift for that
-// and for holding the path up (Hold) along its up, banked toward it at kRollRate; under kAimBankMin g of lift it
-// keeps its bank.
-constexpr float kAimPerUnit=0.05f,kAimMaxEl=1.3f,kSteer=1.6f,kAimBankMin=0.3f;
+// on the keyboard: the frame's movement, at most 1), times ini PlayerJetMouseSpeed, its elevation likewise; the mouse
+// takes it no farther than kAimMaxEl from level (an aim already past, the nose's when W was let go, stays). The plane
+// turns its path toward it at kSteer times the angle off (rad/s), the lift for that and for holding the path up (Hold)
+// along its up. Turning (the aim kAimTurnFrom off or more) it banks toward that lift at kRollRate; on the aim it only
+// levels its wings, gently (kLevelRate), and not at all climbing or diving steeper than kAimSteep (sine): letting W go
+// in a steep climb or over the top of a loop keeps the attitude it has (it snapped upright at kRollRate before,
+// 2026-10-04). Under kAimBankMin g of lift it keeps its bank.
+constexpr float kAimPerUnit=0.05f,kAimMaxEl=1.3f,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
 constexpr float kAimMark=800.0f;       // m: the readout's aim and path points ahead of the plane      // the readout's STALL: the most lift under this many times what holds the path
 // Angle of attack (jet.cpp kAoaPerG): the nose rides this far above the path per g pulled at the middle of
 // the speed range, more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax, eased over kAoaTau s. Only
@@ -516,7 +519,8 @@ void MoveAim(PJet& j,const Stick& s) noexcept {
     float right[3];RightOf(flat,right);
     const float a=s.aimX*k,co=std::cos(a),si=std::sin(a);
     for(int i=0;i<3;++i)flat[i]=flat[i]*co+right[i]*si;
-    const float el=Clamp(std::asin(Clamp(j.aim[1],-1.0f,1.0f))+s.aimY*k,-kAimMaxEl,kAimMaxEl);
+    const float was=std::asin(Clamp(j.aim[1],-1.0f,1.0f));
+    const float el=Clamp(was+s.aimY*k,was<-kAimMaxEl ? was : -kAimMaxEl,was>kAimMaxEl ? was : kAimMaxEl);
     j.aim[0]=flat[0]*std::cos(el);j.aim[1]=std::sin(el);j.aim[2]=flat[2]*std::cos(el);
 }
 
@@ -534,11 +538,13 @@ float AimSteer(PJet& j,const unsigned char* v,const Stick& s,const float* dir,co
         if(c>0.0f)toward[0]=toward[1]=toward[2]=0.0f;
         else RightOf(dir,toward);
     }
-    const float turn=kSteer*std::acos(c)*speed,across=Len(gPerp);
+    const float off=std::acos(c),turn=kSteer*off*speed,across=Len(gPerp);
     float lift[3];
     for(int i=0;i<3;++i)lift[i]=toward[i]*turn-(across>1e-4f ? gPerp[i]/across*hold : 0.0f);
     float want[3];std::memcpy(want,lift,12);
-    if(Len(lift)>kAimBankMin*kG && Across(want,dir))BankToward(j.up,dir,want,kRollRate*dt);
+    const bool turning=off>=kAimTurnFrom,steep=vertical || std::fabs(dir[1])>kAimSteep;
+    if(Len(lift)>kAimBankMin*kG && (turning || !steep) && Across(want,dir))
+        BankToward(j.up,dir,want,(turning ? kRollRate : kLevelRate)*dt);
     return Clamp(Dot(lift,j.up),-kPush*most,most);
 }
 

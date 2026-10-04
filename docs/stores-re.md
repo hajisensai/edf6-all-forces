@@ -56,7 +56,7 @@ EDF.dll TimeDateStamp 0x678CCB46，RVA。置信度：H 读代码确认，M 推�
 - 速度 =（方向 × `AmmoSpeed` + 发射者速度 × `AmmoOwnerMove`）× 60；重力 = `AmmoGravityFactor` × Havok 世界重力（`0x231DC3`、`0x231E7B`）（H）。世界重力是不是 9.8，没有核实（L）。
 - `EDF6VC_MK82_*.SGO`：由原版 `V_409HELI_BOMB01` 改成：
   - CP[0] = 0（触地即爆），CP[3] = 0（不弹跳）。
-  - 继承载机速度（`AmmoOwnerMove` 1），重力系数 1，弹射 0.05 m/帧，寿命 30 s，伤害基础值 500，爆炸半径 25 m，连投间隔 8 帧。
+  - 继承载机速度（`AmmoOwnerMove` 1），重力系数 1，弹射 0.05 m/帧，寿命 30 s，伤害 1500，爆炸半径 25 m，连投间隔 8 帧。
 
 ## 6. 原版 HUD
 

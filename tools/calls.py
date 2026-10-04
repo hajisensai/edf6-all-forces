@@ -48,44 +48,40 @@ class Call:
         return self.brings in ('jets', 'helis')
 
 
-# Every call at the base game's highest tier for now (the user's 2026-10-04 ask: one Inferno version): the level of
-# the N9 Eros Sigma (eWeapon399, 3.42), whose request multiplies its vehicle by 25 -- the jets' tier
-# (pylib/vcobjects.py JET_TIER).
-INFERNO = 3.42
 CALLS: tuple[Call, ...] = (
-    Call('EDF6VC_CALL_INTERCEPTOR', 7101, 'interceptor', False, 2, 900, INFERNO, 'jets', 'interceptors (guard)', 240, 'interceptor'),
-    Call('EDF6VC_CALL_INTERCEPTOR_F', 7102, 'interceptor', True, 2, 1035, INFERNO, 'jets', 'interceptors (follow)', 240, 'interceptor'),
-    Call('EDF6VC_CALL_STRIKE', 7103, 'strike', False, 3, 1500, INFERNO, 'jets', 'strike jets (guard)', 240, 'strike'),
-    Call('EDF6VC_CALL_STRIKE_F', 7104, 'strike', True, 3, 1725, INFERNO, 'jets', 'strike jets (follow)', 240, 'strike'),
-    Call('EDF6VC_CALL_MULTIROLE', 7105, 'multirole', False, 3, 1800, INFERNO, 'jets', 'multirole jets (guard)', 300, 'multirole'),
-    Call('EDF6VC_CALL_MULTIROLE_F', 7106, 'multirole', True, 3, 2070, INFERNO, 'jets', 'multirole jets (follow)', 300, 'multirole'),
-    Call('EDF6VC_CALL_FIGHTER', 7107, 'fighter', False, 4, 2000, INFERNO, 'jets', 'fighters (guard)', 300, 'fighter'),
-    Call('EDF6VC_CALL_FIGHTER_F', 7108, 'fighter', True, 4, 2300, INFERNO, 'jets', 'fighters (follow)', 300, 'fighter'),
-    Call('EDF6VC_CALL_CARRIER', 7109, 'carrier', False, 1, 3000, INFERNO, 'jets', 'carrier (guard)', 600, 'carrier'),
-    Call('EDF6VC_CALL_CARRIER_F', 7110, 'carrier', True, 1, 3450, INFERNO, 'jets', 'carrier (follow)', 600, 'carrier'),
-    Call('EDF6VC_CALL_HELI', 7111, 'heli', False, 2, 1600, INFERNO, 'helis', 'Brute helis (guard)', 360, body='brute410'),
-    Call('EDF6VC_CALL_HELI_F', 7112, 'heli', True, 2, 1800, INFERNO, 'helis', 'Eros helis (follow)', 360, body='eros506'),
+    Call('EDF6VC_CALL_INTERCEPTOR', 7101, 'interceptor', False, 2, 900, 0.3, 'jets', 'interceptors (guard)', 240, 'interceptor'),
+    Call('EDF6VC_CALL_INTERCEPTOR_F', 7102, 'interceptor', True, 2, 1035, 0.5, 'jets', 'interceptors (follow)', 240, 'interceptor'),
+    Call('EDF6VC_CALL_STRIKE', 7103, 'strike', False, 3, 1500, 0.5, 'jets', 'strike jets (guard)', 240, 'strike'),
+    Call('EDF6VC_CALL_STRIKE_F', 7104, 'strike', True, 3, 1725, 0.7, 'jets', 'strike jets (follow)', 240, 'strike'),
+    Call('EDF6VC_CALL_MULTIROLE', 7105, 'multirole', False, 3, 1800, 0.8, 'jets', 'multirole jets (guard)', 300, 'multirole'),
+    Call('EDF6VC_CALL_MULTIROLE_F', 7106, 'multirole', True, 3, 2070, 1.0, 'jets', 'multirole jets (follow)', 300, 'multirole'),
+    Call('EDF6VC_CALL_FIGHTER', 7107, 'fighter', False, 4, 2000, 1.0, 'jets', 'fighters (guard)', 300, 'fighter'),
+    Call('EDF6VC_CALL_FIGHTER_F', 7108, 'fighter', True, 4, 2300, 1.2, 'jets', 'fighters (follow)', 300, 'fighter'),
+    Call('EDF6VC_CALL_CARRIER', 7109, 'carrier', False, 1, 3000, 1.8, 'jets', 'carrier (guard)', 600, 'carrier'),
+    Call('EDF6VC_CALL_CARRIER_F', 7110, 'carrier', True, 1, 3450, 2.0, 'jets', 'carrier (follow)', 600, 'carrier'),
+    Call('EDF6VC_CALL_HELI', 7111, 'heli', False, 2, 1600, 0.4, 'helis', 'Brute helis (guard)', 360, body='brute410'),
+    Call('EDF6VC_CALL_HELI_F', 7112, 'heli', True, 2, 1800, 0.6, 'helis', 'Eros helis (follow)', 360, body='eros506'),
     # Appended 2026-10-04: carriers whose drones blow themselves up next to the enemy.
-    Call('EDF6VC_CALL_BLAST_CARRIER', 7113, 'blast_carrier', False, 1, 3300, INFERNO, 'jets', 'blast drone carrier (guard)', 600,
+    Call('EDF6VC_CALL_BLAST_CARRIER', 7113, 'blast_carrier', False, 1, 3300, 2.0, 'jets', 'blast drone carrier (guard)', 600,
          'blastCarrier'),
-    Call('EDF6VC_CALL_BLAST_CARRIER_F', 7114, 'blast_carrier', True, 1, 3800, INFERNO, 'jets', 'blast drone carrier (follow)', 600,
+    Call('EDF6VC_CALL_BLAST_CARRIER_F', 7114, 'blast_carrier', True, 1, 3800, 2.2, 'jets', 'blast drone carrier (follow)', 600,
          'blastCarrier'),
-    Call('EDF6VC_CALL_DOLL_CARRIER', 7115, 'doll_carrier', False, 1, 3600, INFERNO, 'jets', 'doll drone carrier (guard)', 600,
+    Call('EDF6VC_CALL_DOLL_CARRIER', 7115, 'doll_carrier', False, 1, 3600, 2.2, 'jets', 'doll drone carrier (guard)', 600,
          'dollCarrier'),
-    Call('EDF6VC_CALL_DOLL_CARRIER_F', 7116, 'doll_carrier', True, 1, 4100, INFERNO, 'jets', 'doll drone carrier (follow)', 600,
+    Call('EDF6VC_CALL_DOLL_CARRIER_F', 7116, 'doll_carrier', True, 1, 4100, 2.4, 'jets', 'doll drone carrier (follow)', 600,
          'dollCarrier'),
     # Appended 2026-10-04: the submarine carrier (src/subcarrier.cpp): one, it stays the mission following the
     # player (it surfaces kSubAhead past the marker, its 1664 m hull clear of the caller; three at most).
-    Call('EDF6VC_CALL_SUB', 7117, 'sub', True, 1, 7200, INFERNO, 'sub', 'submarine carrier'),
+    Call('EDF6VC_CALL_SUB', 7117, 'sub', True, 1, 7200, 3.0, 'sub', 'submarine carrier'),
     # Appended 2026-10-04: the jets the player flies (src/playerjet.cpp kKinds), vehicle requests.
-    Call('EDF6VC_CALL_PJET_FIGHTER', 7201, 'pjet_fighter', False, 0, 6000, INFERNO, 'vehicle',
+    Call('EDF6VC_CALL_PJET_FIGHTER', 7201, 'pjet_fighter', False, 0, 6000, 1.0, 'vehicle',
          vehicle='EDF6VC_PJET_FIGHTER', jet='edf6tr_pjet_fighter_mission'),
-    Call('EDF6VC_CALL_PJET_STRIKE', 7202, 'pjet_strike', False, 0, 6500, INFERNO, 'vehicle',
+    Call('EDF6VC_CALL_PJET_STRIKE', 7202, 'pjet_strike', False, 0, 6500, 0.8, 'vehicle',
          vehicle='EDF6VC_PJET_STRIKE', jet='edf6tr_pjet_strike_mission'),
     # Appended 2026-10-04: the gunship (src/jet.cpp GunshipFire), a bomber401 circling and shelling. 0.7.0 had
     # put these two before the player jets', which moved those rows (WITHDRAWN).
-    Call('EDF6VC_CALL_GUNSHIP', 7118, 'gunship', False, 1, 2600, INFERNO, 'jets', 'gunship (guard)', 600, 'gunship'),
-    Call('EDF6VC_CALL_GUNSHIP_F', 7119, 'gunship', True, 1, 3000, INFERNO, 'jets', 'gunship (follow)', 600, 'gunship'),
+    Call('EDF6VC_CALL_GUNSHIP', 7118, 'gunship', False, 1, 2600, 1.2, 'jets', 'gunship (guard)', 600, 'gunship'),
+    Call('EDF6VC_CALL_GUNSHIP_F', 7119, 'gunship', True, 1, 3000, 1.4, 'jets', 'gunship (follow)', 600, 'gunship'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
