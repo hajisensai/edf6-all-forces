@@ -116,6 +116,8 @@ void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
 void ResetMissiles() noexcept;    // missile.cpp
+// What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
+void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
 bool InstallBigWorld() noexcept;

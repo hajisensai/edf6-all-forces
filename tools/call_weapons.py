@@ -219,7 +219,35 @@ def _with_path(entry, path: str):
     return e
 
 
-def vehicle_sgo(template: bytes, call: Call) -> bytes:
+# The stock N9 Eros requests (the template and its five stronger versions): each multiplies its vehicle's durability and
+# weapons' damage by its vehicle setup's [0] (1.3 at level 0.44 ... 25 at 3.42). A player jet request (no difficulty
+# scaling: a request is not a script's CreateFriend) takes the multiplier its own level has on that curve.
+EROS_REQUESTS = ('eWeapon394', 'eWeapon395', 'eWeapon396', 'eWeapon397', 'eWeapon398', 'eWeapon399')
+
+
+def request_curve(game_root: str) -> list[tuple[float, float, float]]:
+    """(level, durability multiplier, damage multiplier) of each stock Eros request, by level."""
+    rows = {str(r.items[0]).upper(): r for r in _rows(dsgo.parse(stock(game_root, TABLE)), TABLE)}
+    curve = []
+    for w in EROS_REQUESTS:
+        level = float(rows[w.upper()].items[4])
+        mult = dsgo.parse(stock(game_root, f'WEAPON/{w.upper()}.SGO')).root.get('Ammo_CustomParameter').items[4].items[3].items[0]
+        curve.append((level, float(mult.items[0]), float(mult.items[1])))
+    return sorted(curve)
+
+
+def request_tier(curve: list[tuple[float, float, float]], level: float) -> tuple[float, float]:
+    """The multipliers a request of `level` has on the stock curve (linear between its points, held past its ends)."""
+    if level <= curve[0][0]:
+        return curve[0][1], curve[0][2]
+    for (l0, d0, w0), (l1, d1, w1) in zip(curve, curve[1:]):
+        if level <= l1:
+            t = (level - l0) / (l1 - l0)
+            return d0 + (d1 - d0) * t, w0 + (w1 - w0) * t
+    return curve[-1][1], curve[-1][2]
+
+
+def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float]) -> bytes:
     """The N9 Eros request bringing the player jet. Ammo_CustomParameter[4] = [transport, box, vehicle SGO,
     vehicle setup [multipliers, heli params (first: the speed gain k = the jet's mark), fuel, weapons],
     voice lines]; `resource` preloads the same paths."""
@@ -230,7 +258,7 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
     stock_vehicle = req.items[2]
     req.items[2] = _object_path(call)
     setup = req.items[3]
-    setup.items[0].items[0], setup.items[0].items[1] = vc.tier_of(call.jet)   # the jet's tier, not the Eros's
+    setup.items[0].items[0], setup.items[0].items[1] = tier   # request_tier: its level's on the stock Eros curve
     setup.items[1].items[0] = float(call.mark)
     # The jet's own weapons (its guns and stores, vcobjects.JETS) with the Eros's fuel tank where the jet SGO has it
     # (vcobjects.with_fuel): as many entries, in the same order, as its vehicle_weapon_setting holders (src/stores.cpp
@@ -253,14 +281,13 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
 
 
 def vehicle_durability(game_root: str, call: Call) -> float:
-    """What the menu shows: the jet's durability times the request's HP multiplier (vehicle_sgo: its tier)."""
-    del game_root
-    return vc.JETS[call.jet].durability * vc.tier_of(call.jet)[0]
+    """What the menu shows: the jet's durability times the request's HP multiplier (vehicle_sgo: request_tier)."""
+    return vc.JETS[call.jet].durability * request_tier(request_curve(game_root), call.level)[0]
 
 
-def weapon_sgo(template: bytes, call: Call) -> bytes:
+def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None) -> bytes:
     if call.brings == 'vehicle':
-        return vehicle_sgo(template, call)
+        return vehicle_sgo(template, call, request_tier(curve or [], call.level))
     doc = dsgo.parse(template)
     r = doc.root
     r.set('AmmoHitSizeAdjust', float(call.mark))
@@ -350,7 +377,8 @@ def stack(game_root: str) -> dict[str, bytes]:
     plan = plan_rows(before)
     tpl = {t: _template_index(before, t) for t in (TEMPLATE, VEHICLE_TEMPLATE)}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
-    out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c) for c in CALLS}
+    curve = request_curve(game_root)
+    out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c, curve) for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
     rows = s.rows
     templates = {c.id: rows[tpl[template_of(c)]] for c in CALLS}

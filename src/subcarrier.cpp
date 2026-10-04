@@ -1099,6 +1099,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         if(!v)return nullptr;
         FixBodyPart506(v,"SUB");
         reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
+        LevelVehicle(v);   // as a script's CreateFriend: the hull's tier (Thicken) is then the difficulty's
         reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
         if(!IsSub(v)) {
             Log("SUB launch: %p is no carrier (mark %.0f): deleted",v,BodyMark(v));
