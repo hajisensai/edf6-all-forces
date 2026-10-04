@@ -52,7 +52,7 @@
 build.cmd
 ```
 
-DLL 输出到 `dist\Mods\Plugins\`。每次 push 都会由 CI 构建。
+DLL 输出到 `build\Mods\Plugins\`（构建产物，不进仓库）。每次 push 都会由 CI 构建。
 
 ## 兼容性
 

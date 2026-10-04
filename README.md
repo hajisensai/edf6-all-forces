@@ -192,6 +192,6 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
 - 构建：`build.cmd`（MSVC x64 + Ninja，RelWithDebInfo），产物输出到 `build/Mods/Plugins/`。
 - `tools/`：安装链（`installer.py` 安装器、`calls.py` 呼叫武器数据、`call_weapons.py`、`make_jets.py`、`make_sub.py`、`build_release.py`、`selftest.py`）和逆向用的小工具。
-- `pylib/`：`tools/` 和 `testrange/` 共用的 Python 库：读 `Root.cpk`（`cpk.py`、`crilayla.py`、`rootcpk.py`，edf6-cpk 部分的许可见 `pylib/LICENSE.edf6-cpk`）、SGO / DSGO 读写（`sgo.py`、`sgowrite.py`、`dsgo.py`）、模型（`mdb.py`、`mdb_jet.py`、`jet_models.py`）、生成的载具（`vcobjects.py`）、生成文件的归属登记（`modfiles.py`）。
+- `pylib/`：`tools/` 和 `testrange/` 共用的 Python 库：读 `Root.cpk`（`cpk.py`、`crilayla.py`、`rootcpk.py`，edf6-cpk 部分的许可见 `pylib/LICENSE.edf6-cpk`）、SGO 读写（`sgo.py`）与 DSGO 读写（`dsgo.py`）、模型（`mdb.py`、`mdb_jet.py`、`jet_models.py`）、生成的载具（`vcobjects.py`）、生成文件的归属登记（`ledger.py`）与原子写入、运行中检测（`modfiles.py`）。
 - `testrange/`：测试场启动器（`gen.py` 生成脚本）。
 - `probe/`：早期调研用的任务脚本探针（用 CreateFriend 生成直升机），已不需要，也未安装。

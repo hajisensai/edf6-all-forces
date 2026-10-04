@@ -79,7 +79,7 @@ Visual Studio 2022 with the C++ x64 tools (CMake and Ninja come with it):
 build.cmd
 ```
 
-The DLL lands in `dist\Mods\Plugins\`. CI builds it on every push.
+The DLL lands in `build\Mods\Plugins\` (a build product, not in the repository). CI builds it on every push.
 
 ## Compatibility
 
