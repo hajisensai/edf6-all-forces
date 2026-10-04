@@ -195,7 +195,7 @@ bomber401 是飞翼（半宽 26 m），不适合当战斗机。
 
 ## 6. 空中航母的推力矢量舱（V508 的四个 booster）
 
-插件实现：`src/jet.cpp` `Thrusters()`、`kThrustBack` 一段注释。数据来源：`python tools/mdb.py dump V508_TRANSPORT.MRAB`，`V508_TRANSPORT.SGO` / `V508_TRANSPORT.CAS`（Root.cpk 只读），`tools/edfre.py` 查字符串。
+插件实现：`src/jet_flight.cpp` `Thrusters()`、`kThrustBack` 一段注释。数据来源：`python tools/mdb.py dump V508_TRANSPORT.MRAB`，`V508_TRANSPORT.SGO` / `V508_TRANSPORT.CAS`（Root.cpk 只读），`tools/edfre.py` 查字符串。
 
 ### 骨骼（H）
 
@@ -289,7 +289,7 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
 - 空母离开 1000 ms 后或死亡时删除四个 Booster。
 - 未验证：火焰朝向（可能朝上而不是朝下），尺寸是否合适。
 
-### 8.2 空母的俯仰与压坡度（`src/jet.cpp`，`Lean`）
+### 8.2 空母的俯仰与压坡度（`src/jet_internal.h` / `src/jet_flight.cpp`，`Lean`）
 
 - `struct Lean { pitchShare, drag, respond, jerk, maxLean, bank; }`；空母用 `kCarrierLean = {0.8, kThrustDrag, 2.5, 1.2, 0.3, 2.5}`。
 - 平滑后的加速度分成沿机头方向和横向两部分：前后部分 × `pitchShare`（0.8）变成低头/抬头，横向部分 × `bank`（2.5）变成压坡度，
@@ -298,15 +298,20 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
 
 ### 8.3 炮舰机（`Role::gunship`，呼叫 7118 / 7119）
 
-- 角色行 `"gunship"`，mark 7011，`attacks=false`（不俯冲、不开机炮，绕锚点盘旋），巡航 120 m/s、高度 350 m、
-  巡逻圆 600 m（每多一架 +80 m）、取目标范围 1500 m、燃料 3.0 倍；机体固定为 `JetBody::bomber401`。
-- `JetRole::gunship`（`src/crew.h`）；`JetLaunch` 把它映射到 `Role::gunship`。
+- 角色行 `"gunship"`（`src/jet_internal.h` `kKinds`），`Weapon::shells`（不俯冲、不开机炮，绕锚点盘旋），巡航 120 m/s、高度 350 m、
+  巡逻圆 600 m（编队里每多一架 +80 m）、取目标范围 1500 m、燃料 3.0 倍。
+- 机体是自己的 SGO `EDF6VC_JET_GUNSHIP.SGO`（`tools/make_jets.py`：对地攻击机套 BOMBER401 模型，mark 改成 7011），
+  所以条目重建时按 mark 认得出是炮舰机。2026-10-04 之前它借用接管轰炸机的 `EDF6VC_BOMBER401.SGO`（mark 7001），
+  条目一重建就被当成对地攻击机。没装这个 SGO 时炮舰机呼叫退回战斗机。
+- `JetRole::gunship`（`src/crew.h`）→ `kLaunchRows` 的 `Body::gunship`；角色由机体的 mark 决定（`kBodies`）。
 - 炮弹：任务里鲸鱼炮舰的 `DEMOGUNSHIPFIREE25`（DemoIndirectFire，见 `docs/mission-airstrike-re.md`），
   用 CreateObject 造（与 `carrierlaser.cpp` 的光束同一方式）：先核 vtable `image+0x17D4B20`，接口在对象 `+0x170`，
   设归属（炮舰机自己与其控制器，不打自己的机体）、伤害 300、`+0x2F9`=1、起点（`+0x300`）= 炮舰机位置、终点 = 目标锁定点。
   不符 vtable 就删掉对象并关掉本任务的炮击。
-- `GunshipFire`：每 2.5 s 一发；只打非飞行目标、目标在 1800 m 内；撤离 / 回收 / 起飞时不打；`HeliFire=0` 时不打。
-- SGO `app:/object/demogunshipfiree25.sgo` 随炮舰机的机体一起预载（`PreloadJets`）；机体没预载时炮舰机退回战斗机。
+- `GunshipFire`（`src/jet_bay.cpp`）：每 2.5 s 一发；只打非飞行目标、目标在 1800 m 内；开火门控与其它喷气机武器同一个
+  `WeaponsFree`（JetPilot、有目标、不在起飞 / 回收 / 撤离），不再看直升机的 `HeliFire`。用到的 IFC 函数（`kIfcOwner` /
+  `kIfcDamage`）走弹舱的签名校验（`bayOk`），DemoIndirectFire 的 vtable 也先确认可读。
+- SGO `app:/object/demogunshipfiree25.sgo` 随炮舰机的机体一起预载（`PreloadShells`）；机体没预载时炮舰机退回战斗机。
 - 呼叫：7118「炮舰机·守点」、7119「炮舰机·跟随」（`airstrike.cpp kCalls` 与 `tools/call_weapons.py CALLS` 同序追加在
   7117 之后，安装器按前缀续写已装的行）。
 - 未验证：炮弹是否从炮舰机身上出发可见、伤害与命中、盘旋半径与高度是否合适、bomber401 机体是否正常飞。
@@ -318,7 +323,41 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
 - 载具的渲染节点建立时遮罩是 `0x12000000`，没有 bit26，所以飞出 1000 m 的喷气机就看不见了。
 - 游戏自己的开关是 SGO `FarRender` / `use_far_render` 走的 `image+0x11B3020(node, true)`。
   喷气机的节点是模型组件 `vehicle+0xE40`（vtable `image+0x176B9A8`），遮罩在节点 `+0x20`。
-- 插件每帧（`JetFrame`）检查：vtable 不符 → 记日志、这架不再处理；bit26 已在 → 什么都不做；否则调用开关并复查，
-  没生效就关掉这架的远景。近相机那一路不变。
+- 插件每帧（`JetFrame` → `src/jet_spawn.cpp` `FarRender`）检查：vtable 不符 → 记日志、这架不再处理；bit26 已在 → 什么都不做；
+  否则调用开关并复查，没生效就关掉这架的远景。近相机那一路不变。
+- 开关函数在安装时核签名（`kSetFarRenderSig`：`44 8B 41 20 41 8B C0 0F BA F0 1A 41 0F BA E8 1A`，即 `mov r8d,[rcx+20h]; mov eax,r8d;
+  btr eax,26; bts r8d,26`，取自同一 TimeDateStamp 的 EDF.dll），不符就整体不开远景渲染（H）。
 - 风险：500–1000 m 两个相机都画（可能重影/闪烁）；远相机的光照/阴影可能不同；模型若有子节点，子节点可能没有 bit26。
 - 备选（未实现）：改环境 `env+0x1a0` 的近裁剪距离，把 1000 m 拉远——影响全场景，代价大，只在上面方式无效时考虑。
+
+## 9. 代码结构与生命周期（2026-10-04 设计审查修复）
+
+- 文件：`src/jet.cpp`（条目表、身份、每帧调度 `JetFrame`、回收 `JetReap`、关卡重置）、`jet_flight.cpp`（固定翼 / 悬停飞行、地面、天花板、墙）、
+  `jet_combat.cpp`（选目标、机炮导弹攻击、统一开火门控 `WeaponsFree`）、`jet_carrier.cpp`（母舰、无人机、自爆装药、人偶）、
+  `jet_bay.cpp`（弹舱、炮舰炮弹、撞击装药）、`jet_spawn.cpp`（机体表、预载、生成、远景渲染）、`jet_hooks.cpp`（506 物理步、子弹穿僚机、安装）；
+  共享声明在 `jet_internal.h`。
+- 机体表 `kBodies`（SGO、文件名、mark、角色、母舰的无人机种类）是机体与 mark 的唯一来源；`kKinds` 每个角色一行，带飞行模型
+  （固定翼 / 悬停）、武器（机炮导弹 / 炮击 / 放无人机 / 自爆装药）、姿态骨骼（升降舵 / 推力舱）；`kLaunchRows` 把 `JetRole` 映射到机体，
+  三张表都有 `static_assert` 检查顺序与一致性。
+- 条目身份 = `ObjRef`（地址 + weak-this 控制块），条目存在期间持有控制块的一个弱引用（与 `booster.cpp` 相同的 MSVC `_Ref_count_base`
+  布局：use +8、weak +0xC），所以对象被销毁看 use count，控制块地址不会被别的对象复用。条目只在喷气机被删 / 销毁 / 击落时回收
+  （`JetReap` 每帧一次），不再因为「1.5 秒没被飞」被抢；表满时新飞机不接管（限频日志）。
+- 关卡开始（`MissionStart` → `ResetJets` / `ResetAirstrikes` / `ResetBoosters`）：上一关的条目、人偶、学到的墙、被接管轰炸机、
+  推力舱火焰全部忘掉，不调用游戏的析构 / Delete，不放弱引用（宁可泄漏）。
+- `JetPilot` 热改成 0：仍在飞的喷气机在下一帧被删除（不再挂着假驾驶员悬停）。推力舱火焰的清理挂在每帧回收入口上。
+- 学到的墙：只在撞点两侧 400 m 内有效，120 s 没再撞到就忘掉；四面世界墙单独一组，不会被学到的墙覆盖。
+- 子弹穿僚机的 addBody 钩子只读游戏线程每帧（及条目增减时）发布的编队快照（SRW 锁保护），不读条目表、不用游戏时钟。
+  依据：`docs/bullet-pass-re.md` 说批处理在主循环里（M），没证实与载具更新同线程，所以按跨线程处理。
+- 巡逻圈半径、母舰绕圈方向按编队内序号（`Jet::wing`），不再按条目下标。
+
+### 9.1 撞击伤害（`ImpactDamage`，`src/jet_bay.cpp`）
+
+- 自爆无人机的装药是挂在无人机 2 号武器位上的 GrenadeBullet01（`EDF6VC_BLAST_CHARGE.SGO`），伤害和半径写在武器 SGO 里，
+  而且必须由带这把武器的载具开火；玩家喷气机没有这把武器，运行时也没有已逆向的改写入口（`docs/decoy-blast-re.md` §1.3 说
+  直接调 `ApplyAreaDamage` 要伪造 GameDamageInfo，不可取）。
+- 所以撞击伤害走炮舰炮弹同一条已逆向的路：DemoIndirectFire（`tools/make_jets.py` 的 `EDF6VC_IMPACT_08/16/32/64.SGO`，由原版
+  `DEMOGUNSHIPFIREE25` 改成 1 发、无等待、2 帧寿命、爆炸半径 8/16/32/64 m）。插件按请求半径选不小于它的最小一档（没有就选最大一档），
+  归属设为撞击者（IFC 每步从归属者取队伍：击杀算撞击者的，友军由游戏的队伍过滤放过），伤害由插件写 `+0xDC`，从撞击点上方 2 m
+  朝撞击点打下去。没预载（没装或本关没预载）时返回 false 并限频记日志。
+- 限制：半径只能按档位；RocketBullet01 寿命到期不爆（`docs/decoy-blast-re.md` §1.4），撞击点那 16 m 内什么都没碰到就没有伤害。
+- 未验证（需实机）：`indirect_fire_param` #10 / #14 / #15 的下标含义（M）、爆炸是否按队伍过滤、伤害数值是否被难度系数再乘。
