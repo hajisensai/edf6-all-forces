@@ -30,6 +30,7 @@
 // weighs on its flight (Burden: thrust, lift and drag) and, a bomb picked, the cockpit shows where it would hit.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "jetaudio.h"
 #include "memory.h"
 #include "vecmath.h"
 #include <cmath>
@@ -779,6 +780,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     j.targetHeld=s.nextTarget;
     if(next && st[j.store].spec->role!=StoreRole::bomb){NextStoreTarget(st[j.store]);Log("PJET v=%p target: the next one",v);}
     j.lock=st[j.store].spec->role==StoreRole::bomb ? 0 : StoreLock(st[j.store],j.lockAt,&j.lockProgress);
+    audio::LockTone(j.lock,j.lockProgress);
     const bool fire=v[kFireStore]!=0;
     v[kFireStore]=0;
     if(fire)TriggerStore(st[j.store]);

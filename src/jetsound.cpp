@@ -12,6 +12,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "jetaudio.h"
+#include "stores.h"
 #include "layout.h"
 #include "memory.h"
 #include <cmath>
@@ -196,10 +197,11 @@ void LockQuiet(unsigned char* v) noexcept {
             if(!Readable(holders[i],kHolderWeapon+8))continue;
             unsigned char* const w=At<unsigned char*>(holders[i],kHolderWeapon);
             if(!Readable(w,kLockPresets[1]+kPresetBank+sizeof(Cue)))continue;
+            const bool own=quiet || IsStoreWeapon(w);   // a store's lock: the cockpit's own tone (audio::LockTone)
             for(int k=0;k<2;++k) {
                 Cue& c=*reinterpret_cast<Cue*>(w+kLockPresets[k]+kPresetBank);
                 if(c.bank && !lockCue[k].bank)lockCue[k]=c;   // the shared cue, kept to give back
-                if(quiet)c=Cue{};
+                if(own)c=Cue{};
                 else if(!c.bank && lockCue[k].bank)c=lockCue[k];
             }
         }

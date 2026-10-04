@@ -14,6 +14,9 @@ bool Start() noexcept;
 int Open() noexcept;
 void Set(int slot,const Mix& mix) noexcept;
 void Close(int slot) noexcept;
+// The cockpit's lock tone this frame (the player's picked store, playerjet.cpp): 2 locked, a steady high tone; 1
+// locking, beeps quickening with `progress` (0..1); 0 none. Not called for kToneStaleMs, it goes quiet.
+void LockTone(int state,float progress) noexcept;
 // Once a game frame: the game runs. With no beat for kQuietMs (paused, loading, a menu) the watchdog silences
 // everything until the next beat, at `volume` (the game's master and effect volume, times the plugin's own).
 void Beat(float volume) noexcept;

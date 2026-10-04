@@ -34,6 +34,15 @@ bool tried=false,ok=false,whine=true;
 std::vector<std::int16_t> roarPcm,whinePcm;
 WAVEFORMATEX roarFormat{},whineFormat{};
 struct Slot { IXAudio2SourceVoice* roar; IXAudio2SourceVoice* whine; bool used; };
+// The lock tone (LockTone): a 1 kHz sine loop, whole cycles; locked it plays at kLockedRatio steadily, locking it
+// beeps kBeepMs every kBeepSlow..kBeepFast ms as the lock closes in.
+constexpr float kToneHz=1000.0f,kLockedRatio=1.6f,kToneVolume=0.25f;
+constexpr ULONGLONG kBeepMs=70,kBeepSlow=450,kBeepFast=120,kToneStaleMs=200;
+IXAudio2SourceVoice* lockVoice=nullptr;
+std::vector<std::int16_t> tonePcm;
+WAVEFORMATEX toneFormat{};
+ULONGLONG toneAt=0,beepFrom=0;
+int toneState=0;
 Slot slots[kSlots]{};
 std::atomic<ULONGLONG> beatAt{0};
 std::atomic<float> masterVolume{1.0f};
@@ -252,7 +261,34 @@ void Close(int i) noexcept {
     slots[i]=Slot{};
 }
 
+void LockTone(int state,float progress) noexcept {
+    if(!Start())return;
+    if(!lockVoice) {
+        const int n=kRate/10;   // 100 ms: 100 whole cycles of kToneHz
+        tonePcm.resize(static_cast<std::size_t>(n));
+        for(int i=0;i<n;++i)tonePcm[static_cast<std::size_t>(i)]=static_cast<std::int16_t>(std::lround(
+            std::sin(6.2831853f*kToneHz*static_cast<float>(i)/static_cast<float>(kRate))*0.8f*32767.0f));
+        toneFormat=Mono16(kRate);
+        lockVoice=Voice(toneFormat,tonePcm);
+        if(!lockVoice)return;
+    }
+    const ULONGLONG now=GetTickCount64();
+    toneAt=now;
+    if(state!=toneState){toneState=state;beepFrom=now;}
+    float volume=0.0f,ratio=1.0f;
+    if(state==2){volume=kToneVolume;ratio=kLockedRatio;}
+    else if(state==1) {
+        const float p=progress<0.0f ? 0.0f : progress>1.0f ? 1.0f : progress;
+        const ULONGLONG period=kBeepSlow-static_cast<ULONGLONG>(p*static_cast<float>(kBeepSlow-kBeepFast));
+        volume=(now-beepFrom)%period<kBeepMs ? kToneVolume : 0.0f;
+    }
+    lockVoice->SetFrequencyRatio(ratio);
+    Pan(lockVoice,volume,volume);
+    lockVoice->SetVolume(1.0f);
+}
+
 void Beat(float volume) noexcept {
+    if(lockVoice && GetTickCount64()-toneAt>kToneStaleMs){Pan(lockVoice,0.0f,0.0f);toneState=0;}
     masterVolume=volume<0.0f ? 0.0f : volume>4.0f ? 4.0f : volume;
     beatAt=GetTickCount64();
 }

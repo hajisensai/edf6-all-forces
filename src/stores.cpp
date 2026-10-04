@@ -46,8 +46,17 @@ constexpr ULONGLONG kSkipMs=4000;
 using PickFn=std::uint64_t(__fastcall*)(void**,unsigned char*,unsigned char*);
 PickFn pickNext=nullptr;
 struct Skip { const unsigned char* weapon; const void* entry; ULONGLONG until; } skip{};
-
-bool IsStoreWeapon(const unsigned char* w) noexcept;
+// The HUD's lock marks (docs/stores-re.md §8): its two lock slots (0x1F0 bytes from HUD +0x720) each draw their weapon's
+// locks in 0xFA060(slot, ctx, camera): the snapshot of locked / fired-at marks (+0x1D0 vector, its count +0x1E8), the
+// lock in progress (+0x1B0) and the lock-range frame (+0x140), rebuilt every frame (0xFC620) from the weapon at slot
+// +0x90. For a store's weapon the plugin draws its own (hud.cpp LockMark): the detour clears what the slot would draw
+// this frame. Its first 14 bytes (mov r11,rsp; mov [r11+18],rbx; push rbp/rsi/rdi/r12/r13; no rip-relative) go to a
+// trampoline. Locking, guidance and the lists are untouched: the HUD only reads them.
+constexpr std::size_t kMarkDraw=0xFA060,kMarkCopied=14,kSlotWeapon=0x90,kSlotMarkCount=0x1E8,kSlotLocking=0x1B0,kSlotFrame=0x140;
+const unsigned char kMarkDrawSig[]={0x4C,0x8B,0xDC,0x49,0x89,0x5B,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,
+                                    0x49,0x8D,0xAB,0x28,0xFF,0xFF,0xFF};
+using MarkDrawFn=void(__fastcall*)(unsigned char*,void*,void*);
+MarkDrawFn markNext=nullptr;
 
 // The file name of the weapon's SGO (after the last separator of its key), or nullptr.
 const wchar_t* FileOf(const unsigned char* weapon,std::size_t* length) noexcept {
@@ -75,10 +84,43 @@ const StoreSpec* SpecOf(const wchar_t* name,std::size_t length) noexcept {
     return nullptr;
 }
 
+}  // namespace
+
 bool IsStoreWeapon(const unsigned char* w) noexcept {
     std::size_t length=0;
     const wchar_t* name=Readable(w,kWeaponNode+8) ? FileOf(w,&length) : nullptr;
     return name && SpecOf(name,length);
+}
+
+namespace {
+void __fastcall MarkDrawHook(unsigned char* slot,void* ctx,void* camera) {
+    __try {
+        const auto w=Readable(slot,kSlotMarkCount+8) ? At<const unsigned char*>(slot,kSlotWeapon) : nullptr;
+        if(w && IsStoreWeapon(w)){Put<std::uint64_t>(slot,kSlotMarkCount,0);slot[kSlotLocking]=0;slot[kSlotFrame]=0;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    markNext(slot,ctx,camera);
+}
+
+// `copied` first bytes of `rva` into a trampoline (they, then jmp [rip] back past them) and a jmp [rip] to `hook` over
+// them, the rest nop'd. The trampoline, or nullptr (nothing patched).
+void* Detour(std::size_t rva,const unsigned char* sig,std::size_t sigSize,std::size_t copied,void* hook) noexcept {
+    if(copied<14 || copied>32 || !Matches(rva,sig,sigSize))return nullptr;
+    unsigned char tramp[32+14];
+    std::memcpy(tramp,image+rva,copied);
+    const unsigned char jmp[6]={0xFF,0x25,0,0,0,0};
+    std::memcpy(tramp+copied,jmp,6);
+    const auto back=reinterpret_cast<std::uintptr_t>(image+rva+copied);
+    std::memcpy(tramp+copied+6,&back,8);
+    void* const t=edf::AllocateNearCode(image+rva,tramp,copied+14);
+    if(!t)return nullptr;
+    unsigned char patch[32];
+    std::memset(patch,0x90,copied);
+    std::memcpy(patch,jmp,6);
+    const auto to=reinterpret_cast<std::uintptr_t>(hook);
+    std::memcpy(patch+6,&to,8);
+    if(edf::PatchCode(image+rva,image+rva,patch,copied))return t;
+    VirtualFree(t,0,MEM_RELEASE);
+    return nullptr;
 }
 
 std::uint64_t __fastcall PickHook(void** ref,unsigned char* result,unsigned char* ctx) {
@@ -228,8 +270,10 @@ bool InstallStores() noexcept {
         if(!storesOk)VirtualFree(cave,0,MEM_RELEASE);
         clearOk=Matches(kClearLock,kClearLockSig,sizeof(kClearLockSig));
         const bool pickOk=Matches(kPick,kPickSig,sizeof(kPickSig)) && HookPick();
-        Log("HOOK stores=%d (the 506 builds a weapon for every holder; %zu store kinds) clearLock=%d crosshairPick=%d",storesOk,
-            sizeof(kStores)/sizeof(kStores[0]),clearOk,pickOk);
+        markNext=reinterpret_cast<MarkDrawFn>(Detour(kMarkDraw,kMarkDrawSig,sizeof(kMarkDrawSig),kMarkCopied,
+                                                     reinterpret_cast<void*>(&MarkDrawHook)));
+        Log("HOOK stores=%d (the 506 builds a weapon for every holder; %zu store kinds) clearLock=%d crosshairPick=%d stockMarks=%s",
+            storesOk,sizeof(kStores)/sizeof(kStores[0]),clearOk,pickOk,markNext ? "hidden for stores" : "kept");
         return storesOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
