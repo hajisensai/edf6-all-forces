@@ -586,7 +586,8 @@ bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     auto& k=*static_cast<Pick*>(ctx);
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
-    if(Dot(d,d)>k.range*k.range)return;
+    // New targets only within the range of the anchor; the current one is chased wherever it goes.
+    if(object!=k.j->target && Dot(d,d)>k.range*k.range)return;
     const bool flyer=Flies(object,p,k.ms);
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);

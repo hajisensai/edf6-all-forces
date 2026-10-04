@@ -485,9 +485,11 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
     return ForEachEnemyOf(At<std::int32_t>(v,kTeam),v,static_cast<F&&>(f));
 }
 
-// The enemy lock point to engage, among the enemies within `range` of `around`: the one nearest to
-// `from` (the heli: the shortest turn and flight), the current one counting kKeepTarget nearer and one
-// too close below to aim at kTooClose farther. Returns false with none.
+// The enemy lock point to engage, among the enemies within `range` of `around` (a guard's post, the
+// player it follows) and the current target wherever it has gone (it is chased, not dropped when it
+// leaves the range): the one nearest to `from` (the heli: the shortest turn and flight), the current
+// one counting kKeepTarget nearer and one too close below to aim at kTooClose farther. Returns false
+// with none.
 bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* from,float range,float* aim) noexcept {
     const bool circler=At<const unsigned char*>(v,0)==image+kHeli410;
     const float minHoriz=MinAimHoriz();
@@ -496,7 +498,7 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
     ForEachEnemy(v,[&](const void* object,const float* a) noexcept {
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
-        if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
+        if(object!=h.target && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
         if(object==h.target)score-=circler ? kCircleKeep : kKeepTarget;
