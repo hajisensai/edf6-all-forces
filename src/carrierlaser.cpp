@@ -31,13 +31,21 @@
 // while +0xDF0 is 0. The plugin wraps slot 7 of UfoCarrier508's vtable: after the stock AI, a ship being sent
 // over the carrier gets the game's own fly-to-point (0x4F2370, the one UfoCarrier's states 3/4 use), which sets
 // +0xB40 toward the point at the given speed and turns the ship to it. The position is never written. (H/M)
+//
+// The carriers are subcarrier.cpp's (SubCarriers, SubSpot, SubDeckUnder: its entries, its geometry); a ship keeps
+// the carrier it is sent to as an ObjRef. The state machine steps once a game frame from a carrier's frame
+// (CarrierLaserFrame); with no carrier left, from a 508's AI (ShipAiHook), so it winds down (Interrupt: the sight
+// deleted) when the last carrier is gone, though nothing of the carriers runs any more.
 #include "crew.h"
 #include "memory.h"
+#include "subcarrier.h"
+#include "vecmath.h"
 #include <cmath>
 #include <cstdint>
 
 namespace crew {
 namespace {
+using vec::Dist;using vec::Flat;
 constexpr unsigned kShipVtable=0x17C9DC0;          // UfoCarrier508
 constexpr unsigned kShipAi=0x4F6D70,kFlyTo=0x4F2370;
 constexpr std::size_t kShipAiSlot=7;
@@ -54,9 +62,9 @@ constexpr float kHatchBelow=20.0f;     // metres under the ship's origin the fal
 constexpr float kCoreBelow=5.0f;       // metres under the ship's origin its core (catapult_A) sits
 constexpr float kPlayerRange=400.0f;   // fallback: the player within this of the ship is its target, else the deck
 constexpr float kShipRange=1500.0f;    // ships further than this from the carrier never charge
-// The carrier (subcarrier.cpp): deck kDeckTop over its origin along up; spots along its nose at kSpotZ, kOverDeck
-// over the deck (its tower tops out 173 m over the deck at z -280, the ship hangs ~44 m under its origin).
-constexpr float kDeckTop=13.25f+179.83f,kOverDeck=220.0f;
+// The carrier (subcarrier.h SubSpot): spots along its nose at kSpotZ, kOverDeck over the deck (its tower tops out
+// 173 m over the deck at z -280, the ship hangs ~44 m under its origin).
+constexpr float kOverDeck=220.0f;
 constexpr float kSpotZ[]={500.0f,120.0f,-520.0f};  // bow deck, middle (ahead of the turrets), stern (over the bay)
 constexpr float kArrive=40.0f;         // horizontal and vertical metres from the spot that count as over it
 constexpr float kFlySpeed=0.75f;       // m/frame (45 m/s) at most
@@ -66,7 +74,7 @@ constexpr float kClimbFirst=40.0f,kClimbFar=300.0f;   // further below the spot 
 constexpr ULONGLONG kChargeMs=12000,kLockMs=1000;   // the charge; the fallback aim is held for its last kLockMs
 constexpr ULONGLONG kCoolMinMs=30000,kCoolMaxMs=45000,kFirstMs=12000;   // the gap between a ship's charges; the first after kFirstMs+
 constexpr ULONGLONG kGapMs=6000;       // after any charge ends, no ship starts one for this long
-constexpr ULONGLONG kStaleMs=1500;     // a ship or carrier not seen for this long is forgotten
+constexpr ULONGLONG kStaleMs=1500;     // a ship not seen for this long is forgotten
 constexpr ULONGLONG kMoveMaxMs=60000;  // not over the carrier by then: the fallback charge from where it is
 constexpr ULONGLONG kAiDeadMs=2000;    // the AI wrapper silent this long on a moving ship: it never runs, fallback
 constexpr int kMaxShips=8,kMaxCarriers=3;
@@ -115,15 +123,13 @@ struct Ship {
     ULONGLONG seen,nextAt,phaseAt,flownAt;   // flownAt: the AI wrapper's last fly-to (0: none yet)
     Phase phase;
     bool steer,down;                    // steer: fly it to the spot; down: this charge fires straight down
-    int carrier; float spotZ;
+    ObjRef carrier; float spotZ;        // the carrier it is sent to (subcarrier.cpp's)
     float hpAtCharge;
     unsigned char* sight; const void* sightCtrl;
     float aim[3];                       // the beams' end
     bool atPlayer;
 };
-struct Carrier { const unsigned char* sub; const void* ctrl; ULONGLONG seen; float pos[3],vel[3]; };   // vel: m/frame
 Ship ships[kMaxShips]{};
-Carrier carriers[kMaxCarriers]{};
 bool sigOk=false,flyOk=false,preloaded=false,broken=false,aiDead=false;
 ShipAiFn nextShipAi=nullptr;
 ULONGLONG tickFrame=0,quietUntil=0;
@@ -148,15 +154,6 @@ bool FilesThere() noexcept {
         if(GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES){Log("LASER %ls not installed (python tools/make_jets.py): off",file);return false;}
     }
     return true;
-}
-
-float Dist(const float* a,const float* b) noexcept {
-    const float d[3]={a[0]-b[0],a[1]-b[1],a[2]-b[2]};
-    return std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
-}
-float Flat(const float* a,const float* b) noexcept {
-    const float dx=a[0]-b[0],dz=a[2]-b[2];
-    return std::sqrt(dx*dx+dz*dz);
 }
 
 // kBelow along the ship's -up from its origin: the hatch ring (fallback) or the core.
@@ -185,59 +182,26 @@ bool ObjectLive(const unsigned char* o,const void* ctrl,unsigned vtable) noexcep
            !(o[kObjFlags]&kObjDeleted);
 }
 
-// Carriers: each one that calls CarrierLaserFrame this frame, its position and velocity.
-bool CarrierLive(const Carrier& c,ULONGLONG ms) noexcept {
-    return c.sub && ms-c.seen<=kStaleMs && Readable(c.sub,kTeam+4) && At<const void*>(c.sub,kSelfCtrl)==c.ctrl &&
-           !(c.sub[kObjFlags]&kObjDeleted);
-}
-void SeeCarrier(const unsigned char* sub,ULONGLONG ms) noexcept {
-    const void* const ctrl=At<const void*>(sub,kSelfCtrl);
-    const float* p=reinterpret_cast<const float*>(sub+kPosition);
-    Carrier* slot=nullptr;
-    for(auto& c:carriers) {
-        if(c.sub==sub && c.ctrl==ctrl){slot=&c;break;}
-        if(!slot && (!c.sub || ms-c.seen>kStaleMs))slot=&c;
-    }
-    if(!slot)return;
-    if(slot->sub==sub && slot->ctrl==ctrl) {
-        const ULONGLONG dt=ms-slot->seen;
-        if(dt==0)return;
-        const float frames=static_cast<float>(dt)/(1000.0f/60.0f);
-        for(int i=0;i<3;++i)slot->vel[i]=slot->vel[i]*0.8f+(p[i]-slot->pos[i])/frames*0.2f;
-    } else *slot=Carrier{sub,ctrl,0,{},{}};
-    std::memcpy(slot->pos,p,12);
-    slot->seen=ms;
-}
-
-// A spot over carrier `c`: kOverDeck over its deck at `z` along its nose, centred across it.
-void Spot(const Carrier& c,float z,float* out) noexcept {
-    const float* m=reinterpret_cast<const float*>(c.sub+kMatrix);
-    const float* p=reinterpret_cast<const float*>(c.sub+kPosition);
-    for(int i=0;i<3;++i)out[i]=p[i]+m[4+i]*(kDeckTop+kOverDeck)+m[8+i]*z;
-}
-
-// Straight down from `core` to carrier `c`'s deck plane.
-void DownAim(const Carrier& c,const float* core,float* out) noexcept {
-    const float* up=reinterpret_cast<const float*>(c.sub+kMatrix+0x10);
-    const float* p=reinterpret_cast<const float*>(c.sub+kPosition);
-    float over=0.0f;
-    for(int i=0;i<3;++i)over+=(core[i]-(p[i]+up[i]*kDeckTop))*up[i];
-    float drop=up[1]>0.5f ? over/up[1] : over;
-    if(!(drop>5.0f))drop=5.0f;
-    if(drop>1000.0f)drop=1000.0f;
-    out[0]=core[0];out[1]=core[1]-drop;out[2]=core[2];
+// The live carriers (subcarrier.cpp), and the one `ref` is among them (nullptr: gone, dead).
+struct Carriers { SubView list[kMaxCarriers]; int n; };
+Carriers Live() noexcept { Carriers c{};c.n=SubCarriers(c.list,kMaxCarriers);return c; }
+const SubView* Find(const Carriers& c,const ObjRef& ref) noexcept {
+    for(int i=0;i<c.n;++i)if(c.list[i].ref.obj==ref.obj && c.list[i].ref.ctrl==ref.ctrl)return &c.list[i];
+    return nullptr;
 }
 
 // The AI wrapper's work for one ship being sent over the carrier: the game's fly-to toward the spot (its carrier's
 // motion led), at a speed easing off near it. Climbs first when far below the spot and far off.
 void Fly(unsigned char* o,Ship& s,ULONGLONG ms) noexcept {
-    const Carrier& c=carriers[s.carrier];
-    if(!CarrierLive(c,ms))return;
-    const float* pos=reinterpret_cast<const float*>(o+kPosition);
+    const Carriers live=Live();
+    const SubView* c=Find(live,s.carrier);
     float spot[3];
-    Spot(c,s.spotZ,spot);
+    if(!c || !SubSpot(s.carrier,s.spotZ,kOverDeck,spot))return;
+    const float* pos=reinterpret_cast<const float*>(o+kPosition);
     alignas(16) float to[4]={spot[0],spot[1],spot[2],1.0f};
-    float lead[3]={c.vel[0]/kFlyGain,c.vel[1]/kFlyGain,c.vel[2]/kFlyGain};
+    // The carrier's motion in m/frame (its velocity is m/s; the ship's speed is m/frame, 0x4F74D0).
+    float lead[3];
+    for(int i=0;i<3;++i)lead[i]=c->vel[i]/60.0f/kFlyGain;
     const float leadLen=std::sqrt(lead[0]*lead[0]+lead[1]*lead[1]+lead[2]*lead[2]);
     const float leadScale=leadLen>kLeadMax ? kLeadMax/leadLen : 1.0f;
     for(int i=0;i<3;++i)to[i]+=std::isfinite(lead[i]) ? lead[i]*leadScale : 0.0f;
@@ -252,9 +216,14 @@ void Fly(unsigned char* o,Ship& s,ULONGLONG ms) noexcept {
     s.flownAt=ms;
 }
 
+void Step() noexcept;
+
 void __fastcall ShipAiHook(void* object,const void* context) {
     nextShipAi(object,context);
     if(!flyOk || broken)return;
+    // With no carrier left none steps the state machine (CarrierLaserFrame): it winds down here, its sights deleted.
+    // Only then: beams are made from a carrier's frame, as from the start.
+    if(!Live().n)Step();
     __try {
         auto const o=static_cast<unsigned char*>(object);
         for(auto& s:ships)
@@ -354,11 +323,9 @@ Ship* Slot(const unsigned char* o,ULONGLONG ms) noexcept {
 // the target, followed until kLockMs before the shot.
 bool Line(Ship& s,ULONGLONG ms,float* start) noexcept {
     if(s.down) {
-        const Carrier& c=carriers[s.carrier];
-        if(!CarrierLive(c,ms))return false;
         Under(s.ship,kCoreBelow,start);
-        DownAim(c,start,s.aim);s.atPlayer=false;
-        return true;
+        s.atPlayer=false;
+        return SubDeckUnder(s.carrier,start,s.aim);
     }
     Under(s.ship,kHatchBelow,start);
     if(s.phase==Phase::charging && ms-s.phaseAt>=kChargeMs-kLockMs)return true;
@@ -411,8 +378,8 @@ void Oblique(Ship& s,ULONGLONG ms,const char* why) noexcept {
 void Moving(Ship& s,ULONGLONG ms) noexcept {
     const float hp=At<float>(s.ship,kHp);
     if(s.ship[kDead] || hp<=0.0f){Interrupt(s,ms,"shot down on the way");return;}
-    const Carrier& c=carriers[s.carrier];
-    if(!CarrierLive(c,ms)){Interrupt(s,ms,"carrier gone");return;}
+    float spot[3];
+    if(!SubSpot(s.carrier,s.spotZ,kOverDeck,spot)){Interrupt(s,ms,"carrier gone");return;}
     if(!flyOk || ms-(s.flownAt ? s.flownAt : s.phaseAt)>kAiDeadMs) {
         if(flyOk && !s.flownAt){aiDead=true;Log("LASER ship=%p: the 508 AI wrapper never ran (state %d): flights off",s.ship,
                                                  At<std::int32_t>(s.ship,kMoveState));}
@@ -420,8 +387,6 @@ void Moving(Ship& s,ULONGLONG ms) noexcept {
     }
     if(ms-s.phaseAt>kMoveMaxMs){Oblique(s,ms,"not over the carrier in 60s");return;}
     const float* pos=reinterpret_cast<const float*>(s.ship+kPosition);
-    float spot[3];
-    Spot(c,s.spotZ,spot);
     if(Flat(pos,spot)>=kArrive || std::fabs(pos[1]-spot[1])>=kArrive)return;
     Log("LASER ship=%p over the carrier: charging (spot z=%.0f, %.1fs on the way)",s.ship,s.spotZ,
         static_cast<double>(ms-s.phaseAt)/1000.0);
@@ -430,40 +395,37 @@ void Moving(Ship& s,ULONGLONG ms) noexcept {
 }
 
 // Ship `s` (idle, due) starts: sent over the nearest carrier within kShipRange, or the fallback charge.
-bool Start(Ship& s,ULONGLONG ms) noexcept {
+bool Start(Ship& s,const Carriers& live,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(s.ship+kPosition);
     int best=-1;float bestD=kShipRange;
-    for(int i=0;i<kMaxCarriers;++i) {
-        if(!CarrierLive(carriers[i],ms))continue;
-        const float d=Dist(pos,carriers[i].pos);
+    for(int i=0;i<live.n;++i) {
+        const float d=Dist(pos,live.list[i].pos);
         if(d<=bestD){bestD=d;best=i;}
     }
     if(best<0)return false;
-    s.carrier=best;s.phaseAt=ms;s.flownAt=0;
+    s.carrier=live.list[best].ref;s.phaseAt=ms;s.flownAt=0;
     if(!flyOk || aiDead){Oblique(s,ms,"flights off");return s.phase==Phase::charging;}
-    float spot[3],d=1e30f;
+    float spot[3]{},d=1e30f;
     for(const float z:kSpotZ) {
         float p[3];
-        Spot(carriers[best],z,p);
-        if(Flat(pos,p)<d){d=Flat(pos,p);s.spotZ=z;std::memcpy(spot,p,12);}
+        if(SubSpot(s.carrier,z,kOverDeck,p) && Flat(pos,p)<d){d=Flat(pos,p);s.spotZ=z;std::memcpy(spot,p,12);}
     }
+    if(!(d<1e30f))return false;
     s.phase=Phase::moving;s.steer=true;s.down=false;
     Log("LASER ship=%p moving over the carrier sub=%p spot z=%.0f (%.0f,%.0f,%.0f) %.0fm off, state=%d route=%d",s.ship,
-        carriers[best].sub,s.spotZ,spot[0],spot[1],spot[2],Dist(pos,spot),At<std::int32_t>(s.ship,kMoveState),
+        s.carrier.obj,s.spotZ,spot[0],spot[1],spot[2],Dist(pos,spot),At<std::int32_t>(s.ship,kMoveState),
         At<const void*>(s.ship,kRoute)!=nullptr);
     return true;
 }
 
+// One step of every ship. With no carrier left, a ship on its way or charging is interrupted (its sight deleted)
+// and no new ship is seen or started.
 void Tick() noexcept {
     const ULONGLONG ms=GameMs();
+    const Carriers live=Live();
     Seen seen{{},0};
-    bool any=false;
-    for(const auto& c:carriers) {
-        if(!CarrierLive(c,ms))continue;
-        VisitEnemiesOf(At<std::int32_t>(c.sub,kTeam),&SeeShip,&seen);
-        any=true;break;   // the carriers are all on the player's team: one visit sees every ship
-    }
-    if(!any)return;
+    // The carriers are all on the player's team: one visit sees every ship.
+    if(live.n)VisitEnemiesOf(live.list[0].team,&SeeShip,&seen);
     bool busy=false;
     for(int i=0;i<seen.n;++i) {
         Ship* s=Slot(seen.list[i],ms);
@@ -477,25 +439,30 @@ void Tick() noexcept {
             s=Ship{};
             continue;
         }
-        if(s.phase==Phase::moving)Moving(s,ms);
+        if(!live.n && s.phase!=Phase::idle)Interrupt(s,ms,"no carrier left");
+        else if(s.phase==Phase::moving)Moving(s,ms);
         else if(s.phase==Phase::charging)Charging(s,ms);
         busy=busy || s.phase!=Phase::idle;
     }
-    if(busy || ms<quietUntil)return;
+    if(busy || ms<quietUntil || !live.n)return;
     for(auto& s:ships) {
         if(!s.ship || s.phase!=Phase::idle || ms<s.nextAt)continue;
-        if(Start(s,ms) && s.phase!=Phase::idle)return;   // one ship at a time
+        if(Start(s,live,ms) && s.phase!=Phase::idle)return;   // one ship at a time
     }
+}
+
+// The state machine's step, at most once a game frame (from a carrier's frame, or a 508's AI with none left).
+void Step() noexcept {
+    if(!sigOk || !preloaded || broken || !Cfg().carrierLaser || tickFrame==GameFrame())return;
+    tickFrame=GameFrame();
+    __try { Tick(); }
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("LASER fault in the frame: off until the game restarts");broken=true;}
 }
 }  // namespace
 
 void PreloadLaser() noexcept {
     __try {
         preloaded=false;
-        for(auto& s:ships)s=Ship{};   // a new mission: the old objects are gone with the old one
-        for(auto& c:carriers)c=Carrier{};
-        quietUntil=0;
-        aiDead=false;   // a mission without its 508s on the AI list does not take the flights off the next one's
         if(!sigOk || broken || !Cfg().carrierLaser)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         preloaded=mgr && FilesThere();
@@ -507,14 +474,11 @@ void PreloadLaser() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){preloaded=false;}
 }
 
+// A carrier's frame (subcarrier.cpp Tick, heli.cpp HeliFrame): the carriers themselves come from SubCarriers, so
+// this only steps the state machine (nullptr does the same: any per-frame caller may).
 void CarrierLaserFrame(const unsigned char* sub) noexcept {
-    if(!sigOk || !preloaded || broken || !Cfg().carrierLaser)return;
-    __try {
-        SeeCarrier(sub,GameMs());   // every carrier, every frame
-        if(tickFrame==GameFrame())return;   // once a frame of the carriers that call it
-        tickFrame=GameFrame();
-        Tick();
-    } __except(EXCEPTION_EXECUTE_HANDLER){Log("LASER fault in the frame: off until the game restarts");broken=true;}
+    (void)sub;
+    Step();
 }
 
 // The flight: UfoCarrier508's AI slot wrapped, if its AI, the fly-to and the Update's move are the known code.
@@ -549,6 +513,12 @@ bool InstallLaser() noexcept {
         return sigOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-// A new mission (mission.cpp MissionStart): TODO(review) drop this module's per-object state.
-void ResetLaser() noexcept {}
+// A new mission (mission.cpp MissionStart): the ships, their sights and the carriers they were sent to are gone with
+// the last mission's world (nothing is deleted here: those objects no longer exist).
+void ResetLaser() noexcept {
+    for(auto& s:ships)s=Ship{};
+    quietUntil=0;
+    tickFrame=0;
+    aiDead=false;   // a mission without its 508s on the AI list does not take the flights off the next one's
+}
 }  // namespace crew
