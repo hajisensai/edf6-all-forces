@@ -273,3 +273,52 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
   失败时的表现应是「没效果、仍 200 m/s」（全部包在 `__try` 里），日志里看 `JET motion props: preset a -> b` 是否出现、
   以及喷气机实测速度是否超过 211。
 - 速度上限：NPC `kBodyTop` 250 m/s（5 g 转弯半径 1275 m × Guard 的墙裕度要装进 ±2400），玩家 260 m/s。
+
+## 8. 2026-10-04 追加：Booster 尾焰、空母俯仰/压坡度、炮舰机、远景渲染
+
+全部未在游戏里测过（L），只确认编译通过、代码路径自洽。
+
+### 8.1 空母的 Booster 尾焰（`src/booster.cpp`）
+
+- 空母（V508 四旋翼机体）挂四个原版 Booster 对象，骨骼 `boneF_l` / `boneF_r` / `boneB_l` / `boneB_r`。
+- 构造：`op_new` `image+0x12D85B0`(0x410) → ctor `image+0x2CB810`，vtable `image+0x17A6D58`；挂骨骼 `image+0x118AF20`，
+  注册 `image+0x1195A20` / `image+0x1197050`。
+- 更新是 vtable 槽 5 `image+0x2CBE30`：每帧把 `*(+0x3D8)` 指向的骨骼矩阵复制到 `+0x60`，所以挂上后跟着骨骼走。
+- 插件每帧写 `+0x3EC` = 推力份额（随该旋翼的推力），`+0x3F0` = 1，`+0x3F4` = 3。
+- 尺寸：前 56/16，后 40/12（V508 原版 35/10、25/7.5 的 1.6 倍，空母机体放大过）。
+- 空母离开 1000 ms 后或死亡时删除四个 Booster。
+- 未验证：火焰朝向（可能朝上而不是朝下），尺寸是否合适。
+
+### 8.2 空母的俯仰与压坡度（`src/jet.cpp`，`Lean`）
+
+- `struct Lean { pitchShare, drag, respond, jerk, maxLean, bank; }`；空母用 `kCarrierLean = {0.8, kThrustDrag, 2.5, 1.2, 0.3, 2.5}`。
+- 平滑后的加速度分成沿机头方向和横向两部分：前后部分 × `pitchShare`（0.8）变成低头/抬头，横向部分 × `bank`（2.5）变成压坡度，
+  合起来限制在 `maxLean` 0.3 rad（约 17°）以内。转弯时向内侧压坡度，看起来不再是平移。
+- 未验证：方向符号（压坡度方向是否朝内），幅度是否太大。
+
+### 8.3 炮舰机（`Role::gunship`，呼叫 7118 / 7119）
+
+- 角色行 `"gunship"`，mark 7011，`attacks=false`（不俯冲、不开机炮，绕锚点盘旋），巡航 120 m/s、高度 350 m、
+  巡逻圆 600 m（每多一架 +80 m）、取目标范围 1500 m、燃料 3.0 倍；机体固定为 `JetBody::bomber401`。
+- `JetRole::gunship`（`src/crew.h`）；`JetLaunch` 把它映射到 `Role::gunship`。
+- 炮弹：任务里鲸鱼炮舰的 `DEMOGUNSHIPFIREE25`（DemoIndirectFire，见 `docs/mission-airstrike-re.md`），
+  用 CreateObject 造（与 `carrierlaser.cpp` 的光束同一方式）：先核 vtable `image+0x17D4B20`，接口在对象 `+0x170`，
+  设归属（炮舰机自己与其控制器，不打自己的机体）、伤害 300、`+0x2F9`=1、起点（`+0x300`）= 炮舰机位置、终点 = 目标锁定点。
+  不符 vtable 就删掉对象并关掉本任务的炮击。
+- `GunshipFire`：每 2.5 s 一发；只打非飞行目标、目标在 1800 m 内；撤离 / 回收 / 起飞时不打；`HeliFire=0` 时不打。
+- SGO `app:/object/demogunshipfiree25.sgo` 随炮舰机的机体一起预载（`PreloadJets`）；机体没预载时炮舰机退回战斗机。
+- 呼叫：7118「炮舰机·守点」、7119「炮舰机·跟随」（`airstrike.cpp kCalls` 与 `tools/call_weapons.py CALLS` 同序追加在
+  7117 之后，安装器按前缀续写已装的行）。
+- 未验证：炮弹是否从炮舰机身上出发可见、伤害与命中、盘旋半径与高度是否合适、bomber401 机体是否正常飞。
+
+### 8.4 远景渲染（`FarRender`，详细逆向见 `tmp/view-distance-re.md`）
+
+- 场景通过两个 Umbra 相机绘制：近相机 0.1 m 到 LightEnv FarClipZ（所有任务里都是 1000 m），只画遮罩含 bit25|bit27 的节点；
+  远相机 500 m 到 20 km，只画 bit26（`0x04000000`）。
+- 载具的渲染节点建立时遮罩是 `0x12000000`，没有 bit26，所以飞出 1000 m 的喷气机就看不见了。
+- 游戏自己的开关是 SGO `FarRender` / `use_far_render` 走的 `image+0x11B3020(node, true)`。
+  喷气机的节点是模型组件 `vehicle+0xE40`（vtable `image+0x176B9A8`），遮罩在节点 `+0x20`。
+- 插件每帧（`JetFrame`）检查：vtable 不符 → 记日志、这架不再处理；bit26 已在 → 什么都不做；否则调用开关并复查，
+  没生效就关掉这架的远景。近相机那一路不变。
+- 风险：500–1000 m 两个相机都画（可能重影/闪烁）；远相机的光照/阴影可能不同；模型若有子节点，子节点可能没有 bit26。
+- 备选（未实现）：改环境 `env+0x1a0` 的近裁剪距离，把 1000 m 拉远——影响全场景，代价大，只在上面方式无效时考虑。

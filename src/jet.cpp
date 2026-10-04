@@ -69,8 +69,8 @@ constexpr float kPi=3.14159265f,kG=9.8f,kGravity=14.7f;
 // Flight, per role (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
 // it first flew). The stock bombers fly 3 m a frame (180 m/s): the strike jet attacks at that, the fighter
 // is faster and pulls harder. Every distance of an attack scales with the turn radius v^2/(n g).
-enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll };
-constexpr int kRoleCount=8;
+enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship };
+constexpr int kRoleCount=9;
 // What a role goes for first: ground or flying targets (the other only with none of its own), or either.
 enum class Prefer { ground, air, any };
 struct Kind {
@@ -111,6 +111,10 @@ constexpr Kind kKinds[kRoleCount]={
      0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f,8},
     {"doll",7008.0f,Prefer::any,false, 25.0f,25.0f,0.0f, 12.0f,12.0f, 4.0f,2.0f, 10.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
      0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f,9},
+    // The gunship (JetRole::gunship): the bomber401 body circling its anchor wide and slow, never diving; it
+    // shells ground targets in reach from where it flies (GunshipFire), the guns stay off (attacks false).
+    {"gunship",7011.0f,Prefer::ground,false, 120.0f,120.0f,70.0f, 3.0f,3.0f, 2.0f,0.3f, 350.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f,
+     600.0f,80.0f, 0.0f,0.0f, 1500.0f, 0.0f,3.0f,2},
 };
 // m/s^2 of speed lost per g pulled over 1 (induced drag): with thrust that sustains 1 + thrust/kTurnBleed
 // g (strike ~4.3, fighter 6); harder it slows, and the turn tightens, as a wing does.
@@ -248,8 +252,9 @@ constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f,kThrustDrag=
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
 // The carrier's fuselage leans only this share of the fore-and-aft thrust (the nacelles take it); sideways,
 // which the nacelles cannot vector, it rolls as before. (0.25 until 2026-10-04: it looked to float, the body
-// level whatever it did; now half, and its acceleration eased: see kCarrierLean.)
-constexpr float kCarrierPitchShare=0.5f;
+// level whatever it did; then half, its acceleration eased: see kCarrierLean; still floating, so 0.8, and it
+// banks kCarrierBank times its turn: a heavy craft heels into its orbit instead of sliding round it level.)
+constexpr float kCarrierPitchShare=0.8f,kCarrierBank=2.5f;
 constexpr unsigned kPlacedFlight=1;
 constexpr ULONGLONG kFlightGapMs=20000;
 constexpr unsigned kAddBodySlot=0x179E128,kAddBody=0x232AA0,kBodyObject=0x108260;
@@ -397,6 +402,9 @@ struct Jet {
     ULONGLONG blastAt;       // a blast or doll drone: game ms its charge went (0: not yet)
     float aoa;               // a wing's angle of attack (rad, nose above the path; see kAoaPerG)
     float acc[3];            // a carrier's eased acceleration (see Lean::respond)
+    ULONGLONG gunAt;         // a gunship's last shell (GunshipFire)
+    int gunShots;            // ...and how many it has fired
+    bool farOff;             // its render node is not the one FarRender knows: far rendering left alone
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
 Jet jets[kMaxJets]{};
@@ -776,6 +784,7 @@ void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noex
         want[i]=Clamp(tilt-side*yaw,-kThrustBack,0.0f);
     }
     PoseSurfaces(j,want,kThrustRate,dt,"thrusters");
+    CarrierFlames(v,j.surf.rec,Clamp(Len(j.thrust)/kG,0.5f,1.0f),ms);   // the stock Booster flame on each nozzle
     if(cfg.debug && ms-j.thrustLogAt>1000) {
         j.thrustLogAt=ms;
         Log("JET v=%p thrusters: thrust %.1f m/s^2 (up %.1f, fwd %.1f) tilt %.0f deg, yaw %.0f deg, at F %.0f/%.0f B %.0f/%.0f",v,
@@ -963,10 +972,11 @@ bool Hovers(const Jet& j) noexcept { return j.role==Role::carrier || Trigger(j.r
 // drone's rotors; the carrier's nacelles take the rest, kCarrierPitchShare), and `drag` m/s^2 per m/s of its
 // speed is the thrust that would hold that speed (kThrustDrag; 0: none shown). `respond`: s its velocity takes
 // to close on the one wanted (0: at once, at its thrust), and `jerk` m/s^3 its acceleration changes at most
-// (0: no limit), so a heavy one swings into a move and out of it instead of sliding; `maxLean` rad it tilts.
-struct Lean { float pitchShare,drag,respond,jerk,maxLean; };
-constexpr Lean kRotorLean{1.0f,0.0f,0.0f,0.0f,kHoverLean};
-constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f};
+// (0: no limit), so a heavy one swings into a move and out of it instead of sliding; `maxLean` rad it tilts;
+// `bank` times the sideways thrust it rolls by (1: as the thrust; more: it heels into its turns).
+struct Lean { float pitchShare,drag,respond,jerk,maxLean,bank; };
+constexpr Lean kRotorLean{1.0f,0.0f,0.0f,0.0f,kHoverLean,1.0f};
+constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f,kCarrierBank};
 
 // `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.thrust gets the thrust
 // asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
@@ -1001,9 +1011,11 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
         nose[0]=m[8];nose[1]=0.0f;nose[2]=m[10];
         if(!Normalize(nose)){nose[0]=0;nose[2]=1;}
     }
-    // The lean: the horizontal thrust against gravity (its fore-and-aft part times pitchShare), at most maxLean.
-    const float ahead=(j.thrust[0]*nose[0]+j.thrust[2]*nose[2])*(how.pitchShare-1.0f);
-    const float side[3]={j.thrust[0]+nose[0]*ahead,0.0f,j.thrust[2]+nose[2]*ahead};
+    // The lean: the horizontal thrust against gravity (its fore-and-aft part times pitchShare, the sideways part
+    // times bank), at most maxLean.
+    const float fore=j.thrust[0]*nose[0]+j.thrust[2]*nose[2];
+    const float across[2]={j.thrust[0]-nose[0]*fore,j.thrust[2]-nose[2]*fore};
+    const float side[3]={nose[0]*fore*how.pitchShare+across[0]*how.bank,0.0f,nose[2]*fore*how.pitchShare+across[1]*how.bank};
     float up[3]={side[0],kG,side[2]};
     const float flat=std::sqrt(side[0]*side[0]+side[2]*side[2]);
     if(std::atan2(flat,kG)>how.maxLean) {
@@ -1385,6 +1397,19 @@ using PhysicsFn=void(__fastcall*)(void*);   // slot 57: void(vehicle)
 PhysicsFn nextPhysics=nullptr;
 using SetVecFn=void(*)(void*,const float*);
 using DeleteFn=void(*)(void*);
+
+// The gunship's shells (GunshipFire): the missions' whale gunship round, DEMOGUNSHIPFIREE25 (DemoIndirectFire,
+// docs/mission-airstrike-re.md; one RocketBullet01 round at 8 m/frame, 10 m blast, 60 frames before it goes),
+// made with CreateObject as carrierlaser.cpp's beams are: owned by the gunship (team, kills, its own hull not
+// hit), started from the gunship itself (+0x2F9 / +0x300) and aimed at its target's lock point (+0x20), so it
+// is seen leaving the gunship instead of the stock off-screen sky point. The object deletes itself when done.
+constexpr unsigned kDemoVtable=0x17D4B20;
+constexpr std::size_t kDemoIfc=0x170,kSelf=0x28;
+constexpr ULONGLONG kGunshipGapMs=2500;   // between shells
+constexpr float kGunshipReach=1800.0f;    // m from the gunship to its target at the most
+constexpr float kGunshipDamage=300.0f;    // a shell's damage (the SGO's own factor is the missions' 250)
+const wchar_t kGunshipSgo[]=L"app:/object/demogunshipfiree25.sgo";
+bool gunshipPreloaded=false;              // the shell SGO was preloaded for this mission (PreloadJets)
 using KickFn=void(*)(void*,void*);
 
 // Slot 57 of the 506, after the stock step: the jet's velocity and spin replace the heli's.
@@ -1460,6 +1485,7 @@ void PreloadJets() noexcept {
             walls[wallCount++]=Wall{{x*kWorldWall,0.0f,z*kWorldWall},{x,0.0f,z}};
         }
         for(auto& p:preloaded)p=false;
+        gunshipPreloaded=false;
         if(!spawnOk)return;
         const auto mgr=At<void*>(image,kPreloadMgr);
         for(int k=0;k<kBodyCount;++k) {
@@ -1469,10 +1495,13 @@ void PreloadJets() noexcept {
         // The doll drones' dolls (as the Recruiter's weapon SGO has its doll preloaded, its `resource`).
         const bool dolls=dollOk && preloaded[kKinds[static_cast<int>(Role::doll)].body];
         if(dolls)for(const auto sgo:kDollSgo)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,sgo,2,-1);
+        // The gunship's shells (GunshipFire), with its body.
+        gunshipPreloaded=preloaded[kKinds[static_cast<int>(Role::gunship)].body];
+        if(gunshipPreloaded)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
         Log("JET preload strike=%d fighter=%d bomber401=%d bomber501_2=%d interceptor=%d multirole=%d carrier=%d drone=%d blast=%d doll=%d "
-            "(dolls %d) heli410=%d heli506=%d",preloaded[0],preloaded[1],preloaded[2],preloaded[3],preloaded[4],preloaded[5],preloaded[6],
-            preloaded[7],preloaded[8],preloaded[9],dolls,preloaded[10],preloaded[11]);
-    } __except(EXCEPTION_EXECUTE_HANDLER){for(auto& p:preloaded)p=false;}
+            "(dolls %d) heli410=%d heli506=%d gunship shells=%d",preloaded[0],preloaded[1],preloaded[2],preloaded[3],preloaded[4],preloaded[5],
+            preloaded[6],preloaded[7],preloaded[8],preloaded[9],dolls,preloaded[10],preloaded[11],gunshipPreloaded);
+    } __except(EXCEPTION_EXECUTE_HANDLER){for(auto& p:preloaded)p=false;gunshipPreloaded=false;}
 }
 
 namespace {
@@ -1729,14 +1758,58 @@ void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexce
 
 static_assert(static_cast<int>(JetRole::carrier)==static_cast<int>(Role::carrier),"JetRole follows Role");
 
+namespace {
+unsigned char* GunshipCreate(const float* m) noexcept {
+    InitParam param{image+kInitParamVtable,{}};
+    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,kGunshipSgo,&param); }
+    __except(EXCEPTION_EXECUTE_HANDLER) {
+        Log("JET gunship shell: the game faulted building it: shells off for this mission");
+        gunshipPreloaded=false;
+        return nullptr;
+    }
+}
+
+// A gunship's shell every kGunshipGapMs while it has a ground target within kGunshipReach and is not
+// leaving: from the gunship (`pos`) onto the target's lock point (j.aim).
+void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
+    if(!gunshipPreloaded || !cfg.heliFire || !j.target || j.flyer)return;
+    if(j.mode==Mode::withdraw || j.mode==Mode::recover || j.mode==Mode::takeoff || ms-j.gunAt<kGunshipGapMs)return;
+    const float d[3]={j.aim[0]-pos[0],j.aim[1]-pos[1],j.aim[2]-pos[2]};
+    if(Len(d)>kGunshipReach || !At<void*>(image,kObjectMgr))return;
+    j.gunAt=ms;
+    alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, j.aim[0],j.aim[1],j.aim[2],1};
+    unsigned char* const o=GunshipCreate(m);
+    if(!o)return;
+    __try {
+        if(At<const void*>(o,0)!=image+kDemoVtable) {
+            Log("JET gunship shell: %p is no DemoIndirectFire: deleted, shells off",o);
+            reinterpret_cast<DeleteFn>(image+kDelete)(o);
+            gunshipPreloaded=false;
+            return;
+        }
+        unsigned char* const ifc=o+kDemoIfc;
+        const void* const owner[2]={At<const void*>(v,kSelf),At<const void*>(v,kSelfCtrl)};
+        reinterpret_cast<void(*)(void*,const void*)>(image+kIfcOwner)(ifc,owner);
+        reinterpret_cast<void(*)(void*,float)>(image+kIfcDamage)(ifc,kGunshipDamage);
+        ifc[kIfcFromJet]=1;
+        const float st[4]={pos[0],pos[1],pos[2],1.0f},am[4]={j.aim[0],j.aim[1],j.aim[2],1.0f};
+        std::memcpy(ifc+kIfcFrom,st,16);std::memcpy(ifc+kIfcAim,am,16);
+        ++j.gunShots;
+        if(cfg.debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.gunShots,j.target,Len(d));
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET gunship shell: fault setting up %p",o);}
+}
+}  // namespace
+
 bool JetLaunch(JetRole as,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort) noexcept {
     // The blast and doll carriers are carriers that launch those drones (LaunchDrones).
     const Role drones=as==JetRole::blastCarrier ? Role::blast : as==JetRole::dollCarrier ? Role::doll : Role::drone;
-    Role role=drones!=Role::drone ? Role::carrier : static_cast<Role>(static_cast<int>(as));
+    Role role=drones!=Role::drone ? Role::carrier : as==JetRole::gunship ? Role::gunship : static_cast<Role>(static_cast<int>(as));
     if(!preloaded[kKinds[static_cast<int>(role)].body])role=Role::fighter;
+    // The gunship flies the bomber401 body (its kind's own), named here so a role-to-body change cannot lose it.
+    const JetBody body=role==Role::gunship ? JetBody::bomber401 : JetBody::kind;
     __try {
-        Jet* const j=Launch(role,from,heading,target,fuelSec,kKinds[static_cast<int>(role)].cruise,source);
+        Jet* const j=Launch(role,from,heading,target,fuelSec,kKinds[static_cast<int>(role)].cruise,source,body);
         if(j){j->escort=escort;j->drones=drones;}
         return j!=nullptr;
     }
@@ -1911,6 +1984,37 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept {
     return true;
 }
 
+namespace {
+// Far rendering (tmp/view-distance-re.md, docs/jet-model-re.md §8.4). The scene draws through two Umbra
+// cameras: the near one 0.1 m to LightEnv FarClipZ (1000 m in every mission) for nodes with mask bit25|bit27,
+// the far one 500 m to 20 km for bit26 only. A vehicle's render node is made with 0x12000000, so a jet circling
+// past 1000 m stops being drawn. The game's own switch for that bit, the one SGO FarRender / use_far_render
+// throw, is 0x11B3020(node,true): the jet's node (the model component at vehicle+0xE40, vtable 0x176B9A8) gets
+// it, and the near pass is unchanged. Checked every frame, set only while the bit is missing, so a node the
+// game rebuilds or resets gets it back.
+constexpr unsigned kRenderNodeVtable=0x176B9A8,kSetFarRender=0x11B3020;
+constexpr std::size_t kRenderNode=0xE40,kNodeMask=0x20;
+constexpr unsigned kFarBit=0x04000000;
+
+void FarRender(Jet& j,unsigned char* v) noexcept {
+    if(j.farOff)return;
+    unsigned char* const node=v+kRenderNode;
+    __try {
+        if(At<const void*>(node,0)!=image+kRenderNodeVtable) {
+            Log("JET v=%p render node %p has vtable %p, not the model node's: far rendering off for it",v,node,
+                At<const void*>(node,0));
+            j.farOff=true;
+            return;
+        }
+        if(At<unsigned>(node,kNodeMask)&kFarBit)return;
+        reinterpret_cast<void(*)(void*,bool)>(image+kSetFarRender)(node,true);
+        const unsigned mask=At<unsigned>(node,kNodeMask);
+        Log("JET v=%p far rendering on: node mask %08x",v,mask);
+        if(!(mask&kFarBit)){Log("JET v=%p far bit did not stick: far rendering off for it",v);j.farOff=true;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("JET v=%p far rendering faulted: off for it",v);j.farOff=true;}
+}
+}  // namespace
+
 void JetFrame(unsigned char* v) noexcept {
     if(!physicsOk)return;
     const ULONGLONG ms=GameMs();
@@ -1926,6 +2030,7 @@ void JetFrame(unsigned char* v) noexcept {
         Log("JET v=%p crewed: %s, hp=%.0f, ceiling=%.0f",v,KindOf(*j).name,At<float>(v,kHp),Ceiling());
     }
     j->seen=ms;
+    FarRender(*j,v);
     Put<float>(v,kAreaInset,kNoInset);
     if(std::fabs(pos[0])>kWorldGone || std::fabs(pos[2])>kWorldGone) {
         if(!j->reap)Log("JET v=%p at the world's edge (%.0f,%.0f): deleting",v,pos[0],pos[2]);
@@ -2098,6 +2203,7 @@ void JetFrame(unsigned char* v) noexcept {
     BayFrame(*j,pos,nose);
     Fire(*j,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
     if(j->role==Role::carrier)LaunchDrones(*j,pos,nose,ms);
+    if(j->role==Role::gunship)GunshipFire(*j,v,pos,ms);
     if(j->role==Role::doll && dolls[j-jets].obj)DollPose(static_cast<int>(j-jets),v);
     if(cfg.debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
@@ -2133,7 +2239,7 @@ bool InstallJets() noexcept {
         if(current!=image+kPhysics506)Log("JET physics: chaining onto %p (another plugin)",current);
         nextPhysics=reinterpret_cast<PhysicsFn>(current);
         physicsOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&PhysicsHook));
-        if(physicsOk)InstallJetProps();
+        if(physicsOk){InstallJetProps();InstallBoosters();}
         spawnOk=physicsOk && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) && Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) &&
                 Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) && Readable(image+kInitParamVtable,8);
         bayOk=spawnOk;

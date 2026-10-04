@@ -160,6 +160,8 @@ void JetReap(const void* self) noexcept;           // deletes withdrawn jets; ca
 void HeliReap(const void* self) noexcept;          // ...and called helis that have left (heli.cpp)
 bool InstallJets() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
+bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
+void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
@@ -170,7 +172,7 @@ void PreloadJets() noexcept;                       // from the mission's player 
 // `escort`: it works round the player (while seen), not round `target`.
 // blastCarrier / dollCarrier: a carrier whose drones blow up next to the enemy (the doll ones carrying a
 // singing, dancing hololive doll); after `carrier`, as they are no role of their own.
-enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier };
+enum class JetRole { strike, fighter, interceptor, multirole, carrier, blastCarrier, dollCarrier, gunship };
 bool JetLaunch(JetRole role,const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                bool escort=false) noexcept;
 // A gun drone (the carrier's drone body, EDF6VC_JET_DRONE.SGO) with no carrier: launched as JetLaunch launches

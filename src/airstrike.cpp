@@ -127,6 +127,9 @@ const Call kCalls[]={
     // The submarine carrier surfaces kSubAhead past the marker (its 1664 m hull clear of the caller) and stays
     // the mission, following the player (subcarrier.cpp; three at most).
     {7117.0f,Brings::sub,JetRole::fighter,HeliBody::eros506,1,0,true,"submarine carrier",L"EDF6VC_CALL_SUB"},
+    // The gunship (jet.cpp GunshipFire): a bomber401 circling its point and shelling the ground enemies in reach.
+    {7118.0f,Brings::jets,JetRole::gunship,HeliBody::eros506,1,600,false,"gunship (guard)",L"EDF6VC_CALL_GUNSHIP"},
+    {7119.0f,Brings::jets,JetRole::gunship,HeliBody::eros506,1,600,true,"gunship (follow)",L"EDF6VC_CALL_GUNSHIP_F"},
 };
 constexpr int kCallCount=static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0]));
 // kCalls' names on the in-mission pick's banner (tools/call_weapons.py KINDS' SC names).
@@ -134,6 +137,7 @@ const wchar_t* const kCallLabels[]={
     L"截击机·守点",L"截击机·跟随",L"对地攻击机·守点",L"对地攻击机·跟随",L"多用途机·守点",L"多用途机·跟随",
     L"制空战斗机·守点",L"制空战斗机·跟随",L"无人机母舰·守点",L"无人机母舰·跟随",L"武装直升机·守点",L"武装直升机·跟随",
     L"自爆无人机母舰·守点",L"自爆无人机母舰·跟随",L"人偶无人机母舰·守点",L"人偶无人机母舰·跟随",L"潜水母舰支援",
+    L"炮舰机·守点",L"炮舰机·跟随",
 };
 static_assert(sizeof(kCallLabels)/sizeof(kCallLabels[0])==kCallCount,"a label per call");
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = every call weapon brings its own call, else
