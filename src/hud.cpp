@@ -5,7 +5,11 @@
 //    drone carrier, the fuel only where the plugin limits it (jets, called helis; "RTB" once it withdraws).
 //  - Per submarine carrier a panel at the screen's right in the carrier's own colours (navy, cyan): its name, the
 //    hull (a wide bar, HP in figures) and each deck part (a bar each; "DOWN" and the repair time once worn out).
-//    Its world gauges (subcarrier.cpp, the follower-gauge style) stay as they are.
+//  - Per submarine carrier its world bars (drawn whatever VehicleHud says): a wide one over its tower for the hull
+//    with its name and HP, a short one over each deck part with its name (DOWN and the repair time once worn out).
+// Every bar has an edge, tenths marked, and a damage trail: what a hit took stays lighter for a moment and then
+// drains to the new HP. A bar over something in the world is drawn larger the nearer it is (kNearScale at the
+// camera, kFarScale from its own reading distance on): its size on the screen never grows as it moves away.
 // Both are drawn with the game's own HUD primitives from the follower gauge's call (subcarrier.cpp GaugeHook,
 // after the stock gauges): 0xC2FB0, the quad the gauge bars are made of, and the text sequence the rescue
 // message and the multiplayer name tags use. The data is gathered on the game thread (HudSee, from every
@@ -71,6 +75,7 @@ constexpr ULONGLONG kFreshMs=500;   // a readout whose vehicle has not been seen
                                     // nor a snapshot this old (wall ms, the draw thread's clock)
 constexpr int kEntries=48,kMaxShown=12;
 struct Data {
+    const void* key;              // the vehicle (its trail's key; never read through)
     float pos[3],top;             // where it is, and how far over it its readout stands
     float hp,hpMax,fuel;          // fuel: seconds left, <0 none
     std::int32_t guns,missiles,drones;   // <0: it has none of them
@@ -134,7 +139,11 @@ const Snapshot& Latest() noexcept {
 // --- Drawing ---
 alignas(16) const float kWhite[4]={1.0f,1.0f,1.0f,1.0f};
 alignas(16) const float kWarn[4]={1.0f,0.65f,0.2f,1.0f};
-alignas(16) const float kBarBack[4]={0.0f,0.0f,0.0f,0.55f};
+alignas(16) const float kBarBack[4]={0.04f,0.05f,0.06f,0.7f};
+alignas(16) const float kBarEdge[4]={0.0f,0.0f,0.0f,0.85f};
+alignas(16) const float kBarTick[4]={0.0f,0.0f,0.0f,0.4f};
+alignas(16) const float kBarShine[4]={1.0f,1.0f,1.0f,0.18f};
+alignas(16) const float kTrail[4]={1.0f,0.95f,0.85f,0.75f};
 alignas(16) const float kGreen[4]={0.35f,1.0f,0.35f,0.95f};
 alignas(16) const float kYellow[4]={1.0f,0.9f,0.2f,0.95f};
 alignas(16) const float kRed[4]={1.0f,0.25f,0.2f,0.95f};
@@ -146,6 +155,11 @@ alignas(16) const float kAmber[4]={1.0f,0.7f,0.15f,0.95f};
 alignas(16) const float kTeal[4]={0.35f,0.75f,0.85f,0.95f};
 alignas(16) const float kDown[4]={1.0f,0.3f,0.25f,1.0f};
 constexpr float kLineScale=0.6f,kTitleScale=0.75f;
+// A world bar's size: kNearScale at the camera down to kFarScale at its own reading distance (metres of view depth) and on.
+constexpr float kNearScale=1.3f,kFarScale=0.7f;
+// The damage trail: held kTrailHoldMs after the last hit, then drains kTrailRate of the bar a second.
+constexpr ULONGLONG kTrailHoldMs=450;
+constexpr float kTrailRate=0.6f;
 
 void Rect(void* drawer,void* ctx,float x0,float y0,float x1,float y1,const float* rgba) noexcept {
     if(x1<=x0 || y1<=y0)return;
@@ -154,16 +168,59 @@ void Rect(void* drawer,void* ctx,float x0,float y0,float x1,float y1,const float
     alignas(16) const float v[12]={0.0f,0.0f,0.0f, w,0.0f,0.0f, 0.0f,h,0.0f, w,h,0.0f};
     reinterpret_cast<QuadFn>(image+kQuad)(drawer,ctx,m,rgba,kStrip,v,4,nullptr);
 }
-// A bar: its back, then `share` of it in `fill`.
-void Bar(void* drawer,void* ctx,float x,float y,float w,float h,float share,const float* fill) noexcept {
-    share=share<0.0f ? 0.0f : share>1.0f ? 1.0f : share;
+float Unit(float v) noexcept { return v<0.0f ? 0.0f : v>1.0f ? 1.0f : v; }
+// A bar: its edge and back, the damage `trail` (a share at least `share`), `share` of it in `fill` with a sheen
+// along its top, and its tenths marked once it is wide enough to show them.
+void Bar(void* drawer,void* ctx,float x,float y,float w,float h,float share,float trail,const float* fill,float s) noexcept {
+    share=Unit(share);trail=Unit(trail>share ? trail : share);
+    const float e=s>0.5f ? s : 0.5f;
+    Rect(drawer,ctx,x-e,y-e,x+w+e,y+h+e,kBarEdge);
     Rect(drawer,ctx,x,y,x+w,y+h,kBarBack);
+    if(trail>share)Rect(drawer,ctx,x+w*share,y,x+w*trail,y+h,kTrail);
     Rect(drawer,ctx,x,y,x+w*share,y+h,fill);
+    Rect(drawer,ctx,x,y,x+w*share,y+h*0.35f,kBarShine);
+    if(w<50.0f*s)return;
+    for(int i=1;i<10;++i) {
+        const float tx=x+w*static_cast<float>(i)*0.1f;
+        Rect(drawer,ctx,tx-0.5f*e,y,tx+0.5f*e,y+h,kBarTick);
+    }
+}
+
+// --- Damage trails (draw thread only): per bar the share it showed and its trail ---
+constexpr int kTrails=64;
+struct Trail { const void* key; float share,trail; ULONGLONG hitAt,at; };
+Trail trails[kTrails]{};
+// The trail of the bar `key` now showing `share` (wall ms `now`): a hit (a lower share than last time) holds the
+// old share for kTrailHoldMs, then it drains; a heal or a new bar has none.
+float TrailOf(const void* key,float share,ULONGLONG now) noexcept {
+    Trail* t=nullptr;
+    Trail* oldest=&trails[0];
+    for(auto& c:trails) {
+        if(c.key==key){t=&c;break;}
+        if(c.at<oldest->at)oldest=&c;
+    }
+    if(!t || now-t->at>2000) {   // new, or not drawn for a while: no trail to show
+        if(!t)t=oldest;
+        *t=Trail{key,share,share,0,now};
+        return share;
+    }
+    if(share<t->share)t->hitAt=now;
+    const float dt=static_cast<float>(now-t->at)*0.001f;
+    if(share>=t->trail)t->trail=share;
+    else if(now-t->hitAt>kTrailHoldMs)t->trail=t->trail-kTrailRate*dt>share ? t->trail-kTrailRate*dt : share;
+    t->share=share;t->at=now;
+    return t->trail;
+}
+
+// A world bar's scale at view depth `depth` for a bar meant to read at up to `readTo` metres (see the top).
+float DepthScale(float depth,float readTo) noexcept {
+    const float f=Unit(depth/readTo);
+    return kNearScale+(kFarScale-kNearScale)*f;
 }
 
 // A line of text to draw once the quads are down: where, its size (measured), its scale and colour.
 struct Line { wchar_t text[64]; float x,y,w,h,scale; const float* rgba; };
-constexpr int kMaxLines=40;
+constexpr int kMaxLines=64;
 
 void Format(Line& l,const wchar_t* format,...) noexcept {
     va_list args;va_start(args,format);
@@ -261,13 +318,14 @@ void FreeText(Text& t) noexcept {
 }
 
 // The world point `p` on the screen (viewport pixels, y down), as the gauge drawer 0x804300 projects it.
-bool Project(const float* vp,const float* p,float width,float height,float* sx,float* sy) noexcept {
+// `depth`: its view depth (the clip w of a perspective projection: metres in front of the camera).
+bool Project(const float* vp,const float* p,float width,float height,float* sx,float* sy,float* depth) noexcept {
     float c[4];
     for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
     if(!(c[3]>1e-6f))return false;
     const float x=c[0]/c[3],y=c[1]/c[3],z=c[2]/c[3];
     if(!(std::fabs(x)<=1.0f && std::fabs(y)<=1.0f && z>=0.0f && z<=1.0f))return false;
-    *sx=width*0.5f*x+width*0.5f;*sy=height*0.5f-height*0.5f*y;
+    *sx=width*0.5f*x+width*0.5f;*sy=height*0.5f-height*0.5f*y;*depth=c[3];
     return true;
 }
 
@@ -293,8 +351,9 @@ const float* HpColour(float share) noexcept { return share>0.6f ? kGreen : share
 const float* HullColour(float share) noexcept { return share>0.5f ? kCyan : share>0.25f ? kAmber : kRed; }
 
 // The readouts: a line each over its vehicle, the HP bar under it (bars now, the line later).
+constexpr float kReadoutFar=400.0f;   // a readout's bar reads at its smallest from this far on
 int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int at,
-             const Snapshot& snap,int* shown) noexcept {
+             const Snapshot& snap,int* shown,ULONGLONG now) noexcept {
     Data best[kMaxShown];
     int most=Cfg().vehicleHudCount;
     most=most<0 ? 0 : most>kMaxShown ? kMaxShown : most;
@@ -303,9 +362,10 @@ int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float
     for(int i=0;i<n && at<kMaxLines;++i) {
         const Data& d=best[i];
         const float over[3]={d.pos[0],d.pos[1]+d.top,d.pos[2]};
-        float sx,sy;
-        if(!Project(vp,over,width,height,&sx,&sy))continue;
-        const float share=d.hpMax>0.0f ? d.hp/d.hpMax : 0.0f;
+        float sx,sy,depth;
+        if(!Project(vp,over,width,height,&sx,&sy,&depth))continue;
+        const float share=d.hpMax>0.0f ? Unit(d.hp/d.hpMax) : 0.0f;
+        const float k=DepthScale(depth,kReadoutFar),ks=k*s;
         Line& l=lines[at];
         Format(l,L"%hs %d%%",d.kind,static_cast<int>(std::lround(share*100.0f)));
         if(d.guns>=0)Append(l,L"  G %d",d.guns);
@@ -316,12 +376,12 @@ int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float
             const int sec=static_cast<int>(d.fuel);
             Append(l,L"  F %d:%02d",sec/60,sec%60);
         }
-        l.scale=kLineScale;l.rgba=d.leaving || (d.fuel>=0.0f && d.fuel<20.0f) ? kWarn : kWhite;
+        l.scale=kLineScale*k;l.rgba=d.leaving || (d.fuel>=0.0f && d.fuel<20.0f) ? kWarn : kWhite;
         l.w=l.h=0.0f;
         if(text)MeasureAll(*text,&l,1);
-        const float bw=64.0f*s,bh=5.0f*s;
-        Bar(drawer,ctx,sx-bw*0.5f,sy-bh,bw,bh,share,HpColour(share));
-        l.x=sx-l.w*0.5f;l.y=sy-bh-2.0f*s-l.h;
+        const float bw=80.0f*ks,bh=7.0f*ks;
+        Bar(drawer,ctx,sx-bw*0.5f,sy-bh,bw,bh,share,TrailOf(d.key,share,now),HpColour(share),ks);
+        l.x=sx-l.w*0.5f;l.y=sy-bh-3.0f*ks-l.h;
         ++at;++*shown;
     }
     return at;
@@ -376,13 +436,54 @@ float Panel(void* drawer,void* ctx,Text* text,const CarrierPanel& p,int index,in
     Rect(drawer,ctx,x0,top,x0+pw,bottom,kPanel);
     Rect(drawer,ctx,x0,top,x0+3.0f*s,bottom,kCyan);           // the edge
     Rect(drawer,ctx,x0,top,x0+pw,top+2.0f*s,kCyan);
-    Bar(drawer,ctx,x,hullY,bw,hullH,hullShare,HullColour(hullShare));
+    Bar(drawer,ctx,x,hullY,bw,hullH,hullShare,hullShare,HullColour(hullShare),s);
     for(int k=0;k<p.parts;++k) {
         const auto& part=p.part[k];
-        Bar(drawer,ctx,x,partY[k],bw,partH,part.down || part.max<=0.0f ? 0.0f : part.hp/part.max,part.down ? kRed : kTeal);
+        const float share=part.down || part.max<=0.0f ? 0.0f : part.hp/part.max;
+        Bar(drawer,ctx,x,partY[k],bw,partH,share,share,part.down ? kRed : kTeal,s);
     }
     *at=first+n;
     return bottom;
+}
+
+// A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.
+constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
+void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
+                 Line* lines,int* at,ULONGLONG now) noexcept {
+    float sx,sy,depth;
+    if(*at<kMaxLines && Project(vp,p.at,width,height,&sx,&sy,&depth)) {
+        const float k=DepthScale(depth,kCarrierFar),ks=k*s;
+        const float share=p.hullMax>0.0f ? Unit(p.hull/p.hullMax) : 0.0f;
+        Line& l=lines[(*at)++];
+        Format(l,L"SUBMARINE CARRIER  %d%%",static_cast<int>(std::lround(share*100.0f)));
+        l.scale=kTitleScale*k;l.rgba=kTitle;l.w=l.h=0.0f;
+        if(text)MeasureAll(*text,&l,1);
+        const float bw=240.0f*ks,bh=12.0f*ks;
+        Bar(drawer,ctx,sx-bw*0.5f,sy-bh,bw,bh,share,TrailOf(p.key,share,now),HullColour(share),ks);
+        l.x=sx-l.w*0.5f;l.y=sy-bh-4.0f*ks-l.h;
+    }
+    for(int k=0;k<p.parts && k<4 && *at<kMaxLines;++k) {
+        const auto& part=p.part[k];
+        if(!Project(vp,part.at,width,height,&sx,&sy,&depth))continue;
+        const float f=DepthScale(depth,kPartFar),fs=f*s;
+        const float share=part.down || part.max<=0.0f ? 0.0f : Unit(part.hp/part.max);
+        Line& l=lines[(*at)++];
+        if(part.down) {
+            const int sec=static_cast<int>(part.repairSec);
+            Format(l,L"%hs  DOWN %d:%02d",part.name,sec/60,sec%60);
+            l.rgba=kDown;
+        } else {
+            Format(l,L"%hs",part.name);
+            l.rgba=kWhite;
+        }
+        l.scale=kLineScale*f;l.w=l.h=0.0f;
+        if(text)MeasureAll(*text,&l,1);
+        const float bw=90.0f*fs,bh=6.0f*fs;
+        // Each part's trail its own: the carrier's key and the part's index (a value, never read through).
+        const void* const key=static_cast<const unsigned char*>(p.key)+1+k;
+        Bar(drawer,ctx,sx-bw*0.5f,sy-bh,bw,bh,share,TrailOf(key,share,now),part.down ? kRed : kTeal,fs);
+        l.x=sx-l.w*0.5f;l.y=sy-bh-3.0f*fs-l.h;
+    }
 }
 
 // What is drawn, logged when it changes (Debug, once in 10 s at most).
@@ -422,6 +523,7 @@ void HudSee(unsigned char* v) noexcept {
     Work* const w=WorkFor(v,ms);
     if(!w)return;
     Data d{};
+    d.key=v;
     std::memcpy(d.pos,pos,12);
     d.hp=At<float>(v,kHp);d.hpMax=At<float>(v,kHpMax);
     d.fuel=-1.0f;d.drones=-1;
@@ -461,7 +563,7 @@ void HudPublish() noexcept {
 }
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
-    if(!Cfg().vehicleHud || !quadOk || !viewProj || !ctx || !viewport)return;
+    if(!quadOk || !viewProj || !ctx || !viewport)return;   // the carriers' bars are drawn whatever VehicleHud says
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
         const int w=At<std::int32_t>(viewport,8),h=At<std::int32_t>(viewport,0xC);
@@ -473,10 +575,14 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines];
         int at=0,shown=0;
-        const Snapshot& snap=Latest();
-        if(GetTickCount64()-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown);
-        float top=height*0.28f;
-        for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
+        const ULONGLONG now=GetTickCount64();
+        for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
+        if(Cfg().vehicleHud) {
+            const Snapshot& snap=Latest();
+            if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
+            float top=height*0.28f;
+            for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
+        }
         if(t && textOk)DrawAll(*t,lines,at);
         FreeText(text);
         DrawLog(shown,count,lines,at,w,h);

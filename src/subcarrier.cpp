@@ -18,11 +18,10 @@
 // a barrel is on it and the homing missiles (0x2021) once the game has locked a target; empty weapons are
 // reloaded aboard after kReloadMs. The fire bytes are written in the input stage (after the stock input, which
 // owns them); with no input stage (the driver gone) the physics step writes them too, and says so once.
-// Its HP is shown as the game's follower gauge (HudPlayer_FollowerDurability 0x8040E0 draws one over every
-// follower of the player, 0x804300): the plugin calls that drawer once more with a stand-in owner whose
-// follower list holds a stand-in object per carrier (only +0x90 position, +0x2F4 / +0x2F8 HP and +0x550,
-// an empty follower list, are read). The draw runs on another thread: it reads only what the game thread
-// published last (Publish / Latest, a triple buffer), never the carriers' entries.
+// Its HP is shown by hud.cpp (HudDraw): a bar over the tower for the hull and one over each deck part, drawn
+// from the game's follower gauge call (HudPlayer_FollowerDurability 0x8040E0 -> 0x804300, hooked at kGaugeCall:
+// the HUD's draw pass, its view-projection and context). The draw runs on another thread: it reads only what the
+// game thread published last (Publish / Latest, a triple buffer), never the carriers' entries.
 // Its HP is split into the hull and four deck parts (kSystems: two turrets, the missile bay, the drone bay),
 // docs/subcarrier-re.md §8: every hit reaches it as the damage message through the 506's slot 9 (body506.cpp
 // hooks it, SubMessage). A hit within a part's reach wears that part (its own HP, its own gauge) and not the
@@ -63,10 +62,10 @@ constexpr unsigned char kObjDeleted=4;
 constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kSetTeam=0x54EE70,kInitParamVtable=0x1762068;
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
-// The gauge (docs/subcarrier-re.md §4): the follower HUD's draw (vtable 0x17F6C08 slot 3) calls the
-// drawer at kGaugeCall: (hud, view-projection, owner, r9, 5th) -> a gauge per object in owner+0x550's list.
+// The gauge call (docs/subcarrier-re.md §4): the follower HUD's draw (vtable 0x17F6C08 slot 3) calls the
+// drawer at kGaugeCall: (hud, view-projection, owner, r9 = draw context, 5th = viewport). The plugin's HUD is
+// drawn right after it (GaugeHook), in the same pass.
 constexpr unsigned kGaugeHud=0x17F6C08,kGaugeDraw=0x8040E0,kGaugeCall=0x8042AD,kGaugeFn=0x804300;
-constexpr std::size_t kFollowers=0x550,kProxySize=0x560;
 // GameDamageInfo (docs/subcarrier-re.md §8.1): the attacker (weak_ptr: object, control block), its team, where it
 // hit (the round's position, or the blast's centre), the damage.
 constexpr std::size_t kDmgAttacker=0x10,kDmgAttackerCtrl=0x18,kDmgTeam=0x24,kDmgAt=0x30,kDmgAmount=0x50;
@@ -181,11 +180,10 @@ struct Sub {
 Sub subs[kMaxSubs]{};
 const void* refused=nullptr;          // the last carrier no entry was free for (logged once)
 
-// The gauges (see the top): per carrier the hull's stand-in and each part's, then its HUD panel (hud.cpp). The game
+// The gauges (see the top): per carrier its panel (hud.cpp: the hull and each part, where each stands). The game
 // thread builds them into `staging` every tick and publishes the whole set; the draw reads the last published one.
-constexpr int kGauges=1+kSystemCount;
 const char* const kPartNames[kSystemCount]={"TURRET A","TURRET B","MISSILES","DRONE BAY"};
-struct Gauges { alignas(16) unsigned char proxy[kGauges][kProxySize]; CarrierPanel panel; bool shown; };
+struct Gauges { CarrierPanel panel; bool shown; };
 struct Snapshot { ULONGLONG tick; Gauges sub[kMaxSubs]; };
 Gauges staging[kMaxSubs]{};
 // The triple buffer: the game thread writes shots[writing] and swaps it in as `latest` (marked kFresh); the draw
@@ -195,8 +193,6 @@ constexpr LONG kFresh=4;
 Snapshot shots[3]{};
 volatile LONG latest=0;
 int writing=1,reading=2;
-struct Node { Node* next; Node* prev; void* object; };   // the game's list node: next, prev, value at +0x10
-Node noFollowers{};
 
 bool heavyOk[kHeavyCount]{};
 bool spawnOk=false,gaugeOk=false,gaugeTried=false,damageOk=false;
@@ -756,29 +752,22 @@ void FireStep(Sub& s,unsigned char* v,const float* m,ULONGLONG ms) noexcept {
     v[kFireGun]=gun;v[kFireMissile]=missile;
 }
 
-// A gauge stand-in: at body-frame `at`, hp of max.
-void Gauge(unsigned char* p,const float* m,const float* at,float max,float hp) noexcept {
-    Put<void*>(p,kFollowers,&noFollowers);
-    float w[4]={0.0f,0.0f,0.0f,1.0f};
-    ToWorld(m,at,w);
-    std::memcpy(p+kPosition,w,16);
-    const float top=max>1.0f ? max : 1.0f;
-    Put<float>(p,kHpMax,top);
-    Put<float>(p,kHp,Clamp(hp,0.0f,top));
-}
-// Carrier i's gauges and panel into the staging set: the hull's over the tower, then each part's.
+// Carrier i's panel into the staging set: the hull over the tower, then each deck part over its own place.
 void Stage(int i,const Sub& s,const unsigned char* v,const float* m,ULONGLONG ms) noexcept {
     Gauges& g=staging[i];
-    const float tower[3]={0.0f,kTop,0.0f};
-    Gauge(g.proxy[0],m,tower,At<float>(v,kHpMax),At<float>(v,kHp));
     CarrierPanel& p=g.panel;
-    p.hull=At<float>(g.proxy[0],kHp);p.hullMax=At<float>(g.proxy[0],kHpMax);
+    p.key=v;
+    const float tower[3]={0.0f,kTop,0.0f};
+    ToWorld(m,tower,p.at);
+    p.hullMax=At<float>(v,kHpMax)>1.0f ? At<float>(v,kHpMax) : 1.0f;
+    p.hull=Clamp(At<float>(v,kHp),0.0f,p.hullMax);
     p.parts=kSystemCount;
     for(int k=0;k<kSystemCount;++k) {
-        Gauge(g.proxy[1+k],m,kSystems[k].gauge,kSystems[k].hp,kSystems[k].hp-s.wear[k]);
         const ULONGLONG done=s.downAt[k]+kRepairMs;
         const float left=s.down[k] && done>ms ? static_cast<float>(done-ms)*0.001f : 0.0f;
-        p.part[k]={kPartNames[k],At<float>(g.proxy[1+k],kHp),At<float>(g.proxy[1+k],kHpMax),left,s.down[k]};
+        auto& part=p.part[k];
+        part={kPartNames[k],Clamp(kSystems[k].hp-s.wear[k],0.0f,kSystems[k].hp),kSystems[k].hp,left,s.down[k],{}};
+        ToWorld(m,kSystems[k].gauge,part.at);
     }
     g.shown=true;
 }
@@ -812,34 +801,18 @@ unsigned char* CreateSub(const float* m,InitParam* param) noexcept {
     __except(SubFault(GetExceptionInformation())) { return nullptr; }
 }
 
-// The follower gauges as the game draws them, then one per carrier of the last published snapshot (see the top),
-// then the vehicle HUD (hud.cpp: the readouts and a panel per carrier).
+// The follower gauges as the game draws them, then the plugin's HUD (hud.cpp: the vehicle readouts, and per carrier
+// of the last published snapshot its world bars and its panel).
 void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fifth) {
     const auto draw=reinterpret_cast<GaugeFn>(image+kGaugeFn);
     draw(hud,viewProj,owner,r9,fifth);
     __try {
         const Snapshot& shot=Latest();
         const bool fresh=GetTickCount64()-shot.tick<=kGaugeMs;   // the game thread still publishing (not paused)
-        alignas(16) unsigned char stand[kProxySize]{};
-        Node head{};head.next=&head;head.prev=&head;
-        Node nodes[kMaxSubs*kGauges]{};
         CarrierPanel panels[kMaxSubs]{};
-        int n=0,count=0;
-        for(int i=0;fresh && i<kMaxSubs;++i) {
-            const Gauges& g=shot.sub[i];
-            if(!g.shown)continue;
-            panels[count++]=g.panel;
-            for(int k=0;k<kGauges;++k) {
-                Node& node=nodes[n++];
-                node.object=const_cast<unsigned char*>(g.proxy[k]);
-                node.prev=head.prev;node.next=&head;
-                head.prev->next=&node;head.prev=&node;
-            }
-        }
-        if(n) {
-            Put<void*>(stand,kFollowers,&head);
-            draw(hud,viewProj,stand,r9,fifth);
-        }
+        int count=0;
+        for(int i=0;fresh && i<kMaxSubs;++i)
+            if(shot.sub[i].shown)panels[count++]=shot.sub[i].panel;
         HudDraw(static_cast<const float*>(viewProj),r9,fifth,panels,count);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
@@ -849,13 +822,9 @@ const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,
 const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
 const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
 struct Sig { unsigned rva; unsigned char bytes[8]; std::size_t size; };
-// The drawer and what it reads of the owner and of each object (docs/subcarrier-re.md §4).
+// The drawer and its call (docs/subcarrier-re.md §4).
 const Sig kGaugeSigs[]={
     {kGaugeFn,{0x4C,0x8B,0xDC,0x55,0x53,0x56,0x57,0x41},8},
-    {0x804329,{0x49,0x8B,0xB8,0x50,0x05,0x00,0x00},7},          // mov rdi,[r8+550h]: the owner's followers
-    {0x8043F4,{0x0F,0x10,0x90,0x90,0x00,0x00,0x00},7},          // movups xmm2,[rax+90h]: the object's position
-    {0x804633,{0xF3,0x0F,0x10,0x90,0xF8,0x02,0x00,0x00},8},     // its HP
-    {0x80463B,{0xF3,0x0F,0x5E,0x90,0xF4,0x02,0x00,0x00},8},     // over its max HP
     {kGaugeCall,{0xE8,0x4E,0x00,0x00,0x00},5},
     {kGaugeDraw,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74},8},
 };
@@ -1159,7 +1128,6 @@ bool InstallGauge() noexcept {
     __try {
         bool gauge=Readable(image+kGaugeHud+3*8,8) && At<const unsigned char*>(image,kGaugeHud+3*8)==image+kGaugeDraw;
         for(const auto& g:kGaugeSigs)gauge=gauge && Matches(g.rva,g.bytes,g.size);
-        noFollowers.next=&noFollowers;noFollowers.prev=&noFollowers;
         bool changed=false;
         gaugeOk=gauge && RedirectCall(image+kGaugeCall,image+kGaugeFn,reinterpret_cast<void*>(&GaugeHook),changed);
         Log("HOOK gauge=%d (carrier gauges, vehicle HUD)",gaugeOk);

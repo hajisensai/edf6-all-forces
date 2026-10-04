@@ -6,11 +6,15 @@ bool InstallHud() noexcept;                         // at load: checks the draw 
 void HudSee(unsigned char* vehicle) noexcept;       // from every vehicle's input hook (game thread): a readout's data
 // Once a game frame (crew.cpp FrameTick, game thread): what HudSee gathered is published, whole, for the draw.
 void HudPublish() noexcept;
-// A carrier's panel (subcarrier.cpp fills it every draw from its game-thread copies): the hull, each deck part.
+// A carrier's panel (subcarrier.cpp publishes it from the game thread): the hull, each deck part, and where each
+// stands in the world (its bar is drawn there). `key` tells one carrier from another across draws (the bars'
+// damage trails); it is never read through.
 struct CarrierPanel {
+    const void* key;
     float hull,hullMax;
+    float at[3];
     int parts;
-    struct Part { const char* name; float hp,max,repairSec; bool down; } part[4];
+    struct Part { const char* name; float hp,max,repairSec; bool down; float at[3]; } part[4];
 };
 // From the follower gauge's draw (the draw thread): the published readouts and `count` carrier panels.
 // `viewProj`, `ctx` and `viewport` as the gauge drawer 0x804300 gets them.
