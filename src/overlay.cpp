@@ -1,5 +1,7 @@
 // The in-mission call pick (airstrike.cpp CallPick): its keys (ini CallNextKey / CallPrevKey, virtual-key
-// codes, 0 = off) and the banner that shows what is picked. One thread does both: it polls the keys while
+// codes, 0 = off) and the banner that shows what is picked. One thread does both for the plugin's life (the
+// keys are read from the live config each poll, so turning a key on in the ini works without a restart): it
+// polls the keys while
 // one of the game's windows is in front (keys typed into another program never count), and owns the
 // banner, a borderless layered window over the top of the game's window that never takes the focus or a
 // click (WS_EX_NOACTIVATE, WS_EX_TRANSPARENT) and hides itself after kBannerMs. In exclusive full screen
@@ -78,9 +80,10 @@ DWORD WINAPI PickerThread(void*) {
         while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}
         if(banner && shownAt && GetTickCount64()-shownAt>kBannerMs){ShowWindow(banner,SW_HIDE);shownAt=0;}
         HWND game=nullptr;
-        const bool front=Cfg().enabled && GameInFront(&game);
-        const bool next=front && Cfg().callNextKey && (GetAsyncKeyState(static_cast<int>(Cfg().callNextKey))&0x8000);
-        const bool prev=front && Cfg().callPrevKey && (GetAsyncKeyState(static_cast<int>(Cfg().callPrevKey))&0x8000);
+        const Config& cfg=Cfg();   // one snapshot per poll
+        const bool front=cfg.enabled && GameInFront(&game);
+        const bool next=front && cfg.callNextKey && (GetAsyncKeyState(static_cast<int>(cfg.callNextKey))&0x8000);
+        const bool prev=front && cfg.callPrevKey && (GetAsyncKeyState(static_cast<int>(cfg.callPrevKey))&0x8000);
         const int step=(next && !nextDown) ? 1 : (prev && !prevDown) ? -1 : 0;
         nextDown=next;prevDown=prev;
         if(step) {
@@ -93,9 +96,9 @@ DWORD WINAPI PickerThread(void*) {
 }  // namespace
 
 void StartCallPicker() noexcept {
-    if(!Cfg().callNextKey && !Cfg().callPrevKey)return;
     const HANDLE t=CreateThread(nullptr,0,PickerThread,nullptr,0,nullptr);
     if(t)CloseHandle(t);
-    Log("CALLS pick keys next=%#lx prev=%#lx%s",Cfg().callNextKey,Cfg().callPrevKey,t ? "" : " (no thread)");
+    Log("CALLS pick thread %s (keys from the ini: next=%#lx prev=%#lx, 0 = off)",t ? "on" : "could not start",Cfg().callNextKey,
+        Cfg().callPrevKey);
 }
 }  // namespace crew

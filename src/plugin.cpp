@@ -34,7 +34,7 @@ void SuppressBump(bool on) noexcept { noBumpDepth+=on ? 1 : -1; }
 bool BumpSuppressed() noexcept { return noBumpDepth>0; }
 namespace {
 HMODULE module=nullptr;
-wchar_t logPath[MAX_PATH]{};
+wchar_t logPath[MAX_PATH]{},logOldPath[MAX_PATH+2]{};
 wchar_t iniPath[MAX_PATH]{};
 FILETIME iniStamp{};
 ULONGLONG iniCheckedAt=0;
@@ -88,13 +88,72 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
 bool ReadBool(const wchar_t* key,bool fallback) noexcept {
     return GetPrivateProfileIntW(L"VehicleCrew",key,fallback ? 1 : 0,iniPath)!=0;
 }
+// A whole number, signed: GetPrivateProfileIntW parses "-5" and hands it back as a huge UINT, which as a
+// delay meant "never" (CrewDelayMs=-1: no NPC ever came). FixInt clamps it.
+int ReadInt(const wchar_t* key,DWORD fallback) noexcept {
+    return static_cast<int>(GetPrivateProfileIntW(L"VehicleCrew",key,static_cast<INT>(fallback),iniPath));
+}
+
+// Range checks: a value outside [lo, hi] is clamped and the change logged (each reload logs it again, so the
+// log always says what is in force).
+void Fix(const char* key,float& v,float lo,float hi) noexcept {
+    const float c=v<lo ? lo : v>hi ? hi : v;
+    if(c!=v){Log("CONFIG %s=%g out of range [%g, %g]: %g used",key,v,lo,hi,c);v=c;}
+}
+DWORD FixInt(const char* key,int v,int lo,int hi) noexcept {
+    const int c=v<lo ? lo : v>hi ? hi : v;
+    if(c!=v)Log("CONFIG %s=%d out of range [%d, %d]: %d used",key,v,lo,hi,c);
+    return static_cast<DWORD>(c);
+}
+void Validate(Config& n) noexcept {
+    Fix("CrewRange",n.crewRange,0.0f,10000.0f);
+    Fix("HeliHeight",n.heliHeight,0.0f,500.0f);
+    Fix("HeliFollow",n.heliFollow,0.0f,1000.0f);
+    Fix("HeliRange",n.heliRange,0.0f,2000.0f);
+    // Engaged while following, it takes on enemies within HeliCombatRange of the player plus its gun's reach,
+    // capped at HeliRange: a combat range past HeliRange says something HeliRange overrules anyway.
+    Fix("HeliCombatRange",n.heliCombatRange,0.0f,n.heliRange);
+    Fix("HeliFireHeight",n.heliFireHeight,1.0f,300.0f);
+    Fix("HeliFireCone",n.heliFireCone,0.1f,90.0f);
+    // heli.cpp Tune rewrites the speed only with a time constant of at least half a second (30 frames).
+    Fix("HeliSpeed",n.heliSpeed,0.0f,200.0f);
+    Fix("HeliAgility",n.heliAgility,0.5f,60.0f);
+    Fix("HeliYawRate",n.heliYawRate,0.0f,360.0f);
+    Fix("HeliGuardRadius",n.heliGuardRadius,0.0f,1000.0f);
+    Fix("HeliGuardSpeed",n.heliGuardSpeed,1.0f,100.0f);
+    Fix("GroundFollow",n.groundFollow,0.0f,500.0f);
+    Fix("GroundRange",n.groundRange,0.0f,2000.0f);
+    // A leash shorter than the follow distance keeps the crawler leashed for good: it would never engage.
+    Fix("GroundLeash",n.groundLeash,n.groundFollow,5000.0f);
+    Fix("RescueBelow",n.rescueBelow,-1000.0f,1000.0f);
+    Fix("SubHullHp",n.subHullHp,0.0f,1.0e7f);
+    Fix("SubHeavyHit",n.subHeavyHit,0.0f,1.0e7f);
+    Fix("CarrierLaserDamage",n.carrierLaserDamage,0.0f,1.0e6f);
+    Fix("CarrierLaserBreak",n.carrierLaserBreak,0.0f,1.0f);
+    Fix("VehicleHudRange",n.vehicleHudRange,0.0f,10000.0f);
+    n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
+}
+
+// The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
+// the keys ignored (said once).
+void IgnoreRetired() noexcept {
+    static const wchar_t* const kRetired[]={L"HeliMoveGain",L"HeliBrakeGain",L"HeliClimbGain",L"HeliHoverLearn"};
+    static bool said[4]{};
+    for(int i=0;i<4;++i) {
+        wchar_t text[8]{};
+        GetPrivateProfileStringW(L"VehicleCrew",kRetired[i],L"",text,8,iniPath);
+        if(!text[0] || said[i])continue;
+        said[i]=true;
+        Log("CONFIG %ls is no longer read (the flight controller's gains are fixed): ignored",kRetired[i]);
+    }
+}
 
 void LoadConfig() noexcept {
     Config n{};
     n.enabled=ReadBool(L"Enabled",n.enabled);
     n.debug=ReadBool(L"Debug",n.debug);
     n.autoCrew=ReadBool(L"AutoCrew",n.autoCrew);
-    n.crewDelayMs=GetPrivateProfileIntW(L"VehicleCrew",L"CrewDelayMs",n.crewDelayMs,iniPath);
+    n.crewDelayMs=FixInt("CrewDelayMs",ReadInt(L"CrewDelayMs",n.crewDelayMs),0,600000);
     n.crewRange=ReadFloat(L"CrewRange",n.crewRange);
     n.bump=ReadBool(L"Bump",n.bump);
     n.bumpToGunner=ReadBool(L"BumpToGunner",n.bumpToGunner);
@@ -108,12 +167,8 @@ void LoadConfig() noexcept {
     n.heliFireHeight=ReadFloat(L"HeliFireHeight",n.heliFireHeight);
     n.heliAvoid=ReadBool(L"HeliAvoid",n.heliAvoid);
     n.heliMissile=ReadBool(L"HeliMissile",n.heliMissile);
-    n.heliMissileMs=GetPrivateProfileIntW(L"VehicleCrew",L"HeliMissileMs",n.heliMissileMs,iniPath);
-    n.heliMoveGain=ReadFloat(L"HeliMoveGain",n.heliMoveGain);
-    n.heliBrakeGain=ReadFloat(L"HeliBrakeGain",n.heliBrakeGain);
-    n.heliClimbGain=ReadFloat(L"HeliClimbGain",n.heliClimbGain);
-    n.heliHoverLearn=ReadFloat(L"HeliHoverLearn",n.heliHoverLearn);
-    n.heliLandMs=GetPrivateProfileIntW(L"VehicleCrew",L"HeliLandMs",n.heliLandMs,iniPath);
+    n.heliMissileMs=FixInt("HeliMissileMs",ReadInt(L"HeliMissileMs",n.heliMissileMs),0,600000);
+    n.heliLandMs=FixInt("HeliLandMs",ReadInt(L"HeliLandMs",n.heliLandMs),0,3600000);
     n.heliSpeed=ReadFloat(L"HeliSpeed",n.heliSpeed);
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
@@ -121,8 +176,8 @@ void LoadConfig() noexcept {
     n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
     n.heliGuardSpeed=ReadFloat(L"HeliGuardSpeed",n.heliGuardSpeed);
     n.jetPilot=ReadBool(L"JetPilot",n.jetPilot);
-    n.jetFuelSec=GetPrivateProfileIntW(L"VehicleCrew",L"JetFuelSec",n.jetFuelSec,iniPath);
-    n.jetSortieSec=GetPrivateProfileIntW(L"VehicleCrew",L"JetSortieSec",n.jetSortieSec,iniPath);
+    n.jetFuelSec=FixInt("JetFuelSec",ReadInt(L"JetFuelSec",n.jetFuelSec),0,3600);
+    n.jetSortieSec=FixInt("JetSortieSec",ReadInt(L"JetSortieSec",n.jetSortieSec),0,3600);
     n.jetAirRaider=ReadBool(L"JetAirRaider",n.jetAirRaider);
     n.jetMissionStrike=ReadBool(L"JetMissionStrike",n.jetMissionStrike);
     n.groundPilot=ReadBool(L"GroundPilot",n.groundPilot);
@@ -130,8 +185,8 @@ void LoadConfig() noexcept {
     n.groundRange=ReadFloat(L"GroundRange",n.groundRange);
     n.groundLeash=ReadFloat(L"GroundLeash",n.groundLeash);
     n.groundFire=ReadBool(L"GroundFire",n.groundFire);
-    n.callNextKey=GetPrivateProfileIntW(L"VehicleCrew",L"CallNextKey",n.callNextKey,iniPath);
-    n.callPrevKey=GetPrivateProfileIntW(L"VehicleCrew",L"CallPrevKey",n.callPrevKey,iniPath);
+    n.callNextKey=FixInt("CallNextKey",ReadInt(L"CallNextKey",n.callNextKey),0,255);   // virtual-key codes
+    n.callPrevKey=FixInt("CallPrevKey",ReadInt(L"CallPrevKey",n.callPrevKey),0,255);
     n.seaRescue=ReadBool(L"SeaRescue",n.seaRescue);
     n.rescueBelow=ReadFloat(L"RescueBelow",n.rescueBelow);
     n.rescueAutoBoard=ReadBool(L"RescueAutoBoard",n.rescueAutoBoard);
@@ -141,15 +196,17 @@ void LoadConfig() noexcept {
     n.carrierLaserDamage=ReadFloat(L"CarrierLaserDamage",n.carrierLaserDamage);
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
-    n.vehicleHudCount=static_cast<int>(GetPrivateProfileIntW(L"VehicleCrew",L"VehicleHudCount",n.vehicleHudCount,iniPath));
+    n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
     n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
     n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
+    Validate(n);
+    IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         n.enabled,n.debug,n.autoCrew,n.crewDelayMs,n.crewRange,n.bump,n.bumpToGunner,
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
-    Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.0f missile=%d/%lums move=%.3f brake=%.3f climb=%.3f learn=%.3f landMs=%lu",
-        n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliMoveGain,n.heliBrakeGain,n.heliClimbGain,n.heliHoverLearn,n.heliLandMs);
+    Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.1f missile=%d/%lums landMs=%lu",
+        n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
@@ -161,6 +218,7 @@ void LoadConfig() noexcept {
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
+    Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }
@@ -171,26 +229,57 @@ FILETIME IniStamp() noexcept {
 }
 }  // namespace
 
+// The log: one handle kept open, appended to (each line one WriteFile: whole lines, and in the file even if
+// the game dies next). Opening and closing the file per line, on the game thread, with the virus scanner
+// looking at each close, was the hitch when a mission starts and logs hundreds of lines. Debug=1 writes the
+// flight data every second, so past kLogMax the file is renamed to .log.1 (the one before replaced) and a new
+// one begun. The handle, its size and the rename are under one lock (lines come from the game thread, the
+// call picker and the draw thread). No FILE_SHARE_DELETE: a log deleted while the game runs would take the
+// rest unseen.
+namespace {
+constexpr LONGLONG kLogMax=32ll<<20;
+SRWLOCK logLock=SRWLOCK_INIT;
+HANDLE logFile=nullptr;
+LONGLONG logSize=0;
+
+HANDLE OpenLog() noexcept {
+    const HANDLE h=CreateFileW(logPath,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h==INVALID_HANDLE_VALUE)return nullptr;
+    LARGE_INTEGER size{};
+    logSize=GetFileSizeEx(h,&size) ? size.QuadPart : 0;
+    return h;
+}
+
+// Under logLock: the log renamed to .log.1 and a new one opened. A rename that fails (another program holds
+// .log.1, or the log without sharing delete) is said in the log, which then grows another kLogMax first.
+void RotateLog() noexcept {
+    CloseHandle(logFile);
+    const BOOL moved=MoveFileExW(logPath,logOldPath,MOVEFILE_REPLACE_EXISTING);
+    const DWORD error=moved ? 0 : GetLastError();
+    logFile=OpenLog();
+    if(!logFile)return;
+    char line[160];
+    const int n=moved ? _snprintf_s(line,sizeof(line),_TRUNCATE,"(log continued: the previous %lld MB are in .log.1)\r\n",kLogMax>>20)
+                      : _snprintf_s(line,sizeof(line),_TRUNCATE,"(log rotation failed, error %lu: this file grows on)\r\n",error);
+    if(!moved)logSize=0;   // the next try another kLogMax on, not on every line
+    DWORD wrote=0;
+    if(n>0 && WriteFile(logFile,line,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+}
+}  // namespace
+
 void Log(const char* format,...) noexcept {
     if(!logPath[0])return;
     char text[1000]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
-    // One handle kept open, appended to (each line one WriteFile: whole lines from any thread, and in the
-    // file even if the game dies next). Opening and closing the file per line, on the game thread, with
-    // the virus scanner looking at each close, was the hitch when a mission starts and logs hundreds of lines.
-    // The first lines may come from two threads at once: one handle is published, a second one opened in the
-    // race is closed again. No FILE_SHARE_DELETE: a log deleted while the game runs would take the rest unseen.
-    static HANDLE file=nullptr;
-    HANDLE h=file;
-    if(!h) {
-        h=CreateFileW(logPath,FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-        if(h==INVALID_HANDLE_VALUE)return;
-        if(HANDLE was=InterlockedCompareExchangePointer(&file,h,nullptr)){CloseHandle(h);h=was;}
-    }
     SYSTEMTIME t{};GetLocalTime(&t);
     char line[1100];
     const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
+    if(n<=0)return;
+    AcquireSRWLockExclusive(&logLock);
+    if(!logFile)logFile=OpenLog();
+    if(logFile && logSize+n>kLogMax)RotateLog();
     DWORD wrote=0;
-    if(n>0)WriteFile(h,line,static_cast<DWORD>(n),&wrote,nullptr);
+    if(logFile && WriteFile(logFile,line,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+    ReleaseSRWLockExclusive(&logLock);
 }
 
 void ReloadConfigIfChanged() noexcept {
@@ -246,7 +335,7 @@ Rider SeatRider(const unsigned char* seat) noexcept {
 namespace {
 constexpr ULONGLONG kPlayerHumanMs=2000;
 unsigned char* playerHuman=nullptr;
-const void* playerHumanCtrl=nullptr;
+ObjRef playerHumanRef;
 ULONGLONG playerHumanAt=0;
 
 unsigned char* HumanOf(unsigned char* object) noexcept {
@@ -262,7 +351,7 @@ void SeePlayer(const float* pos,std::int32_t team) noexcept {
     __try {
         auto object=const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(pos))-kPosition;
         if(auto human=HumanOf(object)) {
-            playerHuman=human;playerHumanCtrl=At<const void*>(human,kSelfCtrl);playerHumanAt=player.at;
+            playerHuman=human;playerHumanRef=ObjRef::Of(human);playerHumanAt=player.at;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
@@ -270,8 +359,7 @@ void SeePlayer(const float* pos,std::int32_t team) noexcept {
 unsigned char* PlayerHuman() noexcept {
     __try {
         if(!playerHuman || GameMs()-playerHumanAt>kPlayerHumanMs)return nullptr;
-        if(!Readable(playerHuman,kHumanVehicleCtrl+8) || At<const void*>(playerHuman,kSelfCtrl)!=playerHumanCtrl ||
-           !IsPlayer(playerHuman))return nullptr;
+        if(!Readable(playerHuman,kHumanVehicleCtrl+8) || !playerHumanRef.Is(playerHuman) || !IsPlayer(playerHuman))return nullptr;
         return playerHuman;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
@@ -285,21 +373,35 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
+    swprintf_s(logOldPath,L"%ls.1",logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(EDF6VC_VERSION_MAJOR,EDF6VC_VERSION_MINOR,EDF6VC_VERSION_PATCH,0);
     Log("EDF6VehicleCrew %s loading",EDF6VC_VERSION);
     iniStamp=IniStamp();
     LoadConfig();
     if(!IdentifyImage(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll");return false;}
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
-    InstallBody506();
-    Log("HELI profile=%d",CheckHeliProfile());
-    Log("GROUND profile=%d",CheckGroundProfile());
+    // Checks first, patching nothing: a refusal above, or a module found off here, leaves the game as it was.
+    const bool heli=CheckHeliProfile();
+    const bool ground=CheckGroundProfile();
+    Log("HELI profile=%d",heli);
+    Log("GROUND profile=%d",ground);
+    // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
+    // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
+    InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
+    if(heli) {
+        InstallDoorGuns();  // the 410's door guns are part of the heli pilot
+        InstallJets();      // the jets and the carrier are flown from HeliFrame: no heli pilot, none of them
+        InstallSub();
+    } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
+    InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallLaser();
     InstallHud();
-    InstallLoadout(iniPath);   // independent of the crew hooks
+    InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
+    InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
+    if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
     StartCallPicker();
-    return InstallCrew();   // never unload code a patched slot points at
+    return true;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {
