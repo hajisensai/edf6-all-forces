@@ -5,6 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "edf/layout.h"
+#include "edf/patch.h"
+#include "edf/seat.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -102,23 +105,20 @@ void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
 
 // --- EDF.dll layout ---
-// GameObject: weak-this at +0x28 (object) / +0x30 (control block, use count at +8)
-constexpr std::size_t kSelf=0x28,kSelfCtrl=0x30;
-// Vehicle
-constexpr std::size_t kMatrix=0x60,kPosition=0x90,kDead=0x2E8,kTeam=0x314;
+// The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):
+// GameObject weak-this +0x28 / +0x30, the vehicle's matrix, position, dead byte, team, seats, the seat's
+// rider weak_ptr, the human's pad / player flag, the dummy rider's vtable, At / Put.
+using edf::kSelf; using edf::kSelfCtrl; using edf::kMatrix; using edf::kPosition; using edf::kDead; using edf::kTeam;
+using edf::kSeats; using edf::kSeatCount; using edf::kSeatStride; using edf::kSeatRider; using edf::kSeatRiderCtrl;
+using edf::kHumanPad; using edf::kHumanPlayer; using edf::kDummyRiderVtable; using edf::kSlotInput;
+using edf::At; using edf::Put;
 // Teams (mission AsCommon.h): player 0, enemy 1, friend 2, neutral 3, vehicle 5 = nobody's vehicle,
 // which anyone may board (CanRideSeat skips the team test for it).
 constexpr std::int32_t kTeamVehicle=5;
-constexpr std::size_t kSeats=0x608,kSeatCount=0x618,kSeatStride=0x340;
-// Seat: rider object / its weak_ptr control block (occupied while the use count is non-zero)
-constexpr std::size_t kSeatRider=0x260,kSeatRiderCtrl=0x268;
-// Human: pad / player-controlled (the test 0x572EFF and 0x673AC2 make before reading a pad),
-// the vehicle it is in (weak_ptr object +0x1548, control block +0x1550)
-constexpr std::size_t kHumanPad=0x340,kHumanPlayer=0x354,kHumanVehicleCtrl=0x1550;
-// The rider RideAi (VehicleBase slot 50, 0x633030) seats: it drives through the vehicle AI
-constexpr unsigned kDummyRiderVtable=0x17D7320;
-// VehicleBase virtual slots
-constexpr std::size_t kSlotFindSeat=49,kSlotRideAi=50,kSlotInput=55;
+// Human: the vehicle it is in (weak_ptr object +0x1548, control block +0x1550)
+constexpr std::size_t kHumanVehicleCtrl=0x1550;
+// VehicleBase virtual slots (input: edf::kSlotInput)
+constexpr std::size_t kSlotFindSeat=49,kSlotRideAi=50;
 constexpr unsigned kFindSeat=0x633B80,kRideAi=0x633030;
 // Seat functions
 constexpr unsigned kCanRideSeat=0x6346D0;   // (vehicle, human, seat) -> bool: team, mask, free, in reach
@@ -129,13 +129,6 @@ constexpr unsigned kSeatKick=0x62E1A0;      // (vehicle, seat): get-off message,
 // The on-foot ride-prompt visitor (0x5735E7): {vtable, human, bool result}; slot 1 is called per object
 constexpr unsigned kPromptFunctorVtable=0x17D09B8,kPromptVisit=0x5725A0;
 constexpr std::size_t kFunctorHuman=0x8,kFunctorResult=0x10;
-
-template<class T> T At(const void* base,std::size_t offset) noexcept {
-    T value;std::memcpy(&value,static_cast<const unsigned char*>(base)+offset,sizeof(T));return value;
-}
-template<class T> void Put(void* base,std::size_t offset,T value) noexcept {
-    std::memcpy(static_cast<unsigned char*>(base)+offset,&value,sizeof(T));
-}
 
 // A game object as the plugin remembers it: its address and its weak-this control block (+0x30). A new
 // object at the same address (the next mission, a respawn) has another control block, so it is not taken
@@ -151,15 +144,14 @@ struct ObjRef {
 // The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
 void ReloadConfigIfChanged() noexcept;
-bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept;
-bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept;
+// The patch primitives and the seat test are common/'s (shared with EDF6AutoTurret).
+inline bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept { return edf::Matches(image,rva,bytes,size); }
+using edf::PatchVtableSlot;
 
-// What sits in a seat.
-enum class Rider { none, dummy, player, other };
-Rider SeatRider(const unsigned char* seat) noexcept;
-unsigned char* SeatAt(unsigned char* vehicle,unsigned index) noexcept;
-unsigned SeatCount(const unsigned char* vehicle) noexcept;
-bool IsPlayer(const unsigned char* human) noexcept;
+// What sits in a seat (common/seat.cpp).
+using Rider=edf::Rider;
+inline Rider SeatRider(const unsigned char* seat) noexcept { return edf::SeatRider(image,seat); }
+using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer;
 
 // The player as last seen (on foot through the prompt visitor, or riding through a vehicle input); `at` is
 // GameMs (0: never seen).

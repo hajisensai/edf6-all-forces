@@ -49,7 +49,7 @@ using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
 using RideAiFn=void(__fastcall*)(void*,bool);
 // Forwarded with all four register arguments: CarBase's input (slot 55) also reads r8 (its drive block)
 // and the 502's pre-update (slot 4) takes `this` alone.
-using InputFn=void(__fastcall*)(void*,std::uintptr_t,void*,void*);
+using InputFn=edf::VehicleInputFn;   // the slot 55 signature both plugins chain (common/edf/layout.h)
 using PromptFn=void(__fastcall*)(void*,void*);
 using CanRideSeatFn=bool(__fastcall*)(void*,void*,void*);
 using CanRideFn=bool(__fastcall*)(void*,void*);

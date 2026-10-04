@@ -17,6 +17,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "subcarrier.h"
+#include "edf/host.h"
 #include "version.h"
 
 namespace crew {
@@ -37,8 +38,7 @@ namespace {
 HMODULE module=nullptr;
 wchar_t logPath[MAX_PATH]{},logOldPath[MAX_PATH+2]{};
 wchar_t iniPath[MAX_PATH]{};
-FILETIME iniStamp{};
-ULONGLONG iniCheckedAt=0;
+edf::IniWatch ini;
 
 struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
 // The code the plugin calls or relies on; any mismatch and it stays off.
@@ -56,20 +56,6 @@ const Signature kSignatures[]={
     {0x62DD32,{0x48,0x8B,0x87,0x38,0x02,0x00,0x00,0x48,0x85,0xC0,0x74,0x06,0x83,0x78,0x08,0x00},16},   // same, prompt check
     {0x572EFF,{0x44,0x38,0xAE,0x54,0x03,0x00,0x00},7},                                                 // human+0x354 player
 };
-
-bool IdentifyImage(HMODULE handle) noexcept {
-    __try {
-        auto base=reinterpret_cast<unsigned char*>(handle);
-        if(!Readable(base,0x1000))return false;
-        auto dos=reinterpret_cast<IMAGE_DOS_HEADER*>(base);
-        if(dos->e_magic!=IMAGE_DOS_SIGNATURE || dos->e_lfanew<0 || dos->e_lfanew>0x800)return false;
-        auto pe=reinterpret_cast<IMAGE_NT_HEADERS64*>(base+dos->e_lfanew);
-        if(pe->Signature!=IMAGE_NT_SIGNATURE || pe->FileHeader.Machine!=IMAGE_FILE_MACHINE_AMD64
-           || pe->FileHeader.TimeDateStamp!=0x678CCB46 || pe->OptionalHeader.SizeOfImage!=0x22CE000)return false;
-        image=base;
-        return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){image=nullptr;return false;}
-}
 
 bool CheckProfile() noexcept {
     __try {
@@ -226,10 +212,6 @@ void LoadConfig() noexcept {
     if(fresh)published.store(fresh,std::memory_order_release);
 }
 
-FILETIME IniStamp() noexcept {
-    WIN32_FILE_ATTRIBUTE_DATA data{};
-    return GetFileAttributesExW(iniPath,GetFileExInfoStandard,&data) ? data.ftLastWriteTime : FILETIME{};
-}
 }  // namespace
 
 // The log: one handle kept open, appended to (each line one WriteFile: whole lines, and in the file even if
@@ -286,48 +268,7 @@ void Log(const char* format,...) noexcept {
 }
 
 void ReloadConfigIfChanged() noexcept {
-    const auto now=GetTickCount64();
-    if(now-iniCheckedAt<1000)return;
-    iniCheckedAt=now;
-    const auto stamp=IniStamp();
-    if(CompareFileTime(&stamp,&iniStamp)==0)return;
-    iniStamp=stamp;
-    LoadConfig();
-}
-
-bool Matches(std::size_t rva,const unsigned char* bytes,std::size_t size) noexcept {
-    return std::memcmp(image+rva,bytes,size)==0;
-}
-
-bool PatchVtableSlot(void** slot,void* expected,void* replacement) noexcept {
-    DWORD old=0;
-    if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))return false;
-    const bool ok=InterlockedCompareExchangePointer(slot,replacement,expected)==expected;
-    VirtualProtect(slot,sizeof(void*),old,&old);
-    return ok;
-}
-
-unsigned SeatCount(const unsigned char* vehicle) noexcept {
-    const auto n=At<std::uint64_t>(vehicle,kSeatCount);
-    const auto seats=At<const unsigned char*>(vehicle,kSeats);
-    return n>0 && n<=16 && Readable(seats,n*kSeatStride) ? static_cast<unsigned>(n) : 0;
-}
-
-unsigned char* SeatAt(unsigned char* vehicle,unsigned index) noexcept {
-    return At<unsigned char*>(vehicle,kSeats)+index*kSeatStride;
-}
-
-bool IsPlayer(const unsigned char* human) noexcept {
-    return Readable(human,kHumanPlayer+1) && human[kHumanPlayer] && At<const void*>(human,kHumanPad);
-}
-
-Rider SeatRider(const unsigned char* seat) noexcept {
-    const auto ctrl=At<const unsigned char*>(seat,kSeatRiderCtrl);
-    if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return Rider::none;
-    const auto rider=At<const unsigned char*>(seat,kSeatRider);
-    if(!Readable(rider,kHumanPlayer+1))return Rider::other;
-    if(At<const unsigned char*>(rider,0)==image+kDummyRiderVtable)return Rider::dummy;
-    return IsPlayer(rider) ? Rider::player : Rider::other;
+    if(ini.Changed())LoadConfig();
 }
 
 // The player's human. SeePlayer gets a position inside an object: the human's own (the on-foot ride prompt,
@@ -379,9 +320,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     swprintf_s(logOldPath,L"%ls.1",logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(EDF6VC_VERSION_MAJOR,EDF6VC_VERSION_MINOR,EDF6VC_VERSION_PATCH,0);
     Log("EDF6VehicleCrew %s loading",EDF6VC_VERSION);
-    iniStamp=IniStamp();
+    ini.Start(iniPath);
     LoadConfig();
-    if(!IdentifyImage(GetModuleHandleW(L"EDF.dll"))){Log("REFUSED: unsupported EDF.dll");return false;}
+    image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
+    if(!image){Log("REFUSED: unsupported EDF.dll");return false;}
     if(!CheckProfile()){Log("REFUSED: unexpected EDF.dll code");return false;}
     // Checks first, patching nothing: a refusal above, or a module found off here, leaves the game as it was.
     const bool heli=CheckHeliProfile();
