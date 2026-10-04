@@ -561,6 +561,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepPlayerJet,&PlayerJetFrame,v);
     Guarded(kStepSub,&SubStep,v);
     Guarded(kStepHeli,&HeliStep,v);
+    Guarded(kStepHeli,&HeliCueStep,v);
     Guarded(kStepGround,&GroundStep,v);
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepJetSound,&JetSound,v);

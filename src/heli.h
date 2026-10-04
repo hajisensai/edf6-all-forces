@@ -6,6 +6,11 @@
 
 namespace crew {
 bool IsHelicopter(const void* vehicle) noexcept;
+// The player's helicopter on the ground, for the cockpit's takeoff cue: its rotor speed and the rotor speed whose
+// lift holds it up (docs/aircraft-re.md: hover = g M / (60 L), 0.288 for the stock lift L 70, M 1).
+struct HeliCue { float rotor,hover; };
+void HeliCueStep(unsigned char* vehicle) noexcept;   // each vehicle's frame
+bool PlayerHeliCue(HeliCue* out) noexcept;           // the player's, as of the last frame; false: none on the ground
 // The plugin seated an NPC pilot: it flies this heli. False when its table is full of live helis (the heli is
 // then left to the stock game: it sits where it is).
 bool HeliCrewed(const void* vehicle) noexcept;

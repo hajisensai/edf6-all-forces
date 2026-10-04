@@ -87,7 +87,7 @@ struct Work { ObjRef ref; ULONGLONG seen; bool logged; Data d; };
 Work work[kEntries]{};
 // The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
 // waits in `middle` (its index, kFresh while the draw has not taken it).
-struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; };
+struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -579,6 +579,26 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     keys2.x=(width-keys2.w)*0.5f;keys2.y=y;
 }
 
+// The player's helicopter on the ground (HeliCue, the user 2026-10-05): its rotor spinning up to the speed whose lift
+// holds it, then 'LIFT OK: TAKE OFF' blinking: from there the collective lifts it off.
+void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliCue& c,Line* lines,int* at) noexcept {
+    if(*at>=kMaxLines || !(c.rotor>0.01f) || !(c.hover>0.0f))return;
+    Line& l=lines[(*at)++];
+    const bool ok=c.rotor>=c.hover;
+    const int pct=static_cast<int>(std::lround(100.0f*c.rotor/c.hover));
+    if(ok)Format(l,L"ROTOR %d%%    LIFT OK: TAKE OFF (ascend)",pct);
+    else Format(l,L"ROTOR %d%% of lift-off",pct);
+    l.scale=kTitleScale;
+    l.rgba=ok ? ((GetTickCount64()/125)%2==0 ? kGreen : kYellow) : kCyan;
+    l.w=l.h=0.0f;
+    if(text)MeasureAll(*text,&l,1);
+    const float pad=8.0f*s,h=(l.h>0.0f ? l.h : 24.0f*s)+2.0f*pad,w=(l.w>0.0f ? l.w : 360.0f*s)+2.0f*pad;
+    const float x0=(width-w)*0.5f,y0=height*0.80f-h;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,ok ? kGreen : kCyan);
+    l.x=(width-l.w)*0.5f;l.y=y0+pad;
+}
+
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.
 constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
 void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
@@ -691,6 +711,7 @@ void HudPublish() noexcept {
     std::memcpy(s.me,player.pos,sizeof(s.me));
     s.count=0;
     s.cockpit=PlayerJetHud(&s.jet);
+    s.heli=PlayerHeliCue(&s.heliCue);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -740,6 +761,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
         }
+        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
