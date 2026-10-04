@@ -1,9 +1,9 @@
 # EDF6 MDB0 模型格式 + RAB/MRAB 容器 + 运行时骨骼驱动
 
 目标：给 `bomber501` 喷气机做一版「舵面是独立骨骼」的模型，插件在运行时转这些骨骼。
-本文所有字段都对照游戏实物验证过（`tools/mdb.py verify`）。可信度标注：**[H]** 实物逐字节 / 反汇编直证；**[M]** 多个样本一致但没有直接看到引擎消费它；**[L]** 推测。
+本文所有字段都对照游戏实物验证过（`pylib/mdb.py verify`）。可信度标注：**[H]** 实物逐字节 / 反汇编直证；**[M]** 多个样本一致但没有直接看到引擎消费它；**[L]** 推测。
 
-- 工具：`tools/mdb.py`（读/写/dump/verify，CMPL 编解码，RAB 读写）、`tools/mdb_jet.py`（bomber501 舵面拆分）。
+- 工具：`pylib/mdb.py`（读/写/dump/verify，CMPL 编解码，RAB 读写）、`pylib/mdb_jet.py`（bomber501 舵面拆分）。
 - 产物：`build/jetmodel/`（`bomber501.mdb`、`bomber501.mrab`、`hinges.json`、`preview.png`）。**不写游戏目录。**
 - EDF.dll 版本：TimeDateStamp `0x678CCB46`；下面所有 RVA 都基于它（`tools/edfre.py` / `fnrefs.py` / `dump.py` 复核）。
 - 社区参考：KCreator 的 [EDF-MDB-Viewer](https://github.com/KCreator/EDF-MDB-Viewer)（`MDBParser.cpp`，为 EDF4.1 写）给出了头、名字表、骨骼、贴图、材质、object/mesh/layout 的大框架；
@@ -43,7 +43,7 @@ BOMBER501.MRAB 的目录：`TEXTURE`（`*.lod.dds` 低清贴图）、`MODEL`（`
 `CMPL` + `u32 大端 raw size` + Okumura LZSS（N=4096、F=18、阈值 2、窗口初始填 0x00 从 4078 开始，flag 字节 LSB 先）。
 **与社区 `CMPLCompress.cpp` / Okumura 原版的唯一差别：引用的两个字节是「位置高位在前」**：
 `b0 = pos >> 4`，`b1 = ((pos & 0xF) << 4) | (len − 3)`。
-`tools/mdb.py` 的 `cmpl_compress` 用 Okumura 二叉树匹配，对游戏里的流**逐字节复现**（bomber 的全部 lod dds、两个 mdb、v506_heli.mdb 已测）。
+`pylib/mdb.py` 的 `cmpl_compress` 用 Okumura 二叉树匹配，对游戏里的流**逐字节复现**（bomber 的全部 lod dds、两个 mdb、v506_heli.mdb 已测）。
 游戏也接受未压缩的成员（大量 HD 贴图就是裸存的）；新 mdb 仍按原样压缩以免踩到未知分支。
 
 ---
@@ -89,7 +89,7 @@ BOMBER501.MRAB 的目录：`TEXTURE`（`*.lod.dds` 低清贴图）、`MODEL`（`
 | +0xA0 | f32[4] | 包围盒半尺寸（w = 1） | M |
 | +0xB0 | f32[4] | 包围盒中心，**骨骼 bind 坐标系内**（w = 1） | M |
 
-inverse bind 的全量统计（738 个 mdb，`tools/mdb.py verify` + 分类脚本）：
+inverse bind 的全量统计（738 个 mdb，`pylib/mdb.py verify` + 分类脚本）：
 - 绝大多数骨骼满足 `inv_bind = inverse(local 链乘出的模型空间矩阵)`。
 - 不满足的 1239 根分四类：
   - 902 根是没有任何几何引用的定位骨骼（`aim_center`、导弹挂点等），inv_bind = 单位阵。
@@ -156,7 +156,7 @@ layout 项（0x10）：`i32 格式`、`i32 顶点内偏移`、`i32 channel`、`i
 - `e503_frog_armorfrog` 的顶点与索引两段的顺序也是自己的一套。
 - 加载器只按 mesh 头里的偏移找数据，这个顺序没有语义。
 
-`tools/mdb.py` 把读到的顺序记在 `Mdb.buffer_order` 里，写回时照用，以保证逐字节一致。新建模型留 `None`，即 object 顺序。
+`pylib/mdb.py` 把读到的顺序记在 `Mdb.buffer_order` 里，写回时照用，以保证逐字节一致。新建模型留 `None`，即 object 顺序。
 
 ### 2.8 两个参照样本
 
@@ -232,7 +232,7 @@ UpdateBone(inst, parentRec)                // 0x1100BD0 只更新 rec 的「后�
 
 ---
 
-## 4. bomber501 舵面拆分（`tools/mdb_jet.py`）
+## 4. bomber501 舵面拆分（`pylib/mdb_jet.py`）
 
 ### 4.1 先说结论：bomber501 **没有尾翼**
 
@@ -278,7 +278,7 @@ mesh 改为蒙皮：flags `00010100`，vsize 68 = 原 48 字节 + `BLENDWEIGHT` 
 - 用 bind 矩阵蒙皮还原出的每个顶点 = 原位置（< 1e-3）。
 - mrab 重读后成员列表不变，新 mdb 的 CMPL 解压等于原文。
 - 其余 11 个成员是原 stored 字节，原样拷贝。
-- `python tools/mdb.py verify build/jetmodel/bomber501.mrab` 返回 0 problems。
+- `python pylib/mdb.py verify build/jetmodel/bomber501.mrab` 返回 0 problems。
 
 ---
 
@@ -296,7 +296,7 @@ mesh 改为蒙皮：flags `00010100`，vsize 68 = 原 48 字节 + `BLENDWEIGHT` 
 
 ## 6. 全量验证
 
-`python tools/mdb.py verify` 遍历 Root.cpk `OBJECT/` 下全部 185 个 RAB/MRAB。对每个档案：
+`python pylib/mdb.py verify` 遍历 Root.cpk `OBJECT/` 下全部 185 个 RAB/MRAB。对每个档案：
 - 整包重建，与原文逐字节比较；
 - 每个 .mdb 解析后重写，逐字节比较；
 - 每个 .mdb 的 CMPL 流重编码，逐字节比较；
