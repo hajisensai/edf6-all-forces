@@ -177,6 +177,9 @@ struct PJet {
     bool hasAim;
     bool keys;                   // flown on the keyboard and mouse last frame
     bool mouseFlies;             // ...by the mouse's aim: it moved since a key was last pressed (Air)
+    int flier;                   // who flew it last frame: 0 the keys, 1 the mouse's aim, 2 a pad (FlightWatch)
+    float watchBank,watchHead;   // its bank and heading kWatchMs ago (FlightWatch), rad
+    ULONGLONG watchAt,watchLogAt;
     int store;                   // the store the secondary fires (an index into ReadStores' list)
     bool switchHeld;             // the switch key / LB down last frame
     Burden burden;               // what its stores weigh (BurdenOf)
@@ -520,6 +523,42 @@ void Roll(PJet& j,const unsigned char* v,const Stick& s,const float* dir,const f
     Across(j.up,dir);
 }
 
+// The flight's own record of who flies it and of its attitude jumping (the user, 2026-10-05: "flying, it reset my
+// direction again"; the 2 s air lines are too coarse to see it): every handover between the keys, the mouse's aim
+// and a pad is logged, and so is a bank or heading change of more than kWatchJump in kWatchMs, with the inputs then.
+constexpr ULONGLONG kWatchMs=200,kWatchLogMs=500;
+constexpr float kWatchJump=0.52f;   // rad (30 deg)
+constexpr float kWatchPi=3.14159265f;
+const char* const kFliers[]={"keys","mouse aim","pad"};
+
+float BankOf(const float* dir,const float* up) noexcept {
+    float level[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};
+    if(!Normalize(level))return 0.0f;
+    float right[3];Cross(dir,level,right);
+    return std::atan2(Dot(up,right),Dot(up,level));
+}
+
+void FlightWatch(PJet& j,const unsigned char* v,const Stick& s,const float* dir,int flier) noexcept {
+    const ULONGLONG ms=GameMs();
+    if(flier!=j.flier) {
+        Log("PJET v=%p flown by: %s -> %s (pitch %.2f roll %.2f mouse %.3f,%.3f)",v,kFliers[j.flier],kFliers[flier],s.pitch,s.roll,
+            s.aimX,s.aimY);
+        j.flier=flier;
+    }
+    const float bank=BankOf(dir,j.up),head=std::atan2(dir[0],dir[2]);
+    if(!j.watchAt){j.watchAt=ms;j.watchBank=bank;j.watchHead=head;return;}
+    if(ms-j.watchAt<kWatchMs)return;
+    const float db=std::remainder(bank-j.watchBank,2.0f*kWatchPi),dh=std::remainder(head-j.watchHead,2.0f*kWatchPi);
+    if((std::fabs(db)>kWatchJump || (std::fabs(dir[1])<0.9f && std::fabs(dh)>kWatchJump)) && ms-j.watchLogAt>kWatchLogMs) {
+        j.watchLogAt=ms;
+        Log("PJET v=%p attitude jump in %.0f ms: bank %.0f -> %.0f deg, heading %.0f -> %.0f deg, climb %.0f deg; flown by %s "
+            "(pitch %.2f roll %.2f mouse %.3f,%.3f keys %d)",v,static_cast<float>(ms-j.watchAt),j.watchBank*180.0f/kWatchPi,bank*180.0f/kWatchPi,
+            j.watchHead*180.0f/kWatchPi,head*180.0f/kWatchPi,std::asin(Clamp(dir[1],-1.0f,1.0f))*180.0f/kWatchPi,kFliers[flier],s.pitch,s.roll,s.aimX,
+            s.aimY,s.keys);
+    }
+    j.watchAt=ms;j.watchBank=bank;j.watchHead=head;
+}
+
 // The mouse's aim moved by this frame's mouse (see kAimPerUnit): its heading about the world's up, its elevation.
 void MoveAim(PJet& j,const Stick& s) noexcept {
     float flat[3]={j.aim[0],0.0f,j.aim[2]};
@@ -610,6 +649,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     WallTurn(pos,next);
     Across(j.up,next);   // carried along the new path
     if(!aiming){std::memcpy(j.aim,next,12);j.hasAim=s.keys;}
+    FlightWatch(j,v,s,next,!s.keys ? 2 : aiming ? 1 : 0);
     float bodyUp[3];std::memcpy(bodyUp,j.up,12);
     const float g=pitch/kG,top2=k.top*k.top;
     j.load=g;
