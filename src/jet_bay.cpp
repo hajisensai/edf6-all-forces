@@ -77,6 +77,12 @@ bool chargeReady[kChargeCount]{};         // preloaded this mission (PreloadShel
 // m over the impact the charge starts, straight down (make_jets.py IMPACT_*: 10 m a frame for 6 frames, bursting on
 // what it meets: the ground under the impact, or the enemy rammed in the air)
 constexpr float kImpactDrop=2.0f;
+// The drill tank's charge (DrillCharge, drill.cpp): tools/make_drill.py's EDF6VC_DRILL_CHARGE.SGO, the impact charges'
+// recipe with a small blast (pylib/vcobjects.py DRILL_CHARGE: 4 m, at least the 3 m from which a blast breaks buildings,
+// docs/drill-re.md §3) and a short flight (from the drill's base along its axis, it meets what the drill touches).
+const wchar_t kDrillChargeSgo[]=L"app:/object/edf6vc_drill_charge.sgo";
+const wchar_t kDrillChargeFile[]=L"EDF6VC_DRILL_CHARGE.SGO";
+bool drillReady=false;                    // preloaded this mission (PreloadShells)
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
@@ -247,12 +253,16 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         chargeReady[i]=shellsOk && ModFileThere(kCharges[i].file);
         if(chargeReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCharges[i].sgo,2,-1);
     }
-    Log("JET preload gunship shells=%d impact charges %d/%d/%d/%d",gunshipReady,chargeReady[0],chargeReady[1],chargeReady[2],chargeReady[3]);
+    drillReady=shellsOk && ModFileThere(kDrillChargeFile);
+    if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
+    Log("JET preload gunship shells=%d impact charges %d/%d/%d/%d drill charge %d",gunshipReady,chargeReady[0],chargeReady[1],chargeReady[2],
+        chargeReady[3],drillReady);
 }
 
 void ResetShells() noexcept {
     gunshipReady=false;
     for(auto& c:chargeReady)c=false;
+    drillReady=false;
 }
 }  // namespace jet
 
@@ -320,5 +330,17 @@ bool ImpactDamage(const unsigned char* by,const float* at,float damage,float rad
     if(fired && Cfg().debug)Log("JET impact by %p at (%.0f,%.0f,%.0f): %.0f damage, %.0f m charge (asked %.0f m)",by,at[0],at[1],at[2],damage,
                               kCharges[c].radius,radius);
     return fired;
+}
+// A bite of the drill tank's drill (drill.cpp): the drill charge fired by `by` straight from `from` (the drill's base)
+// at `at` (what it touches) with `damage`; its team's enemies hurt, its kills, the map's buildings and rocks too.
+bool DrillCharge(const unsigned char* by,const float* from,const float* at,float damage) noexcept {
+    if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
+    if(!drillReady) {
+        static ULONGLONG loggedAt=0;
+        const ULONGLONG now=GetTickCount64();
+        if(now-loggedAt>10000){loggedAt=now;Log("DRILL no drill charge preloaded this mission (python tools/make_drill.py)");}
+        return false;
+    }
+    return Shell(kDrillChargeSgo,drillReady,by,from,at,damage,true,"drill charge");
 }
 }  // namespace crew

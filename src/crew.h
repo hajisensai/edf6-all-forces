@@ -81,6 +81,12 @@ struct Config {
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
+    float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
+    float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
+    float drillSpinDownSec=2.5f;    // ...seconds from the top RPM to still, let go
+    float drillDamage=2000.0f;      // ...damage a second to an enemy it touches, at the top RPM (less in proportion)
+    float drillBreak=600.0f;        // ...HP a second off a building or rock it bores into, at the top RPM
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
@@ -300,6 +306,20 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // pla
 // of its side within `radius` metres (a charge of the vehicle's own, as the blast drones' is: its team, its
 // kills, friends untouched). False when it could not be dealt (no charge preloaded this mission).
 bool ImpactDamage(const unsigned char* by,const float* at,float damage,float radius) noexcept;
+// jet_bay.cpp: a bite of the drill tank's drill: its charge fired by `by` straight from `from` at `at` with `damage`
+// (its side's enemies, its kills, the map's buildings and rocks). False when not fired (not preloaded this mission).
+bool DrillCharge(const unsigned char* by,const float* from,const float* at,float damage) noexcept;
+
+// drill.cpp: the drill tank (EDF6VC_DRILL.SGO, docs/drill-re.md). DrillInput before the stock input (the player's
+// trigger taken for the drill), DrillFrame after it (spin, pose, bites).
+bool InstallDrill() noexcept;
+bool IsDrillTank(const void* vehicle) noexcept;
+void DrillInput(unsigned char* vehicle) noexcept;
+void DrillFrame(unsigned char* vehicle) noexcept;
+void ResetDrills() noexcept;
+// The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
+struct DrillCue { float rpm,maxRpm; bool touching; };
+bool PlayerDrillCue(DrillCue* out) noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;

@@ -28,7 +28,7 @@ PLUGINS = os.path.join(ROOT, 'build', 'Mods', 'Plugins')
 EXE_NAME = 'EDF6VehicleCrew安装器'
 OUT = os.path.join(ROOT, 'release')
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
-RELEASE_MODELS = ('twin_tank',)     # pylib/artillery_model.py MODEL
+RELEASE_MODELS = ('twin_tank', 'drill_tank')     # pylib/artillery_model.py MODEL, drill_model.MODEL_SUBDIR
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -83,7 +83,7 @@ def build_exe() -> str:
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange')):
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'graft_pure', 'primer_fighter_model', 'calls',
-                'obj_model', 'texfile',
+                'obj_model', 'texfile', 'make_drill', 'drill_model',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'weapons'):
         cmd += ['--hidden-import', mod]
     for mod in ('PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these (numpy: the big map's seams need it)

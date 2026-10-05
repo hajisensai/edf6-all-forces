@@ -331,8 +331,30 @@ def hand_copies_agree() -> None:
     files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
-    written = {n.split('/', 1)[1] for n in make_jets.names()}
+    written = {n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE}   # the drill's: tools/make_drill.py
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
+
+
+@test
+def drill_copies_agree() -> None:
+    """src/drill.cpp's drill (bone name, length, base radius) is pylib/drill_model.py's, src/jet_bay.cpp's drill charge
+    is the one tools/make_drill.py writes (pylib/vcobjects.py DRILL_CHARGE_FILE), its blast breaks buildings (>= 3 m),
+    the drill tank's request is a ground vehicle request of tools/make_drill.py's vehicle, and the model turns the OBJ
+    without mirroring it."""
+    import drill_model
+    import make_drill
+    d = src('src/drill.cpp')
+    assert f'kDrillBone[]=L"{drill_model.DRILL_BONE}"' in d, 'src/drill.cpp kDrillBone'
+    m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
+    assert m and (float(m.group(1)), float(m.group(2))) == (drill_model.DRILL_LENGTH, drill_model.DRILL_RADIUS), m and m.groups()
+    bay = src('src/jet_bay.cpp')
+    assert f'kDrillChargeFile[]=L"{vc.DRILL_CHARGE_FILE}"' in bay, 'src/jet_bay.cpp kDrillChargeFile'
+    assert f'kDrillChargeSgo[]=L"app:/object/{vc.DRILL_CHARGE_FILE.lower()}"' in bay, 'src/jet_bay.cpp kDrillChargeSgo'
+    assert vc.DRILL_CHARGE_RADIUS >= 3.0, 'a drill charge under 3 m breaks no building (docs/drill-re.md §3)'
+    drills = [c for c in calls.CALLS if c.ground == 'drill']
+    assert len(drills) == 1 and drills[0].vehicle == make_drill.VEHICLE.sgo and drills[0].mark == 0
+    assert make_drill.OWNER in ledger.OWNERS and make_drill.VEHICLE.tool == 'make_drill'
+    assert not drill_model.CONVERSION.mirrors() and drill_model.CONVERSION.point((1.0, 0.0, 0.0))[2] > 0, 'OBJ +X is forward'
 
 
 @test

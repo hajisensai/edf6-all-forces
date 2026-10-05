@@ -293,7 +293,19 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                                ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
                                ('app:/weapon/edf6vc_howitzer_l.sgo', 'app:/weapon/edf6vc_howitzer_r.sgo'), 600.0,
                                'make_artillery'),
+    # The drill tank (tools/make_drill.py, src/drill.cpp): the Blacker's class (Vehicle505_Tank, tracks, one weapon
+    # holder) in EDF: Iron Rain's drill tank, requested like the Blacker E series; its one weapon fires nothing (the
+    # drill is the plugin's: it spins it and bites with DRILL_CHARGE_FILE).
+    'drill': GroundVehicle('EDF6VC_DRILL', 'V505_TANK', 'EWEAPON418',
+                           ('EWEAPON418', 'EWEAPON421', 'EWEAPON425', 'EWEAPON428', 'EWEAPON433'),
+                           ('app:/weapon/edf6vc_drill_bit.sgo',), 1400.0, 'make_drill'),
 }
+# The drill tank's bite (src/jet_bay.cpp kDrillChargeFile, DrillCharge): an impact charge (tools/make_jets.py
+# impact_charge) with a blast of DRILL_CHARGE_RADIUS m (3 m or more: the stock path that lets a blast break buildings,
+# docs/drill-re.md §3), DRILL_CHARGE_SPEED m a frame for DRILL_CHARGE_LIFE frames: from the drill's base it reaches
+# what the drill touches (an enemy's lock point within ~6 m) and bursts there; meeting nothing it is gone without a burst.
+DRILL_CHARGE_FILE = 'EDF6VC_DRILL_CHARGE.SGO'
+DRILL_CHARGE_RADIUS, DRILL_CHARGE_SPEED, DRILL_CHARGE_LIFE = 4.0, 2.5, 4
 JET_SILENT_SE = 'EDF6VC_SILENT'
 JET_ROTOR_SE_ROWS = (0, 1)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).

@@ -130,6 +130,11 @@ void Validate(Config& n) noexcept {
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
+    Fix("DrillMaxRpm",n.drillMaxRpm,30.0f,1200.0f);
+    Fix("DrillSpinUpSec",n.drillSpinUpSec,0.2f,10.0f);
+    Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
+    Fix("DrillDamage",n.drillDamage,0.0f,1.0e6f);
+    Fix("DrillBreak",n.drillBreak,0.0f,1.0e6f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -213,6 +218,12 @@ void LoadConfig() noexcept {
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.drill=ReadBool(L"Drill",n.drill);
+    n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
+    n.drillSpinUpSec=ReadFloat(L"DrillSpinUpSec",n.drillSpinUpSec);
+    n.drillSpinDownSec=ReadFloat(L"DrillSpinDownSec",n.drillSpinDownSec);
+    n.drillDamage=ReadFloat(L"DrillDamage",n.drillDamage);
+    n.drillBreak=ReadFloat(L"DrillBreak",n.drillBreak);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     Validate(n);
     IgnoreRetired();
@@ -231,6 +242,8 @@ void LoadConfig() noexcept {
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
+    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s",n.drill,n.drillMaxRpm,n.drillSpinUpSec,
+        n.drillSpinDownSec,n.drillDamage,n.drillBreak);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
@@ -414,6 +427,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
+    InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD

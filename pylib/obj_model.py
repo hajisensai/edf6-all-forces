@@ -120,7 +120,8 @@ def model_roots() -> list[str]:
     """Where user-supplied models are looked for, in order: $EDF6VC_MODELS; `models` next to the installer (the
     frozen exe's folder in a release, the repository root otherwise: tools/build_release.py bundles it there);
     the developer's folder."""
-    here = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else         os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+    here = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else \
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
     roots = [os.environ.get('EDF6VC_MODELS', ''), os.path.join(here, 'models'), DEV_MODELS]
     return [os.path.normpath(r) for r in roots if r]
 
