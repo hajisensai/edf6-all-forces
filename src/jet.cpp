@@ -552,6 +552,20 @@ void jet::ResumeNpc(unsigned char* v,const float* vel) noexcept {
     Publish(true);
 }
 
+// One of ours the player boarded that has no entry: a mission placed it empty (testrange/gen.py plan.vehicles), so no
+// NPC pilot ever sat in it and JetFrame never made one (CrewPlaced runs on its pilot's first frame). What the player's
+// flight reads off the entry was missing: a rotor craft's hover (playerjet_board.inc HoverStep: no entry, it never
+// lifted), a carrier's drones (DronesLeft 0), and a jet left in the air came back to an NPC in takeoff mode at 200 m/s.
+// Made now as a placed jet's (its fuel clock stands while the player holds it: ResumeNpc). nullptr: not one of our jets,
+// JetPilot off (Sweep would delete it at once), kMaxJets.
+jet::Jet* jet::Adopt(unsigned char* v) noexcept {
+    if(Jet* j=FindJet(v))return j;
+    if(!HooksOk() || !Cfg().jetPilot)return nullptr;
+    Jet* const j=CrewPlaced(v,reinterpret_cast<const float*>(v+kPosition),GameMs());
+    if(j)Log("JET v=%p: its entry made for the player who boarded it empty",v);
+    return j;
+}
+
 // A new mission (mission.cpp MissionStart): every entry, doll and learned wall of the last one is forgotten.
 // Its objects are not touched (their bays' destructors, their Delete): they went with that mission. The weak
 // reference each entry holds is dropped: it is what kept the control block alive (HoldRef), so the block is

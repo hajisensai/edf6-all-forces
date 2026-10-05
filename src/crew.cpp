@@ -471,7 +471,9 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(!st.emptySince)st.emptySince=now;
     // A heli no player has ridden yet stays where it stands for them (the user, 2026-10-05: the range's parked helis
     // "all took off by themselves, I could not get in": crewed 9 s in, a heli lifts off at once, where a crewed tank
-    // stays to be bumped). One a player has ridden and left is crewed as before (it follows them).
+    // stays to be bumped). One a player has ridden and left is crewed as before (it follows them). The plugin's aircraft
+    // are 506 bodies (IsHelicopter by the vtable): one a mission placed empty waits too (the user, 2026-10-05: the
+    // range's air carrier, there an NPC-flown friend, "flew straight off"; testrange/gen.py now parks them empty).
     if(IsHelicopter(vehicle) && !st.playerAt)return;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
