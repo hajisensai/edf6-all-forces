@@ -13,6 +13,10 @@
 //    HP to kWreckHpShare of its max, and it tumbles straight at the mark (no homing); on the mark, the ground, a
 //    wall or after kWreckMaxMs its charge (weapon 2, a point charge on the enemy's team) goes off and it is gone
 //    (Blast). Shot again on the way, it goes down as the stock 506 does: no blast.
+// Its team (docs/swarm-team-re.md): a vehicle's team is its riders' (the vehicle update 0x630250 sets it from its
+// seats every frame, 5 with none), and RideAi's dummy pilot is made a friend (team 2, 0x6331CC) whatever the vehicle
+// was. So the pilot goes to the enemy's team (unregistered, as RideAi left it), then the vehicle (SwarmTeam), when
+// it is made and every frame after: its rounds and its charge take the vehicle's team (weapon +0x214, 0x630421).
 // Only the local player is aimed at (player.pos). Game thread, under the input hook's guard.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
@@ -20,7 +24,7 @@
 namespace crew {
 namespace jet {
 namespace {
-constexpr std::size_t kHpFloor=0x2F0;
+constexpr std::size_t kHpFloor=0x2F0,kOwnTeam=0x318;
 constexpr float kFloorHp=1.0f;
 constexpr float kWreckHpShare=0.04f;    // a wreck's HP: one more hit brings it down
 // Drones: at most kMaxUnits (SwarmUnits), kSpawnPerFrame a frame, once the core is kSpawnClear over the ground
@@ -98,11 +102,15 @@ Jet* CoreOf(const Jet& j) noexcept {
     return nullptr;
 }
 
+bool OnEnemySide(const unsigned char* o) noexcept {
+    return At<std::int32_t>(o,kTeam)==kTeamEnemy && At<std::int32_t>(o,kOwnTeam)==kTeamEnemy;
+}
+
 // Its HP times SwarmHpScale (max and current), the floor set, its team the enemy's, and a flight: once, on its
 // first frame. A core gets a flight of its own (its drones join it), and its orbit starts where it is.
 void Init(Jet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     j.swarm.init=true;
-    SetObjectTeam(v,kTeamEnemy);
+    SwarmTeam(v);
     const float scale=Cfg().swarmHpScale,max=At<float>(v,kHpMax)*scale;
     if(max>kFloorHp*2.0f){Put<float>(v,kHpMax,max);Put<float>(v,kHp,max);}
     Put<float>(v,kHpFloor,kFloorHp);
@@ -146,6 +154,7 @@ void Spawn(Jet& c,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept
             Log("SWARM core %p: drone %d not made: no more",v,s);
             return;
         }
+        SwarmTeam(u);   // an enemy from its first frame on (SpawnJet's RideAi seated a friend)
         d->swarm.core=c.ref.ctrl;d->swarm.slot=s;
         std::memcpy(d->anchor,at,12);
         std::memcpy(d->m.vel,c.m.vel,12);
@@ -300,6 +309,16 @@ void WreckFly(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
 }
 }  // namespace
 
+void SwarmTeam(unsigned char* v) noexcept {
+    for(unsigned i=0;i<SeatCount(v);++i) {
+        unsigned char* const seat=SeatAt(v,i);
+        if(SeatRider(seat)!=Rider::dummy)continue;
+        const auto rider=At<unsigned char*>(seat,kSeatRider);
+        if(rider && !OnEnemySide(rider))reinterpret_cast<SetTeamFn>(image+kSetTeam)(rider,kTeamEnemy,false);
+    }
+    if(!OnEnemySide(v))SetObjectTeam(v,kTeamEnemy);
+}
+
 void SwarmFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
     if(!Cfg().swarm) {
         if(!j.reap){j.reap=true;j.why="Swarm off";}
@@ -307,6 +326,7 @@ void SwarmFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) 
         return;
     }
     if(!j.swarm.init)Init(j,v,pos,ms);
+    else SwarmTeam(v);
     j.m.ready=true;
     if(j.swarm.wreck){WreckFly(j,v,pos,dt,ms);return;}
     // Shot down to its floor (or the floor lost: whatever set it, it is set again).

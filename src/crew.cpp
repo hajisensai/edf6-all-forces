@@ -358,7 +358,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
             At<std::int32_t>(vehicle,kTeam),player.team,riders,p[0],p[1],p[2],player.at ? std::sqrt(Distance2(vehicle,player.pos)) : -1.0f);
     }
     if(anyPlayer){st.playerAt=now;st.emptySince=0;return;}
-    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle)){st.emptySince=0;return;}   // a player jet waits for the player
+    // A player jet waits for the player; a Primer swarm body (an enemy) that lost its pilot gets no friend.
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || IsSwarmVehicle(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).

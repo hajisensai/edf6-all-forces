@@ -499,6 +499,8 @@ void ResetFlights() noexcept;
 // --- jet_swarm.cpp ---
 constexpr std::int32_t kTeamEnemy=1;
 inline bool IsSwarm(const Jet& j) noexcept { return j.role==Role::swarmCore || j.role==Role::swarmUnit; }
+// Its dummy pilot and then itself on the enemy's team (a vehicle's team is its riders': jet_swarm.cpp's head).
+void SwarmTeam(unsigned char* v) noexcept;
 // A swarm core's or drone's frame (from JetFrame, which has set the stock input aside and the clock).
 void SwarmFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept;
 

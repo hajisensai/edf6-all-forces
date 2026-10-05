@@ -182,6 +182,7 @@ void ResetPlayer() noexcept;
 
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
+bool IsSwarmVehicle(const void* vehicle) noexcept; // ...the Primer swarm's (an enemy: jet_swarm.cpp)
 bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a wingman in the way (no pass-through)
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update

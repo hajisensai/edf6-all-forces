@@ -55,5 +55,8 @@ CreateFriend("点名", "app:/object/edf6vc_swarm_core.sgo", 1.0, false);
 ## 6. 风险与验证
 
 - 敌方队伍的 506 + RideAi 假驾驶员开火时子弹的队伍归属、敌人计数、玩家能否锁定：静态逆向见 `docs/swarm-team-re.md`。
+  结论：载具队伍每帧按乘员重算（0x630250），RideAi 的假驾驶员写死 team 2（0x6331CC），所以 `SwarmTeam` 把驾驶员改到 1
+  （reg=false）再改载具，生成时和每帧（含引爆那几帧）都做；子弹 / 炸药队伍取载具的（weapon +0x214）。
+  失去驾驶员的合体机队伍变 5，crew.cpp 的 autoCrew 不给它派友军驾驶员。
 - 游戏在用户手里运行，本轮只做构建、静态核对和离线生成（`python tools/make_jets.py` 的 build 不写游戏目录的部分）；
   实机清单见 README「批量实测清单」新增行。
