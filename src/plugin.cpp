@@ -105,6 +105,7 @@ void Validate(Config& n) noexcept {
     // heli.cpp Tune rewrites the speed only with a time constant of at least half a second (30 frames).
     Fix("HeliSpeed",n.heliSpeed,0.0f,200.0f);
     Fix("HeliAgility",n.heliAgility,0.5f,60.0f);
+    Fix("PlayerHeliStopSec",n.playerHeliStopSec,0.0f,10.0f);
     Fix("HeliYawRate",n.heliYawRate,0.0f,360.0f);
     Fix("HeliGuardRadius",n.heliGuardRadius,0.0f,1000.0f);
     Fix("HeliGuardSpeed",n.heliGuardSpeed,1.0f,100.0f);
@@ -177,6 +178,7 @@ void LoadConfig() noexcept {
     n.heliLandMs=FixInt("HeliLandMs",ReadInt(L"HeliLandMs",n.heliLandMs),0,3600000);
     n.heliSpeed=ReadFloat(L"HeliSpeed",n.heliSpeed);
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
+    n.playerHeliStopSec=ReadFloat(L"PlayerHeliStopSec",n.playerHeliStopSec);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
     n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
@@ -242,6 +244,7 @@ void LoadConfig() noexcept {
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.1f missile=%d/%lums landMs=%lu",
         n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
+    Log("CONFIG playerHeliStopSec=%.2f",n.playerHeliStopSec);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
