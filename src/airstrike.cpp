@@ -174,12 +174,14 @@ void CheckCallTable() noexcept {
     else Log("CALLS all %d rows in the weapon table, their files there",kCallRowCount);
 }
 
-// The call weapon `ifc` is in, or nullptr (a stock call): what it brings is the picked call, if any.
+// The call weapon `ifc` is in, or nullptr (a stock call): what it brings is the picked call, if any. Online every
+// machine makes the aircraft of every player's call (crew.h InSession): the pick is this machine's alone, so there
+// each call weapon brings its own.
 const Call* CallOf(const void* ifc) noexcept {
     const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
     if(!Readable(w+kWeaponHitSize,4))return nullptr;
     const float mark=At<float>(w,kWeaponHitSize);
-    const int p=picked.load();
+    const int p=InSession() ? -1 : picked.load();
     for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return p>=0 ? &kCalls[p] : &c;
     return nullptr;
 }
@@ -259,7 +261,11 @@ void __fastcall RadioBomberHook(unsigned char* plane,const float* target,const v
 void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                   float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(Cfg().enabled && Cfg().jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
+    if(!Cfg().enabled || !Cfg().jetMissionStrike)return;
+    // Online the mission's bombers are the host's alone: a jet there that the guests do not make parts the
+    // machines' objects (crew.h InSession). They fly stock.
+    if(InSession()){Log("AIRSTRIKE mission bomber %p: online, it flies stock",plane);return;}
+    TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
 }
 
 // BombingPlane slot 5 (update), for a held plane: hidden and left as it is while its jet holds it, then
@@ -366,6 +372,11 @@ bool Redirect(unsigned site,const unsigned char* sig,std::size_t size,void* hook
 
 // One step through "each its own" and kCalls; `out` gets the banner text.
 void CallPick(int step,wchar_t* out,std::size_t size) noexcept {
+    if(InSession()) {   // CallOf ignores the pick online: say so instead of showing a pick that does nothing
+        swprintf_s(out,size,L"空袭呼叫：联机时按各武器原样（各台机器要一致）");
+        Log("CALLS pick ignored: online");
+        return;
+    }
     const int n=kCallCount+1;
     const int p=((picked.load()+1+step)%n+n)%n-1;
     picked.store(p);
