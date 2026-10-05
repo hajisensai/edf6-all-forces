@@ -21,6 +21,8 @@
 //    empty, its call resumed: it takes off); a pilot seat found empty under them gets the stock RideAi (EnsurePilot).
 //  - Leaving the gun (GunnerLeft): over kEjectFrom the parachute (EjectStart, no catch); the gunship goes on with its call
 //    under its NPC pilot, on its pilot's team again.
+//  - Moving between the two seats aboard (seatswitch.cpp, the seat key: to the gun at any time, to the stick where it may be
+//    boarded) is no leaving: no parachute, no ejection (AboardElsewhere); the NPC in the seat taken changes places.
 constexpr ULONGLONG kGunnerCentreMs=30000;   // the pylon turn stays round the point last shelled this long
 constexpr std::size_t kSeatFire=0x2E4;       // the seat's primary trigger (docs/heli-input-re.md §3: >= kSeatFireOn fires)
 constexpr float kSeatFireOn=0.8f;
@@ -152,6 +154,8 @@ void GunnerFrame(unsigned char* v) noexcept {
     if(!Cfg().playerJetAll || !GunshipSeats(v))return;
     const bool mine=gunner.ref.Is(v);
     const bool aboard=!v[kDead] && SeatRider(SeatAt(v,kGunnerSeat))==Rider::player;
+    // Moved to the stick (seatswitch.cpp): not out of the gunship, no parachute; the pilot's path (Fly: Board) takes it.
+    if(mine && !aboard && !v[kDead] && AboardElsewhere(v,kGunnerSeat)){Log("GUNNER v=%p the player moved to another seat",v);gunner=Gunner{};return;}
     if(mine && !aboard){GunnerLeft(true,v[kDead] ? "the gunship destroyed" : "got out");return;}
     if(!aboard)return;
     if(!mine)GunnerBoarded(v);

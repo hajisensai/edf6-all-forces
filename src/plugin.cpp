@@ -149,6 +149,8 @@ void Validate(Config& n) noexcept {
     Fix("HighCamHeight",n.highCamHeight,10.0f,200.0f);
     Fix("HighCamBack",n.highCamBack,0.0f,200.0f);
     Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
+    n.seatNextKey=static_cast<int>(FixInt("SeatNextKey",n.seatNextKey,0,254));
+    n.seatButton=static_cast<int>(FixInt("SeatButton",n.seatButton,0,255));
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -268,6 +270,13 @@ void LoadConfig() noexcept {
     n.highCamBack=ReadFloat(L"HighCamBack",n.highCamBack);
     n.highCamPitch=ReadFloat(L"HighCamPitch",n.highCamPitch);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
+    n.stockHeliStores=ReadBool(L"StockHeliStores",n.stockHeliStores);
+    n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
+    n.seatNextKey=ReadInt(L"SeatNextKey",static_cast<DWORD>(n.seatNextKey));
+    n.seatNumberKeys=ReadBool(L"SeatNumberKeys",n.seatNumberKeys);
+    n.seatButton=ReadInt(L"SeatButton",static_cast<DWORD>(n.seatButton));
+    n.seatPilot=ReadBool(L"SeatPilot",n.seatPilot);
+    n.seatSwitchOnline=ReadBool(L"SeatSwitchOnline",n.seatSwitchOnline);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -295,6 +304,8 @@ void LoadConfig() noexcept {
         n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
+    Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d",n.stockHeliStores,n.seatSwitch,
+        n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
@@ -488,6 +499,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallJetSound();
     InstallMissiles();
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
+    InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

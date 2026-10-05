@@ -18,6 +18,10 @@ What install does, with EDF6.exe closed:
      everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack to play with
      others). The test range's forced loadout is never written: everyone picks their own class.
 
+With StockHeliStores=1 in the player's ini (off by default) install also gives the stock 506-class helicopters'
+requests the jets' rocket pod and Hellfires (tools/make_stock_stores.py); with it 0 it takes back what an earlier install
+gave them.
+
 Uninstall removes the plugin and, when asked, the call weapons (their rows become placeholders that keep the
 row numbers saves use) and the generated objects no other tool still needs.
 
@@ -149,6 +153,17 @@ def merge_ini(user: str, shipped: str) -> tuple[str, list[str], list[str]]:
     return nl.join(merged) + nl, added, gone
 
 
+def player_ini_text(game: str, shipped_ini: bytes) -> str:
+    """The ini the plugin will read after this install: the player's own (kept by install_plugin), else the shipped one."""
+    path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
+    raw = shipped_ini
+    if os.path.isfile(path):
+        with open(path, 'rb') as f:
+            raw = f.read()
+    raw = raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw
+    return raw.decode('utf-8', errors='replace')
+
+
 def install_plugin(game: str, dll: bytes, shipped_ini: bytes) -> None:
     dst = os.path.join(game, 'Mods', 'Plugins')
     modfiles.atomic_write(os.path.join(dst, PLUGIN + '.dll'), dll)
@@ -250,9 +265,11 @@ def install(game: str) -> None:
     import make_chute
     import make_jets
     import make_katyusha
+    import make_stock_stores
     import make_sub
     check_loader(game)
     dll, ini = plugin_files()
+    stock_stores = make_stock_stores.wanted(player_ini_text(game, ini))
     if call_weapons.recover(game):
         print('上次运行没有完成：已把武器表相关文件恢复到那次运行之前。')
     print('检查武器表并生成呼叫武器（只读 Root.cpk 与现有武器表）……')
@@ -272,12 +289,25 @@ def install(game: str) -> None:
     chute = make_chute.build(game)
     print('生成钻头战车（读取 Root.cpk 和钻头战车模型，不修改它们）……')
     drill = make_drill.build(game)
+    stock = None
+    if stock_stores:
+        print('给原版直升机的请求加上火箭巢和地狱火导弹（ini StockHeliStores=1；读取 Root.cpk，不修改它）……')
+        stock = make_stock_stores.build(game)
     print('生成大地图（测试场平原拼成 3 x 3，无缝；读取 Root.cpk，不修改它，约需一两分钟）……')
     bigmap = make_bigmap.build(game)
     print('\n全部生成完毕，开始写入。')
     for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery) + \
             make_chute.install(game, chute) + make_drill.install(game, drill):
         print('写入', path)
+    if stock is not None:   # after make_jets: the stores' weapon files are its
+        files, skipped = stock
+        for path in make_stock_stores.install(game, files):
+            print('写入', path)
+        for rel in skipped:
+            print('跳过（别的 mod 已经放了自己的请求文件，保持原样）', rel)
+    else:
+        for path in make_stock_stores.remove(game)[0]:
+            print('删除（StockHeliStores=0：原版直升机的请求恢复原样）', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
     install_plugin(game, dll, ini)
@@ -297,6 +327,7 @@ def uninstall(game: str) -> None:
     import make_chute
     import make_jets
     import make_katyusha
+    import make_stock_stores
     import make_sub
     print('卸载会删掉插件。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
     print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
@@ -308,7 +339,8 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
-        for remove in (make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, make_sub.remove, make_jets.remove):
+        for remove in (make_stock_stores.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
+                       make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
                 print('删除', path)

@@ -93,7 +93,8 @@ Work work[kEntries]{};
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
-                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud; };
+                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
+                  bool seats; SeatPrompt seatPrompt; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -536,6 +537,34 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
     l.scale=kLineScale*0.85f;l.rgba=on ? kGreen : kWhite;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
     l.x=(width-l.w)*0.5f;l.y=height*0.86f+2.0f*s;
+}
+
+// The seats of the vehicle the player sits in (seatswitch.cpp, the user 2026-10-06): a line low on the screen, each seat's
+// number, what it is and who holds it, the player's in brackets, the keys that move them; amber a moment after a refused
+// press (the seat named taken, or no free seat), grey online with SeatSwitchOnline off.
+void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
+    if(*at>=kMaxLines || p.seats<2)return;
+    Line& l=lines[(*at)++];
+    Format(l,L"SEATS");
+    static const wchar_t* const kHolder[]={L"-",L"YOU",L"NPC",L"TAKEN"};
+    for(int i=0;i<p.seats && i<kMostSeatsShown;++i) {
+        const wchar_t* const what=i==0 ? (p.aircraft ? L"PILOT" : L"DRIVER") : p.gun[i] ? L"GUN" : L"SEAT";
+        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,what,kHolder[static_cast<int>(p.holder[i])&3]);
+    }
+    if(p.locked)Append(l,L"   (online: SeatSwitchOnline=0)");
+    else if(p.keys) {
+        wchar_t key[32];
+        KeyName(Cfg().seatNextKey,key,32);
+        if(Cfg().seatNextKey>0)Append(l,L"   [%ls] next",key);
+        if(Cfg().seatNumberKeys)Append(l,L"   [1-%d] pick",p.seats<9 ? p.seats : 9);
+    } else if(Cfg().seatButton==0x02)Append(l,L"   [B] next");
+    else if(Cfg().seatButton>0)Append(l,L"   [button 0x%X] next",Cfg().seatButton);
+    if(p.refused==-2)Append(l,L"   NO FREE SEAT");
+    else if(p.refused>=0)Append(l,L"   SEAT %d TAKEN",p.refused+1);
+    alignas(16) static const float kGrey[4]={0.7f,0.7f,0.7f,0.9f};
+    l.scale=kLineScale*0.85f;l.rgba=p.locked ? kGrey : p.refused!=-1 ? kWarn : kWhite;l.w=l.h=0.0f;
+    if(text)MeasureAll(*text,&l,1);
+    l.x=(width-l.w)*0.5f;l.y=height*0.82f;
 }
 
 // The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a round of the picked gun
@@ -1344,6 +1373,7 @@ void HudPublish() noexcept {
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
+    s.seats=PlayerSeatPrompt(&s.seatPrompt);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1463,6 +1493,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);

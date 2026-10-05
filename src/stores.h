@@ -3,6 +3,7 @@
 // their weapon's SGO, picks and fires them itself (the 506 fires only holders 0-2 from its two fire bytes), and
 // weighs them: a jet with stores aboard is heavier and draggier.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 
 namespace crew {
@@ -42,6 +43,11 @@ const JetMass* JetMassOf(float mark) noexcept;
 int StoreLock(const Store& s,float* point,float* progress) noexcept;
 // Whether weapon `w` is one of the stores' (its SGO one of kStores'): the cockpit marks and sounds their locks itself.
 bool IsStoreWeapon(const unsigned char* w) noexcept;
+// The store weapon `w` is (its SGO one of kStores'), else nullptr.
+const StoreSpec* StoreOf(const unsigned char* w) noexcept;
+// The file name of weapon `w`'s SGO (after the last separator of its resource key, upper case), `length` characters;
+// nullptr when it cannot be read. Not zero-terminated where the key goes on.
+const wchar_t* WeaponFile(const unsigned char* w,std::size_t* length) noexcept;
 // Drops the store's locks now (the weapon relocks on its next tick).
 void ClearStoreLock(const Store& s) noexcept;
 // Drops the store's lock and keeps its target last in the crosshair's order for a while: the next one in the cone
