@@ -137,7 +137,7 @@ def jet_nozzles_on_their_models() -> None:
         if jet.mark not in rows:
             bad.append(f'{name}: mark {jet.mark} has no nozzle row')
             continue
-        want = jet_models.NOZZLES[jet.file]
+        want = jet_models.NOZZLES[jet.file or jet.box_model]   # the gunship: the stock bomber401 it flies
         got, size = rows[jet.mark]
         d = want[0][1]
         if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
@@ -512,9 +512,11 @@ def hand_copies_agree() -> None:
         if c.brings != 'vehicle' or c.ground:
             continue
         jet = vc.JETS[c.jet]
-        assert jet.player and jet.mark == c.mark, c.id
-        assert float(pjet[c.kind.removeprefix('pjet_')]) == c.mark, f'src/playerjet.cpp kKinds disagrees on {c.id}'
-        assert make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
+        assert jet.mark == c.mark and make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
+        if jet.player:   # a player jet: its mark src/playerjet.cpp kKinds'
+            assert float(pjet[c.kind.removeprefix('pjet_')]) == c.mark, f'src/playerjet.cpp kKinds disagrees on {c.id}'
+        else:            # one of the plugin's other aircraft: a requested twin (every_boardable_aircraft_requested)
+            assert jet.requested and jet.parked and c.jet in {vc.request_name(k) for k in vc.REQUEST_KINDS}, c.id
     # The jets' marks and files, wherever src/jet*.cpp / *.h keep their table (kKinds, kCarrierMarks, kJetFile /
     # kJetSgo, or one body table).
     jet_src = ''.join(src(f'src/{n}') for n in sorted(os.listdir(os.path.join(ROOT, 'src'))) if n.startswith('jet'))
@@ -686,6 +688,60 @@ def every_npc_aircraft_boardable() -> None:
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('PlayerJetAll', 'PlayerJetHailKey'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+
+
+@test
+def every_boardable_aircraft_requested() -> None:
+    """The Air Raider requests every aircraft the player flies (src/playerjet_kinds.h kBoardable) empty, as a vehicle (the
+    user, 2026-10-06: 「补上空袭的召唤飞机，空母载具」), but those LEFT_OUT says why not: each request of one of them
+    (tools/calls.py EDF6VC_CALL_FLY_*) brings its kind's requested twin (pylib/vcobjects.py REQUEST_KINDS: its mark, model
+    and arms, parked: the whole plane's box, every class; requested: vehicle_setup, which the stock request's vehicle is
+    built from) under tools/make_jets.py's EDF6VC_FLY_<KIND>.SGO; the rows are vehicle requests of the N9 Eros (category
+    308, appended after the thrown drones), one a kind, and their names and texts say "fly it"."""
+    left_out = {
+        'strike': 'the player strike jet request (EDF6VC_CALL_PJET_STRIKE) brings the same airframe, model and stores',
+        'bomber401': 'the airstrike bombers the strike jets take over (stock bombers, not ours to bring)',
+        'bomber501_2': 'the airstrike bombers the strike jets take over (stock bombers, not ours to bring)',
+        'blast': 'its one weapon is the charge that destroys it: the thrown blast drone brings that charge',
+        'doll': 'its one weapon is the charge that destroys it: the thrown doll drone brings that charge',
+    }
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    marks = {body: float(mark) for body, mark in
+             re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
+    frames = dict(re.findall(r'\{Body::(\w+),Airframe::(\w+),', src('src/playerjet_kinds.h')))
+    assert len(frames) >= 13 and set(left_out) <= set(frames), sorted(frames)
+    fly = [c for c in calls.CALLS if c.brings == 'vehicle' and c.jet and not vc.JETS[c.jet].player]
+    by_mark = {c.mark: c for c in fly}
+    assert len(by_mark) == len(fly), 'two requests of one kind'
+    for body, frame in frames.items():
+        mark = marks[body]
+        assert (mark in by_mark) != (body in left_out), f'{body} (mark {mark:.0f}): requested and left out, or neither'
+    want = {vc.request_name(k) for k in vc.REQUEST_KINDS}
+    assert {c.jet for c in fly} == want, sorted(want ^ {c.jet for c in fly})
+    for kind in vc.REQUEST_KINDS:
+        a, b = vc.JETS[kind], vc.JETS[vc.request_name(kind)]
+        assert b.parked and b.requested and not a.parked and not a.requested and not b.player, kind
+        assert (a.mark, a.model, a.file, a.weapons, a.durability, a.box_model) == (b.mark, b.model, b.file, b.weapons,
+                                                                                    b.durability, b.box_model), kind
+    # The gunship has no model file of its own: measured on the stock bomber401 it flies; its NPC SGO is make_jets'.
+    gun = vc.JETS[vc.GUNSHIP_JET]
+    assert gun.mark == make_jets.GUNSHIP_MARK == marks['gunship'] and gun.box_model in ('bomber401',), gun
+    assert gun.weapons == vc.JETS['edf6tr_jet_strike_mission'].weapons and gun.model[1] == 'bomber401.mdb'
+    first = calls.IDS.index(fly[0].id)
+    assert calls.IDS[first:first + len(fly)] == tuple(c.id for c in fly), 'the requests are one appended run'
+    assert all(c.brings == 'throw' for c in calls.CALLS[first - 3:first]), 'appended after the thrown drones'
+    for c in fly:
+        assert c.id == calls.ID_PREFIX + 'FLY_' + c.vehicle.removeprefix('EDF6VC_FLY_'), c.id
+        assert make_jets.request_file(next(k for k in vc.REQUEST_KINDS if vc.request_name(k) == c.jet)) == f'{c.vehicle}.SGO'
+        assert cw.template_of(c) == cw.VEHICLE_TEMPLATE == 'eWeapon394' and c.count == 0 and not c.follow, c.id
+        assert 0.0 < c.level <= 4.0 and c.reload >= 3000, c.id
+        assert '(Fly It)' in calls.call_name(c, 'EN') and '（自操縦）' in calls.call_name(c, 'JA'), c.id
+        assert '自驾' in calls.call_name(c, 'SC') and '自駕' in calls.call_name(c, 'CN'), c.id
+        assert 'EDF6VC_FLY_' in calls.call_description(c, 'SC'), c.id
+    # The air carriers say how big they are (the stock container makes the vehicle where it lands: docs/player-jet-re.md).
+    for c in fly:
+        rotor = frames[next(b for b, m in marks.items() if m == c.mark and b in frames)] == 'rotor'
+        assert ('59 x 77 m' in calls.call_description(c, 'EN')) == rotor, c.id
 
 
 @test
