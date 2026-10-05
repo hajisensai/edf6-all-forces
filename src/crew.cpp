@@ -242,8 +242,8 @@ void SetLine(State& st,unsigned char* line,LineWant want,const float* at) noexce
 // A seat's lines: hidden while an NPC holds the seat, or while it is empty in a vehicle an NPC drives (the 410's door
 // guns, aimed by the plugin with nobody in them), and while the player holds it in an aircraft whose HUD draws a gun
 // sight of its own: one the player-jet flight flies (playerjet.cpp PlayerJetOwnSight: the user, 2026-10-05, "delete
-// the stock gun's two red lines") or a stock helicopter (helisight.cpp PlayerHeliOwnSight: "the heli's sight ours
-// too"). The stock line (a count taken away given back) for the player with our sight off (the ini turned off: the
+// the stock gun's two red lines"), a stock helicopter (helisight.cpp PlayerHeliOwnSight: "the heli's sight ours
+// too") or any other stock vehicle (vhud.cpp PlayerStockOwnSight, 2026-10-06: its impact points in their place). The stock line (a count taken away given back) for the player with our sight off (the ini turned off: the
 // next frame). Any other seat is left as it was (as before this list grew): an empty one of a vehicle no NPC drives
 // (one the player got out of keeps its line hidden, nobody there to see it, until they or an NPC sit in it) and a
 // remote player's.
@@ -262,7 +262,7 @@ void AimLines(unsigned char* vehicle) noexcept {
     if(!st)return;
     const unsigned count=SeatCount(vehicle);
     const bool npcDriven=count>0 && SeatRider(SeatAt(vehicle,0))==Rider::dummy;
-    const bool ownSight=PlayerJetOwnSight(vehicle) || PlayerHeliOwnSight(vehicle);
+    const bool ownSight=PlayerJetOwnSight(vehicle) || PlayerHeliOwnSight(vehicle) || PlayerStockOwnSight(vehicle);
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
         const LineWant want=Want(SeatRider(seat),npcDriven,ownSight);
@@ -550,10 +550,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam"};
+                                          "launcher","heli sight","net probe","high cam","stock hud"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -704,6 +704,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);
     Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
+    Guarded(kStepStockHud,&StockHudFrame,v);
     Guarded(kStepJetSound,&JetSound,v);
     Guarded(kStepLockSound,&LockSound,v);
     Guarded(kStepUnderground,&UnderVehicle,v);
@@ -781,6 +782,11 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
         if(line && At<std::int32_t>(line,kAimLineSegments)==0)out[found++]=At<const unsigned char*>(holders[w],kHolderWeapon);
     }
     return found;
+}
+
+const char* VehicleClassName(const void* vehicle) noexcept {
+    const int c=ClassOf(vehicle);
+    return c>=0 ? kClasses[c].name : "vehicle";
 }
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.

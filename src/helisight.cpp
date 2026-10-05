@@ -24,11 +24,12 @@
 //    progress +0xC70, the same in every weapon, docs/stores-re.md §7), on the target's lock point; with no lock, its
 //    boresight and LockonRange (+0x6D0), the reach it locks within. It homes: no impact point to show.
 //  - The rockets (the 409's V_409HELI_MISSILE01: a MissileBullet01 with no lock, starting at 0.5 m/frame and speeding
-//    up; heli.cpp Arms's rule: no lock and a round slower than kRocketBelow): they fly straight along their muzzle
-//    (heli.cpp kRocketStart: its NPC leads them so), so their mark is where that line first meets the map within
-//    kRocketSight, its distance beside it. Not an arc: the weapon's copy of the round's acceleration
-//    (Ammo_CustomParameter[4]) has no known offset, so a drop on the way is not shown. The call variants' dropped
-//    weapons (V_506HELI_UNDER_NAPALM01, the 409's bomb) fall under the same rule and get the same straight mark.
+//    up; heli.cpp Arms's rule: no lock and a round slower than kRocketBelow): their mark is where their path, flown as
+//    the game flies them (vhud.h RoundLands: rounds.h Motor, the weapon's own Ammo_CustomParameter; the 409's coast
+//    1.5 s, falling, before the motor lights), first meets the map within kRocketSight, its distance beside it. Until
+//    2026-10-06 it was their straight line, the drop on the way left out (the user: "the rockets' point is off"). The
+//    call variants' dropped weapons (V_506HELI_UNDER_NAPALM01, the 409's bomb) fall under the same rule and are flown
+//    as the arcs they are.
 // Computed on the game thread from the vehicle's input (crew.cpp InputHook, after AimLines), published with the HUD's
 // frame (hud.cpp HudPublish, the snapshot's triple buffer) and drawn by it.
 #include "crew.h"
@@ -48,7 +49,7 @@ constexpr std::size_t kWeaponLockRange=0x6D0;   // LockonRange (autoturret/docs/
 // A round slower than this (m/frame: 120 m/s, heli.cpp Arms) with no lock is a rocket; a round that reaches less than
 // kNoReach m in its life is no weapon to aim (the 506's fuel tank v_fuel01: 1 m/frame for 1 frame).
 constexpr float kRocketBelow=2.0f,kNoReach=10.0f;
-constexpr float kRocketSight=1500.0f,kRocketStep=10.0f;   // m along the rockets' line; m a step of it (RoundImpact)
+constexpr float kRocketSight=3000.0f;   // m: the farthest the rockets' point is looked for (the near camera's far clip)
 
 HeliSightReadout latest{};
 ULONGLONG latestMs=0;
@@ -118,9 +119,11 @@ bool SolveArm(unsigned char* w,bool homing,HeliSightReadout& r) noexcept {
         return true;
     }
     r.arm=HeliArm::rockets;
-    const float step[3]={dir[0]*kRocketStep,dir[1]*kRocketStep,dir[2]*kRocketStep},none[3]={0.0f,0.0f,0.0f};
-    float took=0.0f;
-    r.armHit=RoundImpact(pos,step,none,static_cast<int>(kRocketSight/kRocketStep),r.armAt,&took);
+    RoundModel m{};
+    float sec=0.0f;
+    if(!ReadRound(w,&m))return true;   // unreadable: only its boresight (dim)
+    r.armLabel=m.label;
+    r.armHit=RoundLands(w,m,pos,dir,kRocketSight,r.armAt,&sec);
     if(r.armHit)r.armRange=vec::Dist(pos,r.armAt);
     return true;
 }

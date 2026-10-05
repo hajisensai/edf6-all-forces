@@ -51,3 +51,4 @@
    - 瞄准具只认「线现在被隐藏」的炮（`crew.cpp` `HiddenAimGuns`：座位武器里有 `WeaponAimLine` 且段数为 0），所以输入钩子里
      `HeliSightFrame` 排在 `AimLines` 之后（`tools/selftest.py` `heli_sight_after_aim_lines` 检查顺序）。原版就没有红线的炮
      （`V_409HELI_GATLING01` 的 `custom_parameter` 为空）没有可替换的东西，不画瞄准具。
+7. 其余原版载具（2026-10-06 用户要求「把所有原版载具都改成咱们的显示……弹着点也加上」）：玩家坐的不是插件机体、也不是直升机的原版载具（`vhud.cpp` `PlayerStockOwnSight`），ini `StockVehicleHud=1`（默认）且 HUD 能画（`hud.cpp` `HudReady`）时，玩家座位的瞄准线同样按「隐藏」处理，HUD 改画该座位每件武器的弹着点（`docs/hud-re.md` §7）；`StockVehicleHud=0` 时下一帧按「恢复」写回。原版屏幕中心的准星没有改动。

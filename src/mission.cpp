@@ -66,6 +66,7 @@ void MissionStart() noexcept {
     ResetHighCam();
     ResetNix();
     ResetHeliSight();
+    ResetStockHud();
     ResetGear();
     ResetJetSound();
     ResetMissiles();

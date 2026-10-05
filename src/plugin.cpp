@@ -195,6 +195,7 @@ void LoadConfig() noexcept {
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
     n.playerHeliStopSec=ReadFloat(L"PlayerHeliStopSec",n.playerHeliStopSec);
     n.playerHeliGunSight=ReadBool(L"PlayerHeliGunSight",n.playerHeliGunSight);
+    n.stockVehicleHud=ReadBool(L"StockVehicleHud",n.stockVehicleHud);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
     n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
@@ -283,7 +284,7 @@ void LoadConfig() noexcept {
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
-    Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
+    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d",n.playerJetGunSight,n.playerJetFlightHud,
@@ -490,6 +491,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
+    InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallJetSound();
     InstallMissiles();
