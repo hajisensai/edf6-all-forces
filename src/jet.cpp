@@ -342,6 +342,34 @@ int FaultLog(const char* where,const EXCEPTION_POINTERS* e) noexcept {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// The NPC jets' flares (the user, 2026-10-05: the NPC jets drop them too): every kNpcFlareLookMs a jet with a missile
+// homing on it (missile.cpp MissileHoming) drops a pair with kNpcFlareReact, at most one every kNpcFlareGapMs, while it
+// has pairs (Jet::flares); its burning flares are drawn (booster.cpp FlareFlames).
+constexpr ULONGLONG kNpcFlareLookMs=500,kNpcFlareGapMs=1500;
+constexpr float kNpcFlareReact=0.6f,kNpcFlareRadius=20.0f,kNpcFlareBack=8.0f,kNpcFlareSide=12.0f,kNpcFlareKeep=0.6f;
+void NpcFlares(Jet& j,unsigned char* v,const float* pos,const float* nose,ULONGLONG ms) noexcept {
+    static unsigned seed=0x85EBCA6Bu;
+    if(j.flares>0 && ms-j.flareLook>=kNpcFlareLookMs && ms-j.flareAt>=kNpcFlareGapMs) {
+        j.flareLook=ms;
+        seed=seed*1664525u+1013904223u;
+        if(MissileHoming(pos,kNpcFlareRadius) && static_cast<float>(seed>>8)/16777216.0f<kNpcFlareReact) {
+            j.flares--;j.flareAt=ms;
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            float right[3]={m[0],m[1],m[2]};
+            Normalize(right);
+            for(int side=-1;side<=1;side+=2) {
+                float at[3],vel[3];
+                for(int i=0;i<3;++i){at[i]=pos[i]-nose[i]*kNpcFlareBack;vel[i]=j.m.vel[i]*kNpcFlareKeep+right[i]*kNpcFlareSide*static_cast<float>(side);}
+                FlareDrop(v,at,vel,nose,side<0);
+            }
+            if(Cfg().debug)Log("JET v=%p flares at a missile (%d pairs left)",v,j.flares);
+        }
+    }
+    float at[8][3],vel[8][3];
+    const int n=FlaresOf(v,at,vel,8);
+    if(n || j.flares<4)FlareFlames(v,at,vel,n,ms);
+}
+
 void JetFrame(unsigned char* v) noexcept {
     if(!HooksOk())return;
     const ULONGLONG ms=GameMs();
@@ -409,6 +437,7 @@ void JetFrame(unsigned char* v) noexcept {
     BayFrame(*j,pos);
     Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
     DollFrame(IndexOf(*j),v);
+    NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
 
@@ -470,6 +499,17 @@ bool jet::LockingOn(const void* target) noexcept {
     if(!target)return false;
     for(const auto& j:jets)if(j.ref && j.t.target==target && j.t.lockAt && Alive(j.ref))return true;
     return false;
+}
+
+int jet::BreakLocks(const void* target,float chance) noexcept {
+    static unsigned seed=0x9E3779B9u;
+    int broke=0;
+    for(auto& j:jets) {
+        if(!j.ref || j.t.target!=target || !j.t.lockAt || !Alive(j.ref))continue;
+        seed=seed*1664525u+1013904223u;
+        if(static_cast<float>(seed>>8)/16777216.0f<chance){j.t.lockAt=0;++broke;}   // the lock starts over
+    }
+    return broke;
 }
 
 bool IsJet(const void* vehicle) noexcept {

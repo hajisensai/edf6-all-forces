@@ -47,15 +47,22 @@ constexpr float kG=9.8f;
 
 // Each round guided: the target where it was last frame (its velocity, m a frame), and the game frame it was last
 // guided in: an entry not guided for kStaleFrames is a round gone (dead rounds are never told of), free again.
-// `decoy`: 1 + the flare it chases instead of its lock (FlareDrop), 0 none.
-struct Round { const unsigned char* b; std::int32_t age; ULONGLONG frame; float last[3]; bool seen; int decoy; };
-// Flares (the user, 2026-10-05: "add flares"): a flare dropped by the player's jet (playerjet.cpp) falls under
-// kFlareGravity with kFlareDrag of its speed lost a second and burns kFlareLifeMs. As it drops, each round homing within
-// kDecoyRadius of where it was dropped (on that jet) takes it for its target with kDecoyChance: it flies at the flare
-// from then on, and on at the last place it saw it once it burns out.
-struct Flare { const void* owner; float pos[3],vel[3]; ULONGLONG until; };
+// `decoy`: 1 + the flare it chases instead of its lock (FlaresStep), 0 none; `rolled`: the last flare drop it was
+// judged against (each drop once); `pos`, `dir`: where it is and where it flies (the judgement's range and aspect).
+struct Round { const unsigned char* b; std::int32_t age; ULONGLONG frame; float last[3]; bool seen; int decoy;
+               unsigned rolled; float pos[3],dir[3]; };
+// Flares (the user, 2026-10-05: "add flares", then all of: they work while they burn, they break locks, the chance
+// goes by the moment, the NPC jets drop them too). A flare dropped by a jet (playerjet.cpp, jet.cpp) falls under
+// kFlareGravity with kFlareDrag of its speed lost a second and burns kFlareLifeMs. While a drop burns, every round
+// homing on its jet (its lock point within kDecoyRadius of the jet: fired before the drop or during its burn) is
+// judged against it once (FlaresStep): it takes a flare for its target with kDecoyBase times a range factor (1 up to
+// kDecoyNear m from the jet, down to kDecoyFarFactor at kDecoyFar) times an aspect factor (1 coming from behind the
+// jet, kDecoyHeadOn head on), and flies at the flare from then on, then on past where it burned out.
+struct Flare { const void* owner; float pos[3],vel[3],nose[3]; ULONGLONG until; unsigned drop; };
 constexpr int kFlares=16;
-constexpr float kFlareGravity=6.0f,kFlareDrag=0.6f,kDecoyRadius=40.0f,kDecoyChance=0.75f;
+constexpr float kFlareGravity=6.0f,kFlareDrag=0.6f,kDecoyRadius=40.0f,kDecoyBase=0.85f;
+constexpr float kDecoyNear=600.0f,kDecoyFar=2000.0f,kDecoyFarFactor=0.3f,kDecoyHeadOn=0.5f;
+unsigned drops=0;
 constexpr ULONGLONG kFlareLifeMs=4000;
 Flare flares[kFlares]{};
 ULONGLONG flaresFrame=0;
@@ -76,23 +83,28 @@ bool guideOk=false;
 
 // A round guided this frame or the last whose lock point (Round::last) is within `radius` of `at`: a missile coming
 // for whatever is there (the player's missile warning, playerjet.cpp).
-void FlareDrop(const void* owner,const float* at,const float* vel) noexcept {
+void FlareDrop(const void* owner,const float* at,const float* vel,const float* nose,bool pairStart) noexcept {
     const ULONGLONG ms=GameMs();
+    if(pairStart)++drops;
     int slot=0;
     for(int i=0;i<kFlares;++i){if(flares[i].until<=ms){slot=i;break;}if(flares[i].until<flares[slot].until)slot=i;}
     Flare& f=flares[slot];
-    f.owner=owner;std::memcpy(f.pos,at,12);std::memcpy(f.vel,vel,12);f.until=ms+kFlareLifeMs;
-    const ULONGLONG frame=GameFrame();
-    int fooled=0,homing=0;
-    for(auto& r:rounds) {
-        if(!r.b || !r.seen || frame-r.frame>1 || r.decoy)continue;
-        const float d[3]={r.last[0]-at[0],r.last[1]-at[1],r.last[2]-at[2]};
-        if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>=kDecoyRadius*kDecoyRadius)continue;
-        ++homing;
-        if(Chance()<kDecoyChance){r.decoy=slot+1;++fooled;}
-    }
-    if(homing)Log("FLARE %d of %d missiles coming for it took the flare",fooled,homing);
+    f.owner=owner;std::memcpy(f.pos,at,12);std::memcpy(f.vel,vel,12);std::memcpy(f.nose,nose,12);
+    f.until=ms+kFlareLifeMs;f.drop=drops;
 }
+
+namespace {
+// The chance round `r` takes flare `f` (dropped by a jet now at `jet`): see kDecoyBase.
+float DecoyChance(const Round& r,const Flare& f,const float* jet) noexcept {
+    const float d[3]={r.pos[0]-jet[0],r.pos[1]-jet[1],r.pos[2]-jet[2]};
+    const float range=Len(d);
+    const float byRange=range<=kDecoyNear ? 1.0f : range>=kDecoyFar ? kDecoyFarFactor :
+                    1.0f-(1.0f-kDecoyFarFactor)*(range-kDecoyNear)/(kDecoyFar-kDecoyNear);
+    const float along=Clamp(Dot(r.dir,f.nose),-1.0f,1.0f);   // 1: flying the way the jet flies, from behind it
+    const float aspect=kDecoyHeadOn+(1.0f-kDecoyHeadOn)*(along+1.0f)*0.5f;
+    return kDecoyBase*byRange*aspect;
+}
+}  // namespace
 
 void FlaresStep() noexcept {
     const ULONGLONG frame=GameFrame();
@@ -100,11 +112,26 @@ void FlaresStep() noexcept {
     flaresFrame=frame;
     const ULONGLONG ms=GameMs();
     constexpr float dt=1.0f/60.0f;
-    for(auto& f:flares) {
+    for(int i=0;i<kFlares;++i) {
+        Flare& f=flares[i];
         if(f.until<=ms)continue;
         f.vel[1]-=kFlareGravity*dt;
         for(auto& x:f.vel)x*=1.0f-kFlareDrag*dt;
-        for(int i=0;i<3;++i)f.pos[i]+=f.vel[i]*dt;
+        for(int k=0;k<3;++k)f.pos[k]+=f.vel[k]*dt;
+        // The rounds coming for its jet, each judged once against this drop.
+        const auto jetObj=static_cast<const unsigned char*>(f.owner);
+        float jet[3];
+        __try { if(!Readable(jetObj,kPosition+12))continue; std::memcpy(jet,jetObj+kPosition,12); }
+        __except(EXCEPTION_EXECUTE_HANDLER){continue;}
+        int fooled=0,judged=0;
+        for(auto& r:rounds) {
+            if(!r.b || !r.seen || frame-r.frame>1 || r.decoy || r.rolled>=f.drop)continue;
+            const float d[3]={r.last[0]-jet[0],r.last[1]-jet[1],r.last[2]-jet[2]};
+            if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>=kDecoyRadius*kDecoyRadius)continue;
+            r.rolled=f.drop;++judged;
+            if(Chance()<DecoyChance(r,f,jet)){r.decoy=i+1;++fooled;}
+        }
+        if(judged)Log("FLARE %p: %d of %d missiles coming for it took the flare",f.owner,fooled,judged);
     }
 }
 
@@ -130,7 +157,7 @@ Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept
     Round* free=nullptr;
     for(auto& r:rounds) {
         if(r.b==b) {
-            if(age<r.age || frame-r.frame>kStaleFrames)r=Round{b,age,frame,{},false,0};
+            if(age<r.age || frame-r.frame>kStaleFrames)r=Round{b,age,frame,{},false,0,0,{},{}};
             return r;
         }
         const bool stale=!r.b || frame-r.frame>kStaleFrames;
@@ -172,6 +199,7 @@ void Guide(unsigned char* b) noexcept {
     const auto lock=At<const unsigned char*>(b,kLock);
     const auto ctrl=At<const unsigned char*>(b,kLockCtrl);
     const float* pos=reinterpret_cast<const float*>(b+kPos);
+    std::memcpy(round.pos,pos,12);std::memcpy(round.dir,dir,12);
     // As the stock steering takes it (0x269C0A): the entry is the target's (its lock point, rewritten every frame by
     // its own update, 0x6C7700); the round's reference is weak: with the target gone the point stops, so a dead
     // entry (use count 0) is no lock, it flies on.
