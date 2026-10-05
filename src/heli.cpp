@@ -1981,7 +1981,8 @@ void PlayerAssist(unsigned char* v) noexcept {
 // lifts it off, as before), and for kLiftOffMs after it no horizontal stick and no speed set (the NPC's lift-off).
 // The descend key is the brake key (ini PlayerJetBrakeKey): the stock keyboard has none, letting go of Space only spun
 // the rotor down.
-// The readout (PlayerHeliHud, ini HeliFlightHud) is gathered whether or not the mouse flies it.
+// The readout (PlayerHeliHud) is gathered while the mouse flies it or the HUD (ini HeliFlightHud) is on: the mouse's aim
+// is drawn whenever it flies, the HUD around it only with HeliFlightHud.
 constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
 constexpr float kPlayerClimb=6.0f;     // m/s: Space / the brake key (the stock rotor's most is ~8: aircraft-re.md)
 constexpr float kPlayerMark=800.0f;    // m: the aim's mark ahead (playerjet.cpp kAimMark), kept within kAimOnScreen
@@ -2131,7 +2132,7 @@ void PlayerHeli(unsigned char* v) noexcept {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
         p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
     }
-    if(Cfg().heliFlightHud)PublishHud(*p,v,pos,grounded,clear,keys);
+    if(Cfg().heliFlightHud || p->flying)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
 }
 }  // namespace
 

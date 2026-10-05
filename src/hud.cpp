@@ -1036,7 +1036,8 @@ void HeightBar(void* drawer,void* ctx,float width,float height,float s,const Hel
     Tri(drawer,ctx,x-14.0f*s,at,x-2.0f*s,at,6.0f*s,sink ? kAmber : kHud);
 }
 
-// The helicopter HUD's instruments (see above); the weapons' aim is the caller's.
+// The helicopter HUD's instruments (see above); the weapons' aim and the mouse's aim (drawn with the HUD off too) are the
+// caller's.
 void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliFlight& f,
              const PlayerJetSymbols& y,Line* lines,int* at) noexcept {
     if(!f.landed)Ladder(drawer,ctx,text,vp,width,height,s,y,lines,at);
@@ -1047,18 +1048,19 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
     if(f.aiming)std::swprintf(set,32,f.setSpeed==0.0f ? L"SET HOVER" : L"SET %d",static_cast<int>(std::lround(f.setSpeed*3.6f)));
     Boxes(drawer,ctx,text,width,height,s,f.speed,set,kCyan,f.clear,f.ground,f.climb,lines,at);
     HeightBar(drawer,ctx,width,height,s,f);
-    if(f.aiming)AimSquare(drawer,ctx,vp,width,height,s,f.aim);
     if(Cfg().playerJetThreatHud)ThreatRing(drawer,ctx,text,vp,width,height,s,y,lines,at);
 }
 
-// The line in place of the old panel (see above): over it the warning (a missile, a lock, the sink near the ground) or on
-// the ground the takeoff cue (the rotor's share of the lift-off speed; LIFT OK blinking from there); the line itself the
-// speed set and the height held (the mouse-aim flight) and `stores` (a rotor craft's; nullptr: none).
+// The lines in place of the old panel (see above): on top the warning (a missile, a lock, the sink near the ground) or on
+// the ground the takeoff cue (the rotor's share of the lift-off speed; LIFT OK blinking from there); under it the speed
+// set and the height held (the mouse-aim flight); at the bottom `stores` (a rotor craft's; nullptr: none) on a line of
+// their own (with the speed and ALT HOLD on one line, 5-6 stores ran past a line's 128 characters: the last cut off).
 void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,const PlayerJetSymbols& y,const wchar_t* stores,
                Line* lines,int* at) noexcept {
-    if(*at+2>kMaxLines)return;
+    if(*at+3>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& info=lines[(*at)++];
+    Line& arms=lines[(*at)++];
     bool missile=false,locked=false;
     for(int i=0;i<y.threats && i<kMostThreats;++i){missile=missile || y.threatKind[i]==2;locked=locked || y.threatKind[i]==1;}
     const bool blink=(GetTickCount64()/125)%2==0,lift=f.landed && f.hover>0.0f && f.rotor>0.01f,liftOk=lift && f.rotor>=f.hover;
@@ -1072,12 +1074,14 @@ void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,c
     Format(info,L"");
     if(f.aiming)Append(info,f.setSpeed==0.0f ? L"SPEED SET: HOVER" : L"SPEED SET %d km/h",static_cast<int>(std::lround(f.setSpeed*3.6f)));
     if(f.holding)Append(info,L"%lsALT HOLD",info.text[0] ? L"    " : L"");
-    if(stores && stores[0])Append(info,L"%ls%ls",info.text[0] ? L"    " : L"",stores);
-    warn.scale=kTitleScale;info.scale=kLineScale;info.rgba=kHud;
-    warn.w=warn.h=info.w=info.h=0.0f;
-    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);}
-    const float infoH=info.h>0.0f ? info.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
-    info.x=(width-info.w)*0.5f;info.y=height*0.80f-infoH;
+    Format(arms,L"%ls",stores ? stores : L"");
+    warn.scale=kTitleScale;info.scale=arms.scale=kLineScale;info.rgba=arms.rgba=kHud;
+    warn.w=warn.h=info.w=info.h=arms.w=arms.h=0.0f;
+    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);MeasureAll(*text,&arms,1);}
+    const float lineH=18.0f*s,armsH=arms.h>0.0f ? arms.h : (arms.text[0] ? lineH : 0.0f);
+    const float infoH=info.h>0.0f ? info.h : lineH,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
+    arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
+    info.x=(width-info.w)*0.5f;info.y=arms.y-infoH-(arms.text[0] ? 4.0f*s : 0.0f);
     warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
 }
 
@@ -1285,7 +1289,7 @@ void HudPublish() noexcept {
     s.count=0;
     s.cockpit=PlayerJetHud(&s.jet);
     s.heli=PlayerHeliCue(&s.heliCue);
-    s.heliFly=Cfg().heliFlightHud && PlayerHeliHud(&s.heliHud);
+    s.heliFly=PlayerHeliHud(&s.heliHud);   // the HUD (HeliFlightHud), or only the mouse-aim flight's square
     s.drill=PlayerDrillCue(&s.drillCue);
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
@@ -1383,6 +1387,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
+            if(snap.jet.rotor && snap.jet.heli.aiming)AimSquare(drawer,ctx,viewProj,width,height,s,snap.jet.heli.aim);   // HUD or not
             if(rotorHud) {
                 HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,lines,&at);
                 if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
@@ -1396,7 +1401,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             }
             GearPanel(drawer,ctx,t,width,height,s,lines,&at,now);
         }
-        const bool heliHud=now-snap.tick<=kFreshMs && snap.heliFly && !snap.cockpit;   // a stock heli: the helicopter HUD
+        // A stock heli: the mouse-aim flight's square whenever the mouse flies it (HeliMouseAim), the helicopter HUD round it
+        // with HeliFlightHud (off: the takeoff panel, as before).
+        const bool heliFresh=now-snap.tick<=kFreshMs && snap.heliFly && !snap.cockpit,heliHud=heliFresh && Cfg().heliFlightHud;
+        if(heliFresh && snap.heliHud.f.aiming)AimSquare(drawer,ctx,viewProj,width,height,s,snap.heliHud.f.aim);
         if(heliHud) {
             HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,lines,&at);
             HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.sym,nullptr,lines,&at);
