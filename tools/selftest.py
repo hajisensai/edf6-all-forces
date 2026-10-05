@@ -542,13 +542,16 @@ def weapon_marks_agree() -> None:
     assert make_katyusha.ROCKETS['LockonTargetType'] == make_katyusha.MARK_LOFTED
 
 
+BOHR_STOCK_AMMO_ALIVE = 100.0   # V603_FLAK_GLGUN01_DLC_{L,R}.SGO AmmoAlive in the stock Root.cpk
+
+
 @test
 def high_cam_wired() -> None:
     """The artillery's high camera (src/highcam.cpp): its ini keys are read, shipped (with a range said) and documented;
     the plugin takes the Katyusha's and the howitzer's weapons for indirect fire (rounds living kIndirectLife frames or
     more) and not the other ground-marked guns (EDF6AutoTurret's Bohr grenades, stock life); the raised own cameras of
     both look down onto the ground ahead; the camera block offsets agree with docs/camera-re.md."""
-    from rootcpk import default as game
+    import rootcpk
     code, ini, readme, doc = src('src/highcam.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
     plugin = src('src/plugin.cpp')
     for key in ('HighCam', 'HighCamKey', 'HighCamButton', 'HighCamHeight', 'HighCamBack', 'HighCamPitch'):
@@ -557,8 +560,13 @@ def high_cam_wired() -> None:
         assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
     life = int(re.search(r'kIndirectLife=(\d+)', code).group(1))
     assert make_katyusha.ROCKETS['AmmoAlive'] >= life and make_artillery.SHELLS['AmmoAlive'] >= life
-    bohr = dsgo.to_py(dsgo.parse(game().read('WEAPON', at_build.BOHR_GUN.format(side='L'))).root)
-    assert bohr['AmmoAlive'] < life, (bohr['AmmoAlive'], life)
+    # The Bohr's grenades keep the stock life (autoturret/tools/build.py leaves AmmoAlive alone). The stock value is
+    # pinned here so CI (no game) still checks it against kIndirectLife; with the game present it is re-read.
+    assert BOHR_STOCK_AMMO_ALIVE < life, (BOHR_STOCK_AMMO_ALIVE, life)
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        for side in 'LR':
+            bohr = dsgo.to_py(dsgo.parse(rootcpk.default().read('WEAPON', at_build.BOHR_GUN.format(side=side))).root)
+            assert bohr['AmmoAlive'] == BOHR_STOCK_AMMO_ALIVE, (side, bohr['AmmoAlive'])
     for offset in ('kCamLook=0x170', 'kCamEye=0x180', 'kCamEase=0x190'):
         assert offset in code, offset
     for rva in ('0x54DDF0', '0xF86A0', '0xFAF20', '+0x170', '+0x180', '+0x190'):
