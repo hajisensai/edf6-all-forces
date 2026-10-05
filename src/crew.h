@@ -495,8 +495,7 @@ void HeliSightFrame(unsigned char* vehicle) noexcept;
 void NetProbe(unsigned char* vehicle) noexcept;
 // Whether this machine is in an online session (netprobe.cpp; true when the session function is not the one read).
 // Every machine of a room makes its own aircraft for the same calls (docs/online-re.md §2): what only one machine
-// does (the call picked here, a mission bomber taken over on the host) parts their objects, and the host's vehicle
-// messages then reach the wrong object on the others (a guest crashed in EDF+0x630939).
+// does (the call picked here) gives each machine different aircraft for the same call.
 bool InSession() noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most

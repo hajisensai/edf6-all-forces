@@ -261,11 +261,7 @@ void __fastcall RadioBomberHook(unsigned char* plane,const float* target,const v
 void __fastcall MissionBomberHook(unsigned char* plane,const float* target,const void* owner,float damage,float spread,
                                   float speed,float adjust,float reach,const void* param,std::int32_t seed) {
     reinterpret_cast<BomberInitFn>(image+kBomberInit)(plane,target,owner,damage,spread,speed,adjust,reach,param,seed);
-    if(!Cfg().enabled || !Cfg().jetMissionStrike)return;
-    // Online the mission's bombers are the host's alone: a jet there that the guests do not make parts the
-    // machines' objects (crew.h InSession). They fly stock.
-    if(InSession()){Log("AIRSTRIKE mission bomber %p: online, it flies stock",plane);return;}
-    TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
+    if(Cfg().enabled && Cfg().jetMissionStrike)TakeOver("mission",plane,target,BombLoad{owner,damage,spread,speed,adjust,reach,param,seed},&kMissionSource);
 }
 
 // BombingPlane slot 5 (update), for a held plane: hidden and left as it is while its jet holds it, then
