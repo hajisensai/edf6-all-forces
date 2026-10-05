@@ -1,6 +1,9 @@
 """Builds the unzip-and-run release: release/EDF6VehicleCrew-<version>.zip holding
   EDF6VehicleCrew安装器.exe  (tools/installer.py frozen by PyInstaller, plugin dll + ini inside)
   说明.txt
+  models/<name>/...           the user-supplied vehicle models (RELEASE_MODELS) found by pylib/obj_model.py model_dir()
+                              ($EDF6VC_MODELS, models/ in the repository, the developer's folder); the installer reads
+                              them from models/ next to itself, and skips what a missing one would make
 The version is the one CMakeLists.txt project(VERSION) sets, the same the DLL reports (src/version.h.in).
 Run build.cmd first: the exe bundles build/Mods/Plugins/EDF6VehicleCrew.dll and .ini as they are now.
 Needs PyInstaller (python -m pip install pyinstaller).
@@ -25,6 +28,7 @@ PLUGINS = os.path.join(ROOT, 'build', 'Mods', 'Plugins')
 EXE_NAME = 'EDF6VehicleCrew安装器'
 OUT = os.path.join(ROOT, 'release')
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
+RELEASE_MODELS = ('twin_tank',)     # pylib/artillery_model.py MODEL
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -39,6 +43,8 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
   不需要装 Python。战机、直升机、潜水母舰、呼叫武器和大地图是安装器用你自己游戏里的
   Root.cpk 现场生成的（不修改 Root.cpk）；全部生成成功后才开始写文件。
+  自行榴弹炮的外形来自压缩包里的 models 文件夹（双管坦克模型），请和 exe 放在一起解压；
+  没有这个文件夹时自行榴弹炮用 Kepler 原版外形。
   安装器还会写入：
     - 大地图：测试场那张平原拼成 3 x 3 块（无缝），只影响测试场那一关；
     - 测试场「大混战」关卡（母舰、传送舰、敌机与我方战机的空战，地面混战，地上停着可以开的战斗机和攻击机）。
@@ -77,6 +83,7 @@ def build_exe() -> str:
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange')):
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'graft_pure', 'primer_fighter_model', 'calls',
+                'obj_model', 'texfile',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'weapons'):
         cmd += ['--hidden-import', mod]
     for mod in ('PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these (numpy: the big map's seams need it)
@@ -86,6 +93,22 @@ def build_exe() -> str:
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))
     subprocess.run(cmd, check=True)
     return os.path.join(WORK, 'dist', EXE_NAME + '.exe')
+
+
+def release_models() -> list[tuple[str, str]]:
+    """(file on disk, path in the zip) of every RELEASE_MODELS folder found (each one missing is reported)."""
+    sys.path.insert(0, os.path.join(ROOT, 'pylib'))
+    import obj_model
+    out = []
+    for name in RELEASE_MODELS:
+        folder = obj_model.model_dir(name)
+        if folder is None:
+            print(f'note: model {name} not found ({", ".join(obj_model.model_roots())}): the release goes without it')
+            continue
+        for f in sorted(os.listdir(folder)):
+            if os.path.isfile(os.path.join(folder, f)):
+                out.append((os.path.join(folder, f), f'models/{name}/{f}'))
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -105,6 +128,8 @@ def main(argv: list[str]) -> int:
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
         z.write(exe, EXE_NAME + '.exe')
         z.writestr('说明.txt', README.format(version=version).replace('\n', '\r\n').encode('utf-8-sig'))
+        for src, arc in release_models():
+            z.write(src, arc)
     shutil.copy2(exe, os.path.join(OUT, EXE_NAME + '.exe'))
     print(f'wrote {os.path.getsize(zpath)} bytes')
     print(zpath)

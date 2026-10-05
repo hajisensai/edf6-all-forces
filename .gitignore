@@ -12,3 +12,5 @@ __pycache__/
 *.log
 testrange/testrange.json
 testrange/runs/
+# User-supplied vehicle models (pylib/obj_model.py model_dir): never committed
+models/
