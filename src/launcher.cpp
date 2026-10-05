@@ -18,6 +18,7 @@
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
+#include "rounds.h"
 #include "edf/weapon.h"
 #include <cmath>
 
@@ -28,6 +29,7 @@ constexpr std::uint64_t kMostMuzzles=64;
 constexpr ULONGLONG kFreshMs=200;       // a readout not refreshed this long (game ms) is gone: the player got out
 constexpr float kPi=3.14159265f;
 constexpr float kSightFar=3000.0f;      // m: the farthest the camera's ground point is looked for (the stock far clip)
+constexpr float kNoReach=1e9f;          // RoundImpact: the round's life alone ends the search
 
 LauncherReadout latest{};
 ULONGLONG latestMs=0;
@@ -154,19 +156,10 @@ void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherR
 // The first ground along the arc from `pos` at `vel` (m/frame), `drop` m/frame^2 added a frame, for at most `frames`
 // frames: `hit` and the frames it took. Shared with playerjet.cpp's bomb impact (crew.h).
 bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept {
-    float p[3]={pos[0],pos[1],pos[2]},v[3]={vel[0],vel[1],vel[2]};
-    for(int n=0;n<frames;n+=kSegment) {
-        const float from[3]={p[0],p[1],p[2]};
-        const int steps=frames-n<kSegment ? frames-n : kSegment;
-        for(int k=0;k<steps;++k)for(int c=0;c<3;++c){v[c]+=drop[c];p[c]+=v[c];}
-        const float d[3]={p[0]-from[0],p[1]-from[1],p[2]-from[2]};
-        const float length=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
-        const float at=MapRay(from,p,hit);
-        if(at<0.0f)continue;
-        *took=static_cast<float>(n)+(length>1e-3f ? at/length : 0.0f)*static_cast<float>(steps);
-        return true;
-    }
-    return false;
+    rounds::Arc arc{};
+    for(int c=0;c<3;++c){arc.vel[c]=vel[c];arc.drop[c]=drop[c];}
+    float end[3];
+    return rounds::FirstHit(arc,pos,frames,kSegment,kNoReach,&MapRay,hit,end,took);
 }
 
 void LauncherFrame(unsigned char* v) noexcept {

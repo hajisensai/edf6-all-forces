@@ -39,6 +39,7 @@ struct Config {
     float heliAgility=4.0f;    // seconds (time constant) to reach it
     float playerHeliStopSec=1.0f;// a stock heli the player flies: its horizontal speed's time constant (s; 0: stock)
     bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
+    bool stockVehicleHud=true;      // any other stock vehicle the player drives or mans: our HUD and impact points, its seat's aim lines hidden (vhud.cpp)
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
     float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
@@ -507,8 +508,9 @@ bool PlayerJetOwnSight(const void* vehicle) noexcept;
 // end of its life; `range` m from the muzzle to it. The other weapon (the secondary button's: `arm`, HeliArm):
 // `armBore` its muzzle's way; a missile's lock (`lock` 2 locked / 1 locking, `lockProgress` 0..1, `armAt` the target's
 // lock point, as the jets' stores read it: stores.h StoreLock) or with none its LockonRange (`lockRange`); the rockets'
-// mark `armAt` where their straight line meets the map (`armHit`), `armRange` m to it. HeliSightFrame from every
-// vehicle's input (game thread); PlayerHeliSight the last one, false with none this moment (hud.cpp HudPublish).
+// (or a dropped weapon's) mark `armAt` where their path as the game flies them meets the map (`armHit`; vhud.h
+// RoundLands), `armRange` m to it, `armLabel` what it is (RKT, GREN...). HeliSightFrame from every vehicle's input
+// (game thread); PlayerHeliSight the last one, false with none this moment (hud.cpp HudPublish).
 enum class HeliArm : std::uint8_t { none, missile, rockets };
 struct HeliSightReadout {
     bool gun,hit;
@@ -517,6 +519,7 @@ struct HeliSightReadout {
     bool armHit;
     int lock;
     float armBore[3],armAt[3],armRange,lockProgress,lockRange;
+    const char* armLabel;
 };
 bool PlayerHeliOwnSight(const void* vehicle) noexcept;
 void HeliSightFrame(unsigned char* vehicle) noexcept;
@@ -558,3 +561,4 @@ unsigned char* PlayerHuman() noexcept;
 #include "ground.h"
 #include "heli.h"
 #include "hud.h"
+#include "vhud.h"

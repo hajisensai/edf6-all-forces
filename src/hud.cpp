@@ -93,7 +93,8 @@ Work work[kEntries]{};
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
-                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud; };
+                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
+                  bool stock; StockHudReadout stockHud; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -916,8 +917,9 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
 // it is where the round ends), its distance in metres to its right. The other weapon (the secondary button's), each
 // in its own shape so neither is taken for the gun's pipper: the missile's lock as the jets' (LockAt: a yellow square
 // closing in, a red diamond locked) with MSL and its distance, or with no lock a dim ring of kMissileRing round its
-// boresight with MSL and the range it locks within; the rockets' mark a hollow diamond where their line meets the map
-// with RKT and its distance (none met: a dim one on their boresight).
+// boresight with MSL and the range it locks within; the rockets' mark a hollow diamond where their path (flown as the
+// game flies them: vhud.h RoundLands) meets the map with its label (RKT, GREN...) and distance (none met: a dim one on
+// their boresight).
 constexpr float kMissileRing=34.0f,kRocketMark=11.0f;   // px at 1080 lines
 void RocketDiamond(void* drawer,void* ctx,float x,float y,float s,const float* rgba) noexcept {
     const float r=kRocketMark*s,t=2.0f*s;
@@ -944,10 +946,11 @@ void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,
     } else if(h.arm==HeliArm::rockets) {
         if(h.armHit && sight::ToScreen(vp,h.armAt,1.0f,width,height,&x,&y)) {
             RocketDiamond(drawer,ctx,x,y,s,kHud);
-            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHud,L"RKT %d m",static_cast<int>(std::lround(h.armRange)));
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHud,L"%hs %d m",h.armLabel ? h.armLabel : "RKT",
+                  static_cast<int>(std::lround(h.armRange)));
         } else if(sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
             RocketDiamond(drawer,ctx,x,y,s,kHudDim);
-            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHudDim,L"RKT");
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHudDim,L"%hs",h.armLabel ? h.armLabel : "RKT");
         }
     }
 }
@@ -1262,6 +1265,219 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
 }
 
+// --- The stock vehicles' HUD (vhud.cpp gathers it; ini StockVehicleHud; docs/hud-re.md §7): for the stock vehicle the
+// player drives or mans, in the helis' green and drawn with the same quads and text (exclusive full screen too):
+//  - each weapon's impact point (StockMarks): a gun's or a cannon's the helis' boresight and pipper (dim: no ground
+//    within its reach, where its round ends), a grenade's or a mortar's (and any round flying longer than kLobSec) the
+//    artillery's yellow cross as the Katyusha's (LauncherMarks) with its range and flight time, the rockets' the helis'
+//    diamond, a missile's lock the helis' (LockAt; no lock: a dim ring round its boresight and its LockonRange); its
+//    label and range beside it; the selected store's label in brackets. Weapons that land together (a pair of guns)
+//    are drawn once;
+//  - the heading tape at the top (the gun's heading, a caret under it for the hull's: StockTape);
+//  - left of the bottom centre (StockBlock): the hull / turret indicator (the hull's outline and the gun's line, up the
+//    camera's look: which way the hull points against where the player looks and aims), the vehicle's kind and seat,
+//    its speed and HP with the HP bar, a line per weapon (rounds of the magazine; RELOAD and its share and seconds;
+//    EMPTY when it never reloads), and over it the warning (a missile, a lock, the hull critical, out of ammo);
+//  - the threat ring of the aircraft (ThreatRing) round the screen's middle. ---
+constexpr float kLobSec=2.5f;        // s: a round in the air longer than this is lobbed (the cross, with its flight time)
+constexpr float kSamePoint=2.0f;     // m: two weapons' points this near and of one label are drawn once
+constexpr float kIndicatorR=34.0f;   // px (1080 lines): the hull / turret indicator's ring
+const char kStockHpKey=0;            // the HP bar's damage trail's key (an address of our own: never a vehicle's)
+
+// `a` - `b` in degrees, in (-180, 180].
+float HdgDiff(float a,float b) noexcept {
+    float d=std::fmod(a-b,360.0f);
+    if(d>180.0f)d-=360.0f;
+    if(d<=-180.0f)d+=360.0f;
+    return d;
+}
+
+// The heading tape for `hdg` (the gun's) with a caret under it at `hull`'s heading when within the tape (HeadingTape's
+// look: a tick every 5 degrees, the tens numbered).
+void StockTape(void* drawer,void* ctx,Text* text,float width,float height,float s,float hdg,float hull,Line* lines,int* at) noexcept {
+    const float cx=width*0.5f,base=height*0.11f,k=kTapePx*s,t=2.0f*s;
+    Seg(drawer,ctx,cx-kTapeHalf*k,base,cx+kTapeHalf*k,base,t,kHudDim);
+    for(int d=static_cast<int>(std::ceil((hdg-kTapeHalf)/5.0f))*5;static_cast<float>(d)<=hdg+kTapeHalf;d+=5) {
+        const float x=cx+(static_cast<float>(d)-hdg)*k;
+        const bool ten=d%10==0;
+        Seg(drawer,ctx,x,base,x,base-(ten ? 10.0f : 5.0f)*s,t,kHud);
+        if(ten)Label(text,lines,at,x,base-22.0f*s,1,kLineScale*0.8f,kHud,L"%03d",((d%360)+360)%360);
+    }
+    Tri(drawer,ctx,cx,base+12.0f*s,cx,base+2.0f*s,6.0f*s,kHud);
+    Label(text,lines,at,cx,base+26.0f*s,1,kLineScale,kHud,L"%03d",static_cast<int>(std::lround(hdg))%360);
+    if(hull<0.0f)return;
+    const float off=HdgDiff(hull,hdg);
+    if(std::fabs(off)>kTapeHalf)return;
+    const float x=cx+off*k;
+    Tri(drawer,ctx,x,base+14.0f*s,x,base+4.0f*s,5.0f*s,kAmber);
+    Label(text,lines,at,x,base+40.0f*s,1,kLineScale*0.7f,kAmber,L"HULL");
+}
+
+// One weapon's mark (see above); `name` its label (bracketed when selected).
+void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const wchar_t* name,
+               Line* lines,int* at) noexcept {
+    float x,y;
+    const float note=kLineScale*0.85f;
+    const int metres=static_cast<int>(std::lround(a.range));
+    if(a.kind==RoundKind::homing) {
+        if(LockAt(drawer,ctx,vp,width,height,s,a.lock,a.at,a.lockProgress,&x,&y))
+            Label(text,lines,at,x,y+44.0f*s,1,note,a.lock==2 ? kRed : kYellow,L"%ls %d m",name,metres);
+        else if(!a.lock && sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
+            Arc(drawer,ctx,x,y,kMissileRing*s,0.0f,kTurn,2.0f*s,24,kHudDim);
+            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,L"%ls %d m",name,metres);
+        }
+        return;
+    }
+    if(a.kind==RoundKind::rocket) {
+        if(sight::ToScreen(vp,a.at,1.0f,width,height,&x,&y) || sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
+            const float* c=a.hit ? kHud : kHudDim;
+            RocketDiamond(drawer,ctx,x,y,s,c);
+            if(a.hit)Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,c,L"%ls %d m",name,metres);
+            else Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,c,L"%ls",name);
+        }
+        return;
+    }
+    if((a.lobbed || a.flight>kLobSec) && a.hit) {
+        if(ImpactCross(drawer,ctx,vp,width,height,s,a.at,&x,&y))
+            Label(text,lines,at,x,y+26.0f*s,1,note,kYellow,L"%ls %d m   %.1f s",name,metres,a.flight);
+        return;
+    }
+    const float* c=a.hit ? kHud : kHudDim;
+    Boresight(drawer,ctx,vp,width,height,s,a.bore);
+    if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y))
+        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
+}
+
+// The marks of every aimed weapon but the Katyusha's (launcher.cpp's), those landing on another's drawn once.
+void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,Line* lines,
+                int* at) noexcept {
+    for(int i=0;i<r.arms && i<kStockArms;++i) {
+        const StockArm& a=r.arm[i];
+        if(!a.aimed || a.lofted)continue;
+        bool twin=false;
+        for(int k=0;k<i && !twin && i!=r.selected;++k) {
+            const StockArm& b=r.arm[k];
+            twin=b.aimed && !b.lofted && b.kind==a.kind && std::strcmp(a.label,b.label)==0 && vec::Dist(a.at,b.at)<kSamePoint;
+        }
+        if(twin)continue;
+        wchar_t name[24];
+        std::swprintf(name,24,i==r.selected ? L"[%hs]" : L"%hs",a.label);
+        StockMark(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
+    }
+}
+
+// The hull / turret indicator at (cx, cy): up is the way the camera looks (`up` its heading); the hull an outline turned
+// by its heading off it, the gun a line from the middle by its heading off it (headings < 0: none).
+void HullTurret(void* drawer,void* ctx,float cx,float cy,float s,float up,float hull,float gun) noexcept {
+    const float r=kIndicatorR*s,t=2.0f*s;
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,t,24,kHudDim);
+    Tri(drawer,ctx,cx,cy-r+6.0f*s,cx,cy-r-2.0f*s,4.0f*s,kHudDim);   // the look's mark at the top
+    if(hull>=0.0f) {
+        const float a=HdgDiff(hull,up)*kDeg,fx=std::sin(a),fy=-std::cos(a),rx=-fy,ry=fx;   // its nose and right on the screen
+        const float l=0.62f*r,w=0.38f*r;
+        const float corner[4][2]={{l,w},{l,-w},{-l,-w},{-l,w}};
+        float px[4],py[4];
+        for(int k=0;k<4;++k){px[k]=cx+fx*corner[k][0]+rx*corner[k][1];py[k]=cy+fy*corner[k][0]+ry*corner[k][1];}
+        for(int k=0;k<4;++k)Seg(drawer,ctx,px[k],py[k],px[(k+1)%4],py[(k+1)%4],t,kHud);
+        Tri(drawer,ctx,cx+fx*l*0.55f,cy+fy*l*0.55f,cx+fx*l*0.95f,cy+fy*l*0.95f,w*0.5f,kHud);   // its front
+    }
+    if(gun>=0.0f) {
+        const float a=HdgDiff(gun,up)*kDeg,fx=std::sin(a),fy=-std::cos(a);
+        Arc(drawer,ctx,cx,cy,0.2f*r,0.0f,kTurn,t,10,kCyan);
+        Seg(drawer,ctx,cx+fx*0.2f*r,cy+fy*0.2f*r,cx+fx*1.05f*r,cy+fy*1.05f*r,3.0f*s,kCyan);
+    }
+}
+
+// A weapon's line: its label (bracketed when selected), the rounds of the magazine, its reload; its colour by its state.
+void ArmLine(Line& l,const StockArm& a,bool selected) noexcept {
+    Format(l,selected ? L"[%hs]" : L"%hs",a.label);
+    if(a.ammoMax>1)Append(l,L" %d/%d",a.ammo>0 ? a.ammo : 0,a.ammoMax);
+    else if(a.ammo>1)Append(l,L" %d",a.ammo);   // no magazine read (WeaponStatusOk false): the rounds alone
+    else if(a.ammo>0)Append(l,L" READY");
+    if(a.ammo<=0 && a.reload<1.0f) {
+        Append(l,L" RELOAD %d%%",static_cast<int>(std::lround(a.reload*100.0f)));
+        if(a.reloadSec>=0.0f)Append(l,L" %.1fs",a.reloadSec);
+        l.rgba=kAmber;
+    } else if(a.ammo<=0) {
+        Append(l,a.canReload ? L" RELOAD" : L" EMPTY");
+        l.rgba=a.canReload ? kAmber : kRed;
+    } else l.rgba=selected ? kCyan : kHud;
+    l.scale=kLineScale*0.85f;
+}
+
+// The block left of the bottom centre (see above).
+void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float s,const StockHudReadout& r,Line* lines,int* at) noexcept {
+    const int arms=r.arms<kStockArms ? r.arms : kStockArms;
+    if(*at+3+arms>kMaxLines)return;
+    Line& warn=lines[(*at)++];
+    Line& title=lines[(*at)++];
+    Line& info=lines[(*at)++];
+    Line* const arm=&lines[*at];
+    *at+=arms;
+    bool missile=false,locked=false,dry=arms>0;
+    for(int i=0;i<r.threats && i<kStockThreats;++i){missile=missile || r.threatKind[i]==2;locked=locked || r.threatKind[i]==1;}
+    for(int i=0;i<arms;++i)dry=dry && r.arm[i].ammo<=0 && !r.arm[i].canReload;
+    const float hp=r.hpMax>0.0f ? Unit(r.hp/r.hpMax) : 0.0f;
+    const bool blink=(GetTickCount64()/125)%2==0;
+    if(missile){Format(warn,L"MISSILE!");warn.rgba=blink ? kRed : kWhite;}
+    else if(locked){Format(warn,L"LOCKED");warn.rgba=kYellow;}
+    else if(hp<0.25f && r.hpMax>0.0f){Format(warn,L"HULL CRITICAL");warn.rgba=blink ? kRed : kWhite;}
+    else if(dry){Format(warn,L"NO AMMO");warn.rgba=kAmber;}
+    else{Format(warn,L"");warn.rgba=kHud;}
+    if(r.seat==0)Format(title,L"%hs",r.kind);
+    else Format(title,L"%hs  GUNNER %u",r.kind,r.seat);
+    Format(info,L"SPD %d km/h    HP %d%%",static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
+    warn.scale=kTitleScale;title.scale=info.scale=kLineScale;title.rgba=info.rgba=kHud;
+    for(int i=0;i<arms;++i)ArmLine(arm[i],r.arm[i],i==r.selected);
+    Line* const head[]={&warn,&title,&info};
+    for(Line* l:head){l->w=l->h=0.0f;if(text)MeasureAll(*text,l,1);}
+    for(int i=0;i<arms;++i){arm[i].w=arm[i].h=0.0f;if(text)MeasureAll(*text,&arm[i],1);}
+    const float lineH=18.0f*s,gap=3.0f*s,barW=150.0f*s,barH=6.0f*s;
+    float h=(title.h>0.0f ? title.h : lineH)+gap+(info.h>0.0f ? info.h : lineH)+gap+barH+gap*2.0f;
+    for(int i=0;i<arms;++i)h+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;
+    const float cx=width*0.5f-460.0f*s,x=cx+kIndicatorR*s+18.0f*s;
+    float y=height*0.80f-h;
+    const float hull=sight::HeadingOf(r.hull),gun=r.aimOk ? sight::HeadingOf(r.aim) : -1.0f,look=r.lookOk ? sight::HeadingOf(r.look) : -1.0f;
+    const float up=look>=0.0f ? look : gun>=0.0f ? gun : hull;
+    HullTurret(drawer,ctx,cx,y+kIndicatorR*s+4.0f*s,s,up<0.0f ? 0.0f : up,hull,gun);
+    warn.x=x;warn.y=y-(warn.h>0.0f ? warn.h : 24.0f*s)-4.0f*s;
+    title.x=x;title.y=y;y+=(title.h>0.0f ? title.h : lineH)+gap;
+    info.x=x;info.y=y;y+=(info.h>0.0f ? info.h : lineH)+gap;
+    Bar(drawer,ctx,x,y,barW,barH,hp,TrailOf(&kStockHpKey,hp,GetTickCount64()),HpColour(hp),s);
+    y+=barH+gap*2.0f;
+    for(int i=0;i<arms;++i){arm[i].x=x;arm[i].y=y;y+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;}
+}
+
+// The stock vehicle HUD, part by part (see above). A stock heli's are elsewhere (HeliHud, HeliGunSight, StockStores).
+void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,Line* lines,
+                     int* at) noexcept {
+    StockMarks(drawer,ctx,text,vp,width,height,s,r,lines,at);
+    const float hull=sight::HeadingOf(r.hull),gun=r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
+    if(gun>=0.0f)StockTape(drawer,ctx,text,width,height,s,gun,hull,lines,at);
+    else if(hull>=0.0f)StockTape(drawer,ctx,text,width,height,s,hull,-1.0f,lines,at);
+    StockBlock(drawer,ctx,text,width,height,s,r,lines,at);
+    if(Cfg().playerJetThreatHud && r.threats>0) {
+        PlayerJetSymbols y{};
+        std::memcpy(y.pos,r.pos,12);
+        y.threats=r.threats<kMostThreats ? r.threats : kMostThreats;
+        for(int i=0;i<y.threats && i<kStockThreats;++i){std::memcpy(y.threatAt[i],r.threatAt[i],12);y.threatKind[i]=r.threatKind[i];}
+        ThreatRing(drawer,ctx,text,vp,width,height,s,y,lines,at);
+    }
+}
+
+// A stock heli's stores for the helicopter HUD's bottom line (HeliStrip): each weapon, its rounds, its reload.
+void StockStores(const StockHudReadout& r,wchar_t* out,std::size_t size) noexcept {
+    out[0]=L'\0';
+    std::size_t n=0;
+    for(int i=0;i<r.arms && i<kStockArms;++i) {
+        Line l{};
+        ArmLine(l,r.arm[i],i==r.selected);
+        const int k=_snwprintf_s(out+n,size-n,_TRUNCATE,L"%ls%ls",n ? L"   " : L"",l.text);
+        if(k<0)break;
+        n+=static_cast<std::size_t>(k);
+    }
+}
+
 // What is drawn, logged when it changes (Debug, once in 10 s at most).
 void DrawLog(int shown,int panels,const Line* lines,int count,int width,int height) noexcept {
     static int lastShown=-1,lastPanels=-1;
@@ -1285,6 +1501,8 @@ bool InstallHud() noexcept {
         return quadOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+
+bool HudReady() noexcept { return quadOk; }
 
 void HudSee(unsigned char* v) noexcept {
     if(!Cfg().vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
@@ -1344,6 +1562,7 @@ void HudPublish() noexcept {
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
+    s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1456,7 +1675,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(heliFresh && snap.heliHud.f.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f.aim,lines,&at);
         if(heliHud) {
             HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,lines,&at);
-            HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.sym,nullptr,lines,&at);
+            wchar_t stores[192];
+            const bool own=snap.stock && snap.stockHud.heli;   // its weapons, rounds and reloads (vhud.cpp)
+            if(own)StockStores(snap.stockHud,stores,_countof(stores));
+            HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.sym,own ? stores : nullptr,lines,&at);
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
@@ -1464,6 +1686,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.stock && !snap.cockpit && !snap.stockHud.heli)
+            StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
