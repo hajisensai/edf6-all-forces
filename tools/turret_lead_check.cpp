@@ -7,9 +7,13 @@
 //    Out of reach: false.
 //  - NextPick: the nearest first, then each next one out, round to the nearest after the last; none: -1.
 //  - OffView: the angle off the view and the distance.
+//  - The player's gun's owner (common/edf/aimlink.h PlayerGunRule, the user 2026-10-06): with EDF6VehicleCrew's turret
+//    camera on the seat the gun follows the view and the plugin turns it only onto a lock in AUTO, never reading the
+//    stick as a drag; without the camera, V1: the auto-aim and the drag in AUTO, neither in the lead circle.
 // Exit code 1 on a failure. Built on request only:
 // cmake --build build --target turret_lead_check && build\turret_lead_check.exe
 #include "../autoturret/src/aimmath.h"
+#include "edf/aimlink.h"
 #include <cmath>
 #include <cstdio>
 
@@ -97,6 +101,17 @@ int main() {
         float distance;
         const float a=aim::OffView(eye,dir,p,&distance);
         Check(std::fabs(a-45.0f*kDeg)<1e-4f && std::fabs(distance-141.421356f)<1e-3f,"OffView: 45 deg, 141.4 m");
+    }
+    {
+        using edf::aimlink::PlayerGunRule;
+        // With the turret camera: AUTO + lock steers; AUTO without a lock, and the lead circle, leave the gun to the view.
+        Check(PlayerGunRule(true,false,true).steer && !PlayerGunRule(true,false,true).drag,"camera turret, AUTO, locked: the lock steers, no drag");
+        Check(!PlayerGunRule(true,false,false).steer && !PlayerGunRule(true,false,false).drag,"camera turret, AUTO, no lock: the view steers");
+        Check(!PlayerGunRule(true,true,true).steer && !PlayerGunRule(true,true,false).steer,"camera turret, lead circle: never steered");
+        // Without it (EDF6VehicleCrew absent, DecoupledTurretCam=0, a seat it does not serve): V1 unchanged.
+        Check(PlayerGunRule(false,false,false).steer && PlayerGunRule(false,false,false).drag,"no camera, AUTO: auto-aim, the stick drags");
+        Check(PlayerGunRule(false,false,true).steer && PlayerGunRule(false,false,true).drag,"no camera, AUTO, locked: as V1");
+        Check(!PlayerGunRule(false,true,false).steer && !PlayerGunRule(false,true,true).drag,"no camera, lead circle: the player's");
     }
     std::printf("%s\n",failures ? "FAILED" : "all passed");
     return failures ? 1 : 0;

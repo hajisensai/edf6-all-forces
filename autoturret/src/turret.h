@@ -13,6 +13,7 @@
 #include "edf/patch.h"
 #include "edf/seat.h"
 #include "edf/weapon.h"
+#include "edf/aimlink.h"
 
 namespace autoturret {
 using edf::At;
@@ -165,6 +166,7 @@ struct Track {
     float in[2];           // last input written
     float k[2];            // learned rad per frame per unit input
     bool player;           // a player aims with it: never given up for an NPC's seat (TrackFor)
+    ULONGLONG steered;     // the game frame (Frame) this plugin last wrote the seat's turn input (aimlink Steers)
     bool dragging;         // the rider is aiming by hand
     const void* dropped;   // target dragged away from
     ULONGLONG droppedUntil;
@@ -225,6 +227,9 @@ void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned c
 const void* Designated(const unsigned char* vehicle,float* world) noexcept;
 // The lead-circle mode: the player's own turret is not steered, the HUD shows where to aim.
 bool LeadCircle() noexcept;
+// EDF6VehicleCrew's turret camera turns `vehicle`'s seat `seat` after the player's view (common/edf/aimlink.h
+// CameraTurret); false without that plugin (or an older one): the player's gun is this plugin's as in V1.
+bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
 // The readout for EDF6VehicleCrew's HUD (common/edf/aimlink.h), from the player's seat this frame: `ownGun` the seat's
 // gun is the plugin's; `target` what the gun works on (null: nothing) at `world`, led from `muzzle` along `bore` with
 // `shot` against the target's velocity `vel` (m/frame); `life` the round's frames (0: unknown).

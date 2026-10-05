@@ -60,7 +60,8 @@ ULONGLONG readoutAt=0;
 
 link::ViewRayFn viewRay=nullptr;
 link::MapRayFn mapRay=nullptr;
-ULONGLONG viewTried=0,mapTried=0;
+link::SeatQueryFn cameraTurret=nullptr;
+ULONGLONG viewTried=0,mapTried=0,cameraTried=0;
 
 bool KeyHeld(int vk) noexcept {
     if(vk<=0 || vk>0xFE)return false;
@@ -205,6 +206,10 @@ const void* Designated(const unsigned char* vehicle,float* world) noexcept {
 }
 
 bool LeadCircle() noexcept { return mode==link::Mode::leadCircle; }
+
+bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept {
+    return link::Resolve(link::kCrewDll,link::kCameraTurret,cameraTurret,cameraTried) && cameraTurret(vehicle,seat);
+}
 
 void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const float* muzzle,const float* bore,
                 const Shot* shot,const float* vel,float life) noexcept {

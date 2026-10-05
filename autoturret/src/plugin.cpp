@@ -640,13 +640,16 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     const float* muzzle=barrel.ok ? barrel.pos : nullptr;
     const float* bore=barrel.ok ? barrel.dir : nullptr;
     if(pilot)PilotFrame(vehicle,0,seat,muzzle,bore,range);
-    const bool lead=pilot && LeadCircle();
     const void* only=pilot ? Designated(vehicle,nullptr) : nullptr;
-    // Holding the aim stick aims by hand (the stock input already turned it); letting go hands the
-    // turret back at once, to a target near where it was dragged, never the one dragged away from.
-    // In the lead-circle mode the turret is the player's anyway.
+    // Who turns the gun (common/edf/aimlink.h PlayerGunRule): an NPC's always this plugin; the player's, with
+    // EDF6VehicleCrew's turret camera turning it after the view, only onto their lock in AUTO; without that camera, as
+    // ever (the auto-aim, the lead circle the player's own). Holding the aim stick then aims by hand (the stock input
+    // already turned it); letting go hands the turret back at once, to a target near where it was dragged, never the
+    // one dragged away from. With the camera the stick turns the view: no drag.
+    const edf::aimlink::PlayerGun rule=pilot ? edf::aimlink::PlayerGunRule(CameraTurret(vehicle,0),LeadCircle(),only!=nullptr)
+                                             : edf::aimlink::PlayerGun{true,true};
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
-    const bool drag=!lead && cfg.dragDeadzone>0.0f && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
+    const bool drag=rule.drag && cfg.dragDeadzone>0.0f && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
     if(drag && !track->dragging && track->target){track->dropped=track->target;track->droppedUntil=now+cfg.dragDropMs;}
     track->dragging=drag;
     if(drag)track->target=nullptr;
@@ -657,13 +660,13 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
         if(pilot)PublishAim(vehicle,true,nullptr,nullptr,muzzle,bore,&shot,nullptr,barrel.life);
         return -1.0f;
     }
-    diag.stop=lead ? "lead-circle" : "aiming";
+    diag.stop=rule.steer ? "aiming" : "tracking";
     Lead(vehicle,*track,target,world,local,shot);
     track->at=now;
     if(pilot)PublishAim(vehicle,true,target,world,muzzle,bore,&shot,track->vel,barrel.life);
     float wantYaw,wantPitch,flight;
     if(!AimAngles(local,shot,wantYaw,wantPitch,flight)){diag.stop="out-of-reach";return -1.0f;}
-    if(lead)return flight;   // the time fuse still bursts the flak at the target's range
+    if(!rule.steer)return flight;   // the time fuse still bursts the flak at the target's range
     const auto axes=seat+kSeatAim+kAimAxes;
     const float yaw=At<float>(axes,kAxisAngle),pitch=At<float>(axes+kAxisStride,kAxisAngle);
     if(!std::isfinite(yaw) || !std::isfinite(pitch)){diag.stop="bad-axis";return flight;}
@@ -673,6 +676,7 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     const float in[2]={AxisInput(*track,0,wantYaw,yaw,yawError,fullCircle,cfg.gain),AxisInput(*track,1,wantPitch,pitch,wantPitch-pitch,false,cfg.gain)};
     if(!std::isfinite(in[0]) || !std::isfinite(in[1])){diag.stop="bad-input";return flight;}
     Put<float>(vehicle,kTurn,in[0]);Put<float>(vehicle,kTurn+4,in[1]);
+    track->steered=Frame();
     if(cfg.debug && now-track->loggedAt>500) {
         track->loggedAt=now;
         Log("AIM %s flight=%.0ff drop=%.5f v=%p t=%p local=(%.1f,%.1f,%.1f) yaw=%.3f->%.3f pitch=%.3f->%.3f in=(%.2f,%.2f) rate=(%.2f,%.2f)/s k=(%.2f,%.2f)/s speed=%.0fm/s",
@@ -894,6 +898,19 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     const int gunners=HookGunners();
     Log("LOADED patches flak=%d gunners=%d",flak,gunners);
     return flak+gunners>0;
+}
+
+// EDF6VehicleCrew's turret camera asks whether this plugin turned `vehicle`'s seat `seat` this game frame (aimlink.h
+// Steers): it then leaves the turret to it for the frame. The aim step it asks from runs after this frame's input slot.
+extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_SteersV2(const void* vehicle,unsigned seat) {
+    using namespace autoturret;
+    if(!vehicle)return false;
+    __try {
+        const auto ctrl=At<const void*>(vehicle,kSelfCtrl);
+        for(const Track& t:tracks)
+            if(t.vehicle==vehicle && t.seat==seat && t.ctrl==ctrl)return t.steered!=0 && t.steered==Frame();
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return false;
 }
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {

@@ -424,6 +424,11 @@ bool InstallTurretCam() noexcept;
 void TurretCamFrame(unsigned char* vehicle) noexcept;
 bool TurretCamServes(const void* vehicle) noexcept;
 bool TurretCamLarge(const void* vehicle) noexcept;
+// TurretCamTurret: the camera is decoupled in `vehicle`'s seat `seat` (the player's turret follows the view: the right
+// stick turns the camera; EDF6AutoTurret asks, common/edf/aimlink.h CameraTurret). TurretCamSteers: and the camera
+// turned that seat's aim itself in its last step (not another plugin's hand): nix.cpp then leaves the torso's yaw to it.
+bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept;
+bool TurretCamSteers(const void* vehicle) noexcept;
 void ResetTurretCam() noexcept;
 // The player's turret against their view (hud.cpp's marker; any HUD may draw it), fresh within 200 ms while the camera
 // is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds

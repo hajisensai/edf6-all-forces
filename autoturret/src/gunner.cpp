@@ -308,13 +308,15 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     const bool pilot=crew==Crew::player;
     const float life=static_cast<float>(At<std::int32_t>(gun.weapon,kAmmoAlive));
     if(pilot)PilotFrame(vehicle,s,seat,gun.pos,gun.dir,gun.range);
-    const bool lead=pilot && LeadCircle();
     const void* designated=Designated(vehicle,nullptr);
     const void* only=pilot ? designated : nullptr;
-    // A player holding the stick aims by hand; letting go hands the gun back, never to the target
-    // it was dragged away from. In the lead-circle mode the gun is the player's anyway.
+    // Who turns the gun (common/edf/aimlink.h PlayerGunRule): an AI seat's this plugin; the player's as the flak's
+    // (plugin.cpp Steer). A player holding the stick (no turret camera on the seat) aims by hand; letting go hands the
+    // gun back, never to the target it was dragged away from.
+    const edf::aimlink::PlayerGun rule=pilot ? edf::aimlink::PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)
+                                             : edf::aimlink::PlayerGun{true,false};
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
-    const bool drag=pilot && !lead && cfg.dragDeadzone>0.0f
+    const bool drag=rule.drag && cfg.dragDeadzone>0.0f
         && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
     if(drag && !track.dragging && track.target){track.dropped=track.target;track.droppedUntil=now+cfg.dragDropMs;}
     track.dragging=drag;
@@ -330,7 +332,7 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     LeadGun(vehicle,gun,track,target,world,aimAt);
     track.at=now;
     if(pilot)PublishAim(vehicle,true,target,world,gun.pos,gun.dir,&gun.shot,track.vel,life);
-    if(lead)return;
+    if(!rule.steer)return;
     float want[2],error[2],axis[2],time,distance;
     if(!Solve(vehicle,gun,aimAt,want,time,distance) || !AxisTargets(aim,want,error,axis)){track.firing=false;return;}
     for(int a=0;a<2;++a)axis[a]=Clamp(axis[a],aim.min[a],aim.max[a]);
@@ -341,6 +343,7 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     }
     if(!AllFinite(in,2))return;
     Put<float>(vehicle,kTurn+s*kTurnStride,in[0]);Put<float>(vehicle,kTurn+s*kTurnStride+4,in[1]);
+    track.steered=autoturret::Frame();
     const bool fire=crew!=Crew::player && OnTarget(gun,error,distance,track.firing ? kHoldCone : 1.0f);
     if(fire) {
         // A pull the weapon has not read by the next frame means this gun is not being updated.

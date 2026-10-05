@@ -17,8 +17,11 @@
 //    frame; the hook turns the view by the rider's own stick (seat+0x2D0, docs/camera-re.md §4: -1..1 a frame, the
 //    mouse's excess carried over by 0x56DBC0, handed to the aim as (-x, y)) and hands the aim the input that turns the
 //    turret onto the point under the screen's centre (CameraRay + MapRay, else kAimFar along it) at the stock rates
-//    (turretcam.h AxisCommand), the low ballistic arc for a gun that drops. An aim input off the stick is another
-//    plugin's (EDF6AutoTurret's flak aim): the turret stays theirs, the view the rider's.
+//    (turretcam.h AxisCommand): the round's low ballistic arc through a real map hit, the bore line through it in
+//    EDF6AutoTurret's lead-circle mode (the circle already solved the arc) and through the made-up point of a view that
+//    hits nothing (turretcam.h BallisticAim). EDF6AutoTurret turns this turret only onto the player's lock in its
+//    auto-aim mode and says so (common/edf/aimlink.h V2 Steers): that frame the turret is its, the view the rider's; an
+//    EDF6AutoTurret without the V2 link is told apart by its input being off the stick (turretcam.h Foreign).
 //  - Free look (FreeLookKey / FreeLookButton held): the view turns, the turret holds the point it was on (decoupled) or
 //    stands still (coupled); let go, the view swings back to where it was (coupled: onto the stock camera's) and hands
 //    over again.
@@ -35,6 +38,7 @@
 #include "memory.h"
 #include "turretcam.h"
 #include "sight.h"
+#include "turretaim.h"
 #include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
@@ -86,11 +90,14 @@ struct Shared {
     bool decoupled,high;       // DecoupledTurretCam / highcam.cpp's toggle, this frame
     bool free,returning;       // free look held / swinging back
     bool view;                 // yaw / pitch hold the plugin's view
+    bool steering;             // the aim's last step had the camera's command (not the stick's, not another plugin's)
     float yaw,pitch;
+    unsigned take;             // which take-over this is (each new vehicle or seat a new one): the camera eases in anew
 };
 // The camera's own (its hook only): the rig it has eased to, its last placement, how far into a take-over.
 struct CamSide {
     const unsigned char* seat;
+    unsigned take;             // Shared::take it was placing for: another one starts from the stock camera again
     bool owned;
     int blend;                 // frames left of easing in (taken over) or out (handing back: `leaving`)
     bool leaving;
@@ -108,11 +115,13 @@ struct GameSide {
     float holdAt[3];           // the point the turret holds while looking round
     float backYaw,backPitch;   // the view to swing back to (decoupled)
     float aim[3];bool hasAim;  // the point under the screen's centre this frame
+    bool aimHit,holdHit;       // ... a real map hit (else kAimFar along an empty view) / the held point's
     float lastWant[2],drift[2];bool hasWant;
     bool foreign;              // the aim's input was not the rider's stick last frame
     ULONGLONG logAt;
 };
 Shared shared{};
+unsigned takes=0;              // Shared::take's counter (under `lock`)
 CamSide camSide{};
 GameSide game{};
 SRWLOCK lock=SRWLOCK_INIT;
@@ -161,14 +170,22 @@ void AxesDir(const unsigned char* v,const unsigned char* seat,float* d) noexcept
     vec::Normalize(d);
 }
 
-// The point under the screen's centre: the first map hit along it, else kAimFar out. False with no camera yet.
-bool AimPoint(float* p) noexcept {
-    float eye[3],dir[3],hit[3];
+// The point under the screen's centre: the first map hit along it (`*hit` true), else kAimFar out. False with no camera
+// yet.
+bool AimPoint(float* p,bool* hit) noexcept {
+    float eye[3],dir[3],at[3];
+    *hit=false;
     if(!CameraRay(eye,dir))return false;
     const float end[3]={eye[0]+dir[0]*kSightFar,eye[1]+dir[1]*kSightFar,eye[2]+dir[2]*kSightFar};
-    if(MapRay(eye,end,hit)>=0.0f && vec::Dist(eye,hit)<=kSightFar){std::memcpy(p,hit,12);return true;}
+    if(MapRay(eye,end,at)>=0.0f && vec::Dist(eye,at)<=kSightFar){std::memcpy(p,at,12);*hit=true;return true;}
     for(int i=0;i<3;++i)p[i]=eye[i]+dir[i]*kAimFar;
     return true;
+}
+
+// EDF6AutoTurret's lead-circle mode on the player's own gun (its readout: common/edf/aimlink.h).
+bool LeadCircleOn() noexcept {
+    edf::aimlink::TurretReadoutV1 r{};
+    return AutoTurretReadout(&r) && r.ownGun && r.mode==edf::aimlink::Mode::leadCircle;
 }
 
 bool FreeHeld(const unsigned char* seat) noexcept {
@@ -195,9 +212,10 @@ void Drop(const char* why) noexcept {
 
 // --- the turret, from the aim step (game thread) ---
 
-// The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`: from the muzzle, in the hull's frame, the
-// low ballistic arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line).
-bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,float* want) noexcept {
+// The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`: from the muzzle, in the hull's frame, with
+// `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line),
+// else the bore line (turretcam.h BallisticAim).
+bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,bool ballistic,float* want) noexcept {
     const unsigned char* gun=Gun(seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,16,muzzle,dir))return false;
@@ -210,7 +228,7 @@ bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,float
     float elevation=std::atan2(l[1],x),frames=0.0f,g[3];
     const float speed=At<float>(gun,edf::kWeaponAmmoSpeed),factor=At<float>(gun,edf::kWeaponAmmoGravity);
     const bool lofted=At<std::int32_t>(gun,edf::kWeaponMark)==edf::kMarkLofted;
-    if(!lofted && std::isfinite(speed) && speed>0.0f && std::isfinite(factor) && factor>0.0f && edf::WorldGravity(image,g)) {
+    if(ballistic && !lofted && std::isfinite(speed) && speed>0.0f && std::isfinite(factor) && factor>0.0f && edf::WorldGravity(image,g)) {
         const double drop=factor*-(g[0]*m[4]+g[1]*m[5]+g[2]*m[6])/3600.0;
         float e=0.0f;
         if(drop>0.0 && edf::BallisticArc(x,l[1],speed,drop,false,e,frames) && std::isfinite(e))elevation=e;
@@ -241,7 +259,7 @@ bool Steer(const unsigned char* seat,const float* want,float* in) noexcept {
     return on;
 }
 
-void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt) noexcept {
+void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic) noexcept {
     TurretCamReadout r{};
     r.decoupled=s.decoupled;r.freeLook=s.free || s.returning;r.high=s.high;r.onTarget=on;
     const unsigned char* gun=Gun(seat);
@@ -249,11 +267,12 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     if(!gun || !edf::MeanMuzzle(gun,16,muzzle,dir))return;
     std::memcpy(r.aim,holdAt,12);
     std::memcpy(r.muzzle,muzzle,12);std::memcpy(r.gunDir,dir,12);
-    // Where the gun's round would be at the aim point's range: along its arc for a gun that drops.
+    // Where the gun's round would be at the aim point's range: along its arc for a gun that drops, aimed by its arc;
+    // along its bore line when the line is what is put on the point (BallisticAim), so the mark meets the point.
     const float range=vec::Dist(holdAt,muzzle);
     float g[3];
     const float speed=At<float>(gun,edf::kWeaponAmmoSpeed),factor=At<float>(gun,edf::kWeaponAmmoGravity);
-    if(std::isfinite(speed) && speed>0.0f && std::isfinite(factor) && factor>0.0f && edf::WorldGravity(image,g)) {
+    if(ballistic && std::isfinite(speed) && speed>0.0f && std::isfinite(factor) && factor>0.0f && edf::WorldGravity(image,g)) {
         const float vel[3]={dir[0]*speed,dir[1]*speed,dir[2]*speed};
         const float drop[3]={g[0]*factor/3600.0f,g[1]*factor/3600.0f,g[2]*factor/3600.0f};
         sight::RoundAfter(muzzle,vel,drop,range/speed,r.gun);
@@ -279,8 +298,8 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);s.view=true;
     }
     if(press) {
-        std::memcpy(game.holdAt,game.aim,12);
-        if(!game.hasAim){float d[3];AxesDir(s.v,seat,d);const float* p=reinterpret_cast<const float*>(s.v+kMatrix)+12;for(int i=0;i<3;++i)game.holdAt[i]=p[i]+d[i]*kAimFar;}
+        std::memcpy(game.holdAt,game.aim,12);game.holdHit=game.aimHit;
+        if(!game.hasAim){float d[3];AxesDir(s.v,seat,d);const float* p=reinterpret_cast<const float*>(s.v+kMatrix)+12;for(int i=0;i<3;++i)game.holdAt[i]=p[i]+d[i]*kAimFar;game.holdHit=false;}
         game.backYaw=s.yaw;game.backPitch=s.pitch;
         if(!s.decoupled) {   // coupled: the view starts where the screen's centre is
             float eye[3],dir[3];
@@ -292,9 +311,9 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     if(release){s.free=false;s.returning=true;}
     // The view turns by the rider's own stick (as the aim gets it: a positive yaw input turns the axis to the hull's +x,
     // its left, so the heading falls; a positive pitch input lowers the gun). The aim's own input may be another
-    // plugin's (EDF6AutoTurret aims the flak its rider sits in): then the turret stays theirs, the view the rider's.
+    // plugin's (EDF6AutoTurret on the player's lock): then the turret is theirs this frame, the view the rider's.
     const float stick[2]={-At<float>(seat,kSeatStick),At<float>(seat,kSeatStick+4)};
-    const bool foreign=std::fabs(in[0]-stick[0])>kForeign || std::fabs(in[1]-stick[1])>kForeign;
+    const bool foreign=tcam::Foreign(AutoTurretSteers(s.v,0),in,stick,kForeign);
     const float rate=std::fmax(c.turretCamRate*kPi/180.0f/60.0f,At<float>(seat,kSeatAim+kAimParams+8));
     const bool turning=s.decoupled || s.free;
     if(turning && !s.returning) {
@@ -311,17 +330,19 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     float want[2];
     bool on=false;
     const float* target=s.free || s.returning ? game.holdAt : game.aim;
+    const bool ballistic=tcam::BallisticAim(s.free || s.returning ? game.holdHit : game.aimHit,LeadCircleOn());
     const bool steer=s.decoupled && !foreign && (game.hasAim || s.free || s.returning);
+    s.steering=false;
     if(foreign){cmd[0]=in[0];cmd[1]=in[1];game.hasWant=false;}
-    else if(steer && Wants(s.v,seat,target,want))on=Steer(seat,want,cmd);
+    else if(steer && Wants(s.v,seat,target,ballistic,want)){on=Steer(seat,want,cmd);s.steering=true;}
     else if(s.free || s.returning){cmd[0]=0.0f;cmd[1]=0.0f;}   // coupled: the turret stands while the view looks round
     else{cmd[0]=in[0];cmd[1]=in[1];game.hasWant=false;}
     AcquireSRWLockExclusive(&lock);
-    if(shared.seat==seat){shared.aimMs=s.aimMs;shared.free=s.free;shared.returning=s.returning;shared.view=s.view;shared.yaw=s.yaw;shared.pitch=s.pitch;}
+    if(shared.seat==seat){shared.aimMs=s.aimMs;shared.free=s.free;shared.returning=s.returning;shared.view=s.view;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=s.steering;}
     ReleaseSRWLockExclusive(&lock);
     if(foreign!=game.foreign && c.debug)Log("TURRETCAM the aim's input is %s",foreign ? "another hand's (the turret is theirs, the view the rider's)" : "the rider's again");
     game.foreign=foreign;
-    if(s.decoupled || s.free || s.returning)Readout(seat,s,on,target);
+    if(s.decoupled || s.free || s.returning)Readout(seat,s,on,target,ballistic);
 }
 
 void __fastcall AimHook(void* aim,const float* in) {
@@ -397,6 +418,9 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const bool viewed=aimed && (s.decoupled || s.free || s.returning);
     const bool own=live && (viewed || s.high);
     if(!live){camSide=CamSide{};return;}
+    // Another take (the player left the seat and came back, Drop between: this hook does not run while nobody is
+    // served, so it never saw them go): its camera starts from the stock one again, easing in.
+    if(camSide.owned && camSide.take!=s.take)camSide=CamSide{};
     // The stock points: the look-at just fetched, the eye's as its locator puts it (no XAngleAdjust).
     alignas(16) float eyeM[16];
     reinterpret_cast<PointFn>(image+kPoint)(seat+kSeatCamEye,eyeM);
@@ -423,7 +447,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         const bool back=camSide.owned && camSide.seat==seat;   // taken back while handing over: from where it is
         const CamSide was=camSide;
         camSide=CamSide{};
-        camSide.seat=seat;camSide.owned=true;camSide.blend=kBlendFrames;
+        camSide.seat=seat;camSide.take=s.take;camSide.owned=true;camSide.blend=kBlendFrames;
         camSide.rig=back ? was.rig : a ? rigA : want;camSide.offset=back ? was.offset : viewed ? 0.0f : baseA;
         std::memcpy(camSide.eye,cam+kCamEye,12);std::memcpy(camSide.look,cam+kCamLook,12);
         if(c.debug)Log("TURRETCAM v=%p: camera taken (%s%s), rig %s r=%.1f up=%.1f rise=%.1f, stock r=%.1f",s.v,viewed ? "view" : "coupled",
@@ -467,7 +491,7 @@ bool InstallTurretCam() noexcept {
             return false;
         }
         auto slot=reinterpret_cast<void**>(image+kAimVtable)+kAimStepSlot;
-        if(*slot!=image+kAimStep){Log("TURRETCAM the seat aim's step is patched already (%p): left alone",*slot);return false;}
+        const bool aimStock=*slot==image+kAimStep;   // another plugin's hook there: its turret aim is left alone
         // The shim: mov r8, rsi (the camera); jmp [rip] -> LookHook.
         unsigned char shim[3+14]={0x49,0x89,0xF0,0xFF,0x25,0,0,0,0};
         const auto hook=reinterpret_cast<std::uintptr_t>(&LookHook);
@@ -477,7 +501,8 @@ bool InstallTurretCam() noexcept {
         bool changed=false;
         if(!RedirectCall(image+kLookCall,image+kPoint,page,changed)){VirtualFree(page,0,MEM_RELEASE);Log("TURRETCAM look-at call not redirected");return false;}
         void* next=nullptr;
-        if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&AimHook),&next)) {
+        if(!aimStock)Log("TURRETCAM the seat aim's step is patched already (%p): left alone, the high view only",*slot);
+        else if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&AimHook),&next)) {
             Log("TURRETCAM the seat aim's step not hooked: the high view only");
         } else nextAim=reinterpret_cast<AimStepFn>(next);
         lookOk=true;
@@ -497,13 +522,13 @@ void TurretCamFrame(unsigned char* v) noexcept {
     if(!mine || !shared.ref.Is(v)) {
         if(shared.v)Drop("another vehicle");
         AcquireSRWLockExclusive(&lock);
-        shared=Shared{};shared.ref=ObjRef::Of(v);shared.v=v;shared.seat=seat;
+        shared=Shared{};shared.ref=ObjRef::Of(v);shared.v=v;shared.seat=seat;shared.take=++takes;
         ReleaseSRWLockExclusive(&lock);
         game=GameSide{};game.held=FreeHeld(seat);   // a key held while boarding is no press
         Log("TURRETCAM v=%p: a turret the player drives (decoupled=%d, free look key 0x%X / button 0x%X, aim hook %d)",v,
             c.decoupledTurretCam,c.freeLookKey,c.freeLookButton,nextAim!=nullptr);
     }
-    game.hasAim=AimPoint(game.aim);
+    game.hasAim=AimPoint(game.aim,&game.aimHit);
     AcquireSRWLockExclusive(&lock);
     shared.seat=seat;shared.seenMs=GameMs();
     shared.decoupled=c.decoupledTurretCam && nextAim;
@@ -526,6 +551,22 @@ bool TurretCamLarge(const void* vehicle) noexcept {
 }
 
 bool TurretCamServes(const void* vehicle) noexcept { return lookOk && shared.v==vehicle; }
+
+bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept {
+    if(!lookOk || !nextAim || seat!=0 || !vehicle)return false;
+    AcquireSRWLockShared(&lock);
+    const Shared s=shared;
+    ReleaseSRWLockShared(&lock);
+    return Cfg().enabled && s.v==vehicle && s.decoupled && GameMs()-s.seenMs<=kFreshMs && s.ref.Is(vehicle);
+}
+
+bool TurretCamSteers(const void* vehicle) noexcept {
+    if(!TurretCamTurret(vehicle,0))return false;
+    AcquireSRWLockShared(&lock);
+    const bool steering=shared.v==vehicle && shared.steering && GameMs()-shared.aimMs<=kAimFreshMs;
+    ReleaseSRWLockShared(&lock);
+    return steering;
+}
 
 bool PlayerTurretCam(TurretCamReadout* r) noexcept {
     AcquireSRWLockShared(&outLock);

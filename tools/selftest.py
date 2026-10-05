@@ -749,9 +749,10 @@ def katyusha_pose_agrees() -> None:
 @test
 def turret_aim_wired() -> None:
     """The player's turret (autoturret/src/designate.cpp): its ini keys are read, shipped and documented in both READMEs;
-    the lead-circle mode returns before the turn input is written (the flak's Steer, the gunners' SteerSeat); the two
-    plugins' link (common/edf/aimlink.h) exports exactly the names each looks up; EDF6VehicleCrew's two keys are read,
-    shipped and documented; the jets' pick scores by the view only with PlayerJetLockByView."""
+    the ownership rule (aimlink.h PlayerGunRule: the lead circle and, with the turret camera, AUTO without a lock) returns
+    before the turn input is written (the flak's Steer, the gunners' SteerSeat), and each write is reported for the V2
+    Steers; the two plugins' link (common/edf/aimlink.h) exports exactly the names each looks up; EDF6VehicleCrew's two
+    keys are read, shipped and documented; the jets' pick scores by the view only with PlayerJetLockByView."""
     at, ini = src('autoturret/src/plugin.cpp'), src('autoturret/EDF6AutoTurret.ini')
     zh, en = src('autoturret/README.zh-CN.md'), src('autoturret/README.md')
     for key in ('AimMode', 'AimModeKey', 'AimModeButton', 'LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs'):
@@ -759,16 +760,29 @@ def turret_aim_wired() -> None:
     unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if f'L"{k}"' not in at]
     assert not unread, f'EDF6AutoTurret.ini keys autoturret/src/plugin.cpp never reads: {unread}'
     steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
-    assert 0 <= steer.find('if(lead)return flight;') < steer.find('Put<float>(vehicle,kTurn'), 'Steer: lead mode writes no turn'
+    put = steer.find('Put<float>(vehicle,kTurn')
+    assert 0 <= steer.find('if(!rule.steer)return flight;') < put < steer.find('track->steered=Frame();'), 'Steer: the rule gates the turn'
+    assert 'PlayerGunRule(CameraTurret(vehicle,0),LeadCircle(),only!=nullptr)' in steer
     gunner = src('autoturret/src/gunner.cpp')
     seat = gunner.split('void SteerSeat(', 1)[1].split('\n}\n', 1)[0]
-    assert 0 <= seat.find('if(lead)return;') < seat.find('Put<float>(vehicle,kTurn'), 'SteerSeat: lead mode writes no turn'
+    put = seat.find('Put<float>(vehicle,kTurn')
+    assert 0 <= seat.find('if(!rule.steer)return;') < put < seat.find('track.steered=autoturret::Frame();'), 'SteerSeat: the rule gates the turn'
+    assert 'PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)' in seat
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
-    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout'}, names
+    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers'}, names
+    assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
+    # The rule itself: with the camera, only a lock in AUTO steers and the stick never drags; without, V1.
+    rule = link.split('inline PlayerGun PlayerGunRule(', 1)[1].split('\n}', 1)[0]
+    assert 'if(!cameraTurret)return PlayerGun{!lead,!lead};' in rule and 'return PlayerGun{!lead && locked,false};' in rule
     assert f'bool __cdecl {names["kTurretReadout"]}(' in src('autoturret/src/designate.cpp')
+    assert f'bool __cdecl {names["kSteers"]}(' in at
     crew = src('src/turretaim.cpp')
     assert f'bool __cdecl {names["kViewRay"]}(' in crew and f'float __cdecl {names["kMapRay"]}(' in crew
+    assert f'bool __cdecl {names["kCameraTurret"]}(' in crew
+    cam = src('src/turretcam.cpp')
+    assert 'tcam::Foreign(AutoTurretSteers(s.v,0),in,stick,kForeign)' in cam and 'tcam::BallisticAim(' in cam
+    assert '!TurretCamSteers(v)' in src('src/nix.cpp'), 'nix.cpp: the hold stands aside for the turret camera'
     plugin, vini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('PlayerJetLockByView', 'TurretAimHud'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=1', vini, re.M) and key in readme, key

@@ -6,7 +6,10 @@
 //    40 deg/s is tracked (after the catch-up) within a degree;
 //  - the rig: the eye `radius` behind O along the view, never under O + rise, the view's direction kept when raised;
 //    an authored pair (game_object_camera_setting) placed at its own pitch puts the eye where it says; the high view at
-//    its pitch puts the eye `height` up and `back` behind; headings grow turning right.
+//    its pitch puts the eye `height` up and `back` behind; headings grow turning right;
+//  - who turns the turret (Foreign: EDF6AutoTurret's V2 answer decides, else V1's guess off the stick) and whether the
+//    round's arc or the bore line goes through the view point (BallisticAim: the arc only for a real hit outside the
+//    lead-circle mode).
 // Exit code 1 when one fails. Built on request only:
 // cmake --build build --target turret_cam_check && build\turret_cam_check.exe
 #include "../src/turretcam.h"
@@ -148,7 +151,22 @@ void Rigs() {
 }
 }  // namespace
 
+void Owners() {
+    const float stick[2]={0.3f,-0.1f},close[2]={0.31f,-0.1f},off[2]={0.0f,0.0f};
+    // EDF6AutoTurret answers: its word is taken whatever the inputs look like (a small correction near its lock is
+    // still its; an input that happens to equal the stick while it steers too).
+    Expect(tcam::Foreign(1,close,stick,0.02f),"V2: it steers, its small correction near the target is its");
+    Expect(tcam::Foreign(1,stick,stick,0.02f),"V2: it steers, an input equal to the stick is still its");
+    Expect(!tcam::Foreign(0,off,stick,0.02f),"V2: it does not steer, an input off the stick is not taken as its");
+    // No answer (an older EDF6AutoTurret, or none): V1's guess.
+    Expect(!tcam::Foreign(-1,close,stick,0.02f) && tcam::Foreign(-1,off,stick,0.02f),"V1: the input off the stick by more than the tolerance");
+    Expect(tcam::BallisticAim(true,false),"a real hit, AUTO / no auto-turret: the round's arc");
+    Expect(!tcam::BallisticAim(true,true),"lead circle: the bore line (the circle solved the arc)");
+    Expect(!tcam::BallisticAim(false,false) && !tcam::BallisticAim(false,true),"no hit (the made-up far point): the bore line");
+}
+
 int main() {
+    Owners();
     Steps();
     Ends();
     Sweep();

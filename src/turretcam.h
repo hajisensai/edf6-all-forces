@@ -78,6 +78,20 @@ inline Rig High(float height,float back,float pitchDeg) noexcept {
     return Rig{up,0.0f,0.0f,r,height-up,{0.0f,0.0f,0.0f}};
 }
 
+// Who turns the player's turret this frame (common/edf/aimlink.h V2): `steers` EDF6AutoTurret's answer (1: it wrote the
+// seat's input this frame, 0: it did not, -1: no answer, an older peer or none), `in` the aim's input, `stick` the
+// rider's as the aim gets it. Another hand's: the camera leaves the turret to it for the frame. With no answer, V1's
+// guess: an input more than `tol` off the stick.
+inline bool Foreign(int steers,const float* in,const float* stick,float tol) noexcept {
+    if(steers>=0)return steers!=0;
+    return std::fabs(in[0]-stick[0])>tol || std::fabs(in[1]-stick[1])>tol;
+}
+// Whether the gun's round (its low arc) goes through the view point, else the gun's bore line: only for a real hit
+// (ground, a building, a target under the screen's centre) outside the lead-circle mode. The lead circle already solved
+// the arc (the bore line must pass through it: raising the gun again for the drop drops nothing twice), and a view
+// that hits nothing gives a made-up point kAimFar out whose range means nothing.
+inline bool BallisticAim(bool viewHit,bool leadCircle) noexcept { return viewHit && !leadCircle; }
+
 // Each rig parameter `a` eased toward `b` by `k` (0..1).
 inline void Ease(Rig& a,const Rig& b,float k) noexcept {
     a.up+=(b.up-a.up)*k;a.ahead+=(b.ahead-a.ahead)*k;a.side+=(b.side-a.side)*k;

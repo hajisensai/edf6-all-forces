@@ -16,6 +16,8 @@
 //    with its own closed loop (0x63AC40), and another machine's is that machine's. Not while the aim chases a
 //    target angle (+0xC0 set with mode +0xC8 1: the online path, which overwrites the angle).
 //  - Off (NixTorsoTwist=0, the plugin off): nothing is written; the torso stays where it is relative to the legs.
+//  - The turret camera (turretcam.cpp, DecoupledTurretCam) steering the torso itself: nothing is written either (its
+//    command onto a world point already holds the torso's world yaw; TurretCamSteers).
 // PlayerNixTorso publishes the frame's legs and torso (nix.h) for the vehicle camera and the HUD's twist indicator.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
@@ -120,7 +122,10 @@ void Before(unsigned char* v) noexcept {
             v,c.nixTorsoTwist ? "held in the world" : "stock (turns with the legs)",yaw[kAxisAngle/4]*kRad,s.lo*kRad,s.hi*kRad,
             yaw[kAxisMin/4]*kRad,yaw[kAxisMax/4]*kRad,PitchAxis(aim)[kAxisMin/4]*kRad,PitchAxis(aim)[kAxisMax/4]*kRad);
     }
-    hold->held=c.nixTorsoTwist && steered;
+    // The turret camera turning this Nix's torso after its own world-held view (turretcam.cpp, decoupled): its command
+    // already takes the legs' turn out (the want is a world point, the matrix this frame's), so giving the turn back
+    // here too would turn the torso against the legs twice.
+    hold->held=c.nixTorsoTwist && steered && !TurretCamSteers(v);
     if(fresh && hold->held) {
         const nixtwist::Stops s=nixtwist::TwistStops(yaw[kAxisMin/4],yaw[kAxisMax/4]);
         yaw[kAxisAngle/4]=nixtwist::Hold(yaw[kAxisAngle/4],nixtwist::Wrap(heading-hold->heading),s);

@@ -8,9 +8,14 @@
 // Each scenario prints the torso's world yaw through it and whether it is what the controls mean: legs turning under a
 // still mouse leave the torso where it looks (until the stop, then it goes round with the legs, the legs never pushed);
 // the mouse alone turns it; the heading far from 0 and across +-pi changes nothing; an axis with no stops gets +-120 deg;
-// NixTorsoTwist=0 is the stock (the torso turns with the legs). Exit code 1 when one is not.
+// NixTorsoTwist=0 is the stock (the torso turns with the legs). With the turret camera steering the torso (turretcam.cpp,
+// decoupled: its command, tcam::AxisCommand on the stock axis step, takes the yaw axis onto a world point with the
+// want's own drift fed forward) the hold must stand aside (nix.cpp TurretCamSteers): the camera alone keeps the torso
+// on the point while the legs turn; with the hold too the turn is taken out twice and the torso swings off it.
+// Exit code 1 when one is not.
 // Built on request only: cmake --build build --target nix_twist_check && build\nix_twist_check.exe
 #include "../src/nix_twist.h"
+#include "../src/turretcam.h"
 #include <cmath>
 #include <cstdio>
 
@@ -126,6 +131,36 @@ void Stock() {
     Expect(Near(t,start+45.0f*kDeg),"the torso's world yaw",t,start+45.0f*kDeg);
 }
 
+// The turret camera steering the torso onto a world heading `target` while the legs turn at `legs` rad/s, the hold
+// `held` or not: the worst miss of the torso's drawn world yaw over the last second (after the first two to settle).
+float CameraSteered(bool held,float legs,float target) noexcept {
+    const float p[3]={0.2f,0.15f,1.6f*kDt};   // brake, accel, top (rad/frame): a Nix-like torso, faster than the legs
+    crew::tcam::Axis a{-70.0f*kDeg,70.0f*kDeg,0.0f,0.0f};
+    float heading=0.0f,last=0.0f,lastWant=0.0f,drift=0.0f,worst=0.0f;
+    bool started=false;
+    for(int f=0;f<180;++f) {
+        const float drawn=heading;
+        if(held && started)a.angle=nixtwist::Hold(a.angle,nixtwist::Wrap(heading-last),nixtwist::TwistStops(a.lo,a.hi));
+        last=heading;
+        // turretcam.cpp Steer: the want in the hull's frame of this frame's matrix, its drift a frame fed forward.
+        const float want=nixtwist::Wrap(target-heading);
+        if(started)drift+=(std::fmax(-0.2f,std::fmin(0.2f,want-lastWant))-drift)*0.5f;
+        lastWant=want;started=true;
+        crew::tcam::AxisStep(a,crew::tcam::AxisCommand(want-a.angle,a.rate,drift,p),p);
+        const float miss=std::fabs(nixtwist::Wrap(drawn+a.angle-target));
+        if(f>=120 && miss>worst)worst=miss;
+        heading+=legs*kDt;
+    }
+    return worst;
+}
+
+void CameraAndHold() {
+    std::puts("the turret camera steers the torso onto a point 10 deg off while the legs turn 12 deg/s the other way:");
+    const float alone=CameraSteered(false,-12.0f*kDeg,10.0f*kDeg),both=CameraSteered(true,-12.0f*kDeg,10.0f*kDeg);
+    Expect(alone<0.5f*kDeg,"the hold standing aside: the worst miss",alone,0.0f);
+    Expect(both>2.0f*alone && both>0.25f*kDeg,"the hold on too (the turn taken out twice): the worst miss is larger",both,alone);
+}
+
 void AimRows() {
     std::puts("the torso's aim in the vehicle's frame:");
     float d[3];
@@ -145,6 +180,7 @@ int main() {
     FarHeadings();
     NoStops();
     Stock();
+    CameraAndHold();
     AimRows();
     std::printf("%s (%d wrong)\n",failures ? "FAILED" : "all as the controls mean",failures);
     return failures ? 1 : 0;

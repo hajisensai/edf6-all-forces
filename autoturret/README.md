@@ -62,6 +62,15 @@ seats; driving those tanks you get the lock too):
   being lockable, gets 1.5x the lock range away, or you leave the seat. Unlocked, the auto-aim picks its own targets as
   before and the lead circle shows on its pick.
 - A line low on the screen names the mode and both bindings (red while locked).
+- **With EDF6VehicleCrew's turret camera** (its `DecoupledTurretCam=1`, the default: the mouse / right stick turns the
+  camera and your turret follows the screen's centre), the gun you sit at is the camera's by default: this plugin never
+  turns it onto a target of its own picking. In auto-aim it turns it onto **your lock** only (lock with Q / X); the
+  camera stays yours meanwhile, and when the lock goes the turret follows the view again. In the lead-circle mode it
+  never turns it. The stick is the camera's there, so it is never read as you dragging the gun (`DragDeadzone` does
+  not apply to that seat). The two plugins tell each other who turns which seat (`common/edf/aimlink.h` V2); without
+  EDF6VehicleCrew, with its turret camera off, or with an EDF6VehicleCrew older than that link, everything here works
+  as described above (auto-aim on its own pick, the stick dragging the gun). The flak's time fuse still bursts at the
+  tracked target's range either way. NPC gunners are unchanged.
 
 The HUD, the camera's view ray and the line-of-sight test come from EDF6VehicleCrew (ini `TurretAimHud`). With this
 plugin alone the modes and the lock still work, without anything drawn; the lock then looks along the barrel and does
