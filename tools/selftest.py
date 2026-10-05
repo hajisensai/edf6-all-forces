@@ -816,6 +816,37 @@ def heli_mouse_aim_wired() -> None:
 
 
 @test
+def nix_torso_wired() -> None:
+    """The Nix's torso twist (src/nix.cpp, src/nix_twist.h): its ini key is read, shipped on and documented; it chains the
+    Nix's own class (the vtable crew.cpp knows as 612_nix) and is built (its own target_sources line) with its offline
+    check target; every EDF.dll address it checks is in docs/nix-re.md; the open stops are 120 deg; with the game
+    present, V612_NIX.SGO is that class and its pilot class says the +-70 deg README.md gives as the stock twist limit."""
+    import math
+    import rootcpk
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/nix-re.md')
+    code, twist, crew, cmake = src('src/nix.cpp'), src('src/nix_twist.h'), src('src/crew.cpp'), src('CMakeLists.txt')
+    assert 'L"NixTorsoTwist"' in plugin and re.search(r'^NixTorsoTwist=1', ini, re.M) and 'NixTorsoTwist' in readme
+    vt = re.search(r'kVtNix=(0x[0-9A-F]+)', code).group(1)
+    assert re.search(rf'\{{{vt},0x[0-9A-F]+,"612_nix"\}}', crew), vt
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)' in cmake
+    assert 'add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)' in cmake
+    sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
+    rvas = re.findall(r'\{(0x[0-9A-F]+),\{', sigs)
+    assert len(rvas) >= 8, rvas + [re.search(r'kUpdate=(0x[0-9A-F]+)', code).group(1), vt]
+    for rva in rvas:
+        assert rva.upper().replace('0X', '0x') in doc, f'docs/nix-re.md does not mention {rva}'
+    assert re.search(r'kHeading=0x1720\+0x2B4', code) and '0x2B4' in doc
+    open_twist = float(re.search(r'kOpenTwist=([0-9.]+)f', twist).group(1))
+    assert abs(math.degrees(open_twist) - 120.0) < 1e-4 and '120' in readme
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        import sgo
+        nix = sgo.load(data=rootcpk.default().read('OBJECT', 'V612_NIX.SGO'))
+        assert nix['xgs_scene_object_class'] == 'Vehicle612_nix'
+        assert [-70.0, 70.0] == nix['begaruta_pilot_class'][0][1][2:], nix['begaruta_pilot_class']
+        assert '±70°' in readme
+
+
+@test
 def gunship_gunner_seat() -> None:
     """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second
     seat with the pilot's locators and the stock door gunner's pose, class mask and key row, and nothing else changes; a
