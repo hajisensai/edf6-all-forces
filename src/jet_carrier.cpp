@@ -132,6 +132,43 @@ bool DroneOut(const Jet& c,int i) noexcept {
         if(d.ref && d.drone.mother==c.ref.ctrl && d.drone.slot==i && !d.reap && Alive(d.ref) && !d.Vehicle()[kDead])return true;
     return false;
 }
+
+// A drone place whose drone is gone (shot down) gets a new one kReplaceMs on.
+void ReplaceLost(Jet& c,ULONGLONG ms) noexcept {
+    CarrierState& cs=c.carrier;
+    for(int i=0;i<kCarrierDrones;++i) {
+        if(cs.dock[i]!=kDroneOut || DroneOut(c,i))continue;
+        cs.dock[i]=ms+kReplaceMs;
+        Log("JET v=%p carrier: drone %d lost, a new one in %.0f s",c.Vehicle(),i,static_cast<float>(kReplaceMs)*0.001f);
+    }
+}
+
+// One drone launched from a ready place (see kCarrierDrones) at `aim` (`target`: what it is sent at, for the log):
+// from kLaunchBelow under the carrier along its heading, faster than it, in its flight. False: no place ready, the
+// table full (FreeSlot says so in the log, at most every few seconds), the game could not make it.
+bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const void* target,ULONGLONG ms) noexcept {
+    CarrierState& cs=c.carrier;
+    int i=0;
+    while(i<kCarrierDrones && cs.dock[i]>ms)++i;
+    if(i==kCarrierDrones || cs.sorties<=0 || !SlotFree())return false;
+    cs.launchAt=ms;
+    float heading[3]={c.m.vel[0],0.0f,c.m.vel[2]};
+    if(!Normalize(heading)){heading[0]=nose[0];heading[1]=0.0f;heading[2]=nose[2];}
+    const float from[3]={pos[0],pos[1]-kLaunchBelow,pos[2]};
+    // Its own drones (blast, doll: its body's mark says which) when their body is there this mission, else the gun drone.
+    const Kind& own=KindOf(cs.drones);
+    const Body b=own.weapon==Weapon::charge && Preloaded(own.body) ? own.body : Body::drone;
+    const float least=KindOf(Row(b).role).minSpeed,s=Len(c.m.vel)+20.0f;
+    Jet* d=Launch(b,from,heading,aim,Cfg().jetFuelSec,s>least ? s : least,c.Vehicle());
+    if(!d)return false;
+    d->drone.mother=c.ref.ctrl;d->drone.carried=true;d->drone.slot=i;
+    JoinFlight(*d,c.flight);
+    cs.dock[i]=kDroneOut;--cs.sorties;
+    if(KindOf(*d).doll)DollMake(IndexOf(*d),d->Vehicle(),Cfg().jetFuelSec);
+    Log("JET v=%p carrier %p launched %s %d at %p",d->Vehicle(),c.Vehicle(),KindOf(*d).name,i,target);
+    Publish(true);
+    return true;
+}
 }  // namespace
 
 Jet* MotherOf(const Jet& d) noexcept {
@@ -197,32 +234,42 @@ void CarrierGoal(Jet& c,const Kind& k,const float* pos,const float* anchor,float
 // kLaunchBelow under it along its heading, faster than it, in its flight. With the table full it waits for an
 // entry (FreeSlot says so in the log, at most every few seconds), trying nothing meanwhile.
 void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexcept {
-    CarrierState& cs=c.carrier;
-    for(int i=0;i<kCarrierDrones;++i) {
-        if(cs.dock[i]!=kDroneOut || DroneOut(c,i))continue;
-        cs.dock[i]=ms+kReplaceMs;
-        Log("JET v=%p carrier: drone %d lost, a new one in %.0f s",c.Vehicle(),i,static_cast<float>(kReplaceMs)*0.001f);
+    ReplaceLost(c,ms);
+    if(!c.t.target || c.mode==Mode::withdraw || c.carrier.sorties<=0 || ms-c.carrier.launchAt<kLaunchGapMs)return;
+    LaunchOne(c,pos,nose,c.t.aim,c.t.target,ms);
+}
+
+// The player flying carrier `v` sends a drone at `at` (playerjet_board.inc), at most one every kLaunchGapMs: its drones
+// then work round that point (jet.cpp JetFrame: CarrierState::order) until they come back or the player leaves.
+bool PlayerLaunchDrone(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
+    Jet* const c=FindJet(v);
+    if(!c || KindOf(*c).weapon!=Weapon::drones)return false;
+    ReplaceLost(*c,ms);
+    if(ms-c->carrier.launchAt<kLaunchGapMs)return false;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    std::memcpy(c->carrier.order,at,12);c->carrier.ordered=true;
+    for(auto& d:jets)if(d.ref && d.drone.mother==c->ref.ctrl)d.t.target=nullptr;   // the drones out pick again round the new point
+    return LaunchOne(*c,pos,m+8,at,nullptr,ms);
+}
+
+// Its drones out called back to it (Mode::recover: Recover, Dock); how many.
+int RecallDrones(unsigned char* v,ULONGLONG ms) noexcept {
+    Jet* const c=FindJet(v);
+    if(!c)return 0;
+    c->carrier.ordered=false;
+    int n=0;
+    for(auto& d:jets) {
+        if(!d.ref || d.drone.mother!=c->ref.ctrl || d.reap || d.mode==Mode::recover || d.mode==Mode::withdraw || d.drone.blastAt)continue;
+        SetMode(d,Mode::recover,ms);++n;
     }
-    if(!c.t.target || c.mode==Mode::withdraw || cs.sorties<=0 || ms-cs.launchAt<kLaunchGapMs)return;
-    int i=0;
-    while(i<kCarrierDrones && cs.dock[i]>ms)++i;
-    if(i==kCarrierDrones || !SlotFree())return;
-    cs.launchAt=ms;
-    float heading[3]={c.m.vel[0],0.0f,c.m.vel[2]};
-    if(!Normalize(heading)){heading[0]=nose[0];heading[1]=0.0f;heading[2]=nose[2];}
-    const float from[3]={pos[0],pos[1]-kLaunchBelow,pos[2]};
-    // Its own drones (blast, doll: its body's mark says which) when their body is there this mission, else the gun drone.
-    const Kind& own=KindOf(cs.drones);
-    const Body b=own.weapon==Weapon::charge && Preloaded(own.body) ? own.body : Body::drone;
-    const float least=KindOf(Row(b).role).minSpeed,s=Len(c.m.vel)+20.0f;
-    Jet* d=Launch(b,from,heading,c.t.aim,Cfg().jetFuelSec,s>least ? s : least,c.Vehicle());
-    if(!d)return;
-    d->drone.mother=c.ref.ctrl;d->drone.carried=true;d->drone.slot=i;
-    JoinFlight(*d,c.flight);
-    cs.dock[i]=kDroneOut;--cs.sorties;
-    if(KindOf(*d).doll)DollMake(IndexOf(*d),d->Vehicle(),Cfg().jetFuelSec);
-    Log("JET v=%p carrier %p launched %s %d at %p",d->Vehicle(),c.Vehicle(),KindOf(*d).name,i,c.t.target);
-    Publish(true);
+    if(n)Log("JET v=%p carrier: %d drones called back by the player",v,n);
+    return n;
+}
+
+int DronesLeft(const unsigned char* v) noexcept {
+    const Jet* const c=FindJet(v);
+    return c && KindOf(*c).weapon==Weapon::drones ? c->carrier.sorties : 0;
 }
 
 bool OutOfDrones(const Jet& c) noexcept {

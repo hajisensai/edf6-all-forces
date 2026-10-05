@@ -372,6 +372,8 @@ void NpcFlares(Jet& j,unsigned char* v,const float* pos,const float* nose,ULONGL
 
 void JetFrame(unsigned char* v) noexcept {
     if(!HooksOk())return;
+    // Called down for the player (its NPC pilot still aboard): playerjet.cpp flies it, its fuel clock standing (ResumeNpc).
+    if(PlayerJetHolds(v))return;
     const ULONGLONG ms=GameMs();
     Publish(false);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -404,14 +406,17 @@ void JetFrame(unsigned char* v) noexcept {
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
     Jet* const mother=MotherOf(*j);
     if(j->escort && follow)std::memcpy(j->anchor,player.pos,12);
-    const float* anchor=mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : follow && !j->launched ? player.pos : j->anchor;
+    // The player's carrier sends its drones to a point (PlayerLaunchDrone): they work round that.
+    const bool ordered=mother && mother->carrier.ordered;
+    const float* anchor=ordered ? mother->carrier.order : mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) :
+                        follow && !j->launched ? player.pos : j->anchor;
     const float* viewer=follow ? player.pos : anchor;
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     Leave(*j,kind,arms,mother,hp,hpMax,ms);
     const bool walled=Sense(*j,pos,ms);
 
     // The target and its motion.
-    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,kind.range,dt,ms);
+    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : kind.range,dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
@@ -477,6 +482,32 @@ void JetReap(const void* self) noexcept {
         changed=true;
     }
     if(changed)Publish(true);
+}
+
+// The jet handed back to its NPC pilot (playerjet_board.inc: the player left it in the air, the catch or the hail ran
+// out), flying at `vel`. Its flight starts afresh from there; its fuel clock stood while the plugin did not fly it (the
+// time since it last did is added to its birth: fuel, a sortie's time and a drone's sortie count on), so it goes back
+// to its call with what it had, under its own rules (Leave: low on fuel or HP, out of ammo, it withdraws); its drones'
+// orders are dropped (they work round the carrier again); a bomber whose run is not over flies it again. Mode: as it
+// was when withdrawing, bombing or going back to its carrier, else patrol (takeoff off the ground).
+void jet::ResumeNpc(unsigned char* v,const float* vel) noexcept {
+    const ULONGLONG ms=GameMs();
+    Jet* const j=FindJet(v);
+    if(!j)return;   // its first frame with its pilot makes the entry (CrewPlaced)
+    if(ms>j->seen)j->bornAt+=ms-j->seen;
+    j->seen=ms;j->lastStep=0;
+    std::memcpy(j->m.vel,vel,12);
+    std::memset(j->m.omega,0,12);std::memset(j->m.acc,0,12);
+    j->m.ready=false;j->m.prevAt=0;j->m.blockedFor=0;
+    j->t.target=nullptr;j->t.lockAt=0;j->t.lockSeen=0;
+    j->carrier.ordered=false;
+    if(j->mode!=Mode::withdraw && j->mode!=Mode::bomb && j->mode!=Mode::recover) {
+        const float clear=GroundClearance(reinterpret_cast<const float*>(v+kPosition));
+        SetMode(*j,clear!=kNoGround && clear<kTakeoffClear ? Mode::takeoff : Mode::patrol,ms);
+    }
+    Log("JET v=%p back to its NPC pilot: %s, %.0f m/s, %.0f s of its fuel flown",v,kModeNames[static_cast<int>(j->mode)],Len(vel),
+        static_cast<float>(ms-j->bornAt)*0.001f);
+    Publish(true);
 }
 
 // A new mission (mission.cpp MissionStart): every entry, doll and learned wall of the last one is forgotten.

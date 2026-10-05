@@ -79,6 +79,8 @@ struct Config {
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
+    bool playerJetAll=true;         // the player can board every other aircraft of the plugin too (playerjet_kinds.h)
+    int playerJetHailKey=0x48;      // ...and this key calls the nearest one down to them ('H'; 0: off)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
@@ -336,6 +338,11 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
+// Any other aircraft of the plugin (playerjet_kinds.h) is the player's too: they may board it now (one of ours, low and
+// slow enough: crew.cpp bumps its NPC pilot for them); the plugin holds it for them (they fly it, it comes down for
+// them, catches them or waits where they left it): jet.cpp does not fly it then, crew.cpp does not crew it.
+bool PlayerJetBoardable(const void* vehicle) noexcept;
+bool PlayerJetHolds(const void* vehicle) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
 // The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path; stores: what it

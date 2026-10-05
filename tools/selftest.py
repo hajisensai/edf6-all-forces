@@ -327,6 +327,27 @@ def hand_copies_agree() -> None:
 
 
 @test
+def every_npc_aircraft_boardable() -> None:
+    # Every jet body of our side (jet_internal.h kBodies: a mark, not hostile) has its row in src/playerjet_kinds.h
+    # kBoardable, so an aircraft added later is flown by the player too (or is left out on purpose here, saying why);
+    # the enemy's are not; the ini keys of the feature are read and documented.
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    rows = re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,[^}]*?"(\w+)"(,true)?\}', re.sub(r'\s+', ' ', table))
+    assert len(rows) >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
+    boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
+    for body, mark, _name, hostile in rows:
+        if int(mark) == 0:
+            continue   # a heli: the stock heli flight
+        if hostile:
+            assert body not in boardable, f'{body} is the enemy\'s: not boardable'
+        else:
+            assert body in boardable, f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('PlayerJetAll', 'PlayerJetHailKey'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+
+
+@test
 def readme_counts() -> None:
     readme = src('README.md')
     assert f'{len(calls.FLOWN)} 种呼叫' in readme, f'README.md: say {len(calls.FLOWN)} 种呼叫 (tools/calls.py FLOWN)'

@@ -132,8 +132,11 @@ void SetObjectTeam(unsigned char* object,std::int32_t team) noexcept {
 
 namespace {
 
-// The team a player boards it as: the team it had before we crewed it, else its own.
+// The team a player boards it as: the team it had before we crewed it, else its own. One of the plugin's aircraft the
+// player may board (playerjet.cpp PlayerJetBoardable) is nobody's vehicle to the seat check: its NPC pilot holds it on
+// the friends' team (2), which the stock check lets no player into.
 std::int32_t OwnTeam(const unsigned char* vehicle) noexcept {
+    if(IsJet(vehicle) && PlayerJetBoardable(vehicle))return kTeamVehicle;
     const State* st=FindState(vehicle);
     return st && st->crewedAt ? st->ownTeam : At<std::int32_t>(vehicle,kTeam);
 }
@@ -342,8 +345,9 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     if(seat || !Cfg().enabled || !Cfg().bump || BumpSuppressed())return seat;
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
-        // The jets are NPC aircraft: their pilot is never bumped for the player (they have no other seat).
-        if(!IsPlayer(static_cast<const unsigned char*>(human)) || IsJet(v) || IsSub(v))return nullptr;
+        // The jets: only one of ours the player may board now (on the ground or hovering low and slow, playerjet.cpp
+        // PlayerJetBoardable); its pilot is kicked (it has no other seat).
+        if(!IsPlayer(static_cast<const unsigned char*>(human)) || (IsJet(v) && !PlayerJetBoardable(v)) || IsSub(v))return nullptr;
         // An NPC still aboard (one moved to a gunner seat, the player gone again) keeps the vehicle on
         // its team, and the stock check then refuses even a free seat: ask again on the vehicle's own.
         const auto team=At<std::int32_t>(v,kTeam),own=OwnTeam(v);
@@ -373,7 +377,8 @@ void __fastcall PromptHook(void* functor,void* object) {
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         EnsureInputs();    // first mission frame: every plugin has loaded by now
-        if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object) || IsSub(object))return;
+        if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || (IsJet(object) && !PlayerJetBoardable(object)) ||
+           IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
         for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy;
@@ -414,7 +419,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
             At<std::int32_t>(vehicle,kTeam),player.team,riders,p[0],p[1],p[2],player.at ? std::sqrt(Distance2(vehicle,player.pos)) : -1.0f);
     }
     if(anyPlayer){st.playerAt=now;st.emptySince=0;return;}
-    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle)){st.emptySince=0;return;}   // a player jet waits for the player
+    // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).

@@ -28,10 +28,13 @@
 // fires the store picked (stores.h: its missiles and bombs, one holder each; the switch key or LB cycles them):
 // the stock fire byte 0x2021 (holder 2) is taken and that store's own trigger pulled (Stores). What it carries
 // weighs on its flight (Burden: thrust, lift and drag) and, a bomb picked, the cockpit shows where it would hit.
+// Every other aircraft of the plugin (the NPC jets, carriers, drones, the gunship, the bombers: playerjet_kinds.h) is
+// boarded and flown through this same record and these steps; what is theirs alone is in playerjet_board.inc.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
 #include "jetaudio.h"
 #include "memory.h"
+#include "playerjet_kinds.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -75,6 +78,8 @@ constexpr Kind kKinds[]={
     {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,150.0f, 2.6f, 130.0f, 10.0f},   // 1 g at 61 m/s
     {"strike", 7202, 60.0f,70.0f,240.0f, 11.0f,26.0f, 5.0f,140.0f, 1.6f, 120.0f, 12.0f},   // 1 g at 63 m/s
 };
+// Every other aircraft of the plugin the player can board (playerjet_kinds.h, the NPC's own performance): their Kinds.
+#include "playerjet_kinds.inc"
 constexpr float kAutoRotate=20.0f;     // m/s over rotate: it lifts off without the stick...
 constexpr float kAutoThrottle=0.6f;    // ...with the throttle at least this open (not rolling out a landing)
 constexpr float kLiftOffClimb=5.0f;    // m/s up the moment it lifts off
@@ -220,7 +225,33 @@ struct PJet {
     const unsigned char* model;  // the bone array the elevons were found in
     unsigned char* elevon[2];
     float elevonBind[2][16],elevonSet[2][16],elevonAt[2];
+    // Any other aircraft of the plugin the player boards (playerjet_board.inc): its row (nullptr: a player jet).
+    const pjet::Boardable* board;
+    bool steered;                // the plugin steers it by `aim` this frame (the gunship's pylon turn): Air as the autopilot's
+    bool keep;                   // left on the ground by the player: it waits there for them (no NPC takes it back)
+    float yaw;                   // a rotor craft's heading (rad, the nose at (sin, 0, cos))
+    ULONGLONG blastAt;           // a charge drone's charge fired (game ms; 0: not)
+    bool specialHeld;            // the target key / X down last frame (a special store's own action)
+    bool orbiting;               // the gunship's pylon turn round orbitAt (orbitR m out, at the height orbitAlt)
+    float orbitAt[3],orbitR,orbitAlt;
+    float sight[3];              // where the camera's centre looks (the shells' and drones' aim), hasSight: found
+    bool hasSight;
+    struct Hail {                // called down for the player (HailTick): its approach, landing and wait
+        int phase;               // HailPhase
+        ULONGLONG at;            // game ms the phase began
+        float stop[3],dir[3],touch[3];   // a wing's strip: where it stops, its heading, where it touches down
+        int tries;               // a wing's approaches flown
+        bool spot;               // a rotor craft's spot (stop) picked
+        int cand;                // the strip search's next candidate
+        float best;              // ...the best one's cost so far (0: none)
+        float bestStop[3],bestDir[3];
+    } hail;
 };
+// playerjet_board.inc (any of the plugin's aircraft under the player): what the flight steps above call.
+void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
+void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
+int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept;
+void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noexcept;
 constexpr int kMaxJets=16;
 PJet jets[kMaxJets]{};
 
@@ -233,6 +264,7 @@ float Axis(const unsigned char* seat,std::size_t at) noexcept {
 }
 
 const Kind* KindOf(const unsigned char* v) noexcept {
+    if(BodyOf(v)==PluginBody::jet)return BoardKindOf(v);   // an NPC aircraft the player may board
     if(BodyOf(v)!=PluginBody::playerJet)return nullptr;
     const int mark=static_cast<int>(BodyMark(v));
     for(const auto& kind:kKinds)if(mark==kind.mark)return &kind;
@@ -603,7 +635,7 @@ bool AimOnScreen(const float* vp,const float* pos,const float* aim) noexcept {
 // See kAimOnScreen: the aim as it was (`was`) when this frame's mouse took it off the screen; still off (the camera
 // turned), toward the flight path `dir` until it is on.
 void KeepAimOnScreen(PJet& j,const unsigned char* v,const float* dir,const float* was) noexcept {
-    if(j.autopilot)return;   // the catch's autopilot aims off the player's screen
+    if(j.autopilot || j.steered)return;   // the catch's autopilot (the pylon turn) aims off the player's screen
     float vp[16];
     if(!LastViewProj(vp))return;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -676,7 +708,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     const bool keyDown=std::fabs(s.pitch)>=kRollDead || std::fabs(s.roll)>=kRollDead;
     if(keyDown)j.mouseFlies=false;
     else if(std::fabs(s.aimX)+std::fabs(s.aimY)>kMouseMoved)j.mouseFlies=true;
-    const bool aiming=j.autopilot || (s.keys && Cfg().playerJetMouseFlight && j.mouseFlies && !keyDown);
+    const bool aiming=j.autopilot || j.steered || (s.keys && Cfg().playerJetMouseFlight && j.mouseFlies && !keyDown);
     if(!aiming)Roll(j,v,s,dir,up,vertical,dt);
     const float wing=speed<k.corner ? (speed/k.corner)*(speed/k.corner) : 1.0f;
     const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;   // its mass over clean: the same wing lifts less g
@@ -810,9 +842,10 @@ constexpr float kThreatRadius=20.0f;
 
 void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Store st[kMostStores];
-    const int n=ReadStores(v,st,kMostStores);
+    const int real=ReadStores(v,st,j.board ? kMostStores-1 : kMostStores);
+    const int n=real+SpecialStore(j,v,st+real);   // the aircraft's own weapon as one more store (playerjet_board.inc)
     j.stores=n;j.bomb=j.hasImpact=false;j.lock=0;
-    j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,n);
+    j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,real);
     if(n==0)return;   // none known: the 506's own fire bytes stand
     if(j.store>=n || j.store<0)j.store=0;
     const bool press=s.switchStore && !j.switchHeld;
@@ -838,7 +871,8 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Flares(j,v,s,pos);
     const bool fire=v[kFireStore]!=0;
     v[kFireStore]=0;
-    if(fire)TriggerStore(st[j.store]);
+    if(fire && st[j.store].weapon)TriggerStore(st[j.store]);
+    else if(fire)FireSpecial(j,v,st[j.store],pos);
     for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;}
     j.bomb=st[j.store].spec->role==StoreRole::bomb;
     if(j.bomb && j.phase==Phase::air)j.hasImpact=Impact(j,pos,j.impact);
@@ -858,11 +892,13 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     j.hasUp=false;j.hasAim=false;
     std::memcpy(j.vel,j.measured,12);
     j.throttle=air ? 0.5f : 0.0f;
-    if(j.autopilot) {   // the catch's jet: the player takes it over in flight, as fast as it flew in
+    if(j.autopilot && catchFlight.v==v) {   // the catch's jet: the player takes it over in flight, as fast as it flew in
         std::memcpy(j.vel,j.sent,12);
         j.phase=Phase::air;j.throttle=1.0f;j.autopilot=false;
         catchFlight=CatchFlight{};
     }
+    j.autopilot=false;
+    Boarded(j,v,pos,clear);   // any of the plugin's other aircraft: its own (playerjet_board.inc)
     Log("PJET v=%p boarded: %s, hp %.0f/%.0f, %s at (%.0f,%.0f,%.0f), %.0f m over the ground, %.0f m/s",v,j.kind->name,
         At<float>(v,kHp),At<float>(v,kHpMax),kPhaseNames[static_cast<int>(j.phase)],pos[0],pos[1],pos[2],clear,speed);
 }
@@ -1054,6 +1090,7 @@ void Leave(PJet& j,unsigned char* v,float clear,bool alive,const char* how) noex
     j.insetSaved=false;
     Log("PJET v=%p left: %s (%s, %.0f m/s, %.0f m over the ground)%s",v,how,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel),
         clear==kNoGround ? -1.0f : clear,eject ? ": ejected" : "");
+    Left(j,v,clear,alive,eject);   // any of the plugin's other aircraft: parked, caught or handed back (playerjet_board.inc)
 }
 
 void Report(PJet& j,const unsigned char* v,const Stick& s,const float* pos,float clear,bool water,ULONGLONG ms) noexcept {
@@ -1110,14 +1147,18 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     JetFlames(v,j.throttle,j.throttle>0.95f,ms);
 }
 
+// Any of the plugin's other aircraft under the player (boarding, a rotor craft's flight, the special stores, the hail).
+#include "playerjet_board.inc"
+
 void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dt=Measure(j,pos,ms);
     const bool wet=j.wetFrame && j.wetFrame+1>=GameFrame();   // a water message this frame or the last
     const bool driven=SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::player;
     if(!driven && catchFlight.v==v && !v[kDead]){AutoFly(j,v,pos,dt,ms);return;}
+    if(!driven && j.hail.phase!=kHailNone && !v[kDead]){HailFly(j,v,pos,dt,ms);return;}   // called down for the player
     if(!driven) {
-        if(j.autopilot){j.autopilot=false;j.active=false;}
+        if(j.autopilot){j.autopilot=false;j.active=false;if(j.board)HandBack(j,v,"the catch is over");}
         if(j.driven)Leave(j,v,GroundClearance(pos),true,"got out");
         if(wet)Crash(j,v,0.0f,0.0f,false,ms,nullptr);   // empty and afloat: it breaks up
         return;
@@ -1129,10 +1170,12 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     SmoothStick(j,s,dt);
     j.keys=s.keys;
     Stores(j,v,s,pos);
+    SpecialFrame(j,v,s,pos,ms);
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
+    if(j.board && j.board->frame==pjet::Airframe::rotor){HoverStep(j,v,s,pos,clear,water || wet,dt,ms);Report(j,v,s,pos,clear,water,ms);return;}
     Blocked(j,v,pos,ms);
     if(v[kDead]){j.active=false;return;}
     Lever(j,v,s,dt);
@@ -1147,6 +1190,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     }
     j.active=j.phase!=Phase::parked && !v[kDead];
     std::memcpy(j.sent,j.vel,12);
+    MirrorEntry(j,v);
     Elevons(j,v,s.pitch,s.roll,dt);
     Report(j,v,s,pos,clear,water,ms);
     // The exhaust (booster.cpp JetFlames) with the throttle; the lever full forward is the afterburner.
@@ -1193,6 +1237,7 @@ void PlayerEjectTick() noexcept {
         for(auto& j:jets)if(j.driven && j.vehicle && Gone(j))Leave(j,j.vehicle,j.clear,false,"destroyed");
     EjectTick();
     FlaresStep();
+    if(flyOk && Cfg().playerJet)HailTick();
 }
 
 void PreloadPlayerJets() noexcept {
@@ -1254,8 +1299,19 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     return false;
 }
 
+bool PlayerJetBoardable(const void* vehicle) noexcept {
+    __try { return BoardableNow(static_cast<const unsigned char*>(vehicle)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool PlayerJetHolds(const void* vehicle) noexcept {
+    if(!flyOk || !Cfg().playerJet)return false;
+    __try { return BodyOf(vehicle)==PluginBody::jet && Held(static_cast<const unsigned char*>(vehicle)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool IsPlayerJet(const void* vehicle) noexcept {
-    __try { return KindOf(static_cast<const unsigned char*>(vehicle))!=nullptr; }
+    __try { return BodyOf(vehicle)==PluginBody::playerJet && KindOf(static_cast<const unsigned char*>(vehicle))!=nullptr; }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -1274,6 +1330,9 @@ void CatchWhy(const unsigned char* v,int why) noexcept {
 
 void PlayerJetFrame(unsigned char* v) noexcept {
     if(!flyOk || !Cfg().playerJet)return;
+    // An NPC aircraft is the player's only while they fly it, it comes down for them, catches them or waits for them
+    // (Held); its entry let go of once it is not (playerjet_board.inc).
+    if(BodyOf(v)==PluginBody::jet && !Held(v)){Forget(v);return;}
     const Kind* kind=KindOf(v);
     if(!kind){CatchWhy(v,0);return;}
     if(v[kDead]) {   // destroyed with the player in it: out they go (Leave)
@@ -1283,7 +1342,7 @@ void PlayerJetFrame(unsigned char* v) noexcept {
     }
     const ULONGLONG ms=GameMs();
     PJet* j=Find(v);
-    if(!j)j=Make(v,kind);
+    if(!j && (j=Make(v,kind))!=nullptr)j->board=BoardRowOf(v);
     if(!j){CatchWhy(v,2);return;}
     CatchWhy(v,3);
     if(!j->bodyFixed){FixBodyPart506(v,"PJET");j->bodyFixed=true;}   // looked up once: logged when missing
@@ -1295,6 +1354,11 @@ bool InstallPlayerJets() noexcept {
     flyOk=Body506Ok();
     if(!flyOk)Log("PJET: no 506 physics hook (body506): player jets off");
     Log("HOOK player jets fly=%d water=%d die=%d bodyPart=%d",flyOk,Body506MessageOk(),Die506Ok(),BodyPartOk());
+    for(int i=0;i<pjet::kBoardableCount && Cfg().debug;++i) {   // what each of the plugin's aircraft flies like under the player
+        const Kind& k=kBoardKinds[i];
+        Log("PJET boardable %s (%s): minAir %.0f rotate %.0f top %.0f m/s, thrust %.1f, %.1f g, roll %.2f, land %.0f, ram %.0f m",k.name,
+            pjet::kBoardable[i].frame==pjet::Airframe::rotor ? "rotor" : "wing",k.minAir,k.rotate,k.top,k.thrust,k.maxG,k.roll,k.landMax,k.ram);
+    }
     return flyOk;
 }
 

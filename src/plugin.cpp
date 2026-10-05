@@ -125,6 +125,7 @@ void Validate(Config& n) noexcept {
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
+    n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
     n.playerJetFlares=static_cast<int>(FixInt("PlayerJetFlares",n.playerJetFlares,0,99));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
@@ -206,6 +207,8 @@ void LoadConfig() noexcept {
     n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
+    n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
+    n.playerJetHailKey=ReadInt(L"PlayerJetHailKey",static_cast<DWORD>(n.playerJetHailKey));
     n.playerJetFlares=ReadInt(L"PlayerJetFlares",static_cast<DWORD>(n.playerJetFlares));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
@@ -227,6 +230,7 @@ void LoadConfig() noexcept {
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
+    Log("CONFIG playerJetAll=%d hailKey=0x%X",n.playerJetAll,n.playerJetHailKey);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,

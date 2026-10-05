@@ -120,3 +120,45 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
   - 物理步进把自动驾驶中的飞机当成有人驾驶的飞机一样推进（`PlayerJetBodyStep`）。
 - 离玩家 9 m 以内时每帧替玩家按上车键（`PressBoardButton`）。上车后飞机按原来的速度交给玩家，伞降结束。
 - 45 秒没接上就放弃：那架飞机空着飞走、落下，伞降继续。
+
+## 8. 插件的其它飞机也能开（2026-10-05，`src/playerjet_kinds.h`、`src/playerjet_board.inc`）
+
+用户：「所有飞机我们都能开对吧……逻辑能复用的复用，不能复用的就写。我希望能开是真正的每个都很好用」。
+
+### 8.1 走同一条路
+
+- 可登机的机种表是 `playerjet_kinds.h` 的 `kBoardable`（机体 `jet::Body` → 飞法 wing / rotor → 自带武器 → 性能 `Perf`）。性能由 NPC 自己飞的那一行（`jet_internal.h kKinds`，轰炸机用原版轰炸机 180 m/s 的一行 `kStockBomber`）按固定规则换算，规则在文件头；同规则算出的 NPC 战斗机 / 攻击机与手调的 `kKinds[0] / [1]` 每项相差 ≤ 10%，`playerjet_kinds.inc` 里 `static_assert` 检查；`tools/pjet_kinds.cpp`（`cmake --build build --target pjet_kinds`）打印整张表并检查可飞性。
+- 识别：`BodyOf == PluginBody::jet` 时 `KindOf` 走 `BoardKindOf`（标记 → `kBodies` 行；7001 被攻击机和两种接管轰炸机共用，按模型骨骼 `BomberBody` 区分）。敌方机体（`BodyRow::hostile`）没有行。
+- 玩家坐上后它和玩家战斗机是同一条路径：`PJet` 记录、`Fly`、`Air` / `Ground`、挂载、座舱读数（`PlayerJetHud`）、弹射与接机。`PJet::board` 非空就是这种飞机，只多出三处分支：旋翼机的 `HoverStep`、特殊挂载（`SpecialStore` / `FireSpecial` / `SpecialFrame`）、下机（`Left`）。其它人做的座舱 HUD、起落架都挂在 `PJet` 上，对它们同样生效。
+- 物理步：`body506.cpp` 对 `PluginBody::jet` 先问 `PlayerJetBodyStep`（玩家开着、或它在为玩家降落时写速度），否则照旧 `JetBodyStep`；消息（落水）同理先给 `PlayerJetMessage`，它只接玩家开着的。
+- 持有（`Held` / `PlayerJetHolds`）：玩家在座位上、它在下来接玩家（hail）、在接弹射的玩家、或停在玩家下机的地方。持有期间 `JetFrame` 一开头就返回（燃料、撤离、呼叫的航线都不动），`crew.cpp Crew` 不给它派 NPC。交回 NPC 时 `jet::ResumeNpc` 把这段时间加到 `bornAt` 上（燃料和出击计时停住）、清掉运动状态、模式回到巡逻（贴地则起飞；撤离、投弹、回母舰保持）。
+
+### 8.2 上机
+
+- `crew.cpp FindSeatHook / PromptHook` 原来对一切 `IsJet` 直接拒绝；现在 `PlayerJetBoardable` 为真时照常走「挤掉 NPC」：我方阵营、没在被删除 / 自爆、离地 ≤ 12 m（`GroundClearance`）、速度 ≤ 8 m/s（玩家记录的实测速度，否则 jet.cpp 的 `m.real`）。座位检查按「无主载具」队伍 5 做（`OwnTeam`），因为 NPC 飞行员把它放在友军队伍 2，原版检查不让玩家进 2。喷气机只有一个座位，NPC 被 `kSeatKick` 踢掉（死亡）。
+- 呼叫（`HailTick`，ini `PlayerJetHailKey`）：步行时按键，最近的我方插件飞机（NPC 在飞、未撤离）下来。旋翼机：选身边一处平地（`PickSpot`），用 NPC 的 `Hover` 平飞过去（离得远时保持至少「落点 + 80 m」高度），近了垂直落下，停住后等。固定翼：`PlanStrip` 每帧评估 12 个候选（6 个环 × 12 个方位 × 12 个航向，按环由近到远，一环内有可用的就停），条件见代码常量；然后 `Approach`：先飞到 1500 m 外的进近入口并对准跑道（目标点在入口后方，距离一半处，把航线拉到跑道延长线上），进入 400 m 且航迹与跑道夹角 < 32° 转入五边，沿 4° 下滑道以「起飞速度 + 10」飞（`SteerAt`：自动驾驶的瞄准转向 + 油门/减速板控速），由 `Air` 的接地判定落地（下沉 ≤ 10 m/s、机翼水平、速度 ≤ landMax）；过头 100 m、偏离 150 m、高于下滑道 80 m 或低 40 m 都复飞，三次失败作罢。`Rollout` 沿机头滑跑、按 `sqrt(2·8·剩余距离)` 收油门刹到停止点。停下后等 90 s（NPC 还在座位上），超时交回。
+
+### 8.3 武器
+
+- 机炮和挂载同玩家战斗机。挂载循环里多一项「特殊挂载」（`Store::weapon` 为空，`stores.cpp` 的锁定 / 扳机函数原本就对空武器什么都不做）：
+  - **BOMB BAY**：喷气机还带着接管来的弹仓（`BayState::ifc` 且没开过）。副射击 → `jet::PlayerOpenBay`：`bombAt` = 当前 CCIP 落点，`bombDir` / `bombSpeed` = 此刻的水平速度，`bayFrom = -reach`，所以第一颗炸弹瞄 CCIP，之后每帧 `BayFrame` 按原版轰炸机每帧前移一个速度（`docs/airstrike-re.md`）。
+  - **SHELLS**（炮舰机）：`jet::PlayerShell`，同 `GunshipFire` 的炮弹、间隔、射程，目标是屏幕中心视线与地面的交点（`CameraRay`：由上一帧 view-projection 求逆，眼睛 = (0,0,1,0)·VP⁻¹，中心点 = (0,0,0.5,1)·VP⁻¹）；按住目标键绕点盘旋（`Orbit`：`steered` 让 `Air` 按瞄准点转向，鼠标只转镜头）。
+  - **DRONES**（三种航母）：`jet::PlayerLaunchDrone` 复用 NPC 的发射（`LaunchOne`，从 `LaunchDrones` 抽出来，行为不变），同时给航母记 `CarrierState::order`：它放出的无人机以这一点（抬高 40 m）为锚点、400 m 内找目标（`jet.cpp JetFrame`）；目标键 `RecallDrones`。
+  - **CHARGE**（自爆 / 人偶无人机）：副射击后 100 ms 内每帧置 0x2021（2 号挂架，炸药，同 `jet_carrier.cpp Blast`），300 ms 后 `Kill`（原版死亡消息，踢出座位，玩家按 §7 弹射）。
+
+### 8.4 下机（`Left`）
+
+- 地面上（`Phase` 不是 air）：`keep`，原地等玩家。
+- 空中且弹射、固定翼、`PlayerJetCatch=1`：这架飞机本身就是接机的那架（`catchFlight` / `bail.caught` 指向它，§7 的 `AutoFly` / `Catch` 原样用）；没接上（玩家落地、死亡，或 45 s 放弃）就交回 NPC。
+- 其它空中情况：`HandBack`：座位空则 `RideAi(false)` 坐上 NPC，`ResumeNpc`。
+
+### 8.5 验证状态
+
+- 静态：`build.cmd` 无警告（/W4 /WX）；`static_assert`（行一致性、派生与玩家战斗机/攻击机的偏差）；`build\pjet_kinds.exe` 13 行全部通过；`tools/selftest.py` 新增 `every_npc_aircraft_boardable`（每个我方喷气机体都有行、敌方没有、ini 键被读且有文档）。
+- 未实机验证（需要在游戏里逐项看）：
+  1. 每种飞机的上车点（`vehicle_riding_position`）是否在原版上车距离内够得着：航母（59×77 m 机体，放大 1.6 倍）、轰炸机（BOMBER401 原尺寸）、无人机（5.7 m）。
+  2. 挤掉 NPC 后座位队伍、`RideAi(false)` 交回后 NPC 能否正常接着飞（日志 `JET v=... back to its NPC pilot`、之后的 `JET` 模式行）。
+  3. 呼叫：旋翼机落点、下降与停放；固定翼找跑道的耗时与成功率（城市、山地各一张图）、进近是否稳定接地（`PJET hail ... on the final` → `landed` → `down ... waiting`）、滑跑能否停在停止点附近；`MapRay` 每帧约 240 条射线的开销（`PERF` 行）。
+  4. 每种固定翼的手感（尤其炮舰机 2 g、轰炸机 3 g）；旋翼机键鼠/手柄操作、航母推进舱是否随推力转、落地判定。
+  5. 特殊挂载：弹仓第一颗是否落在 CCIP；炮弹落点与屏幕中心十字是否一致（`CameraRay` 的反投影约定：行向量、D3D 深度）；盘旋方向（目标在左）与半径；无人机按指定点找目标、召回、在玩家开着的航母上停靠；自爆后玩家被抛出、伤害不伤友军。
+  6. 交回 NPC 后：燃料计时确实停过（`back to its NPC pilot ... s of its fuel flown`）、轰炸机的投弹航线、无人机回到母舰。

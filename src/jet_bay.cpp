@@ -233,6 +233,52 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.shells.gunShots,j.t.target,Len(d));
 }
 
+// The player's aircraft (playerjet_board.inc). A bay not yet open: its bombs.
+int BayLeft(const unsigned char* v) noexcept {
+    const Jet* const j=FindJet(v);
+    if(!j || !j->bay.ifc || j->bay.bombing)return 0;
+    const std::int32_t shots=At<std::int32_t>(j->bay.ifc,kIfcShots);
+    return shots>0 ? shots : 0;
+}
+
+// The bay opened by the player: its first bomb on `at` (the cockpit's CCIP), the carpet laid on from there along the
+// jet's track at its speed when the bay opened, a step a frame as the stock bomber lays it (BayFrame: the drop point
+// starts at bayFrom + reach along the line from bombAt).
+bool PlayerOpenBay(unsigned char* v,const float* at,const float* vel) noexcept {
+    Jet* const j=FindJet(v);
+    if(!j || !BayLeft(v))return false;
+    BayState& b=j->bay;
+    float dir[3]={vel[0],0.0f,vel[2]};
+    const float speed=Len(dir);
+    if(!Normalize(dir) || speed<1.0f)return false;
+    std::memcpy(b.bombAt,at,12);std::memcpy(b.bombDir,dir,12);
+    b.bombSpeed=speed;b.bayFrom=-b.reach;b.baySteps=0;b.bayOpenAt=GameMs();b.bombing=true;
+    reinterpret_cast<void(*)(void*)>(image+kIfcOpen)(b.ifc);
+    Log("JET v=%p bay opened by the player: %d to drop from (%.0f,%.0f,%.0f) along its track at %.0f m/s",v,At<std::int32_t>(b.ifc,kIfcShots),
+        at[0],at[1],at[2],speed);
+    return true;
+}
+
+void PlayerBayFrame(unsigned char* v,const float* pos) noexcept {
+    if(Jet* const j=FindJet(v))BayFrame(*j,pos);
+}
+
+// The gunship's shell from the player: as GunshipFire's (kGunshipGapMs apart, within kGunshipReach), at `at`.
+bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
+    Jet* const j=FindJet(v);
+    if(!j || ms-j->shells.gunAt<kGunshipGapMs)return false;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
+    if(Len(d)>kGunshipReach)return false;
+    j->shells.gunAt=ms;
+    if(!Shell(kGunshipSgo,gunshipReady,v,pos,at,kGunshipDamage,false,"gunship shell"))return false;
+    ++j->shells.gunShots;
+    if(Cfg().debug)Log("JET v=%p gunship shell #%d from the player at (%.0f,%.0f,%.0f), %.0f m",v,j->shells.gunShots,at[0],at[1],at[2],Len(d));
+    return true;
+}
+
+bool ShellsReady() noexcept { return gunshipReady && shellsOk; }
+
 bool InstallBay(bool spawnOk) noexcept {
     bayOk=spawnOk;
     for(const auto& b:kBaySigs)bayOk=bayOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
