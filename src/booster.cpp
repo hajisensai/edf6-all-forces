@@ -83,9 +83,22 @@ constexpr JetNozzles kJetNozzles[]={
     {7007.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
     {7008.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
 };
+// The stock bombers a strike jet took over (airstrike.cpp) fly their own models under the strike jet's mark (crew.h
+// BomberBody tells them apart): their exits, measured on those models as they are (pylib/jet_models.py STOCK_BOMBERS;
+// mark 0: not looked up by mark).
+constexpr JetNozzles kBomberNozzles[]={
+    {0.0f,1,{{0.0f,1.267f,-1.597f},{0.0f,0.0f,0.0f}},{4.755f,0.951f}},   // JetBody::bomber401
+    {0.0f,2,{{3.58f,0.039f,-12.006f},{-3.58f,0.039f,-12.006f}},{9.195f,1.839f}},   // JetBody::bomber501_2
+};
+constexpr float kStrikeMark=7001.0f;
 constexpr float kBurnerLength=1.6f;
 
-const JetNozzles* NozzlesOf(float mark) noexcept {
+const JetNozzles* NozzlesOf(const unsigned char* v,float mark) noexcept {
+    if(mark==kStrikeMark) {
+        const JetBody body=BomberBody(v+kModelInst506);
+        if(body==JetBody::bomber401)return &kBomberNozzles[0];
+        if(body==JetBody::bomber501_2)return &kBomberNozzles[1];
+    }
     for(const auto& n:kJetNozzles)if(n.mark==mark)return &n;
     return nullptr;
 }
@@ -370,10 +383,12 @@ void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[
 
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept {
     if(!sigOk || broken || !v)return;
-    const JetNozzles* const nz=NozzlesOf(BodyMark(v));
-    if(!nz)return;
-    const float size[2]={nz->size[0]*(burner ? kBurnerLength : 1.0f),nz->size[1]};
-    __try { JetFrame(v,nz->at,nz->count,size,intensity,ms); }
+    __try {
+        const JetNozzles* const nz=NozzlesOf(v,BodyMark(v));
+        if(!nz)return;
+        const float size[2]={nz->size[0]*(burner ? kBurnerLength : 1.0f),nz->size[1]};
+        JetFrame(v,nz->at,nz->count,size,intensity,ms);
+    }
     __except(MakeFault(GetExceptionInformation())) {}
 }
 

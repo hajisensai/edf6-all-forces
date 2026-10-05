@@ -41,24 +41,6 @@ const unsigned char* LoftedLauncher(const unsigned char* seat) noexcept {
     return nullptr;
 }
 
-// The first ground along the arc from `pos` at `vel` (m/frame), `drop` m/frame^2 added a frame, for at most `frames`
-// frames: `hit` and the frames it took.
-bool Impact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept {
-    float p[3]={pos[0],pos[1],pos[2]},v[3]={vel[0],vel[1],vel[2]};
-    for(int n=0;n<frames;n+=kSegment) {
-        const float from[3]={p[0],p[1],p[2]};
-        const int steps=frames-n<kSegment ? frames-n : kSegment;
-        for(int k=0;k<steps;++k)for(int c=0;c<3;++c){v[c]+=drop[c];p[c]+=v[c];}
-        const float d[3]={p[0]-from[0],p[1]-from[1],p[2]-from[2]};
-        const float length=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
-        const float at=MapRay(from,p,hit);
-        if(at<0.0f)continue;
-        *took=static_cast<float>(n)+(length>1e-3f ? at/length : 0.0f)*static_cast<float>(steps);
-        return true;
-    }
-    return false;
-}
-
 // Where an arc from `pos` at `vel` (m/frame) comes down to height `y` (the per-frame step in closed form: after n
 // frames p = pos + n vel + drop n(n+1)/2), on its way down. False when it never gets that low.
 bool DownTo(const float* pos,const float* vel,const float* drop,float y,float* at) noexcept {
@@ -105,7 +87,7 @@ bool Solve(const unsigned char* weapon,LauncherReadout& r) noexcept {
     r=LauncherReadout{};
     r.elevation=std::asin(dir[1]<-1.0f ? -1.0f : dir[1]>1.0f ? 1.0f : dir[1])*180.0f/kPi;
     float took=0.0f;
-    r.reach=Impact(pos,vel,drop,alive,r.impact,&took);
+    r.reach=RoundImpact(pos,vel,drop,alive,r.impact,&took);
     if(!r.reach)return true;
     r.flight=took/60.0f;
     r.range=std::sqrt((r.impact[0]-pos[0])*(r.impact[0]-pos[0])+(r.impact[2]-pos[2])*(r.impact[2]-pos[2]));
@@ -129,6 +111,24 @@ void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherR
         At<float>(weapon,edf::kWeaponAccuracyScale),r.reach,r.range,r.flight,r.rings);
 }
 }  // namespace
+
+// The first ground along the arc from `pos` at `vel` (m/frame), `drop` m/frame^2 added a frame, for at most `frames`
+// frames: `hit` and the frames it took. Shared with playerjet.cpp's bomb impact (crew.h).
+bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept {
+    float p[3]={pos[0],pos[1],pos[2]},v[3]={vel[0],vel[1],vel[2]};
+    for(int n=0;n<frames;n+=kSegment) {
+        const float from[3]={p[0],p[1],p[2]};
+        const int steps=frames-n<kSegment ? frames-n : kSegment;
+        for(int k=0;k<steps;++k)for(int c=0;c<3;++c){v[c]+=drop[c];p[c]+=v[c];}
+        const float d[3]={p[0]-from[0],p[1]-from[1],p[2]-from[2]};
+        const float length=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        const float at=MapRay(from,p,hit);
+        if(at<0.0f)continue;
+        *took=static_cast<float>(n)+(length>1e-3f ? at/length : 0.0f)*static_cast<float>(steps);
+        return true;
+    }
+    return false;
+}
 
 void LauncherFrame(unsigned char* v) noexcept {
     if(v[kDead] || SeatCount(v)==0)return;

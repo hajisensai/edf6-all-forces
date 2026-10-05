@@ -145,6 +145,18 @@ def jet_nozzles_on_their_models() -> None:
         if abs(size[1] - d) >= 0.005 or abs(size[0] - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
             bad.append(f'{name}: flame {size}, its engine {d} m across')
     assert len(rows) >= 10, f'{len(rows)} nozzle rows parsed: the pattern no longer reads the table'
+    table = src('src/booster.cpp').split('kBomberNozzles[]={', 1)[1].split('};', 1)[0]
+    for name in ('bomber401', 'bomber501_2'):
+        m = re.search(r'\{0\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\},\s*// JetBody::'
+                      + name + r'\n', table)
+        assert m, f'src/booster.cpp kBomberNozzles: no {name} row'
+        want = jet_models.NOZZLES[name]
+        got = [tuple(float(m.group(k)) for k in range(2 + 3 * n, 5 + 3 * n)) for n in range(int(m.group(1)))]
+        d = want[0][1]
+        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
+            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
+        if abs(float(m.group(9)) - d) >= 0.005 or abs(float(m.group(8)) - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
+            bad.append(f'{name}: flame {m.group(8)} x {m.group(9)}, its engine {d} m across')
     assert not bad, '\n'.join(bad)
 
 
@@ -426,6 +438,27 @@ def lofted_arc_solver() -> None:
     for key, unit in (('max_range', '米'), ('high_min_range', '米'), ('max_range_time', '秒'), ('high_min_time', '秒')):
         said = f'{round(env[key])} {unit}' if unit == '米' else f'{env[key]:.1f} {unit}'
         assert said in readme, f'README.md: the Katyusha section should say {said} ({key}, pylib/ballistics.py)'
+
+
+@test
+def every_npc_aircraft_boardable() -> None:
+    # Every jet body of our side (jet_internal.h kBodies: a mark, not hostile) has its row in src/playerjet_kinds.h
+    # kBoardable, so an aircraft added later is flown by the player too (or is left out on purpose here, saying why);
+    # the enemy's are not; the ini keys of the feature are read and documented.
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    rows = re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,[^}]*?"(\w+)"(,true)?\}', re.sub(r'\s+', ' ', table))
+    assert len(rows) >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
+    boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
+    for body, mark, _name, hostile in rows:
+        if int(mark) == 0:
+            continue   # a heli: the stock heli flight
+        if hostile:
+            assert body not in boardable, f'{body} is the enemy\'s: not boardable'
+        else:
+            assert body in boardable, f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('PlayerJetAll', 'PlayerJetHailKey'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
 
 
 @test

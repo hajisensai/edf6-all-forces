@@ -84,6 +84,8 @@ struct Config {
     bool playerJetThreatHud=true;   // ...and the threats' directions (enemy locks, missiles coming for it) round the screen's centre
     int playerJetGearKey=0x47;      // the key that raises / lowers the landing gear ('G'; gear.cpp PlayerGear)
     int playerJetGearButton=0x40;   // ...and the pad button (the seat's button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
+    bool playerJetAll=true;         // the player can board every other aircraft of the plugin too (playerjet_kinds.h)
+    int playerJetHailKey=0x48;      // ...and this key calls the nearest one down to them ('H'; 0: off)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
@@ -362,6 +364,11 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
+// Any other aircraft of the plugin (playerjet_kinds.h) is the player's too: they may board it now (one of ours, low and
+// slow enough: crew.cpp bumps its NPC pilot for them); the plugin holds it for them (they fly it, it comes down for
+// them, catches them or waits where they left it): jet.cpp does not fly it then, crew.cpp does not crew it.
+bool PlayerJetBoardable(const void* vehicle) noexcept;
+bool PlayerJetHolds(const void* vehicle) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
 // The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path; stores: what it
@@ -413,6 +420,9 @@ struct LauncherReadout {
     float range,flight,elevation;
     bool reach;
 };
+// A round's arc as the game steps it (a frame: vel += drop, pos += vel; m/frame, m/frame^2) from `pos` for at most
+// `frames` frames: the first ground a map ray finds along it (`hit`) and the frames it took. launcher.cpp.
+bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept;
 void LauncherFrame(unsigned char* vehicle) noexcept;
 bool PlayerLauncher(LauncherReadout* out) noexcept;
 // Whether the player in `vehicle` sees our gun sight instead of the stock aim lines (crew.cpp AimLines): an aircraft

@@ -375,6 +375,9 @@ def model_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - ro
 def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     if file is None:
         return elevon_model(game)
+    if file in STOCK_BOMBERS:
+        arc, mdl = STOCK_BOMBERS[file]
+        return mdb_read(next(f for f in rab_read(game.read('OBJECT', arc)).files if f.name.lower() == mdl).data)
     r = MODELS[file]
     raw = game.read('OBJECT', r.archive)
     return make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r,
@@ -395,6 +398,11 @@ def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
 # its length), length FLAME_LENGTH_PER_DIAMETER of that. NOZZLE_EXITS picks each exit's rim vertices (a box in the
 # model's frame, the right one of a mirrored pair); measure_nozzles reads them off the model, NOZZLES is what it
 # reads (constants: the self-test has no Root.cpk), check_nozzles holds the two together.
+# STOCK_BOMBERS: the stock bombers the airstrike's strike jets take over fly their own models as they are (no scale,
+# no grounding, no gear), sharing the strike jet's mark: their exits are measured on those (src/booster.cpp
+# kBomberNozzles). bomber501_2's x 0.65 + grounding is the interceptor's, bomber401's x 0.5 the multirole's.
+STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bomber401.mdb'),
+                                             'bomber501_2': ('BOMBER501.MRAB', 'bomber501_2.mdb')}
 # The landing gear (Recipe.gear) stands each model up on its wheels, so its grounding lifts it by the gear's height
 # more (2026-10-05): the bomber501 1.0 m, the interceptor 0.65 m (both: jet_gear.SPECS drop x scale), the multirole
 # 0.4365 m ((1.0 - its stock lowest point 0.127) x 0.5); the drone has no gear. The exit boxes are in the lifted frame.
@@ -405,6 +413,8 @@ NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a 
     'EDF6VC_INTERCEPTOR.MRAB': (((1.0, 3.6), (0.0, 3.0), (-8.4, -7.6)), True),
     'EDF6VC_MULTIROLE.MRAB': (((-0.5, 0.5), (0.7, 1.5), (-0.85, -0.75)), False),
     'EDF6VC_DRONE.MRAB': (((-0.3, 0.3), (0.7, 1.3), (-1.3, -1.22)), False),
+    'bomber401': (((-1.0, 1.0), (0.8, 1.8), (-1.7, -1.5)), False),
+    'bomber501_2': (((1.5, 5.6), (-2.3, 2.3), (-12.95, -11.69)), True),
 }
 Nozzle = tuple[tuple[float, float, float], float]   # (exit centre, diameter)
 NOZZLES: dict[str | None, tuple[Nozzle, ...]] = {
@@ -412,6 +422,8 @@ NOZZLES: dict[str | None, tuple[Nozzle, ...]] = {
     'EDF6VC_INTERCEPTOR.MRAB': (((2.327, 1.511, -7.804), 1.195), ((-2.327, 1.511, -7.804), 1.195)),
     'EDF6VC_MULTIROLE.MRAB': (((0.0, 1.07, -0.799), 0.475),),
     'EDF6VC_DRONE.MRAB': (((0.0, 1.005, -1.261), 0.323),),
+    'bomber401': (((0.0, 1.267, -1.597), 0.951),),
+    'bomber501_2': (((3.58, 0.039, -12.006), 1.839), ((-3.58, 0.039, -12.006), 1.839)),
 }
 
 

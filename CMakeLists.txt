@@ -18,3 +18,9 @@ configure_file(EDF6VehicleCrew.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6Vehicle
 
 # EDF6AutoTurret: the flak / Bohr auto-aim and the tank side guns (autoturret/README.md)
 add_subdirectory(autoturret)
+
+# The boardable aircraft's flight numbers checked offline (tools/pjet_kinds.cpp); not part of the plugin build:
+# cmake --build build --target pjet_kinds && build\pjet_kinds.exe
+add_executable(pjet_kinds EXCLUDE_FROM_ALL tools/pjet_kinds.cpp)
+target_include_directories(pjet_kinds PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(pjet_kinds PRIVATE /W4 /WX /utf-8 /permissive-)
