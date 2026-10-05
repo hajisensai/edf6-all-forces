@@ -60,6 +60,7 @@ void MissionStart() noexcept {
     ResetSubs();
     ResetLaser();
     ResetHud();
+    ResetLauncher();
     ResetJetSound();
     ResetMissiles();
     ResetBigWorld();

@@ -122,6 +122,7 @@ void ResetSubs() noexcept;        // subcarrier.cpp
 void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
+void ResetLauncher() noexcept;    // launcher.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
 void ResetMissiles() noexcept;    // missile.cpp
 // What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
@@ -360,6 +361,21 @@ struct PlayerJetReadout {
     float lockAt[3],lockProgress;
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
+// launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked
+// kMarkLofted (common/edf/weapon.h): where a rocket fired now comes down (reach: it does within its life), `ring` points
+// round it its ripple's spread reaches (FireAccuracy's cone), the horizontal range, the flight in seconds and the
+// launcher's elevation in degrees. LauncherFrame from every vehicle's input (game thread); PlayerLauncher the last one,
+// false with none this moment.
+constexpr int kLauncherRing=16;
+struct LauncherReadout {
+    float impact[3];
+    float ring[kLauncherRing][3];
+    int rings;
+    float range,flight,elevation;
+    bool reach;
+};
+void LauncherFrame(unsigned char* vehicle) noexcept;
+bool PlayerLauncher(LauncherReadout* out) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
 namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;
