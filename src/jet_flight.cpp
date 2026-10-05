@@ -3,6 +3,7 @@
 // the walls it learns.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "gear.h"
 #include <cwchar>
 
 namespace crew {
@@ -566,6 +567,7 @@ void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* no
     Attitude(j,k,v,dir,up);
     if(k.pose==Pose::elevons)Elevons(j,k,v,dt);
     else if(k.pose==Pose::flap)Flap(j,k,v,dt);
+    NpcGear(v,Len(j.m.vel),dt);   // the landing gear up in flight (gear.cpp; a model without it: nothing)
     // The exhaust (booster.cpp JetFlames): burning with the speed between its slowest and its attack speed, the
     // afterburner near the top.
     const float s=Len(j.m.vel),share=k.attack>k.minSpeed ? (s-k.minSpeed)/(k.attack-k.minSpeed) : 1.0f;

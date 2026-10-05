@@ -127,3 +127,11 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 `Threats`（`MissilesHomingAt` 来袭导弹的位置、`jet::LockersOf` 锁定本机的敌机位置），存进 `PJet::sym`，`PlayerJetHud` 随读数发布；
 绘制、原版红线的隐藏和验证见 `docs/hud-re.md` §5、`docs/aim-line-re.md` 第 5 条。全部按 `PJet`（玩家正在驾驶的那架）取数，
 不按机型标记，玩家以后能开的其它插件飞机同样适用；没有机炮的飞机不画瞄准具，悬停（速度 < 5 m/s）时不画速度矢量。
+
+## 起落架（2026-10-05）
+
+模型、骨骼、收放角度、离线自检数值和需要实机确认的项目见 `docs/jet-model-re.md`「起落架」。飞行上的影响都在 `src/playerjet.cpp` 的几处调用里：
+- `Air`：阻力的寄生项加上 `GearDragShare`（放下时 1.5 倍干净构型）。
+- `Touch`：着陆条件都满足但 `GearDown` 为假 → `BellyLanding`（`Crash` 的伤害，转为滑行）。
+- `Ground`：`GearDown` 为假时（机腹着地）只减速（10 m/s²），不转向、不起飞。
+- `PilotGear`：读键（`PlayerJetGearKey`）/ 手柄位（`PlayerJetGearButton`，座位按键位 `seat+0x2E8`，docs/stores-re.md §4），交给 `gear.cpp PlayerGear`；地面上收起被拒绝。

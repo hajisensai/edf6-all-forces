@@ -20,6 +20,7 @@
 // is the wall clock: a snapshot older than kFreshMs (paused, loading, mission over) is not drawn.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "gear.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
@@ -854,6 +855,49 @@ void FighterHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     if(Cfg().playerJetThreatHud)ThreatRing(drawer,ctx,text,vp,width,height,s,y,lines,at);
 }
 
+// The landing gear (gear.cpp GearHudLatest; the jets with gear only), at the screen's right over the cockpit's line: its
+// three lights as a real gear panel lays them out (the nose's over the two mains'): green down and locked, amber in
+// transit, out (an empty frame) up and locked; under them DOWN / TRANSIT / UP and the key. Warnings over it: GEAR! (red,
+// blinking) low and slow with it not down, GEAR SPEED (amber) over the gear's limit with it not up, WEIGHT ON WHEELS
+// (amber) an up command refused on the ground.
+void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at,ULONGLONG now) noexcept {
+    GearHud g{};
+    if(!GearHudLatest(&g) || now-g.tick>kFreshMs || *at+2>kMaxLines)return;
+    const float box=24.0f*s,gap=10.0f*s,pad=10.0f*s,w=3.0f*box+4.0f*gap+2.0f*pad,h=2.0f*box+gap+2.0f*pad+60.0f*s;
+    const float x0=width-w-40.0f*s,y0=height*0.80f-h;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kCyan);
+    const float cx=x0+w*0.5f,top=y0+pad;
+    const float lx[kGearLegs]={cx-box*0.5f,cx-box*1.5f-gap,cx+box*0.5f+gap};   // nose; left / right main (x>0 is left)
+    const float ly[kGearLegs]={top,top+box+gap,top+box+gap};
+    bool down=true,up=true;
+    for(int i=0;i<kGearLegs;++i) {
+        down=down && g.at[i]<=0.0f;up=up && g.at[i]>=1.0f;
+        const float t=2.0f*s;
+        Rect(drawer,ctx,lx[i],ly[i],lx[i]+box,ly[i]+box,kBarEdge);
+        if(g.at[i]<=0.0f)Rect(drawer,ctx,lx[i]+t,ly[i]+t,lx[i]+box-t,ly[i]+box-t,kGreen);
+        else if(g.at[i]<1.0f)Rect(drawer,ctx,lx[i]+t,ly[i]+t,lx[i]+box-t,ly[i]+box-t,kAmber);
+        else Rect(drawer,ctx,lx[i]+t,ly[i]+t,lx[i]+box-t,ly[i]+box-t,kBarBack);
+    }
+    Line& state=lines[(*at)++];
+    wchar_t key[32]=L"L3";
+    if(g.keys)KeyName(Cfg().playerJetGearKey,key,32);
+    else if(Cfg().playerJetGearButton!=0x40)std::swprintf(key,32,L"button 0x%X",Cfg().playerJetGearButton);
+    Format(state,L"GEAR %ls  [%ls]",down ? L"DOWN" : up ? L"UP" : L"TRANSIT",key);
+    state.scale=kLineScale*0.85f;state.rgba=down ? kGreen : up ? kWhite : kAmber;
+    state.w=state.h=0.0f;
+    if(text)MeasureAll(*text,&state,1);
+    state.x=cx-state.w*0.5f;state.y=top+2.0f*box+gap+8.0f*s;
+    const wchar_t* const what=g.warn ? L"GEAR!" : g.overspeed ? L"GEAR SPEED" : g.blocked ? L"WEIGHT ON WHEELS" : nullptr;
+    if(!what)return;
+    Line& warn=lines[(*at)++];
+    Format(warn,L"%ls",what);
+    warn.scale=kLineScale;warn.rgba=g.warn ? ((now/125)%2==0 ? kRed : kWhite) : kAmber;
+    warn.w=warn.h=0.0f;
+    if(text)MeasureAll(*text,&warn,1);
+    warn.x=cx-warn.w*0.5f;warn.y=state.y+(state.h>0.0f ? state.h : 18.0f*s)+4.0f*s;
+}
+
 // The player's helicopter on the ground (HeliCue, the user 2026-10-05): its rotor spinning up to the speed whose lift
 // holds it, then 'LIFT OK: TAKE OFF' blinking: from there the collective lifts it off.
 void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliCue& c,Line* lines,int* at) noexcept {
@@ -1061,6 +1105,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,lines,&at);
             Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
+            GearPanel(drawer,ctx,t,width,height,s,lines,&at,now);
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);

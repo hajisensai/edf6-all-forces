@@ -126,6 +126,8 @@ void Validate(Config& n) noexcept {
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetFlares=static_cast<int>(FixInt("PlayerJetFlares",n.playerJetFlares,0,99));
+    n.playerJetGearKey=static_cast<int>(FixInt("PlayerJetGearKey",n.playerJetGearKey,0,254));
+    n.playerJetGearButton=static_cast<int>(FixInt("PlayerJetGearButton",n.playerJetGearButton,0,255));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
@@ -212,6 +214,8 @@ void LoadConfig() noexcept {
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetFlares=ReadInt(L"PlayerJetFlares",static_cast<DWORD>(n.playerJetFlares));
+    n.playerJetGearKey=ReadInt(L"PlayerJetGearKey",static_cast<DWORD>(n.playerJetGearKey));
+    n.playerJetGearButton=ReadInt(L"PlayerJetGearButton",static_cast<DWORD>(n.playerJetGearButton));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
@@ -242,6 +246,7 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d",n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud);
+    Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,

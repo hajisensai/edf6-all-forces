@@ -149,6 +149,26 @@ def jet_nozzles_on_their_models() -> None:
 
 
 @test
+def gear_legs_as_the_models_fold_them() -> None:
+    """src/gear.cpp's legs (kLegNames, kLegUp) are pylib/jet_gear.py's (LEGS, LEG_UP): the plugin folds each leg by the
+    angle its model was measured to fold level at; every fixed-wing model recipe names a gear spec, hover craft none."""
+    import jet_gear
+    import jet_models
+    text = src('src/gear.cpp')
+    names = re.search(r'kLegNames\[kGearLegs\]=\{([^}]*)\}', text)
+    ups = re.search(r'kLegUp\[kGearLegs\]=\{([^}]*)\}', text)
+    assert names and ups, 'kLegNames / kLegUp not found in src/gear.cpp'
+    got_names = re.findall(r'L"([^"]+)"', names.group(1))
+    got_ups = [float(x.strip().rstrip('f')) for x in ups.group(1).split(',')]
+    assert tuple(got_names) == jet_gear.LEGS, f'{got_names} vs {jet_gear.LEGS}'
+    assert all(abs(a - jet_gear.LEG_UP[n]) < 1e-4 for a, n in zip(got_ups, got_names)), f'{got_ups} vs {jet_gear.LEG_UP}'
+    assert jet_models.ELEVON_GEAR in jet_gear.SPECS
+    for file, r in jet_models.MODELS.items():
+        hover = file in ('EDF6VC_CARRIER.MRAB', 'EDF6VC_DRONE.MRAB')
+        assert (r.gear is None) == hover and (r.gear is None or r.gear in jet_gear.SPECS), f'{file}: gear {r.gear}'
+
+
+@test
 def play_edge_margin_is_the_big_maps() -> None:
     """src/crew.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
     import make_bigmap

@@ -5,10 +5,15 @@
 Each output archive is a stock OBJECT/*.MRAB from Root.cpk (read only) with exactly one .mdb replaced (same file
 name inside the archive, CMPL-compressed like pylib/mdb_jet.py does); every other member keeps its stored bytes.
 
-  EDF6VC_INTERCEPTOR.MRAB  BOMBER501.MRAB         bomber501_2.mdb  elevon split (mdb_jet.build), x 0.65
-  EDF6VC_MULTIROLE.MRAB    BOMBER401.MRAB         bomber401.mdb    x 0.5
+  EDF6VC_INTERCEPTOR.MRAB  BOMBER501.MRAB         bomber501_2.mdb  elevon split (mdb_jet.build), landing gear, x 0.65
+  EDF6VC_MULTIROLE.MRAB    BOMBER401.MRAB         bomber401.mdb    skinned (jet_gear.skin_rigid), landing gear, x 0.5
   EDF6VC_CARRIER.MRAB      V508_TRANSPORT.MRAB    v508_transport.mdb  x 1.6
   EDF6VC_DRONE.MRAB        PD607_DRONE_AIRSTRIKE.MRAB  pd607_Drone_airstrike.mdb  x 3.0, root bone renamed `mdl`, `body` levelled
+
+The fixed-wing models carry retractable landing gear (pylib/jet_gear.py, Recipe.gear): three legs grafted from a stock
+helicopter's gear, extended in the bind pose, the wheels the model's lowest points (so the grounded model stands on
+them and its box's bottom is their contact); the archive gains the donor's textures. Hover craft (the carrier, the
+drone) have none.
 
 Every jet model's root bone is `mdl` (pylib/vcobjects.py JET_MAB_ROOT: the V506 locators hang on that name), so
 a model whose root is called otherwise gets it renamed (Recipe.root; only that bone uses the name).
@@ -43,6 +48,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 from mdb import (Bone, Mat, Mdb, Mesh, Object, bind_world, cmpl_compress, cmpl_decompress, ident, inverse_affine, mdb_read,  # noqa: E402
                  mdb_write, mmul, rab_read, rab_write, read_elem, verify)
 import gamedir  # noqa: E402
+import graft_pure  # noqa: E402
+import jet_gear  # noqa: E402
 import mdb_jet  # noqa: E402
 
 Box = tuple[list[float], list[float]]          # (min xyz, max xyz)
@@ -60,11 +67,12 @@ class Recipe:
     level: str | None = None  # a bone turned level (level_bone): the one the V506 body drives, if its bind is turned
     grounded: bool = True     # lifted so its lowest point is the model origin (grounded): the game puts a vehicle's origin
                               # on the ground; a model under it sinks into the ground, a box under it falls through it
+    gear: str | None = None   # its landing gear (jet_gear.SPECS key) before scaling; None: none (hover craft)
 
 
 MODELS: dict[str, Recipe] = {
-    'EDF6VC_INTERCEPTOR.MRAB': Recipe('BOMBER501.MRAB', 'bomber501_2.mdb', 0.65, split=True, fuselage_x=2.0),
-    'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5),
+    'EDF6VC_INTERCEPTOR.MRAB': Recipe('BOMBER501.MRAB', 'bomber501_2.mdb', 0.65, split=True, fuselage_x=2.0, gear='bomber501'),
+    'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5, gear='bomber401'),
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
     'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
 }
@@ -172,19 +180,46 @@ def grounded(md: Mdb) -> Mdb:
     return out
 
 
-# The stock bomber with elevon bones (mdb_jet.jet_archive: bomber501.mdb split), grounded: the default jet model
-# (vcobjects.JET_ELEVON_FILE) and the strike jets' and the player strike jet's.
+# The stock bomber with elevon bones (mdb_jet.jet_archive: bomber501.mdb split) and landing gear, grounded: the default
+# jet model (vcobjects.JET_ELEVON_FILE) and the strike jets' and the player strike jet's.
 ELEVON_ARCHIVE, ELEVON_MODEL = 'BOMBER501.MRAB', 'bomber501.mdb'
 ELEVON_FUSELAGE_X = 2.0   # m: the default jets' fuselage box half width (formation wings do not catch)
+ELEVON_GEAR = 'bomber501'
+
+_DONORS: dict[int, jet_gear.Donors] = {}
+
+
+def donors(game) -> jet_gear.Donors:  # noqa: ANN001 - rootcpk.Game
+    """The landing gear's donor (jet_gear.load_donors), read once per game reader."""
+    if id(game) not in _DONORS:
+        _DONORS[id(game)] = jet_gear.load_donors(game)
+    return _DONORS[id(game)]
+
+
+def with_gear(md: Mdb, gear: str | None, d: jet_gear.Donors | None) -> tuple[Mdb, list[str]]:
+    """`md` with the landing gear `gear` (jet_gear.SPECS; a rigid two-bone model skinned first: jet_gear.skin_rigid) and
+    the donor textures it needs; `gear` None: `md` as it is."""
+    if gear is None:
+        return md, []
+    assert d is not None, 'a model with landing gear needs the donor'
+    if md.bones[1].kind == 1:
+        md = jet_gear.skin_rigid(md)
+    return jet_gear.add_gear(md, jet_gear.SPECS[gear], d)
 
 
 def elevon_model(game) -> Mdb:  # noqa: ANN001 - rootcpk.Game
-    return grounded(mdb_jet.jet_archive(game.read('OBJECT', ELEVON_ARCHIVE))[2])
+    md, _tex = with_gear(mdb_jet.jet_archive(game.read('OBJECT', ELEVON_ARCHIVE))[2], ELEVON_GEAR, donors(game))
+    return grounded(md)
 
 
 def elevon_archive(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
+    """EDF6VC_JET.MRAB, its model's gear checked (jet_gear.check_gear)."""
     raw = game.read('OBJECT', ELEVON_ARCHIVE)
-    return replace_member(raw, ELEVON_MODEL, mdb_write(elevon_model(game)))
+    d = donors(game)
+    md, tex = with_gear(mdb_jet.jet_archive(raw)[2], ELEVON_GEAR, d)
+    md = grounded(md)
+    jet_gear.check_gear(md, 1.0)
+    return replace_member(raw, ELEVON_MODEL, mdb_write(md), d.rab, tex)
 
 
 # ------------------------------------------------------------------------------------------ interceptor
@@ -279,18 +314,30 @@ def level_bone(md: Mdb, name: str) -> Mdb:
     return out
 
 
-def make_model(src: Mdb, r: Recipe) -> Mdb:
-    if not r.split:
-        md = scale_mdb(level_bone(src, r.level) if r.level else src, r.scale)
-        md = rename_root(md, r.root) if r.root else md
-    else:
+def unscaled(src: Mdb, r: Recipe, d: jet_gear.Donors | None) -> tuple[Mdb, list[str]]:
+    """The model `r` makes of `src` before its scale (levelled, split, with its gear) and the gear's textures."""
+    if r.split:
         split, surfaces, _stats = mdb_jet.build(collapse_501_2(src))
         mdb_jet.self_check(mdb_write(split), surfaces)        # hinge / bind checks on the unscaled split model
-        md = scale_mdb(split, r.scale)
+        return with_gear(split, r.gear, d)
+    return with_gear(level_bone(src, r.level) if r.level else src, r.gear, d)
+
+
+def finish(md: Mdb, r: Recipe) -> Mdb:
+    """The unscaled model `md` (unscaled) scaled, its root renamed, grounded as `r` says."""
+    md = scale_mdb(md, r.scale)
+    md = rename_root(md, r.root) if r.root else md
     return grounded(md) if r.grounded else md
 
 
-def replace_member(raw: bytes, model: str, data: bytes) -> bytes:
+def make_model(src: Mdb, r: Recipe, d: jet_gear.Donors | None = None) -> Mdb:
+    """`src` made as `r` says (`d`: the gear's donor, needed when r.gear is set)."""
+    return finish(unscaled(src, r, d)[0], r)
+
+
+def replace_member(raw: bytes, model: str, data: bytes, donor=None, textures: list[str] | None = None) -> bytes:  # noqa: ANN001 - mdb.Rab
+    """The archive `raw` with member `model` replaced by `data` (CMPL-compressed) and the texture files `textures`
+    (each with its .lod variant) copied in from the archive `donor` (graft_pure.copy_texture_members)."""
     rab = rab_read(raw)
     assert rab_write(rab) == raw, 'stock archive does not round-trip'
     hits = [f for f in rab.files if f.name.lower() == model.lower()]
@@ -298,6 +345,8 @@ def replace_member(raw: bytes, model: str, data: bytes) -> bytes:
     stored = cmpl_compress(data)
     assert cmpl_decompress(stored) == data
     hits[0].stored = stored
+    if textures:
+        graft_pure.copy_texture_members(rab, donor, textures)
     return rab_write(rab)
 
 
@@ -307,9 +356,11 @@ def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  #
     for name, r in (MODELS if models is None else models).items():
         raw = game.read('OBJECT', r.archive)
         src = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data)
-        data = mdb_write(make_model(src, r))
-        arc = replace_member(raw, r.model, data)
-        check(raw, arc, r)
+        d = donors(game) if r.gear else None
+        md, tex = unscaled(src, r, d)
+        data = mdb_write(finish(md, r))
+        arc = replace_member(raw, r.model, data, d.rab if d else None, tex)
+        check(raw, arc, r, d)
         out[name] = arc
     return out
 
@@ -326,7 +377,8 @@ def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
         return elevon_model(game)
     r = MODELS[file]
     raw = game.read('OBJECT', r.archive)
-    return make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r)
+    return make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r,
+                      donors(game) if r.gear else None)
 
 
 # Each jet model's nozzles, in its frame (x right, y up, z forward): src/booster.cpp kJetNozzles (tools/selftest.py
@@ -343,19 +395,22 @@ def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
 # its length), length FLAME_LENGTH_PER_DIAMETER of that. NOZZLE_EXITS picks each exit's rim vertices (a box in the
 # model's frame, the right one of a mirrored pair); measure_nozzles reads them off the model, NOZZLES is what it
 # reads (constants: the self-test has no Root.cpk), check_nozzles holds the two together.
+# The landing gear (Recipe.gear) stands each model up on its wheels, so its grounding lifts it by the gear's height
+# more (2026-10-05): the bomber501 1.0 m, the interceptor 0.65 m (both: jet_gear.SPECS drop x scale), the multirole
+# 0.4365 m ((1.0 - its stock lowest point 0.127) x 0.5); the drone has no gear. The exit boxes are in the lifted frame.
 FLAME_LENGTH_PER_DIAMETER = 5.0
 ExitBox = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]   # (x0, x1), (y0, y1), (z0, z1)
 NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a left twin at -x)
-    None: (((-0.5, 0.5), (0.0, 3.0), (-12.5, -11.9)), False),
-    'EDF6VC_INTERCEPTOR.MRAB': (((1.0, 3.6), (0.0, 2.0), (-8.4, -7.6)), True),
-    'EDF6VC_MULTIROLE.MRAB': (((-0.5, 0.5), (0.4, 0.9), (-0.85, -0.75)), False),
+    None: (((-0.5, 0.5), (0.0, 4.5), (-12.5, -11.9)), False),
+    'EDF6VC_INTERCEPTOR.MRAB': (((1.0, 3.6), (0.0, 3.0), (-8.4, -7.6)), True),
+    'EDF6VC_MULTIROLE.MRAB': (((-0.5, 0.5), (0.7, 1.5), (-0.85, -0.75)), False),
     'EDF6VC_DRONE.MRAB': (((-0.3, 0.3), (0.7, 1.3), (-1.3, -1.22)), False),
 }
 Nozzle = tuple[tuple[float, float, float], float]   # (exit centre, diameter)
 NOZZLES: dict[str | None, tuple[Nozzle, ...]] = {
-    None: (((0.0, 1.067, -12.182), 0.87),),
-    'EDF6VC_INTERCEPTOR.MRAB': (((2.327, 0.861, -7.804), 1.195), ((-2.327, 0.861, -7.804), 1.195)),
-    'EDF6VC_MULTIROLE.MRAB': (((0.0, 0.633, -0.799), 0.475),),
+    None: (((0.0, 2.067, -12.182), 0.87),),
+    'EDF6VC_INTERCEPTOR.MRAB': (((2.327, 1.511, -7.804), 1.195), ((-2.327, 1.511, -7.804), 1.195)),
+    'EDF6VC_MULTIROLE.MRAB': (((0.0, 1.07, -0.799), 0.475),),
     'EDF6VC_DRONE.MRAB': (((0.0, 1.005, -1.261), 0.323),),
 }
 
@@ -438,44 +493,56 @@ def close(a: float, b: float) -> bool:
     return abs(a - b) <= 1e-3 * abs(b) + 2e-3      # half4 positions re-rounded after scaling
 
 
-def check(raw: bytes, arc: bytes, r: Recipe) -> None:
-    """Re-read the written archive: same members, untouched members byte-identical, the new model round-trips,
-    its vertex box == source box x scale, bone names as the source (plus the elevon split), and every bone's
-    bind x inv_bind and world translation consistent with the source x scale."""
+def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None) -> None:
+    """Re-read the written archive: the stock members in their order, untouched ones byte-identical, plus (a model with
+    gear) exactly the gear's donor textures, their bytes the donor's; the new model round-trips; bone names as the
+    unscaled model it was made from (unscaled: the stock skeleton, the elevon split, the gear), every bone's bind x
+    inv_bind and world translation consistent with that x scale; the stock geometry's box == the source box x scale
+    and the whole model's == the unscaled model's x scale (both raised by the grounding); the gear's own checks
+    (jet_gear.check_gear: one ground plane under every wheel, the legs fold into the body)."""
     a, b = rab_read(raw), rab_read(arc)
     assert rab_write(b) == arc
-    assert [(f.name, f.folder, f.flag) for f in a.files] == [(f.name, f.folder, f.flag) for f in b.files]
-    for fa, fb in zip(a.files, b.files):
+    src = mdb_read(next(f for f in a.files if f.name.lower() == r.model.lower()).data)
+    ref, tex = unscaled(src, r, d)      # the unscaled model it was made from
+    added = [f for f in b.files if f.name.lower() not in {x.name.lower() for x in a.files}]
+    want = sorted(x.name.lower() for t in tex for x in graft_pure.texture_members(d.rab, t)) if tex else []  # type: ignore[union-attr]
+    assert sorted(f.name.lower() for f in added) == want, f'added members {[f.name for f in added]}, want {want}'
+    for f in added:
+        assert f.stored == next(x for x in d.rab.files if x.name.lower() == f.name.lower()).stored  # type: ignore[union-attr]
+    kept = [f for f in b.files if f not in added]
+    assert [(f.name, a.folders[f.folder], f.flag) for f in a.files] == [(f.name, b.folders[f.folder], f.flag) for f in kept]
+    for fa, fb in zip(a.files, kept):
         if fa.name.lower() != r.model.lower():
             assert fa.stored == fb.stored, f'{fa.name} changed'
-    src = mdb_read(next(f for f in a.files if f.name.lower() == r.model.lower()).data)
     data = next(f for f in b.files if f.name.lower() == r.model.lower()).data
     new = mdb_read(data)
     assert mdb_write(new) == data, 'new model does not round-trip'
 
-    ref = mdb_jet.build(collapse_501_2(src))[0] if r.split else src     # the unscaled model it was made from
-    if r.level:
-        ref = level_bone(ref, r.level)
     names = [ref.name_of(x.name) for x in ref.bones]
     if r.root:
         names[0] = r.root
     assert [new.name_of(x.name) for x in new.bones] == names
     assert [x.parent for x in new.bones] == [x.parent for x in ref.bones]
     if not r.split:
-        assert names[1:] == [src.name_of(x.name) for x in src.bones][1:]
-    lo0, hi0 = bbox(bind_positions(src))
-    lo1, hi1 = bbox(bind_positions(new))
+        assert set([src.name_of(x.name) for x in src.bones][1:]) <= set(names[1:])
+    lo0, hi0 = bbox(bind_positions(ref))
     lift = -lo0[1] * r.scale if r.grounded and lo0[1] < 0.0 else 0.0   # grounded: the scaled box raised onto its origin
     shift = (0.0, lift, 0.0)
-    for i in range(3):
-        assert close(lo1[i], lo0[i] * r.scale + shift[i]) and close(hi1[i], hi0[i] * r.scale + shift[i]), \
-            f'{r.model} box axis {i}: {lo1[i]}..{hi1[i]} vs {lo0[i] * r.scale + shift[i]}..{hi0[i] * r.scale + shift[i]}'
+    gear = {new.bone_index(n) for n in jet_gear.GEAR_BONES} if r.gear else set()
+    stock = set(range(len(new.bones))) - gear
+    for (l0, h0), pts in (((lo0, hi0), bind_positions(new)), (bbox(bind_positions(src)), bind_positions(new, stock))):
+        lo1, hi1 = bbox(pts)
+        for i in range(3):
+            assert close(lo1[i], l0[i] * r.scale + shift[i]) and close(hi1[i], h0[i] * r.scale + shift[i]), \
+                f'{r.model} box axis {i}: {lo1[i]}..{hi1[i]} vs {l0[i] * r.scale + shift[i]}..{h0[i] * r.scale + shift[i]}'
     w0, w1 = bind_world(ref), bind_world(new)
     for k, (x0, x1) in enumerate(zip(ref.bones, new.bones)):
         p0, p1 = mmul(w0[k], x0.inv_bind), mmul(w1[k], x1.inv_bind)
         assert max(abs(u - v * (r.scale if i in (12, 13, 14) else 1.0)) for i, (u, v) in enumerate(zip(p1, p0))) < 1e-3
         assert all(abs(w1[k][12 + c] - (w0[k][12 + c] * r.scale + shift[c])) < 2e-3 for c in range(3))
         assert all(abs(x1.half[c] - x0.half[c] * r.scale) < 1e-4 for c in range(3))
+    if r.gear:
+        jet_gear.check_gear(new, r.scale)
 
 
 # ------------------------------------------------------------------------------------------ main
