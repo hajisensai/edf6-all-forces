@@ -10,10 +10,12 @@
 //    of the candidates when the round is slower than kPassSpeed (core = collector+0x88, velocity core+0xB90 in m/s,
 //    every BulletBase: H): the round goes through as if no shield were there. The stock team test stays as it is.
 //  - Vehicles: the stock shield has no contact with any vehicle (the heli's CheckBarrierCollision 0x64FB20 asks a
-//    flag no code sets: M). ShieldBlock, from the plugin jets' and the player jet's physics steps, keeps a vehicle
-//    faster than kBlockSpeed from crossing a hostile layer's face: the velocity's part across it is turned back
-//    (kBounce of it), the rest kept, so the plane glances off or stops dead on it. Slower vehicles, and everyone on
-//    foot (never in these steps), cross freely.
+//    flag no code sets: M). Every vehicle faster than kBlockSpeed is kept from crossing a hostile layer's face as
+//    from a building's wall (the user, 2026-10-05: "it threw me back; it should be a hit like a building's"): the
+//    velocity's part across the face is gone, the rest kept, and ShieldBlock returns the speed lost for the owner's
+//    crash (the player jet: the crash a building gives, playerjet.cpp Crash). The plugin's jets and the player jet
+//    from their physics steps (their own velocity), every other vehicle (stock helis, tanks, ...) from its frame
+//    (ShieldVehicle: the physics body's velocity). Slower vehicles, and everyone on foot, cross freely.
 // The layer's sphere: the world box of its body's shape, as the heli's check measures it (0x64FC1A..0x64FCD6):
 // shape 0x11B15E0(body), transform = the world interface (*(*(body+0x100)+0x58)+0x20) slot 0x80 (id), box = the
 // shape type's entry of the table at kAabbTable (+type*0x100+0x18)(shape, transform, out min/max). Centre and the
@@ -30,13 +32,14 @@ constexpr std::size_t kLayers[2]={0x18C0,0x1F40};
 constexpr std::size_t kLayerBody=0x580,kLayerInfo=0x590,kInfoTeam=8,kBodyId=0xF0,kBodyWorld=0x100,kWorldIface=0x58;
 constexpr std::size_t kCollectorCore=0x88,kBulletVelocity=0xB90;
 constexpr unsigned kTransformSlot=0x80/8;
+constexpr std::size_t kHeliBody=0x1650;   // HelicopterBase's rigid body
+constexpr unsigned kGetLinVel=0x11B1300,kSetLinVel=0x11B18F0;   // (body) -> m/s; (body, m/s): physics.cpp
 constexpr std::int32_t kSideEdf=0;   // the shields are the EDF side's enemies (the lock-on registry)
 // Rounds slower than this (m/s) pass a shield: 2.5 m a frame. Rifles, cannons and missiles in flight are faster;
 // grenades lobbed slowly, plasma balls and flames slower.
 constexpr float kPassSpeed=150.0f;
-// Vehicles faster than this (m/s, about 144 km/h) cannot cross a shield's face; kBounce of their speed across it
-// comes back.
-constexpr float kBlockSpeed=40.0f,kBounce=0.3f;
+// Vehicles faster than this (m/s, about 144 km/h) cannot cross a shield's face.
+constexpr float kBlockSpeed=40.0f;
 constexpr float kLookAhead=2.0f/60.0f;   // two frames ahead: a fast plane never gets one frame past the face
 constexpr int kMaxShields=32;
 
@@ -47,6 +50,8 @@ using BodyObjectFn=const void*(__fastcall*)(std::uint32_t);
 using BodyShapeFn=const unsigned char*(__fastcall*)(const void*);
 using TransformFn=const void*(__fastcall*)(const void*,std::uint32_t);
 using AabbFn=void(__fastcall*)(const void*,const void*,float*);
+using GetVecFn=const float*(*)(void*);
+using SetVecFn=std::uintptr_t(*)(void*,const float*);
 
 struct Sphere { float c[3]; float r; std::int32_t team; };
 Sphere shields[kMaxShields];
@@ -83,7 +88,9 @@ bool LayerSphere(const unsigned char* bearer,int i,Sphere& s) noexcept {
     for(int k=0;k<3;++k)s.c[k]=(box[k]+box[4+k])*0.5f;
     s.r=(box[4]-box[0])*0.5f;
     s.team=At<std::int32_t>(bearer+kLayers[i],kLayerInfo+kInfoTeam);
-    return s.r>1.0f && s.r<2000.0f;
+    // Not set up yet: the bearer's first frames have the layer on team -1 with its body at the origin (2026-10-05:
+    // a jet near (0,0,0) ran into it).
+    return s.team>=0 && s.r>1.0f && s.r<2000.0f;
 }
 
 void Gather(void*,const void* object,const float*) noexcept {
@@ -108,17 +115,18 @@ void GatherOnce() noexcept {
     }
 }
 
-// Turn back the part of `vel` that would carry `pos` across the face of `s` within kLookAhead.
-bool Glance(const Sphere& s,const float* pos,float* vel) noexcept {
+// Take away the part of `vel` that would carry `pos` across the face of `s` within kLookAhead (as a wall does);
+// the speed taken, 0 when it stays on its side.
+float Glance(const Sphere& s,const float* pos,float* vel) noexcept {
     const float rel[3]={pos[0]-s.c[0],pos[1]-s.c[1],pos[2]-s.c[2]};
     const float dist=std::sqrt(rel[0]*rel[0]+rel[1]*rel[1]+rel[2]*rel[2]);
-    if(dist<1.0f)return false;
+    if(dist<1.0f)return 0.0f;
     const float n[3]={rel[0]/dist,rel[1]/dist,rel[2]/dist};
     const float across=vel[0]*n[0]+vel[1]*n[1]+vel[2]*n[2];   // > 0 outward
     const float face=dist-s.r,next=face+across*kLookAhead;
-    if((face>=0.0f)==(next>=0.0f))return false;   // stays on its side
-    for(int k=0;k<3;++k)vel[k]-=(1.0f+kBounce)*across*n[k];
-    return true;
+    if((face>=0.0f)==(next>=0.0f))return 0.0f;   // stays on its side
+    for(int k=0;k<3;++k)vel[k]-=across*n[k];
+    return std::fabs(across);
 }
 
 struct PassLog { ULONGLONG at; unsigned passed,stopped; };
@@ -149,20 +157,39 @@ bool ShieldLetsThrough(void* collector,std::uint32_t body) noexcept {
     return pass;
 }
 
-void ShieldBlock(const unsigned char* v,float* vel) noexcept {
-    if(!ok || !v)return;
-    if(vel[0]*vel[0]+vel[1]*vel[1]+vel[2]*vel[2]<kBlockSpeed*kBlockSpeed)return;
+float ShieldBlock(const unsigned char* v,float* vel) noexcept {
+    if(!ok || !v)return 0.0f;
+    if(vel[0]*vel[0]+vel[1]*vel[1]+vel[2]*vel[2]<kBlockSpeed*kBlockSpeed)return 0.0f;
+    float lost=0.0f;
     __try {
         GatherOnce();
         const float* pos=reinterpret_cast<const float*>(v+kPosition);
         const std::int32_t team=At<std::int32_t>(v,kTeam);
         for(int i=0;i<shieldCount;++i) {
-            if(shields[i].team==team || !Glance(shields[i],pos,vel))continue;
+            if(shields[i].team==team)continue;
+            const float taken=Glance(shields[i],pos,vel);
+            if(taken<=0.0f)continue;
+            lost=taken>lost ? taken : lost;
             static ULONGLONG at=0;
             const ULONGLONG now=GetTickCount64();
-            if(Cfg().debug && now-at>1000){at=now;Log("SHIELD v=%p ran into shield %d (radius %.0f)",v,i,shields[i].r);}
+            if(Cfg().debug && now-at>1000)
+                {at=now;Log("SHIELD v=%p at (%.0f,%.0f,%.0f) ran into shield %d (centre (%.0f,%.0f,%.0f) radius %.0f) at %.0f m/s across its face",
+                     v,pos[0],pos[1],pos[2],i,shields[i].c[0],shields[i].c[1],shields[i].c[2],shields[i].r,taken);}
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return lost;
+}
+
+void ShieldVehicle(unsigned char* v) noexcept {
+    // The plugin's bodies: from their own steps. The helicopters only (stock and called): their rigid body is at
+    // +0x1650 (docs/aircraft-re.md); a ground vehicle's is not known yet, and only a bike gets near kBlockSpeed.
+    if(!ok || BodyOf(v)!=PluginBody::none || v[kDead] || !IsHelicopter(v))return;
+    void* const body=At<void*>(v,kHeliBody);
+    if(!body)return;
+    const float* now=reinterpret_cast<GetVecFn>(image+kGetLinVel)(body);
+    if(!now)return;
+    alignas(16) float vel[4]={now[0],now[1],now[2],0.0f};
+    if(ShieldBlock(v,vel)>0.0f)reinterpret_cast<SetVecFn>(image+kSetLinVel)(body,vel);
 }
 
 bool InstallShields() noexcept {

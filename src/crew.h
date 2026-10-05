@@ -222,8 +222,9 @@ bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's
 bool InstallShields() noexcept;                    // shield.cpp: the Shield Bearer's shield lets slow things through
 // shield.cpp: whether a round (its candidate collector) passes a shield layer's body (slow: true, so it is left out)
 bool ShieldLetsThrough(void* collector,std::uint32_t body) noexcept;
-// shield.cpp: a fast vehicle's velocity (m/s) kept from crossing a hostile shield's face
-void ShieldBlock(const unsigned char* vehicle,float* vel) noexcept;
+// shield.cpp: a fast vehicle's velocity (m/s) kept from crossing a hostile shield's face; the speed it lost
+float ShieldBlock(const unsigned char* vehicle,float* vel) noexcept;
+void ShieldVehicle(unsigned char* vehicle) noexcept;   // shield.cpp: the same for a vehicle with no plugin body
 void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
 // booster.cpp: a jet's exhaust flames on its nozzles (by its mark), burning `intensity` (0..1), `burner` longer.
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept;

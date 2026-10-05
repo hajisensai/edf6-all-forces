@@ -134,6 +134,11 @@ constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude t
 constexpr float kStallFloor=25.0f;
 constexpr float kBodyTop=340.0f;       // m/s: the steepest dive's (the drag holds it about there; jetprops.cpp 600)
 constexpr float kCeilingGap=12.0f;
+// Under the ceiling the path bends level over kCeilingBand m (CeilingBend): the climb's sine allowed falls with the
+// room left. (It was a hard stop, the climb's vertical speed zeroed in one frame over CeilingY()-kCeilingGap: a
+// steep climb lost most of its speed and snapped level, "pulled back" (the user, 2026-10-05; 91 m/s climbing at
+// 65 deg at 11:36:16 to 51 m/s and a stall at 300 m).)
+constexpr float kCeilingBand=150.0f;
 // The world's walls (kWorldWallIn inside WorldHalf: the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
 // turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
 constexpr float kWorldWallIn=600.0f,kWallIn=0.3f,kWallAlong=0.9f;   // kWorldWallIn: m inside the world's edge (WorldHalf)
@@ -375,6 +380,15 @@ void RightOf(const float* dir,float* right) noexcept {
 // The world's walls (see kWorldWallIn): a path (unit) out through one beyond it is turned along it (its way along
 // kept, or the right of it when it flew straight at the wall) and kWallIn back in. Never less than the speed it has:
 // only the direction turns.
+// The path `dir` (unit) bent level under the ceiling (see kCeilingBand): its length kept.
+void CeilingBend(const float* pos,float* dir) noexcept {
+    const float most=Clamp((CeilingY()-kCeilingGap-pos[1])/kCeilingBand,0.0f,1.0f);
+    if(dir[1]<=most)return;
+    const float flat=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]),keep=std::sqrt(1.0f-most*most);
+    if(flat<1e-4f)return;   // straight up: no heading to level onto (the next frames have one)
+    dir[0]*=keep/flat;dir[2]*=keep/flat;dir[1]=most;
+}
+
 void WallTurn(const float* pos,float* dir) noexcept {
     for(int i=0;i<3;i+=2) {
         if(std::fabs(pos[i])<WorldHalf()-kWorldWallIn || dir[i]*pos[i]<=0.0f)continue;
@@ -685,6 +699,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     for(int i=0;i<3;++i)next[i]=dir[i]+(lift[i]+gPerp[i])*dt/speed;
     if(!Normalize(next))std::memcpy(next,dir,12);
     WallTurn(pos,next);
+    CeilingBend(pos,next);
     Across(j.up,next);   // carried along the new path
     if(!aiming){std::memcpy(j.aim,next,12);j.hasAim=s.keys;}
     FlightWatch(j,v,s,next,!s.keys ? 2 : aiming ? 1 : 0);
@@ -697,8 +712,6 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     speed+=(thrust-drag-airbrake-kG*next[1])*dt;
     speed=Clamp(speed,kStallFloor,kBodyTop);
     for(int i=0;i<3;++i)j.vel[i]=next[i]*speed;
-    // The ceiling the stock input holds every body under: it levels off under it.
-    if(pos[1]>CeilingY()-kCeilingGap && j.vel[1]>0.0f)j.vel[1]=0.0f;
     // The nose above the path by what the wing needs, pitched about the body's right only (no sideslip).
     const float mid=0.5f*(k.minAir+k.top),past=mid/speed;
     const float aoaWant=Clamp(kAoaPerG*g*past*past,kAoaMin,kAoaMax);
@@ -1083,7 +1096,9 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     const auto body=At<void*>(v,kBody);
     if(!body)return false;
     JetMotionProps(body);
-    ShieldBlock(v,j->vel);   // its own velocity (shield.cpp)
+    // A shield hit as a building's (shield.cpp): its speed across the face gone, and the crash Blocked would give.
+    if(const float lost=ShieldBlock(v,j->vel);lost>0.0f && j->phase==Phase::air)
+        Crash(*j,v,0.0f,lost+j->kind->landMax,false,GameMs(),nullptr);
     for(int i=0;i<3;++i){lin[i]=j->vel[i];ang[i]=j->omega[i];}
     return true;
 }
