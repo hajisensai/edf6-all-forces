@@ -42,6 +42,13 @@ class Jet:
     # is walked through, wings and all: 「飞机缺少实体」, 2026-10-05) and a seat every class may take. Its NPC-flown
     # twin keeps the fuselage box (jet_sgo).
     parked: bool = False
+    # A requested one (REQUEST_KINDS, the Air Raider's EDF6VC_CALL_FLY_* vehicle requests, tools/call_weapons.py): a parked
+    # twin the stock request's transport drops empty at the flare, so its SGO keeps `vehicle_setup` beside `mission_setup`
+    # as a player jet's does (the request's vehicle setup is the one the vehicle gets; the SGO is the stock heli's shape).
+    requested: bool = False
+    # The stock bomber model (pylib/jet_models.py STOCK_BOMBERS) a jet with no model file of its own is measured on for
+    # its box and door when parked (the gunship's bomber401); None: its `file`, or the elevon bomber.
+    box_model: str | None = None
     # The stock heli SGO it is made from (its body, rigid body, crash and weapons): every jet is a V506.
     stock: str = 'V506_HELI'
     # mission_setup[0]: the vehicle's tier, the two multipliers the game's vehicle requests scale a vehicle by (its
@@ -414,6 +421,30 @@ def parked_name(kind: str) -> str:
 
 
 JETS.update({parked_name(k): replace(JETS[k], parked=True) for k in PARKED_KINDS})
+# The gunship (src/jet_internal.h Body::gunship, mark 7011) as a JETS entry, for its requested twin only: the NPC gunship
+# is tools/make_jets.py's (the strike jet in BOMBER401's model with GUNSHIP_MARK and a gunner seat). Its arms and
+# durability the strike jet's (as tools/make_jets.py's), its model the stock bomber401 (52 m across, no gear: it stands
+# on its belly), measured on that model when parked (box_model).
+GUNSHIP_JET = 'edf6tr_jet_gunship'   # no _mission: the range never places it (testrange/gen.py)
+JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=('app:/object/bomber401.mrab', 'bomber401.mdb'),
+                            body='bomber401', box_model='bomber401')
+# The NPC kinds the Air Raider requests as empty aircraft to fly (tools/calls.py EDF6VC_CALL_FLY_*, the user, 2026-10-06:
+# 「补上空袭的召唤飞机，空母载具」): every kind of src/playerjet_kinds.h kBoardable the player jets' requests do not already
+# bring, each one's requested twin (parked: the whole plane's box, every class; requested: vehicle_setup). Left out on
+# purpose (tools/selftest.py every_boardable_aircraft_requested): the strike jet (the player strike jet's request brings
+# the same airframe, model and stores), the bomber takeover bodies (the airstrike's stock bombers, not ours to bring),
+# the blast and doll drones (their one weapon is the charge that destroys them: the thrown drones bring that charge).
+REQUEST_KINDS = ('edf6tr_jet_interceptor_mission', 'edf6tr_jet_fighter_mission', 'edf6tr_jet_multirole_mission', GUNSHIP_JET,
+                 'edf6tr_jet_drone', 'edf6tr_jet_carrier_mission', 'edf6tr_jet_blast_carrier_mission',
+                 'edf6tr_jet_doll_carrier_mission')
+
+
+def request_name(kind: str) -> str:
+    """The requested twin's SGO name of the NPC jet `kind` (REQUEST_KINDS)."""
+    return kind.removesuffix('_mission') + '_request_mission'
+
+
+JETS.update({request_name(k): replace(JETS[k], parked=True, requested=True) for k in REQUEST_KINDS})
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
 JET_ELEVON_FILE = 'EDF6VC_JET.MRAB'
@@ -602,7 +633,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         # The player sees the whole plane: its box is the model's (wings, nose and tail), measured, not a fuselage
         # box (an NPC jet's is the fuselage: a formation's wings would catch on each other, low passes scrape; a
         # carrier's drones leave and dock under its middle). A parked one is the player's to walk up to.
-        rigid = jet_models.model_box(game, jet.file)
+        rigid = jet_models.model_box(game, jet.file or jet.box_model)
     elif jet.file in jet_models.MODELS:
         rigid = jet_models.fuselage_box(game, jet.file)   # off its model as made (grounded): never under its origin
     elif jet.model is None and rigid is None and model == JET_ELEVON_MODEL:
@@ -626,9 +657,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9).
         seat = m['vehicle_riding_position'][0]
         seat[3], seat[4] = PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES
-    if jet.player:
+    if jet.player or jet.requested:
         import copy
         m['vehicle_setup'] = copy.deepcopy(setup)
+    if jet.player:
         cam = m['game_object_camera_setting']
         if jet.camera is not None:
             m['game_object_camera_setting'] = [cam[0], [float(x) for x in jet.camera]]
@@ -676,6 +708,8 @@ def _root_lift(game: Game, jet: Jet, model: list[str] | None) -> float | None:
     import jet_models
     if jet.file in jet_models.MODELS:
         return jet_models.root_lift(game, jet.file)
+    if jet.box_model is not None:
+        return jet_models.root_lift(game, jet.box_model)   # the stock bomber it is measured on
     if jet.file is None:
         return jet_models.root_lift(game, None) if model == JET_ELEVON_MODEL else 0.0   # a stock bomber: not grounded
     return None

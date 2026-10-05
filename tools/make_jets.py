@@ -10,7 +10,8 @@ and the blast drones' charges EDF6VC_BLAST_CHARGE / EDF6VC_DOLL_CHARGE.SGO (vcob
 sound is silenced (vcobjects.JET_ROTOR_SE_ROWS): the plugin plays their engine (src/jetsound.cpp). Without the SGOs the plugin leaves the stock
 bombers alone.
 Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, which the Air Raider's call
-weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring.
+weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring, and EDF6VC_FLY_<KIND>.SGO: the plugin's other aircraft
+(interceptor, fighter, multirole, gunship, drone, the three air carriers) parked empty, which EDF6VC_CALL_FLY_* bring.
 Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model with the gunship's own mark and a gunner seat), the
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
 impact charges a crash sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64.SGO.
@@ -39,6 +40,13 @@ import vcobjects as vc  # noqa: E402
 
 OWNER = 'jets'   # pylib/ledger.py
 
+
+def request_file(kind: str) -> str:
+    """The Mods/OBJECT file of the requested twin of the NPC jet `kind` (vcobjects.REQUEST_KINDS): EDF6VC_FLY_<KIND>.SGO."""
+    short = kind.removeprefix('edf6tr_jet_').removesuffix('_mission')
+    return f'EDF6VC_FLY_{short.upper()}.SGO'
+
+
 # file -> the testrange jet it is made like
 FILES: dict[str, str] = {
     'EDF6VC_JET_STRIKE.SGO': 'edf6tr_jet_strike_mission',
@@ -59,6 +67,10 @@ FILES: dict[str, str] = {
     # (tools/call_weapons.py): with vehicle_setup as well as mission_setup.
     'EDF6VC_PJET_FIGHTER.SGO': 'edf6tr_pjet_fighter_mission',
     'EDF6VC_PJET_STRIKE.SGO': 'edf6tr_pjet_strike_mission',
+    # The plugin's other aircraft the Air Raider requests empty to fly (EDF6VC_CALL_FLY_*, tools/call_weapons.py): each
+    # one's requested twin (vcobjects.REQUEST_KINDS), with vehicle_setup as well as mission_setup. The gunship's gets
+    # the NPC gunship's gunner seat (with_gunner_seat).
+    **{request_file(k): vc.request_name(k) for k in vc.REQUEST_KINDS},
 }
 # Their own models (pylib/jet_models.py).
 MODEL_FILES = sorted({vc.JETS[j].file for j in FILES.values() if vc.JETS[j].file})
@@ -134,7 +146,11 @@ def build(root: str) -> dict[str, bytes]:
     primer_fighter_model.check(arc)
     out[f'OBJECT/{vc.JETS["edf6tr_jet_primer_fighter_mission"].file}'] = arc
     for name, jet in FILES.items():
-        out[f'OBJECT/{name}'] = vc.jet_sgo(game, jet, MODEL)
+        data = vc.jet_sgo(game, jet, MODEL)
+        if vc.JETS[jet].mark == GUNSHIP_MARK:   # the requested gunship: the gunner seat the NPC gunship has
+            data = with_gunner_seat(data, game.read('OBJECT', GUNNER_STOCK))
+            check_gunner_seat(data, name)
+        out[f'OBJECT/{name}'] = data
     for name, (model, body, rigid) in BOMBERS.items():
         out[f'OBJECT/{name}'] = vc.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid)
     model, body, rigid = BOMBERS['EDF6VC_BOMBER401.SGO']
@@ -203,7 +219,7 @@ def with_gunner_seat(data: bytes, stock: bytes) -> bytes:
     return sgo.write(version, m)
 
 
-def check_gunner_seat(data: bytes) -> None:
+def check_gunner_seat(data: bytes, name: str = GUNSHIP_FILE) -> None:
     """Re-read the gunship SGO and raise GunnerSeatError unless: its mark is GUNSHIP_MARK; it has exactly two seats;
     seat 0 is the pilot's (PILOT_KEYS); the gunner seat has the pilot's three locators, GUNNER_POSE, a class mask every
     class passes (15) and GUNNER_KEYS; no weapon sits on the gunner seat (every vehicle_weapon_setting on seat 0 or -1),
@@ -212,7 +228,7 @@ def check_gunner_seat(data: bytes) -> None:
 
     def need(ok: bool, msg: str) -> None:
         if not ok:
-            raise GunnerSeatError(f'{GUNSHIP_FILE}: {msg}')
+            raise GunnerSeatError(f'{name}: {msg}')
 
     _, m = sgo.read(data)
     setup = m.get('mission_setup')
