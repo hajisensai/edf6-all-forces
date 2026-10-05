@@ -155,6 +155,11 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 | AmmoOwnerMove | `weapon+0x24C`：武器 SGO 读取函数在 `0x68C59A` 把 `AmmoOwnerMove` 字符串（`0x17E2998`）的值写到这里；`0x691FA0` 用 `weapon+0x190 × weapon+0x24C ÷ 60`（除数常量 `0x1768E20` = 60）算继承速度；`weapon+0x190` 由持有者每帧更新 `0x633DD0`（`0x633E50`）从载具传入的速度向量写入。原版直升机炮的 AmmoOwnerMove 都是 0（Root.cpk：V_506/602HELI_GATLING01_L/R、V_410HELI_GATLING01–03、V_409HELI_GATLING01），照样读 | 偏移 H（静态）；+0x190 是 m/s 的载机速度 **M**（由 ÷60 和 `docs/missile-re.md` 的继承速度推断） |
 | 弹着圈 | `RoundImpact`（15 帧一段的地图射线：地形和建筑，不含水面和载具）第一次命中处；寿命内没命中：`sight::RoundAfter` 闭式求寿命结束处（`pos + n·v + drop·n(n+1)/2`），变暗；旁边标炮口到它的直线距离 | 设计 |
 | 提前量 | 不做：原版直升机炮不锁定（`LockonType 0`），座位上没有可读的锁定目标 | — |
+| 没有红线的炮（2026-10-05 追加） | 座位里没有被隐藏红线的炮时（409 的炮塔机炮 `V_409HELI_GATLING01`，`custom_parameter` 为空），取座位武器里弹速最快、不锁定、射程超过 10 m 的那门（10 m 排除 506 的油箱 `v_fuel01`：1 m/帧 × 1 帧） | 设计；武器字段 H |
+| 选中的武器 | 原版直升机**没有**选武器：506 第 55 槽把主扳机（`seat+0x2E4`）写成 `veh+0x2020`（holder 0、1 的机炮），按键位 `0x20` 写成 `veh+0x2021`（holder 2 的导弹）（`docs/heli-input-re.md` §2b，H；409 同样，静态）。座位里也没有可读的「当前武器」下标。所以瞄准具把机炮和副武器同时画出来 | H（506）/ M（409） |
+| 导弹 | 座位里第一件 `LockonType`（`+0x6B0`）= 1 的武器（506 / 602 的 `V_*HELI_MISSILE01`，`MissileBullet01`，LockonRange 500）。锁定读武器自己的锁定列表（`+0xC60` 链表首节点的条目 `+0x10`）和正在锁定的条目（`+0xC70`，进度 `+0xC80` / LockonTime `+0x6D4`），即 `stores.cpp` 的 `StoreLock`，与玩家战机挂载的锁定框同一读法；画法同挂载（`hud.cpp` `LockAt`），下方 `MSL 距离`。没有锁定：导弹炮口方向画暗色圆环，标 LockonRange（`+0x6D0`） | 锁定列表 H（`docs/stores-re.md` §7）；原版直升机导弹的锁定由它自己的锁定 tick 维护 **M** |
+| 火箭 | 不锁定且弹速低于 2 m/帧（120 m/s，`heli.cpp` `Arms` 判火箭的同一条）的第一件武器（409 的 `V_409HELI_MISSILE01`：`MissileBullet01`，LockonType 0，起速 0.5 m/帧，`Ammo_CustomParameter[4]` 加速 0.03 m/帧²、[6] 极速 10 m/帧）。沿炮口方向的直线（`RoundImpact`，每步 10 m、共 1500 m、不下坠）第一次碰到地图处画空心菱形，标 `RKT 距离` | 直线是 `heli.cpp` NPC 对火箭的同一模型；**加速度在武器对象里的偏移没有逆向**（Ammo_CustomParameter 只知道子弹里的 `+0x13A0`，`docs/missile-re.md`），所以不能按真实弧线算。呼叫变体的 `V_506HELI_UNDER_NAPALM01`（0.1 m/帧、重力 ×2、继承载机速度）和 409 的炸弹也会落进这条规则，按直线画是**不准**的 |
+| 飞行瞄准点 | 鼠标瞄准飞行的青色方框旁标 `FLY`（`hud.cpp` `FlightAim`），和武器的绿色弹着圈 / 黄色红色锁定框 / 菱形区分开；战斗机的方框不标（它同时是机头机炮的方向） | 设计 |
 
 **离线验证**（`tmp/heli_sight_check.cpp`，不入库，用 cl 编译后跑 `src/sight.h`）：`RoundAfter` 与逐帧步进在 410 / 506 / 410-02 三种炮、
 4 个方向、带继承速度时，寿命内每帧最大差 < 1 mm；平地（y=0）射线模拟：410 炮 50 m 高平射落在 659.6 m（逐帧折线与地面交点 660.9 m，
@@ -163,4 +168,4 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 
 **需实机确认**：弹着圈是否落在炮弹实际打到的地方（炮口偏移、门炮炮塔转动时 `MeanMuzzle` 的方向是否就是射出方向、散布）；
 红线隐藏 / 恢复（ini 改 0 再改 1）在风神驾驶座、布鲁特左右门炮、602 上都正常；距离文字的位置和可读性；与原版准星 / 雷达是否重叠；
-409（无红线）确实不画。602 的 SGO 类是 `Vehicle506_Helicopter`（Root.cpk 静态核对），与 506 同一个 vtable，在 `heli.cpp` 的直升机表里。
+409 的炮塔机炮弹着圈跟着炮塔转、火箭菱形落点与实际弹着的差（加速段的下坠）、506 导弹的锁定框与原版锁定标记是否重合。602 的 SGO 类是 `Vehicle506_Helicopter`（Root.cpk 静态核对），与 506 同一个 vtable，在 `heli.cpp` 的直升机表里。

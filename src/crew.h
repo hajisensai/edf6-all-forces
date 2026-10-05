@@ -501,12 +501,23 @@ void ResetKatyushas() noexcept;
 // Whether the player in `vehicle` sees our gun sight instead of the stock aim lines (crew.cpp AimLines): an aircraft
 // the player-jet flight flies (playerjet.cpp), ini PlayerJetGunSight on.
 bool PlayerJetOwnSight(const void* vehicle) noexcept;
-// helisight.cpp: the gun sight of a stock helicopter (heli.cpp IsHelicopter, no plugin body) the player flies or mans
-// (ini PlayerHeliGunSight): the seat's gun (crew.cpp HiddenAimGuns: its stock aim line hidden), `bore` the way its
-// muzzle points (a direction), `pipper` where a round fired now first hits the map along its real arc (hit), else
-// where it is at the end of its life; `range` m from the muzzle to it. HeliSightFrame from every vehicle's input (game
-// thread); PlayerHeliSight the last one, false with none this moment (hud.cpp HudPublish, the snapshot carries it).
-struct HeliSightReadout { float bore[3],pipper[3],range; bool hit; };
+// helisight.cpp: the weapons' sight of a stock helicopter (heli.cpp IsHelicopter, no plugin body) the player flies or
+// mans (ini PlayerHeliGunSight). The gun (the primary trigger's: `gun`): `bore` the way its muzzle points (a
+// direction), `pipper` where a round fired now first hits the map along its real arc (hit), else where it is at the
+// end of its life; `range` m from the muzzle to it. The other weapon (the secondary button's: `arm`, HeliArm):
+// `armBore` its muzzle's way; a missile's lock (`lock` 2 locked / 1 locking, `lockProgress` 0..1, `armAt` the target's
+// lock point, as the jets' stores read it: stores.h StoreLock) or with none its LockonRange (`lockRange`); the rockets'
+// mark `armAt` where their straight line meets the map (`armHit`), `armRange` m to it. HeliSightFrame from every
+// vehicle's input (game thread); PlayerHeliSight the last one, false with none this moment (hud.cpp HudPublish).
+enum class HeliArm : std::uint8_t { none, missile, rockets };
+struct HeliSightReadout {
+    bool gun,hit;
+    float bore[3],pipper[3],range;
+    HeliArm arm;
+    bool armHit;
+    int lock;
+    float armBore[3],armAt[3],armRange,lockProgress,lockRange;
+};
 bool PlayerHeliOwnSight(const void* vehicle) noexcept;
 void HeliSightFrame(unsigned char* vehicle) noexcept;
 // netprobe.cpp: Debug=1, online only: once a second per helicopter-class vehicle, which machine runs it and how its

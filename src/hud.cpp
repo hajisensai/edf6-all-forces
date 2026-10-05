@@ -568,24 +568,34 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     line.x=sx-line.w*0.5f;line.y=sy+22.0f*s;
 }
 
-// The picked store's lock: locking, a yellow square closing in as it locks; locked, a red diamond on the target. The
-// missile flies at what this marks (stores.cpp StoreLock reads the same entry the round will hold).
-void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
-    float sx,sy,depth;
-    if(!j.lock || !Project(vp,j.lockAt,width,height,&sx,&sy,&depth))return;
+// A lock (stores.h StoreLock: `lock` 2 locked, 1 locking at `progress`, on the lock point `p`): locking, a yellow
+// square closing in as it locks; locked, a red diamond on the target. False off the screen (`sx`, `sy`: its point).
+bool LockAt(void* drawer,void* ctx,const float* vp,float width,float height,float s,int lock,const float* p,float progress,float* sx,
+            float* sy) noexcept {
+    float depth;
+    if(!lock || !Project(vp,p,width,height,sx,sy,&depth))return false;
     const float t=2.0f*s;
-    if(j.lock==1) {
-        const float r=(40.0f-24.0f*j.lockProgress)*s;
-        Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kYellow);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kYellow);
-        Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kYellow);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kYellow);
-        return;
+    if(lock==1) {
+        const float r=(40.0f-24.0f*progress)*s;
+        const float x=*sx,y=*sy;
+        Rect(drawer,ctx,x-r,y-r,x+r,y-r+t,kYellow);Rect(drawer,ctx,x-r,y+r-t,x+r,y+r,kYellow);
+        Rect(drawer,ctx,x-r,y-r,x-r+t,y+r,kYellow);Rect(drawer,ctx,x+r-t,y-r,x+r,y+r,kYellow);
+        return true;
     }
-    const float r=14.0f*s;
+    const float r=14.0f*s,x=*sx,y=*sy;
     for(int k=0;k<6;++k) {   // a diamond from small squares along its four edges
         const float f=static_cast<float>(k)/6.0f,d=r*f,e=r-d;
-        Rect(drawer,ctx,sx+d-t,sy-e-t,sx+d+t,sy-e+t,kRed);Rect(drawer,ctx,sx-d-t,sy-e-t,sx-d+t,sy-e+t,kRed);
-        Rect(drawer,ctx,sx+d-t,sy+e-t,sx+d+t,sy+e+t,kRed);Rect(drawer,ctx,sx-d-t,sy+e-t,sx-d+t,sy+e+t,kRed);
+        Rect(drawer,ctx,x+d-t,y-e-t,x+d+t,y-e+t,kRed);Rect(drawer,ctx,x-d-t,y-e-t,x-d+t,y-e+t,kRed);
+        Rect(drawer,ctx,x+d-t,y+e-t,x+d+t,y+e+t,kRed);Rect(drawer,ctx,x-d-t,y+e-t,x-d+t,y+e+t,kRed);
     }
+    return true;
+}
+
+// The picked store's lock (LockAt). The missile flies at what this marks (stores.cpp StoreLock reads the same entry the
+// round will hold).
+void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
+    float sx,sy;
+    LockAt(drawer,ctx,vp,width,height,s,j.lock,j.lockAt,j.lockProgress,&sx,&sy);
 }
 
 // The stores: each store's name and rounds, the picked one in brackets, and the flares in the air.
@@ -901,16 +911,55 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
     }
 }
 
-// A stock helicopter's gun sight (helisight.cpp; ini PlayerHeliGunSight): the jet sight's boresight and pipper, the
-// pipper where a round fired now first hits the ground (dim: none in its life, it is where the round ends), its
-// distance in metres to its right.
+// A stock helicopter's weapons' sight (helisight.cpp; ini PlayerHeliGunSight). The gun (the primary trigger's): the
+// jet sight's boresight and pipper, the pipper where a round fired now first hits the ground (dim: none in its life,
+// it is where the round ends), its distance in metres to its right. The other weapon (the secondary button's), each
+// in its own shape so neither is taken for the gun's pipper: the missile's lock as the jets' (LockAt: a yellow square
+// closing in, a red diamond locked) with MSL and its distance, or with no lock a dim ring of kMissileRing round its
+// boresight with MSL and the range it locks within; the rockets' mark a hollow diamond where their line meets the map
+// with RKT and its distance (none met: a dim one on their boresight).
+constexpr float kMissileRing=34.0f,kRocketMark=11.0f;   // px at 1080 lines
+void RocketDiamond(void* drawer,void* ctx,float x,float y,float s,const float* rgba) noexcept {
+    const float r=kRocketMark*s,t=2.0f*s;
+    Seg(drawer,ctx,x,y-r,x+r,y,t,rgba);Seg(drawer,ctx,x+r,y,x,y+r,t,rgba);
+    Seg(drawer,ctx,x,y+r,x-r,y,t,rgba);Seg(drawer,ctx,x-r,y,x,y-r,t,rgba);
+}
 void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliSightReadout& h,
                   Line* lines,int* at) noexcept {
-    const float* c=h.hit ? kHud : kHudDim;
     float x,y;
-    Boresight(drawer,ctx,vp,width,height,s,h.bore);
-    if(Pipper(drawer,ctx,vp,width,height,s,h.pipper,c,&x,&y))
-        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,kLineScale*0.85f,c,L"%d m",static_cast<int>(std::lround(h.range)));
+    const float note=kLineScale*0.85f;
+    if(h.gun) {
+        const float* c=h.hit ? kHud : kHudDim;
+        Boresight(drawer,ctx,vp,width,height,s,h.bore);
+        if(Pipper(drawer,ctx,vp,width,height,s,h.pipper,c,&x,&y))
+            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%d m",static_cast<int>(std::lround(h.range)));
+    }
+    if(h.arm==HeliArm::missile) {
+        if(LockAt(drawer,ctx,vp,width,height,s,h.lock,h.armAt,h.lockProgress,&x,&y))
+            Label(text,lines,at,x,y+44.0f*s,1,note,h.lock==2 ? kRed : kYellow,L"MSL %d m",static_cast<int>(std::lround(h.armRange)));
+        else if(!h.lock && sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
+            Arc(drawer,ctx,x,y,kMissileRing*s,0.0f,kTurn,2.0f*s,24,kHudDim);
+            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,L"MSL %d m",static_cast<int>(std::lround(h.lockRange)));
+        }
+    } else if(h.arm==HeliArm::rockets) {
+        if(h.armHit && sight::ToScreen(vp,h.armAt,1.0f,width,height,&x,&y)) {
+            RocketDiamond(drawer,ctx,x,y,s,kHud);
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHud,L"RKT %d m",static_cast<int>(std::lround(h.armRange)));
+        } else if(sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
+            RocketDiamond(drawer,ctx,x,y,s,kHudDim);
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHudDim,L"RKT");
+        }
+    }
+}
+
+// The mouse-aim flight's aim of a heli or rotor craft (heliaim.h): the jets' cyan square, FLY beside it, so it is not
+// taken for a weapon's mark (the user, 2026-10-05: the flight's aim and the gun's pipper were confused). The jets keep
+// the bare square: theirs is where both the flight and the nose's guns go.
+void FlightAim(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const float* p,Line* lines,
+               int* at) noexcept {
+    float x,y,depth;
+    AimSquare(drawer,ctx,vp,width,height,s,p);
+    if(Project(vp,p,width,height,&x,&y,&depth))Label(text,lines,at,x+22.0f*s,y,0,kLineScale*0.75f,kCyan,L"FLY");
 }
 
 // The threats (the user, 2026-10-05: "locked on, it should show the direction"): round the screen's middle a faint
@@ -1387,7 +1436,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
-            if(snap.jet.rotor && snap.jet.heli.aiming)AimSquare(drawer,ctx,viewProj,width,height,s,snap.jet.heli.aim);   // HUD or not
+            if(snap.jet.rotor && snap.jet.heli.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli.aim,lines,&at);   // HUD or not
             if(rotorHud) {
                 HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,lines,&at);
                 if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
@@ -1404,7 +1453,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // A stock heli: the mouse-aim flight's square whenever the mouse flies it (HeliMouseAim), the helicopter HUD round it
         // with HeliFlightHud (off: the takeoff panel, as before).
         const bool heliFresh=now-snap.tick<=kFreshMs && snap.heliFly && !snap.cockpit,heliHud=heliFresh && Cfg().heliFlightHud;
-        if(heliFresh && snap.heliHud.f.aiming)AimSquare(drawer,ctx,viewProj,width,height,s,snap.heliHud.f.aim);
+        if(heliFresh && snap.heliHud.f.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f.aim,lines,&at);
         if(heliHud) {
             HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,lines,&at);
             HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.sym,nullptr,lines,&at);
