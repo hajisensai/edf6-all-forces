@@ -81,6 +81,7 @@ struct Config {
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
+    bool heliMousePitch=true;       // a heli or rotor craft the player flies: the mouse's Y moves a fore / back lever it leaves (off: the camera's)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
     bool playerJetGunSight=true;    // the aircraft the player flies: our gun sight (pipper, lead, boresight), the stock red aim lines hidden
     bool playerJetFlightHud=true;   // ...and its flight HUD: flight path marker, horizon and pitch ladder, heading tape, speed / altitude
@@ -117,6 +118,16 @@ struct Config {
 // The live config: an immutable snapshot, swapped whole by the ini reload (plugin.cpp LoadConfig) and read
 // from any thread (game, call picker, HUD draw) without a torn mix of old and new values.
 const Config& Cfg() noexcept;
+// A heli's fore / back lever moved by the mouse (keyboard and mouse only, ini HeliMousePitch): the frame's aim Y
+// (the seat's right stick Y, the frame's movement; > 0 the nose up, PlayerJetInvertPitch applied) moves it, and it
+// stays where the mouse leaves it, as the jets' aim does (playerjet.cpp MoveAim): a frame's mouse is 1, 0, 0.6, 0...
+// while the hand moves evenly, so read as a stick it would shake and spring back. kHeliLeverAim rad of the jets' aim
+// (kAimPerUnit 0.05 a unit, times PlayerJetMouseSpeed) is a full lever. The nose down (mouse forward) flies forward.
+constexpr float kHeliLeverAim=0.5f;
+inline float MouseLever(float lever,float aimY) noexcept {
+    const float l=lever-aimY*0.05f*Cfg().playerJetMouseSpeed/kHeliLeverAim;
+    return l>1.0f ? 1.0f : l<-1.0f ? -1.0f : l;
+}
 // Between SuppressBump(true) and SuppressBump(false) on this thread, the player's board button takes no
 // NPC's seat (heli.cpp PressBoard): an override of the call, not a write to the config. (A pair of calls,
 // not a scoped object: the callers run under __try, which allows no destructors.)

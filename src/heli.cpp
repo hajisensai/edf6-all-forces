@@ -1964,6 +1964,36 @@ void PlayerAssist(unsigned char* v) noexcept {
         Log("HELI v=%p player assist: settles over %.1fs (stock %.1fs), top speed %.1f m/s kept",v,sec,1.0f/denom/60.0f,top);
     Put<float>(v,kSpeedGain,top/(frames*blend));Put<float>(v,kBlend,blend);
 }
+
+// The player's mouse pitch (ini HeliMousePitch; the user, 2026-10-05: "直升机的俯仰也应该可以被鼠标操控"): the stock
+// input (slot 55) copies LX, the trigger, LY and RX to the heli, never RY, so the mouse's Y only ever moved the camera
+// (heli-input-re.md §2, §4). The fore stick kInForward is the nose's tilt and the forward speed both (-LY on the stock):
+// W / S let go, it gets the lever the mouse moves and leaves (crew.h MouseLever); held, they fly it and zero the lever.
+// Written after slot 55 (HeliFrame runs in its post-hook, crew.cpp InputHook), so slot 57 reads it this frame. On the
+// keyboard and mouse only (a pad's right stick Y is the camera's, as on the stock).
+constexpr std::size_t kSeatPad=0x2B0,kSeatLY=0x2C4,kSeatRY=0x2D4;   // heli-input-re.md §4 (playerjet.cpp's)
+struct MouseFore { ObjRef ref; float lever; ULONGLONG seen; };
+MouseFore mouseFore[8];
+
+void PlayerMousePitch(unsigned char* v) noexcept {
+    const unsigned char* seat=SeatAt(v,0);
+    if(!Cfg().heliMousePitch || At<unsigned char>(seat,kSeatPad)!=0)return;
+    const ULONGLONG ms=GameMs();
+    MouseFore* m=nullptr;
+    for(auto& x:mouseFore)if(x.ref.Is(v))m=&x;
+    if(!m) {   // its first frame under the player: the lever level
+        for(auto& x:mouseFore)if(!m && (!x.ref || ms-x.seen>kAssistStaleMs))m=&x;
+        if(!m)return;
+        *m=MouseFore{ObjRef::Of(v),0.0f,ms};
+    }
+    m->seen=ms;
+    const float ly=At<float>(seat,kSeatLY),ry=At<float>(seat,kSeatRY);
+    if(!std::isfinite(ly) || !std::isfinite(ry))return;
+    if(ly<-0.3f || ly>0.3f){m->lever=0.0f;return;}   // W / S: the stock's own -LY flies it
+    const float aimY=Clamp(Cfg().playerJetInvertPitch ? ry : -ry,-1.0f,1.0f);
+    m->lever=MouseLever(m->lever,aimY);
+    Put<float>(v,kInForward,m->lever);
+}
 }  // namespace
 
 void HeliFrame(unsigned char* vehicle) noexcept {
@@ -1972,7 +2002,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
-        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player)PlayerAssist(vehicle);
+        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerMousePitch(vehicle);}
         else AssistOff(vehicle);
         return;
     }
@@ -2378,6 +2408,7 @@ bool CheckHeliProfile() noexcept {
 void ResetHelis() noexcept {
     for(auto& h:helis)h=Heli{};
     for(auto& a:assists)a=Assist{};
+    for(auto& m:mouseFore)m=MouseFore{};
     fullLoggedAt=0;
     ResetTrack();
     rescue=Rescue{};

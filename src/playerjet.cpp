@@ -241,6 +241,7 @@ struct PJet {
     bool steered;                // the plugin steers it by `aim` this frame (the gunship's pylon turn): Air as the autopilot's
     bool keep;                   // left on the ground by the player: it waits there for them (no NPC takes it back)
     float yaw;                   // a rotor craft's heading (rad, the nose at (sin, 0, cos))
+    float hoverFore;             // ...its fore / back lever the mouse moves and leaves (-1..1, HoverStep)
     ULONGLONG blastAt;           // a charge drone's charge fired (game ms; 0: not)
     bool specialHeld;            // the target key / X down last frame (a special store's own action)
     bool orbiting;               // the gunship's pylon turn round orbitAt (orbitR m out, at the height orbitAlt)

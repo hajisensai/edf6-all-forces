@@ -68,7 +68,7 @@ void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
         j.yaw=std::atan2(m[8],m[10]);
         const bool down=clear!=kNoGround && clear<kTouch && Len(j.measured)<kBoardSpeed;
         j.phase=down ? Phase::parked : Phase::air;
-        j.throttle=0.0f;
+        j.throttle=0.0f;j.hoverFore=0.0f;
         if(e){std::memcpy(e->m.vel,j.measured,12);std::memset(e->m.acc,0,12);}
     }
     Log("PJET v=%p one of ours boarded: %s (%s), its NPC pilot out",v,j.kind->name,j.board->frame==pjet::Airframe::rotor ? "rotor" : "wing");
@@ -276,7 +276,11 @@ void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float cl
     j.yaw=nose+Clamp(std::remainder(j.yaw-nose,2.0f*kWatchPi),-kHoverLead,kHoverLead);
     const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
     float right[3];RightOf(fwd,right);
-    const float fore=s.keys ? (s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f) : -s.ly,side=s.lx;
+    // On the keys W / S fly it and zero the mouse's lever; let go, the lever the mouse leaves (MouseLever) does.
+    const bool keyFore=s.ly<-0.3f || s.ly>0.3f;
+    if(!s.keys || keyFore || !Cfg().heliMousePitch)j.hoverFore=0.0f;
+    else j.hoverFore=MouseLever(j.hoverFore,s.aimY);
+    const float fore=!s.keys ? -s.ly : keyFore ? (s.ly<0.0f ? 1.0f : -1.0f) : j.hoverFore,side=s.lx;
     const float top=k.cruise*(s.keys && s.throttle<=0.0f ? kHoverCruise : 1.0f);
     float want[3]={(fwd[0]*fore+right[0]*side)*top,0.0f,(fwd[2]*fore+right[2]*side)*top};
     const float asked=Len(want);
