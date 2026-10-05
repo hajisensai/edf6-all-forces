@@ -35,6 +35,7 @@ It has two parts:
 | Titan (all, incl. DLC side cannons) | Plugin only: both side cannons aim themselves; with no player in a gunner seat they also fire, as the driver's (player or NPC). Main cannon untouched. |
 | NPC Titan (e.g. mission 64) | Data: the stock NPC Titan has empty side-cannon mounts; `build.py` gives it the player Titan's two side cannons, which the plugin then aims and fires. |
 | Ranger tanks with gunner seats (Vehicle403) | Plugin only: both side machine guns, as above. Single-seat tanks (Air Raider's, Vehicle601) have no side guns. |
+| Katyusha rocket truck (EDF6VehicleCrew's vehicle, `tools/make_katyusha.py`) | Plugin only: its launcher carries the lofted mark (7303): ground targets first, on the **high arc** (the root above 45 deg); the low one only when the high one is past the launcher's 80 deg elevation stop (a target too close). |
 
 Why: the stock Keplers deal a third to a half of the damage per second of same-level tanks and
 helicopters, with under half their durability, and the shortest range of any of them. The Bohr

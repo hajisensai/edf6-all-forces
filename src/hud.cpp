@@ -88,7 +88,8 @@ Work work[kEntries]{};
 // The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
 // waits in `middle` (its index, kFresh while the draw has not taken it).
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
-                  bool drill; DrillCue drillCue; };
+                  bool drill; DrillCue drillCue;
+                  bool launcher; LauncherReadout launch; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -467,13 +468,40 @@ void AimMarks(void* drawer,void* ctx,const float* vp,float width,float height,fl
     }
 }
 
-// A bomb's impact point (CCIP): a cross with a gap at its centre.
+// An impact point (CCIP) at `at`: a yellow cross with a gap at its centre. False when it is off the screen.
+bool ImpactCross(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* at,float* sx,float* sy) noexcept {
+    float depth;
+    if(!Project(vp,at,width,height,sx,sy,&depth))return false;
+    const float x=*sx,y=*sy,r=16.0f*s,g=5.0f*s,t=2.0f*s;
+    Rect(drawer,ctx,x-r,y-t*0.5f,x-g,y+t*0.5f,kYellow);Rect(drawer,ctx,x+g,y-t*0.5f,x+r,y+t*0.5f,kYellow);
+    Rect(drawer,ctx,x-t*0.5f,y-r,x+t*0.5f,y-g,kYellow);Rect(drawer,ctx,x-t*0.5f,y+g,x+t*0.5f,y+r,kYellow);
+    return true;
+}
+
+// A bomb's impact point (CCIP).
 void ImpactMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
-    float sx,sy,depth;
-    if(!j.hasImpact || !Project(vp,j.impact,width,height,&sx,&sy,&depth))return;
-    const float r=16.0f*s,g=5.0f*s,t=2.0f*s;
-    Rect(drawer,ctx,sx-r,sy-t*0.5f,sx-g,sy+t*0.5f,kYellow);Rect(drawer,ctx,sx+g,sy-t*0.5f,sx+r,sy+t*0.5f,kYellow);
-    Rect(drawer,ctx,sx-t*0.5f,sy-r,sx+t*0.5f,sy-g,kYellow);Rect(drawer,ctx,sx-t*0.5f,sy+g,sx+t*0.5f,sy+r,kYellow);
+    float sx,sy;
+    if(j.hasImpact)ImpactCross(drawer,ctx,vp,width,height,s,j.impact,&sx,&sy);
+}
+
+// The Katyusha's impact point (launcher.cpp): the cross where a rocket fired now lands, a dotted ring round it as far
+// as the ripple spreads, and under the cross the range, the flight time and the launcher's elevation (text later).
+void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const LauncherReadout& l,
+                   Line* lines,int* at) noexcept {
+    if(!l.reach)return;
+    for(int i=0;i<l.rings && i<kLauncherRing;++i) {
+        float x,y,depth;
+        if(!Project(vp,l.ring[i],width,height,&x,&y,&depth))continue;
+        const float r=2.5f*s;
+        Rect(drawer,ctx,x-r,y-r,x+r,y+r,kYellow);
+    }
+    float sx,sy;
+    if(!ImpactCross(drawer,ctx,vp,width,height,s,l.impact,&sx,&sy) || *at>=kMaxLines)return;
+    Line& line=lines[(*at)++];
+    Format(line,L"%d m   %.1f s   ELEV %d",static_cast<int>(std::lround(l.range)),l.flight,static_cast<int>(std::lround(l.elevation)));
+    line.scale=kLineScale;line.rgba=kYellow;line.w=line.h=0.0f;
+    if(text)MeasureAll(*text,&line,1);
+    line.x=sx-line.w*0.5f;line.y=sy+20.0f*s;
 }
 
 // The picked store's lock: locking, a yellow square closing in as it locks; locked, a red diamond on the target. The
@@ -747,6 +775,7 @@ void HudPublish() noexcept {
     s.cockpit=PlayerJetHud(&s.jet);
     s.heli=PlayerHeliCue(&s.heliCue);
     s.drill=PlayerDrillCue(&s.drillCue);
+    s.launcher=PlayerLauncher(&s.launch);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -798,6 +827,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

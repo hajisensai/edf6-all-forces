@@ -34,6 +34,7 @@ ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'autoturret', 'tools'))
+import ballistics  # noqa: E402
 import build as at_build  # noqa: E402
 import call_weapons as cw  # noqa: E402
 import calls  # noqa: E402
@@ -42,7 +43,9 @@ import gen_calls  # noqa: E402
 import gen_stores  # noqa: E402
 import installer  # noqa: E402
 import ledger  # noqa: E402
+import make_artillery  # noqa: E402
 import make_jets  # noqa: E402
+import make_katyusha  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
@@ -355,6 +358,42 @@ def drill_copies_agree() -> None:
     assert len(drills) == 1 and drills[0].vehicle == make_drill.VEHICLE.sgo and drills[0].mark == 0
     assert make_drill.OWNER in ledger.OWNERS and make_drill.VEHICLE.tool == 'make_drill'
     assert not drill_model.CONVERSION.mirrors() and drill_model.CONVERSION.point((1.0, 0.0, 0.0))[2] > 0, 'OBJ +X is forward'
+
+
+@test
+def weapon_marks_agree() -> None:
+    """The mod's LockonTargetType marks: one copy in C++ (common/edf/weapon.h), the data tools' copies equal to it."""
+    marks = dict(re.findall(r'(kMark\w+)=(\d+)', src('common/edf/weapon.h')))
+    assert marks == {'kMarkAir': '7301', 'kMarkGround': '7302', 'kMarkLofted': '7303'}, marks
+    assert at_build.MARK_AIR == 7301.0 and at_build.MARK_GROUND == 7302.0
+    assert make_artillery.MARK_GROUND == 7302.0 and make_katyusha.MARK_LOFTED == 7303.0
+    assert make_katyusha.ROCKETS['LockonTargetType'] == make_katyusha.MARK_LOFTED
+
+
+@test
+def lofted_arc_solver() -> None:
+    """pylib/ballistics.py (the model autoturret/src/plugin.cpp Ballistic mirrors): the high and the low root both hit
+    their point under the game's per-frame step (v += drop, p += v) within 5 cm, the high one above 45 deg and the low
+    one under; out of reach is None; the Katyusha's envelope is what README.md says."""
+    import math
+    speed, drop = make_katyusha.ROCKETS['AmmoSpeed'], ballistics.drop_per_frame()
+    for x, y in ((150.0, 0.0), (500.0, 0.0), (800.0, 30.0), (400.0, -50.0), (900.0, 0.0), (300.0, 60.0)):
+        for high in (False, True):
+            r = ballistics.arc(x, y, speed, drop, high)
+            assert r is not None, (x, y, high)
+            e, n = r
+            assert (e > math.radians(45.0)) == high, (x, y, high, math.degrees(e))
+            path = ballistics.fly(speed, e, drop, int(n) + 2)
+            k = int(x / (speed * math.cos(e)))
+            (x0, y0), (x1, y1) = path[k - 1], path[k]
+            miss = y0 + (y1 - y0) * (x - x0) / (x1 - x0) - y
+            assert abs(miss) < 0.05, (x, y, high, miss)
+    assert ballistics.arc(1200.0, 0.0, speed, drop, True) is None
+    env = ballistics.envelope(speed, drop, math.radians(make_katyusha.PITCH_STOP_DEG))
+    readme = src('README.md')
+    for key, unit in (('max_range', '米'), ('high_min_range', '米'), ('max_range_time', '秒'), ('high_min_time', '秒')):
+        said = f'{round(env[key])} {unit}' if unit == '米' else f'{env[key]:.1f} {unit}'
+        assert said in readme, f'README.md: the Katyusha section should say {said} ({key}, pylib/ballistics.py)'
 
 
 @test

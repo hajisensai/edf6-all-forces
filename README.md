@@ -195,6 +195,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/heli.cpp`：直升机自动驾驶。
 - `src/playerjet.cpp`：玩家驾驶的战斗机 / 攻击机飞控（`docs/player-jet-re.md`）。
 - `src/drill.cpp`：钻头战车的钻头（转速、旋转、近战伤害、钻开建筑；`docs/drill-re.md`）。
+- `src/launcher.cpp`：喀秋莎的落点显示（CCIP），弹道模型与离线验证见 `pylib/ballistics.py` 和 `autoturret/docs/re-notes.md`「Rounds in flight」。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
@@ -209,8 +210,10 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 空降兵可以请求一辆喀秋莎（武器 `EDF6VC_CALL_KATYUSHA`，请求方式和档位都参照 Naegling，由运输机空投）。
 - **外形**：军用卡车，车斗上架着 Naegling 的多管火箭发射架。安装器从你本机的 Root.cpk 现场拼出模型（`tools/make_katyusha.py`、`pylib/katyusha_model.py`）。
 - **操作**：和 Naegling 相同。车辆类沿用 Naegling 的，所以是坦克式转向，左右轮差速，可以原地转弯，前轮不打方向。
-- **武器**：无制导火箭弹走抛物线，一轮齐射 40 发、散布覆盖一片区域，装填 10 秒。
-- **自瞄**：需要同时装 EDF6AutoTurret（本仓库 `autoturret/`）。它会自动把发射架转向地面目标，按火箭弹道算好仰角；你手动瞄准时由你接管。
+- **武器**：无制导火箭弹（外形是原版歌利亚 / 格兰特火箭筒的火箭弹 `bullet_rocket.rab`，拖着 2 秒长的尾烟），走抛物线，一轮齐射 40 发、散布覆盖一片区域，装填 10 秒。火箭弹出膛 120 m/s（`AmmoSpeed` 2.0 米/帧；档位只放大伤害和耐久，不改弹速），寿命 25 秒，散布锥半角 0.02 弧度（45° 时落点散开约 ±28 米，80° 时约 ±38 米）。
+- **高抛弹道**：发射架最高能抬到 80°（Naegling 原版只到 50°）。在平地上（游戏实测重力 14.7 m/s²，`pylib/ballistics.py`）：最远射程 978 米（仰角 45°，飞行 11.5 秒）；高抛弹道（仰角 45°～80°）覆盖 335 米到 978 米，80° 时飞行 16.1 秒。比 335 米更近的目标只能放低发射架平射。
+- **落点显示**：你坐上喀秋莎时，屏幕上的黄色十字是此刻发射的火箭弹会落在哪里（和战斗机炸弹的 CCIP 一样），周围一圈黄点是一轮齐射的散布范围，十字下面写着水平距离、飞行时间和发射架仰角（`ELEV`）。它从发射架自己的炮口、沿发射轨方向、按武器实际的弹速和重力系数、像游戏一样逐帧推进弹道，并沿弹道每 0.25 秒打一条地图射线找落地点（地形和建筑，水面不算）；火箭弹在寿命内落不了地时不显示。由 EDF6VehicleCrew 画（`src/launcher.cpp`），不装 EDF6AutoTurret 也有。
+- **自瞄**：需要同时装 EDF6AutoTurret（本仓库 `autoturret/`）。它会自动把发射架转向地面目标，按火箭弹道算好仰角，走**高抛弹道**（两个解里仰角大于 45° 的那个；目标近到高抛解超过 80° 时才退回低伸解）；你手动瞄准时由你接管，抬高发射架就是高抛，落点看黄色十字。
 
 ## 自行榴弹炮
 
@@ -222,7 +225,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
   - E551 每侧 7 个负重轮，Kepler 只有 6 个：前 6 个按 Kepler 的悬挂和转动，第 7 个（最后一个）固定在车体上，不转；前导轮、主动轮照常转动；
   - 没有 `models/twin_tank` 时安装器提示一句，自行榴弹炮先用 Kepler 原版外形（武器照旧）。
 - **武器**：两门炮同时开火，每次曲射两发大口径高爆弹，爆炸半径 25 m；每 5 秒一轮。炮弹和抛出的弹壳都按炮口内径（0.35 m）放大：炮弹约 0.32 m 粗、0.7 m 长（`AmmoSize` 5.0，碰撞球仍是原来的 1.2 m），弹壳约 0.32 m 粗、0.93 m 长（`ShellCase_CustomParameter` 的 `scale` 4.5，原版只有大型炮用过 2.0）。
-- **自瞄**：需要 EDF6AutoTurret，和喀秋莎一样，自动瞄准地面目标并按弹道算好仰角。
+- **自瞄**：需要 EDF6AutoTurret，自动瞄准地面目标并按弹道算好仰角（低伸弹道；喀秋莎走高抛弹道）。
 - **已离线核对 / 待游戏内确认**：模型的蒙皮、骨骼（逆绑定）、贴图成员、炮管俯仰净空、补面位置都在生成时自检（`python pylib/artillery_model.py <输出目录>` 还会导出一份 OBJ 和每根骨骼的包围盒）；游戏里还要看：车轮 / 履带骨骼挪到 E551 的位置后悬挂和履带滚动是否正常、炮口火焰和炮弹是否从炮口出来、弹壳放大后（`scale` 对 `Weapon_VehicleShoot` 是否生效、它的物理形状是否随之放大）会不会穿地。
 
 ## 钻头战车
