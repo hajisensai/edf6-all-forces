@@ -139,7 +139,7 @@ constexpr float kCeilingGap=12.0f;
 // steep climb lost most of its speed and snapped level, "pulled back" (the user, 2026-10-05; 91 m/s climbing at
 // 65 deg at 11:36:16 to 51 m/s and a stall at 300 m).)
 constexpr float kCeilingBand=150.0f;
-// The world's walls (kWorldWallIn inside WorldHalf: the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
+// The world's walls (the play edge, crew.h PlayEdge, inside the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
 // turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
 constexpr float kWallIn=0.3f;   // past the play edge, at least this share of the path points back in
 // The ground (Clear): the body's origin rests on the ground (the models are grounded and the boxes measured off

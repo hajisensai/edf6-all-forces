@@ -26,7 +26,7 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 // commanded 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never
 // flown. Since 2026-10-04 a jet body gets its own copy of the motion properties with a 600 m/s cap
 // (jetprops.cpp), so the old 200 m/s Havok cap no longer binds. Past 250 the 5 g turn radius (1275 m) times the
-// wall margin (Guard) no longer fits inside the world walls (kWorldWallIn).
+// wall margin (Guard) no longer fits inside the world walls (the play edge, crew.h PlayEdge).
 // Patrol: the speed that holds the patrol circle at a 60 degree bank (tan 1.73, 2 g), between kLoiterMin
 // times the stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time; at
 // 45 degrees (until 2026-10-04) it crawled round at 100 m/s.
@@ -46,7 +46,7 @@ constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.17f,kAoaTau=0.3f;
 // and is forgotten kWallLifeMs after it was last met.
 constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.0f,kWallSpan=400.0f;
 constexpr ULONGLONG kBlockedMs=250,kWallLifeMs=120000;
-// The Havok broadphase ends at 3000 m a side: the world's walls kWorldWallIn inside the world's edge (WorldHalf: ini BigWorld or 3000) keep the jets in (jet.cpp deletes
+// The Havok broadphase ends at 3000 m a side: the world's walls at the play edge (crew.h PlayEdge: 2400 stock, the big map's ground edge) keep the jets in (jet.cpp deletes
 // one past kWorldGoneIn of it). They are never forgotten and no learned wall takes their place.
 // The world walls stand at the play edge (crew.h PlayEdge, the user's buffer and "past the line, back first"):
 // they turn a jet off from kEdgeBuffer in (or its turn's reach, if more), and one past them is sent back in before
