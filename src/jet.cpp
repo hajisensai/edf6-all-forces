@@ -18,10 +18,10 @@
 // nearest target, either), carrier (jet_carrier.cpp: the V508 transport's four nacelles; it circles a station and
 // sends its drones), drone (from its carrier), blast and doll (a blast or doll carrier's drones: rotor drones that
 // blow up next to the enemy, the doll one carrying a singing, dancing hololive doll), gunship (jet_bay.cpp: it
-// shells ground targets from its orbit). With missiles a jet stands off (Missile): it fires them from its role's
-// missileRange and turns away, and closes in with the guns only once they are spent. None reloads; out of
-// ammo, out of fuel (Cfg().jetFuelSec times its role's fuel, a launched sortie Cfg().jetSortieSec) or below
-// kWithdrawHp of its HP it flies off and is deleted out of the player's sight.
+// shells ground targets and fires its side cannon at them from its orbit). With missiles a jet stands off
+// (Missile): it fires them from its role's missileRange and turns away, and closes in with the guns only once
+// they are spent. None reloads; out of ammo, out of fuel (Cfg().jetFuelSec times its role's fuel, a launched
+// sortie Cfg().jetSortieSec) or below kWithdrawHp of its HP it flies off and is deleted out of the player's sight.
 // Two ways in: a mission places one (the test range's CreateFriend: it guards the player), or JetLaunch
 // makes one at run time (the airstrike takeovers, airstrike.cpp; jet_spawn.cpp).
 // Time is the plugin's game clock (GameMs): wall time that stops while no vehicle updates (pause menu,
@@ -242,7 +242,7 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
 }
 
 // The weapon its kind fights with, this frame: the fire bytes (only the guns' weapon sets them), and the
-// shells or the drone launches.
+// shells and the cannon (GunshipFire) or the drone launches.
 void Arm(Jet& j,const Kind& kind,unsigned char* v,const float* pos,const float* nose,const float* lead,bool gunsOk,bool missileOk,
          const Arms& arms,ULONGLONG ms) noexcept {
     if(kind.weapon==Weapon::guns){Fire(j,v,pos,nose,lead,gunsOk,missileOk,arms,ms);return;}
@@ -446,7 +446,7 @@ void JetFrame(unsigned char* v) noexcept {
     const bool walled=Sense(*j,pos,ms);
 
     // The target and its motion.
-    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : kind.range,dt,ms);
+    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : TargetRange(kind),dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {

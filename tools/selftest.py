@@ -854,6 +854,54 @@ def gunship_gunner_seat() -> None:
 
 
 @test
+def gunship_cannon_round() -> None:
+    """tools/make_jets.py cannon_round / check_cannon_round on a synthetic stock round (no game needed): the gunship
+    cannon's round is the stock gunship's solid round with the cannon's numbers, nothing else changed, and the check
+    refuses a round that falls short of the reach or penetrates. The C++ side fires the file the tool writes, with the
+    tool's reach and speed (src/jet_bay.cpp kCannon*), as a store of the gunship's (src/playerjet_board.inc CANNON); the
+    installer writes it (make_jets.names) and the README tells of it."""
+    import sgo
+    stock = {'xgs_scene_object_class': 'DemoIndirectFire', 'indirect_fire_damage': 2000.0,
+             'indirect_fire_param': [[1.2, 0.0], [800.0, 0.0], 1, 0, 'SolidBullet01', 20.0, 0.0, 10.0, 2.0, 0.0, 600, 1,
+                                     [0.4, 0.4, 6.0, 1.0], [], 0, 60, 0, [0, 'weapon_KUBAKU_Cannon_shot', 0.5, 1.0, 1.0, 500.0],
+                                     [0, 'common_damages_kuubaku_Cannon21', 0.9, 1.0, 3.0, 200.0]]}
+
+    class Game:
+        def read(self, folder: str, name: str) -> bytes:
+            assert (folder, name) == ('OBJECT', make_jets.IMPACT_STOCK), (folder, name)
+            return sgo.write(0x102, stock)
+
+    data = make_jets.cannon_round(Game())
+    make_jets.check_cannon_round(data)
+    old, new = sgo.read(Game().read('OBJECT', make_jets.IMPACT_STOCK))[1], sgo.read(data)[1]
+    assert set(old) == set(new) and [k for k in old if old[k] != new[k]] == ['indirect_fire_damage', 'indirect_fire_param']
+    changed = [i for i, (a, b) in enumerate(zip(old['indirect_fire_param'], new['indirect_fire_param'])) if a != b]
+    assert changed == [0, 5, 7, 9, 10, 11, 12, 15], changed   # scatter, speed, size, blast, life, penetration, colour, wait
+    assert new['indirect_fire_param'][17] == old['indirect_fire_param'][17], 'the stock cannon fire sound kept'
+    for i, value, why in ((10, 100, 'a life short of the reach'), (11, 1, 'a penetrating round'), (9, 25.0, 'a whale-sized blast')):
+        version, bad = sgo.read(data)
+        bad['indirect_fire_param'][i] = value
+        try:
+            make_jets.check_cannon_round(sgo.write(version, bad))
+        except make_jets.CannonRoundError:
+            continue
+        raise AssertionError(f'check_cannon_round took {why}')
+    assert 3.0 <= make_jets.CANNON_RADIUS <= 6.0, 'a few metres of blast (and >= 3 m: as the drill charge, docs/drill-re.md §3)'
+    assert make_jets.CANNON_SPEED * make_jets.CANNON_LIFE >= make_jets.CANNON_REACH
+    bay = src('src/jet_bay.cpp')
+    assert f'kCannonFile[]=L"{make_jets.CANNON_FILE}"' in bay, 'src/jet_bay.cpp kCannonFile'
+    assert f'kCannonSgo[]=L"app:/object/{make_jets.CANNON_FILE.lower()}"' in bay, 'src/jet_bay.cpp kCannonSgo'
+    m = re.search(r'kCannonReach=([\d.]+)f', bay)
+    assert m and float(m.group(1)) == make_jets.CANNON_REACH, 'src/jet_bay.cpp kCannonReach'
+    m = re.search(r'kCannonSpeed=([\d.]+)f', bay)
+    assert m and float(m.group(1)) == make_jets.CANNON_SPEED * 60.0, 'src/jet_bay.cpp kCannonSpeed (m/s) is CANNON_SPEED a frame'
+    assert f'OBJECT/{make_jets.CANNON_FILE}' in make_jets.names()
+    assert '{L"","CANNON",StoreRole::bomb' in src('src/playerjet_board.inc'), 'src/playerjet_board.inc kSpecials CANNON'
+    readme = src('README.md')
+    assert make_jets.CANNON_FILE in readme and '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
+
+
+@test
 def readme_counts() -> None:
     readme = src('README.md')
     assert f'{len(calls.FLOWN)} 种呼叫' in readme, f'README.md: say {len(calls.FLOWN)} 种呼叫 (tools/calls.py FLOWN)'

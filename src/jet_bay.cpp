@@ -1,5 +1,5 @@
 // The jets' IndirectFireControl users (jet.cpp): the bomb bay of a jet that takes over a bomber, the gunship's
-// shells, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
+// shells and its cannon, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include <malloc.h>
@@ -60,6 +60,22 @@ constexpr float kGunshipReach=1800.0f;    // m from the gunship to its target at
 constexpr float kGunshipDamage=300.0f;    // a shell's damage (the SGO's own factor is the missions' 250)
 const wchar_t kGunshipSgo[]=L"app:/object/demogunshipfiree25.sgo";
 bool gunshipReady=false;                  // the shell SGO was preloaded for this mission (PreloadShells)
+// The gunship's long-range side cannon (CannonShot; README 炮舰机的机炮, the user 2026-10-05: "炮舰机应该加装远距离
+// 机炮", an AC-130's 30-40 mm side gun): tools/make_jets.py's EDF6VC_GUNSHIP_CANNON.SGO, an impact charge (the stock
+// gunship's solid round, one round, no wait) made a 40 mm HE round: 16 m a frame (kCannonSpeed), no fall, 170 frames
+// (2720 m, past kCannonReach), a 4 m blast, a thin orange tracer. Fired straight (IFC +0x2F8 = 0) from the gunship at
+// its aim, a round every kCannonGapMs: 2 a second, at kCannonDamage a round at the base tier times the gunship's tier
+// (Tier: the same factor the ram's damage takes, playerjet.cpp RamDamage), so 5 rounds in a shell's 2.5 s gap carry its
+// 300 at the base tier: as strong as the shells, but far, quick and exact where the shells are slow and wide. Its own
+// gap: the shells and the cannon are two guns. Without the file (an install from before) there is no cannon: the
+// gunship has its shells alone, as before.
+constexpr ULONGLONG kCannonGapMs=500;
+constexpr float kCannonReach=2500.0f;     // m from the gunship to what it fires at, at the most
+constexpr float kCannonDamage=60.0f;      // a round's at the base tier
+constexpr float kCannonSpeed=960.0f;      // m/s: the round's (make_jets.py CANNON_SPEED, 16 m a frame), for the NPCs' lead
+const wchar_t kCannonSgo[]=L"app:/object/edf6vc_gunship_cannon.sgo";
+const wchar_t kCannonFile[]=L"EDF6VC_GUNSHIP_CANNON.SGO";
+bool cannonReady=false;                   // preloaded this mission (PreloadShells)
 // Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round made a one-round,
 // no-wait GrenadeBullet01 that bursts at the end of its kImpact life (or on what it meets first), its blast
 // radius the charge's (indirect_fire_param #9 AmmoExplosion): a blast's radius is the SGO's, so one charge per
@@ -164,6 +180,40 @@ int ChargeFor(float radius) noexcept {
     }
     return best;
 }
+
+// The tier the game gave aircraft `v` (its max HP over its SGO durability, stores.inc kJetMasses): what a weapon's
+// damage is scaled by (the ram's too, playerjet.cpp RamDamage). 1 for a body without a durability.
+float Tier(const unsigned char* v) noexcept {
+    const JetMass* const kind=JetMassOf(BodyMark(v));
+    const float hpMax=At<float>(v,kHpMax);
+    return kind && kind->durability>0.0f && hpMax>0.0f && std::isfinite(hpMax) ? hpMax/kind->durability : 1.0f;
+}
+
+// A cannon round fired by `who` from the gunship (`pos`) at `at` (see kCannonSgo): kCannonGapMs after its last, within
+// kCannonReach. Every tenth logged (Debug): two a second would drown the log.
+bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,ULONGLONG ms,const char* who) noexcept {
+    if(!cannonReady || ms-j.shells.cannonAt<kCannonGapMs)return false;
+    const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
+    if(Len(d)>kCannonReach)return false;
+    j.shells.cannonAt=ms;
+    const float damage=kCannonDamage*Tier(v);
+    if(!Shell(kCannonSgo,cannonReady,v,pos,at,damage,true,"gunship cannon"))return false;
+    if(Cfg().debug && j.shells.cannonShots%10==0)
+        Log("JET v=%p gunship cannon round #%d from %s at (%.0f,%.0f,%.0f), %.0f m, %.0f damage",v,j.shells.cannonShots+1,who,at[0],at[1],
+            at[2],Len(d),damage);
+    ++j.shells.cannonShots;
+    return true;
+}
+
+// The NPC crew's cannon at its target (j.t: a ground one), led: where a round fired now meets it as it moves on
+// (tgtVel, m/s) over the round's flight to where it is now.
+bool CannonAtTarget(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms,const char* who) noexcept {
+    if(!cannonReady || !j.t.target || j.t.flyer)return false;
+    const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
+    const float t=Len(d)/kCannonSpeed;
+    const float at[3]={j.t.aim[0]+j.t.tgtVel[0]*t,j.t.aim[1]+j.t.tgtVel[1]*t,j.t.aim[2]+j.t.tgtVel[2]*t};
+    return CannonShot(j,v,pos,at,ms,who);
+}
 }  // namespace
 
 // The bombing run (Mode::bomb): level at bombAlt along the bomber's line through the target at its speed,
@@ -227,10 +277,13 @@ void BayFrame(Jet& j,const float* pos) noexcept {
     }
 }
 
-// A gunship's shell every kGunshipGapMs while its weapons are free (WeaponsFree, as every jet weapon) at a
-// ground target within kGunshipReach: from the gunship (`pos`) onto the target's lock point.
+// A gunship's guns while its weapons are free (WeaponsFree, as every jet weapon) at a ground target: its cannon
+// (CannonAtTarget) within kCannonReach, and a shell every kGunshipGapMs within kGunshipReach, from the gunship (`pos`)
+// onto the target's lock point.
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
-    if(!WeaponsFree(j) || j.t.flyer || ms-j.shells.gunAt<kGunshipGapMs)return;
+    if(!WeaponsFree(j) || j.t.flyer)return;
+    CannonAtTarget(j,v,pos,ms,"its NPC crew");
+    if(ms-j.shells.gunAt<kGunshipGapMs)return;
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
     j.shells.gunAt=ms;
@@ -291,15 +344,26 @@ bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
     return j && CrewFire(*j,v,at,ms,"the player");
 }
 
+// The gunship's cannon from the player (the pilot's CANNON, the gunner seat): at `at`, where they aim (no lead: the
+// round flies 2.6 s to its reach, the player leads a mover themselves).
+bool PlayerCannon(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
+    Jet* const j=FindJet(v);
+    return j && CannonShot(*j,v,reinterpret_cast<const float*>(v+kPosition),at,ms,"the player");
+}
+
 // The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
-// gunship itself within kGunshipReach (PickTarget; the entry's target is its own again when it is handed back:
-// ResumeNpc), a shell at it when the gun is ready.
+// gunship itself within the longer gun's reach (PickTarget; the entry's target is its own again when it is handed back:
+// ResumeNpc); the cannon at it (led) and a shell when it is within the shells' reach, each gun when it is ready.
 bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {
     Jet* const j=FindJet(v);
-    if(!j || !Cfg().jetPilot || ms-j->shells.gunAt<kGunshipGapMs)return false;
+    if(!j || !Cfg().jetPilot)return false;
+    const bool cannon=cannonReady && ms-j->shells.cannonAt>=kCannonGapMs,shell=ms-j->shells.gunAt>=kGunshipGapMs;
+    if(!cannon && !shell)return false;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    PickTarget(*j,v,pos,pos,kGunshipReach,dt,ms);
-    return j->t.target && !j->t.flyer && CrewFire(*j,v,j->t.aim,ms,"its NPC gunner");
+    PickTarget(*j,v,pos,pos,cannonReady ? kCannonReach : kGunshipReach,dt,ms);
+    if(!j->t.target || j->t.flyer)return false;
+    const bool fired=cannon && CannonAtTarget(*j,v,pos,ms,"its NPC gunner");
+    return (shell && CrewFire(*j,v,j->t.aim,ms,"its NPC gunner")) || fired;
 }
 
 float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept {
@@ -313,6 +377,27 @@ float ShellReach() noexcept { return kGunshipReach; }
 
 bool ShellsReady() noexcept { return gunshipReady && shellsOk; }
 
+float CannonWait(const unsigned char* v,ULONGLONG ms) noexcept {
+    const Jet* const j=FindJet(v);
+    if(!j)return 0.0f;
+    const ULONGLONG since=ms-j->shells.cannonAt;
+    return since>=kCannonGapMs ? 0.0f : static_cast<float>(kCannonGapMs-since)*0.001f;
+}
+
+float CannonReach() noexcept { return kCannonReach; }
+
+bool CannonReady() noexcept { return cannonReady && shellsOk; }
+
+// How far from its anchor kind `k` takes targets (jet.cpp PickTarget): its range; a gunship with its cannon reaches out
+// further, to where the cannon still reaches them from anywhere on its circle (kCannonReach over the circle's height,
+// less the circle and a step of its spacing): about 1800 m instead of 1500, the targets past the shells' reach the
+// cannon's alone.
+float TargetRange(const Kind& k) noexcept {
+    if(k.weapon!=Weapon::shells || !CannonReady())return k.range;
+    const float out=std::sqrt(kCannonReach*kCannonReach-k.alt*k.alt)-k.patrol-k.patrolStep;
+    return out>k.range ? out : k.range;
+}
+
 bool InstallBay(bool spawnOk) noexcept {
     bayOk=spawnOk;
     for(const auto& b:kBaySigs)bayOk=bayOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
@@ -323,18 +408,22 @@ bool InstallBay(bool spawnOk) noexcept {
 void PreloadShells(void* mgr,bool gunship) noexcept {
     gunshipReady=shellsOk && gunship;
     if(gunshipReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
+    cannonReady=gunshipReady && ModFileThere(kCannonFile);
+    if(cannonReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCannonSgo,2,-1);
+    else if(gunshipReady)Log("JET the gunship has no cannon this mission: no %ls (python tools/make_jets.py, or the installer)",kCannonFile);
     for(int i=0;i<kChargeCount;++i) {
         chargeReady[i]=shellsOk && ModFileThere(kCharges[i].file);
         if(chargeReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCharges[i].sgo,2,-1);
     }
     drillReady=shellsOk && ModFileThere(kDrillChargeFile);
     if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
-    Log("JET preload gunship shells=%d impact charges %d/%d/%d/%d drill charge %d",gunshipReady,chargeReady[0],chargeReady[1],chargeReady[2],
-        chargeReady[3],drillReady);
+    Log("JET preload gunship shells=%d cannon=%d impact charges %d/%d/%d/%d drill charge %d",gunshipReady,cannonReady,chargeReady[0],
+        chargeReady[1],chargeReady[2],chargeReady[3],drillReady);
 }
 
 void ResetShells() noexcept {
     gunshipReady=false;
+    cannonReady=false;
     for(auto& c:chargeReady)c=false;
     drillReady=false;
 }

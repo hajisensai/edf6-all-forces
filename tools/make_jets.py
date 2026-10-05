@@ -13,7 +13,8 @@ Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, whi
 weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring.
 Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model with the gunship's own mark and a gunner seat), the
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
-impact charges a crash sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64.SGO.
+impact charges a crash sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64.SGO, and the gunship's
+long-range side cannon's round (src/jet_bay.cpp CannonShot): EDF6VC_GUNSHIP_CANNON.SGO.
 Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
 EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (vcobjects.portal_lasers).
 
@@ -109,6 +110,23 @@ IMPACT_FILES: dict[str, float] = {
 }
 IMPACT_LIFE = 6
 IMPACT_SPEED = 10.0
+# The gunship's long-range side cannon (src/jet_bay.cpp kCannonSgo / CannonShot, README 炮舰机的机炮; the user 2026-10-05:
+# "炮舰机应该加装远距离机炮", an AC-130's 30-40 mm side gun): an impact charge (impact_charge) made a 40 mm HE round:
+# CANNON_SPEED m a frame (960 m/s, a 40 mm Bofors' ~880, the AC-130J's 30 mm ~1080), no fall, CANNON_LIFE frames (past
+# CANNON_REACH, src/jet_bay.cpp kCannonReach: a round aimed at the ground within it meets the ground; one aimed past it
+# is gone without a burst), a CANNON_RADIUS m blast (a few metres, 3 m or more: as the drill's, it breaks buildings,
+# docs/drill-re.md §3), not penetrating (it bursts on what it meets first). The stock round is the whale's huge solid
+# shot (#7 AmmoSize 10, blue): a thin orange tracer here (#7 CANNON_SIZE, #8 CANNON_HIT: a hit radius of their product,
+# #12 AmmoColor CANNON_COLOR). Its fire and hit sounds stay the stock cannon's. The plugin writes its damage (60 a round
+# times the gunship's tier) and fires it straight from the gunship at the aim point.
+CANNON_FILE = 'EDF6VC_GUNSHIP_CANNON.SGO'
+CANNON_RADIUS = 4.0
+CANNON_SPEED = 16.0
+CANNON_LIFE = 170
+CANNON_REACH = 2500.0
+CANNON_SIZE = 0.8
+CANNON_HIT = 2.0
+CANNON_COLOR = (6.0, 3.0, 0.6, 1.0)
 # The helis the Air Raider's call weapons bring (src/jet.cpp HeliLaunch, tools/call_weapons.py): the stock
 # call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true) gives them their weapons.
 HELIS: dict[str, str] = {
@@ -145,6 +163,9 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{GUNSHIP_FILE}'] = gunship
     for name, data in impact_charges(game).items():
         out[f'OBJECT/{name}'] = data
+    cannon = cannon_round(game)
+    check_cannon_round(cannon)
+    out[f'OBJECT/{CANNON_FILE}'] = cannon
     for name, stock in HELIS.items():
         out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
     return out
@@ -160,7 +181,7 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
 
 def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
-    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *HELIS, MODEL_FILE, *MODEL_FILES, *vc.PORTAL_LASER_FILES]
+    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, CANNON_FILE, *HELIS, MODEL_FILE, *MODEL_FILES, *vc.PORTAL_LASER_FILES]
     return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in vc.JET_WEAPON_FILES]
 
 
@@ -238,6 +259,11 @@ def check_gunner_seat(data: bytes) -> None:
     need(all(_number(w[1]) in (0.0, -1.0) for w in settings), '有武器挂在炮手座上（炮手的炮弹是插件的）')
 
 
+def _same(got: float | None, want: float) -> bool:
+    """Whether an SGO number (a 32-bit float) is `want`, to its precision."""
+    return got is not None and abs(got - want) <= 1e-6 * max(1.0, abs(want))
+
+
 def _number(v) -> float | None:
     """An SGO number node's value (pylib/sgo.py: int, or Float keeping its bytes), else None."""
     import sgo
@@ -266,6 +292,47 @@ def impact_charge(game: vc.Game, radius: float, speed: float = IMPACT_SPEED, lif
 def impact_charges(game: vc.Game) -> dict[str, bytes]:
     """The impact charges (IMPACT_FILES) from the stock gunship round."""
     return {name: impact_charge(game, radius) for name, radius in IMPACT_FILES.items()}
+
+
+def cannon_round(game: vc.Game) -> bytes:
+    """The gunship cannon's round (see CANNON_FILE): an impact charge with the cannon's blast, speed and life, a thin
+    orange tracer."""
+    import sgo
+    version, m = sgo.read(impact_charge(game, CANNON_RADIUS, CANNON_SPEED, CANNON_LIFE))
+    p = m['indirect_fire_param']
+    if (_number(p[7]) is None or _number(p[8]) is None or not isinstance(p[12], list) or len(p[12]) != len(CANNON_COLOR)
+            or any(_number(c) is None for c in p[12])):
+        raise ValueError(f'{IMPACT_STOCK} 的弹体粗细 / 颜色不是预期的样子')
+    p[7], p[8] = float(CANNON_SIZE), float(CANNON_HIT)
+    p[12] = [float(c) for c in CANNON_COLOR]
+    return sgo.write(version, m)
+
+
+class CannonRoundError(Exception):
+    """The gunship cannon's round is not what the plugin fires (check_cannon_round)."""
+
+
+def check_cannon_round(data: bytes) -> None:
+    """Re-read the cannon round and raise CannonRoundError unless it is a DemoIndirectFire firing one SolidBullet01 with
+    no scatter, no gap and no wait, CANNON_SPEED m a frame with no fall for CANNON_LIFE frames (at least CANNON_REACH),
+    a CANNON_RADIUS m blast, not penetrating, CANNON_SIZE x CANNON_HIT thick in CANNON_COLOR, its damage the plugin's (0)."""
+    import sgo
+
+    def need(ok: bool, msg: str) -> None:
+        if not ok:
+            raise CannonRoundError(f'{CANNON_FILE}: {msg}')
+
+    _, m = sgo.read(data)
+    p = m.get('indirect_fire_param')
+    need(m.get('xgs_scene_object_class') == 'DemoIndirectFire' and isinstance(p, list) and len(p) == 19, '不是 DemoIndirectFire')
+    need(p[4] == 'SolidBullet01', f'弹种应是 SolidBullet01，实际 {p[4]!r}')
+    need([_number(x) for x in p[0]] == [0.0, 0.0], '应无散布')
+    want = {2: 1, 3: 0, 5: CANNON_SPEED, 6: 0, 7: CANNON_SIZE, 8: CANNON_HIT, 9: CANNON_RADIUS, 10: CANNON_LIFE, 11: 0, 15: 0}
+    got = {i: _number(p[i]) for i in want}
+    need(all(_same(got[i], v) for i, v in want.items()), f'参数不符：{got}')
+    need(len(p[12]) == len(CANNON_COLOR) and all(_same(_number(c), v) for c, v in zip(p[12], CANNON_COLOR)), '曳光颜色不符')
+    need(CANNON_SPEED * CANNON_LIFE >= CANNON_REACH, f'飞不到 {CANNON_REACH:.0f} m 的射程')
+    need(_number(m.get('indirect_fire_damage')) == 0.0, '伤害应由插件写（SGO 里为 0）')
 
 
 def main(argv: list[str]) -> int:
