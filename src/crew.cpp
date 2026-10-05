@@ -570,10 +570,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -709,7 +709,8 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     auto v=static_cast<unsigned char*>(vehicle);
     SeeFrame(v);               // the frame is a clock: it steps with the plugin off too (body506's steps test it)
     GuardedTick(kStepJetSoundTick,&JetSoundTick);   // once a frame, the plugin off too: it stops the sounds then
-    Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: it gives the camera block back then
+    Guarded(kStepTurretCam,&TurretCamFrame,v);      // the plugin off too: it lets the camera go then
+    Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: the high view goes then
     if(!Cfg().enabled)return;
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);

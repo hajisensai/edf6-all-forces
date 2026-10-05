@@ -153,6 +153,10 @@ void Validate(Config& n) noexcept {
     Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
     n.seatNextKey=static_cast<int>(FixInt("SeatNextKey",n.seatNextKey,0,254));
     n.seatButton=static_cast<int>(FixInt("SeatButton",n.seatButton,0,255));
+    n.highCamClass=static_cast<int>(FixInt("HighCamClass",n.highCamClass,1,3));
+    Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
+    n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
+    n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -282,6 +286,11 @@ void LoadConfig() noexcept {
     n.highCamBack=ReadFloat(L"HighCamBack",n.highCamBack);
     n.highCamPitch=ReadFloat(L"HighCamPitch",n.highCamPitch);
     n.nixTorsoTwist=ReadBool(L"NixTorsoTwist",n.nixTorsoTwist);
+    n.highCamClass=ReadInt(L"HighCamClass",static_cast<DWORD>(n.highCamClass));
+    n.decoupledTurretCam=ReadBool(L"DecoupledTurretCam",n.decoupledTurretCam);
+    n.turretCamRate=ReadFloat(L"TurretCamRate",n.turretCamRate);
+    n.freeLookKey=ReadInt(L"FreeLookKey",static_cast<DWORD>(n.freeLookKey));
+    n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.stockHeliStores=ReadBool(L"StockHeliStores",n.stockHeliStores);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
@@ -509,6 +518,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
+    InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();

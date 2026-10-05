@@ -640,16 +640,17 @@ BOHR_STOCK_AMMO_ALIVE = 100.0   # V603_FLAK_GLGUN01_DLC_{L,R}.SGO AmmoAlive in t
 
 @test
 def high_cam_wired() -> None:
-    """The artillery's high camera (src/highcam.cpp): its ini keys are read, shipped (with a range said) and documented;
-    the plugin takes the Katyusha's and the howitzer's weapons for indirect fire (rounds living kIndirectLife frames or
-    more) and not the other ground-marked guns (EDF6AutoTurret's Bohr grenades, stock life); the raised own cameras of
-    both look down onto the ground ahead; the camera block offsets agree with docs/camera-re.md."""
+    """The high camera (src/highcam.cpp's toggle, src/turretcam.cpp's placement): its ini keys are read, shipped (with a
+    range said) and documented; the plugin takes the Katyusha's and the howitzer's weapons for indirect fire (rounds
+    living kIndirectLife frames or more) and not the other ground-marked guns (EDF6AutoTurret's Bohr grenades, stock
+    life); the raised own cameras of both look down onto the ground ahead; the toggle writes no camera block any more
+    (the riding camera never reads game_object_camera_setting: docs/camera-re.md §3b)."""
     import rootcpk
     code, ini, readme, doc = src('src/highcam.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
     plugin = src('src/plugin.cpp')
-    for key in ('HighCam', 'HighCamKey', 'HighCamButton', 'HighCamHeight', 'HighCamBack', 'HighCamPitch'):
+    for key in ('HighCam', 'HighCamKey', 'HighCamButton', 'HighCamHeight', 'HighCamBack', 'HighCamPitch', 'HighCamClass'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
-    for key in ('HighCamKey', 'HighCamButton', 'HighCamHeight', 'HighCamBack', 'HighCamPitch'):
+    for key in ('HighCamKey', 'HighCamButton', 'HighCamHeight', 'HighCamBack', 'HighCamPitch', 'HighCamClass'):
         assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
     life = int(re.search(r'kIndirectLife=(\d+)', code).group(1))
     assert make_katyusha.ROCKETS['AmmoAlive'] >= life and make_artillery.SHELLS['AmmoAlive'] >= life
@@ -660,12 +661,38 @@ def high_cam_wired() -> None:
         for side in 'LR':
             bohr = dsgo.to_py(dsgo.parse(rootcpk.default().read('WEAPON', at_build.BOHR_GUN.format(side=side))).root)
             assert bohr['AmmoAlive'] == BOHR_STOCK_AMMO_ALIVE, (side, bohr['AmmoAlive'])
-    for offset in ('kCamLook=0x170', 'kCamEye=0x180', 'kCamEase=0x190'):
-        assert offset in code, offset
-    for rva in ('0x54DDF0', '0xF86A0', '0xFAF20', '+0x170', '+0x180', '+0x190'):
+    assert not re.search(r'=0x1[78]0\b', code), 'highcam.cpp writes the object camera block again'
+    for rva in ('0x54DDF0', '0xF86A0', '0xFAF20', '0xFB9F0', '0xFC01B', '+0x170', '+0x180', '+0x190'):
         assert rva in doc, rva
     vc.check_artillery_camera(make_katyusha.CAMERA)
     vc.check_artillery_camera(make_artillery.CAMERA)
+
+
+@test
+def turret_cam_wired() -> None:
+    """The turret camera (src/turretcam.cpp, README 功能 12): its ini keys are read, range-checked, shipped and documented;
+    the hooks it patches are the ones docs/camera-re.md gives (the look-at fetch's call site, the seat aim's step and its
+    vtable), with their signature checked; the camera offsets it writes agree with the doc; the offline check of its math
+    (tools/turret_cam_check.cpp) is a CMake target and uses the header the plugin uses; it runs from every vehicle's input
+    and is reset with the mission."""
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
+    code, cmake, crew, mission = src('src/turretcam.cpp'), src('CMakeLists.txt'), src('src/crew.cpp'), src('src/mission.cpp')
+    for key in ('DecoupledTurretCam', 'TurretCamRate', 'FreeLookKey', 'FreeLookButton'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    for key in ('TurretCamRate', 'FreeLookKey', 'FreeLookButton'):
+        assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
+    for name, rva in (('kLookSite', '0xFC013'), ('kLookCall', '0xFC01B'), ('kPoint', '0x6BB5A0'), ('kAimVtable', '0x17D8A90'),
+                      ('kAimStep', '0x5FCD80')):
+        assert re.search(rf'{name}={rva}\b', code), (name, rva)
+        assert rva in doc, rva
+    for name, off in (('kCamEye', '0x630'), ('kCamLook', '0x640'), ('kSeatCamType', '0x200'), ('kSeatCamEye', '0x208'),
+                      ('kSeatCamLook', '0x218'), ('kAimParams', '0x90'), ('kObjCamLook', '0x170'), ('kObjCamEye', '0x180')):
+        assert re.search(rf'{name}={off}\b', code), (name, off)
+        assert f'+{off}' in doc or f'{off}' in doc, off
+    assert 'Matches(kLookSite,kLookSiteCode' in code and 'Matches(kAimStep,kAimStepCode' in code
+    assert 'src/turretcam.cpp' in cmake and 'tools/turret_cam_check.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/turret_cam_check.cpp' in cmake
+    assert '#include "../src/turretcam.h"' in src('tools/turret_cam_check.cpp') and '#include "turretcam.h"' in code
+    assert '&TurretCamFrame,v' in crew and 'ResetTurretCam();' in mission and 'InstallTurretCam();' in plugin
 
 
 @test

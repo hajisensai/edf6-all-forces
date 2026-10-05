@@ -62,7 +62,7 @@ struct Config {
     // it and lock the target nearest the view (virtual-key codes, pad button bits; 0 = none), the lock's cone (deg off
     // the view) and range (m, 0 = the gun's), how long a held lock binding takes to let the lock go.
     int aimMode=0;
-    int modeKey=0x5A,modeButton=0x40;   // Z, L3
+    int modeKey=0x5A,modeButton=0;      // Z; no pad button (L3 is EDF6VehicleCrew's FreeLookButton in the same seats)
     int lockKey=0x51,lockButton=0x04;   // Q, X (the jets' next-target bindings)
     float lockCone=20.0f;
     float lockRange=0.0f;

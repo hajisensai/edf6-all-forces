@@ -46,7 +46,7 @@ already out-damages the same-level Barrias TZ4 but has well under half its durab
 In a gun position the plugin aims (the Kepler, Bohr and howitzer turrets; the Titan's and the Ranger tanks' gunner
 seats; driving those tanks you get the lock too):
 
-- **Two modes**, switched with **Z** (pad: L3; ini `AimModeKey` / `AimModeButton`, the starting one `AimMode`):
+- **Two modes**, switched with **Z** (pad: none by default, since L3 is EDF6VehicleCrew's free look; ini `AimModeKey` / `AimModeButton`, the starting one `AimMode`):
   - **Auto-aim** (default, as before): the turret turns itself onto the target, leading it on the round's arc.
   - **Lead circle**: the turret is yours alone; the HUD draws a green **lead circle**: put the gun's line through its
     centre and the round meets the target where the target will be (the gun's real round speed and drop, the target's
