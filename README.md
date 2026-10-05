@@ -278,6 +278,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/launcher.cpp`：喀秋莎的落点显示（CCIP）和高抛瞄准（按镜头看的地面点算发射架仰角），弹道模型与离线验证见 `pylib/ballistics.py` 和 `autoturret/docs/re-notes.md`「Rounds in flight」。
 - `src/katyusha.cpp`：喀秋莎发射架的姿态（只抬发射架、不动镜头）和伸缩液压杆，逆向笔记见 `autoturret/docs/re-notes.md`「The Katyusha's camera and pose」。
 - `src/highcam.cpp`：喀秋莎 / 自行榴弹炮的高视角切换（改载具自己的镜头参数，游戏照常做缓动和碰撞），镜头逆向见 `docs/camera-re.md`。
+- `src/nix.cpp`：尼克斯的上下半身分离（腿转向时上半身在世界里保持朝向，`NixTorsoTwist`），逆向见 `docs/nix-re.md`，离线验算 `tools/nix_twist_check.cpp`。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
@@ -363,3 +364,21 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - **限制**：伤害和破坏不随请求档位、难度变化（是 ini 里的固定值，可自己调）；敌人的身体按「脚下到锁定点再加 1 米」估算，
   身体特别宽的巨大敌人在侧面贴着钻头区时可能不算接触；车身两侧的敌人（不在车头前方）不受钻头伤害；
   需要 EDF6VehicleCrew 插件（没有插件时钻头不转，射击键什么也不发射）；联机时钻头的伤害只在开车的那台电脑上结算。
+
+## 尼克斯（Nix）上下半身分离
+
+空降兵的战斗框架尼克斯（`Vehicle612_nix`，`V612_NIX*.SGO`）改成机甲战士式操作（ini `NixTorsoTwist`，默认 1，0 = 原版）。逆向笔记见 `docs/nix-re.md`。
+- **操作**：W/S 前进后退，A/D 原地转下半身（腿）——这两样原版就是这样（原版尼克斯没有横移）。上半身（连同镜头和双臂的瞄准）只跟鼠标转：
+  原版上半身的朝向是「相对腿」的角度，A/D 一转腿，上半身、准星和镜头跟着一起甩；现在腿转多少，插件每帧就把上半身相对腿的角度
+  反向补回多少，上半身在世界里的朝向保持不动，只有鼠标能转它。手柄同理：左摇杆管腿，右摇杆管上半身。
+- **扭转极限**：上半身相对腿能扭多少沿用原版的限制（尼克斯的瞄准轴自己的上下限，SGO 的 `begaruta_pilot_class` 里是 ±70°；
+  轴没有上下限时用 ±120°）。腿继续转、上半身扭到极限时，上半身停在极限、跟着腿一起转；鼠标往极限外推也只是停在极限，
+  **不会**反过来带着腿转——要转身就按 A/D。
+- **只管玩家自己开的尼克斯**：NPC 开的（它的瞄准是自己的闭环）、联机里别人开的不变；其它载具（包括同一家族的贝加尔塔）不变。
+- **给别的功能的数据**：插件每帧公开玩家这台尼克斯的腿朝向、上半身朝向、扭转角和上下限、上半身的瞄准方向（`src/nix.h`
+  `PlayerNixTorso`），载具 HUD 的扭转指示和载具镜头用它。
+- **待游戏内确认**（只做了静态逆向和离线验算 `tools/nix_twist_check.cpp`）：`Debug=1` 时上车日志
+  `NIX v=… the player drives it; torso held in the world, twist … stops …` 给出实际的扭转极限；之后每秒一行
+  `NIX v=…: heading H (matrix M) torso T twist W … camera-torso D deg`：H 与 M 应相同（车身矩阵确由这个朝向建出），
+  按 A/D 转腿时 T 应保持不变、W 反向变化，D 应接近 0 且不随转腿变化（镜头跟着上半身的瞄准）。若转腿时 T 反而变化两倍，
+  说明瞄准轴的转向符号与腿相反（`docs/nix-re.md` §3 的推断不成立）。

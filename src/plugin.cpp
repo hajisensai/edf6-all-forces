@@ -269,6 +269,7 @@ void LoadConfig() noexcept {
     n.highCamHeight=ReadFloat(L"HighCamHeight",n.highCamHeight);
     n.highCamBack=ReadFloat(L"HighCamBack",n.highCamBack);
     n.highCamPitch=ReadFloat(L"HighCamPitch",n.highCamPitch);
+    n.nixTorsoTwist=ReadBool(L"NixTorsoTwist",n.nixTorsoTwist);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     Validate(n);
     IgnoreRetired();
@@ -298,6 +299,7 @@ void LoadConfig() noexcept {
         n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
+    Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
@@ -483,6 +485,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
+    InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
