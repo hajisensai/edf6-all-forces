@@ -93,3 +93,14 @@ CreateFriend("点名", "app:/object/edf6vc_centipede.sgo", 1.0, false);
 - 两个自制模型在游戏里能否正常显示（格式与原版一致、往返校验通过，但没进过游戏）；骨骼缩放（隐藏头尾）在游戏里是否生效。
 - 龙虫贴地 1.5 米时的碰撞与地形起伏；长龙跟随时相邻碰撞盒是否偶尔相碰。
 - 敌方队伍、子弹归属、锁定（见 §2）。
+
+## 爆浆（待实现，2026-10-05 静态逆向，EDF.dll 0x678CCB46）
+
+原版虫子的血/酸液飞溅走全局 `EffectGenUtil`（指针 `0x20B2980`，进程启动时建好，贴图在 `app:/Effect/basic.rab` 里常驻），插件可直接调用：
+
+- `0x2E5680` 受击飞溅（H）：`(fx, pos[4], normal[4], atkDir[4], ownerMtx(veh+0x60), rgba[4], float scale, Params{float sizeMul; u8 spray, useAttackDir, pad[2]; float sprayCap})`。签名开头 `48 8B C4 48 89 58 18 55 56 57 41 54 41 55 41 56`；`0x2E57E9` 的 lea 指向 `"BloodSplash_01.dds"`（`0x17A82B8`）。巨蚁的参数：`scale=min(4, dmg×0.1)`，`Params{1,1,0,500}`。
+- `0x2E1090` 爆浆团（H）：`(fx, pos, dir, rgba, float scale)`，签名 `48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55`。巨蚁死亡：随机 3 根骨骼各一次，`scale=DeathBloodScale×5`。
+- `0x2E5BB0` 地面血泊（M）：`(fx, pos, rgba, float scale)`，签名 `48 8B C4 48 89 58 08 48 89 78 10 55 48 8D 68 C8`，巨蚁 `scale=2×DeathBloodScale`。
+- 巨蚁颜色常量 `0x17BC080 = {0.675, 0.525, 0.10, 0.125}`（alpha 在受击函数里 ×8）。
+- 只在游戏主线程（载具 update）调用，不在物理步里调：会往对象管理器 `0x20B2958` 注册对象，随机数用全局 `0x1F54128`。受击命中点在伤害消息 `GDI+0x30`（PrimerMessage 收到时先排队，到 CentipedeFrame 再发）；死亡在 `PrimerDied` 里沿身体喷 3~6 团再加一摊血泊。
+- `fx` 或对象管理器为空时不调用；贴图查找 `0x2CCC80` 找不到会返回 null 而 `0x2E5680` 不判空（`0x2E57FD`），所以只用原版巨蚁也在用的这张图。

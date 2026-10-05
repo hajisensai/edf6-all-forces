@@ -269,9 +269,14 @@ _PRIMER_NEEDLE, _PRIMER_SPIT, _PRIMER_BARB, _PRIMER_STING = ('app:/weapon/' + f.
 # heli_se_table rows (index -> SEPRESET cue: 3 hit, 4 crash, 5 rotor crash, 6-8 the explosions: which of those its
 # death plays is not known, so all three), and ragdoll_contact's cue. A cue the banks do not hold is silence.
 CREATURE_SOUNDS: dict[str, tuple[str, dict[int, str], str]] = {
+    # the giant ant's (GIANTANT01.SGO ant_DamageEffectSe / ant_BloodSe / ant_DeadSe)
     'centipede': ('app:/sound/adx/tikyuu4_en_GiantAnt.acb',
                   {3: '巨大蟻ヒットエフェクト', 4: '巨大蟻衝突', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき大', 7: '敵共通血しぶき小',
-                   8: 'e665中型蟻死亡'}, '巨大蟻衝突'),
+                   8: '巨大蟻死亡'}, '巨大蟻衝突'),
+    # the giant bee's (GIANTBEE01.SGO bee_DamageEffectSe / bee_DamageSe / bee_DeadBloodSe / bee_DeadSe)
+    'dragonfly': ('app:/sound/adx/tikyuu4_en_GiantBee.acb',
+                  {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
+                   8: '蜂死亡'}, '蜂ダメージ'),
 }
 # kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against).
 JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7006.0: 2200.0, 7020.0: 16000.0,
@@ -372,7 +377,7 @@ JETS: dict[str, Jet] = {
                                     weapon_bones=('head', 'head', 'sting', 'gun'), creature='centipede'),
     'edf6tr_dragonfly_mission': Jet(7013.0, 600.0, (_PRIMER_NEEDLE,) * 3,
                                     ('app:/object/edf6vc_dragonfly.mrab', 'e507_goldufo.mdb'), 'EDF6VC_DRAGONFLY.MRAB',
-                                    'body', 'body', rigid=((0.0, -0.134, -1.32), (1.529, 1.454, 7.04))),
+                                    'body', 'body', rigid=((0.0, -0.134, -1.32), (1.529, 1.454, 7.04)), creature='dragonfly'),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
     # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
     # deck (y 163.08..193.08 over the origin; the tower above is not solid). Not the whole hull: afloat its
