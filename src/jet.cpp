@@ -42,6 +42,7 @@ Jet jets[kMaxJets]{};
 namespace {
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
+constexpr float kThrownHover=12.0f;    // m a thrown charge drone hovers over where its bomb landed, waiting (Rotor)
 // Withdrawing it climbs toward the ceiling and flies away from the player at full speed; it is deleted
 // only out there (never in front of the player): kGone from the player, or, held in by the map's edge,
 // kGoneStuck after kStuckMs of withdrawing.
@@ -126,6 +127,13 @@ void Leave(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,float hp,float h
     // A drone goes back to its carrier instead, and after kDroneSortieMs, half its HP gone, the carrier
     // leaving, or kIdleMs with nothing to attack; with the carrier gone it withdraws.
     if(j.drone.carried && !mother && !why)why="carrier lost";
+    // A thrown charge (JetLaunchThrown) has nowhere to go back to: out of fuel (no enemy came), badly hit or spent,
+    // it goes off where it is (Blast, from the next frame) instead of flying off armed.
+    if(why && j.thrown && kind.weapon==Weapon::charge) {
+        Log("JET v=%p thrown %s: %s, blows up where it is",j.Vehicle(),kind.name,why);
+        Detonate(j,nullptr,0.0f,ms);
+        return;
+    }
     if(!why && kind.weapon==Weapon::drones) {
         if(OutOfDrones(j))why="out of drones";
     } else if(mother) {
@@ -216,13 +224,17 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
     bool faced=false;
     if(j.mode==Mode::withdraw)for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
     else if(kind.weapon==Weapon::charge) {
-        // At its target; going back, at its carrier's dock; else under the carrier.
+        // At its target; going back, at its carrier's dock; else under the carrier, or with none (a thrown one)
+        // kThrownHover over its anchor. Under the carrier is under the carrier itself, not the anchor: the anchor is
+        // the point the player sent the drones to (CarrierState::order) or where a thrown one's bomb landed, both on
+        // the ground, and twice kDockBelow under that is under the ground (the drone sank into it, held by
+        // HoldOffGround's floor).
         climb=kind.cruise*0.5f;
-        if(j.mode==Mode::recover && mother) {
-            const float* mp=reinterpret_cast<const float*>(mother->Vehicle()+kPosition);
-            goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];
-        } else if(j.t.target)std::memcpy(goal,j.t.aim,12);
-        else{goal[0]=anchor[0];goal[1]=anchor[1]-kDockBelow*2.0f;goal[2]=anchor[2];}
+        const float* mp=mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : nullptr;
+        if(j.mode==Mode::recover && mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];}
+        else if(j.t.target)std::memcpy(goal,j.t.aim,12);
+        else if(mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow*2.0f;goal[2]=mp[2];}
+        else{goal[0]=anchor[0];goal[1]=anchor[1]+kThrownHover;goal[2]=anchor[2];}
     } else {
         // The carrier: about its station (CarrierGoal), kMinAlt*2 over the ground there at least.
         faced=kind.weapon==Weapon::drones;
@@ -441,7 +453,7 @@ void JetFrame(unsigned char* v) noexcept {
     const bool walled=Sense(*j,pos,ms);
 
     // The target and its motion.
-    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : kind.range,dt,ms);
+    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : j->reach>0.0f ? j->reach : kind.range,dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {

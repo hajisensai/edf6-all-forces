@@ -295,6 +295,13 @@ bool JetLaunch(JetRole role,const float* from,const float* heading,const float* 
 // jet does (fuel, damage, ammo). The vehicle, or nullptr (not preloaded this mission, kMaxJets flying).
 unsigned char* JetLaunchDrone(const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                               bool escort) noexcept;
+// A drone a thrown Robot Bomb releases where it landed (airstrike.cpp kThrows; tools/calls.py brings 'throw'): the
+// blast or doll drone (rotor, a few metres over `at`) or the gun drone (fixed wing, taking off from ~20 m over it),
+// with no carrier, working round `at` within a short reach and leaving (a charge: blowing up there) out of fuel
+// (`fuelSec`). The vehicle, or nullptr (its body not preloaded this mission, JetPilot off, too many thrown drones
+// out, kMaxJets): the caller keeps the stock bomb then.
+enum class ThrownDrone { blast, doll, drone };
+unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* heading,DWORD fuelSec,const void* source) noexcept;
 // Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
 // withdrawing.
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
