@@ -1469,6 +1469,8 @@ void PilotGear(PJet& j,unsigned char* v,float dt) noexcept {
 }
 // Any of the plugin's other aircraft under the player (boarding, a rotor craft's flight, the special stores, the hail).
 #include "playerjet_board.inc"
+// The gunship's crew: its gunner seat (the player at the gun, an NPC at it under the player at the stick).
+#include "playerjet_crew.inc"
 
 void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -1493,6 +1495,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     Sight(j,v,pos,dt);
     Threats(j,v,pos);
     SpecialFrame(j,v,s,pos,ms);
+    CrewGunner(j,v,dt,ms);   // the gunship's NPC gunner (playerjet_crew.inc)
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
@@ -1561,7 +1564,7 @@ void PlayerEjectTick() noexcept {
     EjectTick();
     ChuteTick();
     FlaresStep();
-    if(flyOk && Cfg().playerJet)HailTick();
+    if(flyOk && Cfg().playerJet){HailTick();GunnerTick();}
 }
 
 void PreloadPlayerJets() noexcept {
@@ -1637,6 +1640,31 @@ bool PlayerJetBoardable(const void* vehicle) noexcept {
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+bool GunshipCrewSeats(const void* vehicle) noexcept {
+    if(!flyOk || !Cfg().playerJet || !Cfg().playerJetAll)return false;
+    __try { return GunshipSeats(static_cast<const unsigned char*>(vehicle)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+unsigned GunshipBoardSeat() noexcept {
+    return Cfg().gunshipBoardGunner!=KeyDown(Cfg().gunshipGunnerKey) ? kGunnerSeat : 0u;
+}
+
+bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept {
+    __try {
+        if(!gunner.ref.Is(vehicle) || gunner.frame+1<GameFrame())return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    out->centred=gunner.centred;
+    std::memcpy(out->at,gunner.centre,12);std::memcpy(out->home,gunner.home,12);
+    return true;
+}
+
+bool PlayerGunnerHud(GunnerReadout* out) noexcept {
+    if(!gunner.ref || gunner.frame+1<GameFrame())return false;
+    *out=gunner.hud;
+    return true;
+}
+
 bool PlayerJetHolds(const void* vehicle) noexcept {
     if(!flyOk || !Cfg().playerJet)return false;
     __try { return BodyOf(vehicle)==PluginBody::jet && Held(static_cast<const unsigned char*>(vehicle)); }
@@ -1670,6 +1698,7 @@ void CatchWhy(const unsigned char* v,int why) noexcept {
 
 void PlayerJetFrame(unsigned char* v) noexcept {
     if(!flyOk || !Cfg().playerJet)return;
+    GunnerFrame(v);   // the gunship's gunner seat (playerjet_crew.inc): before Held, which taking the gun may end
     // An NPC aircraft is the player's only while they fly it, it comes down for them, catches them or waits for them
     // (Held); its entry let go of once it is not (playerjet_board.inc).
     if(BodyOf(v)==PluginBody::jet && !Held(v)){Forget(v);return;}

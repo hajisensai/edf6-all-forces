@@ -210,3 +210,40 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
   4. 每种固定翼的手感（尤其炮舰机 2 g、轰炸机 3 g）；旋翼机键鼠/手柄操作、航母推进舱是否随推力转、落地判定。
   5. 特殊挂载：弹仓第一颗是否落在 CCIP；炮弹落点与屏幕中心十字是否一致（`CameraRay` 的反投影约定：行向量、D3D 深度）；盘旋方向（目标在左）与半径；无人机按指定点找目标、召回、在玩家开着的航母上停靠；自爆后玩家被抛出、伤害不伤友军。
   6. 交回 NPC 后：燃料计时确实停过（`back to its NPC pilot ... s of its fuel flown`）、轰炸机的投弹航线、无人机回到母舰。
+
+## 11. 炮舰机的机组：驾驶座 + 侧炮手座（2026-10-05，`src/playerjet_crew.inc`）
+
+用户：「炮舰机应该是多人开的」，先做单机多座位（联机同步另行研究）：AC-130 那样一个驾驶、一个侧炮手，玩家可以坐任一个，另一个由 NPC 担任。
+
+### 11.1 座位从哪来（静态逆向）
+
+| 事实 | 来源 | 置信度 |
+|---|---|---|
+| V506_HELI.SGO 的 `vehicle_riding_position` **只有一项**（驾驶座：上车口 `搭乗口１`、座位 `操縦席１`、姿势 `506_HELI_DRIVER`、职业掩码 9、数字 10.0、按键行 5）。「直升机副座 / 炮艇模式」说的是 VEHICLE410_HELI 的两个门炮手座（`410_HELI_GUNNER_L/R`，掩码 15，数字 0，按键行 6），506 机体本身没有第二个座位 | 读 Root.cpk | H |
+| 座位数 = `vehicle_riding_position` 的项数：车辆初始化 0x629B36 起逐项调 0x62B430(veh, 项)，建完写 `veh+0x618`（座位数）、`+0x620`、`+0x624`（占用掩码 = (1<<n)-1），并把各座位上车口离原点的最大距离写进 `veh+0xE00` | 反汇编 | H |
+| 一项的 7 个元素（0x62B430 往临时座位结构写，结构基址 = 座位）：[0] 上车口定位点 → 座位 `+0x1E0`（CanRideSeat 0x6346D0 的距离判定用它和定位点自身 `+0x10` 的半径）；[1] 座位定位点 → `+0x1F0`；[2][0] 第三个定位点 → `+0x208`、[2][1..2] → `+0x240/+0x244`；[3] 姿势名（0x7A3500 查表）→ `+0x18`；[4] 职业掩码 → `+0x30`；[5] 浮点 → `+0x258`（含义未查）；[6] 整数 → `+0x2B4` | 反汇编 | H（偏移）/ L（+0x258 的含义） |
+| 定位点按名字在 `veh+0xE40` 的表里找（0x6BADD0）。喷气机的 MAB 只有 V506 那一组定位点（父骨骼已改成 `mdl`，`vcobjects.JET_MAB_ROOT`），找不到的名字在初始化里读空指针（EDF+0x62B619，见 jet_sgo 的注释）。所以炮手座**共用驾驶座的三个定位点**（同一个舱门上，人都看不见机舱里面） | 反汇编 + 已有崩溃记录 | H |
+| `seat+0x2B4` 是按键配置行：HumanBase 0x57339A 以行偏移 `0xA8 × (human+0xD40 × 16 + seat+0x2B4)` 读键位表（该函数里的 rbx）的 +0x940 / +0x958（键盘的上升 / 主射击，写 `seat+0x2E0/+0x2E4`）和其后各按键位。5 = 直升机驾驶员，6 = 门炮手 / 乘员（V507 救援车的座位、Proteus 炮手也是 6）；0x56D7D8 另把 3 当特例 | 反汇编 | H（读法）/ L（行 6 的主射击键在键鼠上是哪个键） |
+| 506 的第 55 / 57 槽只读座位 0 的输入，只开 `veh+0x638` 的持有者 0–2（heli-input-re.md §2b）：炮手座的扳机原版不接任何武器；炮手座上也不放武器（`vehicle_weapon_setting` 的座位号全是 0 或 -1）。炮手的炮是插件的炮弹（`jet_bay.cpp` 的 `CrewFire`，与 `GunshipFire` 同弹、同间隔、同射程） | 反汇编 + 生成器检查 | H |
+
+生成：`tools/make_jets.py` 的 `with_gunner_seat` 从本机的 VEHICLE410_HELI.SGO 复制门炮手座的 [3]–[6]（姿势、掩码、数字、按键行，先核对是 `410_HELI_GUNNER_L` / 6），拼在驾驶座的 [0]–[2] 后面；`check_gunner_seat` 回读检查（两个座位、定位点相同、掩码 15、按键行 6、没有武器挂在炮手座、标记 7011）。`tools/selftest.py gunship_gunner_seat` 用合成 SGO 测这两个函数（含拒绝的情况）以及 `crew.h kGunnerSeat`、ini 键的接线。离线生成：`make_jets.build(游戏目录)` 写到 `tmp/` 检查过，除 `vehicle_riding_position` 外其它成员与原来逐个相等。
+
+### 11.2 上车与座位
+
+- 上车键仍走 `crew.cpp FindSeatHook`。炮舰机（`GunshipCrewSeats`：炮舰机体、≥2 个座位、`PlayerJetAll`）且 `PlayerJetBoardable` 时，先走 `GunshipSeat`：按 `GunshipBoardSeat`（ini `GunshipBoardGunner`，按住 `GunshipGunnerKey` 取另一个）选座位；原版 FindSeat 会取第一个空座位（NPC 在飞时就是炮手座），所以必须先选。选中的座位上有 NPC 时用原有的 `Bump`：另一个座位空就挪过去（驾驶员去炮位、炮手上驾驶座），否则踢掉——所以任何时候只有一个驾驶员。然后照原版 FindSeat 命中时的做法（0x633BF5：`0x633FE0(veh, human, seat)` 预约并返回该座位）。可乘判定用原有的「隐藏 NPC + 自己的队伍」（`WithDummiesHidden` / `WithTeamField`）。
+- 玩家坐驾驶座：同 §10，`PJet` 的整条路径。炮手座上有 NPC 时 `CrewGunner` → `jet::CrewShell`：`PickTarget` 以炮舰机自己为中心、1800 m 内选地面目标，炮好了就打一发（`ResumeNpc` 交回时会清掉这个目标）。空中下机照 §10.4（接机或 `HandBack`：驾驶座空则原版 RideAi 坐一个新的 NPC），炮手留着；`JetReap` 现在踢掉所有 NPC 座位再删除，任何座位上有玩家就不删。
+- 玩家坐炮手座（`GunnerFrame`，在 `PlayerJetFrame` 开头、`Held` 之前）：呼叫下来在等的（hail）或停着等玩家的（keep）立刻 `HandBack`（驾驶座空则 RideAi，`ResumeNpc` 在地面上转 takeoff）；之后由 `jet.cpp JetFrame` 的 NPC 飞行照常飞，只是：`GunnerHold`（这一帧的时间加到 `bornAt`，燃料与出击计时停住；正在撤离的取消）、不问 `Leave`、不开 NPC 自己的炮、锚点 = `GunnerAnchor`（玩家 30 s 内打中的地面点 → 呼叫的标记 → 上机点；跟随型不再把锚点拉到 `player.pos`，因为玩家就在机上）。盘旋是原有的 `Patrol`：切向 (out.z, 0, -out.x)，中心在航迹左侧。驾驶座若空，`EnsurePilot` 用原版 RideAi 补一次（失败只记日志，不重试）。
+- 炮手的扳机：座位 `+0x2E4 ≥ 0.8`（所有载具的主射击约定，heli-input-re.md §3）；瞄准点 = 屏幕中心视线与地面的交点（`CameraRay` + `MapRay`，3000 m 内）；`jet::PlayerShell` 开炮（共用一门炮的间隔）。HUD：`hud.cpp GunnerMarks`（黄色落点十字、超射程红色、距离与 READY / 装填秒数、青色方框 = 盘旋中心），只在玩家不在驾驶座时画。
+- 炮手下机（`GunnerLeft`）：离地 15 m 以上用 §7 的弹射跳伞（`EjectStart`，`bail.mark = 0`：不接机）；驾驶座有 NPC 且队伍不是友军 2 时 `SetObjectTeam` 回 2（玩家上车时原版可能把载具改成玩家的队伍，呼叫键只找友军队伍的飞机）。炮舰机不见了（删除、残骸消失）由 `GunnerTick` 每帧检查。
+- 炮手在机上时 `hud.cpp HudSee` 不在这架上方画 NPC 载具读数。
+
+### 11.3 验证状态
+
+- 静态：`build.cmd` 无警告（/W4 /WX）；`tools/selftest.py` 全过（新增 `gunship_gunner_seat`）；离线生成炮舰机 SGO 并回读检查通过。
+- 未实机验证（需要在游戏里逐项看）：
+  1. 新 SGO 能否正常生成载具（第二个座位共用定位点、`seat+0x258` = 0）、炮舰机呼叫照常飞（日志 `CREW` / `JET ... crewed: gunship`、`VEH ... seats=[d-]`）。
+  2. 上车：默认坐驾驶座且原驾驶员挪到炮手座（`BUMP ... npc moved to gunner seat 1`、`BOARD ... pilot seat`）；按住 V 坐炮手座（`BOARD ... gunner seat`），NPC 留在驾驶座；`GunshipBoardGunner=1` 反过来；上车提示是否出现；三种职业（掩码 15 的姿势 `410_HELI_GUNNER_L`）能否坐炮手座、姿势是否正常。
+  3. 炮手座上的镜头：能否用鼠标 / 右摇杆自由转动、`CameraRay` 的屏幕中心与黄色十字是否一致；按键行 6 下键鼠的主射击（`seat+0x2E4`）是哪个键（日志 `GUNNER ... trigger 1.00 (keys)`）；按住射击是否每 2.5 秒一发、炮弹是否落在十字上。
+  4. 炮手在机上时：呼叫下来停在地面的那架能否交回 NPC 并起飞（`PJET ... back to its NPC pilot: the player took its gun`、`JET ... takeoff` → `patrol`），之后绕打中的点盘旋（目标在左侧、约 600 m、350 m 高）；燃料是否停走（下机后 `JetHud` 的剩余燃料）、不撤离、不被删除；RideAi 在玩家已在炮手座时把载具队伍改成 2 是否有副作用。
+  5. 玩家驾驶时炮手 NPC 是否自动开炮（`JET ... gunship shell #n from its NPC gunner`），与自己的 SHELLS 是否共用间隔。
+  6. 下机：炮手在空中下机是否正常跳伞（`PJET ejected`、`CHUTE made`）、炮舰机继续执行呼叫；驾驶员在空中下机时炮手是否留下、接机 / 交回是否正常；在地面下机后再上（`keep` 时炮手 NPC 挪到驾驶座）。

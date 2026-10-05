@@ -506,6 +506,11 @@ bool PlayerOpenBay(unsigned char* v,const float* at,const float* vel) noexcept;
 void PlayerBayFrame(unsigned char* v,const float* pos) noexcept;
 bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept;
 bool ShellsReady() noexcept;
+// The gunship's crew (playerjet_crew.inc): its NPC gunner's shell under a player pilot (its own target round the
+// gunship; false: none, not ready); the gun's wait before the next shell (s, 0: ready); a shell's reach (m).
+bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept;
+float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept;
+float ShellReach() noexcept;
 
 // --- jet_spawn.cpp ---
 // Rows right, up, forward, position, as BombingPlane_Init builds its matrix (right = up x forward).

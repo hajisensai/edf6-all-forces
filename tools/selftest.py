@@ -598,6 +598,64 @@ def heli_sight_after_aim_lines() -> None:
 
 
 @test
+def gunship_gunner_seat() -> None:
+    """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second
+    seat with the pilot's locators and the stock door gunner's pose, class mask and key row, and nothing else changes; a
+    gunship that has it already, a stock gunner seat not as expected, or a weapon put on the gunner seat are refused. The
+    C++ side's seat number (src/crew.h kGunnerSeat) is the generator's, the crew's ini keys are read and documented."""
+    import sgo
+    pilot = ['door1', 'seat1', ['loc1', 0.0, 0.0], '506_HELI_DRIVER', 9, 10.0, make_jets.PILOT_KEYS]
+    setup = [[1.0, 1.0], [make_jets.GUNSHIP_MARK, 0.0003], [999900.0, 1.666],
+             [['app:/weapon/a.sgo', [0.0001, 0.1]], ['app:/weapon/b.sgo', [0.0001, 0.1]], ['app:/weapon/v_fuel01.sgo']]]
+    weapons = [['mdl', 0], ['mdl', 0], ['mdl', -1]]
+
+    def gunship(seats: list, settings: list) -> bytes:
+        return sgo.write(0x102, {'mission_setup': setup, 'vehicle_riding_position': seats, 'vehicle_weapon_setting': settings,
+                                 'game_object_durability': 1500.0})
+
+    def stock(pose: str, keys: int) -> bytes:
+        door = ['door2', 'seat2', ['loc2', 0.0, 0.0], pose, 15, 0, keys]
+        return sgo.write(0x102, {'vehicle_riding_position': [['d', 's', ['l', 0.0, 0.0], '410_HELI_DRIVER', 9, 15.0, 5], door]})
+
+    good = stock(make_jets.GUNNER_POSE, make_jets.GUNNER_KEYS)
+    before = gunship([pilot], weapons)
+    after = make_jets.with_gunner_seat(before, good)
+    make_jets.check_gunner_seat(after)
+    old, new = sgo.read(before)[1], sgo.read(after)[1]
+    assert [k for k in old if old[k] != new[k]] == ['vehicle_riding_position'] and set(new) == set(old)
+    seats = new['vehicle_riding_position']
+    assert len(seats) == make_jets.GUNNER_SEAT + 1 and seats[0] == sgo.read(before)[1]['vehicle_riding_position'][0]
+    gunner = seats[make_jets.GUNNER_SEAT]
+    assert gunner[:3] == seats[0][:3] and gunner[3] == make_jets.GUNNER_POSE and gunner[4] == 15 and gunner[6] == make_jets.GUNNER_KEYS
+    for bad, why in ((lambda: make_jets.with_gunner_seat(after, good), 'a second gunner seat'),
+                     (lambda: make_jets.with_gunner_seat(before, stock('410_HELI_DRIVER', 5)), 'the stock seat not a gunner seat')):
+        try:
+            bad()
+        except ValueError:
+            continue
+        raise AssertionError(f'with_gunner_seat took {why}')
+    armed = gunship(seats, [['mdl', 0], ['mdl', 1], ['mdl', -1]])
+    try:
+        make_jets.check_gunner_seat(armed)
+    except make_jets.GunnerSeatError:
+        pass
+    else:
+        raise AssertionError('check_gunner_seat let a weapon sit on the gunner seat')
+    try:
+        make_jets.check_gunner_seat(before)
+    except make_jets.GunnerSeatError:
+        pass
+    else:
+        raise AssertionError('check_gunner_seat took a gunship with one seat')
+    m = re.search(r'constexpr unsigned kGunnerSeat=(\d+);', src('src/crew.h'))
+    assert m and int(m.group(1)) == make_jets.GUNNER_SEAT, 'src/crew.h kGunnerSeat'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('GunshipBoardGunner', 'GunshipGunnerKey'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    assert 'FixInt("GunshipGunnerKey"' in plugin, 'GunshipGunnerKey is range-checked'
+
+
+@test
 def readme_counts() -> None:
     readme = src('README.md')
     assert f'{len(calls.FLOWN)} 种呼叫' in readme, f'README.md: say {len(calls.FLOWN)} 种呼叫 (tools/calls.py FLOWN)'

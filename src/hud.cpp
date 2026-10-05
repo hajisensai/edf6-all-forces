@@ -91,7 +91,8 @@ Work work[kEntries]{};
 // waits in `middle` (its index, kFresh while the draw has not taken it).
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue;
-                  bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim; };
+                  bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
+                  bool gunner; GunnerReadout gun; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -505,6 +506,34 @@ void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width
     line.scale=kLineScale;line.rgba=kYellow;line.w=line.h=0.0f;
     if(text)MeasureAll(*text,&line,1);
     line.x=sx-line.w*0.5f;line.y=sy+20.0f*s;
+}
+
+// The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a shell fired now lands
+// (where the screen's centre meets the ground), red out of its reach; under it the range and READY or the gun's wait;
+// a cyan square on the pylon turn's centre (the point last shelled). No ground under the centre: the line alone.
+void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const GunnerReadout& g,
+                 Line* lines,int* at) noexcept {
+    float sx=width*0.5f,sy=height*0.5f,depth;
+    if(g.centred && Project(vp,g.centre,width,height,&sx,&sy,&depth)) {
+        const float r=10.0f*s,t=2.0f*s;
+        Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kCyan);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kCyan);
+        Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kCyan);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kCyan);
+    }
+    sx=width*0.5f;sy=height*0.5f;
+    if(g.ground && g.inReach)ImpactCross(drawer,ctx,vp,width,height,s,g.sight,&sx,&sy);
+    else if(g.ground && Project(vp,g.sight,width,height,&sx,&sy,&depth)) {
+        const float r=12.0f*s,t=2.0f*s;
+        Rect(drawer,ctx,sx-r,sy-t*0.5f,sx+r,sy+t*0.5f,kRed);Rect(drawer,ctx,sx-t*0.5f,sy-r,sx+t*0.5f,sy+r,kRed);
+    }
+    if(*at>=kMaxLines)return;
+    Line& line=lines[(*at)++];
+    if(!g.ground)Format(line,L"SHELLS   NO GROUND IN SIGHT");
+    else if(!g.inReach)Format(line,L"SHELLS   %d m   OUT OF RANGE",static_cast<int>(std::lround(g.range)));
+    else if(g.ready)Format(line,L"SHELLS   %d m   READY",static_cast<int>(std::lround(g.range)));
+    else Format(line,L"SHELLS   %d m   %.1f s",static_cast<int>(std::lround(g.range)),g.wait);
+    line.scale=kLineScale;line.rgba=g.ground && g.inReach ? (g.ready ? kGreen : kYellow) : kRed;line.w=line.h=0.0f;
+    if(text)MeasureAll(*text,&line,1);
+    line.x=sx-line.w*0.5f;line.y=sy+22.0f*s;
 }
 
 // The picked store's lock: locking, a yellow square closing in as it locks; locked, a red diamond on the target. The
@@ -1028,6 +1057,7 @@ bool InstallHud() noexcept {
 void HudSee(unsigned char* v) noexcept {
     if(!Cfg().vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
     if(SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy)return;   // NPC-driven only
+    for(unsigned i=1;i<SeatCount(v);++i)if(SeatRider(SeatAt(v,i))==Rider::player)return;   // not the one the player is in (a gunner)
     const std::int32_t team=At<std::int32_t>(v,kTeam);
     if(team!=player.team && team!=kTeamFriend && team!=kTeamVehicle)return;
     const ULONGLONG ms=GameMs();   // player.at's clock (a wall tick here never matched it: no readout was ever shown)
@@ -1079,6 +1109,7 @@ void HudPublish() noexcept {
     s.drill=PlayerDrillCue(&s.drillCue);
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
+    s.gunner=PlayerGunnerHud(&s.gun);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1134,6 +1165,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
