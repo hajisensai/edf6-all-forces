@@ -249,6 +249,8 @@ void LoadConfig() noexcept {
     n.playerJetGunSight=ReadBool(L"PlayerJetGunSight",n.playerJetGunSight);
     n.playerJetFlightHud=ReadBool(L"PlayerJetFlightHud",n.playerJetFlightHud);
     n.playerJetThreatHud=ReadBool(L"PlayerJetThreatHud",n.playerJetThreatHud);
+    n.playerJetLockByView=ReadBool(L"PlayerJetLockByView",n.playerJetLockByView);
+    n.turretAimHud=ReadBool(L"TurretAimHud",n.turretAimHud);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
@@ -283,7 +285,8 @@ void LoadConfig() noexcept {
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
-    Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d",n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud);
+    Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d",n.playerJetGunSight,n.playerJetFlightHud,
+        n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud);
     Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X",n.playerJetAll,n.playerJetHailKey,n.gunshipBoardGunner,
         n.gunshipGunnerKey);

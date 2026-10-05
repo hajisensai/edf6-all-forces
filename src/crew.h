@@ -87,6 +87,8 @@ struct Config {
     bool playerJetGunSight=true;    // the aircraft the player flies: our gun sight (pipper, lead, boresight), the stock red aim lines hidden
     bool playerJetFlightHud=true;   // ...and its flight HUD: flight path marker, horizon and pitch ladder, heading tape, speed / altitude
     bool playerJetThreatHud=true;   // ...and the threats' directions (enemy locks, missiles coming for it) round the screen's centre
+    bool playerJetLockByView=true;  // ...its locks (and the target key's next one) go to the target nearest the screen's centre, not the nose
+    bool turretAimHud=true;         // EDF6AutoTurret's turrets the player is at: its lock box and lead circle (hud.cpp TurretAimMarks)
     int playerJetGearKey=0x47;      // the key that raises / lowers the landing gear ('G'; gear.cpp PlayerGear)
     int playerJetGearButton=0x40;   // ...and the pad button (the seat's button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
     bool playerJetAll=true;         // the player can board every other aircraft of the plugin too (playerjet_kinds.h)

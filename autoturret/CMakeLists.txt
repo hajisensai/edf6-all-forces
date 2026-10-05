@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(EDF6AutoTurret VERSION 0.3.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6AutoTurret SHARED src/plugin.cpp src/gunner.cpp)
+add_library(EDF6AutoTurret SHARED src/plugin.cpp src/gunner.cpp src/designate.cpp)
 # edf6common (common/): the memory / patch / image / seat code shared with EDF6VehicleCrew
 target_link_libraries(EDF6AutoTurret PRIVATE edf6common)
 target_include_directories(EDF6AutoTurret PRIVATE ${CMAKE_SOURCE_DIR}/third_party/EDFModLoader)

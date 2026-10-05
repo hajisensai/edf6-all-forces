@@ -218,6 +218,12 @@ void RefreshWorld() noexcept {
     diag.registry+=static_cast<unsigned>(n);
 }
 
+const Enemy* World(int* count) noexcept {
+    RefreshWorld();
+    *count=worldCount;
+    return worldEnemies;
+}
+
 void ScanEnemies(const unsigned char* vehicle,float range,Nearby& out) noexcept {
     out.count=0;
     RefreshWorld();
@@ -480,16 +486,11 @@ template<class Visit> void ForEachGun(const unsigned char* seat,Visit visit) noe
     }
 }
 
-// The tracked enemy stays the target while it lives within the gun's full range (dropping it at the
-// tracking-range edge made the turret flip between targets every second or two). A new one comes
-// from within tracking range: any target of the gun's kind (air, or ground for a ground-attack gun)
-// beats any other, then distance plus the turn it costs from where the guns point now. Returns the
-// enemy object; `world` is its aim point, always taken from the object's first lock point so the lead
-// sees a steady track.
-const void* PickTarget(const unsigned char* vehicle,const unsigned char* seat,const void* keep,const void* dropped,bool& armed,float* world,Shot& shot) noexcept {
-    armed=false;shot=Shot{};
+// The seat's marked guns as one round (the last one's speed and drop; whether any hunts the ground or lobs) and the
+// farthest reach (m); false with none of ours (a stock flak: left alone).
+bool ReadShot(const unsigned char* vehicle,const unsigned char* seat,Shot& shot,float& range) noexcept {
+    bool armed=false;shot=Shot{};range=0.0f;
     float gravity=0.0f;
-    float range=0.0f;
     ForEachGun(seat,[&](const unsigned char* weapon) noexcept {
         const Mark mark=GunMark(weapon);
         if(mark==Mark::none)return;
@@ -501,8 +502,19 @@ const void* PickTarget(const unsigned char* vehicle,const unsigned char* seat,co
         const float reach=shot.speed*static_cast<float>(At<std::int32_t>(weapon,kAmmoAlive));
         if(reach>range)range=reach;
     });
-    if(!armed)return nullptr;
-    if(std::isfinite(gravity) && gravity>0.0f)shot.drop=gravity*Down(vehicle)/kFramesPerSecondSq;
+    if(armed && std::isfinite(gravity) && gravity>0.0f)shot.drop=gravity*Down(vehicle)/kFramesPerSecondSq;
+    return armed;
+}
+
+// The tracked enemy stays the target while it lives within the gun's full range (dropping it at the
+// tracking-range edge made the turret flip between targets every second or two). A new one comes
+// from within tracking range: any target of the gun's kind (air, or ground for a ground-attack gun)
+// beats any other, then distance plus the turn it costs from where the guns point now. Returns the
+// enemy object; `world` is its aim point, always taken from the object's first lock point so the lead
+// sees a steady track. `only` (the player's lock, designate.cpp): that one alone, kept while the gun can reach it,
+// and nothing else while it cannot.
+const void* PickTarget(const unsigned char* vehicle,const unsigned char* seat,const void* keep,const void* dropped,const void* only,
+                       Shot& shot,float range,float* world) noexcept {
     Nearby nearby;
     ScanEnemies(vehicle,range,nearby);
     const float track=cfg.trackRange*range;
@@ -520,13 +532,14 @@ const void* PickTarget(const unsigned char* vehicle,const unsigned char* seat,co
     };
     const Enemy* best=nullptr;float bestScore=0.0f;
     bool kept=false;
+    if(only)keep=only;
     for(int i=0;keep && i<nearby.count;++i) {
         if(nearby.e[i]->object!=keep)continue;    // the scan already limits it to full range
         float l[3],wantYaw,wantPitch;ToLocal(vehicle,nearby.e[i]->pos,l);
         if(reachable(l,wantYaw,wantPitch)){best=nearby.e[i];kept=true;}
         break;
     }
-    for(int i=0;!kept && i<nearby.count;++i) {
+    for(int i=0;!kept && !only && i<nearby.count;++i) {
         const Enemy* e=nearby.e[i];
         if(e->object==dropped)continue;
         float l[3],wantYaw,wantPitch;ToLocal(vehicle,e->pos,l);
@@ -600,31 +613,57 @@ bool PlayerLofted(const unsigned char* seat) noexcept {
     return lofted;
 }
 
+// The seat's gun's barrel (its first holder's muzzles, rebuilt from the bones) and its round's life in frames.
+struct Barrel { bool ok; float pos[3],dir[3]; float life; };
+Barrel SeatBarrel(const unsigned char* seat) noexcept {
+    Barrel b{};
+    const auto gun=SeatGun(seat);
+    if(!gun || !Readable(gun,kAmmoGravity+4) || !Readable(gun+edf::kWeaponMatrix,0x40))return b;
+    b.ok=edf::MeanMuzzle(gun,8,b.pos,b.dir);
+    b.life=static_cast<float>(At<std::int32_t>(gun,kAmmoAlive));
+    return b;
+}
+
 // Aims the ridden flak's turret (seat 0); returns the flight time (frames) to the aim point, the time fuse
-// its rounds get, or -1 (no target, aimed by hand, out of reach: the rounds burst at max range).
+// its rounds get, or -1 (no target, aimed by hand, out of reach: the rounds burst at max range). For this machine's
+// player it keeps their bindings and lock (designate.cpp) and publishes the HUD's readout; in the lead-circle mode it
+// tracks and fuses as ever but leaves the turret to them.
 float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     if(PlayerLofted(seat)){diag.stop="player-lofted";return -1.0f;}
     Track* track=TrackFor(vehicle,0,true);   // the flak is aimed only for its rider (hasInput)
     if(!track){diag.stop="no-track";return -1.0f;}
     const auto now=GetTickCount64();
-    bool armed=false;float world[3]{},local[3]{};Shot shot{};
+    float world[3]{},local[3]{},range=0.0f;Shot shot{};
+    if(!ReadShot(vehicle,seat,shot,range)){diag.stop="unarmed";return -1.0f;}   // a stock flak: leave it alone
+    const bool pilot=edf::SeatRider(image,seat)==edf::Rider::player;
+    const Barrel barrel=pilot ? SeatBarrel(seat) : Barrel{};
+    const float* muzzle=barrel.ok ? barrel.pos : nullptr;
+    const float* bore=barrel.ok ? barrel.dir : nullptr;
+    if(pilot)PilotFrame(vehicle,0,seat,muzzle,bore,range);
+    const bool lead=pilot && LeadCircle();
+    const void* only=pilot ? Designated(vehicle,nullptr) : nullptr;
     // Holding the aim stick aims by hand (the stock input already turned it); letting go hands the
     // turret back at once, to a target near where it was dragged, never the one dragged away from.
+    // In the lead-circle mode the turret is the player's anyway.
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
-    const bool drag=cfg.dragDeadzone>0.0f && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
+    const bool drag=!lead && cfg.dragDeadzone>0.0f && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
     if(drag && !track->dragging && track->target){track->dropped=track->target;track->droppedUntil=now+cfg.dragDropMs;}
     track->dragging=drag;
     if(drag)track->target=nullptr;
     const void* dropped=now<track->droppedUntil ? track->dropped : nullptr;
-    const auto target=PickTarget(vehicle,seat,track->target,dropped,armed,world,shot);
-    if(!armed){diag.stop="unarmed";return -1.0f;}       // a stock flak: leave it alone
-    if(drag){diag.stop="manual";track->at=now;return -1.0f;}
-    if(!target){diag.stop="no-target";track->at=now;track->target=nullptr;return -1.0f;}
-    diag.stop="aiming";
+    const auto target=drag ? nullptr : PickTarget(vehicle,seat,track->target,dropped,only,shot,range,world);
+    if(!target) {
+        diag.stop=drag ? "manual" : "no-target";track->at=now;track->target=nullptr;
+        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,muzzle,bore,&shot,nullptr,barrel.life);
+        return -1.0f;
+    }
+    diag.stop=lead ? "lead-circle" : "aiming";
     Lead(vehicle,*track,target,world,local,shot);
     track->at=now;
+    if(pilot)PublishAim(vehicle,true,target,world,muzzle,bore,&shot,track->vel,barrel.life);
     float wantYaw,wantPitch,flight;
     if(!AimAngles(local,shot,wantYaw,wantPitch,flight)){diag.stop="out-of-reach";return -1.0f;}
+    if(lead)return flight;   // the time fuse still bursts the flak at the target's range
     const auto axes=seat+kSeatAim+kAimAxes;
     const float yaw=At<float>(axes,kAxisAngle),pitch=At<float>(axes+kAxisStride,kAxisAngle);
     if(!std::isfinite(yaw) || !std::isfinite(pitch)){diag.stop="bad-axis";return flight;}
@@ -735,6 +774,12 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     return end!=text && std::isfinite(value) ? value : fallback;
 }
 
+// An integer key held to [lo, hi] (a key code, a button mask, milliseconds).
+int ReadInt(const wchar_t* key,int fallback,int lo,int hi) noexcept {
+    const int v=static_cast<int>(GetPrivateProfileIntW(L"AutoTurret",key,fallback,iniPath));
+    return v<lo ? lo : v>hi ? hi : v;
+}
+
 void LoadConfig() noexcept {
     Config next{};
     next.enabled=GetPrivateProfileIntW(L"AutoTurret",L"Enabled",1,iniPath)!=0;
@@ -765,12 +810,22 @@ void LoadConfig() noexcept {
     next.gunnerMinDistance=Clamp(ReadFloat(L"GunnerMinDistance",next.gunnerMinDistance),0.0f,500.0f);
     next.gunnerYawSign=ReadFloat(L"GunnerYawSign",next.gunnerYawSign)>=0.0f ? 1.0f : -1.0f;
     next.gunnerPitchSign=ReadFloat(L"GunnerPitchSign",next.gunnerPitchSign)>=0.0f ? 1.0f : -1.0f;
+    next.aimMode=GetPrivateProfileIntW(L"AutoTurret",L"AimMode",next.aimMode,iniPath)!=0 ? 1 : 0;
+    next.modeKey=ReadInt(L"AimModeKey",next.modeKey,0,0xFE);
+    next.modeButton=ReadInt(L"AimModeButton",next.modeButton,0,0xFFFF);
+    next.lockKey=ReadInt(L"LockKey",next.lockKey,0,0xFE);
+    next.lockButton=ReadInt(L"LockButton",next.lockButton,0,0xFFFF);
+    next.lockCone=Clamp(ReadFloat(L"LockCone",next.lockCone),1.0f,90.0f);
+    next.lockRange=Clamp(ReadFloat(L"LockRange",next.lockRange),0.0f,5000.0f);
+    next.lockClearMs=static_cast<DWORD>(ReadInt(L"LockClearMs",static_cast<int>(next.lockClearMs),200,5000));
     cfg=next;
     Log("CONFIG enabled=%d debug=%d gain=%.2f yaw=%.0f%+.3f pitch=%.0f%+.3f pivot=%.1f air=%.1f lead=%d track=%.2f ff=%d slew=%.0f drag=%.2f/%lums fuse=%d%+.1f min=%d proximity=%.1f contact=%d",
         cfg.enabled,cfg.debug,cfg.gain,cfg.yawSign,cfg.yawOffset,cfg.pitchSign,cfg.pitchOffset,cfg.pivotHeight,
         cfg.airHeight,cfg.lead,cfg.trackRange,cfg.feedForward,cfg.slewWeight,cfg.dragDeadzone,cfg.dragDropMs,cfg.fuse,cfg.fuseBias,cfg.fuseMin,cfg.proximity,cfg.contact);
     Log("CONFIG gunners ai=%d assist=%d range=%.0f cone=%.3f min=%.0f sign=(%+.0f,%+.0f)",
         cfg.gunnerAi,cfg.gunnerAssist,cfg.gunnerRange,cfg.gunnerCone,cfg.gunnerMinDistance,cfg.gunnerYawSign,cfg.gunnerPitchSign);
+    Log("CONFIG player mode=%s key=0x%X button=0x%X lock key=0x%X button=0x%X cone=%.0fdeg range=%.0fm clear=%lums",
+        cfg.aimMode ? "lead" : "auto",cfg.modeKey,cfg.modeButton,cfg.lockKey,cfg.lockButton,cfg.lockCone,cfg.lockRange,cfg.lockClearMs);
 }
 
 // Edits to the ini apply within a second; no game restart needed.
