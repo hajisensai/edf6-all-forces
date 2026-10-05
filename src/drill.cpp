@@ -29,12 +29,13 @@ constexpr unsigned kTriggerRead=0x61AD14;
 // and base radius (m, as the model is built: pylib/drill_model.py DRILL_LENGTH / DRILL_RADIUS; tools/selftest.py
 // holds them equal).
 const wchar_t kDrillBone[]=L"edf6vc_drill";
-constexpr float kDrillLength=3.9f,kDrillRadius=0.97f;
+constexpr float kDrillLength=3.77f,kDrillRadius=0.97f;
 constexpr std::size_t kModelInst=kModelInst506,kBoneLocal=kBoneLocal506,kBoneWorld=kBoneWorld506;
 // What it reaches: an enemy lock point within kDrillRadius + kEnemyReach of the axis from kBehind behind the base to
 // kAhead past the tip (a lock point sits inside the enemy's body, not on its skin); the map along the axis to kAhead
 // past the tip.
 constexpr float kEnemyReach=2.5f,kBehind=0.5f,kAhead=1.0f;
+constexpr float kLowRay=0.8f;      // the second map ray: this share of the base radius under the axis
 constexpr float kBiteSec=0.2f;      // a charge this often while it touches something and turns at kWorkShare or more
 constexpr float kWorkShare=0.15f;   // of the top RPM: slower, it neither hurts nor breaks anything
 constexpr float kInto=1.0f;         // m past the map hit the charge is aimed (it meets the wall on its way)
@@ -152,9 +153,15 @@ bool Touch(const unsigned char* v,const Drill& d,float* from,float* at,bool* ene
     VisitEnemies(v,&SeeEnemy,&r);
     std::memcpy(from,base,12);
     if(r.found){*enemy=true;std::memcpy(at,r.at,12);return true;}
+    // The map: along the axis, else along the drill's underside (kLowRay of its radius under the axis, by the hull's
+    // up: the bone's own rows turn with the spin), which meets a rock or a low wall under the axis.
     float hit[3];
-    const float end[3]={r.to[0],r.to[1],r.to[2]};
-    if(MapRay(base,end,hit)<0.0f)return false;
+    if(MapRay(base,r.to,hit)<0.0f) {
+        const float* up=reinterpret_cast<const float*>(v+kMatrix)+4;
+        float a[3],b[3];
+        for(int i=0;i<3;++i){a[i]=base[i]-up[i]*kDrillRadius*kLowRay;b[i]=r.to[i]-up[i]*kDrillRadius*kLowRay;}
+        if(MapRay(a,b,hit)<0.0f)return false;
+    }
     *enemy=false;
     for(int i=0;i<3;++i)at[i]=hit[i]+axis[i]*kInto;
     return true;

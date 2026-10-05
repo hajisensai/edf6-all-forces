@@ -166,23 +166,26 @@ def _number(v) -> float | None:
     return float(v) if isinstance(v, int) else None
 
 
+def impact_charge(game: vc.Game, radius: float, speed: float = IMPACT_SPEED, life: int = IMPACT_LIFE) -> bytes:
+    """An impact charge (see IMPACT_FILES) from the stock gunship round: a `radius` m blast, `speed` m a frame for
+    `life` frames (also tools/make_drill.py's drill charge)."""
+    import sgo
+    version, m = sgo.read(game.read('OBJECT', IMPACT_STOCK))
+    p = m.get('indirect_fire_param')
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'SolidBullet01' or not isinstance(p[0], list) or len(p[0]) != 2
+            or any(_number(p[i]) is None for i in (2, 3, 5, 6, 9, 10, 11, 15)) or 'indirect_fire_damage' not in m):
+        raise ValueError(f'{IMPACT_STOCK} 不是预期的炮舰炮弹')
+    for i, value in ((2, 1), (3, 0), (5, speed), (6, 0), (9, radius), (10, life), (11, 0), (15, 0)):
+        p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
+    p[0] = [0.0, 0.0]   # no scatter
+    m['indirect_fire_damage'] = 0.0   # the plugin sets the damage (IFC +0xDC)
+    return sgo.write(version, m)
+
+
 def impact_charges(game: vc.Game) -> dict[str, bytes]:
     """The impact charges (IMPACT_FILES) from the stock gunship round."""
-    import sgo
-    out = {}
-    for name, radius in IMPACT_FILES.items():
-        version, m = sgo.read(game.read('OBJECT', IMPACT_STOCK))
-        p = m.get('indirect_fire_param')
-        if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
-                or p[4] != 'SolidBullet01' or not isinstance(p[0], list) or len(p[0]) != 2
-                or any(_number(p[i]) is None for i in (2, 3, 5, 6, 9, 10, 11, 15)) or 'indirect_fire_damage' not in m):
-            raise ValueError(f'{IMPACT_STOCK} 不是预期的炮舰炮弹')
-        for i, value in ((2, 1), (3, 0), (5, IMPACT_SPEED), (6, 0), (9, radius), (10, IMPACT_LIFE), (11, 0), (15, 0)):
-            p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
-        p[0] = [0.0, 0.0]   # no scatter
-        m['indirect_fire_damage'] = 0.0   # the plugin sets the damage (IFC +0xDC)
-        out[name] = sgo.write(version, m)
-    return out
+    return {name: impact_charge(game, radius) for name, radius in IMPACT_FILES.items()}
 
 
 def main(argv: list[str]) -> int:

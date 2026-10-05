@@ -25,6 +25,10 @@ PLUGINS = os.path.join(ROOT, 'build', 'Mods', 'Plugins')
 EXE_NAME = 'EDF6VehicleCrew安装器'
 OUT = os.path.join(ROOT, 'release')
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
+sys.path.insert(0, os.path.join(ROOT, 'pylib'))
+import drill_model  # noqa: E402
+MODELS = drill_model.model_dir()
+MODEL_SUBDIRS = (drill_model.MODEL_SUBDIR,)
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -60,6 +64,20 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 """
 
 
+def model_files() -> list[str]:
+    """The user-supplied models the installer builds vehicles from (MODEL_SUBDIRS of MODELS, when there), relative to
+    MODELS: shipped next to the exe as models/<subdir>/ (pylib/drill_model.py model_dir finds them there). Ripped game
+    assets, never in the repository."""
+    out = []
+    for sub in MODEL_SUBDIRS:
+        d = os.path.join(MODELS, sub) if MODELS else ''
+        if not d or not os.path.isdir(d):
+            print(f'no models/{sub} ({MODELS}): the release builds without it (that vehicle falls back, see its tool)')
+            continue
+        out += [os.path.join(sub, f) for f in sorted(os.listdir(d)) if os.path.isfile(os.path.join(d, f))]
+    return out
+
+
 def cmake_version() -> str:
     """CMakeLists.txt project(... VERSION x.y.z ...): the one version (src/version.h.in)."""
     with open(os.path.join(ROOT, 'CMakeLists.txt'), encoding='utf-8') as f:
@@ -77,7 +95,8 @@ def build_exe() -> str:
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange')):
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'graft_pure', 'primer_fighter_model', 'calls',
-                'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'weapons'):
+                'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'weapons',
+                'make_drill', 'drill_model', 'obj_model', 'texfile'):
         cmd += ['--hidden-import', mod]
     for mod in ('PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these (numpy: the big map's seams need it)
         cmd += ['--exclude-module', mod]
@@ -105,6 +124,8 @@ def main(argv: list[str]) -> int:
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
         z.write(exe, EXE_NAME + '.exe')
         z.writestr('说明.txt', README.format(version=version).replace('\n', '\r\n').encode('utf-8-sig'))
+        for rel in model_files():
+            z.write(os.path.join(MODELS, rel), 'models/' + rel.replace(os.sep, '/'))
     shutil.copy2(exe, os.path.join(OUT, EXE_NAME + '.exe'))
     print(f'wrote {os.path.getsize(zpath)} bytes')
     print(zpath)
