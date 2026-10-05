@@ -75,6 +75,7 @@ struct Config {
     bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
     int playerJetFlareKey=0x58;     // the key that drops a pair of flares ('X'; missile.cpp FlareDrop)
     int playerJetFlares=8;          // the pairs a player jet carries
+    int playerJetChuteCutKey=0x58;  // the key that cuts the parachute after an ejection ('X')
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
