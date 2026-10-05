@@ -93,12 +93,15 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import gen
     import rmpa
-    from vcobjects import DEFAULT_GAME, Game
-    game = Game(DEFAULT_GAME)
+    # A map of its own (the selftest runs without the game, on CI too): the player start and a point every 25 m out
+    # to 1 km round it, enough for the vehicle spots, the enemy ring and the ships' far points.
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
+    points += [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+               for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
     air = gen.Plan()
     air.air.enabled = True
     for plan in (gen.grand_battle(gen.Plan()), air, gen.Plan()):
-        lay = gen.layout(rmpa.points(game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')), gen.small_count(plan))
+        lay = gen.layout(points, gen.small_count(plan))
         named = set(re.findall(r'app:/object/(edf6tr_[a-z0-9_]+)\.sgo', gen.script(plan, lay)))
         missing = named - {x for x in gen.spawned(plan) if x in gen.DERIVED}
         assert not missing, f'{plan.scenario or ("air" if plan.air.enabled else "waves")}: never written {sorted(missing)}'
