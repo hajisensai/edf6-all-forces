@@ -48,6 +48,7 @@ struct Config {
     DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover
     bool jetAirRaider=true;    // the Air Raider's bomber calls send jets instead, and its call weapons (airstrike.cpp) work
     bool jetMissionStrike=true;// the missions' strafing-plane airstrikes (DemoAirStrike) send jets instead
+    bool throwDrones=true;     // the thrown-drone Robot Bombs (EDF6VC_CALL_THROW_*) release the plugin's drones (airstrike.cpp)
     bool groundPilot=true;     // NPC-crewed Depth Crawlers (502, no stock AI) are driven by the plugin (ground.cpp)
     float groundFollow=20.0f;  // metres from the player it stops at with no enemy
     float groundRange=200.0f;  // it engages enemies within this distance

@@ -74,5 +74,14 @@ const CallRow kCallRows[]={
     {L"EDF6VC_CALL_KATYUSHA",L"EDF6VC_CALL_KATYUSHA.SGO",L"EDF6VC_KATYUSHA.SGO"},
     {L"EDF6VC_CALL_ARTILLERY",L"EDF6VC_CALL_ARTILLERY.SGO",L"EDF6VC_ARTILLERY.SGO"},
     {L"EDF6VC_CALL_DRILL",L"EDF6VC_CALL_DRILL.SGO",L"EDF6VC_DRILL.SGO"},
+    {L"EDF6VC_CALL_THROW_BLAST",L"EDF6VC_CALL_THROW_BLAST.SGO",nullptr},
+    {L"EDF6VC_CALL_THROW_DOLL",L"EDF6VC_CALL_THROW_DOLL.SGO",nullptr},
+    {L"EDF6VC_CALL_THROW_DRONE",L"EDF6VC_CALL_THROW_DRONE.SGO",nullptr},
 };
 constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));
+// The thrown drones: their weapons' AmmoHitSizeAdjust bits (weapon +0x8C4), in tools/calls.py CALLS order.
+const Throw kThrows[]={
+    {0x3F800D61u,ThrownDrone::blast,90,"thrown blast drone",L"EDF6VC_CALL_THROW_BLAST"},
+    {0x3F800D62u,ThrownDrone::doll,120,"thrown doll drone",L"EDF6VC_CALL_THROW_DOLL"},
+    {0x3F800D63u,ThrownDrone::drone,180,"thrown gun drone",L"EDF6VC_CALL_THROW_DRONE"},
+};

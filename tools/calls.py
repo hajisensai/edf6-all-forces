@@ -10,6 +10,7 @@ removed (RELEASED: each order a release installed must stay a prefix of CALLS).
 """
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 
 ID_PREFIX = 'EDF6VC_CALL_'
@@ -24,10 +25,12 @@ class Call:
     mark: float          # a call: AmmoHitSizeAdjust, the plugin's call marker; a vehicle request: the jet's mark
     kind: str            # key into KINDS
     follow: bool         # escorts the caller instead of holding the marked point
-    count: int           # what it brings; also the stock bomber fallback's plane count (Ammo_CustomParameter[2][1])
-    reload: float        # ReloadTime[0], the base of the star curve
+    count: int           # what it brings; also the stock bomber fallback's plane count (Ammo_CustomParameter[2][1]);
+                         # a thrown one's: the bombs a magazine holds (AmmoCount[0])
+    reload: float        # ReloadTime[0], the base of the star curve (a thrown one's: frames, 60 a second)
     level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
-    brings: str          # 'jets' (JetLaunch), 'helis' (HeliLaunch), 'sub' (SubLaunch), 'vehicle' (a vehicle request)
+    brings: str          # 'jets' (JetLaunch), 'helis' (HeliLaunch), 'sub' (SubLaunch), 'vehicle' (a vehicle request),
+                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown)
     log: str = ''        # its name in the plugin's log
     fuel_sec: int = 0    # the plugin's fuel limit for what it brings (0: none)
     role: str = ''       # brings 'jets': the JetRole (src/crew.h)
@@ -38,16 +41,37 @@ class Call:
     jet: str = ''
     # ...or the pylib/vcobjects.py GROUND_VEHICLES entry it brings (a vehicle request of a ground vehicle; `mark` 0).
     ground: str = ''
+    # brings 'throw': the drone its bomb releases (src/crew.h ThrownDrone); `mark` is then throw_mark(code).
+    drone: str = ''
 
     @property
     def flown(self) -> bool:
-        """The plugin launches what it brings at the call (kCalls); a vehicle request is the game's own."""
-        return self.brings != 'vehicle'
+        """The plugin launches what it brings at the call (kCalls, the in-mission pick cycles through them); a
+        vehicle request is the game's own, a thrown drone comes from its bomb (kThrows), neither is a call."""
+        return self.brings not in ('vehicle', 'throw')
 
     @property
     def modal(self) -> bool:
         """It comes in a guard and a follow version, and its name says which."""
         return self.brings in ('jets', 'helis')
+
+
+# A thrown drone's marker (brings 'throw'): its weapon's AmmoHitSizeAdjust (weapon +0x8C4, which the plugin
+# compares as the float's bits) is the float whose bits are THROW_MARK_BASE | code, about 1.0004: the stock
+# Patroller's bomb hits as it does, so without the plugin the weapon is a plain Patroller, and every stock weapon
+# SGO near 1.0 there is exactly 1.0 (0x3F800000, 1590 of them; 2026-10-05 scan), so no stock weapon is taken for
+# ours. The SGO holds a double the game converts to a float (0x68D8FB): the value is that float exactly.
+THROW_MARK_BASE = 0x3F800000
+
+
+def throw_mark(code: int) -> float:
+    assert 0 < code < 0x1000, code
+    return struct.unpack('<f', struct.pack('<I', THROW_MARK_BASE | code))[0]
+
+
+def mark_bits(call: 'Call') -> int:
+    """The float32 bits of a call's mark (a thrown drone's: what src/airstrike.cpp kThrows compares)."""
+    return struct.unpack('<I', struct.pack('<f', call.mark))[0]
 
 
 CALLS: tuple[Call, ...] = (
@@ -92,6 +116,14 @@ CALLS: tuple[Call, ...] = (
          ground='artillery'),
     # Appended 2026-10-05: the drill tank (tools/make_drill.py, src/drill.cpp), requested like the Blacker.
     Call('EDF6VC_CALL_DRILL', 0, 'drill', False, 0, 7000, 1.0, 'vehicle', vehicle='EDF6VC_DRILL', ground='drill'),
+    # Appended 2026-10-05: Robot Bombs (clones of the stock Patroller, eWeapon217) whose bomb releases one of the
+    # plugin's drones where it lands (src/airstrike.cpp kThrows, src/jet_spawn.cpp JetLaunchThrown).
+    Call('EDF6VC_CALL_THROW_BLAST', throw_mark(0xD61), 'throw_blast', False, 6, 900, 1.2, 'throw', 'thrown blast drone', 90,
+         drone='blast'),
+    Call('EDF6VC_CALL_THROW_DOLL', throw_mark(0xD62), 'throw_doll', False, 3, 1200, 1.6, 'throw', 'thrown doll drone', 120,
+         drone='doll'),
+    Call('EDF6VC_CALL_THROW_DRONE', throw_mark(0xD63), 'throw_drone', False, 2, 1800, 2.0, 'throw', 'thrown gun drone', 180,
+         drone='drone'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -107,6 +139,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'Katyusha (2026-10-05)': IDS[:22],
     'artillery (2026-10-05)': IDS[:23],
     'drill tank (2026-10-05)': IDS[:24],
+    'thrown drones (2026-10-05)': IDS[:27],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -132,6 +165,41 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'throw_blast': {
+        'SC': ('投掷式自爆无人机', '投出一枚机械化炸弹，落地后变成一架旋翼自爆无人机：在落点上空低悬，飞向落点 300 米内的敌人，'
+                        '贴近后引爆（伤害 1200，半径 15 米，不伤友军）；90 秒内没等到敌人就在原地引爆。'),
+        'CN': ('投擲式自爆無人機', '投出一枚機械化炸彈，落地後變成一架旋翼自爆無人機：在落點上空低懸，飛向落點 300 米內的敵人，'
+                        '貼近後引爆（傷害 1200，半徑 15 米，不傷友軍）；90 秒內沒等到敵人就在原地引爆。'),
+        'JA': ('投擲式自爆ドローン', 'ロボットボムを投げ、着地すると回転翼の自爆ドローンになる。着地点の上空に低く滞空し、着地点から'
+                          '300m 以内の敵へ飛んで近接起爆する（ダメージ 1200、半径 15m、味方には当たらない）。90 秒以内に敵が'
+                          '来なければその場で起爆する。'),
+        'EN': ('Thrown Blast Drone', 'Throws a robot bomb that becomes a rotor blast drone where it lands: it hovers low over '
+                                     'the spot, flies at enemies within 300 m of it and blows up next to them (1200 damage, '
+                                     '15 m radius, no harm to friends). With no enemy in 90 seconds it blows up where it is.'),
+    },
+    'throw_doll': {
+        'SC': ('投掷式人偶无人机', '投出一枚机械化炸弹，落地后变成一架挂着唱歌跳舞人偶的旋翼无人机：慢慢飞到落点 300 米内的敌人中间'
+                        '吸引火力，然后自爆（伤害 3000，半径 25 米）。人偶是 DLC 内容，没有时无人机照样自爆。'),
+        'CN': ('投擲式人偶無人機', '投出一枚機械化炸彈，落地後變成一架掛著唱歌跳舞人偶的旋翼無人機：慢慢飛到落點 300 米內的敵人中間'
+                        '吸引火力，然後自爆（傷害 3000，半徑 25 米）。人偶是 DLC 內容，沒有時無人機照樣自爆。'),
+        'JA': ('投擲式人形ドローン', 'ロボットボムを投げ、着地すると歌って踊る人形を吊るした回転翼ドローンになる。着地点から 300m 以内の'
+                          '敵の中へゆっくり進んで注意を引き、自爆する（ダメージ 3000、半径 25m）。人形は DLC の内容で、'
+                          'ない場合もドローンは自爆する。'),
+        'EN': ('Thrown Doll Drone', 'Throws a robot bomb that becomes a rotor drone carrying a singing, dancing doll: it '
+                                    'drifts into the enemies within 300 m of where it landed, draws their fire and blows up '
+                                    '(3000 damage, 25 m radius). The doll is DLC; without it the drone still blows up.'),
+    },
+    'throw_drone': {
+        'SC': ('投掷式无人机', '投出一枚机械化炸弹，落地后变成一架小型固定翼无人机：机炮和轻型对地导弹，在落点上空盘旋，攻击落点'
+                      ' 300 米内的敌人；弹药或燃料（180 秒）用完后飞走。'),
+        'CN': ('投擲式無人機', '投出一枚機械化炸彈，落地後變成一架小型固定翼無人機：機砲和輕型對地飛彈，在落點上空盤旋，攻擊落點'
+                      ' 300 米內的敵人；彈藥或燃料（180 秒）用完後飛走。'),
+        'JA': ('投擲式ドローン', 'ロボットボムを投げ、着地すると小型の固定翼ドローンになる。機関砲と軽対地ミサイルを持ち、着地点の上空を'
+                        '旋回して 300m 以内の敵を攻撃する。弾薬か燃料（180 秒）が尽きると飛び去る。'),
+        'EN': ('Thrown Gun Drone', 'Throws a robot bomb that becomes a small fixed-wing drone with guns and light air-to-ground '
+                                   'missiles: it circles over where it landed and attacks enemies within 300 m of it, '
+                                   'leaving once out of ammo or fuel (180 seconds).'),
+    },
     'drill': {
         'SC': ('钻头战车', '请求一辆钻头战车：车头装着巨大的钻头，按住射击键钻头加速旋转，转速越高，对接触到的敌人伤害越大、'
                       '钻开建筑和岩石越快。近战，不发射炮弹。'),
@@ -266,6 +334,13 @@ VEHICLE_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグインと tools/make_jets.py が書き出す EDF6VC_PJET_*.SGO が必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the EDF6VC_PJET_*.SGO files tools/make_jets.py writes.',
 }
+THROW_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件和安装器生成的无人机文件；未安装插件时为普通巡逻炸弹。',
+    'CN': '需要 EDF6VehicleCrew 插件和安裝器生成的無人機檔案；未安裝插件時為普通巡邏炸彈。',
+    'JA': 'EDF6VehicleCrew プラグインとインストーラーが書き出すドローンのファイルが必要。未導入時は通常のパトローラーになる。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the drone files the installer writes; without the plugin this is a plain '
+          'Patroller.',
+}
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',
@@ -299,6 +374,8 @@ def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
     if call.brings == 'vehicle':
         return KINDS[call.kind][lang][1] + '\n\n' + (GROUND_NOTES if call.ground else VEHICLE_NOTES)[lang]
+    if call.brings == 'throw':
+        return KINDS[call.kind][lang][1] + '\n\n' + THROW_NOTES[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

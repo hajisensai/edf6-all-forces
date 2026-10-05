@@ -346,15 +346,22 @@ def calls_table_consistent() -> None:
     crew_h = src('src/crew.h')
     roles = set(re.search(r'enum class JetRole \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     bodies = set(re.search(r'enum class HeliBody \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
+    drones = set(re.search(r'enum class ThrownDrone \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     for c in calls.CALLS:
         assert c.kind in calls.KINDS, c.id
-        assert c.brings in ('jets', 'helis', 'sub', 'vehicle'), c.id
+        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw'), c.id
+        thrown = c.brings == 'throw'
+        assert bool(c.drone) == thrown and (not c.drone or c.drone in drones), c.id
+        # A thrown drone's marker: the bits of 1.0 with its code in the low ones, never 1.0 itself (calls.throw_mark).
+        bits = calls.mark_bits(c)
+        assert not thrown or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
         assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
         assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
-        assert (c.count > 0) == c.flown and bool(c.log) == c.flown, c.id
+        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown), c.id
+        assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
             assert calls.retired_name(c, lang) != calls.call_name(c, lang)
@@ -369,6 +376,40 @@ def calls_inc_current() -> None:
     with open(gen_calls.OUT, encoding='utf-8', newline='') as f:
         assert f.read().replace('\r\n', '\n') == gen_calls.render(), 'src/calls.inc is stale: python tools/gen_calls.py'
     assert '#include "calls.inc"' in src('src/airstrike.cpp')
+
+
+@test
+def thrown_drones_marked_and_wired() -> None:
+    """The thrown drones' weapons (tools/calls.py brings 'throw'): the SGO tools/call_weapons.py writes holds the
+    marker as a double that is that float exactly (the game reads a double and keeps a float, 0x68D8FB: any rounding
+    and the plugin's bit compare misses), with the magazine and reload asked for; its text row keeps only the count
+    and reload stats; the plugin's kThrows has every one with those bits; the ini key is read, shipped, documented."""
+    import struct
+    template = dsgo.write(dsgo.Document(dsgo.Node(
+        [1.0, dsgo.Node([8.0, 0.0, 0.0, 7.0, 0.5, 0.5, 0.0]), dsgo.Node([480.0, 21.0, 2.0, 8.0, 1.0, 0.5, 0.0]), 'Patroller'],
+        {0: 'AmmoHitSizeAdjust', 1: 'AmmoCount', 2: 'ReloadTime', 3: 'name.en'}), []))
+    stat = [['Number', '$0', [8.0, 0.0, 0.0, 7.0, 0.5, 0.5, 0.0]], ['Damage', '$0', [18.0]], ['Search', '$0m', [30.0]],
+            ['Reload', '$0 sec', [8.0, 21.0, 2.0, 8.0, 1.0, 0.5, 1.0]], ['Spread', '75.0m']]
+    def node(v):   # a plain list as a dsgo list node
+        return dsgo.Node([node(x) for x in v]) if isinstance(v, list) else v
+    text = node(['Patroller', 'stock text', stat])
+    thrown = [c for c in calls.CALLS if c.brings == 'throw']
+    assert thrown and cw.template_of(thrown[0]) == cw.THROW_TEMPLATE == 'eWeapon217'
+    inc = src('src/calls.inc')
+    for c in thrown:
+        r = dsgo.parse(cw.weapon_sgo(template, c)).root
+        mark = r.get('AmmoHitSizeAdjust')
+        assert struct.unpack('<f', struct.pack('<f', mark))[0] == mark, f'{c.id}: the marker is no float'
+        assert struct.unpack('<I', struct.pack('<f', mark))[0] == calls.mark_bits(c), c.id
+        assert r.get('AmmoCount').items[0] == c.count and r.get('ReloadTime').items[0] == c.reload, c.id
+        assert r.get('name.en') == calls.call_name(c, 'EN'), c.id
+        row = dsgo.to_py(cw._text_row(text, c, 'EN'))
+        assert [s[0] for s in row[2]] == ['Number', 'Reload'], row[2]
+        assert row[2][0][2][0] == c.count and abs(row[2][1][2][0] - c.reload / 60.0) < 1e-9, row[2]
+        assert f'{{0x{calls.mark_bits(c):08X}u,ThrownDrone::{c.drone},{c.fuel_sec},' in inc, f'src/calls.inc kThrows: {c.id}'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert 'L"ThrowDrones"' in plugin and re.search(r'^ThrowDrones=1', ini, re.M) and 'ThrowDrones' in readme
+    assert 'kThrows' in src('src/airstrike.cpp') and 'JetLaunchThrown' in src('src/jet_spawn.cpp')
 
 
 @test
