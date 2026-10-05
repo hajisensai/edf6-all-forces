@@ -52,8 +52,8 @@ constexpr unsigned kPlacedFlight=1;    // the jets a mission places (see jet_hoo
 // Flight, per role (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
 // it first flew). The stock bombers fly 3 m a frame (180 m/s): the strike jet attacks at that, the fighter
 // is faster and pulls harder. Every distance of an attack scales with the turn radius v^2/(n g).
-enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship, swarmCore, swarmUnit };
-constexpr int kRoleCount=11;
+enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship, swarmCore, swarmUnit, swarmHuge };
+constexpr int kRoleCount=12;
 // What a role goes for first: ground or flying targets (the other only with none of its own), or either.
 enum class Prefer { ground, air, any };
 // How it flies: a wing (JetSteer: lift along its up, it banks to turn) or a rotor craft (Hover: it goes
@@ -90,8 +90,8 @@ inline constexpr Lean kSwarmCoreLean{0.8f,0.0f,1.5f,2.0f,0.25f,1.5f};
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier, swarmCore, swarmUnit };
-constexpr int kBodyCount=17;
+                  gunship, blastCarrier, dollCarrier, swarmCore, swarmUnit, swarmHuge };
+constexpr int kBodyCount=18;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -125,6 +125,7 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     // The Primer swarm (jet_swarm.cpp, docs/swarm-plan.md), an enemy: the core a mission places, the drones it brings.
     {Body::swarmCore,L"app:/object/edf6vc_swarm_core.sgo",L"EDF6VC_SWARM_CORE.SGO",7012.0f,Role::swarmCore,Role::swarmUnit,"swarmCore"},
     {Body::swarmUnit,L"app:/object/edf6vc_swarm_unit.sgo",L"EDF6VC_SWARM_UNIT.SGO",7013.0f,Role::swarmUnit,Role::swarmUnit,"swarmUnit"},
+    {Body::swarmHuge,L"app:/object/edf6vc_swarm_huge.sgo",L"EDF6VC_SWARM_HUGE.SGO",7014.0f,Role::swarmHuge,Role::swarmUnit,"swarmHuge"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -204,6 +205,8 @@ inline constexpr Kind kKinds[kRoleCount]={
      1.3f,0.8f, 70.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1500.0f, 0.0f,1.0f, 0.0f,false,Body::swarmCore},
     {Role::swarmUnit,"swarmUnit",Prefer::any,FlightModel::rotor,Weapon::swarm,Pose::none,&kRotorLean, 45.0f,45.0f,0.0f, 25.0f,25.0f,
      4.0f,3.0f, 35.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1500.0f, 0.0f,1.0f, 0.0f,false,Body::swarmUnit},
+    {Role::swarmHuge,"swarmHuge",Prefer::any,FlightModel::rotor,Weapon::swarm,Pose::none,&kSwarmCoreLean, 30.0f,30.0f,0.0f, 4.0f,3.5f,
+     1.2f,0.5f, 100.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1500.0f, 0.0f,1.0f, 0.0f,false,Body::swarmHuge},
 };
 constexpr bool KindsInOrder() noexcept {
     for(int i=0;i<kRoleCount;++i) {
@@ -500,7 +503,7 @@ void ResetFlights() noexcept;
 
 // --- jet_swarm.cpp ---
 constexpr std::int32_t kTeamEnemy=1;
-inline bool IsSwarm(const Jet& j) noexcept { return j.role==Role::swarmCore || j.role==Role::swarmUnit; }
+inline bool IsSwarm(const Jet& j) noexcept { return j.role==Role::swarmCore || j.role==Role::swarmUnit || j.role==Role::swarmHuge; }
 // Its dummy pilot and then itself on the enemy's team (a vehicle's team is its riders': jet_swarm.cpp's head).
 void SwarmTeam(unsigned char* v) noexcept;
 // A swarm core's or drone's frame (from JetFrame, which has set the stock input aside and the clock).

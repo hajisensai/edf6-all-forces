@@ -69,6 +69,8 @@ MODELS: dict[str, Recipe] = {
     # its cannon arms, x 0.5) and its members in the gold drone's (19 m across, x 0.5). Both already have the
     # root `mdl` and a level `body` bone, so only the scale changes.
     'EDF6VC_SWARM_CORE.MRAB': Recipe('E515_IMPERIALUFO.MRAB', 'e515_imperialufo.mdb', 0.5),
+    # the huge swarm's core: the Imperial drone at its own size (83 m across)
+    'EDF6VC_SWARM_CORE_XL.MRAB': Recipe('E515_IMPERIALUFO.MRAB', 'e515_imperialufo.mdb', 1.0),
     'EDF6VC_SWARM_UNIT.MRAB': Recipe('E507_GOLDUFO.MRAB', 'e507_goldufo.mdb', 0.5),
 }
 # The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,

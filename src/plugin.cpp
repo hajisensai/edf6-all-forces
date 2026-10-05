@@ -121,6 +121,7 @@ void Validate(Config& n) noexcept {
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
     n.swarmUnits=static_cast<int>(FixInt("SwarmUnits",n.swarmUnits,0,16));
+    n.swarmHugeUnits=static_cast<int>(FixInt("SwarmHugeUnits",n.swarmHugeUnits,0,16));
     Fix("SwarmHpScale",n.swarmHpScale,0.05f,100.0f);
     Fix("SwarmRange",n.swarmRange,60.0f,1000.0f);
     Fix("SwarmHeight",n.swarmHeight,20.0f,400.0f);
@@ -195,6 +196,7 @@ void LoadConfig() noexcept {
     n.playerJetRamDamage=ReadFloat(L"PlayerJetRamDamage",n.playerJetRamDamage);
     n.swarm=ReadBool(L"Swarm",n.swarm);
     n.swarmUnits=ReadInt(L"SwarmUnits",static_cast<DWORD>(n.swarmUnits));
+    n.swarmHugeUnits=ReadInt(L"SwarmHugeUnits",static_cast<DWORD>(n.swarmHugeUnits));
     n.swarmHpScale=ReadFloat(L"SwarmHpScale",n.swarmHpScale);
     n.swarmRange=ReadFloat(L"SwarmRange",n.swarmRange);
     n.swarmHeight=ReadFloat(L"SwarmHeight",n.swarmHeight);
@@ -211,8 +213,8 @@ void LoadConfig() noexcept {
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f",n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage);
-    Log("CONFIG swarm=%d units=%d hpScale=%.2f range=%.0f height=%.0f fire=%d",n.swarm,n.swarmUnits,n.swarmHpScale,n.swarmRange,
-        n.swarmHeight,n.swarmFire);
+    Log("CONFIG swarm=%d units=%d hugeUnits=%d hpScale=%.2f range=%.0f height=%.0f fire=%d",n.swarm,n.swarmUnits,n.swarmHugeUnits,
+        n.swarmHpScale,n.swarmRange,n.swarmHeight,n.swarmFire);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,

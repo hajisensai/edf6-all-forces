@@ -77,9 +77,10 @@ SWARM_GUN_FILES: dict[str, tuple[float, float, float, float, float, float, tuple
 SWARM_CHARGE_FILES: dict[str, tuple[float, float]] = {
     'EDF6VC_SWARM_CHARGE_S.SGO': (300.0, 10.0),    # a member's wreck
     'EDF6VC_SWARM_CHARGE_L.SGO': (1000.0, 25.0),   # the core's wreck
+    'EDF6VC_SWARM_CHARGE_XL.SGO': (2500.0, 45.0),  # the huge core's wreck
 }
 _SWARM_GUN, _SWARM_CANNON = ('app:/weapon/' + f.lower() for f in SWARM_GUN_FILES)
-_SWARM_CHARGE_S, _SWARM_CHARGE_L = ('app:/weapon/' + f.lower() for f in SWARM_CHARGE_FILES)
+_SWARM_CHARGE_S, _SWARM_CHARGE_L, _SWARM_CHARGE_XL = ('app:/weapon/' + f.lower() for f in SWARM_CHARGE_FILES)
 JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *SWARM_GUN_FILES, *SWARM_CHARGE_FILES)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
@@ -116,6 +117,12 @@ JETS: dict[str, Jet] = {
     'edf6tr_swarm_core_mission': Jet(7012.0, 3000.0, (_SWARM_CANNON, _SWARM_CANNON, _SWARM_CHARGE_L),
                                      ('app:/object/edf6vc_swarm_core.mrab', 'e515_imperialufo.mdb'), 'EDF6VC_SWARM_CORE.MRAB',
                                      'body', 'body', rigid=((0.0, -3.42, -5.113), (20.75, 7.455, 12.168))),
+    # The huge swarm: the Imperial drone at its own size (83 m across), more drones, its formation twice as wide.
+    'edf6tr_swarm_huge_mission': Jet(7014.0, 9000.0, (_SWARM_CANNON, _SWARM_CANNON, _SWARM_CHARGE_XL),
+                                     ('app:/object/edf6vc_swarm_core_xl.mrab', 'e515_imperialufo.mdb'),
+                                     'EDF6VC_SWARM_CORE_XL.MRAB', 'body', 'body',
+                                     rigid=((0.0, -6.84, -10.227), (41.5, 14.91, 24.336))),
+    # The drone: a core's member, or placed alone by a mission (a lone drone, scattered from the start).
     'edf6tr_swarm_unit': Jet(7013.0, 250.0, (_SWARM_GUN, _SWARM_GUN, _SWARM_CHARGE_S),
                              ('app:/object/edf6vc_swarm_unit.mrab', 'e507_goldufo.mdb'), 'EDF6VC_SWARM_UNIT.MRAB',
                              'body', 'body', rigid=((0.0, -0.595, 0.0), (4.695, 1.942, 4.695))),

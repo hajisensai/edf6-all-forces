@@ -120,7 +120,9 @@ DERIVED: dict[str, str] = {
 BIG = frozenset({'edf6tr_sub_carrier_mission'})
 
 
-SWARM = 'edf6vc_swarm_core'   # the Primer swarm's core (see SWARM_FILES)
+# The Primer swarm in its three sizes (see SWARM_FILES): what the range places, at most how many a wave, in all.
+SWARM_HUGE, SWARM, SWARM_SOLO = 'edf6vc_swarm_huge', 'edf6vc_swarm_core', 'edf6vc_swarm_unit'
+SWARM_KINDS: dict[str, tuple[int, int]] = {SWARM_HUGE: (1, 4), SWARM: (3, 12), SWARM_SOLO: (6, 36)}
 # (sgo, label, flying)
 ENEMIES: list[tuple[str, str, bool]] = [
     ('giantant01', '巨蚁', False),
@@ -136,18 +138,21 @@ ENEMIES: list[tuple[str, str, bool]] = [
     ('e515_imperialufo', '帝国 UFO（飞）', True),
     ('dragonsmall401', '小龙（飞）', True),
     ('shootingtarget', '训练靶子（地面 + 空中，不动）', False),
-    (SWARM, '星导者群体合体机（插件，飞）', True),
+    (SWARM_HUGE, '星导者群体合体机·巨大（插件，飞）', True),
+    (SWARM, '星导者群体合体机·大（插件，飞）', True),
+    (SWARM_SOLO, '星导者群体合体机·个体（插件，飞）', True),
 ]
-# The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): its core is placed like a jet (CreateFriend; the plugin
-# turns it to the enemy's side and brings its drones). Its SGOs are the installer's (tools/make_jets.py), which
-# the range only uses (SWARM_FILES). per_wave cores (at most SWARM_PER_WAVE) come once no enemy is left, at most
-# SWARM_MAX in all: without the plugin they stay friends and would pile up.
-SWARM_FILES = ('OBJECT/EDF6VC_SWARM_CORE.SGO', 'OBJECT/EDF6VC_SWARM_UNIT.SGO', 'OBJECT/EDF6VC_SWARM_CORE.MRAB',
-               'OBJECT/EDF6VC_SWARM_UNIT.MRAB', 'WEAPON/EDF6VC_SWARM_GUN.SGO', 'WEAPON/EDF6VC_SWARM_CANNON.SGO',
-               'WEAPON/EDF6VC_SWARM_CHARGE_S.SGO', 'WEAPON/EDF6VC_SWARM_CHARGE_L.SGO')
-SWARM_PER_WAVE, SWARM_MAX = 3, 12
-# The cores come out this far over their (ground) spots: the core's box reaches 10.9 m under its origin.
-SWARM_RAISE = 40.0
+# The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): a core (huge or not) or a lone drone is placed like a
+# jet (CreateFriend; the plugin turns it to the enemy's side, a core brings its drones). Its SGOs are the
+# installer's (tools/make_jets.py), which the range only uses (SWARM_FILES). per_wave of them (at most SWARM_KINDS'
+# first) come once no enemy is left, at most its second in all: without the plugin they stay friends and would
+# pile up.
+SWARM_FILES = ('OBJECT/EDF6VC_SWARM_HUGE.SGO', 'OBJECT/EDF6VC_SWARM_CORE.SGO', 'OBJECT/EDF6VC_SWARM_UNIT.SGO',
+               'OBJECT/EDF6VC_SWARM_CORE_XL.MRAB', 'OBJECT/EDF6VC_SWARM_CORE.MRAB', 'OBJECT/EDF6VC_SWARM_UNIT.MRAB',
+               'WEAPON/EDF6VC_SWARM_GUN.SGO', 'WEAPON/EDF6VC_SWARM_CANNON.SGO', 'WEAPON/EDF6VC_SWARM_CHARGE_S.SGO',
+               'WEAPON/EDF6VC_SWARM_CHARGE_L.SGO', 'WEAPON/EDF6VC_SWARM_CHARGE_XL.SGO')
+# They come out this far over their (ground) spots: the huge core's box reaches 21.75 m under its origin.
+SWARM_RAISE = 50.0
 # The targets (enemy TARGET): groups of per_wave on the target spots (target_spots), every other spot raised
 # TARGET_AIR m (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. One
 # target a raised spot stayed up there on 2026-10-03 (EDF6VehicleCrew.log: its jets' targets marked (air)).
@@ -387,28 +392,29 @@ def script(plan: Plan, lay: Layout) -> str:
             '\t\tWait(1.0);',
             '\t}',
         ]
-    elif w.enabled and lay.enemy_points and w.enemy == SWARM:
-        per = max(1, min(int(w.per_wave), SWARM_PER_WAVE))
+    elif w.enabled and lay.enemy_points and w.enemy in SWARM_KINDS:
+        most, total = SWARM_KINDS[w.enemy]
+        per = max(1, min(int(w.per_wave), most))
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
         lines += [
             '',
-            '	// Primer swarms (EDF6VehicleCrew turns each core to the enemy and brings its drones): the next',
-            f'	// {per} once no enemy is left, at most {SWARM_MAX} in all.',
-            f'	array<string> spots = {{ {pts} }};',
-            '	uint next = 0;',
-            '	uint made = 0;',
-            f'	Wait({w.first_delay:.1f});',
-            '	while( true ) {',
-            f'		if( GetTeamObjectCount(TEAM_ID_ENEMY) == 0 && made < {SWARM_MAX} ) {{',
-            f'			for( uint i = 0; i < {per}; i++ ) {{',
-            f'				CreateFriend(spots[next % spots.length()], {_q("app:/object/" + SWARM + ".sgo")}, {w.level:.2f}, false);',
-            '				next++;',
-            '				made++;',
-            '			}',
-            f'			Wait({max(w.interval, 10.0):.1f});',
-            '		}',
-            '		Wait(1.0);',
-            '	}',
+            '\t// The Primer swarm (EDF6VehicleCrew turns each to the enemy, a core brings its drones): the next',
+            f'\t// {per} once no enemy is left, at most {total} in all.',
+            f'\tarray<string> spots = {{ {pts} }};',
+            '\tuint next = 0;',
+            '\tuint made = 0;',
+            f'\tWait({w.first_delay:.1f});',
+            '\twhile( true ) {',
+            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) == 0 && made < {total} ) {{',
+            f'\t\t\tfor( uint i = 0; i < {per}; i++ ) {{',
+            f'\t\t\t\tCreateFriend(spots[next % spots.length()], {_q("app:/object/" + w.enemy + ".sgo")}, {w.level:.2f}, false);',
+            '\t\t\t\tnext++;',
+            '\t\t\t\tmade++;',
+            '\t\t\t}',
+            f'\t\t\tWait({max(w.interval, 10.0):.1f});',
+            '\t\t}',
+            '\t\tWait(1.0);',
+            '\t}',
         ]
     elif w.enabled and lay.enemy_points:
         spawn = 'CreateEnemyGroup'
@@ -549,9 +555,9 @@ def install(game_root: str, plan: Plan) -> list[str]:
     placed = [(s, npc, p) for s, npc, p in spots_for(plan, layout(rmpa.points(points_file), small_count(plan)))]
     if plan.waves.enabled and plan.waves.enemy == TARGET:
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
-    if plan.waves.enabled and plan.waves.enemy == SWARM:
+    if plan.waves.enabled and plan.waves.enemy in SWARM_KINDS:
         points_file = rmpa.raised(points_file, {p.name for p in lay.enemy_points}, SWARM_RAISE)
-    swarm = plan.waves.enabled and plan.waves.enemy == SWARM
+    swarm = plan.waves.enabled and plan.waves.enemy in SWARM_KINDS
     if swarm and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in SWARM_FILES):
         raise RuntimeError('没有星导者群体合体机的机体（Mods/OBJECT/EDF6VC_SWARM_*.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
     os.makedirs(out, exist_ok=True)

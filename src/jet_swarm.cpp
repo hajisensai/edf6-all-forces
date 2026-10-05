@@ -1,7 +1,8 @@
-// The Primer swarm (docs/swarm-plan.md): an ENEMY made of the plugin's 506 bodies. A mission places its core
-// (EDF6VC_SWARM_CORE, mark 7012: CreateFriend like any placed jet); the first time the core is flown it goes over
-// to the enemy's team and brings its drones (EDF6VC_SWARM_UNIT, mark 7013, spawned on the enemy's team), which
-// fly as one craft with it, a flying wing round the core:
+// The Primer swarm (docs/swarm-plan.md): an ENEMY made of the plugin's 506 bodies, in three sizes (kSizes): a mission
+// places a huge core (EDF6VC_SWARM_HUGE, mark 7014), a core (EDF6VC_SWARM_CORE, 7012) or a lone drone
+// (EDF6VC_SWARM_UNIT, 7013), CreateFriend like any placed jet. The first time a core is flown it goes over to the
+// enemy's team and brings its drones (EDF6VC_SWARM_UNIT, spawned on the enemy's team), which fly as one craft with
+// it, a flying wing round the core (the huge one's twice as wide); a lone drone flies as a scattered one:
 //  - combined: the core circles the player SwarmRange out and SwarmHeight up, now and then passing low over them;
 //    each drone holds its slot (the core's velocity plus a pull onto the slot), its nose (pitch too) on the
 //    player, and fires its guns in bursts when on them. The core's cannons fire whenever it is on them. A swarm is
@@ -70,12 +71,23 @@ constexpr ULONGLONG kBurstOnMs=1600,kBurstMs=4000,kSlotPhaseMs=733;
 // resting on its side has its origin that high: drone 4.7 m, core 20.75 m out, 10.9 m under its origin), stopped
 // (its real speed under kWreckStuck of what it is told for kWreckStuckMs, whichever way it is held), or
 // kWreckMaxMs on.
-constexpr float kWreckSpeed[2]={55.0f,40.0f},kWreckAccel=35.0f,kWreckTrigger[2]={8.0f,16.0f},kWreckGround[2]={6.0f,14.0f};
-constexpr float kWreckStuck=0.3f;
+constexpr float kWreckAccel=35.0f,kWreckStuck=0.3f;
 constexpr ULONGLONG kWreckMaxMs=12000,kWreckStuckMs=400,kWreckSettleMs=800,kLogMs=2000;
 
-bool IsCore(const Jet& j) noexcept { return j.role==Role::swarmCore; }
-int Big(const Jet& j) noexcept { return IsCore(j) ? 1 : 0; }
+// What differs by size: the drone (a core's member or alone), the core (the Imperial drone x 0.5: box 20.75 m out
+// to each side, 10.9 m under its origin) and the huge core (x 1: 41.5 m, 21.75 m). Slots: kSlots times this
+// (the core's box is twice the size). Orbit / height: SwarmRange / SwarmHeight times these. The wreck's top speed,
+// how near its mark and how low over the ground its charge goes off: a drone at its widest half and a margin, a
+// core just under where it rests level (more would burst it in the air); one that came down on its side is
+// caught as stopped.
+struct Size { float slots,spawnClear,orbit,height,wreckSpeed,wreckTrigger,wreckGround; };
+constexpr Size kSizes[3]={
+    {1.0f,0.0f,1.0f,1.0f,55.0f,8.0f,6.0f},      // drone
+    {1.0f,30.0f,1.0f,1.0f,40.0f,16.0f,14.0f},   // core
+    {2.0f,50.0f,1.6f,1.5f,30.0f,30.0f,24.0f},   // huge core
+};
+bool IsCore(const Jet& j) noexcept { return j.role==Role::swarmCore || j.role==Role::swarmHuge; }
+const Size& SizeOf(const Jet& j) noexcept { return kSizes[j.role==Role::swarmHuge ? 2 : j.role==Role::swarmCore ? 1 : 0]; }
 
 // The player's chest, if they were seen lately (`at`); false with no player.
 bool Target(float* at,ULONGLONG ms) noexcept {
@@ -98,12 +110,12 @@ void Heading(const unsigned char* v,float* fwd) noexcept {
     if(!Normalize(fwd)){fwd[0]=0;fwd[2]=1;}
 }
 
-// The world point of slot `s` of a core at `at` heading `fwd`.
-void SlotAt(const float* at,const float* fwd,int s,float* out) noexcept {
+// The world point of slot `s` of a core at `at` heading `fwd`, its slots `scale` times kSlots.
+void SlotAt(const float* at,const float* fwd,int s,float scale,float* out) noexcept {
     const float* o=kSlots[s];
     const float right[3]={fwd[2],0.0f,-fwd[0]};
-    for(int i=0;i<3;++i)out[i]=at[i]+right[i]*o[0]+fwd[i]*o[2];
-    out[1]+=o[1];
+    for(int i=0;i<3;++i)out[i]=at[i]+(right[i]*o[0]+fwd[i]*o[2])*scale;
+    out[1]+=o[1]*scale;
 }
 
 // The core entry of drone `j` (alive, flown, not a wreck), or nullptr.
@@ -126,11 +138,18 @@ void Init(Jet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     const float scale=Cfg().swarmHpScale,max=At<float>(v,kHpMax)*scale;
     if(max>kFloorHp*2.0f){Put<float>(v,kHpMax,max);Put<float>(v,kHp,max);}
     j.mode=Mode::patrol;
+    float at[3];
+    const bool seen=Target(at,ms);
     if(IsCore(j)) {
         JoinFlight(j,NewFlight());
         j.swarm.passAt=ms;
-        float at[3];
-        j.swarm.orbit=Target(at,ms) ? std::atan2(pos[2]-at[2],pos[0]-at[0]) : 0.0f;
+        j.swarm.orbit=seen ? std::atan2(pos[2]-at[2],pos[0]-at[0]) : 0.0f;
+    } else if(!j.swarm.core) {
+        // A lone drone a mission placed: scattered from the start, a ring of its own (by its address).
+        j.swarm.scattered=true;
+        j.swarm.slot=static_cast<int>((reinterpret_cast<std::uintptr_t>(v)>>4)%kMaxUnits);
+        j.swarm.orbit=seen ? std::atan2(pos[2]-at[2],pos[0]-at[0]) : 0.0f;
+        JoinFlight(j,NewFlight());
     }
     Log("SWARM v=%p %s: enemy team %d, hp %.0f, flight %u",v,KindOf(j).name,At<std::int32_t>(v,kTeam),At<float>(v,kHp),j.flight);
     Publish(true);
@@ -145,10 +164,12 @@ int SwarmEntries() noexcept {
 // A core brings its drones: at most kSpawnPerFrame this frame, until SwarmUnits are out (none at all without the
 // drone body; with the table full, again kRetryMs on).
 void Spawn(Jet& c,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
-    const int want=Cfg().swarmUnits<kMaxUnits ? Cfg().swarmUnits : kMaxUnits;
+    const Size& size=SizeOf(c);
+    const int units=c.role==Role::swarmHuge ? Cfg().swarmHugeUnits : Cfg().swarmUnits;
+    const int want=units<kMaxUnits ? units : kMaxUnits;
     if(c.swarm.noUnits || c.swarm.spawned>=want || ms<c.swarm.retryAt)return;
     const float clear=GroundClearance(pos);
-    if(clear!=kNoGround && clear<kSpawnClear && ms-c.bornAt<kSpawnWaitMs)return;
+    if(clear!=kNoGround && clear<size.spawnClear && ms-c.bornAt<kSpawnWaitMs)return;
     if(!SpawnReady() || !Preloaded(Body::swarmUnit)) {
         c.swarm.noUnits=true;
         Log("SWARM core %p: no drones (EDF6VC_SWARM_UNIT.SGO not preloaded: run the installer)",v);
@@ -165,7 +186,7 @@ void Spawn(Jet& c,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept
         }
         const int s=c.swarm.spawned++;
         float at[3];
-        SlotAt(pos,fwd,s,at);
+        SlotAt(pos,fwd,s,size.slots,at);
         OverGround(at,kUnitClear);
         alignas(16) float m[16];
         Facing(fwd,at,m);
@@ -230,7 +251,7 @@ void Guns(Jet& j,unsigned char* v,const float* pos,const float* aim,bool hasAim,
 
 // The core's station: round the player (or where it was placed), now and then a pass over them.
 void CoreFly(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* aim,bool hasAim,float dt,ULONGLONG ms) noexcept {
-    const float r=Cfg().swarmRange,h=Cfg().swarmHeight;
+    const float r=Cfg().swarmRange*SizeOf(j).orbit,h=Cfg().swarmHeight*SizeOf(j).height;
     const float* centre=hasAim ? player.pos : j.anchor;
     float goal[3],speed=kOrbitSpeed;
     if(j.swarm.pass) {
@@ -268,7 +289,7 @@ void Hold(Jet& j,const Jet& core,const float* pos) noexcept {
     const float* cp=reinterpret_cast<const float*>(cv+kPosition);
     float fwd[3],slot[3];
     Heading(cv,fwd);
-    SlotAt(cp,fwd,j.swarm.slot,slot);
+    SlotAt(cp,fwd,j.swarm.slot,SizeOf(core).slots,slot);
     float pull[3]={(slot[0]-pos[0])*kFormGain,(slot[1]-pos[1])*kFormGain,(slot[2]-pos[2])*kFormGain};
     const float p=Len(pull);
     if(p>kFormCatch)for(int i=0;i<3;++i)pull[i]*=kFormCatch/p;
@@ -312,7 +333,7 @@ void Wreck(Jet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
 
 // A wreck's frame: straight at its mark, tumbling; its charge at the mark, the ground, a wall or the time's end.
 void WreckFly(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
-    const int b=Big(j);
+    const Size& size=SizeOf(j);
     const bool walled=Sense(j,pos,ms);
     float to[3]={j.swarm.aimAt[0]-pos[0],j.swarm.aimAt[1]-pos[1],j.swarm.aimAt[2]-pos[2]};
     const float d=Len(to),clear=GroundClearance(pos);
@@ -321,7 +342,7 @@ void WreckFly(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     if(!slow)j.swarm.slowSince=0;
     else if(!j.swarm.slowSince)j.swarm.slowSince=ms;
     const bool stuck=slow && ms-j.swarm.slowSince>=kWreckStuckMs;
-    const char* why=d<kWreckTrigger[b] ? "on its mark" : clear!=kNoGround && clear<kWreckGround[b] ? "the ground" :
+    const char* why=d<size.wreckTrigger ? "on its mark" : clear!=kNoGround && clear<size.wreckGround ? "the ground" :
                     walled ? "blocked" : stuck ? "stopped" : ms-j.swarm.wreckAt>kWreckMaxMs ? "time" : nullptr;
     if(why) {
         Log("SWARM v=%p %s wreck bursts (%s), %.0f m from its mark",v,KindOf(j).name,why,d);
@@ -330,7 +351,7 @@ void WreckFly(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
         return;
     }
     Normalize(to);
-    const float s=Clamp(Len(j.m.vel)+kWreckAccel*dt,0.0f,kWreckSpeed[b]);
+    const float s=Clamp(Len(j.m.vel)+kWreckAccel*dt,0.0f,size.wreckSpeed);
     for(int i=0;i<3;++i){j.m.vel[i]=to[i]*s;j.m.omega[i]=j.swarm.spin[i];}
     v[kFireGun]=0;v[kFireMissile]=0;
 }

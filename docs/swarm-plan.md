@@ -1,5 +1,10 @@
 # 星导者群体合体机（敌方）设计与实现计划
 
+三种（2026-10-05 追加）：**巨大**（`EDF6VC_SWARM_HUGE.SGO`，标记 7014，帝国无人机原尺寸约 83 米，耐久 9000，
+16 架无人机，编队槽位 ×2，绕圈半径 ×1.6、高度 ×1.5，残骸炸药 2500 / 45 米）、**大**（下文的核心）、
+**个体**（任务直接放置 `EDF6VC_SWARM_UNIT.SGO`：没有核心，一出场就按「散开」飞，环按机体地址错开）。
+三者的差别只在 `src/jet_swarm.cpp` 的 `kSizes` 一张表里。
+
 EDF.dll TimeDateStamp 0x678CCB46。新增一种**敌方**空中单位：一架「核心」带着十几架小型无人机组成一个整体飞行；
 核心被打掉后无人机散开各自追打玩家；任何一架被打爆后，残骸笔直冲向玩家被打爆那一刻的位置，砸地爆炸。
 
@@ -16,6 +21,8 @@ EDF.dll TimeDateStamp 0x678CCB46。新增一种**敌方**空中单位：一架�
 | 文件 | 来源 | 说明 |
 |---|---|---|
 | `EDF6VC_SWARM_CORE.MRAB` | `E515_IMPERIALUFO.MRAB` 的 `e515_imperialufo.mdb` ×0.5 | 核心外形：帝国无人机（约 42 m 宽，含两侧炮臂） |
+| `EDF6VC_SWARM_CORE_XL.MRAB` | 同上 ×1.0 | 巨大核心外形（83 m；碰撞盒半宽 41.5、原点下 21.75 m） |
+| `EDF6VC_SWARM_HUGE.SGO` | V506 机体，标记 7014 | 巨大核心；武器同核心，炸药 `EDF6VC_SWARM_CHARGE_XL`（2500 / 45 m） |
 | `EDF6VC_SWARM_UNIT.MRAB` | `E507_GOLDUFO.MRAB` 的 `e507_goldufo.mdb` ×0.5 | 成员外形：金色小型无人机（约 9.4 m） |
 | `EDF6VC_SWARM_CORE.SGO` | V506 机体，标记 7012 | 武器：两门重型光弹炮 + 大炸药 |
 | `EDF6VC_SWARM_UNIT.SGO` | V506 机体，标记 7013 | 武器：两门紫色光弹机炮 + 小炸药 |

@@ -446,7 +446,8 @@ bool IsJet(const void* vehicle) noexcept {
 
 bool IsSwarmVehicle(const void* vehicle) noexcept {
     Role role=Role::fighter;
-    return IsJetVehicle(static_cast<const unsigned char*>(vehicle),&role,nullptr) && (role==Role::swarmCore || role==Role::swarmUnit);
+    return IsJetVehicle(static_cast<const unsigned char*>(vehicle),&role,nullptr) &&
+           (role==Role::swarmCore || role==Role::swarmUnit || role==Role::swarmHuge);
 }
 
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept {

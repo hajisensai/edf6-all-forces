@@ -216,8 +216,9 @@ void PreloadJets() noexcept {
         char line[512];
         int at=0;
         for(int k=0;k<kBodyCount;++k) {
-            // The swarm's core only comes from a mission, which preloads it itself (docs/swarm-plan.md §3).
-            preloaded[k]=!broken[k] && kBodies[k].body!=Body::swarmCore && ModFileThere(kBodies[k].file);
+            // The swarm's cores only come from a mission, which preloads them itself (docs/swarm-plan.md §3).
+            const bool missionOnly=kBodies[k].body==Body::swarmCore || kBodies[k].body==Body::swarmHuge;
+            preloaded[k]=!broken[k] && !missionOnly && ModFileThere(kBodies[k].file);
             if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kBodies[k].sgo,2,-1);
             const int n=sprintf_s(line+at,sizeof(line)-at,"%s%s=%d",k ? " " : "",kBodies[k].name,preloaded[k]);
             if(n>0)at+=n;
