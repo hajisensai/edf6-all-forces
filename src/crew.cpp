@@ -22,6 +22,7 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
 #include "body506.h"
+#include "edf/host.h"
 #include "heli.h"
 #include "layout.h"
 #include "memory.h"
@@ -346,7 +347,36 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
 }
 
 // The on-foot ride prompt, once per object per frame for every human on foot.
+// TEMPORARY guard (2026-10-05, until the root cause is found): the board prompt's walk of a team's set (EDF+0x5E11D0)
+// has twice handed the stock visitor a freed object, whose dynamic_cast to VehicleBase (0x5725DD) threw and ended the
+// game (dumps EDF6.exe.76548 / .66844). The first was a jet the plugin deleted in the same frame as its kick (fixed:
+// JetReap waits); the second's source is not known yet. An object whose vtable is not in EDF.dll, or that is marked
+// deleted (+0x18 bit 4), is logged (PROMPT stale: address, vtable, flags, team) and not handed on: the log tells which
+// object was left in the set, so the leak can be fixed where it is made. Remove once that is found and fixed.
+constexpr std::size_t kObjFlags=0x18;
+constexpr unsigned char kObjDeleted=4;
+bool StaleObject(const void* object) noexcept {
+    const auto o=static_cast<const unsigned char*>(object);
+    if(!Readable(o,kTeam+4))return true;
+    const auto vt=At<const unsigned char*>(o,0);
+    return vt<image || vt>=image+edf::kImageSize || (o[kObjFlags]&kObjDeleted);
+}
+
 void __fastcall PromptHook(void* functor,void* object) {
+    __try {
+        if(StaleObject(object)) {
+            static ULONGLONG loggedAt=0;
+            const ULONGLONG ms=GameMs();
+            if(ms-loggedAt>1000) {
+                loggedAt=ms;
+                const auto o=static_cast<const unsigned char*>(object);
+                const bool readable=Readable(o,kTeam+4);
+                Log("PROMPT stale object %p in a team's set: vtable %p flags %02x team %d (not handed to the stock prompt)",object,
+                    readable ? At<const void*>(o,0) : nullptr,readable ? o[kObjFlags] : 0xFF,readable ? At<std::int32_t>(o,kTeam) : -99);
+            }
+            return;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){return;}
     originalPrompt(functor,object);
     if(!Cfg().enabled)return;
     __try {

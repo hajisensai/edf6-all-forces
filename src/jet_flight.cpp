@@ -61,7 +61,9 @@ constexpr float kReact=1.0f;
 // pitch the nose up, opposite they roll: kElevonMax at the full pitch rate (maxG) or roll rate, moved at
 // most kElevonRate. The engine makes world = local x parent world each frame.
 constexpr std::size_t kModelInst=0xEE0,kInstBones=0x10,kInstBoneCount=0x20,kBoneStride=0x110,kBoneAuto=0x8,kBoneLocal=0x70;
-constexpr float kElevonMax=0.35f,kElevonRate=2.0f;
+// (2026-10-05, the user: the control surfaces should visibly move: kElevonGain times the turn's share of its most, up to
+// kElevonMax ~29 deg, kElevonRate fast: an ordinary turn shows them deflected, not a degree or two.)
+constexpr float kElevonMax=0.5f,kElevonRate=4.0f,kElevonGain=3.0f;
 const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 // The carrier's thrusters (docs/jet-model-re.md §6): the V508 transport's four nacelles, bones boosterF_l/r and
 // boosterB_l/r under body, each bound level (nose +z) at its mount, hinged along its local X like the elevons.
@@ -293,7 +295,7 @@ void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
     Cross(j.m.omega,f,c);const float pitch=Dot(c,u);           // nose toward the body's up
     Cross(j.m.omega,r,c);const float roll=-Dot(c,u);           // right wing going down
     const float s=Len(j.m.vel),pitchMax=k.maxG*kG/(s>k.minSpeed ? s : k.minSpeed);
-    const float p=Clamp(pitch/pitchMax,-1.0f,1.0f),q=Clamp(roll/k.roll,-1.0f,1.0f);
+    const float p=Clamp(kElevonGain*pitch/pitchMax,-1.0f,1.0f),q=Clamp(kElevonGain*roll/k.roll,-1.0f,1.0f);
     const float want[2]={Clamp((p-q)*kElevonMax,-kElevonMax,kElevonMax),Clamp((p+q)*kElevonMax,-kElevonMax,kElevonMax)};
     PoseSurfaces(j,want,kElevonRate,dt,"elevons");
 }

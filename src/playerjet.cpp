@@ -156,7 +156,10 @@ constexpr float kBlockedPart=0.5f,kBlockedMin=40.0f,kRollBlockedMin=20.0f;
 constexpr ULONGLONG kBlockedMs=150;
 constexpr ULONGLONG kLogMs=2000;
 // Elevons (jet.cpp Elevons): bones elevon_L/R of the jet model, hinged along their local X.
-constexpr float kElevonMax=0.35f,kElevonRate=2.0f;
+// The elevons follow the pilot (2026-10-05, the user: the control surfaces should visibly move with the controls): the
+// keys' or a pad's pitch and roll stick as they are, else (the mouse's aim) kElevonGain times the turn's share of its
+// most; up to kElevonMax (~29 deg), kElevonRate rad/s.
+constexpr float kElevonMax=0.5f,kElevonRate=4.0f,kElevonGain=3.0f;
 const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 
 enum class Phase { parked, rolling, air };
@@ -270,7 +273,7 @@ float Clear(const float* p,bool* water) noexcept {
 }
 
 // The elevons after the body's turn (jet.cpp Elevons): both up pitch the nose up, opposite they roll.
-void Elevons(PJet& j,unsigned char* v,float dt) noexcept {
+void Elevons(PJet& j,unsigned char* v,float stickPitch,float stickRoll,float dt) noexcept {
     const unsigned char* inst=v+kModelInst506;
     const auto bones=At<const unsigned char*>(inst,kInstBones506);
     if(!bones)return;
@@ -289,8 +292,10 @@ void Elevons(PJet& j,unsigned char* v,float dt) noexcept {
     float c[3];
     Cross(j.omega,f,c);const float pitch=Dot(c,u);
     Cross(j.omega,r,c);const float roll=-Dot(c,u);
-    const float s=Len(j.vel),pitchMax=j.kind->maxG*kG/(s>j.kind->minAir ? s : j.kind->minAir);
-    const float p=Clamp(pitch/pitchMax,-1.0f,1.0f),q=Clamp(roll/j.kind->roll,-1.0f,1.0f);
+    const float speed=Len(j.vel),pitchMax=j.kind->maxG*kG/(speed>j.kind->minAir ? speed : j.kind->minAir);
+    float p=Clamp(kElevonGain*pitch/pitchMax,-1.0f,1.0f),q=Clamp(kElevonGain*roll/j.kind->roll,-1.0f,1.0f);
+    if(std::fabs(stickPitch)>=kRollDead)p=Clamp(stickPitch,-1.0f,1.0f);   // the stick held: the surfaces where it puts them
+    if(std::fabs(stickRoll)>=kRollDead)q=Clamp(stickRoll,-1.0f,1.0f);
     const float want[2]={Clamp((p-q)*kElevonMax,-kElevonMax,kElevonMax),Clamp((p+q)*kElevonMax,-kElevonMax,kElevonMax)};
     for(int i=0;i<2;++i) {
         j.elevonAt[i]+=Clamp(want[i]-j.elevonAt[i],-kElevonRate*dt,kElevonRate*dt);
@@ -1020,7 +1025,7 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     if(dist<kCatchHoming)for(int i=0;i<3;++i)j.vel[i]=to[i]*catchFlight.speed;   // the last stretch: straight in
     j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
-    Elevons(j,v,dt);
+    Elevons(j,v,s.pitch,s.roll,dt);
     JetFlames(v,j.throttle,j.throttle>0.95f,ms);
 }
 
@@ -1061,7 +1066,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     }
     j.active=j.phase!=Phase::parked && !v[kDead];
     std::memcpy(j.sent,j.vel,12);
-    Elevons(j,v,dt);
+    Elevons(j,v,s.pitch,s.roll,dt);
     Report(j,v,s,pos,clear,water,ms);
     // The exhaust (booster.cpp JetFlames) with the throttle; the lever full forward is the afterburner.
     JetFlames(v,j.throttle,j.throttle>0.95f,ms);
