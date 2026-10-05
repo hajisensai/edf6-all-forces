@@ -24,6 +24,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include "turret.h"
+#include "edf/weapon.h"
 
 namespace autoturret {
 namespace {
@@ -33,14 +34,8 @@ constexpr unsigned kPullTrigger=0x62C000;   // (trigger): fire this frame if the
 // Triggers: vehicle+0x638 array, +0x648 count, stride 0x48; +8 the weapon's weak_ptr control block,
 // +0x10 the weapon. Trigger i belongs to seat i (the Titan's 3..5 are the seats' secondary weapons).
 constexpr std::size_t kTriggers=0x638,kTriggerCount=0x648,kTriggerStride=0x48,kTriggerCtrl=0x8,kTriggerWeapon=0x10;
-// Weapon muzzles: array at +0x1D0, count at +0x1E0, stride 0xF0. Muzzle +0 is its bone (world rows
-// right/up/forward/position at +0xB0..+0xEF, updated every frame), +0x10 its local 4x4 matrix,
-// +0xE0 how fire orients it (0x696B70): mode 0 takes the weapon's own world rows (weapon+0x150,
-// copied from its aim bone each frame by 0x633DD0), mode 1 the local matrix times the bone.
-// The round leaves along row 2 (+0x70 of the built matrix, 0x69168B).
-constexpr std::size_t kMuzzles=0x1D0,kMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleLocal=0x10,kBoneRows=0xB0;
-constexpr std::size_t kMuzzleMode=0xE0,kWeaponMatrix=0x150;
-constexpr std::int32_t kModeWeaponRows=0;
+// Weapon muzzles (MeanMuzzle, the weapon matrix): common/edf/weapon.h.
+using edf::kWeaponMatrix;
 constexpr std::uint64_t kMaxTriggers=16;
 using edf::kMaxSeats;
 constexpr float kMuzzleReach=30.0f;         // a muzzle farther than this from the vehicle is garbage
@@ -139,36 +134,9 @@ Crew SeatCrew(const unsigned char* seat) noexcept {
     return rider==edf::Rider::player ? Crew::player : Crew::ai;
 }
 
-// One muzzle's world position and direction as 0x6969A0 builds them for a shot: the position is
-// row 3 of local x bone, the direction row 2 of the matrix its mode picks.
-bool MuzzleFrame(const unsigned char* weapon,const unsigned char* muzzle,float* pos,float* dir) noexcept {
-    const auto bone=At<const unsigned char*>(muzzle,0);
-    if(!Readable(bone,kBoneRows+0x40))return false;
-    float b[4][4],l[4][4];
-    std::memcpy(b,bone+kBoneRows,sizeof(b));std::memcpy(l,muzzle+kMuzzleLocal,sizeof(l));
-    for(int c=0;c<3;++c) {
-        dir[c]=l[2][0]*b[0][c]+l[2][1]*b[1][c]+l[2][2]*b[2][c];
-        pos[c]=l[3][0]*b[0][c]+l[3][1]*b[1][c]+l[3][2]*b[2][c]+l[3][3]*b[3][c];
-    }
-    if(At<std::int32_t>(muzzle,kMuzzleMode)==kModeWeaponRows)std::memcpy(dir,weapon+kWeaponMatrix+0x20,12);
-    const float length=std::sqrt(Dot(dir,dir));
-    return AllFinite(pos,3) && std::isfinite(length) && length>0.5f && length<2.0f;
-}
-
 // The barrel: the mean of the gun's muzzles (the Titan's side cannons have two).
 bool Barrel(const unsigned char* vehicle,const unsigned char* weapon,float* pos,float* dir) noexcept {
-    const auto muzzles=At<const unsigned char*>(weapon,kMuzzles);
-    const auto count=At<std::uint64_t>(weapon,kMuzzleCount);
-    if(count==0 || count>8 || !Readable(muzzles,count*kMuzzleStride))return false;
-    std::memset(pos,0,12);std::memset(dir,0,12);
-    for(std::uint64_t i=0;i<count;++i) {
-        float p[3],f[3];
-        if(!MuzzleFrame(weapon,muzzles+i*kMuzzleStride,p,f))return false;
-        for(int c=0;c<3;++c){pos[c]+=p[c];dir[c]+=f[c];}
-    }
-    const float length=std::sqrt(Dot(dir,dir));
-    if(!(length>0.1f))return false;
-    for(int c=0;c<3;++c){pos[c]/=static_cast<float>(count);dir[c]/=length;}
+    if(!edf::MeanMuzzle(weapon,8,pos,dir))return false;
     const float* m=Frame(vehicle);
     const float d[3]={pos[0]-m[12],pos[1]-m[13],pos[2]-m[14]};
     return Dot(d,d)<kMuzzleReach*kMuzzleReach;

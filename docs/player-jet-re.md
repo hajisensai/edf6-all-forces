@@ -42,7 +42,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 - 接地（离地 <3 m 且在下沉，或沿速度方向 3 帧内会碰到）：下沉 ≤10 m/s、机身 up.y ≥0.77、机头俯角不超过约 15 度、速度 ≤ 无损接地速度 → 降落转滑跑；否则坠毁扣血，并把下沉截到地面上方。
 - 离地高度：取地面（地图射线）和水面（`SeaAt`，游戏自己的水域）中较高的一个。地图射线穿过水面打到海床（docs/water-re.md），以前把海床当地面。
 - 撞到东西（建筑、敌人、地图墙）：150 ms 内实际位移不到下达速度的一半（空中 >40 m/s，滑跑 >20 m/s）→ 按损失速度坠毁扣血；空中水平速度反向、以最低空速弹开，滑跑直接停下。
-- 撞击伤害（2026-10-04 用户要求）：上面这种撞到东西的坠毁（不含撞地、落水），在机头位置（沿下达速度方向半个撞击半径）调 `ImpactDamage`（jet.cpp）：伤害 = 本机这次扣掉的 HP × `PlayerJetRamDamage`（ini，默认 1.0；接入 Config 前代码里是常量 `kRamDamage`），半径 = 机型的 `ram`，只伤敌方阵营、记在本机名下。与坠毁同一个 1 秒节流。
+- 撞击伤害（2026-10-04 用户要求；2026-10-05 改为按质量和速度）：上面这种撞到东西的坠毁（不含撞地、落水），在机头位置（沿下达速度方向半个撞击半径）调 `ImpactDamage`（jet_bay.cpp）：伤害 = ½·m·v² ÷ `kRamJoulesPerDamage`（2.87e5 J，按 Mk 82 的 1500 伤害 ≈ 430 MJ 装药定）× 强度倍率 × `PlayerJetRamDamage`（`RamDamage`）。m = `JetMassOf(BodyMark(v))` 的空重 × `Burden.mass`（挂载）；v = 下达速度 − 实测沿该方向的速度（被挡掉的部分 = 沿接触法向的接近速度，对方迎面飞来时实测为负，v 更大）；强度倍率 = 最大 HP ÷ 机体 SGO 的耐久（`kJetMasses` 第三列，`tools/gen_stores.py` 从 `JETS` 生成），与游戏放大武器伤害的倍数一致（**L**：假定耐久和武器伤害按同一倍数放大，原版 tier 两个乘数相同时成立）。半径 = 机型的 `ram`，只伤敌方阵营、记在本机名下。与坠毁同一个 1 秒节流。每种插件飞机都有质量（selftest `jet_masses_cover_every_jet`），没有质量的机种不造成撞击伤害（日志说明）。
 - 天花板（`*(image+0x20B2998)+0x3C`）下 12 m 不再上升。
 - ±2.4 km 世界边界：越过边界且朝外飞时，航向沿墙转向（保留沿墙方向的分量；正对墙时转向右侧），并带 0.3 的向内分量，速度大小不变（`WallTurn`）。以前只把向外分量清零，正对墙垂直撞上时水平速度为 0，下一帧又被清零，就悬停在墙上。
 - 落水：506 收到水消息（0x10000025）会当直升机落水、每帧给自己发 2 倍 HP 的伤害；body506.cpp 的 slot 9 钩子把它拦下，交给插件自己的模型：空中触水一律算坠毁（不能水上降落）；浮在水面（滑跑/停着，或空机泡在水里）每秒算一次坠毁（每次至少 20% 最大 HP），约 5 秒解体。
@@ -153,3 +153,147 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
 - 伞衣确实显示、位置正确，玩家和子弹都穿得过去，敌人不打它（M：没有刚体与中立阵营都是静态结论）。
 - 插件写矩阵与对象更新的先后：若插件在对象更新之后写，渲染矩阵晚一帧（刚弹射时水平速度大，伞衣会落后约 1 m）。
 - 远处的剔除包围盒取 bone 的 half/centre（已按模型重算）。
+
+## 9. 战斗机 HUD 的数据（2026-10-05）
+
+每帧 `Fly` 在 `Stores` 之后调 `Sight`（机头、航迹方向、机炮弹道读自机炮武器、弹着圈、按锁定点差分出目标速度后的提前量）和
+`Threats`（`MissilesHomingAt` 来袭导弹的位置、`jet::LockersOf` 锁定本机的敌机位置），存进 `PJet::sym`，`PlayerJetHud` 随读数发布；
+绘制、原版红线的隐藏和验证见 `docs/hud-re.md` §5、`docs/aim-line-re.md` 第 5 条。全部按 `PJet`（玩家正在驾驶的那架）取数，
+不按机型标记，玩家以后能开的其它插件飞机同样适用；没有机炮的飞机不画瞄准具，悬停（速度 < 5 m/s）时不画速度矢量。
+
+## 起落架（2026-10-05）
+
+模型、骨骼、收放角度、离线自检数值和需要实机确认的项目见 `docs/jet-model-re.md`「起落架」。飞行上的影响都在 `src/playerjet.cpp` 的几处调用里：
+- `Air`：阻力的寄生项加上 `GearDragShare`（放下时 1.5 倍干净构型）。
+- `Touch`：着陆条件都满足但 `GearDown` 为假 → `BellyLanding`（`Crash` 的伤害，转为滑行）。
+- `Ground`：`GearDown` 为假时（机腹着地）只减速（10 m/s²），不转向、不起飞。
+- `PilotGear`：读键（`PlayerJetGearKey`）/ 手柄位（`PlayerJetGearButton`，座位按键位 `seat+0x2E8`，docs/stores-re.md §4），交给 `gear.cpp PlayerGear`；地面上收起被拒绝。
+
+## 10. 插件的其它飞机也能开（2026-10-05，`src/playerjet_kinds.h`、`src/playerjet_board.inc`）
+
+用户：「所有飞机我们都能开对吧……逻辑能复用的复用，不能复用的就写。我希望能开是真正的每个都很好用」。
+
+### 10.1 走同一条路
+
+- 可登机的机种表是 `playerjet_kinds.h` 的 `kBoardable`（机体 `jet::Body` → 飞法 wing / rotor → 自带武器 → 性能 `Perf`）。性能由 NPC 自己飞的那一行（`jet_internal.h kKinds`，轰炸机用原版轰炸机 180 m/s 的一行 `kStockBomber`）按固定规则换算，规则在文件头；同规则算出的 NPC 战斗机 / 攻击机与手调的 `kKinds[0] / [1]` 每项相差 ≤ 10%，`playerjet_kinds.inc` 里 `static_assert` 检查；`tools/pjet_kinds.cpp`（`cmake --build build --target pjet_kinds`）打印整张表并检查可飞性。
+- 识别：`BodyOf == PluginBody::jet` 时 `KindOf` 走 `BoardKindOf`（标记 → `kBodies` 行；7001 被攻击机和两种接管轰炸机共用，按模型骨骼 `BomberBody` 区分）。敌方机体（`BodyRow::hostile`）没有行。
+- 玩家坐上后它和玩家战斗机是同一条路径：`PJet` 记录、`Fly`、`Air` / `Ground`、挂载、座舱读数（`PlayerJetHud`）、弹射与接机。`PJet::board` 非空就是这种飞机，只多出三处分支：旋翼机的 `HoverStep`、特殊挂载（`SpecialStore` / `FireSpecial` / `SpecialFrame`）、下机（`Left`）。其它人做的座舱 HUD、起落架都挂在 `PJet` 上，对它们同样生效。
+- 物理步：`body506.cpp` 对 `PluginBody::jet` 先问 `PlayerJetBodyStep`（玩家开着、或它在为玩家降落时写速度），否则照旧 `JetBodyStep`；消息（落水）同理先给 `PlayerJetMessage`，它只接玩家开着的。
+- 持有（`Held` / `PlayerJetHolds`）：玩家在座位上、它在下来接玩家（hail）、在接弹射的玩家、或停在玩家下机的地方。持有期间 `JetFrame` 一开头就返回（燃料、撤离、呼叫的航线都不动），`crew.cpp Crew` 不给它派 NPC。交回 NPC 时 `jet::ResumeNpc` 把这段时间加到 `bornAt` 上（燃料和出击计时停住）、清掉运动状态、模式回到巡逻（贴地则起飞；撤离、投弹、回母舰保持）。
+
+### 10.2 上机
+
+- `crew.cpp FindSeatHook / PromptHook` 原来对一切 `IsJet` 直接拒绝；现在 `PlayerJetBoardable` 为真时照常走「挤掉 NPC」：我方阵营、没在被删除 / 自爆、离地 ≤ 12 m（`GroundClearance`）、速度 ≤ 8 m/s（玩家记录的实测速度，否则 jet.cpp 的 `m.real`）。座位检查按「无主载具」队伍 5 做（`OwnTeam`），因为 NPC 飞行员把它放在友军队伍 2，原版检查不让玩家进 2。喷气机只有一个座位，NPC 被 `kSeatKick` 踢掉（死亡）。
+- 呼叫（`HailTick`，ini `PlayerJetHailKey`）：步行时按键，最近的我方插件飞机（NPC 在飞、未撤离）下来。旋翼机：选身边一处平地（`PickSpot`），用 NPC 的 `Hover` 平飞过去（离得远时保持至少「落点 + 80 m」高度），近了垂直落下，停住后等。固定翼：`PlanStrip` 每帧评估 12 个候选（6 个环 × 12 个方位 × 12 个航向，按环由近到远，一环内有可用的就停），条件见代码常量；然后 `Approach`：先飞到 1500 m 外的进近入口并对准跑道（目标点在入口后方，距离一半处，把航线拉到跑道延长线上），进入 400 m 且航迹与跑道夹角 < 32° 转入五边，沿 4° 下滑道以「起飞速度 + 10」飞（`SteerAt`：自动驾驶的瞄准转向 + 油门/减速板控速），由 `Air` 的接地判定落地（下沉 ≤ 10 m/s、机翼水平、速度 ≤ landMax）；过头 100 m、偏离 150 m、高于下滑道 80 m 或低 40 m 都复飞，三次失败作罢。`Rollout` 沿机头滑跑、按 `sqrt(2·8·剩余距离)` 收油门刹到停止点。停下后等 90 s（NPC 还在座位上），超时交回。
+
+### 10.3 武器
+
+- 机炮和挂载同玩家战斗机。挂载循环里多一项「特殊挂载」（`Store::weapon` 为空，`stores.cpp` 的锁定 / 扳机函数原本就对空武器什么都不做）：
+  - **BOMB BAY**：喷气机还带着接管来的弹仓（`BayState::ifc` 且没开过）。副射击 → `jet::PlayerOpenBay`：`bombAt` = 当前 CCIP 落点，`bombDir` / `bombSpeed` = 此刻的水平速度，`bayFrom = -reach`，所以第一颗炸弹瞄 CCIP，之后每帧 `BayFrame` 按原版轰炸机每帧前移一个速度（`docs/airstrike-re.md`）。
+  - **SHELLS**（炮舰机）：`jet::PlayerShell`，同 `GunshipFire` 的炮弹、间隔、射程，目标是屏幕中心视线与地面的交点（`CameraRay`：由上一帧 view-projection 求逆，眼睛 = (0,0,1,0)·VP⁻¹，中心点 = (0,0,0.5,1)·VP⁻¹）；按住目标键绕点盘旋（`Orbit`：`steered` 让 `Air` 按瞄准点转向，鼠标只转镜头）。
+  - **DRONES**（三种航母）：`jet::PlayerLaunchDrone` 复用 NPC 的发射（`LaunchOne`，从 `LaunchDrones` 抽出来，行为不变），同时给航母记 `CarrierState::order`：它放出的无人机以这一点（抬高 40 m）为锚点、400 m 内找目标（`jet.cpp JetFrame`）；目标键 `RecallDrones`。
+  - **CHARGE**（自爆 / 人偶无人机）：副射击后 100 ms 内每帧置 0x2021（2 号挂架，炸药，同 `jet_carrier.cpp Blast`），300 ms 后 `Kill`（原版死亡消息，踢出座位，玩家按 §7 弹射）。
+
+### 10.4 下机（`Left`）
+
+- 地面上（`Phase` 不是 air）：`keep`，原地等玩家。
+- 空中且弹射、固定翼、`PlayerJetCatch=1`：这架飞机本身就是接机的那架（`catchFlight` / `bail.caught` 指向它，§7 的 `AutoFly` / `Catch` 原样用）；没接上（玩家落地、死亡，或 45 s 放弃）就交回 NPC。
+- 其它空中情况：`HandBack`：座位空则 `RideAi(false)` 坐上 NPC，`ResumeNpc`。
+
+### 10.5 验证状态
+
+- 静态：`build.cmd` 无警告（/W4 /WX）；`static_assert`（行一致性、派生与玩家战斗机/攻击机的偏差）；`build\pjet_kinds.exe` 13 行全部通过；`tools/selftest.py` 新增 `every_npc_aircraft_boardable`（每个我方喷气机体都有行、敌方没有、ini 键被读且有文档）。
+- 未实机验证（需要在游戏里逐项看）：
+  1. 每种飞机的上车点（`vehicle_riding_position`）是否在原版上车距离内够得着：航母（59×77 m 机体，放大 1.6 倍）、轰炸机（BOMBER401 原尺寸）、无人机（5.7 m）。
+  2. 挤掉 NPC 后座位队伍、`RideAi(false)` 交回后 NPC 能否正常接着飞（日志 `JET v=... back to its NPC pilot`、之后的 `JET` 模式行）。
+  3. 呼叫：旋翼机落点、下降与停放；固定翼找跑道的耗时与成功率（城市、山地各一张图）、进近是否稳定接地（`PJET hail ... on the final` → `landed` → `down ... waiting`）、滑跑能否停在停止点附近；`MapRay` 每帧约 240 条射线的开销（`PERF` 行）。
+  4. 每种固定翼的手感（尤其炮舰机 2 g、轰炸机 3 g）；旋翼机键鼠/手柄操作、航母推进舱是否随推力转、落地判定。
+  5. 特殊挂载：弹仓第一颗是否落在 CCIP；炮弹落点与屏幕中心十字是否一致（`CameraRay` 的反投影约定：行向量、D3D 深度）；盘旋方向（目标在左）与半径；无人机按指定点找目标、召回、在玩家开着的航母上停靠；自爆后玩家被抛出、伤害不伤友军。
+  6. 交回 NPC 后：燃料计时确实停过（`back to its NPC pilot ... s of its fuel flown`）、轰炸机的投弹航线、无人机回到母舰。
+
+## 11. 炮舰机的机组：驾驶座 + 侧炮手座（2026-10-05，`src/playerjet_crew.inc`）
+
+用户：「炮舰机应该是多人开的」，先做单机多座位（联机同步另行研究）：AC-130 那样一个驾驶、一个侧炮手，玩家可以坐任一个，另一个由 NPC 担任。
+
+### 11.1 座位从哪来（静态逆向）
+
+| 事实 | 来源 | 置信度 |
+|---|---|---|
+| V506_HELI.SGO 的 `vehicle_riding_position` **只有一项**（驾驶座：上车口 `搭乗口１`、座位 `操縦席１`、姿势 `506_HELI_DRIVER`、职业掩码 9、数字 10.0、按键行 5）。「直升机副座 / 炮艇模式」说的是 VEHICLE410_HELI 的两个门炮手座（`410_HELI_GUNNER_L/R`，掩码 15，数字 0，按键行 6），506 机体本身没有第二个座位 | 读 Root.cpk | H |
+| 座位数 = `vehicle_riding_position` 的项数：车辆初始化 0x629B36 起逐项调 0x62B430(veh, 项)，建完写 `veh+0x618`（座位数）、`+0x620`、`+0x624`（占用掩码 = (1<<n)-1），并把各座位上车口离原点的最大距离写进 `veh+0xE00` | 反汇编 | H |
+| 一项的 7 个元素（0x62B430 往临时座位结构写，结构基址 = 座位）：[0] 上车口定位点 → 座位 `+0x1E0`（CanRideSeat 0x6346D0 的距离判定用它和定位点自身 `+0x10` 的半径）；[1] 座位定位点 → `+0x1F0`；[2][0] 第三个定位点 → `+0x208`、[2][1..2] → `+0x240/+0x244`；[3] 姿势名（0x7A3500 查表）→ `+0x18`；[4] 职业掩码 → `+0x30`；[5] 浮点 → `+0x258`（含义未查）；[6] 整数 → `+0x2B4` | 反汇编 | H（偏移）/ L（+0x258 的含义） |
+| 定位点按名字在 `veh+0xE40` 的表里找（0x6BADD0）。喷气机的 MAB 只有 V506 那一组定位点（父骨骼已改成 `mdl`，`vcobjects.JET_MAB_ROOT`），找不到的名字在初始化里读空指针（EDF+0x62B619，见 jet_sgo 的注释）。所以炮手座**共用驾驶座的三个定位点**（同一个舱门上，人都看不见机舱里面） | 反汇编 + 已有崩溃记录 | H |
+| `seat+0x2B4` 是按键配置行：HumanBase 0x57339A 以行偏移 `0xA8 × (human+0xD40 × 16 + seat+0x2B4)` 读键位表（该函数里的 rbx）的 +0x940 / +0x958（键盘的上升 / 主射击，写 `seat+0x2E0/+0x2E4`）和其后各按键位。5 = 直升机驾驶员，6 = 门炮手 / 乘员（V507 救援车的座位、Proteus 炮手也是 6）；0x56D7D8 另把 3 当特例 | 反汇编 | H（读法）/ L（行 6 的主射击键在键鼠上是哪个键） |
+| 506 的第 55 / 57 槽只读座位 0 的输入，只开 `veh+0x638` 的持有者 0–2（heli-input-re.md §2b）：炮手座的扳机原版不接任何武器；炮手座上也不放武器（`vehicle_weapon_setting` 的座位号全是 0 或 -1）。炮手的炮是插件的炮弹（`jet_bay.cpp` 的 `CrewFire`，与 `GunshipFire` 同弹、同间隔、同射程） | 反汇编 + 生成器检查 | H |
+
+生成：`tools/make_jets.py` 的 `with_gunner_seat` 从本机的 VEHICLE410_HELI.SGO 复制门炮手座的 [3]–[6]（姿势、掩码、数字、按键行，先核对是 `410_HELI_GUNNER_L` / 6），拼在驾驶座的 [0]–[2] 后面；`check_gunner_seat` 回读检查（两个座位、定位点相同、掩码 15、按键行 6、没有武器挂在炮手座、标记 7011）。`tools/selftest.py gunship_gunner_seat` 用合成 SGO 测这两个函数（含拒绝的情况）以及 `crew.h kGunnerSeat`、ini 键的接线。离线生成：`make_jets.build(游戏目录)` 写到 `tmp/` 检查过，除 `vehicle_riding_position` 外其它成员与原来逐个相等。
+
+### 11.2 上车与座位
+
+- 上车键仍走 `crew.cpp FindSeatHook`。炮舰机（`GunshipCrewSeats`：炮舰机体、≥2 个座位、`PlayerJetAll`）且 `PlayerJetBoardable` 时，先走 `GunshipSeat`：按 `GunshipBoardSeat`（ini `GunshipBoardGunner`，按住 `GunshipGunnerKey` 取另一个）选座位；原版 FindSeat 会取第一个空座位（NPC 在飞时就是炮手座），所以必须先选。选中的座位上有 NPC 时用原有的 `Bump`：另一个座位空就挪过去（驾驶员去炮位、炮手上驾驶座），否则踢掉——所以任何时候只有一个驾驶员。然后照原版 FindSeat 命中时的做法（0x633BF5：`0x633FE0(veh, human, seat)` 预约并返回该座位）。可乘判定用原有的「隐藏 NPC + 自己的队伍」（`WithDummiesHidden` / `WithTeamField`）。
+- 玩家坐驾驶座：同 §10，`PJet` 的整条路径。炮手座上有 NPC 时 `CrewGunner` → `jet::CrewShell`：`PickTarget` 以炮舰机自己为中心、1800 m 内选地面目标，炮好了就打一发（`ResumeNpc` 交回时会清掉这个目标）。空中下机照 §10.4（接机或 `HandBack`：驾驶座空则原版 RideAi 坐一个新的 NPC），炮手留着；`JetReap` 现在踢掉所有 NPC 座位再删除，任何座位上有玩家就不删。
+- 玩家坐炮手座（`GunnerFrame`，在 `PlayerJetFrame` 开头、`Held` 之前）：呼叫下来在等的（hail）或停着等玩家的（keep）立刻 `HandBack`（驾驶座空则 RideAi，`ResumeNpc` 在地面上转 takeoff）；之后由 `jet.cpp JetFrame` 的 NPC 飞行照常飞，只是：`GunnerHold`（这一帧的时间加到 `bornAt`，燃料与出击计时停住；正在撤离的取消）、不问 `Leave`、不开 NPC 自己的炮、锚点 = `GunnerAnchor`（玩家 30 s 内打中的地面点 → 呼叫的标记 → 上机点；跟随型不再把锚点拉到 `player.pos`，因为玩家就在机上）。盘旋是原有的 `Patrol`：切向 (out.z, 0, -out.x)，中心在航迹左侧。驾驶座若空，`EnsurePilot` 用原版 RideAi 补一次（失败只记日志，不重试）。
+- 炮手的扳机：座位 `+0x2E4 ≥ 0.8`（所有载具的主射击约定，heli-input-re.md §3）；瞄准点 = 屏幕中心视线与地面的交点（`CameraRay` + `MapRay`，3000 m 内）；`jet::PlayerShell` 开炮（共用一门炮的间隔）。HUD：`hud.cpp GunnerMarks`（黄色落点十字、超射程红色、距离与 READY / 装填秒数、青色方框 = 盘旋中心），只在玩家不在驾驶座时画。
+- 炮手下机（`GunnerLeft`）：离地 15 m 以上用 §7 的弹射跳伞（`EjectStart`，`bail.mark = 0`：不接机）；驾驶座有 NPC 且队伍不是友军 2 时 `SetObjectTeam` 回 2（玩家上车时原版可能把载具改成玩家的队伍，呼叫键只找友军队伍的飞机）。炮舰机不见了（删除、残骸消失）由 `GunnerTick` 每帧检查。
+- 炮手在机上时 `hud.cpp HudSee` 不在这架上方画 NPC 载具读数。
+
+### 11.3 验证状态
+
+- 静态：`build.cmd` 无警告（/W4 /WX）；`tools/selftest.py` 全过（新增 `gunship_gunner_seat`）；离线生成炮舰机 SGO 并回读检查通过。
+- 未实机验证（需要在游戏里逐项看）：
+  1. 新 SGO 能否正常生成载具（第二个座位共用定位点、`seat+0x258` = 0）、炮舰机呼叫照常飞（日志 `CREW` / `JET ... crewed: gunship`、`VEH ... seats=[d-]`）。
+  2. 上车：默认坐驾驶座且原驾驶员挪到炮手座（`BUMP ... npc moved to gunner seat 1`、`BOARD ... pilot seat`）；按住 V 坐炮手座（`BOARD ... gunner seat`），NPC 留在驾驶座；`GunshipBoardGunner=1` 反过来；上车提示是否出现；三种职业（掩码 15 的姿势 `410_HELI_GUNNER_L`）能否坐炮手座、姿势是否正常。
+  3. 炮手座上的镜头：能否用鼠标 / 右摇杆自由转动、`CameraRay` 的屏幕中心与黄色十字是否一致；按键行 6 下键鼠的主射击（`seat+0x2E4`）是哪个键（日志 `GUNNER ... trigger 1.00 (keys)`）；按住射击是否每 2.5 秒一发、炮弹是否落在十字上。
+  4. 炮手在机上时：呼叫下来停在地面的那架能否交回 NPC 并起飞（`PJET ... back to its NPC pilot: the player took its gun`、`JET ... takeoff` → `patrol`），之后绕打中的点盘旋（目标在左侧、约 600 m、350 m 高）；燃料是否停走（下机后 `JetHud` 的剩余燃料）、不撤离、不被删除；RideAi 在玩家已在炮手座时把载具队伍改成 2 是否有副作用。
+  5. 玩家驾驶时炮手 NPC 是否自动开炮（`JET ... gunship shell #n from its NPC gunner`），与自己的 SHELLS 是否共用间隔。
+  6. 下机：炮手在空中下机是否正常跳伞（`PJET ejected`、`CHUTE made`）、炮舰机继续执行呼叫；驾驶员在空中下机时炮手是否留下、接机 / 交回是否正常；在地面下机后再上（`keep` 时炮手 NPC 挪到驾驶座）。
+
+## 12. 停放飞机的实体与上车点（2026-10-05，`pylib/vcobjects.py` `move_door` / `Jet.parked`）
+
+用户在测试场大混战（每种可驾驶飞机空着停一架）里报：「飞机缺少实体」「空母缺少登机口」。日志（19:54:55 那次，0.7.1）：停放的空中航母三架开局位置 y = 10–11，6 秒后 7–8（位置 = 碰撞箱中心，见下），没有一条上车记录。
+
+### 12.1 原因（离线量模型 + 读 SGO，H）
+
+| 事实 | 来源 | 置信度 |
+|---|---|---|
+| 停放的是 NPC 版 SGO（`edf6tr_jet_<机种>_mission`），碰撞箱是 `jet_models.fuselage_box`：只量机身（舵面轰炸机 \|x\| ≤ 2 m，截击机 1.3 m，多用途机 1.25 m，航母 7.2 m），半宽 1.98 / 1.29 / 1.24 / 7.09 m，而模型半宽 12.4 / 8.0 / 13.0 / 29.7 m：人能走进机翼和大半个飞机。玩家战斗机 / 攻击机用 `model_box`（整个模型），没有这个问题 | `tmp/box_probe.py` 量 `_model_of` | H |
+| NPC 版用机身箱是有意的（`docs/jet-model-re.md` §3 第 8 条、`b1ff091`）：编队时机翼互相卡住、低空通过翼尖刮地和建筑；另外航母的无人机从中心下方 25 m 放出、15 m 处回收（`jet_carrier.cpp kLaunchBelow` / `kDockBelow`）。所以不改 NPC 版，给停放的单独一版 | git 历史 + 代码 | H |
+| 航母的机身箱底在模型原点上方 3.49 m：模型最低点是两侧的起落架舱（\|x\| 11.5–12.7 m），不在 7.2 m 的机身范围里。NPC 航母落地（呼叫下来）时就趴在机身箱上，起落架舱陷进地里 3.49 m | `tmp/carrier_low.py` | H |
+| 上车点 = 座位 0 的 `vehicle_riding_position[0][0]`（`搭乗口１`）这个 MAB 定位点，父骨骼 `mdl`。V506 的值：局部 (2.15, 0, 1.8)，半径 1.8；CanRideSeat 的判定距离 = 半径 + 0.5 = 2.3 m（`docs/rescue-re.md`）。MAB 定位点记录：表在 `u32@0x14 + 0x20` 到 `u32@0x18`，每条 0x20 字节（+0 名字、+4 父骨骼名，都相对记录的 UTF-16 偏移；+0xC 局部 vec4 的偏移；+0x10 半径） | 解 V506 / V410 / V508 的 MAB（`tmp/mab2.py`），与 0x6BADD0 / 0x6BB420 一致 | H |
+| 喷气机共用 V506 的 MAB，所以上车点在机体原点右边 2.15 m、前 1.8 m 的地面上，也就是**机腹正中下面**：航母机身箱侧面离它 4.9 m、底在它上方，站在哪都差 5 m 以上 → 没有上车提示；玩家攻击机整机箱的侧面离它 10 m（以前能上去，大概是站到了机翼上：箱顶离上车点约 2 m） | 计算 | H |
+| 原版的做法：V506 舱门在箱侧面（2.8 m）内 0.65 m 的地面上；V410 三个舱门都在 `mdl` 上、y = 0、机身两侧 | 解 MAB | H |
+| `0x6BADD0` 找到的父骨骼记录就是模型实例（`veh+0xEE0`）的骨骼记录，CanRideSeat 用它 `+0xB0..+0xEC` 的世界矩阵。原版直升机每帧用根骨骼记录的 `+0xE0`（平移行）做对地射线（0x651B8F），所以根骨骼的世界平移是有效的 | 反汇编 | H |
+| `mdl` 在落地后的模型里绑定位置抬高了 lift（舵面轰炸机 2.285、截击机 1.485、多用途机 0.437、航母 3.512 m，`jet_models.root_lift`）。游戏里根骨骼记录带不带这段抬高**没有定论**：网格骨骼（bone 1）实测就在模型原点（FLAME 日志），说明根骨骼的局部被动画替换、抬高大概率不生效；但 `booster.cpp` 记录过根骨骼「没有方向」。所以上车点按两种情况都够得着来放 | 推断 | M |
+
+### 12.2 修法
+
+- `Jet.parked`：`PARKED_KINDS`（制空战斗机、截击机、对地攻击机、多用途机、三种航母）各有一个停放版 `edf6tr_jet_<机种>_parked_mission`，标记 / 模型 / 武器与 NPC 版相同（插件只认标记，`kBoardable`），碰撞箱用 `model_box`，座位职业掩码 15 + `505_TANK_DRIVER`（同玩家战斗机）。测试场 `BOARDABLE_PARKED` 放这一版（启动器里也有「·停放」行）；`placements` 把它和玩家战斗机一样空着放。
+- `fuselage_box` 的箱底改到模型最低点（原点）：只影响航母（其它机种机身范围里就有前起落架，底本来就是 0）。NPC 航母的箱变成 y 0–17.03（中心 8.515），无人机放出点（中心下 25 m）仍在箱外。
+- `move_door`（`jet_sgo` 里，对模型抬高量已知的所有喷气机：`_root_lift`；Primer 战斗机和潜水母舰不动）：上车点 = 碰撞箱右侧（+x）外 `DOOR_OUT` = 0.6 m、y = 0（`mdl` 上，地面）、z = 原版的 1.8（限制在箱长范围内）；半径 = max(原版 1.8, √(max(lift, 1)² + 1²) − 0.5 + 0.05)：人站在离它 1 m（水平）处、位置取脚底或脚上 1 m，上车点在地面或抬高 lift 处，都够得着。只改这一条定位点记录的 16 字节坐标和 4 字节半径，座位、镜头定位点不动（姿势、镜头不变）。炮舰机的炮手座共用这个定位点，一起移动。
+- `check_door`（每次 `jet_sgo` 生成后回读）：箱底不在原点下面；上车点在地面上、在箱右侧外 `DOOR_OUT`、在箱长范围内；上面那四种组合都在判定距离内。不满足就抛 `DoorError`，什么都不写。
+- `veh+0xE00`（各座位上车点离原点的最大距离，载具半径）随之变大：停放航母约 30.4 m、停放舵面轰炸机约 13 m。它用在 slot 55 的区域夹紧（把载具往地图里缩这么多），影响很小；别处的用途没查（L）。
+- 测试场每台留空的半径：整机实体的舵面轰炸机外形（玩家攻击机、停放的制空战斗机 / 对地攻击机）机头在原点前 17.9 m、半宽 12.4 m，转到任何方向最远 21.7 m，改为 `ELEVON_RADIUS` = 22 m（原 15 m，两架相距 30 m 时机头对机尾就会重叠）。用户的大混战计划在 M045 上 36 个点位正好放满，`spaced` 先放你自己开的，剩下的重叠落在 NPC 驾驶、开局就起飞的那几架上（离线试排：NPC 攻击机与停放截击机相距 25.3 m、与停放制空战斗机 30.8 m，NPC 截击机与多足机 20.2 m）。往 800 m 圈扩点位会占掉舰船要的远处点位（`grand_points` 报不够），所以没扩。
+- 调试日志（`crew.cpp DoorLog`，`Debug=1`）：步行玩家第一次走到一架可驾驶的插件飞机 40 m 内时记一行 `DOOR v=... seat 0's door at (x,y,z) from its centre (its frame), reach r m; the player at (...), d m from the door; the stock prompt shows/does not show`。坐标是相对载具位置（= 碰撞箱中心）、在机体坐标系里。
+
+离线结果（`tmp/offline.py`，`make_jets.build` + 每个测试场喷气机 `jet_sgo`，全部通过 `check_door`）和实机应看到的 `DOOR` 行（A：根骨骼不带抬高，B：带抬高）：
+
+| SGO | 碰撞箱中心 / 半尺寸 | 上车点（`mdl` 上） / 半径 | `DOOR` 行的 y（A / B） | x / z |
+|---|---|---|---|---|
+| 停放航母（三种） | (0, 8.516, −3.109) / (29.703, 8.516, 38.422) | (30.303, 0, 1.8) / 3.201 | −8.52 / −5.00 | 30.30 / 4.91 |
+| NPC 航母（三种） | (0, 8.515, −3.109) / (7.086, 8.515, 38.422) | (7.686, 0, 1.8) / 3.201 | −8.52 / −5.00 | 7.69 / 4.91 |
+| 停放制空 / 对地攻击机、玩家攻击机 | (0, 2.123, 2.598) / (12.375, 2.123, 15.262) | (12.975, 0, 1.8) / 2.044 | −2.12 / +0.16 | 12.98 / −0.80 |
+| NPC 制空 / 对地攻击机 | (0, 2.123, 2.723) / (1.983, 2.123, 15.137) | (2.583, 0, 1.8) / 2.044 | −2.12 / +0.16 | 2.58 / −0.92 |
+| 停放截击机、玩家战斗机 | (0, 1.381, 1.688) / (8.047, 1.381, 9.922) | (8.647, 0, 1.8) / 1.8 | −1.38 / +0.10 | 8.65 / 0.11 |
+| 停放多用途机 | (0, 1.255, 0) / (12.969, 1.255, 4.039) | (13.569, 0, 1.8) / 1.8 | −1.26 / −0.82 | 13.57 / 1.80 |
+| NPC 截击机 / 敌方战斗机 | (0, 1.381, 1.77) / (1.289, 1.381, 9.84) | (1.889, 0, 1.8) / 1.8 | −1.38 / +0.10 | 1.89 / 0.03 |
+| 无人机（三种） | (0, 1.043, 1.075) / (1.748, 1.043, 2.833) | (2.348, 0, 1.8) / 1.8 | — | — |
+
+### 12.3 验证状态
+
+- 静态：`build.cmd` 无警告（/W4 /WX）；`tools/selftest.py` 全过（新增 `jet_door_on_the_ground_beside_its_box`：合成 MAB 上的 `mab_locator` / `move_door` / `check_door`，含拒绝原版上车点和够不着的情况；`range_parks_every_boardable_aircraft_apart` 改为检查停放版）；离线 `make_jets.build` 47 个文件和全部测试场喷气机 SGO 生成并通过 `check_door`；测试场干跑（用户的 testrange.json + 大混战，M045）：36 个放置、7 架停放版都在、脚本引用的生成物件都会写。
+- 未实机验证（需要在游戏里看）：
+  1. 停放的每种飞机：机翼、机头、机尾是不是实体（走不进去、能站上去）；航母和舵面轰炸机开局有没有被挤开 / 顶起来（`VEH ... pos=` 的 y：停放航母应在地面 + 8.5 左右，NPC 航母原来是 + 6.8）。
+  2. 走到每种飞机右侧驾驶舱旁边是否出现上车提示、能否上去；看 `DOOR` 行的 y 是 A 还是 B（定下来后可以把半径收回到只够一种情况）。
+  3. 停放版上去后飞行、起降、放无人机（航母）是否和 NPC 版一样；在空中下机后交回 NPC 时，整机箱的 NPC 低空飞行有没有刮地（这只发生在玩家开过的停放版上）。
+  4. 下机位置：原版从上车点下车的话，现在会落在飞机右侧地面上（B 时是离地 lift 处）。
+  5. Wing Diver / Fencer 能否坐停放版（掩码 15 + `505_TANK_DRIVER`，同玩家战斗机）。NPC 版的座位仍是掩码 9（游骑兵 + 空降兵），呼叫下来的 NPC 飞机其它兵种上不去——这是原来就有的，没改。

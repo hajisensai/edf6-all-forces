@@ -13,7 +13,10 @@
   - the installer's ini merge (installer.merge_ini) only adds settings and changes nothing of the player's;
   - interrupted or refused runs: autoturret/tools/build.py install killed half way still reinstalls and
     uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
-    uninstall over a misaligned table offers repair or skipping the table instead of failing.
+    uninstall over a misaligned table offers repair or skipping the table instead of failing;
+  - the model importer (pylib/obj_model.py, pylib/texfile.py) on synthetic data: OBJ reading (negative indices,
+    n-gons, winding, uv origin, texture lookup), holes found and closed, skins, meshes split below 65536 vertices
+    with tangents, PNG decoding, DDS .lod slicing and DXT1.
 """
 from __future__ import annotations
 
@@ -31,6 +34,7 @@ ROOT = os.path.normpath(os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, 'autoturret', 'tools'))
+import ballistics  # noqa: E402
 import build as at_build  # noqa: E402
 import call_weapons as cw  # noqa: E402
 import calls  # noqa: E402
@@ -39,7 +43,9 @@ import gen_calls  # noqa: E402
 import gen_stores  # noqa: E402
 import installer  # noqa: E402
 import ledger  # noqa: E402
+import make_artillery  # noqa: E402
 import make_jets  # noqa: E402
+import make_katyusha  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
@@ -110,18 +116,20 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
 
 @test
 def jet_nozzles_on_their_models() -> None:
-    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES), and every jet
-    mark has a row."""
+    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES: on the exit's
+    centre), its flame as big as that engine (width the exit's diameter, length FLAME_LENGTH_PER_DIAMETER of it), and
+    every jet mark has a row."""
     import jet_models
     from vcobjects import JETS
     carrier = 'EDF6VC_CARRIER.MRAB'
     num = r'([-\d.]+)f'
     vec = r'\{' + num + ',' + num + ',' + num + r'\}'
     rows = {}
-    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\}', src('src/booster.cpp')):
+    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\}',
+                         src('src/booster.cpp')):
         count = int(m.group(2))
         at = [tuple(float(m.group(k)) for k in range(3 + 3 * n, 6 + 3 * n)) for n in range(count)]
-        rows[float(m.group(1))] = at
+        rows[float(m.group(1))] = (at, (float(m.group(9)), float(m.group(10))))
     bad = []
     for name, jet in JETS.items():
         if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == carrier):
@@ -130,10 +138,46 @@ def jet_nozzles_on_their_models() -> None:
             bad.append(f'{name}: mark {jet.mark} has no nozzle row')
             continue
         want = jet_models.NOZZLES[jet.file]
-        got = rows[jet.mark]
-        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, w in zip(got, want) for a, b in zip(g, w)):
-            bad.append(f'{name}: {got}, the model has {want}')
+        got, size = rows[jet.mark]
+        d = want[0][1]
+        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
+            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
+        if abs(size[1] - d) >= 0.005 or abs(size[0] - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
+            bad.append(f'{name}: flame {size}, its engine {d} m across')
+    assert len(rows) >= 10, f'{len(rows)} nozzle rows parsed: the pattern no longer reads the table'
+    table = src('src/booster.cpp').split('kBomberNozzles[]={', 1)[1].split('};', 1)[0]
+    for name in ('bomber401', 'bomber501_2'):
+        m = re.search(r'\{0\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\},\s*// JetBody::'
+                      + name + r'\n', table)
+        assert m, f'src/booster.cpp kBomberNozzles: no {name} row'
+        want = jet_models.NOZZLES[name]
+        got = [tuple(float(m.group(k)) for k in range(2 + 3 * n, 5 + 3 * n)) for n in range(int(m.group(1)))]
+        d = want[0][1]
+        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
+            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
+        if abs(float(m.group(9)) - d) >= 0.005 or abs(float(m.group(8)) - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
+            bad.append(f'{name}: flame {m.group(8)} x {m.group(9)}, its engine {d} m across')
     assert not bad, '\n'.join(bad)
+
+
+@test
+def gear_legs_as_the_models_fold_them() -> None:
+    """src/gear.cpp's legs (kLegNames, kLegUp) are pylib/jet_gear.py's (LEGS, LEG_UP): the plugin folds each leg by the
+    angle its model was measured to fold level at; every fixed-wing model recipe names a gear spec, hover craft none."""
+    import jet_gear
+    import jet_models
+    text = src('src/gear.cpp')
+    names = re.search(r'kLegNames\[kGearLegs\]=\{([^}]*)\}', text)
+    ups = re.search(r'kLegUp\[kGearLegs\]=\{([^}]*)\}', text)
+    assert names and ups, 'kLegNames / kLegUp not found in src/gear.cpp'
+    got_names = re.findall(r'L"([^"]+)"', names.group(1))
+    got_ups = [float(x.strip().rstrip('f')) for x in ups.group(1).split(',')]
+    assert tuple(got_names) == jet_gear.LEGS, f'{got_names} vs {jet_gear.LEGS}'
+    assert all(abs(a - jet_gear.LEG_UP[n]) < 1e-4 for a, n in zip(got_ups, got_names)), f'{got_ups} vs {jet_gear.LEG_UP}'
+    assert jet_models.ELEVON_GEAR in jet_gear.SPECS
+    for file, r in jet_models.MODELS.items():
+        hover = file in ('EDF6VC_CARRIER.MRAB', 'EDF6VC_DRONE.MRAB')
+        assert (r.gear is None) == hover and (r.gear is None or r.gear in jet_gear.SPECS), f'{file}: gear {r.gear}'
 
 
 @test
@@ -404,6 +448,18 @@ def placeholders_keep_rows() -> None:
         raise AssertionError('two rows for one call not refused')
 
 
+@test
+def jet_masses_cover_every_jet() -> None:
+    """Every aircraft kind has a clean mass and a durability (src/stores.inc kJetMasses): any of them the player flies
+    rams with its own mass (src/playerjet.cpp RamDamage), scaled by its HP over that durability."""
+    marks = {j.mark for j in vc.JETS.values() if j.mark != 7101.0} | {make_jets.GUNSHIP_MARK}   # 7101: the sub, no jet
+    missing = sorted(marks - set(vc.JET_MASSES))
+    assert not missing, f'pylib/vcobjects.py JET_MASSES: no mass for marks {missing}'
+    durability = gen_stores.durabilities()
+    assert all(durability.get(m, 0.0) > 0.0 for m in vc.JET_MASSES), 'a JET_MASSES mark with no durability'
+    assert all(m > 0.0 for m in vc.JET_MASSES.values())
+
+
 # ---------------------------------------------------------------- copies kept by hand
 
 
@@ -428,8 +484,367 @@ def hand_copies_agree() -> None:
     files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
-    written = {n.split('/', 1)[1] for n in make_jets.names()}
+    written = {n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE}   # the drill's: tools/make_drill.py
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
+
+
+@test
+def ground_mission_builders_take_the_game_alone() -> None:
+    """testrange/gen.py GROUND_MISSION calls each tool's vehicle_sgo(game): every other parameter has a default (the
+    howitzer's grew a required own_model, and every range placing it would have failed at install)."""
+    import importlib
+    import inspect
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    for name, tool in gen.GROUND_MISSION.items():
+        params = list(inspect.signature(importlib.import_module(tool).vehicle_sgo).parameters.values())[1:]
+        assert all(p.default is not inspect.Parameter.empty for p in params), f'{tool}.vehicle_sgo for {name}: {params}'
+
+
+@test
+def drill_copies_agree() -> None:
+    """src/drill.cpp's drill (marker and spin bone names, length, base radius, base, rotational repeat) is pylib/drill_model.py's, src/jet_bay.cpp's drill charge
+    is the one tools/make_drill.py writes (pylib/vcobjects.py DRILL_CHARGE_FILE), its blast breaks buildings (>= 3 m),
+    the drill tank's request is a ground vehicle request of tools/make_drill.py's vehicle, and the model turns the OBJ
+    without mirroring it."""
+    import drill_model
+    import make_drill
+    d = src('src/drill.cpp')
+    assert f'kDrillBone[]=L"{drill_model.DRILL_BONE}"' in d, 'src/drill.cpp kDrillBone'
+    assert f'kSpinBone[]=L"{drill_model.SPIN_BONE}"' in d, 'src/drill.cpp kSpinBone'
+    m = re.search(r'kBoxHalfX=([\d.]+)f', d)
+    assert m and 2 * float(m.group(1)) <= 3.8 + 1e-6, 'the contact box is no wider than the 3.8 m hull'
+    m = re.search(r'kHullFront=([\d.]+)f,kChargeFrom=([\d.]+)f', d)
+    assert m and float(m.group(1)) < drill_model.DRILL_BASE[2] and float(m.group(2)) >= 3.4, m and m.groups()
+    m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
+    assert m and (float(m.group(1)), float(m.group(2))) == (drill_model.DRILL_LENGTH, drill_model.DRILL_RADIUS), m and m.groups()
+    m = re.search(r'kDrillBaseY=([\d.]+)f,kDrillBaseZ=([\d.]+)f', d)
+    assert m and (0.0, float(m.group(1)), float(m.group(2))) == drill_model.DRILL_BASE, m and m.groups()
+    m = re.search(r'kSpinRepeat=2\.0f\*kPi/([\d.]+)f', d)
+    assert m and float(m.group(1)) == drill_model.DRILL_FOLDS, m and m.groups()
+    bay = src('src/jet_bay.cpp')
+    assert f'kDrillChargeFile[]=L"{vc.DRILL_CHARGE_FILE}"' in bay, 'src/jet_bay.cpp kDrillChargeFile'
+    assert f'kDrillChargeSgo[]=L"app:/object/{vc.DRILL_CHARGE_FILE.lower()}"' in bay, 'src/jet_bay.cpp kDrillChargeSgo'
+    assert vc.DRILL_CHARGE_RADIUS >= 3.0, 'a drill charge under 3 m breaks no building (docs/drill-re.md §3)'
+    drills = [c for c in calls.CALLS if c.ground == 'drill']
+    assert len(drills) == 1 and drills[0].vehicle == make_drill.VEHICLE.sgo and drills[0].mark == 0
+    assert make_drill.OWNER in ledger.OWNERS and make_drill.VEHICLE.tool == 'make_drill'
+    assert not drill_model.CONVERSION.mirrors() and drill_model.CONVERSION.point((1.0, 0.0, 0.0))[2] > 0, 'OBJ +X is forward'
+
+
+@test
+def weapon_marks_agree() -> None:
+    """The mod's LockonTargetType marks: one copy in C++ (common/edf/weapon.h), the data tools' copies equal to it."""
+    marks = dict(re.findall(r'(kMark\w+)=(\d+)', src('common/edf/weapon.h')))
+    assert marks == {'kMarkAir': '7301', 'kMarkGround': '7302', 'kMarkLofted': '7303'}, marks
+    assert at_build.MARK_AIR == 7301.0 and at_build.MARK_GROUND == 7302.0
+    assert make_artillery.MARK_GROUND == 7302.0 and make_katyusha.MARK_LOFTED == 7303.0
+    assert make_katyusha.ROCKETS['LockonTargetType'] == make_katyusha.MARK_LOFTED
+
+
+BOHR_STOCK_AMMO_ALIVE = 100.0   # V603_FLAK_GLGUN01_DLC_{L,R}.SGO AmmoAlive in the stock Root.cpk
+
+
+@test
+def high_cam_wired() -> None:
+    """The artillery's high camera (src/highcam.cpp): its ini keys are read, shipped (with a range said) and documented;
+    the plugin takes the Katyusha's and the howitzer's weapons for indirect fire (rounds living kIndirectLife frames or
+    more) and not the other ground-marked guns (EDF6AutoTurret's Bohr grenades, stock life); the raised own cameras of
+    both look down onto the ground ahead; the camera block offsets agree with docs/camera-re.md."""
+    import rootcpk
+    code, ini, readme, doc = src('src/highcam.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
+    plugin = src('src/plugin.cpp')
+    for key in ('HighCam', 'HighCamKey', 'HighCamButton', 'HighCamHeight', 'HighCamBack', 'HighCamPitch'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    for key in ('HighCamKey', 'HighCamButton', 'HighCamHeight', 'HighCamBack', 'HighCamPitch'):
+        assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
+    life = int(re.search(r'kIndirectLife=(\d+)', code).group(1))
+    assert make_katyusha.ROCKETS['AmmoAlive'] >= life and make_artillery.SHELLS['AmmoAlive'] >= life
+    # The Bohr's grenades keep the stock life (autoturret/tools/build.py leaves AmmoAlive alone). The stock value is
+    # pinned here so CI (no game) still checks it against kIndirectLife; with the game present it is re-read.
+    assert BOHR_STOCK_AMMO_ALIVE < life, (BOHR_STOCK_AMMO_ALIVE, life)
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        for side in 'LR':
+            bohr = dsgo.to_py(dsgo.parse(rootcpk.default().read('WEAPON', at_build.BOHR_GUN.format(side=side))).root)
+            assert bohr['AmmoAlive'] == BOHR_STOCK_AMMO_ALIVE, (side, bohr['AmmoAlive'])
+    for offset in ('kCamLook=0x170', 'kCamEye=0x180', 'kCamEase=0x190'):
+        assert offset in code, offset
+    for rva in ('0x54DDF0', '0xF86A0', '0xFAF20', '+0x170', '+0x180', '+0x190'):
+        assert rva in doc, rva
+    vc.check_artillery_camera(make_katyusha.CAMERA)
+    vc.check_artillery_camera(make_artillery.CAMERA)
+
+
+@test
+def lofted_arc_solver() -> None:
+    """pylib/ballistics.py (the model common/weapon.cpp BallisticArc mirrors): the high and the low root both hit
+    their point under the game's per-frame step (v += drop, p += v) within 5 cm, the high one above 45 deg and the low
+    one under; out of reach is None; the Katyusha's envelope is what README.md says."""
+    import math
+    speed, drop = make_katyusha.ROCKETS['AmmoSpeed'], ballistics.drop_per_frame()
+    for x, y in ((150.0, 0.0), (500.0, 0.0), (800.0, 30.0), (400.0, -50.0), (900.0, 0.0), (300.0, 60.0)):
+        for high in (False, True):
+            r = ballistics.arc(x, y, speed, drop, high)
+            assert r is not None, (x, y, high)
+            e, n = r
+            assert (e > math.radians(45.0)) == high, (x, y, high, math.degrees(e))
+            path = ballistics.fly(speed, e, drop, int(n) + 2)
+            k = int(x / (speed * math.cos(e)))
+            (x0, y0), (x1, y1) = path[k - 1], path[k]
+            miss = y0 + (y1 - y0) * (x - x0) / (x1 - x0) - y
+            assert abs(miss) < 0.05, (x, y, high, miss)
+    assert ballistics.arc(1200.0, 0.0, speed, drop, True) is None
+    env = ballistics.envelope(speed, drop, math.radians(make_katyusha.PITCH_STOP_DEG))
+    readme = src('README.md')
+    for key, unit in (('max_range', '米'), ('high_min_range', '米'), ('max_range_time', '秒'), ('high_min_time', '秒')):
+        said = f'{round(env[key])} {unit}' if unit == '米' else f'{env[key]:.1f} {unit}'
+        assert said in readme, f'README.md: the Katyusha section should say {said} ({key}, pylib/ballistics.py)'
+
+
+@test
+def katyusha_pose_agrees() -> None:
+    """The Katyusha's pose (src/katyusha.cpp) is its model's (pylib/katyusha_model.py): the rod bone's name and one
+    elevation stop (tools/make_katyusha.py takes the model's). EDF6AutoTurret leaves a lofted launcher the player rides
+    alone before it does anything else in Steer (steering it turns the player's camera); the arc solve is one copy
+    (common/weapon.cpp BallisticArc) that both plugins call. The ram's offline pose: the eye on the launcher, the
+    rod turned with the cylinder, at the stroke's ends."""
+    import math
+    import katyusha_model as km
+    assert f'kRod[]=L"{km.RAM_ROD}"' in src('src/katyusha.cpp'), 'src/katyusha.cpp kRod'
+    assert make_katyusha.PITCH_STOP_DEG == km.PITCH_STOP_DEG
+    at = src('autoturret/src/plugin.cpp')
+    steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert steer.split('\n')[1].strip().startswith('if(PlayerLofted(seat))'), 'autoturret Steer: PlayerLofted first'
+    assert 'bool Root(' not in at and 'bool BallisticArc(' in src('common/weapon.cpp')
+    assert 'edf::BallisticArc(' in at and 'edf::BallisticArc(' in src('src/launcher.cpp')
+    P, E, M = (0.0, 2.2, -2.06), (0.0, 2.51, -3.52), (0.0, 2.23, -3.56)   # the built model's, rounded
+    d0, e0, l0 = km.ram_pose(P, E, M, 0.0)
+    assert abs(d0) < 1e-12 and max(abs(a - b) for a, b in zip(e0, E)) < 1e-12
+    d, e, length = km.ram_pose(P, E, M, math.radians(km.PITCH_STOP_DEG))
+    q = km.ram_turn(E, P, d)   # the bind eye turned with the cylinder lies on the line to the posed eye
+    cross = (q[1] - P[1]) * (e[2] - P[2]) - (q[2] - P[2]) * (e[1] - P[1])
+    assert abs(cross) < 1e-9 and length > l0 and km.stroke(P, E, M) > 0.2, (cross, length, l0)
+
+
+@test
+def every_npc_aircraft_boardable() -> None:
+    # Every jet body of our side (jet_internal.h kBodies: a mark, not hostile) has its row in src/playerjet_kinds.h
+    # kBoardable, so an aircraft added later is flown by the player too (or is left out on purpose here, saying why);
+    # the enemy's are not; the ini keys of the feature are read and documented.
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    rows = re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,[^}]*?"(\w+)"(,true)?\}', re.sub(r'\s+', ' ', table))
+    assert len(rows) >= 15, f'src/jet_internal.h kBodies: read {len(rows)} rows'
+    boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
+    for body, mark, _name, hostile in rows:
+        if int(mark) == 0:
+            continue   # a heli: the stock heli flight
+        if hostile:
+            assert body not in boardable, f'{body} is the enemy\'s: not boardable'
+        else:
+            assert body in boardable, f'{body} (mark {mark}): no row in src/playerjet_kinds.h kBoardable'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('PlayerJetAll', 'PlayerJetHailKey'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+
+
+@test
+def range_parks_every_boardable_aircraft_apart() -> None:
+    """The grand battle parks one of each of our aircraft the player boards that has a range SGO (testrange/gen.py
+    BOARDABLE_PARKED: every mark of src/playerjet_kinds.h kBoardable among pylib/vcobjects.py JETS) empty, none of them
+    NPC-flown (the air carrier, an NPC friend there, "flew straight off", 2026-10-05); and on a map of its own every
+    placement's footprint is clear of the others' and the player start's (the carrier is 59 x 77 m: 33 m from a jet it
+    began 11 m over its spot)."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import rmpa
+    from vcobjects import JETS
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    marks = {body: int(mark) for body, mark in
+             re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
+    boardable = {marks[b] for b in re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h'))}
+    assert len(boardable) >= 10, f'read {len(boardable)} boardable marks'
+    kinds = {name for name, jet in JETS.items()
+             if int(jet.mark) in boardable and name.endswith('_mission') and not jet.parked and not jet.player}
+    want = {vc.parked_name(k) for k in kinds}
+    assert set(gen.BOARDABLE_PARKED) == want, f'BOARDABLE_PARKED {sorted(gen.BOARDABLE_PARKED)}, boardable {sorted(want)}'
+    # Each the parked twin of its kind: the same mark, model and arms, parked (the whole plane's box, every class).
+    for k in kinds:
+        a, b = JETS[k], JETS[vc.parked_name(k)]
+        assert b.parked and not a.parked and (a.mark, a.model, a.file, a.weapons) == (b.mark, b.model, b.file, b.weapons), k
+        assert vc.parked_name(k) in gen.DERIVED and vc.parked_name(k) in {s for s, _ in gen.VEHICLES}, k
+    plan = gen.grand_battle(gen.Plan())
+    empty = {s for s, npc in gen.placements(plan) if not npc}
+    flown = {s for s, npc in gen.placements(plan) if npc}
+    carrier = vc.parked_name('edf6tr_jet_carrier_mission')
+    carriers = {s for s in want if gen.footprint(s) == gen.footprint(carrier)}
+    # NPC-flown fighters fight the battle; a carrier is there for the player only.
+    assert want <= empty and len(carriers) == 3 and not carriers & flown, (sorted(want - empty), sorted(carriers & flown))
+    assert 2 * gen.footprint(carrier) >= (59.0 ** 2 + 77.0 ** 2) ** 0.5, 'the carrier footprint is under its size'
+    # A map of its own: the player start and a point every 25 m out to 1 km (the selftest runs without the game).
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
+    points += [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+               for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
+    lay = gen.layout(points, gen.small_count(plan))
+    taken = [(lay.player, gen.SPOT)]
+    for sgo, _npc, p in gen.spots_for(plan, lay):
+        r = gen.footprint(sgo)
+        assert gen.overlap(p, r, taken) == 0.0, f'{sgo} at {p.name} reaches {gen.overlap(p, r, taken):.1f} m into another'
+        taken.append((p, r))
+    # The fallback is the least overlap, never a silent pile-up: a crowd that cannot fit still spreads out.
+    crowd = gen.spaced([(carrier, False)] * 3, points[1:5], lay.player)
+    assert len(set(p.name for p in crowd)) == 3, crowd
+
+
+@test
+def jet_door_on_the_ground_beside_its_box() -> None:
+    """pylib/vcobjects.py move_door / check_door (docs/player-jet-re.md §12): a jet's boarding point (the V506's door
+    locator, read out of a MAB block by mab_locator) goes on the ground DOOR_OUT m outside its collision box's right side,
+    with a radius that reaches a human DOOR_STEP m off it whether or not `mdl` carries the grounding's lift (the parked
+    carrier's door was under its middle, 4.9 m in from its box's side: no prompt anywhere, 2026-10-05); check_door
+    refuses a door inside the box or out of reach. On a block of its own (the selftest runs without the game)."""
+    import struct
+    import sgo
+    door, seat = '搭乗口１', '操縦席１'
+    nul = chr(0)
+    names = (door + nul + 'mdl' + nul + seat + nul).encode('utf-16le')
+    vecs, strings, table = 0x84, 0xA4, 0x24
+    mab = bytearray(strings) + names
+    mab[0:4] = b'MAB' + bytes(1)
+    struct.pack_into('<4I', mab, 0x14, table, table + 0x60, vecs, strings)
+    at_door, at_mdl, at_seat = strings, strings + 2 * (len(door) + 1), strings + 2 * (len(door) + len('mdl') + 2)
+    for r, name, vec, radius in ((0x44, at_door, vecs, 1.8), (0x64, at_seat, vecs + 16, 0.5)):
+        struct.pack_into('<iiiif', mab, r, name - r, at_mdl - r, 0, vec - r, radius)
+    struct.pack_into('<8f', mab, vecs, 2.15, 0.0, 1.8, 1.0, 0.0, 1.45, 1.1, 1.0)
+    mab = bytes(mab)
+    assert vc.mab_locator(mab, door) == (vecs, 0x44 + 0x10) and vc.mab_locator(mab, seat) == (vecs + 16, 0x64 + 0x10)
+    for bad in ('カメラ１', 'mdl'):
+        try:
+            vc.mab_locator(mab, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f'{bad}: not a locator, found')
+    carrier = [[0.0, 8.516, -3.109], [29.703, 8.516, 38.422]]   # EDF6VC_CARRIER's whole-model box (jet_models.model_box)
+    lift = 3.512                                                   # ...its `mdl` bound this far up (root_lift)
+
+    def jet(box: list[list[float]], door_mab: bytes) -> bytes:
+        return sgo.write(1, {'animation_model': [['a', 'b'], 'c', door_mab], 'heli_rigid_body': [box[0], box[1], 0.3],
+                             'vehicle_riding_position': [[door, seat, ['カメラ１', 0.0, 0.0], '505_TANK_DRIVER', 15, 10.0, 5]]})
+
+    def refused(data: bytes, at_lift: float, why: str) -> None:
+        try:
+            vc.check_door(data, at_lift)
+        except vc.DoorError:
+            return
+        raise AssertionError(f'check_door passed {why}')
+
+    refused(jet(carrier, mab), lift, 'the stock door under the middle of the carrier')
+    _, m = sgo.read(jet(carrier, mab))
+    vc.move_door(m, carrier, lift)
+    moved = sgo.write(1, m)
+    vc.check_door(moved, lift)
+    refused(moved, lift + 1.0, 'a door out of reach (a lift its radius was not made for)')
+    block = m['animation_model'][2]
+    vec, rad = vc.mab_locator(block, door)
+    x, y, z = struct.unpack_from('<3f', block, vec)
+    radius = struct.unpack_from('<f', block, rad)[0]
+    assert abs(x - (29.703 + vc.DOOR_OUT)) < 1e-3 and y == 0.0 and abs(z - 1.8) < 1e-6, (x, y, z)
+    assert radius + vc.DOOR_SLACK >= (vc.DOOR_STEP ** 2 + lift ** 2) ** 0.5, radius
+    assert vc.mab_locator(block, seat) == (vecs + 16, 0x64 + 0x10)
+    assert struct.unpack_from('<4f', block, vecs + 16) == struct.unpack_from('<4f', mab, vecs + 16), 'the seat moved'
+    # A small jet keeps the stock radius (1.8) when that reaches; the door stays within the box's length.
+    at, r = vc.door_point([[0.0, 1.381, 1.688], [8.047, 1.381, 9.922]], 1.485, (2.15, 0.0, 1.8), 1.8)
+    assert at == [8.647, 0.0, 1.8] and r == 1.8, (at, r)
+    at, r = vc.door_point([[0.0, 1.255, 0.0], [12.969, 1.255, 1.0]], 0.437, (2.15, 0.0, 1.8), 1.8)
+    assert at[2] == 1.0, at
+
+
+@test
+def boarding_an_empty_aircraft_makes_its_entry() -> None:
+    """One of our aircraft a mission placed empty has no src/jet.cpp entry (JetFrame makes it on an NPC pilot's first
+    frame): boarding it makes one (playerjet_board.inc Boarded: jet::Adopt), else a rotor craft never lifts (HoverStep
+    flies off the entry), a carrier has no drones and a jet left in the air goes back to an NPC in takeoff mode."""
+    board = src('src/playerjet_board.inc')
+    boarded = board.split('void Boarded(', 1)[1].split('\n}\n', 1)[0]
+    assert 'jet::Adopt(v)' in boarded and 'jet::FindJet' not in boarded, 'Boarded does not make the entry'
+    adopt = src('src/jet.cpp').split('jet::Jet* jet::Adopt(', 1)[1].split('\n}\n', 1)[0]
+    assert 'FindJet(v)' in adopt and 'CrewPlaced(' in adopt and 'jetPilot' in adopt, adopt
+    hover = board.split('void HoverStep(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!e){j.active=false;return;}' in hover, 'HoverStep no longer needs the entry: revisit jet::Adopt'
+
+
+@test
+def heli_sight_after_aim_lines() -> None:
+    """The stock heli's gun sight (src/helisight.cpp) draws for the guns whose aim line AimLines hid this frame
+    (HiddenAimGuns), so the input hook runs it after AimLines; AimLines hides the player's line for it
+    (PlayerHeliOwnSight); its ini key is read, shipped and documented; every key the ini ships is read."""
+    crew = src('src/crew.cpp')
+    hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
+    lines, sight = hook.find('&AimLines,'), hook.find('&HeliSightFrame,')
+    assert 0 <= lines < sight, 'src/crew.cpp InputHook: AimLines must run before HeliSightFrame'
+    aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerHeliOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the heli sight hides the player\'s line'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert re.search(r'^PlayerHeliGunSight=1', ini, re.M) and 'PlayerHeliGunSight' in readme
+    unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if f'L"{k}"' not in plugin]
+    assert not unread, f'EDF6VehicleCrew.ini keys src/plugin.cpp never reads: {unread}'
+
+
+@test
+def gunship_gunner_seat() -> None:
+    """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second
+    seat with the pilot's locators and the stock door gunner's pose, class mask and key row, and nothing else changes; a
+    gunship that has it already, a stock gunner seat not as expected, or a weapon put on the gunner seat are refused. The
+    C++ side's seat number (src/crew.h kGunnerSeat) is the generator's, the crew's ini keys are read and documented."""
+    import sgo
+    pilot = ['door1', 'seat1', ['loc1', 0.0, 0.0], '506_HELI_DRIVER', 9, 10.0, make_jets.PILOT_KEYS]
+    setup = [[1.0, 1.0], [make_jets.GUNSHIP_MARK, 0.0003], [999900.0, 1.666],
+             [['app:/weapon/a.sgo', [0.0001, 0.1]], ['app:/weapon/b.sgo', [0.0001, 0.1]], ['app:/weapon/v_fuel01.sgo']]]
+    weapons = [['mdl', 0], ['mdl', 0], ['mdl', -1]]
+
+    def gunship(seats: list, settings: list) -> bytes:
+        return sgo.write(0x102, {'mission_setup': setup, 'vehicle_riding_position': seats, 'vehicle_weapon_setting': settings,
+                                 'game_object_durability': 1500.0})
+
+    def stock(pose: str, keys: int) -> bytes:
+        door = ['door2', 'seat2', ['loc2', 0.0, 0.0], pose, 15, 0, keys]
+        return sgo.write(0x102, {'vehicle_riding_position': [['d', 's', ['l', 0.0, 0.0], '410_HELI_DRIVER', 9, 15.0, 5], door]})
+
+    good = stock(make_jets.GUNNER_POSE, make_jets.GUNNER_KEYS)
+    before = gunship([pilot], weapons)
+    after = make_jets.with_gunner_seat(before, good)
+    make_jets.check_gunner_seat(after)
+    old, new = sgo.read(before)[1], sgo.read(after)[1]
+    assert [k for k in old if old[k] != new[k]] == ['vehicle_riding_position'] and set(new) == set(old)
+    seats = new['vehicle_riding_position']
+    assert len(seats) == make_jets.GUNNER_SEAT + 1 and seats[0] == sgo.read(before)[1]['vehicle_riding_position'][0]
+    gunner = seats[make_jets.GUNNER_SEAT]
+    assert gunner[:3] == seats[0][:3] and gunner[3] == make_jets.GUNNER_POSE and gunner[4] == 15 and gunner[6] == make_jets.GUNNER_KEYS
+    for bad, why in ((lambda: make_jets.with_gunner_seat(after, good), 'a second gunner seat'),
+                     (lambda: make_jets.with_gunner_seat(before, stock('410_HELI_DRIVER', 5)), 'the stock seat not a gunner seat')):
+        try:
+            bad()
+        except ValueError:
+            continue
+        raise AssertionError(f'with_gunner_seat took {why}')
+    armed = gunship(seats, [['mdl', 0], ['mdl', 1], ['mdl', -1]])
+    try:
+        make_jets.check_gunner_seat(armed)
+    except make_jets.GunnerSeatError:
+        pass
+    else:
+        raise AssertionError('check_gunner_seat let a weapon sit on the gunner seat')
+    try:
+        make_jets.check_gunner_seat(before)
+    except make_jets.GunnerSeatError:
+        pass
+    else:
+        raise AssertionError('check_gunner_seat took a gunship with one seat')
+    m = re.search(r'constexpr unsigned kGunnerSeat=(\d+);', src('src/crew.h'))
+    assert m and int(m.group(1)) == make_jets.GUNNER_SEAT, 'src/crew.h kGunnerSeat'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('GunshipBoardGunner', 'GunshipGunnerKey'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    assert 'FixInt("GunshipGunnerKey"' in plugin, 'GunshipGunnerKey is range-checked'
 
 
 @test
@@ -702,6 +1117,224 @@ def uninstall_misaligned_skips_table() -> None:
     finally:
         shutil.rmtree(game, ignore_errors=True)
 
+
+# ---------------------------------------------------------------- model import (pylib/obj_model.py, pylib/texfile.py)
+
+def _cube_part(skip_face: int | None = None) -> 'object':
+    """A unit cube centred on x = 0 as an obj_model.Part, outward faces (counter-clockwise), face 0 the +x one."""
+    import obj_model as om
+    c = [(x, y, z) for x in (-0.5, 0.5) for y in (0.0, 1.0) for z in (0.0, 1.0)]
+    quads = [(4, 6, 7, 5), (0, 1, 3, 2), (2, 3, 7, 6), (0, 4, 5, 1), (1, 5, 7, 3), (0, 2, 6, 4)]
+    verts, tris = [], []
+    for k, q in enumerate(quads):
+        if k == skip_face:
+            continue
+        n = om.norm(om.cross(om.sub(c[q[1]], c[q[0]]), om.sub(c[q[2]], c[q[0]])))
+        base = len(verts)
+        verts += [om.Vertex(c[i], n, (j % 2 * 1.0, j // 2 * 1.0)) for j, i in enumerate(q)]
+        tris += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+    return om.Part('cube', 'm', verts, tris)
+
+
+@test
+def obj_reader_triangulates_and_converts() -> None:
+    import obj_model as om
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, 'm.mtl'), 'w', encoding='utf-8') as h:
+            h.write('newmtl a\nmap_Kd C:/elsewhere/Tex.PNG\n')
+        with open(os.path.join(d, 'tex.png'), 'wb') as h:
+            h.write(b'')
+        with open(os.path.join(d, 'm.obj'), 'w', encoding='utf-8') as h:
+            h.write('mtllib m.mtl\no box\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv 0.5 1.5 0\nvt 0 0\nvt 1 0\nvt 1 1\n'
+                    'vn 0 0 1\nusemtl a\nf -5/1/1 -4/2/1 -3/3/1 -1/3/1 -2/3/1\nf 1//1 2//1 3//1\n')
+        obj = om.read_obj(os.path.join(d, 'm.obj'))
+        assert [o.name for o in obj.objects] == ['box'] and len(obj.objects[0].faces) == 2
+        assert om.texture_path(obj, 'a') == os.path.join(d, 'tex.png'), 'map_Kd found by its base name'
+        (p,) = om.obj_parts(obj)
+        assert len(p.tris) == 3 + 1, p.tris                              # a pentagon: 3 triangles, + 1
+        for t in p.tris:     # winding kept: every triangle faces the normal
+            a, b, c = (p.verts[i].pos for i in t)
+            assert om.dot(om.cross(om.sub(b, a), om.sub(c, a)), (0.0, 0.0, 1.0)) > 0
+        assert p.verts[0].uv == (0.0, 1.0), 'v flipped to the top-left origin'
+        (m,) = om.obj_parts(obj, om.Conversion(axes=((-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))))
+        for t in m.tris:     # a mirroring conversion reverses the winding: still facing its (mirrored) normal
+            a, b, c = (m.verts[i].pos for i in t)
+            assert om.dot(om.cross(om.sub(b, a), om.sub(c, a)), m.verts[t[0]].normal) > 0
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@test
+def obj_holes_found_and_closed() -> None:
+    import obj_model as om
+    assert om.boundary_loops(_cube_part()) == [], 'a closed cube has no hole'
+    part = _cube_part(skip_face=0)
+    loops = om.boundary_loops(part)
+    assert len(loops) == 1 and len(loops[0]) == 4 and om.mirror_unmatched(part, loops) == loops
+    fill = om.fill_loop(part, loops[0])
+    assert len(fill.tris) == 2 and om.boundary_loops(part) == []
+    part = _cube_part(skip_face=0)
+    full = _cube_part()
+    ref = [tuple(om.RefCorner(full.verts[i].pos, full.verts[i].normal, ((0, 1.0),)) for i in t) for t in full.tris]
+    fills = om.restore_from_reference(part, ref)  # type: ignore[arg-type]
+    assert len(fills) == 1 and len(fills[0].tris) == 2 and om.boundary_loops(part) == [], fills
+    skins = om.skins_by_reference(part, ref, lambda b: b + 7)  # type: ignore[arg-type]
+    assert all(s == ((7, 1.0),) for s in skins)
+    halves = om.split_part(full, lambda t: max(p[0] for p in t) > 0)
+    assert len(halves[True].tris) == 2 * 5 and len(halves[False].tris) == 2
+    assert len(om.components(om.merge([full, _cube_part()]))) == 1, 'coincident copies weld into one piece'
+
+
+@test
+def obj_meshes_split_below_65536() -> None:
+    import struct as st
+    import obj_model as om
+    from mdb import Mesh, VElem, read_elem
+    layout = [VElem(7, 0, 0, 'BINORMAL'), VElem(7, 8, 0, 'TANGENT'), VElem(7, 16, 0, 'NORMAL'), VElem(7, 24, 0, 'POSITION'),
+              VElem(12, 32, 0, 'TEXCOORD'), VElem(1, 40, 0, 'BLENDWEIGHT'), VElem(21, 56, 0, 'BLENDINDICES')]
+    template = Mesh(bytes(4), 0, 0, 60, layout, 0, b'', b'')
+    cube = _cube_part()
+    big = om.merge([om.Part('c', 'm', [om.Vertex(om.add(v.pos, (k * 2.0, 0.0, 0.0)), v.normal, v.uv) for v in cube.verts],
+                            cube.tris) for k in range(2800)])           # 67200 vertices
+    meshes = om.build_meshes(template, [(big, om.rigid(big, 3))], material=2)
+    assert len(meshes) == 2 and all(me.nverts < 0x10000 and me.material == 2 for me in meshes)
+    assert sum(len(me.indices) // 6 for me in meshes) == len(big.tris)
+    me = meshes[0]
+    assert me.flags == bytes((0, 1, 1, 0)) and {int(r[0]) for r in read_elem(me, 'BLENDINDICES')} == {3}
+    for n, t, b in zip(read_elem(me, 'NORMAL'), read_elem(me, 'TANGENT'), read_elem(me, 'BINORMAL')):
+        assert abs(om.dot(n[:3], t[:3])) < 2e-3 and abs(om.dot(n[:3], b[:3])) < 2e-3, (n, t, b)
+    assert max(st.unpack(f'<{len(me.indices) // 2}H', me.indices)) < me.nverts
+
+
+@test
+def texture_files_decode_and_slice() -> None:
+    import struct as st
+    import zlib
+    import texfile
+    w, h = 5, 3
+    rows = [bytes(sum(([x * 40, y * 80, (x + y) * 20] for x in range(w)), [])) for y in range(h)]
+    raw = bytearray()
+    prev = bytes(3 * w)
+    for y, row in enumerate(rows):     # each row with another filter (0 none, 1 sub, 2 up, 3 average, 4 paeth)
+        ft = y % 5
+        out = bytearray(row)
+        for i in range(len(row)):
+            left = row[i - 3] if i >= 3 else 0
+            ul = prev[i - 3] if i >= 3 else 0
+            pred = (0, left, prev[i], (left + prev[i]) // 2, texfile._paeth(left, prev[i], ul))[ft]
+            out[i] = (row[i] - pred) & 0xFF
+        raw += bytes([ft]) + out
+        prev = row
+    chunk = lambda k, b: st.pack('>I', len(b)) + k + b + st.pack('>I', zlib.crc32(k + b))  # noqa: E731
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', st.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + \
+        chunk(b'IDAT', zlib.compress(bytes(raw))) + chunk(b'IEND', b'')
+    img = texfile.decode_png(png)
+    assert (img.width, img.height) == (w, h)
+    assert bytes(img.rgba[0::4]) + bytes(img.rgba[1::4]) == bytes(b for r in rows for b in r[0::3]) + bytes(b for r in rows for b in r[1::3])
+    dds = texfile.solid_dxt1((200, 100, 50), 64)
+    info = texfile.dds_info(dds)
+    assert (info.width, info.mips, info.fourcc) == (64, 7, b'DXT1')
+    hd, lod = texfile.texture_pair(dds)
+    li = texfile.dds_info(lod)
+    assert hd == dds and (li.width, li.height, li.mips) == (16, 16, 4), li    # 64 -> 16 (never below 16), 16 .. 2 (stock)
+    assert len(lod) == 128 + 8 * (16 + 4 + 1 + 1) and texfile.pair_problem(hd, lod) is None
+    assert texfile.pair_problem(hd, texfile.dds_tail(dds, 2)) == '.lod has 5 mip levels, the stock layout 4'
+    assert [texfile.lod_mips(w, h) for w, h in ((128, 128), (64, 32), (16, 16), (32, 16))] == [7, 6, 4, 5]
+    assert texfile.lod_level(2048, 2048) == 4 and texfile.lod_level(1024, 512) == 4 and texfile.lod_level(64, 64) == 2
+    c0, c1, idx = st.unpack_from('<HHI', lod, 128)
+    assert c0 == c1 == ((200 * 31 + 127) // 255) << 11 | ((100 * 63 + 127) // 255) << 5 | ((50 * 31 + 127) // 255) and idx == 0
+
+
+
+@test
+def textures_go_before_the_model() -> None:
+    """The game binds a model's textures when the model member loads, from the TEXTURE members read before it (mdb.
+    insert_member): add_texture / copy_texture_members into an archive that holds only its model (the twin tank's
+    case, which rendered black) put each .lod before the model, the HD after; texture_problems refuses the old order."""
+    import graft_pure as g
+    import obj_model as om
+    import texfile
+    from mdb import Mdb, Rab, RabFile, Texture, rab_read, rab_write
+    md = Mdb(0, [], [], [], [], [Texture(0, 'a_DDS', 'a.dds', 0), Texture(1, 'b_DDS', 'b.DDS', 0)])
+    rab = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [RabFile('m.mdb', 1, 0, b'model')])
+    for fn in ('a.dds',):
+        om.add_texture(rab, fn, texfile.solid_dxt1((10, 20, 30), 64))
+    donor = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [])
+    om.add_texture(donor, 'b.DDS', texfile.solid_dxt1((40, 50, 60), 32))
+    g.copy_texture_members(rab, donor, ['b.DDS'])
+    assert [(rab.folders[f.folder], f.name) for f in rab.files] == [
+        ('TEXTURE', 'a.lod.dds'), ('TEXTURE', 'b.lod.DDS'), ('MODEL', 'm.mdb'), ('HD-TEXTURE', 'a.dds'),
+        ('HD-TEXTURE', 'b.DDS')], rab.files
+    assert om.texture_problems(rab, md, 'm.mdb') == []
+    old = Rab(rab.version, rab.folders, [rab.files[k] for k in (2, 3, 4, 0, 1)])     # the order the old code wrote
+    bad = om.texture_problems(old, md, 'm.mdb')
+    assert bad[0].startswith('archive members not in folder-table order') and len(bad) == 3, bad
+    assert 'a.lod.dds after the model m.mdb' in bad[1] and 'b.lod.DDS after the model' in bad[2], bad
+    assert rab_read(rab_write(rab)).files[0].name == 'a.lod.dds'
+
+@test
+def artillery_chassis_is_stock() -> None:
+    """pylib/artillery_model.py takes the chassis from the stock E551 as it is: stock_meshes keeps the triangles on the
+    OBJ's points with every vertex byte copied but the blend indices (mapped to the Kepler's bones); stock_materials /
+    material_problems: the E551 materials unchanged (tracks under the Kepler's names, which the SGO scrolls), their
+    stored texture members, the turret the only other material; an edited parameter, a re-encoded texture member or
+    an unused member is refused."""
+    import struct
+    import artillery_model as am
+    import graft_pure as g
+    import obj_model as om
+    import texfile
+    from dataclasses import replace
+    from mdb import MatParam, MatTex, Material, Mdb, Mesh, Object, Rab, RabFile, Texture, VElem
+    elems = [VElem(7, 0, 0, 'position'), VElem(12, 8, 0, 'texcoord'), VElem(1, 16, 0, 'BLENDWEIGHT'),
+             VElem(21, 32, 0, 'BLENDINDICES')]
+    P = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]
+    rows = [struct.pack('<4e2f4f4B', *p, 1.0, 0.0, 0.25 * k, 0.75, 0.25, 0.0, 0.0, 3, 4, 9, 9) for k, p in enumerate(P)]
+    me = Mesh(bytes((0, 1, 2, 0)), 0, 0, 36, elems, 0, b''.join(rows), struct.pack('<6H', 0, 1, 2, 1, 3, 2))
+    names = ['mdl'] + list(am.HULL_MATERIALS)
+    mats = [Material(k, 0, 0, k + 1, 'snd_BRDF_Mech_Catapillar' if n.startswith('Caterpi') else 'snd_BRDF_Common_Basic',
+                     [MatParam([0.5, 0.5, 0.5, 0.0], (0, 0), 'scroll_texture' if n.startswith('Caterpi') else 'diffuse', 513)],
+                     [MatTex(k, 'albedo', (0,) * 5)], 3) for k, n in enumerate(am.HULL_MATERIALS)]
+    texs = [Texture(k, f't{k}_DDS', f't{k}.DDS', 0) for k in range(len(mats))]
+    ref = Mdb(0x20, names, [], [Object(0, 0, [me])], mats, texs)
+    out, kept = am.stock_meshes(ref, {om.wkey(p) for p in P[:3]}, {3: 7, 4: 8})
+    assert len(out) == 1 and kept == {frozenset(om.wkey(p) for p in P[:3])}, kept
+    new = out[0][1]
+    assert g.triangles(new) == [(0, 1, 2)] and new.nverts == 3, g.triangles(new)
+    for k in range(3):
+        a, b = new.vdata[36 * k:36 * k + 36], rows[k]
+        assert a[:32] == b[:32] and a[32:] == bytes((7, 8, 0, 0)), (a, b)
+    try:
+        am.stock_meshes(ref, {om.wkey(p) for p in P[:3]}, {3: 7})
+        raise AssertionError('an unmapped weighted bone was accepted')
+    except am.ArtilleryCheckError:
+        pass
+    ref_rab = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [])
+    for t in texs:
+        om.add_texture(ref_rab, t.filename, texfile.solid_dxt1((10 * t.index, 20, 30), 32))
+    fp = am.make_stock_fingerprints(ref, ref_rab)
+
+    def made(edit: bool = False) -> tuple[Rab, Mdb]:
+        md, _map = am.stock_materials(Mdb(0x20, ['mdl'], [], [], [], []), ref, set(range(len(mats))))
+        md, _t = om.add_material(md, ref, 'v505_tank', am.TURRET_MATERIAL[0], {'albedo': 'own.dds'})
+        if edit:
+            md.materials[0] = replace(md.materials[0], params=[replace(md.materials[0].params[0], value=[1.0, 0, 0, 0])])
+        rab = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [RabFile(am.HOST_MDB, 1, 0, b'model')])
+        g.copy_texture_members(rab, ref_rab, [t.filename for t in texs])
+        om.add_texture(rab, 'own.dds', texfile.solid_dxt1((1, 2, 3), 32))
+        return rab, md
+    with patched(am, STOCK_MATERIALS=fp[0], STOCK_TEXTURES=fp[1]):
+        rab, md = made()
+        assert {md.name_of(m.name) for m in md.materials} == set(am.HULL_MATERIALS.values()) | {am.TURRET_MATERIAL[0]}
+        assert am.material_problems(rab, md) == [], am.material_problems(rab, md)
+        assert any('is not the stock E551' in x for x in am.material_problems(*made(edit=True)))
+        om.add_texture(rab, 'dead.dds', texfile.solid_dxt1((1, 2, 3), 32))
+        assert sorted(am.material_problems(rab, md)) == ['archive member dead.dds used by no material',
+                                                         'archive member dead.lod.dds used by no material']
+        rab, md = made()
+        om.add_texture(rab, 't0.DDS', texfile.solid_dxt1((99, 2, 3), 32))      # a re-encoded stock texture
+        assert any('t0.DDS: member' in x for x in am.material_problems(rab, md)), am.material_problems(rab, md)
 
 def main() -> int:
     failed = 0

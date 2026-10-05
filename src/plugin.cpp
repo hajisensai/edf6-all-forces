@@ -105,6 +105,7 @@ void Validate(Config& n) noexcept {
     // heli.cpp Tune rewrites the speed only with a time constant of at least half a second (30 frames).
     Fix("HeliSpeed",n.heliSpeed,0.0f,200.0f);
     Fix("HeliAgility",n.heliAgility,0.5f,60.0f);
+    Fix("PlayerHeliStopSec",n.playerHeliStopSec,0.0f,10.0f);
     Fix("HeliYawRate",n.heliYawRate,0.0f,360.0f);
     Fix("HeliGuardRadius",n.heliGuardRadius,0.0f,1000.0f);
     Fix("HeliGuardSpeed",n.heliGuardSpeed,1.0f,100.0f);
@@ -125,12 +126,29 @@ void Validate(Config& n) noexcept {
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
+    n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
+    n.gunshipGunnerKey=static_cast<int>(FixInt("GunshipGunnerKey",n.gunshipGunnerKey,0,254));
     n.playerJetFlares=static_cast<int>(FixInt("PlayerJetFlares",n.playerJetFlares,0,99));
+    n.playerJetGearKey=static_cast<int>(FixInt("PlayerJetGearKey",n.playerJetGearKey,0,254));
+    n.playerJetGearButton=static_cast<int>(FixInt("PlayerJetGearButton",n.playerJetGearButton,0,255));
     n.playerJetChuteCutKey=static_cast<int>(FixInt("PlayerJetChuteCutKey",n.playerJetChuteCutKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
+    Fix("DrillMaxRpm",n.drillMaxRpm,30.0f,1200.0f);
+    Fix("DrillSpinUpSec",n.drillSpinUpSec,0.2f,10.0f);
+    Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
+    Fix("DrillDamage",n.drillDamage,0.0f,1.0e6f);
+    Fix("DrillBreak",n.drillBreak,0.0f,1.0e6f);
+    Fix("DrillHeatSec",n.drillHeatSec,1.0f,600.0f);
+    Fix("DrillCoolSec",n.drillCoolSec,1.0f,600.0f);
+    Fix("DrillResumeHeat",n.drillResumeHeat,0.0f,0.95f);
+    n.highCamKey=static_cast<int>(FixInt("HighCamKey",n.highCamKey,0,254));
+    n.highCamButton=static_cast<int>(FixInt("HighCamButton",n.highCamButton,0,255));
+    Fix("HighCamHeight",n.highCamHeight,10.0f,200.0f);
+    Fix("HighCamBack",n.highCamBack,0.0f,200.0f);
+    Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -170,6 +188,8 @@ void LoadConfig() noexcept {
     n.heliLandMs=FixInt("HeliLandMs",ReadInt(L"HeliLandMs",n.heliLandMs),0,3600000);
     n.heliSpeed=ReadFloat(L"HeliSpeed",n.heliSpeed);
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
+    n.playerHeliStopSec=ReadFloat(L"PlayerHeliStopSec",n.playerHeliStopSec);
+    n.playerHeliGunSight=ReadBool(L"PlayerHeliGunSight",n.playerHeliGunSight);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
     n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
@@ -207,14 +227,38 @@ void LoadConfig() noexcept {
     n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
+    n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
+    n.playerJetHailKey=ReadInt(L"PlayerJetHailKey",static_cast<DWORD>(n.playerJetHailKey));
+    n.gunshipBoardGunner=ReadBool(L"GunshipBoardGunner",n.gunshipBoardGunner);
+    n.gunshipGunnerKey=ReadInt(L"GunshipGunnerKey",static_cast<DWORD>(n.gunshipGunnerKey));
     n.playerJetFlares=ReadInt(L"PlayerJetFlares",static_cast<DWORD>(n.playerJetFlares));
+    n.playerJetGearKey=ReadInt(L"PlayerJetGearKey",static_cast<DWORD>(n.playerJetGearKey));
+    n.playerJetGearButton=ReadInt(L"PlayerJetGearButton",static_cast<DWORD>(n.playerJetGearButton));
     n.playerJetChuteCutKey=ReadInt(L"PlayerJetChuteCutKey",static_cast<DWORD>(n.playerJetChuteCutKey));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
+    n.playerJetGunSight=ReadBool(L"PlayerJetGunSight",n.playerJetGunSight);
+    n.playerJetFlightHud=ReadBool(L"PlayerJetFlightHud",n.playerJetFlightHud);
+    n.playerJetThreatHud=ReadBool(L"PlayerJetThreatHud",n.playerJetThreatHud);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.drill=ReadBool(L"Drill",n.drill);
+    n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
+    n.drillSpinUpSec=ReadFloat(L"DrillSpinUpSec",n.drillSpinUpSec);
+    n.drillSpinDownSec=ReadFloat(L"DrillSpinDownSec",n.drillSpinDownSec);
+    n.drillDamage=ReadFloat(L"DrillDamage",n.drillDamage);
+    n.drillBreak=ReadFloat(L"DrillBreak",n.drillBreak);
+    n.drillHeatSec=ReadFloat(L"DrillHeatSec",n.drillHeatSec);
+    n.drillCoolSec=ReadFloat(L"DrillCoolSec",n.drillCoolSec);
+    n.drillResumeHeat=ReadFloat(L"DrillResumeHeat",n.drillResumeHeat);
+    n.highCam=ReadBool(L"HighCam",n.highCam);
+    n.highCamKey=ReadInt(L"HighCamKey",static_cast<DWORD>(n.highCamKey));
+    n.highCamButton=ReadInt(L"HighCamButton",static_cast<DWORD>(n.highCamButton));
+    n.highCamHeight=ReadFloat(L"HighCamHeight",n.highCamHeight);
+    n.highCamBack=ReadFloat(L"HighCamBack",n.highCamBack);
+    n.highCamPitch=ReadFloat(L"HighCamPitch",n.highCamPitch);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     Validate(n);
     IgnoreRetired();
@@ -223,16 +267,25 @@ void LoadConfig() noexcept {
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.1f missile=%d/%lums landMs=%lu",
         n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
+    Log("CONFIG playerHeliStopSec=%.2f gunSight=%d",n.playerHeliStopSec,n.playerHeliGunSight);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
+    Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d",n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud);
+    Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
+    Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X",n.playerJetAll,n.playerJetHailKey,n.gunshipBoardGunner,
+        n.gunshipGunnerKey);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
+    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
+        n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
+    Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
+        n.highCamBack,n.highCamPitch);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
@@ -416,6 +469,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
+    InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
+    InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD

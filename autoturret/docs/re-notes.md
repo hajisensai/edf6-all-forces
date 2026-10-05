@@ -121,7 +121,86 @@ The game's vehicle aim (`0x622640`) takes the world gravity vector from
 `*(*(0x20B2958) + 0x68) + 0x20` (virtual slot 0 returns a pointer to it, m/s^2), rotates it into
 the vehicle frame and drops a round by `AmmoGravityFactor * gravity / 3600` metres per frame^2
 (`0x622B65`), then solves the two launch angles at `0x50350`. Measured gravity: about 14.7 m/s^2.
-The plugin does the same and takes the lower arc.
+The plugin does the same and takes the lower arc; a lofted gun (mark 7303, the Katyusha) the higher one while its
+pitch is within the axis' stops, else the lower (NPC crews only: see "The Katyusha's camera and pose"). The solve is
+one copy, `common/weapon.cpp` `edf::BallisticArc`, which EDF6VehicleCrew's Katyusha loft calls too.
+
+### Rounds in flight (2026-10-05, static)
+
+- Spawn (`0x231CC0` -> `0x231D97..0x231F14`): position `C+0xB80` = the muzzle matrix row 3; velocity `C+0xB90` =
+  row 2 x `C+0xA04` (AmmoSpeed, m/frame) (+ owner velocity x AmmoOwnerMove at `C+0x9C0`), then divided by the
+  vector 1/60 at `0x176B040` (so m/s); gravity `C+0xBA0` = AmmoGravityFactor (`param+0xB0`) x the world gravity
+  vector (`0x231E7B`, the same virtual call as above); `C+0xBB0` the start position.
+- Step (BulletControl `0x233CB0`, also `0x2349D0`): `v += g * 1/60` (`0x233DC4`), then `p += v * 1/60`
+  (`0x233E18..`), the swept segment then ray- and shape-cast (docs/bullet-pass-re.md). Semi-implicit Euler: after n
+  frames a round has fallen `g/3600 * n(n+1)/2`, `g/3600 * n/2` more than the parabola. `Ballistic` aims that much
+  over the point (three passes); `pylib/ballistics.py` is the same model in Python, and `tools/selftest.py
+  lofted_arc_solver` checks both roots against the per-frame step (miss < 5 cm).
+- The request's tier does not touch the speed: a vehicle request's setup `[0]` is `[durability, damage]`
+  (tools/call_weapons.py request_tier). The plugins read AmmoSpeed (`+0x894`) from the live weapon anyway.
+- FireAccuracy (`weapon+0x378`, filled at `0x68CF1F`): fire `0x691B02` passes `weapon+0xE14 x FireAccuracy` to
+  `0x4E820`, which draws the polar angle uniformly in `[0, it]` and the azimuth in `[0, 2pi)`: a cone half angle in
+  radians. `weapon+0xE14`'s only writer found is `0x69DB11` (another weapon class); for Weapon_VehicleShoot it is
+  assumed 1 (EDF6VehicleCrew's `LAUNCHER` debug line logs it).
+- The launcher's elevation stop: `car_base_constraint_data`'s hinge limit `[1, min, max]` (degrees, pitch
+  negative-up) is the aim axis' range: the V603 flak's `[1, -60, 5]` is its `-1.047..0.087` rad. The Naegling's
+  `Rocketcannon_main` `[1, -50, 0]`; tools/make_katyusha.py writes `-80`.
+
+Needs an in-game check: the Katyusha's pitch axis really stops at -80 deg (`AIM` debug lines show `pitch`: seen in
+the user's log 2026-10-05, `pitch -> -1.386`, within the stop); the
+rockets' look (bullet_rocket.rab on a GrenadeBullet01: nose along the flight, the 120-frame smoke trail); the
+CCIP cross where the rockets land (EDF6VehicleCrew `LAUNCHER` lines: muzzle count, speed, cone); `weapon+0xE14`
+being 1 on the launcher; the high-arc auto-aim hitting.
+
+### The Katyusha's camera and pose (2026-10-05, static)
+
+The user's play (EDF6VehicleCrew.log 18:36-18:38: `LAUNCHER elev=75..79`, `AIM lofted ... pitch -> -1.3..-1.39`):
+"the camera stares at the sky, the hydraulic rod is too short and parts from the launcher".
+
+- Aim input. Vehicle402_Rocket slot 55 (`0x5FD8E0`) writes the rider's stick (`seat+0x2D0`) into the turn input
+  `+0x2AA0` (`0x5FD957`); slot 4 (`0x5FDB00`) hands it to the seat's aim, `VehicleWeaponAim` (vtable `0x17D8A68`,
+  RTTI `.?AVVehicleWeaponAim@@`) at `seat+0xE0`, slot 2 `0x5FBDA0`. Its axes (`+0x10`, stride `0x40`: min, max, angle,
+  velocity, ...; params at `+0x90`) step by the input (`0x5FBC00`); mode `+0xC8` 1 (a target angle at `+0xA0/+0xA4`
+  the axes chase) is only set when `0x7748F0` says the game is online (`0x672820`, slot 6 `0x6731C0`), so offline the
+  axes are the turret's only aim state. Each axis maps its angle onto its bones through entries at `axis+0x28`
+  (stride `0x38`, `0x5FC280` -> `0x5FC630`): `[seat+0x158]+0xC` is the launcher's pitch the pose reads. Slot 3
+  `0x5FACD0` builds the aim's matrix from the two angles. Common layout: `common/edf/layout.h` kSeatAim / kAimAxes.
+- The camera. Not traced to its reader (the human's camera code, `0x572DF0` / `0x54DDF0`, and the scene cameras were
+  not followed through). What is known: offline the axes are the one aim state and the launcher's bone follows them,
+  and steering the axes (EDF6AutoTurret writes `+0x2AA0`) turned the player's view with the launcher. The fix assumes
+  the camera reads the axes (or the aim's matrix), not the launcher's bone: EDF6AutoTurret no longer steers a lofted
+  launcher the player rides (`PlayerLofted`), and EDF6VehicleCrew lifts only the bone. **In-game check**: with
+  `Debug=1` EDF6VehicleCrew logs `LOFT ... bone=<held> stock(axis)=<axes> camera=<screen centre pitch>`; `camera`
+  must follow `stock(axis)`, not `bone`. Were it the bone, the sight would run away (lofted bone -> camera up -> no
+  ground -> bone back down), and the fallback would be a camera of the plugin's own.
+- The pose. Slot 45 (`0x5FD980`) calls `0x6EDCA0` (the car base), then `0x5FDDA0` (`call` at `0x5FD99C`), then
+  `0x1100B90` (the model: the root bone's world = the vehicle matrix, then `0x1100010`: every bone in order with
+  `+0x8 == 1`, world `+0xB0` = local `+0x70` x parent's world). `0x5FDDA0`: the turntable's yaw (`0x661C00`), the
+  launcher's pitch (`0x661810`: the bind local from the skeleton, `*(veh+0xEE0)` records `+0x58` stride `0xD0`, last
+  index `+0x68`, local at `+0x20`, turned by `[seat+0x158]+0xC`; writes world and local), then the prop: angle =
+  `asin(dot(turntable up, launcher forward))` (`asinf`), clamped to `[-pitchMax, -pitchMin]` of the seat's pitch axis,
+  plus the prop's bind angle (`+0x2AC0`, set in the constructor `0x5FD604`), written into the prop's local as
+  `Rx(angle) Ry(90 deg)` (`0x5FDF57..0x5FE095`): the whole prop turns by the launcher's elevation about the cylinder's
+  pivot. The weapon aims along `Rocketcannon_main` (`vehicle_weapon_setting`), its muzzles' rows copied from that
+  bone (`0x633DD0`). Bone records the constructor caches: `+0x2AC4` (a 4-letter name), `+0x2AC8` base, `+0x2ACC`
+  main, `+0x2AD0` prop (looked up by name).
+- EDF6VehicleCrew (`src/katyusha.cpp`) redirects the call at `0x5FD99C` (bytes `E8 FF 03 00 00`, checked) through a
+  stub near the image to `PoseHook`: the stock `0x5FDDA0`, then (the Katyusha's model only: it has the bone
+  `edf6vc_ram_rod`) the launcher's local at the elevation `src/launcher.cpp` LoftWant asks for (the high arc onto the
+  ground point under the screen's centre, `edf::BallisticArc`, eased at 1.1 rad/s; no ground under it: the stock
+  pose), and the ram: the cylinder (`Rocketcannon_prop`) and the rod (`edf6vc_ram_rod`, at the eye) both turned by
+  the angle the line from the cylinder's pivot to the eye (fixed on the launcher) has turned since bind. The world
+  pass right after builds the bones (and so the muzzles) from those locals.
+- The stock ram measured (`pylib/katyusha_model.py ram_report`, the built model): turned with the launcher, the eye
+  stays inside the launcher's box up to 50 deg, is 0.14 m out at 55, 0.35 at 60, 1.09 at 75, 1.35 at 80. The
+  telescopic one: 1.49 m long at 0 deg, 1.77 at 80 (stroke 0.28 m, the rod lengthened 0.36 m into the cylinder), the
+  rod's front inside the cylinder and the eye inside the launcher at every 5 deg (`check_ram`).
+
+Needs an in-game check: the `LOFT` line above (camera vs bone); the rockets leaving along the lifted launcher and the
+CCIP cross near the screen's centre on the ground; the ram drawn joined; the launcher's rigid body (`car_base_rigid_body`
+Rocketcannon_main, 0.25) following the lifted bone rather than holding the axis' pose, and nothing after the world
+pass rewriting the prop (it is a `car_base_simulation_node`, as the wheels are); the pose hook not fighting
+another plugin's (the bytes are checked, a mismatch leaves the stock pose and logs `KATYUSHA pose call ... changed`).
 
 ## GrenadeBullet01 (the flak round)
 

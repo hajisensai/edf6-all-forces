@@ -303,6 +303,8 @@ struct CarrierState {
     ULONGLONG dock[kCarrierDrones];   // its drones: game ms each is ready (kDroneOut: out)
     ULONGLONG launchAt;      // its last launch
     int sorties;             // its launches left (kCarrierSorties)
+    float order[3];          // the player flying it sent its drones here (PlayerLaunchDrone): they work round it,
+    bool ordered;            // ...within kOrderRange, instead of round the carrier
 };
 // A carrier's drone: its carrier (the carrier entry's control block; nullptr once that entry is gone) and its
 // place on it. `carried` stays: a drone whose carrier is gone withdraws ("carrier lost").
@@ -480,6 +482,13 @@ void DollFrame(int i,const unsigned char* v) noexcept;   // its doll follows dro
 void ResetDolls() noexcept;                // the mission's end: forgotten, not deleted (they went with it)
 bool PreloadDolls(void* mgr,bool dollBody) noexcept;   // the dolls' SGOs with the doll drone's body: whether
 bool InstallDolls() noexcept;
+// The player's carrier (playerjet_board.inc): a drone launched now at `at` (its drones then work round that point, within
+// kOrderRange; false: none ready, the gap since the last not passed, the table full), its drones called back (how
+// many), its launches left.
+constexpr float kOrderRange=400.0f;
+bool PlayerLaunchDrone(unsigned char* carrier,const float* at,ULONGLONG ms) noexcept;
+int RecallDrones(unsigned char* carrier,ULONGLONG ms) noexcept;
+int DronesLeft(const unsigned char* carrier) noexcept;
 
 // --- jet_bay.cpp ---
 void BombRun(Jet& j,const float* pos,ULONGLONG ms,float* want,float* speed) noexcept;
@@ -489,6 +498,19 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
 bool InstallBay(bool spawnOk) noexcept;
 void PreloadShells(void* mgr,bool gunship) noexcept;   // the gunship's shells (with its body), the impact charges
 void ResetShells() noexcept;
+// The player's aircraft (playerjet_board.inc): a bay's bombs left (0: no bay, or it is open already); the bay opened
+// with its first bomb on `at`, the carpet laid along `vel` at its speed (false: none); a frame of the open bay; the
+// gunship's shell fired at `at` (false: not ready, out of reach, not preloaded); whether its shells are there at all.
+int BayLeft(const unsigned char* v) noexcept;
+bool PlayerOpenBay(unsigned char* v,const float* at,const float* vel) noexcept;
+void PlayerBayFrame(unsigned char* v,const float* pos) noexcept;
+bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept;
+bool ShellsReady() noexcept;
+// The gunship's crew (playerjet_crew.inc): its NPC gunner's shell under a player pilot (its own target round the
+// gunship; false: none, not ready); the gun's wait before the next shell (s, 0: ready); a shell's reach (m).
+bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept;
+float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept;
+float ShellReach() noexcept;
 
 // --- jet_spawn.cpp ---
 // Rows right, up, forward, position, as BombingPlane_Init builds its matrix (right = up x forward).
@@ -501,6 +523,10 @@ bool ModFileThere(const wchar_t* file) noexcept;   // Mods/OBJECT (next to the g
 // (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets).
 Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source) noexcept;
 void FarRender(Jet& j,unsigned char* v) noexcept;
+// jet.cpp: a jet the player flew or called down handed back to its NPC pilot (playerjet_board.inc), flying at `vel`.
+void ResumeNpc(unsigned char* v,const float* vel) noexcept;
+// jet.cpp: the entry of one of ours the player boarded, made now if a mission placed it empty (nullptr: none).
+Jet* Adopt(unsigned char* v) noexcept;
 bool SpawnReady() noexcept;
 bool InstallSpawn() noexcept;
 bool InstallFarRender() noexcept;

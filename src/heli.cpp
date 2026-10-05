@@ -388,6 +388,8 @@ struct Heli {
     float top,stopDecel;  // m/s at full stick, and the braking it plans with (see Tune)
     bool tuned;           // Fly writes params (k, b, max yaw, yaw smoothing) every frame
     float params[4];
+    float stock[4];       // ...and the heli's own (Tune read them): put back when its NPC stops flying it (Restore)
+    bool applied;         // params are on the heli now
     ULONGLONG circleUntil;// 409: circling for its turret until then (see kTurretCircleMs)
     Door doors[2];        // 410: left, right
     // A called heli (HeliCalled): its post (guard), when its sortie ends (game ms), leaving since leftAt, and
@@ -1029,7 +1031,7 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
 // learned from how the barrel moves, as EDF6AutoTurret's tank gunners do; an axis held at a stop with the
 // error not closing for kStuckMs flips its sign too.
 constexpr std::size_t kDoorBlock=0x2030,kDoorStride=0x20,kDoorPull=0x10;
-constexpr std::size_t kSeatAim=0xE0,kAimAxes=0x10,kAxisStride=0x40,kAxisMin=0x0,kAxisMax=0x4,kAxisAngle=0x8;
+// The seat aim's axes (kSeatAim, kAimAxes, ...): common/edf/layout.h.
 constexpr std::size_t kMuzzles=0x1D0,kMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleLocal=0x10,kBoneRows=0xB0;
 constexpr std::size_t kMuzzleMode=0xE0,kWeaponRows=0x150;
 constexpr std::int32_t kModeWeaponRows=0;
@@ -1418,6 +1420,7 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     if(h.tuned) {   // see Tune
         Put<float>(v,kSpeedGain,h.params[0]);Put<float>(v,kBlend,h.params[1]);
         Put<float>(v,kMaxYaw,h.params[2]);Put<float>(v,kYawSmooth,h.params[3]);
+        h.applied=true;
     }
     for(int i=0;i<3;++i){const float raw=(pos[i]-h.prev[i])/dt;h.vel[i]+= (raw-h.vel[i])*0.3f;h.prev[i]=pos[i];}
     // In contact (see kGroundContact): on the ground, or perched on another body.
@@ -1869,6 +1872,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
     const float denom=1.0f-d*(1.0f-b);
     if(!std::isfinite(k+b+d+yaw+smooth) || k<=0.0f || b<=0.0f || b>=1.0f || d<=0.5f || d>=1.0f || denom<1e-6f)return;
     h.params[0]=k;h.params[1]=b;h.params[2]=yaw;h.params[3]=smooth;
+    std::memcpy(h.stock,h.params,sizeof(h.stock));
     const float frames=Cfg().heliAgility*60.0f,stockTop=b*k/denom;
     if(Cfg().heliSpeed>stockTop && frames>=30.0f) {
         const float blend=1.0f-(1.0f-1.0f/frames)/d;   // 1-d*(1-blend) = 1/frames
@@ -1904,10 +1908,75 @@ bool HeliCrewed(const void* vehicle) noexcept {
     return true;
 }
 
+namespace {
+// The heli's own speed and yaw params back (Tune's stock), once its NPC no longer flies it: the player bumped it out
+// (the user, 2026-10-05: a stock heli the player flies "drifts, does not stop": they flew on the NPC's tuning, its
+// velocity settling over HeliAgility's 4 s instead of the stock few tenths), or the seat emptied. Left on, a later
+// crew's Tune also took them for the stock ones. Its NPC back, Fly applies them again.
+void Restore(Heli& h,unsigned char* v) noexcept {
+    if(!h.applied)return;
+    h.applied=false;
+    Put<float>(v,kSpeedGain,h.stock[0]);Put<float>(v,kBlend,h.stock[1]);
+    Put<float>(v,kMaxYaw,h.stock[2]);Put<float>(v,kYawSmooth,h.stock[3]);
+    Log("HELI v=%p no NPC pilot: its own params back (k=%.2f b=%.5f yaw=%.0fdeg/s smooth=%.4f)",v,h.stock[0],h.stock[1],
+        h.stock[2]*180.0f/kPi,h.stock[3]);
+}
+}  // namespace
+
+namespace {
+// The player's hover assist (ini PlayerHeliStopSec; the user, 2026-10-05: a stock heli "drifts, does not stop"): the
+// stock helis' horizontal velocity settles over ~13 s (d 0.999, blend 0.0003: the log's "tau=12.8s"), so let go it
+// slides on. The heli's own params made to settle over PlayerHeliStopSec instead, as Tune does for the NPC (the game's
+// own velocity law, nothing written to the velocity): blend from 1-d*(1-blend) = 1/frames, k keeping its stock top
+// speed (b k / (1-d (1-b))). Written every frame the player flies it (as Fly does), the stock ones back as they get off.
+struct Assist { ObjRef ref; float k,b; ULONGLONG seen; bool said; };
+Assist assists[8];
+constexpr ULONGLONG kAssistStaleMs=2000;
+
+void AssistOff(unsigned char* v) noexcept {
+    for(auto& a:assists) {
+        if(!a.ref.Is(v))continue;
+        Put<float>(v,kSpeedGain,a.k);Put<float>(v,kBlend,a.b);
+        a=Assist{};
+        Log("HELI v=%p the player is off: its own speed params back",v);
+    }
+}
+
+void PlayerAssist(unsigned char* v) noexcept {
+    const float sec=Cfg().playerHeliStopSec;
+    if(sec<=0.0f){AssistOff(v);return;}
+    const ULONGLONG ms=GameMs();
+    Assist* a=nullptr;
+    for(auto& x:assists)if(x.ref.Is(v))a=&x;
+    if(!a) {   // its first frame under the player: the params are its own now (Restore: no NPC tuning left on it)
+        for(auto& x:assists)if(!a && (!x.ref || ms-x.seen>kAssistStaleMs))a=&x;
+        if(!a)return;
+        *a=Assist{ObjRef::Of(v),At<float>(v,kSpeedGain),At<float>(v,kBlend),ms,false};
+    }
+    a->seen=ms;
+    const float k=a->k,b=a->b,d=At<float>(v,kDamp);
+    const float denom=1.0f-d*(1.0f-b),frames=std::fmax(sec*60.0f,15.0f);
+    if(!std::isfinite(k+b+d) || k<=0.0f || b<=0.0f || b>=1.0f || d<=0.5f || d>=1.0f || denom<1e-6f)return;
+    const float blend=1.0f-(1.0f-1.0f/frames)/d;
+    if(!(blend>b && blend<1.0f))return;   // it settles faster than that already
+    const float top=b*k/denom;
+    if(!a->said && (a->said=true))
+        Log("HELI v=%p player assist: settles over %.1fs (stock %.1fs), top speed %.1f m/s kept",v,sec,1.0f/denom/60.0f,top);
+    Put<float>(v,kSpeedGain,top/(frames*blend));Put<float>(v,kBlend,blend);
+}
+}  // namespace
+
 void HeliFrame(unsigned char* vehicle) noexcept {
     if(rescue.ref.Is(vehicle))rescue.seenFrame=GameFrame();   // RescueHeliAlive
     if(!profileOk || vehicle[kDead])return;
-    if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC pilots
+    if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
+        if(Heli* h=Find(vehicle))Restore(*h,vehicle);
+        const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
+        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player)PlayerAssist(vehicle);
+        else AssistOff(vehicle);
+        return;
+    }
+    AssistOff(vehicle);   // an NPC in its seat again: Tune's stock is the heli's own
     if(IsJet(vehicle)){if(Cfg().jetPilot)JetFrame(vehicle);return;}
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
@@ -2308,6 +2377,7 @@ bool CheckHeliProfile() noexcept {
 // new map), and the rescue (its heli was the last mission's).
 void ResetHelis() noexcept {
     for(auto& h:helis)h=Heli{};
+    for(auto& a:assists)a=Assist{};
     fullLoggedAt=0;
     ResetTrack();
     rescue=Rescue{};

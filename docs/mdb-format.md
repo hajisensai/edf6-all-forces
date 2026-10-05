@@ -36,6 +36,20 @@
 BOMBER501.MRAB 的目录：`TEXTURE`（`*.lod.dds` 低清贴图）、`MODEL`（`bomber501.mdb`、`bomber501_2.mdb`）、`HD-TEXTURE`（`*.dds`）。
 **.mdb 里的 texture 表的 `filename` 字段（如 `bomber501_df.dds`）就是 RAB 里同名文件**；`.lod.dds` 由引擎按名字派生（[M]）。
 
+**成员顺序是加载顺序约定 [H]**：全部 185 个原版 OBJECT 档案的文件表都按目录表顺序分组（`TEXTURE` 的 lod → `MODEL` → `HD-TEXTURE`）。
+EDF.dll 的读取（静态核对）：
+- `0x69980` 按文件表顺序读非 HD 成员（flag & 1 的跳过，之后 seek 到下一个），读完一批按顺序分发给各目录的加载函数；
+- 分发处（`0x110b03b` 附近）先取本档案 `TEXTURE` 目录的资源表，把它作为第 8 个参数交给每个加载函数；`TEXTURE` 成员名里有 `.lod.` 就去掉 `lod.`
+  （`0x110b182`），加载结果按这个名字插进资源表（`0x110b2aa`）；HD 文件按同一名字在排序索引里二分查找（`0x71230`，区分大小写），之后流式加载；
+- `MODEL` 的加载函数（`0x1107db0` → `0x1108100` → 每个材质 `0x110f110`）在模型加载**当时**按材质贴图槽的 filename 在这张资源表里查找
+  （`0x110f640`），查不到就是空贴图（`0x110f6ff`）。
+
+所以 lod 成员必须排在模型前面；排在后面的贴图永远绑不上，模型全黑（双管坦克就是这样：生成的档案只剩模型一个成员时，旧的 `add_texture`
+把贴图都接在了模型后面）。`pylib/mdb.py` 的 `insert_member` 按目录表顺序插入，`obj_model.texture_problems` 在生成时检查。
+
+lod 贴图的布局（2176 对非 DX10 的原版 HD / lod 全部如此）：每边是 HD 的 1/16、但不小于 16 像素；mip 比完整链少一级，止于长边 2 像素
+（128×128：7 级；64×32：6 级），而 HD 一直到 1×1。`texfile.texture_pair` 照此切出 lod（多出的 1×1 级是否有害未在游戏里验证，按原版对齐）。
+
 `rab_write(rab_read(x)) == x`：BOMBER501 / V506_HELI / VEHICLE409_HELI 已逐字节验证，全量 185 个 OBJECT 档案的结果见 §6。
 
 ### 1.1 CMPL [H]

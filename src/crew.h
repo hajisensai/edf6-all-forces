@@ -37,6 +37,8 @@ struct Config {
     DWORD heliLandMs=0;        // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
     float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
+    float playerHeliStopSec=1.0f;// a stock heli the player flies: its horizontal speed's time constant (s; 0: stock)
+    bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
     float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
@@ -79,9 +81,33 @@ struct Config {
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
-    float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
+    float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
+    bool playerJetGunSight=true;    // the aircraft the player flies: our gun sight (pipper, lead, boresight), the stock red aim lines hidden
+    bool playerJetFlightHud=true;   // ...and its flight HUD: flight path marker, horizon and pitch ladder, heading tape, speed / altitude
+    bool playerJetThreatHud=true;   // ...and the threats' directions (enemy locks, missiles coming for it) round the screen's centre
+    int playerJetGearKey=0x47;      // the key that raises / lowers the landing gear ('G'; gear.cpp PlayerGear)
+    int playerJetGearButton=0x40;   // ...and the pad button (the seat's button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
+    bool playerJetAll=true;         // the player can board every other aircraft of the plugin too (playerjet_kinds.h)
+    int playerJetHailKey=0x48;      // ...and this key calls the nearest one down to them ('H'; 0: off)
+    bool gunshipBoardGunner=false;  // the gunship's board button takes its gunner seat (off: its pilot seat; playerjet_crew.inc)
+    int gunshipGunnerKey=0x56;      // ...the other seat while this key is held ('V'; 0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
+    float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
+    float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
+    float drillSpinDownSec=2.5f;    // ...seconds from the top RPM to still, let go
+    float drillDamage=2000.0f;      // ...damage a second to an enemy it touches, at the top RPM (less in proportion)
+    float drillBreak=600.0f;        // ...HP a second off a building or rock it bores into, at the top RPM
+    float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
+    float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
+    float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
+    bool highCam=true;              // the artillery's high camera toggle (highcam.cpp): the Katyusha, the howitzer
+    int highCamKey=0x43;            // ...its key ('C'; a Windows virtual-key code, 0: none)
+    int highCamButton=0x80;         // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
+    float highCamHeight=45.0f;      // ...the high eye: m over the vehicle's origin
+    float highCamBack=35.0f;        // ...m behind it
+    float highCamPitch=40.0f;       // ...looking down this many degrees ahead
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
@@ -123,6 +149,8 @@ void ResetSubs() noexcept;        // subcarrier.cpp
 void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
+void ResetLauncher() noexcept;    // launcher.cpp
+void ResetHeliSight() noexcept;   // helisight.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
 void ResetMissiles() noexcept;    // missile.cpp
 // What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
@@ -143,6 +171,8 @@ inline float PlayEdge() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorl
 inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld : 3000.0f; }    // bigworld.cpp: once a mission, the map's ground on a grid (log)
 // The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
 bool LastViewProj(float* out) noexcept;
+// The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.
+bool CameraRay(float* eye,float* dir) noexcept;
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
 bool InstallBigWorld() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
@@ -164,6 +194,7 @@ void LockSound(unsigned char* vehicle) noexcept;
 using edf::kSelf; using edf::kSelfCtrl; using edf::kMatrix; using edf::kPosition; using edf::kDead; using edf::kTeam;
 using edf::kSeats; using edf::kSeatCount; using edf::kSeatStride; using edf::kSeatRider; using edf::kSeatRiderCtrl;
 using edf::kHumanPad; using edf::kHumanPlayer; using edf::kDummyRiderVtable; using edf::kSlotInput;
+using edf::kSeatAim; using edf::kAimAxes; using edf::kAxisStride; using edf::kAxisMin; using edf::kAxisMax; using edf::kAxisAngle;
 using edf::At; using edf::Put;
 // Teams (mission AsCommon.h): player 0, enemy 1, friend 2, neutral 3, vehicle 5 = nobody's vehicle,
 // which anyone may board (CanRideSeat skips the team test for it).
@@ -304,6 +335,28 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // pla
 // of its side within `radius` metres (a charge of the vehicle's own, as the blast drones' is: its team, its
 // kills, friends untouched). False when it could not be dealt (no charge preloaded this mission).
 bool ImpactDamage(const unsigned char* by,const float* at,float damage,float radius) noexcept;
+// jet_bay.cpp: a bite of the drill tank's drill: its charge fired by `by` straight from `from` at `at` with `damage`
+// (its side's enemies, its kills, the map's buildings and rocks). False when not fired (not preloaded this mission).
+bool DrillCharge(const unsigned char* by,const float* from,const float* at,float damage) noexcept;
+
+// drill.cpp: the drill tank (EDF6VC_DRILL.SGO, docs/drill-re.md). DrillInput before the stock input (the player's
+// trigger taken for the drill), DrillFrame after it (spin, pose, bites).
+bool InstallDrill() noexcept;
+bool IsDrillTank(const void* vehicle) noexcept;
+void DrillInput(unsigned char* vehicle) noexcept;
+void DrillFrame(unsigned char* vehicle) noexcept;
+void ResetDrills() noexcept;
+// The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
+struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated; };
+bool PlayerDrillCue(DrillCue* out) noexcept;
+
+// highcam.cpp: the artillery's high camera (an indirect-fire vehicle the player drives: its key / pad button switches
+// the vehicle's camera block between its own points and a high view, docs/camera-re.md). From every vehicle's input,
+// the plugin off too (it gives the block back then). PlayerHighCam (hud.cpp): whether the toggle is offered this
+// moment, the view's state and whether the player is on keys (else a pad).
+void HighCamFrame(unsigned char* vehicle) noexcept;
+bool PlayerHighCam(bool* on,bool* keys) noexcept;
+void ResetHighCam() noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
@@ -340,6 +393,27 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
+// Any other aircraft of the plugin (playerjet_kinds.h) is the player's too: they may board it now (one of ours, low and
+// slow enough: crew.cpp bumps its NPC pilot for them); the plugin holds it for them (they fly it, it comes down for
+// them, catches them or waits where they left it): jet.cpp does not fly it then, crew.cpp does not crew it.
+bool PlayerJetBoardable(const void* vehicle) noexcept;
+bool PlayerJetHolds(const void* vehicle) noexcept;
+// The gunship's crew (playerjet_crew.inc, README 炮舰机): seat 0 its pilot, kGunnerSeat its side gunner (tools/make_jets.py
+// with_gunner_seat; a gunship installed before has the one seat, and none of this). Whether `vehicle` is such a
+// gunship; the seat its board button takes now (crew.cpp GunshipSeat: ini GunshipBoardGunner, the other one while
+// GunshipGunnerKey is held).
+constexpr unsigned kGunnerSeat=1;
+bool GunshipCrewSeats(const void* vehicle) noexcept;
+unsigned GunshipBoardSeat() noexcept;
+// The player at its gun, its NPC pilot flying on (jet.cpp JetFrame): the pylon turn's centre, `at` the point they last
+// shelled (centred: within the last kGunnerCentreMs), `home` where they boarded. False with the player not there.
+struct GunnerOrder { bool centred; float at[3],home[3]; };
+bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
+// The gunner's sight (hud.cpp GunnerMarks, game thread): where the screen's centre meets the ground (`ground`: within
+// the camera's reach), its range from the gunship and whether a shell reaches it, the gun's wait (s, 0: ready; `ready`:
+// the shells are there and the gun is), the pylon turn's centre. False with the player not at a gunship's gun.
+struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; };
+bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
 // The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path; stores: what it
@@ -347,6 +421,19 @@ void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's 
 // would hit now (hasImpact: the ground is under its fall); clear: its
 // height over the ground, or (ground: false, none under it) over the world's zero; keys: flown with the keyboard and
 // mouse; aiming: in the air the mouse's aim steers it, `aim` the point it aims at, `path` the point it flies at.
+// The fighter HUD's symbols for the aircraft the player flies (playerjet.cpp Sight / Threats, hud.cpp FighterHud).
+constexpr int kMostThreats=6;
+struct PlayerJetSymbols {
+    float pos[3],nose[3];        // the aircraft and its body's nose (the guns fire along it: the boresight)
+    float dir[3]; bool moving;   // its flight path's direction; moving: fast enough to have one (a hovering craft has not)
+    bool gun;                    // a gun to sight: its rounds' `pipper` point at the range they are sighted for
+    float pipper[3];
+    bool lead,leadInRange;       // the picked store's target led for the guns (leadAt: aim the pipper there), within reach
+    float leadAt[3],leadRange,gunRange;
+    int threats;                 // what threatens it: where, and 2 a missile coming for it, 1 an enemy jet's lock on it
+    float threatAt[kMostThreats][3];
+    int threatKind[kMostThreats];
+};
 struct PlayerJetReadout {
     float speed,throttle,clear,climb,hp,hpMax,load;
     float rotate;                // m/s: the speed it can lift off from (the kind's rotate), for the takeoff cue
@@ -362,15 +449,65 @@ struct PlayerJetReadout {
     float impact[3];
     int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
     float lockAt[3],lockProgress;
+    PlayerJetSymbols sym;        // the fighter HUD's (hud.cpp FighterHud)
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
+// launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked
+// kMarkLofted (common/edf/weapon.h): where a rocket fired now comes down (reach: it does within its life), `ring` points
+// round it its ripple's spread reaches (FireAccuracy's cone), the horizontal range, the flight in seconds and the
+// launcher's elevation in degrees. LauncherFrame from every vehicle's input (game thread); PlayerLauncher the last one,
+// false with none this moment.
+constexpr int kLauncherRing=16;
+struct LauncherReadout {
+    float impact[3];
+    float ring[kLauncherRing][3];
+    int rings;
+    float range,flight,elevation;
+    bool reach;
+};
+// A round's arc as the game steps it (a frame: vel += drop, pos += vel; m/frame, m/frame^2) from `pos` for at most
+// `frames` frames: the first ground a map ray finds along it (`hit`) and the frames it took. launcher.cpp.
+bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept;
+void LauncherFrame(unsigned char* vehicle) noexcept;
+bool PlayerLauncher(LauncherReadout* out) noexcept;
+// katyusha.cpp: the Katyusha's launcher pose. The 402 class's pose call is detoured: after the stock pose the launcher
+// is held at the elevation LauncherFrame asks for with SetLauncherLoft (the arc onto where the player's camera looks;
+// `aim` false: none, the stock pose, the player's own aim), eased at the stock turret's rate, and the telescopic ram's
+// two bones are aimed at each other's pivot. LauncherLoft: the last pose of `vehicle` (rad; held: off the stock pose).
+bool InstallKatyusha() noexcept;
+void SetLauncherLoft(const void* vehicle,bool aim,float elevation) noexcept;
+struct LoftReadout { bool held; float elevation,stock,ramTurn,ramLength; };
+bool LauncherLoft(const void* vehicle,LoftReadout* out) noexcept;
+void ResetKatyushas() noexcept;
+// Whether the player in `vehicle` sees our gun sight instead of the stock aim lines (crew.cpp AimLines): an aircraft
+// the player-jet flight flies (playerjet.cpp), ini PlayerJetGunSight on.
+bool PlayerJetOwnSight(const void* vehicle) noexcept;
+// helisight.cpp: the gun sight of a stock helicopter (heli.cpp IsHelicopter, no plugin body) the player flies or mans
+// (ini PlayerHeliGunSight): the seat's gun (crew.cpp HiddenAimGuns: its stock aim line hidden), `bore` the way its
+// muzzle points (a direction), `pipper` where a round fired now first hits the map along its real arc (hit), else
+// where it is at the end of its life; `range` m from the muzzle to it. HeliSightFrame from every vehicle's input (game
+// thread); PlayerHeliSight the last one, false with none this moment (hud.cpp HudPublish, the snapshot carries it).
+struct HeliSightReadout { float bore[3],pipper[3],range; bool hit; };
+bool PlayerHeliOwnSight(const void* vehicle) noexcept;
+void HeliSightFrame(unsigned char* vehicle) noexcept;
+// netprobe.cpp: Debug=1, online only: once a second per helicopter-class vehicle, which machine runs it and how its
+// pose replication stands (the NET lines, docs/online-re.md). Reads only.
+void NetProbe(unsigned char* vehicle) noexcept;
+bool PlayerHeliSight(HeliSightReadout* out) noexcept;
+// crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
+// `most`; how many.
+int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
 namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;
 // jet.cpp: the jets locking on to `target` lose their lock with `chance` each (a flare drop); how many did
-int BreakLocks(const void* target,float chance) noexcept; }
+int BreakLocks(const void* target,float chance) noexcept;
+// jet.cpp: the jets with `target` in their missile lock now (LockingOn's): where they are, at most `most`; how many
+int LockersOf(const void* target,float (*at)[3],int most) noexcept; }
 // missile.cpp: a guided round now homing on a point within `radius` m of `at` (its lock point there)
 bool MissileHoming(const float* at,float radius) noexcept;
+// missile.cpp: MissileHoming's rounds: where they are, at most `most`; how many (all of them, past `most` too)
+int MissilesHomingAt(const float* at,float radius,float (*pos)[3],int most) noexcept;
 // missile.cpp: flares. A flare dropped by `owner` at `at` (m/s `vel`): the rounds homing there may take it for their
 // target. FlaresStep moves them once a frame; FlaresOf: `owner`'s burning flares, at most `most` (their places, speeds).
 // `nose`: the jet's nose (the aspect); `pairStart`: the first flare of a drop (each drop is judged once a round).

@@ -62,9 +62,15 @@ const unsigned char kWaterCmpSig[]={0x81,0xFA,0x25,0x00,0x00,0x10};   // 0x652E8
 const unsigned char kDieSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x69,0x81,0x18,0x06,0x00,0x00,0x40,0x03,0x00,0x00};
 const unsigned char kFindPartSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x56,0x48,0x83,0xEC,0x50};
 
+// A jet is the player's while they fly it (or it comes down for them, playerjet.cpp): its step first, which says no
+// for every jet it does not fly.
+bool JetOrPlayerStep(unsigned char* v,float* lin,float* ang) noexcept {
+    return PlayerJetBodyStep(v,lin,ang) || JetBodyStep(v,lin,ang);
+}
+
 StepFn StepOf(PluginBody body) noexcept {
     switch(body) {
-        case PluginBody::jet: return &JetBodyStep;
+        case PluginBody::jet: return &JetOrPlayerStep;
         case PluginBody::sub: return &SubBodyStep;
         case PluginBody::playerJet: return &PlayerJetBodyStep;
         default: return nullptr;
@@ -74,7 +80,9 @@ OwnerMessageFn MessageOwner(PluginBody body) noexcept {
     switch(body) {
         case PluginBody::sub: return &SubMessage;
         case PluginBody::playerJet: return &PlayerJetMessage;
-        default: return nullptr;   // the jets take their messages as the stock 506 does
+        // The jets take their messages as the stock 506 does, but for one the player flies (its water: the plugin's crash).
+        case PluginBody::jet: return &PlayerJetMessage;
+        default: return nullptr;
     }
 }
 

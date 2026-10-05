@@ -77,6 +77,12 @@ bool chargeReady[kChargeCount]{};         // preloaded this mission (PreloadShel
 // m over the impact the charge starts, straight down (make_jets.py IMPACT_*: 10 m a frame for 6 frames, bursting on
 // what it meets: the ground under the impact, or the enemy rammed in the air)
 constexpr float kImpactDrop=2.0f;
+// The drill tank's charge (DrillCharge, drill.cpp): tools/make_drill.py's EDF6VC_DRILL_CHARGE.SGO, the impact charges'
+// recipe with a small blast (pylib/vcobjects.py DRILL_CHARGE: 4 m, at least the 3 m from which a blast breaks buildings,
+// docs/drill-re.md §3) and a short flight (from the drill's base along its axis, it meets what the drill touches).
+const wchar_t kDrillChargeSgo[]=L"app:/object/edf6vc_drill_charge.sgo";
+const wchar_t kDrillChargeFile[]=L"EDF6VC_DRILL_CHARGE.SGO";
+bool drillReady=false;                    // preloaded this mission (PreloadShells)
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
@@ -233,6 +239,80 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.shells.gunShots,j.t.target,Len(d));
 }
 
+// The player's aircraft (playerjet_board.inc). A bay not yet open: its bombs.
+int BayLeft(const unsigned char* v) noexcept {
+    const Jet* const j=FindJet(v);
+    if(!j || !j->bay.ifc || j->bay.bombing)return 0;
+    const std::int32_t shots=At<std::int32_t>(j->bay.ifc,kIfcShots);
+    return shots>0 ? shots : 0;
+}
+
+// The bay opened by the player: its first bomb on `at` (the cockpit's CCIP), the carpet laid on from there along the
+// jet's track at its speed when the bay opened, a step a frame as the stock bomber lays it (BayFrame: the drop point
+// starts at bayFrom + reach along the line from bombAt).
+bool PlayerOpenBay(unsigned char* v,const float* at,const float* vel) noexcept {
+    Jet* const j=FindJet(v);
+    if(!j || !BayLeft(v))return false;
+    BayState& b=j->bay;
+    float dir[3]={vel[0],0.0f,vel[2]};
+    const float speed=Len(dir);
+    if(!Normalize(dir) || speed<1.0f)return false;
+    std::memcpy(b.bombAt,at,12);std::memcpy(b.bombDir,dir,12);
+    b.bombSpeed=speed;b.bayFrom=-b.reach;b.baySteps=0;b.bayOpenAt=GameMs();b.bombing=true;
+    reinterpret_cast<void(*)(void*)>(image+kIfcOpen)(b.ifc);
+    Log("JET v=%p bay opened by the player: %d to drop from (%.0f,%.0f,%.0f) along its track at %.0f m/s",v,At<std::int32_t>(b.ifc,kIfcShots),
+        at[0],at[1],at[2],speed);
+    return true;
+}
+
+void PlayerBayFrame(unsigned char* v,const float* pos) noexcept {
+    if(Jet* const j=FindJet(v))BayFrame(*j,pos);
+}
+
+namespace {
+// A gunship's shell fired by its crew at `at`: as GunshipFire's (kGunshipGapMs apart, within kGunshipReach). One gun:
+// the pilot's SHELLS, the player at the gunner seat and the NPC gunner under a player pilot share its gap.
+bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* who) noexcept {
+    if(ms-j.shells.gunAt<kGunshipGapMs)return false;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
+    if(Len(d)>kGunshipReach)return false;
+    j.shells.gunAt=ms;
+    if(!Shell(kGunshipSgo,gunshipReady,v,pos,at,kGunshipDamage,false,"gunship shell"))return false;
+    ++j.shells.gunShots;
+    if(Cfg().debug)Log("JET v=%p gunship shell #%d from %s at (%.0f,%.0f,%.0f), %.0f m",v,j.shells.gunShots,who,at[0],at[1],at[2],Len(d));
+    return true;
+}
+}  // namespace
+
+// The gunship's shell from the player (the pilot's SHELLS, the gunner seat): at `at`.
+bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
+    Jet* const j=FindJet(v);
+    return j && CrewFire(*j,v,at,ms,"the player");
+}
+
+// The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
+// gunship itself within kGunshipReach (PickTarget; the entry's target is its own again when it is handed back:
+// ResumeNpc), a shell at it when the gun is ready.
+bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {
+    Jet* const j=FindJet(v);
+    if(!j || !Cfg().jetPilot || ms-j->shells.gunAt<kGunshipGapMs)return false;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    PickTarget(*j,v,pos,pos,kGunshipReach,dt,ms);
+    return j->t.target && !j->t.flyer && CrewFire(*j,v,j->t.aim,ms,"its NPC gunner");
+}
+
+float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept {
+    const Jet* const j=FindJet(v);
+    if(!j)return 0.0f;
+    const ULONGLONG since=ms-j->shells.gunAt;
+    return since>=kGunshipGapMs ? 0.0f : static_cast<float>(kGunshipGapMs-since)*0.001f;
+}
+
+float ShellReach() noexcept { return kGunshipReach; }
+
+bool ShellsReady() noexcept { return gunshipReady && shellsOk; }
+
 bool InstallBay(bool spawnOk) noexcept {
     bayOk=spawnOk;
     for(const auto& b:kBaySigs)bayOk=bayOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
@@ -247,12 +327,16 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         chargeReady[i]=shellsOk && ModFileThere(kCharges[i].file);
         if(chargeReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCharges[i].sgo,2,-1);
     }
-    Log("JET preload gunship shells=%d impact charges %d/%d/%d/%d",gunshipReady,chargeReady[0],chargeReady[1],chargeReady[2],chargeReady[3]);
+    drillReady=shellsOk && ModFileThere(kDrillChargeFile);
+    if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
+    Log("JET preload gunship shells=%d impact charges %d/%d/%d/%d drill charge %d",gunshipReady,chargeReady[0],chargeReady[1],chargeReady[2],
+        chargeReady[3],drillReady);
 }
 
 void ResetShells() noexcept {
     gunshipReady=false;
     for(auto& c:chargeReady)c=false;
+    drillReady=false;
 }
 }  // namespace jet
 
@@ -320,5 +404,17 @@ bool ImpactDamage(const unsigned char* by,const float* at,float damage,float rad
     if(fired && Cfg().debug)Log("JET impact by %p at (%.0f,%.0f,%.0f): %.0f damage, %.0f m charge (asked %.0f m)",by,at[0],at[1],at[2],damage,
                               kCharges[c].radius,radius);
     return fired;
+}
+// A bite of the drill tank's drill (drill.cpp): the drill charge fired by `by` straight from `from` (the drill's base)
+// at `at` (what it touches) with `damage`; its team's enemies hurt, its kills, the map's buildings and rocks too.
+bool DrillCharge(const unsigned char* by,const float* from,const float* at,float damage) noexcept {
+    if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
+    if(!drillReady) {
+        static ULONGLONG loggedAt=0;
+        const ULONGLONG now=GetTickCount64();
+        if(now-loggedAt>10000){loggedAt=now;Log("DRILL no drill charge preloaded this mission (python tools/make_drill.py)");}
+        return false;
+    }
+    return Shell(kDrillChargeSgo,drillReady,by,from,at,damage,true,"drill charge");
 }
 }  // namespace crew

@@ -21,8 +21,8 @@ import jet_models  # noqa: E402
 import ledger  # noqa: E402
 import rmpa  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
-from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, Game, as_mission_sgo,  # noqa: E402,F401
-                       jet_guns, jet_sgo, object_dir, weapon_dir)
+from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
+                       as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
 MARKER = 'EDF6TestRange.txt'
@@ -95,9 +95,19 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_sub_carrier_mission', '航空潜舰（插件驾驶，原尺寸 1664 米，放在最远的点；测试场生成）'),
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
+    # The NPC kinds parked for the player (BOARDABLE_PARKED): each one's parked twin (vcobjects Jet.parked: the whole
+    # plane is solid, its boarding point at its side on the ground, every class may fly it).
+    (parked_name('edf6tr_jet_fighter_mission'), '制空战斗机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_interceptor_mission'), '截击机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_strike_mission'), '对地攻击机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_multirole_mission'), '多用途战斗机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_carrier_mission'), '空中航母·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_blast_carrier_mission'), '自爆无人机母舰·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_doll_carrier_mission'), '人偶无人机母舰·停放（自己驾驶；测试场生成）'),
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
+    ('edf6tr_drill_mission', '钻头战车（自己驾驶；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
@@ -122,6 +132,7 @@ DERIVED_PREFIX = 'edf6tr_'
 DERIVED: dict[str, str] = {
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
+    'edf6tr_drill_mission': 'EDF6VC_DRILL',
     'edf6tr_v506_heli_mission': 'V506_HELI',
     'edf6tr_v506_heli_edf6benefits_mission': 'V506_HELI_EDF6BENEFITS',
     'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
@@ -139,6 +150,7 @@ DERIVED: dict[str, str] = {
     'edf6tr_sub_carrier_mission': 'V506_HELI',
     'edf6tr_pjet_fighter_mission': 'V506_HELI',
     'edf6tr_pjet_strike_mission': 'V506_HELI',
+    **{parked_name(k): 'V506_HELI' for k in PARKED_KINDS},
     # Ground vehicles with no stock `_mission` SGO: the call-in one, vehicle_setup renamed (same layout).
     'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
     'edf6tr_vehicle502_groundrobo_mission': 'VEHICLE502_GROUNDROBO',
@@ -245,15 +257,29 @@ GRAND_SOLDIERS = ('app:/object/AiArmySoldier_S_AF_Leader.sgo', 'app:/object/AiAr
 GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to (counted together: the cap is the sum)
 
 
+# The plugin's aircraft the player boards (src/playerjet_kinds.h kBoardable) that have a range SGO: the grand battle
+# parks one of each empty, on the ground for the player. An NPC-flown one is in the air at once (the user, 2026-10-05:
+# the air carrier, placed as an NPC-flown friend for them to fly, "flew straight off", 405 m off its spot chasing
+# targets): only H calls it down. (The bombers, the gunship and the drones have none: called or launched.)
+# Each is its kind's parked twin (vcobjects PARKED_KINDS, Jet.parked): parked as the NPC SGO, its fuselage box let the
+# player walk through the wings and its door was under the middle of the plane (「飞机缺少实体」「空母缺少登机口」,
+# 2026-10-05); the NPC-flown ones keep their own SGO.
+BOARDABLE_PARKED = tuple(parked_name(k) for k in PARKED_KINDS)
+
+
 def grand_battle(plan: Plan) -> Plan:
     # Parked jets the player can board, several of each (the user, 2026-10-05: more planes on the ground to get in).
     # Every vehicle we added that the player drives (the user, 2026-10-05): the player's jets, the Katyusha and the
-    # howitzer, the helicopters the range makes placeable, the tanks and the flak EDF6AutoTurret arms, the Depth Crawler.
+    # howitzer, the drill tank, the helicopters the range makes placeable, the tanks and the flak EDF6AutoTurret arms, the Depth Crawler;
+    # and one of each of the plugin's other aircraft the player can fly (BOARDABLE_PARKED), parked empty.
     plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3,
-                     'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2,
+                     **{sgo: 1 for sgo in BOARDABLE_PARKED},
+                     'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2, 'edf6tr_drill_mission': 2,
                      'edf6tr_v506_heli_mission': 1, 'edf6tr_vehicle409_heli_mission': 1, 'edf6tr_vehicle410_heli_mission': 1,
                      'edf6tr_v602_heli_mission': 1, 'vehicle403_tank_mission': 1, 'vehicle404_bigtank': 1,
                      'v603_flak_mission': 1, 'edf6tr_vehicle502_groundrobo_mission': 1}
+    # Our NPC-flown jets in the battle (H calls the nearest down to the player, README); the multirole and the carrier
+    # are parked above instead (they were here only for the player to fly).
     plan.friends = {'edf6tr_jet_fighter_mission': 2, 'edf6tr_jet_interceptor_mission': 1, 'edf6tr_jet_strike_mission': 2,
                     'vehicle403_tank_mission': 3}
     plan.waves.enabled = False
@@ -274,7 +300,8 @@ def placements(plan: Plan) -> list[tuple[str, bool]]:
     """(sgo, NPC-driven) for every vehicle to place, empty ones first, the BIG ones last. A player jet
     (Jet.player) is always placed empty: it is the player's to fly, and an NPC in it would be flown as a heli."""
     chosen = ([(s, False) for s, n in plan.vehicles.items() for _ in range(max(0, n))] +
-              [(s, not (s in JETS and JETS[s].player)) for s, n in plan.friends.items() for _ in range(max(0, n))])
+              [(s, not (s in JETS and (JETS[s].player or JETS[s].parked))) for s, n in plan.friends.items()
+               for _ in range(max(0, n))])
     return [c for c in chosen if c[0] not in BIG] + [c for c in chosen if c[0] in BIG]
 
 
@@ -328,8 +355,9 @@ SPOT_RINGS = (160.0, 300.0, 450.0, 800.0)
 
 def layout(points: list[rmpa.Point], need: int = 0) -> Layout:
     """Vehicle spots: flat points from 30 m off the player start, 15 m apart, nearest first, out to
-    160 m or as far out (SPOT_RINGS) as `need` of them takes; enemy spots 180-450 m, those a vehicle
-    takes left out (all of them when that leaves none)."""
+    160 m or as far out (SPOT_RINGS) as `need` of them takes; enemy spots 180-450 m, the nearest `need` vehicle
+    spots left out (all of them when that leaves none; spots_for then drops the ones it really took: spaced may
+    take farther ones of them for a wide vehicle)."""
     player = next(p for p in points if p.name == 'プレイヤー')
     by_distance = sorted(points, key=lambda p: math.dist(p.pos, player.pos))
     spots: list[rmpa.Point] = []
@@ -358,41 +386,82 @@ def spots_for(plan: Plan, lay: Layout) -> list[tuple[str, bool, rmpa.Point]]:
         raise ValueError(f'载具太多：这张地图玩家附近只有 {len(lay.vehicle_points)} 个空位')
     if len(big) > len(lay.far_points):
         raise ValueError(f'大型载具太多：这张地图远处只有 {len(lay.far_points)} 个空位')
+    points = spaced(small, lay.vehicle_points, lay.player)
+    # What the vehicles stand on is no enemy's or ship's point (layout left out only the nearest `need`).
+    lay.enemy_points = [p for p in lay.enemy_points if p not in points] or lay.enemy_points
+    lay.far_points = [p for p in lay.far_points if p not in points]
     far = lay.far_points[::-1][:len(big)]
     lay.far_points = [p for p in lay.far_points if p not in far]
-    return [(s, npc, p) for (s, npc), p in zip(small, spaced(small, lay.vehicle_points))] + \
-        [(s, npc, p) for (s, npc), p in zip(big, far)]
+    return [(s, npc, p) for (s, npc), p in zip(small, points)] + [(s, npc, p) for (s, npc), p in zip(big, far)]
 
 
-# Parked jets stand at least JET_GAP m apart (the fighter is 16 m across, the strike jet's wings wider): the
-# vehicle spots are 15 m apart round the player, and several parked jets side by side would lock wings at the start
-# (the grand battle parks seven, the user, 2026-10-05). The other vehicles take the spots left, nearest first.
+# Each placement keeps a circle of its footprint's radius clear round its point (m): two stand at least the sum of
+# theirs apart, so nothing is placed inside another (overlapping bodies are pushed apart, up, at the mission's start:
+# the air carrier, 33 m from a jet, began 11 m over its spot on 2026-10-05). The vehicle spots are 15 m apart (layout),
+# which keeps two SPOT ones apart already: a tank or a car takes the nearest spot left, as before.
+SPOT = 7.5
+# Parked jets stand at least JET_GAP m apart (the fighter is 16 m across, the strike jet's wings wider): several
+# parked jets side by side would lock wings at the start (the grand battle parks a dozen, the user, 2026-10-05).
 JET_GAP = 30.0
 # The other vehicles kept JET_GAP apart like the jets: the helicopters' rotors, the big tank.
 WIDE = frozenset({'edf6tr_v506_heli_mission', 'edf6tr_v506_heli_edf6benefits_mission', 'edf6tr_vehicle409_heli_mission',
                   'edf6tr_vehicle410_heli_mission', 'edf6tr_v602_heli_mission', 'vehicle404_bigtank'})
+# The air carriers (pylib/vcobjects.py JETS: the EDF transport x 1.6, 59 x 77 m): half its diagonal (48.5 m), whichever
+# way it faces, and a margin.
+CARRIER_MODEL = 'EDF6VC_CARRIER.MRAB'
+CARRIER_RADIUS = 50.0
+
+
+# A jet in the elevon bomber (the strike jet's and the fighter's model, 24.8 m across, its nose 17.9 m ahead of its origin:
+# jet_models.model_box) reaches 21.7 m from its point whichever way it faces; a whole-model box (a player jet's, a
+# parked one's: vcobjects Jet.player / parked) that far out would lock with a neighbour's JET_GAP off.
+ELEVON_RADIUS = 22.0
+
+
+def footprint(sgo: str) -> float:
+    """The radius (m) `sgo` keeps clear round its point (see SPOT)."""
+    jet = JETS.get(sgo)
+    if jet and jet.file == CARRIER_MODEL:
+        return CARRIER_RADIUS
+    if jet and jet.file is None and (jet.player or jet.parked):
+        return ELEVON_RADIUS
+    return JET_GAP / 2 if jet or sgo in WIDE else SPOT
 
 
 def _apart(a: rmpa.Point, b: rmpa.Point) -> float:
     return ((a.pos[0] - b.pos[0]) ** 2 + (a.pos[2] - b.pos[2]) ** 2) ** 0.5
 
 
-def spaced(chosen: list[tuple[str, bool]], points: list[rmpa.Point]) -> list[rmpa.Point]:
-    """A point for each of `chosen` (in order): each jet the nearest one JET_GAP from every jet's before it (else the
-    nearest left), the rest the nearest left."""
+def overlap(p: rmpa.Point, r: float, taken: list[tuple[rmpa.Point, float]]) -> float:
+    """How far (m) a footprint of radius `r` at `p` reaches into the worst of `taken`'s, OVERLAP_SLACK and less
+    counted as none (the spots are 15 m apart in 3-D, a little less across the ground)."""
+    worst = max([0.0] + [r + rt - _apart(p, t) for t, rt in taken])
+    return worst if worst > OVERLAP_SLACK else 0.0
+
+
+OVERLAP_SLACK = 1.0
+
+
+def spaced(chosen: list[tuple[str, bool]], points: list[rmpa.Point], player: rmpa.Point | None = None) -> list[rmpa.Point]:
+    """A point for each of `chosen` (in order): the player's (empty) ones before the NPC-driven ones, each group the
+    widest first (footprint). Each takes, of the spots left, the one whose footprint reaches least into those taken
+    so far (and the player's start, a SPOT); of those, the one whose footprint covers fewest of the other spots left
+    (a SPOT's room round each: what a wide one stands over no other vehicle can use, so the carrier takes a spot off
+    by itself rather than the cluster round the player); of those, the nearest. For a SPOT one every spot covers none
+    (they are 15 m apart): the nearest left, as before."""
     left = list(points)
-    jets: list[rmpa.Point] = []
+    taken: list[tuple[rmpa.Point, float]] = [(player, SPOT)] if player else []
     out: list[rmpa.Point | None] = [None] * len(chosen)
-    for i, (sgo, _) in enumerate(chosen):
-        if sgo not in JETS and sgo not in WIDE:
-            continue
-        p = next((q for q in left if all(_apart(q, j) >= JET_GAP for j in jets)), left[0])
-        left.remove(p)
-        jets.append(p)
+    for i in sorted(range(len(chosen)), key=lambda k: (chosen[k][1], -footprint(chosen[k][0]))):
+        r = footprint(chosen[i][0])
+
+        def cost(n: int) -> tuple[float, int, int]:
+            q = left[n]
+            covered = sum(1 for o in left if o is not q and overlap(q, r, [(o, SPOT)]) > 0.0)
+            return overlap(q, r, taken), covered, n
+        p = left.pop(min(range(len(left)), key=cost))
+        taken.append((p, r))
         out[i] = p
-    for i, p in enumerate(out):
-        if p is None:
-            out[i] = left.pop(0)
     return out
 
 
@@ -645,7 +714,8 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
 # Our ground vehicles made placeable (the user, 2026-10-05: every vehicle we added on the map, to drive): the call-in
 # SGO their own tool makes (tools/make_katyusha.py, make_artillery.py: its model and weapons are what that tool, and
 # the installer, write) turned into a mission one (as_mission_sgo).
-GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery'}
+GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery',
+                                  'edf6tr_drill_mission': 'make_drill'}
 
 
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:

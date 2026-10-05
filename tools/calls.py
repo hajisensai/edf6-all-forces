@@ -90,6 +90,8 @@ CALLS: tuple[Call, ...] = (
     # Appended 2026-10-05: the self-propelled artillery (tools/make_artillery.py), requested like the Kepler.
     Call('EDF6VC_CALL_ARTILLERY', 0, 'artillery', False, 0, 8000, 1.2, 'vehicle', vehicle='EDF6VC_ARTILLERY',
          ground='artillery'),
+    # Appended 2026-10-05: the drill tank (tools/make_drill.py, src/drill.cpp), requested like the Blacker.
+    Call('EDF6VC_CALL_DRILL', 0, 'drill', False, 0, 7000, 1.0, 'vehicle', vehicle='EDF6VC_DRILL', ground='drill'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -104,6 +106,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     '0.7.1 (the gunship after the player jets)': IDS[:21],
     'Katyusha (2026-10-05)': IDS[:22],
     'artillery (2026-10-05)': IDS[:23],
+    'drill tank (2026-10-05)': IDS[:24],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -129,14 +132,25 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'drill': {
+        'SC': ('钻头战车', '请求一辆钻头战车：车头装着巨大的钻头，按住射击键钻头加速旋转，转速越高，对接触到的敌人伤害越大、'
+                      '钻开建筑和岩石越快。近战，不发射炮弹。'),
+        'CN': ('鑽頭戰車', '請求一輛鑽頭戰車：車頭裝著巨大的鑽頭，按住射擊鍵鑽頭加速旋轉，轉速越高，對接觸到的敵人傷害越大、'
+                      '鑽開建築和岩石越快。近戰，不發射砲彈。'),
+        'JA': ('ドリル戦車', 'ドリル戦車を要請する。車体前方の巨大ドリルは射撃ボタンを押し続けると回転が上がり、回転数が高いほど'
+                        '触れた敵へのダメージと建物・岩を掘り崩す速さが増す。近接武器で、砲弾は撃たない。'),
+        'EN': ('Drill Tank', 'Requests a drill tank: a huge drill on its nose that spins up while the fire button is held. '
+                             'The faster it spins, the harder it hits the enemies it touches and the faster it bores '
+                             'through buildings and rock. Melee: it fires no shells.'),
+    },
     'artillery': {
-        'SC': ('自行榴弹炮', '请求一辆自行榴弹炮：E551 的炮塔装着武装巴尔加的两门大炮，自动瞄准地面目标，每次曲射两发大范围高爆弹。装填较慢。'),
-        'CN': ('自行榴彈砲', '請求一輛自行榴彈砲：E551 的砲塔裝著武裝巴爾加的兩門大砲，自動瞄準地面目標，每次曲射兩發大範圍高爆彈。裝填較慢。'),
-        'JA': ('自走榴弾砲', '自走榴弾砲を要請する。E551 の砲塔に武装バルガの大砲 2 門、地上の目標を自動で狙い、広範囲の榴弾を 2 発ずつ曲射する。'
+        'SC': ('自行榴弹炮', '请求一辆自行榴弹炮：E551 的车体上一座双管炮塔，自动瞄准地面目标，每次曲射两发大口径高爆弹。装填较慢。'),
+        'CN': ('自行榴彈砲', '請求一輛自行榴彈砲：E551 的車體上一座雙管砲塔，自動瞄準地面目標，每次曲射兩發大口徑高爆彈。裝填較慢。'),
+        'JA': ('自走榴弾砲', '自走榴弾砲を要請する。E551 の車体に連装砲塔、地上の目標を自動で狙い、大口径の榴弾を 2 発ずつ曲射する。'
                        '装填は遅い。'),
-        'EN': ('Self-Propelled Howitzer', "Requests a self-propelled howitzer: the Armed Barga's two cannons on an E551 "
-                                          'turret, aiming at ground targets by itself and lobbing two wide-blast shells '
-                                          'a salvo. Slow to reload.'),
+        'EN': ('Self-Propelled Howitzer', "Requests a self-propelled howitzer: a twin-gun turret on an E551 hull, "
+                                          'aiming at ground targets by itself and lobbing two heavy-calibre shells a '
+                                          'salvo. Slow to reload.'),
     },
     'katyusha': {
         'SC': ('喀秋莎火箭炮车', '请求一辆喀秋莎火箭炮车：卡车车斗上的多管火箭发射架，自动瞄准地面目标，曲射齐射 40 发火箭弹覆盖一片区域。'

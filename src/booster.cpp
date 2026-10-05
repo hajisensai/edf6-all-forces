@@ -66,24 +66,39 @@ Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
 // The jets' nozzles by their mark (pylib/vcobjects.py JETS; read off their models, pylib/jet_models.py NOZZLES, which
 // tools/selftest.py holds this table to): the bomber501 the strike jets and the player's strike jet fly, the interceptor
-// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones'. Flame length and
-// width in m; with the afterburner (the player's boost) kBurnerLength times as long.
+// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones'. Each flame on its
+// exhaust's exit (its centre, in the exit plane: a flame set back inside the nozzle showed high in it from behind), as
+// big as the engine: width the exit's diameter, length jet_models.FLAME_LENGTH_PER_DIAMETER of it (m); with the
+// afterburner (the player's boost) kBurnerLength times as long.
 struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
 constexpr JetNozzles kJetNozzles[]={
-    {7001.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
-    {7002.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
-    {7202.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
-    {7003.0f,2,{{1.85f,0.85f,-7.3f},{-1.85f,0.85f,-7.3f}},{6.0f,1.2f}},
-    {7020.0f,2,{{1.85f,0.85f,-7.3f},{-1.85f,0.85f,-7.3f}},{6.0f,1.2f}},
-    {7201.0f,2,{{1.85f,0.85f,-7.3f},{-1.85f,0.85f,-7.3f}},{6.0f,1.2f}},
-    {7004.0f,1,{{0.0f,0.97f,-1.78f},{0.0f,0.0f,0.0f}},{4.0f,0.7f}},
-    {7006.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
-    {7007.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
-    {7008.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
+    {7001.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
+    {7002.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
+    {7202.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
+    {7003.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
+    {7020.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
+    {7201.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
+    {7004.0f,1,{{0.0f,1.07f,-0.799f},{0.0f,0.0f,0.0f}},{2.377f,0.475f}},
+    {7006.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
+    {7007.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
+    {7008.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
 };
+// The stock bombers a strike jet took over (airstrike.cpp) fly their own models under the strike jet's mark (crew.h
+// BomberBody tells them apart): their exits, measured on those models as they are (pylib/jet_models.py STOCK_BOMBERS;
+// mark 0: not looked up by mark).
+constexpr JetNozzles kBomberNozzles[]={
+    {0.0f,1,{{0.0f,1.267f,-1.597f},{0.0f,0.0f,0.0f}},{4.755f,0.951f}},   // JetBody::bomber401
+    {0.0f,2,{{3.58f,0.039f,-12.006f},{-3.58f,0.039f,-12.006f}},{9.195f,1.839f}},   // JetBody::bomber501_2
+};
+constexpr float kStrikeMark=7001.0f;
 constexpr float kBurnerLength=1.6f;
 
-const JetNozzles* NozzlesOf(float mark) noexcept {
+const JetNozzles* NozzlesOf(const unsigned char* v,float mark) noexcept {
+    if(mark==kStrikeMark) {
+        const JetBody body=BomberBody(v+kModelInst506);
+        if(body==JetBody::bomber401)return &kBomberNozzles[0];
+        if(body==JetBody::bomber501_2)return &kBomberNozzles[1];
+    }
     for(const auto& n:kJetNozzles)if(n.mark==mark)return &n;
     return nullptr;
 }
@@ -368,10 +383,12 @@ void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[
 
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept {
     if(!sigOk || broken || !v)return;
-    const JetNozzles* const nz=NozzlesOf(BodyMark(v));
-    if(!nz)return;
-    const float size[2]={nz->size[0]*(burner ? kBurnerLength : 1.0f),nz->size[1]};
-    __try { JetFrame(v,nz->at,nz->count,size,intensity,ms); }
+    __try {
+        const JetNozzles* const nz=NozzlesOf(v,BodyMark(v));
+        if(!nz)return;
+        const float size[2]={nz->size[0]*(burner ? kBurnerLength : 1.0f),nz->size[1]};
+        JetFrame(v,nz->at,nz->count,size,intensity,ms);
+    }
     __except(MakeFault(GetExceptionInformation())) {}
 }
 
