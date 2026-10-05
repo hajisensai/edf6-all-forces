@@ -168,6 +168,45 @@ float GroundClearance(const float* p) noexcept {
     return MapRay(top,p,hit)>=0.0f ? p[1]-hit[1] : kNoGround;
 }
 
+// The player jet over the map's ceiling (the user, 2026-10-05: "who put in this 300 m limit?"). The heli input (slot
+// 55, 0x6543A0) sets a body over the ceiling (*(*(image+0x20B2998)+0x3C), 300 m on this map) back down to it every
+// frame, its position only (docs/jet-model-re.md, slot 55's clamp). The plugin's input hook keeps the player jet's
+// height round it: CeilingHold reads the body's place before the stock input, CeilingLift puts the height back when
+// the clamp took it down (the X/Z area clamp is already off for it: jet.cpp kAreaInset). The NPC jets keep under the
+// ceiling on their own (jet_flight.cpp Guard).
+constexpr unsigned kGetPosition=0x11B15B0,kSetPosition=0x11B1A00;
+const unsigned char kGetPositionSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x8B,0x91,0xF0,0x00,0x00,
+                                       0x00,0x48,0x8B,0x48,0x58,0x48,0x8B,0x41,0x20,0x48,0x83,0xC1,0x20,0xFF,0x90,0x80,
+                                       0x00,0x00,0x00,0x48,0x83,0xC0,0x30};
+const unsigned char kSetPositionSig[]={0x40,0x55,0x48,0x83,0xEC,0x70,0x48,0x8D,0x6C,0x24,0x40,0x48,0x83,0xE5,0xE0,0x48};
+int ceilingOk=-1;   // -1 not checked yet
+
+bool CeilingHold(unsigned char* v,float* at) noexcept {
+    __try {
+        if(ceilingOk<0)ceilingOk=Matches(kGetPosition,kGetPositionSig,sizeof(kGetPositionSig)) &&
+                                 Matches(kSetPosition,kSetPositionSig,sizeof(kSetPositionSig));
+        if(!ceilingOk || BodyOf(v)!=PluginBody::playerJet)return false;
+        void* const body=At<void*>(v,kBody);
+        if(!body)return false;
+        const float* p=reinterpret_cast<const float*(*)(void*)>(image+kGetPosition)(body);
+        if(!p)return false;
+        std::memcpy(at,p,16);
+        return at[1]>CeilingY()-1.0f;   // under the ceiling the clamp never acts
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+void CeilingLift(unsigned char* v,const float* at) noexcept {
+    __try {
+        void* const body=At<void*>(v,kBody);
+        if(!body)return;
+        const float* p=reinterpret_cast<const float*(*)(void*)>(image+kGetPosition)(body);
+        if(!p || p[1]>=at[1]-0.01f)return;   // not taken down
+        alignas(16) const float q[4]={p[0],at[1],p[2],p[3]};
+        reinterpret_cast<void(*)(void*,const float*)>(image+kSetPosition)(body,q);
+        Put<float>(v,kPosition+4,at[1]);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
 float CeilingY() noexcept {
     const auto p=At<const unsigned char*>(image,kCeiling);
     if(!p || !Readable(p+kCeilingY,4))return 1e9f;

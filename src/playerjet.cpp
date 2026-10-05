@@ -133,12 +133,6 @@ constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude t
 // slowed this far (pulled up too long) has its path fall through: the nose drops and it dives out, a stall.
 constexpr float kStallFloor=25.0f;
 constexpr float kBodyTop=340.0f;       // m/s: the steepest dive's (the drag holds it about there; jetprops.cpp 600)
-constexpr float kCeilingGap=12.0f;
-// Under the ceiling the path bends level over kCeilingBand m (CeilingBend): the climb's sine allowed falls with the
-// room left. (It was a hard stop, the climb's vertical speed zeroed in one frame over CeilingY()-kCeilingGap: a
-// steep climb lost most of its speed and snapped level, "pulled back" (the user, 2026-10-05; 91 m/s climbing at
-// 65 deg at 11:36:16 to 51 m/s and a stall at 300 m).)
-constexpr float kCeilingBand=150.0f;
 // The world's walls (the play edge, crew.h PlayEdge, inside the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
 // turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
 constexpr float kWallIn=0.3f;   // past the play edge, at least this share of the path points back in
@@ -375,15 +369,6 @@ void SmoothStick(PJet& j,Stick& s,float dt) noexcept {
 void RightOf(const float* dir,float* right) noexcept {
     right[0]=-dir[2];right[1]=0.0f;right[2]=dir[0];
     if(!Normalize(right)){right[0]=-1.0f;right[1]=0.0f;right[2]=0.0f;}
-}
-
-// The path `dir` (unit) bent level under the ceiling (see kCeilingBand): its length kept.
-void CeilingBend(const float* pos,float* dir) noexcept {
-    const float most=Clamp((CeilingY()-kCeilingGap-pos[1])/kCeilingBand,0.0f,1.0f);
-    if(dir[1]<=most)return;
-    const float flat=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]),keep=std::sqrt(1.0f-most*most);
-    if(flat<1e-4f)return;   // straight up: no heading to level onto (the next frames have one)
-    dir[0]*=keep/flat;dir[2]*=keep/flat;dir[1]=most;
 }
 
 void WallTurn(const float* pos,float* dir) noexcept {
@@ -704,7 +689,6 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     for(int i=0;i<3;++i)next[i]=dir[i]+(lift[i]+gPerp[i])*dt/speed;
     if(!Normalize(next))std::memcpy(next,dir,12);
     WallTurn(pos,next);
-    CeilingBend(pos,next);
     Across(j.up,next);   // carried along the new path
     if(!aiming){std::memcpy(j.aim,next,12);j.hasAim=s.keys;}
     FlightWatch(j,v,s,next,!s.keys ? 2 : aiming ? 1 : 0);

@@ -16,6 +16,7 @@
 // has its boosters deleted (BoosterSweep, once a frame from jet.cpp JetReap: also once the last carrier is gone,
 // when no carrier frame runs). (H/M)
 #include "crew.h"
+#include "body506.h"
 #include "jet_internal.h"   // FaultLog, BoosterSweep
 #include "memory.h"
 #include <cmath>
@@ -228,14 +229,25 @@ void Frame(const unsigned char* v,unsigned char* const* recs,float intensity,ULO
 
 namespace {
 // A jet's exhaust (the user, 2026-10-05: the jets have no flame): the same Booster on each of its nozzles (JetNozzles:
-// by its mark, in its model's frame: x right, y up, z forward), the flame leaving backwards (its matrix: the body's
+// by its mark, in its model's frame: x right, y up, z forward), the flame leaving backwards (its matrix: the model's
 // rows turned pi about y, as the carrier's nozzles), `size` its length and width, `intensity` how strongly it burns.
+// The model's frame is its root bone's world matrix as drawn (kModelRoot; the vehicle's own matrix if the model has
+// none): the nozzles were put on the vehicle's matrix, and the player fighter's two flames showed above and outside
+// its nozzles (the user's picture, 2026-10-05): the model is not drawn on the vehicle's origin. FLAME logs the gap.
+const wchar_t* const kModelRoot=L"mdl";
 void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* size,float intensity,ULONGLONG ms) noexcept {
     Carrier* const c=Find(v,ms);
     if(!c)return;
+    const bool fresh=c->seen!=ms && !c->n[0].obj;
     c->seen=ms;
     float b[16];
-    std::memcpy(b,v+kMatrix,64);
+    const unsigned char* root=BoneRecord506(v+kModelInst506,kModelRoot);
+    std::memcpy(b,root && Readable(root+kBoneWorld506,64) ? root+kBoneWorld506 : v+kMatrix,64);
+    if(fresh && Cfg().debug) {
+        const float* p=reinterpret_cast<const float*>(v+kPosition);
+        Log("FLAME v=%p model root %s: (%.2f,%.2f,%.2f) from the vehicle's origin",v,root ? "found" : "missing (vehicle matrix)",
+            b[12]-p[0],b[13]-p[1],b[14]-p[2]);
+    }
     for(int r=0;r<3;++r) {
         float* const row=b+r*4;
         const float l=std::sqrt(row[0]*row[0]+row[1]*row[1]+row[2]*row[2]);

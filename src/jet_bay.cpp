@@ -74,7 +74,9 @@ const Charge kCharges[]={
 };
 constexpr int kChargeCount=static_cast<int>(sizeof(kCharges)/sizeof(kCharges[0]));
 bool chargeReady[kChargeCount]{};         // preloaded this mission (PreloadShells)
-constexpr float kImpactDrop=0.5f;   // the charge's 2 frames at 0.25 m a frame (make_jets.py IMPACT_*)
+// m over the impact the charge starts, straight down (make_jets.py IMPACT_*: 10 m a frame for 6 frames, bursting on
+// what it meets: the ground under the impact, or the enemy rammed in the air)
+constexpr float kImpactDrop=2.0f;
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
