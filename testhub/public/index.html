@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全军出击测试站</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>EDF 全军出击 · 测试站</h1>
+    <span class="me"><span id="me"></span> · <a href="/logout">退出</a></span>
+  </header>
+
+  <section>
+    <h2>1. 下载测试版</h2>
+    <div id="build" class="muted">加载中……</div>
+    <details>
+      <summary class="muted">以前的版本</summary>
+      <div class="scroll"><table class="builds"><tbody id="builds"></tbody></table></div>
+    </details>
+    <p class="muted">
+      解压后运行里面的「EDF6VehicleCrew安装器.exe」：<b>1</b> 安装或更新（先退出游戏），
+      <b>3</b> 下载最新测试版，<b>4</b> 回传日志。回传会自动带上插件日志、设置和版本信息，不用自己找文件。
+    </p>
+  </section>
+
+  <section>
+    <h2>2. 要测的东西</h2>
+    <div id="cases" class="muted">加载中……</div>
+  </section>
+
+  <section>
+    <h2>3. 反馈结果</h2>
+    <form id="form">
+      <label for="case">测的是哪一项</label>
+      <select id="case" name="case_id"></select>
+      <label>结果</label>
+      <div class="choices">
+        <label><input type="radio" name="result" value="pass" required>修好了</label>
+        <label><input type="radio" name="result" value="fail">还有问题</label>
+        <label><input type="radio" name="result" value="new">发现新问题</label>
+        <label><input type="radio" name="result" value="info">只是补充信息</label>
+      </div>
+      <label for="note">怎么测的、看到了什么</label>
+      <textarea id="note" name="note" placeholder="例：大混战地图，开坦克从右边石头堆冲过去，第 3 次车被弹到半空。"></textarea>
+      <label for="file">附件（录屏、截图、日志；总共不超过 95 MB）</label>
+      <input type="file" id="file" name="file" multiple>
+      <input type="hidden" id="version" name="version">
+      <p class="row"><button class="btn" id="send" type="submit">提交</button><span id="sendState" class="muted"></span></p>
+      <progress id="progress" class="hide" max="1" value="0"></progress>
+    </form>
+  </section>
+
+  <section>
+    <h2>4. 反馈记录与开发者回复</h2>
+    <div id="reports" class="muted">加载中……</div>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

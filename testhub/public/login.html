@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>全军出击测试站</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <section class="login">
+    <h2>EDF 全军出击 · 测试站</h2>
+    <p id="bad" class="err hide">账号或密码不对。</p>
+    <form method="post" action="/login">
+      <label for="user">账号</label>
+      <input type="text" id="user" name="user" autocomplete="username" required>
+      <label for="pass">密码</label>
+      <input type="password" id="pass" name="pass" autocomplete="current-password" required>
+      <p><button class="btn" type="submit">登录</button></p>
+    </form>
+  </section>
+</main>
+<script>if (location.search.includes('bad=1')) document.getElementById('bad').classList.remove('hide');</script>
+</body>
+</html>

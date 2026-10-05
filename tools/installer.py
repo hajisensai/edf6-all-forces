@@ -20,6 +20,9 @@ What install does, with EDF6.exe closed:
 
 Uninstall removes the plugin and, when asked, the call weapons (their rows become placeholders that keep the
 row numbers saves use) and the generated objects no other tool still needs.
+
+Menu 3 downloads the newest build from the test site and menu 4 sends the logs back to it (tools/testhub.py;
+the site itself is testhub/).
 """
 from __future__ import annotations
 
@@ -315,14 +318,53 @@ def uninstall(game: str) -> None:
     print('\n卸载完成。')
 
 
+def build_name() -> str:
+    """This installer's build: build_release.py bundles build_info.json (the zip's name without .zip)."""
+    import json
+    try:
+        with open(os.path.join(bundle_dir(), 'build_info.json'), encoding='utf-8') as f:
+            return json.load(f).get('name', '')
+    except (OSError, ValueError):
+        return ''
+
+
+def download_latest() -> int:
+    """Menu 3: the newest build from the test site, unpacked next to this exe; offers to start its installer."""
+    import testhub
+    hub = testhub.hub_for_player(ask)
+    here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, 'frozen', False) else __file__))
+    exe = testhub.download_latest(hub, here, build_name())
+    if exe and ask('输入 y 现在打开新版安装器；其它 = 不打开：').lower() == 'y':
+        os.startfile(exe)  # type: ignore[attr-defined]
+        print('新版安装器已在另一个窗口打开，这个窗口可以关掉了。')
+    return 0
+
+
+def send_logs() -> int:
+    """Menu 4: the logs and a note back to the developer (the game may be running: the logs are opened shared)."""
+    import testhub
+    game = pick_game()
+    if not game:
+        return 1
+    testhub.send_logs(testhub.hub_for_player(ask), game, ask, build_name())
+    return 0
+
+
 def main(argv: list[str]) -> int:
-    print(f'== {PLUGIN} 安装程序 ==\n')
+    print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
     mode = argv[0] if argv else ''
-    if mode not in ('install', 'uninstall'):
-        pick = ask('输入 1 安装 / 更新，2 卸载，回车退出：')
-        mode = {'1': 'install', '2': 'uninstall'}.get(pick, '')
+    if mode not in ('install', 'uninstall', 'update', 'logs'):
+        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，回车退出：')
+        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs'}.get(pick, '')
         if not mode:
             return 0
+    if mode in ('update', 'logs'):
+        import testhub
+        try:
+            return download_latest() if mode == 'update' else send_logs()
+        except testhub.HubError as e:
+            print(f'\n没有完成：{e}')
+            return 1
     if modfiles.game_running():
         print(f'{PROCESS} 正在运行。请先退出游戏再运行本程序（本程序不会替你关游戏）。')
         return 1
@@ -331,6 +373,23 @@ def main(argv: list[str]) -> int:
         return 1
     (install if mode == 'install' else uninstall)(game)
     return 0
+
+
+def offer_error_report(text: str) -> None:
+    """After an installer error: the error and the logs to the test site, if the player wants."""
+    if not getattr(sys, 'frozen', False) or ask('输入 y 把这个错误和日志发给开发者；其它 = 不发：').lower() != 'y':
+        return
+    try:
+        import testhub
+        hub = testhub.hub_for_player(ask)
+        files = [('installer-error.txt', text.encode('utf-8'))]
+        game = gamedir.find()
+        if game:
+            files.append(('logs.zip', testhub.collect(game, build_name())[0]))
+        rid = testhub.post_report(hub, None, 'new', '安装器出错（自动回传）', build_name(), files)
+        print(f'已发送（#{rid}）。')
+    except Exception as e:   # a courtesy: its failure must not hide the error above
+        print(f'发送失败：{e}')
 
 
 def run() -> int:
@@ -344,6 +403,7 @@ def run() -> int:
         traceback.print_exc()
         print('\n出错了，上面是错误信息。武器表和武器说明要么全部写入、要么已恢复原样；'
               '生成的模型每个文件要么是新的要么是旧的。问题解决后重新运行安装即可。')
+        offer_error_report(traceback.format_exc())
         code = 1
     if getattr(sys, 'frozen', False):
         ask('\n按回车关闭窗口……')

@@ -1,0 +1,29 @@
+# EDF 全军出击 测试站：部署见 README.md。部署只用 node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml。
+name = "edf6-testhub"
+main = "src/worker.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+routes = [
+  { pattern = "edf6.fushi.moe", custom_domain = true },
+]
+
+# Every request reaches the worker first: the page and its script are only served after the login check.
+[assets]
+directory = "public"
+binding = "ASSETS"
+run_worker_first = true
+html_handling = "none"   # /login.html stays /login.html (/login is the POST endpoint, / is index.html)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "edf6-testhub"
+database_id = "a0adfd9f-a0cd-48df-ba2b-eb6ac91e0a55"
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "edf6-testhub"
+
+# Secrets (wrangler secret put): ACCOUNTS = "user:password:role,..." (role tester / dev), SESSION_SECRET.
+[vars]
+KEEP_BUILDS = "15"

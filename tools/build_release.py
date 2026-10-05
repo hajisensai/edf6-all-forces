@@ -13,6 +13,7 @@ Prints the zip's path last.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -56,6 +57,10 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
          行号不变，存档里装备着也不会崩溃，以后重新安装会用回这些行。
   选 2 = 只删插件：武器留着，会按原版轰炸机呼叫，不影响游玩。
 
+测试（和开发者一起测）：
+  测试站 https://edf6.fushi.moe （账号密码问开发者要）：下载测试版、看要测什么、提交反馈和录屏、看开发者回复。
+  安装器输入 3 = 下载最新测试版；输入 4 = 回传日志（插件日志、设置、版本、最近的崩溃转储，游戏开着也能传）。
+
 杀毒软件可能误报 PyInstaller 打包的 exe，这是打包方式本身的常见误报。
 """
 
@@ -69,20 +74,28 @@ def cmake_version() -> str:
     return m.group(1)
 
 
-def build_exe() -> str:
+def build_exe(name: str) -> str:
+    """name: the zip's name without .zip, bundled as plugin/build_info.json (the installer shows it, and its
+    menu 3 compares it with the test site's newest build)."""
     seps = os.pathsep
+    os.makedirs(WORK, exist_ok=True)
+    info = os.path.join(WORK, 'build_info.json')
+    with open(info, 'w', encoding='utf-8') as f:
+        json.dump({'name': name}, f)
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', EXE_NAME, '--distpath', os.path.join(WORK, 'dist'), '--workpath', os.path.join(WORK, 'work'),
            '--specpath', WORK]
     for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange')):
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'make_chute', 'chute_model', 'graft_pure', 'primer_fighter_model', 'calls',
-                'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'weapons'):
+                'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'weapons',
+                'testhub'):
         cmd += ['--hidden-import', mod]
     for mod in ('PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these (numpy: the big map's seams need it)
         cmd += ['--exclude-module', mod]
     for name in ('EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'):
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
+    cmd += ['--add-data', f'{info}{seps}plugin']
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))
     subprocess.run(cmd, check=True)
     return os.path.join(WORK, 'dist', EXE_NAME + '.exe')
@@ -99,7 +112,7 @@ def main(argv: list[str]) -> int:
     for name in ('EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'):
         if not os.path.isfile(os.path.join(PLUGINS, name)):
             raise SystemExit(f'missing {name} in build/Mods/Plugins: run build.cmd first')
-    exe = build_exe()
+    exe = build_exe(f'EDF6VehicleCrew-{version}{a.suffix}')
     os.makedirs(OUT, exist_ok=True)
     zpath = os.path.join(OUT, f'EDF6VehicleCrew-{version}{a.suffix}.zip')
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
