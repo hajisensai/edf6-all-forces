@@ -29,22 +29,32 @@ SIZE = 1.0
 # Segments: (bone, centre z). The body bone sits in the middle one; each other segment's bone is at its joint
 # toward the middle, so a turn of it bends the creature there.
 SEGMENTS = [('segF2', 3.6), ('segF1', 1.8), ('body', 0.0), ('segB1', -1.8), ('segB2', -3.6)]
-BONES = [
-    ('mdl', -1, (0.0, 0.0, 0.0)),
-    ('centipede', 0, (0.0, 0.0, 0.0)),
-    ('globalSRT', 0, (0.0, 0.0, 0.0)),
-    ('body', 2, (0.0, 0.0, 0.0)),
-    ('segF1', 3, (0.0, 0.0, 0.9)),
-    ('segF2', 4, (0.0, 0.0, 2.7)),
-    ('head', 5, (0.0, 0.0, 4.4)),
-    ('segB1', 3, (0.0, 0.0, -0.9)),
-    ('segB2', 7, (0.0, 0.0, -2.7)),
-    ('tail', 8, (0.0, 0.0, -4.4)),
-]
-for _seg, _z in SEGMENTS:
-    _parent = [n for n, _, _ in BONES].index(_seg)
-    for _side, _x in (('l', -1.0), ('r', 1.0)):
-        BONES.append((f'leg_{_seg}_{_side}', _parent, (_x * 1.0, -0.15, _z)))
+SEGMENT_Z = dict(SEGMENTS)
+
+
+def _skeleton() -> list:
+    """The bones in depth-first preorder (every stock model's order, which the engine's depth_delta walk relies on:
+    docs/mdb-format.md §4.2): each segment, then its legs, then the segment (or head / tail) it carries."""
+    tree = {'mdl': ['centipede', 'globalSRT'], 'globalSRT': ['body'], 'body': ['segF1', 'segB1'],
+            'segF1': ['segF2'], 'segF2': ['head'], 'segB1': ['segB2'], 'segB2': ['tail']}
+    at = {'mdl': 0.0, 'centipede': 0.0, 'globalSRT': 0.0, 'body': 0.0, 'segF1': 0.9, 'segF2': 2.7, 'head': 4.4,
+          'segB1': -0.9, 'segB2': -2.7, 'tail': -4.4}
+    out: list = []
+
+    def visit(name: str, parent: int) -> None:
+        out.append((name, parent, (0.0, 0.0, at[name]) if name in at else None))
+        me = len(out) - 1
+        if name in SEGMENT_Z:   # its legs first
+            for side, x in (('l', -1.0), ('r', 1.0)):
+                out.append((f'leg_{name}_{side}', me, (x * 1.0, -0.15, SEGMENT_Z[name])))
+        for child in tree.get(name, []):
+            visit(child, me)
+
+    visit('mdl', -1)
+    return out
+
+
+BONES = _skeleton()
 BONE = {n: i for i, (n, _, _) in enumerate(BONES)}
 LEG_BONES = [n for n, _, _ in BONES if n.startswith('leg_')]
 

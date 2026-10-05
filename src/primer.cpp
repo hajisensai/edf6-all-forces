@@ -40,7 +40,8 @@ constexpr float kAirRange=130.0f,kAirHeight=45.0f,kAirSpeed=32.0f,kAirSwell=12.0
 constexpr ULONGLONG kDiveEveryMs=22000,kDiveMaxMs=12000;
 constexpr float kDiveLow=12.0f,kDiveDone=30.0f;
 constexpr float kFollowGain=3.0f,kFollowCatch=40.0f,kFollowTop=80.0f;
-constexpr float kJoinAt=4.0f,kJoinSpeed=28.0f;   // m from its link point it links; m/s at least on its way there
+// m from its link point it links; m/s at least on its way there; m from it on it rides along with the tail.
+constexpr float kJoinAt=4.0f,kJoinSpeed=28.0f,kJoinRide=40.0f;
 constexpr ULONGLONG kLookMs=1000;
 constexpr float kSpitReach=400.0f,kSpitCone=0.12f;   // pylib/vcobjects.py PRIMER_GUN_FILES: 3.5 x 120 m
 // The dragonfly.
@@ -227,15 +228,27 @@ void TrailPoint(const Jet& lead,float back,float* out) noexcept {
     for(int i=0;i<3;++i)out[i]=prev[i]+dir[i]*back;
 }
 
-// A front (alone or of a chain) looks for the tail of another chain to join (kLookMs apart): the nearest within
-// CentipedeLinkRange whose chain is longer than its own (or as long, its front earlier in the table), the two
-// together at most CentipedeLinkMax. Never its own chain's, so no ring can form.
+// Whether the front `j` (its chain `len` long) may join tail `t`: a tail of another chain, that chain longer than
+// its own (or as long, its front earlier in the table), the two together at most CentipedeLinkMax. Never its own
+// chain's, and the order is strict, so no ring can form. Asked again of the tail it already makes for each frame:
+// its own chain may have grown on the way.
+bool MayJoin(const Jet& j,const Jet& t,int len) noexcept {
+    if(&t==&j || !t.ref || !IsCentipede(t) || !t.primer.init || t.reap || !Alive(t.ref) || t.Vehicle()[kDead])return false;
+    if(Centipede(t.primer.behind))return false;                       // not a tail
+    Jet* const front=FrontOf(const_cast<Jet*>(&t));
+    if(front==&j)return false;                                        // its own chain
+    const int other=LengthFrom(front);
+    return !(other<len || (other==len && IndexOf(*front)>IndexOf(j)) || other+len>Cfg().centipedeLinkMax);
+}
+
+// A front (alone or of a chain) looks for a tail to join (MayJoin), the nearest within CentipedeLinkRange, kLookMs
+// apart; the one it makes for it keeps while that may still be joined and within twice that.
 Jet* TailToJoin(Jet& j,const float* pos,int len,ULONGLONG ms) noexcept {
     PrimerState& s=j.primer;
     if(Jet* t=Centipede(s.joining)) {
         const float* tp=reinterpret_cast<const float*>(t->Vehicle()+kPosition);
         const float d[3]={tp[0]-pos[0],tp[1]-pos[1],tp[2]-pos[2]};
-        if(!Centipede(t->primer.behind) && FrontOf(t)!=&j && Len(d)<Cfg().centipedeLinkRange*2.0f)return t;
+        if(MayJoin(j,*t,len) && Len(d)<Cfg().centipedeLinkRange*2.0f)return t;
         s.joining=nullptr;
     }
     if(ms-s.lookAt<kLookMs)return nullptr;
@@ -243,12 +256,7 @@ Jet* TailToJoin(Jet& j,const float* pos,int len,ULONGLONG ms) noexcept {
     Jet* best=nullptr;
     float bestD=Cfg().centipedeLinkRange;
     for(auto& t:jets) {
-        if(&t==&j || !t.ref || !IsCentipede(t) || !t.primer.init || t.reap || !Alive(t.ref) || t.Vehicle()[kDead])continue;
-        if(Centipede(t.primer.behind))continue;                       // not a tail
-        Jet* const front=FrontOf(&t);
-        if(front==&j)continue;                                        // its own chain
-        const int other=LengthFrom(front);
-        if(other<len || (other==len && IndexOf(*front)>IndexOf(j)) || other+len>Cfg().centipedeLinkMax)continue;
+        if(!MayJoin(j,t,len))continue;
         const float* tp=reinterpret_cast<const float*>(t.Vehicle()+kPosition);
         const float d[3]={tp[0]-pos[0],tp[1]-pos[1],tp[2]-pos[2]};
         if(Len(d)<bestD){bestD=Len(d);best=&t;}
@@ -328,7 +336,14 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     float aim[3];
     const bool hasAim=PlayerAim(aim,ms);
     Jet* ahead=Centipede(s.ahead);
-    if(s.ahead && !ahead){s.ahead=nullptr;Log("PRIMER v=%p centipede: the one ahead of it is gone: a front again",v);}
+    if(s.ahead && !ahead) {
+        // A front again: its winding starts from where it is (what it held from its first frame is stale).
+        s.ahead=nullptr;
+        float at[3];
+        if(PlayerAim(at,ms))s.orbit=std::atan2(pos[2]-at[2],pos[0]-at[0]);
+        s.dive=false;s.diveAt=ms;
+        Log("PRIMER v=%p centipede: the one ahead of it is gone: a front again",v);
+    }
     if(s.behind && !Centipede(s.behind))s.behind=nullptr;
     float face[3]={0.0f,0.0f,1.0f};
     const char* what;
@@ -352,8 +367,13 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
                 s.ahead=tail->ref.ctrl;tail->primer.behind=j.ref.ctrl;s.joining=nullptr;
                 Log("PRIMER v=%p centipede linked behind %p: %d long",v,tail->Vehicle(),LengthFrom(FrontOf(&j)));
             }
-            const float speed=Len(tail->m.vel)*1.3f>kJoinSpeed ? Len(tail->m.vel)*1.3f : kJoinSpeed;
-            Hover(j,k,v,pos,goal,goal,speed,kHoverClimb*2.0f,dt);
+            // Near it, it rides along with the tail (its velocity plus the pull onto the point, as a follower):
+            // Hover only flies at a point, so it would hang back v^2 / 2 brake behind a moving one and never link.
+            if(Len(to)<kJoinRide)Follow(j,pos,goal,tail->m.vel);
+            else {
+                const float speed=Len(tail->m.vel)*1.3f>kJoinSpeed ? Len(tail->m.vel)*1.3f : kJoinSpeed;
+                Hover(j,k,v,pos,goal,goal,speed,kHoverClimb*2.0f,dt);
+            }
             for(int i=0;i<3;++i)face[i]=to[i];
             what="joining";
         } else if(s.flying){Wind(j,k,v,pos,hasAim,dt,ms,face);what="front (flying)";}
@@ -448,9 +468,12 @@ void DragonflyFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
         const float under=prey.air ? -kBelow : kAbove;
         if(s.hunt==2) {
             std::memcpy(goal,s.dartTo,12);speed=kDartSpeed;
+            // Facing the way it flies; still (the frame its strike ended), the way its nose points.
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            float way[3]={m[8],m[9],m[10]};
             float vel[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
-            if(Normalize(vel))std::memcpy(face,vel,12);
-            for(int i=0;i<3;++i)face[i]=pos[i]+face[i]*50.0f;
+            if(Normalize(vel))std::memcpy(way,vel,12);
+            for(int i=0;i<3;++i)face[i]=pos[i]+way[i]*50.0f;
             what="dart";
         } else if(s.hunt==1) {
             // Held kStandoff off on its own side, under (a flyer) or over (on the ground); its nose on the target.

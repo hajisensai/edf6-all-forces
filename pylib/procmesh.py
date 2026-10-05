@@ -200,6 +200,14 @@ def pack(part: Part, tmpl: Mesh, boxes, scale: float) -> tuple[bytes, bytes]:
 def bones(joints: list[Joint], object_bone: str, meshes_pos: list[tuple[np.ndarray, list]], scale: float) -> list[Bone]:
     """The skeleton (`joints`, scaled), each skin bone's bounds over the vertices it leads."""
     n = len(joints)
+    # Depth-first preorder (every stock model's; the engine walks bones by depth_delta): each bone's parent is the
+    # bone before it or one of that one's ancestors.
+    chain: list[int] = []
+    for i, (name, parent, _) in enumerate(joints):
+        while chain and chain[-1] != parent:
+            chain.pop()
+        assert (parent == -1 and not chain and i == 0) or (chain and chain[-1] == parent), f'{name}: bones not in preorder'
+        chain.append(i)
     children: dict[int, list[int]] = {i: [] for i in range(n)}
     for i, (_, p, _) in enumerate(joints):
         if p >= 0:
