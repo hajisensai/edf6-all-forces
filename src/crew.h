@@ -81,7 +81,8 @@ struct Config {
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
-    bool heliMousePitch=true;       // a heli or rotor craft the player flies: the mouse's Y also moves a fore / back lever it leaves (off: the camera's alone)
+    bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
+    bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
     bool playerJetGunSight=true;    // the aircraft the player flies: our gun sight (pipper, lead, boresight), the stock red aim lines hidden
     bool playerJetFlightHud=true;   // ...and its flight HUD: flight path marker, horizon and pitch ladder, heading tape, speed / altitude
@@ -119,16 +120,6 @@ struct Config {
 // The live config: an immutable snapshot, swapped whole by the ini reload (plugin.cpp LoadConfig) and read
 // from any thread (game, call picker, HUD draw) without a torn mix of old and new values.
 const Config& Cfg() noexcept;
-// A heli's fore / back lever moved by the mouse (keyboard and mouse only, ini HeliMousePitch): the frame's aim Y
-// (the seat's right stick Y, the frame's movement; > 0 the nose up, PlayerJetInvertPitch applied) moves it, and it
-// stays where the mouse leaves it, as the jets' aim does (playerjet.cpp MoveAim): a frame's mouse is 1, 0, 0.6, 0...
-// while the hand moves evenly, so read as a stick it would shake and spring back. kHeliLeverAim rad of the jets' aim
-// (kAimPerUnit 0.05 a unit, times PlayerJetMouseSpeed) is a full lever. The nose down (mouse forward) flies forward.
-constexpr float kHeliLeverAim=0.5f;
-inline float MouseLever(float lever,float aimY) noexcept {
-    const float l=lever-aimY*0.05f*Cfg().playerJetMouseSpeed/kHeliLeverAim;
-    return l>1.0f ? 1.0f : l<-1.0f ? -1.0f : l;
-}
 // Between SuppressBump(true) and SuppressBump(false) on this thread, the player's board button takes no
 // NPC's seat (heli.cpp PressBoard): an override of the call, not a write to the config. (A pair of calls,
 // not a scoped object: the callers run under __try, which allows no destructors.)
@@ -448,6 +439,18 @@ struct PlayerJetSymbols {
     float threatAt[kMostThreats][3];
     int threatKind[kMostThreats];
 };
+// The helicopter HUD's flight data (hud.cpp HeliHud; ini HeliFlightHud): a stock helicopter the player flies (heli.cpp
+// PlayerHeliHud) or a rotor craft of the plugin (PlayerJetReadout::rotor, `heli`). vel: m/s, world (the hover's drift:
+// its level part on the nose's frame); speed: its level part; clear: its height over the ground (ground: false, none
+// under it: over the world's zero); climb m/s; setSpeed: the forward speed W / S set (m/s) of `top`; aim: the mouse's aim,
+// a point ahead (aiming: the mouse-aim flight flies at it, heliaim.h); holding: it holds its height; rotor / hover: a stock
+// heli on the ground, its rotor and the rotor whose lift holds it (the takeoff cue; 0: none); landed: on the ground.
+struct HeliFlight {
+    float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
+    bool ground,landed,keys,aiming,holding;
+};
+struct PlayerHeliReadout { HeliFlight f; PlayerJetSymbols sym; };
+bool PlayerHeliHud(PlayerHeliReadout* out) noexcept;   // heli.cpp: the stock heli's, as of the last frame; false: none
 struct PlayerJetReadout {
     float speed,throttle,clear,climb,hp,hpMax,load;
     float rotate;                // m/s: the speed it can lift off from (the kind's rotate), for the takeoff cue
@@ -464,6 +467,8 @@ struct PlayerJetReadout {
     int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
     float lockAt[3],lockProgress;
     PlayerJetSymbols sym;        // the fighter HUD's (hud.cpp FighterHud)
+    bool rotor;                  // a rotor craft of the plugin: `heli` (the helicopter HUD's) too
+    HeliFlight heli;
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked

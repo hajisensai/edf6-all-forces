@@ -25,6 +25,13 @@ add_executable(pjet_kinds EXCLUDE_FROM_ALL tools/pjet_kinds.cpp)
 target_include_directories(pjet_kinds PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(pjet_kinds PRIVATE /W4 /WX /utf-8 /permissive-)
 
+# The stock heli's mouse-aim flight (src/heliaim.h) against a stand-in of its flight law, offline: the signs of the keys and
+# the mouse (tools/heli_aim_check.cpp). Not part of the plugin build:
+# cmake --build build --target heli_aim_check && build\heli_aim_check.exe
+add_executable(heli_aim_check EXCLUDE_FROM_ALL tools/heli_aim_check.cpp)
+target_compile_options(heli_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(heli_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # NPC jets against buildings, offline (tools/jet_obstacle_sim.cpp): the plugin's own jet_flight.cpp, jet_combat.cpp and
 # body506.cpp against a stand-in world of flat ground and box buildings; tools/jet_obstacle_view.py draws its trace.
 # jet_obstacle_sim_before: the same with Wing's Ahead call and Strike's InSight test cut out of copies of the two files,

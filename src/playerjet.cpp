@@ -36,6 +36,7 @@
 #include "body506.h"
 #include "edf/weapon.h"
 #include "gear.h"
+#include "heliaim.h"
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"
@@ -124,14 +125,14 @@ constexpr float kInduced=0.3f;
 constexpr float kStallWarn=1.05f;
 // The mouse's aim (AimSteer): its heading turns kAimPerUnit rad per unit of a frame's mouse X (the seat's right stick
 // on the keyboard: the frame's movement, at most 1), times ini PlayerJetMouseSpeed, its elevation likewise; the mouse
-// takes it no farther than kAimMaxEl from level (an aim already past, the nose's when W was let go, stays). The plane
+// takes it no farther than aim::kMaxEl from level (an aim already past, the nose's when W was let go, stays). The plane
 // turns its path toward it at kSteer times the angle off (rad/s), the lift for that and for holding the path up (Hold)
 // along its up. Turning (the aim kAimTurnFrom off or more) it banks toward that lift at kRollRate; on the aim it only
 // levels its wings, gently (kLevelRate), and not at all climbing or diving steeper than kAimSteep (sine): letting W go
 // in a steep climb or over the top of a loop keeps the attitude it has (it snapped upright at kRollRate before,
 // 2026-10-04). Under kAimBankMin g of lift it keeps its bank.
 constexpr float kMouseMoved=0.02f;    // a frame's mouse movement past this hands the plane to the aim
-constexpr float kAimPerUnit=0.05f,kAimMaxEl=1.3f,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
+constexpr float kAimPerUnit=aim::kPerUnit,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
 // The mouse's aim stays on the screen: its mark (kAimMark ahead) within kAimOnScreen of the screen's half size
 // (the user, 2026-10-05: the aim ran off the screen and the jet turned on after it, unseen). A frame's mouse that
 // would take it out is not taken; one the camera's turn left outside is drawn back toward the flight path.
@@ -241,7 +242,8 @@ struct PJet {
     bool steered;                // the plugin steers it by `aim` this frame (the gunship's pylon turn): Air as the autopilot's
     bool keep;                   // left on the ground by the player: it waits there for them (no NPC takes it back)
     float yaw;                   // a rotor craft's heading (rad, the nose at (sin, 0, cos))
-    float hoverFore;             // ...its fore / back lever the mouse moves and leaves (-1..1, HoverStep)
+    aim::Hold hover;             // ...its mouse-aim flight's setpoint and height held (heliaim.h, HoverStep), its top speed
+    float hoverTop;
     ULONGLONG blastAt;           // a charge drone's charge fired (game ms; 0: not)
     bool specialHeld;            // the target key / X down last frame (a special store's own action)
     bool orbiting;               // the gunship's pylon turn round orbitAt (orbitR m out, at the height orbitAlt)
@@ -664,42 +666,17 @@ void FlightWatch(PJet& j,const unsigned char* v,const Stick& s,const float* dir,
     j.watchAt=ms;j.watchBank=bank;j.watchHead=head;
 }
 
-// The mouse's aim moved by this frame's mouse (see kAimPerUnit): its heading about the world's up, its elevation.
-void MoveAim(PJet& j,const Stick& s) noexcept {
-    float flat[3]={j.aim[0],0.0f,j.aim[2]};
-    if(!Normalize(flat)){flat[0]=0.0f;flat[2]=1.0f;}
-    const float k=kAimPerUnit*Cfg().playerJetMouseSpeed;
-    float right[3];RightOf(flat,right);
-    const float a=s.aimX*k,co=std::cos(a),si=std::sin(a);
-    for(int i=0;i<3;++i)flat[i]=flat[i]*co+right[i]*si;
-    const float was=std::asin(Clamp(j.aim[1],-1.0f,1.0f));
-    const float el=Clamp(was+s.aimY*k,was<-kAimMaxEl ? was : -kAimMaxEl,was>kAimMaxEl ? was : kAimMaxEl);
-    j.aim[0]=flat[0]*std::cos(el);j.aim[1]=std::sin(el);j.aim[2]=flat[2]*std::cos(el);
-}
+// The mouse's aim moved by this frame's mouse (see kAimPerUnit; heliaim.h Move): its heading about the world's up, its
+// elevation.
+void MoveAim(PJet& j,const Stick& s) noexcept { aim::Move(j.aim,s.aimX,s.aimY,kAimPerUnit*Cfg().playerJetMouseSpeed); }
 
-// Whether the aim's mark lies within kAimOnScreen of the screen (view-projection `vp`, row vectors).
-bool AimOnScreen(const float* vp,const float* pos,const float* aim) noexcept {
-    const float p[3]={pos[0]+aim[0]*kAimMark,pos[1]+aim[1]*kAimMark,pos[2]+aim[2]*kAimMark};
-    float c[4];
-    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
-    return c[3]>1e-3f && std::fabs(c[0]/c[3])<=kAimOnScreen && std::fabs(c[1]/c[3])<=kAimOnScreen;
-}
-
-// See kAimOnScreen: the aim as it was (`was`) when this frame's mouse took it off the screen; still off (the camera
-// turned), toward the flight path `dir` until it is on.
+// See kAimOnScreen (heliaim.h KeepOnScreen): the aim as it was (`was`) when this frame's mouse took it off the screen;
+// still off (the camera turned), toward the flight path `dir` until it is on.
 void KeepAimOnScreen(PJet& j,const unsigned char* v,const float* dir,const float* was) noexcept {
     if(j.autopilot || j.steered)return;   // the catch's autopilot (the pylon turn) aims off the player's screen
     float vp[16];
     if(!LastViewProj(vp))return;
-    const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    if(AimOnScreen(vp,pos,j.aim))return;
-    std::memcpy(j.aim,was,12);
-    for(int step=0;step<10 && !AimOnScreen(vp,pos,j.aim);++step) {
-        float a[3];
-        for(int i=0;i<3;++i)a[i]=j.aim[i]*0.8f+dir[i]*0.2f;
-        if(!Normalize(a))break;
-        std::memcpy(j.aim,a,12);
-    }
+    aim::KeepOnScreen(vp,reinterpret_cast<const float*>(v+kPosition),j.aim,was,dir,kAimMark,kAimOnScreen);
 }
 
 // The lift (along the plane's up, as Air's pitch) that turns its path toward the mouse's aim (kSteer) and holds it
@@ -1636,6 +1613,15 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
             r.sym=j.sym;
+            if(j.board && j.board->frame==pjet::Airframe::rotor) {   // the helicopter HUD's (hud.cpp HeliHud)
+                HeliFlight& f=r.heli;
+                r.rotor=true;r.aiming=false;
+                std::memcpy(f.vel,j.vel,12);
+                f.speed=std::sqrt(j.vel[0]*j.vel[0]+j.vel[2]*j.vel[2]);f.clear=r.clear;f.ground=ground;f.climb=j.climb;
+                f.hp=r.hp;f.hpMax=r.hpMax;f.keys=j.keys;f.landed=!air;
+                f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=f.aiming && j.hover.holding;
+                f.setSpeed=j.hover.speed;f.top=j.hoverTop;std::memcpy(f.aim,r.aim,12);
+            }
             *out=r;
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}

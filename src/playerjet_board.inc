@@ -69,7 +69,7 @@ void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
         j.yaw=std::atan2(m[8],m[10]);
         const bool down=clear!=kNoGround && clear<kTouch && Len(j.measured)<kBoardSpeed;
         j.phase=down ? Phase::parked : Phase::air;
-        j.throttle=0.0f;j.hoverFore=0.0f;
+        j.throttle=0.0f;j.hover=aim::Hold{};
         if(e){std::memcpy(e->m.vel,j.measured,12);std::memset(e->m.acc,0,12);}
     }
     Log("PJET v=%p one of ours boarded: %s (%s), its NPC pilot out",v,j.kind->name,j.board->frame==pjet::Airframe::rotor ? "rotor" : "wing");
@@ -239,11 +239,14 @@ void SpecialFrame(PJet& j,unsigned char* v,Stick& s,const float* pos,ULONGLONG m
 }
 
 // --- A rotor craft under the player (the carriers, the blast and doll drones) ---
-// The stick asks for a velocity: forward / back (left stick, W / S) and sideways (A / D) up to its top speed
-// (kHoverCruise of it on the keys, all of it with the boost key held), up with the ascend trigger (Space), down with
-// L3 (the brake key), its height held with neither; its heading turns with the right stick (kHoverYaw rad/s at full,
-// its kind's roll rate within those bounds) or the mouse (as the jets' aim: kAimPerUnit a unit), never more than
-// kHoverLead ahead of its nose. jet_flight.cpp's Hover flies it there (its thrust, its response, its lean: the NPC's
+// On the keyboard and mouse with ini HeliMouseAim, the mouse-aim flight (heliaim.h, as a stock heli's: the mouse moves
+// the aim, the craft faces it and flies along its elevation, W / S set the forward speed and leave it, A / D sidestep,
+// Space / the brake key climb and descend at its most, let go it holds its height at the speed set). Else the stick
+// asks for a velocity: forward / back (left stick, W / S) and sideways (A / D) up to its top speed (kHoverCruise of it
+// on the keys, all of it with the boost key held), up with the ascend trigger (Space), down with L3 (the brake key), its
+// height held with neither; its heading turns with the right stick (kHoverYaw rad/s at full, its kind's roll rate within
+// those bounds) or the mouse (as the jets' aim: kAimPerUnit a unit). Either way its heading goes no more than kHoverLead
+// ahead of its nose. jet_flight.cpp's Hover flies it there (its thrust, its response, its lean: the NPC's
 // own rotor flight), HoldOffGround keeps it off the floor, the carrier's nacelles follow its thrust. Touching down
 // faster than its landMax is a crash; set down still with nothing asked, it is parked (the stock body holds it).
 constexpr float kHoverCruise=0.6f,kHoverYawMin=0.6f,kHoverYawMax=2.0f,kHoverLead=0.8f,kHoverClimbShare=0.4f;
@@ -283,28 +286,58 @@ void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const flo
     std::memcpy(j.sent,j.vel,12);
 }
 
+// The stick's velocity (see above): `want` horizontal, `vz` up, along the heading j.yaw (turned by the caller).
+void HoverStick(const PJet& j,const jet::Kind& k,const Stick& s,bool down,float* want,float* vz) noexcept {
+    const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
+    float right[3];RightOf(fwd,right);
+    const float fore=s.keys ? (s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f) : -s.ly,side=s.lx;
+    const float top=k.cruise*(s.keys && s.throttle<=0.0f ? kHoverCruise : 1.0f);
+    want[0]=(fwd[0]*fore+right[0]*side)*top;want[1]=0.0f;want[2]=(fwd[2]*fore+right[2]*side)*top;
+    const float asked=Len(want);
+    if(asked>top)for(int i=0;i<3;i+=2)want[i]*=top/asked;
+    *vz=(s.ascend-(down ? 1.0f : 0.0f))*HoverClimb(k);
+}
+
+// The mouse-aim flight's frame (heliaim.h): the aim moved and kept on the screen, the heading onto it, the velocity and
+// the climb it asks (aim::Fly, its kind's cruise the top speed, HoverClimb the most climb).
+void HoverAim(PJet& j,unsigned char* v,const Stick& s,const float* pos,float nose,float clear,bool down,float dt,float* want,
+              float* vz) noexcept {
+    const jet::Jet* const e=jet::FindJet(v);
+    if(!e)return;
+    const jet::Kind& k=jet::KindOf(e->role);
+    const float level[3]={std::sin(nose),0.0f,std::cos(nose)};
+    if(!j.hasAim){std::memcpy(j.aim,level,12);j.hasAim=true;j.hover=aim::Hold{};}
+    float was[3];std::memcpy(was,j.aim,12);
+    MoveAim(j,s);
+    KeepAimOnScreen(j,v,level,was);
+    const bool grounded=clear!=kNoGround && clear<kTouch;
+    const aim::Keys keys{s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f,s.lx,s.ascend-(down ? 1.0f : 0.0f)};
+    const aim::Want w=aim::Fly(j.hover,j.aim,level,pos,j.measured,keys,k.cruise,HoverClimb(k),grounded,
+                               clear==kNoGround ? -1.0f : clear,dt);
+    std::memcpy(want,w.vel,12);*vz=w.climb;
+    j.yaw=std::atan2(w.face[0],w.face[2]);
+}
+
 void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bool wet,float dt,ULONGLONG ms) noexcept {
     jet::Jet* const e=jet::FindJet(v);
     if(!e){j.active=false;return;}
     const jet::Kind& k=jet::KindOf(e->role);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const float nose=std::atan2(m[8],m[10]);
-    const float rate=Clamp(k.roll,kHoverYawMin,kHoverYawMax);
-    j.yaw-=s.keys ? s.aimX*kAimPerUnit*Cfg().playerJetMouseSpeed : s.yaw*rate*dt;
-    j.yaw=nose+Clamp(std::remainder(j.yaw-nose,2.0f*kWatchPi),-kHoverLead,kHoverLead);
-    const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
-    float right[3];RightOf(fwd,right);
-    // On the keys W / S fly it and zero the mouse's lever; let go, the lever the mouse leaves (MouseLever) does.
-    const bool keyFore=s.ly<-0.3f || s.ly>0.3f;
-    if(!s.keys || keyFore || !Cfg().heliMousePitch)j.hoverFore=0.0f;
-    else j.hoverFore=MouseLever(j.hoverFore,s.aimY);
-    const float fore=!s.keys ? -s.ly : keyFore ? (s.ly<0.0f ? 1.0f : -1.0f) : j.hoverFore,side=s.lx;
-    const float top=k.cruise*(s.keys && s.throttle<=0.0f ? kHoverCruise : 1.0f);
-    float want[3]={(fwd[0]*fore+right[0]*side)*top,0.0f,(fwd[2]*fore+right[2]*side)*top};
-    const float asked=Len(want);
-    if(asked>top)for(int i=0;i<3;i+=2)want[i]*=top/asked;
     const bool down=s.keys ? s.throttle<0.0f : (At<std::uint16_t>(SeatAt(v,0),kSeatButtons)&kButtonL3)!=0;
-    float vz=(s.ascend-(down ? 1.0f : 0.0f))*HoverClimb(k);
+    float want[3]={0.0f,0.0f,0.0f},vz=0.0f;
+    const bool aimFlight=s.keys && Cfg().heliMouseAim;
+    if(aimFlight)HoverAim(j,v,s,pos,nose,clear,down,dt,want,&vz);
+    else {
+        const float rate=Clamp(k.roll,kHoverYawMin,kHoverYawMax);
+        j.yaw-=s.keys ? s.aimX*kAimPerUnit*Cfg().playerJetMouseSpeed : s.yaw*rate*dt;
+        j.hover=aim::Hold{};j.hasAim=false;
+    }
+    j.hoverTop=k.cruise;
+    j.yaw=nose+Clamp(std::remainder(j.yaw-nose,2.0f*kWatchPi),-kHoverLead,kHoverLead);
+    if(!aimFlight)HoverStick(j,k,s,down,want,&vz);
+    const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
+    const float asked=Len(want);
     // Coming down near the ground it slows (kSettleShare of its height a second, at least kSettle): set down, not dropped.
     if(vz<0.0f && clear!=kNoGround)vz=std::fmax(vz,-std::fmax(kSettle,clear*kSettleShare));
     const float face[3]={pos[0]+fwd[0]*100.0f,pos[1],pos[2]+fwd[2]*100.0f};

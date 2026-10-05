@@ -33,6 +33,8 @@
 // dropped at a new mission (ResetHelis, with the player's track and the rescue) and reused only once its heli
 // has not been flown for kStaleMs: a full table takes on no new heli rather than drop a live one.
 #include "crew.h"
+#include "body506.h"
+#include "heliaim.h"
 #include "layout.h"
 #include "memory.h"
 #include <cmath>
@@ -59,6 +61,7 @@ constexpr float kRotorGain=4.0f;     // throttle per unit the rotor is off the w
 // stick per m/s off the wanted velocity, rotor speed per m/s of climb-rate error, and how fast the rotor speed
 // that holds height is learned.
 constexpr float kMoveGain=0.04f,kBrakeGain=0.12f,kClimbGain=0.08f,kHoverLearn=0.03f;
+constexpr aim::RotorGains kRotorGains{kClimbGain,kHoverLearn,kRotorGain};   // the throttle's (heliaim.h StockThrottle)
 // Take-off: no horizontal stick on the ground and for kLiftOffMs after leaving it, so it climbs straight
 // up. (With full forward stick before the rotor spun up, a heli slid along the ground into a tank and both
 // blew up.)
@@ -1691,10 +1694,8 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
 
     // Horizontal: the stick for the wanted velocity (full stick flies h.top) plus kBrakeGain per m/s it is
     // off, on the heading rows.
-    float cv[3]={w.vel[0]/h.top+(w.vel[0]-h.vel[0])*kBrakeGain,0,w.vel[2]/h.top+(w.vel[2]-h.vel[2])*kBrakeGain};
-    Limit2(cv,1.0f);
-    float forward=Clamp(Dot2(cv,s.fwd),-1.0f,1.0f);
-    const float lateral=Clamp(Dot2(cv,s.right),-1.0f,1.0f);
+    float forward=0.0f,lateral=0.0f;
+    aim::StockStick(w.vel,h.vel,h.top,kBrakeGain,s.fwd,s.right,&forward,&lateral);
     // Aiming, the forward stick is the nose dip (kMaxTilt at full stick), and it creeps along the nose.
     if(mode==Mode::aim)forward=Clamp((s.dipWant+(s.dipWant-s.dip)*kPitchGain)/kMaxTilt,-1.0f,1.0f);
 
@@ -1704,11 +1705,8 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     // climb rate is not saturated (learning on the climb winds it up to 1 and it overshoots by 20 m).
     const float dy=w.height-pos[1];
     const float climb=Clamp(dy*0.25f,-3.0f,3.0f);
-    const float err=climb-h.vel[1];
-    if(std::fabs(dy)<6.0f)h.hover=Clamp(h.hover+err*kHoverLearn*s.dt,0.1f,1.0f);
-    const float wantRotor=Clamp(h.hover+err*kClimbGain,0.0f,1.0f);
     c.rotor=At<float>(s.v,kRotor);
-    c.throttle=std::isfinite(c.rotor) ? Clamp(wantRotor+(wantRotor-c.rotor)*kRotorGain,0.0f,1.0f) : wantRotor;
+    c.throttle=aim::StockThrottle(climb,h.vel[1],c.rotor,&h.hover,std::fabs(dy)<6.0f,s.dt,kRotorGains);
     c.stickF=forward;c.stickL=lateral;
     if(s.grounded)h.groundAt=s.ms;
     if(land && s.grounded){c.throttle=0.0f;c.stickF=c.stickL=0.0f;}
@@ -1723,7 +1721,7 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     c.yaw=0.0f;c.offYaw=kPi;
     if(Dot2(face,face)>1.0f) {
         c.offYaw=Wrap(std::atan2(face[0],face[2])-s.heading);
-        c.yaw=Clamp(c.offYaw*1.5f-(h.yawRate-faceRate)*kYawDamp+faceRate*kYawFeed,-1.0f,1.0f)*static_cast<float>(h.yawSign);
+        c.yaw=aim::StockYaw(c.offYaw,h.yawRate,faceRate,kYawDamp,kYawFeed)*static_cast<float>(h.yawSign);
     }
     h.lastYaw=c.yaw;
 
@@ -1965,36 +1963,163 @@ void PlayerAssist(unsigned char* v) noexcept {
     Put<float>(v,kSpeedGain,top/(frames*blend));Put<float>(v,kBlend,blend);
 }
 
-// The player's mouse pitch (ini HeliMousePitch; the user, 2026-10-05: "直升机的俯仰也应该可以被鼠标操控"): the stock
-// input (slot 55) copies LX, the trigger, LY and RX to the heli, never RY, so the mouse's Y only ever moved the camera
-// (heli-input-re.md §2, §4). The fore stick kInForward is the nose's tilt and the forward speed both (-LY on the stock):
-// W / S let go, it gets the lever the mouse moves and leaves (crew.h MouseLever); held, they fly it and zero the lever.
-// Written after slot 55 (HeliFrame runs in its post-hook, crew.cpp InputHook), so slot 57 reads it this frame. On the
-// keyboard and mouse only (a pad's right stick Y is the camera's, as on the stock).
-constexpr std::size_t kSeatPad=0x2B0,kSeatLY=0x2C4,kSeatRY=0x2D4;   // heli-input-re.md §4 (playerjet.cpp's)
-struct MouseFore { ObjRef ref; float lever; ULONGLONG seen; };
-constexpr ULONGLONG kLeverStaleMs=250;
-MouseFore mouseFore[8];
+// ---- The player at the stick of a stock helicopter: the mouse-aim flight and the helicopter HUD's readout ----
+// The mouse-aim flight (ini HeliMouseAim, heliaim.h; keyboard and mouse only: a pad keeps the stock control): the stock
+// input (slot 55) copies LX, the trigger, LY and RX to the heli and never RY, so the mouse's Y only ever moved the camera
+// (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads this frame's
+// values) the input block is written from what aim::Fly asks, through the NPC pilot's own law (Steer's StockStick,
+// StockThrottle and StockYaw): the forward value drives the nose's tilt and the forward speed both, the lateral the
+// sidestep, the yaw the turn onto the aim's heading (+ grows the heading angle: the stock writes -RX and the mouse to the
+// right turns the heli right, docs/player-jet-re.md §2), the throttle the rotor for the climb (the height held with the
+// rotor that holds it, learned as the NPC's is, from the takeoff cue's stock hover speed on). PlayerAssist's settle runs
+// first: with the setpoint at 0 it stops within PlayerHeliStopSec. On the ground (contact bit 1) nothing horizontal and
+// the stock throttle (Space lifts it off, as before), and for kLiftOffMs after it no horizontal stick (the NPC's).
+// The descend key is the brake key (ini PlayerJetBrakeKey): the stock keyboard has none, letting go of Space only spun
+// the rotor down.
+// The readout (PlayerHeliHud, ini HeliFlightHud) is gathered whether or not the mouse flies it.
+constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
+constexpr float kPlayerClimb=6.0f;     // m/s: Space / the brake key (the stock rotor's most is ~8: aircraft-re.md)
+constexpr float kPlayerMark=800.0f;    // m: the aim's mark ahead (playerjet.cpp kAimMark), kept within kAimOnScreen
+constexpr float kAimOnScreen=0.85f;
+constexpr float kMovingSpeed=5.0f;     // m/s: slower, it has no flight path to mark (the HUD shows its drift)
+constexpr float kThreatRadius=20.0f;   // m: a missile's lock point this near it homes on it (playerjet.cpp's)
+struct Pilot {
+    ObjRef ref;
+    ULONGLONG seen,lastMs,groundAt;
+    float prev[3],vel[3];
+    bool havePrev;
+    float aim[3];                      // the mouse's aim (heliaim.h), a world direction
+    aim::Hold hold;
+    float hover;                       // the rotor that holds its height (learned, StockThrottle)
+    float prevHeading,yawRate;
+    bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
+};
+Pilot pilots[4];
 
-void PlayerMousePitch(unsigned char* v) noexcept {
-    const unsigned char* seat=SeatAt(v,0);
-    if(!Cfg().heliMousePitch || At<unsigned char>(seat,kSeatPad)!=0)return;
-    const ULONGLONG ms=GameMs();
-    MouseFore* m=nullptr;
-    for(auto& x:mouseFore)if(x.ref.Is(v))m=&x;
-    if(!m) {   // its first frame under the player: the lever level
-        for(auto& x:mouseFore)if(!m && (!x.ref || ms-x.seen>kAssistStaleMs))m=&x;
-        if(!m)return;
-        *m=MouseFore{ObjRef::Of(v),0.0f,ms};
+// Its record: a new one (a free slot or a stale one) starts level, at a hover, the aim on its nose.
+Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
+    for(auto& p:pilots)if(p.ref.Is(v) && ms-p.seen<=kAssistStaleMs)return &p;
+    Pilot* p=nullptr;
+    for(auto& x:pilots)if(!p && (!x.ref || x.ref.Is(v) || ms-x.seen>kAssistStaleMs))p=&x;
+    if(!p)return nullptr;
+    *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
+    std::memcpy(p->aim,fwd,12);
+    const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
+    p->hover=lift>1.0f && mass>0.0f && std::isfinite(lift+mass) ? Clamp(kStockHover*kStockLift/lift*mass,0.1f,1.0f) : 0.5f;
+    p->prevHeading=std::atan2(fwd[0],fwd[2]);
+    return p;
+}
+
+// The heli's own top speed now (its params as PlayerAssist leaves them: b k / (1 - d (1 - b))), else kTopSpeed.
+float PlayerTop(const unsigned char* v) noexcept {
+    const float k=At<float>(v,kSpeedGain),b=At<float>(v,kBlend),d=At<float>(v,kDamp),denom=1.0f-d*(1.0f-b);
+    const float top=denom>1e-6f ? b*k/denom : 0.0f;
+    return std::isfinite(top) && top>1.0f ? top : kTopSpeed;
+}
+
+bool KeyDown(int vk) noexcept {
+    if(vk<=0)return false;
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+}
+float SeatAxis(const unsigned char* seat,std::size_t at) noexcept {
+    const float x=At<float>(seat,at);
+    return std::isfinite(x) ? Clamp(x,-1.0f,1.0f) : 0.0f;
+}
+
+// The mouse-aim flight's frame (see the top): the aim moved, the want, the input block written.
+void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos,const float* fwd,const float* right,bool grounded,
+            float clear,float dt,ULONGLONG ms) noexcept {
+    const float ly=SeatAxis(seat,kSeatLY),ry=SeatAxis(seat,kSeatRY);
+    const aim::Keys keys{ly<-0.3f ? 1.0f : ly>0.3f ? -1.0f : 0.0f,SeatAxis(seat,kSeatLX),
+                         (At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-(KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f)};
+    float was[3];std::memcpy(was,p.aim,12);
+    aim::Move(p.aim,SeatAxis(seat,kSeatRX),Cfg().playerJetInvertPitch ? ry : -ry,aim::kPerUnit*Cfg().playerJetMouseSpeed);
+    float vp[16];
+    if(LastViewProj(vp))aim::KeepOnScreen(vp,pos,p.aim,was,fwd,kPlayerMark,kAimOnScreen);
+    const float top=PlayerTop(v);
+    const aim::Want w=aim::Fly(p.hold,p.aim,fwd,pos,p.vel,keys,top,kPlayerClimb,grounded,clear,dt);
+    float forward=0.0f,lateral=0.0f;
+    aim::StockStick(w.vel,p.vel,top,kBrakeGain,fwd,right,&forward,&lateral);
+    if(grounded)p.groundAt=ms;
+    if(ms-p.groundAt<kLiftOffMs)forward=lateral=0.0f;
+    const float heading=std::atan2(fwd[0],fwd[2]);
+    const float yaw=aim::StockYaw(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,0.0f,kYawDamp,kYawFeed);
+    Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
+    if(!grounded) {   // on the ground the stock throttle (the ascend key) lifts it off
+        const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
+        Put<float>(v,kInThrottle,aim::StockThrottle(w.climb,p.vel[1],At<float>(v,kRotor),&p.hover,learn,dt,kRotorGains));
     }
-    if(ms-m->seen>kLeverStaleMs)m->lever=0.0f;   // not flown by them since: boarded again, the lever level
-    m->seen=ms;
-    const float ly=At<float>(seat,kSeatLY),ry=At<float>(seat,kSeatRY);
-    if(!std::isfinite(ly) || !std::isfinite(ry))return;
-    if(ly<-0.3f || ly>0.3f){m->lever=0.0f;return;}   // W / S: the stock's own -LY flies it
-    const float aimY=Clamp(Cfg().playerJetInvertPitch ? ry : -ry,-1.0f,1.0f);
-    m->lever=MouseLever(m->lever,aimY);
-    Put<float>(v,kInForward,m->lever);
+    if(!p.flying)Log("HELI v=%p the mouse-aim flight: top %.1f m/s, hover rotor %.3f",v,top,p.hover);
+    p.flying=true;
+}
+
+// The HUD's readout (the flight's state; the threats as the jets' Threats gathers them), published for HudPublish.
+SRWLOCK heliHudLock=SRWLOCK_INIT;
+PlayerHeliReadout heliHud{};
+ULONGLONG heliHudAt=0;
+void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,float clear,bool keys) noexcept {
+    PlayerHeliReadout r{};
+    HeliFlight& f=r.f;
+    std::memcpy(f.vel,p.vel,12);
+    f.speed=std::sqrt(p.vel[0]*p.vel[0]+p.vel[2]*p.vel[2]);
+    f.ground=clear!=kNoGround;f.clear=f.ground ? clear : pos[1];f.climb=p.vel[1];
+    f.hp=At<float>(v,kHp);f.hpMax=At<float>(v,kHpMax);
+    f.keys=keys;f.aiming=p.flying;f.holding=p.flying && p.hold.holding;f.landed=grounded;
+    f.setSpeed=p.hold.speed;f.top=PlayerTop(v);
+    for(int i=0;i<3;++i)f.aim[i]=pos[i]+p.aim[i]*kPlayerMark;
+    if(grounded) {
+        const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass),rotor=At<float>(v,kRotor);
+        if(lift>1.0f && mass>0.0f && std::isfinite(lift+mass+rotor)){f.rotor=rotor;f.hover=kStockHover*kStockLift/lift*mass;}
+    }
+    PlayerJetSymbols& y=r.sym;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    std::memcpy(y.pos,pos,12);
+    y.nose[0]=m[8];y.nose[1]=m[9];y.nose[2]=m[10];
+    const float nl=std::sqrt(y.nose[0]*y.nose[0]+y.nose[1]*y.nose[1]+y.nose[2]*y.nose[2]);
+    if(std::isfinite(nl) && nl>0.5f)for(auto& c:y.nose)c/=nl;
+    else{y.nose[0]=0.0f;y.nose[1]=0.0f;y.nose[2]=1.0f;}
+    const float sp=std::sqrt(p.vel[0]*p.vel[0]+p.vel[1]*p.vel[1]+p.vel[2]*p.vel[2]);
+    y.moving=sp>kMovingSpeed;
+    if(y.moving)for(int i=0;i<3;++i)y.dir[i]=p.vel[i]/sp;
+    int n=MissilesHomingAt(pos,kThreatRadius,y.threatAt,kMostThreats);
+    if(n>kMostThreats)n=kMostThreats;
+    for(int i=0;i<n;++i)y.threatKind[i]=2;
+    const int locks=jet::LockersOf(v,y.threatAt+n,kMostThreats-n);
+    for(int i=n;i<n+locks;++i)y.threatKind[i]=1;
+    y.threats=n+locks;
+    AcquireSRWLockExclusive(&heliHudLock);
+    heliHud=r;heliHudAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&heliHudLock);
+}
+
+// The player in seat 0 of a stock heli, each frame after PlayerAssist.
+void PlayerHeli(unsigned char* v) noexcept {
+    if(!Cfg().heliMouseAim && !Cfg().heliFlightHud)return;
+    float fwd[3],right[3];
+    if(!Row(v,kHeadForward,fwd) || !Row(v,kHeadRight,right))return;
+    const ULONGLONG ms=GameMs();
+    Pilot* const p=PilotOf(v,fwd,ms);
+    if(!p)return;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    const float dt=GameStep(ms-p->lastMs);   // game time: a slow frame moved it no more than 1/60 s (body506.h)
+    p->lastMs=ms;p->seen=ms;
+    if(p->havePrev)for(int i=0;i<3;++i)p->vel[i]+=((pos[i]-p->prev[i])/dt-p->vel[i])*0.3f;
+    std::memcpy(p->prev,pos,12);p->havePrev=true;
+    const float heading=std::atan2(fwd[0],fwd[2]);
+    p->yawRate+=(Wrap(heading-p->prevHeading)/dt-p->yawRate)*0.3f;
+    p->prevHeading=heading;
+    const bool grounded=(v[kContact]&kContactGround)!=0;
+    const float clear=GroundClearance(pos);
+    const unsigned char* seat=SeatAt(v,0);
+    const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    if(Cfg().heliMouseAim && keys)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
+    else {
+        if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
+        p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
+    }
+    if(Cfg().heliFlightHud)PublishHud(*p,v,pos,grounded,clear,keys);
 }
 }  // namespace
 
@@ -2004,7 +2129,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
-        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerMousePitch(vehicle);}
+        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerHeli(vehicle);}
         else AssistOff(vehicle);
         return;
     }
@@ -2020,6 +2145,14 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     bool playerAboard=false;
     for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || SeatRider(SeatAt(vehicle,i))==Rider::player;
     Fly(*h,vehicle,playerAboard);
+}
+
+bool PlayerHeliHud(PlayerHeliReadout* out) noexcept {
+    AcquireSRWLockShared(&heliHudLock);
+    const bool fresh=heliHudAt && GetTickCount64()-heliHudAt<=kCueFreshMs;
+    if(fresh)*out=heliHud;
+    ReleaseSRWLockShared(&heliHudLock);
+    return fresh;
 }
 
 void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept {
@@ -2410,7 +2543,7 @@ bool CheckHeliProfile() noexcept {
 void ResetHelis() noexcept {
     for(auto& h:helis)h=Heli{};
     for(auto& a:assists)a=Assist{};
-    for(auto& m:mouseFore)m=MouseFore{};
+    for(auto& p:pilots)p=Pilot{};
     fullLoggedAt=0;
     ResetTrack();
     rescue=Rescue{};

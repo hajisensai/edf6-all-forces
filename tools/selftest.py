@@ -795,6 +795,26 @@ def heli_sight_after_aim_lines() -> None:
     assert not unread, f'EDF6VehicleCrew.ini keys src/plugin.cpp never reads: {unread}'
 
 
+
+@test
+def heli_mouse_aim_wired() -> None:
+    """The helicopters' mouse-aim flight (src/heliaim.h) and HUD: their ini keys are read, shipped and documented, the
+    lever they replaced (HeliMousePitch) is shipped no more and an old ini's is said ignored; the stock heli the player
+    flies and the NPC pilot write the input block through the same stick, throttle and yaw law (heli.cpp Steer and
+    AimFly), and the rotor craft fly the same aim::Fly (playerjet_board.inc HoverAim)."""
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('HeliMouseAim', 'HeliFlightHud'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=1', ini, re.M) and key in readme, key
+    assert not re.search(r'^HeliMousePitch=', ini, re.M), 'HeliMousePitch is retired (HeliMouseAim)'
+    assert 'L"HeliMousePitch"' in plugin.split('void IgnoreRetired(', 1)[1].split('\n}\n', 1)[0]
+    heli, board = src('src/heli.cpp'), src('src/playerjet_board.inc')
+    steer = heli.split('Control Steer(', 1)[1].split('\n}\n', 1)[0]
+    fly = heli.split('void AimFly(', 1)[1].split('\n}\n', 1)[0]
+    for law in ('aim::StockStick(', 'aim::StockThrottle(', 'aim::StockYaw('):
+        assert law in steer and law in fly, law
+    assert 'aim::Fly(' in fly and 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
+
+
 @test
 def gunship_gunner_seat() -> None:
     """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second

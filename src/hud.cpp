@@ -93,7 +93,7 @@ Work work[kEntries]{};
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
-                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; };
+                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -467,15 +467,20 @@ void KeyName(int vk,wchar_t* out,int size) noexcept {
     if(vk<=0 || !scan || GetKeyNameTextW(static_cast<LONG>(scan<<16),out,size)<=0)wcscpy_s(out,static_cast<rsize_t>(size),L"?");
 }
 
+// The mouse's aim: a hollow cyan square at `at` (the jets' and the helis', heliaim.h).
+void AimSquare(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* at) noexcept {
+    float sx,sy,depth;
+    if(!Project(vp,at,width,height,&sx,&sy,&depth))return;
+    const float r=14.0f*s,t=2.0f*s;
+    Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kCyan);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kCyan);
+    Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kCyan);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kCyan);
+}
+
 // The mouse's aim on the keyboard and mouse: a hollow square where it aims, a small dot where the plane flies (with the
 // flight HUD on, its flight path marker shows that: FighterHud).
 void AimMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
+    AimSquare(drawer,ctx,vp,width,height,s,j.aim);
     float sx,sy,depth;
-    if(Project(vp,j.aim,width,height,&sx,&sy,&depth)) {
-        const float r=14.0f*s,t=2.0f*s;
-        Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kCyan);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kCyan);
-        Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kCyan);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kCyan);
-    }
     if(!Cfg().playerJetFlightHud && Project(vp,j.path,width,height,&sx,&sy,&depth)) {
         const float r=4.0f*s;
         Rect(drawer,ctx,sx-r,sy-r,sx+r,sy+r,kWhite);
@@ -827,12 +832,12 @@ void HeadingTape(void* drawer,void* ctx,Text* text,float width,float height,floa
     Label(text,lines,at,cx,base+26.0f*s,1,kLineScale,kHud,L"%03d",static_cast<int>(std::lround(hdg))%360);
 }
 
-// The boxes left and right of the middle: the speed (km/h) with the g under it, the height over the floor (ALT*: over
-// the world's zero, nothing under it) with the climb under it. The landing gear's indicator (branch feat/jet-gear) has
-// the row under the g: (width / 2 - kBoxOff * s, height / 2 + 2 * kBoxRow * s).
+// The boxes left and right of the middle: the speed (km/h) with `under` under it (the jets' g, the helis' speed set), the
+// height over the floor (ALT*: over the world's zero, nothing under it) with the climb under it. The landing gear's
+// indicator (branch feat/jet-gear) has the row under the left one: (width / 2 - kBoxOff * s, height / 2 + 2 * kBoxRow * s).
 constexpr float kBoxOff=280.0f,kBoxW=120.0f,kBoxH=34.0f,kBoxRow=30.0f;
-void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
-                   int* at) noexcept {
+void Boxes(void* drawer,void* ctx,Text* text,float width,float height,float s,float speed,const wchar_t* under,const float* underRgba,
+           float clear,bool ground,float climb,Line* lines,int* at) noexcept {
     const float cy=height*0.5f,w=kBoxW*s*0.5f,hh=kBoxH*s*0.5f,t=2.0f*s;
     const float left=width*0.5f-kBoxOff*s,right=width*0.5f+kBoxOff*s;
     const float boxes[2]={left,right};
@@ -840,13 +845,19 @@ void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,fl
         Seg(drawer,ctx,x-w,cy-hh,x+w,cy-hh,t,kHud);Seg(drawer,ctx,x-w,cy+hh,x+w,cy+hh,t,kHud);
         Seg(drawer,ctx,x-w,cy-hh,x-w,cy+hh,t,kHud);Seg(drawer,ctx,x+w,cy-hh,x+w,cy+hh,t,kHud);
     }
-    const float alt=std::fmax(-9999.0f,std::fmin(j.clear,99999.0f));
-    Label(text,lines,at,left,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(j.speed*3.6f)));
+    const float alt=std::fmax(-9999.0f,std::fmin(clear,99999.0f));
+    Label(text,lines,at,left,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(speed*3.6f)));
     Label(text,lines,at,left,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"KM/H");
-    Label(text,lines,at,left,cy+kBoxRow*s,1,kLineScale,j.load>5.0f ? kWarn : kHud,L"G %.1f",j.load);
+    if(under && under[0])Label(text,lines,at,left,cy+kBoxRow*s,1,kLineScale,underRgba,L"%ls",under);
     Label(text,lines,at,right,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(alt)));
-    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,j.ground ? L"ALT M" : L"ALT* M");
-    Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,L"VS %+d",static_cast<int>(std::lround(j.climb)));
+    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,ground ? L"ALT M" : L"ALT* M");
+    Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,L"VS %+d",static_cast<int>(std::lround(climb)));
+}
+void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
+                   int* at) noexcept {
+    wchar_t g[16];
+    std::swprintf(g,16,L"G %.1f",j.load);
+    Boxes(drawer,ctx,text,width,height,s,j.speed,g,j.load>5.0f ? kWarn : kHud,j.clear,j.ground,j.climb,lines,at);
 }
 
 // The boresight: a cross with a gap at its centre on the direction `dir` (where it vanishes: the guns' line, far).
@@ -974,6 +985,100 @@ void CockpitStrip(Text* text,float width,float height,float s,const PlayerJetRea
     const float armsH=arms.h>0.0f ? arms.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
     arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
     warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
+}
+
+// --- The helicopter HUD (the user, 2026-10-05: "a helicopter HUD": the flight instruments, the weapons' aim, the hover's
+// aids, the old panel gone; ini HeliFlightHud): for a stock helicopter the player flies (heli.cpp PlayerHeliHud) and a
+// rotor craft of the plugin (PlayerJetReadout::rotor), from their HeliFlight and the fighter HUD's symbols. The fighter
+// HUD's horizon, ladder, heading tape and boxes (the left one's under-line the speed W / S set), the flight path marker
+// once it flies (kMovingSpeed), else and low over the ground the hover's: a drift circle (its level velocity on the
+// nose's frame, kDriftFull at the ring) and a bar of the height over the ground up to kLowHover. The mouse's aim is the
+// jets' cyan square. The weapons' aim is the stock heli's gun sight (HeliGunSight, drawn apart) or the rotor craft's the
+// jets' (GunSight, LockMark, ImpactMark); the threat ring the fighter's. One line under the HUD's centre in place of the
+// old panel (HeliStrip): the warning or the takeoff cue over the speed set, the height held and the stores. ---
+constexpr float kDriftShown=8.0f;    // m/s: slower than this (level) the drift circle shows
+constexpr float kDriftFull=5.0f;     // m/s: the drift at the circle's ring
+constexpr float kDriftR=40.0f,kDriftDown=150.0f;   // px (at 1080 lines): its radius, its centre under the screen's
+constexpr float kLowHover=30.0f;     // m over the ground: the height bar's top (shown under it)
+constexpr float kBarHalf=100.0f;     // px: the height bar's half length
+constexpr float kSinkWarn=4.0f,kSinkLow=10.0f;   // m/s down under kSinkLow m: SINK RATE
+
+// The hover's drift: a ring round a centre cross under the screen's middle, an arrow from the centre the way it drifts
+// (up: along the nose, right: to its right), kDriftFull m/s at the ring; faster, the arrow stops at the ring, amber.
+void DriftMark(void* drawer,void* ctx,float width,float height,float s,const HeliFlight& f,const PlayerJetSymbols& y) noexcept {
+    float nose[3]={y.nose[0],0.0f,y.nose[2]};
+    if(!vec::Normalize(nose))return;
+    const float right[3]={-nose[2],0.0f,nose[0]};   // its level right (playerjet.cpp RightOf)
+    const float fore=f.vel[0]*nose[0]+f.vel[2]*nose[2],side=f.vel[0]*right[0]+f.vel[2]*right[2];
+    const float cx=width*0.5f,cy=height*0.5f+kDriftDown*s,r=kDriftR*s,t=2.0f*s;
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,t,24,kHudDim);
+    Seg(drawer,ctx,cx-6.0f*s,cy,cx+6.0f*s,cy,t,kHud);Seg(drawer,ctx,cx,cy-6.0f*s,cx,cy+6.0f*s,t,kHud);
+    const float drift=std::sqrt(fore*fore+side*side);
+    if(drift<0.2f)return;
+    const float len=r*vec::Clamp(drift/kDriftFull,0.0f,1.0f),dx=side/drift,dy=-fore/drift;
+    const float* c=drift>kDriftFull ? kAmber : kHud;
+    const float tipX=cx+dx*len,tipY=cy+dy*len,head=8.0f*s;
+    if(len>head)Seg(drawer,ctx,cx,cy,tipX-dx*head,tipY-dy*head,3.0f*s,c);
+    Tri(drawer,ctx,tipX-dx*head,tipY-dy*head,tipX,tipY,5.0f*s,c);
+}
+
+// The height over the ground for the landing and the low hover: a bar right of the height box from 0 to kLowHover m, a
+// tick every 5 m, a caret at the height, amber sinking faster than kSinkWarn under kSinkLow m.
+void HeightBar(void* drawer,void* ctx,float width,float height,float s,const HeliFlight& f) noexcept {
+    if(!f.ground || !(f.clear<kLowHover))return;
+    const float x=width*0.5f+(kBoxOff+kBoxW*0.5f+18.0f)*s,cy=height*0.5f,half=kBarHalf*s,t=2.0f*s;
+    const float bottom=cy+half,per=2.0f*half/kLowHover;
+    Seg(drawer,ctx,x,cy-half,x,bottom,t,kHudDim);
+    for(int m=0;m<=static_cast<int>(kLowHover);m+=5)Seg(drawer,ctx,x,bottom-per*static_cast<float>(m),x+(m%10==0 ? 10.0f : 6.0f)*s,
+                                                        bottom-per*static_cast<float>(m),t,kHud);
+    const float at=bottom-per*vec::Clamp(f.clear,0.0f,kLowHover);
+    const bool sink=f.clear<kSinkLow && f.climb<-kSinkWarn;
+    Tri(drawer,ctx,x-14.0f*s,at,x-2.0f*s,at,6.0f*s,sink ? kAmber : kHud);
+}
+
+// The helicopter HUD's instruments (see above); the weapons' aim is the caller's.
+void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliFlight& f,
+             const PlayerJetSymbols& y,Line* lines,int* at) noexcept {
+    if(!f.landed)Ladder(drawer,ctx,text,vp,width,height,s,y,lines,at);
+    if(y.moving && !f.landed)FlightPath(drawer,ctx,vp,width,height,s,y);
+    if(!f.landed && (f.speed<kDriftShown || (f.ground && f.clear<kLowHover)))DriftMark(drawer,ctx,width,height,s,f,y);
+    HeadingTape(drawer,ctx,text,width,height,s,y,lines,at);
+    wchar_t set[32]=L"";
+    if(f.aiming)std::swprintf(set,32,f.setSpeed==0.0f ? L"SET HOVER" : L"SET %d",static_cast<int>(std::lround(f.setSpeed*3.6f)));
+    Boxes(drawer,ctx,text,width,height,s,f.speed,set,kCyan,f.clear,f.ground,f.climb,lines,at);
+    HeightBar(drawer,ctx,width,height,s,f);
+    if(f.aiming)AimSquare(drawer,ctx,vp,width,height,s,f.aim);
+    if(Cfg().playerJetThreatHud)ThreatRing(drawer,ctx,text,vp,width,height,s,y,lines,at);
+}
+
+// The line in place of the old panel (see above): over it the warning (a missile, a lock, the sink near the ground) or on
+// the ground the takeoff cue (the rotor's share of the lift-off speed; LIFT OK blinking from there); the line itself the
+// speed set and the height held (the mouse-aim flight) and `stores` (a rotor craft's; nullptr: none).
+void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,const PlayerJetSymbols& y,const wchar_t* stores,
+               Line* lines,int* at) noexcept {
+    if(*at+2>kMaxLines)return;
+    Line& warn=lines[(*at)++];
+    Line& info=lines[(*at)++];
+    bool missile=false,locked=false;
+    for(int i=0;i<y.threats && i<kMostThreats;++i){missile=missile || y.threatKind[i]==2;locked=locked || y.threatKind[i]==1;}
+    const bool blink=(GetTickCount64()/125)%2==0,lift=f.landed && f.hover>0.0f && f.rotor>0.01f,liftOk=lift && f.rotor>=f.hover;
+    const bool sink=!f.landed && f.ground && f.clear<kSinkLow && f.climb<-kSinkWarn;
+    if(missile){Format(warn,L"MISSILE!");warn.rgba=blink ? kRed : kWhite;}
+    else if(locked){Format(warn,L"LOCKED");warn.rgba=kYellow;}
+    else if(sink){Format(warn,L"SINK RATE");warn.rgba=blink ? kAmber : kWhite;}
+    else if(liftOk){Format(warn,L"LIFT OK: TAKE OFF (ascend)");warn.rgba=blink ? kGreen : kYellow;}
+    else if(lift){Format(warn,L"ROTOR %d%% of lift-off",static_cast<int>(std::lround(100.0f*f.rotor/f.hover)));warn.rgba=kCyan;}
+    else{Format(warn,L"");warn.rgba=kHud;}
+    Format(info,L"");
+    if(f.aiming)Append(info,f.setSpeed==0.0f ? L"SPEED SET: HOVER" : L"SPEED SET %d km/h",static_cast<int>(std::lround(f.setSpeed*3.6f)));
+    if(f.holding)Append(info,L"%lsALT HOLD",info.text[0] ? L"    " : L"");
+    if(stores && stores[0])Append(info,L"%ls%ls",info.text[0] ? L"    " : L"",stores);
+    warn.scale=kTitleScale;info.scale=kLineScale;info.rgba=kHud;
+    warn.w=warn.h=info.w=info.h=0.0f;
+    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);}
+    const float infoH=info.h>0.0f ? info.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
+    info.x=(width-info.w)*0.5f;info.y=height*0.80f-infoH;
+    warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
 }
 
 // The landing gear (gear.cpp GearHudLatest; the jets with gear only), at the screen's right over the cockpit's line: its
@@ -1180,6 +1285,7 @@ void HudPublish() noexcept {
     s.count=0;
     s.cockpit=PlayerJetHud(&s.jet);
     s.heli=PlayerHeliCue(&s.heliCue);
+    s.heliFly=Cfg().heliFlightHud && PlayerHeliHud(&s.heliHud);
     s.drill=PlayerDrillCue(&s.drillCue);
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
@@ -1272,16 +1378,30 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const ULONGLONG now=GetTickCount64();
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
+        const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
-            FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,lines,&at);
-            if(Cfg().playerJetFlightHud)CockpitStrip(t,width,height,s,snap.jet,lines,&at);
-            else Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
+            if(rotorHud) {
+                HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,lines,&at);
+                if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
+                wchar_t stores[128];
+                StoresText(stores,_countof(stores),snap.jet);
+                HeliStrip(t,width,height,s,snap.jet.heli,snap.jet.sym,stores,lines,&at);
+            } else {
+                FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,lines,&at);
+                if(Cfg().playerJetFlightHud)CockpitStrip(t,width,height,s,snap.jet,lines,&at);
+                else Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
+            }
             GearPanel(drawer,ctx,t,width,height,s,lines,&at,now);
         }
-        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
+        const bool heliHud=now-snap.tick<=kFreshMs && snap.heliFly && !snap.cockpit;   // a stock heli: the helicopter HUD
+        if(heliHud) {
+            HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,lines,&at);
+            HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.sym,nullptr,lines,&at);
+        }
+        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
