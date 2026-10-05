@@ -7,10 +7,17 @@
 // Each voice has a low-pass filter (the air takes a far engine's highs) and an output matrix (left / right ear).
 // A watchdog thread silences the master voice once the game stops beating (Beat): paused, loading, in a menu; the
 // game's own sounds stop then too.
+// The cockpit's sounds play here as well (LockTone, Warn): the lock tones, the threat beeps and the launch warble on a
+// tone, the stall horn, and the warnings' callouts (PULL UP's whoops and voice, TERRAIN, SINK RATE...) one at a time on
+// a voice of their own. The callouts' voice is the Windows one (SAPI 5, rendered into memory once on a thread of its
+// own: an English one when there is one), or the player's WAVs next to the DLL; with neither, tones made here.
 #include "jetaudio.h"
 #include "crew.h"
 #include <windows.h>
 #include <xaudio2.h>
+#pragma warning(push,0)
+#include <sapi.h>
+#pragma warning(pop)
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -45,11 +52,32 @@ ULONGLONG toneAt=0,beepFrom=0;
 int toneState=0;
 // The threat warning (ThreatTone): the lock tone's loop on a voice of its own, lower and beeping: locked on by an
 // enemy kThreatLockRatio, kThreatLockMs on in every kThreatLockPeriod; a missile coming kThreatMissileRatio,
-// kThreatMissileMs on in every kThreatMissilePeriod.
-constexpr float kThreatLockRatio=0.8f,kThreatMissileRatio=1.9f,kThreatVolume=0.3f;
-constexpr ULONGLONG kThreatLockMs=150,kThreatLockPeriod=600,kThreatMissileMs=60,kThreatMissilePeriod=120;
+// kThreatMissileMs on in every kThreatMissilePeriod; just launched, steady and warbling between kLaunchHigh and
+// kLaunchLow every kWarbleMs (an RWR's launch tone).
+constexpr float kThreatLockRatio=0.8f,kThreatMissileRatio=1.9f,kThreatVolume=0.3f,kLaunchHigh=1.35f,kLaunchLow=0.85f;
+constexpr ULONGLONG kThreatLockMs=150,kThreatLockPeriod=600,kThreatMissileMs=60,kThreatMissilePeriod=120,kWarbleMs=80;
 IXAudio2SourceVoice* threatVoice=nullptr;
 ULONGLONG threatAt=0;
+// The warnings' callouts (Warn). Each a one-shot clip at kRate from the first of: the player's WAV next to the DLL
+// (<dll name>_warn_<kCallName>.wav), the Windows voice's (Cfg().warnVoice: SpeakAll renders kCallText once on a thread
+// of its own; PULL UP gets two GPWS whoops before it), made here (MadeClips: PULL UP's whoops, a chime for TERRAIN,
+// SINK RATE and the gear; none for the stall and the missile, whose horn and warble say it).
+const wchar_t* const kCallName[kCallCount]={L"pullup",L"missile",L"stall",L"terrain",L"sinkrate",L"gear"};
+const wchar_t* const kCallText[kCallCount]={L"Pull up",L"Missile",L"Stall",L"Terrain, terrain",L"Sink rate",L"Too low, gear"};
+// Each again this long after it ends while it stays on; kOnce: once each time it comes on.
+constexpr ULONGLONG kOnce=~0ull>>2;
+const ULONGLONG kCallRepeat[kCallCount]={150,kOnce,3000,1500,2000,3000};
+constexpr float kCalloutVolume=0.55f,kHornVolume=0.2f;
+std::vector<std::int16_t> madeClip[kCallCount],ownClip[kCallCount],hornPcm;
+// Written by SpeakAll's thread only, before spokenReady (release); read only after it (acquire).
+std::vector<std::int16_t> spokenClip[kCallCount];
+std::atomic<bool> spokenReady{false};
+bool warnMade=false,speaking=false;
+IXAudio2SourceVoice* calloutVoice=nullptr;
+IXAudio2SourceVoice* hornVoice=nullptr;
+int calling=-1;                    // the callout playing (-1: none), till callEnd
+ULONGLONG callEnd=0,dueAt[kCallCount]{},warnAt=0;
+unsigned callsOn=0;                // the callouts on last frame (a rise makes one due at once)
 Slot slots[kSlots]{};
 std::atomic<ULONGLONG> beatAt{0};
 std::atomic<float> masterVolume{1.0f};
@@ -157,6 +185,16 @@ WAVEFORMATEX Mono16(UINT32 rate) noexcept {
     return f;
 }
 
+// <dll path without .dll><suffix> into `path` (MAX_PATH); false when it does not fit.
+bool BesideDll(const wchar_t* suffix,wchar_t* path) noexcept {
+    HMODULE self=nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&BesideDll),&self);
+    if(!GetModuleFileNameW(self,path,MAX_PATH))return false;
+    wchar_t* dot=wcsrchr(path,L'.');
+    return dot && wcscpy_s(dot,MAX_PATH-(dot-path),suffix)==0;
+}
+
 // The watchdog: silent while the game does not beat (see Beat).
 DWORD WINAPI Watch(void*) {
     bool quiet=false;
@@ -185,6 +223,254 @@ void Pan(IXAudio2SourceVoice* v,float left,float right) noexcept {
     m[0]=left;m[1]=masterChannels>1 ? right : 0.5f*(left+right);
     v->SetOutputMatrix(nullptr,1,masterChannels,m);
 }
+
+// The cockpit's own share of the volume (Cfg().warnVolume, the master voice being the game's).
+float WarnGain() noexcept {
+    const float v=Cfg().warnVolume;
+    return v<0.0f || !std::isfinite(v) ? 0.0f : v>4.0f ? 4.0f : v;
+}
+
+// --- Making the warnings' sounds ---
+// Float samples to 16-bit, their peak at `peak` of full scale.
+std::vector<std::int16_t> Pcm16(const std::vector<float>& x,float peak) {
+    float top=1e-6f;
+    for(float v:x)top=std::fabs(v)>top ? std::fabs(v) : top;
+    std::vector<std::int16_t> out(x.size());
+    for(std::size_t i=0;i<x.size();++i)out[i]=static_cast<std::int16_t>(std::lround(x[i]/top*peak*32767.0f));
+    return out;
+}
+void Gap(std::vector<float>& x,float sec) { x.insert(x.end(),static_cast<std::size_t>(sec*static_cast<float>(kRate)),0.0f); }
+// A GPWS whoop: a tone (its fundamental and third) sweeping up from 350 to 1300 Hz in 0.38 s, faded in and out, at
+// `gain`.
+void Whoop(std::vector<float>& x,float gain) {
+    const int n=static_cast<int>(0.38f*static_cast<float>(kRate));
+    const float in=0.01f*static_cast<float>(kRate),out=0.03f*static_cast<float>(kRate);
+    float phase=0.0f;
+    for(int i=0;i<n;++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(n),hz=350.0f*std::pow(1300.0f/350.0f,t);
+        phase+=6.2831853f*hz/static_cast<float>(kRate);
+        const float env=std::fmin(1.0f,static_cast<float>(i)/in)*std::fmin(1.0f,static_cast<float>(n-i)/out);
+        x.push_back(gain*env*(std::sin(phase)+0.3f*std::sin(3.0f*phase))/1.3f);
+    }
+}
+// PULL UP's two whoops (the voice, when there is one, after them).
+void Whoops(std::vector<float>& x) { Whoop(x,0.8f);Gap(x,0.1f);Whoop(x,0.8f);Gap(x,0.12f); }
+// A caution chime: two struck notes falling, 1050 then 750 Hz.
+void Chime(std::vector<float>& x) {
+    for(const float hz:{1050.0f,750.0f}) {
+        const int n=static_cast<int>(0.24f*static_cast<float>(kRate));
+        for(int i=0;i<n;++i) {
+            const float t=static_cast<float>(i)/static_cast<float>(kRate),env=std::exp(-t*9.0f);
+            x.push_back(env*std::sin(6.2831853f*hz*t)+0.25f*env*env*std::sin(6.2831853f*2.0f*hz*t));
+        }
+    }
+}
+// The stall horn: a harsh steady 420 Hz (its odd harmonics to the 9th), 0.5 s of whole cycles: a seamless loop.
+std::vector<std::int16_t> SynthHorn() {
+    std::vector<float> x(kRate/2);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate);
+        float v=0.0f;
+        for(int k=1;k<=9;k+=2)v+=std::sin(6.2831853f*420.0f*static_cast<float>(k)*t)/static_cast<float>(k);
+        x[i]=v;
+    }
+    return Pcm16(x,0.7f);
+}
+// `in` at `rate` to kRate (linear: a callout, not music).
+std::vector<std::int16_t> Resampled(const std::vector<std::int16_t>& in,UINT32 rate) {
+    if(rate==kRate || in.empty())return in;
+    const double step=static_cast<double>(rate)/static_cast<double>(kRate);
+    std::vector<std::int16_t> out(static_cast<std::size_t>(static_cast<double>(in.size()-1)/step));
+    for(std::size_t i=0;i<out.size();++i) {
+        const double at=static_cast<double>(i)*step;
+        const std::size_t a=static_cast<std::size_t>(at);
+        const double f=at-static_cast<double>(a);
+        out[i]=static_cast<std::int16_t>(std::lround(in[a]*(1.0-f)+in[a+1]*f));
+    }
+    return out;
+}
+
+// --- The Windows voice (SAPI 5) ---
+// The voice's samples (mono 16-bit at kRate, written raw into `mem`; a RIFF header skipped should there be one) as
+// floats in `out`, the silence it leaves at either end cut. False: nothing said.
+bool ReadSpoken(IStream* mem,std::vector<float>& out) {
+    STATSTG st{};HGLOBAL h=nullptr;
+    if(FAILED(mem->Stat(&st,STATFLAG_NONAME)) || FAILED(GetHGlobalFromStream(mem,&h)) || !h)return false;
+    const std::size_t size=static_cast<std::size_t>(st.cbSize.QuadPart);
+    const auto* p=static_cast<const unsigned char*>(GlobalLock(h));
+    if(!p)return false;
+    std::size_t at=0,end=size;
+    if(size>=12 && !std::memcmp(p,"RIFF",4))
+        for(at=12;at+8<=size;) {
+            std::uint32_t len;std::memcpy(&len,p+at+4,4);
+            if(!std::memcmp(p+at,"data",4)){at+=8;end=at+len<=size ? at+len : size;break;}
+            at+=8+len+(len&1);
+        }
+    std::vector<float> x;
+    for(std::size_t i=at;i+2<=end;i+=2){std::int16_t v;std::memcpy(&v,p+i,2);x.push_back(static_cast<float>(v)/32768.0f);}
+    GlobalUnlock(h);
+    float top=0.0f;
+    for(float v:x)top=std::fabs(v)>top ? std::fabs(v) : top;
+    if(top<0.01f)return false;
+    std::size_t first=0,last=x.size();
+    while(first<last && std::fabs(x[first])<0.02f*top)++first;
+    while(last>first && std::fabs(x[last-1])<0.02f*top)--last;
+    const std::size_t pad=kRate/100;
+    first=first>pad ? first-pad : 0;last=last+pad<x.size() ? last+pad : x.size();
+    out.clear();
+    for(std::size_t i=first;i<last;++i)out.push_back(x[i]/top);
+    return out.size()>kRate/20;
+}
+// `voice` saying `text` into `out` (ReadSpoken).
+bool Speak(ISpVoice* voice,const wchar_t* text,std::vector<float>& out) {
+    IStream* mem=nullptr;ISpStream* stream=nullptr;
+    bool said=false;
+    const WAVEFORMATEX f=Mono16(kRate);
+    if(SUCCEEDED(CreateStreamOnHGlobal(nullptr,TRUE,&mem)) &&
+       SUCCEEDED(CoCreateInstance(CLSID_SpStream,nullptr,CLSCTX_ALL,IID_ISpStream,reinterpret_cast<void**>(&stream))) &&
+       SUCCEEDED(stream->SetBaseStream(mem,SPDFID_WaveFormatEx,&f)) && SUCCEEDED(voice->SetOutput(stream,FALSE)) &&
+       SUCCEEDED(voice->Speak(text,SPF_DEFAULT|SPF_IS_NOT_XML,nullptr)))
+        said=ReadSpoken(mem,out);
+    if(stream){stream->Close();stream->Release();}
+    if(mem)mem->Release();
+    return said;
+}
+// An English voice (a woman's first: the warnings' "Betty") when one is installed, else the system's own; logged.
+void PickVoice(ISpVoice* voice) {
+    ISpObjectTokenCategory* category=nullptr;IEnumSpObjectTokens* list=nullptr;ISpObjectToken* token=nullptr;
+    if(SUCCEEDED(CoCreateInstance(CLSID_SpObjectTokenCategory,nullptr,CLSCTX_ALL,IID_ISpObjectTokenCategory,
+                                  reinterpret_cast<void**>(&category))) &&
+       SUCCEEDED(category->SetId(SPCAT_VOICES,FALSE)) && SUCCEEDED(category->EnumTokens(L"Language=409",L"Gender=Female",&list)) &&
+       list->Next(1,&token,nullptr)==S_OK)
+        voice->SetVoice(token);
+    if(token)token->Release();
+    if(list)list->Release();
+    if(category)category->Release();
+    ISpObjectToken* used=nullptr;
+    wchar_t* name=nullptr;
+    if(SUCCEEDED(voice->GetVoice(&used)) && used && SUCCEEDED(used->GetStringValue(nullptr,&name)) && name)
+        Log("SOUND warnings: the callouts' voice is \"%ls\"",name);
+    if(name)CoTaskMemFree(name);
+    if(used)used->Release();
+}
+void SpeakAllNow() {
+    if(FAILED(CoInitializeEx(nullptr,COINIT_MULTITHREADED))){Log("SOUND warnings: no COM on the voice's thread: tones");return;}
+    ISpVoice* voice=nullptr;
+    if(FAILED(CoCreateInstance(CLSID_SpVoice,nullptr,CLSCTX_ALL,IID_ISpVoice,reinterpret_cast<void**>(&voice))) || !voice) {
+        Log("SOUND warnings: no Windows voice (SAPI 5): the callouts are tones");
+        CoUninitialize();
+        return;
+    }
+    PickVoice(voice);
+    voice->SetRate(1);
+    int said=0;
+    for(int k=0;k<kCallCount;++k) {
+        std::vector<float> words,clip;
+        if(!ownClip[k].empty() || !Speak(voice,kCallText[k],words))continue;   // ownClip: written before this thread began
+        if(k==kCallPullUp)Whoops(clip);
+        clip.insert(clip.end(),words.begin(),words.end());
+        spokenClip[k]=Pcm16(clip,0.9f);
+        ++said;
+    }
+    voice->Release();
+    CoUninitialize();
+    spokenReady.store(true,std::memory_order_release);
+    Log("SOUND warnings: %d callout(s) spoken by the Windows voice",said);
+}
+DWORD WINAPI SpeakAll(void*) {
+    __try { SpeakAllNow(); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { Log("SOUND warnings: the Windows voice faulted: the callouts are tones"); }
+    return 0;
+}
+
+// The callouts' clips made here and read from the player's WAVs, the horn, their voices (once, on the first Warn).
+void MakeWarnings() {
+    warnMade=true;
+    std::vector<float> x;
+    Whoops(x);madeClip[kCallPullUp]=Pcm16(x,0.8f);
+    x.clear();Chime(x);
+    madeClip[kCallTerrain]=madeClip[kCallSinkRate]=madeClip[kCallGear]=Pcm16(x,0.7f);
+    hornPcm=SynthHorn();
+    for(int k=0;k<kCallCount;++k) {
+        wchar_t path[MAX_PATH],suffix[48];
+        std::vector<std::int16_t> pcm;UINT32 rate=kRate;
+        swprintf_s(suffix,L"_warn_%ls.wav",kCallName[k]);
+        if(!BesideDll(suffix,path) || !ReadWav(path,pcm,rate))continue;
+        ownClip[k]=Resampled(pcm,rate);
+        Log("SOUND warnings: %ls from %ls",kCallName[k],path);
+    }
+    const WAVEFORMATEX f=Mono16(kRate);
+    if(FAILED(engine->CreateSourceVoice(&calloutVoice,&f)))calloutVoice=nullptr;
+    hornVoice=Voice(f,hornPcm);
+    Log("SOUND warnings: callouts=%d horn=%d",calloutVoice!=nullptr,hornVoice!=nullptr);
+}
+
+// The callout `k` sounds as: the player's, the voice's, else the one made here (maybe none: empty).
+const std::vector<std::int16_t>& ClipOf(int k) noexcept {
+    if(!ownClip[k].empty())return ownClip[k];
+    if(Cfg().warnVoice && spokenReady.load(std::memory_order_acquire) && !spokenClip[k].empty())return spokenClip[k];
+    return madeClip[k];
+}
+void StopCallout() noexcept {
+    if(calloutVoice){calloutVoice->Stop(0);calloutVoice->FlushSourceBuffers();}
+    calling=-1;
+}
+void Play(int k,ULONGLONG now) noexcept {
+    const auto& pcm=ClipOf(k);
+    StopCallout();
+    XAUDIO2_BUFFER b{};
+    b.Flags=XAUDIO2_END_OF_STREAM;b.AudioBytes=static_cast<UINT32>(pcm.size()*2);b.pAudioData=reinterpret_cast<const BYTE*>(pcm.data());
+    if(FAILED(calloutVoice->SubmitSourceBuffer(&b)))return;
+    const float v=kCalloutVolume*WarnGain();
+    Pan(calloutVoice,v,v);
+    calloutVoice->Start(0);
+    calling=k;callEnd=now+pcm.size()*1000/kRate;
+}
+// The callouts this frame (see jetaudio.h Warn), a GPWS's priorities: the most urgent one on with something to say (a
+// once-only one said is done) is the only one that may play, cutting a lesser one short (due again once it is over);
+// while it waits out its own repeat nothing lesser starts in between. One whose warning went out stops.
+void Callouts(unsigned on,ULONGLONG now) noexcept {
+    if(!calloutVoice)return;
+    const unsigned rose=on&~callsOn;
+    callsOn=on;
+    for(int k=0;k<kCallCount;++k)if(rose>>k&1u)dueAt[k]=now;
+    bool busy=calling>=0 && now<callEnd;
+    if(busy && !(on>>calling&1u)){StopCallout();busy=false;}
+    if(!busy)calling=-1;
+    for(int k=0;k<kCallCount;++k) {
+        if(!(on>>k&1u) || dueAt[k]==kOnce || ClipOf(k).empty())continue;
+        if(busy && k>=calling)return;   // the one playing is at least as urgent
+        if(now<dueAt[k])return;         // the most urgent one between its repeats: nothing lesser in the gap
+        if(busy)dueAt[calling]=now;
+        Play(k,now);
+        dueAt[k]=kCallRepeat[k]==kOnce ? kOnce : callEnd+kCallRepeat[k];
+        return;
+    }
+}
+
+// The threat tone (Warn): see kThreatLockRatio.
+void ThreatTone(int state,bool launch,ULONGLONG now) noexcept {
+    if(!threatVoice) {
+        if(tonePcm.empty()) {   // the lock tone's loop (LockTone makes it the same way)
+            const int n=kRate/10;
+            tonePcm.resize(static_cast<std::size_t>(n));
+            for(int i=0;i<n;++i)tonePcm[static_cast<std::size_t>(i)]=static_cast<std::int16_t>(std::lround(
+                std::sin(6.2831853f*kToneHz*static_cast<float>(i)/static_cast<float>(kRate))*0.8f*32767.0f));
+            toneFormat=Mono16(kRate);
+        }
+        threatVoice=Voice(toneFormat,tonePcm);
+        if(!threatVoice)return;
+    }
+    threatAt=now;
+    float volume=0.0f,ratio=1.0f;
+    if(launch){ratio=(now/kWarbleMs)%2 ? kLaunchHigh : kLaunchLow;volume=kThreatVolume;}
+    else if(state==2){ratio=kThreatMissileRatio;volume=now%kThreatMissilePeriod<kThreatMissileMs ? kThreatVolume : 0.0f;}
+    else if(state==1){ratio=kThreatLockRatio;volume=now%kThreatLockPeriod<kThreatLockMs ? kThreatVolume : 0.0f;}
+    volume*=WarnGain();
+    threatVoice->SetFrequencyRatio(ratio);
+    Pan(threatVoice,volume,volume);
+    threatVoice->SetVolume(1.0f);
+}
 }  // namespace
 
 bool Start() noexcept {
@@ -200,15 +486,9 @@ bool Start() noexcept {
     }
     XAUDIO2_VOICE_DETAILS details{};master->GetVoiceDetails(&details);
     masterChannels=details.InputChannels>=1 && details.InputChannels<=XAUDIO2_MAX_AUDIO_CHANNELS ? details.InputChannels : 2;
-    wchar_t path[MAX_PATH]{};HMODULE self=nullptr;
-    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                       reinterpret_cast<LPCWSTR>(&Start),&self);
+    wchar_t path[MAX_PATH]{};
     UINT32 rate=kRate;
-    bool own=false;
-    if(GetModuleFileNameW(self,path,MAX_PATH)) {
-        wchar_t* dot=wcsrchr(path,L'.');
-        if(dot && wcscpy_s(dot,MAX_PATH-(dot-path),L"_jet.wav")==0)own=ReadWav(path,roarPcm,rate);
-    }
+    const bool own=BesideDll(L"_jet.wav",path) && ReadWav(path,roarPcm,rate);
     if(own) {
         whine=false;
         Log("SOUND engine sound from %ls (%u Hz, %.1f s)",path,rate,static_cast<double>(roarPcm.size())/rate);
@@ -268,27 +548,25 @@ void Close(int i) noexcept {
     slots[i]=Slot{};
 }
 
-void ThreatTone(int state) noexcept {
+bool Running() noexcept { return ok; }
+
+void Warn(const Cockpit& c) noexcept {
     if(!Start())return;
-    if(!threatVoice) {
-        if(tonePcm.empty()) {   // the lock tone's loop (LockTone makes it the same way)
-            const int n=kRate/10;
-            tonePcm.resize(static_cast<std::size_t>(n));
-            for(int i=0;i<n;++i)tonePcm[static_cast<std::size_t>(i)]=static_cast<std::int16_t>(std::lround(
-                std::sin(6.2831853f*kToneHz*static_cast<float>(i)/static_cast<float>(kRate))*0.8f*32767.0f));
-            toneFormat=Mono16(kRate);
-        }
-        threatVoice=Voice(toneFormat,tonePcm);
-        if(!threatVoice)return;
+    if(!warnMade)MakeWarnings();
+    if(Cfg().warnAudio && Cfg().warnVoice && !speaking) {   // the voice once asked for (it may be switched on later in the game)
+        speaking=true;
+        const HANDLE t=CreateThread(nullptr,0,&SpeakAll,nullptr,0,nullptr);
+        if(t)CloseHandle(t);
     }
     const ULONGLONG now=GetTickCount64();
-    threatAt=now;
-    float volume=0.0f,ratio=1.0f;
-    if(state==2){ratio=kThreatMissileRatio;volume=now%kThreatMissilePeriod<kThreatMissileMs ? kThreatVolume : 0.0f;}
-    else if(state==1){ratio=kThreatLockRatio;volume=now%kThreatLockPeriod<kThreatLockMs ? kThreatVolume : 0.0f;}
-    threatVoice->SetFrequencyRatio(ratio);
-    Pan(threatVoice,volume,volume);
-    threatVoice->SetVolume(1.0f);
+    warnAt=now;
+    ThreatTone(c.threat,c.launch,now);
+    if(hornVoice) {
+        const float v=c.stall ? kHornVolume*WarnGain() : 0.0f;
+        Pan(hornVoice,v,v);
+        hornVoice->SetVolume(1.0f);
+    }
+    Callouts(c.callouts,now);
 }
 
 void LockTone(int state,float progress) noexcept {
@@ -312,14 +590,21 @@ void LockTone(int state,float progress) noexcept {
         const ULONGLONG period=kBeepSlow-static_cast<ULONGLONG>(p*static_cast<float>(kBeepSlow-kBeepFast));
         volume=(now-beepFrom)%period<kBeepMs ? kToneVolume : 0.0f;
     }
+    volume*=WarnGain();
     lockVoice->SetFrequencyRatio(ratio);
     Pan(lockVoice,volume,volume);
     lockVoice->SetVolume(1.0f);
 }
 
 void Beat(float volume) noexcept {
-    if(lockVoice && GetTickCount64()-toneAt>kToneStaleMs){Pan(lockVoice,0.0f,0.0f);toneState=0;}
-    if(threatVoice && GetTickCount64()-threatAt>kToneStaleMs)Pan(threatVoice,0.0f,0.0f);
+    const ULONGLONG now=GetTickCount64();
+    if(lockVoice && now-toneAt>kToneStaleMs){Pan(lockVoice,0.0f,0.0f);toneState=0;}
+    if(threatVoice && now-threatAt>kToneStaleMs)Pan(threatVoice,0.0f,0.0f);
+    if(warnMade && now-warnAt>kToneStaleMs) {   // no aircraft flown (or the plugin off): the warnings stop
+        if(hornVoice)Pan(hornVoice,0.0f,0.0f);
+        if(calling>=0)StopCallout();
+        callsOn=0;
+    }
     masterVolume=volume<0.0f ? 0.0f : volume>4.0f ? 4.0f : volume;
     beatAt=GetTickCount64();
 }

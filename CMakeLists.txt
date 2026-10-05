@@ -2,13 +2,13 @@ cmake_minimum_required(VERSION 3.20)
 project(EDF6VehicleCrew VERSION 0.7.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/warn.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
 configure_file(src/version.h.in "${CMAKE_BINARY_DIR}/generated/version.h" @ONLY)
 target_include_directories(EDF6VehicleCrew PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
-target_link_libraries(EDF6VehicleCrew PRIVATE xaudio2)
+target_link_libraries(EDF6VehicleCrew PRIVATE xaudio2 sapi ole32)
 target_compile_options(EDF6VehicleCrew PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_options(EDF6VehicleCrew PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6VehicleCrew.pdb)
 # Build output, never tracked: build/Mods/Plugins holds both plugins and their ini files, laid out as they go
@@ -61,3 +61,21 @@ foreach(sim ${EDF6_SIMS})
     target_compile_definitions(${sim} PRIVATE _CRT_SECURE_NO_WARNINGS)
     set_target_properties(${sim} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endforeach()
+
+# The cockpit's warnings offline (tools/warn_check.cpp): the ground-proximity cases, the launch detection, the callouts'
+# scheduler, and every warning sound written out as a WAV (no sound played). Not part of the plugin build:
+# cmake --build build --target warn_check && build\warn_check.exe
+add_executable(warn_check EXCLUDE_FROM_ALL tools/warn_check.cpp src/warn.cpp)
+target_include_directories(warn_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(warn_check PRIVATE edf6common xaudio2 sapi ole32)
+target_compile_options(warn_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(warn_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp against a stand-in image whose draw functions record;
+# tools/hud_view.py makes the PNGs): the warnings' layout to look at. Not part of the plugin build:
+# cmake --build build --target hud_view && build\hud_view.exe && python tools\hud_view.py %TEMP%\edf6_hud_view
+add_executable(hud_view EXCLUDE_FROM_ALL tools/hud_view.cpp)
+target_include_directories(hud_view PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(hud_view PRIVATE edf6common)
+target_compile_options(hud_view PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hud_view PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

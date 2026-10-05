@@ -96,6 +96,9 @@ struct Config {
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     bool jetEntrySmoke=true;        // a called jet arriving trails smoke from its exhausts (booster.cpp JetSmoke)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    bool warnAudio=true;            // the cockpit's warnings heard (warn.cpp): PULL UP, stall horn, launch warble, callouts
+    bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
+    float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
     float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
@@ -187,6 +190,7 @@ bool InstallJetSound() noexcept;
 bool InstallGlyphLock() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
+float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)
 // The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
 void LockSound(unsigned char* vehicle) noexcept;
 
@@ -445,9 +449,15 @@ struct PlayerJetSymbols {
 // under it: over the world's zero); climb m/s; setSpeed: the forward speed W / S set (m/s) of `top`; aim: the mouse's aim,
 // a point ahead (aiming: the mouse-aim flight flies at it, heliaim.h); holding: it holds its height; rotor / hover: a stock
 // heli on the ground, its rotor and the rotor whose lift holds it (the takeoff cue; 0: none); landed: on the ground.
+// The ground-proximity warning (warn.cpp ClosureIn / GpwsOf), a real GPWS's modes: SINK RATE (sinking onto the ground
+// under it too fast), TERRAIN (its path runs into something higher than that), PULL UP (either within kPullUpSeconds).
+enum class Gpws : std::uint8_t { none, sinkRate, terrain, pullUp };
+// gpws / impactIn: the ground-proximity warning and the seconds to the impact it warns of (<0: none).
 struct HeliFlight {
     float vel[3],speed,clear,climb,hp,hpMax,setSpeed,top,aim[3],rotor,hover;
     bool ground,landed,keys,aiming,holding;
+    Gpws gpws;
+    float impactIn;
 };
 struct PlayerHeliReadout { HeliFlight f; PlayerJetSymbols sym; };
 bool PlayerHeliHud(PlayerHeliReadout* out) noexcept;   // heli.cpp: the stock heli's, as of the last frame; false: none
@@ -455,7 +465,10 @@ struct PlayerJetReadout {
     float speed,throttle,clear,climb,hp,hpMax,load;
     float rotate;                // m/s: the speed it can lift off from (the kind's rotate), for the takeoff cue
     bool air,stall,ground,keys,aiming;   // ground: there is ground under it (clear is its height over it), not on it
-    bool pullUp;                 // in the air and about to hit the ground or what stands on it (PullUpNeeded)
+    bool pullUp;                 // in the air and about to hit the ground or what stands on it (gpws == pullUp)
+    Gpws gpws;                   // the ground-proximity warning, `impactIn` s to the impact it warns of (<0: none)
+    float impactIn;
+    float liftShare;             // the share of all the wing gives its path needs (1: STALL; 0 on the ground, a rotor craft)
     int threat;                  // 2 a missile homing on it, 1 an enemy's missile lock on it, 0 none
     int flares;                  // flare pairs left
     float aim[3],path[3];

@@ -136,6 +136,7 @@ void Validate(Config& n) noexcept {
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
+    Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
     Fix("DrillMaxRpm",n.drillMaxRpm,30.0f,1200.0f);
     Fix("DrillSpinUpSec",n.drillSpinUpSec,0.2f,10.0f);
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
@@ -251,6 +252,9 @@ void LoadConfig() noexcept {
     n.playerJetThreatHud=ReadBool(L"PlayerJetThreatHud",n.playerJetThreatHud);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
+    n.warnAudio=ReadBool(L"WarnAudio",n.warnAudio);
+    n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
+    n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.drill=ReadBool(L"Drill",n.drill);
     n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
@@ -283,7 +287,8 @@ void LoadConfig() noexcept {
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
-    Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d",n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud);
+    Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d; warnings audio=%d voice=%d volume=%.2f",n.playerJetGunSight,
+        n.playerJetFlightHud,n.playerJetThreatHud,n.warnAudio,n.warnVoice,n.warnVolume);
     Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X",n.playerJetAll,n.playerJetHailKey,n.gunshipBoardGunner,
         n.gunshipGunnerKey);
