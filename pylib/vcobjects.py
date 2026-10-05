@@ -340,6 +340,14 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'drill': GroundVehicle('EDF6VC_DRILL', 'V505_TANK', 'EWEAPON418',
                            ('EWEAPON418', 'EWEAPON421', 'EWEAPON425', 'EWEAPON428', 'EWEAPON433'),
                            ('app:/weapon/edf6vc_drill_bit.sgo',), 1400.0, 'make_drill'),
+    # The sidecar motorcycle (tools/make_sidecar.py, src/sidecar.cpp): the Freed bike's class (Vehicle503_Bike) and
+    # weapons (its rider's two machine guns, its fuel tank: the stock ones), a sidecar platform and wheel built from
+    # stock parts (pylib/sidecar_model.py), requested like the Freed bikes (the Ranger's vehicle slot). Its gunner is
+    # no seat's: the plugin holds a soldier on the platform, firing their own weapons.
+    'sidecar': GroundVehicle('EDF6VC_SIDECAR', 'V503_BIKE', 'AWEAPON338',
+                             ('AWEAPON338', 'AWEAPON339', 'AWEAPON341', 'AWEAPON343', 'AWEAPON345'),
+                             ('app:/weapon/v_503_bike_gun_l.sgo', 'app:/weapon/v_503_bike_gun_r.sgo',
+                              'app:/weapon/v_fuel01.sgo'), 300.0, 'make_sidecar'),
 }
 # The drill tank's bite (src/jet_bay.cpp kDrillChargeFile, DrillCharge): an impact charge (tools/make_jets.py
 # impact_charge) with a blast of DRILL_CHARGE_RADIUS m (3 m or more: the stock path that lets a blast break buildings,
