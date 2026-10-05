@@ -92,6 +92,8 @@ CALLS: tuple[Call, ...] = (
          ground='artillery'),
     # Appended 2026-10-05: the drill tank (tools/make_drill.py, src/drill.cpp), requested like the Blacker.
     Call('EDF6VC_CALL_DRILL', 0, 'drill', False, 0, 7000, 1.0, 'vehicle', vehicle='EDF6VC_DRILL', ground='drill'),
+    # Appended 2026-10-06: the sidecar motorcycle (tools/make_sidecar.py, src/sidecar.cpp), requested like the Freed bike.
+    Call('EDF6VC_CALL_SIDECAR', 0, 'sidecar', False, 0, 4000, 1.0, 'vehicle', vehicle='EDF6VC_SIDECAR', ground='sidecar'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -107,6 +109,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'Katyusha (2026-10-05)': IDS[:22],
     'artillery (2026-10-05)': IDS[:23],
     'drill tank (2026-10-05)': IDS[:24],
+    'sidecar motorcycle (2026-10-06)': IDS[:25],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -132,6 +135,24 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'sidecar': {
+        'SC': ('边三轮摩托', '请求一辆边三轮摩托：驾驶员开车并用车上的两挺机枪射击，边车上的人用自己的武器开火。'
+                      '靠近边车按上车键坐进边车（离驾驶座更近则开车）；在边车里再按上车键或跳跃离开。'
+                      '你开车时，附近的 NPC 队友会跳进边车替你射击；你坐边车、没人开车时，推左摇杆让车朝你看的方向开。'),
+        'CN': ('邊三輪摩托', '請求一輛邊三輪摩托：駕駛員開車並用車上的兩挺機槍射擊，邊車上的人用自己的武器開火。'
+                      '靠近邊車按上車鍵坐進邊車（離駕駛座更近則開車）；在邊車裡再按上車鍵或跳躍離開。'
+                      '你開車時，附近的 NPC 隊友會跳進邊車替你射擊；你坐邊車、沒人開車時，推左搖桿讓車朝你看的方向開。'),
+        'JA': ('サイドカー', 'サイドカー付きバイクを要請する。運転手は運転と車体の機関銃 2 挺、サイドカーの隊員は自分の武器で射撃する。'
+                        'サイドカーに近づいて搭乗ボタンで乗り込む（運転席の方が近ければ運転する）。サイドカーでもう一度搭乗ボタンか'
+                        'ジャンプで降りる。運転中は近くの NPC 隊員がサイドカーに乗って射撃し、サイドカーに乗って誰も運転していない'
+                        'ときは左スティックを倒すと見ている方向へ走る。'),
+        'EN': ('Sidecar Motorcycle', 'Requests a motorcycle with a sidecar: the rider drives and fires its two machine '
+                                     'guns, whoever is in the sidecar fires their own weapons. Walk up to the sidecar '
+                                     'and press board to get in (nearer the saddle, you drive); board again or jump to '
+                                     'get out. While you drive, a nearby NPC squadmate hops into the sidecar and shoots '
+                                     'for you; in the sidecar with nobody driving, push the left stick and the bike '
+                                     'drives the way you look.'),
+    },
     'drill': {
         'SC': ('钻头战车', '请求一辆钻头战车：车头装着巨大的钻头，按住射击键钻头加速旋转，转速越高，对接触到的敌人伤害越大、'
                       '钻开建筑和岩石越快。近战，不发射炮弹。'),
@@ -266,6 +287,14 @@ VEHICLE_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグインと tools/make_jets.py が書き出す EDF6VC_PJET_*.SGO が必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the EDF6VC_PJET_*.SGO files tools/make_jets.py writes.',
 }
+# A ground vehicle that needs no EDF6AutoTurret: its notes in place of GROUND_NOTES.
+PLUGIN_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件，以及安装器写入的车辆文件。',
+    'CN': '需要 EDF6VehicleCrew 插件，以及安裝器寫入的車輛檔案。',
+    'JA': 'EDF6VehicleCrew プラグイン、およびインストーラーが書き出す車両ファイルが必要。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
+}
+GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES}
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',
@@ -298,7 +327,8 @@ def call_name(call: Call, lang: str) -> str:
 def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
     if call.brings == 'vehicle':
-        return KINDS[call.kind][lang][1] + '\n\n' + (GROUND_NOTES if call.ground else VEHICLE_NOTES)[lang]
+        notes = GROUND_NOTES_BY_KIND.get(call.kind, GROUND_NOTES) if call.ground else VEHICLE_NOTES
+        return KINDS[call.kind][lang][1] + '\n\n' + notes[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

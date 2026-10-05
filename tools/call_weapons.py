@@ -222,8 +222,10 @@ def vehicle_weapons(call: Call) -> tuple[str, ...]:
 
 def vehicle_needs(call: Call) -> list[str]:
     """What a vehicle request's SGO names and so needs installed (by tools/make_jets.py, or the ground vehicle's own
-    tool): the vehicle SGO and its weapons."""
-    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in vehicle_weapons(call)]
+    tool): the vehicle SGO and its weapons of ours (EDF6VC_*). A stock weapon it keeps (the sidecar bike's guns and
+    fuel tank) is the game's own, in Root.cpk: nothing to install."""
+    ours = [w for w in vehicle_weapons(call) if w.split('/')[-1].upper().startswith('EDF6VC_')]
+    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in ours]
 
 
 def _object_path(call: Call) -> str:
@@ -286,8 +288,9 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float]) -> bytes
     if not call.ground:
         setup.items[1].items[0] = float(call.mark)   # the heli params' speed gain: the jet's mark
     # The weapon list: the setup's last entry ([multipliers, heli params, fuel, weapons] in the Eros's request;
-    # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's).
-    at = 2 if call.ground else 3
+    # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's; [multipliers, bike params, fuel,
+    # weapons] in the Freed bike's, the sidecar's).
+    at = len(setup.items) - 1 if call.ground else 3
     weapons = setup.items[at].items
     entry = weapons[0]
     jet_weapons = vehicle_weapons(call)
