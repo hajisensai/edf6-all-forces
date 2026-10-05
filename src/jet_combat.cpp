@@ -322,12 +322,19 @@ void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,flo
     VisitEnemies(v,&VisitTarget,&pick);
     Aim& t=j.t;
     if(!pick.best){t.target=nullptr;return;}
+    // The velocity from the target's move over one frame (`dt`, this frame's game step) only: a call after skipped frames
+    // (a gun's gate, a phase its caller sits out) divided several frames' move by one (CrewShell's half second: 30 times
+    // too fast), a second call in a frame a move of 0. Either keeps the velocity it had; a new target starts it at 0.
     const bool same=pick.best==t.target;
+    const ULONGLONG frame=GameFrame();
+    const bool step=same && t.trackFrame+1==frame;
     for(int i=0;i<3;++i) {
         const float raw=(pick.aim[i]-t.tgtPrev[i])/dt;
-        t.tgtVel[i]=same && std::fabs(raw)<80.0f ? t.tgtVel[i]+(raw-t.tgtVel[i])*0.2f : 0.0f;
+        if(step)t.tgtVel[i]=std::fabs(raw)<80.0f ? t.tgtVel[i]+(raw-t.tgtVel[i])*0.2f : 0.0f;
+        else if(!same)t.tgtVel[i]=0.0f;
     }
-    std::memcpy(t.tgtPrev,pick.aim,12);std::memcpy(t.aim,pick.aim,12);
+    if(!same || t.trackFrame!=frame){std::memcpy(t.tgtPrev,pick.aim,12);t.trackFrame=frame;}   // a frame's first sample
+    std::memcpy(t.aim,pick.aim,12);
     t.target=pick.best;t.flyer=pick.flyer;t.seenTarget=ms;
 }
 

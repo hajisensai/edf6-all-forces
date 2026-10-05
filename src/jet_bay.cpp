@@ -57,7 +57,7 @@ bool shellsOk=false;     // bayOk, and the DemoIndirectFire vtable is there
 // point, so it is seen leaving the gunship instead of the stock off-screen sky point.
 constexpr ULONGLONG kGunshipGapMs=2500;   // between shells
 constexpr float kGunshipReach=1800.0f;    // m from the gunship to its target at the most
-constexpr float kGunshipDamage=300.0f;    // a shell's damage (the SGO's own factor is the missions' 250)
+constexpr float kGunshipDamage=300.0f;    // a shell's damage at the base tier, times the gunship's (Tier; the SGO's own is the missions' 250)
 const wchar_t kGunshipSgo[]=L"app:/object/demogunshipfiree25.sgo";
 bool gunshipReady=false;                  // the shell SGO was preloaded for this mission (PreloadShells)
 // The gunship's long-range side cannon (CannonShot; README 炮舰机的机炮, the user 2026-10-05: "炮舰机应该加装远距离
@@ -65,8 +65,9 @@ bool gunshipReady=false;                  // the shell SGO was preloaded for thi
 // gunship's solid round, one round, no wait) made a 40 mm HE round: 16 m a frame (kCannonSpeed), no fall, 170 frames
 // (2720 m, past kCannonReach), a 4 m blast, a thin orange tracer. Fired straight (IFC +0x2F8 = 0) from the gunship at
 // its aim, a round every kCannonGapMs: 2 a second, at kCannonDamage a round at the base tier times the gunship's tier
-// (Tier: the same factor the ram's damage takes, playerjet.cpp RamDamage), so 5 rounds in a shell's 2.5 s gap carry its
-// 300 at the base tier: as strong as the shells, but far, quick and exact where the shells are slow and wide. Its own
+// (Tier: the same factor the ram's damage takes, playerjet.cpp RamDamage, and the shells': every weapon of the plugin's
+// grows with the mission's difficulty / the call's tier as the stock ones do, README), so 5 rounds in a shell's 2.5 s gap
+// carry a shell's damage at any tier: as strong as the shells, but far, quick and exact where they are slow and wide. Its own
 // gap: the shells and the cannon are two guns. Without the file (an install from before) there is no cannon: the
 // gunship has its shells alone, as before.
 constexpr ULONGLONG kCannonGapMs=500;
@@ -206,12 +207,31 @@ bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,U
 }
 
 // The NPC crew's cannon at its target (j.t: a ground one), led: where a round fired now meets it as it moves on
-// (tgtVel, m/s) over the round's flight to where it is now.
+// (tgtVel, m/s) over the round's flight to where it is now. Only with the line from the gunship to that point clear of
+// the map (kCannonSightSlack): the round flies straight at 8-11 deg down from 350 m over up to 2500 m and bursts on the
+// first thing it meets (4 m HE, no penetration), so a target behind a building or a ridge took every round into the
+// building. One ray per gap at the most (cannonLookAt): a blocked look waits a gap before the next, the gun's gap itself
+// left as it was (the player's CANNON shares it). The player's own rounds go where the screen's centre looks, which is
+// the first thing on that line already: no look for them (PlayerCannon).
+constexpr float kCannonSightSlack=20.0f;   // m: what stands this near the aim point short of it is the target's ground
 bool CannonAtTarget(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms,const char* who) noexcept {
     if(!cannonReady || !j.t.target || j.t.flyer)return false;
+    if(ms-j.shells.cannonAt<kCannonGapMs || ms-j.shells.cannonLookAt<kCannonGapMs)return false;
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     const float t=Len(d)/kCannonSpeed;
     const float at[3]={j.t.aim[0]+j.t.tgtVel[0]*t,j.t.aim[1]+j.t.tgtVel[1]*t,j.t.aim[2]+j.t.tgtVel[2]*t};
+    const float to[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
+    if(Len(to)>kCannonReach)return false;
+    j.shells.cannonLookAt=ms;
+    float hit[3];
+    if(MapRay(pos,at,hit)>=0.0f) {
+        const float gap[3]={hit[0]-at[0],hit[1]-at[1],hit[2]-at[2]};
+        if(Len(gap)>kCannonSightSlack) {
+            if(Cfg().debug && j.shells.cannonHeld++%10==0)
+                Log("JET v=%p gunship cannon held (%s): the map %.0f m short of its aim, %.0f m out",v,who,Len(gap),Len(to));
+            return false;
+        }
+    }
     return CannonShot(j,v,pos,at,ms,who);
 }
 }  // namespace
@@ -287,7 +307,7 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
     j.shells.gunAt=ms;
-    if(!Shell(kGunshipSgo,gunshipReady,v,pos,j.t.aim,kGunshipDamage,false,"gunship shell"))return;
+    if(!Shell(kGunshipSgo,gunshipReady,v,pos,j.t.aim,kGunshipDamage*Tier(v),false,"gunship shell"))return;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.shells.gunShots,j.t.target,Len(d));
 }
@@ -331,7 +351,7 @@ bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* w
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kGunshipReach)return false;
     j.shells.gunAt=ms;
-    if(!Shell(kGunshipSgo,gunshipReady,v,pos,at,kGunshipDamage,false,"gunship shell"))return false;
+    if(!Shell(kGunshipSgo,gunshipReady,v,pos,at,kGunshipDamage*Tier(v),false,"gunship shell"))return false;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d from %s at (%.0f,%.0f,%.0f), %.0f m",v,j.shells.gunShots,who,at[0],at[1],at[2],Len(d));
     return true;
@@ -354,14 +374,17 @@ bool PlayerCannon(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
 // The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
 // gunship itself within the longer gun's reach (PickTarget; the entry's target is its own again when it is handed back:
 // ResumeNpc); the cannon at it (led) and a shell when it is within the shells' reach, each gun when it is ready.
+// The target is tracked every frame, the guns ready or not: PickTarget takes the target's velocity from its move since
+// the last call over this frame's dt, as the NPC jets call it (jet.cpp JetFrame). Called only when a gun was ready
+// (every 0.5 s), it divided half a second's move by one frame: the velocity 30 times too fast, the cannon's lead 60-150 m
+// off, or zeroed by its 80 m/s sanity cut.
 bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {
     Jet* const j=FindJet(v);
     if(!j || !Cfg().jetPilot)return false;
-    const bool cannon=cannonReady && ms-j->shells.cannonAt>=kCannonGapMs,shell=ms-j->shells.gunAt>=kGunshipGapMs;
-    if(!cannon && !shell)return false;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     PickTarget(*j,v,pos,pos,cannonReady ? kCannonReach : kGunshipReach,dt,ms);
-    if(!j->t.target || j->t.flyer)return false;
+    const bool cannon=cannonReady && ms-j->shells.cannonAt>=kCannonGapMs,shell=ms-j->shells.gunAt>=kGunshipGapMs;
+    if((!cannon && !shell) || !j->t.target || j->t.flyer)return false;
     const bool fired=cannon && CannonAtTarget(*j,v,pos,ms,"its NPC gunner");
     return (shell && CrewFire(*j,v,j->t.aim,ms,"its NPC gunner")) || fired;
 }

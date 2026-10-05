@@ -290,6 +290,7 @@ struct Aim {
     const void* target;
     bool flyer;
     float aim[3],tgtPrev[3],tgtVel[3];
+    ULONGLONG trackFrame;    // GameFrame of tgtPrev (PickTarget: the velocity from one frame's move only)
     ULONGLONG seenTarget;    // game ms it last had a target
     float out[3];            // extend / run-out / crank direction
     ULONGLONG missileAt;     // its last missile salvo
@@ -340,6 +341,8 @@ struct ShellState {
     int gunShots;            // ...and how many it has fired
     ULONGLONG cannonAt;      // its last cannon round (jet_bay.cpp CannonShot)
     int cannonShots;         // ...and how many it has fired
+    ULONGLONG cannonLookAt;  // the NPCs' last look along the cannon's line (CannonAtTarget: a ray a gap at the most)
+    int cannonHeld;          // ...and how many found the map in the way (logged every tenth)
 };
 
 struct Jet {
