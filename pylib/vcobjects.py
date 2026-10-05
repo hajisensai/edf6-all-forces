@@ -63,25 +63,18 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
-# The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): an enemy. Its guns are the 506 gatling made a slow
-# glowing round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius,
-# colour, spread); its charges are the blast drone's point charge (the wreck sets it off where it hits:
-# name -> damage, radius m). Damage is per round against the player (the stock gatling's is 10, 20 a second).
-SWARM_GUN_STOCK = 'V_506HELI_GATLING01_L.SGO'
-SWARM_GUN_FILES: dict[str, tuple[float, float, float, float, float, float, tuple[float, float, float, float], float]] = {
-    # a member's: violet, 6 a second, 420 m
-    'EDF6VC_SWARM_GUN.SGO': (6.0, 10.0, 6.0, 70.0, 0.6, 0.0, (1.4, 0.5, 3.2, 1.0), 0.04),
-    # the core's: a red bolt every half second with a small blast, 600 m
-    'EDF6VC_SWARM_CANNON.SGO': (40.0, 30.0, 5.0, 120.0, 1.4, 3.0, (3.2, 0.5, 0.4, 1.0), 0.015),
+# The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
+# round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread).
+# Damage is per round against the player (the stock gatling's is 10, 20 a second).
+PRIMER_GUN_STOCK = 'V_506HELI_GATLING01_L.SGO'
+PRIMER_GUN_FILES: dict[str, tuple[float, float, float, float, float, float, tuple[float, float, float, float], float]] = {
+    # the dragonfly's needles: fast thin violet rounds, 15 a second, 360 m
+    'EDF6VC_PRIMER_NEEDLE.SGO': (8.0, 4.0, 12.0, 30.0, 0.4, 0.0, (2.2, 0.6, 3.4, 1.0), 0.01),
+    # the centipede's spit: a slow teal glob with a small blast, about one a second, 420 m
+    'EDF6VC_PRIMER_SPIT.SGO': (30.0, 45.0, 3.5, 120.0, 1.2, 4.0, (0.4, 2.6, 2.4, 1.0), 0.03),
 }
-SWARM_CHARGE_FILES: dict[str, tuple[float, float]] = {
-    'EDF6VC_SWARM_CHARGE_S.SGO': (300.0, 10.0),    # a member's wreck
-    'EDF6VC_SWARM_CHARGE_L.SGO': (1000.0, 25.0),   # the core's wreck
-    'EDF6VC_SWARM_CHARGE_XL.SGO': (2500.0, 45.0),  # the huge core's wreck
-}
-_SWARM_GUN, _SWARM_CANNON = ('app:/weapon/' + f.lower() for f in SWARM_GUN_FILES)
-_SWARM_CHARGE_S, _SWARM_CHARGE_L, _SWARM_CHARGE_XL = ('app:/weapon/' + f.lower() for f in SWARM_CHARGE_FILES)
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *SWARM_GUN_FILES, *SWARM_CHARGE_FILES)
+_PRIMER_NEEDLE, _PRIMER_SPIT = ('app:/weapon/' + f.lower() for f in PRIMER_GUN_FILES)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *PRIMER_GUN_FILES)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
     'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _ARMS),
@@ -110,25 +103,17 @@ JETS: dict[str, Jet] = {
                             'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                            'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
-    # The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md), on the enemy's side: the core (the Imperial
-    # drone x 0.5, 41.5 m across with its cannon arms, which the box takes in so they can be hit) a mission
-    # places, and the members it brings (the gold drone x 0.5, 9.4 m across). Weapon 2 is the charge its wreck
-    # sets off. Durability is the SGO's; the plugin scales it (SwarmHpScale).
-    'edf6tr_swarm_core_mission': Jet(7012.0, 3000.0, (_SWARM_CANNON, _SWARM_CANNON, _SWARM_CHARGE_L),
-                                     ('app:/object/edf6vc_swarm_core.mrab', 'e515_imperialufo.mdb'), 'EDF6VC_SWARM_CORE.MRAB',
-                                     'body', 'body', rigid=((0.0, -3.42, -5.113), (20.75, 7.455, 12.168))),
-    # The huge swarm: the Imperial drone at its own size (83 m across), more drones, its formation twice as wide.
-    'edf6tr_swarm_huge_mission': Jet(7014.0, 9000.0, (_SWARM_CANNON, _SWARM_CANNON, _SWARM_CHARGE_XL),
-                                     ('app:/object/edf6vc_swarm_core_xl.mrab', 'e515_imperialufo.mdb'),
-                                     'EDF6VC_SWARM_CORE_XL.MRAB', 'body', 'body',
-                                     rigid=((0.0, -6.84, -10.227), (41.5, 14.91, 24.336))),
-    # The drone: a core's member, or placed alone by a mission (a lone drone, scattered from the start). Its model
-    # is the plugin's own dragonfly (pylib/dragonfly_model.py: 14 m long, 13.5 m across the wings), written into
-    # the gold drone's archive under that drone's member name; its box is the body (thorax, head, abdomen), not
-    # the wings.
-    'edf6tr_swarm_unit': Jet(7013.0, 250.0, (_SWARM_GUN, _SWARM_GUN, _SWARM_CHARGE_S),
-                             ('app:/object/edf6vc_swarm_unit.mrab', 'e507_goldufo.mdb'), 'EDF6VC_SWARM_UNIT.MRAB',
-                             'body', 'body', rigid=((0.0, -0.134, -1.32), (1.529, 1.454, 7.04))),
+    # The Primer creatures (src/primer.cpp, docs/primer-plan.md), enemies a mission places, in models of their own:
+    # the centipede (pylib/centipede_model.py: 12 m, in the teleportation ship's archive and materials; its box the
+    # middle 7.2 m of its body, so that linked ones 9 m apart do not touch) and the dragonfly
+    # (pylib/dragonfly_model.py: 14 m long, 13.5 m across the wings, in the gold drone's; its box the body, not
+    # the wings).
+    'edf6tr_centipede_mission': Jet(7012.0, 400.0, (_PRIMER_SPIT, _PRIMER_SPIT),
+                                    ('app:/object/edf6vc_centipede.mrab', 'e508_carrier.mdb'), 'EDF6VC_CENTIPEDE.MRAB',
+                                    'body', 'body', rigid=((0.0, 0.05, 0.0), (1.15, 0.6, 3.6))),
+    'edf6tr_dragonfly_mission': Jet(7013.0, 600.0, (_PRIMER_NEEDLE, _PRIMER_NEEDLE),
+                                    ('app:/object/edf6vc_dragonfly.mrab', 'e507_goldufo.mdb'), 'EDF6VC_DRAGONFLY.MRAB',
+                                    'body', 'body', rigid=((0.0, -0.134, -1.32), (1.529, 1.454, 7.04))),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
     # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
     # deck (y 163.08..193.08 over the origin; the tower above is not solid). Not the whole hull: afloat its
@@ -328,11 +313,11 @@ def jet_guns(game: Game) -> dict[str, bytes]:
         r.set('AmmoSpeed', JET_GUN_SPEED)
         r.set('AmmoAlive', JET_GUN_ALIVE)
         out[name] = dsgo.write(doc)
-    for name, (damage, gap, speed, alive, size, blast, colour, spread) in SWARM_GUN_FILES.items():
-        doc = dsgo.parse(game.read('WEAPON', SWARM_GUN_STOCK))
+    for name, (damage, gap, speed, alive, size, blast, colour, spread) in PRIMER_GUN_FILES.items():
+        doc = dsgo.parse(game.read('WEAPON', PRIMER_GUN_STOCK))
         r = doc.root
         if r.get('AmmoClass') != 'SolidBullet01' or len(r.get('AmmoColor').items) != 4:
-            raise ValueError(f'{SWARM_GUN_STOCK} 不是预期的直升机机炮')
+            raise ValueError(f'{PRIMER_GUN_STOCK} 不是预期的直升机机炮')
         flash = r.get('MuzzleFlash_CustomParameter')
         for key, value in (('AmmoCount', 99999.0), ('AmmoDamage', damage), ('FireInterval', gap), ('AmmoSpeed', speed),
                            ('AmmoAlive', alive), ('AmmoSize', size), ('AmmoExplosion', blast), ('FireAccuracy', spread)):
@@ -341,7 +326,7 @@ def jet_guns(game: Game) -> dict[str, bytes]:
         if len(flash.items) == 10 and isinstance(flash.items[8], dsgo.Node) and len(flash.items[8].items) == 4:
             flash.items[8].items[:] = list(colour)   # the muzzle flash in the round's colour
         out[name] = dsgo.write(doc)
-    for name, (damage, radius) in {**JET_BLAST_FILES, **SWARM_CHARGE_FILES}.items():
+    for name, (damage, radius) in JET_BLAST_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', JET_BLAST_STOCK))
         r = doc.root
         cp = r.get('Ammo_CustomParameter')

@@ -65,12 +65,6 @@ MODELS: dict[str, Recipe] = {
     'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5),
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
     'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
-    # The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): its cores in the Imperial drone's model (83 m with
-    # its cannon arms, x 0.5, and x 1 for the huge one), which already has the root `mdl` and a level `body` bone,
-    # so only the scale changes. Its drone is a model of its own (GENERATED).
-    'EDF6VC_SWARM_CORE.MRAB': Recipe('E515_IMPERIALUFO.MRAB', 'e515_imperialufo.mdb', 0.5),
-    # the huge swarm's core: the Imperial drone at its own size (83 m across)
-    'EDF6VC_SWARM_CORE_XL.MRAB': Recipe('E515_IMPERIALUFO.MRAB', 'e515_imperialufo.mdb', 1.0),
 }
 # The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,
 # at its size in the missions (x 1: 1664 m long, 355 m wide, hull bottom to main deck 360 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
@@ -230,16 +224,16 @@ def replace_member(raw: bytes, model: str, data: bytes) -> bytes:
     return rab_write(rab)
 
 
-# Models made from primitives rather than scaled (file -> builder module): the swarm's dragonfly drone
-# (pylib/dragonfly_model.py, in the stock gold drone's archive and materials).
-GENERATED_FILES = ('EDF6VC_SWARM_UNIT.MRAB',)
+# Models made from primitives rather than scaled (file -> builder module): the Primer creatures (src/primer.cpp),
+# written into stock archives so they use those models' materials and textures.
+GENERATED: dict[str, str] = {'EDF6VC_DRAGONFLY.MRAB': 'dragonfly_model', 'EDF6VC_CENTIPEDE.MRAB': 'centipede_model'}
+GENERATED_FILES = tuple(GENERATED)
 
 
 def generated(game, name: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
-    """The archive of GENERATED_FILES entry `name`."""
-    import dragonfly_model
-    assert name in GENERATED_FILES, name
-    return dragonfly_model.build(game)
+    """The archive of GENERATED entry `name`."""
+    import importlib
+    return importlib.import_module(GENERATED[name]).build(game)
 
 
 def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game

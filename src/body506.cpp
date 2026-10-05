@@ -75,8 +75,7 @@ OwnerMessageFn MessageOwner(PluginBody body) noexcept {
     switch(body) {
         case PluginBody::sub: return &SubMessage;
         case PluginBody::playerJet: return &PlayerJetMessage;
-        case PluginBody::jet: return &SwarmMessage;   // only the Primer swarm's: every other jet's as the stock 506's
-        default: return nullptr;
+        default: return nullptr;   // the jets take their messages as the stock 506 does
     }
 }
 

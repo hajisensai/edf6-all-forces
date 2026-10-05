@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/jet_swarm.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/playerjet.cpp src/jetprops.cpp src/booster.cpp src/mission.cpp src/body506.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/primer.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/playerjet.cpp src/jetprops.cpp src/booster.cpp src/mission.cpp src/body506.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -18,6 +18,7 @@ configure_file(EDF6VehicleCrew.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6Vehicle
 # EDF6AutoTurret: the flak / Bohr auto-aim and the tank side guns (autoturret/README.md)
 add_subdirectory(autoturret)
 
-# The Primer swarm drone's pose code run offline (tools/swarm_pose_view.py renders it): not part of the plugin.
-add_executable(swarm_pose_sim tools/swarm_pose_sim.cpp)
-set_target_properties(swarm_pose_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Primer creatures' pose code run offline (tools/primer_pose_view.py, tools/primer_chain_view.py render it):
+# not part of the plugin.
+add_executable(primer_pose_sim tools/primer_pose_sim.cpp)
+set_target_properties(primer_pose_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

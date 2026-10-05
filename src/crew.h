@@ -67,13 +67,11 @@ struct Config {
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
-    bool swarm=true;           // the Primer swarm (an enemy: EDF6VC_SWARM_CORE a mission places) is flown by the plugin (jet_swarm.cpp)
-    int swarmUnits=12;         // ...the drones a core brings (0-16)
-    int swarmHugeUnits=16;     // ...the drones a huge core brings (0-16)
-    float swarmHpScale=1.0f;   // ...its HP, times the SGO's (huge core 9000, core 3000, drone 250)
-    float swarmRange=250.0f;   // ...metres from the player it circles at
-    float swarmHeight=70.0f;   // ...metres over the player
-    bool swarmFire=true;       // ...its guns fire (its wrecks' charges go off either way)
+    bool primer=true;          // the Primer creatures (enemies: EDF6VC_CENTIPEDE / _DRAGONFLY a mission places) are flown (primer.cpp)
+    float primerHpScale=1.0f;  // ...their HP, times the SGO's (centipede 400, dragonfly 600)
+    bool primerFire=true;      // ...their guns fire
+    int centipedeLinkMax=12;   // ...the most centipedes linked into one (2-32)
+    float centipedeLinkRange=150.0f;// ...m a centipede goes to join another's tail from
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -183,7 +181,7 @@ void ResetPlayer() noexcept;
 
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
-bool IsSwarmVehicle(const void* vehicle) noexcept; // ...the Primer swarm's (an enemy: jet_swarm.cpp)
+bool IsPrimerVehicle(const void* vehicle) noexcept;// ...a Primer creature's (an enemy: primer.cpp)
 bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a wingman in the way (no pass-through)
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update

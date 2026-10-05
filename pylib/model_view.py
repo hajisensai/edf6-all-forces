@@ -1,5 +1,5 @@
 """Offline model viewer: renders an MDB from Root.cpk (or a built archive) posed, as a PNG, to check how the plugin's
-bone poses (src/jet_swarm.cpp SwarmPose) will look before trying them in the game. Read only; writes only --out.
+bone poses (src/primer.cpp Pose, src/primer_pose.h) will look before trying them in the game. Read only; writes only --out.
 
     python pylib/model_view.py E606_SHELLFISH.MRAB e606_shellfish.mdb --out build/view.png
         [--pose "fin_rollA_l=z:30,fin_rollA_r=z:-30" --pose "..."]   one row of views per --pose (none: the bind pose)
@@ -28,7 +28,8 @@ from mdb import Mdb, bind_world, mdb_read, mmul, rab_read, read_elem  # noqa: E4
 
 PALETTE = [(230, 90, 60), (70, 160, 230), (90, 200, 110), (230, 190, 60), (190, 100, 220), (60, 210, 210)]
 BASE = (175, 175, 168)
-# --color @mat: each vertex in its material's colour (by the material's name; others BASE), roughly as it shows.
+# --color @tex: each vertex in its material's albedo texture at its first UV (the textures from the model's own
+# archive), shaded: close to how it shows. --color @mat: each vertex in its material's colour (by its name).
 MATERIAL_COLOURS = {'gold': (214, 172, 72), 'copper': (186, 112, 70), 'metal': (162, 168, 178), 'matblack': (44, 44, 50),
                     'translucent': (90, 165, 255)}
 
@@ -68,6 +69,19 @@ def posed_world(md: Mdb, pose: dict[str, list[tuple[str, float]]],
     return w
 
 
+TEXTURES: dict[int, dict[str, Image.Image]] = {}   # id(model) -> texture file name (lower case) -> image
+
+
+def albedo(md: Mdb, material: int) -> Image.Image | None:
+    """The albedo texture of `material`, if load() found it in the model's archive."""
+    if material >= len(md.materials):
+        return None
+    tex = next((t for t in md.materials[material].textures if t.kind.lower() == 'albedo'), None)
+    if tex is None or not 0 <= tex.texture < len(md.textures):
+        return None
+    return TEXTURES.get(id(md), {}).get(md.textures[tex.texture].filename.lower())
+
+
 def geometry(md: Mdb, pose: dict[str, list[tuple[str, float]]], colour_prefixes: list[str],
              locals_: dict[str, list[float]] | None = None):
     """(vertices N x 3, triangles M x 3, per-vertex colour N x 3) of the posed model."""
@@ -95,8 +109,15 @@ def geometry(md: Mdb, pose: dict[str, list[tuple[str, float]]], colour_prefixes:
                 owner = np.full(len(p4), ob.bone)
             names = [md.name_of(md.bones[i].name) for i in range(len(md.bones))]
             c = np.tile(np.array(BASE, dtype=np.float64), (len(p4), 1))
-            by_material = colour_prefixes == ['@mat']
-            if by_material:
+            by_material = colour_prefixes in (['@mat'], ['@tex'])
+            image = albedo(md, me.material) if colour_prefixes == ['@tex'] else None
+            uv = read_elem(me, next((x.name for x in me.elems if x.name.lower() == 'texcoord' and x.channel == 0), ''), 0)
+            if image is not None and uv:
+                w, h = image.size
+                px = np.asarray(image, dtype=np.float64)
+                a = np.array(uv)
+                c[:] = px[(np.mod(a[:, 1], 1.0) * (h - 1)).astype(int), (np.mod(a[:, 0], 1.0) * (w - 1)).astype(int)]
+            elif by_material:
                 mat = md.name_of(md.materials[me.material].name).lower() if me.material < len(md.materials) else ''
                 c[:] = MATERIAL_COLOURS.get(mat, BASE)
             for n, prefix in enumerate([] if by_material else colour_prefixes):
@@ -162,7 +183,21 @@ def load(archive: str, model: str) -> Mdb:
     else:
         import rootcpk
         raw = rootcpk.default().read('OBJECT', archive)
-    return mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == model.lower()).data)
+    rab = rab_read(raw)
+    md = mdb_read(next(f for f in rab.files if f.name.lower() == model.lower()).data)
+    import io
+    wanted = {t.filename.lower() for t in md.textures}
+    textures = {}
+    for f in rab.files:
+        if f.name.lower() in wanted:
+            try:
+                im = Image.open(io.BytesIO(f.data))
+                im.draft('RGB', (512, 512))
+                textures[f.name.lower()] = im.convert('RGB').resize((512, 512))
+            except Exception:   # a format PIL cannot read: that material keeps its plain colour
+                pass
+    TEXTURES[id(md)] = textures
+    return md
 
 
 def sheet(md: Mdb, rows: list[tuple[str, dict[str, list[float]]]], views: list[str], size: int, colour: list[str],

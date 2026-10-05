@@ -78,7 +78,10 @@ void Release(Jet& j) noexcept {
     DollFree(IndexOf(j));
     for(auto& d:jets) {
         if(d.ref && d.drone.mother==j.ref.ctrl)d.drone.mother=nullptr;
-        if(d.ref && d.swarm.core==j.ref.ctrl)d.swarm.core=nullptr;   // its swarm's drones: scattered
+        // A centipede linked to it: the link goes (the part behind gets a front of its own).
+        if(d.ref && d.primer.ahead==j.ref.ctrl)d.primer.ahead=nullptr;
+        if(d.ref && d.primer.behind==j.ref.ctrl)d.primer.behind=nullptr;
+        if(d.ref && d.primer.joining==j.ref.ctrl)d.primer.joining=nullptr;
     }
     DropRef(j.ref);
     j=Jet{};
@@ -197,7 +200,7 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     case Weapon::drones:
         Circle(j,pos,anchor,height,ms,want,speed);
         return;
-    case Weapon::swarm:   // flown by SwarmFrame, never here (its kind has no patrol circle)
+    case Weapon::primer:   // flown by PrimerFrame, never here (its kind has no patrol circle)
         return;
     }
 }
@@ -355,12 +358,8 @@ void JetFrame(unsigned char* v) noexcept {
     // The stock input stays out of it: rotor spinning, no stick.
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,1.0f);Put<float>(v,kInW,1.0f);
-    if(j->drone.blastAt) {
-        if(IsSwarm(*j))SwarmTeam(v);   // a swarm wreck's charge goes off on the enemy's side
-        Blast(*j,v,ms);
-        return;
-    }
-    if(IsSwarm(*j)){SwarmFrame(*j,v,pos,dt,ms);return;}   // the Primer swarm: an enemy, flown by jet_swarm.cpp
+    if(j->drone.blastAt){Blast(*j,v,ms);return;}
+    if(IsPrimer(*j)){PrimerFrame(*j,v,pos,dt,ms);return;}   // the Primer creatures: enemies, flown by primer.cpp
 
     const Kind& kind=KindOf(*j);
     ExtendLock(v,kind.missileRange);
@@ -444,10 +443,9 @@ bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr,nullptr);
 }
 
-bool IsSwarmVehicle(const void* vehicle) noexcept {
+bool IsPrimerVehicle(const void* vehicle) noexcept {
     Role role=Role::fighter;
-    return IsJetVehicle(static_cast<const unsigned char*>(vehicle),&role,nullptr) &&
-           (role==Role::swarmCore || role==Role::swarmUnit || role==Role::swarmHuge);
+    return IsJetVehicle(static_cast<const unsigned char*>(vehicle),&role,nullptr) && (role==Role::centipede || role==Role::dragonfly);
 }
 
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept {

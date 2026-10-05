@@ -12,9 +12,9 @@ weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring.
 Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model with the gunship's own mark), the
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
 impact charges a crash sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64.SGO.
-Also the Primer swarm, an enemy in three sizes (src/jet_swarm.cpp, docs/swarm-plan.md): EDF6VC_SWARM_HUGE / _CORE /
-_UNIT.SGO and their models EDF6VC_SWARM_CORE_XL / _CORE / _UNIT.MRAB, their guns EDF6VC_SWARM_GUN / _CANNON.SGO and the
-charges their wrecks set off, EDF6VC_SWARM_CHARGE_S / _L / _XL.SGO.
+Also the Primer creatures, enemies (src/primer.cpp, docs/primer-plan.md): EDF6VC_CENTIPEDE / _DRAGONFLY.SGO, their
+own models EDF6VC_CENTIPEDE / _DRAGONFLY.MRAB (pylib/centipede_model.py, pylib/dragonfly_model.py) and their guns
+EDF6VC_PRIMER_SPIT / _NEEDLE.SGO.
 Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
 EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (vcobjects.portal_lasers).
 
@@ -58,11 +58,9 @@ FILES: dict[str, str] = {
     # (tools/call_weapons.py): with vehicle_setup as well as mission_setup.
     'EDF6VC_PJET_FIGHTER.SGO': 'edf6tr_pjet_fighter_mission',
     'EDF6VC_PJET_STRIKE.SGO': 'edf6tr_pjet_strike_mission',
-    # The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): an enemy core a mission places, and the members the
-    # plugin brings to it.
-    'EDF6VC_SWARM_CORE.SGO': 'edf6tr_swarm_core_mission',
-    'EDF6VC_SWARM_UNIT.SGO': 'edf6tr_swarm_unit',
-    'EDF6VC_SWARM_HUGE.SGO': 'edf6tr_swarm_huge_mission',
+    # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies a mission places.
+    'EDF6VC_CENTIPEDE.SGO': 'edf6tr_centipede_mission',
+    'EDF6VC_DRAGONFLY.SGO': 'edf6tr_dragonfly_mission',
 }
 # Their own models (pylib/jet_models.py).
 MODEL_FILES = sorted({vc.JETS[j].file for j in FILES.values() if vc.JETS[j].file})

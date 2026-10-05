@@ -84,23 +84,13 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 
 8. **载具状态显示**（`src/hud.cpp`，ini `VehicleHud` / `VehicleHudCount` / `VehicleHudRange`，逆向笔记 `docs/hud-re.md`）：离玩家 500 米内最近的 6 台 NPC 驾驶的友军载具，头顶显示「机种 血量%  G 机炮余弹  M 导弹  D 剩余无人机出击  F 剩余燃料」一行和一条血条（没有的项不显示，燃料只对插件限时的喷气机、呼叫直升机显示，撤离时显示 RTB）；潜水母舰在屏幕右侧有自己的面板（深蓝底、青色边）：船体大血条和数值、4 个子系统各一条，打坏时显示 DOWN 和修复倒计时，舰上原有的血条保留。用游戏自己的 HUD 绘制（血条的四边形和救援提示的文字），独占全屏也能看到；日志 `HUD`（Debug=1）记下显示了什么。
 
-9. **星导者群体合体机（敌人）**（`src/jet_swarm.cpp`，设计与依据见 `docs/swarm-plan.md`，ini `Swarm` / `SwarmUnits` / `SwarmHugeUnits` / `SwarmHpScale` / `SwarmRange` / `SwarmHeight` / `SwarmFire`）：一种新的**敌方**空中单位，一架核心带着一群小型无人机拼成一架「飞翼」整体飞行。全部是插件驾驶的 506 机体（同战斗机），只是队伍设为敌方、外形换成星导者的模型（安装器生成）。分三种：
-
-   | 种类 | 任务里放置的 SGO | 外形 | 耐久 | 带的无人机 | 残骸炸药 |
-   |---|---|---|---|---|---|
-   | 巨大 | `edf6vc_swarm_huge.sgo` | 帝国无人机原尺寸，约 83 米宽 | 9000 | `SwarmHugeUnits`（默认 16），编队宽一倍；绕圈半径 ×1.6、高度 ×1.5 | 2500 / 45 米 |
-   | 大 | `edf6vc_swarm_core.sgo` | 帝国无人机 ×0.5，约 42 米 | 3000 | `SwarmUnits`（默认 12） | 1000 / 25 米 |
-   | 个体 | `edf6vc_swarm_unit.sgo` | 生物机械蜻蜓（插件自带模型），长约 14 米、翼展约 13.5 米 | 250 | 没有核心：一出场就绕着玩家飞（同「散开」） | 300 / 10 米 |
-
-   - **无人机外形与动作**：无人机（合体机的成员和「个体」）是插件自己生成的蜻蜓模型（`pylib/dragonfly_model.py`：金色胸部、蓝色发光复眼与翅膀、铜色分节腹部，用原版金色无人机的材质与贴图）。插件每帧驱动它的骨骼（`src/swarm_pose.h`）：四片翅膀前后两对交错扇动；锁定目标后翅膀转为急速悬停振动、腹部向下卷起成「尾刺」，**卷到位才开火**（攻击前的提示）；残骸翅膀下垂、腹部半卷。不进游戏也能看效果：`build.cmd` 后运行 `python tools/swarm_pose_view.py`（插件同一份姿态代码离线跑一段出击过程并渲染）和 `python tools/swarm_formation_view.py`（整个编队），图在 `build/`；
-
-   - **出场**：任务脚本像放置战斗机一样放——`Preload("app:/object/edf6vc_swarm_core.sgo", -1);` 和 `CreateFriend("点名", "app:/object/edf6vc_swarm_core.sgo", 1.0, false);`（换成上表的 SGO 即另外两种；放置点离地至少 15 米，巨大的 25 米）。插件第一次看到它就把它改到敌方队伍，按 `SwarmHpScale` 放大耐久，核心离地 30 米（巨大 50 米）后每帧放出最多 3 架无人机，排进编队。测试场的敌人波次里选「星导者群体合体机·巨大 / 大 / 个体」即可（场上没有敌人时才放下一批；每批最多 1 / 3 / 6，总数最多 4 / 12 / 36）；
-   - **合体**：核心以 `SwarmRange`（默认 250 米）为半径、高出玩家 `SwarmHeight`（默认 70 米）绕玩家盘旋，每 30 秒从玩家头顶低空穿过一次。无人机按编队槽位贴着核心飞（核心的速度加上把它拉回槽位的修正），各自把机头（含俯仰）对准玩家，对准、在射程内时按「打 1.6 秒、停 2.4 秒」的节奏开火（各架错开）；核心的两门红色重炮对准就打。同一合体机的子弹互相穿过；
-   - **散开**：核心被打掉（或消失）后，剩下的无人机各自在 90–150 米的环上绕玩家飞，继续开火；
-   - **死亡行为（残骸冲锋）**：每架机体（核心、无人机）被打爆时不会当场坠毁：插件把它变成残骸，锁定玩家**此刻**的位置，翻滚着直线冲过去（不追踪；无人机最快 55 m/s，核心 40 m/s），到点、贴地、撞到建筑或 12 秒后引爆（无人机 300 伤害 / 10 米，核心 1000 伤害 / 25 米，敌方队伍：伤玩家和友军），随即删除。冲锋途中再打它一下，它按原版坠毁、不爆炸——空中拆掉。原理：原版扣血把 HP 夹在 `+0x2F0`（下限）和最大值之间，只有 HP ≤ 0 才判死亡；插件在处理合体机的每条伤害消息时临时把下限设成 1、处理完立即恢复，致命一击后它停在 1 HP，插件看到就转成残骸。插件没在驾驶它时（`Enabled=0`、驾驶员没了）不拦截，它按原版正常被击毁；
-   - 队伍（`docs/swarm-team-re.md`，静态逆向）：载具的队伍每帧按乘员的队伍重算，而 RideAi 的假驾驶员写死是友军，所以插件把驾驶员也改到敌方（每帧核对）；子弹和炸药的队伍取载具的。合体机算任务里的敌人（`GetTeamObjectCount(TEAM_ID_ENEMY)` 计入，全灭任务会等它），雷达上在敌方一组，玩家的锁定武器应能锁定（推断，待实机）；
-   - 只瞄准本机玩家；联机未验证；
-   - 装了就每关预载无人机机体（模型约 15 MB），和其它插件机体一样；核心由放置它的任务自己预载；`Swarm=0` 时场上的合体机被删除。
+9. **星导者生物（敌人）**（`src/primer.cpp`，设计与依据见 `docs/primer-plan.md`，ini `Primer` / `PrimerHpScale` / `PrimerFire` / `CentipedeLinkMax` / `CentipedeLinkRange`）：两种新的**敌方**生物，都是插件驾驶的 506 机体（同战斗机），只是队伍设为敌方、外形是插件自己生成的模型（安装器生成，用原版星导者模型的材质与贴图）：
+   - **百足龙虫**（`edf6vc_centipede.sgo`，长 12 米，黑色装甲、金色腿、青色发光接缝）：单只贴地爬行，S 形逼近玩家、到近处绕着转，头对准就喷青色光弹。附近的龙虫会首尾相接合成**一条长龙**（短的接到长的尾巴后面，最多 `CentipedeLinkMax` 只）：接上的沿前一只走过的轨迹跟进，身体顺着弯，中间各只的头尾隐藏，整条只有一个头一个尾；两只以上就**起飞**，在玩家周围蛇行盘旋、不时俯冲穿过，每一节对准玩家时喷吐；还能继续有龙虫接上来变得更长。中间被打掉一只就从那里断开，后半段长出新的头；只剩一只就落地爬行；
+   - **蜻蜓空优机**（`edf6vc_dragonfly.sgo`，长 14 米、翼展 13.5 米，金色胸部、蓝色发光翅膀）：优先追打空中目标（友军战机、离地的玩家），没有才打地面上的玩家。像真蜻蜓那样按拦截航线从目标下后方突进，在 140 米外悬停跟随，腹部卷起对准——**卷到位才开火**（攻击前的提示），连射紫色针弹后向侧上方急转脱离，再绕回来；
+   - **出场**：任务脚本像放置战斗机一样放——`Preload("app:/object/edf6vc_centipede.sgo", -1);` 和 `CreateFriend("点名", "app:/object/edf6vc_centipede.sgo", 1.0, false);`（蜻蜓换成 `edf6vc_dragonfly.sgo`；放置点离地：龙虫 2–4 米、蜻蜓 15 米以上）。插件第一次看到就把它改到敌方队伍，按 `PrimerHpScale` 放大耐久（龙虫 400、蜻蜓 600）。测试场的敌人波次里选「星导者·百足龙虫」或「星导者·蜻蜓空优机」即可；
+   - 队伍（`docs/swarm-team-re.md`，静态逆向）：载具的队伍每帧按乘员重算，RideAi 的假驾驶员写死是友军，所以插件每帧把驾驶员也改到敌方；子弹的队伍取载具的。它们算任务里的敌人（全灭任务会等它们），玩家的锁定武器应能锁定（推断，待实机）。死亡是原版坠毁；
+   - 不进游戏也能看效果：`build.cmd` 后运行 `python tools/primer_pose_view.py centipede`（或 `dragonfly`）看单只的动作，`python tools/primer_chain_view.py --flying` 看一条长龙（都用插件同一份姿态代码离线跑），图在 `build/`；
+   - 只瞄准本机玩家；联机未验证；两种生物只由放置它们的任务加载，不增加其它关卡的加载量；`Primer=0` 时场上的星导者生物被删除。
 
 所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。
 
@@ -151,9 +141,9 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 | 12 | 启动器勾强制装备（例如空袭兵 + 载具格选一台车），安装，进测试场那一项 | 兵种和武器是启动器选的；呼叫的载具是选的那台 | 启动时 `HOOK mission preload=2/2 online=2/2` 和 `HOOK loadout create=5/5`，进关 `MISSION start`、`LOADOUT preload ...` 和 `LOADOUT create ...` |
 | 13 | 撤退回主菜单，看装备界面 | 还是你原来的装备（强制装备没进存档） | — |
 | 14 | 任务中重试（暂停菜单） | 强制装备仍在 | 又一对 `LOADOUT` |
-| 15 | 测试场敌人选「星导者群体合体机·大」，每波 1，安装后进关等 30 秒（再分别试「巨大」「个体」） | 一架帝国无人机外形的核心升空，12 架金色小无人机围着它排成飞翼，绕你盘旋并朝你射击（紫色光弹、红色重炮） | `SWARM v=... swarmCore: enemy team 1`、12 行 `SWARM core ...: drone N`，`Debug=1` 每 2 秒一行 `SWARM v=... fire=` |
-| 16 | 打掉一架无人机 | 它不当场坠毁，翻滚着冲向你刚才站的位置，砸地爆炸；中途再打一下则直接坠毁、不炸 | `shot down: wreck diving at`、`wreck bursts (the ground/on its mark)` |
-| 17 | 打掉核心 | 核心残骸冲过来爆炸；其余无人机散开各自绕你飞、继续射击 | `drone N: its core is gone: scattered` |
+| 15 | 测试场敌人选「星导者·百足龙虫」，每波 4，安装后进关等 30 秒 | 几只黑色龙虫贴地爬向你；靠近的会首尾相接，接上第二只就一起起飞成长龙，在你周围盘旋、俯冲，中间各只的头尾不显示 | `PRIMER v=... centipede: enemy team 1`、`makes for the tail`、`linked behind ...: N long`，`Debug=1` 每 2 秒一行 `PRIMER v=... crawling/linked/front (flying)` |
+| 16 | 打掉长龙中间的一只 | 龙从那里断开，后半段的第一只露出头，成为新的龙头 | `the one ahead of it is gone: a front again` |
+| 17 | 测试场敌人选「星导者·蜻蜓空优机」，自己开直升机或玩家战斗机升空 | 蜻蜓追向你、从下后方切入，在一段距离外悬停、腹部卷起后连射紫色针弹，然后急转飞开再绕回来；你落地后它改打地面上的你 | `dragonfly strikes at the flying player`，`Debug=1` 行里 `hunt` / `strike` / `dart` |
 
 如果直升机飞得不对，把整个 `.log` 发回来。飞控每秒记录模式（`orbit` / `follow` / `run` / `aim` / `hold` …）、高度、爬升率、油门、悬停油门、旋翼转速、三个摇杆量和偏航学习状态。
 飞控增益（旧版的 `HeliMoveGain` / `HeliBrakeGain` / `HeliClimbGain` / `HeliHoverLearn`）已固定为常量，ini 里还有这几项会被忽略（日志说一次）。常见现象：
@@ -208,7 +198,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/crew.cpp`：NPC 上车（Vehicle_RideAi）、顶替（slot 49 FindSeat + 上车提示访问器）、每帧入口（slot 55 串接）。
 - `src/heli.cpp`：直升机自动驾驶。
 - `src/playerjet.cpp`：玩家驾驶的战斗机 / 攻击机飞控（`docs/player-jet-re.md`）。
-- `src/jet_swarm.cpp`：星导者群体合体机（敌人：编队、散开、残骸冲锋，`docs/swarm-plan.md`）；`src/swarm_pose.h` 无人机的骨骼动作（插件和离线模拟 `tools/swarm_pose_sim.cpp` 共用）；`pylib/dragonfly_model.py` 无人机模型；`pylib/model_view.py` 离线看模型。
+- `src/primer.cpp`：星导者生物（敌人：百足龙虫、蜻蜓空优机，`docs/primer-plan.md`）；`src/primer_pose.h` 它们的骨骼动作（插件和离线模拟 `tools/primer_pose_sim.cpp` 共用）；`pylib/centipede_model.py`、`pylib/dragonfly_model.py` 模型（`pylib/procmesh.py` 共用的生成器）；`pylib/model_view.py` 离线看模型。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
