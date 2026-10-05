@@ -111,6 +111,7 @@ struct Config {
     float highCamHeight=45.0f;      // ...the high eye: m over the vehicle's origin
     float highCamBack=35.0f;        // ...m behind it
     float highCamPitch=40.0f;       // ...looking down this many degrees ahead
+    bool nixTorsoTwist=true;        // the Nix's torso keeps its world yaw while A/D turn the legs; only the mouse turns it (nix.cpp)
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
@@ -558,3 +559,4 @@ unsigned char* PlayerHuman() noexcept;
 #include "ground.h"
 #include "heli.h"
 #include "hud.h"
+#include "nix.h"
