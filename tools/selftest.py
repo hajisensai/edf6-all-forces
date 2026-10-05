@@ -107,29 +107,30 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
 
 @test
 def jet_nozzles_on_their_models() -> None:
-    """src/booster.cpp kJetNozzles: each mark's nozzle where its model's is (pylib/jet_models.py tail_nozzle), and
-    every jet mark has a row."""
+    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES), and every jet
+    mark has a row."""
     import jet_models
-    from vcobjects import DEFAULT_GAME, JETS, Game
-    CARRIER_FILE = 'EDF6VC_CARRIER.MRAB'
-    game = Game(DEFAULT_GAME)
-    rows = {float(m.group(1)): (int(m.group(2)), [float(x) for x in m.group(3, 4, 5)])
-            for m in re.finditer(r'\{(\d+)\.0f,(\d),\{\{([-\d.]+)f,([-\d.]+)f,([-\d.]+)f\}', src('src/booster.cpp'))}
+    from vcobjects import JETS
+    carrier = 'EDF6VC_CARRIER.MRAB'
+    num = r'([-\d.]+)f'
+    vec = r'\{' + num + ',' + num + ',' + num + r'\}'
+    rows = {}
+    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\}', src('src/booster.cpp')):
+        count = int(m.group(2))
+        at = [tuple(float(m.group(k)) for k in range(3 + 3 * n, 6 + 3 * n)) for n in range(count)]
+        rows[float(m.group(1))] = at
     bad = []
     for name, jet in JETS.items():
-        if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == CARRIER_FILE):
+        if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == carrier):
             continue   # the carrier's four nozzles are its own (CarrierFlames); the Primers' fighter flaps: no exhaust
         if jet.mark not in rows:
             bad.append(f'{name}: mark {jet.mark} has no nozzle row')
             continue
-        count, at = rows[jet.mark]
-        want = jet_models.tail_nozzle(game, jet.file)
-        if count != 1 or any(abs(a - b) >= 0.02 for a, b in zip(at, want)):
-            bad.append(f'{name}: {at} (x{count}), the model says {want}')
+        want = jet_models.NOZZLES[jet.file]
+        got = rows[jet.mark]
+        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, w in zip(got, want) for a, b in zip(g, w)):
+            bad.append(f'{name}: {got}, the model has {want}')
     assert not bad, '\n'.join(bad)
-
-
-# ---------------------------------------------------------------- the data
 
 
 @test

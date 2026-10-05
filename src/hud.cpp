@@ -524,11 +524,14 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Format(info,L"SPD %d km/h    ALT%ls %d m    %ls %d m/s    HP %d%%",static_cast<int>(std::lround(j.speed*3.6f)),
            j.ground ? L"" : L"*",static_cast<int>(std::lround(alt)),j.climb>=0.0f ? L"UP" : L"DOWN",
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
-    // On the takeoff roll: the speed it may lift off from coming up, then the cue to pull up (the user, 2026-10-05).
+    // On the takeoff roll (not in the air: j.ground only says there is ground under it, so the cue stayed on after
+    // takeoff, 2026-10-05): the speed it may lift off from coming up, then the cue to pull up (the user, 2026-10-05).
+    // In the air, the ground-proximity warning (PlayerJetReadout::pullUp) in its place.
     const int rotateKmh=static_cast<int>(std::lround(j.rotate*3.6f));
-    const bool rolling=j.ground && j.rotate>0.0f && j.speed>1.0f,rotate=rolling && j.speed>=j.rotate;
+    const bool rolling=!j.air && j.rotate>0.0f && j.speed>1.0f,rotate=rolling && j.speed>=j.rotate;
     wchar_t cue[64]=L"";
-    if(rotate)std::swprintf(cue,64,L"    ROTATE: PULL UP (W / SPACE)");
+    if(j.pullUp)std::swprintf(cue,64,L"    PULL UP! TERRAIN");
+    else if(rotate)std::swprintf(cue,64,L"    ROTATE: PULL UP (W / SPACE)");
     else if(rolling && j.speed>=j.rotate*0.7f)std::swprintf(cue,64,L"    ROTATE AT %d km/h",rotateKmh);
     Format(thr,L"THROTTLE %d%%    G %.1f%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"",cue);
     StoresLine(arms,j);
@@ -553,8 +556,10 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
         Format(keys2,L"TAKE OFF: pull the right stick back (from %d km/h)",rotateKmh);
     }
     info.scale=kTitleScale;info.rgba=kWhite;
-    // The rotate cue blinks green (4 Hz) over the throttle line's cyan.
-    thr.scale=kLineScale;thr.rgba=j.stall ? kRed : rotate && (GetTickCount64()/125)%2==0 ? kGreen : rotate ? kYellow : kCyan;
+    // The rotate cue blinks green (4 Hz) over the throttle line's cyan; the pull-up warning red and white (8 Hz).
+    const bool blink=(GetTickCount64()/125)%2==0;
+    thr.scale=kLineScale;
+    thr.rgba=j.pullUp ? (blink ? kRed : kWhite) : j.stall ? kRed : rotate && blink ? kGreen : rotate ? kYellow : kCyan;
     arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kWhite;
     keys.scale=keys2.scale=kLineScale*0.85f;keys.rgba=keys2.rgba=kWhite;
     info.w=info.h=thr.w=thr.h=arms.w=arms.h=keys.w=keys.h=keys2.w=keys2.h=0.0f;

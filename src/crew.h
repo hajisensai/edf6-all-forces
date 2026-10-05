@@ -332,7 +332,8 @@ void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's 
 struct PlayerJetReadout {
     float speed,throttle,clear,climb,hp,hpMax,load;
     float rotate;                // m/s: the speed it can lift off from (the kind's rotate), for the takeoff cue
-    bool air,stall,ground,keys,aiming;
+    bool air,stall,ground,keys,aiming;   // ground: there is ground under it (clear is its height over it), not on it
+    bool pullUp;                 // in the air and about to hit the ground or what stands on it (PullUpNeeded)
     float aim[3],path[3];
     int stores,store;
     const char* storeName[6];

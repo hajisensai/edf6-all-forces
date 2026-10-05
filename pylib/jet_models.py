@@ -329,19 +329,19 @@ def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     return make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r)
 
 
-# The nozzle: the centre line's (|x| < NOZZLE_X) last NOZZLE_DEPTH m. These low-poly models have no nozzle of
-# their own; their fuselage ends in a cone on the centre line, and the flame belongs on its end at its middle
-# height. (Measured off the box before, the height was the box's centre, fins and all: the flame sat inside the
-# upper fuselage, the user, 2026-10-05.)
-NOZZLE_X, NOZZLE_DEPTH = 0.3, 0.6
-
-
-def tail_nozzle(game, file: str | None) -> tuple[float, float, float]:  # noqa: ANN001 - rootcpk.Game
-    """(x, y, z) of a jet model's nozzle, in its frame (x right, y up, z forward): src/booster.cpp kJetNozzles."""
-    line = [p for p in bind_positions(_model_of(game, file)) if abs(p[0]) < NOZZLE_X]
-    end = min(p[2] for p in line)
-    tail = [p[1] for p in line if p[2] < end + NOZZLE_DEPTH]
-    return 0.0, round((min(tail) + max(tail)) / 2, 2), round(end, 2)
+# Each jet model's nozzles, in its frame (x right, y up, z forward): src/booster.cpp kJetNozzles (tools/selftest.py
+# holds that table to this one). Read off the meshes, each checked against the game where there is a picture:
+#  - the interceptor (the player's fighter): two square nozzles either side of the tail (the user's picture,
+#    2026-10-05: "the flame belongs in the two nozzles"), the openings' rims x 1.25..3.3, y 0.17..1.67 at z -7.2..-8.2,
+#    their insides at z -6.6..-7.0: each flame on its opening's middle, just inside the rim. (A first rule, the end of
+#    the centre-line cone, put one flame on the spine between them: inside the upper fuselage.)
+#  - the others: the end of the fuselage's centre-line cone at its middle height (no picture yet).
+NOZZLES: dict[str | None, tuple[tuple[float, float, float], ...]] = {
+    None: ((0.0, 1.07, -12.41),),
+    'EDF6VC_INTERCEPTOR.MRAB': ((1.85, 0.85, -7.3), (-1.85, 0.85, -7.3)),
+    'EDF6VC_MULTIROLE.MRAB': ((0.0, 0.97, -1.78),),
+    'EDF6VC_DRONE.MRAB': ((0.0, 1.33, -1.5),),
+}
 
 
 def fuselage_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game

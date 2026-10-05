@@ -1130,6 +1130,22 @@ void PreloadPlayerJets() noexcept {
     Log("PJET preload for the catch: fighter=%d strike=%d",playerJetPreloaded[0],playerJetPreloaded[1]);
 }
 
+// The ground-proximity warning (the user, 2026-10-05: "warn me to pull up when I'm about to hit the ground"): in
+// the air, at its sink rate it reaches the ground within kPullUpSeconds faster than a landing takes (kLandSink),
+// or its path within kPullUpSeconds runs into something standing higher than the ground under it (a hill, a
+// building) or into the ground while it sinks faster than a landing. A gentle landing approach raises nothing.
+constexpr float kPullUpSeconds=3.0f,kPullUpRise=5.0f;
+bool PullUpNeeded(const PJet& j,const float* pos) noexcept {
+    if(j.phase!=Phase::air)return false;
+    const float sink=-j.climb;
+    if(j.clear!=kNoGround && sink>kLandSink && j.clear<sink*kPullUpSeconds)return true;
+    const float end[3]={pos[0]+j.vel[0]*kPullUpSeconds,pos[1]+j.vel[1]*kPullUpSeconds,pos[2]+j.vel[2]*kPullUpSeconds};
+    float hit[3];
+    if(MapRay(pos,end,hit)<0.0f)return false;
+    const float under=j.clear!=kNoGround ? pos[1]-j.clear : hit[1];
+    return sink>kLandSink || hit[1]>under+kPullUpRise;
+}
+
 bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;
     for(const auto& j:jets) {
@@ -1144,7 +1160,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
             const Kind* const kind=KindOf(v);
             r.rotate=kind ? kind->rotate : 0.0f;
-            r.air=air;r.stall=air && j.stall;r.ground=ground;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=PullUpNeeded(j,pos);r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
