@@ -917,11 +917,14 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
     if(Len(d)<kCatchReach)PressBoardButton(h);
 }
 
-void EjectStart(const PJet& j,const unsigned char* v) noexcept {
+// `alive`: the jet still there to read (a shot-down one may be deleted already: its kind and its path from the PJet).
+void EjectStart(const PJet& j,const unsigned char* v,bool alive) noexcept {
     bail=Bailout{Eject::pending,GameMs(),{j.vel[0]*kEjectCarry,j.vel[2]*kEjectCarry},0.0f,0.0f,{0.0f,0.0f,1.0f},0.0f,ObjRef{},0};
-    if(const Kind* k=KindOf(v))bail.mark=static_cast<float>(k->mark);
-    const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    bail.heading[0]=m[8];bail.heading[1]=m[9];bail.heading[2]=m[10];
+    if(j.kind)bail.mark=static_cast<float>(j.kind->mark);
+    float nose[3]={j.vel[0],j.vel[1],j.vel[2]};
+    if(alive){const float* m=reinterpret_cast<const float*>(v+kMatrix);nose[0]=m[8];nose[1]=m[9];nose[2]=m[10];}
+    else if(!Normalize(nose)){nose[0]=0.0f;nose[1]=0.0f;nose[2]=1.0f;}
+    std::memcpy(bail.heading,nose,12);
     bail.speed=Len(j.vel);
 }
 
@@ -966,15 +969,17 @@ void EjectTick() noexcept {
     bail.vy=vel[1];
 }
 
-void Leave(PJet& j,unsigned char* v) noexcept {
-    if(j.phase==Phase::air) {
-        const float* pos=reinterpret_cast<const float*>(v+kPosition);
-        const float clear=GroundClearance(pos);
-        if(clear==kNoGround || clear>kEjectFrom)EjectStart(j,v);
-    }
+// The player out of the jet: got out, or the jet destroyed under them (the user, 2026-10-05: "a shot-down one should
+// eject too, high enough"). In the air over kEjectFrom (`clear`: now, or the last frame's for a jet gone) they are
+// thrown up and come down under the parachute (EjectTick). `alive`: the jet still there to write back to.
+void Leave(PJet& j,unsigned char* v,float clear,bool alive,const char* how) noexcept {
+    const bool eject=j.phase==Phase::air && (clear==kNoGround || clear>kEjectFrom);
+    if(eject)EjectStart(j,v,alive);
     j.driven=false;j.active=false;j.turnIn=j.pitchIn=j.yawIn=j.rollIn=0.0f;j.hasUp=false;j.hasAim=false;
-    if(j.insetSaved){Put<float>(v,kAreaInset,j.savedInset);j.insetSaved=false;}
-    Log("PJET v=%p left (%s, %.0f m/s)",v,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel));
+    if(j.insetSaved && alive)Put<float>(v,kAreaInset,j.savedInset);
+    j.insetSaved=false;
+    Log("PJET v=%p left: %s (%s, %.0f m/s, %.0f m over the ground)%s",v,how,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel),
+        clear==kNoGround ? -1.0f : clear,eject ? ": ejected" : "");
 }
 
 void Report(PJet& j,const unsigned char* v,const Stick& s,const float* pos,float clear,bool water,ULONGLONG ms) noexcept {
@@ -1039,7 +1044,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     if(!driven && catchFlight.v==v && !v[kDead]){AutoFly(j,v,pos,dt,ms);return;}
     if(!driven) {
         if(j.autopilot){j.autopilot=false;j.active=false;}
-        if(j.driven)Leave(j,v);
+        if(j.driven)Leave(j,v,GroundClearance(pos),true,"got out");
         if(wet)Crash(j,v,0.0f,0.0f,false,ms,nullptr);   // empty and afloat: it breaks up
         return;
     }
@@ -1103,7 +1108,17 @@ bool PlayerJetMessage(unsigned char* v,std::uint32_t msg,void* data,MessageResto
     return true;
 }
 
-void PlayerEjectTick() noexcept { EjectTick(); }
+// A jet the player flew that is dead or gone without its frame having seen it (its object deleted at once, or no
+// input frame for a wreck): the same as PlayerJetFrame's, from the last frame's clearance.
+bool Gone(const PJet& j) noexcept {
+    __try { return !j.ref.Is(j.vehicle) || j.vehicle[kDead]; } __except(EXCEPTION_EXECUTE_HANDLER){return true;}
+}
+
+void PlayerEjectTick() noexcept {
+    if(flyOk && Cfg().playerJet)
+        for(auto& j:jets)if(j.driven && j.vehicle && Gone(j))Leave(j,j.vehicle,j.clear,false,"destroyed");
+    EjectTick();
+}
 
 void PreloadPlayerJets() noexcept {
     for(int i=0;i<2;++i) {
@@ -1172,7 +1187,11 @@ bool IsPlayerJet(const void* vehicle) noexcept {
 void PlayerJetFrame(unsigned char* v) noexcept {
     if(!flyOk || !Cfg().playerJet)return;
     const Kind* kind=KindOf(v);
-    if(!kind || v[kDead])return;
+    if(!kind)return;
+    if(v[kDead]) {   // destroyed with the player in it: out they go (Leave)
+        if(PJet* j=Find(v);j && j->driven)Leave(*j,v,j->clear,true,"destroyed");
+        return;
+    }
     const ULONGLONG ms=GameMs();
     PJet* j=Find(v);
     if(!j)j=Make(v,kind);
