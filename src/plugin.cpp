@@ -195,6 +195,7 @@ void LoadConfig() noexcept {
     n.primer=ReadBool(L"Primer",n.primer);
     n.primerHpScale=ReadFloat(L"PrimerHpScale",n.primerHpScale);
     n.primerFire=ReadBool(L"PrimerFire",n.primerFire);
+    n.primerTrace=ReadBool(L"PrimerTrace",n.primerTrace);
     n.centipedeLinkMax=ReadInt(L"CentipedeLinkMax",static_cast<DWORD>(n.centipedeLinkMax));
     n.centipedeLinkRange=ReadFloat(L"CentipedeLinkRange",n.centipedeLinkRange);
     Validate(n);
@@ -209,8 +210,8 @@ void LoadConfig() noexcept {
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f",n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage);
-    Log("CONFIG primer=%d hpScale=%.2f fire=%d centipede linkMax=%d linkRange=%.0f",n.primer,n.primerHpScale,n.primerFire,
-        n.centipedeLinkMax,n.centipedeLinkRange);
+    Log("CONFIG primer=%d hpScale=%.2f fire=%d trace=%d centipede linkMax=%d linkRange=%.0f",n.primer,n.primerHpScale,n.primerFire,
+        n.primerTrace,n.centipedeLinkMax,n.centipedeLinkRange);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,

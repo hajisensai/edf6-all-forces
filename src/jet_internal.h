@@ -329,6 +329,9 @@ struct PrimerState {
     bool posed;              // every part found
     float phase,curl;
     ULONGLONG logAt;
+    const char* what;        // what it did this frame, and whether it fired (Debug, Trace)
+    bool fired;
+    ULONGLONG traceAt;
 };
 // The bomb bay of a jet that takes over a bomber (jet_bay.cpp).
 struct BayState {

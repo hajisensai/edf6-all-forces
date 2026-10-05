@@ -70,6 +70,7 @@ struct Config {
     bool primer=true;          // the Primer creatures (enemies: EDF6VC_CENTIPEDE / _DRAGONFLY a mission places) are flown (primer.cpp)
     float primerHpScale=1.0f;  // ...their HP, times the SGO's (centipede 400, dragonfly 600)
     bool primerFire=true;      // ...their guns fire
+    bool primerTrace=false;    // ...a line each 0.1 s per creature into EDF6VehicleCrew.primer.csv (tools/primer_trace_view.py)
     int centipedeLinkMax=12;   // ...the most centipedes linked into one (2-32)
     float centipedeLinkRange=150.0f;// ...m a centipede goes to join another's tail from
 };

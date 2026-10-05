@@ -10,6 +10,8 @@
 //    winds round the player and now and then dives through, every link spitting when it faces them; more can
 //    join it (at most CentipedeLinkMax). One shot out of the middle splits it there: the part behind gets a head
 //    again (its new front), and one left alone comes down to crawl.
+// PrimerTrace=1 writes a line every kTraceMs per creature into Mods/Plugins/EDF6VehicleCrew.primer.csv (Trace):
+// its flight and fight as the game ran them, for tools/primer_trace_view.py to draw.
 //  - The dragonfly (EDF6VC_DRAGONFLY, mark 7013): an air superiority fighter that hunts as a dragonfly does. It
 //    goes for flying targets first (the plugin's friendly jets, the player off the ground) and the player on the
 //    ground otherwise: it flies an interception (where the target will be), comes up from below and behind,
@@ -19,13 +21,14 @@
 // guard. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "primer_pose.h"
+#include <cstdio>
 #include <cwchar>
 
 namespace crew {
 namespace jet {
 namespace {
 constexpr std::size_t kOwnTeam=0x318;
-constexpr ULONGLONG kLogMs=2000;
+constexpr ULONGLONG kLogMs=2000,kTraceMs=100;
 constexpr float kChest=1.2f;         // m: what is aimed at over the player's feet
 constexpr float kMaxPitch=0.8f;      // rad: the most a body pitches its nose at a target
 constexpr float kAimGain=4.0f;
@@ -404,6 +407,7 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     Pose(j,v,primer::kCentipedeBones,primer::kCentipedeBoneCount,angle,scale);
     const bool fire=Cfg().primerFire && hasAim && OnTarget(v,pos,aim,kSpitReach,kSpitCone);
     v[kFireGun]=fire ? 1 : 0;v[kFireMissile]=0;
+    s.what=what;s.fired=fire;
     Debug(j,v,what,fire,ms);
 }
 
@@ -506,7 +510,45 @@ void DragonflyFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     const bool fire=Cfg().primerFire && arm && (!s.posed || s.curl>=primer::kCurlFire) &&
                     OnTarget(v,pos,prey.pos,kNeedleReach,kNeedleCone);
     v[kFireGun]=fire ? 1 : 0;v[kFireMissile]=0;
+    s.what=what;s.fired=fire;
     Debug(j,v,what,fire,ms);
+}
+
+// --- The trace (PrimerTrace) ---
+// One CSV line per creature every kTraceMs: game ms, its table index, kind, what it did, position, velocity, HP,
+// whether it fired, the table indexes of the centipedes ahead of and behind it (-1: none), the player's position.
+// Opened on the first line (appended to; a header first when the file is new), flushed once a second.
+std::FILE* traceFile=nullptr;
+bool traceFailed=false;
+ULONGLONG traceFlushAt=0;
+
+std::FILE* TraceFile() noexcept {
+    if(traceFile || traceFailed)return traceFile;
+    wchar_t path[MAX_PATH];
+    const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
+    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
+    if(!slash || (*slash=0,wcscat_s(path,L"\\Mods\\Plugins\\EDF6VehicleCrew.primer.csv"))!=0){traceFailed=true;return nullptr;}
+    const bool fresh=GetFileAttributesW(path)==INVALID_FILE_ATTRIBUTES;
+    if(_wfopen_s(&traceFile,path,L"ab")!=0 || !traceFile){traceFile=nullptr;traceFailed=true;Log("PRIMER trace: cannot open %ls",path);return nullptr;}
+    if(fresh)std::fprintf(traceFile,"ms,id,kind,what,x,y,z,vx,vy,vz,hp,fire,ahead,behind,px,py,pz\n");
+    Log("PRIMER trace: writing %ls",path);
+    return traceFile;
+}
+
+int IndexOfCtrl(const void* ctrl) noexcept {
+    for(int i=0;i<kMaxJets;++i)if(ctrl && jets[i].ref && jets[i].ref.ctrl==ctrl)return i;
+    return -1;
+}
+
+void Trace(Jet& j,const float* pos,const unsigned char* v,ULONGLONG ms) noexcept {
+    if(!Cfg().primerTrace || ms-j.primer.traceAt<kTraceMs)return;
+    j.primer.traceAt=ms;
+    std::FILE* const f=TraceFile();
+    if(!f)return;
+    std::fprintf(f,"%llu,%d,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.0f,%d,%d,%d,%.2f,%.2f,%.2f\n",ms,IndexOf(j),KindOf(j).name,
+                 j.primer.what ? j.primer.what : "-",pos[0],pos[1],pos[2],j.m.vel[0],j.m.vel[1],j.m.vel[2],At<float>(v,kHp),
+                 j.primer.fired ? 1 : 0,IndexOfCtrl(j.primer.ahead),IndexOfCtrl(j.primer.behind),player.pos[0],player.pos[1],player.pos[2]);
+    if(ms-traceFlushAt>1000){traceFlushAt=ms;std::fflush(f);}
 }
 }  // namespace
 
@@ -531,6 +573,7 @@ void PrimerFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms)
     j.m.ready=true;
     if(IsCentipede(j))CentipedeFrame(j,v,pos,dt,ms);
     else DragonflyFrame(j,v,pos,dt,ms);
+    Trace(j,pos,v,ms);
 }
 }  // namespace jet
 }  // namespace crew
