@@ -451,6 +451,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
+    InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD

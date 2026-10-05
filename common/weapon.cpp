@@ -58,4 +58,31 @@ bool WorldGravity(const unsigned char* image,float* g) noexcept {
     std::memcpy(g,v,12);
     return AllFinite(g,3);
 }
+
+namespace {
+// The parabola's launch elevation through (x, y): speed v m/frame, drop a m/frame^2, the high root or the low.
+bool Root(double x,double y,double v,double a,bool high,double& e) noexcept {
+    const double disc=v*v*v*v-a*(a*x*x+2.0*y*v*v);
+    if(disc<0.0)return false;
+    e=std::atan((v*v+(high ? std::sqrt(disc) : -std::sqrt(disc)))/(a*x));
+    return true;
+}
+}  // namespace
+
+bool BallisticArc(double x,double y,double speed,double drop,bool high,float& elevation,float& frames) noexcept {
+    if(!(speed>0.01))return false;
+    if(!(drop>0.0) || x<0.01) {
+        elevation=static_cast<float>(std::atan2(y,x));
+        frames=static_cast<float>(std::sqrt(x*x+y*y)/speed);
+        return true;
+    }
+    double e=0.0,n=0.0;
+    for(int pass=0;pass<3;++pass) {
+        if(!Root(x,y+drop*n*0.5,speed,drop,high,e))return false;
+        n=x/(speed*std::cos(e));
+    }
+    elevation=static_cast<float>(e);
+    frames=static_cast<float>(n);
+    return true;
+}
 }  // namespace edf

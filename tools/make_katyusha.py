@@ -2,18 +2,22 @@
 
   Mods/OBJECT/EDF6VC_KATYUSHA.MRAB          the Naegling's model with the V607 truck in place of its hull and tracks,
                                             its rocket rack on the truck bed, the truck's tyres on its wheel bones
-                                            (pylib/katyusha_model.py; built from the player's own Root.cpk)
+                                            (pylib/katyusha_model.py; built from the player's own Root.cpk), its
+                                            elevation ram telescopic (a rod bone of its own)
   Mods/OBJECT/EDF6VC_KATYUSHA.SGO           the Naegling's vehicle (Vehicle402_Rocket: its turret, its wheels) with that
                                             model, the truck's wheel radii and the rockets below
   Mods/WEAPON/EDF6VC_KATYUSHA_ROCKETS.SGO   the Naegling's launcher made a multiple rocket launcher: unguided rockets (the
                                             Goliath's rocket model) on a ballistic arc (GrenadeBullet01, impact fuse,
                                             smoke trail), a 40-round ripple, a slow reload; LockonTargetType kMarkLofted
-                                            (EDF6AutoTurret: aimed by itself at ground targets on the rockets' high arc;
-                                            EDF6VehicleCrew: the impact point on the HUD while the player rides it)
+                                            (EDF6AutoTurret: an NPC crew's aimed by itself at ground targets on the
+                                            rockets' high arc; EDF6VehicleCrew: the player's lifted onto the arc to where
+                                            the camera looks, and the impact point on the HUD while the player rides it)
 
 The request is tools/calls.py EDF6VC_CALL_KATYUSHA (tools/call_weapons.py, the Naegling's request as its template).
 The vehicle's launcher elevates to PITCH_STOP_DEG (the Naegling's 50 raised) so the rockets can be lobbed on the high
-arc; the rockets' speed and life fit that arc (pylib/ballistics.py envelope, check()).
+arc; the rockets' speed and life fit that arc (pylib/ballistics.py envelope, check()). The model's elevation ram is
+telescopic for that range (pylib/katyusha_model.py RAM_ROD; EDF6VehicleCrew src/katyusha.cpp poses it), and the
+player aims with the camera while EDF6VehicleCrew lifts the launcher alone onto the arc (src/katyusha.cpp).
 
 Built in memory first, then written atomically and recorded in the ledger as this tool's (pylib/ledger.py); --remove
 releases them. No shared table is touched here.
@@ -46,15 +50,18 @@ STOCK_WEAPON = 'V_402ROCKET_ROCKETCANNON.SGO'
 # up): car_base_wheel [8] is a wheel's radius, the hub's height over the ground (the Naegling's 0.528 / 0.452).
 TYRE_RADIUS = 0.534
 # EDF6AutoTurret's lofted mark (autoturret/src/turret.h kMarkLofted; EDF6VehicleCrew src/launcher.cpp reads it too):
-# the plugin aims the launcher at ground targets on the rockets' HIGH arc (the low one when the high one is past the
-# elevation stop), and EDF6VehicleCrew shows the player where the rockets land. A stock game, or an EDF6AutoTurret
+# EDF6AutoTurret aims an NPC crew's launcher at ground targets on the rockets' HIGH arc (the low one when the high one
+# is past the elevation stop); the player's it leaves alone: EDF6VehicleCrew lifts it onto that arc to the ground
+# point the camera looks at (src/katyusha.cpp) and shows where the rockets land. A stock game, or an EDF6AutoTurret
 # older than the mark, fires the launcher as any no-lock gun.
 MARK_LOFTED = 7303.0
 # The launcher's elevation stop, degrees up: car_base_constraint_data's Rocketcannon_main hinge limit [1, -stop, 0]
 # (pitch negative-up; the Naegling's -50 lifts the rack 50 deg, the V603 flak's [1, -60, 5] is its aim axis
 # -1.047..0.087 rad, autoturret/docs/re-notes.md). 80 deg leaves the high arc 1/3..1 of the most range; the rack
 # swung there stays 0.36 m over the truck bed (pylib/katyusha_model.py build_model: the rack's pivot is at its rear).
-PITCH_STOP_DEG = 80.0
+# One copy, the model's: its telescopic ram is built for this stroke (katyusha_model.check_ram holds it together
+# from 0 up to it).
+PITCH_STOP_DEG = katyusha_model.PITCH_STOP_DEG
 STOCK_PITCH_LIMIT = [1.0, -50.0, 0.0]
 # The rockets (BM-21 Grad, cut to the game's world): 120 m/s off the rail (2.0 m a frame: the game's muzzle speed is
 # AmmoSpeed x 60, ballistics.py), lobbed: the most range ~980 m at 45 deg, the high arc from ~335 m (at the 80 deg

@@ -24,6 +24,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
+#include "vecmath.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -1134,6 +1135,50 @@ bool LastViewProj(float* out) noexcept {
     if(ok)std::memcpy(out,lastViewProj,sizeof(lastViewProj));
     ReleaseSRWLockShared(&viewLock);
     return ok;
+}
+
+namespace {
+// `m` inverted (4x4, Gauss-Jordan with partial pivoting); false when it is singular.
+bool Invert4(const float* m,float* out) noexcept {
+    float a[4][8];
+    for(int r=0;r<4;++r)for(int c=0;c<8;++c)a[r][c]=c<4 ? m[r*4+c] : (c-4==r ? 1.0f : 0.0f);
+    for(int c=0;c<4;++c) {
+        int p=c;
+        for(int r=c+1;r<4;++r)if(std::fabs(a[r][c])>std::fabs(a[p][c]))p=r;
+        if(std::fabs(a[p][c])<1e-12f)return false;
+        if(p!=c)for(int k=0;k<8;++k){const float t=a[c][k];a[c][k]=a[p][k];a[p][k]=t;}
+        const float d=a[c][c];
+        for(int k=0;k<8;++k)a[c][k]/=d;
+        for(int r=0;r<4;++r) {
+            if(r==c)continue;
+            const float f=a[r][c];
+            for(int k=0;k<8;++k)a[r][k]-=f*a[c][k];
+        }
+    }
+    for(int r=0;r<4;++r)for(int c=0;c<4;++c)out[r*4+c]=a[r][c+4];
+    return true;
+}
+
+// `h` (row vector) times `m`.
+void RowTimes(const float* h,const float* m,float* out) noexcept {
+    for(int k=0;k<4;++k)out[k]=h[0]*m[k]+h[1]*m[4+k]+h[2]*m[8+k]+h[3]*m[12+k];
+}
+}  // namespace
+
+// The camera's eye and its look through the screen's centre, from the last frame's view-projection (row vectors,
+// hud.cpp): the eye is where clip w is 0 with x and y (0, 0, 1, 0) x VP^-1), a point ahead the centre at mid depth.
+bool CameraRay(float* eye,float* dir) noexcept {
+    float vp[16],inv[16];
+    if(!LastViewProj(vp) || !Invert4(vp,inv))return false;
+    const float atEye[4]={0.0f,0.0f,1.0f,0.0f},ahead[4]={0.0f,0.0f,0.5f,1.0f};
+    float e[4],a[4];
+    RowTimes(atEye,inv,e);RowTimes(ahead,inv,a);
+    if(std::fabs(e[3])<1e-9f || std::fabs(a[3])<1e-9f)return false;
+    for(int i=0;i<3;++i){eye[i]=e[i]/e[3];dir[i]=a[i]/a[3]-eye[i];}
+    if(!vec::Normalize(dir))return false;
+    const float probe[4]={eye[0]+dir[0]*100.0f,eye[1]+dir[1]*100.0f,eye[2]+dir[2]*100.0f,1.0f};
+    float c[4];RowTimes(probe,vp,c);
+    return c[3]>0.0f && std::isfinite(eye[0]+eye[1]+eye[2]);
 }
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {

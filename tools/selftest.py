@@ -535,7 +535,7 @@ def weapon_marks_agree() -> None:
 
 @test
 def lofted_arc_solver() -> None:
-    """pylib/ballistics.py (the model autoturret/src/plugin.cpp Ballistic mirrors): the high and the low root both hit
+    """pylib/ballistics.py (the model common/weapon.cpp BallisticArc mirrors): the high and the low root both hit
     their point under the game's per-frame step (v += drop, p += v) within 5 cm, the high one above 45 deg and the low
     one under; out of reach is None; the Katyusha's envelope is what README.md says."""
     import math
@@ -557,6 +557,31 @@ def lofted_arc_solver() -> None:
     for key, unit in (('max_range', '米'), ('high_min_range', '米'), ('max_range_time', '秒'), ('high_min_time', '秒')):
         said = f'{round(env[key])} {unit}' if unit == '米' else f'{env[key]:.1f} {unit}'
         assert said in readme, f'README.md: the Katyusha section should say {said} ({key}, pylib/ballistics.py)'
+
+
+@test
+def katyusha_pose_agrees() -> None:
+    """The Katyusha's pose (src/katyusha.cpp) is its model's (pylib/katyusha_model.py): the rod bone's name and one
+    elevation stop (tools/make_katyusha.py takes the model's). EDF6AutoTurret leaves a lofted launcher the player rides
+    alone before it does anything else in Steer (steering it turns the player's camera); the arc solve is one copy
+    (common/weapon.cpp BallisticArc) that both plugins call. The ram's offline pose: the eye on the launcher, the
+    rod turned with the cylinder, at the stroke's ends."""
+    import math
+    import katyusha_model as km
+    assert f'kRod[]=L"{km.RAM_ROD}"' in src('src/katyusha.cpp'), 'src/katyusha.cpp kRod'
+    assert make_katyusha.PITCH_STOP_DEG == km.PITCH_STOP_DEG
+    at = src('autoturret/src/plugin.cpp')
+    steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert steer.split('\n')[1].strip().startswith('if(PlayerLofted(seat))'), 'autoturret Steer: PlayerLofted first'
+    assert 'bool Root(' not in at and 'bool BallisticArc(' in src('common/weapon.cpp')
+    assert 'edf::BallisticArc(' in at and 'edf::BallisticArc(' in src('src/launcher.cpp')
+    P, E, M = (0.0, 2.2, -2.06), (0.0, 2.51, -3.52), (0.0, 2.23, -3.56)   # the built model's, rounded
+    d0, e0, l0 = km.ram_pose(P, E, M, 0.0)
+    assert abs(d0) < 1e-12 and max(abs(a - b) for a, b in zip(e0, E)) < 1e-12
+    d, e, length = km.ram_pose(P, E, M, math.radians(km.PITCH_STOP_DEG))
+    q = km.ram_turn(E, P, d)   # the bind eye turned with the cylinder lies on the line to the posed eye
+    cross = (q[1] - P[1]) * (e[2] - P[2]) - (q[2] - P[2]) * (e[1] - P[1])
+    assert abs(cross) < 1e-9 and length > l0 and km.stroke(P, E, M) > 0.2, (cross, length, l0)
 
 
 @test

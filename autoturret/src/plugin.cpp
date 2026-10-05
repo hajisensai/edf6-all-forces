@@ -2,7 +2,7 @@
 // turret.h) slews its turret onto an enemy inside its tracking range by itself: anti-air guns prefer air
 // targets, ground-attack guns (the Bohr's grenade launchers) ground ones. The aim solves the round's
 // ballistic arc (a lofted launcher's, the Katyusha's, the high one). The rider keeps the trigger, and aims by hand
-// while holding the stick.
+// while holding the stick; a lofted launcher the player rides is not steered at all (PlayerLofted).
 // Enemies come straight from the game's lock-target registry (every lockable enemy, all around),
 // not from the guns' lock lists, which only cover the front hemisphere and churn.
 // It also time-fuses the anti-air shells to the target's range and proximity-fuses them near any enemy of
@@ -441,41 +441,17 @@ float Down(const unsigned char* vehicle) noexcept {
     return std::isfinite(down) ? down : 0.0f;
 }
 
-// The parabola's launch elevation through (x, y): speed v m/frame, drop a m/frame^2, the high root or the low.
-bool Root(double x,double y,double v,double a,bool high,double& e) noexcept {
-    const double disc=v*v*v*v-a*(a*x*x+2.0*y*v*v);
-    if(disc<0.0)return false;
-    e=std::atan((v*v+(high ? std::sqrt(disc) : -std::sqrt(disc)))/(a*x));
-    return true;
-}
-
-// Elevation (rad, up positive) and flight time (frames) to hit a point (x across, y up) on one arc. The game steps a
-// round's velocity by the frame's drop before moving it (0x233DC4: v += g/60, then p += v/60), so by frame n it has
-// fallen a*n(n+1)/2, a*n/2 below the parabola: the parabola's root is aimed that much over the point, three passes
-// (pylib/ballistics.py arc: the miss is under a millimetre against the per-frame step).
+// Elevation (rad, up positive) and flight time (frames) to hit a point (x across, y up) on one arc: common/weapon.cpp
+// edf::BallisticArc (the per-frame step's drop aimed over the point; pylib/ballistics.py arc is its Python copy).
 bool Arc(double x,double y,const Shot& shot,bool high,float& elevation,float& time) noexcept {
-    const double v=shot.speed,a=shot.drop;
-    double e=0.0,n=0.0;
-    for(int pass=0;pass<3;++pass) {
-        if(!Root(x,y+a*n*0.5,v,a,high,e))return false;
-        n=x/(v*std::cos(e));
-    }
-    elevation=static_cast<float>(e);
-    time=static_cast<float>(n);
-    return true;
+    return edf::BallisticArc(x,y,shot.speed,shot.drop,high,elevation,time);
 }
 
 // Elevation (rad, up positive) and flight time (frames) to hit a point in the vehicle frame: the lower of the two
 // arcs, the solve the game's vehicle aim runs (0x50350); a lofted gun's the higher, while its pitch is within the
 // axis' stops (shot.pitchMin..pitchMax), else the lower. False when out of reach.
 bool Ballistic(const float* local,const Shot& shot,float& elevation,float& time) noexcept {
-    if(shot.speed<=0.01f)return false;
     const double x=std::sqrt(local[0]*local[0]+local[2]*local[2]),y=local[1];
-    if(shot.drop<=0.0f || x<0.01) {
-        elevation=static_cast<float>(std::atan2(y,x));
-        time=static_cast<float>(std::sqrt(x*x+y*y)/shot.speed);
-        return true;
-    }
     if(shot.lofted && Arc(x,y,shot,true,elevation,time)) {
         const float pitch=cfg.pitchSign*elevation+cfg.pitchOffset;
         if(pitch>=shot.pitchMin && pitch<=shot.pitchMax)return true;
@@ -612,9 +588,22 @@ float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,
     return in;
 }
 
+// A lofted launcher (the Katyusha) the player on this machine rides: they aim it with the camera, which follows the
+// seat's aim axes (the vehicle's turn input, +0x2AA0, is what Steer writes; docs/re-notes.md "The Katyusha's camera
+// and pose": inferred, EDF6VehicleCrew's LOFT debug line checks it), so any steering here turns the player's view
+// (2026-10-05: lofted to 75..79 deg it stared at the sky). EDF6VehicleCrew lifts the launcher alone onto
+// the high arc to the ground point the camera looks at (src/katyusha.cpp); NPC crews keep this plugin's aim.
+bool PlayerLofted(const unsigned char* seat) noexcept {
+    if(edf::SeatRider(image,seat)!=edf::Rider::player)return false;
+    bool lofted=false;
+    ForEachGun(seat,[&](const unsigned char* weapon) noexcept { lofted=lofted || GunMark(weapon)==Mark::lofted; });
+    return lofted;
+}
+
 // Aims the ridden flak's turret (seat 0); returns the flight time (frames) to the aim point, the time fuse
 // its rounds get, or -1 (no target, aimed by hand, out of reach: the rounds burst at max range).
 float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
+    if(PlayerLofted(seat)){diag.stop="player-lofted";return -1.0f;}
     Track* track=TrackFor(vehicle,0,true);   // the flak is aimed only for its rider (hasInput)
     if(!track){diag.stop="no-track";return -1.0f;}
     const auto now=GetTickCount64();

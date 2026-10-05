@@ -40,4 +40,13 @@ bool MeanMuzzle(const unsigned char* weapon,std::uint64_t most,float* pos,float*
 // virtual slot 0, as the game's vehicle aim (0x622706) and every round's spawn (0x231E7B) read it. False when it
 // cannot be read. Under the caller's __try.
 bool WorldGravity(const unsigned char* image,float* g) noexcept;
+
+// The launch elevation (rad, up positive) and the flight time (frames) for a round leaving at `speed` m/frame and
+// falling `drop` m/frame^2 (AmmoGravityFactor x gravity / 3600 along the launcher's down) to hit a point `x` across
+// and `y` up, on the high arc or the low one; false out of reach. The game steps a round's velocity by the frame's
+// drop before moving it (0x233DC4: v += g/60, then p += v/60), so by frame n it has fallen drop*n(n+1)/2, drop*n/2
+// below the parabola: the parabola's root is aimed that much over the point, three passes (pylib/ballistics.py arc;
+// tools/selftest.py lofted_arc_solver: the miss is under 5 cm against the per-frame step). No drop, or a point
+// straight over the muzzle: the straight line to it.
+bool BallisticArc(double x,double y,double speed,double drop,bool high,float& elevation,float& frames) noexcept;
 }  // namespace edf
