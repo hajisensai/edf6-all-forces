@@ -437,7 +437,8 @@ def gun_clearance(md: Mdb, side: str) -> list[tuple[float, float, float, int]]:
 def check(arc: bytes) -> None:
     """Re-read `arc` and raise ArtilleryCheckError unless: archive and model round-trip; < 256 bones; every mesh's
     vertex buffer, indices, blend indices (skin bones only), weights, material and numbering are valid; every
-    material texture (HD and .lod) is a member; every bind x inverse bind is the identity; the bones are the
+    material texture (HD and .lod) is a member, before the model in folder-table order, in the stock HD / .lod
+    layout (obj_model.texture_problems); every bind x inverse bind is the identity; the bones are the
     Kepler's (names, parents, links, kinds), unmoved ones at their stock model-space bind, moved ones with their stock
     rotation; every skin bone of the stock wheels / tracks / turret / guns carries geometry and the radars none; each
     wheel bone sits at its wheel's centre and each track station on its wheel; the guns are mirror images (to
@@ -453,6 +454,8 @@ def check(arc: bytes) -> None:
     files = {f.name.lower() for f in rab.files}
     for o in md.objects:
         _mesh_ok(md, o, files)
+    bad = om.texture_problems(rab, md, HOST_MDB)
+    _req(not bad, 'textures: ' + '; '.join(bad))
     w = bind_world(md)
     for b in md.bones:
         p = mmul(w[b.index], b.inv_bind)

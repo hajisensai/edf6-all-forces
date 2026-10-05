@@ -40,7 +40,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, Hashable, Iterable
 
 import texfile
-from mdb import MatTex, Mdb, Mesh, Rab, RabFile, Texture, cmpl_compress
+from mdb import MatTex, Mdb, Mesh, Rab, RabFile, Texture, cmpl_compress, folder_order_ok, insert_member
 from mdb_jet import pack_vertex
 
 Vec3 = tuple[float, float, float]
@@ -790,20 +790,49 @@ def add_material(md: Mdb, template: Mdb, template_material: str, name: str,
 
 def add_texture(rab: Rab, filename: str, dds: bytes) -> list[str]:
     """Add texture `filename` ('x.dds') to `rab` as the game stores it: `x.dds` (HD-TEXTURE, flag 1) and
-    `x.lod.dds` (TEXTURE, flag 0, the mip tail texfile.texture_pair cuts), CMPL-compressed, each after the last
-    member of its folder. An existing member of the same name is replaced. Returns the member names."""
+    `x.lod.dds` (TEXTURE, flag 0, the mip tail texfile.texture_pair cuts), CMPL-compressed, each placed by
+    mdb.insert_member (folder-table order: the .lod before the model, which binds its textures when it loads). An
+    existing member of the same name is replaced. Returns the member names."""
     hd, lod = texfile.texture_pair(dds)
     stem, ext = filename.rsplit('.', 1)
     added = []
     for name, folder, flag, data in ((filename, 'HD-TEXTURE', 1, hd), (f'{stem}.lod.{ext}', 'TEXTURE', 0, lod)):
         if folder not in rab.folders:
             rab.folders.append(folder)
-        fi = rab.folders.index(folder)
         rab.files = [f for f in rab.files if f.name.lower() != name.lower()]
-        last = max((k for k, f in enumerate(rab.files) if f.folder == fi), default=len(rab.files) - 1)
-        rab.files.insert(last + 1, RabFile(name, fi, flag, cmpl_compress(data)))
+        insert_member(rab, RabFile(name, rab.folders.index(folder), flag, cmpl_compress(data)))
         added.append(name)
     return added
+
+
+def texture_problems(rab: Rab, md: Mdb, model_member: str) -> list[str]:
+    """What keeps the model `md` (archive member `model_member` of `rab`) from getting its textures in game: members
+    not in folder-table order; a material texture whose HD member (HD-TEXTURE, flag 1) or .lod member (TEXTURE, flag
+    0) is missing, or whose .lod comes after the model (mdb.insert_member: the model binds its textures when it
+    loads, a later one is never bound and the model renders black); an HD / .lod pair that breaks the stock layout
+    (texfile.pair_problem)."""
+    out: list[str] = []
+    if not folder_order_ok(rab):
+        out.append('archive members not in folder-table order (' +
+                   ', '.join(dict.fromkeys(rab.folders[f.folder] for f in rab.files)) + ')')
+    at = {f.name.lower(): k for k, f in enumerate(rab.files)}
+    model_at = at.get(model_member.lower())
+    if model_at is None:
+        return out + [f'no member {model_member}']
+    for fn in sorted({t.filename for t in md.textures}):
+        stem, ext = fn.rsplit('.', 1)
+        hd, lod = (rab.files[at[n.lower()]] if n.lower() in at else None for n in (fn, f'{stem}.lod.{ext}'))
+        if hd is None or lod is None:
+            out.append(f'{fn}: HD or .lod member missing')
+            continue
+        if (rab.folders[hd.folder], hd.flag, rab.folders[lod.folder], lod.flag) != ('HD-TEXTURE', 1, 'TEXTURE', 0):
+            out.append(f'{fn}: members not in HD-TEXTURE (flag 1) / TEXTURE (flag 0)')
+        if at[lod.name.lower()] > model_at:
+            out.append(f'{lod.name} after the model {model_member}: the model loads before it and never binds it')
+        bad = texfile.pair_problem(hd.data, lod.data)
+        if bad:
+            out.append(f'{fn}: {bad}')
+    return out
 
 
 def texture_dds(path: str) -> bytes:

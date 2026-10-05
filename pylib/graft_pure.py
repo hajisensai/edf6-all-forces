@@ -24,7 +24,7 @@ import struct
 from dataclasses import replace
 from typing import Callable, Iterable
 
-from mdb import Bone, Mat, Mdb, Mesh, Object, Rab, RabFile, Texture, bind_world, mmul, read_elem
+from mdb import Bone, Mat, Mdb, Mesh, Object, Rab, RabFile, Texture, bind_world, insert_member, mmul, read_elem
 from mdb_jet import link, pack_vertex, vertex_table
 
 Vec3 = tuple[float, float, float]
@@ -350,8 +350,8 @@ def texture_members(rab: Rab, filename: str) -> list[RabFile]:
 
 def copy_texture_members(host: Rab, donor: Rab, filenames: Iterable[str]) -> list[str]:
     """Copy the donor members of `filenames` (and their .lod variants) into `host` (stored bytes untouched, folder
-    mapped by folder name, flag kept); each goes after the host's last member of the same folder. Members the host
-    already has (same name) are skipped. Returns the names copied."""
+    mapped by folder name, flag kept), each placed by mdb.insert_member (folder-table order: a .lod before the
+    model). Members the host already has (same name) are skipped. Returns the names copied."""
     have = {f.name.lower() for f in host.files}
     copied: list[str] = []
     for fn in filenames:
@@ -363,9 +363,7 @@ def copy_texture_members(host: Rab, donor: Rab, filenames: Iterable[str]) -> lis
             folder = donor.folders[f.folder]
             if folder not in host.folders:
                 host.folders.append(folder)
-            new = RabFile(f.name, host.folders.index(folder), f.flag, f.stored, f.unk)
-            last = max((k for k, h in enumerate(host.files) if h.folder == new.folder), default=len(host.files) - 1)
-            host.files.insert(last + 1, new)
+            insert_member(host, RabFile(f.name, host.folders.index(folder), f.flag, f.stored, f.unk))
             have.add(f.name.lower())
             copied.append(f.name)
     return copied

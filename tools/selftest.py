@@ -1049,11 +1049,41 @@ def texture_files_decode_and_slice() -> None:
     assert (info.width, info.mips, info.fourcc) == (64, 7, b'DXT1')
     hd, lod = texfile.texture_pair(dds)
     li = texfile.dds_info(lod)
-    assert hd == dds and (li.width, li.height, li.mips) == (16, 16, 5), li          # 64 -> 16 (never below 16)
+    assert hd == dds and (li.width, li.height, li.mips) == (16, 16, 4), li    # 64 -> 16 (never below 16), 16 .. 2 (stock)
+    assert len(lod) == 128 + 8 * (16 + 4 + 1 + 1) and texfile.pair_problem(hd, lod) is None
+    assert texfile.pair_problem(hd, texfile.dds_tail(dds, 2)) == '.lod has 5 mip levels, the stock layout 4'
+    assert [texfile.lod_mips(w, h) for w, h in ((128, 128), (64, 32), (16, 16), (32, 16))] == [7, 6, 4, 5]
     assert texfile.lod_level(2048, 2048) == 4 and texfile.lod_level(1024, 512) == 4 and texfile.lod_level(64, 64) == 2
     c0, c1, idx = st.unpack_from('<HHI', lod, 128)
     assert c0 == c1 == ((200 * 31 + 127) // 255) << 11 | ((100 * 63 + 127) // 255) << 5 | ((50 * 31 + 127) // 255) and idx == 0
 
+
+
+@test
+def textures_go_before_the_model() -> None:
+    """The game binds a model's textures when the model member loads, from the TEXTURE members read before it (mdb.
+    insert_member): add_texture / copy_texture_members into an archive that holds only its model (the twin tank's
+    case, which rendered black) put each .lod before the model, the HD after; texture_problems refuses the old order."""
+    import graft_pure as g
+    import obj_model as om
+    import texfile
+    from mdb import Mdb, Rab, RabFile, Texture, rab_read, rab_write
+    md = Mdb(0, [], [], [], [], [Texture(0, 'a_DDS', 'a.dds', 0), Texture(1, 'b_DDS', 'b.DDS', 0)])
+    rab = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [RabFile('m.mdb', 1, 0, b'model')])
+    for fn in ('a.dds',):
+        om.add_texture(rab, fn, texfile.solid_dxt1((10, 20, 30), 64))
+    donor = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [])
+    om.add_texture(donor, 'b.DDS', texfile.solid_dxt1((40, 50, 60), 32))
+    g.copy_texture_members(rab, donor, ['b.DDS'])
+    assert [(rab.folders[f.folder], f.name) for f in rab.files] == [
+        ('TEXTURE', 'a.lod.dds'), ('TEXTURE', 'b.lod.DDS'), ('MODEL', 'm.mdb'), ('HD-TEXTURE', 'a.dds'),
+        ('HD-TEXTURE', 'b.DDS')], rab.files
+    assert om.texture_problems(rab, md, 'm.mdb') == []
+    old = Rab(rab.version, rab.folders, [rab.files[k] for k in (2, 3, 4, 0, 1)])     # the order the old code wrote
+    bad = om.texture_problems(old, md, 'm.mdb')
+    assert bad[0].startswith('archive members not in folder-table order') and len(bad) == 3, bad
+    assert 'a.lod.dds after the model m.mdb' in bad[1] and 'b.lod.DDS after the model' in bad[2], bad
+    assert rab_read(rab_write(rab)).files[0].name == 'a.lod.dds'
 
 def main() -> int:
     failed = 0

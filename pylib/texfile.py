@@ -5,13 +5,17 @@ What the game's archives hold (every stock OBJECT/*.MRAB checked, pylib/mdb.py R
 `<stem>.dds` in the HD-TEXTURE folder (flag 1) and `<stem>.lod.dds` in the TEXTURE folder (flag 0), both CMPL-compressed
 DDS files with the legacy 124-byte header (no DX10 header), a full mip chain (flags 0xA1007, caps 0x401008), in DXT1 /
 DXT3 / BC5U. The `.lod` member is the same picture 16x smaller per side (2048 -> 128, 1024x512 -> 64x32), but never
-below 16 pixels on its shorter side (64 -> 16): exactly the tail of the HD file's mip chain.
+below 16 pixels on its shorter side (64 -> 16), with one mip level fewer than a full chain: it ends at 2 pixels on its
+longer side (128x128: 7 levels, 128 .. 2; 64x32: 6, 64x32 .. 2x1), where the HD file's chain goes on to 1x1 (every
+one of the 2238 stock HD / .lod pairs). Here the .lod is the HD file's own mip levels from lod_level() on, that long.
 
     load_image(path) -> Image                     PNG (8 / 16 bit, gray / RGB / palette / alpha, not interlaced) or
                                                   baseline JPEG (Huffman, any sampling, restart markers), as RGBA8
     dds_info(data) -> DdsInfo                     header facts of a DDS file
-    dds_tail(data, level) -> bytes                the DDS made of mip levels `level`.. of `data` (block / plain formats)
+    dds_tail(data, level, count) -> bytes         the DDS made of mip levels `level`.. of `data` (block / plain formats)
     lod_level(width, height) -> int               the mip level the .lod member starts at (16x smaller, >= 16 px)
+    lod_mips(width, height) -> int                the .lod member's mip count (full chain of its size minus one)
+    pair_problem(hd, lod) -> str | None           what breaks the stock HD / .lod layout, None when nothing
     dxt1_dds(image) -> bytes                      a DXT1 DDS with a full box-filtered mip chain (a simple range-fit
                                                   encoder; DXT1 is what every stock albedo map is, and an uncompressed
                                                   DDS has no stock precedent the game is known to read)
@@ -441,28 +445,68 @@ def _header(width: int, height: int, mips: int, fourcc: bytes, bits: int, masks:
             struct.pack('<5I', CAPS, 0, 0, 0, 0))
 
 
-def dds_tail(data: bytes, level: int) -> bytes:
-    """A DDS of mip levels `level`.. of `data` (same format; the header's size / pitch / mip count updated)."""
+def dds_tail(data: bytes, level: int, count: int | None = None) -> bytes:
+    """A DDS of `count` mip levels (default: all the rest) from level `level` of `data` (same format; the header's
+    size / pitch / mip count updated)."""
     info = dds_info(data)
-    if level >= info.mips:
-        raise TextureError(f'DDS has {info.mips} mip levels, level {level} asked')
+    count = info.mips - level if count is None else count
+    if count < 1 or level + count > info.mips:
+        raise TextureError(f'DDS has {info.mips} mip levels, levels {level}..{level + count - 1} asked')
     pos, w, h = 128, info.width, info.height
     for _ in range(level):
         pos += level_size(info, w, h)
         w, h = max(1, w // 2), max(1, h // 2)
     masks = struct.unpack_from('<4I', data, 92)
     top = level_size(info, w, h) if info.fourcc else w * info.bits // 8
-    return _header(w, h, info.mips - level, info.fourcc, info.bits, masks, top) + data[pos:]
+    end, lw, lh = pos, w, h
+    for _ in range(count):
+        end += level_size(info, lw, lh)
+        lw, lh = max(1, lw // 2), max(1, lh // 2)
+    return _header(w, h, count, info.fourcc, info.bits, masks, top) + data[pos:end]
+
+
+def lod_mips(width: int, height: int) -> int:
+    """The mip count of a .lod member of this size: a full chain less its last level (stock: ends at 2 px on the
+    longer side; 128x128 -> 7, 64x32 -> 6, 16x16 -> 4)."""
+    return max(1, max(width, height).bit_length() - 1)
 
 
 def texture_pair(data: bytes) -> tuple[bytes, bytes]:
-    """(HD, .lod) DDS files of a DDS texture: the file itself, and its mip chain from lod_level() on. A file without
-    the mips that needs is refused (re-save it with mipmaps)."""
+    """(HD, .lod) DDS files of a DDS texture: the file itself, and its mip levels from lod_level() on, lod_mips()
+    of them (the stock .lod layout). A file without the mips that needs is refused (re-save it with mipmaps)."""
     info = dds_info(data)
     k = lod_level(info.width, info.height)
-    if info.mips <= k:
+    n = lod_mips(max(1, info.width >> k), max(1, info.height >> k))
+    if info.mips < k + n:
         raise TextureError(f'DDS {info.width}x{info.height} has {info.mips} mip level(s): save it with mipmaps')
-    return data, dds_tail(data, k)
+    return data, dds_tail(data, k, n)
+
+
+def pair_problem(hd: bytes, lod: bytes) -> str | None:
+    """What makes (hd, lod) differ from every stock HD / .lod pair, None when nothing: a header dds_info refuses,
+    other formats, a .lod neither lod_level() halvings of the HD size nor the stock size (each side / 16, at least
+    16: all 2176 non-DX10 stock pairs; the same as lod_level()'s unless a side is below 256) or not lod_mips()
+    levels (2176 of 2176), a file shorter than its mip chain."""
+    try:
+        a, b = dds_info(hd), dds_info(lod)
+    except TextureError as e:
+        return str(e)
+    k = lod_level(a.width, a.height)
+    if (a.fourcc, a.bits) != (b.fourcc, b.bits):
+        return f'HD {a.fourcc!r} / .lod {b.fourcc!r}'
+    stock = (max(16, a.width >> 4), max(16, a.height >> 4))     # every stock .lod (resampled: 64x32 -> 16x16)
+    if (b.width, b.height) not in ((max(1, a.width >> k), max(1, a.height >> k)), stock):
+        return f'.lod {b.width}x{b.height} is neither HD {a.width}x{a.height} / {1 << k} nor {stock[0]}x{stock[1]}'
+    if b.mips != lod_mips(b.width, b.height):
+        return f'.lod has {b.mips} mip levels, the stock layout {lod_mips(b.width, b.height)}'
+    for data, i in ((hd, a), (lod, b)):
+        need, w, h = 128, i.width, i.height
+        for _ in range(i.mips):
+            need += level_size(i, w, h)
+            w, h = max(1, w // 2), max(1, h // 2)
+        if len(data) < need:
+            return f'a {i.width}x{i.height} file of {len(data)} bytes, its {i.mips} mip levels need {need}'
+    return None
 
 
 def _half(img: Image) -> Image:
