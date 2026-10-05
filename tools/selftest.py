@@ -489,6 +489,19 @@ def hand_copies_agree() -> None:
 
 
 @test
+def ground_mission_builders_take_the_game_alone() -> None:
+    """testrange/gen.py GROUND_MISSION calls each tool's vehicle_sgo(game): every other parameter has a default (the
+    howitzer's grew a required own_model, and every range placing it would have failed at install)."""
+    import importlib
+    import inspect
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    for name, tool in gen.GROUND_MISSION.items():
+        params = list(inspect.signature(importlib.import_module(tool).vehicle_sgo).parameters.values())[1:]
+        assert all(p.default is not inspect.Parameter.empty for p in params), f'{tool}.vehicle_sgo for {name}: {params}'
+
+
+@test
 def drill_copies_agree() -> None:
     """src/drill.cpp's drill (bone name, length, base radius) is pylib/drill_model.py's, src/jet_bay.cpp's drill charge
     is the one tools/make_drill.py writes (pylib/vcobjects.py DRILL_CHARGE_FILE), its blast breaks buildings (>= 3 m),

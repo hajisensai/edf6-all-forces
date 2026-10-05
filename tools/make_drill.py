@@ -83,7 +83,11 @@ def bit_sgo(game: vc.Game, plain: bool) -> bytes:
     return dsgo.write(doc)
 
 
-def vehicle_sgo(game: vc.Game, model: list[str]) -> bytes:
+def vehicle_sgo(game: vc.Game, model: list[str] | None = None) -> bytes:
+    """The drill tank's SGO on `model` (animation_model's [archive, mdb]); None: the one install writes (ours with the
+    OBJ there, else the stock Blacker's): what the test range places (testrange/gen.py GROUND_MISSION)."""
+    if model is None:
+        model = [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB] if drill_model.obj_path() else STOCK_MODEL
     version, m = sgo.read(game.read('OBJECT', f'{VEHICLE.stock}.SGO'))
     if m.get('xgs_scene_object_class') != 'Vehicle505_Tank':
         raise ValueError(f'{VEHICLE.stock}.SGO 不是 Vehicle505_Tank')

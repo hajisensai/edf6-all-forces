@@ -98,6 +98,7 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
+    ('edf6tr_drill_mission', '钻头战车（自己驾驶；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
@@ -122,6 +123,7 @@ DERIVED_PREFIX = 'edf6tr_'
 DERIVED: dict[str, str] = {
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
+    'edf6tr_drill_mission': 'EDF6VC_DRILL',
     'edf6tr_v506_heli_mission': 'V506_HELI',
     'edf6tr_v506_heli_edf6benefits_mission': 'V506_HELI_EDF6BENEFITS',
     'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
@@ -248,14 +250,15 @@ GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to 
 def grand_battle(plan: Plan) -> Plan:
     # Parked jets the player can board, several of each (the user, 2026-10-05: more planes on the ground to get in).
     # Every vehicle we added that the player drives (the user, 2026-10-05): the player's jets, the Katyusha and the
-    # howitzer, the helicopters the range makes placeable, the tanks and the flak EDF6AutoTurret arms, the Depth Crawler.
+    # howitzer, the drill tank, the helicopters the range makes placeable, the tanks and the flak EDF6AutoTurret arms, the Depth Crawler.
     plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3,
-                     'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2,
+                     'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2, 'edf6tr_drill_mission': 2,
                      'edf6tr_v506_heli_mission': 1, 'edf6tr_vehicle409_heli_mission': 1, 'edf6tr_vehicle410_heli_mission': 1,
                      'edf6tr_v602_heli_mission': 1, 'vehicle403_tank_mission': 1, 'vehicle404_bigtank': 1,
                      'v603_flak_mission': 1, 'edf6tr_vehicle502_groundrobo_mission': 1}
+    # Our NPC-flown aircraft, of every kind the player can board (H calls the nearest down to them, README).
     plan.friends = {'edf6tr_jet_fighter_mission': 2, 'edf6tr_jet_interceptor_mission': 1, 'edf6tr_jet_strike_mission': 2,
-                    'vehicle403_tank_mission': 3}
+                    'edf6tr_jet_multirole_mission': 1, 'edf6tr_jet_carrier_mission': 1, 'vehicle403_tank_mission': 3}
     plan.waves.enabled = False
     plan.air = AirWaves(enabled=False)
     plan.scenario = GRAND
@@ -645,7 +648,8 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
 # Our ground vehicles made placeable (the user, 2026-10-05: every vehicle we added on the map, to drive): the call-in
 # SGO their own tool makes (tools/make_katyusha.py, make_artillery.py: its model and weapons are what that tool, and
 # the installer, write) turned into a mission one (as_mission_sgo).
-GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery'}
+GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery',
+                                  'edf6tr_drill_mission': 'make_drill'}
 
 
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:

@@ -100,8 +100,12 @@ def howitzer_sgo(game: vc.Game, stock: str) -> bytes:
     return dsgo.write(doc)
 
 
-def vehicle_sgo(game: vc.Game, own_model: bool) -> bytes:
-    """The vehicle: the Kepler's, with this tool's model when `own_model` (else the Kepler's own), and its guns."""
+def vehicle_sgo(game: vc.Game, own_model: bool | None = None) -> bytes:
+    """The vehicle: the Kepler's, with this tool's model when `own_model` (else the Kepler's own), and its guns.
+    None: as install writes it (the model with the twin tank's folder there): what the test range places
+    (testrange/gen.py GROUND_MISSION calls this with the game alone)."""
+    if own_model is None:
+        own_model = artillery_model.model_dir() is not None
     doc = dsgo.parse(game.read('OBJECT', f'{VEHICLE.stock}.SGO'))
     r = doc.root
     if r.get('xgs_scene_object_class') != 'Vehicle603_Flak':
