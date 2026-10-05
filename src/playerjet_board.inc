@@ -78,7 +78,9 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
     if(!j.board)return;
     j.steered=false;j.orbiting=false;
     if(eject)bail.mark=0.0f;   // no jet of its kind to make for the catch (kPlayerJetFiles): the parachute, or itself (below)
-    if(!alive)return;   // destroyed: its wreck is the game's
+    // Destroyed: its wreck is the game's. `alive` is only that its object can still be read (PlayerJetFrame's kDead
+    // branch leaves a shot-down jet readable): a dead one neither waits, nor catches the parachute, nor flies on.
+    if(!alive || v[kDead])return;
     if(j.phase!=Phase::air){j.keep=true;Log("PJET v=%p left on the ground: it waits there for the player",v);return;}
     if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch) {
         // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
@@ -177,6 +179,9 @@ int SpecialOf(const StoreSpec* spec) noexcept {
     for(int i=0;i<4;++i)if(spec==&kSpecials[i])return i;
     return -1;
 }
+
+// What falls as a bomb when let go (its CCIP traced, Stores): a bomb store's weapon, or the bay's.
+bool FallsAsBomb(const Store& st) noexcept { return st.weapon!=nullptr || SpecialOf(st.spec)==kBay; }
 
 // The point the shells and the drones go for: the pylon turn's centre while it flies one, else the camera's sight.
 const float* AimPoint(const PJet& j) noexcept { return j.orbiting ? j.orbitAt : j.hasSight ? j.sight : nullptr; }
@@ -623,11 +628,9 @@ void Hail(jet::Jet& e,ULONGLONG ms) noexcept {
 
 // Once a frame: the hail key (on its press, the player on foot) calls the nearest aircraft of ours (alive, flown by its
 // NPC pilot, not leaving, of our side) within kHailRange down to the player; a hail going is let go first (its jet
-// back to its call), so the next press calls the next nearest. Also: a catch by one of ours the parachute ended
-// without (the player landed, died) is let go, its NPC pilot to take it back (Fly: HandBack).
+// back to its call), so the next press calls the next nearest. (A catch the parachute ended without is let go in
+// EndEject, for every kind of jet.)
 void HailTick() noexcept {
-    if(catchFlight.v && bail.state==Eject::none)
-        if(PJet* c=Find(static_cast<const unsigned char*>(catchFlight.v));c && c->board)catchFlight=CatchFlight{};
     static bool held=false;
     const bool down=KeyDown(Cfg().playerJetHailKey);
     const bool press=down && !held;

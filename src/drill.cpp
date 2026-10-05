@@ -49,7 +49,7 @@ struct Drill {
     ObjRef ref;
     ULONGLONG seen,lastMs,touchAt,loggedAt;
     float rpm,angle,bite;
-    bool held,player;
+    bool held,player,npc;   // seat 0: the player, an NPC (RideAi's dummy), or (neither) empty
     const void* bones;            // the model's bone array the record below is in (looked up again when it changes)
     unsigned char* rec;
     float bind[16],set[16];
@@ -211,7 +211,8 @@ void DrillInput(unsigned char* v) noexcept {
     Drill* const d=DrillTank(v);
     if(!d)return;
     unsigned char* const seat=SeatAt(v,0);
-    d->player=SeatRider(seat)==Rider::player;
+    const Rider rider=SeatRider(seat);
+    d->player=rider==Rider::player;d->npc=rider==Rider::dummy;
     if(!d->player)return;
     float* const trigger=reinterpret_cast<float*>(seat+kSeatTrigger);
     d->held=*trigger>=kTriggerOn;
@@ -227,7 +228,9 @@ void DrillFrame(unsigned char* v) noexcept {
     const float dt=GameStep(d->lastMs ? ms-d->lastMs : 0);
     d->lastMs=d->seen=ms;
     const float top=Cfg().drillMaxRpm;
-    if(!d->player)d->held=d->touchAt && ms-d->touchAt<kNpcHoldMs;   // an NPC's drill spins while it touches something
+    // An NPC's drill spins while it touches something; an empty tank's never (it once bored on by itself, left
+    // against a wall or with the drill in a slope, until the mission's end).
+    if(!d->player)d->held=d->npc && d->touchAt && ms-d->touchAt<kNpcHoldMs;
     const float rate=d->held ? top/Cfg().drillSpinUpSec : -top/Cfg().drillSpinDownSec;
     d->rpm+=rate*dt;
     d->rpm=d->rpm<0.0f ? 0.0f : d->rpm>top ? top : d->rpm;
@@ -237,7 +240,7 @@ void DrillFrame(unsigned char* v) noexcept {
     if(d->bite>=kBiteSec) {
         d->bite=0.0f;
         // An NPC probes for something to bore into even standing still (that is what spins it up).
-        if(d->rpm>0.0f || !d->player)Bite(v,*d,top>0.0f ? d->rpm/top : 0.0f,ms);
+        if(d->rpm>0.0f || d->npc)Bite(v,*d,top>0.0f ? d->rpm/top : 0.0f,ms);
     }
     if(d->player)Publish(*d);
 }

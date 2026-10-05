@@ -263,6 +263,7 @@ void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept;
 void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noexcept;
+bool FallsAsBomb(const Store& st) noexcept;
 constexpr int kMaxJets=16;
 PJet jets[kMaxJets]{};
 
@@ -928,13 +929,15 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     j.threat=MissileHoming(pos,kThreatRadius) ? 2 : jet::LockingOn(v) ? 1 : 0;
     audio::ThreatTone(j.threat);
     Flares(j,v,s,pos);
+    for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;}
+    // The impact point before the trigger: the bomb bay opens on it (FireSpecial kBay). Only what falls as a bomb (a
+    // bomb store, the bay); the shells' and drones' cross is their aim point (SpecialFrame), no fall to trace.
+    j.bomb=st[j.store].spec->role==StoreRole::bomb;
+    if(j.bomb && j.phase==Phase::air && FallsAsBomb(st[j.store]))j.hasImpact=Impact(j,pos,st[j.store].weapon,j.impact);
     const bool fire=v[kFireStore]!=0;
     v[kFireStore]=0;
     if(fire && st[j.store].weapon)TriggerStore(st[j.store]);
     else if(fire)FireSpecial(j,v,st[j.store],pos);
-    for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;}
-    j.bomb=st[j.store].spec->role==StoreRole::bomb;
-    if(j.bomb && j.phase==Phase::air)j.hasImpact=Impact(j,pos,st[j.store].weapon,j.impact);
 }
 
 // The gun sight (the user, 2026-10-05: "the stock gun's two red lines: delete them, make our own"; crew.cpp AimLines
@@ -1109,6 +1112,16 @@ void MissionSetup(unsigned char* v) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("PJET catch: the game faulted applying the mission setup");}
 }
 
+// The parachute over. Caught (the player in the catch's jet): Board takes the catch over (its speed, its pilot).
+// Any other end (landed, dead, attached, never out, too long) lets the catch go here, the one place it is let go:
+// its jet, no one aboard, ends its autopilot in Fly (a player jet flies on, empty, and comes down; one of the
+// plugin's other aircraft goes back to its NPC pilot). It used to keep circling the spot to the mission's end.
+void EndEject(bool caught) noexcept {
+    bail.state=Eject::none;
+    if(caught)return;
+    catchFlight=CatchFlight{};bail.caught=ObjRef{};
+}
+
 unsigned char* SpawnCatchJet(float mark,const float* m) noexcept {
     for(int i=0;i<2;++i) {
         if(kPlayerJetFiles[i].mark!=mark || !playerJetPreloaded[i] || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt))continue;
@@ -1152,7 +1165,7 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         return;
     }
     unsigned char* const v=const_cast<unsigned char*>(static_cast<const unsigned char*>(bail.caught.obj));
-    if(!bail.caught.Is(v) || v[kDead]){Log("PJET catch: the jet is gone");bail.state=Eject::none;catchFlight=CatchFlight{};return;}
+    if(!bail.caught.Is(v) || v[kDead]){Log("PJET catch: the jet is gone");EndEject(false);return;}
     if(ms-bail.caughtAt>kCatchMostMs) {
         Log("PJET catch: given up, the player not aboard in %.0f s",static_cast<float>(kCatchMostMs)*0.001f);
         bail.caught=ObjRef{};bail.mark=0.0f;catchFlight=CatchFlight{};
@@ -1176,7 +1189,6 @@ void EjectStart(const PJet& j,const unsigned char* v,bool alive) noexcept {
     std::memcpy(bail.heading,nose,12);
     bail.speed=Len(j.vel);
 }
-
 void EjectTick() noexcept {
     if(bail.state==Eject::none)return;
     unsigned char* const h=PlayerHuman();
@@ -1186,12 +1198,12 @@ void EjectTick() noexcept {
         // came for me", no line after the catch's).
         Log("PJET ejection over: %s (state %d)",!h ? "no player found" : h[kDead] ? "the player died" : "the player attached/ragdolled",
             static_cast<int>(bail.state));
-        bail.state=Eject::none;return;
+        EndEject(false);return;
     }
     float* const vel=reinterpret_cast<float*>(h+kHumanVel);
     if(bail.state==Eject::pending) {
         if(At<std::uint32_t>(h,kHumanFlags)&kRiding) {   // the stock exit not through yet
-            if(ms-bail.at>kEjectWaitMs){bail.state=Eject::none;Log("PJET ejection over: the player never left the seat");}
+            if(ms-bail.at>kEjectWaitMs){EndEject(false);Log("PJET ejection over: the player never left the seat");}
             return;
         }
         Put<float>(h,kJumpSpeed,kEjectUp);h[kJumpFlag]=1;
@@ -1203,14 +1215,14 @@ void EjectTick() noexcept {
     }
     if(At<std::uint32_t>(h,kHumanFlags)&kRiding) {   // caught: in the new jet
         Log("PJET catch: the player is in");
-        bail.state=Eject::none;
+        EndEject(true);
         return;
     }
     Catch(h,ms);
     const unsigned char support=h[kHumanSupport];
     if(ms-bail.at>kChuteMostMs || (support==2 && ms-bail.at>300) || vel[1]>bail.vy+kChuteBoost) {
         Log("PJET parachute: %s",support==2 ? "landed" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
-        bail.state=Eject::none;
+        EndEject(false);
         return;
     }
     const float keep=1.0f-kChuteBleed/60.0f;
