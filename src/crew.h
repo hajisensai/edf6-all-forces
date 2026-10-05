@@ -38,6 +38,7 @@ struct Config {
     float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
     float playerHeliStopSec=1.0f;// a stock heli the player flies: its horizontal speed's time constant (s; 0: stock)
+    bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
     float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
@@ -138,6 +139,7 @@ void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
 void ResetLauncher() noexcept;    // launcher.cpp
+void ResetHeliSight() noexcept;   // helisight.cpp
 void ResetJetSound() noexcept;    // jetsound.cpp
 void ResetMissiles() noexcept;    // missile.cpp
 // What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
@@ -431,6 +433,18 @@ bool PlayerLauncher(LauncherReadout* out) noexcept;
 // Whether the player in `vehicle` sees our gun sight instead of the stock aim lines (crew.cpp AimLines): an aircraft
 // the player-jet flight flies (playerjet.cpp), ini PlayerJetGunSight on.
 bool PlayerJetOwnSight(const void* vehicle) noexcept;
+// helisight.cpp: the gun sight of a stock helicopter (heli.cpp IsHelicopter, no plugin body) the player flies or mans
+// (ini PlayerHeliGunSight): the seat's gun (crew.cpp HiddenAimGuns: its stock aim line hidden), `bore` the way its
+// muzzle points (a direction), `pipper` where a round fired now first hits the map along its real arc (hit), else
+// where it is at the end of its life; `range` m from the muzzle to it. HeliSightFrame from every vehicle's input (game
+// thread); PlayerHeliSight the last one, false with none this moment (hud.cpp HudPublish, the snapshot carries it).
+struct HeliSightReadout { float bore[3],pipper[3],range; bool hit; };
+bool PlayerHeliOwnSight(const void* vehicle) noexcept;
+void HeliSightFrame(unsigned char* vehicle) noexcept;
+bool PlayerHeliSight(HeliSightReadout* out) noexcept;
+// crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
+// `most`; how many.
+int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
 namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;

@@ -568,6 +568,23 @@ def every_npc_aircraft_boardable() -> None:
 
 
 @test
+def heli_sight_after_aim_lines() -> None:
+    """The stock heli's gun sight (src/helisight.cpp) draws for the guns whose aim line AimLines hid this frame
+    (HiddenAimGuns), so the input hook runs it after AimLines; AimLines hides the player's line for it
+    (PlayerHeliOwnSight); its ini key is read, shipped and documented; every key the ini ships is read."""
+    crew = src('src/crew.cpp')
+    hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
+    lines, sight = hook.find('&AimLines,'), hook.find('&HeliSightFrame,')
+    assert 0 <= lines < sight, 'src/crew.cpp InputHook: AimLines must run before HeliSightFrame'
+    aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerHeliOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the heli sight hides the player\'s line'
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert re.search(r'^PlayerHeliGunSight=1', ini, re.M) and 'PlayerHeliGunSight' in readme
+    unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if f'L"{k}"' not in plugin]
+    assert not unread, f'EDF6VehicleCrew.ini keys src/plugin.cpp never reads: {unread}'
+
+
+@test
 def readme_counts() -> None:
     readme = src('README.md')
     assert f'{len(calls.FLOWN)} 种呼叫' in readme, f'README.md: say {len(calls.FLOWN)} 种呼叫 (tools/calls.py FLOWN)'
