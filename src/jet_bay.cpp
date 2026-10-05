@@ -269,19 +269,47 @@ void PlayerBayFrame(unsigned char* v,const float* pos) noexcept {
     if(Jet* const j=FindJet(v))BayFrame(*j,pos);
 }
 
-// The gunship's shell from the player: as GunshipFire's (kGunshipGapMs apart, within kGunshipReach), at `at`.
-bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
-    Jet* const j=FindJet(v);
-    if(!j || ms-j->shells.gunAt<kGunshipGapMs)return false;
+namespace {
+// A gunship's shell fired by its crew at `at`: as GunshipFire's (kGunshipGapMs apart, within kGunshipReach). One gun:
+// the pilot's SHELLS, the player at the gunner seat and the NPC gunner under a player pilot share its gap.
+bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* who) noexcept {
+    if(ms-j.shells.gunAt<kGunshipGapMs)return false;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kGunshipReach)return false;
-    j->shells.gunAt=ms;
+    j.shells.gunAt=ms;
     if(!Shell(kGunshipSgo,gunshipReady,v,pos,at,kGunshipDamage,false,"gunship shell"))return false;
-    ++j->shells.gunShots;
-    if(Cfg().debug)Log("JET v=%p gunship shell #%d from the player at (%.0f,%.0f,%.0f), %.0f m",v,j->shells.gunShots,at[0],at[1],at[2],Len(d));
+    ++j.shells.gunShots;
+    if(Cfg().debug)Log("JET v=%p gunship shell #%d from %s at (%.0f,%.0f,%.0f), %.0f m",v,j.shells.gunShots,who,at[0],at[1],at[2],Len(d));
     return true;
 }
+}  // namespace
+
+// The gunship's shell from the player (the pilot's SHELLS, the gunner seat): at `at`.
+bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
+    Jet* const j=FindJet(v);
+    return j && CrewFire(*j,v,at,ms,"the player");
+}
+
+// The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
+// gunship itself within kGunshipReach (PickTarget; the entry's target is its own again when it is handed back:
+// ResumeNpc), a shell at it when the gun is ready.
+bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {
+    Jet* const j=FindJet(v);
+    if(!j || !Cfg().jetPilot || ms-j->shells.gunAt<kGunshipGapMs)return false;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    PickTarget(*j,v,pos,pos,kGunshipReach,dt,ms);
+    return j->t.target && !j->t.flyer && CrewFire(*j,v,j->t.aim,ms,"its NPC gunner");
+}
+
+float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept {
+    const Jet* const j=FindJet(v);
+    if(!j)return 0.0f;
+    const ULONGLONG since=ms-j->shells.gunAt;
+    return since>=kGunshipGapMs ? 0.0f : static_cast<float>(kGunshipGapMs-since)*0.001f;
+}
+
+float ShellReach() noexcept { return kGunshipReach; }
 
 bool ShellsReady() noexcept { return gunshipReady && shellsOk; }
 

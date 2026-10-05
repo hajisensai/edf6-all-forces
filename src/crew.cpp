@@ -341,10 +341,40 @@ bool Bump(unsigned char* vehicle,unsigned index) noexcept {
     return true;
 }
 
+// The gunship's two seats (playerjet_crew.inc, README 炮舰机): the board button takes the seat GunshipBoardSeat names,
+// not the stock first free one (the gunner's, while the NPC flies). The NPC in that seat moves to the other one when it
+// is free (Bump: the pilot to the gun, or the gunner up to the stick: the gunship keeps its pilot), else it is kicked;
+// then the seat is reserved as the stock FindSeat reserves the one it finds (0x633BFE: 0x633FE0(vehicle, human, seat),
+// returned). nullptr: not a gunship with both seats, not the player's to board now, or that seat not theirs to take (the
+// stock / generic path goes on).
+using ReserveSeatFn=void(__fastcall*)(void*,void*,void*);
+constexpr unsigned kReserveSeat=0x633FE0;
+unsigned char* GunshipSeat(unsigned char* v,void* human) noexcept {
+    if(!IsPlayer(static_cast<const unsigned char*>(human)) || !GunshipCrewSeats(v) || !PlayerJetBoardable(v))return nullptr;
+    const unsigned want=GunshipBoardSeat();
+    auto seat=SeatAt(v,want);
+    const Rider rider=SeatRider(seat);
+    if(rider!=Rider::none && rider!=Rider::dummy)return nullptr;
+    const auto canRide=[&]{ return reinterpret_cast<CanRideSeatFn>(image+kCanRideSeat)(v,human,seat); };
+    if(!WithDummiesHidden(v,canRide))return nullptr;   // out of reach, or its class may not sit there
+    if(rider==Rider::dummy && !Bump(v,want))return nullptr;
+    return WithTeamField(v,OwnTeam(v),[&]()->unsigned char* {   // the stock seat check's team (see WithTeamField)
+        if(!canRide())return nullptr;
+        reinterpret_cast<ReserveSeatFn>(image+kReserveSeat)(v,human,seat);
+        Log("BOARD v=%p gunship: the player takes the %s seat",v,want==kGunnerSeat ? "gunner" : "pilot");
+        return seat;
+    });
+}
+
 unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     EnsureInputs();   // the board button in the first mission (with no prompt hook nor mission start hooked)
     const int cls=ClassOf(vehicle);
     const FindSeatFn originalFindSeat=cls>=0 && originalFindSeat_[cls] ? originalFindSeat_[cls] : reinterpret_cast<FindSeatFn>(image+kFindSeat);
+    if(Cfg().enabled && Cfg().bump && !BumpSuppressed()) {
+        unsigned char* crewSeat=nullptr;
+        __try { crewSeat=GunshipSeat(static_cast<unsigned char*>(vehicle),human); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        if(crewSeat)return crewSeat;
+    }
     auto seat=originalFindSeat(vehicle,human);
     if(seat || !Cfg().enabled || !Cfg().bump || BumpSuppressed())return seat;
     __try {

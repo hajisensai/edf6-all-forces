@@ -88,6 +88,8 @@ struct Config {
     int playerJetGearButton=0x40;   // ...and the pad button (the seat's button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
     bool playerJetAll=true;         // the player can board every other aircraft of the plugin too (playerjet_kinds.h)
     int playerJetHailKey=0x48;      // ...and this key calls the nearest one down to them ('H'; 0: off)
+    bool gunshipBoardGunner=false;  // the gunship's board button takes its gunner seat (off: its pilot seat; playerjet_crew.inc)
+    int gunshipGunnerKey=0x56;      // ...the other seat while this key is held ('V'; 0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
@@ -372,6 +374,22 @@ bool IsPlayerJet(const void* vehicle) noexcept;
 // them, catches them or waits where they left it): jet.cpp does not fly it then, crew.cpp does not crew it.
 bool PlayerJetBoardable(const void* vehicle) noexcept;
 bool PlayerJetHolds(const void* vehicle) noexcept;
+// The gunship's crew (playerjet_crew.inc, README 炮舰机): seat 0 its pilot, kGunnerSeat its side gunner (tools/make_jets.py
+// with_gunner_seat; a gunship installed before has the one seat, and none of this). Whether `vehicle` is such a
+// gunship; the seat its board button takes now (crew.cpp GunshipSeat: ini GunshipBoardGunner, the other one while
+// GunshipGunnerKey is held).
+constexpr unsigned kGunnerSeat=1;
+bool GunshipCrewSeats(const void* vehicle) noexcept;
+unsigned GunshipBoardSeat() noexcept;
+// The player at its gun, its NPC pilot flying on (jet.cpp JetFrame): the pylon turn's centre, `at` the point they last
+// shelled (centred: within the last kGunnerCentreMs), `home` where they boarded. False with the player not there.
+struct GunnerOrder { bool centred; float at[3],home[3]; };
+bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
+// The gunner's sight (hud.cpp GunnerMarks, game thread): where the screen's centre meets the ground (`ground`: within
+// the camera's reach), its range from the gunship and whether a shell reaches it, the gun's wait (s, 0: ready; `ready`:
+// the shells are there and the gun is), the pylon turn's centre. False with the player not at a gunship's gun.
+struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; };
+bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
 // The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path; stores: what it

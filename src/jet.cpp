@@ -370,6 +370,26 @@ void NpcFlares(Jet& j,unsigned char* v,const float* pos,const float* nose,ULONGL
     if(n || j.flares<4)FlareFlames(v,at,vel,n,ms);
 }
 
+namespace {
+// The player at the gunship's gun (playerjet_crew.inc): held for them as a jet the player flies is (jet::ResumeNpc,
+// playerjet_board.inc Held): its fuel clock stands (the frame's time added to its birth, as ResumeNpc adds a held
+// stretch), it does not withdraw (Leave not asked; a withdrawal begun before they boarded called off) and is not
+// deleted (JetReap); its NPC pilot flies on.
+void GunnerHold(Jet& j,ULONGLONG ms) noexcept {
+    if(j.seen && ms>j.seen)j.bornAt+=ms-j.seen;
+    if(j.mode!=Mode::withdraw)return;
+    j.reap=false;j.why=nullptr;
+    SetMode(j,Mode::patrol,ms);
+    Log("JET v=%p withdrawal called off: the player is at its gun",j.Vehicle());
+}
+
+// The gunner's pylon turn: round the point they last shelled, else the call's own point (a launched one's strike point),
+// else where they boarded (a placed or following one works round the player, and the player is aboard).
+const float* GunnerAnchor(const Jet& j,const GunnerOrder& o) noexcept {
+    return o.centred ? o.at : j.launched ? j.anchor : o.home;
+}
+}  // namespace
+
 void JetFrame(unsigned char* v) noexcept {
     if(!HooksOk())return;
     // Called down for the player (its NPC pilot still aboard): playerjet.cpp flies it, its fuel clock standing (ResumeNpc).
@@ -380,6 +400,11 @@ void JetFrame(unsigned char* v) noexcept {
     Jet* j=FindJet(v);
     if(!j)j=CrewPlaced(v,pos,ms);
     if(!j)return;   // kMaxJets flying: this one is not taken over (FreeSlot logged it)
+    // The player at the gunship's gun, its NPC pilot flying on (playerjet_crew.inc): held for them as the pilot seat
+    // is (GunnerHold), its pylon turn round the point they shell (GunnerAnchor), its own gun theirs.
+    GunnerOrder crewOrder{};
+    const bool gunner=PlayerGunnerOrder(v,&crewOrder);
+    if(gunner)GunnerHold(*j,ms);
     j->seen=ms;
     FarRender(*j,v);
     Put<float>(v,kAreaInset,kNoInset);
@@ -405,14 +430,14 @@ void JetFrame(unsigned char* v) noexcept {
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
     Jet* const mother=MotherOf(*j);
-    if(j->escort && follow)std::memcpy(j->anchor,player.pos,12);
+    if(j->escort && follow && !gunner)std::memcpy(j->anchor,player.pos,12);   // the player aboard: player.pos is its own
     // The player's carrier sends its drones to a point (PlayerLaunchDrone): they work round that.
     const bool ordered=mother && mother->carrier.ordered;
-    const float* anchor=ordered ? mother->carrier.order : mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) :
-                        follow && !j->launched ? player.pos : j->anchor;
+    const float* anchor=gunner ? GunnerAnchor(*j,crewOrder) : ordered ? mother->carrier.order :
+                        mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : follow && !j->launched ? player.pos : j->anchor;
     const float* viewer=follow ? player.pos : anchor;
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
-    Leave(*j,kind,arms,mother,hp,hpMax,ms);
+    if(!gunner)Leave(*j,kind,arms,mother,hp,hpMax,ms);   // held for the player at the gun: no withdrawal
     const bool walled=Sense(*j,pos,ms);
 
     // The target and its motion.
@@ -440,7 +465,8 @@ void JetFrame(unsigned char* v) noexcept {
     HoldOffGround(*j,pos,clear,dt,ms);
     j->m.ready=true;
     BayFrame(*j,pos);
-    Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
+    if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
+    else Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
     DollFrame(IndexOf(*j),v);
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
@@ -455,6 +481,19 @@ void JetFrame(unsigned char* v) noexcept {
 // deleted at the world's edge).
 constexpr ULONGLONG kReapSettleFrames=30;
 
+namespace {
+// Who is aboard: the player in any seat, else an NPC in any, else nobody.
+Rider Aboard(unsigned char* v) noexcept {
+    Rider r=Rider::none;
+    for(unsigned i=0;i<SeatCount(v);++i) {
+        const Rider s=SeatRider(SeatAt(v,i));
+        if(s==Rider::player)return s;
+        if(s==Rider::dummy)r=s;
+    }
+    return r;
+}
+}  // namespace
+
 void JetReap(const void* self) noexcept {
     const ULONGLONG ms=GameMs();
     static ULONGLONG frame=~0ull;
@@ -466,10 +505,13 @@ void JetReap(const void* self) noexcept {
         // Only the same object, still there: one destroyed meanwhile is the game's (its entry just goes).
         unsigned char* const v=j.Vehicle();
         if(Alive(j.ref) && !v[kDead] && crew::BodyOf(v)==PluginBody::jet) {
-            // Its rider off first, the delete only once the jet has taken itself as empty (see kReapSettleFrames).
-            if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none) {
-                if(SeatRider(SeatAt(v,0))==Rider::dummy && !j.emptyFrame) {
-                    reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
+            // Its riders off first (the gunship's gunner too), the delete only once the jet has taken itself as empty
+            // (see kReapSettleFrames); never with the player in any of its seats.
+            const Rider aboard=Aboard(v);
+            if(aboard!=Rider::none) {
+                if(aboard==Rider::dummy && !j.emptyFrame) {
+                    for(unsigned i=0;i<SeatCount(v);++i)
+                        if(SeatRider(SeatAt(v,i))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,i));
                     j.emptyFrame=f;
                 }
                 continue;   // a player aboard (or the NPC not off yet): no delete under them
