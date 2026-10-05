@@ -223,9 +223,15 @@ def set_big_world(root: str, value: float) -> str:
     return path
 
 
-def install(root: str, radius: int = 1) -> list[str]:
-    data = build_map(root, radius)
-    files, _ = build_seams(root)
+def build(root: str, radius: int = 1) -> tuple[bytes, dict[str, bytes]]:
+    """Everything the map is, in memory (nothing written): the MAC and the seamless pieces."""
+    return build_map(root, radius), build_seams(root)[0]
+
+
+def install(root: str, radius: int = 1, built: tuple[bytes, dict[str, bytes]] | None = None) -> list[str]:
+    """Writes the map (`built`: made earlier by build, so the installer writes only once all it makes is made) and
+    sets BigWorld in the plugin's ini (installed by then)."""
+    data, files = built or build(root, radius)
     led = ledger.Ledger(root)
     paths = [led.put(OWNER, f'MAP/{MAP_FILE}', data)]
     paths += [led.put(OWNER, f'MAP/{name}', blob) for name, blob in files.items()]
