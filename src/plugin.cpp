@@ -239,6 +239,7 @@ void LoadConfig() noexcept {
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
     n.heliMousePitch=ReadBool(L"HeliMousePitch",n.heliMousePitch);
+    n.jetEntrySmoke=ReadBool(L"JetEntrySmoke",n.jetEntrySmoke);
     n.playerJetGunSight=ReadBool(L"PlayerJetGunSight",n.playerJetGunSight);
     n.playerJetFlightHud=ReadBool(L"PlayerJetFlightHud",n.playerJetFlightHud);
     n.playerJetThreatHud=ReadBool(L"PlayerJetThreatHud",n.playerJetThreatHud);

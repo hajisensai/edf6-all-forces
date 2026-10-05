@@ -93,6 +93,7 @@ struct Config {
     bool gunshipBoardGunner=false;  // the gunship's board button takes its gunner seat (off: its pilot seat; playerjet_crew.inc)
     int gunshipGunnerKey=0x56;      // ...the other seat while this key is held ('V'; 0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
+    bool jetEntrySmoke=true;        // a called jet arriving trails smoke from its exhausts (booster.cpp JetSmoke)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
@@ -288,6 +289,7 @@ void ShieldVehicle(unsigned char* vehicle) noexcept;   // shield.cpp: the same f
 void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
 // booster.cpp: a jet's exhaust flames on its nozzles (by its mark), burning `intensity` (0..1), `burner` longer.
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept;
+void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept;   // booster.cpp: an arriving jet's smoke trails
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot

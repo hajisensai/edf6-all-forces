@@ -671,6 +671,7 @@ void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* no
     // afterburner near the top.
     const float s=Len(j.m.vel),share=k.attack>k.minSpeed ? (s-k.minSpeed)/(k.attack-k.minSpeed) : 1.0f;
     JetFlames(v,Clamp(share,0.4f,1.0f),speed>=k.attack-5.0f,ms);
+    JetSmoke(v,Entering(j,ms),ms);   // arriving: smoke from its exhausts (booster.cpp)
 }
 }  // namespace jet
 }  // namespace crew
