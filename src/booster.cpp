@@ -240,9 +240,10 @@ namespace {
 // The model's frame is its mesh bone's world matrix as drawn (ModelBone; the vehicle's own matrix if none): on the
 // vehicle's matrix the player fighter's two flames showed above and outside its nozzles, and on the root bone ("mdl")
 // both sat in one dot with no direction (the user's pictures, 2026-10-05): the root's record is not kept up as drawn.
-// The mesh bone (the root's first child, its local the identity) is the model's frame less the root's bind lift
-// (kRootLift: mdl's local, the nozzles' heights are from the model's origin). FLAME logs the frame once per jet.
-constexpr float kRootLift=0.835f;
+// The mesh bone (the root's first child) as drawn is the model's origin itself: FLAME logged it 1.05 m under and 1.77
+// m behind the vehicle's origin (the collision box's centre, jet_models.model_box (0, 1.06, 1.69)), its rows the
+// vehicle's. The nozzles go on it as they are (a lift of mdl's bind 0.835 m taken off them put both flames at the
+// bottom of the tail: the user, 2026-10-05). FLAME logs the frame once per jet.
 const unsigned char* ModelBone(const unsigned char* v) noexcept {
     const unsigned char* inst=v+kModelInst506;
     if(!Readable(inst,kInstBones506+8))return nullptr;
@@ -276,7 +277,7 @@ void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* siz
     }
     for(int i=0;i<n && i<kNozzles;++i) {
         Nozzle& z=c->n[i];
-        const float t[3]={at[i][0],at[i][1]-(root ? kRootLift : 0.0f),at[i][2]};
+        const float* t=at[i];
         for(int k=0;k<3;++k) {
             z.m[k]=-b[k];z.m[4+k]=b[4+k];z.m[8+k]=-b[8+k];
             z.m[12+k]=b[12+k]+t[0]*b[k]+t[1]*b[4+k]+t[2]*b[8+k];
@@ -295,6 +296,76 @@ void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* siz
 }
 }  // namespace
 
+namespace {
+// The flares' fire (FlareFlames): a set of Booster flames on the jet that dropped them, one a burning flare, each
+// at its flare and trailing against its motion; a set's flames past its flares burn down (no level).
+constexpr int kFlareSets=4,kFlareFlames=8;
+constexpr float kFlareSize[2]={4.0f,1.5f};
+struct FlareSet { const unsigned char* v; const void* ctrl; ULONGLONG seen; Nozzle n[kFlareFlames]; };
+FlareSet flareSets[kFlareSets];
+
+FlareSet* FlareSetOf(const unsigned char* v,ULONGLONG ms) noexcept {
+    const void* const ctrl=At<const void*>(v,kSelfCtrl);
+    FlareSet* free=nullptr;
+    for(auto& f:flareSets) {
+        if(f.v==v && f.ctrl==ctrl)return &f;
+        if(!f.v && !free)free=&f;
+    }
+    if(free){free->v=v;free->ctrl=ctrl;free->seen=ms;}
+    return free;
+}
+
+void FlareFrame(const unsigned char* v,const float (*at)[3],const float (*vel)[3],int n,ULONGLONG ms) noexcept {
+    FlareSet* const f=FlareSetOf(v,ms);
+    if(!f)return;
+    f->seen=ms;
+    for(int i=0;i<kFlareFlames;++i) {
+        Nozzle& z=f->n[i];
+        if(i>=n) {   // no flare for it now: let it burn down
+            if(Live(z)){Put<float>(z.obj,kLevel,0.0f);Put<float>(z.obj,kPulse,0.0f);}
+            continue;
+        }
+        float back[3]={-vel[i][0],-vel[i][1],-vel[i][2]};   // the flame's +z: the trail behind the flare
+        const float l=std::sqrt(back[0]*back[0]+back[1]*back[1]+back[2]*back[2]);
+        if(l>1e-3f){for(auto& x:back)x/=l;}else{back[0]=0.0f;back[1]=1.0f;back[2]=0.0f;}
+        float up[3]={0.0f,1.0f,0.0f};
+        if(std::fabs(back[1])>0.9f){up[0]=1.0f;up[1]=0.0f;}
+        float x[3]={up[1]*back[2]-up[2]*back[1],up[2]*back[0]-up[0]*back[2],up[0]*back[1]-up[1]*back[0]};
+        const float xl=std::sqrt(x[0]*x[0]+x[1]*x[1]+x[2]*x[2]);
+        for(auto& c:x)c/=xl;
+        const float y[3]={back[1]*x[2]-back[2]*x[1],back[2]*x[0]-back[0]*x[2],back[0]*x[1]-back[1]*x[0]};
+        for(int k=0;k<3;++k){z.m[k]=x[k];z.m[4+k]=y[k];z.m[8+k]=back[k];z.m[12+k]=at[i][k];}
+        z.m[3]=z.m[7]=z.m[11]=0.0f;z.m[15]=1.0f;
+        if(!Live(z)) {
+            DropWeak(z.ctrl);
+            z.obj=nullptr;z.ctrl=nullptr;
+            Make(z,v,kFlareSize);
+            if(!Live(z))continue;
+        }
+        Put<float>(z.obj,kLevel,1.0f);
+        Put<float>(z.obj,kPulse,1.0f);
+        Put<int>(z.obj,kHold,3);
+    }
+}
+
+void FlareSweep(ULONGLONG ms) noexcept {
+    for(auto& f:flareSets) {
+        if(!f.v)continue;
+        const bool gone=ms-f.seen>kStaleMs || !Readable(f.v,kTeam+4) || At<const void*>(f.v,kSelfCtrl)!=f.ctrl ||
+                        (f.v[kObjFlags]&kObjDeleted);
+        if(!gone)continue;
+        for(auto& z:f.n)Drop(z);
+        f.v=nullptr;f.ctrl=nullptr;
+    }
+}
+}  // namespace
+
+void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[3],int n,ULONGLONG ms) noexcept {
+    if(!sigOk || broken || !v)return;
+    __try { FlareFrame(v,at,vel,n,ms); }
+    __except(MakeFault(GetExceptionInformation())) {}
+}
+
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept {
     if(!sigOk || broken || !v)return;
     const JetNozzles* const nz=NozzlesOf(BodyMark(v));
@@ -312,7 +383,7 @@ void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float inten
 
 void BoosterSweep(ULONGLONG ms) noexcept {
     if(!sigOk || broken)return;
-    __try { Sweep(ms); }
+    __try { Sweep(ms);FlareSweep(ms); }
     __except(FaultLog("FLAME sweep",GetExceptionInformation())) {}
 }
 
@@ -336,6 +407,10 @@ void ResetBoosters() noexcept {
     for(auto& c:carriers) {
         for(auto& z:c.n)DropWeak(z.ctrl);
         c=Carrier{};
+    }
+    for(auto& f:flareSets) {
+        for(auto& z:f.n)DropWeak(z.ctrl);
+        f=FlareSet{};
     }
 }
 }  // namespace crew

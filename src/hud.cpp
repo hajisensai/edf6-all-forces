@@ -505,6 +505,7 @@ void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
         if(n<0)break;
         at+=static_cast<std::size_t>(n);
     }
+    if(j.air)_snwprintf_s(text+at,_countof(text)-at,_TRUNCATE,L"FLARE %d",j.flares);
     Format(l,L"%ls",text);
 }
 
@@ -545,7 +546,8 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
                                                     : L"W / SPACE: pull up    S: push down    A / D: roll    (let go: wings level)");
             if(Cfg().playerJetMouseFlight)Format(keys,L"MOUSE: aim    W / SPACE / S / A / D: fly by hand (the mouse takes over once it moves)");
             wchar_t target[32];KeyName(Cfg().playerJetTargetKey,target,32);
-            Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target",boost,brake,swap,target);
+            wchar_t flare[32];KeyName(Cfg().playerJetFlareKey,flare,32);
+            Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target    %ls: flares",boost,brake,swap,target,flare);
         } else {
             Format(keys,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",boost,brake);
             Format(keys2,L"W / SPACE: pull up to take off (from %d km/h)",rotateKmh);

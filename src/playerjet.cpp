@@ -211,6 +211,9 @@ struct PJet {
     bool insetSaved;
     ULONGLONG lastMs,logAt,crashAt,blockedSince;
     int threat;                  // 2 a missile homing on it, 1 an enemy's missile lock on it, 0 none (StoresStep)
+    int flares;                  // flare pairs left (Cfg().playerJetFlares when the entry is made)
+    bool flareHeld;
+    ULONGLONG flareAt;           // game ms of its last pair
     ULONGLONG frame;             // GameFrame of its last flight step
     ULONGLONG wetFrame;          // GameFrame of the last water message (0: none)
     bool dieLogged;
@@ -250,7 +253,7 @@ PJet* Find(const unsigned char* v) noexcept {
 PJet* Make(unsigned char* v,const Kind* kind) noexcept {
     for(auto& j:jets) {
         if(j.vehicle && Live(j))continue;
-        j=PJet{};j.ref=ObjRef::Of(v);j.vehicle=v;j.kind=kind;
+        j=PJet{};j.ref=ObjRef::Of(v);j.vehicle=v;j.kind=kind;j.flares=Cfg().playerJetFlares;
         return &j;
     }
     static const void* refused=nullptr;
@@ -311,7 +314,7 @@ void Elevons(PJet& j,unsigned char* v,float stickPitch,float stickRoll,float dt)
 // air yaw (the right stick: turn) and roll (the left stick's sideways: roll > 0 rolls right) are apart.
 // keys (the keyboard and mouse): pitch from W / ascend (+1) and S (-1), throttle from the ini's boost and brake keys,
 // no yaw: the mouse (aimX, aimY: the frame's movement, no dead zone; aimY > 0 up) moves the aim instead.
-struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; bool switchStore,nextTarget; };
+struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; bool switchStore,nextTarget,flare; };
 
 // Whether the virtual key `vk` is down while the game has the foreground (0: never).
 bool KeyDown(int vk) noexcept {
@@ -335,6 +338,7 @@ Stick ReadStick(const unsigned char* seat) noexcept {
     s.keys=At<unsigned char>(seat,kSeatPad)==0;
     s.switchStore=s.keys ? KeyDown(Cfg().playerJetSwitchKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     s.nextTarget=s.keys ? KeyDown(Cfg().playerJetTargetKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonX)!=0;
+    s.flare=KeyDown(Cfg().playerJetFlareKey);   // the keyboard's (a pad's buttons are the game's)
     if(s.keys) {
         // The mouse steers only with ini PlayerJetMouseFlight; off, the keys fly the plane alone (W / ascend pull, S
         // push, A / D roll, let go it levels) and the mouse is left to the camera (the user's ask, 2026-10-04).
@@ -768,6 +772,37 @@ bool Impact(const PJet& j,const float* pos,float* hit) noexcept {
 // Its stores (stores.h): the switch (key or LB, on its press) moves to the next with rounds left; one emptied, the
 // next; the secondary fire (the stock fire byte, taken so the 506 does not fire holder 2 itself) pulls the picked
 // one's trigger; what they weigh; the cockpit's list and, a bomb picked, where it would hit.
+// Flares (the user, 2026-10-05): the flare key drops a pair, one either side behind the jet, at most one pair every
+// kFlareGapMs, while it has pairs left (missile.cpp FlareDrop: the missiles coming for it may take one); its burning
+// flares drawn every frame (booster.cpp FlareFlames).
+constexpr ULONGLONG kFlareGapMs=1000;
+constexpr float kFlareBack=6.0f,kFlareSide=12.0f,kFlareDown=4.0f,kFlareKeep=0.6f;   // m behind; m/s out, down; share of its speed
+constexpr int kFlaresDrawn=8;
+void Flares(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
+    const ULONGLONG ms=GameMs();
+    const bool press=s.flare && !j.flareHeld;
+    j.flareHeld=s.flare;
+    if(press && j.phase==Phase::air && j.flares>0 && ms-j.flareAt>=kFlareGapMs) {
+        j.flares--;j.flareAt=ms;
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float right[3]={m[0],m[1],m[2]},nose[3]={m[8],m[9],m[10]};
+        Normalize(right);Normalize(nose);
+        for(int side=-1;side<=1;side+=2) {
+            float at[3],vel[3];
+            for(int i=0;i<3;++i) {
+                at[i]=pos[i]-nose[i]*kFlareBack;
+                vel[i]=j.vel[i]*kFlareKeep+right[i]*kFlareSide*static_cast<float>(side);
+            }
+            vel[1]-=kFlareDown;
+            FlareDrop(v,at,vel);
+        }
+        Log("PJET v=%p flares (%d pairs left)",v,j.flares);
+    }
+    float at[kFlaresDrawn][3],vel[kFlaresDrawn][3];
+    const int n=FlaresOf(v,at,vel,kFlaresDrawn);
+    FlareFlames(v,at,vel,n,ms);
+}
+
 // A missile's lock point this close to the jet is a missile coming for it (missile.cpp MissileHoming).
 constexpr float kThreatRadius=20.0f;
 
@@ -798,6 +833,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.
     j.threat=MissileHoming(pos,kThreatRadius) ? 2 : jet::LockingOn(v) ? 1 : 0;
     audio::ThreatTone(j.threat);
+    Flares(j,v,s,pos);
     const bool fire=v[kFireStore]!=0;
     v[kFireStore]=0;
     if(fire)TriggerStore(st[j.store]);
@@ -869,6 +905,27 @@ constexpr unsigned kPreloadFn=0x7A3780,kCreateObjectFn=0x11945E0,kInitParamVt=0x
 constexpr std::size_t kPreloadMgrAt=0x20B29A8,kObjectMgrAt=0x20B2958;
 struct alignas(16) SpawnParam { const void* vtable; unsigned char rest[0x28]; };
 
+// The SGO's mission_setup applied with no AI aboard (the catch jet stays empty for the player): the first half of
+// RideAi(true) (0x633030): 0x62D6E0(vehicle, &setup) reads it, the vehicle's slot 46 applies it (the jet mark, its
+// weapons, the heli parameters), the setup's variant destroyed through its type's entry (*(image+0x1765220)[type]).
+// Without it the catch jet had mark 0: no kind, no autopilot, it fell like a stone (2026-10-05 13:34 / 13:52, "PJET
+// catch jet ... frame: no kind (mark 0, body 0)").
+constexpr unsigned kReadSetup=0x62D6E0,kSetupDtors=0x1765220;
+constexpr std::size_t kSlotApplySetup=46,kSetupType=0x10;
+const unsigned char kReadSetupSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x40,0x48,0x8B,0xDA};
+void MissionSetup(unsigned char* v) noexcept {
+    __try {
+        if(!Matches(kReadSetup,kReadSetupSig,sizeof(kReadSetupSig))){Log("PJET catch: mission setup profile mismatch");return;}
+        alignas(16) unsigned char setup[0x40]{};
+        alignas(16) unsigned char scratch[0x40]{};
+        reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kReadSetup)(v,setup);
+        reinterpret_cast<void(__fastcall* const*)(void*,void*)>(At<void* const*>(v,0))[kSlotApplySetup](v,setup);
+        const std::uint16_t type=At<std::uint16_t>(setup,kSetupType);
+        if(type!=0xFFFF)reinterpret_cast<void(__fastcall* const*)(void*,void*)>(image+kSetupDtors)[type](setup,scratch);
+        Log("PJET catch: mission setup applied (mark %.0f)",BodyMark(v));
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("PJET catch: the game faulted applying the mission setup");}
+}
+
 unsigned char* SpawnCatchJet(float mark,const float* m) noexcept {
     for(int i=0;i<2;++i) {
         if(kPlayerJetFiles[i].mark!=mark || !playerJetPreloaded[i] || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt))continue;
@@ -880,6 +937,7 @@ unsigned char* SpawnCatchJet(float mark,const float* m) noexcept {
         } __except(EXCEPTION_EXECUTE_HANDLER){playerJetPreloaded[i]=false;Log("PJET catch: the game faulted building %ls: off",kPlayerJetFiles[i].file);return nullptr;}
         if(!v)return nullptr;
         FixBodyPart506(v,"PJET");
+        MissionSetup(v);
         SetObjectTeam(v,kTeamVehicle);
         LevelVehicle(v);
         return v;
@@ -1132,6 +1190,7 @@ void PlayerEjectTick() noexcept {
     if(flyOk && Cfg().playerJet)
         for(auto& j:jets)if(j.driven && j.vehicle && Gone(j))Leave(j,j.vehicle,j.clear,false,"destroyed");
     EjectTick();
+    FlaresStep();
 }
 
 void PreloadPlayerJets() noexcept {
@@ -1178,7 +1237,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
             const Kind* const kind=KindOf(v);
             r.rotate=kind ? kind->rotate : 0.0f;
-            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=PullUpNeeded(j,pos);r.threat=j.threat;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=PullUpNeeded(j,pos);r.threat=j.threat;r.flares=j.flares;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
