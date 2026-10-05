@@ -1973,6 +1973,7 @@ void PlayerAssist(unsigned char* v) noexcept {
 // keyboard and mouse only (a pad's right stick Y is the camera's, as on the stock).
 constexpr std::size_t kSeatPad=0x2B0,kSeatLY=0x2C4,kSeatRY=0x2D4;   // heli-input-re.md §4 (playerjet.cpp's)
 struct MouseFore { ObjRef ref; float lever; ULONGLONG seen; };
+constexpr ULONGLONG kLeverStaleMs=250;
 MouseFore mouseFore[8];
 
 void PlayerMousePitch(unsigned char* v) noexcept {
@@ -1986,6 +1987,7 @@ void PlayerMousePitch(unsigned char* v) noexcept {
         if(!m)return;
         *m=MouseFore{ObjRef::Of(v),0.0f,ms};
     }
+    if(ms-m->seen>kLeverStaleMs)m->lever=0.0f;   // not flown by them since: boarded again, the lever level
     m->seen=ms;
     const float ly=At<float>(seat,kSeatLY),ry=At<float>(seat,kSeatRY);
     if(!std::isfinite(ly) || !std::isfinite(ry))return;

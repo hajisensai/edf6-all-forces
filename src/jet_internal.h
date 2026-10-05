@@ -281,7 +281,8 @@ struct Motion {
     ULONGLONG thrustLogAt;   // Thrusters' last log
     std::uint8_t sweep;      // Ahead's next stretch of its track
     float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
-    ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it
+    ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it or off its track
+    std::int8_t obstSide;    // ...too steep to climb: the side it turns off to (+1 / -1, picked once; 0 none)
 };
 // What it goes for (Pick, Lead) and its guns' and missiles' state (Fire, Missile).
 struct Aim {

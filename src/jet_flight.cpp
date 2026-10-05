@@ -406,24 +406,52 @@ bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept {
 // frame as the probe went past it: the jets flew into buildings and slid along them (Sense). Ahead sweeps its track
 // kMinAlt under it out to a pull-up's time (kReact, the roll to lift, the climb's turn s / (maxG g); kSweepMin to
 // kSweepMax s) in kSweepSlots stretches, kSweepPerFrame a frame (a whole sweep every 3 frames: 2 rays a jet a frame);
-// a stretch that hits something has its top found (the ground over a point kObstStep past the hit, on: a roof) and
-// kept as the obstacle, the highest one, until the jet is past it or the sweep's time and kObstKeepMs more is up.
+// a stretch that hits something has its top found and kept as the obstacle, the highest one, until the jet is past it,
+// it lies kObstOff to the side of its track (turned away, or a building it only grazed), or the sweep's time and
+// kObstKeepMs more is up. The top: a ray down from kRoofProbe over the jet (or the hit) onto a point kObstStep past the
+// face, its first hit (a roof); none, it starts inside something taller still, taken as that tall. (A ray down from the
+// point itself, inside the building, found the street under it: the face's own height, never the roof.)
 constexpr int kSweepSlots=6,kSweepPerFrame=2;
-constexpr float kSweepMin=3.0f,kSweepMax=8.0f,kObstStep=3.0f;
+constexpr float kSweepMin=3.0f,kSweepMax=8.0f,kObstStep=3.0f,kRoofProbe=400.0f,kObstOff=40.0f;
 constexpr ULONGLONG kObstKeepMs=2000;
 // Guard over it: kObstMargin times the slope to its top, kObstSteep (the sine) at most; steeper than kObstTurnSlope
-// (rise over distance, 45 deg) it turns off to a side as well (Aside).
-constexpr float kObstMargin=1.3f,kObstSteep=0.9f,kObstTurnSlope=1.0f;
+// (rise over distance, 45 deg) it turns off as well, kAsideAngle off the line to it, to the side (picked once, when it
+// is found: TurnSide) whose ray at its height reaches further past it (kAsideBeyond).
+constexpr float kObstMargin=1.3f,kObstSteep=0.9f,kObstTurnSlope=1.0f,kAsideAngle=0.6f,kAsideBeyond=150.0f;
+
+// `dir` (level, unit) turned `side` (+1 / -1) by kAsideAngle.
+void Turned(const float* dir,float side,float* out) noexcept {
+    const float c=std::cos(kAsideAngle),s=std::sin(kAsideAngle)*side;
+    out[0]=dir[0]*c+dir[2]*s;out[1]=0.0f;out[2]=dir[2]*c-dir[0]*s;
+}
+
+std::int8_t TurnSide(const float* pos,const float* at) noexcept {
+    float to[3]={at[0]-pos[0],0.0f,at[2]-pos[2]};
+    const float reach=Len(to)+kAsideBeyond;
+    if(!Normalize(to))return 1;
+    float room[2];
+    for(int i=0;i<2;++i) {
+        float way[3];Turned(to,i ? -1.0f : 1.0f,way);
+        const float end[3]={pos[0]+way[0]*reach,pos[1],pos[2]+way[2]*reach};
+        float hit[3];
+        const float d=MapRay(pos,end,hit);
+        room[i]=d<0.0f ? reach : d;
+    }
+    return room[1]>room[0] ? -1 : 1;
+}
+
 void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
     Motion& mo=j.m;
-    if(mo.obstUntil) {
-        const float to[3]={mo.obstAt[0]-pos[0],0.0f,mo.obstAt[2]-pos[2]};
-        if(ms>mo.obstUntil || to[0]*mo.vel[0]+to[2]*mo.vel[2]<0.0f)mo.obstUntil=0;
-    }
     const Kind& k=KindOf(j);
     const float s=Len(mo.vel);
     float dir[3]={mo.vel[0],0.0f,mo.vel[2]};
-    if(s<1.0f || !Normalize(dir))return;
+    const bool moving=s>=1.0f && Normalize(dir);
+    if(mo.obstUntil) {
+        const float to[3]={mo.obstAt[0]-pos[0],0.0f,mo.obstAt[2]-pos[2]};
+        const float along=to[0]*dir[0]+to[2]*dir[2],off=std::fabs(to[0]*dir[2]-to[2]*dir[0]);
+        if(ms>mo.obstUntil || !moving || along<0.0f || off>kObstOff){mo.obstUntil=0;mo.obstSide=0;}
+    }
+    if(!moving)return;
     const float span=Clamp(kReact+RollToLift(j)/k.roll+s/(k.maxG*kG),kSweepMin,kSweepMax);
     for(int n=0;n<kSweepPerFrame;++n) {
         const int i=mo.sweep++%kSweepSlots;
@@ -433,36 +461,18 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
         float hit[3];
         if(MapRay(a,b,hit)<0.0f)continue;
         const float in[3]={hit[0]+dir[0]*kObstStep,hit[1],hit[2]+dir[2]*kObstStep};
-        const float c=GroundClearance(in);
-        const float top=c!=kNoGround && in[1]-c>hit[1] ? in[1]-c : hit[1];
+        const float from[3]={in[0],(pos[1]>hit[1] ? pos[1] : hit[1])+kRoofProbe,in[2]};
+        float roof[3];
+        const float top=MapRay(from,in,roof)>=0.0f ? roof[1] : from[1];
         if(mo.obstUntil && top<=mo.obstTop)continue;
         if(Cfg().debug && (!mo.obstUntil || top>mo.obstTop+10.0f))
             Log("JET v=%p obstacle ahead: top y=%.0f (%.0f over it), %.0f m out",j.Vehicle(),top,top-pos[1],HorizDist(pos,hit));
         mo.obstTop=top;std::memcpy(mo.obstAt,hit,12);
         mo.obstUntil=ms+static_cast<ULONGLONG>(span*1000.0f)+kObstKeepMs;
     }
-}
-
-// Too steep to climb over what is ahead (Guard): turned off to the side whose ray, kAsideAngle off its track at its
-// height, reaches further past it.
-constexpr float kAsideAngle=0.6f,kAsideBeyond=150.0f;
-void Aside(const Jet& j,const float* pos,float toObst,float* want) noexcept {
-    float dir[3]={j.m.vel[0],0.0f,j.m.vel[2]};
-    if(!Normalize(dir))return;
-    const float c=std::cos(kAsideAngle),s=std::sin(kAsideAngle),reach=toObst+kAsideBeyond;
-    float side[2][3],room[2];
-    for(int i=0;i<2;++i) {
-        const float sg=i ? -1.0f : 1.0f;
-        side[i][0]=dir[0]*c+dir[2]*s*sg;side[i][1]=0.0f;side[i][2]=dir[2]*c-dir[0]*s*sg;
-        const float end[3]={pos[0]+side[i][0]*reach,pos[1],pos[2]+side[i][2]*reach};
-        float hit[3];
-        const float d=MapRay(pos,end,hit);
-        room[i]=d<0.0f ? reach : d;
-    }
-    const float* to=side[room[1]>room[0] ? 1 : 0];
-    const float h=std::sqrt(want[0]*want[0]+want[2]*want[2]);
-    const float flat=h>1e-4f ? h : 1.0f;
-    want[0]=to[0]*flat;want[2]=to[2]*flat;
+    // Too steep to climb from here (now, or once it has come closer): its side picked, once.
+    if(mo.obstUntil && !mo.obstSide && mo.obstTop+kMinAlt-pos[1]>HorizDist(pos,mo.obstAt)*kObstTurnSlope)
+        mo.obstSide=TurnSide(pos,mo.obstAt);
 }
 
 // Keeps `want` off the walls and the ground and under the ceiling. The ground is the highest under it now and
@@ -472,6 +482,21 @@ void Aside(const Jet& j,const float* pos,float toObst,float* want) noexcept {
 void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const Kind& k=KindOf(j);
     const float s=Len(j.m.vel);
+    // A building (or a ridge) Ahead found on its track: a floor too (below), climbed from where it is now (`rise` over
+    // `toObst`); too steep for that, it turns off kAsideAngle from the line to it on its picked side, before the walls
+    // (they still turn it back in).
+    float rise=0.0f,toObst=0.0f;
+    if(j.m.obstUntil) {
+        toObst=HorizDist(pos,j.m.obstAt);
+        rise=j.m.obstTop+kMinAlt-pos[1];
+        float to[3]={j.m.obstAt[0]-pos[0],0.0f,j.m.obstAt[2]-pos[2]};
+        const float h=std::sqrt(want[0]*want[0]+want[2]*want[2]);
+        if(j.m.obstSide && rise>toObst*kObstTurnSlope && Normalize(to)) {
+            float way[3];Turned(to,static_cast<float>(j.m.obstSide),way);
+            const float flat=h>1e-4f ? h : 1.0f;
+            want[0]=way[0]*flat;want[2]=way[2]*flat;
+        }
+    }
     // Walls: turned off from a turn's radius out (more closing fast), never flown into.
     const float r=s*s/(k.maxG*kG);
     for(const auto& w:WorldWalls())TurnOff(w,j,pos,r,want,kEdgeBuffer);
@@ -492,15 +517,7 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float seen=j.m.groundSeen ? j.m.groundY : -1e9f;
     const float lowest=there!=kNoGround ? probe[1]-there : seen;
     float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
-    // A building (or a ridge) Ahead found on its track: a floor too, and climbed from where it is now (`rise` over
-    // `toObst`); too steep for that, it turns off to the clearer side (Aside).
-    float rise=0.0f,toObst=0.0f;
-    if(j.m.obstUntil) {
-        toObst=HorizDist(pos,j.m.obstAt);
-        rise=j.m.obstTop+kMinAlt-pos[1];
-        if(j.m.obstTop>floorY)floorY=j.m.obstTop;
-        if(rise>toObst*kObstTurnSlope)Aside(j,pos,toObst,want);
-    }
+    if(j.m.obstUntil && j.m.obstTop>floorY)floorY=j.m.obstTop;
     float bottom=pos[1];
     if(s>1.0f && j.m.vel[1]<0.0f) {
         const float sinDive=Clamp(-j.m.vel[1]/s,0.0f,1.0f),cosDive=std::sqrt(1.0f-sinDive*sinDive);

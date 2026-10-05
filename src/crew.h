@@ -81,7 +81,7 @@ struct Config {
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
-    bool heliMousePitch=true;       // a heli or rotor craft the player flies: the mouse's Y moves a fore / back lever it leaves (off: the camera's)
+    bool heliMousePitch=true;       // a heli or rotor craft the player flies: the mouse's Y also moves a fore / back lever it leaves (off: the camera's alone)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
     bool playerJetGunSight=true;    // the aircraft the player flies: our gun sight (pipper, lead, boresight), the stock red aim lines hidden
     bool playerJetFlightHud=true;   // ...and its flight HUD: flight path marker, horizon and pitch ladder, heading tape, speed / altitude
