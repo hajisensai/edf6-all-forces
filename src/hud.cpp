@@ -87,7 +87,8 @@ struct Work { ObjRef ref; ULONGLONG seen; bool logged; Data d; };
 Work work[kEntries]{};
 // The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
 // waits in `middle` (its index, kFresh while the draw has not taken it).
-struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue; };
+struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
+                  bool drill; DrillCue drillCue; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -609,6 +610,27 @@ void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
     l.x=(width-l.w)*0.5f;l.y=y0+pad;
 }
 
+// The player's drill tank (DrillCue, the user 2026-10-05: the RPM on the HUD): its RPM and a bar of it, amber while
+// it spins up or down, green at the top; "DRILLING" while it touches something.
+void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const DrillCue& c,Line* lines,int* at) noexcept {
+    if(*at>=kMaxLines || !(c.maxRpm>0.0f))return;
+    Line& l=lines[(*at)++];
+    const float share=Unit(c.rpm/c.maxRpm);
+    const bool top=share>=0.99f;
+    Format(l,L"DRILL %d RPM%ls",static_cast<int>(std::lround(c.rpm)),c.touching && c.rpm>0.0f ? L"    DRILLING" : L"");
+    l.scale=kTitleScale;
+    l.rgba=top ? kGreen : share>0.0f ? kAmber : kCyan;
+    l.w=l.h=0.0f;
+    if(text)MeasureAll(*text,&l,1);
+    const float pad=8.0f*s,gap=5.0f*s,barW=320.0f*s,barH=10.0f*s;
+    const float lineH=l.h>0.0f ? l.h : 24.0f*s,w=(l.w>barW ? l.w : barW)+2.0f*pad,h=pad+lineH+gap+barH+pad;
+    const float x0=(width-w)*0.5f,y0=height*0.80f-h;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,top ? kGreen : kCyan);
+    l.x=(width-l.w)*0.5f;l.y=y0+pad;
+    Bar(drawer,ctx,(width-barW)*0.5f,y0+pad+lineH+gap,barW,barH,share,share,top ? kGreen : kAmber,s);
+}
+
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.
 constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
 void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
@@ -702,6 +724,8 @@ void HudSee(unsigned char* v) noexcept {
         if(HeliFuel(v,&fuel)){d.fuel=fuel;d.leaving=fuel<=0.0f;}
     } else if(IsGroundRobo(v)) {
         d.top=6.0f;Kind(d,"crawler");
+    } else if(IsDrillTank(v)) {
+        d.top=5.0f;Kind(d,"drill");
     } else {
         d.top=4.0f;Kind(d,"npc");
     }
@@ -722,6 +746,7 @@ void HudPublish() noexcept {
     s.count=0;
     s.cockpit=PlayerJetHud(&s.jet);
     s.heli=PlayerHeliCue(&s.heliCue);
+    s.drill=PlayerDrillCue(&s.drillCue);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -772,6 +797,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
