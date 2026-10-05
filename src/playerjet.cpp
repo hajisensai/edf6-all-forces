@@ -1100,6 +1100,7 @@ struct Bailout {
     ObjRef caught; ULONGLONG caughtAt;
     bool open;                       // past the top: the parachute is open (the canopy shows: Chute)
     const char* why;                 // how it ended (state none), for the canopy's CHUTE line
+    bool cutUp;                      // the cut key seen up since the ejection (see EjectTick)
 } bail{};
 
 // The ejection over (state none), `why` kept for the canopy's line (ChuteTick): its one exit. Caught (the player in
@@ -1255,7 +1256,12 @@ void EjectTick() noexcept {
     const unsigned char support=h[kHumanSupport];
     const float clear=GroundClearance(reinterpret_cast<const float*>(h+kPosition));
     const bool landed=ms-bail.at>300 && (support!=0 || (clear!=kNoGround && clear<kChuteLand));
-    const bool cut=ms-bail.at>kChuteCutAfterMs && KeyDown(Cfg().playerJetChuteCutKey);
+    // A press made after the ejection cuts it, not one held through it: the cut key is the flare key (X both), and X
+    // held for flares through a bail-out under a missile cut the parachute 0.5 s in, the catch with it (the log of
+    // 2026-10-05 22:35 has a cut 2.4 s into an ejection, before any catch: a held key is the likely one).
+    const bool cutKey=KeyDown(Cfg().playerJetChuteCutKey);
+    if(!cutKey)bail.cutUp=true;
+    const bool cut=ms-bail.at>kChuteCutAfterMs && bail.cutUp && cutKey;
     if(ms-bail.at>kChuteMostMs || landed || cut || vel[1]>bail.vy+kChuteBoost) {
         const char* const why=landed ? "landed" : cut ? "cut by the player" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long";
         Log("PJET parachute: %s",why);

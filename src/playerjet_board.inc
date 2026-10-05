@@ -632,6 +632,10 @@ bool BoardableNow(const unsigned char* v) noexcept {
     if(team!=jet::kTeamFriend && team!=kTeamVehicle && team!=player.team)return false;
     const jet::Jet* const e=jet::FindJet(v);
     if(e && (e->reap || e->drone.blastAt))return false;
+    // The catch's (Left: it came back for the parachuting player) is boarded in the air at its speed, as the player
+    // jet's catch is: the low-and-slow gate below is for one standing by, and turned the catch's every board press
+    // down (no seat for them: "not aboard yet" under the parachute for 45 s, then handed back to its NPC).
+    if(bail.state==Eject::chute && bail.caught.Is(v) && catchFlight.v==v)return true;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float clear=GroundClearance(pos);
     if(clear==kNoGround || clear>kBoardClear)return false;
