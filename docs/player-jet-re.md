@@ -120,3 +120,10 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
   - 物理步进把自动驾驶中的飞机当成有人驾驶的飞机一样推进（`PlayerJetBodyStep`）。
 - 离玩家 9 m 以内时每帧替玩家按上车键（`PressBoardButton`）。上车后飞机按原来的速度交给玩家，伞降结束。
 - 45 秒没接上就放弃：那架飞机空着飞走、落下，伞降继续。
+
+## 8. 战斗机 HUD 的数据（2026-10-05）
+
+每帧 `Fly` 在 `Stores` 之后调 `Sight`（机头、航迹方向、机炮弹道读自机炮武器、弹着圈、按锁定点差分出目标速度后的提前量）和
+`Threats`（`MissilesHomingAt` 来袭导弹的位置、`jet::LockersOf` 锁定本机的敌机位置），存进 `PJet::sym`，`PlayerJetHud` 随读数发布；
+绘制、原版红线的隐藏和验证见 `docs/hud-re.md` §5、`docs/aim-line-re.md` 第 5 条。全部按 `PJet`（玩家正在驾驶的那架）取数，
+不按机型标记，玩家以后能开的其它插件飞机同样适用；没有机炮的飞机不画瞄准具，悬停（速度 < 5 m/s）时不画速度矢量。

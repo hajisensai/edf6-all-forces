@@ -28,10 +28,14 @@
 // fires the store picked (stores.h: its missiles and bombs, one holder each; the switch key or LB cycles them):
 // the stock fire byte 0x2021 (holder 2) is taken and that store's own trigger pulled (Stores). What it carries
 // weighs on its flight (Burden: thrust, lift and drag) and, a bomb picked, the cockpit shows where it would hit.
+// The fighter HUD's symbols (Sight: the gun sight and the lead; Threats: the missiles and locks on it) are gathered
+// here each frame for hud.cpp FighterHud (docs/hud-re.md §5); the stock gun aim lines are hidden (crew.cpp AimLines).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
 #include "jetaudio.h"
+#include "layout.h"
 #include "memory.h"
+#include "sight.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -42,7 +46,7 @@ namespace {
 using vec::Clamp;using vec::Cross;using vec::Dot;using vec::Len;using vec::Normalize;
 constexpr std::size_t kBody=0x1650;
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
-constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8,kObjFlags=0x18,kCtrlUses=8;
+constexpr std::size_t kObjFlags=0x18,kCtrlUses=8;   // the HP: layout.h
 constexpr unsigned char kObjDeleted=4;
 // The seat's stick block (docs/heli-input-re.md §4): left stick, right stick, the ascend trigger (the heli's
 // collective: analog 0..1 on a pad, 0 or 1 on the keyboard).
@@ -220,6 +224,9 @@ struct PJet {
     const unsigned char* model;  // the bone array the elevons were found in
     unsigned char* elevon[2];
     float elevonBind[2][16],elevonSet[2][16],elevonAt[2];
+    float targetWas[3],targetVel[3];   // the picked store's target last frame, its velocity (TrackTarget)
+    bool targetSeen;
+    PlayerJetSymbols sym;        // the fighter HUD's (Sight, Threats)
 };
 constexpr int kMaxJets=16;
 PJet jets[kMaxJets]{};
@@ -874,6 +881,92 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     if(j.bomb && j.phase==Phase::air)j.hasImpact=Impact(j,pos,j.impact);
 }
 
+// The gun sight (the user, 2026-10-05: "the stock gun's two red lines: delete them, make our own"; crew.cpp AimLines
+// hides them, ini PlayerJetGunSight). The guns (seat 0's holders 0 and 1, the two the primary fires) fire along the
+// body's nose; a round flies at its weapon's AmmoSpeed (+0x894, m a frame) for AmmoAlive frames (+0x898), falling at its
+// gravity factor (+0x8E0) times kRoundGravity (the jet guns' is 0: a straight line), and it does not take the
+// aircraft's velocity (their AmmoOwnerMove is the stock gatling's 0, pylib/vcobjects.py jet_guns; docs/stores-re.md:
+// a round's velocity is its direction x AmmoSpeed + the shooter's x AmmoOwnerMove). So a round fired now is at
+// sight::RoundAt(pos, nose, speed, drop, t): the pipper is that point at the time of flight to the picked store's
+// target, led (sight::Intercept with the target's velocity: put the pipper on the lead mark and the rounds meet it), or
+// at kPipperRange (or the rounds' reach, the nearer) with none. The target's velocity is measured off its lock point
+// frame to frame, smoothed over kTargetTau; a jump faster than kTargetMost is another target (no velocity yet).
+constexpr float kRoundGravity=14.7f;   // m/s^2: the world's (heli.cpp kGravity, measured)
+constexpr float kPipperRange=600.0f,kTargetTau=0.25f,kTargetMost=600.0f,kMovingSpeed=5.0f;
+constexpr std::uint64_t kGunHolders=2;
+
+// The guns' round: speed (m/s), fall (m/s^2), life (s); false with no gun (a missile in holders 0 and 1, or none).
+bool GunRound(unsigned char* v,float* speed,float* drop,float* life) noexcept {
+    if(SeatCount(v)==0)return false;
+    const auto seat=SeatAt(v,0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(count>8 || !Readable(holders,count*8))return false;
+    *speed=0.0f;
+    for(std::uint64_t i=0;i<count && i<kGunHolders;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
+        if(!Readable(w,kWeaponAmmo+4) || At<std::int32_t>(w,kWeaponLockon)==kHoming)continue;
+        const float s=At<float>(w,kWeaponSpeed)*60.0f,g=At<float>(w,kWeaponGravity);
+        const std::int32_t alive=At<std::int32_t>(w,kWeaponAlive);
+        if(!std::isfinite(s) || s<=*speed || alive<=0)continue;
+        *speed=s;*drop=std::isfinite(g) && g>0.0f ? g*kRoundGravity : 0.0f;*life=static_cast<float>(alive)/60.0f;
+    }
+    return *speed>1.0f;
+}
+
+// The picked store's target's velocity (see kTargetTau), off its lock point (Stores: j.lock, j.lockAt).
+void TrackTarget(PJet& j,float dt) noexcept {
+    if(!j.lock || !(dt>0.0f)){j.targetSeen=false;return;}
+    float v[3];
+    for(int i=0;i<3;++i)v[i]=(j.lockAt[i]-j.targetWas[i])/dt;
+    if(!j.targetSeen || !(Len(v)<=kTargetMost))std::memset(j.targetVel,0,12);
+    else {
+        const float k=1.0f-std::exp(-dt/kTargetTau);
+        for(int i=0;i<3;++i)j.targetVel[i]+=(v[i]-j.targetVel[i])*k;
+    }
+    std::memcpy(j.targetWas,j.lockAt,12);j.targetSeen=true;
+}
+
+// The sight's symbols (PlayerJetSymbols) for this frame.
+void Sight(PJet& j,unsigned char* v,const float* pos,float dt) noexcept {
+    PlayerJetSymbols& y=j.sym;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    std::memcpy(y.pos,pos,12);
+    y.nose[0]=m[8];y.nose[1]=m[9];y.nose[2]=m[10];
+    if(!Normalize(y.nose)){y.nose[0]=0.0f;y.nose[1]=0.0f;y.nose[2]=1.0f;}
+    std::memcpy(y.dir,j.vel,12);
+    y.moving=Len(j.vel)>kMovingSpeed && Normalize(y.dir);
+    TrackTarget(j,dt);
+    float speed=0.0f,drop=0.0f,life=0.0f;
+    y.gun=GunRound(v,&speed,&drop,&life);
+    y.lead=y.leadInRange=false;
+    if(!y.gun)return;
+    y.gunRange=speed*life;
+    float t=(kPipperRange<y.gunRange ? kPipperRange : y.gunRange)/speed;
+    if(j.lock) {
+        const float d[3]={j.lockAt[0]-pos[0],j.lockAt[1]-pos[1],j.lockAt[2]-pos[2]};
+        const float hit=sight::Intercept(d,j.targetVel,speed);
+        if(hit>0.0f) {
+            t=hit;y.lead=true;y.leadInRange=hit<=life;y.leadRange=speed*hit;
+            for(int i=0;i<3;++i)y.leadAt[i]=j.lockAt[i]+j.targetVel[i]*hit;
+        }
+    }
+    sight::RoundAt(pos,y.nose,speed,drop,t,y.pipper);
+}
+
+// What threatens it, for the HUD's threat ring (the user, 2026-10-05: "locked on, it should show the direction"): the
+// missiles coming for it (MissileHoming's, as the MISSILE! warning), then the enemy jets locking on to it (LockingOn's).
+void Threats(PJet& j,const unsigned char* v,const float* pos) noexcept {
+    PlayerJetSymbols& y=j.sym;
+    int n=MissilesHomingAt(pos,kThreatRadius,y.threatAt,kMostThreats);
+    if(n>kMostThreats)n=kMostThreats;
+    for(int i=0;i<n;++i)y.threatKind[i]=2;
+    const int locks=jet::LockersOf(v,y.threatAt+n,kMostThreats-n);
+    for(int i=n;i<n+locks;++i)y.threatKind[i]=1;
+    y.threats=n+locks;
+}
+
 // The caught jet's speed for its boarding (see kCatchAfterMs).
 // The catch's jet flying in (see kCatchFrom): the jet, where it makes for (under the parachuting player, led by their
 // drift), its speed there.
@@ -1159,6 +1252,8 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     SmoothStick(j,s,dt);
     j.keys=s.keys;
     Stores(j,v,s,pos);
+    Sight(j,v,pos,dt);
+    Threats(j,v,pos);
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
@@ -1277,6 +1372,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             for(int i=0;i<j.stores && i<kMostStores;++i){r.storeName[i]=j.storeName[i];r.storeRounds[i]=j.storeRounds[i];}
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
+            r.sym=j.sym;
             *out=r;
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}
@@ -1287,6 +1383,10 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
 bool IsPlayerJet(const void* vehicle) noexcept {
     __try { return KindOf(static_cast<const unsigned char*>(vehicle))!=nullptr; }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool PlayerJetOwnSight(const void* vehicle) noexcept {
+    return flyOk && Cfg().enabled && Cfg().playerJet && Cfg().playerJetGunSight && IsPlayerJet(vehicle);
 }
 
 // The catch jet's frame turned away before its autopilot (debug, once a reason): its catch jet fell like a stone and

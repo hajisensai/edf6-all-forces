@@ -235,16 +235,20 @@ void SetLine(State& st,unsigned char* line,Rider rider,const float* at) noexcept
 
 // Every seat's guns: no line while an NPC holds the seat, or while it is empty in a vehicle an NPC
 // drives (the 410's door guns, aimed by the plugin with nobody in them); the stock line while the player
-// holds it. Only for a vehicle with a state (Crew made it this frame).
+// holds it, but in an aircraft the player-jet flight flies, whose HUD draws a gun sight of its own (playerjet.cpp
+// PlayerJetOwnSight: the user, 2026-10-05, "delete the stock gun's two red lines"): hidden as an NPC's.
+// Only for a vehicle with a state (Crew made it this frame).
 void AimLines(unsigned char* vehicle) noexcept {
     State* const st=FindState(vehicle);
     if(!st)return;
     const unsigned count=SeatCount(vehicle);
     const bool npcDriven=count>0 && SeatRider(SeatAt(vehicle,0))==Rider::dummy;
+    const bool ownSight=PlayerJetOwnSight(vehicle);
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
         Rider rider=SeatRider(seat);
         if(rider==Rider::none && npcDriven)rider=Rider::dummy;
+        if(rider==Rider::player && ownSight)rider=Rider::dummy;   // our sight instead: the line hidden as an NPC's
         if(rider!=Rider::dummy && rider!=Rider::player)continue;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
