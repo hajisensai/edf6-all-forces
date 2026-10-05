@@ -28,7 +28,6 @@ constexpr std::size_t kParts=0x1320,kBodyPart=0x1530;
 const wchar_t* const kFuselageBones[]={L"bomber501",L"bomber401",L"body"};
 constexpr std::size_t kCeiling=0x20B2998,kCeilingY=0x3C;
 constexpr float kUnderProbe=600.0f,kGroundProbe=3000.0f;
-constexpr std::size_t kInstBoneCount=0x20,kBoneStride=0x110;
 
 // The marks (testrange/gen.py JETS, tools/make_jets.py, tools/make_sub.py write them into the SGOs):
 // jets 7001-7099 (jet.cpp kKinds and kCarrierMarks name each), the submarine carrier 7101, the player

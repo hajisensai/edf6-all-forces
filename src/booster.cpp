@@ -231,22 +231,37 @@ namespace {
 // A jet's exhaust (the user, 2026-10-05: the jets have no flame): the same Booster on each of its nozzles (JetNozzles:
 // by its mark, in its model's frame: x right, y up, z forward), the flame leaving backwards (its matrix: the model's
 // rows turned pi about y, as the carrier's nozzles), `size` its length and width, `intensity` how strongly it burns.
-// The model's frame is its root bone's world matrix as drawn (kModelRoot; the vehicle's own matrix if the model has
-// none): the nozzles were put on the vehicle's matrix, and the player fighter's two flames showed above and outside
-// its nozzles (the user's picture, 2026-10-05): the model is not drawn on the vehicle's origin. FLAME logs the gap.
-const wchar_t* const kModelRoot=L"mdl";
+// The model's frame is its mesh bone's world matrix as drawn (ModelBone; the vehicle's own matrix if none): on the
+// vehicle's matrix the player fighter's two flames showed above and outside its nozzles, and on the root bone ("mdl")
+// both sat in one dot with no direction (the user's pictures, 2026-10-05): the root's record is not kept up as drawn.
+// The mesh bone (the root's first child, its local the identity) is the model's frame less the root's bind lift
+// (kRootLift: mdl's local, the nozzles' heights are from the model's origin). FLAME logs the frame once per jet.
+constexpr float kRootLift=0.835f;
+const unsigned char* ModelBone(const unsigned char* v) noexcept {
+    const unsigned char* inst=v+kModelInst506;
+    if(!Readable(inst,kInstBones506+8))return nullptr;
+    const auto bones=At<const unsigned char*>(inst,kInstBones506);
+    const auto count=At<std::int32_t>(inst,kInstBoneCount);
+    if(!bones || count<2 || !Readable(bones+kBoneStride,kBoneStride))return nullptr;
+    const unsigned char* rec=bones+kBoneStride;   // bone 1: the mesh bone under the root
+    const float* m=reinterpret_cast<const float*>(rec+kBoneWorld506);
+    const float l=m[0]*m[0]+m[1]*m[1]+m[2]*m[2];
+    return l>0.01f ? rec : nullptr;   // a matrix the game keeps up (the root's was none)
+}
 void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* size,float intensity,ULONGLONG ms) noexcept {
     Carrier* const c=Find(v,ms);
     if(!c)return;
-    const bool fresh=c->seen!=ms && !c->n[0].obj;
+    const bool fresh=!c->n[0].obj && !c->n[0].ctrl;   // no flame made for it yet
     c->seen=ms;
     float b[16];
-    const unsigned char* root=BoneRecord506(v+kModelInst506,kModelRoot);
-    std::memcpy(b,root && Readable(root+kBoneWorld506,64) ? root+kBoneWorld506 : v+kMatrix,64);
+    const unsigned char* root=ModelBone(v);
+    std::memcpy(b,root ? root+kBoneWorld506 : v+kMatrix,64);
     if(fresh && Cfg().debug) {
         const float* p=reinterpret_cast<const float*>(v+kPosition);
-        Log("FLAME v=%p model root %s: (%.2f,%.2f,%.2f) from the vehicle's origin",v,root ? "found" : "missing (vehicle matrix)",
-            b[12]-p[0],b[13]-p[1],b[14]-p[2]);
+        const float* vm=reinterpret_cast<const float*>(v+kMatrix);
+        Log("FLAME v=%p bone %s at (%.2f,%.2f,%.2f) from the vehicle's origin; its rows x(%.2f,%.2f,%.2f) y(%.2f,%.2f,%.2f) "
+            "z(%.2f,%.2f,%.2f); the vehicle's z (%.2f,%.2f,%.2f)",v,root ? "found" : "missing (vehicle matrix)",b[12]-p[0],b[13]-p[1],
+            b[14]-p[2],b[0],b[1],b[2],b[4],b[5],b[6],b[8],b[9],b[10],vm[8],vm[9],vm[10]);
     }
     for(int r=0;r<3;++r) {
         float* const row=b+r*4;
@@ -255,7 +270,7 @@ void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* siz
     }
     for(int i=0;i<n && i<kNozzles;++i) {
         Nozzle& z=c->n[i];
-        const float* t=at[i];
+        const float t[3]={at[i][0],at[i][1]-(root ? kRootLift : 0.0f),at[i][2]};
         for(int k=0;k<3;++k) {
             z.m[k]=-b[k];z.m[4+k]=b[4+k];z.m[8+k]=-b[8+k];
             z.m[12+k]=b[12+k]+t[0]*b[k]+t[1]*b[4+k]+t[2]*b[8+k];

@@ -40,7 +40,7 @@ const Sig kBaySigs[]={
 bool bayOk=false;        // the spawn functions matched (InstallJets) and the bay's (kBaySigs)
 
 // A bomber's model -> its body: the mesh bone that names it (bone records as jet_flight.cpp's kInstBones says).
-constexpr std::size_t kInstBones=0x10,kInstBoneCount=0x20,kBoneStride=0x110;
+constexpr std::size_t kInstBones=0x10;   // the bone count and record size: body506.h
 struct BomberModel { const wchar_t* bone; JetBody body; };
 const BomberModel kBomberModels[]={{L"bomber501_2",JetBody::bomber501_2},{L"bomber401",JetBody::bomber401}};
 

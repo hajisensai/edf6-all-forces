@@ -63,7 +63,7 @@ constexpr float kReact=1.0f;
 // count at +kInstBoneCount); local = Rx(theta) x bind (row vectors), theta > 0 = trailing edge up. Both up
 // pitch the nose up, opposite they roll: kElevonMax at the full pitch rate (maxG) or roll rate, moved at
 // most kElevonRate. The engine makes world = local x parent world each frame.
-constexpr std::size_t kModelInst=0xEE0,kInstBones=0x10,kInstBoneCount=0x20,kBoneStride=0x110,kBoneAuto=0x8,kBoneLocal=0x70;
+constexpr std::size_t kModelInst=0xEE0,kInstBones=0x10,kBoneAuto=0x8,kBoneLocal=0x70;   // count, stride: body506.h
 // (2026-10-05, the user: the control surfaces should visibly move: kElevonGain times the turn's share of its most, up to
 // kElevonMax ~29 deg, kElevonRate fast: an ordinary turn shows them deflected, not a degree or two.)
 constexpr float kElevonMax=0.5f,kElevonRate=4.0f,kElevonGain=3.0f;

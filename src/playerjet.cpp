@@ -932,11 +932,17 @@ void EjectTick() noexcept {
     if(bail.state==Eject::none)return;
     unsigned char* const h=PlayerHuman();
     const ULONGLONG ms=GameMs();
-    if(!h || h[kDead] || At<std::int32_t>(h,kHumanAttach)!=0){bail.state=Eject::none;return;}
+    if(!h || h[kDead] || At<std::int32_t>(h,kHumanAttach)!=0) {
+        // It used to end here without a word: the parachute and the catch stopped unseen (2026-10-05: "no plane
+        // came for me", no line after the catch's).
+        Log("PJET ejection over: %s (state %d)",!h ? "no player found" : h[kDead] ? "the player died" : "the player attached/ragdolled",
+            static_cast<int>(bail.state));
+        bail.state=Eject::none;return;
+    }
     float* const vel=reinterpret_cast<float*>(h+kHumanVel);
     if(bail.state==Eject::pending) {
         if(At<std::uint32_t>(h,kHumanFlags)&kRiding) {   // the stock exit not through yet
-            if(ms-bail.at>kEjectWaitMs)bail.state=Eject::none;
+            if(ms-bail.at>kEjectWaitMs){bail.state=Eject::none;Log("PJET ejection over: the player never left the seat");}
             return;
         }
         Put<float>(h,kJumpSpeed,kEjectUp);h[kJumpFlag]=1;
@@ -1184,18 +1190,33 @@ bool IsPlayerJet(const void* vehicle) noexcept {
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+// The catch jet's frame turned away before its autopilot (debug, once a reason): its catch jet fell like a stone and
+// no autopilot line came (2026-10-05 12:56).
+void CatchWhy(const unsigned char* v,int why) noexcept {
+    static const void* saidFor=nullptr;
+    static int said=-1;
+    if(v!=catchFlight.v || (v==saidFor && why==said))return;
+    saidFor=v;said=why;
+    static const char* const kWhy[]={"no kind (mark %.0f, body %d)","dead","no table entry","to its flight"};
+    char text[96];
+    std::snprintf(text,sizeof(text),kWhy[why],BodyMark(v),static_cast<int>(BodyOf(v)));
+    Log("PJET catch jet %p frame: %s",v,text);
+}
+
 void PlayerJetFrame(unsigned char* v) noexcept {
     if(!flyOk || !Cfg().playerJet)return;
     const Kind* kind=KindOf(v);
-    if(!kind)return;
+    if(!kind){CatchWhy(v,0);return;}
     if(v[kDead]) {   // destroyed with the player in it: out they go (Leave)
         if(PJet* j=Find(v);j && j->driven)Leave(*j,v,j->clear,true,"destroyed");
+        CatchWhy(v,1);
         return;
     }
     const ULONGLONG ms=GameMs();
     PJet* j=Find(v);
     if(!j)j=Make(v,kind);
-    if(!j)return;
+    if(!j){CatchWhy(v,2);return;}
+    CatchWhy(v,3);
     if(!j->bodyFixed){FixBodyPart506(v,"PJET");j->bodyFixed=true;}   // looked up once: logged when missing
     j->frame=GameFrame();
     Fly(*j,v,ms);
