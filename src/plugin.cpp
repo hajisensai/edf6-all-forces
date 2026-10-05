@@ -144,6 +144,11 @@ void Validate(Config& n) noexcept {
     Fix("DrillHeatSec",n.drillHeatSec,1.0f,600.0f);
     Fix("DrillCoolSec",n.drillCoolSec,1.0f,600.0f);
     Fix("DrillResumeHeat",n.drillResumeHeat,0.0f,0.95f);
+    n.highCamKey=static_cast<int>(FixInt("HighCamKey",n.highCamKey,0,254));
+    n.highCamButton=static_cast<int>(FixInt("HighCamButton",n.highCamButton,0,255));
+    Fix("HighCamHeight",n.highCamHeight,10.0f,200.0f);
+    Fix("HighCamBack",n.highCamBack,0.0f,200.0f);
+    Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -248,6 +253,12 @@ void LoadConfig() noexcept {
     n.drillHeatSec=ReadFloat(L"DrillHeatSec",n.drillHeatSec);
     n.drillCoolSec=ReadFloat(L"DrillCoolSec",n.drillCoolSec);
     n.drillResumeHeat=ReadFloat(L"DrillResumeHeat",n.drillResumeHeat);
+    n.highCam=ReadBool(L"HighCam",n.highCam);
+    n.highCamKey=ReadInt(L"HighCamKey",static_cast<DWORD>(n.highCamKey));
+    n.highCamButton=ReadInt(L"HighCamButton",static_cast<DWORD>(n.highCamButton));
+    n.highCamHeight=ReadFloat(L"HighCamHeight",n.highCamHeight);
+    n.highCamBack=ReadFloat(L"HighCamBack",n.highCamBack);
+    n.highCamPitch=ReadFloat(L"HighCamPitch",n.highCamPitch);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     Validate(n);
     IgnoreRetired();
@@ -273,6 +284,8 @@ void LoadConfig() noexcept {
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
         n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
+    Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
+        n.highCamBack,n.highCamPitch);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);

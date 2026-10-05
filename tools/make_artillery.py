@@ -39,6 +39,9 @@ MODEL_MDB = 'v603_flak.mdb'   # the host's own model file name, inside the archi
 STOCK_GUNS = ('V603_FLAK_GUN01_L.SGO', 'V603_FLAK_GUN01_R.SGO')
 MARK_GROUND = 7302.0   # EDF6AutoTurret's ground-attack mark (autoturret/src/turret.h kMarkGround)
 SHELL_MODEL = 'app:/WEAPON/bullet_grenade.rab'
+# The camera (game_object_camera_setting [0] look-at / [1] eye, pylib/vcobjects.py camera_view): the Kepler's level
+# (0, 4, 0) / (0, 4, -15.5) raised over the turret, looking down onto the ground ahead.
+CAMERA = ([0.0, 4.5, 4.0], [0.0, 9.0, -18.0])
 # The calibre: the twin tank's muzzle mouth, inscribed diameter (artillery_model.Barrel.bore, 0.350 m; build() checks
 # the model still has it). The shell (bullet_grenade.rab: 0.063 m across, 0.139 m long at AmmoSize 1, scaled
 # uniformly; the stock Barga / E551 DLC cannons use it at 5) is 90 % of the bore across, and its contact sphere
@@ -120,6 +123,8 @@ def vehicle_sgo(game: vc.Game, own_model: bool | None = None) -> bytes:
         raise ValueError(f'{VEHICLE.stock}.SGO: {len(guns)} guns, the artillery has {len(VEHICLE.weapons)}')
     for entry, path in zip(guns, VEHICLE.weapons):
         entry.items[0] = path
+    cam = r.get('game_object_camera_setting')
+    cam.items[0], cam.items[1] = _node(CAMERA[0]), _node(CAMERA[1])
     r.set('game_object_durability', VEHICLE.durability)
     return dsgo.write(doc)
 
@@ -134,6 +139,9 @@ def check(files: dict[str, bytes]) -> None:
     want = [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB] if own else ['app:/Object/v603_flak.mrab', MODEL_MDB]
     assert v['animation_model'][0] == want, v['animation_model'][0]
     assert [w[0] for w in v['vehicle_setup'][2]] == list(VEHICLE.weapons)
+    cam = v['game_object_camera_setting']
+    assert [cam[0], cam[1]] == [list(CAMERA[0]), list(CAMERA[1])], cam
+    vc.check_artillery_camera(CAMERA)
     if own:
         md = mdb_read(next(f for f in rab_read(files[f'OBJECT/{MODEL_FILE}']).files
                            if f.name.lower() == MODEL_MDB.lower()).data)
