@@ -288,9 +288,6 @@ JetBody BomberBody(const unsigned char* inst) noexcept;
 // spin to set (false: leave the stock step's).
 enum class PluginBody { none, jet, sub, playerJet };
 PluginBody BodyOf(const void* vehicle) noexcept;
-// body506.cpp: the player jet's place before the stock input (true: over the ceiling, CeilingLift after it)
-bool CeilingHold(unsigned char* vehicle,float* at) noexcept;
-void CeilingLift(unsigned char* vehicle,const float* at) noexcept;   // its height back if the ceiling clamp took it
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
 bool Body506Ok() noexcept;                         // the physics hook is in

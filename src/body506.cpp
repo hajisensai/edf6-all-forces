@@ -168,44 +168,18 @@ float GroundClearance(const float* p) noexcept {
     return MapRay(top,p,hit)>=0.0f ? p[1]-hit[1] : kNoGround;
 }
 
-// The player jet over the map's ceiling (the user, 2026-10-05: "who put in this 300 m limit?"). The heli input (slot
-// 55, 0x6543A0) sets a body over the ceiling (*(*(image+0x20B2998)+0x3C), 300 m on this map) back down to it every
-// frame, its position only (docs/jet-model-re.md, slot 55's clamp). The plugin's input hook keeps the player jet's
-// height round it: CeilingHold reads the body's place before the stock input, CeilingLift puts the height back when
-// the clamp took it down (the X/Z area clamp is already off for it: jet.cpp kAreaInset). The NPC jets keep under the
-// ceiling on their own (jet_flight.cpp Guard).
-constexpr unsigned kGetPosition=0x11B15B0,kSetPosition=0x11B1A00;
-const unsigned char kGetPositionSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x8B,0x91,0xF0,0x00,0x00,
-                                       0x00,0x48,0x8B,0x48,0x58,0x48,0x8B,0x41,0x20,0x48,0x83,0xC1,0x20,0xFF,0x90,0x80,
-                                       0x00,0x00,0x00,0x48,0x83,0xC0,0x30};
-const unsigned char kSetPositionSig[]={0x40,0x55,0x48,0x83,0xEC,0x70,0x48,0x8D,0x6C,0x24,0x40,0x48,0x83,0xE5,0xE0,0x48};
-int ceilingOk=-1;   // -1 not checked yet
-
-bool CeilingHold(unsigned char* v,float* at) noexcept {
-    __try {
-        if(ceilingOk<0)ceilingOk=Matches(kGetPosition,kGetPositionSig,sizeof(kGetPositionSig)) &&
-                                 Matches(kSetPosition,kSetPositionSig,sizeof(kSetPositionSig));
-        if(!ceilingOk || BodyOf(v)!=PluginBody::playerJet)return false;
-        void* const body=At<void*>(v,kBody);
-        if(!body)return false;
-        const float* p=reinterpret_cast<const float*(*)(void*)>(image+kGetPosition)(body);
-        if(!p)return false;
-        std::memcpy(at,p,16);
-        return at[1]>CeilingY()-1.0f;   // under the ceiling the clamp never acts
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
-}
-
-void CeilingLift(unsigned char* v,const float* at) noexcept {
-    __try {
-        void* const body=At<void*>(v,kBody);
-        if(!body)return;
-        const float* p=reinterpret_cast<const float*(*)(void*)>(image+kGetPosition)(body);
-        if(!p || p[1]>=at[1]-0.01f)return;   // not taken down
-        alignas(16) const float q[4]={p[0],at[1],p[2],p[3]};
-        reinterpret_cast<void(*)(void*,const float*)>(image+kSetPosition)(body,q);
-        Put<float>(v,kPosition+4,at[1]);
-    } __except(EXCEPTION_EXECUTE_HANDLER){}
-}
+// No ceiling (the user, 2026-10-05: "who put in this 300 m limit? just delete the stock function that holds the
+// height down"). The heli input (slot 55, 0x6543A0) sets every helicopter-class body over the map's ceiling
+// (*(*(image+0x20B2998)+0x3C), 300 m on this map) back down to it every frame: at 0x654463 it compares the body's
+// height with the ceiling and `jbe` (0x65446C) skips the clamp only when under it. That jump made unconditional
+// (EB), the clamp never runs: the player's jets, the stock and called helis climb as high as they like. The map's
+// X/Z area clamp right after it is left as it is (the plugin's jets widen it themselves: jet.cpp kAreaInset).
+// CeilingY() still reads the value: the NPC jets keep under it on their own (jet_flight.cpp Guard).
+constexpr unsigned kCeilingClamp=0x654463;
+const unsigned char kCeilingClampCode[]={0xF3,0x0F,0x10,0x44,0x24,0x24,0x0F,0x2F,0xC6,0x76,0x0A,0xF3,0x0F,0x11,0x74,0x24,0x24,
+                                         0xB3,0x01,0xEB,0xEB};
+constexpr std::size_t kCeilingJump=9;   // the jbe's opcode within it
+bool ceilingOff=false;
 
 float CeilingY() noexcept {
     const auto p=At<const unsigned char*>(image,kCeiling);
@@ -299,7 +273,11 @@ bool InstallBody506() noexcept {
         // The death goes through the 506's own message slot (hooked or not) to the stock handler.
         dieOk=messageOk && Matches(kVehicleDie,kDieSig,sizeof(kDieSig));
         bodyPartOk=Matches(kFindPart,kFindPartSig,sizeof(kFindPartSig));
-        Log("HOOK body506 physics=%d messages=%d die=%d bodyPart=%d",physicsOk,messageOk,dieOk,bodyPartOk);
+        unsigned char noClamp[sizeof(kCeilingClampCode)];
+        std::memcpy(noClamp,kCeilingClampCode,sizeof(noClamp));
+        noClamp[kCeilingJump]=0xEB;
+        ceilingOff=edf::PatchCode(image+kCeilingClamp,kCeilingClampCode,noClamp,sizeof(noClamp));
+        Log("HOOK body506 physics=%d messages=%d die=%d bodyPart=%d ceilingOff=%d",physicsOk,messageOk,dieOk,bodyPartOk,ceilingOff);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

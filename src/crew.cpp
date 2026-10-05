@@ -585,10 +585,7 @@ void FrameTick() noexcept {
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
     LARGE_INTEGER t0,t1,t2;QueryPerformanceCounter(&t0);
-    alignas(16) float held[4];
-    const bool overCeiling=Cfg().enabled && CeilingHold(static_cast<unsigned char*>(vehicle),held);
     nextInput[I](vehicle,hasInput,a3,a4);
-    if(overCeiling)CeilingLift(static_cast<unsigned char*>(vehicle),held);   // no ceiling for the player jet
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
     auto v=static_cast<unsigned char*>(vehicle);

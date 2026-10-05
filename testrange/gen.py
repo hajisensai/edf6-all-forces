@@ -241,7 +241,8 @@ GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to 
 
 
 def grand_battle(plan: Plan) -> Plan:
-    plan.vehicles = {'edf6tr_pjet_fighter_mission': 1, 'vehicle403_tank_mission': 1}
+    # Parked jets the player can board, several of each (the user, 2026-10-05: more planes on the ground to get in).
+    plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3, 'vehicle403_tank_mission': 1}
     plan.friends = {'edf6tr_jet_fighter_mission': 2, 'edf6tr_jet_interceptor_mission': 1, 'edf6tr_jet_strike_mission': 2,
                     'vehicle403_tank_mission': 3}
     plan.waves.enabled = False
@@ -348,8 +349,37 @@ def spots_for(plan: Plan, lay: Layout) -> list[tuple[str, bool, rmpa.Point]]:
         raise ValueError(f'大型载具太多：这张地图远处只有 {len(lay.far_points)} 个空位')
     far = lay.far_points[::-1][:len(big)]
     lay.far_points = [p for p in lay.far_points if p not in far]
-    return ([(s, npc, p) for (s, npc), p in zip(small, lay.vehicle_points)] +
-            [(s, npc, p) for (s, npc), p in zip(big, far)])
+    return [(s, npc, p) for (s, npc), p in zip(small, spaced(small, lay.vehicle_points))] + \
+        [(s, npc, p) for (s, npc), p in zip(big, far)]
+
+
+# Parked jets stand at least JET_GAP m apart (the fighter is 16 m across, the strike jet's wings wider): the
+# vehicle spots are 15 m apart round the player, and several parked jets side by side would lock wings at the start
+# (the grand battle parks seven, the user, 2026-10-05). The other vehicles take the spots left, nearest first.
+JET_GAP = 30.0
+
+
+def _apart(a: rmpa.Point, b: rmpa.Point) -> float:
+    return ((a.pos[0] - b.pos[0]) ** 2 + (a.pos[2] - b.pos[2]) ** 2) ** 0.5
+
+
+def spaced(chosen: list[tuple[str, bool]], points: list[rmpa.Point]) -> list[rmpa.Point]:
+    """A point for each of `chosen` (in order): each jet the nearest one JET_GAP from every jet's before it (else the
+    nearest left), the rest the nearest left."""
+    left = list(points)
+    jets: list[rmpa.Point] = []
+    out: list[rmpa.Point | None] = [None] * len(chosen)
+    for i, (sgo, _) in enumerate(chosen):
+        if sgo not in JETS:
+            continue
+        p = next((q for q in left if all(_apart(q, j) >= JET_GAP for j in jets)), left[0])
+        left.remove(p)
+        jets.append(p)
+        out[i] = p
+    for i, p in enumerate(out):
+        if p is None:
+            out[i] = left.pop(0)
+    return out
 
 
 def target_spots(lay: Layout) -> list[rmpa.Point]:
