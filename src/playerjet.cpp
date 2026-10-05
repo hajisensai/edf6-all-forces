@@ -30,6 +30,7 @@
 // weighs on its flight (Burden: thrust, lift and drag) and, a bomb picked, the cockpit shows where it would hit.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "gear.h"
 #include "jetaudio.h"
 #include "memory.h"
 #include "vecmath.h"
@@ -88,6 +89,7 @@ constexpr float kTaxiTurn=0.8f;        // rad/s: the slowest taxi turn rate (the
 constexpr float kTaxiFull=25.0f;       // ...from this ground speed on (rate times kTaxiFull / speed)
 constexpr float kGroundBrake=12.0f;    // m/s^2 rolling with the throttle closed
 constexpr float kParkSpeed=0.5f;       // below this, throttle closed: parked (the stock code holds it)
+constexpr float kBellyBrake=10.0f;     // m/s^2 sliding on its belly (gear.cpp: landed with the gear not down)
 // The plane's own up (PJet::up), carried along its path: the roll rotates it about the nose at kRollRate; let go it
 // returns to the bank the turn stick asks for (kTurnBank at full, a coordinated turn: Air), at most kLevelRate, unless the pitch stick is held
 // (kLevelPull: pulled through the top it loops, as in Ace Combat) or it points
@@ -458,11 +460,12 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     float speed=Dot(j.vel,nose);
     if(speed<0.0f)speed=0.0f;
     const float want=j.throttle*k.top;
-    if(j.throttle<0.02f)speed-=kGroundBrake*dt;
+    const bool belly=!GearDown(v);   // on its belly (gear.cpp): it slides to a stop, no thrust, no steering, no takeoff
+    if(j.throttle<0.02f || belly)speed-=(belly ? kBellyBrake : kGroundBrake)*dt;
     else speed+=Clamp(want-speed,-k.brake*dt,k.thrust*dt/(j.burden.mass>1.0f ? j.burden.mass : 1.0f));
     if(speed<0.0f)speed=0.0f;
     // The nose wheel: kTaxiTurn at taxi speeds, less from kTaxiFull on.
-    const float rate=kTaxiTurn*(speed>kTaxiFull ? kTaxiFull/speed : 1.0f)*(speed>0.5f || s.throttle>0.0f ? 1.0f : 0.0f);
+    const float rate=belly ? 0.0f : kTaxiTurn*(speed>kTaxiFull ? kTaxiFull/speed : 1.0f)*(speed>0.5f || s.throttle>0.0f ? 1.0f : 0.0f);
     const float a=-s.turn*rate*dt,co=std::cos(a),si=std::sin(a);
     const float turned[3]={nose[0]*co+nose[2]*si,0.0f,nose[2]*co-nose[0]*si};
     const float vy=j.measured[1]<0.0f ? (j.measured[1]>-30.0f ? j.measured[1] : -30.0f) : 0.0f;
@@ -470,7 +473,7 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     j.vel[1]=vy;
     const float up[3]={0.0f,1.0f,0.0f};
     BodyAttitude(v,turned,up,kAttGain,k.roll,j.omega);
-    if(speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
+    if(!belly && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
         j.phase=Phase::air;j.vel[1]=kLiftOffClimb;j.hasAim=false;
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
         return;
@@ -483,6 +486,14 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     j.phase=speed<kParkSpeed && j.throttle<0.02f ? Phase::parked : Phase::rolling;
 }
 
+// A landing with the gear not down and locked (gear.cpp): a crash (Crash's damage for its sink and speed), then it slides
+// on its belly to a stop (Ground) until the gear is down.
+void BellyLanding(PJet& j,unsigned char* v,float sink,float speed,ULONGLONG ms) noexcept {
+    Log("PJET v=%p belly landing at %.0f m/s, sink %.1f m/s: the gear is not down",v,speed,sink);
+    Crash(j,v,sink,speed,false,ms,nullptr);
+    j.phase=Phase::rolling;j.vel[1]=0.0f;
+}
+
 // Touching the ground in the air: a landing (it rolls on) or a crash. Touching the water is always a crash.
 void Touch(PJet& j,unsigned char* v,float speed,bool water,ULONGLONG ms) noexcept {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -490,6 +501,7 @@ void Touch(PJet& j,unsigned char* v,float speed,bool water,ULONGLONG ms) noexcep
     const float dirY=speed>1.0f ? j.vel[1]/speed : 0.0f;
     const bool banked=m[5]<kLandBank;
     if(!water && sink<=kLandSink && !banked && dirY>=kLandNose && speed<=j.kind->landMax) {
+        if(!GearDown(v)){BellyLanding(j,v,sink,speed,ms);return;}
         j.phase=Phase::rolling;j.vel[1]=0.0f;
         Log("PJET v=%p landed at %.0f m/s, sink %.1f m/s",v,speed,sink);
         return;
@@ -701,7 +713,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     const float g=pitch/kG,top2=k.top*k.top;
     j.load=g;
     const float thrust=k.thrust*want*want/top2/mass;   // the engine's force over a heavier jet
-    const float slow=k.corner/speed,drag=(k.thrust*speed*speed/top2*(1.0f+j.burden.drag))/mass+kInduced*g*g*slow*slow*mass;
+    const float slow=k.corner/speed,drag=(k.thrust*speed*speed/top2*(1.0f+j.burden.drag+GearDragShare(v)))/mass+kInduced*g*g*slow*slow*mass;
     const float airbrake=s.throttle<0.0f ? k.brake*speed*speed/top2 : 0.0f;
     speed+=(thrust-drag-airbrake-kG*next[1])*dt;
     speed=Clamp(speed,kStallFloor,kBodyTop);
@@ -1107,7 +1119,16 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
     Elevons(j,v,s.pitch,s.roll,dt);
+    GearStep(v,true,dt,false);   // the catch's jet flies in with its gear up
     JetFlames(v,j.throttle,j.throttle>0.95f,ms);
+}
+
+// The landing gear (gear.cpp PlayerGear): the gear key (keyboard and mouse) or the pad's gear button toggles it.
+void PilotGear(PJet& j,unsigned char* v,float dt) noexcept {
+    const unsigned char* seat=SeatAt(v,0);
+    const bool held=j.keys ? KeyDown(Cfg().playerJetGearKey)
+                           : (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(Cfg().playerJetGearButton))!=0;
+    PlayerGear(v,held,j.keys,j.phase==Phase::air,Len(j.vel),j.clear,j.climb,dt);
 }
 
 void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
@@ -1148,6 +1169,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     j.active=j.phase!=Phase::parked && !v[kDead];
     std::memcpy(j.sent,j.vel,12);
     Elevons(j,v,s.pitch,s.roll,dt);
+    PilotGear(j,v,dt);
     Report(j,v,s,pos,clear,water,ms);
     // The exhaust (booster.cpp JetFlames) with the throttle; the lever full forward is the afterburner.
     JetFlames(v,j.throttle,j.throttle>0.95f,ms);
