@@ -82,3 +82,7 @@ Opposite block edges differ by up to 33.9 m (x = +-1750 at z = -1000: 24.6 m; z 
 which is the step neighbouring 3500 m copies met in. After `seams.Field`: 0.006 m (quantisation); the middle ground
 and its seam with the ring are unchanged (largest change on |x| or |z| = 1250: 4e-6 m); the ring moves by at most
 17.3 m, fading to 0 over 450 m from the outer edge.
+
+The near terrain of the ring (`IG_HEIGEN601_ENKEI*.FMB`, docs/fmb-format.md, pylib/fmb.py) is the same mesh as its
+collision (render vs collision height on the ring: 0.0000 m before and after) and gets the same field: 33.90 m ->
+0.006 m. The far-only ground (`ig_far_heigen507_2.mdb`, decimated, half floats): 34.47 m -> 0.64 m.

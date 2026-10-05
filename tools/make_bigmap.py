@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import bigmap  # noqa: E402
 import cpk  # noqa: E402
 import crilayla  # noqa: E402
+import fmb  # noqa: E402
 import hkcms  # noqa: E402
 import hktag  # noqa: E402
 import ledger  # noqa: E402
@@ -51,7 +52,8 @@ FAR_MODEL = 'ig_far_heigen507_2.mdb'     # the far-only ground (record ig_far_he
 RING_TAG = 'enkei'                       # the four edge pieces: ig_heigen601_enkei{up,bottom,left,right}
 FAR_EDGE_EPS = 12.0      # m: the far ground is decimated, its edge vertices stray up to 11 m off the edge line
 FAR_CORNER_TOL = 3.0     # m: and two of its corners have no vertex
-SEAM_TOL = {'collision': 0.01, 'far': 1.0}   # m: largest opposite-edge difference left (quantisation, half floats)
+RING_FILES = [f'IG_HEIGEN601_ENKEI{s}.FMB' for s in ('BOTTOM', 'LEFT', 'RIGHT', 'UP')]   # their near terrain
+SEAM_TOL = {'collision': 0.01, 'terrain': 0.01, 'far': 1.0}   # m: largest opposite-edge difference left (quantisation, half floats)
 ARCHIVE = 'Chunk02.cpk'
 BLOCK = 3500.0           # m: the ground (2500) and its edge ring (500 a side)
 SINK = -40000.0          # m: the far mountain ring's drop (out of the far camera's 20 km)
@@ -177,12 +179,26 @@ def seamless_far(rab_bytes: bytes) -> tuple[bytes, dict[str, float]]:
                                 'after': edge_gap(after, FAR_EDGE_EPS)}
 
 
+def seamless_terrain(stock: dict[str, bytes]) -> tuple[dict[str, bytes], dict[str, float]]:
+    """The four ring pieces' near terrain (FMB, pylib/fmb.py) made periodic: one field from all four (an outer edge
+    runs through two pieces), normals of the moved triangles recomputed, the trees' boxes re-derived."""
+    pts = {name: np.array(fmb.decode(data), dtype=np.float64) for name, data in stock.items()}
+    before = np.concatenate(list(pts.values()))
+    field = seams.Field(before)
+    out = {name: fmb.set_heights(data, lambda x, y, z: y + float(field.delta(x, z))) for name, data in stock.items()}
+    after = np.concatenate([np.array(fmb.decode(data), dtype=np.float64) for data in out.values()])
+    return out, {'vertices': int((np.abs(after[:, 1] - before[:, 1]) > 1e-4).sum()),
+                 'before': edge_gap(before, seams.EDGE_EPS), 'after': edge_gap(after, seams.EDGE_EPS)}
+
+
 def build_seams(root: str) -> tuple[dict[str, bytes], dict[str, dict[str, float]]]:
     """MAP file name -> its seamless bytes, and per part the seam report; raises if a seam is left."""
     files: dict[str, bytes] = {}
     report: dict[str, dict[str, float]] = {}
     files[COLLISION_FILE], report['collision'] = seamless_collision(stock_file(root, COLLISION_FILE))
     files[MODELS_FILE], report['far'] = seamless_far(stock_file(root, MODELS_FILE))
+    terrain, report['terrain'] = seamless_terrain({name: stock_file(root, name) for name in RING_FILES})
+    files.update(terrain)
     for part, r in report.items():
         if r['after'] > SEAM_TOL[part]:
             raise ValueError(f'{part}: opposite edges still differ by {r["after"]:.3f} m')
