@@ -67,16 +67,17 @@ bool sigOk=false,broken=false;
 // The jets' nozzles by their mark (pylib/vcobjects.py JETS; read off their models, pylib/jet_models.py NOZZLES, which
 // tools/selftest.py holds this table to): the bomber501 the strike jets and the player's strike jet fly, the interceptor
 // model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones'. Flame length and
-// width in m; with the afterburner (the player's boost) kBurnerLength times as long.
+// width in m; with the afterburner (the player's boost) kBurnerLength times as long. (Their heights include the landing
+// gear's lift: pylib/jet_models.py NOZZLES.)
 struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
 constexpr JetNozzles kJetNozzles[]={
-    {7001.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
-    {7002.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
-    {7202.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
-    {7003.0f,2,{{1.85f,0.85f,-7.3f},{-1.85f,0.85f,-7.3f}},{6.0f,1.2f}},
-    {7020.0f,2,{{1.85f,0.85f,-7.3f},{-1.85f,0.85f,-7.3f}},{6.0f,1.2f}},
-    {7201.0f,2,{{1.85f,0.85f,-7.3f},{-1.85f,0.85f,-7.3f}},{6.0f,1.2f}},
-    {7004.0f,1,{{0.0f,0.97f,-1.78f},{0.0f,0.0f,0.0f}},{4.0f,0.7f}},
+    {7001.0f,1,{{0.0f,2.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
+    {7002.0f,1,{{0.0f,2.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
+    {7202.0f,1,{{0.0f,2.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
+    {7003.0f,2,{{1.85f,1.5f,-7.3f},{-1.85f,1.5f,-7.3f}},{6.0f,1.2f}},
+    {7020.0f,2,{{1.85f,1.5f,-7.3f},{-1.85f,1.5f,-7.3f}},{6.0f,1.2f}},
+    {7201.0f,2,{{1.85f,1.5f,-7.3f},{-1.85f,1.5f,-7.3f}},{6.0f,1.2f}},
+    {7004.0f,1,{{0.0f,1.41f,-1.78f},{0.0f,0.0f,0.0f}},{4.0f,0.7f}},
     {7006.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
     {7007.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
     {7008.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
