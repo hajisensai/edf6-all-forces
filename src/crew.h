@@ -112,6 +112,10 @@ struct Config {
     float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
     float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
     float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
+    bool sidecar=true;              // the sidecar motorcycle (sidecar.cpp): its gunner held in the sidecar on foot, its own weapons;
+                                    // the bike kept level (the level hook is put in at load: a game restart toggles that part)
+    bool sidecarNpcGunner=true;     // ...while the player drives one, the nearest NPC squadmate rides in its sidecar and shoots
+    float sidecarNpcRange=25.0f;    // ...from within this many metres of the bike
     bool highCam=true;              // the artillery's high camera toggle (highcam.cpp): the Katyusha, the howitzer
     int highCamKey=0x43;            // ...its key ('C'; a Windows virtual-key code, 0: none)
     int highCamButton=0x80;         // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
@@ -380,6 +384,23 @@ void ResetDrills() noexcept;
 // The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
 struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
+
+// sidecar.cpp: the sidecar motorcycle (EDF6VC_SIDECAR.SGO, docs/sidecar-re.md): a Freed bike whose second rider stands
+// in the sidecar on foot (their own weapons), held there by the plugin. SidecarFrame after the stock input (the held
+// gunner put back, an NPC gunner taken in, the bike driven for the player in the sidecar); SidecarBoard from the board
+// button (crew.cpp FindSeatHook, before the stock seat search): true when it took the player into the sidecar (no seat
+// then); SidecarHoldsPlayer: the player stands in its sidecar (crew.cpp gives it no NPC driver: the plugin drives);
+// SidecarLevel: from the car step's setAngVel (physics.cpp), the roll part of a sidecar bike's angular velocity
+// replaced by its way back to level.
+bool InstallSidecar() noexcept;
+bool IsSidecar(const void* vehicle) noexcept;
+void SidecarFrame(unsigned char* vehicle) noexcept;
+bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
+bool SidecarHoldsPlayer(const void* vehicle) noexcept;
+void SidecarLevel(const void* body,float* w) noexcept;
+void ResetSidecars() noexcept;
+// physics.cpp: the car step's final setAngVel (0x6746C6) goes through the plugin (SidecarLevel), redirected at load.
+bool SidecarLevelHooked() noexcept;
 
 // highcam.cpp: the artillery's high camera (an indirect-fire vehicle the player drives: its key / pad button switches
 // the vehicle's camera block between its own points and a high view, docs/camera-re.md). From every vehicle's input,

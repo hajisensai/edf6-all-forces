@@ -85,6 +85,7 @@ const CallRow kCallRows[]={
     {L"EDF6VC_CALL_FLY_CARRIER",L"EDF6VC_CALL_FLY_CARRIER.SGO",L"EDF6VC_FLY_CARRIER.SGO"},
     {L"EDF6VC_CALL_FLY_BLAST_CARRIER",L"EDF6VC_CALL_FLY_BLAST_CARRIER.SGO",L"EDF6VC_FLY_BLAST_CARRIER.SGO"},
     {L"EDF6VC_CALL_FLY_DOLL_CARRIER",L"EDF6VC_CALL_FLY_DOLL_CARRIER.SGO",L"EDF6VC_FLY_DOLL_CARRIER.SGO"},
+    {L"EDF6VC_CALL_SIDECAR",L"EDF6VC_CALL_SIDECAR.SGO",L"EDF6VC_SIDECAR.SGO"},
 };
 constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));
 // The thrown drones: their weapons' AmmoHitSizeAdjust bits (weapon +0x8C4), in tools/calls.py CALLS order.

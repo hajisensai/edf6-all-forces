@@ -108,6 +108,7 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
     ('edf6tr_drill_mission', '钻头战车（自己驾驶；测试场生成）'),
+    ('edf6tr_sidecar_mission', '边三轮摩托（自己驾驶或坐边车；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
@@ -133,6 +134,7 @@ DERIVED: dict[str, str] = {
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
     'edf6tr_drill_mission': 'EDF6VC_DRILL',
+    'edf6tr_sidecar_mission': 'EDF6VC_SIDECAR',
     'edf6tr_v506_heli_mission': 'V506_HELI',
     'edf6tr_v506_heli_edf6benefits_mission': 'V506_HELI_EDF6BENEFITS',
     'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
@@ -275,6 +277,7 @@ def grand_battle(plan: Plan) -> Plan:
     plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3,
                      **{sgo: 1 for sgo in BOARDABLE_PARKED},
                      'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2, 'edf6tr_drill_mission': 2,
+                     'edf6tr_sidecar_mission': 2,
                      'edf6tr_v506_heli_mission': 1, 'edf6tr_vehicle409_heli_mission': 1, 'edf6tr_vehicle410_heli_mission': 1,
                      'edf6tr_v602_heli_mission': 1, 'vehicle403_tank_mission': 1, 'vehicle404_bigtank': 1,
                      'v603_flak_mission': 1, 'edf6tr_vehicle502_groundrobo_mission': 1}
@@ -715,7 +718,7 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
 # SGO their own tool makes (tools/make_katyusha.py, make_artillery.py: its model and weapons are what that tool, and
 # the installer, write) turned into a mission one (as_mission_sgo).
 GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery',
-                                  'edf6tr_drill_mission': 'make_drill'}
+                                  'edf6tr_drill_mission': 'make_drill', 'edf6tr_sidecar_mission': 'make_sidecar'}
 
 
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
@@ -724,7 +727,9 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
         return jet_sgo(game, sgo_name, jet_model)
     if sgo_name in GROUND_MISSION:
         import importlib
-        return as_mission_sgo(importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game))
+        data = importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game)
+        # The Freed bike's SGO (the sidecar's) is a script's already: it has its mission_setup next to vehicle_setup.
+        return data if 'mission_setup'.encode('utf-16le') + b'\0\0' in data else as_mission_sgo(data)
     stock = DERIVED.get(sgo_name)
     if stock:
         return as_mission_sgo(game.read('OBJECT', stock + '.SGO'))

@@ -266,6 +266,7 @@ def install(game: str) -> None:
     import make_jets
     import make_katyusha
     import make_stock_stores
+    import make_sidecar
     import make_sub
     check_loader(game)
     dll, ini = plugin_files()
@@ -293,11 +294,13 @@ def install(game: str) -> None:
     if stock_stores:
         print('给原版直升机的请求加上火箭巢和地狱火导弹（ini StockHeliStores=1；读取 Root.cpk，不修改它）……')
         stock = make_stock_stores.build(game)
+    print('生成边三轮摩托（读取 Root.cpk，不修改它）……')
+    sidecar = make_sidecar.build(game)
     print('生成大地图（测试场平原拼成 3 x 3，无缝；读取 Root.cpk，不修改它，约需一两分钟）……')
     bigmap = make_bigmap.build(game)
     print('\n全部生成完毕，开始写入。')
     for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery) + \
-            make_chute.install(game, chute) + make_drill.install(game, drill):
+            make_chute.install(game, chute) + make_drill.install(game, drill) + make_sidecar.install(game, sidecar):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
         files, skipped = stock
@@ -328,6 +331,7 @@ def uninstall(game: str) -> None:
     import make_jets
     import make_katyusha
     import make_stock_stores
+    import make_sidecar
     import make_sub
     print('卸载会删掉插件。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
     print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
@@ -339,7 +343,7 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
-        for remove in (make_stock_stores.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
+        for remove in (make_stock_stores.remove, make_sidecar.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
