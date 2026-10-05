@@ -224,16 +224,15 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
     bool faced=false;
     if(j.mode==Mode::withdraw)for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
     else if(kind.weapon==Weapon::charge) {
-        // At its target; going back, at its carrier's dock; else under the carrier, or with none (a thrown one)
-        // kThrownHover over its anchor. Under the carrier is under the carrier itself, not the anchor: the anchor is
-        // the point the player sent the drones to (CarrierState::order) or where a thrown one's bomb landed, both on
-        // the ground, and twice kDockBelow under that is under the ground (the drone sank into it, held by
-        // HoldOffGround's floor).
+        // At its target; going back, at its carrier's dock; else, its carrier given no order, under the carrier
+        // itself; sent somewhere (the player's order, CarrierState::order) or thrown (no carrier), kThrownHover over
+        // its anchor, waiting there. The anchor is on the ground in both, and twice kDockBelow under it, as before,
+        // was under the ground (the drone sank into it, held by HoldOffGround's floor).
         climb=kind.cruise*0.5f;
         const float* mp=mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : nullptr;
         if(j.mode==Mode::recover && mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];}
         else if(j.t.target)std::memcpy(goal,j.t.aim,12);
-        else if(mp){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow*2.0f;goal[2]=mp[2];}
+        else if(mp && !mother->carrier.ordered){goal[0]=mp[0];goal[1]=mp[1]-kDockBelow*2.0f;goal[2]=mp[2];}
         else{goal[0]=anchor[0];goal[1]=anchor[1]+kThrownHover;goal[2]=anchor[2];}
     } else {
         // The carrier: about its station (CarrierGoal), kMinAlt*2 over the ground there at least.

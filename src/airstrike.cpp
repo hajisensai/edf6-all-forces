@@ -332,8 +332,11 @@ const char kThrowSource='t';   // the thrown drones' flight source (JetLaunch's 
 // and the bullets' updates). A bomb converts within kThrowFuseMs, so an entry older than kBombStaleMs is one whose
 // bomb went without an update of its own (the mission's end, a delete from elsewhere). Whose bomb it is is read at
 // its landing, not at the shot: where the bullet's owner is written in its making is not traced (static RE), and by
-// its landing it is (the bomb's blast reads it, 0x2972A5); only the local player's becomes a drone.
-struct Bomb { const unsigned char* bullet; const Throw* what; ULONGLONG at; };
+// its landing it is (the bomb's blast reads it, 0x2972A5); only the local player's becomes a drone. An entry is the
+// bullet's ObjRef (its address and weak-this block): a bomb deleted without an update of its own leaves its entry, and
+// a new bomb at the same address (a stock Patroller thrown alongside) is not taken for it; stale entries go at every
+// throw and every bomb update.
+struct Bomb { ObjRef bullet; const Throw* what; ULONGLONG at; };
 constexpr int kMaxBombs=16;
 constexpr ULONGLONG kThrowFuseMs=4000,kBombStaleMs=10000;
 Bomb bombs[kMaxBombs]{};
@@ -359,9 +362,11 @@ void SeeThrow(const unsigned char* weapon,const unsigned char* bullet) noexcept 
     if(!t || !bullet || !Readable(bullet,kBombLanded+1) || At<const void*>(bullet,0)!=image+kBombVtable)return;
     const ULONGLONG ms=GameMs();
     for(auto& b:bombs)if(b.bullet && ms-b.at>kBombStaleMs)Forget(b);
+    const ObjRef ref=ObjRef::Of(bullet);
+    if(!ref.ctrl)return;
     for(auto& b:bombs) {
         if(b.bullet)continue;
-        b=Bomb{bullet,t,ms};
+        b=Bomb{ref,t,ms};
         ++bombCount;
         if(Cfg().debug)Log("THROW %s: bomb %p",t->name,bullet);
         return;
@@ -389,9 +394,11 @@ void ThrowHeading(const float* at,float* out) noexcept {
 // (its update must not run: the bomb is gone); false: the stock update runs (not ours, not yet, or no drone).
 bool BombStep(unsigned char* bullet) noexcept {
     __try {
+        const ULONGLONG ms=GameMs();
+        const bool on=Cfg().enabled && Cfg().throwDrones;
         for(auto& b:bombs) {
-            if(b.bullet!=bullet)continue;
-            const ULONGLONG ms=GameMs();
+            if(b.bullet && (!on || ms-b.at>kBombStaleMs)){Forget(b);continue;}   // switched off since, or long gone
+            if(!b.bullet.Is(bullet))continue;
             if(At<const void*>(bullet,0)!=image+kBombVtable || (bullet[kBombFlags]&1)) {
                 Forget(b);   // something else at its address, or spent: its own update deletes it
                 return false;
