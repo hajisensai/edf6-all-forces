@@ -847,7 +847,17 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
 // The caught jet's speed for its boarding (see kCatchAfterMs).
 // The catch's jet flying in (see kCatchFrom): the jet, where it makes for (under the parachuting player, led by their
 // drift), its speed there.
-struct CatchFlight { const void* v; float target[3],speed; } catchFlight{};
+// `drift`: the player's velocity (the formation's); `heading`: the way it flew in, level (its nose in the formation).
+struct CatchFlight { const void* v; float target[3],speed; float drift[3],heading[3]; } catchFlight{};
+// The catch's last stretch (the user, 2026-10-05: "the catch jet twitches under my feet": it made straight for its
+// point at full speed and overshot it every frame): within kCatchHoming it flies in formation, the player's drift
+// plus a correction at kCatchGain of the gap, no more than a stop at kCatchBrake would allow, its nose level along
+// its heading.
+constexpr float kCatchGain=1.5f,kCatchBrake=40.0f;
+// The board press is retried; a refusal says which of the stock button's gates holds (docs/rescue-re.md: +0x128
+// bit 0, +0x5D0 bit 2, +0x39C) every kCatchSayMs.
+constexpr ULONGLONG kCatchSayMs=2000;
+ULONGLONG catchSaidAt=0,catchReachAt=0;
 
 void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     j.driven=true;j.blockedSince=0;
@@ -859,7 +869,7 @@ void Board(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     std::memcpy(j.vel,j.measured,12);
     j.throttle=air ? 0.5f : 0.0f;
     if(j.autopilot) {   // the catch's jet: the player takes it over in flight, as fast as it flew in
-        std::memcpy(j.vel,j.sent,12);
+        for(int i=0;i<3;++i)j.vel[i]=catchFlight.heading[i]*catchFlight.speed;   // (its formation speed would stall)
         j.phase=Phase::air;j.throttle=1.0f;j.autopilot=false;
         catchFlight=CatchFlight{};
     }
@@ -882,6 +892,11 @@ constexpr std::uint32_t kRiding=0x80;
 constexpr float kEjectUp=25.0f,kEjectCarry=0.3f,kEjectFrom=15.0f;   // m/s up; share of the jet's; m over the ground
 constexpr float kChuteSink=6.0f,kChuteBleed=0.6f,kChuteBoost=3.0f;   // m/s down at most; a second; m/s up in a frame
 constexpr ULONGLONG kEjectWaitMs=2000,kChuteMostMs=180000;
+// The parachute ends on any ground contact (support 2 standing, 1 sliding down a slope: it hung on there) or within
+// kChuteLand m of the ground, and when the player cuts it (ini PlayerJetChuteCutKey) after kChuteCutAfterMs (the
+// user, 2026-10-05: it should go on landing, and I should be able to cut it in the air).
+constexpr float kChuteLand=1.5f;
+constexpr ULONGLONG kChuteCutAfterMs=500;
 enum class Eject { none, pending, chute };
 // The catch (Cfg().playerJetCatch; the user: "don't wait till they land, catch them in the air"; 2026-10-05: "it
 // should fly in from outside"): kCatchAfterMs into the parachute, with the player kCatchClear over the ground, a jet
@@ -964,7 +979,8 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         if(!v){Log("PJET catch: no jet of mark %.0f could be made",bail.mark);bail.mark=0.0f;return;}
         const Kind* const k=KindOf(v);
         const float speed=std::fmax(bail.speed,(k ? k->rotate : 75.0f)+kCatchOver);
-        catchFlight=CatchFlight{v,{p[0],p[1]-kCatchBelow,p[2]},speed};
+        catchFlight=CatchFlight{v,{p[0],p[1]-kCatchBelow,p[2]},speed,{hv[0],hv[1],hv[2]},{f[0],0.0f,f[2]}};
+        catchReachAt=0;
         bail.caught=ObjRef::Of(v);bail.caughtAt=ms;
         Log("PJET catch: v=%p made %.0f m out at (%.0f,%.0f,%.0f), flying in at %.0f m/s to the player at (%.0f,%.0f,%.0f)",v,kCatchFrom,
             at[0],at[1],at[2],speed,p[0],p[1],p[2]);
@@ -977,12 +993,26 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         bail.caught=ObjRef{};bail.mark=0.0f;catchFlight=CatchFlight{};
         return;
     }
-    // Where it makes for: under the player, kCatchLead s ahead of their drift.
-    for(int i=0;i<3;++i)catchFlight.target[i]=p[i]+hv[i]*kCatchLead;
-    catchFlight.target[1]-=kCatchBelow;
+    // Where it makes for: its pilot seat's riding point onto the player (that point within the stock reach is what the
+    // board button needs; the jet's own origin is the collision box's centre, metres off it), kCatchLead s ahead of
+    // their drift; without the point, kCatchBelow under them.
     const float* vp=reinterpret_cast<const float*>(v+kPosition);
-    const float d[3]={p[0]-vp[0],p[1]-vp[1],p[2]-vp[2]};
-    if(Len(d)<kCatchReach)PressBoardButton(h);
+    float seatAt[3],reach=0.0f;
+    const bool point=SeatPoint(v,0,seatAt,&reach);
+    for(int i=0;i<3;++i)catchFlight.target[i]=p[i]+hv[i]*kCatchLead+(point ? vp[i]-seatAt[i] : 0.0f);
+    if(!point)catchFlight.target[1]-=kCatchBelow;
+    std::memcpy(catchFlight.drift,hv,12);
+    const float* boardAt=point ? seatAt : vp;
+    const float d[3]={p[0]-boardAt[0],p[1]-boardAt[1],p[2]-boardAt[2]};
+    const float gap=Len(d);
+    if(gap>=(point ? reach : kCatchReach))return;
+    if(!catchReachAt){catchReachAt=ms;Log("PJET catch: the seat in reach (%.1f m, reach %.1f m): boarding",gap,reach);}
+    PressBoardButton(h);
+    if(ms-catchReachAt>1000 && ms-catchSaidAt>kCatchSayMs) {
+        catchSaidAt=ms;
+        Log("PJET catch: not aboard yet, %.1f m from the seat; gates +0x128=%02x +0x5D0=%08x +0x39C=%d",gap,
+            At<unsigned char>(h,0x128),At<std::uint32_t>(h,0x5D0),At<std::int32_t>(h,0x39C));
+    }
 }
 
 // `alive`: the jet still there to read (a shot-down one may be deleted already: its kind and its path from the PJet).
@@ -1027,8 +1057,11 @@ void EjectTick() noexcept {
     }
     Catch(h,ms);
     const unsigned char support=h[kHumanSupport];
-    if(ms-bail.at>kChuteMostMs || (support==2 && ms-bail.at>300) || vel[1]>bail.vy+kChuteBoost) {
-        Log("PJET parachute: %s",support==2 ? "landed" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
+    const float clear=GroundClearance(reinterpret_cast<const float*>(h+kPosition));
+    const bool landed=ms-bail.at>300 && (support!=0 || (clear!=kNoGround && clear<kChuteLand));
+    const bool cut=ms-bail.at>kChuteCutAfterMs && KeyDown(Cfg().playerJetChuteCutKey);
+    if(ms-bail.at>kChuteMostMs || landed || cut || vel[1]>bail.vy+kChuteBoost) {
+        Log("PJET parachute: %s",landed ? "landed" : cut ? "cut by the player" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
         bail.state=Eject::none;
         return;
     }
@@ -1103,7 +1136,12 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     Put<float>(v,kAreaInset,kNoInset);
     j.clear=clear;j.climb=j.vel[1];
     Air(j,v,s,pos,clear,water,dt,ms);
-    if(dist<kCatchHoming)for(int i=0;i<3;++i)j.vel[i]=to[i]*catchFlight.speed;   // the last stretch: straight in
+    if(dist<kCatchHoming) {   // the last stretch: in formation under the player (see kCatchGain)
+        const float closing=std::fmin(std::fmin(dist*kCatchGain,catchFlight.speed),std::sqrt(2.0f*kCatchBrake*dist));
+        for(int i=0;i<3;++i)j.vel[i]=catchFlight.drift[i]+to[i]*closing;
+        const float up[3]={0.0f,1.0f,0.0f};
+        if(j.kind)BodyAttitude(v,catchFlight.heading,up,kAttGain,j.kind->roll,j.omega);
+    }
     j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
     Elevons(j,v,s.pitch,s.roll,dt);

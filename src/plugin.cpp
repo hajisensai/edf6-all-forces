@@ -126,6 +126,7 @@ void Validate(Config& n) noexcept {
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetFlares=static_cast<int>(FixInt("PlayerJetFlares",n.playerJetFlares,0,99));
+    n.playerJetChuteCutKey=static_cast<int>(FixInt("PlayerJetChuteCutKey",n.playerJetChuteCutKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
@@ -207,6 +208,7 @@ void LoadConfig() noexcept {
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetFlares=ReadInt(L"PlayerJetFlares",static_cast<DWORD>(n.playerJetFlares));
+    n.playerJetChuteCutKey=ReadInt(L"PlayerJetChuteCutKey",static_cast<DWORD>(n.playerJetChuteCutKey));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
