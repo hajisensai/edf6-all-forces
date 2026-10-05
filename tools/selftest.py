@@ -503,7 +503,7 @@ def ground_mission_builders_take_the_game_alone() -> None:
 
 @test
 def drill_copies_agree() -> None:
-    """src/drill.cpp's drill (bone name, length, base radius, base, rotational repeat) is pylib/drill_model.py's, src/jet_bay.cpp's drill charge
+    """src/drill.cpp's drill (marker and spin bone names, length, base radius, base, rotational repeat) is pylib/drill_model.py's, src/jet_bay.cpp's drill charge
     is the one tools/make_drill.py writes (pylib/vcobjects.py DRILL_CHARGE_FILE), its blast breaks buildings (>= 3 m),
     the drill tank's request is a ground vehicle request of tools/make_drill.py's vehicle, and the model turns the OBJ
     without mirroring it."""
@@ -511,6 +511,11 @@ def drill_copies_agree() -> None:
     import make_drill
     d = src('src/drill.cpp')
     assert f'kDrillBone[]=L"{drill_model.DRILL_BONE}"' in d, 'src/drill.cpp kDrillBone'
+    assert f'kSpinBone[]=L"{drill_model.SPIN_BONE}"' in d, 'src/drill.cpp kSpinBone'
+    m = re.search(r'kBoxHalfX=([\d.]+)f', d)
+    assert m and 2 * float(m.group(1)) <= 3.8 + 1e-6, 'the contact box is no wider than the 3.8 m hull'
+    m = re.search(r'kHullFront=([\d.]+)f,kChargeFrom=([\d.]+)f', d)
+    assert m and float(m.group(1)) < drill_model.DRILL_BASE[2] and float(m.group(2)) >= 3.4, m and m.groups()
     m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
     assert m and (float(m.group(1)), float(m.group(2))) == (drill_model.DRILL_LENGTH, drill_model.DRILL_RADIUS), m and m.groups()
     m = re.search(r'kDrillBaseY=([\d.]+)f,kDrillBaseZ=([\d.]+)f', d)
