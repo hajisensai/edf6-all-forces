@@ -59,6 +59,15 @@ def src(rel: str) -> str:
 # ---------------------------------------------------------------- the code
 
 
+def in_team_field(rel: str, text: str, at: int) -> bool:
+    """The one allowed raw write: crew.cpp WithTeamField, the team field changed for a stock seat check inside a team
+    walk's visitor and put back right after (a SetTeam there would change the set the walk stands in)."""
+    if rel != 'src/crew.cpp':
+        return False
+    start = text.find('auto WithTeamField(')
+    return start >= 0 and start < at < text.find('\n}\n', start)
+
+
 @test
 def team_changes_go_through_set_team() -> None:
     """No plugin writes an object's team (+0x314, kTeam) itself: the game's team manager finds the object's set by
@@ -71,7 +80,8 @@ def team_changes_go_through_set_team() -> None:
             for name in files:
                 if name.endswith(('.cpp', '.h', '.inc')):
                     rel = os.path.relpath(os.path.join(folder, name), ROOT).replace(os.sep, '/')
-                    found += [f'{rel}: {m.group(0)}' for m in raw.finditer(src(rel))]
+                    text = src(rel)
+                    found += [f'{rel}: {m.group(0)}' for m in raw.finditer(text) if not in_team_field(rel, text, m.start())]
     assert not found, 'raw team writes (use SetObjectTeam):\n' + '\n'.join(found)
     assert raw.search('Put<std::int32_t>(v,kTeam,own);'), 'the pattern no longer sees a raw write'
 

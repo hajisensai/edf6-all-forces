@@ -158,6 +158,7 @@ constexpr std::int32_t kTeamVehicle=5;
 // Every team change goes through SetTeam, the object's registration (+0x380 bit 6) kept as it is.
 constexpr unsigned kSetTeam=0x54EE70;
 constexpr std::size_t kObjectFlags=0x380;
+// Never from inside a team walk's visitor (the board prompt, FindSeat): crew.cpp WithTeamField.
 void SetObjectTeam(unsigned char* object,std::int32_t team) noexcept;
 // Human: the vehicle it is in (weak_ptr object +0x1548, control block +0x1550)
 constexpr std::size_t kHumanVehicleCtrl=0x1550;

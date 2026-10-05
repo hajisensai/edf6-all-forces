@@ -254,11 +254,25 @@ void AimLines(unsigned char* vehicle) noexcept {
     }
 }
 
-// Run `check` with the NPC riders of the vehicle's NPC-held seats hidden and the vehicle on its own
-// team (see OwnTeam); restores both before returning.
-template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcept {
-    const std::int32_t team=At<std::int32_t>(vehicle,kTeam);
-    SetObjectTeam(vehicle,OwnTeam(vehicle));
+// WithTeamField: `f` run with the vehicle on `team` for the stock seat checks, put back right after (a fault too): the field alone (+0x314), not
+// registered. The board prompt (0x5735E7) and the board button (0x56D77F) call their visitors, and the visitors
+// FindSeat (slot 49), while the team manager walks a team's set (0x5E11D0): a SetTeam there takes the vehicle out
+// of the set the walk is in and frees the node the walk stands on. It read freed memory (a dynamic_cast on it threw:
+// dumps EDF6.exe.76548, .66844) or a broken tree (an 'object' at 0x68, the walk never ending: the game hung,
+// 2026-10-05 10:30). A field changed and put back within the visit leaves every set as it is (they are keyed by
+// the object's address); the vehicle's real team changes only as the stock code changes it (the player getting in).
+// The one raw write of +0x314 (tools/selftest.py team_changes_go_through_set_team names this function).
+template<class F> auto WithTeamField(unsigned char* v,std::int32_t team,F f) noexcept -> decltype(f()) {
+    const std::int32_t was=At<std::int32_t>(v,kTeam);
+    Put<std::int32_t>(v,kTeam,team);
+    decltype(f()) r{};
+    __try { r=f(); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    Put<std::int32_t>(v,kTeam,was);
+    return r;
+}
+
+// `check` with the NPC riders of the vehicle's NPC-held seats hidden (put back after, a fault too).
+template<class F> bool WithRidersHidden(unsigned char* vehicle,F check) noexcept {
     void* saved[16]{};
     const unsigned count=SeatCount(vehicle);
     for(unsigned i=0;i<count && i<16;++i) {
@@ -269,9 +283,15 @@ template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcep
     bool ok=false;
     __try { ok=check(); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
     for(unsigned i=0;i<count && i<16;++i)if(saved[i])Put<void*>(SeatAt(vehicle,i),kSeatRiderCtrl,saved[i]);
-    SetObjectTeam(vehicle,team);
     return ok;
 }
+
+// Run `check` with the NPC riders of the vehicle's NPC-held seats hidden and the vehicle on its own
+// team (see OwnTeam, WithTeamField); restores both before returning.
+template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcept {
+    return WithTeamField(vehicle,OwnTeam(vehicle),[&]{ return WithRidersHidden(vehicle,check); });
+}
+
 
 // A free seat other than `skip` for the NPC to move into, or -1.
 int FreeGunnerSeat(unsigned char* vehicle,unsigned skip) noexcept {
@@ -294,18 +314,16 @@ bool LeaveSeat(unsigned char* vehicle,unsigned char* from,unsigned char* to) noe
 // choice is made before the first write; the move is seat, then clear (LeaveSeat pairs them). False when the
 // seat could not be freed (the caller then offers the player nothing).
 bool Bump(unsigned char* vehicle,unsigned index) noexcept {
-    const std::int32_t team=At<std::int32_t>(vehicle,kTeam),own=OwnTeam(vehicle);
     auto seat=SeatAt(vehicle,index);
     auto rider=const_cast<void*>(RiderObject(seat));
     const int gunner=Cfg().bumpToGunner ? FreeGunnerSeat(vehicle,index) : -1;
-    SetObjectTeam(vehicle,own);   // the stock slot 49 re-checks the team next
     bool freed=false;
     if(gunner>=0) {
         if(auto to=reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,gunner,false)) {
             freed=LeaveSeat(vehicle,seat,to);
             Log(freed ? "BUMP v=%p seat=%u -> npc moved to gunner seat %d" : "BUMP v=%p seat=%u -> the move to seat %d faulted: undone",
                 vehicle,index,gunner);
-            if(!freed){SetObjectTeam(vehicle,team);return false;}   // as it was: the NPC still in its seat
+            if(!freed)return false;   // as it was: the NPC still in its seat
         }
     }
     if(!freed) {
@@ -330,9 +348,7 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
         // its team, and the stock check then refuses even a free seat: ask again on the vehicle's own.
         const auto team=At<std::int32_t>(v,kTeam),own=OwnTeam(v);
         if(team!=own) {
-            SetObjectTeam(v,own);
-            if(auto free=originalFindSeat(vehicle,human))return free;
-            SetObjectTeam(v,team);
+            if(auto free=WithTeamField(v,own,[&]{ return originalFindSeat(vehicle,human); }))return free;   // see WithTeamField
         }
         const unsigned count=SeatCount(v);
         for(unsigned i=0;i<count;++i) {
@@ -340,43 +356,15 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
             if(SeatRider(s)!=Rider::dummy)continue;
             const bool ok=WithDummiesHidden(v,[&]{ return reinterpret_cast<CanRideSeatFn>(image+kCanRideSeat)(v,human,s); });
             if(!ok)continue;
-            return Bump(v,i) ? originalFindSeat(vehicle,human) : nullptr;
+            // the stock slot 49 re-checks the team (see WithTeamField)
+            return WithTeamField(v,own,[&]{ return Bump(v,i) ? originalFindSeat(vehicle,human) : nullptr; });
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return nullptr;
 }
 
 // The on-foot ride prompt, once per object per frame for every human on foot.
-// TEMPORARY guard (2026-10-05, until the root cause is found): the board prompt's walk of a team's set (EDF+0x5E11D0)
-// has twice handed the stock visitor a freed object, whose dynamic_cast to VehicleBase (0x5725DD) threw and ended the
-// game (dumps EDF6.exe.76548 / .66844). The first was a jet the plugin deleted in the same frame as its kick (fixed:
-// JetReap waits); the second's source is not known yet. An object whose vtable is not in EDF.dll, or that is marked
-// deleted (+0x18 bit 4), is logged (PROMPT stale: address, vtable, flags, team) and not handed on: the log tells which
-// object was left in the set, so the leak can be fixed where it is made. Remove once that is found and fixed.
-constexpr std::size_t kObjFlags=0x18;
-constexpr unsigned char kObjDeleted=4;
-bool StaleObject(const void* object) noexcept {
-    const auto o=static_cast<const unsigned char*>(object);
-    if(!Readable(o,kTeam+4))return true;
-    const auto vt=At<const unsigned char*>(o,0);
-    return vt<image || vt>=image+edf::kImageSize || (o[kObjFlags]&kObjDeleted);
-}
-
 void __fastcall PromptHook(void* functor,void* object) {
-    __try {
-        if(StaleObject(object)) {
-            static ULONGLONG loggedAt=0;
-            const ULONGLONG ms=GameMs();
-            if(ms-loggedAt>1000) {
-                loggedAt=ms;
-                const auto o=static_cast<const unsigned char*>(object);
-                const bool readable=Readable(o,kTeam+4);
-                Log("PROMPT stale object %p in a team's set: vtable %p flags %02x team %d (not handed to the stock prompt)",object,
-                    readable ? At<const void*>(o,0) : nullptr,readable ? o[kObjFlags] : 0xFF,readable ? At<std::int32_t>(o,kTeam) : -99);
-            }
-            return;
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER){return;}
     originalPrompt(functor,object);
     if(!Cfg().enabled)return;
     __try {
@@ -384,8 +372,6 @@ void __fastcall PromptHook(void* functor,void* object) {
         auto human=At<unsigned char*>(f,kFunctorHuman);
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
-        JetReap(object);   // a withdrawn jet with no other vehicle about (the player on foot)
-        HeliReap(object);  // ...and a called heli that left
         EnsureInputs();    // first mission frame: every plugin has loaded by now
         if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object) || IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
