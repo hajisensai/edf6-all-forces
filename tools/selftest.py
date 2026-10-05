@@ -310,6 +310,18 @@ def placeholders_keep_rows() -> None:
         raise AssertionError('two rows for one call not refused')
 
 
+@test
+def jet_masses_cover_every_jet() -> None:
+    """Every aircraft kind has a clean mass and a durability (src/stores.inc kJetMasses): any of them the player flies
+    rams with its own mass (src/playerjet.cpp RamDamage), scaled by its HP over that durability."""
+    marks = {j.mark for j in vc.JETS.values() if j.mark != 7101.0} | {make_jets.GUNSHIP_MARK}   # 7101: the sub, no jet
+    missing = sorted(marks - set(vc.JET_MASSES))
+    assert not missing, f'pylib/vcobjects.py JET_MASSES: no mass for marks {missing}'
+    durability = gen_stores.durabilities()
+    assert all(durability.get(m, 0.0) > 0.0 for m in vc.JET_MASSES), 'a JET_MASSES mark with no durability'
+    assert all(m > 0.0 for m in vc.JET_MASSES.values())
+
+
 # ---------------------------------------------------------------- copies kept by hand
 
 

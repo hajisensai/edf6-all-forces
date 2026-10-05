@@ -152,6 +152,19 @@ bool MissileHoming(const float* at,float radius) noexcept {
     return false;
 }
 
+int MissilesHomingAt(const float* at,float radius,float (*pos)[3],int most) noexcept {
+    const ULONGLONG frame=GameFrame();
+    int n=0;
+    for(const auto& r:rounds) {
+        if(!r.b || !r.seen || frame-r.frame>1)continue;
+        const float d[3]={r.last[0]-at[0],r.last[1]-at[1],r.last[2]-at[2]};
+        if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>=radius*radius)continue;
+        if(n<most)std::memcpy(pos[n],r.pos,12);
+        ++n;
+    }
+    return n;
+}
+
 namespace {
 Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept {
     Round* free=nullptr;

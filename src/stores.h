@@ -14,7 +14,8 @@ struct StoreSpec {
     float mass;              // kg a round
     float drag;              // a round's share of the clean jet's parasitic drag
 };
-struct JetMass { float mark,mass; };
+// A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
+struct JetMass { float mark,mass,durability; };
 
 // One holder of seat 0 that holds a store, as its weapon is now.
 struct Store {
@@ -34,6 +35,8 @@ void TriggerStore(const Store& s) noexcept;
 // share over clean (>= 0). A mark without a mass: none.
 struct Burden { float mass,drag; };
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept;
+// The kind of mark `mark` (pylib/vcobjects.py JET_MASSES: every jet's), or nullptr.
+const JetMass* JetMassOf(float mark) noexcept;
 // A homing store's lock as the weapon holds it (docs/stores-re.md §7): 2 locked (`point` its target's lock point), 1
 // locking (`progress` 0..1, `point` the target), 0 none.
 int StoreLock(const Store& s,float* point,float* progress) noexcept;

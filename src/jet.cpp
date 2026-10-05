@@ -501,6 +501,14 @@ bool jet::LockingOn(const void* target) noexcept {
     return false;
 }
 
+int jet::LockersOf(const void* target,float (*at)[3],int most) noexcept {
+    int n=0;
+    if(!target)return 0;
+    for(const auto& j:jets)
+        if(n<most && j.ref && j.t.target==target && j.t.lockAt && Alive(j.ref))std::memcpy(at[n++],j.Vehicle()+kPosition,12);
+    return n;
+}
+
 int jet::BreakLocks(const void* target,float chance) noexcept {
     static unsigned seed=0x9E3779B9u;
     int broke=0;
