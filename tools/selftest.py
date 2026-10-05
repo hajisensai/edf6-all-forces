@@ -13,7 +13,10 @@
   - the installer's ini merge (installer.merge_ini) only adds settings and changes nothing of the player's;
   - interrupted or refused runs: autoturret/tools/build.py install killed half way still reinstalls and
     uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
-    uninstall over a misaligned table offers repair or skipping the table instead of failing.
+    uninstall over a misaligned table offers repair or skipping the table instead of failing;
+  - the model importer (pylib/obj_model.py, pylib/texfile.py) on synthetic data: OBJ reading (negative indices,
+    n-gons, winding, uv origin, texture lookup), holes found and closed, skins, meshes split below 65536 vertices
+    with tangents, PNG decoding, DDS .lod slicing and DXT1.
 """
 from __future__ import annotations
 
@@ -595,6 +598,131 @@ def uninstall_misaligned_skips_table() -> None:
         assert not os.path.exists(_mods(game, cw.MANIFEST))
     finally:
         shutil.rmtree(game, ignore_errors=True)
+
+
+# ---------------------------------------------------------------- model import (pylib/obj_model.py, pylib/texfile.py)
+
+def _cube_part(skip_face: int | None = None) -> 'object':
+    """A unit cube centred on x = 0 as an obj_model.Part, outward faces (counter-clockwise), face 0 the +x one."""
+    import obj_model as om
+    c = [(x, y, z) for x in (-0.5, 0.5) for y in (0.0, 1.0) for z in (0.0, 1.0)]
+    quads = [(4, 6, 7, 5), (0, 1, 3, 2), (2, 3, 7, 6), (0, 4, 5, 1), (1, 5, 7, 3), (0, 2, 6, 4)]
+    verts, tris = [], []
+    for k, q in enumerate(quads):
+        if k == skip_face:
+            continue
+        n = om.norm(om.cross(om.sub(c[q[1]], c[q[0]]), om.sub(c[q[2]], c[q[0]])))
+        base = len(verts)
+        verts += [om.Vertex(c[i], n, (j % 2 * 1.0, j // 2 * 1.0)) for j, i in enumerate(q)]
+        tris += [(base, base + 1, base + 2), (base, base + 2, base + 3)]
+    return om.Part('cube', 'm', verts, tris)
+
+
+@test
+def obj_reader_triangulates_and_converts() -> None:
+    import obj_model as om
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, 'm.mtl'), 'w', encoding='utf-8') as h:
+            h.write('newmtl a\nmap_Kd C:/elsewhere/Tex.PNG\n')
+        with open(os.path.join(d, 'tex.png'), 'wb') as h:
+            h.write(b'')
+        with open(os.path.join(d, 'm.obj'), 'w', encoding='utf-8') as h:
+            h.write('mtllib m.mtl\no box\nv 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nv 0.5 1.5 0\nvt 0 0\nvt 1 0\nvt 1 1\n'
+                    'vn 0 0 1\nusemtl a\nf -5/1/1 -4/2/1 -3/3/1 -1/3/1 -2/3/1\nf 1//1 2//1 3//1\n')
+        obj = om.read_obj(os.path.join(d, 'm.obj'))
+        assert [o.name for o in obj.objects] == ['box'] and len(obj.objects[0].faces) == 2
+        assert om.texture_path(obj, 'a') == os.path.join(d, 'tex.png'), 'map_Kd found by its base name'
+        (p,) = om.obj_parts(obj)
+        assert len(p.tris) == 3 + 1, p.tris                              # a pentagon: 3 triangles, + 1
+        for t in p.tris:     # winding kept: every triangle faces the normal
+            a, b, c = (p.verts[i].pos for i in t)
+            assert om.dot(om.cross(om.sub(b, a), om.sub(c, a)), (0.0, 0.0, 1.0)) > 0
+        assert p.verts[0].uv == (0.0, 1.0), 'v flipped to the top-left origin'
+        (m,) = om.obj_parts(obj, om.Conversion(axes=((-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))))
+        for t in m.tris:     # a mirroring conversion reverses the winding: still facing its (mirrored) normal
+            a, b, c = (m.verts[i].pos for i in t)
+            assert om.dot(om.cross(om.sub(b, a), om.sub(c, a)), m.verts[t[0]].normal) > 0
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@test
+def obj_holes_found_and_closed() -> None:
+    import obj_model as om
+    assert om.boundary_loops(_cube_part()) == [], 'a closed cube has no hole'
+    part = _cube_part(skip_face=0)
+    loops = om.boundary_loops(part)
+    assert len(loops) == 1 and len(loops[0]) == 4 and om.mirror_unmatched(part, loops) == loops
+    fill = om.fill_loop(part, loops[0])
+    assert len(fill.tris) == 2 and om.boundary_loops(part) == []
+    part = _cube_part(skip_face=0)
+    full = _cube_part()
+    ref = [tuple(om.RefCorner(full.verts[i].pos, full.verts[i].normal, ((0, 1.0),)) for i in t) for t in full.tris]
+    fills = om.restore_from_reference(part, ref)  # type: ignore[arg-type]
+    assert len(fills) == 1 and len(fills[0].tris) == 2 and om.boundary_loops(part) == [], fills
+    skins = om.skins_by_reference(part, ref, lambda b: b + 7)  # type: ignore[arg-type]
+    assert all(s == ((7, 1.0),) for s in skins)
+    halves = om.split_part(full, lambda t: max(p[0] for p in t) > 0)
+    assert len(halves[True].tris) == 2 * 5 and len(halves[False].tris) == 2
+    assert len(om.components(om.merge([full, _cube_part()]))) == 1, 'coincident copies weld into one piece'
+
+
+@test
+def obj_meshes_split_below_65536() -> None:
+    import struct as st
+    import obj_model as om
+    from mdb import Mesh, VElem, read_elem
+    layout = [VElem(7, 0, 0, 'BINORMAL'), VElem(7, 8, 0, 'TANGENT'), VElem(7, 16, 0, 'NORMAL'), VElem(7, 24, 0, 'POSITION'),
+              VElem(12, 32, 0, 'TEXCOORD'), VElem(1, 40, 0, 'BLENDWEIGHT'), VElem(21, 56, 0, 'BLENDINDICES')]
+    template = Mesh(bytes(4), 0, 0, 60, layout, 0, b'', b'')
+    cube = _cube_part()
+    big = om.merge([om.Part('c', 'm', [om.Vertex(om.add(v.pos, (k * 2.0, 0.0, 0.0)), v.normal, v.uv) for v in cube.verts],
+                            cube.tris) for k in range(2800)])           # 67200 vertices
+    meshes = om.build_meshes(template, [(big, om.rigid(big, 3))], material=2)
+    assert len(meshes) == 2 and all(me.nverts < 0x10000 and me.material == 2 for me in meshes)
+    assert sum(len(me.indices) // 6 for me in meshes) == len(big.tris)
+    me = meshes[0]
+    assert me.flags == bytes((0, 1, 1, 0)) and {int(r[0]) for r in read_elem(me, 'BLENDINDICES')} == {3}
+    for n, t, b in zip(read_elem(me, 'NORMAL'), read_elem(me, 'TANGENT'), read_elem(me, 'BINORMAL')):
+        assert abs(om.dot(n[:3], t[:3])) < 2e-3 and abs(om.dot(n[:3], b[:3])) < 2e-3, (n, t, b)
+    assert max(st.unpack(f'<{len(me.indices) // 2}H', me.indices)) < me.nverts
+
+
+@test
+def texture_files_decode_and_slice() -> None:
+    import struct as st
+    import zlib
+    import texfile
+    w, h = 5, 3
+    rows = [bytes(sum(([x * 40, y * 80, (x + y) * 20] for x in range(w)), [])) for y in range(h)]
+    raw = bytearray()
+    prev = bytes(3 * w)
+    for y, row in enumerate(rows):     # each row with another filter (0 none, 1 sub, 2 up, 3 average, 4 paeth)
+        ft = y % 5
+        out = bytearray(row)
+        for i in range(len(row)):
+            left = row[i - 3] if i >= 3 else 0
+            ul = prev[i - 3] if i >= 3 else 0
+            pred = (0, left, prev[i], (left + prev[i]) // 2, texfile._paeth(left, prev[i], ul))[ft]
+            out[i] = (row[i] - pred) & 0xFF
+        raw += bytes([ft]) + out
+        prev = row
+    chunk = lambda k, b: st.pack('>I', len(b)) + k + b + st.pack('>I', zlib.crc32(k + b))  # noqa: E731
+    png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', st.pack('>IIBBBBB', w, h, 8, 2, 0, 0, 0)) + \
+        chunk(b'IDAT', zlib.compress(bytes(raw))) + chunk(b'IEND', b'')
+    img = texfile.decode_png(png)
+    assert (img.width, img.height) == (w, h)
+    assert bytes(img.rgba[0::4]) + bytes(img.rgba[1::4]) == bytes(b for r in rows for b in r[0::3]) + bytes(b for r in rows for b in r[1::3])
+    dds = texfile.solid_dxt1((200, 100, 50), 64)
+    info = texfile.dds_info(dds)
+    assert (info.width, info.mips, info.fourcc) == (64, 7, b'DXT1')
+    hd, lod = texfile.texture_pair(dds)
+    li = texfile.dds_info(lod)
+    assert hd == dds and (li.width, li.height, li.mips) == (16, 16, 5), li          # 64 -> 16 (never below 16)
+    assert texfile.lod_level(2048, 2048) == 4 and texfile.lod_level(1024, 512) == 4 and texfile.lod_level(64, 64) == 2
+    c0, c1, idx = st.unpack_from('<HHI', lod, 128)
+    assert c0 == c1 == ((200 * 31 + 127) // 255) << 11 | ((100 * 63 + 127) // 255) << 5 | ((50 * 31 + 127) // 255) and idx == 0
 
 
 def main() -> int:

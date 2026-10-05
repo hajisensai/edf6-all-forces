@@ -12,11 +12,14 @@ The pipeline (each step a plain function, the caller decides what goes where):
     boundary_loops(part) / mirror_unmatched(loops)    open holes, and the ones the mirror side (x -> -x) does not have
     fill_loop(part, loop) / restore_from_reference()  close a hole by ear clipping, or with the triangles a reference
                                                       mesh has there (exact repair of an accidentally deleted face)
+    split_by_reference(part, refs)                    a part cut by which reference mesh has each triangle
     skins_by_reference(part, ref, bone_map)           per-vertex bone influences copied from a reference mesh whose
-                                                      vertices coincide (a kitbash of stock parts), names mapped
+                                                      triangles coincide (a kitbash of stock parts), bones mapped
     rigid(part, bone)                                 every vertex 100 % on one bone
     build_meshes(template, [(part, skins)], material) skinned MDB meshes in the template mesh's vertex layout,
                                                       tangents / binormals from the UVs, split below 65536 vertices
+    model_dir(name)                                   where a user-supplied model folder is ($EDF6VC_MODELS, the release's
+                                                      `models`, the developer's folder)
     add_material(md, template, ...) / add_texture(rab, filename, dds)
                                                       a material copied from a stock one (shader, parameters) with
                                                       new textures, and the texture's HD + .lod archive members
@@ -32,6 +35,7 @@ from __future__ import annotations
 import math
 import os
 import struct
+import sys
 from dataclasses import dataclass, field, replace
 from typing import Callable, Hashable, Iterable
 
@@ -43,7 +47,8 @@ Vec3 = tuple[float, float, float]
 Vec2 = tuple[float, float]
 Skin = tuple[tuple[int, float], ...]       # (bone, weight) pairs, weights summing to 1
 MAX_VERTS = 0xFFFF                          # u16 index buffers: fewer than 65536 vertices per mesh
-WELD = 1e-5                                 # positions closer than this are one point (OBJ exports are exact)
+WELD = 1e-4                                 # m: positions closer than this are one point (stock vertices, half
+                                            # floats, are >= 1e-3 apart; OBJ exports round to 1e-6)
 
 
 class ObjError(Exception):
@@ -77,9 +82,53 @@ def norm(a: Vec3) -> Vec3:
     return (a[0] / n, a[1] / n, a[2] / n) if n > 1e-12 else (0.0, 0.0, 0.0)
 
 
+class _Welder:
+    """Positions within WELD of a point seen earlier get that point's key (a grid of WELD cells, the 27 around a
+    position searched): plain rounding would split two copies of one point that straddle a cell edge (an OBJ's
+    6-decimal 0.995605 and the stock half float 0.99560546875)."""
+
+    def __init__(self) -> None:
+        self.cells: dict[tuple[int, int, int], list[tuple[Vec3, tuple[int, int, int]]]] = {}
+
+    def key(self, p: Vec3) -> tuple[int, int, int]:
+        c = (math.floor(p[0] / WELD), math.floor(p[1] / WELD), math.floor(p[2] / WELD))
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    for q, k in self.cells.get((c[0] + dx, c[1] + dy, c[2] + dz), ()):
+                        if abs(q[0] - p[0]) <= WELD and abs(q[1] - p[1]) <= WELD and abs(q[2] - p[2]) <= WELD:
+                            return k
+        self.cells.setdefault(c, []).append((p, c))
+        return c
+
+
+_WELDER = _Welder()
+
+
 def wkey(p: Vec3) -> tuple[int, int, int]:
-    """The weld key of a position."""
-    return (round(p[0] / WELD), round(p[1] / WELD), round(p[2] / WELD))
+    """The weld key of a position: equal for positions within WELD of each other (one process-wide welder, so keys
+    compare across parts and reference meshes)."""
+    return _WELDER.key(p)
+
+
+# ------------------------------------------------------------------------------------------ model folders
+
+DEV_MODELS = r'D:\APP\edf6-models'        # the developer's model folder
+
+
+def model_roots() -> list[str]:
+    """Where user-supplied models are looked for, in order: $EDF6VC_MODELS; `models` next to the installer (the
+    frozen exe's folder in a release, the repository root otherwise: tools/build_release.py bundles it there);
+    the developer's folder."""
+    here = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else         os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+    roots = [os.environ.get('EDF6VC_MODELS', ''), os.path.join(here, 'models'), DEV_MODELS]
+    return [os.path.normpath(r) for r in roots if r]
+
+
+def model_dir(name: str) -> str | None:
+    """The first `<root>/<name>` folder of model_roots() that exists, None when none does (the model is not installed:
+    callers skip what needs it, with a message)."""
+    return next((os.path.join(r, name) for r in model_roots() if os.path.isdir(os.path.join(r, name))), None)
 
 
 # ------------------------------------------------------------------------------------------ OBJ / MTL
@@ -381,6 +430,19 @@ def merge(parts: list[Part], name: str | None = None) -> Part:
     return out
 
 
+# ------------------------------------------------------------------------------------------ reference meshes
+
+@dataclass(frozen=True)
+class RefCorner:
+    """A corner of a reference mesh's triangle: what a coinciding OBJ corner can take from it."""
+    pos: Vec3
+    normal: Vec3
+    skin: Skin
+
+
+RefTri = tuple[RefCorner, RefCorner, RefCorner]
+
+
 # ------------------------------------------------------------------------------------------ holes
 
 @dataclass
@@ -459,9 +521,9 @@ def fill_loop(part: Part, loop: list[int]) -> Fill:
     return Fill(part.name, pts, [(pts[a], pts[b], pts[c]) for a, b, c in tris], 'ear-clip')
 
 
-def restore_from_reference(part: Part, ref: list[tuple[tuple[Vec3, Vec3], ...]], tol: float = 1e-3) -> list[Fill]:
+def restore_from_reference(part: Part, ref: list[RefTri], tol: float = 1e-3) -> list[Fill]:
     """Close holes of `part` with the triangles of a reference mesh it was copied from: every reference triangle
-    ((position, normal) x 3, game-space winding) whose corners all coincide (within `tol`) with points of `part`, that
+    (RefTri, game-space winding) whose corners all coincide (within `tol`) with points of `part`, that
     `part` lacks, and that has an edge on `part`'s open boundary, is added (repeated until none is left, so a hole
     several triangles deep closes from its rim inward). New vertices take the part's position and the uv of the face
     beside the hole, the reference's normal. One Fill per closed hole (triangles grouped by shared edges)."""
@@ -488,7 +550,7 @@ def restore_from_reference(part: Part, ref: list[tuple[tuple[Vec3, Vec3], ...]],
         have = {frozenset(wkey(part.verts[i].pos) for i in t) for t in part.tris}
         new = 0
         for tri in ref:
-            ids = [match(p) for p, _n in tri]
+            ids = [match(c.pos) for c in tri]
             if any(i is None for i in ids):
                 continue
             ks = [wkey(part.verts[i].pos) for i in ids]  # type: ignore[index]
@@ -504,8 +566,8 @@ def restore_from_reference(part: Part, ref: list[tuple[tuple[Vec3, Vec3], ...]],
                 if face is not None:
                     uvs[k], uvs[(k + 1) % 3] = part.verts[face[1]].uv, part.verts[face[0]].uv
             base = len(part.verts)
-            for i, (_p, n), uv in zip(ids, tri, uvs):
-                part.verts.append(Vertex(part.verts[i].pos, norm(n), uv))  # type: ignore[index]
+            for i, c, uv in zip(ids, tri, uvs):
+                part.verts.append(Vertex(part.verts[i].pos, norm(c.normal), uv))  # type: ignore[index]
             part.tris.append((base, base + 1, base + 2))
             have.add(frozenset(ks))
             added.append(tuple(part.verts[i].pos for i in ids))  # type: ignore[arg-type, index]
@@ -539,36 +601,55 @@ def rigid(part: Part, bone: int) -> list[Skin]:
     return [((bone, 1.0),)] * len(part.verts)
 
 
-def skins_by_reference(part: Part, ref: list[tuple[Vec3, Skin]], bone_map: Callable[[int], int],
-                       tol: float = 1e-3) -> list[Skin]:
-    """Each vertex's influences from the reference vertex at its position (nearest within `tol`; a reference with
-    several vertices there must agree), bones mapped through `bone_map` (influences landing on the same bone summed).
-    A vertex with no reference vertex there raises."""
-    grid: dict[tuple[int, int, int], list[int]] = {}
-    for i, (p, _s) in enumerate(ref):
-        grid.setdefault(tuple(int(math.floor(c / tol)) for c in p), []).append(i)  # type: ignore[arg-type]
-    out: list[Skin] = []
-    missing = 0
-    for v in part.verts:
-        c = [int(math.floor(x / tol)) for x in v.pos]
-        best, bi = tol, None
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
-                    for i in grid.get((c[0] + dx, c[1] + dy, c[2] + dz), []):
-                        e = max(abs(ref[i][0][k] - v.pos[k]) for k in range(3))
-                        if e <= best:
-                            best, bi = e, i
-        if bi is None:
-            missing += 1
-            out.append(())
+def split_by_reference(part: Part, refs: dict[str, list[RefTri]]) -> dict[str, Part]:
+    """`part` cut by which reference mesh (name -> its triangles) has each triangle (same three welded positions):
+    an OBJ object may mix pieces the source model draws with different materials. A triangle no reference has
+    goes under the key ''."""
+    owner: dict[frozenset, str] = {}
+    for name, tris in refs.items():
+        for t in tris:
+            owner.setdefault(frozenset(wkey(c.pos) for c in t), name)
+    return {str(k): v for k, v in split_part(part, lambda t: owner.get(frozenset(wkey(p) for p in t), '')).items()}
+
+
+def skins_by_reference(part: Part, ref: list[RefTri], bone_map: Callable[[int], int]) -> list[Skin]:
+    """Each vertex's influences from the reference mesh `part` was copied from: from the corner at its position of the
+    reference triangle with the same three (welded) positions as a triangle using the vertex (a point where several
+    bones' pieces meet carries one skin per piece; the face says which), bones mapped through `bone_map` (influences
+    landing on the same bone summed). A vertex in no matching triangle takes the skin of another vertex at its point
+    that has one, or the reference's skin there when all reference corners at that point agree; else it raises."""
+    faces: dict[frozenset, RefTri] = {}
+    for t in ref:
+        faces.setdefault(frozenset(wkey(c.pos) for c in t), t)
+    found: list[Skin | None] = [None] * len(part.verts)
+    for t in part.tris:
+        hit = faces.get(frozenset(wkey(part.verts[i].pos) for i in t))
+        if hit is None:
             continue
+        at = {wkey(c.pos): c.skin for c in hit}
+        for i in t:
+            if found[i] is None:
+                found[i] = at[wkey(part.verts[i].pos)]
+    at_point: dict[tuple[int, int, int], set[Skin]] = {}
+    for t in ref:
+        for c in t:
+            at_point.setdefault(wkey(c.pos), set()).add(c.skin)
+    for i, f in enumerate(found):     # a vertex whose faces the reference triangulates differently: its point's skin
+        if f is None:
+            k = wkey(part.verts[i].pos)
+            same = [found[j] for j, v in enumerate(part.verts) if found[j] is not None and wkey(v.pos) == k]
+            options = at_point.get(k, set())
+            found[i] = same[0] if same else (next(iter(options)) if len(options) == 1 else None)
+    missing = sum(f is None for f in found)
+    if missing:
+        raise ObjError(f'{part.name}: {missing} of {len(part.verts)} vertices match no reference triangle, and their '
+                       f'point no single reference skin')
+    out: list[Skin] = []
+    for f in found:
         acc: dict[int, float] = {}
-        for b, w in ref[bi][1]:
+        for b, w in f:  # type: ignore[union-attr]
             acc[bone_map(b)] = acc.get(bone_map(b), 0.0) + w
         out.append(tuple(sorted(acc.items(), key=lambda bw: -bw[1])))
-    if missing:
-        raise ObjError(f'{part.name}: {missing} of {len(part.verts)} vertices have no reference vertex within {tol}')
     return out
 
 
