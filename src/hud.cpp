@@ -581,18 +581,46 @@ void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,fl
     }
 }
 
-// The stores line: each store's name and rounds, the picked one in brackets.
-void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
-    wchar_t text[128]=L"";
+// The stores: each store's name and rounds, the picked one in brackets, and the flares in the air.
+void StoresText(wchar_t* text,std::size_t size,const PlayerJetReadout& j) noexcept {
+    text[0]=L'\0';
     std::size_t at=0;
     for(int i=0;i<j.stores && i<6;++i) {
-        const int n=_snwprintf_s(text+at,_countof(text)-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
+        const int n=_snwprintf_s(text+at,size-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
                                  j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
         if(n<0)break;
         at+=static_cast<std::size_t>(n);
     }
-    if(j.air)_snwprintf_s(text+at,_countof(text)-at,_TRUNCATE,L"FLARE %d",j.flares);
+    if(j.air)_snwprintf_s(text+at,size-at,_TRUNCATE,L"FLARE %d",j.flares);
+}
+void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
+    wchar_t text[128];
+    StoresText(text,_countof(text),j);
     Format(l,L"%ls",text);
+}
+
+// The cockpit's cue (empty: none): the ground-proximity warning, a missile, a lock, then on the takeoff roll the speed
+// it may lift off from coming up and the cue to pull up (`rotate`: that one is showing).
+void CockpitCue(const PlayerJetReadout& j,wchar_t* cue,std::size_t size,bool* rotate) noexcept {
+    // On the takeoff roll (not in the air: j.ground only says there is ground under it, so the cue stayed on after
+    // takeoff, 2026-10-05): the speed it may lift off from coming up, then the cue to pull up (the user, 2026-10-05).
+    // In the air, the ground-proximity warning (PlayerJetReadout::pullUp) in its place.
+    const int rotateKmh=static_cast<int>(std::lround(j.rotate*3.6f));
+    const bool rolling=!j.air && j.rotate>0.0f && j.speed>1.0f;
+    *rotate=rolling && j.speed>=j.rotate;
+    cue[0]=L'\0';
+    if(j.pullUp)_snwprintf_s(cue,size,_TRUNCATE,L"PULL UP! TERRAIN");
+    else if(j.threat==2)_snwprintf_s(cue,size,_TRUNCATE,L"MISSILE!");
+    else if(j.threat==1)_snwprintf_s(cue,size,_TRUNCATE,L"LOCKED");
+    else if(*rotate)_snwprintf_s(cue,size,_TRUNCATE,L"ROTATE: PULL UP (W / SPACE)");
+    else if(rolling && j.speed>=j.rotate*0.7f)_snwprintf_s(cue,size,_TRUNCATE,L"ROTATE AT %d km/h",rotateKmh);
+}
+// The cue's colour (over `calm` without one): the ground and a missile blink red and white (8 Hz), a lock is yellow,
+// a stall red, the pull-up cue blinks green (4 Hz).
+const float* CueColour(const PlayerJetReadout& j,bool rotate,const float* calm) noexcept {
+    const bool blink=(GetTickCount64()/125)%2==0;
+    return j.pullUp || j.threat==2 ? (blink ? kRed : kWhite) : j.threat==1 ? kYellow : j.stall ? kRed :
+           rotate && blink ? kGreen : rotate ? kYellow : calm;
 }
 
 // The cockpit readout of the jet the player flies (drawn whatever VehicleHud says): at the bottom centre, its
@@ -611,18 +639,12 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Format(info,L"SPD %d km/h    ALT%ls %d m    %ls %d m/s    HP %d%%",static_cast<int>(std::lround(j.speed*3.6f)),
            j.ground ? L"" : L"*",static_cast<int>(std::lround(alt)),j.climb>=0.0f ? L"UP" : L"DOWN",
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
-    // On the takeoff roll (not in the air: j.ground only says there is ground under it, so the cue stayed on after
-    // takeoff, 2026-10-05): the speed it may lift off from coming up, then the cue to pull up (the user, 2026-10-05).
-    // In the air, the ground-proximity warning (PlayerJetReadout::pullUp) in its place.
     const int rotateKmh=static_cast<int>(std::lround(j.rotate*3.6f));
-    const bool rolling=!j.air && j.rotate>0.0f && j.speed>1.0f,rotate=rolling && j.speed>=j.rotate;
-    wchar_t cue[64]=L"";
-    if(j.pullUp)std::swprintf(cue,64,L"    PULL UP! TERRAIN");
-    else if(j.threat==2)std::swprintf(cue,64,L"    MISSILE!");
-    else if(j.threat==1)std::swprintf(cue,64,L"    LOCKED");
-    else if(rotate)std::swprintf(cue,64,L"    ROTATE: PULL UP (W / SPACE)");
-    else if(rolling && j.speed>=j.rotate*0.7f)std::swprintf(cue,64,L"    ROTATE AT %d km/h",rotateKmh);
-    Format(thr,L"THROTTLE %d%%    G %.1f%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"",cue);
+    wchar_t cue[64];
+    bool rotate=false;
+    CockpitCue(j,cue,_countof(cue),&rotate);
+    Format(thr,L"THROTTLE %d%%    G %.1f%ls%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"",
+           cue[0] ? L"    " : L"",cue);
     StoresLine(arms,j);
     if(j.keys) {
         wchar_t boost[32],brake[32],swap[32];
@@ -646,11 +668,8 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
         Format(keys2,L"TAKE OFF: pull the right stick back (from %d km/h)",rotateKmh);
     }
     info.scale=kTitleScale;info.rgba=kWhite;
-    // The rotate cue blinks green (4 Hz) over the throttle line's cyan; the pull-up warning red and white (8 Hz).
-    const bool blink=(GetTickCount64()/125)%2==0;
     thr.scale=kLineScale;
-    thr.rgba=j.pullUp || j.threat==2 ? (blink ? kRed : kWhite) : j.threat==1 ? kYellow : j.stall ? kRed :
-             rotate && blink ? kGreen : rotate ? kYellow : kCyan;
+    thr.rgba=CueColour(j,rotate,kCyan);
     arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kWhite;
     keys.scale=keys2.scale=kLineScale*0.85f;keys.rgba=keys2.rgba=kWhite;
     info.w=info.h=thr.w=thr.h=arms.w=arms.h=keys.w=keys.h=keys2.w=keys2.h=0.0f;
@@ -929,6 +948,30 @@ void FighterHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     }
     if(Cfg().playerJetGunSight)GunSight(drawer,ctx,vp,width,height,s,y);
     if(Cfg().playerJetThreatHud)ThreatRing(drawer,ctx,text,vp,width,height,s,y,lines,at);
+}
+
+// With the flight HUD on (ini PlayerJetFlightHud; the user, 2026-10-05: "飞机底部的旧hud可以删了吧") the old cockpit
+// panel goes: its speed, height, climb and g are the HUD's boxes (SpeedAltBoxes), its HP the game's own vehicle bar,
+// its key list the README's. What only it showed stays, as HUD text without a panel under the HUD's centre: one line
+// of the throttle, the stores (the picked one in brackets) and the flares, and over it, only while there is one, the
+// warning (STALL, PULL UP, MISSILE!, LOCKED, the takeoff's cue) in the panel's colours.
+void CockpitStrip(Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,int* at) noexcept {
+    if(*at+2>kMaxLines)return;
+    Line& warn=lines[(*at)++];
+    Line& arms=lines[(*at)++];
+    wchar_t cue[64],stores[128];
+    bool rotate=false;
+    CockpitCue(j,cue,_countof(cue),&rotate);
+    StoresText(stores,_countof(stores),j);
+    Format(warn,L"%ls%ls%ls",j.stall ? L"STALL" : L"",j.stall && cue[0] ? L"    " : L"",cue);
+    Format(arms,L"THR %d%%    %ls",static_cast<int>(std::lround(j.throttle*100.0f)),stores);
+    warn.scale=kTitleScale;warn.rgba=CueColour(j,rotate,kHud);
+    arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kHud;
+    warn.w=warn.h=arms.w=arms.h=0.0f;
+    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&arms,1);}
+    const float armsH=arms.h>0.0f ? arms.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
+    arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
+    warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
 }
 
 // The landing gear (gear.cpp GearHudLatest; the jets with gear only), at the screen's right over the cockpit's line: its
@@ -1232,7 +1275,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,lines,&at);
-            Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
+            if(Cfg().playerJetFlightHud)CockpitStrip(t,width,height,s,snap.jet,lines,&at);
+            else Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
             GearPanel(drawer,ctx,t,width,height,s,lines,&at,now);
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
