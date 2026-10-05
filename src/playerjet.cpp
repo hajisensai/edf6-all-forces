@@ -892,6 +892,11 @@ constexpr std::uint32_t kRiding=0x80;
 constexpr float kEjectUp=25.0f,kEjectCarry=0.3f,kEjectFrom=15.0f;   // m/s up; share of the jet's; m over the ground
 constexpr float kChuteSink=6.0f,kChuteBleed=0.6f,kChuteBoost=3.0f;   // m/s down at most; a second; m/s up in a frame
 constexpr ULONGLONG kEjectWaitMs=2000,kChuteMostMs=180000;
+// The parachute ends on any ground contact (support 2 standing, 1 sliding down a slope: it hung on there) or within
+// kChuteLand m of the ground, and when the player cuts it (ini PlayerJetChuteCutKey) after kChuteCutAfterMs (the
+// user, 2026-10-05: it should go on landing, and I should be able to cut it in the air).
+constexpr float kChuteLand=1.5f;
+constexpr ULONGLONG kChuteCutAfterMs=500;
 enum class Eject { none, pending, chute };
 // The catch (Cfg().playerJetCatch; the user: "don't wait till they land, catch them in the air"; 2026-10-05: "it
 // should fly in from outside"): kCatchAfterMs into the parachute, with the player kCatchClear over the ground, a jet
@@ -1052,8 +1057,11 @@ void EjectTick() noexcept {
     }
     Catch(h,ms);
     const unsigned char support=h[kHumanSupport];
-    if(ms-bail.at>kChuteMostMs || (support==2 && ms-bail.at>300) || vel[1]>bail.vy+kChuteBoost) {
-        Log("PJET parachute: %s",support==2 ? "landed" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
+    const float clear=GroundClearance(reinterpret_cast<const float*>(h+kPosition));
+    const bool landed=ms-bail.at>300 && (support!=0 || (clear!=kNoGround && clear<kChuteLand));
+    const bool cut=ms-bail.at>kChuteCutAfterMs && KeyDown(Cfg().playerJetChuteCutKey);
+    if(ms-bail.at>kChuteMostMs || landed || cut || vel[1]>bail.vy+kChuteBoost) {
+        Log("PJET parachute: %s",landed ? "landed" : cut ? "cut by the player" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
         bail.state=Eject::none;
         return;
     }
