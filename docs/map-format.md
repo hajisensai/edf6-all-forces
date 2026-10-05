@@ -118,18 +118,21 @@ starts with int kind, centre vec3, half-extent vec3)
 | piece | X | Z | Y |
 |---|---|---|---|
 | ig_heigen507_2 (ground, record 0) | -1250 .. 1250 | -1250 .. 1250 | -44.8 .. 21.4 |
-| enkeibottom (203) | -1750 .. 1250 | 1250 .. 1750 | 24 .. 219 |
-| enkeileft (204) | -1750 .. -1250 | -1750 .. 1250 | 57 .. 167 |
-| enkeiright (205) | 1250 .. 1750 | -1250 .. 1750 | 68 .. 190 |
-| enkeiup (206) | -1250 .. 1750 | -1750 .. -1250 | 6 .. 164 |
+| enkeibottom (203) | -1750 .. 1250 | 1250 .. 1750 | -16.6 .. 13.9 |
+| enkeileft (204) | -1750 .. -1250 | -1750 .. 1250 | -44.8 .. 10.4 |
+| enkeiright (205) | 1250 .. 1750 | -1250 .. 1750 | -33.3 .. 11.8 |
+| enkeiup (206) | -1250 .. 1750 | -1750 .. -1250 | -37.9 .. 1.8 |
 
 The four enkei pieces form a 500 m pinwheel ring around the 2500 m ground; the whole block is 3500 x 3500.
+(Y corrected 2026-10-05 from the collision meshes, docs/map-collision.md; the earlier Y column, 24..219 etc., was
+misread. The ring is low ground; the horizon's mountains are the far-only ig_farmt ring.)
 All five sit at position (0,0,0) in the map, so these are world extents.
 
 Tiling options: ground-only copies at multiples of 2500 make a continuous flat field, but the original enkei hills then
 stand on the neighbouring tiles' edges (drop them by not copying, or accept the ridge). Copying the whole block
 (0, 203-206, plus far 207/208) at multiples of 3500 keeps every piece intact, with enkei hills between tiles; the outer
-enkei edges of neighbours meet at +-1750 but their heights are not designed to match (M: likely a visible seam).
+enkei edges of neighbours meet at +-1750 but their heights are not designed to match (H: up to 33.9 m apart, seen
+in game as see-through steps; tools/make_bigmap.py makes the block periodic, docs/map-collision.md).
 
 ## Unknowns / risks
 
