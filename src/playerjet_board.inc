@@ -86,7 +86,12 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
         // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
         const float* pos=reinterpret_cast<const float*>(v+kPosition);
         const float speed=std::fmax(Len(j.vel),j.kind->rotate+kCatchOver);
-        catchFlight=CatchFlight{v,{pos[0]+j.vel[0]*5.0f,pos[1]+j.vel[1]*5.0f,pos[2]+j.vel[2]*5.0f},speed};
+        // Its heading level along its flight (the catch's formation attitude and the speed the player takes it over
+        // at: AutoFly, Board); the drift Catch refreshes every frame.
+        float f[3]={j.vel[0],0.0f,j.vel[2]};
+        if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
+        catchFlight=CatchFlight{v,{pos[0]+j.vel[0]*5.0f,pos[1]+j.vel[1]*5.0f,pos[2]+j.vel[2]*5.0f},speed,{0.0f,0.0f,0.0f},
+                                {f[0],0.0f,f[2]}};
         bail.caught=ObjRef::Of(v);bail.caughtAt=GameMs();
         Log("PJET v=%p left in the air: it comes back to catch the player",v);
         return;

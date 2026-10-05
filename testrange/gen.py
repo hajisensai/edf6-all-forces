@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+sys.path.insert(0, os.path.join(HERE, '..', 'tools'))   # the ground vehicles' builders (GROUND_MISSION)
 import jet_models  # noqa: E402
 import ledger  # noqa: E402
 import rmpa  # noqa: E402
@@ -95,6 +96,8 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
+    ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
+    ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
@@ -117,6 +120,8 @@ VEHICLES: list[tuple[str, str]] = [
 # marks them as ours: install/uninstall only ever touch files with it.
 DERIVED_PREFIX = 'edf6tr_'
 DERIVED: dict[str, str] = {
+    'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
+    'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
     'edf6tr_v506_heli_mission': 'V506_HELI',
     'edf6tr_v506_heli_edf6benefits_mission': 'V506_HELI_EDF6BENEFITS',
     'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
@@ -242,7 +247,13 @@ GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to 
 
 def grand_battle(plan: Plan) -> Plan:
     # Parked jets the player can board, several of each (the user, 2026-10-05: more planes on the ground to get in).
-    plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3, 'vehicle403_tank_mission': 1}
+    # Every vehicle we added that the player drives (the user, 2026-10-05): the player's jets, the Katyusha and the
+    # howitzer, the helicopters the range makes placeable, the tanks and the flak EDF6AutoTurret arms, the Depth Crawler.
+    plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3,
+                     'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2,
+                     'edf6tr_v506_heli_mission': 1, 'edf6tr_vehicle409_heli_mission': 1, 'edf6tr_vehicle410_heli_mission': 1,
+                     'edf6tr_v602_heli_mission': 1, 'vehicle403_tank_mission': 1, 'vehicle404_bigtank': 1,
+                     'v603_flak_mission': 1, 'edf6tr_vehicle502_groundrobo_mission': 1}
     plan.friends = {'edf6tr_jet_fighter_mission': 2, 'edf6tr_jet_interceptor_mission': 1, 'edf6tr_jet_strike_mission': 2,
                     'vehicle403_tank_mission': 3}
     plan.waves.enabled = False
@@ -357,6 +368,9 @@ def spots_for(plan: Plan, lay: Layout) -> list[tuple[str, bool, rmpa.Point]]:
 # vehicle spots are 15 m apart round the player, and several parked jets side by side would lock wings at the start
 # (the grand battle parks seven, the user, 2026-10-05). The other vehicles take the spots left, nearest first.
 JET_GAP = 30.0
+# The other vehicles kept JET_GAP apart like the jets: the helicopters' rotors, the big tank.
+WIDE = frozenset({'edf6tr_v506_heli_mission', 'edf6tr_v506_heli_edf6benefits_mission', 'edf6tr_vehicle409_heli_mission',
+                  'edf6tr_vehicle410_heli_mission', 'edf6tr_v602_heli_mission', 'vehicle404_bigtank'})
 
 
 def _apart(a: rmpa.Point, b: rmpa.Point) -> float:
@@ -370,7 +384,7 @@ def spaced(chosen: list[tuple[str, bool]], points: list[rmpa.Point]) -> list[rmp
     jets: list[rmpa.Point] = []
     out: list[rmpa.Point | None] = [None] * len(chosen)
     for i, (sgo, _) in enumerate(chosen):
-        if sgo not in JETS:
+        if sgo not in JETS and sgo not in WIDE:
             continue
         p = next((q for q in left if all(_apart(q, j) >= JET_GAP for j in jets)), left[0])
         left.remove(p)
@@ -628,10 +642,19 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
     ]
 
 
+# Our ground vehicles made placeable (the user, 2026-10-05: every vehicle we added on the map, to drive): the call-in
+# SGO their own tool makes (tools/make_katyusha.py, make_artillery.py: its model and weapons are what that tool, and
+# the installer, write) turned into a mission one (as_mission_sgo).
+GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery'}
+
+
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
     if sgo_name in JETS:
         return jet_sgo(game, sgo_name, jet_model)
+    if sgo_name in GROUND_MISSION:
+        import importlib
+        return as_mission_sgo(importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game))
     stock = DERIVED.get(sgo_name)
     if stock:
         return as_mission_sgo(game.read('OBJECT', stock + '.SGO'))

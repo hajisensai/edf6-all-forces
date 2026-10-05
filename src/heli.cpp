@@ -2253,6 +2253,11 @@ void RescueStep() noexcept {
 
 void PressBoardButton(unsigned char* human) noexcept { PressBoard(human); }
 
+bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noexcept {
+    if(!reachOk || seat>=SeatCount(v))return false;
+    __try { return RidingPoint(SeatAt(const_cast<unsigned char*>(v),seat),at,reach); } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 void RescueTick() noexcept {
     if(!profileOk || rescue.frame==GameFrame())return;   // it flies the heli through Fly; at most once a frame
     rescue.frame=GameFrame();

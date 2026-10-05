@@ -107,7 +107,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
   - 进入附着或布娃娃状态（`+0x39C != 0`）。
   - 玩家自己往上飞，也就是翼装或剑兵推进，竖直速度一帧涨 3 m/s 以上。
   - 超过 3 分钟。
-- 没有降落伞模型，只有减速效果。
+- 伞开（越过最高点）时显示伞衣模型，见 §8。
 
 **空中接人**（ini `PlayerJetCatch`，默认开；2026-10-05 改为从场外飞进来）：
 - 每个任务开始时预载两种玩家飞机的车辆文件（`PreloadPlayerJets`）。
@@ -121,7 +121,40 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 - 离玩家 9 m 以内时每帧替玩家按上车键（`PressBoardButton`）。上车后飞机按原来的速度交给玩家，伞降结束。
 - 45 秒没接上就放弃：那架飞机空着飞走、落下，伞降继续。
 
-## 8. 战斗机 HUD 的数据（2026-10-05）
+## 8. 伞衣模型（2026-10-05）
+
+EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（`tools/edfre.py` + capstone），没有实机验证。
+
+**挑哪种对象来显示一个静态模型**（Root.cpk 里全部 `OBJECT/*.SGO` 的 `xgs_scene_object_class` 都过了一遍）：
+
+| 候选 | 结论 |
+|---|---|
+| `Decoy`（招募员人偶，`jet_carrier.cpp` 用过） | 不用。`BasicAnimationCharacter`，有布娃娃刚体、受伤动画、阵营 4 会被敌人当目标；还要骨架和 `.cas` 动画对得上模型 |
+| `RouteGuide_Arrow`（`GUIDEARROW.SGO`） | 不用。更新 `0x5C9F20` 每帧调寻路对象 `+0x1B0`（没有就空指针），模式 1 没有目标时自删（`0x5C9DA0`），朝向每 30 帧被路线改写（`0x5CA8B0`） |
+| `Humanoid_BigGreyBoss_EffectModel` | 不用。更新里 `0x44D740` 读 owner 弱指针，没有 owner 时读绝对地址 `0x2F8`，必崩 |
+| **`FarEventObject`**（远景的工厂、挖掘机，如 `EV601_PLANT.SGO`） | **用它**，见下 |
+
+**FarEventObject**（vtable `0x17D5DA0`，工厂 `0x5C3A00`：`new 0xAD0` → GameObjectBase ctor `0x545670(obj, initparam)`）（H）：
+- ctor 置 `+0xAC0..+0xAC8` 缩放为 (1,1,1)，读 SGO 的 `setting`（`0x5C3E50`）：`scale`、`default_animation`（可选，查不到键就跳过），再调 `0x5C4970`。
+- `0x5C4970` 只在 SGO 有 `ragdoll` 键时才建物理体；**没有 `ragdoll` 就没有刚体**。原版远景对象都没有这个键。
+- 更新（vtable 槽 5，`0x5C4FB0`）：GameObjectBase 基类更新 `0x54BE40`，然后把 `+0x60..+0x9F`（对象矩阵）乘缩放写进渲染矩阵（`0x1100B90(obj+0x660, …)`），有动画就推进 `+0xAA0`。**它从不写 `+0x60`**，所以插件每帧写这块矩阵就能让它跟着走。
+- `animation_model` 写 `[[mrab, mdb], 0, 0]`（不带 `.cas`、动画数据、伤害网格）：`CollapseModel`、`RouteGuide_Arrow`、BigGreyBoss 特效模型的原版 SGO 都是这种写法。
+
+**插件**（`src/playerjet.cpp` Chute*；模型 `pylib/chute_model.py`，安装 `tools/make_chute.py`）：
+- 任务开始时，若 `Mods/OBJECT/EDF6VC_CHUTE.SGO` 存在就预载（与接人飞机同一时机，`PreloadPlayerJets`）。
+- 伞开时 `CreateObject(mgr, 矩阵, L"app:/object/edf6vc_chute.sgo", InitParamBase@SceneObject)`，核对 vtable 是 FarEventObject，经 `SetTeam` 设为中立阵营 3（与谁都不敌对，M）。
+- 每帧矩阵 = 玩家脚下位置 + 4 m，直立，正面朝水平漂移方向（漂移低于 0.5 m/s 时保持上一次的朝向）。
+- 伞降结束（着地、自己飞走、被接走、死亡、附着、超时、接人飞机没了）时删除（`0x118A1B0`）；任务开始时只忘掉指针（对象随上一任务一起没了）。日志行 `CHUTE made / gone: 原因 / not made: 原因`。
+- 安装时核对 `0x5C4FB0` 的开头字节，并核对 vtable 槽 5 指向它；对不上就不做伞衣（`HOOK player jets … chute=0`）。
+
+**模型**：半椭球伞衣，直径 7.5 m、高 3 m、底部开口，内外两层（各自朝外/朝内，互相错开 2 cm，背面剔除开不开都能看见）；16 根伞绳从伞缘收到玩家肩部（每根两条十字交叉的双面细条）。材质整个照搬 Grape（`VEHICLE401_STRIKER.MRAB`）座椅布料：`snd_BRDF_Common_SeparateOcc`，`v401_interiorSheet_*` 128 px 平铺布纹，1 m 一个重复；遮蔽贴图的 texcoord1 钉在 `v401_inner_occ.DDS` 最亮的一个 DXT1 块上。三角形绕序按原版：`cross(b−a, c−a)` 与顶点法线同向（V401 / V506 每个三角形都如此）；切线 = dP/du，副法线 = dP/dv。
+
+**待实机确认**：
+- 伞衣确实显示、位置正确，玩家和子弹都穿得过去，敌人不打它（M：没有刚体与中立阵营都是静态结论）。
+- 插件写矩阵与对象更新的先后：若插件在对象更新之后写，渲染矩阵晚一帧（刚弹射时水平速度大，伞衣会落后约 1 m）。
+- 远处的剔除包围盒取 bone 的 half/centre（已按模型重算）。
+
+## 9. 战斗机 HUD 的数据（2026-10-05）
 
 每帧 `Fly` 在 `Stores` 之后调 `Sight`（机头、航迹方向、机炮弹道读自机炮武器、弹着圈、按锁定点差分出目标速度后的提前量）和
 `Threats`（`MissilesHomingAt` 来袭导弹的位置、`jet::LockersOf` 锁定本机的敌机位置），存进 `PJet::sym`，`PlayerJetHud` 随读数发布；
@@ -136,11 +169,11 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 - `Ground`：`GearDown` 为假时（机腹着地）只减速（10 m/s²），不转向、不起飞。
 - `PilotGear`：读键（`PlayerJetGearKey`）/ 手柄位（`PlayerJetGearButton`，座位按键位 `seat+0x2E8`，docs/stores-re.md §4），交给 `gear.cpp PlayerGear`；地面上收起被拒绝。
 
-## 9. 插件的其它飞机也能开（2026-10-05，`src/playerjet_kinds.h`、`src/playerjet_board.inc`）
+## 10. 插件的其它飞机也能开（2026-10-05，`src/playerjet_kinds.h`、`src/playerjet_board.inc`）
 
 用户：「所有飞机我们都能开对吧……逻辑能复用的复用，不能复用的就写。我希望能开是真正的每个都很好用」。
 
-### 9.1 走同一条路
+### 10.1 走同一条路
 
 - 可登机的机种表是 `playerjet_kinds.h` 的 `kBoardable`（机体 `jet::Body` → 飞法 wing / rotor → 自带武器 → 性能 `Perf`）。性能由 NPC 自己飞的那一行（`jet_internal.h kKinds`，轰炸机用原版轰炸机 180 m/s 的一行 `kStockBomber`）按固定规则换算，规则在文件头；同规则算出的 NPC 战斗机 / 攻击机与手调的 `kKinds[0] / [1]` 每项相差 ≤ 10%，`playerjet_kinds.inc` 里 `static_assert` 检查；`tools/pjet_kinds.cpp`（`cmake --build build --target pjet_kinds`）打印整张表并检查可飞性。
 - 识别：`BodyOf == PluginBody::jet` 时 `KindOf` 走 `BoardKindOf`（标记 → `kBodies` 行；7001 被攻击机和两种接管轰炸机共用，按模型骨骼 `BomberBody` 区分）。敌方机体（`BodyRow::hostile`）没有行。
@@ -148,12 +181,12 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 - 物理步：`body506.cpp` 对 `PluginBody::jet` 先问 `PlayerJetBodyStep`（玩家开着、或它在为玩家降落时写速度），否则照旧 `JetBodyStep`；消息（落水）同理先给 `PlayerJetMessage`，它只接玩家开着的。
 - 持有（`Held` / `PlayerJetHolds`）：玩家在座位上、它在下来接玩家（hail）、在接弹射的玩家、或停在玩家下机的地方。持有期间 `JetFrame` 一开头就返回（燃料、撤离、呼叫的航线都不动），`crew.cpp Crew` 不给它派 NPC。交回 NPC 时 `jet::ResumeNpc` 把这段时间加到 `bornAt` 上（燃料和出击计时停住）、清掉运动状态、模式回到巡逻（贴地则起飞；撤离、投弹、回母舰保持）。
 
-### 9.2 上机
+### 10.2 上机
 
 - `crew.cpp FindSeatHook / PromptHook` 原来对一切 `IsJet` 直接拒绝；现在 `PlayerJetBoardable` 为真时照常走「挤掉 NPC」：我方阵营、没在被删除 / 自爆、离地 ≤ 12 m（`GroundClearance`）、速度 ≤ 8 m/s（玩家记录的实测速度，否则 jet.cpp 的 `m.real`）。座位检查按「无主载具」队伍 5 做（`OwnTeam`），因为 NPC 飞行员把它放在友军队伍 2，原版检查不让玩家进 2。喷气机只有一个座位，NPC 被 `kSeatKick` 踢掉（死亡）。
 - 呼叫（`HailTick`，ini `PlayerJetHailKey`）：步行时按键，最近的我方插件飞机（NPC 在飞、未撤离）下来。旋翼机：选身边一处平地（`PickSpot`），用 NPC 的 `Hover` 平飞过去（离得远时保持至少「落点 + 80 m」高度），近了垂直落下，停住后等。固定翼：`PlanStrip` 每帧评估 12 个候选（6 个环 × 12 个方位 × 12 个航向，按环由近到远，一环内有可用的就停），条件见代码常量；然后 `Approach`：先飞到 1500 m 外的进近入口并对准跑道（目标点在入口后方，距离一半处，把航线拉到跑道延长线上），进入 400 m 且航迹与跑道夹角 < 32° 转入五边，沿 4° 下滑道以「起飞速度 + 10」飞（`SteerAt`：自动驾驶的瞄准转向 + 油门/减速板控速），由 `Air` 的接地判定落地（下沉 ≤ 10 m/s、机翼水平、速度 ≤ landMax）；过头 100 m、偏离 150 m、高于下滑道 80 m 或低 40 m 都复飞，三次失败作罢。`Rollout` 沿机头滑跑、按 `sqrt(2·8·剩余距离)` 收油门刹到停止点。停下后等 90 s（NPC 还在座位上），超时交回。
 
-### 9.3 武器
+### 10.3 武器
 
 - 机炮和挂载同玩家战斗机。挂载循环里多一项「特殊挂载」（`Store::weapon` 为空，`stores.cpp` 的锁定 / 扳机函数原本就对空武器什么都不做）：
   - **BOMB BAY**：喷气机还带着接管来的弹仓（`BayState::ifc` 且没开过）。副射击 → `jet::PlayerOpenBay`：`bombAt` = 当前 CCIP 落点，`bombDir` / `bombSpeed` = 此刻的水平速度，`bayFrom = -reach`，所以第一颗炸弹瞄 CCIP，之后每帧 `BayFrame` 按原版轰炸机每帧前移一个速度（`docs/airstrike-re.md`）。
@@ -161,13 +194,13 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
   - **DRONES**（三种航母）：`jet::PlayerLaunchDrone` 复用 NPC 的发射（`LaunchOne`，从 `LaunchDrones` 抽出来，行为不变），同时给航母记 `CarrierState::order`：它放出的无人机以这一点（抬高 40 m）为锚点、400 m 内找目标（`jet.cpp JetFrame`）；目标键 `RecallDrones`。
   - **CHARGE**（自爆 / 人偶无人机）：副射击后 100 ms 内每帧置 0x2021（2 号挂架，炸药，同 `jet_carrier.cpp Blast`），300 ms 后 `Kill`（原版死亡消息，踢出座位，玩家按 §7 弹射）。
 
-### 9.4 下机（`Left`）
+### 10.4 下机（`Left`）
 
 - 地面上（`Phase` 不是 air）：`keep`，原地等玩家。
 - 空中且弹射、固定翼、`PlayerJetCatch=1`：这架飞机本身就是接机的那架（`catchFlight` / `bail.caught` 指向它，§7 的 `AutoFly` / `Catch` 原样用）；没接上（玩家落地、死亡，或 45 s 放弃）就交回 NPC。
 - 其它空中情况：`HandBack`：座位空则 `RideAi(false)` 坐上 NPC，`ResumeNpc`。
 
-### 9.5 验证状态
+### 10.5 验证状态
 
 - 静态：`build.cmd` 无警告（/W4 /WX）；`static_assert`（行一致性、派生与玩家战斗机/攻击机的偏差）；`build\pjet_kinds.exe` 13 行全部通过；`tools/selftest.py` 新增 `every_npc_aircraft_boardable`（每个我方喷气机体都有行、敌方没有、ini 键被读且有文档）。
 - 未实机验证（需要在游戏里逐项看）：

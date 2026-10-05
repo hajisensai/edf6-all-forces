@@ -8,6 +8,9 @@ namespace crew {
 bool IsHelicopter(const void* vehicle) noexcept;
 // The player's board button pressed for them (the stock button's code: the nearest seat they may take in reach).
 void PressBoardButton(unsigned char* human) noexcept;
+// Seat `seat`'s riding point (world) and the stock reach round it a human must be within to board it (CanRideSeat);
+// false when they cannot be read.
+bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noexcept;
 // The player's helicopter on the ground, for the cockpit's takeoff cue: its rotor speed and the rotor speed whose
 // lift holds it up (docs/aircraft-re.md: hover = g M / (60 L), 0.288 for the stock lift L 70, M 1).
 struct HeliCue { float rotor,hover; };
