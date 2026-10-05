@@ -63,22 +63,22 @@ struct Carrier {
 };
 Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
-// The jets' nozzles by their mark (pylib/vcobjects.py JETS; their models' measured boxes, jet_models.model_box: the
-// tail's end, the box's centre height): the bomber501 the strike jets and the player's strike jet fly, the interceptor
+// The jets' nozzles by their mark (pylib/vcobjects.py JETS; measured off their models, pylib/jet_models.py tail_nozzle:
+// the end of the fuselage's centre-line cone at its middle height; tools/selftest.py holds this table to it): the bomber501 the strike jets and the player's strike jet fly, the interceptor
 // model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones'. Flame length and
 // width in m; with the afterburner (the player's boost) kBurnerLength times as long.
 struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
 constexpr JetNozzles kJetNozzles[]={
-    {7001.0f,2,{{1.2f,1.6f,-12.2f},{-1.2f,1.6f,-12.2f}},{9.0f,1.6f}},
-    {7002.0f,2,{{1.2f,1.6f,-12.2f},{-1.2f,1.6f,-12.2f}},{9.0f,1.6f}},
-    {7202.0f,2,{{1.2f,1.6f,-12.2f},{-1.2f,1.6f,-12.2f}},{9.0f,1.6f}},
-    {7003.0f,2,{{0.7f,1.05f,-7.9f},{-0.7f,1.05f,-7.9f}},{6.0f,1.0f}},
-    {7020.0f,2,{{0.7f,1.05f,-7.9f},{-0.7f,1.05f,-7.9f}},{6.0f,1.0f}},
-    {7201.0f,2,{{0.7f,1.05f,-7.9f},{-0.7f,1.05f,-7.9f}},{6.0f,1.0f}},
-    {7004.0f,2,{{0.5f,1.07f,-3.8f},{-0.5f,1.07f,-3.8f}},{4.0f,0.7f}},
-    {7006.0f,1,{{0.0f,1.04f,-1.7f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
-    {7007.0f,1,{{0.0f,1.04f,-1.7f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
-    {7008.0f,1,{{0.0f,1.04f,-1.7f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
+    {7001.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
+    {7002.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
+    {7202.0f,1,{{0.0f,1.07f,-12.41f},{0.0f,0.0f,0.0f}},{9.0f,1.6f}},
+    {7003.0f,1,{{0.0f,0.69f,-8.07f},{0.0f,0.0f,0.0f}},{6.0f,1.0f}},
+    {7020.0f,1,{{0.0f,0.69f,-8.07f},{0.0f,0.0f,0.0f}},{6.0f,1.0f}},
+    {7201.0f,1,{{0.0f,0.69f,-8.07f},{0.0f,0.0f,0.0f}},{6.0f,1.0f}},
+    {7004.0f,1,{{0.0f,0.97f,-1.78f},{0.0f,0.0f,0.0f}},{4.0f,0.7f}},
+    {7006.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
+    {7007.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
+    {7008.0f,1,{{0.0f,1.33f,-1.5f},{0.0f,0.0f,0.0f}},{1.5f,0.3f}},
 };
 constexpr float kBurnerLength=1.6f;
 

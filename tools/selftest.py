@@ -86,6 +86,49 @@ def team_changes_go_through_set_team() -> None:
     assert raw.search('Put<std::int32_t>(v,kTeam,own);'), 'the pattern no longer sees a raw write'
 
 
+@test
+def range_writes_every_generated_sgo_its_script_creates() -> None:
+    """Each generated object (edf6tr_*) the range's script names is one install writes (testrange/gen.py spawned):
+    the grand battle's script created the enemy fighter, never written, and the game stopped (dump EDF6.exe.79680)."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import rmpa
+    from vcobjects import DEFAULT_GAME, Game
+    game = Game(DEFAULT_GAME)
+    air = gen.Plan()
+    air.air.enabled = True
+    for plan in (gen.grand_battle(gen.Plan()), air, gen.Plan()):
+        lay = gen.layout(rmpa.points(game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')), gen.small_count(plan))
+        named = set(re.findall(r'app:/object/(edf6tr_[a-z0-9_]+)\.sgo', gen.script(plan, lay)))
+        missing = named - {x for x in gen.spawned(plan) if x in gen.DERIVED}
+        assert not missing, f'{plan.scenario or ("air" if plan.air.enabled else "waves")}: never written {sorted(missing)}'
+        assert named or plan.scenario != gen.GRAND, 'the grand battle names no generated object: the check sees nothing'
+
+
+@test
+def jet_nozzles_on_their_models() -> None:
+    """src/booster.cpp kJetNozzles: each mark's nozzle where its model's is (pylib/jet_models.py tail_nozzle), and
+    every jet mark has a row."""
+    import jet_models
+    from vcobjects import DEFAULT_GAME, JETS, Game
+    CARRIER_FILE = 'EDF6VC_CARRIER.MRAB'
+    game = Game(DEFAULT_GAME)
+    rows = {float(m.group(1)): (int(m.group(2)), [float(x) for x in m.group(3, 4, 5)])
+            for m in re.finditer(r'\{(\d+)\.0f,(\d),\{\{([-\d.]+)f,([-\d.]+)f,([-\d.]+)f\}', src('src/booster.cpp'))}
+    bad = []
+    for name, jet in JETS.items():
+        if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == CARRIER_FILE):
+            continue   # the carrier's four nozzles are its own (CarrierFlames); the Primers' fighter flaps: no exhaust
+        if jet.mark not in rows:
+            bad.append(f'{name}: mark {jet.mark} has no nozzle row')
+            continue
+        count, at = rows[jet.mark]
+        want = jet_models.tail_nozzle(game, jet.file)
+        if count != 1 or any(abs(a - b) >= 0.02 for a, b in zip(at, want)):
+            bad.append(f'{name}: {at} (x{count}), the model says {want}')
+    assert not bad, '\n'.join(bad)
+
+
 # ---------------------------------------------------------------- the data
 
 

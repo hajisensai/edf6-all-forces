@@ -329,6 +329,21 @@ def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     return make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r)
 
 
+# The nozzle: the centre line's (|x| < NOZZLE_X) last NOZZLE_DEPTH m. These low-poly models have no nozzle of
+# their own; their fuselage ends in a cone on the centre line, and the flame belongs on its end at its middle
+# height. (Measured off the box before, the height was the box's centre, fins and all: the flame sat inside the
+# upper fuselage, the user, 2026-10-05.)
+NOZZLE_X, NOZZLE_DEPTH = 0.3, 0.6
+
+
+def tail_nozzle(game, file: str | None) -> tuple[float, float, float]:  # noqa: ANN001 - rootcpk.Game
+    """(x, y, z) of a jet model's nozzle, in its frame (x right, y up, z forward): src/booster.cpp kJetNozzles."""
+    line = [p for p in bind_positions(_model_of(game, file)) if abs(p[0]) < NOZZLE_X]
+    end = min(p[2] for p in line)
+    tail = [p[1] for p in line if p[2] < end + NOZZLE_DEPTH]
+    return 0.0, round((min(tail) + max(tail)) / 2, 2), round(end, 2)
+
+
 def fuselage_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game
     """[centre, half extents] of a jet model's fuselage (the vertices within its Recipe.fuselage_x, all with none; the
     default model's within ELEVON_FUSELAGE_X): an NPC jet's collision box (vcobjects.jet_sgo), measured off the model

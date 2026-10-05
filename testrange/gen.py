@@ -677,6 +677,20 @@ def installed(game_root: str) -> Slot | None:
     return next((x for x in SLOTS if ours(game_root, x.mission)), None)
 
 
+def spawned(plan: Plan) -> set[str]:
+    """Every object SGO name (no app:/object/, no .sgo) the mission's script creates: the placed vehicles, the air
+    waves' enemy jet, the grand battle's sky. The generated ones among them must be written (_write_derived) and the
+    placed ones checked for a mission_setup: a script that creates an SGO the game cannot find ends the game (2026-10-05
+    10:40, dump EDF6.exe.79680: the grand battle's CreateFriend of the enemy fighter, never written, faulted in the
+    game's own error stop)."""
+    names = {x for x, _ in placements(plan)}
+    if plan.air.enabled:
+        names.add(AIR_ENEMY)
+    if plan.scenario == GRAND:
+        names |= {sgo.removeprefix('app:/object/').removesuffix('.sgo') for sgo in GRAND_AIR}
+    return names
+
+
 def install(game_root: str, plan: Plan) -> list[str]:
     """Writes the range over plan.slot (and removes it from the other slot). Refuses to touch a
     folder another mod put there."""
@@ -684,7 +698,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
     if os.path.isdir(out) and os.listdir(out) and not ours(game_root, plan.slot):
         raise RuntimeError(f'{out} 已有别的 mod 的文件，不覆盖。请先手动处理。')
     game = Game(game_root)
-    for sgo_name in {s for s, _ in placements(plan)}:
+    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {x for x, _ in placements(plan)}):
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
@@ -697,7 +711,7 @@ def install(game_root: str, plan: Plan) -> list[str]:
     if plan.waves.enabled and plan.waves.enemy == TARGET and not plan.air.enabled:
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
     os.makedirs(out, exist_ok=True)
-    _write_derived(game_root, game, {s for s, _ in placements(plan) if s in DERIVED})
+    _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED})
     with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
         f.write(b'\xef\xbb\xbf' + text.encode('utf-8'))
     with open(os.path.join(out, 'MISSION.RMPA'), 'wb') as f:
