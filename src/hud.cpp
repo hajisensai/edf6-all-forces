@@ -24,6 +24,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
+#include "turretaim.h"
 #include "vecmath.h"
 #include <atomic>
 #include <cmath>
@@ -93,7 +94,8 @@ Work work[kEntries]{};
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
-                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud; };
+                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
+                  bool turret; edf::aimlink::TurretReadoutV1 turretAim; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -1262,6 +1264,57 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
 }
 
+// EDF6AutoTurret's turret the player is at (turretaim.cpp, common/edf/aimlink.h; the user, 2026-10-06: "auto-aim
+// switchable to a lead circle, a lock box on the target I pick"). The lock as the jets' (LockAt: a yellow square closing
+// in while its track settles, then the red diamond). In the lead-circle mode the lead circle (预瞄圈: a ring with a dot
+// where the gun's line must pass for the round to meet the target on its arc) and the gun's bore cross (where its line
+// passes now, at the same range): the cross in the ring, the round meets the target; dim when the round's life does
+// not reach. Under the ring the range and the flight time. Low on the screen the mode and its bindings.
+constexpr float kLeadCircle=22.0f;   // px at 1080 lines
+void ButtonName(int bits,wchar_t* out,int size) noexcept {
+    static const wchar_t* const kNames[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
+    for(int i=0;i<8;++i)if(bits==(1<<i)){wcscpy_s(out,static_cast<rsize_t>(size),kNames[i]);return;}
+    std::swprintf(out,static_cast<std::size_t>(size),L"0x%X",bits);
+}
+void Binding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
+    if(keys)KeyName(key,out,size);
+    else ButtonName(button,out,size);
+}
+void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
+                    const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at) noexcept {
+    namespace link=edf::aimlink;
+    float x,y;
+    if(r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
+    const bool circle=r.ownGun && r.mode==link::Mode::leadCircle;
+    if(circle && r.lead) {
+        const float t=2.0f*s,* c=r.inReach ? kHud : kHudDim;
+        float bx,by;
+        if(sight::ToScreen(vp,r.boreAt,1.0f,width,height,&bx,&by)) {   // the bore cross, its centre open
+            const float b=9.0f*s,g=3.0f*s;
+            Seg(drawer,ctx,bx-b,by,bx-g,by,t,kWhite);Seg(drawer,ctx,bx+g,by,bx+b,by,t,kWhite);
+            Seg(drawer,ctx,bx,by-b,bx,by-g,t,kWhite);Seg(drawer,ctx,bx,by+g,bx,by+b,t,kWhite);
+        }
+        if(sight::ToScreen(vp,r.leadAt,1.0f,width,height,&x,&y)) {
+            Arc(drawer,ctx,x,y,kLeadCircle*s,0.0f,kTurn,t,20,c);
+            Rect(drawer,ctx,x-1.5f*s,y-1.5f*s,x+1.5f*s,y+1.5f*s,c);
+            Label(text,lines,at,x,y+(kLeadCircle+12.0f)*s,1,kLineScale*0.85f,c,L"%d m  %.1f s%ls",static_cast<int>(std::lround(r.range)),
+                  r.flight,r.inReach ? L"" : L"  OUT OF RANGE");
+        }
+    }
+    wchar_t mode[32],lock[32];
+    Binding(r.keys,r.modeKey,r.modeButton,mode,32);
+    Binding(r.keys,r.lockKey,r.lockButton,lock,32);
+    const bool hasMode=r.keys ? r.modeKey>0 : r.modeButton>0,hasLock=r.keys ? r.lockKey>0 : r.lockButton>0;
+    const wchar_t* const state=!r.ownGun ? L"GUNNERS" : circle ? L"LEAD CIRCLE" : L"AUTO-AIM";
+    wchar_t keys[96]=L"";
+    if(r.ownGun && hasMode)std::swprintf(keys,96,L"   [%ls] %ls",mode,circle ? L"auto-aim" : L"lead circle");
+    if(hasLock) {
+        const std::size_t n=wcslen(keys);
+        std::swprintf(keys+n,96-n,L"   [%ls] %ls (hold: clear)",lock,r.lock==link::Lock::none ? L"lock" : L"next");
+    }
+    Label(text,lines,at,width*0.5f,height*0.90f,1,kLineScale*0.85f,r.lock==link::Lock::locked ? kRed : kWhite,L"%ls%ls",state,keys);
+}
+
 // What is drawn, logged when it changes (Debug, once in 10 s at most).
 void DrawLog(int shown,int panels,const Line* lines,int count,int width,int height) noexcept {
     static int lastShown=-1,lastPanels=-1;
@@ -1344,6 +1397,7 @@ void HudPublish() noexcept {
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
+    s.turret=PlayerTurretAim(&s.turretAim);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1464,6 +1518,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

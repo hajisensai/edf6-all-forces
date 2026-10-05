@@ -627,6 +627,36 @@ def katyusha_pose_agrees() -> None:
 
 
 @test
+def turret_aim_wired() -> None:
+    """The player's turret (autoturret/src/designate.cpp): its ini keys are read, shipped and documented in both READMEs;
+    the lead-circle mode returns before the turn input is written (the flak's Steer, the gunners' SteerSeat); the two
+    plugins' link (common/edf/aimlink.h) exports exactly the names each looks up; EDF6VehicleCrew's two keys are read,
+    shipped and documented; the jets' pick scores by the view only with PlayerJetLockByView."""
+    at, ini = src('autoturret/src/plugin.cpp'), src('autoturret/EDF6AutoTurret.ini')
+    zh, en = src('autoturret/README.zh-CN.md'), src('autoturret/README.md')
+    for key in ('AimMode', 'AimModeKey', 'AimModeButton', 'LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs'):
+        assert f'L"{key}"' in at and re.search(rf'^{key}=', ini, re.M) and key in zh and key in en, key
+    unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if f'L"{k}"' not in at]
+    assert not unread, f'EDF6AutoTurret.ini keys autoturret/src/plugin.cpp never reads: {unread}'
+    steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert 0 <= steer.find('if(lead)return flight;') < steer.find('Put<float>(vehicle,kTurn'), 'Steer: lead mode writes no turn'
+    gunner = src('autoturret/src/gunner.cpp')
+    seat = gunner.split('void SteerSeat(', 1)[1].split('\n}\n', 1)[0]
+    assert 0 <= seat.find('if(lead)return;') < seat.find('Put<float>(vehicle,kTurn'), 'SteerSeat: lead mode writes no turn'
+    link = src('common/edf/aimlink.h')
+    names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
+    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout'}, names
+    assert f'bool __cdecl {names["kTurretReadout"]}(' in src('autoturret/src/designate.cpp')
+    crew = src('src/turretaim.cpp')
+    assert f'bool __cdecl {names["kViewRay"]}(' in crew and f'float __cdecl {names["kMapRay"]}(' in crew
+    plugin, vini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('PlayerJetLockByView', 'TurretAimHud'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=1', vini, re.M) and key in readme, key
+    pick = src('src/stores.cpp').split('float ViewAngle(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Cfg().playerJetLockByView' in pick and 'Rider::player' in pick
+
+
+@test
 def every_npc_aircraft_boardable() -> None:
     # Every jet body of our side (jet_internal.h kBodies: a mark, not hostile) has its row in src/playerjet_kinds.h
     # kBoardable, so an aircraft added later is flown by the player too (or is left out on purpose here, saying why);
