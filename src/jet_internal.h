@@ -372,6 +372,11 @@ struct Jet {
     BayState bay;
     ShellState shells;
     Burden burden{1.0f,0.0f};   // what its stores weigh (BurdenOf; JetSteer)
+    // A thrown drone (JetLaunchThrown): no carrier, it works round where its bomb landed, taking targets within
+    // `reach` of it (0: its kind's range; the carrier's drones reach as far as their carrier sends them), and a
+    // charge out of fuel goes off there instead of flying away (jet.cpp Leave).
+    bool thrown=false;
+    float reach=0.0f;
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
@@ -550,8 +555,11 @@ bool Preloaded(Body b) noexcept;
 unsigned char* SpawnJet(Body b,const float* m) noexcept;
 bool ModFileThere(const wchar_t* file) noexcept;   // Mods/OBJECT (next to the game's exe) holds `file`
 // A jet launched now from `source`, flying `b` along `heading` at `speed` to work round `target`: its entry
-// (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets).
-Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source) noexcept;
+// (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets). It starts
+// at least `clear` over the ground under `from` (kLaunchClear: a jet's; a thrown drone starts off its bomb's spot).
+constexpr float kLaunchClear=100.0f;
+Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source,
+            float clear=kLaunchClear) noexcept;
 void FarRender(Jet& j,unsigned char* v) noexcept;
 // jet.cpp: a jet the player flew or called down handed back to its NPC pilot (playerjet_board.inc), flying at `vel`.
 void ResumeNpc(unsigned char* v,const float* vel) noexcept;

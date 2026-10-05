@@ -206,6 +206,7 @@ void LoadConfig() noexcept {
     n.jetSortieSec=FixInt("JetSortieSec",ReadInt(L"JetSortieSec",n.jetSortieSec),0,3600);
     n.jetAirRaider=ReadBool(L"JetAirRaider",n.jetAirRaider);
     n.jetMissionStrike=ReadBool(L"JetMissionStrike",n.jetMissionStrike);
+    n.throwDrones=ReadBool(L"ThrowDrones",n.throwDrones);
     n.groundPilot=ReadBool(L"GroundPilot",n.groundPilot);
     n.groundFollow=ReadFloat(L"GroundFollow",n.groundFollow);
     n.groundRange=ReadFloat(L"GroundRange",n.groundRange);
@@ -297,8 +298,8 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X",n.playerJetAll,n.playerJetHailKey,n.gunshipBoardGunner,
         n.gunshipGunnerKey);
-    Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
-        n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
+    Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d throwDrones=%d",n.jetPilot,n.jetFuelSec,
+        n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike,n.throwDrones);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,

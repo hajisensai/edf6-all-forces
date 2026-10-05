@@ -10,6 +10,7 @@ removed (RELEASED: each order a release installed must stay a prefix of CALLS).
 """
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 
 ID_PREFIX = 'EDF6VC_CALL_'
@@ -24,10 +25,12 @@ class Call:
     mark: float          # a call: AmmoHitSizeAdjust, the plugin's call marker; a vehicle request: the jet's mark
     kind: str            # key into KINDS
     follow: bool         # escorts the caller instead of holding the marked point
-    count: int           # what it brings; also the stock bomber fallback's plane count (Ammo_CustomParameter[2][1])
-    reload: float        # ReloadTime[0], the base of the star curve
+    count: int           # what it brings; also the stock bomber fallback's plane count (Ammo_CustomParameter[2][1]);
+                         # a thrown one's: the bombs a magazine holds (AmmoCount[0])
+    reload: float        # ReloadTime[0], the base of the star curve (a thrown one's: frames, 60 a second)
     level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
-    brings: str          # 'jets' (JetLaunch), 'helis' (HeliLaunch), 'sub' (SubLaunch), 'vehicle' (a vehicle request)
+    brings: str          # 'jets' (JetLaunch), 'helis' (HeliLaunch), 'sub' (SubLaunch), 'vehicle' (a vehicle request),
+                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown)
     log: str = ''        # its name in the plugin's log
     fuel_sec: int = 0    # the plugin's fuel limit for what it brings (0: none)
     role: str = ''       # brings 'jets': the JetRole (src/crew.h)
@@ -38,16 +41,37 @@ class Call:
     jet: str = ''
     # ...or the pylib/vcobjects.py GROUND_VEHICLES entry it brings (a vehicle request of a ground vehicle; `mark` 0).
     ground: str = ''
+    # brings 'throw': the drone its bomb releases (src/crew.h ThrownDrone); `mark` is then throw_mark(code).
+    drone: str = ''
 
     @property
     def flown(self) -> bool:
-        """The plugin launches what it brings at the call (kCalls); a vehicle request is the game's own."""
-        return self.brings != 'vehicle'
+        """The plugin launches what it brings at the call (kCalls, the in-mission pick cycles through them); a
+        vehicle request is the game's own, a thrown drone comes from its bomb (kThrows), neither is a call."""
+        return self.brings not in ('vehicle', 'throw')
 
     @property
     def modal(self) -> bool:
         """It comes in a guard and a follow version, and its name says which."""
         return self.brings in ('jets', 'helis')
+
+
+# A thrown drone's marker (brings 'throw'): its weapon's AmmoHitSizeAdjust (weapon +0x8C4, which the plugin
+# compares as the float's bits) is the float whose bits are THROW_MARK_BASE | code, about 1.0004: the stock
+# Patroller's bomb hits as it does, so without the plugin the weapon is a plain Patroller, and every stock weapon
+# SGO near 1.0 there is exactly 1.0 (0x3F800000, 1590 of them; 2026-10-05 scan), so no stock weapon is taken for
+# ours. The SGO holds a double the game converts to a float (0x68D8FB): the value is that float exactly.
+THROW_MARK_BASE = 0x3F800000
+
+
+def throw_mark(code: int) -> float:
+    assert 0 < code < 0x1000, code
+    return struct.unpack('<f', struct.pack('<I', THROW_MARK_BASE | code))[0]
+
+
+def mark_bits(call: 'Call') -> int:
+    """The float32 bits of a call's mark (a thrown drone's: what src/airstrike.cpp kThrows compares)."""
+    return struct.unpack('<I', struct.pack('<f', call.mark))[0]
 
 
 CALLS: tuple[Call, ...] = (
@@ -92,6 +116,34 @@ CALLS: tuple[Call, ...] = (
          ground='artillery'),
     # Appended 2026-10-05: the drill tank (tools/make_drill.py, src/drill.cpp), requested like the Blacker.
     Call('EDF6VC_CALL_DRILL', 0, 'drill', False, 0, 7000, 1.0, 'vehicle', vehicle='EDF6VC_DRILL', ground='drill'),
+    # Appended 2026-10-05: Robot Bombs (clones of the stock Patroller, eWeapon217) whose bomb releases one of the
+    # plugin's drones where it lands (src/airstrike.cpp kThrows, src/jet_spawn.cpp JetLaunchThrown).
+    Call('EDF6VC_CALL_THROW_BLAST', throw_mark(0xD61), 'throw_blast', False, 6, 900, 1.2, 'throw', 'thrown blast drone', 90,
+         drone='blast'),
+    Call('EDF6VC_CALL_THROW_DOLL', throw_mark(0xD62), 'throw_doll', False, 3, 1200, 1.6, 'throw', 'thrown doll drone', 120,
+         drone='doll'),
+    Call('EDF6VC_CALL_THROW_DRONE', throw_mark(0xD63), 'throw_drone', False, 2, 1800, 2.0, 'throw', 'thrown gun drone', 180,
+         drone='drone'),
+    # Appended 2026-10-06 (the user: 「补上空袭的召唤飞机，空母载具」): the plugin's other aircraft the player flies
+    # (src/playerjet_kinds.h kBoardable), requested empty like the player jets: each one's requested twin
+    # (pylib/vcobjects.py REQUEST_KINDS, tools/make_jets.py EDF6VC_FLY_*.SGO), `mark` its NPC kind's (the plugin tells
+    # the kind by it). The strike jet, the bomber takeovers and the blast / doll drones are left out (REQUEST_KINDS says why).
+    Call('EDF6VC_CALL_FLY_INTERCEPTOR', 7003, 'fly_interceptor', False, 0, 6500, 1.2, 'vehicle',
+         vehicle='EDF6VC_FLY_INTERCEPTOR', jet='edf6tr_jet_interceptor_request_mission'),
+    Call('EDF6VC_CALL_FLY_FIGHTER', 7002, 'fly_fighter', False, 0, 5500, 0.9, 'vehicle',
+         vehicle='EDF6VC_FLY_FIGHTER', jet='edf6tr_jet_fighter_request_mission'),
+    Call('EDF6VC_CALL_FLY_MULTIROLE', 7004, 'fly_multirole', False, 0, 8000, 1.5, 'vehicle',
+         vehicle='EDF6VC_FLY_MULTIROLE', jet='edf6tr_jet_multirole_request_mission'),
+    Call('EDF6VC_CALL_FLY_GUNSHIP', 7011, 'fly_gunship', False, 0, 16000, 2.2, 'vehicle',
+         vehicle='EDF6VC_FLY_GUNSHIP', jet='edf6tr_jet_gunship_request_mission'),
+    Call('EDF6VC_CALL_FLY_DRONE', 7006, 'fly_drone', False, 0, 3500, 0.3, 'vehicle',
+         vehicle='EDF6VC_FLY_DRONE', jet='edf6tr_jet_drone_request_mission'),
+    Call('EDF6VC_CALL_FLY_CARRIER', 7005, 'fly_carrier', False, 0, 24000, 2.6, 'vehicle',
+         vehicle='EDF6VC_FLY_CARRIER', jet='edf6tr_jet_carrier_request_mission'),
+    Call('EDF6VC_CALL_FLY_BLAST_CARRIER', 7009, 'fly_blast_carrier', False, 0, 26000, 2.8, 'vehicle',
+         vehicle='EDF6VC_FLY_BLAST_CARRIER', jet='edf6tr_jet_blast_carrier_request_mission'),
+    Call('EDF6VC_CALL_FLY_DOLL_CARRIER', 7010, 'fly_doll_carrier', False, 0, 28000, 3.0, 'vehicle',
+         vehicle='EDF6VC_FLY_DOLL_CARRIER', jet='edf6tr_jet_doll_carrier_request_mission'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -107,6 +159,8 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'Katyusha (2026-10-05)': IDS[:22],
     'artillery (2026-10-05)': IDS[:23],
     'drill tank (2026-10-05)': IDS[:24],
+    'thrown drones (2026-10-05)': IDS[:27],
+    'aircraft to fly and air carriers (2026-10-06)': IDS[:35],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -132,6 +186,170 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'fly_interceptor': {
+        'SC': ('截击机（自驾）', '请求一架由你自己驾驶的截击机，空着送到信号弹处：机炮和 4 远距、2 中距、2 近距空空导'
+                                 '弹，飞得最快最高。操作同玩家战斗机。'),
+        'CN': ('截擊機（自駕）', '請求一架由你自己駕駛的截擊機，空著送到信號彈處：機砲和 4 遠距、2 中距、2 近距空空飛'
+                                 '彈，飛得最快最高。操作同玩家戰鬥機。'),
+        'JA': ('迎撃機（自操縦）', '自分で操縦する迎撃機を信号弾の位置へ要請する。機関砲と長距離 4・中距離 2・短距離 '
+                                   '2 発の空対空ミサイル、最も速く高く飛ぶ。操作は戦闘機（自操縦）と同じ。'),
+        'EN': ('Interceptor (Fly It)', 'Requests an interceptor you fly yourself, delivered empty to the flare: guns '
+                                       'and 4 long, 2 medium and 2 short-range air-to-air missiles; the fastest and '
+                                       'highest flier. Flown like the player fighter.'),
+    },
+    'fly_fighter': {
+        'SC': ('制空战斗机（自驾）', '请求一架由你自己驾驶的制空战斗机（呼叫来的那种带舵面的大翼展机体），空着送到信'
+                                     '号弹处：机炮和 4 中距、2 近距空空导弹。操作同玩家战斗机。'),
+        'CN': ('制空戰鬥機（自駕）', '請求一架由你自己駕駛的制空戰鬥機（呼叫來的那種帶舵面的大翼展機體），空著送到信'
+                                     '號彈處：機砲和 4 中距、2 近距空空飛彈。操作同玩家戰鬥機。'),
+        'JA': ('制空戦闘機（自操縦）', '自分で操縦する制空戦闘機（要請で来る舵面付きの大きな翼の機体）を信号弾の位置'
+                                       'へ要請する。機関砲と中距離 4・短距離 2 発の空対空ミサイル。操作は戦闘機（自操'
+                                       '縦）と同じ。'),
+        'EN': ('Air Superiority Fighter (Fly It)', 'Requests an air superiority fighter you fly yourself (the '
+                                                   'wide-winged airframe the fighter call brings), delivered empty '
+                                                   'to the flare: guns and 4 medium and 2 short-range air-to-air '
+                                                   'missiles. Flown like the player fighter.'),
+    },
+    'fly_multirole': {
+        'SC': ('多用途机（自驾）', '请求一架由你自己驾驶的多用途战斗机，空着送到信号弹处：机炮，空空导弹、空地导弹、'
+                                   '火箭弹和 Mk 82 炸弹都带。操作同玩家战斗机。'),
+        'CN': ('多用途機（自駕）', '請求一架由你自己駕駛的多用途戰鬥機，空著送到信號彈處：機砲，空空飛彈、空地飛彈、'
+                                   '火箭彈和 Mk 82 炸彈都帶。操作同玩家戰鬥機。'),
+        'JA': ('マルチロール機（自操縦）', '自分で操縦するマルチロール機を信号弾の位置へ要請する。機関砲に空対空・空'
+                                           '対地ミサイル、ロケット弾、Mk 82 爆弾をすべて積む。操作は戦闘機（自操縦）'
+                                           'と同じ。'),
+        'EN': ('Multirole Fighter (Fly It)', 'Requests a multirole fighter you fly yourself, delivered empty to the '
+                                             'flare: guns, air-to-air and air-to-ground missiles, rockets and Mk 82 '
+                                             'bombs. Flown like the player fighter.'),
+    },
+    'fly_gunship': {
+        'SC': ('炮舰机（自驾）', '请求一架由你自己驾驶的炮舰机，空着送到信号弹处：重而慢，机炮和攻击机的挂载，另有不'
+                                 '限量的炮击（打向屏幕中心所看的地面点，按住锁定键绕那一点盘旋）；有驾驶座和侧炮手座'
+                                 '。翼展 52 米，没有起落架，停着时机腹着地。操作同玩家战斗机。'),
+        'CN': ('砲艦機（自駕）', '請求一架由你自己駕駛的砲艦機，空著送到信號彈處：重而慢，機砲和攻擊機的掛載，另有不'
+                                 '限量的砲擊（打向畫面中心所看的地面點，按住鎖定鍵繞那一點盤旋）；有駕駛座和側砲手座'
+                                 '。翼展 52 米，沒有起落架，停著時機腹著地。操作同玩家戰鬥機。'),
+        'JA': ('ガンシップ（自操縦）', '自分で操縦するガンシップを信号弾の位置へ要請する。重く遅い。機関砲と攻撃機の'
+                                       '兵装に加え、画面中央の地点への無制限の砲撃（ロックオン切替を押し続けるとその'
+                                       '地点を旋回する）。操縦席と側面砲手席がある。翼幅 52m、着陸脚はなく、駐機中は'
+                                       '胴体着地。操作は戦闘機（自操縦）と同じ。'),
+        'EN': ('Fixed-wing Gunship (Fly It)', 'Requests a fixed-wing gunship you fly yourself, delivered empty to '
+                                              "the flare: heavy and slow, guns and the strike jet's stores, plus "
+                                              "unlimited shelling at the ground point the screen's centre looks at "
+                                              '(hold the target key to circle that point); a pilot and a side gunner '
+                                              'seat. 52 m across, no landing gear: parked on its belly. Flown like '
+                                              'the player fighter.'),
+    },
+    'fly_drone': {
+        'SC': ('无人机（自驾）', '请求一架由你自己驾驶的小型固定翼无人机（空母放出的那种），空着送到信号弹处：机炮和 '
+                                 '4 枚轻型空地导弹，又小又灵活，但很脆。操作同玩家战斗机。'),
+        'CN': ('無人機（自駕）', '請求一架由你自己駕駛的小型固定翼無人機（空母放出的那種），空著送到信號彈處：機砲和 '
+                                 '4 枚輕型空地飛彈，又小又靈活，但很脆。操作同玩家戰鬥機。'),
+        'JA': ('ドローン（自操縦）', '自分で操縦する小型の固定翼ドローン（母艦が放つもの）を信号弾の位置へ要請する。'
+                                     '機関砲と軽対地ミサイル 4 発、小さく身軽だが脆い。操作は戦闘機（自操縦）と同じ。'),
+        'EN': ('Drone (Fly It)', 'Requests a small fixed-wing drone you fly yourself (the kind the carriers launch), '
+                                 'delivered empty to the flare: guns and 4 light air-to-ground missiles; small and '
+                                 'nimble, but fragile. Flown like the player fighter.'),
+    },
+    'fly_carrier': {
+        'SC': ('无人机母舰（自驾）', '请求一艘由你自己驾驶的无人机母舰，空着送到信号弹处：机炮和空空导弹，副射击向屏'
+                                     '幕中心所看的地点放出无人机，按锁定键召回。旋翼悬停：左摇杆或 W / S / A / D 前后'
+                                     '左右平移，上升键上升，按下左摇杆或减速键下降，右摇杆或鼠标转机头。机体有 59 × 7'
+                                     '7 米，信号弹要扔在够大的空地上。'),
+        'CN': ('無人機母艦（自駕）', '請求一艘由你自己駕駛的無人機母艦，空著送到信號彈處：機砲和空空飛彈，副射擊向畫'
+                                     '面中心所看的地點放出無人機，按鎖定鍵召回。旋翼懸停：左搖桿或 W / S / A / D 前後'
+                                     '左右平移，上升鍵上升，按下左搖桿或減速鍵下降，右搖桿或滑鼠轉機頭。機體有 59 × 7'
+                                     '7 米，信號彈要扔在夠大的空地上。'),
+        'JA': ('無人機母艦（自操縦）', '自分で操縦する無人機母艦を信号弾の位置へ要請する。機関砲と空対空ミサイル、サ'
+                                       'ブ射撃で画面中央の地点へ無人機を放ち、ロックオン切替で呼び戻す。回転翼で滞空'
+                                       'する。左スティックか W / S / A / D で前後左右に移動、上昇で上昇、左スティック'
+                                       '押し込みか減速で降下、右スティックかマウスで機首を回す。機体は 59 × 77m ある'
+                                       'ので、信号弾は十分に広い空き地へ投げること。'),
+        'EN': ('Drone Carrier (Fly It)', 'Requests a drone carrier you fly yourself, delivered empty to the flare: '
+                                         'guns and air-to-air missiles; the secondary fire sends a drone to the '
+                                         "point the screen's centre looks at, the target key calls them back. It "
+                                         'hovers on its rotors: the left stick or W / S / A / D moves it, ascend '
+                                         'climbs, L3 or the brake key descends, the right stick or mouse turns its '
+                                         'nose. It is 59 x 77 m: throw the flare onto open ground that size.'),
+    },
+    'fly_blast_carrier': {
+        'SC': ('自爆无人机母舰（自驾）', '请求一艘由你自己驾驶的自爆无人机母舰，空着送到信号弹处：同无人机母舰，放出'
+                                         '的是冲到敌人身边自爆的近炸无人机。旋翼悬停：左摇杆或 W / S / A / D 前后左右'
+                                         '平移，上升键上升，按下左摇杆或减速键下降，右摇杆或鼠标转机头。机体有 59 × 7'
+                                         '7 米，信号弹要扔在够大的空地上。'),
+        'CN': ('自爆無人機母艦（自駕）', '請求一艘由你自己駕駛的自爆無人機母艦，空著送到信號彈處：同無人機母艦，放出'
+                                         '的是衝到敵人身邊自爆的近炸無人機。旋翼懸停：左搖桿或 W / S / A / D 前後左右'
+                                         '平移，上升鍵上升，按下左搖桿或減速鍵下降，右搖桿或滑鼠轉機頭。機體有 59 × 7'
+                                         '7 米，信號彈要扔在夠大的空地上。'),
+        'JA': ('自爆ドローン母艦（自操縦）', '自分で操縦する自爆ドローン母艦を信号弾の位置へ要請する。無人機母艦と同'
+                                             'じだが、放つのは敵に突っ込んで近接起爆するドローン。回転翼で滞空する。'
+                                             '左スティックか W / S / A / D で前後左右に移動、上昇で上昇、左スティック'
+                                             '押し込みか減速で降下、右スティックかマウスで機首を回す。機体は 59 × 77m'
+                                             ' あるので、信号弾は十分に広い空き地へ投げること。'),
+        'EN': ('Blast Drone Carrier (Fly It)', 'Requests a blast drone carrier you fly yourself, delivered empty to '
+                                               'the flare: as the drone carrier, its drones dive at the enemy and '
+                                               'blow up next to it. It hovers on its rotors: the left stick or W / S '
+                                               '/ A / D moves it, ascend climbs, L3 or the brake key descends, the '
+                                               'right stick or mouse turns its nose. It is 59 x 77 m: throw the '
+                                               'flare onto open ground that size.'),
+    },
+    'fly_doll_carrier': {
+        'SC': ('人偶无人机母舰（自驾）', '请求一艘由你自己驾驶的人偶无人机母舰，空着送到信号弹处：同无人机母舰，放出'
+                                         '挂着唱歌跳舞人偶的无人机，慢慢飞到敌人中间吸引火力后自爆。旋翼悬停：左摇杆'
+                                         '或 W / S / A / D 前后左右平移，上升键上升，按下左摇杆或减速键下降，右摇杆或'
+                                         '鼠标转机头。机体有 59 × 77 米，信号弹要扔在够大的空地上。'),
+        'CN': ('人偶無人機母艦（自駕）', '請求一艘由你自己駕駛的人偶無人機母艦，空著送到信號彈處：同無人機母艦，放出'
+                                         '掛著唱歌跳舞人偶的無人機，慢慢飛到敵人中間吸引火力後自爆。旋翼懸停：左搖桿'
+                                         '或 W / S / A / D 前後左右平移，上升鍵上升，按下左搖桿或減速鍵下降，右搖桿或'
+                                         '滑鼠轉機頭。機體有 59 × 77 米，信號彈要扔在夠大的空地上。'),
+        'JA': ('人形ドローン母艦（自操縦）', '自分で操縦する人形ドローン母艦を信号弾の位置へ要請する。無人機母艦と同'
+                                             'じだが、歌って踊る人形を吊るしたドローンを放ち、敵の中で注意を引いてか'
+                                             'ら自爆させる。回転翼で滞空する。左スティックか W / S / A / D で前後左右'
+                                             'に移動、上昇で上昇、左スティック押し込みか減速で降下、右スティックかマ'
+                                             'ウスで機首を回す。機体は 59 × 77m あるので、信号弾は十分に広い空き地へ'
+                                             '投げること。'),
+        'EN': ('Doll Drone Carrier (Fly It)', 'Requests a doll drone carrier you fly yourself, delivered empty to '
+                                              'the flare: as the drone carrier, its drones carry a singing, dancing '
+                                              'doll into the enemy, draw their fire and blow up. It hovers on its '
+                                              'rotors: the left stick or W / S / A / D moves it, ascend climbs, L3 '
+                                              'or the brake key descends, the right stick or mouse turns its nose. '
+                                              'It is 59 x 77 m: throw the flare onto open ground that size.'),
+    },
+    'throw_blast': {
+        'SC': ('投掷式自爆无人机', '投出一枚机械化炸弹，落地后变成一架旋翼自爆无人机：在落点上空低悬，飞向落点 300 米内的敌人，'
+                        '贴近后引爆（伤害 1200，半径 15 米，不伤友军）；90 秒内没等到敌人就在原地引爆。'),
+        'CN': ('投擲式自爆無人機', '投出一枚機械化炸彈，落地後變成一架旋翼自爆無人機：在落點上空低懸，飛向落點 300 米內的敵人，'
+                        '貼近後引爆（傷害 1200，半徑 15 米，不傷友軍）；90 秒內沒等到敵人就在原地引爆。'),
+        'JA': ('投擲式自爆ドローン', 'ロボットボムを投げ、着地すると回転翼の自爆ドローンになる。着地点の上空に低く滞空し、着地点から'
+                          '300m 以内の敵へ飛んで近接起爆する（ダメージ 1200、半径 15m、味方には当たらない）。90 秒以内に敵が'
+                          '来なければその場で起爆する。'),
+        'EN': ('Thrown Blast Drone', 'Throws a robot bomb that becomes a rotor blast drone where it lands: it hovers low over '
+                                     'the spot, flies at enemies within 300 m of it and blows up next to them (1200 damage, '
+                                     '15 m radius, no harm to friends). With no enemy in 90 seconds it blows up where it is.'),
+    },
+    'throw_doll': {
+        'SC': ('投掷式人偶无人机', '投出一枚机械化炸弹，落地后变成一架挂着唱歌跳舞人偶的旋翼无人机：慢慢飞到落点 300 米内的敌人中间'
+                        '吸引火力，然后自爆（伤害 3000，半径 25 米）。人偶是 DLC 内容，没有时无人机照样自爆。'),
+        'CN': ('投擲式人偶無人機', '投出一枚機械化炸彈，落地後變成一架掛著唱歌跳舞人偶的旋翼無人機：慢慢飛到落點 300 米內的敵人中間'
+                        '吸引火力，然後自爆（傷害 3000，半徑 25 米）。人偶是 DLC 內容，沒有時無人機照樣自爆。'),
+        'JA': ('投擲式人形ドローン', 'ロボットボムを投げ、着地すると歌って踊る人形を吊るした回転翼ドローンになる。着地点から 300m 以内の'
+                          '敵の中へゆっくり進んで注意を引き、自爆する（ダメージ 3000、半径 25m）。人形は DLC の内容で、'
+                          'ない場合もドローンは自爆する。'),
+        'EN': ('Thrown Doll Drone', 'Throws a robot bomb that becomes a rotor drone carrying a singing, dancing doll: it '
+                                    'drifts into the enemies within 300 m of where it landed, draws their fire and blows up '
+                                    '(3000 damage, 25 m radius). The doll is DLC; without it the drone still blows up.'),
+    },
+    'throw_drone': {
+        'SC': ('投掷式无人机', '投出一枚机械化炸弹，落地后变成一架小型固定翼无人机：机炮和轻型对地导弹，在落点上空盘旋，攻击落点'
+                      ' 300 米内的敌人；弹药或燃料（180 秒）用完后飞走。'),
+        'CN': ('投擲式無人機', '投出一枚機械化炸彈，落地後變成一架小型固定翼無人機：機砲和輕型對地飛彈，在落點上空盤旋，攻擊落點'
+                      ' 300 米內的敵人；彈藥或燃料（180 秒）用完後飛走。'),
+        'JA': ('投擲式ドローン', 'ロボットボムを投げ、着地すると小型の固定翼ドローンになる。機関砲と軽対地ミサイルを持ち、着地点の上空を'
+                        '旋回して 300m 以内の敵を攻撃する。弾薬か燃料（180 秒）が尽きると飛び去る。'),
+        'EN': ('Thrown Gun Drone', 'Throws a robot bomb that becomes a small fixed-wing drone with guns and light air-to-ground '
+                                   'missiles: it circles over where it landed and attacks enemies within 300 m of it, '
+                                   'leaving once out of ammo or fuel (180 seconds).'),
+    },
     'drill': {
         'SC': ('钻头战车', '请求一辆钻头战车：车头装着巨大的钻头，按住射击键钻头加速旋转，转速越高，对接触到的敌人伤害越大、'
                       '钻开建筑和岩石越快。近战，不发射炮弹。'),
@@ -261,10 +479,18 @@ NOTES: dict[str, str] = {
 
 
 VEHICLE_NOTES: dict[str, str] = {
-    'SC': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 写入的 EDF6VC_PJET_*.SGO。',
-    'CN': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 寫入的 EDF6VC_PJET_*.SGO。',
-    'JA': 'EDF6VehicleCrew プラグインと tools/make_jets.py が書き出す EDF6VC_PJET_*.SGO が必要。',
-    'EN': 'Needs the EDF6VehicleCrew plugin and the EDF6VC_PJET_*.SGO files tools/make_jets.py writes.',
+    'SC': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 写入的飞机文件（EDF6VC_PJET_* / EDF6VC_FLY_*.SGO）。',
+    'CN': '需要 EDF6VehicleCrew 插件和 tools/make_jets.py 寫入的飛機檔案（EDF6VC_PJET_* / EDF6VC_FLY_*.SGO）。',
+    'JA': 'EDF6VehicleCrew プラグインと tools/make_jets.py が書き出す機体ファイル（EDF6VC_PJET_* / EDF6VC_FLY_*.SGO）が必要。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the aircraft files tools/make_jets.py writes (EDF6VC_PJET_* / '
+          'EDF6VC_FLY_*.SGO).',
+}
+THROW_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件和安装器生成的无人机文件；未安装插件时为普通巡逻炸弹。',
+    'CN': '需要 EDF6VehicleCrew 插件和安裝器生成的無人機檔案；未安裝插件時為普通巡邏炸彈。',
+    'JA': 'EDF6VehicleCrew プラグインとインストーラーが書き出すドローンのファイルが必要。未導入時は通常のパトローラーになる。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the drone files the installer writes; without the plugin this is a plain '
+          'Patroller.',
 }
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
@@ -299,6 +525,8 @@ def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
     if call.brings == 'vehicle':
         return KINDS[call.kind][lang][1] + '\n\n' + (GROUND_NOTES if call.ground else VEHICLE_NOTES)[lang]
+    if call.brings == 'throw':
+        return KINDS[call.kind][lang][1] + '\n\n' + THROW_NOTES[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

@@ -298,3 +298,30 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
   3. 停放版上去后飞行、起降、放无人机（航母）是否和 NPC 版一样；在空中下机后交回 NPC 时，整机箱的 NPC 低空飞行有没有刮地（这只发生在玩家开过的停放版上）。
   4. 下机位置：原版从上车点下车的话，现在会落在飞机右侧地面上。
   5. Wing Diver / Fencer 能否坐停放版（掩码 15 + `505_TANK_DRIVER`，同玩家战斗机）。NPC 版的座位仍是掩码 9（游骑兵 + 空降兵），呼叫下来的 NPC 飞机其它兵种上不去——这是原来就有的，没改。
+
+## 13. 其它飞机的自驾载具请求（2026-10-06，`tools/calls.py` `EDF6VC_CALL_FLY_*`、`pylib/vcobjects.py` `REQUEST_KINDS`）
+
+用户：「补上空袭的召唤飞机，空母载具」。`kBoardable` 里玩家战斗机 / 攻击机的请求还没带来的机种，各追加一行载具请求（武器表行永不挪动，只追加；`RELEASED` 记下这一版的顺序）。
+
+### 13.1 投送：集装箱，不是编队（静态，H / M）
+
+| 事实 | 来源 | 置信度 |
+|---|---|---|
+| N9 Eros 请求的 `Ammo_CustomParameter[4]` = [`v508_transport.sgo`, `v509_transportbox.sgo`, 载具 SGO, 载具设定]；Proteus（大型机器人）同样是运输机 + 集装箱 | 读原版 SGO | H |
+| 运输机（Transporter508 slot 50 `0x5E5070`）只生成集装箱；集装箱落地后的卸车态 `0x5E8C00` **无条件**按自己 `+0xB80` 的 SGO 路径 `CreateObject`（`0x5E8FDC`），位置是集装箱 MAB 的「乗り物生成ポイント」，`SetTeam(veh,5,1)`，设定经载具 vfunc `+0x170` 交给它。载具的大小不参与 | `docs/online-re.md` §2.3 | H |
+| Barga（`eWeapon389` / `393`）用 `v508_transport_formation.sgo`（`Transporter_Formation`，4 架运输机按 `formation` 的 4 个偏移排开），集装箱一项为 `0.0`；编队 SGO 的 `carrier_anchor` = 「アンカー１」–「アンカー４」，这 4 个名字出现在 `V515_RETROBALAM(_GRAY).SGO`（各 4 处）、不出现在 `V506_HELI.SGO`（0 处）：编队按**被吊载具自己的挂点**吊运，插件飞机共用的 V506 MAB 没有这 4 个定位点（缺定位点时载具初始化读空指针的先例见 `vcobjects.JET_MAB_ROOT`）。EDF.dll 里没有找到 `carrier_anchor` 这个字符串本身（键名可能另行编码），所以编队怎样读挂点没有追到代码 | 读原版 SGO + `tools/edfre.py strs` | M |
+
+结论：59 × 77 米的航母照样能由集装箱送到（生成点就是集装箱的落点），不需要插件自己飞进来；不用编队（需要给 V506 MAB 加挂点，原地改 MAB 的做法做不到）。代价是航母生成在信号弹落点、占满 59 × 77 米：说明文字要求把信号弹扔在空地上。生成时与建筑 / 玩家重叠的处理是游戏物理的，没有实测（L）。
+
+### 13.2 送来的是什么
+
+- `Jet.requested`：`REQUEST_KINDS`（截击机、制空战斗机、多用途机、炮舰机、无人机、三种航母）各有一个请求版 `edf6tr_jet_<机种>_request_mission`（`parked=True, requested=True`）：标记 / 模型 / 武器 / 耐久同 NPC 版；整机碰撞箱、掩码 15 的座位、右侧地面上的上车点同停放版（§12）；`jet_sgo` 给它像玩家战斗机一样多写一份 `vehicle_setup`（`player or requested`）。`tools/make_jets.py` 写成 `EDF6VC_FLY_<机种>.SGO`。
+- 炮舰机原来没有 `JETS` 项（NPC 版由 `make_jets` 用攻击机 + bomber401 模型 + `with_mark(7011)` + `with_gunner_seat` 拼）：新增 `GUNSHIP_JET = 'edf6tr_jet_gunship'`（攻击机的挂载和耐久、原版 bomber401 模型，名字不带 `_mission`：测试场不放它），`Jet.box_model = 'bomber401'`：停放版的碰撞箱和上车点按原版 bomber401 模型量（`jet_models.model_box` / `root_lift` 对 `STOCK_BOMBERS` 本来就支持）。请求版再加炮手座（`with_gunner_seat`，`check_gunner_seat` 回读）。
+- 请求武器（`call_weapons.vehicle_sgo`，与玩家战斗机的同一条路）：载具设定 `[1][0]` = 机种标记（插件 `BodyMark` 读的就是它），武器清单 = 该机种的机炮和挂载 + Eros 的燃料箱，`resource` 同步替换；倍率按请求等级取 Eros 曲线。
+- 送到后：机身体是 `PluginBody::jet`（标记 7002–7011），`kBoardable` 按标记认出机种。空机：`jet.cpp` 没有记录（`CrewPlaced` 只在 NPC 飞行员的第一帧建），`crew.cpp` 对没人坐过的 506 机体不派 NPC（同停放版）；玩家上机 `Boarded` → `jet::Adopt` 建记录（旋翼机悬停、航母放无人机、空中下机后交回 NPC 都靠它）。`BoardableNow` 接受 team 5（集装箱设的「载具」队）。
+- 炮舰机（7011）原来没有尾焰行：`booster.cpp kJetNozzles` 按标记查，bomber401 的喷口只在攻击机标记（接管的原版轰炸机）下查。加一行 7011 = bomber401 的喷口（`jet_nozzles_on_their_models` 改为按 `file or box_model` 对照）。
+
+### 13.3 验证状态
+
+- 离线：`python tools/call_weapons.py build <TEMP>`（读本机 Mods 里装着的武器表 1588 行）后回读：8 行在 1591–1598，排在投掷式无人机（1588–1590）之后，与 `CALLS` 顺序一致；类别 308、第 3 列同 `eWeapon394`；等级、运输机 / 集装箱、载具路径、标记、武器清单、倍率、`resource` 里换成了请求版 SGO；5 种语言的文本行名字与 `call_name` 一致、表与文本行数对齐。8 个 `EDF6VC_FLY_*.SGO` 由本机 Root.cpk 生成（`jet_sgo` 内的 `check_door`、炮舰机的 `check_gunner_seat` 通过；`vehicle_setup == mission_setup`；整机碰撞箱：航母 (29.7, 8.52, 38.42)、炮舰机 (25.94, 2.01, 8.08)、无人机 (1.75, 1.04, 2.83) 半尺寸）。
+- 未实机验证：运输机能否投下这些派生 SGO（同 §5 玩家战斗机请求，L）；航母从集装箱生成时与周围物体重叠的表现；炮舰机（无起落架）机腹着地时的地面滑跑与起飞；请求版的上车提示与上机后建记录（日志 `JET v=... its entry made for the player who boarded it empty`）。

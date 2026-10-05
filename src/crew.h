@@ -49,6 +49,7 @@ struct Config {
     DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover
     bool jetAirRaider=true;    // the Air Raider's bomber calls send jets instead, and its call weapons (airstrike.cpp) work
     bool jetMissionStrike=true;// the missions' strafing-plane airstrikes (DemoAirStrike) send jets instead
+    bool throwDrones=true;     // the thrown-drone Robot Bombs (EDF6VC_CALL_THROW_*) release the plugin's drones (airstrike.cpp)
     bool groundPilot=true;     // NPC-crewed Depth Crawlers (502, no stock AI) are driven by the plugin (ground.cpp)
     float groundFollow=20.0f;  // metres from the player it stops at with no enemy
     float groundRange=200.0f;  // it engages enemies within this distance
@@ -307,6 +308,13 @@ bool JetLaunch(JetRole role,const float* from,const float* heading,const float* 
 // jet does (fuel, damage, ammo). The vehicle, or nullptr (not preloaded this mission, kMaxJets flying).
 unsigned char* JetLaunchDrone(const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                               bool escort) noexcept;
+// A drone a thrown Robot Bomb releases where it landed (airstrike.cpp kThrows; tools/calls.py brings 'throw'): the
+// blast or doll drone (rotor, a few metres over `at`) or the gun drone (fixed wing, taking off from ~20 m over it),
+// with no carrier, working round `at` within a short reach and leaving (a charge: blowing up there) out of fuel
+// (`fuelSec`). The vehicle, or nullptr (its body not preloaded this mission, JetPilot off, too many thrown drones
+// out, kMaxJets): the caller keeps the stock bomb then.
+enum class ThrownDrone { blast, doll, drone };
+unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* heading,DWORD fuelSec,const void* source) noexcept;
 // Whether jet.cpp still flies `vehicle` (the object with weak-this control block `ctrl`), alive and not
 // withdrawing.
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
