@@ -331,17 +331,93 @@ def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
 
 # Each jet model's nozzles, in its frame (x right, y up, z forward): src/booster.cpp kJetNozzles (tools/selftest.py
 # holds that table to this one). Read off the meshes, each checked against the game where there is a picture:
-#  - the interceptor (the player's fighter): two square nozzles either side of the tail (the user's picture,
-#    2026-10-05: "the flame belongs in the two nozzles"), the openings' rims x 1.25..3.3, y 0.17..1.67 at z -7.2..-8.2,
-#    their insides at z -6.6..-7.0: each flame on its opening's middle, just inside the rim. (A first rule, the end of
-#    the centre-line cone, put one flame on the spine between them: inside the upper fuselage.)
-#  - the others: the end of the fuselage's centre-line cone at its middle height (no picture yet).
-NOZZLES: dict[str | None, tuple[tuple[float, float, float], ...]] = {
-    None: ((0.0, 1.07, -12.41),),
-    'EDF6VC_INTERCEPTOR.MRAB': ((1.85, 0.85, -7.3), (-1.85, 0.85, -7.3)),
-    'EDF6VC_MULTIROLE.MRAB': ((0.0, 0.97, -1.78),),
-    'EDF6VC_DRONE.MRAB': ((0.0, 1.33, -1.5),),
+#  - the interceptor (the player's fighter): two square nozzles either side of the tail, each exit a slanted quad
+#    (1.43,0.18,-7.77) (2.22,0.38,-8.23) (3.22,0.84,-7.77) (2.34,1.67,-7.63). The first table put each flame at
+#    (1.85,0.85,-7.3): 0.45 m in from the opening's middle and 0.55 m inside it, which from behind and below shows
+#    the flame high in the opening (the user's picture, 2026-10-05: 「飞机的尾焰高了一点」).
+#  - the strike jet's bomber501: a flying wing with no nozzle; its tail cone ends in a vertical edge (x 0, y 0.63..1.5).
+#  - the multirole: a 0.68 x 0.26 m exhaust box at the fuselage's end (z -0.8), not the flat tail's tip (-1.78).
+#  - the drone: a round 0.33 m nozzle at z -1.26 (the old table had it 0.33 m above and 0.24 m behind it).
+# Each flame sits on its exit's centre in the exit plane and is as big as its engine (the user, 2026-10-05:
+# 「尾焰大小应该根据引擎大小来」): width the exit's diameter (a circle of the exit's area; an exit that is only an edge:
+# its length), length FLAME_LENGTH_PER_DIAMETER of that. NOZZLE_EXITS picks each exit's rim vertices (a box in the
+# model's frame, the right one of a mirrored pair); measure_nozzles reads them off the model, NOZZLES is what it
+# reads (constants: the self-test has no Root.cpk), check_nozzles holds the two together.
+FLAME_LENGTH_PER_DIAMETER = 5.0
+ExitBox = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]   # (x0, x1), (y0, y1), (z0, z1)
+NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a left twin at -x)
+    None: (((-0.5, 0.5), (0.0, 3.0), (-12.5, -11.9)), False),
+    'EDF6VC_INTERCEPTOR.MRAB': (((1.0, 3.6), (0.0, 2.0), (-8.4, -7.6)), True),
+    'EDF6VC_MULTIROLE.MRAB': (((-0.5, 0.5), (0.4, 0.9), (-0.85, -0.75)), False),
+    'EDF6VC_DRONE.MRAB': (((-0.3, 0.3), (0.7, 1.3), (-1.3, -1.22)), False),
 }
+Nozzle = tuple[tuple[float, float, float], float]   # (exit centre, diameter)
+NOZZLES: dict[str | None, tuple[Nozzle, ...]] = {
+    None: (((0.0, 1.067, -12.182), 0.87),),
+    'EDF6VC_INTERCEPTOR.MRAB': (((2.327, 0.861, -7.804), 1.195), ((-2.327, 0.861, -7.804), 1.195)),
+    'EDF6VC_MULTIROLE.MRAB': (((0.0, 0.633, -0.799), 0.475),),
+    'EDF6VC_DRONE.MRAB': (((0.0, 1.005, -1.261), 0.323),),
+}
+
+
+def _hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """The convex hull of `points`, counter-clockwise (Andrew's monotone chain)."""
+    pts = sorted(set(points))
+    if len(pts) < 3:
+        return pts
+
+    def turn(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[tuple[float, float]] = []
+    upper: list[tuple[float, float]] = []
+    for p in pts:
+        while len(lower) >= 2 and turn(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    for p in reversed(pts):
+        while len(upper) >= 2 and turn(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def exit_of(rim: list[tuple[float, float, float]]) -> Nozzle:
+    """An exhaust exit from its rim vertices: (centre, diameter). Seen from behind (x, y) the rim's hull is the
+    opening: its area centroid is the centre, the circle of its area gives the diameter; z is the rim's mean (the exit
+    plane). A rim with no area (an edge, a point) has its box middle as centre and its longest extent as diameter."""
+    h = _hull([(p[0], p[1]) for p in rim])
+    z = sum(p[2] for p in rim) / len(rim)
+    a2 = sum(h[i][0] * h[i - 1][1] - h[i - 1][0] * h[i][1] for i in range(len(h))) if len(h) >= 3 else 0.0
+    if abs(a2) < 2e-3:
+        lo = [min(p[c] for p in rim) for c in range(2)]
+        hi = [max(p[c] for p in rim) for c in range(2)]
+        return ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, z), max(hi[0] - lo[0], hi[1] - lo[1])
+    cx = sum((h[i - 1][0] + h[i][0]) * (h[i][0] * h[i - 1][1] - h[i - 1][0] * h[i][1]) for i in range(len(h))) / (3 * a2)
+    cy = sum((h[i - 1][1] + h[i][1]) * (h[i][0] * h[i - 1][1] - h[i - 1][0] * h[i][1]) for i in range(len(h))) / (3 * a2)
+    return (cx, cy, z), 2.0 * (abs(a2) / 2 / 3.141592653589793) ** 0.5
+
+
+def measure_nozzles(game, file: str | None) -> tuple[Nozzle, ...]:  # noqa: ANN001 - rootcpk.Game
+    """`file`'s exits read off its model (NOZZLE_EXITS picks their rim vertices), the right one first."""
+    ((x0, x1), (y0, y1), (z0, z1)), mirrored = NOZZLE_EXITS[file]
+    rim = [p for p in bind_positions(_model_of(game, file)) if x0 <= p[0] <= x1 and y0 <= p[1] <= y1 and z0 <= p[2] <= z1]
+    if len({(round(p[0], 3), round(p[1], 3)) for p in rim}) < 2:
+        raise ValueError(f'{file}: {len(rim)} rim vertices in its exit box')
+    (c, d) = exit_of(rim)
+    if not mirrored:
+        return ((c, d),)
+    return ((c, d), ((-c[0], c[1], c[2]), d))
+
+
+def check_nozzles(game) -> None:  # noqa: ANN001 - rootcpk.Game
+    """NOZZLES is what measure_nozzles reads off the player's models (to 5 mm)."""
+    for file, want in NOZZLES.items():
+        got = measure_nozzles(game, file)
+        ok = len(got) == len(want) and all(abs(a - b) < 0.005 for (gc, gd), (wc, wd) in zip(got, want)
+                                           for a, b in zip(gc + (gd,), wc + (wd,)))
+        if not ok:
+            raise ValueError(f'{file}: NOZZLES {want}, the model has {got}')
 
 
 def fuselage_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game

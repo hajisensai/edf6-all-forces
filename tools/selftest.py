@@ -110,18 +110,20 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
 
 @test
 def jet_nozzles_on_their_models() -> None:
-    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES), and every jet
-    mark has a row."""
+    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES: on the exit's
+    centre), its flame as big as that engine (width the exit's diameter, length FLAME_LENGTH_PER_DIAMETER of it), and
+    every jet mark has a row."""
     import jet_models
     from vcobjects import JETS
     carrier = 'EDF6VC_CARRIER.MRAB'
     num = r'([-\d.]+)f'
     vec = r'\{' + num + ',' + num + ',' + num + r'\}'
     rows = {}
-    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\}', src('src/booster.cpp')):
+    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\},\{' + num + ',' + num + r'\}\}',
+                         src('src/booster.cpp')):
         count = int(m.group(2))
         at = [tuple(float(m.group(k)) for k in range(3 + 3 * n, 6 + 3 * n)) for n in range(count)]
-        rows[float(m.group(1))] = at
+        rows[float(m.group(1))] = (at, (float(m.group(9)), float(m.group(10))))
     bad = []
     for name, jet in JETS.items():
         if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == carrier):
@@ -130,9 +132,13 @@ def jet_nozzles_on_their_models() -> None:
             bad.append(f'{name}: mark {jet.mark} has no nozzle row')
             continue
         want = jet_models.NOZZLES[jet.file]
-        got = rows[jet.mark]
-        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, w in zip(got, want) for a, b in zip(g, w)):
-            bad.append(f'{name}: {got}, the model has {want}')
+        got, size = rows[jet.mark]
+        d = want[0][1]
+        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, (w, _d) in zip(got, want) for a, b in zip(g, w)):
+            bad.append(f'{name}: {got}, the model has {[w for w, _d in want]}')
+        if abs(size[1] - d) >= 0.005 or abs(size[0] - jet_models.FLAME_LENGTH_PER_DIAMETER * d) >= 0.01:
+            bad.append(f'{name}: flame {size}, its engine {d} m across')
+    assert len(rows) >= 10, f'{len(rows)} nozzle rows parsed: the pattern no longer reads the table'
     assert not bad, '\n'.join(bad)
 
 

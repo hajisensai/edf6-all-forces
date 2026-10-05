@@ -112,6 +112,7 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{MODEL_FILE}'] = jet_models.elevon_archive(game)   # the elevon bomber, grounded
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
+    jet_models.check_nozzles(game)   # the plugin's flames (src/booster.cpp kJetNozzles) on these models' exits
     import primer_fighter_model   # the Primer fighter's own model (not a jet_models recipe)
     arc = primer_fighter_model.build(game)
     primer_fighter_model.check(arc)
