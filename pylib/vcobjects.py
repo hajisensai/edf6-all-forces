@@ -452,11 +452,12 @@ def on_origin(box) -> list[list[float]]:
 # was 4.9 m in from its fuselage box's side at the ground (no prompt anywhere round it: 「空母缺少登机口」, 2026-10-05),
 # a player jet's 10 m in from its whole-model box. move_door puts it where the stock heli has its own: on the ground,
 # DOOR_OUT m outside the box's right side (+x, the V506's side), at the stock door's z (within the box's length).
-# `mdl` is bound `lift` m over the model's origin on a grounded model (pylib/jet_models.py root_lift); whether the
-# game's root record carries that lift is not settled (the mesh bone as drawn is at the origin, booster.cpp ModelBone;
-# the root's own record was seen with no frame): the door is at the origin's height on `mdl`, so it is at the ground or
-# `lift` over it, and its radius makes either reachable from DOOR_STEP m across the ground, from the human's feet or
-# HUMAN_HEIGHT over them (which of the two its position is, is not settled either). The stock radius is never cut.
+# Every model's `mdl` and mesh bone are bound at its origin (pylib/jet_models.py lift_mdb: the grounding lifts what
+# hangs on the mesh bone, not it), the box frame's origin, so the door (y 0 on `mdl`) is as high over the box's bottom
+# as the origin is: on the ground for a grounded jet (its box's bottom is the origin), door_height over it for a stock
+# bomber's box that reaches under its origin (on the ground once it has landed). Its radius makes it reachable from
+# DOOR_STEP m across the ground, from the human's feet or HUMAN_HEIGHT over them (which of the two its position is, is
+# not settled). The stock radius is never cut.
 DOOR_SLACK = 0.5      # EDF.dll 0x1C36990
 DOOR_OUT = 0.6        # m: outside the box's side, where a human standing against it is
 DOOR_STEP = 1.0       # m: across the ground from the door point, still in reach
@@ -489,12 +490,19 @@ def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
     return vec, r + 0x10
 
 
-def door_point(box, lift: float, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
-    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents],
-    on its origin) whose `mdl` is bound `lift` m up; `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
+def door_height(box) -> float:
+    """How far a jet's door (y 0 on `mdl`, the box frame's origin) is over the bottom of its collision box `box`
+    ([centre, half extents]): where it stands on the ground. 0 for a box on its origin (on_origin)."""
+    (_cx, cy, _cz), (_hx, hy, _hz) = box
+    return max(0.0, hy - cy)
+
+
+def door_point(box, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
+    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]);
+    `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
     (cx, _cy, cz), (hx, _hy, hz) = box
     z = min(max(stock[2], cz - hz), cz + hz)
-    rise = max(lift, HUMAN_HEIGHT)   # the most the door can be over (or under) the human's position
+    rise = max(door_height(box), HUMAN_HEIGHT)   # the most the door can be over (or under) the human's position
     need = (rise * rise + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
     return [round(cx + hx + DOOR_OUT, 3), 0.0, round(z, 3)], round(max(radius, need), 3)
 
@@ -507,34 +515,34 @@ def door_name(m: dict) -> str:
     return seats[0][0]
 
 
-def move_door(m: dict, box, lift: float) -> None:
+def move_door(m: dict, box) -> None:
     """`m` (a jet SGO's values) with its door (seat 0's: every seat of a jet shares it, make_jets.with_gunner_seat)
     moved to door_point."""
     mab = bytearray(m['animation_model'][2])
     vec, rad = mab_locator(bytes(mab), door_name(m))
     stock = struct.unpack_from('<3f', mab, vec)
-    at, radius = door_point(box, lift, stock, struct.unpack_from('<f', mab, rad)[0])
+    at, radius = door_point(box, stock, struct.unpack_from('<f', mab, rad)[0])
     struct.pack_into('<3f', mab, vec, *at)
     struct.pack_into('<f', mab, rad, radius)
     m['animation_model'][2] = bytes(mab)
 
 
-def check_door(data: bytes, lift: float) -> None:
-    """Re-read a jet SGO and raise DoorError unless its door is on the ground (y 0 on `mdl`), outside its collision
-    box (heli_rigid_body) across its right side by DOOR_OUT, within its length, and a human standing DOOR_STEP m from it
-    (its position at its feet or HUMAN_HEIGHT over them) is in reach whether or not `mdl` carries its `lift`."""
+def check_door(data: bytes) -> None:
+    """Re-read a jet SGO and raise DoorError unless its door is at its origin's height (y 0 on `mdl`), outside its
+    collision box (heli_rigid_body) across its right side by DOOR_OUT, within its length, and a human standing DOOR_STEP m
+    from it on the ground under its box (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
     _, m = sgo.read(data)
     mab = m['animation_model'][2]
     name = door_name(m)
     vec, rad = mab_locator(mab, name)
     x, y, z = struct.unpack_from('<3f', mab, vec)
     reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
-    (cx, cy, cz), (hx, hy, hz) = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
-    if cy - hy < -1e-3:
-        raise DoorError(f'碰撞箱伸到原点下面（{cy - hy:.2f}）')
+    box = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
+    (cx, cy, cz), (hx, hy, hz) = box
     if abs(y) > 1e-4 or x < cx + hx + DOOR_OUT - 1e-3 or not cz - hz - 1e-3 <= z <= cz + hz + 1e-3:
         raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱右侧外 {DOOR_OUT} m 的地面上')
-    worst = max(((DOOR_STEP ** 2 + (door - feet) ** 2) ** 0.5 for door in (0.0, lift) for feet in (0.0, HUMAN_HEIGHT)))
+    door = door_height(box)
+    worst = max(((DOOR_STEP ** 2 + (door - feet) ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
     if worst > reach:
         raise DoorError(f'站在上车点旁 {DOOR_STEP} m 的地面上够不着（要 {worst:.2f} m，能 {reach:.2f} m）')
 
@@ -588,10 +596,12 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE) -> bytes:
 
 
 def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = JET_BODY_BONE,
-            rigid: list[list[float]] | None = None) -> bytes:
+            rigid: list[list[float]] | None = None, airborne: bool = False) -> bytes:
     """`model`: the model archive and file (default JET_MODEL, the stock bomber); `body`: its mesh bone, which
     the root and the ragdoll drive; `rigid`: the collision box [centre, half extents] (default JET_RIGID_BODY).
-    A jet with its own model (Jet.model) always flies it: these three come from the Jet then."""
+    A jet with its own model (Jet.model) always flies it: these three come from the Jet then. `airborne`: only ever
+    made in the air (a stock bomber an airstrike's jet takes over, tools/make_jets.py BOMBERS): its box is its model's
+    as it is, not cut at its origin (on_origin: a vehicle made on the ground stands on its origin)."""
     jet = JETS[name]
     root = anchor = JET_ROOT_BONE   # root: see JET_MAB_ROOT
     if jet.model is not None:
@@ -651,11 +661,12 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
-    box = on_origin(JET_RIGID_BODY if rigid is None else rigid)
+    box = JET_RIGID_BODY if rigid is None else rigid
+    box = [list(box[0]), list(box[1])] if airborne else on_origin(box)
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
-    lift = _root_lift(game, jet, model_ref)
-    if lift is not None:
-        move_door(m, box, lift)
+    door = _moves_door(jet)
+    if door:
+        move_door(m, box)
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
     se = m.get('heli_se_table')
@@ -664,21 +675,17 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     for i in JET_ROTOR_SE_ROWS:
         se[i] = JET_SILENT_SE
     out = sgo.write(version, m)
-    if lift is not None:
-        check_door(out, lift)
+    if door:
+        check_door(out)
     return out
 
 
-def _root_lift(game: Game, jet: Jet, model: list[str] | None) -> float | None:
-    """How far `mdl` is bound over the origin of the model `jet` flies (`model`: its archive and file; None the stock
-    bomber): pylib/jet_models.py root_lift. None for a model another builder makes (the Primers' fighter, the submarine
-    carrier: not boarded on the ground), whose door stays the V506's."""
+def _moves_door(jet: Jet) -> bool:
+    """Whether jet_sgo puts `jet`'s door beside its box (move_door): every model pylib/jet_models.py makes and the
+    bombers; not a model another builder makes (the Primers' fighter, the submarine carrier: not boarded on the
+    ground), whose door stays the V506's."""
     import jet_models
-    if jet.file in jet_models.MODELS:
-        return jet_models.root_lift(game, jet.file)
-    if jet.file is None:
-        return jet_models.root_lift(game, None) if model == JET_ELEVON_MODEL else 0.0   # a stock bomber: not grounded
-    return None
+    return jet.file is None or jet.file in jet_models.MODELS
 
 
 def as_mission_sgo(data: bytes) -> bytes:

@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <intrin.h>
 
 namespace crew {
@@ -72,9 +73,9 @@ bool sigOk=false,broken=false;
 // afterburner (the player's boost) kBurnerLength times as long.
 struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
 constexpr JetNozzles kJetNozzles[]={
-    {7001.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
-    {7002.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
-    {7202.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
+    {7001.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
+    {7002.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
+    {7202.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
     {7003.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
     {7020.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
     {7201.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
@@ -255,17 +256,29 @@ namespace {
 // The model's frame is its mesh bone's world matrix as drawn (ModelBone; the vehicle's own matrix if none): on the
 // vehicle's matrix the player fighter's two flames showed above and outside its nozzles, and on the root bone ("mdl")
 // both sat in one dot with no direction (the user's pictures, 2026-10-05): the root's record is not kept up as drawn.
-// The mesh bone (the root's first child) as drawn is the model's origin itself: FLAME logged it 1.05 m under and 1.77
-// m behind the vehicle's origin (the collision box's centre, jet_models.model_box (0, 1.06, 1.69)), its rows the
-// vehicle's. The nozzles go on it as they are (a lift of mdl's bind 0.835 m taken off them put both flames at the
-// bottom of the tail: the user, 2026-10-05). FLAME logs the frame once per jet.
+// The mesh bone as drawn is the model's origin itself, at the collision box frame's origin: FLAME logged the player
+// fighter's 1.385 m under and 1.69 m behind the vehicle's origin (its box's centre (0, 1.381, 1.688)), the strike jet's
+// (0, -2.12, -2.72) (its box's (0, 2.123, 2.723)), its rows the vehicle's. The models are bound with it at their origin
+// (pylib/jet_models.py lift_mdb), so the nozzles (in the grounded model's frame) go on it as they are. It is the bone the
+// jet SGO's animation_model_bone_mapping drives (vcobjects.jet_sgo: Jet.body), found by name (kMeshBones): bone 1 on
+// the bombers' models, bone 2 on the drone's (bone 1 its globalSRT node) and the stock BOMBER501_2's (its bomber501_2
+// node). FLAME logs the frame once per jet.
+const wchar_t* const kMeshBones[]={L"bomber501",L"bomber401",L"body"};
 const unsigned char* ModelBone(const unsigned char* v) noexcept {
     const unsigned char* inst=v+kModelInst506;
     if(!Readable(inst,kInstBones506+8))return nullptr;
     const auto bones=At<const unsigned char*>(inst,kInstBones506);
     const auto count=At<std::int32_t>(inst,kInstBoneCount);
-    if(!bones || count<2 || !Readable(bones+kBoneStride,kBoneStride))return nullptr;
-    const unsigned char* rec=bones+kBoneStride;   // bone 1: the mesh bone under the root
+    if(!bones || count<2 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return nullptr;
+    const unsigned char* rec=bones+kBoneStride;   // bone 1 when no bone is named so
+    for(std::int32_t i=1;i<count;++i) {
+        const unsigned char* const r=bones+static_cast<std::size_t>(i)*kBoneStride;
+        const auto name=At<const wchar_t*>(r,0);
+        if(!name || !Readable(name,2))continue;
+        bool hit=false;
+        for(const auto* want:kMeshBones)hit=hit || std::wcsncmp(name,want,32)==0;
+        if(hit){rec=r;break;}
+    }
     const float* m=reinterpret_cast<const float*>(rec+kBoneWorld506);
     const float l=m[0]*m[0]+m[1]*m[1]+m[2]*m[2];
     return l>0.01f ? rec : nullptr;   // a matrix the game keeps up (the root's was none)

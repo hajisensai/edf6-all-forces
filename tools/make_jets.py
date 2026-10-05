@@ -64,7 +64,9 @@ FILES: dict[str, str] = {
 MODEL_FILES = sorted({vc.JETS[j].file for j in FILES.values() if vc.JETS[j].file})
 # The strike jets that take over a BOMBER401 or BOMBER501_2 (src/jet.cpp kJetSgo): that bomber's own model,
 # its mesh bone, and a box round its fuselage (bomber401: wings 52 m across but a fuselage about 5 x 4 x 16 m
-# centred 2.14 m up; bomber501_2 is BOMBER501's mesh in another paint: the strike jet's box).
+# centred 2.14 m up; bomber501_2, BOMBER501's mesh in another paint, None: measured off its model, jet_models.fuselage_box
+# (it was the strike jet's old hand-made box, cut at the origin: the fuselage's lower 1.29 m and 2.26 m at each end
+# outside it). Both are only made in the air (vcobjects.jet_sgo airborne): their boxes are their models' as they are.
 BOMBERS: dict[str, tuple[list[str], str, list[list[float]] | None]] = {
     'EDF6VC_BOMBER401.SGO': (['app:/object/bomber401.mrab', 'bomber401.mdb'], 'bomber401', [[0.0, 2.14, 0.0], [2.5, 2.0, 8.0]]),
     'EDF6VC_BOMBER501_2.SGO': (['app:/object/bomber501.mrab', 'bomber501_2.mdb'], 'bomber501', None),
@@ -135,10 +137,9 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{vc.JETS["edf6tr_jet_primer_fighter_mission"].file}'] = arc
     for name, jet in FILES.items():
         out[f'OBJECT/{name}'] = vc.jet_sgo(game, jet, MODEL)
-    for name, (model, body, rigid) in BOMBERS.items():
-        out[f'OBJECT/{name}'] = vc.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid)
-    model, body, rigid = BOMBERS['EDF6VC_BOMBER401.SGO']
-    gunship = with_mark(vc.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid), GUNSHIP_MARK)
+    for name in BOMBERS:
+        out[f'OBJECT/{name}'] = bomber_sgo(game, name)
+    gunship = with_mark(bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), GUNSHIP_MARK)
     gunship = with_gunner_seat(gunship, game.read('OBJECT', GUNNER_STOCK))
     check_gunner_seat(gunship)
     out[f'OBJECT/{GUNSHIP_FILE}'] = gunship
@@ -147,6 +148,14 @@ def build(root: str) -> dict[str, bytes]:
     for name, stock in HELIS.items():
         out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
     return out
+
+
+def bomber_sgo(game: vc.Game, name: str) -> bytes:
+    """The strike jet in BOMBERS[name]'s stock model, its box BOMBERS' or (None) its model's fuselage, as it is."""
+    model, body, rigid = BOMBERS[name]
+    if rigid is None:
+        rigid = jet_models.fuselage_box(game, model[1].removesuffix('.mdb'))
+    return vc.jet_sgo(game, 'edf6tr_jet_strike_mission', model, body, rigid, airborne=True)
 
 
 def names() -> list[str]:

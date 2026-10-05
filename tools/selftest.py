@@ -699,7 +699,8 @@ def range_parks_every_boardable_aircraft_apart() -> None:
 def jet_door_on_the_ground_beside_its_box() -> None:
     """pylib/vcobjects.py move_door / check_door (docs/player-jet-re.md §12): a jet's boarding point (the V506's door
     locator, read out of a MAB block by mab_locator) goes on the ground DOOR_OUT m outside its collision box's right side,
-    with a radius that reaches a human DOOR_STEP m off it whether or not `mdl` carries the grounding's lift (the parked
+    with a radius that reaches a human DOOR_STEP m off it on the ground under its box (the door is at the box frame's
+    origin: on the ground for a box on its origin, over it for a stock bomber's box reaching under it) (the parked
     carrier's door was under its middle, 4.9 m in from its box's side: no prompt anywhere, 2026-10-05); check_door
     refuses a door inside the box or out of reach. On a block of its own (the selftest runs without the game)."""
     import struct
@@ -724,38 +725,43 @@ def jet_door_on_the_ground_beside_its_box() -> None:
             continue
         raise AssertionError(f'{bad}: not a locator, found')
     carrier = [[0.0, 8.516, -3.109], [29.703, 8.516, 38.422]]   # EDF6VC_CARRIER's whole-model box (jet_models.model_box)
-    lift = 3.512                                                   # ...its `mdl` bound this far up (root_lift)
 
     def jet(box: list[list[float]], door_mab: bytes) -> bytes:
         return sgo.write(1, {'animation_model': [['a', 'b'], 'c', door_mab], 'heli_rigid_body': [box[0], box[1], 0.3],
                              'vehicle_riding_position': [[door, seat, ['カメラ１', 0.0, 0.0], '505_TANK_DRIVER', 15, 10.0, 5]]})
 
-    def refused(data: bytes, at_lift: float, why: str) -> None:
+    def refused(data: bytes, why: str) -> None:
         try:
-            vc.check_door(data, at_lift)
+            vc.check_door(data)
         except vc.DoorError:
             return
         raise AssertionError(f'check_door passed {why}')
 
-    refused(jet(carrier, mab), lift, 'the stock door under the middle of the carrier')
+    refused(jet(carrier, mab), 'the stock door under the middle of the carrier')
     _, m = sgo.read(jet(carrier, mab))
-    vc.move_door(m, carrier, lift)
+    vc.move_door(m, carrier)
     moved = sgo.write(1, m)
-    vc.check_door(moved, lift)
-    refused(moved, lift + 1.0, 'a door out of reach (a lift its radius was not made for)')
+    vc.check_door(moved)
+    _, low = sgo.read(moved)
+    low['heli_rigid_body'] = [[0.0, 3.516, -3.109], [29.703, 8.516, 38.422], 0.3]   # its bottom 5 m under the door
+    refused(sgo.write(1, low), 'a door out of reach (5 m over the ground its box stands on)')
     block = m['animation_model'][2]
     vec, rad = vc.mab_locator(block, door)
     x, y, z = struct.unpack_from('<3f', block, vec)
     radius = struct.unpack_from('<f', block, rad)[0]
     assert abs(x - (29.703 + vc.DOOR_OUT)) < 1e-3 and y == 0.0 and abs(z - 1.8) < 1e-6, (x, y, z)
-    assert radius + vc.DOOR_SLACK >= (vc.DOOR_STEP ** 2 + lift ** 2) ** 0.5, radius
+    assert abs(radius - 1.8) < 1e-6, radius   # on the ground: the stock radius reaches
     assert vc.mab_locator(block, seat) == (vecs + 16, 0x64 + 0x10)
     assert struct.unpack_from('<4f', block, vecs + 16) == struct.unpack_from('<4f', mab, vecs + 16), 'the seat moved'
     # A small jet keeps the stock radius (1.8) when that reaches; the door stays within the box's length.
-    at, r = vc.door_point([[0.0, 1.381, 1.688], [8.047, 1.381, 9.922]], 1.485, (2.15, 0.0, 1.8), 1.8)
+    at, r = vc.door_point([[0.0, 1.381, 1.688], [8.047, 1.381, 9.922]], (2.15, 0.0, 1.8), 1.8)
     assert at == [8.647, 0.0, 1.8] and r == 1.8, (at, r)
-    at, r = vc.door_point([[0.0, 1.255, 0.0], [12.969, 1.255, 1.0]], 0.437, (2.15, 0.0, 1.8), 1.8)
+    at, r = vc.door_point([[0.0, 1.255, 0.0], [12.969, 1.255, 1.0]], (2.15, 0.0, 1.8), 1.8)
     assert at[2] == 1.0, at
+    # A box reaching under its origin (a stock bomber's) puts the door over the ground: a radius that reaches it.
+    assert abs(vc.door_height([[0.0, 0.339, 2.723], [1.983, 1.624, 15.137]]) - 1.285) < 1e-9
+    at, r = vc.door_point([[0.0, -1.0, 0.0], [2.0, 2.0, 5.0]], (2.15, 0.0, 1.8), 1.8)
+    assert r == round((3.0 ** 2 + vc.DOOR_STEP ** 2) ** 0.5 - vc.DOOR_SLACK + vc.DOOR_MARGIN, 3), r
 
 
 @test
