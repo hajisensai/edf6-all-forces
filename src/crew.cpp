@@ -26,6 +26,7 @@
 #include "heli.h"
 #include "layout.h"
 #include "memory.h"
+#include "warn.h"
 #include <cmath>
 
 namespace crew {
@@ -550,10 +551,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -672,6 +673,7 @@ void FrameTick() noexcept {
     PerfTick();
     GuardedTick(kStepUnderground,&UnderPlayer);
     GuardedTick(kStepRescue,&RescueTick);
+    GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
     GuardedTick(kStepHudPublish,&HudPublish);
     GuardedTick(kStepUnderground,&BigWorldProbe);
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);

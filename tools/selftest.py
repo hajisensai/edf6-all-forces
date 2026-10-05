@@ -897,6 +897,35 @@ def nix_torso_wired() -> None:
         assert '±70°' in readme
 
 
+def cockpit_warnings_wired() -> None:
+    """The cockpit's warnings (src/warn.cpp, hud.cpp, jetaudio.cpp): their ini keys are read, shipped and documented; one
+    owner sounds the threats (warn.cpp, not playerjet.cpp any more); every warning has its annunciator text and every
+    callout its file name, text and repeat; WarnTick runs before the HUD's publish carries what it decides; the offline
+    checks are build targets."""
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('WarnAudio', 'WarnVoice', 'WarnVolume'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    assert 'Fix("WarnVolume"' in plugin
+    assert 'ThreatTone' not in src('src/playerjet.cpp') and 'ThreatTone' not in src('src/jetaudio.h')
+    warn_h, audio_h, audio, hud = src('src/warn.h'), src('src/jetaudio.h'), src('src/jetaudio.cpp'), src('src/hud.cpp')
+    warns = re.search(r'enum Warn : int \{([^}]*)\}', warn_h).group(1)
+    n_warn = len([w for w in warns.split(',') if w.strip() and 'kWarnCount' not in w])
+    texts = hud.split('kWarnText[kWarnCount]={', 1)[1].split('};', 1)[0]
+    assert len(re.findall(r'(?<!\w)L"', texts)) == n_warn, (texts, n_warn)
+    calls = re.search(r'enum Callout : int \{([^}]*)\}', audio_h).group(1)
+    n_call = len([c for c in calls.split(',') if c.strip() and 'kCallCount' not in c])
+    for table in ('kCallName[kCallCount]={', 'kCallText[kCallCount]={'):
+        assert len(re.findall(r'(?<!\w)L"', audio.split(table, 1)[1].split('};', 1)[0])) == n_call, table
+    repeats = audio.split('kCallRepeat[kCallCount]={', 1)[1].split('};', 1)[0]
+    assert len(repeats.split(',')) == n_call, repeats
+    tick = src('src/crew.cpp').split('void FrameTick()', 1)[1].split('\n}', 1)[0]
+    assert 0 <= tick.find('&WarnTick') < tick.find('&HudPublish'), 'WarnTick must run before HudPublish'
+    cmake = src('CMakeLists.txt')
+    assert 'src/warn.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
+    for target in ('warn_check', 'hud_view'):
+        assert f'add_executable({target} EXCLUDE_FROM_ALL' in cmake, target
+
+
 @test
 def gunship_gunner_seat() -> None:
     """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second

@@ -43,6 +43,7 @@
 #include "sight.h"
 #include "playerjet_kinds.h"
 #include "vecmath.h"
+#include "warn.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -214,6 +215,9 @@ struct PJet {
     int lock;                    // the picked store's lock (StoreLock), for the cockpit
     float lockAt[3],lockProgress;
     bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
+    float stallShare;            // ...the share of all its wing gives its path needs, kStallWarn over (>= 1: stall)
+    Gpws gpws;                   // the ground-proximity warning (Proximity), impactIn s to the impact (<0: none)
+    float impactIn;
     float vel[3],omega[3];
     float prev[3];               // its position last frame
     bool havePrev;
@@ -752,6 +756,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     float lift[3];
     for(int i=0;i<3;++i)lift[i]=j.up[i]*pitch;
     j.stall=most<kStallWarn*across;
+    j.stallShare=most>1e-6f ? kStallWarn*across/most : 2.0f;
     float next[3];
     for(int i=0;i<3;++i)next[i]=dir[i]+(lift[i]+gPerp[i])*dt/speed;
     if(!Normalize(next))std::memcpy(next,dir,12);
@@ -905,8 +910,8 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     audio::LockTone(j.lock,j.lockProgress);
     // Being locked on (the user, 2026-10-05: "being locked on should sound a warning too"): a missile homing on it
     // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.
+    // Heard through warn.cpp WarnTick (from the threats Threats gathers), with every aircraft the player flies.
     j.threat=MissileHoming(pos,kThreatRadius) ? 2 : jet::LockingOn(v) ? 1 : 0;
-    audio::ThreatTone(j.threat);
     Flares(j,v,s,pos);
     for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;}
     // The impact point before the trigger: the bomb bay opens on it (FireSpecial kBay). Only what falls as a bomb (a
@@ -1003,6 +1008,20 @@ void Threats(PJet& j,const unsigned char* v,const float* pos) noexcept {
     const int locks=jet::LockersOf(v,y.threatAt+n,kMostThreats-n);
     for(int i=n;i<n+locks;++i)y.threatKind[i]=1;
     y.threats=n+locks;
+}
+
+// The ground-proximity warning (the user, 2026-10-05: "warn me to pull up when I'm about to hit the ground"; 2026-10-06:
+// "more realistic"): warn.cpp ClosureIn looking kTerrainSeconds ahead, a real GPWS's modes (GpwsOf): PULL UP within
+// kPullUpSeconds of the ground or what stands on it, TERRAIN / SINK RATE as a caution before. A landing (sinking no
+// faster than the airframe lands: kLandSink for a wing, the kind's landMax for a rotor craft) raises nothing. In the air
+// only; last frame's velocity and climb (one frame late, as the HUD shows them).
+void Proximity(PJet& j,const float* pos,float clear) noexcept {
+    j.gpws=Gpws::none;j.impactIn=-1.0f;
+    if(j.phase!=Phase::air)return;
+    const bool rotor=j.board && j.board->frame==pjet::Airframe::rotor;
+    bool rising=false;
+    j.impactIn=ClosureIn(pos,j.vel,j.climb,clear,rotor ? j.kind->landMax : kLandSink,kTerrainSeconds,&rising);
+    j.gpws=GpwsOf(j.impactIn,rising);
 }
 
 // The caught jet's speed for its boarding (see kCatchAfterMs).
@@ -1479,6 +1498,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     Stores(j,v,s,pos);
     Sight(j,v,pos,dt);
     Threats(j,v,pos);
+    Proximity(j,pos,clear);
     SpecialFrame(j,v,s,pos,ms);
     CrewGunner(j,v,dt,ms);   // the gunship's NPC gunner (playerjet_crew.inc)
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
@@ -1574,22 +1594,6 @@ void PreloadPlayerJets() noexcept {
         chutePreloaded);
 }
 
-// The ground-proximity warning (the user, 2026-10-05: "warn me to pull up when I'm about to hit the ground"): in
-// the air, at its sink rate it reaches the ground within kPullUpSeconds faster than a landing takes (kLandSink),
-// or its path within kPullUpSeconds runs into something standing higher than the ground under it (a hill, a
-// building) or into the ground while it sinks faster than a landing. A gentle landing approach raises nothing.
-constexpr float kPullUpSeconds=3.0f,kPullUpRise=5.0f;
-bool PullUpNeeded(const PJet& j,const float* pos) noexcept {
-    if(j.phase!=Phase::air)return false;
-    const float sink=-j.climb;
-    if(j.clear!=kNoGround && sink>kLandSink && j.clear<sink*kPullUpSeconds)return true;
-    const float end[3]={pos[0]+j.vel[0]*kPullUpSeconds,pos[1]+j.vel[1]*kPullUpSeconds,pos[2]+j.vel[2]*kPullUpSeconds};
-    float hit[3];
-    if(MapRay(pos,end,hit)<0.0f)return false;
-    const float under=j.clear!=kNoGround ? pos[1]-j.clear : hit[1];
-    return sink>kLandSink || hit[1]>under+kPullUpRise;
-}
-
 bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;
     for(const auto& j:jets) {
@@ -1604,7 +1608,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
             const Kind* const kind=KindOf(v);
             r.rotate=kind ? kind->rotate : 0.0f;
-            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=PullUpNeeded(j,pos);r.threat=j.threat;r.flares=j.flares;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=air && j.gpws==Gpws::pullUp;r.threat=j.threat;r.flares=j.flares;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
@@ -1613,7 +1617,10 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
             r.sym=j.sym;
-            if(j.board && j.board->frame==pjet::Airframe::rotor) {   // the helicopter HUD's (hud.cpp HeliHud)
+            r.gpws=air ? j.gpws : Gpws::none;r.impactIn=r.gpws!=Gpws::none ? j.impactIn : -1.0f;
+            const bool rotor=j.board && j.board->frame==pjet::Airframe::rotor;
+            r.liftShare=air && !rotor ? j.stallShare : 0.0f;
+            if(rotor) {   // the helicopter HUD's (hud.cpp HeliHud)
                 HeliFlight& f=r.heli;
                 r.rotor=true;r.aiming=false;
                 std::memcpy(f.vel,j.vel,12);
@@ -1621,6 +1628,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
                 f.hp=r.hp;f.hpMax=r.hpMax;f.keys=j.keys;f.landed=!air;
                 f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=f.aiming && j.hover.holding;
                 f.setSpeed=j.hover.speed;f.top=j.hoverTop;std::memcpy(f.aim,r.aim,12);
+                f.gpws=r.gpws;f.impactIn=r.impactIn;
             }
             *out=r;
             return true;

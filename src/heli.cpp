@@ -39,6 +39,7 @@
 #include "memory.h"
 #include "roundaim.h"
 #include "edf/weapon.h"
+#include "warn.h"
 #include <cmath>
 
 namespace crew {
@@ -2109,14 +2110,15 @@ void PlayerAssist(unsigned char* v) noexcept {
 // lifts it off, as before), and for kLiftOffMs after it no horizontal stick and no speed set (the NPC's lift-off).
 // The descend key is the brake key (ini PlayerJetBrakeKey): the stock keyboard has none, letting go of Space only spun
 // the rotor down.
-// The readout (PlayerHeliHud) is gathered while the mouse flies it or the HUD (ini HeliFlightHud) is on: the mouse's aim
-// is drawn whenever it flies, the HUD around it only with HeliFlightHud.
+// The readout (PlayerHeliHud) is gathered while the mouse flies it, the HUD (ini HeliFlightHud) is on or the warnings are
+// heard (ini WarnAudio, warn.cpp): the mouse's aim is drawn whenever it flies, the HUD around it only with HeliFlightHud.
 constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
 constexpr float kPlayerClimb=6.0f;     // m/s: Space / the brake key (the stock rotor's most is ~8: aircraft-re.md)
 constexpr float kPlayerMark=800.0f;    // m: the aim's mark ahead (playerjet.cpp kAimMark), kept within kAimOnScreen
 constexpr float kAimOnScreen=0.85f;
 constexpr float kMovingSpeed=5.0f;     // m/s: slower, it has no flight path to mark (the HUD shows its drift)
 constexpr float kThreatRadius=20.0f;   // m: a missile's lock point this near it homes on it (playerjet.cpp's)
+constexpr float kGpwsSlack=1.0f;       // m/s over the descent key's sink before the ground-proximity warning counts it
 struct Pilot {
     ObjRef ref;
     ULONGLONG seen,lastMs,groundAt;
@@ -2206,6 +2208,15 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     f.hp=At<float>(v,kHp);f.hpMax=At<float>(v,kHpMax);
     f.keys=keys;f.aiming=p.flying;f.holding=p.flying && p.hold.holding;f.landed=grounded;
     f.setSpeed=p.hold.speed;f.top=PlayerTop(v);
+    // The ground-proximity warning (warn.cpp), off the ground: sinking faster than the descent key's kPlayerClimb (plus
+    // kGpwsSlack) onto the ground, or the path into something standing higher than it.
+    f.gpws=Gpws::none;f.impactIn=-1.0f;
+    if(!grounded) {
+        bool rising=false;
+        f.impactIn=ClosureIn(pos,p.vel,p.vel[1],clear,kPlayerClimb+kGpwsSlack,kTerrainSeconds,&rising);
+        f.gpws=GpwsOf(f.impactIn,rising);
+        if(f.gpws==Gpws::none)f.impactIn=-1.0f;
+    }
     for(int i=0;i<3;++i)f.aim[i]=pos[i]+p.aim[i]*kPlayerMark;
     if(grounded) {
         const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass),rotor=At<float>(v,kRotor);
@@ -2234,7 +2245,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
 
 // The player in seat 0 of a stock heli, each frame after PlayerAssist.
 void PlayerHeli(unsigned char* v) noexcept {
-    if(!Cfg().heliMouseAim && !Cfg().heliFlightHud)return;
+    if(!Cfg().heliMouseAim && !Cfg().heliFlightHud && !Cfg().warnAudio)return;
     float fwd[3],right[3];
     if(!Row(v,kHeadForward,fwd) || !Row(v,kHeadRight,right))return;
     const ULONGLONG ms=GameMs();
@@ -2260,7 +2271,7 @@ void PlayerHeli(unsigned char* v) noexcept {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
         p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
     }
-    if(Cfg().heliFlightHud || p->flying)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
+    if(Cfg().heliFlightHud || p->flying || Cfg().warnAudio)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
 }
 }  // namespace
 

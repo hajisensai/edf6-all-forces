@@ -67,3 +67,17 @@
 - 每把武器初始化（0x68A920）时无条件按名字加载两个 SEPRESET：0x68E90B「ロックオンサーチ」→ weapon+0xCC0，0x68E928「ロックオン完了」→ weapon+0xD40（`weapon_Common_lockonSearch` / `_lockonLocked`，参考距离 10000 m，10 km 内满音量）。武器 SGO 里没有锁定音键。(H)
 - 锁定 tick 0x6963A0 播放它们（0x69656F / 0x6965D9 → 0x7B4510），条件是武器持有者（weapon+0x120）没有 +0x1A 第 3 位（对象在跑 AI：原版 NPC 士兵有，玩家没有）。载具没有这一位，所以 NPC 驾驶的载具锁定时照样在玩家耳边响。(H/M)
 - 插件（`src/jetsound.cpp` LockSound，每台载具每帧）：座位上坐的不是本机玩家时，把该座位所有武器这两个 preset 的 `{bank, cueIdx}`（+0x20）清零（0x7B4510 遇 bank 为空直接返回）；本机玩家坐的座位写回（全局同一个 cue，第一次见到时记下）。
+
+## 8. 座舱告警音（2026-10-06，`src/warn.cpp` 决定，`src/jetaudio.cpp` `Warn` 播放）
+
+游戏里没有现成的告警语音或失速声（TIKYUUX_SE.ACB 里只有锁定的 search / locked 两种提示音，§7），所以全部由插件自己出声，走引擎声同一个 XAudio2 引擎：
+
+- **音量**：主 voice = 游戏主音量 × 效果音量；引擎声在各自的 Mix 里乘 `JetSoundVolume`，座舱的锁定音、威胁蜂鸣、失速喇叭、语音乘 `WarnVolume`（以前锁定音也乘 `JetSoundVolume`，因为它挂在主 voice 上）。
+- **心跳**：以前只有喷气机引擎的每帧 tick 调 `Beat`，`JetSound=0` 或原版直升机任务里没有插件喷气机时没有心跳，看门狗会把主 voice 一直静音（座舱提示音也听不到）。现在 `WarnTick` 每帧也调 `Beat`（引擎已起时）。
+- **威胁音**：原来的 1 kHz 循环换音高：被锁定慢低音蜂鸣、导弹来袭快高音蜂鸣（不变）；新发射 2.5 s 内改为 1.35 / 0.85 倍每 80 ms 交替的颤音（RWR 发射音）。
+- **失速喇叭**：420 Hz 奇次谐波到 9 次（近似方波）0.5 s 整周期循环，失速时常响。
+- **语音**：一个单独的 voice，一次一条：PULL UP（两声 350→1300 Hz 上扬「呜」+「Pull up」，结束后 150 ms 再来）、MISSILE（每次发射一次）、STALL（3 s）、TERRAIN（1.5 s）、SINK RATE（2 s）、GEAR「Too low, gear」（3 s）。只有亮着的告警里最优先、还有话要说的那一条能播：它能打断次要的（被打断的随后重播），它在重复间隙里时次要的也不插话（GPWS 的抑制）。
+- **语音来源**：SAPI 5（`ISpVoice` → `ISpStream::SetBaseStream` 到 `CreateStreamOnHGlobal` 的内存流，48 kHz 16 位单声道，裁掉首尾静音），第一次 `Warn` 时在单独线程里念完 6 条（COM MTA），完成后原子标记发布；优先 `Language=409`（英文）+ `Gender=Female` 的语音。本机实测：`Microsoft Zira Desktop - English (United States)`，6 条全部念出。没有 SAPI 或 `WarnVoice=0`：PULL UP 只有两声「呜」，TERRAIN / SINK RATE / GEAR 是 1050→750 Hz 的双音提示，STALL / MISSILE 只有喇叭和颤音。DLL 旁 `<dll>_warn_<名字>.wav` 优先于以上两者（线性重采样到 48 kHz）。
+- 离线：`tools/warn_check.cpp`（不创建 XAudio2 引擎，不出声）检查语音的调度，并把合成音和语音写成 WAV。
+
+**需实机确认**：音量平衡（语音 0.55、喇叭 0.2、蜂鸣 0.3，乘 `WarnVolume`）；SAPI 在游戏进程里念的耗时（后台线程，不卡帧）；中文系统没有英文语音时慧慧念英文的效果。

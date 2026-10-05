@@ -122,8 +122,10 @@ audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,float
         doppler=(kSoundSpeed-vl)/(kSoundSpeed-vs);
     }
     const float roarAt=d>kRoarRef ? kRoarRef/d : 1.0f,whineAt=d>kWhineRef ? std::pow(kWhineRef/d,1.3f) : 1.0f;
-    const float roar=(0.45f+0.55f*share)*roarAt*(0.6f+0.4f*(ahead<0.0f ? -ahead : 0.0f));
-    const float whine=(0.2f+0.8f*share)*whineAt*(0.35f+0.65f*(ahead>0.0f ? ahead : 0.0f));
+    // JetSoundVolume here, not on the master voice: the cockpit's warnings share that at their own WarnVolume.
+    const float own=Cfg().jetSoundVolume;
+    const float roar=own*(0.45f+0.55f*share)*roarAt*(0.6f+0.4f*(ahead<0.0f ? -ahead : 0.0f));
+    const float whine=own*(0.2f+0.8f*share)*whineAt*(0.35f+0.65f*(ahead>0.0f ? ahead : 0.0f));
     m.roarL=roar*leftGain;m.roarR=roar*rightGain;
     m.whineL=whine*leftGain;m.whineR=whine*rightGain;
     m.roarRatio=(0.85f+0.3f*share)*doppler;
@@ -167,11 +169,19 @@ void Tick() noexcept {
         }
         std::memcpy(listener,cam,sizeof(listener));listenerFrame=frame;hasListener=true;
     } else hasListener=false;
-    audio::Beat(GameVolume()*Cfg().jetSoundVolume);
+    audio::Beat(GameVolume());
     for(auto& s:sounds)
         if(s.ref && ms-s.seen>kStaleMs)Silence(s);   // deleted, wrecked or gone with the mission
 }
 
+}  // namespace
+
+float GameEffectVolume() noexcept {
+    __try { return GameVolume(); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return 1.0f;}
+}
+
+namespace {
 // --- The lock-on beeps ---
 // Every weapon loads two presets at init (0x68A920: 0x68E90B 'ロックオンサーチ' into +0xCC0, 0x68E928 'ロックオン完了'
 // into +0xD40; weapon_Common_lockonSearch / _lockonLocked, heard at full out to 10 km) and its lock-on tick plays them
