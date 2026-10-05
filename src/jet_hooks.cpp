@@ -82,6 +82,10 @@ bool Candidate(void* collector,std::uint32_t body,const void** owner,const void*
 }
 
 void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
+    // A slow round through the Shield Bearer's shield (shield.cpp), whoever fired it.
+    bool through=false;
+    __try { through=ShieldLetsThrough(collector,body); } __except(FaultLog("SHIELD round",GetExceptionInformation())) { through=false; }
+    if(through)return;
     bool pass=false;
     if(flown.load(std::memory_order_relaxed)) {
         const void* owner=nullptr;
@@ -124,6 +128,7 @@ bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     const auto body=At<void*>(v,kBody);
     if(!body)return false;
     JetMotionProps(body);
+    ShieldBlock(v,j->m.vel);   // its own velocity: the next frame's flight starts from the glance
     for(int i=0;i<3;++i){lin[i]=j->m.vel[i];ang[i]=j->m.omega[i];}
     return true;
 }
@@ -135,6 +140,7 @@ bool InstallJets() noexcept {
         hooksOk=true;
         InstallJetProps();
         InstallBoosters();
+        InstallShields();
         const bool spawn=InstallSpawn();
         const bool bay=InstallBay(spawn);
         const bool dolls=spawn && InstallDolls();

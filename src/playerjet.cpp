@@ -1083,6 +1083,7 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     const auto body=At<void*>(v,kBody);
     if(!body)return false;
     JetMotionProps(body);
+    ShieldBlock(v,j->vel);   // its own velocity (shield.cpp)
     for(int i=0;i<3;++i){lin[i]=j->vel[i];ang[i]=j->omega[i];}
     return true;
 }
