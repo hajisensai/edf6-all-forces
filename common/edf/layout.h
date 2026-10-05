@@ -25,6 +25,9 @@ constexpr std::size_t kSeatRider=0x260,kSeatRiderCtrl=0x268;
 // velocity, ...}: yaw, then pitch (negative up). Slot 2 (0x5FBDA0) turns them by the vehicle's turn input (+0x2AA0),
 // slot 3 (0x5FACD0) builds the aim's matrix from the two angles.
 constexpr std::size_t kSeatAim=0xE0,kAimAxes=0x10,kAxisStride=0x40,kAxisMin=0x0,kAxisMax=0x4,kAxisAngle=0x8;
+// Seat: its rider's input (EDF6VehicleCrew docs/stores-re.md §4): byte 1 = a pad (0 the keyboard and mouse), and the
+// pad's buttons as a word (0x01 A, 0x02 B, 0x04 X, 0x08 Y, 0x10 LB, 0x20 RB, 0x40 L3, 0x80 R3).
+constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 // Human: pad / player-controlled (the test 0x572EFF and 0x673AC2 make before reading a pad)
 constexpr std::size_t kHumanPad=0x340,kHumanPlayer=0x354;
 // A rider's network object (rider+0x120); bit 0 of its +8 set: another machine runs it (the weapon fire
