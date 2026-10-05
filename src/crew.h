@@ -423,9 +423,10 @@ unsigned GunshipBoardSeat() noexcept;
 struct GunnerOrder { bool centred; float at[3],home[3]; };
 bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // The gunner's sight (hud.cpp GunnerMarks, game thread): where the screen's centre meets the ground (`ground`: within
-// the camera's reach), its range from the gunship and whether a shell reaches it, the gun's wait (s, 0: ready; `ready`:
-// the shells are there and the gun is), the pylon turn's centre. False with the player not at a gunship's gun.
-struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; };
+// the camera's reach), its range from the gunship and whether the picked gun reaches it, that gun's wait (s, 0: ready;
+// `ready`: its rounds are there and it is), the pylon turn's centre; `cannon`: the gun picked is the long-range cannon
+// (else the shells), `both`: the cannon is there to switch to. False with the player not at a gunship's gun.
+struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred,cannon,both; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.

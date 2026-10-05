@@ -206,7 +206,8 @@ inline constexpr Kind kKinds[kRoleCount]={
     {Role::doll,"doll",Prefer::any,FlightModel::rotor,Weapon::charge,Pose::none,&kRotorLean, 25.0f,25.0f,0.0f, 12.0f,12.0f, 4.0f,2.0f,
      10.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kDollTrigger,true,Body::doll},
     // The gunship (JetRole::gunship): the bomber401 body (its own SGO, mark 7011) circling its anchor wide and
-    // slow, never diving; it shells ground targets in reach from where it flies (GunshipFire).
+    // slow, never diving; it shells ground targets in reach from where it flies and fires its side cannon at them
+    // from further out (GunshipFire; TargetRange: its range grows with the cannon).
     {Role::gunship,"gunship",Prefer::ground,FlightModel::wing,Weapon::shells,Pose::elevons,nullptr, 120.0f,120.0f,70.0f, 3.0f,3.0f, 2.0f,0.3f,
      350.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 600.0f,80.0f, 0.0f,0.0f, 1500.0f, 0.0f,3.0f, 0.0f,false,Body::gunship},
     // The Primer fighter: a flapping dogfighter, slower than ours and nimbler (its wings beat it round: Flap), guns only.
@@ -333,10 +334,12 @@ struct BayState {
     const void* bombOwner;   // whose bombs the bay drops (the caller: the bomb rounds' owner)
     ULONGLONG bombClear;     // game ms until which the owner's rounds still pass its flight (0: bay open)
 };
-// The gunship's shells (GunshipFire).
+// The gunship's shells and its cannon (GunshipFire): two guns, each with its own gap.
 struct ShellState {
     ULONGLONG gunAt;         // its last shell
     int gunShots;            // ...and how many it has fired
+    ULONGLONG cannonAt;      // its last cannon round (jet_bay.cpp CannonShot)
+    int cannonShots;         // ...and how many it has fired
 };
 
 struct Jet {
@@ -526,6 +529,15 @@ bool ShellsReady() noexcept;
 bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept;
 float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept;
 float ShellReach() noexcept;
+// Its long-range cannon (jet_bay.cpp kCannonSgo): a round from the player at `at` (false: not ready, out of reach, no
+// cannon this mission); whether the cannon is there at all (its SGO installed and preloaded: an install from before
+// has none); its wait before the next round (s, 0: ready); its reach (m).
+bool PlayerCannon(unsigned char* v,const float* at,ULONGLONG ms) noexcept;
+bool CannonReady() noexcept;
+float CannonWait(const unsigned char* v,ULONGLONG ms) noexcept;
+float CannonReach() noexcept;
+// How far from its anchor kind `k` takes targets (its range; a gunship's further with its cannon: jet.cpp PickTarget).
+float TargetRange(const Kind& k) noexcept;
 
 // --- jet_spawn.cpp ---
 // Rows right, up, forward, position, as BombingPlane_Init builds its matrix (right = up x forward).

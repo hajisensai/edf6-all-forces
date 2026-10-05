@@ -533,9 +533,10 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
     l.x=(width-l.w)*0.5f;l.y=height*0.86f+2.0f*s;
 }
 
-// The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a shell fired now lands
-// (where the screen's centre meets the ground), red out of its reach; under it the range and READY or the gun's wait;
-// a cyan square on the pylon turn's centre (the point last shelled). No ground under the centre: the line alone.
+// The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a round of the picked gun
+// fired now lands (where the screen's centre meets the ground), red out of its reach; under it the gun (SHELLS or
+// CANNON, the other one named when the switch has one to go to), the range and READY or the gun's wait; a cyan square
+// on the pylon turn's centre (the point last fired at). No ground under the centre: the line alone.
 void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const GunnerReadout& g,
                  Line* lines,int* at) noexcept {
     float sx=width*0.5f,sy=height*0.5f,depth;
@@ -552,10 +553,11 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
     if(*at>=kMaxLines)return;
     Line& line=lines[(*at)++];
-    if(!g.ground)Format(line,L"SHELLS   NO GROUND IN SIGHT");
-    else if(!g.inReach)Format(line,L"SHELLS   %d m   OUT OF RANGE",static_cast<int>(std::lround(g.range)));
-    else if(g.ready)Format(line,L"SHELLS   %d m   READY",static_cast<int>(std::lround(g.range)));
-    else Format(line,L"SHELLS   %d m   %.1f s",static_cast<int>(std::lround(g.range)),g.wait);
+    const wchar_t* const gun=g.both ? (g.cannon ? L"[CANNON] SHELLS" : L"[SHELLS] CANNON") : L"SHELLS";
+    if(!g.ground)Format(line,L"%ls   NO GROUND IN SIGHT",gun);
+    else if(!g.inReach)Format(line,L"%ls   %d m   OUT OF RANGE",gun,static_cast<int>(std::lround(g.range)));
+    else if(g.ready)Format(line,L"%ls   %d m   READY",gun,static_cast<int>(std::lround(g.range)));
+    else Format(line,L"%ls   %d m   %.1f s",gun,static_cast<int>(std::lround(g.range)),g.wait);
     line.scale=kLineScale;line.rgba=g.ground && g.inReach ? (g.ready ? kGreen : kYellow) : kRed;line.w=line.h=0.0f;
     if(text)MeasureAll(*text,&line,1);
     line.x=sx-line.w*0.5f;line.y=sy+22.0f*s;

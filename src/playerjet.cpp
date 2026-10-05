@@ -262,6 +262,7 @@ struct PJet {
 // playerjet_board.inc (any of the plugin's aircraft under the player): what the flight steps above call.
 void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
+int SpecialRoom(const PJet& j) noexcept;
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept;
 void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noexcept;
 bool FallsAsBomb(const Store& st) noexcept;
@@ -903,8 +904,8 @@ constexpr float kThreatRadius=20.0f;
 
 void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Store st[kMostStores];
-    const int real=ReadStores(v,st,j.board ? kMostStores-1 : kMostStores);
-    const int n=real+SpecialStore(j,v,st+real);   // the aircraft's own weapon as one more store (playerjet_board.inc)
+    const int real=ReadStores(v,st,j.board ? kMostStores-SpecialRoom(j) : kMostStores);
+    const int n=real+SpecialStore(j,v,st+real);   // the aircraft's own weapons as more stores (playerjet_board.inc)
     j.stores=n;j.bomb=j.hasImpact=false;j.lock=0;
     j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,real);
     if(n==0)return;   // none known: the 506's own fire bytes stand

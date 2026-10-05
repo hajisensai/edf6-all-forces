@@ -12,9 +12,10 @@
 //    own rotor flight (jet_flight.cpp Hover: its lean, its thrusters) at the velocity the stick asks for (HoverStep).
 //  - Weapons: its guns (primary) and stores (secondary, as the player jets'), and its own weapon as one more store in
 //    the cockpit's cycle (SpecialStore): a bomber's bay (BOMB BAY: the carpet from the CCIP point on), the gunship's
-//    shells (SHELLS at where the camera looks; the target key held flies the pylon turn round that point), the
-//    carrier's drones (DRONES launched at where the camera looks; the target key calls them back), the blast / doll
-//    drone's charge (CHARGE: it goes off and the drone with it, the player thrown clear).
+//    shells and its long-range side cannon (SHELLS / CANNON at where the camera looks; the target key held flies the
+//    pylon turn round that point), the carrier's drones (DRONES launched at where the camera looks; the target key
+//    calls them back), the blast / doll drone's charge (CHARGE: it goes off and the drone with it, the player thrown
+//    clear).
 //  - Leaving (Left): on the ground it stays where it is and waits for them (keep); in the air the jet itself is the
 //    catch (a wing, Cfg().playerJetCatch: it flies back to the parachuting player), else, and when the catch gives up,
 //    its NPC pilot takes it back and it goes on with its call (HandBack, jet.cpp ResumeNpc: its fuel clock stood).
@@ -115,18 +116,28 @@ bool Sight(float* out) noexcept {
 
 // --- Its own weapon, as one more store (see the file comment) ---
 // No weapon behind them (Store::weapon null): stores.cpp's lock, trigger and cycle calls pass them by; FireSpecial
-// fires them. Their role: bomb draws the cockpit's impact cross (the bay's CCIP; the shells' and drones' aim point).
+// fires them. Their role: bomb draws the cockpit's impact cross (the bay's CCIP; the shells', cannon's and drones' aim
+// point). The gunship has two (SHELLS, then CANNON when its round is installed: jet_bay.cpp kCannonSgo; an install from
+// before has the shells alone, the preload logs the cannon missing), every other aircraft one at most (SpecialRoom).
 constexpr StoreSpec kSpecials[]={
     {L"","BOMB BAY",StoreRole::bomb,0.0f,0.0f},
     {L"","SHELLS",StoreRole::bomb,0.0f,0.0f},
     {L"","DRONES",StoreRole::bomb,0.0f,0.0f},
     {L"","CHARGE",StoreRole::ground,0.0f,0.0f},
+    {L"","CANNON",StoreRole::bomb,0.0f,0.0f},
 };
-constexpr int kBay=0,kShells=1,kDrones=2,kCharge=3;
-constexpr int kShellRounds=99;   // the gunship's shells never run out (as its NPC's): shown as 99
+constexpr int kBay=0,kShells=1,kDrones=2,kCharge=3,kCannon=4;
+constexpr int kSpecialCount=static_cast<int>(sizeof(kSpecials)/sizeof(kSpecials[0]));
+// The gunship's guns never run out (as its NPC's): shown as 99. Its cannon is no different: a magazine with a reload
+// would only be a pause the NPC crew's gun does not have, and its rate (2 a second, jet_bay.cpp kCannonGapMs) is its limit.
+constexpr int kShellRounds=99;
 constexpr ULONGLONG kChargeFireMs=100,kChargeMs=300;   // jet_carrier.cpp kBlastFireMs / kBlastMs
 constexpr float kOrderUp=40.0f;   // m: the drones' point over the sight (they work round it, jet.cpp)
 
+// The room its own weapons take in the cockpit's cycle (kMostStores in all): the gunship's two guns, else one.
+int SpecialRoom(const PJet& j) noexcept { return j.board && j.board->arm==pjet::Arm::shells ? 2 : 1; }
+
+// Its own weapons as stores, at most SpecialRoom of them: their count.
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept {
     if(!j.board)return 0;
     int which=-1,rounds=0;
@@ -135,19 +146,22 @@ int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept {
     else if(j.board->arm==pjet::Arm::drones){which=kDrones;rounds=jet::DronesLeft(v);}
     else if(j.board->arm==pjet::Arm::charge){which=kCharge;rounds=j.blastAt ? 0 : 1;}
     if(which<0)return 0;
-    *out=Store{nullptr,&kSpecials[which],rounds,0,0.0f};
-    return 1;
+    out[0]=Store{nullptr,&kSpecials[which],rounds,0,0.0f};
+    if(which!=kShells || !jet::CannonReady())return 1;
+    out[1]=Store{nullptr,&kSpecials[kCannon],kShellRounds,0,0.0f};
+    return 2;
 }
 
 int SpecialOf(const StoreSpec* spec) noexcept {
-    for(int i=0;i<4;++i)if(spec==&kSpecials[i])return i;
+    for(int i=0;i<kSpecialCount;++i)if(spec==&kSpecials[i])return i;
     return -1;
 }
 
 // What falls as a bomb when let go (its CCIP traced, Stores): a bomb store's weapon, or the bay's.
 bool FallsAsBomb(const Store& st) noexcept { return st.weapon!=nullptr || SpecialOf(st.spec)==kBay; }
 
-// The point the shells and the drones go for: the pylon turn's centre while it flies one, else the camera's sight.
+// The point the shells, the cannon and the drones go for: the pylon turn's centre while it flies one, else the
+// camera's sight.
 const float* AimPoint(const PJet& j) noexcept { return j.orbiting ? j.orbitAt : j.hasSight ? j.sight : nullptr; }
 
 void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noexcept {
@@ -160,6 +174,9 @@ void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noex
         break;
     case kShells:
         if(at)jet::PlayerShell(v,at,ms);
+        break;
+    case kCannon:   // held, a round every kCannonGapMs (the fire byte is set again each frame it is held)
+        if(at)jet::PlayerCannon(v,at,ms);
         break;
     case kDrones:
         if(at) {
@@ -175,9 +192,9 @@ void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noex
     }
 }
 
-// The gunship's pylon turn (the target key held with its shells picked): round the point the camera looked at when
-// it was pressed, kOrbitMin to kOrbitMax out (where it was), that point on its left (the AC-130's guns' side), at the
-// height it had; the plane steered by the aim's law (Air: steered), the player's mouse left to the camera.
+// The gunship's pylon turn (the target key held with its shells or its cannon picked): round the point the camera
+// looked at when it was pressed, kOrbitMin to kOrbitMax out (where it was), that point on its left (the AC-130's guns'
+// side), at the height it had; the plane steered by the aim's law (Air: steered), the player's mouse left to the camera.
 constexpr float kOrbitMin=400.0f,kOrbitMax=900.0f;
 void Orbit(PJet& j,const unsigned char* v,const float* pos,bool hold) noexcept {
     if(!hold){if(j.orbiting)Log("PJET v=%p pylon turn: off",v);j.orbiting=false;return;}
@@ -204,10 +221,11 @@ void SpecialFrame(PJet& j,unsigned char* v,Stick& s,const float* pos,ULONGLONG m
     j.specialHeld=s.nextTarget;
     j.hasSight=Sight(j.sight);
     int special=-1;
-    for(int i=0;i<4;++i)if(j.stores>0 && j.store<j.stores && j.storeName[j.store]==kSpecials[i].name)special=i;
-    Orbit(j,v,pos,special==kShells && s.nextTarget);
+    for(int i=0;i<kSpecialCount;++i)if(j.stores>0 && j.store<j.stores && j.storeName[j.store]==kSpecials[i].name)special=i;
+    const bool gun=special==kShells || special==kCannon;
+    Orbit(j,v,pos,gun && s.nextTarget);
     if(j.steered){s.aimX=0.0f;s.aimY=0.0f;}   // the pylon turn steers; the mouse only turns the camera
-    if(special==kShells || special==kDrones) {   // the cross on where they go, not a bomb's fall
+    if(gun || special==kDrones) {   // the cross on where they go, not a bomb's fall
         const float* at=AimPoint(j);
         j.hasImpact=at!=nullptr;
         if(at)std::memcpy(j.impact,at,12);
