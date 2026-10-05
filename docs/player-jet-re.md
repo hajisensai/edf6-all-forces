@@ -191,6 +191,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
 - 机炮和挂载同玩家战斗机。挂载循环里多一项「特殊挂载」（`Store::weapon` 为空，`stores.cpp` 的锁定 / 扳机函数原本就对空武器什么都不做）：
   - **BOMB BAY**：喷气机还带着接管来的弹仓（`BayState::ifc` 且没开过）。副射击 → `jet::PlayerOpenBay`：`bombAt` = 当前 CCIP 落点，`bombDir` / `bombSpeed` = 此刻的水平速度，`bayFrom = -reach`，所以第一颗炸弹瞄 CCIP，之后每帧 `BayFrame` 按原版轰炸机每帧前移一个速度（`docs/airstrike-re.md`）。
   - **SHELLS**（炮舰机）：`jet::PlayerShell`，同 `GunshipFire` 的炮弹、间隔、射程，目标是屏幕中心视线与地面的交点（`CameraRay`：由上一帧 view-projection 求逆，眼睛 = (0,0,1,0)·VP⁻¹，中心点 = (0,0,0.5,1)·VP⁻¹）；按住目标键绕点盘旋（`Orbit`：`steered` 让 `Air` 按瞄准点转向，鼠标只转镜头）。
+  - **CANNON**（炮舰机，2026-10-05）：`jet::PlayerCannon`，侧舷远程机炮（`jet_bay.cpp` `CannonShot`，`EDF6VC_GUNSHIP_CANNON.SGO`：`tools/make_jets.py` `cannon_round`，原版 `DEMOGUNSHIPFIRESOLID` 改成一发 16 m/帧、不下坠、170 帧、4 m 爆炸、不穿透），`Shell(..., straight=true)` 从机身直线打向同一个瞄准点；自己的间隔 500 ms、射程 2500 m，伤害 60 × 机体倍率（最大 HP ÷ `kJetMasses` 耐久，同 `RamDamage`）；副射击字节 0x2021 由 slot 55 每帧按按键重写，所以按住即连发。只有 `jet::CannonReady()`（文件存在并已预载）时才进挂载循环，炮舰机的特殊挂载占两格（`SpecialRoom`）。NPC（`GunshipFire`、炮手 `CrewShell`）对地面目标按 `tgtVel` 算一次提前量；有机炮的 NPC 炮舰机选目标范围 `TargetRange` = √(2500² − 350²) − 600 − 80 ≈ 1795 m（原 1500 m）。炮手座用 `PlayerJetSwitchKey` / LB 在 SHELLS 与 CANNON 间切换（`GunnerPick`）。
   - **DRONES**（三种航母）：`jet::PlayerLaunchDrone` 复用 NPC 的发射（`LaunchOne`，从 `LaunchDrones` 抽出来，行为不变），同时给航母记 `CarrierState::order`：它放出的无人机以这一点（抬高 40 m）为锚点、400 m 内找目标（`jet.cpp JetFrame`）；目标键 `RecallDrones`。
   - **CHARGE**（自爆 / 人偶无人机）：副射击后 100 ms 内每帧置 0x2021（2 号挂架，炸药，同 `jet_carrier.cpp Blast`），300 ms 后 `Kill`（原版死亡消息，踢出座位，玩家按 §7 弹射）。
 
