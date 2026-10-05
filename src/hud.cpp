@@ -969,25 +969,29 @@ void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
     l.x=(width-l.w)*0.5f;l.y=y0+pad;
 }
 
-// The player's drill tank (DrillCue, the user 2026-10-05: the RPM on the HUD): its RPM and a bar of it, amber while
-// it spins up or down, green at the top; "DRILLING" while it touches something.
+// The player's drill tank (DrillCue, the user 2026-10-05: the RPM on the HUD; its heat next to it): the RPM and its
+// bar, amber while it spins up or down, green at the top, "DRILLING" while it touches something; the heat's bar beside
+// it, yellow, amber past 70%, red past 90%; overheated, all red and "OVERHEAT" (it turns again once cooled).
+const float* HeatColour(float heat,bool over) noexcept { return over || heat>=0.9f ? kRed : heat>=0.7f ? kAmber : kYellow; }
 void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const DrillCue& c,Line* lines,int* at) noexcept {
     if(*at>=kMaxLines || !(c.maxRpm>0.0f))return;
     Line& l=lines[(*at)++];
-    const float share=Unit(c.rpm/c.maxRpm);
+    const float share=Unit(c.rpm/c.maxRpm),heat=Unit(c.heat);
     const bool top=share>=0.99f;
-    Format(l,L"DRILL %d RPM%ls",static_cast<int>(std::lround(c.rpm)),c.touching && c.rpm>0.0f ? L"    DRILLING" : L"");
+    Format(l,L"DRILL %d RPM    HEAT %d%%%ls",static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(heat*100.0f)),
+           c.overheated ? L"    OVERHEAT" : c.touching && c.rpm>0.0f ? L"    DRILLING" : L"");
     l.scale=kTitleScale;
-    l.rgba=top ? kGreen : share>0.0f ? kAmber : kCyan;
+    l.rgba=c.overheated ? kRed : top ? kGreen : share>0.0f ? kAmber : kCyan;
     l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
-    const float pad=8.0f*s,gap=5.0f*s,barW=320.0f*s,barH=10.0f*s;
-    const float lineH=l.h>0.0f ? l.h : 24.0f*s,w=(l.w>barW ? l.w : barW)+2.0f*pad,h=pad+lineH+gap+barH+pad;
-    const float x0=(width-w)*0.5f,y0=height*0.80f-h;
+    const float pad=8.0f*s,gap=5.0f*s,rpmW=220.0f*s,heatW=120.0f*s,between=16.0f*s,barH=10.0f*s,barsW=rpmW+between+heatW;
+    const float lineH=l.h>0.0f ? l.h : 24.0f*s,w=(l.w>barsW ? l.w : barsW)+2.0f*pad,h=pad+lineH+gap+barH+pad;
+    const float x0=(width-w)*0.5f,y0=height*0.80f-h,bx=(width-barsW)*0.5f,by=y0+pad+lineH+gap;
     Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
-    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,top ? kGreen : kCyan);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,c.overheated ? kRed : top ? kGreen : kCyan);
     l.x=(width-l.w)*0.5f;l.y=y0+pad;
-    Bar(drawer,ctx,(width-barW)*0.5f,y0+pad+lineH+gap,barW,barH,share,share,top ? kGreen : kAmber,s);
+    Bar(drawer,ctx,bx,by,rpmW,barH,share,share,top ? kGreen : kAmber,s);
+    Bar(drawer,ctx,bx+rpmW+between,by,heatW,barH,heat,heat,HeatColour(heat,c.overheated),s);
 }
 
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.

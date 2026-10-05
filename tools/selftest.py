@@ -503,7 +503,7 @@ def ground_mission_builders_take_the_game_alone() -> None:
 
 @test
 def drill_copies_agree() -> None:
-    """src/drill.cpp's drill (bone name, length, base radius) is pylib/drill_model.py's, src/jet_bay.cpp's drill charge
+    """src/drill.cpp's drill (bone name, length, base radius, base, rotational repeat) is pylib/drill_model.py's, src/jet_bay.cpp's drill charge
     is the one tools/make_drill.py writes (pylib/vcobjects.py DRILL_CHARGE_FILE), its blast breaks buildings (>= 3 m),
     the drill tank's request is a ground vehicle request of tools/make_drill.py's vehicle, and the model turns the OBJ
     without mirroring it."""
@@ -513,6 +513,10 @@ def drill_copies_agree() -> None:
     assert f'kDrillBone[]=L"{drill_model.DRILL_BONE}"' in d, 'src/drill.cpp kDrillBone'
     m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
     assert m and (float(m.group(1)), float(m.group(2))) == (drill_model.DRILL_LENGTH, drill_model.DRILL_RADIUS), m and m.groups()
+    m = re.search(r'kDrillBaseY=([\d.]+)f,kDrillBaseZ=([\d.]+)f', d)
+    assert m and (0.0, float(m.group(1)), float(m.group(2))) == drill_model.DRILL_BASE, m and m.groups()
+    m = re.search(r'kSpinRepeat=2\.0f\*kPi/([\d.]+)f', d)
+    assert m and float(m.group(1)) == drill_model.DRILL_FOLDS, m and m.groups()
     bay = src('src/jet_bay.cpp')
     assert f'kDrillChargeFile[]=L"{vc.DRILL_CHARGE_FILE}"' in bay, 'src/jet_bay.cpp kDrillChargeFile'
     assert f'kDrillChargeSgo[]=L"app:/object/{vc.DRILL_CHARGE_FILE.lower()}"' in bay, 'src/jet_bay.cpp kDrillChargeSgo'
