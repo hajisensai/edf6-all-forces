@@ -913,7 +913,14 @@ struct Bailout {
     Eject state; ULONGLONG at; float carry[2],vy;
     float mark,heading[3],speed;     // the jet left: its kind's mark, its nose, its speed (the catch)
     ObjRef caught; ULONGLONG caughtAt;
+    bool open;                       // past the top: the parachute is open (the canopy shows: Chute)
+    const char* why;                 // how it ended (state none), for the canopy's CHUTE line
 } bail{};
+
+// The ejection over (state none), `why` kept for the canopy's line (ChuteTick).
+void BailEnd(const char* why) noexcept {
+    bail.state=Eject::none;bail.why=why;
+}
 struct PlayerJetFile { float mark; const wchar_t* sgo; const wchar_t* file; };
 constexpr PlayerJetFile kPlayerJetFiles[]={{7201.0f,L"app:/object/edf6vc_pjet_fighter.sgo",L"EDF6VC_PJET_FIGHTER.SGO"},
                                           {7202.0f,L"app:/object/edf6vc_pjet_strike.sgo",L"EDF6VC_PJET_STRIKE.SGO"}};
@@ -987,7 +994,7 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         return;
     }
     unsigned char* const v=const_cast<unsigned char*>(static_cast<const unsigned char*>(bail.caught.obj));
-    if(!bail.caught.Is(v) || v[kDead]){Log("PJET catch: the jet is gone");bail.state=Eject::none;catchFlight=CatchFlight{};return;}
+    if(!bail.caught.Is(v) || v[kDead]){Log("PJET catch: the jet is gone");BailEnd("the catch jet is gone");catchFlight=CatchFlight{};return;}
     if(ms-bail.caughtAt>kCatchMostMs) {
         Log("PJET catch: given up, the player not aboard in %.0f s",static_cast<float>(kCatchMostMs)*0.001f);
         bail.caught=ObjRef{};bail.mark=0.0f;catchFlight=CatchFlight{};
@@ -1035,12 +1042,12 @@ void EjectTick() noexcept {
         // came for me", no line after the catch's).
         Log("PJET ejection over: %s (state %d)",!h ? "no player found" : h[kDead] ? "the player died" : "the player attached/ragdolled",
             static_cast<int>(bail.state));
-        bail.state=Eject::none;return;
+        BailEnd(!h ? "no player found" : h[kDead] ? "the player died" : "the player attached/ragdolled");return;
     }
     float* const vel=reinterpret_cast<float*>(h+kHumanVel);
     if(bail.state==Eject::pending) {
         if(At<std::uint32_t>(h,kHumanFlags)&kRiding) {   // the stock exit not through yet
-            if(ms-bail.at>kEjectWaitMs){bail.state=Eject::none;Log("PJET ejection over: the player never left the seat");}
+            if(ms-bail.at>kEjectWaitMs){BailEnd("the player never left the seat");Log("PJET ejection over: the player never left the seat");}
             return;
         }
         Put<float>(h,kJumpSpeed,kEjectUp);h[kJumpFlag]=1;
@@ -1052,7 +1059,7 @@ void EjectTick() noexcept {
     }
     if(At<std::uint32_t>(h,kHumanFlags)&kRiding) {   // caught: in the new jet
         Log("PJET catch: the player is in");
-        bail.state=Eject::none;
+        BailEnd("caught: the player is in the catch jet");
         return;
     }
     Catch(h,ms);
@@ -1061,9 +1068,14 @@ void EjectTick() noexcept {
     const bool landed=ms-bail.at>300 && (support!=0 || (clear!=kNoGround && clear<kChuteLand));
     const bool cut=ms-bail.at>kChuteCutAfterMs && KeyDown(Cfg().playerJetChuteCutKey);
     if(ms-bail.at>kChuteMostMs || landed || cut || vel[1]>bail.vy+kChuteBoost) {
-        Log("PJET parachute: %s",landed ? "landed" : cut ? "cut by the player" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long");
-        bail.state=Eject::none;
+        const char* const why=landed ? "landed" : cut ? "cut by the player" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long";
+        Log("PJET parachute: %s",why);
+        BailEnd(why);
         return;
+    }
+    if(!bail.open && vel[1]<=0.0f) {   // past the top: the canopy shows (ChuteTick)
+        bail.open=true;
+        Log("PJET parachute open, %.0f m/s carried",std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]));
     }
     const float keep=1.0f-kChuteBleed/60.0f;
     if(vel[1]<-kChuteSink)vel[1]=-kChuteSink;
@@ -1074,6 +1086,116 @@ void EjectTick() noexcept {
         push[0]*=keep;push[2]*=keep;shove[0]*=keep;shove[2]*=keep;
     }
     bail.vy=vel[1];
+}
+
+// The parachute's canopy (the user, 2026-10-05: the parachute "only slows the fall, no model"): from the parachute's
+// opening (past the top, bail.open) to its end, one object over the player, CHUTE lines when it is made and gone (and
+// why). The object is a FarEventObject (docs/player-jet-re.md §8; tools/make_chute.py EDF6VC_CHUTE.SGO, the stock
+// far-off plant's SGO with pylib/chute_model.py's dome and lines as its model, preloaded at the mission's start when the
+// file is there: PreloadPlayerJets): CreateObject with the plain InitParamBase@SceneObject as the catch jet's, its class
+// checked by its vtable. Its update (vtable slot 5, 0x5C4FB0) only renders its model at its matrix (+0x60..+0x9F,
+// times its setting.scale) and ticks an optional animation; it never writes that matrix, so the plugin's write each
+// frame moves it (H: the whole update read). Its physics body comes only from a "ragdoll" entry (0x5C4970, H), which
+// the SGO has none of: nothing collides with it, pushes the player or stops a bullet (M: the GameObjectBase base adds
+// no collider of its own that the stock far-off objects show). It goes on the neutral team (SetObjectTeam: hostile to
+// nobody, so no enemy turns on it; M) and is deleted when the parachute ends, or forgotten at a mission's start (the
+// mission's objects go with it). Upright, kChuteUp over the player's feet (the model's origin: pylib/chute_model.py
+// CANOPY_UP), its front along the drift (the last one held while the drift is under kChuteTurnSpeed).
+constexpr unsigned kFarEventVtable=0x17D5DA0,kFarEventUpdate=0x5C4FB0,kDeleteFn=0x118A1B0;
+constexpr std::size_t kVtableUpdate=5;
+constexpr float kChuteUp=4.0f,kChuteTurnSpeed=0.5f;
+const unsigned char kFarEventUpdateSig[]={0x40,0x53,0x48,0x83,0xEC,0x70,0x48,0x8B,0xD9,0xE8};
+const wchar_t* const kChuteSgo=L"app:/object/edf6vc_chute.sgo";
+const wchar_t* const kChuteFile=L"EDF6VC_CHUTE.SGO";
+struct Chute {
+    unsigned char* obj; const void* ctrl;
+    bool tried;                      // made (or failed to be) for this ejection: not tried again every frame
+    float face[2];                   // its front (x, z)
+} chute{};
+alignas(16) float chuteMatrix[16];   // where it is put (ChutePose)
+bool chuteOk=false,chutePreloaded=false;
+
+bool ChuteLive() noexcept {
+    unsigned char* const o=chute.obj;
+    return o && Readable(o,kTeam+4) && At<const void*>(o,0)==image+kFarEventVtable && At<const void*>(o,kSelfCtrl)==chute.ctrl &&
+           !(o[kObjFlags]&kObjDeleted);
+}
+
+// Its matrix: upright, kChuteUp over the feet at `p`, its front along the drift `v` (held when slow).
+void ChutePose(const float* p,const float* v) noexcept {
+    float f[3]={v[0],0.0f,v[2]};
+    if(Len(f)>=kChuteTurnSpeed && Normalize(f)){chute.face[0]=f[0];chute.face[1]=f[2];}
+    const float x=chute.face[0],z=chute.face[1];
+    const float pose[16]={z,0,-x,0, 0,1,0,0, x,0,z,0, p[0],p[1]+kChuteUp,p[2],1};
+    std::memcpy(chuteMatrix,pose,sizeof(pose));
+}
+
+void ChuteMake(const unsigned char* h) noexcept {
+    chute.tried=true;
+    if(!chuteOk || !chutePreloaded || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt)) {
+        Log("CHUTE not made: %s",!chuteOk ? "FarEventObject profile mismatch" : !chutePreloaded ? "EDF6VC_CHUTE.SGO not preloaded (not installed?)" :
+            "no object manager");
+        return;
+    }
+    float f[3]={bail.heading[0],0.0f,bail.heading[2]};
+    if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
+    chute.face[0]=f[0];chute.face[1]=f[2];
+    const float* p=reinterpret_cast<const float*>(h+kPosition);
+    ChutePose(p,reinterpret_cast<const float*>(h+kHumanVel));
+    SpawnParam param{image+kInitParamVt,{}};
+    unsigned char* o=nullptr;
+    __try {
+        o=reinterpret_cast<unsigned char*(*)(void*,const float*,const wchar_t*,SpawnParam*)>(image+kCreateObjectFn)(
+            At<void*>(image,kObjectMgrAt),chuteMatrix,kChuteSgo,&param);
+    } __except(EXCEPTION_EXECUTE_HANDLER){chutePreloaded=false;Log("CHUTE not made: the game faulted building it: off this mission");return;}
+    if(!o){Log("CHUTE not made: the game made no object");return;}
+    if(At<const void*>(o,0)!=image+kFarEventVtable) {
+        Log("CHUTE %p is no FarEventObject (vtable %p): deleted",o,At<const void*>(o,0));
+        reinterpret_cast<void(*)(void*)>(image+kDeleteFn)(o);
+        return;
+    }
+    const std::int32_t team=At<std::int32_t>(o,kTeam);
+    SetObjectTeam(o,kTeamNeutral);
+    chute.obj=o;chute.ctrl=At<const void*>(o,kSelfCtrl);
+    Log("CHUTE made: %p over the player at (%.0f,%.0f,%.0f), team %d -> %d",o,p[0],p[1],p[2],team,At<std::int32_t>(o,kTeam));
+}
+
+void ChuteFree(const char* why) noexcept {
+    unsigned char* const o=chute.obj;
+    __try {
+        if(ChuteLive())reinterpret_cast<void(*)(void*)>(image+kDeleteFn)(o);
+        else Log("CHUTE %p: already gone",o);
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("CHUTE %p: the game faulted deleting it",o);}
+    chute.obj=nullptr;chute.ctrl=nullptr;
+    Log("CHUTE gone: %s",why ? why : "the ejection ended");
+}
+
+// A frame (after EjectTick): the canopy made at the parachute's opening, kept over the player while it is open,
+// deleted once it is not.
+void ChuteTick() noexcept {
+    const bool open=bail.state==Eject::chute && bail.open;
+    if(!open) {
+        if(chute.obj)ChuteFree(bail.state==Eject::none ? bail.why : "a new ejection");
+        if(bail.state!=Eject::chute)chute.tried=false;
+        return;
+    }
+    const unsigned char* const h=PlayerHuman();
+    if(!h)return;   // EjectTick ends it next frame
+    if(!chute.obj) {
+        if(!chute.tried)ChuteMake(h);
+        return;
+    }
+    __try {
+        if(!ChuteLive()){chute.obj=nullptr;chute.ctrl=nullptr;Log("CHUTE gone: deleted by the game");return;}
+        ChutePose(reinterpret_cast<const float*>(h+kPosition),reinterpret_cast<const float*>(h+kHumanVel));
+        std::memcpy(chute.obj+kMatrix,chuteMatrix,sizeof(chuteMatrix));
+    } __except(EXCEPTION_EXECUTE_HANDLER){chute.obj=nullptr;chute.ctrl=nullptr;Log("CHUTE gone: the game faulted moving it");}
+}
+
+// A mission's start: the last mission's canopy went with its objects.
+void ChuteForget() noexcept {
+    if(chute.obj)Log("CHUTE gone: a new mission (forgotten with the last one's objects)");
+    chute=Chute{};
 }
 
 // The player out of the jet: got out, or the jet destroyed under them (the user, 2026-10-05: "a shot-down one should
@@ -1230,6 +1352,7 @@ void PlayerEjectTick() noexcept {
     if(flyOk && Cfg().playerJet)
         for(auto& j:jets)if(j.driven && j.vehicle && Gone(j))Leave(j,j.vehicle,j.clear,false,"destroyed");
     EjectTick();
+    ChuteTick();
     FlaresStep();
 }
 
@@ -1243,8 +1366,16 @@ void PreloadPlayerJets() noexcept {
             playerJetPreloaded[i]=true;
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
+    chutePreloaded=false;   // the parachute's canopy (ChuteMake), when installed
+    if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kChuteFile)) {
+        __try {
+            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kChuteSgo,2,-1);
+            chutePreloaded=true;
+        } __except(EXCEPTION_EXECUTE_HANDLER){}
+    }
     bail=Bailout{};catchFlight=CatchFlight{};
-    Log("PJET preload for the catch: fighter=%d strike=%d",playerJetPreloaded[0],playerJetPreloaded[1]);
+    Log("PJET preload for the catch: fighter=%d strike=%d; the parachute's canopy=%d",playerJetPreloaded[0],playerJetPreloaded[1],
+        chutePreloaded);
 }
 
 // The ground-proximity warning (the user, 2026-10-05: "warn me to pull up when I'm about to hit the ground"): in
@@ -1332,12 +1463,16 @@ void PlayerJetFrame(unsigned char* v) noexcept {
 bool InstallPlayerJets() noexcept {
     flyOk=Body506Ok();
     if(!flyOk)Log("PJET: no 506 physics hook (body506): player jets off");
-    Log("HOOK player jets fly=%d water=%d die=%d bodyPart=%d",flyOk,Body506MessageOk(),Die506Ok(),BodyPartOk());
+    chuteOk=Matches(kFarEventUpdate,kFarEventUpdateSig,sizeof(kFarEventUpdateSig)) &&
+            Readable(image+kFarEventVtable,(kVtableUpdate+1)*8) &&
+            At<const void*>(image+kFarEventVtable,kVtableUpdate*8)==image+kFarEventUpdate;
+    Log("HOOK player jets fly=%d water=%d die=%d bodyPart=%d chute=%d",flyOk,Body506MessageOk(),Die506Ok(),BodyPartOk(),chuteOk);
     return flyOk;
 }
 
 // A new mission (mission.cpp MissionStart): the last mission's jets are gone with it.
 void ResetPlayerJets() noexcept {
     for(auto& j:jets)j=PJet{};
+    ChuteForget();
 }
 }  // namespace crew

@@ -6,7 +6,8 @@ What install does, with EDF6.exe closed:
   2. makes everything first, in memory, from the player's own Root.cpk (only read): the call weapons stacked
      onto the shared weapon table (call_weapons.stack, which also checks the table and its texts line up and
      offers repair when they do not), the jets, helicopters and drones (make_jets.build) and the submarine
-     carrier (make_sub.build), the big map (make_bigmap.build: the test range's plain stitched 3 x 3, seamless).
+     carrier (make_sub.build), the ejection's parachute canopy (make_chute.build), the big map
+     (make_bigmap.build: the test range's plain stitched 3 x 3, seamless).
      They cannot be shipped prebuilt: they are derived from the game's files, and the
      weapon table is shared with other mods. Nothing is written unless all of it could be made;
   3. writes them: the generated objects (each file atomically, recorded in the ownership ledger,
@@ -242,6 +243,7 @@ def install(game: str) -> None:
     import gen
     import make_artillery
     import make_bigmap
+    import make_chute
     import make_jets
     import make_katyusha
     import make_sub
@@ -262,10 +264,13 @@ def install(game: str) -> None:
     katyusha = make_katyusha.build(game)
     print('生成自行榴弹炮（读取 Root.cpk，不修改它）……')
     artillery = make_artillery.build(game)
+    print('生成降落伞（读取 Root.cpk，不修改它）……')
+    chute = make_chute.build(game)
     print('生成大地图（测试场平原拼成 3 x 3，无缝；读取 Root.cpk，不修改它，约需一两分钟）……')
     bigmap = make_bigmap.build(game)
     print('\n全部生成完毕，开始写入。')
-    for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery):
+    for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery) + \
+            make_chute.install(game, chute):
         print('写入', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
@@ -282,6 +287,7 @@ def uninstall(game: str) -> None:
     import gen
     import make_artillery
     import make_bigmap
+    import make_chute
     import make_jets
     import make_katyusha
     import make_sub
@@ -295,7 +301,7 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
-        for remove in (make_artillery.remove, make_katyusha.remove, make_sub.remove, make_jets.remove):
+        for remove in (make_chute.remove, make_artillery.remove, make_katyusha.remove, make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
                 print('删除', path)
