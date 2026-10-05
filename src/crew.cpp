@@ -469,6 +469,10 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
+    // A heli no player has ridden yet stays where it stands for them (the user, 2026-10-05: the range's parked helis
+    // "all took off by themselves, I could not get in": crewed 9 s in, a heli lifts off at once, where a crewed tank
+    // stays to be bumped). One a player has ridden and left is crewed as before (it follows them).
+    if(IsHelicopter(vehicle) && !st.playerAt)return;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
     ULONGLONG since=st.emptySince;
