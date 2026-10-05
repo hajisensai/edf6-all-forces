@@ -459,6 +459,9 @@ bool PlayerJetOwnSight(const void* vehicle) noexcept;
 struct HeliSightReadout { float bore[3],pipper[3],range; bool hit; };
 bool PlayerHeliOwnSight(const void* vehicle) noexcept;
 void HeliSightFrame(unsigned char* vehicle) noexcept;
+// netprobe.cpp: Debug=1, online only: once a second per helicopter-class vehicle, which machine runs it and how its
+// pose replication stands (the NET lines, docs/online-re.md). Reads only.
+void NetProbe(unsigned char* vehicle) noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
 // `most`; how many.
