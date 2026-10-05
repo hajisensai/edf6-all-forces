@@ -1410,6 +1410,83 @@ def artillery_chassis_is_stock() -> None:
         om.add_texture(rab, 't0.DDS', texfile.solid_dxt1((99, 2, 3), 32))      # a re-encoded stock texture
         assert any('t0.DDS: member' in x for x in am.material_problems(rab, md)), am.material_problems(rab, md)
 
+@test
+def stock_payload_and_seats_wired() -> None:
+    """The stock vehicles' payload readout and store switch (src/payload.cpp) and the seat switch (src/seatswitch.cpp):
+    their ini keys are read, shipped and documented, the keys range-checked; the input hook moves the player before the
+    steps that read who sits where and picks the store before the heli sight marks it; the HUD's struct is the header's;
+    playerjet.cpp tells a move between the gunship's seats from getting out; the installer step (tools/make_stock_stores.py)
+    is opt-in (off in the shipped ini), installed after the jets' store weapons, removed, bundled and a ledger owner, and
+    its stores are store weapons make_jets writes and src/stores.inc knows."""
+    import make_stock_stores as mss
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline')
+    for key in keys:
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    for key in ('SeatNextKey', 'SeatButton'):
+        assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
+    assert re.search(r'^StockHeliStores=0', ini, re.M) and not mss.wanted(ini), 'StockHeliStores ships off'
+    assert mss.wanted('[VehicleCrew]\nStockHeliStores=1 ; on\n') and not mss.wanted('[Other]\nStockHeliStores=1\n')
+    hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
+    order = [hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
+    assert all(x >= 0 for x in order) and order == sorted(order), f'src/crew.cpp InputHook step order: {order}'
+    assert 'PayloadPicked(v)' in src('src/helisight.cpp')
+    assert 'PlayerSeatPrompt(&s.seatPrompt)' in src('src/hud.cpp') and 'void SeatLine(' in src('src/hud.cpp')
+    header = src('src/payload.h')
+    for name in ('struct PayloadReadout', 'struct PayloadEntry', 'bool PlayerPayload(', 'struct SeatPrompt'):
+        assert name in header, name
+    pj = src('src/playerjet.cpp')
+    assert 'if(j.driven && AboardElsewhere(v,0))Moved(j,v);' in pj, 'playerjet.cpp: a move to the gun is no ejection'
+    assert 'AboardElsewhere(v,kGunnerSeat)' in src('src/playerjet_crew.inc'), 'playerjet_crew.inc: a move to the stick is no bail-out'
+    for f in ('src/payload.cpp', 'src/seatswitch.cpp'):
+        assert f in src('CMakeLists.txt'), f
+    assert mss.OWNER in ledger.OWNERS
+    inst = src('tools/installer.py')
+    assert inst.index('make_jets.install(game, jets)') < inst.index('make_stock_stores.install(game, files)'), 'stores after the jets'
+    assert 'make_stock_stores.remove' in inst and "'make_stock_stores'" in src('tools/build_release.py')
+    stores_inc = src('src/stores.inc')
+    for f in mss.store_files():
+        assert f in vc.STORE_FILES, f'{f}: make_jets does not write it'
+        kind = vc.store_of('app:/weapon/' + f.lower())[0]
+        assert f'L"EDF6VC_{kind}_"' in stores_inc, f'{f}: src/stores.inc does not know its kind'
+    # The seat switch's offsets agree with the RE notes.
+    doc = src('docs/stock-payload-re.md')
+    for rva in ('0x5763E0', '0x551C30', '0x56C9F0', '0x633FE0', '0x634940', '0x6346FC', '0x56D7CC', '0x572734'):
+        assert rva in doc, rva
+    seat = src('src/seatswitch.cpp')
+    for c in ('kAnnounce=0x5763E0', 'kSetAction=0x551C30', 'kRideAction=0x56C9F0', 'kReserve=0x633FE0', 'kClear=0x634940'):
+        assert c in seat, c
+
+
+@test
+def stock_stores_build() -> None:
+    """With the game here (CI has none): every stock request that brings a 506-class helicopter of LOADOUTS gets a vehicle
+    whose holders and weapon list agree, the fuel tank fourth, the stores after it (make_stock_stores.check); only the
+    vehicle, the weapon list and the preload list change."""
+    import rootcpk
+    import make_stock_stores as mss
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    names = mss.requests(game)
+    assert names, 'no stock request brings a helicopter of LOADOUTS'
+    files: dict[str, bytes] = {}
+    stems = set()
+    for name in names:
+        data, stem = mss.request_sgo(game.read('WEAPON', name), name)
+        files[f'WEAPON/{name}'] = data
+        stems.add(stem)
+        before, after = dsgo.to_py(dsgo.parse(game.read('WEAPON', name)).root), dsgo.to_py(dsgo.parse(data).root)
+        assert set(before) == set(after), name
+        for k in before:
+            if k not in ('Ammo_CustomParameter', 'resource'):
+                assert before[k] == after[k], (name, k)
+    assert stems == set(mss.LOADOUTS), stems
+    for stem in stems:
+        files[f'OBJECT/{mss.derived_name(stem)}'] = mss.derived_vehicle(game, stem)
+    mss.check(files)
+
+
 def main() -> int:
     failed = 0
     for fn in TESTS:
