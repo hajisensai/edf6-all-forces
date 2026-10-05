@@ -51,9 +51,12 @@ constexpr ULONGLONG kStuckMs=60000;
 // mission's move area shrunk by veh+kAreaInset (0x5A9E50) and teleports it back, every frame, so a jet at
 // the edge stopped dead and slid flank first. A jet's inset is set to kNoInset (the box grown 1e6 m: no
 // clamp; the stock bombers are never clamped either). Out there the Havok broadphase ends at 3000 m a
-// side: walls (jet_flight.cpp kWorldWallIn inside WorldHalf) keep the jets in, and one past kWorldGoneIn of it is deleted.
+// side: walls at the play edge (crew.h PlayEdge, with its buffer) keep the jets in, and one past kWorldGoneIn of it is deleted.
 constexpr std::size_t kAreaInset=0xE00;
-constexpr float kNoInset=-1.0e6f,kWorldGoneIn=300.0f;   // kWorldGoneIn: m inside the world's edge (WorldHalf): 2700 stock
+// kWorldGoneIn: m inside the world's edge (WorldHalf): 2950 stock. It was 300: a jet chasing past the walls
+// (then 600 m in) at 200 m/s turns on a radius of some 500 m, and one in its turn was deleted 300 m past the wall
+// (2026-10-05 11:43, the user: "do the NPCs vanish at the edge?"). Now the whole of a turn fits between them.
+constexpr float kNoInset=-1.0e6f,kWorldGoneIn=50.0f;
 // A wingman within kJetSpan of a burst's path is in its way when the rounds cannot pass through (JetInLine).
 constexpr float kJetSpan=20.0f;
 constexpr ULONGLONG kFullLogMs=5000;   // wall ms between "the table is full" lines

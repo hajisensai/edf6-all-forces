@@ -48,7 +48,10 @@ constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.
 constexpr ULONGLONG kBlockedMs=250,kWallLifeMs=120000;
 // The Havok broadphase ends at 3000 m a side: the world's walls kWorldWallIn inside the world's edge (WorldHalf: ini BigWorld or 3000) keep the jets in (jet.cpp deletes
 // one past kWorldGoneIn of it). They are never forgotten and no learned wall takes their place.
-constexpr float kWorldWallIn=600.0f;   // m inside the physics world's edge (WorldHalf): 2400 in the stock +-3000
+// The world walls stand at the play edge (crew.h PlayEdge, the user's buffer and "past the line, back first"):
+// they turn a jet off from kEdgeBuffer in (or its turn's reach, if more), and one past them is sent back in before
+// all else: at least kEdgeBack of its way pointing in (Guard).
+constexpr float kEdgeBack=0.7f;
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus the sink (gravity
 // along the path speeding it up) while it gets ready: kReact seconds, and the roll that turns its lift up
 // (RollToLift). With kReact alone a fighter diving inverted at an air target began to pull at 75 m, 92 m/s
@@ -92,7 +95,7 @@ struct Wall { float at[3],n[3]; ULONGLONG seen; bool on; };
 struct WorldWalls {
     Wall w[4];
     WorldWalls() noexcept {
-        const float a=WorldHalf()-kWorldWallIn;
+        const float a=PlayEdge();
         w[0]=Wall{{a,0.0f,0.0f},{1.0f,0.0f,0.0f},0,false};w[1]=Wall{{-a,0.0f,0.0f},{-1.0f,0.0f,0.0f},0,false};
         w[2]=Wall{{0.0f,0.0f,a},{0.0f,0.0f,1.0f},0,false};w[3]=Wall{{0.0f,0.0f,-a},{0.0f,0.0f,-1.0f},0,false};
     }
@@ -139,10 +142,10 @@ bool JetNear(const Jet& self,const float* pos,ULONGLONG ms) noexcept {
 }
 
 // `want` turned off wall `w` from a turn's radius `r` out (more closing fast), never flown into.
-void TurnOff(const Wall& w,const Jet& j,const float* pos,float r,float* want) noexcept {
+void TurnOff(const Wall& w,const Jet& j,const float* pos,float r,float* want,float least=0.0f) noexcept {
     const float gap=Gap(w,pos);
     const float closing=j.m.vel[0]*w.n[0]+j.m.vel[2]*w.n[2];
-    const float reach=r*1.5f+(closing>0.0f ? closing*kReact : 0.0f);
+    const float turn=r*1.5f+(closing>0.0f ? closing*kReact : 0.0f),reach=turn>least ? turn : least;
     if(gap>reach)return;
     const float push=Clamp(1.0f-gap/reach,0.2f,1.0f),into=want[0]*w.n[0]+want[2]*w.n[2];
     if(into<=-push)return;
@@ -406,7 +409,15 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float s=Len(j.m.vel);
     // Walls: turned off from a turn's radius out (more closing fast), never flown into.
     const float r=s*s/(k.maxG*kG);
-    for(const auto& w:WorldWalls())TurnOff(w,j,pos,r,want);
+    for(const auto& w:WorldWalls())TurnOff(w,j,pos,r,want,kEdgeBuffer);
+    // Past the play edge: back in before all else (its fight, its target out there), level, straight in.
+    for(const auto& w:WorldWalls()) {
+        if(Gap(w,pos)>=0.0f)continue;
+        const float into=want[0]*w.n[0]+want[2]*w.n[2];
+        if(into>-kEdgeBack){want[0]-=w.n[0]*(into+kEdgeBack);want[2]-=w.n[2]*(into+kEdgeBack);}
+        want[1]=Clamp(want[1],-0.2f,0.2f);
+        Normalize(want);
+    }
     for(const auto& w:learned)if(Holds(w,pos,ms))TurnOff(w,j,pos,r,want);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};

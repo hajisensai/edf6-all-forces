@@ -552,9 +552,29 @@ void UnderVehicle(unsigned char* v) noexcept {
     WatchUnder(v,c>=0 ? kClasses[c].name : "vehicle",nullptr);
 }
 
+// The frame time, every kPerfMs (debug; the user, 2026-10-05: "it plays choppy"): the frames' mean and worst, and
+// how many took over kPerfSlowMs: whether the game is slow all along or stalls now and then.
+constexpr ULONGLONG kPerfMs=5000;
+constexpr double kPerfSlowMs=33.4;
+struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow; ULONGLONG at; } perf{};
+void PerfTick() noexcept {
+    LARGE_INTEGER now,hz;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&hz);
+    if(perf.last.QuadPart) {
+        const double ms=1000.0*static_cast<double>(now.QuadPart-perf.last.QuadPart)/static_cast<double>(hz.QuadPart);
+        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;if(ms>perf.worst)perf.worst=ms;}
+    }
+    perf.last=now;
+    const ULONGLONG t=GetTickCount64();
+    if(t-perf.at<kPerfMs)return;
+    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms",perf.frames,
+        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.slow,kPerfSlowMs);
+    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
+}
+
 void FrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
+    PerfTick();
     GuardedTick(kStepUnderground,&UnderPlayer);
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepHudPublish,&HudPublish);

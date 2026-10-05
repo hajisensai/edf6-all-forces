@@ -134,6 +134,17 @@ def jet_nozzles_on_their_models() -> None:
 
 
 @test
+def play_edge_margin_is_the_big_maps() -> None:
+    """src/crew.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
+    import make_bigmap
+    m = re.search(r'kBigWorldMargin=([\d.]+)f', src('src/crew.h'))
+    assert m and float(m.group(1)) == make_bigmap.WORLD_MARGIN, (m and m.group(1), make_bigmap.WORLD_MARGIN)
+
+
+# ---------------------------------------------------------------- the data
+
+
+@test
 def calls_table_consistent() -> None:
     ids = [c.id for c in calls.CALLS]
     assert len(set(ids)) == len(ids), 'duplicate ids'

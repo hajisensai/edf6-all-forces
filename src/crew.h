@@ -127,6 +127,16 @@ void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
 void BigWorldProbe() noexcept;
 // m: the physics world's half size (3000 stock, ini BigWorld when raised): the plugin's walls stand inside it.
+// The edge of the play area every flyer keeps inside (the user, 2026-10-05: "don't let them go out there; a buffer
+// before it; past the line, coming back comes first"): the stock world's 2400 (600 m inside its +-3000), or the big
+// map's ground's own edge, its BigWorld less the margin tools/make_bigmap.py adds past the last block (WORLD_MARGIN;
+// selftest holds the two equal). It was the physics world less 600 m on the big map too: 150 m out over no ground,
+// where the player slid along the wall below the ground with the heading snapping +-17 deg (2026-10-05 11:47).
+constexpr float kBigWorldMargin=750.0f,kStockEdgeIn=600.0f;
+// The buffer inside the edge: from here in the flyers are turned in, the more the nearer the edge (EdgeTurn).
+constexpr float kEdgeBuffer=800.0f;
+inline float WorldHalf() noexcept;
+inline float PlayEdge() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld-kBigWorldMargin : 3000.0f-kStockEdgeIn; }
 inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld : 3000.0f; }    // bigworld.cpp: once a mission, the map's ground on a grid (log)
 // The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
 bool LastViewProj(float* out) noexcept;

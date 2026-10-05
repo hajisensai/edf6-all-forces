@@ -141,7 +141,7 @@ constexpr float kCeilingGap=12.0f;
 constexpr float kCeilingBand=150.0f;
 // The world's walls (kWorldWallIn inside WorldHalf: the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
 // turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
-constexpr float kWorldWallIn=600.0f,kWallIn=0.3f,kWallAlong=0.9f;   // kWorldWallIn: m inside the world's edge (WorldHalf)
+constexpr float kWallIn=0.3f;   // past the play edge, at least this share of the path points back in
 // The ground (Clear): the body's origin rests on the ground (the models are grounded and the boxes measured off
 // them, pylib/jet_models.py grounded / vcobjects.on_origin), so under kTouch it is on it; over kOffGround in the air.
 constexpr float kTouch=3.0f,kOffGround=6.0f;
@@ -390,20 +390,28 @@ void CeilingBend(const float* pos,float* dir) noexcept {
 }
 
 void WallTurn(const float* pos,float* dir) noexcept {
+    // The play edge (crew.h PlayEdge) with its buffer: the share of the path allowed outward falls from all of it
+    // kEdgeBuffer m in to none at the edge, and past it the path must point back in by kWallIn: the plane is
+    // bent round smoothly, its heading never flipped (it was a hard turn at the wall, its sense flipping between
+    // frames: the heading snapped +-17 deg every few seconds along it).
+    const float edge=PlayEdge();
     for(int i=0;i<3;i+=2) {
-        if(std::fabs(pos[i])<WorldHalf()-kWorldWallIn || dir[i]*pos[i]<=0.0f)continue;
-        const int o=2-i;   // the other horizontal axis: along the wall
-        const float out=pos[i]>0.0f ? 1.0f : -1.0f;
-        float along=dir[o];
-        if(std::fabs(along)<0.2f) {   // at the wall head on: along it to its right
+        const float out=pos[i]>0.0f ? 1.0f : -1.0f,away=dir[i]*out;
+        const float most=Clamp((edge-std::fabs(pos[i]))/kEdgeBuffer,-kWallIn,1.0f);
+        if(away<=most)continue;
+        const int o=2-i;   // the other horizontal axis: along the edge
+        const float flat=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
+        if(flat<1e-4f)continue;
+        const float target=most*flat,along=std::sqrt(std::fmax(flat*flat-target*target,0.0f));
+        float sense=dir[o];
+        if(std::fabs(sense)<1e-3f) {   // straight at the edge: along it to its right
             float right[3];RightOf(dir,right);
-            along=right[o]>=0.0f ? 1.0f : -1.0f;
+            sense=right[o];
         }
-        dir[o]=(along>0.0f ? 1.0f : -1.0f)*kWallAlong;
-        dir[i]=-out*kWallIn;
-        dir[1]=Clamp(dir[1],-0.3f,0.3f);
-        if(!Normalize(dir)){dir[0]=0.0f;dir[1]=0.0f;dir[2]=1.0f;}
+        dir[i]=out*target;
+        dir[o]=(sense>=0.0f ? 1.0f : -1.0f)*along;
     }
+    if(!Normalize(dir)){dir[0]=0.0f;dir[1]=0.0f;dir[2]=1.0f;}
 }
 
 // Its death (see body506.h Die506). Without that path it is kept at 1 HP: alive and flying, the next hit the
