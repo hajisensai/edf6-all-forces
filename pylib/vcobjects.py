@@ -6,6 +6,7 @@ written where, and who owns it, is pylib/ledger.py.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import struct
@@ -285,6 +286,37 @@ class GroundVehicle:
     weapons: tuple[str, ...]
     durability: float
     tool: str             # the tool that writes it (tools/<tool>.py)
+
+
+# A ground vehicle's own camera (game_object_camera_setting, docs/camera-re.md): [0] the point it looks at, [1] the
+# eye, both points in the vehicle's frame (metres; x left-right, y up, z forward, from the vehicle's origin): the eye is
+# a position of its own, not an offset from [0]. The stock ground vehicles look level from 4 m (Naegling (0, 4, 0) /
+# (0, 4, -10.5), Kepler (0, 4, 0) / (0, 4, -15.5)); the artillery's (the user, 2026-10-05: "the view is too low")
+# looks down past its front onto the ground ahead: ARTILLERY_VIEW_DOWN deg down, the line of sight reaching the ground
+# ARTILLERY_VIEW_GROUND m ahead of the origin. The plugin's high view (src/highcam.cpp) is the second mode over these.
+ARTILLERY_VIEW_DOWN = (8.0, 20.0)
+ARTILLERY_VIEW_GROUND = (15.0, 45.0)
+
+
+def camera_view(camera: tuple[list[float], list[float]]) -> dict[str, float]:
+    """What a game_object_camera_setting ([0] look-at, [1] eye, in the vehicle's frame) shows: the line of sight's
+    pitch down (deg), where it meets the vehicle's ground plane (y 0; m ahead of the origin), the eye's height and its
+    distance from the look-at point."""
+    look, eye = camera
+    assert look[0] == eye[0] == 0.0 and look[2] > eye[2], camera
+    run, drop = look[2] - eye[2], eye[1] - look[1]
+    ground = eye[2] + eye[1] * run / drop if drop > 0.0 else math.inf
+    return {'down': math.degrees(math.atan2(drop, run)), 'ground': ground, 'height': eye[1], 'arm': math.hypot(run, drop)}
+
+
+def check_artillery_camera(camera: tuple[list[float], list[float]]) -> dict[str, float]:
+    """The artillery's raised camera looks down onto the ground ahead (ARTILLERY_VIEW_DOWN, ARTILLERY_VIEW_GROUND),
+    from over the stock 4 m. Its numbers."""
+    out = camera_view(camera)
+    assert ARTILLERY_VIEW_DOWN[0] <= out['down'] <= ARTILLERY_VIEW_DOWN[1], f'the view is not tilted onto the ground ahead: {out}'
+    assert ARTILLERY_VIEW_GROUND[0] <= out['ground'] <= ARTILLERY_VIEW_GROUND[1], f'the view meets the ground too near / far: {out}'
+    assert out['height'] > 4.0, f'the eye is no higher than the stock: {out}'
+    return out
 
 
 # The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its

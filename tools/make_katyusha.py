@@ -63,6 +63,9 @@ MARK_LOFTED = 7303.0
 # from 0 up to it).
 PITCH_STOP_DEG = katyusha_model.PITCH_STOP_DEG
 STOCK_PITCH_LIMIT = [1.0, -50.0, 0.0]
+# The camera (game_object_camera_setting [0] look-at / [1] eye, pylib/vcobjects.py camera_view): the Naegling's level
+# (0, 4, 0) / (0, 4, -10.5) raised over the launcher, looking down onto the ground ahead.
+CAMERA = ([0.0, 4.5, 4.0], [0.0, 8.5, -15.0])
 # The rockets (BM-21 Grad, cut to the game's world): 120 m/s off the rail (2.0 m a frame: the game's muzzle speed is
 # AmmoSpeed x 60, ballistics.py), lobbed: the most range ~980 m at 45 deg, the high arc from ~335 m (at the 80 deg
 # stop) out to it, 11.5..16 s in the air on flat ground (ballistics.envelope, in the game's measured 14.7 m/s^2);
@@ -157,6 +160,8 @@ def vehicle_sgo(game: vc.Game) -> bytes:
     for wheel in m['car_base_wheel']:
         wheel[8] = TYRE_RADIUS
     _raise_launcher(m['car_base_constraint_data'])
+    cam = m['game_object_camera_setting']
+    m['game_object_camera_setting'] = [list(CAMERA[0]), list(CAMERA[1]), cam[2], cam[3]]
     m['game_object_durability'] = VEHICLE.durability
     return sgo.write(version, m)
 
@@ -173,6 +178,9 @@ def check(files: dict[str, bytes]) -> None:
     missing = {w[0] for w in v['car_base_wheel']} - names
     assert not missing, f'model lacks wheel bones {missing}'
     assert _value(_pitch_limit(v['car_base_constraint_data'])) == [1.0, -PITCH_STOP_DEG, 0.0]
+    cam = _value(v['game_object_camera_setting'])
+    assert [cam[0], cam[1]] == [list(CAMERA[0]), list(CAMERA[1])], cam
+    vc.check_artillery_camera(CAMERA)
     w = dsgo.to_py(dsgo.parse(files[f'WEAPON/{vc.KATYUSHA_ROCKETS}']).root)
     assert w['LockonTargetType'] == MARK_LOFTED and w['LockonType'] == 0.0 and w['AmmoClass'] == 'GrenadeBullet01', w
     assert w['AmmoModel'] == ROCKET_MODEL and ROCKET_MODEL in w['resource'], (w['AmmoModel'], w['resource'])

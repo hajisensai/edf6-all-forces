@@ -102,6 +102,12 @@ struct Config {
     float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
     float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
     float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
+    bool highCam=true;              // the artillery's high camera toggle (highcam.cpp): the Katyusha, the howitzer
+    int highCamKey=0x43;            // ...its key ('C'; a Windows virtual-key code, 0: none)
+    int highCamButton=0x80;         // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
+    float highCamHeight=45.0f;      // ...the high eye: m over the vehicle's origin
+    float highCamBack=35.0f;        // ...m behind it
+    float highCamPitch=40.0f;       // ...looking down this many degrees ahead
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
@@ -343,6 +349,14 @@ void ResetDrills() noexcept;
 // The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
 struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
+
+// highcam.cpp: the artillery's high camera (an indirect-fire vehicle the player drives: its key / pad button switches
+// the vehicle's camera block between its own points and a high view, docs/camera-re.md). From every vehicle's input,
+// the plugin off too (it gives the block back then). PlayerHighCam (hud.cpp): whether the toggle is offered this
+// moment, the view's state and whether the player is on keys (else a pad).
+void HighCamFrame(unsigned char* vehicle) noexcept;
+bool PlayerHighCam(bool* on,bool* keys) noexcept;
+void ResetHighCam() noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;

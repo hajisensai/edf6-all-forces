@@ -248,6 +248,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/drill.cpp`：钻头战车的钻头（转速、旋转、热量、近战伤害、钻开建筑；`docs/drill-re.md`）。
 - `src/launcher.cpp`：喀秋莎的落点显示（CCIP）和高抛瞄准（按镜头看的地面点算发射架仰角），弹道模型与离线验证见 `pylib/ballistics.py` 和 `autoturret/docs/re-notes.md`「Rounds in flight」。
 - `src/katyusha.cpp`：喀秋莎发射架的姿态（只抬发射架、不动镜头）和伸缩液压杆，逆向笔记见 `autoturret/docs/re-notes.md`「The Katyusha's camera and pose」。
+- `src/highcam.cpp`：喀秋莎 / 自行榴弹炮的高视角切换（改载具自己的镜头参数，游戏照常做缓动和碰撞），镜头逆向见 `docs/camera-re.md`。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
@@ -266,8 +267,11 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - **武器**：无制导火箭弹（外形是原版歌利亚 / 格兰特火箭筒的火箭弹 `bullet_rocket.rab`，拖着 2 秒长的尾烟），走抛物线，一轮齐射 40 发、散布覆盖一片区域，装填 10 秒。火箭弹出膛 120 m/s（`AmmoSpeed` 2.0 米/帧；档位只放大伤害和耐久，不改弹速），寿命 25 秒，散布锥半角 0.02 弧度（45° 时落点散开约 ±28 米，80° 时约 ±38 米）。
 - **高抛弹道**：发射架最高能抬到 80°（Naegling 原版只到 50°）。在平地上（游戏实测重力 14.7 m/s²，`pylib/ballistics.py`）：最远射程 978 米（仰角 45°，飞行 11.5 秒）；高抛弹道（仰角 45°～80°）覆盖 335 米到 978 米，80° 时飞行 16.1 秒。比 335 米更近的目标只能放低发射架平射。
 - **瞄准**：和其它载具一样，用镜头瞄准：把屏幕中心对准地面上要打的地方，发射架会自己抬到让火箭弹落在那里的仰角（优先高抛弹道；目标近到高抛要超过 80° 时用低伸弹道；超出最远射程时抬到 45° 打最远），镜头不跟着抬，始终看着你瞄的地方。发射架按原版炮塔的速度（约每秒 1.1 弧度，63°）转过去，落点以黄色十字为准。屏幕中心看着天空、找不到地面时，发射架就停在你镜头的方向（和原版 Naegling 一样，抬镜头就抬发射架）。这由 EDF6VehicleCrew 做（`src/launcher.cpp` 算仰角，`src/katyusha.cpp` 只改发射架骨骼的姿态，不改座位的瞄准轴，所以不会动镜头），不需要 EDF6AutoTurret。
+- **镜头**：车辆视角比原版 Naegling 高：镜头在车后上方（原点上方 8.5 米、后方 15 米），往前下方约 12° 看，能看到发射架和前方约 25 米外的地面（原版是 4 米高平视）。由安装器写进 `EDF6VC_KATYUSHA.SGO` 的 `game_object_camera_setting`（`tools/make_katyusha.py` `CAMERA`；两个向量的含义见 `docs/camera-re.md`）。
+- **高视角**：开着喀秋莎时按 **C**（手柄按下右摇杆 R3；ini `HighCamKey` / `HighCamButton`）在车辆视角和高视角之间切换：高视角的镜头在车后上方（默认原点上方 45 米、后方 35 米，往前下方 40° 看，ini `HighCamHeight` / `HighCamBack` / `HighCamPitch`），看得到火箭弹落在哪一片（黄色十字和散布圈）；瞄准方式不变，屏幕中心对准的地面就是目标，发射架照样自动抬到对应仰角。屏幕下方显示 `HIGH CAM [C]`（开着高视角时绿色 `HIGH CAM ON [C]`）。下车、车被打爆、ini 里关掉 `HighCam` 或插件、换任务时自动换回车辆视角；同一个任务里再坐上一辆火炮车会沿用你上次的选择。由 EDF6VehicleCrew 做（`src/highcam.cpp`）：它改的是游戏镜头自己读的那两个点，所以切换时镜头平滑移过去，镜头碰到建筑也照常被推近。
 - **落点显示**：你坐上喀秋莎时，屏幕上的黄色十字是此刻发射的火箭弹会落在哪里（和战斗机炸弹的 CCIP 一样），周围一圈黄点是一轮齐射的散布范围，十字下面写着水平距离、飞行时间和发射架仰角（`ELEV`）。它从发射架自己的炮口、沿发射轨方向、按武器实际的弹速和重力系数、像游戏一样逐帧推进弹道，并沿弹道每 0.25 秒打一条地图射线找落地点（地形和建筑，水面不算）；火箭弹在寿命内落不了地时不显示。由 EDF6VehicleCrew 画（`src/launcher.cpp`），不装 EDF6AutoTurret 也有。
 - **自瞄**：只给 NPC 开的喀秋莎（需要 EDF6AutoTurret，本仓库 `autoturret/`）：它把发射架转向地面目标，走**高抛弹道**（两个解里仰角大于 45° 的那个；目标近到高抛解超过 80° 时才退回低伸解）。你自己开的喀秋莎它不碰：游戏的镜头跟着座位的瞄准轴走（逆向推断，见下面「待游戏内确认」），自瞄转瞄准轴就等于替你转镜头（以前把发射架抬到 75°～79° 时镜头一直看天，就是这个原因），所以现在由你用镜头选目标，发射架自己抬到高抛仰角（见上面的「瞄准」）。
+- **高视角待游戏内确认**（只做了静态逆向，`docs/camera-re.md` §4）：开车时游戏镜头确实读载具的这两个点（按 C 后镜头升高；`Debug=1` 时日志 `HIGHCAM v=… high: camera eye in the vehicle's frame (x,y,z), D m from the block's eye` 的 y 应接近 45），镜头随鼠标转动时高视角的表现，黄色十字仍在屏幕中心瞄的地方附近，下车后视角恢复（日志 `HIGHCAM v=… off (the player got out)`）。
 - **已离线核对 / 待游戏内确认**：液压杆在 0°～80° 的姿态、仰角解算（`tools/selftest.py` `lofted_arc_solver`、`katyusha_pose_agrees`）都离线核对过；游戏里还要看：镜头确实只跟瞄准轴、不跟发射架骨骼（`Debug=1` 时日志 `LOFT` 行的 `camera` 应接近 `stock(axis)`，而不是 `bone`），火箭弹沿抬起后的发射架飞出、黄色十字落在屏幕中心瞄的地方附近，液压杆在画面里连着。
 
 ## 自行榴弹炮
@@ -282,6 +286,8 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
   - E551 每侧 7 个负重轮，Kepler 只有 6 个：前 6 个按 Kepler 的悬挂和转动，第 7 个（最后一个）固定在车体上，不转；前导轮、主动轮照常转动；
   - 没有 `models/twin_tank` 时安装器提示一句，自行榴弹炮先用 Kepler 原版外形（武器照旧）。
 - **武器**：两门炮同时开火，每次曲射两发大口径高爆弹，爆炸半径 25 m；每 5 秒一轮。炮弹和抛出的弹壳都按炮口内径（0.35 m）放大：炮弹约 0.32 m 粗、0.7 m 长（`AmmoSize` 5.0，碰撞球仍是原来的 1.2 m），弹壳约 0.32 m 粗、0.93 m 长（`ShellCase_CustomParameter` 的 `scale` 4.5，原版只有大型炮用过 2.0）。
+- **镜头**：车辆视角比原版 Kepler 高：镜头在原点上方 9 米、后方 18 米，往前下方约 12° 看，前方约 26 米外的地面在画面中心（原版是 4 米高平视）。写在 `EDF6VC_ARTILLERY.SGO`（`tools/make_artillery.py` `CAMERA`）。
+- **高视角**：和喀秋莎一样，按 **C**（手柄 R3）切换高视角（见「喀秋莎火箭炮车」）。插件按武器认车：座位 0 的武器带插件的对地 / 高抛标记、且弹药寿命不少于 10 秒（间接射击）的载具都算，所以喀秋莎和自行榴弹炮都有，EDF6AutoTurret 改过的 Bohr 榴弹（寿命不到 2 秒）不算。
 - **自瞄**：需要 EDF6AutoTurret，自动瞄准地面目标并按弹道算好仰角（低伸弹道；喀秋莎走高抛弹道）。
 - **修复：模型全黑**。以前生成的档案里贴图都排在模型后面，游戏加载模型时还没读到贴图，所有贴图槽都是空的，整辆车是黑的；现在贴图按原版顺序排在模型前面，生成时自检这一点（静态逆向依据见 `docs/mdb-format.md`；还没有在游戏里看过修复后的效果）。（当时模型自带的履带贴图 `Vehicle504_tankdf02.dds` 本身几乎全黑，平均亮度约 3/255；现在底盘改用原版 E551 贴图，见上。）
 - **已离线核对 / 待游戏内确认**：模型的蒙皮、骨骼（逆绑定）、贴图成员（顺序、lod 布局）、底盘材质和贴图成员与原版 E551 逐字节一致（材质除名字外全部相同；档案里没有用不到的成员）、履带滚动用到的材质名和参数、炮管俯仰净空都在生成时自检（`python pylib/artillery_model.py <输出目录>` 还会导出一份 OBJ 和每根骨骼的包围盒）；游戏里还要看：车体和炮塔是否显示出贴图颜色（底盘应和原版 E551 一个样子）、履带是否滚动、车轮 / 履带骨骼挪到 E551 的位置后悬挂和履带滚动是否正常、炮口火焰和炮弹是否从炮口出来、弹壳放大后（`scale` 对 `Weapon_VehicleShoot` 是否生效、它的物理形状是否随之放大）会不会穿地。
