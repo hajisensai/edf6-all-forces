@@ -383,6 +383,12 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     EnsureInputs();   // the board button in the first mission (with no prompt hook nor mission start hooked)
     const int cls=ClassOf(vehicle);
     const FindSeatFn originalFindSeat=cls>=0 && originalFindSeat_[cls] ? originalFindSeat_[cls] : reinterpret_cast<FindSeatFn>(image+kFindSeat);
+    // The sidecar motorcycle's sidecar (sidecar.cpp): the player standing nearer it than the saddle takes it, no seat.
+    if(Cfg().enabled) {
+        bool sidecar=false;
+        __try { sidecar=SidecarBoard(static_cast<unsigned char*>(vehicle),static_cast<unsigned char*>(human)); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        if(sidecar)return nullptr;
+    }
     if(Cfg().enabled && Cfg().bump && !BumpSuppressed()) {
         unsigned char* crewSeat=nullptr;
         __try { crewSeat=GunshipSeat(static_cast<unsigned char*>(vehicle),human); } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -501,7 +507,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     }
     if(anyPlayer){st.playerAt=now;st.emptySince=0;return;}
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
-    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle)){st.emptySince=0;return;}
+    // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
     // A heli no player has ridden yet stays where it stands for them (the user, 2026-10-05: the range's parked helis
     // "all took off by themselves, I could not get in": crewed 9 s in, a heli lifts off at once, where a crewed tank
@@ -550,10 +557,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepSidecar, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam"};
+                                          "launcher","heli sight","net probe","high cam","sidecar"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -701,6 +708,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHeli,&HeliCueStep,v);
     Guarded(kStepGround,&GroundStep,v);
     Guarded(kStepDrill,&DrillFrame,v);
+    Guarded(kStepSidecar,&SidecarFrame,v);
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);
     Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
