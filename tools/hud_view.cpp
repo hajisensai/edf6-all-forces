@@ -1,9 +1,13 @@
 // The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp included whole, its draw run on a
 // stand-in "EDF.dll" image whose quad and text functions (the RVAs hud.cpp calls) jump to recorders here, for a few
-// scenes of the warnings (warn.h) on a jet, a rotor craft and a stock heli. Each scene's quads (as triangles) and text
+// scenes of the warnings (warn.h) on a jet, a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the
+// drill tank, a Nix; at 16:9 and 21:9) under threat. Each scene's quads (as triangles) and text
 // lines go to DIR/<scene>.txt; tools/hud_view.py turns them into PNGs. The text's size is a stand-in (the game's
 // glyphs are not here: kGlyphH px a unit of font scale, kGlyphW of that a character), so read the layout, not the
 // lettering.
+//
+// The stock HUD's layout is also checked: the RWR scope's box and the hull / turret block's (StockBlock, with its drill
+// line) must not overlap at 16:9 or 21:9; exit code 1 when they do.
 //
 //   hud_view [--out DIR]      (default %TEMP%\edf6_hud_view), then: python tools/hud_view.py DIR
 #include "../src/hud.cpp"
@@ -16,10 +20,21 @@ PlayerFix player{};
 namespace {
 Config config{};
 // The scene: what the stubs hand the HUD.
-bool hasJet=false,hasHeli=false,hasWarn=false;
+bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false;
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
 Warnings sceneWarn{};
+StockHudReadout sceneStock{};
+DrillCue sceneDrill{};
+NixTorso sceneNix{};
+// The bounding box of what is drawn while `boxing` (the layout check).
+struct Box { float x0,y0,x1,y1; bool any; };
+bool boxing=false;
+Box box{};
+void Grow(float x,float y) {
+    if(!box.any){box=Box{x,y,x,y,true};return;}
+    box.x0=std::fmin(box.x0,x);box.y0=std::fmin(box.y0,y);box.x1=std::fmax(box.x1,x);box.y1=std::fmax(box.y1,y);
+}
 std::FILE* out=nullptr;
 float fontScale=1.0f;
 constexpr float kGlyphH=40.0f,kGlyphW=0.52f;
@@ -28,6 +43,8 @@ constexpr float kGlyphH=40.0f,kGlyphW=0.52f;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     float p[4][2];
     for(int i=0;i<n && i<4;++i){p[i][0]=v[i*3]*m[0]+v[i*3+1]*m[4]+m[12];p[i][1]=v[i*3]*m[1]+v[i*3+1]*m[5]+m[13];}
+    if(boxing)for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);
+    if(!out)return;
     for(int i=0;i+2<n && i<2;++i)
         std::fprintf(out,"T %.1f %.1f %.1f %.1f %.1f %.1f %.3f %.3f %.3f %.3f\n",p[i][0],p[i][1],p[i+1][0],p[i+1][1],p[i+2][0],p[i+2][1],
                      rgba[0],rgba[1],rgba[2],rgba[3]);
@@ -38,6 +55,8 @@ void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bo
     size[0]=static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale;size[1]=kGlyphH*fontScale;
 }
 void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar_t* text,std::int64_t) {
+    if(boxing){Grow(m[12],m[13]);Grow(m[12]+static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale,m[13]+kGlyphH*fontScale);}
+    if(!out)return;
     char narrow[256];
     WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
     std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",m[12],m[13],kGlyphH*fontScale,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
@@ -56,7 +75,12 @@ bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return h
 bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;return hasHeli; }
 bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; }
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
-bool PlayerDrillCue(DrillCue*) noexcept { return false; }
+bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
+bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
+bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
+bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
+bool PlayerTurretAim(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
+bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
 bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
 bool PlayerGunnerHud(GunnerReadout*) noexcept { return false; }
@@ -102,18 +126,72 @@ void Threat(PlayerJetSymbols& y,int kind,float bearingDeg,float dist,float up) {
     y.threatAt[i][1]=y.pos[1]+up;
     y.threatAt[i][2]=y.pos[2]+std::cos(bearingDeg*kDeg)*dist;
 }
-void Scene(const std::wstring& dir,const wchar_t* name,const float* pos) {
+void Scene(const std::wstring& dir,const wchar_t* name,const float* pos,int width=1920) {
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out)return;
-    std::fprintf(out,"W 1920 1080\n");
+    std::fprintf(out,"W %d 1080\n",width);
     float vp[16];
-    const float* fwd=hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
-    Camera(pos,fwd,1920.0f,1080.0f,vp);
+    const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
+    Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
     HudPublish();
-    struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
+    struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
     HudDraw(vp,image,&viewport,nullptr,0);
     std::fclose(out);out=nullptr;
     std::printf("%ls\n",path.c_str());
+}
+
+// What `draw` puts on the screen (its quads and its text lines drawn), as a box.
+template<class F> Box Measured(F draw) {
+    alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
+    static unsigned char ctx[16]{};
+    Text text{};
+    text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);
+    Line lines[kMaxLines];
+    int at=0;
+    box=Box{};boxing=true;
+    draw(&text,lines,&at);
+    DrawAll(text,lines,at);
+    FreeText(text);
+    boxing=false;
+    return box;
+}
+
+// The stock HUD's RWR scope (Threats' side for it) and its block, at `width` x 1080: apart.
+bool StockLayoutApart(int width) {
+    const float w=static_cast<float>(width),h=1080.0f,s=1.0f;
+    void* const drawer=At<void*>(image,kQuadDrawer);
+    static unsigned char ctx[16]{};
+    PlayerJetSymbols y{};
+    std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
+    y.threats=sceneStock.threats;
+    for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
+    const Box rwr=Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);});
+    const StockExtras x{nullptr,&sceneDrill,false};
+    const Box block=Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);});
+    const bool apart=rwr.x1<block.x0 || block.x1<rwr.x0 || rwr.y1<block.y0 || block.y1<rwr.y0;
+    std::printf("%s  %dx1080: RWR scope (%.0f,%.0f)-(%.0f,%.0f), stock block (%.0f,%.0f)-(%.0f,%.0f)\n",apart ? "ok  " : "FAIL",width,
+                rwr.x0,rwr.y0,rwr.x1,rwr.y1,block.x0,block.y0,block.x1,block.y1);
+    return apart && rwr.any && block.any && rwr.x1<=w && block.x0>=0.0f;
+}
+
+// A stock tank (three weapons, a missile and a lock on it) at `pos`, heading +z, the turret 30 degrees right.
+void StockTank(const float* pos) {
+    sceneStock=StockHudReadout{};
+    strcpy_s(sceneStock.kind,"403_Tank");
+    std::memcpy(sceneStock.pos,pos,12);
+    sceneStock.hull[2]=1.0f;
+    sceneStock.aim[0]=-0.5f;sceneStock.aim[2]=0.866f;sceneStock.aimOk=true;
+    std::memcpy(sceneStock.look,sceneStock.hull,12);sceneStock.lookOk=true;
+    sceneStock.speed=12.0f;sceneStock.hp=3000.0f;sceneStock.hpMax=4000.0f;
+    static const char* names[]={"CANNON","MG","MISSILE"};
+    sceneStock.arms=3;sceneStock.selected=0;
+    for(int i=0;i<3;++i) {
+        StockArm& a=sceneStock.arm[i];
+        strcpy_s(a.label,names[i]);a.ammo=10-i;a.ammoMax=10;a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;a.kind=RoundKind::arc;
+    }
+    sceneStock.threats=2;
+    sceneStock.threatKind[0]=2;sceneStock.threatAt[0][0]=pos[0]-600.0f;sceneStock.threatAt[0][1]=pos[1]+80.0f;sceneStock.threatAt[0][2]=pos[2]+900.0f;
+    sceneStock.threatKind[1]=1;sceneStock.threatAt[1][0]=pos[0]+1500.0f;sceneStock.threatAt[1][1]=pos[1]+300.0f;sceneStock.threatAt[1][2]=pos[2]-800.0f;
 }
 }  // namespace
 
@@ -177,5 +255,30 @@ int wmain(int argc,wchar_t** argv) {
     Symbols(sceneHeli.sym,pos,0.0f,-22.0f);
     sceneWarn.on=1u<<kWarnSinkRate;sceneWarn.litAt[kWarnSinkRate]=now-4000;
     Scene(dir,L"heli_sinkrate",pos);
-    return 0;
+
+    // The stock vehicles' HUD: a tank under a missile and a lock, at 16:9 and 21:9; the drill tank overheating; a Nix
+    // with its torso twisted 40 degrees left of its legs.
+    hasJet=hasHeli=hasWarn=false;hasStock=true;
+    const float ground[3]={0.0f,0.0f,0.0f};
+    StockTank(ground);
+    Scene(dir,L"stock_tank",ground);
+    Scene(dir,L"stock_tank_219",ground,2520);
+    hasDrill=true;
+    sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
+    strcpy_s(sceneStock.kind,"DrillTank");
+    Scene(dir,L"stock_drill",ground);
+    int failed=0;
+    failed+=!StockLayoutApart(1920);
+    failed+=!StockLayoutApart(2520);
+    hasDrill=false;
+    hasNix=true;
+    strcpy_s(sceneStock.kind,"612_nix");
+    sceneNix=NixTorso{};
+    std::memcpy(sceneNix.at,ground,12);
+    sceneNix.legsYaw=0.0f;sceneNix.twist=0.7f;sceneNix.twistMin=-1.4f;sceneNix.twistMax=1.4f;sceneNix.torsoYaw=0.7f;
+    sceneNix.dir[0]=std::sin(0.7f);sceneNix.dir[2]=std::cos(0.7f);sceneNix.held=true;
+    Scene(dir,L"stock_nix",ground);
+    hasNix=false;
+    std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
+    return failed ? 1 : 0;
 }

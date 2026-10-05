@@ -64,7 +64,7 @@ set_target_properties(rounds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_
 
 # The turret camera's rig and turret command (src/turretcam.h) against the stock aim axis step, offline
 # (tools/turret_cam_check.cpp). Not part of the plugin build:
-# cmake --build build --target turret_cam_check && build	urret_cam_check.exe
+# cmake --build build --target turret_cam_check && build\turret_cam_check.exe
 add_executable(turret_cam_check EXCLUDE_FROM_ALL tools/turret_cam_check.cpp)
 target_compile_options(turret_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(turret_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
