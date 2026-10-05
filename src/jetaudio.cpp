@@ -43,6 +43,13 @@ std::vector<std::int16_t> tonePcm;
 WAVEFORMATEX toneFormat{};
 ULONGLONG toneAt=0,beepFrom=0;
 int toneState=0;
+// The threat warning (ThreatTone): the lock tone's loop on a voice of its own, lower and beeping: locked on by an
+// enemy kThreatLockRatio, kThreatLockMs on in every kThreatLockPeriod; a missile coming kThreatMissileRatio,
+// kThreatMissileMs on in every kThreatMissilePeriod.
+constexpr float kThreatLockRatio=0.8f,kThreatMissileRatio=1.9f,kThreatVolume=0.3f;
+constexpr ULONGLONG kThreatLockMs=150,kThreatLockPeriod=600,kThreatMissileMs=60,kThreatMissilePeriod=120;
+IXAudio2SourceVoice* threatVoice=nullptr;
+ULONGLONG threatAt=0;
 Slot slots[kSlots]{};
 std::atomic<ULONGLONG> beatAt{0};
 std::atomic<float> masterVolume{1.0f};
@@ -261,6 +268,29 @@ void Close(int i) noexcept {
     slots[i]=Slot{};
 }
 
+void ThreatTone(int state) noexcept {
+    if(!Start())return;
+    if(!threatVoice) {
+        if(tonePcm.empty()) {   // the lock tone's loop (LockTone makes it the same way)
+            const int n=kRate/10;
+            tonePcm.resize(static_cast<std::size_t>(n));
+            for(int i=0;i<n;++i)tonePcm[static_cast<std::size_t>(i)]=static_cast<std::int16_t>(std::lround(
+                std::sin(6.2831853f*kToneHz*static_cast<float>(i)/static_cast<float>(kRate))*0.8f*32767.0f));
+            toneFormat=Mono16(kRate);
+        }
+        threatVoice=Voice(toneFormat,tonePcm);
+        if(!threatVoice)return;
+    }
+    const ULONGLONG now=GetTickCount64();
+    threatAt=now;
+    float volume=0.0f,ratio=1.0f;
+    if(state==2){ratio=kThreatMissileRatio;volume=now%kThreatMissilePeriod<kThreatMissileMs ? kThreatVolume : 0.0f;}
+    else if(state==1){ratio=kThreatLockRatio;volume=now%kThreatLockPeriod<kThreatLockMs ? kThreatVolume : 0.0f;}
+    threatVoice->SetFrequencyRatio(ratio);
+    Pan(threatVoice,volume,volume);
+    threatVoice->SetVolume(1.0f);
+}
+
 void LockTone(int state,float progress) noexcept {
     if(!Start())return;
     if(!lockVoice) {
@@ -289,6 +319,7 @@ void LockTone(int state,float progress) noexcept {
 
 void Beat(float volume) noexcept {
     if(lockVoice && GetTickCount64()-toneAt>kToneStaleMs){Pan(lockVoice,0.0f,0.0f);toneState=0;}
+    if(threatVoice && GetTickCount64()-threatAt>kToneStaleMs)Pan(threatVoice,0.0f,0.0f);
     masterVolume=volume<0.0f ? 0.0f : volume>4.0f ? 4.0f : volume;
     beatAt=GetTickCount64();
 }

@@ -464,6 +464,14 @@ void ResetJets() noexcept {
     Publish(true);
 }
 
+// Whether a jet has `target` in its missile lock now: its nose came onto it within the missile cone (Aim::lockAt, set
+// by jet_combat.cpp Fire). Only enemies make the player's jet their target: the player's lock warning (playerjet.cpp).
+bool jet::LockingOn(const void* target) noexcept {
+    if(!target)return false;
+    for(const auto& j:jets)if(j.ref && j.t.target==target && j.t.lockAt && Alive(j.ref))return true;
+    return false;
+}
+
 bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr,nullptr);
 }

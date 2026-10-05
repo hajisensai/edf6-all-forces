@@ -210,6 +210,7 @@ struct PJet {
     float savedInset;
     bool insetSaved;
     ULONGLONG lastMs,logAt,crashAt,blockedSince;
+    int threat;                  // 2 a missile homing on it, 1 an enemy's missile lock on it, 0 none (StoresStep)
     ULONGLONG frame;             // GameFrame of its last flight step
     ULONGLONG wetFrame;          // GameFrame of the last water message (0: none)
     bool dieLogged;
@@ -767,6 +768,9 @@ bool Impact(const PJet& j,const float* pos,float* hit) noexcept {
 // Its stores (stores.h): the switch (key or LB, on its press) moves to the next with rounds left; one emptied, the
 // next; the secondary fire (the stock fire byte, taken so the 506 does not fire holder 2 itself) pulls the picked
 // one's trigger; what they weigh; the cockpit's list and, a bomb picked, where it would hit.
+// A missile's lock point this close to the jet is a missile coming for it (missile.cpp MissileHoming).
+constexpr float kThreatRadius=20.0f;
+
 void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Store st[kMostStores];
     const int n=ReadStores(v,st,kMostStores);
@@ -790,6 +794,10 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     if(next && st[j.store].spec->role!=StoreRole::bomb){NextStoreTarget(st[j.store]);Log("PJET v=%p target: the next one",v);}
     j.lock=st[j.store].spec->role==StoreRole::bomb ? 0 : StoreLock(st[j.store],j.lockAt,&j.lockProgress);
     audio::LockTone(j.lock,j.lockProgress);
+    // Being locked on (the user, 2026-10-05: "being locked on should sound a warning too"): a missile homing on it
+    // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.
+    j.threat=MissileHoming(pos,kThreatRadius) ? 2 : jet::LockingOn(v) ? 1 : 0;
+    audio::ThreatTone(j.threat);
     const bool fire=v[kFireStore]!=0;
     v[kFireStore]=0;
     if(fire)TriggerStore(st[j.store]);
@@ -1170,7 +1178,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
             const Kind* const kind=KindOf(v);
             r.rotate=kind ? kind->rotate : 0.0f;
-            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=PullUpNeeded(j,pos);r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=PullUpNeeded(j,pos);r.threat=j.threat;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
