@@ -171,16 +171,20 @@ void StockHudFrame(unsigned char* v) noexcept {
     Speed(v,r,ms);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+    // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
+    const unsigned char* const picked=PayloadPicked(v);
+    int pickedArm=-1;
     if(n<=8 && Readable(holders,n*8))
         for(std::uint64_t i=0;i<n && r.arms<kStockArms;++i) {
             if(!Readable(holders[i],kHolderWeapon+8))continue;
             const unsigned char* const w=At<const unsigned char*>(holders[i],kHolderWeapon);
             if(!Readable(w,kChargeLeft+4))continue;
+            if(picked && w==picked)pickedArm=r.arms;
             StockArm& a=r.arm[r.arms++];
             Arm(w,!r.heli,a);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
-    r.selected=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
+    r.selected=pickedArm>=0 ? pickedArm : selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     if(r.selected>=r.arms)r.selected=-1;
     Threats(v,r);
     latest=r;latestMs=ms;

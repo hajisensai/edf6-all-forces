@@ -120,6 +120,14 @@ struct Config {
     float highCamPitch=40.0f;       // ...looking down this many degrees ahead
     bool nixTorsoTwist=true;        // the Nix's torso keeps its world yaw while A/D turn the legs; only the mouse turns it (nix.cpp)
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
+    bool stockHeliStores=false;     // the stock 506 helis' requests carry the jets' rockets and Hellfires (the installer,
+                                    // tools/make_stock_stores.py) and their secondary switches between them (payload.cpp)
+    bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
+    int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
+    bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
+    int seatButton=0x02;            // ...on a pad: the seat's button bit (docs/stores-re.md §4: 0x02 B; 0 none)
+    bool seatPilot=true;            // ...out of a stock helicopter's pilot seat: an NPC (the stock RideAi) takes the stick
+    bool seatSwitchOnline=false;    // ...in an online room too (off: offline only)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
 };
@@ -233,6 +241,9 @@ constexpr unsigned kCanRide=0x62DCB0;       // (vehicle, human) -> bool: any sea
 constexpr unsigned kSeatRide=0x633C10;      // (vehicle, rider, index, force) -> seat or null
 constexpr unsigned kSeatClear=0x634940;     // (vehicle, seat): forget the rider, no message to it
 constexpr unsigned kSeatKick=0x62E1A0;      // (vehicle, seat): get-off message, then clear (a dummy rider dies)
+// The NPC in seat `from` moved to seat `to` (seat, then clear, as the bump moves one); false: not moved, the NPC where it
+// was (crew.cpp).
+bool MoveRider(unsigned char* vehicle,unsigned from,unsigned to) noexcept;
 // The on-foot ride-prompt visitor (0x5735E7): {vtable, human, bool result}; slot 1 is called per object
 constexpr unsigned kPromptFunctorVtable=0x17D09B8,kPromptVisit=0x5725A0;
 constexpr std::size_t kFunctorHuman=0x8,kFunctorResult=0x10;
@@ -587,3 +598,4 @@ unsigned char* PlayerHuman() noexcept;
 #include "hud.h"
 #include "nix.h"
 #include "vhud.h"
+#include "payload.h"

@@ -91,11 +91,18 @@ const StoreSpec* SpecOf(const wchar_t* name,std::size_t length) noexcept {
 
 }  // namespace
 
-bool IsStoreWeapon(const unsigned char* w) noexcept {
-    std::size_t length=0;
-    const wchar_t* name=Readable(w,kWeaponNode+8) ? FileOf(w,&length) : nullptr;
-    return name && SpecOf(name,length);
+const wchar_t* WeaponFile(const unsigned char* w,std::size_t* length) noexcept {
+    *length=0;
+    return Readable(w,kWeaponNode+8) ? FileOf(w,length) : nullptr;
 }
+
+const StoreSpec* StoreOf(const unsigned char* w) noexcept {
+    std::size_t length=0;
+    const wchar_t* name=WeaponFile(w,&length);
+    return name ? SpecOf(name,length) : nullptr;
+}
+
+bool IsStoreWeapon(const unsigned char* w) noexcept { return StoreOf(w)!=nullptr; }
 
 namespace {
 void __fastcall MarkDrawHook(unsigned char* slot,void* ctx,void* camera) {

@@ -23,6 +23,9 @@
 //    holds): the lock as the jets' stores read it (stores.h StoreLock: the weapon's lock list +0xC60 and the lock in
 //    progress +0xC70, the same in every weapon, docs/stores-re.md §7), on the target's lock point; with no lock, its
 //    boresight and LockonRange (+0x6D0), the reach it locks within. It homes: no impact point to show.
+//  - The stores (the jets' rocket pod and Hellfires the installer gives the 506s' requests, ini StockHeliStores): the
+//    secondary fires the one picked (payload.cpp), and that one is the other weapon here (PayloadPicked), a Hellfire's lock
+//    as the missile's, the rocket pod's mark as the rockets'.
 //  - The rockets (the 409's V_409HELI_MISSILE01: a MissileBullet01 with no lock, starting at 0.5 m/frame and speeding
 //    up; heli.cpp Arms's rule: no lock and a round slower than kRocketBelow): their mark is where their path, flown as
 //    the game flies them (vhud.h RoundLands: rounds.h Motor, the weapon's own Ammo_CustomParameter; the 409's coast
@@ -185,6 +188,8 @@ void HeliSightFrame(unsigned char* v) noexcept {
     unsigned char *gun=nullptr,*arm=nullptr;
     bool homing=false;
     Weapons(seat,&gun,&arm,&homing);
+    // The stores switched on the pilot's secondary (payload.cpp, ini StockHeliStores): the mark is the one it fires now.
+    if(unsigned char* const picked=PayloadPicked(v);picked && seat==SeatAt(v,0)){arm=picked;homing=At<std::int32_t>(picked,kWeaponLockon)==kHoming;}
     if(!n && gun){guns[0]=gun;n=1;}   // no stock line to replace (the 409's turret gun): its fastest gun
     HeliSightReadout r{};
     const bool gunOk=n && SolveGun(guns,n,r);

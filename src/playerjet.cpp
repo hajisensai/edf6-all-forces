@@ -268,6 +268,7 @@ struct PJet {
 // playerjet_board.inc (any of the plugin's aircraft under the player): what the flight steps above call.
 void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
+void HandBack(PJet& j,unsigned char* v,const char* why) noexcept;
 int SpecialRoom(const PJet& j) noexcept;
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept;
 void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noexcept;
@@ -1404,6 +1405,24 @@ void Leave(PJet& j,unsigned char* v,float clear,bool alive,const char* how) noex
     Left(j,v,clear,alive,eject);   // any of the plugin's other aircraft: parked, caught or handed back (playerjet_board.inc)
 }
 
+// Whether a local player sits in a seat of `v` other than `seat` (seatswitch.cpp moves them between the gunship's seats).
+bool AboardElsewhere(unsigned char* v,unsigned seat) noexcept {
+    const unsigned count=SeatCount(v);
+    for(unsigned i=0;i<count;++i)if(i!=seat && SeatRider(SeatAt(v,i))==Rider::player)return true;
+    return false;
+}
+
+// The player moved from the stick to another seat of the aircraft (seatswitch.cpp: the gunship's gun): not out of it, so
+// no ejection and no catch; the flight given up as Leave gives it up, its NPC pilot flying on (HandBack: one seated by
+// the stock RideAi when the gunner's EnsurePilot has not already).
+void Moved(PJet& j,unsigned char* v) noexcept {
+    j.driven=false;j.active=false;j.turnIn=j.pitchIn=j.yawIn=j.rollIn=0.0f;j.hasUp=false;j.hasAim=false;
+    if(j.insetSaved)Put<float>(v,kAreaInset,j.savedInset);
+    j.insetSaved=false;
+    Log("PJET v=%p the player moved to another seat (%s, %.0f m/s): no ejection",v,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel));
+    if(j.board)HandBack(j,v,"the player moved to another seat");
+}
+
 void Report(PJet& j,const unsigned char* v,const Stick& s,const float* pos,float clear,bool water,ULONGLONG ms) noexcept {
     if(!Cfg().debug || ms-j.logAt<kLogMs)return;
     j.logAt=ms;
@@ -1485,7 +1504,8 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     if(!driven && j.hail.phase!=kHailNone && !v[kDead]){HailFly(j,v,pos,dt,ms);return;}   // called down for the player
     if(!driven) {
         if(j.autopilot){j.autopilot=false;j.active=false;if(j.board)HandBack(j,v,"the catch is over");}
-        if(j.driven)Leave(j,v,GroundClearance(pos),true,"got out");
+        if(j.driven && AboardElsewhere(v,0))Moved(j,v);
+        else if(j.driven)Leave(j,v,GroundClearance(pos),true,"got out");
         if(wet)Crash(j,v,0.0f,0.0f,false,ms,nullptr);   // empty and afloat: it breaks up
         return;
     }

@@ -331,6 +331,18 @@ bool LeaveSeat(unsigned char* vehicle,unsigned char* from,unsigned char* to) noe
     return false;
 }
 
+}  // namespace
+
+// The NPC in seat `from` to seat `to` (seat, then clear: LeaveSeat pairs them). False: not moved, the NPC still where
+// it was (the seat refused it, or the clear faulted and the seating was undone).
+bool MoveRider(unsigned char* vehicle,unsigned from,unsigned to) noexcept {
+    auto seat=SeatAt(vehicle,from);
+    auto rider=const_cast<void*>(RiderObject(seat));
+    auto dest=reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,static_cast<int>(to),false);
+    return dest && LeaveSeat(vehicle,seat,dest);
+}
+
+namespace {
 // Free the NPC-held seat `index` for the player: move the NPC to a free gunner seat, else kick it. Every
 // choice is made before the first write; the move is seat, then clear (LeaveSeat pairs them). False when the
 // seat could not be freed (the caller then offers the player nothing).
@@ -551,10 +563,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -694,6 +706,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     if(!Cfg().enabled)return;
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);
+    Guarded(kStepSeats,&SeatSwitchFrame,v);    // before the steps that read who sits where this frame
     Guarded(kStepAimLines,&AimLines,v);
     Guarded(kStepJetReap,&JetReapStep,v);
     Guarded(kStepHeliReap,&HeliReapStep,v);
@@ -705,6 +718,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepDrill,&DrillFrame,v);
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);
+    Guarded(kStepPayload,&PayloadFrame,v);       // before the sight: it marks the store the secondary fires
     Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
     Guarded(kStepStockHud,&StockHudFrame,v);
     Guarded(kStepJetSound,&JetSound,v);
