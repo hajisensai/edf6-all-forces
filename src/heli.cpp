@@ -37,6 +37,8 @@
 #include "heliaim.h"
 #include "layout.h"
 #include "memory.h"
+#include "roundaim.h"
+#include "edf/weapon.h"
 #include <cmath>
 
 namespace crew {
@@ -137,6 +139,23 @@ constexpr float kTurretReach=70.0f;
 // dry. Short of that the guns fire kBurstMs bursts with kBurstRest between.
 constexpr ULONGLONG kReloadGunMs=8000,kReloadAltMs=15000,kBurstMs=2000,kBurstRest=1000;
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
+// The store: an unguided weapon on the missile byte (holder 2, docs/heli-input-re.md 2b) of a nose-gun heli that strafes:
+// the N9 Eros Blaze's, Vulture ZA's and ZAM's twin napalm gun (V_506HELI_NAPALM01: a NapalmBullet01 at 3 m/frame,
+// AmmoGravityFactor 1, FireAccuracy 0.2 rad, bursts of 6) and the Eros No. 6's napalm drop pod (V_506HELI_UNDER_NAPALM01:
+// 0.1 m/frame along FireVector (0,-1,0), AmmoGravityFactor 2, AmmoOwnerMove 1). Until 2026-10-06 it was fired as if it
+// were the homing missile: the nose within kMissileCone (10 deg) of the gun's lead (the gatling's 240 m/s straight line,
+// no drop) anywhere from kMissileMin to HeliRange. The napalm falls 28 m over 350 m and the cone is 61 m wide there; the
+// pod fell under the heli with the target 50-350 m ahead (the user, 2026-10-06: "npc直升机的烧夷弹好像射的非常不准").
+// Now its own round is flown (roundaim.h, the bullet core's per-frame step): the nose is aimed so its muzzle's arc meets
+// the target where it will be (a pod has no aim: it falls), and the store fires only while the arc from the muzzle as it
+// points now passes within what the weapon's own scatter misses by anyway (roundaim::Worth, at least kHitRadius or its
+// blast), its scatter at most kStoreSpread there (the napalm gun: 120 m), and not within kStoreClear of the player.
+// The weapon's fields: FireVector (weapon+0x350, a float4 the SGO reader writes at 0x68CCFA only when the list is not
+// empty: H; fire reads it at 0x691943, its frame there not traced: M, taken in the vehicle's frame, which a level heli
+// does not tell apart from the world's) and AmmoExplosion (weapon+0x8B0, written at 0x68D82F: M).
+constexpr std::uint64_t kStoreHolder=2;
+constexpr std::size_t kWeaponFireVector=0x350,kWeaponExplosion=0x8B0;
+constexpr float kStoreSpread=12.0f,kStoreClear=15.0f;
 constexpr float kKeepTarget=30.0f;   // m: the current target counts this much nearer (less switching)
 // The 410 circles its target (kGunshipRadius) and its door guns pick their own: the target is only the
 // circle's centre, so it keeps it unless another is kCircleKeep nearer, and the turn (kTurnCost) does not
@@ -379,6 +398,8 @@ struct Heli {
     float extendTo[3];    // where it extends to
     struct Arm { unsigned char* weapon; std::int32_t full; ULONGLONG emptyAt; } arms[4];   // weapon: identity only
     ULONGLONG burstAt,restUntil;   // the gun's current burst began / it rests until
+    std::int32_t storeAmmo;        // the store's rounds last frame, and when a burst of it last left (see kStoreHolder)
+    ULONGLONG storeShotAt;
     ObjRef passed;        // the target it last broke off from (see kPassedMs)
     ULONGLONG passedUntil;
     bool firing;
@@ -894,9 +915,14 @@ Orbit GuardOrbit(Heli& h,const float* pos,const float* fwd,const float* centre,f
 // (LockonType 1) and the straight rockets (slow, accelerating rounds). Refills an emptied one (see
 // kReloadGunMs). Reads the gun's round speed and drop for the lead.
 struct Loadout { float gunSpeed,gunGravity,rocketGravity; bool gun,missile,rockets; std::int32_t ammo[4],rocketAmmo;
-                 const unsigned char* gunWeapon; };   // the fastest gun (its barrel: the 409's turret)
+                 const unsigned char* gunWeapon;    // the fastest gun (its barrel: the 409's turret)
+                 const unsigned char* store; };     // the unguided store (see kStoreHolder), or null
+// Whether holder `i` of a heli of type `t` is the store: holder 2 of a strafing nose-gun type, not homing.
+bool IsStore(const HeliType* t,std::uint64_t i,bool homing) noexcept {
+    return t && i==kStoreHolder && !homing && t->guns==Guns::nose && t->attack==Attack::strafe;
+}
 Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
-    Loadout l{kBulletSpeed,0.0f,1.0f,false,false,false,{-1,-1,-1,-1},0,nullptr};
+    Loadout l{kBulletSpeed,0.0f,1.0f,false,false,false,{-1,-1,-1,-1},0,nullptr,nullptr};
     if(SeatCount(v)==0)return l;
     const auto seat=SeatAt(v,0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
@@ -913,15 +939,17 @@ Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
         if(ammo>arm.full)arm.full=ammo;
         const float speed=At<float>(weapon,kWeaponSpeed)*60.0f,gravity=At<float>(weapon,kWeaponGravity);
         const bool homing=At<std::int32_t>(weapon,kWeaponLockon)==kHoming,rocket=!homing && speed<120.0f;
+        const bool store=IsStore(h.type,i,homing);
         if(ammo<=0 && arm.full>0 && !h.called) {
             if(!arm.emptyAt)arm.emptyAt=ms;
-            else if(ms-arm.emptyAt>((homing || rocket) ? kReloadAltMs : kReloadGunMs)) {
+            else if(ms-arm.emptyAt>((homing || rocket || store) ? kReloadAltMs : kReloadGunMs)) {
                 Put<std::int32_t>(weapon,kWeaponAmmo,arm.full);arm.emptyAt=0;
                 if(Cfg().debug)Log("HELI v=%p reloaded weapon %llu (%p) to %d",v,static_cast<unsigned long long>(i),weapon,arm.full);
             }
         } else arm.emptyAt=0;
         l.ammo[i]=ammo;
-        if(homing)l.missile=true;
+        if(store)l.store=weapon;
+        else if(homing)l.missile=true;
         else if(rocket){l.rockets=true;l.rocketAmmo+=ammo>0 ? ammo : 0;if(std::isfinite(gravity))l.rocketGravity=gravity;}
         else if(std::isfinite(speed) && speed>best) {
             best=speed;l.gun=true;l.gunSpeed=speed;l.gunGravity=std::isfinite(gravity) && gravity>0.0f ? gravity : 0.0f;
@@ -1391,6 +1419,12 @@ struct Sense {
     float aim[3],lead[3],gunLead[3];
     float dist,dipWant,losRate,range,aimRange,bearingOff;
     Loadout arms;
+    // The store (see kStoreHolder), engaged: read (store), its muzzle (storeFrom), the pass of a round fired now
+    // (storePass, storeRange m from the muzzle, storeTol the miss allowed, storeWorth: the gate), and the aim point
+    // that puts its muzzle on the solved arc (storeLead; storeAim: it has one: not a dropped round, solved in reach).
+    bool store,storeAim,storeWorth;
+    roundaim::Pass storePass;
+    float storeRange,storeTol,storeFrom[3],storeLead[3];
 };
 // What a mode wants: the horizontal velocity and the height, how far it is off where it is going, and for
 // the guard orbit its state (the log's).
@@ -1406,6 +1440,79 @@ struct Shot { bool gun,missile; float miss,cone; };
 // PlayerHeli both.
 bool OnGround(bool contact,bool probed,float below) noexcept {
     return contact && (!probed || (below>=0.0f && below<kGroundContact));
+}
+
+// The store's round as its weapon fires it (see kStoreHolder): its speed, fall (the world's gravity, or kGravity down
+// when that cannot be read), owner move and life; the cone (FireAccuracy x weapon+0xE14 as launcher.cpp Cone reads it),
+// the blast and the FireVector (in the vehicle's frame; zero: none). False when it cannot be read.
+struct StoreRound { roundaim::Round r; float cone,blast,fireVector[3]; };
+bool ReadStore(const unsigned char* w,StoreRound* out) noexcept {
+    __try {
+        if(!Readable(w,edf::kWeaponAccuracyScale+4))return false;
+        const float speed=At<float>(w,kWeaponSpeed),factor=At<float>(w,kWeaponGravity),move=At<float>(w,edf::kWeaponAmmoOwnerMove);
+        const std::int32_t alive=At<std::int32_t>(w,kWeaponAlive);
+        if(!std::isfinite(speed) || speed<0.0f || !std::isfinite(factor) || !std::isfinite(move) || alive<=0 || alive>100000)return false;
+        float g[3]={0.0f,-kGravity,0.0f};
+        float world[3];
+        if(edf::WorldGravity(image,world) && vec::Len(world)>1.0f)std::memcpy(g,world,12);
+        out->r.speed=speed;out->r.ownerMove=move;out->r.alive=alive;
+        for(int i=0;i<3;++i)out->r.drop[i]=g[i]*factor/3600.0f;
+        const float accuracy=At<float>(w,edf::kWeaponAccuracy),scale=At<float>(w,edf::kWeaponAccuracyScale);
+        const float k=std::isfinite(scale) && scale>0.0f && scale<=4.0f ? scale : 1.0f;
+        out->cone=std::isfinite(accuracy) && accuracy>0.0f && accuracy<1.0f ? accuracy*k : 0.0f;
+        const float blast=At<float>(w,kWeaponExplosion);
+        out->blast=std::isfinite(blast) && blast>0.0f && blast<100.0f ? blast : 0.0f;
+        std::memcpy(out->fireVector,w+kWeaponFireVector,12);
+        if(!std::isfinite(out->fireVector[0]+out->fireVector[1]+out->fireVector[2]) || vec::Len(out->fireVector)<0.5f)
+            std::memset(out->fireVector,0,12);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// The store's muzzle (its muzzles' mean, as fire builds a shot) and the way its round leaves now: along the muzzle,
+// or a FireVector turned by the vehicle's rows. False when it cannot be read.
+bool StoreMuzzle(const unsigned char* v,const unsigned char* w,const StoreRound& sr,float* pos,float* dir) noexcept {
+    __try {
+        if(!edf::MeanMuzzle(w,8,pos,dir))return false;
+        const float* at=reinterpret_cast<const float*>(v+kPosition);
+        if(vec::Dist(pos,at)>kMuzzleReach)return false;
+        if(vec::Len(sr.fireVector)>0.5f) {
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            for(int i=0;i<3;++i)dir[i]=m[i]*sr.fireVector[0]+m[4+i]*sr.fireVector[1]+m[8+i]*sr.fireVector[2];
+            if(!vec::Normalize(dir))return false;
+        }
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// The store, engaged (see kStoreHolder): the pass of a round fired now and the gate, and (a round it aims) the point the
+// nose is to be put on so the muzzle lies along the solved arc: the nose turned by what the muzzle is off the solution
+// (the muzzle sits fixed on the airframe, so turning the nose turns it the same).
+void StoreSense(const Heli& h,Sense& s) noexcept {
+    s.store=s.storeAim=s.storeWorth=false;
+    const unsigned char* w=s.arms.store;
+    StoreRound sr{};
+    float dir[3];
+    if(!w || !ReadStore(w,&sr) || !StoreMuzzle(s.v,w,sr,s.storeFrom,dir))return;
+    s.store=true;
+    s.storePass=roundaim::Fire(sr.r,s.storeFrom,dir,h.vel,s.aim,h.tgtVel);
+    s.storeRange=vec::Dist(s.storeFrom,s.storePass.round);
+    const float hit=sr.blast>kHitRadius ? sr.blast : kHitRadius;
+    s.storeWorth=roundaim::Worth(s.storePass,s.storeRange,sr.cone,hit,kStoreSpread,&s.storeTol);
+    if(vec::Len(sr.fireVector)>0.5f)return;   // a dropped round: nothing to aim, the run takes it over the target
+    float want[3];roundaim::Pass solved{};
+    if(!roundaim::Solve(sr.r,s.storeFrom,h.vel,s.aim,h.tgtVel,hit,want,&solved))return;
+    float nose[3];
+    for(int i=0;i<3;++i)nose[i]=s.nose[i]+want[i]-dir[i];
+    if(!vec::Normalize(nose))return;
+    const float reach=vec::Dist(s.pos,s.aim);
+    for(int i=0;i<3;++i)s.storeLead[i]=s.pos[i]+nose[i]*reach;
+    s.storeAim=true;
+}
+
+// Whether the store may fire now (its rounds left, HeliMissileMs since its last burst left): then the run aims it.
+bool StoreReady(const Heli& h,const Sense& s) noexcept {
+    return s.store && Cfg().heliMissile && h.storeAmmo>0 && s.ms-h.storeShotAt>static_cast<ULONGLONG>(Cfg().heliMissileMs);
 }
 
 // The first frame (false): it only starts its state. Else (true) the frame's sensing in `s`.
@@ -1487,10 +1594,18 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // Lead the target by the rounds' flight time and drop: the gun's, and the rockets' for a rocket-run type
     // (the 409), whose nose aims them (its gun is in a turret). The nose, the dip and the fire test use the lead.
     s.dist=s.dipWant=s.losRate=0.0f;
+    // The store's rounds: a burst left when its count fell (the weapon's own interval and burst decide when).
+    if(s.arms.store) {
+        const std::int32_t ammo=s.arms.ammo[kStoreHolder];
+        if(ammo<h.storeAmmo)h.storeShotAt=ms;
+        h.storeAmmo=ammo;
+    }
     if(s.engage) {
         const float gunSpeed=s.arms.gunSpeed>1.0f ? s.arms.gunSpeed : kBulletSpeed;
         LeadPoint(pos,s.aim,h.tgtVel,s.arms.gunGravity,[gunSpeed](float d) noexcept { return d/gunSpeed; },s.gunLead);
+        StoreSense(h,s);
         if(s.type->attack==Attack::rocketRun && s.arms.rockets)LeadPoint(pos,s.aim,h.tgtVel,s.arms.rocketGravity,RocketTime,s.lead);
+        else if(s.storeAim && StoreReady(h,s))std::memcpy(s.lead,s.storeLead,12);   // the nose onto the store's arc
         else std::memcpy(s.lead,s.gunLead,12);
         const float d[3]={s.lead[0]-pos[0],s.lead[1]-pos[1],s.lead[2]-pos[2]};
         s.dist=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
@@ -1770,6 +1885,17 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
             float rocketDist=0.0f;
             const float rocketMiss=missOf(s.lead,&rocketDist);
             shot.missile=rocketMiss<coneAt(kRocketCone,rocketDist) && rocketDist<kRocketRange;
+        } else if(s.arms.store) {
+            // The store's own arc from its muzzle as it points now (StoreSense): held while the heli's attitude has it
+            // off the solution, and never onto the player. Unread this frame (s.store false), it holds.
+            const bool clear=!player.at || s.ms-player.at>2000 ||
+                             (vec::Dist(s.storePass.round,player.pos)>kStoreClear && !NearLine(s.storeFrom,s.storePass.round,player.pos,8.0f));
+            shot.missile=s.store && StoreReady(h,s) && s.storeWorth && clear;
+            if(shot.missile && Cfg().debug && s.ms-h.missileAt>500) {
+                h.missileAt=s.ms;
+                Log("HELI v=%p store fire: target=%p miss=%.1f m (allowed %.1f) %.0f m from the muzzle, %.0f frames, ammo=%d",
+                    s.v,h.target.obj,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,h.storeAmmo);
+            }
         } else {
             shot.missile=Cfg().heliMissile && shot.miss<kMissileCone && s.dist>kMissileMin && s.dist<Cfg().heliRange &&
                          s.ms-h.missileAt>Cfg().heliMissileMs;
@@ -1813,6 +1939,8 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
         s.engage ? h.target.obj : nullptr,s.dist,c.offYaw*180.0f/kPi,shot.miss,-s.dip*180.0f/kPi,shot.gun,shot.missile,
         speed,std::sqrt(Dot2(w.vel,w.vel)),s.dipWant*180.0f/kPi,shot.cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),s.losRate*180.0f/kPi,
         a.ahead,a.clear,a.roof,a.anyRoof,a.anyFlags,h.losLift,s.hidden ? " hidden" : "",s.wallAhead ? " wall" : "");
+    if(s.store)Log("HELI v=%p store: miss=%.1f allowed=%.1f range=%.0f frames=%.0f worth=%d ready=%d aimed=%d ammo=%d",
+                   v,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,s.storeWorth,StoreReady(h,s),s.storeAim,h.storeAmmo);
 }
 
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
