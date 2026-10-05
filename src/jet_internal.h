@@ -324,6 +324,13 @@ struct SwarmState {
     float aimAt[3],spin[3];
     ULONGLONG wreckAt;
     ULONGLONG slowSince;     // a wreck: game ms it began to move much slower than told (0: not)
+    // A drone's moving parts (SwarmPose, src/swarm_pose.h): its bone records (looked up again when the model's
+    // bone array changes), their bind locals, the abdomen's curl.
+    const unsigned char* poseModel;
+    unsigned char* poseRec[8];
+    float poseBind[8][16];
+    bool posed;              // every part found
+    float curl;
     ULONGLONG retryAt;       // a core: game ms it may try to bring drones again (the table was full)
     ULONGLONG fireLogAt;
 };

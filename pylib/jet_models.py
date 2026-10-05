@@ -65,13 +65,12 @@ MODELS: dict[str, Recipe] = {
     'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5),
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
     'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
-    # The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): its core in the Imperial drone's model (83 m with
-    # its cannon arms, x 0.5) and its members in the gold drone's (19 m across, x 0.5). Both already have the
-    # root `mdl` and a level `body` bone, so only the scale changes.
+    # The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): its cores in the Imperial drone's model (83 m with
+    # its cannon arms, x 0.5, and x 1 for the huge one), which already has the root `mdl` and a level `body` bone,
+    # so only the scale changes. Its drone is a model of its own (GENERATED).
     'EDF6VC_SWARM_CORE.MRAB': Recipe('E515_IMPERIALUFO.MRAB', 'e515_imperialufo.mdb', 0.5),
     # the huge swarm's core: the Imperial drone at its own size (83 m across)
     'EDF6VC_SWARM_CORE_XL.MRAB': Recipe('E515_IMPERIALUFO.MRAB', 'e515_imperialufo.mdb', 1.0),
-    'EDF6VC_SWARM_UNIT.MRAB': Recipe('E507_GOLDUFO.MRAB', 'e507_goldufo.mdb', 0.5),
 }
 # The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,
 # at its size in the missions (x 1: 1664 m long, 355 m wide, hull bottom to main deck 360 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
@@ -231,9 +230,25 @@ def replace_member(raw: bytes, model: str, data: bytes) -> bytes:
     return rab_write(rab)
 
 
+# Models made from primitives rather than scaled (file -> builder module): the swarm's dragonfly drone
+# (pylib/dragonfly_model.py, in the stock gold drone's archive and materials).
+GENERATED_FILES = ('EDF6VC_SWARM_UNIT.MRAB',)
+
+
+def generated(game, name: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
+    """The archive of GENERATED_FILES entry `name`."""
+    import dragonfly_model
+    assert name in GENERATED_FILES, name
+    return dragonfly_model.build(game)
+
+
 def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game
-    """Output file name -> archive bytes, every one checked (`check`); `models` default MODELS."""
+    """Output file name -> archive bytes, every one checked (`check`); `models` default MODELS, and then the
+    GENERATED_FILES too."""
     out: dict[str, bytes] = {}
+    if models is None:
+        for name in GENERATED_FILES:
+            out[name] = generated(game, name)
     for name, r in (MODELS if models is None else models).items():
         raw = game.read('OBJECT', r.archive)
         src = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data)

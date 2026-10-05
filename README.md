@@ -90,7 +90,9 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    |---|---|---|---|---|---|
    | 巨大 | `edf6vc_swarm_huge.sgo` | 帝国无人机原尺寸，约 83 米宽 | 9000 | `SwarmHugeUnits`（默认 16），编队宽一倍；绕圈半径 ×1.6、高度 ×1.5 | 2500 / 45 米 |
    | 大 | `edf6vc_swarm_core.sgo` | 帝国无人机 ×0.5，约 42 米 | 3000 | `SwarmUnits`（默认 12） | 1000 / 25 米 |
-   | 个体 | `edf6vc_swarm_unit.sgo` | 金色小型无人机 ×0.5，约 9 米 | 250 | 没有核心：一出场就绕着玩家飞（同「散开」） | 300 / 10 米 |
+   | 个体 | `edf6vc_swarm_unit.sgo` | 生物机械蜻蜓（插件自带模型），长约 14 米、翼展约 13.5 米 | 250 | 没有核心：一出场就绕着玩家飞（同「散开」） | 300 / 10 米 |
+
+   - **无人机外形与动作**：无人机（合体机的成员和「个体」）是插件自己生成的蜻蜓模型（`pylib/dragonfly_model.py`：金色胸部、蓝色发光复眼与翅膀、铜色分节腹部，用原版金色无人机的材质与贴图）。插件每帧驱动它的骨骼（`src/swarm_pose.h`）：四片翅膀前后两对交错扇动；锁定目标后翅膀转为急速悬停振动、腹部向下卷起成「尾刺」，**卷到位才开火**（攻击前的提示）；残骸翅膀下垂、腹部半卷。不进游戏也能看效果：`build.cmd` 后运行 `python tools/swarm_pose_view.py`（插件同一份姿态代码离线跑一段出击过程并渲染）和 `python tools/swarm_formation_view.py`（整个编队），图在 `build/`；
 
    - **出场**：任务脚本像放置战斗机一样放——`Preload("app:/object/edf6vc_swarm_core.sgo", -1);` 和 `CreateFriend("点名", "app:/object/edf6vc_swarm_core.sgo", 1.0, false);`（换成上表的 SGO 即另外两种；放置点离地至少 15 米，巨大的 25 米）。插件第一次看到它就把它改到敌方队伍，按 `SwarmHpScale` 放大耐久，核心离地 30 米（巨大 50 米）后每帧放出最多 3 架无人机，排进编队。测试场的敌人波次里选「星导者群体合体机·巨大 / 大 / 个体」即可（场上没有敌人时才放下一批；每批最多 1 / 3 / 6，总数最多 4 / 12 / 36）；
    - **合体**：核心以 `SwarmRange`（默认 250 米）为半径、高出玩家 `SwarmHeight`（默认 70 米）绕玩家盘旋，每 30 秒从玩家头顶低空穿过一次。无人机按编队槽位贴着核心飞（核心的速度加上把它拉回槽位的修正），各自把机头（含俯仰）对准玩家，对准、在射程内时按「打 1.6 秒、停 2.4 秒」的节奏开火（各架错开）；核心的两门红色重炮对准就打。同一合体机的子弹互相穿过；
@@ -206,7 +208,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/crew.cpp`：NPC 上车（Vehicle_RideAi）、顶替（slot 49 FindSeat + 上车提示访问器）、每帧入口（slot 55 串接）。
 - `src/heli.cpp`：直升机自动驾驶。
 - `src/playerjet.cpp`：玩家驾驶的战斗机 / 攻击机飞控（`docs/player-jet-re.md`）。
-- `src/jet_swarm.cpp`：星导者群体合体机（敌人：编队、散开、残骸冲锋，`docs/swarm-plan.md`）。
+- `src/jet_swarm.cpp`：星导者群体合体机（敌人：编队、散开、残骸冲锋，`docs/swarm-plan.md`）；`src/swarm_pose.h` 无人机的骨骼动作（插件和离线模拟 `tools/swarm_pose_sim.cpp` 共用）；`pylib/dragonfly_model.py` 无人机模型；`pylib/model_view.py` 离线看模型。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。

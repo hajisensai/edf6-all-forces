@@ -122,10 +122,13 @@ JETS: dict[str, Jet] = {
                                      ('app:/object/edf6vc_swarm_core_xl.mrab', 'e515_imperialufo.mdb'),
                                      'EDF6VC_SWARM_CORE_XL.MRAB', 'body', 'body',
                                      rigid=((0.0, -6.84, -10.227), (41.5, 14.91, 24.336))),
-    # The drone: a core's member, or placed alone by a mission (a lone drone, scattered from the start).
+    # The drone: a core's member, or placed alone by a mission (a lone drone, scattered from the start). Its model
+    # is the plugin's own dragonfly (pylib/dragonfly_model.py: 14 m long, 13.5 m across the wings), written into
+    # the gold drone's archive under that drone's member name; its box is the body (thorax, head, abdomen), not
+    # the wings.
     'edf6tr_swarm_unit': Jet(7013.0, 250.0, (_SWARM_GUN, _SWARM_GUN, _SWARM_CHARGE_S),
                              ('app:/object/edf6vc_swarm_unit.mrab', 'e507_goldufo.mdb'), 'EDF6VC_SWARM_UNIT.MRAB',
-                             'body', 'body', rigid=((0.0, -0.595, 0.0), (4.695, 1.942, 4.695))),
+                             'body', 'body', rigid=((0.0, -0.134, -1.32), (1.529, 1.454, 7.04))),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
     # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
     # deck (y 163.08..193.08 over the origin; the tower above is not solid). Not the whole hull: afloat its

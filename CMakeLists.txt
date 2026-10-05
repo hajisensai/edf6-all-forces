@@ -17,3 +17,7 @@ configure_file(EDF6VehicleCrew.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6Vehicle
 
 # EDF6AutoTurret: the flak / Bohr auto-aim and the tank side guns (autoturret/README.md)
 add_subdirectory(autoturret)
+
+# The Primer swarm drone's pose code run offline (tools/swarm_pose_view.py renders it): not part of the plugin.
+add_executable(swarm_pose_sim tools/swarm_pose_sim.cpp)
+set_target_properties(swarm_pose_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

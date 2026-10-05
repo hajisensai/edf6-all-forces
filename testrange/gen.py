@@ -505,6 +505,8 @@ def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
     rel = f'OBJECT/{file}'
     if os.path.isfile(led.disk(rel)):
         led.need(OWNER, rel)
+    elif file in jet_models.GENERATED_FILES:
+        led.put(OWNER, rel, jet_models.generated(game, file))
     else:
         recipe = {**jet_models.MODELS, **jet_models.SUB_MODELS}[file]
         led.put(OWNER, rel, jet_models.build(game, {file: recipe})[file])

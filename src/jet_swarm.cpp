@@ -23,6 +23,8 @@
 // Only the local player is aimed at (player.pos). Game thread, under the input hook's guard.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "swarm_pose.h"
+#include <cwchar>
 
 namespace crew {
 namespace jet {
@@ -227,7 +229,38 @@ void PointAt(Jet& j,const unsigned char* v,const float* pos,const float* aim,boo
     BodyAttitude(v,nose,up,kAimGain,KindOf(j).roll,j.m.omega);
 }
 
-// The guns (0x2020): on the target within the reach and kFireCone, a drone in its burst.
+// A drone's moving parts (src/swarm_pose.h): its wings beat, its abdomen sways, armed (`arm`) curls under it,
+// a wreck's hang. Its bone records are looked up by name in the model instance (veh+0xEE0) and found again when
+// its bone array changes; each frame local = R x bind is written into them (+0x70), as the jets' elevons are.
+// Every part found or none posed (a drone in another model: logged once).
+static_assert(swarm::kDroneBoneCount<=8,"SwarmState holds 8 parts");
+void SwarmPose(Jet& j,unsigned char* v,bool arm,float dt,ULONGLONG ms) noexcept {
+    const unsigned char* const inst=v+kModelInst506;
+    const auto bones=At<const unsigned char*>(inst,kInstBones506);
+    if(!bones)return;
+    if(bones!=j.swarm.poseModel) {
+        j.swarm.poseModel=bones;j.swarm.posed=true;
+        for(int i=0;i<swarm::kDroneBoneCount;++i) {
+            j.swarm.poseRec[i]=BoneRecord506(inst,swarm::kDroneBones[i].name);
+            if(!j.swarm.poseRec[i]){j.swarm.posed=false;continue;}
+            std::memcpy(j.swarm.poseBind[i],j.swarm.poseRec[i]+kBoneLocal506,64);
+        }
+        if(!j.swarm.posed)Log("SWARM v=%p: its model has not the dragonfly's parts: not posed",v);
+    }
+    if(!j.swarm.posed)return;
+    const swarm::DroneInput in{static_cast<float>(ms%600000)*0.001f,arm,j.swarm.wreck};
+    j.swarm.curl=swarm::CurlStep(j.swarm.curl,in,dt);
+    float angles[swarm::kDroneBoneCount];
+    swarm::DroneAngles(in,j.swarm.curl,angles);
+    for(int i=0;i<swarm::kDroneBoneCount;++i) {
+        alignas(16) float local[16];
+        swarm::TurnLocal(j.swarm.poseBind[i],swarm::kDroneBones[i].axis,angles[i],local);
+        std::memcpy(j.swarm.poseRec[i]+kBoneLocal506,local,64);
+    }
+}
+
+// The guns (0x2020): on the target within the reach and kFireCone, a drone in its burst with its abdomen curled
+// (its warning: SwarmPose).
 void Guns(Jet& j,unsigned char* v,const float* pos,const float* aim,bool hasAim,ULONGLONG ms) noexcept {
     v[kFireMissile]=0;
     bool fire=false;
@@ -238,7 +271,8 @@ void Guns(Jet& j,unsigned char* v,const float* pos,const float* aim,bool hasAim,
         const float* m=reinterpret_cast<const float*>(v+kMatrix);
         float fwd[3]={m[8],m[9],m[10]};
         if(Normalize(to) && Normalize(fwd))off=std::acos(Clamp(Dot(to,fwd),-1.0f,1.0f));
-        const bool burst=IsCore(j) || (ms+static_cast<ULONGLONG>(j.swarm.slot)*kSlotPhaseMs)%kBurstMs<kBurstOnMs;
+        const bool burst=IsCore(j) || ((ms+static_cast<ULONGLONG>(j.swarm.slot)*kSlotPhaseMs)%kBurstMs<kBurstOnMs &&
+                                       (!j.swarm.posed || j.swarm.curl>=swarm::kCurlFire));
         fire=burst && d<(IsCore(j) ? kCoreReach : kUnitReach) && off<kFireCone;
     }
     v[kFireGun]=fire ? 1 : 0;
@@ -350,6 +384,7 @@ void WreckFly(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
         Blast(j,v,ms);
         return;
     }
+    if(!IsCore(j))SwarmPose(j,v,false,dt,ms);
     Normalize(to);
     const float s=Clamp(Len(j.m.vel)+kWreckAccel*dt,0.0f,size.wreckSpeed);
     for(int i=0;i<3;++i){j.m.vel[i]=to[i]*s;j.m.omega[i]=j.swarm.spin[i];}
@@ -421,6 +456,8 @@ void SwarmFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) 
     const float reach=(IsCore(j) ? kCoreReach : kUnitReach)*kAimReach;
     const bool inReach=hasAim && (aim[0]-pos[0])*(aim[0]-pos[0])+(aim[1]-pos[1])*(aim[1]-pos[1])+(aim[2]-pos[2])*(aim[2]-pos[2])<reach*reach;
     PointAt(j,v,pos,aim,inReach,fwd);
+    // A drone arms (curls its abdomen) with its target in reach.
+    if(!IsCore(j))SwarmPose(j,v,inReach && Cfg().swarmFire,dt,ms);
     Guns(j,v,pos,aim,inReach,ms);
 }
 }  // namespace jet
