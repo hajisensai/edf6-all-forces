@@ -279,8 +279,8 @@ class GroundVehicle:
 
 
 # The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its
-# wheels), the V607 truck under the Naegling's rack; its rockets are lobbed and the EDF6AutoTurret plugin aims them
-# (LockonTargetType kMarkGround, as the Bohr's).
+# wheels), the V607 truck under the Naegling's rack; its rockets are lobbed on the high arc and the EDF6AutoTurret
+# plugin aims them (LockonTargetType kMarkLofted); EDF6VehicleCrew shows its rider where they land.
 KATYUSHA_ROCKETS = 'EDF6VC_KATYUSHA_ROCKETS.SGO'
 GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
