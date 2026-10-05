@@ -150,6 +150,8 @@ bool InstallMissiles() noexcept;
 // The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
 // once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
 bool InstallJetSound() noexcept;
+// The game's glyph cache under one lock (glyphs.cpp): its threads lost glyphs and showed one character as another.
+bool InstallGlyphLock() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
 // The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
