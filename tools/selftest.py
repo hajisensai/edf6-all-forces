@@ -533,6 +533,56 @@ def drill_copies_agree() -> None:
 
 
 @test
+def sidecar_copies_agree() -> None:
+    """The sidecar motorcycle (src/sidecar.cpp, pylib/sidecar_model.py, tools/make_sidecar.py): the C++ copies of the
+    marker bone, the gunner's point and the platform's outer side are the model's; its request is a ground vehicle
+    request of the Freed bike's class and request (a Ranger's vehicle), its notes do not ask for EDF6AutoTurret and
+    it needs no stock weapon installed; the plugin is wired through (the input step, the board button before the
+    stock seat search, no NPC driver while the player is in the sidecar, the mission reset, the setAngVel redirect,
+    the build); its ini keys are read, shipped and documented. With the game: the whole build passes its checks (the
+    model against the stock bones, the ragdoll against the stock one byte for byte outside the edit)."""
+    import make_sidecar
+    import sidecar_model as sm
+    c = src('src/sidecar.cpp')
+    assert f'kMarkerBone[]=L"{sm.MARKER_BONE}"' in c, 'src/sidecar.cpp kMarkerBone'
+    m = re.search(r'kGunnerX=(-?[\d.]+)f,kGunnerY=(-?[\d.]+)f,kGunnerZ=(-?[\d.]+)f', c)
+    assert m and tuple(float(x) for x in m.groups()) == sm.GUNNER_POINT, m and m.groups()
+    m = re.search(r'kPlatformOut=(-?[\d.]+)f', c)
+    assert m and float(m.group(1)) == sm.PLATFORM[0][0], m and m.groups()
+    assert sm.PLATFORM[0][1] < sm.GUNNER_POINT[1] == sm.PLATFORM[1][1], 'the gunner stands on the platform top'
+    assert all(sm.PLATFORM[0][k] < sm.GUNNER_POINT[k] < sm.PLATFORM[1][k] for k in (0, 2)), 'the gunner over the platform'
+    rows = [x for x in calls.CALLS if x.ground == 'sidecar']
+    assert len(rows) == 1 and rows[0].vehicle == make_sidecar.VEHICLE.sgo and rows[0].mark == 0 and rows[0].brings == 'vehicle'
+    assert make_sidecar.VEHICLE.stock == 'V503_BIKE' and make_sidecar.VEHICLE.request == 'AWEAPON338'
+    assert make_sidecar.OWNER in ledger.OWNERS and make_sidecar.VEHICLE.tool == 'make_sidecar'
+    assert cw.vehicle_needs(rows[0]) == [f"OBJECT/{make_sidecar.SGO_FILE}"], cw.vehicle_needs(rows[0])
+    for lang in ('SC', 'CN', 'JA', 'EN', 'KR'):
+        text = calls.call_description(rows[0], lang)
+        assert 'EDF6AutoTurret' not in text and 'EDF6VehicleCrew' in text, (lang, text)
+    crew = src('src/crew.cpp')
+    hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
+    assert '&SidecarFrame,' in hook.split('nextInput[I](', 1)[1], 'SidecarFrame runs after the stock input'
+    board = crew.split('unsigned char* __fastcall FindSeatHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 0 <= board.find('SidecarBoard(') < board.find('originalFindSeat(vehicle,human)'), 'the sidecar before the stock seat'
+    assert 'SidecarHoldsPlayer(vehicle)' in crew.split('void Crew(', 1)[1].split('\n}\n', 1)[0], 'no NPC driver'
+    assert 'ResetSidecars();' in src('src/mission.cpp')
+    phys = src('src/physics.cpp')
+    assert 'SidecarLevel(body,spin)' in phys and '&ChassisSetAngVel' in phys and '&FinalAngProbe' not in phys
+    assert 'src/sidecar.cpp' in src('CMakeLists.txt') and 'InstallSidecar();' in src('src/plugin.cpp')
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('Sidecar', 'SidecarNpcGunner', 'SidecarNpcRange'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    assert 'Fix("SidecarNpcRange"' in plugin, 'SidecarNpcRange is not range-checked'
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        game = rootcpk.default()
+        shkt, _info = sm.build_collision(game)
+        files = {f'OBJECT/{make_sidecar.MODEL_FILE}': sm.build(game), f'OBJECT/{make_sidecar.RAGDOLL_FILE}': shkt,
+                 f'OBJECT/{make_sidecar.SGO_FILE}': make_sidecar.vehicle_sgo(game)}
+        make_sidecar.check(files, game)
+
+
+@test
 def weapon_marks_agree() -> None:
     """The mod's LockonTargetType marks: one copy in C++ (common/edf/weapon.h), the data tools' copies equal to it."""
     marks = dict(re.findall(r'(kMark\w+)=(\d+)', src('common/edf/weapon.h')))
