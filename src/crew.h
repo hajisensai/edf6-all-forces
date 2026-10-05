@@ -79,6 +79,7 @@ struct Config {
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
     bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
     float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
 };
@@ -114,6 +115,7 @@ void ResetJets() noexcept;        // jet.cpp (and the dolls, the walls learned)
 void ResetAirstrikes() noexcept;  // airstrike.cpp
 void ResetBoosters() noexcept;    // booster.cpp
 void ResetShields() noexcept;     // shield.cpp
+void ViewTick() noexcept;         // view.cpp: once a frame, the view distance raised
 void ResetSubs() noexcept;        // subcarrier.cpp
 void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
