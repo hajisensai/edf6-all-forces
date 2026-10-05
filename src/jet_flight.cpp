@@ -401,6 +401,70 @@ bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept {
     return false;
 }
 
+// What stands on its track ahead (the user, 2026-10-05: "飞机会撞楼"). Guard's two rays look straight down (under it
+// now and kLookAhead s on), so a building between them was never seen, and one the far ray saw was forgotten the next
+// frame as the probe went past it: the jets flew into buildings and slid along them (Sense). Ahead sweeps its track
+// kMinAlt under it out to a pull-up's time (kReact, the roll to lift, the climb's turn s / (maxG g); kSweepMin to
+// kSweepMax s) in kSweepSlots stretches, kSweepPerFrame a frame (a whole sweep every 3 frames: 2 rays a jet a frame);
+// a stretch that hits something has its top found (the ground over a point kObstStep past the hit, on: a roof) and
+// kept as the obstacle, the highest one, until the jet is past it or the sweep's time and kObstKeepMs more is up.
+constexpr int kSweepSlots=6,kSweepPerFrame=2;
+constexpr float kSweepMin=3.0f,kSweepMax=8.0f,kObstStep=3.0f;
+constexpr ULONGLONG kObstKeepMs=2000;
+// Guard over it: kObstMargin times the slope to its top, kObstSteep (the sine) at most; steeper than kObstTurnSlope
+// (rise over distance, 45 deg) it turns off to a side as well (Aside).
+constexpr float kObstMargin=1.3f,kObstSteep=0.9f,kObstTurnSlope=1.0f;
+void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
+    Motion& mo=j.m;
+    if(mo.obstUntil) {
+        const float to[3]={mo.obstAt[0]-pos[0],0.0f,mo.obstAt[2]-pos[2]};
+        if(ms>mo.obstUntil || to[0]*mo.vel[0]+to[2]*mo.vel[2]<0.0f)mo.obstUntil=0;
+    }
+    const Kind& k=KindOf(j);
+    const float s=Len(mo.vel);
+    float dir[3]={mo.vel[0],0.0f,mo.vel[2]};
+    if(s<1.0f || !Normalize(dir))return;
+    const float span=Clamp(kReact+RollToLift(j)/k.roll+s/(k.maxG*kG),kSweepMin,kSweepMax);
+    for(int n=0;n<kSweepPerFrame;++n) {
+        const int i=mo.sweep++%kSweepSlots;
+        const float t0=span*static_cast<float>(i)/kSweepSlots,t1=span*static_cast<float>(i+1)/kSweepSlots;
+        const float a[3]={pos[0]+mo.vel[0]*t0,pos[1]+mo.vel[1]*t0-kMinAlt,pos[2]+mo.vel[2]*t0};
+        const float b[3]={pos[0]+mo.vel[0]*t1,pos[1]+mo.vel[1]*t1-kMinAlt,pos[2]+mo.vel[2]*t1};
+        float hit[3];
+        if(MapRay(a,b,hit)<0.0f)continue;
+        const float in[3]={hit[0]+dir[0]*kObstStep,hit[1],hit[2]+dir[2]*kObstStep};
+        const float c=GroundClearance(in);
+        const float top=c!=kNoGround && in[1]-c>hit[1] ? in[1]-c : hit[1];
+        if(mo.obstUntil && top<=mo.obstTop)continue;
+        if(Cfg().debug && (!mo.obstUntil || top>mo.obstTop+10.0f))
+            Log("JET v=%p obstacle ahead: top y=%.0f (%.0f over it), %.0f m out",j.Vehicle(),top,top-pos[1],HorizDist(pos,hit));
+        mo.obstTop=top;std::memcpy(mo.obstAt,hit,12);
+        mo.obstUntil=ms+static_cast<ULONGLONG>(span*1000.0f)+kObstKeepMs;
+    }
+}
+
+// Too steep to climb over what is ahead (Guard): turned off to the side whose ray, kAsideAngle off its track at its
+// height, reaches further past it.
+constexpr float kAsideAngle=0.6f,kAsideBeyond=150.0f;
+void Aside(const Jet& j,const float* pos,float toObst,float* want) noexcept {
+    float dir[3]={j.m.vel[0],0.0f,j.m.vel[2]};
+    if(!Normalize(dir))return;
+    const float c=std::cos(kAsideAngle),s=std::sin(kAsideAngle),reach=toObst+kAsideBeyond;
+    float side[2][3],room[2];
+    for(int i=0;i<2;++i) {
+        const float sg=i ? -1.0f : 1.0f;
+        side[i][0]=dir[0]*c+dir[2]*s*sg;side[i][1]=0.0f;side[i][2]=dir[2]*c-dir[0]*s*sg;
+        const float end[3]={pos[0]+side[i][0]*reach,pos[1],pos[2]+side[i][2]*reach};
+        float hit[3];
+        const float d=MapRay(pos,end,hit);
+        room[i]=d<0.0f ? reach : d;
+    }
+    const float* to=side[room[1]>room[0] ? 1 : 0];
+    const float h=std::sqrt(want[0]*want[0]+want[2]*want[2]);
+    const float flat=h>1e-4f ? h : 1.0f;
+    want[0]=to[0]*flat;want[2]=to[2]*flat;
+}
+
 // Keeps `want` off the walls and the ground and under the ceiling. The ground is the highest under it now and
 // kLookAhead seconds along its track; sinking, the lowest it gets is where a maxG pull-out started
 // kReact seconds from now bottoms out (so a dive runs down to kMinAlt instead of pulling up 100 m early);
@@ -427,7 +491,16 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     // there and flew on to -1100 (2026-10-04). It keeps the surface it last saw under it then.
     const float seen=j.m.groundSeen ? j.m.groundY : -1e9f;
     const float lowest=there!=kNoGround ? probe[1]-there : seen;
-    const float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
+    float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
+    // A building (or a ridge) Ahead found on its track: a floor too, and climbed from where it is now (`rise` over
+    // `toObst`); too steep for that, it turns off to the clearer side (Aside).
+    float rise=0.0f,toObst=0.0f;
+    if(j.m.obstUntil) {
+        toObst=HorizDist(pos,j.m.obstAt);
+        rise=j.m.obstTop+kMinAlt-pos[1];
+        if(j.m.obstTop>floorY)floorY=j.m.obstTop;
+        if(rise>toObst*kObstTurnSlope)Aside(j,pos,toObst,want);
+    }
     float bottom=pos[1];
     if(s>1.0f && j.m.vel[1]<0.0f) {
         const float sinDive=Clamp(-j.m.vel[1]/s,0.0f,1.0f),cosDive=std::sqrt(1.0f-sinDive*sinDive);
@@ -437,6 +510,14 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     if(bottom<floorY+kMinAlt) {
         const float need=Clamp((floorY+kMinAlt-bottom)/40.0f,0.3f,0.8f);
         if(want[1]<need){want[1]=need;Normalize(want);}
+        // Over what is ahead: kObstMargin times the slope from here to its top, kObstSteep at most, as the path's own
+        // climb (the sine itself, not one normalized away).
+        const float slope=rise>0.0f ? Clamp(kObstMargin*rise/std::sqrt(rise*rise+toObst*toObst),0.0f,kObstSteep) : 0.0f;
+        const float h=std::sqrt(want[0]*want[0]+want[2]*want[2]);
+        if(want[1]<slope && h>1e-4f) {
+            const float keep=std::sqrt(1.0f-slope*slope)/h;
+            want[0]*=keep;want[2]*=keep;want[1]=slope;
+        }
     }
     const float top=CeilingY()-kCeilingGap;
     const float rising=pos[1]+(j.m.vel[1]>0.0f ? j.m.vel[1]*kLookAhead : 0.0f);
@@ -555,6 +636,7 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
 }
 
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* nose,float* want,float speed,float dt,ULONGLONG ms) noexcept {
+    Ahead(j,pos,ms);
     Guard(j,pos,want,ms);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     float up[3];

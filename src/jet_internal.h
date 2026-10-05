@@ -279,6 +279,9 @@ struct Motion {
     float thrust[3];         // a rotor craft's (Hover): the thrust its flight asks for, world, m/s^2
     float acc[3];            // a rotor craft's eased acceleration (see Lean::respond)
     ULONGLONG thrustLogAt;   // Thrusters' last log
+    std::uint8_t sweep;      // Ahead's next stretch of its track
+    float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
+    ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it
 };
 // What it goes for (Pick, Lead) and its guns' and missiles' state (Fire, Missile).
 struct Aim {
@@ -348,6 +351,7 @@ struct Jet {
     const char* why;         // why it withdrew
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
+    bool entered;            // ...its first attack run begun: its arrival over (Entering)
     bool escort;             // ...or the player, while seen (a call's follow variant; anchor: where they were last)
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
     int wing;                // its place in its flight: its patrol ring, a carrier's way round its orbit
@@ -406,6 +410,13 @@ bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's
 void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
 inline bool Flown(const Jet& o,ULONGLONG ms) noexcept { return o.ref && ms-o.seen<=kStaleMs; }
+
+// A called jet's arrival (the user, 2026-10-05: "有些入场情况，可以一开始就进入攻击状态"): launched by a call, kEntryMs
+// at most, until its first attack run begins (entered). Strike flies it in at its attack speed and the height it came
+// at, turning onto its target, where it used to climb to its attack height and, the target off its nose, fly out up
+// to 2.2 km and 12 s first to come round.
+constexpr ULONGLONG kEntryMs=15000;
+inline bool Entering(const Jet& j,ULONGLONG ms) noexcept { return j.launched && !j.entered && ms-j.bornAt<kEntryMs; }
 
 // --- jet_flight.cpp ---
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept;

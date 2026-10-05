@@ -142,6 +142,16 @@ void GunToward(const Jet& j,const float* pos,const float* nose,const float* lead
     if(Normalize(aimed))std::memcpy(want,aimed,12);
 }
 
+// The lead point seen from `pos`: nothing standing between (a building's face, a ridge) more than kSightSlack short
+// of it. A dive at one behind a building was a dive into the building.
+constexpr float kSightSlack=30.0f;
+bool InSight(const float* pos,const float* lead) noexcept {
+    float hit[3];
+    if(MapRay(pos,lead,hit)<0.0f)return true;
+    const float d[3]={hit[0]-lead[0],hit[1]-lead[1],hit[2]-lead[2]};
+    return Len(d)<kSightSlack;
+}
+
 // Strike attack (see kDiveCone). Returns whether the guns may fire (diving at the lead point).
 bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float height,ULONGLONG ms,float* want,float* speed) noexcept {
     const Kind& k=KindOf(j);
@@ -171,11 +181,15 @@ bool Strike(Jet& j,const float* pos,const float* nose,const float* lead,float he
         if(j.mode!=Mode::approach)SetMode(j,Mode::approach,ms);
         break;
     }
-    // Approach: at the target at height; dive once in the window, else fly out and come round.
-    if(dh<=k.diveStart && dh>k.gunClose*2.0f && off<kDiveCone && over>k.pullAlt+30.0f){SetMode(j,Mode::dive,ms);GunToward(j,pos,nose,lead,want);return true;}
-    if(off>kDiveCone && InsideTurn(j,pos,lead)){std::memcpy(j.t.out,vdir,12);SetMode(j,Mode::extend,ms);Level(pos,vdir,height,want);return false;}
-    Level(pos,to,height,want);
-    *speed=k.cruise;
+    // Approach: at the target at height; dive once in the window with the lead in sight, else fly out and come round.
+    // Arriving (Entering) it comes straight on at the height it came at and its attack speed, never flying out first.
+    const bool entering=Entering(j,ms);
+    if(dh<=k.diveStart && dh>k.gunClose*2.0f && off<kDiveCone && over>k.pullAlt+30.0f && InSight(pos,lead)) {
+        j.entered=true;SetMode(j,Mode::dive,ms);GunToward(j,pos,nose,lead,want);return true;
+    }
+    if(!entering && off>kDiveCone && InsideTurn(j,pos,lead)){std::memcpy(j.t.out,vdir,12);SetMode(j,Mode::extend,ms);Level(pos,vdir,height,want);return false;}
+    Level(pos,to,entering && pos[1]<height ? pos[1] : height,want);
+    *speed=entering ? k.attack : k.cruise;
     return false;
 }
 
