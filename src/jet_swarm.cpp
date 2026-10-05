@@ -7,12 +7,14 @@
 //    player, and fires its guns in bursts when on them. The core's cannons fire whenever it is on them. A swarm is
 //    one flight: its rounds pass through its own (jet_hooks.cpp).
 //  - scattered: the core shot down (or gone), every drone left circles the player on a ring of its own.
-//  - wreck (the death behaviour): every swarm body's HP floor (+0x2F0) is kFloorHp. The stock damage clamps the HP
-//    into [floor, max] (0x547C30: 0x548172) and dies only at HP <= 0 (0x54840B), so a killing hit leaves it at the
-//    floor. Seen there it becomes a wreck: where the player is now is its mark, the floor goes back to 0 and the
-//    HP to kWreckHpShare of its max, and it tumbles straight at the mark (no homing); on the mark, the ground, a
-//    wall or after kWreckMaxMs its charge (weapon 2, a point charge on the enemy's team) goes off and it is gone
-//    (Blast). Shot again on the way, it goes down as the stock 506 does: no blast.
+//  - wreck (the death behaviour): the stock damage (message 0x10000000, 0x547C30) clamps the HP into [+0x2F0 floor,
+//    max] (0x548172) and dies only at HP <= 0 (0x54840B). While the plugin flies a swarm body, its damage message
+//    is handled with the floor at kFloorHp (SwarmMessage, through body506's message hook, put back to what it was
+//    right after), so a killing hit leaves it at the floor. Seen there it becomes a wreck: where the player is now
+//    is its mark, its HP kWreckHpShare of its max, and it tumbles straight at the mark (no homing); on the mark,
+//    the ground, stopped, or after kWreckMaxMs its charge (weapon 2, a point charge on the enemy's team) goes off
+//    and it is gone (Blast). Shot again on the way, it goes down as the stock 506 does: no blast. Not flown (the
+//    plugin off, its pilot gone, a step faulting) its floor stays the stock one: it dies as any 506.
 // Its team (docs/swarm-team-re.md): a vehicle's team is its riders' (the vehicle update 0x630250 sets it from its
 // seats every frame, 5 with none), and RideAi's dummy pilot is made a friend (team 2, 0x6331CC) whatever the vehicle
 // was. So the pilot goes to the enemy's team (unregistered, as RideAi left it), then the vehicle (SwarmTeam), when
@@ -23,15 +25,21 @@
 
 namespace crew {
 namespace jet {
-namespace {
-constexpr std::size_t kHpFloor=0x2F0,kOwnTeam=0x318;
+constexpr std::size_t kHpFloor=0x2F0;
 constexpr float kFloorHp=1.0f;
+constexpr ULONGLONG kFlownMs=500;      // a body flown within this long has its damage held at the floor
+namespace {
+constexpr std::size_t kOwnTeam=0x318;
 constexpr float kWreckHpShare=0.04f;    // a wreck's HP: one more hit brings it down
 // Drones: at most kMaxUnits (SwarmUnits), kSpawnPerFrame a frame, once the core is kSpawnClear over the ground
 // (or kSpawnWaitMs on), each kUnitClear over the ground at least.
 constexpr int kMaxUnits=16,kSpawnPerFrame=3;
 constexpr float kSpawnClear=30.0f,kUnitClear=15.0f;
 constexpr ULONGLONG kSpawnWaitMs=4000;
+// The swarm takes at most kSwarmEntries of the jets' table (kMaxJets): the friends' jets and drones keep the rest.
+// A core that could not bring its drones (the table full) tries again kRetryMs on.
+constexpr int kSwarmEntries=kMaxJets-16;
+constexpr ULONGLONG kRetryMs=5000;
 // The formation: slots (right, up, forward) m in the core's heading, filled in this order. A flying wing: the
 // core in its middle (41.5 m across, its box 20.75 m out to each side, z -17.3..7), the drones (9.4 m) 12 m apart
 // at least, none inside the core's box.
@@ -58,9 +66,13 @@ constexpr float kMaxPitch=0.8f,kChest=1.2f,kAimReach=1.4f,kFireCone=0.09f,kAimGa
 constexpr float kUnitReach=400.0f,kCoreReach=580.0f;   // pylib/vcobjects.py SWARM_GUN_FILES: 6x70, 5x120 m
 constexpr ULONGLONG kBurstOnMs=1600,kBurstMs=4000,kSlotPhaseMs=733;
 // A wreck: it speeds up at kWreckAccel to kWreckSpeed (a drone's, the core's), tumbling; its charge goes off
-// within kWreckTrigger of its mark, kWreckGround over the ground, blocked, or kWreckMaxMs on.
-constexpr float kWreckSpeed[2]={55.0f,40.0f},kWreckAccel=35.0f,kWreckTrigger[2]={6.0f,12.0f},kWreckGround[2]={3.0f,8.0f};
-constexpr ULONGLONG kWreckMaxMs=12000,kLogMs=2000;
+// within kWreckTrigger of its mark, kWreckGround over the ground (its box's widest half and a margin: a body
+// resting on its side has its origin that high: drone 4.7 m, core 20.75 m out, 10.9 m under its origin), stopped
+// (its real speed under kWreckStuck of what it is told for kWreckStuckMs, whichever way it is held), or
+// kWreckMaxMs on.
+constexpr float kWreckSpeed[2]={55.0f,40.0f},kWreckAccel=35.0f,kWreckTrigger[2]={8.0f,16.0f},kWreckGround[2]={6.0f,14.0f};
+constexpr float kWreckStuck=0.3f;
+constexpr ULONGLONG kWreckMaxMs=12000,kWreckStuckMs=400,kWreckSettleMs=800,kLogMs=2000;
 
 bool IsCore(const Jet& j) noexcept { return j.role==Role::swarmCore; }
 int Big(const Jet& j) noexcept { return IsCore(j) ? 1 : 0; }
@@ -113,7 +125,6 @@ void Init(Jet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     SwarmTeam(v);
     const float scale=Cfg().swarmHpScale,max=At<float>(v,kHpMax)*scale;
     if(max>kFloorHp*2.0f){Put<float>(v,kHpMax,max);Put<float>(v,kHp,max);}
-    Put<float>(v,kHpFloor,kFloorHp);
     j.mode=Mode::patrol;
     if(IsCore(j)) {
         JoinFlight(j,NewFlight());
@@ -125,10 +136,17 @@ void Init(Jet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     Publish(true);
 }
 
-// A core brings its drones: at most kSpawnPerFrame this frame, until SwarmUnits are out (or none can come).
+int SwarmEntries() noexcept {
+    int n=0;
+    for(const auto& o:jets)if(o.ref && IsSwarm(o))++n;
+    return n;
+}
+
+// A core brings its drones: at most kSpawnPerFrame this frame, until SwarmUnits are out (none at all without the
+// drone body; with the table full, again kRetryMs on).
 void Spawn(Jet& c,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     const int want=Cfg().swarmUnits<kMaxUnits ? Cfg().swarmUnits : kMaxUnits;
-    if(c.swarm.noUnits || c.swarm.spawned>=want)return;
+    if(c.swarm.noUnits || c.swarm.spawned>=want || ms<c.swarm.retryAt)return;
     const float clear=GroundClearance(pos);
     if(clear!=kNoGround && clear<kSpawnClear && ms-c.bornAt<kSpawnWaitMs)return;
     if(!SpawnReady() || !Preloaded(Body::swarmUnit)) {
@@ -139,7 +157,12 @@ void Spawn(Jet& c,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept
     float fwd[3];
     Heading(v,fwd);
     for(int n=0;n<kSpawnPerFrame && c.swarm.spawned<want;++n) {
-        if(!SlotFree()){c.swarm.noUnits=true;Log("SWARM core %p: the jet table is full: %d drones",v,c.swarm.spawned);return;}
+        if(SwarmEntries()>=kSwarmEntries || !SlotFree()) {
+            c.swarm.retryAt=ms+kRetryMs;
+            Log("SWARM core %p: no room in the jet table (%d swarm entries): %d drones so far, again in %llu ms",v,SwarmEntries(),
+                c.swarm.spawned,kRetryMs);
+            return;
+        }
         const int s=c.swarm.spawned++;
         float at[3];
         SlotAt(pos,fwd,s,at);
@@ -154,11 +177,11 @@ void Spawn(Jet& c,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept
             Log("SWARM core %p: drone %d not made: no more",v,s);
             return;
         }
-        SwarmTeam(u);   // an enemy from its first frame on (SpawnJet's RideAi seated a friend)
         d->swarm.core=c.ref.ctrl;d->swarm.slot=s;
         std::memcpy(d->anchor,at,12);
         std::memcpy(d->m.vel,c.m.vel,12);
         JoinFlight(*d,c.flight);
+        Init(*d,u,at,ms);   // an enemy from now on (SpawnJet's RideAi seated a friend), its HP scaled
         Log("SWARM core %p: drone %d v=%p at (%.0f,%.0f,%.0f)",v,s,u,at[0],at[1],at[2]);
     }
     Publish(true);
@@ -276,7 +299,6 @@ void Wreck(Jet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
         const float clear=GroundClearance(pos);
         j.swarm.aimAt[1]-=clear!=kNoGround && clear>0.0f ? clear : 50.0f;
     }
-    Put<float>(v,kHpFloor,0.0f);
     const float max=At<float>(v,kHpMax),hp=max*kWreckHpShare;
     Put<float>(v,kHp,hp>kFloorHp ? hp : kFloorHp);
     // A tumble of its own (a pseudo-random sign and rate per body).
@@ -294,8 +316,13 @@ void WreckFly(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     const bool walled=Sense(j,pos,ms);
     float to[3]={j.swarm.aimAt[0]-pos[0],j.swarm.aimAt[1]-pos[1],j.swarm.aimAt[2]-pos[2]};
     const float d=Len(to),clear=GroundClearance(pos);
+    // Stopped: held by the ground, a roof or a wall whichever way (Sense's slide misses a body held from below).
+    const bool slow=ms-j.swarm.wreckAt>kWreckSettleMs && j.m.real<Len(j.m.vel)*kWreckStuck;
+    if(!slow)j.swarm.slowSince=0;
+    else if(!j.swarm.slowSince)j.swarm.slowSince=ms;
+    const bool stuck=slow && ms-j.swarm.slowSince>=kWreckStuckMs;
     const char* why=d<kWreckTrigger[b] ? "on its mark" : clear!=kNoGround && clear<kWreckGround[b] ? "the ground" :
-                    walled ? "blocked" : ms-j.swarm.wreckAt>kWreckMaxMs ? "time" : nullptr;
+                    walled ? "blocked" : stuck ? "stopped" : ms-j.swarm.wreckAt>kWreckMaxMs ? "time" : nullptr;
     if(why) {
         Log("SWARM v=%p %s wreck bursts (%s), %.0f m from its mark",v,KindOf(j).name,why,d);
         Detonate(j,nullptr,d,ms);
@@ -319,6 +346,23 @@ void SwarmTeam(unsigned char* v) noexcept {
     if(!OnEnemySide(v))SetObjectTeam(v,kTeamEnemy);
 }
 
+}  // namespace jet
+
+// Its damage message (body506's hook, before the stock handler): while the plugin flies it (and it is no wreck yet)
+// the HP floor is kFloorHp for this message only, so a killing hit leaves it at the floor (see the file's head).
+bool SwarmMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept {
+    (void)data;
+    if(msg!=kMsgDamage || !Cfg().enabled || !Cfg().jetPilot || !Cfg().swarm || v[kDead])return false;
+    const jet::Jet* const j=jet::FindJet(v);
+    if(!j || !jet::IsSwarm(*j) || !j->swarm.init || j->swarm.wreck || j->drone.blastAt || j->reap ||
+       GameMs()-j->seen>jet::kFlownMs)return false;
+    float* const floor=reinterpret_cast<float*>(v+jet::kHpFloor);
+    restore->at=floor;restore->was=*floor;
+    *floor=jet::kFloorHp;
+    return false;
+}
+
+namespace jet {
 void SwarmFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
     if(!Cfg().swarm) {
         if(!j.reap){j.reap=true;j.why="Swarm off";}
@@ -329,9 +373,8 @@ void SwarmFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) 
     else SwarmTeam(v);
     j.m.ready=true;
     if(j.swarm.wreck){WreckFly(j,v,pos,dt,ms);return;}
-    // Shot down to its floor (or the floor lost: whatever set it, it is set again).
+    // Shot down to the floor its damage was held at (SwarmMessage).
     if(At<float>(v,kHp)<=kFloorHp+0.01f){Wreck(j,v,pos,ms);WreckFly(j,v,pos,dt,ms);return;}
-    Put<float>(v,kHpFloor,kFloorHp);
 
     const Kind& k=KindOf(j);
     float aim[3];

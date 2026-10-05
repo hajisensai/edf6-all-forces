@@ -320,6 +320,8 @@ struct SwarmState {
     bool wreck;              // shot down: diving at aimAt
     float aimAt[3],spin[3];
     ULONGLONG wreckAt;
+    ULONGLONG slowSince;     // a wreck: game ms it began to move much slower than told (0: not)
+    ULONGLONG retryAt;       // a core: game ms it may try to bring drones again (the table was full)
     ULONGLONG fireLogAt;
 };
 // The bomb bay of a jet that takes over a bomber (jet_bay.cpp).

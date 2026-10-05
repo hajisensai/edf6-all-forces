@@ -76,7 +76,10 @@ void DropRef(const ObjRef& r) noexcept {
 void Release(Jet& j) noexcept {
     BayFree(j.bay.ifc);
     DollFree(IndexOf(j));
-    for(auto& d:jets)if(d.ref && d.drone.mother==j.ref.ctrl)d.drone.mother=nullptr;
+    for(auto& d:jets) {
+        if(d.ref && d.drone.mother==j.ref.ctrl)d.drone.mother=nullptr;
+        if(d.ref && d.swarm.core==j.ref.ctrl)d.swarm.core=nullptr;   // its swarm's drones: scattered
+    }
     DropRef(j.ref);
     j=Jet{};
 }
@@ -192,8 +195,9 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
         return;
     case Weapon::shells:
     case Weapon::drones:
-    case Weapon::swarm:   // flown by SwarmFrame, never here
         Circle(j,pos,anchor,height,ms,want,speed);
+        return;
+    case Weapon::swarm:   // flown by SwarmFrame, never here (its kind has no patrol circle)
         return;
     }
 }

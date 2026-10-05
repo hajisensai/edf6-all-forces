@@ -142,8 +142,12 @@ ENEMIES: list[tuple[str, str, bool]] = [
 # turns it to the enemy's side and brings its drones). Its SGOs are the installer's (tools/make_jets.py), which
 # the range only uses (SWARM_FILES). per_wave cores (at most SWARM_PER_WAVE) come once no enemy is left, at most
 # SWARM_MAX in all: without the plugin they stay friends and would pile up.
-SWARM_FILES = ('OBJECT/EDF6VC_SWARM_CORE.SGO', 'OBJECT/EDF6VC_SWARM_UNIT.SGO')
+SWARM_FILES = ('OBJECT/EDF6VC_SWARM_CORE.SGO', 'OBJECT/EDF6VC_SWARM_UNIT.SGO', 'OBJECT/EDF6VC_SWARM_CORE.MRAB',
+               'OBJECT/EDF6VC_SWARM_UNIT.MRAB', 'WEAPON/EDF6VC_SWARM_GUN.SGO', 'WEAPON/EDF6VC_SWARM_CANNON.SGO',
+               'WEAPON/EDF6VC_SWARM_CHARGE_S.SGO', 'WEAPON/EDF6VC_SWARM_CHARGE_L.SGO')
 SWARM_PER_WAVE, SWARM_MAX = 3, 12
+# The cores come out this far over their (ground) spots: the core's box reaches 10.9 m under its origin.
+SWARM_RAISE = 40.0
 # The targets (enemy TARGET): groups of per_wave on the target spots (target_spots), every other spot raised
 # TARGET_AIR m (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. One
 # target a raised spot stayed up there on 2026-10-03 (EDF6VehicleCrew.log: its jets' targets marked (air)).
@@ -545,6 +549,8 @@ def install(game_root: str, plan: Plan) -> list[str]:
     placed = [(s, npc, p) for s, npc, p in spots_for(plan, layout(rmpa.points(points_file), small_count(plan)))]
     if plan.waves.enabled and plan.waves.enemy == TARGET:
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
+    if plan.waves.enabled and plan.waves.enemy == SWARM:
+        points_file = rmpa.raised(points_file, {p.name for p in lay.enemy_points}, SWARM_RAISE)
     swarm = plan.waves.enabled and plan.waves.enemy == SWARM
     if swarm and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in SWARM_FILES):
         raise RuntimeError('没有星导者群体合体机的机体（Mods/OBJECT/EDF6VC_SWARM_*.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
