@@ -10,6 +10,10 @@ namespace edf {
 // AmmoSpeed (m/frame), AmmoAlive (frames), AmmoGravityFactor.
 constexpr std::size_t kWeaponMark=0x6B4,kWeaponAccuracy=0x378,kWeaponAccuracyScale=0xE14;
 constexpr std::size_t kWeaponAmmoSpeed=0x894,kWeaponAmmoAlive=0x898,kWeaponAmmoGravity=0x8E0;
+// AmmoOwnerMove (float, filled at 0x68C59A) and the shooter's velocity (m/s, hkVector4: the holder update 0x633DD0
+// copies it in each frame, 0x633E50). 0x691FA0 hands a round velocity x AmmoOwnerMove / 60 (m/frame) on top of its
+// direction x AmmoSpeed (docs/stores-re.md, autoturret/docs/re-notes.md "Rounds in flight").
+constexpr std::size_t kWeaponAmmoOwnerMove=0x24C,kWeaponOwnerVel=0x190;
 // The mod's marks in LockonTargetType (tools/build.py MARK_*, tools/make_*.py): the only stock reader of the field is
 // the lock query (0x696792), which a range-0, type-0 gun never makes, so a mark changes nothing in the stock game.
 // kMarkAir: an anti-air gun (EDF6AutoTurret: air targets first, fused rounds). kMarkGround: a ground-attack gun (ground

@@ -40,3 +40,14 @@
    - 没有改喷气机机炮的 SGO（`custom_parameter[0]` 写 0 可以让瞄准线根本不建出来，但那样 `PlayerJetGunSight=0` 也没法
      恢复，而且只管得了 `EDF6VC_JET_GUN_*`，管不了玩家以后开的其它插件飞机的武器）。运行时这条对任何武器的瞄准线都有效，
      已装的旧武器文件也不用重装。
+6. 原版直升机（2026-10-05 用户要求「直升机瞄具也换成我们的」）：玩家驾驶或坐炮位的原版直升机（`heli.cpp` `IsHelicopter`，且
+   `BodyOf == none`，即不是插件的机体：`helisight.cpp` `PlayerHeliOwnSight`），ini `PlayerHeliGunSight=1`（默认）时，玩家座位的
+   瞄准线同样记下段数并写 0，HUD 改画插件的瞄准具（`docs/hud-re.md` §6）。座位的处理整理成三种（`crew.cpp` `Want`）：
+   - 隐藏：NPC 坐的座位；NPC 驾驶时的空座位；玩家坐、且这架有自己的瞄准具（插件飞机 `PlayerJetOwnSight` 或原版直升机
+     `PlayerHeliOwnSight`）。
+   - 恢复（先 `EnsurePoints` 再写回段数）：玩家坐、且没有自己的瞄准具——包括 ini 改成 0 后的下一帧。
+   - 不动：没人驾驶的载具上的空座位（玩家下机后，这个座位的红线保持隐藏，没人看得见；玩家再坐上来时按上面两条处理）、
+     远程玩家（`Rider::other`）。这和以前完全一样，只是把原来的「改写 rider 再判断」拆成了显式的三种结果。
+   - 瞄准具只认「线现在被隐藏」的炮（`crew.cpp` `HiddenAimGuns`：座位武器里有 `WeaponAimLine` 且段数为 0），所以输入钩子里
+     `HeliSightFrame` 排在 `AimLines` 之后（`tools/selftest.py` `heli_sight_after_aim_lines` 检查顺序）。原版就没有红线的炮
+     （`V_409HELI_GATLING01` 的 `custom_parameter` 为空）没有可替换的东西，不画瞄准具。

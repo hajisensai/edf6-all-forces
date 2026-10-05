@@ -91,7 +91,7 @@ Work work[kEntries]{};
 // waits in `middle` (its index, kFresh while the draw has not taken it).
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue;
-                  bool launcher; LauncherReadout launch; };
+                  bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -774,6 +774,25 @@ void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,fl
     Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,L"VS %+d",static_cast<int>(std::lround(j.climb)));
 }
 
+// The boresight: a cross with a gap at its centre on the direction `dir` (where it vanishes: the guns' line, far).
+void Boresight(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* dir) noexcept {
+    const float t=2.0f*s,r=10.0f*s,g=3.0f*s;
+    float x,y;
+    if(!sight::ToScreen(vp,dir,0.0f,width,height,&x,&y))return;
+    Seg(drawer,ctx,x-r,y,x-g,y,t,kHud);Seg(drawer,ctx,x+g,y,x+r,y,t,kHud);
+    Seg(drawer,ctx,x,y-r,x,y-g,t,kHud);Seg(drawer,ctx,x,y+g,x,y+r,t,kHud);
+}
+// The pipper: a circle of radius kPipper with a dot in it at the point `at`, its screen point in (x, y); false off
+// the screen.
+constexpr float kPipper=18.0f;
+bool Pipper(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* at,const float* rgba,float* x,
+            float* y) noexcept {
+    if(!sight::ToScreen(vp,at,1.0f,width,height,x,y))return false;
+    Arc(drawer,ctx,*x,*y,kPipper*s,0.0f,kTurn,2.0f*s,16,rgba);
+    Rect(drawer,ctx,*x-1.5f*s,*y-1.5f*s,*x+1.5f*s,*y+1.5f*s,rgba);
+    return true;
+}
+
 // The guns' sight: a cross on the boresight (where the nose points: the guns' line), the pipper (a circle, a dot in it)
 // where the rounds fired now will be at the target's range (else at the sight's own), the target's lead mark (a cross
 // in a circle, dim out of the rounds' reach) and the range as an arc round the pipper (from its top, the share of the
@@ -782,20 +801,11 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
     if(!y.gun)return;
     const float t=2.0f*s;
     float x,yy;
-    if(sight::ToScreen(vp,y.nose,0.0f,width,height,&x,&yy)) {
-        const float r=10.0f*s,g=3.0f*s;
-        Seg(drawer,ctx,x-r,yy,x-g,yy,t,kHud);Seg(drawer,ctx,x+g,yy,x+r,yy,t,kHud);
-        Seg(drawer,ctx,x,yy-r,x,yy-g,t,kHud);Seg(drawer,ctx,x,yy+g,x,yy+r,t,kHud);
-    }
-    if(sight::ToScreen(vp,y.pipper,1.0f,width,height,&x,&yy)) {
-        const float r=18.0f*s;
-        Arc(drawer,ctx,x,yy,r,0.0f,kTurn,t,16,kHud);
-        Rect(drawer,ctx,x-1.5f*s,yy-1.5f*s,x+1.5f*s,yy+1.5f*s,kHud);
-        if(y.lead && y.gunRange>0.0f) {
-            const float share=vec::Clamp(y.leadRange/y.gunRange,0.0f,1.0f);
-            const int sides=static_cast<int>(std::ceil(share*24.0f));
-            if(sides>0)Arc(drawer,ctx,x,yy,r+5.0f*s,-0.25f*kTurn,share*kTurn,3.0f*s,sides,y.leadInRange ? kHud : kHudDim);
-        }
+    Boresight(drawer,ctx,vp,width,height,s,y.nose);
+    if(Pipper(drawer,ctx,vp,width,height,s,y.pipper,kHud,&x,&yy) && y.lead && y.gunRange>0.0f) {
+        const float share=vec::Clamp(y.leadRange/y.gunRange,0.0f,1.0f);
+        const int sides=static_cast<int>(std::ceil(share*24.0f));
+        if(sides>0)Arc(drawer,ctx,x,yy,(kPipper+5.0f)*s,-0.25f*kTurn,share*kTurn,3.0f*s,sides,y.leadInRange ? kHud : kHudDim);
     }
     if(y.lead && sight::ToScreen(vp,y.leadAt,1.0f,width,height,&x,&yy)) {
         const float r=7.0f*s;
@@ -803,6 +813,18 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
         Arc(drawer,ctx,x,yy,r,0.0f,kTurn,t,10,c);
         Seg(drawer,ctx,x-r,yy-r,x+r,yy+r,t,c);Seg(drawer,ctx,x-r,yy+r,x+r,yy-r,t,c);
     }
+}
+
+// A stock helicopter's gun sight (helisight.cpp; ini PlayerHeliGunSight): the jet sight's boresight and pipper, the
+// pipper where a round fired now first hits the ground (dim: none in its life, it is where the round ends), its
+// distance in metres to its right.
+void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliSightReadout& h,
+                  Line* lines,int* at) noexcept {
+    const float* c=h.hit ? kHud : kHudDim;
+    float x,y;
+    Boresight(drawer,ctx,vp,width,height,s,h.bore);
+    if(Pipper(drawer,ctx,vp,width,height,s,h.pipper,c,&x,&y))
+        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,kLineScale*0.85f,c,L"%d m",static_cast<int>(std::lround(h.range)));
 }
 
 // The threats (the user, 2026-10-05: "locked on, it should show the direction"): round the screen's middle a faint
@@ -1056,6 +1078,7 @@ void HudPublish() noexcept {
     s.heli=PlayerHeliCue(&s.heliCue);
     s.drill=PlayerDrillCue(&s.drillCue);
     s.launcher=PlayerLauncher(&s.launch);
+    s.heliSight=PlayerHeliSight(&s.heliAim);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1109,6 +1132,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
