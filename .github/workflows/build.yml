@@ -35,6 +35,12 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Python packages
+        shell: pwsh
+        # numpy: the big map's seams (pylib/seams.py, hkcms.py; tools/make_bigmap.py) and their self-tests; the
+        # installer exe bundles it too.
+        run: python -m pip install --disable-pip-version-check numpy
+
       - name: Build plugins
         shell: cmd
         run: call build.cmd
