@@ -414,6 +414,38 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     return nullptr;
 }
 
+// The boarding point as the game reads it (debug; docs/player-jet-re.md §12): once per jet the player may board,
+// when the player on foot first comes within kDoorLogRange of it, seat 0's riding point and stock reach (heli.cpp
+// SeatPoint, CanRideSeat's own reading) from its position (its collision box's centre) in its own frame, where the
+// player stands in that frame, their distance to the point and the stock prompt's answer. pylib/vcobjects.py
+// move_door puts the point on the ground beside the box; its y says whether `mdl` carries the grounding's lift there.
+constexpr float kDoorLogRange=40.0f;
+constexpr int kDoorLogged=64;
+const void* doorLogged[kDoorLogged]{};
+int doorLoggedNext=0;
+
+void ToFrame(const unsigned char* v,const float* world,float* out) noexcept {
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const float d[3]={world[0]-p[0],world[1]-p[1],world[2]-p[2]};
+    for(int r=0;r<3;++r)out[r]=d[0]*m[r*4]+d[1]*m[r*4+1]+d[2]*m[r*4+2];
+}
+
+void DoorLog(const unsigned char* v,const unsigned char* human,bool prompt) noexcept {
+    for(const void* p:doorLogged)if(p==v)return;
+    const float* hp=reinterpret_cast<const float*>(human+kPosition);
+    float who[3],door[3],at[3],reach=0.0f;
+    ToFrame(v,hp,who);
+    if(who[0]*who[0]+who[1]*who[1]+who[2]*who[2]>kDoorLogRange*kDoorLogRange)return;
+    if(!SeatPoint(v,0,at,&reach))return;
+    doorLogged[doorLoggedNext++%kDoorLogged]=v;
+    ToFrame(v,at,door);
+    const float g[3]={hp[0]-at[0],hp[1]-at[1],hp[2]-at[2]};
+    Log("DOOR v=%p seat 0's door at (%.2f,%.2f,%.2f) from its centre (its frame), reach %.2f m; the player at "
+        "(%.2f,%.2f,%.2f), %.2f m from the door; the stock prompt %s",v,door[0],door[1],door[2],reach,who[0],who[1],
+        who[2],std::sqrt(g[0]*g[0]+g[1]*g[1]+g[2]*g[2]),prompt ? "shows" : "does not show");
+}
+
 // The on-foot ride prompt, once per object per frame for every human on foot.
 void __fastcall PromptHook(void* functor,void* object) {
     originalPrompt(functor,object);
@@ -424,6 +456,8 @@ void __fastcall PromptHook(void* functor,void* object) {
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
         EnsureInputs();    // first mission frame: every plugin has loaded by now
+        if(Cfg().debug && IsJet(object) && PlayerJetBoardable(object))
+            DoorLog(static_cast<const unsigned char*>(object),human,f[kFunctorResult]!=0);
         if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || (IsJet(object) && !PlayerJetBoardable(object)) ||
            IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
@@ -752,5 +786,6 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
 void ResetCrew() noexcept {
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
+    for(auto& p:doorLogged)p=nullptr;
 }
 }  // namespace crew

@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import dsgo
 import sgo
@@ -36,6 +36,11 @@ class Jet:
     # `camera` replaces game_object_camera_setting's offset (the stock heli's (0, 5.5, -11.5) is inside a jet).
     player: bool = False
     camera: tuple[float, float, float] | None = None
+    # A parked one (testrange/gen.py BOARDABLE_PARKED): an NPC kind (its mark, model and arms) placed empty on the ground
+    # for the player to fly, so built like a player jet where the player meets it: the whole model's box (a fuselage box
+    # is walked through, wings and all: 「飞机缺少实体」, 2026-10-05) and a seat every class may take. Its NPC-flown
+    # twin keeps the fuselage box (jet_sgo).
+    parked: bool = False
     # The stock heli SGO it is made from (its body, rigid body, crash and weapons): every jet is a V506.
     stock: str = 'V506_HELI'
     # mission_setup[0]: the vehicle's tier, the two multipliers the game's vehicle requests scale a vehicle by (its
@@ -363,6 +368,20 @@ JETS: dict[str, Jet] = {
                                        'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', player=True, camera=(0.0, 6.0, -24.0)),
     'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _STRIKE, player=True, camera=(0.0, 8.0, -32.0)),
 }
+# The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
+# (Jet.parked), named after it: edf6tr_jet_<kind>_parked_mission. Same mark, model and arms: the plugin tells them
+# apart from nothing (src/playerjet_kinds.h kBoardable goes by the mark).
+PARKED_KINDS = ('edf6tr_jet_fighter_mission', 'edf6tr_jet_interceptor_mission', 'edf6tr_jet_strike_mission',
+                'edf6tr_jet_multirole_mission', 'edf6tr_jet_carrier_mission', 'edf6tr_jet_blast_carrier_mission',
+                'edf6tr_jet_doll_carrier_mission')
+
+
+def parked_name(kind: str) -> str:
+    """The parked twin's SGO name of the NPC jet `kind` (PARKED_KINDS)."""
+    return kind.removesuffix('_mission') + '_parked_mission'
+
+
+JETS.update({parked_name(k): replace(JETS[k], parked=True) for k in PARKED_KINDS})
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
 JET_ELEVON_FILE = 'EDF6VC_JET.MRAB'
@@ -391,6 +410,106 @@ def on_origin(box) -> list[list[float]]:
     if bottom >= 0.0:
         return [list(box[0]), list(box[1])]
     return [[cx, top / 2.0, cz], [hx, top / 2.0, hz]]
+
+
+# The boarding point (docs/player-jet-re.md §12). A seat's door is the MAB locator its vehicle_riding_position entry
+# names first ([0], seat +0x1E0); CanRideSeat (0x6346D0) lets a human board when their position is within the locator's
+# radius (record +0x10) plus DOOR_SLACK (the float at EDF+0x1C36990) of it (docs/rescue-re.md). The V506's door
+# (「搭乗口１」) is (2.15, 0, 1.8) on `mdl`, radius 1.8: at the ground, 0.65 m inside the stock heli's box side (2.8 m) --
+# a human against the hull is in reach. On a jet the same point is under the middle of the plane: the parked carrier's
+# was 4.9 m in from its fuselage box's side at the ground (no prompt anywhere round it: 「空母缺少登机口」, 2026-10-05),
+# a player jet's 10 m in from its whole-model box. move_door puts it where the stock heli has its own: on the ground,
+# DOOR_OUT m outside the box's right side (+x, the V506's side), at the stock door's z (within the box's length).
+# `mdl` is bound `lift` m over the model's origin on a grounded model (pylib/jet_models.py root_lift); whether the
+# game's root record carries that lift is not settled (the mesh bone as drawn is at the origin, booster.cpp ModelBone;
+# the root's own record was seen with no frame): the door is at the origin's height on `mdl`, so it is at the ground or
+# `lift` over it, and its radius makes either reachable from DOOR_STEP m across the ground, from the human's feet or
+# HUMAN_HEIGHT over them (which of the two its position is, is not settled either). The stock radius is never cut.
+DOOR_SLACK = 0.5      # EDF.dll 0x1C36990
+DOOR_OUT = 0.6        # m: outside the box's side, where a human standing against it is
+DOOR_STEP = 1.0       # m: across the ground from the door point, still in reach
+HUMAN_HEIGHT = 1.0    # m: a human's position is at its feet or up to this over them
+DOOR_MARGIN = 0.05    # m: of reach to spare
+
+
+class DoorError(Exception):
+    """A jet's boarding point is not where move_door puts it (check_door)."""
+
+
+def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
+    """(offset of the local vec4, offset of the radius) of locator `name` in the MAB block `mab` (an SGO's
+    animation_model[2]). The block: b'MAB\\0'; u32 at 0x14 the record table, its records from +0x20 to the u32 at 0x18,
+    0x20 bytes each (i32 +0 its name, +4 its parent bone's name: UTF-16, from the record; +0xC its vec4, from the record;
+    float +0x10 its radius); the vec4s between the u32s at 0x1C and 0x20 (EDF.dll 0x6BADD0, 0x6BB420). ValueError
+    unless exactly one record is named so and its vec4 is a point (w 1) in that area."""
+    if mab[:4] != b'MAB\0':
+        raise ValueError('不是 MAB 块')
+    table, end, vecs, strings = struct.unpack_from('<4I', mab, 0x14)
+    want = name.encode('utf-16le') + b'\0\0'
+    hits = [r for r in range(table + 0x20, end, 0x20)
+            if mab[r + struct.unpack_from('<i', mab, r)[0]:][:len(want)] == want]
+    if len(hits) != 1:
+        raise ValueError(f'MAB 里叫 {name!r} 的定位点有 {len(hits)} 个')
+    r = hits[0]
+    vec = r + struct.unpack_from('<i', mab, r + 0xC)[0]
+    if not (vecs <= vec and vec + 16 <= strings and struct.unpack_from('<f', mab, vec + 12)[0] == 1.0):
+        raise ValueError(f'定位点 {name!r} 的坐标不在 MAB 的坐标区')
+    return vec, r + 0x10
+
+
+def door_point(box, lift: float, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
+    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents],
+    on its origin) whose `mdl` is bound `lift` m up; `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
+    (cx, _cy, cz), (hx, _hy, hz) = box
+    z = min(max(stock[2], cz - hz), cz + hz)
+    rise = max(lift, HUMAN_HEIGHT)   # the most the door can be over (or under) the human's position
+    need = (rise * rise + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
+    return [round(cx + hx + DOOR_OUT, 3), 0.0, round(z, 3)], round(max(radius, need), 3)
+
+
+def door_name(m: dict) -> str:
+    """The door locator's name of seat 0 (vehicle_riding_position[0][0])."""
+    seats = m.get('vehicle_riding_position')
+    if not (isinstance(seats, list) and seats and isinstance(seats[0], list) and isinstance(seats[0][0], str)):
+        raise ValueError('没有 vehicle_riding_position')
+    return seats[0][0]
+
+
+def move_door(m: dict, box, lift: float) -> None:
+    """`m` (a jet SGO's values) with its door (seat 0's: every seat of a jet shares it, make_jets.with_gunner_seat)
+    moved to door_point."""
+    mab = bytearray(m['animation_model'][2])
+    vec, rad = mab_locator(bytes(mab), door_name(m))
+    stock = struct.unpack_from('<3f', mab, vec)
+    at, radius = door_point(box, lift, stock, struct.unpack_from('<f', mab, rad)[0])
+    struct.pack_into('<3f', mab, vec, *at)
+    struct.pack_into('<f', mab, rad, radius)
+    m['animation_model'][2] = bytes(mab)
+
+
+def check_door(data: bytes, lift: float) -> None:
+    """Re-read a jet SGO and raise DoorError unless its door is on the ground (y 0 on `mdl`), outside its collision
+    box (heli_rigid_body) across its right side by DOOR_OUT, within its length, and a human standing DOOR_STEP m from it
+    (its position at its feet or HUMAN_HEIGHT over them) is in reach whether or not `mdl` carries its `lift`."""
+    _, m = sgo.read(data)
+    mab = m['animation_model'][2]
+    name = door_name(m)
+    vec, rad = mab_locator(mab, name)
+    x, y, z = struct.unpack_from('<3f', mab, vec)
+    reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
+    (cx, cy, cz), (hx, hy, hz) = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
+    if cy - hy < -1e-3:
+        raise DoorError(f'碰撞箱伸到原点下面（{cy - hy:.2f}）')
+    if abs(y) > 1e-4 or x < cx + hx + DOOR_OUT - 1e-3 or not cz - hz - 1e-3 <= z <= cz + hz + 1e-3:
+        raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱右侧外 {DOOR_OUT} m 的地面上')
+    worst = max(((DOOR_STEP ** 2 + (door - feet) ** 2) ** 0.5 for door in (0.0, lift) for feet in (0.0, HUMAN_HEIGHT)))
+    if worst > reach:
+        raise DoorError(f'站在上车点旁 {DOOR_STEP} m 的地面上够不着（要 {worst:.2f} m，能 {reach:.2f} m）')
+
+
+def _value(v) -> float:
+    """An SGO number node's value (sgo.Float keeps its bytes)."""
+    return v.value if isinstance(v, sgo.Float) else float(v)
 
 
 def _rebone(v, names: set[str], to: str = JET_ROOT_BONE):
@@ -447,9 +566,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         model, body, rigid = list(jet.model), jet.body, [list(x) for x in jet.rigid] if jet.rigid else None
         anchor = jet.anchor
     import jet_models
-    if jet.player:
+    if jet.player or jet.parked:
         # The player sees the whole plane: its box is the model's (wings, nose and tail), measured, not a fuselage
-        # box (an NPC jet's is the fuselage: a formation's wings would catch on each other).
+        # box (an NPC jet's is the fuselage: a formation's wings would catch on each other, low passes scrape; a
+        # carrier's drones leave and dock under its middle). A parked one is the player's to walk up to.
         rigid = jet_models.model_box(game, jet.file)
     elif jet.file in jet_models.MODELS:
         rigid = jet_models.fuselage_box(game, jet.file)   # off its model as made (grounded): never under its origin
@@ -468,14 +588,15 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     setup[3] = with_fuel([[w, stock[_STOCK_OF[w]][1]] if _STOCK_OF.get(w) in stock else stock.get(w, [w, [0.0001, 0.1]])
                           for w in jet.weapons], stock['app:/weapon/v_fuel01.sgo'])
     m['mission_setup'] = setup
-    if jet.player:
-        import copy
-        m['vehicle_setup'] = copy.deepcopy(setup)
+    if jet.player or jet.parked:
         # Every class flies it (the user, 2026-10-05: Wing Divers and Fencers too): the seat's class mask (R 1, WD 2,
         # F 4, AR 8; the 506's 9) to 15, and a driver's pose every class has (the stock gives 15 only to seats like
         # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9).
         seat = m['vehicle_riding_position'][0]
         seat[3], seat[4] = PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES
+    if jet.player:
+        import copy
+        m['vehicle_setup'] = copy.deepcopy(setup)
         cam = m['game_object_camera_setting']
         if jet.camera is not None:
             m['game_object_camera_setting'] = [cam[0], [float(x) for x in jet.camera]]
@@ -500,6 +621,9 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     rb = m['heli_rigid_body']
     box = on_origin(JET_RIGID_BODY if rigid is None else rigid)
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
+    lift = _root_lift(game, jet, model_ref)
+    if lift is not None:
+        move_door(m, box, lift)
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
     se = m.get('heli_se_table')
@@ -507,7 +631,22 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         raise ValueError('V506_HELI 的 heli_se_table 不是预期的样子')
     for i in JET_ROTOR_SE_ROWS:
         se[i] = JET_SILENT_SE
-    return sgo.write(version, m)
+    out = sgo.write(version, m)
+    if lift is not None:
+        check_door(out, lift)
+    return out
+
+
+def _root_lift(game: Game, jet: Jet, model: list[str] | None) -> float | None:
+    """How far `mdl` is bound over the origin of the model `jet` flies (`model`: its archive and file; None the stock
+    bomber): pylib/jet_models.py root_lift. None for a model another builder makes (the Primers' fighter, the submarine
+    carrier: not boarded on the ground), whose door stays the V506's."""
+    import jet_models
+    if jet.file in jet_models.MODELS:
+        return jet_models.root_lift(game, jet.file)
+    if jet.file is None:
+        return jet_models.root_lift(game, None) if model == JET_ELEVON_MODEL else 0.0   # a stock bomber: not grounded
+    return None
 
 
 def as_mission_sgo(data: bytes) -> bytes:

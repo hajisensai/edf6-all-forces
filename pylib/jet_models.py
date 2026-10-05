@@ -372,7 +372,19 @@ def model_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - ro
     return rigid_box(bind_positions(_model_of(game, file)), None)
 
 
+_MODELS_MADE: dict[tuple[int, str | None], Mdb] = {}
+
+
 def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
+    """The model `file` (as model_box) as it is made, made once per game reader (every jet SGO measures its box and
+    its door off it: vcobjects.jet_sgo). Callers only read it."""
+    key = (id(game), file)
+    if key not in _MODELS_MADE:
+        _MODELS_MADE[key] = _make_model_of(game, file)
+    return _MODELS_MADE[key]
+
+
+def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     if file is None:
         return elevon_model(game)
     if file in STOCK_BOMBERS:
@@ -490,13 +502,25 @@ def check_nozzles(game) -> None:  # noqa: ANN001 - rootcpk.Game
 def fuselage_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game
     """[centre, half extents] of a jet model's fuselage (the vertices within its Recipe.fuselage_x, all with none; the
     default model's within ELEVON_FUSELAGE_X): an NPC jet's collision box (vcobjects.jet_sgo), measured off the model
-    as it is made (grounded), so it never reaches under the origin."""
+    as it is made (grounded), so it never reaches under the origin. Its bottom is the model's lowest point (the origin:
+    what it stands on), wherever that is: the carrier's hull is 3.49 m over its landing pods (at |x| 11.5-12.7 m, out of
+    its 7.2 m fuselage), and a box of the hull alone stood it on its hull, the pods 3.49 m in the ground (2026-10-05)."""
     if file is None:
         fx = ELEVON_FUSELAGE_X
     else:
         r = MODELS[file]
         fx = None if r.fuselage_x is None else r.fuselage_x * r.scale
-    return rigid_box(bind_positions(_model_of(game, file)), fx)
+    pts = bind_positions(_model_of(game, file))
+    (cx, cy, cz), (hx, hy, hz) = rigid_box(pts, fx)
+    low = min(p[1] for p in pts)
+    top = cy + hy
+    return [[cx, round((low + top) / 2, 3), cz], [hx, round((top - low) / 2, 3), hz]]
+
+
+def root_lift(game, file: str | None) -> float:  # noqa: ANN001 - rootcpk.Game
+    """How far the model's root bone (`mdl`, the V506 locators' parent: vcobjects.JET_MAB_ROOT) is bound over its origin:
+    the grounding's lift (grounded), 0 for a model not grounded. `file` as model_box (None: the elevon bomber)."""
+    return round(bind_world(_model_of(game, file))[0][13], 4)
 
 
 # ------------------------------------------------------------------------------------------ checks

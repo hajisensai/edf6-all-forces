@@ -21,8 +21,8 @@ import jet_models  # noqa: E402
 import ledger  # noqa: E402
 import rmpa  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
-from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, Game, as_mission_sgo,  # noqa: E402,F401
-                       jet_guns, jet_sgo, object_dir, weapon_dir)
+from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
+                       as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
 MARKER = 'EDF6TestRange.txt'
@@ -95,6 +95,15 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_sub_carrier_mission', '航空潜舰（插件驾驶，原尺寸 1664 米，放在最远的点；测试场生成）'),
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
+    # The NPC kinds parked for the player (BOARDABLE_PARKED): each one's parked twin (vcobjects Jet.parked: the whole
+    # plane is solid, its boarding point at its side on the ground, every class may fly it).
+    (parked_name('edf6tr_jet_fighter_mission'), '制空战斗机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_interceptor_mission'), '截击机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_strike_mission'), '对地攻击机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_multirole_mission'), '多用途战斗机·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_carrier_mission'), '空中航母·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_blast_carrier_mission'), '自爆无人机母舰·停放（自己驾驶；测试场生成）'),
+    (parked_name('edf6tr_jet_doll_carrier_mission'), '人偶无人机母舰·停放（自己驾驶；测试场生成）'),
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
@@ -141,6 +150,7 @@ DERIVED: dict[str, str] = {
     'edf6tr_sub_carrier_mission': 'V506_HELI',
     'edf6tr_pjet_fighter_mission': 'V506_HELI',
     'edf6tr_pjet_strike_mission': 'V506_HELI',
+    **{parked_name(k): 'V506_HELI' for k in PARKED_KINDS},
     # Ground vehicles with no stock `_mission` SGO: the call-in one, vehicle_setup renamed (same layout).
     'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
     'edf6tr_vehicle502_groundrobo_mission': 'VEHICLE502_GROUNDROBO',
@@ -251,9 +261,10 @@ GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to 
 # parks one of each empty, on the ground for the player. An NPC-flown one is in the air at once (the user, 2026-10-05:
 # the air carrier, placed as an NPC-flown friend for them to fly, "flew straight off", 405 m off its spot chasing
 # targets): only H calls it down. (The bombers, the gunship and the drones have none: called or launched.)
-BOARDABLE_PARKED = ('edf6tr_jet_fighter_mission', 'edf6tr_jet_interceptor_mission', 'edf6tr_jet_strike_mission',
-                    'edf6tr_jet_multirole_mission', 'edf6tr_jet_carrier_mission', 'edf6tr_jet_blast_carrier_mission',
-                    'edf6tr_jet_doll_carrier_mission')
+# Each is its kind's parked twin (vcobjects PARKED_KINDS, Jet.parked): parked as the NPC SGO, its fuselage box let the
+# player walk through the wings and its door was under the middle of the plane (「飞机缺少实体」「空母缺少登机口」,
+# 2026-10-05); the NPC-flown ones keep their own SGO.
+BOARDABLE_PARKED = tuple(parked_name(k) for k in PARKED_KINDS)
 
 
 def grand_battle(plan: Plan) -> Plan:
@@ -289,7 +300,8 @@ def placements(plan: Plan) -> list[tuple[str, bool]]:
     """(sgo, NPC-driven) for every vehicle to place, empty ones first, the BIG ones last. A player jet
     (Jet.player) is always placed empty: it is the player's to fly, and an NPC in it would be flown as a heli."""
     chosen = ([(s, False) for s, n in plan.vehicles.items() for _ in range(max(0, n))] +
-              [(s, not (s in JETS and JETS[s].player)) for s, n in plan.friends.items() for _ in range(max(0, n))])
+              [(s, not (s in JETS and (JETS[s].player or JETS[s].parked))) for s, n in plan.friends.items()
+               for _ in range(max(0, n))])
     return [c for c in chosen if c[0] not in BIG] + [c for c in chosen if c[0] in BIG]
 
 
@@ -400,11 +412,20 @@ CARRIER_MODEL = 'EDF6VC_CARRIER.MRAB'
 CARRIER_RADIUS = 50.0
 
 
+# A jet in the elevon bomber (the strike jet's and the fighter's model, 24.8 m across, its nose 17.9 m ahead of its origin:
+# jet_models.model_box) reaches 21.7 m from its point whichever way it faces; a whole-model box (a player jet's, a
+# parked one's: vcobjects Jet.player / parked) that far out would lock with a neighbour's JET_GAP off.
+ELEVON_RADIUS = 22.0
+
+
 def footprint(sgo: str) -> float:
     """The radius (m) `sgo` keeps clear round its point (see SPOT)."""
-    if sgo in JETS and JETS[sgo].file == CARRIER_MODEL:
+    jet = JETS.get(sgo)
+    if jet and jet.file == CARRIER_MODEL:
         return CARRIER_RADIUS
-    return JET_GAP / 2 if sgo in JETS or sgo in WIDE else SPOT
+    if jet and jet.file is None and (jet.player or jet.parked):
+        return ELEVON_RADIUS
+    return JET_GAP / 2 if jet or sgo in WIDE else SPOT
 
 
 def _apart(a: rmpa.Point, b: rmpa.Point) -> float:
