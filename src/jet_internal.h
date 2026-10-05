@@ -525,6 +525,8 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
 void FarRender(Jet& j,unsigned char* v) noexcept;
 // jet.cpp: a jet the player flew or called down handed back to its NPC pilot (playerjet_board.inc), flying at `vel`.
 void ResumeNpc(unsigned char* v,const float* vel) noexcept;
+// jet.cpp: the entry of one of ours the player boarded, made now if a mission placed it empty (nullptr: none).
+Jet* Adopt(unsigned char* v) noexcept;
 bool SpawnReady() noexcept;
 bool InstallSpawn() noexcept;
 bool InstallFarRender() noexcept;

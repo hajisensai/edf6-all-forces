@@ -610,6 +610,61 @@ def every_npc_aircraft_boardable() -> None:
 
 
 @test
+def range_parks_every_boardable_aircraft_apart() -> None:
+    """The grand battle parks one of each of our aircraft the player boards that has a range SGO (testrange/gen.py
+    BOARDABLE_PARKED: every mark of src/playerjet_kinds.h kBoardable among pylib/vcobjects.py JETS) empty, none of them
+    NPC-flown (the air carrier, an NPC friend there, "flew straight off", 2026-10-05); and on a map of its own every
+    placement's footprint is clear of the others' and the player start's (the carrier is 59 x 77 m: 33 m from a jet it
+    began 11 m over its spot)."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import rmpa
+    from vcobjects import JETS
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    marks = {body: int(mark) for body, mark in
+             re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
+    boardable = {marks[b] for b in re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h'))}
+    assert len(boardable) >= 10, f'read {len(boardable)} boardable marks'
+    want = {name for name, jet in JETS.items() if int(jet.mark) in boardable and name.endswith('_mission')}
+    assert set(gen.BOARDABLE_PARKED) == want, f'BOARDABLE_PARKED {sorted(gen.BOARDABLE_PARKED)}, boardable {sorted(want)}'
+    plan = gen.grand_battle(gen.Plan())
+    empty = {s for s, npc in gen.placements(plan) if not npc}
+    flown = {s for s, npc in gen.placements(plan) if npc}
+    carrier = 'edf6tr_jet_carrier_mission'
+    carriers = {s for s in want if gen.footprint(s) == gen.footprint(carrier)}
+    # NPC-flown fighters fight the battle; a carrier is there for the player only.
+    assert want <= empty and len(carriers) == 3 and not carriers & flown, (sorted(want - empty), sorted(carriers & flown))
+    assert 2 * gen.footprint(carrier) >= (59.0 ** 2 + 77.0 ** 2) ** 0.5, 'the carrier footprint is under its size'
+    # A map of its own: the player start and a point every 25 m out to 1 km (the selftest runs without the game).
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
+    points += [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+               for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
+    lay = gen.layout(points, gen.small_count(plan))
+    taken = [(lay.player, gen.SPOT)]
+    for sgo, _npc, p in gen.spots_for(plan, lay):
+        r = gen.footprint(sgo)
+        assert gen.overlap(p, r, taken) == 0.0, f'{sgo} at {p.name} reaches {gen.overlap(p, r, taken):.1f} m into another'
+        taken.append((p, r))
+    # The fallback is the least overlap, never a silent pile-up: a crowd that cannot fit still spreads out.
+    crowd = gen.spaced([(carrier, False)] * 3, points[1:5], lay.player)
+    assert len(set(p.name for p in crowd)) == 3, crowd
+
+
+@test
+def boarding_an_empty_aircraft_makes_its_entry() -> None:
+    """One of our aircraft a mission placed empty has no src/jet.cpp entry (JetFrame makes it on an NPC pilot's first
+    frame): boarding it makes one (playerjet_board.inc Boarded: jet::Adopt), else a rotor craft never lifts (HoverStep
+    flies off the entry), a carrier has no drones and a jet left in the air goes back to an NPC in takeoff mode."""
+    board = src('src/playerjet_board.inc')
+    boarded = board.split('void Boarded(', 1)[1].split('\n}\n', 1)[0]
+    assert 'jet::Adopt(v)' in boarded and 'jet::FindJet' not in boarded, 'Boarded does not make the entry'
+    adopt = src('src/jet.cpp').split('jet::Jet* jet::Adopt(', 1)[1].split('\n}\n', 1)[0]
+    assert 'FindJet(v)' in adopt and 'CrewPlaced(' in adopt and 'jetPilot' in adopt, adopt
+    hover = board.split('void HoverStep(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!e){j.active=false;return;}' in hover, 'HoverStep no longer needs the entry: revisit jet::Adopt'
+
+
+@test
 def heli_sight_after_aim_lines() -> None:
     """The stock heli's gun sight (src/helisight.cpp) draws for the guns whose aim line AimLines hid this frame
     (HiddenAimGuns), so the input hook runs it after AimLines; AimLines hides the player's line for it

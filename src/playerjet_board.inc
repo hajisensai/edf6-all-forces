@@ -60,7 +60,8 @@ void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept {
     (void)pos;
     if(!j.board)return;
     j.hail=PJet::Hail{};j.keep=false;j.blastAt=0;j.orbiting=false;j.steered=false;
-    jet::Jet* const e=jet::FindJet(v);
+    // Its jet.cpp entry, made now for one a mission placed empty (jet::Adopt): the hover, the drones, the hand-back read it.
+    jet::Jet* const e=jet::Adopt(v);
     if(e)e->carrier.ordered=false;
     if(j.board->frame==pjet::Airframe::rotor) {
         const float* m=reinterpret_cast<const float*>(v+kMatrix);
