@@ -287,8 +287,8 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
                               ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),
     # The self-propelled artillery (tools/make_artillery.py): the Kepler's class (Vehicle603_Flak: a turret, twin guns),
-    # the E551's turret housing with the Armed Barga's two cannons on it; two large shells a salvo, lobbed, aimed by
-    # EDF6AutoTurret.
+    # the user's twin-gun tank model (an E551 hull, a twin-barrel turret; pylib/artillery_model.py); two large shells a
+    # salvo, lobbed, aimed by EDF6AutoTurret.
     'artillery': GroundVehicle('EDF6VC_ARTILLERY', 'V603_FLAK', 'AWEAPON346',
                                ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
                                ('app:/weapon/edf6vc_howitzer_l.sgo', 'app:/weapon/edf6vc_howitzer_r.sgo'), 600.0,

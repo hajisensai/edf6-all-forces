@@ -130,13 +130,13 @@ def slot_of(row_id: str) -> str | None:
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
     'artillery': {
-        'SC': ('自行榴弹炮', '请求一辆自行榴弹炮：E551 的炮塔装着武装巴尔加的两门大炮，自动瞄准地面目标，每次曲射两发大范围高爆弹。装填较慢。'),
-        'CN': ('自行榴彈砲', '請求一輛自行榴彈砲：E551 的砲塔裝著武裝巴爾加的兩門大砲，自動瞄準地面目標，每次曲射兩發大範圍高爆彈。裝填較慢。'),
-        'JA': ('自走榴弾砲', '自走榴弾砲を要請する。E551 の砲塔に武装バルガの大砲 2 門、地上の目標を自動で狙い、広範囲の榴弾を 2 発ずつ曲射する。'
+        'SC': ('自行榴弹炮', '请求一辆自行榴弹炮：E551 的车体上一座双管炮塔，自动瞄准地面目标，每次曲射两发大口径高爆弹。装填较慢。'),
+        'CN': ('自行榴彈砲', '請求一輛自行榴彈砲：E551 的車體上一座雙管砲塔，自動瞄準地面目標，每次曲射兩發大口徑高爆彈。裝填較慢。'),
+        'JA': ('自走榴弾砲', '自走榴弾砲を要請する。E551 の車体に連装砲塔、地上の目標を自動で狙い、大口径の榴弾を 2 発ずつ曲射する。'
                        '装填は遅い。'),
-        'EN': ('Self-Propelled Howitzer', "Requests a self-propelled howitzer: the Armed Barga's two cannons on an E551 "
-                                          'turret, aiming at ground targets by itself and lobbing two wide-blast shells '
-                                          'a salvo. Slow to reload.'),
+        'EN': ('Self-Propelled Howitzer', "Requests a self-propelled howitzer: a twin-gun turret on an E551 hull, "
+                                          'aiming at ground targets by itself and lobbing two heavy-calibre shells a '
+                                          'salvo. Slow to reload.'),
     },
     'katyusha': {
         'SC': ('喀秋莎火箭炮车', '请求一辆喀秋莎火箭炮车：卡车车斗上的多管火箭发射架，自动瞄准地面目标，曲射齐射 40 发火箭弹覆盖一片区域。'
