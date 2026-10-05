@@ -66,10 +66,11 @@ Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
 // The jets' nozzles by their mark (pylib/vcobjects.py JETS; read off their models, pylib/jet_models.py NOZZLES, which
 // tools/selftest.py holds this table to): the bomber501 the strike jets and the player's strike jet fly, the interceptor
-// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones'. Each flame on its
-// exhaust's exit (its centre, in the exit plane: a flame set back inside the nozzle showed high in it from behind), as
-// big as the engine: width the exit's diameter, length jet_models.FLAME_LENGTH_PER_DIAMETER of it (m); with the
-// afterburner (the player's boost) kBurnerLength times as long.
+// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones', the gunship's
+// bomber401 (it had none: its mark is its own, 7011, and kBomberNozzles is only looked up under the strike mark). Each
+// flame on its exhaust's exit (its centre, in the exit plane: a flame set back inside the nozzle showed high in it from
+// behind), as big as the engine: width the exit's diameter, length jet_models.FLAME_LENGTH_PER_DIAMETER of it (m); with
+// the afterburner (the player's boost) kBurnerLength times as long.
 struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
 constexpr JetNozzles kJetNozzles[]={
     {7001.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
@@ -82,6 +83,7 @@ constexpr JetNozzles kJetNozzles[]={
     {7006.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
     {7007.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
     {7008.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
+    {7011.0f,1,{{0.0f,1.267f,-1.597f},{0.0f,0.0f,0.0f}},{4.755f,0.951f}},   // the gunship: the stock bomber401 (kBomberNozzles)
 };
 // The stock bombers a strike jet took over (airstrike.cpp) fly their own models under the strike jet's mark (crew.h
 // BomberBody tells them apart): their exits, measured on those models as they are (pylib/jet_models.py STOCK_BOMBERS;
