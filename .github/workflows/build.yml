@@ -145,7 +145,8 @@ jobs:
         run: |
           if (-not $env:EDF6_TESTHUB_AUTH) { Write-Host 'EDF6_TESTHUB_AUTH not set: skipped'; exit 0 }
           $channel = if ($env:GITHUB_REF -eq 'refs/heads/main') { 'nightly' } else { 'test' }
-          $notes = "$($env:GITHUB_REF_NAME) $($env:GITHUB_SHA.Substring(0,7))`n$(git log -1 --pretty=%B)"
+          # git prints the message as an array of lines: joined with newlines, not the spaces "$(...)" would put
+          $notes = "$($env:GITHUB_REF_NAME) $($env:GITHUB_SHA.Substring(0,7))`n" + ((git log -1 --pretty=%B) -join "`n")
           python tools/testhub.py publish $env:INSTALLER --channel $channel --commit $env:GITHUB_SHA --notes $notes
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
