@@ -23,7 +23,7 @@ function renderBuilds(builds) {
   const b = builds[0];
   $('build').innerHTML = b
     ? `<p class="row"><a class="btn" href="${dl(b)}">下载 ${esc(b.name)}</a><span class="muted">${size(b.size)} · ${esc(b.channel)} · ${when(b.at)}</span></p>
-       ${b.notes ? `<pre>${esc(b.notes)}</pre>` : ''}<p class="muted">SHA-256 ${esc(b.sha256)}</p>`
+       ${b.notes ? `<pre>${esc(b.notes)}</pre>` : ''}<p class="muted hash">SHA-256 ${esc(b.sha256)}</p>`
     : '还没有上传测试版。';
   $('builds').innerHTML = builds.slice(1).map((x) =>
     `<tr><td><a href="${dl(x)}">${esc(x.name)}</a></td><td>${esc(x.channel)}</td><td>${when(x.at)}</td><td>${esc(x.notes.split('\n')[0])}</td></tr>`).join('');

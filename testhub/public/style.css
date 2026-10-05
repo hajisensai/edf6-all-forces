@@ -51,3 +51,4 @@ progress { width: 100%; }
 .login { max-width: 360px; margin: 12vh auto; }
 .err { color: var(--bad); }
 .hide { display: none; }
+.hash, .files a, .report .muted { overflow-wrap: anywhere; word-break: break-all; }
