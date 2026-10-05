@@ -54,6 +54,11 @@ DRILL_BONE, DRILL_PARENT = 'edf6vc_drill', 'body'
 # The drill's length and base radius as built (src/drill.cpp kDrillLength / kDrillRadius; tools/selftest.py holds them
 # equal; check() holds the geometry to them).
 DRILL_LENGTH, DRILL_RADIUS = 3.77, 0.97
+# Its base in the model (= the vehicle's frame: x, y up, z forward; src/drill.cpp kDrillBaseY / kDrillBaseZ, the
+# contact probes' axis) and its rotational repeat: the mesh maps onto itself turned 1/DRILL_FOLDS of a turn (its
+# flutes; src/drill.cpp kSpinRepeat caps the drawn turn a frame under it, docs/drill-re.md §4).
+DRILL_BASE = (0.0, 3.37, 4.19)
+DRILL_FOLDS = 16
 
 
 class DrillModelError(Exception):
@@ -98,6 +103,26 @@ def split(parts: list[om.Part]) -> tuple[list[om.Part], list[om.Part]]:
         if True in cut:
             drill.append(cut[True])
     return hull, drill
+
+
+def repeat_share(points: list[om.Vec3], base: om.Vec3, folds: int, tol: float = 0.03) -> float:
+    """The share of `points` that land on one of them (within `tol` m) turned 1/folds of a turn about the +Z axis
+    through `base`: 1.0 for a mesh that repeats every 1/folds turn."""
+    cell: dict[tuple[int, int, int], list[om.Vec3]] = {}
+    key = lambda p: (round(p[0] / tol), round(p[1] / tol), round(p[2] / tol))  # noqa: E731
+    for p in points:
+        cell.setdefault(key(p), []).append(p)
+    a = 2.0 * math.pi / folds
+    c, s = math.cos(a), math.sin(a)
+    hits = 0
+    for p in points:
+        x, y = p[0] - base[0], p[1] - base[1]
+        q = (base[0] + c * x - s * y, base[1] + s * x + c * y, p[2])
+        k = key(q)
+        near = (o for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)
+                for o in cell.get((k[0] + dx, k[1] + dy, k[2] + dz), ()))
+        hits += any(math.dist(o, q) < tol for o in near)
+    return hits / len(points) if points else 0.0
 
 
 def drill_axis(drill: list[om.Part]) -> tuple[om.Vec3, float, float]:
@@ -162,6 +187,9 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
     base, length, radius = drill_axis(drill)
     _req(abs(length - DRILL_LENGTH) < 0.05 and abs(radius - DRILL_RADIUS) < 0.05,
          f'drill {length:.3f} m long, {radius:.3f} m base radius: DRILL_LENGTH / DRILL_RADIUS are {DRILL_LENGTH} / {DRILL_RADIUS}')
+    _req(max(abs(a - b) for a, b in zip(base, DRILL_BASE)) < 0.02, f'drill base {base}: DRILL_BASE is {DRILL_BASE}')
+    share = repeat_share([v.pos for p in drill for v in p.verts], base, DRILL_FOLDS)
+    _req(share > 0.99, f'the drill repeats every 1/{DRILL_FOLDS} turn for {share:.3f} of its vertices: DRILL_FOLDS is off')
     md = replace(host, objects=[o for o in host.objects if host.name_of(o.name) == 'v505_tank'], buffer_order=None)
     _req(len(md.objects) == 1, 'the Blacker model has no v505_tank object')
     md, drill_bone = insert_bone(md, DRILL_PARENT, DRILL_BONE, base)
@@ -177,7 +205,7 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(md.objects[0], meshes=meshes)])
     md = g.recompute_bounds(md)
-    info = {'drill base': base, 'drill length': length, 'drill radius': radius, 'meshes': len(meshes),
+    info = {'drill base': base, 'drill length': length, 'drill radius': radius, 'drill repeat': share, 'meshes': len(meshes),
             'triangles': sum(len(me.indices) // 6 for me in meshes), 'drill bone': drill_bone}
     return md, rab, textures(obj), info
 

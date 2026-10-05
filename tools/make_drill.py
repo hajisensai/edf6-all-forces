@@ -4,7 +4,8 @@
                                         own (pylib/drill_model.py; built from the user's OBJ and the player's own
                                         Root.cpk)
   Mods/OBJECT/EDF6VC_DRILL.SGO          the Blacker's vehicle (Vehicle505_Tank: tracks, one weapon holder) with that model,
-                                        DRILL_DURABILITY base, its camera raised and pulled back for the taller hull
+                                        DRILL_DURABILITY base, its camera up and back looking down over the hull
+                                        at the drill (CAMERA)
   Mods/WEAPON/EDF6VC_DRILL_BIT.SGO      its one weapon, the Blacker's cannon made to fire nothing that shows or hurts (the
                                         plugin takes the player's trigger for the drill; an NPC driver's AI may still pull
                                         it): no damage, no blast, a round that lives one frame, silent
@@ -23,6 +24,7 @@ Built in memory first, written atomically and recorded in the ledger as this too
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -43,7 +45,16 @@ MODEL_MDB = drill_model.HOST_MDB          # the host's own model file name, insi
 STOCK_MODEL = ['app:/Object/v505_tank.mrab', MODEL_MDB]
 STOCK_GUN = 'V_505TANK_CANNON01.SGO'
 BIT_FILE = VEHICLE.weapons[0].split('/')[-1].upper()
-CAMERA = ([0.0, 5.5, 0.0], [0.0, 5.5, -18.0])   # the Blacker's (0, 4, 0) / (0, 4, -15.5), for a 4.6 m tall hull
+# The camera (game_object_camera_setting [0] / [1], docs/drill-re.md §6): the stock ground vehicles put [1] at the
+# height of [0] (Blacker (0, 4, 0) / (0, 4, -15.5): a level view just over its ~3 m hull and gun), the 502 robot higher
+# ((0, 5, 0) / (0, 7, -10): looking down onto it). The drill sits in front of a 4.6 m hull at 3.37 m: from any level
+# camera over the roof (5.5 m until 2026-10-05) the hull hides it (the user: "the drill's view is odd"). So, like the
+# 502: the camera HULL_TOP-clear up and back, looking down past the pivot over the hull's front edge at the drill's
+# tip (CAMERA_AIM_Z: the view's centre crosses the axis's height there) and on to the ground ~20 m ahead.
+CAMERA = ([0.0, 5.7, 0.0], [0.0, 10.5, -17.0])
+HULL_TOP = (4.6, 3.0)        # (y, z) m: the hull's front top edge in the model (pylib/drill_model.py's hull vertices)
+SIGHT_CLEAR = 0.15           # m the sight line to the drill's tip passes over it, at least
+CAMERA_AIM_Z = (6.0, 10.0)   # m forward: where the view's centre crosses the drill axis's height (its tip ~8 m)
 # The bit: the cannon's shot made a nothing (with the plugin the trigger never reaches it; an NPC's AI may fire it).
 BIT = {'AmmoDamage': 0.0, 'AmmoExplosion': 0.0, 'AmmoAlive': 1.0, 'AmmoSpeed': 0.01, 'AmmoSize': 0.01,
        'AmmoHitImpulseAdjust': 0.0, 'FireRecoil': 0.0, 'AmmoColor': [0.0, 0.0, 0.0, 0.0]}
@@ -108,6 +119,24 @@ def charge_sgo(game: vc.Game) -> bytes:
     return make_jets.impact_charge(game, vc.DRILL_CHARGE_RADIUS, vc.DRILL_CHARGE_SPEED, vc.DRILL_CHARGE_LIFE)
 
 
+def camera_check(camera: tuple[list[float], list[float]] = CAMERA) -> dict[str, float]:
+    """The camera sees the drill over the hull (the sight line from [1] to the drill's tip clears HULL_TOP by
+    SIGHT_CLEAR) and looks at it (the line through [1] and [0] crosses the axis's height within CAMERA_AIM_Z), with [1]
+    a camera position in the vehicle's frame. Its numbers."""
+    pivot, cam = camera
+    assert pivot[0] == cam[0] == 0.0 and pivot[2] == 0.0 and cam[2] < 0.0 and cam[1] > pivot[1], camera
+    _, by, bz = drill_model.DRILL_BASE
+    tip = bz + drill_model.DRILL_LENGTH
+    top_y, top_z = HULL_TOP
+    over = cam[1] + (by - cam[1]) * (top_z - cam[2]) / (tip - cam[2])     # the sight line's height over the hull's edge
+    aim = (cam[1] - by) / (cam[1] - pivot[1]) * (pivot[2] - cam[2]) + cam[2]
+    out = {'clear': over - top_y, 'aim': aim, 'down': math.degrees(math.atan2(cam[1] - pivot[1], pivot[2] - cam[2])),
+           'arm': math.hypot(cam[1] - pivot[1], pivot[2] - cam[2])}
+    assert out['clear'] >= SIGHT_CLEAR, f'the hull hides the drill from the camera: {out}'
+    assert CAMERA_AIM_Z[0] <= aim <= CAMERA_AIM_Z[1], f'the view does not look at the drill: {out}'
+    return out
+
+
 def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
     """The SGO names this tool's model (or, without one, the stock Blacker's) and weapon; with the model, its weapon
     bone is there and the model passes drill_model.check; the bit fires nothing; the charge's blast breaks buildings."""
@@ -118,6 +147,9 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
     assert v['animation_model'][0] == want, v['animation_model'][0]
     assert [w[0] for w in v['vehicle_setup'][2]] == list(VEHICLE.weapons)
     assert v['xgs_scene_object_class'] == 'Vehicle505_Tank' and v['game_object_durability'] == VEHICLE.durability
+    cam = v['game_object_camera_setting']
+    assert [list(cam[0]), list(cam[1])] == [list(CAMERA[0]), list(CAMERA[1])], cam
+    camera_check()
     if built:
         arc = files[f'OBJECT/{MODEL_FILE}']
         drill_model.check(arc, drill_model.stock_bones(game) if game is not None else None)

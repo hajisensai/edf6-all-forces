@@ -141,6 +141,9 @@ void Validate(Config& n) noexcept {
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
     Fix("DrillDamage",n.drillDamage,0.0f,1.0e6f);
     Fix("DrillBreak",n.drillBreak,0.0f,1.0e6f);
+    Fix("DrillHeatSec",n.drillHeatSec,1.0f,600.0f);
+    Fix("DrillCoolSec",n.drillCoolSec,1.0f,600.0f);
+    Fix("DrillResumeHeat",n.drillResumeHeat,0.0f,0.95f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -242,6 +245,9 @@ void LoadConfig() noexcept {
     n.drillSpinDownSec=ReadFloat(L"DrillSpinDownSec",n.drillSpinDownSec);
     n.drillDamage=ReadFloat(L"DrillDamage",n.drillDamage);
     n.drillBreak=ReadFloat(L"DrillBreak",n.drillBreak);
+    n.drillHeatSec=ReadFloat(L"DrillHeatSec",n.drillHeatSec);
+    n.drillCoolSec=ReadFloat(L"DrillCoolSec",n.drillCoolSec);
+    n.drillResumeHeat=ReadFloat(L"DrillResumeHeat",n.drillResumeHeat);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     Validate(n);
     IgnoreRetired();
@@ -265,8 +271,8 @@ void LoadConfig() noexcept {
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
-    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s",n.drill,n.drillMaxRpm,n.drillSpinUpSec,
-        n.drillSpinDownSec,n.drillDamage,n.drillBreak);
+    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
+        n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);

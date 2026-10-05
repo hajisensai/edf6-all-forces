@@ -99,6 +99,9 @@ struct Config {
     float drillSpinDownSec=2.5f;    // ...seconds from the top RPM to still, let go
     float drillDamage=2000.0f;      // ...damage a second to an enemy it touches, at the top RPM (less in proportion)
     float drillBreak=600.0f;        // ...HP a second off a building or rock it bores into, at the top RPM
+    float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
+    float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
+    float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
@@ -333,7 +336,7 @@ void DrillInput(unsigned char* vehicle) noexcept;
 void DrillFrame(unsigned char* vehicle) noexcept;
 void ResetDrills() noexcept;
 // The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
-struct DrillCue { float rpm,maxRpm; bool touching; };
+struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
 
 // airstrike.cpp
