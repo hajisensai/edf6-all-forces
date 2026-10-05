@@ -442,6 +442,10 @@ void SteerAt(PJet& j,unsigned char* v,const float* pos,const float* goal,float w
     std::memcpy(j.sent,j.vel,12);
     MirrorEntry(j,v);
     Elevons(j,v,0.0f,0.0f,dt);
+    // Its gear (gear.cpp): no one aboard steps it here (PilotGear is the player's, NpcGear the NPC flight's, and a held
+    // jet flies neither), so down on the final (well over the ~3 s it takes before the touch), up before; a landing with
+    // it up would be Touch's belly landing.
+    GearStep(v,!final,dt,false);
     JetFlames(v,j.throttle,false,ms);
 }
 
