@@ -9,11 +9,17 @@ with every stock mesh taken out and the OBJ in their place:
     its hull (7.5 m long) comes to 6.0 x 3.8 x 4.6 m, over the Blacker's 6.8 x 3.2 m hull and collision shapes (the
     ragdoll's are the physics: a hull much bigger than them would sink into walls it cannot touch), the drill 3.8 m
     long in front of it (docs/drill-re.md §1);
-  - the hull rigidly on the Blacker's `body` bone, the drill (every triangle past DRILL_SPLIT_Z) on a new bone
-    DRILL_BONE, a child of `body`, its origin on the drill's axis at its base and its axes the model's, so the plugin
-    (src/drill.cpp) spins it by turning its local matrix about Z. The bone is inserted at the end of `body`'s subtree:
-    the object bones after it move one index on (no stock data refers to bones by index: the SGO, CAS, ragdoll and
-    constraints name them);
+  - the hull rigidly on the Blacker's `body` bone, the drill (every triangle past DRILL_SPLIT_Z) rigidly on the stock
+    bone SPIN_BONE (`catapi_body`, the track rig's root), moved to the drill's axis at its base with the model's axes
+    and made a leaf of `body` (its track children handed to `body`, their binds unchanged), so the plugin
+    (src/drill.cpp) spins it by turning its local matrix about Z. Why a stock bone: the drawn pose reaches only the
+    bones the vehicle's CAS skeleton (v505_tank.cas) names; a bone of our own composes its world matrix all right
+    (the 2026-10-05 19:56 play logged it turning) but is drawn at its bind pose, so the drill never turned on screen
+    (docs/drill-re.md §5.4). `catapi_body` is in that skeleton, carries nothing of ours but the drill (the track
+    object is left out), and no SGO entry, ragdoll shape or EDF.dll string names it;
+  - a marker bone DRILL_BONE (no geometry) inserted at the end of `body`'s subtree, at the drill's base: the plugin
+    tells the drill tank from a stock Blacker by it (the object bones after it move one index on; no stock data
+    refers to bones by index: the SGO, CAS, ragdoll and constraints name them);
   - two materials made from the Blacker's hull material (its shader and parameters): MI_Tank_C with the OBJ's
     Tank_C_BC.png, MI_Tank_B_CS (the tracks and running gear, whose texture is not in the OBJ's folder) a plain dark
     steel; their normal maps flat, their roughness / metal / occlusion maps one neutral value.
@@ -51,6 +57,8 @@ OFFSET_Z = 0.25
 CONVERSION = om.Conversion(AXES, SCALE, (0.0, 0.0, OFFSET_Z))
 DRILL_SPLIT_Z = 4.5 * SCALE + OFFSET_Z      # the OBJ has no geometry between its hull (x <= 3.6) and its drill (x >= 4.7)
 DRILL_BONE, DRILL_PARENT = 'edf6vc_drill', 'body'
+# The stock bone the drill's geometry rides and the plugin turns (src/drill.cpp kSpinBone; see the module docstring).
+SPIN_BONE = 'catapi_body'
 # The drill's length and base radius as built (src/drill.cpp kDrillLength / kDrillRadius; tools/selftest.py holds them
 # equal; check() holds the geometry to them).
 DRILL_LENGTH, DRILL_RADIUS = 3.77, 0.97
@@ -138,6 +146,29 @@ def drill_axis(drill: list[om.Part]) -> tuple[om.Vec3, float, float]:
 
 # ------------------------------------------------------------------------------------------ skeleton
 
+def rehome_spin_bone(md: Mdb, name: str, parent: str, origin: om.Vec3) -> tuple[Mdb, int]:
+    """`md` with the stock bone `name` made the drill's spin bone: a leaf under `parent` with its bind at model-space
+    `origin` (axes the model's); its children are handed to `parent` with their bind worlds unchanged (so they never
+    turn with the drill). Bone order, names and count stay the stock ones. Returns (model, its index)."""
+    si, pi = md.bone_index(name), md.bone_index(parent)
+    _req(si >= 0 and pi >= 0 and md.bones[si].kind == 3, f'no skin bone {name} / {parent}')
+    w = bind_world(md)
+    inv_parent = inverse_affine(w[pi])
+    bones = []
+    for b in md.bones:
+        if b.index == si:
+            world = g.translation(origin)
+            b = replace(b, parent=pi, local=mmul(world, inv_parent),
+                        inv_bind=g.translation((-origin[0], -origin[1], -origin[2])))
+        elif b.parent == si:
+            b = replace(b, parent=pi, local=mmul(w[b.index], inv_parent))
+        else:
+            b = replace(b)
+        bones.append(b)
+    link(bones)
+    return replace(md, bones=bones), si
+
+
 def insert_bone(md: Mdb, parent: str, name: str, origin: om.Vec3) -> tuple[Mdb, int]:
     """`md` with a skin bone `name` (kind 3, bounded) under `parent` at model-space `origin` (axes the model's),
     placed at the end of the parent's subtree (preorder kept); every later bone, parent link and object bone shifted.
@@ -192,7 +223,8 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
     _req(share > 0.99, f'the drill repeats every 1/{DRILL_FOLDS} turn for {share:.3f} of its vertices: DRILL_FOLDS is off')
     md = replace(host, objects=[o for o in host.objects if host.name_of(o.name) == 'v505_tank'], buffer_order=None)
     _req(len(md.objects) == 1, 'the Blacker model has no v505_tank object')
-    md, drill_bone = insert_bone(md, DRILL_PARENT, DRILL_BONE, base)
+    md, marker = insert_bone(md, DRILL_PARENT, DRILL_BONE, base)
+    md, drill_bone = rehome_spin_bone(md, SPIN_BONE, DRILL_PARENT, base)
     body = md.bone_index(DRILL_PARENT)
     template = next(me for o in host.objects for me in o.meshes if host.name_of(host.materials[me.material].name) == TEMPLATE_MATERIAL)
     meshes = []
@@ -206,7 +238,7 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
     md = replace(md, objects=[replace(md.objects[0], meshes=meshes)])
     md = g.recompute_bounds(md)
     info = {'drill base': base, 'drill length': length, 'drill radius': radius, 'drill repeat': share, 'meshes': len(meshes),
-            'triangles': sum(len(me.indices) // 6 for me in meshes), 'drill bone': drill_bone}
+            'triangles': sum(len(me.indices) // 6 for me in meshes), 'drill bone': drill_bone, 'marker bone': marker}
     return md, rab, textures(obj), info
 
 
@@ -234,9 +266,11 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
     range, skinned only to skin bones, weights 1); every material texture (HD and .lod) an archive member, before the
     model in folder-table order, in the stock HD / .lod layout (obj_model.texture_problems); every bone's bind x
     inverse bind the identity; the bone names in order are `host_bones` (the stock Blacker's) with DRILL_BONE
-    inserted under `body`; the drill bone's axes the model's, its geometry inside the cylinder of DRILL_RADIUS round
-    its +Z from its origin to DRILL_LENGTH, every other vertex on `body`, behind the drill (but for the drive shaft
-    into the drill's base, inside its radius) and over the ground."""
+    inserted under `body`; the drill's geometry skinned to SPIN_BONE alone (a childless bone under `body`, at
+    DRILL_BASE with the model's axes, like the marker DRILL_BONE, which carries no geometry), inside the cylinder of
+    DRILL_RADIUS round its +Z from its origin to DRILL_LENGTH; every other vertex (the hull) on `body`, behind the
+    drill (but for the drive shaft into the drill's base, inside its radius) and over the ground: nothing of the hull
+    turns with the drill and nothing of the drill stays on the hull."""
     rab = rab_read(arc)
     _req(rab_write(rab) == arc, 'archive does not round-trip')
     data = member(rab, HOST_MDB).data
@@ -256,12 +290,16 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
         err = max(abs(p[k] - (1.0 if k in (0, 5, 10, 15) else 0.0)) for k in range(16))
         _req(err < 1e-4, f'bone {md.name_of(b.name)}: bind x inverse bind off identity by {err}')
     names = [md.name_of(b.name) for b in md.bones]
-    di, body = md.bone_index(DRILL_BONE), md.bone_index(DRILL_PARENT)
-    _req(di > body >= 0 and md.bones[di].parent == body and md.bones[di].kind == 3, f'{DRILL_BONE} not a skin bone under body')
+    mi, di, body = md.bone_index(DRILL_BONE), md.bone_index(SPIN_BONE), md.bone_index(DRILL_PARENT)
+    _req(mi > body >= 0 and md.bones[mi].parent == body and md.bones[mi].kind == 3, f'{DRILL_BONE} not a skin bone under body')
+    _req(di > body and md.bones[di].parent == body and md.bones[di].kind == 3 and md.bones[di].child == -1
+         and not any(b.parent == di for b in md.bones), f'{SPIN_BONE} not a childless skin bone under body')
     if host_bones is not None:
         _req([n for n in names if n != DRILL_BONE] == host_bones, 'the stock bones changed')
-    rot = w[di][:3] + w[di][4:7] + w[di][8:11]
-    _req(max(abs(a - b) for a, b in zip(rot, (1, 0, 0, 0, 1, 0, 0, 0, 1))) < 1e-5, f'{DRILL_BONE}: axes not the model\'s')
+    for k in (mi, di):
+        rot = w[k][:3] + w[k][4:7] + w[k][8:11]
+        _req(max(abs(a - b) for a, b in zip(rot, (1, 0, 0, 0, 1, 0, 0, 0, 1))) < 1e-5, f'{names[k]}: axes not the model\'s')
+        _req(max(abs(a - b) for a, b in zip(w[k][12:15], DRILL_BASE)) < 0.02, f'{names[k]}: origin {w[k][12:15]}, not DRILL_BASE')
     origin = w[di][12:15]
     drill_pts, hull_lo = 0, 1e9
     for j, me in enumerate(o.meshes):

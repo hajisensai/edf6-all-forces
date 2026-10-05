@@ -4,8 +4,8 @@
                                         own (pylib/drill_model.py; built from the user's OBJ and the player's own
                                         Root.cpk)
   Mods/OBJECT/EDF6VC_DRILL.SGO          the Blacker's vehicle (Vehicle505_Tank: tracks, one weapon holder) with that model,
-                                        DRILL_DURABILITY base, its camera up and back looking down over the hull
-                                        at the drill (CAMERA)
+                                        DRILL_DURABILITY base, its camera high up and back, the whole tank and
+                                        the ground ahead of the drill in view (CAMERA)
   Mods/WEAPON/EDF6VC_DRILL_BIT.SGO      its one weapon, the Blacker's cannon made to fire nothing that shows or hurts (the
                                         plugin takes the player's trigger for the drill; an NPC driver's AI may still pull
                                         it): no damage, no blast, a round that lives one frame, silent
@@ -45,16 +45,23 @@ MODEL_MDB = drill_model.HOST_MDB          # the host's own model file name, insi
 STOCK_MODEL = ['app:/Object/v505_tank.mrab', MODEL_MDB]
 STOCK_GUN = 'V_505TANK_CANNON01.SGO'
 BIT_FILE = VEHICLE.weapons[0].split('/')[-1].upper()
-# The camera (game_object_camera_setting [0] / [1], docs/drill-re.md §6): the stock ground vehicles put [1] at the
-# height of [0] (Blacker (0, 4, 0) / (0, 4, -15.5): a level view just over its ~3 m hull and gun), the 502 robot higher
-# ((0, 5, 0) / (0, 7, -10): looking down onto it). The drill sits in front of a 4.6 m hull at 3.37 m: from any level
-# camera over the roof (5.5 m until 2026-10-05) the hull hides it (the user: "the drill's view is odd"). So, like the
-# 502: the camera HULL_TOP-clear up and back, looking down past the pivot over the hull's front edge at the drill's
-# tip (CAMERA_AIM_Z: the view's centre crosses the axis's height there) and on to the ground ~20 m ahead.
-CAMERA = ([0.0, 5.7, 0.0], [0.0, 10.5, -17.0])
-HULL_TOP = (4.6, 3.0)        # (y, z) m: the hull's front top edge in the model (pylib/drill_model.py's hull vertices)
-SIGHT_CLEAR = 0.15           # m the sight line to the drill's tip passes over it, at least
-CAMERA_AIM_Z = (6.0, 10.0)   # m forward: where the view's centre crosses the drill axis's height (its tip ~8 m)
+# The camera (game_object_camera_setting [0] / [1], docs/drill-re.md §6). The stock ground vehicles put the pivot [0]
+# 1.2..1.5 times their hull's height up (Blacker 4 m over a 2.6 m hull, rescue tank 8 m over 6.7 m, Grape 4 m over
+# 3.0 m; the bikes and cars 0.7 m with [1] 3 m up) and [1] 10..25 m behind. The drill tank is 4.6 m tall with its drill
+# 3.37 m up in front: (0, 5.5..5.7, 0) put the pivot at 1.2 times its height and the user found the view too low twice
+# (2026-10-05 18:40 and 19:57: "视角太矮" / "载具的视角，感觉太低了，特别是钻头"). So the pivot goes to
+# PIVOT_SHARE (1.63) times the hull's height, over the stock tanks' ratios, and [1] well up and back, so that the
+# whole vehicle and the ground ahead of the drill are in view whichever way the engine reads [1]: as the camera's
+# position in the vehicle's frame (as the stock tanks' equal heights suggest: a level view) or as its offset from
+# the pivot (which of the two is not yet known: L). camera_check() works the view out under both readings.
+CAMERA = ([0.0, 7.5, 0.0], [0.0, 12.5, -17.0])
+HULL_HEIGHT = 4.6            # m: the drill tank's hull (pylib/drill_model.py's hull vertices)
+HULL_TOP = (4.6, 3.0)        # (y, z) m: the hull's front top edge in the model
+HULL_BACK = -3.6             # m: the hull's rear end
+PIVOT_SHARE = 1.6            # the pivot at least this times the hull's height up (stock tanks 1.2..1.53)
+SIGHT_CLEAR = 0.3            # m the sight line to the drill's tip passes over the hull's front edge, at least
+HALF_VIEW = 28.0             # deg: what must be in view lies within this of the view's centre, up or down (the
+                             # vertical field of view is not measured: L; ~60 deg is assumed)
 # The bit: the cannon's shot made a nothing (with the plugin the trigger never reaches it; an NPC's AI may fire it).
 BIT = {'AmmoDamage': 0.0, 'AmmoExplosion': 0.0, 'AmmoAlive': 1.0, 'AmmoSpeed': 0.01, 'AmmoSize': 0.01,
        'AmmoHitImpulseAdjust': 0.0, 'FireRecoil': 0.0, 'AmmoColor': [0.0, 0.0, 0.0, 0.0]}
@@ -119,21 +126,35 @@ def charge_sgo(game: vc.Game) -> bytes:
     return make_jets.impact_charge(game, vc.DRILL_CHARGE_RADIUS, vc.DRILL_CHARGE_SPEED, vc.DRILL_CHARGE_LIFE)
 
 
-def camera_check(camera: tuple[list[float], list[float]] = CAMERA) -> dict[str, float]:
-    """The camera sees the drill over the hull (the sight line from [1] to the drill's tip clears HULL_TOP by
-    SIGHT_CLEAR) and looks at it (the line through [1] and [0] crosses the axis's height within CAMERA_AIM_Z), with [1]
-    a camera position in the vehicle's frame. Its numbers."""
+def camera_view(camera: tuple[list[float], list[float]], relative: bool) -> dict[str, float]:
+    """The view from `camera` (game_object_camera_setting [0] the pivot, [1] the camera: its position in the vehicle's
+    frame, or with `relative` its offset from the pivot), in the vehicle's (y up, z forward) plane: how far the sight
+    line to the drill's tip clears the hull's front edge, and the angles (deg, + below the view's centre) of the drill's
+    tip, the ground under it and the hull's rear top edge."""
     pivot, cam = camera
-    assert pivot[0] == cam[0] == 0.0 and pivot[2] == 0.0 and cam[2] < 0.0 and cam[1] > pivot[1], camera
+    assert pivot[0] == cam[0] == 0.0 and pivot[2] == 0.0 and cam[2] < 0.0, camera
+    cy, cz = (cam[1] + pivot[1], cam[2]) if relative else (cam[1], cam[2])
     _, by, bz = drill_model.DRILL_BASE
     tip = bz + drill_model.DRILL_LENGTH
     top_y, top_z = HULL_TOP
-    over = cam[1] + (by - cam[1]) * (top_z - cam[2]) / (tip - cam[2])     # the sight line's height over the hull's edge
-    aim = (cam[1] - by) / (cam[1] - pivot[1]) * (pivot[2] - cam[2]) + cam[2]
-    out = {'clear': over - top_y, 'aim': aim, 'down': math.degrees(math.atan2(cam[1] - pivot[1], pivot[2] - cam[2])),
-           'arm': math.hypot(cam[1] - pivot[1], pivot[2] - cam[2])}
-    assert out['clear'] >= SIGHT_CLEAR, f'the hull hides the drill from the camera: {out}'
-    assert CAMERA_AIM_Z[0] <= aim <= CAMERA_AIM_Z[1], f'the view does not look at the drill: {out}'
+    centre = math.degrees(math.atan2(cy - pivot[1], pivot[2] - cz))
+    below = lambda y, z: math.degrees(math.atan2(cy - y, z - cz)) - centre  # noqa: E731
+    return {'camera y': cy, 'down': centre, 'arm': math.hypot(cy - pivot[1], pivot[2] - cz),
+            'clear': cy + (by - cy) * (top_z - cz) / (tip - cz) - top_y,
+            'tip': below(by, tip), 'ground at tip': below(0.0, tip), 'hull rear': below(HULL_HEIGHT, HULL_BACK)}
+
+
+def camera_check(camera: tuple[list[float], list[float]] = CAMERA) -> dict[str, dict[str, float]]:
+    """The drill tank's camera is up where the user wants it: the pivot PIVOT_SHARE times the hull's height or more up,
+    and under both readings of [1] (camera_view) the drill seen over the hull (SIGHT_CLEAR) with its tip, the ground
+    under it and the hull's rear in view (within HALF_VIEW of the centre). Its numbers per reading."""
+    assert camera[0][1] >= PIVOT_SHARE * HULL_HEIGHT, f'pivot {camera[0][1]} m: under {PIVOT_SHARE} x the hull height'
+    out = {}
+    for name, relative in (('position', False), ('offset', True)):
+        v = camera_view(camera, relative)
+        assert v['clear'] >= SIGHT_CLEAR, f'{name}: the hull hides the drill from the camera: {v}'
+        assert all(abs(v[k]) <= HALF_VIEW for k in ('tip', 'ground at tip', 'hull rear')), f'{name}: out of view: {v}'
+        out[name] = v
     return out
 
 
