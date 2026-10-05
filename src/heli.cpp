@@ -1400,6 +1400,14 @@ struct Control { float stickF,stickL,throttle,rotor,yaw,offYaw; Avoidance avoid;
 // What the guns did, for the log.
 struct Shot { bool gun,missile; float miss,cone; };
 
+// In contact (veh+0x1580 bit 1, see kGroundContact) and on the ground: the map (terrain, a building's roof) within
+// kGroundContact under it (`below`, m: the ray down, < 0 none), else perched on another body (a heli, a vehicle, an
+// enemy). Without the ray (`probed` false) every contact counts as the ground. The NPC's Sense and the player's
+// PlayerHeli both.
+bool OnGround(bool contact,bool probed,float below) noexcept {
+    return contact && (!probed || (below>=0.0f && below<kGroundContact));
+}
+
 // The first frame (false): it only starts its state. Else (true) the frame's sensing in `s`.
 bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
@@ -1427,13 +1435,9 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     }
     for(int i=0;i<3;++i){const float raw=(pos[i]-h.prev[i])/dt;h.vel[i]+= (raw-h.vel[i])*0.3f;h.prev[i]=pos[i];}
     // In contact (see kGroundContact): on the ground, or perched on another body.
-    const bool contact=(v[kContact]&kContactGround)!=0;
-    s.grounded=contact;
-    if(contact && Cfg().heliAvoid && rayOk) {
-        const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
-        const float below=CastRay(pos,down);
-        s.grounded=below>=0.0f && below<kGroundContact;
-    }
+    const bool contact=(v[kContact]&kContactGround)!=0,probed=contact && Cfg().heliAvoid && rayOk;
+    const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
+    s.grounded=OnGround(contact,probed,probed ? CastRay(pos,down) : -1.0f);
     s.perched=contact && !s.grounded;
 
     // Learn the yaw sign from the turn the last input produced.
@@ -1880,7 +1884,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
         }
     }
     const float yawWant=Cfg().heliYawRate*kPi/180.0f;
-    if(yawWant>yaw){h.params[2]=yawWant;h.params[3]=smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth;h.tuned=true;}
+    if(yawWant>std::fabs(yaw)){h.params[2]=yawWant*aim::YawSign(yaw);h.params[3]=smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth;h.tuned=true;}
     Log("HELI v=%p tune: stock k=%.2f b=%.5f d=%.4f top=%.1fm/s tau=%.1fs yaw=%.0fdeg/s smooth=%.4f -> k=%.2f b=%.5f top=%.1fm/s brake=%.2fm/s2 yaw=%.0fdeg/s smooth=%.4f%s",
         v,k,b,d,stockTop,1.0f/denom/60.0f,yaw*180.0f/kPi,smooth,h.params[0],h.params[1],h.top,h.stopDecel,h.params[2]*180.0f/kPi,h.params[3],h.tuned ? "" : " (stock)");
 }
@@ -1969,11 +1973,12 @@ void PlayerAssist(unsigned char* v) noexcept {
 // (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads this frame's
 // values) the input block is written from what aim::Fly asks, through the NPC pilot's own law (Steer's StockStick,
 // StockThrottle and StockYaw): the forward value drives the nose's tilt and the forward speed both, the lateral the
-// sidestep, the yaw the turn onto the aim's heading (+ grows the heading angle: the stock writes -RX and the mouse to the
-// right turns the heli right, docs/player-jet-re.md §2), the throttle the rotor for the climb (the height held with the
-// rotor that holds it, learned as the NPC's is, from the takeoff cue's stock hover speed on). PlayerAssist's settle runs
-// first: with the setpoint at 0 it stops within PlayerHeliStopSec. On the ground (contact bit 1) nothing horizontal and
-// the stock throttle (Space lifts it off, as before), and for kLiftOffMs after it no horizontal stick (the NPC's).
+// sidestep, the yaw the turn onto the aim's heading (+ grows the heading angle with a positive max yaw rate, aim::YawSign:
+// the stock writes -RX and the mouse to the right turns the heli right, docs/player-jet-re.md §2), the throttle the rotor
+// for the climb (the height held with the rotor that holds it, learned as the NPC's is, from the takeoff cue's stock hover
+// speed on). PlayerAssist's settle runs first: with the setpoint at 0 it stops within PlayerHeliStopSec. On the ground
+// (OnGround: contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle (Space
+// lifts it off, as before), and for kLiftOffMs after it no horizontal stick and no speed set (the NPC's lift-off).
 // The descend key is the brake key (ini PlayerJetBrakeKey): the stock keyboard has none, letting go of Space only spun
 // the rotor down.
 // The readout (PlayerHeliHud, ini HeliFlightHud) is gathered whether or not the mouse flies it.
@@ -2039,13 +2044,17 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     float vp[16];
     if(LastViewProj(vp))aim::KeepOnScreen(vp,pos,p.aim,was,fwd,kPlayerMark,kAimOnScreen);
     const float top=PlayerTop(v);
-    const aim::Want w=aim::Fly(p.hold,p.aim,fwd,pos,p.vel,keys,top,kPlayerClimb,grounded,clear,dt);
+    if(grounded)p.groundAt=ms;
+    const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal (and no setpoint)
+    const aim::Want w=aim::Fly(p.hold,p.aim,fwd,pos,p.vel,keys,top,kPlayerClimb,grounded,lifting,clear,dt);
     float forward=0.0f,lateral=0.0f;
     aim::StockStick(w.vel,p.vel,top,kBrakeGain,fwd,right,&forward,&lateral);
-    if(grounded)p.groundAt=ms;
-    if(ms-p.groundAt<kLiftOffMs)forward=lateral=0.0f;
+    if(lifting)forward=lateral=0.0f;
     const float heading=std::atan2(fwd[0],fwd[2]);
-    const float yaw=aim::StockYaw(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,0.0f,kYawDamp,kYawFeed);
+    // Turned by its own max yaw rate's sign (aim::YawSign): the NPC learns its sign from how it turns (Sense's votes); the
+    // player's flight reads it, the turn right from the first frame.
+    const float yaw=aim::StockYaw(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,0.0f,kYawDamp,kYawFeed)*
+                    aim::YawSign(At<float>(v,kMaxYaw));
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
     if(!grounded) {   // on the ground the stock throttle (the ascend key) lifts it off
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
@@ -2110,8 +2119,11 @@ void PlayerHeli(unsigned char* v) noexcept {
     const float heading=std::atan2(fwd[0],fwd[2]);
     p->yawRate+=(Wrap(heading-p->prevHeading)/dt-p->yawRate)*0.3f;
     p->prevHeading=heading;
-    const bool grounded=(v[kContact]&kContactGround)!=0;
+    // On the ground as the NPC tells it (OnGround): contact on top of an enemy, a vehicle or another heli is not the
+    // ground. Taken as the ground, a low scrape over one zeroed the speed set, handed the throttle back to the stock and
+    // locked the sidestep for kLiftOffMs.
     const float clear=GroundClearance(pos);
+    const bool grounded=OnGround((v[kContact]&kContactGround)!=0,rayOk,clear==kNoGround ? -1.0f : clear);
     const unsigned char* seat=SeatAt(v,0);
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
     if(Cfg().heliMouseAim && keys)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);

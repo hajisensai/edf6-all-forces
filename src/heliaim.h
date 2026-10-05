@@ -85,9 +85,11 @@ struct Hold { float speed,pressFrom,y; bool pressing,holding; };
 // What it asks of the craft: a horizontal velocity (m/s, world), a climb (m/s, + up), the level way to face.
 struct Want { float vel[3],climb,face[3]; };
 
-// The speed setpoint after this frame's W / S (see the top). On the ground it is 0: lifting off it does not lurch.
-inline void SetSpeed(Hold& h,float fore,float top,bool grounded,float dt) noexcept {
-    if(grounded){h.speed=0.0f;h.pressing=false;return;}
+// The speed setpoint after this frame's W / S (see the top). `still` (nothing horizontal: on the ground, or the lift-off's
+// first moments, heli.cpp kLiftOffMs) holds it at 0: W held through the lift-off would otherwise build a setpoint the
+// stick does not fly yet, and the craft lurched to it the moment it was let go.
+inline void SetSpeed(Hold& h,float fore,float top,bool still,float dt) noexcept {
+    if(still){h.speed=0.0f;h.pressing=false;return;}
     if(fore==0.0f){h.pressing=false;return;}
     if(!h.pressing){h.pressing=true;h.pressFrom=h.speed;}
     const float lo=h.pressFrom>0.0f ? 0.0f : -kBackShare*top,hi=h.pressFrom<0.0f ? 0.0f : top;
@@ -116,13 +118,14 @@ inline float Climb(Hold& h,const float* aim,const float* pos,const float* vel,fl
 }
 
 // The frame's want (see the top): `nose` the craft's level heading (unit), `vel` its velocity (m/s), `top` its top
-// speed and `most` its fastest climb, `grounded` on the ground, `clear` m over it (< 0: unknown).
+// speed and `most` its fastest climb, `grounded` on the ground, `still` nothing horizontal yet (grounded, or lifting off:
+// SetSpeed), `clear` m over the ground (< 0: unknown).
 inline Want Fly(Hold& h,const float* aim,const float* nose,const float* pos,const float* vel,const Keys& k,float top,float most,
-                bool grounded,float clear,float dt) noexcept {
+                bool grounded,bool still,float clear,float dt) noexcept {
     Want w{};
-    SetSpeed(h,k.fore,top,grounded,dt);
+    SetSpeed(h,k.fore,top,grounded || still,dt);
     float right[3];RightOf(nose,right);
-    const float side=grounded ? 0.0f : vec::Clamp(k.side,-1.0f,1.0f)*kSideShare*top;
+    const float side=grounded || still ? 0.0f : vec::Clamp(k.side,-1.0f,1.0f)*kSideShare*top;
     w.vel[0]=nose[0]*h.speed+right[0]*side;w.vel[2]=nose[2]*h.speed+right[2]*side;
     const float len=std::sqrt(w.vel[0]*w.vel[0]+w.vel[2]*w.vel[2]);
     if(len>top){w.vel[0]*=top/len;w.vel[2]*=top/len;}
@@ -163,5 +166,10 @@ inline float StockThrottle(float climb,float vy,float rotor,float* hover,bool le
 inline float StockYaw(float off,float rate,float faceRate,float damp,float feed) noexcept {
     return vec::Clamp(off*1.5f-(rate-faceRate)*damp+faceRate*feed,-1.0f,1.0f);
 }
+
+// The heli's yaw sign: slot 57 turns the heading by the yaw input times its max yaw rate (veh+0x1634, the SGO's
+// vehicle_setup[1][2]; docs/heli-input-re.md §2), so a craft whose SGO gives it a negative one turns the other way for
+// the same input. + grows the heading angle with a positive max yaw rate (every stock heli's: the 506's 23.5 deg).
+inline float YawSign(float maxYaw) noexcept { return maxYaw<0.0f ? -1.0f : 1.0f; }
 }  // namespace aim
 }  // namespace crew

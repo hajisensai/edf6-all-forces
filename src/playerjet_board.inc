@@ -312,7 +312,7 @@ void HoverAim(PJet& j,unsigned char* v,const Stick& s,const float* pos,float nos
     KeepAimOnScreen(j,v,level,was);
     const bool grounded=clear!=kNoGround && clear<kTouch;
     const aim::Keys keys{s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f,s.lx,s.ascend-(down ? 1.0f : 0.0f)};
-    const aim::Want w=aim::Fly(j.hover,j.aim,level,pos,j.measured,keys,k.cruise,HoverClimb(k),grounded,
+    const aim::Want w=aim::Fly(j.hover,j.aim,level,pos,j.measured,keys,k.cruise,HoverClimb(k),grounded,grounded,
                                clear==kNoGround ? -1.0f : clear,dt);
     std::memcpy(want,w.vel,12);*vz=w.climb;
     j.yaw=std::atan2(w.face[0],w.face[2]);
