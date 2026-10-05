@@ -7,7 +7,14 @@
 // build/Mods/Plugins/EDF6VehicleCrew.primer.csv; tools/primer_trace_view.py draws it.
 //
 //   primer_flight_sim [--centipedes 6] [--dragonflies 2] [--seconds 90] [--player stand|walk|fly|land]
-//                     [--kill SECONDS:ID ...] [--jets N] [--shoot DPS]
+//                     [--kill SECONDS:ID ...] [--kill-middle SECONDS] [--jets N] [--shoot DPS] [--shoot-from SECONDS]
+//                     [--binds FILE --frames FILE [--every 6]]
+//
+// --binds: lines "centipede|dragonfly <bone> m0 .. m15", the bind locals of the bones the plugin poses
+// (src/primer_pose.h tables, from the models): each body then has a model instance (veh+0xEE0) holding records for
+// them, which the plugin's Pose finds by name and writes as in the game. --frames: every --every frames, each live
+// body's matrix and its bone records as the plugin left them ("body ID KIND m0..m15", "bone ID NAME m0..m15"), the
+// player's position ("player x y z"): tools/primer_sim_video.py renders them.
 //
 // --kill shoots creature ID (its table index; centipedes first) down at that time (its dead byte: the code sees it
 // as the game's dead body); --jets puts N friendly jets circling the player (the dragonfly's air prey). The player:
@@ -21,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 namespace crew {
@@ -84,7 +92,11 @@ namespace {
 constexpr std::size_t kBodySize=0x3000,kCtrlSize=0x40;
 constexpr float kDt=1.0f/60.0f;
 
-struct SimBody { std::vector<unsigned char> mem,ctrl; bool dead; };
+struct SimBody { std::vector<unsigned char> mem,ctrl,recs; bool dead; int bones; };
+// The bones a body's records hold: the posed ones of its kind, their names (wide, for BoneRecord506) and bind locals.
+struct SimBone { std::string kind,name; std::wstring wide; float bind[16]; };
+std::vector<SimBone> simBones;
+constexpr std::size_t kRecStride=0x110,kRecLocal=0x70,kInstCount=0x20;
 
 unsigned char* Make(SimBody& b,Role role,const float* at,float hp,float heading) {
     b.mem.assign(kBodySize,0);b.ctrl.assign(kCtrlSize,0);b.dead=false;
@@ -95,6 +107,22 @@ unsigned char* Make(SimBody& b,Role role,const float* at,float hp,float heading)
     std::memcpy(v+kPosition,at,12);
     Put<float>(v,kHpMax,hp);Put<float>(v,kHp,hp);
     Put<long>(b.ctrl.data(),8,1);   // a live control block (use count)
+    // Its model instance's bone records (veh+0xEE0: the array at +0x10, the count at +0x20), as many as --binds
+    // gave its kind: name at +0, local at +0x70, what BoneRecord506 and Pose read and write.
+    const char* const kind=role==Role::centipede ? "centipede" : role==Role::dragonfly ? "dragonfly" : "";
+    std::vector<const SimBone*> mine;
+    for(const auto& sb:simBones)if(sb.kind==kind)mine.push_back(&sb);
+    b.bones=static_cast<int>(mine.size());
+    b.recs.assign(mine.size()*kRecStride+16,0);
+    for(std::size_t i=0;i<mine.size();++i) {
+        unsigned char* rec=b.recs.data()+i*kRecStride;
+        Put<const wchar_t*>(rec,0,mine[i]->wide.c_str());
+        std::memcpy(rec+kRecLocal,mine[i]->bind,64);
+    }
+    if(!mine.empty()) {
+        Put<unsigned char*>(v+kModelInst506,kInstBones506,b.recs.data());
+        Put<std::int32_t>(v+kModelInst506,kInstCount,b.bones);
+    }
     Put<const void*>(v,kSelfCtrl,b.ctrl.data());
     // Its entry, as NewEntry makes one (the role its mark would name).
     for(auto& j:jets) {
@@ -141,7 +169,9 @@ int main(int argc,char** argv) {
     float seconds=90.0f;
     const char* how="stand";
     std::vector<std::pair<float,int>> kills;
-    float dps=0.0f;
+    float dps=0.0f,shootFrom=0.0f,killMiddle=-1.0f;   // --kill-middle: the middle one of the longest chain then
+    const char* framesPath=nullptr;
+    int every=6;
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--centipedes") && a+1<argc)centipedes=std::atoi(argv[++a]);
         else if(!std::strcmp(argv[a],"--dragonflies") && a+1<argc)dragonflies=std::atoi(argv[++a]);
@@ -149,6 +179,22 @@ int main(int argc,char** argv) {
         else if(!std::strcmp(argv[a],"--seconds") && a+1<argc)seconds=static_cast<float>(std::atof(argv[++a]));
         else if(!std::strcmp(argv[a],"--player") && a+1<argc)how=argv[++a];
         else if(!std::strcmp(argv[a],"--shoot") && a+1<argc)dps=static_cast<float>(std::atof(argv[++a]));
+        else if(!std::strcmp(argv[a],"--shoot-from") && a+1<argc)shootFrom=static_cast<float>(std::atof(argv[++a]));
+        else if(!std::strcmp(argv[a],"--kill-middle") && a+1<argc)killMiddle=static_cast<float>(std::atof(argv[++a]));
+        else if(!std::strcmp(argv[a],"--frames") && a+1<argc)framesPath=argv[++a];
+        else if(!std::strcmp(argv[a],"--every") && a+1<argc)every=std::atoi(argv[++a]);
+        else if(!std::strcmp(argv[a],"--binds") && a+1<argc) {
+            std::FILE* bf=std::fopen(argv[++a],"r");
+            if(!bf){std::fprintf(stderr,"cannot read %s\n",argv[a]);return 1;}
+            char kind[32],name[64];
+            SimBone sb{};
+            while(std::fscanf(bf,"%31s %63s",kind,name)==2) {
+                for(float& x:sb.bind)if(std::fscanf(bf,"%f",&x)!=1)x=0.0f;
+                sb.kind=kind;sb.name=name;sb.wide=std::wstring(sb.name.begin(),sb.name.end());
+                simBones.push_back(sb);
+            }
+            std::fclose(bf);
+        }
         else if(!std::strcmp(argv[a],"--kill") && a+1<argc) {
             float t=0;int id=0;
             if(std::sscanf(argv[++a],"%f:%d",&t,&id)==2)kills.emplace_back(t,id);
@@ -179,13 +225,35 @@ int main(int argc,char** argv) {
         Put<std::int32_t>(vs.back(),kTeam,2);
     }
     const int frames=static_cast<int>(seconds*60.0f);
+    std::FILE* out=framesPath ? std::fopen(framesPath,"w") : nullptr;
+    if(framesPath && !out){std::fprintf(stderr,"cannot write %s\n",framesPath);return 1;}
     for(int f=0;f<frames;++f) {
         nowMs+=16;
         const float t=static_cast<float>(f)*kDt;
         Player(how,t,seconds);
         for(auto& [kt,id]:kills)
             if(kt>=0.0f && t>=kt && id>=0 && id<static_cast<int>(vs.size())){vs[id][kDead]=1;bodies[id].dead=true;Log("SIM %d shot down",id);kt=-1.0f;}
-        if(dps>0.0f && f%10==0) {   // a hit on the nearest centipede in reach
+        if(killMiddle>=0.0f && t>=killMiddle) {   // the middle one of the longest chain (by their links, as the plugin keeps them)
+            killMiddle=-1.0f;
+            std::vector<int> best;
+            for(int i=0;i<static_cast<int>(vs.size());++i) {
+                if(bodies[i].dead || jets[i].role!=Role::centipede || jets[i].primer.ahead)continue;
+                std::vector<int> chain{i};
+                for(const void* b=jets[i].primer.behind;b && chain.size()<64;) {
+                    int next=-1;
+                    for(int k2=0;k2<static_cast<int>(vs.size());++k2)if(jets[k2].ref.ctrl==b)next=k2;
+                    if(next<0)break;
+                    chain.push_back(next);b=jets[next].primer.behind;
+                }
+                if(chain.size()>best.size())best=chain;
+            }
+            if(best.size()>=3) {
+                const int id=best[best.size()/2];
+                vs[id][kDead]=1;bodies[id].dead=true;
+                Log("SIM %d shot down: the middle of a chain of %d",id,static_cast<int>(best.size()));
+            } else Log("SIM no chain of 3 or more to split");
+        }
+        if(dps>0.0f && t>=shootFrom && f%10==0) {   // a hit on the nearest centipede in reach
             int best=-1;
             float bestD=300.0f;
             for(int i=0;i<static_cast<int>(vs.size());++i) {
@@ -221,7 +289,25 @@ int main(int argc,char** argv) {
             }
             Move(j,v);
         }
+        if(out && f%(every>0 ? every : 1)==0) {
+            std::fprintf(out,"frame %.3f\nplayer %.2f %.2f %.2f\n",t,player.pos[0],player.pos[1],player.pos[2]);
+            for(int i=0;i<static_cast<int>(vs.size());++i) {
+                if(bodies[i].dead)continue;
+                const float* m=reinterpret_cast<const float*>(vs[i]+kMatrix);
+                std::fprintf(out,"body %d %s",i,jets[i].role==Role::centipede ? "centipede" : jets[i].role==Role::dragonfly ? "dragonfly" : "jet");
+                for(int c=0;c<16;++c)std::fprintf(out," %.4f",m[c]);
+                std::fprintf(out,"\n");
+                for(int b=0;b<bodies[i].bones;++b) {
+                    const unsigned char* rec=bodies[i].recs.data()+b*kRecStride;
+                    std::fprintf(out,"bone %d %ls",i,At<const wchar_t*>(rec,0));
+                    const float* l=reinterpret_cast<const float*>(rec+kRecLocal);
+                    for(int c=0;c<16;++c)std::fprintf(out," %.5f",l[c]);
+                    std::fprintf(out,"\n");
+                }
+            }
+        }
     }
+    if(out)std::fclose(out);
     if(logFile)std::fclose(logFile);
     std::printf("simulated %.0f s: %d centipedes, %d dragonflies, %d friendly jets, player %s\n",seconds,centipedes,dragonflies,friendly,how);
     return 0;
