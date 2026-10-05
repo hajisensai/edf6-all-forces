@@ -928,6 +928,43 @@ def readme_counts() -> None:
     assert f'共 {len(calls.CALLS)} 行' in readme, f'README.md: say 共 {len(calls.CALLS)} 行 (tools/calls.py CALLS)'
 
 
+@test
+def stock_vehicle_hud_wired() -> None:
+    """The stock vehicles' HUD (src/vhud.cpp, src/rounds.cpp, hud.cpp StockVehicleHud): its ini key is read, shipped and
+    documented; the input hook gathers it after AimLines, which hides the player's line for it; the HUD publishes and
+    draws it; the helis' rockets are flown by the round model, not along a straight line (the user, 2026-10-06); every
+    round class rounds.cpp names is the one docs/hud-re.md §7 lists; the stock rockets tools/rounds_check.cpp flies are
+    Root.cpk's (re-read when the game is there)."""
+    import rootcpk
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert 'L"StockVehicleHud"' in plugin and re.search(r'^StockVehicleHud=1', ini, re.M) and 'StockVehicleHud' in readme
+    crew = src('src/crew.cpp')
+    hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 0 <= hook.find('&AimLines,') < hook.find('&StockHudFrame,'), 'src/crew.cpp InputHook: AimLines must run before StockHudFrame'
+    aim = crew.split('void AimLines(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerStockOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the stock HUD hides the player\'s line'
+    hud = src('src/hud.cpp')
+    assert 'PlayerStockHud(&s.stockHud)' in hud.split('void HudPublish(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StockVehicleHud(drawer' in hud.split('void HudDraw(', 1)[1].split('\n}\n', 1)[0]
+    sight = src('src/helisight.cpp').split('bool SolveArm(', 1)[1].split('\n}\n', 1)[0]
+    assert 'RoundLands(' in sight and 'kRocketStep' not in sight, 'src/helisight.cpp: the rockets flown as the game flies them'
+    rounds, doc = src('src/rounds.cpp'), src('docs/hud-re.md')
+    for vt, rtti in re.findall(r'\{(0x[0-9A-F]+),"\.\?AVFactory@(\w+)@@"', rounds):
+        assert f'`{vt}`' in doc and rtti.split('_')[0] in doc, (vt, rtti)
+    assert 'src/rounds.cpp' in src('CMakeLists.txt') and 'tools/rounds_check.cpp' in src('CMakeLists.txt')
+    check = src('tools/rounds_check.cpp')
+    rows = re.findall(r'\{"(V_\w+) \([^)]*\)",([\d.]+)f,([\d.]+)f,([\d.]+)f,([\d.]+)f,([\d.]+)f,(\d+),(\d+)\}', check)
+    assert len(rows) == 3, rows
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        for name, speed, factor, accel, top, keep, ignite, alive in rows:
+            w = dsgo.to_py(dsgo.parse(rootcpk.default().read('WEAPON', name + '.SGO')).root)
+            cp = w['Ammo_CustomParameter']
+            got = (w['AmmoSpeed'], w['AmmoGravityFactor'], cp[4], cp[6], cp[7][1], cp[7][0], w['AmmoAlive'])
+            want = (speed, factor, accel, top, keep, ignite, alive)
+            assert all(abs(float(g) - float(x)) < 1e-4 for g, x in zip(got, want)), (name, got, want)
+            assert w['AmmoClass'] == 'MissileBullet01' and cp[0] == 0, (name, w['AmmoClass'], cp[0])
+
+
 # ---------------------------------------------------------------- the transaction
 
 
