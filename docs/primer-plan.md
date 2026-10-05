@@ -77,7 +77,15 @@ CreateFriend("点名", "app:/object/edf6vc_centipede.sgo", 1.0, false);
 - `python tools/primer_pose_view.py centipede|dragonfly`：单只的动作（爬行 / 合体中 / 飞行；巡航 / 打击）；
 - `python tools/primer_chain_view.py [--links 8] [--flying]`：一条长龙（按 `kLinkSpacing` 沿弧长排开，弯曲角用 `LinkBend` 同一公式）。
 
-## 9. 待实机确认
+## 9. 不开游戏跑飞行和战斗（`tools/primer_flight_sim.cpp`）
+
+`primer.cpp`、`jet_flight.cpp`、`body506.cpp` 原样编进一个程序，替身世界提供它们碰到的游戏部分：平地的地形射线（`MapRay`）、
+机体是按插件读写的偏移放着矩阵 / 位置 / 血量 / 队伍 / 开火字节的清零内存块、每帧按插件给的速度和角速度移动（游戏里 506 物理钩子做的事）、
+按脚本移动的玩家、可选的友军战机和按时刻打掉某一只。插件的轨迹记录（`PrimerTrace`）照常写 CSV，`tools/primer_trace_view.py` 画图。
+2026-10-05 跑出的结果：6 只龙虫约 37 秒全部合成一条；打掉中间一只立刻断成两截，短的那截 3 秒后又接到长的尾巴上；
+蜻蜓在飞行的玩家与友军战机之间切换目标，玩家落地后只追战机。观察到的可调点：长龙中间各节很少对准玩家，火力主要在龙头。
+
+## 10. 待实机确认
 
 - 两个自制模型在游戏里能否正常显示（格式与原版一致、往返校验通过，但没进过游戏）；骨骼缩放（隐藏头尾）在游戏里是否生效。
 - 龙虫贴地 1.5 米时的碰撞与地形起伏；长龙跟随时相邻碰撞盒是否偶尔相碰。

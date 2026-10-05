@@ -90,6 +90,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - **出场**：任务脚本像放置战斗机一样放——`Preload("app:/object/edf6vc_centipede.sgo", -1);` 和 `CreateFriend("点名", "app:/object/edf6vc_centipede.sgo", 1.0, false);`（蜻蜓换成 `edf6vc_dragonfly.sgo`；放置点离地：龙虫 2–4 米、蜻蜓 15 米以上）。插件第一次看到就把它改到敌方队伍，按 `PrimerHpScale` 放大耐久（龙虫 400、蜻蜓 600）。测试场的敌人波次里选「星导者·百足龙虫」或「星导者·蜻蜓空优机」即可；
    - 队伍（`docs/swarm-team-re.md`，静态逆向）：载具的队伍每帧按乘员重算，RideAi 的假驾驶员写死是友军，所以插件每帧把驾驶员也改到敌方；子弹的队伍取载具的。它们算任务里的敌人（全灭任务会等它们），玩家的锁定武器应能锁定（推断，待实机）。死亡是原版坠毁；
    - 不进游戏也能看效果：`build.cmd` 后运行 `python tools/primer_pose_view.py centipede`（或 `dragonfly`）看单只的动作，`python tools/primer_chain_view.py --flying` 看一条长龙（都用插件同一份姿态代码离线跑），图在 `build/`；
+   - 不进游戏跑飞行和战斗：`build\primer_flight_sim.exe --centipedes 6 --dragonflies 2 --seconds 90 --player stand --kill 45:1`（在 `build` 目录里运行）把插件自己的 `primer.cpp` 和飞控代码放进一个替身世界（平地、按脚本走的玩家、按插件给的速度移动的机体；`--player stand|walk|fly|land`，`--jets N` 加友军战机，`--kill 秒:编号` 在那一刻打掉一只），插件的轨迹记录照常写出；再 `python tools/primer_trace_view.py build/Mods/Plugins/EDF6VehicleCrew.primer.csv` 画俯视轨迹（开火点、合体时刻）、高度曲线、最长龙的长度曲线。游戏里打开 ini 的 `PrimerTrace=1` 也会记录同一种轨迹，用同一个脚本画；
    - 只瞄准本机玩家；联机未验证；两种生物只由放置它们的任务加载，不增加其它关卡的加载量；`Primer=0` 时场上的星导者生物被删除；
    - **升级时必须重新运行安装器**：标记 7012 / 7013 以前（未发布的开发版）属于群体合体机，只换 DLL 不重新生成机体，旧机体会被当成龙虫 / 蜻蜓来飞。
 

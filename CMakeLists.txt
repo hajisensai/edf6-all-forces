@@ -22,3 +22,9 @@ add_subdirectory(autoturret)
 # not part of the plugin.
 add_executable(primer_pose_sim tools/primer_pose_sim.cpp)
 set_target_properties(primer_pose_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The Primer creatures' flight and fight run without the game (tools/primer_flight_sim.cpp): the plugin's own
+# primer.cpp and the jets' flight code against a stand-in world; tools/primer_trace_view.py draws its trace.
+add_executable(primer_flight_sim tools/primer_flight_sim.cpp src/primer.cpp src/jet_flight.cpp src/body506.cpp)
+target_link_libraries(primer_flight_sim PRIVATE edf6common)
+set_target_properties(primer_flight_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
