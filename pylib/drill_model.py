@@ -203,8 +203,9 @@ def build(game, obj_file: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
 def check(arc: bytes, host_bones: list[str] | None = None) -> None:
     """Re-read `arc` and raise DrillModelError unless: the archive and model round-trip; one object, on a kind-2 bone,
     every mesh valid (vertex / index buffers, < 65536 vertices, mesh_index a permutation, material and blend indices in
-    range, skinned only to skin bones, weights 1); every material texture (HD and .lod) an archive member; every bone's
-    bind x inverse bind the identity; the bone names in order are `host_bones` (the stock Blacker's) with DRILL_BONE
+    range, skinned only to skin bones, weights 1); every material texture (HD and .lod) an archive member, before the
+    model in folder-table order, in the stock HD / .lod layout (obj_model.texture_problems); every bone's bind x
+    inverse bind the identity; the bone names in order are `host_bones` (the stock Blacker's) with DRILL_BONE
     inserted under `body`; the drill bone's axes the model's, its geometry inside the cylinder of DRILL_RADIUS round
     its +Z from its origin to DRILL_LENGTH, every other vertex on `body`, behind the drill (but for the drive shaft
     into the drill's base, inside its radius) and over the ground."""
@@ -216,6 +217,8 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
     nb = len(md.bones)
     _req(nb < 256 and len(md.objects) == 1, f'{nb} bones, {len(md.objects)} objects')
     files = {f.name.lower() for f in rab.files}
+    bad = om.texture_problems(rab, md, HOST_MDB)
+    _req(not bad, 'textures: ' + '; '.join(bad))
     o = md.objects[0]
     _req(md.bones[o.bone].kind == 2 and o.meshes, 'the object is not on a kind-2 bone or has no mesh')
     _req(sorted(me.mesh_index for me in o.meshes) == list(range(len(o.meshes))), 'mesh_index not a permutation')

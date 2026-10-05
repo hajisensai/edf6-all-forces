@@ -252,6 +252,26 @@ def rab_read(b: bytes) -> Rab:
     return Rab(ver, folders, files)
 
 
+def insert_member(rab: Rab, f: RabFile) -> None:
+    """Insert `f` into `rab` keeping the members grouped in folder-table order, after every member of its own and of
+    each earlier folder (every stock archive: TEXTURE lods, MODEL, HD-TEXTURE; 185 of 185 checked).
+
+    The order is a load-order contract, not cosmetics: the engine reads an archive's non-HD members one after another
+    in table order (EDF.dll 0x69980: HD-flagged entries skipped, the rest read and dispatched in sequence), each
+    TEXTURE member is put into the archive's texture map under its name without `lod.` (0x110b182 / 0x110b2aa), and
+    a model binds every material texture slot when it loads, by filename in that map (0x110f640, the TEXTURE map is
+    the loader's 8th argument; not found = a null texture). A texture member after the model is never bound: the
+    model renders black."""
+    k = max((i for i, h in enumerate(rab.files) if h.folder <= f.folder), default=-1)
+    rab.files.insert(k + 1, f)
+
+
+def folder_order_ok(rab: Rab) -> bool:
+    """Members grouped in folder-table order (insert_member's invariant)."""
+    idx = [f.folder for f in rab.files]
+    return idx == sorted(idx)
+
+
 def _raw_size(stored: bytes) -> int:
     return struct.unpack_from('>I', stored, 4)[0] if stored[:4] == b'CMPL' else len(stored)
 
