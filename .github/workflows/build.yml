@@ -133,6 +133,22 @@ jobs:
           $notes = "main 最新构建（$($env:GITHUB_SHA.Substring(0,7))），每次推送 main 自动更新。正式版见 v* 版本。玩家下载 EDF6VehicleCrew-*.zip（安装器）。`n`n$(git log -1 --pretty=%s)"
           gh release create nightly $env:INSTALLER $env:TOOLS --target $env:GITHUB_SHA --prerelease --title "nightly ($($env:GITHUB_SHA.Substring(0,7)))" --notes $notes
 
+      - name: Mirror to the test site
+        # The installer zip into the test site (testhub/, https://edf6.fushi.moe): every push to main as `nightly`,
+        # a manual run on any branch as `test` (a fix sent to the tester before it is merged). Skipped without the
+        # EDF6_TESTHUB_AUTH secret (user:password of a developer account), e.g. on forks.
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        env:
+          PYTHONIOENCODING: utf-8
+          EDF6_TESTHUB_AUTH: ${{ secrets.EDF6_TESTHUB_AUTH }}
+        run: |
+          if (-not $env:EDF6_TESTHUB_AUTH) { Write-Host 'EDF6_TESTHUB_AUTH not set: skipped'; exit 0 }
+          $channel = if ($env:GITHUB_REF -eq 'refs/heads/main') { 'nightly' } else { 'test' }
+          $notes = "$($env:GITHUB_REF_NAME) $($env:GITHUB_SHA.Substring(0,7))`n$(git log -1 --pretty=%B)"
+          python tools/testhub.py publish $env:INSTALLER --channel $channel --commit $env:GITHUB_SHA --notes $notes
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
       - name: Publish release
         if: github.ref_type == 'tag'
         shell: pwsh
