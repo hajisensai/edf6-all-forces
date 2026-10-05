@@ -1031,7 +1031,7 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
 // learned from how the barrel moves, as EDF6AutoTurret's tank gunners do; an axis held at a stop with the
 // error not closing for kStuckMs flips its sign too.
 constexpr std::size_t kDoorBlock=0x2030,kDoorStride=0x20,kDoorPull=0x10;
-constexpr std::size_t kSeatAim=0xE0,kAimAxes=0x10,kAxisStride=0x40,kAxisMin=0x0,kAxisMax=0x4,kAxisAngle=0x8;
+// The seat aim's axes (kSeatAim, kAimAxes, ...): common/edf/layout.h.
 constexpr std::size_t kMuzzles=0x1D0,kMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleLocal=0x10,kBoneRows=0xB0;
 constexpr std::size_t kMuzzleMode=0xE0,kWeaponRows=0x150;
 constexpr std::int32_t kModeWeaponRows=0;

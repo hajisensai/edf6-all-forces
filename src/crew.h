@@ -165,6 +165,8 @@ inline float PlayEdge() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorl
 inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld : 3000.0f; }    // bigworld.cpp: once a mission, the map's ground on a grid (log)
 // The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
 bool LastViewProj(float* out) noexcept;
+// The camera's eye and its unit look through the screen's centre, from LastViewProj (hud.cpp); false: no camera yet.
+bool CameraRay(float* eye,float* dir) noexcept;
 // A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
 bool InstallBigWorld() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
@@ -184,6 +186,7 @@ void LockSound(unsigned char* vehicle) noexcept;
 using edf::kSelf; using edf::kSelfCtrl; using edf::kMatrix; using edf::kPosition; using edf::kDead; using edf::kTeam;
 using edf::kSeats; using edf::kSeatCount; using edf::kSeatStride; using edf::kSeatRider; using edf::kSeatRiderCtrl;
 using edf::kHumanPad; using edf::kHumanPlayer; using edf::kDummyRiderVtable; using edf::kSlotInput;
+using edf::kSeatAim; using edf::kAimAxes; using edf::kAxisStride; using edf::kAxisMin; using edf::kAxisMax; using edf::kAxisAngle;
 using edf::At; using edf::Put;
 // Teams (mission AsCommon.h): player 0, enemy 1, friend 2, neutral 3, vehicle 5 = nobody's vehicle,
 // which anyone may board (CanRideSeat skips the team test for it).
@@ -451,6 +454,15 @@ struct LauncherReadout {
 bool RoundImpact(const float* pos,const float* vel,const float* drop,int frames,float* hit,float* took) noexcept;
 void LauncherFrame(unsigned char* vehicle) noexcept;
 bool PlayerLauncher(LauncherReadout* out) noexcept;
+// katyusha.cpp: the Katyusha's launcher pose. The 402 class's pose call is detoured: after the stock pose the launcher
+// is held at the elevation LauncherFrame asks for with SetLauncherLoft (the arc onto where the player's camera looks;
+// `aim` false: none, the stock pose, the player's own aim), eased at the stock turret's rate, and the telescopic ram's
+// two bones are aimed at each other's pivot. LauncherLoft: the last pose of `vehicle` (rad; held: off the stock pose).
+bool InstallKatyusha() noexcept;
+void SetLauncherLoft(const void* vehicle,bool aim,float elevation) noexcept;
+struct LoftReadout { bool held; float elevation,stock,ramTurn,ramLength; };
+bool LauncherLoft(const void* vehicle,LoftReadout* out) noexcept;
+void ResetKatyushas() noexcept;
 // Whether the player in `vehicle` sees our gun sight instead of the stock aim lines (crew.cpp AimLines): an aircraft
 // the player-jet flight flies (playerjet.cpp), ini PlayerJetGunSight on.
 bool PlayerJetOwnSight(const void* vehicle) noexcept;

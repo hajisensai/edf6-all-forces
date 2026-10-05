@@ -21,6 +21,10 @@ constexpr std::size_t kMatrix=0x60,kPosition=0x90,kDead=0x2E8,kTeam=0x314;
 constexpr std::size_t kSeats=0x608,kSeatCount=0x618,kSeatStride=0x340;
 // Seat: rider object / its weak_ptr control block (occupied while the use count is non-zero, 0x634710)
 constexpr std::size_t kSeatRider=0x260,kSeatRiderCtrl=0x268;
+// Seat: its aim (VehicleWeaponAim, vtable 0x17D8A68) at +0xE0, its axes at +0x10, stride 0x40, each {min, max, angle,
+// velocity, ...}: yaw, then pitch (negative up). Slot 2 (0x5FBDA0) turns them by the vehicle's turn input (+0x2AA0),
+// slot 3 (0x5FACD0) builds the aim's matrix from the two angles.
+constexpr std::size_t kSeatAim=0xE0,kAimAxes=0x10,kAxisStride=0x40,kAxisMin=0x0,kAxisMax=0x4,kAxisAngle=0x8;
 // Human: pad / player-controlled (the test 0x572EFF and 0x673AC2 make before reading a pad)
 constexpr std::size_t kHumanPad=0x340,kHumanPlayer=0x354;
 // A rider's network object (rider+0x120); bit 0 of its +8 set: another machine runs it (the weapon fire

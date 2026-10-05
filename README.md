@@ -236,7 +236,8 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/heli.cpp`：直升机自动驾驶。
 - `src/playerjet.cpp`：玩家驾驶的战斗机 / 攻击机飞控（`docs/player-jet-re.md`）。
 - `src/drill.cpp`：钻头战车的钻头（转速、旋转、热量、近战伤害、钻开建筑；`docs/drill-re.md`）。
-- `src/launcher.cpp`：喀秋莎的落点显示（CCIP），弹道模型与离线验证见 `pylib/ballistics.py` 和 `autoturret/docs/re-notes.md`「Rounds in flight」。
+- `src/launcher.cpp`：喀秋莎的落点显示（CCIP）和高抛瞄准（按镜头看的地面点算发射架仰角），弹道模型与离线验证见 `pylib/ballistics.py` 和 `autoturret/docs/re-notes.md`「Rounds in flight」。
+- `src/katyusha.cpp`：喀秋莎发射架的姿态（只抬发射架、不动镜头）和伸缩液压杆，逆向笔记见 `autoturret/docs/re-notes.md`「The Katyusha's camera and pose」。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。
@@ -250,11 +251,14 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 
 空降兵可以请求一辆喀秋莎（武器 `EDF6VC_CALL_KATYUSHA`，请求方式和档位都参照 Naegling，由运输机空投）。
 - **外形**：军用卡车，车斗上架着 Naegling 的多管火箭发射架。安装器从你本机的 Root.cpk 现场拼出模型（`tools/make_katyusha.py`、`pylib/katyusha_model.py`）。
+- **液压杆**：发射架下面的液压杆做成了伸缩式：缸筒装在转台上，活塞杆的末端连在发射架上，发射架从 0° 抬到 80° 时活塞杆从缸筒里伸出约 0.28 米，两头始终连着。原版 Naegling 的液压杆是一整根、跟着发射架的仰角一起转，只配得上它的 50°：抬过约 52° 杆头就从发射架里露出来，80° 时离开发射架 1.3 米（这就是之前看到的「液压杆不够长、和顶部分开」）。模型把活塞杆拆到一根自己的骨骼上（`edf6vc_ram_rod`），由 EDF6VehicleCrew 每帧把缸筒和活塞杆对准彼此的转轴（`src/katyusha.cpp`）；生成模型时按 0°～80° 每 5° 检查一遍：活塞杆始终插在缸筒里、杆头始终在发射架里（`katyusha_model.check_ram`）。
 - **操作**：和 Naegling 相同。车辆类沿用 Naegling 的，所以是坦克式转向，左右轮差速，可以原地转弯，前轮不打方向。
 - **武器**：无制导火箭弹（外形是原版歌利亚 / 格兰特火箭筒的火箭弹 `bullet_rocket.rab`，拖着 2 秒长的尾烟），走抛物线，一轮齐射 40 发、散布覆盖一片区域，装填 10 秒。火箭弹出膛 120 m/s（`AmmoSpeed` 2.0 米/帧；档位只放大伤害和耐久，不改弹速），寿命 25 秒，散布锥半角 0.02 弧度（45° 时落点散开约 ±28 米，80° 时约 ±38 米）。
 - **高抛弹道**：发射架最高能抬到 80°（Naegling 原版只到 50°）。在平地上（游戏实测重力 14.7 m/s²，`pylib/ballistics.py`）：最远射程 978 米（仰角 45°，飞行 11.5 秒）；高抛弹道（仰角 45°～80°）覆盖 335 米到 978 米，80° 时飞行 16.1 秒。比 335 米更近的目标只能放低发射架平射。
+- **瞄准**：和其它载具一样，用镜头瞄准：把屏幕中心对准地面上要打的地方，发射架会自己抬到让火箭弹落在那里的仰角（优先高抛弹道；目标近到高抛要超过 80° 时用低伸弹道；超出最远射程时抬到 45° 打最远），镜头不跟着抬，始终看着你瞄的地方。发射架按原版炮塔的速度（约每秒 1.1 弧度，63°）转过去，落点以黄色十字为准。屏幕中心看着天空、找不到地面时，发射架就停在你镜头的方向（和原版 Naegling 一样，抬镜头就抬发射架）。这由 EDF6VehicleCrew 做（`src/launcher.cpp` 算仰角，`src/katyusha.cpp` 只改发射架骨骼的姿态，不改座位的瞄准轴，所以不会动镜头），不需要 EDF6AutoTurret。
 - **落点显示**：你坐上喀秋莎时，屏幕上的黄色十字是此刻发射的火箭弹会落在哪里（和战斗机炸弹的 CCIP 一样），周围一圈黄点是一轮齐射的散布范围，十字下面写着水平距离、飞行时间和发射架仰角（`ELEV`）。它从发射架自己的炮口、沿发射轨方向、按武器实际的弹速和重力系数、像游戏一样逐帧推进弹道，并沿弹道每 0.25 秒打一条地图射线找落地点（地形和建筑，水面不算）；火箭弹在寿命内落不了地时不显示。由 EDF6VehicleCrew 画（`src/launcher.cpp`），不装 EDF6AutoTurret 也有。
-- **自瞄**：需要同时装 EDF6AutoTurret（本仓库 `autoturret/`）。它会自动把发射架转向地面目标，按火箭弹道算好仰角，走**高抛弹道**（两个解里仰角大于 45° 的那个；目标近到高抛解超过 80° 时才退回低伸解）；你手动瞄准时由你接管，抬高发射架就是高抛，落点看黄色十字。
+- **自瞄**：只给 NPC 开的喀秋莎（需要 EDF6AutoTurret，本仓库 `autoturret/`）：它把发射架转向地面目标，走**高抛弹道**（两个解里仰角大于 45° 的那个；目标近到高抛解超过 80° 时才退回低伸解）。你自己开的喀秋莎它不碰：游戏的镜头跟着座位的瞄准轴走（逆向推断，见下面「待游戏内确认」），自瞄转瞄准轴就等于替你转镜头（以前把发射架抬到 75°～79° 时镜头一直看天，就是这个原因），所以现在由你用镜头选目标，发射架自己抬到高抛仰角（见上面的「瞄准」）。
+- **已离线核对 / 待游戏内确认**：液压杆在 0°～80° 的姿态、仰角解算（`tools/selftest.py` `lofted_arc_solver`、`katyusha_pose_agrees`）都离线核对过；游戏里还要看：镜头确实只跟瞄准轴、不跟发射架骨骼（`Debug=1` 时日志 `LOFT` 行的 `camera` 应接近 `stock(axis)`，而不是 `bone`），火箭弹沿抬起后的发射架飞出、黄色十字落在屏幕中心瞄的地方附近，液压杆在画面里连着。
 
 ## 自行榴弹炮
 

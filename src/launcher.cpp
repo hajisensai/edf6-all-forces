@@ -12,6 +12,9 @@
 //    each of those arcs down to the impact's height (closed form of the same per-frame step: no rays).
 // Computed on the game thread from the vehicle's input (crew.cpp InputHook), published with the HUD's frame
 // (hud.cpp HudPublish) and drawn by it. Works whether EDF6AutoTurret is installed or not: it reads only the weapon.
+// The loft (LoftWant): the player aims the launcher with the camera at a ground point; the elevation that drops the
+// rockets there (the high arc while the launcher can reach it, else the low one) goes to katyusha.cpp, which lifts the
+// launcher's bone alone, so the camera keeps looking where the player looks (katyusha.cpp's file comment).
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
@@ -24,6 +27,7 @@ constexpr int kSegment=15;              // frames a map ray covers (0.25 s: the 
 constexpr std::uint64_t kMostMuzzles=64;
 constexpr ULONGLONG kFreshMs=200;       // a readout not refreshed this long (game ms) is gone: the player got out
 constexpr float kPi=3.14159265f;
+constexpr float kSightFar=3000.0f;      // m: the farthest the camera's ground point is looked for (the stock far clip)
 
 LauncherReadout latest{};
 ULONGLONG latestMs=0;
@@ -101,7 +105,34 @@ bool Solve(const unsigned char* weapon,LauncherReadout& r) noexcept {
     return true;
 }
 
-void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherReadout& r) noexcept {
+// The elevation (rad up, on the vehicle) the launcher needs to drop its rockets where the player's camera looks (the
+// first ground along the screen's centre: CameraRay + MapRay): the high arc while the launcher's stops allow it, else
+// the low one, else (out of reach) 45 deg, the farthest it throws. Solved as EDF6AutoTurret solves (edf::BallisticArc:
+// from the launcher's muzzles, in the vehicle's frame, gravity along the vehicle's down). False when the camera looks
+// at no ground: the launcher then stays where the player aims it (the stock pose).
+bool LoftWant(const unsigned char* v,const unsigned char* seat,const unsigned char* weapon,float* want,float* range) noexcept {
+    float eye[3],dir[3],pos[3],rail[3],g[3],hit[3];
+    if(!CameraRay(eye,dir) || !edf::MeanMuzzle(weapon,kMostMuzzles,pos,rail) || !edf::WorldGravity(image,g))return false;
+    const float end[3]={eye[0]+dir[0]*kSightFar,eye[1]+dir[1]*kSightFar,eye[2]+dir[2]*kSightFar};
+    if(MapRay(eye,end,hit)<0.0f)return false;
+    const float speed=At<float>(weapon,edf::kWeaponAmmoSpeed),factor=At<float>(weapon,edf::kWeaponAmmoGravity);
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const float d[3]={hit[0]-pos[0],hit[1]-pos[1],hit[2]-pos[2]};
+    const float across=d[0]*m[0]+d[1]*m[1]+d[2]*m[2],up=d[0]*m[4]+d[1]*m[5]+d[2]*m[6],ahead=d[0]*m[8]+d[1]*m[9]+d[2]*m[10];
+    const double x=std::sqrt(across*across+ahead*ahead);
+    const double drop=factor*-(g[0]*m[4]+g[1]*m[5]+g[2]*m[6])/3600.0;
+    const auto pitch=seat+kSeatAim+kAimAxes+kAxisStride;   // the pitch axis' stops, negative up
+    const float lowest=-At<float>(pitch,kAxisMax),highest=-At<float>(pitch,kAxisMin);
+    float e=0.0f,frames=0.0f;
+    if(!(edf::BallisticArc(x,up,speed,drop,true,e,frames) && e>=lowest && e<=highest)
+       && !edf::BallisticArc(x,up,speed,drop,false,e,frames))e=0.25f*kPi;
+    if(!std::isfinite(e) || !(highest>lowest))return false;
+    *want=e<lowest ? lowest : e>highest ? highest : e;
+    *range=static_cast<float>(x);
+    return true;
+}
+
+void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherReadout& r,bool aim,float want,float sight) noexcept {
     static ULONGLONG at=0;
     const ULONGLONG now=GetTickCount64();
     if(!Cfg().debug || now-at<2000)return;
@@ -109,6 +140,14 @@ void DebugLog(const unsigned char* v,const unsigned char* weapon,const LauncherR
     Log("LAUNCHER v=%p elev=%.1f speed=%.3fm/f alive=%d cone=%.4f(x%.3f) reach=%d range=%.0fm flight=%.1fs ring=%d",v,r.elevation,
         At<float>(weapon,edf::kWeaponAmmoSpeed),At<std::int32_t>(weapon,edf::kWeaponAmmoAlive),At<float>(weapon,edf::kWeaponAccuracy),
         At<float>(weapon,edf::kWeaponAccuracyScale),r.reach,r.range,r.flight,r.rings);
+    // The camera's pitch against the axis' (the stock pose's) and the held launcher's: the camera following the axes,
+    // not the bone, is what keeps it on the ground while the launcher is lofted (katyusha.cpp).
+    float eye[3],dir[3];
+    const float cam=CameraRay(eye,dir) ? std::asin(dir[1]<-1.0f ? -1.0f : dir[1]>1.0f ? 1.0f : dir[1])*180.0f/kPi : 0.0f;
+    LoftReadout l{};
+    if(LauncherLoft(v,&l))
+        Log("LOFT v=%p sight=%d %.0fm want=%.1f held=%d bone=%.1f stock(axis)=%.1f camera=%.1f ram=%+.1fdeg %.2fm",v,aim,sight,
+            want*180.0f/kPi,l.held,l.elevation*180.0f/kPi,l.stock*180.0f/kPi,cam,l.ramTurn*180.0f/kPi,l.ramLength);
 }
 }  // namespace
 
@@ -136,6 +175,9 @@ void LauncherFrame(unsigned char* v) noexcept {
     if(SeatRider(seat)!=Rider::player)return;
     const unsigned char* weapon=LoftedLauncher(seat);
     if(!weapon)return;
+    float want=0.0f,sight=0.0f;
+    const bool aim=LoftWant(v,seat,weapon,&want,&sight);
+    SetLauncherLoft(v,aim,want);
     LauncherReadout r{};
     if(!Solve(weapon,r)) {
         static ULONGLONG at=0;
@@ -148,7 +190,7 @@ void LauncherFrame(unsigned char* v) noexcept {
         return;
     }
     latest=r;latestMs=GameMs();
-    DebugLog(v,weapon,r);
+    DebugLog(v,weapon,r,aim,want,sight);
 }
 
 bool PlayerLauncher(LauncherReadout* out) noexcept {

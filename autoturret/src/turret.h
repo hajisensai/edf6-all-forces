@@ -66,11 +66,11 @@ constexpr unsigned kFlakVtable=0x17DC620,kFlakInput=0x621460;   // Vehicle603_Fl
 // Vehicle: the turn input the input slot writes (seat i at +0x2AA0 + i*0x10: yaw, pitch)
 constexpr std::size_t kTurn=0x2AA0,kTurnStride=0x10;
 // Seat (stride 0x340): weapon holders, aim controller, rider stick
-constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kSeatAim=0xE0,kStick=0x2D0;
+constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kStick=0x2D0;
 constexpr std::size_t kHolderWeapon=0x10;
 constexpr std::uint64_t kMaxHolders=8;
-// VehicleWeaponAim: axes at +0x10, stride 0x40; {min, max, angle, velocity, ...}
-constexpr std::size_t kAimAxes=0x10,kAxisStride=0x40,kAxisMin=0x0,kAxisMax=0x4,kAxisAngle=0x8;
+// The seat's aim and its axes: common/edf/layout.h
+using edf::kSeatAim; using edf::kAimAxes; using edf::kAxisStride; using edf::kAxisMin; using edf::kAxisMax; using edf::kAxisAngle;
 // Weapon lock-on profile, filled from the SGO at 0x68D4A0: LockonType, LockonTargetType, LockonRange.
 constexpr std::size_t kLockonType=0x6B0,kLockonTargetType=0x6B4,kLockonRange=0x6D0;
 // Our guns' marker: LockonTargetType set to one of the mod's marks (common/edf/weapon.h: kMarkAir, kMarkGround,
