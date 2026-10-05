@@ -24,3 +24,33 @@ add_subdirectory(autoturret)
 add_executable(pjet_kinds EXCLUDE_FROM_ALL tools/pjet_kinds.cpp)
 target_include_directories(pjet_kinds PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(pjet_kinds PRIVATE /W4 /WX /utf-8 /permissive-)
+
+# NPC jets against buildings, offline (tools/jet_obstacle_sim.cpp): the plugin's own jet_flight.cpp, jet_combat.cpp and
+# body506.cpp against a stand-in world of flat ground and box buildings; tools/jet_obstacle_view.py draws its trace.
+# jet_obstacle_sim_before: the same with Wing's Ahead call and Strike's InSight test cut out of copies of the two files,
+# to show what they change. Not part of the plugin build:
+# cmake --build build --target jet_obstacle_sim jet_obstacle_sim_before
+file(READ src/jet_flight.cpp EDF6_SIM_FLIGHT)
+file(READ src/jet_combat.cpp EDF6_SIM_COMBAT)
+string(REPLACE "    Ahead(j,pos,ms);\n" "" EDF6_SIM_FLIGHT_BEFORE "${EDF6_SIM_FLIGHT}")
+string(REPLACE " && InSight(pos,lead)" "" EDF6_SIM_COMBAT_BEFORE "${EDF6_SIM_COMBAT}")
+set(EDF6_SIMS jet_obstacle_sim)
+add_executable(jet_obstacle_sim EXCLUDE_FROM_ALL tools/jet_obstacle_sim.cpp src/jet_flight.cpp src/jet_combat.cpp src/body506.cpp)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/jet_flight.cpp src/jet_combat.cpp)
+# The cut not found (the code moved): no "before" build, never a failed configure of the plugin's own.
+if(EDF6_SIM_FLIGHT_BEFORE STREQUAL EDF6_SIM_FLIGHT OR EDF6_SIM_COMBAT_BEFORE STREQUAL EDF6_SIM_COMBAT)
+    message(WARNING "jet_obstacle_sim_before skipped: the Ahead call or the InSight test is no longer where the copy cuts it")
+else()
+    file(WRITE "${CMAKE_BINARY_DIR}/sim/jet_flight_before.cpp" "${EDF6_SIM_FLIGHT_BEFORE}")
+    file(WRITE "${CMAKE_BINARY_DIR}/sim/jet_combat_before.cpp" "${EDF6_SIM_COMBAT_BEFORE}")
+    add_executable(jet_obstacle_sim_before EXCLUDE_FROM_ALL tools/jet_obstacle_sim.cpp "${CMAKE_BINARY_DIR}/sim/jet_flight_before.cpp"
+                   "${CMAKE_BINARY_DIR}/sim/jet_combat_before.cpp" src/body506.cpp)
+    list(APPEND EDF6_SIMS jet_obstacle_sim_before)
+endif()
+foreach(sim ${EDF6_SIMS})
+    target_include_directories(${sim} PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+    target_link_libraries(${sim} PRIVATE edf6common)
+    target_compile_options(${sim} PRIVATE /W3 /utf-8 /permissive-)
+    target_compile_definitions(${sim} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    set_target_properties(${sim} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+endforeach()

@@ -407,17 +407,30 @@ bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept {
 // kMinAlt under it out to a pull-up's time (kReact, the roll to lift, the climb's turn s / (maxG g); kSweepMin to
 // kSweepMax s) in kSweepSlots stretches, kSweepPerFrame a frame (a whole sweep every 3 frames: 2 rays a jet a frame);
 // a stretch that hits something has its top found and kept as the obstacle, the highest one, until the jet is past it,
-// it lies kObstOff to the side of its track (turned away, or a building it only grazed), or the sweep's time and
-// kObstKeepMs more is up. The top: a ray down from kRoofProbe over the jet (or the hit) onto a point kObstStep past the
-// face, its first hit (a roof); none, it starts inside something taller still, taken as that tall. (A ray down from the
-// point itself, inside the building, found the street under it: the face's own height, never the roof.)
+// it lies kObstOff to the side of its track while it is not turning off it (a building it only grazed; turning off, the
+// turn itself takes it off the track, and dropping it then turned the jet back onto it), or the sweep's time and
+// kObstKeepMs more is up. The top: a ray down from kRoofProbe over the jet (or the hit) onto a point kObstIn on along
+// the stretch from the hit and kObstSink under it, its first hit (a roof); none, it starts inside something taller
+// still, taken as that tall. (A ray down from the point itself, inside the building, found the street under it; one
+// onto a point level with a hit on the ground, or past a corner it grazed, missed and made a 400 m wall of nothing:
+// the offline flight test, tools/jet_obstacle_sim.cpp, pulled strafing dives out at 117 m instead of 65.)
 constexpr int kSweepSlots=6,kSweepPerFrame=2;
-constexpr float kSweepMin=3.0f,kSweepMax=8.0f,kObstStep=3.0f,kRoofProbe=400.0f,kObstOff=40.0f;
+constexpr float kSweepMin=3.0f,kSweepMax=8.0f,kObstIn=0.5f,kObstSink=1.0f,kRoofProbe=400.0f,kObstOff=40.0f;
 constexpr ULONGLONG kObstKeepMs=2000;
-// Guard over it: kObstMargin times the slope to its top, kObstSteep (the sine) at most; steeper than kObstTurnSlope
-// (rise over distance, 45 deg) it turns off as well, kAsideAngle off the line to it, to the side (picked once, when it
-// is found: TurnSide) whose ray at its height reaches further past it (kAsideBeyond).
-constexpr float kObstMargin=1.3f,kObstSteep=0.9f,kObstTurnSlope=1.0f,kAsideAngle=0.6f,kAsideBeyond=150.0f;
+// Guard over it: kObstMargin times the slope to its top, kObstSteep (the sine) at most. When the climb it needs is more
+// than kClimbShare of what a pull-up at its g gets it in that distance (Unclimbable: a 45 deg rule sent a jet at a
+// 400 m tower 600 m out up its face), it turns off as well, kAsideAngle off the line to it, to the side (picked once,
+// when it is found: TurnSide) whose ray at its height reaches further past it (kAsideBeyond).
+constexpr float kObstMargin=1.3f,kObstSteep=0.9f,kClimbShare=0.8f,kAsideAngle=0.6f,kAsideBeyond=150.0f;
+
+// Whether `rise` is more than it climbs in `d` (horizontal) on a pull-up at its g: the arc of radius s^2 / ((maxG - 1) g)
+// rises r - sqrt(r^2 - d^2) in d (straight up past a quarter turn), kClimbShare of that.
+bool Unclimbable(const Jet& j,float rise,float d) noexcept {
+    const Kind& k=KindOf(j);
+    const float s=Len(j.m.vel),r=s*s/(std::fmax(k.maxG-1.0f,0.5f)*kG);
+    const float most=d<r ? r-std::sqrt(r*r-d*d) : d;
+    return rise>most*kClimbShare;
+}
 
 // `dir` (level, unit) turned `side` (+1 / -1) by kAsideAngle.
 void Turned(const float* dir,float side,float* out) noexcept {
@@ -449,7 +462,7 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
     if(mo.obstUntil) {
         const float to[3]={mo.obstAt[0]-pos[0],0.0f,mo.obstAt[2]-pos[2]};
         const float along=to[0]*dir[0]+to[2]*dir[2],off=std::fabs(to[0]*dir[2]-to[2]*dir[0]);
-        if(ms>mo.obstUntil || !moving || along<0.0f || off>kObstOff){mo.obstUntil=0;mo.obstSide=0;}
+        if(ms>mo.obstUntil || !moving || along<0.0f || (off>kObstOff && !mo.obstSide)){mo.obstUntil=0;mo.obstSide=0;}
     }
     if(!moving)return;
     const float span=Clamp(kReact+RollToLift(j)/k.roll+s/(k.maxG*kG),kSweepMin,kSweepMax);
@@ -460,7 +473,9 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
         const float b[3]={pos[0]+mo.vel[0]*t1,pos[1]+mo.vel[1]*t1-kMinAlt,pos[2]+mo.vel[2]*t1};
         float hit[3];
         if(MapRay(a,b,hit)<0.0f)continue;
-        const float in[3]={hit[0]+dir[0]*kObstStep,hit[1],hit[2]+dir[2]*kObstStep};
+        float seg[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
+        if(!Normalize(seg))std::memcpy(seg,dir,12);
+        const float in[3]={hit[0]+seg[0]*kObstIn,hit[1]+seg[1]*kObstIn-kObstSink,hit[2]+seg[2]*kObstIn};
         const float from[3]={in[0],(pos[1]>hit[1] ? pos[1] : hit[1])+kRoofProbe,in[2]};
         float roof[3];
         const float top=MapRay(from,in,roof)>=0.0f ? roof[1] : from[1];
@@ -471,7 +486,7 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
         mo.obstUntil=ms+static_cast<ULONGLONG>(span*1000.0f)+kObstKeepMs;
     }
     // Too steep to climb from here (now, or once it has come closer): its side picked, once.
-    if(mo.obstUntil && !mo.obstSide && mo.obstTop+kMinAlt-pos[1]>HorizDist(pos,mo.obstAt)*kObstTurnSlope)
+    if(mo.obstUntil && !mo.obstSide && Unclimbable(j,mo.obstTop+kMinAlt-pos[1],HorizDist(pos,mo.obstAt)))
         mo.obstSide=TurnSide(pos,mo.obstAt);
 }
 
@@ -491,7 +506,7 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
         rise=j.m.obstTop+kMinAlt-pos[1];
         float to[3]={j.m.obstAt[0]-pos[0],0.0f,j.m.obstAt[2]-pos[2]};
         const float h=std::sqrt(want[0]*want[0]+want[2]*want[2]);
-        if(j.m.obstSide && rise>toObst*kObstTurnSlope && Normalize(to)) {
+        if(j.m.obstSide && Unclimbable(j,rise,toObst) && Normalize(to)) {
             float way[3];Turned(to,static_cast<float>(j.m.obstSide),way);
             const float flat=h>1e-4f ? h : 1.0f;
             want[0]=way[0]*flat;want[2]=way[2]*flat;
@@ -525,6 +540,14 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
         bottom-=s*s/(k.maxG*kG)*(1.0f-cosDive)-j.m.vel[1]*t+0.5f*kGravity*sinDive*sinDive*t*t;
     }
     if(bottom<floorY+kMinAlt) {
+        // Pulling up, never turning back at the same time: `want` behind it made JetSteer's shortest arc go through
+        // straight down (over a tower, its target behind it, a jet dived at -47 deg to 1 m: the offline flight test).
+        // Up first, along its way; the turn after.
+        float flatV[3]={j.m.vel[0],0.0f,j.m.vel[2]};
+        if(Normalize(flatV) && want[0]*flatV[0]+want[2]*flatV[2]<0.0f) {
+            const float hw=std::sqrt(want[0]*want[0]+want[2]*want[2]);
+            want[0]=flatV[0]*hw;want[2]=flatV[2]*hw;
+        }
         const float need=Clamp((floorY+kMinAlt-bottom)/40.0f,0.3f,0.8f);
         if(want[1]<need){want[1]=need;Normalize(want);}
         // Over what is ahead: kObstMargin times the slope from here to its top, kObstSteep at most, as the path's own
