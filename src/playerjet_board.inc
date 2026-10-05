@@ -134,8 +134,9 @@ constexpr int kShellRounds=99;
 constexpr ULONGLONG kChargeFireMs=100,kChargeMs=300;   // jet_carrier.cpp kBlastFireMs / kBlastMs
 constexpr float kOrderUp=40.0f;   // m: the drones' point over the sight (they work round it, jet.cpp)
 
-// The room its own weapons take in the cockpit's cycle (kMostStores in all): the gunship's two guns, else one.
-int SpecialRoom(const PJet& j) noexcept { return j.board && j.board->arm==pjet::Arm::shells ? 2 : 1; }
+// The room its own weapons take in the cockpit's cycle (kMostStores in all): the gunship's two guns (the cannon only when
+// its round is installed, SpecialStore: else its slot is a pylon's), else one.
+int SpecialRoom(const PJet& j) noexcept { return j.board && j.board->arm==pjet::Arm::shells && jet::CannonReady() ? 2 : 1; }
 
 // Its own weapons as stores, at most SpecialRoom of them: their count.
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept {
