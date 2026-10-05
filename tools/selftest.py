@@ -137,6 +137,112 @@ def jet_nozzles_on_their_models() -> None:
 
 
 @test
+def chute_canopy_geometry() -> None:
+    """pylib/chute_model.py canopy(): a dome 2 x RADIUS across and HEIGHT over its rim, open underneath (nothing under
+    the rim but the lines, which stay inside it and end at the riser point), the outside shell facing out and the
+    inside in, every triangle wound as the stock models' (its cross product along its normals)."""
+    import chute_model as cm
+    verts, tris = cm.canopy()
+    assert len(verts) < 0x10000 and tris, (len(verts), len(tris))
+    assert all(max(t) < len(verts) for t in tris)
+    p = [v[0] for v in verts]
+    assert abs(max(x for x, _y, _z in p) - min(x for x, _y, _z in p) - 2 * cm.RADIUS) < 1e-3
+    assert abs(max(y for _x, y, _z in p) - cm.RIM_Y - cm.HEIGHT) < 1e-3
+    assert abs(min(y for _x, y, _z in p) - cm.RISER_Y) < cm.LINE_WIDTH   # a strip's corners, half its width round the point
+    for x, y, z in p:
+        r = (x * x + z * z) ** 0.5
+        assert r <= cm.RADIUS + cm.LINE_WIDTH, (x, y, z)   # the lines' strips: half their width off the rim
+        if y < cm.RIM_Y - 1e-3:   # a line: on the cone from the rim to the riser point
+            assert r <= cm.RADIUS * (y - cm.RISER_Y) / (cm.RIM_Y - cm.RISER_Y) + cm.LINE_WIDTH, (x, y, z)
+    bad = [t for t in tris if cm.facing(verts, t) <= 0]
+    assert not bad, f'{len(bad)} triangles wound against their normals'
+    shell = (cm.SEGMENTS + 1) * (cm.RINGS + 1)
+    for k, (q, n, *_rest) in enumerate(verts[:2 * shell]):
+        out = (q[0] * n[0] + (q[1] - cm.RIM_Y) * n[1] + q[2] * n[2]) > 0
+        assert out == (k < shell), f'vertex {k}: normal {n} at {q}'
+
+
+def _chute_game() -> object:
+    """A stand-in for rootcpk.Game with what pylib/chute_model.py reads: the Grape's archive cut down to one fabric
+    material, its seat layout (one triangle) and its textures (an 8 x 8 DXT1 occlusion map, bright in one block), and
+    a far-off plant SGO."""
+    import struct
+    import chute_model as cm
+    from mdb import Bone, MatParam, MatTex, Material, Mdb, Mesh, Object, Rab, RabFile, Texture, VElem, mdb_write, rab_write
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+    bones = [Bone(i, -1 if i == 0 else 0, -1, -1, i, 0, kind, 0, int(kind == 3), 0, 0, list(ident), list(ident),
+                  [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0]) for i, kind in enumerate((0, 2, 3))]
+    elems = [VElem(7, 0, 0, 'position'), VElem(7, 8, 0, 'normal'), VElem(7, 16, 0, 'binormal'), VElem(7, 24, 0, 'tangent'),
+             VElem(12, 32, 0, 'texcoord'), VElem(12, 40, 1, 'texcoord'), VElem(1, 48, 0, 'BLENDWEIGHT'),
+             VElem(21, 64, 0, 'BLENDINDICES')]
+    seat = Mesh(bytes((0, 1, 1, 0)), 0, 0, 68, elems, 0, bytes(68 * 3), struct.pack('<3H', 0, 1, 2))
+    mat = Material(0, 0, 0, 3, 'snd_BRDF_Common_SeparateOcc', [MatParam([0.5, 0.5, 0.5, 0.0], (0, 0), 'diffuse', 0x402)],
+                   [MatTex(0, 'albedo', (0,) * 5), MatTex(1, 'param_occ', (0,) * 5)], 3)
+    donor = Mdb(0x20, ['mdl', 'grape', 'mainBody', 'Material'], bones, [Object(1, 1, [seat])], [mat],
+                [Texture(0, 'sheet_DDS', cm.FABRIC, 0), Texture(1, 'occ_DDS', 'occ.DDS', 0)])
+    occ = bytearray(128)
+    occ[0:4] = b'DDS '
+    struct.pack_into('<II', occ, 12, 8, 8)
+    occ[84:88] = b'DXT1'
+    for k in range(4):   # 2 x 2 blocks: the last one white
+        occ += struct.pack('<HHI', 0xFFFF if k == 3 else 0x4208, 0xFFFF if k == 3 else 0x2104, 0)
+    stem = cm.FABRIC.rsplit('.', 1)[0]
+    files = [RabFile(f'{stem}.lod.DDS', 0, 0, b'lod'), RabFile('occ.lod.DDS', 0, 0, bytes(occ)),
+             RabFile(cm.DONOR_MDB, 1, 0, mdb_write(donor)), RabFile(cm.FABRIC, 2, 1, b'hd'), RabFile('occ.DDS', 2, 1, bytes(occ))]
+    arc = rab_write(Rab(0x110, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], files))
+    plant = dsgo.Document(dsgo.Node(['FarEventObject', dsgo.Node([dsgo.Node([1.0, 1.0, 1.0]), 'default'], {0: 'scale', 1: 'default_animation'}),
+                                     dsgo.Node([dsgo.Node(['app:/Object/ev601_plant.mrab', 'ev601_plant.mdb']), 'app:/object/ev601_plant.cas',
+                                                dsgo.Blob(b'anim')])],
+                                    {0: 'xgs_scene_object_class', 1: 'setting', 2: 'animation_model'}), [])
+    stock = {('OBJECT', cm.DONOR_ARC): arc, ('OBJECT', cm.STOCK_SGO): dsgo.write(plant)}
+
+    class Game:
+        def read(self, folder: str, name: str) -> bytes:
+            return stock[(folder, name)]
+    return Game()
+
+
+@test
+def chute_builds_without_the_game() -> None:
+    """pylib/chute_model.py build / check / sgo on a stand-in Root.cpk: the archive holds the model and the fabric's
+    textures, the model's occlusion coordinates sit on the brightest block, and the SGO is a FarEventObject showing
+    this model with a unit scale only (no animation, no ragdoll)."""
+    import chute_model as cm
+    from mdb import mdb_read, rab_read, read_elem
+    game = _chute_game()
+    arc = cm.build(game)
+    cm.check(arc)
+    rab = rab_read(arc)
+    names = [f.name for f in rab.files]
+    stem = cm.FABRIC.rsplit('.', 1)[0]
+    assert names == ['occ.lod.DDS', f'{stem}.lod.DDS', cm.OUT_MDB, 'occ.DDS', cm.FABRIC], names   # folder, then name
+    md = mdb_read(next(f for f in rab.files if f.name == cm.OUT_MDB).data)
+    occ = {tuple(v) for v in read_elem(md.objects[0].meshes[0], 'texcoord', 1)}
+    assert occ == {(0.75, 0.75)}, occ
+    v = dsgo.to_py(dsgo.parse(cm.sgo(game)).root)
+    assert v == {'xgs_scene_object_class': 'FarEventObject', 'setting': {'scale': [1.0, 1.0, 1.0]},
+                 'animation_model': [[f'app:/Object/{cm.OUT_ARC.lower()}', cm.OUT_MDB], 0.0, 0.0]}, v
+
+
+@test
+def chute_wired_through() -> None:
+    """The canopy's copies agree: src/playerjet.cpp's SGO path, file and height with pylib/chute_model.py, and
+    tools/make_chute.py is installed, removed, bundled and a ledger owner."""
+    import chute_model as cm
+    import make_chute
+    text = src('src/playerjet.cpp')
+    assert f'kChuteSgo=L"app:/object/{cm.SGO_FILE.lower()}"' in text
+    assert f'kChuteFile=L"{cm.SGO_FILE}"' in text
+    up = re.search(r'kChuteUp=([\d.]+)f', text)
+    assert up and float(up.group(1)) == cm.CANOPY_UP, up
+    assert make_chute.OWNER in ledger.OWNERS
+    inst = src('tools/installer.py')
+    assert 'make_chute.install(game, chute)' in inst and 'make_chute.remove' in inst
+    rel = src('tools/build_release.py')
+    assert "'make_chute'" in rel and "'chute_model'" in rel
+
+
+@test
 def play_edge_margin_is_the_big_maps() -> None:
     """src/crew.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
     import make_bigmap

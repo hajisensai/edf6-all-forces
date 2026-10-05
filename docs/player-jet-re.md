@@ -107,7 +107,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
   - 进入附着或布娃娃状态（`+0x39C != 0`）。
   - 玩家自己往上飞，也就是翼装或剑兵推进，竖直速度一帧涨 3 m/s 以上。
   - 超过 3 分钟。
-- 没有降落伞模型，只有减速效果。
+- 伞开（越过最高点）时显示伞衣模型，见 §8。
 
 **空中接人**（ini `PlayerJetCatch`，默认开；2026-10-05 改为从场外飞进来）：
 - 每个任务开始时预载两种玩家飞机的车辆文件（`PreloadPlayerJets`）。
@@ -120,3 +120,36 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
   - 物理步进把自动驾驶中的飞机当成有人驾驶的飞机一样推进（`PlayerJetBodyStep`）。
 - 离玩家 9 m 以内时每帧替玩家按上车键（`PressBoardButton`）。上车后飞机按原来的速度交给玩家，伞降结束。
 - 45 秒没接上就放弃：那架飞机空着飞走、落下，伞降继续。
+
+## 8. 伞衣模型（2026-10-05）
+
+EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（`tools/edfre.py` + capstone），没有实机验证。
+
+**挑哪种对象来显示一个静态模型**（Root.cpk 里全部 `OBJECT/*.SGO` 的 `xgs_scene_object_class` 都过了一遍）：
+
+| 候选 | 结论 |
+|---|---|
+| `Decoy`（招募员人偶，`jet_carrier.cpp` 用过） | 不用。`BasicAnimationCharacter`，有布娃娃刚体、受伤动画、阵营 4 会被敌人当目标；还要骨架和 `.cas` 动画对得上模型 |
+| `RouteGuide_Arrow`（`GUIDEARROW.SGO`） | 不用。更新 `0x5C9F20` 每帧调寻路对象 `+0x1B0`（没有就空指针），模式 1 没有目标时自删（`0x5C9DA0`），朝向每 30 帧被路线改写（`0x5CA8B0`） |
+| `Humanoid_BigGreyBoss_EffectModel` | 不用。更新里 `0x44D740` 读 owner 弱指针，没有 owner 时读绝对地址 `0x2F8`，必崩 |
+| **`FarEventObject`**（远景的工厂、挖掘机，如 `EV601_PLANT.SGO`） | **用它**，见下 |
+
+**FarEventObject**（vtable `0x17D5DA0`，工厂 `0x5C3A00`：`new 0xAD0` → GameObjectBase ctor `0x545670(obj, initparam)`）（H）：
+- ctor 置 `+0xAC0..+0xAC8` 缩放为 (1,1,1)，读 SGO 的 `setting`（`0x5C3E50`）：`scale`、`default_animation`（可选，查不到键就跳过），再调 `0x5C4970`。
+- `0x5C4970` 只在 SGO 有 `ragdoll` 键时才建物理体；**没有 `ragdoll` 就没有刚体**。原版远景对象都没有这个键。
+- 更新（vtable 槽 5，`0x5C4FB0`）：GameObjectBase 基类更新 `0x54BE40`，然后把 `+0x60..+0x9F`（对象矩阵）乘缩放写进渲染矩阵（`0x1100B90(obj+0x660, …)`），有动画就推进 `+0xAA0`。**它从不写 `+0x60`**，所以插件每帧写这块矩阵就能让它跟着走。
+- `animation_model` 写 `[[mrab, mdb], 0, 0]`（不带 `.cas`、动画数据、伤害网格）：`CollapseModel`、`RouteGuide_Arrow`、BigGreyBoss 特效模型的原版 SGO 都是这种写法。
+
+**插件**（`src/playerjet.cpp` Chute*；模型 `pylib/chute_model.py`，安装 `tools/make_chute.py`）：
+- 任务开始时，若 `Mods/OBJECT/EDF6VC_CHUTE.SGO` 存在就预载（与接人飞机同一时机，`PreloadPlayerJets`）。
+- 伞开时 `CreateObject(mgr, 矩阵, L"app:/object/edf6vc_chute.sgo", InitParamBase@SceneObject)`，核对 vtable 是 FarEventObject，经 `SetTeam` 设为中立阵营 3（与谁都不敌对，M）。
+- 每帧矩阵 = 玩家脚下位置 + 4 m，直立，正面朝水平漂移方向（漂移低于 0.5 m/s 时保持上一次的朝向）。
+- 伞降结束（着地、自己飞走、被接走、死亡、附着、超时、接人飞机没了）时删除（`0x118A1B0`）；任务开始时只忘掉指针（对象随上一任务一起没了）。日志行 `CHUTE made / gone: 原因 / not made: 原因`。
+- 安装时核对 `0x5C4FB0` 的开头字节，并核对 vtable 槽 5 指向它；对不上就不做伞衣（`HOOK player jets … chute=0`）。
+
+**模型**：半椭球伞衣，直径 7.5 m、高 3 m、底部开口，内外两层（各自朝外/朝内，互相错开 2 cm，背面剔除开不开都能看见）；16 根伞绳从伞缘收到玩家肩部（每根两条十字交叉的双面细条）。材质整个照搬 Grape（`VEHICLE401_STRIKER.MRAB`）座椅布料：`snd_BRDF_Common_SeparateOcc`，`v401_interiorSheet_*` 128 px 平铺布纹，1 m 一个重复；遮蔽贴图的 texcoord1 钉在 `v401_inner_occ.DDS` 最亮的一个 DXT1 块上。三角形绕序按原版：`cross(b−a, c−a)` 与顶点法线同向（V401 / V506 每个三角形都如此）；切线 = dP/du，副法线 = dP/dv。
+
+**待实机确认**：
+- 伞衣确实显示、位置正确，玩家和子弹都穿得过去，敌人不打它（M：没有刚体与中立阵营都是静态结论）。
+- 插件写矩阵与对象更新的先后：若插件在对象更新之后写，渲染矩阵晚一帧（刚弹射时水平速度大，伞衣会落后约 1 m）。
+- 远处的剔除包围盒取 bone 的 half/centre（已按模型重算）。
