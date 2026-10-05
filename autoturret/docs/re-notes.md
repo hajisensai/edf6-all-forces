@@ -121,7 +121,34 @@ The game's vehicle aim (`0x622640`) takes the world gravity vector from
 `*(*(0x20B2958) + 0x68) + 0x20` (virtual slot 0 returns a pointer to it, m/s^2), rotates it into
 the vehicle frame and drops a round by `AmmoGravityFactor * gravity / 3600` metres per frame^2
 (`0x622B65`), then solves the two launch angles at `0x50350`. Measured gravity: about 14.7 m/s^2.
-The plugin does the same and takes the lower arc.
+The plugin does the same and takes the lower arc; a lofted gun (mark 7303, the Katyusha) the higher one while its
+pitch is within the axis' stops, else the lower.
+
+### Rounds in flight (2026-10-05, static)
+
+- Spawn (`0x231CC0` -> `0x231D97..0x231F14`): position `C+0xB80` = the muzzle matrix row 3; velocity `C+0xB90` =
+  row 2 x `C+0xA04` (AmmoSpeed, m/frame) (+ owner velocity x AmmoOwnerMove at `C+0x9C0`), then divided by the
+  vector 1/60 at `0x176B040` (so m/s); gravity `C+0xBA0` = AmmoGravityFactor (`param+0xB0`) x the world gravity
+  vector (`0x231E7B`, the same virtual call as above); `C+0xBB0` the start position.
+- Step (BulletControl `0x233CB0`, also `0x2349D0`): `v += g * 1/60` (`0x233DC4`), then `p += v * 1/60`
+  (`0x233E18..`), the swept segment then ray- and shape-cast (docs/bullet-pass-re.md). Semi-implicit Euler: after n
+  frames a round has fallen `g/3600 * n(n+1)/2`, `g/3600 * n/2` more than the parabola. `Ballistic` aims that much
+  over the point (three passes); `pylib/ballistics.py` is the same model in Python, and `tools/selftest.py
+  lofted_arc_solver` checks both roots against the per-frame step (miss < 5 cm).
+- The request's tier does not touch the speed: a vehicle request's setup `[0]` is `[durability, damage]`
+  (tools/call_weapons.py request_tier). The plugins read AmmoSpeed (`+0x894`) from the live weapon anyway.
+- FireAccuracy (`weapon+0x378`, filled at `0x68CF1F`): fire `0x691B02` passes `weapon+0xE14 x FireAccuracy` to
+  `0x4E820`, which draws the polar angle uniformly in `[0, it]` and the azimuth in `[0, 2pi)`: a cone half angle in
+  radians. `weapon+0xE14`'s only writer found is `0x69DB11` (another weapon class); for Weapon_VehicleShoot it is
+  assumed 1 (EDF6VehicleCrew's `LAUNCHER` debug line logs it).
+- The launcher's elevation stop: `car_base_constraint_data`'s hinge limit `[1, min, max]` (degrees, pitch
+  negative-up) is the aim axis' range: the V603 flak's `[1, -60, 5]` is its `-1.047..0.087` rad. The Naegling's
+  `Rocketcannon_main` `[1, -50, 0]`; tools/make_katyusha.py writes `-80`.
+
+Needs an in-game check: the Katyusha's pitch axis really stops at -80 deg (`AIM` debug lines show `pitch`); the
+rockets' look (bullet_rocket.rab on a GrenadeBullet01: nose along the flight, the 120-frame smoke trail); the
+CCIP cross where the rockets land (EDF6VehicleCrew `LAUNCHER` lines: muzzle count, speed, cone); `weapon+0xE14`
+being 1 on the launcher; the high-arc auto-aim hitting.
 
 ## GrenadeBullet01 (the flak round)
 
