@@ -377,9 +377,6 @@ void RightOf(const float* dir,float* right) noexcept {
     if(!Normalize(right)){right[0]=-1.0f;right[1]=0.0f;right[2]=0.0f;}
 }
 
-// The world's walls (see kWorldWallIn): a path (unit) out through one beyond it is turned along it (its way along
-// kept, or the right of it when it flew straight at the wall) and kWallIn back in. Never less than the speed it has:
-// only the direction turns.
 // The path `dir` (unit) bent level under the ceiling (see kCeilingBand): its length kept.
 void CeilingBend(const float* pos,float* dir) noexcept {
     const float most=Clamp((CeilingY()-kCeilingGap-pos[1])/kCeilingBand,0.0f,1.0f);
