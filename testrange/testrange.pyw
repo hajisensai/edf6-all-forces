@@ -54,10 +54,15 @@ class App(tk.Tk):
         right = ttk.Frame(body)
         right.pack(side='left', fill='both', expand=True)
         self._waves(right).pack(fill='x')
+        self._air(right).pack(fill='x', pady=(6, 0))
         self._loadout(right).pack(fill='x', pady=(6, 0))
 
         bar = ttk.Frame(self)
         bar.pack(fill='x', **pad)
+        ttk.Label(bar, text='地图').pack(side='left')
+        self.site = ttk.Combobox(bar, values=[x.label for x in gen.SITES], state='readonly', width=20)
+        self.site.current(next(i for i, x in enumerate(gen.SITES) if x.source == self.plan.site))
+        self.site.pack(side='left', padx=(4, 10))
         ttk.Label(bar, text='装进').pack(side='left')
         self.slot = ttk.Combobox(bar, values=[x.label for x in gen.SLOTS], state='readonly', width=46)
         self.slot.current(next(i for i, x in enumerate(gen.SLOTS) if x.mission == self.plan.slot))
@@ -78,7 +83,7 @@ class App(tk.Tk):
             self.counts[sgo] = var
             self.npc_counts[sgo] = npc
             ttk.Spinbox(box, from_=0, to=4, width=3, textvariable=var).grid(row=row, column=0, padx=4, pady=1)
-            ttk.Spinbox(box, from_=0, to=4, width=3, textvariable=npc).grid(row=row, column=1, padx=4, pady=1)
+            ttk.Spinbox(box, from_=0, to=12, width=3, textvariable=npc).grid(row=row, column=1, padx=4, pady=1)
             ttk.Label(box, text=label).grid(row=row, column=2, sticky='w')
         last = len(gen.VEHICLES) + 1
         self.vlevel = tk.DoubleVar(value=self.plan.vehicle_level)
@@ -106,6 +111,48 @@ class App(tk.Tk):
             ttk.Label(box, text=text).grid(row=i, column=0, sticky='w')
             ttk.Entry(box, textvariable=var, width=8).grid(row=i, column=1, sticky='w', pady=1)
         return box
+
+    def _air(self, parent: tk.Widget) -> ttk.LabelFrame:
+        a = self.plan.air
+        box = ttk.LabelFrame(parent, text='空战：敌机波次（开启后不刷地面敌人和靶子）')
+        self.a_on = tk.BooleanVar(value=a.enabled)
+        ttk.Checkbutton(box, text='刷敌机', variable=self.a_on).grid(row=0, column=0, sticky='w')
+        ttk.Button(box, text='空战预设（玩家战斗机 + 3 架友军 + 8 架敌机，之后成波补充）', command=self.air_battle).grid(
+            row=0, column=1, sticky='w', padx=6)
+        self.grand = tk.BooleanVar(value=self.plan.scenario == gen.GRAND)
+        ttk.Checkbutton(box, text='大混战（需先用 tools/make_bigmap.py 装大地图）', variable=self.grand).grid(row=9, column=0, sticky='w')
+        ttk.Button(box, text='大混战预设（母舰、传送舰、敌机 vs 我方飞机；地面步兵坦克 vs 外星地面部队）',
+                   command=self.grand_battle).grid(row=9, column=1, sticky='w', padx=6)
+        self.a_vars: dict[str, tk.Variable] = {}
+        fields = [('per_wave', '每波敌机数', tk.IntVar), ('max_alive', '敌机少于几架时补充', tk.IntVar),
+                  ('first_delay', '开局多少秒后开始补充', tk.DoubleVar), ('interval', '两波最短间隔（秒）', tk.DoubleVar)]
+        for i, (key, text, kind) in enumerate(fields, start=1):
+            var = kind(value=getattr(a, key))
+            self.a_vars[key] = var
+            ttk.Label(box, text=text).grid(row=i, column=0, sticky='w')
+            ttk.Entry(box, textvariable=var, width=8).grid(row=i, column=1, sticky='w', pady=1)
+        return box
+
+    def grand_battle(self) -> None:
+        plan = gen.grand_battle(gen.Plan())
+        for s, var in self.counts.items():
+            var.set(plan.vehicles.get(s, 0))
+        for s, var in self.npc_counts.items():
+            var.set(plan.friends.get(s, 0))
+        self.w_on.set(False)
+        self.a_on.set(False)
+        self.grand.set(True)
+
+    def air_battle(self) -> None:
+        plan = gen.air_battle(gen.Plan())
+        for s, var in self.counts.items():
+            var.set(plan.vehicles.get(s, 0))
+        for s, var in self.npc_counts.items():
+            var.set(plan.friends.get(s, 0))
+        self.w_on.set(False)
+        self.a_on.set(True)
+        for k, var in self.a_vars.items():
+            var.set(getattr(plan.air, k))
 
     def _loadout(self, parent: tk.Widget) -> ttk.LabelFrame:
         box = ttk.LabelFrame(parent, text='强制装备（插件在进关时装上，出关后存档不变）')
@@ -198,8 +245,11 @@ class App(tk.Tk):
         enemy = next(s for s, l, _ in gen.ENEMIES if l == self.w_enemy.get())
         plan.waves = gen.Waves(enabled=bool(self.w_on.get()), enemy=enemy,
                                **{k: v.get() for k, v in self.w_vars.items()})
+        plan.air = gen.AirWaves(enabled=bool(self.a_on.get()), **{k: v.get() for k, v in self.a_vars.items()})
+        plan.scenario = gen.GRAND if self.grand.get() else ''
         plan.loadout = self._loadout_choice()
         plan.slot = gen.SLOTS[self.slot.current()].mission
+        plan.site = gen.SITES[self.site.current()].source
         return plan
 
     def install(self) -> None:

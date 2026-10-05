@@ -7,6 +7,7 @@
 #include <cstring>
 #include "edf/layout.h"
 #include "edf/patch.h"
+#include "stores.h"
 #include "edf/seat.h"
 
 namespace crew {
@@ -55,18 +56,32 @@ struct Config {
     bool seaRescue=true;       // a heli comes for a local player in the sea and ferries them to a submarine carrier's deck
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool rescueAutoBoard=false;// ...and, in the stock board reach of a free door seat, boards them by the stock board path
-    float subHullHp=100000.0f; // a submarine carrier's hull HP (raised to this from its SGO's 30000; 0 = the SGO's)
+    float subHullHp=100000.0f; // a submarine carrier's hull HP at the base tier (its SGO's is 30000), times its tier (25 at the highest); 0 = the game's
     float subHeavyHit=1500.0f; // a hit on its hull (no deck part) counts only from a heavy source, or from this much
                                // damage in one hit (0 = only the listed heavy sources, subcarrier.cpp kHeavy)
     bool carrierLaser=true;    // with a submarine carrier out, the e508 teleportation ships charge and fire a portal laser (carrierlaser.cpp)
     float carrierLaserDamage=2500.0f;// the main beam's damage
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
+    bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
+    bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
     float vehicleHudRange=500.0f;// ...within this many metres of the player
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
+    int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
+    int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
+    int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
+    bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
+    int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
+    float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
+    bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
+    bool jetSound=true;             // the jets' engine sound (jetsound.cpp)
+    float jetSoundVolume=1.0f;      // ...its volume, times the game's own for that sound
+    float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
+    float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
+                                    // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -99,10 +114,43 @@ void ResetGround() noexcept;      // ground.cpp
 void ResetJets() noexcept;        // jet.cpp (and the dolls, the walls learned)
 void ResetAirstrikes() noexcept;  // airstrike.cpp
 void ResetBoosters() noexcept;    // booster.cpp
+void ResetShields() noexcept;     // shield.cpp
+void ViewTick() noexcept;         // view.cpp: once a frame, the view distance raised
 void ResetSubs() noexcept;        // subcarrier.cpp
 void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
 void ResetHud() noexcept;         // hud.cpp
+void ResetJetSound() noexcept;    // jetsound.cpp
+void ResetMissiles() noexcept;    // missile.cpp
+// What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
+void LevelVehicle(unsigned char* vehicle) noexcept;
+void ResetBigWorld() noexcept;    // bigworld.cpp
+void BigWorldProbe() noexcept;
+// m: the physics world's half size (3000 stock, ini BigWorld when raised): the plugin's walls stand inside it.
+// The edge of the play area every flyer keeps inside (the user, 2026-10-05: "don't let them go out there; a buffer
+// before it; past the line, coming back comes first"): the stock world's 2400 (600 m inside its +-3000), or the big
+// map's ground's own edge, its BigWorld less the margin tools/make_bigmap.py adds past the last block (WORLD_MARGIN;
+// selftest holds the two equal). It was the physics world less 600 m on the big map too: 150 m out over no ground,
+// where the player slid along the wall below the ground with the heading snapping +-17 deg (2026-10-05 11:47).
+constexpr float kBigWorldMargin=750.0f,kStockEdgeIn=600.0f;
+// The buffer inside the edge: from here in the flyers are turned in, the more the nearer the edge (EdgeTurn).
+constexpr float kEdgeBuffer=800.0f;
+inline float WorldHalf() noexcept;
+inline float PlayEdge() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld-kBigWorldMargin : 3000.0f-kStockEdgeIn; }
+inline float WorldHalf() noexcept { return Cfg().bigWorld>3000.0f ? Cfg().bigWorld : 3000.0f; }    // bigworld.cpp: once a mission, the map's ground on a grid (log)
+// The camera's view-projection (row vectors, the HUD's) as of the last frame drawn; false before one (hud.cpp).
+bool LastViewProj(float* out) noexcept;
+// A bigger physics world and the map pieces' log (bigworld.cpp): at load, before any mission.
+bool InstallBigWorld() noexcept;
+// The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
+bool InstallMissiles() noexcept;
+// The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
+// once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
+bool InstallJetSound() noexcept;
+void JetSound(unsigned char* vehicle) noexcept;
+void JetSoundTick() noexcept;
+// The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
+void LockSound(unsigned char* vehicle) noexcept;
 
 // --- EDF.dll layout ---
 // The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):
@@ -123,6 +171,7 @@ constexpr std::int32_t kTeamVehicle=5;
 // Every team change goes through SetTeam, the object's registration (+0x380 bit 6) kept as it is.
 constexpr unsigned kSetTeam=0x54EE70;
 constexpr std::size_t kObjectFlags=0x380;
+// Never from inside a team walk's visitor (the board prompt, FindSeat): crew.cpp WithTeamField.
 void SetObjectTeam(unsigned char* object,std::int32_t team) noexcept;
 // Human: the vehicle it is in (weak_ptr object +0x1548, control block +0x1550)
 constexpr std::size_t kHumanVehicleCtrl=0x1550;
@@ -182,7 +231,15 @@ void JetReap(const void* self) noexcept;           // deletes withdrawn jets; ca
 bool InstallJets() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
 bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
+bool InstallShields() noexcept;                    // shield.cpp: the Shield Bearer's shield lets slow things through
+// shield.cpp: whether a round (its candidate collector) passes a shield layer's body (slow: true, so it is left out)
+bool ShieldLetsThrough(void* collector,std::uint32_t body) noexcept;
+// shield.cpp: a fast vehicle's velocity (m/s) kept from crossing a hostile shield's face; the speed it lost
+float ShieldBlock(const unsigned char* vehicle,float* vel) noexcept;
+void ShieldVehicle(unsigned char* vehicle) noexcept;   // shield.cpp: the same for a vehicle with no plugin body
 void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
+// booster.cpp: a jet's exhaust flames on its nozzles (by its mark), burning `intensity` (0..1), `burner` longer.
+void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept;
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
 // A jet made at run time at `from`, flying along `heading` to work round `target`; false when it cannot
@@ -267,6 +324,8 @@ float SubHullGap(const float* p) noexcept;
 bool InstallLaser() noexcept;                         // at load
 void PreloadLaser() noexcept;                         // from the mission's player preload
 void CarrierLaserFrame(const unsigned char* sub) noexcept;   // from a flown carrier's frame, at most once a frame
+// physics.cpp: stock EDF6 physics defects, patched at load (needs a game restart to toggle)
+bool InstallPhysics() noexcept;
 
 // What jet.cpp flies a jet as (game thread): its role's name, seconds of fuel left (-1: none, a carrier's drone),
 // a carrier's drone launches left (-1: not a carrier), whether it is withdrawing; false when it does not fly it.
@@ -276,6 +335,30 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
+// The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
+// The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path; stores: what it
+// carries (name, rounds left), `store` the one the secondary fire fires; bomb: that one is a bomb, `impact` where it
+// would hit now (hasImpact: the ground is under its fall); clear: its
+// height over the ground, or (ground: false, none under it) over the world's zero; keys: flown with the keyboard and
+// mouse; aiming: in the air the mouse's aim steers it, `aim` the point it aims at, `path` the point it flies at.
+struct PlayerJetReadout {
+    float speed,throttle,clear,climb,hp,hpMax,load;
+    float rotate;                // m/s: the speed it can lift off from (the kind's rotate), for the takeoff cue
+    bool air,stall,ground,keys,aiming;   // ground: there is ground under it (clear is its height over it), not on it
+    bool pullUp;                 // in the air and about to hit the ground or what stands on it (PullUpNeeded)
+    float aim[3],path[3];
+    int stores,store;
+    const char* storeName[6];
+    int storeRounds[6];
+    bool bomb,hasImpact;
+    float impact[3];
+    int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
+    float lockAt[3],lockProgress;
+};
+bool PlayerJetHud(PlayerJetReadout* out) noexcept;
+void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
+void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
+namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; }
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for

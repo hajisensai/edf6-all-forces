@@ -51,9 +51,12 @@ constexpr ULONGLONG kStuckMs=60000;
 // mission's move area shrunk by veh+kAreaInset (0x5A9E50) and teleports it back, every frame, so a jet at
 // the edge stopped dead and slid flank first. A jet's inset is set to kNoInset (the box grown 1e6 m: no
 // clamp; the stock bombers are never clamped either). Out there the Havok broadphase ends at 3000 m a
-// side: walls (jet_flight.cpp kWorldWall) keep the jets in, and one past kWorldGone is deleted.
+// side: walls at the play edge (crew.h PlayEdge, with its buffer) keep the jets in, and one past kWorldGoneIn of it is deleted.
 constexpr std::size_t kAreaInset=0xE00;
-constexpr float kNoInset=-1.0e6f,kWorldGone=2700.0f;
+// kWorldGoneIn: m inside the world's edge (WorldHalf): 2950 stock. It was 300: a jet chasing past the walls
+// (then 600 m in) at 200 m/s turns on a radius of some 500 m, and one in its turn was deleted 300 m past the wall
+// (2026-10-05 11:43, the user: "do the NPCs vanish at the edge?"). Now the whole of a turn fits between them.
+constexpr float kNoInset=-1.0e6f,kWorldGoneIn=50.0f;
 // A wingman within kJetSpan of a burst's path is in its way when the rounds cannot pass through (JetInLine).
 constexpr float kJetSpan=20.0f;
 constexpr ULONGLONG kFullLogMs=5000;   // wall ms between "the table is full" lines
@@ -98,10 +101,16 @@ Jet* FreeSlot() noexcept {
     return nullptr;
 }
 
-// A jet a mission placed, seen for the first time (its pilot just seated): it guards the player.
+// A jet a mission placed, seen for the first time (its pilot just seated): it guards the player; an enemy's jet
+// (HostileJet) joins the enemy team first, so the same flight round the player hunts the player's side: its targets
+// are whatever its team is hostile to (VisitEnemies), its friends the enemy's.
 Jet* CrewPlaced(unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     Jet* const j=NewEntry(v,ms);
     if(!j)return nullptr;
+    if(HostileJet(v)) {
+        SetJetTeam(v,kTeamEnemy);
+        Log("JET v=%p is the enemy's: team %d",v,At<std::int32_t>(v,kTeam));
+    }
     std::memcpy(j->anchor,pos,12);j->mode=Mode::takeoff;
     JoinFlight(*j,kPlacedFlight);
     j->fuelMs=static_cast<ULONGLONG>(static_cast<float>(Cfg().jetFuelSec)*KindOf(*j).fuel*1000.0f);
@@ -113,7 +122,7 @@ Jet* CrewPlaced(unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
 // Why it leaves (fuel, damage, ammo, its carrier lost, out of drones), or a drone's way back to its carrier.
 void Leave(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,float hp,float hpMax,ULONGLONG ms) noexcept {
     const char* why=ms-j.bornAt>j.fuelMs ? "fuel" : hpMax>0.0f && hp<hpMax*kWithdrawHp ? "damaged" :
-                    arms.guns<=0 && arms.missiles<=0 && (arms.hasGun || arms.hasMissile) ? "out of ammo" : nullptr;
+                    arms.guns<=0 && arms.missiles<=0 && arms.bombs<=0 && (arms.hasGun || arms.hasMissile) ? "out of ammo" : nullptr;
     // A drone goes back to its carrier instead, and after kDroneSortieMs, half its HP gone, the carrier
     // leaving, or kIdleMs with nothing to attack; with the carrier gone it withdraws.
     if(j.drone.carried && !mother && !why)why="carrier lost";
@@ -187,7 +196,7 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
         return;
     }
     case Weapon::guns:
-        if(j.t.target){Attack(j,arms,pos,lead,height,ms,want,speed,gunsOk,missileOk);return;}
+        if(j.t.target){Attack(j,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk);return;}
         Circle(j,pos,anchor,height,ms,want,speed);
         return;
     case Weapon::shells:
@@ -303,6 +312,12 @@ bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept {
     }
     return false;
 }
+bool HostileJet(const unsigned char* v) noexcept {
+    if(crew::BodyOf(v)!=PluginBody::jet)return false;
+    const float k=BodyMark(v);
+    for(const auto& b:kBodies)if(b.mark>0.0f && k==b.mark)return b.hostile;
+    return false;
+}
 }  // namespace jet
 
 using namespace jet;
@@ -338,7 +353,8 @@ void JetFrame(unsigned char* v) noexcept {
     j->seen=ms;
     FarRender(*j,v);
     Put<float>(v,kAreaInset,kNoInset);
-    if(std::fabs(pos[0])>kWorldGone || std::fabs(pos[2])>kWorldGone) {
+    const float gone=WorldHalf()-kWorldGoneIn;
+    if(std::fabs(pos[0])>gone || std::fabs(pos[2])>gone) {
         if(!j->reap)Log("JET v=%p at the world's edge (%.0f,%.0f): deleting",v,pos[0],pos[2]);
         j->reap=true;
     }
@@ -353,8 +369,8 @@ void JetFrame(unsigned char* v) noexcept {
     if(j->drone.blastAt){Blast(*j,v,ms);return;}
 
     const Kind& kind=KindOf(*j);
-    ExtendLock(v,kind.missileRange);
-    const Arms arms=ReadArms(v);
+    Arms arms=ReadArms(v);
+    j->burden=BurdenOf(BodyMark(v),arms.stores,arms.storeCount);
     const bool follow=player.at && ms-player.at<10000;
     // A drone works round its carrier, a launched jet round its strike point, a placed one guards the
     // player. Each withdraws away from the player (`viewer`), so it is deleted out of their sight.
@@ -369,6 +385,7 @@ void JetFrame(unsigned char* v) noexcept {
     // The target and its motion.
     if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,kind.range,dt,ms);
     else j->t.target=nullptr;
+    if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
         const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};
         const float d=Len(to);
@@ -395,6 +412,15 @@ void JetFrame(unsigned char* v) noexcept {
     if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
 
+// A reaped jet's NPC pilot is put off and the jet deleted only once the game has taken it as empty: its team then
+// 5 (nobody's vehicle, the stock emptied-vehicle step: 0x118A4B0 state, then SetTeam(5, registered), 0x5E6548 /
+// 0x5E7AE3), or kReapSettleFrames after the kick. The delete (0x118A1B0) takes the object out of its team's set
+// (vtable +0x40, 0x54A290: team -1) while it lives on until the manager frees it; a kick in the same frame had the
+// emptied step run after it and register the deleted jet in team 5's set again, where its address stayed once it
+// was freed: the next walk of team 5 (the on-foot board prompt) read freed memory (crash 2026-10-05 00:19, a jet
+// deleted at the world's edge).
+constexpr ULONGLONG kReapSettleFrames=30;
+
 void JetReap(const void* self) noexcept {
     const ULONGLONG ms=GameMs();
     static ULONGLONG frame=~0ull;
@@ -406,7 +432,15 @@ void JetReap(const void* self) noexcept {
         // Only the same object, still there: one destroyed meanwhile is the game's (its entry just goes).
         unsigned char* const v=j.Vehicle();
         if(Alive(j.ref) && !v[kDead] && crew::BodyOf(v)==PluginBody::jet) {
-            if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy)reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
+            // Its rider off first, the delete only once the jet has taken itself as empty (see kReapSettleFrames).
+            if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none) {
+                if(SeatRider(SeatAt(v,0))==Rider::dummy && !j.emptyFrame) {
+                    reinterpret_cast<KickFn>(image+kSeatKick)(v,SeatAt(v,0));
+                    j.emptyFrame=f;
+                }
+                continue;   // a player aboard (or the NPC not off yet): no delete under them
+            }
+            if(j.emptyFrame && At<std::int32_t>(v,kTeam)!=kTeamVehicle && f-j.emptyFrame<kReapSettleFrames)continue;
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
             Log("JET v=%p gone (deleted%s%s)",v,j.why ? ": " : "",j.why ? j.why : "");
         }

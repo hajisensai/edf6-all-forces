@@ -36,6 +36,7 @@ import call_weapons as cw  # noqa: E402
 import calls  # noqa: E402
 import dsgo  # noqa: E402
 import gen_calls  # noqa: E402
+import gen_stores  # noqa: E402
 import installer  # noqa: E402
 import ledger  # noqa: E402
 import make_jets  # noqa: E402
@@ -58,6 +59,15 @@ def src(rel: str) -> str:
 # ---------------------------------------------------------------- the code
 
 
+def in_team_field(rel: str, text: str, at: int) -> bool:
+    """The one allowed raw write: crew.cpp WithTeamField, the team field changed for a stock seat check inside a team
+    walk's visitor and put back right after (a SetTeam there would change the set the walk stands in)."""
+    if rel != 'src/crew.cpp':
+        return False
+    start = text.find('auto WithTeamField(')
+    return start >= 0 and start < at < text.find('\n}\n', start)
+
+
 @test
 def team_changes_go_through_set_team() -> None:
     """No plugin writes an object's team (+0x314, kTeam) itself: the game's team manager finds the object's set by
@@ -70,9 +80,68 @@ def team_changes_go_through_set_team() -> None:
             for name in files:
                 if name.endswith(('.cpp', '.h', '.inc')):
                     rel = os.path.relpath(os.path.join(folder, name), ROOT).replace(os.sep, '/')
-                    found += [f'{rel}: {m.group(0)}' for m in raw.finditer(src(rel))]
+                    text = src(rel)
+                    found += [f'{rel}: {m.group(0)}' for m in raw.finditer(text) if not in_team_field(rel, text, m.start())]
     assert not found, 'raw team writes (use SetObjectTeam):\n' + '\n'.join(found)
     assert raw.search('Put<std::int32_t>(v,kTeam,own);'), 'the pattern no longer sees a raw write'
+
+
+@test
+def range_writes_every_generated_sgo_its_script_creates() -> None:
+    """Each generated object (edf6tr_*) the range's script names is one install writes (testrange/gen.py spawned):
+    the grand battle's script created the enemy fighter, never written, and the game stopped (dump EDF6.exe.79680)."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import rmpa
+    # A map of its own (the selftest runs without the game, on CI too): the player start and a point every 25 m out
+    # to 1 km round it, enough for the vehicle spots, the enemy ring and the ships' far points.
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
+    points += [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+               for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
+    air = gen.Plan()
+    air.air.enabled = True
+    for plan in (gen.grand_battle(gen.Plan()), air, gen.Plan()):
+        lay = gen.layout(points, gen.small_count(plan))
+        named = set(re.findall(r'app:/object/(edf6tr_[a-z0-9_]+)\.sgo', gen.script(plan, lay)))
+        missing = named - {x for x in gen.spawned(plan) if x in gen.DERIVED}
+        assert not missing, f'{plan.scenario or ("air" if plan.air.enabled else "waves")}: never written {sorted(missing)}'
+        assert named or plan.scenario != gen.GRAND, 'the grand battle names no generated object: the check sees nothing'
+
+
+@test
+def jet_nozzles_on_their_models() -> None:
+    """src/booster.cpp kJetNozzles: each mark's nozzles those of its model (pylib/jet_models.py NOZZLES), and every jet
+    mark has a row."""
+    import jet_models
+    from vcobjects import JETS
+    carrier = 'EDF6VC_CARRIER.MRAB'
+    num = r'([-\d.]+)f'
+    vec = r'\{' + num + ',' + num + ',' + num + r'\}'
+    rows = {}
+    for m in re.finditer(r'\{(\d+)\.0f,(\d),\{' + vec + ',' + vec + r'\}', src('src/booster.cpp')):
+        count = int(m.group(2))
+        at = [tuple(float(m.group(k)) for k in range(3 + 3 * n, 6 + 3 * n)) for n in range(count)]
+        rows[float(m.group(1))] = at
+    bad = []
+    for name, jet in JETS.items():
+        if jet.file is not None and (jet.file not in jet_models.MODELS or jet.file == carrier):
+            continue   # the carrier's four nozzles are its own (CarrierFlames); the Primers' fighter flaps: no exhaust
+        if jet.mark not in rows:
+            bad.append(f'{name}: mark {jet.mark} has no nozzle row')
+            continue
+        want = jet_models.NOZZLES[jet.file]
+        got = rows[jet.mark]
+        if len(got) != len(want) or any(abs(a - b) >= 0.005 for g, w in zip(got, want) for a, b in zip(g, w)):
+            bad.append(f'{name}: {got}, the model has {want}')
+    assert not bad, '\n'.join(bad)
+
+
+@test
+def play_edge_margin_is_the_big_maps() -> None:
+    """src/crew.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
+    import make_bigmap
+    m = re.search(r'kBigWorldMargin=([\d.]+)f', src('src/crew.h'))
+    assert m and float(m.group(1)) == make_bigmap.WORLD_MARGIN, (m and m.group(1), make_bigmap.WORLD_MARGIN)
 
 
 # ---------------------------------------------------------------- the data
@@ -83,8 +152,9 @@ def calls_table_consistent() -> None:
     ids = [c.id for c in calls.CALLS]
     assert len(set(ids)) == len(ids), 'duplicate ids'
     assert all(i.startswith(calls.ID_PREFIX) for i in ids)
-    marks = [c.mark for c in calls.CALLS]
+    marks = [c.mark for c in calls.CALLS if not c.ground]   # a ground vehicle's request has no mark (0)
     assert len(set(marks)) == len(marks), 'duplicate marks'
+    assert all(c.mark == 0 for c in calls.CALLS if c.ground), 'a ground vehicle request with a mark'
     crew_h = src('src/crew.h')
     roles = set(re.search(r'enum class JetRole \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     bodies = set(re.search(r'enum class HeliBody \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
@@ -93,7 +163,9 @@ def calls_table_consistent() -> None:
         assert c.brings in ('jets', 'helis', 'sub', 'vehicle'), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
-        assert bool(c.vehicle) == bool(c.jet) == (c.brings == 'vehicle'), c.id
+        assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
+        assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
+        assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
         assert (c.count > 0) == c.flown and bool(c.log) == c.flown, c.id
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
@@ -109,6 +181,27 @@ def calls_inc_current() -> None:
     with open(gen_calls.OUT, encoding='utf-8', newline='') as f:
         assert f.read().replace('\r\n', '\n') == gen_calls.render(), 'src/calls.inc is stale: python tools/gen_calls.py'
     assert '#include "calls.inc"' in src('src/airstrike.cpp')
+
+
+@test
+def stores_inc_current() -> None:
+    with open(gen_stores.OUT, encoding='utf-8', newline='') as f:
+        assert f.read().replace('\r\n', '\n') == gen_stores.render(), 'src/stores.inc is stale: python tools/gen_stores.py'
+    assert '#include "stores.inc"' in src('src/stores.cpp')
+    # Every jet: as many weapons as holders, four at least (src/stores.cpp: without the plugin the 506 builds four),
+    # and every store it names is made.
+    for name, jet in vc.JETS.items():
+        assert len(jet.weapons) + 1 >= 4, name
+        for w in jet.weapons:
+            got = vc.store_of(w)
+            assert got is None or w.split('/')[-1].upper() in vc.STORE_FILES, (name, w)
+    # The weapons the submarine carrier's launch requires (src/subcarrier.cpp kSubFiles) are the ones it is built with.
+    import re
+    sub = src('src/subcarrier.cpp')
+    listed = re.findall(r'WEAPON\\+([A-Z0-9_]+\.SGO)', sub[sub.index('kSubFiles[]'):sub.index('};', sub.index('kSubFiles[]'))])
+    built = {w.split('/')[-1].upper() for w in vc.JETS['edf6tr_sub_carrier_mission'].weapons}
+    assert listed and set(listed) <= built, (listed, built)
+    assert f'kSgoHull={vc.JETS["edf6tr_sub_carrier_mission"].durability:.1f}f' in sub, 'subcarrier.cpp kSgoHull'
 
 
 @test
@@ -175,7 +268,7 @@ def hand_copies_agree() -> None:
     # kKinds rows: {"name",mark,...}, the mark an integer or a float literal.
     pjet = dict(re.findall(r'\{"(\w+)",\s*(\d+)(?:\.0f)?\s*,', src('src/playerjet.cpp').split('kKinds[]={', 1)[1].split('};', 1)[0]))
     for c in calls.CALLS:
-        if c.brings != 'vehicle':
+        if c.brings != 'vehicle' or c.ground:
             continue
         jet = vc.JETS[c.jet]
         assert jet.player and jet.mark == c.mark, c.id
@@ -398,7 +491,8 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     """What call_weapons.stack would give (shape only), and the jets the vehicle requests need."""
     for c in calls.CALLS:
         if c.vehicle:
-            modfiles.atomic_write(_mods(game, cw.vehicle_file(c)), b'jet')
+            for rel in cw.vehicle_needs(c):
+                modfiles.atomic_write(_mods(game, rel), b'jet')
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
     files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS})

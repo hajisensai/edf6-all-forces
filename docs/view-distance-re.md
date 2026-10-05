@@ -2,6 +2,13 @@
 
 两份纯静态逆向的合并稿。全部地址都是 EDF.dll 的 RVA（TimeDateStamp 0x678CCB46），**没有在实机上验证过**。
 
+## 2026-10-05 追加：全局视距（src/view.cpp，ViewDistance）
+
+- 用户要求把视距拉高。插件每帧把 `env+0x1A0`（FarClipZ）抬到 `ViewDistance`（默认 3000 m，范围 1000~10000，0 = 不动）。`env = *(*(base+0x20B2990)+0x258)`。
+- 远景相机的起点 `env+0x1A4` 抬到 `ViewDistance-500`，和原版一样两个相机重叠 500 m；它的终点 `env+0x1A8` 不小于 `ViewDistance`。
+- 每关加载时 env 被写回原版值，插件下一帧再抬上去。日志：`VIEW far clip 1000 -> 3000 m`。
+- 未验证：帧率；深度精度（远近比从 10000 变成 30000）；雾的终点（FogEnd ≥ 5000，应该不挡）。
+
 ## 采用的方案（src/jet.cpp `FarRender`）
 
 - 每架固定翼在 JetFrame（游戏线程）里每帧检查一次：

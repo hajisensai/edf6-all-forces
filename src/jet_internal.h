@@ -32,6 +32,7 @@ constexpr unsigned char kObjDeleted=4;
 constexpr unsigned kDelete=0x118A1B0,kCreateObject=0x11945E0,kInitParamVtable=0x1762068;   // SetTeam: crew.h kSetTeam
 constexpr std::size_t kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
+constexpr std::int32_t kTeamEnemy=1;   // the game's team relations: 0 (player) and 2 (friends) are both hostile to 1
 // InitParamBase as DemoAirStrike's ctor builds it on its stack (0x5B433A): the vtable, the rest zero.
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 using CreateObjectFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
@@ -52,8 +53,8 @@ constexpr unsigned kPlacedFlight=1;    // the jets a mission places (see jet_hoo
 // Flight, per role (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
 // it first flew). The stock bombers fly 3 m a frame (180 m/s): the strike jet attacks at that, the fighter
 // is faster and pulls harder. Every distance of an attack scales with the turn radius v^2/(n g).
-enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship };
-constexpr int kRoleCount=9;
+enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship, primer };
+constexpr int kRoleCount=10;
 // What a role goes for first: ground or flying targets (the other only with none of its own), or either.
 enum class Prefer { ground, air, any };
 // How it flies: a wing (JetSteer: lift along its up, it banks to turn) or a rotor craft (Hover: it goes
@@ -63,8 +64,8 @@ enum class FlightModel { wing, rotor };
 // it flies (the gunship: GunshipFire), drones it launches (the carrier: LaunchDrones), or a charge it carries
 // into the enemy (the blast and doll drones: Detonate).
 enum class Weapon { guns, shells, drones, charge };
-// The bones it moves: elevons (Elevons), the carrier's nacelles (Thrusters), or none.
-enum class Pose { none, elevons, thrusters };
+// The bones it moves: elevons (Elevons), the carrier's nacelles (Thrusters), the Primer fighter's wings (Flap), or none.
+enum class Pose { none, elevons, thrusters, flap };
 // How a rotor craft shows its thrust: `pitchShare` of the fore-and-aft part leans its body (1: all, as a
 // drone's rotors; the carrier's nacelles take the rest, kCarrierPitchShare), and `drag` m/s^2 per m/s of its
 // speed is the thrust that would hold that speed (kThrustDrag; 0: none shown). `respond`: s its velocity takes
@@ -88,8 +89,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier };
-constexpr int kBodyCount=15;
+                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter };
+constexpr int kBodyCount=17;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -98,6 +99,8 @@ struct BodyRow {
     Role role;
     Role drones;                    // a carrier's: what it launches (blast, doll; else the gun drone)
     const char* name;
+    bool hostile=false;             // the enemy's: on first sight it joins the enemy team (CrewPlaced) and hunts the
+                                    // player's side round the player, as a friendly one guards them
 };
 // The strike jets that take over a BOMBER401 or BOMBER501_2 fly that bomber's own model with the strike jet's
 // mark; tools/make_jets.py writes them all (testrange/gen.py JETS has the marks of the mission-placed ones).
@@ -120,6 +123,13 @@ inline constexpr BodyRow kBodies[kBodyCount]={
      "blastCarrier"},
     {Body::dollCarrier,L"app:/object/edf6vc_jet_doll_carrier.sgo",L"EDF6VC_JET_DOLL_CARRIER.SGO",7010.0f,Role::carrier,Role::doll,
      "dollCarrier"},
+    // The enemy fighter (testrange/gen.py: the interceptor's dark bomber501_2 model, a dogfighter's role).
+    {Body::enemyFighter,L"app:/object/edf6vc_jet_enemy_fighter.sgo",L"EDF6VC_JET_ENEMY_FIGHTER.SGO",7020.0f,Role::fighter,Role::drone,
+     "enemyFighter",true},
+    // The Primers' fighter (pylib/primer_fighter_model.py: a pod of their new ship with two of its hatch petals for wings),
+    // the enemy's, flapping (Role::primer, Pose::flap).
+    {Body::primerFighter,L"app:/object/edf6vc_jet_primer_fighter.sgo",L"EDF6VC_JET_PRIMER_FIGHTER.SGO",7030.0f,Role::primer,
+     Role::drone,"primerFighter",true},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -155,7 +165,8 @@ struct Kind {
     float patrol,patrolStep;        // m: patrol circle, plus this per jet of its flight
     float overrun,chaseOver;        // Chase
     float range;                    // m from the anchor it takes targets in
-    float missileRange;             // m: it fires its missiles from here in, standing off (0: never)
+    float missileRange;             // m: it fires its missiles from here in, standing off (0: never), and never farther
+                                    // than its missile locks (Arms::missileRange: the weapon's own LockonRange)
     float fuel;                     // its time in the air, times Cfg().jetFuelSec
     float trigger;                  // a charge's: m from its target it goes off (see kBlastTrigger), else 0
     bool doll;                      // it carries a hololive doll (DollMake)
@@ -169,15 +180,17 @@ struct Kind {
 constexpr float kBlastTrigger=8.0f,kDollTrigger=6.0f;
 inline constexpr Kind kKinds[kRoleCount]={
     // 2026-10-04: faster (750-900 km/h at the attack; own motion properties lift the 200 m/s cap), higher, about 5 g at most.
+    // 2026-10-05: strafing runs open fire from 1000 m (the guns' reach caps it) and pull out lower (80-100 m over the
+    // target): about 4 s of fire a pass, as a real gun run, not 2.
     {Role::strike,"strike",Prefer::ground,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 190.0f,215.0f,85.0f, 10.0f,15.0f, 5.0f,1.4f,
-     450.0f, 1500.0f,130.0f,2200.0f, 700.0f,120.0f, 1000.0f,120.0f, 120.0f,30.0f, 1200.0f, 800.0f,1.0f, 0.0f,false,Body::strike},
+     450.0f, 1500.0f,80.0f,2200.0f, 1000.0f,120.0f, 1000.0f,120.0f, 120.0f,30.0f, 1200.0f, 800.0f,1.0f, 0.0f,false,Body::strike},
     {Role::fighter,"fighter",Prefer::air,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 210.0f,235.0f,110.0f, 15.0f,20.0f, 5.0f,2.4f,
-     550.0f, 1700.0f,150.0f,2500.0f, 700.0f,120.0f, 1400.0f,150.0f, 160.0f,40.0f, 1800.0f, 1100.0f,1.0f, 0.0f,false,Body::fighter},
+     550.0f, 1700.0f,90.0f,2500.0f, 1000.0f,120.0f, 1400.0f,150.0f, 160.0f,40.0f, 1800.0f, 1100.0f,1.0f, 0.0f,false,Body::fighter},
     {Role::interceptor,"interceptor",Prefer::air,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 220.0f,245.0f,120.0f, 25.0f,20.0f,
-     5.0f,2.0f, 600.0f, 1900.0f,160.0f,2800.0f, 650.0f,130.0f, 1500.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f, 0.0f,false,
+     5.0f,2.0f, 600.0f, 1900.0f,100.0f,2800.0f, 1000.0f,130.0f, 1500.0f,150.0f, 220.0f,50.0f, 2600.0f, 1600.0f,1.0f, 0.0f,false,
      Body::interceptor},
     {Role::multirole,"multirole",Prefer::any,FlightModel::wing,Weapon::guns,Pose::elevons,nullptr, 200.0f,225.0f,100.0f, 12.0f,18.0f,
-     5.0f,2.0f, 500.0f, 1600.0f,140.0f,2300.0f, 700.0f,120.0f, 1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f, 0.0f,false,
+     5.0f,2.0f, 500.0f, 1600.0f,90.0f,2300.0f, 1000.0f,120.0f, 1200.0f,130.0f, 150.0f,35.0f, 1500.0f, 1000.0f,1.0f, 0.0f,false,
      Body::multirole},
     // Over its anchor, its drones do the reaching (2026-10-03: 1300 m out).
     {Role::carrier,"carrier",Prefer::any,FlightModel::rotor,Weapon::drones,Pose::thrusters,&kCarrierLean, 60.0f,60.0f,40.0f, 4.0f,4.0f,
@@ -193,6 +206,10 @@ inline constexpr Kind kKinds[kRoleCount]={
     // slow, never diving; it shells ground targets in reach from where it flies (GunshipFire).
     {Role::gunship,"gunship",Prefer::ground,FlightModel::wing,Weapon::shells,Pose::elevons,nullptr, 120.0f,120.0f,70.0f, 3.0f,3.0f, 2.0f,0.3f,
      350.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 600.0f,80.0f, 0.0f,0.0f, 1500.0f, 0.0f,3.0f, 0.0f,false,Body::gunship},
+    // The Primer fighter: a flapping dogfighter, slower than ours and nimbler (its wings beat it round: Flap), guns only.
+    {Role::primer,"primer",Prefer::air,FlightModel::wing,Weapon::guns,Pose::flap,nullptr, 170.0f,195.0f,80.0f, 18.0f,22.0f, 7.0f,3.0f,
+     450.0f, 1400.0f,90.0f,2000.0f, 900.0f,100.0f, 1200.0f,120.0f, 120.0f,35.0f, 1800.0f, 0.0f,1.0f, 0.0f,false,
+     Body::primerFighter},
 };
 constexpr bool KindsInOrder() noexcept {
     for(int i=0;i<kRoleCount;++i) {
@@ -247,6 +264,7 @@ constexpr int kCarrierSorties=18;
 struct Motion {
     float vel[3],omega[3];   // what the physics stage writes
     bool ready;              // vel/omega hold this frame's command
+    float flap;              // the Primer fighter's wing-beat phase (rad, Flap)
     float aoa;               // a wing's angle of attack (rad, nose above the path; see kAoaPerG)
     float top;               // m/s it never goes past: its kind's, or a faster bomber's speed
     float prevPos[3];        // where the body was at prevAt (Sense)
@@ -271,6 +289,8 @@ struct Aim {
     ULONGLONG lockSeen;      // standing off with missiles: game ms the lock list last held a target (0: not)
     ULONGLONG gunsUntil;     // no lock came (kNoLockMs): guns only until then
     ULONGLONG gateAt;        // the last gun gate log (Fire)
+    ULONGLONG bombAt;        // its last bomb (Fire)
+    ULONGLONG rocketAt;      // its last rocket ripple (Fire)
 };
 // A carrier's work (CarrierGoal, LaunchDrones): hit (hpSeen fell) it sidesteps to evadeTo until evadeUntil, and
 // not again before evadeAgain; it holds still while a drone docks (docking); its station follows its target.
@@ -321,6 +341,7 @@ struct Jet {
     float anchor[3];         // where it patrols when there is no player
     bool reap;               // withdrawn: delete from another object's update (JetReap)
     const char* why;         // why it withdrew
+    ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
     bool escort;             // ...or the player, while seen (a call's follow variant; anchor: where they were last)
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
@@ -334,6 +355,7 @@ struct Jet {
     DroneState drone;
     BayState bay;
     ShellState shells;
+    Burden burden{1.0f,0.0f};   // what its stores weigh (BurdenOf; JetSteer)
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -373,6 +395,8 @@ Jet* NewEntry(unsigned char* v,ULONGLONG ms) noexcept;
 bool SlotFree() noexcept;                 // NewEntry would find an entry (logged when not, at most every few seconds)
 void JoinFlight(Jet& j,unsigned flight) noexcept;   // its flight and its place in it
 bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept;
+bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's (BodyRow::hostile)
+void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
 inline bool Flown(const Jet& o,ULONGLONG ms) noexcept { return o.ref && ms-o.seen<=kStaleMs; }
 
@@ -399,16 +423,33 @@ constexpr float kHoverLeave=500.0f;    // m: leaving, it heads this far along it
 
 // --- jet_combat.cpp ---
 // The pilot's seat weapons: guns (straight, fastest round speed for the lead), the homing missile.
-struct Arms { float gunSpeed,gunGravity,gunRange; std::int32_t guns,missiles,locked; bool hasGun,hasMissile; };
+// What its weapons are, as their SGOs set them: the guns' speed, drop and reach (AmmoSpeed x AmmoAlive), the
+// homing weapons' lock range (LockonRange); rounds left, targets locked. Its stores (stores.h) besides: until
+// PickStore the missile counts are every homing weapon's; after it, the one store picked for the target's (pick).
+struct Arms {
+    float gunSpeed,gunGravity,gunRange,missileRange;
+    std::int32_t guns,missiles,locked,bombs;
+    bool hasGun,hasMissile;
+    Store stores[kMostStores];
+    int storeCount,pick;     // pick: the missile store PickStore chose (-1: none, or no stores: the stock fire byte)
+    int rocket;              // the rocket store with rounds left (StoreRole::rocket), or -1
+};
 Arms ReadArms(unsigned char* v) noexcept;
-void ExtendLock(unsigned char* v,float range) noexcept;
+// The missile for the target: of the stores of its kind (air-to-air at a flyer, else air-to-ground) with rounds,
+// the one whose lock reaches `dist` with the least to spare (a long-range one far out, a short-range one close in),
+// else the longest. The arms' missile counts become that store's.
+void PickStore(Arms& a,bool flyer,float dist) noexcept;
+// The distance a jet fires its missiles from: its role's standoff, within what its missile locks (0: never).
+inline float MissileReach(const Kind& k,const Arms& a) noexcept {
+    return k.missileRange<a.missileRange ? k.missileRange : a.missileRange;
+}
 void Lead(const float* from,const float* aim,const float* tv,const Arms& a,float* out) noexcept;
 // The target as the role prefers among the enemies within `range` of `anchor` (the current one counting nearer):
 // j.t gets it and its motion, or none.
 void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,float range,float dt,ULONGLONG ms) noexcept;
 // The guns' and missiles' attack (Weapon::guns, with a target): `want`, `speed`; whether the guns and the
 // missile may fire this frame.
-void Attack(Jet& j,const Arms& arms,const float* pos,const float* lead,float height,ULONGLONG ms,float* want,float* speed,
+void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,ULONGLONG ms,float* want,float* speed,
             bool* gunsOk,bool* missileOk) noexcept;
 // Whether a jet may use its weapons now (every weapon of every kind: guns, missiles, shells): flown by the
 // plugin (JetPilot), a target, and not taking off, going back or leaving.

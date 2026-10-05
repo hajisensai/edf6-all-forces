@@ -235,7 +235,9 @@ def retire_weapons(game: str) -> bool:
 
 def install(game: str) -> None:
     import call_weapons
+    import make_artillery
     import make_jets
+    import make_katyusha
     import make_sub
     check_loader(game)
     dll, ini = plugin_files()
@@ -250,8 +252,12 @@ def install(game: str) -> None:
     jets = make_jets.build(game)
     print('生成潜水母舰（约 39 MB）……')
     sub = make_sub.build(game)
+    print('生成喀秋莎火箭炮车（读取 Root.cpk，不修改它）……')
+    katyusha = make_katyusha.build(game)
+    print('生成自行榴弹炮（读取 Root.cpk，不修改它）……')
+    artillery = make_artillery.build(game)
     print('\n全部生成完毕，开始写入。')
-    for path in make_jets.install(game, jets) + make_sub.install(game, sub):
+    for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery):
         print('写入', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
@@ -260,7 +266,9 @@ def install(game: str) -> None:
 
 
 def uninstall(game: str) -> None:
+    import make_artillery
     import make_jets
+    import make_katyusha
     import make_sub
     print('卸载会删掉插件。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
     print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
@@ -272,7 +280,7 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
-        for remove in (make_sub.remove, make_jets.remove):
+        for remove in (make_artillery.remove, make_katyusha.remove, make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
                 print('删除', path)

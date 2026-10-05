@@ -4,6 +4,7 @@
 #include "edf/memory.h"
 namespace crew {
 using edf::Readable;
+using edf::AllocateNearCode;
 using edf::AllocateNearThunk;
 using edf::RedirectCall;
 }  // namespace crew

@@ -31,7 +31,7 @@ wchar_t iniPath[MAX_PATH]{};
 Config cfg{};
 edf::IniWatch ini{};
 
-VehicleInputFn nextInput=nullptr;
+VehicleInputFn nextInput[2]{};   // the flak's (0) and the rocket launcher's (1) input slots, as found
 
 // GrenadeBullet01 (the flak round): slot 1 deleting dtor, slot 5 per-frame update.
 constexpr unsigned kGrenadeVtable=0x17A17E0,kGrenadeDtor=0x265B10,kGrenadeUpdate=0x264AB0;
@@ -673,8 +673,8 @@ void FlushDiag(const void* vehicle) noexcept {
 
 // Slot 55 of the flak, chained (edf::VehicleInputFn: all four register arguments forwarded, as
 // EDF6VehicleCrew's hook on the same slot forwards them).
-void __fastcall HookInput(void* vehicle,std::uintptr_t hasInput,void* r8,void* r9) {
-    nextInput(vehicle,hasInput,r8,r9);
+template<int K> void __fastcall HookInput(void* vehicle,std::uintptr_t hasInput,void* r8,void* r9) {
+    nextInput[K](vehicle,hasInput,r8,r9);
     ++diag.calls;
     FlushDiag(vehicle);
     ReloadConfigIfChanged();
@@ -768,18 +768,44 @@ void ReloadConfigIfChanged() noexcept {
     if(ini.Changed())LoadConfig();
 }
 
+// The rocket launcher (Vehicle402_Rocket, the Naegling's class: EDF6VehicleCrew's Katyusha is one): its input slot
+// is the flak's line for line up to the turn it writes (+0x2AA0; 0x5FD958 stores it whole, the flak's per axis), so
+// the same hook aims its marked guns. Its stock missiles carry no mark: left alone. 1 when hooked.
+constexpr unsigned kRocketVtable=0x17D8B50,kRocketInput=0x5FD8E0;
+int HookRocket() noexcept {
+    __try {
+        const unsigned char input[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x0F,0xB6,0xDA};
+        const unsigned char turn[]={0x0F,0x11,0x87,0xA0,0x2A,0x00,0x00};     // movups [rdi+2AA0],xmm0
+        const unsigned char apply[]={0x48,0x8D,0x93,0xA0,0x2A,0x00,0x00};    // lea rdx,[rbx+2AA0] (slot 4)
+        if(!edf::Matches(image,kRocketInput,input,sizeof(input)) || !edf::Matches(image,0x5FD958,turn,sizeof(turn))
+           || !edf::Matches(image,0x5FDB5B,apply,sizeof(apply))) {
+            Log("HOOK rocket launcher: unexpected layout, its guns stay unaimed");
+            return 0;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+    auto slot=reinterpret_cast<void**>(image+kRocketVtable)+edf::kSlotInput;
+    void* const current=*slot;
+    if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&HookInput<1>),reinterpret_cast<void**>(&nextInput[1]))) {
+        Log("HOOK rocket launcher input: slot changed under us");
+        return 0;
+    }
+    if(current!=image+kRocketInput)Log("HOOK rocket launcher input: chaining onto %p (another plugin)",current);
+    Log("HOOK rocket launcher input slot=1");
+    return 1;
+}
+
 // The flak: its input slot, then the round hooks the fuses need. Returns the number of slots patched.
 int HookFlak() noexcept {
     if(!CheckProfile()){Log("HOOK flak: unexpected layout or conflicting patch, flak off");return 0;}
     auto slot=reinterpret_cast<void**>(image+kFlakVtable)+edf::kSlotInput;
     void* const current=*slot;
-    if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&HookInput),reinterpret_cast<void**>(&nextInput))) {
+    if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&HookInput<0>),reinterpret_cast<void**>(&nextInput[0]))) {
         Log("HOOK flak input: slot changed under us, flak off");
         return 0;
     }
     if(current!=image+kFlakInput)Log("HOOK flak input: chaining onto %p (another plugin)",current);
     Log("HOOK flak input slot=1");
-    return 1+HookGrenade();
+    return 1+HookGrenade()+HookRocket();
 }
 }  // namespace autoturret
 

@@ -4,8 +4,10 @@ bombers' own models), made from this machine's own V506_HELI.SGO and
 BOMBER501 model exactly like the test range's jets (pylib/vcobjects.py jet_sgo), and EDF6VC_JET.MRAB: the
 stock BOMBER501.MRAB with its model split into elevon bones the plugin moves (pylib/mdb_jet.py,
 docs/mdb-format.md), which only these two SGOs use (the stock bombers keep theirs), and their guns into
-<game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO and the blast drones' charges EDF6VC_BLAST_CHARGE /
-EDF6VC_DOLL_CHARGE.SGO (vcobjects.jet_guns). Without the SGOs the plugin leaves the stock
+<game>/Mods/WEAPON: EDF6VC_JET_GUN_L / _R.SGO, the stores EDF6VC_<KIND>_<rounds>.SGO (pylib/vcobjects.py STORES: missiles
+with a jet's launch and motor sounds, bombs)
+and the blast drones' charges EDF6VC_BLAST_CHARGE / EDF6VC_DOLL_CHARGE.SGO (vcobjects.jet_guns). The jets' rotor
+sound is silenced (vcobjects.JET_ROTOR_SE_ROWS): the plugin plays their engine (src/jetsound.cpp). Without the SGOs the plugin leaves the stock
 bombers alone.
 Also the player jets (src/playerjet.cpp): EDF6VC_PJET_FIGHTER / _STRIKE.SGO, which the Air Raider's call
 weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring.
@@ -42,6 +44,8 @@ FILES: dict[str, str] = {
     'EDF6VC_JET_STRIKE.SGO': 'edf6tr_jet_strike_mission',
     'EDF6VC_JET_FIGHTER.SGO': 'edf6tr_jet_fighter_mission',
     'EDF6VC_JET_INTERCEPTOR.SGO': 'edf6tr_jet_interceptor_mission',
+    'EDF6VC_JET_ENEMY_FIGHTER.SGO': 'edf6tr_jet_enemy_fighter_mission',
+    'EDF6VC_JET_PRIMER_FIGHTER.SGO': 'edf6tr_jet_primer_fighter_mission',
     'EDF6VC_JET_MULTIROLE.SGO': 'edf6tr_jet_multirole_mission',
     'EDF6VC_JET_CARRIER.SGO': 'edf6tr_jet_carrier_mission',
     'EDF6VC_JET_DRONE.SGO': 'edf6tr_jet_drone',
@@ -69,24 +73,24 @@ BOMBERS: dict[str, tuple[list[str], str, list[list[float]] | None]] = {
 # (BOMBERS' recipe) with a mark of its own, so the plugin knows it for a gunship from its body alone.
 GUNSHIP_FILE = 'EDF6VC_JET_GUNSHIP.SGO'
 GUNSHIP_MARK = 7011.0
-# Impact charges (src/jet_bay.cpp kCharges, ImpactDamage): the missions' whale gunship round (DemoIndirectFire,
-# docs/mission-airstrike-re.md) made a charge that bursts where it is set off. indirect_fire_param (the IFC's
-# parser 0x2B5F40, docs/carrier-laser-re.md §3): one round (#2), no gap (#3), no wait before it (#15), the bullet
-# class GrenadeBullet01 (#4: a RocketBullet01 never bursts at the end of its life, only on what it meets; a
-# GrenadeBullet01 with Ammo_CustomParameter #0 = 1 does, docs/decoy-blast-re.md 1.4), slow (#5 IMPACT_SPEED m a
-# frame), no gravity (#6), not penetrating (#11), IMPACT_LIFE frames of life (#10), its blast (#9 AmmoExplosion)
-# the file's radius in metres; #13 the grenade's custom parameter: [1 bursts at the end of its life, 0 no gravity,
-# 1, 0 no bounce, 0, 0 no random extra life]. Its damage the plugin writes (IFC +0xDC).
-IMPACT_STOCK = 'DEMOGUNSHIPFIREE25.SGO'
+# Impact charges (src/jet_bay.cpp kCharges, ImpactDamage): the missions' gunship cannon round (DemoIndirectFire with a
+# SolidBullet01, a stock pairing) made a charge that bursts on what it meets. indirect_fire_param (the IFC's parser
+# 0x2B5F40, docs/carrier-laser-re.md §3): no scatter (#0), one round (#2), no gap (#3), no wait before it (#15),
+# IMPACT_SPEED m a frame (#5), no gravity (#6), IMPACT_LIFE frames of life (#10), not penetrating (#11), its blast
+# (#9 AmmoExplosion) the file's radius in metres. The plugin fires it straight down from kImpactDrop over the impact:
+# into the ground under it, or through the enemy rammed in the air. Its damage the plugin writes (IFC +0xDC).
+# (It was a GrenadeBullet01 that bursts at the end of its life: no stock DemoIndirectFire fires one, and it reads a
+# bullet model the IFC never hands it, +0x1170 null: the game crashed in its first frame, the first ram, 2026-10-05
+# 12:35, dump EDF6.exe.54488 at EDF+0x1100B90 from GrenadeBullet01's update 0x2648F0.)
+IMPACT_STOCK = 'DEMOGUNSHIPFIRESOLID.SGO'
 IMPACT_FILES: dict[str, float] = {
     'EDF6VC_IMPACT_08.SGO': 8.0,
     'EDF6VC_IMPACT_16.SGO': 16.0,
     'EDF6VC_IMPACT_32.SGO': 32.0,
     'EDF6VC_IMPACT_64.SGO': 64.0,
 }
-IMPACT_LIFE = 2
-IMPACT_SPEED = 0.25
-IMPACT_CUSTOM: list = [1, 0.0, 1.0, 0.0, 0.0, 0]
+IMPACT_LIFE = 6
+IMPACT_SPEED = 10.0
 # The helis the Air Raider's call weapons bring (src/jet.cpp HeliLaunch, tools/call_weapons.py): the stock
 # call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true) gives them their weapons.
 HELIS: dict[str, str] = {
@@ -105,9 +109,13 @@ def build(root: str) -> dict[str, bytes]:
         out[f'WEAPON/{name}'] = data
     for name, data in vc.portal_lasers(game).items():
         out[f'OBJECT/{name}'] = data
-    out[f'OBJECT/{MODEL_FILE}'] = mdb_jet.jet_archive(game.read('OBJECT', 'BOMBER501.MRAB'))[0]
+    out[f'OBJECT/{MODEL_FILE}'] = jet_models.elevon_archive(game)   # the elevon bomber, grounded
     for name, data in jet_models.build(game).items():
         out[f'OBJECT/{name}'] = data
+    import primer_fighter_model   # the Primer fighter's own model (not a jet_models recipe)
+    arc = primer_fighter_model.build(game)
+    primer_fighter_model.check(arc)
+    out[f'OBJECT/{vc.JETS["edf6tr_jet_primer_fighter_mission"].file}'] = arc
     for name, jet in FILES.items():
         out[f'OBJECT/{name}'] = vc.jet_sgo(game, jet, MODEL)
     for name, (model, body, rigid) in BOMBERS.items():
@@ -166,13 +174,12 @@ def impact_charges(game: vc.Game) -> dict[str, bytes]:
         version, m = sgo.read(game.read('OBJECT', IMPACT_STOCK))
         p = m.get('indirect_fire_param')
         if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
-                or p[4] != 'RocketBullet01' or not isinstance(p[13], list)
+                or p[4] != 'SolidBullet01' or not isinstance(p[0], list) or len(p[0]) != 2
                 or any(_number(p[i]) is None for i in (2, 3, 5, 6, 9, 10, 11, 15)) or 'indirect_fire_damage' not in m):
             raise ValueError(f'{IMPACT_STOCK} 不是预期的炮舰炮弹')
         for i, value in ((2, 1), (3, 0), (5, IMPACT_SPEED), (6, 0), (9, radius), (10, IMPACT_LIFE), (11, 0), (15, 0)):
             p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
-        p[4] = 'GrenadeBullet01'
-        p[13] = list(IMPACT_CUSTOM)
+        p[0] = [0.0, 0.0]   # no scatter
         m['indirect_fire_damage'] = 0.0   # the plugin sets the damage (IFC +0xDC)
         out[name] = sgo.write(version, m)
     return out

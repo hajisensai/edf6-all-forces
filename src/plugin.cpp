@@ -120,6 +120,14 @@ void Validate(Config& n) noexcept {
     Fix("VehicleHudRange",n.vehicleHudRange,0.0f,10000.0f);
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
+    n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
+    n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
+    n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
+    n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
+    Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
+    if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
+    if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
+    Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -183,12 +191,25 @@ void LoadConfig() noexcept {
     n.carrierLaser=ReadBool(L"CarrierLaser",n.carrierLaser);
     n.carrierLaserDamage=ReadFloat(L"CarrierLaserDamage",n.carrierLaserDamage);
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
+    n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
+    n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
     n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
     n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
     n.playerJetRamDamage=ReadFloat(L"PlayerJetRamDamage",n.playerJetRamDamage);
+    n.playerJetBoostKey=ReadInt(L"PlayerJetBoostKey",static_cast<DWORD>(n.playerJetBoostKey));
+    n.playerJetBrakeKey=ReadInt(L"PlayerJetBrakeKey",static_cast<DWORD>(n.playerJetBrakeKey));
+    n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
+    n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
+    n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
+    n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
+    n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
+    n.jetSound=ReadBool(L"JetSound",n.jetSound);
+    n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
+    n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -200,7 +221,8 @@ void LoadConfig() noexcept {
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
-    Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f",n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage);
+    Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
+        n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
@@ -208,23 +230,33 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
+    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d",n.vehicleWelding,n.giantContactCap);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }
 
 }  // namespace
 
-// The log: one handle kept open, appended to (each line one WriteFile: whole lines, and in the file even if
-// the game dies next). Opening and closing the file per line, on the game thread, with the virus scanner
-// looking at each close, was the hitch when a mission starts and logs hundreds of lines. Debug=1 writes the
-// flight data every second, so past kLogMax the file is renamed to .log.1 (the one before replaced) and a new
-// one begun. The handle, its size and the rename are under one lock (lines come from the game thread, the
-// call picker and the draw thread). No FILE_SHARE_DELETE: a log deleted while the game runs would take the
-// rest unseen.
+// The log: lines are copied into a memory buffer on the caller's thread (the game thread, the call picker, the draw
+// thread: one memcpy under a lock) and a writer thread of its own writes the buffer to one handle kept open every
+// kFlushMs. A WriteFile per line on the game thread was the hitch under a burst of lines (an air strike's jets,
+// each logging what it saw: 15000 lines a second, 2026-10-04); opening and closing the file per line before that,
+// with the virus scanner looking at each close, was the hitch when a mission started. A crash takes at most the
+// last kFlushMs of lines. Two buffers of kLogBuffer: the writer takes the full one and the lines go on into the
+// other; a line that does not fit is dropped and counted (said with the next write), never waited for. Debug=1
+// writes the flight data every second, so past kLogMax the file is renamed to .log.1 (the one before replaced) and
+// a new one begun, by the writer. No FILE_SHARE_DELETE: a log deleted while the game runs would take the rest unseen.
 namespace {
 constexpr LONGLONG kLogMax=32ll<<20;
-SRWLOCK logLock=SRWLOCK_INIT;
-HANDLE logFile=nullptr;
+constexpr std::size_t kLogBuffer=1u<<20;
+constexpr DWORD kFlushMs=50;
+SRWLOCK logLock=SRWLOCK_INIT;        // the buffers
+char logBuffer[2][kLogBuffer];
+std::size_t logUsed=0;               // in logBuffer[logActive]
+int logActive=0;
+unsigned logDropped=0;
+INIT_ONCE logWriterOnce=INIT_ONCE_STATIC_INIT;
+HANDLE logFile=nullptr;              // the writer's alone
 LONGLONG logSize=0;
 
 HANDLE OpenLog() noexcept {
@@ -235,8 +267,13 @@ HANDLE OpenLog() noexcept {
     return h;
 }
 
-// Under logLock: the log renamed to .log.1 and a new one opened. A rename that fails (another program holds
-// .log.1, or the log without sharing delete) is said in the log, which then grows another kLogMax first.
+void WriteLog(const char* text,std::size_t n) noexcept {
+    DWORD wrote=0;
+    if(logFile && n && WriteFile(logFile,text,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+}
+
+// The log renamed to .log.1 and a new one opened. A rename that fails (another program holds .log.1, or the log
+// without sharing delete) is said in the log, which then grows another kLogMax first.
 void RotateLog() noexcept {
     CloseHandle(logFile);
     const BOOL moved=MoveFileExW(logPath,logOldPath,MOVEFILE_REPLACE_EXISTING);
@@ -247,8 +284,36 @@ void RotateLog() noexcept {
     const int n=moved ? _snprintf_s(line,sizeof(line),_TRUNCATE,"(log continued: the previous %lld MB are in .log.1)\r\n",kLogMax>>20)
                       : _snprintf_s(line,sizeof(line),_TRUNCATE,"(log rotation failed, error %lu: this file grows on)\r\n",error);
     if(!moved)logSize=0;   // the next try another kLogMax on, not on every line
-    DWORD wrote=0;
-    if(n>0 && WriteFile(logFile,line,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+    if(n>0)WriteLog(line,static_cast<std::size_t>(n));
+}
+
+DWORD WINAPI LogWriter(void*) {
+    for(;;) {
+        Sleep(kFlushMs);
+        AcquireSRWLockExclusive(&logLock);
+        const int full=logActive;
+        const std::size_t n=logUsed;
+        const unsigned dropped=logDropped;
+        logActive^=1;logUsed=0;logDropped=0;
+        ReleaseSRWLockExclusive(&logLock);
+        if(!n && !dropped)continue;
+        if(!logFile)logFile=OpenLog();
+        if(!logFile)continue;
+        if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
+        WriteLog(logBuffer[full],n);
+        if(dropped) {
+            char line[120];
+            const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
+                                    kLogBuffer>>10,kFlushMs);
+            if(k>0)WriteLog(line,static_cast<std::size_t>(k));
+        }
+    }
+}
+
+BOOL CALLBACK StartLogWriter(PINIT_ONCE,void*,void**) {
+    const HANDLE t=CreateThread(nullptr,0,&LogWriter,nullptr,0,nullptr);
+    if(t)CloseHandle(t);
+    return TRUE;
 }
 }  // namespace
 
@@ -259,11 +324,12 @@ void Log(const char* format,...) noexcept {
     char line[1100];
     const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
     if(n<=0)return;
+    InitOnceExecuteOnce(&logWriterOnce,&StartLogWriter,nullptr,nullptr);
     AcquireSRWLockExclusive(&logLock);
-    if(!logFile)logFile=OpenLog();
-    if(logFile && logSize+n>kLogMax)RotateLog();
-    DWORD wrote=0;
-    if(logFile && WriteFile(logFile,line,static_cast<DWORD>(n),&wrote,nullptr))logSize+=wrote;
+    if(logUsed+static_cast<std::size_t>(n)<=kLogBuffer) {
+        std::memcpy(logBuffer[logActive]+logUsed,line,static_cast<std::size_t>(n));
+        logUsed+=static_cast<std::size_t>(n);
+    } else ++logDropped;
     ReleaseSRWLockExclusive(&logLock);
 }
 
@@ -344,9 +410,14 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
+    InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
+    InstallJetSound();
+    InstallMissiles();
+    InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
+    InstallBigWorld();
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());

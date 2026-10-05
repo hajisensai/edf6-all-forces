@@ -28,7 +28,6 @@ constexpr std::size_t kParts=0x1320,kBodyPart=0x1530;
 const wchar_t* const kFuselageBones[]={L"bomber501",L"bomber401",L"body"};
 constexpr std::size_t kCeiling=0x20B2998,kCeilingY=0x3C;
 constexpr float kUnderProbe=600.0f,kGroundProbe=3000.0f;
-constexpr std::size_t kInstBoneCount=0x20,kBoneStride=0x110;
 
 // The marks (testrange/gen.py JETS, tools/make_jets.py, tools/make_sub.py write them into the SGOs):
 // jets 7001-7099 (jet.cpp kKinds and kCarrierMarks name each), the submarine carrier 7101, the player
@@ -83,6 +82,10 @@ void __fastcall PhysicsHook(void* vehicle) {
     nextPhysics(vehicle);
     __try {
         auto v=static_cast<unsigned char*>(vehicle);
+        // Every plugin body has its body part, however it came into the world: a jet a mission script placed (the
+        // test range's NPC and enemy jets, src/jet.cpp CrewPlaced) never went through the spawn's fix, and shot down
+        // its 506 crash state (0x650010, state 1) read part -1: EDF+0x650137, 2026-10-04 (FixBodyPart506).
+        if(At<std::int32_t>(v,kBodyPart)==-1 && BodyOf(v)!=PluginBody::none)FixBodyPart506(v,"BODY506");
         const StepFn step=StepOf(BodyOf(v));
         if(!step)return;
         alignas(16) float lin[4]{},ang[4]{};
@@ -164,6 +167,19 @@ float GroundClearance(const float* p) noexcept {
     return MapRay(top,p,hit)>=0.0f ? p[1]-hit[1] : kNoGround;
 }
 
+// No ceiling (the user, 2026-10-05: "who put in this 300 m limit? just delete the stock function that holds the
+// height down"). The heli input (slot 55, 0x6543A0) sets every helicopter-class body over the map's ceiling
+// (*(*(image+0x20B2998)+0x3C), 300 m on this map) back down to it every frame: at 0x654463 it compares the body's
+// height with the ceiling and `jbe` (0x65446C) skips the clamp only when under it. That jump made unconditional
+// (EB), the clamp never runs: the player's jets, the stock and called helis climb as high as they like. The map's
+// X/Z area clamp right after it is left as it is (the plugin's jets widen it themselves: jet.cpp kAreaInset).
+// CeilingY() still reads the value: the NPC jets keep under it on their own (jet_flight.cpp Guard).
+constexpr unsigned kCeilingClamp=0x654463;
+const unsigned char kCeilingClampCode[]={0xF3,0x0F,0x10,0x44,0x24,0x24,0x0F,0x2F,0xC6,0x76,0x0A,0xF3,0x0F,0x11,0x74,0x24,0x24,
+                                         0xB3,0x01,0xEB,0xEB};
+constexpr std::size_t kCeilingJump=9;   // the jbe's opcode within it
+bool ceilingOff=false;
+
 float CeilingY() noexcept {
     const auto p=At<const unsigned char*>(image,kCeiling);
     if(!p || !Readable(p+kCeilingY,4))return 1e9f;
@@ -188,8 +204,11 @@ bool FixBodyPart506(unsigned char* v,const char* tag) noexcept {
         if(Cfg().debug)Log("%s v=%p body part: %ls (%d)",tag,v,name,i);
         return true;
     }
-    Log("%s v=%p has no body part (going down it would crash)",tag,v);
-    return false;
+    // None of its bones is a fuselage: its root (bone 0), which every model has, so its crash state reads a bone, not
+    // part -1 (EDF+0x650137).
+    Put<std::int32_t>(v,kBodyPart,0);
+    Log("%s v=%p has no fuselage bone: body part 0 (its root)",tag,v);
+    return true;
 }
 
 void BodyAttitude(const unsigned char* v,const float* nose,const float* up,float gain,float maxRate,float* omega) noexcept {
@@ -253,7 +272,11 @@ bool InstallBody506() noexcept {
         // The death goes through the 506's own message slot (hooked or not) to the stock handler.
         dieOk=messageOk && Matches(kVehicleDie,kDieSig,sizeof(kDieSig));
         bodyPartOk=Matches(kFindPart,kFindPartSig,sizeof(kFindPartSig));
-        Log("HOOK body506 physics=%d messages=%d die=%d bodyPart=%d",physicsOk,messageOk,dieOk,bodyPartOk);
+        unsigned char noClamp[sizeof(kCeilingClampCode)];
+        std::memcpy(noClamp,kCeilingClampCode,sizeof(noClamp));
+        noClamp[kCeilingJump]=0xEB;
+        ceilingOff=edf::PatchCode(image+kCeilingClamp,kCeilingClampCode,noClamp,sizeof(noClamp));
+        Log("HOOK body506 physics=%d messages=%d die=%d bodyPart=%d ceilingOff=%d",physicsOk,messageOk,dieOk,bodyPartOk,ceilingOff);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

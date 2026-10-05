@@ -26,7 +26,7 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 // commanded 260-360 m/s flew 200-211, so turn radius, lead and bomb release were planned for a speed never
 // flown. Since 2026-10-04 a jet body gets its own copy of the motion properties with a 600 m/s cap
 // (jetprops.cpp), so the old 200 m/s Havok cap no longer binds. Past 250 the 5 g turn radius (1275 m) times the
-// wall margin (Guard) no longer fits inside kWorldWall.
+// wall margin (Guard) no longer fits inside the world walls (the play edge, crew.h PlayEdge).
 // Patrol: the speed that holds the patrol circle at a 60 degree bank (tan 1.73, 2 g), between kLoiterMin
 // times the stall speed and cruise. At cruise the circle took 5 g and 78 degrees of bank the whole time; at
 // 45 degrees (until 2026-10-04) it crawled round at 100 m/s.
@@ -46,9 +46,12 @@ constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.17f,kAoaTau=0.3f;
 // and is forgotten kWallLifeMs after it was last met.
 constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.0f,kWallSpan=400.0f;
 constexpr ULONGLONG kBlockedMs=250,kWallLifeMs=120000;
-// The Havok broadphase ends at 3000 m a side: the world's walls at kWorldWall keep the jets in (jet.cpp deletes
-// one past kWorldGone). They are never forgotten and no learned wall takes their place.
-constexpr float kWorldWall=2400.0f;
+// The Havok broadphase ends at 3000 m a side: the world's walls at the play edge (crew.h PlayEdge: 2400 stock, the big map's ground edge) keep the jets in (jet.cpp deletes
+// one past kWorldGoneIn of it). They are never forgotten and no learned wall takes their place.
+// The world walls stand at the play edge (crew.h PlayEdge, the user's buffer and "past the line, back first"):
+// they turn a jet off from kEdgeBuffer in (or its turn's reach, if more), and one past them is sent back in before
+// all else: at least kEdgeBack of its way pointing in (Guard).
+constexpr float kEdgeBack=0.7f;
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus the sink (gravity
 // along the path speeding it up) while it gets ready: kReact seconds, and the roll that turns its lift up
 // (RollToLift). With kReact alone a fighter diving inverted at an air target began to pull at 75 m, 92 m/s
@@ -60,8 +63,10 @@ constexpr float kReact=1.0f;
 // count at +kInstBoneCount); local = Rx(theta) x bind (row vectors), theta > 0 = trailing edge up. Both up
 // pitch the nose up, opposite they roll: kElevonMax at the full pitch rate (maxG) or roll rate, moved at
 // most kElevonRate. The engine makes world = local x parent world each frame.
-constexpr std::size_t kModelInst=0xEE0,kInstBones=0x10,kInstBoneCount=0x20,kBoneStride=0x110,kBoneAuto=0x8,kBoneLocal=0x70;
-constexpr float kElevonMax=0.35f,kElevonRate=2.0f;
+constexpr std::size_t kModelInst=0xEE0,kInstBones=0x10,kBoneAuto=0x8,kBoneLocal=0x70;   // count, stride: body506.h
+// (2026-10-05, the user: the control surfaces should visibly move: kElevonGain times the turn's share of its most, up to
+// kElevonMax ~29 deg, kElevonRate fast: an ordinary turn shows them deflected, not a degree or two.)
+constexpr float kElevonMax=0.5f,kElevonRate=4.0f,kElevonGain=3.0f;
 const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 // The carrier's thrusters (docs/jet-model-re.md §6): the V508 transport's four nacelles, bones boosterF_l/r and
 // boosterB_l/r under body, each bound level (nose +z) at its mount, hinged along its local X like the elevons.
@@ -73,6 +78,13 @@ const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 // tilt-rotor's yaw in the hover).
 constexpr float kThrustBack=1.92f,kThrustRate=0.8f,kThrustYaw=0.25f;
 const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l",L"boosterB_r"};
+// The Primer fighter's wings (Flap): both beat kFlapAmplitude rad about their bones' local X (the model's forward)
+// kFlapHz times a second, faster (up to kFlapHzMost) the more it climbs or speeds up; each downstroke lifts it
+// (kFlapLift m/s^2 at the stroke's middle, none on the upstroke): it flies in beats. kFlapUp: the sign of theta that
+// raises each wing's tip (pylib/primer_fighter_model.py).
+const wchar_t* const kWingNames[2]={L"wing_l",L"wing_r"};
+constexpr float kFlapAmplitude=0.6f,kFlapHz=2.5f,kFlapHzMost=4.5f,kFlapLift=14.0f;
+constexpr float kFlapUp[2]={1.0f,-1.0f};
 // The ground under a jet is body506's GroundClearance: under the ground a ray down sees nothing, so a jet that
 // went through it was once taken for one over a void, Guard let it be, and it flew on under the map
 // (2026-10-03: a fighter 5 s down to -109, drones to -310); its ray from above finds the surface then.
@@ -80,8 +92,16 @@ const wchar_t* const kThrusterNames[4]={L"boosterF_l",L"boosterF_r",L"boosterB_l
 // The walls: the world's four (fixed) and the ones learned this mission (see kWallSpan), where one was met and
 // its horizontal normal, into it.
 struct Wall { float at[3],n[3]; ULONGLONG seen; bool on; };
-constexpr Wall kWorldWalls[4]={{{kWorldWall,0.0f,0.0f},{1.0f,0.0f,0.0f},0},{{-kWorldWall,0.0f,0.0f},{-1.0f,0.0f,0.0f},0},
-                               {{0.0f,0.0f,kWorldWall},{0.0f,0.0f,1.0f},0},{{0.0f,0.0f,-kWorldWall},{0.0f,0.0f,-1.0f},0}};
+struct WorldWalls {
+    Wall w[4];
+    WorldWalls() noexcept {
+        const float a=PlayEdge();
+        w[0]=Wall{{a,0.0f,0.0f},{1.0f,0.0f,0.0f},0,false};w[1]=Wall{{-a,0.0f,0.0f},{-1.0f,0.0f,0.0f},0,false};
+        w[2]=Wall{{0.0f,0.0f,a},{0.0f,0.0f,1.0f},0,false};w[3]=Wall{{0.0f,0.0f,-a},{0.0f,0.0f,-1.0f},0,false};
+    }
+    const Wall* begin() const noexcept { return w; }
+    const Wall* end() const noexcept { return w+4; }
+};
 constexpr int kLearnedWalls=16;
 Wall learned[kLearnedWalls]{};
 
@@ -122,10 +142,10 @@ bool JetNear(const Jet& self,const float* pos,ULONGLONG ms) noexcept {
 }
 
 // `want` turned off wall `w` from a turn's radius `r` out (more closing fast), never flown into.
-void TurnOff(const Wall& w,const Jet& j,const float* pos,float r,float* want) noexcept {
+void TurnOff(const Wall& w,const Jet& j,const float* pos,float r,float* want,float least=0.0f) noexcept {
     const float gap=Gap(w,pos);
     const float closing=j.m.vel[0]*w.n[0]+j.m.vel[2]*w.n[2];
-    const float reach=r*1.5f+(closing>0.0f ? closing*kReact : 0.0f);
+    const float turn=r*1.5f+(closing>0.0f ? closing*kReact : 0.0f),reach=turn>least ? turn : least;
     if(gap>reach)return;
     const float push=Clamp(1.0f-gap/reach,0.2f,1.0f),into=want[0]*w.n[0]+want[2]*w.n[2];
     if(into<=-push)return;
@@ -151,7 +171,11 @@ float RollToLift(const Jet& j) noexcept {
 // gravity along the path takes it off climbing and adds it diving.
 void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const float* want,float speed,float dt,float* up) noexcept {
     const bool bombing=j.mode==Mode::bomb;
-    const float maxG=bombing ? kBombG : k.maxG,tau=bombing ? kBombTau : kSteerTau;
+    // Its stores (BurdenOf): the same wing lifts fewer g of a heavier jet, the same engine speeds it up less, and
+    // their drag takes off top speed (drag ~ v^2: the speed it can hold falls as the root of 1 + their share).
+    const float mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
+    const float maxG=(bombing ? kBombG : k.maxG)/mass,tau=bombing ? kBombTau : kSteerTau;
+    speed/=std::sqrt(1.0f+(j.burden.drag>0.0f ? j.burden.drag : 0.0f));
     float dir[3]={j.m.vel[0],j.m.vel[1],j.m.vel[2]};
     float s=Len(dir);
     if(s<1.0f || !Normalize(dir)){std::memcpy(dir,fwd,12);s=k.minSpeed;}
@@ -181,7 +205,7 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     for(int i=0;i<3;++i)next[i]=dir[i]+(acc[i]-dir[i]*accAlong)*dt/s;
     if(!Normalize(next))std::memcpy(next,dir,12);
     const float bleed=pull>kG ? (pull/kG-1.0f)*kTurnBleed : 0.0f;
-    s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt)-(kG*next[1]+bleed)*dt;
+    s+=Clamp(speed-s,-k.brake*dt,k.thrust*dt/mass)-(kG*next[1]+bleed)*dt;
     const float top=j.m.top>0.0f ? j.m.top : k.attack*1.3f;
     s=Clamp(s,k.minSpeed*0.8f,top<kBodyTop ? top : kBodyTop);
     for(int i=0;i<3;++i)j.m.vel[i]=next[i]*s;
@@ -252,6 +276,19 @@ void PoseSurfaces(Jet& j,const float* want,float rate,float dt,const char* what)
     s.fresh=false;s.written=s.count>0;
 }
 
+// The Primer fighter's wings beating (see kFlapAmplitude); its velocity lifted by each downstroke.
+void Flap(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
+    if(!FindSurfaces(j,v,kWingNames,2,"wings"))return;
+    const float s=Len(j.m.vel),work=Clamp((j.m.vel[1]/10.0f)+(k.attack-s)/k.attack,0.0f,1.0f);
+    j.m.flap+=(kFlapHz+(kFlapHzMost-kFlapHz)*work)*2.0f*kPi*dt;
+    if(j.m.flap>2.0f*kPi)j.m.flap-=2.0f*kPi;
+    const float stroke=std::sin(j.m.flap);   // > 0 going up, < 0 going down
+    const float want[2]={kFlapUp[0]*kFlapAmplitude*stroke,kFlapUp[1]*kFlapAmplitude*stroke};
+    PoseSurfaces(j,want,100.0f,dt,"wings");
+    const float down=-std::cos(j.m.flap);   // the stroke's speed downward: the lift comes then
+    if(down>0.0f)j.m.vel[1]+=kFlapLift*down*dt;
+}
+
 // The elevons after the commanded turn (see kElevonMax).
 void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
     if(!FindSurfaces(j,v,kElevonNames,2,"elevons"))return;
@@ -261,7 +298,7 @@ void Elevons(Jet& j,const Kind& k,unsigned char* v,float dt) noexcept {
     Cross(j.m.omega,f,c);const float pitch=Dot(c,u);           // nose toward the body's up
     Cross(j.m.omega,r,c);const float roll=-Dot(c,u);           // right wing going down
     const float s=Len(j.m.vel),pitchMax=k.maxG*kG/(s>k.minSpeed ? s : k.minSpeed);
-    const float p=Clamp(pitch/pitchMax,-1.0f,1.0f),q=Clamp(roll/k.roll,-1.0f,1.0f);
+    const float p=Clamp(kElevonGain*pitch/pitchMax,-1.0f,1.0f),q=Clamp(kElevonGain*roll/k.roll,-1.0f,1.0f);
     const float want[2]={Clamp((p-q)*kElevonMax,-kElevonMax,kElevonMax),Clamp((p+q)*kElevonMax,-kElevonMax,kElevonMax)};
     PoseSurfaces(j,want,kElevonRate,dt,"elevons");
 }
@@ -358,7 +395,7 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
 
 // A wall within `range` ahead of `pos`.
 bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept {
-    for(const auto& w:kWorldWalls)if(Gap(w,pos)<range)return true;
+    for(const auto& w:WorldWalls())if(Gap(w,pos)<range)return true;
     for(const auto& w:learned)if(Holds(w,pos,ms) && Gap(w,pos)<range)return true;
     return false;
 }
@@ -372,7 +409,15 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float s=Len(j.m.vel);
     // Walls: turned off from a turn's radius out (more closing fast), never flown into.
     const float r=s*s/(k.maxG*kG);
-    for(const auto& w:kWorldWalls)TurnOff(w,j,pos,r,want);
+    for(const auto& w:WorldWalls())TurnOff(w,j,pos,r,want,kEdgeBuffer);
+    // Past the play edge: back in before all else (its fight, its target out there), level, straight in.
+    for(const auto& w:WorldWalls()) {
+        if(Gap(w,pos)>=0.0f)continue;
+        const float into=want[0]*w.n[0]+want[2]*w.n[2];
+        if(into>-kEdgeBack){want[0]-=w.n[0]*(into+kEdgeBack);want[2]-=w.n[2]*(into+kEdgeBack);}
+        want[1]=Clamp(want[1],-0.2f,0.2f);
+        Normalize(want);
+    }
     for(const auto& w:learned)if(Holds(w,pos,ms))TurnOff(w,j,pos,r,want);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
@@ -520,6 +565,11 @@ void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* no
     PitchBy(j.m.aoa,dir,up);
     Attitude(j,k,v,dir,up);
     if(k.pose==Pose::elevons)Elevons(j,k,v,dt);
+    else if(k.pose==Pose::flap)Flap(j,k,v,dt);
+    // The exhaust (booster.cpp JetFlames): burning with the speed between its slowest and its attack speed, the
+    // afterburner near the top.
+    const float s=Len(j.m.vel),share=k.attack>k.minSpeed ? (s-k.minSpeed)/(k.attack-k.minSpeed) : 1.0f;
+    JetFlames(v,Clamp(share,0.4f,1.0f),speed>=k.attack-5.0f,ms);
 }
 }  // namespace jet
 }  // namespace crew

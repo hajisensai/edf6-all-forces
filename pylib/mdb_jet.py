@@ -39,7 +39,7 @@ SLAB_Y = 0.3          # a vertex belongs to the wing slab when |y| < SLAB_Y ...
 SLAB_X = 6.0          # ... and |x| > SLAB_X (outboard of the nacelles)
 X_IN = 7.4            # inboard end of the elevon (just outboard of the trailing-edge kink at |x| = 7.23..7.26)
 X_HINGE_OUT = 11.4    # second station used to place the hinge line (the surface itself runs to the tip)
-CHORD_FRAC = 0.25     # elevon chord = 25 % of the local wing chord
+CHORD_FRAC = 0.4      # elevon chord = 40 % of the local wing chord (25 % until 2026-10-05: the user did not see them move)
 EPS = 1e-4
 MIN_AREA = 1e-7
 
