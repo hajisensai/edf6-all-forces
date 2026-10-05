@@ -141,6 +141,44 @@ def play_edge_margin_is_the_big_maps() -> None:
     assert m and float(m.group(1)) == make_bigmap.WORLD_MARGIN, (m and m.group(1), make_bigmap.WORLD_MARGIN)
 
 
+@test
+def seam_field_makes_the_block_periodic() -> None:
+    """pylib/seams.py on a made-up uneven block: opposite edges and the four corners end up equal, the middle
+    ground (|x|, |z| <= 1250) does not move, and nothing moves by more than the edge difference it fixes."""
+    import numpy as np
+    import seams
+    rng = np.random.default_rng(7)
+    g = np.arange(-seams.HALF, seams.HALF + 1, 25.0)
+    x, z = np.meshgrid(g, g)
+    y = (20 * np.sin(x / 310 + 1.3) * np.cos(z / 470) + 0.01 * x + rng.normal(0, 0.5, x.shape))
+    pts = np.stack([x.ravel(), y.ravel(), z.ravel()], 1)
+    f = seams.Field(pts)
+    ny = f.heights(pts).reshape(x.shape)
+    assert np.abs(ny[:, 0] - ny[:, -1]).max() < 1e-9 and np.abs(ny[0, :] - ny[-1, :]).max() < 1e-9
+    assert np.ptp([ny[0, 0], ny[0, -1], ny[-1, 0], ny[-1, -1]]) < 1e-9
+    middle = (np.abs(x) <= seams.INNER) & (np.abs(z) <= seams.INNER)
+    assert np.abs(ny - y)[middle].max() == 0.0
+    edge_gap = max(np.abs(y[:, 0] - y[:, -1]).max(), np.abs(y[0, :] - y[-1, :]).max())
+    assert np.abs(ny - y).max() <= edge_gap
+
+
+@test
+def collision_box_codec_holds_its_child() -> None:
+    """pylib/hkcms.py encode_box: the decoded code of any box inside a parent contains the box and stays inside
+    the parent (the game culls with the decoded box: a smaller one would let things fall through)."""
+    import numpy as np
+    import hkcms
+    rng = np.random.default_rng(3)
+    for _ in range(2000):
+        a, b = rng.uniform(-2000, 2000, 3), rng.uniform(-2000, 2000, 3)
+        parent = np.array([np.minimum(a, b), np.maximum(a, b)])
+        c, d = rng.uniform(parent[0], parent[1]), rng.uniform(parent[0], parent[1])
+        child = np.array([np.minimum(c, d), np.maximum(c, d)])
+        got = hkcms.decode_box(parent, hkcms.encode_box(parent, child))
+        assert (got[0] <= child[0]).all() and (got[1] >= child[1]).all(), (parent, child, got)
+        assert (got[0] >= parent[0] - 1e-6).all() and (got[1] <= parent[1] + 1e-6).all(), (parent, child, got)
+
+
 # ---------------------------------------------------------------- the data
 
 

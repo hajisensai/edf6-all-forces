@@ -8,6 +8,11 @@ over") into <game>/Mods:
                               and its collision, by name, at its own place); the far mountain ring is sunk out of
                               sight (its ring would stand inside the bigger map). A RADIUS of 1 is 3 x 3 blocks
                               (+-5250 m), 2 is 5 x 5 (+-8750 m).
+  Mods/MAP/IG_HEIGEN601.MAD   its collision, Mods/MAP/IG_HEIGEN601.RAB its far-only ground, Mods/MAP/
+  IG_HEIGEN601_ENKEI*.FMB     its four edge pieces' terrain: the block made seamless (pylib/seams.py). The stock
+                              block was never meant to repeat, its east and west (north and south) edges differ by up
+                              to 33 m, so neighbouring copies met in see-through steps; each of these three is moved
+                              near the block's outer edge so the opposite edges match, the middle ground untouched.
   Mods/Plugins/EDF6VehicleCrew.ini  BigWorld (the physics world's half size, src/bigworld.cpp) set to cover it; --remove
                               sets it back to 0.
 
@@ -16,6 +21,7 @@ ground units' paths), the map's own move area is widened by the plugin with BigW
 
   python tools/make_bigmap.py [game dir] [--radius N]   write / refresh
   python tools/make_bigmap.py [game dir] --remove       release it
+  python tools/make_bigmap.py [game dir] --check        build everything in memory and report the seams (writes nothing)
 """
 from __future__ import annotations
 
@@ -23,16 +29,29 @@ import os
 import re
 import sys
 
+import numpy as np
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import bigmap  # noqa: E402
 import cpk  # noqa: E402
 import crilayla  # noqa: E402
+import hkcms  # noqa: E402
+import hktag  # noqa: E402
 import ledger  # noqa: E402
+import mdb  # noqa: E402
+import seams  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 OWNER = 'bigmap'   # pylib/ledger.py
 MAP_FILE = 'IG_HEIGEN601.MAC'
+COLLISION_FILE = 'IG_HEIGEN601.MAD'
+MODELS_FILE = 'IG_HEIGEN601.RAB'
+FAR_MODEL = 'ig_far_heigen507_2.mdb'     # the far-only ground (record ig_far_heigen507_2.mdx), in MODELS_FILE
+RING_TAG = 'enkei'                       # the four edge pieces: ig_heigen601_enkei{up,bottom,left,right}
+FAR_EDGE_EPS = 12.0      # m: the far ground is decimated, its edge vertices stray up to 11 m off the edge line
+FAR_CORNER_TOL = 3.0     # m: and two of its corners have no vertex
+SEAM_TOL = {'collision': 0.01, 'far': 1.0}   # m: largest opposite-edge difference left (quantisation, half floats)
 ARCHIVE = 'Chunk02.cpk'
 BLOCK = 3500.0           # m: the ground (2500) and its edge ring (500 a side)
 SINK = -40000.0          # m: the far mountain ring's drop (out of the far camera's 20 km)
@@ -40,10 +59,10 @@ WORLD_MARGIN = 750.0     # m of physics world past the last block's edge
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
 
 
-def stock_map(root: str) -> bytes:
-    """The stock map archive, from the game's Chunk02.cpk (only read)."""
+def stock_file(root: str, name: str) -> bytes:
+    """A stock MAP file, from the game's Chunk02.cpk (only read)."""
     c = cpk.Cpk(os.path.join(root, ARCHIVE))
-    e = c.index[('MAP', MAP_FILE)]
+    e = c.index[('MAP', name)]
     with open(c.path, 'rb') as h:
         h.seek(c.base + int(e['FileOffset']))
         data = h.read(int(e['FileSize']))
@@ -85,7 +104,7 @@ def sink(mac: bytes, i: int) -> bytes:
 def build_map(root: str, radius: int) -> bytes:
     if not 1 <= radius <= 3:
         raise ValueError('radius 1..3')
-    stock = stock_map(root)
+    stock = stock_file(root, MAP_FILE)
     block, ring = pieces(stock)
     copies = [(i, gx * BLOCK, 0.0, gz * BLOCK) for gx in range(-radius, radius + 1) for gz in range(-radius, radius + 1)
               if (gx, gz) != (0, 0) for i in block]
@@ -99,6 +118,75 @@ def build_map(root: str, radius: int) -> bytes:
         if problems:
             raise ValueError(f'{MAP_FILE} (the ring sunk): ' + '; '.join(problems[:5]))
     return out
+
+
+def edge_gap(pts: np.ndarray, eps: float) -> float:
+    """Largest height difference between opposite block edges, sampled every 25 m along them (points within eps of
+    an edge line count as on it; heights in between linear)."""
+    worst = 0.0
+    ts = np.arange(-seams.HALF + 50.0, seams.HALF - 49.0, 25.0)
+    for ax in (0, 2):
+        prof = []
+        for side in (-1, 1):
+            m = np.abs(pts[:, ax] - side * seams.HALF) < eps
+            t, y = pts[m, 2 - ax], pts[m, 1]
+            k = np.argsort(t)
+            prof.append(np.interp(ts, t[k], y[k]))
+        worst = max(worst, float(np.abs(prof[0] - prof[1]).max()))
+    return worst
+
+
+def seamless_collision(mad: bytes) -> tuple[bytes, dict[str, float]]:
+    """The map's collision with the four edge pieces' meshes made periodic; every box re-checked."""
+    marc = bigmap.Marc.parse(mad)
+    hkt = marc.get('collision.hkt')
+    tag = hktag.Tag(hkt)
+    buf = bytearray(hkt)
+    bodies = hkcms.bodies(tag)
+    ring = sorted(n for n in bodies if RING_TAG in n.lower())
+    if len(ring) != 4:
+        raise ValueError(f'{COLLISION_FILE}: expected 4 edge pieces, found {ring}')
+    comps = [hkcms.Compound(tag, buf, bodies[n]) for n in ring]
+    before = np.concatenate([c.triangles().reshape(-1, 3) for c in comps])
+    field = seams.Field(before)
+    moved = sum(c.set_heights(field.heights) for c in comps)
+    new = hktag.Tag(bytes(buf))
+    problems = [p for n in ring for p in hkcms.bound_problems(new, bytes(buf), bodies[n])]
+    if problems:
+        raise ValueError(f'{COLLISION_FILE}: boxes no longer hold their triangles: ' + '; '.join(problems[:5]))
+    after = np.concatenate([hkcms.Compound(new, bytearray(buf), bodies[n]).triangles().reshape(-1, 3) for n in ring])
+    marc.put('collision.hkt', bytes(buf))
+    return marc.build(), {'meshes': moved, 'before': edge_gap(before, seams.EDGE_EPS),
+                          'after': edge_gap(after, seams.EDGE_EPS)}
+
+
+def seamless_far(rab_bytes: bytes) -> tuple[bytes, dict[str, float]]:
+    """The map's model archive with the far-only ground made periodic (every other member's bytes kept)."""
+    rab = mdb.rab_read(rab_bytes)
+    hits = [f for f in rab.files if f.name.lower() == FAR_MODEL]
+    if len(hits) != 1:
+        raise ValueError(f'{MODELS_FILE}: {FAR_MODEL} found {len(hits)} times')
+    f = hits[0]
+    md = mdb.mdb_read(f.data)
+    before = seams.mdb_points(md)
+    field = seams.Field(before, edge_eps=FAR_EDGE_EPS, corner_tol=FAR_CORNER_TOL)
+    moved = seams.apply_mdb(md, field)
+    after = seams.mdb_points(md)
+    f.stored = mdb.cmpl_compress(mdb.mdb_write(md))
+    return mdb.rab_write(rab), {'vertices': moved, 'before': edge_gap(before, FAR_EDGE_EPS),
+                                'after': edge_gap(after, FAR_EDGE_EPS)}
+
+
+def build_seams(root: str) -> tuple[dict[str, bytes], dict[str, dict[str, float]]]:
+    """MAP file name -> its seamless bytes, and per part the seam report; raises if a seam is left."""
+    files: dict[str, bytes] = {}
+    report: dict[str, dict[str, float]] = {}
+    files[COLLISION_FILE], report['collision'] = seamless_collision(stock_file(root, COLLISION_FILE))
+    files[MODELS_FILE], report['far'] = seamless_far(stock_file(root, MODELS_FILE))
+    for part, r in report.items():
+        if r['after'] > SEAM_TOL[part]:
+            raise ValueError(f'{part}: opposite edges still differ by {r["after"]:.3f} m')
+    return files, report
 
 
 def world_half(radius: int) -> float:
@@ -121,8 +209,10 @@ def set_big_world(root: str, value: float) -> str:
 
 def install(root: str, radius: int = 1) -> list[str]:
     data = build_map(root, radius)
+    files, _ = build_seams(root)
     led = ledger.Ledger(root)
     paths = [led.put(OWNER, f'MAP/{MAP_FILE}', data)]
+    paths += [led.put(OWNER, f'MAP/{name}', blob) for name, blob in files.items()]
     paths.append(set_big_world(root, world_half(radius)))
     return paths
 
@@ -141,6 +231,12 @@ def main(argv: list[str]) -> int:
     radius = 1
     if '--radius' in argv:
         radius = int(argv[argv.index('--radius') + 1])
+    if '--check' in argv:
+        _, report = build_seams(root)
+        for part, r in report.items():
+            print(f'{part}: 对边高差 {r["before"]:.2f} m -> {r["after"]:.3f} m',
+                  {k: v for k, v in r.items() if k not in ('before', 'after')})
+        return 0
     if '--remove' in argv:
         deleted, kept = remove(root)
         for path in deleted:
