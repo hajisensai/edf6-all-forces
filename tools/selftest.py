@@ -816,6 +816,29 @@ def heli_mouse_aim_wired() -> None:
 
 
 @test
+def heli_store_flies_its_own_arc() -> None:
+    """The NPC heli's unguided store (heli.cpp kStoreHolder: the 506 napalm gun and drop pod) is aimed and gated on its
+    own round's arc (src/roundaim.h), not on the gun's lead with the homing missile's cone: Arms takes holder 2 apart
+    (IsStore), StoreSense solves and gates with roundaim, the run's nose goes onto the solution while the store is
+    ready, Fire's store branch fires only on the gate; tools/heli_fire_check.cpp runs the same roundaim calls and is
+    an EXCLUDE_FROM_ALL target."""
+    heli = src('src/heli.cpp')
+    arms = heli.split('Loadout Arms(', 1)[1].split('\n}\n', 1)[0]
+    assert 'IsStore(h.type,i,homing)' in arms and 'l.store=weapon' in arms, 'heli.cpp Arms: holder 2 is the store'
+    sense = heli.split('void StoreSense(', 1)[1].split('\n}\n', 1)[0]
+    for call in ('roundaim::Fire(', 'roundaim::Worth(', 'roundaim::Solve('):
+        assert call in sense, f'heli.cpp StoreSense: {call}'
+    frame = heli.split('bool SenseFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StoreSense(h,s);' in frame and 'std::memcpy(s.lead,s.storeLead,12)' in frame, 'heli.cpp SenseFrame: the nose onto the store'
+    fire = heli.split('Shot Fire(', 1)[1].split('\n}\n', 1)[0]
+    branch = fire.split('} else if(s.arms.store) {', 1)[1].split('} else {', 1)[0]
+    assert 's.storeWorth' in branch and 'kMissileCone' not in branch, 'heli.cpp Fire: the store fires on its own gate'
+    check = src('tools/heli_fire_check.cpp')
+    assert '#include "../src/roundaim.h"' in check and 'roundaim::Worth(' in check and 'roundaim::Solve(' in check
+    assert re.search(r'add_executable\(heli_fire_check EXCLUDE_FROM_ALL tools/heli_fire_check\.cpp\)', src('CMakeLists.txt'))
+
+
+@test
 def gunship_gunner_seat() -> None:
     """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second
     seat with the pilot's locators and the stock door gunner's pose, class mask and key row, and nothing else changes; a

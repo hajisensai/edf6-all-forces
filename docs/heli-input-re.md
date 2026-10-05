@@ -215,6 +215,27 @@ Gates inside physics (no rider check; H):
 3. Read back for control: rotor speed `veh+0x1BF8`, attitude `veh+0x1600/1604/1608`, heading basis
    `veh+0x15C0..`, contact byte `veh+0x1580`, matrix `veh+0x60`, position `veh+0x90`.
 
+## 6b. The store on the missile byte: unguided rounds (2026-10-06, static)
+
+`veh+0x2021` fires holder 2 (2b). On the stock 506 it is the homing missile, but the Air Raider's vehicle requests put
+unguided napalm there (Root.cpk WEAPON request SGOs, `Ammo_CustomParameter[4][3][3]`, H):
+N9 Eros Blaze `eWeapon396`, Vulture ZA `eWeapon398`, Vulture ZAM `MPACK_B_Weapon104`: `v_506heli_napalm01`
+(NapalmBullet01, AmmoSpeed 3 m/frame, AmmoGravityFactor 1, AmmoAlive 360, FireAccuracy 0.2, bursts of 6 every 4
+frames, FireInterval 360); Eros No. 6 `DLC_Vehicle_heli_edf6benefits`: `v_506heli_under_napalm01` (0.1 m/frame,
+gravity x2, AmmoOwnerMove 1, FireVector (0,-1,0)). The plugin's own call helis (EDF6VC_HELI_506 from V506_HELI)
+carry the homing `v_506heli_missile01`.
+
+- NapalmBullet01's update `0x2641F0` calls the bullet core update `0x235D50` first (rcx = bullet+0x140): its flight is
+  the core's per-frame step, v += g/60 then p += v/60, no drag (autoturret/docs/re-notes.md "Rounds in flight"). H.
+- FireVector: the SGO reader stores the list's three floats at `weapon+0x350` (`0x68CCFA`) only when it is not empty
+  (else +0x350 keeps the constructor's value, zero as read so far). H. Fire reads it at `0x691943` and, by a flag,
+  uses it as is or turns it by a quaternion of the muzzle (`0x64690`); which frame applies to the pod is not traced:
+  M. The plugin turns it by the vehicle's rows (a level heli makes both the same).
+- AmmoExplosion: written to `weapon+0x8B0` (`0x68D82F`, through `0xD7CE0`). M.
+
+The NPC pilot (heli.cpp kStoreHolder, src/roundaim.h) flies this round's arc for its aim and fire gate;
+tools/heli_fire_check.cpp compares that with the homing-missile gate it used before.
+
 ## 7. Open items for a live cdb session
 
 - World-axis sign of `+0x1540` and `+0x1550`, and the actual gains `veh+0x162C/0x1630/0x1634/0x1640`.

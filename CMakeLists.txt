@@ -31,6 +31,12 @@ target_compile_options(pjet_kinds PRIVATE /W4 /WX /utf-8 /permissive-)
 add_executable(heli_aim_check EXCLUDE_FROM_ALL tools/heli_aim_check.cpp)
 target_compile_options(heli_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(heli_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The NPC helis' unguided store (the 506's napalm gun and drop pod: src/roundaim.h, heli.cpp kStoreHolder) against
+# targets at several ranges, heights and speeds, the miss before and after (tools/heli_fire_check.cpp). Not part of the
+# plugin build: cmake --build build --target heli_fire_check && build\heli_fire_check.exe
+add_executable(heli_fire_check EXCLUDE_FROM_ALL tools/heli_fire_check.cpp)
+target_compile_options(heli_fire_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(heli_fire_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # NPC jets against buildings, offline (tools/jet_obstacle_sim.cpp): the plugin's own jet_flight.cpp, jet_combat.cpp and
 # body506.cpp against a stand-in world of flat ground and box buildings; tools/jet_obstacle_view.py draws its trace.
