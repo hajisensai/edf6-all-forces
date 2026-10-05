@@ -47,7 +47,20 @@ constexpr float kG=9.8f;
 
 // Each round guided: the target where it was last frame (its velocity, m a frame), and the game frame it was last
 // guided in: an entry not guided for kStaleFrames is a round gone (dead rounds are never told of), free again.
-struct Round { const unsigned char* b; std::int32_t age; ULONGLONG frame; float last[3]; bool seen; };
+// `decoy`: 1 + the flare it chases instead of its lock (FlareDrop), 0 none.
+struct Round { const unsigned char* b; std::int32_t age; ULONGLONG frame; float last[3]; bool seen; int decoy; };
+// Flares (the user, 2026-10-05: "add flares"): a flare dropped by the player's jet (playerjet.cpp) falls under
+// kFlareGravity with kFlareDrag of its speed lost a second and burns kFlareLifeMs. As it drops, each round homing within
+// kDecoyRadius of where it was dropped (on that jet) takes it for its target with kDecoyChance: it flies at the flare
+// from then on, and on at the last place it saw it once it burns out.
+struct Flare { const void* owner; float pos[3],vel[3]; ULONGLONG until; };
+constexpr int kFlares=16;
+constexpr float kFlareGravity=6.0f,kFlareDrag=0.6f,kDecoyRadius=40.0f,kDecoyChance=0.75f;
+constexpr ULONGLONG kFlareLifeMs=4000;
+Flare flares[kFlares]{};
+ULONGLONG flaresFrame=0;
+unsigned decoySeed=0x2545F491u;
+float Chance() noexcept { decoySeed=decoySeed*1664525u+1013904223u; return static_cast<float>(decoySeed>>8)/16777216.0f; }
 constexpr int kRounds=128;
 constexpr ULONGLONG kStaleFrames=2;
 Round rounds[kRounds]{};
@@ -63,6 +76,45 @@ bool guideOk=false;
 
 // A round guided this frame or the last whose lock point (Round::last) is within `radius` of `at`: a missile coming
 // for whatever is there (the player's missile warning, playerjet.cpp).
+void FlareDrop(const void* owner,const float* at,const float* vel) noexcept {
+    const ULONGLONG ms=GameMs();
+    int slot=0;
+    for(int i=0;i<kFlares;++i){if(flares[i].until<=ms){slot=i;break;}if(flares[i].until<flares[slot].until)slot=i;}
+    Flare& f=flares[slot];
+    f.owner=owner;std::memcpy(f.pos,at,12);std::memcpy(f.vel,vel,12);f.until=ms+kFlareLifeMs;
+    const ULONGLONG frame=GameFrame();
+    int fooled=0,homing=0;
+    for(auto& r:rounds) {
+        if(!r.b || !r.seen || frame-r.frame>1 || r.decoy)continue;
+        const float d[3]={r.last[0]-at[0],r.last[1]-at[1],r.last[2]-at[2]};
+        if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>=kDecoyRadius*kDecoyRadius)continue;
+        ++homing;
+        if(Chance()<kDecoyChance){r.decoy=slot+1;++fooled;}
+    }
+    if(homing)Log("FLARE %d of %d missiles coming for it took the flare",fooled,homing);
+}
+
+void FlaresStep() noexcept {
+    const ULONGLONG frame=GameFrame();
+    if(frame==flaresFrame)return;
+    flaresFrame=frame;
+    const ULONGLONG ms=GameMs();
+    constexpr float dt=1.0f/60.0f;
+    for(auto& f:flares) {
+        if(f.until<=ms)continue;
+        f.vel[1]-=kFlareGravity*dt;
+        for(auto& x:f.vel)x*=1.0f-kFlareDrag*dt;
+        for(int i=0;i<3;++i)f.pos[i]+=f.vel[i]*dt;
+    }
+}
+
+int FlaresOf(const void* owner,float (*at)[3],float (*vel)[3],int most) noexcept {
+    const ULONGLONG ms=GameMs();
+    int n=0;
+    for(const auto& f:flares)if(n<most && f.owner==owner && f.until>ms){std::memcpy(at[n],f.pos,12);std::memcpy(vel[n],f.vel,12);++n;}
+    return n;
+}
+
 bool MissileHoming(const float* at,float radius) noexcept {
     const ULONGLONG frame=GameFrame();
     for(const auto& r:rounds) {
@@ -78,7 +130,7 @@ Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept
     Round* free=nullptr;
     for(auto& r:rounds) {
         if(r.b==b) {
-            if(age<r.age || frame-r.frame>kStaleFrames)r=Round{b,age,frame,{},false};
+            if(age<r.age || frame-r.frame>kStaleFrames)r=Round{b,age,frame,{},false,0};
             return r;
         }
         const bool stale=!r.b || frame-r.frame>kStaleFrames;
@@ -125,6 +177,12 @@ void Guide(unsigned char* b) noexcept {
     // entry (use count 0) is no lock, it flies on.
     if(lock && ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)>0 && Readable(lock,kLockValid+1) && lock[kLockValid]) {
         const float* aim=reinterpret_cast<const float*>(lock+kLockAim);
+        float decoyAt[3];
+        if(round.decoy) {   // fooled by a flare: at it while it burns, then on at where it was last
+            const Flare& f=flares[round.decoy-1];
+            std::memcpy(decoyAt,GameMs()<f.until ? f.pos : round.last,12);
+            aim=decoyAt;
+        }
         float tv[3]={0.0f,0.0f,0.0f};
         if(round.seen)for(int i=0;i<3;++i)tv[i]=aim[i]-round.last[i];
         if(Len(tv)>20.0f)tv[0]=tv[1]=tv[2]=0.0f;   // the lock moved to another target: no velocity from that

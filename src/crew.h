@@ -73,6 +73,8 @@ struct Config {
     int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
     int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
     bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
+    int playerJetFlareKey=0x58;     // the key that drops a pair of flares ('X'; missile.cpp FlareDrop)
+    int playerJetFlares=8;          // the pairs a player jet carries
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
@@ -347,6 +349,7 @@ struct PlayerJetReadout {
     bool air,stall,ground,keys,aiming;   // ground: there is ground under it (clear is its height over it), not on it
     bool pullUp;                 // in the air and about to hit the ground or what stands on it (PullUpNeeded)
     int threat;                  // 2 a missile homing on it, 1 an enemy's missile lock on it, 0 none
+    int flares;                  // flare pairs left
     float aim[3],path[3];
     int stores,store;
     const char* storeName[6];
@@ -362,6 +365,13 @@ void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the p
 namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept; }
 // missile.cpp: a guided round now homing on a point within `radius` m of `at` (its lock point there)
 bool MissileHoming(const float* at,float radius) noexcept;
+// missile.cpp: flares. A flare dropped by `owner` at `at` (m/s `vel`): the rounds homing there may take it for their
+// target. FlaresStep moves them once a frame; FlaresOf: `owner`'s burning flares, at most `most` (their places, speeds).
+void FlareDrop(const void* owner,const float* at,const float* vel) noexcept;
+void FlaresStep() noexcept;
+int FlaresOf(const void* owner,float (*at)[3],float (*vel)[3],int most) noexcept;
+// booster.cpp: the flares' fire, drawn as Booster flames on `v` (their owner) at `at`, trailing against `vel`.
+void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[3],int n,ULONGLONG ms) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for

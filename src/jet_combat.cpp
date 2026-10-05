@@ -40,7 +40,9 @@ constexpr float kGunSlip=0.985f;
 // (Until 2026-10-03 the fighter fired only inside 500 m, the nose on the guns' lead point, while flying a
 // gun pass at the target: the missiles went at 430 m and it closed in to 120 m all the same.)
 constexpr float kMissileCone=0.15f,kMissileMin=150.0f,kStandoffIn=0.45f,kCrankAngle=1.2f,kTurnAwayAngle=2.6f;
-constexpr ULONGLONG kMissileMs=2500,kLockMs=700,kSalvoMs=900,kCrankMs=4500,kPullMs=7000,kExtendMs=12000;
+// kLockMs: the nose held on the target this long before a missile goes (the user, 2026-10-05: the lock should take
+// longer; it was 0.7 s): the player hears the lock warning (playerjet.cpp ThreatTone) that long first.
+constexpr ULONGLONG kMissileMs=2500,kLockMs=2500,kSalvoMs=900,kCrankMs=4500,kPullMs=7000,kExtendMs=12000;
 // Missiles with no lock: once the game has had nothing in the missile's lock list for kNoLockMs while
 // the jet stood off, it goes in with the guns for kGunSpellMs, then tries the missiles again.
 constexpr ULONGLONG kNoLockMs=10000,kGunSpellMs=15000;
