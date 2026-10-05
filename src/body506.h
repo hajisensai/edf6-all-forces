@@ -28,6 +28,7 @@ void BodyAttitude(const unsigned char* v,const float* nose,const float* up,float
 // The record of bone `name` in model instance `inst` (veh+0xEE0), or nullptr (jet.cpp BoneRecord).
 unsigned char* BoneRecord506(const unsigned char* inst,const wchar_t* name) noexcept;
 constexpr std::size_t kModelInst506=0xEE0,kInstBones506=0x10,kBoneLocal506=0x70,kBoneWorld506=0xB0;
+constexpr std::size_t kInstBoneCount=0x20,kBoneStride=0x110;   // the bone count; one bone record's size
 // `bind` (a bone's local matrix, row vectors) turned `angle` rad about its local X: Rx(angle) x bind.
 void HingePose(const float* bind,float angle,float* out) noexcept;
 

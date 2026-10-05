@@ -25,6 +25,16 @@ const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,
 const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
 const unsigned char kDeleteSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x60,0x48};
 bool spawnOk=false;      // the spawn functions matched (InstallSpawn)
+// The level a script's CreateFriend gives what it spawns (docs/mission-airstrike-re.md §3b: 0x1D8900 calls
+// 0x54E740(object, ctx[0x280 + team * 4] * level) after SetTeam): its durability and firepower scaled to the mission's
+// difficulty (and its SGO's game_object_level_adjust). The team factors start at 1 (0x1D6301) and only a script
+// changes them (0x1BA190, the enemy's); the test range's level is 1: so 1, as there. Without it the plugin's jets
+// were the base values on every difficulty while the range's were ~x17 on the user's (2026-10-04 log).
+constexpr unsigned kSetLevel=0x54E740;
+const unsigned char kSetLevelSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57,0x48,0x8D};
+constexpr float kFriendLevel=1.0f;
+using SetLevelFn=void(__fastcall*)(void*,float);
+bool levelOk=false;
 bool preloaded[kBodyCount]{};   // the body's SGO was preloaded for this mission (PreloadJets)
 bool broken[kBodyCount]{};      // its spawn faulted in the game's init (CreateJet): off until the game restarts
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
@@ -123,6 +133,10 @@ void Facing(const float* heading,const float* at,float* m) noexcept {
     std::memcpy(m,r,sizeof(r));
 }
 
+void SetJetTeam(unsigned char* v,std::int32_t team) noexcept {
+    if(spawnOk)reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
+}
+
 // CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not what
 // its body is (a jet SGO without its mark, a heli SGO that is a jet), or nullptr. `team`: friend, or the enemy
 // for an enemy, set before RideAi seats the pilot as for CreateFriend (whose pilot is a friend all the same:
@@ -133,6 +147,7 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     if(!v)return nullptr;
     if(bodyPartOk)FixBodyPart506(v,"JET");
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
+    LevelVehicle(v);
     reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
     const BodyRow& row=Row(b);
     const bool jet=row.mark>0.0f;
@@ -158,9 +173,9 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     std::memcpy(j->anchor,target,12);j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
     JoinFlight(*j,FlightFor(source,ms));
     for(int i=0;i<3;++i)j->m.vel[i]=m[8+i]*speed;
-    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d",v,
-        KindOf(*j).name,Row(b).file,j->flight,j->wing,start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,
-        SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
+    Log("JET v=%p launched: %s (%ls) flight %u wing %d from (%.0f,%.0f,%.0f) at (%.0f,%.0f,%.0f) %.0f m/s fuel=%lus driver=%d hp=%.0f/%.0f",
+        v,KindOf(*j).name,Row(b).file,j->flight,j->wing,start[0],start[1],start[2],target[0],target[1],target[2],speed,fuelSec,
+        SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy,At<float>(v,kHp),At<float>(v,kHpMax));
     Publish(true);
     return j;
 }
@@ -183,6 +198,13 @@ void FarRender(Jet& j,unsigned char* v) noexcept {
     } __except(FaultLog("JET far rendering (off for that jet)",GetExceptionInformation())){j.farOff=true;}
 }
 
+}  // namespace jet
+
+void LevelVehicle(unsigned char* v) noexcept {
+    if(jet::levelOk)reinterpret_cast<jet::SetLevelFn>(image+jet::kSetLevel)(v,jet::kFriendLevel);
+}
+
+namespace jet {
 bool InstallSpawn() noexcept {
     spawnOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig)) && Matches(kPreload,kPreloadSig,sizeof(kPreloadSig)) &&
             Matches(kCreateObject,kCreateObjectSig,sizeof(kCreateObjectSig)) && Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)) &&
@@ -190,6 +212,8 @@ bool InstallSpawn() noexcept {
     bodyPartOk=spawnOk && Matches(kFindPart,kFindPartSig,sizeof(kFindPartSig)) &&
                Matches(kBodyPartUse,kBodyPartUseSig,sizeof(kBodyPartUseSig)) && Matches(kBodyPartInit,kBodyPartInitSig,sizeof(kBodyPartInitSig));
     if(!bodyPartOk)spawnOk=false;   // a jet without its body part crashes online: none at all
+    levelOk=Matches(kSetLevel,kSetLevelSig,sizeof(kSetLevelSig));
+    if(!levelOk)Log("JET spawn: unexpected EDF.dll level code: launched jets are not scaled to the difficulty");
     return spawnOk;
 }
 

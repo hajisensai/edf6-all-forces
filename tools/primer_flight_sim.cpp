@@ -78,6 +78,7 @@ unsigned NewFlight() noexcept { static unsigned next=100;return next++; }
 void Publish(bool) noexcept {}
 }  // namespace jet
 void CarrierFlames(const unsigned char*,unsigned char* const*,float,ULONGLONG) noexcept {}
+void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
 bool JetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SubBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool PlayerJetBodyStep(unsigned char*,float*,float*) noexcept { return false; }

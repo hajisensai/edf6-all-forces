@@ -124,7 +124,20 @@ def row_ids(table: bytes) -> list[str]:
 
 
 def template_of(call: Call) -> str:
+    """The stock row a call's row and SGO are made from: the bomber call, the N9 Eros request (a player jet), or a
+    ground vehicle's own request (vcobjects.GROUND_VEHICLES: the Naegling's for the Katyusha)."""
+    if call.ground:
+        return vc.GROUND_VEHICLES[call.ground].request
     return VEHICLE_TEMPLATE if call.brings == 'vehicle' else TEMPLATE
+
+
+def templates() -> tuple[str, ...]:
+    """Every template a call uses, the bomber's and the Eros's first."""
+    out = [TEMPLATE, VEHICLE_TEMPLATE]
+    for c in CALLS:
+        if template_of(c) not in out:
+            out.append(template_of(c))
+    return tuple(out)
 
 
 def _template_index(ids: list[str], template: str = TEMPLATE) -> int:
@@ -202,11 +215,63 @@ _VEHICLE_SWAP = {
 }
 
 
+def vehicle_weapons(call: Call) -> tuple[str, ...]:
+    """The weapons a vehicle request's setup carries: the player jet's (vcobjects.JETS) or the ground vehicle's."""
+    return vc.GROUND_VEHICLES[call.ground].weapons if call.ground else vc.JETS[call.jet].weapons
+
+
+def vehicle_needs(call: Call) -> list[str]:
+    """What a vehicle request's SGO names and so needs installed (by tools/make_jets.py, or the ground vehicle's own
+    tool): the vehicle SGO and its weapons."""
+    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in vehicle_weapons(call)]
+
+
 def _object_path(call: Call) -> str:
     return f'app:/object/{call.vehicle.lower()}.sgo'
 
 
-def vehicle_sgo(template: bytes, call: Call) -> bytes:
+def _with_path(entry, path: str):
+    """A copy of a vehicle weapon list entry ([path, [params]]) for another weapon."""
+    import copy
+    e = copy.deepcopy(entry)
+    e.items[0] = path
+    return e
+
+
+# The stock N9 Eros requests (the template and its five stronger versions): each multiplies its vehicle's durability and
+# weapons' damage by its vehicle setup's [0] (1.3 at level 0.44 ... 25 at 3.42). A player jet request (no difficulty
+# scaling: a request is not a script's CreateFriend) takes the multiplier its own level has on that curve.
+EROS_REQUESTS = ('eWeapon394', 'eWeapon395', 'eWeapon396', 'eWeapon397', 'eWeapon398', 'eWeapon399')
+
+
+def request_family(call: Call | None) -> tuple[str, ...]:
+    """The stock requests whose levels and multipliers set a vehicle request's: the Eros's, or a ground vehicle's own."""
+    return vc.GROUND_VEHICLES[call.ground].family if call is not None and call.ground else EROS_REQUESTS
+
+
+def request_curve(game_root: str, family: tuple[str, ...] = EROS_REQUESTS) -> list[tuple[float, float, float]]:
+    """(level, durability multiplier, damage multiplier) of each stock request of `family` (the Eros's), by level."""
+    rows = {str(r.items[0]).upper(): r for r in _rows(dsgo.parse(stock(game_root, TABLE)), TABLE)}
+    curve = []
+    for w in family:
+        level = float(rows[w.upper()].items[4])
+        mult = dsgo.parse(stock(game_root, f'WEAPON/{w.upper()}.SGO')).root.get('Ammo_CustomParameter').items[4].items[3].items[0]
+        curve.append((level, float(mult.items[0]), float(mult.items[1])))
+    return sorted(curve)
+
+
+def request_tier(curve: list[tuple[float, float, float]], level: float) -> tuple[float, float]:
+    """The multipliers a request of `level` has on the stock curve (linear between its points, held past its ends)."""
+    if level <= curve[0][0]:
+        return curve[0][1], curve[0][2]
+    for (l0, d0, w0), (l1, d1, w1) in zip(curve, curve[1:]):
+        if level <= l1:
+            t = (level - l0) / (l1 - l0)
+            return d0 + (d1 - d0) * t, w0 + (w1 - w0) * t
+    return curve[-1][1], curve[-1][2]
+
+
+def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float]) -> bytes:
     """The N9 Eros request bringing the player jet. Ammo_CustomParameter[4] = [transport, box, vehicle SGO,
     vehicle setup [multipliers, heli params (first: the speed gain k = the jet's mark), fuel, weapons],
     voice lines]; `resource` preloads the same paths."""
@@ -217,12 +282,34 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
     stock_vehicle = req.items[2]
     req.items[2] = _object_path(call)
     setup = req.items[3]
-    setup.items[1].items[0] = float(call.mark)
-    for w in setup.items[3].items:
-        w.items[0] = _VEHICLE_SWAP.get(w.items[0].lower(), w.items[0])
-    res = r.get('resource')
+    setup.items[0].items[0], setup.items[0].items[1] = tier   # request_tier: its level's on its family's curve
+    if not call.ground:
+        setup.items[1].items[0] = float(call.mark)   # the heli params' speed gain: the jet's mark
+    # The weapon list: the setup's last entry ([multipliers, heli params, fuel, weapons] in the Eros's request;
+    # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's).
+    at = 2 if call.ground else 3
+    weapons = setup.items[at].items
+    entry = weapons[0]
+    jet_weapons = vehicle_weapons(call)
     swap = {stock_vehicle.lower(): _object_path(call), **_VEHICLE_SWAP}
-    res.items = [swap.get(x.lower(), x) for x in res.items]
+    if call.ground:
+        # The ground vehicle's weapons in its request's entries' places (the stock request's per-weapon parameters):
+        # one entry a holder of its vehicle_weapon_setting, as the stock one.
+        if len(weapons) != len(jet_weapons):
+            raise ValueError(f'{template_of(call)}: {len(weapons)} weapons in its setup, {call.ground} has {len(jet_weapons)}')
+        swap.update({str(w.items[0]).lower(): new for w, new in zip(weapons, jet_weapons)})
+        setup.items[at].items = [_with_path(w, new) for w, new in zip(weapons, jet_weapons)]
+    else:
+        # The jet's own weapons (its guns and stores, vcobjects.JETS) with the Eros's fuel tank where the jet SGO has
+        # it (vcobjects.with_fuel): as many entries, in the same order, as its vehicle_weapon_setting holders
+        # (src/stores.cpp builds one weapon a holder from this list).
+        fuel = weapons[-1]
+        if 'fuel' not in str(fuel.items[0]).lower():
+            raise ValueError(f'{VEHICLE_TEMPLATE}: its weapon list does not end in the fuel tank')
+        setup.items[at].items = vc.with_fuel([_with_path(entry, w) for w in jet_weapons], fuel)
+    res = r.get('resource')
+    items = [swap.get(x.lower(), x) for x in res.items]
+    res.items = items + [w for w in jet_weapons if w not in {x.lower() for x in items}]
     for lang in LANGS:
         key = f'name.{lang.lower()}'
         if key in r.names.values():
@@ -231,15 +318,14 @@ def vehicle_sgo(template: bytes, call: Call) -> bytes:
 
 
 def vehicle_durability(game_root: str, call: Call) -> float:
-    """What the menu shows: the jet's durability times the request's HP multiplier."""
-    root = dsgo.parse(stock(game_root, f'WEAPON/{VEHICLE_TEMPLATE.upper()}.SGO')).root
-    mult = float(root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0])
-    return vc.JETS[call.jet].durability * mult
+    """What the menu shows: the vehicle's durability times the request's HP multiplier (vehicle_sgo: request_tier)."""
+    hp = vc.GROUND_VEHICLES[call.ground].durability if call.ground else vc.JETS[call.jet].durability
+    return hp * request_tier(request_curve(game_root, request_family(call)), call.level)[0]
 
 
-def weapon_sgo(template: bytes, call: Call) -> bytes:
+def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None) -> bytes:
     if call.brings == 'vehicle':
-        return vehicle_sgo(template, call)
+        return vehicle_sgo(template, call, request_tier(curve or [], call.level))
     doc = dsgo.parse(template)
     r = doc.root
     r.set('AmmoHitSizeAdjust', float(call.mark))
@@ -327,14 +413,16 @@ def stack(game_root: str) -> dict[str, bytes]:
     s = load_shared(game_root)
     before = s.ids
     plan = plan_rows(before)
-    tpl = {t: _template_index(before, t) for t in (TEMPLATE, VEHICLE_TEMPLATE)}
+    tpl = {t: _template_index(before, t) for t in templates()}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
-    out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c) for c in CALLS}
+    curves = {request_family(c): request_curve(game_root, request_family(c)) for c in CALLS if c.brings == 'vehicle'}
+    out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c, curves.get(request_family(c)))
+                             for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
     rows = s.rows
-    templates = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
+    row_template = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
     for c in order:
-        _put(rows, plan.at[c.id], _table_row(templates[c.id], c))
+        _put(rows, plan.at[c.id], _table_row(row_template[c.id], c))
     out[TABLE] = dsgo.compact(s.table)
     durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
     for lang, rel in zip(LANGS, TEXTS):
@@ -378,7 +466,7 @@ def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[st
     present = {c: i for c, i in plan.at.items() if i < len(ids)}
     cut = tail_start(ids) if delete_rows else len(ids)
     deleted = sorted((c for c, i in present.items() if i >= cut), key=lambda c: present[c])
-    tpl = {t: _template_index(ids, t) for t in (TEMPLATE, VEHICLE_TEMPLATE)}
+    tpl = {t: _template_index(ids, t) for t in templates()}
     by_id = {c.id: c for c in CALLS}
     rows = s.rows
     for cid, i in present.items():
@@ -506,7 +594,7 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     if recover(game_root):
         print('rolled back the weapon table files of an earlier run that did not finish')
     files = stack(game_root) if files is None else files
-    missing = [vehicle_file(c) for c in CALLS if c.vehicle and not os.path.isfile(_mods(game_root, vehicle_file(c)))]
+    missing = [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c) if not os.path.isfile(_mods(game_root, rel))]
     if missing:
         raise SystemExit(f'{", ".join(missing)} not installed: run python tools/make_jets.py first')
     manifest = load_manifest(game_root)
@@ -526,7 +614,8 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     led = ledger.Ledger(game_root)
     for c in CALLS:
         if c.vehicle:
-            led.need(OWNER, vehicle_file(c))
+            for rel in vehicle_needs(c):   # what its request names (vehicle_sgo): kept while the request is
+                led.need(OWNER, rel)
     return dict(manifest['written'])
 
 
@@ -568,7 +657,7 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
     commit(game_root, {**changes, MANIFEST: _manifest_bytes(manifest) if left else None})
     for rel, data in changes.items():
         print(f'{"removed" if data is None else "wrote"} {rel}')
-    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    ledger.Ledger(game_root).release(OWNER, [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c)])
     if left:
         print(f'{len(left)} rows are placeholders now (EDF6VC_RETIRED_*, stock weapons), keeping their row numbers')
         return
@@ -594,7 +683,7 @@ def repair(game_root: str) -> list[str]:
             changes[rel] = None
     commit(game_root, {**changes, MANIFEST: None})
     shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
-    ledger.Ledger(game_root).release(OWNER, [vehicle_file(c) for c in CALLS if c.vehicle])
+    ledger.Ledger(game_root).release(OWNER, [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c)])
     return sorted(changes)
 
 
@@ -628,7 +717,7 @@ def check(game_root: str) -> bool:
         if state == 'in' and not os.path.isfile(_mods(game_root, sgo_file(c))):
             print(f'        {sgo_file(c)} missing')
             ok = False
-        if state == 'in' and c.vehicle and not os.path.isfile(_mods(game_root, vehicle_file(c))):
+        if state == 'in' and c.vehicle and any(not os.path.isfile(_mods(game_root, rel)) for rel in vehicle_needs(c)):
             print(f'        {vehicle_file(c)} missing (python tools/make_jets.py)')
             ok = False
     return ok

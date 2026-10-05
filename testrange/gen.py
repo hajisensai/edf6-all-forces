@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+sys.path.insert(0, os.path.join(HERE, '..', 'tools'))   # the ground vehicles' builders (GROUND_MISSION)
 import jet_models  # noqa: E402
 import ledger  # noqa: E402
 import rmpa  # noqa: E402
@@ -24,9 +25,6 @@ from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, Ga
                        jet_guns, jet_sgo, object_dir, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
-SOURCE = 'M045'            # the plain whose map and points the range uses
-MAP = 'app:/Map/ig_Heigen601.mac'
-WEATHER = 'cloudy'
 MARKER = 'EDF6TestRange.txt'
 
 
@@ -40,7 +38,7 @@ class Slot:
 # Slots, by their position in the in-game offline mission list: item N is entry N-1 of
 # MISSION/MISSIONLIST.OFFLINE.LIST.SGO, and its title is entry N-1 of MISSIONLIST.OFFLINE.TXT.*.SGO
 # (item 14 「转机」 = RM015, item 2 「非法入侵者」 = M001). The range only borrows the slot: its map and
-# points are always M045's (SOURCE). The opening missions are the ruined world, where the Air Raider's
+# points are the site's (SITES). The opening missions are the ruined world, where the Air Raider's
 # vehicle and air support requests are accepted but never arrive; in item 14 they do.
 SLOTS = [
     Slot('RM015', 14, '列表第 14 项「转机」（RM015）：空袭兵能呼叫载具和空中支援'),
@@ -51,6 +49,27 @@ DEFAULT_SLOT = SLOTS[0].mission
 
 def slot_of(mission: str) -> Slot:
     return next(x for x in SLOTS if x.mission == mission)
+
+
+@dataclass(frozen=True)
+class Site:
+    source: str        # stock mission whose map, weather and points (MISSION.RMPA) the range uses
+    map: str
+    weather: str
+    label: str
+
+
+# Only missions with a 'プレイヤー' point and room for vehicles around it: of the city missions RM016B
+# (TrainCity) has the most, 11 flat spots within 800 m and 11 enemy spots.
+SITES = [
+    Site('M045', 'app:/Map/ig_Heigen601.mac', 'cloudy', '平原（M045）'),
+    Site('RM016B', 'app:/Map/nw_TrainCity.mac', 'finecloud', '城区（RM016B 列车城）'),
+]
+DEFAULT_SITE = SITES[0].source
+
+
+def site_of(source: str) -> Site:
+    return next(x for x in SITES if x.source == source)
 
 # (sgo, label). Only SGOs with a `mission_setup` block (weapon set-up for script-placed vehicles):
 # CreateVehicle2 reads it, and a player call-in SGO without it crashes the game (EDF.dll+0x52E44).
@@ -67,6 +86,8 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_jet_strike_mission', '对地攻击机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_fighter_mission', '制空战斗机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_interceptor_mission', '截击机（远程导弹，插件驾驶，测试场生成）'),
+    ('edf6tr_jet_enemy_fighter_mission', '敌方战斗机（插件驾驶，敌方阵营：攻击你和友军飞机，测试场生成）'),
+    ('edf6tr_jet_primer_fighter_mission', '星导者扑翼战斗机（插件驾驶，敌方阵营，测试场生成）'),
     ('edf6tr_jet_multirole_mission', '多用途战斗机（插件驾驶，测试场生成）'),
     ('edf6tr_jet_carrier_mission', '空中航母（放攻击无人机，插件驾驶，测试场生成）'),
     ('edf6tr_jet_blast_carrier_mission', '自爆无人机母舰（插件驾驶，测试场生成）'),
@@ -75,6 +96,8 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
+    ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
+    ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
     ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
     ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
@@ -97,6 +120,8 @@ VEHICLES: list[tuple[str, str]] = [
 # marks them as ours: install/uninstall only ever touch files with it.
 DERIVED_PREFIX = 'edf6tr_'
 DERIVED: dict[str, str] = {
+    'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
+    'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
     'edf6tr_v506_heli_mission': 'V506_HELI',
     'edf6tr_v506_heli_edf6benefits_mission': 'V506_HELI_EDF6BENEFITS',
     'edf6tr_vehicle409_heli_mission': 'VEHICLE409_HELI',
@@ -105,6 +130,8 @@ DERIVED: dict[str, str] = {
     'edf6tr_jet_strike_mission': 'V506_HELI',
     'edf6tr_jet_fighter_mission': 'V506_HELI',
     'edf6tr_jet_interceptor_mission': 'V506_HELI',
+    'edf6tr_jet_enemy_fighter_mission': 'V506_HELI',
+    'edf6tr_jet_primer_fighter_mission': 'V506_HELI',
     'edf6tr_jet_multirole_mission': 'V506_HELI',
     'edf6tr_jet_carrier_mission': 'V506_HELI',
     'edf6tr_jet_blast_carrier_mission': 'V506_HELI',
@@ -165,6 +192,21 @@ class Waves:
     level: float = 1.0
 
 
+# Enemy jets in waves (an air battle): once fewer than max_alive enemies are left, per_wave more enemy fighters come in
+# from the far points (CreateFriend: the plugin puts them on the enemy team on first sight, src/jet.cpp CrewPlaced).
+# It counts every enemy, so with it on the ground waves and targets are left out (one loop: a script has one Main).
+AIR_ENEMY = 'edf6tr_jet_enemy_fighter_mission'
+
+
+@dataclass
+class AirWaves:
+    enabled: bool = False
+    per_wave: int = 2
+    max_alive: int = 6
+    first_delay: float = 20.0
+    interval: float = 15.0
+
+
 @dataclass
 class Plan:
     vehicles: dict[str, int] = field(default_factory=lambda: {
@@ -173,9 +215,70 @@ class Plan:
     waves: Waves = field(default_factory=Waves)
     loadout: dict = field(default_factory=dict)
     slot: str = DEFAULT_SLOT
+    site: str = DEFAULT_SITE
     # Vehicles spawned with an NPC driver (CreateFriend, as stock missions spawn allied vehicles). An
     # NPC-piloted heli is flown by the plugin, several of them in formation.
     friends: dict[str, int] = field(default_factory=dict)
+    air: AirWaves = field(default_factory=AirWaves)
+    scenario: str = ''   # '' the waves above; GRAND the grand battle (grand_battle)
+
+
+# An air battle (the test range's 「空战」 button): the player's fighter, a few friendly jets, eight enemy fighters to
+# start with and more in waves; no ground enemies.
+def air_battle(plan: Plan) -> Plan:
+    plan.vehicles = {'edf6tr_pjet_fighter_mission': 1}
+    plan.friends = {'edf6tr_jet_fighter_mission': 2, 'edf6tr_jet_interceptor_mission': 1, AIR_ENEMY: 8}
+    plan.waves.enabled = False
+    plan.air = AirWaves(enabled=True, per_wave=2, max_alive=8, first_delay=30.0, interval=10.0)
+    return plan
+
+
+# The grand battle (the user, 2026-10-05: "the mothership, teleport ships, the Primers' fighters against our jets and
+# NPCs; a fierce battle in the sky above, a fierce one on the plain below, on one map"): on the big map
+# (tools/make_bigmap.py) the mothership high up, the Primers' new ship and two teleport ships lower down, enemy jets
+# and UFOs coming in waves in the sky while Martians and Berserkers come in waves on the plain; on our side the
+# player's fighter, NPC fighters, interceptors and strike jets, NPC tanks and soldier squads. The sky and the ground
+# run in threads of their own (GRAND_THREADS), each topping its side up to its own cap.
+GRAND = 'grand'
+GRAND_SHIPS = (('app:/object/e511_mothership_edf6.sgo', 900.0), ('app:/object/e611_timeship.sgo', 400.0),
+               ('app:/object/e508_carrier.sgo', 250.0), ('app:/object/e508_carrier.sgo', 250.0))
+GRAND_GROUND = ('app:/object/e601_martian_gs.sgo', 'app:/object/e602_berserker.sgo', 'app:/object/e601_martian_ls.sgo')
+# The sky's waves: a pair of jets (CreateFriend: the plugin puts each on the enemy team on first sight, its body hostile)
+# or a group of UFOs, in turn; the Primers' flapping fighters among them.
+PRIMER_FIGHTER = 'edf6tr_jet_primer_fighter_mission'
+GRAND_AIR = ('app:/object/' + AIR_ENEMY + '.sgo', 'app:/object/e507_goldufo.sgo', 'app:/object/' + PRIMER_FIGHTER + '.sgo',
+             'app:/object/e605_spinnerufo.sgo')
+GRAND_SQUADS = 3
+# Shield Bearers on the plain (src/shield.cpp: slow rounds and planes through their shields, fast ones stopped).
+GRAND_BEARER = 'app:/object/e513_shieldbearer.sgo'
+GRAND_BEARERS = 2
+GRAND_SOLDIERS = ('app:/object/AiArmySoldier_S_AF_Leader.sgo', 'app:/object/AiArmySoldier_S_Follower1.sgo')
+GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to (counted together: the cap is the sum)
+
+
+def grand_battle(plan: Plan) -> Plan:
+    # Parked jets the player can board, several of each (the user, 2026-10-05: more planes on the ground to get in).
+    # Every vehicle we added that the player drives (the user, 2026-10-05): the player's jets, the Katyusha and the
+    # howitzer, the helicopters the range makes placeable, the tanks and the flak EDF6AutoTurret arms, the Depth Crawler.
+    plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3,
+                     'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2,
+                     'edf6tr_v506_heli_mission': 1, 'edf6tr_vehicle409_heli_mission': 1, 'edf6tr_vehicle410_heli_mission': 1,
+                     'edf6tr_v602_heli_mission': 1, 'vehicle403_tank_mission': 1, 'vehicle404_bigtank': 1,
+                     'v603_flak_mission': 1, 'edf6tr_vehicle502_groundrobo_mission': 1}
+    plan.friends = {'edf6tr_jet_fighter_mission': 2, 'edf6tr_jet_interceptor_mission': 1, 'edf6tr_jet_strike_mission': 2,
+                    'vehicle403_tank_mission': 3}
+    plan.waves.enabled = False
+    plan.air = AirWaves(enabled=False)
+    plan.scenario = GRAND
+    return plan
+
+
+def grand_points(lay: Layout) -> list[tuple[str, float, rmpa.Point]]:
+    """(ship SGO, height, its point): the farthest free points, raised (install writes them up in MISSION.RMPA)."""
+    far = lay.far_points[::-1]
+    if len(far) < len(GRAND_SHIPS) + 2:
+        raise ValueError('大混战：这张地图远处的空闲点位不够放舰船')
+    return [(sgo, dy, p) for (sgo, dy), p in zip(GRAND_SHIPS, far)]
 
 
 def placements(plan: Plan) -> list[tuple[str, bool]]:
@@ -192,8 +295,8 @@ def small_count(plan: Plan) -> int:
 
 def save_plan(path: str, plan: Plan) -> None:
     data = {'vehicles': plan.vehicles, 'vehicle_level': plan.vehicle_level,
-            'waves': plan.waves.__dict__, 'loadout': plan.loadout, 'slot': plan.slot,
-            'friends': plan.friends}
+            'waves': plan.waves.__dict__, 'air': plan.air.__dict__, 'loadout': plan.loadout, 'slot': plan.slot,
+            'site': plan.site, 'friends': plan.friends, 'scenario': plan.scenario}
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -210,9 +313,13 @@ def load_plan(path: str) -> Plan:
     plan.friends = {k: int(v) for k, v in data.get('friends', {}).items() if k in known}
     plan.vehicle_level = float(data.get('vehicle_level', plan.vehicle_level))
     plan.waves = Waves(**{k: v for k, v in data.get('waves', {}).items() if k in Waves.__dataclass_fields__})
+    plan.air = AirWaves(**{k: v for k, v in data.get('air', {}).items() if k in AirWaves.__dataclass_fields__})
     plan.loadout = data.get('loadout', {})
     if data.get('slot') in {x.mission for x in SLOTS}:
         plan.slot = data['slot']
+    if data.get('site') in {x.source for x in SITES}:
+        plan.site = data['site']
+    plan.scenario = GRAND if data.get('scenario') == GRAND else ''
     return plan
 
 
@@ -264,8 +371,40 @@ def spots_for(plan: Plan, lay: Layout) -> list[tuple[str, bool, rmpa.Point]]:
         raise ValueError(f'大型载具太多：这张地图远处只有 {len(lay.far_points)} 个空位')
     far = lay.far_points[::-1][:len(big)]
     lay.far_points = [p for p in lay.far_points if p not in far]
-    return ([(s, npc, p) for (s, npc), p in zip(small, lay.vehicle_points)] +
-            [(s, npc, p) for (s, npc), p in zip(big, far)])
+    return [(s, npc, p) for (s, npc), p in zip(small, spaced(small, lay.vehicle_points))] + \
+        [(s, npc, p) for (s, npc), p in zip(big, far)]
+
+
+# Parked jets stand at least JET_GAP m apart (the fighter is 16 m across, the strike jet's wings wider): the
+# vehicle spots are 15 m apart round the player, and several parked jets side by side would lock wings at the start
+# (the grand battle parks seven, the user, 2026-10-05). The other vehicles take the spots left, nearest first.
+JET_GAP = 30.0
+# The other vehicles kept JET_GAP apart like the jets: the helicopters' rotors, the big tank.
+WIDE = frozenset({'edf6tr_v506_heli_mission', 'edf6tr_v506_heli_edf6benefits_mission', 'edf6tr_vehicle409_heli_mission',
+                  'edf6tr_vehicle410_heli_mission', 'edf6tr_v602_heli_mission', 'vehicle404_bigtank'})
+
+
+def _apart(a: rmpa.Point, b: rmpa.Point) -> float:
+    return ((a.pos[0] - b.pos[0]) ** 2 + (a.pos[2] - b.pos[2]) ** 2) ** 0.5
+
+
+def spaced(chosen: list[tuple[str, bool]], points: list[rmpa.Point]) -> list[rmpa.Point]:
+    """A point for each of `chosen` (in order): each jet the nearest one JET_GAP from every jet's before it (else the
+    nearest left), the rest the nearest left."""
+    left = list(points)
+    jets: list[rmpa.Point] = []
+    out: list[rmpa.Point | None] = [None] * len(chosen)
+    for i, (sgo, _) in enumerate(chosen):
+        if sgo not in JETS and sgo not in WIDE:
+            continue
+        p = next((q for q in left if all(_apart(q, j) >= JET_GAP for j in jets)), left[0])
+        left.remove(p)
+        jets.append(p)
+        out[i] = p
+    for i, p in enumerate(out):
+        if p is None:
+            out[i] = left.pop(0)
+    return out
 
 
 def target_spots(lay: Layout) -> list[rmpa.Point]:
@@ -289,11 +428,19 @@ SPAWN_BATCH, SPAWN_GAP = 4, 0.25
 def script(plan: Plan, lay: Layout) -> str:
     """The mission script. Same skeleton as the stock generated scripts (event 0 = Main)."""
     chosen = placements(plan)
+    site = site_of(plan.site)
     placed = spots_for(plan, lay)
     w = plan.waves
+    air = plan.air
+    if air.enabled:   # one loop: the air battle's (see AirWaves)
+        w = Waves(**{**w.__dict__, 'enabled': False})
     targets = w.enemy == TARGET
     flying = next((f for s, _, f in ENEMIES if s == w.enemy), False)
-    preload = sorted({f'app:/object/{s}.sgo' for s, _ in chosen} | ({f'app:/object/{w.enemy}.sgo'} if w.enabled else set()))
+    grand = plan.scenario == GRAND
+    preload = sorted({f'app:/object/{s}.sgo' for s, _ in chosen} | ({f'app:/object/{w.enemy}.sgo'} if w.enabled else set())
+                     | ({f'app:/object/{AIR_ENEMY}.sgo'} if air.enabled else set())
+                     | ({s for s, _ in GRAND_SHIPS} | set(GRAND_GROUND) | set(GRAND_AIR) | set(GRAND_SOLDIERS) | {GRAND_BEARER}
+                        if grand else set()))
     lines = [
         '//',
         '// EDF6 test range, generated by testrange/gen.py (EDF6VehicleCrew). Delete this folder to restore mission 1.',
@@ -327,7 +474,7 @@ def script(plan: Plan, lay: Layout) -> str:
         '\tinternal_InitEventThread(0, ::__0000_data.m_counter, "Main", "開始");',
         '',
         '\tBeginLoading();',
-        f'\tPreloadMap({_q(MAP)}, {_q(WEATHER)}, -1);',
+        f'\tPreloadMap({_q(site.map)}, {_q(site.weather)}, -1);',
         '\tPreload("app:/ui/UiResourceGroup_InMission.sgo", -1);',
         '\tPreload("app:/ui/UiResourceGroup_MissionCleared.sgo", -1);',
         '\tPreload("app:/ui/UiResourceGroup_MissionFailed.sgo", -1);',
@@ -351,7 +498,7 @@ def script(plan: Plan, lay: Layout) -> str:
         '',
         'void Main_usercode()',
         '{',
-        f'\tMap({_q(MAP)}, {_q(WEATHER)});',
+        f'\tMap({_q(site.map)}, {_q(site.weather)});',
         f'\tCreatePlayer({_q(lay.player.name)});',
     ]
     # The NPC vehicles come out SPAWN_BATCH at a time, SPAWN_GAP s apart: 37 of them created in the first frame
@@ -430,11 +577,34 @@ def script(plan: Plan, lay: Layout) -> str:
         ]
         if flying:
             lines.insert(lines.index('\twhile( true ) {'), '\t// flying enemies are spawned at ground points too; they take off on their own')
+    if air.enabled and (lay.far_points or lay.enemy_points):
+        pts = ', '.join(_q(p.name) for p in (lay.far_points or lay.enemy_points))
+        enemy = _q('app:/object/' + AIR_ENEMY + '.sgo')
+        lines += [
+            '',
+            '\t// Enemy jets in waves (AirWaves): once fewer than max_alive enemies are left, per_wave more from the far points.',
+            f'\tarray<string> air = {{ {pts} }};',
+            '\tuint nextAir = 0;',
+            f'\tWait({air.first_delay:.1f});',
+            '\twhile( true ) {',
+            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {int(air.max_alive)} ) {{',
+            f'\t\t\tfor( int k = 0; k < {max(1, int(air.per_wave))}; k++ ) {{',
+            f'\t\t\t\tCreateFriend(air[nextAir % air.length()], {enemy}, {plan.vehicle_level:.2f}, false);',
+            '\t\t\t\tnextAir++;',
+            '\t\t\t}',
+            f'\t\t\tWait({air.interval:.1f});',
+            '\t\t}',
+            '\t\tWait(1.0);',
+            '\t}',
+        ]
+    if grand:
+        lines += grand_main(plan, lay)
     lines += [
         '\t// The mission must never return on its own (stock scripts end the same way); leave from the pause menu.',
         '\twhile( true ) sys_Yield();',
         '}',
         '',
+        *(grand_threads(plan, lay) if grand else []),
         'void __0000_voice_event()',
         '{',
         '\t::__0000_data.m_voice_thread_sync.Update(__END_SYNC);',
@@ -445,10 +615,81 @@ def script(plan: Plan, lay: Layout) -> str:
     return '\n'.join(lines)
 
 
+def grand_main(plan: Plan, lay: Layout) -> list[str]:
+    """The grand battle's opening in Main: the ships up on their raised points, the soldier squads by the player, the
+    two threads started."""
+    out = ['', '\t// The grand battle (GRAND): the ships, the squads, then the sky and the ground in threads of their own.']
+    for sgo, _, p in grand_points(lay):
+        out.append(f'\tCreateEnemy({_q(p.name)}, {_q(sgo)}, {plan.vehicle_level:.2f}, true);')
+    for p in lay.enemy_points[-GRAND_BEARERS:]:
+        out.append(f'\tCreateEnemy({_q(p.name)}, {_q(GRAND_BEARER)}, {plan.vehicle_level:.2f}, true);')
+    spots = lay.enemy_points[:GRAND_SQUADS] or [lay.player]
+    for p in spots:
+        out.append(f'\tCreateFriendSquad({_q(lay.player.name)}, 40, {_q(GRAND_SOLDIERS[0])}, {_q(GRAND_SOLDIERS[1])}, 6, '
+                   f'{plan.vehicle_level:.2f}, false);')
+    out += ['\t::internal_CreateThread("GrandGround");', '\t::internal_CreateThread("GrandSky");']
+    return out
+
+
+def grand_threads(plan: Plan, lay: Layout) -> list[str]:
+    """The two threads: the ground tops itself up with groups on the enemy spots, the sky with enemy jets and UFOs on
+    the far points (and up high), each every few seconds while the enemies number under the caps."""
+    ground = ', '.join(_q(p.name) for p in lay.enemy_points) or _q(lay.player.name)
+    ships = {p.name for _, _, p in grand_points(lay)}
+    far = ', '.join(_q(p.name) for p in lay.far_points if p.name not in ships) or ground
+    gk = ', '.join(_q(x) for x in GRAND_GROUND)
+    ak = ', '.join(_q(x) for x in GRAND_AIR)
+    lv = f'{plan.vehicle_level:.2f}'
+    return [
+        'void GrandGround()',
+        '{',
+        f'\tarray<string> spots = {{ {ground} }};',
+        f'\tarray<string> kinds = {{ {gk} }};',
+        '\tuint next = 0;',
+        '\tWait(15.0);',
+        '\twhile( true ) {',
+        f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {GRAND_GROUND_CAP + GRAND_AIR_CAP} ) {{',
+        f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], 30, kinds[next % kinds.length()], 6, {lv}, true);',
+        '\t\t\tnext++;',
+        '\t\t}',
+        '\t\tWait(8.0);',
+        '\t}',
+        '}',
+        '',
+        'void GrandSky()',
+        '{',
+        f'\tarray<string> spots = {{ {far} }};',
+        f'\tarray<string> kinds = {{ {ak} }};',
+        '\tuint next = 0;',
+        '\tWait(20.0);',
+        '\twhile( true ) {',
+        f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) < {GRAND_GROUND_CAP + GRAND_AIR_CAP} ) {{',
+        '\t\t\tstring k = kinds[next % kinds.length()];',
+        f'\t\t\tif( k.findFirst("edf6tr_jet") >= 0 ) {{ CreateFriend(spots[next % spots.length()], k, {lv}, false); '
+        f'CreateFriend(spots[(next + 1) % spots.length()], k, {lv}, false); }}',
+        f'\t\t\telse CreateEnemyGroup(spots[next % spots.length()], 40, k, 3, {lv}, true);',
+        '\t\t\tnext++;',
+        '\t\t}',
+        '\t\tWait(10.0);',
+        '\t}',
+        '}',
+        '',
+    ]
+
+
+# Our ground vehicles made placeable (the user, 2026-10-05: every vehicle we added on the map, to drive): the call-in
+# SGO their own tool makes (tools/make_katyusha.py, make_artillery.py: its model and weapons are what that tool, and
+# the installer, write) turned into a mission one (as_mission_sgo).
+GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery'}
+
+
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
     if sgo_name in JETS:
         return jet_sgo(game, sgo_name, jet_model)
+    if sgo_name in GROUND_MISSION:
+        import importlib
+        return as_mission_sgo(importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game))
     stock = DERIVED.get(sgo_name)
     if stock:
         return as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
@@ -535,6 +776,20 @@ def installed(game_root: str) -> Slot | None:
     return next((x for x in SLOTS if ours(game_root, x.mission)), None)
 
 
+def spawned(plan: Plan) -> set[str]:
+    """Every object SGO name (no app:/object/, no .sgo) the mission's script creates: the placed vehicles, the air
+    waves' enemy jet, the grand battle's sky. The generated ones among them must be written (_write_derived) and the
+    placed ones checked for a mission_setup: a script that creates an SGO the game cannot find ends the game (2026-10-05
+    10:40, dump EDF6.exe.79680: the grand battle's CreateFriend of the enemy fighter, never written, faulted in the
+    game's own error stop)."""
+    names = {x for x, _ in placements(plan)}
+    if plan.air.enabled:
+        names.add(AIR_ENEMY)
+    if plan.scenario == GRAND:
+        names |= {sgo.removeprefix('app:/object/').removesuffix('.sgo') for sgo in GRAND_AIR}
+    return names
+
+
 def install(game_root: str, plan: Plan) -> list[str]:
     """Writes the range over plan.slot (and removes it from the other slot). Refuses to touch a
     folder another mod put there."""
@@ -542,14 +797,17 @@ def install(game_root: str, plan: Plan) -> list[str]:
     if os.path.isdir(out) and os.listdir(out) and not ours(game_root, plan.slot):
         raise RuntimeError(f'{out} 已有别的 mod 的文件，不覆盖。请先手动处理。')
     game = Game(game_root)
-    for sgo_name in {s for s, _ in placements(plan)}:
+    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {x for x, _ in placements(plan)}):
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
-    points_file = game.read(f'MISSION/EDF6/{SOURCE}', 'MISSION.RMPA')
+    points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
     lay = layout(rmpa.points(points_file), small_count(plan))
     text = script(plan, lay)
     placed = [(s, npc, p) for s, npc, p in spots_for(plan, layout(rmpa.points(points_file), small_count(plan)))]
-    if plan.waves.enabled and plan.waves.enemy == TARGET:
+    if plan.scenario == GRAND:   # the ships' points up in the air
+        for _, dy, p in grand_points(lay):
+            points_file = rmpa.raised(points_file, {p.name}, dy)
+    if plan.waves.enabled and plan.waves.enemy == TARGET and not plan.air.enabled:
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
     if plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS:
         points_file = rmpa.raised(points_file, {p.name for p in lay.enemy_points}, PRIMER_KINDS[plan.waves.enemy][2])
@@ -557,7 +815,8 @@ def install(game_root: str, plan: Plan) -> list[str]:
     if primer and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in PRIMER_FILES):
         raise RuntimeError('没有星导者生物的机体（Mods/OBJECT/EDF6VC_CENTIPEDE / _DRAGONFLY.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
     os.makedirs(out, exist_ok=True)
-    _write_derived(game_root, game, {s for s, _ in placements(plan) if s in DERIVED}, PRIMER_FILES if primer else ())
+    _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED},
+                   PRIMER_FILES if primer else ())
     with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
         f.write(b'\xef\xbb\xbf' + text.encode('utf-8'))
     with open(os.path.join(out, 'MISSION.RMPA'), 'wb') as f:

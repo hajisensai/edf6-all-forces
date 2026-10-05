@@ -432,6 +432,22 @@ void LogSkip(const unsigned char* vehicle,const char* why) noexcept {
         edf::SeatCount(vehicle),static_cast<unsigned long long>(At<std::uint64_t>(vehicle,kTriggerCount)));
 }
 
+// Online, the stock vehicle update (slot 51 0x672AD0 -> 0x62E6C0, every frame while in a session, 0x7748F0) hands
+// every gunner seat that is empty, or whose rider another machine runs, to the network: 0x5FBA20 sets its aim's
+// +0xC0, and the aim step (0x5FBDA0, from slot 4) then turns it by the network's input (+0xB0, which nothing on
+// the host writes) instead of the seat's turn input (vehicle +0x2AA0): an empty seat this plugin steers stood still
+// whenever the player hosted a co-op game. A seat whose rider this machine runs gets 0x5FB880 instead (the stock
+// call at 0x62E72B): its turn input applies. So a seat steered here, of a vehicle whose driver this machine runs,
+// gets the same, each frame before its input is written (the update sets the flag again at its end).
+constexpr std::size_t kAimNetwork=0xC0;
+constexpr unsigned kAimLocal=0x5FB880;
+void TakeFromNetwork(const unsigned char* vehicle,unsigned s,unsigned char* seat) noexcept {
+    const auto aim=At<unsigned char*>(seat,kSeatAim);
+    if(!Readable(aim,kAimNetwork+8,true) || !aim[kAimNetwork])return;
+    reinterpret_cast<void(__fastcall*)(void*)>(image+kAimLocal)(aim);
+    if(cfg.debug)LogOnce(vehicle,0x100+s,"seat=%u was the network's (co-op host): steered here",s);
+}
+
 // A seat other than the driver's (seat 0, the main cannon, which the driver aims) whose own gun is turned
 // by its own aim controller: a gunner seat.
 bool GunnerSeat(const unsigned char* seat) noexcept {
@@ -458,8 +474,10 @@ void Gunners(unsigned char* vehicle) noexcept {
     Nearby nearby;
     ScanEnemies(vehicle,cfg.gunnerRange+kMuzzleReach,nearby);
     const float down=Down(vehicle);
+    const bool local=crew[0]!=Crew::remote;   // its driver this machine's (or none): its seats are this machine's to turn
     for(unsigned s=1;s<count;++s) {
         if(!gunner[s] || !Wanted(crew[s]))continue;   // an empty gunner seat is wanted: the AI crews it
+        if(local)TakeFromNetwork(vehicle,s,edf::SeatAt(vehicle,s));
         Track* track=TrackFor(vehicle,s,crew[s]==Crew::player);
         if(!track)continue;
         SteerSeat(vehicle,s,crew[s]==Crew::player ? Crew::player : Crew::ai,down,nearby,*track);
@@ -497,6 +515,9 @@ const Signature kSignatures[]={
     {0x5FEF21,{0x48,0x8D,0x95,0xAA,0x02,0x00,0x00},7},                    // 403 slot 4: lea rdx,[rbp+2AA]
     {0x600049,{0x4B,0x8B,0x84,0x34,0xE0,0x00,0x00,0x00},8},               // 404 slot 4: seat+E0 aim
     {0x600051,{0x48,0x8D,0x95,0xAA,0x02,0x00,0x00},7},                    // 404 slot 4: lea rdx,[rbp+2AA]
+    {kAimLocal,{0x8B,0x41,0x58,0x89,0x81,0xA0,0x00,0x00,0x00,0x8B,0x41,0x18},12},  // the aim made this machine's
+    {0x5FBDA9,{0x80,0xB9,0xC0,0x00,0x00,0x00,0x00},7},                    // the aim step: cmp byte [rcx+C0],0
+    {0x62E72B,{0xE8,0x50,0xD1,0xFC,0xFF},5},                              // the update's call of it for a local rider
     {kPullTrigger,{0x48,0x8B,0x41,0x08,0x48,0x85,0xC0,0x74,0x11,0x83,0x78,0x08,0x00,0x74,0x0B,
                    0x48,0x8B,0x41,0x10,0xC6,0x80,0x39,0x01,0x00,0x00,0x01,0xC3},27},
     {0x6330A9,{0x48,0x8B,0x86,0x48,0x06,0x00,0x00},7},                    // mov rax,[rsi+648] (trigger count)

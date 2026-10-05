@@ -1828,6 +1828,37 @@ bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,flo
 
 bool IsHelicopter(const void* vehicle) noexcept { return TypeOf(vehicle)!=nullptr; }
 
+// The takeoff cue (HeliCue): the player at the controls of a stock helicopter (not a plugin jet on a 506 body) with
+// it on the ground (contact bit 1). The lift per rotor speed +0x1610 and the mass factor +0x161C scale the stock
+// hover speed (0.288 at 70 and 1).
+namespace {
+constexpr std::size_t kLiftPerRotor=0x1610,kLiftMass=0x161C;
+constexpr float kStockHover=0.288f,kStockLift=70.0f;
+constexpr ULONGLONG kCueFreshMs=300;
+SRWLOCK cueLock=SRWLOCK_INIT;
+HeliCue cue{};
+ULONGLONG cueAt=0;
+}  // namespace
+
+void HeliCueStep(unsigned char* v) noexcept {
+    if(!IsHelicopter(v) || BodyOf(v)!=PluginBody::none || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::player)return;
+    if(!(At<unsigned char>(v,kContact)&2))return;
+    const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);
+    if(!(lift>1.0f) || !(mass>0.0f) || !std::isfinite(lift+mass))return;
+    AcquireSRWLockExclusive(&cueLock);
+    cue=HeliCue{At<float>(v,kRotor),kStockHover*kStockLift/lift*mass};
+    cueAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&cueLock);
+}
+
+bool PlayerHeliCue(HeliCue* out) noexcept {
+    AcquireSRWLockShared(&cueLock);
+    const bool fresh=cueAt && GetTickCount64()-cueAt<=kCueFreshMs;
+    if(fresh)*out=cue;
+    ReleaseSRWLockShared(&cueLock);
+    return fresh;
+}
+
 namespace {
 // See kSpeedGain: the heli's own top speed and brake, and with heliSpeed above its stock top speed (or
 // heliYawRate above its yaw limit) the params Fly writes back every frame.
@@ -2150,6 +2181,13 @@ void RescueStep() noexcept {
     Ferry(ms);
 }
 }  // namespace
+
+void PressBoardButton(unsigned char* human) noexcept { PressBoard(human); }
+
+bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noexcept {
+    if(!reachOk || seat>=SeatCount(v))return false;
+    __try { return RidingPoint(SeatAt(const_cast<unsigned char*>(v),seat),at,reach); } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 void RescueTick() noexcept {
     if(!profileOk || rescue.frame==GameFrame())return;   // it flies the heli through Fly; at most once a frame

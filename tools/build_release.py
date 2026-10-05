@@ -37,8 +37,15 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
      也可以把 exe 放进游戏目录里再运行。
   3. 看到「安装完成」后启动游戏。
 
-  不需要装 Python。战机、直升机、潜水母舰和呼叫武器是安装器用你自己游戏里的
+  不需要装 Python。战机、直升机、潜水母舰、呼叫武器和大地图是安装器用你自己游戏里的
   Root.cpk 现场生成的（不修改 Root.cpk）；全部生成成功后才开始写文件。
+  安装器还会写入：
+    - 大地图：测试场那张平原拼成 3 x 3 块（无缝），只影响测试场那一关；
+    - 测试场「大混战」关卡（母舰、传送舰、敌机与我方战机的空战，地面混战，地上停着可以开的战斗机和攻击机）。
+
+联机一起玩：
+  房间里每个人都要装同一个版本（同一个安装包），地图、关卡和载具才一致。
+  测试场关卡不限制兵种和武器，各自选自己的。
   武器表只动本插件自己的行（已有的行原地更新，新的追加在末尾），别的 MOD 的行原样保留，
   武器表和武器说明要么全部写入、要么保持原样。
   已有的 Mods/Plugins/EDF6VehicleCrew.ini 不会被覆盖：你的设置保留，只补进新版本新增的设置。
@@ -67,11 +74,12 @@ def build_exe() -> str:
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', EXE_NAME, '--distpath', os.path.join(WORK, 'dist'), '--workpath', os.path.join(WORK, 'work'),
            '--specpath', WORK]
-    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib')):
+    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange')):
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'make_jets', 'make_sub', 'calls'):
+    for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'make_chute', 'chute_model', 'graft_pure', 'primer_fighter_model', 'calls',
+                'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'weapons'):
         cmd += ['--hidden-import', mod]
-    for mod in ('numpy', 'PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these
+    for mod in ('PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these (numpy: the big map's seams need it)
         cmd += ['--exclude-module', mod]
     for name in ('EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'):
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']

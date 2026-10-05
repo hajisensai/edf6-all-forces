@@ -21,6 +21,9 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "body506.h"
+#include "edf/host.h"
+#include "heli.h"
 #include "layout.h"
 #include "memory.h"
 #include <cmath>
@@ -176,9 +179,46 @@ unsigned char* AimLineOf(unsigned char* const* holders,std::uint64_t i) noexcept
     return line;
 }
 
+// The line's points: a std::vector<hkVector4> at line+kAimLinePoints (begin +8, capacity +0x10, size +0x18),
+// built by 0x6899F0 only while the segment count is non-zero. A line hidden from the vehicle's first frame
+// never got one, and the render (0x687F20, on the render thread) reads `segments` points from begin without
+// looking at the size: putting the count back onto a null begin crashed it (EDF.dll+0x6880C1, null read, the
+// frame the player was bumped in). So the buffer is made before the count: grown the way 0x6899F0 grows it
+// (game operator new; 0x1000 bytes and up 32-aligned with the raw pointer at [-8], what the release 0x6895C0
+// frees), every point at the vehicle -- a zero-length line until the next build fills it.
+constexpr std::size_t kAimLinePoints=0x70,kGameNew=0x12D85B0,kPointsRelease=0x6895C0;
+using GameNewFn=void*(*)(std::size_t);
+using PointsReleaseFn=void(*)(void*);
+
+bool EnsurePoints(unsigned char* line,std::int32_t segments,const float* at) noexcept {
+    unsigned char* const vec=line+kAimLinePoints;
+    const auto count=static_cast<std::uint64_t>(segments);
+    if(At<const void*>(vec,8) && At<std::uint64_t>(vec,0x10)>=count)return true;
+    const std::size_t bytes=count*16;
+    const auto gameNew=reinterpret_cast<GameNewFn>(image+kGameNew);
+    float* points=nullptr;
+    if(bytes>=0x1000) {
+        auto* raw=static_cast<unsigned char*>(gameNew(bytes+0x27));
+        if(!raw)return false;
+        points=reinterpret_cast<float*>((reinterpret_cast<std::uintptr_t>(raw)+0x27)&~std::uintptr_t{0x1F});
+        reinterpret_cast<unsigned char**>(points)[-1]=raw;
+    } else {
+        points=static_cast<float*>(gameNew(bytes));
+        if(!points)return false;
+    }
+    for(std::uint64_t i=0;i<count;++i) {
+        points[i*4]=at[0];points[i*4+1]=at[1];points[i*4+2]=at[2];points[i*4+3]=1.0f;
+    }
+    if(At<const void*>(vec,8))reinterpret_cast<PointsReleaseFn>(image+kPointsRelease)(vec);
+    Put<std::uint64_t>(vec,0x18,count);
+    Put<std::uint64_t>(vec,0x10,count);
+    Put<float*>(vec,8,points);
+    return true;
+}
+
 // Hides the line from an NPC (its count kept in the vehicle's state; with no room left the line stays as it
-// is), gives a player back what was taken.
-void SetLine(State& st,unsigned char* line,Rider rider) noexcept {
+// is), gives a player back what was taken (its point buffer first: EnsurePoints).
+void SetLine(State& st,unsigned char* line,Rider rider,const float* at) noexcept {
     const auto segments=At<std::int32_t>(line,kAimLineSegments);
     HiddenLine* h=HiddenOf(st,line);
     if(rider==Rider::dummy && segments>0) {
@@ -187,6 +227,7 @@ void SetLine(State& st,unsigned char* line,Rider rider) noexcept {
         *h=HiddenLine{line,segments};
         Put<std::int32_t>(line,kAimLineSegments,0);
     } else if(rider==Rider::player && h) {
+        if(!EnsurePoints(line,h->segments,at))return;
         Put<std::int32_t>(line,kAimLineSegments,h->segments);
         *h=HiddenLine{};
     }
@@ -209,15 +250,29 @@ void AimLines(unsigned char* vehicle) noexcept {
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(n>8 || !Readable(holders,n*8))continue;
         for(std::uint64_t w=0;w<n;++w)
-            if(auto line=AimLineOf(holders,w))SetLine(*st,line,rider);
+            if(auto line=AimLineOf(holders,w))SetLine(*st,line,rider,reinterpret_cast<const float*>(vehicle+kPosition));
     }
 }
 
-// Run `check` with the NPC riders of the vehicle's NPC-held seats hidden and the vehicle on its own
-// team (see OwnTeam); restores both before returning.
-template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcept {
-    const std::int32_t team=At<std::int32_t>(vehicle,kTeam);
-    SetObjectTeam(vehicle,OwnTeam(vehicle));
+// WithTeamField: `f` run with the vehicle on `team` for the stock seat checks, put back right after (a fault too): the field alone (+0x314), not
+// registered. The board prompt (0x5735E7) and the board button (0x56D77F) call their visitors, and the visitors
+// FindSeat (slot 49), while the team manager walks a team's set (0x5E11D0): a SetTeam there takes the vehicle out
+// of the set the walk is in and frees the node the walk stands on. It read freed memory (a dynamic_cast on it threw:
+// dumps EDF6.exe.76548, .66844) or a broken tree (an 'object' at 0x68, the walk never ending: the game hung,
+// 2026-10-05 10:30). A field changed and put back within the visit leaves every set as it is (they are keyed by
+// the object's address); the vehicle's real team changes only as the stock code changes it (the player getting in).
+// The one raw write of +0x314 (tools/selftest.py team_changes_go_through_set_team names this function).
+template<class F> auto WithTeamField(unsigned char* v,std::int32_t team,F f) noexcept -> decltype(f()) {
+    const std::int32_t was=At<std::int32_t>(v,kTeam);
+    Put<std::int32_t>(v,kTeam,team);
+    decltype(f()) r{};
+    __try { r=f(); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    Put<std::int32_t>(v,kTeam,was);
+    return r;
+}
+
+// `check` with the NPC riders of the vehicle's NPC-held seats hidden (put back after, a fault too).
+template<class F> bool WithRidersHidden(unsigned char* vehicle,F check) noexcept {
     void* saved[16]{};
     const unsigned count=SeatCount(vehicle);
     for(unsigned i=0;i<count && i<16;++i) {
@@ -228,9 +283,15 @@ template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcep
     bool ok=false;
     __try { ok=check(); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
     for(unsigned i=0;i<count && i<16;++i)if(saved[i])Put<void*>(SeatAt(vehicle,i),kSeatRiderCtrl,saved[i]);
-    SetObjectTeam(vehicle,team);
     return ok;
 }
+
+// Run `check` with the NPC riders of the vehicle's NPC-held seats hidden and the vehicle on its own
+// team (see OwnTeam, WithTeamField); restores both before returning.
+template<class F> bool WithDummiesHidden(unsigned char* vehicle,F check) noexcept {
+    return WithTeamField(vehicle,OwnTeam(vehicle),[&]{ return WithRidersHidden(vehicle,check); });
+}
+
 
 // A free seat other than `skip` for the NPC to move into, or -1.
 int FreeGunnerSeat(unsigned char* vehicle,unsigned skip) noexcept {
@@ -253,18 +314,16 @@ bool LeaveSeat(unsigned char* vehicle,unsigned char* from,unsigned char* to) noe
 // choice is made before the first write; the move is seat, then clear (LeaveSeat pairs them). False when the
 // seat could not be freed (the caller then offers the player nothing).
 bool Bump(unsigned char* vehicle,unsigned index) noexcept {
-    const std::int32_t team=At<std::int32_t>(vehicle,kTeam),own=OwnTeam(vehicle);
     auto seat=SeatAt(vehicle,index);
     auto rider=const_cast<void*>(RiderObject(seat));
     const int gunner=Cfg().bumpToGunner ? FreeGunnerSeat(vehicle,index) : -1;
-    SetObjectTeam(vehicle,own);   // the stock slot 49 re-checks the team next
     bool freed=false;
     if(gunner>=0) {
         if(auto to=reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,gunner,false)) {
             freed=LeaveSeat(vehicle,seat,to);
             Log(freed ? "BUMP v=%p seat=%u -> npc moved to gunner seat %d" : "BUMP v=%p seat=%u -> the move to seat %d faulted: undone",
                 vehicle,index,gunner);
-            if(!freed){SetObjectTeam(vehicle,team);return false;}   // as it was: the NPC still in its seat
+            if(!freed)return false;   // as it was: the NPC still in its seat
         }
     }
     if(!freed) {
@@ -289,9 +348,7 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
         // its team, and the stock check then refuses even a free seat: ask again on the vehicle's own.
         const auto team=At<std::int32_t>(v,kTeam),own=OwnTeam(v);
         if(team!=own) {
-            SetObjectTeam(v,own);
-            if(auto free=originalFindSeat(vehicle,human))return free;
-            SetObjectTeam(v,team);
+            if(auto free=WithTeamField(v,own,[&]{ return originalFindSeat(vehicle,human); }))return free;   // see WithTeamField
         }
         const unsigned count=SeatCount(v);
         for(unsigned i=0;i<count;++i) {
@@ -299,7 +356,8 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
             if(SeatRider(s)!=Rider::dummy)continue;
             const bool ok=WithDummiesHidden(v,[&]{ return reinterpret_cast<CanRideSeatFn>(image+kCanRideSeat)(v,human,s); });
             if(!ok)continue;
-            return Bump(v,i) ? originalFindSeat(vehicle,human) : nullptr;
+            // the stock slot 49 re-checks the team (see WithTeamField)
+            return WithTeamField(v,own,[&]{ return Bump(v,i) ? originalFindSeat(vehicle,human) : nullptr; });
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return nullptr;
@@ -314,8 +372,6 @@ void __fastcall PromptHook(void* functor,void* object) {
         auto human=At<unsigned char*>(f,kFunctorHuman);
         if(!IsPlayer(human))return;
         SeePlayer(reinterpret_cast<const float*>(human+kPosition),At<std::int32_t>(human,kTeam));
-        JetReap(object);   // a withdrawn jet with no other vehicle about (the player on foot)
-        HeliReap(object);  // ...and a called heli that left
         EnsureInputs();    // first mission frame: every plugin has loaded by now
         if(!Cfg().bump || BumpSuppressed() || f[kFunctorResult] || ClassOf(object)<0 || IsJet(object) || IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
@@ -401,9 +457,9 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // The per-frame steps, each under its own guard: a fault in one (logged per step at most every kFaultLogMs,
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
-            kStepRescue, kStepHudPublish, kStepCount };
+            kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
-                                          "rescue","hud publish"};
+                                          "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -439,11 +495,93 @@ void GroundStep(unsigned char* v) noexcept { if(IsGroundRobo(v))GroundFrame(v); 
 // Once a game frame, from the first vehicle input of the frame: what is no one vehicle's (the sea rescue,
 // which needs no heli to exist yet; the HUD's publish of what it gathered last frame).
 ULONGLONG tickFrame=0;
+// Diagnostics of things under the ground (the user, 2026-10-04: everything falls through it now and then, the
+// player too; the RE found no single cause, docs/bigworld-re.md): an object is under the terrain when a map ray
+// from kProbeUp over it comes down on ground more than kUnder over it, and nothing is under it within kUnderFloor
+// (a bridge or a roof over it has ground under it too). Each object's going under and coming back up is logged
+// (UNDERGROUND), at most one line per kUnderLogMs: where, the surface over it, its fall speed, a soldier's support
+// state; coming up, the jump (the game's put-back, 0x5A9E50, moves a vehicle up but keeps its fall speed).
+constexpr float kProbeUp=400.0f,kUnder=2.5f,kUnderFloor=20.0f;
+constexpr ULONGLONG kUnderLogMs=5000,kUnderEveryMs=100;
+constexpr std::size_t kHumanSupport=0x711;   // CharacterControl_Walk +0x91: 2 on the ground, 1 sliding, 0 in the air
+struct UnderWatch { const void* object; float y; ULONGLONG ms,loggedAt; bool under; };
+UnderWatch underWatch[64]{};
+
+UnderWatch& WatchOf(const void* object,ULONGLONG ms) noexcept {
+    UnderWatch* free=&underWatch[0];
+    for(auto& w:underWatch) {
+        if(w.object==object)return w;
+        if(ms-w.ms>kUnderLogMs*4 && ms-free->ms<=kUnderLogMs*4)free=&w;
+    }
+    *free=UnderWatch{object,0.0f,0,0,false};
+    return *free;
+}
+
+bool UnderTerrain(const float* p,float* top) noexcept {
+    const float from[3]={p[0],p[1]+kProbeUp,p[2]},to[3]={p[0],p[1]-1.0f,p[2]};
+    float hit[3];
+    if(MapRay(from,to,hit)<0.0f || !(hit[1]>p[1]+kUnder))return false;
+    const float below=GroundClearance(p);
+    *top=hit[1];
+    return below==kNoGround || below>kUnderFloor;
+}
+
+void WatchUnder(const unsigned char* object,const char* what,const unsigned char* human) noexcept {
+    const float* p=reinterpret_cast<const float*>(object+kPosition);
+    if(!std::isfinite(p[0]+p[1]+p[2]))return;
+    const ULONGLONG ms=GameMs();
+    UnderWatch& w=WatchOf(object,ms);
+    if(w.ms && ms-w.ms<kUnderEveryMs)return;   // two rays an object a kUnderEveryMs, not a frame
+    float top=0.0f;
+    const bool under=UnderTerrain(p,&top);
+    const float dt=w.ms && ms>w.ms ? static_cast<float>(ms-w.ms)*0.001f : 0.0f,vy=dt>0.0f ? (p[1]-w.y)/dt : 0.0f;
+    if(under!=w.under && ms-w.loggedAt>=kUnderLogMs) {
+        w.loggedAt=ms;
+        if(under)Log("UNDERGROUND %s %p went under the ground at (%.1f,%.1f,%.1f): the surface %.1f m over it, falling %.1f m/s%s%d",
+                     what,object,p[0],p[1],p[2],top-p[1],-vy,human ? ", support " : "",human ? At<unsigned char>(human,kHumanSupport) : 0);
+        else Log("UNDERGROUND %s %p came back up to (%.1f,%.1f,%.1f): %.0f m in %.2f s",what,object,p[0],p[1],p[2],p[1]-w.y,dt);
+    }
+    w.under=under;w.y=p[1];w.ms=ms;
+}
+
+void UnderPlayer() noexcept {
+    if(const auto human=PlayerHuman())WatchUnder(human,"player",human);
+}
+
+void UnderVehicle(unsigned char* v) noexcept {
+    const int c=ClassOf(v);
+    WatchUnder(v,c>=0 ? kClasses[c].name : "vehicle",nullptr);
+}
+
+// The frame time, every kPerfMs (debug; the user, 2026-10-05: "it plays choppy"): the frames' mean and worst, and
+// how many took over kPerfSlowMs: whether the game is slow all along or stalls now and then.
+constexpr ULONGLONG kPerfMs=5000;
+constexpr double kPerfSlowMs=33.4;
+struct Perf { LARGE_INTEGER last; double worst,sum; unsigned frames,slow; ULONGLONG at; } perf{};
+void PerfTick() noexcept {
+    LARGE_INTEGER now,hz;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&hz);
+    if(perf.last.QuadPart) {
+        const double ms=1000.0*static_cast<double>(now.QuadPart-perf.last.QuadPart)/static_cast<double>(hz.QuadPart);
+        if(ms<1000.0){perf.sum+=ms;++perf.frames;perf.slow+=ms>kPerfSlowMs;if(ms>perf.worst)perf.worst=ms;}
+    }
+    perf.last=now;
+    const ULONGLONG t=GetTickCount64();
+    if(t-perf.at<kPerfMs)return;
+    if(Cfg().debug && perf.frames)Log("PERF %u frames: mean %.1f ms (%.0f fps), worst %.1f ms, %u over %.0f ms",perf.frames,
+        perf.sum/perf.frames,1000.0*perf.frames/perf.sum,perf.worst,perf.slow,kPerfSlowMs);
+    perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
+}
+
 void FrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
+    PerfTick();
+    GuardedTick(kStepUnderground,&UnderPlayer);
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepHudPublish,&HudPublish);
+    GuardedTick(kStepUnderground,&BigWorldProbe);
+    GuardedTick(kStepPlayerJet,&PlayerEjectTick);
+    GuardedTick(kStepView,&ViewTick);
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
@@ -453,6 +591,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
     auto v=static_cast<unsigned char*>(vehicle);
     SeeFrame(v);               // the frame is a clock: it steps with the plugin off too (body506's steps test it)
+    GuardedTick(kStepJetSoundTick,&JetSoundTick);   // once a frame, the plugin off too: it stops the sounds then
     if(!Cfg().enabled)return;
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);
@@ -462,8 +601,13 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepPlayerJet,&PlayerJetFrame,v);
     Guarded(kStepSub,&SubStep,v);
     Guarded(kStepHeli,&HeliStep,v);
+    Guarded(kStepHeli,&HeliCueStep,v);
     Guarded(kStepGround,&GroundStep,v);
     Guarded(kStepHud,&HudSee,v);
+    Guarded(kStepJetSound,&JetSound,v);
+    Guarded(kStepLockSound,&LockSound,v);
+    Guarded(kStepUnderground,&UnderVehicle,v);
+    Guarded(kStepShield,&ShieldVehicle,v);
     QueryPerformanceCounter(&t2);
     SlowLog(I,vehicle,t1.QuadPart-t0.QuadPart,t2.QuadPart-t1.QuadPart);
 }

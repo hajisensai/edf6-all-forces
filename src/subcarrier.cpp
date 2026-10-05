@@ -18,11 +18,10 @@
 // a barrel is on it and the homing missiles (0x2021) once the game has locked a target; empty weapons are
 // reloaded aboard after kReloadMs. The fire bytes are written in the input stage (after the stock input, which
 // owns them); with no input stage (the driver gone) the physics step writes them too, and says so once.
-// Its HP is shown as the game's follower gauge (HudPlayer_FollowerDurability 0x8040E0 draws one over every
-// follower of the player, 0x804300): the plugin calls that drawer once more with a stand-in owner whose
-// follower list holds a stand-in object per carrier (only +0x90 position, +0x2F4 / +0x2F8 HP and +0x550,
-// an empty follower list, are read). The draw runs on another thread: it reads only what the game thread
-// published last (Publish / Latest, a triple buffer), never the carriers' entries.
+// Its HP is shown by hud.cpp (HudDraw): a bar over the tower for the hull and one over each deck part, drawn
+// from the game's follower gauge call (HudPlayer_FollowerDurability 0x8040E0 -> 0x804300, hooked at kGaugeCall:
+// the HUD's draw pass, its view-projection and context). The draw runs on another thread: it reads only what the
+// game thread published last (Publish / Latest, a triple buffer), never the carriers' entries.
 // Its HP is split into the hull and four deck parts (kSystems: two turrets, the missile bay, the drone bay),
 // docs/subcarrier-re.md §8: every hit reaches it as the damage message through the 506's slot 9 (body506.cpp
 // hooks it, SubMessage). A hit within a part's reach wears that part (its own HP, its own gauge) and not the
@@ -48,7 +47,7 @@ constexpr std::size_t kFireGun=0x2020,kFireMissile=0x2021;
 constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr std::size_t kWeaponLockon=0x6B0,kWeaponAmmo=0xBE8;
-constexpr std::size_t kWeaponLockAngle=0x6C0,kWeaponLockRange=0x6D0,kWeaponLockSpeed=0x790,kWeaponLocked=0xC68;
+constexpr std::size_t kWeaponLockRange=0x6D0,kWeaponLocked=0xC68,kWeaponSpeed=0x894,kWeaponAlive=0x898;
 constexpr std::int32_t kHoming=1;
 // A weapon's muzzles (heli.cpp MuzzleFrame, H for the 410's guns): each {bone record, local 4x4 at +0x10, mode
 // +0xE0}; the round leaves at row 3 of local x bone world (+0xB0), along row 2 of the bone's (mode != 0) or of the
@@ -63,10 +62,10 @@ constexpr unsigned char kObjDeleted=4;
 constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kInitParamVtable=0x1762068;   // SetTeam: crew.h kSetTeam
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
 constexpr std::int32_t kTeamFriend=2;
-// The gauge (docs/subcarrier-re.md §4): the follower HUD's draw (vtable 0x17F6C08 slot 3) calls the
-// drawer at kGaugeCall: (hud, view-projection, owner, r9, 5th) -> a gauge per object in owner+0x550's list.
+// The gauge call (docs/subcarrier-re.md §4): the follower HUD's draw (vtable 0x17F6C08 slot 3) calls the
+// drawer at kGaugeCall: (hud, view-projection, owner, r9 = draw context, 5th = viewport). The plugin's HUD is
+// drawn right after it (GaugeHook), in the same pass.
 constexpr unsigned kGaugeHud=0x17F6C08,kGaugeDraw=0x8040E0,kGaugeCall=0x8042AD,kGaugeFn=0x804300;
-constexpr std::size_t kFollowers=0x550,kProxySize=0x560;
 // GameDamageInfo (docs/subcarrier-re.md §8.1): the attacker (weak_ptr: object, control block), its team, where it
 // hit (the round's position, or the blast's centre), the damage.
 constexpr std::size_t kDmgAttacker=0x10,kDmgAttackerCtrl=0x18,kDmgTeam=0x24,kDmgAt=0x30,kDmgAmount=0x50;
@@ -84,9 +83,10 @@ constexpr int kHeavyCount=sizeof(kHeavy)/sizeof(kHeavy[0]);
 constexpr std::uintptr_t kImageSpan=0x3000000;   // past EDF.dll's last section
 
 const wchar_t* const kSubSgo=L"app:/object/edf6vc_sub_carrier.sgo";
-// What SubLaunch needs in Mods (tools/make_sub.py): the SGO, its model, the turret guns.
+// What SubLaunch needs in Mods (tools/make_sub.py): the SGO, its model, the turret guns, the missile.
 const wchar_t* const kSubFiles[]={L"\\Mods\\OBJECT\\EDF6VC_SUB_CARRIER.SGO",L"\\Mods\\OBJECT\\EDF6VC_SUB.MRAB",
-                                  L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_L.SGO",L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_R.SGO"};
+                                  L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_L.SGO",L"\\Mods\\WEAPON\\EDF6VC_JET_GUN_R.SGO",
+                                  L"\\Mods\\WEAPON\\EDF6VC_ESSM_32.SGO"};   // vcobjects.store_file('ESSM', 32)
 constexpr int kMaxSubs=3;                     // M123: three carriers attack at once (BE151_157)
 
 // The hull (the SGO's box, the model at its own size): its bottom kHullBottom under the body origin,
@@ -104,9 +104,11 @@ constexpr float kCruise=25.0f,kAccel=3.0f,kClimb=8.0f,kSink=4.0f,kClimbAccel=6.0
 constexpr float kTurnRate=0.05f,kTurnGain=0.8f,kRollGain=1.5f,kMaxPitch=0.05f;   // 3 deg/s, 3 deg
 // Combat.
 constexpr float kRange=2000.0f;              // it engages enemies this far from it
-constexpr float kGunRange=580.0f,kGunCone=0.07f;   // the guns' reach (gen.JET_GUN_REACH 600), 4 deg off the barrel
-constexpr float kMissileRange=2000.0f,kMissileMin=60.0f;
-constexpr float kLockMargin=1.15f,kLockAngle=1.2f,kLockSpeed=2.0f;
+// The guns fire within their own reach (Sub::gunReach: their SGO's AmmoSpeed x AmmoAlive, less kGunReachIn), the
+// missiles within their lock range (Sub::missileReach: the carrier's missile SGO, vcobjects STORES['ESSM'], sets
+// it and its wide cone: the missile bay need not face the target).
+constexpr float kGunCone=0.07f,kGunReachIn=0.97f;   // 4 deg off the barrel
+constexpr float kMissileMin=60.0f;
 constexpr ULONGLONG kMissileMs=2500,kReloadMs=12000,kGaugeMs=1000;
 constexpr float kPi=3.14159265f;
 // The turrets (see Turrets): the arc a barrel turns in (elevation over the deck plane, rad), how fast it turns,
@@ -145,6 +147,8 @@ struct Sub {
     unsigned char* vehicle;
     ULONGLONG bornAt,missileAt,logAt,tickMs;
     ULONGLONG frame,fireFrame;   // GameFrame of the last tick, fire step
+    float gunReach,missileReach; // m: its guns' reach and its missiles' lock range, as their SGOs set them (Arm)
+    float tier;                  // its HP over its SGO's (Thicken: the request's tier, pylib/vcobjects.py JET_TIER)
     ULONGLONG inputAt;           // GameMs of the last input stage
     float dt;                     // the game's step of the last tick (s)
     bool noInputLogged;
@@ -181,11 +185,10 @@ struct Sub {
 Sub subs[kMaxSubs]{};
 const void* refused=nullptr;          // the last carrier no entry was free for (logged once)
 
-// The gauges (see the top): per carrier the hull's stand-in and each part's, then its HUD panel (hud.cpp). The game
+// The gauges (see the top): per carrier its panel (hud.cpp: the hull and each part, where each stands). The game
 // thread builds them into `staging` every tick and publishes the whole set; the draw reads the last published one.
-constexpr int kGauges=1+kSystemCount;
 const char* const kPartNames[kSystemCount]={"TURRET A","TURRET B","MISSILES","DRONE BAY"};
-struct Gauges { alignas(16) unsigned char proxy[kGauges][kProxySize]; CarrierPanel panel; bool shown; };
+struct Gauges { CarrierPanel panel; bool shown; };
 struct Snapshot { ULONGLONG tick; Gauges sub[kMaxSubs]; };
 Gauges staging[kMaxSubs]{};
 // The triple buffer: the game thread writes shots[writing] and swaps it in as `latest` (marked kFresh); the draw
@@ -195,8 +198,6 @@ constexpr LONG kFresh=4;
 Snapshot shots[3]{};
 volatile LONG latest=0;
 int writing=1,reading=2;
-struct Node { Node* next; Node* prev; void* object; };   // the game's list node: next, prev, value at +0x10
-Node noFollowers{};
 
 bool heavyOk[kHeavyCount]{};
 bool spawnOk=false,gaugeOk=false,gaugeTried=false,damageOk=false;
@@ -293,11 +294,14 @@ bool HeavySource(std::uintptr_t from) noexcept {
     return false;
 }
 
+// A part's HP: its own at the base tier, times the carrier's (Thicken).
+float PartHp(const Sub& s,int k) noexcept { return kSystems[k].hp*(s.tier>1.0f ? s.tier : 1.0f); }
+
 void Wear(Sub& s,int k,float dmg) noexcept {
     s.partDmg+=dmg;
     s.wear[k]+=dmg;
-    if(s.wear[k]<kSystems[k].hp)return;
-    s.wear[k]=kSystems[k].hp;s.down[k]=true;s.downAt[k]=GameMs();
+    if(s.wear[k]<PartHp(s,k))return;
+    s.wear[k]=PartHp(s,k);s.down[k]=true;s.downAt[k]=GameMs();
     Log("SUB v=%p part %s destroyed (the crew repairs it in %llus)",s.vehicle,kSystems[k].name,kRepairMs/1000);
 }
 
@@ -324,13 +328,19 @@ float* Route(unsigned char* v,unsigned char* gdi,float* was) noexcept {
     return reinterpret_cast<float*>(gdi+kDmgAmount);
 }
 
-// The hull made as thick as Cfg().subHullHp (its HP raised in proportion), once per carrier.
-void Thicken(unsigned char* v) noexcept {
+// The carrier's tier (its HP over its SGO's kSgoHull: the multiplier its SGO's mission_setup[0] or its request
+// gave, 25 at the highest), and its hull made Cfg().subHullHp at the base tier times that (its HP kept in proportion;
+// 0: the game's). Its parts' HP scale the same (PartHp). Once per carrier.
+constexpr float kSgoHull=30000.0f;   // pylib/vcobjects.py JETS['edf6tr_sub_carrier_mission'].durability
+void Thicken(Sub& s,unsigned char* v) noexcept {
     const float max=At<float>(v,kHpMax),hp=At<float>(v,kHp);
-    if(!(Cfg().subHullHp>max) || !(max>0.0f))return;
-    Put<float>(v,kHpMax,Cfg().subHullHp);
-    Put<float>(v,kHp,hp/max*Cfg().subHullHp);
-    Log("SUB v=%p hull hp %.0f/%.0f -> %.0f/%.0f",v,hp,max,At<float>(v,kHp),Cfg().subHullHp);
+    if(!(max>0.0f))return;
+    s.tier=max/kSgoHull>1.0f ? max/kSgoHull : 1.0f;
+    const float want=Cfg().subHullHp*s.tier;
+    if(!(want>0.0f) || want==max){Log("SUB v=%p tier x%.1f, hull hp %.0f",v,s.tier,max);return;}
+    Put<float>(v,kHpMax,want);
+    Put<float>(v,kHp,hp/max*want);
+    Log("SUB v=%p tier x%.1f, hull hp %.0f/%.0f -> %.0f/%.0f",v,s.tier,hp,max,At<float>(v,kHp),want);
 }
 
 // Worn-out parts back in order kRepairMs after they wore out.
@@ -338,7 +348,7 @@ void Repair(Sub& s,ULONGLONG ms) noexcept {
     for(int k=0;k<kSystemCount;++k) {
         if(!s.down[k] || ms-s.downAt[k]<kRepairMs)continue;
         s.down[k]=false;s.wear[k]=0.0f;
-        Log("SUB v=%p part %s repaired (hp %.0f)",s.vehicle,kSystems[k].name,kSystems[k].hp);
+        Log("SUB v=%p part %s repaired (hp %.0f)",s.vehicle,kSystems[k].name,PartHp(s,k));
     }
 }
 
@@ -497,11 +507,12 @@ void Resolve(Sub& s,unsigned char* v,const float* m) noexcept {
     if(Cfg().debug)Log("SUB v=%p weapons: turretA %p, turretB %p, missiles %p",v,s.weapon[turretA],s.weapon[turretB],s.weapon[missiles]);
 }
 
-// The parts' seat weapons: the homing one locks out to kMissileRange (wider and faster than stock), an empty one is
-// refilled to what it held at first kReloadMs after it ran dry, a worn-out part's is kept dry. Out: each part's
-// ammo, the missiles' locks.
+// The parts' seat weapons: an empty one is refilled to what it held at first kReloadMs after it ran dry, a worn-out
+// part's is kept dry; their reach as their SGOs set it (s.gunReach, s.missileReach). Out: each part's ammo, the
+// missiles' locks.
 void Arm(Sub& s,ULONGLONG ms,std::int32_t* ammoOf,std::int32_t* locked) noexcept {
     *locked=0;
+    s.gunReach=s.missileReach=0.0f;
     for(int k=0;k<kSystemCount;++k) {
         ammoOf[k]=0;
         unsigned char* w=s.weapon[k];
@@ -519,17 +530,15 @@ void Arm(Sub& s,ULONGLONG ms,std::int32_t* ammoOf,std::int32_t* locked) noexcept
             if(Cfg().debug)Log("SUB v=%p %s reloaded aboard: %d",s.vehicle,kSystems[k].name,ammo);
         }
         ammoOf[k]=ammo>0 ? ammo : 0;
-        if(!kSystems[k].homing)continue;
+        if(!kSystems[k].homing) {
+            const float reach=At<float>(w,kWeaponSpeed)*static_cast<float>(At<std::int32_t>(w,kWeaponAlive))*kGunReachIn;
+            if(std::isfinite(reach) && (s.gunReach<=0.0f || reach<s.gunReach))s.gunReach=reach;
+            continue;
+        }
         const auto l=At<std::uint64_t>(w,kWeaponLocked);
         *locked+=l<64 ? static_cast<std::int32_t>(l) : 0;
-        auto& range=*reinterpret_cast<float*>(w+kWeaponLockRange);
-        if(range<kMissileRange*kLockMargin)range=kMissileRange*kLockMargin;
-        for(int a=0;a<2;++a) {
-            auto& angle=*reinterpret_cast<float*>(w+kWeaponLockAngle+4*a);
-            if(angle<kLockAngle)angle=kLockAngle;
-        }
-        auto& speed=*reinterpret_cast<float*>(w+kWeaponLockSpeed);
-        if(speed<kLockSpeed)speed=kLockSpeed;
+        const float range=At<float>(w,kWeaponLockRange);
+        if(std::isfinite(range) && range>s.missileReach)s.missileReach=range;
     }
 }
 
@@ -593,7 +602,7 @@ void Pose(Turret& t,const float* aim) noexcept {
 // The turrets: each turns (at most kTurretSlew) toward the target while it is within its arc (kTurretDip under to
 // kTurretRise over the deck plane, the line not through the hull), else back to the bow; true (into `on`) for each
 // whose barrel, as the game builds its muzzles, points at the target within kGunCone, in range, clear of the hull;
-// each barrel's line (kGunRange along it) into `path` (from, to) where it has one (`hasPath`).
+// each barrel's line (its reach along it) into `path` (from, to) where it has one (`hasPath`).
 // No pose is written for a turret whose bone is not in the model.
 void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasPath,float* path) noexcept {
     const unsigned char* inst=v+kModelInst506;
@@ -613,7 +622,7 @@ void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasP
         float pos[3],dir[3];std::int32_t mode=0;
         const bool barrel=w && Barrel(w,pos,dir,&mode);
         hasPath[t]=barrel;
-        if(barrel)for(int i=0;i<3;++i){path[t*6+i]=pos[i];path[t*6+3+i]=pos[i]+dir[i]*kGunRange;}
+        if(barrel)for(int i=0;i<3;++i){path[t*6+i]=pos[i];path[t*6+3+i]=pos[i]+dir[i]*s.gunReach;}
         float want[3]={0.0f,0.0f,1.0f};   // the bow
         bool engage=false;
         if(barrel && s.hasTarget && !s.down[t]) {
@@ -621,7 +630,7 @@ void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasP
             float local[3]={Dot(to,m),Dot(to,m+4),Dot(to,m+8)};
             if(Normalize(local)) {
                 const float elevation=std::asin(Clamp(local[1],-1.0f,1.0f));
-                engage=elevation>=-kTurretDip && elevation<=kTurretRise && Len(to)<kGunRange && !HullBlocks(m,pos,s.target);
+                engage=elevation>=-kTurretDip && elevation<=kTurretRise && Len(to)<s.gunReach && !HullBlocks(m,pos,s.target);
                 if(engage)std::memcpy(want,local,12);
             }
         }
@@ -746,7 +755,7 @@ void FireStep(Sub& s,unsigned char* v,const float* m,ULONGLONG ms) noexcept {
         const float muzzle[3]={from[0]+m[4]*kGunHeight,from[1]+m[5]*kGunHeight,from[2]+m[6]*kGunHeight};
         const float d[3]={s.target[0]-muzzle[0],s.target[1]-muzzle[1],s.target[2]-muzzle[2]};
         const float dist=Len(d);
-        missile=ammo[missiles]>0 && locked>0 && dist>kMissileMin && dist<kMissileRange && ms-s.missileAt>kMissileMs &&
+        missile=ammo[missiles]>0 && locked>0 && dist>kMissileMin && dist<s.missileReach && ms-s.missileAt>kMissileMs &&
                 !FriendInLine(muzzle,s.target,v);
         if(missile) {
             s.missileAt=ms;
@@ -756,29 +765,22 @@ void FireStep(Sub& s,unsigned char* v,const float* m,ULONGLONG ms) noexcept {
     v[kFireGun]=gun;v[kFireMissile]=missile;
 }
 
-// A gauge stand-in: at body-frame `at`, hp of max.
-void Gauge(unsigned char* p,const float* m,const float* at,float max,float hp) noexcept {
-    Put<void*>(p,kFollowers,&noFollowers);
-    float w[4]={0.0f,0.0f,0.0f,1.0f};
-    ToWorld(m,at,w);
-    std::memcpy(p+kPosition,w,16);
-    const float top=max>1.0f ? max : 1.0f;
-    Put<float>(p,kHpMax,top);
-    Put<float>(p,kHp,Clamp(hp,0.0f,top));
-}
-// Carrier i's gauges and panel into the staging set: the hull's over the tower, then each part's.
+// Carrier i's panel into the staging set: the hull over the tower, then each deck part over its own place.
 void Stage(int i,const Sub& s,const unsigned char* v,const float* m,ULONGLONG ms) noexcept {
     Gauges& g=staging[i];
-    const float tower[3]={0.0f,kTop,0.0f};
-    Gauge(g.proxy[0],m,tower,At<float>(v,kHpMax),At<float>(v,kHp));
     CarrierPanel& p=g.panel;
-    p.hull=At<float>(g.proxy[0],kHp);p.hullMax=At<float>(g.proxy[0],kHpMax);
+    p.key=v;
+    const float tower[3]={0.0f,kTop,0.0f};
+    ToWorld(m,tower,p.at);
+    p.hullMax=At<float>(v,kHpMax)>1.0f ? At<float>(v,kHpMax) : 1.0f;
+    p.hull=Clamp(At<float>(v,kHp),0.0f,p.hullMax);
     p.parts=kSystemCount;
     for(int k=0;k<kSystemCount;++k) {
-        Gauge(g.proxy[1+k],m,kSystems[k].gauge,kSystems[k].hp,kSystems[k].hp-s.wear[k]);
         const ULONGLONG done=s.downAt[k]+kRepairMs;
         const float left=s.down[k] && done>ms ? static_cast<float>(done-ms)*0.001f : 0.0f;
-        p.part[k]={kPartNames[k],At<float>(g.proxy[1+k],kHp),At<float>(g.proxy[1+k],kHpMax),left,s.down[k]};
+        auto& part=p.part[k];
+        part={kPartNames[k],Clamp(PartHp(s,k)-s.wear[k],0.0f,PartHp(s,k)),PartHp(s,k),left,s.down[k],{}};
+        ToWorld(m,kSystems[k].gauge,part.at);
     }
     g.shown=true;
 }
@@ -812,34 +814,18 @@ unsigned char* CreateSub(const float* m,InitParam* param) noexcept {
     __except(SubFault(GetExceptionInformation())) { return nullptr; }
 }
 
-// The follower gauges as the game draws them, then one per carrier of the last published snapshot (see the top),
-// then the vehicle HUD (hud.cpp: the readouts and a panel per carrier).
+// The follower gauges as the game draws them, then the plugin's HUD (hud.cpp: the vehicle readouts, and per carrier
+// of the last published snapshot its world bars and its panel).
 void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fifth) {
     const auto draw=reinterpret_cast<GaugeFn>(image+kGaugeFn);
     draw(hud,viewProj,owner,r9,fifth);
     __try {
         const Snapshot& shot=Latest();
         const bool fresh=GetTickCount64()-shot.tick<=kGaugeMs;   // the game thread still publishing (not paused)
-        alignas(16) unsigned char stand[kProxySize]{};
-        Node head{};head.next=&head;head.prev=&head;
-        Node nodes[kMaxSubs*kGauges]{};
         CarrierPanel panels[kMaxSubs]{};
-        int n=0,count=0;
-        for(int i=0;fresh && i<kMaxSubs;++i) {
-            const Gauges& g=shot.sub[i];
-            if(!g.shown)continue;
-            panels[count++]=g.panel;
-            for(int k=0;k<kGauges;++k) {
-                Node& node=nodes[n++];
-                node.object=const_cast<unsigned char*>(g.proxy[k]);
-                node.prev=head.prev;node.next=&head;
-                head.prev->next=&node;head.prev=&node;
-            }
-        }
-        if(n) {
-            Put<void*>(stand,kFollowers,&head);
-            draw(hud,viewProj,stand,r9,fifth);
-        }
+        int count=0;
+        for(int i=0;fresh && i<kMaxSubs;++i)
+            if(shot.sub[i].shown)panels[count++]=shot.sub[i].panel;
         HudDraw(static_cast<const float*>(viewProj),r9,fifth,panels,count);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
@@ -849,13 +835,9 @@ const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,
 const unsigned char kCreateObjectSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
 const unsigned char kSetTeamSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
 struct Sig { unsigned rva; unsigned char bytes[8]; std::size_t size; };
-// The drawer and what it reads of the owner and of each object (docs/subcarrier-re.md §4).
+// The drawer and its call (docs/subcarrier-re.md §4).
 const Sig kGaugeSigs[]={
     {kGaugeFn,{0x4C,0x8B,0xDC,0x55,0x53,0x56,0x57,0x41},8},
-    {0x804329,{0x49,0x8B,0xB8,0x50,0x05,0x00,0x00},7},          // mov rdi,[r8+550h]: the owner's followers
-    {0x8043F4,{0x0F,0x10,0x90,0x90,0x00,0x00,0x00},7},          // movups xmm2,[rax+90h]: the object's position
-    {0x804633,{0xF3,0x0F,0x10,0x90,0xF8,0x02,0x00,0x00},8},     // its HP
-    {0x80463B,{0xF3,0x0F,0x5E,0x90,0xF4,0x02,0x00,0x00},8},     // over its max HP
     {kGaugeCall,{0xE8,0x4E,0x00,0x00,0x00},5},
     {kGaugeDraw,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74},8},
 };
@@ -898,7 +880,7 @@ Sub* Adopt(unsigned char* v) noexcept {
     FixBodyPart506(v,"SUB");
     Log("SUB v=%p crewed (placed by the mission) at y=%.0f: %s y=%.0f, hp=%.0f/%.0f",v,pos[1],s->sea ? "afloat at" : "held at",
         s->floor,At<float>(v,kHp),At<float>(v,kHpMax));
-    Thicken(v);
+    Thicken(*s,v);
     return s;
 }
 // Carrier v's entry (made if it has none): nullptr when it has none and gets none, or its object is no longer
@@ -1117,6 +1099,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         if(!v)return nullptr;
         FixBodyPart506(v,"SUB");
         reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
+        LevelVehicle(v);   // as a script's CreateFriend: the hull's tier (Thicken) is then the difficulty's
         reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
         if(!IsSub(v)) {
             Log("SUB launch: %p is no carrier (mark %.0f): deleted",v,BodyMark(v));
@@ -1133,7 +1116,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=ms;s->launched=true;s->inputAt=ms;
         s->sea=sea==Sea::water;s->floor=s->sea ? surface-kDraft : -INFINITY;
         std::memcpy(s->post,start,12);
-        Thicken(v);
+        Thicken(*s,v);
         Log("SUB v=%p launched at (%.0f,%.0f,%.0f) heading (%.2f,%.2f) %s hp=%.0f driver=%d",v,start[0],start[1],start[2],fwd[0],fwd[2],
             sea==Sea::water ? "afloat" : "on the ground (water unknown)",At<float>(v,kHp),SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
         return v;
@@ -1159,7 +1142,6 @@ bool InstallGauge() noexcept {
     __try {
         bool gauge=Readable(image+kGaugeHud+3*8,8) && At<const unsigned char*>(image,kGaugeHud+3*8)==image+kGaugeDraw;
         for(const auto& g:kGaugeSigs)gauge=gauge && Matches(g.rva,g.bytes,g.size);
-        noFollowers.next=&noFollowers;noFollowers.prev=&noFollowers;
         bool changed=false;
         gaugeOk=gauge && RedirectCall(image+kGaugeCall,image+kGaugeFn,reinterpret_cast<void*>(&GaugeHook),changed);
         Log("HOOK gauge=%d (carrier gauges, vehicle HUD)",gaugeOk);

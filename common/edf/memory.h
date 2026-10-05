@@ -9,6 +9,8 @@ namespace edf {
 // touching a PAGE_GUARD page would take the guard away. Regions are cached per thread for about a tick.
 bool Readable(const void* ptr,std::size_t size,bool writable=false) noexcept;
 // A 12-byte absolute jump to `target` in a page within rel32 reach of `anchor`, or nullptr.
+// Copies `size` bytes of code into a fresh executable page within rel32 reach of `anchor`.
+void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept;
 void* AllocateNearThunk(const void* anchor,void* target) noexcept;
 // Points the rel32 call (E8) or tail jump (E9) at `callSite` to `replacement` (through a near thunk), only
 // while it still targets `expectedTarget`. `changed`: whether the site was written.

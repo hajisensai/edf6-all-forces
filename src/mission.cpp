@@ -55,11 +55,16 @@ void MissionStart() noexcept {
     ResetAirstrikes();
     ResetJets();
     ResetBoosters();
+    ResetShields();
     ResetPlayerJets();
     ResetSubs();
     ResetLaser();
     ResetHud();
+    ResetJetSound();
+    ResetMissiles();
+    ResetBigWorld();
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
+    PreloadPlayerJets();   // ...and the player jets, for the catch after an ejection (playerjet.cpp)
     PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)
     PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs

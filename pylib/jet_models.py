@@ -58,6 +58,8 @@ class Recipe:
     fuselage_x: float | None = None   # rigid box from the vertices with |x| <= this (source metres); None = all
     root: str | None = None   # the root bone's new name (see the docstring); None = kept
     level: str | None = None  # a bone turned level (level_bone): the one the V506 body drives, if its bind is turned
+    grounded: bool = True     # lifted so its lowest point is the model origin (grounded): the game puts a vehicle's origin
+                              # on the ground; a model under it sinks into the ground, a box under it falls through it
 
 
 MODELS: dict[str, Recipe] = {
@@ -70,7 +72,7 @@ MODELS: dict[str, Recipe] = {
 # at its size in the missions (x 1: 1664 m long, 355 m wide, hull bottom to main deck 360 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
 # drone's. Kept out of MODELS so tools/make_jets.py does not write it; build(game, SUB_MODELS) does.
 SUB_MODELS: dict[str, Recipe] = {
-    'EDF6VC_SUB.MRAB': Recipe('EV603_MARINE.MRAB', 'ev603_marine.mdb', 1.0, root='mdl', level='body'),
+    'EDF6VC_SUB.MRAB': Recipe('EV603_MARINE.MRAB', 'ev603_marine.mdb', 1.0, root='mdl', level='body', grounded=False),
 }
 
 PACK = {1: '<4f', 4: '<3f', 7: '<4e', 12: '<2f', 21: '<4B'}
@@ -110,6 +112,79 @@ def scale_mdb(md: Mdb, s: float) -> Mdb:
     bounds. Everything else (normals, tangents, uvs, skin weights, materials, names, buffer order) unchanged."""
     return replace(md, bones=[scale_bone(b, s) for b in md.bones],
                    objects=[replace(o, meshes=[scale_mesh(me, s) for me in o.meshes]) for o in md.objects])
+
+
+# ------------------------------------------------------------------------------------------ lifting
+
+def lift_mesh(me: Mesh, d: float) -> Mesh:
+    """A skinned mesh (stored in model space) raised d; a rigid one (bone-local) is raised with its bone instead."""
+    if me.flags[1] == 0:
+        return me
+    e = next(x for x in me.elems if x.name.lower() == 'position')
+    fmt = PACK[e.fmt]
+    out = bytearray(me.vdata)
+    for v in range(me.nverts):
+        at = v * me.vsize + e.offset
+        p = list(struct.unpack_from(fmt, out, at))
+        p[1] += d
+        struct.pack_into(fmt, out, at, *p)
+    return replace(me, vdata=bytes(out))
+
+
+def lift_bone(b: Bone, d: float) -> Bone:
+    """Its bind raised d: a root's local translation up d; every bone's inverse bind T(-d) * inv (row vectors: its
+    translation row less d times its y row). Bounds stay (they are in the bone's own frame)."""
+    local = list(b.local)
+    if b.parent < 0:
+        local[13] += d
+    inv = list(b.inv_bind)
+    for c in range(3):
+        inv[12 + c] -= d * inv[4 + c]
+    return replace(b, local=local, inv_bind=inv)
+
+
+def lift_mdb(md: Mdb, d: float) -> Mdb:
+    return replace(md, bones=[lift_bone(b, d) for b in md.bones],
+                   objects=[replace(o, meshes=[lift_mesh(me, d) for me in o.meshes]) for o in md.objects])
+
+
+def ground_lift(md: Mdb) -> float:
+    """How far `md` must rise for its lowest bind-pose vertex to be the origin (0 when none is under it)."""
+    low = min(p[1] for p in bind_positions(md))
+    return -low if low < 0.0 else 0.0
+
+
+def grounded(md: Mdb) -> Mdb:
+    """`md` lifted onto its origin (ground_lift), checked: its box rose exactly that, every bone's bind x inverse
+    bind is unchanged and its world translation rose that."""
+    d = ground_lift(md)
+    if d == 0.0:
+        return md
+    out = lift_mdb(md, d)
+    lo0, hi0 = bbox(bind_positions(md))
+    lo1, hi1 = bbox(bind_positions(out))
+    assert close(lo1[1], 0.0) and close(hi1[1], hi0[1] + d), f'lift box {lo0}..{hi0} -> {lo1}..{hi1}'
+    w0, w1 = bind_world(md), bind_world(out)
+    for k, (x0, x1) in enumerate(zip(md.bones, out.bones)):
+        p0, p1 = mmul(w0[k], x0.inv_bind), mmul(w1[k], x1.inv_bind)
+        assert max(abs(u - v) for u, v in zip(p0, p1)) < 1e-4, f'bone {k}: bind x inverse bind moved'
+        assert abs(w1[k][13] - w0[k][13] - d) < 1e-4 and abs(w1[k][12] - w0[k][12]) < 1e-4 and abs(w1[k][14] - w0[k][14]) < 1e-4
+    return out
+
+
+# The stock bomber with elevon bones (mdb_jet.jet_archive: bomber501.mdb split), grounded: the default jet model
+# (vcobjects.JET_ELEVON_FILE) and the strike jets' and the player strike jet's.
+ELEVON_ARCHIVE, ELEVON_MODEL = 'BOMBER501.MRAB', 'bomber501.mdb'
+ELEVON_FUSELAGE_X = 2.0   # m: the default jets' fuselage box half width (formation wings do not catch)
+
+
+def elevon_model(game) -> Mdb:  # noqa: ANN001 - rootcpk.Game
+    return grounded(mdb_jet.jet_archive(game.read('OBJECT', ELEVON_ARCHIVE))[2])
+
+
+def elevon_archive(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
+    raw = game.read('OBJECT', ELEVON_ARCHIVE)
+    return replace_member(raw, ELEVON_MODEL, mdb_write(elevon_model(game)))
 
 
 # ------------------------------------------------------------------------------------------ interceptor
@@ -207,10 +282,12 @@ def level_bone(md: Mdb, name: str) -> Mdb:
 def make_model(src: Mdb, r: Recipe) -> Mdb:
     if not r.split:
         md = scale_mdb(level_bone(src, r.level) if r.level else src, r.scale)
-        return rename_root(md, r.root) if r.root else md
-    split, surfaces, _stats = mdb_jet.build(collapse_501_2(src))
-    mdb_jet.self_check(mdb_write(split), surfaces)        # hinge / bind checks on the unscaled split model
-    return scale_mdb(split, r.scale)
+        md = rename_root(md, r.root) if r.root else md
+    else:
+        split, surfaces, _stats = mdb_jet.build(collapse_501_2(src))
+        mdb_jet.self_check(mdb_write(split), surfaces)        # hinge / bind checks on the unscaled split model
+        md = scale_mdb(split, r.scale)
+    return grounded(md) if r.grounded else md
 
 
 def replace_member(raw: bytes, model: str, data: bytes) -> bytes:
@@ -253,6 +330,48 @@ def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  #
     return out
 
 
+def model_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game
+    """[centre, half extents] of the whole of a jet's model as the game draws it (wings, nose and tail): `file` one of
+    MODELS, None the bomber with elevon bones (mdb_jet.jet_archive, the stock bomber501.mdb's geometry). A player
+    jet's collision box (vcobjects.jet_sgo) is this, so it is the plane the player sees."""
+    return rigid_box(bind_positions(_model_of(game, file)), None)
+
+
+def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
+    if file is None:
+        return elevon_model(game)
+    r = MODELS[file]
+    raw = game.read('OBJECT', r.archive)
+    return make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r)
+
+
+# Each jet model's nozzles, in its frame (x right, y up, z forward): src/booster.cpp kJetNozzles (tools/selftest.py
+# holds that table to this one). Read off the meshes, each checked against the game where there is a picture:
+#  - the interceptor (the player's fighter): two square nozzles either side of the tail (the user's picture,
+#    2026-10-05: "the flame belongs in the two nozzles"), the openings' rims x 1.25..3.3, y 0.17..1.67 at z -7.2..-8.2,
+#    their insides at z -6.6..-7.0: each flame on its opening's middle, just inside the rim. (A first rule, the end of
+#    the centre-line cone, put one flame on the spine between them: inside the upper fuselage.)
+#  - the others: the end of the fuselage's centre-line cone at its middle height (no picture yet).
+NOZZLES: dict[str | None, tuple[tuple[float, float, float], ...]] = {
+    None: ((0.0, 1.07, -12.41),),
+    'EDF6VC_INTERCEPTOR.MRAB': ((1.85, 0.85, -7.3), (-1.85, 0.85, -7.3)),
+    'EDF6VC_MULTIROLE.MRAB': ((0.0, 0.97, -1.78),),
+    'EDF6VC_DRONE.MRAB': ((0.0, 1.33, -1.5),),
+}
+
+
+def fuselage_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - rootcpk.Game
+    """[centre, half extents] of a jet model's fuselage (the vertices within its Recipe.fuselage_x, all with none; the
+    default model's within ELEVON_FUSELAGE_X): an NPC jet's collision box (vcobjects.jet_sgo), measured off the model
+    as it is made (grounded), so it never reaches under the origin."""
+    if file is None:
+        fx = ELEVON_FUSELAGE_X
+    else:
+        r = MODELS[file]
+        fx = None if r.fuselage_x is None else r.fuselage_x * r.scale
+    return rigid_box(bind_positions(_model_of(game, file)), fx)
+
+
 # ------------------------------------------------------------------------------------------ checks
 
 def close(a: float, b: float) -> bool:
@@ -286,14 +405,16 @@ def check(raw: bytes, arc: bytes, r: Recipe) -> None:
         assert names[1:] == [src.name_of(x.name) for x in src.bones][1:]
     lo0, hi0 = bbox(bind_positions(src))
     lo1, hi1 = bbox(bind_positions(new))
+    lift = -lo0[1] * r.scale if r.grounded and lo0[1] < 0.0 else 0.0   # grounded: the scaled box raised onto its origin
+    shift = (0.0, lift, 0.0)
     for i in range(3):
-        assert close(lo1[i], lo0[i] * r.scale) and close(hi1[i], hi0[i] * r.scale), \
-            f'{r.model} box axis {i}: {lo1[i]}..{hi1[i]} vs {lo0[i] * r.scale}..{hi0[i] * r.scale}'
+        assert close(lo1[i], lo0[i] * r.scale + shift[i]) and close(hi1[i], hi0[i] * r.scale + shift[i]), \
+            f'{r.model} box axis {i}: {lo1[i]}..{hi1[i]} vs {lo0[i] * r.scale + shift[i]}..{hi0[i] * r.scale + shift[i]}'
     w0, w1 = bind_world(ref), bind_world(new)
     for k, (x0, x1) in enumerate(zip(ref.bones, new.bones)):
         p0, p1 = mmul(w0[k], x0.inv_bind), mmul(w1[k], x1.inv_bind)
         assert max(abs(u - v * (r.scale if i in (12, 13, 14) else 1.0)) for i, (u, v) in enumerate(zip(p1, p0))) < 1e-3
-        assert all(abs(w1[k][12 + c] - w0[k][12 + c] * r.scale) < 1e-4 for c in range(3))
+        assert all(abs(w1[k][12 + c] - (w0[k][12 + c] * r.scale + shift[c])) < 2e-3 for c in range(3))
         assert all(abs(x1.half[c] - x0.half[c] * r.scale) < 1e-4 for c in range(3))
 
 

@@ -6,12 +6,17 @@ What install does, with EDF6.exe closed:
   2. makes everything first, in memory, from the player's own Root.cpk (only read): the call weapons stacked
      onto the shared weapon table (call_weapons.stack, which also checks the table and its texts line up and
      offers repair when they do not), the jets, helicopters and drones (make_jets.build) and the submarine
-     carrier (make_sub.build). They cannot be shipped prebuilt: they are derived from the game's files, and the
+     carrier (make_sub.build), the ejection's parachute canopy (make_chute.build), the big map
+     (make_bigmap.build: the test range's plain stitched 3 x 3, seamless).
+     They cannot be shipped prebuilt: they are derived from the game's files, and the
      weapon table is shared with other mods. Nothing is written unless all of it could be made;
   3. writes them: the generated objects (each file atomically, recorded in the ownership ledger,
      pylib/ledger.py), then the weapon table, its texts and the call SGOs in one transaction (all or none,
      call_weapons.commit), and last the plugin: EDF6VehicleCrew.dll, and the .ini (a new one when there is
-     none; else the player's own, with only the settings this version adds appended: merge_ini).
+     none; else the player's own, with only the settings this version adds appended: merge_ini); then the big map
+     (it sets BigWorld in that ini) and the test range's grand battle mission (testrange/gen.py, on its slot), so
+     everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack to play with
+     others). The test range's forced loadout is never written: everyone picks their own class.
 
 Uninstall removes the plugin and, when asked, the call weapons (their rows become placeholders that keep the
 row numbers saves use) and the generated objects no other tool still needs.
@@ -24,7 +29,7 @@ import sys
 import traceback
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (HERE, os.path.join(HERE, '..', 'pylib')):
+for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'testrange')):
     sys.path.insert(0, os.path.normpath(_p))
 
 import gamedir  # noqa: E402
@@ -235,7 +240,12 @@ def retire_weapons(game: str) -> bool:
 
 def install(game: str) -> None:
     import call_weapons
+    import gen
+    import make_artillery
+    import make_bigmap
+    import make_chute
     import make_jets
+    import make_katyusha
     import make_sub
     check_loader(game)
     dll, ini = plugin_files()
@@ -250,17 +260,36 @@ def install(game: str) -> None:
     jets = make_jets.build(game)
     print('生成潜水母舰（约 39 MB）……')
     sub = make_sub.build(game)
+    print('生成喀秋莎火箭炮车（读取 Root.cpk，不修改它）……')
+    katyusha = make_katyusha.build(game)
+    print('生成自行榴弹炮（读取 Root.cpk，不修改它）……')
+    artillery = make_artillery.build(game)
+    print('生成降落伞（读取 Root.cpk，不修改它）……')
+    chute = make_chute.build(game)
+    print('生成大地图（测试场平原拼成 3 x 3，无缝；读取 Root.cpk，不修改它，约需一两分钟）……')
+    bigmap = make_bigmap.build(game)
     print('\n全部生成完毕，开始写入。')
-    for path in make_jets.install(game, jets) + make_sub.install(game, sub):
+    for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery) + \
+            make_chute.install(game, chute):
         print('写入', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
     install_plugin(game, dll, ini)
+    for path in make_bigmap.install(game, built=bigmap):
+        print('写入', path)
+    print('写入测试场「大混战」关卡（联机时大家要有同样的关卡和物体）……')
+    for line in gen.install(game, gen.grand_battle(gen.Plan())):
+        print('  ', line)
     print('\n安装完成。启动游戏即可。')
 
 
 def uninstall(game: str) -> None:
+    import gen
+    import make_artillery
+    import make_bigmap
+    import make_chute
     import make_jets
+    import make_katyusha
     import make_sub
     print('卸载会删掉插件。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
     print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
@@ -272,12 +301,16 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
-        for remove in (make_sub.remove, make_jets.remove):
+        for remove in (make_chute.remove, make_artillery.remove, make_katyusha.remove, make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
                 print('删除', path)
             for path in kept:
                 print('保留（之后被别的工具改过）', path)
+    if gen.uninstall(game):
+        print('删除测试场关卡')
+    for path in make_bigmap.remove(game)[0]:
+        print('删除', path)
     remove_plugin(game)
     print('\n卸载完成。')
 
