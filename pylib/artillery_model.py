@@ -9,15 +9,16 @@ skeleton, so the stock Vehicle603_Flak class and V603_FLAK.SGO drive it (turret,
                                              (the bind pose, one object per bone, for any viewer), and a report
                                              (repairs, barrels, bores, gun clearance, each bone's vertex box)
 
-The OBJ is a kitbash of EDF6 parts, already in game space (+Y up, +Z forward, +X the vehicle's left): every vertex of
-its hull, tracks and lights coincides with a vertex of the E551 (OBJECT/V505_TANK.MRAB, checked: a converted vertex
-with no E551 vertex within 1 mm is an error). So those parts take, from the E551:
-  - their skin: each vertex the E551 bones of the E551 vertex there, renamed to the Kepler's (E551_TO_HOST: the
-    E551 has 7 road wheels and 2 end wheels a side, the Kepler 6 + 2: its seventh road wheel (and that track station)
-    rides on the hull / track body, its sprocket on the Kepler's tire_moveH);
-  - the repair of what the OBJ lost: every E551 triangle of the same material whose corners are all OBJ points, that
-    the OBJ lacks and that borders one of its open holes is put back (the hull lost 5 triangles: see HULL_FILLS);
-  - their normal / roughness-metal-occlusion maps (same UVs), with the user's albedo textures.
+The OBJ is a kitbash of EDF6 parts, already in game space (+Y up, +Z forward, +X the vehicle's left): its hull,
+tracks and lights are the E551's (OBJECT/V505_TANK.MRAB) own triangles, vertex for vertex (checked: every one of
+those OBJ triangles is an E551 triangle). So the chassis is not rebuilt from the OBJ but taken from the stock E551
+(stock_meshes): every E551 triangle whose three corners are points of those OBJ parts (the OBJ's triangles, plus 5
+the OBJ lost: see HULL_FILLS), each vertex's stored bytes copied as they are (positions, normals, tangents, uvs,
+weights, the E551's own layouts), only the blend indices mapped to the Kepler's bones (E551_TO_HOST: the E551 has 7
+road wheels and 2 end wheels a side, the Kepler 6 + 2: its seventh road wheel (and that track station) rides on the
+hull / track body, its sprocket on the Kepler's tire_moveH); with the E551's materials unchanged (the tracks renamed
+to the Kepler's, which its SGO scrolls) and their stock texture members (stored bytes). The OBJ's own chassis
+textures are not used (its track albedo, Vehicle504_tankdf02.dds, is near black).
 The turret (object fortressrobo_bottom: the turret body and two barrels as three separate meshes, a Balam part with
 its own texture) has no stock counterpart: a flat normal map and a plain parameter map. Its body is skinned to
 cannon_main; each barrel is cut where its thick breech sleeve steps down to the tube: the sleeve on cannon_l / _r
@@ -42,8 +43,8 @@ import graft_pure as g
 import obj_model as om
 import texfile
 from graft_pure import Vec3
-from mdb import Mdb, Rab, RabFile, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, mmul, rab_read, \
-    rab_write, read_elem
+from mdb import Material, Mdb, Mesh, Rab, RabFile, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, \
+    mmul, rab_read, rab_write
 
 HOST_ARC, HOST_MDB = 'V603_FLAK.MRAB', 'v603_flak.mdb'
 REF_ARC, REF_MDB = 'V505_TANK.MRAB', 'v505_tank.mdb'
@@ -53,13 +54,13 @@ OBJ_FILE = 'twin_tank.obj'
 # OBJ object names (prefixes): the turret, and the E551 parts (hull, lights, tracks)
 TURRET_OBJECT = 'fortressrobo_bottom'
 E551_OBJECTS = ('v505_tank', 'Caterpi')
-# E551 material -> the new material made from it (its shader, parameters, normal / parameter maps; the albedo is the
-# user's texture of the OBJ triangles that coincide with that material's). The tracks keep the Kepler's names:
-# V603_FLAK.SGO tank_caterpillar_animation scrolls 'v603_kyata_L' / '_R'.
+# The chassis is the stock E551's own meshes and materials (stock textures), not the OBJ's copies: E551 material ->
+# its name here. The tracks take the Kepler's names: V603_FLAK.SGO tank_caterpillar_animation scrolls
+# ('v603_kyata_L' / '_R', 'scroll_texture'), a parameter the E551 track material (same shader as the Kepler's,
+# snd_BRDF_Mech_Catapillar) has; the E551's own SGO scrolls its tracks with the same tank_caterpillar_animation_info.
 HULL_MATERIALS = {'v505_tank': 'v505_tank', 'Light01': 'Light01', 'Light02': 'Light02', 'Caterpi_l': 'v603_kyata_L',
                   'Caterpi_r': 'v603_kyata_R'}
 TURRET_MATERIAL = ('fortressx_02', 'v505_tank')       # (name, E551 template material) of the turret's material
-TEXTURE_FILES = {'v505_tank.001': 'npc_tank.png'}     # OBJ material -> its file (the MTL names it NPC坦克.png)
 FLAT_NORMAL = ('edf6vc_flat_nor.dds', (128, 128, 255))      # x, y = 0: the shader's normal is the surface's
 PLAIN_RMO = ('edf6vc_plain_rmo.dds', (140, 90, 200))        # ~ the E551 / Kepler body maps' mean (roughness, metal, occ)
 # E551 bone -> Kepler bone (by name). cannon_main: a plate of the E551's turret floor the OBJ hull still has (under the
@@ -82,10 +83,12 @@ for _s in 'lr':
     HOST_AT_E551[f'tire_moveH_{_s}'] = f'tire_moveI_{_s}'
 GUN_BONES = ['cannon_l', 'cannon_r', 'cannon_slide_l', 'cannon_slide_r']
 MOVED = sorted(set(HOST_AT_E551) | set(GUN_BONES))
-# The triangles the repair puts back into the user's hull. The OBJ lacks 5 of the E551 hull's triangles, in two holes on
-# the deck's right side (x < 0) whose mirror images on the left are present: a quad (2 triangles) at x -0.784..-0.150,
-# y 1.227..1.289, z 1.639..1.688 (the sloped strip just ahead of the turret ring) and a strip of 3 triangles at
-# x -0.913..-0.878, y 1.270..1.302, z -1.390..0.646 (the chamfer along the deck's right edge beside the turret).
+# The chassis is every E551 triangle whose three corners are points of the OBJ's E551 parts: the OBJ's 6953 triangles
+# (each one an E551 triangle, checked) and 5 the OBJ lost, in two holes on the deck's right side (x < 0) whose mirror
+# images on the left are present: a quad (2 triangles) at x -0.784..-0.150, y 1.227..1.289, z 1.639..1.688 (the
+# sloped strip just ahead of the turret ring) and a strip of 3 triangles at x -0.913..-0.878, y 1.270..1.302,
+# z -1.390..0.646 (the chamfer along the deck's right edge beside the turret). Taking the stock meshes closes those
+# holes by itself (no repair step); the count is checked so a changed OBJ is noticed.
 HULL_FILLS = 5
 BARREL_MIN_LENGTH = 2.0      # m: a turret piece this long along z and narrower than BARREL_MAX_WIDTH is a barrel
 BARREL_MAX_WIDTH = 0.8
@@ -200,19 +203,71 @@ def split_turret(part: om.Part) -> tuple[om.Part, dict[str, Barrel]]:
 
 # ------------------------------------------------------------------------------------------ reference (the E551)
 
-def reference(ref: Mdb) -> dict[str, list[om.RefTri]]:
-    """Per E551 material name: its triangles (position, normal, influences per corner)."""
-    out: dict[str, list[om.RefTri]] = {}
+def chassis_points(parts: list[om.Part]) -> tuple[set, set]:
+    """(welded points, welded triangles as frozensets of points) of the OBJ's E551 parts."""
+    pts = {om.wkey(v.pos) for p in parts for v in p.verts}
+    tris = {frozenset(om.wkey(p.verts[i].pos) for i in t) for p in parts for t in p.tris}
+    return pts, tris
+
+
+def stock_meshes(ref: Mdb, pts: set, bone_map: dict[int, int]) -> tuple[list[tuple[int, Mesh]], set]:
+    """The E551's meshes cut to the triangles whose three corners are in `pts`, as (E551 material, Mesh): each kept
+    vertex's bytes copied as stored (layout, positions, normals, tangents, uvs, weights), only its BLENDINDICES
+    bytes rewritten through `bone_map` (E551 bone -> Kepler bone; zero-weight slots 0). Also the kept triangles'
+    point sets. Raises when a kept vertex has a weighted bone the map lacks."""
+    out: list[tuple[int, Mesh]] = []
+    kept: set = set()
     for o in ref.objects:
         for me in o.meshes:
             P = g.mesh_positions(me)
-            N = read_elem(me, g.elem_name(me, 'normal') or '') or []
             bi, bw = g.skin_columns(me)
-            skins = [tuple((int(b), x) for b, x in zip(i, w) if x > 0) or ((int(i[0]), 1.0),) for i, w in zip(bi, bw)]
-            corners = [om.RefCorner(p, n[:3], sk) for p, n, sk in zip(P, N, skins)]  # type: ignore[arg-type]
-            out.setdefault(ref.name_of(ref.materials[me.material].name), []).extend(
-                (corners[a], corners[b], corners[c]) for a, b, c in g.triangles(me))
-    return out
+            tris = [t for t in g.triangles(me) if all(om.wkey(P[i]) in pts for i in t)]
+            if not tris:
+                continue
+            kept |= {frozenset(om.wkey(P[i]) for i in t) for t in tris}
+            off = next(e.offset for e in me.elems if e.name.upper() == 'BLENDINDICES')
+            used = sorted({i for t in tris for i in t})
+            remap = {v: k for k, v in enumerate(used)}
+            rows = []
+            for v in used:
+                miss = [int(x) for x, w in zip(bi[v], bw[v]) if w > 0 and int(x) not in bone_map]
+                _req(not miss, f'E551 vertex on bone(s) {miss} with no Kepler counterpart')
+                idx = bytes(bone_map[int(x)] if w > 0 or n == 0 else 0 for n, (x, w) in enumerate(zip(bi[v], bw[v])))
+                raw = me.vdata[v * me.vsize:(v + 1) * me.vsize]
+                rows.append(raw[:off] + idx + raw[off + 4:])
+            ix = [remap[i] for t in tris for i in t]
+            out.append((me.material, replace(me, vdata=b''.join(rows), indices=struct.pack(f'<{len(ix)}H', *ix))))
+    return out, kept
+
+
+def stock_materials(md: Mdb, ref: Mdb, used: set[int]) -> tuple[Mdb, dict[int, int]]:
+    """`md` with the E551 materials `used` appended as they are (g.merge_materials), each under its HULL_MATERIALS
+    name (the tracks under the Kepler's). Returns the model and E551 material -> its index."""
+    mat_names = {m.name for m in ref.materials}
+    renamed = replace(ref, names=[HULL_MATERIALS.get(n, n) if n is not None and i in mat_names else n
+                                  for i, n in enumerate(ref.names)])
+    return g.merge_materials(md, renamed, used)
+
+
+def material_key(md: Mdb, m: Material) -> str:
+    """sha256[:16] of everything that makes up a material but its name: shader, flags, parameters, texture slots
+    (kind, slot data, texture file / flag). Not the texture entry's label: the loader binds a slot by file name
+    (mdb.insert_member), and the E551 itself keeps two entries per track / light file ('x_DDS', 'x_DDS1') that
+    g.merge_materials folds into one."""
+    rows = [m.shader, m.b2, m.b3, m.unk]
+    rows += [(p.name, p.type, p.unk, struct.pack('<4f', *p.value).hex()) for p in m.params]
+    rows += [(x.kind, x.unk, md.textures[x.texture].filename, md.textures[x.texture].unk) for x in m.textures]
+    return hashlib.sha256(repr(rows).encode()).hexdigest()[:16]
+
+
+def make_stock_fingerprints(ref: Mdb, ref_rab: Rab) -> tuple[dict[str, str], dict[str, str]]:
+    """(STOCK_MATERIALS, STOCK_TEXTURES) of the stock E551 (used once to generate the constants below): per
+    HULL_MATERIALS material its material_key, per archive member of their textures the sha256[:16] of its stored
+    bytes."""
+    mats = {ref.name_of(m.name): m for m in ref.materials if ref.name_of(m.name) in HULL_MATERIALS}
+    files = sorted({ref.textures[x.texture].filename for m in mats.values() for x in m.textures})
+    tex = {f.name: hashlib.sha256(f.stored).hexdigest()[:16] for fn in files for f in g.texture_members(ref_rab, fn)}
+    return {n: material_key(ref, m) for n, m in sorted(mats.items())}, dict(sorted(tex.items()))
 
 
 # ------------------------------------------------------------------------------------------ build
@@ -224,51 +279,37 @@ def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - r
     host0 = mdb_read(member(host_rab, HOST_MDB).data)
     ref = mdb_read(member(ref_rab, REF_MDB).data)
     obj = om.read_obj(os.path.join(folder, OBJ_FILE))
-    info: dict = {'fills': []}
+    info: dict = {}
     hb = {host0.name_of(b.name): b.index for b in host0.bones}
     rb = {ref.name_of(b.name): b.index for b in ref.bones}
     for n in set(E551_TO_HOST.values()) | set(HOST_AT_E551) | set(GUN_BONES):
         _req(n in hb, f'host bone {n} missing')
     for n in set(E551_TO_HOST) | set(HOST_AT_E551.values()):
         _req(n in rb, f'E551 bone {n} missing')
-    ref_name = {i: n for n, i in rb.items()}
 
-    def to_host(b: int) -> int:
-        n = ref_name[b]
-        _req(n in E551_TO_HOST, f'an OBJ vertex lies on E551 bone {n}, which has no Kepler counterpart')
-        return hb[E551_TO_HOST[n]]
-
-    # 1. the parts: the hull / tracks / lights cut by the E551 material each triangle is in (an OBJ object can mix
-    #    them), holes repaired from that material, skinned from the E551; the turret split into body and barrels
-    ref_tris = reference(ref)
-    family = [ref_tris[m] for m in HULL_MATERIALS]
-    pieces: dict[str, list[tuple[om.Part, list[om.Skin]]]] = {}
-    albedo: dict[str, str] = {}
+    # 1. the chassis: the E551's own meshes, cut to the triangles on the OBJ's E551 parts (each OBJ triangle must be an
+    #    E551 one), re-skinned onto the Kepler's bones; the turret split into body and barrels
+    chassis: list[om.Part] = []
     turret: om.Part | None = None
     for part in om.obj_parts(obj):
         _req(part.name.startswith((TURRET_OBJECT,) + E551_OBJECTS), f'{OBJ_FILE}: object {part.name} is not known')
         if part.name.startswith(TURRET_OBJECT):
             _req(turret is None, f'{OBJ_FILE}: a second turret part {part.name}')
             turret = part
-            continue
-        tex = om.texture_path(obj, part.material, TEXTURE_FILES)
-        for stock, sub in om.split_by_reference(part, {m: ref_tris[m] for m in HULL_MATERIALS}).items():
-            _req(stock != '', f'{part.name}: {len(sub.tris)} triangles the E551 does not have')
-            new = HULL_MATERIALS[stock]
-            _req(albedo.setdefault(new, tex) == tex, f'{new}: two albedo textures ({albedo[new]}, {tex})')
-            info['fills'] += om.restore_from_reference(sub, ref_tris[stock])
-            skins = om.skins_by_reference(sub, [t for f in family for t in f], to_host)
-            pieces.setdefault(new, []).append((sub, skins))
+        else:
+            chassis.append(part)
     _req(turret is not None, f'{OBJ_FILE}: no turret object')
+    pts, obj_tris = chassis_points(chassis)
+    stock, kept = stock_meshes(ref, pts, {rb[n]: hb[h] for n, h in E551_TO_HOST.items()})
+    _req(not obj_tris - kept, f'{OBJ_FILE}: {len(obj_tris - kept)} E551-part triangles the E551 does not have')
+    info['stock_only'] = len(kept - obj_tris)
+    _req(info['stock_only'] == HULL_FILLS, f'the E551 has {info["stock_only"]} triangles on the OBJ hull that the OBJ '
+                                           f'lacks, expected {HULL_FILLS}')
+    info['chassis_tris'] = len(kept)
+    _req({ref.name_of(ref.materials[m].name) for m, _me in stock} == set(HULL_MATERIALS),
+         'the chassis does not use exactly the E551 materials ' + ', '.join(HULL_MATERIALS))
     body, barrels = split_turret(turret)  # type: ignore[arg-type]
     info['barrels'] = barrels
-    tm = TURRET_MATERIAL[0]
-    albedo[tm] = om.texture_path(obj, turret.material, TEXTURE_FILES)  # type: ignore[union-attr]
-    pieces[tm] = [(body, om.rigid(body, hb['cannon_main']))]
-    for s, b in barrels.items():
-        pieces[tm] += [(b.sleeve, om.rigid(b.sleeve, hb[f'cannon_{s}'])), (b.tube, om.rigid(b.tube, hb[f'cannon_slide_{s}']))]
-    _req(sum(len(f.tris) for f in info['fills']) == HULL_FILLS,
-         f'repair put back {sum(len(f.tris) for f in info["fills"])} triangles, expected {HULL_FILLS}')
 
     # 2. the skeleton: the Kepler's, bones moved onto this model (stock rotations)
     md = replace(host0, objects=[replace(host0.objects[0], meshes=[])], materials=[], textures=[], buffer_order=None)
@@ -279,40 +320,35 @@ def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - r
         md = g.set_bone_origin(md, hb[f'cannon_{s}'], b.pivot)
         md = g.set_bone_origin(md, hb[f'cannon_slide_{s}'], b.muzzle)
 
-    # 3. materials and textures: the user's albedo files (DDS as they are, PNG / JPEG converted), the E551's other maps
+    # 3. materials and textures: the chassis takes the E551's materials as they are (the tracks under the Kepler's
+    #    names) and their stock texture members (stored bytes); the turret the user's albedo (DDS as it is, PNG /
+    #    JPEG converted) with a flat normal map and a plain parameter map
     keep = {member(host_rab, HOST_MDB).name.lower()}
     host_rab.files = [f for f in host_rab.files if f.name.lower() in keep]
-    templates = {v: k for k, v in HULL_MATERIALS.items()}
-    templates[tm] = TURRET_MATERIAL[1]
-    stock_files: set[str] = set()
-    made: dict[str, bytes] = {}
-    mat_index: dict[str, int] = {}
-    for new in pieces:
-        src = os.path.basename(albedo[new])
-        tex = {'albedo': src.rsplit('.', 1)[0].lower() + '.dds'}
-        if tex['albedo'] not in made:
-            made[tex['albedo']] = om.texture_dds(albedo[new])
-        if new == tm:
-            tex['normal'], tex['param_r_m_occ_hr'] = FLAT_NORMAL[0], PLAIN_RMO[0]
-            made[FLAT_NORMAL[0]] = texfile.solid_dxt1(FLAT_NORMAL[1])
-            made[PLAIN_RMO[0]] = texfile.solid_dxt1(PLAIN_RMO[1])
-        md, mat_index[new] = om.add_material(md, ref, templates[new], new, tex)
-        m = next(m for m in ref.materials if ref.name_of(m.name) == templates[new])
-        stock_files |= {ref.textures[x.texture].filename for x in m.textures if x.kind not in tex}
+    md, mat_map = stock_materials(md, ref, {m for m, _me in stock})
+    stock_files = sorted({md.textures[x.texture].filename for m in md.materials for x in m.textures})
+    g.copy_texture_members(host_rab, ref_rab, stock_files)
+    tm = TURRET_MATERIAL[0]
+    albedo = om.texture_path(obj, turret.material)  # type: ignore[union-attr]
+    tex = {'albedo': os.path.basename(albedo).rsplit('.', 1)[0].lower() + '.dds', 'normal': FLAT_NORMAL[0],
+           'param_r_m_occ_hr': PLAIN_RMO[0]}
+    made = {tex['albedo']: om.texture_dds(albedo), FLAT_NORMAL[0]: texfile.solid_dxt1(FLAT_NORMAL[1]),
+            PLAIN_RMO[0]: texfile.solid_dxt1(PLAIN_RMO[1])}
+    md, turret_mat = om.add_material(md, ref, TURRET_MATERIAL[1], tm, tex)
     for fn, dds in sorted(made.items()):
         om.add_texture(host_rab, fn, dds)
-    g.copy_texture_members(host_rab, ref_rab, sorted(stock_files))
 
-    # 4. meshes (hull layout: the Kepler body mesh's; tracks: the Kepler track mesh's, with its second uv)
-    body_layout, track_layout = host0.objects[0].meshes[0], host0.objects[0].meshes[1]
-    meshes = []
-    for new, ps in pieces.items():
-        layout = track_layout if new in (HULL_MATERIALS['Caterpi_l'], HULL_MATERIALS['Caterpi_r']) else body_layout
-        meshes += om.build_meshes(layout, ps, mat_index[new])
+    # 4. meshes: the E551's (their own layouts), then the turret's (the Kepler body mesh's layout)
+    turret_pieces = [(body, om.rigid(body, hb['cannon_main']))]
+    for s, b in barrels.items():
+        turret_pieces += [(b.sleeve, om.rigid(b.sleeve, hb[f'cannon_{s}'])),
+                          (b.tube, om.rigid(b.tube, hb[f'cannon_slide_{s}']))]
+    meshes = [replace(me, material=mat_map[m]) for m, me in stock]
+    meshes += om.build_meshes(host0.objects[0].meshes[0], turret_pieces, turret_mat)
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(md.objects[0], meshes=meshes)])
     md = g.recompute_bounds(md)
-    info['tex_files'] = sorted(made) + sorted(stock_files)
+    info['tex_files'] = sorted(made) + stock_files
     return md, host_rab, info
 
 
@@ -434,13 +470,62 @@ def gun_clearance(md: Mdb, side: str) -> list[tuple[float, float, float, int]]:
     return out
 
 
+def material_problems(rab: Rab, md: Mdb) -> list[str]:
+    """What breaks "the chassis is the stock E551's look, the turret the only own material, nothing else in the
+    archive": the materials are not exactly HULL_MATERIALS' names + the turret's; a chassis material differs from
+    its stock E551 material (STOCK_MATERIALS: everything but the name); a track material without the scroll
+    parameter the host SGO animates; a chassis texture member that is not the stock E551's stored bytes
+    (STOCK_TEXTURES) or one missing; an archive member no material uses (dead weight) or a texture entry no
+    material references."""
+    out: list[str] = []
+    mats = {md.name_of(m.name): m for m in md.materials}
+    want = set(HULL_MATERIALS.values()) | {TURRET_MATERIAL[0]}
+    if set(mats) != want or len(mats) != len(md.materials):
+        out.append(f'materials {sorted(mats)}, expected {sorted(want)}')
+    chassis_files: set[str] = set()
+    for stock, new in HULL_MATERIALS.items():
+        m = mats.get(new)
+        if m is None:
+            continue
+        if material_key(md, m) != STOCK_MATERIALS[stock]:
+            out.append(f'material {new} is not the stock E551 {stock}')
+        if new.startswith('v603_kyata') and not any(p.name == 'scroll_texture' for p in m.params):
+            out.append(f'track material {new} has no scroll_texture (the host SGO scrolls it)')
+        chassis_files |= {md.textures[x.texture].filename for x in m.textures}
+    stock_members = {k.lower(): v for k, v in STOCK_TEXTURES.items()}
+    for fn in sorted(chassis_files):
+        for f in g.texture_members(rab, fn) or [None]:
+            if f is None or stock_members.get(f.name.lower()) != hashlib.sha256(f.stored).hexdigest()[:16]:
+                out.append(f'chassis texture {fn}: member {f.name if f else "missing"} is not the stock E551 one')
+    used = {x.texture for m in md.materials for x in m.textures}
+    out += [f'texture {t.filename} referenced by no material' for t in md.textures if t.index not in used]
+    live = {HOST_MDB.lower()} | {n.lower() for t in md.textures
+                                 for n in (t.filename, '{0}.lod.{1}'.format(*t.filename.rsplit('.', 1)))}
+    out += [f'archive member {f.name} used by no material' for f in rab.files if f.name.lower() not in live]
+    return out
+
+
+def weighted_counts(md: Mdb) -> dict[int, int]:
+    """Per bone, how many vertices it moves (a weight > 0 in any slot: the stock E551's track station catapiD_r is
+    never a vertex's first influence, only a second one)."""
+    out: dict[int, int] = {}
+    for o in md.objects:
+        for me in o.meshes:
+            for r, wt in zip(*g.skin_columns(me)):
+                for b in {int(i) for i, x in zip(r, wt) if x > 0}:
+                    out[b] = out.get(b, 0) + 1
+    return out
+
+
 def check(arc: bytes) -> None:
     """Re-read `arc` and raise ArtilleryCheckError unless: archive and model round-trip; < 256 bones; every mesh's
     vertex buffer, indices, blend indices (skin bones only), weights, material and numbering are valid; every
     material texture (HD and .lod) is a member, before the model in folder-table order, in the stock HD / .lod
-    layout (obj_model.texture_problems); every bind x inverse bind is the identity; the bones are the
+    layout (obj_model.texture_problems); the chassis materials and their texture members are the stock E551's,
+    the tracks' with the scroll parameter, the turret's the only other material, no member unused
+    (material_problems); every bind x inverse bind is the identity; the bones are the
     Kepler's (names, parents, links, kinds), unmoved ones at their stock model-space bind, moved ones with their stock
-    rotation; every skin bone of the stock wheels / tracks / turret / guns carries geometry and the radars none; each
+    rotation; every skin bone of the stock wheels / tracks / turret / guns moves vertices and the radars none; each
     wheel bone sits at its wheel's centre and each track station on its wheel; the guns are mirror images (to
     MIRROR_TOL), each pivot on its sleeve's axis at the turret's front face, each slide bone on the tube's axis in the
     mouth plane, the tube ahead of the sleeve; at every ELEVATIONS angle no gun vertex goes below the turret body's
@@ -456,6 +541,8 @@ def check(arc: bytes) -> None:
         _mesh_ok(md, o, files)
     bad = om.texture_problems(rab, md, HOST_MDB)
     _req(not bad, 'textures: ' + '; '.join(bad))
+    bad = material_problems(rab, md)
+    _req(not bad, 'materials: ' + '; '.join(bad))
     w = bind_world(md)
     for b in md.bones:
         p = mmul(w[b.index], b.inv_bind)
@@ -472,11 +559,12 @@ def check(arc: bytes) -> None:
             _req(hashlib.sha256(struct.pack('<16f', *w[b.index])).hexdigest()[:16] == s[8],
                  f'bone {n}: model-space bind differs from stock')
     pts = g.skinned_points(md)
+    weighted = weighted_counts(md)
     pos = {md.name_of(b.name): w[b.index][12:15] for b in md.bones}
     for n in ('doppler_radar', 'tracking_radar'):
-        _req(md.bone_index(n) not in pts, f'{n} carries geometry')
+        _req(md.bone_index(n) not in weighted, f'{n} carries geometry')
     for n in MOVED + ['body']:
-        _req(len(pts.get(md.bone_index(n), [])) >= 8, f'{n}: no geometry')
+        _req(weighted.get(md.bone_index(n), 0) >= 8, f'{n}: no geometry')
     for s in 'lr':
         for k in 'ABCDEFGH':
             t, (lo, hi) = pos[f'tire_move{k}_{s}'], box(pts[md.bone_index(f'tire_move{k}_{s}')])
@@ -579,6 +667,25 @@ STOCK_BONES: list[tuple] = [
 ]
 
 
+# make_stock_fingerprints() of the stock OBJECT/V505_TANK.MRAB: per E551 chassis material its material_key (all but
+# the name), per member of their textures the sha256[:16] of its stored bytes
+STOCK_MATERIALS: dict[str, str] = {
+    'Caterpi_l': '65bfa5aba5bda1c7', 'Caterpi_r': '65bfa5aba5bda1c7', 'Light01': '5bcfdae72bcbabb4',
+    'Light02': 'fa6df7e01ae1229e', 'v505_tank': 'a45e08a04e0368f2',
+}
+STOCK_TEXTURES: dict[str, str] = {
+    'Caterpi_rgb.dds': '007109a621ea3be8', 'Caterpi_rgb.lod.dds': '4cdd75dd1b2b1083',
+    'v505_catapi_col.DDS': '81266b61c74b68c3', 'v505_catapi_col.lod.DDS': 'a7c032f771f0d515',
+    'v505_catapi_nor.DDS': '2ad1e1dc69072753', 'v505_catapi_nor.lod.DDS': 'e69b9b425b0fd473',
+    'v505_catapi_rm.DDS': 'cb72cbc8efe49027', 'v505_catapi_rm.lod.DDS': 'f5b9e34d2be79a4e',
+    'v505_light_col.DDS': 'f58b8ab5a485e991', 'v505_light_col.lod.DDS': '39a9e2028c5f2bf4',
+    'v505_light_nor.DDS': '583908d569c45417', 'v505_light_nor.lod.DDS': '0d945b24bb231a1e',
+    'v505_light_rmol.DDS': 'ce9fd129ba21a551', 'v505_light_rmol.lod.DDS': '3c18674104693cc2',
+    'v505_tank_body_col.DDS': '2be9f160131e448c', 'v505_tank_body_col.lod.DDS': 'dba7e5b820e6c6b0',
+    'v505_tank_body_nor.DDS': '8ff5d5f1dfd70179', 'v505_tank_body_nor.lod.DDS': 'ddba06176a28afb8',
+    'v505_tank_body_rmo.DDS': '9275d2eb8dc74659', 'v505_tank_body_rmo.lod.DDS': '14e875c5b1d3ae72',
+}
+
 def main(argv: list[str]) -> int:
     import sys
     from rootcpk import Game, DEFAULT_GAME
@@ -594,8 +701,7 @@ def main(argv: list[str]) -> int:
     check(arc)
     with open(os.path.join(argv[0], 'EDF6VC_ARTILLERY.MRAB'), 'wb') as h:
         h.write(arc)
-    for f in info['fills']:
-        print('repaired', f.describe())
+    print(f"chassis: {info['chassis_tris']} stock E551 triangles ({info['stock_only']} of them missing from the OBJ)")
     for s, b in sorted(info['barrels'].items()):
         print(f'cannon_{s}: axis x {b.axis[0]:.4f} y {b.axis[1]:.4f}, sleeve to tube at z {b.step_z:.4f}, pivot z '
               f'{b.pivot[2]:.4f}, muzzle z {b.muzzle[2]:.4f}, bore {b.bore:.3f} m (mouth ring {b.mouth:.3f} m)')
