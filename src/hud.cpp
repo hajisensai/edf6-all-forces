@@ -161,6 +161,10 @@ alignas(16) const float kAmber[4]={1.0f,0.7f,0.15f,0.95f};
 alignas(16) const float kTeal[4]={0.35f,0.75f,0.85f,0.95f};
 alignas(16) const float kDown[4]={1.0f,0.3f,0.25f,1.0f};
 constexpr float kLineScale=0.6f,kTitleScale=0.75f;
+// The game's glyph cache (docs/hud-re.md §2.1) keys every glyph on its character and its font scale (as a half
+// float), so each scale is a set of glyphs of its own. A text scale that follows the view depth would rasterize a
+// new set nearly every frame and churn the shared atlas the menus draw from: the scale goes in on this grid.
+constexpr float kTextScaleStep=1.0f/32.0f;
 // A world bar's size: kNearScale at the camera down to kFarScale at its own reading distance (metres of view depth) and on.
 constexpr float kNearScale=1.3f,kFarScale=0.7f;
 // The damage trail: held kTrailHoldMs after the last hit, then drains kTrailRate of the bar a second.
@@ -249,7 +253,12 @@ struct Text {
     bool made;                    // the renderer made (on the first line measured: none when nothing is shown)
     bool begun;                   // between a Begin and its End: a fault in between still owes the End
 };
+float TextScale(float scale) noexcept {
+    const float snapped=std::round(scale/kTextScaleStep)*kTextScaleStep;
+    return snapped>kTextScaleStep ? snapped : kTextScaleStep;
+}
 void Font(Text& t,float scale) noexcept {
+    scale=TextScale(scale);
     std::memset(t.font,0,kFontSize);
     std::memcpy(t.font,t.mgr+kFontDefaults,0x18);
     Put<std::int32_t>(t.font,0x18,1);

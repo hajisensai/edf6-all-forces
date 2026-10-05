@@ -462,6 +462,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
+    InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallJetSound();
     InstallMissiles();
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
