@@ -778,6 +778,7 @@ bool Impact(const PJet& j,const float* pos,float* hit) noexcept {
 constexpr ULONGLONG kFlareGapMs=1000;
 constexpr float kFlareBack=6.0f,kFlareSide=12.0f,kFlareDown=4.0f,kFlareKeep=0.6f;   // m behind; m/s out, down; share of its speed
 constexpr int kFlaresDrawn=8;
+constexpr float kFlareBreakLock=0.6f;   // each enemy jet locking on to it loses its lock with this, a drop
 void Flares(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     const ULONGLONG ms=GameMs();
     const bool press=s.flare && !j.flareHeld;
@@ -794,9 +795,10 @@ void Flares(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
                 vel[i]=j.vel[i]*kFlareKeep+right[i]*kFlareSide*static_cast<float>(side);
             }
             vel[1]-=kFlareDown;
-            FlareDrop(v,at,vel);
+            FlareDrop(v,at,vel,nose,side<0);
         }
-        Log("PJET v=%p flares (%d pairs left)",v,j.flares);
+        const int broke=jet::BreakLocks(v,kFlareBreakLock);
+        Log("PJET v=%p flares (%d pairs left)%s",v,j.flares,broke ? ": an enemy lost its lock" : "");
     }
     float at[kFlaresDrawn][3],vel[kFlaresDrawn][3];
     const int n=FlaresOf(v,at,vel,kFlaresDrawn);

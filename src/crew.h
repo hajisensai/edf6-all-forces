@@ -362,12 +362,15 @@ struct PlayerJetReadout {
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
-namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept; }
+namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;
+// jet.cpp: the jets locking on to `target` lose their lock with `chance` each (a flare drop); how many did
+int BreakLocks(const void* target,float chance) noexcept; }
 // missile.cpp: a guided round now homing on a point within `radius` m of `at` (its lock point there)
 bool MissileHoming(const float* at,float radius) noexcept;
 // missile.cpp: flares. A flare dropped by `owner` at `at` (m/s `vel`): the rounds homing there may take it for their
 // target. FlaresStep moves them once a frame; FlaresOf: `owner`'s burning flares, at most `most` (their places, speeds).
-void FlareDrop(const void* owner,const float* at,const float* vel) noexcept;
+// `nose`: the jet's nose (the aspect); `pairStart`: the first flare of a drop (each drop is judged once a round).
+void FlareDrop(const void* owner,const float* at,const float* vel,const float* nose,bool pairStart) noexcept;
 void FlaresStep() noexcept;
 int FlaresOf(const void* owner,float (*at)[3],float (*vel)[3],int most) noexcept;
 // booster.cpp: the flares' fire, drawn as Booster flames on `v` (their owner) at `at`, trailing against `vel`.
