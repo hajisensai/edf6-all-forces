@@ -122,6 +122,33 @@ void WidenMoveArea() noexcept {
     Log("BIGWORLD move area %.0f x %.0f m -> %.0f x %.0f m (centre %.0f,%.0f)",was[0],was[1],2.0f*want,2.0f*want,box[0],box[2]);
 }
 
+// The sky four times as high (the user, 2026-10-05: "the sky still has a limit; raise the stock one four times").
+// The move area manager m holds two heights: +0x44 the ceiling the heli input clamps to (patched out, body506.cpp)
+// and the NPC jets keep under (CeilingY), +0x40 the top the area clamp holds every body under (0x5A9E50 bit 1: the
+// lower of it and the box's top). Both kSkyScale times as high once a mission, and the box's top raised to the new
+// limit when lower, so nothing still stops a climb at the stock height.
+constexpr std::size_t kAreaTop=0x40,kAreaCeiling=0x44;
+constexpr float kSkyScale=4.0f;
+void RaiseSky() noexcept {
+    const auto p=At<unsigned char*>(image,kMoveArea);
+    unsigned char* const m=p ? p-8 : nullptr;
+    if(!m || !Readable(m,kAreaCeiling+4,true))return;
+    const float top=At<float>(m,kAreaTop),ceiling=At<float>(m,kAreaCeiling);
+    if(!(top>0.0f && top<1.0e5f) || !(ceiling>0.0f && ceiling<1.0e5f))return;
+    Put<float>(m,kAreaTop,top*kSkyScale);
+    Put<float>(m,kAreaCeiling,ceiling*kSkyScale);
+    const float* lo=reinterpret_cast<const float*>(m+kMoveMin);
+    const float* hi=reinterpret_cast<const float*>(m+kMoveMax);
+    const float wantTop=top*kSkyScale,boxTop=hi[1];
+    if(boxTop<wantTop && Matches(kSetMoveBox,kSetMoveBoxSig,sizeof(kSetMoveBoxSig))) {
+        alignas(16) float box[8]={(lo[0]+hi[0])*0.5f,(lo[1]+wantTop)*0.5f,(lo[2]+hi[2])*0.5f,1.0f,
+                                  (hi[0]-lo[0])*0.5f,(wantTop-lo[1])*0.5f,(hi[2]-lo[2])*0.5f,0.0f};
+        reinterpret_cast<void(__fastcall*)(void*,const float*)>(image+kSetMoveBox)(m,box);
+    }
+    Log("SKY area top %.0f -> %.0f m, ceiling %.0f -> %.0f m, box top %.0f -> %.0f m",top,top*kSkyScale,ceiling,
+        ceiling*kSkyScale,boxTop,std::fmax(boxTop,wantTop));
+}
+
 void BigWorldProbe() noexcept {
     const ULONGLONG ms=GameMs();
     if(probed)return;
@@ -129,6 +156,7 @@ void BigWorldProbe() noexcept {
     if(ms-probeFrom<kProbeAfterMs)return;
     probed=true;
     WidenMoveArea();
+    RaiseSky();   // after the widening: it keeps the box's height as it found it
     constexpr int n=2*kProbeHalf+1;
     static float height[n][n];
     float low=1e9f,high=-1e9f;

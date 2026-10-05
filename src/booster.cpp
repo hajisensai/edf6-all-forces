@@ -99,11 +99,17 @@ void DropWeak(void* ctrl) noexcept {
         (*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
 }
 
+// A shared reference let go as MSVC's _Ref_count_base::_Decref does: the uses down by one, and only when that was
+// the last use, the object destroyed and the uses' own weak count dropped. It dropped a weak count every time, one
+// too many for every booster made: the control block was freed while the plugin still held its weak reference, and
+// the next mission's ResetBoosters wrote into freed memory (2026-10-05 13:37, dump EDF6.exe.20900: DropWeak+0xE
+// from ResetBoosters from MissionStart).
 void DropShared(void* ctrl) noexcept {
     if(!ctrl)return;
-    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+8),-1)==1)
+    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(ctrl)+8),-1)==1) {
         (*reinterpret_cast<CtrlFn* const*>(ctrl))[0](ctrl);
-    DropWeak(ctrl);
+        DropWeak(ctrl);
+    }
 }
 
 void Drop(Nozzle& z) noexcept {
