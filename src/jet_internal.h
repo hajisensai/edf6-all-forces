@@ -178,6 +178,9 @@ struct Kind {
 // the drone is) and are deleted kBlastMs later (Blast). The blast's damage is filtered by team (GameDamageInfo,
 // docs/decoy-blast-re.md 1.1): no friend is hurt.
 constexpr float kBlastTrigger=8.0f,kDollTrigger=6.0f;
+// A doll hangs kDollBelow under its drone (jet_carrier.cpp DollPose), never under the ground beneath it; a doll drone
+// charging comes in kDollRide over the ground under its target at least, so its doll is not pressed into its body.
+constexpr float kDollBelow=4.0f,kDollRide=kDollBelow+1.0f;
 inline constexpr Kind kKinds[kRoleCount]={
     // 2026-10-04: faster (750-900 km/h at the attack; own motion properties lift the 200 m/s cap), higher, about 5 g at most.
     // 2026-10-05: strafing runs open fire from 1000 m (the guns' reach caps it) and pull out lower (80-100 m over the
@@ -478,7 +481,7 @@ void Detonate(Jet& j,Jet* mother,float dist,ULONGLONG ms) noexcept;
 void Blast(Jet& j,unsigned char* v,ULONGLONG ms) noexcept;
 void DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept;
 void DollFree(int i) noexcept;
-void DollFrame(int i,const unsigned char* v) noexcept;   // its doll follows drone `v` (if it has one)
+void DollFrame(int i,const unsigned char* v,float clear) noexcept;   // its doll follows drone `v` (if it has one), `clear` over the ground
 void ResetDolls() noexcept;                // the mission's end: forgotten, not deleted (they went with it)
 bool PreloadDolls(void* mgr,bool dollBody) noexcept;   // the dolls' SGOs with the doll drone's body: whether
 bool InstallDolls() noexcept;

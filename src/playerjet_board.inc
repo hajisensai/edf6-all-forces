@@ -252,7 +252,7 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
 void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const float* pos,float clear,bool still,float dt,ULONGLONG ms) noexcept {
     jet::HoldOffGround(e,pos,clear,dt,ms);
     if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms);
-    jet::DollFrame(jet::IndexOf(e),v);
+    jet::DollFrame(jet::IndexOf(e),v,clear);
     const bool down=clear!=kNoGround && clear<kTouch;
     if(down && still && Len(e.m.vel)<1.5f) {
         std::memset(e.m.vel,0,12);std::memset(e.m.acc,0,12);std::memset(e.m.omega,0,12);

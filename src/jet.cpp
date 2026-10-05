@@ -221,7 +221,12 @@ void Rotor(Jet& j,const Kind& kind,unsigned char* v,Jet* mother,const float* pos
         if(j.mode==Mode::recover && mother) {
             const float* mp=reinterpret_cast<const float*>(mother->Vehicle()+kPosition);
             goal[0]=mp[0];goal[1]=mp[1]-kDockBelow;goal[2]=mp[2];
-        } else if(j.t.target)std::memcpy(goal,j.t.aim,12);
+        } else if(j.t.target) {
+            std::memcpy(goal,j.t.aim,12);
+            // A doll drone comes in kDollRide over the ground there (still within kDollTrigger of a target on it).
+            const float under=kind.doll ? GroundClearance(goal) : kNoGround;
+            if(under!=kNoGround && under<kDollRide)goal[1]+=kDollRide-under;
+        }
         else{goal[0]=anchor[0];goal[1]=anchor[1]-kDockBelow*2.0f;goal[2]=anchor[2];}
     } else {
         // The carrier: about its station (CarrierGoal), kMinAlt*2 over the ground there at least.
@@ -467,7 +472,7 @@ void JetFrame(unsigned char* v) noexcept {
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
     else Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
-    DollFrame(IndexOf(*j),v);
+    DollFrame(IndexOf(*j),v,clear);
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000){j->loggedAt=ms;JetLog(*j,v,pos,arms,speed,clear,ms);}
 }
