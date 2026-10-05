@@ -55,6 +55,7 @@ struct Config {
     DWORD callPrevKey=0xDB;    // ...the one before (VK_OEM_4 `[`)
     bool seaRescue=true;       // a heli comes for a local player in the sea and ferries them to a submarine carrier's deck
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
+    bool boardingGun=true;     // the boarding gun's rounds put the player into the friendly vehicle they hit (boarding.cpp)
     bool rescueAutoBoard=false;// ...and, in the stock board reach of a free door seat, boards them by the stock board path
     float subHullHp=100000.0f; // a submarine carrier's hull HP at the base tier (its SGO's is 30000), times its tier (25 at the highest); 0 = the game's
     float subHeavyHit=1500.0f; // a hit on its hull (no deck part) counts only from a heavy source, or from this much
@@ -338,6 +339,18 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
+// The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
+int VehicleClassOf(const void* object) noexcept;
+// The boarding gun (boarding.cpp): from the bullets' candidate collector (jet_hooks.cpp AddBodyHook), true when the
+// candidate is a vehicle hit by one of its rounds (left out: the round passes through); once a frame (FrameTick)
+// the player boards the last vehicle asked for.
+bool BoardingCandidate(void* collector,std::uint32_t body) noexcept;
+void BoardingTick() noexcept;
+bool InstallBoarding() noexcept;   // after CheckHeliProfile and InstallJets (the board button, the addBody hook)
+void ResetBoarding() noexcept;
+// While the boarding gun presses the board button for the player: the one vehicle a seat may be found in (crew.cpp
+// FindSeatHook gives none in any other), else null.
+const void* BoardingOnly() noexcept;
 void PlayerJetFrame(unsigned char* vehicle) noexcept;   // from every vehicle's input hook, after the stock step
 // The jet the player flies now, for its cockpit readout (hud.cpp): game thread. False with none.
 // The cockpit readout (hud.cpp): load in g; stall: all the wing gives is too little to hold its path; stores: what it
@@ -364,7 +377,8 @@ struct PlayerJetReadout {
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
-namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;
+namespace jet { bool SpawnReady() noexcept; bool PassThrough() noexcept;   // jet_hooks.cpp: the addBody hook is in
+ bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept;
 // jet.cpp: the jets locking on to `target` lose their lock with `chance` each (a flare drop); how many did
 int BreakLocks(const void* target,float chance) noexcept; }
 // missile.cpp: a guided round now homing on a point within `radius` m of `at` (its lock point there)

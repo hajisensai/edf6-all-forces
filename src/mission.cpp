@@ -57,6 +57,7 @@ void MissionStart() noexcept {
     ResetBoosters();
     ResetShields();
     ResetPlayerJets();
+    ResetBoarding();
     ResetSubs();
     ResetLaser();
     ResetHud();

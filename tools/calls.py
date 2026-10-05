@@ -38,11 +38,15 @@ class Call:
     jet: str = ''
     # ...or the pylib/vcobjects.py GROUND_VEHICLES entry it brings (a vehicle request of a ground vehicle; `mark` 0).
     ground: str = ''
+    # ...or (brings 'gun') a hand weapon made from this stock weapon row (its SGO, row and texts): the boarding gun,
+    # a KFF 50 LS (laser sight, scope) whose rounds put the player into the vehicle they hit (src/boarding.cpp);
+    # `mark` is then its bullets' tag (call_weapons.gun_sgo), `reload` 0 (the template's own).
+    gun: str = ''
 
     @property
     def flown(self) -> bool:
-        """The plugin launches what it brings at the call (kCalls); a vehicle request is the game's own."""
-        return self.brings != 'vehicle'
+        """The plugin launches what it brings at the call (kCalls); a vehicle request is the game's own, a gun is no call."""
+        return self.brings in ('jets', 'helis', 'sub')
 
     @property
     def modal(self) -> bool:
@@ -90,6 +94,8 @@ CALLS: tuple[Call, ...] = (
     # Appended 2026-10-05: the self-propelled artillery (tools/make_artillery.py), requested like the Kepler.
     Call('EDF6VC_CALL_ARTILLERY', 0, 'artillery', False, 0, 8000, 1.2, 'vehicle', vehicle='EDF6VC_ARTILLERY',
          ground='artillery'),
+    # Appended 2026-10-05: the boarding gun (src/boarding.cpp), a Ranger sniper rifle; no call, a row like the calls'.
+    Call('EDF6VC_CALL_BOARDING_GUN', 7301, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='aWeapon081'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -104,6 +110,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     '0.7.1 (the gunship after the player jets)': IDS[:21],
     'Katyusha (2026-10-05)': IDS[:22],
     'artillery (2026-10-05)': IDS[:23],
+    'boarding gun (2026-10-05)': IDS[:24],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -129,6 +136,18 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'boarding_gun': {
+        'SC': ('登车狙击枪', '装有激光瞄准器和 5.5 倍狙击镜的狙击枪。子弹打中己方载具时不造成伤害，而是让你立刻坐进那台载具'
+                        '（优先驾驶座；NPC 驾驶的载具，NPC 挪到副座或下车）。对敌人照常造成伤害。'),
+        'CN': ('登車狙擊槍', '裝有雷射瞄準器和 5.5 倍狙擊鏡的狙擊槍。子彈打中己方載具時不造成傷害，而是讓你立刻坐進那台載具'
+                        '（優先駕駛座；NPC 駕駛的載具，NPC 挪到副座或下車）。對敵人照常造成傷害。'),
+        'JA': ('搭乗狙撃銃', 'レーザーサイトと 5.5 倍スコープ付きの狙撃銃。味方のビークルに命中すると、ダメージを与えずに'
+                        'そのビークルへ即座に搭乗する（運転席を優先。NPC が運転中なら NPC は副座へ移るか降車する）。'
+                        '敵には通常どおりダメージを与える。'),
+        'EN': ('Boarding Rifle', 'A sniper rifle with a laser sight and a 5.5x scope. A round that hits a friendly '
+                                 'vehicle does it no harm and puts you in it at once (the driver seat first; an NPC '
+                                 'driver moves to a gunner seat or gets off). It hurts enemies as usual.'),
+    },
     'artillery': {
         'SC': ('自行榴弹炮', '请求一辆自行榴弹炮：E551 的炮塔装着武装巴尔加的两门大炮，自动瞄准地面目标，每次曲射两发大范围高爆弹。装填较慢。'),
         'CN': ('自行榴彈砲', '請求一輛自行榴彈砲：E551 的砲塔裝著武裝巴爾加的兩門大砲，自動瞄準地面目標，每次曲射兩發大範圍高爆彈。裝填較慢。'),
@@ -258,7 +277,12 @@ GROUND_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew と EDF6AutoTurret のプラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew and EDF6AutoTurret plugins and the vehicle files the installer writes.',
 }
-
+GUN_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的 ＫＦＦ５０ＬＳ 狙击枪。',
+    'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的 ＫＦＦ５０ＬＳ 狙擊槍。',
+    'JA': 'EDF6VehicleCrew プラグインが必要。未導入時は通常のＫＦＦ５０ＬＳ狙撃銃になる。',
+    'EN': 'Needs the EDF6VehicleCrew plugin; without it this is a plain KFF 50 LS sniper rifle.',
+}
 
 
 RETIRED_NOTE: dict[str, tuple[str, str]] = {   # an uninstalled call's row: (name suffix, description)
@@ -285,6 +309,8 @@ def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
     if call.brings == 'vehicle':
         return KINDS[call.kind][lang][1] + '\n\n' + (GROUND_NOTES if call.ground else VEHICLE_NOTES)[lang]
+    if call.brings == 'gun':
+        return KINDS[call.kind][lang][1] + '\n\n' + GUN_NOTES[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

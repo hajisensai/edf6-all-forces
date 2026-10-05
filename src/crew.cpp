@@ -338,6 +338,8 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     EnsureInputs();   // the board button in the first mission (with no prompt hook nor mission start hooked)
     const int cls=ClassOf(vehicle);
     const FindSeatFn originalFindSeat=cls>=0 && originalFindSeat_[cls] ? originalFindSeat_[cls] : reinterpret_cast<FindSeatFn>(image+kFindSeat);
+    // The boarding gun's press (boarding.cpp): the vehicle its round hit, no other the visitor comes to first.
+    if(const void* only=BoardingOnly(); only && only!=vehicle)return nullptr;
     auto seat=originalFindSeat(vehicle,human);
     if(seat || !Cfg().enabled || !Cfg().bump || BumpSuppressed())return seat;
     __try {
@@ -456,9 +458,9 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // The per-frame steps, each under its own guard: a fault in one (logged per step at most every kFaultLogMs,
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
-            kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepCount };
+            kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepBoarding, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
-                                          "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view"};
+                                          "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","boarding"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -581,6 +583,7 @@ void FrameTick() noexcept {
     GuardedTick(kStepUnderground,&BigWorldProbe);
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
     GuardedTick(kStepView,&ViewTick);
+    GuardedTick(kStepBoarding,&BoardingTick);
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
@@ -674,4 +677,5 @@ void ResetCrew() noexcept {
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
 }
+int VehicleClassOf(const void* object) noexcept { return ClassOf(object); }
 }  // namespace crew

@@ -86,6 +86,10 @@ void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
     bool through=false;
     __try { through=ShieldLetsThrough(collector,body); } __except(FaultLog("SHIELD round",GetExceptionInformation())) { through=false; }
     if(through)return;
+    // A boarding gun's round at a vehicle (boarding.cpp): it passes through, the player boards it next frame.
+    bool board=false;
+    __try { board=BoardingCandidate(collector,body); } __except(FaultLog("BOARDING round",GetExceptionInformation())) { board=false; }
+    if(board)return;
     bool pass=false;
     if(flown.load(std::memory_order_relaxed)) {
         const void* owner=nullptr;
