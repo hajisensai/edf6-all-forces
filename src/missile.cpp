@@ -59,6 +59,21 @@ bool guideOk=false;
 // The entry of round `b` (`age` frames old): its own while it was guided last frame at a younger age; a new round at
 // that address (younger than the entry, or the entry stale) starts afresh in that entry, so no address has two. A
 // new address takes a free or stale entry, else the least recently guided.
+}  // namespace
+
+// A round guided this frame or the last whose lock point (Round::last) is within `radius` of `at`: a missile coming
+// for whatever is there (the player's missile warning, playerjet.cpp).
+bool MissileHoming(const float* at,float radius) noexcept {
+    const ULONGLONG frame=GameFrame();
+    for(const auto& r:rounds) {
+        if(!r.b || !r.seen || frame-r.frame>1)continue;
+        const float d[3]={r.last[0]-at[0],r.last[1]-at[1],r.last[2]-at[2]};
+        if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]<radius*radius)return true;
+    }
+    return false;
+}
+
+namespace {
 Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept {
     Round* free=nullptr;
     for(auto& r:rounds) {

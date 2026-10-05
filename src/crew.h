@@ -346,6 +346,7 @@ struct PlayerJetReadout {
     float rotate;                // m/s: the speed it can lift off from (the kind's rotate), for the takeoff cue
     bool air,stall,ground,keys,aiming;   // ground: there is ground under it (clear is its height over it), not on it
     bool pullUp;                 // in the air and about to hit the ground or what stands on it (PullUpNeeded)
+    int threat;                  // 2 a missile homing on it, 1 an enemy's missile lock on it, 0 none
     float aim[3],path[3];
     int stores,store;
     const char* storeName[6];
@@ -358,7 +359,9 @@ struct PlayerJetReadout {
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 void PlayerEjectTick() noexcept;   // playerjet.cpp: the player's ejection and parachute, a frame
 void PreloadPlayerJets() noexcept; // playerjet.cpp: at a mission's start, the player jets' SGOs (the catch)
-namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; }
+namespace jet { bool SpawnReady() noexcept; bool ModFileThere(const wchar_t* file) noexcept; bool LockingOn(const void* target) noexcept; }
+// missile.cpp: a guided round now homing on a point within `radius` m of `at` (its lock point there)
+bool MissileHoming(const float* at,float radius) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for

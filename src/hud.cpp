@@ -531,6 +531,8 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     const bool rolling=!j.air && j.rotate>0.0f && j.speed>1.0f,rotate=rolling && j.speed>=j.rotate;
     wchar_t cue[64]=L"";
     if(j.pullUp)std::swprintf(cue,64,L"    PULL UP! TERRAIN");
+    else if(j.threat==2)std::swprintf(cue,64,L"    MISSILE!");
+    else if(j.threat==1)std::swprintf(cue,64,L"    LOCKED");
     else if(rotate)std::swprintf(cue,64,L"    ROTATE: PULL UP (W / SPACE)");
     else if(rolling && j.speed>=j.rotate*0.7f)std::swprintf(cue,64,L"    ROTATE AT %d km/h",rotateKmh);
     Format(thr,L"THROTTLE %d%%    G %.1f%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"",cue);
@@ -559,7 +561,8 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     // The rotate cue blinks green (4 Hz) over the throttle line's cyan; the pull-up warning red and white (8 Hz).
     const bool blink=(GetTickCount64()/125)%2==0;
     thr.scale=kLineScale;
-    thr.rgba=j.pullUp ? (blink ? kRed : kWhite) : j.stall ? kRed : rotate && blink ? kGreen : rotate ? kYellow : kCyan;
+    thr.rgba=j.pullUp || j.threat==2 ? (blink ? kRed : kWhite) : j.threat==1 ? kYellow : j.stall ? kRed :
+             rotate && blink ? kGreen : rotate ? kYellow : kCyan;
     arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kWhite;
     keys.scale=keys2.scale=kLineScale*0.85f;keys.rgba=keys2.rgba=kWhite;
     info.w=info.h=thr.w=thr.h=arms.w=arms.h=keys.w=keys.h=keys2.w=keys2.h=0.0f;
