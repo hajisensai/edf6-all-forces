@@ -135,6 +135,7 @@ void Validate(Config& n) noexcept {
     n.centipedeLinkMax=static_cast<int>(FixInt("CentipedeLinkMax",n.centipedeLinkMax,2,48));
     Fix("CentipedeLinkRange",n.centipedeLinkRange,10.0f,2000.0f);
     Fix("CentipedeWoundDamage",n.centipedeWoundDamage,1.0f,20.0f);
+    Fix("PrimerBlood",n.primerBlood,0.0f,5.0f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -227,6 +228,7 @@ void LoadConfig() noexcept {
     n.centipedeLinkMax=ReadInt(L"CentipedeLinkMax",static_cast<DWORD>(n.centipedeLinkMax));
     n.centipedeLinkRange=ReadFloat(L"CentipedeLinkRange",n.centipedeLinkRange);
     n.centipedeWoundDamage=ReadFloat(L"CentipedeWoundDamage",n.centipedeWoundDamage);
+    n.primerBlood=ReadFloat(L"PrimerBlood",n.primerBlood);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -240,8 +242,8 @@ void LoadConfig() noexcept {
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
-    Log("CONFIG primer=%d hpScale=%.2f fire=%d trace=%d centipede linkMax=%d linkRange=%.0f woundDamage=%.1f",n.primer,n.primerHpScale,
-        n.primerFire,n.primerTrace,n.centipedeLinkMax,n.centipedeLinkRange,n.centipedeWoundDamage);
+    Log("CONFIG primer=%d hpScale=%.2f fire=%d trace=%d centipede linkMax=%d linkRange=%.0f woundDamage=%.1f blood=%.2f",n.primer,
+        n.primerHpScale,n.primerFire,n.primerTrace,n.centipedeLinkMax,n.centipedeLinkRange,n.centipedeWoundDamage,n.primerBlood);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,

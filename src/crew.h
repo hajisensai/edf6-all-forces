@@ -92,6 +92,7 @@ struct Config {
     int centipedeLinkMax=24;   // ...the most centipedes (one segment each) linked into one (2-48)
     float centipedeLinkRange=150.0f;// ...m a centipede goes to join another's tail from
     float centipedeWoundDamage=3.0f;// ...a split's headless front takes this many times the damage until its head is back
+    float primerBlood=1.0f;         // ...their blood splash (hit and death) times the giant ant's size; 0: none
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.

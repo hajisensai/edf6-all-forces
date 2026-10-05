@@ -55,6 +55,24 @@ constexpr float kSpitReach=400.0f,kSpitCone=0.12f;
 constexpr float kBarbReach=300.0f,kBarbCone=0.1f;
 constexpr float kStingSpeed=90.0f,kStingReach=520.0f,kStingMost=1.25f,kStingCone=0.1f,kGravityLob=14.7f;
 // A writhing one's nose swings kWritheYaw rad each way at kWritheYawHz.
+// The blood (爆浆): the stock insects' splash, the global EffectGenUtil's (its pointer at kEffectGen, made at the
+// game's start, its textures app:/Effect/basic.rab, there in every mission), called as the giant ant calls it
+// (docs/primer-plan.md 爆浆): kBloodHit at a hit's point (scale min(4, damage x 0.1): the ant's, its BloodScale 1),
+// kBloodBurst along the body and kBloodPool under it on death. It makes objects in the object manager and draws on
+// a global random number: called only from a creature's frame (the game's update), never from the physics step
+// or the damage message, which only note the hit.
+constexpr std::size_t kEffectGen=0x20B2980,kObjectMgr=0x20B2958;
+constexpr unsigned kBloodHit=0x2E5680,kBloodBurst=0x2E1090,kBloodPool=0x2E5BB0,kBloodTexLea=0x2E57E9,kBloodTex=0x17A82B8;
+const unsigned char kBloodHitSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
+const unsigned char kBloodBurstSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x70,0x10,0x48,0x89,0x78,0x18,0x55};
+const unsigned char kBloodPoolSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x78,0x10,0x55,0x48,0x8D,0x68,0xC8};
+struct BloodHitParams { float sizeMul; std::uint8_t spray,useAttackDir,pad[2]; float sprayCap; };
+using BloodHitFn=void(__fastcall*)(void*,const float*,const float*,const float*,const float*,const float*,float,const BloodHitParams*);
+using BloodBurstFn=void(__fastcall*)(void*,const float*,const float*,const float*,float);
+using BloodPoolFn=void(__fastcall*)(void*,const float*,const float*,float);
+// The giant ant's acid (0x17BC080; its alpha the splash's x8), a dragonfly's greener.
+alignas(16) constexpr float kCentipedeBlood[4]={0.675f,0.525f,0.10f,0.125f},kDragonflyBlood[4]={0.35f,0.70f,0.15f,0.125f};
+constexpr float kBloodHitMax=4.0f,kBloodHitPerDamage=0.1f,kBloodHitMin=0.01f,kBloodBurstScale=5.0f,kBloodPoolScale=2.0f;
 constexpr float kWritheYaw=0.45f,kWritheYawHz=1.7f;
 // Its weapon holders (vcobjects JETS: [0, 1] the spit on its head, fired by veh+0x2020; [2] the stinger, by
 // +0x2021; [3] the barbs, which no stock byte fires: its weapon's own trigger, as stores.cpp TriggerStore's).
@@ -179,6 +197,58 @@ void AimPart(Jet& j,const unsigned char* v,int k,const float* dir) noexcept {
     alignas(16) float out[16];
     primer::AimLocal(s.poseBind[k],local,out);
     std::memcpy(s.poseRec[k]+kBoneLocal506,out,64);
+}
+
+// The splash functions, checked once (their heads, and the hit's texture name where its lea r8 reads it);
+// nullptr: not this game build, no blood (logged once).
+void* BloodFx() noexcept {
+    static int ok=-1;
+    if(ok<0) {
+        std::int32_t rel=0;
+        const bool lea=Readable(image+kBloodTexLea,7) && (image[kBloodTexLea]&0xFB)==0x48 && image[kBloodTexLea+1]==0x8D &&
+                       (std::memcpy(&rel,image+kBloodTexLea+3,4),kBloodTexLea+7+rel==kBloodTex);
+        ok=Matches(kBloodHit,kBloodHitSig,sizeof(kBloodHitSig)) && Matches(kBloodBurst,kBloodBurstSig,sizeof(kBloodBurstSig)) &&
+           Matches(kBloodPool,kBloodPoolSig,sizeof(kBloodPoolSig)) && lea ? 1 : 0;
+        Log(ok ? "PRIMER blood: the insects' splash found" : "PRIMER blood: the insects' splash not as expected: no blood");
+    }
+    if(!ok || !Cfg().primerBlood)return nullptr;
+    void* const fx=At<void*>(image,kEffectGen);
+    return fx && At<void*>(image,kObjectMgr) ? fx : nullptr;
+}
+
+const float* BloodColour(const Jet& j) noexcept { return IsCentipede(j) ? kCentipedeBlood : kDragonflyBlood; }
+
+// The hits it took since its last frame (PrimerMessage noted them): one splash at the last one's point, as big as
+// their damage, out from its body.
+void BleedHits(Jet& j,unsigned char* v,const float* pos) noexcept {
+    PrimerState& s=j.primer;
+    const float damage=s.bloodDamage;
+    s.bloodDamage=0.0f;
+    void* const fx=damage>0.0f ? BloodFx() : nullptr;
+    if(!fx)return;
+    const float scale=std::fmin(kBloodHitMax,damage*kBloodHitPerDamage)*Cfg().primerBlood;
+    if(scale<kBloodHitMin)return;
+    alignas(16) float at[4]={s.bloodAt[0],s.bloodAt[1],s.bloodAt[2],1.0f},out[4]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2],0.0f};
+    if(!Normalize(out)){out[0]=0.0f;out[1]=1.0f;out[2]=0.0f;}
+    const BloodHitParams p{1.0f,1,0,{0,0},500.0f};
+    reinterpret_cast<BloodHitFn>(image+kBloodHit)(fx,at,out,out,reinterpret_cast<const float*>(v+kMatrix),BloodColour(j),scale,&p);
+}
+
+// Its death: bursts out of it (up, to each side, back) and a pool under it, as the ant's (bursts at its bones,
+// DeathBloodScale x5; the pool x2).
+void BleedOut(const Jet& j,const unsigned char* v) noexcept {
+    void* const fx=BloodFx();
+    if(!fx)return;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    const float k=Cfg().primerBlood*(IsCentipede(j) ? 1.0f : 1.5f);
+    const float dirs[4][3]={{m[4],m[5],m[6]},{m[0],m[1],m[2]},{-m[0],-m[1],-m[2]},{-m[8],-m[9],-m[10]}};
+    for(const auto& d:dirs) {
+        alignas(16) const float at[4]={p[0]+d[0]*0.8f,p[1]+d[1]*0.8f,p[2]+d[2]*0.8f,1.0f},dir[4]={d[0],d[1],d[2],0.0f};
+        reinterpret_cast<BloodBurstFn>(image+kBloodBurst)(fx,at,dir,BloodColour(j),kBloodBurstScale*k);
+    }
+    alignas(16) const float at[4]={p[0],p[1],p[2],1.0f};
+    reinterpret_cast<BloodPoolFn>(image+kBloodPool)(fx,at,BloodColour(j),kBloodPoolScale*k);
 }
 
 // Holder `i`'s weapon of its seat 0 (vcobjects JETS order), or nullptr.
@@ -683,10 +753,15 @@ void PrimerTeam(unsigned char* v) noexcept {
 bool PrimerMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept {
     constexpr std::size_t kDamage=0x50;
     if(msg!=kMsgDamage || !data || !Cfg().enabled || !Cfg().primer || v[kDead])return false;
-    const jet::Jet* const j=jet::FindJet(v);
-    if(!j || j->role!=jet::Role::centipede || !j->primer.regrowAt || Cfg().centipedeWoundDamage==1.0f)return false;
+    constexpr std::size_t kHitPoint=0x30;   // the round's point of impact or the blast's centre (docs/subcarrier-re.md §8.1)
+    jet::Jet* const j=jet::FindJet(v);
+    if(!j || !jet::IsPrimer(*j))return false;
     float* const damage=reinterpret_cast<float*>(static_cast<unsigned char*>(data)+kDamage);
     if(!(*damage>0.0f))return false;   // healing, or nothing
+    // the hit, for its frame's splash (BleedHits: not from here, the message is no place to make objects)
+    std::memcpy(j->primer.bloodAt,static_cast<unsigned char*>(data)+kHitPoint,12);
+    j->primer.bloodDamage+=*damage;
+    if(j->role!=jet::Role::centipede || !j->primer.regrowAt || Cfg().centipedeWoundDamage==1.0f)return false;
     restore->at=damage;restore->was=*damage;
     *damage*=Cfg().centipedeWoundDamage;
     return false;
@@ -702,6 +777,7 @@ void PrimerFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms)
     if(!j.primer.init)Init(j,v,pos,ms);
     else PrimerTeam(v);
     j.m.ready=true;
+    BleedHits(j,v,pos);
     if(IsCentipede(j))CentipedeFrame(j,v,pos,dt,ms);
     else DragonflyFrame(j,v,pos,dt,ms);
     Trace(j,pos,v,ms);
@@ -733,7 +809,9 @@ void Bury(Corpse& c) noexcept {
 
 bool PrimerDied(const Jet& j) noexcept {
     const PrimerState& s=j.primer;
-    if(!IsCentipede(j) || !Alive(j.ref) || !j.Vehicle()[kDead] || !s.posed)return false;
+    if(!Alive(j.ref) || !j.Vehicle()[kDead])return false;
+    BleedOut(j,j.Vehicle());   // Release runs from the update (Sweep): the game's thread
+    if(!IsCentipede(j) || !s.posed)return false;
     Corpse* slot=nullptr;
     for(auto& c:corpses)if(!c.ref.obj || !Alive(c.ref)){if(c.ref.obj)Bury(c);slot=&c;break;}
     if(!slot)return false;   // as many falling as that: this one falls stiff

@@ -353,6 +353,7 @@ struct PrimerState {
     ULONGLONG regrowAt;      // a split's new front: game ms its head began to grow back (0: not growing)
     ULONGLONG tailAt;        // ...a split's new end: game ms its tail began to grow back (0: not growing)
     float writheFace[3];     // writhing: the way it pointed when it began (Writhe swings it about that)
+    float bloodAt[3],bloodDamage;   // hits since its last frame (PrimerMessage): the last one's point, their damage
     float headShown,tailShown;   // how much of its head / tail showed last frame (a corpse keeps them)
     const char* what;        // what it did this frame, and what it fired (Debug, Trace: 1 spit, 2 stinger, 4 barbs)
     int fired;
