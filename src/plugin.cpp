@@ -151,17 +151,22 @@ void Validate(Config& n) noexcept {
     Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
 }
 
-// The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
-// the keys ignored (said once).
+constexpr const char* kGainsFixed="the flight controller's gains are fixed";
+// Keys no longer read: an old ini that still sets them loads as before, the keys ignored (said once). The flight
+// controller's gains became constants (heli.cpp); the heli's mouse lever (HeliMousePitch) became the mouse-aim flight
+// (HeliMouseAim, heliaim.h).
 void IgnoreRetired() noexcept {
-    static const wchar_t* const kRetired[]={L"HeliMoveGain",L"HeliBrakeGain",L"HeliClimbGain",L"HeliHoverLearn"};
-    static bool said[4]{};
-    for(int i=0;i<4;++i) {
+    struct Retired { const wchar_t* key; const char* why; };
+    static const Retired kRetired[]={{L"HeliMoveGain",kGainsFixed},{L"HeliBrakeGain",kGainsFixed},{L"HeliClimbGain",kGainsFixed},
+                                     {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"}};
+    constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
+    static bool said[kCount]{};
+    for(int i=0;i<kCount;++i) {
         wchar_t text[8]{};
-        GetPrivateProfileStringW(L"VehicleCrew",kRetired[i],L"",text,8,iniPath);
+        GetPrivateProfileStringW(L"VehicleCrew",kRetired[i].key,L"",text,8,iniPath);
         if(!text[0] || said[i])continue;
         said[i]=true;
-        Log("CONFIG %ls is no longer read (the flight controller's gains are fixed): ignored",kRetired[i]);
+        Log("CONFIG %ls is no longer read (%s): ignored",kRetired[i].key,kRetired[i].why);
     }
 }
 
@@ -238,7 +243,7 @@ void LoadConfig() noexcept {
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
-    n.heliMousePitch=ReadBool(L"HeliMousePitch",n.heliMousePitch);
+    n.heliMouseAim=ReadBool(L"HeliMouseAim",n.heliMouseAim);
     n.jetEntrySmoke=ReadBool(L"JetEntrySmoke",n.jetEntrySmoke);
     n.playerJetGunSight=ReadBool(L"PlayerJetGunSight",n.playerJetGunSight);
     n.playerJetFlightHud=ReadBool(L"PlayerJetFlightHud",n.playerJetFlightHud);
@@ -269,7 +274,7 @@ void LoadConfig() noexcept {
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.1f missile=%d/%lums landMs=%lu",
         n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
-    Log("CONFIG playerHeliStopSec=%.2f gunSight=%d",n.playerHeliStopSec,n.playerHeliGunSight);
+    Log("CONFIG playerHeliStopSec=%.2f gunSight=%d mouseAim=%d",n.playerHeliStopSec,n.playerHeliGunSight,n.heliMouseAim);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
