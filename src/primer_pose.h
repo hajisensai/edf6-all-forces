@@ -15,7 +15,9 @@
 //     half also bends toward the one ahead and the rear half toward the one behind (LinkBend), so a long one
 //     curves as one body instead of a row of straight ones with gaps on the outside of its turns;
 //   head / tail: shrunk to their joints (kHidden) when it is linked into a longer creature, so that one shows a
-//     single head at its front and a single tail at its end.
+//     single head at its front and a single tail at its end. Split, they grow back (GrowScale: over kRegrowSec for
+//     the head of the part behind, half that for the tail of the part ahead, ending with a small overshoot), and
+//     while the head grows the headless part writhes (`writhe`: its legs and its S-wave faster and wider).
 // Plain math, no game memory: header only, so the simulator compiles it unchanged.
 #pragma once
 #include <cmath>
@@ -86,6 +88,18 @@ constexpr float kStride=2.2f,kStepMin=0.8f,kStepMax=4.0f,kLegSwing=24.0f,kLegAir
 // Body: kWave deg (kWaveAir in the air) at kWaveHz, each joint kWaveLag rad behind (front +, rear the S's other way).
 constexpr float kWave=7.0f,kWaveAir=4.0f,kWaveHz=0.9f,kWaveLag=0.9f;
 constexpr float kHidden=0.02f;   // a hidden head / tail's scale
+// s a split's new front takes to grow its head back (primer.cpp holds it out of the fight meanwhile); its new
+// tail's at the other side, kTailRegrowShare of that. Writhing, the S-wave and the legs' swing are (1 + kWritheWave /
+// kWritheLegs x writhe) times as wide and the legs kWritheStep times as quick at most.
+constexpr float kRegrowSec=2.5f,kTailRegrowShare=0.5f,kWritheWave=2.0f,kWritheLegs=1.0f,kWritheStep=3.0f;
+
+// A head's / tail's scale grown `grown` (0: hidden, 1: whole) of the way back: an ease-out that overshoots ~10%
+// before it settles (the part pops out of the joint).
+inline float GrowScale(float grown) {
+    const float g=grown<0.0f ? 0.0f : grown>1.0f ? 1.0f : grown,u=g-1.0f;
+    const float e=1.0f+2.70158f*u*u*u+1.70158f*u*u;   // back-out easing
+    return kHidden+(1.0f-kHidden)*e;
+}
 constexpr float kMaxBend=0.7f;   // rad a half of it bends toward a neighbour at most
 
 // The bend (rad about y, + toward its right) that turns a half pointing `along` its body (+: the way it points)
@@ -96,35 +110,37 @@ inline float LinkBend(float right,float along) {
     return a>kMaxBend ? kMaxBend : a<-kMaxBend ? -kMaxBend : a;
 }
 
-// Seconds of game time; m/s it moves; in the air; linked behind another (its head hidden) / before one (its tail);
-// its halves' bends toward its neighbours (LinkBend; 0: none).
-struct CentipedeInput { float t,speed; bool flying,hideHead,hideTail; float bendFront,bendRear; };
+// Seconds of game time; m/s it moves; in the air; how much of its head and of its tail shows (0: hidden behind
+// another / before one, 1: whole; between: growing back, GrowScale); its halves' bends toward its neighbours
+// (LinkBend; 0: none); how hard it writhes (0..1: a split's headless part while its head grows).
+struct CentipedeInput { float t,speed; bool flying; float head,tail,bendFront,bendRear,writhe; };
 
 // Each part's angle (rad) and scale, kCentipedeBones order; `phase`: the legs' step phase (rad), stepped by
 // CentipedeStep so its frequency can change without a jump.
 inline void CentipedeAngles(const CentipedeInput& in,float phase,float* angle,float* scale) {
     const float two=2.0f*kPi;
     for(int i=0;i<kCentipedeBoneCount;++i){angle[i]=0.0f;scale[i]=1.0f;}
-    const float wave=in.flying ? kWaveAir : kWave;
+    const float wave=(in.flying ? kWaveAir : kWave)*(1.0f+kWritheWave*in.writhe);
     const float w=two*kWaveHz*in.t;
     angle[kSegF1]=wave*std::sin(w)*kDeg+in.bendFront*0.5f;
     angle[kSegF2]=wave*std::sin(w-kWaveLag)*kDeg+in.bendFront*0.5f;
     angle[kSegB1]=-wave*std::sin(w+kWaveLag)*kDeg+in.bendRear*0.5f;
     angle[kSegB2]=-wave*std::sin(w+2.0f*kWaveLag)*kDeg+in.bendRear*0.5f;
-    const float swing=in.flying ? kLegAir : kLegSwing;
+    const float swing=(in.flying ? kLegAir : kLegSwing)*(1.0f+kWritheLegs*in.writhe);
     for(int s=0;s<kLegSegments;++s) {
         const float p=phase-two*kLegLag*static_cast<float>(s);
         angle[kLeg0+2*s]=swing*std::sin(p)*kDeg;            // left
         angle[kLeg0+2*s+1]=swing*std::sin(p+kPi)*kDeg;      // right: the other half of the step
     }
-    if(in.hideHead)scale[kHead]=kHidden;
-    if(in.hideTail)scale[kTail]=kHidden;
+    scale[kHead]=in.head>=1.0f ? 1.0f : GrowScale(in.head);
+    scale[kTail]=in.tail>=1.0f ? 1.0f : GrowScale(in.tail);
 }
 
 // The legs' phase after `dt` s at `in`'s speed.
 inline float CentipedeStep(float phase,const CentipedeInput& in,float dt) {
     float hz=in.flying ? kAirStepHz : in.speed/kStride;
     hz=hz<kStepMin ? kStepMin : hz>kStepMax ? kStepMax : hz;
+    hz*=1.0f+(kWritheStep-1.0f)*in.writhe;
     phase+=2.0f*kPi*hz*dt;
     return phase>200.0f*kPi ? phase-200.0f*kPi : phase;
 }

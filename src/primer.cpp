@@ -8,8 +8,11 @@
 //    a joined one follows the trail the one ahead of it leaves, kLinkSpacing behind it (its head and the one
 //    ahead's tail hidden, so the whole shows one head and one tail). Two or more take off: the long form flies,
 //    winds round the player and now and then dives through, every link spitting when it faces them; more can
-//    join it (at most CentipedeLinkMax). One shot out of the middle splits it there: the part behind gets a head
-//    again (its new front), and one left alone comes down to crawl.
+//    join it (at most CentipedeLinkMax). One shot out of the middle splits it there: the part behind has no head
+//    for a while: its new front writhes, slows and sinks, out of the fight (no fire, no joining), while its head grows
+//    back over kRegrowSec (src/primer_pose.h GrowScale), then it is a front again (one left alone comes down to
+//    crawl); the part ahead grows its tail back in half that, fighting on. Until its head is back the headless one
+//    is a wound: every hit on it does CentipedeWoundDamage times the damage (PrimerMessage).
 // PrimerTrace=1 writes a line every kTraceMs per creature into Mods/Plugins/EDF6VehicleCrew.primer.csv (Trace):
 // its flight and fight as the game ran them, for tools/primer_trace_view.py to draw.
 //  - The dragonfly (EDF6VC_DRAGONFLY, mark 7013): an air superiority fighter that hunts as a dragonfly does. It
@@ -46,7 +49,8 @@ constexpr float kFollowGain=3.0f,kFollowCatch=40.0f,kFollowTop=80.0f;
 // m from its link point it links; m/s at least on its way there; m from it on it rides along with the tail.
 constexpr float kJoinAt=4.0f,kJoinSpeed=28.0f,kJoinRide=40.0f;
 constexpr ULONGLONG kLookMs=1000;
-constexpr float kSpitReach=400.0f,kSpitCone=0.12f;   // pylib/vcobjects.py PRIMER_GUN_FILES: 3.5 x 120 m
+constexpr float kSpitReach=400.0f,kSpitCone=0.12f;
+constexpr float kWritheDrag=1.2f,kWritheSink=4.0f;   // a headless front: 1/s of its speed lost, m/s it sinks   // pylib/vcobjects.py PRIMER_GUN_FILES: 3.5 x 120 m
 // The dragonfly.
 constexpr float kHuntSpeed=85.0f,kDartSpeed=95.0f,kStrikeRange=260.0f,kStandoff=140.0f,kBelow=25.0f,kAbove=30.0f,
                 kBehind=60.0f,kDartDist=350.0f,kHuntClear=15.0f;
@@ -279,6 +283,17 @@ void Follow(Jet& j,const float* pos,const float* goal,const float* with) noexcep
     if(s>kFollowTop)for(int i=0;i<3;++i)j.m.vel[i]*=kFollowTop/s;
 }
 
+// A split's headless new front (while its head grows back): its way off (kWritheDrag a second of its speed lost),
+// in the air sinking at kWritheSink, its nose kept where it points.
+void Writhe(Jet& j,const float* pos,float dt,float* face) noexcept {
+    const float keep=std::exp(-kWritheDrag*dt);
+    j.m.vel[0]*=keep;j.m.vel[2]*=keep;
+    j.m.vel[1]=j.primer.flying ? -kWritheSink : j.m.vel[1]*keep;
+    const float* m=reinterpret_cast<const float*>(j.Vehicle()+kMatrix);
+    face[0]=m[8];face[1]=0.0f;face[2]=m[10];
+    (void)pos;
+}
+
 // A lone one on the ground: at the player in a weave, round them close; its nose on them once near.
 void Crawl(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* aim,bool hasAim,float dt,ULONGLONG ms,float* face) noexcept {
     PrimerState& s=j.primer;
@@ -339,18 +354,26 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     float aim[3];
     const bool hasAim=PlayerAim(aim,ms);
     Jet* ahead=Centipede(s.ahead);
-    if(s.ahead && !ahead) {
-        // A front again: its winding starts from where it is (what it held from its first frame is stale).
-        s.ahead=nullptr;
-        float at[3];
-        if(PlayerAim(at,ms))s.orbit=std::atan2(pos[2]-at[2],pos[0]-at[0]);
-        s.dive=false;s.diveAt=ms;
-        Log("PRIMER v=%p centipede: the one ahead of it is gone: a front again",v);
+    if(s.ahead && !ahead)PrimerUnlinked(j,true,ms);
+    if(s.behind && !Centipede(s.behind))PrimerUnlinked(j,false,ms);
+    // How much of its head and tail shows (src/primer_pose.h): hidden while linked, growing back after a split.
+    const float regrowMs=primer::kRegrowSec*1000.0f;
+    float headShows=s.ahead ? 0.0f : 1.0f,tailShows=s.behind ? 0.0f : 1.0f;
+    if(s.regrowAt) {
+        headShows=static_cast<float>(ms-s.regrowAt)/regrowMs;
+        if(headShows>=1.0f){headShows=1.0f;s.regrowAt=0;Log("PRIMER v=%p centipede: its head has grown back: a front",v);}
     }
-    if(s.behind && !Centipede(s.behind))s.behind=nullptr;
+    if(s.tailAt) {
+        tailShows=static_cast<float>(ms-s.tailAt)/(regrowMs*primer::kTailRegrowShare);
+        if(tailShows>=1.0f){tailShows=1.0f;s.tailAt=0;}
+    }
+    const bool regrowing=s.regrowAt!=0;
     float face[3]={0.0f,0.0f,1.0f};
     const char* what;
-    if(ahead) {                                  // linked: on the trail of the one ahead
+    if(regrowing) {                              // headless: writhing, slowing, sinking; out of the fight
+        Writhe(j,pos,dt,face);
+        what="regrowing";
+    } else if(ahead) {                                  // linked: on the trail of the one ahead
         float goal[3];
         TrailPoint(*ahead,kLinkSpacing,goal);
         Follow(j,pos,goal,ahead->m.vel);
@@ -386,7 +409,7 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     Face(j,v,face);
     // Its parts: the legs' wave at its speed, its head hidden behind another, its tail before one, its halves bent
     // toward them.
-    primer::CentipedeInput in{static_cast<float>(ms%600000)*0.001f,Len(j.m.vel),s.flying,s.ahead!=nullptr,s.behind!=nullptr,0.0f,0.0f};
+    primer::CentipedeInput in{static_cast<float>(ms%600000)*0.001f,Len(j.m.vel),s.flying,headShows,tailShows,0.0f,0.0f,regrowing ? 1.0f-headShows : 0.0f};
     {
         const float* m=reinterpret_cast<const float*>(v+kMatrix);
         const float right[3]={m[0],m[1],m[2]},fwd[3]={m[8],m[9],m[10]};
@@ -405,7 +428,7 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     float angle[primer::kCentipedeBoneCount],scale[primer::kCentipedeBoneCount];
     primer::CentipedeAngles(in,s.phase,angle,scale);
     Pose(j,v,primer::kCentipedeBones,primer::kCentipedeBoneCount,angle,scale);
-    const bool fire=Cfg().primerFire && hasAim && OnTarget(v,pos,aim,kSpitReach,kSpitCone);
+    const bool fire=Cfg().primerFire && !regrowing && hasAim && OnTarget(v,pos,aim,kSpitReach,kSpitCone);
     v[kFireGun]=fire ? 1 : 0;v[kFireMissile]=0;
     s.what=what;s.fired=fire;
     Debug(j,v,what,fire,ms);
@@ -552,6 +575,25 @@ void Trace(Jet& j,const float* pos,const unsigned char* v,ULONGLONG ms) noexcept
 }
 }  // namespace
 
+
+void PrimerUnlinked(Jet& j,bool front,ULONGLONG ms) noexcept {
+    PrimerState& s=j.primer;
+    if(front) {
+        if(!s.ahead)return;
+        // A front again, headless at first (its head grows back: CentipedeFrame); its winding then starts from
+        // where it is (what it held from its first frame is stale).
+        s.ahead=nullptr;s.regrowAt=ms ? ms : 1;s.joining=nullptr;
+        float at[3];
+        const float* pos=reinterpret_cast<const float*>(j.Vehicle()+kPosition);
+        if(PlayerAim(at,ms))s.orbit=std::atan2(pos[2]-at[2],pos[0]-at[0]);
+        s.dive=false;s.diveAt=ms;
+        Log("PRIMER v=%p centipede: the one ahead of it is gone: headless, its head grows back",j.Vehicle());
+    } else {
+        if(!s.behind)return;
+        s.behind=nullptr;s.tailAt=ms ? ms : 1;
+    }
+}
+
 void PrimerTeam(unsigned char* v) noexcept {
     for(unsigned i=0;i<SeatCount(v);++i) {
         unsigned char* const seat=SeatAt(v,i);
@@ -562,6 +604,24 @@ void PrimerTeam(unsigned char* v) noexcept {
     if(!OnEnemySide(v))SetObjectTeam(v,kTeamEnemy);
 }
 
+}  // namespace jet
+
+// Its damage message (body506's hook, before the stock handler): a centipede growing its head back takes
+// CentipedeWoundDamage times the damage (the hit's GameDamageInfo +0x50, docs/subcarrier-re.md §8.1, put back right
+// after the stock handler: that copy is the queue's own). Every other message, and every other jet, as it came.
+bool PrimerMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept {
+    constexpr std::size_t kDamage=0x50;
+    if(msg!=kMsgDamage || !data || !Cfg().enabled || !Cfg().primer || v[kDead])return false;
+    const jet::Jet* const j=jet::FindJet(v);
+    if(!j || j->role!=jet::Role::centipede || !j->primer.regrowAt || Cfg().centipedeWoundDamage==1.0f)return false;
+    float* const damage=reinterpret_cast<float*>(static_cast<unsigned char*>(data)+kDamage);
+    if(!(*damage>0.0f))return false;   // healing, or nothing
+    restore->at=damage;restore->was=*damage;
+    *damage*=Cfg().centipedeWoundDamage;
+    return false;
+}
+
+namespace jet {
 void PrimerFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
     if(!Cfg().primer) {
         if(!j.reap){j.reap=true;j.why="Primer off";}

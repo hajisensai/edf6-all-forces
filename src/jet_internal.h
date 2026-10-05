@@ -329,6 +329,8 @@ struct PrimerState {
     bool posed;              // every part found
     float phase,curl;
     ULONGLONG logAt;
+    ULONGLONG regrowAt;      // a split's new front: game ms its head began to grow back (0: not growing)
+    ULONGLONG tailAt;        // ...a split's new end: game ms its tail began to grow back (0: not growing)
     const char* what;        // what it did this frame, and whether it fired (Debug, Trace)
     bool fired;
     ULONGLONG traceAt;
@@ -512,6 +514,9 @@ constexpr std::int32_t kTeamEnemy=1;
 inline bool IsPrimer(const Jet& j) noexcept { return j.role==Role::centipede || j.role==Role::dragonfly; }
 // Its dummy pilot and then itself on the enemy's team (a vehicle's team is its riders': primer.cpp's head).
 void PrimerTeam(unsigned char* v) noexcept;
+// A centipede lost the one ahead of it (`front`: it is a front again) or the one behind it, shot down: its head (or
+// tail) grows back from now on (primer.cpp). From its own frame, or from Release when the other's entry goes first.
+void PrimerUnlinked(Jet& j,bool front,ULONGLONG ms) noexcept;
 // A Primer creature's frame (from JetFrame, which has set the stock input aside and the clock).
 void PrimerFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept;
 

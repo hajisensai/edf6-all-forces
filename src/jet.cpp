@@ -79,8 +79,8 @@ void Release(Jet& j) noexcept {
     for(auto& d:jets) {
         if(d.ref && d.drone.mother==j.ref.ctrl)d.drone.mother=nullptr;
         // A centipede linked to it: the link goes (the part behind gets a front of its own).
-        if(d.ref && d.primer.ahead==j.ref.ctrl)d.primer.ahead=nullptr;
-        if(d.ref && d.primer.behind==j.ref.ctrl)d.primer.behind=nullptr;
+        if(d.ref && d.primer.ahead==j.ref.ctrl)PrimerUnlinked(d,true,GameMs());
+        if(d.ref && d.primer.behind==j.ref.ctrl)PrimerUnlinked(d,false,GameMs());
         if(d.ref && d.primer.joining==j.ref.ctrl)d.primer.joining=nullptr;
     }
     DropRef(j.ref);

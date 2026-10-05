@@ -92,9 +92,9 @@ def main(argv: list[str]) -> int:
         if i + 1 < a.links:
             d = links[i + 1][0] - p
             rear = -link_bend(float(d @ right), float(-(d @ fwd)), most)
-        head, tail = int(i > 0), int(i + 1 < a.links)
-        rows = primer_pose_view.run(['centipede-state', '15', '1' if a.flying else '0', str(head), str(tail), f'{front:.5f}',
-                                     f'{rear:.5f}', '0.4'], binds)
+        head, tail = ('0' if i > 0 else '1'), ('0' if i + 1 < a.links else '1')   # how much shows: hidden inside it
+        rows = primer_pose_view.run(['centipede-state', '15', '1' if a.flying else '0', head, tail, f'{front:.5f}',
+                                     f'{rear:.5f}', '0', '0.4'], binds)
         v, t, c = model_view.geometry(md, {}, ['@tex'], rows[0][1])
         v4 = np.hstack([v, np.ones((len(v), 1))]) @ m
         vs.append(v4[:, :3])

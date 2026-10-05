@@ -30,7 +30,7 @@ CREATURES = {
     'centipede': ('EDF6VC_CENTIPEDE.MRAB', 'e508_carrier.mdb', 'centipede_model',
                   ('segF1', 'segF2', 'segB1', 'segB2', 'head', 'tail', 'leg_segF2_l', 'leg_segF2_r', 'leg_segF1_l',
                    'leg_segF1_r', 'leg_body_l', 'leg_body_r', 'leg_segB1_l', 'leg_segB1_r', 'leg_segB2_l', 'leg_segB2_r'),
-                  '0,0.15,0.3,3.2,4.5'),
+                  '0,0.15,4.5,5.3,6.0,6.6,7.2,8.0'),
 }
 
 

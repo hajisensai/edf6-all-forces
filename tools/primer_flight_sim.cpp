@@ -7,10 +7,13 @@
 // build/Mods/Plugins/EDF6VehicleCrew.primer.csv; tools/primer_trace_view.py draws it.
 //
 //   primer_flight_sim [--centipedes 6] [--dragonflies 2] [--seconds 90] [--player stand|walk|fly|land]
-//                     [--kill SECONDS:ID ...] [--jets N]
+//                     [--kill SECONDS:ID ...] [--jets N] [--shoot DPS]
 //
 // --kill shoots creature ID (its table index; centipedes first) down at that time (its dead byte: the code sees it
 // as the game's dead body); --jets puts N friendly jets circling the player (the dragonfly's air prey). The player:
+// --shoot DPS: the player fires at the nearest centipede within 300 m, DPS damage a second in hits of 10 frames,
+// each hit going through the plugin's damage message (PrimerMessage: a headless one's wound multiplies it) and then
+// off its HP as the stock handler does; at 0 HP it is down. The player:
 // stand (at the origin), walk (a 60 m circle at 5 m/s), fly (a 300 m circle 80 m up at 40 m/s: flying prey), land
 // (flies until half time, then stands on the ground).
 #include "../src/jet_internal.h"
@@ -55,6 +58,12 @@ bool Alive(const ObjRef& r) noexcept {
     if(!r.obj || !r.ctrl || At<long>(r.ctrl,8)<=0)return false;
     const auto o=static_cast<const unsigned char*>(r.obj);
     return At<const void*>(o,kSelfCtrl)==r.ctrl && !(o[kObjFlags]&kObjDeleted);
+}
+Jet* FindJet(const unsigned char* v) noexcept {
+    if(!v)return nullptr;
+    const void* const ctrl=At<const void*>(v,kSelfCtrl);
+    for(auto& j:jets)if(j.ref.obj==v && j.ref.ctrl==ctrl)return &j;
+    return nullptr;
 }
 void JoinFlight(Jet& j,unsigned flight) noexcept { j.flight=flight; }
 unsigned NewFlight() noexcept { static unsigned next=100;return next++; }
@@ -132,12 +141,14 @@ int main(int argc,char** argv) {
     float seconds=90.0f;
     const char* how="stand";
     std::vector<std::pair<float,int>> kills;
+    float dps=0.0f;
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--centipedes") && a+1<argc)centipedes=std::atoi(argv[++a]);
         else if(!std::strcmp(argv[a],"--dragonflies") && a+1<argc)dragonflies=std::atoi(argv[++a]);
         else if(!std::strcmp(argv[a],"--jets") && a+1<argc)friendly=std::atoi(argv[++a]);
         else if(!std::strcmp(argv[a],"--seconds") && a+1<argc)seconds=static_cast<float>(std::atof(argv[++a]));
         else if(!std::strcmp(argv[a],"--player") && a+1<argc)how=argv[++a];
+        else if(!std::strcmp(argv[a],"--shoot") && a+1<argc)dps=static_cast<float>(std::atof(argv[++a]));
         else if(!std::strcmp(argv[a],"--kill") && a+1<argc) {
             float t=0;int id=0;
             if(std::sscanf(argv[++a],"%f:%d",&t,&id)==2)kills.emplace_back(t,id);
@@ -174,6 +185,28 @@ int main(int argc,char** argv) {
         Player(how,t,seconds);
         for(auto& [kt,id]:kills)
             if(kt>=0.0f && t>=kt && id>=0 && id<static_cast<int>(vs.size())){vs[id][kDead]=1;bodies[id].dead=true;Log("SIM %d shot down",id);kt=-1.0f;}
+        if(dps>0.0f && f%10==0) {   // a hit on the nearest centipede in reach
+            int best=-1;
+            float bestD=300.0f;
+            for(int i=0;i<static_cast<int>(vs.size());++i) {
+                if(bodies[i].dead || jets[i].role!=Role::centipede)continue;
+                const float* p=reinterpret_cast<const float*>(vs[i]+kPosition);
+                const float d[3]={p[0]-player.pos[0],p[1]-player.pos[1],p[2]-player.pos[2]};
+                if(Len(d)<bestD){bestD=Len(d);best=i;}
+            }
+            if(best>=0) {
+                alignas(16) unsigned char gdi[0xA0]{};
+                Put<float>(gdi,0x50,dps/6.0f);
+                MessageRestore restore{nullptr,0.0f};
+                PrimerMessage(vs[best],kMsgDamage,gdi,&restore);   // the plugin's say first, as body506's hook gives it
+                const float hit=At<float>(gdi,0x50);
+                if(restore.at)*restore.at=restore.was;
+                float hp=At<float>(vs[best],kHp)-hit;
+                if(hit>dps/6.0f+0.01f)Log("SIM hit %d for %.0f (x%.1f: a wound)",best,hit,hit/(dps/6.0f));
+                if(hp<=0.0f){hp=0.0f;vs[best][kDead]=1;bodies[best].dead=true;Log("SIM %d shot down",best);}
+                Put<float>(vs[best],kHp,hp);
+            }
+        }
         for(int i=0;i<static_cast<int>(vs.size());++i) {
             Jet& j=jets[i];
             unsigned char* v=vs[i];
