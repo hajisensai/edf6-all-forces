@@ -93,7 +93,8 @@ Work work[kEntries]{};
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
                   bool drill; DrillCue drillCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
-                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud; };
+                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
+                  bool turret; TurretCamReadout turretCam; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -536,6 +537,22 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
     l.scale=kLineScale*0.85f;l.rgba=on ? kGreen : kWhite;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
     l.x=(width-l.w)*0.5f;l.y=height*0.86f+2.0f*s;
+}
+
+// The turret camera (turretcam.cpp): while the turret has not come onto the point the view sends it to, a hollow
+// square where its gun points (where its round would be at that point's range); looking round (free look), a cyan
+// cross on the point it holds. The rest is a vehicle HUD's to draw (TurretCamReadout).
+void TurretMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const TurretCamReadout& r) noexcept {
+    float sx,sy;
+    if(!r.onTarget && sight::ToScreen(vp,r.gun,1.0f,width,height,&sx,&sy)) {
+        const float h=9.0f*s,t=2.0f*s;
+        Rect(drawer,ctx,sx-h,sy-h,sx+h,sy-h+t,kWhite);Rect(drawer,ctx,sx-h,sy+h-t,sx+h,sy+h,kWhite);
+        Rect(drawer,ctx,sx-h,sy-h,sx-h+t,sy+h,kWhite);Rect(drawer,ctx,sx+h-t,sy-h,sx+h,sy+h,kWhite);
+    }
+    if(r.freeLook && sight::ToScreen(vp,r.aim,1.0f,width,height,&sx,&sy)) {
+        const float h=7.0f*s,t=2.0f*s;
+        Rect(drawer,ctx,sx-h,sy-t*0.5f,sx+h,sy+t*0.5f,kCyan);Rect(drawer,ctx,sx-t*0.5f,sy-h,sx+t*0.5f,sy+h,kCyan);
+    }
 }
 
 // The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a round of the picked gun
@@ -1344,6 +1361,7 @@ void HudPublish() noexcept {
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
+    s.turret=PlayerTurretCam(&s.turretCam);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1463,6 +1481,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam);
         if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);

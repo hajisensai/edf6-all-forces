@@ -105,12 +105,17 @@ struct Config {
     float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
     float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
     float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
-    bool highCam=true;              // the artillery's high camera toggle (highcam.cpp): the Katyusha, the howitzer
+    bool highCam=true;              // the high camera toggle (highcam.cpp; placed by turretcam.cpp)
+    int highCamClass=2;             // ...offered in: 1 indirect-fire vehicles, 2 + big ones, 3 every turret turretcam.cpp serves
     int highCamKey=0x43;            // ...its key ('C'; a Windows virtual-key code, 0: none)
     int highCamButton=0x80;         // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
     float highCamHeight=45.0f;      // ...the high eye: m over the vehicle's origin
     float highCamBack=35.0f;        // ...m behind it
     float highCamPitch=40.0f;       // ...looking down this many degrees ahead
+    bool decoupledTurretCam=true;   // turretcam.cpp: the mouse turns the camera, the turret follows at its own rate
+    float turretCamRate=90.0f;      // ...the camera's turn at a full stick, deg/s (never slower than the turret's own)
+    int freeLookKey=0x04;           // ...free look while held: the camera turns, the turret holds (VK_MBUTTON; 0 none)
+    int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
@@ -360,7 +365,24 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // moment, the view's state and whether the player is on keys (else a pad).
 void HighCamFrame(unsigned char* vehicle) noexcept;
 bool PlayerHighCam(bool* on,bool* keys) noexcept;
+bool HighCamOn(const void* vehicle) noexcept;   // turretcam.cpp: the high view is on in `vehicle` now
 void ResetHighCam() noexcept;
+
+// turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
+// camera's look-at fetch, the seat aim's step); TurretCamFrame from every vehicle's input, the plugin off too (it lets
+// go then). TurretCamServes: it places the camera of `vehicle` (the player's turret, seat 0); TurretCamLarge: and its
+// rig is a big vehicle's (highcam.cpp HighCamClass 2).
+bool InstallTurretCam() noexcept;
+void TurretCamFrame(unsigned char* vehicle) noexcept;
+bool TurretCamServes(const void* vehicle) noexcept;
+bool TurretCamLarge(const void* vehicle) noexcept;
+void ResetTurretCam() noexcept;
+// The player's turret against their view (hud.cpp's marker; any HUD may draw it), fresh within 200 ms while the camera
+// is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds
+// in free look), `gun` where the gun's round would be at that point's range as it points now (on its arc), the muzzle
+// and its direction; `onTarget` both axes within half a degree of their want.
+struct TurretCamReadout { bool decoupled,freeLook,high,onTarget; float aim[3],gun[3],muzzle[3],gunDir[3]; };
+bool PlayerTurretCam(TurretCamReadout* out) noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;

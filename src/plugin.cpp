@@ -149,6 +149,10 @@ void Validate(Config& n) noexcept {
     Fix("HighCamHeight",n.highCamHeight,10.0f,200.0f);
     Fix("HighCamBack",n.highCamBack,0.0f,200.0f);
     Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
+    n.highCamClass=static_cast<int>(FixInt("HighCamClass",n.highCamClass,1,3));
+    Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
+    n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
+    n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -267,6 +271,11 @@ void LoadConfig() noexcept {
     n.highCamHeight=ReadFloat(L"HighCamHeight",n.highCamHeight);
     n.highCamBack=ReadFloat(L"HighCamBack",n.highCamBack);
     n.highCamPitch=ReadFloat(L"HighCamPitch",n.highCamPitch);
+    n.highCamClass=ReadInt(L"HighCamClass",static_cast<DWORD>(n.highCamClass));
+    n.decoupledTurretCam=ReadBool(L"DecoupledTurretCam",n.decoupledTurretCam);
+    n.turretCamRate=ReadFloat(L"TurretCamRate",n.turretCamRate);
+    n.freeLookKey=ReadInt(L"FreeLookKey",static_cast<DWORD>(n.freeLookKey));
+    n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     Validate(n);
     IgnoreRetired();
@@ -480,6 +489,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
+    InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
