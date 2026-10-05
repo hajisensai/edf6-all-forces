@@ -1,10 +1,10 @@
 """Writes the self-propelled artillery (pylib/vcobjects.py GROUND_VEHICLES['artillery']) into <game>/Mods:
 
-  Mods/OBJECT/EDF6VC_ARTILLERY.MRAB    the user's twin-gun tank model (models/twin_tank/twin_tank.obj and its textures:
-                                       an E551 hull, a Balam turret and barrels) on the KG6 Kepler's skeleton
-                                       (pylib/artillery_model.py; the E551 parts' skins and maps from the player's own
-                                       Root.cpk). Without the model folder it is not made, and the vehicle keeps the
-                                       Kepler's own model.
+  Mods/OBJECT/EDF6VC_ARTILLERY.MRAB    the user's twin-gun tank model (models/twin_tank/twin_tank.obj: an E551 hull,
+                                       a Balam turret and barrels with its texture) on the KG6 Kepler's skeleton
+                                       (pylib/artillery_model.py; the chassis is the stock E551's own meshes,
+                                       materials and textures from the player's own Root.cpk). Without the model
+                                       folder it is not made, and the vehicle keeps the Kepler's own model.
   Mods/OBJECT/EDF6VC_ARTILLERY.SGO     the Kepler's vehicle (Vehicle603_Flak: its turret, its twin guns) with that model
                                        and the guns below
   Mods/WEAPON/EDF6VC_HOWITZER_L/R.SGO  the Kepler's guns made howitzers: a large high-explosive shell each on a ballistic
@@ -126,7 +126,8 @@ def vehicle_sgo(game: vc.Game, own_model: bool | None = None) -> bytes:
 
 def check(files: dict[str, bytes]) -> None:
     """The SGO names this tool's model when it made one (else the Kepler's) and its guns; the model has the guns'
-    bones; the guns are marked, their shells and casings sized to BORE."""
+    bones and the track materials / parameter the SGO scrolls; the guns are marked, their shells and casings sized
+    to BORE."""
     from mdb import mdb_read, rab_read
     v = dsgo.to_py(dsgo.parse(files[f'OBJECT/{SGO_FILE}']).root)
     own = f'OBJECT/{MODEL_FILE}' in files
@@ -138,6 +139,10 @@ def check(files: dict[str, bytes]) -> None:
                            if f.name.lower() == MODEL_MDB.lower()).data)
         missing = {b for b, _ in v['vehicle_weapon_setting']} - {md.name_of(b.name) for b in md.bones}
         assert not missing, f'model lacks gun bones {missing}'
+        # the tracks scroll: every (material, parameter) the SGO's tank_caterpillar_animation animates is in the model
+        params = {(md.name_of(m.name), p.name) for m in md.materials for p in m.params}
+        scroll = [tuple(x) for x in v['tank_caterpillar_animation']]
+        assert scroll and not set(scroll) - params, f'model lacks the scrolled track materials {set(scroll) - params}'
     for w in VEHICLE.weapons:
         g = dsgo.to_py(dsgo.parse(files[f'WEAPON/{w.split("/")[-1].upper()}']).root)
         assert g['LockonTargetType'] == MARK_GROUND and g['LockonType'] == 0.0 and g['AmmoClass'] == 'GrenadeBullet01', g

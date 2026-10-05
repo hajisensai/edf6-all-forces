@@ -1110,6 +1110,69 @@ def textures_go_before_the_model() -> None:
     assert 'a.lod.dds after the model m.mdb' in bad[1] and 'b.lod.DDS after the model' in bad[2], bad
     assert rab_read(rab_write(rab)).files[0].name == 'a.lod.dds'
 
+@test
+def artillery_chassis_is_stock() -> None:
+    """pylib/artillery_model.py takes the chassis from the stock E551 as it is: stock_meshes keeps the triangles on the
+    OBJ's points with every vertex byte copied but the blend indices (mapped to the Kepler's bones); stock_materials /
+    material_problems: the E551 materials unchanged (tracks under the Kepler's names, which the SGO scrolls), their
+    stored texture members, the turret the only other material; an edited parameter, a re-encoded texture member or
+    an unused member is refused."""
+    import struct
+    import artillery_model as am
+    import graft_pure as g
+    import obj_model as om
+    import texfile
+    from dataclasses import replace
+    from mdb import MatParam, MatTex, Material, Mdb, Mesh, Object, Rab, RabFile, Texture, VElem
+    elems = [VElem(7, 0, 0, 'position'), VElem(12, 8, 0, 'texcoord'), VElem(1, 16, 0, 'BLENDWEIGHT'),
+             VElem(21, 32, 0, 'BLENDINDICES')]
+    P = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]
+    rows = [struct.pack('<4e2f4f4B', *p, 1.0, 0.0, 0.25 * k, 0.75, 0.25, 0.0, 0.0, 3, 4, 9, 9) for k, p in enumerate(P)]
+    me = Mesh(bytes((0, 1, 2, 0)), 0, 0, 36, elems, 0, b''.join(rows), struct.pack('<6H', 0, 1, 2, 1, 3, 2))
+    names = ['mdl'] + list(am.HULL_MATERIALS)
+    mats = [Material(k, 0, 0, k + 1, 'snd_BRDF_Mech_Catapillar' if n.startswith('Caterpi') else 'snd_BRDF_Common_Basic',
+                     [MatParam([0.5, 0.5, 0.5, 0.0], (0, 0), 'scroll_texture' if n.startswith('Caterpi') else 'diffuse', 513)],
+                     [MatTex(k, 'albedo', (0,) * 5)], 3) for k, n in enumerate(am.HULL_MATERIALS)]
+    texs = [Texture(k, f't{k}_DDS', f't{k}.DDS', 0) for k in range(len(mats))]
+    ref = Mdb(0x20, names, [], [Object(0, 0, [me])], mats, texs)
+    out, kept = am.stock_meshes(ref, {om.wkey(p) for p in P[:3]}, {3: 7, 4: 8})
+    assert len(out) == 1 and kept == {frozenset(om.wkey(p) for p in P[:3])}, kept
+    new = out[0][1]
+    assert g.triangles(new) == [(0, 1, 2)] and new.nverts == 3, g.triangles(new)
+    for k in range(3):
+        a, b = new.vdata[36 * k:36 * k + 36], rows[k]
+        assert a[:32] == b[:32] and a[32:] == bytes((7, 8, 0, 0)), (a, b)
+    try:
+        am.stock_meshes(ref, {om.wkey(p) for p in P[:3]}, {3: 7})
+        raise AssertionError('an unmapped weighted bone was accepted')
+    except am.ArtilleryCheckError:
+        pass
+    ref_rab = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [])
+    for t in texs:
+        om.add_texture(ref_rab, t.filename, texfile.solid_dxt1((10 * t.index, 20, 30), 32))
+    fp = am.make_stock_fingerprints(ref, ref_rab)
+
+    def made(edit: bool = False) -> tuple[Rab, Mdb]:
+        md, _map = am.stock_materials(Mdb(0x20, ['mdl'], [], [], [], []), ref, set(range(len(mats))))
+        md, _t = om.add_material(md, ref, 'v505_tank', am.TURRET_MATERIAL[0], {'albedo': 'own.dds'})
+        if edit:
+            md.materials[0] = replace(md.materials[0], params=[replace(md.materials[0].params[0], value=[1.0, 0, 0, 0])])
+        rab = Rab(0x200, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], [RabFile(am.HOST_MDB, 1, 0, b'model')])
+        g.copy_texture_members(rab, ref_rab, [t.filename for t in texs])
+        om.add_texture(rab, 'own.dds', texfile.solid_dxt1((1, 2, 3), 32))
+        return rab, md
+    with patched(am, STOCK_MATERIALS=fp[0], STOCK_TEXTURES=fp[1]):
+        rab, md = made()
+        assert {md.name_of(m.name) for m in md.materials} == set(am.HULL_MATERIALS.values()) | {am.TURRET_MATERIAL[0]}
+        assert am.material_problems(rab, md) == [], am.material_problems(rab, md)
+        assert any('is not the stock E551' in x for x in am.material_problems(*made(edit=True)))
+        om.add_texture(rab, 'dead.dds', texfile.solid_dxt1((1, 2, 3), 32))
+        assert sorted(am.material_problems(rab, md)) == ['archive member dead.dds used by no material',
+                                                         'archive member dead.lod.dds used by no material']
+        rab, md = made()
+        om.add_texture(rab, 't0.DDS', texfile.solid_dxt1((99, 2, 3), 32))      # a re-encoded stock texture
+        assert any('t0.DDS: member' in x for x in am.material_problems(rab, md)), am.material_problems(rab, md)
+
 def main() -> int:
     failed = 0
     for fn in TESTS:
