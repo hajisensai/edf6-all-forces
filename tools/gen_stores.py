@@ -1,7 +1,8 @@
 """Writes src/stores.inc, the plugin's side of the jets' stores (src/stores.cpp includes it), from pylib/vcobjects.py:
   kStores     every store kind (STORES): its weapon files' name prefix (vcobjects.store_file: EDF6VC_<KIND>_<rounds>.SGO),
               its name, its role, a round's mass and drag
-  kJetMasses  a jet's mass without stores by its mark (JET_MASSES)
+  kJetMasses  a jet's mass without stores by its mark (JET_MASSES) and the durability its SGO gives it (JETS; the gunship
+              tools/make_jets.py builds from the strike jet's): the ram's damage scales by its HP over that (src/playerjet.cpp)
 
   python tools/gen_stores.py            write it
   python tools/gen_stores.py --check    exit 1 when the committed file is not what this would write (CI)
@@ -13,10 +14,18 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
+import make_jets  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 OUT = os.path.normpath(os.path.join(HERE, '..', 'src', 'stores.inc'))
 ROLES = {'air': 'StoreRole::air', 'ground': 'StoreRole::ground', 'bomb': 'StoreRole::bomb', 'rocket': 'StoreRole::rocket'}
+
+
+def durabilities() -> dict[float, float]:
+    """Each jet mark's SGO durability (vcobjects.JETS), the gunship's that of the strike jet it is built from."""
+    out = {jet.mark: jet.durability for jet in vc.JETS.values()}
+    out[make_jets.GUNSHIP_MARK] = vc.JETS['edf6tr_jet_strike_mission'].durability
+    return out
 
 
 def render() -> str:
@@ -26,8 +35,9 @@ def render() -> str:
         lines.append(f'    {{L"EDF6VC_{kind}_","{s.name}",{ROLES[s.role]},{s.mass:.1f}f,{s.drag:.4f}f}},')
     lines.append('};')
     lines.append('inline constexpr JetMass kJetMasses[]={')
+    durability = durabilities()
     for mark, mass in sorted(vc.JET_MASSES.items()):
-        lines.append(f'    {{{mark:.1f}f,{mass:.1f}f}},')
+        lines.append(f'    {{{mark:.1f}f,{mass:.1f}f,{durability.get(mark, 0.0):.1f}f}},')
     lines.append('};')
     return '\n'.join(lines) + '\n'
 

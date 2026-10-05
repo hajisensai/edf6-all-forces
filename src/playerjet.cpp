@@ -411,10 +411,44 @@ void Kill(PJet& j,unsigned char* v,const char* why) noexcept {
     j.dieLogged=true;
 }
 
+// What it rammed (Blocked): where (its nose), and how fast it closed on it along the contact's normal (the speed lost
+// along the way it was sent: what the obstacle stopped).
+struct RamHit { float at[3]; float closing; };
+
+// The ram's damage to what it hit (the user, 2026-10-05: "the blast of a plane should not only go by its speed but by
+// its mass too"): the kinetic energy of the closing speed, E = 1/2 m v^2, with m the aircraft's mass now (its kind's
+// clean mass, stores.inc kJetMasses, times what its stores add: Burden) and v the closing speed along the normal; in the
+// game's damage at kRamJoulesPerDamage J a point, scaled by the tier the game gave this aircraft (its max HP over its
+// SGO durability: the same factor scales a weapon's damage, so the ram keeps pace with the mission's difficulty), times
+// ini PlayerJetRamDamage. kRamJoulesPerDamage: the mod's Mk 82 (1500 damage, pylib/vcobjects.py STORES) carries some
+// 430 MJ of explosive (87 kg of tritonal, ~103 kg of TNT at 4.184 MJ/kg): 2.87e5 J a point. A 16 t fighter ramming at
+// 200 m/s (320 MJ) hits as about 3/4 of a Mk 82, at 100 m/s a quarter of that. A kind without a mass deals nothing.
+constexpr float kRamJoulesPerDamage=2.87e5f;
+// The aircraft's mass now (kg; 0: its kind has none).
+float RamMass(const PJet& j,const unsigned char* v) noexcept {
+    const JetMass* const kind=JetMassOf(BodyMark(v));
+    return kind ? kind->mass*(j.burden.mass>1.0f ? j.burden.mass : 1.0f) : 0.0f;
+}
+float RamDamage(const PJet& j,const unsigned char* v,float closing) noexcept {
+    const JetMass* const kind=JetMassOf(BodyMark(v));
+    if(!kind || !(closing>0.0f))return 0.0f;
+    const float kg=RamMass(j,v);
+    const float hpMax=At<float>(v,kHpMax);
+    const float tier=kind->durability>0.0f && hpMax>0.0f ? hpMax/kind->durability : 1.0f;
+    return Cfg().playerJetRamDamage*tier*0.5f*kg*closing*closing/kRamJoulesPerDamage;
+}
+
+void Ram(const PJet& j,unsigned char* v,const RamHit& hit) noexcept {
+    const float damage=RamDamage(j,v,hit.closing);
+    const bool dealt=damage>0.0f && ImpactDamage(v,hit.at,damage,j.kind->ram);
+    Log("PJET v=%p rammed at (%.0f,%.0f,%.0f), closing %.0f m/s, %.0f t: %.0f damage within %.0f m%s",v,hit.at[0],hit.at[1],hit.at[2],
+        hit.closing,RamMass(j,v)*0.001f,damage,j.kind->ram,dealt ? "" : " (not dealt: no charge this mission, or no mass for this kind)");
+}
+
 // A hard hit: `sink` m/s into the ground, `speed` over it, `banked` wings too steep. Damage (see kCrashBase). `ram`:
-// where it rammed something (not the ground, not the water): the enemies round it take that much damage (ini
-// PlayerJetRamDamage times the share of its own max HP it lost) within its kind's reach. At most one a kCrashMs.
-void Crash(PJet& j,unsigned char* v,float sink,float speed,bool banked,ULONGLONG ms,const float* ram) noexcept {
+// what it rammed (not the ground, not the water): the enemies round it take RamDamage within its kind's reach. At
+// most one a kCrashMs.
+void Crash(PJet& j,unsigned char* v,float sink,float speed,bool banked,ULONGLONG ms,const RamHit* ram) noexcept {
     if(ms-j.crashAt<kCrashMs)return;
     j.crashAt=ms;
     const float hpMax=At<float>(v,kHpMax),hp=At<float>(v,kHp);
@@ -424,12 +458,7 @@ void Crash(PJet& j,unsigned char* v,float sink,float speed,bool banked,ULONGLONG
     const float taken=share*(hpMax>0.0f ? hpMax : 1000.0f),left=hp-taken;
     Log("PJET v=%p crash: sink %.1f m/s, speed %.0f m/s%s: %.0f%% of max HP, hp %.0f -> %.0f",v,sink,speed,banked ? ", banked" : "",
         share*100.0f,hp,left>0.0f ? left : 0.0f);
-    if(ram && Cfg().playerJetRamDamage>0.0f) {
-        const float damage=taken*Cfg().playerJetRamDamage;
-        const bool dealt=ImpactDamage(v,ram,damage,j.kind->ram);
-        Log("PJET v=%p rammed at (%.0f,%.0f,%.0f): %.0f damage within %.0f m%s",v,ram[0],ram[1],ram[2],damage,j.kind->ram,
-            dealt ? "" : " (not dealt: no charge this mission)");
-    }
+    if(ram && Cfg().playerJetRamDamage>0.0f)Ram(j,v,*ram);
     if(left<=0.0f){Kill(j,v,"crashed");return;}
     Put<float>(v,kHp,left);
 }
@@ -744,10 +773,11 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     j.blockedSince=0;
     const float made=Dot(j.measured,j.sent)/sent;
     Log("PJET v=%p blocked %s: sent %.0f m/s, made %.0f",v,kPhaseNames[static_cast<int>(j.phase)],sent,made);
-    // Where it hit: its nose along the way it was sent.
-    float ram[3];
-    for(int i=0;i<3;++i)ram[i]=pos[i]+j.sent[i]/sent*j.kind->ram*0.5f;
-    Crash(j,v,0.0f,sent-made+j.kind->landMax,false,ms,ram);
+    // Where it hit: its nose along the way it was sent; how fast it closed: what it lost of that way.
+    RamHit ram{};
+    for(int i=0;i<3;++i)ram.at[i]=pos[i]+j.sent[i]/sent*j.kind->ram*0.5f;
+    ram.closing=sent-made;
+    Crash(j,v,0.0f,sent-made+j.kind->landMax,false,ms,&ram);
     if(!j.active)return;
     if(j.phase!=Phase::air){j.vel[0]=j.vel[2]=0.0f;return;}
     for(int i=0;i<3;i+=2)j.vel[i]=-j.vel[i];

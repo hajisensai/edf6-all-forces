@@ -243,9 +243,14 @@ void TriggerStore(const Store& s) noexcept {
     if(s.weapon && s.ammo>0 && Readable(s.weapon+kWeaponTrigger,1,true))s.weapon[kWeaponTrigger]=1;
 }
 
+const JetMass* JetMassOf(float mark) noexcept {
+    for(const auto& m:kJetMasses)if(m.mark==mark)return &m;
+    return nullptr;
+}
+
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept {
-    float clean=0.0f;
-    for(const auto& m:kJetMasses)if(m.mark==mark)clean=m.mass;
+    const JetMass* const kind=JetMassOf(mark);
+    const float clean=kind ? kind->mass : 0.0f;
     Burden b{1.0f,0.0f};
     if(clean<=0.0f)return b;
     float kg=0.0f;

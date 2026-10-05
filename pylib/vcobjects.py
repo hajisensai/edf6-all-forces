@@ -246,9 +246,13 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
-# kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against).
-JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7006.0: 2200.0, 7020.0: 16000.0,
-              7201.0: 16000.0, 7202.0: 22000.0}
+# kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against, and
+# the mass a player-flown aircraft rams with, src/playerjet.cpp RamDamage). Every jet mark has one (tools/selftest.py
+# jet_masses_cover_every_jet): the carriers are the EDF transport x 1.6 (a C-17's class), the Primers' fighter a light
+# fighter's, the blast / doll drones the drone's, the gunship (tools/make_jets.py GUNSHIP_MARK) an AC-130's.
+JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
+              7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
+              7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0}
 STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP)
                             if store_of(w)}))
 JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *STORE_FILES)
