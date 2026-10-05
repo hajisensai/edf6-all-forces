@@ -38,7 +38,7 @@ constexpr float kAimGain=4.0f;
 // The centipede (see the file's head).
 // m between linked bodies' origins: five segments 1.8 m apart each (pylib/centipede_model.py), so the segments run
 // on 1.8 m apart across the links too (tools/primer_chain_view.py reads it).
-constexpr float kLinkSpacing=9.0f;
+constexpr float kLinkSpacing=3.0f;   // m: one segment's length (pylib/centipede_model.py)
 constexpr float kTrailStep=1.0f;     // m of travel between the trail's samples (kPrimerTrail of them)
 constexpr float kCrawlClear=1.5f;    // m its origin rides over the ground crawling (its legs reach 1.35 down)
 constexpr float kCrawlSpeed=16.0f,kCrawlNear=45.0f,kWeave=20.0f,kWeaveHz=0.12f;
@@ -47,9 +47,19 @@ constexpr ULONGLONG kDiveEveryMs=22000,kDiveMaxMs=12000;
 constexpr float kDiveLow=12.0f,kDiveDone=30.0f;
 constexpr float kFollowGain=3.0f,kFollowCatch=40.0f,kFollowTop=80.0f;
 // m from its link point it links; m/s at least on its way there; m from it on it rides along with the tail.
-constexpr float kJoinAt=4.0f,kJoinSpeed=28.0f,kJoinRide=40.0f;
+constexpr float kJoinAt=1.5f,kJoinSpeed=28.0f,kJoinRide=40.0f;
 constexpr ULONGLONG kLookMs=1000;
 constexpr float kSpitReach=400.0f,kSpitCone=0.12f;
+// Its other weapons (pylib/vcobjects.py PRIMER_GUN_FILES): the barbs on its back (a middle one's), aimed at the target
+// from its side; the stinger (the chain's last one's), lobbed onto it on a high arc (the round falls at kGravityLob).
+constexpr float kBarbReach=300.0f,kBarbCone=0.1f;
+constexpr float kStingSpeed=90.0f,kStingReach=520.0f,kStingMost=1.25f,kStingCone=0.1f,kGravityLob=14.7f;
+// A writhing one's nose swings kWritheYaw rad each way at kWritheYawHz.
+constexpr float kWritheYaw=0.45f,kWritheYawHz=1.7f;
+// Its weapon holders (vcobjects JETS: [0, 1] the spit on its head, fired by veh+0x2020; [2] the stinger, by
+// +0x2021; [3] the barbs, which no stock byte fires: its weapon's own trigger, as stores.cpp TriggerStore's).
+constexpr int kBarbHolder=3;
+constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10,kWeaponTrigger=0x139;
 constexpr float kWritheDrag=1.2f,kWritheSink=4.0f;   // a headless front: 1/s of its speed lost, m/s it sinks   // pylib/vcobjects.py PRIMER_GUN_FILES: 3.5 x 120 m
 // The dragonfly.
 constexpr float kHuntSpeed=85.0f,kDartSpeed=95.0f,kStrikeRange=260.0f,kStandoff=140.0f,kBelow=25.0f,kAbove=30.0f,
@@ -124,17 +134,25 @@ bool OnTarget(const unsigned char* v,const float* pos,const float* aim,float rea
     return Normalize(fwd) && std::acos(Clamp(Dot(to,fwd),-1.0f,1.0f))<cone;
 }
 
-// Its moving parts: the bone records of `bones` (looked up again when the model's bone array changes; every one
-// found or none posed: logged once), each written R(angle) x bind, scaled.
-void Pose(Jet& j,unsigned char* v,const primer::PoseBone* bones,int n,const float* angle,const float* scale) noexcept {
+// The centipede's aimed mounts (pylib/centipede_model.py): the barbs' on its back, the stinger's on its tail. Their
+// records follow its moving parts' in PrimerState (kAimGun, kAimSting).
+inline constexpr const wchar_t* kCentipedeAims[]={L"gun",L"sting"};
+constexpr int kAimCount=2,kAimGun=primer::kCentipedeBoneCount,kAimSting=kAimGun+1;
+static_assert(primer::kCentipedeBoneCount+kAimCount<=kPrimerParts && primer::kDragonflyBoneCount<=kPrimerParts,"PrimerState holds the parts");
+
+// Its moving parts: the bone records of `bones` then of `aims` (looked up again when the model's bone array changes;
+// every one found or none posed: logged once), each of `bones` written R(axis2, angle2) x R(axis, angle) x bind,
+// scaled (angle2 / scale nullptr: 0 / 1). The aimed ones are AimPart's.
+void Pose(Jet& j,unsigned char* v,const primer::PoseBone* bones,int n,const float* angle,const float* angle2,
+          const float* scale,const wchar_t* const* aims=nullptr,int na=0) noexcept {
     PrimerState& s=j.primer;
     const unsigned char* const inst=v+kModelInst506;
     const auto array=At<const unsigned char*>(inst,kInstBones506);
     if(!array)return;
     if(array!=s.poseModel) {
         s.poseModel=array;s.posed=true;
-        for(int i=0;i<n;++i) {
-            s.poseRec[i]=BoneRecord506(inst,bones[i].name);
+        for(int i=0;i<n+na;++i) {
+            s.poseRec[i]=BoneRecord506(inst,i<n ? bones[i].name : aims[i-n]);
             if(!s.poseRec[i]){s.posed=false;continue;}
             std::memcpy(s.poseBind[i],s.poseRec[i]+kBoneLocal506,64);
         }
@@ -143,11 +161,45 @@ void Pose(Jet& j,unsigned char* v,const primer::PoseBone* bones,int n,const floa
     if(!s.posed)return;
     for(int i=0;i<n;++i) {
         alignas(16) float local[16];
-        primer::TurnLocal(s.poseBind[i],bones[i].axis,angle[i],local,scale ? scale[i] : 1.0f);
+        primer::TurnLocal2(s.poseBind[i],bones[i].axis,angle[i],bones[i].axis2,angle2 ? angle2[i] : 0.0f,local,
+                           scale ? scale[i] : 1.0f);
         std::memcpy(s.poseRec[i]+kBoneLocal506,local,64);
     }
 }
-static_assert(primer::kCentipedeBoneCount<=kPrimerParts && primer::kDragonflyBoneCount<=kPrimerParts,"PrimerState holds the parts");
+
+// Aimed mount `k` (Pose's record index) pointed along world `dir` (its parent, the body, level-bound: the body's
+// frame), or put back as bound (dir nullptr).
+void AimPart(Jet& j,const unsigned char* v,int k,const float* dir) noexcept {
+    PrimerState& s=j.primer;
+    if(!s.posed || !s.poseRec[k])return;
+    if(!dir){std::memcpy(s.poseRec[k]+kBoneLocal506,s.poseBind[k],64);return;}
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const float local[3]={dir[0]*m[0]+dir[1]*m[1]+dir[2]*m[2],dir[0]*m[4]+dir[1]*m[5]+dir[2]*m[6],
+                          dir[0]*m[8]+dir[1]*m[9]+dir[2]*m[10]};
+    alignas(16) float out[16];
+    primer::AimLocal(s.poseBind[k],local,out);
+    std::memcpy(s.poseRec[k]+kBoneLocal506,out,64);
+}
+
+// Holder `i`'s weapon of its seat 0 (vcobjects JETS order), or nullptr.
+unsigned char* HolderWeapon(unsigned char* v,int i) noexcept {
+    if(SeatCount(v)==0)return nullptr;
+    unsigned char* const seat=SeatAt(v,0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(i<0 || static_cast<std::uint64_t>(i)>=count || count>8 || !Readable(holders,count*8) || !Readable(holders[i],kHolderWeapon+8))
+        return nullptr;
+    return At<unsigned char*>(holders[i],kHolderWeapon);
+}
+
+// Whether holder `i`'s barrel (its muzzles on their bone, as the game fires it) points within `cone` of `dir`.
+bool BarrelAlong(unsigned char* v,int i,const float* dir,float cone) noexcept {
+    const unsigned char* const w=HolderWeapon(v,i);
+    float at[3],d[3];
+    if(!w || !GunBarrel(v,w,at,d))return false;
+    float want[3]={dir[0],dir[1],dir[2]};
+    return Normalize(want) && std::acos(Clamp(Dot(d,want),-1.0f,1.0f))<cone;
+}
 
 unsigned PrimerFlight() noexcept {
     static unsigned flight=0;   // one flight for every creature: their rounds pass through each other
@@ -285,13 +337,16 @@ void Follow(Jet& j,const float* pos,const float* goal,const float* with) noexcep
 
 // A split's headless new front (while its head grows back): its way off (kWritheDrag a second of its speed lost),
 // in the air sinking at kWritheSink, its nose kept where it points.
-void Writhe(Jet& j,const float* pos,float dt,float* face) noexcept {
+void Writhe(Jet& j,float dt,ULONGLONG ms,float* face) noexcept {
     const float keep=std::exp(-kWritheDrag*dt);
     j.m.vel[0]*=keep;j.m.vel[2]*=keep;
     j.m.vel[1]=j.primer.flying ? -kWritheSink : j.m.vel[1]*keep;
     const float* m=reinterpret_cast<const float*>(j.Vehicle()+kMatrix);
-    face[0]=m[8];face[1]=0.0f;face[2]=m[10];
-    (void)pos;
+    // the way it pointed when the link broke, swung kWritheYaw each way (about it, not a turn that adds up)
+    if(!j.primer.writheFace[0] && !j.primer.writheFace[2]){j.primer.writheFace[0]=m[8];j.primer.writheFace[2]=m[10];}
+    const float a=kWritheYaw*std::sin(2.0f*kPi*kWritheYawHz*static_cast<float>(ms)*0.001f+j.primer.seed);
+    const float c=std::cos(a),sn=std::sin(a),*w=j.primer.writheFace;
+    face[0]=w[0]*c+w[2]*sn;face[1]=0.0f;face[2]=w[2]*c-w[0]*sn;
 }
 
 // A lone one on the ground: at the player in a weave, round them close; its nose on them once near.
@@ -347,6 +402,34 @@ void Wind(Jet& j,const Kind& k,unsigned char* v,const float* pos,bool hasAim,flo
     if(Normalize(vel))std::memcpy(face,vel,12);
 }
 
+// Its weapons by its place in the chain: a head (shown: a front, alone or of a chain) spits forward at the target
+// in front of it; a tail (shown) lobs its stinger onto it; one with neither (a middle one) turns the barbs on its
+// back to it and fires them. Each fires only with its barrel on its line (BarrelAlong: the mount as the game posed
+// it). What it fired (1 spit, 2 stinger, 4 barbs).
+int CentipedeFire(Jet& j,unsigned char* v,const float* pos,const float* aim,bool arm,bool head,bool tail) noexcept {
+    int fired=0;
+    const float to[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
+    const float across=std::sqrt(to[0]*to[0]+to[2]*to[2]),dist=Len(to);
+    // the barbs (a middle one's): their mount on the target
+    const bool middle=!head && !tail;
+    AimPart(j,v,kAimGun,middle && arm ? to : nullptr);
+    const bool barbs=middle && arm && dist<kBarbReach && BarrelAlong(v,kBarbHolder,to,kBarbCone);
+    if(unsigned char* const w=HolderWeapon(v,kBarbHolder); w && Readable(w+kWeaponTrigger,1,true))w[kWeaponTrigger]=barbs ? 1 : 0;
+    // the stinger (a tail's): up its lob's arc
+    float elevation=0.0f;
+    const bool lob=tail && arm && dist<kStingReach && across>1.0f &&
+                   primer::LobElevation(across,to[1],kStingSpeed,kGravityLob,kStingMost,&elevation);
+    float up[3]={0.0f,1.0f,0.0f};
+    if(lob){up[0]=to[0]/across*std::cos(elevation);up[1]=std::sin(elevation);up[2]=to[2]/across*std::cos(elevation);}
+    AimPart(j,v,kAimSting,lob ? up : nullptr);
+    const bool sting=lob && BarrelAlong(v,2,up,kStingCone);
+    // the spit (a head's): forward, its nose on the target
+    const bool spit=head && arm && OnTarget(v,pos,aim,kSpitReach,kSpitCone);
+    v[kFireGun]=spit ? 1 : 0;v[kFireMissile]=sting ? 1 : 0;
+    fired|=spit ? 1 : 0;fired|=sting ? 2 : 0;fired|=barbs ? 4 : 0;
+    return fired;
+}
+
 void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
     PrimerState& s=j.primer;
     const Kind& k=KindOf(j);
@@ -368,10 +451,11 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
         if(tailShows>=1.0f){tailShows=1.0f;s.tailAt=0;}
     }
     const bool regrowing=s.regrowAt!=0;
+    if(!regrowing)s.writheFace[0]=s.writheFace[2]=0.0f;
     float face[3]={0.0f,0.0f,1.0f};
     const char* what;
     if(regrowing) {                              // headless: writhing, slowing, sinking; out of the fight
-        Writhe(j,pos,dt,face);
+        Writhe(j,dt,ms,face);
         what="regrowing";
     } else if(ahead) {                                  // linked: on the trail of the one ahead
         float goal[3];
@@ -407,31 +491,18 @@ void CentipedeFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     }
     HoldOffGround(j,pos,GroundClearance(pos),dt,ms);
     Face(j,v,face);
-    // Its parts: the legs' wave at its speed, its head hidden behind another, its tail before one, its halves bent
-    // toward them.
-    primer::CentipedeInput in{static_cast<float>(ms%600000)*0.001f,Len(j.m.vel),s.flying,headShows,tailShows,0.0f,0.0f,regrowing ? 1.0f-headShows : 0.0f};
-    {
-        const float* m=reinterpret_cast<const float*>(v+kMatrix);
-        const float right[3]={m[0],m[1],m[2]},fwd[3]={m[8],m[9],m[10]};
-        if(const Jet* a=Centipede(s.ahead)) {
-            const float* p=reinterpret_cast<const float*>(a->Vehicle()+kPosition);
-            const float d[3]={p[0]-pos[0],p[1]-pos[1],p[2]-pos[2]};
-            in.bendFront=primer::LinkBend(Dot(d,right),Dot(d,fwd));
-        }
-        if(const Jet* b=Centipede(s.behind)) {
-            const float* p=reinterpret_cast<const float*>(b->Vehicle()+kPosition);
-            const float d[3]={p[0]-pos[0],p[1]-pos[1],p[2]-pos[2]};
-            in.bendRear=-primer::LinkBend(Dot(d,right),-Dot(d,fwd));
-        }
-    }
-    s.phase=primer::CentipedeStep(s.phase,in,dt);
-    float angle[primer::kCentipedeBoneCount],scale[primer::kCentipedeBoneCount];
-    primer::CentipedeAngles(in,s.phase,angle,scale);
-    Pose(j,v,primer::kCentipedeBones,primer::kCentipedeBoneCount,angle,scale);
-    const bool fire=Cfg().primerFire && !regrowing && hasAim && OnTarget(v,pos,aim,kSpitReach,kSpitCone);
-    v[kFireGun]=fire ? 1 : 0;v[kFireMissile]=0;
-    s.what=what;s.fired=fire;
-    Debug(j,v,what,fire,ms);
+    // Its parts: its legs a step behind the one ahead's (the wave down the chain; a front's at its own speed), its
+    // head hidden behind another, its tail before one.
+    primer::CentipedeInput in{static_cast<float>(ms%600000)*0.001f,Len(j.m.vel),s.flying,headShows,tailShows,
+                              regrowing ? 1.0f-headShows : 0.0f,-1.0f};
+    s.phase=ahead && !regrowing ? ahead->primer.phase-2.0f*kPi*primer::kChainLag : primer::CentipedeStep(s.phase,in,dt);
+    s.headShown=headShows;s.tailShown=tailShows;
+    float angle[primer::kCentipedeBoneCount],angle2[primer::kCentipedeBoneCount],scale[primer::kCentipedeBoneCount];
+    primer::CentipedeAngles(in,s.phase,angle,angle2,scale);
+    Pose(j,v,primer::kCentipedeBones,primer::kCentipedeBoneCount,angle,angle2,scale,kCentipedeAims,kAimCount);
+    s.what=what;
+    s.fired=CentipedeFire(j,v,pos,aim,hasAim && !regrowing && Cfg().primerFire,headShows>=1.0f,tailShows>=1.0f);
+    Debug(j,v,what,s.fired!=0,ms);
 }
 
 // --- The dragonfly ---
@@ -529,17 +600,17 @@ void DragonflyFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG 
     s.curl=primer::CurlStep(s.curl,in,dt);
     float angle[primer::kDragonflyBoneCount];
     primer::DragonflyAngles(in,s.curl,angle);
-    Pose(j,v,primer::kDragonflyBones,primer::kDragonflyBoneCount,angle,nullptr);
+    Pose(j,v,primer::kDragonflyBones,primer::kDragonflyBoneCount,angle,nullptr,nullptr);
     const bool fire=Cfg().primerFire && arm && (!s.posed || s.curl>=primer::kCurlFire) &&
                     OnTarget(v,pos,prey.pos,kNeedleReach,kNeedleCone);
     v[kFireGun]=fire ? 1 : 0;v[kFireMissile]=0;
-    s.what=what;s.fired=fire;
+    s.what=what;s.fired=fire ? 1 : 0;
     Debug(j,v,what,fire,ms);
 }
 
 // --- The trace (PrimerTrace) ---
 // One CSV line per creature every kTraceMs: game ms, its table index, kind, what it did, position, velocity, HP,
-// whether it fired, the table indexes of the centipedes ahead of and behind it (-1: none), the player's position.
+// what it fired (1 spit / needles, 2 stinger, 4 barbs), the table indexes of the centipedes ahead of and behind it (-1: none), the player's position.
 // Opened on the first line (appended to; a header first when the file is new), flushed once a second.
 std::FILE* traceFile=nullptr;
 bool traceFailed=false;
@@ -570,7 +641,7 @@ void Trace(Jet& j,const float* pos,const unsigned char* v,ULONGLONG ms) noexcept
     if(!f)return;
     std::fprintf(f,"%llu,%d,%s,%s,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.0f,%d,%d,%d,%.2f,%.2f,%.2f\n",ms,IndexOf(j),KindOf(j).name,
                  j.primer.what ? j.primer.what : "-",pos[0],pos[1],pos[2],j.m.vel[0],j.m.vel[1],j.m.vel[2],At<float>(v,kHp),
-                 j.primer.fired ? 1 : 0,IndexOfCtrl(j.primer.ahead),IndexOfCtrl(j.primer.behind),player.pos[0],player.pos[1],player.pos[2]);
+                 j.primer.fired,IndexOfCtrl(j.primer.ahead),IndexOfCtrl(j.primer.behind),player.pos[0],player.pos[1],player.pos[2]);
     if(ms-traceFlushAt>1000){traceFlushAt=ms;std::fflush(f);}
 }
 }  // namespace
@@ -634,6 +705,68 @@ void PrimerFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms)
     if(IsCentipede(j))CentipedeFrame(j,v,pos,dt,ms);
     else DragonflyFrame(j,v,pos,dt,ms);
     Trace(j,pos,v,ms);
+}
+
+// --- The dead ---
+// A shot-down centipede's entry goes (Sweep: Finished), but its wreck falls on (the 506's crash): it keeps its bone
+// records here, with a weak reference of its own on the object's control block, and each physics step of the dead
+// body (jet_hooks.cpp JetBodyStep) poses it dead (primer_pose.h: legs folding in and kicking, head drooping, tail
+// curling) until kCorpseMs or the object is gone.
+namespace {
+constexpr int kCorpses=24;
+constexpr ULONGLONG kCorpseMs=10000;
+struct Corpse {
+    ObjRef ref;
+    ULONGLONG diedAt;
+    const unsigned char* model;   // the bone array its records are in (another: not posed on)
+    unsigned char* rec[primer::kCentipedeBoneCount];
+    float bind[primer::kCentipedeBoneCount][16];
+    float head,tail;
+};
+Corpse corpses[kCorpses];
+
+void Bury(Corpse& c) noexcept {
+    DropRef(c.ref);
+    c=Corpse{};
+}
+}  // namespace
+
+bool PrimerDied(const Jet& j) noexcept {
+    const PrimerState& s=j.primer;
+    if(!IsCentipede(j) || !Alive(j.ref) || !j.Vehicle()[kDead] || !s.posed)return false;
+    Corpse* slot=nullptr;
+    for(auto& c:corpses)if(!c.ref.obj || !Alive(c.ref)){if(c.ref.obj)Bury(c);slot=&c;break;}
+    if(!slot)return false;   // as many falling as that: this one falls stiff
+    slot->ref=j.ref;HoldRef(j.ref);
+    slot->diedAt=GameMs();
+    slot->model=s.poseModel;
+    for(int i=0;i<primer::kCentipedeBoneCount;++i){slot->rec[i]=s.poseRec[i];std::memcpy(slot->bind[i],s.poseBind[i],64);}
+    slot->head=s.headShown;slot->tail=s.tailShown;
+    return true;
+}
+
+void PrimerCorpseStep(unsigned char* v) noexcept {
+    for(auto& c:corpses) {
+        if(c.ref.obj!=v)continue;
+        const ULONGLONG ms=GameMs();
+        if(!Alive(c.ref) || ms-c.diedAt>kCorpseMs ||
+           At<const unsigned char*>(v+kModelInst506,kInstBones506)!=c.model){Bury(c);return;}
+        primer::CentipedeInput in{static_cast<float>(ms%600000)*0.001f,0.0f,false,c.head,c.tail,0.0f,
+                                  static_cast<float>(ms-c.diedAt)*0.001f};
+        float angle[primer::kCentipedeBoneCount],angle2[primer::kCentipedeBoneCount],scale[primer::kCentipedeBoneCount];
+        primer::CentipedeAngles(in,0.0f,angle,angle2,scale);
+        for(int i=0;i<primer::kCentipedeBoneCount;++i) {
+            alignas(16) float local[16];
+            const auto& b=primer::kCentipedeBones[i];
+            primer::TurnLocal2(c.bind[i],b.axis,angle[i],b.axis2,angle2[i],local,scale[i]);
+            std::memcpy(c.rec[i]+kBoneLocal506,local,64);
+        }
+        return;
+    }
+}
+
+void ResetCorpses() noexcept {
+    for(auto& c:corpses)if(c.ref.obj)Bury(c);
 }
 }  // namespace jet
 }  // namespace crew

@@ -76,9 +76,13 @@ Jet* FindJet(const unsigned char* v) noexcept {
 void JoinFlight(Jet& j,unsigned flight) noexcept { j.flight=flight; }
 unsigned NewFlight() noexcept { static unsigned next=100;return next++; }
 void Publish(bool) noexcept {}
+void HoldRef(const ObjRef&) noexcept {}   // the bodies live as long as the run: no weak references to count
+void DropRef(const ObjRef&) noexcept {}
 }  // namespace jet
 void CarrierFlames(const unsigned char*,unsigned char* const*,float,ULONGLONG) noexcept {}
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
+// No barrels in the stand-in world (the weapons' muzzles are the game's): nothing ever has its barrel on a line.
+bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept { return false; }
 bool JetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SubBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool PlayerJetBodyStep(unsigned char*,float*,float*) noexcept { return false; }

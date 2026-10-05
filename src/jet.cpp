@@ -63,17 +63,6 @@ constexpr ULONGLONG kFullLogMs=5000;   // wall ms between "the table is full" li
 using KickFn=void(*)(void*,void*);
 using CtrlFn=void(*)(void*);
 
-// The weak reference an entry holds on its object's control block (MSVC _Ref_count_base: uses +8, weaks +0xC,
-// vtable slot 1 deletes the block; booster.cpp holds its boosters' the same way).
-void HoldRef(const ObjRef& r) noexcept {
-    _InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(const_cast<void*>(r.ctrl))+0xC));
-}
-void DropRef(const ObjRef& r) noexcept {
-    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(r.ctrl));
-    if(!ctrl)return;
-    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(ctrl+0xC),-1)==1)(*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
-}
-
 // An entry of this mission let go of: its bay and doll torn down, its drones told their carrier is gone, the
 // reference dropped.
 void Release(Jet& j) noexcept {
@@ -86,6 +75,7 @@ void Release(Jet& j) noexcept {
         if(d.ref && d.primer.behind==j.ref.ctrl)PrimerUnlinked(d,false,GameMs());
         if(d.ref && d.primer.joining==j.ref.ctrl)d.primer.joining=nullptr;
     }
+    if(IsPrimer(j))PrimerDied(j);   // a shot-down centipede's body is posed on as it falls (its own reference)
     DropRef(j.ref);
     j=Jet{};
 }
@@ -270,6 +260,18 @@ void Sweep(ULONGLONG ms) noexcept {
     BoosterSweep(ms);
 }
 }  // namespace
+
+// The weak reference an entry holds on its object's control block (MSVC _Ref_count_base: uses +8, weaks +0xC,
+// vtable slot 1 deletes the block; booster.cpp holds its boosters' the same way).
+void HoldRef(const ObjRef& r) noexcept {
+    _InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(const_cast<void*>(r.ctrl))+0xC));
+}
+void DropRef(const ObjRef& r) noexcept {
+    using CtrlDelete=void(*)(void*);
+    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(r.ctrl));
+    if(!ctrl)return;
+    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(ctrl+0xC),-1)==1)(*reinterpret_cast<CtrlDelete* const*>(ctrl))[1](ctrl);
+}
 
 bool Alive(const ObjRef& r) noexcept {
     if(!r.obj || !r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return false;
@@ -494,6 +496,7 @@ void JetReap(const void* self) noexcept {
 // still there to drop it from, and keeping it would leak the block every mission.
 void ResetJets() noexcept {
     for(auto& j:jets){DropRef(j.ref);j=Jet{};}
+    ResetCorpses();
     ResetDolls();
     ResetWalls();
     ResetTargets();

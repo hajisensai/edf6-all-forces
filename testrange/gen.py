@@ -149,7 +149,7 @@ BIG = frozenset({'edf6tr_sub_carrier_mission'})
 
 # The Primer creatures (see PRIMER_FILES): what the range places, at most how many a wave, in all, and how far
 # over the ground spot it comes out (the centipede crawls: just over it; the dragonfly flies).
-PRIMER_KINDS: dict[str, tuple[int, int, float]] = {'edf6vc_centipede': (8, 40, 4.0), 'edf6vc_dragonfly': (4, 16, 40.0)}
+PRIMER_KINDS: dict[str, tuple[int, int, float]] = {'edf6vc_centipede': (16, 64, 4.0), 'edf6vc_dragonfly': (4, 16, 40.0)}
 # (sgo, label, flying)
 ENEMIES: list[tuple[str, str, bool]] = [
     ('giantant01', '巨蚁', False),
@@ -173,7 +173,8 @@ ENEMIES: list[tuple[str, str, bool]] = [
 # (PRIMER_FILES). per_wave of them (at most PRIMER_KINDS' first) come once no enemy is left, at most its second
 # in all: without the plugin they stay friends and would pile up.
 PRIMER_FILES = ('OBJECT/EDF6VC_CENTIPEDE.SGO', 'OBJECT/EDF6VC_DRAGONFLY.SGO', 'OBJECT/EDF6VC_CENTIPEDE.MRAB',
-                'OBJECT/EDF6VC_DRAGONFLY.MRAB', 'WEAPON/EDF6VC_PRIMER_SPIT.SGO', 'WEAPON/EDF6VC_PRIMER_NEEDLE.SGO')
+                'OBJECT/EDF6VC_DRAGONFLY.MRAB', 'WEAPON/EDF6VC_PRIMER_SPIT.SGO', 'WEAPON/EDF6VC_PRIMER_NEEDLE.SGO',
+                'WEAPON/EDF6VC_PRIMER_BARB.SGO', 'WEAPON/EDF6VC_PRIMER_STING.SGO')
 # The targets (enemy TARGET): groups of per_wave on the target spots (target_spots), every other spot raised
 # TARGET_AIR m (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. One
 # target a raised spot stayed up there on 2026-10-03 (EDF6VehicleCrew.log: its jets' targets marked (air)).

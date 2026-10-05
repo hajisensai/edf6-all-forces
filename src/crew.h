@@ -89,7 +89,7 @@ struct Config {
     float primerHpScale=1.0f;  // ...their HP, times the SGO's (centipede 400, dragonfly 600)
     bool primerFire=true;      // ...their guns fire
     bool primerTrace=false;    // ...a line each 0.1 s per creature into EDF6VehicleCrew.primer.csv (tools/primer_trace_view.py)
-    int centipedeLinkMax=12;   // ...the most centipedes linked into one (2-32)
+    int centipedeLinkMax=24;   // ...the most centipedes (one segment each) linked into one (2-48)
     float centipedeLinkRange=150.0f;// ...m a centipede goes to join another's tail from
     float centipedeWoundDamage=3.0f;// ...a split's headless front takes this many times the damage until its head is back
 };

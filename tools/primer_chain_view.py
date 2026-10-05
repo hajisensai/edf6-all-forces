@@ -1,10 +1,10 @@
-"""Renders a Primer centipede linked into one long creature, without the game: N individuals one link spacing apart
-(src/primer.cpp kLinkSpacing, read from the source) along a curve, each facing the one ahead of it (as primer.cpp
-flies a linked one), posed by tools/primer_pose_sim (src/primer_pose.h: the front one's tail hidden, the last one's
-head, both on the ones between, each half bent toward its neighbour: LinkBend, its limit read from the header),
-in the model's textures.
+"""Renders a Primer centipede linked into one long creature, without the game: N segments (one creature each) one link
+spacing apart (src/primer.cpp kLinkSpacing, read from the source) along a curve, each facing the one ahead of it (as
+primer.cpp flies a linked one), posed by tools/primer_pose_sim (src/primer_pose.h: the front one's tail hidden, the
+last one's head, both on the ones between; each a little later in its step than the one ahead, as primer.cpp steps
+a chain: kChainLag), in the model's textures.
 
-    python tools/primer_chain_view.py [--links 8] [--flying] [--out build/centipede_chain.png]
+    python tools/primer_chain_view.py [--links 16] [--flying] [--out build/centipede_chain.png]
 
 On the ground the curve is a lazy S on the plain; in the air it also climbs and dips (the long form flying).
 """
@@ -30,16 +30,6 @@ import primer_pose_view  # noqa: E402
 def link_spacing() -> float:
     with open(os.path.join(ROOT, 'src', 'primer.cpp'), encoding='utf-8') as h:
         return float(re.search(r'kLinkSpacing=([\d.]+)f', h.read()).group(1))
-
-
-def max_bend() -> float:
-    with open(os.path.join(ROOT, 'src', 'primer_pose.h'), encoding='utf-8') as h:
-        return float(re.search(r'kMaxBend=([\d.]+)f', h.read()).group(1))
-
-
-def link_bend(right: float, along: float, most: float) -> float:
-    """src/primer_pose.h LinkBend."""
-    return max(-most, min(most, math.atan2(right, max(along, 0.1))))
 
 
 def curve(n: int, spacing: float, flying: bool) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -72,29 +62,22 @@ def frame(p: np.ndarray, f: np.ndarray) -> np.ndarray:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--links', type=int, default=8)
+    ap.add_argument('--links', type=int, default=16)
     ap.add_argument('--flying', action='store_true')
     ap.add_argument('--out')
     ap.add_argument('--px', type=int, default=560)
     a = ap.parse_args(argv)
     md, binds = primer_pose_view.model('centipede')
     spacing = link_spacing()
-    most = max_bend()
     vs, ts, cs, base = [], [], [], 0
     links = curve(a.links, spacing, a.flying)
     for i, (p, f) in enumerate(links):
         m = frame(p, f)
-        right, fwd = m[0, :3], m[2, :3]
-        front = rear = 0.0
-        if i:
-            d = links[i - 1][0] - p
-            front = link_bend(float(d @ right), float(d @ fwd), most)
-        if i + 1 < a.links:
-            d = links[i + 1][0] - p
-            rear = -link_bend(float(d @ right), float(-(d @ fwd)), most)
         head, tail = ('0' if i > 0 else '1'), ('0' if i + 1 < a.links else '1')   # how much shows: hidden inside it
-        rows = primer_pose_view.run(['centipede-state', '15', '1' if a.flying else '0', head, tail, f'{front:.5f}',
-                                     f'{rear:.5f}', '0', '0.4'], binds)
+        # each a little later in its step: run its legs a step's share less far (the chain's wave)
+        until = max(0.02, 0.4 - i * 0.18 / 1.3)
+        rows = primer_pose_view.run(['centipede-state', '15', '1' if a.flying else '0', head, tail, '0', '-1',
+                                     f'{until:.3f}'], binds)
         v, t, c = model_view.geometry(md, {}, ['@tex'], rows[0][1])
         v4 = np.hstack([v, np.ones((len(v), 1))]) @ m
         vs.append(v4[:, :3])

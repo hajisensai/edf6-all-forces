@@ -3,8 +3,9 @@
 // tools/primer_pose_view.py to render with pylib/model_view.py. No game needed.
 //
 //   primer_pose_sim dragonfly|centipede T1 T2 ...  < binds.txt  > frames.txt
-//   primer_pose_sim centipede-state SPEED FLYING HEAD TAIL BENDFRONT BENDREAR WRITHE T  < binds.txt
-//     one moment in a given state (HEAD / TAIL: how much shows, 0 hidden .. 1 whole; WRITHE 0..1)
+//   primer_pose_sim centipede-state SPEED FLYING HEAD TAIL WRITHE DEAD T  < binds.txt
+//     one moment in a given state (HEAD / TAIL: how much shows, 0 hidden .. 1 whole; WRITHE 0..1; DEAD: s since
+//     it died, <0 alive)
 //     (tools/primer_chain_view.py: each link of a long one), stepped from 0 to T at that state
 //
 // binds.txt: one line per bone of the creature's pose table, "name m0 .. m15" (its bind local, row-major, as the
@@ -13,7 +14,7 @@
 //   dragonfly: cruising until 2, its target in reach from 2 (it arms: the abdomen curls, then it may fire);
 //   centipede: crawling alone at 15 m/s until 3, linked into the middle of a longer one from 3 (head and tail
 //     hidden), taking off with it at 4 (flying), the one ahead shot down at 5 (headless: it writhes while its head
-//     grows back over kRegrowSec).
+//     grows back over kRegrowSec), shot down itself at 9 (dead: legs folding in, head drooping, tail curling).
 #include "../src/primer_pose.h"
 #include <cstdio>
 #include <cstdlib>
@@ -45,9 +46,9 @@ bool ReadBinds(Bind* binds,int n) {
     return true;
 }
 
-void Print(const Bind& b,primer::Axis axis,float angle,float scale) {
+void Print(const Bind& b,primer::Axis axis,float angle,float scale,primer::Axis axis2=primer::kAxisX,float angle2=0.0f) {
     float out[16];
-    primer::TurnLocal(b.m,axis,angle,out,scale);
+    primer::TurnLocal2(b.m,axis,angle,axis2,angle2,out,scale);
     std::printf("bone %s",b.name);
     for(float x:out)std::printf(" %.6f",x);
     std::printf("\n");
@@ -78,10 +79,11 @@ primer::CentipedeInput CentipedeScene(float t) {
     const float split=5.0f;
     const float head=t<3.0f ? 1.0f : t<split ? 0.0f : (t-split)/primer::kRegrowSec;
     const bool regrowing=t>=split && head<1.0f;
-    return primer::CentipedeInput{t,15.0f,t>=4.0f,head>1.0f ? 1.0f : head,t<3.0f ? 1.0f : 0.0f,0.0f,0.0f,regrowing ? 1.0f-head : 0.0f};
+    return primer::CentipedeInput{t,15.0f,t>=4.0f,head>1.0f ? 1.0f : head,t<3.0f ? 1.0f : 0.0f,regrowing ? 1.0f-head : 0.0f,
+                                  t>=9.0f ? t-9.0f : -1.0f};
 }
 const char* StateName(const primer::CentipedeInput& in) {
-    return in.writhe>0.0f ? "headless, regrowing" : in.head<1.0f ? "linked" : in.flying ? "front, flying" : "alone";
+    return in.dead>=0.0f ? "dead" : in.writhe>0.0f ? "headless, regrowing" : in.head<1.0f ? "linked" : in.flying ? "front, flying" : "alone";
 }
 
 int Centipede(int argc,char** argv) {
@@ -95,10 +97,11 @@ int Centipede(int argc,char** argv) {
         const float until=std::strtof(argv[a],nullptr);
         while(t+dt*0.5f<until){t+=dt;phase=CentipedeStep(phase,CentipedeScene(t),dt);}
         const CentipedeInput in=CentipedeScene(t);
-        float angle[kCentipedeBoneCount],scale[kCentipedeBoneCount];
-        CentipedeAngles(in,phase,angle,scale);
+        float angle[kCentipedeBoneCount],angle2[kCentipedeBoneCount],scale[kCentipedeBoneCount];
+        CentipedeAngles(in,phase,angle,angle2,scale);
         std::printf("frame %.2f %s,%s head=%.2f\n",t,in.flying ? "flying" : "crawling",StateName(in),in.head);
-        for(int i=0;i<kCentipedeBoneCount;++i)Print(binds[i],kCentipedeBones[i].axis,angle[i],scale[i]);
+        for(int i=0;i<kCentipedeBoneCount;++i)
+            Print(binds[i],kCentipedeBones[i].axis,angle[i],scale[i],kCentipedeBones[i].axis2,angle2[i]);
     }
     return 0;
 }
@@ -106,11 +109,10 @@ int Centipede(int argc,char** argv) {
 
 int CentipedeState(int argc,char** argv) {
     using namespace primer;
-    if(argc!=8){std::fprintf(stderr,"centipede-state SPEED FLYING HEAD TAIL BENDFRONT BENDREAR WRITHE T\n");return 1;}
+    if(argc!=7){std::fprintf(stderr,"centipede-state SPEED FLYING HEAD TAIL WRITHE DEAD T\n");return 1;}
     const CentipedeInput base{0.0f,std::strtof(argv[0],nullptr),std::atoi(argv[1])!=0,std::strtof(argv[2],nullptr),
-                              std::strtof(argv[3],nullptr),std::strtof(argv[4],nullptr),std::strtof(argv[5],nullptr),
-                              std::strtof(argv[6],nullptr)};
-    const float until=std::strtof(argv[7],nullptr);
+                              std::strtof(argv[3],nullptr),std::strtof(argv[4],nullptr),std::strtof(argv[5],nullptr)};
+    const float until=std::strtof(argv[6],nullptr);
     Bind binds[kCentipedeBoneCount]{};
     for(int i=0;i<kCentipedeBoneCount;++i)std::snprintf(binds[i].name,sizeof(binds[i].name),"%ls",kCentipedeBones[i].name);
     if(!ReadBinds(binds,kCentipedeBoneCount))return 2;
@@ -119,10 +121,11 @@ int CentipedeState(int argc,char** argv) {
     CentipedeInput in=base;
     while(t+dt*0.5f<until){t+=dt;in.t=t;phase=CentipedeStep(phase,in,dt);}
     in.t=t;
-    float angle[kCentipedeBoneCount],scale[kCentipedeBoneCount];
-    CentipedeAngles(in,phase,angle,scale);
+    float angle[kCentipedeBoneCount],angle2[kCentipedeBoneCount],scale[kCentipedeBoneCount];
+    CentipedeAngles(in,phase,angle,angle2,scale);
     std::printf("frame %.2f state\n",t);
-    for(int i=0;i<kCentipedeBoneCount;++i)Print(binds[i],kCentipedeBones[i].axis,angle[i],scale[i]);
+    for(int i=0;i<kCentipedeBoneCount;++i)
+        Print(binds[i],kCentipedeBones[i].axis,angle[i],scale[i],kCentipedeBones[i].axis2,angle2[i]);
     return 0;
 }
 

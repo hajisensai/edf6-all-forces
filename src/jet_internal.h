@@ -347,13 +347,15 @@ struct PrimerState {
     const unsigned char* poseModel;
     unsigned char* poseRec[kPrimerParts];
     float poseBind[kPrimerParts][16];
-    bool posed;              // every part found
+    bool posed;              // every part found (its moving parts, then its aimed mounts: Pose)
     float phase,curl;
     ULONGLONG logAt;
     ULONGLONG regrowAt;      // a split's new front: game ms its head began to grow back (0: not growing)
     ULONGLONG tailAt;        // ...a split's new end: game ms its tail began to grow back (0: not growing)
-    const char* what;        // what it did this frame, and whether it fired (Debug, Trace)
-    bool fired;
+    float writheFace[3];     // writhing: the way it pointed when it began (Writhe swings it about that)
+    float headShown,tailShown;   // how much of its head / tail showed last frame (a corpse keeps them)
+    const char* what;        // what it did this frame, and what it fired (Debug, Trace: 1 spit, 2 stinger, 4 barbs)
+    int fired;
     ULONGLONG traceAt;
 };
 // The bomb bay of a jet that takes over a bomber (jet_bay.cpp).
@@ -560,6 +562,14 @@ void PrimerTeam(unsigned char* v) noexcept;
 // A centipede lost the one ahead of it (`front`: it is a front again) or the one behind it, shot down: its head (or
 // tail) grows back from now on (primer.cpp). From its own frame, or from Release when the other's entry goes first.
 void PrimerUnlinked(Jet& j,bool front,ULONGLONG ms) noexcept;
+// A centipede's entry let go of because it was shot down: its body is posed on as it falls (true: the corpse
+// took a reference on its control block); each physics step of a dead jet poses its corpse; a new mission
+// forgets them.
+bool PrimerDied(const Jet& j) noexcept;
+void PrimerCorpseStep(unsigned char* v) noexcept;
+void ResetCorpses() noexcept;
+void HoldRef(const ObjRef& r) noexcept;   // jet.cpp: a weak reference on an object's control block
+void DropRef(const ObjRef& r) noexcept;
 // A Primer creature's frame (from JetFrame, which has set the stock input aside and the clock).
 void PrimerFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept;
 

@@ -132,7 +132,7 @@ void Validate(Config& n) noexcept {
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("PrimerHpScale",n.primerHpScale,0.05f,100.0f);
-    n.centipedeLinkMax=static_cast<int>(FixInt("CentipedeLinkMax",n.centipedeLinkMax,2,32));
+    n.centipedeLinkMax=static_cast<int>(FixInt("CentipedeLinkMax",n.centipedeLinkMax,2,48));
     Fix("CentipedeLinkRange",n.centipedeLinkRange,10.0f,2000.0f);
     Fix("CentipedeWoundDamage",n.centipedeWoundDamage,1.0f,20.0f);
 }
