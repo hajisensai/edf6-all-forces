@@ -84,6 +84,14 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 
 8. **载具状态显示**（`src/hud.cpp`，ini `VehicleHud` / `VehicleHudCount` / `VehicleHudRange`，逆向笔记 `docs/hud-re.md`）：离玩家 500 米内最近的 6 台 NPC 驾驶的友军载具，头顶显示「机种 血量%  G 机炮余弹  M 导弹  D 剩余无人机出击  F 剩余燃料」一行和一条血条（没有的项不显示，燃料只对插件限时的喷气机、呼叫直升机显示，撤离时显示 RTB）；潜水母舰在屏幕右侧有自己的面板（深蓝底、青色边）：船体大血条和数值、4 个子系统各一条，打坏时显示 DOWN 和修复倒计时，舰上原有的血条保留。用游戏自己的 HUD 绘制（血条的四边形和救援提示的文字），独占全屏也能看到；日志 `HUD`（Debug=1）记下显示了什么。
 
+9. **星导者群体合体机（敌人）**（`src/jet_swarm.cpp`，设计与依据见 `docs/swarm-plan.md`，ini `Swarm` / `SwarmUnits` / `SwarmHpScale` / `SwarmRange` / `SwarmHeight` / `SwarmFire`）：一种新的**敌方**空中单位，一架核心带着一群小型无人机拼成一架「飞翼」整体飞行。全部是插件驾驶的 506 机体（同战斗机），只是队伍设为敌方、外形换成星导者的模型（安装器生成：核心是帝国无人机 ×0.5，约 42 米宽；无人机是金色小型无人机 ×0.5，约 9 米）：
+   - **出场**：任务脚本像放置战斗机一样放核心——`Preload("app:/object/edf6vc_swarm_core.sgo", -1);` 和 `CreateFriend("点名", "app:/object/edf6vc_swarm_core.sgo", 1.0, false);`。插件第一次看到它就把它改到敌方队伍，按 `SwarmHpScale` 放大耐久（核心 3000、无人机 250），在它离地 30 米后每帧放出最多 3 架无人机（共 `SwarmUnits` 架，默认 12），排进编队。测试场的敌人波次里选「星导者群体合体机」即可（场上没有敌人时才放下一批，最多 12 个核心）；
+   - **合体**：核心以 `SwarmRange`（默认 250 米）为半径、高出玩家 `SwarmHeight`（默认 70 米）绕玩家盘旋，每 30 秒从玩家头顶低空穿过一次。无人机按编队槽位贴着核心飞（核心的速度加上把它拉回槽位的修正），各自把机头（含俯仰）对准玩家，对准、在射程内时按「打 1.6 秒、停 2.4 秒」的节奏开火（各架错开）；核心的两门红色重炮对准就打。同一合体机的子弹互相穿过；
+   - **散开**：核心被打掉（或消失）后，剩下的无人机各自在 90–150 米的环上绕玩家飞，继续开火；
+   - **死亡行为（残骸冲锋）**：每架机体（核心、无人机）被打爆时不会当场坠毁：插件把它变成残骸，锁定玩家**此刻**的位置，翻滚着直线冲过去（不追踪；无人机最快 55 m/s，核心 40 m/s），到点、贴地、撞到建筑或 12 秒后引爆（无人机 300 伤害 / 10 米，核心 1000 伤害 / 25 米，敌方队伍：伤玩家和友军），随即删除。冲锋途中再打它一下，它按原版坠毁、不爆炸——空中拆掉。原理：原版扣血把 HP 夹在 `+0x2F0`（下限）和最大值之间，只有 HP ≤ 0 才判死亡；插件把合体机的下限设成 1，致命一击后它停在 1 HP，插件看到就转成残骸；
+   - 只瞄准本机玩家；联机未验证。友军 NPC 会不会主动打它、玩家的锁定武器能不能锁它，见 `docs/swarm-team-re.md`；
+   - 装了就每关预载这两个机体（模型约 33 MB），和其它插件机体一样；`Swarm=0` 时场上的合体机被删除。
+
 所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。
 
 ## 安装 / 卸载
@@ -133,6 +141,9 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 | 12 | 启动器勾强制装备（例如空袭兵 + 载具格选一台车），安装，进测试场那一项 | 兵种和武器是启动器选的；呼叫的载具是选的那台 | 启动时 `HOOK mission preload=2/2 online=2/2` 和 `HOOK loadout create=5/5`，进关 `MISSION start`、`LOADOUT preload ...` 和 `LOADOUT create ...` |
 | 13 | 撤退回主菜单，看装备界面 | 还是你原来的装备（强制装备没进存档） | — |
 | 14 | 任务中重试（暂停菜单） | 强制装备仍在 | 又一对 `LOADOUT` |
+| 15 | 测试场敌人选「星导者群体合体机」，每波 1，安装后进关等 30 秒 | 一架帝国无人机外形的核心升空，12 架金色小无人机围着它排成飞翼，绕你盘旋并朝你射击（紫色光弹、红色重炮） | `SWARM v=... swarmCore: enemy team 1`、12 行 `SWARM core ...: drone N`，`Debug=1` 每 2 秒一行 `SWARM v=... fire=` |
+| 16 | 打掉一架无人机 | 它不当场坠毁，翻滚着冲向你刚才站的位置，砸地爆炸；中途再打一下则直接坠毁、不炸 | `shot down: wreck diving at`、`wreck bursts (the ground/on its mark)` |
+| 17 | 打掉核心 | 核心残骸冲过来爆炸；其余无人机散开各自绕你飞、继续射击 | `drone N: its core is gone: scattered` |
 
 如果直升机飞得不对，把整个 `.log` 发回来。飞控每秒记录模式（`orbit` / `follow` / `run` / `aim` / `hold` …）、高度、爬升率、油门、悬停油门、旋翼转速、三个摇杆量和偏航学习状态。
 飞控增益（旧版的 `HeliMoveGain` / `HeliBrakeGain` / `HeliClimbGain` / `HeliHoverLearn`）已固定为常量，ini 里还有这几项会被忽略（日志说一次）。常见现象：
@@ -187,6 +198,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/crew.cpp`：NPC 上车（Vehicle_RideAi）、顶替（slot 49 FindSeat + 上车提示访问器）、每帧入口（slot 55 串接）。
 - `src/heli.cpp`：直升机自动驾驶。
 - `src/playerjet.cpp`：玩家驾驶的战斗机 / 攻击机飞控（`docs/player-jet-re.md`）。
+- `src/jet_swarm.cpp`：星导者群体合体机（敌人：编队、散开、残骸冲锋，`docs/swarm-plan.md`）。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
 - `docs/re-notes.md`：上车门槛与座位函数的逆向笔记；`docs/heli-input-re.md`：直升机输入块的逆向笔记。

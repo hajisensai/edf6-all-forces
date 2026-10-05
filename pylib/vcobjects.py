@@ -63,7 +63,24 @@ JET_BLAST_FILES: dict[str, tuple[float, float]] = {
 }
 JET_BLAST_ALIVE = 2.0
 _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES)
+# The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): an enemy. Its guns are the 506 gatling made a slow
+# glowing round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius,
+# colour, spread); its charges are the blast drone's point charge (the wreck sets it off where it hits:
+# name -> damage, radius m). Damage is per round against the player (the stock gatling's is 10, 20 a second).
+SWARM_GUN_STOCK = 'V_506HELI_GATLING01_L.SGO'
+SWARM_GUN_FILES: dict[str, tuple[float, float, float, float, float, float, tuple[float, float, float, float], float]] = {
+    # a member's: violet, 6 a second, 420 m
+    'EDF6VC_SWARM_GUN.SGO': (6.0, 10.0, 6.0, 70.0, 0.6, 0.0, (1.4, 0.5, 3.2, 1.0), 0.04),
+    # the core's: a red bolt every half second with a small blast, 600 m
+    'EDF6VC_SWARM_CANNON.SGO': (40.0, 30.0, 5.0, 120.0, 1.4, 3.0, (3.2, 0.5, 0.4, 1.0), 0.015),
+}
+SWARM_CHARGE_FILES: dict[str, tuple[float, float]] = {
+    'EDF6VC_SWARM_CHARGE_S.SGO': (300.0, 10.0),    # a member's wreck
+    'EDF6VC_SWARM_CHARGE_L.SGO': (1000.0, 25.0),   # the core's wreck
+}
+_SWARM_GUN, _SWARM_CANNON = ('app:/weapon/' + f.lower() for f in SWARM_GUN_FILES)
+_SWARM_CHARGE_S, _SWARM_CHARGE_L = ('app:/weapon/' + f.lower() for f in SWARM_CHARGE_FILES)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *SWARM_GUN_FILES, *SWARM_CHARGE_FILES)
 # Model sizes and boxes: pylib/jet_models.py (bind-pose vertices after scaling).
 JETS: dict[str, Jet] = {
     'edf6tr_jet_strike_mission': Jet(7001.0, 1500.0, _ARMS),
@@ -92,6 +109,16 @@ JETS: dict[str, Jet] = {
                             'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
     'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                            'EDF6VC_DRONE.MRAB', 'body', 'body', rigid=((0.0, -0.47, 1.08), (1.75, 1.04, 2.83))),
+    # The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md), on the enemy's side: the core (the Imperial
+    # drone x 0.5, 41.5 m across with its cannon arms, which the box takes in so they can be hit) a mission
+    # places, and the members it brings (the gold drone x 0.5, 9.4 m across). Weapon 2 is the charge its wreck
+    # sets off. Durability is the SGO's; the plugin scales it (SwarmHpScale).
+    'edf6tr_swarm_core_mission': Jet(7012.0, 3000.0, (_SWARM_CANNON, _SWARM_CANNON, _SWARM_CHARGE_L),
+                                     ('app:/object/edf6vc_swarm_core.mrab', 'e515_imperialufo.mdb'), 'EDF6VC_SWARM_CORE.MRAB',
+                                     'body', 'body', rigid=((0.0, -3.42, -5.113), (20.75, 7.455, 12.168))),
+    'edf6tr_swarm_unit': Jet(7013.0, 250.0, (_SWARM_GUN, _SWARM_GUN, _SWARM_CHARGE_S),
+                             ('app:/object/edf6vc_swarm_unit.mrab', 'e507_goldufo.mdb'), 'EDF6VC_SWARM_UNIT.MRAB',
+                             'body', 'body', rigid=((0.0, -0.595, 0.0), (4.695, 1.942, 4.695))),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
     # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
     # deck (y 163.08..193.08 over the origin; the tower above is not solid). Not the whole hull: afloat its
@@ -291,7 +318,20 @@ def jet_guns(game: Game) -> dict[str, bytes]:
         r.set('AmmoSpeed', JET_GUN_SPEED)
         r.set('AmmoAlive', JET_GUN_ALIVE)
         out[name] = dsgo.write(doc)
-    for name, (damage, radius) in JET_BLAST_FILES.items():
+    for name, (damage, gap, speed, alive, size, blast, colour, spread) in SWARM_GUN_FILES.items():
+        doc = dsgo.parse(game.read('WEAPON', SWARM_GUN_STOCK))
+        r = doc.root
+        if r.get('AmmoClass') != 'SolidBullet01' or len(r.get('AmmoColor').items) != 4:
+            raise ValueError(f'{SWARM_GUN_STOCK} 不是预期的直升机机炮')
+        flash = r.get('MuzzleFlash_CustomParameter')
+        for key, value in (('AmmoCount', 99999.0), ('AmmoDamage', damage), ('FireInterval', gap), ('AmmoSpeed', speed),
+                           ('AmmoAlive', alive), ('AmmoSize', size), ('AmmoExplosion', blast), ('FireAccuracy', spread)):
+            r.set(key, value)
+        r.get('AmmoColor').items[:] = list(colour)
+        if len(flash.items) == 10 and isinstance(flash.items[8], dsgo.Node) and len(flash.items[8].items) == 4:
+            flash.items[8].items[:] = list(colour)   # the muzzle flash in the round's colour
+        out[name] = dsgo.write(doc)
+    for name, (damage, radius) in {**JET_BLAST_FILES, **SWARM_CHARGE_FILES}.items():
         doc = dsgo.parse(game.read('WEAPON', JET_BLAST_STOCK))
         r = doc.root
         cp = r.get('Ammo_CustomParameter')

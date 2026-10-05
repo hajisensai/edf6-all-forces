@@ -113,6 +113,7 @@ bool ModFileThere(const wchar_t* file) noexcept {
 }
 
 bool Preloaded(Body b) noexcept { return preloaded[static_cast<int>(b)]; }
+unsigned NewFlight() noexcept { return nextFlight++; }
 bool SpawnReady() noexcept { return spawnOk; }
 
 void Facing(const float* heading,const float* at,float* m) noexcept {
@@ -123,13 +124,14 @@ void Facing(const float* heading,const float* at,float* m) noexcept {
 }
 
 // CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not what
-// its body is (a jet SGO without its mark, a heli SGO that is a jet), or nullptr.
-unsigned char* SpawnJet(Body b,const float* m) noexcept {
+// its body is (a jet SGO without its mark, a heli SGO that is a jet), or nullptr. `team`: friend, or the enemy
+// for the Primer swarm's drones (jet_swarm.cpp), set before RideAi seats the pilot as for CreateFriend.
+unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     InitParam param{image+kInitParamVtable,{}};
     unsigned char* v=CreateJet(b,m,&param);
     if(!v)return nullptr;
     if(bodyPartOk)FixBodyPart506(v,"JET");
-    reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
+    reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
     reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
     const BodyRow& row=Row(b);
     const bool jet=row.mark>0.0f;

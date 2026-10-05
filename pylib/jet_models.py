@@ -65,6 +65,11 @@ MODELS: dict[str, Recipe] = {
     'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5),
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
     'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
+    # The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): its core in the Imperial drone's model (83 m with
+    # its cannon arms, x 0.5) and its members in the gold drone's (19 m across, x 0.5). Both already have the
+    # root `mdl` and a level `body` bone, so only the scale changes.
+    'EDF6VC_SWARM_CORE.MRAB': Recipe('E515_IMPERIALUFO.MRAB', 'e515_imperialufo.mdb', 0.5),
+    'EDF6VC_SWARM_UNIT.MRAB': Recipe('E507_GOLDUFO.MRAB', 'e507_goldufo.mdb', 0.5),
 }
 # The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,
 # at its size in the missions (x 1: 1664 m long, 355 m wide, hull bottom to main deck 360 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the

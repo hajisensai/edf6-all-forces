@@ -120,6 +120,10 @@ void Validate(Config& n) noexcept {
     Fix("VehicleHudRange",n.vehicleHudRange,0.0f,10000.0f);
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
+    n.swarmUnits=static_cast<int>(FixInt("SwarmUnits",n.swarmUnits,0,16));
+    Fix("SwarmHpScale",n.swarmHpScale,0.05f,100.0f);
+    Fix("SwarmRange",n.swarmRange,60.0f,1000.0f);
+    Fix("SwarmHeight",n.swarmHeight,20.0f,400.0f);
 }
 
 // The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
@@ -189,6 +193,12 @@ void LoadConfig() noexcept {
     n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
     n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
     n.playerJetRamDamage=ReadFloat(L"PlayerJetRamDamage",n.playerJetRamDamage);
+    n.swarm=ReadBool(L"Swarm",n.swarm);
+    n.swarmUnits=ReadInt(L"SwarmUnits",static_cast<DWORD>(n.swarmUnits));
+    n.swarmHpScale=ReadFloat(L"SwarmHpScale",n.swarmHpScale);
+    n.swarmRange=ReadFloat(L"SwarmRange",n.swarmRange);
+    n.swarmHeight=ReadFloat(L"SwarmHeight",n.swarmHeight);
+    n.swarmFire=ReadBool(L"SwarmFire",n.swarmFire);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -201,6 +211,8 @@ void LoadConfig() noexcept {
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f",n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage);
+    Log("CONFIG swarm=%d units=%d hpScale=%.2f range=%.0f height=%.0f fire=%d",n.swarm,n.swarmUnits,n.swarmHpScale,n.swarmRange,
+        n.swarmHeight,n.swarmFire);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,

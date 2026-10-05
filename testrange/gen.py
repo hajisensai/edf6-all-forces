@@ -120,6 +120,7 @@ DERIVED: dict[str, str] = {
 BIG = frozenset({'edf6tr_sub_carrier_mission'})
 
 
+SWARM = 'edf6vc_swarm_core'   # the Primer swarm's core (see SWARM_FILES)
 # (sgo, label, flying)
 ENEMIES: list[tuple[str, str, bool]] = [
     ('giantant01', '巨蚁', False),
@@ -135,7 +136,14 @@ ENEMIES: list[tuple[str, str, bool]] = [
     ('e515_imperialufo', '帝国 UFO（飞）', True),
     ('dragonsmall401', '小龙（飞）', True),
     ('shootingtarget', '训练靶子（地面 + 空中，不动）', False),
+    (SWARM, '星导者群体合体机（插件，飞）', True),
 ]
+# The Primer swarm (src/jet_swarm.cpp, docs/swarm-plan.md): its core is placed like a jet (CreateFriend; the plugin
+# turns it to the enemy's side and brings its drones). Its SGOs are the installer's (tools/make_jets.py), which
+# the range only uses (SWARM_FILES). per_wave cores (at most SWARM_PER_WAVE) come once no enemy is left, at most
+# SWARM_MAX in all: without the plugin they stay friends and would pile up.
+SWARM_FILES = ('OBJECT/EDF6VC_SWARM_CORE.SGO', 'OBJECT/EDF6VC_SWARM_UNIT.SGO')
+SWARM_PER_WAVE, SWARM_MAX = 3, 12
 # The targets (enemy TARGET): groups of per_wave on the target spots (target_spots), every other spot raised
 # TARGET_AIR m (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. One
 # target a raised spot stayed up there on 2026-10-03 (EDF6VehicleCrew.log: its jets' targets marked (air)).
@@ -375,6 +383,29 @@ def script(plan: Plan, lay: Layout) -> str:
             '\t\tWait(1.0);',
             '\t}',
         ]
+    elif w.enabled and lay.enemy_points and w.enemy == SWARM:
+        per = max(1, min(int(w.per_wave), SWARM_PER_WAVE))
+        pts = ', '.join(_q(p.name) for p in lay.enemy_points)
+        lines += [
+            '',
+            '	// Primer swarms (EDF6VehicleCrew turns each core to the enemy and brings its drones): the next',
+            f'	// {per} once no enemy is left, at most {SWARM_MAX} in all.',
+            f'	array<string> spots = {{ {pts} }};',
+            '	uint next = 0;',
+            '	uint made = 0;',
+            f'	Wait({w.first_delay:.1f});',
+            '	while( true ) {',
+            f'		if( GetTeamObjectCount(TEAM_ID_ENEMY) == 0 && made < {SWARM_MAX} ) {{',
+            f'			for( uint i = 0; i < {per}; i++ ) {{',
+            f'				CreateFriend(spots[next % spots.length()], {_q("app:/object/" + SWARM + ".sgo")}, {w.level:.2f}, false);',
+            '				next++;',
+            '				made++;',
+            '			}',
+            f'			Wait({max(w.interval, 10.0):.1f});',
+            '		}',
+            '		Wait(1.0);',
+            '	}',
+        ]
     elif w.enabled and lay.enemy_points:
         spawn = 'CreateEnemyGroup'
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
@@ -429,15 +460,18 @@ def has_mission_setup(game: Game, sgo_name: str) -> bool:
     return isinstance(values, dict) and 'mission_setup' in values
 
 
-def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
+def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str, ...] = ()) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only), with the
     models and guns they use, and records in the ledger (pylib/ledger.py) every file the range now needs:
-    what it wrote and what it uses from tools/make_jets.py (the elevon bomber). What it needed before and does
-    not now is released, so a model or gun nobody else needs goes with it."""
+    what it wrote and what it uses from tools/make_jets.py (the elevon bomber, `uses`: the swarm's SGOs). What it
+    needed before and does not now is released, so a model or gun nobody else needs goes with it."""
     led = ledger.Ledger(game_root)
     before = set(led.owned_by(OWNER))
     jets = wanted & JETS.keys()
     held = {ledger.key(f'OBJECT/{name.upper()}.SGO') for name in wanted}
+    for rel in uses:
+        led.need(OWNER, rel)
+        held.add(ledger.key(rel))
     for f in sorted({JETS[n].file for n in jets if JETS[n].file}):
         held.add(_need_model(led, game, f))
     if jets:
@@ -511,8 +545,11 @@ def install(game_root: str, plan: Plan) -> list[str]:
     placed = [(s, npc, p) for s, npc, p in spots_for(plan, layout(rmpa.points(points_file), small_count(plan)))]
     if plan.waves.enabled and plan.waves.enemy == TARGET:
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
+    swarm = plan.waves.enabled and plan.waves.enemy == SWARM
+    if swarm and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in SWARM_FILES):
+        raise RuntimeError('没有星导者群体合体机的机体（Mods/OBJECT/EDF6VC_SWARM_*.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
     os.makedirs(out, exist_ok=True)
-    _write_derived(game_root, game, {s for s, _ in placements(plan) if s in DERIVED})
+    _write_derived(game_root, game, {s for s, _ in placements(plan) if s in DERIVED}, SWARM_FILES if swarm else ())
     with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
         f.write(b'\xef\xbb\xbf' + text.encode('utf-8'))
     with open(os.path.join(out, 'MISSION.RMPA'), 'wb') as f:

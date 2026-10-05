@@ -192,6 +192,7 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
         return;
     case Weapon::shells:
     case Weapon::drones:
+    case Weapon::swarm:   // flown by SwarmFrame, never here
         Circle(j,pos,anchor,height,ms,want,speed);
         return;
     }
@@ -351,6 +352,7 @@ void JetFrame(unsigned char* v) noexcept {
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,1.0f);Put<float>(v,kInW,1.0f);
     if(j->drone.blastAt){Blast(*j,v,ms);return;}
+    if(IsSwarm(*j)){SwarmFrame(*j,v,pos,dt,ms);return;}   // the Primer swarm: an enemy, flown by jet_swarm.cpp
 
     const Kind& kind=KindOf(*j);
     ExtendLock(v,kind.missileRange);

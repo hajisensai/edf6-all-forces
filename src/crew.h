@@ -67,6 +67,12 @@ struct Config {
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take the HP share it lost times this (0: none)
+    bool swarm=true;           // the Primer swarm (an enemy: EDF6VC_SWARM_CORE a mission places) is flown by the plugin (jet_swarm.cpp)
+    int swarmUnits=12;         // ...the drones a core brings (0-16)
+    float swarmHpScale=1.0f;   // ...its HP, times the SGO's (core 3000, drone 250)
+    float swarmRange=250.0f;   // ...metres from the player it circles at
+    float swarmHeight=70.0f;   // ...metres over the player
+    bool swarmFire=true;       // ...its guns fire (its wrecks' charges go off either way)
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.

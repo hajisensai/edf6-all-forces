@@ -52,8 +52,8 @@ constexpr unsigned kPlacedFlight=1;    // the jets a mission places (see jet_hoo
 // Flight, per role (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
 // it first flew). The stock bombers fly 3 m a frame (180 m/s): the strike jet attacks at that, the fighter
 // is faster and pulls harder. Every distance of an attack scales with the turn radius v^2/(n g).
-enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship };
-constexpr int kRoleCount=9;
+enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship, swarmCore, swarmUnit };
+constexpr int kRoleCount=11;
 // What a role goes for first: ground or flying targets (the other only with none of its own), or either.
 enum class Prefer { ground, air, any };
 // How it flies: a wing (JetSteer: lift along its up, it banks to turn) or a rotor craft (Hover: it goes
@@ -61,8 +61,8 @@ enum class Prefer { ground, air, any };
 enum class FlightModel { wing, rotor };
 // What it fights with: guns and missiles (it flies at its targets: Strike, Chase, Missile), shells from where
 // it flies (the gunship: GunshipFire), drones it launches (the carrier: LaunchDrones), or a charge it carries
-// into the enemy (the blast and doll drones: Detonate).
-enum class Weapon { guns, shells, drones, charge };
+// into the enemy (the blast and doll drones: Detonate), or the Primer swarm's own (jet_swarm.cpp: it is an enemy).
+enum class Weapon { guns, shells, drones, charge, swarm };
 // The bones it moves: elevons (Elevons), the carrier's nacelles (Thrusters), or none.
 enum class Pose { none, elevons, thrusters };
 // How a rotor craft shows its thrust: `pitchShare` of the fore-and-aft part leans its body (1: all, as a
@@ -83,13 +83,15 @@ constexpr float kThrustDrag=0.12f;
 constexpr float kCarrierPitchShare=0.8f,kCarrierBank=2.5f;
 inline constexpr Lean kRotorLean{1.0f,0.0f,0.0f,0.0f,kHoverLean,1.0f};
 inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f,kCarrierBank};
+// The Primer swarm's core (jet_swarm.cpp): heavy, it swings into a move instead of sliding.
+inline constexpr Lean kSwarmCoreLean{0.8f,0.0f,1.5f,2.0f,0.25f,1.5f};
 
 // The bodies a jet flies in (and the helis the Air Raider calls): the SGO, its file in Mods/OBJECT, the mark its
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier };
-constexpr int kBodyCount=15;
+                  gunship, blastCarrier, dollCarrier, swarmCore, swarmUnit };
+constexpr int kBodyCount=17;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -120,6 +122,9 @@ inline constexpr BodyRow kBodies[kBodyCount]={
      "blastCarrier"},
     {Body::dollCarrier,L"app:/object/edf6vc_jet_doll_carrier.sgo",L"EDF6VC_JET_DOLL_CARRIER.SGO",7010.0f,Role::carrier,Role::doll,
      "dollCarrier"},
+    // The Primer swarm (jet_swarm.cpp, docs/swarm-plan.md), an enemy: the core a mission places, the drones it brings.
+    {Body::swarmCore,L"app:/object/edf6vc_swarm_core.sgo",L"EDF6VC_SWARM_CORE.SGO",7012.0f,Role::swarmCore,Role::swarmUnit,"swarmCore"},
+    {Body::swarmUnit,L"app:/object/edf6vc_swarm_unit.sgo",L"EDF6VC_SWARM_UNIT.SGO",7013.0f,Role::swarmUnit,Role::swarmUnit,"swarmUnit"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -193,6 +198,12 @@ inline constexpr Kind kKinds[kRoleCount]={
     // slow, never diving; it shells ground targets in reach from where it flies (GunshipFire).
     {Role::gunship,"gunship",Prefer::ground,FlightModel::wing,Weapon::shells,Pose::elevons,nullptr, 120.0f,120.0f,70.0f, 3.0f,3.0f, 2.0f,0.3f,
      350.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 600.0f,80.0f, 0.0f,0.0f, 1500.0f, 0.0f,3.0f, 0.0f,false,Body::gunship},
+    // The Primer swarm (jet_swarm.cpp flies them; only cruise, thrust, brake, roll and the lean are read): rotor
+    // craft, the core slow and heavy, its drones quick (scattered, Hover).
+    {Role::swarmCore,"swarmCore",Prefer::any,FlightModel::rotor,Weapon::swarm,Pose::none,&kSwarmCoreLean, 40.0f,40.0f,0.0f, 6.0f,5.0f,
+     1.3f,0.8f, 70.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1500.0f, 0.0f,1.0f, 0.0f,false,Body::swarmCore},
+    {Role::swarmUnit,"swarmUnit",Prefer::any,FlightModel::rotor,Weapon::swarm,Pose::none,&kRotorLean, 45.0f,45.0f,0.0f, 25.0f,25.0f,
+     4.0f,3.0f, 35.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1500.0f, 0.0f,1.0f, 0.0f,false,Body::swarmUnit},
 };
 constexpr bool KindsInOrder() noexcept {
     for(int i=0;i<kRoleCount;++i) {
@@ -292,6 +303,25 @@ struct DroneState {
     int slot;
     ULONGLONG blastAt;       // a charge: game ms it went (0: not yet)
 };
+// The Primer swarm's (jet_swarm.cpp). A core: its drones' formation (`spawned` launched so far, none at all once
+// `noUnits`), its orbit round the player and its passes over them. A drone: its core (the core entry's control block;
+// nullptr: scattered) and its slot. Either, shot down to its HP floor: a wreck diving at `aimAt` (where the player was).
+struct SwarmState {
+    bool init;               // team, HP and flight set
+    const void* core;        // a drone's core (its control block), else nullptr
+    int slot;                // a drone's place in the formation (and its ring, scattered)
+    int spawned;             // a core's drones launched
+    bool noUnits;            // a core that can launch none (no drone body, the table full)
+    bool scattered;          // a drone whose core is gone
+    float orbit;             // rad: the core's (a scattered drone's) angle round the player
+    bool pass;               // the core is passing over the player, to passTo
+    float passTo[3];
+    ULONGLONG passAt;        // game ms the last pass began (or the core came)
+    bool wreck;              // shot down: diving at aimAt
+    float aimAt[3],spin[3];
+    ULONGLONG wreckAt;
+    ULONGLONG fireLogAt;
+};
 // The bomb bay of a jet that takes over a bomber (jet_bay.cpp).
 struct BayState {
     unsigned char* ifc;      // the bomb bay (see kIfcCtor), or nullptr
@@ -334,6 +364,7 @@ struct Jet {
     DroneState drone;
     BayState bay;
     ShellState shells;
+    SwarmState swarm;
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -452,7 +483,9 @@ void ResetShells() noexcept;
 void Facing(const float* heading,const float* at,float* m) noexcept;
 // Whether body `b`'s SGO was preloaded this mission (PreloadJets): only those are spawned.
 bool Preloaded(Body b) noexcept;
-unsigned char* SpawnJet(Body b,const float* m) noexcept;
+// CreateFriend's steps (CreateObject, SetTeam(team), RideAi(true)): the vehicle, or nullptr.
+unsigned char* SpawnJet(Body b,const float* m,std::int32_t team=kTeamFriend) noexcept;
+unsigned NewFlight() noexcept;   // a flight number no jet has (the Primer swarm's)
 bool ModFileThere(const wchar_t* file) noexcept;   // Mods/OBJECT (next to the game's exe) holds `file`
 // A jet launched now from `source`, flying `b` along `heading` at `speed` to work round `target`: its entry
 // (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets).
@@ -462,6 +495,12 @@ bool SpawnReady() noexcept;
 bool InstallSpawn() noexcept;
 bool InstallFarRender() noexcept;
 void ResetFlights() noexcept;
+
+// --- jet_swarm.cpp ---
+constexpr std::int32_t kTeamEnemy=1;
+inline bool IsSwarm(const Jet& j) noexcept { return j.role==Role::swarmCore || j.role==Role::swarmUnit; }
+// A swarm core's or drone's frame (from JetFrame, which has set the stock input aside and the clock).
+void SwarmFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept;
 
 // --- jet_hooks.cpp ---
 // The read-only copy of who is in which flight the bullets' pass-through reads (any thread): published by
