@@ -1612,6 +1612,15 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
             r.sym=j.sym;
+            if(j.board && j.board->frame==pjet::Airframe::rotor) {   // the helicopter HUD's (hud.cpp HeliHud)
+                HeliFlight& f=r.heli;
+                r.rotor=true;r.aiming=false;
+                std::memcpy(f.vel,j.vel,12);
+                f.speed=std::sqrt(j.vel[0]*j.vel[0]+j.vel[2]*j.vel[2]);f.clear=r.clear;f.ground=ground;f.climb=j.climb;
+                f.hp=r.hp;f.hpMax=r.hpMax;f.keys=j.keys;f.landed=!air;
+                f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=f.aiming && j.hover.holding;
+                f.setSpeed=j.hover.speed;f.top=j.hoverTop;std::memcpy(f.aim,r.aim,12);
+            }
             *out=r;
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}

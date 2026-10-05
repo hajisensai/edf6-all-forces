@@ -1976,10 +1976,13 @@ void PlayerAssist(unsigned char* v) noexcept {
 // the stock throttle (Space lifts it off, as before), and for kLiftOffMs after it no horizontal stick (the NPC's).
 // The descend key is the brake key (ini PlayerJetBrakeKey): the stock keyboard has none, letting go of Space only spun
 // the rotor down.
+// The readout (PlayerHeliHud, ini HeliFlightHud) is gathered whether or not the mouse flies it.
 constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
 constexpr float kPlayerClimb=6.0f;     // m/s: Space / the brake key (the stock rotor's most is ~8: aircraft-re.md)
 constexpr float kPlayerMark=800.0f;    // m: the aim's mark ahead (playerjet.cpp kAimMark), kept within kAimOnScreen
 constexpr float kAimOnScreen=0.85f;
+constexpr float kMovingSpeed=5.0f;     // m/s: slower, it has no flight path to mark (the HUD shows its drift)
+constexpr float kThreatRadius=20.0f;   // m: a missile's lock point this near it homes on it (playerjet.cpp's)
 struct Pilot {
     ObjRef ref;
     ULONGLONG seen,lastMs,groundAt;
@@ -2052,9 +2055,48 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     p.flying=true;
 }
 
+// The HUD's readout (the flight's state; the threats as the jets' Threats gathers them), published for HudPublish.
+SRWLOCK heliHudLock=SRWLOCK_INIT;
+PlayerHeliReadout heliHud{};
+ULONGLONG heliHudAt=0;
+void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,float clear,bool keys) noexcept {
+    PlayerHeliReadout r{};
+    HeliFlight& f=r.f;
+    std::memcpy(f.vel,p.vel,12);
+    f.speed=std::sqrt(p.vel[0]*p.vel[0]+p.vel[2]*p.vel[2]);
+    f.ground=clear!=kNoGround;f.clear=f.ground ? clear : pos[1];f.climb=p.vel[1];
+    f.hp=At<float>(v,kHp);f.hpMax=At<float>(v,kHpMax);
+    f.keys=keys;f.aiming=p.flying;f.holding=p.flying && p.hold.holding;f.landed=grounded;
+    f.setSpeed=p.hold.speed;f.top=PlayerTop(v);
+    for(int i=0;i<3;++i)f.aim[i]=pos[i]+p.aim[i]*kPlayerMark;
+    if(grounded) {
+        const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass),rotor=At<float>(v,kRotor);
+        if(lift>1.0f && mass>0.0f && std::isfinite(lift+mass+rotor)){f.rotor=rotor;f.hover=kStockHover*kStockLift/lift*mass;}
+    }
+    PlayerJetSymbols& y=r.sym;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    std::memcpy(y.pos,pos,12);
+    y.nose[0]=m[8];y.nose[1]=m[9];y.nose[2]=m[10];
+    const float nl=std::sqrt(y.nose[0]*y.nose[0]+y.nose[1]*y.nose[1]+y.nose[2]*y.nose[2]);
+    if(std::isfinite(nl) && nl>0.5f)for(auto& c:y.nose)c/=nl;
+    else{y.nose[0]=0.0f;y.nose[1]=0.0f;y.nose[2]=1.0f;}
+    const float sp=std::sqrt(p.vel[0]*p.vel[0]+p.vel[1]*p.vel[1]+p.vel[2]*p.vel[2]);
+    y.moving=sp>kMovingSpeed;
+    if(y.moving)for(int i=0;i<3;++i)y.dir[i]=p.vel[i]/sp;
+    int n=MissilesHomingAt(pos,kThreatRadius,y.threatAt,kMostThreats);
+    if(n>kMostThreats)n=kMostThreats;
+    for(int i=0;i<n;++i)y.threatKind[i]=2;
+    const int locks=jet::LockersOf(v,y.threatAt+n,kMostThreats-n);
+    for(int i=n;i<n+locks;++i)y.threatKind[i]=1;
+    y.threats=n+locks;
+    AcquireSRWLockExclusive(&heliHudLock);
+    heliHud=r;heliHudAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&heliHudLock);
+}
+
 // The player in seat 0 of a stock heli, each frame after PlayerAssist.
 void PlayerHeli(unsigned char* v) noexcept {
-    if(!Cfg().heliMouseAim)return;
+    if(!Cfg().heliMouseAim && !Cfg().heliFlightHud)return;
     float fwd[3],right[3];
     if(!Row(v,kHeadForward,fwd) || !Row(v,kHeadRight,right))return;
     const ULONGLONG ms=GameMs();
@@ -2077,6 +2119,7 @@ void PlayerHeli(unsigned char* v) noexcept {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
         p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
     }
+    if(Cfg().heliFlightHud)PublishHud(*p,v,pos,grounded,clear,keys);
 }
 }  // namespace
 
@@ -2102,6 +2145,14 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     bool playerAboard=false;
     for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || SeatRider(SeatAt(vehicle,i))==Rider::player;
     Fly(*h,vehicle,playerAboard);
+}
+
+bool PlayerHeliHud(PlayerHeliReadout* out) noexcept {
+    AcquireSRWLockShared(&heliHudLock);
+    const bool fresh=heliHudAt && GetTickCount64()-heliHudAt<=kCueFreshMs;
+    if(fresh)*out=heliHud;
+    ReleaseSRWLockShared(&heliHudLock);
+    return fresh;
 }
 
 void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept {

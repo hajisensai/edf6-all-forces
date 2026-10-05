@@ -244,6 +244,7 @@ void LoadConfig() noexcept {
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
     n.heliMouseAim=ReadBool(L"HeliMouseAim",n.heliMouseAim);
+    n.heliFlightHud=ReadBool(L"HeliFlightHud",n.heliFlightHud);
     n.jetEntrySmoke=ReadBool(L"JetEntrySmoke",n.jetEntrySmoke);
     n.playerJetGunSight=ReadBool(L"PlayerJetGunSight",n.playerJetGunSight);
     n.playerJetFlightHud=ReadBool(L"PlayerJetFlightHud",n.playerJetFlightHud);
@@ -274,7 +275,8 @@ void LoadConfig() noexcept {
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.1f missile=%d/%lums landMs=%lu",
         n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
-    Log("CONFIG playerHeliStopSec=%.2f gunSight=%d mouseAim=%d",n.playerHeliStopSec,n.playerHeliGunSight,n.heliMouseAim);
+    Log("CONFIG playerHeliStopSec=%.2f gunSight=%d mouseAim=%d flightHud=%d",n.playerHeliStopSec,n.playerHeliGunSight,n.heliMouseAim,
+        n.heliFlightHud);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
