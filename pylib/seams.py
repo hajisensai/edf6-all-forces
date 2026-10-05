@@ -12,13 +12,19 @@ over BAND metres from the edge with a smoothstep, so only the ring pieces move, 
     delta(x, z) = wx Dx(sx, z) + wz Dz(sz, x) - wx wz Dc(sx, sz)
 
 with sx, sz the sides nearest to the point, w = smoothstep(1 - distance to the edge / BAND), Dx / Dz the edge
-corrections along the edge and Dc the corner correction (Dx and Dz agree at the corners, so delta is exactly Dx on
-an x edge and exactly Dz on a z edge). Each asset (collision, the near terrain, the far terrain) gets a field made
+corrections along the edge and Dc the corner correction. The x and z edge profiles meeting at a corner are pinned to
+one height there (their mean; they may differ by CORNER_TOL / corner_tol), so Dx and Dz agree at the corners and
+delta is exactly Dx on an x edge and exactly Dz on a z edge. Each asset (collision, the near terrain, the far terrain) gets a field made
 from its own edge profile: its edges end up equal to each other and the asset's relation to the others is kept.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
+
+if TYPE_CHECKING:
+    import mdb
 
 HALF = 1750.0      # m: half the block (the ring's outer edge)
 INNER = 1250.0     # m: half the middle ground (never moved)
@@ -47,6 +53,13 @@ class Profile:
             raise ValueError('edge vertices span only %.1f .. %.1f' % (ut[0], ut[-1]))
         self.t, self.y = ut, uy
 
+    def pin(self, t: float, y: float) -> None:
+        """The profile passes through (t, y) (an end: the corner both edges meeting there must agree on)."""
+        keep = np.abs(self.t - t) > 1e-3
+        self.t, self.y = np.append(self.t[keep], t), np.append(self.y[keep], y)
+        order = np.argsort(self.t)
+        self.t, self.y = self.t[order], self.y[order]
+
     def __call__(self, t: np.ndarray | float) -> np.ndarray:
         return np.interp(t, self.t, self.y)
 
@@ -71,7 +84,9 @@ class Field:
                 a, b = float(self.px[sx](sz * HALF)), float(self.pz[sz](sx * HALF))
                 if abs(a - b) > corner_tol:
                     raise ValueError('corner (%d, %d): x edge %.3f m, z edge %.3f m' % (sx * HALF, sz * HALF, a, b))
-                corner.append(a)
+                corner.append(0.5 * (a + b))
+                self.px[sx].pin(sz * HALF, 0.5 * (a + b))
+                self.pz[sz].pin(sx * HALF, 0.5 * (a + b))
         self.c = float(np.mean(corner))
 
     def target_x(self, t: np.ndarray) -> np.ndarray:
@@ -121,14 +136,14 @@ class Field:
         return out / np.linalg.norm(out, axis=1, keepdims=True)
 
 
-def mdb_points(md: 'object') -> np.ndarray:
+def mdb_points(md: 'mdb.Mdb') -> np.ndarray:
     """Every POSITION of a static (one identity bone) MDB, model space == world space for a piece at (0, 0, 0)."""
     import mdb
     return np.concatenate([np.array([v[:3] for v in mdb.read_elem(me, 'POSITION')])
                            for o in md.objects for me in o.meshes])
 
 
-def apply_mdb(md: 'object', field: Field) -> int:
+def apply_mdb(md: 'mdb.Mdb', field: Field) -> int:
     """Moves every vertex of the MDB by `field` (positions and normals; the tangent frame is re-orthogonalised to
     the new normal); returns the number of vertices moved."""
     import struct

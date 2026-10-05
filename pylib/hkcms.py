@@ -207,16 +207,19 @@ class Cms:
             changed = True
         if not changed:
             return False
+        all_y = np.concatenate([new_sy] + list(packed_new.values()))
         if len(sp):
-            self._requantize_shared(sp, new_sy)
+            self._requantize_shared(new_sy, float(all_y.min()), float(all_y.max()))
         for k, ny in packed_new.items():
             self._requantize_packed(self.sections[k], ny)
         self._refresh_bounds()
         return True
 
-    def _requantize_shared(self, sp: np.ndarray, ny: np.ndarray) -> None:
+    def _requantize_shared(self, ny: np.ndarray, ylo: float, yhi: float) -> None:
+        """Shared vertices re-quantized over a domain whose y is [ylo, yhi]: the range of *every* new vertex of
+        the mesh, shared and packed, so the domain never has to grow afterwards (that would move them all)."""
         lo, hi = self.domain.copy()
-        lo[1], hi[1] = float(ny.min()), float(ny.max()) + 1e-3
+        lo[1], hi[1] = ylo, yhi + 1e-3
         lo, hi = _f32_out(np.array([lo, hi]))
         ylo, yhi = lo[1], hi[1]
         v = self.sv.astype(np.uint64)
@@ -240,7 +243,7 @@ class Cms:
         _, at, _ = self.tag.item(self.pv_item)
         o = at + 4 * s.first_packed
         self.buf[o:o + 4 * s.num_packed] = self.pv[s.first_packed:s.first_packed + s.num_packed].tobytes()
-        s.parms = parms
+        s.parms = parms.astype(np.float32).astype(np.float64)
         struct.pack_into('<6f', self.buf, s.at + self.tag.offset('hkcdStaticMeshTree::Section', 'codecParms'),
                          *parms)
 
@@ -267,8 +270,12 @@ class Cms:
             _put_aabb(self.buf, s.at + self._sec_domain_off, dom)
             self._encode_section_tree(s, pb)
             boxes.append(dom)
-        self.domain[0] = np.minimum(self.domain[0], np.min([b[0] for b in boxes], 0))
-        self.domain[1] = np.maximum(self.domain[1], np.max([b[1] for b in boxes], 0))
+        grown = np.array([np.minimum(self.domain[0], np.min([b[0] for b in boxes], 0)),
+                          np.maximum(self.domain[1], np.max([b[1] for b in boxes], 0))])
+        if self.sv.size and not np.array_equal(grown, self.domain):
+            # the shared vertices are quantized over the domain: growing it now would move every one of them
+            raise ValueError('a section outgrew the mesh domain its shared vertices were quantized over')
+        self.domain = grown
         _put_aabb(self.buf, self.domain_at, self.domain)
         self._encode_mesh_tree()
         refresh_simd(self.tag, self.buf, self.simd_item, lambda key: prim_boxes[key >> 1])
@@ -406,22 +413,24 @@ def bound_problems(tag: Tag, buf: bytes | bytearray, compound_item: int) -> list
     """Every box of a compound of compressed meshes that does not contain what it should (empty = sound): the
     compound's aabb and simd tree, each mesh's domain, section domains, section trees and simd tree."""
     out: list[str] = []
-    eps = 2e-3
     comp = Compound(tag, bytearray(buf), compound_item)
+    N = 'hkcdSimdTree::Node'
+    size, o_data, o_leaf = tag.size(N), tag.offset(N, 'data'), tag.offset(N, 'isLeaf')
     cbox = _aabb(buf, comp.aabb_at)
 
     def inside(p: np.ndarray, box: np.ndarray) -> bool:
-        return bool((p >= box[0] - eps).all() and (p <= box[1] + eps).all())
+        p = np.asarray(p, dtype=np.float32).astype(np.float64)
+        return bool((p >= box[0]).all() and (p <= box[1]).all())
 
     def simd(item_idx: int, leaf_pts: Callable[[int], np.ndarray], what: str) -> None:
         _, at, n = tag.item(item_idx)
         for k in range(1, n):
-            o = at + 128 * k
+            o = at + size * k
             f = np.frombuffer(bytes(buf[o:o + 96]), '<f4').reshape(6, 4).astype(np.float64)
             lo, hi = np.stack([f[0], f[2], f[4]], 1), np.stack([f[1], f[3], f[5]], 1)
-            if not buf[o + 112]:
+            if not buf[o + o_leaf]:
                 continue
-            data = struct.unpack_from('<4I', buf, o + 96)
+            data = struct.unpack_from('<4I', buf, o + o_data)
             for l in range(4):
                 if lo[l, 0] <= hi[l, 0] and not inside(leaf_pts(data[l]), np.array([lo[l], hi[l]])):
                     out.append('%s simd node %d lane %d' % (what, k, l))

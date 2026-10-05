@@ -105,7 +105,7 @@ class Mesh:
     base: int                      # offset of the 0x3C mesh record inside the leaf blob
     flags: int                     # +0x00 (2 in stock files)
     indices: list[int]             # +0x04 count, +0x08 rel offset -> u16
-    grid: tuple                    # +0x0C: cell x, cell z (f32), cols, rows (u32), origin x, origin z (f32), fmt, layers
+    grid: tuple[float | int, ...]  # +0x0C: cell x, cell z (f32), cols, rows (u32), origin x, origin z (f32), fmt, layers
     weight_count: int              # +0x2C count of 0x50-byte splat records, +0x34 rel offset
     weight_off: int
     layermap_count: int            # +0x30 count of 0x10-byte layer-index records, +0x38 rel offset
@@ -134,7 +134,7 @@ class Chunk:
     offset: int                    # in the source file
     end: int                       # end of its data (before alignment padding)
     kind: int
-    aabb: tuple                    # centre xyz, half xyz as stored in the chunk header
+    aabb: tuple[float, ...]        # centre xyz, half xyz as stored in the chunk header
     children: tuple = ()           # node: (left_start, right_start); left child = right_start-1, right child = index-1
     stored: bytes = b''            # leaf: the CMPL stream as stored
 

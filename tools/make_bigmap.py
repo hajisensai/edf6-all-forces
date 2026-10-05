@@ -123,10 +123,10 @@ def build_map(root: str, radius: int) -> bytes:
 
 
 def edge_gap(pts: np.ndarray, eps: float) -> float:
-    """Largest height difference between opposite block edges, sampled every 25 m along them (points within eps of
-    an edge line count as on it; heights in between linear)."""
+    """Largest height difference between opposite block edges, sampled every 25 m along their whole length (points
+    within eps of an edge line count as on it; heights in between linear, held flat past the last one)."""
     worst = 0.0
-    ts = np.arange(-seams.HALF + 50.0, seams.HALF - 49.0, 25.0)
+    ts = np.linspace(-seams.HALF, seams.HALF, 141)
     for ax in (0, 2):
         prof = []
         for side in (-1, 1):
