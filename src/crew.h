@@ -539,6 +539,26 @@ bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept;     // saz
 // as a heli; with the player in seat 0 it walks and flies; its bones are posed every frame.
 bool IsSazabi(const void* vehicle) noexcept;
 void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
+// The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
+// fresh for kSazabiCueMs). False with none (not riding one).
+struct SazabiCue {
+    float thruster;          // 0..1 the thrusters' charge
+    float rifleReady;        // 0..1 to the beam rifle's next shot (1 ready)
+    int missiles;            // shield missiles left
+    float missileReady;      // 0..1 to the next salvo
+    float missileLock;       // 0..1 the lock's progress (1 locked)
+    float cannonCharge;      // 0..1 the chest cannon charging (0 not)
+    float cannonReady;       // 0..1 to the cannon's next charge
+    int funnelsOut;          // 0..6 funnels flying
+    float funnelReady;       // 0..1 to the next launch
+    bool guard,swinging,air; // the shield up, the tomahawk swinging, off its feet
+    bool hasAim;
+    float aim[3];            // the rifle's aim point (world): the reticle
+    bool hasLock;
+    float lock[3];           // the missiles' locked target (world)
+};
+constexpr ULONGLONG kSazabiCueMs=250;
+bool PlayerSazabiCue(SazabiCue* out) noexcept;
 void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
 bool InstallSazabi() noexcept;                        // after InstallBody506
 void ResetSazabi() noexcept;                          // a new mission

@@ -354,6 +354,9 @@ void TestBoard(const Mech& m,unsigned char* v) noexcept {
 
 bool IsSazabi(const void* vehicle) noexcept { return BodyOf(vehicle)==PluginBody::sazabi; }
 
+// The HUD's view of the player's Sazabi (crew.h SazabiCue): not published yet (the weapons are not in).
+bool PlayerSazabiCue(SazabiCue* out) noexcept { (void)out;return false; }
+
 void SazabiFrame(unsigned char* v) noexcept {
     if(!installed || !Cfg().sazabi || !IsSazabi(v))return;
     Mech* m=Find(v);
