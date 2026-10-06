@@ -422,6 +422,24 @@ def model_box(game, file: str | None) -> list[list[float]]:  # noqa: ANN001 - ro
     return rigid_box(bind_positions(_model_of(game, file)), None)
 
 
+def model_bounds(game, file: str | None) -> tuple[tuple[float, float, float], tuple[float, float, float]]:  # noqa: ANN001
+    """(min xyz, max xyz) of the whole of a jet's model (`file` as model_box), in its frame: what its seat camera must see
+    from outside (vcobjects.seat_camera)."""
+    lo, hi = bbox(bind_positions(_model_of(game, file)))
+    return tuple(round(x, 3) for x in lo), tuple(round(x, 3) for x in hi)  # type: ignore[return-value]
+
+
+HELI_ARCHIVE, HELI_MODEL = 'V506_HELI.MRAB', 'v506_heli.mdb'   # the stock heli every jet SGO is made from
+
+
+def heli_bounds(game) -> tuple[tuple[float, float, float], tuple[float, float, float]]:  # noqa: ANN001 - rootcpk.Game
+    """(min xyz, max xyz) of the stock V506 heli's model, the one its seat camera was made for (vcobjects.seat_camera)."""
+    raw = game.read('OBJECT', HELI_ARCHIVE)
+    md = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == HELI_MODEL).data)
+    lo, hi = bbox(bind_positions(md))
+    return tuple(round(x, 3) for x in lo), tuple(round(x, 3) for x in hi)  # type: ignore[return-value]
+
+
 _MODELS_MADE: dict[tuple[int, str | None], Mdb] = {}
 
 

@@ -239,6 +239,18 @@ void SpecialFrame(PJet& j,unsigned char* v,Stick& s,const float* pos,ULONGLONG m
     }
 }
 
+// --- A rotor craft's clearance (playerjet_kinds.h RestHeight / BottomClear) ---
+// Its mesh bone (the drawn model's origin, its bottom): the rotor craft's models' is `body` (pylib/vcobjects.py JETS).
+float RestOver(const unsigned char* v,const float* pos) noexcept {
+    const unsigned char* const rec=BoneRecord506(v+kModelInst506,L"body");
+    return rec ? pjet::RestHeight(pos[1],At<float>(rec,kBoneWorld506+0x34)) : 0.0f;   // the world matrix's translation y
+}
+// `clear` (from its position) as its bottom's, for a rotor craft; a wing's as it is.
+float FloorClear(const PJet& j,const unsigned char* v,const float* pos,float clear) noexcept {
+    if(!j.board || j.board->frame!=pjet::Airframe::rotor)return clear;
+    return pjet::BottomClear(clear,RestOver(v,pos),kNoGround);
+}
+
 // --- A rotor craft under the player (the carriers, the blast and doll drones) ---
 // On the keyboard and mouse with ini HeliMouseAim, the mouse-aim flight (heliaim.h, as a stock heli's: the mouse moves
 // the aim, the craft faces it and flies along its elevation, W / S set the forward speed and leave it, A / D sidestep,
@@ -569,7 +581,8 @@ void RotorHail(PJet& j,unsigned char* v,const float* pos,float clear,float dt,UL
     float to[3]={spot[0]-pos[0],0.0f,spot[2]-pos[2]};
     const float speed=Normalize(to) ? std::fmin(k.cruise,std::sqrt(2.0f*k.brake*off)) : 0.0f;
     const float want[3]={to[0]*speed,0.0f,to[2]*speed};
-    const float height=off>kSpotDescend ? std::fmax(pos[1],spot[1]+kSpotOver) : spot[1];
+    const float rest=RestOver(v,pos);   // its position over its bottom: down is the spot plus that
+    const float height=off>kSpotDescend ? std::fmax(pos[1],spot[1]+rest+kSpotOver) : spot[1]+rest;
     const float vz=Clamp((height-pos[1])*0.5f,-HoverClimb(k),HoverClimb(k));
     HoverTo(*e,k,v,pos,want,vz,player.pos,dt);
     HoverDone(j,*e,k,v,pos,clear,off<4.0f,dt,ms);
@@ -584,7 +597,7 @@ void HailFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
     bool water=false;
-    const float clear=Clear(pos,&water);
+    const float clear=FloorClear(j,v,pos,Clear(pos,&water));
     j.clear=clear;
     PJet::Hail& h=j.hail;
     if(h.phase==kHailWait) {

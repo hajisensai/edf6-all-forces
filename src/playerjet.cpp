@@ -1506,12 +1506,12 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     if(!driven) {
         if(j.autopilot){j.autopilot=false;j.active=false;if(j.board)HandBack(j,v,"the catch is over");}
         if(j.driven && AboardElsewhere(v,0))Moved(j,v);
-        else if(j.driven)Leave(j,v,GroundClearance(pos),true,"got out");
+        else if(j.driven)Leave(j,v,FloorClear(j,v,pos,GroundClearance(pos)),true,"got out");
         if(wet)Crash(j,v,0.0f,0.0f,false,ms,nullptr);   // empty and afloat: it breaks up
         return;
     }
     bool water=false;
-    const float clear=Clear(pos,&water);
+    const float clear=FloorClear(j,v,pos,Clear(pos,&water));   // a rotor craft's from its bottom
     if(!j.driven)Board(j,v,pos,clear);
     Stick s=ReadStick(SeatAt(v,0));
     SmoothStick(j,s,dt);

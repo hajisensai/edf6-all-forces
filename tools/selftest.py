@@ -1074,6 +1074,45 @@ def grand_battle_fits_the_real_plain() -> None:
 
 
 @test
+def carrier_camera_and_ragdoll_on_its_box_centre() -> None:
+    """pylib/vcobjects.py seat_camera / sight_problem / _jet_ragdoll (docs/player-jet-re.md §14): the V506's seat camera
+    and ragdoll hang on the vehicle's position, the collision box's centre (`mdl`), and on the mesh bone, the model's
+    origin. The carrier (2026-10-06, 「空母的视角在空母底下，包括碰撞体积也是」): the stock rig put its eye inside the hull
+    and the heli's proxies sat under its belly. Now its rig is the stock one scaled with the model and sees it from
+    outside, every other jet's (its eye already outside) is the stock one, and the proxies sit on the box's centre with
+    the two bindings each other's inverse. Numbers: EDF6VC_CARRIER / the player fighter as made, the V506 model."""
+    import sgo
+    heli = ((-5.274, -0.06, -8.31), (5.274, 4.45, 5.274))
+    heli_centre = (0.0, 1.45, 0.65)
+    eye, look = (0.0, 5.4, -14.45), (0.0, 2.75, 1.1)
+    carrier = ((-29.703, 0.0, -41.531), (29.703, 17.031, 35.312))
+    c = (0.0, 8.516, -3.109)
+    was = [c[i] + eye[i] for i in range(3)], [c[i] + look[i] for i in range(3)]
+    assert vc.sight_problem(*was, carrier), 'the stock rig on the carrier: its eye is in the hull'
+    fit = vc.seat_camera(eye, look, c, carrier, heli, heli_centre)
+    assert fit is not None, 'the carrier keeps the stock rig'
+    now = [[c[i] + p[i] for i in range(3)] for p in fit]
+    assert vc.sight_problem(now[0], now[1], carrier) is None, now
+    assert now[0][2] < carrier[0][2] - 20.0 and now[0][1] > carrier[1][1] + 10.0, now   # behind and over it
+    fighter = ((-8.047, 0.0, -8.234), (8.047, 2.762, 11.609))
+    assert vc.seat_camera(eye, look, (0.0, 1.381, 1.688), fighter, heli, heli_centre) is None, 'a fighter keeps the stock rig'
+    assert vc.sight_problem((0.0, 6.0, -50.0), (0.0, 8.0, 0.0), carrier), 'a line of sight under the carrier top at its tail'
+    blob = sgo.write(1, {
+        'ragdoll_from_animation': [[['body', 'RagDollProxys.body'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                                   [['rotor', 'RagDollProxys.rotor'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+        'animation_from_ragdoll': [[['RagDollProxys.body', 'body'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                                   [['RagDollProxys.rotor', 'rotor'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                                   [['RagDollProxys.body', 'globalSRT'], [0.0, -1.637, 0.0], [0.0, 0.0, 0.0, 1.0]]]})
+    _, inner = sgo.read(vc._jet_ragdoll(blob, 'body', c))
+    value = vc._value
+    for e in inner['ragdoll_from_animation']:
+        assert e[0][0] == 'body' and [round(value(x), 3) for x in e[1]] == list(c), e
+    assert [e[0][0] for e in inner['animation_from_ragdoll']] == ['RagDollProxys.rotor', 'RagDollProxys.body']
+    for e in inner['animation_from_ragdoll']:
+        assert e[0][1] == 'body' and [round(value(x), 3) for x in e[1]] == [-x for x in c], e
+
+
+@test
 def jet_door_on_the_ground_beside_its_box() -> None:
     """pylib/vcobjects.py move_door / check_door (docs/player-jet-re.md §12): a jet's boarding point (the V506's door
     locator, read out of a MAB block by mab_locator) goes on the ground DOOR_OUT m outside its collision box's right side,
