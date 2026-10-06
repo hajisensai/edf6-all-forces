@@ -132,7 +132,16 @@ struct Config {
     float drillSpinDownSec=2.5f;    // ...seconds from the top RPM to still, let go
     float drillDamage=2000.0f;      // ...damage a second to an enemy it touches, at the top RPM (less in proportion)
     float drillBreak=600.0f;        // ...HP a second off a building or rock it bores into, at the top RPM
-    float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
+    float drillOverheatSec=30.0f;   // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster;
+                                    // the retired DrillHeatSec was this at 12 s: too soon, the user 2026-10-06)
+    float drillKillCool=0.1f;       // ...heat shed per enemy the drill kills (a share of the full heat)
+    bool drillLaunch=true;          // ...the launch: the drill flies out on its jet and back like a boomerang
+    int drillLaunchKey=0x52;        // ...its key ('R'; a Windows virtual-key code, 0: none)
+    int drillLaunchButton=0x08;     // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x08 Y; 0 none)
+    float drillLaunchRange=60.0f;   // ...m it flies out before it turns back (sooner when it meets the map)
+    float drillLaunchSpeed=70.0f;   // ...m/s it leaves at (slowing to a stop at the range) and comes back at, at most
+    float drillLaunchDamage=800.0f; // ...damage of each bite in flight (one every kFlightBiteSec while it touches an enemy)
+    float drillLaunchHeat=0.12f;    // ...heat a launch adds (a share of the full heat)
     float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
     float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
     bool emcBeam=true;              // the EMC's trigger charges one thick beam that carries the stock burst's damage (emc.cpp)
@@ -516,8 +525,9 @@ bool IsDrillTank(const void* vehicle) noexcept;
 void DrillInput(unsigned char* vehicle) noexcept;
 void DrillFrame(unsigned char* vehicle) noexcept;
 void ResetDrills() noexcept;
-// The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
-struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated; };
+// The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now, whether it is launched
+// (flying) and on its way back (returning). False with none.
+struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated,flying=false,returning=false; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
 
 // jet_bay.cpp: the EMC's rounds (emc.cpp; pylib/vcobjects.py EMC_*, tools/make_emc.py), DemoIndirectFire objects owned

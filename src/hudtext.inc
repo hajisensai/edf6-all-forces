@@ -152,6 +152,8 @@ HUDTEXT(drillLine,L"DRILL %d RPM    HEAT %d%%%ls",L"钻头 %d RPM    热量 %d%%
 HUDTEXT(drillLineShort,L"DRILL %d RPM  HEAT %d%%%ls",L"钻头 %d RPM  热量 %d%%%ls",L"鑽頭 %d RPM  熱量 %d%%%ls",L"ドリル %d RPM  熱 %d%%%ls")
 HUDTEXT(overheat,L"OVERHEAT",L"过热",L"過熱",L"オーバーヒート")
 HUDTEXT(drilling,L"DRILLING",L"钻削中",L"鑽削中",L"掘削中")
+HUDTEXT(drillLaunched,L"LAUNCHED",L"发射中",L"發射中",L"射出中")
+HUDTEXT(drillReturning,L"RETURNING",L"回收中",L"回收中",L"回収中")
 HUDTEXT(gunnersAuto,L"GUNNERS: AUTO-AIM",L"炮手：自动瞄准",L"砲手：自動瞄準",L"砲手：自動照準")
 HUDTEXT(autoAimOffCircle,L"AUTO-AIM OFF  (LEAD CIRCLE)",L"自动瞄准 关  （预瞄圈）",L"自動瞄準 關  （預瞄圈）",L"自動照準 オフ  （偏差円）")
 HUDTEXT(autoAimOn,L"AUTO-AIM ON",L"自动瞄准 开",L"自動瞄準 開",L"自動照準 オン")

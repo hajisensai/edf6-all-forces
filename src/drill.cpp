@@ -1,17 +1,28 @@
 // The drill tank (钻头战车, docs/drill-re.md): EDF6VC_DRILL.SGO (tools/make_drill.py), the Blacker's class
 // (Vehicle505_Tank) in the drill tank's model, its drill on a bone (kSpinBone) that the plugin spins.
-// Melee: the drill has no rounds. Holding fire spins it up (DrillInput takes the trigger off the seat before the
-// stock input sees it, so the stock cannon path never fires), letting go spins it down; the RPM sets how fast the
-// drill turns, the damage it deals and how fast it breaks what it bores into. What it touches (an enemy's body in the
-// box the drill and the hull's front sweep, or the map along rays through it) gets a drill charge every kBiteSec (jet_bay.cpp DrillCharge): a stock
-// DemoIndirectFire round with a kChargeRadius blast fired by the tank, so the damage is the game's own: the enemies of
-// its side only (the round's team is the tank's: no friendly fire), its kills, and the map's buildings and rocks hurt
-// through the stock break-building path (a blast of 3 m or more, GameDamageInfo +0x60 bit 0, takes its damage off the
-// map object's HP: docs/drill-re.md §3). Turning heats the drill (more the faster, more biting); overheated it stops,
-// no bite, until it has cooled to DrillResumeHeat (the player's and an NPC's alike).
+// Melee: holding fire spins it up (DrillInput takes the trigger off the seat before the stock input sees it, so the
+// stock cannon path never fires), letting go spins it down; the RPM sets how fast the drill turns, the damage it
+// deals and how fast it breaks what it bores into. What it touches (an enemy's body in the box the drill and the
+// hull's front sweep, or the map along rays through it) gets a drill charge every kBiteSec (jet_bay.cpp DrillCharge):
+// a stock DemoIndirectFire round with a kChargeRadius blast fired by the tank, so the damage is the game's own: the
+// enemies of its side only (the round's team is the tank's: no friendly fire), its kills, and the map's buildings
+// and rocks hurt through the stock break-building path (a blast of 3 m or more, GameDamageInfo +0x60 bit 0, takes
+// its damage off the map object's HP: docs/drill-re.md §3).
+// The launch (the user, 2026-10-06: "钻头可以发射喷气的那种然后射完回收类似回旋镖攻击"): DrillLaunchKey / Button
+// sends the drill off the hull on a jet (the flares' Booster flame, booster.cpp FlareFlames) at DrillLaunchSpeed,
+// slowing to a stop at DrillLaunchRange (or bursting on the map where it meets it), then back to the hull like a
+// boomerang, biting the enemies it passes (a charge every kFlightBiteSec, DrillLaunchDamage each). Drawn by writing
+// the spin bone's local matrix from the world pose it should have: local = world x inverse(`body`'s world)
+// (kSpinBone is a leaf of `body`, docs/drill-re.md §5.6).
+// Heat: turning heats the drill (more the faster, more biting; a launch adds DrillLaunchHeat); overheated it stops,
+// no bite, until it has cooled to DrillResumeHeat (the player's and an NPC's alike). Every enemy the drill kills
+// sheds DrillKillCool of it (the user, 2026-10-06: "改成击杀减热量"): an enemy it bit that is dead within
+// kKillWindowMs counts as its kill (the charge's own kill is not reported to the plugin: the bite is the evidence).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "body506.h"
+#include "exhaust_pose.h"
+#include "layout.h"
 #include "memory.h"
 #include <cmath>
 #include <cstdio>
@@ -26,6 +37,8 @@ constexpr std::size_t kSeatTrigger=0x2E4;
 constexpr float kTriggerOn=0.8f;
 const unsigned char kTriggerSig[]={0xF3,0x0F,0x10,0x8B,0xE4,0x02,0x00,0x00,0x48,0x8D,0x8B,0xC0,0x02,0x00,0x00,0xE8};
 constexpr unsigned kTriggerRead=0x61AD14;
+// The seat's input: 1 = a pad (its button bits), 0 = keyboard and mouse (the key, GetAsyncKeyState) (highcam.cpp).
+constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 // The drill tank's bones (pylib/drill_model.py): kDrillBone, a marker of our own at the drill's base that tells the
 // drill tank from a stock Blacker, and kSpinBone, the stock bone the drill's geometry rides (moved to the drill's
 // base, its +Z the axis), so turning its local matrix about Z spins the drill in place. Why a stock bone: the drawn
@@ -36,7 +49,8 @@ constexpr unsigned kTriggerRead=0x61AD14;
 // nothing in the SGO, the ragdoll or EDF.dll names it (docs/drill-re.md §5.4). The drawn pose's array (the model
 // instance's +0x28 vector, data +0x30, count +0x40: built by 0x11002D0, the render command 0x1100D50 / 0x1100E90
 // copies the records' world matrices into it, the skin palette 0x11009A0 = inverse bind (rec+0x30) x that array) is
-// read back in the Debug pose log, so the next play shows which matrices the renderer got.
+// read back in the Debug pose log, so the next play shows which matrices the renderer got. kParentBone is the spin
+// bone's parent (pylib/drill_model.py DRILL_PARENT): its world composes the spin bone's (local x parent.world).
 // The drill's length, base radius and base in the model (= the vehicle's frame: the 505's slot 45 0x61AD70 roots the
 // model at veh+0x60, SetWorld 0x1100B90), as built (m: pylib/drill_model.py DRILL_LENGTH / DRILL_RADIUS /
 // DRILL_BASE; tools/selftest.py holds them equal). The bone record layout is the engine's model instance (0x1110FC0
@@ -44,31 +58,32 @@ constexpr unsigned kTriggerRead=0x61AD14;
 // like the 506's (0x61AE51).
 const wchar_t kDrillBone[]=L"edf6vc_drill";
 const wchar_t kSpinBone[]=L"catapi_body";
-constexpr float kDrillLength=3.77f,kDrillRadius=0.97f;
-constexpr float kDrillBaseY=3.37f,kDrillBaseZ=4.19f;
+const wchar_t kParentBone[]=L"body";
+constexpr float kDrillLength=4.71f,kDrillRadius=1.21f;
+constexpr float kDrillBaseY=4.21f,kDrillBaseZ=5.18f;
 constexpr std::size_t kModelInst=kModelInst506,kBoneLocal=kBoneLocal506,kBoneWorld=kBoneWorld506;
 constexpr std::size_t kRecIndex=0x0C,kInstPose=0x30,kInstPoseCount=0x40,kPoseStride=0x40;
-// The hull's front (m along the vehicle's forward: the model's hull vertices under the drill end at z 3.0; the
-// Blacker's collision shapes reach ~3.4). Pressed against a wall the hull stops there with the drill's base
-// (kDrillBaseZ) already ~0.8 m inside it: a map ray started there starts inside the building's shape and finds
-// nothing. So the map rays start over the vehicle's origin (inside the hull: the hull keeps the walls out), and a
-// charge starts no farther back than kChargeFrom (past the collision shapes: it must not meet the tank itself).
-constexpr float kHullFront=3.0f,kChargeFrom=3.5f;
+// The hull's front (m along the vehicle's forward: the model's hull vertices under the drill end at z 3.7; the
+// Blacker's collision shapes, which the drill tank keeps, reach ~3.4). Pressed against a wall the hull stops there
+// with the drill's base (kDrillBaseZ) already ~1.8 m inside it: a map ray started there starts inside the building's
+// shape and finds nothing. So the map rays start over the vehicle's origin (inside the hull: the hull keeps the walls
+// out), and a charge starts no farther back than kChargeFrom (past the collision shapes: it must not meet the tank).
+constexpr float kHullFront=3.7f,kChargeFrom=3.5f;
 // What the drill reaches (2026-10-05 19:56 play: rammed into ants at 300 rpm, not one bite: the nearest lock points
-// were 5.5..6.5 m from the drill's axis, which is 3.37 m up while an ant's lock point is ~1 m up and its body on the
-// ground; a cylinder round the axis never meets an enemy the drill is ploughing through). So the contact volume is
+// were 5.5..6.5 m from the drill's axis, which is up over the hull while an ant's lock point is ~1 m up and its body on
+// the ground; a cylinder round the axis never meets an enemy the drill is ploughing through). So the contact volume is
 // the space the drill and the hull's front sweep: a box in the vehicle's frame from the ground up to the drill's top
-// (+ kTopMargin), kBoxHalfX either side (the hull's half width: the hull is 3.8 m wide), from the hull's front to
+// (+ kTopMargin), kBoxHalfX either side (the hull's half width: the hull is 4.8 m wide), from the hull's front to
 // kAhead past the drill's tip. An enemy touches it with its body: the segment from its position (object +0x90: its
 // feet / root) to its lock point, kBodyPad thick (a lock point sits inside the body, the body reaches past it).
-constexpr float kBoxHalfX=1.9f,kTopMargin=0.3f,kAhead=1.0f,kBodyPad=1.0f;
+constexpr float kBoxHalfX=2.4f,kTopMargin=0.3f,kAhead=1.0f,kBodyPad=1.0f;
 constexpr float kBoxTop=kDrillBaseY+kDrillRadius+kTopMargin,kBoxFront=kDrillBaseZ+kDrillLength+kAhead;
 // The map: rays forward from over the vehicle's origin to kBoxFront at these (x aside, y up) of the vehicle's frame:
 // down the middle at four heights (a rock or low wall to the drill's top; not under kRayLow: a ray that low meets the
 // ground ahead on any rise, and the drill cannot reach below the hull's nose anyway) and two to the sides.
 struct RayAt { float x,y; };
 constexpr float kRayLow=1.2f;
-constexpr RayAt kRays[]={{0.0f,kRayLow},{0.0f,2.3f},{0.0f,kDrillBaseY},{0.0f,4.2f},{-1.3f,2.3f},{1.3f,2.3f}};
+constexpr RayAt kRays[]={{0.0f,kRayLow},{0.0f,2.9f},{0.0f,kDrillBaseY},{0.0f,5.2f},{-1.6f,2.9f},{1.6f,2.9f}};
 constexpr float kBiteSec=0.2f;      // a charge this often while it touches something and turns at kWorkShare or more
 constexpr ULONGLONG kBiteMs=200,kFrameMs=50;   // the same in ms; "biting" (heat) = touched within a bite and a bit
 constexpr float kWorkShare=0.15f;   // of the top RPM: slower, it neither hurts nor breaks anything
@@ -83,15 +98,34 @@ constexpr float kPi=3.14159265f;
 constexpr float kSpinRepeat=2.0f*kPi/16.0f;
 constexpr float kSpinStepMost=0.4f*kSpinRepeat;
 // Heat (the user, 2026-10-05: the drill heats up and must stop when it overheats): per second +share x (1 + kBiteHeat
-// while biting) / DrillHeatSec, -(1 - share) / DrillCoolSec (share = RPM / top RPM): the top RPM idling heats it from
-// cold in DrillHeatSec, standing still cools it in DrillCoolSec. At 1 it overheats: no spin, no bite, until it is
-// down to DrillResumeHeat.
+// while biting) / DrillOverheatSec, -(1 - share) / DrillCoolSec (share = RPM / top RPM): the top RPM idling heats it
+// from cold in DrillOverheatSec, standing still cools it in DrillCoolSec. At 1 it overheats: no spin, no bite, until
+// it is down to DrillResumeHeat. A launch adds DrillLaunchHeat at once, a kill takes DrillKillCool off.
 constexpr float kBiteHeat=0.5f;
+// The launch. Out: from the drill's place on the hull along the vehicle's forward at DrillLaunchSpeed, slowing evenly
+// (kOutStop of that speed left is a stop) so that it stops at DrillLaunchRange; a map ray each frame from the tip's
+// last place (at the launch: over the vehicle's origin, inside the hull, as kRays) to its next: a hit is a bite on
+// the map there and the turn back. Back: from rest, speeding up as evenly to DrillLaunchSpeed, straight at the drill's
+// place on the hull (where the vehicle is now); caught within kCatchM (or the step), or snapped home after kBackMostMs.
+// Its axis: out, the launch's direction; back, turned toward the vehicle's forward over the last kAlignM.
+constexpr float kOutStop=0.05f,kCatchM=1.0f,kAlignM=15.0f;
+constexpr ULONGLONG kBackMostMs=12000;
+// In flight it bites every kFlightBiteSec the enemy whose body (root..lock point) is nearest its axis, within its
+// radius + kBodyPad; not one within kNearHullM of the vehicle's origin (the charge would start in or meet the tank).
+constexpr float kFlightBiteSec=0.1f,kNearHullM=7.0f;
+// Kills: an enemy bitten in the last kKillWindowMs that is dead (or gone) is the drill's (up to kVictims tracked).
+constexpr ULONGLONG kKillWindowMs=1500;
+constexpr int kVictims=16;
 // An NPC driver has no trigger: its drill spins while it touches something (a probe every kBiteSec), kNpcHoldMs on.
+// It never launches the drill.
 constexpr ULONGLONG kNpcHoldMs=1500;
 constexpr ULONGLONG kStaleMs=2000;   // a drill tank not seen this long is gone: its slot is free
 constexpr ULONGLONG kLogMs=1000;     // Debug: a drill's contact / bite line at most this often, its pose 3x rarer
 constexpr int kMaxDrills=8;
+
+enum class Flight : unsigned char { home, out, back };
+
+struct Victim { ObjRef ref; ULONGLONG at; };
 
 struct Drill {
     ObjRef ref;
@@ -101,9 +135,17 @@ struct Drill {
     const void* bones;            // the model's bone array the records below are in (looked up again when it changes)
     unsigned char* rec;           // kSpinBone's record (the one turned)
     unsigned char* marker;        // kDrillBone's (the Debug pose log's reference)
+    const unsigned char* parent;  // kParentBone's (its world composes the spin bone's: the launch's pose)
     float bind[16],set[16];
     bool written,rewritten;
-    int bites,misses;
+    int bites,misses,kills;
+    // The launch (see kOutStop): where the drill's base is (world), the way it was sent, its speed (m/s), how far it
+    // has gone out, its tip's last place (the next map ray's start), its axis as drawn, when it turned back.
+    Flight flight;
+    bool launchHeld,launchAsked,flaming,poseFailed;
+    float pos[3],dir[3],axis[3],speed,flown,lastTip[3],flightBite;
+    ULONGLONG backAt;
+    Victim victims[kVictims];
 };
 Drill drills[kMaxDrills]{};
 bool triggerOk=false;
@@ -116,6 +158,34 @@ constexpr ULONGLONG kCueFreshMs=300;
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 float Clamp(float x,float lo,float hi) noexcept { return x<lo ? lo : x>hi ? hi : x; }
+float Len(const float* a) noexcept { return std::sqrt(Dot(a,a)); }
+void Cross(const float* a,const float* b,float* out) noexcept {
+    const float r[3]={a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]};
+    std::memcpy(out,r,12);
+}
+// a / |a| into out; false (out untouched) for a zero vector.
+bool Unit(const float* a,float* out) noexcept {
+    const float l=Len(a);
+    if(!(l>1e-6f))return false;
+    for(int i=0;i<3;++i)out[i]=a[i]/l;
+    return true;
+}
+// How far p is from the segment a..b.
+float SegmentGap(const float* p,const float* a,const float* b) noexcept {
+    const float ab[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]},ap[3]={p[0]-a[0],p[1]-a[1],p[2]-a[2]};
+    const float l2=Dot(ab,ab);
+    const float t=l2>1e-9f ? Clamp(Dot(ap,ab)/l2,0.0f,1.0f) : 0.0f;
+    const float d[3]={ap[0]-ab[0]*t,ap[1]-ab[1]*t,ap[2]-ab[2]*t};
+    return Len(d);
+}
+
+// Whether the virtual key `vk` is down while the game has the foreground (0: never; highcam.cpp's).
+bool KeyHeld(int vk) noexcept {
+    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+}
 
 bool Is505(const void* v) noexcept { return At<const unsigned char*>(v,0)==image+kVt505; }
 
@@ -128,6 +198,7 @@ unsigned char* DrillBone(Drill& d,const unsigned char* v) noexcept {
     d.bones=bones;d.written=false;d.rewritten=false;
     d.marker=BoneRecord506(inst,kDrillBone);
     d.rec=d.marker ? BoneRecord506(inst,kSpinBone) : nullptr;
+    d.parent=d.rec ? BoneRecord506(inst,kParentBone) : nullptr;
     if(d.rec)std::memcpy(d.bind,d.rec+kBoneLocal,64);
     return d.rec;
 }
@@ -154,25 +225,51 @@ Drill* DrillTank(unsigned char* v) noexcept {
     return d;
 }
 
-// The drill spun `angle` rad about its own axis: local = Rz(angle) x bind (row vectors: rows 0 and 1, the bone's
-// x and y, turn in their plane; row 2, the axis, and the translation stay). The engine composes the world matrix
-// from it in the 505's slot 45 (0x61AD70 -> SetWorld 0x1100B90 -> 0x1100010: every bone whose rec+8 flag is 1, as
-// 0x1110FC0 sets it), which VehicleBase's update (slot 5, 0x630250) calls every frame.
-void Pose(Drill& d) noexcept {
+// The rows x, y of a drill turned `angle` about its axis z from its unturned rows x0, y0 (row vectors: rows 0 and 1
+// turn in their plane; the axis stays).
+void Turn(const float* x0,const float* y0,float angle,float* x,float* y,int n) noexcept {
+    const float co=std::cos(angle),si=std::sin(angle);
+    for(int k=0;k<n;++k){x[k]=co*x0[k]+si*y0[k];y[k]=-si*x0[k]+co*y0[k];}
+}
+
+void WriteLocal(Drill& d) noexcept {
     if(d.written && std::memcmp(d.rec+kBoneLocal,d.set,64)!=0 && !d.rewritten) {
         d.rewritten=true;   // something else (an animation) writes it every frame: the spin would not show. Said once.
         Log("DRILL v=%p: its spin bone's local matrix was rewritten by the game between frames",d.ref.obj);
     }
-    const float co=std::cos(d.angle),si=std::sin(d.angle);
-    const float* b=d.bind;
-    for(int x=0;x<4;++x) {
-        d.set[x]=co*b[x]+si*b[4+x];
-        d.set[4+x]=-si*b[x]+co*b[4+x];
-        d.set[8+x]=b[8+x];
-        d.set[12+x]=b[12+x];
-    }
     std::memcpy(d.rec+kBoneLocal,d.set,64);
     d.written=true;
+}
+
+// The drill on the hull, spun `angle` rad about its own axis: local = Rz(angle) x bind. The engine composes the world
+// matrix from it in the 505's slot 45 (0x61AD70 -> SetWorld 0x1100B90 -> 0x1100010: every bone whose rec+8 flag is
+// 1, as 0x1110FC0 sets it), which VehicleBase's update (slot 5, 0x630250) calls every frame.
+void PoseHome(Drill& d) noexcept {
+    Turn(d.bind,d.bind+4,d.angle,d.set,d.set+4,4);
+    std::memcpy(d.set+8,d.bind+8,32);
+    WriteLocal(d);
+}
+
+// The drill in flight: its world pose (base at d.pos, +Z along d.axis, x / y from the vehicle's up, spun d.angle)
+// brought into the parent bone's frame (local = world x parent.world^-1, the parent's world as last composed: a
+// frame late at most). False (nothing written) without the parent or with a degenerate one.
+bool PoseFlight(const unsigned char* v,Drill& d) noexcept {
+    if(!d.parent)return false;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    float x0[3],y0[3];
+    Cross(m+4,d.axis,x0);              // x = up x z (the vehicle's rows: x left = up x forward)
+    if(!Unit(x0,x0)){Cross(d.axis,m+8,x0);if(!Unit(x0,x0))return false;}
+    Cross(d.axis,x0,y0);
+    float w[16]{};
+    Turn(x0,y0,d.angle,w,w+4,3);
+    std::memcpy(w+8,d.axis,12);
+    std::memcpy(w+12,d.pos,12);
+    w[15]=1.0f;
+    float inv[16];
+    if(!exhaust::Inverse(reinterpret_cast<const float*>(d.parent+kBoneWorld),inv))return false;
+    exhaust::Mul(w,inv,d.set);
+    WriteLocal(d);
+    return true;
 }
 
 // The vehicle's frame (veh+0x60: rows right, up, forward, then the position; the model's root): `local` (x aside, y
@@ -185,6 +282,11 @@ void ToLocal(const unsigned char* v,const float* world,float* out) noexcept {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const float p[3]={world[0]-m[12],world[1]-m[13],world[2]-m[14]};
     for(int i=0;i<3;++i)out[i]=Dot(p,m+4*i);
+}
+// The drill's place on the hull (its base, world).
+void HomeBase(const unsigned char* v,float* out) noexcept {
+    const float base[3]={0.0f,kDrillBaseY,kDrillBaseZ};
+    ToWorld(v,base,out);
 }
 
 // A world matrix's turn about the drill's axis in the vehicle's frame (deg): its x row against the vehicle's rows.
@@ -208,22 +310,24 @@ const float* DrawnPose(const unsigned char* v,const unsigned char* rec) noexcept
 // Debug (3 kLogMs): the drawn spin as the engine has it: the spin bone's world (its angle about the axis: the
 // written one, a frame late, when the world follows the local matrix), its matrix in the drawn pose array (what the
 // skin palette is built from; "n/a" when unreadable), the marker's world (a bone of our own: it does not turn), and
-// how far the spin bone's world origin is from the model's drill base (0 when it rides the hull as built).
+// how far the spin bone's world origin is from where the drill should be (its place on the hull, or in flight d.pos).
 void LogPose(const unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
     if(!Cfg().debug || ms-d.poseLogAt<kLogMs*3)return;
     d.poseLogAt=ms;
     const float* w=reinterpret_cast<const float*>(d.rec+kBoneWorld);
     const float* drawn=DrawnPose(v,d.rec);
     const float* mark=d.marker ? reinterpret_cast<const float*>(d.marker+kBoneWorld) : w;
-    const float baseLocal[3]={0.0f,kDrillBaseY,kDrillBaseZ};
-    float base[3];ToWorld(v,baseLocal,base);
+    float base[3];
+    if(d.flight==Flight::home)HomeBase(v,base);
+    else std::memcpy(base,d.pos,12);
     const float off[3]={w[12]-base[0],w[13]-base[1],w[14]-base[2]};
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     char seen[32]="n/a";
     if(drawn)std::snprintf(seen,sizeof(seen),"%.0f deg",TurnDeg(v,drawn));
-    Log("DRILL v=%p pose: %.0f rpm, written %.0f deg, spin bone world %.0f deg, drawn pose %s (marker world %.0f deg); "
-        "bone origin %.2f m off the drill base, its axis . forward %.2f",v,d.rpm,d.angle*180.0f/kPi,TurnDeg(v,w),seen,
-        TurnDeg(v,mark),std::sqrt(Dot(off,off)),Dot(w+8,m+8)/std::sqrt(Dot(w+8,w+8)+1e-12f));
+    Log("DRILL v=%p pose (%s): %.0f rpm, written %.0f deg, spin bone world %.0f deg, drawn pose %s (marker world %.0f deg); "
+        "bone origin %.2f m off where the drill should be, its axis . forward %.2f",v,
+        d.flight==Flight::home ? "home" : d.flight==Flight::out ? "out" : "back",d.rpm,d.angle*180.0f/kPi,TurnDeg(v,w),seen,
+        TurnDeg(v,mark),Len(off),Dot(w+8,m+8)/std::sqrt(Dot(w+8,w+8)+1e-12f));
 }
 
 // Where the segment a..b (vehicle frame) first enters the box lo..hi (its t in [0, 1]), false when it misses.
@@ -253,23 +357,28 @@ float BoxGap(const float* p,const float* lo,const float* hi) noexcept {
     return std::sqrt(s);
 }
 
+// An enemy's root (object +0x90, world), or its lock point when that is not a number.
+void RootOf(const void* object,const float* aim,float* out) noexcept {
+    const float* pos=reinterpret_cast<const float*>(static_cast<const unsigned char*>(object)+kPosition);
+    std::memcpy(out,std::isfinite(pos[0]+pos[1]+pos[2]) ? pos : aim,12);
+}
+
 // The enemies against the contact box (EnemyVisitor), in the vehicle's frame: the one whose body (root..lock point,
 // kBodyPad thick) is in the box nearest the hull, and the nearest of all to the box (for the log).
-struct Reach { const unsigned char* v; float lo[3],hi[3],at[3],along,nearest,closest[3]; int seen; bool found; };
+struct Reach { const unsigned char* v; float lo[3],hi[3],at[3],along,nearest,closest[3]; int seen; bool found; const void* who; };
 void SeeEnemy(void* ctx,const void* object,const float* aim) noexcept {
     auto& r=*static_cast<Reach*>(ctx);
-    float lock[3],root[3];
+    float lock[3],root[3],rootWorld[3];
     ToLocal(r.v,aim,lock);
-    const float* pos=reinterpret_cast<const float*>(static_cast<const unsigned char*>(object)+kPosition);
-    if(std::isfinite(pos[0]+pos[1]+pos[2]))ToLocal(r.v,pos,root);
-    else std::memcpy(root,lock,12);
+    RootOf(object,aim,rootWorld);
+    ToLocal(r.v,rootWorld,root);
     const float gap=std::fmin(BoxGap(lock,r.lo,r.hi),BoxGap(root,r.lo,r.hi))-kBodyPad;
     if(r.seen++==0 || gap<r.nearest){r.nearest=gap<0.0f ? 0.0f : gap;std::memcpy(r.closest,lock,12);}
     float lo[3],hi[3],t=0.0f;
     for(int i=0;i<3;++i){lo[i]=r.lo[i]-kBodyPad;hi[i]=r.hi[i]+kBodyPad;}
     if(!SegmentInBox(root,lock,lo,hi,&t))return;
     if(r.found && lock[2]>=r.along)return;
-    r.found=true;r.along=lock[2];std::memcpy(r.at,aim,12);
+    r.found=true;r.along=lock[2];std::memcpy(r.at,aim,12);r.who=object;
 }
 
 // What one probe saw (the bite's and the log's): an enemy or the map, the charge's start and aim, the map hit (m
@@ -337,6 +446,34 @@ void LogTouch(const unsigned char* v,Drill& d,const Contact& c,bool touched,floa
         d.overheated ? " OVERHEATED: no bite" : "");
 }
 
+// An enemy the drill just bit: remembered (kKillWindowMs) to see whether it dies of it.
+void Bitten(Drill& d,const void* who,ULONGLONG ms) noexcept {
+    if(!who)return;
+    Victim* slot=nullptr;
+    for(auto& x:d.victims) {
+        if(x.ref.Is(who)){x.at=ms;return;}
+        if(!slot && (!x.ref || ms-x.at>kKillWindowMs))slot=&x;
+    }
+    if(!slot) {   // all fresh: the oldest makes room
+        slot=&d.victims[0];
+        for(auto& x:d.victims)if(x.at<slot->at)slot=&x;
+    }
+    *slot=Victim{ObjRef::Of(who),ms};
+}
+
+// One charge fired by the drill (`who`: the enemy it is aimed at, null for the map), counted and logged (kLogMs).
+void Charge(unsigned char* v,Drill& d,const float* from,const float* at,float damage,const void* who,const char* what,
+            ULONGLONG ms) noexcept {
+    const bool fired=DrillCharge(v,from,at,damage);
+    if(fired){++d.bites;if(who)Bitten(d,who,ms);}
+    else ++d.misses;
+    if(Cfg().debug && (ms-d.biteLogAt>=kLogMs || !fired)) {
+        d.biteLogAt=ms;
+        Log("DRILL v=%p bite: %s, %.0f damage, charge %s (%d fired, %d not, %d kills)",v,what,damage,
+            fired ? "fired" : "NOT fired",d.bites,d.misses,d.kills);
+    }
+}
+
 // One probe and, turning fast enough and not overheated, a bite: a drill charge onto what it touches, its damage the
 // RPM's share of the per-second value times kBiteSec.
 void Bite(unsigned char* v,Drill& d,float share,ULONGLONG ms) noexcept {
@@ -349,13 +486,15 @@ void Bite(unsigned char* v,Drill& d,float share,ULONGLONG ms) noexcept {
     const float perSec=c.enemy ? Cfg().drillDamage : Cfg().drillBreak;
     const float damage=perSec*share*kBiteSec;
     if(!(damage>0.0f))return;
-    const bool fired=DrillCharge(v,c.from,c.at,damage);
-    if(fired)++d.bites;
-    else ++d.misses;
-    if(Cfg().debug && (ms-d.biteLogAt>=kLogMs || !fired)) {
-        d.biteLogAt=ms;
-        Log("DRILL v=%p bite: %s, %.0f damage, charge %s (%d fired, %d not)",v,c.enemy ? "enemy" : "map",damage,
-            fired ? "fired" : "NOT fired",d.bites,d.misses);
+    Charge(v,d,c.from,c.at,damage,c.enemy ? c.reach.who : nullptr,c.enemy ? "enemy" : "map",ms);
+}
+
+// Heat shed (a kill, d.heat 0..1), with the cooled-down line when that brings it to DrillResumeHeat.
+void Shed(const unsigned char* v,Drill& d,float amount) noexcept {
+    d.heat=d.heat-amount<0.0f ? 0.0f : d.heat-amount;
+    if(d.overheated && d.heat<=Cfg().drillResumeHeat) {
+        d.overheated=false;
+        Log("DRILL v=%p cooled to %.0f%%: it turns again",v,d.heat*100.0f);
     }
 }
 
@@ -363,21 +502,172 @@ void Bite(unsigned char* v,Drill& d,float share,ULONGLONG ms) noexcept {
 // and cools to DrillResumeHeat before it turns again; both said in the log.
 void Heat(const unsigned char* v,Drill& d,float share,bool biting,float dt) noexcept {
     const auto& c=Cfg();
-    d.heat+=(share*(1.0f+(biting ? kBiteHeat : 0.0f))/c.drillHeatSec-(1.0f-share)/c.drillCoolSec)*dt;
+    d.heat+=(share*(1.0f+(biting ? kBiteHeat : 0.0f))/c.drillOverheatSec-(1.0f-share)/c.drillCoolSec)*dt;
     d.heat=d.heat<0.0f ? 0.0f : d.heat>1.0f ? 1.0f : d.heat;
     if(!d.overheated && d.heat>=1.0f) {
         d.overheated=true;
         Log("DRILL v=%p overheated (%s): it stops until it cools to %.0f%%",v,d.player ? "player" : d.npc ? "NPC" : "empty",
             c.drillResumeHeat*100.0f);
     } else if(d.overheated && d.heat<=c.drillResumeHeat) {
-        d.overheated=false;
-        Log("DRILL v=%p cooled to %.0f%%: it turns again",v,d.heat*100.0f);
+        Shed(v,d,0.0f);
     }
+}
+
+// Whether the enemy `r` is dead: its control block's count gone, the object reused, its dead flag or no HP left.
+bool Died(const ObjRef& r) noexcept {
+    if(!r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return true;
+    const auto o=static_cast<const unsigned char*>(r.obj);
+    if(!Readable(o,kHp+4) || At<const void*>(o,kSelfCtrl)!=r.ctrl)return true;
+    return o[kDead]!=0 || !(At<float>(o,kHp)>0.0f);
+}
+
+// The drill's kills this frame: each one sheds DrillKillCool of its heat.
+void Kills(const unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
+    for(auto& x:d.victims) {
+        if(!x.ref)continue;
+        if(ms-x.at>kKillWindowMs){x=Victim{};continue;}
+        if(!Died(x.ref))continue;
+        x=Victim{};
+        ++d.kills;
+        const float before=d.heat;
+        Shed(v,d,Cfg().drillKillCool);
+        if(Cfg().debug)Log("DRILL v=%p kill %d: heat %.0f%% -> %.0f%%",v,d.kills,before*100.0f,d.heat*100.0f);
+    }
+}
+
+// The launch: the drill leaves its place on the hull along the vehicle's forward, its heat up by DrillLaunchHeat.
+void Launch(unsigned char* v,Drill& d) noexcept {
+    const auto& c=Cfg();
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    HomeBase(v,d.pos);
+    std::memcpy(d.dir,m+8,12);
+    std::memcpy(d.axis,d.dir,12);
+    const float over[3]={0.0f,kDrillBaseY,0.0f};   // the first map ray from over the vehicle's origin (see kRays)
+    ToWorld(v,over,d.lastTip);
+    d.speed=c.drillLaunchSpeed;d.flown=0.0f;d.flightBite=kFlightBiteSec;d.backAt=0;
+    d.flight=Flight::out;
+    d.heat=d.heat+c.drillLaunchHeat>1.0f ? 1.0f : d.heat+c.drillLaunchHeat;
+    Log("DRILL v=%p launched: %.0f m/s out to %.0f m, heat %.0f%%",v,d.speed,c.drillLaunchRange,d.heat*100.0f);
+}
+
+void TurnBack(const unsigned char* v,Drill& d,ULONGLONG ms,const char* why) noexcept {
+    d.flight=Flight::back;d.speed=0.0f;d.backAt=ms;
+    if(Cfg().debug)Log("DRILL v=%p turns back after %.0f m (%s)",v,d.flown,why);
+}
+
+// The drill caught back on the hull (or snapped there): its flame burns down.
+void Catch(const unsigned char* v,Drill& d,ULONGLONG ms,const char* how) noexcept {
+    d.flight=Flight::home;d.speed=0.0f;
+    if(d.flaming){FlareFlames(v,nullptr,nullptr,0,ms);d.flaming=false;}
+    Log("DRILL v=%p back on the hull (%s; %d kills so far)",v,how,d.kills);
+}
+
+// Out one frame: the tip's ray to its next place; a map hit bursts a charge there and turns it back.
+void FlyOut(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
+    const auto& c=Cfg();
+    const float slow=c.drillLaunchSpeed*c.drillLaunchSpeed/(2.0f*c.drillLaunchRange);
+    const float step=d.speed*dt;
+    float tip[3],hit[3];
+    for(int i=0;i<3;++i)tip[i]=d.pos[i]+d.dir[i]*(kDrillLength+step);
+    if(MapRay(d.lastTip,tip,hit)>=0.0f) {
+        float at[3],from[3];
+        for(int i=0;i<3;++i){at[i]=hit[i]+d.dir[i]*kInto;from[i]=hit[i]-d.dir[i]*kLead;d.pos[i]=hit[i]-d.dir[i]*kDrillLength;}
+        if(!d.overheated)Charge(v,d,from,at,c.drillBreak*kBiteSec*2.0f,nullptr,"map (launched)",ms);
+        TurnBack(v,d,ms,"met the map");
+        return;
+    }
+    for(int i=0;i<3;++i){d.pos[i]+=d.dir[i]*step;d.lastTip[i]=d.pos[i]+d.dir[i]*kDrillLength;}
+    d.flown+=step;
+    d.speed-=slow*dt;
+    if(d.flown>=c.drillLaunchRange || d.speed<=kOutStop*c.drillLaunchSpeed)TurnBack(v,d,ms,"at its range");
+}
+
+// Back one frame: toward its place on the hull, speeding up; its axis turned to the vehicle's forward near it.
+void FlyBack(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
+    const auto& c=Cfg();
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const float quick=c.drillLaunchSpeed*c.drillLaunchSpeed/(2.0f*c.drillLaunchRange);
+    float home[3];HomeBase(v,home);
+    const float to[3]={home[0]-d.pos[0],home[1]-d.pos[1],home[2]-d.pos[2]};
+    const float gap=Len(to);
+    d.speed=d.speed+quick*dt>c.drillLaunchSpeed ? c.drillLaunchSpeed : d.speed+quick*dt;
+    const float step=d.speed*dt;
+    if(gap<=kCatchM+step){Catch(v,d,ms,"caught");return;}
+    if(ms-d.backAt>kBackMostMs){Catch(v,d,ms,"snapped: too long on its way back");return;}
+    for(int i=0;i<3;++i)d.pos[i]+=to[i]/gap*step;
+    const float w=Clamp((gap-step)/kAlignM,0.0f,1.0f);
+    float axis[3];
+    for(int i=0;i<3;++i)axis[i]=m[8+i]*(1.0f-w)+d.dir[i]*w;
+    if(!Unit(axis,d.axis))std::memcpy(d.axis,m+8,12);
+}
+
+// The enemy nearest the flying drill's axis (EnemyVisitor): its body (root..lock point) within the drill's radius +
+// kBodyPad of the axis, not within kNearHullM of the vehicle's origin.
+struct Sweep { const unsigned char* v; float a[3],b[3],at[3],gap; const void* who; };
+void SweepEnemy(void* ctx,const void* object,const float* aim) noexcept {
+    auto& s=*static_cast<Sweep*>(ctx);
+    float root[3];RootOf(object,aim,root);
+    const float mid[3]={(root[0]+aim[0])*0.5f,(root[1]+aim[1])*0.5f,(root[2]+aim[2])*0.5f};
+    const float gap=std::fmin(std::fmin(SegmentGap(aim,s.a,s.b),SegmentGap(root,s.a,s.b)),SegmentGap(mid,s.a,s.b));
+    if(gap>kDrillRadius+kBodyPad || (s.who && gap>=s.gap))return;
+    const float* m=reinterpret_cast<const float*>(s.v+kMatrix);
+    const float off[3]={aim[0]-m[12],aim[1]-m[13],aim[2]-m[14]};
+    if(Len(off)<kNearHullM)return;
+    s.gap=gap;s.who=object;std::memcpy(s.at,aim,12);
+}
+
+// In flight (kFlightBiteSec): a charge at the enemy nearest its axis, from kLead short of it on the drill's side.
+void FlightBite(unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
+    Sweep s{v};
+    std::memcpy(s.a,d.pos,12);
+    for(int i=0;i<3;++i)s.b[i]=d.pos[i]+d.axis[i]*kDrillLength;
+    VisitEnemies(v,&SweepEnemy,&s);
+    if(!s.who)return;
+    d.touchAt=ms;
+    if(d.overheated)return;
+    float back[3]={d.pos[0]-s.at[0],d.pos[1]-s.at[1],d.pos[2]-s.at[2]};
+    const float l=Len(back);
+    if(!Unit(back,back))std::memcpy(back,d.axis,12);
+    float from[3];
+    for(int i=0;i<3;++i)from[i]=s.at[i]+back[i]*(l<kLead ? (l>0.3f ? l : 0.3f) : kLead);
+    Charge(v,d,from,s.at,Cfg().drillLaunchDamage,s.who,"enemy (launched)",ms);
+}
+
+// The jet: a flame at the drill's trailing end, against its motion (out: its base; back: its tip, it flies tail first).
+void Jet(const unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
+    float at[1][3],vel[1][3];
+    const float s=d.speed>1.0f ? d.speed : 1.0f;
+    if(d.flight==Flight::out) {
+        std::memcpy(at[0],d.pos,12);
+        for(int i=0;i<3;++i)vel[0][i]=d.dir[i]*s;
+    } else {
+        float home[3];HomeBase(v,home);
+        float to[3]={home[0]-d.pos[0],home[1]-d.pos[1],home[2]-d.pos[2]};
+        if(!Unit(to,to))std::memcpy(to,d.axis,12);
+        for(int i=0;i<3;++i){at[0][i]=d.pos[i]+d.axis[i]*kDrillLength;vel[0][i]=to[i]*s;}
+    }
+    FlareFlames(v,at,vel,1,ms);
+    d.flaming=true;
+}
+
+// The flight this frame (launched): its move, its bites, its jet and its pose. A pose that cannot be written (no
+// parent bone) ends the flight at once: a drill flying unseen would bite from nowhere.
+void Fly(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
+    if(d.flight==Flight::out)FlyOut(v,d,dt,ms);
+    else FlyBack(v,d,dt,ms);
+    if(d.flight==Flight::home)return;
+    d.flightBite+=dt;
+    if(d.flightBite>=kFlightBiteSec){d.flightBite=0.0f;FlightBite(v,d,ms);}
+    Jet(v,d,ms);
+    if(PoseFlight(v,d))return;
+    if(!d.poseFailed){d.poseFailed=true;Log("DRILL v=%p: no %ls bone to pose the launched drill by: launch off",v,kParentBone);}
+    Catch(v,d,ms,"no pose");
 }
 
 void Publish(const Drill& d) noexcept {
     AcquireSRWLockExclusive(&cueLock);
-    cue=DrillCue{d.rpm,Cfg().drillMaxRpm,d.heat,GameMs()-d.touchAt<=500,d.overheated};
+    cue=DrillCue{d.rpm,Cfg().drillMaxRpm,d.heat,GameMs()-d.touchAt<=500,d.overheated,d.flight!=Flight::home,
+                 d.flight==Flight::back};
     cueAt=GetTickCount64();
     ReleaseSRWLockExclusive(&cueLock);
 }
@@ -394,7 +684,7 @@ bool IsDrillTank(const void* v) noexcept {
 }
 
 // Before the stock input (crew.cpp InputHook): the player's trigger is the drill's, taken off the seat so the
-// stock input never pulls weapon holder 0.
+// stock input never pulls weapon holder 0; the launch key / button pressed this frame asks for a launch.
 void DrillInput(unsigned char* v) noexcept {
     if(!triggerOk || !Cfg().drill)return;
     Drill* const d=DrillTank(v);
@@ -402,14 +692,21 @@ void DrillInput(unsigned char* v) noexcept {
     unsigned char* const seat=SeatAt(v,0);
     const Rider rider=SeatRider(seat);
     d->player=rider==Rider::player;d->npc=rider==Rider::dummy;
-    if(!d->player)return;
+    if(!d->player){d->launchHeld=false;return;}
     float* const trigger=reinterpret_cast<float*>(seat+kSeatTrigger);
     d->held=*trigger>=kTriggerOn;
     *trigger=0.0f;
+    const auto& c=Cfg();
+    const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    const bool down=keys ? KeyHeld(c.drillLaunchKey)
+                         : (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(c.drillLaunchButton))!=0;
+    if(down && !d->launchHeld)d->launchAsked=true;
+    d->launchHeld=down;
 }
 
-// After the stock input: the RPM toward the top (held, not overheated) or nothing, the heat, the drill turned by it
-// (once a frame, the drawn step capped: kSpinStepMost), a probe / bite every kBiteSec.
+// After the stock input: the RPM toward the top (held or launched, not overheated) or nothing, the heat and the kills,
+// the launch (asked on the hull, not overheated), the drill turned by it (once a frame, the drawn step capped:
+// kSpinStepMost) on the hull or in flight, a probe / bite every kBiteSec on the hull.
 void DrillFrame(unsigned char* v) noexcept {
     if(!triggerOk || !Cfg().drill)return;
     Drill* const d=DrillTank(v);
@@ -419,26 +716,38 @@ void DrillFrame(unsigned char* v) noexcept {
     d->frame=frame;
     const float dt=GameStep(d->lastMs ? ms-d->lastMs : 0);
     d->lastMs=d->seen=ms;
-    const float top=Cfg().drillMaxRpm;
+    const auto& c=Cfg();
+    const float top=c.drillMaxRpm;
+    if(d->launchAsked) {
+        d->launchAsked=false;
+        if(c.drillLaunch && d->player && d->flight==Flight::home && !d->overheated)Launch(v,*d);
+    }
+    const bool flying=d->flight!=Flight::home;
     // An NPC's drill spins while it touches something; an empty tank's never (it once bored on by itself, left
-    // against a wall or with the drill in a slope, until the mission's end). Overheated, none.
+    // against a wall or with the drill in a slope, until the mission's end). Launched, it spins at the top on its jet.
+    // Overheated, none.
     if(!d->player)d->held=d->npc && d->touchAt && ms-d->touchAt<kNpcHoldMs;
+    if(flying)d->held=true;
     if(d->overheated)d->held=false;
-    const float rate=d->held ? top/Cfg().drillSpinUpSec : -top/Cfg().drillSpinDownSec;
+    const float rate=d->held ? top/c.drillSpinUpSec : -top/c.drillSpinDownSec;
     d->rpm+=rate*dt;
     d->rpm=d->rpm<0.0f ? 0.0f : d->rpm>top ? top : d->rpm;
     const float share=top>0.0f ? d->rpm/top : 0.0f;
     Heat(v,*d,share,d->touchAt && ms-d->touchAt<=kBiteMs+kFrameMs,dt);
+    Kills(v,*d,ms);
     const float step=d->rpm/60.0f*2.0f*kPi*dt;
     d->angle=std::fmod(d->angle+(step<kSpinStepMost*share ? step : kSpinStepMost*share),2.0f*kPi);
-    Pose(*d);
-    if(d->rpm>0.0f)LogPose(v,*d,ms);
-    d->bite+=dt;
-    if(d->bite>=kBiteSec) {
-        d->bite=0.0f;
-        // An NPC probes for something to bore into even standing still (that is what spins it up).
-        if(d->rpm>0.0f || (d->npc && !d->overheated))Bite(v,*d,share,ms);
+    if(flying)Fly(v,*d,dt,ms);
+    if(d->flight==Flight::home) {
+        PoseHome(*d);
+        d->bite+=dt;
+        if(d->bite>=kBiteSec) {
+            d->bite=0.0f;
+            // An NPC probes for something to bore into even standing still (that is what spins it up).
+            if(d->rpm>0.0f || (d->npc && !d->overheated))Bite(v,*d,share,ms);
+        }
     }
+    if(d->rpm>0.0f || d->flight!=Flight::home)LogPose(v,*d,ms);
     if(d->player)Publish(*d);
 }
 
