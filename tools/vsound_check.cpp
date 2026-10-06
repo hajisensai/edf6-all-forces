@@ -176,6 +176,36 @@ void Rules() {
         sprintf_s(what,"%s: %s",c.what,c.main ? "a main gun" : "not a main gun");
         Check(MainGun(c.r,c.homing,c.frames,c.looped,c.volume)==c.main,what);
     }
+    // Every weapon's kind (docs/sound-re.md §9.4): the stock vehicle weapons' numbers (the dumps of Root.cpk).
+    struct KindCase { const char* what; Round r; bool homing; int frames; bool looped; float volume; GunKind kind; };
+    const KindCase kinds[]={
+        {"the Blacker's cannon",Round::cannon,false,120,false,0.8f,GunKind::main},
+        {"the Kepler's gatling (3 frames, looped)",Round::gun,false,3,true,0.6f,GunKind::rapid},
+        {"the 506's door gatling (3 frames, looped)",Round::gun,false,3,true,0.6f,GunKind::rapid},
+        {"the 403's machine gun (4 frames, looped)",Round::gun,false,4,true,0.64f,GunKind::rapid},
+        {"the Kepler's grenade gun (5 frames, one-shot)",Round::grenade,false,5,false,0.53f,GunKind::rapid},
+        {"the Striker's cannon (RocketBullet01, 20 frames)",Round::cannon,false,20,false,0.75f,GunKind::autocannon},
+        {"the robot truck's rifle (SolidBullet01, 30 frames)",Round::gun,false,30,false,0.75f,GunKind::autocannon},
+        {"the Begaruta's grenade (40 frames)",Round::grenade,false,40,false,0.7f,GunKind::autocannon},
+        {"the heli's missile (MissileBullet01)",Round::missile,false,300,false,0.9f,GunKind::missile},
+        {"the Naegling's rockets (MissileBullet01)",Round::missile,false,240,false,0.71f,GunKind::missile},
+        {"the 612's laser rifle (EfsExposureBullet, looped)",Round::beam,false,1,true,0.6f,GunKind::none},
+        {"the 506's laser cannon (LaserBullet01)",Round::other,false,120,false,0.56f,GunKind::none},
+        {"a flamethrower (FlameBullet02)",Round::other,false,2,true,0.7f,GunKind::none},
+        {"a homing laser (HomingLaserBullet01)",Round::other,true,1,false,0.71f,GunKind::none},
+        {"the Barga's cannon (looped fire, 180 frames)",Round::cannon,false,180,true,1.0f,GunKind::none},
+        {"the drill (silent)",Round::cannon,false,120,false,0.0f,GunKind::none},
+    };
+    for(const KindCase& c:kinds) {
+        char what[200];
+        const char* names[]={"stock","main gun","autocannon","rapid","missile"};
+        sprintf_s(what,"%s: %s",c.what,names[static_cast<int>(c.kind)]);
+        Check(KindOf(c.r,c.homing,c.frames,c.looped,c.volume)==c.kind,what);
+    }
+    Check(std::fabs(BurstRatio(60.0f/s::kMgRate,s::kMgRate)-1.0f)<1e-4f && BurstRatio(1.0f,s::kGatlingRate)==kBurstRatioHi &&
+          BurstRatio(30.0f,s::kMgRate)==kBurstRatioLo,"a burst: as made at its own rate, its pitch held within its bounds");
+    Check(Firing(0.0f,3.0f) && Firing(6.0f,3.0f) && !Firing(7.0f,3.0f) && Firing(4.0f,1.0f) && !Firing(5.0f,1.0f),
+          "a gun fires its interval and kBurstHold frames past each round, no longer");
 }
 
 // The loader's cues of a gun waiting `interval` frames between shots, a magazine of `rounds` reloaded over `reload`
@@ -308,6 +338,63 @@ void Scenario(const std::wstring& dir) {
         pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));
     WriteWav(dir+L"\\scenario_tank.wav",pcmOut,2);
 }
+
+// The small guns' scenario: a bike riding by (its engine revving up), a Kepler-like gatling firing a 2 s burst at 30 m
+// and stopping (its tail), a machine gun's short bursts, an autocannon's rounds, a missile launched, all as GunStep
+// plays them (the loops at their burst ratio, the rounds one-shots, the cases near).
+void SmallScenario(const std::wstring& dir) {
+    using namespace vmix;
+    using namespace audio;
+    constexpr float kSec=12.0f,kPan=0.70710678f;
+    const int frames=static_cast<int>(kSec*60.0f),spf=s::kRate/60;
+    std::vector<float> out(static_cast<std::size_t>(frames*spf),0.0f);
+    std::vector<float> clip[kClipCount];
+    for(int c=0;c<kClipCount;++c)clip[c]=Floats(pcm[c]);
+    Player idle{&clip[kClipBikeIdle]},load{&clip[kClipBikeLoad]},gat{&clip[kClipGatling]},mg{&clip[kClipMg]},brass{&clip[kClipBrass]};
+    float on=0.0f,speed=0.0f,bikeLoad=0.0f,gI=0.0f,gL=0.0f,gG=0.0f,gM=0.0f,gB=0.0f;
+    const float gun=30.0f,bikeAt=10.0f;
+    const float atGun=Falloff(gun,kRapidRef,1.0f),atBrass=Falloff(8.0f,kReloadRef,1.3f);
+    bool wasGat=false,wasMg=false;
+    auto at=[&](float sec){ return static_cast<std::size_t>(sec*static_cast<float>(s::kRate)); };
+    for(int f=0;f<frames;++f) {
+        const float t=static_cast<float>(f)/60.0f;
+        on=vec::Approach(on,1.0f,1.0f/60.0f/1.2f);
+        bikeLoad+=((t>1.0f && t<4.0f ? 1.0f : 0.2f)-bikeLoad)*0.05f;
+        speed=vec::Approach(speed,t>1.0f && t<4.0f ? 25.0f : 5.0f,6.0f/60.0f);
+        const EngineMix e=Engine(Revs(speed,bikeLoad,kBike),bikeLoad,on,kBike);
+        const float ge=kEngineShare*Falloff(bikeAt,kEngineRef,1.0f)*kPan;
+        const std::size_t a=static_cast<std::size_t>(f*spf),n=static_cast<std::size_t>(spf);
+        idle.Mix(out,a,n,e.ratio,gI,ge*e.idle);load.Mix(out,a,n,e.ratio,gL,ge*e.load);
+        gI=ge*e.idle;gL=ge*e.load;
+        const bool gatFiring=t>4.0f && t<6.0f,mgFiring=(t>7.0f && t<7.6f) || (t>8.0f && t<8.5f);
+        const float nG=gatFiring ? kRapidShare*atGun*kPan : 0.0f,nM=mgFiring ? kRapidShare*atGun*kPan : 0.0f;
+        const float nB=gatFiring || mgFiring ? kBrassShare*atBrass*kPan : 0.0f;
+        gat.Mix(out,a,n,BurstRatio(3.0f,s::kGatlingRate),gG,nG);mg.Mix(out,a,n,BurstRatio(5.0f,s::kMgRate),gM,nM);
+        brass.Mix(out,a,n,BurstRatio(3.0f,s::kBrassRate),gB,nB);
+        gG=nG;gM=nM;gB=nB;
+        if(wasGat && !gatFiring)OneShot(out,clip[kClipBurstTail],a,kRapidShare*atGun*kPan);
+        if(wasMg && !mgFiring)OneShot(out,clip[kClipBurstTail],a,kRapidShare*atGun*kPan);
+        wasGat=gatFiring;wasMg=mgFiring;
+    }
+    for(int k=0;k<4;++k) {
+        const float t=9.2f+0.33f*static_cast<float>(k);
+        OneShot(out,clip[kClipAutocannon],at(t+gun/kSoundSpeed),kAutoShare*atGun*kPan);
+        OneShot(out,clip[kClipCaseSmall],at(t+0.3f),kBrassShare*atBrass*kPan);
+    }
+    OneShot(out,clip[kClipMissile],at(10.8f),kMissileShare*Falloff(20.0f,kMissileRef,1.0f)*kPan);
+    float peak=0.0f;
+    for(float v:out)peak=std::fabs(v)>peak ? std::fabs(v) : peak;
+    char what[160];
+    sprintf_s(what,"the small guns' scenario at full volume: peak %.2f of full scale (under 1: no clipping)",peak);
+    Check(peak<1.0f && peak>0.2f,what);
+    const double bike=Rms(out,at(0.5f),at(1.0f)),burst=Rms(out,at(4.5f),at(5.5f));
+    sprintf_s(what,"the gatling over the bike's idle: %.1f dB louder",20.0*std::log10(burst/bike));
+    Check(burst>bike*2.0,what);
+    std::vector<std::int16_t> pcmOut(out.size()*2);
+    for(std::size_t i=0;i<out.size();++i)
+        pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));
+    WriteWav(dir+L"\\scenario_small_guns.wav",pcmOut,2);
+}
 }  // namespace
 }  // namespace crew
 
@@ -323,6 +410,7 @@ int wmain(int argc,wchar_t** argv) {
     Rules();
     Loaders();
     Scenario(out);
+    SmallScenario(out);
     std::printf("      the sounds are in %ls\n",out.c_str());
     std::printf(failures ? "%d check(s) FAILED\n" : "all checks passed\n",failures);
     return failures ? 1 : 0;

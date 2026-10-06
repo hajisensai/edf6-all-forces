@@ -479,11 +479,14 @@ void ThreatTone(int state,bool launch,ULONGLONG now) noexcept {
 // --- The ground vehicles' sounds ---
 const wchar_t* const kClipName[kClipCount]={L"engine_heavy_idle",L"engine_heavy_load",L"engine_light_idle",L"engine_light_load",
                                             L"tracks",L"turret",L"turret_stop",L"gun_near",L"gun_far",L"reload_eject",
-                                            L"reload_load",L"reload_close"};
-constexpr bool kClipLoops[kClipCount]={true,true,true,true,true,true,false,false,false,false,false,false};
+                                            L"reload_load",L"reload_close",L"engine_bike_idle",L"engine_bike_load",L"mg_burst",
+                                            L"gatling_burst",L"burst_tail",L"autocannon",L"brass",L"case_small",L"missile_launch"};
+constexpr bool kClipLoops[kClipCount]={true,true,true,true,true,true,false,false,false,false,false,false,true,true,true,true,false,
+                                       false,true,false,false};
 // Peak of each clip as made, of full scale: the loops a little under (several play at once), the gun's report at the top.
-constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f};
-constexpr int kLoops=64,kShots=24;
+constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.85f,0.8f,
+                                       0.95f,0.6f,0.8f,0.9f};
+constexpr int kLoops=96,kShots=32;
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
 std::atomic<bool> clipsReady{false};
@@ -508,7 +511,16 @@ std::vector<float> MadeClip(int c) {
     case kClipGunFar: return s::GunFar();
     case kClipEject: return s::ReloadEject();
     case kClipLoad: return s::ReloadLoad();
-    default: return s::ReloadClose();
+    case kClipClose: return s::ReloadClose();
+    case kClipBikeIdle: return s::EngineLayer(s::kBikeEngine,false);
+    case kClipBikeLoad: return s::EngineLayer(s::kBikeEngine,true);
+    case kClipMg: return s::MachineGun();
+    case kClipGatling: return s::Gatling();
+    case kClipBurstTail: return s::BurstTail();
+    case kClipAutocannon: return s::Autocannon();
+    case kClipBrass: return s::Brass();
+    case kClipCaseSmall: return s::CaseSmall();
+    default: return s::MissileLaunch();
     }
 }
 void MakeClipsNow() {
