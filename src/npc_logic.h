@@ -54,6 +54,64 @@ inline float SegmentDist(const float* a,const float* b,const float* p,float* alo
     return Len(c);
 }
 
+// --- A soldier's intent block (docs/npc-ai-design.md §3.1) ---
+// The look a soldier is given towards world direction `dir` as the stock AI gives it (0x5A2B50 at 0x5A2FFB): 0x4E100
+// turns the direction into (pitch = -atan2(dy, horizontal), yaw = atan2(dx, dz)); d60 = wrap(pitch - cur pitch) x gain,
+// d64 = wrap(yaw - cur yaw) x gain, each clamped to `most` rad a frame. False for a zero direction.
+inline bool AimDelta(float curPitch,float curYaw,const float* dir,float gain,float most,float* out) noexcept {
+    const float h=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
+    if(!(h>1e-6f) && !(std::fabs(dir[1])>1e-6f))return false;
+    const float pitch=-std::atan2(dir[1],h),yaw=h>1e-6f ? std::atan2(dir[0],dir[2]) : curYaw;
+    out[0]=Clamp(Wrap(pitch-curPitch)*gain,-most,most);
+    out[1]=Clamp(Wrap(yaw-curYaw)*gain,-most,most);
+    return true;
+}
+// The aim's error (rad) between the soldier's look (pitch, yaw) and world direction `dir`.
+inline float AimError(float curPitch,float curYaw,const float* dir) noexcept {
+    const float h=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
+    const float pitch=-std::atan2(dir[1],h),yaw=std::atan2(dir[0],dir[2]);
+    const float dp=Wrap(pitch-curPitch),dy=Wrap(yaw-curYaw)*std::cos(pitch);
+    return std::sqrt(dp*dp+dy*dy);
+}
+// The local move stick (d50.x, d50.z) for world horizontal direction `dir` at `magnitude` (0..1), the soldier's yaw
+// `yaw`: the inverse of 0x56D350's world = x (cos, 0, -sin) + z (sin, 0, cos).
+inline void LocalMove(float yaw,const float* dir,float magnitude,float* x,float* z) noexcept {
+    const float s=std::sin(yaw),c=std::cos(yaw);
+    float lx=dir[0]*c-dir[2]*s,lz=dir[0]*s+dir[2]*c;
+    const float l=std::sqrt(lx*lx+lz*lz);
+    if(l>1e-6f){lx/=l;lz/=l;}
+    *x=lx*magnitude;*z=lz*magnitude;
+}
+// The world direction of local stick (x, z) at yaw `yaw` (what 0x56D350 does with it).
+inline void WorldMove(float yaw,float x,float z,float* out) noexcept {
+    const float s=std::sin(yaw),c=std::cos(yaw);
+    out[0]=x*c+z*s;out[1]=0.0f;out[2]=-x*s+z*c;
+}
+// A roll's stick: the stock roll needs |d50.x| over 0.35 (0x1790138); a way out straight back or ahead gets a side
+// component of at least `side` towards the side it leans to (right when none).
+inline void RollStick(float x,float z,float side,float* ox,float* oz) noexcept {
+    const float s=x<0.0f ? -1.0f : 1.0f;
+    float ax=std::fabs(x);
+    if(ax<side)ax=side;
+    const float rz=std::sqrt(1.0f-ax*ax>0.0f ? 1.0f-ax*ax : 0.0f)*(z<0.0f ? -1.0f : 1.0f);
+    *ox=s*ax;*oz=std::fabs(z)>1e-6f ? rz : 0.0f;
+}
+
+// --- Script control (A, docs/npc-ai-design.md §4.2) ---
+// What the stock fields say of a unit: its route (+0x4A8), its root leader (up +0x548) the local player or an NPC with
+// a route, its fixed position (+0x380 bit 15), a direction order's frames (+0x4E0), the explorer a Navigation one
+// (an escort), it has an NPC leader at all.
+struct ScriptFacts { bool route,rootPlayer,rootRouted,fixed,escort,npcLeader; int directionFrames; };
+enum class Control : std::uint8_t { free, squad, recruited, script, hold, escort };
+// Script control first (the unit's moves left to the stock AI while it lasts), then recruited, in an NPC squad, free.
+inline Control Classify(const ScriptFacts& f) noexcept {
+    if(f.route || f.rootRouted)return f.escort ? Control::escort : Control::script;
+    if(f.fixed || f.directionFrames>0)return Control::hold;
+    if(f.rootPlayer)return Control::recruited;
+    return f.npcLeader ? Control::squad : Control::free;
+}
+inline bool Scripted(Control c) noexcept { return c==Control::script || c==Control::hold || c==Control::escort; }
+
 // --- Fire lanes (B1) ---
 // The player's lane: from their eye along their aim to `end` (the first wall or enemy, else their weapon's reach),
 // `radius` m wide (the spread their rounds and an NPC's body take up).

@@ -16,6 +16,55 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 }
 bool Near(float a,float b,float tol) { return std::fabs(a-b)<=tol; }
 
+// The intent block: the move's local stick turns back into the world way it was made from (0x56D350's transform), the
+// look as 0x4E100 makes it (up is a negative pitch), the roll's stick past the stock 0.35, the script classes.
+void Intent() {
+    using namespace npc;
+    for(float yaw=-3.1f;yaw<3.2f;yaw+=0.37f)
+        for(float a=0.0f;a<6.28f;a+=0.41f) {
+            const float dir[3]={std::sin(a),0.0f,std::cos(a)};
+            float x,z,back[3];
+            LocalMove(yaw,dir,0.8f,&x,&z);
+            WorldMove(yaw,x,z,back);
+            Check(Near(back[0],dir[0]*0.8f,1e-4f) && Near(back[2],dir[2]*0.8f,1e-4f),"local move round trip",yaw,a);
+            // The stock's own forward (sin yaw, 0, cos yaw) is local +z.
+            const float fwd[3]={std::sin(yaw),0.0f,std::cos(yaw)};
+            LocalMove(yaw,fwd,1.0f,&x,&z);
+            Check(Near(x,0.0f,1e-4f) && Near(z,1.0f,1e-4f),"forward is +z",yaw);
+        }
+    float d[2];
+    const float up[3]={0.0f,10.0f,10.0f};
+    Check(AimDelta(0.0f,0.0f,up,1.0f,10.0f,d) && Near(d[0],-0.785398f,1e-4f) && Near(d[1],0.0f,1e-5f),"up 45 deg: pitch -pi/4",d[0],d[1]);
+    const float right[3]={10.0f,0.0f,0.0f};
+    Check(AimDelta(0.0f,0.0f,right,0.5f,10.0f,d) && Near(d[1],0.785398f,1e-4f),"yaw +pi/2 at gain 0.5",d[1]);
+    const float behind[3]={-0.01f,0.0f,-10.0f};
+    Check(AimDelta(0.0f,3.1f,behind,1.0f,10.0f,d) && std::fabs(d[1])<0.1f,"the short way round (wrap)",d[1]);
+    Check(AimDelta(0.0f,0.0f,right,1.0f,0.2f,d) && Near(d[1],0.2f,1e-6f),"clamped to most a frame",d[1]);
+    Check(AimError(0.0f,0.0f,right)>1.5f && AimError(0.0f,1.5707963f,right)<1e-4f,"aim error");
+    // Converging: applying the delta every frame brings the look onto the direction.
+    float p=0.3f,y=-2.0f;
+    const float tgt[3]={3.0f,-2.0f,-7.0f};
+    for(int f=0;f<200;++f){AimDelta(p,y,tgt,0.25f,0.3f,d);p+=d[0];y=Wrap(y+d[1]);}
+    Check(AimError(p,y,tgt)<0.01f,"the look converges",AimError(p,y,tgt));
+    for(float x=-1.0f;x<=1.0f;x+=0.25f)
+        for(float z=-1.0f;z<=1.0f;z+=0.5f) {
+            float ox,oz;RollStick(x,z,0.6f,&ox,&oz);
+            Check(std::fabs(ox)>0.35f && Near(ox*ox+oz*oz,z==0.0f ? ox*ox : 1.0f,1e-3f),"roll stick past 0.35, unit",x,z);
+            if(x<-0.01f)Check(ox<0.0f,"roll keeps its side",x);
+        }
+    ScriptFacts f{};
+    Check(Classify(f)==Control::free,"nothing: free");
+    f.npcLeader=true;Check(Classify(f)==Control::squad,"an NPC leader: squad");
+    f.rootPlayer=true;Check(Classify(f)==Control::recruited,"root the player: recruited");
+    f.directionFrames=5;Check(Classify(f)==Control::hold && Scripted(Classify(f)),"a direction order: hold (scripted)");
+    f.directionFrames=0;f.rootRouted=true;f.rootPlayer=false;
+    Check(Classify(f)==Control::script,"its leader on a route: script");
+    f.escort=true;Check(Classify(f)==Control::escort && Scripted(Classify(f)),"a navigation route: escort");
+    f=ScriptFacts{};f.route=true;f.rootPlayer=true;
+    Check(Classify(f)==Control::script,"a route wins over recruited");
+    f=ScriptFacts{};f.fixed=true;Check(Classify(f)==Control::hold,"fixed: hold");
+}
+
 void Lanes() {
     using namespace npc;
     const Lane lane{{0.0f,1.5f,0.0f},{0.0f,1.5f,100.0f},2.0f};
@@ -205,6 +254,7 @@ void Posts() {
 }  // namespace
 
 int main() {
+    Intent();
     Lanes();
     Shots();
     Arms();
