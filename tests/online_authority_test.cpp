@@ -117,6 +117,16 @@ int main() {
         Check(Counting(h,c,S::vehicle,S::vehicle,true,true)==1,"client driver's ram on both copies: once (client)");
         Check(Counting(h,c,S::localPlayer,S::vehicle,true,false)==1,"the host player at its gun: once (host)");
     }
+    // The coop hit authority (W3) judges a hit on its attacker's machine: a client player Q at a plugin gun of a vehicle
+    // the host runs (Q != A) must name Q, or W3 drops it on Q while ShotCounts zeroes it on A (damage.md §9.2 #9).
+    {
+        const Facts c=Vehicle(false,theirs,false,2),h=Vehicle(true,ours,true,1);
+        Check(ShotCounts(c,S::localPlayer) && ShooterIsAttacker(c,S::localPlayer),"Q at a remote-run vehicle's plugin gun: counted on Q, Q the attacker");
+        Check(ShooterIsAttacker(Vehicle(false,theirs,false,1),S::localPlayer),"Q = A: Q the attacker too (the same machine either way)");
+        Check(!ShooterIsAttacker(h,S::vehicle) && !ShooterIsAttacker(c,S::vehicle),"the vehicle's own rounds name the vehicle");
+        Check(!ShooterIsAttacker(Vehicle(false,none,false,1,kCopyHere),S::localPlayer),"the plugin's own copies name the copy (no identity)");
+        Check(!ShooterIsAttacker(Facts{false,true,false,ours,true,false,kCopyHost,2},S::localPlayer),"offline the vehicle stays the attacker");
+    }
     // Offline nothing changes.
     Check(ShotCounts(Facts{false,true,false,none,true,false,kCopyElsewhere,2},S::vehicle),"offline: every round counts");
 

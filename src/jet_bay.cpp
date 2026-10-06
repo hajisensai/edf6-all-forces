@@ -216,7 +216,10 @@ unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,
             return nullptr;
         }
         unsigned char* const ifc=o+kDemoIfc;
-        const void* const weak[2]={At<const void*>(owner,kSelf),At<const void*>(owner,kSelfCtrl)};
+        // The attacker the hit is credited to and judged by: the vehicle, or online the player of this machine who pulled
+        // the trigger of a registered vehicle's gun (online_authority.h ShooterIsAttacker).
+        const unsigned char* const attacker=OnlineAttacker(owner,by);
+        const void* const weak[2]={At<const void*>(attacker,kSelf),At<const void*>(attacker,kSelfCtrl)};
         reinterpret_cast<void(*)(void*,const void*)>(image+kIfcOwner)(ifc,weak);
         reinterpret_cast<void(*)(void*,float)>(image+kIfcDamage)(ifc,damage);
         ifc[kIfcFromJet]=1;

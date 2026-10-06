@@ -82,6 +82,17 @@ constexpr bool ShotCounts(const Facts& f,Shooter by) noexcept {
     return Authority(f);
 }
 
+// Whether a round a player of this machine fires from the object names that player as its attacker (its IFC's owner)
+// instead of the object. Online, on a registered vehicle: the room's hit authority (coop W3, docs/net-re/damage.md §9)
+// takes the attacker's machine for the one that judges the hit, and a vehicle's machine (0x630F90; the host for an NPC
+// driver) may be another than the gunner's, where ShotCounts deals the damage: named as the vehicle, the round would be
+// dropped here and dealt as 0 there. The player is this machine's registered object, so both rules pick this machine.
+// Offline (the kill credit, the team, the hull the round spares stay the vehicle's, as origin/main) and on the plugin's own
+// copies (no identity: the hit is settled where the round is) the vehicle stays the attacker.
+constexpr bool ShooterIsAttacker(const Facts& f,Shooter by) noexcept {
+    return f.session && by==Shooter::localPlayer && !LocalCopy(f.net);
+}
+
 // Whether this machine may seat an NPC rider (RideAi) in the vehicle: an unregistered copy is this machine's alone; a
 // registered vehicle gets one on the host only (a client's would make it the vehicle's authority there too).
 constexpr bool MaySeatNpc(const Facts& f) noexcept { return LocalCopy(f.net) || HostOnly(f.session,f.known,f.host); }
@@ -98,6 +109,9 @@ bool OnlineMaySeatNpc(const void* vehicle) noexcept;   // an NPC rider may be se
 bool SeatNpcRider(unsigned char* vehicle,bool spawned) noexcept;
 // Whether a round fired from `owner` by `by` deals its damage here (online::ShotCounts).
 bool OnlineShotCounts(const void* owner,online::Shooter by) noexcept;
+// The attacker a round fired from `owner` by `by` names (online::ShooterIsAttacker): this machine's player in one of
+// `owner`'s seats, else `owner`.
+const unsigned char* OnlineAttacker(const unsigned char* owner,online::Shooter by) noexcept;
 
 // The owner of the unregistered copies made from now on (game thread): kCopyHere for this machine's player's call /
 // throw / rescue, kCopyElsewhere for another machine's player's call replayed here, kCopyHost otherwise (the rest

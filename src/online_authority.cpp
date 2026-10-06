@@ -104,6 +104,17 @@ bool OnlineShotCounts(const void* owner,online::Shooter by) noexcept {
     return Read(owner,&f) && online::ShotCounts(f,by);
 }
 
+const unsigned char* OnlineAttacker(const unsigned char* owner,online::Shooter by) noexcept {
+    online::Facts f;
+    if(!Read(owner,&f) || !online::ShooterIsAttacker(f,by))return owner;
+    const unsigned n=SeatCount(owner);
+    for(unsigned i=0;i<n;++i) {
+        const unsigned char* seat=SeatAt(const_cast<unsigned char*>(owner),i);
+        if(SeatRider(seat)==Rider::player)return At<const unsigned char*>(seat,kSeatRider);
+    }
+    return owner;
+}
+
 online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept {
     const online::CopyOwner previous=spawnScope;
     spawnScope=owner;

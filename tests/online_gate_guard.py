@@ -110,6 +110,8 @@ def check_damage(root: str) -> None:
     if not re.search(r'if\(damage>0\.0f && !OnlineShotCounts\(owner,by\)\)damage=0\.0f;', make) or \
             not before(make, 'OnlineShotCounts(owner,by)', 'ShellCreate('):
         fail('src/jet_bay.cpp ShellMake: a damage round is made without the exactly-once gate (OnlineShotCounts)')
+    if not before(make, 'OnlineAttacker(owner,by)', 'image+kIfcOwner'):
+        fail("src/jet_bay.cpp ShellMake: the round's attacker is not OnlineAttacker's (coop's hit authority would drop it)")
     bay = code_only(read(root, 'src/jet_bay.cpp'))
     for fn in ('bool PlayerShell(', 'bool PlayerCannon('):
         if 'online::Shooter::localPlayer' not in body(bay, fn):
