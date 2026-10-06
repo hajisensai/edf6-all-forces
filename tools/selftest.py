@@ -1234,9 +1234,10 @@ def embedded_seat_aim_wired() -> None:
     two = proteus.split('void TwoSeats(', 1)[1].split('\n}\n', 1)[0]
     assert 'kAimAxes' not in two, 'the AI task must not write unmapped cannon angles'
     hook = proteus.split('void __fastcall AimHook(', 1)[1].split('\n}\n', 1)[0]
-    assert hook.index('nextAim[I](aim,input)') < hook.index('FollowCannon(aim)')
+    assert hook.index('reinterpret_cast<AimFn>(nextAim[I])(aim,input)') < hook.index('FollowCannon(aim)')
+    assert 'hooks[i],&nextAim[i]' in proteus, 'publish the continuation before installing its hook'
     assert 'seataim::Follow(left,right' in proteus and '(axis,true)' in proteus
-    assert plugin.index('InstallTurretCam();') < plugin.index('InstallProteus();')
+    assert plugin.index('InstallTurretCam();') < plugin.index('InstallStabilizer();') < plugin.index('InstallProteus();')
     assert 'add_executable(seat_aim_check' in src('CMakeLists.txt')
 
 

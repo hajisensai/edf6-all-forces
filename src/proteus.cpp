@@ -143,7 +143,7 @@ using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
 using SeatFn=void(__fastcall*)(void*,void*);
 using AimFn=void(__fastcall*)(void*,const float*);
 using AxisApplyFn=void(__fastcall*)(void*,bool);
-AimFn nextAim[2]{};
+void* nextAim[2]{};   // ChainVtableSlot fills the continuation before publishing our hook
 UserFn nextUser=nullptr;
 SearchFn nextSearch=nullptr;
 const unsigned char* damageThunk=nullptr;   // where the redirected damage call goes now (the near thunk to DamageHook)
@@ -692,7 +692,7 @@ void FollowCannon(void* aim) noexcept {
 }
 
 template<int I> void __fastcall AimHook(void* aim,const float* input) {
-    nextAim[I](aim,input);
+    reinterpret_cast<AimFn>(nextAim[I])(aim,input);
     __try { FollowCannon(aim); } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
@@ -787,14 +787,21 @@ bool InstallProteus() noexcept {
     __try {
         ok=AllMatch(kSigs,sizeof(kSigs)/sizeof(kSigs[0]),"the rework");
         if(!ok){Log("PROTEUS off: the Proteus stays stock");return false;}
-        // Installed after the turret camera: retain its hook, and leave unrelated seats alone.
+        // Installed after the turret camera and stabilizer: retain their hooks.
         if(!AllMatch(kAimSigs,sizeof(kAimSigs)/sizeof(kAimSigs[0]),"the paired cannons")){ok=false;return false;}
         const unsigned tables[2]={kAimVt,kAimSeVt};
         void* hooks[2]={reinterpret_cast<void*>(&AimHook<0>),reinterpret_cast<void*>(&AimHook<1>)};
         for(int i=0;i<2;++i) {
-            void* next=nullptr;
-            if(!edf::ChainVtableSlot(reinterpret_cast<void**>(image+tables[i])+2,hooks[i],&next)){ok=false;return false;}
-            nextAim[i]=reinterpret_cast<AimFn>(next);
+            if(!edf::ChainVtableSlot(reinterpret_cast<void**>(image+tables[i])+2,hooks[i],&nextAim[i])) {
+                ok=false;
+                for(int j=0;j<i;++j) {
+                    // Restore only our own slot. A failed restore leaves a safe forwarding hook:
+                    // keep nextAim alive and no unit is active while installation failed.
+                    if(!edf::PatchVtableSlot(reinterpret_cast<void**>(image+tables[j])+2,hooks[j],nextAim[j]))
+                        Log("PROTEUS aim hook %d rollback failed; retaining its original continuation",j);
+                }
+                return false;
+            }
         }
         bool changed=false;
         damageOk=AllMatch(kDamageSigs,sizeof(kDamageSigs)/sizeof(kDamageSigs[0]),"shields") &&

@@ -676,8 +676,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
-    InstallProteus();       // chain its paired cannon aims after the turret camera's aim hook
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
+    InstallProteus();       // chain both aims after the turret camera and plain-aim stabilizer hooks
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
