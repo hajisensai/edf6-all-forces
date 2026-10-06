@@ -41,7 +41,7 @@ ULONGLONG fullLoggedAt=0;
 Post* PostOf(const unsigned char* v,ULONGLONG ms) noexcept {
     Post* slot=nullptr;
     for(auto& p:posts) {
-        if(p.ref.Is(v))return &p;
+        if(p.ref.Is(v) && ms-p.seen<=kStaleMs)return &p;   // a stale one (not NPC-driven for a while) is begun afresh
         if(!slot && (!p.ref || p.ref.obj==v || ms-p.seen>kStaleMs))slot=&p;
     }
     if(!slot) {
@@ -92,7 +92,11 @@ bool TankAi(const unsigned char* v) noexcept {
 
 void NpcPostInput(unsigned char* v) noexcept {
     if(!Cfg().customNpcAi || !Cfg().tankReturnToPost || v[kDead] || !TankAi(v))return;
-    if(SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy)return;
+    if(SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy) {
+        // Not NPC-driven (the player took the wheel, or nobody): its post is forgotten; an NPC later starts from where it is.
+        for(auto& p:posts)if(p.ref.Is(v))p=Post{};
+        return;
+    }
     if(At<const void*>(v,kRoute))return;                         // a script's route: the stock drives it (§4.3)
     if(InSession() && !IsRoomHost())return;
     const ULONGLONG ms=GameMs();

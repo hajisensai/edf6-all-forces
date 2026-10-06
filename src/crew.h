@@ -239,6 +239,8 @@ struct Config {
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay
     float npcFreeRange=120.0f;      // ...a squad told to engage freely: m round where it stood it goes after enemies
     float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s
+    bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
+    float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round

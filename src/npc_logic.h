@@ -32,10 +32,11 @@ inline float Horiz(const float* a,const float* b) noexcept {
     return std::sqrt(dx*dx+dz*dz);
 }
 inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : v>hi ? hi : v; }
+// The angle into [-pi, pi]; no loop (an infinite or huge angle read from the game must not hang the game thread):
+// not finite gives 0.
 inline float Wrap(float a) noexcept {
-    while(a>kPi)a-=2.0f*kPi;
-    while(a<-kPi)a+=2.0f*kPi;
-    return a;
+    if(!std::isfinite(a))return 0.0f;
+    return std::remainder(a,2.0f*kPi);
 }
 // The unit horizontal direction from a to b; false when they stand on one spot.
 inline bool HorizDir(const float* a,const float* b,float* out) noexcept {
@@ -111,6 +112,18 @@ inline Control Classify(const ScriptFacts& f) noexcept {
     return f.npcLeader ? Control::squad : Control::free;
 }
 inline bool Scripted(Control c) noexcept { return c==Control::script || c==Control::hold || c==Control::escort; }
+// The end of a script's control (A3, §4.4): a unit the script controlled and no longer does, `settleMs` running (not
+// the gap between two of the script's orders), is released once: Step is true that one time. Scripted again before or
+// after: watched again from the start.
+struct ScriptWatch { bool was,released; std::uint64_t endAt; };
+inline bool Step(ScriptWatch& w,bool scripted,std::uint64_t now,std::uint64_t settleMs) noexcept {
+    if(scripted){w.was=true;w.released=false;w.endAt=0;return false;}
+    if(!w.was || w.released)return false;
+    if(!w.endAt){w.endAt=now;return settleMs==0 ? (w.released=true) : false;}
+    if(now-w.endAt<settleMs)return false;
+    w.released=true;
+    return true;
+}
 
 // --- Fire lanes (B1) ---
 // The player's lane: from their eye along their aim to `end` (the first wall or enemy, else their weapon's reach),

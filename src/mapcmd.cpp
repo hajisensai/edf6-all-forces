@@ -237,6 +237,12 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
 }
 
 void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool pointer) noexcept {
+    // The game's memory is read before the lock is taken: a fault in a read (a unit gone between its listing and here)
+    // must not leave the lock held, which would block the draw thread for good.
+    float pos[kCmdUnits][3];
+    for(int i=0;i<g.count;++i)std::memcpy(pos[i],PosOf(g.list[i].u.v),12);
+    SquadRow rows[16];
+    const int squads=SquadRows(rows,16);
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,g.count);r.selected=g.sel.n;r.pointOk=pointOk;
@@ -246,11 +252,12 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     for(int i=0;i<g.count;++i) {
         const Entry& e=g.list[i];
         CmdMark& m=r.unit[i];
-        std::memcpy(m.pos,PosOf(e.u.v),12);
+        std::memcpy(m.pos,pos[i],12);
         m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);m.locked=e.u.locked;
         std::snprintf(m.name,sizeof(m.name),"%s%s",e.owner==Owner::heli ? "HELI " : e.owner==Owner::jet ? "JET " : "",e.u.name ? e.u.name : "?");
     }
-    r.squads=SquadRows(r.squad,16);
+    r.squads=squads;
+    std::memcpy(r.squad,rows,sizeof(rows));
     for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;

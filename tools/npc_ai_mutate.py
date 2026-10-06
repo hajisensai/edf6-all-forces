@@ -30,6 +30,9 @@ MUTANTS = [
     ('local move transposed', 'float lx=dir[0]*c-dir[2]*s,lz=dir[0]*s+dir[2]*c;', 'float lx=dir[0]*c+dir[2]*s,lz=-dir[0]*s+dir[2]*c;'),
     ('roll side lost', 'if(ax<side)ax=side;', ''),
     ('route not script', 'if(f.route || f.rootRouted)return', 'if(f.rootRouted)return'),
+    ('script released at once', 'if(now-w.endAt<settleMs)return false;', ''),
+    ('script released again', 'if(!w.was || w.released)return false;', 'if(!w.was)return false;'),
+    ('never-scripted released', 'if(!w.was || w.released)return false;', 'if(w.released)return false;'),
     ('mark ignores move', 'return Dist(pos,mark)<=reach+moveRadius;', 'return Dist(pos,mark)<=reach;'),
 ]
 
