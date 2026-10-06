@@ -2359,7 +2359,7 @@ void PlayerHeli(unsigned char* v) noexcept {
 // RideAi rider has no network identity, so seat 0 is empty here, and slot 55 then zeroes the block), so the replicated
 // stick is copied to the input block as slot 55 would, under the same params Tune gives the pilot (ini HeliSpeed /
 // HeliAgility / HeliYawRate, the same on every machine with the same ini). A stick not received for kStickFresh frames
-// (the stock zeroes it then) is no pilot's: the heli's own params go back (Restore).
+// (the stock zeroes it then) is no pilot's: the heli's own params go back and its record goes (ReplicaOff).
 constexpr std::size_t kRxStickFrames=0x1D7C;   // frames since seat 0's stick came in (slot 8 clears it, slot 51 counts)
 constexpr int kStickFresh=30;
 Heli replicas[8]{};
@@ -2396,11 +2396,12 @@ void ReplicaOff(unsigned char* v) noexcept {
 // A Replica: its replicated stick into the input block, after the stock slot 55 (crew.cpp InputHook), under the
 // pilot's params.
 void Replay(unsigned char* v) noexcept {
+    // No stick coming in: no pilot's (a parked heli takes no record, so the table keeps room for the flown ones).
+    if(At<std::int32_t>(v,kRxStickFrames)>=kStickFresh){ReplicaOff(v);return;}
     const ULONGLONG ms=GameMs();
     Heli* const h=ReplicaOf(v,ms);
     if(!h)return;
     h->seen=ms;
-    if(At<std::int32_t>(v,kRxStickFrames)>=kStickFresh){Restore(*h,v);return;}
     if(h->tuned) {
         Put<float>(v,kSpeedGain,h->params[0]);Put<float>(v,kBlend,h->params[1]);
         Put<float>(v,kMaxYaw,h->params[2]);Put<float>(v,kYawSmooth,h->params[3]);
