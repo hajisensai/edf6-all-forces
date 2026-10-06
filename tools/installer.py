@@ -463,6 +463,16 @@ def _text(path: str) -> str | None:
     return (raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw).decode('utf-8', errors='replace')
 
 
+def check_range(game: str) -> bool:
+    """The installer always writes the default slot; mission files are outside the asset ledger."""
+    import gen
+    out = gen.mission_dir(game, gen.DEFAULT_SLOT)
+    missing = [name for name in ('MISSION.AC', 'MISSION.RMPA', gen.MARKER)
+               if not modfiles.read(os.path.join(out, name))]
+    print('\n测试场关卡：' + (f'缺失或为空：{", ".join(missing)}' if missing else '文件齐全'))
+    return not missing
+
+
 def check(game: str) -> bool:
     """Menu 5: what is installed against this pack, reading only (the game may be running): each plugin's DLL
     (this pack's or another build) and ini (settings this version adds still missing), EDF6AutoTurret's vehicle data
@@ -499,6 +509,7 @@ def check(game: str) -> bool:
         print('  缺失', k)
     for k in changed:
         print('  被改过', k)
+    ok &= check_range(game)
     print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
     return ok
 

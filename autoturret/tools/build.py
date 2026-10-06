@@ -23,7 +23,8 @@ unaimed and bursts at its full range; nothing goes silent.
 
 install records what it did in Mods/.edf6at_data.json:
   files: every whole file it wrote, with the SHA-256 written and the Mods file it replaced (backed up into
-         Mods/.edf6at_backup/ the first time). A Mods file that is not ours (another mod's, or ours
+         Mods/.edf6at_backup/ the first time, or the latest foreign edit explicitly accepted with --force).
+         A Mods file that is not ours (another mod's, or ours
          changed since) is not overwritten without --force. While installing, pending_sha records the
          replacement before it lands; sha still identifies the file before that write.
   texts: for each WEAPONTEXT table, whether install created it and every row it rewrote, as it was
@@ -374,14 +375,22 @@ def install(mods: str, text: bool, force: bool, files: dict[str, bytes] | None =
     files = build_files() if files is None else files
     texts = build_texts(files, mods) if text else describe.Texts({}, {})
     built = Built(files)
-    problems = [p for p in (_foreign(mods, rel, manifest, built) for rel in files) if p]
+    problems = {rel: p for rel in files if (p := _foreign(mods, rel, manifest, built))}
     if problems and not force:
-        raise SystemExit('not overwriting files this tool does not own:\n  ' + '\n  '.join(problems)
-                         + '\nrerun with --force to back them up (first time only) and overwrite them')
+        raise SystemExit('not overwriting files this tool does not own:\n  ' + '\n  '.join(problems.values())
+                         + '\nrerun with --force to back them up and overwrite them')
     # Back up what we replace the first time and record it, before any file is written. A file the old
     # build.py wrote is ours already; what it replaced back then is not known, so it has no backup.
     for rel in files:
         if rel in manifest['files']:
+            if rel in problems:
+                # A later mod's edit supersedes our previous restore point. Save it under a
+                # fresh content-addressed name before changing the manifest; interruption
+                # before that save must leave the previous restore point intact too.
+                data = modfiles.read(_path(mods, rel))
+                backup = f'overrides/{modfiles.sha256(data)}/{rel}'
+                modfiles.atomic_write(_path(mods, f'{BACKUP}/{backup}'), data)
+                manifest['files'][rel]['backup'] = backup
             continue
         backup = None
         if os.path.isfile(_path(mods, rel)) and not built.legacy_owns(mods, rel):
@@ -404,7 +413,7 @@ def install(mods: str, text: bool, force: bool, files: dict[str, bytes] | None =
             entry['rows'][row_id] = {'original': original, 'ours': dsgo.dump(written), 'previous': dsgo.dump(before)}
     # Write-ahead fingerprints: both sides of every atomic replacement belong to this install. This applies
     # to upgrades too, whose sha is already set. A later tool version can recognize an interrupted write
-    # from these hashes without regenerating the failed version's bytes. Preserve the first backup.
+    # from these hashes without regenerating the failed version's bytes. Preserve the chosen restore point.
     for rel, data in files.items():
         entry = manifest['files'][rel]
         entry['sha'] = modfiles.sha256_file(_path(mods, rel))
