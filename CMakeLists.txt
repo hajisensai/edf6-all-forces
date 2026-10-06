@@ -298,6 +298,10 @@ foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
 endforeach()
 add_test(NAME hud_layout COMMAND hud_view --out "${CMAKE_BINARY_DIR}/hud-review")
+# The jets' attack runs offline (tools/jet_obstacle_sim.cpp --selftest): Guard's predicted pull-out (src/jet_pullout.h) clears
+# the ground in every dive it is given, and a called strike jet's guns and missiles fire as it arrives.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/jet-attack-runs")
+add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE_BINARY_DIR}/jet-attack-runs")
 # The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
 # edge (jet_obstacle_sim --edge-suite).
 add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
