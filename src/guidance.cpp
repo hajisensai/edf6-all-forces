@@ -80,7 +80,8 @@ bool GateOpen(const Kind& k,const unsigned char* b,std::uint32_t t) noexcept {
 // The round's frame (rows 0-2: right, up, nose) looking along `dir`, by the game's own look-to.
 void Face(unsigned char* b,const float* dir) noexcept {
     alignas(16) float m[16];
-    reinterpret_cast<LookToFn>(image+kLookTo)(m,dir);
+    alignas(16) const float along[4]={dir[0],dir[1],dir[2],0.0f};   // it reads 16 bytes
+    reinterpret_cast<LookToFn>(image+kLookTo)(m,along);
     std::memcpy(b+kRows,m,48);
 }
 

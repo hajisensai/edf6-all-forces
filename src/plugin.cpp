@@ -320,6 +320,9 @@ void LoadConfig() noexcept {
     n.stockMissileNav=ReadFloat(L"StockMissileNav",n.stockMissileNav);
     if(!(n.stockMissileNav>=2.0f && n.stockMissileNav<=6.0f))n.stockMissileNav=3.0f;
     n.playerLockByView=ReadBool(L"PlayerLockByView",n.playerLockByView);
+    n.tempestTv=ReadBool(L"TempestTv",n.tempestTv);
+    n.tempestTvMouseSpeed=ReadFloat(L"TempestTvMouseSpeed",n.tempestTvMouseSpeed);
+    if(!(n.tempestTvMouseSpeed>=0.1f && n.tempestTvMouseSpeed<=5.0f))n.tempestTvMouseSpeed=1.0f;
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
@@ -526,8 +529,9 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
-    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d",
-        n.vehicleWelding,n.giantContactCap,n.splitMissileSurface,n.stockMissilePN,n.stockMissileNav,n.playerLockByView);
+    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d tempestTv=%d (mouse %.1f)",
+        n.vehicleWelding,n.giantContactCap,n.splitMissileSurface,n.stockMissilePN,n.stockMissileNav,n.playerLockByView,
+        n.tempestTv,n.tempestTvMouseSpeed);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }

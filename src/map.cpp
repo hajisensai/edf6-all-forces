@@ -34,6 +34,7 @@
 #include "map_stock_hud.h"
 #include "memory.h"
 #include "turretaim.h"
+#include "tvguide.h"
 #include "vecmath.h"
 #include <Xinput.h>
 #include <algorithm>
@@ -628,11 +629,28 @@ bool Frame(unsigned char* human) noexcept {
     return true;
 }
 
+// The player's input for the Tempest's TV (tvguide.cpp): mouse and keys in front, a pad.
+TvInput TvRead(const unsigned char* human) noexcept {
+    TvInput in{InFront(),0.0f,0.0f,0.0f,0.0f,false,false};
+    if(in.front) {
+        if(!MouseDelta(human,&in.dx,&in.dy))in.dx=in.dy=0.0f;
+        in.fire=Down(VK_LBUTTON);in.leave=Down(VK_ESCAPE);
+    }
+    XINPUT_STATE pad{};
+    if(PadState(&pad)) {
+        in.rx=Stick(pad.Gamepad.sThumbRX);in.ry=Stick(pad.Gamepad.sThumbRY);
+        in.fire=in.fire || pad.Gamepad.bRightTrigger>128;
+        in.leave=in.leave || (pad.Gamepad.wButtons&XINPUT_GAMEPAD_B)!=0;
+    }
+    return in;
+}
+
 // Called by the shim (rcx = the soldier) from every soldier's pre-update, the player's or not.
 bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
-        return Frame(human);
+        const bool open=Frame(human);
+        return TvFrame(human,open && game.open,TvRead(human)) || open;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -659,7 +677,15 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
     if(!cameraSession.Current(generation))return;
     // The camera's target: the soldier it follows (+0x350 its weak reference, +0x360 the SoldierBase cast of it).
     const bool mine=p.human && (At<const void*>(cam,kCamTargetRef)==p.human || At<const void*>(cam,kCamTarget)==p.human);
-    const bool open=p.open && mine && GetTickCount64()-p.at<=kFreshMs;
+    const bool mapOpen=p.open && mine && GetTickCount64()-p.at<=kFreshMs;
+    // The Tempest's TV (tvguide.cpp) shows through the same hook (one owner of the camera step) when the map does not.
+    const void* tvHuman=nullptr;
+    float tvEye[3],tvLook[3];
+    const bool tv=!mapOpen && TvView(&tvHuman,tvEye,tvLook) &&
+                  (At<const void*>(cam,kCamTargetRef)==tvHuman || At<const void*>(cam,kCamTarget)==tvHuman);
+    const bool open=mapOpen || tv;
+    const float* toEye=mapOpen ? p.eye : tvEye;
+    const float* toLook=mapOpen ? p.look : tvLook;
     if(!open && !camSide.shown)return;
     // The stock view this frame (its eye; a point ahead along its forward row): where the map eases from and back to.
     const float* stockEye=reinterpret_cast<const float*>(cam+kCamEyeRow);
@@ -673,7 +699,7 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
             cameraSession.Publish(generation,true);
         }
         const float k=camSide.blend>0 ? 1.0f/static_cast<float>(camSide.blend--) : 1.0f;
-        Ease(camSide.eye,p.eye,k);Ease(camSide.look,p.look,k);
+        Ease(camSide.eye,toEye,k);Ease(camSide.look,toLook,k);
     } else {
         if(!camSide.leaving){camSide.leaving=true;camSide.blend=kEaseOut;}
         if(camSide.blend<=0){camSide=CamSide{};cameraSession.Publish(generation,false);return;}
@@ -833,7 +859,7 @@ bool PlayerMap(MapReadout* out) noexcept {
     return fresh;
 }
 
-bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed); }
+bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed) || TvHoldsKeys(); }
 bool MapOwnsView() noexcept { return cameraSession.Owns(); }
 bool MapHidesStockHud(const void* camera) noexcept {
     AcquireSRWLockShared(&hudLock);

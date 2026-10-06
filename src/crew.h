@@ -72,7 +72,9 @@ struct Config {
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
     bool stockMissilePN=true;  // every stock homing round (anyone's) steers by proportional navigation at its own strength (guidance.cpp)
     float stockMissileNav=3.0f;// ...its navigation constant (2..6)
-    bool playerLockByView=true;// a stock lock-on weapon the player holds locks the target nearest the screen's centre first (lockon.cpp)
+    bool playerLockByView=true;
+    bool tempestTv=true;       // the player's Tempest cruise missile flown from its nose once it is out (tvguide.cpp)
+    float tempestTvMouseSpeed=1.0f;// ...how fast the mouse steers it// a stock lock-on weapon the player holds locks the target nearest the screen's centre first (lockon.cpp)
     bool splitMissileSurface=true;// split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
@@ -830,6 +832,8 @@ void FlaresStep() noexcept;
 // the flares, homing on the lock held at `lockAt` (entry, control block): the point it flies at (its lock point, or the
 // flare that fooled it) into `aim` and that point's velocity (m a frame; zero at first and after a jump) into `tv`.
 // False: no live lock (it flies on).
+// missile.cpp: round `b` (a MissileBullet01) blasts where it is now (the stock expiry: core flags 0x20, age = life).
+void DetonateRound(unsigned char* b) noexcept;
 bool TrackRound(const unsigned char* b,std::int32_t age,const float* pos,const float* dir,const unsigned char* lockAt,
                 float* aim,float* tv) noexcept;
 int FlaresOf(const void* owner,float (*at)[3],float (*vel)[3],int most) noexcept;

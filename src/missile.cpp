@@ -20,6 +20,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "pn.h"
+#include "tvguide.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -182,6 +183,14 @@ Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept
     return *free;
 }
 
+}  // namespace
+
+void DetonateRound(unsigned char* b) noexcept {
+    Put<std::uint32_t>(b,kFlags,At<std::uint32_t>(b,kFlags)|kBlastOnExpiry);
+    Put<std::int32_t>(b,kAge,At<std::int32_t>(b,kLife));
+}
+
+namespace {
 void Detonate(unsigned char* b,const float* r) noexcept {
     Put<std::uint32_t>(b,kFlags,At<std::uint32_t>(b,kFlags)|kBlastOnExpiry);
     Put<std::int32_t>(b,kAge,At<std::int32_t>(b,kLife));
@@ -266,7 +275,7 @@ void Guide(unsigned char* b) noexcept {
 
 void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
     if(Cfg().enabled) {
-        __try { Guide(static_cast<unsigned char*>(b)); }
+        __try { if(!TvSteer(static_cast<unsigned char*>(b)))Guide(static_cast<unsigned char*>(b)); }
         __except(EXCEPTION_EXECUTE_HANDLER){}
     }
     nextUpdate(b,a2,a3,a4);
@@ -288,5 +297,6 @@ bool InstallMissiles() noexcept {
 
 void ResetMissiles() noexcept {
     for(auto& r:rounds)r=Round{};
+    ResetTv();
 }
 }  // namespace crew

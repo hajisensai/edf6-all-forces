@@ -29,6 +29,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/guidance.cpp)
 # Every lock-on weapon's lock: the order it locks in (the player's nearest the view), the target cycle, reading it.
 target_sources(EDF6VehicleCrew PRIVATE src/lockon.cpp)
+# The Tempest cruise missiles flown from their nose (TV guidance; the view and the hold are the map's).
+target_sources(EDF6VehicleCrew PRIVATE src/tvguide.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
