@@ -107,7 +107,7 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
     air = gen.Plan()
     air.air.enabled = True
     for plan in (gen.grand_battle(gen.Plan()), air, gen.Plan()):
-        lay = gen.layout(points, gen.small_count(plan))
+        lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan.scenario))
         named = set(re.findall(r'app:/object/(edf6tr_[a-z0-9_]+)\.sgo', gen.script(plan, lay)))
         missing = named - {x for x in gen.spawned(plan) if x in gen.DERIVED}
         assert not missing, f'{plan.scenario or ("air" if plan.air.enabled else "waves")}: never written {sorted(missing)}'
@@ -1042,7 +1042,7 @@ def range_parks_every_boardable_aircraft_apart() -> None:
     points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
     points += [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
                for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
-    lay = gen.layout(points, gen.small_count(plan))
+    lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan.scenario))
     taken = [(lay.player, gen.SPOT)]
     for sgo, _npc, p in gen.spots_for(plan, lay):
         r = gen.footprint(sgo)
@@ -1051,6 +1051,26 @@ def range_parks_every_boardable_aircraft_apart() -> None:
     # The fallback is the least overlap, never a silent pile-up: a crowd that cannot fit still spreads out.
     crowd = gen.spaced([(carrier, False)] * 3, points[1:5], lay.player)
     assert len(set(p.name for p in crowd)) == 3, crowd
+
+
+@test
+def grand_battle_fits_the_real_plain() -> None:
+    """The grand battle laid out on the game's own M045 points (48 of them): every placement gets a spot and the ships
+    and the sky's spawns their far points (grand_points). The 1 km grid above never runs short; the real plain did once a
+    second sidecar came in (38 placements left 5 far points of 6 and the install stopped at the last step, 2026-10-06)."""
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import rmpa
+    plan = gen.grand_battle(gen.Plan())
+    points = rmpa.points(gen.Game(rootcpk.DEFAULT_GAME).read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA'))
+    reserve = gen.far_reserved(plan.scenario)
+    lay = gen.layout(points, gen.small_count(plan), reserve)
+    assert len(gen.spots_for(plan, lay)) == len(gen.placements(plan))
+    assert len(gen.grand_points(lay)) == len(gen.GRAND_SHIPS)
+    gen.script(plan, gen.layout(points, gen.small_count(plan), reserve))
 
 
 @test
