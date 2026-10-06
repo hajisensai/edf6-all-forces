@@ -27,6 +27,12 @@ target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
+# Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
+target_sources(EDF6VehicleCrew PRIVATE src/guidance.cpp)
+# Every lock-on weapon's lock: the order it locks in (the player's nearest the view), the target cycle, reading it.
+target_sources(EDF6VehicleCrew PRIVATE src/lockon.cpp)
+# The Tempest cruise missiles flown from their nose (TV guidance; the view and the hold are the map's).
+target_sources(EDF6VehicleCrew PRIVATE src/tvguide.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -313,6 +319,10 @@ set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(split_fuse_test tests/split_fuse_test.cpp)
 target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME split_fuse COMMAND split_fuse_test)
+# Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
+add_executable(pn_test tests/pn_test.cpp)
+target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
@@ -351,3 +361,16 @@ add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-sui
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
     --compiler "${CMAKE_CXX_COMPILER}")
+
+add_executable(lockon_test EXCLUDE_FROM_ALL tests/lockon_test.cpp)
+target_link_libraries(lockon_test PRIVATE edf6common)
+target_include_directories(lockon_test PRIVATE src common)
+target_compile_options(lockon_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks lockon_test)
+add_test(NAME lockon COMMAND lockon_test)
+
+add_executable(tvguide_test EXCLUDE_FROM_ALL tests/tvguide_test.cpp)
+target_link_libraries(tvguide_test PRIVATE edf6common)
+target_compile_options(tvguide_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks tvguide_test)
+add_test(NAME tvguide COMMAND tvguide_test)

@@ -15,6 +15,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
+#include "lockon.h"
 #include "hudscale.h"
 #include "hudtext.h"
 #include "gunnerrecoil.h"
@@ -316,6 +317,15 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
+    n.stockMissilePN=ReadBool(L"StockMissilePN",n.stockMissilePN);
+    n.stockMissileNav=ReadFloat(L"StockMissileNav",n.stockMissileNav);
+    if(!(n.stockMissileNav>=2.0f && n.stockMissileNav<=6.0f))n.stockMissileNav=3.0f;
+    n.playerLockByView=ReadBool(L"PlayerLockByView",n.playerLockByView);
+    n.tempestTv=ReadBool(L"TempestTv",n.tempestTv);
+    n.tempestTvMouseSpeed=ReadFloat(L"TempestTvMouseSpeed",n.tempestTvMouseSpeed);
+    if(!(n.tempestTvMouseSpeed>=0.1f && n.tempestTvMouseSpeed<=5.0f))n.tempestTvMouseSpeed=1.0f;
+    n.tempestTvBoost=ReadFloat(L"TempestTvBoost",n.tempestTvBoost);
+    if(!(n.tempestTvBoost>=1.0f && n.tempestTvBoost<=10.0f))n.tempestTvBoost=3.0f;
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
@@ -522,8 +532,9 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
-    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d",n.vehicleWelding,n.giantContactCap,
-        n.splitMissileSurface);
+    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d tempestTv=%d (mouse %.1f, boost x%.1f)",
+        n.vehicleWelding,n.giantContactCap,n.splitMissileSurface,n.stockMissilePN,n.stockMissileNav,n.playerLockByView,
+        n.tempestTv,n.tempestTvMouseSpeed,n.tempestTvBoost);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }
@@ -727,7 +738,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
+    InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
+    InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks

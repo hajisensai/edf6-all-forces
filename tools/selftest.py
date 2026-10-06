@@ -1042,10 +1042,15 @@ def turret_aim_wired() -> None:
     assert 'tcam::Foreign(AutoTurretSteers(s.v,0),in,stick,kForeign)' in cam and 'tcam::BallisticAim(' in cam
     assert '!TurretCamSteers(v)' in src('src/nix.cpp'), 'nix.cpp: the hold stands aside for the turret camera'
     plugin, vini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    for key in ('PlayerJetLockByView', 'TurretAimHud'):
+    for key in ('PlayerJetLockByView', 'PlayerLockByView', 'TurretAimHud'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=1', vini, re.M) and key in readme, key
-    pick = src('src/stores.cpp').split('float ViewAngle(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Cfg().playerJetLockByView' in pick and 'Rider::player' in pick
+    # The lock order is lockon.cpp's, every weapon's: the jets' stores by PlayerJetLockByView, the stock weapons the
+    # player holds by PlayerLockByView; "the player holds it" is the soldier's own weapon or a seat they ride.
+    lockon = src('src/lockon.cpp')
+    score = lockon.split('bool Score(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'PlayerHolds(w)' in score
+    holds = lockon.split('bool PlayerHolds(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Rider::player' in holds and 'IsPlayer(owner)' in holds and 'SeatHolds(seat,w)' in holds
 
 
 @test
@@ -3544,6 +3549,47 @@ def split_missile_wired() -> None:
     assert 'src/splitmissile.cpp' in src('CMakeLists.txt')
     assert 'add_test(NAME split_fuse COMMAND split_fuse_test)' in src('CMakeLists.txt')
     assert 'docs/split-missile-re.md' in sm and os.path.exists(os.path.join(ROOT, 'docs', 'split-missile-re.md'))
+
+
+@test
+def stock_guidance_wired() -> None:
+    """Every stock homing round steers by PN at its own stock strength (guidance.cpp: the six steering calls of
+    MissileBullet01/02 and HomingLaserBullet01 redirected, MissileBullet02's gate result kept); the lock code is one
+    for every weapon (lockon.cpp, stores.cpp has none left); the Tempest's TV shares the map's one camera hook and one
+    soldier hold; the settings default on and are documented; CTest flies the law (docs/guidance-re.md)."""
+    g = src('src/guidance.cpp')
+    for site, target in (('0x26AA85', '0x269AF0'), ('0x26AA76', '0x269EE0'), ('0x26ECCA', '0x26D4B0'),
+                         ('0x26ECBE', '0x26D8D0'), ('0x250918', '0x24FA60'), ('0x25090B', '0x24FE80')):
+        assert site in g and target in g, (site, target)
+    assert 'RedirectCall(image+kind.site[t],image+kind.target[t],kHooks[k][t],changed)' in g
+    assert 'return t>=At<std::uint32_t>(static_cast<unsigned char*>(b),kKinds[1].delay);' in g, 'MB02 keeps its gate result'
+    assert 'own0*turn' in g, 'type 1: the stock turn at its speed'
+    assert 'pn::Lateral(pos,vel,aim,tv,nav,accel,a);' in g, 'type 2: the stock thrust'
+    assert 'At<std::uint32_t>(b,k.delay)==kNoStockHoming' in g, "the plugin's own missiles left to missile.cpp"
+    assert 'pn::Lateral(' in src('src/missile.cpp'), 'one PN law'
+    stores = src('src/stores.cpp')
+    assert '0x691310' not in stores and '0x68FF60' not in stores, "the lock code is lockon.cpp's"
+    assert 'InstallLockon();' in src('src/plugin.cpp') and 'InstallGuidance();' in src('src/plugin.cpp')
+    m = src('src/map.cpp')
+    assert 'return TvFrame(human,open && game.open,TvRead(human)) || open;' in m, 'one hold shim'
+    assert 'TvView(&tvHuman,tvEye,tvLook)' in m, 'the TV through the map camera hook'
+    assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
+    assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
+    assert 'if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(' in src('src/missile.cpp')
+    crew, vini, readme = src('src/crew.h'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
+                       ('tempestTv', 'TempestTv')):
+        assert f'bool {field}=true;' in crew and re.search(rf'^{key}=1', vini, re.M) and key in readme, key
+    tvg = src('src/tvguide.cpp')
+    assert 'else if(in.fire && !tv.boost){tv.boost=true;' in tvg and 'DetonateRound' not in tvg, 'fire boosts, once'
+    for key in ('StockMissileNav', 'TempestTvMouseSpeed', 'TempestTvBoost'):
+        assert re.search(rf'^{key}=', vini, re.M) and key in readme, key
+    cm = src('CMakeLists.txt')
+    for f in ('src/guidance.cpp', 'src/lockon.cpp', 'src/tvguide.cpp'):
+        assert f in cm, f
+    assert 'add_test(NAME pn COMMAND pn_test)' in cm
+    for doc in ('guidance-re.md', 'lockon-re.md', 'tvguide-re.md'):
+        assert os.path.exists(os.path.join(ROOT, 'docs', doc)), doc
 
 
 @test

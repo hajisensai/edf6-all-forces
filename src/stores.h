@@ -38,9 +38,6 @@ struct Burden { float mass,drag; };
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept;
 // The kind of mark `mark` (pylib/vcobjects.py JET_MASSES: every jet's), or nullptr.
 const JetMass* JetMassOf(float mark) noexcept;
-// A homing store's lock as the weapon holds it (docs/stores-re.md §7): 2 locked (`point` its target's lock point), 1
-// locking (`progress` 0..1, `point` the target), 0 none.
-int StoreLock(const Store& s,float* point,float* progress) noexcept;
 // Whether weapon `w` is one of the stores' (its SGO one of kStores'): the cockpit marks and sounds their locks itself.
 bool IsStoreWeapon(const unsigned char* w) noexcept;
 // The store weapon `w` is (its SGO one of kStores'), else nullptr.
@@ -48,12 +45,6 @@ const StoreSpec* StoreOf(const unsigned char* w) noexcept;
 // The file name of weapon `w`'s SGO (after the last separator of its resource key, upper case), `length` characters;
 // nullptr when it cannot be read. Not zero-terminated where the key goes on.
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* length) noexcept;
-// Drops the store's locks now (the weapon relocks on its next tick).
-void ClearStoreLock(const Store& s) noexcept;
-// Drops the store's lock and keeps its target last in the crosshair's order for a while: the next one in the cone
-// is locked (the cockpit's target cycle).
-void NextStoreTarget(const Store& s) noexcept;
-// The 506's weapon build made one weapon a holder, the stores' lock search ordered by the crosshair (stores.cpp): at
-// load.
+// The 506's weapon build made one weapon a holder (stores.cpp): at load. The stores' locks: lockon.h.
 bool InstallStores() noexcept;
 }  // namespace crew

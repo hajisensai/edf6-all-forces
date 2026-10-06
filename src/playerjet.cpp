@@ -34,6 +34,7 @@
 // boarded and flown through this same record and these steps; what is theirs alone is in playerjet_board.inc.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "lockon.h"
 #include "edf/weapon.h"
 #include "gear.h"
 #include "heliaim.h"
@@ -220,7 +221,7 @@ struct PJet {
     bool bomb,hasImpact;         // the store picked is a bomb; where it would hit now (Impact)
     float impact[3];
     bool targetHeld;             // the target key / X down last frame
-    int lock;                    // the picked store's lock (StoreLock), for the cockpit
+    int lock;                    // the picked store's lock (WeaponLock), for the cockpit
     float lockAt[3],lockProgress;
     bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
     float stallShare;            // ...the share of all its wing gives its path needs, kStallWarn over (>= 1: stall)
@@ -920,13 +921,13 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
             const int at=(j.store+k)%n;
             if(st[at].ammo>0 || k==n){j.store=at;break;}
         }
-        if(j.store!=was){ClearStoreLock(st[was]);ClearStoreLock(st[j.store]);}   // no lock left on the store put away
+        if(j.store!=was){ClearWeaponLock(st[was].weapon);ClearWeaponLock(st[j.store].weapon);}   // no lock left on the store put away
         if(press)Log("PJET v=%p store: %s (%d left)",v,st[j.store].spec->name,st[j.store].ammo);
     }
     const bool next=s.nextTarget && !j.targetHeld;
     j.targetHeld=s.nextTarget;
-    if(next && st[j.store].spec->role!=StoreRole::bomb){NextStoreTarget(st[j.store]);Log("PJET v=%p target: the next one",v);}
-    j.lock=st[j.store].spec->role==StoreRole::bomb ? 0 : StoreLock(st[j.store],j.lockAt,&j.lockProgress);
+    if(next && st[j.store].spec->role!=StoreRole::bomb){NextLockTarget(st[j.store].weapon);Log("PJET v=%p target: the next one",v);}
+    j.lock=st[j.store].spec->role==StoreRole::bomb ? 0 : WeaponLock(st[j.store].weapon,j.lockAt,&j.lockProgress);
     audio::LockTone(j.lock,j.lockProgress);
     // Being locked on (the user, 2026-10-05: "being locked on should sound a warning too"): a missile homing on it
     // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.

@@ -20,7 +20,7 @@
 //    pipper; none within its life, the round's place at its end (sight::RoundAfter), drawn dim. Its distance from
 //    the muzzle goes next to it. No lead: the stock heli guns lock nothing.
 //  - The missile (the 506's and 602's: LockonType 1, a MissileBullet01 homing on what the weapon's own lock list
-//    holds): the lock as the jets' stores read it (stores.h StoreLock: the weapon's lock list +0xC60 and the lock in
+//    holds): the lock as the jets' stores read it (lockon.h WeaponLock: the weapon's lock list +0xC60 and the lock in
 //    progress +0xC70, the same in every weapon, docs/stores-re.md §7), on the target's lock point; with no lock, its
 //    boresight and LockonRange (+0x6D0), the reach it locks within. It homes: no impact point to show.
 //  - The stores (the jets' rocket pod and Hellfires the installer gives the 506s' requests, ini StockHeliStores): the
@@ -39,6 +39,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
+#include "lockon.h"
 #include "stores.h"
 #include "edf/weapon.h"
 #include <cmath>
@@ -117,7 +118,7 @@ bool SolveArm(unsigned char* w,bool homing,HeliSightReadout& r) noexcept {
         r.arm=HeliArm::missile;
         const float range=At<float>(w,kWeaponLockRange);
         r.lockRange=std::isfinite(range) && range>0.0f ? range : 0.0f;
-        r.lock=StoreLock(Store{w,nullptr,0,0,r.lockRange},r.armAt,&r.lockProgress);
+        r.lock=WeaponLock(w,r.armAt,&r.lockProgress);
         if(r.lock)r.armRange=vec::Dist(pos,r.armAt);
         return true;
     }

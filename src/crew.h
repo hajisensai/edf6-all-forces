@@ -70,6 +70,12 @@ struct Config {
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
+    bool stockMissilePN=true;  // every stock homing round (anyone's) steers by proportional navigation at its own strength (guidance.cpp)
+    float stockMissileNav=3.0f;// ...its navigation constant (2..6)
+    bool playerLockByView=true;
+    bool tempestTv=true;       // the player's Tempest cruise missile flown from its nose once it is out (tvguide.cpp)
+    float tempestTvMouseSpeed=1.0f;// ...how fast the mouse steers it
+    float tempestTvBoost=3.0f;     // ...fire boosts it to this many times its top speed (once, for good)// a stock lock-on weapon the player holds locks the target nearest the screen's centre first (lockon.cpp)
     bool splitMissileSurface=true;// split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
@@ -303,6 +309,7 @@ bool InstallBigWorld() noexcept;
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
 bool InstallSplitMissiles() noexcept;
+bool InstallGuidance() noexcept;   // guidance.cpp: the stock homing rounds' steering calls
 // The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
 // once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
 bool InstallJetSound() noexcept;
@@ -822,6 +829,12 @@ int MissilesHomingAt(const float* at,float radius,float (*pos)[3],int most) noex
 // `nose`: the jet's nose (the aspect); `pairStart`: the first flare of a drop (each drop is judged once a round).
 void FlareDrop(const void* owner,const float* at,const float* vel,const float* nose,bool pairStart) noexcept;
 void FlaresStep() noexcept;
+// missile.cpp: round `b` (`age` frames into its flight, at `pos` flying along `dir`) tracked for the missile warnings and
+// the flares, homing on the lock held at `lockAt` (entry, control block): the point it flies at (its lock point, or the
+// flare that fooled it) into `aim` and that point's velocity (m a frame; zero at first and after a jump) into `tv`.
+// False: no live lock (it flies on).
+bool TrackRound(const unsigned char* b,std::int32_t age,const float* pos,const float* dir,const unsigned char* lockAt,
+                float* aim,float* tv) noexcept;
 int FlaresOf(const void* owner,float (*at)[3],float (*vel)[3],int most) noexcept;
 // booster.cpp: the flares' fire, drawn as Booster flames on `v` (their owner) at `at`, trailing against `vel`.
 void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[3],int n,ULONGLONG ms) noexcept;
