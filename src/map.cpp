@@ -484,7 +484,8 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         float dx=0.0f,dy=0.0f;
         if(MouseDelta(human,&dx,&dy) && (dx!=0.0f || dy!=0.0f)) {
             if(!game.loggedMouse && Cfg().debug){game.loggedMouse=true;Log("MAP mouse delta (%.1f,%.1f) a frame",dx,dy);}
-            if(Down(VK_LBUTTON)){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
+            // Ctrl + left drag is the NPC commands' selection box (mapcmd.cpp), not a pan.
+            if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing()){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
             else if(Down(VK_RBUTTON)){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
         }
     }
@@ -572,7 +573,10 @@ bool Frame(unsigned char* human) noexcept {
     if(eye[1]<under+kEyeClear)eye[1]=under+kEyeClear;   // a ridge behind the focus: over it, still looking at the focus
     // The NPC commands (mapcmd.cpp): a unit selected by its key centres the map on it.
     float onto[3];
-    if(MapCommandFrame(front,pad,pad ? padState.Gamepad.wButtons : 0,eye,look,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
+    MapCmdInput in{front,pad,game.pad,false,pad ? padState.Gamepad.wButtons : static_cast<WORD>(0),0.0f,0.0f,{},{}};
+    in.mouse=front && MouseDelta(human,&in.dx,&in.dy);
+    std::memcpy(in.eye,eye,12);std::memcpy(in.look,look,12);
+    if(MapCommandFrame(in,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
     if(now-game.gatherAt>=kGatherMs){game.gatherAt=now;Gather(game,human);}
     Publish(game,human,eye,look);
     ViewMapClip(true,c.mapViewDistance,vec::Clamp(mapcam::Distance(v)*0.004f,0.5f,5.0f));

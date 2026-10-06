@@ -2477,11 +2477,15 @@ def map_commands_wired() -> None:
     """The map's NPC commands (src/mapcmd.cpp, README 地图 指挥 NPC): its keys are read only while the map is open (map.cpp
     Frame calls it after its open test, its one key reader is ReadKeys), it is off online, it is reset with the map; each AI
     module takes the command where it picks what it works round (the jets' anchor, the helis' post as HeliCalled writes it,
-    the crawlers' leader); its offline check (tools/map_cmd_check.cpp) is built and run by CTest; the README says the keys."""
+    the crawlers' leader); the box (Ctrl + left drag) never pans the map; its offline check (tools/map_cmd_check.cpp) is
+    built and run by CTest; the README says the keys."""
     code, mapc, cmake, readme = src('src/mapcmd.cpp'), src('src/map.cpp'), src('CMakeLists.txt'), src('README.md')
     assert code.count('GetAsyncKeyState') == 1 and 'Down(VK_TAB)' in code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
     frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
-    assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(front,pad,'), 'the commands read keys only with the map open'
+    assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
+    # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").
+    assert 'if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing()){mapcam::Drag(v,dx,dy);' in mapc
+    assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
     assert 'ResetMapCommands();' in mapc.split('void ResetMap()', 1)[1].split('\n}', 1)[0]
     assert 'const bool allowed=!InSession();' in code
     assert 'src/mapcmd.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/map_cmd_check.cpp' in cmake
@@ -2491,7 +2495,7 @@ def map_commands_wired() -> None:
     assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
     cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c)', 1)[1].split('\n}\n', 1)[0]
     assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
-    for key in ('Tab', 'G', 'V', 'X', 'OFFLINE ONLY'):
+    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', 'OFFLINE ONLY', '框选'):
         assert key in readme, key
     assert '指挥 NPC' in readme
 

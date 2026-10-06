@@ -2339,6 +2339,8 @@ bool Commandable(const Heli& h) noexcept {
 }
 }  // namespace
 
+bool HeliSharesPost() noexcept { return Cfg().heliGuardRadius>0.0f; }   // GuardOrbit spaces helis on one post round it
+
 int HeliCommandUnits(CommandUnit* out,int most) noexcept {
     int n=0;
     for(const auto& h:helis)

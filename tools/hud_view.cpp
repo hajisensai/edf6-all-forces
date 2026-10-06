@@ -98,6 +98,7 @@ bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap; }
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
+void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=GetTickCount64();
@@ -184,23 +185,26 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     MapUnit& ship=Unit(MapKind::enemyAir,-420.0f,400.0f,820.0f,90.0f);ship.flags=kMapLarge;ship.hp=0.9f;
     Unit(MapKind::lock,-120.0f,6.0f,522.0f);
     Unit(MapKind::marker,250.0f,0.0f,450.0f);Unit(MapKind::marker,-700.0f,0.0f,1200.0f);
-    // The NPC commands (mapcmd.cpp): the heli (selected) sent to guard a point, the jet following the player, two crawlers
-    // under no command; the last command's word.
+    // The NPC commands (mapcmd.cpp): two crawlers (selected) sent to guard a point, standing in their formation slots
+    // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
+    // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
-    sceneCmd.allowed=true;sceneCmd.pointOk=true;
+    sceneCmd.allowed=true;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
+    sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
         CmdMark& c=sceneCmd.unit[sceneCmd.count++];
         std::memcpy(c.pos,pos,12);c.air=air;c.selected=selected;c.now.order=order;
         if(at)std::memcpy(c.now.at,at,12);
         std::snprintf(c.name,sizeof(c.name),"%s",name);
+        if(selected)++sceneCmd.selected;
     };
     const float heli[3]={-150.0f,80.0f,300.0f},jet[3]={400.0f,300.0f,-100.0f},guard[3]={60.0f,0.0f,420.0f};
-    const float robo1[3]={-60.0f,0.0f,90.0f},robo2[3]={80.0f,0.0f,40.0f};
-    cmdUnit(heli,true,"HELI 506",Order::guard,guard,true);
+    const float slot1[3]={60.0f,0.0f,450.0f},robo1[3]={-60.0f,0.0f,90.0f},robo2[3]={80.0f,0.0f,40.0f};
+    cmdUnit(heli,true,"HELI 506",Order::guard,guard,false);
     cmdUnit(jet,true,"JET fighter",Order::follow,nullptr,false);
-    cmdUnit(robo1,false,"CRAWLER",Order::none,nullptr,false);
-    cmdUnit(robo2,false,"CRAWLER",Order::none,nullptr,false);
-    std::swprintf(sceneCmd.note,_countof(sceneCmd.note),L"GUARD (60, 420): 1 UNIT");
+    cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
+    cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
+    std::swprintf(sceneCmd.note,_countof(sceneCmd.note),L"GUARD (60, 420): 2 UNITS");
     sceneCmd.noteFresh=true;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
