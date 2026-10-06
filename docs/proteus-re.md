@@ -13,7 +13,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。H = 反汇编里直接看�
 | vtable | `0x17DEC40`，构造 `0x648DE0` / `0x648EE0`；`veh+0x120` 的接口 vtable `0x17DEE10`（构造里写入，`0x648E19`） | H |
 | 与家族的差别 | 和 `VehicleBegaruta`（0x17DE0A8）只差 slot 1（析构）、**50**（`0x6490C0`：先调原版 RideAi，再给**每个**座位放一个 NPC 乘员）、**55**（`0x648F70`：先调家族的 AI 思考 `0x63C1C0`，再做炮手的 AI）、57/58 | H |
 | slot 49 | 原版 FindSeat `0x633B80`（`docs/re-notes.md` 原来写成「BigBegaruta 的第 49 槽是 0x6490C0」，那其实是第 50 槽） | H |
-| 插件入口 | `crew.cpp kClasses` 显式挂 **slot 4 = 0x644350**。旧实现挂 slot 55 = 0x648F70，只是 AI 任务，玩家驾驶无法保证执行；日志显示安装成功却没有 `PROTEUS v=` 行。共享更新链现在包含重构、换座位、GameFrame 与 HUD 发布 | H（代码/原生槽位；实机症状见日志） |
+| 插件入口 | `crew.cpp kClasses` 显式挂 **slot 4 = 0x644350**（同族 504 / Begaruta / 612 Nix 同样挂 slot 4，`tests/begaruta_family_native_profile_test.py` 对 EDF.dll 核对）。旧实现挂 slot 55 = 0x648F70，只是 AI 任务，玩家驾驶无法保证执行；日志显示安装成功却没有 `PROTEUS v=` 行。共享更新链现在包含重构、换座位、GameFrame 与 HUD 发布 | H（代码/原生槽位；实机症状见日志） |
 | 耐久 | 所有这些 SGO 都是 `game_object_durability=7500`（插件按 最大 HP / 7500 算档位，用来放大机炮和齐射的伤害） | H |
 
 座位（`vehicle_riding_position`，4 个）：0 驾驶员（`407_BIGBEGARUTA_DRIVER`）、1 左炮手、2 右炮手、3 中间（导弹）炮手。

@@ -406,6 +406,8 @@ target_compile_options(jetsound_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks jetsound_check)
 add_test(NAME jetsound_check COMMAND jetsound_check)
 add_test(NAME vehicle_cas COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_cas_pose.py")
+# The Begaruta family (Proteus too) chains its per-frame slot 4; with the game present, against EDF.dll.
+add_test(NAME begaruta_family_profile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/begaruta_family_native_profile_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 

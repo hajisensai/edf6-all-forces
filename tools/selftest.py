@@ -1575,7 +1575,7 @@ def nix_torso_wired() -> None:
     code, twist, crew, cmake = src('src/nix.cpp'), src('src/nix_twist.h'), src('src/crew.cpp'), src('CMakeLists.txt')
     assert 'L"NixTorsoTwist"' in plugin and re.search(r'^NixTorsoTwist=1', ini, re.M) and 'NixTorsoTwist' in readme
     vt = re.search(r'kVtNix=(0x[0-9A-F]+)', code).group(1)
-    assert re.search(rf'\{{{vt},0x[0-9A-F]+,"612_nix"\}}', crew), vt
+    assert re.search(rf'\{{{vt},0x644350,"612_nix",kFindSeat,4\}}', crew), vt   # the family's per-frame update (slot 4)
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)' in cmake
     assert 'add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)' in cmake
     sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
