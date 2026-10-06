@@ -10,6 +10,8 @@ bool InstallNpcAi() noexcept;
 void ResetNpcAi() noexcept;
 // Whether `human` is one of the four soldier classes (AssultSoldier, PaleWing, HeavyArmor, Engineer).
 bool IsSoldierClass(const void* human) noexcept;
+// An enemy is marked now (the Q mark, §6.3; the focus order needs one).
+bool NpcMarked() noexcept;
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
 // reads seat 0's stick (crew.cpp InputHook).

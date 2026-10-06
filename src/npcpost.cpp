@@ -34,7 +34,7 @@ constexpr float kGoalNear=30.0f;                    // m: +0x25E0 this near when
 constexpr ULONGLONG kStaleMs=2000,kLogMs=2000;
 constexpr int kMaxPosts=64;
 
-struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3]; bool commanded; bool active; };
+struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; };
 Post posts[kMaxPosts]{};
 ULONGLONG fullLoggedAt=0;
 
@@ -54,6 +54,7 @@ Post* PostOf(const unsigned char* v,ULONGLONG ms) noexcept {
     const float* goal=reinterpret_cast<const float*>(v+kStockGoal);
     const bool spawn=std::isfinite(goal[0]+goal[1]+goal[2]) && npc::Horiz(pos,goal)<kGoalNear;
     std::memcpy(slot->at,spawn ? goal : pos,12);
+    std::memcpy(slot->home,slot->at,12);
     Log("NPCPOST v=%p %s post (%.0f,%.0f,%.0f)",v,spawn ? "spawn" : "first-seen",slot->at[0],slot->at[1],slot->at[2]);
     return slot;
 }
@@ -117,11 +118,25 @@ void NpcPostInput(unsigned char* v) noexcept {
 bool NpcPostCommand(const void* v,const float* at) noexcept {
     for(auto& p:posts) {
         if(!p.ref.Is(v))continue;
-        if(at){std::memcpy(p.at,at,12);p.commanded=true;}
-        Log("NPCPOST v=%p post moved to (%.0f,%.0f,%.0f) by a command",v,p.at[0],p.at[1],p.at[2]);
+        std::memcpy(p.at,at ? at : p.home,12);p.commanded=at!=nullptr;
+        Log("NPCPOST v=%p post %s (%.0f,%.0f,%.0f) by a command",v,at ? "moved to" : "back on its spawn",p.at[0],p.at[1],p.at[2]);
         return true;
     }
     return false;
+}
+
+// The map's tanks (mapcmd.cpp): those keeping a post now (seen within kCommandSeenMs).
+int TankCommandUnits(CommandUnit* out,int most) noexcept {
+    const ULONGLONG ms=GameMs();
+    int n=0;
+    for(const auto& p:posts)
+        if(n<most && p.ref && p.seen && ms-p.seen<=500)out[n++]=CommandUnit{p.ref.obj,"TANK",p.cmd,false,false,p.active ? "RETURNING" : "AT POST"};
+    return n;
+}
+bool TankCommand(const void* v,const Command& c) noexcept {
+    if(c.order!=Order::guard && c.order!=Order::none)return false;
+    for(auto& p:posts)if(p.ref.Is(v))p.cmd=c;
+    return NpcPostCommand(v,c.order==Order::guard ? c.at : nullptr);
 }
 
 void ResetNpcPosts() noexcept {

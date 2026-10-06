@@ -189,8 +189,9 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 ### 6.1 与地图指挥整合
 
 - 面板就是地图视图（`M`）里的指挥层：`mapcmd.cpp` 的 `Owner` 增加 `squad`，`mapcmd_logic.h` 的 `Order` 增加 `engage`（自由交战）、`focus`（集中火力）、`board`、`dismount`、`dismiss`、`recruit`。选择、框选、Tab 轮换、编队、发令的代码全部沿用。
-- 左侧新增小队列表（`hud.cpp` `MapCommands`）：每行 = 小队名（兵种 + 序号）、人数 / 存活、状态（§4.4）、当前指令、冷却剩余。数字键 1–9 选中对应行（Shift 加选）。
-- 键（地图打开时）：G 驻守指针处（已有）/ V 跟随（已有）/ X 释放（已有）/ **F 自由交战** / **C 集中火力（打标记目标）** / **B 上车** / **N 下车** / **K 解除招募** / **R 招募**。手柄沿用 X/Y/RB/LB，其余只有键鼠。
+- 左上角新增小队列表（`hud.cpp` `MapSquadPanel`；右上角是指南针）：每行 = 小队名（兵种 + 序号）、人数 / 存活、状态（§4.4）、当前指令、冷却剩余。数字键 1–9 选中对应行（Shift 加选）。
+- 键（地图打开时）：G 驻守指针处（已有）/ V 跟随（已有；对未招募的小队 = 招募）/ X 释放（已有）/ **J 自由交战** / **H 集中火力（打标记目标）** / **B 上车** / **N 下车** / **K 解除招募** / **U 招募**（地图自己的镜头用了 WASD、QE、RF，所以没用 F / C / R）。手柄沿用 X/Y/RB/LB，其余只有键鼠。
+- 坦克（§8）也作为地图单位：G 移动驻守点、X 回出生点；不接受跟随。
 - 「前往标记点」= G：地图上指针处就是标记点（已有编队落点）。
 
 ### 6.2 指令语义（步兵）
@@ -289,6 +290,7 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 | P1 | implemented_unverified | 编译（/W4 /WX）；`npc_ai_check`；selftest `npc_ai_wired`（钩子先跑原版、脚本分支不写移动、只驱动本机士兵、ini 读 / 范围 / 发布 / 文档） | §3.1 的 M 项：`+0x1A & 8` 与 AI 列表的对应、d82..d84 对应武器数组前三项、`+0xBE8` 弹数、翻滚输入；全部行为 |
 | P2 | implemented_unverified | 编译；`npc_ai_check` 回位决策（原版方位角与摇杆符号、倒车、原地转向、坦克模型从各方向回到驻守点）；`tools/npc_ai_mutate.py` 21/21 变异被抓；selftest（写在原版输入之前、有路线不碰、联机仅房主） | 实机方向是否与原版 0x661020 一致（日志 `NPCPOST`）；`+0x25E0` 作为出生点（M） |
 | P3 | implemented_unverified | 编译；`npc_ai_check`（PickLeader / JoinSquad / 冷却）；selftest（在原版 Think 之前、仅房主、经原版 SetFollow 与 vslot 39 同步、ini） | 跟随链表遍历（`+0x550` 节点布局，H 但未实测）、vslot 39 单机调用无副作用（M）、整体行为 |
+| P4 | implemented_unverified | 编译；`map_cmd_check`（新指令的按键判定、车辆只收三种指令、无标记时拒绝集中火力）；hud_view 地图场景渲染（面板与按键行不重叠）；selftest（脚本小队不受令、解除招募清 `+0x540` 并开始冷却、冷却结束恢复、车辆指令过滤、ini） | 小队表的计数与状态、解除 / 招募的原版行为（SetFollow + 第 39 槽）、面板实际显示 |
 
 ### 实机验收清单（用户）
 

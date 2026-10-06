@@ -23,6 +23,7 @@
 #include "npc_logic.h"
 #include "vhud.h"
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace crew {
@@ -367,10 +368,10 @@ Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const f
 }
 
 // Where it fights from: the combat spot (re-picked every kSpotMs) no farther than the leash from its anchor.
-void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,float engage,ULONGLONG ms) noexcept {
+void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,float engage,float leash,ULONGLONG ms) noexcept {
     if(s.spotSet && ms-s.spotAt<kSpotMs)return;
     npc::CombatSpot(pos,aim,world.player ? world.playerAt : nullptr,engage,Cfg().npcFlankDeg*npc::kPi/180.0f,s.spot);
-    const float off=npc::Horiz(anchor,s.spot),leash=Cfg().npcLeash;
+    const float off=npc::Horiz(anchor,s.spot);
     if(off>leash) {
         const float k=leash/off;
         s.spot[0]=anchor[0]+(s.spot[0]-anchor[0])*k;s.spot[2]=anchor[2]+(s.spot[2]-anchor[2])*k;
@@ -428,14 +429,87 @@ bool FallBack(unsigned char* h,const float* pos) noexcept {
     return true;
 }
 
+// --- The squads (§5, §6) ---
+// One entry a squad, keyed by its top NPC (the soldier at the top of the +0x548 chain below the player, or with no
+// leader at all): its order from the map, how many members its soldiers' Think counted last frame, its control, its
+// dismissal's cooldown. The members are never stored: the stock chain is read again each frame.
+constexpr int kMaxSquads=64;
+constexpr ULONGLONG kSquadSeenMs=500;
+constexpr std::size_t kAutoFollow=0x540;
+struct Squad {
+    ObjRef top;
+    ULONGLONG seen,frame;
+    int alive,counting,cls;
+    npc::Control control;
+    Command cmd;
+    std::uint8_t autoFollow;   // +0x540 before a dismissal (put back when its cooldown ends)
+    bool dismissed;
+};
+Squad squads[kMaxSquads]{};
+npc::Cooldowns<kMaxSquads> cooldowns;
+std::uint32_t SquadKey(const void* top) noexcept {
+    const auto a=reinterpret_cast<std::uintptr_t>(top);
+    return static_cast<std::uint32_t>(a^(a>>32));
+}
+
+// The top NPC of `h`'s squad: up +0x548 as far as an NPC leads (the player above it ends the walk).
+unsigned char* TopNpc(unsigned char* h) noexcept {
+    unsigned char* top=h;
+    for(int i=0;i<kMaxRoot;++i) {
+        const auto up=At<unsigned char*>(top,kLeader);
+        if(!up || !Readable(up,kLeader+8) || IsPlayer(up) || up[kDead])break;
+        top=up;
+    }
+    return top;
+}
+
+Squad* FindSquad(const void* top) noexcept {
+    for(auto& q:squads)if(q.top.Is(top))return &q;
+    return nullptr;
+}
+
+// Counted by every member's Think; the top's own Think sets its class and control.
+Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control control,ULONGLONG ms) noexcept {
+    Squad* q=FindSquad(top);
+    if(!q) {
+        // A slot no squad has been counted in lately; never a dismissed one's whose cooldown has yet to put its +0x540
+        // back (its soldiers may only be out of this machine's update for a while).
+        for(auto& e:squads)if(!e.top || (ms-e.seen>kSquadSeenMs*4 && !e.dismissed)){q=&e;break;}
+        if(!q)return nullptr;
+        *q=Squad{};q->top=ObjRef::Of(top);q->cls=cls;
+    }
+    if(q->frame!=GameFrame()){q->alive=q->counting;q->counting=0;q->frame=GameFrame();}
+    ++q->counting;
+    q->seen=ms;
+    if(h==top){q->cls=cls;q->control=control;}
+    // The dismissal's cooldown over: the stock "joins a player who comes near" back (§5.4).
+    if(q->dismissed && cooldowns.Ready(SquadKey(top),ms)) {
+        top[kAutoFollow]=q->autoFollow;q->dismissed=false;
+        Log("NPCAI squad %p: its cooldown is over, it may be recruited again",top);
+    }
+    return q;
+}
+
+// What the squad's order makes of a member's anchor and reach (§6.2): guard holds it within NpcGuardRadius of the point,
+// engage lets it fight NpcFreeRange round the point it was given at.
+struct Orders { const float* anchor; float leash; bool hold; };
+Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
+    Orders o{anchor,Cfg().npcLeash,false};
+    if(!q)return o;
+    if(q->cmd.order==Order::guard){o.anchor=q->cmd.at;o.leash=Cfg().npcGuardRadius;o.hold=true;}
+    else if(q->cmd.order==Order::engage){o.anchor=q->cmd.at;o.leash=Cfg().npcFreeRange;}
+    return o;
+}
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
-           const float* pos,ULONGLONG ms) noexcept {
+           const float* pos,const Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.current};
-    // Its anchor: the player it follows, its NPC leader, the spot it was free at.
-    const float* anchor=s.control==npc::Control::recruited && world.player ? world.playerAt :
-                        s.control==npc::Control::squad && root ? Pos(root) : s.home;
+    // Its anchor: the player it follows, its NPC leader, the spot it was free at; a map order's point over them.
+    const Orders o=OrdersOf(q,s.control==npc::Control::recruited && world.player ? world.playerAt :
+                               s.control==npc::Control::squad && root ? Pos(root) : s.home);
+    const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
-    const Pick t=engage>0.0f ? PickTarget(s,eye,anchor,Cfg().npcLeash+engage) : Pick{nullptr,0.0f};
+    const Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage) : Pick{nullptr,0.0f};
     s.target=t.e ? ObjRef::Of(t.e->object) : ObjRef{};
     const unsigned mask=At<std::uint32_t>(h,kControlMask);
     if(t.e) {
@@ -452,9 +526,12 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     float out[3];
     if(world.lane && npc::LaneEscape(world.laneOf,pos,out)){Move(h,out,1.0f);p.move="out of the lane";return p;}
     if(t.e) {
-        Spot(s,pos,t.e->aim,anchor,engage,ms);
+        Spot(s,pos,t.e->aim,anchor,engage,o.leash,ms);
         MoveTo(h,pos,s.spot,kSpotStop);
         p.move="combat spot";
+    } else if(o.hold && npc::Horiz(pos,anchor)>o.leash) {
+        MoveTo(h,pos,anchor,o.leash*0.5f);
+        p.move="to its post";
     }
     return p;
 }
@@ -482,12 +559,13 @@ void Think(unsigned char* h,int cls) noexcept {
         s->control=control;s->controlSet=true;
         std::memcpy(s->home,pos,12);s->homeSet=true;s->spotSet=false;
     }
+    Squad* const q=SeeSquad(TopNpc(h),h,cls,control,ms);
     const Arms a=ArmsOf(h);
     if(a.n==0) {   // its weapons cannot be read: nothing to fight with that the plugin knows of, so all of it stays stock
         if(Cfg().debug && ms-s->loggedAt>kLogMs){s->loggedAt=ms;Log("NPCAI %s %p: weapons unreadable, left stock",kSoldiers[cls].name,h);}
         return;
     }
-    const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,ms);
+    const Plan p=npc::Scripted(control) ? Scripted(*s,h,a,eye,pos) : Drive(*s,h,kSoldiers[cls],a,root,eye,pos,q,ms);
     if(Cfg().debug && ms-s->loggedAt>kLogMs) {
         s->loggedAt=ms;
         Log("NPCAI %s %p %s pos=(%.0f,%.0f,%.0f) arms=%d held=%d arm=%d reach=%.0f target=%p move=%s fire=%d",kSoldiers[cls].name,h,
@@ -639,7 +717,111 @@ bool InstallNpcAi() noexcept {
 
 void ResetNpcAi() noexcept {
     for(auto& s:soldiers)s=Soldier{};
+    for(auto& q:squads)q=Squad{};
+    cooldowns=npc::Cooldowns<kMaxSquads>{};
     world=World{};
     fullLoggedAt=listLoggedAt=0;
 }
+
+// --- The squads on the map (§6) ---
+namespace {
+char squadNames[kMaxSquads][24];
+const char* kClassWords[kClasses]={"RANGER","WING DIVER","FENCER","AIR RAIDER"};
+// Counted by its soldiers' Think within kSquadSeenMs: alive then (the map reads no object it has not seen lately).
+bool Live(const Squad& q,ULONGLONG ms) noexcept { return q.top && q.seen && ms-q.seen<=kSquadSeenMs; }
+const char* StatusOf(const Squad& q,ULONGLONG ms,char* buf,std::size_t size) noexcept {
+    if(q.dismissed){std::snprintf(buf,size,"WAIT %llus",static_cast<unsigned long long>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000));return buf;}
+    switch(q.control) {
+    case npc::Control::recruited: return "RECRUITED";
+    case npc::Control::free: return "FREE";
+    case npc::Control::squad: return "SQUAD";
+    case npc::Control::script: return "SCRIPT";
+    case npc::Control::hold: return "HOLD";
+    case npc::Control::escort: return "ESCORT";
+    }
+    return "?";
+}
+}  // namespace
+
+int SquadCommandUnits(CommandUnit* out,int most) noexcept {
+    if(!ok || !Cfg().customNpcAi)return 0;
+    const ULONGLONG ms=GameMs();
+    int n=0;
+    static char status[kMaxSquads][16];
+    for(int i=0;i<kMaxSquads && n<most;++i) {
+        const Squad& q=squads[i];
+        if(!Live(q,ms))continue;
+        std::snprintf(squadNames[i],sizeof(squadNames[i]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
+        out[n++]=CommandUnit{q.top.obj,squadNames[i],q.cmd,false,npc::Scripted(q.control),StatusOf(q,ms,status[i],sizeof(status[i]))};
+    }
+    return n;
+}
+
+int SquadRows(SquadRow* out,int most) noexcept {
+    if(!ok || !Cfg().customNpcAi)return 0;
+    const ULONGLONG ms=GameMs();
+    int n=0;
+    for(int i=0;i<kMaxSquads && n<most;++i) {
+        const Squad& q=squads[i];
+        if(!Live(q,ms))continue;
+        SquadRow& r=out[n++];
+        r.leader=q.top.obj;
+        std::snprintf(r.name,sizeof(r.name),"%s",kClassWords[q.cls]);
+        char buf[16];
+        std::snprintf(r.status,sizeof(r.status),"%s",StatusOf(q,ms,buf,sizeof(buf)));
+        r.alive=q.alive>0 ? q.alive : 1;
+        r.cooldown=q.dismissed ? static_cast<int>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000) : 0;
+        r.now=q.cmd;r.locked=npc::Scripted(q.control);
+    }
+    return n;
+}
+
+// An order to a squad (§6.2): guard / engage / release change what its members work round; follow / recruit make it the
+// player's (the stock SetFollow, as the stock recruit does), refused during its dismissal's cooldown; dismiss lets go a
+// recruited squad where it stands and starts the cooldown (+0x540 cleared meanwhile, or the stock would take it back at
+// once). The squads of a mission script take none (§4.3).
+bool SquadCommand(const void* leader,const Command& c) noexcept {
+    __try {
+        const ULONGLONG ms=GameMs();
+        Squad* const q=FindSquad(leader);
+        if(!q || !Live(*q,ms) || npc::Scripted(q->control) || !followOk)return false;
+        auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
+        const bool recruited=q->control==npc::Control::recruited;
+        switch(c.order) {
+        case Order::guard:
+            q->cmd=c;
+            break;
+        case Order::engage:
+            q->cmd=c;std::memcpy(q->cmd.at,Pos(top),12);
+            break;
+        case Order::none:
+            q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
+            break;
+        case Order::follow:
+        case Order::recruit: {
+            q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
+            if(recruited)break;
+            unsigned char* const me=PlayerHuman();
+            if(!me || q->dismissed)return false;
+            Follow(top,me);
+            Log("NPCAI squad %p recruited by command",top);
+            break;
+        }
+        case Order::dismiss:
+            if(!recruited)return false;
+            q->autoFollow=top[kAutoFollow];top[kAutoFollow]=0;
+            Follow(top,nullptr);
+            cooldowns.Start(SquadKey(top),ms,static_cast<std::uint64_t>(Cfg().npcRecruitCooldownSec*1000.0f));
+            q->dismissed=true;
+            q->cmd=Command{Order::guard,{0.0f,0.0f,0.0f}};std::memcpy(q->cmd.at,Pos(top),12);
+            Log("NPCAI squad %p dismissed: it holds here, recruitable again in %.0f s",top,Cfg().npcRecruitCooldownSec);
+            break;
+        default:
+            return false;   // focus (P5), board / dismount (P6)
+        }
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool NpcMarked() noexcept { return false; }   // the mark arrives with P5 (docs/npc-ai-design.md §6.3)
 }  // namespace crew

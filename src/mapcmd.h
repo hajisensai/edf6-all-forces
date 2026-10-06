@@ -13,7 +13,9 @@ using mapcmd::Command;
 using mapcmd::Order;
 // A unit an AI module takes map commands for: the vehicle, a short name for the map, the command it stands under,
 // whether it flies (its icon is on it; a ground unit's is up its pin).
-struct CommandUnit { const void* v; const char* name; Command now; bool air; };
+// `locked`: listed (shown, selectable) but takes no order now (a squad a mission script drives: §4.3), `status` what it
+// is doing in a word or two (the panel's column; nullptr: none).
+struct CommandUnit { const void* v; const char* name; Command now; bool air; bool locked; const char* status; };
 // Each module's units that take a command now (live, flown or driven by the plugin's NPC, not withdrawing), at most
 // `most`; how many. Game thread.
 int HeliCommandUnits(CommandUnit* out,int most) noexcept;
@@ -24,6 +26,16 @@ int GroundCommandUnits(CommandUnit* out,int most) noexcept;
 bool HeliCommand(const void* v,const Command& c) noexcept;
 bool JetCommand(const void* v,const Command& c) noexcept;
 bool GroundCommand(const void* v,const Command& c) noexcept;
+// npcai.cpp: the NPC soldiers' squads (one unit a squad, its leader's address; docs/npc-ai-design.md §5, §6), every one
+// the frame saw (a script's too, locked), and an order to one.
+int SquadCommandUnits(CommandUnit* out,int most) noexcept;
+bool SquadCommand(const void* leader,const Command& c) noexcept;
+// npcpost.cpp: the NPC tanks keeping a post (guard moves it; release puts it back on the spawn point).
+int TankCommandUnits(CommandUnit* out,int most) noexcept;
+bool TankCommand(const void* v,const Command& c) noexcept;
+// The panel's row of a squad (hud.cpp MapCommands): its members alive, the seconds left of its dismissal's cooldown.
+struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked; };
+int SquadRows(SquadRow* out,int most) noexcept;
 bool HeliSharesPost() noexcept;   // heli.cpp: guard helis on one post share its orbit (HeliGuardRadius > 0)
 
 // The map's input a frame (map.cpp Frame, the map open): the game window in front, a pad read (its buttons), the last
@@ -47,7 +59,7 @@ bool MapCommandBoxing() noexcept;
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.
 constexpr int kCmdUnits=96;
-struct CmdMark { float pos[3]; Command now; bool selected,air; char name[24]; };
+struct CmdMark { float pos[3]; Command now; bool selected,air,locked; char name[24]; };
 struct MapCommandReadout {
     bool allowed;              // commands work (offline: InSession false)
     bool all;                  // every unit selected (more than one)
@@ -62,6 +74,9 @@ struct MapCommandReadout {
     CmdMark unit[kCmdUnits];
     wchar_t note[80];          // the last command's result or refusal
     bool noteFresh;
+    int squads;                // the squad panel (number keys 1-9 pick a row)
+    SquadRow squad[16];
+    bool squadSelected[16];
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 }  // namespace crew
