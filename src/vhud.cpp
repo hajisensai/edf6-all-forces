@@ -13,6 +13,8 @@
 //    lock as the jets' stores read it (StoreLock), else its LockonRange. The Katyusha's lofted launcher is launcher.cpp's
 //    (its cross and ripple ring): listed here, not aimed twice;
 //  - the selected store, where something lets the player pick one (SetStockSelectedStore; feat/ov-payload);
+//  - the fuel tank (v_fuel01, which every seat of a heli or a bike lists): no weapon, so not among the arms; its FuelTank
+//    is read instead (stockgauge.cpp FuelGauge: the share left and the time at its burn);
 //  - the threats: missiles homing on it, jets locking it (the jets' threat ring's sources).
 // A stock heli gets only the stores here (its sight is helisight.cpp's, its instruments HeliHud's). With the HUD on, the
 // player's seat's stock aim lines are hidden (crew.cpp AimLines, PlayerStockOwnSight): its impact points replace them.
@@ -132,8 +134,8 @@ void DebugLog(const StockHudReadout& r) noexcept {
     const ULONGLONG now=GetTickCount64();
     if(!Cfg().debug || now-at<2000)return;
     at=now;
-    Log("VHUD %s seat %u: %.0f km/h hp %.0f/%.0f arms %d selected %d threats %d",r.kind,r.seat,r.speed*3.6f,r.hp,r.hpMax,r.arms,r.selected,
-        r.threats);
+    Log("VHUD %s seat %u: %.0f km/h hp %.0f/%.0f arms %d selected %d threats %d fuel %d %.3f %.0fs",r.kind,r.seat,r.speed*3.6f,r.hp,
+        r.hpMax,r.arms,r.selected,r.threats,r.fuel.ok,r.fuel.share,r.fuel.sec);
     for(int i=0;i<r.arms;++i) {
         const StockArm& a=r.arm[i];
         Log("VHUD   %d %s %d/%d reload %.2f (%.1fs) kind %d aimed %d hit %d %.0fm %.1fs lock %d",i,a.label,a.ammo,a.ammoMax,a.reload,
@@ -173,19 +175,22 @@ void StockHudFrame(unsigned char* v) noexcept {
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
     const unsigned char* const picked=PayloadPicked(v);
-    int pickedArm=-1;
+    // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
+    const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
+    int pickedArm=-1,storeArm=-1;
     if(n<=8 && Readable(holders,n*8))
         for(std::uint64_t i=0;i<n && r.arms<kStockArms;++i) {
             if(!Readable(holders[i],kHolderWeapon+8))continue;
             const unsigned char* const w=At<const unsigned char*>(holders[i],kHolderWeapon);
-            if(!Readable(w,kChargeLeft+4))continue;
+            if(!Readable(w,kChargeLeft+4) || IsFuelTank(w))continue;
             if(picked && w==picked)pickedArm=r.arms;
+            if(static_cast<int>(i)==store)storeArm=r.arms;
             StockArm& a=r.arm[r.arms++];
             Arm(w,!r.heli,a);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
-    r.selected=pickedArm>=0 ? pickedArm : selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
-    if(r.selected>=r.arms)r.selected=-1;
+    r.selected=pickedArm>=0 ? pickedArm : storeArm;
+    FuelGauge(v,&r.fuel);
     Threats(v,r);
     latest=r;latestMs=ms;
     DebugLog(r);

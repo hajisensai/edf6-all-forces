@@ -78,12 +78,6 @@ bool KeyDown(int vk) noexcept {
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
 }
 
-bool IsFuel(const unsigned char* w) noexcept {
-    std::size_t n=0;
-    const wchar_t* f=WeaponFile(w,&n);
-    return f && n>=6 && _wcsnicmp(f,L"V_FUEL",6)==0;
-}
-
 // The reload as the stock gauge 0x692100 reckons it (see the top).
 void Reload(const unsigned char* w,std::int32_t rounds,float* ready,float* sec) noexcept {
     *ready=1.0f;*sec=0.0f;
@@ -160,7 +154,7 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
     for(std::uint64_t i=0;i<n && count<kMostPayload;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
         unsigned char* const w=At<unsigned char*>(holders[i],kHolderWeapon);
-        if(!Readable(w,kWeaponCharge+4) || IsFuel(w))continue;
+        if(!Readable(w,kWeaponCharge+4) || IsFuelTank(w))continue;
         index[count]=HolderIndex(v,holders[i]);
         ws[count++]=w;
     }

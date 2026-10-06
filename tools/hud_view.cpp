@@ -1,6 +1,7 @@
 // The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp included whole, its draw run on a
 // stand-in "EDF.dll" image whose quad and text functions (the RVAs hud.cpp calls) jump to recorders here, for a few
-// scenes of the warnings (warn.h) on a jet, a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the
+// scenes of the warnings (warn.h) on a jet (one low on fuel: the fuel readout that replaces the stock FUEL gauge, LOW
+// FUEL lit), a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the
 // drill tank, a Nix; at 16:9 and 21:9) under threat. Each scene's quads (as triangles) and text
 // lines go to DIR/<scene>.txt; tools/hud_view.py turns them into PNGs. The text's size is a stand-in (the game's
 // glyphs are not here: kGlyphH px a unit of font scale, kGlyphW of that a character), so read the layout, not the
@@ -97,6 +98,7 @@ bool IsGroundRobo(const void*) noexcept { return false; }
 bool IsDrillTank(const void*) noexcept { return false; }
 bool JetHud(const void*,JetHudInfo*) noexcept { return false; }
 bool HeliFuel(const void*,float*) noexcept { return false; }
+void SetStockGaugeCover(bool) noexcept {}
 }  // namespace crew
 
 using namespace crew;
@@ -221,6 +223,8 @@ int wmain(int argc,wchar_t** argv) {
     sceneJet.impactIn=2.4f;sceneJet.stores=3;sceneJet.store=1;
     static const char* names[]={"AAM","AGM","BOMB"};
     for(int i=0;i<3;++i){sceneJet.storeName[i]=names[i];sceneJet.storeRounds[i]=4-i;}
+    sceneJet.fuel=FuelReading{true,0.62f,-1.0f};   // the 506 body's idle burn: no time worth showing
+    sceneJet.guns=2;sceneJet.gunRounds=1786;
     Symbols(sceneJet.sym,pos,-10.0f,-25.0f);
     Threat(sceneJet.sym,2,150.0f,900.0f,30.0f);Threat(sceneJet.sym,2,-40.0f,2600.0f,200.0f);Threat(sceneJet.sym,1,20.0f,3800.0f,400.0f);
     sceneWarn=Warnings{};
@@ -236,6 +240,15 @@ int wmain(int argc,wchar_t** argv) {
     Threat(sceneJet.sym,1,-120.0f,1500.0f,0.0f);
     sceneWarn.on=1u<<kWarnTerrain|1u<<kWarnLock;sceneWarn.litAt[kWarnTerrain]=now-500;sceneWarn.launchAt=0;
     Scene(dir,L"jet_terrain",pos);
+
+    // The same jet cruising low on fuel, 5:12 left at its burn: FUEL on the stores line, LOW FUEL lit.
+    sceneJet.gpws=Gpws::none;sceneJet.impactIn=-1.0f;sceneJet.climb=0.0f;sceneJet.liftShare=0.5f;
+    Symbols(sceneJet.sym,pos,3.0f,0.0f);
+    sceneJet.sym.threats=0;
+    sceneJet.fuel=FuelReading{true,0.08f,312.0f};
+    sceneWarn.on=1u<<kWarnFuel;sceneWarn.litAt[kWarnFuel]=now-500;
+    Scene(dir,L"jet_lowfuel",pos);
+    sceneJet.fuel=FuelReading{true,0.62f,-1.0f};
 
     // A rotor craft sinking onto the ground, hovering slowly (the helicopter HUD).
     sceneJet.rotor=true;config.heliFlightHud=true;
@@ -253,6 +266,7 @@ int wmain(int argc,wchar_t** argv) {
     sceneHeli=PlayerHeliReadout{};
     sceneHeli.f.speed=12.0f;sceneHeli.f.clear=8.0f;sceneHeli.f.climb=-5.0f;sceneHeli.f.ground=true;sceneHeli.f.vel[2]=12.0f;sceneHeli.f.vel[1]=-5.0f;
     Symbols(sceneHeli.sym,pos,0.0f,-22.0f);
+    sceneHeli.fuel=FuelReading{true,0.41f,1830.0f};
     sceneWarn.on=1u<<kWarnSinkRate;sceneWarn.litAt[kWarnSinkRate]=now-4000;
     Scene(dir,L"heli_sinkrate",pos);
 

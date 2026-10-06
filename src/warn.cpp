@@ -6,7 +6,9 @@
 //  - STALL: the jet's wing cannot hold its path (playerjet.cpp Air);
 //  - MISSILE / LOCK: a missile homing on it, an enemy's lock on it (the threats PlayerJetSymbols carries); a launch: more
 //    missiles coming than within kMissileMemoryMs before;
-//  - GEAR / GEAR SPEED / WEIGHT ON WHEELS: the landing gear (gear.cpp GearHudLatest).
+//  - GEAR / GEAR SPEED / WEIGHT ON WHEELS: the landing gear (gear.cpp GearHudLatest);
+//  - LOW FUEL: its tank (the readouts' FuelReading, stockgauge.cpp FuelGauge; the stock FUEL gauge is gone with
+//    HideStockGauges, its number now the HUD's stores line).
 // Published whole for the HUD (WarnLatest: hud.cpp's annunciator, RWR scope) and sounded (jetaudio.cpp Warn: the threat
 // beeps always, as before; with WarnAudio the launch warble, the stall horn and the callouts).
 #include "warn.h"
@@ -69,8 +71,9 @@ void WarnTick() noexcept {
     const HeliFlight* f=nullptr;
     Gpws g=Gpws::none;
     bool stall=false;
-    if(PlayerJetHud(&j)){y=&j.sym;g=j.gpws;stall=j.stall;f=j.rotor ? &j.heli : nullptr;}
-    else if(PlayerHeliHud(&h)){y=&h.sym;g=h.f.gpws;f=&h.f;}
+    const FuelReading* fuel=nullptr;
+    if(PlayerJetHud(&j)){y=&j.sym;g=j.gpws;stall=j.stall;f=j.rotor ? &j.heli : nullptr;fuel=&j.fuel;}
+    else if(PlayerHeliHud(&h)){y=&h.sym;g=h.f.gpws;f=&h.f;fuel=&h.fuel;}
     if(!y) {
         if(flown){state.on=0;Publish(false);}
         missilesSeen=0;
@@ -96,6 +99,7 @@ void WarnTick() noexcept {
         if(gear.overspeed)on|=1u<<kWarnGearSpeed;
         if(gear.blocked)on|=1u<<kWarnWow;
     }
+    if(fuel && FuelLow(*fuel))on|=1u<<kWarnFuel;
     for(int k=0;k<kWarnCount;++k)if((on>>k&1u) && !(state.on>>k&1u))state.litAt[k]=now;
     state.on=on;state.tick=now;
     Publish(true);

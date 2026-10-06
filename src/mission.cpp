@@ -68,6 +68,7 @@ void MissionStart() noexcept {
     ResetTurretCam();
     ResetHeliSight();
     ResetStockHud();
+    ResetStockGauges();
     ResetPayload();
     ResetSeatSwitch();
     ResetGear();
