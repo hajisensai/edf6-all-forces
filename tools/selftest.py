@@ -287,6 +287,20 @@ def chute_wired_through() -> None:
 
 
 @test
+def release_imports() -> None:
+    """Every project module tools/installer.py imports inside a function (tools/, pylib/, testrange/) is one of
+    tools/build_release.py's PyInstaller hidden imports: a generator left out installs in a dev checkout and is missing
+    from the released exe."""
+    inst, rel = src('tools/installer.py'), src('tools/build_release.py')
+    hidden = set(re.findall(r"'(\w+)'", rel.split("for mod in ('call_weapons'", 1)[1].split('):', 1)[0])) | {'call_weapons'}
+    local = {os.path.splitext(f)[0] for d in ('tools', 'pylib', 'testrange') for f in os.listdir(os.path.join(ROOT, d)) if f.endswith('.py')}
+    lazy = set(re.findall(r'^[ \t]+import (\w+)', inst, re.M)) & local
+    assert 'make_emc' in lazy, 'release_imports: the scan reads installer.py'
+    missing = sorted(lazy - hidden)
+    assert not missing, f'tools/build_release.py: hidden imports missing {missing}'
+
+
+@test
 def play_edge_margin_is_the_big_maps() -> None:
     """src/crew.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
     import make_bigmap
@@ -607,6 +621,13 @@ def emc_copies_agree() -> None:
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     i_in, i_stock, i_frame = hook.find('&EmcInput,'), hook.find('nextInput[I]('), hook.find('&EmcFrame,')
     assert 0 <= i_in < i_stock < i_frame, 'src/crew.cpp InputHook: EmcInput before the stock input, EmcFrame after'
+    # The plugin off mid-charge: the frame and the tick still run (the charge let go, a gone EMC's loop stopped).
+    off = hook.find('if(!Cfg().enabled)return;')
+    assert i_frame < off and 0 <= hook.find('&EmcTick)') < off, 'EmcFrame / EmcTick run with the plugin off'
+    assert 'Cfg().enabled && Cfg().emcBeam' in emc, 'emc.cpp Ready: off with the plugin'
+    # The HUD's EMC line is the EMC's own vehicle's (its position), as the Proteus readout is.
+    assert 'float pos[3]; };' in src('src/crew.h').split('struct EmcCue', 1)[1].split('\n', 1)[0]
+    assert 'std::memcpy(c.pos,v+kPosition,12);' in emc and 'x.emc && vec::Dist(x.emc->pos,r.pos)<2.0f' in src('src/hud.cpp')
     assert 'ResetEmc();' in src('src/mission.cpp') and 'InstallEmc();' in src('src/plugin.cpp')
     inst = src('tools/installer.py')
     assert 'make_emc.build(game)' in inst and 'make_emc.install(game, emc)' in inst and 'make_emc.remove' in inst
@@ -854,7 +875,8 @@ def turret_aim_wired() -> None:
     assert 'PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)' in seat
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
-    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone'}, names   # the last: proteus_wired
+    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
+                          'kInputHeld'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
     assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at
@@ -1207,8 +1229,25 @@ def proteus_wired() -> None:
     assert 'ResetProteus();' in src('src/mission.cpp') and 'InstallProteus();' in plugin
     frame = crew.split('void __fastcall InputHook', 1)[1]
     assert frame.index('&ProteusFrame') < frame.index('if(!Cfg().enabled)return;'), 'the Proteus step must run with the plugin off'
+    assert frame.index('&ProteusFrame') < frame.index('&SeatSwitchFrame'), 'the seats it closes are closed before the seat switch asks'
+    # The stock launcher is the salvo's only while the salvo can be fired and its seat is closed, decided each frame after
+    # the seats; what is given back is what was taken.
+    step = code.split('void Frame(unsigned char* v)', 1)[1].split('\n}', 1)[0]
+    assert step.index('TwoSeats(*u,v);') < step.index('Guns(*u,salvoReady,c);'), 'Guns after the seats'
+    assert 'const bool hold=salvo && u.closed;' in code and 'Put<float>(m,kRate,u.rate[kLauncherSeat]);' in code
+    give = code.split('void GiveBack(Unit& u', 1)[1].split('\n}', 1)[0]
+    assert 'Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);' in give and '1.0f' not in give
+    assert 'u.active && u.ref.Is(v)' in code and 'u.ref.obj==' not in code, 'a Proteus unit by its live object, not its address'
+    # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
+    assert '(IsHelicopter(vehicle) || IsProteus(vehicle)) && !st.playerAt' in crew
+    assert 'kProteusHoldCountdown*0.5f' in src('src/vehsound.cpp') and 'kHoldCountdown=kProteusHoldCountdown' in code
+    # The damage call both read: the carrier's check takes the Proteus's redirect as intact (no install order between them).
+    sub = src('src/subcarrier.cpp')
+    sigs = sub.split('const Sig kDamageSigs[]={', 1)[1].split('};', 1)[0]
+    assert '{0x54A586,' not in sigs and 'return to==image+kDamageTarget || ProteusDamageThunk(to);' in sub
+    assert 'damageOk=Body506MessageOk() && DamageCallReaches();' in sub and 'damageThunk=image+kDamageCall+5+rel;' in code
     assert 'ProteusViewLift(' in src('src/turretcam.cpp')
-    assert 'Cfg().enabled && Cfg().proteus' in src('src/jet_spawn.cpp') and 'gunship || proteus' in src('src/jet_bay.cpp')
+    assert 'PreloadShells(mgr,Preloaded(Body::gunship),ProteusReady());' in src('src/jet_spawn.cpp') and 'gunship || proteus' in src('src/jet_bay.cpp')
     link = src('common/edf/aimlink.h')
     name = re.search(r'kPriorityZone\[\]="(\w+)"', link).group(1)
     assert f'extern "C" __declspec(dllexport) bool __cdecl {name}(' in code, name
@@ -1306,6 +1345,12 @@ def vehicle_sound_wired() -> None:
     hook = crew.split('void __fastcall InputHook(', 1)[1]
     assert 0 <= hook.find('&VehicleSound,v') < hook.find('if(!Cfg().enabled)return;'), 'VehicleSound before the Enabled test'
     assert 'ResetVehicleSound();' in mission and 'InstallVehicleSound();' in plugin
+    # The listener is the camera's for the vehicles too: placed whenever VehicleSound is on (not only once a jet sounded),
+    # and a stock sound is held only while ours can be heard (the clips made and the listener placed).
+    tick = src('src/jetsound.cpp').split('void JetSoundTick()', 1)[1].split('\n}', 1)[0]
+    assert 'if((jets && started) || (Cfg().enabled && Cfg().vehicleSound))Tick();' in tick, 'JetSoundTick: the vehicles need the listener'
+    on = code.split('void VehicleSound(unsigned char* v)', 1)[1].split('\n}', 1)[0]
+    assert 'audio::ClipsReady() && SoundListening()' in on, 'VehicleSound: no stock sound held while nothing of ours can sound'
     assert 'src/vehsound.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
     assert 'add_executable(vsound_check EXCLUDE_FROM_ALL tools/vsound_check.cpp)' in cmake
     check = src('tools/vsound_check.cpp')
@@ -2220,11 +2265,25 @@ def map_wired() -> None:
             want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
+    # Closed by a key: the hold stays until every closing key is let go (the closing B is no seat switch, no stock B action).
+    frame = code.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
+    shut = frame.index('Close(close ? "Esc / B" : "the map key");')
+    assert shut < frame.index('game.draining=true;holds.store(true);') < frame.index(
+        'if(k.map || k.esc || k.padMap || k.padClose)return true;') < frame.index('if(!game.open) {'), 'map: the closing key drains'
+    assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
                 'src/proteus.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
+    # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
+    held = re.search(r'kInputHeld\[\]="(\w+)"', src('common/edf/aimlink.h')).group(1)
+    assert held.endswith('V1') and f'extern "C" __declspec(dllexport) bool __cdecl {held}() {{ return crew::MapHoldsKeys(); }}' in code
+    design = src('autoturret/src/designate.cpp')
+    assert 'link::Resolve(link::kCrewDll,link::kInputHeld,inputHeld,heldTried) && inputHeld()' in design
+    assert 'if(vk<=0 || vk>0xFE || MapHolds())return false;' in design.split('bool KeyHeld(int vk)', 1)[1].split('\n}', 1)[0]
+    at_readers = [f for f in os.listdir(os.path.join(ROOT, 'autoturret', 'src')) if 'GetAsyncKeyState' in src(f'autoturret/src/{f}')]
+    assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'overlay.cpp', 'map.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
