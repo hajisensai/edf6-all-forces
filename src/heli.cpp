@@ -2238,6 +2238,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     const int locks=jet::LockersOf(v,y.threatAt+n,kMostThreats-n);
     for(int i=n;i<n+locks;++i)y.threatKind[i]=1;
     y.threats=n+locks;
+    FuelGauge(v,&r.fuel);   // the tank the stock FUEL gauge showed (stockgauge.cpp): HeliStrip's line, LOW FUEL
     AcquireSRWLockExclusive(&heliHudLock);
     heliHud=r;heliHudAt=GetTickCount64();
     ReleaseSRWLockExclusive(&heliHudLock);

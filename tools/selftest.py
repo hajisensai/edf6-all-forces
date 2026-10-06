@@ -1305,6 +1305,32 @@ def stock_vehicle_hud_wired() -> None:
             assert w['AmmoClass'] == 'MissileBullet01' and cp[0] == 0, (name, w['AmmoClass'], cp[0])
 
 
+@test
+def stock_gauges_wired() -> None:
+    """The stock weapon gauges (src/stockgauge.cpp; the user, 2026-10-06: "删掉原版挂载和油料显示"): its ini key is read,
+    shipped and documented; it is installed at load and only through the gauge's update slot (no draw call skipped); the
+    HUD's publish says what it covers; every EDF.dll address it checks is in docs/hud-re.md §9; the fuel tank is no
+    weapon in the stock HUD's arms and is read where the stock FUEL panel was, LOW FUEL its warning."""
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert 'L"HideStockGauges"' in plugin and re.search(r'^HideStockGauges=1', ini, re.M) and 'HideStockGauges' in readme
+    assert 'InstallStockGauges();' in plugin.split('EML6_Load(', 1)[1]
+    cmake = src('CMakeLists.txt')
+    assert 'src/stockgauge.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
+    gauge = src('src/stockgauge.cpp')
+    assert gauge.count('PatchVtableSlot(') == 1 and 'RedirectCall' not in gauge, 'stockgauge.cpp: the update slot only'
+    doc = src('docs/hud-re.md').split('## 9.', 1)[1]
+    rvas = set(re.findall(r'\b0x[0-9A-F]{6,7}\b', gauge))
+    missing = sorted(r for r in rvas if f'`{r}`' not in doc and f'`{r} ' not in doc and r not in doc)
+    assert not missing, f'docs/hud-re.md §9 does not name {missing}'
+    hud = src('src/hud.cpp')
+    assert 'SetStockGaugeCover(textOk' in hud.split('void HudPublish(', 1)[1].split('\n}\n', 1)[0]
+    vhud = src('src/vhud.cpp').split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'IsFuelTank(w)' in vhud and 'FuelGauge(v,&r.fuel)' in vhud
+    assert 'FuelGauge(v,&r.fuel)' in src('src/playerjet.cpp') and 'FuelGauge(v,&r.fuel)' in src('src/heli.cpp')
+    assert 'kWarnFuel' in src('src/warn.h') and 'kWarnFuel' in src('src/warn.cpp') and 'L"LOW FUEL"' in hud
+    assert 'jet_lowfuel' in src('tools/hud_view.cpp')
+
+
 # ---------------------------------------------------------------- the transaction
 
 

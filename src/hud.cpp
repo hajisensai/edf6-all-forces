@@ -652,10 +652,15 @@ void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,fl
     LockAt(drawer,ctx,vp,width,height,s,j.lock,j.lockAt,j.lockProgress,&sx,&sy);
 }
 
-// The stores: each store's name and rounds, the picked one in brackets, and the flares in the air.
+// The stores: the guns' rounds (the fewest in one), each store's name and rounds, the picked one in brackets, and the
+// flares in the air.
 void StoresText(wchar_t* text,std::size_t size,const PlayerJetReadout& j) noexcept {
     text[0]=L'\0';
     std::size_t at=0;
+    if(j.guns>0) {
+        const int n=_snwprintf_s(text,size,_TRUNCATE,L"GUN %d  ",j.gunRounds>0 ? j.gunRounds : 0);
+        if(n>0)at=static_cast<std::size_t>(n);
+    }
     for(int i=0;i<j.stores && i<6;++i) {
         const int n=_snwprintf_s(text+at,size-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
                                  j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
@@ -668,6 +673,19 @@ void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
     wchar_t text[128];
     StoresText(text,_countof(text),j);
     Format(l,L"%ls",text);
+}
+
+// The fuel tank's readout (empty with none): FUEL and the share left, and the time left at its burn under 100 minutes (a
+// jet's 506 body idles its rotor: a full tank lasts some 21 hours, no time worth showing). It replaces the stock gauge's
+// FUEL panel (stockgauge.cpp).
+void FuelText(wchar_t* out,std::size_t size,const FuelReading& f) noexcept {
+    out[0]=L'\0';
+    if(!f.ok)return;
+    const int share=static_cast<int>(std::lround(f.share*100.0f));
+    if(f.sec>=0.0f && f.sec<5999.5f) {
+        const int sec=static_cast<int>(std::lround(f.sec));
+        _snwprintf_s(out,size,_TRUNCATE,L"FUEL %d%% %d:%02d",share,sec/60,sec%60);
+    } else _snwprintf_s(out,size,_TRUNCATE,L"FUEL %d%%",share);
 }
 
 // The takeoff roll's cue (empty: none; `rotate`: the cue to pull up is showing). On the takeoff roll (not in the air:
@@ -687,6 +705,7 @@ void CockpitCue(const PlayerJetReadout& j,wchar_t* cue,std::size_t size,bool* ro
     if(j.pullUp)_snwprintf_s(cue,size,_TRUNCATE,L"PULL UP! TERRAIN");
     else if(j.threat==2)_snwprintf_s(cue,size,_TRUNCATE,L"MISSILE!");
     else if(j.threat==1)_snwprintf_s(cue,size,_TRUNCATE,L"LOCKED");
+    else if(!cue[0] && FuelLow(j.fuel))_snwprintf_s(cue,size,_TRUNCATE,L"LOW FUEL");
 }
 // The cue's colour (over `calm` without one): the ground and a missile blink red and white (8 Hz), a lock is yellow,
 // a stall red, the pull-up cue blinks green (4 Hz).
@@ -716,8 +735,10 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     wchar_t cue[64];
     bool rotate=false;
     CockpitCue(j,cue,_countof(cue),&rotate);
-    Format(thr,L"THROTTLE %d%%    G %.1f%ls%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"",
-           cue[0] ? L"    " : L"",cue);
+    wchar_t fuel[32];
+    FuelText(fuel,_countof(fuel),j.fuel);
+    Format(thr,L"THROTTLE %d%%%ls%ls    G %.1f%ls%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"    " : L"",fuel,j.load,
+           j.stall ? L"    STALL" : L"",cue[0] ? L"    " : L"",cue);
     StoresLine(arms,j);
     if(j.keys) {
         wchar_t boost[32],brake[32],swap[32];
@@ -1190,7 +1211,7 @@ void StallCue(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 // the warnings red and the cautions amber in a frame; the warnings blink, and so does a caution its first kNewMs.
 constexpr ULONGLONG kNewMs=3000;
 const wchar_t* const kWarnText[kWarnCount]={L"PULL UP",L"MISSILE",L"STALL",L"GEAR",L"TERRAIN",L"SINK RATE",L"LOCK",L"GEAR SPEED",
-                                            L"WEIGHT ON WHEELS"};
+                                            L"WEIGHT ON WHEELS",L"LOW FUEL"};
 void Annunciator(void* drawer,void* ctx,Text* text,float width,float height,float s,const Warnings& w,Line* lines,int* at) noexcept {
     if(!w.on)return;
     const ULONGLONG now=GetTickCount64();
@@ -1250,18 +1271,20 @@ void FighterHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 // With the flight HUD on (ini PlayerJetFlightHud; the user, 2026-10-05: "飞机底部的旧hud可以删了吧") the old cockpit
 // panel goes: its speed, height, climb and g are the HUD's boxes (SpeedAltBoxes), its HP the game's own vehicle bar,
 // its key list the README's, its warnings the annunciator's and the HUD's symbols (2026-10-06: "只留挂载和告警").
-// What only it showed stays, as HUD text without a panel under the HUD's centre: one line of the throttle, the stores
-// (the picked one in brackets) and the flares, and over it on the takeoff roll its cue (TakeoffCue).
+// What only it showed stays, as HUD text without a panel under the HUD's centre: one line of the throttle, the fuel (the
+// stock gauge's FUEL panel gone, stockgauge.cpp), the stores (the picked one in brackets) and the flares, and over it on
+// the takeoff roll its cue (TakeoffCue).
 void CockpitStrip(Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,int* at) noexcept {
     if(*at+2>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& arms=lines[(*at)++];
-    wchar_t cue[64],stores[128];
+    wchar_t cue[64],stores[128],fuel[32];
     bool rotate=false;
     TakeoffCue(j,cue,_countof(cue),&rotate);
     StoresText(stores,_countof(stores),j);
+    FuelText(fuel,_countof(fuel),j.fuel);
     Format(warn,L"%ls",cue);
-    Format(arms,L"THR %d%%    %ls",static_cast<int>(std::lround(j.throttle*100.0f)),stores);
+    Format(arms,L"THR %d%%%ls%ls    %ls",static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"  " : L"",fuel,stores);
     warn.scale=kTitleScale;warn.rgba=rotate ? ((GetTickCount64()/125)%2==0 ? kGreen : kYellow) : kHud;
     arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kHud;
     warn.w=warn.h=arms.w=arms.h=0.0f;
@@ -1338,7 +1361,9 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
 // the ground the takeoff cue (the rotor's share of the lift-off speed; LIFT OK blinking from there); under it the speed
 // set and the height held (the mouse-aim flight); at the bottom `stores` (a rotor craft's; nullptr: none) on a line of
 // their own (with the speed and ALT HOLD on one line, 5-6 stores ran past a line's 128 characters: the last cut off).
-void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,const wchar_t* stores,Line* lines,int* at) noexcept {
+// The fuel (`fuel`, the stock gauge's FUEL panel gone: stockgauge.cpp) goes on the speed set's line.
+void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,const wchar_t* stores,Line* lines,
+               int* at) noexcept {
     if(*at+3>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& info=lines[(*at)++];
@@ -1350,6 +1375,9 @@ void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,c
     Format(info,L"");
     if(f.aiming)Append(info,f.setSpeed==0.0f ? L"SPEED SET: HOVER" : L"SPEED SET %d km/h",static_cast<int>(std::lround(f.setSpeed*3.6f)));
     if(f.holding)Append(info,L"%lsALT HOLD",info.text[0] ? L"    " : L"");
+    wchar_t tank[32];
+    FuelText(tank,_countof(tank),fuel);
+    if(tank[0])Append(info,L"%ls%ls",info.text[0] ? L"    " : L"",tank);
     Format(arms,L"%ls",stores ? stores : L"");
     warn.scale=kTitleScale;info.scale=arms.scale=kLineScale;info.rgba=arms.rgba=kHud;
     warn.w=warn.h=info.w=info.h=arms.w=arms.h=0.0f;
@@ -1722,6 +1750,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     else if(locked){Format(warn,L"LOCKED");warn.rgba=kYellow;}
     else if(hp<0.25f && r.hpMax>0.0f){Format(warn,L"HULL CRITICAL");warn.rgba=blink ? kRed : kWhite;}
     else if(drill && x.drill->overheated){Format(warn,L"DRILL OVERHEAT");warn.rgba=blink ? kRed : kWhite;}
+    else if(FuelLow(r.fuel)){Format(warn,L"LOW FUEL");warn.rgba=kAmber;}
     else if(dry){Format(warn,L"NO AMMO");warn.rgba=kAmber;}
     else{Format(warn,L"");warn.rgba=kHud;}
     if(r.seat==0)Format(title,L"%hs",r.kind);
@@ -1729,6 +1758,9 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     Format(info,L"SPD %d km/h    HP %d%%",static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
     if(nix)Append(info,L"    TWIST %+d",static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));   // right positive, as headings
     if(r.stab)Append(info,r.stab==2 ? L"    STAB LAG" : L"    STAB");   // the gun stabilizer holds it (LAG: the hull outruns its drive)
+    wchar_t fuel[32];
+    FuelText(fuel,_countof(fuel),r.fuel);   // a bike's tank (the stock gauge's FUEL panel gone: stockgauge.cpp)
+    if(fuel[0])Append(info,L"    %ls",fuel);
     warn.scale=kTitleScale;title.scale=info.scale=kLineScale;title.rgba=info.rgba=kHud;
     for(int i=0;i<arms;++i)ArmLine(arm[i],r.arm[i],i==r.selected);
     if(drill) {
@@ -1892,6 +1924,11 @@ void HudPublish() noexcept {
     s.seats=PlayerSeatPrompt(&s.seatPrompt);
     s.turretCamOk=PlayerTurretCam(&s.turretCam);   // the turret camera (turretcam.cpp): the gun's mark, free look
     s.nix=PlayerNixTorso(&s.nixTorso);   // the Nix's legs and torso (nix.cpp): the stock HUD's hull / turret ring
+    // The stock weapon gauge gives way (stockgauge.cpp, HideStockGauges) where HudDraw lists the vehicle's weapons and
+    // their rounds: a plugin aircraft's stores line (CockpitStrip, the old Cockpit, HeliStrip), StockBlock, a stock heli's
+    // HeliStrip (HeliFlightHud). Its text must draw: the lists are text.
+    const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
+    SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists));
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1991,7 +2028,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
                 wchar_t stores[128];
                 StoresText(stores,_countof(stores),snap.jet);
-                HeliStrip(t,width,height,s,snap.jet.heli,stores,lines,&at);
+                HeliStrip(t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,lines,&at);
             } else {
                 FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,launchAt,lines,&at);
                 if(Cfg().playerJetFlightHud)CockpitStrip(t,width,height,s,snap.jet,lines,&at);
@@ -2010,7 +2047,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             wchar_t stores[192];
             const bool own=snap.stock && snap.stockHud.heli;   // its weapons, rounds and reloads (vhud.cpp)
             if(own)StockStores(snap.stockHud,stores,_countof(stores));
-            HeliStrip(t,width,height,s,snap.heliHud.f,own ? stores : nullptr,lines,&at);
+            HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,own ? stores : nullptr,lines,&at);
             if(snap.warned)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);

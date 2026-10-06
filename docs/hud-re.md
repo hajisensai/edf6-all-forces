@@ -274,3 +274,51 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 离线：`hud_view` 把 `hud.cpp` 整个编进来，用一块假的「EDF.dll」内存（四边形和文字函数的 RVA 处写跳转到记录函数），画出喷气机 PULL UP / TERRAIN、旋翼机 PULL UP、原版直升机 SINK RATE 四个场景的 PNG；字体是替代品（每单位字号 40 px），只看排版。
 
 **需实机确认**：灯板、圆盘、升力条与原版 HUD（雷达、血条、武器栏）是否重叠；V 形和箭头在追尾镜头下的方向感；TERRAIN 在城市低飞时是否太吵（楼顶 5 m 的门槛）。
+
+## 9. 原版武器栏与油箱（2026-10-06，`src/stockgauge.cpp`，ini `HideStockGauges`）
+
+用户要求：「删掉原版挂载和油料显示。选择挂载等改成我们自己的hud显示」。
+
+### 9.1 原版载具武器栏怎么画（H，反汇编）
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 类 | `HUiHudWeapon`（vtable `0x17FD150`），载具用的是单独一个实例：布局 `app:/ui/lyt_HudWeaponGuageVehicle.sgo`，构造函数在 `0x82DBEF` 写 `+0xC60 = 1`（步行的左右武器栏是同类的另外几个实例，`+0xC60 = 0`） | H |
+| 布局树 | `Guage_Root → WeaponGuageBase → 5 × WeaponGuage(TextName, TextRemain, TextLoaded)`（Root.cpk `UI/LYT_HUDWEAPONGUAGEVEHICLE.SGO` 的 `layout_tree`）：最多 5 块 | H |
+| 更新（slot 1，`0x832B30`，每帧） | 把 `+0x778` 的拥有者（SceneObject）`__RTDynamicCast`（`0x12DA7AA`，类型描述符 SceneObject `0x2006450` → SoldierBase `0x2006428`）成 SoldierBase；`+0xC60` 时：士兵 `+0x1550`（所乘载具的控制块）活着、`+0xC61 == 0` → 置 `+0xC61 = 1`，把座位（士兵 `+0x1540`）`+0xC8` 里有武器的 holder 下标逐个 push 进 `+0xC68` 缓冲（数据 `+0xC70`，个数 `+0xC80`，8 字节）；下车 → `+0xC61 = 0`、`+0xC80 = 0`（`0x832D00`）。**一次上车只列一次** | H |
+| 布局（slot 2，`0x831A40`） | 只在 `+0x770`（脏标记）置位时运行并清掉它；载具实例：`+0xC61` 为 0 直接返回；否则按 `+0xC80` 个下标（倒序）逐块填名字 / 余弹 / 弹匣并 `panel+0x1F8 = 1`，池里剩下的块 `panel+0x1F8 = 0`（`0x832348`） | H |
+| 谁读这张表 | 位移扫描：`+0xC68..+0xC80` 只出现在构造函数和上面两个函数里；开火走载具自己的 holder（`docs/aim-line-re.md`），不经过 HUD | H |
+| `+0x1F8` | 布局节点的显示标记（布局函数自己用它显示 / 隐藏面板） | H（用法）；渲染每帧读它 M |
+
+### 9.2 插件怎么去掉它
+
+不跳过绘制、不碰布局节点：只在更新（vtable slot 1 改指 `UpdateHook`，其余原样调用）前后改这张表。
+
+- 本帧要隐藏（玩家所乘载具 = `SetStockGaugeCover` 发布的那台，`HideStockGauges=1`、`Enabled=1`）且表非空 → `+0xC80 = 0`、`+0x770 = 1`：布局函数自己把 5 块全藏起来。
+- 不再隐藏（插件 HUD 不再列这台的武器、改了 ini）→ 更新前 `+0xC61 = 0`、`+0xC80 = 0`：原版更新按座位重新列表，再置脏让布局显示。
+- 换座位（`seatswitch.cpp`，人还在车上，`+0xC61` 不会复位）：原版会拿旧座位的下标读新座位的 holder 数组（`0x831EC0`：`[seat+0xC8 + idx*8]`，不检查个数），新座位武器少时越界读。插件记下列表对应的座位，座位变了就照上一条重新列表（原版缺陷，顺带修，M：未实机复现越界）。
+- 每个实例一条记录（本地分屏最多两个）；表的主人不是插件 HUD 所讲的那台载具（另一个本地玩家）就不动。
+
+`SetStockGaugeCover`（`hud.cpp HudPublish`，游戏线程，每帧）：与 `HudDraw` 同一组条件——插件战机 / 旋翼机的座舱（`CockpitStrip` / 旧 `Cockpit` / `HeliStrip` 都列挂载）、`StockBlock`（`StockVehicleHud` 覆盖的原版载具）、开 `HeliFlightHud` 的原版直升机（`HeliStrip` 列 `StockStores`），且文字能画（`textOk`：列表是文字）。所乘载具取 `PlayerHuman()` 的 `+0x1548` / `+0x1550`。
+
+签名（`InstallStockGauges`，任一不符就不挂钩、原版不变）：`0x832B30` 函数头、`0x832BAE` 的 cast 调用（两个类型描述符）、`0x832C48` 载具分支、`0x832C85` 座位读取、`0x832CB2` 列表缓冲、`0x832D00` 下车清表、`0x831A96` 脏标记、`0x831BB4` 按个数显示、`0x832348` 隐藏剩余面板。
+
+### 9.3 护甲 / 载具耐久条为什么保留
+
+`HUiHudPowerGuage`（`lyt_HudPowerGuage01.sgo`）：`layout_tree` 是 `Guage_Root → PowerGuage(PowText, DefText) / PowerGuage_Secondary / PowerGuage01_Vehicle(TextVehicle)`，同一块仪表里既有玩家自己的护甲也有载具耐久。载具的条不是一个布局节点：布局函数 `0x8277B0` 把 `载具 HP / 最大 HP` 作为参数 `bar_vehicle`、`V_Base`、`V_scale` 写到 `+0x950` 节点上（H）；`+0x950` 是构造时从 `PowerGuage01_Vehicle`（`+0x940`）的 `+0x98` 取来的，按布局树应是它的父节点 `Guage_Root`（M）；数字在 `TextVehicle`（`+0x960`，H）。只隐藏 `PowerGuage01_Vehicle` 去不掉那条（L），动 `Guage_Root` 会连玩家护甲一起藏掉。插件 HUD 只有 `StockBlock`（和 `PlayerJetFlightHud=0` 的旧座舱面板）显示载具 HP，玩家护甲则没有替代，所以这块仪表一律保留。
+
+### 9.4 油箱（FuelTank）
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 结构 | `+0` 启用（byte）、`+4` 容量、`+8` 剩余、`+0xC` 每单位输入的消耗（float）；`0x5EFA70(tank, 容量, 消耗)` 建立（来自 `vehicle_setup[2] = [999900, 1.666]`），`0x5EF8E0(tank, 输入)`：剩余 −= |输入| × 消耗，耗尽时把输入按比例截掉 | H |
+| 位置 | 直升机基类（slot 46 `0x6530E0`，506 / 409 / 410 共用；插件飞机是 506 机体）`+0x1690`（`0x6532B0` 建立、旋翼 `0x651A0E` 消耗）；`Vehicle503_Bike`（vtable `0x17DA508`）`+0x29B0`（`0x617E52` 建立、`0x6179D3` 消耗）；`Vehicle511_Bike`（`0x17DBDF8`）`+0x2B00`（`0x61F689` / `0x61F273`） | H |
+| 和 FUEL 武器 | 每个有油箱的载具每个座位都列着 `v_fuel01`（`Weapon_VehicleShoot`，AmmoCount 1），原版武器栏把它当一件武器显示，余弹即燃料（用户截图 FUEL 999571）。谁把燃料写进它的余弹没追（L）；插件直接读油箱 | 显示 H（截图）/ 写入 L |
+| 剩余时间 | 剩余的下降量按游戏时钟求速率（2 s 一阶平滑，加油 / 回升时重测），剩余 ÷ 速率；100 分钟以上不显示 | 设计 |
+| 插件战机 | 机体的旋翼输入被插件写 0（`playerjet.cpp`），引擎开着时旋翼保持怠速 0.13（`docs/heli-input-re.md`），所以油箱按怠速慢慢下降：0.13 × 1.666 每帧 ≈ 13 每秒，满箱约 7.7 万秒（21 小时） | 怠速消耗 M（与截图的 999571 量级吻合） |
+
+显示：战机 `CockpitStrip` 的那行（`THR 80%  FUEL 62%    GUN 1786  挂载…`）、旧座舱面板的油门行、旋翼机和原版直升机 `HeliStrip` 的中间一行、原版载具块的信息行；`FuelLow`（< 15% 或 < 60 s）点亮告警灯板的 **LOW FUEL**（`warn.h` `kWarnFuel`，琥珀色告警），原版载具块是 LOW FUEL 一行，旧座舱面板是提示行。油箱不再算进 `StockBlock` / `StockStores` 的武器（以前是一行「GUN 999571」）；插件战机的挂载行以前不含机炮（`ReadStores` 只读挂载），原版武器栏去掉后机炮余弹没了出处，所以挂载行前加 `GUN n`：座位 0 里既不是挂载（`IsStoreWeapon`）也不是油箱的武器，取余弹最少的那门（左右两门一起打）；`SetStockSelectedStore` 的下标仍按 holder 列表，换算到跳过油箱后的武器行。
+
+离线：`tools/hud_view` 新增 `jet_lowfuel`（8%、5:12、LOW FUEL）；`heli_sinkrate` 显示 `FUEL 41% 30:30`，`rotor_pullup` 显示 `FUEL 62%`。
+
+**需实机确认**：插件战机 / 原版直升机 / 坦克 / 摩托上原版武器栏消失、步行和巴尔加时还在；`HideStockGauges=0` 或关掉 `StockVehicleHud` 后（同一次乘坐中）武器栏回来；换座位后武器栏（`HideStockGauges=0` 时）显示新座位的武器；FUEL 百分比与原版数值一致；开火、切换挂载不受影响。

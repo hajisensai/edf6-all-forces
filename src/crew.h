@@ -40,6 +40,7 @@ struct Config {
     float playerHeliStopSec=1.0f;// a stock heli the player flies: its horizontal speed's time constant (s; 0: stock)
     bool playerHeliGunSight=true;   // a stock heli the player flies or mans: our gun sight (boresight, impact pipper), its gun's red aim line hidden
     bool stockVehicleHud=true;      // any other stock vehicle the player drives or mans: our HUD and impact points, its seat's aim lines hidden (vhud.cpp)
+    bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
     float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
@@ -558,7 +559,11 @@ struct HeliFlight {
     Gpws gpws;
     float impactIn;
 };
-struct PlayerHeliReadout { HeliFlight f; PlayerJetSymbols sym; };
+// A vehicle's fuel tank (stockgauge.cpp FuelGauge: the FuelTank the stock FUEL gauge shows through its fuel weapon
+// v_fuel01): ok false with none; share 0..1 of its capacity; sec the seconds left at its burn of the last seconds, <0
+// unknown (not burning).
+struct FuelReading { bool ok; float share,sec; };
+struct PlayerHeliReadout { HeliFlight f; PlayerJetSymbols sym; FuelReading fuel; };
 bool PlayerHeliHud(PlayerHeliReadout* out) noexcept;   // heli.cpp: the stock heli's, as of the last frame; false: none
 struct PlayerJetReadout {
     float speed,throttle,clear,climb,hp,hpMax,load;
@@ -581,6 +586,8 @@ struct PlayerJetReadout {
     PlayerJetSymbols sym;        // the fighter HUD's (hud.cpp FighterHud)
     bool rotor;                  // a rotor craft of the plugin: `heli` (the helicopter HUD's) too
     HeliFlight heli;
+    FuelReading fuel;            // its airframe's tank (the 506 body's: what the stock FUEL gauge showed)
+    int guns,gunRounds;          // its guns (seat 0's weapons neither a store nor the tank) and the fewest rounds in one
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked

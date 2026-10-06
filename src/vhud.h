@@ -61,6 +61,7 @@ struct StockHudReadout {
     float speed;                 // m/s, level (its own position's change)
     float hp,hpMax;
     int stab;                    // the seat's gun stabilizer (stab.cpp StabState): 1 holding, 2 outrun by the hull, 0 none
+    FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
     int arms,selected;           // selected: SetStockSelectedStore's (-1 none)
     StockArm arm[kStockArms];
     int threats;                 // 2 a missile homing on it, 1 a jet's lock (missile.cpp, jet.cpp: as the jets' threat ring)
@@ -74,4 +75,22 @@ bool HudReady() noexcept;   // hud.cpp: its quads can be drawn (InstallHud): no 
 void StockHudFrame(unsigned char* vehicle) noexcept;   // every vehicle's input (crew.cpp InputHook), after AimLines
 bool PlayerStockHud(StockHudReadout* out) noexcept;    // the last frame's, false with none (hud.cpp HudPublish)
 void ResetStockHud() noexcept;                         // mission.cpp MissionStart
+
+// --- stockgauge.cpp: the stock weapon gauges and the fuel tank (docs/hud-re.md §9) ---
+// At load: the stock vehicle weapon gauge's update (HUiHudWeapon slot 1) chained, the FuelTank reads checked; each part
+// off on its own when its EDF.dll code is not as expected.
+bool InstallStockGauges() noexcept;
+// hud.cpp HudPublish, once a frame: whether the HUD it publishes lists the weapons of the vehicle the player is in (the
+// jets' and rotor craft's stores line, a stock heli's HeliStrip, StockBlock). With HideStockGauges the stock gauge's
+// panels (a weapon a panel, the fuel tank's FUEL too) are taken off the screen for that vehicle, put back when it stops.
+void SetStockGaugeCover(bool lists) noexcept;
+void ResetStockGauges() noexcept;   // mission.cpp MissionStart
+// The fuel tank of `vehicle` (a helicopter's, the 506 bodies' of the plugin's aircraft, the 503 / 511 bikes'), its burn
+// measured over the game clock; game thread. False (out->ok false) with no tank or the reads off.
+bool FuelGauge(const void* vehicle,FuelReading* out) noexcept;
+// Whether a tank reads low: under kLowFuelShare, or under kLowFuelSec at its burn.
+constexpr float kLowFuelShare=0.15f,kLowFuelSec=60.0f;
+constexpr bool FuelLow(const FuelReading& f) noexcept { return f.ok && (f.share<kLowFuelShare || (f.sec>=0.0f && f.sec<kLowFuelSec)); }
+// Whether `w` is a vehicle's fuel tank (its weapon file V_FUEL*): no weapon, listed in every seat (payload.cpp's test).
+bool IsFuelTank(const unsigned char* w) noexcept;
 }  // namespace crew

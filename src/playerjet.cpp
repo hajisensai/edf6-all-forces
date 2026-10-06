@@ -1615,6 +1615,26 @@ void PreloadPlayerJets() noexcept {
         chutePreloaded);
 }
 
+// The guns' rounds for the cockpit's stores line (the stock gauge's gun panels gone, stockgauge.cpp): seat 0's weapons
+// that are neither a store nor the fuel tank (pylib/vcobjects.py JETS: guns L / R first), how many, and the fewest rounds
+// in one (the pair fires together: the first dry stops the burst's other half).
+namespace {
+void GunRounds(const unsigned char* v,PlayerJetReadout& r) noexcept {
+    r.guns=0;r.gunRounds=0;
+    const unsigned char* const seat=SeatAt(const_cast<unsigned char*>(v),0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(!n || n>8 || !Readable(holders,n*8))return;
+    for(std::uint64_t i=0;i<n;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const unsigned char* const w=At<const unsigned char*>(holders[i],kHolderWeapon);
+        if(!Readable(w,kWeaponAmmo+4) || IsStoreWeapon(w) || IsFuelTank(w))continue;
+        const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
+        r.gunRounds=r.guns++==0 || ammo<r.gunRounds ? ammo : r.gunRounds;
+    }
+}
+}  // namespace
+
 bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;
     for(const auto& j:jets) {
@@ -1638,6 +1658,8 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
             r.sym=j.sym;
+            FuelGauge(v,&r.fuel);   // its 506 body's tank, which the stock FUEL gauge showed (stockgauge.cpp)
+            GunRounds(v,r);
             r.gpws=air ? j.gpws : Gpws::none;r.impactIn=r.gpws!=Gpws::none ? j.impactIn : -1.0f;
             const bool rotor=j.board && j.board->frame==pjet::Airframe::rotor;
             r.liftShare=air && !rotor ? j.stallShare : 0.0f;
