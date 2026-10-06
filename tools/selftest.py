@@ -1188,8 +1188,18 @@ def heli_mouse_aim_wired() -> None:
     heli, board = src('src/heli.cpp'), src('src/playerjet_board.inc')
     steer = heli.split('Control Steer(', 1)[1].split('\n}\n', 1)[0]
     fly = heli.split('void AimFly(', 1)[1].split('\n}\n', 1)[0]
-    for law in ('aim::StockStick(', 'aim::StockThrottle(', 'aim::StockYaw('):
+    for law in ('aim::StockStick(', 'aim::StockThrottle('):
         assert law in steer and law in fly, law
+    # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
+    # (StockYaw), the player's heading chases the mouse's aim (PlayerYaw) at the turn rate PlayerYawTune raises.
+    assert 'aim::StockYaw(' in steer and 'aim::PlayerYaw(' in fly and 'aim::StockYaw(' not in fly
+    assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
+    player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerYawTune(v,' in player and 'kMaxYaw,a.yaw' in heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
+    # The hover rotor from the lift as it is in memory (heliaim.h HoverRotor), not the old 70 the 602 clamped to 1.0 on.
+    assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
+    hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
+    assert 'SPACE: up' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
     assert 'aim::Fly(' in fly and 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 
 

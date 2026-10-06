@@ -1971,11 +1971,11 @@ bool GunBarrel(const unsigned char* v,const unsigned char* weapon,float* pos,flo
 bool IsHelicopter(const void* vehicle) noexcept { return TypeOf(vehicle)!=nullptr; }
 
 // The takeoff cue (HeliCue): the player at the controls of a stock helicopter (not a plugin jet on a 506 body) with
-// it on the ground (contact bit 1). The lift per rotor speed +0x1610 and the mass factor +0x161C scale the stock
-// hover speed (0.288 at 70 and 1).
+// it on the ground (contact bit 1). The lift per rotor speed +0x1610 and the mass factor +0x161C give the rotor that
+// lifts it (aim::HoverRotor: 0.424 for the 506's 34 / 60; the cue was missing for the 506 and stuck at 1% for the 602
+// while it took +0x1610 for 70).
 namespace {
 constexpr std::size_t kLiftPerRotor=0x1610,kLiftMass=0x161C;
-constexpr float kStockHover=0.288f,kStockLift=70.0f;
 constexpr ULONGLONG kCueFreshMs=300;
 SRWLOCK cueLock=SRWLOCK_INIT;
 HeliCue cue{};
@@ -1986,9 +1986,9 @@ void HeliCueStep(unsigned char* v) noexcept {
     if(!IsHelicopter(v) || BodyOf(v)!=PluginBody::none || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::player)return;
     if(!(At<unsigned char>(v,kContact)&2))return;
     const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);
-    if(!(lift>1.0f) || !(mass>0.0f) || !std::isfinite(lift+mass))return;
+    if(!(lift>1e-3f) || !(mass>0.0f) || !std::isfinite(lift+mass))return;
     AcquireSRWLockExclusive(&cueLock);
-    cue=HeliCue{At<float>(v,kRotor),kStockHover*kStockLift/lift*mass};
+    cue=HeliCue{At<float>(v,kRotor),aim::HoverRotor(lift,mass)};
     cueAt=GetTickCount64();
     ReleaseSRWLockExclusive(&cueLock);
 }
@@ -2068,31 +2068,57 @@ namespace {
 // slides on. The heli's own params made to settle over PlayerHeliStopSec instead, as Tune does for the NPC (the game's
 // own velocity law, nothing written to the velocity): blend from 1-d*(1-blend) = 1/frames, k keeping its stock top
 // speed (b k / (1-d (1-b))). Written every frame the player flies it (as Fly does), the stock ones back as they get off.
-struct Assist { ObjRef ref; float k,b; ULONGLONG seen; bool said; };
+// The yaw (the mouse-aim flight's, PlayerYawTune): the heli's own max yaw rate and smoothing are kept with the speed
+// params and put back as the player gets off.
+struct Assist { ObjRef ref; float k,b,yaw,smooth; ULONGLONG seen; bool said,yawSaid; };
 Assist assists[8];
 constexpr ULONGLONG kAssistStaleMs=2000;
 
 void AssistOff(unsigned char* v) noexcept {
     for(auto& a:assists) {
         if(!a.ref.Is(v))continue;
-        Put<float>(v,kSpeedGain,a.k);Put<float>(v,kBlend,a.b);
+        Put<float>(v,kSpeedGain,a.k);Put<float>(v,kBlend,a.b);Put<float>(v,kMaxYaw,a.yaw);Put<float>(v,kYawSmooth,a.smooth);
         a=Assist{};
-        Log("HELI v=%p the player is off: its own speed params back",v);
+        Log("HELI v=%p the player is off: its own speed and yaw params back",v);
     }
+}
+
+// The player's record of the heli: its first frame under the player takes its params as its own (Restore: no NPC
+// tuning left on it).
+Assist* AssistOf(unsigned char* v) noexcept {
+    const ULONGLONG ms=GameMs();
+    Assist* a=nullptr;
+    for(auto& x:assists)if(x.ref.Is(v))a=&x;
+    if(!a) {
+        for(auto& x:assists)if(!a && (!x.ref || ms-x.seen>kAssistStaleMs))a=&x;
+        if(!a)return nullptr;
+        *a=Assist{ObjRef::Of(v),At<float>(v,kSpeedGain),At<float>(v,kBlend),At<float>(v,kMaxYaw),At<float>(v,kYawSmooth),ms,false,false};
+    }
+    a->seen=ms;
+    return a;
+}
+
+// The mouse-aim flight's turn (ini HeliMouseAim, keyboard and mouse): the heading chases an aim the mouse moves, so the
+// heli turns at least HeliYawRate (the NPC pilot's, Tune) with the NPC's quicker smoothing; flown on the stock input
+// (a pad, HeliMouseAim 0), its own. The stock 506 turns at most 23.5 deg/s with the smoothing 0.0011: the user's log
+// (2026-10-06 15:01) shows it at 5-17 deg/s behind the aim, "the mouse moves and nothing changes".
+void PlayerYawTune(unsigned char* v,bool mouse) noexcept {
+    Assist* const a=AssistOf(v);
+    if(!a)return;
+    const float yaw=a->yaw,smooth=a->smooth,want=Cfg().heliYawRate*kPi/180.0f;
+    if(!std::isfinite(yaw+smooth))return;
+    if(!mouse || !(want>std::fabs(yaw))){Put<float>(v,kMaxYaw,yaw);Put<float>(v,kYawSmooth,smooth);return;}
+    Put<float>(v,kMaxYaw,want*aim::YawSign(yaw));Put<float>(v,kYawSmooth,smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth);
+    if(!a->yawSaid && (a->yawSaid=true))
+        Log("HELI v=%p player turn: %.0f deg/s, smoothing %.4f (its own %.0f deg/s, %.4f)",v,want*180.0f/kPi,
+            smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth,yaw*180.0f/kPi,smooth);
 }
 
 void PlayerAssist(unsigned char* v) noexcept {
     const float sec=Cfg().playerHeliStopSec;
-    if(sec<=0.0f){AssistOff(v);return;}
-    const ULONGLONG ms=GameMs();
-    Assist* a=nullptr;
-    for(auto& x:assists)if(x.ref.Is(v))a=&x;
-    if(!a) {   // its first frame under the player: the params are its own now (Restore: no NPC tuning left on it)
-        for(auto& x:assists)if(!a && (!x.ref || ms-x.seen>kAssistStaleMs))a=&x;
-        if(!a)return;
-        *a=Assist{ObjRef::Of(v),At<float>(v,kSpeedGain),At<float>(v,kBlend),ms,false};
-    }
-    a->seen=ms;
+    Assist* const a=AssistOf(v);
+    if(!a)return;
+    if(sec<=0.0f){Put<float>(v,kSpeedGain,a->k);Put<float>(v,kBlend,a->b);return;}
     const float k=a->k,b=a->b,d=At<float>(v,kDamp);
     const float denom=1.0f-d*(1.0f-b),frames=std::fmax(sec*60.0f,15.0f);
     if(!std::isfinite(k+b+d) || k<=0.0f || b<=0.0f || b>=1.0f || d<=0.5f || d>=1.0f || denom<1e-6f)return;
@@ -2149,7 +2175,7 @@ Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
     *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
     std::memcpy(p->aim,fwd,12);
     const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
-    p->hover=lift>1.0f && mass>0.0f && std::isfinite(lift+mass) ? Clamp(kStockHover*kStockLift/lift*mass,0.1f,1.0f) : 0.5f;
+    p->hover=aim::HoverRotor(lift,mass);
     p->prevHeading=std::atan2(fwd[0],fwd[2]);
     return p;
 }
@@ -2178,10 +2204,10 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     const float ly=SeatAxis(seat,kSeatLY),ry=SeatAxis(seat,kSeatRY);
     const aim::Keys keys{ly<-0.3f ? 1.0f : ly>0.3f ? -1.0f : 0.0f,SeatAxis(seat,kSeatLX),
                          (At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-(KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f)};
-    float was[3];std::memcpy(was,p.aim,12);
-    aim::Move(p.aim,SeatAxis(seat,kSeatRX),Cfg().playerJetInvertPitch ? ry : -ry,aim::kPerUnit*Cfg().playerJetMouseSpeed);
+    const float mx=SeatAxis(seat,kSeatRX),my=Cfg().playerJetInvertPitch ? ry : -ry,k=aim::kPerUnit*Cfg().playerJetMouseSpeed;
     float vp[16];
-    if(LastViewProj(vp))aim::KeepOnScreen(vp,pos,p.aim,was,fwd,kPlayerMark,kAimOnScreen);
+    if(LastViewProj(vp))aim::MoveOnScreen(vp,pos,p.aim,mx,my,k,fwd,kPlayerMark,kAimOnScreen);
+    else aim::Move(p.aim,mx,my,k);
     const float top=PlayerTop(v);
     if(grounded)p.groundAt=ms;
     const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal (and no setpoint)
@@ -2191,9 +2217,10 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     if(lifting)forward=lateral=0.0f;
     const float heading=std::atan2(fwd[0],fwd[2]);
     // Turned by its own max yaw rate's sign (aim::YawSign): the NPC learns its sign from how it turns (Sense's votes); the
-    // player's flight reads it, the turn right from the first frame.
-    const float yaw=aim::StockYaw(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,0.0f,kYawDamp,kYawFeed)*
-                    aim::YawSign(At<float>(v,kMaxYaw));
+    // player's flight reads it, the turn right from the first frame. The rate asked toward the aim (aim::PlayerYaw) is
+    // at most its max yaw rate (PlayerYawTune's).
+    const float maxYaw=At<float>(v,kMaxYaw);
+    const float yaw=aim::PlayerYaw(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,std::fabs(maxYaw))*aim::YawSign(maxYaw);
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
     if(!grounded) {   // on the ground the stock throttle (the ascend key) lifts it off
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
@@ -2228,7 +2255,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     for(int i=0;i<3;++i)f.aim[i]=pos[i]+p.aim[i]*kPlayerMark;
     if(grounded) {
         const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass),rotor=At<float>(v,kRotor);
-        if(lift>1.0f && mass>0.0f && std::isfinite(lift+mass+rotor)){f.rotor=rotor;f.hover=kStockHover*kStockLift/lift*mass;}
+        if(lift>1e-3f && mass>0.0f && std::isfinite(lift+mass+rotor)){f.rotor=rotor;f.hover=aim::HoverRotor(lift,mass);}
     }
     PlayerJetSymbols& y=r.sym;
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -2275,6 +2302,7 @@ void PlayerHeli(unsigned char* v) noexcept {
     const bool grounded=OnGround((v[kContact]&kContactGround)!=0,rayOk,clear==kNoGround ? -1.0f : clear);
     const unsigned char* seat=SeatAt(v,0);
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    PlayerYawTune(v,Cfg().heliMouseAim && keys);
     if(Cfg().heliMouseAim && keys)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
     else {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);

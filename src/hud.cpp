@@ -1487,10 +1487,20 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
 // lines too, LoadoutBanner).
 void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,
                const wchar_t* stores,const LoadCell* cells,int n,int picked,bool switched,Line* lines,int* at) noexcept {
-    if(*at+3>kMaxLines)return;
+    if(*at+4>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& info=lines[(*at)++];
     Line& arms=lines[(*at)++];
+    Line& help=lines[(*at)++];
+    // The keys (the user, 2026-10-06: "I do not know how to climb or descend, except Space"): the mouse-aim flight on the
+    // keyboard and mouse spells its controls under the strip; the descent is the brake key (ini PlayerJetBrakeKey).
+    Format(help,L"");
+    if(f.keys && f.aiming) {
+        wchar_t down[32];
+        KeyName(Cfg().playerJetBrakeKey,down,32);
+        if(f.landed)Format(help,L"HOLD SPACE: spin the rotor up and lift off    MOUSE: aim the square");
+        else Format(help,L"MOUSE: turn / climb to the square    W / S: speed    A / D: slide    SPACE: up    %ls: down",down);
+    }
     const bool blink=(GetTickCount64()/125)%2==0,lift=f.landed && f.hover>0.0f && f.rotor>0.01f,liftOk=lift && f.rotor>=f.hover;
     if(liftOk){Format(warn,L"LIFT OK: TAKE OFF (ascend)");warn.rgba=blink ? kGreen : kYellow;}
     else if(lift){Format(warn,L"ROTOR %d%% of lift-off",static_cast<int>(std::lround(100.0f*f.rotor/f.hover)));warn.rgba=kCyan;}
@@ -1503,14 +1513,17 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
     if(tank[0])Append(info,L"%ls%ls",info.text[0] ? L"    " : L"",tank);
     Format(arms,L"%ls",stores ? stores : L"");
     warn.scale=kTitleScale;info.scale=arms.scale=kLineScale;info.rgba=arms.rgba=kHud;
-    warn.w=warn.h=info.w=info.h=arms.w=arms.h=0.0f;
-    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);MeasureAll(*text,&arms,1);}
+    help.scale=kLineScale*0.85f;help.rgba=kCyan;
+    warn.w=warn.h=info.w=info.h=arms.w=arms.h=help.w=help.h=0.0f;
+    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);MeasureAll(*text,&arms,1);MeasureAll(*text,&help,1);}
+    help.x=(width-help.w)*0.5f;
     const float lineH=18.0f*s,armsH=arms.h>0.0f ? arms.h : (arms.text[0] ? lineH : 0.0f);
     const float infoH=info.h>0.0f ? info.h : lineH,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
     arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
     info.x=(width-info.w)*0.5f;info.y=arms.y-infoH-(arms.text[0] ? 4.0f*s : 0.0f);
     warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
-    LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
+    const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
+    help.y=height*0.80f+(stripH>0.0f ? stripH+12.0f*s : 4.0f*s);   // the keys under the loadout strip, not over it
     if(switched && picked>=0 && picked<n)LoadoutBanner(drawer,ctx,text,width,warn.y-8.0f*s,s,cells[picked],lines,at);
 }
 
