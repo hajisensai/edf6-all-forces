@@ -937,6 +937,41 @@ def lofted_arc_solver() -> None:
 
 
 @test
+def katyusha_bm13_launcher() -> None:
+    """The Katyusha's launcher is a BM-13 rail pack (pylib/katyusha_model.py launcher_parts): the weapon's 10 muzzles
+    (MUZZLES, written into the weapon's MAB by tools/make_katyusha.py set_muzzles) sit at the rails' front ends on the
+    rockets' axes, symmetric about the launcher's middle; the parts' faces are wound outward as the stock ones are
+    ((b - a) x (c - a) along the outward normal). With the game: the built files pass make_katyusha.check (the rails,
+    rockets and muzzles found in the model, the muzzles in the weapon, the launcher over the bed from 0 to the stop)."""
+    import math
+    import katyusha_model as km
+    import procmesh as pm
+    xs, ys = km.rail_xs(), km.rocket_ys()
+    assert len(xs) == km.RAILS == 8 and len(km.MUZZLES) == 10 and [n for n, _ in km.MUZZLES] == [f'{i:02d}' for i in range(1, 11)]
+    for name, (x, y, z) in km.MUZZLES:
+        assert any(abs(x - r) < 1e-9 for r in xs) and any(abs(y - h) < 1e-9 for h in ys) and z == km.RAIL_FRONT, name
+    assert abs(sum(p[0] for _, p in km.MUZZLES)) < 1e-9 and len({p for _, p in km.MUZZLES}) == 10
+    assert ys[0] - km.ROCKET_R > km.RAIL_Y + km.RAIL_H / 2 and ys[1] + km.ROCKET_R < km.RAIL_Y - km.RAIL_H / 2
+    # Winding: a box turned off the axes and a tube along x, every face pointing away from the solid's middle.
+    part = pm.Part(0)
+    a = math.radians(30)
+    km._box(part, (1.0, 2.0, 3.0), ((math.cos(a), math.sin(a), 0.0), (-math.sin(a), math.cos(a), 0.0), (0.0, 0.0, 1.0)),
+            (0.3, 0.2, 0.5), [(0, 1.0)])
+    boxes = len(part.tris)
+    km._tube(part, (0.0, 0.0, 0.0), km.X_AXES, [(0.0, 0.1), (1.0, 0.1), (1.2, 0.03)], [(0, 1.0)])
+    for k, (i, j, n) in enumerate(part.tris):
+        p, q, r = (part.pos[v] for v in (i, j, n))
+        normal = [((q - p)[(c + 1) % 3] * (r - p)[(c + 2) % 3] - (q - p)[(c + 2) % 3] * (r - p)[(c + 1) % 3]) for c in range(3)]
+        mid = (p + q + r) / 3
+        centre = (1.0, 2.0, 3.0) if k < boxes else (0.6, 0.0, 0.0)   # both convex: inside, their middles
+        assert sum(normal[c] * (mid[c] - centre[c]) for c in range(3)) > 0, f'triangle {k} wound inward'
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        files = make_katyusha.build(rootcpk.DEFAULT_GAME)   # katyusha_model.check + make_katyusha.check
+        make_katyusha.check(files)
+
+
+@test
 def katyusha_pose_agrees() -> None:
     """The Katyusha's pose (src/katyusha.cpp) is its model's (pylib/katyusha_model.py): the rod bone's name and one
     elevation stop (tools/make_katyusha.py takes the model's). EDF6AutoTurret leaves a lofted launcher the player rides
@@ -952,7 +987,7 @@ def katyusha_pose_agrees() -> None:
     assert steer.split('\n')[1].strip().startswith('if(PlayerLofted(seat))'), 'autoturret Steer: PlayerLofted first'
     assert 'bool Root(' not in at and 'bool BallisticArc(' in src('common/weapon.cpp')
     assert 'edf::BallisticArc(' in at and 'edf::BallisticArc(' in src('src/launcher.cpp')
-    P, E, M = (0.0, 2.2, -2.06), (0.0, 2.51, -3.52), (0.0, 2.23, -3.56)   # the built model's, rounded
+    P, E, M = (0.0, 2.25, -2.05), (0.0, 2.56, -3.51), (0.0, 2.28, -3.55)   # the built model's, rounded
     d0, e0, l0 = km.ram_pose(P, E, M, 0.0)
     assert abs(d0) < 1e-12 and max(abs(a - b) for a, b in zip(e0, E)) < 1e-12
     d, e, length = km.ram_pose(P, E, M, math.radians(km.PITCH_STOP_DEG))

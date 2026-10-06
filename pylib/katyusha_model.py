@@ -1,14 +1,19 @@
-"""KATYUSHA.MRAB, built from the player's own Root.cpk (pure Python: pylib + graft_pure, no numpy / PIL).
+"""KATYUSHA.MRAB, built from the player's own Root.cpk (pylib + graft_pure; the launcher's parts with procmesh, so
+numpy and PIL, both in the installer).
 
     build(game) -> bytes     the finished archive (game: rootcpk.Game, read only)
     check(arc)  -> None      raises KatyushaCheckError on any self-check failure
 
 The model: the Naegling (OBJECT/VEHICLE402_ROCKET.MRAB, Vehicle402_Rocket.mdb) with its hull and track geometry
 removed and the V607 robo-truck's truck (OBJECT/V607_ROBOTRUCK.MRAB, object 0 mesh 0: body + 6 tires; the robot
-and its cradle on the bed dropped) grafted in; the rocket rack (Rocketcannon_base subtree) translated onto the bed.
+and its cradle on the bed dropped) grafted in; the rocket rack (Rocketcannon_base subtree) translated onto the bed,
+its launcher box (the geometry on Rocketcannon_main) replaced by a BM-13 rail pack: 8 I-beam rails, 16 M-13 rockets
+(launcher_parts; the weapon's muzzles at the rails' front ends: MUZZLES). The V607 stays the truck: of Root.cpk's
+other trucks the pickups (V610 / V611) are 5.4 m with a 1.5 m bed and two axles, the kei truck (V512) 4.1 m, the
+tractor (V513) a civilian cab with no bed; the V607 is a three-axle military truck with a long bed, as the BM-13's.
 
 Kept for the stock 402_Rocket class / VEHICLE402_ROCKET.SGO: every bone (names, parents, order, kinds, links), the
-rack geometry and every stock material / texture. Changed binds (local + inverse bind consistently): the 3 rack
+turntable and ram geometry and every stock material / texture. Changed binds (local + inverse bind consistently): the 3 rack
 bones (translated together) and the 12 car wheel bones tire_moveA..F_l/r (front axle -> A, middle -> C, rear -> E,
 each tire skinned to its bone at the tire centre; B / D / F put on A / C / E with no geometry). The truck body is
 skinned to `body`, the Naegling's hull bone. The catapi (track) object is dropped.
@@ -30,7 +35,10 @@ import math
 import struct
 from dataclasses import replace
 
+import numpy as np
+
 import graft_pure as g
+import procmesh as pm
 from graft_pure import Vec3
 from mdb import Bone, Mdb, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, mmul, rab_read, rab_write
 from mdb_jet import link, vertex_table
@@ -179,17 +187,18 @@ def stroke(P: Vec3, E: Vec3, M: Vec3, stop_deg: float = PITCH_STOP_DEG) -> float
     return lengths[-1] - lengths[0]
 
 
-def split_ram(md: Mdb, info: dict) -> Mdb:
-    """The prop's rod, end collar and eye onto RAM_ROD, a new bone at the eye (on the prop's axis) under
-    Rocketcannon_base right after the prop; the rod lengthened into the cylinder by the stroke + RAM_OVERLAP. Every
-    bone after the insertion is renumbered (blend indices too). info['ram'] gets the pivots and the stroke."""
-    prop, base, main = (md.bone_index(n) for n in ('Rocketcannon_prop', 'Rocketcannon_base', 'Rocketcannon_main'))
+def _ram_geometry(md: Mdb) -> dict:
+    """The stock prop's pieces and pivots in `md` (bind, model space): the cylinder's pivot P, the launcher's pivot M,
+    the ram's axis u (the prop's local x, towards the eye), the rod's eye E (the mean of each side's farthest rod
+    piece, on the axis), the mesh holding the prop (object k, mesh j), the axial distance of each of its vertices,
+    the rod's pieces per side."""
+    prop, main = md.bone_index('Rocketcannon_prop'), md.bone_index('Rocketcannon_main')
     w = bind_world(md)
     P: Vec3 = (w[prop][12], w[prop][13], w[prop][14])
     M: Vec3 = (w[main][12], w[main][13], w[main][14])
     u = _unit((w[prop][0], w[prop][1], w[prop][2]))   # the prop's local x: along the ram, towards the eye
     hits = [(k, j) for k, o in enumerate(md.objects) for j, me in enumerate(o.meshes) if me.flags[1] and _pieces(me, prop)]
-    _req(len(hits) == 1, f'the prop\'s geometry is in {len(hits)} meshes, expected 1')
+    _req(len(hits) == 1, f"the prop's geometry is in {len(hits)} meshes, expected 1")
     k, j = hits[0]
     me = md.objects[k].meshes[j]
     pos = g.mesh_positions(me)
@@ -199,12 +208,25 @@ def split_ram(md: Mdb, info: dict) -> Mdb:
     _req(len(pieces) == 2 * RAM_PIECES and len(rod) == 2 * ROD_PIECES,
          f'the ram has {len(pieces)} pieces, {len(rod)} past {RAM_SPLIT} m (expected {2 * RAM_PIECES}, {2 * ROD_PIECES})')
     sides = [[pc for pc in rod if (pos[pc[0]][0] > P[0]) == left] for left in (True, False)]
-    _req(all(len(sd) == ROD_PIECES for sd in sides), 'the rod\'s pieces are not three a side')
+    _req(all(len(sd) == ROD_PIECES for sd in sides), "the rod's pieces are not three a side")
     near = lambda pc: min(axial[v] for v in pc)  # noqa: E731
     # The eye: each side's farthest piece; its centre (both sides' mean, on the prop's axis) is the rod's pivot.
     eyes = [max(sd, key=near) for sd in sides]
     eye_at = sum(sum(axial[v] for v in pc) / len(pc) for pc in eyes) / len(eyes)
     E: Vec3 = (P[0] + u[0] * eye_at, P[1] + u[1] * eye_at, P[2] + u[2] * eye_at)
+    return {'P': P, 'M': M, 'u': u, 'E': E, 'k': k, 'j': j, 'axial': axial, 'rod': rod, 'sides': sides,
+            'near': near, 'eye_x': sorted(sum(pos[v][0] for v in pc) / len(pc) for pc in eyes)}
+
+
+def split_ram(md: Mdb, info: dict) -> Mdb:
+    """The prop's rod, end collar and eye onto RAM_ROD, a new bone at the eye (on the prop's axis) under
+    Rocketcannon_base right after the prop; the rod lengthened into the cylinder by the stroke + RAM_OVERLAP. Every
+    bone after the insertion is renumbered (blend indices too). info['ram'] gets the pivots and the stroke."""
+    prop, base = md.bone_index('Rocketcannon_prop'), md.bone_index('Rocketcannon_base')
+    w = bind_world(md)
+    rg = _ram_geometry(md)
+    P, M, u, E, k, j = rg['P'], rg['M'], rg['u'], rg['E'], rg['k'], rg['j']
+    axial, rod, sides, near = rg['axial'], rg['rod'], rg['sides'], rg['near']
     rise = stroke(P, E, M)
     reach = rise + RAM_OVERLAP
     # The rod proper is each side's piece nearest the cylinder: its front ring goes `reach` into the cylinder.
@@ -281,6 +303,273 @@ def ram_report(md: Mdb, stop_deg: float = PITCH_STOP_DEG, step: int = 5) -> list
     return out
 
 
+# ------------------------------------------------------------------------------------------ the BM-13 launcher
+
+# The launcher (Rocketcannon_main's geometry) is a BM-13's rail pack, made here in place of the Naegling's box from
+# pylib/procmesh.py parts in the box's own material and texture (two even patches of it: the frame dark, the rockets
+# lighter). In the launcher's frame (m from its pivot, the bone's origin; its rotation is the model's, checked):
+#  - RAILS I-beam rails RAIL_PITCH apart from RAIL_BACK to RAIL_FRONT (the Naegling box's front face, where the stock
+#    muzzles are), their centres RAIL_Y over the pivot;
+#  - two M-13 rockets on each rail, one hung over it and one under it, loaded at its rear (they go on at the breech end
+#    and run the rail's length when fired), tail at ROCKET_TAIL;
+#  - the rails on CROSS_Z cross-members and two longitudinal beams between the rails, the beams on brackets down to
+#    the pivot tube, and a shaft through the ram's two eyes (the rod's pivot, _ram_geometry) under the rails.
+# The weapon's muzzles (the MAB locators of EDF6VC_KATYUSHA_ROCKETS.SGO, tools/make_katyusha.py) are MUZZLES: at the
+# rails' front ends, on the rockets' axes. check_launcher finds the rails, rockets and muzzles in the built model.
+RAILS = 8
+RAIL_PITCH = 0.30
+RAIL_BACK, RAIL_FRONT = -0.25, 4.40
+RAIL_Y = 0.40
+RAIL_H, RAIL_FLANGE, RAIL_FLANGE_T, RAIL_WEB_T = 0.14, 0.07, 0.012, 0.014
+# M-13: 132 mm across, 1.41 m long; the fins' span 0.28 m (four blades, 45 deg off the rail so they clear it).
+ROCKET_R, ROCKET_LEN, ROCKET_GAP, ROCKET_TAIL = 0.066, 1.41, 0.006, 0.55
+FIN_R, FIN_LEN, FIN_T = 0.14, 0.22, 0.006
+CROSS_Z = (-0.18, 2.10, 3.25, 4.28)
+CROSS_W, CROSS_H = 0.08, 0.09
+BEAM_X, BEAM_W = 0.30, 0.07
+BEAM_BACK, BEAM_FRONT = -0.22, 4.32
+PIVOT_R, PIVOT_HALF, BRACKET_LOW = 0.05, 0.80, -0.05
+EYE_SHAFT_R = 0.035
+TINTS = {'frame': (64, 66, 64), 'rocket': (120, 124, 116)}
+SEGS = 10
+# How far the launcher, raised anywhere from 0 to PITCH_STOP_DEG, stays over the truck's bed floor (m, check).
+BED_CLEARANCE = 0.10
+
+
+def rail_xs() -> list[float]:
+    """The rails' x in the launcher's frame, left (+x) to right."""
+    return [((RAILS - 1) / 2 - i) * RAIL_PITCH for i in range(RAILS)]
+
+
+def rocket_ys() -> tuple[float, float]:
+    """The axes' heights of the rocket over a rail and of the one under it."""
+    off = RAIL_H / 2 + ROCKET_GAP + ROCKET_R
+    return RAIL_Y + off, RAIL_Y - off
+
+
+def muzzle_points() -> list[tuple[str, Vec3]]:
+    """The weapon's 10 muzzle locators (their stock names, the order the weapon fires them in), at the rails' front
+    ends: the 8 upper rockets' axes from the outside in, left and right in turn, then the two outer lower ones."""
+    xs, (up, low) = rail_xs(), rocket_ys()
+    order = [(xs[i], up) for k in range(RAILS // 2) for i in (k, RAILS - 1 - k)] + [(xs[0], low), (xs[-1], low)]
+    return [(f'{n + 1:02d}', (x, y, RAIL_FRONT)) for n, (x, y) in enumerate(order)]
+
+
+MUZZLES = muzzle_points()
+
+
+def _box(part, c: Vec3, axes: tuple[Vec3, Vec3, Vec3], half: Vec3, skin) -> None:  # noqa: ANN001 - procmesh.Part
+    """A box at `c` along the right-handed unit `axes`, `half` its half sizes: 4 vertices a face (flat shading), each
+    face wound outward (the stock winding: (b - a) x (c - a) along the outward normal)."""
+    for k in range(3):
+        u, v = axes[(k + 1) % 3], axes[(k + 2) % 3]
+        hu, hv = half[(k + 1) % 3], half[(k + 2) % 3]
+        for s in (1.0, -1.0):
+            n = tuple(axes[k][i] * half[k] * s for i in range(3))
+            corners = [(-1, -1), (1, -1), (1, 1), (-1, 1)] if s > 0 else [(-1, -1), (-1, 1), (1, 1), (1, -1)]
+            ids = [part.add(tuple(c[i] + n[i] + a * hu * u[i] + b * hv * v[i] for i in range(3)), skin,
+                            ((a + 1) / 2, (b + 1) / 2)) for a, b in corners]
+            part.tris += [(ids[0], ids[1], ids[2]), (ids[0], ids[2], ids[3])]
+
+
+def _tube(part, c: Vec3, axes: tuple[Vec3, Vec3, Vec3], stations: list[tuple[float, float]], skin) -> None:  # noqa: ANN001
+    """A round tube from `c` along axes[2] (axes right-handed): (distance, radius) `stations`, its sides wound outward
+    and its two ends capped with vertices of their own (the sides shade smooth, the caps flat)."""
+    u, v, w = axes
+
+    def at(t: float, r: float, k: int) -> Vec3:
+        a = 2 * math.pi * k / SEGS
+        return tuple(c[i] + w[i] * t + r * (math.cos(a) * u[i] + math.sin(a) * v[i]) for i in range(3))
+    rings = [[part.add(at(t, r, k), skin, (k / SEGS, n / (len(stations) - 1))) for k in range(SEGS)]
+             for n, (t, r) in enumerate(stations)]
+    for a, b in zip(rings, rings[1:]):
+        for k in range(SEGS):
+            q = (k + 1) % SEGS
+            part.tris += [(a[k], a[q], b[q]), (a[k], b[q], b[k])]
+    for (t, r), out in ((stations[0], -1), (stations[-1], 1)):
+        mid = part.add(tuple(c[i] + w[i] * t for i in range(3)), skin, (0.5, 0.5))
+        ring = [part.add(at(t, r, k), skin, (0.5 + 0.5 * math.cos(2 * math.pi * k / SEGS),
+                                             0.5 + 0.5 * math.sin(2 * math.pi * k / SEGS))) for k in range(SEGS)]
+        for k in range(SEGS):
+            q = (k + 1) % SEGS
+            part.tris.append((mid, ring[k], ring[q]) if out > 0 else (mid, ring[q], ring[k]))
+
+
+X_AXES: tuple[Vec3, Vec3, Vec3] = ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0))   # a tube along x
+Z_AXES: tuple[Vec3, Vec3, Vec3] = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+
+
+def _rocket(part, x: float, y: float, skin) -> None:  # noqa: ANN001 - procmesh.Part
+    """An M-13 along the launcher, its tail at ROCKET_TAIL: the body, a blunt ogive nose, four fins at the tail."""
+    r = ROCKET_R
+    _tube(part, (x, y, ROCKET_TAIL), Z_AXES,
+          [(0.0, 0.8 * r), (0.03, r), (ROCKET_LEN - 0.30, r), (ROCKET_LEN - 0.12, 0.75 * r), (ROCKET_LEN, 0.25 * r)], skin)
+    mid = (r - 0.005 + FIN_R) / 2
+    for k in range(4):
+        a = math.radians(45 + 90 * k)
+        d, t = (math.cos(a), math.sin(a), 0.0), (-math.sin(a), math.cos(a), 0.0)
+        _box(part, (x + d[0] * mid, y + d[1] * mid, ROCKET_TAIL + FIN_LEN / 2), (d, t, (0.0, 0.0, 1.0)),
+             ((FIN_R - r + 0.005) / 2, FIN_T / 2, FIN_LEN / 2), skin)
+
+
+def launcher_parts(eye: Vec3, eye_x: float, bone: int, material: int) -> list:
+    """The launcher's parts (procmesh.Part, in the launcher's frame, skinned to `bone`): the frame and the rockets.
+    `eye`: the ram's eye (the rod's pivot) in the launcher's frame, `eye_x` the eyes' |x|."""
+    skin = [(bone, 1.0)]
+    frame, rockets = (pm.Part(material, TINTS[k]) for k in ('frame', 'rocket'))
+    length, mid_z = RAIL_FRONT - RAIL_BACK, (RAIL_FRONT + RAIL_BACK) / 2
+    for x in rail_xs():
+        for y, hx, hy in ((RAIL_Y + (RAIL_H - RAIL_FLANGE_T) / 2, RAIL_FLANGE / 2, RAIL_FLANGE_T / 2),
+                          (RAIL_Y, RAIL_WEB_T / 2, RAIL_H / 2 - RAIL_FLANGE_T),
+                          (RAIL_Y - (RAIL_H - RAIL_FLANGE_T) / 2, RAIL_FLANGE / 2, RAIL_FLANGE_T / 2)):
+            _box(frame, (x, y, mid_z), Z_AXES, (hx, hy, length / 2), skin)
+        for y in rocket_ys():
+            _rocket(rockets, x, y, skin)
+    under = RAIL_Y - RAIL_H / 2
+    span = max(abs(x) for x in rail_xs()) + RAIL_FLANGE / 2
+    for z in CROSS_Z:
+        _box(frame, (0.0, under - CROSS_H / 2, z), Z_AXES, (span, CROSS_H / 2, CROSS_W / 2), skin)
+    for x in (BEAM_X, -BEAM_X):
+        _box(frame, (x, under - CROSS_H / 2, (BEAM_FRONT + BEAM_BACK) / 2), Z_AXES,
+             (BEAM_W / 2, CROSS_H / 2, (BEAM_FRONT - BEAM_BACK) / 2), skin)
+        low, high = BRACKET_LOW, under - CROSS_H
+        _box(frame, (x, (low + high) / 2, 0.0), Z_AXES, (BEAM_W / 2, (high - low) / 2, 2 * PIVOT_R - 0.01), skin)
+    _tube(frame, (-PIVOT_HALF, 0.0, 0.0), X_AXES, [(0.0, PIVOT_R), (2 * PIVOT_HALF, PIVOT_R)], skin)
+    half = eye_x + 0.06
+    _tube(frame, (-half, eye[1], eye[2]), X_AXES, [(0.0, EYE_SHAFT_R), (2 * half, EYE_SHAFT_R)], skin)
+    return [frame, rockets]
+
+
+def replace_launcher(md: Mdb, host0: Mdb, host_rab, info: dict) -> Mdb:  # noqa: ANN001 - mdb.Rab
+    """`md` (the stock model stripped to its rack, stock binds) with the Naegling's launcher box (every triangle on
+    Rocketcannon_main) taken out and the BM-13 rail pack (launcher_parts) put in its mesh's material and layout, into
+    the rack's object. The turntable and the ram are left as they are. info['launcher'] gets what was built."""
+    main = md.bone_index('Rocketcannon_main')
+    w = bind_world(md)
+    _req(max(abs(a - b) for a, b in zip(w[main][:12], (1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0))) < 1e-5,
+         "Rocketcannon_main's axes are not the model's")
+    M: Vec3 = (w[main][12], w[main][13], w[main][14])
+    before = {i: len(p) for i, p in g.skinned_points(md).items()}
+    md = g.strip_geometry(md, set(range(len(md.bones))) - {main}, drop_empty_objects=False)
+    after = {i: len(p) for i, p in g.skinned_points(md).items()}
+    _req(main not in after and all(after.get(i) == n for i, n in before.items() if i != main),
+         'the launcher box shares triangles with the turntable or the ram')
+    rg = _ram_geometry(md)
+    eye = (rg['E'][0] - M[0], rg['E'][1] - M[1], rg['E'][2] - M[2])
+    eye_x = max(abs(x - M[0]) for x in rg['eye_x'])
+    tmpl = md.objects[rg['k']].meshes[rg['j']]
+    albedo = pm.albedos(host_rab, host0)
+    meshes = []
+    for part in launcher_parts(eye, eye_x, main, tmpl.material):
+        part.pos = [p + np.array(M) for p in part.pos]
+        vdata, idx = pm.pack(part, tmpl, pm.uv_boxes(host0, albedo, part.tint), 1.0)
+        meshes.append(replace(tmpl, vdata=vdata, indices=idx))
+    objects = list(md.objects)
+    objects[rg['k']] = replace(objects[rg['k']], meshes=objects[rg['k']].meshes + meshes)
+    info['launcher'] = {'rails': RAILS, 'rail_length': RAIL_FRONT - RAIL_BACK, 'rockets': 2 * RAILS,
+                        'vertices': sum(me.nverts for me in meshes), 'eye': eye}
+    return replace(md, objects=objects, buffer_order=None)
+
+
+def _solids(me, bone: int) -> list[list[int]]:  # noqa: ANN001 - mdb.Mesh
+    """The pieces (vertex lists) of `me` on `bone`, joined by shared triangles and by shared positions (a flat-shaded
+    box's faces have vertices of their own, at its corners)."""
+    pos = g.mesh_positions(me)
+    first: dict[Vec3, int] = {}
+    par = list(range(me.nverts))
+
+    def root(a: int) -> int:
+        while par[a] != a:
+            par[a] = par[par[a]]
+            a = par[a]
+        return a
+    for t in g.triangles(me):
+        par[root(t[0])] = root(t[1])
+        par[root(t[1])] = root(t[2])
+    for v, p in enumerate(pos):
+        par[root(v)] = root(first.setdefault(p, v))
+    bi, _bw = g.skin_columns(me)
+    out: dict[int, list[int]] = {}
+    for v in range(me.nverts):
+        if int(bi[v][0]) == bone:
+            out.setdefault(root(v), []).append(v)
+    return list(out.values())
+
+
+def _components(md: Mdb, bone: int, origin: Vec3) -> list[tuple[Vec3, Vec3]]:
+    """The (low, high) corners of every solid piece of geometry on `bone` (_solids), relative to `origin`."""
+    out = []
+    for o in md.objects:
+        for me in o.meshes:
+            if not me.flags[1]:
+                continue
+            pos = g.mesh_positions(me)
+            for pc in _solids(me, bone):
+                q = [(pos[v][0] - origin[0], pos[v][1] - origin[1], pos[v][2] - origin[2]) for v in pc]
+                out.append((tuple(min(p[c] for p in q) for c in range(3)), tuple(max(p[c] for p in q) for c in range(3))))
+    return out
+
+
+def check_launcher(md: Mdb, muzzles: list[tuple[str, Vec3]] | None = None, tol: float = 0.01) -> dict:
+    """The launcher's geometry, found in `md` (the launcher's frame; positions are stored as half floats, so `tol`):
+    RAILS I-beam rails along it (each three long pieces stacked flange / web / flange, the web the narrowest), one
+    front end and one rear end for all, RAIL_PITCH apart; 2 x RAILS rocket bodies, one over and one under each rail;
+    every muzzle (default MUZZLES) at a rail's front end, on the axis of one of its rockets. Returns what it found."""
+    main = md.bone_index('Rocketcannon_main')
+    w = bind_world(md)
+    M: Vec3 = (w[main][12], w[main][13], w[main][14])
+    comps = _components(md, main, M)
+    longs: dict[float, list[tuple[Vec3, Vec3]]] = {}
+    for lo, hi in comps:
+        if hi[2] - lo[2] > 4.0:
+            longs.setdefault(round((lo[0] + hi[0]) / 2, 2), []).append((lo, hi))
+    rails = {}
+    for x, pcs in longs.items():
+        if len(pcs) != 3:
+            continue
+        pcs.sort(key=lambda b: b[0][1])
+        width = [hi[0] - lo[0] for lo, hi in pcs]
+        stacked = all(abs(a[1][1] - b[0][1]) < tol for a, b in zip(pcs, pcs[1:]))
+        same = all(abs(lo[2] - pcs[0][0][2]) < tol and abs(hi[2] - pcs[0][1][2]) < tol for lo, hi in pcs)
+        if stacked and same and width[1] < min(width[0], width[2]):
+            rails[x] = (pcs[0][0][1], pcs[2][1][1], pcs[0][0][2], pcs[0][1][2])   # bottom, top, back, front
+    _req(len(rails) == RAILS, f'{len(rails)} I-beam rails, expected {RAILS}: {sorted(rails)}')
+    xs = sorted(rails)
+    _req(all(abs(b - a - RAIL_PITCH) < tol for a, b in zip(xs, xs[1:])), f'rails not {RAIL_PITCH} m apart: {xs}')
+    fronts, backs = [r[3] for r in rails.values()], [r[2] for r in rails.values()]
+    _req(max(fronts) - min(fronts) < tol and max(backs) - min(backs) < tol, 'the rails do not end together')
+    bodies = [(lo, hi) for lo, hi in comps if abs(hi[2] - lo[2] - ROCKET_LEN) < 0.05 and hi[0] - lo[0] < 2 * ROCKET_R + tol]
+    on: dict[float, list[float]] = {x: [] for x in xs}
+    for lo, hi in bodies:
+        cx, cy = (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2
+        rail = [x for x in xs if abs(x - cx) < tol]
+        _req(len(rail) == 1, f'a rocket at x {cx:.3f} on no rail')
+        bottom, top = rails[rail[0]][:2]
+        _req(lo[1] > top - tol or hi[1] < bottom + tol, f'a rocket at x {cx:.3f} cuts its rail')
+        on[rail[0]].append(cy)
+    _req(len(bodies) == 2 * RAILS and all(len(ys) == 2 and min(ys) < rails[x][0] < rails[x][1] < max(ys) for x, ys in on.items()),
+         f'{len(bodies)} rockets, expected one over and one under each of the {RAILS} rails')
+    front = sum(fronts) / len(fronts)
+    for name, p in (MUZZLES if muzzles is None else muzzles):
+        rail = [x for x in xs if abs(x - p[0]) < tol]
+        _req(len(rail) == 1 and abs(p[2] - front) < tol and any(abs(y - p[1]) < tol for y in on[rail[0]]),
+             f"muzzle {name} {p} is not at a rail's front end on a rocket's axis (rails end at z {front:.3f})")
+    return {'rails': len(rails), 'rail_x': xs, 'rail_length': front - sum(backs) / len(backs), 'rail_front': front,
+            'rockets': len(bodies), 'rocket_y': sorted({round(y, 3) for ys in on.values() for y in ys})}
+
+
+def launcher_clearance(md: Mdb, stop_deg: float = PITCH_STOP_DEG, step: int = 5) -> list[tuple[int, float]]:
+    """Per elevation 0..stop_deg (every `step` deg): how far the raised launcher's lowest point is over the truck's bed
+    floor (m)."""
+    main, body = md.bone_index('Rocketcannon_main'), md.bone_index('body')
+    w = bind_world(md)
+    M: Vec3 = (w[main][12], w[main][13], w[main][14])
+    floor = truck_geometry(md, 0, body)['bed_floor_y']
+    pts = g.skinned_points(md)[main]
+    return [(deg, min(launcher_point(p, M, math.radians(deg))[1] for p in pts) - floor)
+            for deg in range(0, int(stop_deg) + 1, step)]
+
+
 # ------------------------------------------------------------------------------------------ build
 
 def build_model(game) -> tuple[Mdb, Mdb, object, object, dict]:  # noqa: ANN001 - rootcpk.Game
@@ -304,6 +593,8 @@ def build_model(game) -> tuple[Mdb, Mdb, object, object, dict]:  # noqa: ANN001 
     md = g.strip_geometry(host0, rack, drop_empty_objects=False)
     _req([len(o.meshes) for o in md.objects] == [0, 1, 0], 'unexpected stock object / mesh layout')
     md = replace(md, objects=md.objects[:2])
+    # 1b. the Naegling's launcher box out, the BM-13 rail pack in (stock binds: the placement below moves it with the rack)
+    md = replace_launcher(md, host0, host_rab, info)
 
     # 2. donor truck in host space: body -> host body, tires -> wheel bones; lowest point onto y = 0, x centred
     bone_map = {db['body']: hull_root} | {db[d]: hb[h] for d, h in WHEEL_MAP.items()}
@@ -352,7 +643,8 @@ def build_model(game) -> tuple[Mdb, Mdb, object, object, dict]:  # noqa: ANN001 
     md = split_ram(md, info)
 
     # 7. bounds of what carries new geometry (body, used wheels, the ram, object bones); relink
-    md = g.recompute_bounds(md, {md.bone_index(n) for n in ['body', 'Rocketcannon_prop', RAM_ROD] + list(centre)})
+    md = g.recompute_bounds(md, {md.bone_index(n) for n in ['body', 'Rocketcannon_main', 'Rocketcannon_prop', RAM_ROD]
+                                 + list(centre)})
     md = g.relink(md)
     info['mat_map'] = mat_map
     return md, host0, host_rab, donor_rab, info
@@ -492,6 +784,9 @@ def check(arc: bytes) -> None:
     _req(len(deltas) == len(RACK), 'rack bones missing')
     _req(all(max(abs(d[c] - deltas[0][c]) for c in range(3)) < 1e-4 for d in deltas), 'rack bones moved apart')
     check_ram(md)
+    check_launcher(md)
+    low = min(launcher_clearance(md), key=lambda r: r[1])
+    _req(low[1] >= BED_CLEARANCE, f'the launcher raised {low[0]} deg is {low[1]:.3f} m over the bed (< {BED_CLEARANCE})')
     for n in ALL_WHEELS:
         _req(any(md.bone_index(n) == k for k in pts) == (n in WHEEL_MAP.values()), f'wheel {n}: geometry mismatch')
 
