@@ -12,6 +12,8 @@ void ResetNpcAi() noexcept;
 bool IsSoldierClass(const void* human) noexcept;
 // An enemy is marked now (the Q mark, §6.3; the focus order needs one).
 bool NpcMarked() noexcept;
+// The mark for the HUD (draw thread): where it is; false with none (or none published lately).
+bool NpcMarkReadout(float* at) noexcept;
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
 // reads seat 0's stick (crew.cpp InputHook).

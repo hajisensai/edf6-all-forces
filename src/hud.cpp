@@ -2756,6 +2756,19 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 }
 }  // namespace
 
+// The NPCs' mark (npcai.cpp, the user's Q on foot; docs/npc-ai-design.md §6.3): an amber diamond round it, MARK and its
+// distance under it.
+void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    float m[3],x,y,depth;
+    if(!NpcMarkReadout(m) || !Project(vp,m,width,height,&x,&y,&depth))return;
+    const float r=16.0f*s,t=2.0f*s;
+    Seg(drawer,ctx,x,y-r,x+r,y,t,kAmber);Seg(drawer,ctx,x+r,y,x,y+r,t,kAmber);
+    Seg(drawer,ctx,x,y+r,x-r,y,t,kAmber);Seg(drawer,ctx,x-r,y,x,y-r,t,kAmber);
+    float eye[3],dir[3];
+    if(CameraRay(eye,dir))Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"MARK %.0f m",vec::Dist(eye,m));
+    else Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"MARK");
+}
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
     // hold where the player left them.
@@ -2844,6 +2857,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr};
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
+        NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
