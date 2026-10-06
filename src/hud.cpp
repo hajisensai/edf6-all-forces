@@ -127,6 +127,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
                   bool turret; edf::aimlink::TurretReadoutV1 turretAim;
                   bool stock; StockHudReadout stockHud;
+                  bool payload; PayloadReadout payloadHud;
                   bool warned; Warnings warn;
                   bool seats; SeatPrompt seatPrompt;
                   bool entrance; BoardingEntrance boardingEntrance;
@@ -505,10 +506,64 @@ float Panel(void* drawer,void* ctx,Text* text,const CarrierPanel& p,int index,in
     return bottom;
 }
 
-// A key's name on this keyboard (the ini's virtual-key code), "?" for none.
+// A key's actual binding on this keyboard, including mouse buttons and extended keys.
 void KeyName(int vk,wchar_t* out,int size) noexcept {
-    const UINT scan=MapVirtualKeyW(static_cast<UINT>(vk),MAPVK_VK_TO_VSC);
-    if(vk<=0 || !scan || GetKeyNameTextW(static_cast<LONG>(scan<<16),out,size)<=0)wcscpy_s(out,static_cast<rsize_t>(size),L"?");
+    if(vk<=0){wcsncpy_s(out,size,Tr(Tx::controlUnbound),_TRUNCATE);return;}
+    const wchar_t* mouse=vk==VK_LBUTTON ? L"LMB" : vk==VK_RBUTTON ? L"RMB" : vk==VK_MBUTTON ? L"MMB" :
+                         vk==VK_XBUTTON1 ? L"Mouse 4" : vk==VK_XBUTTON2 ? L"Mouse 5" : nullptr;
+    if(mouse){wcsncpy_s(out,size,mouse,_TRUNCATE);return;}
+    const UINT scan=MapVirtualKeyW(static_cast<UINT>(vk),MAPVK_VK_TO_VSC_EX);
+    // Some layouts return the keypad scan without E0 even for the navigation VKs (Home otherwise reads "Num 7").
+    const bool extended=(scan&0xFF00)!=0 || (vk>=VK_PRIOR && vk<=VK_DOWN) || vk==VK_INSERT || vk==VK_DELETE ||
+                        vk==VK_DIVIDE || vk==VK_NUMLOCK || vk==VK_RCONTROL || vk==VK_RMENU;
+    const LONG bits=static_cast<LONG>(((scan&0xFF)<<16) | (extended ? 0x01000000 : 0));
+    if(!scan || GetKeyNameTextW(bits,out,size)<=0)std::swprintf(out,size,L"VK 0x%X",vk);
+}
+
+// These are EDF seat-button bits, not XInput's differently numbered bits. The caller passes the flight/payload
+// readout's mask, so hints follow the same binding that actually switches its store or target.
+void SeatButtonName(int mask,wchar_t* out,int size) noexcept {
+    static const wchar_t* names[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
+    out[0]=0;
+    if(mask<=0){wcsncpy_s(out,size,Tr(Tx::controlUnbound),_TRUNCATE);return;}
+    if(mask&~0xFF){std::swprintf(out,size,Tr(Tx::padButton),mask);return;}
+    for(int i=0;i<8;++i)if(mask&(1<<i)) {
+        if(out[0])wcscat_s(out,size,L"/");
+        wcscat_s(out,size,names[i]);
+    }
+}
+void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targetButton,bool target,bool flares) noexcept {
+    Format(line,L"");
+    auto add=[&](Tx text,const wchar_t* key){if(line.text[0])Append(line,L"   ");Append(line,Tr(text),key);};
+    wchar_t key[32];
+    if(choices>1) {
+        if(keys)KeyName(Cfg().playerJetSwitchKey,key,32);else SeatButtonName(storeButton,key,32);
+        add(Tx::controlStores,key);
+    }
+    if(target) {
+        if(keys)KeyName(Cfg().playerJetTargetKey,key,32);else SeatButtonName(targetButton,key,32);
+        add(Tx::controlTarget,key);
+    }
+    if(flares) {
+        KeyName(Cfg().playerJetFlareKey,key,32);
+        add(keys ? Tx::controlFlares : Tx::controlFlaresKeyboard,key); // the flight path currently has no pad flare binding
+    }
+}
+void JetControls(Line& line,const PlayerJetReadout& j) noexcept {
+    bool guided=false;
+    for(int i=0;i<j.stores && i<6;++i)guided=guided || j.storeRole[i]==static_cast<int>(StoreRole::air) ||
+                                                        j.storeRole[i]==static_cast<int>(StoreRole::ground);
+    AircraftControls(line,j.keys,j.stores,j.storeButton,j.targetButton,guided,j.stores>0 && Cfg().playerJetFlares>0);
+}
+// A persistent compact control row below the stores, without restoring the removed cockpit panel.
+void ControlRow(Text* text,float width,float y,float s,Line& line) noexcept {
+    line.scale=kLineScale*0.85f;line.rgba=kCyan;line.w=line.h=0;
+    if(text) {
+        MeasureAll(*text,&line,1);
+        const float most=std::fmax(width-32.0f*s,1.0f);
+        if(line.w>most){line.scale*=most/line.w;MeasureAll(*text,&line,1);}
+    }
+    line.x=(width-line.w)*0.5f;line.y=y;
 }
 
 // The mouse's aim: a hollow cyan square at `at` (the jets' and the helis', heliaim.h).
@@ -541,7 +596,7 @@ bool ImpactCross(void* drawer,void* ctx,const float* vp,float width,float height
     return true;
 }
 
-// A bomb's impact point (CCIP).
+// The selected unguided store's map impact (bomb or rocket CCIP; guided stores keep their lock mark).
 void ImpactMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
     float sx,sy;
     if(j.hasImpact)ImpactCross(drawer,ctx,vp,width,height,s,j.impact,&sx,&sy);
@@ -804,7 +859,9 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
         }
     } else if(j.air) {
         Format(keys,L"%ls",Tr(Tx::jetPadAir));
-        Format(keys2,L"%ls",Tr(Tx::jetPadAir2));
+        wchar_t swap[32],target[32],flare[32];
+        SeatButtonName(j.storeButton,swap,32);SeatButtonName(j.targetButton,target,32);KeyName(Cfg().playerJetFlareKey,flare,32);
+        Format(keys2,Tr(Tx::jetPadAir2),swap,target,flare);
     } else {
         Format(keys,L"%ls",Tr(Tx::jetPadGround));
         Format(keys2,Tr(Tx::jetPadTakeoff),rotateKmh);
@@ -1055,7 +1112,8 @@ void Ladder(void* drawer,void* ctx,Text* text,const float* vp,float width,float 
             const float tab[3]={b[0],b[1]-(e>0 ? kLadderTab : -kLadderTab),b[2]};
             DirSeg(drawer,ctx,vp,width,height,b,tab,t,0,kHud);
             float lx,ly;
-            if(sight::ToScreen(vp,b,0.0f,width,height,&lx,&ly) && lx>0.0f && lx<width && ly>0.0f && ly<height)
+            // The lower fixed readouts and control rows own this space; projected pitch labels must not cover them.
+            if(sight::ToScreen(vp,b,0.0f,width,height,&lx,&ly) && lx>0.0f && lx<width && ly>0.0f && ly<height*0.80f-30.0f*s)
                 Label(text,lines,at,lx+k*8.0f*s,ly,side>0 ? 0 : 2,kLineScale*0.85f,kHud,L"%d",e);
         }
     }
@@ -1472,7 +1530,11 @@ void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,flo
     warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
     LoadCell cells[6];
     const int n=JetCells(j,cells);
-    LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
+    const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
+    if(*at<kMaxLines) {
+        Line& keys=lines[(*at)++];JetControls(keys,j);
+        ControlRow(text,width,height*0.80f+(stripH>0 ? stripH+12.0f*s : 4.0f*s),s,keys);
+    }
     if(switched && j.store>=0 && j.store<n)LoadoutBanner(drawer,ctx,text,width,warn.y-8.0f*s,s,cells[j.store],lines,at);
 }
 
@@ -1551,7 +1613,7 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
 // (`cells`, `n`) are the loadout strip under it (`picked` the picked one's, -1 none; `switched`: it large over the
 // lines too, LoadoutBanner).
 void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,
-               const wchar_t* stores,const LoadCell* cells,int n,int picked,bool switched,Line* lines,int* at) noexcept {
+               const wchar_t* stores,const LoadCell* cells,int n,int picked,bool switched,Line* lines,int* at,const Line* controls=nullptr) noexcept {
     if(*at+4>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& info=lines[(*at)++];
@@ -1589,6 +1651,10 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
     warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
     const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
     help.y=height*0.80f+(stripH>0.0f ? stripH+12.0f*s : 4.0f*s);   // the keys under the loadout strip, not over it
+    if(controls && controls->text[0] && *at<kMaxLines) {
+        Line& keys=lines[(*at)++];keys=*controls;
+        ControlRow(text,width,help.y+(help.text[0] ? (help.h>0 ? help.h : 18.0f*s)+6.0f*s : 0.0f),s,keys);
+    }
     if(switched && picked>=0 && picked<n)LoadoutBanner(drawer,ctx,text,width,warn.y-8.0f*s,s,cells[picked],lines,at);
 }
 
@@ -2377,6 +2443,7 @@ void HudPublish() noexcept {
     s.gunner=PlayerGunnerHud(&s.gun);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
     s.turret=PlayerTurretAim(&s.turretAim);
+    s.payload=PlayerPayload(&s.payloadHud);
     s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
     s.warned=WarnLatest(&s.warn);   // the aircraft's warnings (warn.cpp WarnTick, this frame's: it runs first)
     s.seats=PlayerSeatPrompt(&s.seatPrompt);
@@ -2925,8 +2992,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const ULONGLONG launchAt=snap.warned ? snap.warn.launchAt : 0;
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
-            if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
-            else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
+            if(snap.jet.hasImpact)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
+            if(!snap.jet.bomb)LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.rotor && snap.jet.heli.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli.aim,lines,&at);   // HUD or not
             if(rotorHud) {
                 HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,launchAt,lines,&at);
@@ -2935,7 +3002,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 StoresText(stores,_countof(stores),snap.jet,false);
                 LoadCell cells[6];
                 const int n=JetCells(snap.jet,cells);
-                HeliStrip(drawer,ctx,t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,cells,n,snap.jet.store,storeSwitched,lines,&at);
+                Line controls{};JetControls(controls,snap.jet);
+                HeliStrip(drawer,ctx,t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,cells,n,snap.jet.store,storeSwitched,lines,&at,&controls);
             } else {
                 FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,launchAt,lines,&at);
                 if(Cfg().playerJetFlightHud)CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,lines,&at);
@@ -2954,8 +3022,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             const bool own=snap.stock && snap.stockHud.heli;   // its weapons, rounds and reloads (vhud.cpp)
             LoadCell cells[kStockArms];
             const int n=own ? StockCells(snap.stockHud,cells) : 0;
+            Line controls{};
+            if(snap.payload)AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
             HeliStrip(drawer,ctx,t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,nullptr,cells,n,own ? snap.stockHud.selected : -1,
-                      storeSwitched,lines,&at);
+                      storeSwitched,lines,&at,&controls);
             if(snap.warned)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);

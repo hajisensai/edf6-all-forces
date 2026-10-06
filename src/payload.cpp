@@ -222,7 +222,7 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     }
     p.weapon=ws[list[at]];
     r.entry[list[at]].picked=true;
-    r.picked=list[at];r.choices=n;
+    r.picked=list[at];r.choices=n;r.switchButton=kButtonLB;
     const bool fire=v[kFireSecondary]!=0;
     v[kFireSecondary]=0;   // the stock slot 57 would fire holder 2 itself
     if(fire && HolderAlive(v,p.weapon) && Readable(p.weapon+kWeaponTrigger,1,true))p.weapon[kWeaponTrigger]=1;

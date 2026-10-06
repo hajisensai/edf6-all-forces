@@ -89,8 +89,8 @@ HUDTEXT(jetKeysTakeoff,L"W / SPACE: pull up to take off (from %d km/h)",L"W / �
         L"W / スペース：引き起こして離陸（%d km/h から）")
 HUDTEXT(jetPadAir,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways",L"加速：前进 / 上升    减速：后退    滚转：左摇杆左右",
         L"加速：前進 / 上升    減速：後退    滾轉：左搖桿左右",L"ブースト：前進 / 上昇    ブレーキ：後退    ロール：左スティック左右")
-HUDTEXT(jetPadAir2,L"PITCH, TURN: right stick    LB: switch weapon    X: next target",L"俯仰、转向：右摇杆    LB：替换武器    X：下一个目标",
-        L"俯仰、轉向：右搖桿    LB：替換武器    X：下一個目標",L"ピッチ・旋回：右スティック    LB：武器切替    X：次の目標")
+HUDTEXT(jetPadAir2,L"PITCH, TURN: right stick    %ls: stores    %ls: target    keyboard %ls: flares",L"俯仰、转向：右摇杆    %ls：挂载    %ls：目标    键盘 %ls：热诱弹",
+        L"俯仰、轉向：右搖桿    %ls：掛載    %ls：目標    鍵盤 %ls：熱誘彈",L"ピッチ・旋回：右スティック    %ls：兵装    %ls：目標    キーボード %ls：フレア")
 HUDTEXT(jetPadGround,L"THROTTLE: forward / ascend = up, back = down    TURN: sticks",L"油门：前进 / 上升 = 加，后退 = 减    转向：摇杆",
         L"油門：前進 / 上升 = 加，後退 = 減    轉向：搖桿",L"スロットル：前進 / 上昇 = 上げ、後退 = 下げ    旋回：スティック")
 HUDTEXT(jetPadTakeoff,L"TAKE OFF: pull the right stick back (from %d km/h)",L"起飞：右摇杆向后拉（%d km/h 起）",L"起飛：右搖桿向後拉（%d km/h 起）",
@@ -305,3 +305,10 @@ HUDTEXT(areaAhead,L"AREA EDGE AHEAD: TURN BACK",L"前方边界：请返航",L"�
 HUDTEXT(warnArea,L"AREA EDGE",L"区域边界",L"區域邊界",L"エリア境界")
 HUDTEXT(boardingEntry,L"BOARDING ENTRANCE  %d m",L"登乘入口  %d m",L"登乘入口  %d m",L"搭乗口  %d m")
 HUDTEXT(boardingReady,L"BOARD AT THIS ENTRANCE",L"在此按上车键",L"在此按上車鍵",L"ここで搭乗ボタン")
+
+// Contextual aircraft weapon controls (physical bindings supplied by the flight / payload readout).
+HUDTEXT(controlUnbound,L"unbound",L"未绑定",L"未綁定",L"未割当")
+HUDTEXT(controlStores,L"[%ls] stores",L"[%ls] 切换挂载",L"[%ls] 切換掛載",L"[%ls] 兵装切替")
+HUDTEXT(controlTarget,L"[%ls] next target",L"[%ls] 切换目标",L"[%ls] 切換目標",L"[%ls] 目標切替")
+HUDTEXT(controlFlares,L"[%ls] flares",L"[%ls] 热诱弹",L"[%ls] 熱誘彈",L"[%ls] フレア")
+HUDTEXT(controlFlaresKeyboard,L"[keyboard %ls] flares",L"[键盘 %ls] 热诱弹",L"[鍵盤 %ls] 熱誘彈",L"[キーボード %ls] フレア")

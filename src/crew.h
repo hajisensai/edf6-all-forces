@@ -735,6 +735,7 @@ struct PlayerJetReadout {
     int flares;                  // flare pairs left
     float aim[3],path[3];
     int stores,store;
+    int storeButton,targetButton; // actual seat-button masks used by this aircraft
     const char* storeName[6];
     int storeRounds[6];
     int storeRole[6];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)

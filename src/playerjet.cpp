@@ -958,6 +958,12 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     // bomb store, the bay); the shells' and drones' cross is their aim point (SpecialFrame), no fall to trace.
     j.bomb=st[j.store].spec->role==StoreRole::bomb;
     if(j.bomb && j.phase==Phase::air && FallsAsBomb(st[j.store]))j.hasImpact=Impact(j,pos,st[j.store].weapon,j.impact);
+    else if(st[j.store].spec->role==StoreRole::rocket && st[j.store].weapon) {
+        RoundModel model{};float from[3],dir[3],seconds=0.0f;
+        const unsigned char* const weapon=st[j.store].weapon;
+        if(ReadRound(weapon,&model) && edf::MeanMuzzle(weapon,kMostBombMuzzles,from,dir) && Normalize(dir))
+            j.hasImpact=RoundLands(weapon,model,from,dir,3000.0f,j.impact,&seconds);
+    }
     const bool fire=v[kFireStore]!=0;
     v[kFireStore]=0;
     if(fire && st[j.store].weapon)TriggerStore(st[j.store]);
@@ -1746,7 +1752,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
-            r.stores=j.stores;r.store=j.store;
+            r.stores=j.stores;r.store=j.store;r.storeButton=kButtonLB;r.targetButton=kButtonX;
             for(int i=0;i<j.stores && i<kMostStores;++i){r.storeName[i]=j.storeName[i];r.storeRounds[i]=j.storeRounds[i];r.storeRole[i]=j.storeRole[i];}
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;

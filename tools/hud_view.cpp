@@ -149,6 +149,7 @@ bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; 
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
+bool PlayerPayload(PayloadReadout* o) noexcept { if(hasHeli){*o=PayloadReadout{};o->choices=3;o->switchButton=0x10;o->keys=sceneHeli.f.keys;}return hasHeli; }
 bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
@@ -390,6 +391,46 @@ void Prime(const float* pos,int width=1920) {
     HudDraw(vp,image,&viewport,nullptr,0);
 }
 
+// Check the actual draw, including the control row's separation from the loadout and flight hints.
+int AircraftControlsDrawn(const Line& expected) {
+    int found=0,failed=0;
+    for(std::size_t i=0;i<drew.size();++i)if(drew[i].text==expected.text) {
+        ++found;const Drew& a=drew[i];
+        for(std::size_t k=0;k<drew.size();++k)if(k!=i && !drew[k].text.empty()) {
+            const Drew& b=drew[k];
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1) {
+                ++failed;std::printf("FAIL controls overlap: %s at %.1f..%.1f, other %s at %.1f..%.1f\n",
+                    Narrow(a.text).c_str(),a.y0,a.y1,Narrow(b.text).c_str(),b.y0,b.y1);
+            }
+        }
+    }
+    if(found!=1)++failed;
+    std::printf("%s  aircraft controls %s: one complete row, clear of other text\n",failed ? "FAIL" : "ok",hudtext::Name(hudtext::InUse()));
+    return failed;
+}
+
+int AircraftBindingChecks() {
+    int failed=0;
+    auto check=[&](bool ok,const char* what){if(!ok){++failed;std::printf("FAIL aircraft binding: %s\n",what);}};
+    Line line{};wchar_t key[32],part[80];
+    const int swap=config.playerJetSwitchKey,target=config.playerJetTargetKey,flare=config.playerJetFlareKey;
+    config.playerJetSwitchKey=VK_F8;config.playerJetTargetKey=VK_XBUTTON1;config.playerJetFlareKey=VK_HOME;
+    AircraftControls(line,true,3,0x10,0x04,true,true);
+    const int bindings[]={config.playerJetSwitchKey,config.playerJetTargetKey,config.playerJetFlareKey};
+    const Tx labels[]={Tx::controlStores,Tx::controlTarget,Tx::controlFlares};
+    for(int i=0;i<3;++i){KeyName(bindings[i],key,32);std::swprintf(part,80,Tr(labels[i]),key);check(std::wcsstr(line.text,part)!=nullptr,"remapped ini key is shown");}
+    AircraftControls(line,false,3,0x20,0x08,true,true);
+    check(std::wcsstr(line.text,L"[RB]") && std::wcsstr(line.text,L"[Y]"),"pad hints follow supplied seat masks");
+    KeyName(config.playerJetFlareKey,key,32);std::swprintf(part,80,Tr(Tx::controlFlaresKeyboard),key);
+    check(std::wcsstr(line.text,part)!=nullptr,"pad explicitly shows keyboard-only flare binding");
+    AircraftControls(line,false,1,0,0,false,false);check(!line.text[0],"unavailable actions are absent");
+    KeyName(0,key,32);check(!std::wcscmp(key,Tr(Tx::controlUnbound)),"disabled key is unbound");
+    wchar_t home[32];KeyName(VK_HOME,home,32);KeyName(VK_NUMPAD7,key,32);
+    check(std::wcscmp(home,key)!=0,"Home is not mislabeled as keypad 7");
+    config.playerJetSwitchKey=swap;config.playerJetTargetKey=target;config.playerJetFlareKey=flare;
+    return failed;
+}
+
 // What `draw` puts on the screen (its quads and its text lines drawn), as a box.
 template<class F> Box Measured(F draw,float s=1.0f) {
     alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
@@ -627,14 +668,14 @@ int ScaleDrawnChecks() {
 }
 // Every scene and the layout checks in the language in use (hudtext::InUse), written into `dir`: the failures.
 int Scenes(const std::wstring& dir) {
-    int failed=0;
+    int failed=AircraftBindingChecks();
     hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=false;   // as the first run began
     const ULONGLONG now=GetTickCount64();
     const float pos[3]={0.0f,120.0f,0.0f};
 
     // A jet diving at the ground with two missiles and a lock on it, just launched, stalled, the gear not down.
     hasJet=true;hasHeli=false;hasWarn=true;
-    sceneJet=PlayerJetReadout{};
+    sceneJet=PlayerJetReadout{};sceneJet.storeButton=0x10;sceneJet.targetButton=0x04;
     sceneJet.speed=95.0f;sceneJet.throttle=0.8f;sceneJet.clear=120.0f;sceneJet.climb=-45.0f;sceneJet.load=2.1f;sceneJet.air=true;
     sceneJet.ground=true;sceneJet.stall=true;sceneJet.liftShare=1.04f;sceneJet.pullUp=true;sceneJet.gpws=Gpws::pullUp;
     sceneJet.impactIn=2.4f;sceneJet.stores=3;sceneJet.store=1;
@@ -674,6 +715,20 @@ int Scenes(const std::wstring& dir) {
     Prime(pos);
     sceneJet.store=3;
     Scene(dir,L"jet_switch",pos);
+    Line controls{};JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
+    sceneJet.keys=true;
+    Scene(dir,L"jet_controls_keyboard",pos);JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
+    const int swap=config.playerJetSwitchKey,target=config.playerJetTargetKey,flare=config.playerJetFlareKey;
+    config.playerJetSwitchKey=VK_F8;config.playerJetTargetKey=VK_XBUTTON1;config.playerJetFlareKey=VK_HOME;
+    Scene(dir,L"jet_controls_remapped",pos,1280);JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
+    config.playerJetSwitchKey=swap;config.playerJetTargetKey=target;config.playerJetFlareKey=flare;
+    sceneJet.store=4;sceneJet.bomb=false;sceneJet.hasImpact=false;Prime(pos);
+    boxing=true;drawn=0;Prime(pos);const int withoutImpact=drawn;
+    sceneJet.hasImpact=true;sceneJet.impact[0]=0;sceneJet.impact[1]=0;sceneJet.impact[2]=500;
+    drawn=0;Prime(pos);const int withImpact=drawn;boxing=false;
+    const bool rocketCross=withImpact==withoutImpact+4;
+    std::printf("%s  non-bomb rocket draws four impact-cross arms (%d -> %d)\n",rocketCross ? "ok" : "FAIL",withoutImpact,withImpact);
+    failed+=!rocketCross;Scene(dir,L"jet_rocket_impact",pos);sceneJet.hasImpact=false;
     sceneJet.stores=3;sceneJet.store=1;
 
     // A rotor craft sinking onto the ground, hovering slowly (the helicopter HUD).
@@ -686,6 +741,8 @@ int Scenes(const std::wstring& dir) {
     sceneJet.sym.threats=0;
     sceneWarn.on=1u<<kWarnPullUp;sceneWarn.litAt[kWarnPullUp]=now-100;
     Scene(dir,L"rotor_pullup",pos);
+    sceneJet.heli.keys=true;sceneJet.heli.aiming=true;
+    Scene(dir,L"rotor_controls_keyboard",pos);JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
 
     // A stock heli, SINK RATE near the ground, an empty scope.
     hasJet=false;hasHeli=true;
@@ -710,6 +767,10 @@ int Scenes(const std::wstring& dir) {
     Prime(pos);
     sceneStock.selected=1;
     Scene(dir,L"heli_stores",pos);
+    AircraftControls(controls,false,3,0x10,0,false,false);failed+=AircraftControlsDrawn(controls);
+    sceneHeli.f.keys=true;sceneHeli.f.aiming=true;
+    Scene(dir,L"heli_stores_keyboard",pos);
+    AircraftControls(controls,true,3,0x10,0,false,false);failed+=AircraftControlsDrawn(controls);
     hasStock=false;
 
     // The stock vehicles' HUD: a tank under a missile and a lock, at 16:9 and 21:9; the drill tank overheating; a Nix

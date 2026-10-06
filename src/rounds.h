@@ -59,6 +59,25 @@ inline void Step(Motor& m,float* p) noexcept {
     ++m.age;
 }
 
+// The plugin's unguided stores (Hydra 70): missile.cpp Guide first merges inherited velocity into own so it does
+// not decay, then after CP[3][0] applies coast drag and subtracts this frame's stock thrust, at least 1 m/frame.
+// The native MissileBullet01 update follows normally. Keep that order: treating this as a stock powered rocket
+// both loses launcher motion and lets its motor burn forever. The production-Guide regression compares every step.
+struct PluginMotor { Motor motor; float burn; };
+inline void Step(PluginMotor& f,float* p) noexcept {
+    Motor& m=f.motor;
+    if(m.age>=m.ignite) {
+        float v[3];for(int i=0;i<3;++i)v[i]=m.own[i]+m.inh[i];
+        const float speed=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+        if(std::isfinite(speed) && speed>=1e-4f) {
+            float next=speed;
+            if(static_cast<float>(m.age)>f.burn)next=std::fmax(1.0f,speed*(1.0f-0.004f)-m.accel);
+            for(int i=0;i<3;++i){m.own[i]=(v[i]/speed)*next;m.inh[i]=0.0f;}
+        }
+    }
+    Step(m,p);
+}
+
 // The first ground along a round's path from `from`: stepped `segment` frames at a time, the ray `ray(a, b, hit)`
 // (metres from a to the hit, < 0 none) along each stretch; at most `frames` frames and no farther than `reach` m from
 // `from` (the view's reach: a round past it lands nowhere the player can see). `hit` and the frames it took (a share of
