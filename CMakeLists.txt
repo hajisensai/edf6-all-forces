@@ -36,6 +36,12 @@ add_subdirectory(autoturret)
 add_executable(append_log_test EXCLUDE_FROM_ALL tools/append_log_test.cpp)
 target_link_libraries(append_log_test PRIVATE edf6common)
 target_compile_options(append_log_test PRIVATE /W4 /WX /utf-8 /permissive-)
+# Production sidecar boarding against stand-in objects and a recording warp (no game required).
+add_executable(sidecar_board_check EXCLUDE_FROM_ALL tools/sidecar_board_check.cpp)
+target_include_directories(sidecar_board_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(sidecar_board_check PRIVATE edf6common)
+target_compile_options(sidecar_board_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(sidecar_board_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The boardable aircraft's flight numbers checked offline (tools/pjet_kinds.cpp); not part of the plugin build:
 # cmake --build build --target pjet_kinds && build\pjet_kinds.exe

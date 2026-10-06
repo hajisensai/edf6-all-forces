@@ -60,6 +60,12 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址全部是 RVA。纯静态分析
 - **离开**：被炸倒 / 附着（`+0x39C != 0`）、死亡、上了载具（`+0x1550`）、被甩开 3 米以上、玩家跳起（高于站立点 0.25 米且一帧上升 3.5 厘米以上）。
 - **玩家上边车**：上车键 → 访问器 → 各载具第 49 槽（`crew.cpp FindSeatHook`）先问 `SidecarBoard`：站得离边车平台比驾驶座上车点
   （`heli.cpp SeatPoint`，CanRideSeat 自己读的点）更近、或驾驶座不是可以坐的（有别的玩家）时，把玩家放进边车，返回 null（不进座位）。
+  边车门点在平台底部（车辆坐标 `kGunnerX, 0, kGunnerZ`），用 `SeatPoint` 读到的原版登机半径（已经包含 0.5 米余量）检查人物到门点的
+  **三维距离**，读不到门点或半径时拒绝；比较驾驶座远近也用三维距离，不能从楼上或地图另一端登车。
+  原因（H）：`0x56D700` 通过 `0x56D768 call 0x5E0D60` 遍历 team 5，再通过 `0x56D77F call 0x5E11D0` 遍历友队；访问器
+  `0x57266E..0x57267F` 直接调用载具第 49 槽，**不先检查距离**。距离本由 `CanRideSeat 0x6346D0` 检查，边车绕过原座位时必须自己检查。
+  返回 null 也不会停止这次遍历，因此一次上车 / 下车按键被 `boardHeld` 消费后、或人物已经在边车内时，`SidecarBoard` 对后续所有载具都
+  返回已处理，阻止再次传送或落进别的载具原版座位。
 - **NPC 射手**（H：调用方式；M：NPC 士兵都在这条链里）：上车提示自己用的团队遍历 `0x5E11D0(manager = *(image+0x20B2978), team, functor)`
   （`0x573617..0x573624`）：对与 `team` 友好（关系 1，包括自己队）的每个队伍的每个对象调 functor 的第 1 槽。插件用自己的 functor 找
   `SidecarNpcRange` 内最近的、本机运行的、步行的士兵（四个士兵类之一、不是玩家），放进边车。玩家离开驾驶座时放他下来。
@@ -92,6 +98,8 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址全部是 RVA。纯静态分析
 团队遍历的 functor 约定；CarBase 的 setAngVel 调用点、速度拷贝和驾驶块。全部签名在 `InstallSidecar` 里核对（不符整个边车功能关闭，
 `HOOK sidecar=0`）。离线：`python tools/make_sidecar.py --out <临时目录>` 生成并通过 `check()`（模型往返、骨骼、平台和轮子位置、
 贴图；碰撞体逐字节比对、凸包平面）；`python tools/selftest.py` 的 `sidecar_copies_agree`；`build.cmd`（/W4 /WX）。
+`cmake --build build --target sidecar_board_check` 后运行 `build\sidecar_board_check.exe`：直接运行生产 `SidecarBoard` / `MoveIntent`，
+用替身人物、车辆和记录式 warp 检查远距离、楼层高度、原版半径内外、门点缺失、驾驶座优先，以及同一次团队遍历和下车按键不能再次登车。
 
 需要实机（L）：
 1. 射手站在平台上是否稳定（每帧放回的抖动、携带速度是否让他跟着车走、高速时的观感）；落地动画是否正常。

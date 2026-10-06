@@ -334,16 +334,23 @@ void SidecarFrame(unsigned char* v) noexcept {
 
 bool SidecarBoard(unsigned char* v,unsigned char* human) noexcept {
     if(!ok || !Cfg().sidecar || !IsPlayer(human))return false;
+    // FindSeat's caller walks every friendly vehicle, even after we return nullptr (there is no real seat).
+    // Consume the whole press, including the rest of that walk and a step-off's press, before asking any vehicle.
+    if(boardHeld.Is(human))return true;
+    for(const auto& held:sidecars)if(held.gunnerPlayer && held.gunner.Is(human))return true;
     Sidecar* s=Find(v);
     if(!s || !s->marked || s->gunner || v[kDead] || !Holdable(human))return false;
     float gun[3];FramePoint(v,kGunnerX,0.0f,kGunnerZ,gun);
     const float* p=Pos(human);
-    const float dg[3]={p[0]-gun[0],0.0f,p[2]-gun[2]};
+    const float dg[3]={p[0]-gun[0],p[1]-gun[1],p[2]-gun[2]};
     float door[3],reach=0.0f;
+    // The sidecar has its own door at the platform's foot, with the bike's stock boarding radius (already including
+    // CanRideSeat's 0.5 m slack). The team walk does no distance check for us. Vertical separation counts too.
+    if(!SeatPoint(v,0,door,&reach) || !(Dot(dg,dg)<=reach*reach))return false;
     const Rider driver=SeatCount(v) ? SeatRider(SeatAt(v,0)) : Rider::other;
     bool saddleNearer=false;
-    if((driver==Rider::none || driver==Rider::dummy) && SeatPoint(v,0,door,&reach)) {
-        const float dd[3]={p[0]-door[0],0.0f,p[2]-door[2]};
+    if(driver==Rider::none || driver==Rider::dummy) {
+        const float dd[3]={p[0]-door[0],p[1]-door[1],p[2]-door[2]};
         saddleNearer=Dot(dd,dd)<Dot(dg,dg);
     }
     if(saddleNearer)return false;   // the stock board (or crew.cpp's bump of an NPC driver) takes the saddle
