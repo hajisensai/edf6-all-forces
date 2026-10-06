@@ -278,6 +278,7 @@ struct PJet {
 void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept;
+void Forget(const unsigned char* v) noexcept;
 int SpecialRoom(const PJet& j) noexcept;
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept;
 void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noexcept;
@@ -1112,7 +1113,12 @@ constexpr float kCatchClear=40.0f,kCatchBelow=2.0f,kCatchOver=40.0f,kCatchFrom=1
 constexpr float kCatchHoming=250.0f,kCatchReach=9.0f,kCatchLead=1.0f;
 struct Bailout {
     Eject state; ULONGLONG at; float carry[2],vy;
-    float mark,heading[3],speed;     // the jet left: its kind's mark, its nose, its speed (the catch)
+    float heading[3],speed;          // the jet left: its nose, its speed (the catch)
+    // The jet the catch makes (pjet::kCatchFiles, kCatchNone: none), why that one, and what was left (the log). Made
+    // when nothing is coming for them (caught empty): the jet left comes back itself (playerjet_board.inc Left) only
+    // when it can, and if it is lost on the way, this one is made after all (`self`).
+    int catchWith=pjet::kCatchNone; const char* catchWhy; const char* left;
+    bool self;                       // `caught` is the jet they left, flying back for them
     ObjRef caught; ULONGLONG caughtAt;
     bool open;                       // past the top: the parachute is open (the canopy shows: Chute)
     const char* why;                 // how it ended (state none), for the canopy's CHUTE line
@@ -1126,12 +1132,23 @@ struct Bailout {
 // the spot to the mission's end.
 void BailEnd(const char* why,bool caught=false) noexcept {
     bail.state=Eject::none;bail.why=why;
-    if(!caught){catchFlight=CatchFlight{};bail.caught=ObjRef{};}
+    if(!caught){catchFlight=CatchFlight{};bail.caught=ObjRef{};bail.self=false;}
 }
-struct PlayerJetFile { float mark; const wchar_t* sgo; const wchar_t* file; };
-constexpr PlayerJetFile kPlayerJetFiles[]={{7201.0f,L"app:/object/edf6vc_pjet_fighter.sgo",L"EDF6VC_PJET_FIGHTER.SGO"},
-                                          {7202.0f,L"app:/object/edf6vc_pjet_strike.sgo",L"EDF6VC_PJET_STRIKE.SGO"}};
-bool playerJetPreloaded[2]{};
+// The catch's SGOs (playerjet_kinds.h kCatchFiles), each preloaded for this mission (PreloadPlayerJets).
+bool playerJetPreloaded[pjet::kCatchFileCount]{};
+static_assert(pjet::kCatchFiles[pjet::kCatchPlayerFighter].mark==7201.0f && pjet::kCatchFiles[pjet::kCatchPlayerStrike].mark==7202.0f,
+              "the player jets' catch SGOs carry kKinds' marks");
+
+// The catch for the jet `j` left in the air: a player jet its own SGO (by its mark), one of the plugin's other aircraft
+// its row's (playerjet_kinds.h catchWith); kCatchNone when there is none.
+int CatchOf(const PJet& j,const char** why) noexcept {
+    *why="its own SGO";
+    if(j.board){*why=j.board->catchWhy;return j.board->catchWith;}
+    if(!j.kind)return pjet::kCatchNone;
+    for(int i=0;i<pjet::kCatchFileCount;++i)
+        if(pjet::kCatchFiles[i].player && pjet::kCatchFiles[i].mark==static_cast<float>(j.kind->mark))return i;
+    return pjet::kCatchNone;
+}
 constexpr unsigned kPreloadFn=0x7A3780,kCreateObjectFn=0x11945E0,kInitParamVt=0x1762068;
 constexpr std::size_t kPreloadMgrAt=0x20B29A8,kObjectMgrAt=0x20B2958;
 struct alignas(16) SpawnParam { const void* vtable; unsigned char rest[0x28]; };
@@ -1157,40 +1174,52 @@ void MissionSetup(unsigned char* v) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("PJET catch: the game faulted applying the mission setup");}
 }
 
-unsigned char* SpawnCatchJet(float mark,const float* m) noexcept {
-    for(int i=0;i<2;++i) {
-        if(kPlayerJetFiles[i].mark!=mark || !playerJetPreloaded[i] || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt))continue;
-        SpawnParam param{image+kInitParamVt,{}};
-        unsigned char* v=nullptr;
-        __try {
-            v=reinterpret_cast<unsigned char*(*)(void*,const float*,const wchar_t*,SpawnParam*)>(image+kCreateObjectFn)(
-                At<void*>(image,kObjectMgrAt),m,kPlayerJetFiles[i].sgo,&param);
-        } __except(EXCEPTION_EXECUTE_HANDLER){playerJetPreloaded[i]=false;Log("PJET catch: the game faulted building %ls: off",kPlayerJetFiles[i].file);return nullptr;}
-        if(!v)return nullptr;
-        FixBodyPart506(v,"PJET");
-        MissionSetup(v);
-        SetObjectTeam(v,kTeamVehicle);
-        LevelVehicle(v);
-        return v;
+// The catch's jet `which` (pjet::kCatchFiles) at `m`, empty, on nobody's team; nullptr (said why) when it cannot be made.
+unsigned char* SpawnCatchJet(int which,const float* m) noexcept {
+    if(which<0 || which>=pjet::kCatchFileCount){Log("PJET catch: no catch jet for what they left");return nullptr;}
+    const pjet::CatchFile& f=pjet::kCatchFiles[which];
+    if(!playerJetPreloaded[which] || !jet::SpawnReady() || !At<void*>(image,kObjectMgrAt)) {
+        Log("PJET catch: %ls (%s) not preloaded this mission%s",f.file,f.name,
+            f.player || (Cfg().playerJetAll && Cfg().playerJetCatch) ? " (not installed?)" : " (PlayerJetAll / PlayerJetCatch were off at its start)");
+        return nullptr;
     }
-    return nullptr;
+    SpawnParam param{image+kInitParamVt,{}};
+    unsigned char* v=nullptr;
+    __try {
+        v=reinterpret_cast<unsigned char*(*)(void*,const float*,const wchar_t*,SpawnParam*)>(image+kCreateObjectFn)(
+            At<void*>(image,kObjectMgrAt),m,f.sgo,&param);
+    } __except(EXCEPTION_EXECUTE_HANDLER){playerJetPreloaded[which]=false;Log("PJET catch: the game faulted building %ls: off",f.file);return nullptr;}
+    if(!v)return nullptr;
+    FixBodyPart506(v,"PJET");
+    MissionSetup(v);
+    SetObjectTeam(v,kTeamVehicle);
+    LevelVehicle(v);
+    return v;
 }
 
 void Catch(unsigned char* h,ULONGLONG ms) noexcept {
     const float* p=reinterpret_cast<const float*>(h+kPosition);
     const float* hv=reinterpret_cast<const float*>(h+kHumanVel);
     if(!bail.caught) {
-        if(!Cfg().playerJetCatch || ms-bail.at<kCatchAfterMs || bail.mark<=0.0f)return;
+        if(!Cfg().playerJetCatch || ms-bail.at<kCatchAfterMs || bail.catchWith==pjet::kCatchNone)return;
         const float clear=GroundClearance(p);
-        if(clear!=kNoGround && clear<kCatchClear){bail.mark=0.0f;Log("PJET catch: too low (%.0f m), the parachute goes on",clear);return;}
+        if(clear!=kNoGround && clear<kCatchClear) {
+            bail.catchWith=pjet::kCatchNone;
+            Log("PJET catch: too low (%.0f m), the parachute goes on",clear);
+            return;
+        }
         float f[3]={bail.heading[0],0.0f,bail.heading[2]};
         if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
         float at[3]={p[0]-f[0]*kCatchFrom,p[1],p[2]-f[2]*kCatchFrom};
         const float under=GroundClearance(at);
         if(under!=kNoGround && under<kCatchFloor*2.0f)at[1]+=kCatchFloor*2.0f-under;
         alignas(16) const float m[16]={f[2],0,-f[0],0, 0,1,0,0, f[0],0,f[2],0, at[0],at[1],at[2],1};
-        unsigned char* const v=SpawnCatchJet(bail.mark,m);
-        if(!v){Log("PJET catch: no jet of mark %.0f could be made",bail.mark);bail.mark=0.0f;return;}
+        const int which=bail.catchWith;
+        bail.catchWith=pjet::kCatchNone;   // one try: a jet made, or none could be (said why)
+        unsigned char* const v=SpawnCatchJet(which,m);
+        if(!v)return;
+        Log("PJET catch: making %ls (%s) for the %s they left: %s",pjet::kCatchFiles[which].file,pjet::kCatchFiles[which].name,
+            bail.left ? bail.left : "jet",bail.catchWhy ? bail.catchWhy : "");
         const Kind* const k=KindOf(v);
         const float speed=std::fmax(bail.speed,(k ? k->rotate : 75.0f)+kCatchOver);
         catchFlight=CatchFlight{v,{p[0],p[1]-kCatchBelow,p[2]},speed,{hv[0],hv[1],hv[2]},{f[0],0.0f,f[2]}};
@@ -1201,10 +1230,18 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         return;
     }
     unsigned char* const v=const_cast<unsigned char*>(static_cast<const unsigned char*>(bail.caught.obj));
-    if(!bail.caught.Is(v) || v[kDead]){Log("PJET catch: the jet is gone");BailEnd("the catch jet is gone");return;}
+    if(!bail.caught.Is(v) || v[kDead]) {
+        if(bail.self && bail.catchWith!=pjet::kCatchNone) {   // the jet they left, lost on its way back: one is made (above)
+            Log("PJET catch: the %s coming back for them is gone: another jet is made",bail.left ? bail.left : "jet");
+            Forget(v);   // its wreck the game's: not held for the player (jet.cpp JetFrame takes it again)
+            bail.caught=ObjRef{};bail.self=false;catchFlight=CatchFlight{};
+            return;
+        }
+        Log("PJET catch: the jet is gone");Forget(v);BailEnd("the catch jet is gone");return;
+    }
     if(ms-bail.caughtAt>kCatchMostMs) {
         Log("PJET catch: given up, the player not aboard in %.0f s",static_cast<float>(kCatchMostMs)*0.001f);
-        bail.caught=ObjRef{};bail.mark=0.0f;catchFlight=CatchFlight{};
+        bail.caught=ObjRef{};bail.catchWith=pjet::kCatchNone;bail.self=false;catchFlight=CatchFlight{};
         return;
     }
     // Where it makes for: its pilot seat's riding point onto the player (that point within the stock reach is what the
@@ -1231,8 +1268,10 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
 
 // `alive`: the jet still there to read (a shot-down one may be deleted already: its kind and its path from the PJet).
 void EjectStart(const PJet& j,const unsigned char* v,bool alive) noexcept {
-    bail=Bailout{Eject::pending,GameMs(),{j.vel[0]*kEjectCarry,j.vel[2]*kEjectCarry},0.0f,0.0f,{0.0f,0.0f,1.0f},0.0f,ObjRef{},0};
-    if(j.kind)bail.mark=static_cast<float>(j.kind->mark);
+    bail=Bailout{};
+    bail.state=Eject::pending;bail.at=GameMs();bail.carry[0]=j.vel[0]*kEjectCarry;bail.carry[1]=j.vel[2]*kEjectCarry;
+    bail.catchWith=CatchOf(j,&bail.catchWhy);
+    bail.left=j.kind ? j.kind->name : nullptr;
     float nose[3]={j.vel[0],j.vel[1],j.vel[2]};
     if(alive){const float* m=reinterpret_cast<const float*>(v+kMatrix);nose[0]=m[8];nose[1]=m[9];nose[2]=m[10];}
     else if(!Normalize(nose)){nose[0]=0.0f;nose[1]=0.0f;nose[2]=1.0f;}
@@ -1610,15 +1649,25 @@ void PlayerEjectTick() noexcept {
     if(flyOk && Cfg().playerJet){HailTick();GunnerTick();}
 }
 
+// The catch's SGOs (pjet::kCatchFiles) for this mission: the player jets' whenever installed, the requested twins of the
+// plugin's other aircraft only when the player may board those (PlayerJetAll) and the catch is on (PlayerJetCatch):
+// ~10 KB of SGO each, their models the NPC bodies' (jet_spawn.cpp PreloadJets has them loaded already).
 void PreloadPlayerJets() noexcept {
-    for(int i=0;i<2;++i) {
+    const bool twins=Cfg().playerJetAll && Cfg().playerJetCatch;
+    char line[256];
+    int at=0;
+    for(int i=0;i<pjet::kCatchFileCount;++i) {
+        const pjet::CatchFile& f=pjet::kCatchFiles[i];
         playerJetPreloaded[i]=false;
         const auto mgr=At<void*>(image,kPreloadMgrAt);
-        if(!mgr || !jet::SpawnReady() || !jet::ModFileThere(kPlayerJetFiles[i].file))continue;
-        __try {
-            reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kPlayerJetFiles[i].sgo,2,-1);
-            playerJetPreloaded[i]=true;
-        } __except(EXCEPTION_EXECUTE_HANDLER){}
+        if((f.player || twins) && mgr && jet::SpawnReady() && jet::ModFileThere(f.file)) {
+            __try {
+                reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,f.sgo,2,-1);
+                playerJetPreloaded[i]=true;
+            } __except(EXCEPTION_EXECUTE_HANDLER){}
+        }
+        const int n=sprintf_s(line+at,sizeof(line)-at,"%s%s=%d",i ? " " : "",f.name,playerJetPreloaded[i]);
+        if(n>0)at+=n;
     }
     chutePreloaded=false;   // the parachute's canopy (ChuteMake), when installed
     if(const auto mgr=At<void*>(image,kPreloadMgrAt);chuteOk && mgr && jet::SpawnReady() && jet::ModFileThere(kChuteFile)) {
@@ -1628,7 +1677,7 @@ void PreloadPlayerJets() noexcept {
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
     bail=Bailout{};catchFlight=CatchFlight{};
-    Log("PJET preload for the catch: fighter=%d strike=%d; the parachute's canopy=%d",playerJetPreloaded[0],playerJetPreloaded[1],
+    Log("PJET preload for the catch: %s (twins %s); the parachute's canopy=%d",line,twins ? "on" : "off: PlayerJetAll / PlayerJetCatch",
         chutePreloaded);
 }
 

@@ -1,6 +1,6 @@
 // Offline check of the boardable aircraft's flight numbers (src/playerjet_kinds.h): prints each row as the player's
 // flight model gets it, next to the NPC row it comes from, and checks what a flyable row needs (exit code 1 when one
-// fails). Built on request only: `cmake --build build --target pjet_kinds`, then `build\pjet_kinds.exe`.
+// fails), and the jet the catch makes for each. Built on request only: `cmake --build build --target pjet_kinds`, then `build\pjet_kinds.exe`.
 #include "playerjet_kinds.h"
 #include <cstdio>
 
@@ -34,6 +34,8 @@ int main() {
                     b.frame==pjet::Airframe::rotor ? "rotor" : "wing",p.mark,p.minAir,p.rotate,p.top,p.thrust,p.brake,p.maxG,p.corner,p.roll,
                     p.landMax,p.ram,bomber ? "stock bomber" : from.name,from.cruise,from.attack,from.minSpeed,from.thrust,from.maxG,from.roll);
         if(const char* why=Problem(b)){std::printf("  FAIL %s: %s\n",p.name,why);++bad;}
+        // The jet the catch makes for a player who ejected from it (playerjet_kinds.h catchWith, checked by CatchConsistent).
+        std::printf("  catch: %ls (%s): %s\n",pjet::kCatchFiles[b.catchWith].file,pjet::kCatchFiles[b.catchWith].name,b.catchWhy);
     }
     std::printf("%d rows, %d failed\n",pjet::kBoardableCount,bad);
     return bad ? 1 : 0;
