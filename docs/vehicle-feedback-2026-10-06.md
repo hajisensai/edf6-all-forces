@@ -14,3 +14,13 @@ This batch follows the user's screenshots and installed c871652 build, rather th
 - Aircraft entrances: publish the real native seat locator, radius and distance to the HUD. A visible marker leads the on-foot player to large aircraft's distant entrance; it becomes a boarding prompt only within the native radius. Rendering never dereferences vehicle objects.
 
 Regression coverage includes production crew/entrance, helicopter input, Proteus update, gunner aim, axis interpolation and sound paths; actual game-data model/CAS replay and compound reconstruction complement portable geometry checks. These checks do not replace live Havok loading, controls, audio listening or multi-machine online acceptance.
+
+## Follow-up feedback and NPC AI integration
+
+- Catch aircraft converge on the actual native boarding point using relative translation and rotation instead of a one-second absolute lead. Landing clears the air-cruise state, uses bottom clearance and transfers throttle control to ground handling.
+- Aircraft controls display the configured keyboard bindings and actual seat gamepad buttons. Unguided plugin rockets now have an impact prediction matching their production motor/guide steps.
+- New map orders discard obsolete attack targets and reach their duty area before combat; pursuit remains bounded by that duty area. Carrier-owned drones retain their launch/return ownership rather than pretending to accept direct independent orders.
+- Sidecar knockdown cancels virtual occupancy before movement; recovery cannot pull the passenger back. Following reads the current native controller position. Projectile and explosion filters only exclude that passenger's currently occupied vehicle and seated driver, preserving other targets and self-damage.
+- NPC AI PRs #53–#59 are integrated with the current localized command panel and snapshot lifetime rules. Core review fixes protect script squads, faction ownership, recruitment cooldowns, both-hand blast safety, native boarding distance and cancelled boarding orders. Tank return-to-post respects native steering and forgets old posts after scripts/player control. Selected units retain control-block identity rather than an address alone.
+
+The user explicitly stopped in-game testing. Subsequent validation is limited to source review, builds, binary/resource inspection and offline production fixtures; no live-game verification is claimed.

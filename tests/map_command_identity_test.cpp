@@ -29,7 +29,7 @@ int main() {
     using namespace crew;
     unsigned char object[0x100]{},control[1]{},replacement[1]{};
     Put<const void*>(object,kSelfCtrl,control);
-    Game g{};g.count=1;g.list[0]=Entry{CommandUnit{object,"NPC",{},false,false,nullptr},Owner::squad};
+    Game g{};g.count=1;g.list[0]=Entry{CommandUnit{object,"NPC",{},false,{},false,nullptr},Owner::squad};
     const void* ids[]={object};g.sel.Add(object);RememberSelection(g);
     KeepSelection(g,ids);Check(g.sel.Has(object),"live selected identity retained");
     Put<const void*>(object,kSelfCtrl,replacement);

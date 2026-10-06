@@ -41,6 +41,9 @@ bool IsJet(const void*) noexcept{return testJet;}
 bool PlayerJetBoardable(const void*) noexcept{return testJet;}
 unsigned char* PlayerHuman() noexcept{return testHuman;}
 bool SeatPoint(const unsigned char*,unsigned,float* point,float* reach) noexcept{std::memcpy(point,testDoor,12);*reach=2.3f;return true;}
+bool InstallNpcAi() noexcept{return false;}
+void NpcPostInput(unsigned char*) noexcept{}
+void NpcGunnersInput(unsigned char*) noexcept{}
 // Unrelated production hooks are linked but must never run in this fixture.
 void (*volatile unexpectedHook)()=&std::abort;
 bool BumpSuppressed(void) noexcept{unexpectedHook();return {};}

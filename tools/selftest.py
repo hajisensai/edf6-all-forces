@@ -3606,7 +3606,7 @@ def npc_ai_wired() -> None:
     scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
     for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
         assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
-    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger]=0;h[kTrigger+1]=0;' in veto, \
         'a scripted unit: the trigger (both hands) only taken off'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
@@ -3632,8 +3632,8 @@ def npc_ai_wired() -> None:
     hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(At<const void*>(v,kRoute))return;' in body and 'if(InSession() && !IsRoomHost())return;' in body
-    assert body.index('Chasing(v)') < body.index('Put<float>(seat,kSeatSteer')
+    assert 'if(At<const void*>(v,kRoute))' in body and 'if(InSession() && !IsRoomHost())return;' in body
+    assert body.index('StockDriving(seat)') < body.index('Put<float>(seat,kSeatSteer')
     assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
     # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
     # SetFollow and its replication slot.

@@ -60,6 +60,8 @@ def main() -> int:
     for name, old, new in MUTANTS:
         assert old in base, name
         rc = build(base.replace(old, new, 1))
+        if rc == -1:
+            raise RuntimeError(f'{name}: mutant did not compile; this is not a rejected behavior')
         print(f'{"killed" if rc != 0 else "SURVIVED"}  {name} (rc={rc})')
         bad += rc == 0
     print(f'{len(MUTANTS) - bad}/{len(MUTANTS)} mutants killed')

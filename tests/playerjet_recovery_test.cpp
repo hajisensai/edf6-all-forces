@@ -4,6 +4,8 @@
 #include <cstdlib>
 
 namespace crew {
+bool ReadRound(const unsigned char*,RoundModel*) noexcept {return false;}
+bool RoundLands(const unsigned char*,const RoundModel&,const float*,const float*,float,float*,float*) noexcept {return false;}
 unsigned char* image=nullptr;
 Config recoveryConfig{};
 PlayerFix player{};
