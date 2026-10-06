@@ -11,6 +11,8 @@ PlayerFix player{};
 namespace {
 Config config{};
 unsigned char human[0x1600]{},bike[0x3000]{},second[0x3000]{},ordinary[0x3000]{},seat[kSeatStride]{};
+unsigned char riderCtrl[0x10]{};
+const void* boardingOnly=nullptr;
 bool doorReadable=true;
 float doorReach=2.3f;
 int warps=0,failures=0;
@@ -32,8 +34,9 @@ void HumanAt(float x,float y,float z) {
     const float p[3]={x,y,z};std::memcpy(human+kPosition,p,12);
 }
 void Reset() {
-    ResetSidecars();warps=0;doorReadable=true;doorReach=2.3f;
+    ResetSidecars();warps=0;doorReadable=true;doorReach=2.3f;boardingOnly=nullptr;
     std::memset(human,0,sizeof(human));std::memset(bike,0,sizeof(bike));std::memset(second,0,sizeof(second));
+    std::memset(seat,0,sizeof(seat));
     Put<void*>(human,kHumanPad,human);Put<unsigned char>(human,kHumanPlayer,1);
     for(auto v:{bike,second}) {
         Put<unsigned char*>(v,kSeats,seat);Put<std::uint64_t>(v,kSeatCount,1);
@@ -44,6 +47,7 @@ void Reset() {
 }
 }  // namespace
 const Config& Cfg() noexcept { return config; }
+const void* BoardingOnly() noexcept { return boardingOnly; }
 void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return 3600000; }
 ULONGLONG GameFrame() noexcept { return 1; }
@@ -74,6 +78,14 @@ int main() {
     Expect(!SidecarBoard(bike,human) && warps==0,"an unreadable door does not permit an unbounded take");
     Reset();HumanAt(1.0f,0.0f,kGunnerZ);
     Expect(!SidecarBoard(bike,human) && warps==0,"the nearer free saddle keeps the original boarding path");
+    Reset();HumanAt(1.0f,0.0f,kGunnerZ);  // boarding gun's temporary position at the native saddle door
+    Put<std::int32_t>(riderCtrl,edf::kCtrlUses,1);
+    Put<unsigned char*>(seat,kSeatRiderCtrl,riderCtrl);Put<unsigned char*>(seat,kSeatRider,ordinary);
+    boardingOnly=bike;
+    Expect(SeatRider(seat)==Rider::other && !SidecarBoard(bike,human) && warps==0 && !sidecars[0].gunner && !boardHeld,
+           "boarding gun with an occupied saddle cannot take the reachable virtual sidecar");
+    boardingOnly=nullptr;
+    Expect(SidecarBoard(bike,human) && warps==1,"ordinary boarding still takes the sidecar beside an occupied saddle");
     Reset();HumanAt(kGunnerX,0.0f,kGunnerZ);
     Expect(SidecarBoard(bike,human) && warps==1,"nearby sidecar takes the player");
     Expect(SidecarBoard(second,human) && warps==1 && sidecars[0].gunner.Is(human) && !sidecars[1].gunner,

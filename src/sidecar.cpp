@@ -334,6 +334,9 @@ void SidecarFrame(unsigned char* v) noexcept {
 
 bool SidecarBoard(unsigned char* v,unsigned char* human) noexcept {
     if(!ok || !Cfg().sidecar || !IsPlayer(human))return false;
+    // The boarding gun temporarily warps to a native door and confirms success through the native seated state.
+    // A virtual sidecar take cannot satisfy that contract: PressOn would restore the human's remote position.
+    if(BoardingOnly())return false;
     // FindSeat's caller walks every friendly vehicle, even after we return nullptr (there is no real seat).
     // Consume the whole press, including the rest of that walk and a step-off's press, before asking any vehicle.
     if(boardHeld.Is(human))return true;
