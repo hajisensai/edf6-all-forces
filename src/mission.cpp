@@ -72,6 +72,7 @@ void MissionStart() noexcept {
     ResetSeatSwitch();
     ResetGear();
     ResetJetSound();
+    ResetVehicleSound();
     ResetMissiles();
     ResetDrills();
     ResetSidecars();
