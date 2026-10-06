@@ -253,6 +253,8 @@ struct Config {
     int npcSquadMax=8;              // ...a squad takes in others up to this many
     float npcSquadJoinRange=150.0f; // ...within this many m
     bool npcBoarding=true;          // ...squads board and leave friendly vehicles on a map order; soldiers in gunner seats shoot
+    bool npcGunners=true;           // AI riders in gunner seats (soldiers, and RideAi's riders a bump or a seat swap moved
+                                    // there) work their guns: ground vehicles (npcai.cpp), the 410's doors under a player pilot
     int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
     float npcMarkCone=8.0f;         // ...within this many degrees of the centre
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay

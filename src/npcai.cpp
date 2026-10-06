@@ -1159,8 +1159,10 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
 
 namespace {
 // --- NPC gunners (§7) ---
-// A soldier in a gunner seat (1..) of a CarBase vehicle (slot 70 the stock 0x65F6F0): the stock aims and fires only
-// seat 0 for its AI (0x661440 calls 0x65F6F0 with 0), so the plugin calls it for the soldiers' seats, before the stock
+// An AI rider (AiGunner: a soldier, or the stock RideAi's DummyVehicleRider a bump or a seat swap moved there; the
+// user 2026-10-07: "上车的npc应该可以用对应的炮塔武器") in a gunner seat (1..) of a CarBase vehicle (slot 70 the stock
+// 0x65F6F0): the stock aims and fires only seat 0 for its AI (0x661440 calls 0x65F6F0 with 0), and a DummyVehicleRider
+// never writes its seat's stick (docs/ground-ai-re.md), so the plugin calls it for those seats, before the stock
 // input reads the seats (crew.cpp InputHook): it aims by the seat's right stick and pulls its trigger (+0x2E4) only in
 // reach, the limits and the map ray, as for the driver. The target: the mark in reach, else the nearest enemy in reach.
 constexpr std::size_t kSlotSeatFire=70;
@@ -1175,8 +1177,17 @@ void GunnerVisit(void* ctx,const void* object,const float* aim) {
 }
 }  // namespace
 
+bool AiGunner(const unsigned char* seat) noexcept {
+    if(!Cfg().enabled || !Cfg().npcGunners || InSession())return false;
+    const Rider who=SeatRider(seat);
+    if(who==Rider::dummy)return true;   // RideAi's rider, moved here by a bump or a seat swap: it never writes the seat
+    if(who!=Rider::other || !Cfg().customNpcAi || !Cfg().npcBoarding)return false;
+    const auto rider=At<const unsigned char*>(seat,kSeatRider);
+    return IsSoldierClass(rider) && !IsPlayer(rider) && !(At<std::uint8_t>(rider,kNet)&1);
+}
+
 void NpcGunnersInput(unsigned char* v) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || InSession() || v[kDead])return;
+    if(!ok || !Cfg().enabled || !Cfg().npcGunners || InSession() || v[kDead])return;
     static int sig=0;
     if(!sig)sig=Matches(kSeatFire,kSeatFireSig,sizeof(kSeatFireSig)) ? 1 : -1;
     if(sig<0)return;
@@ -1184,9 +1195,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     if(!Readable(vt,(kSlotSeatFire+1)*8) || vt[kSlotSeatFire]!=image+kSeatFire)return;
     for(unsigned i=1;i<SeatCount(v);++i) {
         unsigned char* const seat=SeatAt(v,i);
-        if(SeatRider(seat)!=Rider::other)continue;
-        const auto rider=At<const unsigned char*>(seat,kSeatRider);
-        if(!IsSoldierClass(rider) || IsPlayer(rider) || (At<std::uint8_t>(rider,kNet)&1))continue;
+        if(!AiGunner(seat))continue;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(!n || n>8 || !Readable(holders,n*8))continue;

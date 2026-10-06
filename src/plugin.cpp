@@ -516,6 +516,7 @@ void LoadConfig() noexcept {
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
     n.npcSquadJoinRange=ReadFloat(L"NpcSquadJoinRange",n.npcSquadJoinRange);
     n.npcBoarding=ReadBool(L"NpcBoarding",n.npcBoarding);
+    n.npcGunners=ReadBool(L"NpcGunners",n.npcGunners);
     n.npcMarkKey=ReadInt(L"NpcMarkKey",static_cast<DWORD>(n.npcMarkKey));
     n.npcMarkCone=ReadFloat(L"NpcMarkCone",n.npcMarkCone);
     n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
@@ -560,7 +561,7 @@ void LoadConfig() noexcept {
         n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
-    Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding);
+    Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
     Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
