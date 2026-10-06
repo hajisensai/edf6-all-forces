@@ -20,7 +20,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
 # The friendly NPC soldiers' own AI (src/npcai.cpp, decisions in src/npc_logic.h; docs/npc-ai-design.md).
-target_sources(EDF6VehicleCrew PRIVATE src/npcai.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/npcai.cpp src/npcpost.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)

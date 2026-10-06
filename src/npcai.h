@@ -10,4 +10,11 @@ bool InstallNpcAi() noexcept;
 void ResetNpcAi() noexcept;
 // Whether `human` is one of the four soldier classes (AssultSoldier, PaleWing, HeavyArmor, Engineer).
 bool IsSoldierClass(const void* human) noexcept;
+
+// npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
+// reads seat 0's stick (crew.cpp InputHook).
+void NpcPostInput(unsigned char* vehicle) noexcept;
+// A tank's post moved to `at` (a map command); false when the vehicle keeps no post now.
+bool NpcPostCommand(const void* vehicle,const float* at) noexcept;
+void ResetNpcPosts() noexcept;   // a new mission
 }  // namespace crew

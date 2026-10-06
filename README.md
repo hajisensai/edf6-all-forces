@@ -672,6 +672,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - **机动**：敌人逼近时后撤、单只冲来时侧移、贴身时翻滚（游骑兵、空降兵；翼骑兵是起跳，重装兵只后撤）（`NpcEvade` / `NpcDangerRange` / `NpcGrabRange` / `NpcCrowd` / `NpcRollSec`）；血量低于 `NpcRetreatHp` 退到玩家身后，优先选被地形挡住的位置；交战时离锚点（跟随的玩家、队长、驻守点）不超过 `NpcLeash` 米。
 - **脚本 NPC**：任务脚本正在控制的 NPC（走路线、护送、原地待命、朝向指令）移动和目标照旧由原版决定（插件带离路线会让任务的「等待到达」永远等不到，原版 60 秒看门狗还会把士兵瞬移、把坦克打爆，见设计文档 §4.3）；插件只拦下会打到友军的射击，并按原版目标换枪。
 - **联机**：只改本机运行的士兵（与原版 AI 写的是同一块输入，由原版同步到其他机器）。
+- **NPC 坦克回位**（`src/npcpost.cpp`，`TankReturnToPost` / `TankPostHold` / `TankReverseMax`）：NPC 驾驶的坦克、泰坦、格雷普斯原版只会走任务路线或追射程外的敌人，被主炮后坐力或撞击推开后就停在原地。插件在它偏离驻守点 `TankPostHold` 米后按原版驾驶输出的写法开回去：驻守点在车后且不超过 `TankReverseMax` 米时倒车，否则掉头开回（驻守点 = 地图指挥给的点，否则出生点）。走路线和正在追敌人的车不碰；联机只在房主上算。
 
 日志（`Debug=1`）：每名士兵每 2 秒一行 `NPCAI <兵种> <地址> <状态> pos=... arms=... held=... arm=... reach=... target=... move=... fire=...`；状态变化（`free -> recruited`、`script -> free` 等）各一行。
 
@@ -684,3 +685,5 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 5. 带多把武器的 NPC（任务里的火箭兵等）：近、远、对空时 `held=` 会变化；若日志出现 `weapon picking off for it`，说明直接选枪的输入与逆向不符，请回传日志。
 6. 护送 / 路线任务：脚本 NPC 照常走完路线、任务正常推进（日志里它们的状态是 `script` / `escort`，`move=stock`）。
 7. 日志出现 `not in the AI list` 时请回传：表示这名士兵的输入块会被原版清掉，插件没接管它。
+8. 让 NPC 泰坦 / 坦克连续开炮（后坐力分支 fix/npc-tank-recoil 装上后），或开车把它撞开：日志 `NPCPOST v=... driving back`，车自己开回原位后 `back at its post`；离原位较近且在车尾方向时是倒车（`reverse=1`）。若方向反了（越开越远），回传 `NPCPOST ... bearing=... steer=...` 几行。
+9. 任务里沿路线开进的 NPC 坦克（有路线）不出现 `NPCPOST` 行，照常走路线。

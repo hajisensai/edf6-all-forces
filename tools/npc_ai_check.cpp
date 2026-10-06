@@ -220,33 +220,43 @@ void Marks() {
 
 void Posts() {
     using namespace npc;
-    const float post[3]={0.0f,0.0f,0.0f},north[3]={0.0f,0.0f,1.0f};
+    // A level tank: forward f = (sin h, 0, cos h), right r = (cos h, 0, -sin h) (row 0 to the right of row 2 seen from
+    // above with y up, as the stock rows make the bearing atan2(d.r, d.f) positive for a post to the right).
+    const float post[3]={0.0f,0.0f,0.0f};
+    const float north[3]={0.0f,0.0f,1.0f},east[3]={1.0f,0.0f,0.0f};
     const float inside[3]={0.0f,0.0f,-1.0f};
-    Check(!ReturnToPost(inside,north,post,3.0f,25.0f,2.0f,0.31f).active,"within the hold: nothing");
-    // Pushed back 10 m by the recoil, still facing the post's way... the post is ahead: drive forward.
+    Check(!ReturnToPost(inside,east,north,post,3.0f,25.0f,2.0f,0.31f).active,"within the hold: nothing");
     const float back10[3]={0.0f,0.0f,-10.0f};
-    Steer s=ReturnToPost(back10,north,post,3.0f,25.0f,2.0f,0.31f);
-    Check(s.active && !s.reverse && s.throttle>0.0f && Near(s.steer,0.0f,1e-3f),"post ahead: forward",s.throttle,s.steer);
-    // Pushed forward past the post (the post 10 m behind): reverse, no turning.
+    Steer s=ReturnToPost(back10,east,north,post,3.0f,25.0f,2.0f,0.31f);
+    Check(s.active && !s.reverse && s.throttle>0.0f && Near(s.bearing,0.0f,1e-4f) && ThrottleStick(s)<0.0f,
+          "post ahead: forward (the stick negative, as a pad's forward)",s.throttle,s.bearing);
     const float fwd10[3]={0.0f,0.0f,10.0f};
-    s=ReturnToPost(fwd10,north,post,3.0f,25.0f,2.0f,0.31f);
-    Check(s.active && s.reverse && s.throttle<0.0f && Near(s.steer,0.0f,1e-3f),"post close behind: reverse",s.throttle,s.steer);
-    // Far behind: turn round on the spot first, then drive.
+    s=ReturnToPost(fwd10,east,north,post,3.0f,25.0f,2.0f,0.31f);
+    Check(s.active && s.reverse && s.throttle<0.0f && Near(s.bearing,0.0f,1e-4f) && ThrottleStick(s)>0.0f,"post close behind: reverse",
+          s.throttle,s.bearing);
     const float fwd80[3]={0.0f,0.0f,80.0f};
-    s=ReturnToPost(fwd80,north,post,3.0f,25.0f,2.0f,0.31f);
-    Check(s.active && !s.reverse && s.throttle==0.0f && std::fabs(s.steer)>0.99f,"far behind: turn on the spot",s.throttle,s.steer);
-    // Steering converges: a simple tank model driven by it ends at the post from every start.
+    s=ReturnToPost(fwd80,east,north,post,3.0f,25.0f,2.0f,0.31f);
+    Check(s.active && !s.reverse && s.throttle==0.0f && std::fabs(SteerStick(s))>0.99f,"far behind: turn on the spot",s.throttle,s.bearing);
+    const float leftOf[3]={10.0f,0.0f,0.0f};   // the post 10 m to its left (-x of the east row)
+    s=ReturnToPost(leftOf,east,north,post,3.0f,25.0f,2.0f,0.31f);
+    Check(s.bearing<0.0f && SteerStick(s)>0.0f,"post on the left: negative bearing, positive stick (the stock sign)",s.bearing);
+    // Steering converges: a tank model turned by the stock's own sign (a negative stick turns it towards a positive
+    // bearing, i.e. right) ends at the post from every start.
     for(float a=0.0f;a<6.28f;a+=0.5f)
         for(float d=6.0f;d<=60.0f;d+=18.0f)
             for(float h=0.0f;h<6.28f;h+=1.1f) {
                 float p[3]={std::sin(a)*d,0.0f,std::cos(a)*d},heading=h;
                 bool done=false;
                 for(int f=0;f<60*60 && !done;++f) {
-                    const float fw[3]={std::sin(heading),0.0f,std::cos(heading)};
-                    const Steer t=ReturnToPost(p,fw,post,3.0f,25.0f,2.0f,0.31f);
+                    const float fw[3]={std::sin(heading),0.0f,std::cos(heading)},rt[3]={std::cos(heading),0.0f,-std::sin(heading)};
+                    const Steer t=ReturnToPost(p,rt,fw,post,3.0f,25.0f,2.0f,0.31f);
                     if(!t.active){done=true;break;}
-                    heading+=t.steer*1.2f/60.0f;   // 1.2 rad/s at a full stick
-                    for(int k=0;k<3;k+=2)p[k]+=fw[k]*t.throttle*8.0f/60.0f;   // 8 m/s
+                    // A positive bearing is to the right; turning right grows the heading atan2(f.x, f.z). Tracks turn
+                    // the hull the same way whichever way it drives, and the stock steers its reverse by the same formula
+                    // (the bearing + pi: the tail's), so the stick's sign holds in reverse too.
+                    heading+=-SteerStick(t)*1.2f/60.0f;
+                    const float speed=-ThrottleStick(t)*8.0f/60.0f;
+                    for(int k=0;k<3;k+=2)p[k]+=fw[k]*speed;
                 }
                 Check(done,"back at the post within a minute",a,d);
             }

@@ -229,6 +229,9 @@ struct Config {
     float npcRollSec=2.5f;          // ...s between two rolls
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
+    bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
+    float tankPostHold=6.0f;        // ...m off its post before it does
+    float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -794,6 +797,8 @@ void NetProbe(unsigned char* vehicle) noexcept;
 // This is a session query, not proof that an object participates in replication: plugin call aircraft do not
 // register a network identity; delivered vehicles do (docs/online-re.md sections 1 and 2).
 bool InSession() noexcept;
+// Whether this machine is the room's host (offline: true; netprobe.cpp). False when its code is not the one read.
+bool IsRoomHost() noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
 // `most`; how many.
