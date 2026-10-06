@@ -95,6 +95,10 @@ using SeatFn=void(__fastcall*)(void*,void*);
 // VehicleBigBegaruta (Proteus): slot 55 is its AI task, not the player's update. Chain slot 4 (0x644350), as for
 // the crawler, so a player-driven Proteus runs the rework, publishes HUD and advances the clock even with no AI task.
 // That function takes (vehicle, step); the shared four-register forwarding preserves both and it ignores r8/r9.
+// The rest of the family (504, Begaruta, the 612 Nix) the same (2026-10-07): their slot 55 0x63C1C0 is the family's
+// AI think, run only from the AI pass (slot 7 0x643530, edx 1; slot 6 0x642970 registers it), so a mech nobody or a
+// player drove never ran the plugin's steps (no crew, no seat switch, no map post). The Barga (501, 54 slots, no slot
+// 55) chains its slot 4 0x60AEC0 (its input copy) for the same reason. docs/ground-ai-re.md.
 // Vehicle_Car (the Grape, also the unarmed 512 Kei truck and 513 trailer cab) has its own slot 49
 // (0x65B910, a preferred-seat wrapper round the stock one) and its CarBase input in slot 55 (0x65A390).
 // The 607 RoboTruck and the 60X truck share both (their slot 6 calls CarBase's 0x6731C0 first: the stock AI
@@ -106,11 +110,11 @@ struct VehicleClass {
 };
 const VehicleClass kClasses[]={
     {0x17D8B50,0x5FD8E0,"402_Rocket"},{0x17D8FA0,0x5FEBE0,"403_Tank"},{0x17D9458,0x5FFC50,"404_Tank"},
-    {0x17D98C8,0,"501_FortressRobo"},{kVt502,0x612D20,"502_GroundRobo",kFindSeat,4},{0x17DA508,0x6178B0,"503_Bike"},
-    {0x17DA960,0x63C1C0,"504_begaruta"},{0x17DADB0,0x61ACD0,"505_Tank"},{kVt506,0x61B8F0,"506_Helicopter"},
+    {0x17D98C8,0x60AEC0,"501_FortressRobo",kFindSeat,4},{kVt502,0x612D20,"502_GroundRobo",kFindSeat,4},{0x17DA508,0x6178B0,"503_Bike"},
+    {0x17DA960,0x644350,"504_begaruta",kFindSeat,4},{0x17DADB0,0x61ACD0,"505_Tank"},{kVt506,0x61B8F0,"506_Helicopter"},
     {0x17DB9D8,0x61DDF0,"510_Maser"},{0x17DBDF8,0x61F080,"511_Bike"},{0x17DC250,0x620790,"601_Tank"},
-    {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x63C1C0,"612_nix"},{0x17DD720,0,"VehicleBase"},
-    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0x644350,"BigBegaruta",kFindSeat,4},{kVt409,0x64C020,"Helicopter409"},
+    {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x644350,"612_nix",kFindSeat,4},{0x17DD720,0,"VehicleBase"},
+    {0x17DE0A8,0x644350,"Begaruta",kFindSeat,4},{0x17DEC40,0x644350,"BigBegaruta",kFindSeat,4},{kVt409,0x64C020,"Helicopter409"},
     {kVt410,0x64E080,"Helicopter410"},{kVtHeliBase,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
     {0x17E0A80,0,"CarBase"},{0x17E1828,0,"TankBase"},
     {0x17E01B0,0x65A390,"Car",0x65B910},{0x17DCAB0,0x65A390,"607_RoboTruck",0x65B910},{0x17DCFB8,0x65A390,"60X_Truck",0x65B910},

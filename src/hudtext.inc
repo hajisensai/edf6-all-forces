@@ -298,6 +298,7 @@ HUDTEXT(kindHeliBase,L"base",L"通用型",L"通用型",L"汎用型")
 HUDTEXT(kindCrawler,L"crawler",L"深渊爬行者",L"深淵爬行者",L"デプス・クロウラー")
 HUDTEXT(kindDrill,L"drill",L"钻头战车",L"鑽頭戰車",L"ドリル戦車")
 HUDTEXT(unitCrawler,L"CRAWLER",L"深渊爬行者",L"深淵爬行者",L"デプス・クロウラー")
+HUDTEXT(unitMech,L"MECH",L"机甲",L"機甲",L"メカ")
 HUDTEXT(kindNpc,L"npc",L"NPC",L"NPC",L"NPC")
 
 HUDTEXT(areaTurning,L"AREA EDGE: TURNING BACK",L"接近边界：正在返航",L"接近邊界：正在返航",L"エリア境界：旋回中")

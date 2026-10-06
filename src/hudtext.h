@@ -60,7 +60,7 @@ inline constexpr WordEntry kWords[]={
     {"strike",Tx::kindStrike},{"fighter",Tx::kindFighter},{"interceptor",Tx::kindInterceptor},{"multirole",Tx::kindMultirole},
     {"carrier",Tx::kindCarrier},{"drone",Tx::kindDrone},{"blast",Tx::kindBlast},{"doll",Tx::kindDoll},{"gunship",Tx::kindGunship},
     {"primer",Tx::kindPrimer},{"centipede",Tx::kindCentipede},{"dragonfly",Tx::kindDragonfly},{"jet",Tx::kindJet},
-    {"heli",Tx::kindHeli},{"base",Tx::kindHeliBase},{"crawler",Tx::kindCrawler},{"CRAWLER",Tx::unitCrawler},
+    {"heli",Tx::kindHeli},{"base",Tx::kindHeliBase},{"crawler",Tx::kindCrawler},{"CRAWLER",Tx::unitCrawler},{"MECH",Tx::unitMech},
     {"drill",Tx::kindDrill},{"npc",Tx::kindNpc},
     // NPC class and control-state identifiers (npcai.cpp).
     {"RANGER",Tx::npcRanger},{"WING DIVER",Tx::npcWingDiver},{"FENCER",Tx::npcFencer},{"AIR RAIDER",Tx::npcAirRaider},

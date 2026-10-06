@@ -1575,7 +1575,7 @@ def nix_torso_wired() -> None:
     code, twist, crew, cmake = src('src/nix.cpp'), src('src/nix_twist.h'), src('src/crew.cpp'), src('CMakeLists.txt')
     assert 'L"NixTorsoTwist"' in plugin and re.search(r'^NixTorsoTwist=1', ini, re.M) and 'NixTorsoTwist' in readme
     vt = re.search(r'kVtNix=(0x[0-9A-F]+)', code).group(1)
-    assert re.search(rf'\{{{vt},0x[0-9A-F]+,"612_nix"\}}', crew), vt
+    assert re.search(rf'\{{{vt},0x[0-9A-F]+,"612_nix"(,kFindSeat,4)?\}}', crew), vt
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)' in cmake
     assert 'add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)' in cmake
     sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
@@ -3214,7 +3214,7 @@ def stock_payload_and_seats_wired() -> None:
     # sends it off with the player aboard); Crew() never does while a player rides, so Pilot must.
     pilot = seat.split('void Pilot(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(!heli && !NpcDrivable(v))return;' in pilot and 'kSlotRideAi' in pilot
-    assert 'bool NpcDrivable(const unsigned char* v) noexcept { return TankAi(v); }' in src('src/npcpost.cpp')
+    assert 'bool NpcDrivable(const unsigned char* v) noexcept { return FamilyOf(v)!=Family::none; }' in src('src/npcpost.cpp')
     # Every vehicle an NPC can drive (the user 2026-10-07: "所有载具都要支持ai"): the unarmed trucks of the Grape's class
     # too, and the CarBase classes whose slot 49 is a preferred-seat wrapper (the trucks 607 / 60X, the rescue 507).
     crew_src = src('src/crew.cpp')
@@ -3294,11 +3294,9 @@ def vehicle_ram_wired() -> None:
     assert len(profiles) >= 16, profiles
     for vt, name in profiles:
         assert known.get(name) == int(vt, 16), f'src/vehicleram.h {name} {vt}: not as crew.cpp kClasses has it'
-    unhooked = dict(re.findall(r'\{(0x[0-9A-Fa-f]+),0,"(\w+)"\}', crew))
-    extras = re.findall(r'\{(0x[0-9A-Fa-f]+),4,0x[0-9A-Fa-f]+,\{[^}]*\},"(\w+)"\}', c)
-    assert sorted(n for _, n in extras) == ['501_FortressRobo'], extras
-    for vt, name in extras:
-        assert unhooked.get(vt) == name, f'{name}: crew.cpp hooks it (no own hook needed) or names it otherwise'
+    # The Barga is crew.cpp's now (its slot 4): no own update hook here, or the ram step would run twice a frame.
+    assert '{0x17D98C8,0x60AEC0,"501_FortressRobo",kFindSeat,4}' in crew
+    assert 'kExtras' not in c and 'ChainVtableSlot' not in c, 'src/vehicleram.cpp: an own update hook besides crew.cpp'
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     assert '&VehicleRamFrame,' in hook, 'src/crew.cpp InputHook: the ram step'
     assert 'ResetVehicleRams();' in src('src/mission.cpp') and 'InstallVehicleRam();' in src('src/plugin.cpp')
@@ -3661,7 +3659,14 @@ def npc_ai_wired() -> None:
     assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(At<const void*>(v,kRoute))' in body and 'if(InSession() && !IsRoomHost())return;' in body
-    assert body.index('StockDriving(seat)') < body.index('Put<float>(seat,kSeatSteer')
+    assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
+    # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
+    # last write never read as the stock AI driving, taken back when the drive ends.
+    assert 'f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot' in body and '(image+kBargaWalk)(v,block,point,1.0f,' in body
+    assert 'if(!s.active){TakeBack(v,f,*p);return;}' in body
+    stock = post.split('bool StockDriving(unsigned char* v,Family f,const Post& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'p.wrote && c0==p.last[0] && c1==p.last[1]' in stock
+    assert 'kBargaWalkSig[]={0x40,0x53,' in post, 'the Barga walk prologue (push rbx with REX)'
     assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
     # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
     # SetFollow and its replication slot.
