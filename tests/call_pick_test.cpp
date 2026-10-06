@@ -55,6 +55,20 @@ int main() {
     alignas(16) unsigned char remoteNoPad[0x400]{};
     Put<unsigned char>(remoteNoPad,kHumanPlayer,1);Put<unsigned char>(remoteNoPad,edf::kRiderNet+edf::kNetFlags,1);
     Check(edf::IsAnyPlayer(remoteNoPad) && !IsPlayer(remoteNoPad),"another machine's player without a pad object here is still a player");
+    // A seat: rider +0x260, its control block +0x268 with a live use count. Another machine's player there: no Rider::player
+    // (not this machine's keys) but AnyPlayerIn (a player aboard).
+    alignas(16) unsigned char seat[0x340]{},ctrlBlock[0x20]{};
+    Put<std::int32_t>(ctrlBlock,edf::kCtrlUses,1);
+    Put<const void*>(seat,edf::kSeatRiderCtrl,ctrlBlock);
+    const unsigned char* const riders[]={local,remote,remoteNoPad,npc};
+    const bool anyPlayer[]={true,true,true,false},thisMachine[]={true,false,false,false};
+    for(int i=0;i<4;++i) {
+        Put<const void*>(seat,edf::kSeatRider,riders[i]);
+        Check(edf::AnyPlayerIn(nullptr,seat)==anyPlayer[i],"AnyPlayerIn: a player of any machine in the seat");
+        Check((edf::SeatRider(nullptr,seat)==edf::Rider::player)==thisMachine[i],"Rider::player: this machine's player only");
+    }
+    Put<const void*>(seat,edf::kSeatRiderCtrl,nullptr);
+    Check(!edf::AnyPlayerIn(nullptr,seat),"an empty seat holds no player");
 
     picked.store(-1);
     CallPick(1,banner,_countof(banner));

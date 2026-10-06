@@ -26,6 +26,11 @@ Rider SeatRider(const unsigned char* image,const unsigned char* seat) noexcept {
     return IsPlayer(rider) ? Rider::player : Rider::other;
 }
 
+bool AnyPlayerIn(const unsigned char* image,const unsigned char* seat) noexcept {
+    const Rider r=SeatRider(image,seat);
+    return r==Rider::player || (r==Rider::other && IsAnyPlayer(At<const unsigned char*>(seat,kSeatRider)));
+}
+
 unsigned SeatCount(const unsigned char* vehicle) noexcept {
     const auto n=At<std::uint64_t>(vehicle,kSeatCount);
     const auto seats=At<const unsigned char*>(vehicle,kSeats);

@@ -527,16 +527,18 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(!Readable(vehicle,kSeatCount+8,true) || vehicle[kDead])return;
     const auto now=GameMs();
     const unsigned count=SeatCount(vehicle);
-    bool anyPlayer=false,driver=false;
+    // anyPlayer: a player of any machine aboard (no NPC driver for it); localPlayer: this machine's (its fix).
+    bool anyPlayer=false,localPlayer=false,driver=false;
     int dummies=0;
     for(unsigned i=0;i<count;++i) {
         const Rider r=SeatRider(SeatAt(vehicle,i));
-        anyPlayer=anyPlayer || r==Rider::player;
+        localPlayer=localPlayer || r==Rider::player;
+        anyPlayer=anyPlayer || AnyPlayerIn(SeatAt(vehicle,i));
         driver=driver || (i==0 && r!=Rider::none);
         dummies+=r==Rider::dummy;
     }
     // The player riding: their fix, whether or not this vehicle has a state.
-    if(anyPlayer)SeePlayer(reinterpret_cast<const float*>(vehicle+kPosition),At<std::int32_t>(vehicle,kTeam));
+    if(localPlayer)SeePlayer(reinterpret_cast<const float*>(vehicle+kPosition),At<std::int32_t>(vehicle,kTeam));
     State* const sp=StateFor(vehicle,now);
     if(!sp)return;
     State& st=*sp;st.seen=now;

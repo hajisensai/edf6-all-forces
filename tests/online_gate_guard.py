@@ -16,7 +16,7 @@ a failure. What it holds in place:
     ship's portal laser starts only where the ship is run;
   - the Air Raider's calls: online along the call's own heading (offline as before), the pick sent in the seed and
     decoded only from a call another machine sent;
-  - IsPlayer (common/seat.cpp) leaves out another machine's player.
+  - IsPlayer (common/seat.cpp) leaves out another machine's player; the tests of "a player aboard" ask AnyPlayerIn.
 """
 from __future__ import annotations
 
@@ -173,6 +173,23 @@ def check_session(root: str) -> None:
         fail('src/netprobe.cpp InSession: unknown session code counts as online (offline play would lose the gated features)')
 
 
+# "A player is aboard, leave it to them" asks for a player of any machine (AnyPlayerIn); "this machine's player" (its
+# fix, its keys) for Rider::player. Each: (file, function, what must be in it).
+ANY_PLAYER_SITES = (
+    ('src/crew.cpp', 'void Crew(unsigned char* vehicle,int cls)', 'anyPlayer=anyPlayer || AnyPlayerIn('),
+    ('src/crew.cpp', 'void Crew(unsigned char* vehicle,int cls)', 'if(localPlayer)SeePlayer('),
+    ('src/heli.cpp', 'void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms)', 'if(AnyPlayerIn(seat))'),
+    ('src/heli.cpp', 'void HeliFrame(unsigned char* vehicle)', 'playerAboard=playerAboard || AnyPlayerIn('),
+    ('src/jet.cpp', 'Rider Aboard(unsigned char* v)', 'if(AnyPlayerIn('),
+)
+
+
+def check_any_player(root: str) -> None:
+    for rel, signature, need in ANY_PLAYER_SITES:
+        if need not in body(code_only(read(root, rel)), signature):
+            fail(f'{rel} {signature.split("(")[0]}: lost "{need}" (another machine\'s player aboard is a player too)')
+
+
 def check_player(root: str) -> None:
     if 'RemoteRider(human)' not in body(code_only(read(root, 'common/seat.cpp')), 'bool IsAnyPlayer('):
         fail("common/seat.cpp IsAnyPlayer: another machine's player copied here is no longer a player")
@@ -189,7 +206,7 @@ def main() -> int:
     files = sources(root)
     checks = (lambda: check_rvas(root, files), lambda: check_ride_ai(root, files), lambda: check_damage(root),
               lambda: check_heli(root), lambda: check_frames(root), lambda: check_calls(root), lambda: check_session(root),
-              lambda: check_player(root))
+              lambda: check_any_player(root), lambda: check_player(root))
     for c in checks:
         c()
     for f in failures:

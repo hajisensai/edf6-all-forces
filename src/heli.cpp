@@ -1173,7 +1173,7 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     Door& g=h.doors[i];
     unsigned char* blk=v+kDoorBlock+i*kDoorStride;
     unsigned char* seat=SeatAt(v,static_cast<unsigned>(i+1));
-    if(SeatRider(seat)==Rider::player){g.prevValid=false;return;}   // theirs: their stick, their trigger
+    if(AnyPlayerIn(seat)){g.prevValid=false;return;}   // a player's, of any machine: their stick, their trigger
     const auto triggers=At<unsigned char*>(v,kHolders);
     if(At<std::uint64_t>(v,kHolderCount)<=static_cast<std::uint64_t>(i) || !Readable(triggers+i*kHolderStride,kHolderStride))return;
     const auto trigger=triggers+i*kHolderStride;
@@ -2449,7 +2449,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(!h)return;
     h->seen=GameMs();h->seenFrame=GameFrame();
     bool playerAboard=false;
-    for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || SeatRider(SeatAt(vehicle,i))==Rider::player;
+    for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || AnyPlayerIn(SeatAt(vehicle,i));   // of any machine
     Fly(*h,vehicle,playerAboard);
 }
 
