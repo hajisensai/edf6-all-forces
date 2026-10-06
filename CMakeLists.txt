@@ -21,6 +21,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/sazabi.cpp)
 # What a blocked jet ran into, logged (src/impact.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 # The map's real play area: the walls where its ground ends (src/playarea.cpp, src/playarea.h).

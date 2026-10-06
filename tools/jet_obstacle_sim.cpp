@@ -117,8 +117,10 @@ void JetSmoke(const unsigned char*,bool,ULONGLONG) noexcept {}
 bool JetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SubBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool PlayerJetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
+bool SazabiBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SubMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 bool PlayerJetMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
+bool SazabiMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 // No enemy creatures participate in the building-avoidance scenario.
 bool PrimerMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 namespace jet {

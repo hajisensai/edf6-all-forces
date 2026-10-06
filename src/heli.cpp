@@ -2063,7 +2063,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
 }  // namespace
 
 bool HeliCrewed(const void* vehicle) noexcept {
-    if(IsJet(vehicle) || IsSub(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp
+    if(IsJet(vehicle) || IsSub(vehicle) || IsSazabi(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp / sazabi.cpp
     const HeliType* const type=TypeOf(vehicle);
     if(!type)return false;
     const ULONGLONG ms=GameMs();
@@ -2352,7 +2352,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(!profileOk || vehicle[kDead])return;
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
-        const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
+        const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
         if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerHeli(vehicle);}
         else AssistOff(vehicle);
         return;
@@ -2361,6 +2361,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(IsJet(vehicle)){if(Cfg().jetPilot)JetFrame(vehicle);return;}
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
+    if(IsSazabi(vehicle))return;      // the Sazabi (sazabi.cpp): never flown as a heli
     if(!Cfg().heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){if(!HeliCrewed(vehicle))return;h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too

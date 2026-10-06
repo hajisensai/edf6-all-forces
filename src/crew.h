@@ -97,6 +97,21 @@ struct Config {
     float playerJetAimGain=1.0f;    // ...how hard the mouse's aim turns the plane toward it (times kSteer)
     float playerRotorLift=1.0f;     // a rotor craft the player flies: its vertical acceleration apart from its thrust, times the derived one (hover_lift.h; 0: one budget, the NPCs')
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
+    // The Sazabi (sazabi.cpp, docs/gundam-plan.md): walked and flown by the plugin with the player in it.
+    bool sazabi=true;
+    float sazabiWalk=12.0f;         // m/s ...the stick half forward (a walk)
+    float sazabiRun=26.0f;          // m/s ...full forward (a run)
+    float sazabiFly=48.0f;          // m/s ...in the air
+    float sazabiDash=75.0f;         // m/s ...a dash
+    float sazabiClimb=24.0f;        // m/s up at the full ascend trigger
+    float sazabiGravity=20.0f;      // m/s^2 falling with the thrusters off
+    float sazabiTurn=110.0f;        // deg/s at the full right stick
+    float sazabiMouseTurn=0.6f;     // deg of turn / aim per unit of the mouse's frame movement
+    float sazabiThrusterSec=8.0f;   // s of full thrust a full charge holds
+    float sazabiThrusterRegen=0.25f;   // of a full charge a second, on its feet
+    bool sazabiInvertAim=false;     // the aim's up and down the other way
+    int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
+    int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
@@ -480,7 +495,7 @@ JetBody BomberBody(const unsigned char* inst) noexcept;
 // from its SGO's mark (veh+0x162C, kMark* in body506.cpp, the one table of them); the 506's physics step
 // (slot 57) is hooked once, there, and hands each body to its owner's step, which returns the velocity and
 // spin to set (false: leave the stock step's).
-enum class PluginBody { none, jet, sub, playerJet };
+enum class PluginBody { none, jet, sub, playerJet, sazabi };
 PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
@@ -488,6 +503,13 @@ bool Body506Ok() noexcept;                         // the physics hook is in
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
+bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept;     // sazabi.cpp
+// sazabi.cpp: the Sazabi (docs/gundam-plan.md), a 506 body with the Sazabi mark (7401-7499): never crewed, never flown
+// as a heli; with the player in seat 0 it walks and flies; its bones are posed every frame.
+bool IsSazabi(const void* vehicle) noexcept;
+void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+bool InstallSazabi() noexcept;                        // after InstallBody506
+void ResetSazabi() noexcept;                          // a new mission
 // An impact `by` a vehicle (a crash, jet.cpp / playerjet.cpp; a ground vehicle's ram, vehicleram.cpp) at `at`: `damage`
 // to the enemies of its side within about `radius` metres (the charge nearest that size: vehicleram.h NearestCharge; a
 // charge of the vehicle's own, as the blast drones' is: its team, its kills, friends untouched). False when it could not

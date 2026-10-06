@@ -31,12 +31,13 @@ constexpr float kUnderProbe=600.0f,kGroundProbe=3000.0f;
 
 // The marks (testrange/gen.py JETS, tools/make_jets.py, tools/make_sub.py write them into the SGOs):
 // jets 7001-7099 (jet.cpp kKinds and kCarrierMarks name each), the submarine carrier 7101, the player
-// jets 7201-7299 (playerjet.cpp kKinds). No stock 506 has a speed gain this large.
+// jets 7201-7299 (playerjet.cpp kKinds), the Sazabi 7401-7499 (sazabi.cpp). No stock 506 has a speed gain this large.
 struct MarkRange { float first,last; PluginBody body; };
 constexpr MarkRange kMarks[]={
     {7001.0f,7099.0f,PluginBody::jet},
     {7101.0f,7101.0f,PluginBody::sub},
     {7201.0f,7299.0f,PluginBody::playerJet},
+    {7401.0f,7499.0f,PluginBody::sazabi},
 };
 
 using PhysicsFn=void(__fastcall*)(void*);
@@ -73,6 +74,7 @@ StepFn StepOf(PluginBody body) noexcept {
         case PluginBody::jet: return &JetOrPlayerStep;
         case PluginBody::sub: return &SubBodyStep;
         case PluginBody::playerJet: return &PlayerJetBodyStep;
+        case PluginBody::sazabi: return &SazabiBodyStep;
         default: return nullptr;
     }
 }
@@ -85,6 +87,7 @@ OwnerMessageFn MessageOwner(PluginBody body) noexcept {
     switch(body) {
         case PluginBody::sub: return &SubMessage;
         case PluginBody::playerJet: return &PlayerJetMessage;
+        case PluginBody::sazabi: return &SazabiMessage;
         case PluginBody::jet: return &JetOrPlayerMessage;
         default: return nullptr;
     }
