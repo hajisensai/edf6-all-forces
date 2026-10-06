@@ -1746,6 +1746,60 @@ def artillery_chassis_is_stock() -> None:
         om.add_texture(rab, 't0.DDS', texfile.solid_dxt1((99, 2, 3), 32))      # a re-encoded stock texture
         assert any('t0.DDS: member' in x for x in am.material_problems(rab, md)), am.material_problems(rab, md)
 
+
+@test
+def artillery_ragdoll_is_the_models() -> None:
+    """The twin tank's physics skeleton is its model's (pylib/ragdoll_fit.py, tools/make_artillery.py ragdoll; the
+    turret could not turn while the Kepler's ragdoll kept its hinge 0.68 m from the moved turret bone). With Root.cpk:
+    every stock vehicle's ragdoll agrees with its own model (the rule problems() checks holds in the game's data);
+    refitting the Kepler's to its own model changes no byte; with the twin tank's model folder: its skeleton against
+    the stock ragdoll is refused (turret, guns, wheels), the refitted one agrees, its turret hinge is on the turret
+    bone and its gun hinges on the gun bones, and vehicle_sgo names the refitted ragdoll with the refitted binding."""
+    import artillery_model as am
+    import ragdoll_fit as rf
+    import rootcpk
+    from mdb import mdb_read, rab_read
+    assert 'import ragdoll_fit' in src('tools/make_artillery.py') and "'ragdoll_fit'" in src('tools/build_release.py')
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+
+    def stock(sgo_name: str):  # noqa: ANN202 - (model, shkt, blob)
+        raw = game.read('OBJECT', sgo_name)
+        if raw[:4] == b'DSGO':
+            r = dsgo.parse(raw).root
+            arc, mdb = r.get('animation_model').items[0].items
+            path, blob = r.get('ragdoll').items[0], r.get('ragdoll').items[1].data
+        else:
+            import sgo
+            _v, m = sgo.read(raw)
+            (arc, mdb), (path, blob) = m['animation_model'][0], m['ragdoll']
+        md = mdb_read(next(f for f in rab_read(game.read('OBJECT', str(arc).rsplit('/', 1)[1].upper())).files
+                           if f.name.lower() == str(mdb).lower()).data)
+        return md, game.read('OBJECT', str(path).rsplit('/', 1)[1].upper()), bytes(blob)
+    for name in ('V603_FLAK.SGO', 'V505_TANK.SGO', 'VEHICLE402_ROCKET.SGO', 'V503_BIKE.SGO', 'V506_HELI.SGO'):
+        md, shkt, blob = stock(name)
+        assert rf.problems(md, shkt, blob) == [], (name, rf.problems(md, shkt, blob)[:3])
+    kepler, shkt, blob = stock('V603_FLAK.SGO')
+    assert make_artillery.ragdoll(game, kepler) == (shkt, blob), 'refitting the Kepler to itself changed it'
+    folder = am.model_dir()
+    if folder is None:
+        return
+    sk = am.skeleton(game, folder)
+    before = rf.problems(sk, shkt, blob)
+    for bone in ('cannon_main', 'cannon_l', 'cannon_r', 'tire_moveB_l', 'catapi_body'):
+        assert any(x.startswith(f'bone {bone} ') for x in before), (bone, before[:3])
+    new_shkt, new_blob = make_artillery.ragdoll(game, sk)
+    assert rf.problems(sk, new_shkt, new_blob) == []
+    s, bones = rf.Shkt(new_shkt), rf.bone_frames(sk)
+    hinge = {s.bodies[j.child].name: s.joint_world(j)[1] for j in s.joints}
+    for proxy, bone in (('ragdoll_cannon_main', 'cannon_main'), ('ragdoll_cannon_l', 'cannon_l'),
+                        ('ragdoll_cannon_r', 'cannon_r')):
+        assert rf.dist(hinge[proxy], bones[bone][0]) < 1e-3, (proxy, hinge[proxy], bones[bone][0])
+    r = dsgo.parse(make_artillery.vehicle_sgo(game, True, new_blob)).root.get('ragdoll')
+    assert r.items[0] == make_artillery.RAGDOLL and r.items[1].data == new_blob, r.items[0]
+    assert make_artillery.RAGDOLL == f'app:/object/{make_artillery.RAGDOLL_FILE.lower()}'
+
 @test
 def stock_payload_and_seats_wired() -> None:
     """The stock vehicles' payload readout and store switch (src/payload.cpp) and the seat switch (src/seatswitch.cpp):
