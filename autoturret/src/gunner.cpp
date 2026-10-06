@@ -255,7 +255,7 @@ const void* PickGunTarget(const unsigned char* vehicle,const Gun& gun,const Aim&
         float want[2],error[2],axis[2],time,distance;
         if(!Solve(vehicle,gun,e.pos,want,time,distance) || !AxisTargets(aim,want,error,axis))continue;
         if(e.object==keep){best=keep;bestAt=i;break;}
-        const float score=distance+(std::fabs(error[0])+std::fabs(error[1]))*cfg.slewWeight;
+        const float score=distance*PriorityWeight(e)+(std::fabs(error[0])+std::fabs(error[1]))*cfg.slewWeight;
         if(!best || score<bestScore){best=e.object;bestScore=score;bestAt=i;}
     }
     if(!best)return nullptr;

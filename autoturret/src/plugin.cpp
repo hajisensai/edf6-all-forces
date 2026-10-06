@@ -547,7 +547,8 @@ const void* PickTarget(const unsigned char* vehicle,const unsigned char* seat,co
         if(distance>track || !reachable(l,wantYaw,wantPitch))continue;
         const float turn=aimed ? std::fabs(Wrap(wantYaw-yaw))+std::fabs(wantPitch-pitch) : 0.0f;
         const bool preferred=(l[1]>cfg.airHeight)!=shot.ground;
-        const float score=distance+turn*cfg.slewWeight+(preferred ? 0.0f : 1.0e6f);
+        // EDF6VehicleCrew's Proteus behind its front shield: enemies near it, or after it, first (PriorityWeight).
+        const float score=distance*PriorityWeight(*e)+turn*cfg.slewWeight+(preferred ? 0.0f : 1.0e6f);
         if(!best || score<bestScore){best=e;bestScore=score;}
     }
     if(!best)return nullptr;
