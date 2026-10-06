@@ -70,7 +70,7 @@ constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8,kSeatStick=0x2D0;
 constexpr float kForeign=0.02f;                // the aim's input this far off the rider's stick: another hand steers it
 constexpr float kMinTraverse=0.17f;            // rad of yaw stops: less is no turret
 constexpr float kAimFar=800.0f,kSightFar=3000.0f;
-constexpr float kPitchMost=80.0f*kPi/180.0f,kViewMost=85.0f*kPi/180.0f;
+using tcam::kViewMost;
 constexpr float kReturnRate=0.25f,kReturnDone=0.005f;   // the free look's swing back: share a frame, done within (rad)
 constexpr float kRigEase=0.12f;                // a frame, the rig's move between its shapes (normal / high)
 constexpr int kBlendFrames=15;                 // frames the view eases in when the plugin takes the camera over
@@ -107,8 +107,9 @@ struct CamSide {
     float eye[3],look[3];      // the last placement
 };
 // The rig's numbers the game thread reads (benign races: floats it only steers by): the stock locators' base pitch
-// against the aim (the coupled free look swings back onto it), the rig's radius (highcam.cpp's big vehicles).
-struct RigInfo { float stockBase,normalRadius; const void* v; };
+// against the aim (the coupled free look swings back onto it), the rig's radius (highcam.cpp's big vehicles), the high
+// view's offset of the view's pitch (tcam::ViewOffset: the view's pitch is kept and started in the camera's terms by it).
+struct RigInfo { float stockBase,normalRadius,highOffset; const void* v; };
 RigInfo rigInfo{};
 // The game thread's own: keys, the free look's latch, the turret's last want (for its drift), the aim point.
 struct GameSide {
@@ -297,11 +298,13 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     s.aimMs=GameMs();
     const bool held=FreeHeld(seat);
     const bool press=held && !game.held,release=!held && game.held;
+    // The offset the camera draws the view's pitch at (the high view's, once the camera has placed this vehicle).
+    const float offset=s.high && rigInfo.v==s.v ? rigInfo.highOffset : 0.0f;
     game.held=held;
     if(!s.view) {   // the view's start: the screen's centre as it is
         float eye[3],dir[3];
         if(!CameraRay(eye,dir))AxesDir(s.v,seat,dir);
-        s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);s.view=true;
+        s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchFrom(tcam::PitchOf(dir),offset);s.view=true;
     }
     if(press) {
         std::memcpy(game.holdAt,game.aim,12);game.holdHit=game.aimHit;
@@ -309,7 +312,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         game.backYaw=s.yaw;game.backPitch=s.pitch;
         if(!s.decoupled) {   // coupled: the view starts where the screen's centre is
             float eye[3],dir[3];
-            if(CameraRay(eye,dir)){s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);}
+            if(CameraRay(eye,dir)){s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchFrom(tcam::PitchOf(dir),offset);}
         }
         s.free=true;s.returning=false;
         if(c.debug)Log("TURRETCAM free look on (%s)",s.decoupled ? "decoupled" : "coupled");
@@ -324,7 +327,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     const bool turning=s.decoupled || s.free;
     if(turning && !s.returning) {
         s.yaw=tcam::Wrap(s.yaw-stick[0]*rate);
-        s.pitch=vec::Clamp(s.pitch-stick[1]*rate,-kPitchMost,kPitchMost);
+        s.pitch=tcam::ClampView(s.pitch-stick[1]*rate,offset);
     }
     if(s.returning) {
         float to[2]={game.backYaw,game.backPitch};
@@ -439,7 +442,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     if(b && (!a || rigB.radius>=rigA.radius)){normal=rigB;base=baseB;}
     else if(a){normal=rigA;base=baseA;}
     else{camSide=CamSide{};return;}
-    rigInfo=RigInfo{a ? baseA : 0.0f,normal.radius,s.v};
+    rigInfo=RigInfo{a ? baseA : 0.0f,normal.radius,tcam::ViewOffset(true,c.highCamPitch,base),s.v};
     if(!own){Leave(seat,lookTarget,cam);return;}
     const float scale=std::fmax(1.0f,normal.radius/20.0f);
     tcam::Rig high=tcam::High(c.highCamHeight*scale,c.highCamBack*scale,c.highCamPitch);
@@ -448,7 +451,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const tcam::Rig& want=s.high ? high : normal;
     const float* m=reinterpret_cast<const float*>(s.v+kMatrix);
     // The view: the plugin's (decoupled, free look), else the aim's at the rig's base pitch (coupled high view).
-    const float offset=viewed ? (s.high ? highBase-base : 0.0f) : highBase;
+    const float offset=viewed ? tcam::ViewOffset(s.high,c.highCamPitch,base) : highBase;
     if(!camSide.owned || camSide.seat!=seat || camSide.leaving) {   // taken over: from the stock locators' rig, easing in
         const bool back=camSide.owned && camSide.seat==seat;   // taken back while handing over: from where it is
         const CamSide was=camSide;

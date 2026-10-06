@@ -78,6 +78,20 @@ inline Rig High(float height,float back,float pitchDeg) noexcept {
     return Rig{up,0.0f,0.0f,r,height-up,{0.0f,0.0f,0.0f}};
 }
 
+// The view's pitch (the plugin's own, `pitch` below) and the camera's. The view's pitch is the normal rig's: the high
+// view looks `offset` lower (its pitch below the normal rig's base pitch: ViewOffset), the camera at pitch + offset, never
+// past kViewMost. So every pitch the view takes is kept where the camera can show it (ClampView): a pitch the camera
+// cannot follow is a dead stretch of stick that has to be undone before the view moves again (the high view: 28 deg of
+// it under the Katyusha), and a view started from the camera as drawn (PitchFrom) has the offset taken out, or the high
+// view's offset is counted again each time (the view sinks by it at every take-over or free look started in it).
+constexpr float kPitchMost=80.0f*kPi/180.0f,kViewMost=85.0f*kPi/180.0f;
+inline float ViewOffset(bool high,float highPitchDeg,float base) noexcept { return high ? -highPitchDeg*kPi/180.0f-base : 0.0f; }
+inline float ClampView(float pitch,float offset) noexcept {
+    return vec::Clamp(pitch,std::fmax(-kPitchMost,-kViewMost-offset),std::fmin(kPitchMost,kViewMost-offset));
+}
+inline float CameraPitch(float pitch,float offset) noexcept { return vec::Clamp(pitch+offset,-kViewMost,kViewMost); }
+inline float PitchFrom(float cameraPitch,float offset) noexcept { return ClampView(cameraPitch-offset,offset); }
+
 // Who turns the player's turret this frame (common/edf/aimlink.h V2): `steers` EDF6AutoTurret's answer (1: it wrote the
 // seat's input this frame, 0: it did not, -1: no answer, an older peer or none), `in` the aim's input, `stick` the
 // rider's as the aim gets it. Another hand's: the camera leaves the turret to it for the frame. With no answer, V1's

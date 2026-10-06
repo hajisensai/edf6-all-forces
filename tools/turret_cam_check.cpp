@@ -165,12 +165,52 @@ void Owners() {
     Expect(!tcam::BallisticAim(false,false) && !tcam::BallisticAim(false,true),"no hit (the made-up far point): the bore line");
 }
 
+// The high view's pitch (README 高视角; the user, 2026-10-06: "动几下就显示不对了"). The view's pitch is the normal rig's,
+// the camera draws it `offset` lower (tcam::ViewOffset: the Katyusha's authored rig base -11.9 deg under HighCamPitch 40,
+// -28.1 deg). Two ways it went wrong, both by the offset:
+//  - a view started from the camera as drawn (a take-over: back in the seat, a seat change, the rider check flickering
+//    while boarding, as at 14:56:23 in the user's log; the coupled free look) took the drawn pitch as the view's: the
+//    camera then sank by the offset, again at every start, down to the clamp;
+//  - the view's pitch was kept within +-80 deg of its own while the camera stops at -85: under the high view's offset
+//    the stick turned a pitch the camera could not show (-57..-80 deg), and coming back up the view did not move
+//    until it was undone.
+void HighView() {
+    const float offset=tcam::ViewOffset(true,40.0f,-11.9f*kDeg);
+    Expect(std::fabs(offset/kDeg+28.1f)<0.01f,"the Katyusha's high view offset",offset/kDeg,-28.1);
+    Expect(tcam::ViewOffset(false,40.0f,-11.9f*kDeg)==0.0f,"no offset off the high view");
+    // Five starts in a row, each from the camera as the last one drew it: the camera stays where it was.
+    float drawn=-40.0f*kDeg;
+    for(int take=0;take<5;++take) {
+        const float pitch=tcam::PitchFrom(drawn,offset);
+        const float next=tcam::CameraPitch(pitch,offset);
+        Expect(std::fabs(next-drawn)<1e-4f,"a start from the drawn camera keeps it",next/kDeg,drawn/kDeg);
+        drawn=next;
+    }
+    std::printf("high view: after 5 starts the camera at %.2f deg (it was -40.00)\n",drawn/kDeg);
+    // Mouse down for 2 s at 1.5 deg a frame (90 deg/s), then one frame up: the camera rises at once.
+    const float step=1.5f*kDeg;
+    float pitch=tcam::PitchFrom(-40.0f*kDeg,offset);
+    for(int f=0;f<120;++f)pitch=tcam::ClampView(pitch-step,offset);
+    const float low=tcam::CameraPitch(pitch,offset);
+    int frames=0;
+    for(;frames<60 && !(tcam::CameraPitch(pitch,offset)>low+0.5f*step);++frames)pitch=tcam::ClampView(pitch+step,offset);
+    std::printf("high view: looked down to %.1f deg, the camera rises after %d frame(s) of stick up\n",low/kDeg,frames);
+    Expect(std::fabs(low/kDeg+85.0f)<0.01f,"down as far as the camera goes",low/kDeg,-85.0);
+    Expect(frames==1,"the camera rises on the first frame of stick up",frames,1.0);
+    // Up as far as it goes: the camera's +85 or the view's own +80, whichever comes first; and the normal view keeps +-80.
+    for(int f=0;f<200;++f)pitch=tcam::ClampView(pitch+step,offset);
+    Expect(std::fabs(tcam::CameraPitch(pitch,offset)/kDeg-(80.0f-28.1f))<0.05f,"the high view's top",tcam::CameraPitch(pitch,offset)/kDeg,51.9);
+    Expect(std::fabs(tcam::ClampView(2.0f,0.0f)-tcam::kPitchMost)<1e-6f && std::fabs(tcam::ClampView(-2.0f,0.0f)+tcam::kPitchMost)<1e-6f,
+           "the normal view: +-80 deg as before");
+}
+
 int main() {
     Owners();
     Steps();
     Ends();
     Sweep();
     Rigs();
+    HighView();
     std::printf(failures ? "%d FAILED\n" : "all passed\n",failures);
     return failures ? 1 : 0;
 }
