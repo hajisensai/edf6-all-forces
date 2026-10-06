@@ -99,6 +99,8 @@ bool SubBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool PlayerJetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SubMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 bool PlayerJetMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
+// No enemy creatures participate in the building-avoidance scenario.
+bool PrimerMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 namespace jet {
 Jet jets[kMaxJets]{};
 }  // namespace jet

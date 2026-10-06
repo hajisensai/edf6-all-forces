@@ -210,3 +210,13 @@ add_executable(boarding_hit_test tests/boarding_hit_test.cpp)
 target_link_libraries(boarding_hit_test PRIVATE edf6common)
 target_compile_options(boarding_hit_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME boarding_hit COMMAND boarding_hit_test)
+
+# Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
+set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
+    vehicle_ram_check stab_check vsound_check map_cam_check emc_check proteus_check sidecar_board_check)
+add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
+foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
+    add_test(NAME ${check} COMMAND ${check})
+endforeach()
+add_test(NAME hud_layout COMMAND hud_view --out "${CMAKE_BINARY_DIR}/hud-review")

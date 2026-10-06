@@ -46,8 +46,13 @@ jobs:
         run: call build.cmd
 
       - name: Native regression tests
-        shell: pwsh
-        run: ctest --test-dir build --output-on-failure
+        shell: cmd
+        run: |
+          call tools\msvc-x64-env.cmd
+          if errorlevel 1 exit /b 1
+          cmake --build build --target offline_checks
+          if errorlevel 1 exit /b 1
+          ctest --test-dir build --output-on-failure
 
       - name: Check data tools compile
         shell: pwsh
