@@ -430,6 +430,7 @@ struct Jet {
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     PrimerState primer;
+    bool cmdMoving=false;       // reach a new map order before taking another target
     Command cmd{};              // a map command (JetCommand, mapcmd.cpp): what it works round instead (jet.cpp JetFrame)
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
@@ -437,6 +438,25 @@ constexpr int kMaxJets=64,kPatrolRings=6;
 extern Jet jets[kMaxJets];
 inline const Kind& KindOf(const Jet& j) noexcept { return KindOf(j.role); }
 inline int IndexOf(const Jet& j) noexcept { return static_cast<int>(&j-jets); }
+
+// Retargeting abandons an old attack but preserves ammunition cooldowns and lifecycle flight modes.
+inline void ApplyMapCommand(Jet& j,const Command& cmd,ULONGLONG ms) noexcept {
+    j.cmd=cmd;j.cmdMoving=cmd.order!=Order::none;
+    j.t.target=nullptr;j.t.trackFrame=0;j.t.lockAt=0;j.t.lockSeen=0;
+    j.carrier.stationFor=nullptr;j.carrier.evadeUntil=0;
+    if(j.mode!=Mode::takeoff && j.mode!=Mode::withdraw && j.mode!=Mode::recover && j.mode!=Mode::bomb)
+        {j.mode=Mode::patrol;j.modeAt=ms;}
+}
+
+// Patrol flies a ring rather than the centre. Arrival must include that ring, including outer wing slots;
+// the wider leash also includes its attack's extension so an ordinary pass can finish.
+inline bool MapCommandMoving(Jet& j,const float* pos,const float* anchor,float range) noexcept {
+    const Kind& k=KindOf(j);
+    const float ring=k.patrol+k.patrolStep*static_cast<float>(j.wing%kPatrolRings);
+    const float arrive=std::fmax(40.0f,ring+40.0f);
+    const float leash=std::fmax(range,std::fmax(arrive+100.0f,k.extendOut));
+    return AirCommandTransit(j.cmd,j.cmdMoving,pos,anchor,arrive,leash);
+}
 
 // --- Math ---
 inline float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }

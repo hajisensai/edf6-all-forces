@@ -450,7 +450,7 @@ bool JetCommand(const void* vehicle,const Command& c) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
         if(!j || !Commandable(*j,GameMs()))return false;
-        j->cmd=c;
+        ApplyMapCommand(*j,c,GameMs());
         Log("JET v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
             c.at[0],c.at[1],c.at[2]);
         return true;
@@ -516,7 +516,9 @@ void JetFrame(unsigned char* v) noexcept {
     if(walled)LogImpact("JET",v,pos,was);   // what held it back (impact.cpp)
 
     // The target and its motion.
-    if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : j->reach>0.0f ? j->reach : TargetRange(kind),dt,ms);
+    const float targetRange=ordered ? kOrderRange : j->reach>0.0f ? j->reach : TargetRange(kind);
+    const bool moving=MapCommandMoving(*j,pos,anchor,targetRange);
+    if(!moving && j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,targetRange,dt,ms);
     else j->t.target=nullptr;
     if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {

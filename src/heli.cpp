@@ -435,6 +435,7 @@ struct Heli {
     // A map command (HeliCommand, mapcmd.cpp) is the same post as a call's: guard / post / hold written as HeliCalled
     // writes them; what they were before the first command kept here to put back on its release.
     Command cmd;
+    bool cmdMoving;
     bool ownGuard;
     float ownPost[3],ownHold[3];
 };
@@ -586,8 +587,8 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
 }
 
 // The enemy lock point to engage, among the enemies within `range` of `around` (a guard's post, the
-// player it follows) and the current target wherever it has gone (it is chased, not dropped when it
-// leaves the range): the one nearest to `from` (the heli: the shortest turn and flight), the current
+// player it follows). Without a map command, the current target is chased beyond that range.
+// The one nearest to `from` (the heli: the shortest turn and flight) wins, the current
 // one counting kKeepTarget nearer and one too close below to aim at kTooClose farther. Returns false
 // with none.
 bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* from,float range,float* aim) noexcept {
@@ -599,7 +600,7 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     ForEachEnemy(v,[&](const void* object,const float* a) noexcept {
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const bool current=h.target.Is(object);
-        if(!current && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
+        if((!current || h.cmd.order!=Order::none) && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
         if(current)score-=circler ? kCircleKeep : kKeepTarget;
@@ -1526,6 +1527,12 @@ bool StoreReady(const Heli& h,const Sense& s) noexcept {
     return s.store && Cfg().heliMissile && h.storeAmmo>0 && s.ms-h.storeShotAt>static_cast<ULONGLONG>(Cfg().heliMissileMs);
 }
 
+bool CommandMoving(Heli& h,const float* pos,const float* anchor) noexcept {
+    const float arrive=std::fmax(40.0f,h.cmd.order==Order::guard ? Cfg().heliGuardRadius+20.0f : Cfg().heliCombatRange);
+    const float leash=std::fmax(Cfg().heliRange,arrive+100.0f);
+    return AirCommandTransit(h.cmd,h.cmdMoving,pos,anchor,arrive,leash);
+}
+
 // The first frame (false): it only starts its state. Else (true) the frame's sensing in `s`.
 bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
@@ -1592,7 +1599,8 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
     const float gunRange=GunRange(*s.type);
     const float pick=s.follow && Cfg().heliCombatRange+gunRange<Cfg().heliRange ? Cfg().heliCombatRange+gunRange : Cfg().heliRange;
-    s.engage=!s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
+    const bool moving=CommandMoving(h,pos,anchor);
+    s.engage=!moving && !s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
     if(s.engage) {
         TrackVelocity(h.tgtPrev,h.tgtVel,s.aim,dt,40.0f,!Same(h.tracked,h.target));
         h.tracked=h.target;
@@ -2500,6 +2508,8 @@ bool HeliCommand(const void* vehicle,const Command& c) noexcept {
             std::memcpy(h->post,h->ownPost,12);std::memcpy(h->hold,h->ownHold,12);
         }
         h->cmd=c;
+        h->cmdMoving=c.order!=Order::none;
+        h->target=ObjRef{};h->tracked=ObjRef{};h->circleUntil=0;
         // A new centre at once: GuardOrbit eases its centre at 10 m/s, which would drag the orbit across the map.
         h->orbitSet=false;h->extend=false;
         Log("HELI v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",

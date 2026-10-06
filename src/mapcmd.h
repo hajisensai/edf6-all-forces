@@ -11,6 +11,17 @@
 namespace crew {
 using mapcmd::Command;
 using mapcmd::Order;
+// A new air order first reaches its patrol/hover area before it acquires another target.
+// Once there, ordinary fighting continues until it leaves the wider engagement area.
+// The two radii avoid alternating between a run and return at the patrol-ring boundary.
+inline bool AirCommandTransit(const Command& cmd,bool& moving,const float* pos,const float* anchor,
+                              float arrive,float leash) noexcept {
+    if(cmd.order==Order::none){moving=false;return false;}
+    const float x=pos[0]-anchor[0],z=pos[2]-anchor[2],d=x*x+z*z;
+    if(d>leash*leash)moving=true;
+    if(d<=arrive*arrive)moving=false;
+    return moving;
+}
 // A unit an AI module takes map commands for: the vehicle, a short name for the map, the command it stands under,
 // whether it flies (its icon is on it; a ground unit's is up its pin).
 // `v` is an identity only outside the owning module; positions are copied while the object is verified live.
