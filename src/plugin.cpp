@@ -444,6 +444,7 @@ void LoadConfig() noexcept {
     n.seatButton=ReadInt(L"SeatButton",static_cast<DWORD>(n.seatButton));
     n.seatPilot=ReadBool(L"SeatPilot",n.seatPilot);
     n.seatSwitchOnline=ReadBool(L"SeatSwitchOnline",n.seatSwitchOnline);
+    n.seatList=ReadBool(L"SeatList",n.seatList);
     n.proteus=ReadBool(L"ProteusRework",n.proteus);
     n.proteusModeKey=ReadInt(L"ProteusModeKey",static_cast<DWORD>(n.proteusModeKey));
     n.proteusModeButton=ReadInt(L"ProteusModeButton",static_cast<DWORD>(n.proteusModeButton));
@@ -575,8 +576,8 @@ void LoadConfig() noexcept {
         n.highCamBack,n.highCamPitch);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
-    Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d",n.stockHeliStores,n.seatSwitch,
-        n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline);
+    Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockHeliStores,n.seatSwitch,
+        n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
     Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X mark=0x%X/0x%X salvo=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f arc %.0f block %.2f",
         n.proteus,n.proteusModeKey,n.proteusModeButton,n.proteusShieldKey,n.proteusShieldButton,n.proteusMarkKey,n.proteusMarkButton,n.proteusSalvoKey,
         n.proteusTwoSeats,n.proteusWalkSpeed,n.proteusWalkTurn,n.proteusStepHeight,n.proteusShieldSlow,n.proteusShieldArc,n.proteusShieldBlock);

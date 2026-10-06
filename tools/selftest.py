@@ -3159,7 +3159,7 @@ def stock_payload_and_seats_wired() -> None:
     its stores are store weapons make_jets writes and src/stores.inc knows."""
     import make_stock_stores as mss
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline')
+    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline', 'SeatList')
     for key in keys:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('SeatNextKey', 'SeatButton'):
@@ -3195,6 +3195,13 @@ def stock_payload_and_seats_wired() -> None:
     seat = src('src/seatswitch.cpp')
     for c in ('kAnnounce=0x5763E0', 'kSetAction=0x551C30', 'kRideAction=0x56C9F0', 'kReserve=0x633FE0', 'kClear=0x634940'):
         assert c in seat, c
+    # The seats line is a reading, not a move (the user 2026-10-07): SeatList lists them the whole ride, with SeatSwitch
+    # off too, and the keys ride along only in the prompt's moment.
+    assert re.search(r'^SeatList=1', ini, re.M), 'SeatList ships on'
+    frame = seat.split('void SeatSwitchFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert '!(ok && Cfg().seatSwitch) && !Cfg().seatList' in frame, 'SeatSwitchFrame: the list runs without the switch'
+    assert 'Cfg().seatList ? ms+kFreshMs' in seat, 'Publish: SeatList keeps the line up the whole ride'
+    assert 'const bool may=ok && Cfg().seatSwitch;' in seat and 'if(p.hints)SeatKeys(l,p);' in src('src/hud.cpp')
 
 
 @test

@@ -171,6 +171,8 @@ struct Config {
     int seatButton=0x02;            // ...on a pad: the seat's button bit (docs/stores-re.md §4: 0x02 B; 0 none)
     bool seatPilot=true;            // ...out of a stock helicopter's pilot seat: an NPC (the stock RideAi) takes the stick
     bool seatSwitchOnline=false;    // ...in an online room too (off: offline only)
+    bool seatList=true;             // the seats line shown the whole ride in a vehicle with more than one seat (who holds
+                                    // which), not only a moment after boarding / a move; with SeatSwitch off and online too
     // proteus.cpp: the Proteus rework (README 普罗透斯, docs/proteus-re.md), while a local player rides one.
     bool proteus=true;              // two stances (walk / deployed), two seats, shields, the field, the salvo; off: the stock Proteus
     int proteusModeKey=0x54;        // ...the driver's stance key ('T'; a Windows virtual-key code, 0: none)
