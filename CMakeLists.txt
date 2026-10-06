@@ -109,6 +109,20 @@ add_executable(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check.cpp)
 target_compile_options(vehicle_ram_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vehicle_ram_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The gunship's muzzle (src/gunmuzzle.h) on the circles it flies: no round's line through its airframe, its start where the
+# muzzle is when it leaves, against the old origin start and the shell's stock wait, offline (tools/gunship_muzzle_check.cpp).
+# Not part of the plugin build: cmake --build build --target gunship_muzzle_check && build\gunship_muzzle_check.exe
+add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.cpp)
+target_compile_options(gunship_muzzle_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(gunship_muzzle_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The exhausts' frame (src/exhaust_pose.h): a jet flown frame by frame in the game's order, its flame's root against its
+# nozzle as drawn, before / after carrying the bone record to this frame (tools/exhaust_pose_check.cpp). Not part of the
+# plugin build: cmake --build build --target exhaust_pose_check && build\exhaust_pose_check.exe
+add_executable(exhaust_pose_check EXCLUDE_FROM_ALL tools/exhaust_pose_check.cpp)
+target_compile_options(exhaust_pose_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(exhaust_pose_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The gun stabilizer (src/stab.h) on a hull driven over bumps and through turns against the stock aim axis step, the
 # gun's world pointing error with and without it, offline (tools/stab_check.cpp). Not part of the plugin build:
 # cmake --build build --target stab_check && build\stab_check.exe
@@ -262,7 +276,7 @@ set_target_properties(grape_turret_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check)
+    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})

@@ -455,7 +455,10 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
 #  - the strike jet's bomber501: the interceptor's mesh at x 1 (bomber501_2 is the same mesh): the same two square
 #    nozzles either side of the tail. The first tables put one flame on the tail cone's end on the centre line (x 0),
 #    between them, half their size (2026-10-05).
-#  - the multirole: a 0.68 x 0.26 m exhaust box at the fuselage's end (z -0.8), not the flat tail's tip (-1.78).
+#  - the multirole (bomber401 x 0.5): two dark exhaust notches in the trailing edge either side of the centre body
+#    (x 1.22..2.69, y 0.94..1.41, z -0.88..-0.15: the two dark trapezoids the user sees from behind). The first tables
+#    put one flame on a 0.68 x 0.26 m box under the centre body (x 0, z -0.8), a light panel, not an engine: from
+#    behind it burned under the belly's middle, off both exhausts (the user's picture, 2026-10-06, 548 km/h).
 #  - the drone: a round 0.33 m nozzle at z -1.26 (the old table had it 0.33 m above and 0.24 m behind it).
 # Each flame sits on its exit's centre in the exit plane and is as big as its engine (the user, 2026-10-05:
 # 「尾焰大小应该根据引擎大小来」): width the exit's diameter (a circle of the exit's area; an exit that is only an edge:
@@ -477,18 +480,18 @@ ExitBox = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]  
 NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a left twin at -x)
     None: (((1.5, 5.6), (0.0, 4.6), (-12.95, -11.69)), True),
     'EDF6VC_INTERCEPTOR.MRAB': (((1.0, 3.6), (0.0, 3.0), (-8.4, -7.6)), True),
-    'EDF6VC_MULTIROLE.MRAB': (((-0.5, 0.5), (0.7, 1.5), (-0.85, -0.75)), False),
+    'EDF6VC_MULTIROLE.MRAB': (((1.0, 2.9), (0.85, 1.5), (-1.0, -0.1)), True),
     'EDF6VC_DRONE.MRAB': (((-0.3, 0.3), (0.7, 1.3), (-1.3, -1.22)), False),
-    'bomber401': (((-1.0, 1.0), (0.8, 1.8), (-1.7, -1.5)), False),
+    'bomber401': (((2.0, 5.8), (0.8, 2.15), (-2.0, -0.2)), True),
     'bomber501_2': (((1.5, 5.6), (-2.3, 2.3), (-12.95, -11.69)), True),
 }
 Nozzle = tuple[tuple[float, float, float], float]   # (exit centre, diameter)
 NOZZLES: dict[str | None, tuple[Nozzle, ...]] = {
     None: (((3.58, 2.325, -12.006), 1.839), ((-3.58, 2.325, -12.006), 1.839)),
     'EDF6VC_INTERCEPTOR.MRAB': (((2.327, 1.511, -7.804), 1.195), ((-2.327, 1.511, -7.804), 1.195)),
-    'EDF6VC_MULTIROLE.MRAB': (((0.0, 1.07, -0.799), 0.475),),
+    'EDF6VC_MULTIROLE.MRAB': (((1.916, 1.157, -0.457), 0.738), ((-1.916, 1.157, -0.457), 0.738)),
     'EDF6VC_DRONE.MRAB': (((0.0, 1.005, -1.261), 0.323),),
-    'bomber401': (((0.0, 1.267, -1.597), 0.951),),
+    'bomber401': (((3.831, 1.44, -0.913), 1.478), ((-3.831, 1.44, -0.913), 1.478)),
     'bomber501_2': (((3.58, 0.039, -12.006), 1.839), ((-3.58, 0.039, -12.006), 1.839)),
 }
 

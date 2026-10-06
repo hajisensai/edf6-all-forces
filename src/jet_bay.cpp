@@ -3,6 +3,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "vehicleram.h"
+#include "gunmuzzle.h"
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
@@ -133,6 +134,20 @@ const Sig kIfcAmmoSigs[]={
     {0x2B68C5,{0xF3,0x41,0x0F,0x11,0x86,0xF0,0x00,0x00,0x00,0x66,0x3B,0xC6}},
 };
 bool ifcAmmoOk=false;
+// The IFC's frames before its first round (indirect_fire_param #15: config 0x2B5F40 reads index 15 (0x2B61ED) and writes it
+// here (0x2B624D); the step 0x2B95A0 counts it down a frame at a time (0x2B97BC / 0x2B97D3) and fires only at 0, from +0x300
+// as it is then (0x2B9B7D)). The plugin fires its rounds when it means them to leave, from where it says: ShellMake zeroes
+// this. The stock DEMOGUNSHIPFIREE25 waits 60 frames (the missions' gunship is a sound off-screen, its round arriving a
+// second later): a round of the plugin's then left from where its shooter had been a second before, 120 m behind a gunship
+// circling at 120 m/s (the user, 2026-10-06: 「炮舰机的轰炸炮弹，感觉在飞机后面出现的」), and the Proteus's salvo led its
+// target a second short. The plugin's own SGOs (cannon, impact, drill, EMC) already wait 0.
+constexpr std::size_t kIfcWait=0x2D8;
+const Sig kIfcWaitSigs[]={
+    {0x2B624D,{0x41,0x89,0x86,0xD8,0x02,0x00,0x00,0x66,0x41,0x3B,0xCD,0x74}},
+    {0x2B97BC,{0x41,0x8B,0x86,0xD8,0x02,0x00,0x00,0x41,0xBF,0xFF,0xFF,0xFF}},
+    {0x2B97D3,{0x41,0x89,0x86,0xD8,0x02,0x00,0x00,0x48,0x8B,0x4D,0xE8,0x48}},
+};
+bool ifcWaitOk=false;
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
@@ -199,6 +214,7 @@ unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,
         reinterpret_cast<void(*)(void*,float)>(image+kIfcDamage)(ifc,damage);
         ifc[kIfcFromJet]=1;
         if(straight)ifc[kIfcBallistic]=0;
+        if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);   // it leaves on its first step, from `from` (see kIfcWait)
         alignas(16) const float st[4]={from[0],from[1],from[2],1.0f},am[4]={aim[0],aim[1],aim[2],1.0f};
         std::memcpy(ifc+kIfcFrom,st,16);std::memcpy(ifc+kIfcAim,am,16);
         return o;
@@ -234,15 +250,24 @@ float Tier(const unsigned char* v) noexcept {
     return kind && kind->durability>0.0f && hpMax>0.0f && std::isfinite(hpMax) ? hpMax/kind->durability : 1.0f;
 }
 
-// A cannon round fired by `who` from the gunship (`pos`) at `at` (see kCannonSgo): kCannonGapMs after its last, within
-// kCannonReach. Every tenth logged (Debug): two a second would drown the log.
+// Where a gunship round of hit radius `hit` leaves gunship `v` for `at`: off its airframe on the line to `at`
+// (gunmuzzle.h: from the vehicle's origin, its belly's floor, the line climbed through the plane it circles banked).
+void GunshipMuzzle(const unsigned char* v,const float* at,float hit,float* out) noexcept {
+    gunmuzzle::Muzzle(reinterpret_cast<const float*>(v+kMatrix),gunmuzzle::kGunship,at,hit+gunmuzzle::kMargin,out);
+}
+
+// A cannon round fired by `who` from the gunship (`pos`, its reach measured from there) at `at` (see kCannonSgo), leaving
+// from its muzzle (GunshipMuzzle): kCannonGapMs after its last, within kCannonReach. Every tenth logged (Debug): two a
+// second would drown the log.
 bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,ULONGLONG ms,const char* who) noexcept {
     if(!cannonReady || ms-j.shells.cannonAt<kCannonGapMs)return false;
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kCannonReach)return false;
     j.shells.cannonAt=ms;
     const float damage=kCannonDamage*Tier(v);
-    if(!Shell(kCannonSgo,cannonReady,v,pos,at,damage,true,"gunship cannon"))return false;
+    float muzzle[3];
+    GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle);
+    if(!Shell(kCannonSgo,cannonReady,v,muzzle,at,damage,true,"gunship cannon"))return false;
     if(Cfg().debug && j.shells.cannonShots%10==0)
         Log("JET v=%p gunship cannon round #%d from %s at (%.0f,%.0f,%.0f), %.0f m, %.0f damage",v,j.shells.cannonShots+1,who,at[0],at[1],
             at[2],Len(d),damage);
@@ -267,8 +292,9 @@ bool CannonAtTarget(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms,
     const float to[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(to)>kCannonReach)return false;
     j.shells.cannonLookAt=ms;
-    float hit[3];
-    if(MapRay(pos,at,hit)>=0.0f) {
+    float muzzle[3],hit[3];
+    GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle);   // the line the round flies (CannonShot)
+    if(MapRay(muzzle,at,hit)>=0.0f) {
         const float gap[3]={hit[0]-at[0],hit[1]-at[1],hit[2]-at[2]};
         if(Len(gap)>kCannonSightSlack) {
             if(Cfg().debug && j.shells.cannonHeld++%10==0)
@@ -342,8 +368,8 @@ void BayFrame(Jet& j,const float* pos) noexcept {
 }
 
 // A gunship's guns while its weapons are free (WeaponsFree, as every jet weapon) at a ground target: its cannon
-// (CannonAtTarget) within kCannonReach, and a shell every kGunshipGapMs within kGunshipReach, from the gunship (`pos`)
-// onto the target's lock point.
+// (CannonAtTarget) within kCannonReach, and a shell every kGunshipGapMs within kGunshipReach of the gunship (`pos`), from
+// its muzzle (GunshipMuzzle) onto the target's lock point.
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     if(!WeaponsFree(j) || j.t.flyer)return;
     CannonAtTarget(j,v,pos,ms,"its NPC crew");
@@ -351,7 +377,9 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
     j.shells.gunAt=ms;
-    if(!Shell(kGunshipSgo,gunshipReady,v,pos,j.t.aim,kGunshipDamage*Tier(v),false,"gunship shell"))return;
+    float muzzle[3];
+    GunshipMuzzle(v,j.t.aim,gunmuzzle::kShellHit,muzzle);
+    if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,j.t.aim,kGunshipDamage*Tier(v),false,"gunship shell"))return;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.shells.gunShots,j.t.target,Len(d));
 }
@@ -395,7 +423,9 @@ bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* w
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kGunshipReach)return false;
     j.shells.gunAt=ms;
-    if(!Shell(kGunshipSgo,gunshipReady,v,pos,at,kGunshipDamage*Tier(v),false,"gunship shell"))return false;
+    float muzzle[3];
+    GunshipMuzzle(v,at,gunmuzzle::kShellHit,muzzle);
+    if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,at,kGunshipDamage*Tier(v),false,"gunship shell"))return false;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d from %s at (%.0f,%.0f,%.0f), %.0f m",v,j.shells.gunShots,who,at[0],at[1],at[2],Len(d));
     return true;
@@ -471,6 +501,9 @@ bool InstallBay(bool spawnOk) noexcept {
     shellsOk=bayOk && Readable(image+kDemoVtable,8);
     ifcAmmoOk=shellsOk;
     for(const auto& b:kIfcAmmoSigs)ifcAmmoOk=ifcAmmoOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
+    ifcWaitOk=shellsOk;
+    for(const auto& b:kIfcWaitSigs)ifcWaitOk=ifcWaitOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
+    if(shellsOk && !ifcWaitOk)Log("JET the IFC's first-round wait (0x2B624D / 0x2B97BC) is not as known: shells keep their stock wait");
     return bayOk;
 }
 

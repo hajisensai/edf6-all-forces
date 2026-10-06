@@ -181,6 +181,53 @@ def gear_legs_as_the_models_fold_them() -> None:
 
 
 @test
+def gear_mount_reaches_the_skin() -> None:
+    """pylib/jet_gear.py mounts on synthetic data: a slanted cylinder (the donor's shock absorber: its hub end at the
+    origin, 0.65 forward and 0.42 up to its upper end, 0.07 of that inside its donor body) placed x 1.5 under a level
+    skin 0.5 over where its end would be: reach() raises the end until it goes 0.07 x 1.5 into the skin, _shear keeps
+    the hub end, lifts the upper end by exactly that, and leaves every normal perpendicular to the sheared surface."""
+    import math
+    import jet_gear as jg
+    ring = 8
+    axis_d = (0.0, 0.42, 0.65)
+    ln = math.hypot(axis_d[1], axis_d[2])
+    ax = (0.0, axis_d[1] / ln, axis_d[2] / ln)
+    u = (1.0, 0.0, 0.0)
+    w = (0.0, ax[2], -ax[1])     # u x axis: perpendicular to both
+    r = 0.04
+    rows, P = [], []
+    for end in (0.0, 1.0):
+        for k in range(ring):
+            a = 2 * math.pi * k / ring
+            nrm = tuple(math.cos(a) * u[c] + math.sin(a) * w[c] for c in range(3))
+            p = tuple(end * axis_d[c] + r * nrm[c] for c in range(3))
+            P.append(p)
+            rows.append([p, nrm, ax])
+    m = jg.mount_of(0, 0, P, set(range(2 * ring)), 0.07)
+    assert abs(m.length - ln) < 1e-9 and all(abs(m.axis[c] - ax[c]) < 1e-9 for c in range(3)), (m.axis, m.length)
+    s, off = 1.5, (0.0, 0.0, 0.0)
+    skin_y = m.top[1] * s + 0.5
+    rise = jg.reach(m, s, off, lambda _x, _z: skin_y)
+    top, short = jg.mount_gap(m, s, off, lambda _x, _z: skin_y, rise)
+    assert abs(short) < 1e-9 and abs(top[1] - (skin_y + 0.07 * s)) < 1e-9, (top, short, rise)
+    assert jg.reach(m, s, (0.0, 1.0, 0.0), lambda _x, _z: skin_y) == 0.0, 'a mount already deep enough is not moved'
+    keys = ['position:0', 'normal:0', 'tangent:0']
+    out = [jg._shear(m, rise, row, keys) for row in rows]
+    for k in range(ring):
+        lo, hi = out[k], out[ring + k]
+        assert max(abs(lo[0][c] - rows[k][0][c]) for c in range(3)) < 1e-9, 'the hub end moved'
+        assert abs(hi[0][1] - rows[ring + k][0][1] - rise * m.t(rows[ring + k][0])) < 1e-9
+        side = [hi[0][c] - lo[0][c] for c in range(3)]               # along the sheared surface
+        an = 2 * math.pi * k / ring
+        around = [-math.sin(an) * u[c] + math.cos(an) * w[c] for c in range(3)]   # the hub ring's tangent there
+        for e in (side, around):
+            dot = sum(lo[1][c] * e[c] for c in range(3)) / math.sqrt(sum(x * x for x in e))
+            assert abs(dot) < 1e-9, f'normal {lo[1]} not across the sheared surface ({dot:.3g})'
+        nl = math.sqrt(sum(x * x for x in lo[1]))
+        assert abs(nl - 1.0) < 1e-9
+
+
+@test
 def chute_canopy_geometry() -> None:
     """pylib/chute_model.py canopy(): a dome 2 x RADIUS across and HEIGHT over its rim, open underneath (nothing under
     the rim but the lines, which stay inside it and end at the riser point), the outside shell facing out and the
@@ -1596,6 +1643,43 @@ def gunship_cannon_round() -> None:
     assert '{L"","CANNON",StoreRole::bomb' in src('src/playerjet_board.inc'), 'src/playerjet_board.inc kSpecials CANNON'
     readme = src('README.md')
     assert make_jets.CANNON_FILE in readme and '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
+
+
+@test
+def gunship_muzzle_wired() -> None:
+    """The gunship's rounds leave off its airframe, now (the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」「炮舰机的轰炸炮弹，
+    感觉在飞机后面出现的」): src/gunmuzzle.h's airframe and hit radii are tools/make_jets.py's (GUNSHIP_AIRFRAME, held to the
+    bomber401 model and the stock shell by check_gunship_muzzle when the files are made; CANNON_SIZE x CANNON_HIT; SHELL_HIT);
+    every gunship round in src/jet_bay.cpp leaves from GunshipMuzzle, none from the vehicle's origin; ShellMake zeroes the IFC's
+    first-round wait (+0x2D8, param #15: the stock shell's 60 frames left it where the gunship had been a second before)
+    behind its signatures; the offline check (tools/gunship_muzzle_check.cpp) is one of the offline checks CTest runs."""
+    head = src('src/gunmuzzle.h')
+    num = r'(-?[\d.]+)f'
+    m = re.search(r'kGunship\{\{' + ','.join([num] * 3) + r'\},\{' + ','.join([num] * 3) + r'\}\}', head)
+    assert m, 'src/gunmuzzle.h kGunship'
+    got = [float(m.group(k)) for k in range(1, 7)]
+    want = [v for part in make_jets.GUNSHIP_AIRFRAME for v in part]
+    assert got == want, f'src/gunmuzzle.h kGunship {got}, tools/make_jets.py GUNSHIP_AIRFRAME {want}'
+    m = re.search(r'kCannonHit=' + num, head)
+    assert m and abs(float(m.group(1)) - make_jets.CANNON_SIZE * make_jets.CANNON_HIT) < 1e-6, 'src/gunmuzzle.h kCannonHit'
+    m = re.search(r'kShellHit=' + num, head)
+    assert m and float(m.group(1)) == make_jets.SHELL_HIT, 'src/gunmuzzle.h kShellHit'
+    assert 'check_gunship_muzzle(game)' in src('tools/make_jets.py'), 'tools/make_jets.py build checks the muzzle numbers'
+    bay = src('src/jet_bay.cpp')
+    assert f'kGunshipSgo[]=L"app:/object/{make_jets.SHELL_STOCK.lower()}"' in bay, 'src/jet_bay.cpp kGunshipSgo is SHELL_STOCK'
+    fired = re.findall(r'Shell\((kGunshipSgo|kCannonSgo),(?:gunshipReady|cannonReady),v,(\w+),', bay)
+    assert len(fired) == 3 and all(f == 'muzzle' for _sgo, f in fired), f'the gunship fires from its muzzle: {fired}'
+    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the cannon, its sight line and both shells'
+    assert re.search(r'MapRay\(muzzle,at,hit\)', bay), 'the NPC cannon looks along the line its round flies'
+    make = bay.split('unsigned char* ShellMake(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);' in make, 'ShellMake zeroes the first-round wait'
+    assert 'constexpr std::size_t kIfcWait=0x2D8;' in bay
+    assert 'for(const auto& b:kIfcWaitSigs)ifcWaitOk=ifcWaitOk && Matches(' in bay, 'the wait behind its signatures'
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.cpp)' in cmake
+    checks = cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    assert 'gunship_muzzle_check' in checks.split(), 'CTest runs gunship_muzzle_check'
+    assert '炮舰机的炮口' in src('README.md'), 'README.md: the gunship muzzle'
 
 
 @test

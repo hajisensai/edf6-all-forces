@@ -28,7 +28,7 @@ EDF.dll TimeDateStamp 0x678CCB46，均为 RVA。置信度：H = 反汇编直接�
 | +0xDC | 伤害（0x2B82E0） | H |
 | +0x224 | 散布（0x2B8460） | H |
 | +0x2CC | 已开火 | H |
-| +0x2D8 | 首发前帧数（param #15） | M |
+| +0x2D8 | 首发前帧数（param #15，见下；插件的 ShellMake 写 0） | H |
 | +0x2E0 | 发间隔计数（每发从 param #3 重新取） | H |
 | +0x2E8 / +0x2E4 | 开火音效只放一次 / 已放次数（param #17[0]） | M |
 | +0x2F0 | 剩余发数（param #2） | H |
@@ -39,7 +39,7 @@ EDF.dll TimeDateStamp 0x678CCB46，均为 RVA。置信度：H = 反汇编直接�
 `indirect_fire_param` 其余下标（config 0x2B5F40 逐条跟到写入位置；IFC+0x70 起就是子弹 InitParam，core 偏移 = IFC − 0x70 + 0x9A0）：
 #4 子弹类，#5 速度（+0x220 与 +0xD4 AmmoSpeed，米/帧），#6 AmmoGravityFactor（+0x120），#7 AmmoSize 粗细（+0x100），#8 AmmoHitSizeAdjust（+0x104，命中半径 = #7×#8），
 **#9 AmmoExplosion 爆炸半径**（+0xF0 = core+0xA20；原版 DEMOGUNSHIPFIRE**E15/E25/E35/E50** 的 #9 正是 15/25/35/50），#10 AmmoAlive 存活帧（+0xD8），#11 AmmoIsPenetration（+0xF4），#12 AmmoColor，
-#13 Ammo_CustomParameter（+0x128，交给弹种），#14 自定义模型名（0 = 不用，与爆炸无关），#15 开火音效后到发弹的延迟帧（+0x2D8），#16 开火音效方式，#17 开火音效，#18 AmmoHitSe 命中音效。(H，#14/#15 M)
+#13 Ammo_CustomParameter（+0x128，交给弹种），#14 自定义模型名（0 = 不用，与爆炸无关），#15 开火音效后到发弹的延迟帧（+0x2D8：config 在 0x2B61ED 取下标 15、0x2B624D 写入；step 每帧在 0x2B97BC / 0x2B97D3 减 1，到 0 才发射，起点取发射那一刻的 +0x300，0x2B9B7D），#16 开火音效方式，#17 开火音效，#18 AmmoHitSe 命中音效。(H，#14 M)
 旧版本笔记把 #9 写成「冲击」、#14 写成「爆炸」，是错的。
 IFC 的爆炸按队伍过滤：IFC+0xD0（每步从 owner+0x314 刷新）不为 -1 时只伤敌对方；owner 无效时队伍 -1，伤所有人。RocketBullet01 寿命到期不爆，GrenadeBullet01 在 CustomParameter #0 = 1 时到期必爆。
 
