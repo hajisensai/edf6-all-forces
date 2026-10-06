@@ -11,12 +11,20 @@ target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
+# The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 # The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
 target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
+# What a blocked jet ran into, logged (src/impact.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
+# The map's real play area: the walls where its ground ends (src/playarea.cpp, src/playarea.h).
+target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
+# The stock split missiles (MissileBullet02) split short of a big target's surface.
+target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -43,11 +51,24 @@ target_link_libraries(sidecar_board_check PRIVATE edf6common)
 target_compile_options(sidecar_board_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(sidecar_board_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# A rotor craft's acceleration budget flown offline (tools/hover_lift_check.cpp, src/hover_lift.h); not part of the plugin build:
+# cmake --build build --target hover_lift_check && build\hover_lift_check.exe
+add_executable(hover_lift_check EXCLUDE_FROM_ALL tools/hover_lift_check.cpp)
+target_compile_options(hover_lift_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hover_lift_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The boardable aircraft's flight numbers checked offline (tools/pjet_kinds.cpp); not part of the plugin build:
 # cmake --build build --target pjet_kinds && build\pjet_kinds.exe
 add_executable(pjet_kinds EXCLUDE_FROM_ALL tools/pjet_kinds.cpp)
 target_include_directories(pjet_kinds PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(pjet_kinds PRIVATE /W4 /WX /utf-8 /permissive-)
+# The fixed wings' turn handling under the player's flight model (tools/pjet_turn_sim.cpp: src/pjet_handling.h against the
+# code before 2026-10-06), and its bounds (--check, in CTest):
+# cmake --build build --target pjet_turn_sim && build\pjet_turn_sim.exe --both
+add_executable(pjet_turn_sim EXCLUDE_FROM_ALL tools/pjet_turn_sim.cpp)
+target_include_directories(pjet_turn_sim PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(pjet_turn_sim PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(pjet_turn_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The stock heli's mouse-aim flight (src/heliaim.h) against a stand-in of its flight law, offline: the signs of the keys and
 # the mouse (tools/heli_aim_check.cpp). Not part of the plugin build:
@@ -71,6 +92,11 @@ target_link_libraries(turret_lead_check PRIVATE edf6common)
 target_compile_options(turret_lead_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(turret_lead_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The game clock through the pause menu (src/game_clock.h), offline (tools/pause_clock_check.cpp).
+# Not part of the plugin build: cmake --build build --target pause_clock_check && build\pause_clock_check.exe
+add_executable(pause_clock_check EXCLUDE_FROM_ALL tools/pause_clock_check.cpp)
+target_compile_options(pause_clock_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(pause_clock_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Nix's torso hold (src/nix_twist.h) against a stand-in of the stock update's order, offline (tools/nix_twist_check.cpp).
 # Not part of the plugin build: cmake --build build --target nix_twist_check && build\nix_twist_check.exe
 add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)
@@ -102,6 +128,20 @@ add_executable(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check.cpp)
 target_compile_options(vehicle_ram_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vehicle_ram_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The gunship's muzzle (src/gunmuzzle.h) on the circles it flies: no round's line through its airframe, its start where the
+# muzzle is when it leaves, against the old origin start and the shell's stock wait, offline (tools/gunship_muzzle_check.cpp).
+# Not part of the plugin build: cmake --build build --target gunship_muzzle_check && build\gunship_muzzle_check.exe
+add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.cpp)
+target_compile_options(gunship_muzzle_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(gunship_muzzle_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The exhausts' frame (src/exhaust_pose.h): a jet flown frame by frame in the game's order, its flame's root against its
+# nozzle as drawn, before / after carrying the bone record to this frame (tools/exhaust_pose_check.cpp). Not part of the
+# plugin build: cmake --build build --target exhaust_pose_check && build\exhaust_pose_check.exe
+add_executable(exhaust_pose_check EXCLUDE_FROM_ALL tools/exhaust_pose_check.cpp)
+target_compile_options(exhaust_pose_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(exhaust_pose_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The gun stabilizer (src/stab.h) on a hull driven over bumps and through turns against the stock aim axis step, the
 # gun's world pointing error with and without it, offline (tools/stab_check.cpp). Not part of the plugin build:
 # cmake --build build --target stab_check && build\stab_check.exe
@@ -112,6 +152,11 @@ set_target_properties(stab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BI
 # The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
 # the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
 # cmake --build build --target proteus_check && build\proteus_check.exe
+# The flyers' soft edge's rules offline (tools/airbound_check.cpp, src/airbound.h). Not part of the plugin build.
+add_executable(airbound_check EXCLUDE_FROM_ALL tools/airbound_check.cpp)
+target_compile_options(airbound_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(airbound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)
 target_compile_options(proteus_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(proteus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -180,12 +225,38 @@ target_link_libraries(hud_view PRIVATE edf6common)
 target_compile_options(hud_view PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hud_view PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The HUD's string table offline (tools/hudtext_check.cpp: src/hudtext.h): every text in every language, the same printf
+# arguments as the English, the run-time words, the language picked from the game and the ini. Not part of the plugin build:
+# cmake --build build --target hudtext_check && build\hudtext_check.exe
+add_executable(hudtext_check EXCLUDE_FROM_ALL tools/hudtext_check.cpp)
+target_compile_options(hudtext_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hudtext_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The map view's camera and grid math (src/map_cam.h: the eye, the drag that grabs the ground, the zoom's limits, the
 # grid's reach), offline (tools/map_cam_check.cpp). Not part of the plugin build:
 # cmake --build build --target map_cam_check && build\map_cam_check.exe
 add_executable(map_cam_check EXCLUDE_FROM_ALL tools/map_cam_check.cpp)
 target_compile_options(map_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The map's NPC commands (src/mapcmd_logic.h: the pointer's ground point, the box / click / cycle selection, the keys,
+# the guard formation),
+# offline (tools/map_cmd_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_cmd_check && build\map_cmd_check.exe
+add_executable(map_cmd_check EXCLUDE_FROM_ALL tools/map_cmd_check.cpp)
+target_compile_options(map_cmd_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_cmd_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# What the map marks of the friendly side (src/map_marks.h: team 5's walk, the aircraft's icon), offline
+# (tools/map_marks_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_marks_check && build\map_marks_check.exe
+add_executable(map_marks_check EXCLUDE_FROM_ALL tools/map_marks_check.cpp)
+target_compile_options(map_marks_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_marks_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The HUD's switch cues (src/hud_cue.h: the banner of a store / aim-mode switch, a store's picture), offline
+# (tools/hud_cue_check.cpp). Not part of the plugin build:
+# cmake --build build --target hud_cue_check && build\hud_cue_check.exe
+add_executable(hud_cue_check EXCLUDE_FROM_ALL tools/hud_cue_check.cpp)
+target_compile_options(hud_cue_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hud_cue_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Primer creatures' pose code run offline (tools/primer_pose_view.py, tools/primer_chain_view.py render it):
 # not part of the plugin.
 add_executable(primer_pose_sim tools/primer_pose_sim.cpp)
@@ -218,12 +289,57 @@ target_include_directories(call_pick_test PRIVATE third_party/EDFModLoader "${CM
 target_compile_options(call_pick_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME call_pick COMMAND call_pick_test)
 
+add_executable(map_hud_check EXCLUDE_FROM_ALL tools/map_hud_check.cpp)
+target_compile_options(map_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_hud_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+add_executable(grape_turret_check EXCLUDE_FROM_ALL tools/grape_turret_check.cpp)
+target_compile_options(grape_turret_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(grape_turret_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The view distance's clip planes (src/view_clip.h: the far pass keeps drawing the far-only scenery), offline.
+# cmake --build build --target view_clip_check && build\view_clip_check.exe
+add_executable(view_clip_check EXCLUDE_FROM_ALL tools/view_clip_check.cpp)
+target_compile_options(view_clip_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The split missiles' surface distance against a simulated Blood Storm flight (src/split_fuse.h).
+add_executable(split_fuse_test tests/split_fuse_test.cpp)
+target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME split_fuse COMMAND split_fuse_test)
+
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check emc_check proteus_check sidecar_board_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check
+    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
 endforeach()
 add_test(NAME hud_layout COMMAND hud_view --out "${CMAKE_BINARY_DIR}/hud-review")
+# The jets' attack runs offline (tools/jet_obstacle_sim.cpp --selftest): Guard's predicted pull-out (src/jet_pullout.h) clears
+# the ground in every dive it is given, and a called strike jet's guns and missiles fire as it arrives.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/jet-attack-runs")
+add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE_BINARY_DIR}/jet-attack-runs")
+# The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
+# edge (jet_obstacle_sim --edge-suite).
+add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
+# offline (tools/play_area_check.cpp). Not part of the plugin build:
+# cmake --build build --target play_area_check && build\play_area_check.exe
+add_executable(play_area_check EXCLUDE_FROM_ALL tools/play_area_check.cpp)
+target_include_directories(play_area_check PRIVATE src)
+target_compile_options(play_area_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(play_area_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+add_dependencies(offline_checks play_area_check)
+add_test(NAME play_area_check COMMAND play_area_check)
+add_dependencies(offline_checks pjet_turn_sim)
+add_test(NAME pjet_turn_check COMMAND pjet_turn_sim --check)
+
+add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runtime_check.cpp)
+target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
+target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks map_command_runtime_check)
+add_test(NAME map_command_runtime COMMAND map_command_runtime_check)
+add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-suite)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
+    --compiler "${CMAKE_CXX_COMPILER}")

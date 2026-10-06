@@ -78,6 +78,7 @@ struct Robo {
     float prevAim,prevElev;
     ULONGLONG stuckAt;
     bool firing[kGuns];
+    Command cmd;            // a map command (GroundCommand, mapcmd.cpp): guard puts its leader on the point
 };
 Robo robos[16]{};
 constexpr ULONGLONG kStaleMs=2000;   // a crawler driven every frame; one not driven this long is gone (or not NPC-driven)
@@ -244,7 +245,9 @@ bool OnTarget(const unsigned char* v,const Gun& g,const float* aim,bool firing,b
 void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const bool hasLeader=player.at && GameMs()-player.at<kPlayerFixMs;
-    const float* leader=hasLeader ? player.pos : nullptr;
+    // A guard command (mapcmd.cpp) is a leader standing on its point: it drives there, stops GroundFollow from it and
+    // fights within GroundLeash of it, as it does round the player. Follow is what it does anyway.
+    const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;
     Gun guns[kGuns]{};
     const int n=Guns(v,guns);
     float reach=0.0f;const Gun* ref=nullptr;
@@ -304,6 +307,30 @@ void GroundFrame(unsigned char* vehicle) noexcept {
     if(!r)return;
     r->seen=ms;
     Drive(*r,vehicle,ms);
+}
+
+namespace {
+constexpr ULONGLONG kCommandSeenMs=500;   // game ms: a crawler GroundFrame drove this recently is the plugin's now
+bool Commandable(const Robo& r,ULONGLONG ms) noexcept { return r.ref && r.seen && ms-r.seen<=kCommandSeenMs && CommandVehicleLive(r.ref); }
+}  // namespace
+
+int GroundCommandUnits(CommandUnit* out,int most) noexcept {
+    int n=0;
+    const ULONGLONG ms=GameMs();
+    for(const auto& r:robos)
+        if(n<most && Commandable(r,ms) && ReadCommandUnit(r.ref,"CRAWLER",r.cmd,false,&out[n]))++n;
+    return n;
+}
+
+bool GroundCommand(const void* vehicle,const Command& c) noexcept {
+    for(auto& r:robos) {
+        if(r.ref.obj!=vehicle || !Commandable(r,GameMs()))continue;
+        r.cmd=c;
+        Log("GROUND v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
+            c.at[0],c.at[1],c.at[2]);
+        return true;
+    }
+    return false;
 }
 
 bool CheckGroundProfile() noexcept {

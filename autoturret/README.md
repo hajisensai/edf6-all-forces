@@ -62,7 +62,7 @@ seats; driving those tanks you get the lock too):
   it; the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops
   being lockable, gets 1.5x the lock range away, or you leave the seat. Unlocked, the auto-aim picks its own targets as
   before and the lead circle shows on its pick.
-- A line low on the screen names the mode and both bindings (red while locked).
+- Two lines low on the screen (EDF6VehicleCrew's `TurretAimHud=1`): whether auto-aim is on or off (green `AUTO-AIM ON`; amber `AUTO-AIM OFF (LEAD CIRCLE)`), and under it the switch key (`[Z] auto-aim off` / `on`; on a pad with no `AimModeButton` set, a hint to set one) and the lock key (red while locked). Pressing the switch key shows the new state in large letters over the screen's middle for about 1.5 s.
 - **With EDF6VehicleCrew's turret camera** (its `DecoupledTurretCam=1`, the default: the mouse / right stick turns the
   camera and your turret follows the screen's centre), the gun you sit at is the camera's by default: this plugin never
   turns it onto a target of its own picking. In auto-aim it turns it onto **your lock** only (lock with Q / X); the
@@ -83,6 +83,11 @@ not test line of sight. A Katyusha the player rides stays out of it (left alone,
 ## Install
 
 Requires EDF6 (Steam) with [EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) installed.
+
+**Players: the EDF All Forces pack installs this too.** Its installer (`EDF6VehicleCrew-<version>.zip`, see the
+[repository README](../README.md)) writes this plugin's DLL, its ini (yours kept, only new settings added) and the
+weapon / vehicle data of step 2 on menu 1, puts them back on menu 2 and checks them on menu 5. The manual steps below
+are for using this plugin on its own, or for development.
 
 1. Copy `EDF6AutoTurret.dll` and `EDF6AutoTurret.ini` from a release (or a CI build artifact) into
    `<EDF6>\Mods\Plugins\`.

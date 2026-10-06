@@ -12,7 +12,7 @@ import math
 import os
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
@@ -307,10 +307,41 @@ def grand_battle(plan: Plan) -> Plan:
     return plan
 
 
+# The test range the installer writes (tools/installer.py; the user, 2026-10-06, on the 0.8.0 pack's range, which was the
+# grand battle: 「测试场的怪给我去掉吧，留下靶子。然后载具再补充一下我们新加的」): no enemy at all, only targets (TARGET, the
+# waves' target loop: a group comes back once one is shot down, every other spot up in the air), and every vehicle we
+# added or reworked that the player drives and the range can place: the grand battle's (the player's jets, every
+# boardable kind parked, the Katyusha, the howitzer, the drill tank, the sidecar, the helicopters, the tanks and the flak
+# EDF6AutoTurret arms, the Depth Crawler) and RANGE_REWORKED.
+# Room: the plain (M045) has 36 flat vehicle spots out to 450 m (layout: 15 m apart) and they are not all room (a
+# carrier keeps 50 m clear, a jet 15-22 m: footprint). On the real plain (tools/selftest.py
+# target_range_fits_the_real_plain) the grand battle's 37 placements and these three overlap by up to 6.2 m, so the
+# range keeps one of each ground vehicle the grand battle has two of (the player's jets stay four and three: one a
+# player online), leaves out the NPC tanks (an empty tank gets an NPC driver anyway, README 「NPC 自动上车」) and keeps one
+# NPC-flown fighter of five (H calls it down, README; a second one overlaps the Nix by 2.3 m).
+# The stock vehicles the plugin reworks while the player rides them: the EMC's charged beam (src/emc.cpp), the Nix's
+# torso (src/nix.cpp), the Proteus's two seats and modes (src/proteus.cpp).
+RANGE_REWORKED = ('v510_maser_mission', 'v612_nix_g_mission', 'v614_proteus_mk2_mission')
+RANGE_FRIENDS = {'edf6tr_jet_fighter_mission': 1}
+RANGE_WAVES = Waves(enabled=True, enemy=TARGET, per_wave=4, max_alive=24, first_delay=5.0, interval=5.0)
+
+
+def target_range(plan: Plan) -> Plan:
+    """The installer's range (see RANGE_REWORKED): targets only, every vehicle we added."""
+    fleet = grand_battle(Plan())
+    plan.vehicles = {**{s: n if s in JETS else min(n, 1) for s, n in fleet.vehicles.items()},
+                     **{s: 1 for s in RANGE_REWORKED}}
+    plan.friends = dict(RANGE_FRIENDS)
+    plan.waves = replace(RANGE_WAVES)
+    plan.air = AirWaves(enabled=False)
+    plan.scenario = ''
+    return plan
+
+
 def grand_points(lay: Layout) -> list[tuple[str, float, rmpa.Point]]:
     """(ship SGO, height, its point): the farthest free points, raised (install writes them up in MISSION.RMPA)."""
     far = lay.far_points[::-1]
-    if len(far) < far_reserved(GRAND):
+    if len(far) < len(GRAND_SHIPS) + GRAND_SKY_SPAWNS:
         raise ValueError('大混战：这张地图远处的空闲点位不够放舰船')
     return [(sgo, dy, p) for (sgo, dy), p in zip(GRAND_SHIPS, far)]
 
@@ -365,6 +396,8 @@ class Layout:
     vehicle_points: list[rmpa.Point]
     enemy_points: list[rmpa.Point]
     far_points: list[rmpa.Point] = field(default_factory=list)   # free points past the enemy ring
+    # What spots_for placed (and the player's start, a SPOT), each with its footprint: no target group comes out on them.
+    taken: list[tuple[rmpa.Point, float]] = field(default_factory=list)
 
 
 # How far out vehicle spots are taken, ring by ring, until there are as many as wanted: the plain has 12
@@ -372,10 +405,22 @@ class Layout:
 SPOT_RINGS = (160.0, 300.0, 450.0, 800.0)
 
 
-def far_reserved(scenario: str) -> int:
-    """How many of the farthest points `scenario` keeps for itself (no vehicle stands on them): the grand battle's
-    ships and its sky's spawns."""
-    return len(GRAND_SHIPS) + GRAND_SKY_SPAWNS if scenario == GRAND else 0
+# How many far points a range of targets keeps for them (target_ranged): RANGE_WAVES' groups, three on the ground and
+# three in the air.
+TARGET_SPOTS = 6
+
+
+def target_ranged(plan: Plan) -> bool:
+    """Does `plan` put up targets (TARGET in the waves) rather than enemies? (The air waves leave them out, AirWaves.)"""
+    return plan.waves.enabled and plan.waves.enemy == TARGET and not plan.air.enabled
+
+
+def far_reserved(plan: Plan) -> int:
+    """How many of the farthest points `plan` keeps for itself (no vehicle stands on them): the grand battle's ships
+    and its sky's spawns, or a range's targets (TARGET_SPOTS)."""
+    if plan.scenario == GRAND:
+        return len(GRAND_SHIPS) + GRAND_SKY_SPAWNS
+    return TARGET_SPOTS if target_ranged(plan) else 0
 
 
 def layout(points: list[rmpa.Point], need: int = 0, reserve: int = 0) -> Layout:
@@ -420,6 +465,7 @@ def spots_for(plan: Plan, lay: Layout) -> list[tuple[str, bool, rmpa.Point]]:
     lay.far_points = [p for p in lay.far_points if p not in points]
     far = lay.far_points[::-1][:len(big)]
     lay.far_points = [p for p in lay.far_points if p not in far]
+    lay.taken = [(lay.player, SPOT)] + [(p, footprint(s)) for (s, _), p in zip(small + big, points + far)]
     return [(s, npc, p) for (s, npc), p in zip(small, points)] + [(s, npc, p) for (s, npc), p in zip(big, far)]
 
 
@@ -431,9 +477,15 @@ SPOT = 7.5
 # Parked jets stand at least JET_GAP m apart (the fighter is 16 m across, the strike jet's wings wider): several
 # parked jets side by side would lock wings at the start (the grand battle parks a dozen, the user, 2026-10-05).
 JET_GAP = 30.0
-# The other vehicles kept JET_GAP apart like the jets: the helicopters' rotors, the big tank.
+# The other vehicles kept JET_GAP apart like the jets: the helicopters' rotors.
 WIDE = frozenset({'edf6tr_v506_heli_mission', 'edf6tr_v506_heli_edf6benefits_mission', 'edf6tr_vehicle409_heli_mission',
-                  'edf6tr_vehicle410_heli_mission', 'edf6tr_v602_heli_mission', 'vehicle404_bigtank'})
+                  'edf6tr_vehicle410_heli_mission', 'edf6tr_v602_heli_mission'})
+# Stock vehicles longer than a SPOT, by how far their model reaches from its origin across the ground (m, the bind pose's
+# vertices in the SGO's model, Root.cpk; tools/selftest.py footprint_covers_the_stock_models measures them again): the
+# EMC's barrel 21.0 (v510_maser.mdb), the big tank's 16.6 (in WIDE before: 15), the Proteus's legs 12.0. Each its reach,
+# rounded up.
+REACH: dict[str, float] = {'v510_maser_mission': 21.5, 'vehicle404_bigtank': 17.0, 'v614_proteus_mk2_mission': 12.5,
+                           'vehicle407_bigbegaruta_mission': 11.5}
 # The air carriers (pylib/vcobjects.py JETS: the EDF transport x 1.6, 59 x 77 m): half its diagonal (48.5 m), whichever
 # way it faces, and a margin.
 CARRIER_MODEL = 'EDF6VC_CARRIER.MRAB'
@@ -448,6 +500,8 @@ ELEVON_RADIUS = 22.0
 
 def footprint(sgo: str) -> float:
     """The radius (m) `sgo` keeps clear round its point (see SPOT)."""
+    if sgo in REACH:
+        return REACH[sgo]
     jet = JETS.get(sgo)
     if jet and jet.file == CARRIER_MODEL:
         return CARRIER_RADIUS
@@ -493,10 +547,17 @@ def spaced(chosen: list[tuple[str, bool]], points: list[rmpa.Point], player: rmp
     return out
 
 
+# A target group comes out within this many m of its spot (script: CreateEnemyGroup's radius).
+TARGET_SPREAD = 30.0
+
+
 def target_spots(lay: Layout) -> list[rmpa.Point]:
     """Where targets (TARGET) stand: the enemy spots and the free points past them (the plain has 48 points,
-    the vehicles take most: 7 enemy spots were too few)."""
-    return lay.enemy_points + lay.far_points
+    the vehicles take most: 7 enemy spots were too few), but none whose group (TARGET_SPREAD round it) would come out
+    on a placed vehicle or the player's start (lay.taken, spots_for: with the vehicles out to 376 m on the plain, a target
+    group on a free point among them would come out on the parked jets). All of them when every one would."""
+    every = lay.enemy_points + lay.far_points
+    return [p for p in every if overlap(p, TARGET_SPREAD, lay.taken) == 0.0] or every
 
 
 def air_targets(lay: Layout) -> list[rmpa.Point]:
@@ -613,7 +674,7 @@ def script(plan: Plan, lay: Layout) -> str:
             f'\tWait({w.first_delay:.1f});',
             '\twhile( true ) {',
             f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) + {per} <= {min(int(w.max_alive), len(spots) * per)} ) {{',
-            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], 30, {_q("app:/object/" + w.enemy + ".sgo")}, {per}, {w.level:.2f}, true);',
+            f'\t\t\tCreateEnemyGroup(spots[next % spots.length()], {TARGET_SPREAD:.0f}, {_q("app:/object/" + w.enemy + ".sgo")}, {per}, {w.level:.2f}, true);',
             '\t\t\tnext++;',
             '\t\t}',
             '\t\tWait(1.0);',
@@ -890,14 +951,14 @@ def install(game_root: str, plan: Plan) -> list[str]:
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
-    lay = layout(rmpa.points(points_file), small_count(plan), far_reserved(plan.scenario))
+    lay = layout(rmpa.points(points_file), small_count(plan), far_reserved(plan))
     text = script(plan, lay)
     placed = [(s, npc, p) for s, npc, p in
-              spots_for(plan, layout(rmpa.points(points_file), small_count(plan), far_reserved(plan.scenario)))]
+              spots_for(plan, layout(rmpa.points(points_file), small_count(plan), far_reserved(plan)))]
     if plan.scenario == GRAND:   # the ships' points up in the air
         for _, dy, p in grand_points(lay):
             points_file = rmpa.raised(points_file, {p.name}, dy)
-    if plan.waves.enabled and plan.waves.enemy == TARGET and not plan.air.enabled:
+    if target_ranged(plan):
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
     if plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS:
         points_file = rmpa.raised(points_file, {p.name for p in lay.enemy_points}, PRIMER_KINDS[plan.waves.enemy][2])

@@ -815,10 +815,15 @@ unsigned char* CreateSub(const float* m,InitParam* param) noexcept {
 }
 
 // The follower gauges as the game draws them, then the plugin's HUD (hud.cpp: the vehicle readouts, and per carrier
-// of the last published snapshot its world bars and its panel).
+// of the last published snapshot its world bars and its panel). The followers' bars are the one stock HUD piece the
+// camera's HUD switch does not reach (0x8040E0 never reads it): while the map holds that switch off they give way too
+// (docs/hud-re.md §11).
 void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fifth) {
     const auto draw=reinterpret_cast<GaugeFn>(image+kGaugeFn);
-    draw(hud,viewProj,owner,r9,fifth);
+    bool hide=false;
+    __try { hide=MapHidesStockHud(At<const void*>(hud,0x18)); }  // HUiHud's owning camera, as the other stock HUDs use
+    __except(EXCEPTION_EXECUTE_HANDLER){}
+    if(!hide)draw(hud,viewProj,owner,r9,fifth);
     __try {
         const Snapshot& shot=Latest();
         const bool fresh=GetTickCount64()-shot.tick<=kGaugeMs;   // the game thread still publishing (not paused)

@@ -165,6 +165,19 @@ inline bool Held(const Hold& h,const Stops* stops,const Frame& seen,const float*
     return true;
 }
 
+// Held, and the frame the controller must see its wants in (`frame`): the one `held` is seen in, `seen` (where the
+// drawn gun will be after the step: the hull a step ahead when the pose takes the next step's hull, Probe); `now` (the
+// hull at this step) while nothing is held. A want seen in `now` against a `held` seen in `seen` is off by the hull's
+// turn in a frame: the controller keeps the gun that far off its point (0.4 deg at 25 deg/s), the offset swinging from
+// side to side with every steering correction.
+inline bool HeldIn(const Hold& h,const Stops* stops,const Frame& seen,const Frame& now,const float* axes,float* held,float* hull,
+                   Frame* frame) noexcept {
+    *frame=now;
+    if(!Held(h,stops,seen,axes,held,hull))return false;
+    *frame=seen;
+    return true;
+}
+
 // --- which frame the drawn gun is in (see the top) ---
 
 constexpr int kMounts=2,kTimings=2,kHypotheses=kMounts*kTimings;   // h = mount x 2 + timing (0 same, 1 next)

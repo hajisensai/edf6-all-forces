@@ -4,6 +4,8 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "gear.h"
+#include "jet_pullout.h"
+#include "hover_lift.h"
 #include <cwchar>
 
 namespace crew {
@@ -34,6 +36,7 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 constexpr float kLoiterTan=1.73f,kLoiterMin=1.15f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on the attitude it should have this fast
 constexpr float kNegG=1.0f;            // g: the most it pushes (lift down the body's up)
+constexpr float kPushAngle=0.35f;      // rad: a turn down by less than this is pushed, not rolled into (JetSteer)
 constexpr float kLookAhead=2.5f;       // s: the ground and the ceiling are checked this far ahead too
 // Angle of attack (JetSteer, PitchBy): the nose rides kAoaPerG (1.5 deg) above the path per g pulled at cruise,
 // more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax (-3 to 10 deg), eased over kAoaTau s. Only pitch:
@@ -47,12 +50,9 @@ constexpr float kAoaPerG=0.026f,kAoaMin=-0.05f,kAoaMax=0.17f,kAoaTau=0.3f;
 // and is forgotten kWallLifeMs after it was last met.
 constexpr float kBlockedPart=0.5f,kWallJet=60.0f,kWallGround=40.0f,kWallSame=60.0f,kWallSpan=400.0f;
 constexpr ULONGLONG kBlockedMs=250,kWallLifeMs=120000;
-// The Havok broadphase ends at 3000 m a side: the world's walls at the play edge (crew.h PlayEdge: 2400 stock, the big map's ground edge) keep the jets in (jet.cpp deletes
-// one past kWorldGoneIn of it). They are never forgotten and no learned wall takes their place.
-// The world walls stand at the play edge (crew.h PlayEdge, the user's buffer and "past the line, back first"):
-// they turn a jet off from kEdgeBuffer in (or its turn's reach, if more), and one past them is sent back in before
-// all else: at least kEdgeBack of its way pointing in (Guard).
-constexpr float kEdgeBack=0.7f;
+// The Havok broadphase ends at 3000 m a side: the play edge (crew.h PlayEdge: 2400 stock, the big map's ground edge)
+// keeps the jets in (jet.cpp deletes one past kWorldGoneIn of the world's edge), with its soft edge inside it (SoftEdge,
+// airbound.h): no learned wall takes its place.
 // Diving it must keep the height a maxG pull-out takes (v^2/(n g) (1 - cos dive)) plus the sink (gravity
 // along the path speeding it up) while it gets ready: kReact seconds, and the roll that turns its lift up
 // (RollToLift). With kReact alone a fighter diving inverted at an air target began to pull at 75 m, 92 m/s
@@ -90,19 +90,8 @@ constexpr float kFlapUp[2]={1.0f,-1.0f};
 // went through it was once taken for one over a void, Guard let it be, and it flew on under the map
 // (2026-10-03: a fighter 5 s down to -109, drones to -310); its ray from above finds the surface then.
 
-// The walls: the world's four (fixed) and the ones learned this mission (see kWallSpan), where one was met and
-// its horizontal normal, into it.
+// The walls learned this mission (see kWallSpan): where one was met and its horizontal normal, into it.
 struct Wall { float at[3],n[3]; ULONGLONG seen; bool on; };
-struct WorldWalls {
-    Wall w[4];
-    WorldWalls() noexcept {
-        const float a=PlayEdge();
-        w[0]=Wall{{a,0.0f,0.0f},{1.0f,0.0f,0.0f},0,false};w[1]=Wall{{-a,0.0f,0.0f},{-1.0f,0.0f,0.0f},0,false};
-        w[2]=Wall{{0.0f,0.0f,a},{0.0f,0.0f,1.0f},0,false};w[3]=Wall{{0.0f,0.0f,-a},{0.0f,0.0f,-1.0f},0,false};
-    }
-    const Wall* begin() const noexcept { return w; }
-    const Wall* end() const noexcept { return w+4; }
-};
 constexpr int kLearnedWalls=16;
 Wall learned[kLearnedWalls]{};
 
@@ -199,6 +188,17 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     for(int i=0;i<3;++i)lift[i]-=dir[i]*along;
     std::memcpy(up,lift,12);
     if(!Normalize(up)){up[0]=0;up[1]=1;up[2]=0;}
+    // A small push (the path wanted under it by less than kPushAngle: the lift asked for points down): pushed, upright,
+    // at what kNegG gives, instead of rolled inverted to pull. Rolled over for a few degrees, a strike jet rolling in
+    // on a dive from 150 or 450 m over its target spent the dive inverted, its nose off the target, and was still
+    // inverted where it had to pull out (2026-10-06 offline, tools/jet_obstacle_sim.cpp --selftest; the log's
+    // multirole that hit the ground had dived at bank 165-180).
+    float sky[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};   // the world's up square to the path
+    if(angle<kPushAngle && Dot(up,sky)<0.0f && Normalize(sky)) {
+        const float d=Dot(up,dir);
+        for(int i=0;i<3;++i)up[i]=-(up[i]-dir[i]*d);
+        if(!Normalize(up))std::memcpy(up,sky,12);
+    }
     // What the wing gives along the body's up now, and the path that bends.
     const float pull=Clamp(Dot(lift,bodyUp),-kNegG*kG,(bombing ? maxG+1.0f : maxG)*kG);
     float acc[3]={bodyUp[0]*pull,bodyUp[1]*pull-kG,bodyUp[2]*pull};
@@ -394,9 +394,9 @@ bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept {
     return true;
 }
 
-// A wall within `range` ahead of `pos`.
-bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept {
-    for(const auto& w:WorldWalls())if(Gap(w,pos)<range)return true;
+// A wall within `range` ahead of `pos`: its soft edge, or one learned.
+bool NearWall(const Jet& j,const float* pos,float range,ULONGLONG ms) noexcept {
+    if(airbound::Depth(JetSoftBox(j),pos)<range)return true;
     for(const auto& w:learned)if(Holds(w,pos,ms) && Gap(w,pos)<range)return true;
     return false;
 }
@@ -490,11 +490,95 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
         mo.obstSide=TurnSide(pos,mo.obstAt);
 }
 
+// What PredictPullOut needs of jet `j` now: its speed and dive, the g and thrust its stores leave it (JetSteer's
+// Burden), the roll its lift is from up (RollToLift) and the attitude's gain and rate, kPullReact.
+// kPullReact: s before the pull the prediction allows. Guard and Strike's dive turn `want` up the frame they see it and
+// JetSteer lifts along the body's up as it is (the roll is in the prediction itself); this is the body's attitude
+// catching up (kAttGain) and a margin. (kReact, 1 s, stays the look-ahead's: Ahead, the walls.)
+constexpr float kPullReact=0.3f;
+PullOutIn PullOutFor(const Jet& j,const Kind& k) noexcept {
+    const float s=Len(j.m.vel),mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
+    const float top=j.m.top>0.0f ? j.m.top : k.attack*1.3f;
+    return PullOutIn{s,s>1.0f ? Clamp(-j.m.vel[1]/s,0.0f,1.0f) : 0.0f,k.maxG/mass,RollToLift(j),k.roll,kAttGain,kPullReact,
+                     k.thrust/mass,top<kBodyTop ? top : kBodyTop,kG};
+}
+
+// The soft edge (airbound.h, the user 2026-10-06: a small edge before the edge; past it the jet comes back, and as a rule
+// it never crosses it). The walls at the play edge only turned a jet off from a turn's reach out with a push that
+// started at a fifth of its way (TurnOff), and only past the play edge itself did coming back come first: a jet chasing a
+// target out there, or crank / extend running out at full speed, was pulled back out by its want each frame it was not
+// pushed, and flew on to the edge. Now the turn back starts where the turn would end on the soft line (KeepIn: its
+// radius at its g, the roll into it), and past the line it flies in, level, until airbound::kBackDepth inside.
+// Before its turn bites it has kReact s, and a quarter roll at its roll rate (SoftEdge's `react`).
+// The turn it flies is not the one at maxG: past the g its thrust holds (1 + thrust / kTurnBleed) it slows (JetSteer), and
+// banking into it takes the turn's first part. The offline flight test (jet_obstacle_sim --edge-suite) measured a strike
+// jet's half circle some 30% wider than at its 5 g: the radius is taken at the g it holds, times kTurnWide.
+constexpr float kTurnWide=1.15f;
+// m: the radius of its level turn at `speed`.
+float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept {
+    float g=1.0f+k.thrust/kTurnBleed;
+    if(g>k.maxG)g=k.maxG;
+    g/=mass>1.0f ? mass : 1.0f;
+    return airbound::TurnRadius(speed,std::sqrt(g*g>1.0f ? g*g-1.0f : 0.25f))*kTurnWide;
+}
+
+// m/s: the most a wing flies inside a play area too small for its turns at its attack speed (a stock map's ground,
+// some 1.5 km a side: a 245 m/s fighter's turn is 2.9 km across): the speed whose turn's radius is kTightShare of the
+// area's half size, so it turns back inside the ground (at least kTightLeast times its least speed). Its attack speed
+// where the area holds that.
+constexpr float kTightShare=0.3f,kTightLeast=1.15f;
+float TightSpeed(const Kind& k,float half) noexcept {
+    float g=1.0f+k.thrust/kTurnBleed;
+    if(g>k.maxG)g=k.maxG;
+    const float lat=std::sqrt(g*g>1.0f ? g*g-1.0f : 0.25f);
+    const float s=std::sqrt(kTightShare*half*lat*airbound::kGrav/kTurnWide);
+    return Clamp(s,k.minSpeed*kTightLeast,k.attack);
+}
+
+airbound::Box JetSoftBox(const Jet& j,float* band) noexcept {
+    const Kind& k=KindOf(j);
+    const airbound::Box play=PlayBox();   // mapbounds.h: the ground's walls
+    const float half=airbound::HalfOf(play);
+    const float reach=k.flight==FlightModel::rotor ? k.attack*k.attack/(4.0f*(k.brake>1.0f ? k.brake : 1.0f))
+                                                   : TurnRadiusOf(k,1.0f,TightSpeed(k,half));
+    const float b=airbound::Band(reach,Cfg().airSoftTurns,Cfg().airSoftEdge,half);
+    if(band)*band=b;
+    return airbound::Inset(play,b);
+}
+
+const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept {
+    const Kind& k=KindOf(j);
+    const float circle=k.patrol+k.patrolStep*static_cast<float>(j.wing%kPatrolRings);
+    std::memcpy(room,anchor,12);
+    return airbound::ClampIn(JetSoftBox(j),room,circle) ? room : anchor;
+}
+
+namespace {
+// The horizontal soft edge and the soft ceiling (CeilingY less kCeilingGap less ini AirSoftCeil): `want` turned so its
+// turn back (or its push over) ends on them. Logged as it goes past the soft line and as it is back inside.
+void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
+    const Kind& k=KindOf(j);
+    const float s=std::sqrt(j.m.vel[0]*j.m.vel[0]+j.m.vel[2]*j.m.vel[2]),s3=Len(j.m.vel);
+    const float r=TurnRadiusOf(k,j.burden.mass,s);
+    const float react=kReact+0.5f*kPi*0.5f/(k.roll>0.1f ? k.roll : 0.1f);
+    float band=0.0f;
+    const airbound::Box soft=JetSoftBox(j,&band);
+    const bool was=j.m.edgeBack;
+    airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);
+    if(j.m.edgeBack!=was)
+        Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
+            was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,was ? "" : ": back in first");
+    // Over the top it pushes over: its lift down at most kNegG, gravity with it (JetSteer), a radius of s^2 / ((1 + kNegG) g).
+    const float top=CeilingY()-kCeilingGap-Cfg().airSoftCeil;
+    airbound::CapClimb(pos[1],j.m.vel[1],s3,top,airbound::TurnRadius(s3,1.0f+kNegG)*kTurnWide,react,0.15f,want);
+}
+}  // namespace
+
 // Keeps `want` off the walls and the ground and under the ceiling. The ground is the highest under it now and
 // kLookAhead seconds along its track; sinking, the lowest it gets is where a maxG pull-out started
 // kReact seconds from now bottoms out (so a dive runs down to kMinAlt instead of pulling up 100 m early);
 // climbing, the ceiling is checked kLookAhead seconds out.
-void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
+void Guard(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const Kind& k=KindOf(j);
     const float s=Len(j.m.vel);
     // A building (or a ridge) Ahead found on its track: a floor too (below), climbed from where it is now (`rise` over
@@ -512,18 +596,11 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
             want[0]=way[0]*flat;want[2]=way[2]*flat;
         }
     }
-    // Walls: turned off from a turn's radius out (more closing fast), never flown into.
+    // Learned walls: turned off from a turn's radius out (more closing fast), never flown into.
     const float r=s*s/(k.maxG*kG);
-    for(const auto& w:WorldWalls())TurnOff(w,j,pos,r,want,kEdgeBuffer);
-    // Past the play edge: back in before all else (its fight, its target out there), level, straight in.
-    for(const auto& w:WorldWalls()) {
-        if(Gap(w,pos)>=0.0f)continue;
-        const float into=want[0]*w.n[0]+want[2]*w.n[2];
-        if(into>-kEdgeBack){want[0]-=w.n[0]*(into+kEdgeBack);want[2]-=w.n[2]*(into+kEdgeBack);}
-        want[1]=Clamp(want[1],-0.2f,0.2f);
-        Normalize(want);
-    }
     for(const auto& w:learned)if(Holds(w,pos,ms))TurnOff(w,j,pos,r,want);
+    // The soft edge last: coming back in comes before its fight, its target out there, a learned wall.
+    SoftEdge(j,pos,want);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
     const float here=GroundClearance(pos),there=GroundClearance(probe);
@@ -533,11 +610,19 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float lowest=there!=kNoGround ? probe[1]-there : seen;
     float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
     if(j.m.obstUntil && j.m.obstTop>floorY)floorY=j.m.obstTop;
+    // Sinking: the lowest it gets is the bottom of a pull-out begun kPullReact from now (PredictPullOut: at the g its stores
+    // leave it, against gravity, gaining speed), over the ground where that bottom is as well (rising terrain past the
+    // look-ahead's point).
     float bottom=pos[1];
     if(s>1.0f && j.m.vel[1]<0.0f) {
-        const float sinDive=Clamp(-j.m.vel[1]/s,0.0f,1.0f),cosDive=std::sqrt(1.0f-sinDive*sinDive);
-        const float t=kReact+RollToLift(j)/k.roll;
-        bottom-=s*s/(k.maxG*kG)*(1.0f-cosDive)-j.m.vel[1]*t+0.5f*kGravity*sinDive*sinDive*t*t;
+        const PullOut p=PredictPullOut(PullOutFor(j,k));
+        bottom-=p.drop;
+        float flat[3]={j.m.vel[0],0.0f,j.m.vel[2]};
+        if(Normalize(flat)) {
+            const float end[3]={pos[0]+flat[0]*p.run,pos[1],pos[2]+flat[2]*p.run};
+            const float under=GroundClearance(end);
+            if(under!=kNoGround && end[1]-under>floorY)floorY=end[1]-under;
+        }
     }
     if(bottom<floorY+kMinAlt) {
         // Pulling up, never turning back at the same time: `want` behind it made JetSteer's shortest arc go through
@@ -609,9 +694,14 @@ void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) no
 // `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.m.thrust gets the thrust
 // asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
-           float dt) noexcept {
+           float dt,float lift,bool npcGoal) noexcept {
     const Lean& how=*k.lean;
     Motion& mo=j.m;
+    // NPC goals stop inside their soft edge. Player flight and its hail retain their requested goal instead.
+    float inside[3];
+    std::memcpy(inside,goal,12);
+    if(npcGoal)airbound::ClampIn(JetSoftBox(j),inside,0.0f);
+    goal=inside;
     float to[3]={goal[0]-pos[0],0.0f,goal[2]-pos[2]};
     const float d=Len(to);
     float wantV[3]={0.0f,0.0f,0.0f};
@@ -622,15 +712,7 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
     wantV[1]=Clamp((goal[1]-pos[1])*0.5f,-climb,climb);
     float acc[3];
     const float respond=how.respond>dt ? how.respond : dt;
-    for(int i=0;i<3;++i)acc[i]=(wantV[i]-mo.vel[i])/respond;
-    const float a=Len(acc),most=k.thrust;
-    if(a>most)for(int i=0;i<3;++i)acc[i]*=most/a;
-    if(how.jerk>0.0f) {
-        float change[3]={acc[0]-mo.acc[0],acc[1]-mo.acc[1],acc[2]-mo.acc[2]};
-        const float c=Len(change),step=how.jerk*dt;
-        if(c>step)for(int i=0;i<3;++i)change[i]*=step/c;
-        for(int i=0;i<3;++i)acc[i]=mo.acc[i]+change[i];
-    }
+    hover::Accel(wantV,mo.vel,respond,hover::Budget{k.thrust,lift,how.jerk},mo.acc,dt,acc);   // hover_lift.h
     std::memcpy(mo.acc,acc,12);
     for(int i=0;i<3;++i)mo.vel[i]+=acc[i]*dt;
     for(int i=0;i<3;++i)mo.thrust[i]=acc[i]+mo.vel[i]*how.drag;
@@ -676,6 +758,9 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
 }
 
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* nose,float* want,float speed,float dt,ULONGLONG ms) noexcept {
+    // A play area too small for its turns at full speed: no faster than turns inside it (TightSpeed). A bomber on its
+    // run keeps its run's speed.
+    if(j.mode!=Mode::bomb){const float most=TightSpeed(k,airbound::HalfOf(PlayBox()));if(speed>most)speed=most;}
     Ahead(j,pos,ms);
     Guard(j,pos,want,ms);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);

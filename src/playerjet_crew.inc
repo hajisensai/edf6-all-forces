@@ -64,7 +64,7 @@ void CrewGunner(const PJet& j,unsigned char* v,float dt,ULONGLONG ms) noexcept {
 }
 
 // The player left the gun (`alive`: the gunship can still be read): over kEjectFrom they go out under the parachute
-// (EjectStart with no jet of theirs: no catch, bail.mark 0); the gunship back on its NPC pilot's team.
+// (EjectStart with no jet of theirs: no catch, kCatchNone); the gunship back on its NPC pilot's team.
 void GunnerLeft(bool alive,const char* how) noexcept {
     unsigned char* const v=gunner.vehicle;
     const bool live=alive && !v[kDead];   // `v` read only when it can be
@@ -73,7 +73,7 @@ void GunnerLeft(bool alive,const char* how) noexcept {
         PJet t{};
         std::memcpy(t.vel,gunner.vel,12);
         EjectStart(t,v,live);
-        bail.mark=0.0f;
+        bail.catchWith=pjet::kCatchNone;
     }
     if(live && SeatRider(SeatAt(v,0))==Rider::dummy && At<std::int32_t>(v,kTeam)!=jet::kTeamFriend)
         SetObjectTeam(v,jet::kTeamFriend);

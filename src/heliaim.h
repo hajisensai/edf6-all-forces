@@ -68,6 +68,26 @@ inline void KeepOnScreen(const float* vp,const float* pos,float* aim,const float
     }
 }
 
+// The aim moved by a frame's mouse and kept on the screen one axis at a time: the turn (`x`) taken if its mark stays on
+// the screen, then the elevation (`y`) likewise; what still leaves it off (the camera turned) goes to KeepOnScreen.
+// (Before, a frame whose mouse took the aim off on one axis was dropped whole: pushed up and right with the aim at the
+// screen's right edge it did not rise either, and the heli seemed not to follow the mouse, the user 2026-10-06.)
+inline void MoveOnScreen(const float* vp,const float* pos,float* aim,float x,float y,float k,const float* dir,float mark,
+                         float limit) noexcept {
+    float was[3];std::memcpy(was,aim,12);
+    if(x!=0.0f) {
+        float a[3];std::memcpy(a,aim,12);
+        Move(a,x,0.0f,k);
+        if(OnScreen(vp,pos,a,mark,limit) || !OnScreen(vp,pos,aim,mark,limit))std::memcpy(aim,a,12);
+    }
+    if(y!=0.0f) {
+        float a[3];std::memcpy(a,aim,12);
+        Move(a,0.0f,y,k);
+        if(OnScreen(vp,pos,a,mark,limit) || !OnScreen(vp,pos,aim,mark,limit))std::memcpy(aim,a,12);
+    }
+    KeepOnScreen(vp,pos,aim,was,dir,mark,limit);
+}
+
 // --- The mouse-aim flight (see the top) ---
 constexpr float kSetSeconds=3.0f;   // s: W held takes the setpoint from 0 to the top speed (S as fast back)
 constexpr float kBackShare=0.3f;    // the fastest back speed, of the top speed
@@ -165,6 +185,29 @@ inline float StockThrottle(float climb,float vy,float rotor,float* hover,bool le
 // heading angle growing), the heading turning at `rate` rad/s and the way to face at `faceRate`: 1.5 a rad, damped.
 inline float StockYaw(float off,float rate,float faceRate,float damp,float feed) noexcept {
     return vec::Clamp(off*1.5f-(rate-faceRate)*damp+faceRate*feed,-1.0f,1.0f);
+}
+
+// The player's yaw (veh+0x1550 before YawSign; the mouse-aim flight, heli.cpp AimFly): a turn rate toward the aim,
+// kTurnGain per rad off at most the craft's `most` rad/s (its max yaw rate), asked as that rate's share of `most` plus
+// kRateGain of what the turn `rate` (rad/s) still lacks of it. The NPC's StockYaw damps the turn itself (1.2 a rad/s):
+// with the aim kept on the screen (at most ~30 deg ahead of a camera that follows the nose) that damping ate half of
+// the command and the heli turned 5-17 deg/s however the mouse moved (the user's log, 2026-10-06 15:01).
+constexpr float kTurnGain=2.0f,kRateGain=1.5f;
+inline float PlayerYaw(float off,float rate,float most) noexcept {
+    if(!(most>1e-3f) || !std::isfinite(off+rate))return 0.0f;
+    const float want=vec::Clamp(off*kTurnGain,-most,most);
+    return vec::Clamp((want+(want-rate)*kRateGain)/most,-1.0f,1.0f);
+}
+
+// The rotor that holds a stock heli's height, for its lift per rotor `lift` (veh+0x1610, the SGO's heli_movement[0][1]
+// / 60: docs/aircraft-re.md) and mass factor `mass` (+0x161C): kHoverRotor at the 506's lift (34 / 60), as the NPC
+// pilot learns it holding its height (the logs: 0.42-0.43), the less the more lift. The old guess took +0x1610 as 70
+// (an early note's reading): the 506 (0.567) fell to 0.5 and the 602 (70 / 60) clamped to 1.0, so the 602 the player
+// flew climbed on full throttle from 2 to 141 m and its hover was never learned (the user's log, 2026-10-06 15:00).
+constexpr float kHoverRotor=0.424f,kHoverLift=34.0f/60.0f;
+inline float HoverRotor(float lift,float mass) noexcept {
+    if(!(lift>1e-3f) || !(mass>0.0f) || !std::isfinite(lift+mass))return 0.5f;
+    return vec::Clamp(kHoverRotor*kHoverLift/lift*mass,0.1f,1.0f);
 }
 
 // The heli's yaw sign: slot 57 turns the heading by the yaw input times its max yaw rate (veh+0x1634, the SGO's

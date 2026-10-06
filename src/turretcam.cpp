@@ -30,7 +30,8 @@
 //    eye never under the rig's own height over its point. The high view: tcam::High of HighCamHeight / HighCamBack /
 //    HighCamPitch, scaled up for a big vehicle.
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
-// weapon and its yaw axis turns (more than kMinTraverse): a turret. Helicopters and the plugin's jets do not. The view is
+// weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
+// howitzer). Helicopters and the plugin's jets do not. The view is
 // decoupled only while the aim hook sees that seat's aim stepped (a class that turns its turret some other way keeps the
 // stock camera). The AddSe aim step's hook is also the gun stabilizer's way in (stab.cpp StabStep runs the stock step and
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
@@ -39,6 +40,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "turretcam.h"
+#include "stab.h"
 #include "sight.h"
 #include "turretaim.h"
 #include "edf/weapon.h"
@@ -70,11 +72,13 @@ constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8,kSeatStick=0x2D0;
 constexpr float kForeign=0.02f;                // the aim's input this far off the rider's stick: another hand steers it
 constexpr float kMinTraverse=0.17f;            // rad of yaw stops: less is no turret
 constexpr float kAimFar=800.0f,kSightFar=3000.0f;
-constexpr float kPitchMost=80.0f*kPi/180.0f,kViewMost=85.0f*kPi/180.0f;
+using tcam::kViewMost;
+constexpr int kSwitchFrames=45;   // the camera's move between the two (kRigEase a frame: 0.3 % left)
 constexpr float kReturnRate=0.25f,kReturnDone=0.005f;   // the free look's swing back: share a frame, done within (rad)
 constexpr float kRigEase=0.12f;                // a frame, the rig's move between its shapes (normal / high)
 constexpr int kBlendFrames=15;                 // frames the view eases in when the plugin takes the camera over
 constexpr float kOnTarget=0.0087f;             // rad (0.5 deg): the turret is on the point
+constexpr float kPivotReach=40.0f;             // m: a turret pivot farther from the muzzle than this is not one (TurretPivot)
 constexpr float kLargeRig=17.0f;               // m: a rig this long counts as a big vehicle (HighCamClass 2)
 constexpr ULONGLONG kFreshMs=200,kAimFreshMs=150,kLogMs=1000;
 
@@ -92,7 +96,8 @@ struct Shared {
     bool free,returning;       // free look held / swinging back
     bool view;                 // yaw / pitch hold the plugin's view
     bool steering;             // the aim's last step had the camera's command (not the stick's, not another plugin's)
-    float yaw,pitch;
+    bool highView;             // the view is the high one's ground point (`range`, `dy` with `yaw`: tcam::HighAim)
+    float yaw,pitch,range,dy;
     unsigned take;             // which take-over this is (each new vehicle or seat a new one): the camera eases in anew
 };
 // The camera's own (its hook only): the rig it has eased to, its last placement, how far into a take-over.
@@ -105,19 +110,24 @@ struct CamSide {
     tcam::Rig rig;
     float offset;              // the view's pitch over the player's, eased (the high view looks further down)
     float eye[3],look[3];      // the last placement
+    bool point;                // that placement was the high view's ground point (tcam::HighPlace)
+    float carry;               // a switch between the two placements: the share of the old one's offset still carried
+    float carryEye[3],carryLook[3];
 };
 // The rig's numbers the game thread reads (benign races: floats it only steers by): the stock locators' base pitch
-// against the aim (the coupled free look swings back onto it), the rig's radius (highcam.cpp's big vehicles).
-struct RigInfo { float stockBase,normalRadius; const void* v; };
+// against the aim (the coupled free look swings back onto it), the rig's radius (highcam.cpp's big vehicles), the
+// normal rig (the high view hands the view back onto its point through it: tcam::AimAt).
+struct RigInfo { float stockBase,normalRadius; tcam::Rig normal; const void* v; };
 RigInfo rigInfo{};
 // The game thread's own: keys, the free look's latch, the turret's last want (for its drift), the aim point.
 struct GameSide {
     bool held;                 // the free-look input as last read
     float holdAt[3];           // the point the turret holds while looking round
-    float backYaw,backPitch;   // the view to swing back to (decoupled)
+    float backYaw,backPitch,backRange;   // the view to swing back to (decoupled)
+    float switchAt[3];bool switchHit;int switchFrames;   // the high view switched: the turret holds the point meanwhile
     float aim[3];bool hasAim;  // the point under the screen's centre this frame
     bool aimHit,holdHit;       // ... a real map hit (else kAimFar along an empty view) / the held point's
-    float lastWant[2],drift[2];bool hasWant;
+    tcam::SteerState steer;    // the turret command's last wants and their drift (turretcam.h SteerAxes)
     bool foreign;              // the aim's input was not the rider's stick last frame
     ULONGLONG logAt;
 };
@@ -155,11 +165,13 @@ const unsigned char* Gun(const unsigned char* seat) noexcept {
     return nullptr;
 }
 
-// A seat 0 the plugin's camera serves: Type 1 locators, a weapon, a yaw axis that turns.
+// A seat 0 the plugin's camera serves: Type 1 locators, a weapon, a yaw axis that turns, or an indirect-fire gun that
+// does not (the self-propelled howitzer's turret is fixed, tools/make_artillery.py TURRET_LIMITS: its rider still picks
+// the target with the view and takes the high view; the guns only elevate, the hull is turned to lay them).
 bool Turret(const unsigned char* v,const unsigned char* seat) noexcept {
     if(IsHelicopter(v) || IsPlayerJet(v) || At<std::int32_t>(seat,kSeatCamType)!=1 || !Gun(seat))return false;
     const float* yaw=AxisAt(seat,0);
-    return std::isfinite(yaw[0]) && std::isfinite(yaw[1]) && yaw[1]-yaw[0]>kMinTraverse;
+    return std::isfinite(yaw[0]) && std::isfinite(yaw[1]) && (yaw[1]-yaw[0]>kMinTraverse || IndirectFireSeat(seat));
 }
 
 // The aim's direction in the world: the hull's rows turned by the axes (yaw: right positive; pitch: negative up).
@@ -213,24 +225,35 @@ void Drop(const char* why) noexcept {
 
 // --- the turret, from the aim step (game thread) ---
 
-// The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`: from the muzzle, in the hull's frame, with
-// `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line),
-// else the bore line (turretcam.h BallisticAim).
-bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,bool ballistic,float* want) noexcept {
+// The centre the seat's turret turns about: its look-at camera point's bone (seat +0x218 {locator, bone}), the turret's
+// yaw axis the stock camera orbits (StockRig takes it so too; docs/camera-re.md §3b: the Blacker's `cannon_main`, the
+// Grape's `Barrel` whose origin is its trunnion on the bore line, 0.42 m ahead of the yaw axis). False when unreadable.
+bool TurretPivot(const unsigned char* seat,const float* muzzle,float* pivot) noexcept {
+    const auto bone=At<const unsigned char*>(seat,kSeatCamLook+kPointBone);
+    if(!Readable(bone,kBoneOrigin+12))return false;
+    std::memcpy(pivot,bone+kBoneOrigin,12);
+    return std::isfinite(pivot[0]+pivot[1]+pivot[2]) && vec::Dist(pivot,muzzle)<kPivotReach;
+}
+
+// The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`, seen in `frame` (world rows x, up, nose:
+// the frame the stabilizer's held axes are seen in, else the hull's now; stab.h HeldIn): the bore line through `p` from
+// the bore's point at the turret's pivot (turretcam.h AimOrigin: not from the muzzle, which swings with the gun), with
+// `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line), else
+// the bore line (turretcam.h BallisticAim).
+bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ballistic,float* want) noexcept {
     const unsigned char* gun=Gun(seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,16,muzzle,dir))return false;
-    const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    float a[3],b[3];
-    vec::ToLocal(m,p,a);vec::ToLocal(m,muzzle,b);
-    const float l[3]={a[0]-b[0],a[1]-b[1],a[2]-b[2]};
-    const float x=std::sqrt(l[0]*l[0]+l[2]*l[2]);
+    float pivot[3],origin[3];
+    tcam::AimOrigin(muzzle,dir,TurretPivot(seat,muzzle,pivot) ? pivot : nullptr,origin);
+    float l[3],x=0.0f;
+    tcam::LocalTo(frame,origin,p,l,&x);
     if(!(x>1e-3f || std::fabs(l[1])>1e-3f))return false;
     float elevation=std::atan2(l[1],x),frames=0.0f,g[3];
     const float speed=At<float>(gun,edf::kWeaponAmmoSpeed),factor=At<float>(gun,edf::kWeaponAmmoGravity);
     const bool lofted=At<std::int32_t>(gun,edf::kWeaponMark)==edf::kMarkLofted;
     if(ballistic && !lofted && std::isfinite(speed) && speed>0.0f && std::isfinite(factor) && factor>0.0f && edf::WorldGravity(image,g)) {
-        const double drop=factor*-(g[0]*m[4]+g[1]*m[5]+g[2]*m[6])/3600.0;
+        const double drop=factor*-(g[0]*frame[3]+g[1]*frame[4]+g[2]*frame[5])/3600.0;
         float e=0.0f;
         if(drop>0.0 && edf::BallisticArc(x,l[1],speed,drop,false,e,frames) && std::isfinite(e))elevation=e;
     }
@@ -239,30 +262,23 @@ bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,bool 
     return std::isfinite(want[0]) && std::isfinite(want[1]);
 }
 
-// The input that turns each axis onto `want` (each wanted angle's drift a frame fed forward), and whether it is on. A gun
-// the stabilizer holds (stab.cpp StabHeld) is steered in its frame: from the axes it holds the gun at with no command,
-// the hull's turn taken out of the want's drift (the stabilizer turns the gun by it after the step: counted here too, the
-// turret would be sent past the point by it a second time, and the command would move the stabilizer's reference).
-bool Steer(const unsigned char* seat,const float* want,float* in) noexcept {
-    const float* params=reinterpret_cast<const float*>(seat+kSeatAim+kAimParams);
-    float held[2],hull[2];
-    StabHeld(seat+kSeatAim,held,hull);
-    bool on=true;
-    for(int i=0;i<2;++i) {
-        const float* axis=AxisAt(seat,i);
-        const bool full=axis[1]-axis[0]>=2.0f*kPi-0.01f;
-        const float target=full ? want[i] : vec::Clamp(want[i],axis[0],axis[1]);
-        const float error=full ? tcam::Wrap(target-held[i]) : target-held[i];
-        if(game.hasWant) {
-            const float moved=(full ? tcam::Wrap(target-game.lastWant[i]) : target-game.lastWant[i])-hull[i];
-            game.drift[i]+=(vec::Clamp(moved,-0.2f,0.2f)-game.drift[i])*0.5f;
-        }
-        game.lastWant[i]=target;
-        in[i]=tcam::AxisCommand(error,At<float>(axis,kAxisRate),game.drift[i],params);
-        on=on && std::fabs(error)<kOnTarget;
-    }
-    game.hasWant=true;
-    return on;
+// What the turret is steered against this frame: `held` / `hull` (stab.cpp StabHeld: a gun the stabilizer holds is
+// steered from the axes it holds the gun at with no command, the hull's turn out of the drift; else the axes as they are,
+// 0) and the frame the wants are seen in (the one `held` is seen in; the hull's now with nothing held).
+struct Steering { float held[2],hull[2],frame[9]; };
+void SteeringOf(const unsigned char* v,const unsigned char* seat,Steering* s) noexcept {
+    if(StabHeld(seat+kSeatAim,s->held,s->hull,s->frame))return;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    stab::Frame now{};
+    if(stab::FromMatrix(m,&now))std::memcpy(s->frame,now.r,sizeof(now.r));
+    else for(int r=0;r<3;++r)std::memcpy(s->frame+3*r,m+4*r,12);
+}
+
+// The input that turns each axis onto `want` (turretcam.h SteerAxes), and whether it is on.
+bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* in) noexcept {
+    const tcam::Axis axes[2]={{AxisAt(seat,0)[0],AxisAt(seat,0)[1],AxisAt(seat,0)[2],At<float>(AxisAt(seat,0),kAxisRate)},
+                              {AxisAt(seat,1)[0],AxisAt(seat,1)[1],AxisAt(seat,1)[2],At<float>(AxisAt(seat,1),kAxisRate)}};
+    return tcam::SteerAxes(game.steer,want,s.held,s.hull,axes,reinterpret_cast<const float*>(seat+kSeatAim+kAimParams),kOnTarget,in);
 }
 
 void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic) noexcept {
@@ -286,6 +302,16 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     Publish(r);
 }
 
+// The high view taken on the point under the screen's centre (the turret's: a real map hit, else kAimFar along the view:
+// then the ground under that point, the view having none of its own).
+void ToHigh(Shared& s,const float* origin,float* p) noexcept {
+    if(game.hasAim)std::memcpy(p,game.aim,12);
+    else{float d[3];tcam::Dir(s.yaw,s.pitch,d);for(int i=0;i<3;++i)p[i]=origin[i]+d[i]*kAimFar;}
+    if(!game.hasAim || !game.aimHit)p[1]=origin[1];
+    const tcam::HighAim a=tcam::HighAimAt(origin,p,s.yaw);
+    s.yaw=a.yaw;s.range=a.range;s.dy=a.dy;s.highView=true;
+}
+
 // The aim step's work for the player's seat: the view turned by the stick, the free look's latch and swing back, the
 // turret's input. `in` the stock input, `cmd` what the aim gets.
 void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
@@ -298,16 +324,36 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     const bool held=FreeHeld(seat);
     const bool press=held && !game.held,release=!held && game.held;
     game.held=held;
+    const float* origin=reinterpret_cast<const float*>(s.v+kMatrix)+12;
     if(!s.view) {   // the view's start: the screen's centre as it is
         float eye[3],dir[3];
         if(!CameraRay(eye,dir))AxesDir(s.v,seat,dir);
         s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);s.view=true;
+        s.highView=false;
+        float p[3];
+        if(s.high)ToHigh(s,origin,p);
+    } else if(s.high!=s.highView) {   // the high view switched: the screen's centre stays on its point
+        // The turret holds what it was on while the camera moves over: the high view's ground point, else the screen's
+        // centre's (an empty view's made-up far point too: the bore line stays on it).
+        float p[3];
+        if(s.high) {
+            ToHigh(s,origin,p);
+            if(game.hasAim)std::memcpy(p,game.aim,12);
+            game.switchHit=game.hasAim && game.aimHit;
+        } else {
+            const tcam::HighAim a{s.yaw,s.range,s.dy};
+            tcam::HighPoint(origin,a,p);
+            if(rigInfo.v==s.v)tcam::AimAt(rigInfo.normal,origin,p,&s.yaw,&s.pitch);
+            s.highView=false;game.switchHit=true;
+        }
+        std::memcpy(game.switchAt,p,12);game.switchFrames=kSwitchFrames;
+        if(c.debug)Log("TURRETCAM high view %s on (%.0f, %.0f, %.0f)",s.highView ? "taken" : "handed back",p[0],p[1],p[2]);
     }
     if(press) {
         std::memcpy(game.holdAt,game.aim,12);game.holdHit=game.aimHit;
         if(!game.hasAim){float d[3];AxesDir(s.v,seat,d);const float* p=reinterpret_cast<const float*>(s.v+kMatrix)+12;for(int i=0;i<3;++i)game.holdAt[i]=p[i]+d[i]*kAimFar;game.holdHit=false;}
-        game.backYaw=s.yaw;game.backPitch=s.pitch;
-        if(!s.decoupled) {   // coupled: the view starts where the screen's centre is
+        game.backYaw=s.yaw;game.backPitch=s.pitch;game.backRange=s.range;game.switchFrames=0;
+        if(!s.decoupled && !s.highView) {   // coupled: the view starts where the screen's centre is
             float eye[3],dir[3];
             if(CameraRay(eye,dir)){s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);}
         }
@@ -323,28 +369,45 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     const float rate=std::fmax(c.turretCamRate*kPi/180.0f/60.0f,At<float>(seat,kSeatAim+kAimParams+8));
     const bool turning=s.decoupled || s.free;
     if(turning && !s.returning) {
-        s.yaw=tcam::Wrap(s.yaw-stick[0]*rate);
-        s.pitch=vec::Clamp(s.pitch-stick[1]*rate,-kPitchMost,kPitchMost);
+        if(s.highView){tcam::HighAim a{s.yaw,s.range,s.dy};tcam::HighTurn(a,stick[0],stick[1],rate);s.yaw=a.yaw;s.range=a.range;}
+        else {
+            s.yaw=tcam::Wrap(s.yaw-stick[0]*rate);
+            s.pitch=vec::Clamp(s.pitch-stick[1]*rate,-tcam::kPitchMost,tcam::kPitchMost);
+        }
+        if(std::fabs(stick[0])>1e-3f || std::fabs(stick[1])>1e-3f)game.switchFrames=0;   // the player aims again
     }
     if(s.returning) {
         float to[2]={game.backYaw,game.backPitch};
         if(!s.decoupled){float d[3];AxesDir(s.v,seat,d);to[0]=tcam::YawOf(d);to[1]=tcam::PitchOf(d)+rigInfo.stockBase;}
-        const float dy=tcam::Wrap(to[0]-s.yaw),dp=to[1]-s.pitch;
-        s.yaw=tcam::Wrap(s.yaw+dy*kReturnRate);s.pitch+=dp*kReturnRate;
-        if(std::fabs(dy)<kReturnDone && std::fabs(dp)<kReturnDone){s.returning=false;s.yaw=to[0];s.pitch=to[1];if(!s.decoupled)s.view=false;}
+        const float dy=tcam::Wrap(to[0]-s.yaw),dp=s.highView ? 0.0f : to[1]-s.pitch;
+        const float dr=s.highView && s.decoupled ? game.backRange-s.range : 0.0f;
+        s.yaw=tcam::Wrap(s.yaw+dy*kReturnRate);s.pitch+=dp*kReturnRate;s.range+=dr*kReturnRate;
+        if(std::fabs(dy)<kReturnDone && std::fabs(dp)<kReturnDone && std::fabs(dr)<0.5f) {
+            s.returning=false;s.yaw=to[0];
+            if(!s.highView)s.pitch=to[1];
+            if(dr!=0.0f)s.range=game.backRange;
+            if(!s.decoupled)s.view=false;
+        }
     }
     float want[2];
     bool on=false;
-    const float* target=s.free || s.returning ? game.holdAt : game.aim;
-    const bool ballistic=tcam::BallisticAim(s.free || s.returning ? game.holdHit : game.aimHit,LeadCircleOn());
-    const bool steer=s.decoupled && !foreign && (game.hasAim || s.free || s.returning);
+    // The point the turret is put on: the free look's held one, the switch's while the camera moves over, else the
+    // screen's centre.
+    const bool hold=s.free || s.returning,switching=!hold && game.switchFrames>0;
+    if(game.switchFrames>0)--game.switchFrames;
+    const float* target=hold ? game.holdAt : switching ? game.switchAt : game.aim;
+    const bool ballistic=tcam::BallisticAim(hold ? game.holdHit : switching ? game.switchHit : game.aimHit,LeadCircleOn());
+    const bool steer=s.decoupled && !foreign && (game.hasAim || hold || switching);
     s.steering=false;
-    if(foreign){cmd[0]=in[0];cmd[1]=in[1];game.hasWant=false;}
-    else if(steer && Wants(s.v,seat,target,ballistic,want)){on=Steer(seat,want,cmd);s.steering=true;}
+    Steering st{};
+    if(steer)SteeringOf(s.v,seat,&st);
+    if(foreign){cmd[0]=in[0];cmd[1]=in[1];game.steer.hasWant=false;}
+    else if(steer && Wants(seat,st.frame,target,ballistic,want)){on=Steer(seat,st,want,cmd);s.steering=true;}
     else if(s.free || s.returning){cmd[0]=0.0f;cmd[1]=0.0f;}   // coupled: the turret stands while the view looks round
-    else{cmd[0]=in[0];cmd[1]=in[1];game.hasWant=false;}
+    else{cmd[0]=in[0];cmd[1]=in[1];game.steer.hasWant=false;}
     AcquireSRWLockExclusive(&lock);
-    if(shared.seat==seat){shared.aimMs=s.aimMs;shared.free=s.free;shared.returning=s.returning;shared.view=s.view;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=s.steering;}
+    if(shared.seat==seat){shared.aimMs=s.aimMs;shared.free=s.free;shared.returning=s.returning;shared.view=s.view;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=s.steering;
+                          shared.highView=s.highView;shared.range=s.range;shared.dy=s.dy;}
     ReleaseSRWLockExclusive(&lock);
     if(foreign!=game.foreign && c.debug)Log("TURRETCAM the aim's input is %s",foreign ? "another hand's (the turret is theirs, the view the rider's)" : "the rider's again");
     game.foreign=foreign;
@@ -439,16 +502,18 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     if(b && (!a || rigB.radius>=rigA.radius)){normal=rigB;base=baseB;}
     else if(a){normal=rigA;base=baseA;}
     else{camSide=CamSide{};return;}
-    rigInfo=RigInfo{a ? baseA : 0.0f,normal.radius,s.v};
+    rigInfo=RigInfo{a ? baseA : 0.0f,normal.radius,normal,s.v};
     if(!own){Leave(seat,lookTarget,cam);return;}
     const float scale=std::fmax(1.0f,normal.radius/20.0f);
     tcam::Rig high=tcam::High(c.highCamHeight*scale,c.highCamBack*scale,c.highCamPitch);
     std::memcpy(high.fixed,normal.fixed,sizeof(high.fixed));
     const float highBase=-c.highCamPitch*kPi/180.0f;
-    const tcam::Rig& want=s.high ? high : normal;
+    // The view's high view is its ground point (tcam::HighPlace); the coupled one (the aim's) the high rig.
+    const bool point=viewed && s.highView;
+    const tcam::Rig& want=s.high && !viewed ? high : normal;
     const float* m=reinterpret_cast<const float*>(s.v+kMatrix);
     // The view: the plugin's (decoupled, free look), else the aim's at the rig's base pitch (coupled high view).
-    const float offset=viewed ? (s.high ? highBase-base : 0.0f) : highBase;
+    const float offset=viewed ? 0.0f : highBase;
     if(!camSide.owned || camSide.seat!=seat || camSide.leaving) {   // taken over: from the stock locators' rig, easing in
         const bool back=camSide.owned && camSide.seat==seat;   // taken back while handing over: from where it is
         const CamSide was=camSide;
@@ -456,21 +521,37 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         camSide.seat=seat;camSide.take=s.take;camSide.owned=true;camSide.blend=kBlendFrames;
         camSide.rig=back ? was.rig : a ? rigA : want;camSide.offset=back ? was.offset : viewed ? 0.0f : baseA;
         std::memcpy(camSide.eye,cam+kCamEye,12);std::memcpy(camSide.look,cam+kCamLook,12);
+        camSide.point=point;
         if(c.debug)Log("TURRETCAM v=%p: camera taken (%s%s), rig %s r=%.1f up=%.1f rise=%.1f, stock r=%.1f",s.v,viewed ? "view" : "coupled",
                        s.high ? ", high" : "",b && (!a || rigB.radius>=rigA.radius) ? "authored" : "stock",normal.radius,normal.up,normal.rise,a ? rigA.radius : 0.0f);
     }
     tcam::Ease(camSide.rig,want,kRigEase);
     camSide.offset+=(offset-camSide.offset)*kRigEase;
-    float yaw,pitch;
-    if(viewed){yaw=s.yaw;pitch=s.pitch+camSide.offset;}
+    float eye[3],look[3];
+    if(point)tcam::HighPlace(m+12,tcam::HighAim{s.yaw,s.range,s.dy},c.highCamHeight*scale,c.highCamBack*scale,eye,look);
     else {
-        float a3[3];AxesDir(s.v,seat,a3);
-        yaw=tcam::YawOf(a3);pitch=tcam::PitchOf(a3)+camSide.offset;
+        float yaw,pitch;
+        if(viewed){yaw=s.yaw;pitch=s.pitch+camSide.offset;}
+        else {
+            float a3[3];AxesDir(s.v,seat,a3);
+            yaw=tcam::YawOf(a3);pitch=tcam::PitchOf(a3)+camSide.offset;
+        }
+        pitch=vec::Clamp(pitch,-kViewMost,kViewMost);
+        float d[3];
+        tcam::Dir(yaw,pitch,d);
+        tcam::Place(camSide.rig,m+12,yaw,d,eye,look);
     }
-    pitch=vec::Clamp(pitch,-kViewMost,kViewMost);
-    float d[3],eye[3],look[3];
-    tcam::Dir(yaw,pitch,d);
-    tcam::Place(camSide.rig,m+12,yaw,d,eye,look);
+    // A switch between the ground point and the rig: from where the camera was, the old placement's offset eased out
+    // (carried in the hull's motion, not lagging it).
+    if(point!=camSide.point) {
+        for(int i=0;i<3;++i){camSide.carryEye[i]=camSide.eye[i]-eye[i];camSide.carryLook[i]=camSide.look[i]-look[i];}
+        camSide.carry=1.0f;camSide.point=point;
+    }
+    if(camSide.carry>0.0f) {
+        camSide.carry*=1.0f-kRigEase;
+        if(camSide.carry<1e-3f)camSide.carry=0.0f;
+        for(int i=0;i<3;++i){eye[i]+=camSide.carryEye[i]*camSide.carry;look[i]+=camSide.carryLook[i]*camSide.carry;}
+    }
     if(camSide.blend>0) {   // the first frames ease from where the camera was
         const float k=1.0f/static_cast<float>(camSide.blend--);
         for(int i=0;i<3;++i){eye[i]=camSide.eye[i]+(eye[i]-camSide.eye[i])*k;look[i]=camSide.look[i]+(look[i]-camSide.look[i])*k;}
@@ -557,9 +638,9 @@ void TurretCamFrame(unsigned char* v) noexcept {
         game.logAt=now;
         TurretCamReadout r{};
         const bool fresh=PlayerTurretCam(&r);
-        Log("TURRETCAM v=%p view=(%.1f,%.1f) yaw=%.1f pitch=%.1f free=%d high=%d on=%d aim=%d rig r=%.1f base=%.1f",v,shared.yaw*180.0f/kPi,
-            shared.pitch*180.0f/kPi,AxisAt(seat,0)[2]*180.0f/kPi,AxisAt(seat,1)[2]*180.0f/kPi,shared.free,shared.high,fresh && r.onTarget,
-            game.hasAim,rigInfo.normalRadius,rigInfo.stockBase*180.0f/kPi);
+        Log("TURRETCAM v=%p view=(%.1f,%.1f) yaw=%.1f pitch=%.1f free=%d high=%d range=%.0f on=%d aim=%d rig r=%.1f base=%.1f",v,
+            shared.yaw*180.0f/kPi,shared.pitch*180.0f/kPi,AxisAt(seat,0)[2]*180.0f/kPi,AxisAt(seat,1)[2]*180.0f/kPi,shared.free,shared.high,
+            shared.highView ? shared.range : -1.0f,fresh && r.onTarget,game.hasAim,rigInfo.normalRadius,rigInfo.stockBase*180.0f/kPi);
     }
 }
 

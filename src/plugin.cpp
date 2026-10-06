@@ -15,6 +15,8 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
+#include "hudscale.h"
+#include "hudtext.h"
 #include "memory.h"
 #include "subcarrier.h"
 #include "edf/host.h"
@@ -72,6 +74,16 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     const float v=std::wcstof(text,&end);
     return end!=text && std::isfinite(v) ? v : fallback;
 }
+// HudLanguage: auto / en / zh-CN / zh-TW / ja (hudtext.h ParseSetting); anything else is logged and auto used.
+int ReadLanguage(int fallback) noexcept {
+    wchar_t text[32]{};
+    GetPrivateProfileStringW(L"VehicleCrew",L"HudLanguage",L"",text,32,iniPath);
+    if(!text[0])return fallback;
+    const int v=hudtext::ParseSetting(text);
+    if(v>=0)return v;
+    Log("CONFIG HudLanguage=%ls unknown (auto / en / zh-CN / zh-TW / ja): auto used",text);
+    return static_cast<int>(hudtext::Setting::automatic);
+}
 bool ReadBool(const wchar_t* key,bool fallback) noexcept {
     return GetPrivateProfileIntW(L"VehicleCrew",key,fallback ? 1 : 0,iniPath)!=0;
 }
@@ -119,6 +131,7 @@ void Validate(Config& n) noexcept {
     Fix("CarrierLaserDamage",n.carrierLaserDamage,0.0f,1.0e6f);
     Fix("CarrierLaserBreak",n.carrierLaserBreak,0.0f,1.0f);
     Fix("VehicleHudRange",n.vehicleHudRange,0.0f,10000.0f);
+    Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax);
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
     Fix("VehicleRamDamage",n.vehicleRamDamage,0.0f,100.0f);
@@ -134,7 +147,14 @@ void Validate(Config& n) noexcept {
     n.playerJetGearButton=static_cast<int>(FixInt("PlayerJetGearButton",n.playerJetGearButton,0,255));
     n.playerJetChuteCutKey=static_cast<int>(FixInt("PlayerJetChuteCutKey",n.playerJetChuteCutKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
+    Fix("PlayerJetRollScale",n.playerJetRollScale,0.5f,2.0f);
+    Fix("PlayerJetAimGain",n.playerJetAimGain,0.5f,2.0f);
+    Fix("PlayerRotorLift",n.playerRotorLift,0.0f,4.0f);
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
+    Fix("AirSoftEdge",n.airSoftEdge,0.0f,3000.0f);
+    Fix("AirSoftTurns",n.airSoftTurns,0.0f,3.0f);
+    Fix("AirSoftCeil",n.airSoftCeil,0.0f,1000.0f);
+    Fix("HeliSoftEdge",n.heliSoftEdge,0.0f,1000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
@@ -294,9 +314,12 @@ void LoadConfig() noexcept {
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
+    n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
+    n.hudScale=ReadFloat(L"HudScale",n.hudScale);
+    n.hudLanguage=ReadLanguage(n.hudLanguage);
     n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
     n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
     n.playerJetRamDamage=ReadFloat(L"PlayerJetRamDamage",n.playerJetRamDamage);
@@ -315,6 +338,9 @@ void LoadConfig() noexcept {
     n.playerJetChuteCutKey=ReadInt(L"PlayerJetChuteCutKey",static_cast<DWORD>(n.playerJetChuteCutKey));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
+    n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
+    n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
+    n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
     n.heliMouseAim=ReadBool(L"HeliMouseAim",n.heliMouseAim);
     n.heliFlightHud=ReadBool(L"HeliFlightHud",n.heliFlightHud);
@@ -337,6 +363,10 @@ void LoadConfig() noexcept {
     n.vehicleMgVolume=ReadFloat(L"VehicleMgVolume",n.vehicleMgVolume);
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
+    n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
+    n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
+    n.heliSoftEdge=ReadFloat(L"HeliSoftEdge",n.heliSoftEdge);
     n.vehicleRam=ReadBool(L"VehicleRam",n.vehicleRam);
     n.vehicleRamDamage=ReadFloat(L"VehicleRamDamage",n.vehicleRamDamage);
     n.drill=ReadBool(L"Drill",n.drill);
@@ -445,11 +475,13 @@ void LoadConfig() noexcept {
         n.heliFlightHud);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
+    Log("CONFIG soft edge: jets %.0f m / %.1f turns, ceiling %.0f m, helis %.0f m",n.airSoftEdge,n.airSoftTurns,n.airSoftCeil,n.heliSoftEdge);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
-    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange,
-        n.stockVehicleHud,n.hideStockGauges);
-    Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
-        n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
+    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d",n.vehicleHud,
+        n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud,n.hideStockGauges,n.hudScale,n.hudLanguage);
+    Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
+        n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,
+        n.playerRotorLift,n.jetSound,n.jetSoundVolume);
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",
         n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
         n.warnVolume);
@@ -489,7 +521,8 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
-    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d",n.vehicleWelding,n.giantContactCap);
+    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d",n.vehicleWelding,n.giantContactCap,
+        n.splitMissileSurface);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }
@@ -660,6 +693,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     const bool ground=CheckGroundProfile();
     Log("HELI profile=%d",heli);
     Log("GROUND profile=%d",ground);
+    CheckPauseFlag();       // the game's pause flag (the game clock and the HUD stop with it): read only
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
@@ -690,6 +724,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
+    InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();

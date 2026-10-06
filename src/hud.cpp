@@ -17,11 +17,15 @@
 // of it, with the player's position, is published as one snapshot (a triple buffer: the game thread never waits,
 // the draw thread always has a whole frame's copy, never half of one and half of the next). The draw reads only
 // the snapshot: it never touches a vehicle, allocates nothing and asks no VirtualQuery. The draw thread's clock
-// is the wall clock: a snapshot older than kFreshMs (paused, loading, mission over) is not drawn.
+// is the wall clock: a snapshot older than kFreshMs (loading, mission over) is not drawn; nothing is while the game is paused.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "gear.h"
+#include "hudscale.h"
 #include "map_cam.h"
+#include "map_marks.h"
+#include "hud_cue.h"
+#include "hudtext.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
@@ -37,6 +41,8 @@
 
 namespace crew {
 namespace {
+using hudtext::Tr;
+using hudtext::Tx;
 // The quad (docs/hud-re.md §1): (drawer, ctx, row-major 4x4 transform, RGBA, topology, xyz vertices, count, texture).
 constexpr unsigned kQuad=0xC2FB0;
 constexpr std::size_t kQuadDrawer=0x2139A78;
@@ -70,11 +76,32 @@ const Sig kTextSigs[]={
     {kTextFree,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48},12},
     {0x808568,{0x48,0x8B,0x0D,0x51,0xA4,0x8A,0x01},7},            // the rescue message's font manager: [EDF+0x20B29C0]
 };
+// The screen the game's HUD is laid out on (src/hudscale.h, docs/hud-re.md §0.1): *(*(EDF+0x2137090)+0x10), its width
+// and height (int) at +0x20 / +0x24. A HUD text of the game's reads it so (0x94E24F: mov rax,[EDF+0x2137090];
+// mov rcx,[rax+0x10]; mov eax,[rcx+0x20]), as does the follower gauge's bar (0x8044B1).
+constexpr std::size_t kUiScreen=0x2137090,kUiScreenObj=0x10,kUiW=0x20,kUiH=0x24;
+const Sig kUiSigs[]={
+    {0x94E24F,{0x48,0x8B,0x05,0x3A,0x8E,0x7E,0x01,0x48,0x8B,0x48,0x10,0x8B},12},
+    {0x8044B1,{0x48,0x8B,0x05,0xD8,0x2B,0x93,0x01},7},
+};
 // The rescue message's draw (0x808410) makes these calls in this order: the sequence this file repeats.
 const unsigned kTextCalls[][2]={{0x808611,kTextMake},{0x808622,kTextBegin},{0x80863F,kTextMeasure},{0x8086A9,kTextDraw},
                                 {0x8086B5,kTextEnd},{0x8086BF,kTextFree}};
 
-bool quadOk=false,textOk=false;
+bool quadOk=false,textOk=false,uiOk=false;
+
+// The game's text language (docs/hud-re.md §11): Option_Language's index (0 ja, 1 en, 2 kr, 3 cn: Traditional, 4 sc:
+// Simplified), one int EDF.dll reads through its getter 0xE4000 (mov eax,[rip+X]; ret) and sets through 0xE4030
+// (mov [rip+X],ecx; ret) from the options (0x9457DE: options+0x310) and from Steam's language at start (0x706EF0 maps
+// english / japanese / koreana / tchinese / schinese to 1 / 0 / 2 / 3 / 4). The font manager's loader takes the getter's
+// value for its fonts' order (0x963724 call 0xE4000, 0x96372E call 0x963830).
+constexpr unsigned kLangGet=0xE4000,kLangSet=0xE4030,kFontLoad=0x963830;
+constexpr std::size_t kLangValue=0x20B2B30;
+const Sig kLangSigs[]={
+    {kLangGet,{0x8B,0x05,0x2A,0xEB,0xFC,0x01,0xC3},7},   // mov eax,[EDF+0x20B2B30]; ret
+    {kLangSet,{0x89,0x0D,0xFA,0xEA,0xFC,0x01,0xC3},7},   // mov [EDF+0x20B2B30],ecx; ret
+};
+bool langOk=false;
 
 // --- What the game thread gathers (HudSee) and publishes (HudPublish) ---
 constexpr ULONGLONG kFreshMs=500;   // a readout whose vehicle has not been seen this long (game ms) is not drawn,
@@ -262,6 +289,7 @@ struct Text {
     unsigned char* font;          // kFontSize bytes, 16-aligned
     bool made;                    // the renderer made (on the first line measured: none when nothing is shown)
     bool begun;                   // between a Begin and its End: a fault in between still owes the End
+    float s=1.0f;                 // the HUD's scale (hudscale.h): every line's font scale is times it
 };
 float TextScale(float scale) noexcept {
     const float snapped=std::round(scale/kTextScaleStep)*kTextScaleStep;
@@ -280,7 +308,7 @@ void Font(Text& t,float scale) noexcept {
     Put<float>(t.font,4,scale);Put<float>(t.font,8,scale);   // 0x113A3F0
 }
 void Measure(Text& t,Line& l) noexcept {
-    Font(t,l.scale);
+    Font(t,hudscale::Font(l.scale,t.s));
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
     t.begun=true;
     alignas(16) float size[4]{};
@@ -291,7 +319,7 @@ void Measure(Text& t,Line& l) noexcept {
     l.h=std::isfinite(size[1]) && size[1]>0.0f ? size[1] : 0.0f;
 }
 void Draw(Text& t,const Line& l) noexcept {
-    Font(t,l.scale);
+    Font(t,hudscale::Font(l.scale,t.s));
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
     t.begun=true;
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, l.x,l.y,0.0f,1.0f};
@@ -392,14 +420,16 @@ int Readouts(void* drawer,void* ctx,Text* text,const float* vp,float width,float
         const float share=d.hpMax>0.0f ? Unit(d.hp/d.hpMax) : 0.0f;
         const float k=DepthScale(depth,kReadoutFar),ks=k*s;
         Line& l=lines[at];
-        Format(l,L"%hs %d%%",d.kind,static_cast<int>(std::lround(share*100.0f)));
-        if(d.guns>=0)Append(l,L"  G %d",d.guns);
-        if(d.missiles>=0)Append(l,L"  M %d",d.missiles);
-        if(d.drones>=0)Append(l,L"  D %d",d.drones);
-        if(d.leaving)Append(l,L"  RTB");
+        wchar_t kind[24];
+        hudtext::WordTo(d.kind,kind,_countof(kind));
+        Format(l,L"%ls %d%%",kind,static_cast<int>(std::lround(share*100.0f)));
+        if(d.guns>=0)Append(l,Tr(Tx::readoutGuns),d.guns);
+        if(d.missiles>=0)Append(l,Tr(Tx::readoutMissiles),d.missiles);
+        if(d.drones>=0)Append(l,Tr(Tx::readoutDrones),d.drones);
+        if(d.leaving)Append(l,L"%ls",Tr(Tx::readoutRtb));
         else if(d.fuel>=0.0f) {
             const int sec=static_cast<int>(d.fuel);
-            Append(l,L"  F %d:%02d",sec/60,sec%60);
+            Append(l,Tr(Tx::readoutFuel),sec/60,sec%60);
         }
         l.scale=kLineScale*k;l.rgba=d.leaving || (d.fuel>=0.0f && d.fuel<20.0f) ? kWarn : kWhite;
         l.w=l.h=0.0f;
@@ -419,21 +449,23 @@ float Panel(void* drawer,void* ctx,Text* text,const CarrierPanel& p,int index,in
     if(first+2+p.parts>kMaxLines)return top;
     Line* const title=&lines[first];
     Line* const hull=&lines[first+1];
-    if(count>1)Format(*title,L"SUBMARINE CARRIER %d",index+1);
-    else Format(*title,L"SUBMARINE CARRIER");
+    if(count>1)Format(*title,Tr(Tx::carrierTitleN),index+1);
+    else Format(*title,L"%ls",Tr(Tx::carrierTitle));
     title->scale=kTitleScale;title->rgba=kTitle;
     const float hullShare=p.hullMax>0.0f ? p.hull/p.hullMax : 0.0f;
-    Format(*hull,L"HULL %d%%   %.0f / %.0f",static_cast<int>(std::lround(hullShare*100.0f)),p.hull,p.hullMax);
+    Format(*hull,Tr(Tx::carrierHull),static_cast<int>(std::lround(hullShare*100.0f)),p.hull,p.hullMax);
     hull->scale=kLineScale;hull->rgba=kWhite;
     for(int k=0;k<p.parts;++k) {
         Line& l=lines[first+2+k];
         const auto& part=p.part[k];
+        wchar_t name[24];
+        hudtext::WordTo(part.name,name,_countof(name));
         if(part.down) {
             const int sec=static_cast<int>(part.repairSec);
-            Format(l,L"%hs   DOWN  repair %d:%02d",part.name,sec/60,sec%60);
+            Format(l,Tr(Tx::carrierPartDown),name,sec/60,sec%60);
             l.rgba=kDown;
         } else {
-            Format(l,L"%hs   %d%%",part.name,static_cast<int>(std::lround(part.max>0.0f ? part.hp*100.0f/part.max : 0.0f)));
+            Format(l,L"%ls   %d%%",name,static_cast<int>(std::lround(part.max>0.0f ? part.hp*100.0f/part.max : 0.0f)));
             l.rgba=kWhite;
         }
         l.scale=kLineScale;
@@ -527,7 +559,7 @@ void LauncherMarks(void* drawer,void* ctx,Text* text,const float* vp,float width
     float sx,sy;
     if(!ImpactCross(drawer,ctx,vp,width,height,s,l.impact,&sx,&sy) || *at>=kMaxLines)return;
     Line& line=lines[(*at)++];
-    Format(line,L"%d m   %.1f s   ELEV %d",static_cast<int>(std::lround(l.range)),l.flight,static_cast<int>(std::lround(l.elevation)));
+    Format(line,Tr(Tx::launcherLine),static_cast<int>(std::lround(l.range)),l.flight,static_cast<int>(std::lround(l.elevation)));
     line.scale=kLineScale;line.rgba=kYellow;line.w=line.h=0.0f;
     if(text)MeasureAll(*text,&line,1);
     line.x=sx-line.w*0.5f;line.y=sy+20.0f*s;
@@ -539,10 +571,10 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
     if(*at>=kMaxLines)return;
     wchar_t key[32]=L"R3";
     if(keys)KeyName(Cfg().highCamKey,key,32);
-    else if(Cfg().highCamButton!=0x80)std::swprintf(key,32,L"button 0x%X",Cfg().highCamButton);
+    else if(Cfg().highCamButton!=0x80)std::swprintf(key,32,Tr(Tx::padButton),Cfg().highCamButton);
     if((keys && Cfg().highCamKey<=0) || (!keys && Cfg().highCamButton<=0))return;
     Line& l=lines[(*at)++];
-    Format(l,on ? L"HIGH CAM ON [%ls]" : L"HIGH CAM [%ls]",key);
+    Format(l,Tr(on ? Tx::highCamOn : Tx::highCamOff),key);
     l.scale=kLineScale*0.85f;l.rgba=on ? kGreen : kWhite;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
     l.x=(width-l.w)*0.5f;l.y=height*0.86f+2.0f*s;
@@ -554,22 +586,26 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
 void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
     if(*at>=kMaxLines || p.seats<2)return;
     Line& l=lines[(*at)++];
-    Format(l,L"SEATS");
-    static const wchar_t* const kHolder[]={L"-",L"YOU",L"NPC",L"TAKEN"};
+    Format(l,L"%ls",Tr(Tx::seats));
+    const wchar_t* const holders[]={L"-",Tr(Tx::holderYou),Tr(Tx::holderNpc),Tr(Tx::holderTaken)};
     for(int i=0;i<p.seats && i<kMostSeatsShown;++i) {
-        const wchar_t* const what=i==0 ? (p.aircraft ? L"PILOT" : L"DRIVER") : p.gun[i] ? L"GUN" : L"SEAT";
-        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,what,kHolder[static_cast<int>(p.holder[i])&3]);
+        const Tx what=i==0 ? (p.aircraft ? Tx::seatPilot : Tx::seatDriver) : p.gun[i] ? Tx::seatGun : Tx::seatOther;
+        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,Tr(what),holders[static_cast<int>(p.holder[i])&3]);
     }
-    if(p.locked)Append(l,L"   (online: SeatSwitchOnline=0)");
+    if(p.locked)Append(l,L"%ls",Tr(Tx::seatOnlineLocked));
     else if(p.keys) {
         wchar_t key[32];
         KeyName(Cfg().seatNextKey,key,32);
-        if(Cfg().seatNextKey>0)Append(l,L"   [%ls] next",key);
-        if(Cfg().seatNumberKeys)Append(l,L"   [1-%d] pick",p.seats<9 ? p.seats : 9);
-    } else if(Cfg().seatButton==0x02)Append(l,L"   [B] next");
-    else if(Cfg().seatButton>0)Append(l,L"   [button 0x%X] next",Cfg().seatButton);
-    if(p.refused==-2)Append(l,L"   NO FREE SEAT");
-    else if(p.refused>=0)Append(l,L"   SEAT %d TAKEN",p.refused+1);
+        if(Cfg().seatNextKey>0)Append(l,Tr(Tx::seatNextKey),key);
+        if(Cfg().seatNumberKeys)Append(l,Tr(Tx::seatPick),p.seats<9 ? p.seats : 9);
+    } else if(Cfg().seatButton==0x02)Append(l,Tr(Tx::seatNextKey),L"B");
+    else if(Cfg().seatButton>0) {
+        wchar_t button[32];
+        std::swprintf(button,32,Tr(Tx::padButton),Cfg().seatButton);
+        Append(l,Tr(Tx::seatNextKey),button);
+    }
+    if(p.refused==-2)Append(l,L"%ls",Tr(Tx::seatNoFree));
+    else if(p.refused>=0)Append(l,Tr(Tx::seatTaken),p.refused+1);
     alignas(16) static const float kGrey[4]={0.7f,0.7f,0.7f,0.9f};
     l.scale=kLineScale*0.85f;l.rgba=p.locked ? kGrey : p.refused!=-1 ? kWarn : kWhite;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
@@ -614,10 +650,14 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
     if(*at>=kMaxLines)return;
     Line& line=lines[(*at)++];
-    const wchar_t* const gun=g.both ? (g.cannon ? L"[CANNON] SHELLS" : L"[SHELLS] CANNON") : L"SHELLS";
-    if(!g.ground)Format(line,L"%ls   NO GROUND IN SIGHT",gun);
-    else if(!g.inReach)Format(line,L"%ls   %d m   OUT OF RANGE",gun,static_cast<int>(std::lround(g.range)));
-    else if(g.ready)Format(line,L"%ls   %d m   READY",gun,static_cast<int>(std::lround(g.range)));
+    wchar_t gun[48];
+    const wchar_t* const shells=Tr(Tx::gunnerShells);
+    const wchar_t* const cannon=Tr(Tx::gunnerCannon);
+    if(g.both)std::swprintf(gun,48,L"[%ls] %ls",g.cannon ? cannon : shells,g.cannon ? shells : cannon);
+    else std::swprintf(gun,48,L"%ls",shells);
+    if(!g.ground)Format(line,Tr(Tx::gunnerNoGround),gun);
+    else if(!g.inReach)Format(line,Tr(Tx::gunnerOutOfRange),gun,static_cast<int>(std::lround(g.range)));
+    else if(g.ready)Format(line,Tr(Tx::gunnerReady),gun,static_cast<int>(std::lround(g.range)));
     else Format(line,L"%ls   %d m   %.1f s",gun,static_cast<int>(std::lround(g.range)),g.wait);
     line.scale=kLineScale;line.rgba=g.ground && g.inReach ? (g.ready ? kGreen : kYellow) : kRed;line.w=line.h=0.0f;
     if(text)MeasureAll(*text,&line,1);
@@ -654,22 +694,23 @@ void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,fl
     LockAt(drawer,ctx,vp,width,height,s,j.lock,j.lockAt,j.lockProgress,&sx,&sy);
 }
 
-// The stores: the guns' rounds (the fewest in one), each store's name and rounds, the picked one in brackets, and the
-// flares in the air.
-void StoresText(wchar_t* text,std::size_t size,const PlayerJetReadout& j) noexcept {
+// The stores: the guns' rounds (the fewest in one), each store's name and rounds (`names`; the picked one in brackets),
+// and the flares in the air. Without `names` the stores are the loadout strip's (LoadoutStrip) and the line keeps the
+// guns and the flares.
+void StoresText(wchar_t* text,std::size_t size,const PlayerJetReadout& j,bool names=true) noexcept {
     text[0]=L'\0';
     std::size_t at=0;
     if(j.guns>0) {
-        const int n=_snwprintf_s(text,size,_TRUNCATE,L"GUN %d  ",j.gunRounds>0 ? j.gunRounds : 0);
+        const int n=_snwprintf_s(text,size,_TRUNCATE,Tr(Tx::storesGun),j.gunRounds>0 ? j.gunRounds : 0);
         if(n>0)at=static_cast<std::size_t>(n);
     }
-    for(int i=0;i<j.stores && i<6;++i) {
+    for(int i=0;names && i<j.stores && i<6;++i) {
         const int n=_snwprintf_s(text+at,size-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
                                  j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
         if(n<0)break;
         at+=static_cast<std::size_t>(n);
     }
-    if(j.air)_snwprintf_s(text+at,size-at,_TRUNCATE,L"FLARE %d",j.flares);
+    if(j.air)_snwprintf_s(text+at,size-at,_TRUNCATE,Tr(Tx::storesFlare),j.flares);
 }
 void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
     wchar_t text[128];
@@ -686,8 +727,8 @@ void FuelText(wchar_t* out,std::size_t size,const FuelReading& f) noexcept {
     const int share=static_cast<int>(std::lround(f.share*100.0f));
     if(f.sec>=0.0f && f.sec<5999.5f) {
         const int sec=static_cast<int>(std::lround(f.sec));
-        _snwprintf_s(out,size,_TRUNCATE,L"FUEL %d%% %d:%02d",share,sec/60,sec%60);
-    } else _snwprintf_s(out,size,_TRUNCATE,L"FUEL %d%%",share);
+        _snwprintf_s(out,size,_TRUNCATE,Tr(Tx::fuelTime),share,sec/60,sec%60);
+    } else _snwprintf_s(out,size,_TRUNCATE,Tr(Tx::fuelShare),share);
 }
 
 // The takeoff roll's cue (empty: none; `rotate`: the cue to pull up is showing). On the takeoff roll (not in the air:
@@ -698,23 +739,25 @@ void TakeoffCue(const PlayerJetReadout& j,wchar_t* cue,std::size_t size,bool* ro
     const bool rolling=!j.air && j.rotate>0.0f && j.speed>1.0f;
     *rotate=rolling && j.speed>=j.rotate;
     cue[0]=L'\0';
-    if(*rotate)_snwprintf_s(cue,size,_TRUNCATE,L"ROTATE: PULL UP (W / SPACE)");
-    else if(rolling && j.speed>=j.rotate*0.7f)_snwprintf_s(cue,size,_TRUNCATE,L"ROTATE AT %d km/h",rotateKmh);
+    if(*rotate)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::rotateNow));
+    else if(rolling && j.speed>=j.rotate*0.7f)_snwprintf_s(cue,size,_TRUNCATE,Tr(Tx::rotateAt),rotateKmh);
 }
 // The old panel's cue (empty: none): the ground-proximity warning, a missile, a lock, else the takeoff's (TakeoffCue).
 void CockpitCue(const PlayerJetReadout& j,wchar_t* cue,std::size_t size,bool* rotate) noexcept {
     TakeoffCue(j,cue,size,rotate);
-    if(j.pullUp)_snwprintf_s(cue,size,_TRUNCATE,L"PULL UP! TERRAIN");
-    else if(j.threat==2)_snwprintf_s(cue,size,_TRUNCATE,L"MISSILE!");
-    else if(j.threat==1)_snwprintf_s(cue,size,_TRUNCATE,L"LOCKED");
-    else if(!cue[0] && FuelLow(j.fuel))_snwprintf_s(cue,size,_TRUNCATE,L"LOW FUEL");
+    if(j.pullUp)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::pullUpTerrain));
+    else if(j.threat==2)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::missileBang));
+    else if(j.threat==1)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::locked));
+    else if(j.area==2)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::areaTurning));
+    else if(j.area==1)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::areaAhead));
+    else if(!cue[0] && FuelLow(j.fuel))_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::lowFuel));
 }
 // The cue's colour (over `calm` without one): the ground and a missile blink red and white (8 Hz), a lock is yellow,
-// a stall red, the pull-up cue blinks green (4 Hz).
+// a stall red, the area's edge amber (blinking while a wall turns it back), the pull-up cue blinks green (4 Hz).
 const float* CueColour(const PlayerJetReadout& j,bool rotate,const float* calm) noexcept {
     const bool blink=(GetTickCount64()/125)%2==0;
     return j.pullUp || j.threat==2 ? (blink ? kRed : kWhite) : j.threat==1 ? kYellow : j.stall ? kRed :
-           rotate && blink ? kGreen : rotate ? kYellow : calm;
+           j.area==2 ? (blink ? kAmber : kWhite) : j.area==1 ? kAmber : rotate && blink ? kGreen : rotate ? kYellow : calm;
 }
 
 // The cockpit readout of the jet the player flies (drawn whatever VehicleHud says): at the bottom centre, its
@@ -730,8 +773,8 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Line& keys=lines[(*at)++];
     Line& keys2=lines[(*at)++];
     const float alt=std::fmax(-9999.0f,std::fmin(j.clear,99999.0f));
-    Format(info,L"SPD %d km/h    ALT%ls %d m    %ls %d m/s    HP %d%%",static_cast<int>(std::lround(j.speed*3.6f)),
-           j.ground ? L"" : L"*",static_cast<int>(std::lround(alt)),j.climb>=0.0f ? L"UP" : L"DOWN",
+    Format(info,Tr(Tx::jetInfo),static_cast<int>(std::lround(j.speed*3.6f)),
+           j.ground ? L"" : L"*",static_cast<int>(std::lround(alt)),Tr(j.climb>=0.0f ? Tx::climbUp : Tx::climbDown),
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
     const int rotateKmh=static_cast<int>(std::lround(j.rotate*3.6f));
     wchar_t cue[64];
@@ -739,29 +782,30 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     CockpitCue(j,cue,_countof(cue),&rotate);
     wchar_t fuel[32];
     FuelText(fuel,_countof(fuel),j.fuel);
-    Format(thr,L"THROTTLE %d%%%ls%ls    G %.1f%ls%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"    " : L"",fuel,j.load,
-           j.stall ? L"    STALL" : L"",cue[0] ? L"    " : L"",cue);
+    wchar_t stall[24]=L"";
+    if(j.stall)std::swprintf(stall,24,L"    %ls",Tr(Tx::stall));
+    Format(thr,Tr(Tx::jetThrottle),static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"    " : L"",fuel,j.load,
+           stall,cue[0] ? L"    " : L"",cue);
     StoresLine(arms,j);
     if(j.keys) {
         wchar_t boost[32],brake[32],swap[32];
         KeyName(Cfg().playerJetBoostKey,boost,32);KeyName(Cfg().playerJetBrakeKey,brake,32);KeyName(Cfg().playerJetSwitchKey,swap,32);
         if(j.air) {
-            Format(keys,Cfg().playerJetMouseFlight ? L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll"
-                                                    : L"W / SPACE: pull up    S: push down    A / D: roll    (let go: wings level)");
-            if(Cfg().playerJetMouseFlight)Format(keys,L"MOUSE: aim    W / SPACE / S / A / D: fly by hand (the mouse takes over once it moves)");
+            Format(keys,L"%ls",Tr(Cfg().playerJetMouseFlight ? Tx::jetKeysMouse : Tx::jetKeysHand));
+            if(Cfg().playerJetMouseFlight)Format(keys,L"%ls",Tr(Tx::jetKeysMouseHand));
             wchar_t target[32];KeyName(Cfg().playerJetTargetKey,target,32);
             wchar_t flare[32];KeyName(Cfg().playerJetFlareKey,flare,32);
-            Format(keys2,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target    %ls: flares",boost,brake,swap,target,flare);
+            Format(keys2,Tr(Tx::jetKeysAir),boost,brake,swap,target,flare);
         } else {
-            Format(keys,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",boost,brake);
-            Format(keys2,L"W / SPACE: pull up to take off (from %d km/h)",rotateKmh);
+            Format(keys,Tr(Tx::jetKeysGround),boost,brake);
+            Format(keys2,Tr(Tx::jetKeysTakeoff),rotateKmh);
         }
     } else if(j.air) {
-        Format(keys,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways");
-        Format(keys2,L"PITCH, TURN: right stick    LB: switch weapon    X: next target");
+        Format(keys,L"%ls",Tr(Tx::jetPadAir));
+        Format(keys2,L"%ls",Tr(Tx::jetPadAir2));
     } else {
-        Format(keys,L"THROTTLE: forward / ascend = up, back = down    TURN: sticks");
-        Format(keys2,L"TAKE OFF: pull the right stick back (from %d km/h)",rotateKmh);
+        Format(keys,L"%ls",Tr(Tx::jetPadGround));
+        Format(keys2,Tr(Tx::jetPadTakeoff),rotateKmh);
     }
     info.scale=kTitleScale;info.rgba=kWhite;
     thr.scale=kLineScale;
@@ -851,6 +895,115 @@ void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,
     l.x=x-(align==1 ? l.w*0.5f : align==2 ? l.w : 0.0f);l.y=y-l.h*0.5f;
 }
 
+// --- The loadout strip (the user, 2026-10-06: "切换挂载应该有图片显示，而非仅文字"): every store a cell with its picture
+// (StoreGlyph: a silhouette from quads, hud_cue.h; the HUD has no texture of the game's to draw), its name and rounds
+// under it, the picked one on a panel in a cyan frame; on a switch the picked store large over it for kSwitchMs
+// (LoadoutBanner). For the plugin's jets and rotor craft (PlayerJetReadout) and a stock heli (StockHudReadout). ---
+constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's, EDF6AutoTurret's aim mode's)
+constexpr float kCellW=112.0f,kCellH=48.0f;   // px at 1080 lines: a strip's cell
+constexpr float kRows3[]={-4.0f,0.0f,4.0f};   // a glyph's three rows (the pod's rockets, the gun's rounds)
+struct LoadCell { hudcue::StoreIcon icon; wchar_t text[40]; const float* rgba; bool picked; };
+
+// A store's silhouette round (cx, cy), the nose to the right, `k` px a unit (some 36 x 14 units).
+void StoreGlyph(void* drawer,void* ctx,float cx,float cy,float k,hudcue::StoreIcon icon,const float* rgba) noexcept {
+    using hudcue::StoreIcon;
+    auto box=[&](float u0,float v0,float u1,float v1){Rect(drawer,ctx,cx+u0*k,cy+v0*k,cx+u1*k,cy+v1*k,rgba);};
+    auto tri=[&](float bu,float bv,float tu,float tv,float half){Tri(drawer,ctx,cx+bu*k,cy+bv*k,cx+tu*k,cy+tv*k,half*k,rgba);};
+    auto seg=[&](float u0,float v0,float u1,float v1,float t){Seg(drawer,ctx,cx+u0*k,cy+v0*k,cx+u1*k,cy+v1*k,t*k,rgba);};
+    // A missile: a body of length `len` and radius `r`, its nose cone, tail fins of `fin`, canards (front fins) or mid
+    // wings (`mid`, an air-to-ground's).
+    auto missile=[&](float len,float r,float fin,bool canards,bool mid){
+        const float tail=-len*0.5f,cone=len*0.5f-r*2.0f;
+        box(tail,-r,cone,r);tri(cone,0.0f,len*0.5f,0.0f,r);
+        tri(tail+3.0f,-r,tail,-r-fin,1.6f);tri(tail+3.0f,r,tail,r+fin,1.6f);
+        if(canards){tri(cone-3.0f,-r,cone-4.5f,-r-fin*0.5f,1.0f);tri(cone-3.0f,r,cone-4.5f,r+fin*0.5f,1.0f);}
+        if(mid){tri(1.0f,-r,-4.0f,-r-fin*1.2f,3.5f);tri(1.0f,r,-4.0f,r+fin*1.2f,3.5f);}
+    };
+    switch(icon) {
+    case StoreIcon::aamShort: missile(24.0f,1.4f,3.5f,true,false);break;
+    case StoreIcon::aam: missile(30.0f,1.6f,4.0f,false,true);break;
+    case StoreIcon::aamLong: missile(34.0f,2.3f,4.5f,false,true);break;
+    case StoreIcon::agm: missile(26.0f,2.6f,3.0f,false,true);break;
+    case StoreIcon::agmLight: missile(20.0f,1.6f,2.5f,true,false);break;
+    case StoreIcon::bomb:   // Mk 82: a fat body, its ogive nose, the tail cone and its box fins
+        box(-7.0f,-3.8f,8.0f,3.8f);tri(8.0f,0.0f,15.0f,0.0f,3.8f);tri(-7.0f,0.0f,-12.0f,0.0f,3.8f);
+        seg(-15.0f,-5.0f,-15.0f,5.0f,1.6f);seg(-15.0f,-5.0f,-10.0f,-3.0f,1.4f);seg(-15.0f,5.0f,-10.0f,3.0f,1.4f);
+        break;
+    case StoreIcon::rocket:   // Hydra 70: the pod's outline, its tubes, the rockets' tips out of its front
+        seg(-14.0f,-6.0f,12.0f,-6.0f,1.6f);seg(-14.0f,6.0f,12.0f,6.0f,1.6f);seg(-14.0f,-6.0f,-14.0f,6.0f,1.6f);
+        seg(12.0f,-6.0f,12.0f,6.0f,1.6f);seg(-14.0f,-2.0f,12.0f,-2.0f,0.8f);seg(-14.0f,2.0f,12.0f,2.0f,0.8f);
+        for(const float v:kRows3)tri(12.0f,v*1.0f,16.0f,v*1.0f,1.4f);
+        break;
+    case StoreIcon::gun:   // the gun's rounds: three bullets
+        for(const float r:kRows3){const float v=r*1.125f;box(-10.0f,v-1.4f,2.0f,v+1.4f);tri(2.0f,v,7.0f,v,1.4f);box(-12.0f,v-1.6f,-10.5f,v+1.6f);}
+        break;
+    }
+}
+
+// The strip: `n` cells side by side, centred on the screen's middle, from `y` down; a cell kCellW wide, wider for a
+// longer text (a stock weapon's reload). Its height.
+float LoadoutStrip(void* drawer,void* ctx,Text* text,float width,float y,float s,const LoadCell* cells,int n,Line* lines,int* at) noexcept {
+    if(n<=0)return 0.0f;
+    constexpr int kMost=8;
+    float w[kMost],total=0.0f;
+    int line[kMost];
+    if(n>kMost)n=kMost;
+    for(int i=0;i<n;++i) {   // the texts first: their widths size the cells
+        line[i]=*at;
+        Label(text,lines,at,0.0f,y+37.0f*s,1,kLineScale*0.75f,cells[i].rgba,L"%ls",cells[i].text);
+        const float tw=line[i]<*at ? lines[line[i]].w : 0.0f;
+        w[i]=tw+16.0f*s>kCellW*s ? tw+16.0f*s : kCellW*s;
+        total+=w[i];
+    }
+    const float h=kCellH*s,t=2.0f*s;
+    float x=(width-total)*0.5f;
+    for(int i=0;i<n;++i) {
+        const LoadCell& c=cells[i];
+        const float cx=x+w[i]*0.5f,x1=x+w[i];
+        if(line[i]<*at)lines[line[i]].x=cx-lines[line[i]].w*0.5f;
+        if(c.picked) {
+            Rect(drawer,ctx,x+2.0f*s,y,x1-2.0f*s,y+h,kPanel);
+            Seg(drawer,ctx,x+2.0f*s,y,x1-2.0f*s,y,t,kCyan);Seg(drawer,ctx,x+2.0f*s,y+h,x1-2.0f*s,y+h,t,kCyan);
+            Seg(drawer,ctx,x+2.0f*s,y,x+2.0f*s,y+h,t,kCyan);Seg(drawer,ctx,x1-2.0f*s,y,x1-2.0f*s,y+h,t,kCyan);
+        }
+        StoreGlyph(drawer,ctx,cx,y+15.0f*s,1.4f*s,c.icon,c.rgba);
+        x=x1;
+    }
+    return h;
+}
+
+// The picked store large, over the strip, for kSwitchMs after a switch: its picture twice the size, its name and rounds.
+// The panel is as wide as its text needs (a weapon's word is up to twice as wide in Chinese or Japanese: the text ran out
+// of a fixed 300 px), and it covers the HUD's text drawn under it so far (a pitch ladder's degrees showed through it).
+void LoadoutBanner(void* drawer,void* ctx,Text* text,float width,float bottom,float s,const LoadCell& c,Line* lines,int* at) noexcept {
+    const int first=*at;
+    Label(text,lines,at,0.0f,0.0f,0,kTitleScale,kCyan,L"%ls",c.text);
+    const float textW=*at>first ? lines[first].w : 0.0f,textX=116.0f*s,right=24.0f*s;
+    const float w=std::fmax(300.0f*s,textX+textW+right),h=64.0f*s,x0=(width-w)*0.5f,y0=bottom-h;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kCyan);
+    StoreGlyph(drawer,ctx,x0+58.0f*s,y0+h*0.5f,2.6f*s,c.icon,kCyan);
+    for(int i=0;i<first;++i) {   // what is under the panel
+        Line& l=lines[i];
+        if(l.x<x0+w && x0<l.x+l.w && l.y<y0+h && y0<l.y+l.h)l.text[0]=L'\0';
+    }
+    if(*at>first){lines[first].x=x0+textX;lines[first].y=y0+(h-lines[first].h)*0.5f;}
+}
+
+// The plugin aircraft's stores as cells: each one's picture (hud_cue.h StoreIconOf), its name and rounds; out of rounds
+// dim; the picked one cyan.
+int JetCells(const PlayerJetReadout& j,LoadCell* cells) noexcept {
+    int n=0;
+    for(int i=0;i<j.stores && i<6;++i) {
+        LoadCell& c=cells[n++];
+        c.icon=hudcue::StoreIconOf(j.storeName[i],j.storeRole[i]);
+        c.picked=i==j.store;
+        _snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%hs %d",j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
+        c.rgba=j.storeRounds[i]<=0 ? kHudDim : c.picked ? kCyan : kHud;
+    }
+    return n;
+}
+
 // The level heading the ladder and the tape go by: the flight path's, else (hovering, straight up or down) the nose's.
 bool LevelHeading(const PlayerJetSymbols& y,float* h) noexcept {
     const float* ref=y.moving ? y.dir : y.nose;
@@ -937,11 +1090,11 @@ void Boxes(void* drawer,void* ctx,Text* text,float width,float height,float s,fl
     }
     const float alt=std::fmax(-9999.0f,std::fmin(clear,99999.0f));
     Label(text,lines,at,left,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(speed*3.6f)));
-    Label(text,lines,at,left,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"KM/H");
+    Label(text,lines,at,left,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"%ls",Tr(Tx::speedLabel));
     if(under && under[0])Label(text,lines,at,left,cy+kBoxRow*s,1,kLineScale,underRgba,L"%ls",under);
     Label(text,lines,at,right,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(alt)));
-    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,ground ? L"ALT M" : L"ALT* M");
-    Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,L"VS %+d",static_cast<int>(std::lround(climb)));
+    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"%ls",Tr(ground ? Tx::altLabel : Tx::altLabelNoGround));
+    Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,Tr(Tx::climbRate),static_cast<int>(std::lround(climb)));
 }
 void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
                    int* at) noexcept {
@@ -969,13 +1122,21 @@ bool Pipper(void* drawer,void* ctx,const float* vp,float width,float height,floa
     return true;
 }
 
+// The target's lead mark: a cross in a circle at `at` (where the rounds meet it, hud.cpp GunSight / StockMark).
+void LeadMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* at,const float* rgba) noexcept {
+    float x,y;
+    if(!sight::ToScreen(vp,at,1.0f,width,height,&x,&y))return;
+    const float r=7.0f*s,t=2.0f*s;
+    Arc(drawer,ctx,x,y,r,0.0f,kTurn,t,10,rgba);
+    Seg(drawer,ctx,x-r,y-r,x+r,y+r,t,rgba);Seg(drawer,ctx,x-r,y+r,x+r,y-r,t,rgba);
+}
+
 // The guns' sight: a cross on the boresight (where the nose points: the guns' line), the pipper (a circle, a dot in it)
 // where the rounds fired now will be at the target's range (else at the sight's own), the target's lead mark (a cross
 // in a circle, dim out of the rounds' reach) and the range as an arc round the pipper (from its top, the share of the
 // reach). Pipper on the lead mark: the rounds meet the target.
 void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetSymbols& y) noexcept {
     if(!y.gun)return;
-    const float t=2.0f*s;
     float x,yy;
     Boresight(drawer,ctx,vp,width,height,s,y.nose);
     if(Pipper(drawer,ctx,vp,width,height,s,y.pipper,kHud,&x,&yy) && y.lead && y.gunRange>0.0f) {
@@ -983,12 +1144,7 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
         const int sides=static_cast<int>(std::ceil(share*24.0f));
         if(sides>0)Arc(drawer,ctx,x,yy,(kPipper+5.0f)*s,-0.25f*kTurn,share*kTurn,3.0f*s,sides,y.leadInRange ? kHud : kHudDim);
     }
-    if(y.lead && sight::ToScreen(vp,y.leadAt,1.0f,width,height,&x,&yy)) {
-        const float r=7.0f*s;
-        const float* c=y.leadInRange ? kHud : kHudDim;
-        Arc(drawer,ctx,x,yy,r,0.0f,kTurn,t,10,c);
-        Seg(drawer,ctx,x-r,yy-r,x+r,yy+r,t,c);Seg(drawer,ctx,x-r,yy+r,x+r,yy-r,t,c);
-    }
+    if(y.lead)LeadMark(drawer,ctx,vp,width,height,s,y.leadAt,y.leadInRange ? kHud : kHudDim);
 }
 
 // A stock helicopter's weapons' sight (helisight.cpp; ini PlayerHeliGunSight). The gun (the primary trigger's): the
@@ -1017,19 +1173,20 @@ void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,
     }
     if(h.arm==HeliArm::missile) {
         if(LockAt(drawer,ctx,vp,width,height,s,h.lock,h.armAt,h.lockProgress,&x,&y))
-            Label(text,lines,at,x,y+44.0f*s,1,note,h.lock==2 ? kRed : kYellow,L"MSL %d m",static_cast<int>(std::lround(h.armRange)));
+            Label(text,lines,at,x,y+44.0f*s,1,note,h.lock==2 ? kRed : kYellow,Tr(Tx::missileRange),static_cast<int>(std::lround(h.armRange)));
         else if(!h.lock && sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
             Arc(drawer,ctx,x,y,kMissileRing*s,0.0f,kTurn,2.0f*s,24,kHudDim);
-            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,L"MSL %d m",static_cast<int>(std::lround(h.lockRange)));
+            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,Tr(Tx::missileRange),static_cast<int>(std::lround(h.lockRange)));
         }
     } else if(h.arm==HeliArm::rockets) {
+        wchar_t arm[24];
+        hudtext::WordTo(h.armLabel ? h.armLabel : "RKT",arm,_countof(arm));
         if(h.armHit && sight::ToScreen(vp,h.armAt,1.0f,width,height,&x,&y)) {
             RocketDiamond(drawer,ctx,x,y,s,kHud);
-            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHud,L"%hs %d m",h.armLabel ? h.armLabel : "RKT",
-                  static_cast<int>(std::lround(h.armRange)));
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHud,L"%ls %d m",arm,static_cast<int>(std::lround(h.armRange)));
         } else if(sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
             RocketDiamond(drawer,ctx,x,y,s,kHudDim);
-            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHudDim,L"%hs",h.armLabel ? h.armLabel : "RKT");
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHudDim,L"%ls",arm);
         }
     }
 }
@@ -1041,7 +1198,7 @@ void FlightAim(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
                int* at) noexcept {
     float x,y,depth;
     AimSquare(drawer,ctx,vp,width,height,s,p);
-    if(Project(vp,p,width,height,&x,&y,&depth))Label(text,lines,at,x+22.0f*s,y,0,kLineScale*0.75f,kCyan,L"FLY");
+    if(Project(vp,p,width,height,&x,&y,&depth))Label(text,lines,at,x+22.0f*s,y,0,kLineScale*0.75f,kCyan,L"%ls",Tr(Tx::fly));
 }
 
 // --- The warnings (the user, 2026-10-06: "告警换成更现实一点的如何。比如圆圈告警这种。还有拉起、失速提示音和拉起提示"):
@@ -1079,7 +1236,7 @@ void RwrScope(void* drawer,void* ctx,Text* text,float width,float height,float s
     Seg(drawer,ctx,cx-9.0f*s,cy+1.0f*s,cx+9.0f*s,cy+1.0f*s,t,kHud);   // the aircraft: wings, fuselage, tail
     Seg(drawer,ctx,cx,cy-7.0f*s,cx,cy+8.0f*s,t,kHud);
     Seg(drawer,ctx,cx-4.0f*s,cy+7.0f*s,cx+4.0f*s,cy+7.0f*s,t,kHud);
-    if(launch)Label(text,lines,at,cx,cy-r-22.0f*s,1,kLineScale,blink ? kRed : kWhite,L"LAUNCH");
+    if(launch)Label(text,lines,at,cx,cy-r-22.0f*s,1,kLineScale,blink ? kRed : kWhite,L"%ls",Tr(Tx::launch));
     float fwd[3]={y.nose[0],0.0f,y.nose[2]};
     if(y.threats<=0 || !vec::Normalize(fwd))return;
     const float right[3]={-fwd[2],0.0f,fwd[0]};   // its level right (playerjet.cpp RightOf)
@@ -1174,7 +1331,7 @@ void GroundCue(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     if(!pull)return;
     const float mx=width*0.5f,my=height*0.5f,r=110.0f*s;
     Seg(drawer,ctx,mx-r,my-r,mx+r,my+r,5.0f*s,c);Seg(drawer,ctx,mx-r,my+r,mx+r,my-r,5.0f*s,c);
-    Label(text,lines,at,mx,my+r+22.0f*s,1,kTitleScale,c,L"PULL UP");
+    Label(text,lines,at,mx,my+r+22.0f*s,1,kTitleScale,c,L"%ls",Tr(Tx::pullUp));
 }
 
 // The stall (the user: "失速提示"): a lift tape left of the speed box, the share of all the wing gives that its path needs
@@ -1194,13 +1351,13 @@ void StallCue(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     const float yy=bottom-per*Unit(share);
     const float* c=stall ? kRed : share>kStallNear ? kAmber : kHud;
     Tri(drawer,ctx,x-14.0f*s,yy,x-2.0f*s,yy,6.0f*s,c);
-    Label(text,lines,at,x,cy-half-14.0f*s,1,kLineScale*0.7f,kHudDim,L"LIFT");
+    Label(text,lines,at,x,cy-half-14.0f*s,1,kLineScale*0.7f,kHudDim,L"%ls",Tr(Tx::lift));
     if(!stall)return;
     float fx=width*0.5f,fy=height*0.5f,px,py;
     if(y.moving && sight::ToScreen(vp,y.dir,0.0f,width,height,&px,&py)){fx=px;fy=py;}
     const float* box=blink ? kRed : kWhite;
     const int first=*at;
-    Label(text,lines,at,fx+46.0f*s,fy,0,kTitleScale,box,L"STALL");
+    Label(text,lines,at,fx+46.0f*s,fy,0,kTitleScale,box,L"%ls",Tr(Tx::stall));
     if(*at==first)return;
     const Line& l=lines[first];
     const float w=(l.w>0.0f ? l.w : 70.0f*s)+12.0f*s,h=(l.h>0.0f ? l.h : 24.0f*s)+8.0f*s,x0=l.x-6.0f*s,y0=fy-h*0.5f;
@@ -1212,8 +1369,8 @@ void StallCue(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 // the heading tape, MASTER WARN (red) or MASTER CAUTION (amber) filled first, then each warning lit in warn.h's order,
 // the warnings red and the cautions amber in a frame; the warnings blink, and so does a caution its first kNewMs.
 constexpr ULONGLONG kNewMs=3000;
-const wchar_t* const kWarnText[kWarnCount]={L"PULL UP",L"MISSILE",L"STALL",L"GEAR",L"TERRAIN",L"SINK RATE",L"LOCK",L"GEAR SPEED",
-                                            L"WEIGHT ON WHEELS",L"LOW FUEL"};
+const Tx kWarnText[kWarnCount]={Tx::warnPullUp,Tx::warnMissile,Tx::warnStall,Tx::warnGear,Tx::warnTerrain,Tx::warnSinkRate,Tx::warnLock,
+                                Tx::warnGearSpeed,Tx::warnWeightOnWheels,Tx::warnLowFuel,Tx::warnArea};
 void Annunciator(void* drawer,void* ctx,Text* text,float width,float height,float s,const Warnings& w,Line* lines,int* at) noexcept {
     if(!w.on)return;
     const ULONGLONG now=GetTickCount64();
@@ -1223,12 +1380,12 @@ void Annunciator(void* drawer,void* ctx,Text* text,float width,float height,floa
     for(int k=0;k<kWarnCount;++k)if(w.on>>k&1u){lit[n++]=k;warning=warning || IsWarning(k);}
     if(*at+n+1>kMaxLines)return;
     Line* const tile=&lines[*at];
-    Format(tile[0],warning ? L"MASTER WARN" : L"MASTER CAUTION");
+    Format(tile[0],L"%ls",Tr(warning ? Tx::masterWarn : Tx::masterCaution));
     tile[0].rgba=kInk;
     for(int i=0;i<n;++i) {
         const int k=lit[i];
         const bool launch=k==kWarnMissile && w.launchAt && now-w.launchAt<kLaunchMs;
-        Format(tile[1+i],L"%ls",launch ? L"MSL LAUNCH" : kWarnText[k]);
+        Format(tile[1+i],L"%ls",Tr(launch ? Tx::missileLaunch : kWarnText[k]));
         const bool flash=IsWarning(k) || now-w.litAt[k]<kNewMs;
         tile[1+i].rgba=flash && !blink ? kWhite : IsWarning(k) ? kRed : kAmber;
     }
@@ -1275,18 +1432,20 @@ void FighterHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 // its key list the README's, its warnings the annunciator's and the HUD's symbols (2026-10-06: "只留挂载和告警").
 // What only it showed stays, as HUD text without a panel under the HUD's centre: one line of the throttle, the fuel (the
 // stock gauge's FUEL panel gone, stockgauge.cpp), the stores (the picked one in brackets) and the flares, and over it on
-// the takeoff roll its cue (TakeoffCue).
-void CockpitStrip(Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,int* at) noexcept {
+// the takeoff roll its cue (TakeoffCue). The stores are the loadout strip under it (their pictures, names and rounds;
+// `switched`: the picked one large over the line too, LoadoutBanner).
+void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,bool switched,Line* lines,
+                  int* at) noexcept {
     if(*at+2>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& arms=lines[(*at)++];
     wchar_t cue[64],stores[128],fuel[32];
     bool rotate=false;
     TakeoffCue(j,cue,_countof(cue),&rotate);
-    StoresText(stores,_countof(stores),j);
+    StoresText(stores,_countof(stores),j,false);
     FuelText(fuel,_countof(fuel),j.fuel);
     Format(warn,L"%ls",cue);
-    Format(arms,L"THR %d%%%ls%ls    %ls",static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"  " : L"",fuel,stores);
+    Format(arms,Tr(Tx::strip),static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"  " : L"",fuel,stores);
     warn.scale=kTitleScale;warn.rgba=rotate ? ((GetTickCount64()/125)%2==0 ? kGreen : kYellow) : kHud;
     arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kHud;
     warn.w=warn.h=arms.w=arms.h=0.0f;
@@ -1294,6 +1453,10 @@ void CockpitStrip(Text* text,float width,float height,float s,const PlayerJetRea
     const float armsH=arms.h>0.0f ? arms.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
     arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
     warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
+    LoadCell cells[6];
+    const int n=JetCells(j,cells);
+    LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
+    if(switched && j.store>=0 && j.store<n)LoadoutBanner(drawer,ctx,text,width,warn.y-8.0f*s,s,cells[j.store],lines,at);
 }
 
 // --- The helicopter HUD (the user, 2026-10-05: "a helicopter HUD": the flight instruments, the weapons' aim, the hover's
@@ -1352,7 +1515,7 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
     if(!f.landed && (f.speed<kDriftShown || (f.ground && f.clear<kLowHover)))DriftMark(drawer,ctx,width,height,s,f,y);
     HeadingTape(drawer,ctx,text,width,height,s,y,lines,at);
     wchar_t set[32]=L"";
-    if(f.aiming)std::swprintf(set,32,f.setSpeed==0.0f ? L"SET HOVER" : L"SET %d",static_cast<int>(std::lround(f.setSpeed*3.6f)));
+    if(f.aiming)std::swprintf(set,32,Tr(f.setSpeed==0.0f ? Tx::setHover : Tx::setSpeed),static_cast<int>(std::lround(f.setSpeed*3.6f)));
     Boxes(drawer,ctx,text,width,height,s,f.speed,set,kCyan,f.clear,f.ground,f.climb,lines,at);
     HeightBar(drawer,ctx,width,height,s,f);
     GroundCue(drawer,ctx,text,vp,width,height,s,y,f.gpws,f.impactIn,lines,at);
@@ -1363,32 +1526,49 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
 // the ground the takeoff cue (the rotor's share of the lift-off speed; LIFT OK blinking from there); under it the speed
 // set and the height held (the mouse-aim flight); at the bottom `stores` (a rotor craft's; nullptr: none) on a line of
 // their own (with the speed and ALT HOLD on one line, 5-6 stores ran past a line's 128 characters: the last cut off).
-// The fuel (`fuel`, the stock gauge's FUEL panel gone: stockgauge.cpp) goes on the speed set's line.
-void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,const wchar_t* stores,Line* lines,
-               int* at) noexcept {
-    if(*at+3>kMaxLines)return;
+// The fuel (`fuel`, the stock gauge's FUEL panel gone: stockgauge.cpp) goes on the speed set's line. The stores' cells
+// (`cells`, `n`) are the loadout strip under it (`picked` the picked one's, -1 none; `switched`: it large over the
+// lines too, LoadoutBanner).
+void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,
+               const wchar_t* stores,const LoadCell* cells,int n,int picked,bool switched,Line* lines,int* at) noexcept {
+    if(*at+4>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& info=lines[(*at)++];
     Line& arms=lines[(*at)++];
+    Line& help=lines[(*at)++];
+    // The keys (the user, 2026-10-06: "I do not know how to climb or descend, except Space"): the mouse-aim flight on the
+    // keyboard and mouse spells its controls under the strip; the descent is the brake key (ini PlayerJetBrakeKey).
+    Format(help,L"");
+    if(f.keys && f.aiming) {
+        wchar_t down[32];
+        KeyName(Cfg().playerJetBrakeKey,down,32);
+        if(f.landed)Format(help,L"%ls",Tr(Tx::heliKeysLanded));
+        else Format(help,Tr(Tx::heliKeysAir),down);
+    }
     const bool blink=(GetTickCount64()/125)%2==0,lift=f.landed && f.hover>0.0f && f.rotor>0.01f,liftOk=lift && f.rotor>=f.hover;
-    if(liftOk){Format(warn,L"LIFT OK: TAKE OFF (ascend)");warn.rgba=blink ? kGreen : kYellow;}
-    else if(lift){Format(warn,L"ROTOR %d%% of lift-off",static_cast<int>(std::lround(100.0f*f.rotor/f.hover)));warn.rgba=kCyan;}
+    if(liftOk){Format(warn,L"%ls",Tr(Tx::liftOk));warn.rgba=blink ? kGreen : kYellow;}
+    else if(lift){Format(warn,Tr(Tx::rotorShare),static_cast<int>(std::lround(100.0f*f.rotor/f.hover)));warn.rgba=kCyan;}
     else{Format(warn,L"");warn.rgba=kHud;}
     Format(info,L"");
-    if(f.aiming)Append(info,f.setSpeed==0.0f ? L"SPEED SET: HOVER" : L"SPEED SET %d km/h",static_cast<int>(std::lround(f.setSpeed*3.6f)));
-    if(f.holding)Append(info,L"%lsALT HOLD",info.text[0] ? L"    " : L"");
+    if(f.aiming)Append(info,Tr(f.setSpeed==0.0f ? Tx::speedSetHover : Tx::speedSet),static_cast<int>(std::lround(f.setSpeed*3.6f)));
+    if(f.holding)Append(info,Tr(Tx::altHold),info.text[0] ? L"    " : L"");
     wchar_t tank[32];
     FuelText(tank,_countof(tank),fuel);
     if(tank[0])Append(info,L"%ls%ls",info.text[0] ? L"    " : L"",tank);
     Format(arms,L"%ls",stores ? stores : L"");
     warn.scale=kTitleScale;info.scale=arms.scale=kLineScale;info.rgba=arms.rgba=kHud;
-    warn.w=warn.h=info.w=info.h=arms.w=arms.h=0.0f;
-    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);MeasureAll(*text,&arms,1);}
+    help.scale=kLineScale*0.85f;help.rgba=kCyan;
+    warn.w=warn.h=info.w=info.h=arms.w=arms.h=help.w=help.h=0.0f;
+    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);MeasureAll(*text,&arms,1);MeasureAll(*text,&help,1);}
+    help.x=(width-help.w)*0.5f;
     const float lineH=18.0f*s,armsH=arms.h>0.0f ? arms.h : (arms.text[0] ? lineH : 0.0f);
     const float infoH=info.h>0.0f ? info.h : lineH,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
     arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
     info.x=(width-info.w)*0.5f;info.y=arms.y-infoH-(arms.text[0] ? 4.0f*s : 0.0f);
     warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
+    const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
+    help.y=height*0.80f+(stripH>0.0f ? stripH+12.0f*s : 4.0f*s);   // the keys under the loadout strip, not over it
+    if(switched && picked>=0 && picked<n)LoadoutBanner(drawer,ctx,text,width,warn.y-8.0f*s,s,cells[picked],lines,at);
 }
 
 // The landing gear (gear.cpp GearHudLatest; the jets with gear only), at the screen's right over the cockpit's line: its
@@ -1399,39 +1579,44 @@ void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,c
 void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,bool annunciated,Line* lines,int* at,ULONGLONG now) noexcept {
     GearHud g{};
     if(!GearHudLatest(&g) || now-g.tick>kFreshMs || *at+2>kMaxLines)return;
-    const float box=24.0f*s,gap=10.0f*s,pad=10.0f*s,w=3.0f*box+4.0f*gap+2.0f*pad,h=2.0f*box+gap+2.0f*pad+60.0f*s;
+    bool down=true,up=true;
+    for(int i=0;i<kGearLegs;++i){down=down && g.at[i]<=0.0f;up=up && g.at[i]>=1.0f;}
+    // The lines first: the panel is as wide as they need (WEIGHT ON WHEELS, or a language's longer words, ran past it).
+    Line& state=lines[(*at)++];
+    wchar_t key[32]=L"L3";
+    if(g.keys)KeyName(Cfg().playerJetGearKey,key,32);
+    else if(Cfg().playerJetGearButton!=0x40)std::swprintf(key,32,Tr(Tx::padButton),Cfg().playerJetGearButton);
+    Format(state,Tr(Tx::gearState),Tr(down ? Tx::gearDown : up ? Tx::gearUp : Tx::gearTransit),key);
+    state.scale=kLineScale*0.85f;state.rgba=down ? kGreen : up ? kWhite : kAmber;
+    state.w=state.h=0.0f;
+    if(text)MeasureAll(*text,&state,1);
+    const wchar_t* const what=annunciated ? nullptr : g.warn ? Tr(Tx::gearBang) : g.overspeed ? Tr(Tx::warnGearSpeed) :
+                              g.blocked ? Tr(Tx::warnWeightOnWheels) : nullptr;
+    Line* warn=nullptr;
+    if(what) {
+        warn=&lines[(*at)++];
+        Format(*warn,L"%ls",what);
+        warn->scale=kLineScale;warn->rgba=g.warn ? ((now/125)%2==0 ? kRed : kWhite) : kAmber;
+        warn->w=warn->h=0.0f;
+        if(text)MeasureAll(*text,warn,1);
+    }
+    const float box=24.0f*s,gap=10.0f*s,pad=10.0f*s,h=2.0f*box+gap+2.0f*pad+60.0f*s;
+    const float w=std::fmax(3.0f*box+4.0f*gap+2.0f*pad,std::fmax(state.w,warn ? warn->w : 0.0f)+2.0f*pad);
     const float x0=width-w-40.0f*s,y0=height*0.80f-h;
     Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
     Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kCyan);
     const float cx=x0+w*0.5f,top=y0+pad;
     const float lx[kGearLegs]={cx-box*0.5f,cx-box*1.5f-gap,cx+box*0.5f+gap};   // nose; left / right main (x>0 is left)
     const float ly[kGearLegs]={top,top+box+gap,top+box+gap};
-    bool down=true,up=true;
     for(int i=0;i<kGearLegs;++i) {
-        down=down && g.at[i]<=0.0f;up=up && g.at[i]>=1.0f;
         const float t=2.0f*s;
         Rect(drawer,ctx,lx[i],ly[i],lx[i]+box,ly[i]+box,kBarEdge);
         if(g.at[i]<=0.0f)Rect(drawer,ctx,lx[i]+t,ly[i]+t,lx[i]+box-t,ly[i]+box-t,kGreen);
         else if(g.at[i]<1.0f)Rect(drawer,ctx,lx[i]+t,ly[i]+t,lx[i]+box-t,ly[i]+box-t,kAmber);
         else Rect(drawer,ctx,lx[i]+t,ly[i]+t,lx[i]+box-t,ly[i]+box-t,kBarBack);
     }
-    Line& state=lines[(*at)++];
-    wchar_t key[32]=L"L3";
-    if(g.keys)KeyName(Cfg().playerJetGearKey,key,32);
-    else if(Cfg().playerJetGearButton!=0x40)std::swprintf(key,32,L"button 0x%X",Cfg().playerJetGearButton);
-    Format(state,L"GEAR %ls  [%ls]",down ? L"DOWN" : up ? L"UP" : L"TRANSIT",key);
-    state.scale=kLineScale*0.85f;state.rgba=down ? kGreen : up ? kWhite : kAmber;
-    state.w=state.h=0.0f;
-    if(text)MeasureAll(*text,&state,1);
     state.x=cx-state.w*0.5f;state.y=top+2.0f*box+gap+8.0f*s;
-    const wchar_t* const what=g.warn ? L"GEAR!" : g.overspeed ? L"GEAR SPEED" : g.blocked ? L"WEIGHT ON WHEELS" : nullptr;
-    if(!what || annunciated)return;
-    Line& warn=lines[(*at)++];
-    Format(warn,L"%ls",what);
-    warn.scale=kLineScale;warn.rgba=g.warn ? ((now/125)%2==0 ? kRed : kWhite) : kAmber;
-    warn.w=warn.h=0.0f;
-    if(text)MeasureAll(*text,&warn,1);
-    warn.x=cx-warn.w*0.5f;warn.y=state.y+(state.h>0.0f ? state.h : 18.0f*s)+4.0f*s;
+    if(warn){warn->x=cx-warn->w*0.5f;warn->y=state.y+(state.h>0.0f ? state.h : 18.0f*s)+4.0f*s;}
 }
 
 // The player's helicopter on the ground (HeliCue, the user 2026-10-05): its rotor spinning up to the speed whose lift
@@ -1441,8 +1626,8 @@ void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
     Line& l=lines[(*at)++];
     const bool ok=c.rotor>=c.hover;
     const int pct=static_cast<int>(std::lround(100.0f*c.rotor/c.hover));
-    if(ok)Format(l,L"ROTOR %d%%    LIFT OK: TAKE OFF (ascend)",pct);
-    else Format(l,L"ROTOR %d%% of lift-off",pct);
+    if(ok)Format(l,Tr(Tx::rotorLiftOk),pct);
+    else Format(l,Tr(Tx::rotorShare),pct);
     l.scale=kTitleScale;
     l.rgba=ok ? ((GetTickCount64()/125)%2==0 ? kGreen : kYellow) : kCyan;
     l.w=l.h=0.0f;
@@ -1463,8 +1648,9 @@ void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float
     Line& l=lines[(*at)++];
     const float share=Unit(c.rpm/c.maxRpm),heat=Unit(c.heat);
     const bool top=share>=0.99f;
-    Format(l,L"DRILL %d RPM    HEAT %d%%%ls",static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(heat*100.0f)),
-           c.overheated ? L"    OVERHEAT" : c.touching && c.rpm>0.0f ? L"    DRILLING" : L"");
+    wchar_t state[32]=L"";
+    if(c.overheated || (c.touching && c.rpm>0.0f))std::swprintf(state,32,L"    %ls",Tr(c.overheated ? Tx::overheat : Tx::drilling));
+    Format(l,Tr(Tx::drillLine),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(heat*100.0f)),state);
     l.scale=kTitleScale;
     l.rgba=c.overheated ? kRed : top ? kGreen : share>0.0f ? kAmber : kCyan;
     l.w=l.h=0.0f;
@@ -1488,7 +1674,7 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         const float k=DepthScale(depth,kCarrierFar),ks=k*s;
         const float share=p.hullMax>0.0f ? Unit(p.hull/p.hullMax) : 0.0f;
         Line& l=lines[(*at)++];
-        Format(l,L"SUBMARINE CARRIER  %d%%",static_cast<int>(std::lround(share*100.0f)));
+        Format(l,Tr(Tx::carrierBadge),static_cast<int>(std::lround(share*100.0f)));
         l.scale=kTitleScale*k;l.rgba=kTitle;l.w=l.h=0.0f;
         if(text)MeasureAll(*text,&l,1);
         const float bw=240.0f*ks,bh=12.0f*ks;
@@ -1501,12 +1687,14 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         const float f=DepthScale(depth,kPartFar),fs=f*s;
         const float share=part.down || part.max<=0.0f ? 0.0f : Unit(part.hp/part.max);
         Line& l=lines[(*at)++];
+        wchar_t name[24];
+        hudtext::WordTo(part.name,name,_countof(name));
         if(part.down) {
             const int sec=static_cast<int>(part.repairSec);
-            Format(l,L"%hs  DOWN %d:%02d",part.name,sec/60,sec%60);
+            Format(l,Tr(Tx::carrierPartDownShort),name,sec/60,sec%60);
             l.rgba=kDown;
         } else {
-            Format(l,L"%hs",part.name);
+            Format(l,L"%ls",name);
             l.rgba=kWhite;
         }
         l.scale=kLineScale*f;l.w=l.h=0.0f;
@@ -1536,7 +1724,7 @@ void Binding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
     else ButtonName(button,out,size);
 }
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
-                    const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at) noexcept {
+                    const edf::aimlink::TurretReadoutV1& r,bool flipped,Line* lines,int* at) noexcept {
     namespace link=edf::aimlink;
     float x,y;
     if(r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
@@ -1552,28 +1740,45 @@ void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float widt
         if(sight::ToScreen(vp,r.leadAt,1.0f,width,height,&x,&y)) {
             Arc(drawer,ctx,x,y,kLeadCircle*s,0.0f,kTurn,t,20,c);
             Rect(drawer,ctx,x-1.5f*s,y-1.5f*s,x+1.5f*s,y+1.5f*s,c);
+            wchar_t reach[32]=L"";
+            if(!r.inReach)std::swprintf(reach,32,L"  %ls",Tr(Tx::outOfRange));
             Label(text,lines,at,x,y+(kLeadCircle+12.0f)*s,1,kLineScale*0.85f,c,L"%d m  %.1f s%ls",static_cast<int>(std::lround(r.range)),
-                  r.flight,r.inReach ? L"" : L"  OUT OF RANGE");
+                  r.flight,reach);
         }
     }
+    // The mode as plainly on or off (the user, 2026-10-06: "怎么切换自动瞄准和关闭，看不出来"): AUTO-AIM ON (green, the
+    // turret aims itself) or AUTO-AIM OFF (amber, the lead circle: the turret is the player's), the key that flips it on
+    // the line under it (a pad with no AimModeButton: where to set one); for kSwitchMs after a flip (`flipped`) the new
+    // state large over the screen's middle on a panel.
     wchar_t mode[32],lock[32];
     Binding(r.keys,r.modeKey,r.modeButton,mode,32);
     Binding(r.keys,r.lockKey,r.lockButton,lock,32);
     const bool hasMode=r.keys ? r.modeKey>0 : r.modeButton>0,hasLock=r.keys ? r.lockKey>0 : r.lockButton>0;
-    const wchar_t* const state=!r.ownGun ? L"GUNNERS" : circle ? L"LEAD CIRCLE" : L"AUTO-AIM";
-    wchar_t keys[96]=L"";
-    if(r.ownGun && hasMode)std::swprintf(keys,96,L"   [%ls] %ls",mode,circle ? L"auto-aim" : L"lead circle");
+    const wchar_t* const state=Tr(!r.ownGun ? Tx::gunnersAuto : circle ? Tx::autoAimOffCircle : Tx::autoAimOn);
+    const float* const colour=!r.ownGun ? kWhite : circle ? kAmber : kGreen;
+    wchar_t keys[128]=L"";
+    if(r.ownGun && hasMode)std::swprintf(keys,128,Tr(Tx::autoAimToggle),mode,Tr(circle ? Tx::wordOn : Tx::wordOff));
+    else if(r.ownGun)wcscpy_s(keys,Tr(r.keys ? Tx::aimModeKeyUnset : Tx::aimModeButtonUnset));
     if(hasLock) {
         const std::size_t n=wcslen(keys);
-        std::swprintf(keys+n,96-n,L"   [%ls] %ls (hold: clear)",lock,r.lock==link::Lock::none ? L"lock" : L"next");
+        std::swprintf(keys+n,128-n,Tr(Tx::lockKey),n ? L"   " : L"",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
     }
-    Label(text,lines,at,width*0.5f,height*0.90f,1,kLineScale*0.85f,r.lock==link::Lock::locked ? kRed : kWhite,L"%ls%ls",state,keys);
+    Label(text,lines,at,width*0.5f,height*0.875f,1,kLineScale,colour,L"%ls",state);
+    Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.85f,r.lock==link::Lock::locked ? kRed : kWhite,L"%ls",keys);
+    if(!flipped || !r.ownGun)return;
+    const float by=height*0.30f;
+    Label(text,lines,at,width*0.5f,by,1,kTitleScale,colour,L"%ls",Tr(circle ? Tx::autoAimOffBanner : Tx::autoAimOn));
+    const float w=(*at>0 && lines[*at-1].w>0.0f ? lines[*at-1].w : 420.0f*s)+40.0f*s,h=48.0f*s;
+    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by+h*0.5f,kPanel);
+    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by-h*0.5f+3.0f*s,colour);
 }
 
 // --- The stock vehicles' HUD (vhud.cpp gathers it; ini StockVehicleHud; docs/hud-re.md §7): for the stock vehicle the
 // player drives or mans, in the helis' green and drawn with the same quads and text (exclusive full screen too):
-//  - each weapon's impact point (StockMarks): a gun's or a cannon's the helis' boresight and pipper (dim: no ground
-//    within its reach, where its round ends), a grenade's or a mortar's (and any round flying longer than kLobSec) the
+//  - each weapon's impact point (StockMarks): a gun's or a cannon's the helis' boresight and pipper where its round
+//    meets the map, or with an enemy under the view the jets' gun sight on it (the pipper where the round passes it, its
+//    lead mark where it is then: pipper on the mark, a hit; dim out of the round's reach); neither (the sky): the
+//    boresight alone with its label (roundaim.h GunSight), a grenade's or a mortar's (and any round flying longer than kLobSec) the
 //    artillery's yellow cross as the Katyusha's (LauncherMarks) with its range and flight time, the rockets' the helis'
 //    diamond, a missile's lock the helis' (LockAt; no lock: a dim ring round its boresight and its LockonRange); its
 //    label and range beside it; the selected store's label in brackets. Weapons that land together (a pair of guns)
@@ -1615,7 +1820,14 @@ void StockTape(void* drawer,void* ctx,Text* text,float width,float height,float 
     if(std::fabs(off)>kTapeHalf)return;
     const float x=cx+off*k;
     Tri(drawer,ctx,x,base+14.0f*s,x,base+4.0f*s,5.0f*s,kAmber);
-    Label(text,lines,at,x,base+40.0f*s,1,kLineScale*0.7f,kAmber,L"HULL");
+    Label(text,lines,at,x,base+40.0f*s,1,kLineScale*0.7f,kAmber,L"%ls",Tr(Tx::hullMark));
+}
+
+// A weapon's label (its round's class: rounds.cpp, vhud.cpp) in the HUD's language, bracketed when selected.
+void ArmName(const StockArm& a,bool selected,wchar_t* out,std::size_t size) noexcept {
+    wchar_t word[24];
+    hudtext::WordTo(a.label,word,_countof(word));
+    _snwprintf_s(out,size,_TRUNCATE,selected ? L"[%ls]" : L"%ls",word);
 }
 
 // One weapon's mark (see above); `name` its label (bracketed when selected).
@@ -1642,15 +1854,26 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         }
         return;
     }
+    if(a.ranged) {
+        const float* c=a.inReach ? kHud : kHudDim;
+        Boresight(drawer,ctx,vp,width,height,s,a.bore);
+        LeadMark(drawer,ctx,vp,width,height,s,a.lead,c);
+        if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y))
+            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
+        return;
+    }
     if((a.lobbed || a.flight>kLobSec) && a.hit) {
         if(ImpactCross(drawer,ctx,vp,width,height,s,a.at,&x,&y))
             Label(text,lines,at,x,y+26.0f*s,1,note,kYellow,L"%ls %d m   %.1f s",name,metres,a.flight);
         return;
     }
-    const float* c=a.hit ? kHud : kHudDim;
     Boresight(drawer,ctx,vp,width,height,s,a.bore);
-    if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y))
-        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
+    if(a.hit) {
+        if(Pipper(drawer,ctx,vp,width,height,s,a.at,kHud,&x,&y))
+            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,kHud,L"%ls %d m",name,metres);
+    } else if(sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
+        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,kHudDim,L"%ls",name);   // the sky: nothing to range it on
+    }
 }
 
 // What the stock vehicles' HUD takes from the other readouts: the Nix's legs and torso (its ring), the drill tank's drill
@@ -1669,18 +1892,18 @@ struct ProteusLine { Line* line; bool bar; float share; const float* fill; const
 
 // A binding's name: the mouse's buttons by name (GetKeyNameText has none for them), the keys as KeyName, a pad's button.
 void ProteusBinding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
-    static const wchar_t* const kMouse[]={L"?",L"LMB",L"RMB",L"?",L"MMB",L"MB4",L"MB5"};
-    if(keys && key>0 && key<=6){wcscpy_s(out,static_cast<rsize_t>(size),kMouse[key]);return;}
+    static const Tx kMouse[]={Tx::count,Tx::mouseLeft,Tx::mouseRight,Tx::count,Tx::mouseMiddle,Tx::mouseX1,Tx::mouseX2};
+    if(keys && key>0 && key<=6){wcscpy_s(out,static_cast<rsize_t>(size),kMouse[key]==Tx::count ? L"?" : Tr(kMouse[key]));return;}
     Binding(keys,key,button,out,size);
 }
 
 // The block's Proteus lines (see above) into `pl` (`n` of them): the lines are `lines`' next ones.
 int ProteusLinesOf(const ProteusReadout& p,Line* lines,ProteusLine* pl) noexcept {
-    wchar_t mode[16],shield[16],mark[16],salvo[16];
-    ProteusBinding(p.keys,p.modeKey,p.modeButton,mode,16);
-    ProteusBinding(p.keys,p.shieldKey,p.shieldButton,shield,16);
-    ProteusBinding(p.keys,p.markKey,p.markButton,mark,16);
-    ProteusBinding(p.keys,p.salvoKey,0,salvo,16);
+    wchar_t mode[24],shield[24],mark[24],salvo[24];
+    ProteusBinding(p.keys,p.modeKey,p.modeButton,mode,24);
+    ProteusBinding(p.keys,p.shieldKey,p.shieldButton,shield,24);
+    ProteusBinding(p.keys,p.markKey,p.markButton,mark,24);
+    ProteusBinding(p.keys,p.salvoKey,0,salvo,24);
     if(!p.keys)wcscpy_s(salvo,L"LT");
     const bool blink=(GetTickCount64()/125)%2==0;
     int n=0;
@@ -1696,44 +1919,44 @@ int ProteusLinesOf(const ProteusReadout& p,Line* lines,ProteusLine* pl) noexcept
         const bool stagger=p.mode==proteus::Mode::deploying || p.mode==proteus::Mode::stowing;
         Line& l=add(stagger,p.stagger,kAmber);
         switch(p.mode) {
-            case proteus::Mode::walk: Format(l,L"WALK");if(p.driver)Append(l,L"   [%ls] DEPLOY",mode);break;
-            case proteus::Mode::deploying: Format(l,L"DEPLOYING %d%%",static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
-            case proteus::Mode::deployed: Format(l,L"DEPLOYED");if(p.driver)Append(l,L"   [%ls] STOW",mode);l.rgba=kCyan;break;
-            case proteus::Mode::stowing: Format(l,L"STOWING %d%%",static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
+            case proteus::Mode::walk: Format(l,L"%ls",Tr(Tx::proteusWalk));if(p.driver)Append(l,Tr(Tx::proteusDeployKey),mode);break;
+            case proteus::Mode::deploying: Format(l,Tr(Tx::proteusDeploying),static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
+            case proteus::Mode::deployed: Format(l,L"%ls",Tr(Tx::proteusDeployed));if(p.driver)Append(l,Tr(Tx::proteusStowKey),mode);l.rgba=kCyan;break;
+            case proteus::Mode::stowing: Format(l,Tr(Tx::proteusStowing),static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
         }
     }
     // The shield.
     {
         const bool deployed=p.mode==proteus::Mode::deployed;
         Line& l=add(deployed,p.heat,p.overheated ? kRed : p.heat>=0.7f ? kAmber : kYellow);
-        Format(l,deployed ? L"SHIELD %ls  HEAT %d%%" : L"FRONT SHIELD %ls",p.overheated ? L"OVERHEAT" : p.shieldUp ? L"UP" : L"OFF",
+        Format(l,Tr(deployed ? Tx::shieldHeat : Tx::frontShield),Tr(p.overheated ? Tx::overheat : p.shieldUp ? Tx::shieldUp : Tx::shieldOff),
                static_cast<int>(std::lround(p.heat*100.0f)));
         if(p.driver)Append(l,L"   [%ls]",shield);
-        if(p.priority)Append(l,L"   ALLIES FOCUS");
+        if(p.priority)Append(l,L"%ls",Tr(Tx::alliesFocus));
         l.rgba=p.overheated ? (blink ? kRed : kWhite) : p.shieldUp ? kCyan : kHudDim;
     }
     if(p.mode==proteus::Mode::deployed) {
         // The barrier.
         Line& b=add(true,p.barrier,HullColour(p.barrier));
         pl[n-1].trailKey=&kBarrierKey;
-        Format(b,L"BARRIER %d%%",static_cast<int>(std::lround(p.barrier*100.0f)));
+        Format(b,Tr(Tx::barrier),static_cast<int>(std::lround(p.barrier*100.0f)));
         b.rgba=p.barrier>0.25f ? kHud : kAmber;
         // The field and the gun.
         Line& f=add(false,0.0f,nullptr);
-        Format(f,L"FIELD %d m  ALLIES %d",static_cast<int>(std::lround(p.fieldRadius)),p.allies);
-        if(p.gun)Append(f,p.keys ? L"   GUN [LMB]" : L"   GUN [RT]");
+        Format(f,Tr(Tx::field),static_cast<int>(std::lround(p.fieldRadius)),p.allies);
+        if(p.gun)Append(f,L"   %ls [%ls]",Tr(Tx::wordGun),p.keys ? Tr(Tx::mouseLeft) : L"RT");
         f.rgba=kTeal;
     }
     // The salvo.
     {
         Line& l=add(false,0.0f,nullptr);
-        if(!p.salvoArmed){Format(l,L"SALVO OFFLINE");l.rgba=kHudDim;}
-        else if(p.mode!=proteus::Mode::deployed){Format(l,L"SALVO  DEPLOY FIRST");l.rgba=kHudDim;}
-        else if(p.salvoLeft>0){Format(l,L"SALVO  %d IN THE AIR",p.salvoLeft);l.rgba=kRed;}
-        else if(p.salvoWait>0.0f){Format(l,L"SALVO %.1fs",p.salvoWait);l.rgba=kAmber;}
-        else if(!p.marked){Format(l,L"SALVO READY  MARK A TARGET");if(p.driver)Append(l,L" [%ls]",mark);l.rgba=kYellow;}
-        else{Format(l,L"SALVO READY");if(p.driver)Append(l,L" [%ls]",salvo);l.rgba=blink ? kRed : kYellow;}
-        if(p.marked)Append(l,L"   MARK %d m",static_cast<int>(std::lround(p.markRange)));
+        if(!p.salvoArmed){Format(l,L"%ls",Tr(Tx::salvoOffline));l.rgba=kHudDim;}
+        else if(p.mode!=proteus::Mode::deployed){Format(l,L"%ls",Tr(Tx::salvoDeployFirst));l.rgba=kHudDim;}
+        else if(p.salvoLeft>0){Format(l,Tr(Tx::salvoInAir),p.salvoLeft);l.rgba=kRed;}
+        else if(p.salvoWait>0.0f){Format(l,Tr(Tx::salvoWait),p.salvoWait);l.rgba=kAmber;}
+        else if(!p.marked){Format(l,L"%ls",Tr(Tx::salvoMark));if(p.driver)Append(l,L" [%ls]",mark);l.rgba=kYellow;}
+        else{Format(l,L"%ls",Tr(Tx::salvoReady));if(p.driver)Append(l,L" [%ls]",salvo);l.rgba=blink ? kRed : kYellow;}
+        if(p.marked){Append(l,L"   ");Append(l,Tr(Tx::markRange),static_cast<int>(std::lround(p.markRange)));}
     }
     return n;
 }
@@ -1753,7 +1976,7 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
         const float r=16.0f*s,t=2.5f*s;
         Seg(drawer,ctx,x,y-r,x+r,y,t,kRed);Seg(drawer,ctx,x+r,y,x,y+r,t,kRed);
         Seg(drawer,ctx,x,y+r,x-r,y,t,kRed);Seg(drawer,ctx,x-r,y,x,y-r,t,kRed);
-        Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.85f,kRed,L"MARK %d m",static_cast<int>(std::lround(p.markRange)));
+        Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.85f,kRed,Tr(Tx::markRange),static_cast<int>(std::lround(p.markRange)));
     }
 }
 
@@ -1771,8 +1994,8 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
             twin=b.aimed && !b.lofted && b.kind==a.kind && std::strcmp(a.label,b.label)==0 && vec::Dist(a.at,b.at)<kSamePoint;
         }
         if(twin)continue;
-        wchar_t name[24];
-        std::swprintf(name,24,i==r.selected ? L"[%hs]" : L"%hs",a.label);
+        wchar_t name[32];
+        ArmName(a,i==r.selected,name,_countof(name));
         StockMark(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
     }
 }
@@ -1807,16 +2030,19 @@ void HullTurret(void* drawer,void* ctx,float cx,float cy,float s,float up,float 
 
 // A weapon's line: its label (bracketed when selected), the rounds of the magazine, its reload; its colour by its state.
 void ArmLine(Line& l,const StockArm& a,bool selected) noexcept {
-    Format(l,selected ? L"[%hs]" : L"%hs",a.label);
+    wchar_t name[32];
+    ArmName(a,selected,name,_countof(name));
+    Format(l,L"%ls",name);
     if(a.ammoMax>1)Append(l,L" %d/%d",a.ammo>0 ? a.ammo : 0,a.ammoMax);
     else if(a.ammo>1)Append(l,L" %d",a.ammo);   // no magazine read (WeaponStatusOk false): the rounds alone
-    else if(a.ammo>0)Append(l,L" READY");
+    else if(a.ammo>0)Append(l,L" %ls",Tr(Tx::armReady));
     if(a.ammo<=0 && a.reload<1.0f) {
-        Append(l,L" RELOAD %d%%",static_cast<int>(std::lround(a.reload*100.0f)));
+        Append(l,L" ");
+        Append(l,Tr(Tx::armReload),static_cast<int>(std::lround(a.reload*100.0f)));
         if(a.reloadSec>=0.0f)Append(l,L" %.1fs",a.reloadSec);
         l.rgba=kAmber;
     } else if(a.ammo<=0) {
-        Append(l,a.canReload ? L" RELOAD" : L" EMPTY");
+        Append(l,L" %ls",Tr(a.canReload ? Tx::armReloadWord : Tx::armEmpty));
         l.rgba=a.canReload ? kAmber : kRed;
     } else l.rgba=selected ? kCyan : kHud;
     l.scale=kLineScale*0.85f;
@@ -1827,19 +2053,19 @@ void ArmLine(Line& l,const StockArm& a,bool selected) noexcept {
 void EmcLine(Line& l,const EmcCue& c,float* bar,const float** colour) noexcept {
     const float beam=Cfg().emcBeamSec>0.0f ? Cfg().emcBeamSec : 1.0f;
     if(c.firing) {
-        Format(l,L"EMC BEAM %.1fs",c.beamLeft);
+        Format(l,Tr(Tx::emcBeam),c.beamLeft);
         *bar=Unit(c.beamLeft/beam);*colour=kWhite;
     } else if(c.charging) {
-        Format(l,L"EMC CHARGE %d%%",static_cast<int>(std::lround(Unit(c.charge)*100.0f)));
+        Format(l,Tr(Tx::emcCharge),static_cast<int>(std::lround(Unit(c.charge)*100.0f)));
         *bar=Unit(c.charge);*colour=kAmber;
     } else if(c.empty) {
-        Format(l,L"EMC EMPTY");
+        Format(l,L"%ls",Tr(Tx::emcEmpty));
         *bar=0.0f;*colour=kRed;
     } else if(c.rearm>0.0f) {
-        Format(l,L"EMC REARM %.1fs",c.rearm);
+        Format(l,Tr(Tx::emcRearm),c.rearm);
         *bar=0.0f;*colour=kHudDim;
     } else {
-        Format(l,L"EMC READY x%d  HOLD FIRE",c.beams);
+        Format(l,Tr(Tx::emcReady),c.beams);
         *bar=Unit(c.charge);*colour=kGreen;
     }
     l.rgba=*colour;
@@ -1888,19 +2114,19 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     for(int i=0;i<arms;++i)dry=dry && r.arm[i].ammo<=0 && !r.arm[i].canReload;
     const float hp=r.hpMax>0.0f ? Unit(r.hp/r.hpMax) : 0.0f;
     const bool blink=(GetTickCount64()/125)%2==0;
-    if(missile){Format(warn,L"MISSILE!");warn.rgba=blink ? kRed : kWhite;}
-    else if(locked){Format(warn,L"LOCKED");warn.rgba=kYellow;}
-    else if(hp<0.25f && r.hpMax>0.0f){Format(warn,L"HULL CRITICAL");warn.rgba=blink ? kRed : kWhite;}
-    else if(drill && x.drill->overheated){Format(warn,L"DRILL OVERHEAT");warn.rgba=blink ? kRed : kWhite;}
-    else if(FuelLow(r.fuel)){Format(warn,L"LOW FUEL");warn.rgba=kAmber;}
-    else if(dry){Format(warn,L"NO AMMO");warn.rgba=kAmber;}
+    if(missile){Format(warn,L"%ls",Tr(Tx::missileBang));warn.rgba=blink ? kRed : kWhite;}
+    else if(locked){Format(warn,L"%ls",Tr(Tx::locked));warn.rgba=kYellow;}
+    else if(hp<0.25f && r.hpMax>0.0f){Format(warn,L"%ls",Tr(Tx::hullCritical));warn.rgba=blink ? kRed : kWhite;}
+    else if(drill && x.drill->overheated){Format(warn,L"%ls",Tr(Tx::drillOverheat));warn.rgba=blink ? kRed : kWhite;}
+    else if(FuelLow(r.fuel)){Format(warn,L"%ls",Tr(Tx::lowFuel));warn.rgba=kAmber;}
+    else if(dry){Format(warn,L"%ls",Tr(Tx::noAmmo));warn.rgba=kAmber;}
     else{Format(warn,L"");warn.rgba=kHud;}
     const char* const kind=prot ? "PROTEUS" : r.kind;
     if(r.seat==0)Format(title,L"%hs",kind);
-    else Format(title,L"%hs  GUNNER %u",kind,r.seat);
-    Format(info,L"SPD %d km/h    HP %d%%",static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
-    if(nix)Append(info,L"    TWIST %+d",static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));   // right positive, as headings
-    if(r.stab)Append(info,r.stab==2 ? L"    STAB LAG" : L"    STAB");   // the gun stabilizer holds it (LAG: the hull outruns its drive)
+    else Format(title,Tr(Tx::stockGunner),kind,r.seat);
+    Format(info,Tr(Tx::stockInfo),static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
+    if(nix){Append(info,L"    ");Append(info,Tr(Tx::twist),static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));}   // right positive, as headings
+    if(r.stab)Append(info,L"    %ls",Tr(r.stab==2 ? Tx::stabLag : Tx::stab));   // the gun stabilizer holds it (LAG: the hull outruns its drive)
     wchar_t fuel[32];
     FuelText(fuel,_countof(fuel),r.fuel);   // a bike's tank (the stock gauge's FUEL panel gone: stockgauge.cpp)
     if(fuel[0])Append(info,L"    %ls",fuel);
@@ -1909,8 +2135,9 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     if(drill) {
         const DrillCue& c=*x.drill;
         const float share=Unit(c.rpm/c.maxRpm);
-        Format(*drill,L"DRILL %d RPM  HEAT %d%%%ls",static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(Unit(c.heat)*100.0f)),
-               c.overheated ? L"  OVERHEAT" : c.touching && c.rpm>0.0f ? L"  DRILLING" : L"");
+        wchar_t state[32]=L"";
+        if(c.overheated || (c.touching && c.rpm>0.0f))std::swprintf(state,32,L"  %ls",Tr(c.overheated ? Tx::overheat : Tx::drilling));
+        Format(*drill,Tr(Tx::drillLineShort),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(Unit(c.heat)*100.0f)),state);
         drill->scale=kLineScale*0.85f;
         drill->rgba=c.overheated ? kRed : c.heat>=0.7f ? HeatColour(Unit(c.heat),false) : share>=0.99f ? kGreen : share>0.0f ? kAmber : kCyan;
     }
@@ -1970,7 +2197,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     }
 }
 
-// The stock vehicle HUD, part by part (see above). A stock heli's are elsewhere (HeliHud, HeliGunSight, StockStores).
+// The stock vehicle HUD, part by part (see above). A stock heli's are elsewhere (HeliHud, HeliGunSight, StockCells).
 void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
                      const StockExtras& x,Line* lines,int* at) noexcept {
     StockMarks(drawer,ctx,text,vp,width,height,s,r,x,lines,at);
@@ -1992,17 +2219,37 @@ void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float wid
     }
 }
 
-// A stock heli's stores for the helicopter HUD's bottom line (HeliStrip): each weapon, its rounds, its reload.
-void StockStores(const StockHudReadout& r,wchar_t* out,std::size_t size) noexcept {
-    out[0]=L'\0';
-    std::size_t n=0;
+// A stock heli's stores for the helicopter HUD's loadout strip (HeliStrip): each weapon's picture by its round
+// (hud_cue.h ArmIconOf), its rounds and its reload (ArmLine's text and colour); the picked one cyan.
+int StockCells(const StockHudReadout& r,LoadCell* cells) noexcept {
+    int n=0;
     for(int i=0;i<r.arms && i<kStockArms;++i) {
         Line l{};
-        ArmLine(l,r.arm[i],i==r.selected);
-        const int k=_snwprintf_s(out+n,size-n,_TRUNCATE,L"%ls%ls",n ? L"   " : L"",l.text);
-        if(k<0)break;
-        n+=static_cast<std::size_t>(k);
+        ArmLine(l,r.arm[i],false);
+        LoadCell& c=cells[n++];
+        c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed);
+        c.picked=i==r.selected;
+        wcsncpy_s(c.text,_countof(c.text),l.text,_TRUNCATE);
+        c.rgba=c.picked && l.rgba==kHud ? kCyan : l.rgba;
     }
+    return n;
+}
+
+// The game's screen (kUiScreen): 0 x 0 when it is not there to read (hudscale.h then takes the viewport's).
+void UiScreen(int* w,int* h) noexcept {
+    *w=*h=0;
+    if(!uiOk)return;
+    __try {
+        const void* const holder=At<const void*>(image,kUiScreen);
+        const void* const screen=holder ? At<const void*>(holder,kUiScreenObj) : nullptr;
+        if(screen){*w=At<std::int32_t>(screen,kUiW);*h=At<std::int32_t>(screen,kUiH);}
+    } __except(EXCEPTION_EXECUTE_HANDLER){*w=*h=0;}
+}
+// The HUD's scale for a viewport `w` x `h` (hudscale.h: the game's screen, the ini's HudScale).
+float HudScaleOf(int w,int h) noexcept {
+    int uiW,uiH;
+    UiScreen(&uiW,&uiH);
+    return hudscale::Of(uiW,uiH,w,h,Cfg().hudScale);
 }
 
 // What is drawn, logged when it changes (Debug, once in 10 s at most).
@@ -2012,7 +2259,10 @@ void DrawLog(int shown,int panels,const Line* lines,int count,int width,int heig
     const ULONGLONG now=GetTickCount64();
     if(!Cfg().debug || (shown==lastShown && panels==lastPanels) || now-at<10000)return;
     at=now;lastShown=shown;lastPanels=panels;
-    Log("HUD draw %dx%d: %d readout(s), %d carrier panel(s), text=%d",width,height,shown,panels,textOk);
+    int uiW,uiH;
+    UiScreen(&uiW,&uiH);
+    Log("HUD draw %dx%d (screen %dx%d, scale %.3f): %d readout(s), %d carrier panel(s), text=%d",width,height,uiW,uiH,
+        HudScaleOf(width,height),shown,panels,textOk);
     for(int i=0;i<count && i<12;++i)Log("HUD   \"%ls\" at (%.0f,%.0f) %.0fx%.0f",lines[i].text,lines[i].x,lines[i].y,lines[i].w,lines[i].h);
 }
 }  // namespace
@@ -2023,13 +2273,28 @@ bool InstallHud() noexcept {
         for(const auto& q:kQuadSigs)quad=quad && Matches(q.rva,q.bytes,q.size);
         for(const auto& t:kTextSigs)text=text && Matches(t.rva,t.bytes,t.size);
         for(const auto& c:kTextCalls)text=text && CallsTo(c[0],c[1]);
-        quadOk=quad;textOk=quad && text;
-        Log("HOOK hud quad=%d text=%d (drawn from the follower gauge's call: HOOK sub gauge=1 needed)",quadOk,textOk);
+        bool ui=true;
+        for(const auto& u:kUiSigs)ui=ui && Matches(u.rva,u.bytes,u.size);
+        bool lang=CallsTo(0x963724,kLangGet) && CallsTo(0x96372E,kFontLoad);
+        for(const auto& l:kLangSigs)lang=lang && Matches(l.rva,l.bytes,l.size);
+        quadOk=quad;textOk=quad && text;uiOk=ui;langOk=lang;
+        Log("HOOK hud quad=%d text=%d screen=%d language=%d (drawn from the follower gauge's call: HOOK sub gauge=1 needed; screen=0: "
+            "sized on the viewport; language=0: HudLanguage auto is English)",quadOk,textOk,uiOk,langOk);
+        Log("HUD language: game %d, HudLanguage %d: %s",GameTextLanguage(),Cfg().hudLanguage,
+            hudtext::Name(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage())));
         return quadOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 bool HudReady() noexcept { return quadOk; }
+
+int GameTextLanguage() noexcept {
+    if(!langOk)return -1;
+    __try {
+        const std::int32_t v=At<std::int32_t>(image,kLangValue);
+        return v>=0 && v<=4 ? v : -1;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
 
 void HudSee(unsigned char* v) noexcept {
     if(!Cfg().vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
@@ -2130,25 +2395,7 @@ bool LastViewProj(float* out) noexcept {
 
 namespace {
 // `m` inverted (4x4, Gauss-Jordan with partial pivoting); false when it is singular.
-bool Invert4(const float* m,float* out) noexcept {
-    float a[4][8];
-    for(int r=0;r<4;++r)for(int c=0;c<8;++c)a[r][c]=c<4 ? m[r*4+c] : (c-4==r ? 1.0f : 0.0f);
-    for(int c=0;c<4;++c) {
-        int p=c;
-        for(int r=c+1;r<4;++r)if(std::fabs(a[r][c])>std::fabs(a[p][c]))p=r;
-        if(std::fabs(a[p][c])<1e-12f)return false;
-        if(p!=c)for(int k=0;k<8;++k){const float t=a[c][k];a[c][k]=a[p][k];a[p][k]=t;}
-        const float d=a[c][c];
-        for(int k=0;k<8;++k)a[c][k]/=d;
-        for(int r=0;r<4;++r) {
-            if(r==c)continue;
-            const float f=a[r][c];
-            for(int k=0;k<8;++k)a[r][k]-=f*a[c][k];
-        }
-    }
-    for(int r=0;r<4;++r)for(int c=0;c<4;++c)out[r*4+c]=a[r][c+4];
-    return true;
-}
+bool Invert4(const float* m,float* out) noexcept { return mapcmd::Invert4(m,out); }
 
 // `h` (row vector) times `m`.
 void RowTimes(const float* h,const float* m,float* out) noexcept {
@@ -2189,7 +2436,8 @@ constexpr int kMapLabels=12;             // at most this many labels an axis (ev
 constexpr float kMapLabelGap=34.0f;      // px (at 1080 lines) between two labels of an axis
 constexpr float kMapFarFade=0.45f;       // a pin three times the focus's distance away (and on) drawn this opaque
 constexpr float kMapLockNear=40.0f;      // m: a lock point this near an enemy's pin brackets that pin
-constexpr int kMapLegendRows=13;
+constexpr float kMapEmptyFade=0.55f;     // nobody in it (kMapEmpty): its pin this much of a crewed one's
+constexpr int kMapLegendRows=15;
 constexpr float kMapGuard=1.25f;         // a grid line is cut to this much of the screen's half size round it
 constexpr float kMapNearW=1.0f;          // ...and to this clip w (m in front of the eye)
 
@@ -2230,7 +2478,7 @@ void MapDistance(wchar_t* out,std::size_t size,float m) noexcept {
 
 // Whether a grid label at (x, y) keeps clear of the bands (title, keys), the legend and the scale bar.
 bool MapLabelFree(float x,float y,float width,float height,float s) noexcept {
-    if(y<60.0f*s || y>height-60.0f*s || x>width-140.0f*s)return false;
+    if(y<60.0f*s || y>height-90.0f*s || x>width-140.0f*s)return false;   // the bands (and MapCommands' over the keys)
     if(x<240.0f*s && y>height*0.28f && y<height*0.30f+static_cast<float>(kMapLegendRows)*28.0f*s+20.0f*s)return false;   // the legend
     return !(x<420.0f*s && y>height-140.0f*s);                                             // the scale bar (MapScale)
 }
@@ -2258,7 +2506,7 @@ void MapGrid(void* drawer,void* ctx,Text* text,const float* vp,float width,float
             if(std::fabs(x-lastX)<kMapLabelGap*s && std::fabs(yy-lastY)<kMapLabelGap*s)continue;
             lastX=x;lastY=yy;
             // +x is west of +z (north), -x east; +z north, -z south.
-            const wchar_t* side=axis==0 ? (k>0 ? L"W" : L"E") : (k>0 ? L"N" : L"S");
+            const wchar_t* side=Tr(axis==0 ? (k>0 ? Tx::compassW : Tx::compassE) : (k>0 ? Tx::compassN : Tx::compassS));
             wchar_t d[24];MapDistance(d,_countof(d),std::fabs(static_cast<float>(k))*step);
             Label(text,lines,at,x+4.0f*s,yy-10.0f*s,0,kLineScale*0.7f,kMapAxis,L"%ls %ls",side,d);
         }
@@ -2278,7 +2526,7 @@ void MapCompass(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,2.0f*s,32,kMapAxis);
     Tri(drawer,ctx,cx,cy,cx+dx*r,cy+dy*r,8.0f*s,kMapEnemy);     // north red
     Tri(drawer,ctx,cx,cy,cx-dx*r,cy-dy*r,8.0f*s,kWhite);        // south white
-    Label(text,lines,at,cx+dx*(r+14.0f*s),cy+dy*(r+14.0f*s),1,kLineScale*0.8f,kWhite,L"N");
+    Label(text,lines,at,cx+dx*(r+14.0f*s),cy+dy*(r+14.0f*s),1,kLineScale*0.8f,kWhite,L"%ls",Tr(Tx::compassN));
 }
 
 // The scale bar (bottom left): one grid step across the screen at the focus.
@@ -2333,9 +2581,31 @@ const float* MapFade(const float* rgba,float fade,float* out) noexcept {
     return out;
 }
 
-// One icon at (x, y): `dx, dy` its heading on the screen (0, 0: none), `hp` its HP bar (<0: none).
+// A friendly aircraft (kind air; the user, 2026-10-06: aircraft as plainly on the map as the vehicles, an icon of
+// their own): a fixed-wing one a plane seen from above, its nose along its heading on the screen (`dx`, `dy`; none: up);
+// a helicopter (kMapRotor) its rotor's ring round a short fuselage and tail boom.
+void MapAircraft(void* drawer,void* ctx,float x,float y,float s,bool rotor,float dx,float dy,const float* rgba) noexcept {
+    if(dx==0.0f && dy==0.0f)dy=-1.0f;
+    const float rx=-dy,ry=dx,t=2.0f*s;
+    auto seg=[&](float f0,float r0,float f1,float r1,float w){
+        Seg(drawer,ctx,x+(dx*f0+rx*r0)*s,y+(dy*f0+ry*r0)*s,x+(dx*f1+rx*r1)*s,y+(dy*f1+ry*r1)*s,w,rgba);
+    };
+    if(rotor) {
+        Arc(drawer,ctx,x,y,9.0f*s,0.0f,kTurn,1.5f*s,18,rgba);
+        seg(5.0f,0.0f,-13.0f,0.0f,3.0f*s);seg(-12.0f,-3.0f,-12.0f,3.0f,t);
+        return;
+    }
+    seg(12.0f,0.0f,-10.0f,0.0f,3.0f*s);                        // the fuselage
+    seg(3.0f,0.0f,-4.0f,11.0f,t);seg(3.0f,0.0f,-4.0f,-11.0f,t);   // the swept wings
+    seg(-4.0f,11.0f,-1.0f,0.0f,t);seg(-4.0f,-11.0f,-1.0f,0.0f,t);
+    seg(-7.0f,0.0f,-11.0f,5.0f,t);seg(-7.0f,0.0f,-11.0f,-5.0f,t);   // the tail
+}
+
+// One icon at (x, y): `dx, dy` its heading on the screen (0, 0: none), `hp` its HP bar (<0: none). Nobody in it
+// (kMapEmpty: a vehicle or aircraft of team 5) at kMapEmptyFade of it.
 void MapIcon(void* drawer,void* ctx,float x,float y,float s,MapKind kind,std::uint8_t flags,float dx,float dy,float hp,float fade) noexcept {
     alignas(16) float c[4],b[4];
+    if(flags&kMapEmpty)fade*=kMapEmptyFade;
     const float* rgba=MapFade(MapColour(kind),fade,c);
     const float t=2.0f*s;
     float tick=0.0f;   // the heading tick's start, from the centre
@@ -2343,7 +2613,7 @@ void MapIcon(void* drawer,void* ctx,float x,float y,float s,MapKind kind,std::ui
     case MapKind::squad: Rect(drawer,ctx,x-4.5f*s,y-4.5f*s,x+4.5f*s,y+4.5f*s,rgba);break;
     case MapKind::ally: Rect(drawer,ctx,x-3.5f*s,y-3.5f*s,x+3.5f*s,y+3.5f*s,rgba);break;
     case MapKind::vehicle: MapBox(drawer,ctx,x,y,8.0f*s,t,rgba);Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,rgba);tick=8.0f*s;break;
-    case MapKind::air: MapDiamond(drawer,ctx,x,y,9.0f*s,t,rgba);Rect(drawer,ctx,x-2.0f*s,y-2.0f*s,x+2.0f*s,y+2.0f*s,rgba);tick=9.0f*s;break;
+    case MapKind::air: MapAircraft(drawer,ctx,x,y,s,(flags&kMapRotor)!=0,dx,dy,rgba);tick=flags&kMapRotor ? 9.0f*s : 0.0f;break;
     case MapKind::carrier: MapBox(drawer,ctx,x,y,13.0f*s,t,rgba);MapBox(drawer,ctx,x,y,7.0f*s,t,rgba);tick=13.0f*s;break;
     case MapKind::enemy:
         if(flags&kMapLarge){MapBox(drawer,ctx,x,y,11.0f*s,t,rgba);Rect(drawer,ctx,x-6.0f*s,y-6.0f*s,x+6.0f*s,y+6.0f*s,rgba);tick=11.0f*s;}
@@ -2371,7 +2641,10 @@ void MapDot1(void* drawer,void* ctx,float x,float y,float s,std::uint8_t flags,c
 // on the aircraft, its stem down to the ground under it (its height read off the stem).
 struct Pin { float ix,iy,bx,by,dx,dy,depth; bool stem; };
 bool MapPin(const float* vp,float width,float height,const MapUnit& u,float pin,Pin* p) noexcept {
-    const bool air=u.kind==MapKind::air || u.kind==MapKind::carrier || u.kind==MapKind::enemyAir || u.kind==MapKind::lock;
+    // An aircraft standing on the ground (parked, landed: mapmarks::Landed) gets a ground unit's pin: its icon up on a
+    // stem as a vehicle's, not lost in the ground's clutter at its wheels.
+    const bool air=u.kind==MapKind::lock ||
+                   ((u.kind==MapKind::air || u.kind==MapKind::carrier || u.kind==MapKind::enemyAir) && !mapmarks::Landed(u.pos[1],u.ground));
     float top[3]={u.pos[0],u.pos[1],u.pos[2]},base[3]={u.pos[0],u.pos[1],u.pos[2]};
     if(air)base[1]=u.ground;
     else top[1]+=pin;
@@ -2415,7 +2688,8 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
             const float f=fade(p.depth);
             if(p.stem) {
                 Seg(drawer,ctx,p.bx,p.by,p.ix,p.iy,1.5f*s,MapFade(MapColour(kind),f*0.7f,c));
-                if(kind==MapKind::air || kind==MapKind::carrier || kind==MapKind::enemyAir)Arc(drawer,ctx,p.bx,p.by,4.0f*s,0.0f,kTurn,1.5f*s,10,c);   // its ground point
+                if((kind==MapKind::air || kind==MapKind::carrier || kind==MapKind::enemyAir) && !mapmarks::Landed(u.pos[1],u.ground))
+                    Arc(drawer,ctx,p.bx,p.by,4.0f*s,0.0f,kTurn,1.5f*s,10,c);   // a flying one's ground point
             }
             MapIcon(drawer,ctx,p.ix,p.iy,s,kind,u.flags,p.dx,p.dy,u.flags&kMapLarge ? u.hp : -1.0f,f);
             if(u.flags&kMapNearest)MapBrackets(drawer,ctx,p.ix,p.iy,16.0f*s,2.0f*s,MapFade(kAmber,f,c));
@@ -2455,45 +2729,117 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
 }
 
+// The NPC commands (mapcmd.cpp, README 地图 → 指挥 NPC): the mouse pointer (where G sends the selection; with a pad a
+// crosshair at the screen's centre) and the box being dragged from it, each commandable unit ringed (white brackets:
+// selected), a guard order's line from the unit to its point (its slot of the formation) and a ring there, FOLLOW under a
+// unit following the player, and a band over the keys: how many are selected, the keys, the last command's word.
+alignas(16) const float kMapOrder[4]={0.3f,0.9f,1.0f,1.0f};
+alignas(16) const float kMapOrderDim[4]={0.3f,0.9f,1.0f,0.55f};
+alignas(16) const float kMapBoxFill[4]={0.3f,0.9f,1.0f,0.08f};
+constexpr float kMapGuardRing=12.0f;      // m: the ring at a guard order's point (formation slots are 30 m apart)
+void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    static MapCommandReadout c;   // the draw thread's (too big for its stack)
+    if(!PlayerMapCommands(&c))return;
+    const mapcam::View view{{m.focus[0],m.focus[1],m.focus[2]},m.yaw,m.pitch,m.height};
+    const float pin=mapcam::PinHeight(mapcam::Distance(view),m.pitch);
+    const float* tint=c.allowed && c.count ? kMapOrder : kMapOrderDim;
+    // Where G sends them: the pointer (a ring and a cross), or with a pad the crosshair at the centre.
+    const float cx=c.pointer ? c.px : width*0.5f,cy=c.pointer ? c.py : height*0.5f;
+    Seg(drawer,ctx,cx-16.0f*s,cy,cx-5.0f*s,cy,2.0f*s,tint);Seg(drawer,ctx,cx+5.0f*s,cy,cx+16.0f*s,cy,2.0f*s,tint);
+    Seg(drawer,ctx,cx,cy-16.0f*s,cx,cy-5.0f*s,2.0f*s,tint);Seg(drawer,ctx,cx,cy+5.0f*s,cx,cy+16.0f*s,2.0f*s,tint);
+    if(c.pointer)Arc(drawer,ctx,cx,cy,9.0f*s,0.0f,kTurn,1.5f*s,16,kWhite);
+    // The box being dragged.
+    if(c.boxing) {
+        const float x0=c.bx<c.px ? c.bx : c.px,x1=c.bx<c.px ? c.px : c.bx,y0=c.by<c.py ? c.by : c.py,y1=c.by<c.py ? c.py : c.by;
+        Rect(drawer,ctx,x0,y0,x1,y1,kMapBoxFill);
+        Seg(drawer,ctx,x0,y0,x1,y0,1.5f*s,kMapOrder);Seg(drawer,ctx,x1,y0,x1,y1,1.5f*s,kMapOrder);
+        Seg(drawer,ctx,x1,y1,x0,y1,1.5f*s,kMapOrder);Seg(drawer,ctx,x0,y1,x0,y0,1.5f*s,kMapOrder);
+    }
+    wchar_t one[24]{};
+    for(int i=0;i<c.count && i<kCmdUnits;++i) {
+        const CmdMark& u=c.unit[i];
+        MapUnit mu{};
+        std::memcpy(mu.pos,u.pos,12);mu.ground=u.pos[1];mu.kind=u.air ? MapKind::air : MapKind::vehicle;
+        Pin p;
+        const bool shown=MapPin(vp,width,height,mu,pin,&p);
+        if(u.now.order==Order::guard) {
+            // The ring round its point, its line from the unit.
+            float last[3];
+            for(int k=0;k<=16;++k) {
+                const float a=kTurn*static_cast<float>(k)/16.0f;
+                const float q[3]={u.now.at[0]+std::sin(a)*kMapGuardRing,u.now.at[1]+1.0f,u.now.at[2]+std::cos(a)*kMapGuardRing};
+                if(k)MapLine(drawer,ctx,vp,width,height,last,q,2.0f*s,kMapOrder);
+                std::memcpy(last,q,12);
+            }
+            float gx,gy,depth;
+            if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))Seg(drawer,ctx,p.ix,p.iy,gx,gy,1.5f*s,kMapOrderDim);
+        }
+        if(!shown)continue;
+        Arc(drawer,ctx,p.ix,p.iy,15.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : kMapOrderDim);
+        if(u.selected)MapBrackets(drawer,ctx,p.ix,p.iy,24.0f*s,2.5f*s,kWhite);
+        if(u.now.order==Order::follow)Label(text,lines,at,p.ix,p.iy+24.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
+        if(u.selected && c.selected==1) {
+            wchar_t kind[24];
+            hudtext::WordTo(u.name,kind,_countof(kind));
+            if(u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet)
+                _snwprintf_s(one,_countof(one),_TRUNCATE,Tr(u.owner==kCmdOwnerHeli ? Tx::unitHeli : Tx::unitJet),kind);
+            else _snwprintf_s(one,_countof(one),_TRUNCATE,L"%ls",kind);
+            Label(text,lines,at,p.ix,p.iy-30.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
+        }
+    }
+    // The band over the keys: how many are selected, the keys.
+    Rect(drawer,ctx,0.0f,height-80.0f*s,width,height-46.0f*s,kMapBand);
+    const float y=height-63.0f*s;
+    wchar_t sel[64];
+    if(c.all)_snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedAll),c.selected);
+    else if(c.selected==1 && one[0])_snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedOne),c.count,one);
+    else _snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedSome),c.selected,c.count);
+    if(!c.allowed)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kAmber,L"%ls",Tr(Tx::npcOfflineOnly));
+    else if(!c.count)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::npcNone));
+    else Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(m.pad ? Tx::npcPadKeys : Tx::npcMouseKeys),sel);
+    if(c.noteFresh)Label(text,lines,at,width*0.5f,height-100.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
+}
+
 // The legend (left), the title and the keys (top and bottom bands).
 void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     Rect(drawer,ctx,0.0f,0.0f,width,46.0f*s,kMapBand);
     Rect(drawer,ctx,0.0f,height-46.0f*s,width,height,kMapBand);
     wchar_t h[24],g[24];
     MapDistance(h,_countof(h),m.height);MapDistance(g,_countof(g),mapcam::GridStep(m.height));
-    Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,L"MAP   height %ls   grid %ls%ls",h,g,m.follow ? L"   FOLLOW" : L"");
-    if(m.pad)Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,
-                   L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close");
+    wchar_t follow[32]=L"";
+    if(m.follow)std::swprintf(follow,32,L"   %ls",Tr(Tx::orderFollow));
+    Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,Tr(Tx::mapTitle),h,g,follow);
+    if(m.pad)Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,L"%ls",Tr(Tx::mapPadKeys));
     else {
         wchar_t key[32];KeyName(m.mapKey,key,32);
-        Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,
-              L"LMB drag / WASD pan   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",key);
+        Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapMouseKeys),key);
     }
-    struct Entry { MapKind kind; std::uint8_t flags; const wchar_t* name; };
-    static const Entry kLegend[]={{MapKind::squad,0,L"SQUAD"},{MapKind::ally,0,L"FRIENDLY"},{MapKind::vehicle,0,L"VEHICLE"},
-                                  {MapKind::air,0,L"AIRCRAFT"},{MapKind::carrier,0,L"CARRIER"},
-                                  {MapKind::enemy,kMapLarge,L"LARGE ENEMY"},{MapKind::enemyAir,kMapLarge,L"LARGE ENEMY AIR"},
-                                  {MapKind::marker,0,L"OBJECTIVE"}};
+    struct Entry { MapKind kind; std::uint8_t flags; Tx name; };
+    static const Entry kLegend[]={{MapKind::squad,0,Tx::legendSquad},{MapKind::ally,0,Tx::legendFriendly},{MapKind::vehicle,0,Tx::legendVehicle},
+                                  {MapKind::air,0,Tx::legendAircraft},{MapKind::air,kMapRotor,Tx::legendHelicopter},
+                                  {MapKind::vehicle,kMapEmpty,Tx::legendEmpty},{MapKind::carrier,0,Tx::legendCarrier},
+                                  {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
+                                  {MapKind::marker,0,Tx::legendObjective}};
     float y=height*0.30f;
     Arc(drawer,ctx,40.0f*s,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
-    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"YOU");
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendYou));
     for(const Entry& e:kLegend) {
         y+=28.0f*s;
         MapIcon(drawer,ctx,40.0f*s,y,s,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
-        Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",e.name);
+        Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(e.name));
     }
     y+=28.0f*s;
     MapDot1(drawer,ctx,40.0f*s,y,s,0,kMapEnemy);
-    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"ENEMY");
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemy));
     y+=28.0f*s;
     MapDot1(drawer,ctx,40.0f*s,y,s,kMapFlying,kMapEnemy);
-    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"ENEMY FLYING");
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemyFlying));
     y+=28.0f*s;
     MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kMapEnemy);
-    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"LOCK");
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendLock));
     y+=28.0f*s;
     MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kAmber);
-    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"NEAREST ENEMY");
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
 }
 
 // The map view open: its marks drawn (true), nothing else of the HUD.
@@ -2502,6 +2848,8 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     if(!PlayerMap(&m))return false;
     MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
+    MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
@@ -2514,14 +2862,20 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
     // hold where the player left them.
     if(viewProj && !MapOwnsView())KeepViewProj(viewProj);
     if(!quadOk || !viewProj || !ctx || !viewport)return;   // the carriers' bars are drawn whatever VehicleHud says
+    // The pause menu: nothing of the plugin's (docs/hud-re.md §10). The game still draws the scene and this HUD pass every
+    // frame, and steps the cameras; the stock HUD slides out (its layouts' transition_slide). The snapshot's own age
+    // (kFreshMs, wall) only caught the pause half a second in, and the carriers' bars and the map's marks not at all.
+    if(GamePaused())return;
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
         const int w=At<std::int32_t>(viewport,8),h=At<std::int32_t>(viewport,0xC);
         if(!drawer || w<=0 || h<=0)return;
-        const float width=static_cast<float>(w),height=static_cast<float>(h),s=height/1080.0f;
+        const float width=static_cast<float>(w),height=static_cast<float>(h),s=HudScaleOf(w,h);
+        // The words in the language the game's text is in now (it may change in the options mid-game), or the ini's.
+        hudtext::Use(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));
         alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
         Text text{};
-        text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);
+        text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines];
         int at=0,shown=0;
@@ -2530,9 +2884,21 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             FreeText(text);
             return;
         }
+        // The map's camera easing back to the player (map.cpp Camera, kEaseOut frames): its readout is gone and the view is
+        // still the map's, so the world marks (the impact rings, the turret's box, the vehicle HUD) would land on a
+        // view they were not made for. Nothing, like the stock HUD (its switch held until the camera is back).
+        if(MapOwnsView()){FreeText(text);return;}
         const ULONGLONG now=GetTickCount64();
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
+        // A switch the player makes shows for a moment (hud_cue.h Change, kSwitchMs): the picked store (forgotten while no
+        // aircraft's stores show, so boarding shows none) and EDF6AutoTurret's aim mode.
+        static hudcue::Change storePick{},aimMode{};
+        const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly);
+        if(!storesShown)storePick.seen=false;
+        const int picked=snap.cockpit ? snap.jet.store : snap.stock && snap.stockHud.heli ? snap.stockHud.selected : -1;
+        const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
+        const bool aimFlipped=fresh && snap.turret && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
         const ULONGLONG launchAt=snap.warned ? snap.warn.launchAt : 0;
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
@@ -2544,11 +2910,13 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,launchAt,lines,&at);
                 if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
                 wchar_t stores[128];
-                StoresText(stores,_countof(stores),snap.jet);
-                HeliStrip(t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,lines,&at);
+                StoresText(stores,_countof(stores),snap.jet,false);
+                LoadCell cells[6];
+                const int n=JetCells(snap.jet,cells);
+                HeliStrip(drawer,ctx,t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,cells,n,snap.jet.store,storeSwitched,lines,&at);
             } else {
                 FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,launchAt,lines,&at);
-                if(Cfg().playerJetFlightHud)CockpitStrip(t,width,height,s,snap.jet,lines,&at);
+                if(Cfg().playerJetFlightHud)CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,lines,&at);
                 else Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
             }
             const bool annunciated=snap.warned && (rotorHud || Cfg().playerJetFlightHud);   // else the old panel's text
@@ -2561,10 +2929,11 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(heliFresh && snap.heliHud.f.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f.aim,lines,&at);
         if(heliHud) {
             HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,launchAt,lines,&at);
-            wchar_t stores[192];
             const bool own=snap.stock && snap.stockHud.heli;   // its weapons, rounds and reloads (vhud.cpp)
-            if(own)StockStores(snap.stockHud,stores,_countof(stores));
-            HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,own ? stores : nullptr,lines,&at);
+            LoadCell cells[kStockArms];
+            const int n=own ? StockCells(snap.stockHud,cells) : 0;
+            HeliStrip(drawer,ctx,t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,nullptr,cells,n,own ? snap.stockHud.selected : -1,
+                      storeSwitched,lines,&at);
             if(snap.warned)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
         }
         if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
@@ -2578,9 +2947,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.turretCamOk && !snap.cockpit)TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
         if(stockHud) {
-            const bool fresh=now-snap.tick<=kFreshMs;
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
                                 snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,

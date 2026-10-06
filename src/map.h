@@ -10,8 +10,9 @@ namespace crew {
 // What a mark on the map is: its side and kind (the pin's icon). `lock` is a weapon's lock point (no unit of its own).
 enum class MapKind : std::uint8_t { squad, ally, vehicle, air, carrier, enemy, enemyAir, marker, lock };
 // A unit's flags: a large enemy (its HP bar shown), the nearest enemy, a lock still acquiring (kind lock), a flying
-// small enemy (its dot hollow).
-constexpr std::uint8_t kMapLarge=1,kMapNearest=2,kMapAcquiring=4,kMapFlying=8;
+// small enemy (its dot hollow), nobody in it (a vehicle or aircraft of team 5: drawn dimmer, map_marks.h), a helicopter
+// (kind air: its rotor's ring in place of the wings).
+constexpr std::uint8_t kMapLarge=1,kMapNearest=2,kMapAcquiring=4,kMapFlying=8,kMapEmpty=16,kMapRotor=32;
 // A unit: where it is, the ground under it (an aircraft's stem goes down to it; else its own height), its level heading
 // (0, 0: none), its HP share (<0: not shown).
 struct MapUnit { float pos[3],ground,dir[2],hp; MapKind kind; std::uint8_t flags; };
@@ -42,4 +43,6 @@ bool PlayerMap(MapReadout* out) noexcept;
 bool MapHoldsKeys() noexcept;
 // The camera is the map's this frame (open, or easing back): the HUD keeps its last game view for the aim (CameraRay).
 bool MapOwnsView() noexcept;
+// The map holds this camera's stock HUD off in the current mission: only its follower gauge bars give way too.
+bool MapHidesStockHud(const void* camera) noexcept;
 }  // namespace crew

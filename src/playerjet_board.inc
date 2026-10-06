@@ -32,8 +32,11 @@ constexpr float kHailRange=6000.0f;   // m: the farthest one it calls
 // Whether the plugin holds `v` for the player (see the file comment).
 bool Held(const unsigned char* v) noexcept {
     if(SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::player)return true;
+    // A newly spawned catch twin has no PJet entry until PlayerJetFrame passes this gate and calls Make.
+    // Check its control block too: an address reused after the catch disappeared is not the catch.
+    if(catchFlight.v==v && bail.caught.Is(v))return true;
     const PJet* j=Find(v);
-    return j && (j->driven || j->autopilot || j->hail.phase!=kHailNone || j->keep || catchFlight.v==v);
+    return j && (j->driven || j->autopilot || j->hail.phase!=kHailNone || j->keep);
 }
 // Its entry, once it is not held: let go of.
 void Forget(const unsigned char* v) noexcept {
@@ -79,10 +82,18 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
     (void)clear;
     if(!j.board)return;
     j.steered=false;j.orbiting=false;
-    if(eject)bail.mark=0.0f;   // no jet of its kind to make for the catch (kPlayerJetFiles): the parachute, or itself (below)
+    // Ejected, the catch (playerjet.cpp Catch) makes its row's catch jet (playerjet_kinds.h catchWith: its own kind's
+    // requested twin, else a player jet) unless this one comes back for them itself (below). It used to be no jet at all
+    // (bail.mark 0: only the player jets' SGOs could be made), so one shot down under them left them to the parachute
+    // (2026-10-06, a multirole crashed 859 m up: "nobody came for me").
     // Destroyed: its wreck is the game's. `alive` is only that its object can still be read (PlayerJetFrame's kDead
-    // branch leaves a shot-down jet readable): a dead one neither waits, nor catches the parachute, nor flies on.
-    if(!alive || v[kDead])return;
+    // branch leaves a shot-down jet readable): a dead one neither waits, nor catches the parachute, nor flies on. Its
+    // entry is let go of (Forget): the catch is a new object with an entry of its own (PlayerJetFrame Make, Boarded).
+    if(!alive || v[kDead]) {
+        if(eject)Log("PJET v=%p lost under the player: the catch makes a jet for them",v);
+        j=PJet{};
+        return;
+    }
     if(j.phase!=Phase::air){j.keep=true;Log("PJET v=%p left on the ground: it waits there for the player",v);return;}
     if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch) {
         // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
@@ -94,10 +105,11 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
         if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
         catchFlight=CatchFlight{v,{pos[0]+j.vel[0]*5.0f,pos[1]+j.vel[1]*5.0f,pos[2]+j.vel[2]*5.0f},speed,{0.0f,0.0f,0.0f},
                                 {f[0],0.0f,f[2]}};
-        bail.caught=ObjRef::Of(v);bail.caughtAt=GameMs();
+        bail.caught=ObjRef::Of(v);bail.caughtAt=GameMs();bail.self=true;
         Log("PJET v=%p left in the air: it comes back to catch the player",v);
         return;
     }
+    // A rotor craft (or the catch off): its NPC flies it on; ejected, the catch makes a wing for them (catchWith).
     HandBack(j,v,"the player left it in the air");
 }
 
@@ -239,6 +251,18 @@ void SpecialFrame(PJet& j,unsigned char* v,Stick& s,const float* pos,ULONGLONG m
     }
 }
 
+// --- A rotor craft's clearance (playerjet_kinds.h RestHeight / BottomClear) ---
+// Its mesh bone (the drawn model's origin, its bottom): the rotor craft's models' is `body` (pylib/vcobjects.py JETS).
+float RestOver(const unsigned char* v,const float* pos) noexcept {
+    const unsigned char* const rec=BoneRecord506(v+kModelInst506,L"body");
+    return rec ? pjet::RestHeight(pos[1],At<float>(rec,kBoneWorld506+0x34)) : 0.0f;   // the world matrix's translation y
+}
+// `clear` (from its position) as its bottom's, for a rotor craft; a wing's as it is.
+float FloorClear(const PJet& j,const unsigned char* v,const float* pos,float clear) noexcept {
+    if(!j.board || j.board->frame!=pjet::Airframe::rotor)return clear;
+    return pjet::BottomClear(clear,RestOver(v,pos),kNoGround);
+}
+
 // --- A rotor craft under the player (the carriers, the blast and doll drones) ---
 // On the keyboard and mouse with ini HeliMouseAim, the mouse-aim flight (heliaim.h, as a stock heli's: the mouse moves
 // the aim, the craft faces it and flies along its elevation, W / S set the forward speed and leave it, A / D sidestep,
@@ -266,7 +290,9 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
         const float reach=speed*speed/(2.0f*k.brake)+5.0f;   // far enough that Hover's braking curve asks the whole speed
         goal[0]+=dir[0]*reach;goal[2]+=dir[2]*reach;
     }
-    jet::Hover(e,k,v,pos,goal,face,speed,HoverClimb(k),dt);
+    const JetMass* const mass=JetMassOf(BodyMark(v));   // the player's own lift (hover_lift.h; the NPCs' Hover passes none)
+    // Player flight already uses the map walls; a hail must reach its landing point outside the NPC patrol band too.
+    jet::Hover(e,k,v,pos,goal,face,speed,HoverClimb(k),dt,mass ? hover::PlayerLift(mass->mass,Cfg().playerRotorLift) : 0.0f,false);
 }
 
 // The rotor craft's flight done: the player's record from its entry's, the nacelles, the doll; parked when it sits
@@ -337,6 +363,7 @@ void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float cl
     j.hoverTop=k.cruise;
     j.yaw=nose+Clamp(std::remainder(j.yaw-nose,2.0f*kWatchPi),-kHoverLead,kHoverLead);
     if(!aimFlight)HoverStick(j,k,s,down,want,&vz);
+    j.area=WallTurnVelocity(pos,want);   // the walls where the map's ground ends (playarea.h), as a wing's
     const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
     const float asked=Len(want);
     // Coming down near the ground it slows (kSettleShare of its height a second, at least kSettle): set down, not dropped.
@@ -569,7 +596,8 @@ void RotorHail(PJet& j,unsigned char* v,const float* pos,float clear,float dt,UL
     float to[3]={spot[0]-pos[0],0.0f,spot[2]-pos[2]};
     const float speed=Normalize(to) ? std::fmin(k.cruise,std::sqrt(2.0f*k.brake*off)) : 0.0f;
     const float want[3]={to[0]*speed,0.0f,to[2]*speed};
-    const float height=off>kSpotDescend ? std::fmax(pos[1],spot[1]+kSpotOver) : spot[1];
+    const float rest=RestOver(v,pos);   // its position over its bottom: down is the spot plus that
+    const float height=off>kSpotDescend ? std::fmax(pos[1],spot[1]+rest+kSpotOver) : spot[1]+rest;
     const float vz=Clamp((height-pos[1])*0.5f,-HoverClimb(k),HoverClimb(k));
     HoverTo(*e,k,v,pos,want,vz,player.pos,dt);
     HoverDone(j,*e,k,v,pos,clear,off<4.0f,dt,ms);
@@ -584,7 +612,7 @@ void HailFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
     bool water=false;
-    const float clear=Clear(pos,&water);
+    const float clear=FloorClear(j,v,pos,Clear(pos,&water));
     j.clear=clear;
     PJet::Hail& h=j.hail;
     if(h.phase==kHailWait) {

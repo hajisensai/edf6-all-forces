@@ -158,7 +158,7 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     *speed=bomber && j.bay.bombSpeed>kind.attack ? j.bay.bombSpeed : kind.attack;
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
     const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
-    const bool edge=walled || NearWall(pos,turn*1.5f,ms);
+    const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
     if(gone>kGone || (gone>kGoneStuck && (edge || ms-j.modeAt>kStuckMs))) {
         if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
         j.reap=true;
@@ -414,7 +414,48 @@ void GunnerHold(Jet& j,ULONGLONG ms) noexcept {
 const float* GunnerAnchor(const Jet& j,const GunnerOrder& o) noexcept {
     return o.centred ? o.at : j.launched ? j.anchor : o.home;
 }
+
+constexpr ULONGLONG kCommandSeenMs=500;   // game ms: a jet JetFrame stepped this recently is flown by the plugin now
+
+// What a jet works round under a map command (mapcmd.cpp): the point it was sent to guard, the player it was told to
+// follow (while they are seen), else `own` (its call's strike point, the player it escorts, where it was placed).
+const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
+    if(j.cmd.order==Order::guard)return j.cmd.at;
+    if(j.cmd.order==Order::follow && follow)return player.pos;
+    return own;
+}
+
+// A jet a map command reaches: the friendly side's, flown by the plugin's NPC now (JetFrame stamped it just now: not one
+// the player flies or that is called down for them), not withdrawing or being deleted, not a
+// carrier's drone (its carrier sends it) nor a Primer creature.
+bool Commandable(const Jet& j,ULONGLONG ms) noexcept {
+    if(!j.ref || j.reap || !Alive(j.ref) || IsPrimer(j) || MotherOf(j))return false;
+    if(j.mode==Mode::withdraw || ms-j.seen>kCommandSeenMs)return false;
+    const unsigned char* v=j.Vehicle();
+    return CommandVehicleLive(j.ref) && !HostileJet(v) && !PlayerJetHolds(v);
+}
 }  // namespace
+
+int JetCommandUnits(CommandUnit* out,int most) noexcept {
+    int n=0;
+    __try {
+        const ULONGLONG ms=GameMs();
+        for(const auto& j:jets)
+            if(n<most && Commandable(j,ms) && ReadCommandUnit(j.ref,KindOf(j).name,j.cmd,true,&out[n]))++n;
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return n;
+}
+
+bool JetCommand(const void* vehicle,const Command& c) noexcept {
+    __try {
+        Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || !Commandable(*j,GameMs()))return false;
+        j->cmd=c;
+        Log("JET v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
+            c.at[0],c.at[1],c.at[2]);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 void JetFrame(unsigned char* v) noexcept {
     if(!HooksOk())return;
@@ -461,11 +502,18 @@ void JetFrame(unsigned char* v) noexcept {
     // The player's carrier sends its drones to a point (PlayerLaunchDrone): they work round that.
     const bool ordered=mother && mother->carrier.ordered;
     const float* anchor=gunner ? GunnerAnchor(*j,crewOrder) : ordered ? mother->carrier.order :
-                        mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : follow && !j->launched ? player.pos : j->anchor;
+                        mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) :
+                        CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor);
     const float* viewer=follow ? player.pos : anchor;
+    // Worked round from inside its soft edge (airbound.h): a strike point, a guard post or a commanded point out past it
+    // is taken in by its patrol circle, so the circle and the fight round it stay in.
+    float anchorIn[3];
+    anchor=SoftAnchor(*j,anchor,anchorIn);
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     if(!gunner)Leave(*j,kind,arms,mother,hp,hpMax,ms);   // held for the player at the gun: no withdrawal
+    const float was[3]={j->m.vel[0],j->m.vel[1],j->m.vel[2]};
     const bool walled=Sense(*j,pos,ms);
+    if(walled)LogImpact("JET",v,pos,was);   // what held it back (impact.cpp)
 
     // The target and its motion.
     if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : j->reach>0.0f ? j->reach : TargetRange(kind),dt,ms);

@@ -8,6 +8,7 @@
 #include "crew.h"
 #include "gear.h"
 #include "memory.h"
+#include "playarea.h"
 #include <iterator>
 
 namespace crew {
@@ -84,6 +85,7 @@ void MissionStart() noexcept {
     ResetSidecars();
     ResetProteus();
     ResetBigWorld();
+    ResetPlayArea();
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     PreloadPlayerJets();   // ...and the player jets, for the catch after an ejection (playerjet.cpp)
     PreloadSub();    // ...and the submarine carrier (subcarrier.cpp)

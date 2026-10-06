@@ -11,6 +11,9 @@
   - the ownership ledger (pylib/ledger.py) deletes a file only when nobody needs it, and never one someone
     else changed;
   - the installer's ini merge (installer.merge_ini) only adds settings and changes nothing of the player's;
+  - the pack: every plugin CMake builds is shipped by tools/build_release.py and in installer.PLUGINS, every writer
+    installer.install calls has its remover in uninstall, and a stand-in game's install -> upgrade -> uninstall of
+    both plugins and EDF6AutoTurret's data leaves Mods as other mods left it;
   - interrupted or refused runs: autoturret/tools/build.py install killed half way still reinstalls and
     uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
     uninstall over a misaligned table offers repair or skipping the table instead of failing;
@@ -21,6 +24,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import re
 import shutil
@@ -106,8 +110,8 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
                for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
     air = gen.Plan()
     air.air.enabled = True
-    for plan in (gen.grand_battle(gen.Plan()), air, gen.Plan()):
-        lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan.scenario))
+    for plan in (gen.grand_battle(gen.Plan()), gen.target_range(gen.Plan()), air, gen.Plan()):
+        lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
         named = set(re.findall(r'app:/object/(edf6tr_[a-z0-9_]+)\.sgo', gen.script(plan, lay)))
         missing = named - {x for x in gen.spawned(plan) if x in gen.DERIVED}
         assert not missing, f'{plan.scenario or ("air" if plan.air.enabled else "waves")}: never written {sorted(missing)}'
@@ -178,6 +182,53 @@ def gear_legs_as_the_models_fold_them() -> None:
     for file, r in jet_models.MODELS.items():
         hover = file in ('EDF6VC_CARRIER.MRAB', 'EDF6VC_DRONE.MRAB')
         assert (r.gear is None) == hover and (r.gear is None or r.gear in jet_gear.SPECS), f'{file}: gear {r.gear}'
+
+
+@test
+def gear_mount_reaches_the_skin() -> None:
+    """pylib/jet_gear.py mounts on synthetic data: a slanted cylinder (the donor's shock absorber: its hub end at the
+    origin, 0.65 forward and 0.42 up to its upper end, 0.07 of that inside its donor body) placed x 1.5 under a level
+    skin 0.5 over where its end would be: reach() raises the end until it goes 0.07 x 1.5 into the skin, _shear keeps
+    the hub end, lifts the upper end by exactly that, and leaves every normal perpendicular to the sheared surface."""
+    import math
+    import jet_gear as jg
+    ring = 8
+    axis_d = (0.0, 0.42, 0.65)
+    ln = math.hypot(axis_d[1], axis_d[2])
+    ax = (0.0, axis_d[1] / ln, axis_d[2] / ln)
+    u = (1.0, 0.0, 0.0)
+    w = (0.0, ax[2], -ax[1])     # u x axis: perpendicular to both
+    r = 0.04
+    rows, P = [], []
+    for end in (0.0, 1.0):
+        for k in range(ring):
+            a = 2 * math.pi * k / ring
+            nrm = tuple(math.cos(a) * u[c] + math.sin(a) * w[c] for c in range(3))
+            p = tuple(end * axis_d[c] + r * nrm[c] for c in range(3))
+            P.append(p)
+            rows.append([p, nrm, ax])
+    m = jg.mount_of(0, 0, P, set(range(2 * ring)), 0.07)
+    assert abs(m.length - ln) < 1e-9 and all(abs(m.axis[c] - ax[c]) < 1e-9 for c in range(3)), (m.axis, m.length)
+    s, off = 1.5, (0.0, 0.0, 0.0)
+    skin_y = m.top[1] * s + 0.5
+    rise = jg.reach(m, s, off, lambda _x, _z: skin_y)
+    top, short = jg.mount_gap(m, s, off, lambda _x, _z: skin_y, rise)
+    assert abs(short) < 1e-9 and abs(top[1] - (skin_y + 0.07 * s)) < 1e-9, (top, short, rise)
+    assert jg.reach(m, s, (0.0, 1.0, 0.0), lambda _x, _z: skin_y) == 0.0, 'a mount already deep enough is not moved'
+    keys = ['position:0', 'normal:0', 'tangent:0']
+    out = [jg._shear(m, rise, row, keys) for row in rows]
+    for k in range(ring):
+        lo, hi = out[k], out[ring + k]
+        assert max(abs(lo[0][c] - rows[k][0][c]) for c in range(3)) < 1e-9, 'the hub end moved'
+        assert abs(hi[0][1] - rows[ring + k][0][1] - rise * m.t(rows[ring + k][0])) < 1e-9
+        side = [hi[0][c] - lo[0][c] for c in range(3)]               # along the sheared surface
+        an = 2 * math.pi * k / ring
+        around = [-math.sin(an) * u[c] + math.cos(an) * w[c] for c in range(3)]   # the hub ring's tangent there
+        for e in (side, around):
+            dot = sum(lo[1][c] * e[c] for c in range(3)) / math.sqrt(sum(x * x for x in e))
+            assert abs(dot) < 1e-9, f'normal {lo[1]} not across the sheared surface ({dot:.3g})'
+        nl = math.sqrt(sum(x * x for x in lo[1]))
+        assert abs(nl - 1.0) < 1e-9
 
 
 @test
@@ -293,9 +344,10 @@ def release_imports() -> None:
     from the released exe."""
     inst, rel = src('tools/installer.py'), src('tools/build_release.py')
     hidden = set(re.findall(r"'(\w+)'", rel.split("for mod in ('call_weapons'", 1)[1].split('):', 1)[0])) | {'call_weapons'}
-    local = {os.path.splitext(f)[0] for d in ('tools', 'pylib', 'testrange') for f in os.listdir(os.path.join(ROOT, d)) if f.endswith('.py')}
+    local = {os.path.splitext(f)[0] for d in ('tools', 'pylib', 'testrange', 'autoturret/tools')
+             for f in os.listdir(os.path.join(ROOT, d)) if f.endswith('.py')}
     lazy = set(re.findall(r'^[ \t]+import (\w+)', inst, re.M)) & local
-    assert 'make_emc' in lazy, 'release_imports: the scan reads installer.py'
+    assert {'make_emc', 'build'} <= lazy, 'release_imports: the scan reads installer.py'
     # Procedural models use importlib, so PyInstaller cannot infer these from the import graph.
     import jet_models
     lazy.update(jet_models.GENERATED.values())
@@ -676,7 +728,7 @@ def emc_copies_agree() -> None:
 @test
 def sidecar_copies_agree() -> None:
     """The sidecar motorcycle (src/sidecar.cpp, pylib/sidecar_model.py, tools/make_sidecar.py): the C++ copies of the
-    marker bone, the gunner's point and the platform's outer side are the model's; its request is a ground vehicle
+    marker bone, the gunner's point (on the tub's floor) and the tub's outer side are the model's; its request is a ground vehicle
     request of the Freed bike's class and request (a Ranger's vehicle), its notes do not ask for EDF6AutoTurret and
     it needs no stock weapon installed; the plugin is wired through (the input step, the board button before the
     stock seat search, no NPC driver while the player is in the sidecar, the mission reset, the setAngVel redirect,
@@ -688,10 +740,12 @@ def sidecar_copies_agree() -> None:
     assert f'kMarkerBone[]=L"{sm.MARKER_BONE}"' in c, 'src/sidecar.cpp kMarkerBone'
     m = re.search(r'kGunnerX=(-?[\d.]+)f,kGunnerY=(-?[\d.]+)f,kGunnerZ=(-?[\d.]+)f', c)
     assert m and tuple(float(x) for x in m.groups()) == sm.GUNNER_POINT, m and m.groups()
-    m = re.search(r'kPlatformOut=(-?[\d.]+)f', c)
-    assert m and float(m.group(1)) == sm.PLATFORM[0][0], m and m.groups()
-    assert sm.PLATFORM[0][1] < sm.GUNNER_POINT[1] == sm.PLATFORM[1][1], 'the gunner stands on the platform top'
-    assert all(sm.PLATFORM[0][k] < sm.GUNNER_POINT[k] < sm.PLATFORM[1][k] for k in (0, 2)), 'the gunner over the platform'
+    m = re.search(r'kTubOut=(-?[\d.]+)f', c)
+    assert m and float(m.group(1)) == sm.TUB_OUT == sm.TUB[0][0] == sm.FLOOR[0][0], m and m.groups()
+    assert sm.TUB_OUT == sm.TUB_X - sm.TUB_HALF_WIDTH and sm.TUB_IN == sm.TUB_X + sm.TUB_HALF_WIDTH
+    assert sm.FLOOR[0][1] < sm.GUNNER_POINT[1] == sm.FLOOR[1][1] == sm.FLOOR_Y, 'the gunner stands on the floor slab'
+    assert all(sm.FLOOR[0][k] < sm.GUNNER_POINT[k] < sm.FLOOR[1][k] for k in (0, 2)), 'the gunner over the floor'
+    assert sm.SEAT_FRONT < sm.GUNNER_POINT[2] < sm.DECK_Z, 'the gunner between the seat and the deck'
     rows = [x for x in calls.CALLS if x.ground == 'sidecar']
     assert len(rows) == 1 and rows[0].vehicle == make_sidecar.VEHICLE.sgo and rows[0].mark == 0 and rows[0].brings == 'vehicle'
     assert make_sidecar.VEHICLE.stock == 'V503_BIKE' and make_sidecar.VEHICLE.request == 'AWEAPON338'
@@ -721,6 +775,21 @@ def sidecar_copies_agree() -> None:
         files = {f'OBJECT/{make_sidecar.MODEL_FILE}': sm.build(game), f'OBJECT/{make_sidecar.RAGDOLL_FILE}': shkt,
                  f'OBJECT/{make_sidecar.SGO_FILE}': make_sidecar.vehicle_sgo(game)}
         make_sidecar.check(files, game)
+
+
+@test
+def sidecar_tub_holds_the_gunner() -> None:
+    """The sidecar's tub (pylib/sidecar_model.py sidecar_parts, no game needed) is a tub the gunner stands IN: a floor
+    face at FLOOR_Y under GUNNER_POINT (not floating over it, not sunk in it), walled all round from the floor up to
+    the lowest rim with the walls at least SOLDIER_REACH off (their legs and hips do not go through), the sides
+    beside them up to RIM_Y (their hips), every face drawn the way it is seen; the point is the floor slab's top (the
+    collision the plugin stands them on) and inside the tub's plan."""
+    import sidecar_model as sm
+    got = sm.check_tub(sm.parts_triangles(list(sm.sidecar_parts(2).values())), sm.SOLDIER_REACH)
+    assert got['floor y'] == sm.FLOOR_Y == sm.FLOOR[1][1] == sm.GUNNER_POINT[1], got
+    assert got['rays walled'] == 144 and got['faces seen from behind'] == 0, got
+    assert sm.RIM_Y - sm.FLOOR_Y >= 0.85, "the rim at a standing soldier's hips (koshi 0.888 over their feet)"
+    assert abs(sm.half_width(sm.GUNNER_POINT[2]) - sm.TUB_HALF_WIDTH) < 0.05, "the gunner at the tub's widest"
 
 
 @test
@@ -817,12 +886,26 @@ def gun_stabilizer_wired() -> None:
     assert '&StabFrame,v' in crew and 'ResetStabilizer();' in mission and 'InstallStabilizer();' in plugin
     assert 'src/stab.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/stab_check.cpp' in cmake
     assert '#include "../src/stab.h"' in src('tools/stab_check.cpp') and '#include "stab.h"' in code
-    steer = src('src/turretcam.cpp').split('bool Steer(', 1)[1].split('\n}\n', 1)[0]
-    assert 'StabHeld(seat+kSeatAim,held,hull);' in steer and 'target-held[i]' in steer and '-hull[i];' in steer
+    tc = src('src/turretcam.cpp')
+    steering = tc.split('void SteeringOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StabHeld(seat+kSeatAim,s->held,s->hull,s->frame)' in steering
+    steer = tc.split('bool Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert 'tcam::SteerAxes(game.steer,want,s.held,s.hull,' in steer
+    axes = src('src/turretcam.h').split('inline bool SteerAxes(', 1)[1].split('\n}\n', 1)[0]
+    assert 'target-held[i]' in axes and '-hull[i];' in axes
+    # The wants are seen in the frame the held axes are (stab.h HeldIn), from the bore's point at the turret's pivot
+    # (turretcam.h AimOrigin): the Grape's barrel twitched left and right without either (tools/grape_turret_check.cpp).
+    wants = tc.split('bool Wants(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Wants(seat,st.frame,target,ballistic,want)' in tc and 'tcam::AimOrigin(' in wants and 'tcam::LocalTo(frame,' in wants
+    assert 'stab::HeldIn(' in code and 'EXCLUDE_FROM_ALL tools/grape_turret_check.cpp' in cmake
+    assert 'grape_turret_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    gtc = src('tools/grape_turret_check.cpp')
+    assert all(f in gtc for f in ('tcam::AimOrigin(', 'stab::HeldIn(', 'tcam::SteerAxes(', 'stab::Step('))
     flak = src('autoturret/src/plugin.cpp')
     assert 'Stabilized(vehicle,0,stock,held,hull);' in flak and '-hull;' in flak.split('float AxisInput(', 1)[1].split('\n}\n', 1)[0]
     assert 'Stabilized(vehicle,s,aim.angle,held,hull);' in src('autoturret/src/gunner.cpp')
-    assert 'r.stab=StabState(v,r.seat);' in src('src/vhud.cpp') and 'L"    STAB"' in src('src/hud.cpp')
+    assert 'r.stab=StabState(v,r.seat);' in src('src/vhud.cpp') and 'Tx::stab' in src('src/hud.cpp')
+    assert 'HUDTEXT(stab,L"STAB",' in src('src/hudtext.inc')
     hooked = set(re.findall(r'\{(0x[0-9A-F]{7}),0x[0-9A-F]+,"', crew))
     table = code.split('const Class kClasses[]={', 1)[1].split('};', 1)[0]
     vts = re.findall(r'\{(0x[0-9A-F]{7}),"', table)
@@ -859,6 +942,41 @@ def lofted_arc_solver() -> None:
 
 
 @test
+def katyusha_bm13_launcher() -> None:
+    """The Katyusha's launcher is a BM-13 rail pack (pylib/katyusha_model.py launcher_parts): the weapon's 10 muzzles
+    (MUZZLES, written into the weapon's MAB by tools/make_katyusha.py set_muzzles) sit at the rails' front ends on the
+    rockets' axes, symmetric about the launcher's middle; the parts' faces are wound outward as the stock ones are
+    ((b - a) x (c - a) along the outward normal). With the game: the built files pass make_katyusha.check (the rails,
+    rockets and muzzles found in the model, the muzzles in the weapon, the launcher over the bed from 0 to the stop)."""
+    import math
+    import katyusha_model as km
+    import procmesh as pm
+    xs, ys = km.rail_xs(), km.rocket_ys()
+    assert len(xs) == km.RAILS == 8 and len(km.MUZZLES) == 10 and [n for n, _ in km.MUZZLES] == [f'{i:02d}' for i in range(1, 11)]
+    for name, (x, y, z) in km.MUZZLES:
+        assert any(abs(x - r) < 1e-9 for r in xs) and any(abs(y - h) < 1e-9 for h in ys) and z == km.RAIL_FRONT, name
+    assert abs(sum(p[0] for _, p in km.MUZZLES)) < 1e-9 and len({p for _, p in km.MUZZLES}) == 10
+    assert ys[0] - km.ROCKET_R > km.RAIL_Y + km.RAIL_H / 2 and ys[1] + km.ROCKET_R < km.RAIL_Y - km.RAIL_H / 2
+    # Winding: a box turned off the axes and a tube along x, every face pointing away from the solid's middle.
+    part = pm.Part(0)
+    a = math.radians(30)
+    km._box(part, (1.0, 2.0, 3.0), ((math.cos(a), math.sin(a), 0.0), (-math.sin(a), math.cos(a), 0.0), (0.0, 0.0, 1.0)),
+            (0.3, 0.2, 0.5), [(0, 1.0)])
+    boxes = len(part.tris)
+    km._tube(part, (0.0, 0.0, 0.0), km.X_AXES, [(0.0, 0.1), (1.0, 0.1), (1.2, 0.03)], [(0, 1.0)])
+    for k, (i, j, n) in enumerate(part.tris):
+        p, q, r = (part.pos[v] for v in (i, j, n))
+        normal = [((q - p)[(c + 1) % 3] * (r - p)[(c + 2) % 3] - (q - p)[(c + 2) % 3] * (r - p)[(c + 1) % 3]) for c in range(3)]
+        mid = (p + q + r) / 3
+        centre = (1.0, 2.0, 3.0) if k < boxes else (0.6, 0.0, 0.0)   # both convex: inside, their middles
+        assert sum(normal[c] * (mid[c] - centre[c]) for c in range(3)) > 0, f'triangle {k} wound inward'
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        files = make_katyusha.build(rootcpk.DEFAULT_GAME)   # katyusha_model.check + make_katyusha.check
+        make_katyusha.check(files)
+
+
+@test
 def katyusha_pose_agrees() -> None:
     """The Katyusha's pose (src/katyusha.cpp) is its model's (pylib/katyusha_model.py): the rod bone's name and one
     elevation stop (tools/make_katyusha.py takes the model's). EDF6AutoTurret leaves a lofted launcher the player rides
@@ -874,7 +992,7 @@ def katyusha_pose_agrees() -> None:
     assert steer.split('\n')[1].strip().startswith('if(PlayerLofted(seat))'), 'autoturret Steer: PlayerLofted first'
     assert 'bool Root(' not in at and 'bool BallisticArc(' in src('common/weapon.cpp')
     assert 'edf::BallisticArc(' in at and 'edf::BallisticArc(' in src('src/launcher.cpp')
-    P, E, M = (0.0, 2.2, -2.06), (0.0, 2.51, -3.52), (0.0, 2.23, -3.56)   # the built model's, rounded
+    P, E, M = (0.0, 2.25, -2.05), (0.0, 2.56, -3.51), (0.0, 2.28, -3.55)   # the built model's, rounded
     d0, e0, l0 = km.ram_pose(P, E, M, 0.0)
     assert abs(d0) < 1e-12 and max(abs(a - b) for a, b in zip(e0, E)) < 1e-12
     d, e, length = km.ram_pose(P, E, M, math.radians(km.PITCH_STOP_DEG))
@@ -1006,6 +1124,62 @@ def every_boardable_aircraft_requested() -> None:
 
 
 @test
+def every_boardable_aircraft_caught() -> None:
+    """Whatever the player ejects from has a catch jet (src/playerjet_kinds.h kCatchFiles, each row's catchWith, the
+    user, 2026-10-06: 「我在天上好像还是没来接我」 after a multirole crashed under them): a jet's SGO the installer writes
+    (tools/make_jets.py FILES) with its mark and a seat every class takes, its own kind's requested twin when there is one
+    (pylib/vcobjects.py REQUEST_KINDS), else a player jet; always a wing (the catch flies in as one: AutoFly). Every catch
+    SGO is preloaded at the mission's start (src/playerjet.cpp PreloadPlayerJets over kCatchFiles) and is the one table
+    SpawnCatchJet makes from; the jet left does not take the catch away (playerjet_board.inc Left)."""
+    head = src('src/playerjet_kinds.h')
+    order = re.search(r'enum CatchWith : int \{(.*?)\};', head, re.S).group(1).replace(' ', '').replace('\n', '').split(',')
+    assert order[0] == 'kCatchNone=-1', order
+    order = order[1:]
+    table = head.split('kCatchFiles[]={', 1)[1].split('};', 1)[0]
+    files = re.findall(r'\{"([\w-]+)",(\d+)\.0f,L"([^"]+)",L"([^"]+)",(true|false)\}', table)
+    assert len(files) == len(order) >= 3, (len(files), order)
+    marks = {}
+    by_file = {}
+    for (name, mark, sgo_path, file, player), enum in zip(files, order):
+        assert sgo_path == 'app:/object/' + file.lower(), file
+        assert file in make_jets.FILES, f'{file}: tools/make_jets.py does not write it (the installer would not install it)'
+        jet = vc.JETS[make_jets.FILES[file]]
+        assert jet.mark == float(mark), f'{file}: mark {jet.mark}, kCatchFiles says {mark}'
+        assert (player == 'true') == jet.player and (jet.player or (jet.parked and jet.requested)), file
+        marks[enum] = float(mark)
+        by_file[enum] = (file, jet)
+    body_marks = {body: float(mark) for body, mark in re.findall(
+        r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1]))}
+    rows = re.findall(r'\{Body::(\w+),Airframe::(\w+),Arm::\w+,(?:Wing|Rotor)\(.*?\),(\w+),(\w+)\},', head)
+    frames = dict(re.findall(r'\{Body::(\w+),Airframe::(\w+),', head))
+    assert len(rows) == len(frames) >= 13, (len(rows), len(frames))
+    twins = {vc.JETS[k].mark: k for k in vc.REQUEST_KINDS}
+    wing_marks = {body_marks[b] for b, f in frames.items() if f == 'wing'}
+    for body, frame, catch, why in rows:
+        assert catch in by_file, f'{body}: catchWith {catch} is no kCatchFiles row'
+        file, jet = by_file[catch]
+        mark = body_marks[body]
+        if frame == 'wing' and mark in twins:   # its own kind's twin first
+            assert file == make_jets.request_file(twins[mark]) and why == 'kOwnTwin', f'{body}: caught by {file}, not its own twin'
+        else:
+            assert jet.player and why != 'kOwnTwin', f'{body} ({frame}): no twin of its own to fly in: a player jet, not {file}'
+        assert jet.player or jet.mark in wing_marks, f'{body}: its catch {file} is no wing'
+    jets = src('src/playerjet.cpp')
+    preload = jets[jets.index('void PreloadPlayerJets()'):]
+    preload = preload[:preload.index('\n}\n')]
+    assert 'i<pjet::kCatchFileCount' in preload and 'kPreloadFn)(mgr,f.sgo' in preload, 'PreloadPlayerJets: not every catch SGO'
+    spawn = jets[jets.index('unsigned char* SpawnCatchJet('):]
+    spawn = spawn[:spawn.index('\n}\n')]
+    assert 'pjet::kCatchFiles[which]' in spawn and 'playerJetPreloaded[which]' in spawn, 'SpawnCatchJet: not the catch table'
+    assert 'kPlayerJetFiles' not in jets and 'bail.mark' not in jets, 'a second catch table / the old mark'
+    board = src('src/playerjet_board.inc')
+    left = board[board.index('void Left('):]
+    left = left[:left.index('\n}\n')]
+    assert not re.search(r'bail\.(catchWith|mark)\s*=(?!=)', left), 'Left takes the catch away from the jet left'
+    assert 'bail.catchWith=CatchOf(j,&bail.catchWhy);' in jets, 'EjectStart: the catch of the jet left'
+
+
+@test
 def range_parks_every_boardable_aircraft_apart() -> None:
     """The grand battle parks one of each of our aircraft the player boards that has a range SGO (testrange/gen.py
     BOARDABLE_PARKED: every mark of src/playerjet_kinds.h kBoardable among pylib/vcobjects.py JETS) empty, none of them
@@ -1042,7 +1216,7 @@ def range_parks_every_boardable_aircraft_apart() -> None:
     points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
     points += [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
                for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
-    lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan.scenario))
+    lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
     taken = [(lay.player, gen.SPOT)]
     for sgo, _npc, p in gen.spots_for(plan, lay):
         r = gen.footprint(sgo)
@@ -1066,21 +1240,174 @@ def grand_battle_fits_the_real_plain() -> None:
     import rmpa
     plan = gen.grand_battle(gen.Plan())
     points = rmpa.points(gen.Game(rootcpk.DEFAULT_GAME).read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA'))
-    reserve = gen.far_reserved(plan.scenario)
+    reserve = gen.far_reserved(plan)
     lay = gen.layout(points, gen.small_count(plan), reserve)
     assert len(gen.spots_for(plan, lay)) == len(gen.placements(plan))
     assert len(gen.grand_points(lay)) == len(gen.GRAND_SHIPS)
     gen.script(plan, gen.layout(points, gen.small_count(plan), reserve))
 
 
+def _range_grid() -> list:
+    """A map of its own (the selftest runs without the game): the player start and a point every 25 m out to 1 km."""
+    import rmpa
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
+    return points + [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+                     for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
+
+
+def _range_checked(gen, plan, points: list) -> tuple[list, list]:  # noqa: ANN001 - the testrange module, a gen.Plan
+    """Lays `plan` out on `points` and checks it: every placement on a spot of its own, no footprint reaching
+    OVERLAP_SLACK into another's or the player's start, and (a range of targets) every target spot's group clear of them
+    all. Returns (placed, target spots)."""
+    lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
+    placed = gen.spots_for(plan, lay)
+    assert len(placed) == len(gen.placements(plan)) == len({p.name for _, _, p in placed}), 'a placement without a spot'
+    taken = [(lay.player, gen.SPOT)]
+    for sgo, _npc, p in placed:
+        r = gen.footprint(sgo)
+        assert gen.overlap(p, r, taken) == 0.0, f'{sgo} at {p.name} reaches {gen.overlap(p, r, taken):.1f} m into another'
+        taken.append((p, r))
+    targets = gen.target_spots(lay) if gen.target_ranged(plan) else []
+    for t in targets:
+        assert gen.overlap(t, gen.TARGET_SPREAD, taken) == 0.0, f'targets at {t.name} come out on a vehicle'
+    return placed, targets
+
+
+@test
+def installer_range_has_targets_and_no_enemy() -> None:
+    """The range the installer writes (testrange/gen.py target_range; the user, 2026-10-06: 「测试场的怪给我去掉吧，留下靶子。
+    然后载具再补充一下我们新加的」): the installer writes it (not the grand battle); its script makes targets and nothing
+    hostile (no ship, no thread, no other enemy, no Primer, no enemy jet); every vehicle we added or rework that the player
+    drives is placed empty; and on a map of its own every vehicle has room and no target group comes out on one."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert re.search(r'gen\.install\(game, gen\.target_range\(gen\.Plan\(\)\)\)', src('tools/installer.py')), \
+        'the installer writes another range'
+    plan = gen.target_range(gen.Plan())
+    assert gen.target_ranged(plan) and plan.scenario == '' and gen.far_reserved(plan) == gen.TARGET_SPOTS
+    placed, targets = _range_checked(gen, plan, _range_grid())
+    assert len(targets) >= gen.TARGET_SPOTS, f'{len(targets)} target spots'
+    text = gen.script(plan, gen.layout(_range_grid(), gen.small_count(plan), gen.far_reserved(plan)))
+    made = re.findall(r'(Create\w+)\(([^;]*)\);', text)
+    hostile = [(f, a) for f, a in made if f.startswith('CreateEnemy') and gen.TARGET + '.sgo' not in a]
+    assert not hostile, hostile
+    assert any(f == 'CreateEnemyGroup' for f, _ in made), 'no target in the script'
+    assert not re.search(r'internal_CreateThread\("Grand', text) and 'CreateFriendSquad' not in text
+    friends = {re.search(r'object/(\w+)\.sgo', a).group(1) for f, a in made if f == 'CreateFriend'}
+    assert friends == set(gen.RANGE_FRIENDS), f'NPC-placed {sorted(friends)}'
+    hostile_jets = {s for s, j in gen.JETS.items() if j.mark in (7020.0, 7030.0)} | {s for s, _, _ in gen.ENEMIES}
+    assert not {s for s, _ in gen.placements(plan)} & hostile_jets
+    # Ours, the player's to drive (README: the player's jets, every boardable kind parked, the ground vehicles our tools
+    # make, the helicopters the range makes placeable, the Depth Crawler, the tanks and the flak EDF6AutoTurret arms,
+    # and the stock vehicles the plugin reworks: EMC, Nix, Proteus).
+    ours = ({'edf6tr_pjet_fighter_mission', 'edf6tr_pjet_strike_mission'} | set(gen.BOARDABLE_PARKED) | set(gen.GROUND_MISSION)
+            | {'edf6tr_v506_heli_mission', 'edf6tr_vehicle409_heli_mission', 'edf6tr_vehicle410_heli_mission',
+               'edf6tr_v602_heli_mission', 'edf6tr_vehicle502_groundrobo_mission', 'vehicle403_tank_mission',
+               'vehicle404_bigtank', 'v603_flak_mission', 'v510_maser_mission', 'v612_nix_g_mission',
+               'v614_proteus_mk2_mission'})
+    empty = {s for s, npc, _ in placed if not npc}
+    assert ours <= empty, f'not placed for the player: {sorted(ours - empty)}'
+    assert ours <= {s for s, _ in gen.VEHICLES}
+
+
+@test
+def target_range_fits_the_real_plain() -> None:
+    """The installer's range laid out on the game's own M045 points (48, 36 of them flat vehicle spots): every
+    placement gets a spot of its own, no footprint reaches into another (the grand battle's 37 and the three reworked
+    ones overlapped by up to 6.2 m there), and the targets have their spots, clear of every vehicle."""
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import rmpa
+    plan = gen.target_range(gen.Plan())
+    points = rmpa.points(gen.Game(rootcpk.DEFAULT_GAME).read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA'))
+    _placed, targets = _range_checked(gen, plan, points)
+    assert len(targets) >= gen.TARGET_SPOTS, f'{len(targets)} target spots on the plain'
+    gen.script(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan)))
+
+
+@test
+def footprint_covers_the_stock_models() -> None:
+    """testrange/gen.py footprint for each stock-model vehicle the installer's range places: at least how far its model
+    reaches from its origin across the ground (the bind pose's vertices, Root.cpk), OVERLAP_SLACK aside (the EMC's
+    barrel reaches 21.0 m: as a SPOT, 7.5 m, it stood over its neighbours)."""
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import jet_models
+    import mdb
+    import sgo
+    game = gen.Game(rootcpk.DEFAULT_GAME)
+    seen = 0
+    for name in sorted({s for s, _ in gen.placements(gen.target_range(gen.Plan()))} - gen.JETS.keys()):
+        model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')
+        path, member = model[0][0], model[0][1]
+        folder, file = path.split('app:/')[1].rsplit('/', 1)
+        try:
+            archive = mdb.rab_read(game.read(folder.upper(), file.upper()))
+        except KeyError:   # a model our own tools make (the Katyusha's, ...): not in Root.cpk
+            continue
+        data = next(f for f in archive.files if f.name.lower() == member.lower()).data
+        with contextlib.suppress(Exception):
+            data = mdb.cmpl_decompress(data)
+        reach = max((x * x + z * z) ** 0.5 for x, _y, z in jet_models.bind_positions(mdb.mdb_read(data)))
+        assert gen.footprint(name) + gen.OVERLAP_SLACK >= reach, f'{name}: footprint {gen.footprint(name)}, model {reach:.1f} m'
+        seen += 1
+    assert seen >= 8, f'measured {seen} models'
+
+
+@test
+def carrier_camera_and_ragdoll_on_its_box_centre() -> None:
+    """pylib/vcobjects.py seat_camera / sight_problem / _jet_ragdoll (docs/player-jet-re.md §14): the V506's seat camera
+    and ragdoll hang on the vehicle's position, the collision box's centre (`mdl`), and on the mesh bone, the model's
+    origin. The carrier (2026-10-06, 「空母的视角在空母底下，包括碰撞体积也是」): the stock rig put its eye inside the hull
+    and the heli's proxies sat under its belly. Now its rig is the stock one scaled with the model and sees it from
+    outside, every other jet's (its eye already outside) is the stock one, and the proxies sit on the box's centre with
+    the two bindings each other's inverse. Numbers: EDF6VC_CARRIER / the player fighter as made, the V506 model."""
+    import sgo
+    heli = ((-5.274, -0.06, -8.31), (5.274, 4.45, 5.274))
+    heli_centre = (0.0, 1.45, 0.65)
+    eye, look = (0.0, 5.4, -14.45), (0.0, 2.75, 1.1)
+    carrier = ((-29.703, 0.0, -41.531), (29.703, 17.031, 35.312))
+    c = (0.0, 8.516, -3.109)
+    was = [c[i] + eye[i] for i in range(3)], [c[i] + look[i] for i in range(3)]
+    assert vc.sight_problem(*was, carrier), 'the stock rig on the carrier: its eye is in the hull'
+    fit = vc.seat_camera(eye, look, c, carrier, heli, heli_centre)
+    assert fit is not None, 'the carrier keeps the stock rig'
+    now = [[c[i] + p[i] for i in range(3)] for p in fit]
+    assert vc.sight_problem(now[0], now[1], carrier) is None, now
+    assert now[0][2] < carrier[0][2] - 20.0 and now[0][1] > carrier[1][1] + 10.0, now   # behind and over it
+    fighter = ((-8.047, 0.0, -8.234), (8.047, 2.762, 11.609))
+    assert vc.seat_camera(eye, look, (0.0, 1.381, 1.688), fighter, heli, heli_centre) is None, 'a fighter keeps the stock rig'
+    assert vc.sight_problem((0.0, 6.0, -50.0), (0.0, 8.0, 0.0), carrier), 'a line of sight under the carrier top at its tail'
+    blob = sgo.write(1, {
+        'ragdoll_from_animation': [[['body', 'RagDollProxys.body'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                                   [['rotor', 'RagDollProxys.rotor'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]]],
+        'animation_from_ragdoll': [[['RagDollProxys.body', 'body'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                                   [['RagDollProxys.rotor', 'rotor'], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                                   [['RagDollProxys.body', 'globalSRT'], [0.0, -1.637, 0.0], [0.0, 0.0, 0.0, 1.0]]]})
+    _, inner = sgo.read(vc._jet_ragdoll(blob, 'body', c))
+    value = vc._value
+    for e in inner['ragdoll_from_animation']:
+        assert e[0][0] == 'body' and [round(value(x), 3) for x in e[1]] == list(c), e
+    assert [e[0][0] for e in inner['animation_from_ragdoll']] == ['RagDollProxys.rotor', 'RagDollProxys.body']
+    for e in inner['animation_from_ragdoll']:
+        assert e[0][1] == 'body' and [round(value(x), 3) for x in e[1]] == [-x for x in c], e
+
+
 @test
 def jet_door_on_the_ground_beside_its_box() -> None:
     """pylib/vcobjects.py move_door / check_door (docs/player-jet-re.md §12): a jet's boarding point (the V506's door
     locator, read out of a MAB block by mab_locator) goes on the ground DOOR_OUT m outside its collision box's right side,
-    with a radius that reaches a human DOOR_STEP m off it on the ground under its box (the door is at the box frame's
-    origin: on the ground for a box on its origin, over it for a stock bomber's box reaching under it) (the parked
-    carrier's door was under its middle, 4.9 m in from its box's side: no prompt anywhere, 2026-10-05); check_door
-    refuses a door inside the box or out of reach. On a block of its own (the selftest runs without the game)."""
+    with a radius that reaches a human DOOR_STEP m off it on the ground under its box (the door's parent `mdl` is the
+    box's centre, so the ground is -hy on it: the DOOR log of 2026-10-06 read the carrier's y-0 door 8.52 m over the
+    ground, boarded only through the plugin's own hook) (the parked carrier's door was under its middle, 4.9 m in from its
+    box's side: no prompt anywhere, 2026-10-05); check_door refuses a door inside the box, off the ground or out of
+    reach. On a block of its own (the selftest runs without the game)."""
     import struct
     import sgo
     door, seat = '搭乗口１', '操縦席１'
@@ -1121,25 +1448,30 @@ def jet_door_on_the_ground_beside_its_box() -> None:
     moved = sgo.write(1, m)
     vc.check_door(moved)
     _, low = sgo.read(moved)
-    low['heli_rigid_body'] = [[0.0, 3.516, -3.109], [29.703, 8.516, 38.422], 0.3]   # its bottom 5 m under the door
-    refused(sgo.write(1, low), 'a door out of reach (5 m over the ground its box stands on)')
+    low['heli_rigid_body'] = [[0.0, 13.516, -3.109], [29.703, 13.516, 38.422], 0.3]   # its bottom 5 m under the door
+    refused(sgo.write(1, low), 'a door 5 m over the ground its box stands on')
+    _, old = sgo.read(moved)   # §12's door: y 0 on `mdl`, the box's centre, 8.516 m up
+    ob = bytearray(old['animation_model'][2])
+    struct.pack_into('<f', ob, vc.mab_locator(bytes(ob), door)[0] + 4, 0.0)
+    old['animation_model'][2] = bytes(ob)
+    refused(sgo.write(1, old), "the door at the box's centre height (8.516 m over the ground)")
     block = m['animation_model'][2]
     vec, rad = vc.mab_locator(block, door)
     x, y, z = struct.unpack_from('<3f', block, vec)
     radius = struct.unpack_from('<f', block, rad)[0]
-    assert abs(x - (29.703 + vc.DOOR_OUT)) < 1e-3 and y == 0.0 and abs(z - 1.8) < 1e-6, (x, y, z)
+    assert abs(x - (29.703 + vc.DOOR_OUT)) < 1e-3 and abs(y + 8.516) < 1e-4 and abs(z - 1.8) < 1e-6, (x, y, z)
     assert abs(radius - 1.8) < 1e-6, radius   # on the ground: the stock radius reaches
     assert vc.mab_locator(block, seat) == (vecs + 16, 0x64 + 0x10)
     assert struct.unpack_from('<4f', block, vecs + 16) == struct.unpack_from('<4f', mab, vecs + 16), 'the seat moved'
     # A small jet keeps the stock radius (1.8) when that reaches; the door stays within the box's length.
     at, r = vc.door_point([[0.0, 1.381, 1.688], [8.047, 1.381, 9.922]], (2.15, 0.0, 1.8), 1.8)
-    assert at == [8.647, 0.0, 1.8] and r == 1.8, (at, r)
+    assert at == [8.647, -1.381, 1.8] and r == 1.8, (at, r)
     at, r = vc.door_point([[0.0, 1.255, 0.0], [12.969, 1.255, 1.0]], (2.15, 0.0, 1.8), 1.8)
     assert at[2] == 1.0, at
-    # A box reaching under its origin (a stock bomber's) puts the door over the ground: a radius that reaches it.
-    assert abs(vc.door_height([[0.0, 0.339, 2.723], [1.983, 1.624, 15.137]]) - 1.285) < 1e-9
-    at, r = vc.door_point([[0.0, -1.0, 0.0], [2.0, 2.0, 5.0]], (2.15, 0.0, 1.8), 1.8)
-    assert r == round((3.0 ** 2 + vc.DOOR_STEP ** 2) ** 0.5 - vc.DOOR_SLACK + vc.DOOR_MARGIN, 3), r
+    # A box reaching under its model's origin (a stock bomber's): the door at the box's bottom all the same, the ground
+    # it lands on; the stock radius reaches.
+    at, r = vc.door_point([[0.0, 0.339, 2.723], [1.983, 1.624, 15.137]], (2.15, 0.0, 1.8), 1.8)
+    assert at == [2.583, -1.624, 1.8] and r == 1.8, (at, r)
 
 
 @test
@@ -1188,8 +1520,19 @@ def heli_mouse_aim_wired() -> None:
     heli, board = src('src/heli.cpp'), src('src/playerjet_board.inc')
     steer = heli.split('Control Steer(', 1)[1].split('\n}\n', 1)[0]
     fly = heli.split('void AimFly(', 1)[1].split('\n}\n', 1)[0]
-    for law in ('aim::StockStick(', 'aim::StockThrottle(', 'aim::StockYaw('):
+    for law in ('aim::StockStick(', 'aim::StockThrottle('):
         assert law in steer and law in fly, law
+    # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
+    # (StockYaw), the player's heading chases the mouse's aim (PlayerYaw) at the turn rate PlayerYawTune raises.
+    assert 'aim::StockYaw(' in steer and 'aim::PlayerYaw(' in fly and 'aim::StockYaw(' not in fly
+    assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
+    player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerYawTune(v,' in player and 'kMaxYaw,a.yaw' in heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
+    # The hover rotor from the lift as it is in memory (heliaim.h HoverRotor), not the old 70 the 602 clamped to 1.0 on.
+    assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
+    hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Tx::heliKeysAir' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
+    assert 'SPACE: up' in src('src/hudtext.inc').split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
     assert 'aim::Fly(' in fly and 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 
 
@@ -1357,8 +1700,10 @@ def cockpit_warnings_wired() -> None:
     warn_h, audio_h, audio, hud = src('src/warn.h'), src('src/jetaudio.h'), src('src/jetaudio.cpp'), src('src/hud.cpp')
     warns = re.search(r'enum Warn : int \{([^}]*)\}', warn_h).group(1)
     n_warn = len([w for w in warns.split(',') if w.strip() and 'kWarnCount' not in w])
-    texts = hud.split('kWarnText[kWarnCount]={', 1)[1].split('};', 1)[0]
-    assert len(re.findall(r'(?<!\w)L"', texts)) == n_warn, (texts, n_warn)
+    texts = hud.split('kWarnText[kWarnCount]={', 1)[1].split('};', 1)[0]   # the texts' keys (src/hudtext.inc)
+    keys = re.findall(r'Tx::(\w+)', texts)
+    assert len(keys) == n_warn, (texts, n_warn)
+    assert all(f'HUDTEXT({k},' in src('src/hudtext.inc') for k in keys), keys
     calls = re.search(r'enum Callout : int \{([^}]*)\}', audio_h).group(1)
     n_call = len([c for c in calls.split(',') if c.strip() and 'kCallCount' not in c])
     for table in ('kCallName[kCallCount]={', 'kCallText[kCallCount]={'):
@@ -1372,6 +1717,27 @@ def cockpit_warnings_wired() -> None:
     for target in ('warn_check', 'hud_view'):
         assert f'add_executable({target} EXCLUDE_FROM_ALL' in cmake, target
 
+
+
+@test
+def hud_scale_one_source() -> None:
+    """The plugin HUD's size (src/hudscale.h, docs/hud-re.md §0.1): HudDraw takes its scale from hudscale::Of over the
+    game's screen (the read signature-checked) and the ini's HudScale, not from the viewport's own height; every line's
+    font scale is times it (Measure and Draw); HudScale is read, range-checked on hudscale's limits, shipped and
+    documented; the offline check (tools/hud_view.cpp) runs the scale cases and is a CTest."""
+    hud, plugin, ini, readme = src('src/hud.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert '#include "hudscale.h"' in hud
+    assert '/1080' not in hud.replace(' ', ''), 'a size from the viewport height alone: hudscale::Of'
+    draw = hud.split('void HudDraw(', 1)[1].split('\n}', 1)[0]
+    assert 's=HudScaleOf(w,h)' in draw and 'text.s=s' in draw
+    assert 'hudscale::Of(uiW,uiH,w,h,Cfg().hudScale)' in hud
+    for fn in ('void Measure(Text& t,Line& l)', 'void Draw(Text& t,const Line& l)'):
+        assert 'Font(t,hudscale::Font(l.scale,t.s))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
+    assert 'for(const auto& u:kUiSigs)' in hud and '0x94E24F' in hud
+    assert 'L"HudScale"' in plugin and 'Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax)' in plugin
+    assert re.search(r'^HudScale=1\.0', ini, re.M) and '`HudScale`' in readme
+    view = src('tools/hud_view.cpp')
+    assert 'ScaleOfChecks()+ScaleDrawnChecks()' in view and 'add_test(NAME hud_layout COMMAND hud_view' in src('CMakeLists.txt')
 
 @test
 def vehicle_sound_wired() -> None:
@@ -1425,6 +1791,26 @@ def vehicle_sound_wired() -> None:
     check = src('tools/vsound_check.cpp')
     assert '#include "../src/jetaudio.cpp"' in check and '#include "../src/vehmix.h"' in check
     assert '#include "vsynth.h"' in audio and '#include "vehmix.h"' in code and 'vsound_check' in readme
+
+
+@test
+def view_distance_keeps_far_pass_start() -> None:
+    """ViewDistance / MapViewDistance raise only the near pass's end (and the far pass's end): the far pass's start
+    (env +0x1A4, camera +0x30) is the mission's, because the far-only scenery (the horizon's mountain ring, the
+    simulator's sky dome) is drawn by nothing else. 2026-10-06: moved out to ViewDistance-500 it cut NW_HENDEN's
+    mountains nearer than 2500 m and the rest hung in the sky. The rule is src/view_clip.h, run by
+    tools/view_clip_check.cpp; view.cpp writes only the far clip and the far pass's end."""
+    code, rule, cmake = src('src/view.cpp'), src('src/view_clip.h'), src('CMakeLists.txt')
+    assert '#include "view_clip.h"' in code and 'viewclip::Raise(' in code
+    assert 'kOverlap' not in code and 'kCamDistantNear' not in code, 'view.cpp: the far pass start must not be moved'
+    raise_fn = code.split('bool Raise(', 1)[1].split('\n}', 1)[0]
+    puts = re.findall(r'Put<float>\(at,([^,]+),', raise_fn)
+    assert puts == ['farClip', 'farClip+8'], f'view.cpp Raise writes {puts}: only the far clip and the far pass end'
+    body = rule.split('inline bool Raise(', 1)[1].split('\n}', 1)[0]
+    assert 'distantNear' not in body, 'view_clip.h Raise: the far pass start is the mission\'s'
+    assert 'add_executable(view_clip_check EXCLUDE_FROM_ALL tools/view_clip_check.cpp)' in cmake
+    assert 'view_clip_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0], 'view_clip_check runs in CTest'
+    assert '#include "../src/view_clip.h"' in src('tools/view_clip_check.cpp')
 
 
 @test
@@ -1534,6 +1920,43 @@ def gunship_cannon_round() -> None:
 
 
 @test
+def gunship_muzzle_wired() -> None:
+    """The gunship's rounds leave off its airframe, now (the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」「炮舰机的轰炸炮弹，
+    感觉在飞机后面出现的」): src/gunmuzzle.h's airframe and hit radii are tools/make_jets.py's (GUNSHIP_AIRFRAME, held to the
+    bomber401 model and the stock shell by check_gunship_muzzle when the files are made; CANNON_SIZE x CANNON_HIT; SHELL_HIT);
+    every gunship round in src/jet_bay.cpp leaves from GunshipMuzzle, none from the vehicle's origin; ShellMake zeroes the IFC's
+    first-round wait (+0x2D8, param #15: the stock shell's 60 frames left it where the gunship had been a second before)
+    behind its signatures; the offline check (tools/gunship_muzzle_check.cpp) is one of the offline checks CTest runs."""
+    head = src('src/gunmuzzle.h')
+    num = r'(-?[\d.]+)f'
+    m = re.search(r'kGunship\{\{' + ','.join([num] * 3) + r'\},\{' + ','.join([num] * 3) + r'\}\}', head)
+    assert m, 'src/gunmuzzle.h kGunship'
+    got = [float(m.group(k)) for k in range(1, 7)]
+    want = [v for part in make_jets.GUNSHIP_AIRFRAME for v in part]
+    assert got == want, f'src/gunmuzzle.h kGunship {got}, tools/make_jets.py GUNSHIP_AIRFRAME {want}'
+    m = re.search(r'kCannonHit=' + num, head)
+    assert m and abs(float(m.group(1)) - make_jets.CANNON_SIZE * make_jets.CANNON_HIT) < 1e-6, 'src/gunmuzzle.h kCannonHit'
+    m = re.search(r'kShellHit=' + num, head)
+    assert m and float(m.group(1)) == make_jets.SHELL_HIT, 'src/gunmuzzle.h kShellHit'
+    assert 'check_gunship_muzzle(game)' in src('tools/make_jets.py'), 'tools/make_jets.py build checks the muzzle numbers'
+    bay = src('src/jet_bay.cpp')
+    assert f'kGunshipSgo[]=L"app:/object/{make_jets.SHELL_STOCK.lower()}"' in bay, 'src/jet_bay.cpp kGunshipSgo is SHELL_STOCK'
+    fired = re.findall(r'Shell\((kGunshipSgo|kCannonSgo),(?:gunshipReady|cannonReady),v,(\w+),', bay)
+    assert len(fired) == 3 and all(f == 'muzzle' for _sgo, f in fired), f'the gunship fires from its muzzle: {fired}'
+    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the cannon, its sight line and both shells'
+    assert re.search(r'MapRay\(muzzle,at,hit\)', bay), 'the NPC cannon looks along the line its round flies'
+    make = bay.split('unsigned char* ShellMake(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);' in make, 'ShellMake zeroes the first-round wait'
+    assert 'constexpr std::size_t kIfcWait=0x2D8;' in bay
+    assert 'for(const auto& b:kIfcWaitSigs)ifcWaitOk=ifcWaitOk && Matches(' in bay, 'the wait behind its signatures'
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.cpp)' in cmake
+    checks = cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    assert 'gunship_muzzle_check' in checks.split(), 'CTest runs gunship_muzzle_check'
+    assert '炮舰机的炮口' in src('README.md'), 'README.md: the gunship muzzle'
+
+
+@test
 def readme_counts() -> None:
     readme = src('README.md')
     assert f'{len(calls.FLOWN)} 种呼叫' in readme, f'README.md: say {len(calls.FLOWN)} 种呼叫 (tools/calls.py FLOWN)'
@@ -1578,6 +2001,36 @@ def stock_vehicle_hud_wired() -> None:
 
 
 @test
+def stock_gun_sight_ranged() -> None:
+    """The stock vehicles' gun sight in the sky (the user 2026-10-06, an E551's cannon at a flying saucer, "CANNON 3132 m":
+    "这个好像一直不动也对不上"): an arc gun's marks come from roundaim.h GunSight (ranged on the enemy under the view:
+    pipper and lead mark; the map hit; else none), not from the point its round crosses the 3000 m reach; hud.cpp draws
+    the ranged pipper with the lead mark and, with nothing to range on, the boresight alone; tools/rounds_check.cpp
+    flies the E551 gun Root.cpk has (re-read when the game is there) and lays both sights on a saucer."""
+    import rootcpk
+    vhud, hud, check = src('src/vhud.cpp'), src('src/hud.cpp'), src('tools/rounds_check.cpp')
+    arm = vhud.split('void Arm(', 1)[1].split('\n}\n', 1)[0]
+    assert 'GunMarkOf(w,m,pos,dir,a)' in arm, 'src/vhud.cpp Arm: an arc gun\'s marks are GunMarkOf\'s'
+    mark = vhud.split('void GunMarkOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'roundaim::GunSight(' in mark and 'target.ok ? target.at : nullptr' in mark
+    assert 'RangeTarget(v,r,eye,ms);' in vhud.split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
+    stock = hud.split('void StockMark(', 1)[1].split('\n}\n', 1)[0]
+    ranged = stock.split('if(a.ranged) {', 1)[1].split('return;', 1)[0]
+    assert 'LeadMark(' in ranged and 'Pipper(' in ranged, 'src/hud.cpp StockMark: the ranged pipper with its lead mark'
+    tail = stock.split('Boresight(drawer,ctx,vp,width,height,s,a.bore);\n    if(a.hit)', 1)
+    assert len(tail) == 2 and 'kHudDim' not in tail[1].split('} else', 1)[0], 'StockMark: no dim pipper at the reach any more'
+    assert 'SkySight();' in check.split('int main()', 1)[1]
+    row = re.search(r'kE551Gun=\{"(V_\w+) \([^)]*\)",([\d.]+)f,([\d.]+)f,([\d.]+)f,(\d+)\}', check)
+    assert row, 'tools/rounds_check.cpp: kE551Gun'
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        name, speed, factor, owner, alive = row.groups()
+        w = dsgo.to_py(dsgo.parse(rootcpk.default().read('WEAPON', name + '.SGO')).root)
+        got = (w['AmmoSpeed'], w['AmmoGravityFactor'], w['AmmoOwnerMove'], w['AmmoAlive'])
+        assert all(abs(float(g) - float(x)) < 1e-4 for g, x in zip(got, (speed, factor, owner, alive))), (name, got)
+        assert w['AmmoClass'] == 'RocketBullet01', (name, w['AmmoClass'])
+
+
+@test
 def stock_gauges_wired() -> None:
     """The stock weapon gauges (src/stockgauge.cpp; the user, 2026-10-06: "删掉原版挂载和油料显示"): its ini key is read,
     shipped and documented; it is installed at load and only through the gauge's update slot (no draw call skipped); the
@@ -1599,7 +2052,8 @@ def stock_gauges_wired() -> None:
     vhud = src('src/vhud.cpp').split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
     assert 'IsFuelTank(w)' in vhud and 'FuelGauge(v,&r.fuel)' in vhud
     assert 'FuelGauge(v,&r.fuel)' in src('src/playerjet.cpp') and 'FuelGauge(v,&r.fuel)' in src('src/heli.cpp')
-    assert 'kWarnFuel' in src('src/warn.h') and 'kWarnFuel' in src('src/warn.cpp') and 'L"LOW FUEL"' in hud
+    assert 'kWarnFuel' in src('src/warn.h') and 'kWarnFuel' in src('src/warn.cpp') and 'Tx::lowFuel' in hud
+    assert 'HUDTEXT(lowFuel,L"LOW FUEL",' in src('src/hudtext.inc')
     assert 'jet_lowfuel' in src('tools/hud_view.cpp')
 
 
@@ -2041,6 +2495,179 @@ def uninstall_misaligned_skips_table() -> None:
         shutil.rmtree(game, ignore_errors=True)
 
 
+# ---------------------------------------------------------------- the pack: everything built is shipped, installed, removed
+
+
+def _cmake_plugins() -> dict[str, str]:
+    """Every plugin DLL a CMakeLists.txt builds (add_library SHARED) -> the ini it copies beside it into
+    build/Mods/Plugins (configure_file), as a path in the repository."""
+    out: dict[str, str] = {}
+    for top, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in ('build', 'release', '.git', 'models', 'node_modules')]
+        if 'CMakeLists.txt' not in files:
+            continue
+        text = src(os.path.relpath(os.path.join(top, 'CMakeLists.txt'), ROOT).replace(os.sep, '/'))
+        for name in re.findall(r'add_library\(\s*(\w+)\s+SHARED\b', text):
+            ini = re.search(r'configure_file\(\s*(\S+\.ini)\s+"\$\{CMAKE_BINARY_DIR\}/Mods/Plugins/' + name + r'\.ini"', text)
+            assert ini, f'{name}: CMake copies no {name}.ini into build/Mods/Plugins'
+            out[name] = os.path.join(top, ini.group(1))
+    return out
+
+
+@test
+def pack_ships_every_plugin() -> None:
+    """Every plugin CMake builds is in installer.PLUGINS (install writes it, uninstall removes it, check compares it)
+    with its ini's own section, and tools/build_release.py bundles its dll and ini. 0.8.0 shipped EDF6VehicleCrew
+    alone: the player's EDF6AutoTurret stayed the old build, which fought the turret camera for the Kepler."""
+    import build_release
+    built = _cmake_plugins()
+    assert {'EDF6VehicleCrew', 'EDF6AutoTurret'} <= set(built), f'the scan reads every CMakeLists.txt: {built}'
+    sections = dict(installer.PLUGINS)
+    missing = sorted(set(built) - set(sections))
+    assert not missing, f'installer.PLUGINS lacks {missing}: built by CMake but never shipped or installed'
+    for name, ini in built.items():
+        with open(ini, encoding='utf-8-sig') as f:
+            first = re.search(r'^\s*\[([^\]]+)\]', f.read(), re.M)
+        assert first and first.group(1).lower() == sections[name].lower(), \
+            f'{name}: installer.PLUGINS section {sections[name]}, the ini says {first and first.group(1)}'
+    unbundled = sorted({n + e for n in built for e in installer.PLUGIN_FILES} - set(build_release.plugin_data()))
+    assert not unbundled, f'tools/build_release.py does not bundle {unbundled}'
+
+
+def _function(text: str, name: str) -> str:
+    return text.split(f'\ndef {name}(', 1)[1].split('\ndef ', 1)[0]
+
+
+@test
+def installer_removes_what_it_writes() -> None:
+    """Every writer tools/installer.py install() calls has its remover in uninstall(): X.install( -> X.remove / X.uninstall,
+    install_Y( -> remove_Y(; the call weapons go through retire_weapons (placeholders keep their rows)."""
+    inst = src('tools/installer.py')
+    body, undo = _function(inst, 'install'), _function(inst, 'uninstall')
+    modules = set(re.findall(r'\b(\w+)\.install\(', body))
+    helpers = set(re.findall(r'\binstall_(\w+)\(', body))
+    assert {'make_jets', 'gen', 'call_weapons'} <= modules and {'plugin', 'autoturret'} <= helpers, (modules, helpers)
+    lacking = sorted(m for m in modules - {'call_weapons'} if f'{m}.remove' not in undo and f'{m}.uninstall(' not in undo)
+    lacking += sorted(f'install_{h}' for h in helpers if f'remove_{h}(' not in undo)
+    lacking += [] if 'retire_weapons(' in undo else ['call_weapons']
+    assert not lacking, f'installer.uninstall never undoes {lacking}'
+
+
+def _pack_bundle(folder: str, version: bytes, extra: dict[str, str] | None = None) -> None:
+    """A stand-in build/Mods/Plugins: each plugin's DLL (`version` bytes) and its real shipped ini (+ `extra` lines)."""
+    for name, ini in _cmake_plugins().items():
+        modfiles.atomic_write(os.path.join(folder, name + '.dll'), version + name.encode())
+        with open(ini, 'rb') as f:
+            text = f.read()
+        modfiles.atomic_write(os.path.join(folder, name + '.ini'), text + (extra or {}).get(name, '').encode())
+
+
+def _tree(game: str) -> dict[str, bytes]:
+    out = {}
+    for top, _, files in os.walk(os.path.join(game, 'Mods')):
+        for f in files:
+            path = os.path.join(top, f)
+            out[os.path.relpath(path, game).replace(os.sep, '/')] = _read(path)
+    return out
+
+
+@test
+def pack_install_upgrade_uninstall() -> None:
+    """The whole pack round trip on a stand-in game (generators stubbed; their install / remove, the ledger, the
+    AutoTurret manifest and backups, the plugins and ini merge real): an old EDF6AutoTurret (DLL, ini with the
+    player's settings, data from build.py) is upgraded to the pack's, another mod's file it replaces is backed up
+    after asking, check sees a stale DLL, a second install keeps the player's settings and adds only new keys, and
+    uninstall 1 leaves Mods exactly as other mods left it."""
+    import buildcache
+    import call_weapons
+    import describe
+    import gen
+    import importlib
+    import rootcpk
+    game = tempfile.mkdtemp(prefix='edf6vc-pack-')
+    bundle = os.path.join(game, 'bundle')
+    try:
+        for name, data in (('Root.cpk', b'root'), ('Chunk02.cpk', b'map'), ('EDF6.exe', b'exe')):
+            modfiles.atomic_write(os.path.join(game, name), data)
+        foreign = {'Mods/Plugins/EDF6ClearLoot.dll': b'another mod', 'Mods/WEAPON/OTHER.SGO': b'another mod',
+                   'Mods/WEAPON/AT_C.SGO': b'another mod at a path AutoTurret writes'}
+        for rel, data in foreign.items():
+            modfiles.atomic_write(os.path.join(game, *rel.split('/')), data)
+        at_ini = _cmake_plugins()['EDF6AutoTurret']
+        with open(at_ini, encoding='utf-8') as f:
+            shipped_at = f.read()
+        assert 'Gain=3.0\n' in shipped_at and 'BurstVisualScale=' in shipped_at
+        old_ini = shipped_at.replace('Gain=3.0\n', 'Gain=7.5\n').replace('BurstVisualScale=2.5\n', '')
+        plugins = os.path.join(game, 'Mods', 'Plugins')
+        modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
+        modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.ini'), old_ini.encode())
+        modfiles.atomic_write(os.path.join(plugins, 'EDF6VehicleCrew.log.1'), b'rotated log')
+        mods = os.path.join(game, 'Mods')
+        old_data = {rel: b'old ' + data for rel, data in AT_FILES.items() if rel != 'WEAPON/AT_C.SGO'}
+        texts = describe.Texts({}, {})
+        answers: list[str] = []
+        with contextlib.ExitStack() as stack:
+            enter = stack.enter_context
+            enter(patched(at_build, build_files=lambda legacy=False: old_data, _refuse_while_running=lambda mods: None,
+                          build_texts=lambda files, mods: texts))
+            with contextlib.redirect_stdout(io.StringIO()):
+                at_build.install(mods, text=True, force=False)   # the player's earlier build.py install
+            enter(patched(at_build, build_files=_at_build_files))
+            enter(patched(describe, table_ids=lambda mods: []))
+            enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
+                          stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
+                          ask=lambda prompt: answers.pop(0)))
+            enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
+                          check=lambda game: True))
+            enter(patched(buildcache, recipes=lambda: {g: 'recipe' for g in buildcache.GROUPS}))
+            enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
+
+            def mission(game: str, plan: object) -> list[str]:
+                out = gen.mission_dir(game, gen.SLOTS[0].mission)
+                modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
+                modfiles.atomic_write(os.path.join(out, 'MISSION.AC'), b'script')
+                modfiles.atomic_write(os.path.join(out, 'MISSION.RMPA'), b'points')
+                ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
+                return []
+            enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
+            for group in buildcache.GROUPS:
+                made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
+                    {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
+                enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+            with contextlib.redirect_stdout(io.StringIO()):
+                _pack_bundle(bundle, b'v1 ')
+                answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
+                installer.install(game)
+                assert not answers, 'install did not ask before replacing the other mod\'s AT_C'
+                for name in _cmake_plugins():
+                    assert _read(os.path.join(plugins, name + '.dll')) == b'v1 ' + name.encode(), f'{name}.dll not installed'
+                for rel, data in AT_FILES.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'AutoTurret data {rel} not installed'
+                at_text = _read(os.path.join(plugins, 'EDF6AutoTurret.ini')).decode()
+                assert 'Gain=7.5' in at_text and 'Gain=3.0' not in at_text, 'the player\'s AutoTurret setting lost'
+                assert 'BurstVisualScale=2.5' in at_text and at_text.count('[AutoTurret]') == 1, 'missing key not added'
+                assert installer.check(game), 'check fails right after install'
+                modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
+                assert not installer.check(game), 'check passes an old EDF6AutoTurret.dll'
+                # The upgrade: new DLLs, a setting the new ini adds.
+                _pack_bundle(bundle, b'v2 ', {'EDF6AutoTurret': '\r\n; new in v2\r\nNewTurretKey=5\r\n'})
+                installer.install(game)
+                assert _read(os.path.join(plugins, 'EDF6AutoTurret.dll')) == b'v2 EDF6AutoTurret'
+                at_text = _read(os.path.join(plugins, 'EDF6AutoTurret.ini')).decode()
+                assert 'Gain=7.5' in at_text and 'NewTurretKey=5' in at_text and installer.ADDED_HEADER in at_text
+                assert at_text.count('BurstVisualScale=') == 1 and at_text.count('[AutoTurret]') == 1
+                assert installer.check(game)
+                for name in ('.log', '.log.1'):
+                    modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret' + name), b'log')
+                answers[:] = ['1']
+                installer.uninstall(game)
+        left = _tree(game)
+        assert left == foreign, f'uninstall left {sorted(set(left) - set(foreign))}, changed ' \
+            f'{sorted(r for r in foreign if left.get(r) != foreign[r])}'
+    finally:
+        shutil.rmtree(game, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- model import (pylib/obj_model.py, pylib/texfile.py)
 
 def _cube_part(skip_face: int | None = None) -> 'object':
@@ -2337,6 +2964,85 @@ def artillery_ragdoll_is_the_models() -> None:
     assert r.items[0] == make_artillery.RAGDOLL and r.items[1].data == new_blob, r.items[0]
     assert make_artillery.RAGDOLL == f'app:/object/{make_artillery.RAGDOLL_FILE.lower()}'
 
+
+@test
+def artillery_turret_fixed_guns_mounted() -> None:
+    """The self-propelled howitzer's turret is fixed (the user, 2026-10-06): its car_base_constraint_data turret entry
+    gets TURRET_LIMITS (the hinge and, through 0x669BA0, the seat's yaw stops), a stock entry already limited is
+    refused, and the turret camera still serves its fixed indirect-fire gun (src/turretcam.cpp Turret). The guns'
+    MAB points (muzzle, casing) are found once each in the stock Kepler guns. With the twin tank's model folder: the
+    built guns put the shell on each barrel's mouth (the stock offsets put it 2.9 m in front of it) and the casing
+    just ahead of the trunnion outside the turret (make_artillery.gun_problems); the stock MAB on that model fails."""
+    import artillery_model as am
+    import rootcpk
+    tc = src('src/turretcam.cpp')
+    assert '(yaw[1]-yaw[0]>kMinTraverse || IndirectFireSeat(seat))' in tc, 'src/turretcam.cpp Turret: a fixed howitzer'
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = vc.Game(rootcpk.DEFAULT_GAME)
+    for own in (False, True):
+        if own and am.model_dir() is None:
+            continue
+        r = dsgo.parse(make_artillery.vehicle_sgo(game, own)).root
+        assert dsgo.to_py(make_artillery.turret_constraint(r).items[1].items[1]) == make_artillery.TURRET_LIMITS
+        try:
+            make_artillery.lock_turret(r)
+            raise AssertionError('a turret entry with stops was locked again')
+        except ValueError:
+            pass
+    for stock in make_artillery.STOCK_GUNS:
+        mab = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model').items[2].data
+        muzzle, eject = make_artillery.gun_points(mab)
+        for got, want in ((muzzle, make_artillery.STOCK_MUZZLE), (eject, make_artillery.STOCK_EJECT)):
+            assert max(abs(abs(a) - abs(b)) for a, b in zip(got, want)) < 1e-3, (stock, got, want)
+    folder = am.model_dir()
+    if folder is None:
+        return
+    files = make_artillery.build(rootcpk.DEFAULT_GAME)
+    _arc, md, _info = am.build_with_info(game, folder)
+    assert make_artillery.gun_problems(files, game, md) == []
+    stock = dict(files)
+    for s, path in zip(make_artillery.STOCK_GUNS, make_artillery.VEHICLE.weapons):
+        stock[f'WEAPON/{path.split("/")[-1].upper()}'] = make_artillery.howitzer_sgo(game, s)
+    bad = make_artillery.gun_problems(stock, game, md)
+    assert len(bad) == 4 and sum('the shell leaves at' in x for x in bad) == 2, bad
+
+
+@test
+def drill_spin_bone_free_of_the_ragdoll() -> None:
+    """The drill tank's spin bone (drill_model.SPIN_BONE, the Blacker's catapi_body) is drawn from its local matrix,
+    not from the hull's physics proxy: the Blacker's ragdoll binding draws catapi_body from RagDollProxys.body every
+    frame (0x6EDCA0), which put the rehomed drill 2.5 m low inside the hull and kept it from turning. With Root.cpk:
+    the stock binding against the Blacker skeleton with the spin bone rehomed is refused (ragdoll_fit.problems names
+    catapi_body), make_drill.free_spin_bone's is accepted with only that row gone, and the drill SGO carries it."""
+    import drill_model
+    import make_drill
+    import ragdoll_fit as rf
+    import rootcpk
+    import sgo
+    from mdb import mdb_read, rab_read
+    assert 'free_spin_bone(' in src('tools/make_drill.py') and 'ragdoll_fit.problems' in src('tools/make_drill.py')
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    _v, m = sgo.read(game.read('OBJECT', 'V505_TANK.SGO'))
+    blob, shkt = bytes(m['ragdoll'][1]), game.read('OBJECT', str(m['ragdoll'][0]).rsplit('/', 1)[1].upper())
+    stock = mdb_read(next(f for f in rab_read(game.read('OBJECT', drill_model.HOST_ARC)).files
+                          if f.name.lower() == drill_model.HOST_MDB).data)
+    assert rf.problems(stock, shkt, blob) == []
+    moved, _i = drill_model.rehome_spin_bone(stock, drill_model.SPIN_BONE, drill_model.DRILL_PARENT, drill_model.DRILL_BASE)
+    before = rf.problems(moved, shkt, blob)
+    assert len(before) == 1 and before[0].startswith(f'bone {drill_model.SPIN_BONE} '), before
+    free = make_drill.free_spin_bone(blob)
+    assert rf.problems(moved, shkt, free) == [], rf.problems(moved, shkt, free)
+    rows = lambda b, k: [tuple(map(str, e[0])) for e in sgo.read(b)[1][k]]  # noqa: E731
+    gone = set(rows(blob, 'animation_from_ragdoll')) - set(rows(free, 'animation_from_ragdoll'))
+    assert gone == {('RagDollProxys.body', drill_model.SPIN_BONE)}, gone
+    assert rows(blob, 'ragdoll_from_animation') == rows(free, 'ragdoll_from_animation')
+    built = sgo.read(make_drill.vehicle_sgo(game, [f'app:/Object/{make_drill.MODEL_FILE.lower()}', make_drill.MODEL_MDB]))[1]
+    assert bytes(built['ragdoll'][1]) == free
+    assert bytes(sgo.read(make_drill.vehicle_sgo(game, make_drill.STOCK_MODEL))[1]['ragdoll'][1]) == blob
+
 @test
 def stock_payload_and_seats_wired() -> None:
     """The stock vehicles' payload readout and store switch (src/payload.cpp) and the seat switch (src/seatswitch.cpp):
@@ -2473,6 +3179,54 @@ def vehicle_ram_wired() -> None:
 
 
 @test
+def map_commands_wired() -> None:
+    """The map's NPC commands (src/mapcmd.cpp, README 地图 指挥 NPC): its keys are read only while the map is open (map.cpp
+    Frame calls it after its open test, its one key reader is ReadKeys), it is off online, it is reset with the map; each AI
+    module takes the command where it picks what it works round (the jets' anchor, the helis' post as HeliCalled writes it,
+    the crawlers' leader); the box (Ctrl + left drag) never pans the map; its offline check (tools/map_cmd_check.cpp) is
+    built and run by CTest; the README says the keys."""
+    code, mapc, cmake, readme = src('src/mapcmd.cpp'), src('src/map.cpp'), src('CMakeLists.txt'), src('README.md')
+    assert code.count('GetAsyncKeyState') == 1 and 'Down(VK_TAB)' in code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
+    frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
+    assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
+    # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").
+    assert 'if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing()){mapcam::Drag(v,dx,dy);' in mapc
+    assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
+    assert 'ResetMapCommands();' in mapc.split('void ResetMap()', 1)[1].split('\n}', 1)[0]
+    assert 'const bool allowed=!InSession();' in code
+    assert 'src/mapcmd.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/map_cmd_check.cpp' in cmake
+    assert re.search(r'EDF6_OFFLINE_CHECKS[^)]*\bmap_cmd_check\b', cmake), 'map_cmd_check is not run by CTest'
+    jet, heli, ground = src('src/jet.cpp'), src('src/heli.cpp'), src('src/ground.cpp')
+    assert 'CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor)' in jet
+    assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
+    cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c)', 1)[1].split('\n}\n', 1)[0]
+    assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
+    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', 'OFFLINE ONLY', '框选'):
+        assert key in readme, key
+    assert '指挥 NPC' in readme
+
+
+@test
+def play_area_wired() -> None:
+    """The player-flown aircraft keep inside the map's ground (src/playarea.h, docs/player-jet-re.md §3): the walls are the
+    measured play area's, not the physics square's (crew.h PlayEdge, km out over the void on a stock map); the rotor craft
+    are kept in too; it is measured every mission; a void within the walls is floored; the cockpit shows AREA; the offline
+    check runs in CTest."""
+    pj, board = src('src/playerjet.cpp'), src('src/playerjet_board.inc')
+    wall = pj.split('int WallTurn(const float* pos,float* dir) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'MapPlayArea()' in wall and 'area::EdgeTurn' in wall and 'PlayEdge' not in wall, 'WallTurn takes the measured walls'
+    assert 'j.area=WallTurn(pos,next);' in pj, 'a wing\'s path is bent off the walls (Air)'
+    assert 'j.area=WallTurnVelocity(pos,want);' in board, 'a rotor craft\'s velocity is bent off the walls (HoverStep)'
+    clear = pj.split('float Clear(const float* p,bool* water) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'area::FloorClear(MapPlayArea()' in clear, 'a void within the walls is floored'
+    assert 'GuardedTick(kStepUnderground,&PlayAreaTick);' in src('src/crew.cpp'), 'measured once a mission'
+    assert 'ResetPlayArea();' in src('src/mission.cpp'), 'measured again each mission'
+    assert 'kWarnArea' in src('src/warn.h') and 'kWarnArea' in src('src/warn.cpp') and 'Tx::warnArea' in src('src/hud.cpp')
+    cm = src('CMakeLists.txt')
+    assert 'src/playarea.cpp' in cm and 'add_test(NAME play_area_check COMMAND play_area_check)' in cm
+
+
+@test
 def map_wired() -> None:
     """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
     documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the
@@ -2488,7 +3242,8 @@ def map_wired() -> None:
         assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
     for name, rva in (('kHoldAt', '0x572F0C'), ('kHoldResume', '0x572F1C'), ('kNoPad', '0x573A4D'), ('kCamVtable', '0x1768C10'),
                       ('kCamStep', '0xF86A0'), ('kLookTo', '0x4E220'), ('kTeamWalk', '0x5E11D0'), ('kMarkerVtable', '0x17D4378'),
-                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750'), ('kHostileWalk', '0x5E0F20')):
+                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750'), ('kHostileWalk', '0x5E0F20'),
+                      ('kOneTeamWalk', '0x5E0D60')):
         assert re.search(rf'\b{name}={rva}\b', code), (name, rva)
         assert rva in doc, rva
     for name, off in (('kCamTargetRef', '0x350'), ('kCamTarget', '0x360'), ('kCamMatrix', '0x220'), ('kHumanRecord', '0xD40'),
@@ -2528,7 +3283,8 @@ def map_wired() -> None:
         for arr, at in (('kHoldCode', consts['kHoldAt']), ('kNoPadCode', consts['kNoPad']), ('kCamStepCode', consts['kCamStep']),
                         ('kLookToCode', consts['kLookTo']), ('kLookToUse', 0xFC0D3), ('kTeamWalkCode', consts['kTeamWalk']),
                         ('kMarkerUpdateCode', consts['kMarkerUpdate']), ('kHostileWalkCode', consts['kHostileWalk']),
-                        ('kRadarCall', 0x82B8C3)):
+                        ('kRadarCall', 0x82B8C3), ('kOneTeamWalkCode', consts['kOneTeamWalk']),
+                        ('kBoardTeam5Code', consts['kBoardTeam5Call'])):
             want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
@@ -2553,12 +3309,19 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
     assert 'MapScene(dir,L"map_mid"' in src('tools/hud_view.cpp')
+    # The friendly marks walk team 5 (nobody's vehicles: the parked aircraft, every empty vehicle) besides the friends'
+    # walk, which never visits it (2026-10-06: aircraft missing from the map); classified by map_marks.h (checked offline).
+    gather = code.split('void Gather(Game& g,const unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
+    assert 'reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,mapmarks::kNobodysTeam,&w);' in gather, 'map: team 5 not walked'
+    assert 'mapmarks::WalksFor(team)' in gather and 'mapmarks::FriendlyMark(seen,&kind,&flags)' in code
+    assert 'EXCLUDE_FROM_ALL tools/map_marks_check.cpp' in cmake and 'map_marks_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert '0x5E0D60' in doc and 'kMapEmpty' in hud and 'MapAircraft(' in hud
     assert 'ViewMapClip(true,' in code and 'ViewMapClip(false,' in code
     # The enemies: every one the radar's hostile walk finds; the large ones pins by HP (kMapLargeEnemies), the small ones
     # dots by distance (kMapDots), the caps the README says; the
@@ -2577,12 +3340,245 @@ def map_wired() -> None:
 
 
 @test
+def map_hides_stock_hud() -> None:
+    """The map hides the stock HUD (docs/hud-re.md §11): through the game's own switch (the camera's +0x200, the mission
+    scripts' SetPlayerHudShow), every EDF.dll byte it stands on checked at load (and, with the game present, the bytes
+    EDF.dll has there); the switch is driven from the camera hook after its own step and fault handler, so a fault puts it
+    back; the scripts' writes go through the record; the followers' bars (no reader of the switch) give way in the gauge
+    hook; the plugin's HUD draws nothing while the map's view eases back; the offline checks are built and in CI."""
+    code, h, hud, sub = src('src/map.cpp'), src('src/map_stock_hud.h'), src('src/hud.cpp'), src('src/subcarrier.cpp')
+    doc, cmake = src('docs/hud-re.md'), src('CMakeLists.txt')
+    for name, value in (('kHudShow', '0x118DF30'), ('kHudShowCall', '0x1BA811'), ('kCamHudShown', '0x200')):
+        assert re.search(rf'\b{name}={value}\b', code), name
+        assert value in doc, value
+    sigs = re.search(r'const HudSig kHudSigs\[\]=\{(.*?)\};', code, re.S).group(1)
+    arrays = re.findall(r'\{(k\w+|0x[0-9A-F]+),(k\w+),sizeof\(\2\)\}', sigs)
+    assert len(arrays) == 7, arrays
+    for at, _ in arrays:
+        assert at == 'kHudShow' or at in doc, at
+    install = code.split('bool InstallHudSwitch() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert install.index('Matches(s.rva,s.bytes,s.size)') < install.index('RedirectCall(image+kHudShowCall,image+kHudShow,')
+    assert 'hudOk=holdOk && InstallHudSwitch();' in code and 'if(!hudOk)return;' in code
+    step = code.split('void __fastcall CamStepHook(void* cam,void* step) {', 1)[1].split('\n}\n', 1)[0]
+    assert step.index('__except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};') < step.index('StockHud(static_cast<unsigned char*>(cam),generation);')
+    assert 'maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown)' in code
+    assert 'maphud::GameSet(hudRecord,cam,cameraSession.Generation(),show)' in code
+    assert 'if(write)reinterpret_cast<HudShowFn>(image+kHudShow)(cam,show);' in code
+    assert 'cameraSession.Reset();' in code.split('void ResetMap() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'maphud::Hides(hudRecord,camera,cameraSession.Generation())' in code
+    assert 'MapHidesStockHud(At<const void*>(hud,0x18))' in sub
+    assert 'if(!hide)draw(hud,viewProj,owner,r9,fifth);' in sub
+    draw = hud.split('void HudDraw(const float* viewProj', 1)[1]
+    assert draw.index('if(MapScreen(drawer,ctx,t,viewProj') < draw.index('if(MapOwnsView()){FreeText(text);return;}') < draw.index('CarrierBars(')
+    assert 'inline bool Step(' in h and 'inline bool GameSet(' in h
+    assert 'EXCLUDE_FROM_ALL tools/map_hud_check.cpp' in cmake and 'map_hud_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert '#include "../src/map_stock_hud.h"' in src('tools/map_hud_check.cpp')
+    assert 'failed+=!MapDrawsMapAlone(' in src('tools/hud_view.cpp')
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if os.path.exists(dll):
+        import edfre
+        consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
+        for at, arr in arrays:
+            want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
+            rva = consts[at] if at.startswith('k') else int(at, 16)
+            assert edfre.img[rva:rva + len(want)] == want, (arr, hex(rva))
+        call = edfre.img[consts['kHudShowCall']:consts['kHudShowCall'] + 5]
+        assert call[0] == 0xE8 and consts['kHudShowCall'] + 5 + int.from_bytes(call[1:], 'little', signed=True) == consts['kHudShow']
+
+
+@test
+def game_clock_and_hud_stop_with_the_pause() -> None:
+    """The pause menu (docs/hud-re.md §10): the game clock stops while the game's own pause flag says paused (the camera
+    step still reads it every frame of the pause), and the HUD draws nothing then. GameMs runs game_clock.h, the rule
+    tools/pause_clock_check.cpp checks; the pause flag is read from the System the pause menu sets, its code checked at
+    load and named in the doc."""
+    crew, hud, plugin, clock, doc = (src('src/crew.cpp'), src('src/hud.cpp'), src('src/plugin.cpp'), src('src/game_clock.h'),
+                                     src('docs/hud-re.md'))
+    assert '#include "game_clock.h"' in crew
+    assert re.search(r'ULONGLONG GameMs\(\) noexcept \{ return gameclock::Read\(clock,GetTickCount64\(\),GamePaused\(\)\); \}', crew)
+    assert 'if(c.wall && !paused)' in clock, 'game_clock.h: a paused read must not move the clock'
+    assert 'CheckPauseFlag();' in plugin
+    draw = hud[hud.index('void HudDraw('):]
+    assert draw.index('if(GamePaused())return;') < draw.index('MapScreen('), 'HudDraw must stop before it draws anything'
+    for rva in ('0x20B2958', '0xCD8', '0xCDC', '0x934A46', '0x934ED3', '0x1196FC0', '0x11990C', '0x119953B'):
+        assert rva in doc, f'docs/hud-re.md §10 does not mention {rva}'
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(pause_clock_check EXCLUDE_FROM_ALL tools/pause_clock_check.cpp)' in cmake
+    assert '#include "../src/game_clock.h"' in src('tools/pause_clock_check.cpp')
+
+
+@test
+def hud_switch_cues_wired() -> None:
+    """The loadout strip (every store's picture, name and rounds; the picked one large for a moment after a switch) and
+    EDF6AutoTurret's aim mode said as on / off with a banner on a flip (the user, 2026-10-06) are drawn where the stores
+    and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
+    hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
+    for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at)'):
+        assert call in hud, call
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAimOn' in hud and 'Tx::autoAimOffCircle' in hud
+    table = src('src/hudtext.inc')
+    assert 'HUDTEXT(autoAimOn,L"AUTO-AIM ON",' in table and 'HUDTEXT(autoAimOffCircle,L"AUTO-AIM OFF' in table
+    assert 'hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])' in hud
+    assert 'r.storeRole[i]=j.storeRole[i];' in src('src/playerjet.cpp')
+    assert 'EXCLUDE_FROM_ALL tools/hud_cue_check.cpp' in cmake and 'hud_cue_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'failed+=!TurretLayoutApart(1920);' in view and 'Scene(dir,L"jet_switch"' in view
+
+
+@test
+def split_missile_wired() -> None:
+    """MissileBullet02's split test (0x26CF00) is reached only through the flight state's call (0x26ED9C): the plugin
+    redirects that call, shows the stock test the surface distance (split_fuse.h), defaults on, and CTest runs the
+    simulated flight (docs/split-missile-re.md)."""
+    sm = src('src/splitmissile.cpp')
+    assert 'kSplitTest=0x26CF00,kSplitCall=0x26ED9C' in sm
+    assert 'RedirectCall(image+kSplitCall,image+kSplitTest' in sm
+    assert 'if(!moved)return nextSplit(round,frames);' in sm
+    assert 'targetVtbl[kAddHitSlot]=reinterpret_cast<void*>(&TargetAddHit);' in sm
+    assert 'InstallSplitMissiles();' in src('src/plugin.cpp')
+    assert 'bool splitMissileSurface=true;' in src('src/crew.h')
+    assert 'SplitMissileSurface=1' in src('EDF6VehicleCrew.ini')
+    assert 'src/splitmissile.cpp' in src('CMakeLists.txt')
+    assert 'add_test(NAME split_fuse COMMAND split_fuse_test)' in src('CMakeLists.txt')
+    assert 'docs/split-missile-re.md' in sm and os.path.exists(os.path.join(ROOT, 'docs', 'split-missile-re.md'))
+
+
+@test
 def incremental_install_regressions() -> None:
     from test_installer_incremental import run_checks
     run_checks()
 
 
+# The HUD's sources whose text the player reads: every word comes from src/hudtext.inc (hudtext.h Tr / Word).
+HUD_TEXT_SOURCES = ('src/hud.cpp', 'src/mapcmd.cpp')
+# What may stay in a wide literal of those: printf conversions, digits, punctuation, single letters (pad buttons A B X
+# Y, L3 / R3, the RWR's J / M symbols, the g symbol G), the pad's two-letter buttons and the units.
+HUD_LITERAL_WORDS = {'LB', 'RB', 'LT', 'RT', 'km'}
+HUD_SPEC = re.compile(r'%[-+ #0]*\d*(?:\.\d+)?(?:hs|ls|l?[dufxXsc]|%)')
+
+
+def hud_literal_words(text: str) -> list[tuple[int, str]]:
+    """The words (two letters or more, or any non-ASCII character) in a source's wide literals, with their lines."""
+    found = []
+    for m in re.finditer(r'L"((?:[^"\\]|\\.)*)"', text):
+        line = text.count('\n', 0, m.start()) + 1
+        core = HUD_SPEC.sub('', m.group(1))
+        found += [(line, w) for w in re.findall(r'[A-Za-z]{2,}', core) if w not in HUD_LITERAL_WORDS]
+        found += [(line, ch) for ch in core if ord(ch) > 0x7E]
+    return found
+
+
+def hudtext_entries() -> list[tuple[str, list[str]]]:
+    """src/hudtext.inc's texts: (key, [en, zh-CN, zh-TW, ja])."""
+    table = re.sub(r'//[^\n]*', '', src('src/hudtext.inc'))
+    out = []
+    for m in re.finditer(r'HUDTEXT\((\w+),(.*?)\)\s*(?=HUDTEXT\(|\Z)', table, re.S):
+        texts = [t.encode('utf-8').decode('unicode_escape').encode('latin-1').decode('utf-8')
+                 for t in re.findall(r'L"((?:[^"\\]|\\.)*)"', m.group(2))]
+        out.append((m.group(1), texts))
+    return out
+
+
+@test
+def hud_text_localized() -> None:
+    """The HUD's words in English, Simplified and Traditional Chinese and Japanese (src/hudtext.h, docs/hud-re.md §11):
+    no English or CJK literal left in the HUD's sources (every text a key of the table), every key four texts, each
+    language's characters its own script's (zh-CN in GB2312, zh-TW in Big5, ja in Shift JIS: a Traditional character in
+    the Simplified text, or a Simplified one in the Traditional, is caught), the run-time identifiers the HUD shows (a
+    round's class label, a jet's role, a carrier part) each a word of the table; the language follows the game's
+    Option_Language (read signature-checked) and the ini's HudLanguage, which is read, shipped and documented; the
+    offline checks (tools/hudtext_check.cpp, hud_view in every language) are CTests. With the game here, every character
+    is in one of the game's four fonts (the font chain the game draws with: Root.cpk UI/*.TTF)."""
+    for path in HUD_TEXT_SOURCES:
+        left = hud_literal_words(src(path))
+        assert not left, f'{path}: words outside src/hudtext.inc: {left[:12]}'
+    entries = hudtext_entries()
+    keys = [k for k, _ in entries]
+    assert len(keys) == len(set(keys)) and len(keys) > 200, len(keys)
+    for key, texts in entries:
+        assert len(texts) == 4 and all(texts), (key, texts)
+        en, zh_cn, zh_tw, ja = texts
+        assert all(ord(c) < 0x7F for c in en), (key, en)
+        for text, codec in ((zh_cn, 'gb2312'), (zh_tw, 'big5'), (ja, 'cp932')):
+            for ch in text:
+                if ord(ch) >= 0x2E80:
+                    try:
+                        ch.encode(codec)
+                    except UnicodeEncodeError:
+                        raise AssertionError(f'{key}: {ch!r} is not {codec} in {text!r}') from None
+    words = set(re.findall(r'\{"([^"]+)",Tx::(\w+)\}', src('src/hudtext.h').split('kWords[]={', 1)[1].split('};', 1)[0]))
+    ids = {w for w, _ in words}
+    assert all(k in keys for _, k in words), words
+    shown = set(re.findall(r'\{0x[0-9A-F]+,"[^"]+","(\w+)",Cls::', src('src/rounds.cpp')))
+    shown |= set(re.findall(r'm\.label="(\w+)"', src('src/rounds.cpp') + src('src/vhud.cpp')))
+    shown |= set(re.findall(r'strncpy_s\(a\.label,(?:m\.label \? m\.label : )?"(\w+)"', src('src/vhud.cpp')))
+    shown |= set(re.findall(r'\{Role::\w+,"(\w+)"', src('src/jet_internal.h')))
+    shown |= set(re.findall(r'\{kVt\w+,"(\w+)"', src('src/heli.cpp'))) - {'506', '409', '410'}
+    shown |= set(re.findall(r'^\s+\{"(\w+)",\{', src('src/subcarrier.cpp'), re.M))
+    shown |= set(re.findall(r'Kind\(d,"(\w+)"\)', src('src/hud.cpp')))
+    shown |= set(re.findall(r'ReadCommandUnit\(\w+\.ref,"(\w+)"', src('src/ground.cpp')))
+    assert {'GUN', 'WPN', 'ROCKETS', 'RKT', 'fighter', 'turretA', 'heli', 'CRAWLER', 'base'} <= shown, shown
+    assert shown <= ids, f'shown on the HUD without a word: {sorted(shown - ids)}'
+    hud, plugin, ini, readme = src('src/hud.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert 'kLangValue=0x20B2B30' in hud and 'CallsTo(0x963724,kLangGet) && CallsTo(0x96372E,kFontLoad)' in hud
+    assert 'hudtext::Use(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));' in hud
+    assert 'GetPrivateProfileStringW(L"VehicleCrew",L"HudLanguage"' in plugin and 'n.hudLanguage=ReadLanguage(' in plugin
+    assert re.search(r'^HudLanguage=auto$', ini, re.M) and 'HudLanguage' in readme and '§11' in src('src/hudtext.h')
+    cmake = src('CMakeLists.txt')
+    assert 'EXCLUDE_FROM_ALL tools/hudtext_check.cpp' in cmake and 'hudtext_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'failed+=Scenes(at);' in src('tools/hud_view.cpp')
+    try:
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import hud_view
+        fonts = hud_view.game_fonts()
+    except Exception:  # noqa: BLE001 - no game here (CI): the fonts are not checked
+        fonts = {}
+    if fonts:
+        from fontTools.ttLib import TTFont
+        import io
+        cmaps = [set(TTFont(io.BytesIO(data), lazy=True).getBestCmap()) for data in fonts.values()]
+        missing = sorted({ch for _, texts in entries for t in texts for ch in t if not any(ord(ch) in c for c in cmaps)})
+        assert not missing, f'characters in none of the game\'s fonts: {missing}'
+
+
+@test
+def soft_edge_wired() -> None:
+    """The flyers' soft edge (src/airbound.h, the user 2026-10-06): the NPC jets' Guard turns them in by it (not the old
+    world walls), their rotor goals and anchors are put inside it, their targets past it let be, the helis' wanted
+    velocity is cut by it; its ini keys are read, range-checked, shipped and documented; its two offline tests are CTest
+    tests; a blocked jet logs what it hit (src/impact.cpp, built)."""
+    flight, jet, combat, heli = src('src/jet_flight.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/heli.cpp')
+    guard = flight[flight.index('void Guard(Jet& j,'):flight.index('void ResetWalls()')]
+    assert 'SoftEdge(j,pos,want);' in guard and 'WorldWalls' not in flight, 'Guard: the soft edge, not the world walls'
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);' in flight
+    assert 'airbound::CapClimb(' in flight
+    hover = flight[flight.index('void Hover(Jet& j,'):]
+    assert 'airbound::ClampIn(JetSoftBox(j),inside,0.0f);' in hover[:1500], 'Hover: the goal inside the soft edge'
+    assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
+    assert 'if(PastEdge(*k.j,p))return;' in combat
+    fly = heli[heli.index('void Fly(Heli& h,unsigned char* v,bool playerAboard)'):]
+    assert 'SoftEdge(h,s,mode,w);' in fly[:600] and 'airbound::LimitOut(' in heli
+    assert 'LogImpact("JET",v,pos,was);' in jet and 'LogImpact("PJET",v,pos,j.sent);' in src('src/playerjet.cpp')
+    cm = src('CMakeLists.txt')
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)' in cm
+    assert 'add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite' in cm and 'airbound_check)' in cm
+    assert '#include "../src/airbound.h"' in src('tools/airbound_check.cpp')
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):
+        assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin, key
+        assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
+
+@test
+def installer_recovery_regressions() -> None:
+    from test_installer_recovery import run_checks
+    run_checks()
+
+
 def main() -> int:
+    import rootcpk
+    game = rootcpk.DEFAULT_GAME
     failed = 0
     for fn in TESTS:
         try:
@@ -2592,6 +3588,8 @@ def main() -> int:
             failed += 1
             print(f'FAIL  {fn.__name__}')
             traceback.print_exc()
+        finally:   # installer.install / uninstall point it at their stand-in game: the real-data tests after need the real one
+            rootcpk.use(game)
     print(f'{len(TESTS) - failed}/{len(TESTS)} passed')
     return 1 if failed else 0
 

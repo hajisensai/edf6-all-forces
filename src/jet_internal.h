@@ -12,6 +12,7 @@
 #include "crew.h"
 #include "body506.h"
 #include "memory.h"
+#include "airbound.h"
 #include <cmath>
 
 namespace crew {
@@ -294,6 +295,8 @@ struct Motion {
     float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
     ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it or off its track
     std::int8_t obstSide;    // ...too steep to climb: the side it turns off to (+1 / -1, picked once; 0 none)
+    bool edgeBack;           // past its soft edge: flying back in first (airbound.h KeepIn), its targets out there let be
+    signed char edgeTurn;    // ...turning back from it: the side it turns on (KeepIn: +1 left, -1 right, 0 none)
 };
 // What it goes for (Pick, Lead) and its guns' and missiles' state (Fire, Missile).
 struct Aim {
@@ -427,6 +430,7 @@ struct Jet {
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     PrimerState primer;
+    Command cmd{};              // a map command (JetCommand, mapcmd.cpp): what it works round instead (jet.cpp JetFrame)
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -486,12 +490,21 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept;
 void Toward(const float* pos,const float* goal,float* out) noexcept;
 void Level(const float* pos,const float* dir,float height,float* out) noexcept;
 bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept;
-bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept;
-void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept;
+bool NearWall(const Jet& j,const float* pos,float range,ULONGLONG ms) noexcept;
+void Guard(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept;
+// The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (crew.h PlayEdge) less its band (ini
+// AirSoftEdge / AirSoftTurns: at least that many of its full-speed turn diameters); `band` gets the band's width.
+airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
+// m/s: the most a wing of kind `k` flies inside a play area of half size `half` (turns that fit it; jet_flight.cpp).
+float TightSpeed(const Kind& k,float half) noexcept;
+// The anchor it works round, put inside its soft box less its patrol circle (`room` holds the copy when it moved).
+const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
+// `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
+// `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
-           float dt) noexcept;
+           float dt,float lift=0.0f,bool npcGoal=true) noexcept;
 // A wing's step toward `want` at `speed`: the path, the body's attitude onto it, its pose (elevons).
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* nose,float* want,float speed,float dt,ULONGLONG ms) noexcept;
 void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noexcept;

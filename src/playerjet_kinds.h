@@ -39,6 +39,40 @@ enum class Airframe { wing, rotor };
 // is its jet's, not its kind's: any jet that still has one offers it.)
 enum class Arm { none, shells, drones, charge };
 
+// The catch (playerjet.cpp Catch, Cfg().playerJetCatch): the jet made to fly in under the parachuting player when the
+// aircraft they left cannot come for them itself (shot down or crashed under them; a rotor craft: the catch is a wing's
+// flight, AutoFly). Made with CreateObject on its SGO, so the SGO is preloaded at the mission's start
+// (PreloadPlayerJets): the player jets' always, the requested twins only with PlayerJetAll and PlayerJetCatch on.
+// The requested twins (tools/make_jets.py EDF6VC_FLY_<KIND>.SGO, pylib/vcobjects.py REQUEST_KINDS) are the kind as the
+// player meets it: its mark, model and arms, a seat every class may take (the NPC body's SGO takes Rangers and Air
+// Raiders only) and the whole plane's box; their models are the NPC bodies' (preloaded with them: jet_spawn.cpp
+// PreloadJets), so each twin costs ~10 KB of SGO and no model of its own. `mark`: what its mission_setup writes.
+struct CatchFile {
+    const char* name;
+    float mark;
+    const wchar_t* sgo;
+    const wchar_t* file;
+    bool player;   // a player jet's SGO (preloaded whatever the ini says, as before)
+};
+enum CatchWith : int { kCatchNone=-1, kCatchPlayerFighter, kCatchPlayerStrike, kCatchInterceptor, kCatchFighter, kCatchMultirole,
+                       kCatchGunship, kCatchDrone };
+inline constexpr CatchFile kCatchFiles[]={
+    {"player-fighter",7201.0f,L"app:/object/edf6vc_pjet_fighter.sgo",L"EDF6VC_PJET_FIGHTER.SGO",true},
+    {"player-strike",7202.0f,L"app:/object/edf6vc_pjet_strike.sgo",L"EDF6VC_PJET_STRIKE.SGO",true},
+    {"interceptor",7003.0f,L"app:/object/edf6vc_fly_interceptor.sgo",L"EDF6VC_FLY_INTERCEPTOR.SGO",false},
+    {"fighter",7002.0f,L"app:/object/edf6vc_fly_fighter.sgo",L"EDF6VC_FLY_FIGHTER.SGO",false},
+    {"multirole",7004.0f,L"app:/object/edf6vc_fly_multirole.sgo",L"EDF6VC_FLY_MULTIROLE.SGO",false},
+    {"gunship",7011.0f,L"app:/object/edf6vc_fly_gunship.sgo",L"EDF6VC_FLY_GUNSHIP.SGO",false},
+    {"drone",7006.0f,L"app:/object/edf6vc_fly_drone.sgo",L"EDF6VC_FLY_DRONE.SGO",false},
+};
+constexpr int kCatchFileCount=static_cast<int>(sizeof(kCatchFiles)/sizeof(kCatchFiles[0]));
+// Why a row is caught by what it is (the catch's log line).
+constexpr const char* kOwnTwin="its own kind's requested twin";
+constexpr const char* kStrikeTwin="no requested twin of its own: the player strike jet, the same airframe, model and stores";
+constexpr const char* kBomberCatch="a stock bomber a strike jet took over (no SGO of ours to make it): the player strike jet";
+constexpr const char* kCarrierCatch="a 59 x 77 m rotor craft (the catch is a wing's flight): the player fighter";
+constexpr const char* kChargeCatch="a rotor drone its own charge destroys (the catch is a wing's flight): the player fighter";
+
 // The player's flight model's numbers (playerjet.cpp Kind, the same fields and units).
 struct Perf {
     const char* name;
@@ -51,6 +85,8 @@ struct Boardable {
     Airframe frame;
     Arm arm;
     Perf perf;
+    CatchWith catchWith;   // the jet made to catch the player who left it in the air, when it cannot (kCatchFiles)
+    const char* catchWhy;
 };
 
 constexpr float kTopOver=25.0f,kCornerShare=0.72f,kIdleShare=0.6f,kIdleOver=1.05f,kRotateOver=10.0f,kLeastThrust=6.0f,
@@ -90,19 +126,19 @@ constexpr float MarkOf(Body b) noexcept { return jet::Row(b).mark; }
 // the interceptor 16 m (8), the multirole 26 m (13), the carrier 59 x 77 m (35), the drones 5.7 m long (3), the
 // bomber401 bodies (gunship, BOMBER401) ~40 m (20). jet_bay.cpp ImpactDamage takes the impact charge nearest it.
 inline constexpr Boardable kBoardable[]={
-    {Body::strike,Airframe::wing,Arm::none,Wing("strike",MarkOf(Body::strike),Npc(jet::Role::strike),12.0f)},
-    {Body::fighter,Airframe::wing,Arm::none,Wing("fighter",MarkOf(Body::fighter),Npc(jet::Role::fighter),12.0f)},
-    {Body::bomber401,Airframe::wing,Arm::none,Wing("bomber401",MarkOf(Body::bomber401),kStockBomber,20.0f)},
-    {Body::bomber501_2,Airframe::wing,Arm::none,Wing("bomber501_2",MarkOf(Body::bomber501_2),kStockBomber,12.0f)},
-    {Body::interceptor,Airframe::wing,Arm::none,Wing("interceptor",MarkOf(Body::interceptor),Npc(jet::Role::interceptor),8.0f)},
-    {Body::multirole,Airframe::wing,Arm::none,Wing("multirole",MarkOf(Body::multirole),Npc(jet::Role::multirole),13.0f)},
-    {Body::carrier,Airframe::rotor,Arm::drones,Rotor("carrier",MarkOf(Body::carrier),Npc(jet::Role::carrier),35.0f)},
-    {Body::blastCarrier,Airframe::rotor,Arm::drones,Rotor("blastCarrier",MarkOf(Body::blastCarrier),Npc(jet::Role::carrier),35.0f)},
-    {Body::dollCarrier,Airframe::rotor,Arm::drones,Rotor("dollCarrier",MarkOf(Body::dollCarrier),Npc(jet::Role::carrier),35.0f)},
-    {Body::drone,Airframe::wing,Arm::none,Wing("drone",MarkOf(Body::drone),Npc(jet::Role::drone),3.0f)},
-    {Body::blast,Airframe::rotor,Arm::charge,Rotor("blast",MarkOf(Body::blast),Npc(jet::Role::blast),3.0f)},
-    {Body::doll,Airframe::rotor,Arm::charge,Rotor("doll",MarkOf(Body::doll),Npc(jet::Role::doll),3.0f)},
-    {Body::gunship,Airframe::wing,Arm::shells,Wing("gunship",MarkOf(Body::gunship),Npc(jet::Role::gunship),20.0f)},
+    {Body::strike,Airframe::wing,Arm::none,Wing("strike",MarkOf(Body::strike),Npc(jet::Role::strike),12.0f),kCatchPlayerStrike,kStrikeTwin},
+    {Body::fighter,Airframe::wing,Arm::none,Wing("fighter",MarkOf(Body::fighter),Npc(jet::Role::fighter),12.0f),kCatchFighter,kOwnTwin},
+    {Body::bomber401,Airframe::wing,Arm::none,Wing("bomber401",MarkOf(Body::bomber401),kStockBomber,20.0f),kCatchPlayerStrike,kBomberCatch},
+    {Body::bomber501_2,Airframe::wing,Arm::none,Wing("bomber501_2",MarkOf(Body::bomber501_2),kStockBomber,12.0f),kCatchPlayerStrike,kBomberCatch},
+    {Body::interceptor,Airframe::wing,Arm::none,Wing("interceptor",MarkOf(Body::interceptor),Npc(jet::Role::interceptor),8.0f),kCatchInterceptor,kOwnTwin},
+    {Body::multirole,Airframe::wing,Arm::none,Wing("multirole",MarkOf(Body::multirole),Npc(jet::Role::multirole),13.0f),kCatchMultirole,kOwnTwin},
+    {Body::carrier,Airframe::rotor,Arm::drones,Rotor("carrier",MarkOf(Body::carrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kCarrierCatch},
+    {Body::blastCarrier,Airframe::rotor,Arm::drones,Rotor("blastCarrier",MarkOf(Body::blastCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kCarrierCatch},
+    {Body::dollCarrier,Airframe::rotor,Arm::drones,Rotor("dollCarrier",MarkOf(Body::dollCarrier),Npc(jet::Role::carrier),35.0f),kCatchPlayerFighter,kCarrierCatch},
+    {Body::drone,Airframe::wing,Arm::none,Wing("drone",MarkOf(Body::drone),Npc(jet::Role::drone),3.0f),kCatchDrone,kOwnTwin},
+    {Body::blast,Airframe::rotor,Arm::charge,Rotor("blast",MarkOf(Body::blast),Npc(jet::Role::blast),3.0f),kCatchPlayerFighter,kChargeCatch},
+    {Body::doll,Airframe::rotor,Arm::charge,Rotor("doll",MarkOf(Body::doll),Npc(jet::Role::doll),3.0f),kCatchPlayerFighter,kChargeCatch},
+    {Body::gunship,Airframe::wing,Arm::shells,Wing("gunship",MarkOf(Body::gunship),Npc(jet::Role::gunship),20.0f),kCatchGunship,kOwnTwin},
 };
 constexpr int kBoardableCount=static_cast<int>(sizeof(kBoardable)/sizeof(kBoardable[0]));
 
@@ -123,6 +159,41 @@ constexpr bool BoardableConsistent() noexcept {
     return true;
 }
 static_assert(BoardableConsistent(),"kBoardable: rotor rows rotor craft, jet bodies of our side once each, flyable wings");
+
+// A rotor craft's height over the floor (docs/player-jet-re.md §14). The ground probe (body506.cpp GroundClearance)
+// measures from the vehicle's position, which on a 506 is its collision box's centre (heli_rigid_body[0]), while the
+// drawn model's origin, its lowest point (pylib/jet_models.py grounded), is its mesh bone, `rest` m under it. The rotor
+// flight (HoverStep, HoverDone, RotorHail) reads "on the ground" as under kTouch (3 m): the carrier's position is
+// 8.516 m over its bottom, so standing on the ground it read 9 m up (2026-10-06 14:56:55, "air ... 9 m over the
+// ground"): never set down, never parked, left on the ground it was handed back to its NPC pilot as if in the air, a
+// called-down one never reached its spot. Its clearance is its bottom's: the position's less `rest`. (The wings keep
+// the position's: their rests, 1.38 / 2.12 m, are under kTouch, which their landing was tuned on.)
+constexpr float kRestMost=100.0f;   // m: a rest no airframe of ours has (the bone not where it should be: none)
+// The rest from the position's height and the mesh bone's: 0 when it is not a plausible one (or NaN).
+constexpr float RestHeight(float posY,float meshY) noexcept {
+    const float r=posY-meshY;
+    return r>0.0f && r<kRestMost ? r : 0.0f;
+}
+// The bottom's clearance from the position's (`none`: no ground seen, kept).
+constexpr float BottomClear(float clear,float rest,float none) noexcept { return clear==none ? clear : clear-rest; }
+static_assert(BottomClear(8.516f,RestHeight(108.516f,100.0f),-1e9f)<0.01f,"a carrier standing on the ground is on it");
+static_assert(BottomClear(20.0f,RestHeight(108.516f,100.0f),-1e9f)>11.0f,"a carrier 11.5 m up is in the air");
+static_assert(RestHeight(100.0f,108.0f)==0.0f && RestHeight(500.0f,100.0f)==0.0f,"no rest from a bone out of place");
+static_assert(BottomClear(-1e9f,8.0f,-1e9f)==-1e9f,"no ground stays no ground");
+// The catch's jet of each row: one of kCatchFiles, a wing (a player jet, or a wing row's own kind: the catch is a wing's
+// flight), its own kind's when it is its own mark; the player jets' marks are kKinds' (playerjet.cpp CatchOf).
+constexpr bool CatchConsistent() noexcept {
+    for(int i=0;i<kCatchFileCount;++i)
+        for(int k=i+1;k<kCatchFileCount;++k)if(kCatchFiles[k].mark==kCatchFiles[i].mark)return false;
+    for(const Boardable& b:kBoardable) {
+        if(b.catchWith<0 || b.catchWith>=kCatchFileCount || !b.catchWhy)return false;
+        const CatchFile& c=kCatchFiles[b.catchWith];
+        const bool own=c.mark==jet::Row(b.body).mark;
+        if(c.player==own || (own && b.frame!=Airframe::wing) || (own!=(b.catchWhy==kOwnTwin)))return false;
+    }
+    return true;
+}
+static_assert(CatchConsistent(),"kBoardable catchWith: a wing, its own kind's twin or a player jet, said why");
 
 // The row of body `b`, or nullptr (not boardable).
 constexpr const Boardable* Row(Body b) noexcept {

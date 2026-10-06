@@ -8,6 +8,9 @@
 // origin/feat/primer-swarm tools/primer_flight_sim.cpp.
 //
 //   jet_obstacle_sim --scenario a|b|b2|c|c2|d|d0 [--kind strike|fighter] [--seconds N] [--out DIR] [--tag NAME]
+//   jet_obstacle_sim --selftest [--out DIR]
+//   jet_obstacle_sim --edge-suite   (the soft edge's cases, EdgeSuite: exit 1 when one fails; edge_suite.log here)
+//   jet_obstacle_sim --player-rotor-suite (real Hover: player/hail goals in the NPC band remain reachable)
 //
 //   a   level 60 m over the ground at cruise, heading +z, a 150 m tall 60x60 building 1500 m ahead
 //   b   the same at a 400 m tall 80x80 tower (too steep to climb: it must turn)
@@ -19,17 +22,27 @@
 //   d   a strike dive at a ground point with a 120 m building 150-210 m in front of it (Attack -> Strike)
 //   d0  d with no building (the dive as it is when nothing is in the way)
 //
+// --selftest (CTest jet_attack_runs): the attack runs the 2026-10-06 log showed failing, each case printed, exit 1 on any
+// failure:
+//   pull  a dive Guard alone must pull out of (the guidance holds the dive into the ground): every kind that dives, loaded
+//         and clean, 15-80 deg, 150-250 m/s, upright and inverted, over flat ground and with a 150 m plateau where its
+//         pull-out bottoms, started just high enough for that pull-out (1.3 times PredictPullOut's drop, 60 m more): the
+//         lowest it gets over what is under it is kPullMargin or more;
+//   entry a called strike jet arriving with its missiles at a ground target ahead and off its nose (Attack -> Strike,
+//         Fire): its guns and its missiles fire within its arrival (kEntryMs), the game's lock given.
 // Writes DIR/<tag>.csv (the trajectory, every frame) and DIR/<tag>.log (the plugin's own log), prints the summary.
 // The "before" build (jet_obstacle_sim_before) compiles the same files with Wing's Ahead call and Strike's InSight
 // test cut out (CMakeLists.txt makes the copies), so the two show what Ahead and InSight change.
 #include "../src/jet_internal.h"
 #include "../src/gear.h"
+#include "../src/jet_pullout.h"
 #include "../src/stores.h"
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -62,6 +75,13 @@ float RayBox(const float* a,const float* d,const Box& b) noexcept {
 }
 }  // namespace
 const Config& Cfg() noexcept { return config; }
+// The play area (playarea.cpp measures the map's ground in the game): the physics square, or (the edge suite's ground
+// cases) a stock map's ground, `groundHalf` m a side, its walls playarea.h's kVoidMargin inside it.
+float groundHalf=0.0f;
+PlayArea MapPlayArea() noexcept {
+    const float e=groundHalf>0.0f ? groundHalf-area::kVoidMargin : PlayEdge();
+    return PlayArea{{-e,-e},{e,e},groundHalf>0.0f,0.0f,false};
+}
 ULONGLONG GameMs() noexcept { return nowMs; }
 ULONGLONG GameFrame() noexcept { return nowMs/16; }
 void Log(const char* format,...) noexcept {
@@ -167,6 +187,397 @@ Role RoleNamed(const char* n) {
     if(!std::strcmp(n,"multirole"))return Role::multirole;
     return Role::strike;
 }
+
+// --- --selftest ---
+constexpr float kPullMargin=15.0f;   // m: the least a pull-out may leave under it (Guard aims at kMinAlt, 25)
+
+// A body for a selftest case: at `at`, flying `dir` (unit) at `speed`, rolled `bank` rad about its path (0 upright).
+void Place(Jet& j,unsigned char* v,unsigned char* ctrl,Role role,const float* at,const float* dir,float speed,float bank) {
+    std::memset(v,0,kBodySize);
+    float f[3]={dir[0],dir[1],dir[2]};Normalize(f);
+    float r[3]={f[2],0.0f,-f[0]};   // right: as main() builds it (heading +z: right +x)
+    if(!Normalize(r)){r[0]=1;r[1]=0;r[2]=0;}
+    float u[3];Cross(f,r,u);Normalize(u);
+    if(u[1]<0.0f)for(int i=0;i<3;++i)u[i]=-u[i];
+    const float c=std::cos(bank),sn=std::sin(bank);
+    float u2[3],r2[3];
+    for(int i=0;i<3;++i){u2[i]=u[i]*c+r[i]*sn;r2[i]=r[i]*c-u[i]*sn;}
+    const float mat[16]={r2[0],r2[1],r2[2],0, u2[0],u2[1],u2[2],0, f[0],f[1],f[2],0, at[0],at[1],at[2],1};
+    std::memcpy(v+kMatrix,mat,64);
+    std::memcpy(v+kPosition,at,12);
+    Put<float>(v,kHpMax,1000.0f);Put<float>(v,kHp,1000.0f);
+    std::memset(ctrl,0,kCtrlSize);
+    Put<long>(ctrl,8,1);
+    Put<const void*>(v,kSelfCtrl,ctrl);
+    j=Jet{};
+    j.ref=ObjRef{v,ctrl};j.role=role;j.mode=Mode::patrol;j.drone.slot=-1;
+    j.bornAt=j.modeAt=j.seen=nowMs;
+    for(int i=0;i<3;++i)j.m.vel[i]=f[i]*speed;
+}
+
+// One pull case: the lowest it got over what is under it (GroundClearance), or -1 if it went into it.
+float PullCase(Role role,float mass,float diveDeg,float speed,bool inverted,bool plateau,float* startY) {
+    boxes.clear();
+    const Kind& k=KindOf(role);
+    const float dive=diveDeg*kPi/180.0f,dir[3]={0.0f,-std::sin(dive),std::cos(dive)};
+    const float top=k.attack*1.3f<kBodyTop ? k.attack*1.3f : kBodyTop;
+    const PullOutIn in{speed,std::sin(dive),k.maxG/mass,inverted ? kPi-0.05f : 0.0f,k.roll,6.0f,1.0f,k.thrust/mass,top,kG};
+    const PullOut p=PredictPullOut(in);
+    const float ground=plateau ? 150.0f : 0.0f;
+    const float y0=ground+p.drop*1.3f+60.0f;
+    *startY=y0;
+    // The plateau: from half the pull-out's run on (under where it bottoms), none under the start.
+    if(plateau)AddBox(0.0f,p.run*0.5f+p.run*2.0f,4000.0f,p.run*4.0f,ground);
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    const float at[3]={0.0f,y0,0.0f};
+    Place(j,v,ctrl.data(),role,at,dir,speed,inverted ? kPi-0.05f : 0.0f);
+    j.burden=Burden{mass,0.0f};
+    float lowest=1e9f;
+    bool into=false;
+    for(int f=0;f<60*30;++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3]={dir[0],dir[1],dir[2]};   // held in the dive: only Guard pulls it out
+        Wing(j,k,v,pos,nose,want,k.attack,kDt,nowMs);
+        const float sink=j.m.vel[1];
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        if(j.m.vel[1]>sink+0.01f)into=true;   // the floor caught it: it would have gone in
+        j.m.ready=true;
+        if(Move(j,v))into=true;
+        const float c=GroundClearance(pos);
+        if(c!=kNoGround && c<lowest)lowest=c;
+        if(f>60 && j.m.vel[1]>20.0f)break;   // climbing away: out of it
+    }
+    return into ? -1.0f : lowest;
+}
+
+// The entry case: a strike jet (loaded) 2600 m from its target and `over` over it, the target `offDeg` off its nose, the
+// game locking its missiles; called (`launched`: arriving, Entering) or not. When (s since it came) its guns first fire
+// and its first missile goes (-1: never), and its height over the target at its first burst.
+void EntryCase(float offDeg,float over,bool launched,float* gunAt,float* missileAt,float* overAtFire) {
+    boxes.clear();
+    const Role role=Role::strike;
+    const Kind& k=KindOf(role);
+    const float aim[3]={0.0f,0.0f,0.0f};
+    const float off=offDeg*kPi/180.0f;
+    const float at[3]={0.0f,over,-2600.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    Place(j,v,ctrl.data(),role,at,dir,k.cruise,0.0f);
+    j.launched=launched;j.burden=Burden{launched ? 1.21f : 1.0f,0.0f};
+    static int targetDummy=0;
+    j.t.target=&targetDummy;j.t.flyer=false;std::memcpy(j.t.aim,aim,12);std::memcpy(j.t.tgtPrev,aim,12);
+    Arms arms{};arms.gunSpeed=960.0f;arms.gunRange=960.0f;arms.pick=-1;arms.rocket=-1;arms.guns=3600;arms.hasGun=true;
+    arms.hasMissile=true;arms.missiles=6;arms.locked=1;arms.missileRange=1800.0f;
+    const ULONGLONG born=nowMs;
+    *gunAt=*missileAt=-1.0f;*overAtFire=0.0f;
+    for(int f=0;f<60*20;++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
+        bool gunsOk=false,missileOk=false;
+        Attack(j,arms,pos,nose,aim,aim[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
+        Wing(j,k,v,pos,nose,want,speed,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        Fire(j,v,pos,nose,aim,gunsOk,missileOk,arms,nowMs);
+        const float t=static_cast<float>(nowMs-born)*0.001f;
+        if(v[kFireGun] && *gunAt<0.0f){*gunAt=t;*overAtFire=pos[1]-aim[1];}
+        if(v[kFireMissile] && *missileAt<0.0f)*missileAt=t;
+        Move(j,v);
+    }
+}
+
+int SelfTest(const char* outDir) {
+    const std::string logPath=std::string(outDir)+"/selftest.log";
+    logFile=std::fopen(logPath.c_str(),"w");
+    config.debug=true;config.jetPilot=true;
+    // A world big enough that no case reaches the play edge's soft line (src/airbound.h, the edge suite's business): an
+    // entry 2600 m out, a dive's pull-out run out to 4 km.
+    config.bigWorld=20000.0f;
+    int bad=0,cases=0;
+    float worst=1e9f;
+    // Loaded: the strike jet's 6 AGM, 6 Mk 82, 38 rockets and 2 AIM-9X on its 22 t (1.21); the multirole's load on 18 t.
+    const struct { Role role; float mass; } loads[]={{Role::strike,1.21f},{Role::strike,1.0f},{Role::multirole,1.18f},
+                                                     {Role::fighter,1.0f},{Role::drone,1.0f}};
+    const float dives[]={15.0f,30.0f,45.0f,60.0f,80.0f},speeds[]={150.0f,200.0f,250.0f};
+    for(const auto& l:loads)for(float d:dives)for(float s:speeds)for(int inv=0;inv<2;++inv)for(int pl=0;pl<2;++pl) {
+        float y0=0.0f;
+        const float low=PullCase(l.role,l.mass,d,s,inv!=0,pl!=0,&y0);
+        ++cases;
+        const bool ok=low>=kPullMargin;
+        if(!ok)++bad;
+        if(low<worst)worst=low;
+        std::printf("pull %-9s x%.2f %2.0f deg %3.0f m/s %-8s %-7s from %5.0f m: lowest %6.1f m %s\n",KindOf(l.role).name,
+                    static_cast<double>(l.mass),static_cast<double>(d),static_cast<double>(s),inv ? "inverted" : "upright",
+                    pl ? "plateau" : "flat",static_cast<double>(y0),static_cast<double>(low),ok ? "ok" : "FAIL");
+    }
+    std::printf("pull: %d cases, %d failed, lowest %.1f m (margin %.0f m)\n",cases,bad,static_cast<double>(worst),
+                static_cast<double>(kPullMargin));
+    // Called, arriving 150 m over its target (as the 2026-10-06 log's did); and runs in at its attack height (alt), not
+    // arriving: the ordinary strike run must fire as well.
+    const float alt=KindOf(Role::strike).alt;
+    const struct { float off,over; bool launched; } runs[]={{0.0f,150.0f,true},{15.0f,150.0f,true},{30.0f,150.0f,true},
+                                                            {0.0f,alt,false},{20.0f,alt,false}};
+    for(const auto& r:runs) {
+        float gun=0.0f,msl=0.0f,over=0.0f;
+        EntryCase(r.off,r.over,r.launched,&gun,&msl,&over);
+        const float entry=static_cast<float>(kEntryMs)*0.001f;
+        const bool ok=gun>=0.0f && gun<entry && msl>=0.0f && msl<entry;
+        if(!ok)++bad;
+        std::printf("%s %3.0f m over, target %2.0f deg off the nose: guns at %.1f s (%.0f m over it), missile at %.1f s %s\n",
+                    r.launched ? "entry" : "run  ",static_cast<double>(r.over),static_cast<double>(r.off),static_cast<double>(gun),
+                    static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
+    }
+    if(logFile)std::fclose(logFile);
+    std::printf("%s\n",bad ? "SELFTEST FAILED" : "selftest passed");
+    return bad ? 1 : 0;
+}
+}  // namespace
+
+// --edge-suite: the soft edge (src/airbound.h, jet_flight.cpp SoftEdge) against jets at the play edge, run through Wing
+// (Ahead, Guard, JetSteer) as the game runs it. Each case starts a jet `start` m inside its soft line (negative: past
+// it, in the band), flying `heading` degrees off straight out (+x; the corner cases toward +x +z), at a share of its
+// attack speed, steering at a target out past the play edge (fixed far out along its heading, or flying along the edge
+// out there, or up over the ceiling). A case started with room for its turn back (SoftEdge's own reach: Excursion, and
+// in a corner the whole circle of its turn, airbound::Margin) must never go more than kEdgeTol past the soft line (nor
+// over the soft ceiling); one started without (too near, too fast: what the band is for) or past the line must stay
+// off the play edge and the ceiling and be back inside at its end.
+namespace {
+constexpr float kEdgeTol=50.0f;
+unsigned char fakeArea[0x100]{};   // the move area manager stand-in: +0x3C the ceiling (body506.cpp CeilingY)
+
+airbound::Box SuiteSoft(const Jet& j,float* band) {
+#ifdef EDGE_SUITE_OLD
+    // The tree before the soft edge: the same box, from the same ini defaults.
+    const Kind& k=KindOf(j);
+    float g=1.0f+k.thrust/3.0f;
+    if(g>k.maxG)g=k.maxG;
+    const float b=airbound::Band(airbound::TurnRadius(k.attack,std::sqrt(g*g-1.0f))*1.15f,1.0f,600.0f,PlayEdge());
+    *band=b;
+    return airbound::Inset(airbound::Square(PlayEdge()),b);
+#else
+    return JetSoftBox(j,band);
+#endif
+}
+float SuiteSoftTop() {
+#ifdef EDGE_SUITE_OLD
+    return CeilingY()-kCeilingGap-150.0f;
+#else
+    return CeilingY()-kCeilingGap-Cfg().airSoftCeil;
+#endif
+}
+
+enum class Chase { out, along, corner, climb };
+const char* const kChaseNames[]={"out","along","corner","climb"};
+struct EdgeCase { Role role; float bigWorld,start,heading,share; Chase chase; float seconds; float ground=0.0f; };
+struct EdgeOut { float pastSoft,pastHard,overTop,overCeil,endDepth,pastGround; bool fits,room,ok,judged; };
+
+EdgeOut EdgeRun(const EdgeCase& c) {
+    config.bigWorld=c.bigWorld;
+    groundHalf=c.ground;
+    ResetWalls();
+    const Kind& kind=KindOf(c.role);
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    j=Jet{};
+    j.ref=ObjRef{v,ctrl.data()};j.role=c.role;j.mode=Mode::chase;j.drone.slot=-1;
+    nowMs=1000;j.bornAt=j.modeAt=j.seen=nowMs;
+    float band=0.0f;
+    const airbound::Box soft=SuiteSoft(j,&band),hard=PlayBox();
+    const float softTop=SuiteSoftTop(),ceil=CeilingY()-kCeilingGap;
+    const float rad=c.heading*kPi/180.0f;
+    float heading[3]={std::cos(rad),0.0f,std::sin(rad)};
+    float start[3]={soft.hi[0]-c.start,600.0f,0.0f};
+    if(c.chase==Chase::corner) {
+        const float a=(45.0f+c.heading)*kPi/180.0f;   // heading off the corner's diagonal
+        heading[0]=std::cos(a);heading[2]=std::sin(a);
+        start[2]=soft.hi[1]-c.start;
+    }
+    float climb=0.0f;
+    if(c.chase==Chase::climb){start[0]=0.0f;start[1]=softTop-c.start;climb=0.5f;}   // 30 deg up, mid-map
+    const float right[3]={heading[2],0.0f,-heading[0]};
+    const float mat[16]={right[0],0,right[2],0, 0,1,0,0, heading[0],0,heading[2],0, start[0],start[1],start[2],1};
+    std::memcpy(v+kMatrix,mat,64);
+    std::memcpy(v+kPosition,start,12);
+    Put<float>(v,kHpMax,1000.0f);Put<float>(v,kHp,1000.0f);
+    Put<long>(ctrl.data(),8,1);
+    Put<const void*>(v,kSelfCtrl,ctrl.data());
+    const float s0=std::fmin(kind.attack,TightSpeed(kind,airbound::HalfOf(hard)))*c.share;   // a small area's jet flies slower
+    const float hs=std::sqrt(1.0f-climb*climb);
+    j.m.vel[0]=heading[0]*s0*hs;j.m.vel[1]=s0*climb;j.m.vel[2]=heading[2]*s0*hs;
+    float goal[3]={start[0]+heading[0]*20000.0f,start[1],start[2]+heading[2]*20000.0f};
+    if(c.chase==Chase::along){goal[0]=hard.hi[0]+600.0f;goal[2]=-3000.0f;}
+    if(c.chase==Chase::climb){goal[0]=start[0]+heading[0]*3000.0f;goal[1]=ceil+5000.0f;goal[2]=start[2]+heading[2]*3000.0f;}
+    // Room for its turn back at the start, as SoftEdge reckons it (kReact 1 s plus a quarter roll; the turn at its g,
+    // the push over at 1 + kNegG = 2 g).
+    const float react=1.0f+0.5f*kPi*0.5f/kind.roll,hs0=s0*hs;
+    float gHeld=1.0f+kind.thrust/3.0f;   // jet_flight.cpp TurnRadiusOf: the g its thrust holds (kTurnBleed 3), x 1.15
+    if(gHeld>kind.maxG)gHeld=kind.maxG;
+    const float r=airbound::TurnRadius(hs0,std::sqrt(gHeld*gHeld-1.0f))*1.15f;
+    // The box holds its turns (airbound::kRoomTurns radii at its attack speed each side of the middle): the stock 2400 m
+    // edge does not for these kinds (the band falls back to the ini's 600 m), and there only the play edge is held.
+    const bool fits=c.ground<=0.0f && airbound::HalfOf(soft)+1.0f>=airbound::kRoomTurns*
+                    airbound::TurnRadius(kind.attack,std::sqrt(gHeld*gHeld-1.0f))*1.15f;
+    bool room=start[0]+0.0f<=soft.hi[0] && soft.hi[0]-start[0]>=airbound::Excursion(hs0,j.m.vel[0],r,react)+airbound::kSlack;
+    if(c.chase==Chase::corner)
+        room=std::fmax(airbound::Margin(soft,start,j.m.vel,r,react,1.0f),airbound::Margin(soft,start,j.m.vel,r,react,-1.0f))>=0.0f;
+    if(c.chase==Chase::climb)
+        room=softTop-start[1]>=airbound::Excursion(s0,j.m.vel[1],airbound::TurnRadius(s0,2.0f)*1.15f,react);
+    if(c.start<0.0f)room=false;
+    // The ground cases: the ground's own edge, not the walls the code under test puts on it (a wrong PlayBox moves both).
+    const airbound::Box groundBox=airbound::Square(c.ground);
+    EdgeOut o{-1e9f,-1e9f,-1e9f,-1e9f,0.0f,-1e9f,fits,room,true,true};
+    double clock=1.0;
+    const int frames=static_cast<int>(c.seconds*60.0f);
+    for(int f=0;f<frames;++f) {
+        clock+=1.0/60.0;
+        nowMs=static_cast<ULONGLONG>(clock*1000.0+0.5);
+        if(c.chase==Chase::along)goal[2]+=150.0f*kDt;   // the target flies along the edge out there at 150 m/s
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3];
+        Toward(pos,goal,want);
+        if(c.chase!=Chase::climb)Level(pos,want,start[1],want);
+        Wing(j,kind,v,pos,nose,want,kind.attack,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        Move(j,v);
+        const float ps=-airbound::Depth(soft,pos),ph=-airbound::Depth(hard,pos);
+        if(ps>o.pastSoft)o.pastSoft=ps;
+        if(ph>o.pastHard)o.pastHard=ph;
+        if(c.ground>0.0f)o.pastGround=std::fmax(o.pastGround,-airbound::Depth(groundBox,pos));
+        if(pos[1]-softTop>o.overTop)o.overTop=pos[1]-softTop;
+        if(pos[1]-ceil>o.overCeil)o.overCeil=pos[1]-ceil;
+        o.endDepth=airbound::Depth(soft,pos);
+    }
+    // Fits, with room: never over the soft line (nor the soft ceiling) by more than kEdgeTol. Fits, without room (in
+    // the band, or too near and too fast): never at the play edge, back inside at the end. A box that does not fit:
+    // with room never at the play edge; without, only shown. How far over the ceiling a climb without room goes is shown.
+    if(fits && room)o.ok=o.pastSoft<=kEdgeTol && o.overTop<=kEdgeTol;
+    else if(fits)o.ok=o.pastHard<=0.0f && o.endDepth>=0.0f;
+    else if(c.ground>0.0f)o.ok=o.pastGround<=0.0f;   // the ground cases: never out over the void
+    else if(room)o.ok=o.pastHard<=0.0f;
+    else o.judged=false;
+    std::printf("%-11s edge %5.0f band %4.0f start %6.0f head %3.0f speed %3.0f %-6s | past soft %7.1f  past edge %7.1f  over soft top %7.1f"
+                "  end %6.0f in | %s %s\n",kind.name,hard.hi[0],band,c.start,c.heading,s0,kChaseNames[static_cast<int>(c.chase)],
+                o.pastSoft,o.pastHard,o.overTop,o.endDepth,room ? "room   " : "no room",!o.judged ? "shown" : o.ok ? "ok" : "FAIL");
+    return o;
+}
+
+// The player and a hail use Hover too. At a legal position outside the NPC soft box, a player's outward input must
+// remain outward, and a requested landing point must stay reachable. NPCs must still return to their inner box.
+int PlayerRotorSuite() {
+    config=Config{};groundHalf=1500.0f;
+    int failures=0,cases=0;
+    for(const Role role:{Role::carrier,Role::blast,Role::doll})for(const int axis:{0,2})for(const float lift:{0.0f,10.0f}) {
+        const Kind& kind=KindOf(role);
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+        Jet j{};j.role=role;
+        const airbound::Box soft=JetSoftBox(j),hard=PlayBox();
+        const int k=axis/2;
+        const float start=0.5f*(soft.hi[k]+hard.hi[k]);
+        float at[3]={0.0f,100.0f,0.0f},goal[3]={0.0f,100.0f,0.0f};
+        at[axis]=start;goal[axis]=start+100.0f;
+        const float direction[3]={0.0f,0.0f,1.0f};
+        for(const bool npc:{false,true}) {
+            Place(j,mem.data(),ctrl.data(),role,at,direction,0.0f,0.0f);
+            float* pos=reinterpret_cast<float*>(mem.data()+kPosition);
+            Hover(j,kind,mem.data(),pos,goal,goal,20.0f,kHoverClimb,kDt,lift,npc);
+            const bool rightWay=npc ? j.m.vel[axis]<0.0f : j.m.vel[axis]>0.0f;
+            for(int frame=0;frame<3600;++frame) {
+                Hover(j,kind,mem.data(),pos,goal,goal,20.0f,kHoverClimb,kDt,lift,npc);
+                for(int i=0;i<3;++i)pos[i]+=j.m.vel[i]*kDt;
+            }
+            const float expected=npc ? soft.hi[k] : goal[axis];
+            const bool reached=npc ? pos[axis]<=expected+15.0f : std::fabs(pos[axis]-expected)<15.0f;
+            const bool ok=rightWay && reached;
+            failures+=!ok;++cases;
+            std::printf("rotor %-7s %s axis %d lift %.0f: start %.0f, goal %.0f, reached %.1f (%s)\n",kind.name,
+                        npc ? "NPC   " : "player",axis,lift,start,expected,pos[axis],ok ? "ok" : "FAIL");
+        }
+    }
+    std::printf("player rotor suite: %d production Hover cases, %d failed\n",cases,failures);
+    return failures ? 1 : 0;
+}
+
+int EdgeSuite() {
+    static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
+    image=fakeImage.data();
+    Put<unsigned char*>(image,0x20B2998,fakeArea);
+    Put<float>(fakeArea,0x3C,1200.0f);   // the big map's ceiling as the 2026-10-06 log has it (ceil=1200)
+    config.debug=true;
+    logFile=std::fopen("edge_suite.log","w");
+    const Role roles[]={Role::strike,Role::fighter,Role::interceptor};
+    std::vector<EdgeCase> cases;
+    for(const float world:{6000.0f,0.0f})
+        for(const Role r:roles) {
+            for(const float head:{0.0f,30.0f,60.0f,85.0f})
+                for(const float share:{0.6f,1.0f})
+                    for(const float start:{world>0.0f ? 3000.0f : 1400.0f,1500.0f,800.0f,150.0f})
+                        cases.push_back(EdgeCase{r,world,start,head,share,Chase::out,40.0f});
+            for(const float start:{1500.0f,400.0f})cases.push_back(EdgeCase{r,world,start,0.0f,1.0f,Chase::along,60.0f});
+            for(const float head:{0.0f,20.0f,-20.0f})
+                for(const float start:{world>0.0f ? 2500.0f : 1300.0f,1200.0f})
+                    cases.push_back(EdgeCase{r,world,start,head,1.0f,Chase::corner,40.0f});
+            for(const float start:{-200.0f,-600.0f})cases.push_back(EdgeCase{r,world,start,0.0f,1.0f,Chase::out,60.0f});
+            cases.push_back(EdgeCase{r,world,-300.0f,0.0f,1.0f,Chase::along,60.0f});
+            for(const float start:{600.0f,250.0f})cases.push_back(EdgeCase{r,world,start,0.0f,1.0f,Chase::climb,30.0f});
+        }
+    // A stock map on the big world (the user's: BigWorld 6000, the ground only some 1500 m a side, the void past it):
+    // the walls on the ground's edge (playarea.h), the soft edge inside them; never out over the void.
+    for(const Role r:roles) {
+        for(const float head:{0.0f,30.0f,60.0f,85.0f})
+            for(const float share:{0.7f,1.0f})
+                for(const float start:{1200.0f,600.0f,300.0f,0.0f,-300.0f})
+                    cases.push_back(EdgeCase{r,6000.0f,start,head,share,Chase::out,60.0f,1500.0f});
+        for(const float start:{600.0f,0.0f})cases.push_back(EdgeCase{r,6000.0f,start,0.0f,1.0f,Chase::along,90.0f,1500.0f});
+        for(const float head:{0.0f,20.0f,-20.0f})cases.push_back(EdgeCase{r,6000.0f,600.0f,head,1.0f,Chase::corner,60.0f,1500.0f});
+    }
+    // [fits][room]: cases, the most past the soft line, past the play edge, over the soft ceiling; the ground cases apart.
+    int fails=0,count[2][2]{},grounds=0;
+    float groundPast=-1e9f,groundSoft=-1e9f;
+    float soft[2][2],edge[2][2],top[2][2];
+    for(int a=0;a<2;++a)for(int b=0;b<2;++b)soft[a][b]=edge[a][b]=top[a][b]=-1e9f;
+    for(const auto& c:cases) {
+        const EdgeOut o=EdgeRun(c);
+        fails+=!o.ok;
+        if(c.ground>0.0f){++grounds;groundPast=std::fmax(groundPast,o.pastGround);groundSoft=std::fmax(groundSoft,o.pastSoft);continue;}
+        const int f=o.fits,r=o.room;
+        ++count[f][r];
+        soft[f][r]=std::fmax(soft[f][r],o.pastSoft);edge[f][r]=std::fmax(edge[f][r],o.pastHard);top[f][r]=std::fmax(top[f][r],o.overTop);
+    }
+    for(int f=1;f>=0;--f)for(int r=1;r>=0;--r)
+        if(count[f][r])std::printf("edge suite: %-26s %-24s %3d cases: at most %7.1f m past the soft line, %7.1f m past the play edge,"
+                                   " %7.1f m over the soft ceiling\n",f ? "box holds its turns," : "box too small (stock map),",
+                                   r ? "room for the turn back:" : "no room (band / too near):",count[f][r],soft[f][r],edge[f][r],top[f][r]);
+    std::printf("edge suite: stock map's ground +-1500 m on the big world, %d cases: at most %.1f m past the soft line, %.1f m past"
+                " the ground's edge (void: > 0)\n",grounds,groundSoft,groundPast);
+    std::printf("edge suite: %d cases, %d failed (tolerance %.0f m)\n",static_cast<int>(cases.size()),fails,kEdgeTol);
+    if(logFile)std::fclose(logFile);
+    return fails ? 1 : 0;
+}
 }  // namespace
 
 int main(int argc,char** argv) {
@@ -175,19 +586,25 @@ int main(int argc,char** argv) {
     const char* outDir=".";
     std::string tag;
     float seconds=0.0f;
+    bool selftest=false,playerRotors=false;
+    for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--scenario") && a+1<argc)scenario=argv[++a];
         else if(!std::strcmp(argv[a],"--kind") && a+1<argc)kindName=argv[++a];
         else if(!std::strcmp(argv[a],"--seconds") && a+1<argc)seconds=static_cast<float>(std::atof(argv[++a]));
         else if(!std::strcmp(argv[a],"--out") && a+1<argc)outDir=argv[++a];
         else if(!std::strcmp(argv[a],"--tag") && a+1<argc)tag=argv[++a];
+        else if(!std::strcmp(argv[a],"--selftest"))selftest=true;
+        else if(!std::strcmp(argv[a],"--player-rotor-suite"))playerRotors=true;
         else {std::fprintf(stderr,"unknown argument %s\n",argv[a]);return 1;}
     }
-    if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     // The image: zeroed, so the ceiling's pointer (image+0x20B2998) reads null: no ceiling (CeilingY 1e9).
     static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
     image=fakeImage.data();
     config.debug=true;
+    if(playerRotors)return PlayerRotorSuite();
+    if(selftest)return SelfTest(outDir);
+    if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     const std::string csvPath=std::string(outDir)+"/"+tag+".csv",logPath=std::string(outDir)+"/"+tag+".log";
     logFile=std::fopen(logPath.c_str(),"w");
     std::FILE* csv=std::fopen(csvPath.c_str(),"w");

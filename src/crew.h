@@ -70,9 +70,12 @@ struct Config {
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
+    bool splitMissileSurface=true;// split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
     float vehicleHudRange=500.0f;// ...within this many metres of the player
+    float hudScale=1.0f;       // every HUD the plugin draws, times this on top of the screen's own scale (src/hudscale.h)
+    int hudLanguage=0;         // the HUD's words: 0 the game's text language, else hudtext::Setting (en, zh-CN, zh-TW, ja)
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
@@ -84,6 +87,9 @@ struct Config {
     int playerJetChuteCutKey=0x58;  // the key that cuts the parachute after an ejection ('X')
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
+    float playerJetRollScale=1.0f;  // ...the fixed wings' roll rate, every kind's times this (pjet_handling.h PathRoll; the body keeps up)
+    float playerJetAimGain=1.0f;    // ...how hard the mouse's aim turns the plane toward it (times kSteer)
+    float playerRotorLift=1.0f;     // a rotor craft the player flies: its vertical acceleration apart from its thrust, times the derived one (hover_lift.h; 0: one budget, the NPCs')
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
@@ -206,6 +212,11 @@ struct Config {
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
+    // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
+    float airSoftEdge=600.0f;       // m: the jets' band is at least this wide
+    float airSoftTurns=1.0f;        // ...and at least this many of the kind's full-speed turn diameters (at most half the edge)
+    float airSoftCeil=150.0f;       // m under the ceiling the jets turn level from (soft ceiling)
+    float heliSoftEdge=150.0f;      // m: the NPC helis' band inside their edge (plus what they need to stop)
     bool primer=true;          // the Primer creatures (enemies: EDF6VC_CENTIPEDE / _DRAGONFLY a mission places) are flown (primer.cpp)
     float primerHpScale=1.0f;  // ...their HP, times the SGO's (centipede 400, dragonfly 600)
     bool primerFire=true;      // ...their guns fire
@@ -227,10 +238,14 @@ void SuppressBump(bool on) noexcept;
 bool BumpSuppressed() noexcept;
 
 // --- Time ---
-// The game clock, game thread only: wall time, except that a gap between two reads longer than 250 ms
-// (pause menu, loading) counts as one 16 ms frame. Every timer of the plugin's logic, the player fix's
-// included, is on this clock; wall time (GetTickCount64) is for log throttles and other threads only.
+// The game clock, game thread only (game_clock.h): wall time, stopped while the game is paused (GamePaused), and a
+// gap between two reads longer than 250 ms (loading) counts as one 16 ms frame. Every timer of the plugin's logic,
+// the player fix's included, is on this clock; wall time (GetTickCount64) is for log throttles and other threads only.
 ULONGLONG GameMs() noexcept;
+// The game's own pause (the pause menu: xgs::game::System's pause bits, docs/hud-re.md §10); any thread. False when
+// CheckPauseFlag (at load, patches nothing) found the code different.
+bool CheckPauseFlag() noexcept;
+bool GamePaused() noexcept;
 // The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
 // (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
 ULONGLONG GameFrame() noexcept;
@@ -263,6 +278,9 @@ void ResetMissiles() noexcept;    // missile.cpp
 void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
 void BigWorldProbe() noexcept;
+// What a jet ran into (impact.cpp), logged when it is held back ("blocked"): the nearest map surface round `pos`
+// (terrain or a building) and the nearest objects (class, team, distance). `who` "JET" / "PJET", `way` its velocity.
+void LogImpact(const char* who,const void* self,const float* pos,const float* way) noexcept;
 // m: the physics world's half size (3000 stock, ini BigWorld when raised): the plugin's walls stand inside it.
 // The edge of the play area every flyer keeps inside (the user, 2026-10-05: "don't let them go out there; a buffer
 // before it; past the line, coming back comes first"): the stock world's 2400 (600 m inside its +-3000), or the big
@@ -283,6 +301,8 @@ bool CameraRay(float* eye,float* dir) noexcept;
 bool InstallBigWorld() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
+// The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
+bool InstallSplitMissiles() noexcept;
 // The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
 // once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
 bool InstallJetSound() noexcept;
@@ -576,13 +596,14 @@ bool PlayerTurretCam(TurretCamReadout* out) noexcept;
 // (turretcam.cpp Steer, EDF6AutoTurret through common/edf/aimlink.h V3), the axes the stabilizer holds it at with no
 // command (`held`, rad, the aim's senses) and how much of that is the hull's turn since the last step (`hull`): it steers
 // from `held` and takes `hull` out of its want's drift and of the axes' motion it learns from (false: not held; `held`
-// the axes as they are, `hull` 0); StabState: 1 the seat's gun is held, 2 held but the drive is outrun, 0 not held
-// (vhud.cpp).
+// the axes as they are, `hull` 0); `frame` (9 floats, may be null; written only when held): the world rows (x, up, nose)
+// `held` is seen in, the frame its wants must be seen in too (stab.h HeldIn); StabState: 1 the seat's gun is held, 2
+// held but the drive is outrun, 0 not held (vhud.cpp).
 using AimStepFn=void(__fastcall*)(void*,const float*);
 bool InstallStabilizer() noexcept;
 void StabFrame(unsigned char* vehicle) noexcept;
 void StabStep(void* aim,const float* in,AimStepFn next) noexcept;
-bool StabHeld(const void* aim,float* held,float* hull) noexcept;
+bool StabHeld(const void* aim,float* held,float* hull,float* frame) noexcept;
 int StabState(unsigned char* vehicle,unsigned seat) noexcept;
 void ResetStabilizer() noexcept;
 
@@ -709,6 +730,7 @@ struct PlayerJetReadout {
     int stores,store;
     const char* storeName[6];
     int storeRounds[6];
+    int storeRole[6];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
     bool bomb,hasImpact;
     float impact[3];
     int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
@@ -718,6 +740,7 @@ struct PlayerJetReadout {
     HeliFlight heli;
     FuelReading fuel;            // its airframe's tank (the 506 body's: what the stock FUEL gauge showed)
     int guns,gunRounds;          // its guns (seat 0's weapons neither a store nor the tank) and the fewest rounds in one
+    int area;                    // the play area's walls (playarea.h): 2 turned back by one, 1 heading out near one, 0 neither
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked
@@ -816,6 +839,8 @@ unsigned char* PlayerHuman() noexcept;
 #include "hud.h"
 #include "nix.h"
 #include "vhud.h"
+#include "mapbounds.h"
 #include "payload.h"
 #include "map.h"
+#include "mapcmd.h"
 #include "proteus.h"

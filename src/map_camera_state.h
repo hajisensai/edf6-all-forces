@@ -25,6 +25,7 @@ public:
         return now;
     }
     bool Current(std::uint64_t frame) const noexcept { return generation.load()==frame; }
+    std::uint64_t Generation() const noexcept { return generation.load(); }
     void Publish(std::uint64_t frame,bool owns) noexcept { owner.store(owns ? frame : 0); }
     bool Owns() const noexcept {
         const auto frame=generation.load();
