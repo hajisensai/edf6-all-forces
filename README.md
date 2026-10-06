@@ -255,6 +255,13 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - **地图打开时你的角色 / 载具不接受操作**：用的是游戏自己「这个士兵没有手柄」时的那条路径，人物不走、不转、不开火，载具收不到摇杆、扳机和按键；插件自己的按键（换座、挂载切换、高视角、呼叫切换……）也全部让开，EDF6AutoTurret 的锁定键（Q，地图里是转向）和模式键也一样（它通过 `common/edf/aimlink.h` 的 `InputHeldV1` 问本插件）。用 **B** / **Esc** / **M** / **Back** 关地图时，这个键松开之前操作仍保持，免得同一下按键又被载具 / 人物收到（例如手柄 B 换座位）。**游戏不暂停**（敌人照常行动），所以危险时先关地图。
    - **远处也看得见**：打开期间把视距（近景镜头的远裁剪面）临时抬到 `MapViewDistance`（默认 6000 米），并把近裁剪面从 0.1 米抬到 0.5~5 米（离地越高越大，免得远处地形闪烁），关闭后两者都恢复原值。
    - 炮塔、喀秋莎、瞄准具等按「屏幕中心看的地方」瞄准的功能，地图开着时仍按你打开地图前的视线，不会跟着地图镜头乱转。
+   - **在地图上指挥 NPC**（`src/mapcmd.cpp`、`src/mapcmd_logic.h`；2026-10-06 用户：「在地图上可以指挥npc」。用户没细说，按下面的理解实现）：地图打开时屏幕正中有一个青色**准星**，它对着的地面点（从地图镜头沿视线打一条地图射线，打到地面 / 屋顶；打不到时取视线与焦点所在水平面的交点）就是命令的目标点。
+     - **能指挥谁**：插件自己的 NPC 单位——插件派 NPC 飞的直升机（含空袭兵呼叫来的直升机）、插件的战机 / 旋翼空中航母 / 没有母舰的无人机（投掷式无人机等；母舰放出的无人机跟着母舰，不单独指挥）、插件驾驶的深渊爬行者。正在撤离（弹药 / 燃料打光、重伤）的、你自己在开的、叫下来等你登机的不算。**原版士兵小队和原版 AI 开的坦克 / 格雷普斯不能指挥**：它们的行进由原版 AI（`0x661440` / 路线探索器）决定，插件还没有逆向出能安全注入目标点的位置，硬改要进游戏验证。
+     - **按键**（键鼠）：**Tab** 选下一个单位、**Shift+Tab** 选上一个（顺序固定，最后一项是 **ALL** = 全部单位），选中单位时地图自动移到它身上；**G** 让选中的单位**前往准星处驻守**（飞过去 / 开过去，在那里巡逻、攻击附近的敌人）；**V** 让它**回到你身边跟随**；**X** **解除命令**，恢复它原来的任务（呼叫来的回到原来的守点或跟随，派 NPC 的直升机 / 爬行者回到跟随你）。手柄：**X** 选下一个、**Y** 驻守准星处、**RB** 跟随、**LB** 解除。这些键只在地图打开时有效（地图本来就保持住你的其它操作）。
+     - **地图上显示**：每个可指挥的单位外面套一个青色圈，选中的套白色角框并在上方写名字（`HELI 506`、`JET fighter`、`CRAWLER`……）；驻守命令画一条从单位到目标点的青线、目标点一个青色圆圈标 `GUARD`；跟随命令在单位下方标 `FOLLOW`。按键说明下方多一条青色带：可指挥单位数、当前选择和按键；下达命令后屏幕中央显示结果约 3 秒（如 `GUARD (60, 420): 1 UNIT`），没选中单位时提示 `SELECT A UNIT FIRST`。
+     - **怎么实现**：不另写 AI，命令只改各单位「围着哪里干活」的那一个点，飞行、选目标、开火全部照旧——直升机：和空袭兵的「守点」呼叫一样把守点换成目标点（绕点盘旋 `HeliGuardRadius`、打附近的敌人），解除时把原来的守点 / 跟随放回去；战机 / 航母：巡逻和找目标的锚点换成目标点（跟随 = 锚点换成你）；深渊爬行者：原来跟随的「领队点」换成目标点（停在 `GroundFollow` 米外，`GroundLeash` 米内交战）。
+     - **联机：只在单机（含本地分屏）可用**。插件的 NPC AI 在每台机器上各算各的（呼叫来的飞机没有网络身份，`docs/online-re.md` §1–3），命令也不同步，在联机里下令只会改本机那份副本，所以联机时按键无效，准星变暗，底部写 `NPC COMMANDS: OFFLINE ONLY`。
+     - **离线检查**：`cmake --build build --target map_cmd_check` 再运行 `build\map_cmd_check.exe`（准星射线在各高度 / 俯角下落在焦点、Tab 的循环与 ALL、单位消失后选择作废、每个按键对应的命令或拒绝原因；CTest 也跑它）；`build\hud_view.exe` 的 `map_mid` / `map_high_pad` / `map_low` 三张图里画着一架选中并驻守、一架跟随、两台无命令的单位。**待游戏内确认**（`Debug=1` 日志 `MAPCMD` / `HELI ... map command` / `JET ... map command` / `GROUND ... map command`）：Tab、G、V、X 在原版游戏里没有别的用途（地图打开时人物输入本来就被保持）；单位确实飞到 / 开到目标点。
    - 离线检查：`cmake --build build --target map_cam_check` 再运行 `build\map_cam_check.exe`（镜头位置、拖动时地面跟着鼠标走、缩放上下限、网格覆盖整个画面）；`build\hud_view.exe` + `python tools\hud_view.py` 画出三张地图叠加层（含图钉和几百个小型敌人的点）的布局图（`map_mid` / `map_high_pad` / `map_low`）；`map_cam_check` 也核对图钉的杆在 200 米到 3 公里高时屏幕上一样长。
    - **待游戏内确认**（`Debug=1` 时日志 `MAP` 行）：镜头确实换成地图机位（`MAP open`；若画面没变，说明你此刻用的不是玩家镜头 `CharacterGhostCamera`）；鼠标拖动的方向（日志 `MAP mouse delta`；反了就是游戏鼠标位移的正负与推断相反）；任务目标点是否就是游戏里的 `DestinationMarker`（`MAP marker ...`）；手柄 Back 键在游戏里是否另有用途（有就改 `MapButton`）；驾驶摩托 / 汽车时个别车型自己直接读手柄的按键（例如鸣笛）不在保持范围内。
 
@@ -414,6 +421,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/katyusha.cpp`：喀秋莎发射架的姿态（只抬发射架、不动镜头）和伸缩液压杆，逆向笔记见 `autoturret/docs/re-notes.md`「The Katyusha's camera and pose」。
 - `src/turretcam.cpp`：坐车时的镜头（战争雷霆式炮塔镜头、观察键、镜头摆放和高视角的位置；替换游戏每帧取的两个镜头目标点，游戏照常做缓动和碰撞），数学在 `src/turretcam.h`（`tools/turret_cam_check.cpp` 离线核对炮塔指令和摆放），镜头逆向见 `docs/camera-re.md`。
 - `src/highcam.cpp`：高视角的开关（哪些车有、按键、提示）。
+- `src/mapcmd.cpp`：在地图上指挥插件的 NPC 单位（选择、驻守 / 跟随 / 解除，纯逻辑在 `src/mapcmd_logic.h`，`tools/map_cmd_check.cpp` 离线核对）。
 - `src/map.cpp`：地图（M 键：玩家镜头升到空中、平移 / 转向 / 缩放，打开期间保持玩家输入，收集地图上要标的单位和任务目标点），镜头与网格的数学在 `src/map_cam.h`（`tools/map_cam_check.cpp` 离线核对），叠加层在 `src/hud.cpp` 的 `MapScreen`，逆向与设计见 `docs/camera-re.md` §7。
 - `src/nix.cpp`：尼克斯的上下半身分离（腿转向时上半身在世界里保持朝向，`NixTorsoTwist`），逆向见 `docs/nix-re.md`，离线验算 `tools/nix_twist_check.cpp`。
 - `src/primer.cpp`：星导者生物（敌人：百足龙虫、蜻蜓空优机，`docs/primer-plan.md`）；`src/primer_pose.h` 它们的骨骼动作（插件和离线模拟 `tools/primer_pose_sim.cpp` 共用）；`pylib/centipede_model.py`、`pylib/dragonfly_model.py` 模型（`pylib/procmesh.py` 共用的生成器）；`pylib/model_view.py` 离线看模型。

@@ -2473,6 +2473,30 @@ def vehicle_ram_wired() -> None:
 
 
 @test
+def map_commands_wired() -> None:
+    """The map's NPC commands (src/mapcmd.cpp, README 地图 指挥 NPC): its keys are read only while the map is open (map.cpp
+    Frame calls it after its open test, its one key reader is ReadKeys), it is off online, it is reset with the map; each AI
+    module takes the command where it picks what it works round (the jets' anchor, the helis' post as HeliCalled writes it,
+    the crawlers' leader); its offline check (tools/map_cmd_check.cpp) is built and run by CTest; the README says the keys."""
+    code, mapc, cmake, readme = src('src/mapcmd.cpp'), src('src/map.cpp'), src('CMakeLists.txt'), src('README.md')
+    assert code.count('GetAsyncKeyState') == 1 and 'Down(VK_TAB)' in code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
+    frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
+    assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(front,pad,'), 'the commands read keys only with the map open'
+    assert 'ResetMapCommands();' in mapc.split('void ResetMap()', 1)[1].split('\n}', 1)[0]
+    assert 'const bool allowed=!InSession();' in code
+    assert 'src/mapcmd.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/map_cmd_check.cpp' in cmake
+    assert re.search(r'EDF6_OFFLINE_CHECKS[^)]*\bmap_cmd_check\b', cmake), 'map_cmd_check is not run by CTest'
+    jet, heli, ground = src('src/jet.cpp'), src('src/heli.cpp'), src('src/ground.cpp')
+    assert 'CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor)' in jet
+    assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
+    cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c)', 1)[1].split('\n}\n', 1)[0]
+    assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
+    for key in ('Tab', 'G', 'V', 'X', 'OFFLINE ONLY'):
+        assert key in readme, key
+    assert '指挥 NPC' in readme
+
+
+@test
 def map_wired() -> None:
     """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
     documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the
@@ -2553,7 +2577,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')

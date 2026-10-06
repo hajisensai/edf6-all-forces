@@ -570,6 +570,9 @@ bool Frame(unsigned char* human) noexcept {
     mapcam::Place(v,eye,look);
     const float under=GroundAt(eye[0],eye[2],eye[1]-v.height);
     if(eye[1]<under+kEyeClear)eye[1]=under+kEyeClear;   // a ridge behind the focus: over it, still looking at the focus
+    // The NPC commands (mapcmd.cpp): a unit selected by its key centres the map on it.
+    float onto[3];
+    if(MapCommandFrame(front,pad,pad ? padState.Gamepad.wButtons : 0,eye,look,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
     if(now-game.gatherAt>=kGatherMs){game.gatherAt=now;Gather(game,human);}
     Publish(game,human,eye,look);
     ViewMapClip(true,c.mapViewDistance,vec::Clamp(mapcam::Distance(v)*0.004f,0.5f,5.0f));
@@ -719,6 +722,7 @@ bool InstallMap() noexcept {
 
 void ResetMap() noexcept {
     Close("a new mission");
+    ResetMapCommands();
     game.human=ObjRef{};game.count=0;game.dots=0;
     for(auto& c:cells)c=Cell{};
     cellsUsed=0;

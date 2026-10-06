@@ -818,4 +818,5 @@ unsigned char* PlayerHuman() noexcept;
 #include "vhud.h"
 #include "payload.h"
 #include "map.h"
+#include "mapcmd.h"
 #include "proteus.h"

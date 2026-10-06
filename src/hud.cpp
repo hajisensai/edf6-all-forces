@@ -2230,7 +2230,7 @@ void MapDistance(wchar_t* out,std::size_t size,float m) noexcept {
 
 // Whether a grid label at (x, y) keeps clear of the bands (title, keys), the legend and the scale bar.
 bool MapLabelFree(float x,float y,float width,float height,float s) noexcept {
-    if(y<60.0f*s || y>height-60.0f*s || x>width-140.0f*s)return false;
+    if(y<60.0f*s || y>height-90.0f*s || x>width-140.0f*s)return false;   // the bands (and MapCommands' over the keys)
     if(x<240.0f*s && y>height*0.28f && y<height*0.30f+static_cast<float>(kMapLegendRows)*28.0f*s+20.0f*s)return false;   // the legend
     return !(x<420.0f*s && y>height-140.0f*s);                                             // the scale bar (MapScale)
 }
@@ -2455,6 +2455,68 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
 }
 
+// The NPC commands (mapcmd.cpp, README 地图 → 指挥 NPC): a crosshair at the screen's centre (where G sends the
+// selection), each commandable unit ringed (white brackets: selected), a guard order's line from the unit to its point
+// and a ring there, FOLLOW under a unit following the player, and a band over the keys: the keys, the selection and the
+// last command's word.
+alignas(16) const float kMapOrder[4]={0.3f,0.9f,1.0f,1.0f};
+alignas(16) const float kMapOrderDim[4]={0.3f,0.9f,1.0f,0.55f};
+constexpr float kMapGuardRing=30.0f;      // m: the ring at a guard order's point
+void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    static MapCommandReadout c;   // the draw thread's (too big for its stack)
+    if(!PlayerMapCommands(&c))return;
+    const mapcam::View view{{m.focus[0],m.focus[1],m.focus[2]},m.yaw,m.pitch,m.height};
+    const float pin=mapcam::PinHeight(mapcam::Distance(view),m.pitch);
+    // The crosshair.
+    const float cx=width*0.5f,cy=height*0.5f;
+    const float* cross=c.allowed && c.count ? kMapOrder : kMapOrderDim;
+    Seg(drawer,ctx,cx-16.0f*s,cy,cx-5.0f*s,cy,2.0f*s,cross);Seg(drawer,ctx,cx+5.0f*s,cy,cx+16.0f*s,cy,2.0f*s,cross);
+    Seg(drawer,ctx,cx,cy-16.0f*s,cx,cy-5.0f*s,2.0f*s,cross);Seg(drawer,ctx,cx,cy+5.0f*s,cx,cy+16.0f*s,2.0f*s,cross);
+    const wchar_t* selName=L"NONE";
+    wchar_t one[24]{};
+    for(int i=0;i<c.count && i<kCmdUnits;++i) {
+        const CmdMark& u=c.unit[i];
+        MapUnit mu{};
+        std::memcpy(mu.pos,u.pos,12);mu.ground=u.pos[1];mu.kind=u.air ? MapKind::air : MapKind::vehicle;
+        Pin p;
+        const bool shown=MapPin(vp,width,height,mu,pin,&p);
+        if(u.now.order==Order::guard) {
+            // The ring round the point, its line from the unit.
+            float last[3];
+            for(int k=0;k<=24;++k) {
+                const float a=kTurn*static_cast<float>(k)/24.0f;
+                const float q[3]={u.now.at[0]+std::sin(a)*kMapGuardRing,u.now.at[1]+1.0f,u.now.at[2]+std::cos(a)*kMapGuardRing};
+                if(k)MapLine(drawer,ctx,vp,width,height,last,q,2.0f*s,kMapOrder);
+                std::memcpy(last,q,12);
+            }
+            float gx,gy,depth;
+            if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))Seg(drawer,ctx,p.ix,p.iy,gx,gy,1.5f*s,kMapOrderDim);
+            if(Project(vp,u.now.at,width,height,&gx,&gy,&depth) && MapLabelFree(gx,gy+20.0f*s,width,height,s))
+                Label(text,lines,at,gx,gy+20.0f*s,1,kLineScale*0.6f,kMapOrder,L"GUARD");
+        }
+        if(!shown)continue;
+        Arc(drawer,ctx,p.ix,p.iy,15.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : kMapOrderDim);
+        if(u.selected)MapBrackets(drawer,ctx,p.ix,p.iy,24.0f*s,2.5f*s,kWhite);
+        if(u.now.order==Order::follow)Label(text,lines,at,p.ix,p.iy+24.0f*s,1,kLineScale*0.6f,kMapOrder,L"FOLLOW");
+        if(u.selected && !c.all) {
+            _snwprintf_s(one,_countof(one),_TRUNCATE,L"%hs",u.name);
+            selName=one;
+            Label(text,lines,at,p.ix,p.iy-30.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
+        }
+    }
+    if(c.all)selName=L"ALL";
+    // The band over the keys.
+    Rect(drawer,ctx,0.0f,height-80.0f*s,width,height-46.0f*s,kMapBand);
+    const float y=height-63.0f*s;
+    if(!c.allowed)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kAmber,L"NPC COMMANDS: OFFLINE ONLY");
+    else if(!c.count)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"NPC COMMANDS: no plugin NPC unit (helis, jets, crawlers)");
+    else if(m.pad)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,
+                        L"%d UNITS   SELECTED %ls   X select   Y guard crosshair   RB follow me   LB release",c.count,selName);
+    else Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,
+               L"%d UNITS   SELECTED %ls   Tab / Shift+Tab select   G guard crosshair   V follow me   X release",c.count,selName);
+    if(c.noteFresh)Label(text,lines,at,cx,cy+40.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
+}
+
 // The legend (left), the title and the keys (top and bottom bands).
 void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     Rect(drawer,ctx,0.0f,0.0f,width,46.0f*s,kMapBand);
@@ -2502,6 +2564,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     if(!PlayerMap(&m))return false;
     MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
