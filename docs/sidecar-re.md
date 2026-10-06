@@ -173,6 +173,8 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址全部是 RVA。纯静态分析
   候选 hook（`jet_hooks.cpp InstallBulletPass`，只看自身 addBody / body→object 签名，不随直升机 profile 与
   `InstallJets`）和爆炸 hook 是各自独立的子能力：缺哪个就只有那一路按原版友伤命中本车和司机，日志
   `SIDECAR no bullet pass-through` / `SIDECAR no blast filter` 说明，乘员功能照常。已经重定向的调用在功能禁用时直接转交原版。
+- 候选 hook 是所有子弹的热路径：只有插件飞机在飞（`Publish` 维护的 `flown`）或有副驾驶乘员（`PublishPassenger`
+  在锁内维护的 `riding`，`SidecarPassengers()`）时才查 owner / body→object 并读表，否则直接转交原版（`tests/bullet_pass_test.cpp`）。
 
 验证与接入：
 

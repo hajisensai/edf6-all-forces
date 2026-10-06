@@ -594,6 +594,7 @@ bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
 // Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
 bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
+int SidecarPassengers() noexcept;     // passengers riding now (the bullets' hook's quick "nothing to pass" test)
 bool SidecarBulletHooked() noexcept;  // jet_hooks.cpp: the bullets' candidate hook is in (InstallBulletPass)
 void SidecarLevel(const void* body,float* w) noexcept;
 void ResetSidecars() noexcept;

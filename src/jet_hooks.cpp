@@ -90,7 +90,9 @@ void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
     __try { through=ShieldLetsThrough(collector,body); } __except(FaultLog("SHIELD round",GetExceptionInformation())) { through=false; }
     if(through)return;
     bool pass=false;
-    {
+    // Only while something can be passed: a plugin jet flown (Publish) or a passenger in a sidecar (sidecar.cpp, kept
+    // by who boards and leaves). Every other round keeps the stock path, with no body lookup and no lock.
+    if(flown.load(std::memory_order_relaxed) || SidecarPassengers()) {
         const void* owner=nullptr;
         const void* target=nullptr;
         bool found=false;

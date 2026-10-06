@@ -240,6 +240,17 @@ int main() {
     Expect(sidecars[0].npcReleased && !sidecars[0].gunner,"the NPC scan stays stopped after ejection for this driver's ride");
     sidecars[0].frame=0;Put<void*>(seat,kSeatRiderCtrl,nullptr);SidecarFrame(bike);
     Expect(!sidecars[0].npcReleased,"the driver stepping off permits NPC recruitment on a later ride");
+    // The bullets' hook looks a round up only while someone rides (SidecarPassengers), kept as they board and leave.
+    Reset();
+    Expect(SidecarPassengers()==0,"no passenger: nothing for the bullets' hook to pass");
+    Take(sidecars[0],bike,human,true);Take(sidecars[1],second,otherHuman,true);
+    Expect(SidecarPassengers()==2,"each boarding counts a passenger");
+    Let(sidecars[1],second,"test");
+    Expect(SidecarPassengers()==1,"a passenger leaving uncounts them");
+    Take(sidecars[1],second,human,true);
+    Expect(SidecarPassengers()==1,"a transfer to another sidecar is still one passenger");
+    ResetSidecars();
+    Expect(SidecarPassengers()==0,"the mission's reset leaves no passenger");
     Reset();Take(sidecars[0],bike,human,true);Put<int>(humanRef,8,0);
     Expect(!SidecarBulletPass(human,bike,humanRef),"an expired projectile owner is not protected despite matching addresses");
     // Riding along (the stutter, 2026-10-06): the held gunner moves with the bike in each physics step, with no

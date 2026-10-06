@@ -44,6 +44,7 @@
 #include "crew.h"
 #include "body506.h"
 #include "memory.h"
+#include <atomic>
 #include <cmath>
 
 namespace crew {
@@ -138,6 +139,9 @@ using PositionFn=float*(__fastcall*)(void*,float*);
 struct PassengerPair { ObjRef vehicle,gunner,driver; ULONGLONG at; };
 PassengerPair passengers[kMaxSidecars]{};
 SRWLOCK passengerLock=SRWLOCK_INIT;
+// How many of `passengers` hold a gunner, kept with them under the lock: the bullets' hook (jet_hooks.cpp) looks up
+// a round's owner and target only while this or a flown jet says something can pass.
+std::atomic<int> riding{0};
 
 bool BoardHeld(const void* human) noexcept {
     for(const auto& held:boardHeld)if(held.Is(human))return true;
@@ -192,6 +196,9 @@ void PublishPassenger(const Sidecar& s) noexcept {
     }
     AcquireSRWLockExclusive(&passengerLock);
     passengers[&s-sidecars]=pair;
+    int n=0;
+    for(const auto& p:passengers)n+=p.gunner ? 1 : 0;
+    riding.store(n,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&passengerLock);
 }
 
@@ -421,6 +428,8 @@ bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtr
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+int SidecarPassengers() noexcept { return riding.load(std::memory_order_relaxed); }
+
 bool IsSidecar(const void* vehicle) noexcept {
     const Sidecar* s=Find(vehicle);
     return s && s->marked;
@@ -597,6 +606,7 @@ void ResetSidecars() noexcept {
     for(auto& held:boardHeld)held=ObjRef{};
     AcquireSRWLockExclusive(&passengerLock);
     for(auto& p:passengers)p=PassengerPair{};
+    riding.store(0,std::memory_order_relaxed);
     ReleaseSRWLockExclusive(&passengerLock);
 }
 }  // namespace crew
