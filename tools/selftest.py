@@ -1924,6 +1924,107 @@ def gunship_cannon_round() -> None:
     assert make_jets.CANNON_FILE in readme and '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
 
 
+def _recoil_game(mission_weapon: str, mission_recoil: list, call_weapon: str, call_recoil: list,
+                 classic: bool, vehicle_weapon: str | None = None) -> object:
+    """A stand-in Root.cpk for autoturret/tools/npc_recoil.py: one mission object (one gun and an empty
+    mount, the object's own vehicle_setup naming the player gun) and its call (a vehicle setup under
+    Ammo_CustomParameter)."""
+    import struct
+    import sgo
+    def setup(weapon: str, recoil: list) -> list:
+        return [[1.0, 1.0], [0.1, 10.0], [[weapon, recoil, [20.0, 0.01, 0.1]], [0]]]
+    mission = {'game_object_durability': 100.0, 'mission_setup': setup(mission_weapon, mission_recoil),
+               'vehicle_setup': setup(vehicle_weapon or call_weapon, [0.0, 2.0]), 'resource': [mission_weapon]}
+    def n(v: object) -> object:   # DSGO numbers are all doubles (the empty mount is [0.0])
+        return dsgo.Node([n(c) for c in v]) if isinstance(v, list) else float(v) if isinstance(v, int) else v
+    if classic:
+        def f(v: object) -> object:
+            if isinstance(v, list):
+                return [f(c) for c in v]
+            return sgo.Float(struct.pack('<f', v)) if isinstance(v, float) else v
+        obj = sgo.write_depth_first(0x102, {k: f(v) for k, v in mission.items()})
+    else:
+        obj = dsgo.write(dsgo.Document(dsgo.Node([n(v) for v in mission.values()], dict(enumerate(mission))), []))
+    call_setup = n([[1.0, 1.0], [0.1, 10.0], [[call_weapon, call_recoil, [20.0, 0.01, 0.1]]]])
+    call = dsgo.write(dsgo.Document(dsgo.Node([n([1.0, 'app:/object/x.sgo', call_setup])],
+                                             {0: 'Ammo_CustomParameter'}), []))
+    files = {('OBJECT', 'X_AI.SGO'): obj, ('WEAPON', 'CALL.SGO'): call}
+
+    class Game:
+        def read(self, folder: str, name: str) -> bytes:
+            return files[(folder, name)]
+    return Game()
+
+
+@test
+def recoil_call_formats_agree() -> None:
+    """Both call formats expose the same mounts, including classic SGO's lossless Float wrapper."""
+    import recoil
+    import sgo
+    game = _recoil_game('app:/weapon/v_9tank_ai_cannon01.sgo', [0.0, 2.0],
+                        'app:/weapon/v_9tank_cannon01.sgo', [0.25, 0.5], True)
+    modern = game.read('WEAPON', 'CALL.SGO')
+    custom = recoil.plain(dsgo.parse(modern).root.get('Ammo_CustomParameter'))
+    classic = sgo.write_depth_first(258, {'Ammo_CustomParameter': recoil._as_sgo(custom)})
+    expected = [('v_9tank_cannon01.sgo', [0.25, 0.5])]
+    assert recoil.mounts_of(modern, 'DSGO call') == expected
+    assert recoil.mounts_of(classic, 'classic SGO call') == expected
+
+
+@test
+def npc_recoil_takes_the_player_call() -> None:
+    """autoturret/tools/npc_recoil.py: a mission mount takes the recoil of the same gun in the player's call, in
+    either file format; the AI copy of a gun (`_ai` part) and the object's own vehicle_setup gun count as the
+    same gun, any other gun is refused; build.py writes every file the table names, the NPC Titan included."""
+    import npc_recoil
+    import sgo
+    import titan_ai
+    for classic in (True, False):
+        for weapon in ('app:/weapon/v_9tank_ai_cannon01.sgo', 'app:/weapon/v_9tank_cannon01.sgo'):
+            game = _recoil_game(weapon, [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo', [0.25, 0.5], classic)
+            with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+                out = npc_recoil.build('X_AI.SGO', game=game)
+            v = sgo.load(data=out)
+            assert v['mission_setup'][2][0][1] == [0.25, 0.5], v['mission_setup']
+            assert v['mission_setup'][2][1] == [0] and v['vehicle_setup'][2][0][1] == [0.0, 2.0], v
+            assert out[:4] == (b'SGO\0' if classic else b'DSGO')
+        # The object's vehicle_setup names the player gun when the AI gun's name does not carry it.
+        game = _recoil_game('app:/weapon/v_9_tank_ai_cannon01.sgo', [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo',
+                            [0.25, 0.5], classic)
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            assert sgo.load(data=npc_recoil.build('X_AI.SGO', game=game))['mission_setup'][2][0][1] == [0.25, 0.5]
+        # The AI copy's name alone (`_ai` part) is enough when the object's vehicle_setup names another gun.
+        game = _recoil_game('app:/weapon/v_9tank_ai_cannon01.sgo', [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo',
+                            [0.25, 0.5], classic, vehicle_weapon='app:/weapon/v_7other.sgo')
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            assert sgo.load(data=npc_recoil.build('X_AI.SGO', game=game))['mission_setup'][2][0][1] == [0.25, 0.5]
+        # A tagged spec (the Epsilon's ['BodyRecoil', [push, kick]]) is taken whole.
+        game = _recoil_game('app:/weapon/v_9tank_ai_cannon01.sgo', ['BodyRecoil', [0.0, 0.05]],
+                            'app:/weapon/v_9tank_cannon01.sgo', ['BodyRecoil', [0.1, 0.05]], classic)
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            got = sgo.load(data=npc_recoil.build('X_AI.SGO', game=game))['mission_setup'][2][0][1]
+        assert got[0] == 'BodyRecoil' and [round(x, 6) for x in got[1]] == [0.1, 0.05], got   # float32 in both formats
+        # Another gun in the call's slot (and in the object's own vehicle_setup): refused, not overwritten.
+        game = _recoil_game('app:/weapon/v_8gun.sgo', [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo', [0.25, 0.5], classic,
+                            vehicle_weapon='app:/weapon/v_8gun.sgo')
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            try:
+                npc_recoil.build('X_AI.SGO', game=game)
+            except SystemExit:
+                pass
+            else:
+                raise AssertionError('a mount of another gun took the call recoil')
+    # The range's own placeable vehicles follow the same rule (testrange/gen.py vehicle_sgo).
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert set(gen.PLAYER_CALLS) <= set(gen.DERIVED) - set(gen.JETS), 'gen.PLAYER_CALLS names a vehicle the range does not derive'
+    body = src('testrange/gen.py').split('def vehicle_sgo(', 1)[1].split('\ndef ', 1)[0]
+    assert body.count('_with_player_recoil(game, sgo_name,') == 2, 'gen.vehicle_sgo: GROUND_MISSION and DERIVED both take the player recoil'
+    assert titan_ai.NAME in npc_recoil.PLAYER_CALL, 'build.py writes the NPC Titan through npc_recoil.PLAYER_CALL'
+    code = src('autoturret/tools/build.py')
+    assert 'for name in npc_recoil.PLAYER_CALL:' in code and 'titan_ai.build() if name == titan_ai.NAME' in code
+
+
 @test
 def gunship_muzzle_wired() -> None:
     """The gunship's rounds leave off its airframe, now (the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」「炮舰机的轰炸炮弹，
