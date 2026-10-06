@@ -301,6 +301,8 @@ def release_imports() -> None:
     lazy.update(jet_models.GENERATED.values())
     missing = sorted(lazy - hidden)
     assert not missing, f'tools/build_release.py: hidden imports missing {missing}'
+    excluded = rel.split("cmd += ['--exclude-module', mod]", 1)[0].rsplit('for mod in ', 1)[1]
+    assert "'PIL'" not in excluded, 'procedural model textures require Pillow in the released installer'
 
 
 @test
@@ -660,7 +662,7 @@ def emc_copies_agree() -> None:
     assert 'std::memcpy(c.pos,v+kPosition,12);' in emc and 'x.emc && vec::Dist(x.emc->pos,r.pos)<2.0f' in src('src/hud.cpp')
     assert 'ResetEmc();' in src('src/mission.cpp') and 'InstallEmc();' in src('src/plugin.cpp')
     inst = src('tools/installer.py')
-    assert 'make_emc.build(game)' in inst and 'make_emc.install(game, emc)' in inst and 'make_emc.remove' in inst
+    assert 'build_asset(cache, make_emc,' in inst and 'make_emc.install(game, emc)' in inst and 'make_emc.remove' in inst
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('EmcBeam', 'EmcChargeSec', 'EmcBeamSec', 'EmcBlastRadius', 'EmcBlastShare', 'EmcBreak'):
         assert re.search(rf'^{key}=', ini, re.M) and f'L"{key}"' in plugin and key in readme, key
@@ -2378,6 +2380,12 @@ def map_wired() -> None:
     icon = hud[hud.index('void MapIcon('):hud.index('struct Pin {')]
     for kind in kinds:
         assert f'case MapKind::{kind}:' in icon, f'MapIcon draws no {kind}'
+
+
+@test
+def incremental_install_regressions() -> None:
+    from test_installer_incremental import run_checks
+    run_checks()
 
 
 def main() -> int:

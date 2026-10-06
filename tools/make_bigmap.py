@@ -42,7 +42,7 @@ import hktag  # noqa: E402
 import ledger  # noqa: E402
 import mdb  # noqa: E402
 import seams  # noqa: E402
-import vcobjects as vc  # noqa: E402
+import gamedir  # noqa: E402
 
 OWNER = 'bigmap'   # pylib/ledger.py
 MAP_FILE = 'IG_HEIGEN601.MAC'
@@ -182,11 +182,15 @@ def seamless_far(rab_bytes: bytes) -> tuple[bytes, dict[str, float]]:
 def seamless_terrain(stock: dict[str, bytes]) -> tuple[dict[str, bytes], dict[str, float]]:
     """The four ring pieces' near terrain (FMB, pylib/fmb.py) made periodic: one field from all four (an outer edge
     runs through two pieces), normals of the moved triangles recomputed, the trees' boxes re-derived."""
-    pts = {name: np.array(fmb.decode(data), dtype=np.float64) for name, data in stock.items()}
+    parsed = {name: fmb.parse(data) for name, data in stock.items()}
+    pts = {name: np.array(fmb.points(data), dtype=np.float64) for name, data in parsed.items()}
     before = np.concatenate(list(pts.values()))
     field = seams.Field(before)
-    out = {name: fmb.set_heights(data, lambda x, y, z: y + float(field.delta(x, z))) for name, data in stock.items()}
-    after = np.concatenate([np.array(fmb.decode(data), dtype=np.float64) for data in out.values()])
+    for data in parsed.values():
+        fmb.apply_heights(data, lambda x, y, z: y + float(field.delta(x, z)),
+                          batch_fn=lambda vertices: field.heights(np.asarray(vertices)[:, :3]))
+    after = np.concatenate([np.array(fmb.points(data), dtype=np.float64) for data in parsed.values()])
+    out = {name: fmb.build(data) for name, data in parsed.items()}
     return out, {'vertices': int((np.abs(after[:, 1] - before[:, 1]) > 1e-4).sum()),
                  'before': edge_gap(before, seams.EDGE_EPS), 'after': edge_gap(after, seams.EDGE_EPS)}
 
@@ -195,9 +199,14 @@ def build_seams(root: str) -> tuple[dict[str, bytes], dict[str, dict[str, float]
     """MAP file name -> its seamless bytes, and per part the seam report; raises if a seam is left."""
     files: dict[str, bytes] = {}
     report: dict[str, dict[str, float]] = {}
+    print('  大地图：处理碰撞接缝……', flush=True)
     files[COLLISION_FILE], report['collision'] = seamless_collision(stock_file(root, COLLISION_FILE))
+    print('  大地图：处理远景接缝……', flush=True)
     files[MODELS_FILE], report['far'] = seamless_far(stock_file(root, MODELS_FILE))
-    terrain, report['terrain'] = seamless_terrain({name: stock_file(root, name) for name in RING_FILES})
+    print('  大地图：解压四块地形……', flush=True)
+    stock = {name: stock_file(root, name) for name in RING_FILES}
+    print('  大地图：处理地形接缝、法线和包围盒……', flush=True)
+    terrain, report['terrain'] = seamless_terrain(stock)
     files.update(terrain)
     for part, r in report.items():
         if r['after'] > SEAM_TOL[part]:
@@ -249,7 +258,7 @@ def remove(root: str) -> tuple[list[str], list[str]]:
 
 def main(argv: list[str]) -> int:
     args = [a for a in argv if not a.startswith('--')]
-    root = next((a for a in args if not a.isdigit()), vc.DEFAULT_GAME)
+    root = next((a for a in args if not a.isdigit()), gamedir.find_or_dev())
     radius = 1
     if '--radius' in argv:
         radius = int(argv[argv.index('--radius') + 1])

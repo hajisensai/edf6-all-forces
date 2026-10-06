@@ -9,7 +9,7 @@ import struct
 _LENGTH_BITS = (2, 3, 5, 8)
 
 
-def decompress(data):
+def decompress(data: bytes) -> bytes:
     if data[:8] != b'CRILAYLA':
         raise ValueError('not CRILAYLA data')
     size, compressed = struct.unpack_from('<II', data, 8)
@@ -20,19 +20,15 @@ def decompress(data):
     pool = 0
     left = 0
 
-    def bits(count):
+    def bits(count: int) -> int:
         nonlocal position, pool, left
-        value = 0
-        produced = 0
-        while produced < count:
-            if left == 0:
-                pool = data[position]
-                position -= 1
-                left = 8
-            take = min(left, count - produced)
-            value = (value << take) | ((pool >> (left - take)) & ((1 << take) - 1))
-            left -= take
-            produced += take
+        while left < count:
+            pool = (pool << 8) | data[position]
+            position -= 1
+            left += 8
+        left -= count
+        value = pool >> left
+        pool &= (1 << left) - 1
         return value
 
     end = 0x100 + size - 1
@@ -52,10 +48,18 @@ def decompress(data):
                     length += level
                     if level != 255:
                         break
-            for _ in range(length):
-                out[end - written] = out[source]
-                source -= 1
-                written += 1
+            # Copy back-references in non-overlapping slices. Doubling the available
+            # span handles repeating runs without one Python iteration per byte.
+            dest = end - written
+            distance = source - dest
+            remaining = length
+            while remaining:
+                take = min(distance, remaining)
+                out[dest - take + 1:dest + 1] = out[dest + distance - take + 1:dest + distance + 1]
+                dest -= take
+                remaining -= take
+                distance += take
+            written += length
         else:
             out[end - written] = bits(8)
             written += 1

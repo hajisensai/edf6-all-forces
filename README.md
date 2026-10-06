@@ -291,6 +291,14 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 4. 原版直升机的挂载（`StockHeliStores`，见功能 13）是选装的：在 ini 里改成 1 后运行安装器选「安装」才生成，改回 0 再运行就删掉。
 5. 升级：退出游戏后直接运行新版安装器选「安装」即可，旧版装的武器行原位更新、新行追加在表尾；新版本新增的模型（例如炮舰机 `EDF6VC_JET_GUNSHIP.SGO` 及其炮手座、撞击装药 `EDF6VC_IMPACT_*.SGO`（2 / 4 / 12 米三个是载具撞击伤害一起加的）、炮舰机的机炮炮弹 `EDF6VC_GUNSHIP_CANNON.SGO`、EMC 蓄力光束的 `EDF6VC_EMC_*.SGO`）要这样重新安装后才有。
 
+更新会按资源组校验并复用已有模型和地图，不再每次全量生成和重写。首次使用支持增量更新的安装器仍需生成一次；
+之后只有生成器及其依赖、游戏原始资源包、外部模型发生变化，或已装资源缺失 / 内容被修改时，才重建对应组。
+单独更新 DLL 不会让资源缓存失效。武器表、可选的原版直升机挂载和测试场关卡仍走原有检查 / 安装流程，以保留与其它 MOD 的兼容处理。
+每组显示「生成」或「复用」及耗时，大地图另显示碰撞、远景、解压和地形处理阶段。地图来源是只读的 `Chunk02.cpk`。
+缓存清单是 `Mods/.edf6vc_builds.json`，只记录生成依据与输出摘要，不额外复制模型或地图；删除清单可强制下次重建。
+生成依据使用构建时打包的 Python 源码依赖指纹、CPK 路径 / 大小 / 修改与创建时间，以及外部模型、材质和贴图的内容摘要；
+输出每次按 SHA-256 与归属清单校验。CPK 不做全盘哈希，手工修改资源包并刻意保留全部时间戳后需删除缓存清单。
+
 **开发者**：`build.cmd` 构建到 `build/Mods/Plugins/`（DLL 和 ini 都在那里，ini 由 CMake 自动复制）。
 `python tools/build_release.py` 用 PyInstaller 打出 `release/EDF6VehicleCrew-<版本>.zip`（安装器 exe 内含 DLL 与 ini）；
 版本号只有一处：`CMakeLists.txt` 的 `project(VERSION)`（DLL 自报的版本也来自它）。CI 每次推送都打同样的安装器包，
