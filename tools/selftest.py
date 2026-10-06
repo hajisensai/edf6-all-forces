@@ -2659,8 +2659,19 @@ def npc_ai_wired() -> None:
         assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
         assert key in readme and key in doc, key
     for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
-                'NpcRollSec', 'NpcRetreatHp', 'NpcLeash'):
+                'NpcRollSec', 'NpcRetreatHp', 'NpcLeash', 'TankPostHold', 'TankReverseMax'):
         assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+    # The tanks' post (§8): seat 0's stick written before the stock input reads it; a route's tank and a remote room's
+    # client left alone; its keys shipped and documented.
+    post = src('src/npcpost.cpp')
+    hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
+    assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(At<const void*>(v,kRoute))return;' in body and 'if(InSession() && !IsRoomHost())return;' in body
+    assert body.index('Chasing(v)') < body.index('Put<float>(seat,kSeatSteer')
+    assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
+    for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
 
 
 @test

@@ -304,32 +304,33 @@ inline bool MarkInReach(const float* pos,const float* mark,float reach,float mov
 }
 
 // --- Ground vehicles (D) ---
-// The way back to `post` for a vehicle at `pos` facing `forward` (its matrix row, horizontal part used): steer (-1..1,
-// positive turning towards +heading, i.e. atan2(x, z) growing) and throttle (-1..1, negative: reverse). Within `hold`
-// m: none (`active` false). Behind it (more than `backAngle` off the nose) and nearer than `reverseMax` m: it reverses
-// onto it (steering with the tail); else it turns towards it, on the spot when more than `turnOnSpot` off.
-struct Steer { bool active,reverse; float steer,throttle,dist; };
-inline Steer ReturnToPost(const float* pos,const float* forward,const float* post,float hold,float reverseMax,
-                          float backAngle,float turnOnSpot) noexcept {
+// The way back to `post` for a vehicle at `pos` with matrix rows `right` (+0x60) and `forward` (+0x80), in the stock
+// driver's own terms (0x661020): the bearing = atan2(d . right, d . forward) of the post (d its horizontal offset),
+// the seat-0 steering the stock writes from it -clamp(bearing x 10, +-1) (+0x2C0) and the throttle -throttle (+0x2C4).
+// Within `hold` m: none (`active` false). More than `backAngle` off the nose and nearer than `reverseMax` m: it reverses
+// onto it as the stock reverses (bearing + pi, throttle -1); else it drives at it, turning on the spot while more than
+// `turnOnSpot` off (the stock's 0.314). The throttle ramps down over the last 10 m.
+struct Steer { bool active,reverse; float bearing,throttle,dist; };
+inline Steer ReturnToPost(const float* pos,const float* right,const float* forward,const float* post,float hold,
+                          float reverseMax,float backAngle,float turnOnSpot) noexcept {
     Steer s{false,false,0.0f,0.0f,Horiz(pos,post)};
     if(s.dist<=hold)return s;
-    float to[3];
-    if(!HorizDir(pos,post,to))return s;
-    const float fl=std::sqrt(forward[0]*forward[0]+forward[2]*forward[2]);
-    if(!(fl>0.3f))return s;   // on its side or a wall: no heading to steer by
-    const float heading=std::atan2(forward[0],forward[2]);
-    float err=Wrap(std::atan2(to[0],to[2])-heading);
+    const float d[3]={post[0]-pos[0],0.0f,post[2]-pos[2]};
+    const float x=d[0]*right[0]+d[2]*right[2],z=d[0]*forward[0]+d[2]*forward[2];
+    if(!(std::fabs(x)+std::fabs(z)>1e-4f))return s;
+    s.bearing=std::atan2(x,z);
     s.active=true;
     const float ramp=Clamp((s.dist-hold)/10.0f,0.25f,1.0f);
-    if(std::fabs(err)>backAngle && s.dist<reverseMax) {
+    if(std::fabs(s.bearing)>backAngle && s.dist<reverseMax) {
         s.reverse=true;
-        err=Wrap(err+kPi);                 // the tail onto the post
-        s.steer=Clamp(err*2.0f,-1.0f,1.0f);
+        s.bearing=Wrap(s.bearing+kPi);   // the tail onto the post
         s.throttle=-ramp;
         return s;
     }
-    s.steer=Clamp(err*2.0f,-1.0f,1.0f);
-    s.throttle=std::fabs(err)>turnOnSpot ? 0.0f : ramp;
+    s.throttle=std::fabs(s.bearing)>turnOnSpot ? 0.0f : ramp;
     return s;
 }
+// The seat-0 stick block's values for it, as 0x661020 writes them.
+inline float SteerStick(const Steer& s) noexcept { return -Clamp(s.bearing*10.0f,-1.0f,1.0f); }
+inline float ThrottleStick(const Steer& s) noexcept { return -s.throttle; }
 }  // namespace npc

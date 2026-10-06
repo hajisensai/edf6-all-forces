@@ -93,6 +93,18 @@ bool InSession() noexcept {
     return !sig || reinterpret_cast<OnlineFn>(image+kOnline)(nullptr);
 }
 
+// Whether this machine is the room's host (0x784210: offline 1). Its code not the one read: false (callers that run
+// host-only work leave it off, which is what a client does too).
+bool IsRoomHost() noexcept {
+    static const bool sig=[]() noexcept {
+        bool ok=false;
+        __try { ok=edf::Matches(image,kIsHost,kSigs[1].bytes,sizeof(kSigs[1].bytes)); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
+        if(!ok)Log("NET host check off: EDF+%#x does not match docs/online-re.md, host-only work stays off",kIsHost);
+        return ok;
+    }();
+    return sig && reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr);
+}
+
 void NetProbe(unsigned char* v) noexcept {
     if(!Cfg().debug || !IsHelicopter(v))return;
     if(!checked) {

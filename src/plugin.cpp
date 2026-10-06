@@ -228,6 +228,8 @@ void Validate(Config& n) noexcept {
     Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
     Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
     Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
+    Fix("TankPostHold",n.tankPostHold,1.0f,100.0f);
+    Fix("TankReverseMax",n.tankReverseMax,0.0f,200.0f);
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -458,6 +460,9 @@ void LoadConfig() noexcept {
     n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
     n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
     n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
+    n.tankReturnToPost=ReadBool(L"TankReturnToPost",n.tankReturnToPost);
+    n.tankPostHold=ReadFloat(L"TankPostHold",n.tankPostHold);
+    n.tankReverseMax=ReadFloat(L"TankReverseMax",n.tankReverseMax);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -489,6 +494,7 @@ void LoadConfig() noexcept {
     Log("CONFIG customNpcAi=%d lane=%d width=%.1f length=%.0f flank=%.0f switch=%d engage=%.2f evade=%d danger=%.0f grab=%.1f crowd=%.1f roll=%.1fs retreatHp=%.2f leash=%.0f",
         n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
+    Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
