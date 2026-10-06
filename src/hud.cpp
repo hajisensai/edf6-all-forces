@@ -133,7 +133,8 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool entrance; BoardingEntrance boardingEntrance;
                   bool turretCamOk; TurretCamReadout turretCam;
                   bool nix; NixTorso nixTorso;
-                  bool proteus; ProteusReadout proteusRo; };
+                  bool proteus; ProteusReadout proteusRo;
+                  bool sazabi; SazabiCue sazabiCue; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -1752,6 +1753,122 @@ void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float
     Bar(drawer,ctx,bx+rpmW+between,by,heatW,barH,heat,heat,HeatColour(heat,c.overheated),s);
 }
 
+// The player's Sazabi (crew.h SazabiCue, published by sazabi.cpp; README 沙扎比). A panel where the stock vehicles' block
+// stands (its left kSazabiLeft design px left of the screen's centre, its bottom at 0.80 H; held on a narrow viewport),
+// in the Sazabi's red: its name, the state tags lit at that row's right end (GUARD, AIR, TOMAHAWK, LOCK; at its end so
+// they widen the panel only past its rows' width, toward the screen's centre), then a row per system, its name at the
+// left and its gauge at the right: the thrusters' charge (amber under kSazabiLowThrust), the beam rifle's next shot, the
+// shield missiles (their count in the name, the next salvo's bar, the lock's progress a thin bar under it, red locked),
+// the mega particle cannon (pink while it charges, else its cooldown), the funnels (kSazabiFunnels pips: filled in the
+// pack, hollow flying; the next launch a thin bar under them). A gauge full is green: ready. In the world (SazabiMarks):
+// a pink ring with a dot where the rifle aims, and the missiles' lock as the jets' (LockAt: a yellow square closing in
+// while it locks, the red diamond locked).
+alignas(16) const float kSazabiRed[4]={1.0f,0.3f,0.35f,1.0f};
+alignas(16) const float kSazabiPink[4]={1.0f,0.45f,0.75f,1.0f};
+constexpr float kSazabiLowThrust=0.25f,kSazabiLeft=500.0f;
+constexpr int kSazabiFunnels=6,kSazabiRows=5,kSazabiTags=4;
+// A row's gauge: a bar of `share` in `fill` (or the funnels' pips: `pips` of them in the pack), and with `sub` >= 0 a
+// thin bar of `sub` in `subFill` under it.
+struct SazabiGauge { float share; const float* fill; int pips; float sub; const float* subFill; };
+const float* ReadyColour(float share) noexcept { return share>=1.0f ? kGreen : kTeal; }
+void SazabiMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const SazabiCue& c) noexcept {
+    float sx,sy,depth;
+    if(c.hasAim && Project(vp,c.aim,width,height,&sx,&sy,&depth)) {
+        const float r=18.0f*s,t=2.0f*s,in=r+3.0f*s,out=in+7.0f*s,dot=2.0f*s;
+        Arc(drawer,ctx,sx,sy,r,0.0f,kTurn,t,32,kSazabiPink);
+        Rect(drawer,ctx,sx-out,sy-t*0.5f,sx-in,sy+t*0.5f,kSazabiPink);Rect(drawer,ctx,sx+in,sy-t*0.5f,sx+out,sy+t*0.5f,kSazabiPink);
+        Rect(drawer,ctx,sx-t*0.5f,sy-out,sx+t*0.5f,sy-in,kSazabiPink);Rect(drawer,ctx,sx-t*0.5f,sy+in,sx+t*0.5f,sy+out,kSazabiPink);
+        Rect(drawer,ctx,sx-dot,sy-dot,sx+dot,sy+dot,kSazabiPink);
+    }
+    if(c.hasLock)LockAt(drawer,ctx,vp,width,height,s,c.missileLock>=1.0f ? 2 : 1,c.lock,Unit(c.missileLock),&sx,&sy);
+}
+// The funnels' pips across (x, y, w, h): the first `filled` in the pack, the rest hollow (flying).
+void FunnelPips(void* drawer,void* ctx,float x,float y,float w,float h,int filled,float s) noexcept {
+    const float gap=4.0f*s,pw=(w-gap*static_cast<float>(kSazabiFunnels-1))/static_cast<float>(kSazabiFunnels),t=1.5f*s;
+    for(int i=0;i<kSazabiFunnels;++i) {
+        const float px=x+static_cast<float>(i)*(pw+gap);
+        Rect(drawer,ctx,px-t,y-t,px+pw+t,y+h+t,kBarEdge);
+        if(i<filled){Rect(drawer,ctx,px,y,px+pw,y+h,kSazabiPink);Rect(drawer,ctx,px,y,px+pw,y+h*0.35f,kBarShine);continue;}
+        Rect(drawer,ctx,px,y,px+pw,y+t,kSazabiPink);Rect(drawer,ctx,px,y+h-t,px+pw,y+h,kSazabiPink);
+        Rect(drawer,ctx,px,y,px+t,y+h,kSazabiPink);Rect(drawer,ctx,px+pw-t,y,px+pw,y+h,kSazabiPink);
+    }
+}
+// The rows' names and gauges from the cue (see above): `rows` gets the names, `g` the gauges.
+void SazabiRowsOf(const SazabiCue& c,Line* rows,SazabiGauge* g) noexcept {
+    const bool low=c.thruster<kSazabiLowThrust,charging=c.cannonCharge>0.0f,empty=c.missiles<=0;
+    const float salvo=empty ? 0.0f : Unit(c.missileReady),lock=Unit(c.missileLock);
+    const int pack=kSazabiFunnels-(c.funnelsOut<0 ? 0 : c.funnelsOut>kSazabiFunnels ? kSazabiFunnels : c.funnelsOut);
+    Format(rows[0],L"%ls",Tr(Tx::sazabiThruster));
+    rows[0].rgba=low ? kAmber : kWhite;
+    g[0]=SazabiGauge{Unit(c.thruster),low ? kAmber : kCyan,-1,-1.0f,nullptr};
+    Format(rows[1],L"%ls",Tr(Tx::sazabiRifle));
+    rows[1].rgba=c.rifleReady>=1.0f ? kGreen : kWhite;
+    g[1]=SazabiGauge{Unit(c.rifleReady),ReadyColour(c.rifleReady),-1,-1.0f,nullptr};
+    Format(rows[2],Tr(Tx::sazabiMissiles),c.missiles>0 ? c.missiles : 0);
+    rows[2].rgba=empty ? kRed : salvo>=1.0f ? kGreen : kWhite;
+    g[2]=SazabiGauge{salvo,ReadyColour(salvo),-1,lock,lock>=1.0f ? kRed : kYellow};
+    Format(rows[3],L"%ls",Tr(Tx::sazabiCannon));
+    rows[3].rgba=charging ? kSazabiPink : c.cannonReady>=1.0f ? kGreen : kWhite;
+    g[3]=charging ? SazabiGauge{Unit(c.cannonCharge),kSazabiPink,-1,-1.0f,nullptr}
+                  : SazabiGauge{Unit(c.cannonReady),ReadyColour(c.cannonReady),-1,-1.0f,nullptr};
+    Format(rows[4],L"%ls",Tr(Tx::sazabiFunnels));
+    rows[4].rgba=pack>0 ? kWhite : kAmber;
+    g[4]=SazabiGauge{0.0f,nullptr,pack,Unit(c.funnelReady),ReadyColour(c.funnelReady)};
+}
+// The state tags lit (see above) into `tags`: how many.
+int SazabiTagsOf(const SazabiCue& c,Line* tags) noexcept {
+    int n=0;
+    auto tag=[&](bool on,Tx text,const float* rgba){if(on){Format(tags[n],L"%ls",Tr(text));tags[n++].rgba=rgba;}};
+    tag(c.guard,Tx::sazabiGuard,kCyan);
+    tag(c.air,Tx::sazabiAir,kTeal);
+    tag(c.swinging,Tx::sazabiTomahawk,kAmber);
+    tag(c.hasLock && c.missileLock>=1.0f,Tx::sazabiLock,kRed);
+    return n;
+}
+void SazabiPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const SazabiCue& c,Line* lines,int* at) noexcept {
+    if(*at+1+kSazabiRows+kSazabiTags>kMaxLines)return;
+    Line* const title=&lines[*at];
+    Line* const rows=title+1;
+    Line* const tags=rows+kSazabiRows;
+    SazabiGauge g[kSazabiRows];
+    Format(*title,L"%ls",Tr(Tx::sazabiTitle));
+    title->scale=kTitleScale;title->rgba=kSazabiRed;
+    SazabiRowsOf(c,rows,g);
+    const int nTags=SazabiTagsOf(c,tags),n=1+kSazabiRows+nTags;
+    for(int i=1;i<n;++i)title[i].scale=kLineScale*0.85f;
+    for(int i=0;i<n;++i)title[i].w=title[i].h=0.0f;
+    if(text)MeasureAll(*text,title,n);
+    const float pad=8.0f*s,gap=5.0f*s,col=14.0f*s,tagGap=12.0f*s,barW=180.0f*s,barH=10.0f*s,subH=4.0f*s,subGap=2.0f*s;
+    const float titleH=title->h>0.0f ? title->h : 30.0f*s;
+    float nameW=0.0f,tagsW=0.0f,rowH[kSazabiRows],rowsH=0.0f;
+    for(int i=0;i<kSazabiRows;++i) {
+        nameW=rows[i].w>nameW ? rows[i].w : nameW;
+        const float lineH=rows[i].h>0.0f ? rows[i].h : 20.0f*s,gauge=barH+(g[i].sub>=0.0f ? subGap+subH : 0.0f);
+        rowH[i]=lineH>gauge ? lineH : gauge;
+        rowsH+=rowH[i]+(i ? gap : 0.0f);
+    }
+    for(int i=0;i<nTags;++i)tagsW+=tagGap+tags[i].w;
+    const float rowW=nameW+col+barW,titleW=title->w+tagsW,w=(rowW>titleW ? rowW : titleW)+2.0f*pad,h=pad+titleH+gap+rowsH+pad;
+    const float x0=std::fmax(width*0.5f-kSazabiLeft*s,16.0f*s),y0=height*0.80f-h,bx=x0+w-pad-barW;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kSazabiRed);
+    Rect(drawer,ctx,x0,y0,x0+3.0f*s,y0+h,kSazabiRed);
+    title->x=x0+pad;title->y=y0+pad;
+    float x=x0+w-pad-tagsW;   // the tags at the title row's right end
+    for(int i=0;i<nTags;++i){x+=tagGap;tags[i].x=x;tags[i].y=title->y+titleH-tags[i].h;x+=tags[i].w;}
+    float y=y0+pad+titleH+gap;
+    for(int i=0;i<kSazabiRows;++i) {
+        const float lineH=rows[i].h>0.0f ? rows[i].h : 20.0f*s,gauge=barH+(g[i].sub>=0.0f ? subGap+subH : 0.0f);
+        const float gy=y+(rowH[i]-gauge)*0.5f;
+        rows[i].x=x0+pad;rows[i].y=y+(rowH[i]-lineH)*0.5f;
+        if(g[i].pips>=0)FunnelPips(drawer,ctx,bx,gy,barW,barH,g[i].pips,s);
+        else Bar(drawer,ctx,bx,gy,barW,barH,g[i].share,g[i].share,g[i].fill,s);
+        if(g[i].sub>=0.0f)Bar(drawer,ctx,bx,gy+barH+subGap,barW,subH,g[i].sub,g[i].sub,g[i].subFill,s);
+        y+=rowH[i]+gap;
+    }
+    *at+=n;
+}
+
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.
 constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
 void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
@@ -2456,6 +2573,7 @@ void HudPublish() noexcept {
     const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
     SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists));
     s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shields, salvo, field (proteus.cpp)
+    s.sazabi=PlayerSazabiCue(&s.sazabiCue);   // the Sazabi's thrusters, weapons, aim and lock (sazabi.cpp; SazabiPanel)
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -3119,6 +3237,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // TurretMark's square give way to it.
         const bool stockHud=now-snap.tick<=kFreshMs && snap.stock && !snap.cockpit && !snap.stockHud.heli;
         if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli && !stockHud)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
+        if(now-snap.tick<=kSazabiCueMs && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
+            SazabiMarks(drawer,ctx,viewProj,width,height,s,snap.sazabiCue);
+            SazabiPanel(drawer,ctx,t,width,height,s,snap.sazabiCue,lines,&at);
+        }
         if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
