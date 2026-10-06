@@ -93,6 +93,45 @@ int main() {
     testOnline=true;
     Check(CallOf(ifc,local)==&kCalls[0],"joining a session does not erase the local selection");
     Check(CallOf(ifc,remote)==&kCalls[kCallCount-1],"joining a session does not apply that selection to remote calls");
+    // The pick sent with the call (call_net.h): every heading carries every pick and back, moved at most 2^-11 of itself;
+    // a heading no modded machine wrote (zero, random bits) almost never decodes.
+    Check(callnet::Decode(0.0f)==callnet::kNoMark,"a zero heading carries no pick");
+    const float headings[]={0.0f,0.001f,-0.5f,1.0f,3.14159f,-3.14159f,6.28f,-1.0e-7f};
+    for(const float h:headings)
+        for(int p=callnet::kOwnCall;p<kCallCount;++p) {
+            const float e=callnet::Encode(h,p);
+            Check(callnet::Decode(e)==p,"the pick sent is the pick decoded");
+            Check(std::fabs(e-h)<=std::fabs(h)*0.0005f+1e-30f,"the heading moves by at most 2^-11 of itself");
+            Check(callnet::Decode(callnet::Encode(e,p))==p,"encoding twice keeps the pick");
+        }
+    std::uint32_t lcg=12345u;
+    int falsePicks=0;
+    for(int i=0;i<100000;++i) {
+        lcg=lcg*1664525u+1013904223u;
+        const float f=callnet::Float(lcg);
+        falsePicks+=std::isfinite(f) && callnet::Decode(f)!=callnet::kNoMark;
+    }
+    Check(falsePicks<1500,"random headings decode as a pick at most 1.5% of the time (7 check bits)");
+    // CallOf with a sent pick: the caller's and the others' copies of the weapon take it over their local state.
+    for(int own=0;own<kCallCount;own+=3) {
+        Put<float>(weapon,kWeaponHitSize,kCalls[own].mark);
+        for(int sent=callnet::kOwnCall;sent<kCallCount;++sent) {
+            Put<float>(weapon,kWeaponHeading,callnet::Encode(1.25f,sent));
+            const Call* const want=sent<0 ? &kCalls[own] : &kCalls[sent];
+            picked.store((sent+5)%kCallCount);   // this machine's own pick differs from the one sent
+            Check(CallOf(ifc,remote)==want,"a remote call replays the pick its caller sent");
+            Check(CallOf(ifc,local)==want,"the caller replays the pick it sent, not its picker now");
+            Check(CallOf(ifc,npc)==want,"whoever the owner, the sent pick decides");
+        }
+    }
+    Put<float>(weapon,kWeaponHitSize,kCalls[0].mark);
+    Put<float>(weapon,kWeaponHeading,1.25f);
+    Check(callnet::Decode(1.25f)==callnet::kNoMark,"the fixture's plain heading carries no pick");
+    picked.store(2);
+    Check(CallOf(ifc,local)==&kCalls[2] && CallOf(ifc,remote)==&kCalls[0],"no pick sent: the local picker for the local call only");
+    Put<float>(weapon,kWeaponHitSize,1.0f);
+    Put<float>(weapon,kWeaponHeading,callnet::Encode(1.25f,3));
+    Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its heading carries");
     std::printf("call picker: %d checks passed\n",checks);
     return 0;
 }

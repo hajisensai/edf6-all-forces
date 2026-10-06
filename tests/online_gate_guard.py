@@ -8,6 +8,8 @@ a failure. What it holds in place:
     made with no damage where its owner is not the authority;
   - the NPC heli pilot flies only where the heli is run (heli.cpp HeliFrame's Replica before Fly), puts its input on
     seat 0's stick (Fly -> MirrorStick), and a replica copies that stick back with the same signs;
+  - the Air Raider's calls launch along the call's own heading, read the pick sent with the call, and send it;
+  - the Air Raider's calls launch along the call's own heading, read the pick sent with the call, and send it;
   - IsPlayer (common/seat.cpp) leaves out another machine's player.
 """
 from __future__ import annotations
@@ -124,6 +126,17 @@ def check_heli(root: str) -> None:
             fail(f'src/heli.cpp: MirrorStick ({put}) and Replay ({back}) no longer the stock copy\'s signs')
 
 
+def check_calls(root: str) -> None:
+    code = code_only(read(root, 'src/airstrike.cpp'))
+    launch = body(code, 'int LaunchCall(')
+    if 'player.' in launch:
+        fail("src/airstrike.cpp LaunchCall: the call's direction comes from this machine's player, not the call's heading")
+    if 'callnet::Decode(' not in body(code, 'const Call* CallOf('):
+        fail('src/airstrike.cpp CallOf: the pick sent with the call is not read')
+    if 'InstallPickSend()' not in body(code, 'bool InstallAirstrikes()'):
+        fail("src/airstrike.cpp: the call's pick is no longer sent (InstallPickSend)")
+
+
 def check_player(root: str) -> None:
     if '!RemoteRider(human)' not in body(code_only(read(root, 'common/seat.cpp')), 'bool IsPlayer('):
         fail('common/seat.cpp IsPlayer: another machine\'s player counts as this machine\'s')
@@ -137,7 +150,7 @@ def main() -> int:
     root = parser.parse_args().root
     files = sources(root)
     checks = (lambda: check_rvas(root, files), lambda: check_ride_ai(root, files), lambda: check_damage(root),
-              lambda: check_heli(root), lambda: check_player(root))
+              lambda: check_heli(root), lambda: check_calls(root), lambda: check_player(root))
     for c in checks:
         c()
     for f in failures:

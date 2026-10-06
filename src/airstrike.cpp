@@ -16,8 +16,9 @@
 //    0x6A8DFB) the plugin launches that call's jets or helis instead of its bombers, which it keeps home
 //    (the call's plane count, ifc+0x80, set to 0 after IFC_Start: the call is spent, its state machine
 //    goes back to idle). A guard call works round its marker, a follow call round the player. Each
-//    modded machine does this when it replays the call. The local picker changes only a local player's call;
-//    remote players' calls keep their weapon's definition (docs/online-re.md sections 1 and 9).
+//    modded machine does this when it replays the call, from the call's own heading (message 9's). The local
+//    picker changes only a local player's call; online the pick goes out in the call's message (call_net.h,
+//    HeadingSendHook) and every machine, the caller's too, replays that pick (docs/online-re.md sections 1 and 9).
 //  - The call weapons are owned from the start (docs/loadout-re.md section 8): before the game's own
 //    "grant the installed DLC weapons" step (0xDC550, UnlockDownloadContents: after every save load, and
 //    in a new game's reset; its two entries, a call at 0xDC348 and the script thunk's jump at 0x70FF87,
@@ -39,6 +40,7 @@
 // The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
+#include "call_net.h"
 #include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include <atomic>
@@ -49,7 +51,7 @@
 namespace crew {
 namespace {
 constexpr unsigned kIfcStart=0x2B5DA0,kRadioCall=0x6A8DFB;
-constexpr std::size_t kIfcPlanes=0x80,kStartTarget=0x50;
+constexpr std::size_t kIfcPlanes=0x80,kStartForward=0x40,kStartTarget=0x50;   // IFC_Start's params: its matrix's rows
 constexpr unsigned kBomberInit=0x5AABB0,kRadioBomber=0x2B924E,kMissionBomber=0x5B4423;
 constexpr unsigned kPlaneUpdateSlot=0x17D3A30+5*8,kPlaneUpdate=0x5AB240,kDelete=0x118A1B0;
 constexpr std::size_t kPlaneVelocity=0xB80,kPlaneModel=0x660;   // model instance embedded (0x5AB2E3)
@@ -68,6 +70,13 @@ constexpr unsigned char kUnlockDlcSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74
 constexpr unsigned char kUnlockThunkSig[]={0x48,0x8B,0x0D};   // 0x70FF80: mov rcx,[GS]; jmp 0xDC550
 // The weapon a radio call's IndirectFireControl is in (ifc = weapon+0x1660), and its AmmoHitSizeAdjust.
 constexpr std::size_t kWeaponIfc=0x1660,kWeaponHitSize=0x8C4;
+// RadioContact: its owner (+0x120, 0x6A938A), the call's heading (+0x1650, the aim state's, message 9's float); the
+// confirm state's send of that heading (0x6A9343: movss xmm1,[rbx+0x1650]; lea rcx,[rbp-0x60]; call 0x12B57E0, rbx the
+// weapon) and the message's float writer (0x12B57E0: tag 0xC2, the 4 bytes as they are). See call_net.h.
+constexpr std::size_t kWeaponOwner=0x120,kWeaponHeading=0x1650;
+constexpr unsigned kHeadingSend=0x6A9343,kHeadingCall=0x6A934F,kWriteFloat=0x12B57E0;
+const unsigned char kHeadingSendSig[]={0xF3,0x0F,0x10,0x8B,0x50,0x16,0x00,0x00,0x48,0x8D,0x4D,0xA0,0xE8};
+const unsigned char kWriteFloatSig[]={0x4C,0x8D,0x41,0x10,0xF3,0x0F,0x11,0x4C,0x24,0x10};
 
 const unsigned char kIfcStartSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05};
 // call IFC_Start; then the caller marks the call active and copies the plane count (+0x16E0 -> +0x16E4)
@@ -188,25 +197,50 @@ void CheckCallTable() noexcept {
     else Log("CALLS all %d rows in the weapon table, their files there",kCallRowCount);
 }
 
-// The call weapon `ifc` is in, or nullptr (a stock call). The owner comes from IFC_Start's parameter weak pair,
-// populated by the native RadioContact call state. Never apply this machine's preference to a remote replay.
-const Call* CallOf(const void* ifc,const unsigned char* owner) noexcept {
-    const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
+// The plugin's call weapon `w` is (its mark), or nullptr (a stock call).
+const Call* OwnCall(const unsigned char* w) noexcept {
     if(!Readable(w+kWeaponHitSize,4))return nullptr;
     const float mark=At<float>(w,kWeaponHitSize);
-    const int p=IsPlayer(owner) && !edf::RemoteRider(owner) ? picked.load() : -1;
-    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return p>=0 && p<kCallCount ? &kCalls[p] : &c;
+    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return &c;
     return nullptr;
 }
 
-// The call's jets or helis at `target`, coming from behind it as the player sees it (jets kApproach out
-// and kAboveTarget up, helis kHeliApproach out), side by side; how many came.
-int LaunchCall(const Call& c,const float* target) noexcept {
+// The call weapon `ifc` is in, or nullptr (a stock call). Online, the pick the caller's machine sent with the call
+// (call_net.h, in its heading: the same on every machine, the caller's own too); otherwise (offline, or a call no modded
+// machine sent) a local player's call takes this machine's pick and any other its weapon's own. The owner comes from
+// IFC_Start's parameter weak pair, populated by the native RadioContact call state.
+const Call* CallOf(const void* ifc,const unsigned char* owner) noexcept {
+    const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
+    const Call* const own=OwnCall(w);
+    if(!own)return nullptr;
+    const int sent=Readable(w+kWeaponHeading,4) ? callnet::Decode(At<float>(w,kWeaponHeading)) : callnet::kNoMark;
+    const int p=sent!=callnet::kNoMark ? sent : IsPlayer(owner) ? picked.load() : -1;
+    return p>=0 && p<kCallCount ? &kCalls[p] : own;
+}
+
+// The confirm state's send of the call's heading (kHeadingCall, through HeadingStub: rcx the message, rdx the weapon,
+// xmm2 the heading): a local player's call of one of ours goes out with this machine's pick in it, and the weapon keeps
+// the heading sent, so the caller replays the same pick as everyone else (CallOf).
+using WriteFloatFn=bool(__fastcall*)(void*,float);
+bool __fastcall HeadingSendHook(void* message,unsigned char* weapon,float heading) {
+    float sent=heading;
+    __try {
+        if(Cfg().enabled && Cfg().jetAirRaider && OwnCall(weapon) && IsPlayer(At<const unsigned char*>(weapon,kWeaponOwner))) {
+            sent=callnet::Encode(heading,picked.load());
+            Put<float>(weapon,kWeaponHeading,sent);
+        }
+    } __except(FaultLog("AIRSTRIKE call pick send (the heading as it was)",GetExceptionInformation())) { sent=heading; }
+    return reinterpret_cast<WriteFloatFn>(image+kWriteFloat)(message,sent);
+}
+
+// The call's jets or helis at `target`, coming in along the call's heading (`forward`: the forward row of the matrix
+// the call state builds from the caller's heading, +0x1650; jets kApproach out and kAboveTarget up, helis kHeliApproach
+// out), side by side; how many came. The heading is the call's own (message 9 carries it), so every machine that replays
+// the call launches it from the same points; the local player's position (the old way) differed per machine.
+int LaunchCall(const Call& c,const float* target,const float* forward) noexcept {
     float dir[3]={0,0,1};
-    if(player.at && GameMs()-player.at<10000) {
-        const float dx=target[0]-player.pos[0],dz=target[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
-        if(l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
-    }
+    const float l=std::sqrt(forward[0]*forward[0]+forward[2]*forward[2]);
+    if(std::isfinite(l) && l>0.1f){dir[0]=forward[0]/l;dir[2]=forward[2]/l;}
     if(c.brings==Brings::sub) {
         const float at[3]={target[0]+dir[0]*kSubAhead,target[1],target[2]+dir[2]*kSubAhead};
         const bool ok=SubLaunch(at,dir)!=nullptr;
@@ -244,7 +278,8 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
         const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
         const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
-        if(c && std::isfinite(target[0]+target[1]+target[2]) && LaunchCall(*c,target)>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
+        const float* forward=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartForward);
+        if(c && std::isfinite(target[0]+target[1]+target[2]) && LaunchCall(*c,target,forward)>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
     } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) {}
     return result;
 }
@@ -524,6 +559,25 @@ bool InstallOwnership() noexcept {
     return ok;
 }
 
+// The call's pick into its message (HeadingSendHook): the confirm state's call of the float writer at kHeadingCall, through
+// a stub that hands the hook the weapon (rbx there) and the heading as its third argument. Off (the calls replay each
+// weapon's own on the other machines, as before) when either piece of code is not the one read.
+bool InstallPickSend() noexcept {
+    if(!Matches(kHeadingSend,kHeadingSendSig,sizeof(kHeadingSendSig)) || !Matches(kWriteFloat,kWriteFloatSig,sizeof(kWriteFloatSig))) {
+        Log("AIRSTRIKE call pick send: profile mismatch (online, the others fly each call weapon's own)");
+        return false;
+    }
+    // movaps xmm2,xmm1; mov rdx,rbx; mov rax,HeadingSendHook; jmp rax
+    unsigned char stub[]={0x0F,0x28,0xD1,0x48,0x89,0xDA,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    void* const hook=reinterpret_cast<void*>(&HeadingSendHook);
+    std::memcpy(stub+8,&hook,sizeof(hook));
+    void* const code=AllocateNearCode(image+kHeadingCall,stub,sizeof(stub));
+    bool changed=false;
+    const bool ok=code && RedirectCall(image+kHeadingCall,image+kWriteFloat,code,changed);
+    if(!ok)Log("AIRSTRIKE call pick send %s",changed ? "half patched" : "not patched");
+    return ok;
+}
+
 bool Redirect(unsigned site,const unsigned char* sig,std::size_t size,void* hook,const char* name) noexcept {
     if(!Matches(site,sig,size)){Log("AIRSTRIKE %s: profile mismatch",name);return false;}
     bool changed=false;
@@ -567,7 +621,9 @@ bool InstallAirstrikes() noexcept {
             mission=Redirect(kMissionBomber,kMissionBomberSig,sizeof(kMissionBomberSig),reinterpret_cast<void*>(&MissionBomberHook),"mission bomber");
         }
         const bool throws=InstallThrows();
-        Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d throws=%d",calls,owned,radio,mission,throws);
+        const bool pickSend=calls && InstallPickSend();
+        Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d throws=%d pickSend=%d",calls,owned,radio,mission,
+            throws,pickSend);
         return calls || radio || mission || throws;
     } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }
