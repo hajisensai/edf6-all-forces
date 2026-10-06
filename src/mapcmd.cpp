@@ -68,6 +68,7 @@ struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,pad
 // --- The game thread's own ---
 struct Game {
     mapcmd::Selection sel;
+    ObjRef selected[kCmdUnits]; // identity when selected; an address recycled since then is another unit
     Keys was;
     ULONGLONG frameAt;          // wall ms of the last frame (a gap: the map was closed, no edges the first frame)
     int count;
@@ -104,6 +105,21 @@ void List(Game& g) noexcept {
     add(TankCommandUnits(buf,kCmdUnits-g.count),Owner::tank);
     add(SquadCommandUnits(buf,kCmdUnits-g.count),Owner::squad);
     std::sort(g.list,g.list+g.count,[](const Entry& a,const Entry& b){ return std::less<const void*>()(a.u.v,b.u.v); });
+}
+
+void KeepSelection(Game& g,const void* const* ids) noexcept {
+    mapcmd::Keep(g.sel,ids,g.count);
+    for(int i=g.sel.n-1;i>=0;--i) {
+        const void* id=g.sel.id[i];
+        bool same=false;
+        if(Readable(id,kSelfCtrl+sizeof(void*)))
+            for(const auto& old:g.selected)if(old.Is(id)){same=true;break;}
+        if(!same)g.sel.Remove(id);
+    }
+}
+
+void RememberSelection(Game& g) noexcept {
+    for(int i=0;i<kCmdUnits;++i)g.selected[i]=i<g.sel.n ? ObjRef::Of(g.sel.id[i]) : ObjRef{};
 }
 
 bool Give(const Entry& e,const Command& c) noexcept {
@@ -262,7 +278,7 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
             mapcmd::Formation(slot++,k,cmd.at,kFormationSpacing,c.at);
             c.at[1]=GroundAt(c.at[0],c.at[2],cmd.at[1]);
         }
-        if(!Give(e,c))continue;
+        if(!Give(e,c)){++*skipped;continue;}
         e.u.now=c;
         ++given;
     }
@@ -322,7 +338,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     List(g);
     const void* ids[kCmdUnits];
     for(int i=0;i<g.count;++i)ids[i]=g.list[i].u.v;
-    mapcmd::Keep(g.sel,ids,g.count);
+    KeepSelection(g,ids);
     Pointer(g,in,k,haveView ? &v : nullptr);
     boxingNow.store(g.boxing);
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
@@ -369,6 +385,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
             g.sel.n,given,g.count);
     }
+    RememberSelection(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(!picked)return false;
     const int selected=mapcmd::IndexOf(ids,g.count,g.sel.id[0]);
