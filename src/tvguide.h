@@ -1,6 +1,7 @@
 // TV guidance for the Air Raider's Tempest cruise missiles (src/tvguide.cpp, docs/tvguide-re.md): the player's own
 // Tempest, once it is out, is flown from its nose; the camera rides it, the soldier stands still (the map's hold),
 // mouse / right stick steer it at its own stock turn, fire boosts it (for good), Esc / B hands it back to its laser.
+// Offline only: controls are not replicated. Online missiles retain their existing stock / PN laser guidance.
 #pragma once
 #include <cstdint>
 
@@ -20,7 +21,8 @@ bool TvView(const void** human,float* eye,float* look) noexcept;
 // Whether the TV holds the plugin's keys (MapHoldsKeys: theirs and EDF6AutoTurret's).
 bool TvHoldsKeys() noexcept;
 // MissileBullet01's update, before the stock step (missile.cpp): takes the player's Tempest as it comes out and steers
-// the one the TV flies. True: round `b` is the TV's (the plugin's own guidance leaves it).
+// the one the TV flies. Must run even with Enabled=0 to release a previously owned round safely inside its update.
+// True: round `b` is the TV's (the plugin's own guidance leaves it).
 bool TvSteer(unsigned char* b) noexcept;
 // A new mission: the TV dropped.
 void ResetTv() noexcept;
