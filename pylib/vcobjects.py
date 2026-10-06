@@ -380,9 +380,9 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                            ('EWEAPON418', 'EWEAPON421', 'EWEAPON425', 'EWEAPON428', 'EWEAPON433'),
                            ('app:/weapon/edf6vc_drill_bit.sgo',), 1400.0, 'make_drill'),
     # The sidecar motorcycle (tools/make_sidecar.py, src/sidecar.cpp): the Freed bike's class (Vehicle503_Bike) and
-    # weapons (its rider's two machine guns, its fuel tank: the stock ones), a sidecar platform and wheel built from
-    # stock parts (pylib/sidecar_model.py), requested like the Freed bikes (the Ranger's vehicle slot). Its gunner is
-    # no seat's: the plugin holds a soldier on the platform, firing their own weapons.
+    # weapons (its rider's two machine guns, its fuel tank: the stock ones), a sidecar (a boat-shaped tub, its wheel
+    # under a mudguard) built in the bike's own material (pylib/sidecar_model.py), requested like the Freed bikes (the Ranger's vehicle slot). Its gunner is
+    # no seat's: the plugin holds a soldier standing in the tub, firing their own weapons.
     'sidecar': GroundVehicle('EDF6VC_SIDECAR', 'V503_BIKE', 'AWEAPON338',
                              ('AWEAPON338', 'AWEAPON339', 'AWEAPON341', 'AWEAPON343', 'AWEAPON345'),
                              ('app:/weapon/v_503_bike_gun_l.sgo', 'app:/weapon/v_503_bike_gun_r.sgo',

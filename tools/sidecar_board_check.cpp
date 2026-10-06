@@ -63,7 +63,7 @@ void Pose(unsigned char* v,float yaw,const float* at,float speed) {
 // A held gunner riding a moving bike for `frames` steps of 1/60 s: each frame the pre-update (MoveIntent, which
 // zeroes the walk and adds the step velocity), the bike's input (Hold), then the physics step moves the character
 // by its step velocity (the controller's +0x60, then cleared, as 0x11B9A92 / 0x11B9CB7) and the bike by its own.
-// Returns the farthest the gunner got from the platform's point after a step; `warpsOut` the warps it took.
+// Returns the farthest the gunner got from the gunner's point after a step; `warpsOut` the warps it took.
 float Ride(float speed,float yawRate,int frames,int& warpsOut) {
     Reset();
     float at[3]={0.0f,0.0f,0.0f},yaw=0.0f;
@@ -114,7 +114,7 @@ int main() {
     Reset();HumanAt(-1000.0f,0.0f,kGunnerZ);
     Expect(!SidecarBoard(bike,human) && warps==0,"no boarding across the map even when the sidecar is nearer");
     Reset();HumanAt(kGunnerX,20.0f,kGunnerZ);
-    Expect(!SidecarBoard(bike,human) && warps==0,"no boarding from another floor directly above the platform");
+    Expect(!SidecarBoard(bike,human) && warps==0,"no boarding from another floor directly above the sidecar");
     Reset();HumanAt(kGunnerX-2.31f,0.0f,kGunnerZ);
     Expect(!SidecarBoard(bike,human) && warps==0,"just outside the bike's stock reach");
     Reset();HumanAt(kGunnerX-2.29f,0.0f,kGunnerZ);

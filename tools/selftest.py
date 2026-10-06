@@ -676,7 +676,7 @@ def emc_copies_agree() -> None:
 @test
 def sidecar_copies_agree() -> None:
     """The sidecar motorcycle (src/sidecar.cpp, pylib/sidecar_model.py, tools/make_sidecar.py): the C++ copies of the
-    marker bone, the gunner's point and the platform's outer side are the model's; its request is a ground vehicle
+    marker bone, the gunner's point (on the tub's floor) and the tub's outer side are the model's; its request is a ground vehicle
     request of the Freed bike's class and request (a Ranger's vehicle), its notes do not ask for EDF6AutoTurret and
     it needs no stock weapon installed; the plugin is wired through (the input step, the board button before the
     stock seat search, no NPC driver while the player is in the sidecar, the mission reset, the setAngVel redirect,
@@ -688,10 +688,12 @@ def sidecar_copies_agree() -> None:
     assert f'kMarkerBone[]=L"{sm.MARKER_BONE}"' in c, 'src/sidecar.cpp kMarkerBone'
     m = re.search(r'kGunnerX=(-?[\d.]+)f,kGunnerY=(-?[\d.]+)f,kGunnerZ=(-?[\d.]+)f', c)
     assert m and tuple(float(x) for x in m.groups()) == sm.GUNNER_POINT, m and m.groups()
-    m = re.search(r'kPlatformOut=(-?[\d.]+)f', c)
-    assert m and float(m.group(1)) == sm.PLATFORM[0][0], m and m.groups()
-    assert sm.PLATFORM[0][1] < sm.GUNNER_POINT[1] == sm.PLATFORM[1][1], 'the gunner stands on the platform top'
-    assert all(sm.PLATFORM[0][k] < sm.GUNNER_POINT[k] < sm.PLATFORM[1][k] for k in (0, 2)), 'the gunner over the platform'
+    m = re.search(r'kTubOut=(-?[\d.]+)f', c)
+    assert m and float(m.group(1)) == sm.TUB_OUT == sm.TUB[0][0] == sm.FLOOR[0][0], m and m.groups()
+    assert sm.TUB_OUT == sm.TUB_X - sm.TUB_HALF_WIDTH and sm.TUB_IN == sm.TUB_X + sm.TUB_HALF_WIDTH
+    assert sm.FLOOR[0][1] < sm.GUNNER_POINT[1] == sm.FLOOR[1][1] == sm.FLOOR_Y, 'the gunner stands on the floor slab'
+    assert all(sm.FLOOR[0][k] < sm.GUNNER_POINT[k] < sm.FLOOR[1][k] for k in (0, 2)), 'the gunner over the floor'
+    assert sm.SEAT_FRONT < sm.GUNNER_POINT[2] < sm.DECK_Z, 'the gunner between the seat and the deck'
     rows = [x for x in calls.CALLS if x.ground == 'sidecar']
     assert len(rows) == 1 and rows[0].vehicle == make_sidecar.VEHICLE.sgo and rows[0].mark == 0 and rows[0].brings == 'vehicle'
     assert make_sidecar.VEHICLE.stock == 'V503_BIKE' and make_sidecar.VEHICLE.request == 'AWEAPON338'
@@ -721,6 +723,21 @@ def sidecar_copies_agree() -> None:
         files = {f'OBJECT/{make_sidecar.MODEL_FILE}': sm.build(game), f'OBJECT/{make_sidecar.RAGDOLL_FILE}': shkt,
                  f'OBJECT/{make_sidecar.SGO_FILE}': make_sidecar.vehicle_sgo(game)}
         make_sidecar.check(files, game)
+
+
+@test
+def sidecar_tub_holds_the_gunner() -> None:
+    """The sidecar's tub (pylib/sidecar_model.py sidecar_parts, no game needed) is a tub the gunner stands IN: a floor
+    face at FLOOR_Y under GUNNER_POINT (not floating over it, not sunk in it), walled all round from the floor up to
+    the lowest rim with the walls at least SOLDIER_REACH off (their legs and hips do not go through), the sides
+    beside them up to RIM_Y (their hips), every face drawn the way it is seen; the point is the floor slab's top (the
+    collision the plugin stands them on) and inside the tub's plan."""
+    import sidecar_model as sm
+    got = sm.check_tub(sm.parts_triangles(list(sm.sidecar_parts(2).values())), sm.SOLDIER_REACH)
+    assert got['floor y'] == sm.FLOOR_Y == sm.FLOOR[1][1] == sm.GUNNER_POINT[1], got
+    assert got['rays walled'] == 144 and got['faces seen from behind'] == 0, got
+    assert sm.RIM_Y - sm.FLOOR_Y >= 0.85, "the rim at a standing soldier's hips (koshi 0.888 over their feet)"
+    assert abs(sm.half_width(sm.GUNNER_POINT[2]) - sm.TUB_HALF_WIDTH) < 0.05, "the gunner at the tub's widest"
 
 
 @test
