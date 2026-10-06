@@ -2,6 +2,7 @@
 // flight's wingmen, and the install of the jet files.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "online_authority.h"
 #include <atomic>
 
 namespace crew {
@@ -81,11 +82,28 @@ bool Candidate(void* collector,std::uint32_t body,const void** owner,const void*
     return *target!=nullptr;
 }
 
+// online_authority.h SparesRide for this candidate: the bullet's owner a player of this machine, the candidate the vehicle
+// they ride (human +0x1548, the ride's weak object: boarding.cpp). The owner's fields are read only once the candidate
+// is that pointer, and the session asked last.
+constexpr std::size_t kHumanVehicle=0x1548;
+bool SparesOwnRide(void* collector,std::uint32_t body) noexcept {
+    const void* owner=nullptr;
+    const void* target=nullptr;
+    if(!Candidate(collector,body,&owner,&target) || !owner)return false;
+    const auto human=static_cast<const unsigned char*>(owner);
+    if(!Readable(human,kHumanVehicle+8) || At<const void*>(human,kHumanVehicle)!=target)return false;
+    return online::SparesRide(InSession(),IsPlayer(human),target,target);
+}
+
 void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
     // A slow round through the Shield Bearer's shield (shield.cpp), whoever fired it.
     bool through=false;
     __try { through=ShieldLetsThrough(collector,body); } __except(FaultLog("SHIELD round",GetExceptionInformation())) { through=false; }
     if(through)return;
+    // A round a player of this machine fired from their vehicle, named theirs online (online_authority.h SparesRide).
+    bool spare=false;
+    __try { spare=SparesOwnRide(collector,body); } __except(FaultLog("BULLET own ride",GetExceptionInformation())) { spare=false; }
+    if(spare)return;
     bool pass=false;
     if(flown.load(std::memory_order_relaxed)) {
         const void* owner=nullptr;

@@ -217,8 +217,10 @@ unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,
         }
         unsigned char* const ifc=o+kDemoIfc;
         // The attacker the hit is credited to and judged by: the vehicle, or online the player of this machine who pulled
-        // the trigger of a registered vehicle's gun (online_authority.h ShooterIsAttacker).
-        const unsigned char* const attacker=OnlineAttacker(owner,by);
+        // the trigger of a registered vehicle's gun (online_authority.h ShooterIsAttacker). Only with the bullets' collector
+        // hook in (PassThrough: jet_hooks.cpp keeps such a round off the vehicle the player rides, SparesRide); without
+        // it the vehicle stays the attacker (no self-hit; the coop hit authority may then drop the round).
+        const unsigned char* const attacker=PassThrough() ? OnlineAttacker(owner,by) : owner;
         const void* const weak[2]={At<const void*>(attacker,kSelf),At<const void*>(attacker,kSelfCtrl)};
         reinterpret_cast<void(*)(void*,const void*)>(image+kIfcOwner)(ifc,weak);
         reinterpret_cast<void(*)(void*,float)>(image+kIfcDamage)(ifc,damage);

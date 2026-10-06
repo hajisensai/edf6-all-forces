@@ -93,6 +93,18 @@ constexpr bool ShooterIsAttacker(const Facts& f,Shooter by) noexcept {
     return f.session && by==Shooter::localPlayer && !LocalCopy(f.net);
 }
 
+// Whether a round passes through `target` because it is the vehicle its owner rides: online, a round ShooterIsAttacker
+// named a player for (`ownerIsPlayer`: this machine's) must spare that player's vehicle as the vehicle-owned round spares
+// it. The stock collector leaves out only the owner itself, by pointer (0x232AA0 step 1, core +0x9A8; its base's single
+// ignored object +0x30 is 0 for bullets: docs/bullet-pass-re.md section 3.2), nothing along the owner's ride: the round,
+// made at the muzzle inside the vehicle's own collision, would hit it. The rounds' blasts need nothing: the
+// IndirectFireUnit's blast hurts only what is hostile to its team (+0xD0, the owner's +0x314: docs/carrier-laser-re.md),
+// and the player's vehicle is on the player's side. Offline the owner is never the player (the vehicle stays it), and
+// the test is off besides, so the stock path is untouched.
+constexpr bool SparesRide(bool session,bool ownerIsPlayer,const void* ownerVehicle,const void* target) noexcept {
+    return session && ownerIsPlayer && ownerVehicle && ownerVehicle==target;
+}
+
 // Whether this machine may seat an NPC rider (RideAi) in the vehicle: an unregistered copy is this machine's alone; a
 // registered vehicle gets one on the host only (a client's would make it the vehicle's authority there too).
 constexpr bool MaySeatNpc(const Facts& f) noexcept { return LocalCopy(f.net) || HostOnly(f.session,f.known,f.host); }

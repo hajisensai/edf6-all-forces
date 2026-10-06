@@ -112,6 +112,11 @@ def check_damage(root: str) -> None:
         fail('src/jet_bay.cpp ShellMake: a damage round is made without the exactly-once gate (OnlineShotCounts)')
     if not before(make, 'OnlineAttacker(owner,by)', 'image+kIfcOwner'):
         fail("src/jet_bay.cpp ShellMake: the round's attacker is not OnlineAttacker's (coop's hit authority would drop it)")
+    hook = body(code_only(read(root, 'src/jet_hooks.cpp')), 'void __fastcall AddBodyHook(')
+    if not before(hook, 'SparesOwnRide(collector,body)', 'nextAddBody(collector,body)'):
+        fail("src/jet_hooks.cpp AddBodyHook: a round named the player is not kept off the vehicle they ride (self-hit)")
+    if 'online::SparesRide(InSession()' not in body(code_only(read(root, 'src/jet_hooks.cpp')), 'bool SparesOwnRide('):
+        fail('src/jet_hooks.cpp SparesOwnRide: not the online-only rule (offline must stay stock)')
     bay = code_only(read(root, 'src/jet_bay.cpp'))
     for fn in ('bool PlayerShell(', 'bool PlayerCannon('):
         if 'online::Shooter::localPlayer' not in body(bay, fn):

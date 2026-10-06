@@ -127,6 +127,15 @@ int main() {
         Check(!ShooterIsAttacker(Vehicle(false,none,false,1,kCopyHere),S::localPlayer),"the plugin's own copies name the copy (no identity)");
         Check(!ShooterIsAttacker(Facts{false,true,false,ours,true,false,kCopyHost,2},S::localPlayer),"offline the vehicle stays the attacker");
     }
+    // The round named the player spares the vehicle the player rides (the stock collector spares only the owner pointer).
+    {
+        int ride=0,other=0;
+        Check(SparesRide(true,true,&ride,&ride),"online: the player's round passes through the vehicle they ride");
+        Check(!SparesRide(true,true,&ride,&other),"online: it still hits any other vehicle");
+        Check(!SparesRide(true,false,&ride,&ride),"an owner that is no player of this machine: the stock rule");
+        Check(!SparesRide(true,true,nullptr,nullptr),"a player on foot: nothing spared");
+        Check(!SparesRide(false,true,&ride,&ride),"offline: the stock path, untouched");
+    }
     // Offline nothing changes.
     Check(ShotCounts(Facts{false,true,false,none,true,false,kCopyElsewhere,2},S::vehicle),"offline: every round counts");
 
