@@ -74,6 +74,7 @@ void MissionStart() noexcept {
     ResetJetSound();
     ResetMissiles();
     ResetDrills();
+    ResetEmc();
     ResetSidecars();
     ResetBigWorld();
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources

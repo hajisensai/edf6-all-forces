@@ -100,6 +100,27 @@ constexpr float kImpactDrop=2.0f;
 const wchar_t kDrillChargeSgo[]=L"app:/object/edf6vc_drill_charge.sgo";
 const wchar_t kDrillChargeFile[]=L"EDF6VC_DRILL_CHARGE.SGO";
 bool drillReady=false;                    // preloaded this mission (PreloadShells)
+// The EMC's rounds (emc.cpp, EmcFire; pylib/vcobjects.py EMC_*, tools/make_emc.py): its beam, its charge's glow, the
+// break charge it fires at each building on its line and the blast at its end. Order: EmcRound's.
+struct EmcFile { const wchar_t* sgo; const wchar_t* file; const char* name; };
+const EmcFile kEmcFiles[]={
+    {L"app:/object/edf6vc_emc_beam.sgo",L"EDF6VC_EMC_BEAM.SGO","beam"},
+    {L"app:/object/edf6vc_emc_sight.sgo",L"EDF6VC_EMC_SIGHT.SGO","sight"},
+    {L"app:/object/edf6vc_emc_break.sgo",L"EDF6VC_EMC_BREAK.SGO","break charge"},
+    {L"app:/object/edf6vc_emc_blast.sgo",L"EDF6VC_EMC_BLAST.SGO","blast"},
+};
+constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
+static_assert(kEmcCount==static_cast<int>(EmcRound::blast)+1,"kEmcFiles is indexed by EmcRound");
+bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
+// The IFC's own copy of the round's AmmoSize (#7) and AmmoExplosion (#9), as its config 0x2B5F40 writes them (r14 = the
+// IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B68C5 movss [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its
+// InitParam (IFC +0x70 on) when it is fired, so a write here changes the rounds fired after it (RoundSize, RoundBlast).
+constexpr std::size_t kIfcAmmoSize=0x100,kIfcAmmoBlast=0xF0;
+const Sig kIfcAmmoSigs[]={
+    {0x2B6A15,{0xF3,0x41,0x0F,0x11,0x86,0x00,0x01,0x00,0x00,0x66,0x3B,0xC6}},
+    {0x2B68C5,{0xF3,0x41,0x0F,0x11,0x86,0xF0,0x00,0x00,0x00,0x66,0x3B,0xC6}},
+};
+bool ifcAmmoOk=false;
 
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 constexpr unsigned kPreload=0x7A3780;
@@ -146,18 +167,19 @@ unsigned char* ShellCreate(const wchar_t* sgo,const float* m,bool& ok) noexcept 
 // it was. `ok` goes false for the mission when the game cannot build it or it is no DemoIndirectFire.
 // `straight`: the shot flies the line from `from` to `aim` (IFC +0x2F8 = 0), not the ballistic arc the IFC
 // solves by default.
-bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,bool straight,
-           const char* what) noexcept {
-    if(!ok || !shellsOk || !At<void*>(image,kObjectMgr))return false;
+// The object (nullptr: not made), for a caller that keeps steering it (the EMC's beams: EmcFire).
+unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,
+                         bool straight,const char* what) noexcept {
+    if(!ok || !shellsOk || !At<void*>(image,kObjectMgr))return nullptr;
     alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, aim[0],aim[1],aim[2],1};
     unsigned char* const o=ShellCreate(sgo,m,ok);
-    if(!o)return false;
+    if(!o)return nullptr;
     __try {
         if(At<const void*>(o,0)!=image+kDemoVtable) {
             Log("JET %s: %p is no DemoIndirectFire: deleted, off for this mission",what,o);
             reinterpret_cast<DeleteFn>(image+kDelete)(o);
             ok=false;
-            return false;
+            return nullptr;
         }
         unsigned char* const ifc=o+kDemoIfc;
         const void* const weak[2]={At<const void*>(owner,kSelf),At<const void*>(owner,kSelfCtrl)};
@@ -167,8 +189,13 @@ bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* f
         if(straight)ifc[kIfcBallistic]=0;
         alignas(16) const float st[4]={from[0],from[1],from[2],1.0f},am[4]={aim[0],aim[1],aim[2],1.0f};
         std::memcpy(ifc+kIfcFrom,st,16);std::memcpy(ifc+kIfcAim,am,16);
-        return true;
-    } __except(FaultLog("JET shell setup",GetExceptionInformation())){return false;}
+        return o;
+    } __except(FaultLog("JET shell setup",GetExceptionInformation())){return nullptr;}
+}
+
+bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,bool straight,
+           const char* what) noexcept {
+    return ShellMake(sgo,ok,owner,from,aim,damage,straight,what)!=nullptr;
 }
 
 // The charge for `radius`: the smallest preloaded one at least that wide, else the widest preloaded; -1: none.
@@ -425,6 +452,8 @@ bool InstallBay(bool spawnOk) noexcept {
     bayOk=spawnOk;
     for(const auto& b:kBaySigs)bayOk=bayOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
     shellsOk=bayOk && Readable(image+kDemoVtable,8);
+    ifcAmmoOk=shellsOk;
+    for(const auto& b:kIfcAmmoSigs)ifcAmmoOk=ifcAmmoOk && Matches(b.rva,b.bytes,sizeof(b.bytes));
     return bayOk;
 }
 
@@ -440,8 +469,13 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
     }
     drillReady=shellsOk && ModFileThere(kDrillChargeFile);
     if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
-    Log("JET preload gunship shells=%d cannon=%d impact charges %d/%d/%d/%d drill charge %d",gunshipReady,cannonReady,chargeReady[0],
-        chargeReady[1],chargeReady[2],chargeReady[3],drillReady);
+    for(int i=0;i<kEmcCount;++i) {
+        emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file);
+        if(emcReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEmcFiles[i].sgo,2,-1);
+    }
+    Log("JET preload gunship shells=%d cannon=%d impact charges %d/%d/%d/%d drill charge %d emc beam %d sight %d break %d blast %d",
+        gunshipReady,cannonReady,chargeReady[0],chargeReady[1],chargeReady[2],chargeReady[3],drillReady,emcReady[0],emcReady[1],emcReady[2],
+        emcReady[3]);
 }
 
 void ResetShells() noexcept {
@@ -449,6 +483,7 @@ void ResetShells() noexcept {
     cannonReady=false;
     for(auto& c:chargeReady)c=false;
     drillReady=false;
+    for(auto& e:emcReady)e=false;
 }
 }  // namespace jet
 
@@ -529,4 +564,71 @@ bool DrillCharge(const unsigned char* by,const float* from,const float* at,float
     }
     return Shell(kDrillChargeSgo,drillReady,by,from,at,damage,true,"drill charge");
 }
+
+// The EMC's rounds (emc.cpp): a DemoIndirectFire of kEmcFiles[kind] fired by `by` straight (IFC +0x2F8 = 0) from `from`
+// at `at` with `damage`; its team `by`'s (its side's enemies hurt, its kills, friends spared). The object and its
+// weak-this control block (kept to tell it from another object at the same address later); none when not made.
+bool EmcRoundReady(EmcRound kind) noexcept {
+    const int i=static_cast<int>(kind);
+    return i>=0 && i<kEmcCount && emcReady[i];
+}
+
+RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept {
+    const int i=static_cast<int>(kind);
+    if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<0.0f ||
+       !EmcRoundReady(kind))return RoundObj{};
+    unsigned char* const o=ShellMake(kEmcFiles[i].sgo,emcReady[i],by,from,at,damage,true,kEmcFiles[i].name);
+    if(!o)return RoundObj{};
+    __try { return RoundObj{o,At<const void*>(o,kSelfCtrl)}; }
+    __except(FaultLog("EMC round",GetExceptionInformation())){return RoundObj{};}
+}
+
+namespace {
+// The IFC of round `r` while it is the object made (not deleted, its control block the same), else nullptr.
+unsigned char* RoundIfc(const RoundObj& r) noexcept {
+    if(!r.obj || !Readable(r.obj,kDemoIfc+0x310))return nullptr;
+    if(At<const void*>(r.obj,0)!=image+kDemoVtable || At<const void*>(r.obj,kSelfCtrl)!=r.ctrl || (r.obj[kObjFlags]&kObjDeleted))return nullptr;
+    return r.obj+kDemoIfc;
+}
+}  // namespace
+
+bool RoundSteer(const RoundObj& r,const float* from,const float* at) noexcept {
+    __try {
+        unsigned char* const ifc=RoundIfc(r);
+        if(!ifc)return false;
+        alignas(16) const float st[4]={from[0],from[1],from[2],1.0f},am[4]={at[0],at[1],at[2],1.0f};
+        std::memcpy(ifc+kIfcFrom,st,16);std::memcpy(ifc+kIfcAim,am,16);
+        return true;
+    } __except(FaultLog("EMC round steer",GetExceptionInformation())){return false;}
+}
+
+bool RoundSize(const RoundObj& r,float size) noexcept {
+    if(!ifcAmmoOk || !(size>0.0f))return false;
+    __try {
+        unsigned char* const ifc=RoundIfc(r);
+        if(!ifc)return false;
+        Put<float>(ifc,kIfcAmmoSize,size);
+        return true;
+    } __except(FaultLog("EMC round size",GetExceptionInformation())){return false;}
+}
+
+bool RoundBlast(const RoundObj& r,float radius) noexcept {
+    if(!ifcAmmoOk || !(radius>=0.0f))return false;
+    __try {
+        unsigned char* const ifc=RoundIfc(r);
+        if(!ifc)return false;
+        Put<float>(ifc,kIfcAmmoBlast,radius);
+        return true;
+    } __except(FaultLog("EMC round blast",GetExceptionInformation())){return false;}
+}
+
+void RoundDrop(RoundObj& r) noexcept {
+    const RoundObj was=r;
+    r=RoundObj{};
+    __try {
+        if(RoundIfc(was))reinterpret_cast<DeleteFn>(image+kDelete)(was.obj);
+    } __except(FaultLog("EMC round delete",GetExceptionInformation())){}
+}
+
+bool EmcIfcOk() noexcept { return ifcAmmoOk; }
 }  // namespace crew

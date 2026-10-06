@@ -5,6 +5,8 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
+# The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
+target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -107,6 +109,13 @@ target_include_directories(warn_check PRIVATE src common third_party/EDFModLoade
 target_link_libraries(warn_check PRIVATE edf6common xaudio2 sapi ole32)
 target_compile_options(warn_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(warn_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The EMC's charged beam offline (tools/emc_check.cpp: src/emc_plan.h's trigger cycle, damage budget and the scan along the
+# beam against a stand-in line of buildings and a hill). Not part of the plugin build:
+# cmake --build build --target emc_check && build\emc_check.exe
+add_executable(emc_check EXCLUDE_FROM_ALL tools/emc_check.cpp)
+target_compile_options(emc_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(emc_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp against a stand-in image whose draw functions record;
 # tools/hud_view.py makes the PNGs): the warnings' layout to look at. Not part of the plugin build:
