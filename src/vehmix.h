@@ -12,7 +12,7 @@ inline float Smooth(float x) noexcept { x=Clamp01(x);return x*x*(3.0f-2.0f*x); }
 // them up at once, the speed holds them (a tank at speed in a low gear is not idling). The engine's pitch rises
 // kRevPitch-fold from idle to the top, each layer as the load says: idle fades out as the load fades the load layer in.
 struct EngineClass { float topSpeed,revPitch,idleGain,loadGain; };
-constexpr EngineClass kHeavy{16.0f,2.3f,0.55f,1.0f},kLight{22.0f,2.6f,0.5f,0.9f};
+constexpr EngineClass kHeavy{16.0f,2.3f,0.55f,1.0f},kLight{22.0f,2.6f,0.5f,0.9f},kBike{30.0f,3.2f,0.45f,0.9f};
 inline float Revs(float speed,float load,const EngineClass& c) noexcept {
     return Clamp01(0.55f*Clamp01(load)+0.6f*Clamp01(std::fabs(speed)/c.topSpeed));
 }
@@ -49,10 +49,35 @@ constexpr float kTurretMoving=0.35f,kTurretStill=0.05f;
 // shot at most every kMainGunFrames (a cannon's breech, not an autocannon's belt), a fire sound that is one shot (not a
 // loop: guns that loop it are machine guns and beams) and heard (the drill's is set silent: it is no gun).
 constexpr int kMainGunFrames=60;
-enum class Round { cannon, beam, grenade, other };
+enum class Round { cannon, beam, grenade, gun, missile, other };
 inline bool MainGun(Round r,bool homing,int fireFrames,bool loopedFire,float fireVolume) noexcept {
-    return r!=Round::other && !homing && fireFrames>=kMainGunFrames && !loopedFire && fireVolume>0.0f;
+    return (r==Round::cannon || r==Round::beam || r==Round::grenade) && !homing && fireFrames>=kMainGunFrames && !loopedFire &&
+           fireVolume>0.0f;
 }
+// Every vehicle weapon's sound (the user, 2026-10-06: "the vehicles' sounds: change the like ones too"): the main gun's
+// report (above); a missile's or a rocket's launch (MSL / RKT: their launch sound replaced by a whoosh); a gun firing
+// faster than kRapidFrames a round, or one whose stock fire sound loops (the machine guns, the gatlings, the flak: a
+// burst loop while it fires, its tail when it stops, the cases raining); any other shell or bullet gun (an autocannon,
+// a grenade launcher: a report of its own each round). Beams, lasers, flames, acid, the homing lasers and anything
+// whose fire sound is silent keep the stock sound (none); so does a looped fire sound on a slow gun (the Barga's).
+enum class GunKind { none, main, autocannon, rapid, missile };
+constexpr int kRapidFrames=5;
+inline GunKind KindOf(Round r,bool homing,int fireFrames,bool loopedFire,float fireVolume) noexcept {
+    if(!(fireVolume>0.0f))return GunKind::none;
+    if(MainGun(r,homing,fireFrames,loopedFire,fireVolume))return GunKind::main;
+    if(r==Round::missile)return GunKind::missile;
+    if(homing || (r!=Round::gun && r!=Round::cannon && r!=Round::grenade))return GunKind::none;
+    if(loopedFire)return fireFrames<kMainGunFrames ? GunKind::rapid : GunKind::none;
+    return fireFrames<=kRapidFrames ? GunKind::rapid : GunKind::autocannon;
+}
+// A rapid gun's burst: the loop made at `madeRate` rounds a second played at its own rate (frames a round), the pitch
+// kept within kBurstRatio of the made one; a gun counts as firing kBurstHold frames past its interval after a round.
+constexpr float kBurstRatioLo=0.75f,kBurstRatioHi=1.35f,kBurstHold=3.0f;
+inline float BurstRatio(float frames,float madeRate) noexcept {
+    const float r=frames>0.5f ? 60.0f/frames/madeRate : kBurstRatioHi;
+    return r<kBurstRatioLo ? kBurstRatioLo : r>kBurstRatioHi ? kBurstRatioHi : r;
+}
+inline bool Firing(float sinceRound,float frames) noexcept { return sinceRound<=(frames>1.0f ? frames : 1.0f)+kBurstHold; }
 // The report's mix at `d` m: near (the crack and the punch) within kGunNear, far (the rumble) from kGunFar, the two
 // faded across in log distance; heard at full within kGunRef, ref / d beyond; it arrives d / kSoundSpeed s late.
 constexpr float kGunNear=60.0f,kGunFar=700.0f,kGunRef=25.0f,kSoundSpeed=340.0f;
@@ -84,6 +109,8 @@ inline unsigned ReloadCues(float before,float left,float total,float sinceBefore
 // (m), the rest falling off as Falloff says: the engine 1 / r beyond kEngineRef, the turret and the loader faster (their
 // sounds are small ones, heard from close by).
 constexpr float kEngineShare=0.6f,kTurretShare=0.5f,kReloadShare=0.7f,kGunShare=1.0f;
+constexpr float kRapidShare=0.55f,kAutoShare=0.75f,kBrassShare=0.35f,kMissileShare=0.8f;
+constexpr float kRapidRef=20.0f,kMissileRef=15.0f;   // m: the small guns and the launches heard at full within, ref / d beyond
 constexpr float kEngineRef=12.0f,kTracksRef=10.0f,kTurretRef=5.0f,kReloadRef=4.0f;
 constexpr float kTrackHalf=1.8f;   // m: a tank's track from its middle (an E551's half width): turning on the spot runs them
 // Gain at `d` m of a sound heard at full within `ref`, falling as (ref / d)^`fall` beyond.

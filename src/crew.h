@@ -110,7 +110,9 @@ struct Config {
     float vehicleEngineVolume=1.0f; // ...each group's volume, times the game's own; 0: that group's stock sound kept
     float vehicleTurretVolume=1.0f;
     float vehicleReloadVolume=1.0f;
-    float vehicleGunVolume=1.0f;
+    float vehicleGunVolume=1.0f;    // ...the main guns' reports
+    float vehicleMgVolume=1.0f;     // ...the machine guns', autocannons' and flak's (their bursts, rounds and cases)
+    float vehicleMissileVolume=1.0f;// ...the missiles' and rockets' launches
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
     float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held

@@ -87,7 +87,9 @@ struct EngineSpec { float firing; int cylinders; float res1,res2,rumble,knock,wh
 constexpr EngineSpec kHeavyEngine{30.0f,12,85.0f,190.0f,1.0f,0.35f,1.0f,0x51u};
 // An inline-6 truck diesel (the Grape, the trucks): idle near 840 rpm, lighter and higher, no whistle to speak of.
 constexpr EngineSpec kLightEngine{42.0f,6,140.0f,330.0f,0.45f,0.5f,0.15f,0x77u};
-constexpr float kEngineLoopSec=2.0f;   // whole firings at both rates (60 and 84)
+// A V-twin motorcycle's (the bikes, the sidecar): idle near 1500 rpm, two uneven beats, barking, no whistle.
+constexpr EngineSpec kBikeEngine{25.0f,2,160.0f,420.0f,0.3f,0.6f,0.0f,0xB1u};
+constexpr float kEngineLoopSec=2.0f;   // whole firings at all three rates (60, 84 and 50)
 
 // The firing pulses: each cylinder's own strength (fixed per cylinder) and a small jitter of each firing, every pulse a
 // short burst of pressure (decaying noise and a thump) wrapped round the loop.
@@ -315,6 +317,129 @@ inline Wave ReloadClose() {
     Knock(x,0.0f,1.0f,3000.0f,80.0f,0xC105u);
     Strike(x,0.0f,0.45f,steel,ring,3);
     Knock(x,0.09f,0.3f,4200.0f,200.0f,0x1A7u);
+    return Normalized(std::move(x),1.0f);
+}
+
+// --- The small guns ---
+// One shot of a machine gun or an autocannon at sample `at` (wrapped round a loop of x.size(): a burst's loop; or
+// not, for a one-shot made long enough): the muzzle's crack (bright noise in `crack` s), the blast (noise under 4 kHz
+// falling in `blast` s), the thump (a sine falling from `hz` x 2 to `hz` in 20 ms, lasting `thump` s) and the action's
+// clack (the bolt or the feed, a band of noise round 3 kHz `action` s later). `seed` makes each shot its own.
+struct ShotSpec { float crack,blast,thump,hz,action,gain; };
+inline void AddShot(Wave& x,int at,const ShotSpec& sp,std::uint32_t seed) {
+    Rng r(seed);
+    Biquad hp=Hp(1500.0f),lp=Lp(4000.0f),click=Bp(3000.0f,2.0f);
+    float phase=0.0f;
+    const float len=sp.thump*5.0f>0.25f ? sp.thump*5.0f : 0.25f;
+    AddWrapped(x,at,len,[&](float t) {
+        const float w=r.Next();
+        phase+=kTau*sp.hz*(1.0f+std::exp(-t/0.02f))/static_cast<float>(kRate);
+        const float action=t>=sp.action ? click.Run(w*std::exp(-(t-sp.action)/0.004f))*2.5f : click.Run(0.0f);
+        return sp.gain*(hp.Run(w)*std::exp(-t/sp.crack)*2.0f+lp.Run(w)*std::exp(-t/sp.blast)*1.6f+
+                        std::sin(phase)*std::exp(-t/sp.thump)*std::fmin(1.0f,t/0.001f)*1.4f+0.35f*action);
+    });
+}
+constexpr ShotSpec kMgShot{0.0015f,0.014f,0.03f,130.0f,0.02f,1.0f};
+constexpr ShotSpec kGatlingShot{0.001f,0.009f,0.018f,150.0f,0.015f,0.9f};
+// The bursts as loops (each at its rate: the mixer plays it at made / actual interval): a machine gun's kMgRate rounds
+// a second, a gatling's kGatlingRate over its barrels' whir; each round a little different, the gun's own rattle under
+// them. The loops' length holds whole rounds.
+constexpr float kMgRate=12.0f,kGatlingRate=20.0f,kBurstLoopSec=1.0f;
+inline Wave Burst(float rate,const ShotSpec& sp,float whir,std::uint32_t seed) {
+    const int n=Samples(kBurstLoopSec);
+    Wave x(static_cast<std::size_t>(n),0.0f);
+    Rng r(seed);
+    const int rounds=static_cast<int>(std::lround(kBurstLoopSec*rate));
+    for(int k=0;k<rounds;++k) {
+        ShotSpec one=sp;one.gain*=0.85f+0.3f*r.Uni();
+        AddShot(x,static_cast<int>((static_cast<float>(k)+0.04f*r.Next())*static_cast<float>(n)/static_cast<float>(rounds)),one,seed*31u+static_cast<std::uint32_t>(k));
+    }
+    const Wave rattleIn=NoiseTable(n,seed+5u);
+    const Wave rattle=Steady(rattleIn,[a=Bp(900.0f,1.2f),b=Bp(2400.0f,3.0f)](float v) mutable { return a.Run(v)+0.6f*b.Run(v); });
+    for(int i=0;i<n;++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate);
+        x[static_cast<std::size_t>(i)]+=0.25f*rattle[static_cast<std::size_t>(i)]+
+            whir*(0.4f*std::sin(kTau*3.0f*rate*t)+0.25f*std::sin(kTau*6.0f*rate*t));   // the barrels' whir: whole cycles
+    }
+    return Normalized(std::move(x),1.0f);
+}
+inline Wave MachineGun() { return Burst(kMgRate,kMgShot,0.0f,0x3A6u); }
+inline Wave Gatling() { return Burst(kGatlingRate,kGatlingShot,0.25f,0x6A7u); }
+// A burst ending: the last rounds' echo rolling off the ground (low noise falling over a second, three echoes).
+inline Wave BurstTail() {
+    Wave x(static_cast<std::size_t>(Samples(1.4f)),0.0f);
+    Rng r(0x7A11u);
+    Biquad lp=Lp(600.0f),lp2=Lp(600.0f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate);
+        float e=std::exp(-t/0.12f);
+        for(const float d:{0.25f,0.55f,0.9f})e+=t>d ? 0.35f*std::exp(-(t-d)/0.15f)*(1.0f-d) : 0.0f;
+        x[i]=lp2.Run(lp.Run(r.Next()))*e*std::fmin(1.0f,t/0.005f);
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// An autocannon's one round (the Striker's, the Titan's side guns, the robot truck's rifle): a heavier shot, a short
+// tail and an echo.
+inline Wave Autocannon() {
+    Wave x(static_cast<std::size_t>(Samples(1.3f)),0.0f);
+    AddShot(x,0,ShotSpec{0.002f,0.03f,0.07f,70.0f,0.05f,1.0f},0xAC1u);
+    Rng r(0xAC2u);
+    Biquad lp=Lp(450.0f),lp2=Lp(450.0f),echo=Lp(700.0f);
+    const Wave dry=x;
+    const int d=Samples(0.38f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate);
+        x[i]+=lp2.Run(lp.Run(r.Next()))*std::exp(-t/0.35f)*std::fmin(1.0f,t/0.01f)*2.0f;
+        if(static_cast<int>(i)>=d)x[i]+=0.25f*echo.Run(dry[i-static_cast<std::size_t>(d)]);
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// Spent cases and links raining from a firing gun: small brass rings at random about kBrassRate a second (wrapped round
+// the 1 s loop).
+constexpr float kBrassRate=11.0f;
+inline Wave Brass() {
+    const int n=Samples(1.0f);
+    Wave x(static_cast<std::size_t>(n),0.0f);
+    Rng r(0xB4A5u);
+    const int falls=static_cast<int>(kBrassRate);
+    for(int k=0;k<falls;++k) {
+        const float base=2100.0f*(0.85f+0.3f*r.Uni()),g=0.5f+0.5f*r.Uni();
+        AddWrapped(x,static_cast<int>(r.Uni()*static_cast<float>(n)),0.15f,[=](float t) {
+            return g*(std::sin(kTau*base*t)*std::exp(-t/0.06f)+0.6f*std::sin(kTau*base*2.27f*t)*std::exp(-t/0.035f)+
+                      0.4f*std::sin(kTau*base*3.51f*t)*std::exp(-t/0.02f))*std::fmin(1.0f,t/0.0003f);
+        });
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// One autocannon case landing: a clink and its bounce.
+inline Wave CaseSmall() {
+    Wave x(static_cast<std::size_t>(Samples(0.5f)),0.0f);
+    const float brass[3]={1300.0f,3400.0f,6100.0f},ring[3]={0.12f,0.07f,0.04f},bounce[3]={1330.0f,3460.0f,6200.0f};
+    Strike(x,0.0f,1.0f,brass,ring,3);
+    Strike(x,0.17f,0.45f,bounce,ring,3);
+    Strike(x,0.29f,0.2f,bounce,ring,2);
+    return Normalized(std::move(x),1.0f);
+}
+
+// --- Missiles and rockets ---
+// A launch: the motor's ignition (a pop), its roar coming up in 30 ms and falling away (a band of noise sliding from
+// 1.6 kHz down to 450 Hz as it leaves), the launcher's back-blast under it.
+inline Wave MissileLaunch() {
+    Wave x(static_cast<std::size_t>(Samples(1.8f)),0.0f);
+    Rng r(0x3155u);
+    Biquad band=Bp(1600.0f,1.6f),blast=Lp(300.0f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        if(i%64==0) {
+            const float hz=450.0f+1150.0f*std::exp(-t/0.45f);   // the band's centre now (new coefficients every 64 samples)
+            Biquad b=Bp(hz,1.6f);
+            band.b0=b.b0;band.b1=b.b1;band.b2=b.b2;band.a1=b.a1;band.a2=b.a2;   // its state kept: no click
+        }
+        const float roar=band.Run(w)*std::fmin(1.0f,t/0.03f)*std::exp(-t/0.55f)*3.0f;
+        const float ignite=w*std::exp(-t/0.004f)*1.5f;
+        const float back=blast.Run(w)*std::exp(-t/0.18f)*4.0f;
+        x[i]=roar+ignite+back;
+    }
     return Normalized(std::move(x),1.0f);
 }
 }  // namespace crew::vsynth
