@@ -61,6 +61,23 @@ using SeatQueryFn=bool(__cdecl*)(const void* vehicle,unsigned seat);
 constexpr char kCameraTurret[]="EDF6VehicleCrew_CameraTurretV2";
 constexpr char kSteers[]="EDF6AutoTurret_SteersV2";
 
+// V3, the gun stabilizer (EDF6VehicleCrew src/stab.cpp, 2026-10-06): after a seat's stock aim step EDF6VehicleCrew may
+// turn its axes further, to keep the gun on its line in the world while the hull pitches and turns; the step's own turn
+// (the input) moves that line. A controller of the gun steers in the stabilizer's frame, or it fights it (the hull's turn
+// shows in its error and its want's rate, its input compensates it, the stabilizer compensates it again and takes the
+// input for an aim change):
+//  - Stabilizer (EDF6VehicleCrew), asked before the seat's aim step of the frame: true when it holds `vehicle`'s seat
+//    `seat`; `held` (2 floats, rad, the aim's own senses: yaw, pitch negative up) the axes it holds the gun at this frame
+//    with no input: the angle to steer from; `hull` how much of that is the hull's turn since the last step: taken out of
+//    the want's change (the target's own motion is what is left) and of the held angle's change (the input's own turn,
+//    what a learned turn per input reads). False: `held` the axes as they are, `hull` 0 (steer as ever).
+//  - StabilizerAware (EDF6AutoTurret): it does the above. EDF6VehicleCrew holds no seat EDF6AutoTurret may steer while
+//    that plugin is loaded without this export (an older one).
+using StabilizerFn=bool(__cdecl*)(const void* vehicle,unsigned seat,float* held,float* hull);
+using AwareFn=bool(__cdecl*)();
+constexpr char kStabilizer[]="EDF6VehicleCrew_StabilizerV3";
+constexpr char kStabilizerAware[]="EDF6AutoTurret_StabilizerAwareV3";
+
 // What EDF6AutoTurret does with the player's own gun in a frame (a pure rule: tools/turret_lead_check.cpp checks it):
 // `steer` it turns the gun onto its target, `drag` a stick past DragDeadzone is the player aiming by hand (the target
 // let go). `cameraTurret` the camera turns the gun (CameraTurret above), `lead` the lead-circle mode, `locked` the

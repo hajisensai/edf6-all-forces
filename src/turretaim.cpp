@@ -10,7 +10,8 @@ namespace crew {
 namespace {
 edf::aimlink::TurretReadoutFn turretReadout=nullptr;
 edf::aimlink::SeatQueryFn turretSteers=nullptr;
-ULONGLONG turretTried=0,steersTried=0;
+edf::aimlink::AwareFn turretAware=nullptr;
+ULONGLONG turretTried=0,steersTried=0,awareTried=0;
 }  // namespace
 
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1* out) noexcept {
@@ -27,6 +28,21 @@ int AutoTurretSteers(const void* vehicle,unsigned seat) noexcept {
     namespace link=edf::aimlink;
     const auto fn=link::Resolve(link::kTurretDll,link::kSteers,turretSteers,steersTried);
     return fn ? (fn(vehicle,seat) ? 1 : 0) : -1;
+}
+
+// Asked per aim step of every held seat: the module looked up at most once a second (plugins are never unloaded, so
+// once found it stays; once aware, always aware).
+int AutoTurretStabAware() noexcept {
+    namespace link=edf::aimlink;
+    static int known=-1;
+    static ULONGLONG checkedAt=0;
+    if(known==1)return 1;
+    const ULONGLONG now=GetTickCount64();
+    if(checkedAt && now-checkedAt<1000)return known;
+    checkedAt=now;
+    if(!GetModuleHandleW(link::kTurretDll))return known=-1;
+    const auto fn=link::Resolve(link::kTurretDll,link::kStabilizerAware,turretAware,awareTried);
+    return known=fn && fn() ? 1 : 0;
 }
 }  // namespace crew
 

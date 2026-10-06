@@ -71,6 +71,9 @@ seats; driving those tanks you get the lock too):
   EDF6VehicleCrew, with its turret camera off, or with an EDF6VehicleCrew older than that link, everything here works
   as described above (auto-aim on its own pick, the stick dragging the gun). The flak's time fuse still bursts at the
   tracked target's range either way. NPC gunners are unchanged.
+  EDF6VehicleCrew's gun stabilizer (its `GunStabilizer`) holds a stabilized gun on its line in the world while the hull
+  bumps and turns; this plugin then steers that gun (the flak's, a gunner seat's) from where the stabilizer holds it and
+  leaves the hull's turn to it (`common/edf/aimlink.h` V3), so the hull's turn is never compensated twice.
 
 The HUD, the camera's view ray and the line-of-sight test come from EDF6VehicleCrew (ini `TurretAimHud`). With this
 plugin alone the modes and the lock still work, without anything drawn; the lock then looks along the barrel and does

@@ -7,6 +7,8 @@ add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 # The ground vehicles' ram (its own line, as above).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
+# The gun stabilizer (its own line, as the Nix's).
+target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -72,10 +74,17 @@ target_compile_options(turret_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(turret_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The ram's pure part (src/vehicleram.h: the kinetic-energy formula the jets and the ground vehicles share, the parts that
 # hit, the contact, the impact charge's pick) and representative rams' damage, offline (tools/vehicle_ram_check.cpp).
-# Not part of the plugin build: cmake --build build --target vehicle_ram_check && buildehicle_ram_check.exe
+# Not part of the plugin build: cmake --build build --target vehicle_ram_check && build\vehicle_ram_check.exe
 add_executable(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check.cpp)
 target_compile_options(vehicle_ram_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vehicle_ram_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The gun stabilizer (src/stab.h) on a hull driven over bumps and through turns against the stock aim axis step, the
+# gun's world pointing error with and without it, offline (tools/stab_check.cpp). Not part of the plugin build:
+# cmake --build build --target stab_check && build\stab_check.exe
+add_executable(stab_check EXCLUDE_FROM_ALL tools/stab_check.cpp)
+target_compile_options(stab_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(stab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # NPC jets against buildings, offline (tools/jet_obstacle_sim.cpp): the plugin's own jet_flight.cpp, jet_combat.cpp and
 # body506.cpp against a stand-in world of flat ground and box buildings; tools/jet_obstacle_view.py draws its trace.

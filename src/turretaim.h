@@ -11,4 +11,7 @@ bool AutoTurretReadout(edf::aimlink::TurretReadoutV1* out) noexcept;
 // EDF6AutoTurret's answer whether it turned `vehicle`'s seat `seat` this game frame (aimlink.h Steers): 1 yes, 0 no,
 // -1 no answer (the plugin absent or older than the V2 link).
 int AutoTurretSteers(const void* vehicle,unsigned seat) noexcept;
+// Whether EDF6AutoTurret takes the gun stabilizer's turn out of what it learns (aimlink.h V3 StabilizerAware): 1 yes,
+// 0 it is loaded without that (older), -1 it is not loaded.
+int AutoTurretStabAware() noexcept;
 }  // namespace crew

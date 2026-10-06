@@ -1551,8 +1551,8 @@ void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float widt
 //  - the heading tape at the top (the gun's heading, a caret under it for the hull's: StockTape);
 //  - left of the bottom centre (StockBlock): the hull / turret indicator (the hull's outline and the gun's line, up the
 //    camera's look: which way the hull points against where the player looks and aims), the vehicle's kind and seat,
-//    its speed and HP with the HP bar, a line per weapon (rounds of the magazine; RELOAD and its share and seconds;
-//    EMPTY when it never reloads), and over it the warning (a missile, a lock, the hull critical, out of ammo);
+//    its speed and HP with the HP bar (STAB on that line while the gun stabilizer holds the seat's gun), a line per
+//    weapon (rounds of the magazine; RELOAD and its share and seconds; EMPTY when it never reloads), and over it the warning (a missile, a lock, the hull critical, out of ammo);
 //  - the threat ring of the aircraft (ThreatRing) round the screen's middle. ---
 constexpr float kLobSec=2.5f;        // s: a round in the air longer than this is lobbed (the cross, with its flight time)
 constexpr float kSamePoint=2.0f;     // m: two weapons' points this near and of one label are drawn once
@@ -1728,6 +1728,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     else Format(title,L"%hs  GUNNER %u",r.kind,r.seat);
     Format(info,L"SPD %d km/h    HP %d%%",static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
     if(nix)Append(info,L"    TWIST %+d",static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));   // right positive, as headings
+    if(r.stab)Append(info,r.stab==2 ? L"    STAB LAG" : L"    STAB");   // the gun stabilizer holds it (LAG: the hull outruns its drive)
     warn.scale=kTitleScale;title.scale=info.scale=kLineScale;title.rgba=info.rgba=kHud;
     for(int i=0;i<arms;++i)ArmLine(arm[i],r.arm[i],i==r.selected);
     if(drill) {
