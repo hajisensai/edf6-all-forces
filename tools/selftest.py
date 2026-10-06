@@ -2577,6 +2577,24 @@ def map_wired() -> None:
 
 
 @test
+def split_missile_wired() -> None:
+    """MissileBullet02's split test (0x26CF00) is reached only through the flight state's call (0x26ED9C): the plugin
+    redirects that call, shows the stock test the surface distance (split_fuse.h), defaults on, and CTest runs the
+    simulated flight (docs/split-missile-re.md)."""
+    sm = src('src/splitmissile.cpp')
+    assert 'kSplitTest=0x26CF00,kSplitCall=0x26ED9C' in sm
+    assert 'RedirectCall(image+kSplitCall,image+kSplitTest' in sm
+    assert 'if(!moved)return nextSplit(round,frames);' in sm
+    assert 'targetVtbl[kAddHitSlot]=reinterpret_cast<void*>(&TargetAddHit);' in sm
+    assert 'InstallSplitMissiles();' in src('src/plugin.cpp')
+    assert 'bool splitMissileSurface=true;' in src('src/crew.h')
+    assert 'SplitMissileSurface=1' in src('EDF6VehicleCrew.ini')
+    assert 'src/splitmissile.cpp' in src('CMakeLists.txt')
+    assert 'add_test(NAME split_fuse COMMAND split_fuse_test)' in src('CMakeLists.txt')
+    assert 'docs/split-missile-re.md' in sm and os.path.exists(os.path.join(ROOT, 'docs', 'split-missile-re.md'))
+
+
+@test
 def incremental_install_regressions() -> None:
     from test_installer_incremental import run_checks
     run_checks()

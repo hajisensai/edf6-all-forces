@@ -17,6 +17,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
+# The stock split missiles (MissileBullet02) split short of a big target's surface.
+target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -217,6 +219,11 @@ target_link_libraries(call_pick_test PRIVATE edf6common)
 target_include_directories(call_pick_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(call_pick_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME call_pick COMMAND call_pick_test)
+
+# The split missiles' surface distance against a simulated Blood Storm flight (src/split_fuse.h).
+add_executable(split_fuse_test tests/split_fuse_test.cpp)
+target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME split_fuse COMMAND split_fuse_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
