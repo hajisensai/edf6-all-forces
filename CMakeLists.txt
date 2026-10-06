@@ -9,6 +9,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).
 target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
+# A remote gunner's recoil on the vehicle's authority (src/gunnerrecoil.cpp, docs/online-re.md §10).
+target_sources(EDF6VehicleCrew PRIVATE src/gunnerrecoil.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
@@ -217,6 +219,12 @@ target_link_libraries(call_pick_test PRIVATE edf6common)
 target_include_directories(call_pick_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(call_pick_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME call_pick COMMAND call_pick_test)
+# The remote gunner's recoil on the vehicle's authority (src/gunnerrecoil.cpp) against a stand-in EDF.dll.
+add_executable(gunner_recoil_test tests/gunner_recoil_test.cpp)
+target_link_libraries(gunner_recoil_test PRIVATE edf6common)
+target_include_directories(gunner_recoil_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(gunner_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME gunner_recoil COMMAND gunner_recoil_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check

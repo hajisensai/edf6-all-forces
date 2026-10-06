@@ -15,6 +15,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
+#include "gunnerrecoil.h"
 #include "memory.h"
 #include "subcarrier.h"
 #include "edf/host.h"
@@ -680,6 +681,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallProteus();       // chain both aims after the turret camera and plain-aim stabilizer hooks
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
+    InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
