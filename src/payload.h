@@ -29,6 +29,7 @@ struct PayloadReadout {
     int count;                 // entries (the fuel tank, which every seat lists, left out)
     int picked;                // the entry the secondary fires, -1 when the seat has no stores to switch between
     int choices;               // how many the switch goes round (>= 2 when `picked` >= 0)
+    int switchButton;          // EDF seat-button mask used by Switch (read-only HUD binding)
     bool keys;                 // the player is on the keyboard and mouse (else a pad): which switch to name
     PayloadEntry entry[kMostPayload];
 };

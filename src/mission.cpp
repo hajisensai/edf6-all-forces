@@ -54,6 +54,8 @@ void MissionStart() noexcept {
     ResetCrew();
     ResetHelis();
     ResetGround();
+    ResetNpcAi();
+    ResetNpcPosts();
     ResetAirstrikes();
     ResetJets();
     ResetBoosters();

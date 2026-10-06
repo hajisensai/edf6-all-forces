@@ -203,6 +203,7 @@ def vehicle_sgo(game: vc.Game, own_model: bool | None = None, blob: bytes | None
         model = r.get('animation_model')
         model.items[0].items[0] = f'app:/Object/{MODEL_FILE.lower()}'
         model.items[0].items[1] = MODEL_MDB
+        model.items[1] = f'app:/object/{artillery_model.OUT_CAS.lower()}'
         if blob is None:
             if folder is None:
                 raise ValueError('没有双管坦克模型，无法生成它的物理骨架')
@@ -251,6 +252,9 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
     root = dsgo.parse(files[f'OBJECT/{SGO_FILE}']).root
     v = dsgo.to_py(root)
     own = f'OBJECT/{MODEL_FILE}' in files
+    if own:
+        assert v['animation_model'][1] == f'app:/object/{artillery_model.OUT_CAS.lower()}'
+        assert f'OBJECT/{artillery_model.OUT_CAS}' in files, 'the retargeted artillery animation is missing'
     assert dsgo.to_py(turret_constraint(root).items[1].items[1]) == TURRET_LIMITS, 'the turret can still turn'
     md = None
     assert own == (f'OBJECT/{RAGDOLL_FILE}' in files), 'the model and its ragdoll come together'
@@ -273,6 +277,8 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
         scroll = [tuple(x) for x in v['tank_caterpillar_animation']]
         assert scroll and not set(scroll) - params, f'model lacks the scrolled track materials {set(scroll) - params}'
     if game is not None:
+        if own:
+            assert files[f'OBJECT/{artillery_model.OUT_CAS}'] == artillery_model.animation(game, md), 'stale artillery animation'
         bad = gun_problems(files, game, md)
         assert not bad, 'gun mounts: ' + '; '.join(bad)
     for w in VEHICLE.weapons:
@@ -320,7 +326,7 @@ def gun_problems(files: dict[str, bytes], game: vc.Game, md: Mdb | None) -> list
 
 
 def build(root: str) -> dict[str, bytes]:
-    """Every file this tool writes, {path under Mods: bytes}, checked, from the game's Root.cpk (only read) and the
+    """Every file this tool writes (including the model's private CAS), {path under Mods: bytes}, checked, from the game's Root.cpk (only read) and the
     twin tank's model folder (artillery_model.model_dir(); without it no model is made, with a message)."""
     game = vc.Game(root)
     folder = artillery_model.model_dir()
@@ -335,6 +341,7 @@ def build(root: str) -> dict[str, bytes]:
             if abs(b.bore - BORE) > 0.02:
                 raise ValueError(f'炮口内径 {b.bore:.3f} m，炮弹按 {BORE} m 设计：请更新 BORE')
         files[f'OBJECT/{MODEL_FILE}'] = arc
+        files[f'OBJECT/{artillery_model.OUT_CAS}'] = artillery_model.animation(game, md)
         files[f'OBJECT/{RAGDOLL_FILE}'], blob = ragdoll(game, md)
     files[f'OBJECT/{SGO_FILE}'] = vehicle_sgo(game, folder is not None, blob)
     for stock, path, side in zip(STOCK_GUNS, VEHICLE.weapons, 'lr'):

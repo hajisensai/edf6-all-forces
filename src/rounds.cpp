@@ -179,9 +179,18 @@ bool ReadRound(const unsigned char* w,RoundModel* out) noexcept {
     if(c && c->cls==Cls::missile && customOk) {
         // The guidance type (CP[0]): 0 flies straight on its motor (the rockets), 1 / 2 steer at the lock.
         const Variant& custom=*reinterpret_cast<const Variant*>(w+kWeaponCustom);
-        if(Whole(Number(custom,0,-1,0.0))!=0)m.kind=RoundKind::homing;
+        const bool plugin=Whole(Number(custom,8,-1,0.0))==1000000 && Whole(Number(custom,9,-1,0.0))==4242;
+        const bool unguided=At<std::int32_t>(w,kWeaponLockon)!=kHoming;
+        const int type=Whole(Number(custom,0,-1,0.0));
+        // A plugin rocket retains the base missile's CP[0] but deliberately has no lock. Its marker selects Guide's
+        // motor, not a guided target: do not discard its impact as if it were an AIM/AGM store.
+        // Type 1 accelerates along own before its closed CP[8] gate, just like type 0 (guidance-re.md §1).
+        // Type 2 instead accelerates along the model nose; that is not this read-only model.
+        if(!unguided || (type!=0 && !(plugin && type==1)))m.kind=RoundKind::homing;
         else {
             m.kind=RoundKind::rocket;m.label="RKT";
+            m.pluginMotor=plugin && unguided;
+            m.burn=vec::Clamp(static_cast<float>(Number(custom,3,0,0.0)),0.0f,3600.0f);
             m.accel=static_cast<float>(Number(custom,4,-1,0.0));
             m.top=static_cast<float>(Number(custom,6,-1,0.0));
             m.ignite=Whole(Number(custom,7,0,0.0));
@@ -215,7 +224,8 @@ bool RoundLands(const unsigned char* w,const RoundModel& m,const float* pos,cons
         rounds::Motor f{};
         for(int i=0;i<3;++i){f.own[i]=dir[i]*m.speed;f.inh[i]=owner[i];f.drop[i]=drop[i];}
         f.accel=m.accel;f.top=m.top;f.keepInh=m.keepInh;f.keepOwn=m.keepOwn;f.ignite=m.ignite;
-        landed=rounds::FirstHit(f,pos,m.alive,kSegment,reach,&Ray,hit,at,&took);
+        if(m.pluginMotor && Cfg().enabled)landed=rounds::FirstHit(rounds::PluginMotor{f,m.burn},pos,m.alive,kSegment,reach,&Ray,hit,at,&took);
+        else landed=rounds::FirstHit(f,pos,m.alive,kSegment,reach,&Ray,hit,at,&took);
     } else {
         rounds::Arc f{};
         for(int i=0;i<3;++i){f.vel[i]=dir[i]*m.speed+owner[i];f.drop[i]=drop[i];}

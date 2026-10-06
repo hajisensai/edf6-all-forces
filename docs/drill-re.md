@@ -236,6 +236,26 @@ UV 已按游戏的左上原点翻转、贴图渲染位置正常（`pylib/model_v
 仍需实机（L）：钻头是否画在车头前并转动（Debug 姿态行的 `drawn pose` 应跟着 `written` 走）；`catapi_body` 的组合是否用到本帧车体的
 世界矩阵（若用上一帧，高速行驶时钻头会落后车体一帧）。
 
+### 5.7 实际截图的上下两个钻头：还漏了 CAS 的绝对位置
+
+2026-10-06 新截图显示车头下方的小锥体和上方露出的巨大扇形座。读取实际安装的 MRAB/SGO（只读）确认：
+只有一份锥体几何，且 §5.6 的 ragdoll 行已经删除，仍然出错。18:54:51 的日志另有
+`its spin bone's local matrix was rewritten by the game between frames`。
+
+Root.cpk 的 `V505_TANK.CAS` 内嵌 CANM 0x300；`default` 和 `fire` 两个片段都向 `catapi_body` 写绝对局部位置
+`(0, 0.8808, 0)`，不是相对 MDB 绑定姿态的增量。新绑定是 `(0, 3.36818, 4.19409)`。
+将这份真实动画应用于实际 MRAB，可以重现截图：锥体被向下向后移动，车顶留下暴露的扇形座。
+因此 §5.6 的静态绑定一致性检查不足以证明实机位置正确。
+
+生成器现在同时生成 `OBJECT/EDF6VC_DRILL.CAS`，SGO 引用它。两段动画移除插件接管的 `catapi_body` 轨道，
+保留其骨骼名表项；其它改过父级的骨骼按新旧局部绑定差值重定位，其余动画的关键帧和运动幅度不变。
+插件从 MDB 取得正确的初始局部矩阵，后续旋转不会再被原版轨道拖回履带根部。
+
+回归：`python tests/test_cas_pose.py` 是不需要游戏的二进制边界/共享通道/运动幅度测试；
+`python tools/vehicle_cas_check.py --out build/vehicle-cas-review` 用真实 Root.cpk 和用户 OBJ 生成最终 MRAB/SGO/CAS，
+读取生成产物回放旧/新动画并输出前后预览。它要求显式输出目录，拒绝写入游戏目录。
+尚需游戏内复核实际旋转及最终渲染；离线回放验证位置修复，不声称完成实机 E2E。
+
 ## 6. 镜头（`tools/make_drill.py CAMERA`）
 
 `game_object_camera_setting` 是 `[向量0, 向量1, 1, 0.1]`，解析在 `0x54DDF0`（向量 0 → obj+0x170，向量 1 → obj+0x180，第 4 项 → +0x190）。

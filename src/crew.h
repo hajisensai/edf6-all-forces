@@ -231,6 +231,36 @@ struct Config {
     float centipedeLinkRange=150.0f;// ...m a centipede goes to join another's tail from
     float centipedeWoundDamage=3.0f;// ...a split's headless front takes this many times the damage until its head is back
     float primerBlood=1.0f;         // ...their blood splash (hit and death) times the giant ant's size; 0: none
+    // npcai.cpp: the plugin's own AI for the friendly NPC soldiers (docs/npc-ai-design.md §3, §4).
+    bool customNpcAi=true;          // the master switch (off: every soldier's AI is the stock one)
+    bool npcFireLane=true;          // ...they keep out of the player's line of fire (the camera's centre line)
+    float npcLaneWidth=2.5f;        // ...m either side of that line
+    float npcLaneLength=150.0f;     // ...m along it (shorter where it meets the map)
+    float npcFlankDeg=45.0f;        // ...their combat spot this many degrees off the player's own line to the target
+    bool npcWeaponSwitch=true;      // ...they switch weapons for the target's range and kind
+    float npcEngageShare=0.85f;     // ...they fight at this share of their longest weapon's true reach (the stock: half, at least 25 m)
+    bool npcEvade=true;             // ...crowded, they back off, side-step and roll
+    float npcDangerRange=15.0f;     // ...m: enemies this near press on them
+    float npcGrabRange=4.0f;        // ...m: one this near makes them roll (or back off)
+    float npcCrowd=1.5f;            // ...the pressure (enemies near, nearer weigh more) they back off from
+    float npcRollSec=2.5f;          // ...s between two rolls
+    float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
+    float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
+    bool npcSquadSuccession=true;   // ...a squad whose leader dies gets a new one (or joins another), not split up
+    int npcSquadMin=2;              // ...fewer left than this: it joins the nearest squad with room
+    int npcSquadMax=8;              // ...a squad takes in others up to this many
+    float npcSquadJoinRange=150.0f; // ...within this many m
+    bool npcBoarding=true;          // ...squads board and leave friendly vehicles on a map order; soldiers in gunner seats shoot
+    int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
+    float npcMarkCone=8.0f;         // ...within this many degrees of the centre
+    float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay
+    float npcFreeRange=120.0f;      // ...a squad told to engage freely: m round where it stood it goes after enemies
+    float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s
+    bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
+    float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
+    bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
+    float tankPostHold=6.0f;        // ...m off its post before it does
+    float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -559,6 +589,9 @@ bool IsSidecar(const void* vehicle) noexcept;
 void SidecarFrame(unsigned char* vehicle) noexcept;
 bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
+// Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
+bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
+bool SidecarBulletHooked() noexcept;
 void SidecarLevel(const void* body,float* w) noexcept;
 void ResetSidecars() noexcept;
 // physics.cpp: the car step's final setAngVel (0x6746C6) goes through the plugin (SidecarLevel), redirected at load.
@@ -735,6 +768,7 @@ struct PlayerJetReadout {
     int flares;                  // flare pairs left
     float aim[3],path[3];
     int stores,store;
+    int storeButton,targetButton; // actual seat-button masks used by this aircraft
     const char* storeName[6];
     int storeRounds[6];
     int storeRole[6];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
@@ -808,6 +842,8 @@ void NetProbe(unsigned char* vehicle) noexcept;
 // This is a session query, not proof that an object participates in replication: plugin call aircraft do not
 // register a network identity; delivered vehicles do (docs/online-re.md sections 1 and 2).
 bool InSession() noexcept;
+// Whether this machine is the room's host (offline: true; netprobe.cpp). False when its code is not the one read.
+bool IsRoomHost() noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
 // `most`; how many.
@@ -857,3 +893,4 @@ unsigned char* PlayerHuman() noexcept;
 #include "map.h"
 #include "mapcmd.h"
 #include "proteus.h"
+#include "npcai.h"

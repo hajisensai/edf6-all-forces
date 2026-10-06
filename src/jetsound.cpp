@@ -13,6 +13,8 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "jetaudio.h"
+#include "jetsound_state.h"
+#include "jet_internal.h"
 #include "stores.h"
 #include "layout.h"
 #include "memory.h"
@@ -29,7 +31,6 @@ constexpr std::size_t kPresetBank=0x20;   // SePreset: its cue (the bank: null p
 // coordinates p.x R1 + p.y R2 + p.z R3 + R4; +x is the camera's left, +z ahead: the game's pan atan2(-x, z), 0x7ACD20).
 constexpr std::size_t kListeners=0x58,kListenerCount=0x68,kListenerFloats=20;
 constexpr std::size_t kMasterVolume=0x2E8,kEffectVolume=0x2F0;
-constexpr float kFullSpeed=150.0f;               // the engine's sound at its fullest from this speed on
 constexpr float kRoarRef=180.0f,kWhineRef=90.0f; // full volume within these; 1/r beyond (the whine's highs fall faster)
 constexpr float kFarAt=2500.0f;                  // the air's dulling at its fullest this far
 constexpr float kSpread=0.75f;                   // how far a sound to one side leaves the other ear
@@ -67,6 +68,9 @@ int Fault(const EXCEPTION_POINTERS* e) noexcept {
     Log("SOUND fault on a jet's engine sound (%08lX at EDF+%llX): jet sounds off until the game restarts",r->ExceptionCode,
         static_cast<unsigned long long>(static_cast<const unsigned char*>(r->ExceptionAddress)-image));
     broken=true;
+    // Other audio consumers continue beating the shared engine after this fault.
+    // Stop our loops now; the watchdog cannot silence just these voices for us.
+    for(auto& s:sounds){audio::Close(s.slot);s=Sound{};}
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
@@ -125,8 +129,8 @@ bool Place(const float* pos,const float* vel,SoundPlace* out) noexcept {
     return true;
 }
 
-// What jet `v` at `pos`, flying `vel` at `share` of kFullSpeed, sounds like at the camera.
-audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,float share) noexcept {
+// What jet `v` at `pos`, flying `vel` with its current engine load, sounds like at the camera.
+audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,const jetsound::Engine& engine) noexcept {
     audio::Mix m{};
     SoundPlace p{};
     if(!Place(pos,vel,&p))return m;
@@ -136,7 +140,7 @@ audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,float
     const float ahead=mat[8]*p.toCamera[0]+mat[9]*p.toCamera[1]+mat[10]*p.toCamera[2];
     const float roarAt=d>kRoarRef ? kRoarRef/d : 1.0f,whineAt=d>kWhineRef ? std::pow(kWhineRef/d,1.3f) : 1.0f;
     // JetSoundVolume here, not on the master voice: the cockpit's warnings share that at their own WarnVolume.
-    const float own=Cfg().jetSoundVolume;
+    const float own=Cfg().jetSoundVolume*engine.gain,share=engine.power;
     const float roar=own*(0.45f+0.55f*share)*roarAt*(0.6f+0.4f*(ahead<0.0f ? -ahead : 0.0f));
     const float whine=own*(0.2f+0.8f*share)*whineAt*(0.35f+0.65f*(ahead>0.0f ? ahead : 0.0f));
     m.roarL=roar*leftGain;m.roarR=roar*rightGain;
@@ -149,6 +153,24 @@ audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,float
 
 void Step(unsigned char* v) noexcept {
     const ULONGLONG ms=GameMs(),frame=GameFrame();
+    jetsound::State state{};
+    if(!jetsound::PlayerState(v,&state)) {
+        // A live NPC flight includes a stationary carrier's hover. A retained entry
+        // alone (Adopt/hand-back, or an old command) is not evidence of an engine running.
+        const jet::Jet* const j=jet::FindJet(v);
+        if(j && !j->reap && j->lastStep && ms-j->lastStep<=kStaleMs) {
+            state.commanded=true;state.parked=false;
+            state.rotor=jet::KindOf(j->role).flight==jet::FlightModel::rotor;
+            state.speed=std::sqrt(Dot(j->m.vel,j->m.vel));
+        }
+    }
+    state.occupied=SeatCount(v)>0 && SeatRider(SeatAt(v,0))!=Rider::none;
+    const jetsound::Engine engine=v[kDead] ? jetsound::Engine{} : jetsound::For(state);
+    if(engine.gain<=0.0f) {
+        // Parked exhibits must not consume the finite aircraft/voice tables.
+        for(auto& old:sounds)if(old.ref.Is(v)){Silence(old);break;}
+        return;
+    }
     Sound* const s=EntryFor(v,ms);
     if(!s)return;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -160,7 +182,7 @@ void Step(unsigned char* v) noexcept {
     if(frame!=s->lastFrame){std::memcpy(s->last,pos,12);s->lastFrame=frame;}
     s->seen=ms;
     if(s->slot<0)s->slot=audio::Open();   // a new jet, or all voices were in use: (again) now
-    audio::Set(s->slot,MixFor(v,pos,s->vel,Clamp01(std::sqrt(Dot(s->vel,s->vel))/kFullSpeed)));
+    audio::Set(s->slot,MixFor(v,pos,s->vel,engine));
 }
 
 // Once a frame: the camera's place, matrix and velocity, the beat (at the game's volume), and every sound whose jet
@@ -259,7 +281,6 @@ void JetSound(unsigned char* v) noexcept {
     if(body!=PluginBody::jet && body!=PluginBody::playerJet)return;
     if(!started){started=true;audio::Start();}   // the first jet: the engine (it logs why when it cannot)
     __try {
-        if(v[kDead])return;   // a wreck's sound stops with it going stale
         Step(v);
     } __except(Fault(GetExceptionInformation())) {}
 }

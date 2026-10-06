@@ -21,6 +21,7 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "boarding_entrance.h"
 #include "body506.h"
 #include "game_clock.h"
 #include "edf/host.h"
@@ -90,9 +91,9 @@ using SeatFn=void(__fastcall*)(void*,void*);
 // its stock slot 49 (FindSeat), the slot we chain its per-frame input on, and whether only an armed one
 // (a weapon holder, veh+0x648) gets an NPC driver.
 // The 502 has the 54-slot VehicleBase vtable: no slot 55, its per-frame input copy is slot 4 (0x612D20).
-// VehicleBigBegaruta (the Proteus) has its own slot 55 (0x648F70: the family's AI think 0x63C1C0, then its gunners') and
-// its own slot 50 (0x6490C0: RideAi, every seat), slot 49 the stock FindSeat (docs/proteus-re.md §1); before 2026-10-06
-// its input was 0 here, so no per-frame step of the plugin ever ran for it (no HUD, no seat switch, no crew).
+// VehicleBigBegaruta (Proteus): slot 55 is its AI task, not the player's update. Chain slot 4 (0x644350), as for
+// the crawler, so a player-driven Proteus runs the rework, publishes HUD and advances the clock even with no AI task.
+// That function takes (vehicle, step); the shared four-register forwarding preserves both and it ignores r8/r9.
 // Vehicle_Car (the Grape, also the unarmed 512 Kei truck and 513 trailer cab) has its own slot 49
 // (0x65B910, a preferred-seat wrapper round the stock one) and its CarBase input in slot 55 (0x65A390).
 struct VehicleClass {
@@ -105,7 +106,7 @@ const VehicleClass kClasses[]={
     {0x17DA960,0x63C1C0,"504_begaruta"},{0x17DADB0,0x61ACD0,"505_Tank"},{kVt506,0x61B8F0,"506_Helicopter"},
     {0x17DB9D8,0x61DDF0,"510_Maser"},{0x17DBDF8,0x61F080,"511_Bike"},{0x17DC250,0x620790,"601_Tank"},
     {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x63C1C0,"612_nix"},{0x17DD720,0,"VehicleBase"},
-    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0x648F70,"BigBegaruta"},{kVt409,0x64C020,"Helicopter409"},
+    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0x644350,"BigBegaruta",kFindSeat,4},{kVt409,0x64C020,"Helicopter409"},
     {kVt410,0x64E080,"Helicopter410"},{kVtHeliBase,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
     {0x17E0A80,0,"CarBase"},{0x17E1828,0,"TankBase"},
     {0x17E01B0,0x65A390,"Car",0x65B910,kSlotInput,true},
@@ -548,19 +549,14 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
         Log("VEH v=%p %s team=%d playerTeam=%d seats=[%s] pos=(%.0f,%.0f,%.0f) dist=%.0f",vehicle,kClasses[cls].name,
             At<std::int32_t>(vehicle,kTeam),player.team,riders,p[0],p[1],p[2],player.at ? std::sqrt(Distance2(vehicle,player.pos)) : -1.0f);
     }
-    if(anyPlayer){st.playerAt=now;st.emptySince=0;return;}
+    if(anyPlayer){if(SeatRider(SeatAt(vehicle,0))==Rider::player)st.playerAt=now;st.emptySince=0;return;}
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
-    // A heli no player has ridden yet stays where it stands for them (the user, 2026-10-05: the range's parked helis
-    // "all took off by themselves, I could not get in": crewed 9 s in, a heli lifts off at once, where a crewed tank
-    // stays to be bumped). One a player has ridden and left is crewed as before (it follows them). The plugin's aircraft
-    // are 506 bodies (IsHelicopter by the vtable): one a mission placed empty waits too (the user, 2026-10-05: the
-    // range's air carrier, there an NPC-flown friend, "flew straight off"; testrange/gen.py now parks them empty).
-    // The Proteus the same (decided 2026-10-06): a parked one no player has ridden stays for them, its RideAi would seat
-    // NPCs in all four seats and walk it off; one a player rode and left is crewed as any vehicle is.
-    if((IsHelicopter(vehicle) || IsProteus(vehicle)) && !st.playerAt)return;
+    // Every first-use parked vehicle belongs to the waiting player, not only helicopters/Proteus.
+    // An existing mission NPC is untouched above; a player must have driven seat 0 before auto-crew is eligible.
+    if(!st.playerAt)return;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
     ULONGLONG since=st.emptySince;
@@ -602,10 +598,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -739,6 +735,10 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     if(Cfg().enabled)Guarded(kStepDrill,&DrillInput,static_cast<unsigned char*>(vehicle));
     // The EMC's trigger is its charge's (emc.cpp): the same, the stock burst never starts.
     if(Cfg().enabled)Guarded(kStepEmc,&EmcInput,static_cast<unsigned char*>(vehicle));
+    // An NPC tank pushed off its post drives back: seat 0's stick written before the stock input reads it (npcpost.cpp).
+    if(Cfg().enabled)Guarded(kStepNpcPost,&NpcPostInput,static_cast<unsigned char*>(vehicle));
+    // The NPC soldiers in its gunner seats aim and fire, before the stock input reads the seats (npcai.cpp).
+    if(Cfg().enabled)Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle));
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
@@ -807,6 +807,7 @@ void InstallInputs() noexcept {
 void EnsureInputs() noexcept {
     if(InterlockedCompareExchange(&inputsHooked,1,0)!=0)return;
     InstallInputs();
+    InstallNpcAi();   // the soldiers' Think, chained after any other plugin's the same way (npcai.cpp)
 }
 
 bool InstallCrew() noexcept {
@@ -852,6 +853,40 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
 }
 
 bool KnownVehicle(const void* object) noexcept { return ClassOf(object)>=0; }
+
+bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
+    if(!out || !Cfg().enabled || !Cfg().playerJet)return false;
+    __try {
+        const auto* human=PlayerHuman();
+        if(!human || human[kDead])return false;
+        const auto* riding=At<const unsigned char*>(human,kHumanVehicleCtrl);
+        if(riding && At<std::int32_t>(riding,8)>0)return false;
+        const auto mask=At<std::uint32_t>(human,0x31C);
+        const auto* pos=reinterpret_cast<const float*>(human+kPosition);
+        float best=120.0f*120.0f;
+        bool found=false;
+        const ULONGLONG now=GameMs();
+        for(const auto& st:states) {
+            if(!st.ref || now-st.seen>300)continue;
+            auto* v=static_cast<unsigned char*>(const_cast<void*>(st.ref.obj));
+            if(!Readable(v,kSeatCount+8) || !st.ref.Is(v) || !IsJet(v) || !PlayerJetBoardable(v))continue;
+            for(unsigned i=0;i<SeatCount(v);++i) {
+                const auto* seat=SeatAt(v,i);
+                const Rider rider=SeatRider(seat);
+                if(rider!=Rider::none && !(rider==Rider::dummy && Cfg().bump))continue;
+                if(!(mask & At<std::uint32_t>(seat,0x30) & At<std::uint32_t>(seat,0x34)))continue;
+                float point[3],reach=0.0f;
+                if(!SeatPoint(v,i,point,&reach) || !std::isfinite(reach) || reach<=0.0f)continue;
+                const float dx=point[0]-pos[0],dy=point[1]-pos[1],dz=point[2]-pos[2];
+                const float d=dx*dx+dy*dy+dz*dz;
+                if(!std::isfinite(d) || d>=best)continue;
+                best=d;found=true;
+                std::memcpy(out->at,point,12);out->reach=reach;out->distance=std::sqrt(d);out->inReach=d<=reach*reach;
+            }
+        }
+        return found;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 const char* VehicleClassName(const void* vehicle) noexcept {
     const int c=ClassOf(vehicle);

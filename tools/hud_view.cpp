@@ -149,12 +149,14 @@ bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; 
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
+bool PlayerPayload(PayloadReadout* o) noexcept { if(hasHeli){*o=PayloadReadout{};o->choices=3;o->switchButton=0x10;o->keys=sceneHeli.f.keys;}return hasHeli; }
 bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
+bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
 bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
 bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
 bool PlayerGunnerHud(GunnerReadout*) noexcept { return false; }
@@ -163,6 +165,9 @@ bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap || mapEasing; }
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
+// The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
+bool sceneMarkOn=false;float sceneMark[3]{};
+bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
 void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -286,7 +291,7 @@ void Dot(float x,float y,float z,std::uint8_t flags) {
 }
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
-void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad) {
+void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920) {
     sceneMap=MapReadout{};
     sceneMap.pad=pad;sceneMap.follow=true;
     sceneMap.yaw=yawDeg*kDeg;sceneMap.pitch=pitchDeg*kDeg;sceneMap.height=height;
@@ -335,17 +340,65 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
     sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
-    std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardMany),Tr(Tx::orderGuard),60.0,420.0,2);
+    // The squads (npcai.cpp, docs/npc-ai-design.md §6.1): a recruited one guarding, a free one, a script's (locked, grey),
+    // one dismissed waiting out its cooldown; their panel on the right.
+    const float sq1[3]={-30.0f,0.0f,150.0f},sq2[3]={200.0f,0.0f,250.0f},sq3[3]={-250.0f,0.0f,500.0f};
+    cmdUnit(sq1,false,"RANGER x4",Order::guard,guard,true);
+    cmdUnit(sq2,false,"FENCER x2",Order::none,nullptr,false);
+    cmdUnit(sq3,false,"RANGER x6",Order::none,nullptr,false);
+    for(int i=sceneCmd.count-3;i<sceneCmd.count;++i)sceneCmd.unit[i].owner=kCmdOwnerGround;
+    sceneCmd.unit[sceneCmd.count-1].locked=true;
+    auto row=[](const char* name,int alive,const char* status,Order order,bool locked,bool selected){
+        SquadRow& r=sceneCmd.squad[sceneCmd.squads];
+        std::snprintf(r.name,sizeof(r.name),"%s",name);std::snprintf(r.status,sizeof(r.status),"%s",status);
+        r.alive=alive;r.now.order=order;r.locked=locked;
+        sceneCmd.squadSelected[sceneCmd.squads++]=selected;
+    };
+    row("RANGER",4,"RECRUITED",Order::guard,false,true);
+    row("FENCER",2,"FREE",Order::none,false,false);
+    row("RANGER",6,"SCRIPT",Order::none,true,false);
+    row("AIR RAIDER",3,"WAIT 42s",Order::guard,false,false);
+    sceneCmd.squad[sceneCmd.squads-1].cooldown=42;
+    if(squadCount==9) {
+        row("WING DIVER",12,"RECRUITED",Order::focus,false,false);
+        row("AIR RAIDER",8,"ESCORT",Order::board,true,false);
+        row("FENCER",10,"HOLD",Order::dismount,true,false);
+        row("WING DIVER",7,"SQUAD",Order::engage,false,false);
+        row("RANGER",4,"FREE",Order::recruit,false,false);
+        for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==sceneCmd.count-3;
+        sceneCmd.selected=1;
+    }
+    std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardResult),Tr(Tx::orderGuard),60.0,420.0,2,L"");
     sceneCmd.noteFresh=true;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return;}
-    std::fprintf(out,"W 1920 1080\n");
-    SetScreen(1920,1080);
+    std::fprintf(out,"W %d 1080\n",width);
+    SetScreen(width,1080);
     float vp[16];
-    MapCamera(sceneMap,1920.0f,1080.0f,vp);
-    struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
-    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},1920);
+    MapCamera(sceneMap,static_cast<float>(width),1080.0f,vp);
+    struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},width);
+    auto shown=[&](const wchar_t* wanted,bool title=false){
+        int found=0;
+        for(std::size_t i=0;i<drew.size();++i)if(drew[i].text==wanted && (!title || drew[i].y0<100)) {
+            ++found;const Drew& a=drew[i];
+            for(std::size_t j=0;j<drew.size();++j)if(i!=j && !drew[j].text.empty()) {
+                const Drew& b=drew[j];
+                if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1) {
+                    ++textFailed;std::printf("FAIL squad overlap %s: %s / %s\n",hudtext::Name(hudtext::InUse()),Narrow(a.text).c_str(),Narrow(b.text).c_str());
+                }
+            }
+        }
+        if(found!=1){++textFailed;std::printf("FAIL squad text missing or repeated: %s\n",Narrow(wanted).c_str());}
+    };
+    shown(Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys),true);
+    if(!pad)shown(Tr(Tx::squadKeys));
+    for(int i=0;i<sceneCmd.squads;++i) {
+        const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
+        hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
+        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));shown(expected.text);
+    }
     std::fclose(out);out=nullptr;
     hasMap=false;
     std::printf("%ls\n",path.c_str());
@@ -387,6 +440,46 @@ void Prime(const float* pos,int width=1920) {
     HudPublish();
     struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
     HudDraw(vp,image,&viewport,nullptr,0);
+}
+
+// Check the actual draw, including the control row's separation from the loadout and flight hints.
+int AircraftControlsDrawn(const Line& expected) {
+    int found=0,failed=0;
+    for(std::size_t i=0;i<drew.size();++i)if(drew[i].text==expected.text) {
+        ++found;const Drew& a=drew[i];
+        for(std::size_t k=0;k<drew.size();++k)if(k!=i && !drew[k].text.empty()) {
+            const Drew& b=drew[k];
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1) {
+                ++failed;std::printf("FAIL controls overlap: %s at %.1f..%.1f, other %s at %.1f..%.1f\n",
+                    Narrow(a.text).c_str(),a.y0,a.y1,Narrow(b.text).c_str(),b.y0,b.y1);
+            }
+        }
+    }
+    if(found!=1)++failed;
+    std::printf("%s  aircraft controls %s: one complete row, clear of other text\n",failed ? "FAIL" : "ok",hudtext::Name(hudtext::InUse()));
+    return failed;
+}
+
+int AircraftBindingChecks() {
+    int failed=0;
+    auto check=[&](bool ok,const char* what){if(!ok){++failed;std::printf("FAIL aircraft binding: %s\n",what);}};
+    Line line{};wchar_t key[32],part[80];
+    const int swap=config.playerJetSwitchKey,target=config.playerJetTargetKey,flare=config.playerJetFlareKey;
+    config.playerJetSwitchKey=VK_F8;config.playerJetTargetKey=VK_XBUTTON1;config.playerJetFlareKey=VK_HOME;
+    AircraftControls(line,true,3,0x10,0x04,true,true);
+    const int bindings[]={config.playerJetSwitchKey,config.playerJetTargetKey,config.playerJetFlareKey};
+    const Tx labels[]={Tx::controlStores,Tx::controlTarget,Tx::controlFlares};
+    for(int i=0;i<3;++i){KeyName(bindings[i],key,32);std::swprintf(part,80,Tr(labels[i]),key);check(std::wcsstr(line.text,part)!=nullptr,"remapped ini key is shown");}
+    AircraftControls(line,false,3,0x20,0x08,true,true);
+    check(std::wcsstr(line.text,L"[RB]") && std::wcsstr(line.text,L"[Y]"),"pad hints follow supplied seat masks");
+    KeyName(config.playerJetFlareKey,key,32);std::swprintf(part,80,Tr(Tx::controlFlaresKeyboard),key);
+    check(std::wcsstr(line.text,part)!=nullptr,"pad explicitly shows keyboard-only flare binding");
+    AircraftControls(line,false,1,0,0,false,false);check(!line.text[0],"unavailable actions are absent");
+    KeyName(0,key,32);check(!std::wcscmp(key,Tr(Tx::controlUnbound)),"disabled key is unbound");
+    wchar_t home[32];KeyName(VK_HOME,home,32);KeyName(VK_NUMPAD7,key,32);
+    check(std::wcscmp(home,key)!=0,"Home is not mislabeled as keypad 7");
+    config.playerJetSwitchKey=swap;config.playerJetTargetKey=target;config.playerJetFlareKey=flare;
+    return failed;
 }
 
 // What `draw` puts on the screen (its quads and its text lines drawn), as a box.
@@ -626,14 +719,15 @@ int ScaleDrawnChecks() {
 }
 // Every scene and the layout checks in the language in use (hudtext::InUse), written into `dir`: the failures.
 int Scenes(const std::wstring& dir) {
-    int failed=0;
+    int failed=AircraftBindingChecks();
     hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=false;   // as the first run began
+    sceneMarkOn=false;
     const ULONGLONG now=GetTickCount64();
     const float pos[3]={0.0f,120.0f,0.0f};
 
     // A jet diving at the ground with two missiles and a lock on it, just launched, stalled, the gear not down.
     hasJet=true;hasHeli=false;hasWarn=true;
-    sceneJet=PlayerJetReadout{};
+    sceneJet=PlayerJetReadout{};sceneJet.storeButton=0x10;sceneJet.targetButton=0x04;
     sceneJet.speed=95.0f;sceneJet.throttle=0.8f;sceneJet.clear=120.0f;sceneJet.climb=-45.0f;sceneJet.load=2.1f;sceneJet.air=true;
     sceneJet.ground=true;sceneJet.stall=true;sceneJet.liftShare=1.04f;sceneJet.pullUp=true;sceneJet.gpws=Gpws::pullUp;
     sceneJet.impactIn=2.4f;sceneJet.stores=3;sceneJet.store=1;
@@ -673,6 +767,20 @@ int Scenes(const std::wstring& dir) {
     Prime(pos);
     sceneJet.store=3;
     Scene(dir,L"jet_switch",pos);
+    Line controls{};JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
+    sceneJet.keys=true;
+    Scene(dir,L"jet_controls_keyboard",pos);JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
+    const int swap=config.playerJetSwitchKey,target=config.playerJetTargetKey,flare=config.playerJetFlareKey;
+    config.playerJetSwitchKey=VK_F8;config.playerJetTargetKey=VK_XBUTTON1;config.playerJetFlareKey=VK_HOME;
+    Scene(dir,L"jet_controls_remapped",pos,1280);JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
+    config.playerJetSwitchKey=swap;config.playerJetTargetKey=target;config.playerJetFlareKey=flare;
+    sceneJet.store=4;sceneJet.bomb=false;sceneJet.hasImpact=false;Prime(pos);
+    boxing=true;drawn=0;Prime(pos);const int withoutImpact=drawn;
+    sceneJet.hasImpact=true;sceneJet.impact[0]=0;sceneJet.impact[1]=0;sceneJet.impact[2]=500;
+    drawn=0;Prime(pos);const int withImpact=drawn;boxing=false;
+    const bool rocketCross=withImpact==withoutImpact+4;
+    std::printf("%s  non-bomb rocket draws four impact-cross arms (%d -> %d)\n",rocketCross ? "ok" : "FAIL",withoutImpact,withImpact);
+    failed+=!rocketCross;Scene(dir,L"jet_rocket_impact",pos);sceneJet.hasImpact=false;
     sceneJet.stores=3;sceneJet.store=1;
 
     // A rotor craft sinking onto the ground, hovering slowly (the helicopter HUD).
@@ -685,6 +793,8 @@ int Scenes(const std::wstring& dir) {
     sceneJet.sym.threats=0;
     sceneWarn.on=1u<<kWarnPullUp;sceneWarn.litAt[kWarnPullUp]=now-100;
     Scene(dir,L"rotor_pullup",pos);
+    sceneJet.heli.keys=true;sceneJet.heli.aiming=true;
+    Scene(dir,L"rotor_controls_keyboard",pos);JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
 
     // A stock heli, SINK RATE near the ground, an empty scope.
     hasJet=false;hasHeli=true;
@@ -709,6 +819,10 @@ int Scenes(const std::wstring& dir) {
     Prime(pos);
     sceneStock.selected=1;
     Scene(dir,L"heli_stores",pos);
+    AircraftControls(controls,false,3,0x10,0,false,false);failed+=AircraftControlsDrawn(controls);
+    sceneHeli.f.keys=true;sceneHeli.f.aiming=true;
+    Scene(dir,L"heli_stores_keyboard",pos);
+    AircraftControls(controls,true,3,0x10,0,false,false);failed+=AircraftControlsDrawn(controls);
     hasStock=false;
 
     // The stock vehicles' HUD: a tank under a missile and a lock, at 16:9 and 21:9; the drill tank overheating; a Nix
@@ -756,11 +870,22 @@ int Scenes(const std::wstring& dir) {
     sceneNix.dir[0]=std::sin(0.7f);sceneNix.dir[2]=std::cos(0.7f);sceneNix.held=true;
     Scene(dir,L"stock_nix",ground);
     hasNix=false;
-    // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.
+    // On foot with an enemy marked for the NPCs (npcai.cpp, the Q mark): the amber diamond and its distance, nothing else.
     hasStock=false;
+    const bool heliWas=hasHeli;hasHeli=false;
+    const float noseWas[3]={sceneHeli.sym.nose[0],sceneHeli.sym.nose[1],sceneHeli.sym.nose[2]};
+    sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
+    sceneMarkOn=true;sceneMark[0]=ground[0]+25.0f;sceneMark[1]=ground[1]+6.0f;sceneMark[2]=ground[2]+180.0f;
+    Scene(dir,L"npc_mark",ground);
+    sceneMarkOn=false;hasHeli=heliWas;
+    std::memcpy(sceneHeli.sym.nose,noseWas,12);
+    // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.
     MapScene(dir,L"map_mid",700.0f,60.0f,20.0f,false);
     MapScene(dir,L"map_high_pad",3000.0f,85.0f,-40.0f,true);
     MapScene(dir,L"map_low",200.0f,32.0f,0.0f,false);
+    MapScene(dir,L"map_nine_squads",700.0f,60.0f,20.0f,false,9);
+    MapScene(dir,L"map_nine_squads_narrow",700.0f,60.0f,20.0f,false,9,1280);
+    MapScene(dir,L"map_nine_squads_pad",700.0f,60.0f,20.0f,true,9);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
     hasStock=false;

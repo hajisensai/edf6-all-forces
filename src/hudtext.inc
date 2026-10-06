@@ -89,8 +89,8 @@ HUDTEXT(jetKeysTakeoff,L"W / SPACE: pull up to take off (from %d km/h)",L"W / �
         L"W / スペース：引き起こして離陸（%d km/h から）")
 HUDTEXT(jetPadAir,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways",L"加速：前进 / 上升    减速：后退    滚转：左摇杆左右",
         L"加速：前進 / 上升    減速：後退    滾轉：左搖桿左右",L"ブースト：前進 / 上昇    ブレーキ：後退    ロール：左スティック左右")
-HUDTEXT(jetPadAir2,L"PITCH, TURN: right stick    LB: switch weapon    X: next target",L"俯仰、转向：右摇杆    LB：替换武器    X：下一个目标",
-        L"俯仰、轉向：右搖桿    LB：替換武器    X：下一個目標",L"ピッチ・旋回：右スティック    LB：武器切替    X：次の目標")
+HUDTEXT(jetPadAir2,L"PITCH, TURN: right stick    %ls: stores    %ls: target    keyboard %ls: flares",L"俯仰、转向：右摇杆    %ls：挂载    %ls：目标    键盘 %ls：热诱弹",
+        L"俯仰、轉向：右搖桿    %ls：掛載    %ls：目標    鍵盤 %ls：熱誘彈",L"ピッチ・旋回：右スティック    %ls：兵装    %ls：目標    キーボード %ls：フレア")
 HUDTEXT(jetPadGround,L"THROTTLE: forward / ascend = up, back = down    TURN: sticks",L"油门：前进 / 上升 = 加，后退 = 减    转向：摇杆",
         L"油門：前進 / 上升 = 加，後退 = 減    轉向：搖桿",L"スロットル：前進 / 上昇 = 上げ、後退 = 下げ    旋回：スティック")
 HUDTEXT(jetPadTakeoff,L"TAKE OFF: pull the right stick back (from %d km/h)",L"起飞：右摇杆向后拉（%d km/h 起）",L"起飛：右搖桿向後拉（%d km/h 起）",
@@ -126,21 +126,24 @@ HUDTEXT(masterCaution,L"MASTER CAUTION",L"主注意",L"主注意",L"マスター
 HUDTEXT(missileLaunch,L"MSL LAUNCH",L"飞弹发射",L"飛彈發射",L"ミサイル発射")
 
 // --- The helicopters (HeliStrip, HeliHud) and the gear ---
-HUDTEXT(setHover,L"SET HOVER",L"设定 悬停",L"設定 懸停",L"設定 ホバー")
-HUDTEXT(setSpeed,L"SET %d",L"设定 %d",L"設定 %d",L"設定 %d")
+HUDTEXT(heliSpeedLabel,L"GROUND KM/H",L"水平速 km/h",L"水平速 km/h",L"水平速度 km/h")
+HUDTEXT(heliHeightLabel,L"AGL M",L"离地 m",L"離地 m",L"対地高度 m")
+HUDTEXT(heliThreatScope,L"THREATS",L"威胁方向",L"威脅方向",L"脅威方向")
+HUDTEXT(setHover,L"FWD SET 0",L"前速目标 0",L"前速目標 0",L"前進設定 0")
+HUDTEXT(setSpeed,L"FWD SET %d",L"前速目标 %d",L"前速目標 %d",L"前進設定 %d")
 HUDTEXT(heliKeysLanded,L"HOLD SPACE: spin the rotor up and lift off    MOUSE: aim the square",L"按住空格：旋翼加速并升空    鼠标：瞄准方框",
         L"按住空白鍵：旋翼加速並升空    滑鼠：瞄準方框",L"スペース長押し：ローター加速で離陸    マウス：四角で照準")
-HUDTEXT(heliKeysAir,L"MOUSE: turn / climb to the square    W / S: speed    A / D: slide    SPACE: up    %ls: down",
-        L"鼠标：转向 / 爬升到方框    W / S：速度    A / D：横移    空格：上升    %ls：下降",
-        L"滑鼠：轉向 / 爬升到方框    W / S：速度    A / D：橫移    空白鍵：上升    %ls：下降",
-        L"マウス：四角へ旋回 / 上昇    W / S：速度    A / D：横移動    スペース：上昇    %ls：下降")
+HUDTEXT(heliKeysAir,L"MOUSE: turn / pitch    W / S: forward speed    A / D: slide    SPACE: up    %ls: down",
+        L"鼠标：转向 / 俯仰    W / S：前速    A / D：横移    空格：上升    %ls：下降",
+        L"滑鼠：轉向 / 俯仰    W / S：前速    A / D：橫移    空白鍵：上升    %ls：下降",
+        L"マウス：旋回 / 機首上下    W / S：前進速度    A / D：横移動    スペース：上昇    %ls：下降")
 HUDTEXT(liftOk,L"LIFT OK: TAKE OFF (ascend)",L"升力足够：起飞（上升）",L"升力足夠：起飛（上升）",L"揚力十分：離陸（上昇）")
 HUDTEXT(rotorShare,L"ROTOR %d%% of lift-off",L"旋翼 %d%%（离地所需）",L"旋翼 %d%%（離地所需）",L"ローター %d%%（離陸に必要な回転）")
 HUDTEXT(rotorLiftOk,L"ROTOR %d%%    LIFT OK: TAKE OFF (ascend)",L"旋翼 %d%%    升力足够：起飞（上升）",L"旋翼 %d%%    升力足夠：起飛（上升）",
         L"ローター %d%%    揚力十分：離陸（上昇）")
-HUDTEXT(speedSetHover,L"SPEED SET: HOVER",L"速度设定：悬停",L"速度設定：懸停",L"速度設定：ホバー")
-HUDTEXT(speedSet,L"SPEED SET %d km/h",L"速度设定 %d km/h",L"速度設定 %d km/h",L"速度設定 %d km/h")
-HUDTEXT(altHold,L"%lsALT HOLD",L"%ls高度保持",L"%ls高度保持",L"%ls高度維持")
+HUDTEXT(speedSetHover,L"FORWARD HOLD 0 km/h",L"前速保持 0 km/h",L"前速保持 0 km/h",L"前進速度維持 0 km/h")
+HUDTEXT(speedSet,L"FORWARD HOLD %d km/h",L"前速保持 %d km/h",L"前速保持 %d km/h",L"前進速度維持 %d km/h")
+HUDTEXT(altHold,L"%lsALTITUDE HOLD",L"%ls垂直：定高",L"%ls垂直：定高",L"%ls垂直：高度維持")
 HUDTEXT(gearState,L"GEAR %ls  [%ls]",L"起落架 %ls  [%ls]",L"起落架 %ls  [%ls]",L"ギア %ls  [%ls]")
 HUDTEXT(gearDown,L"DOWN",L"放下",L"放下",L"ダウン")
 HUDTEXT(gearUp,L"UP",L"收起",L"收起",L"アップ")
@@ -219,15 +222,15 @@ HUDTEXT(selectedAll,L"SELECTED ALL %d",L"已选全部 %d",L"已選全部 %d",L"�
 HUDTEXT(selectedOne,L"SELECTED 1 / %d: %ls",L"已选 1 / %d：%ls",L"已選 1 / %d：%ls",L"選択 1 / %d：%ls")
 HUDTEXT(selectedSome,L"SELECTED %d / %d",L"已选 %d / %d",L"已選 %d / %d",L"選択 %d / %d")
 HUDTEXT(npcOfflineOnly,L"NPC COMMANDS: OFFLINE ONLY",L"NPC 指挥：仅限离线",L"NPC 指揮：僅限離線",L"NPC 指揮：オフライン専用")
-HUDTEXT(npcNone,L"NPC COMMANDS: no plugin NPC unit (helis, jets, crawlers)",L"NPC 指挥：没有插件的 NPC 单位（直升机、喷气机、爬行者）",
-        L"NPC 指揮：沒有插件的 NPC 單位（直升機、噴射機、爬行者）",L"NPC 指揮：プラグインの NPC ユニットなし（ヘリ・ジェット・クロウラー）")
+HUDTEXT(npcNone,L"NPC COMMANDS: no NPC unit (squads, helis, jets, crawlers, tanks)",L"NPC 指挥：没有 NPC 单位（小队、直升机、喷气机、爬行者、坦克）",
+        L"NPC 指揮：沒有 NPC 單位（小隊、直升機、噴射機、爬行者、坦克）",L"NPC 指揮：ユニットなし（分隊・ヘリ・ジェット・クロウラー・戦車）")
 HUDTEXT(npcPadKeys,L"%ls   X select (ALL last)   Y guard crosshair   RB follow me   LB release",
         L"%ls   X 选择（最后为全部）   Y 守准星处   RB 跟随我   LB 解除",L"%ls   X 選擇（最後為全部）   Y 守準星處   RB 跟隨我   LB 解除",
         L"%ls   X 選択（最後は全員）   Y 照準点を防衛   RB 自分に追従   LB 解除")
-HUDTEXT(npcMouseKeys,L"%ls   Ctrl+drag box (Shift add)   click pick / clear   Tab cycle   G guard pointer   V follow me   X release",
-        L"%ls   Ctrl+拖动框选（Shift 追加）   点击 选择 / 清除   Tab 轮换   G 守指针处   V 跟随我   X 解除",
-        L"%ls   Ctrl+拖曳框選（Shift 追加）   點擊 選擇 / 清除   Tab 輪換   G 守指標處   V 跟隨我   X 解除",
-        L"%ls   Ctrl+ドラッグで範囲選択（Shift 追加）   クリック 選択 / 解除   Tab 切替   G カーソル地点を防衛   V 自分に追従   X 解除")
+HUDTEXT(npcMouseKeys,L"%ls   Ctrl+drag / Shift add   click select/clear   Tab next   G guard   V follow   X release",
+        L"%ls   Ctrl+框选 / Shift 追加   点击 选择/清除   Tab 轮换   G 守指针处   V 跟随我   X 解除",
+        L"%ls   Ctrl+框選 / Shift 追加   點擊 選擇/清除   Tab 輪換   G 守指標處   V 跟隨我   X 解除",
+        L"%ls   Ctrl+範囲選択 / Shift 追加   クリック 選択/解除   Tab 切替   G 地点防衛   V 追従   X 解除")
 HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
 HUDTEXT(mapPadKeys,L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close",
         L"左摇杆 平移   右摇杆 旋转 / 俯仰   RT / LT 缩放   A 居中   B / 地图键 关闭",L"左搖桿 平移   右搖桿 旋轉 / 俯仰   RT / LT 縮放   A 置中   B / 地圖鍵 關閉",
@@ -300,3 +303,43 @@ HUDTEXT(kindNpc,L"npc",L"NPC",L"NPC",L"NPC")
 HUDTEXT(areaTurning,L"AREA EDGE: TURNING BACK",L"接近边界：正在返航",L"接近邊界：正在返航",L"エリア境界：旋回中")
 HUDTEXT(areaAhead,L"AREA EDGE AHEAD: TURN BACK",L"前方边界：请返航",L"前方邊界：請返航",L"前方エリア境界：引き返せ")
 HUDTEXT(warnArea,L"AREA EDGE",L"区域边界",L"區域邊界",L"エリア境界")
+HUDTEXT(boardingEntry,L"BOARDING ENTRANCE  %d m",L"登乘入口  %d m",L"登乘入口  %d m",L"搭乗口  %d m")
+HUDTEXT(boardingReady,L"BOARD AT THIS ENTRANCE",L"在此按上车键",L"在此按上車鍵",L"ここで搭乗ボタン")
+
+// Contextual aircraft weapon controls (physical bindings supplied by the flight / payload readout).
+HUDTEXT(controlUnbound,L"unbound",L"未绑定",L"未綁定",L"未割当")
+HUDTEXT(controlStores,L"[%ls] stores",L"[%ls] 切换挂载",L"[%ls] 切換掛載",L"[%ls] 兵装切替")
+HUDTEXT(controlTarget,L"[%ls] next target",L"[%ls] 切换目标",L"[%ls] 切換目標",L"[%ls] 目標切替")
+HUDTEXT(controlFlares,L"[%ls] flares",L"[%ls] 热诱弹",L"[%ls] 熱誘彈",L"[%ls] フレア")
+HUDTEXT(controlFlaresKeyboard,L"[keyboard %ls] flares",L"[键盘 %ls] 热诱弹",L"[鍵盤 %ls] 熱誘彈",L"[キーボード %ls] フレア")
+
+// NPC squads and their map orders; identifiers are localized through hudtext::Word.
+HUDTEXT(virtualKey,L"VK 0x%X",L"键码 0x%X",L"鍵碼 0x%X",L"キーコード 0x%X")
+HUDTEXT(orderEngage,L"ENGAGE",L"交战",L"交戰",L"交戦")
+HUDTEXT(orderFocus,L"FOCUS FIRE",L"集火",L"集火",L"集中攻撃")
+HUDTEXT(orderBoard,L"BOARD",L"上车",L"上車",L"搭乗")
+HUDTEXT(orderDismount,L"DISMOUNT",L"下车",L"下車",L"降車")
+HUDTEXT(orderDismiss,L"DISMISS",L"解散",L"解散",L"解散")
+HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
+HUDTEXT(cmdNoMark,L"NO MARK (Q)",L"没有标记（Q）",L"沒有標記（Q）",L"マークなし（Q）")
+HUDTEXT(cmdCannot,L"%d CANNOT",L"%d 个无法执行",L"%d 個無法執行",L"%d ユニットは実行不可")
+HUDTEXT(cmdGuardResult,L"%ls (%.0f, %.0f): %d UNIT(S)%ls",L"%ls（%.0f, %.0f）：%d 个单位%ls",L"%ls（%.0f, %.0f）：%d 個單位%ls",L"%ls（%.0f, %.0f）：%d ユニット%ls")
+HUDTEXT(cmdOrderResult,L"%ls: %d UNIT(S)%ls",L"%ls：%d 个单位%ls",L"%ls：%d 個單位%ls",L"%ls：%d ユニット%ls")
+HUDTEXT(squadTitle,L"SQUADS",L"小队",L"小隊",L"分隊")
+HUDTEXT(squadTitleKeys,L"SQUADS (1-9 pick, Shift add)",L"小队（1-9 选择，Shift 追加）",L"小隊（1-9 選擇，Shift 追加）",L"分隊（1-9 選択、Shift 追加）")
+HUDTEXT(squadKeys,L"SQUADS: 1-9 pick   J engage   H focus (Q mark)   K dismiss   U recruit   B board   N dismount",
+        L"小队：1-9 选择   J 交战   H 集火（Q 标记）   K 解散   U 招募   B 上车   N 下车",
+        L"小隊：1-9 選擇   J 交戰   H 集火（Q 標記）   K 解散   U 招募   B 上車   N 下車",
+        L"分隊：1-9 選択   J 交戦   H 集中攻撃（Q マーク）   K 解散   U 加入   B 搭乗   N 降車")
+HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒")
+HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
+HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
+HUDTEXT(npcRanger,L"RANGER",L"游骑兵",L"遊騎兵",L"レンジャー")
+HUDTEXT(npcWingDiver,L"WING DIVER",L"飞翼潜兵",L"飛翼潛兵",L"ウイングダイバー")
+HUDTEXT(npcFencer,L"FENCER",L"剑兵",L"劍兵",L"フェンサー")
+HUDTEXT(npcAirRaider,L"AIR RAIDER",L"空袭兵",L"空襲兵",L"エアレイダー")
+HUDTEXT(npcRecruited,L"RECRUITED",L"已招募",L"已招募",L"加入済み")
+HUDTEXT(npcFree,L"FREE",L"自由行动",L"自由行動",L"自由行動")
+HUDTEXT(npcScript,L"SCRIPT",L"剧情控制",L"劇情控制",L"シナリオ制御")
+HUDTEXT(npcHold,L"HOLD",L"驻守",L"駐守",L"待機")
+HUDTEXT(npcEscort,L"ESCORT",L"护送",L"護送",L"護衛")
