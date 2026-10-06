@@ -233,6 +233,7 @@ struct Config {
     int npcSquadMin=2;              // ...fewer left than this: it joins the nearest squad with room
     int npcSquadMax=8;              // ...a squad takes in others up to this many
     float npcSquadJoinRange=150.0f; // ...within this many m
+    bool npcBoarding=true;          // ...squads board and leave friendly vehicles on a map order; soldiers in gunner seats shoot
     int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
     float npcMarkCone=8.0f;         // ...within this many degrees of the centre
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay

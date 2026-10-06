@@ -715,6 +715,8 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     if(Cfg().enabled)Guarded(kStepEmc,&EmcInput,static_cast<unsigned char*>(vehicle));
     // An NPC tank pushed off its post drives back: seat 0's stick written before the stock input reads it (npcpost.cpp).
     if(Cfg().enabled)Guarded(kStepNpcPost,&NpcPostInput,static_cast<unsigned char*>(vehicle));
+    // The NPC soldiers in its gunner seats aim and fire, before the stock input reads the seats (npcai.cpp).
+    if(Cfg().enabled)Guarded(kStepNpcPost,&NpcGunnersInput,static_cast<unsigned char*>(vehicle));
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
