@@ -2,6 +2,7 @@
 // shells and its cannon, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "online_authority.h"
 #include "vehicleram.h"
 #include "gunmuzzle.h"
 #include <malloc.h>
@@ -198,6 +199,11 @@ unsigned char* ShellCreate(const wchar_t* sgo,const float* m,bool& ok) noexcept 
 unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,
                          bool straight,const char* what) noexcept {
     if(!ok || !shellsOk || !At<void*>(image,kObjectMgr))return nullptr;
+    // Online, the damage is dealt where its owner's plugin work counts (online_authority.h IsOnlineAuthority: the
+    // driver's machine; the host for an NPC-driven vehicle or an unregistered copy no local player rides). Every
+    // machine runs the ram, the drill, the EMC and the guns on its own copy, so elsewhere the round still flies and
+    // bursts (the same sight) with no damage: the hit counts once, not once per machine.
+    if(damage>0.0f && !IsOnlineAuthority(owner))damage=0.0f;
     alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, aim[0],aim[1],aim[2],1};
     unsigned char* const o=ShellCreate(sgo,m,ok);
     if(!o)return nullptr;
