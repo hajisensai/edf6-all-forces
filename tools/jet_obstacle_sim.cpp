@@ -214,7 +214,7 @@ float SuiteSoftTop() {
 enum class Chase { out, along, corner, climb };
 const char* const kChaseNames[]={"out","along","corner","climb"};
 struct EdgeCase { Role role; float bigWorld,start,heading,share; Chase chase; float seconds; float ground=0.0f; };
-struct EdgeOut { float pastSoft,pastHard,overTop,overCeil,endDepth; bool fits,room,ok,judged; };
+struct EdgeOut { float pastSoft,pastHard,overTop,overCeil,endDepth,pastGround; bool fits,room,ok,judged; };
 
 EdgeOut EdgeRun(const EdgeCase& c) {
     config.bigWorld=c.bigWorld;
@@ -269,7 +269,9 @@ EdgeOut EdgeRun(const EdgeCase& c) {
     if(c.chase==Chase::climb)
         room=softTop-start[1]>=airbound::Excursion(s0,j.m.vel[1],airbound::TurnRadius(s0,2.0f)*1.15f,react);
     if(c.start<0.0f)room=false;
-    EdgeOut o{-1e9f,-1e9f,-1e9f,-1e9f,0.0f,fits,room,true,true};
+    // The ground cases: the ground's own edge, not the walls the code under test puts on it (a wrong PlayBox moves both).
+    const airbound::Box groundBox=airbound::Square(c.ground);
+    EdgeOut o{-1e9f,-1e9f,-1e9f,-1e9f,0.0f,-1e9f,fits,room,true,true};
     double clock=1.0;
     const int frames=static_cast<int>(c.seconds*60.0f);
     for(int f=0;f<frames;++f) {
@@ -293,6 +295,7 @@ EdgeOut EdgeRun(const EdgeCase& c) {
         const float ps=-airbound::Depth(soft,pos),ph=-airbound::Depth(hard,pos);
         if(ps>o.pastSoft)o.pastSoft=ps;
         if(ph>o.pastHard)o.pastHard=ph;
+        if(c.ground>0.0f)o.pastGround=std::fmax(o.pastGround,-airbound::Depth(groundBox,pos));
         if(pos[1]-softTop>o.overTop)o.overTop=pos[1]-softTop;
         if(pos[1]-ceil>o.overCeil)o.overCeil=pos[1]-ceil;
         o.endDepth=airbound::Depth(soft,pos);
@@ -302,7 +305,7 @@ EdgeOut EdgeRun(const EdgeCase& c) {
     // with room never at the play edge; without, only shown. How far over the ceiling a climb without room goes is shown.
     if(fits && room)o.ok=o.pastSoft<=kEdgeTol && o.overTop<=kEdgeTol;
     else if(fits)o.ok=o.pastHard<=0.0f && o.endDepth>=0.0f;
-    else if(c.ground>0.0f)o.ok=o.pastHard<=area::kVoidMargin;   // the ground cases: never out over the void
+    else if(c.ground>0.0f)o.ok=o.pastGround<=0.0f;   // the ground cases: never out over the void
     else if(room)o.ok=o.pastHard<=0.0f;
     else o.judged=false;
     std::printf("%-11s edge %5.0f band %4.0f start %6.0f head %3.0f speed %3.0f %-6s | past soft %7.1f  past edge %7.1f  over soft top %7.1f"
@@ -352,7 +355,7 @@ int EdgeSuite() {
     for(const auto& c:cases) {
         const EdgeOut o=EdgeRun(c);
         fails+=!o.ok;
-        if(c.ground>0.0f){++grounds;groundPast=std::fmax(groundPast,o.pastHard-area::kVoidMargin);groundSoft=std::fmax(groundSoft,o.pastSoft);continue;}
+        if(c.ground>0.0f){++grounds;groundPast=std::fmax(groundPast,o.pastGround);groundSoft=std::fmax(groundSoft,o.pastSoft);continue;}
         const int f=o.fits,r=o.room;
         ++count[f][r];
         soft[f][r]=std::fmax(soft[f][r],o.pastSoft);edge[f][r]=std::fmax(edge[f][r],o.pastHard);top[f][r]=std::fmax(top[f][r],o.overTop);
