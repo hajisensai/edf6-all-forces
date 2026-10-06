@@ -23,8 +23,18 @@
 //    are redirected) every weapon table row named EDF6VC_CALL_* gets the owned bit, as that step gives a
 //    DLC weapon its: NEW and 0 stars the first time, stars left alone after. Before it, so its "equipped
 //    but not owned: back to the default weapon" pass keeps them on the soldiers that carry them.
+//  - The thrown drones (tools/call_weapons.py: EDF6VC_CALL_THROW_*, Patroller clones in the Robot Bomb list, told
+//    apart by their AmmoHitSizeAdjust's bits, kThrows): the Weapon_Sub's shot (its vtable slot 17, called with the
+//    bullet it just made, 0x697DDD) of one of ours, a BombBullet01, is kept (bombs[]); at that bomb's update
+//    (BombBullet01 slot 5), once it has landed (its landed byte, +0xD40, which its own update tests at 0x29637B) or
+//    kThrowFuseMs after the throw, and if its owner is the local player, the drone is launched where the bomb is
+//    (JetLaunchThrown) and the bomb deleted (0x118A1B0, as its own update deletes a spent bomb at 0x2962D5) before
+//    its update runs, so the stock patroller never starts. A drone that cannot be launched leaves the stock bomb as
+//    it is. Only the thrower's game: in an online game the others see the stock patroller (their copy's owner is no
+//    local player). Kills are the drone's (an NPC friend's), as a call's jets' are.
 // When no jet can be launched (the jet SGOs missing or not preloaded this mission) the stock bombers fly;
-// without the plugin the call weapons are plain KM6 calls (still owned: the bit is in the save).
+// without the plugin the call weapons are plain KM6 calls (still owned: the bit is in the save), the thrown drones
+// plain Patrollers.
 // The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
@@ -113,6 +123,9 @@ struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optio
 // A weapon table row tools/call_weapons.py installs (a vehicle request too): its id, its SGO in Mods/WEAPON and
 // the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
 struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* objectFile; };
+// A thrown drone's weapon (tools/calls.py brings 'throw'): its AmmoHitSizeAdjust's bits (calls.throw_mark), the
+// drone its bomb releases and that drone's fuel.
+struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
 #include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = every call weapon brings its own call, else
 // every call weapon brings kCalls[picked].
@@ -292,6 +305,159 @@ void __fastcall PlaneUpdateHook(unsigned char* plane,const void* frame) {
     nextPlaneUpdate(plane,frame);
 }
 
+// --- Thrown drones (see the file comment) ---
+// Weapon_Sub's vtable slot 17 (0x6AD370: it keeps the bullet in the weapon's list, weapon+0x1658), called by the
+// weapons' fire step with the bullet just made (0x697DD7: rdx = the bullet, possibly null). BombBullet01's vtable
+// (+0) and slot 5, its update (bullet, frame): +0x90 its position (the matrix's last row, copied from +0xC90 each
+// update), +0xAE8 its owner (weak_ptr object, read so at 0x2972A5 for the blast's owner), +0xC34 bit 0 spent (its
+// update deletes it then, 0x2962BE), +0xD40 landed (0x29637B).
+constexpr unsigned kSubShotSlot=0x17E54C8,kSubShot=0x6AD370,kSubShotCall=0x697DD7;
+constexpr unsigned kBombVtable=0x17A47D0,kBombStepSlot=0x17A47D0+5*8,kBombStep=0x2962A0;
+constexpr unsigned kBombSpentTest=0x2962BE,kBombLandedTest=0x29637B,kBombOwnerRead=0x2972A5;
+constexpr std::size_t kBombPos=0x90,kBombOwner=0xAE8,kBombFlags=0xC34,kBombLanded=0xD40;
+const unsigned char kSubShotSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,0x41,0x56,
+                                   0x41,0x57,0x48,0x83,0xEC,0x60,0x4C,0x8B,0xC2,0x8B,0x81,0x78,0x16,0x00,0x00};
+const unsigned char kSubShotCallSig[]={0x48,0x8B,0xD3,0x49,0x8B,0xCF,0xFF,0x90,0x88,0x00,0x00,0x00};   // mov rdx,rbx; call [rax+88h]
+const unsigned char kBombStepSig[]={0x40,0x53,0x55,0x41,0x56,0x48,0x81,0xEC,0xA0,0x00,0x00,0x00,0x48,0x8B,0xD9,0x48};
+const unsigned char kBombSpentSig[]={0xF6,0x83,0x34,0x0C,0x00,0x00,0x01};    // at 0x2962BE: test byte [rbx+0C34h],1
+const unsigned char kBombLandedSig[]={0x80,0xBB,0x40,0x0D,0x00,0x00,0x00};   // at 0x29637B: cmp byte [rbx+0D40h],0
+const unsigned char kBombOwnerSig[]={0x48,0x8B,0x8E,0xE8,0x0A,0x00,0x00};    // at 0x2972A5: mov rcx,[rsi+0AE8h]
+using SubShotFn=std::uintptr_t(__fastcall*)(void*,unsigned char*);
+using BombStepFn=void(__fastcall*)(unsigned char*,const void*);
+SubShotFn nextSubShot=nullptr;
+BombStepFn nextBombStep=nullptr;
+const char kThrowSource='t';   // the thrown drones' flight source (JetLaunch's `source`)
+
+// The bombs of ours thrown and not yet landed: the bullet, what it releases, when. Game thread only (the fire step
+// and the bullets' updates). A bomb converts within kThrowFuseMs, so an entry older than kBombStaleMs is one whose
+// bomb went without an update of its own (the mission's end, a delete from elsewhere). Whose bomb it is is read at
+// its landing, not at the shot: where the bullet's owner is written in its making is not traced (static RE), and by
+// its landing it is (the bomb's blast reads it, 0x2972A5); only the local player's becomes a drone. An entry is the
+// bullet's ObjRef (its address and weak-this block): a bomb deleted without an update of its own leaves its entry, and
+// a new bomb at the same address (a stock Patroller thrown alongside) is not taken for it; stale entries go at every
+// throw and every bomb update.
+struct Bomb { ObjRef bullet; const Throw* what; ULONGLONG at; };
+constexpr int kMaxBombs=16;
+constexpr ULONGLONG kThrowFuseMs=4000,kBombStaleMs=10000;
+Bomb bombs[kMaxBombs]{};
+int bombCount=0;   // entries in use: the bombs' update skips the table while 0
+
+void Forget(Bomb& b) noexcept {
+    b=Bomb{};
+    --bombCount;
+}
+
+// The thrown drone weapon `weapon` is, or nullptr: its AmmoHitSizeAdjust's bits exactly (a stock weapon's are
+// 0x3F800000 where near 1).
+const Throw* ThrowOf(const unsigned char* weapon) noexcept {
+    if(!Readable(weapon+kWeaponHitSize,4))return nullptr;
+    const auto bits=At<std::uint32_t>(weapon,kWeaponHitSize);
+    for(const auto& t:kThrows)if(bits==t.markBits)return &t;
+    return nullptr;
+}
+
+// After the stock shot: a bomb of one of ours, kept for its landing.
+void SeeThrow(const unsigned char* weapon,const unsigned char* bullet) noexcept {
+    const Throw* const t=ThrowOf(weapon);
+    if(!t || !bullet || !Readable(bullet,kBombLanded+1) || At<const void*>(bullet,0)!=image+kBombVtable)return;
+    const ULONGLONG ms=GameMs();
+    for(auto& b:bombs)if(b.bullet && ms-b.at>kBombStaleMs)Forget(b);
+    const ObjRef ref=ObjRef::Of(bullet);
+    if(!ref.ctrl)return;
+    for(auto& b:bombs) {
+        if(b.bullet)continue;
+        b=Bomb{ref,t,ms};
+        ++bombCount;
+        if(Cfg().debug)Log("THROW %s: bomb %p",t->name,bullet);
+        return;
+    }
+    Log("THROW %s: %d bombs in the air already, this one stays a Patroller",t->name,kMaxBombs);
+}
+
+std::uintptr_t __fastcall SubShotHook(unsigned char* weapon,unsigned char* bullet) {
+    const auto result=nextSubShot(weapon,bullet);
+    if(Cfg().enabled && Cfg().throwDrones) {
+        __try { SeeThrow(weapon,bullet); } __except(FaultLog("THROW shot (the stock bomb)",GetExceptionInformation())) {}
+    }
+    return result;
+}
+
+// Where the drone heads off: away from the thrower (the player as last seen), else along +z.
+void ThrowHeading(const float* at,float* out) noexcept {
+    out[0]=0.0f;out[1]=0.0f;out[2]=1.0f;
+    if(!player.at || GameMs()-player.at>10000)return;
+    const float dx=at[0]-player.pos[0],dz=at[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
+    if(l>1.0f){out[0]=dx/l;out[2]=dz/l;}
+}
+
+// At a bomb's update: one of ours landed (or kThrowFuseMs out) becomes its drone and is deleted. True when it is
+// (its update must not run: the bomb is gone); false: the stock update runs (not ours, not yet, or no drone).
+bool BombStep(unsigned char* bullet) noexcept {
+    __try {
+        const ULONGLONG ms=GameMs();
+        const bool on=Cfg().enabled && Cfg().throwDrones;
+        for(auto& b:bombs) {
+            if(b.bullet && (!on || ms-b.at>kBombStaleMs)){Forget(b);continue;}   // switched off since, or long gone
+            if(!b.bullet.Is(bullet))continue;
+            if(At<const void*>(bullet,0)!=image+kBombVtable || (bullet[kBombFlags]&1)) {
+                Forget(b);   // something else at its address, or spent: its own update deletes it
+                return false;
+            }
+            if(!bullet[kBombLanded] && ms-b.at<kThrowFuseMs)return false;
+            if(!IsPlayer(At<const unsigned char*>(bullet,kBombOwner))) {
+                Forget(b);   // another machine's player's (online: their copy of it) or a soldier's: the stock bomb
+                return false;
+            }
+            const Throw* const t=b.what;
+            const bool landed=bullet[kBombLanded]!=0;
+            Forget(b);
+            float at[3],dir[3];
+            std::memcpy(at,bullet+kBombPos,12);
+            if(!std::isfinite(at[0]+at[1]+at[2]))return false;
+            ThrowHeading(at,dir);
+            if(!JetLaunchThrown(t->drone,at,dir,t->fuelSec,&kThrowSource)) {
+                Log("THROW %s: no drone (not installed, not preloaded or too many out): it stays a Patroller",t->name);
+                return false;
+            }
+            Log("THROW %s at (%.0f,%.0f,%.0f), %s: the bomb is its drone now",t->name,at[0],at[1],at[2],landed ? "landed" : "still falling");
+            reinterpret_cast<DeleteFn>(image+kDelete)(bullet);
+            return true;
+        }
+        return false;
+    } __except(FaultLog("THROW bomb update (the stock bomb)",GetExceptionInformation())) { return false; }
+}
+
+void __fastcall BombStepHook(unsigned char* bullet,const void* frame) {
+    if(bombCount>0 && BombStep(bullet))return;
+    nextBombStep(bullet,frame);
+}
+
+// What vtable slot `slotRva` holds now, its stock `original` or another plugin's hook (chained onto), or nullptr.
+void* SlotNow(unsigned slotRva,unsigned original,const char* name) noexcept {
+    void* const current=*reinterpret_cast<void**>(image+slotRva);
+    if(current && current!=image+original)Log("THROW %s: chaining onto %p (another plugin)",name,current);
+    return current;
+}
+
+// The bombs' update first (a bomb kept must always be seen at its landing), then the shot.
+bool InstallThrows() noexcept {
+    if(!Matches(kSubShot,kSubShotSig,sizeof(kSubShotSig)) || !Matches(kSubShotCall,kSubShotCallSig,sizeof(kSubShotCallSig)) ||
+       !Matches(kBombStep,kBombStepSig,sizeof(kBombStepSig)) || !Matches(kBombSpentTest,kBombSpentSig,sizeof(kBombSpentSig)) ||
+       !Matches(kBombLandedTest,kBombLandedSig,sizeof(kBombLandedSig)) || !Matches(kBombOwnerRead,kBombOwnerSig,sizeof(kBombOwnerSig)) ||
+       !Readable(image+kBombVtable,8)) {
+        Log("THROW thrown drones: profile mismatch (they stay Patrollers)");
+        return false;
+    }
+    void* const step=SlotNow(kBombStepSlot,kBombStep,"bomb update");
+    if(!step)return false;
+    nextBombStep=reinterpret_cast<BombStepFn>(step);
+    if(!PatchVtableSlot(reinterpret_cast<void**>(image+kBombStepSlot),step,reinterpret_cast<void*>(&BombStepHook)))return false;
+    void* const shot=SlotNow(kSubShotSlot,kSubShot,"Weapon_Sub shot");
+    if(!shot)return false;
+    nextSubShot=reinterpret_cast<SubShotFn>(shot);
+    return PatchVtableSlot(reinterpret_cast<void**>(image+kSubShotSlot),shot,reinterpret_cast<void*>(&SubShotHook));
+}
+
 using UnlockFn=void(__fastcall*)(unsigned char*);
 using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
@@ -397,13 +563,16 @@ bool InstallAirstrikes() noexcept {
             radio=Redirect(kRadioBomber,kRadioBomberSig,sizeof(kRadioBomberSig),reinterpret_cast<void*>(&RadioBomberHook),"air raider bomber");
             mission=Redirect(kMissionBomber,kMissionBomberSig,sizeof(kMissionBomberSig),reinterpret_cast<void*>(&MissionBomberHook),"mission bomber");
         }
-        Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d",calls,owned,radio,mission);
-        return calls || radio || mission;
+        const bool throws=InstallThrows();
+        Log("HOOK airstrikes calls=%d owned=%d airRaiderBombers=%d missionBombers=%d throws=%d",calls,owned,radio,mission,throws);
+        return calls || radio || mission || throws;
     } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }
-// A new mission (mission.cpp MissionStart): the held bombers were the last mission's (their control blocks'
+// A new mission (mission.cpp MissionStart): the held bombers and the thrown bombs were the last mission's (their
 // addresses may be the new mission's objects'): forgotten, nothing of them touched. The call pick stays.
 void ResetAirstrikes() noexcept {
     for(auto& h:held)h=Held{};
+    for(auto& b:bombs)b=Bomb{};
+    bombCount=0;
 }
 }  // namespace crew

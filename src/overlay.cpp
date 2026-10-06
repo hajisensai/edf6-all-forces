@@ -81,7 +81,7 @@ DWORD WINAPI PickerThread(void*) {
         if(banner && shownAt && GetTickCount64()-shownAt>kBannerMs){ShowWindow(banner,SW_HIDE);shownAt=0;}
         HWND game=nullptr;
         const Config& cfg=Cfg();   // one snapshot per poll
-        const bool front=cfg.enabled && GameInFront(&game);
+        const bool front=cfg.enabled && !MapHoldsKeys() && GameInFront(&game);   // the map view holds the keys (map.cpp)
         const bool next=front && cfg.callNextKey && (GetAsyncKeyState(static_cast<int>(cfg.callNextKey))&0x8000);
         const bool prev=front && cfg.callPrevKey && (GetAsyncKeyState(static_cast<int>(cfg.callPrevKey))&0x8000);
         const int step=(next && !nextDown) ? 1 : (prev && !prevDown) ? -1 : 0;

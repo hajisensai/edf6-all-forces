@@ -220,12 +220,11 @@ void RecordLin(void* body,const float* v) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
-std::uintptr_t FinalAngProbe(void* body,const float* w) noexcept {
+void FinalAngProbe(void* body,const float* w) noexcept {
     __try {
         if(body && w)for(Track& t:tracks)
             if(t.body==body)Copy3(t.f[(t.next+kFrames-1)%kFrames].outAng,w);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
-    return reinterpret_cast<SetVecFn>(image+kSetAngVel)(body,w);
 }
 
 // Car/tank chassis vs rubble. The launch probe named what throws the tank: at the launch step the hull
@@ -352,6 +351,8 @@ bool RubbleDue(const void* wrapper) noexcept {
 
 bool heavyChassis;
 bool probeChassisVelocity;
+bool probeChassisSpin;
+bool sidecarLevel;
 
 void HeavyChassis(void* wrapper) noexcept {
     __try {
@@ -406,6 +407,27 @@ bool RedirectChassisLinVel() noexcept {
     return redirected;
 }
 
+// The car step's final spin write (0x6746C6: setAngVel(veh+0x1698 body, the spin it worked out)): a sidecar bike's
+// roll part replaced (sidecar.cpp SidecarLevel, on a copy: the step's own vector is left as it was), then the debug
+// probe's record, then the game's setAngVel with what it was handed.
+std::uintptr_t ChassisSetAngVel(void* body,const float* w) noexcept {
+    alignas(16) float spin[4]={0.0f,0.0f,0.0f,0.0f};
+    const float* out=w;
+    if(sidecarLevel && body && w) {
+        __try { Copy3(spin,w); spin[3]=w[3]; SidecarLevel(body,spin); out=spin; } __except(EXCEPTION_EXECUTE_HANDLER){out=w;}
+    }
+    if(probeChassisSpin)FinalAngProbe(body,out);
+    return reinterpret_cast<SetVecFn>(image+kSetAngVel)(body,out);
+}
+
+bool RedirectChassisAngVel() noexcept {
+    static bool redirected=false;
+    bool changed=false;
+    if(!redirected)redirected=RedirectCall(image+kFinalAngSite,image+kSetAngVel,
+                                           reinterpret_cast<void*>(&ChassisSetAngVel),changed);
+    return redirected;
+}
+
 bool HeavyVehicleChassis() noexcept {
     if(!RedirectChassisLinVel())return false;
     heavyChassis=true;
@@ -413,13 +435,15 @@ bool HeavyVehicleChassis() noexcept {
 }
 
 int ProbeVehicleVelocity() noexcept {
-    bool changed=false;
     int done=0;
     if(RedirectChassisLinVel()) {
         probeChassisVelocity=true;
         ++done;
     }
-    if(RedirectCall(image+kFinalAngSite,image+kSetAngVel,reinterpret_cast<void*>(&FinalAngProbe),changed))++done;
+    if(RedirectChassisAngVel()) {
+        probeChassisSpin=true;
+        ++done;
+    }
     return done;
 }
 }  // namespace
@@ -429,8 +453,11 @@ bool InstallPhysics() noexcept {
     const bool chassis=Cfg().vehicleWelding && HeavyVehicleChassis();
     const bool capped=Cfg().giantContactCap && CapGiantContact();
     if(Cfg().debug)Log("PHYSICS velocity probes=%d",ProbeVehicleVelocity());
+    sidecarLevel=Cfg().sidecar && RedirectChassisAngVel();
     Log("PHYSICS vehicleWelding heli=%d chassis=%d giantContactCap=%d (config %d/%d)",welded,chassis,capped,
         Cfg().vehicleWelding,Cfg().giantContactCap);
-    return welded || chassis || capped;
+    return welded || chassis || capped || sidecarLevel;
 }
+
+bool SidecarLevelHooked() noexcept { return sidecarLevel; }
 }  // namespace crew

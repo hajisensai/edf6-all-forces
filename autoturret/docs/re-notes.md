@@ -202,6 +202,33 @@ Rocketcannon_main, 0.25) following the lifted bone rather than holding the axis'
 pass rewriting the prop (it is a `car_base_simulation_node`, as the wheels are); the pose hook not fighting
 another plugin's (the bytes are checked, a mismatch leaves the stock pose and logs `KATYUSHA pose call ... changed`).
 
+## The player's turret: the mode, the lock, the lead circle (2026-10-06, static)
+
+`src/designate.cpp`; the math in `src/aimmath.h`, checked offline by `tools/turret_lead_check.cpp`.
+
+- Bindings. The seat's rider input: `seat+0x2B0` byte 1 = a pad, 0 = keyboard and mouse; `seat+0x2E8` the pad's
+  buttons as a word (A 0x01, B 0x02, X 0x04, Y 0x08, LB 0x10, RB 0x20, L3 0x40, R3 0x80). Confidence M: measured on the
+  506 (EDF6VehicleCrew `docs/stores-re.md` §4) and read the same way by its heli and artillery code; every vehicle
+  seat is the one class (stride `0x340`), whose input the human code copies before the vehicle's slot 55 runs. The
+  keyboard is read with `GetAsyncKeyState` while one of the game's windows is in front (the keys' mapping to those
+  bits depends on the game's key setup).
+- Lock by look. The view is EDF6VehicleCrew's camera ray (its HUD's view-projection inverted, `hud.cpp CameraRay`) and
+  the line of sight its map ray (`heli.cpp MapRay`: the game's Havok cast, layer 22 with the ground collector:
+  terrain and buildings, never units), found through `common/edf/aimlink.h`. The candidates are this frame's
+  registry snapshot (the same one the aim and the proximity fuse use), one per object (its lock point nearest the
+  view). A lock press acts on its release; held `LockClearMs` it lets the lock go instead.
+- The lock and the aim: `PickTarget` / `PickGunTarget` take the lock as `only`: kept while reachable, nothing else
+  while it is not. An AI gunner seat of the player's vehicle takes it as its `keep` (first when reachable).
+- The lead circle: the target's velocity is the aim's own (`Track::vel`, smoothed per frame); the solve
+  (`aim::LeadSolve`) is `edf::BallisticArc` from the gun's real muzzle (`edf::MeanMuzzle`) in the vehicle's frame, the
+  flight time taken to the lead point itself until it moves under 1 cm. The circle sits on the required direction at
+  the lead point's range, the bore cross on the barrel's: both at the same distance, so the cross in the circle is the
+  barrel on the required direction whatever the camera's offset from the gun. In the lead-circle mode the input
+  (`vehicle+0x2AA0`) is not written at all; the flak's fuse stamp still uses the flight time.
+- Needs an in-game check: the bindings reaching `+0x2E8` in a flak / tank seat (the `PILOT` and `LOCK` log lines say
+  each press), the lock picking what is under the crosshair (the camera ray is the HUD's last frame), the lead circle
+  on a crossing air target with the flak (the cross in the circle should burst the shell at it).
+
 ## GrenadeBullet01 (the flak round)
 
 | What | Where |

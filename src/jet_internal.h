@@ -178,6 +178,9 @@ struct Kind {
 // the drone is) and are deleted kBlastMs later (Blast). The blast's damage is filtered by team (GameDamageInfo,
 // docs/decoy-blast-re.md 1.1): no friend is hurt.
 constexpr float kBlastTrigger=8.0f,kDollTrigger=6.0f;
+// A doll hangs kDollBelow under its drone (jet_carrier.cpp DollPose), never under the ground beneath it; a doll drone
+// charging comes in kDollRide over the ground under its target at least, so its doll is not pressed into its body.
+constexpr float kDollBelow=4.0f,kDollRide=kDollBelow+1.0f;
 inline constexpr Kind kKinds[kRoleCount]={
     // 2026-10-04: faster (750-900 km/h at the attack; own motion properties lift the 200 m/s cap), higher, about 5 g at most.
     // 2026-10-05: strafing runs open fire from 1000 m (the guns' reach caps it) and pull out lower (80-100 m over the
@@ -203,7 +206,8 @@ inline constexpr Kind kKinds[kRoleCount]={
     {Role::doll,"doll",Prefer::any,FlightModel::rotor,Weapon::charge,Pose::none,&kRotorLean, 25.0f,25.0f,0.0f, 12.0f,12.0f, 4.0f,2.0f,
      10.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1800.0f, 0.0f,1.0f, kDollTrigger,true,Body::doll},
     // The gunship (JetRole::gunship): the bomber401 body (its own SGO, mark 7011) circling its anchor wide and
-    // slow, never diving; it shells ground targets in reach from where it flies (GunshipFire).
+    // slow, never diving; it shells ground targets in reach from where it flies and fires its side cannon at them
+    // from further out (GunshipFire; TargetRange: its range grows with the cannon).
     {Role::gunship,"gunship",Prefer::ground,FlightModel::wing,Weapon::shells,Pose::elevons,nullptr, 120.0f,120.0f,70.0f, 3.0f,3.0f, 2.0f,0.3f,
      350.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 600.0f,80.0f, 0.0f,0.0f, 1500.0f, 0.0f,3.0f, 0.0f,false,Body::gunship},
     // The Primer fighter: a flapping dogfighter, slower than ours and nimbler (its wings beat it round: Flap), guns only.
@@ -276,12 +280,17 @@ struct Motion {
     float thrust[3];         // a rotor craft's (Hover): the thrust its flight asks for, world, m/s^2
     float acc[3];            // a rotor craft's eased acceleration (see Lean::respond)
     ULONGLONG thrustLogAt;   // Thrusters' last log
+    std::uint8_t sweep;      // Ahead's next stretch of its track
+    float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
+    ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it or off its track
+    std::int8_t obstSide;    // ...too steep to climb: the side it turns off to (+1 / -1, picked once; 0 none)
 };
 // What it goes for (Pick, Lead) and its guns' and missiles' state (Fire, Missile).
 struct Aim {
     const void* target;
     bool flyer;
     float aim[3],tgtPrev[3],tgtVel[3];
+    ULONGLONG trackFrame;    // GameFrame of tgtPrev (PickTarget: the velocity from one frame's move only)
     ULONGLONG seenTarget;    // game ms it last had a target
     float out[3];            // extend / run-out / crank direction
     ULONGLONG missileAt;     // its last missile salvo
@@ -326,10 +335,14 @@ struct BayState {
     const void* bombOwner;   // whose bombs the bay drops (the caller: the bomb rounds' owner)
     ULONGLONG bombClear;     // game ms until which the owner's rounds still pass its flight (0: bay open)
 };
-// The gunship's shells (GunshipFire).
+// The gunship's shells and its cannon (GunshipFire): two guns, each with its own gap.
 struct ShellState {
     ULONGLONG gunAt;         // its last shell
     int gunShots;            // ...and how many it has fired
+    ULONGLONG cannonAt;      // its last cannon round (jet_bay.cpp CannonShot)
+    int cannonShots;         // ...and how many it has fired
+    ULONGLONG cannonLookAt;  // the NPCs' last look along the cannon's line (CannonAtTarget: a ray a gap at the most)
+    int cannonHeld;          // ...and how many found the map in the way (logged every tenth)
 };
 
 struct Jet {
@@ -345,6 +358,7 @@ struct Jet {
     const char* why;         // why it withdrew
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
+    bool entered;            // ...its first attack run begun: its arrival over (Entering)
     bool escort;             // ...or the player, while seen (a call's follow variant; anchor: where they were last)
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
     int wing;                // its place in its flight: its patrol ring, a carrier's way round its orbit
@@ -358,6 +372,11 @@ struct Jet {
     BayState bay;
     ShellState shells;
     Burden burden{1.0f,0.0f};   // what its stores weigh (BurdenOf; JetSteer)
+    // A thrown drone (JetLaunchThrown): no carrier, it works round where its bomb landed, taking targets within
+    // `reach` of it (0: its kind's range; the carrier's drones reach as far as their carrier sends them), and a
+    // charge out of fuel goes off there instead of flying away (jet.cpp Leave).
+    bool thrown=false;
+    float reach=0.0f;
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
@@ -403,6 +422,13 @@ bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's
 void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
 inline bool Flown(const Jet& o,ULONGLONG ms) noexcept { return o.ref && ms-o.seen<=kStaleMs; }
+
+// A called jet's arrival (the user, 2026-10-05: "有些入场情况，可以一开始就进入攻击状态"): launched by a call, kEntryMs
+// at most, until its first attack run begins (entered). Strike flies it in at its attack speed and the height it came
+// at, turning onto its target, where it used to climb to its attack height and, the target off its nose, fly out up
+// to 2.2 km and 12 s first to come round.
+constexpr ULONGLONG kEntryMs=15000;
+inline bool Entering(const Jet& j,ULONGLONG ms) noexcept { return j.launched && !j.entered && ms-j.bornAt<kEntryMs; }
 
 // --- jet_flight.cpp ---
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept;
@@ -478,7 +504,7 @@ void Detonate(Jet& j,Jet* mother,float dist,ULONGLONG ms) noexcept;
 void Blast(Jet& j,unsigned char* v,ULONGLONG ms) noexcept;
 void DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept;
 void DollFree(int i) noexcept;
-void DollFrame(int i,const unsigned char* v) noexcept;   // its doll follows drone `v` (if it has one)
+void DollFrame(int i,const unsigned char* v,float clear) noexcept;   // its doll follows drone `v` (if it has one), `clear` over the ground
 void ResetDolls() noexcept;                // the mission's end: forgotten, not deleted (they went with it)
 bool PreloadDolls(void* mgr,bool dollBody) noexcept;   // the dolls' SGOs with the doll drone's body: whether
 bool InstallDolls() noexcept;
@@ -496,7 +522,7 @@ void BayFrame(Jet& j,const float* pos) noexcept;
 void BayFree(unsigned char*& ifc) noexcept;
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept;
 bool InstallBay(bool spawnOk) noexcept;
-void PreloadShells(void* mgr,bool gunship) noexcept;   // the gunship's shells (with its body), the impact charges
+void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept;   // the gunship's shells (with its body), the impact charges
 void ResetShells() noexcept;
 // The player's aircraft (playerjet_board.inc): a bay's bombs left (0: no bay, or it is open already); the bay opened
 // with its first bomb on `at`, the carpet laid along `vel` at its speed (false: none); a frame of the open bay; the
@@ -511,6 +537,15 @@ bool ShellsReady() noexcept;
 bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept;
 float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept;
 float ShellReach() noexcept;
+// Its long-range cannon (jet_bay.cpp kCannonSgo): a round from the player at `at` (false: not ready, out of reach, no
+// cannon this mission); whether the cannon is there at all (its SGO installed and preloaded: an install from before
+// has none); its wait before the next round (s, 0: ready); its reach (m).
+bool PlayerCannon(unsigned char* v,const float* at,ULONGLONG ms) noexcept;
+bool CannonReady() noexcept;
+float CannonWait(const unsigned char* v,ULONGLONG ms) noexcept;
+float CannonReach() noexcept;
+// How far from its anchor kind `k` takes targets (its range; a gunship's further with its cannon: jet.cpp PickTarget).
+float TargetRange(const Kind& k) noexcept;
 
 // --- jet_spawn.cpp ---
 // Rows right, up, forward, position, as BombingPlane_Init builds its matrix (right = up x forward).
@@ -520,8 +555,11 @@ bool Preloaded(Body b) noexcept;
 unsigned char* SpawnJet(Body b,const float* m) noexcept;
 bool ModFileThere(const wchar_t* file) noexcept;   // Mods/OBJECT (next to the game's exe) holds `file`
 // A jet launched now from `source`, flying `b` along `heading` at `speed` to work round `target`: its entry
-// (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets).
-Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source) noexcept;
+// (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets). It starts
+// at least `clear` over the ground under `from` (kLaunchClear: a jet's; a thrown drone starts off its bomb's spot).
+constexpr float kLaunchClear=100.0f;
+Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source,
+            float clear=kLaunchClear) noexcept;
 void FarRender(Jet& j,unsigned char* v) noexcept;
 // jet.cpp: a jet the player flew or called down handed back to its NPC pilot (playerjet_board.inc), flying at `vel`.
 void ResumeNpc(unsigned char* v,const float* vel) noexcept;

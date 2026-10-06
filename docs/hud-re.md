@@ -155,6 +155,11 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 | AmmoOwnerMove | `weapon+0x24C`：武器 SGO 读取函数在 `0x68C59A` 把 `AmmoOwnerMove` 字符串（`0x17E2998`）的值写到这里；`0x691FA0` 用 `weapon+0x190 × weapon+0x24C ÷ 60`（除数常量 `0x1768E20` = 60）算继承速度；`weapon+0x190` 由持有者每帧更新 `0x633DD0`（`0x633E50`）从载具传入的速度向量写入。原版直升机炮的 AmmoOwnerMove 都是 0（Root.cpk：V_506/602HELI_GATLING01_L/R、V_410HELI_GATLING01–03、V_409HELI_GATLING01），照样读 | 偏移 H（静态）；+0x190 是 m/s 的载机速度 **M**（由 ÷60 和 `docs/missile-re.md` 的继承速度推断） |
 | 弹着圈 | `RoundImpact`（15 帧一段的地图射线：地形和建筑，不含水面和载具）第一次命中处；寿命内没命中：`sight::RoundAfter` 闭式求寿命结束处（`pos + n·v + drop·n(n+1)/2`），变暗；旁边标炮口到它的直线距离 | 设计 |
 | 提前量 | 不做：原版直升机炮不锁定（`LockonType 0`），座位上没有可读的锁定目标 | — |
+| 没有红线的炮（2026-10-05 追加） | 座位里没有被隐藏红线的炮时（409 的炮塔机炮 `V_409HELI_GATLING01`，`custom_parameter` 为空），取座位武器里弹速最快、不锁定、射程超过 10 m 的那门（10 m 排除 506 的油箱 `v_fuel01`：1 m/帧 × 1 帧） | 设计；武器字段 H |
+| 选中的武器 | 原版直升机**没有**选武器：506 第 55 槽把主扳机（`seat+0x2E4`）写成 `veh+0x2020`（holder 0、1 的机炮），按键位 `0x20` 写成 `veh+0x2021`（holder 2 的导弹）（`docs/heli-input-re.md` §2b，H；409 同样，静态）。座位里也没有可读的「当前武器」下标。所以瞄准具把机炮和副武器同时画出来 | H（506）/ M（409） |
+| 导弹 | 座位里第一件 `LockonType`（`+0x6B0`）= 1 的武器（506 / 602 的 `V_*HELI_MISSILE01`，`MissileBullet01`，LockonRange 500）。锁定读武器自己的锁定列表（`+0xC60` 链表首节点的条目 `+0x10`）和正在锁定的条目（`+0xC70`，进度 `+0xC80` / LockonTime `+0x6D4`），即 `stores.cpp` 的 `StoreLock`，与玩家战机挂载的锁定框同一读法；画法同挂载（`hud.cpp` `LockAt`），下方 `MSL 距离`。没有锁定：导弹炮口方向画暗色圆环，标 LockonRange（`+0x6D0`） | 锁定列表 H（`docs/stores-re.md` §7）；原版直升机导弹的锁定由它自己的锁定 tick 维护 **M** |
+| 火箭 | 不锁定且弹速低于 2 m/帧（120 m/s，`heli.cpp` `Arms` 判火箭的同一条）的第一件武器（409 的 `V_409HELI_MISSILE01`：`MissileBullet01`，LockonType 0）。2026-10-06 起按游戏真实的飞法算（§7.3：点火前滑行下坠、点火后加速到极速），第一次碰到地图处画空心菱形，标「标签 距离」（RKT；炸弹 GREN、凝固汽油弹 NAPALM 按各自的弧线）。之前是沿炮口方向的直线（不下坠），409 的火箭因此落点偏远（5° 俯射 50 m 高：直线 572 m，实际 429 m） | 弹道 H（§7.3）；落点与实弹是否重合需实机看 |
+| 飞行瞄准点 | 鼠标瞄准飞行的青色方框旁标 `FLY`（`hud.cpp` `FlightAim`），和武器的绿色弹着圈 / 黄色红色锁定框 / 菱形区分开；战斗机的方框不标（它同时是机头机炮的方向） | 设计 |
 
 **离线验证**（`tmp/heli_sight_check.cpp`，不入库，用 cl 编译后跑 `src/sight.h`）：`RoundAfter` 与逐帧步进在 410 / 506 / 410-02 三种炮、
 4 个方向、带继承速度时，寿命内每帧最大差 < 1 mm；平地（y=0）射线模拟：410 炮 50 m 高平射落在 659.6 m（逐帧折线与地面交点 660.9 m，
@@ -163,4 +168,157 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 
 **需实机确认**：弹着圈是否落在炮弹实际打到的地方（炮口偏移、门炮炮塔转动时 `MeanMuzzle` 的方向是否就是射出方向、散布）；
 红线隐藏 / 恢复（ini 改 0 再改 1）在风神驾驶座、布鲁特左右门炮、602 上都正常；距离文字的位置和可读性；与原版准星 / 雷达是否重叠；
-409（无红线）确实不画。602 的 SGO 类是 `Vehicle506_Helicopter`（Root.cpk 静态核对），与 506 同一个 vtable，在 `heli.cpp` 的直升机表里。
+409 的炮塔机炮弹着圈跟着炮塔转、火箭菱形落点与实际弹着的差（加速段的下坠）、506 导弹的锁定框与原版锁定标记是否重合。602 的 SGO 类是 `Vehicle506_Helicopter`（Root.cpk 静态核对），与 506 同一个 vtable，在 `heli.cpp` 的直升机表里。
+
+## 7. 原版载具 HUD 与弹着点（2026-10-06，`src/vhud.cpp` 收集、`src/rounds.cpp` / `src/rounds.h` 算弹道、`hud.cpp` `StockVehicleHud` 画）
+
+用户要求：「把所有原版载具都改成咱们的显示，做独立 hud，弹着点也加上」「火箭落点按直线算，会和实际有偏差，改一下」。ini `StockVehicleHud`（默认 1；0 = 原版红线、不画这套 HUD）。
+
+### 7.1 覆盖哪些载具
+
+`crew.cpp` `kClasses` 挂了输入钩子的全部类（玩家坐任一座位时）：402_Rocket（Naegling / 喀秋莎 / 榴弹炮底盘）、403_Tank、404_Tank（Titan）、502_GroundRobo（Depth Crawler，第 4 槽）、503 / 511 Bike、504_begaruta / Begaruta（机甲）、505_Tank、510_Maser、601_Tank、603_Flak、612_nix、Car（Grape、卡车）以及直升机类。排除：插件机体（`BodyOf != none`：喷气机、潜舰、玩家战机）。原版直升机只用这里的「挂载」一行（`HeliStrip` 底行），瞄准具仍是 §6、仪表仍是 `HeliHud`。
+
+**没覆盖：501_FortressRobo（巴尔加）**——`kClasses` 里它的输入槽是 0（不挂钩），没有每帧入口，所以这套 HUD 不出现（L：要加需先逆它的每帧输入槽）。
+
+### 7.2 数据（游戏线程，`StockHudFrame`，`AimLines` 之后）
+
+| 项 | 来源 | 可信度 |
+|---|---|---|
+| 种类 | `crew.cpp` 的类名（`VehicleClassName`，`_` 换空格、大写） | H |
+| 车头 / 炮口方向 | 车体矩阵第 2 行（`+0x60+0x20`）/ 座位第一件能读炮口的武器的 `edf::MeanMuzzle` 方向（开火 `0x6969A0` 的同一读法） | H |
+| 镜头方向 | `CameraRay`（上一帧的 view-projection 求逆） | H（同 `launcher.cpp`） |
+| 速度 | 载具位置按游戏时钟的差分（水平），0.25 s 一阶平滑 | 设计 |
+| HP | `+0x2F8` / `+0x2F4` | H |
+| 武器 | 座位 `+0xC8` holder 列表（最多 6 件），弹数 `+0xBE8`、弹匣 AmmoCount `+0x248`（`0x68C567`，四舍五入成整数） | H |
+| 装填 | 照原版武器状态 `0x692100`（武器栏读的那个）：弹数 ≤ 0、射击间隔 `+0xE0C` 已走完、`+0xF18` 为空时，`+0x22C > 0` 用 `1 − +0xE7C / +0x22C`，否则 `1 − +0xE68 / +0x20C`（ReloadTime，`0x68C9DD`；`ReloadInit` 在 `0x68EAA5` 从 `+0xE68` 扣掉一段，所以 `+0xE68` 是剩余帧数）。剩余秒 = `+0xE68 / 60`。`+0x20C < 0` = 不装填（打空就 EMPTY）。`rounds.cpp` 核对 `0x692100` 读这些字段的 7 条指令和 AmmoCount 的写入 `0x68C55C`，不符（`status=0`）就只显示弹数 | 公式 H；`+0xE68` 是剩余帧 **M**；`+0x22C` 那种的单位没查（不显示秒） |
+| 选中的挂载 | `SetStockSelectedStore(vehicle, seat, index)`：给 `feat/ov-payload` 的切换挂载每帧调用（index = 座位 holder 列表的下标），2 帧内没调用 = 不显示选中 | 接口 |
+| 威胁 | `MissilesHomingAt`（锁定点在载具 30 m 内的导弹）、`jet::LockersOf`（锁定它的敌机），与战斗机威胁圆环同源 | H（同 §5） |
+
+### 7.3 弹种与弹道（`rounds.cpp`）
+
+**弹种**：武器 `+0x7F8` 是 AmmoClass 的工厂对象（`0x68D4D0` / `0x68D53A`），它的 vtable 决定子弹类。插件对 15 个工厂 vtable 在加载时逐个核对 RTTI 名（`.?AVFactory@<类>@@`，vtable−8 的 COL → TypeDescriptor+0x10），对不上的那一类当作未知（标 `WPN`，按弧线）。
+
+| 工厂 vtable | 类 | HUD 标签 | 画法 |
+|---|---|---|---|
+| `0x17A3E90` / `0x17A3ED0` | SolidBullet01 / SolidBullet01Rail | GUN / CANNON | 弹着圈 |
+| `0x17A3878` / `0x17A4440` | RocketBullet01 / SolidExpBullet01 | CANNON | 弹着圈 |
+| `0x17A1688` / `0x17A16C8` | GrenadeBullet01（/ MapNoDamage） | GREN | 黄色十字（喀秋莎同款）+ 距离 + 飞行秒 |
+| `0x17A1BD0` | MissileBullet01 | CP[0]=0：RKT（火箭弹道）；否则 MSL（锁定框） | 菱形 / 锁定框 |
+| `0x17A1DA8` / `0x179F9D8` | MissileBullet02 / HomingLaserBullet01 | MSL / HLASER | 锁定框 |
+| `0x179FC60` / `0x179E2D0` / `0x179ECA8` | LaserBullet01 / EfsBullet / EfsExposureBullet | LASER / BEAM | 弹着圈 |
+| `0x17A12F0` / `0x17A20A0` / `0x17A14A0` | FlameBullet02 / AcidBullet01 / NapalmBullet01 | FLAME / ACID / NAPALM | 弹着圈（NAPALM 十字） |
+
+飞行超过 2.5 s 的弧线弹也画十字（迫击 / 榴弹的高弧）。`LockonType`（`+0x6B0`）= 1 的武器一律按锁定框（与 §6 导弹同读法）。
+
+**弧线弹**（除 MissileBullet01/02 外，各类第 5 槽更新都不写速度：RocketBullet01 `0x287E40`、SolidBullet01 `0x28BD30`、GrenadeBullet01 `0x264AB0`、Laser `0x2535C0`、Flame `0x2622A0`、Acid `0x2735B0` 只调核心 `0x235D50` 和特效，H）：子弹核心的 BulletControl（`0x233CB0` / `0x2349D0`）每帧 `v += g/60`、`p += v/60`（`0x233DC4`、`0x234AA7`，H），即 §6 的同一模型：速度 = 炮口方向 × AmmoSpeed + 载具速度 × AmmoOwnerMove / 60，每帧加 AmmoGravityFactor × 世界重力 / 3600。榴弹 / 滚动弹接地后的弹跳、滚动不模拟（只要第一次着地点）。
+
+**火箭（MissileBullet01，CP[0] = 0）——之前按直线算的那个**。逆向结论（H，除注明外）：
+
+| 项 | 位置 | 内容 |
+|---|---|---|
+| Ammo_CustomParameter 在武器里 | `weapon+0x8E8` | SGO 读取 `0x68D9DB`（`lea rcx,[rsi+0x8E8]`）；开火把 `weapon+0x830` 起的参数块交给每发子弹（`0x69712F`），导弹构造读的是自己的副本 `+0xB98`（`0x267AB6`）：`0x8E8 − 0x830 = 0xB98 − (0x140 + 0x9A0)` 对得上 |
+| 读取方式 | 变体：16 字节 + `+0x10` 的 tag（0xFFFF 空，2 = SGO 文档节点 `{doc, 节点号}`） | 构造函数经三张按 tag 索引的表读：`0x179EAF0` 取子项（tag 2 = `0x2390D0`）、`0x179EAA8` 取数（`0x2390B0` → `0x52F50`）、`0x179EEF0` 取个数（`0x240AF0`）。`0x52DE0` 取子项**不检查下标**，所以插件先取个数再取子项。整数是四舍五入（`0x239130`） |
+| 状态 | 导弹对象 | 自身速度 `+0x13D0`（构造：核心初速 − 继承速度，即炮口方向 × AmmoSpeed）、继承速度 `+0x13E0`（构造 `0x268F07`：发射参数 `+0x50`）、每帧重力 `+0x13F0`（`0x268F5E` ← `0x231C10`：核心重力 `+0xBA0` × (1/60)²）、年龄 `+0x1400`（从 0，`0x26AB8C` 每帧 +1） |
+| 点火前（年龄 < CP[7][0]） | `0x26A92E`–`0x26A9D0` | 继承 ×= CP[7][1]；自身 ×= CP[7][2]（没给 = 1，`0x2680D5`）；继承 += 每帧重力 |
+| 点火后 | `0x26AA17`–`0x26AB25` | 继承 ×= 0.9（`0x17A1D80`）；CP[0]=0：自身速度长度 += CP[4]（`0x4D940`：不小于 0，零向量不变）、再限制到 CP[6]（`0x23F4E0`），方向不变（只按它转模型矩阵）；CP[0]=1/2 走导引 `0x269AF0` / `0x269EE0` |
+| 位移 | `0x26AB2C` → `0x235540`、核心 BulletControl | 交给核心的速度 = (自身 + 继承) × 60；BulletControl 再加一次重力后移动：**每帧位移 = 自身 + 继承 + 每帧重力**。下一帧速度又由自身 + 继承重写，所以点火后下坠**不累积**（每帧固定一个重力量）；点火前的下坠在继承速度里累积并按 CP[7][1] 衰减 |
+| 随机极速 | `0x2687E1` | 只对 CP[0] = 1/2 且有 CP[10] 时把 CP[6] 乘一个随机系数；火箭（CP[0]=0）不受影响 |
+
+`src/rounds.h` `Motor` 就是上表的逐帧步进；`rounds.cpp` 核对上表的每处指令字节、三张表的 tag-2 项确是这三个函数，不符就整块关掉（日志 `HOOK rounds custom=0`），此时 MissileBullet01 全部按「锁定框」处理，不再画直线。
+
+原版数值（Root.cpk，`tools/rounds_check.cpp` 用的就是这些）：
+
+| 武器 | AmmoSpeed | 重力系数 | CP[4] 加速 | CP[6] 极速 | CP[7] | 寿命 |
+|---|---|---|---|---|---|---|
+| `V_409HELI_MISSILE01`（Nereid 火箭） | 0.5 | 1.0 | 0.03 | 10 | [90, 0.98] | 2400 |
+| `V_502_GROUNDROBO_MISSILE01_L/R`（Depth Crawler，LockonType 0） | 0.1 | 0.75 | 0.08 | 1.5 | [0, 0.98] | 480 |
+| `V_504BEGARUTA_ROCKET01_L/R` | 0.1 | 0.75 | 0.01 | 10 | [0, 0.98] | 1200 |
+
+409 的火箭先以 0.5 m/帧滑行 90 帧（1.5 s）、一路下坠，才点火：点火时已在发射线下方 10.4 m，1000 m 处约低 12.9 m；从 50 m 高俯 5° 发射，直线说落在 572 m，按真实弹道落在 429 m——这就是用户看到的偏差。另外两种一出膛就点火，1000 m（或寿命尽头）只低 1.3–1.5 m。
+
+**落点**：`rounds::FirstHit`——按上面的步进每 15 帧一段打一条地图射线（`MapRay`：地形和建筑，不含水面和载具），第一处命中即落点；最远找 3000 m（近景镜头的远裁剪），超出或寿命内没命中：画在弹道结束处、变暗。
+
+### 7.4 画法
+
+- 弹着点：弧线 = 直升机同款瞄准十字 + 弹着圈（旁标「标签 距离」）；高弧 / 榴弹 = 黄色十字（`ImpactCross`，与喀秋莎同一画法）+「标签 距离 飞行秒」；火箭 = 空心菱形；导弹 = 锁定框 / 未锁定时炮口方向的暗圆环 + LockonRange。同标签、落点相距 2 m 内的（左右成对的炮）只画一个。选中的挂载标签加方括号。喀秋莎的发射架（`kMarkLofted`）由 `launcher.cpp` 照旧画十字和散布圈，这里只在列表里列出（ROCKETS），不重复画。
+- 顶部航向带：以炮口方向为中心，车头方向用琥珀色小三角 + HULL 标在带下。
+- 屏幕下方中线左侧：车体 / 炮塔指示（圆环的上方 = 镜头朝向；车体轮廓按车头相对镜头转，青色线 = 炮口方向）、种类与座位、速度、HP 与血条、每件武器一行（弹数 / 弹匣，装填中 RELOAD 百分比与秒，琥珀色；不装填打空 EMPTY 红色），上方告警（MISSILE! / LOCKED / HULL CRITICAL / NO AMMO）。
+- 威胁：战斗机的雷达告警圆盘（`RwrScope`，受 `PlayerJetThreatHud` 控制）镜像到中线右侧（`RwrCentre` 的 `side` = +1）：在左侧时它的框
+  （中心 W/2−486s、0.80H−96s，半径 86s）正好压在车体 / 炮塔块上（圆环中心 W/2−460s）。离线核对：`tools/hud_view` 的
+  `StockLayoutApart` 在 1920×1080 与 2520×1080 下分别画圆盘和整块（含钻头那行），两者外框不相交（旧位置时两种宽度都相交）。
+- 一门炮的标记只留一组：`TurretMark`（炮塔镜头）的白方框在这套 HUD 开着时不画；EDF6AutoTurret 的预瞄圈画在玩家自己这门炮
+  （`ownGun`、预瞄圈模式、有解）时，座位第一件武器（瞄准轴转的那门）的准星 / 弹着圈不画，只剩预瞄圈和炮膛十字。
+- 钻头战车：`DrillPanel` 只在这套 HUD 不画时出现；HUD 开着时转速 / 热量是块里的一行，过热进告警行。
+- Nix：`PlayerNixTorso`（`nix.cpp`）的腿朝向 / 躯干方向代替车头 / 炮口画进圆环，扭腰极限画成环外两个刻度，信息行加 TWIST。
+- 红线：`StockVehicleHud=1` 且 HUD 能画（`HudReady`）时，玩家座位的原版瞄准线按 `docs/aim-line-re.md` 第 7 条隐藏；原版准星（屏幕中心的图标）没有动。
+
+### 7.5 需实机确认
+
+- 每种载具的弹着圈 / 十字 / 菱形是否落在实际弹着处（尤其 409 火箭点火前的下坠、Depth Crawler 火箭、Titan 主炮、Grape、榴弹炮）；子弹核心每帧「先类更新、后 BulletControl」的顺序（差一帧，M）。
+- `+0xE68` 剩余帧、`+0x22C` 那种装填的显示；弹匣 AmmoCount 与原版武器栏是否一致。
+- 下方信息块的位置是否与原版 HUD（武器栏、载具血条）重叠；车体 / 炮塔指示的方向（转炮塔时青线是否跟着转）。
+- 502 Depth Crawler 的输入槽是第 4 槽（每帧都来）；Car 类只有带武器的才有弹着点。
+
+## 8. 座舱告警（2026-10-06，`src/warn.cpp` 决定，`hud.cpp` `Annunciator` / `GroundCue` / `StallCue` / `RwrScope` 画）
+
+用户要求把一行告警文字换成「更现实」的：告警灯板、近地 V 形 + 大叉 + 拉起箭头、失速升力条 + STALL 框、雷达告警圆盘。全部由游戏线程每帧一次的 `WarnTick` 决定（`PlayerJetHud` / `PlayerHeliHud` / `GearHudLatest`），整份发布，`HudPublish` 拷进快照，绘制线程只读快照；声音同一处决定（`jetaudio.cpp` `Warn`），屏幕和耳朵不会各说各的。
+
+| 项 | 做法 | 可信度 |
+|---|---|---|
+| 近地 | `ClosureIn`：下降率 × 6 s 内触地（快于着陆允许的下沉：机翼 `kLandSink` 10 m/s，旋翼机按机种 `landMax`，原版直升机下降键 6 m/s + 1）或沿速度 6 s 的地图射线撞上比脚下地面高 5 m 以上的东西；≤3 s PULL UP，否则 TERRAIN（撞高处）/ SINK RATE（往下撞地）。原来的 `PullUpNeeded`（3 s）是它的 3 s 部分，结果不变 | 设计；`tools/warn_check.cpp` 离线验证 10 种情况 |
+| 拉起箭头 | 从速度矢量（悬停时机头）指向「航迹朝世界上方转」的屏幕方向：投影对方向的导数 `(u·w_b − b·w_u)`（裁剪坐标），速度矢量在屏幕外也对。最初用两点相减，陡降时一个点在屏外、另一个在屏内，箭头朝下（`tools/hud_view.cpp` 离线画出来发现） | 公式 H |
+| 失速 | 本飞行模型没有迎角，失速按「航迹需要的升力 / 机翼此刻能给的最大升力」（`playerjet.cpp` Air 的 `across·kStallWarn / most`，≥1 即 STALL），升力条显示这个比例 | H（与 `j.stall` 同一式） |
+| 雷达告警圆盘 | 机头朝上；方位 = 威胁相对本机水平机头的方位角（与镜头无关）；半径按 √(距离/5 km)；发射 = 追来的导弹数比 1.5 s 内记得的最多数还多（锁定点在追踪半径边上进出不算新发射） | 设计 |
+| 灯板位置 | 航向带下方 44 px（1080 线）固定一排；俯仰梯升到那里时被灯板的底色压住 | 离线排版 |
+
+离线：`hud_view` 把 `hud.cpp` 整个编进来，用一块假的「EDF.dll」内存（四边形和文字函数的 RVA 处写跳转到记录函数），画出喷气机 PULL UP / TERRAIN、旋翼机 PULL UP、原版直升机 SINK RATE 四个场景的 PNG；字体是替代品（每单位字号 40 px），只看排版。
+
+**需实机确认**：灯板、圆盘、升力条与原版 HUD（雷达、血条、武器栏）是否重叠；V 形和箭头在追尾镜头下的方向感；TERRAIN 在城市低飞时是否太吵（楼顶 5 m 的门槛）。
+
+## 9. 原版武器栏与油箱（2026-10-06，`src/stockgauge.cpp`，ini `HideStockGauges`）
+
+用户要求：「删掉原版挂载和油料显示。选择挂载等改成我们自己的hud显示」。
+
+### 9.1 原版载具武器栏怎么画（H，反汇编）
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 类 | `HUiHudWeapon`（vtable `0x17FD150`），载具用的是单独一个实例：布局 `app:/ui/lyt_HudWeaponGuageVehicle.sgo`，构造函数在 `0x82DBEF` 写 `+0xC60 = 1`（步行的左右武器栏是同类的另外几个实例，`+0xC60 = 0`） | H |
+| 布局树 | `Guage_Root → WeaponGuageBase → 5 × WeaponGuage(TextName, TextRemain, TextLoaded)`（Root.cpk `UI/LYT_HUDWEAPONGUAGEVEHICLE.SGO` 的 `layout_tree`）：最多 5 块 | H |
+| 更新（slot 1，`0x832B30`，每帧） | 把 `+0x778` 的拥有者（SceneObject）`__RTDynamicCast`（`0x12DA7AA`，类型描述符 SceneObject `0x2006450` → SoldierBase `0x2006428`）成 SoldierBase；`+0xC60` 时：士兵 `+0x1550`（所乘载具的控制块）活着、`+0xC61 == 0` → 置 `+0xC61 = 1`，把座位（士兵 `+0x1540`）`+0xC8` 里有武器的 holder 下标逐个 push 进 `+0xC68` 缓冲（数据 `+0xC70`，个数 `+0xC80`，8 字节）；下车 → `+0xC61 = 0`、`+0xC80 = 0`（`0x832D00`）。**一次上车只列一次** | H |
+| 布局（slot 2，`0x831A40`） | 只在 `+0x770`（脏标记）置位时运行并清掉它；载具实例：`+0xC61` 为 0 直接返回；否则按 `+0xC80` 个下标（倒序）逐块填名字 / 余弹 / 弹匣并 `panel+0x1F8 = 1`，池里剩下的块 `panel+0x1F8 = 0`（`0x832348`） | H |
+| 谁读这张表 | 位移扫描：`+0xC68..+0xC80` 只出现在构造函数和上面两个函数里；开火走载具自己的 holder（`docs/aim-line-re.md`），不经过 HUD | H |
+| `+0x1F8` | 布局节点的显示标记（布局函数自己用它显示 / 隐藏面板） | H（用法）；渲染每帧读它 M |
+
+### 9.2 插件怎么去掉它
+
+不跳过绘制、不碰布局节点：只在更新（vtable slot 1 改指 `UpdateHook`，其余原样调用）前后改这张表。
+
+- 本帧要隐藏（玩家所乘载具 = `SetStockGaugeCover` 发布的那台，`HideStockGauges=1`、`Enabled=1`）且表非空 → `+0xC80 = 0`、`+0x770 = 1`：布局函数自己把 5 块全藏起来。
+- 不再隐藏（插件 HUD 不再列这台的武器、改了 ini）→ 更新前 `+0xC61 = 0`、`+0xC80 = 0`：原版更新按座位重新列表，再置脏让布局显示。
+- 换座位（`seatswitch.cpp`，人还在车上，`+0xC61` 不会复位）：原版会拿旧座位的下标读新座位的 holder 数组（`0x831EC0`：`[seat+0xC8 + idx*8]`，不检查个数），新座位武器少时越界读。插件记下列表对应的座位，座位变了就照上一条重新列表（原版缺陷，顺带修，M：未实机复现越界）。
+- 每个实例一条记录（本地分屏最多两个）；表的主人不是插件 HUD 所讲的那台载具（另一个本地玩家）就不动。
+
+`SetStockGaugeCover`（`hud.cpp HudPublish`，游戏线程，每帧）：与 `HudDraw` 同一组条件——插件战机 / 旋翼机的座舱（`CockpitStrip` / 旧 `Cockpit` / `HeliStrip` 都列挂载）、`StockBlock`（`StockVehicleHud` 覆盖的原版载具）、开 `HeliFlightHud` 的原版直升机（`HeliStrip` 列 `StockStores`），且文字能画（`textOk`：列表是文字）。所乘载具取 `PlayerHuman()` 的 `+0x1548` / `+0x1550`。
+
+签名（`InstallStockGauges`，任一不符就不挂钩、原版不变）：`0x832B30` 函数头、`0x832BAE` 的 cast 调用（两个类型描述符）、`0x832C48` 载具分支、`0x832C85` 座位读取、`0x832CB2` 列表缓冲、`0x832D00` 下车清表、`0x831A96` 脏标记、`0x831BB4` 按个数显示、`0x832348` 隐藏剩余面板。
+
+### 9.3 护甲 / 载具耐久条为什么保留
+
+`HUiHudPowerGuage`（`lyt_HudPowerGuage01.sgo`）：`layout_tree` 是 `Guage_Root → PowerGuage(PowText, DefText) / PowerGuage_Secondary / PowerGuage01_Vehicle(TextVehicle)`，同一块仪表里既有玩家自己的护甲也有载具耐久。载具的条不是一个布局节点：布局函数 `0x8277B0` 把 `载具 HP / 最大 HP` 作为参数 `bar_vehicle`、`V_Base`、`V_scale` 写到 `+0x950` 节点上（H）；`+0x950` 是构造时从 `PowerGuage01_Vehicle`（`+0x940`）的 `+0x98` 取来的，按布局树应是它的父节点 `Guage_Root`（M）；数字在 `TextVehicle`（`+0x960`，H）。只隐藏 `PowerGuage01_Vehicle` 去不掉那条（L），动 `Guage_Root` 会连玩家护甲一起藏掉。插件 HUD 只有 `StockBlock`（和 `PlayerJetFlightHud=0` 的旧座舱面板）显示载具 HP，玩家护甲则没有替代，所以这块仪表一律保留。
+
+### 9.4 油箱（FuelTank）
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 结构 | `+0` 启用（byte）、`+4` 容量、`+8` 剩余、`+0xC` 每单位输入的消耗（float）；`0x5EFA70(tank, 容量, 消耗)` 建立（来自 `vehicle_setup[2] = [999900, 1.666]`），`0x5EF8E0(tank, 输入)`：剩余 −= |输入| × 消耗，耗尽时把输入按比例截掉 | H |
+| 位置 | 直升机基类（slot 46 `0x6530E0`，506 / 409 / 410 共用；插件飞机是 506 机体）`+0x1690`（`0x6532B0` 建立、旋翼 `0x651A0E` 消耗）；`Vehicle503_Bike`（vtable `0x17DA508`）`+0x29B0`（`0x617E52` 建立、`0x6179D3` 消耗）；`Vehicle511_Bike`（`0x17DBDF8`）`+0x2B00`（`0x61F689` / `0x61F273`） | H |
+| 和 FUEL 武器 | 每个有油箱的载具每个座位都列着 `v_fuel01`（`Weapon_VehicleShoot`，AmmoCount 1），原版武器栏把它当一件武器显示，余弹即燃料（用户截图 FUEL 999571）。谁把燃料写进它的余弹没追（L）；插件直接读油箱 | 显示 H（截图）/ 写入 L |
+| 剩余时间 | 剩余的下降量按游戏时钟求速率（2 s 一阶平滑，加油 / 回升时重测），剩余 ÷ 速率；100 分钟以上不显示 | 设计 |
+| 插件战机 | 机体的旋翼输入被插件写 0（`playerjet.cpp`），引擎开着时旋翼保持怠速 0.13（`docs/heli-input-re.md`），所以油箱按怠速慢慢下降：0.13 × 1.666 每帧 ≈ 13 每秒，满箱约 7.7 万秒（21 小时） | 怠速消耗 M（与截图的 999571 量级吻合） |
+
+显示：战机 `CockpitStrip` 的那行（`THR 80%  FUEL 62%    GUN 1786  挂载…`）、旧座舱面板的油门行、旋翼机和原版直升机 `HeliStrip` 的中间一行、原版载具块的信息行；`FuelLow`（< 15% 或 < 60 s）点亮告警灯板的 **LOW FUEL**（`warn.h` `kWarnFuel`，琥珀色告警），原版载具块是 LOW FUEL 一行，旧座舱面板是提示行。油箱不再算进 `StockBlock` / `StockStores` 的武器（以前是一行「GUN 999571」）；插件战机的挂载行以前不含机炮（`ReadStores` 只读挂载），原版武器栏去掉后机炮余弹没了出处，所以挂载行前加 `GUN n`：座位 0 里既不是挂载（`IsStoreWeapon`）也不是油箱的武器，取余弹最少的那门（左右两门一起打）；`SetStockSelectedStore` 的下标仍按 holder 列表，换算到跳过油箱后的武器行。
+
+离线：`tools/hud_view` 新增 `jet_lowfuel`（8%、5:12、LOW FUEL）；`heli_sinkrate` 显示 `FUEL 41% 30:30`，`rotor_pullup` 显示 `FUEL 62%`。
+
+**需实机确认**：插件战机 / 原版直升机 / 坦克 / 摩托上原版武器栏消失、步行和巴尔加时还在；`HideStockGauges=0` 或关掉 `StockVehicleHud` 后（同一次乘坐中）武器栏回来；换座位后武器栏（`HideStockGauges=0` 时）显示新座位的武器；FUEL 百分比与原版数值一致；开火、切换挂载不受影响。

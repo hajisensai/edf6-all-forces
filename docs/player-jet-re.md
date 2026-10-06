@@ -32,7 +32,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 | 推力 / 减速（m/s²） | 16 / 20 | 11 / 15 |
 | 最大过载 / 滚转率 | 6 g / 2.6 rad/s | 5 g / 1.6 rad/s |
 | 无损接地最高速 | 130 | 120 |
-| 撞击半径（`ram`） | 10 m | 12 m |
+| 撞击半径（`ram`，机体尺寸的一半） | 8 m | 12 m |
 
 数值以 `src/playerjet.cpp` 的 `kKinds` 为准（本表 2026-10-04 按代码改正：此前写的 195/180、7 g 是旧值）。
 
@@ -42,7 +42,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。置信度：**H** = 反汇
 - 接地（离地 <3 m 且在下沉，或沿速度方向 3 帧内会碰到）：下沉 ≤10 m/s、机身 up.y ≥0.77、机头俯角不超过约 15 度、速度 ≤ 无损接地速度 → 降落转滑跑；否则坠毁扣血，并把下沉截到地面上方。
 - 离地高度：取地面（地图射线）和水面（`SeaAt`，游戏自己的水域）中较高的一个。地图射线穿过水面打到海床（docs/water-re.md），以前把海床当地面。
 - 撞到东西（建筑、敌人、地图墙）：150 ms 内实际位移不到下达速度的一半（空中 >40 m/s，滑跑 >20 m/s）→ 按损失速度坠毁扣血；空中水平速度反向、以最低空速弹开，滑跑直接停下。
-- 撞击伤害（2026-10-04 用户要求；2026-10-05 改为按质量和速度）：上面这种撞到东西的坠毁（不含撞地、落水），在机头位置（沿下达速度方向半个撞击半径）调 `ImpactDamage`（jet_bay.cpp）：伤害 = ½·m·v² ÷ `kRamJoulesPerDamage`（2.87e5 J，按 Mk 82 的 1500 伤害 ≈ 430 MJ 装药定）× 强度倍率 × `PlayerJetRamDamage`（`RamDamage`）。m = `JetMassOf(BodyMark(v))` 的空重 × `Burden.mass`（挂载）；v = 下达速度 − 实测沿该方向的速度（被挡掉的部分 = 沿接触法向的接近速度，对方迎面飞来时实测为负，v 更大）；强度倍率 = 最大 HP ÷ 机体 SGO 的耐久（`kJetMasses` 第三列，`tools/gen_stores.py` 从 `JETS` 生成），与游戏放大武器伤害的倍数一致（**L**：假定耐久和武器伤害按同一倍数放大，原版 tier 两个乘数相同时成立）。半径 = 机型的 `ram`，只伤敌方阵营、记在本机名下。与坠毁同一个 1 秒节流。每种插件飞机都有质量（selftest `jet_masses_cover_every_jet`），没有质量的机种不造成撞击伤害（日志说明）。
+- 撞击伤害（2026-10-04 用户要求；2026-10-05 改为按质量和速度）：上面这种撞到东西的坠毁（不含撞地、落水），在机头位置（沿下达速度方向一个撞击半径，即机体尺寸的一半；2026-10-06 前是半个）调 `ImpactDamage`（jet_bay.cpp）：伤害 = ½·m·v² ÷ 2.87e5 J（`src/vehicleram.h` 的 `ram::Damage`，地面载具的撞击伤害同一公式；按 Mk 82 的 1500 伤害 ≈ 430 MJ 装药定）× 强度倍率 × `PlayerJetRamDamage`（`RamDamage`）。m = `JetMassOf(BodyMark(v))` 的空重 × `Burden.mass`（挂载）；v = 下达速度 − 实测沿该方向的速度（被挡掉的部分 = 沿接触法向的接近速度，对方迎面飞来时实测为负，v 更大）；强度倍率 = 最大 HP ÷ 机体 SGO 的耐久（`kJetMasses` 第三列，`tools/gen_stores.py` 从 `JETS` 生成），与游戏放大武器伤害的倍数一致（**L**：假定耐久和武器伤害按同一倍数放大，原版 tier 两个乘数相同时成立）。半径 = 机型的 `ram`（机体尺寸的一半，2026-10-06 起；只看大小不看伤害，伤害里已经有质量和速度），取最接近它的装药，只伤敌方阵营、记在本机名下。与坠毁同一个 1 秒节流。每种插件飞机都有质量（selftest `jet_masses_cover_every_jet`），没有质量的机种不造成撞击伤害（日志说明）。
 - 天花板（`*(image+0x20B2998)+0x3C`）下 12 m 不再上升。
 - ±2.4 km 世界边界：越过边界且朝外飞时，航向沿墙转向（保留沿墙方向的分量；正对墙时转向右侧），并带 0.3 的向内分量，速度大小不变（`WallTurn`）。以前只把向外分量清零，正对墙垂直撞上时水平速度为 0，下一帧又被清零，就悬停在墙上。
 - 落水：506 收到水消息（0x10000025）会当直升机落水、每帧给自己发 2 倍 HP 的伤害；body506.cpp 的 slot 9 钩子把它拦下，交给插件自己的模型：空中触水一律算坠毁（不能水上降落）；浮在水面（滑跑/停着，或空机泡在水里）每秒算一次坠毁（每次至少 20% 最大 HP），约 5 秒解体。
@@ -191,6 +191,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
 - 机炮和挂载同玩家战斗机。挂载循环里多一项「特殊挂载」（`Store::weapon` 为空，`stores.cpp` 的锁定 / 扳机函数原本就对空武器什么都不做）：
   - **BOMB BAY**：喷气机还带着接管来的弹仓（`BayState::ifc` 且没开过）。副射击 → `jet::PlayerOpenBay`：`bombAt` = 当前 CCIP 落点，`bombDir` / `bombSpeed` = 此刻的水平速度，`bayFrom = -reach`，所以第一颗炸弹瞄 CCIP，之后每帧 `BayFrame` 按原版轰炸机每帧前移一个速度（`docs/airstrike-re.md`）。
   - **SHELLS**（炮舰机）：`jet::PlayerShell`，同 `GunshipFire` 的炮弹、间隔、射程，目标是屏幕中心视线与地面的交点（`CameraRay`：由上一帧 view-projection 求逆，眼睛 = (0,0,1,0)·VP⁻¹，中心点 = (0,0,0.5,1)·VP⁻¹）；按住目标键绕点盘旋（`Orbit`：`steered` 让 `Air` 按瞄准点转向，鼠标只转镜头）。
+  - **CANNON**（炮舰机，2026-10-05）：`jet::PlayerCannon`，侧舷远程机炮（`jet_bay.cpp` `CannonShot`，`EDF6VC_GUNSHIP_CANNON.SGO`：`tools/make_jets.py` `cannon_round`，原版 `DEMOGUNSHIPFIRESOLID` 改成一发 16 m/帧、不下坠、170 帧、4 m 爆炸、不穿透），`Shell(..., straight=true)` 从机身直线打向同一个瞄准点；自己的间隔 500 ms、射程 2500 m，伤害 60 × 机体倍率（最大 HP ÷ `kJetMasses` 耐久，同 `RamDamage`）；副射击字节 0x2021 由 slot 55 每帧按按键重写，所以按住即连发。只有 `jet::CannonReady()`（文件存在并已预载）时才进挂载循环，炮舰机的特殊挂载占两格（`SpecialRoom`）。NPC（`GunshipFire`、炮手 `CrewShell`）对地面目标按 `tgtVel` 算一次提前量；有机炮的 NPC 炮舰机选目标范围 `TargetRange` = √(2500² − 350²) − 600 − 80 ≈ 1795 m（原 1500 m）。炮手座用 `PlayerJetSwitchKey` / LB 在 SHELLS 与 CANNON 间切换（`GunnerPick`）。
   - **DRONES**（三种航母）：`jet::PlayerLaunchDrone` 复用 NPC 的发射（`LaunchOne`，从 `LaunchDrones` 抽出来，行为不变），同时给航母记 `CarrierState::order`：它放出的无人机以这一点（抬高 40 m）为锚点、400 m 内找目标（`jet.cpp JetFrame`）；目标键 `RecallDrones`。
   - **CHARGE**（自爆 / 人偶无人机）：副射击后 100 ms 内每帧置 0x2021（2 号挂架，炸药，同 `jet_carrier.cpp Blast`），300 ms 后 `Kill`（原版死亡消息，踢出座位，玩家按 §7 弹射）。
 
@@ -263,13 +264,13 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
 | 喷气机共用 V506 的 MAB，所以上车点在机体原点右边 2.15 m、前 1.8 m 的地面上，也就是**机腹正中下面**：航母机身箱侧面离它 4.9 m、底在它上方，站在哪都差 5 m 以上 → 没有上车提示；玩家攻击机整机箱的侧面离它 10 m（以前能上去，大概是站到了机翼上：箱顶离上车点约 2 m） | 计算 | H |
 | 原版的做法：V506 舱门在箱侧面（2.8 m）内 0.65 m 的地面上；V410 三个舱门都在 `mdl` 上、y = 0、机身两侧 | 解 MAB | H |
 | `0x6BADD0` 找到的父骨骼记录就是模型实例（`veh+0xEE0`）的骨骼记录，CanRideSeat 用它 `+0xB0..+0xEC` 的世界矩阵。原版直升机每帧用根骨骼记录的 `+0xE0`（平移行）做对地射线（0x651B8F），所以根骨骼的世界平移是有效的 | 反汇编 | H |
-| `mdl` 在落地后的模型里绑定位置抬高了 lift（舵面轰炸机 2.285、截击机 1.485、多用途机 0.437、航母 3.512 m，`jet_models.root_lift`）。游戏里根骨骼记录带不带这段抬高**没有定论**：网格骨骼（bone 1）实测就在模型原点（FLAME 日志），说明根骨骼的局部被动画替换、抬高大概率不生效；但 `booster.cpp` 记录过根骨骼「没有方向」。所以上车点按两种情况都够得着来放 | 推断 | M |
+| 游戏画模型用的是网格骨骼（bone 1：bomber501 / bomber401 / body）的世界矩阵乘逆绑定，网格骨骼实测就在载具原点（FLAME 日志：箱中心的反向），根骨骼 `mdl` 的局部平移不生效。所以落地抬高（舵面轰炸机 2.285、截击机 1.485、多用途机 0.437、无人机 1.512、航母 3.512 m）曾经加在 `mdl` 上时，游戏里画出来的模型比碰撞箱和尾焰表低一个 lift（2026-10-05 用户：「碰撞模型和实际外观不一致」「尾焰高了一点」）。现在抬高在蒙皮顶点和网格骨骼的子骨骼上（`jet_models.lift_mdb`），网格骨骼仍在原点，`jet_models.drawn_lift` 恒为 0 | 推断（离线渲染 + 日志），待实机看停放截击机机轮是否刚好接地 | M |
 
 ### 12.2 修法
 
 - `Jet.parked`：`PARKED_KINDS`（制空战斗机、截击机、对地攻击机、多用途机、三种航母）各有一个停放版 `edf6tr_jet_<机种>_parked_mission`，标记 / 模型 / 武器与 NPC 版相同（插件只认标记，`kBoardable`），碰撞箱用 `model_box`，座位职业掩码 15 + `505_TANK_DRIVER`（同玩家战斗机）。测试场 `BOARDABLE_PARKED` 放这一版（启动器里也有「·停放」行）；`placements` 把它和玩家战斗机一样空着放。
 - `fuselage_box` 的箱底改到模型最低点（原点）：只影响航母（其它机种机身范围里就有前起落架，底本来就是 0）。NPC 航母的箱变成 y 0–17.03（中心 8.515），无人机放出点（中心下 25 m）仍在箱外。
-- `move_door`（`jet_sgo` 里，对模型抬高量已知的所有喷气机：`_root_lift`；Primer 战斗机和潜水母舰不动）：上车点 = 碰撞箱右侧（+x）外 `DOOR_OUT` = 0.6 m、y = 0（`mdl` 上，地面）、z = 原版的 1.8（限制在箱长范围内）；半径 = max(原版 1.8, √(max(lift, 1)² + 1²) − 0.5 + 0.05)：人站在离它 1 m（水平）处、位置取脚底或脚上 1 m，上车点在地面或抬高 lift 处，都够得着。只改这一条定位点记录的 16 字节坐标和 4 字节半径，座位、镜头定位点不动（姿势、镜头不变）。炮舰机的炮手座共用这个定位点，一起移动。
+- `move_door`（`jet_sgo` 里，对插件的所有喷气机：`_moves_door`；Primer 战斗机和潜水母舰不动）：上车点 = 碰撞箱右侧（+x）外 `DOOR_OUT` = 0.6 m、y = `door_height(box)`（贴地的机体为 0：地面）、z = 原版的 1.8（限制在箱长范围内）；半径 = 原版 1.8（画出来的模型与箱子同高后，不再需要照顾「抬高 lift 处」的情况）。只改这一条定位点记录的 16 字节坐标和 4 字节半径，座位、镜头定位点不动（姿势、镜头不变）。炮舰机的炮手座共用这个定位点，一起移动。
 - `check_door`（每次 `jet_sgo` 生成后回读）：箱底不在原点下面；上车点在地面上、在箱右侧外 `DOOR_OUT`、在箱长范围内；上面那四种组合都在判定距离内。不满足就抛 `DoorError`，什么都不写。
 - `veh+0xE00`（各座位上车点离原点的最大距离，载具半径）随之变大：停放航母约 30.4 m、停放舵面轰炸机约 13 m。它用在 slot 55 的区域夹紧（把载具往地图里缩这么多），影响很小；别处的用途没查（L）。
 - 测试场每台留空的半径：整机实体的舵面轰炸机外形（玩家攻击机、停放的制空战斗机 / 对地攻击机）机头在原点前 17.9 m、半宽 12.4 m，转到任何方向最远 21.7 m，改为 `ELEVON_RADIUS` = 22 m（原 15 m，两架相距 30 m 时机头对机尾就会重叠）。用户的大混战计划在 M045 上 36 个点位正好放满，`spaced` 先放你自己开的，剩下的重叠落在 NPC 驾驶、开局就起飞的那几架上（离线试排：NPC 攻击机与停放截击机相距 25.3 m、与停放制空战斗机 30.8 m，NPC 截击机与多足机 20.2 m）。往 800 m 圈扩点位会占掉舰船要的远处点位（`grand_points` 报不够），所以没扩。
@@ -295,5 +296,32 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
   1. 停放的每种飞机：机翼、机头、机尾是不是实体（走不进去、能站上去）；航母和舵面轰炸机开局有没有被挤开 / 顶起来（`VEH ... pos=` 的 y：停放航母应在地面 + 8.5 左右，NPC 航母原来是 + 6.8）。
   2. 走到每种飞机右侧驾驶舱旁边是否出现上车提示、能否上去；看 `DOOR` 行的 y 是 A 还是 B（定下来后可以把半径收回到只够一种情况）。
   3. 停放版上去后飞行、起降、放无人机（航母）是否和 NPC 版一样；在空中下机后交回 NPC 时，整机箱的 NPC 低空飞行有没有刮地（这只发生在玩家开过的停放版上）。
-  4. 下机位置：原版从上车点下车的话，现在会落在飞机右侧地面上（B 时是离地 lift 处）。
+  4. 下机位置：原版从上车点下车的话，现在会落在飞机右侧地面上。
   5. Wing Diver / Fencer 能否坐停放版（掩码 15 + `505_TANK_DRIVER`，同玩家战斗机）。NPC 版的座位仍是掩码 9（游骑兵 + 空降兵），呼叫下来的 NPC 飞机其它兵种上不去——这是原来就有的，没改。
+
+## 13. 其它飞机的自驾载具请求（2026-10-06，`tools/calls.py` `EDF6VC_CALL_FLY_*`、`pylib/vcobjects.py` `REQUEST_KINDS`）
+
+用户：「补上空袭的召唤飞机，空母载具」。`kBoardable` 里玩家战斗机 / 攻击机的请求还没带来的机种，各追加一行载具请求（武器表行永不挪动，只追加；`RELEASED` 记下这一版的顺序）。
+
+### 13.1 投送：集装箱，不是编队（静态，H / M）
+
+| 事实 | 来源 | 置信度 |
+|---|---|---|
+| N9 Eros 请求的 `Ammo_CustomParameter[4]` = [`v508_transport.sgo`, `v509_transportbox.sgo`, 载具 SGO, 载具设定]；Proteus（大型机器人）同样是运输机 + 集装箱 | 读原版 SGO | H |
+| 运输机（Transporter508 slot 50 `0x5E5070`）只生成集装箱；集装箱落地后的卸车态 `0x5E8C00` **无条件**按自己 `+0xB80` 的 SGO 路径 `CreateObject`（`0x5E8FDC`），位置是集装箱 MAB 的「乗り物生成ポイント」，`SetTeam(veh,5,1)`，设定经载具 vfunc `+0x170` 交给它。载具的大小不参与 | `docs/online-re.md` §2.3 | H |
+| Barga（`eWeapon389` / `393`）用 `v508_transport_formation.sgo`（`Transporter_Formation`，4 架运输机按 `formation` 的 4 个偏移排开），集装箱一项为 `0.0`；编队 SGO 的 `carrier_anchor` = 「アンカー１」–「アンカー４」，这 4 个名字出现在 `V515_RETROBALAM(_GRAY).SGO`（各 4 处）、不出现在 `V506_HELI.SGO`（0 处）：编队按**被吊载具自己的挂点**吊运，插件飞机共用的 V506 MAB 没有这 4 个定位点（缺定位点时载具初始化读空指针的先例见 `vcobjects.JET_MAB_ROOT`）。EDF.dll 里没有找到 `carrier_anchor` 这个字符串本身（键名可能另行编码），所以编队怎样读挂点没有追到代码 | 读原版 SGO + `tools/edfre.py strs` | M |
+
+结论：59 × 77 米的航母照样能由集装箱送到（生成点就是集装箱的落点），不需要插件自己飞进来；不用编队（需要给 V506 MAB 加挂点，原地改 MAB 的做法做不到）。代价是航母生成在信号弹落点、占满 59 × 77 米：说明文字要求把信号弹扔在空地上。生成时与建筑 / 玩家重叠的处理是游戏物理的，没有实测（L）。
+
+### 13.2 送来的是什么
+
+- `Jet.requested`：`REQUEST_KINDS`（截击机、制空战斗机、多用途机、炮舰机、无人机、三种航母）各有一个请求版 `edf6tr_jet_<机种>_request_mission`（`parked=True, requested=True`）：标记 / 模型 / 武器 / 耐久同 NPC 版；整机碰撞箱、掩码 15 的座位、右侧地面上的上车点同停放版（§12）；`jet_sgo` 给它像玩家战斗机一样多写一份 `vehicle_setup`（`player or requested`）。`tools/make_jets.py` 写成 `EDF6VC_FLY_<机种>.SGO`。
+- 炮舰机原来没有 `JETS` 项（NPC 版由 `make_jets` 用攻击机 + bomber401 模型 + `with_mark(7011)` + `with_gunner_seat` 拼）：新增 `GUNSHIP_JET = 'edf6tr_jet_gunship'`（攻击机的挂载和耐久、原版 bomber401 模型，名字不带 `_mission`：测试场不放它），`Jet.box_model = 'bomber401'`：停放版的碰撞箱和上车点按原版 bomber401 模型量（`jet_models.model_box` / `root_lift` 对 `STOCK_BOMBERS` 本来就支持）。请求版再加炮手座（`with_gunner_seat`，`check_gunner_seat` 回读）。
+- 请求武器（`call_weapons.vehicle_sgo`，与玩家战斗机的同一条路）：载具设定 `[1][0]` = 机种标记（插件 `BodyMark` 读的就是它），武器清单 = 该机种的机炮和挂载 + Eros 的燃料箱，`resource` 同步替换；倍率按请求等级取 Eros 曲线。
+- 送到后：机身体是 `PluginBody::jet`（标记 7002–7011），`kBoardable` 按标记认出机种。空机：`jet.cpp` 没有记录（`CrewPlaced` 只在 NPC 飞行员的第一帧建），`crew.cpp` 对没人坐过的 506 机体不派 NPC（同停放版）；玩家上机 `Boarded` → `jet::Adopt` 建记录（旋翼机悬停、航母放无人机、空中下机后交回 NPC 都靠它）。`BoardableNow` 接受 team 5（集装箱设的「载具」队）。
+- 炮舰机（7011）原来没有尾焰行：`booster.cpp kJetNozzles` 按标记查，bomber401 的喷口只在攻击机标记（接管的原版轰炸机）下查。加一行 7011 = bomber401 的喷口（`jet_nozzles_on_their_models` 改为按 `file or box_model` 对照）。
+
+### 13.3 验证状态
+
+- 离线：`python tools/call_weapons.py build <TEMP>`（读本机 Mods 里装着的武器表 1588 行）后回读：8 行在 1591–1598，排在投掷式无人机（1588–1590）之后，与 `CALLS` 顺序一致；类别 308、第 3 列同 `eWeapon394`；等级、运输机 / 集装箱、载具路径、标记、武器清单、倍率、`resource` 里换成了请求版 SGO；5 种语言的文本行名字与 `call_name` 一致、表与文本行数对齐。8 个 `EDF6VC_FLY_*.SGO` 由本机 Root.cpk 生成（`jet_sgo` 内的 `check_door`、炮舰机的 `check_gunner_seat` 通过；`vehicle_setup == mission_setup`；整机碰撞箱：航母 (29.7, 8.52, 38.42)、炮舰机 (25.94, 2.01, 8.08)、无人机 (1.75, 1.04, 2.83) 半尺寸）。
+- 未实机验证：运输机能否投下这些派生 SGO（同 §5 玩家战斗机请求，L）；航母从集装箱生成时与周围物体重叠的表现；炮舰机（无起落架）机腹着地时的地面滑跑与起飞；请求版的上车提示与上机后建记录（日志 `JET v=... its entry made for the player who boarded it empty`）。

@@ -42,6 +42,13 @@ class Jet:
     # is walked through, wings and all: 「飞机缺少实体」, 2026-10-05) and a seat every class may take. Its NPC-flown
     # twin keeps the fuselage box (jet_sgo).
     parked: bool = False
+    # A requested one (REQUEST_KINDS, the Air Raider's EDF6VC_CALL_FLY_* vehicle requests, tools/call_weapons.py): a parked
+    # twin the stock request's transport drops empty at the flare, so its SGO keeps `vehicle_setup` beside `mission_setup`
+    # as a player jet's does (the request's vehicle setup is the one the vehicle gets; the SGO is the stock heli's shape).
+    requested: bool = False
+    # The stock bomber model (pylib/jet_models.py STOCK_BOMBERS) a jet with no model file of its own is measured on for
+    # its box and door when parked (the gunship's bomber401); None: its `file`, or the elevon bomber.
+    box_model: str | None = None
     # The stock heli SGO it is made from (its body, rigid body, crash and weapons): every jet is a V506.
     stock: str = 'V506_HELI'
     # mission_setup[0]: the vehicle's tier, the two multipliers the game's vehicle requests scale a vehicle by (its
@@ -340,6 +347,14 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'drill': GroundVehicle('EDF6VC_DRILL', 'V505_TANK', 'EWEAPON418',
                            ('EWEAPON418', 'EWEAPON421', 'EWEAPON425', 'EWEAPON428', 'EWEAPON433'),
                            ('app:/weapon/edf6vc_drill_bit.sgo',), 1400.0, 'make_drill'),
+    # The sidecar motorcycle (tools/make_sidecar.py, src/sidecar.cpp): the Freed bike's class (Vehicle503_Bike) and
+    # weapons (its rider's two machine guns, its fuel tank: the stock ones), a sidecar platform and wheel built from
+    # stock parts (pylib/sidecar_model.py), requested like the Freed bikes (the Ranger's vehicle slot). Its gunner is
+    # no seat's: the plugin holds a soldier on the platform, firing their own weapons.
+    'sidecar': GroundVehicle('EDF6VC_SIDECAR', 'V503_BIKE', 'AWEAPON338',
+                             ('AWEAPON338', 'AWEAPON339', 'AWEAPON341', 'AWEAPON343', 'AWEAPON345'),
+                             ('app:/weapon/v_503_bike_gun_l.sgo', 'app:/weapon/v_503_bike_gun_r.sgo',
+                              'app:/weapon/v_fuel01.sgo'), 300.0, 'make_sidecar'),
 }
 # The drill tank's bite (src/jet_bay.cpp kDrillChargeFile, DrillCharge): an impact charge (tools/make_jets.py
 # impact_charge) with a blast of DRILL_CHARGE_RADIUS m (3 m or more: the stock path that lets a blast break buildings,
@@ -414,6 +429,30 @@ def parked_name(kind: str) -> str:
 
 
 JETS.update({parked_name(k): replace(JETS[k], parked=True) for k in PARKED_KINDS})
+# The gunship (src/jet_internal.h Body::gunship, mark 7011) as a JETS entry, for its requested twin only: the NPC gunship
+# is tools/make_jets.py's (the strike jet in BOMBER401's model with GUNSHIP_MARK and a gunner seat). Its arms and
+# durability the strike jet's (as tools/make_jets.py's), its model the stock bomber401 (52 m across, no gear: it stands
+# on its belly), measured on that model when parked (box_model).
+GUNSHIP_JET = 'edf6tr_jet_gunship'   # no _mission: the range never places it (testrange/gen.py)
+JETS[GUNSHIP_JET] = replace(JETS['edf6tr_jet_strike_mission'], mark=7011.0, model=('app:/object/bomber401.mrab', 'bomber401.mdb'),
+                            body='bomber401', box_model='bomber401')
+# The NPC kinds the Air Raider requests as empty aircraft to fly (tools/calls.py EDF6VC_CALL_FLY_*, the user, 2026-10-06:
+# 「补上空袭的召唤飞机，空母载具」): every kind of src/playerjet_kinds.h kBoardable the player jets' requests do not already
+# bring, each one's requested twin (parked: the whole plane's box, every class; requested: vehicle_setup). Left out on
+# purpose (tools/selftest.py every_boardable_aircraft_requested): the strike jet (the player strike jet's request brings
+# the same airframe, model and stores), the bomber takeover bodies (the airstrike's stock bombers, not ours to bring),
+# the blast and doll drones (their one weapon is the charge that destroys them: the thrown drones bring that charge).
+REQUEST_KINDS = ('edf6tr_jet_interceptor_mission', 'edf6tr_jet_fighter_mission', 'edf6tr_jet_multirole_mission', GUNSHIP_JET,
+                 'edf6tr_jet_drone', 'edf6tr_jet_carrier_mission', 'edf6tr_jet_blast_carrier_mission',
+                 'edf6tr_jet_doll_carrier_mission')
+
+
+def request_name(kind: str) -> str:
+    """The requested twin's SGO name of the NPC jet `kind` (REQUEST_KINDS)."""
+    return kind.removesuffix('_mission') + '_request_mission'
+
+
+JETS.update({request_name(k): replace(JETS[k], parked=True, requested=True) for k in REQUEST_KINDS})
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
 JET_ELEVON_FILE = 'EDF6VC_JET.MRAB'
@@ -452,11 +491,12 @@ def on_origin(box) -> list[list[float]]:
 # was 4.9 m in from its fuselage box's side at the ground (no prompt anywhere round it: 「空母缺少登机口」, 2026-10-05),
 # a player jet's 10 m in from its whole-model box. move_door puts it where the stock heli has its own: on the ground,
 # DOOR_OUT m outside the box's right side (+x, the V506's side), at the stock door's z (within the box's length).
-# `mdl` is bound `lift` m over the model's origin on a grounded model (pylib/jet_models.py root_lift); whether the
-# game's root record carries that lift is not settled (the mesh bone as drawn is at the origin, booster.cpp ModelBone;
-# the root's own record was seen with no frame): the door is at the origin's height on `mdl`, so it is at the ground or
-# `lift` over it, and its radius makes either reachable from DOOR_STEP m across the ground, from the human's feet or
-# HUMAN_HEIGHT over them (which of the two its position is, is not settled either). The stock radius is never cut.
+# Every model's `mdl` and mesh bone are bound at its origin (pylib/jet_models.py lift_mdb: the grounding lifts what
+# hangs on the mesh bone, not it), the box frame's origin, so the door (y 0 on `mdl`) is as high over the box's bottom
+# as the origin is: on the ground for a grounded jet (its box's bottom is the origin), door_height over it for a stock
+# bomber's box that reaches under its origin (on the ground once it has landed). Its radius makes it reachable from
+# DOOR_STEP m across the ground, from the human's feet or HUMAN_HEIGHT over them (which of the two its position is, is
+# not settled). The stock radius is never cut.
 DOOR_SLACK = 0.5      # EDF.dll 0x1C36990
 DOOR_OUT = 0.6        # m: outside the box's side, where a human standing against it is
 DOOR_STEP = 1.0       # m: across the ground from the door point, still in reach
@@ -489,12 +529,19 @@ def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
     return vec, r + 0x10
 
 
-def door_point(box, lift: float, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
-    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents],
-    on its origin) whose `mdl` is bound `lift` m up; `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
+def door_height(box) -> float:
+    """How far a jet's door (y 0 on `mdl`, the box frame's origin) is over the bottom of its collision box `box`
+    ([centre, half extents]): where it stands on the ground. 0 for a box on its origin (on_origin)."""
+    (_cx, cy, _cz), (_hx, hy, _hz) = box
+    return max(0.0, hy - cy)
+
+
+def door_point(box, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
+    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]);
+    `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
     (cx, _cy, cz), (hx, _hy, hz) = box
     z = min(max(stock[2], cz - hz), cz + hz)
-    rise = max(lift, HUMAN_HEIGHT)   # the most the door can be over (or under) the human's position
+    rise = max(door_height(box), HUMAN_HEIGHT)   # the most the door can be over (or under) the human's position
     need = (rise * rise + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
     return [round(cx + hx + DOOR_OUT, 3), 0.0, round(z, 3)], round(max(radius, need), 3)
 
@@ -507,34 +554,34 @@ def door_name(m: dict) -> str:
     return seats[0][0]
 
 
-def move_door(m: dict, box, lift: float) -> None:
+def move_door(m: dict, box) -> None:
     """`m` (a jet SGO's values) with its door (seat 0's: every seat of a jet shares it, make_jets.with_gunner_seat)
     moved to door_point."""
     mab = bytearray(m['animation_model'][2])
     vec, rad = mab_locator(bytes(mab), door_name(m))
     stock = struct.unpack_from('<3f', mab, vec)
-    at, radius = door_point(box, lift, stock, struct.unpack_from('<f', mab, rad)[0])
+    at, radius = door_point(box, stock, struct.unpack_from('<f', mab, rad)[0])
     struct.pack_into('<3f', mab, vec, *at)
     struct.pack_into('<f', mab, rad, radius)
     m['animation_model'][2] = bytes(mab)
 
 
-def check_door(data: bytes, lift: float) -> None:
-    """Re-read a jet SGO and raise DoorError unless its door is on the ground (y 0 on `mdl`), outside its collision
-    box (heli_rigid_body) across its right side by DOOR_OUT, within its length, and a human standing DOOR_STEP m from it
-    (its position at its feet or HUMAN_HEIGHT over them) is in reach whether or not `mdl` carries its `lift`."""
+def check_door(data: bytes) -> None:
+    """Re-read a jet SGO and raise DoorError unless its door is at its origin's height (y 0 on `mdl`), outside its
+    collision box (heli_rigid_body) across its right side by DOOR_OUT, within its length, and a human standing DOOR_STEP m
+    from it on the ground under its box (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
     _, m = sgo.read(data)
     mab = m['animation_model'][2]
     name = door_name(m)
     vec, rad = mab_locator(mab, name)
     x, y, z = struct.unpack_from('<3f', mab, vec)
     reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
-    (cx, cy, cz), (hx, hy, hz) = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
-    if cy - hy < -1e-3:
-        raise DoorError(f'碰撞箱伸到原点下面（{cy - hy:.2f}）')
+    box = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
+    (cx, cy, cz), (hx, hy, hz) = box
     if abs(y) > 1e-4 or x < cx + hx + DOOR_OUT - 1e-3 or not cz - hz - 1e-3 <= z <= cz + hz + 1e-3:
         raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱右侧外 {DOOR_OUT} m 的地面上')
-    worst = max(((DOOR_STEP ** 2 + (door - feet) ** 2) ** 0.5 for door in (0.0, lift) for feet in (0.0, HUMAN_HEIGHT)))
+    door = door_height(box)
+    worst = max(((DOOR_STEP ** 2 + (door - feet) ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
     if worst > reach:
         raise DoorError(f'站在上车点旁 {DOOR_STEP} m 的地面上够不着（要 {worst:.2f} m，能 {reach:.2f} m）')
 
@@ -588,10 +635,12 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE) -> bytes:
 
 
 def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = JET_BODY_BONE,
-            rigid: list[list[float]] | None = None) -> bytes:
+            rigid: list[list[float]] | None = None, airborne: bool = False) -> bytes:
     """`model`: the model archive and file (default JET_MODEL, the stock bomber); `body`: its mesh bone, which
     the root and the ragdoll drive; `rigid`: the collision box [centre, half extents] (default JET_RIGID_BODY).
-    A jet with its own model (Jet.model) always flies it: these three come from the Jet then."""
+    A jet with its own model (Jet.model) always flies it: these three come from the Jet then. `airborne`: only ever
+    made in the air (a stock bomber an airstrike's jet takes over, tools/make_jets.py BOMBERS): its box is its model's
+    as it is, not cut at its origin (on_origin: a vehicle made on the ground stands on its origin)."""
     jet = JETS[name]
     root = anchor = JET_ROOT_BONE   # root: see JET_MAB_ROOT
     if jet.model is not None:
@@ -602,7 +651,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         # The player sees the whole plane: its box is the model's (wings, nose and tail), measured, not a fuselage
         # box (an NPC jet's is the fuselage: a formation's wings would catch on each other, low passes scrape; a
         # carrier's drones leave and dock under its middle). A parked one is the player's to walk up to.
-        rigid = jet_models.model_box(game, jet.file)
+        rigid = jet_models.model_box(game, jet.file or jet.box_model)
     elif jet.file in jet_models.MODELS:
         rigid = jet_models.fuselage_box(game, jet.file)   # off its model as made (grounded): never under its origin
     elif jet.model is None and rigid is None and model == JET_ELEVON_MODEL:
@@ -626,9 +675,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9).
         seat = m['vehicle_riding_position'][0]
         seat[3], seat[4] = PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES
-    if jet.player:
+    if jet.player or jet.requested:
         import copy
         m['vehicle_setup'] = copy.deepcopy(setup)
+    if jet.player:
         cam = m['game_object_camera_setting']
         if jet.camera is not None:
             m['game_object_camera_setting'] = [cam[0], [float(x) for x in jet.camera]]
@@ -651,11 +701,12 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
-    box = on_origin(JET_RIGID_BODY if rigid is None else rigid)
+    box = JET_RIGID_BODY if rigid is None else rigid
+    box = [list(box[0]), list(box[1])] if airborne else on_origin(box)
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
-    lift = _root_lift(game, jet, model_ref)
-    if lift is not None:
-        move_door(m, box, lift)
+    door = _moves_door(jet)
+    if door:
+        move_door(m, box)
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
     se = m.get('heli_se_table')
@@ -664,21 +715,18 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     for i in JET_ROTOR_SE_ROWS:
         se[i] = JET_SILENT_SE
     out = sgo.write(version, m)
-    if lift is not None:
-        check_door(out, lift)
+    if door:
+        check_door(out)
     return out
 
 
-def _root_lift(game: Game, jet: Jet, model: list[str] | None) -> float | None:
-    """How far `mdl` is bound over the origin of the model `jet` flies (`model`: its archive and file; None the stock
-    bomber): pylib/jet_models.py root_lift. None for a model another builder makes (the Primers' fighter, the submarine
-    carrier: not boarded on the ground), whose door stays the V506's."""
+def _moves_door(jet: Jet) -> bool:
+    """Whether jet_sgo puts `jet`'s door beside its box (move_door): every model pylib/jet_models.py makes and the
+    bombers; not a model another builder makes (the Primers' fighter, the submarine carrier: not boarded on the
+    ground), whose door stays the V506's."""
     import jet_models
-    if jet.file in jet_models.MODELS:
-        return jet_models.root_lift(game, jet.file)
-    if jet.file is None:
-        return jet_models.root_lift(game, None) if model == JET_ELEVON_MODEL else 0.0   # a stock bomber: not grounded
-    return None
+    # A requested body measured on a stock bomber model (box_model: the gunship) is boarded on the ground too.
+    return jet.file is None or jet.file in jet_models.MODELS or jet.box_model is not None
 
 
 def as_mission_sgo(data: bytes) -> bytes:
@@ -876,3 +924,118 @@ def portal_lasers(game: Game) -> dict[str, bytes]:
         m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
         out[name] = sgo.write(version, m)
     return out
+
+
+# The EMC's charged beam (src/emc.cpp, docs/emc-re.md; the user 2026-10-06: "蓄力 → 一道粗光束持续 2–3 秒 ... 贯穿，沿途建筑
+# ... 一起摧毁 ... 几百米范围的爆炸"): the EMC (V510_MASER, Vehicle510_Maser, the Air Raider's EMC / EMCS / EMCX requests)
+# fires its stock weapon EMC_STOCK_WEAPON as a 1000-round burst (FireBurstCount), a round a frame for 16.7 s. With the
+# plugin's EmcBeam on, the trigger charges instead and the burst's whole damage (AmmoDamage x FireBurstCount, times the
+# request's damage factor the game puts on the weapon) goes out as one beam. Four DemoIndirectFire SGOs (the IFC as the
+# portal laser's above; the plugin owns, aims and deletes them, docs/carrier-laser-re.md §2-3):
+#   EMC_BEAM_FILE   the beam: the missions' satellite laser (LaserBullet02, penetrating: it passes through every enemy on
+#                   its line) remade thick in the maser's blue, a round a frame for up to EMC_BEAM_ROUNDS frames (the
+#                   plugin ends it at EmcBeamSec), each EMC_BEAM_SPEED m a frame for EMC_BEAM_LIFE frames: EMC_BEAM_RANGE,
+#                   the stock round's reach (AmmoSpeed x AmmoAlive, checked against the stock SGO). Its shot sound once.
+#   EMC_SIGHT_FILE  the charge's glow: the same beam thin and dim, silent, no damage (the plugin thickens it as it charges).
+#   EMC_BREAK_FILE  a break charge (tools/make_jets.py impact_charge's recipe, as the drill's): a EMC_BREAK_RADIUS m blast,
+#                   3 m or more so it takes its damage off the buildings it meets (docs/drill-re.md §3), fired at each
+#                   building on the beam's line; a short flight, so it bursts only on what it meets there.
+#   EMC_BLAST_FILE  the blast at the beam's end: the same, its radius EMC_BLAST_RADIUS (the plugin writes EmcBlastRadius over it).
+# The charges are thin and beam-coloured (they fly a few metres inside the beam); the SGOs' damage is 0 (the plugin's).
+EMC_STOCK_WEAPON = 'V_510_MASER_THUNDER01.SGO'
+EMC_BEAM_FILE = 'EDF6VC_EMC_BEAM.SGO'
+EMC_SIGHT_FILE = 'EDF6VC_EMC_SIGHT.SGO'
+EMC_BREAK_FILE = 'EDF6VC_EMC_BREAK.SGO'
+EMC_BLAST_FILE = 'EDF6VC_EMC_BLAST.SGO'
+EMC_FILES = (EMC_BEAM_FILE, EMC_SIGHT_FILE, EMC_BREAK_FILE, EMC_BLAST_FILE)
+EMC_BEAM_RANGE = 600.0                   # m: the stock round's reach (8 m a frame x 75 frames)
+EMC_BEAM_SPEED, EMC_BEAM_LIFE = 100.0, 6
+EMC_BEAM_ROUNDS, EMC_SIGHT_ROUNDS = 330, 630   # 5.5 s / 10.5 s of rounds: past EmcBeamSec's / EmcChargeSec's top (5 / 10 s)
+EMC_BEAM_SIZE, EMC_SIGHT_SIZE = 12.0, 0.6
+EMC_BEAM_COLOUR = (0.3, 0.6, 3.0, 1.0)   # the stock maser's (0.14, 0.3, 2.5) blue, brighter
+EMC_SIGHT_COLOUR = (0.14, 0.3, 2.5, 1.0)
+EMC_BEAM_SHOT_PITCH = 0.8                # the satellite's shot a little lower
+EMC_BREAK_RADIUS, EMC_BREAK_SPEED, EMC_BREAK_LIFE = 12.0, 2.5, 4
+EMC_BLAST_RADIUS, EMC_BLAST_SPEED, EMC_BLAST_LIFE = 300.0, 3.0, 4
+EMC_CHARGE_SIZE, EMC_CHARGE_HIT = 0.5, 2.0   # the charges' round: thin (hidden in the beam), a 1 m hit radius
+
+
+def _emc_beam(game: Game, rounds: int, size: float, colour: tuple[float, ...], shot_volume: float) -> bytes:
+    """The satellite laser (PORTAL_LASER_STOCK) made one of the EMC's beams (see EMC_BEAM_FILE)."""
+    version, m = sgo.read(game.read('OBJECT', PORTAL_LASER_STOCK))
+    p = m['indirect_fire_param']
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'LaserBullet02' or p[11] != 1 or not isinstance(p[17], list) or len(p[17]) != 6
+            or not isinstance(p[18], list) or len(p[18]) != 6):
+        raise ValueError(f'{PORTAL_LASER_STOCK} 不是预期的卫星激光')
+    p[0] = [0.0, 0.0]
+    p[2], p[3], p[5], p[7], p[9], p[10] = rounds, 0, EMC_BEAM_SPEED, size, 0.0, EMC_BEAM_LIFE
+    p[12] = list(colour)
+    p[14], p[15], p[16] = 0, 0, 0
+    p[17][0] = 1.0                      # its shot sound once for all its rounds
+    p[17][2] = shot_volume
+    p[17][3] = EMC_BEAM_SHOT_PITCH
+    p[18][2] = 0.0                      # no hit sound: a round a frame would play it 60 times a second
+    m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
+    return sgo.write(version, m)
+
+
+def _emc_charge(game: Game, radius: float, speed: float, life: int) -> bytes:
+    """An impact charge (tools/make_jets.py impact_charge's recipe, here so pylib needs no tool) for the EMC: a `radius` m
+    blast, `speed` m a frame for `life` frames, thin and in the beam's colour."""
+    version, m = sgo.read(game.read('OBJECT', 'DEMOGUNSHIPFIRESOLID.SGO'))
+    p = m.get('indirect_fire_param')
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'SolidBullet01' or 'indirect_fire_damage' not in m):
+        raise ValueError('DEMOGUNSHIPFIRESOLID.SGO 不是预期的炮舰炮弹')
+    for i, value in ((2, 1), (3, 0), (5, speed), (6, 0), (9, radius), (10, life), (11, 0), (15, 0)):
+        p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
+    p[0] = [0.0, 0.0]
+    p[7], p[8] = EMC_CHARGE_SIZE, EMC_CHARGE_HIT
+    p[12] = list(EMC_BEAM_COLOUR)
+    m['indirect_fire_damage'] = 0.0
+    return sgo.write(version, m)
+
+
+def emc_rounds(game: Game) -> dict[str, bytes]:
+    """The EMC's four DemoIndirectFire SGOs (EMC_FILES), {Mods/OBJECT file: bytes}."""
+    return {EMC_BEAM_FILE: _emc_beam(game, EMC_BEAM_ROUNDS, EMC_BEAM_SIZE, EMC_BEAM_COLOUR, 1.0),
+            EMC_SIGHT_FILE: _emc_beam(game, EMC_SIGHT_ROUNDS, EMC_SIGHT_SIZE, EMC_SIGHT_COLOUR, 0.0),
+            EMC_BREAK_FILE: _emc_charge(game, EMC_BREAK_RADIUS, EMC_BREAK_SPEED, EMC_BREAK_LIFE),
+            EMC_BLAST_FILE: _emc_charge(game, EMC_BLAST_RADIUS, EMC_BLAST_SPEED, EMC_BLAST_LIFE)}
+
+
+def emc_stock(game: Game) -> dict[str, float]:
+    """The stock EMC weapon's numbers the beam rests on (EMC_STOCK_WEAPON): AmmoDamage, AmmoCount, FireBurstCount,
+    AmmoSpeed, AmmoAlive, and its reach (speed x life)."""
+    w = sgo.load(data=game.read('WEAPON', EMC_STOCK_WEAPON))
+    if not isinstance(w, dict) or w.get('xgs_scene_object_class') != 'Weapon_VehicleMaser':
+        raise ValueError(f'{EMC_STOCK_WEAPON} 不是原版 EMC 的武器（Weapon_VehicleMaser）')
+    out = {k: float(w[k]) for k in ('AmmoDamage', 'AmmoCount', 'FireBurstCount', 'AmmoSpeed', 'AmmoAlive')}
+    out['reach'] = out['AmmoSpeed'] * out['AmmoAlive']
+    return out
+
+
+def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
+    """The EMC's SGOs as src/emc.cpp fires them: the beam and the sight LaserBullet02, penetrating, no blast, a round a frame
+    reaching EMC_BEAM_RANGE, enough rounds for the longest beam / charge, the sight silent; the charges SolidBullet01, one
+    round, not penetrating, the break charge's blast 3 m or more (it breaks buildings), every damage 0 (the plugin's).
+    With the game: EMC_BEAM_RANGE is the stock weapon's reach."""
+    for name in (EMC_BEAM_FILE, EMC_SIGHT_FILE):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'LaserBullet02' and p[11] == 1, name
+        assert p[3] == 0 and p[9] == 0.0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, (name, p)
+        assert abs(p[5] * p[10] - EMC_BEAM_RANGE) < 1e-3, (name, p[5], p[10])
+        assert p[17][0] == 1.0 and p[18][2] == 0.0, name
+    beam, sight = (sgo.load(data=files[n])['indirect_fire_param'] for n in (EMC_BEAM_FILE, EMC_SIGHT_FILE))
+    assert beam[2] >= 5.0 * 60 and sight[2] >= 10.0 * 60 and sight[17][2] == 0.0 and beam[17][2] > 0.0
+    assert beam[7] > sight[7]
+    for name, radius in ((EMC_BREAK_FILE, EMC_BREAK_RADIUS), (EMC_BLAST_FILE, EMC_BLAST_RADIUS)):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', name
+        assert p[2] == 1 and p[11] == 0 and p[9] == radius >= 3.0 and m['indirect_fire_damage'] == 0.0, (name, p)
+    if game is not None:
+        stock = emc_stock(game)
+        assert abs(stock['reach'] - EMC_BEAM_RANGE) < 1e-3, stock

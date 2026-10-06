@@ -16,7 +16,6 @@ namespace {
 // &matrix, path, &InitParam) -> the object (the manager owns it), SetTeam(object, team, 1).
 constexpr unsigned kPreload=0x7A3780;
 constexpr std::size_t kPreloadMgr=0x20B29A8;
-constexpr float kLaunchClear=100.0f;   // a launched jet starts at least this high over the ground
 // The heli starts kHeliClear over the ground: high enough that it does not hit it while its rotor spins
 // up (heli.cpp gives it the hover rotor at once), low enough that it is soon at its working height.
 constexpr float kHeliClear=40.0f;
@@ -155,11 +154,12 @@ unsigned char* SpawnJet(Body b,const float* m) noexcept {
     return nullptr;
 }
 
-Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source) noexcept {
+Jet* Launch(Body b,const float* from,const float* heading,const float* target,DWORD fuelSec,float speed,const void* source,
+            float clear) noexcept {
     if(!spawnOk || !Cfg().jetPilot || !Preloaded(b) || !At<void*>(image,kObjectMgr) || !SlotFree())return nullptr;
     const ULONGLONG ms=GameMs();
     float start[3]={from[0],from[1],from[2]};
-    ClearGround(start,kLaunchClear);
+    ClearGround(start,clear);
     alignas(16) float m[16];
     Facing(heading,start,m);
     unsigned char* const v=SpawnJet(b,m);
@@ -247,7 +247,9 @@ void PreloadJets() noexcept {
         const bool dolls=PreloadDolls(mgr,Preloaded(Body::doll));
         Log("JET preload %s (dolls %d)",line,dolls);
         // The gunship's shells (GunshipFire), with its body; the impact charges.
-        PreloadShells(mgr,Preloaded(Body::gunship));
+        // ...and for the Proteus's gun and salvo (proteus.cpp) whenever its rework's code checked out at load, whatever the
+        // ini says now: a Proteus may be called any time, and ProteusRework (or Enabled) may be switched on mid-mission.
+        PreloadShells(mgr,Preloaded(Body::gunship),ProteusReady());
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;
         ResetShells();
@@ -283,6 +285,42 @@ unsigned char* JetLaunchDrone(const float* from,const float* heading,const float
         return j->Vehicle();
     }
     __except(FaultLog("JET drone launch",GetExceptionInformation())){return nullptr;}
+}
+
+namespace {
+// Thrown drones (JetLaunchThrown): a rotor drone starts kThrownRotorClear over its bomb's spot, drifting off at
+// kThrownRotorSpeed, and patrols (hovers) there; the gun drone, a wing, starts kThrownWingClear over it at its least
+// speed and takes off (climbs to kTakeoffClear first). They take targets within kThrownReach of the spot, not their
+// kind's 1800 m (a carrier's drones go where their carrier sends them): a bomb thrown at a fight works that fight.
+// At most kMaxThrown out at once: a throw past them keeps the stock bomb.
+constexpr float kThrownRotorClear=3.0f,kThrownWingClear=20.0f,kThrownRotorSpeed=5.0f,kThrownReach=300.0f;
+constexpr int kMaxThrown=12;
+
+int ThrownOut() noexcept {
+    int n=0;
+    for(const auto& j:jets)if(j.ref && j.thrown && !j.reap && Alive(j.ref))++n;
+    return n;
+}
+
+Body ThrownBody(ThrownDrone what) noexcept {
+    return what==ThrownDrone::blast ? Body::blast : what==ThrownDrone::doll ? Body::doll : Body::drone;
+}
+}  // namespace
+
+unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* heading,DWORD fuelSec,const void* source) noexcept {
+    const Body b=ThrownBody(what);
+    __try {
+        if(const int out=ThrownOut();out>=kMaxThrown){Log("JET thrown %s: %d thrown drones out already",Row(b).name,out);return nullptr;}
+        const Kind& k=KindOf(Row(b).role);
+        const bool wing=k.flight==FlightModel::wing;
+        Jet* const j=Launch(b,at,heading,at,fuelSec,wing ? k.minSpeed : kThrownRotorSpeed,source,wing ? kThrownWingClear : kThrownRotorClear);
+        if(!j)return nullptr;
+        j->thrown=true;j->reach=kThrownReach;
+        if(wing)j->mode=Mode::takeoff;
+        if(k.doll)DollMake(IndexOf(*j),j->Vehicle(),fuelSec);
+        return j->Vehicle();
+    }
+    __except(FaultLog("JET thrown drone launch",GetExceptionInformation())){return nullptr;}
 }
 
 unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {

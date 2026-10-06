@@ -6,18 +6,23 @@
 //    while GunshipGunnerKey is held). The NPC in that seat moves to the other one when it is free (the pilot to the gun,
 //    the gunner up to the stick), else it is kicked: never two pilots.
 //  - The player at the stick: the player jet's path (Fly) as before; an NPC at the gun (the pilot the player bumped there)
-//    shells ground targets round the gunship (CrewGunner: jet_bay.cpp CrewShell, GunshipFire's target, reach and gap; one
-//    gun, the pilot's own SHELLS share its gap). Leaving the stick in the air is the pilot's rule (Left: the catch, or
-//    HandBack: the stock RideAi in the empty pilot seat); the NPC gunner stays at the gun.
+//    shells ground targets round the gunship and fires the cannon at them (CrewGunner: jet_bay.cpp CrewShell,
+//    GunshipFire's target, reaches and gaps; the same two guns, the pilot's own SHELLS and CANNON share their gaps).
+//    Leaving the stick in the air is the pilot's rule (Left: the catch, or HandBack: the stock RideAi in the empty pilot
+//    seat); the NPC gunner stays at the gun.
 //  - The player at the gun (GunnerFrame): the NPC pilot flies on (jet.cpp JetFrame: its pylon turn, the target on its left,
 //    round PlayerGunnerOrder's centre: the point the player last shelled for kGunnerCentreMs, else the call's own point or
-//    where they boarded); the seat's primary trigger fires a shell at where the screen's centre meets the ground (CameraRay
-//    as the pilot's SHELLS, jet::PlayerShell), the HUD's cross on it (hud.cpp GunnerMarks). Held for them as the pilot seat
-//    is: no fuel burnt, no withdrawal, no deletion (jet.cpp GunnerHold, JetReap), no crewing (crew.cpp: a player aboard). A
+//    where they boarded); the seat's primary trigger fires the picked gun at where the screen's centre meets the ground
+//    (CameraRay as the pilot's SHELLS: a shell, jet::PlayerShell, or with the cannon picked a round every 0.5 s while it
+//    is held, jet::PlayerCannon), the HUD's cross on it (hud.cpp GunnerMarks). The pilot's switch key (pad LB) picks the
+//    gun: the shells, or the cannon when its round is installed (jet::CannonReady; an install from before: the shells
+//    alone). Held for them as the pilot seat is: no fuel burnt, no withdrawal, no deletion (jet.cpp GunnerHold, JetReap), no crewing (crew.cpp: a player aboard). A
 //    hailed or parked gunship goes back to its NPC pilot as they take the gun (HandBack: a pilot seated if the seat is
 //    empty, its call resumed: it takes off); a pilot seat found empty under them gets the stock RideAi (EnsurePilot).
 //  - Leaving the gun (GunnerLeft): over kEjectFrom the parachute (EjectStart, no catch); the gunship goes on with its call
 //    under its NPC pilot, on its pilot's team again.
+//  - Moving between the two seats aboard (seatswitch.cpp, the seat key: to the gun at any time, to the stick where it may be
+//    boarded) is no leaving: no parachute, no ejection (AboardElsewhere); the NPC in the seat taken changes places.
 constexpr ULONGLONG kGunnerCentreMs=30000;   // the pylon turn stays round the point last shelled this long
 constexpr std::size_t kSeatFire=0x2E4;       // the seat's primary trigger (docs/heli-input-re.md §3: >= kSeatFireOn fires)
 constexpr float kSeatFireOn=0.8f;
@@ -33,6 +38,7 @@ struct Gunner {
     float vel[3],clear;          // the gunship's velocity and height over the ground last frame (the parachute's)
     ULONGLONG frame,logAt;       // GameFrame of its last GunnerFrame
     bool pilotTried;             // EnsurePilot seated one (or failed to) since the pilot seat was last held
+    bool cannon,switchHeld;      // the gun picked is the cannon (else the shells); the switch key / LB down last frame
     GunnerReadout hud;
 } gunner{};
 
@@ -98,30 +104,46 @@ void EnsurePilot(unsigned char* v) noexcept {
     if(seated)jet::ResumeNpc(v,gunner.vel);
 }
 
-// The gun (see the file comment): the trigger fires at the ground sight, the pylon turn moves to what was shelled.
+// The gun picked (see the file comment): the switch key's press (pad LB) goes between the shells and the cannon, the
+// cannon only while it is there.
+void GunnerPick(unsigned char* v,const unsigned char* seat) noexcept {
+    const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    const bool down=keys ? KeyDown(Cfg().playerJetSwitchKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
+    const bool press=down && !gunner.switchHeld;
+    gunner.switchHeld=down;
+    const bool there=jet::CannonReady();
+    if(press && there){gunner.cannon=!gunner.cannon;Log("GUNNER v=%p gun: %s",v,gunner.cannon ? "the cannon" : "the shells");}
+    if(!there)gunner.cannon=false;
+}
+
+// The gun (see the file comment): the trigger fires the picked gun at the ground sight, the pylon turn moves to what
+// was fired at.
 void GunnerFire(unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     const unsigned char* const seat=SeatAt(v,kGunnerSeat);
     const float trigger=At<float>(seat,kSeatFire);
     const bool pull=std::isfinite(trigger) && trigger>=kSeatFireOn;
+    GunnerPick(v,seat);
+    const bool cannon=gunner.cannon;
     GunnerReadout& r=gunner.hud;
     r=GunnerReadout{};
+    r.cannon=cannon;r.both=jet::CannonReady();
     r.ground=GroundSight(r.sight);
     r.range=r.ground ? vec::Dist(pos,r.sight) : 0.0f;
-    r.inReach=r.ground && r.range<=jet::ShellReach();
-    r.wait=jet::ShellWait(v,ms);
-    r.ready=jet::ShellsReady() && r.wait<=0.0f;
-    if(pull && r.inReach && jet::PlayerShell(v,r.sight,ms)) {
+    r.inReach=r.ground && r.range<=(cannon ? jet::CannonReach() : jet::ShellReach());
+    r.wait=cannon ? jet::CannonWait(v,ms) : jet::ShellWait(v,ms);
+    r.ready=(cannon ? jet::CannonReady() : jet::ShellsReady()) && r.wait<=0.0f;
+    if(pull && r.inReach && (cannon ? jet::PlayerCannon(v,r.sight,ms) : jet::PlayerShell(v,r.sight,ms))) {
         std::memcpy(gunner.centre,r.sight,12);gunner.centred=true;gunner.centreAt=ms;
-        r.wait=jet::ShellWait(v,ms);r.ready=false;
+        r.wait=cannon ? jet::CannonWait(v,ms) : jet::ShellWait(v,ms);r.ready=false;
     }
     if(gunner.centred && ms-gunner.centreAt>kGunnerCentreMs)gunner.centred=false;
     r.centred=gunner.centred;
     std::memcpy(r.centre,gunner.centre,12);
     if(!Cfg().debug || ms-gunner.logAt<kGunnerLogMs)return;
     gunner.logAt=ms;
-    Log("GUNNER v=%p trigger %.2f (%s) sight %s (%.0f,%.0f,%.0f) %.0f m%s, gun %s, turn round %s (%.0f,%.0f,%.0f)",v,trigger,
+    Log("GUNNER v=%p trigger %.2f (%s) sight %s (%.0f,%.0f,%.0f) %.0f m%s, %s %s, turn round %s (%.0f,%.0f,%.0f)",v,trigger,
         At<unsigned char>(seat,kSeatPad) ? "pad" : "keys",r.ground ? "on the ground" : "none",r.sight[0],r.sight[1],r.sight[2],r.range,
-        r.inReach ? "" : " (out of reach)",r.ready ? "ready" : "waiting",gunner.centred ? "the point shelled" : "its call's point",
+        r.inReach ? "" : " (out of reach)",cannon ? "cannon" : "shells",r.ready ? "ready" : "waiting",gunner.centred ? "the point shelled" : "its call's point",
         gunner.centred ? gunner.centre[0] : gunner.home[0],gunner.centred ? gunner.centre[1] : gunner.home[1],
         gunner.centred ? gunner.centre[2] : gunner.home[2]);
 }
@@ -132,6 +154,8 @@ void GunnerFrame(unsigned char* v) noexcept {
     if(!Cfg().playerJetAll || !GunshipSeats(v))return;
     const bool mine=gunner.ref.Is(v);
     const bool aboard=!v[kDead] && SeatRider(SeatAt(v,kGunnerSeat))==Rider::player;
+    // Moved to the stick (seatswitch.cpp): not out of the gunship, no parachute; the pilot's path (Fly: Board) takes it.
+    if(mine && !aboard && !v[kDead] && AboardElsewhere(v,kGunnerSeat)){Log("GUNNER v=%p the player moved to another seat",v);gunner=Gunner{};return;}
     if(mine && !aboard){GunnerLeft(true,v[kDead] ? "the gunship destroyed" : "got out");return;}
     if(!aboard)return;
     if(!mine)GunnerBoarded(v);

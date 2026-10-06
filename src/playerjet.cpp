@@ -36,12 +36,15 @@
 #include "body506.h"
 #include "edf/weapon.h"
 #include "gear.h"
+#include "heliaim.h"
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
+#include "vehicleram.h"
 #include "playerjet_kinds.h"
 #include "vecmath.h"
+#include "warn.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -79,10 +82,10 @@ struct Kind {
     float corner;        // m/s: ...from this speed up; below, maxG * (speed / corner)^2 (1 g at corner / sqrt(maxG))
     float roll;          // rad/s: how fast the body turns onto its attitude
     float landMax;       // m/s: the fastest it can touch down without damage
-    float ram;           // m: the reach of what it rams (its size: the fighter's model is 16 m across, the strike jet's 25 m)
+    float ram;           // m: its ram's blast radius, half its model's width (the fighter's model is 16 m across, the strike jet's 25 m)
 };
 constexpr Kind kKinds[]={
-    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,150.0f, 2.6f, 130.0f, 10.0f},   // 1 g at 61 m/s
+    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,150.0f, 2.6f, 130.0f, 8.0f},    // 1 g at 61 m/s
     {"strike", 7202, 60.0f,70.0f,240.0f, 11.0f,26.0f, 5.0f,140.0f, 1.6f, 120.0f, 12.0f},   // 1 g at 63 m/s
 };
 // Every other aircraft of the plugin the player can board (playerjet_kinds.h, the NPC's own performance): their Kinds.
@@ -124,14 +127,14 @@ constexpr float kInduced=0.3f;
 constexpr float kStallWarn=1.05f;
 // The mouse's aim (AimSteer): its heading turns kAimPerUnit rad per unit of a frame's mouse X (the seat's right stick
 // on the keyboard: the frame's movement, at most 1), times ini PlayerJetMouseSpeed, its elevation likewise; the mouse
-// takes it no farther than kAimMaxEl from level (an aim already past, the nose's when W was let go, stays). The plane
+// takes it no farther than aim::kMaxEl from level (an aim already past, the nose's when W was let go, stays). The plane
 // turns its path toward it at kSteer times the angle off (rad/s), the lift for that and for holding the path up (Hold)
 // along its up. Turning (the aim kAimTurnFrom off or more) it banks toward that lift at kRollRate; on the aim it only
 // levels its wings, gently (kLevelRate), and not at all climbing or diving steeper than kAimSteep (sine): letting W go
 // in a steep climb or over the top of a loop keeps the attitude it has (it snapped upright at kRollRate before,
 // 2026-10-04). Under kAimBankMin g of lift it keeps its bank.
 constexpr float kMouseMoved=0.02f;    // a frame's mouse movement past this hands the plane to the aim
-constexpr float kAimPerUnit=0.05f,kAimMaxEl=1.3f,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
+constexpr float kAimPerUnit=aim::kPerUnit,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
 // The mouse's aim stays on the screen: its mark (kAimMark ahead) within kAimOnScreen of the screen's half size
 // (the user, 2026-10-05: the aim ran off the screen and the jet turned on after it, unseen). A frame's mouse that
 // would take it out is not taken; one the camera's turn left outside is drawn back toward the flight path.
@@ -213,6 +216,9 @@ struct PJet {
     int lock;                    // the picked store's lock (StoreLock), for the cockpit
     float lockAt[3],lockProgress;
     bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
+    float stallShare;            // ...the share of all its wing gives its path needs, kStallWarn over (>= 1: stall)
+    Gpws gpws;                   // the ground-proximity warning (Proximity), impactIn s to the impact (<0: none)
+    float impactIn;
     float vel[3],omega[3];
     float prev[3];               // its position last frame
     bool havePrev;
@@ -241,6 +247,8 @@ struct PJet {
     bool steered;                // the plugin steers it by `aim` this frame (the gunship's pylon turn): Air as the autopilot's
     bool keep;                   // left on the ground by the player: it waits there for them (no NPC takes it back)
     float yaw;                   // a rotor craft's heading (rad, the nose at (sin, 0, cos))
+    aim::Hold hover;             // ...its mouse-aim flight's setpoint and height held (heliaim.h, HoverStep), its top speed
+    float hoverTop;
     ULONGLONG blastAt;           // a charge drone's charge fired (game ms; 0: not)
     bool specialHeld;            // the target key / X down last frame (a special store's own action)
     bool orbiting;               // the gunship's pylon turn round orbitAt (orbitR m out, at the height orbitAlt)
@@ -261,6 +269,8 @@ struct PJet {
 // playerjet_board.inc (any of the plugin's aircraft under the player): what the flight steps above call.
 void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
+void HandBack(PJet& j,unsigned char* v,const char* why) noexcept;
+int SpecialRoom(const PJet& j) noexcept;
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept;
 void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noexcept;
 bool FallsAsBomb(const Store& st) noexcept;
@@ -362,7 +372,7 @@ struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; boo
 
 // Whether the virtual key `vk` is down while the game has the foreground (0: never).
 bool KeyDown(int vk) noexcept {
-    if(vk<=0)return false;
+    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
     DWORD pid=0;
     GetWindowThreadProcessId(GetForegroundWindow(),&pid);
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
@@ -462,12 +472,11 @@ struct RamHit { float at[3]; float closing; };
 // The ram's damage to what it hit (the user, 2026-10-05: "the blast of a plane should not only go by its speed but by
 // its mass too"): the kinetic energy of the closing speed, E = 1/2 m v^2, with m the aircraft's mass now (its kind's
 // clean mass, stores.inc kJetMasses, times what its stores add: Burden) and v the closing speed along the normal; in the
-// game's damage at kRamJoulesPerDamage J a point, scaled by the tier the game gave this aircraft (its max HP over its
-// SGO durability: the same factor scales a weapon's damage, so the ram keeps pace with the mission's difficulty), times
-// ini PlayerJetRamDamage. kRamJoulesPerDamage: the mod's Mk 82 (1500 damage, pylib/vcobjects.py STORES) carries some
-// 430 MJ of explosive (87 kg of tritonal, ~103 kg of TNT at 4.184 MJ/kg): 2.87e5 J a point. A 16 t fighter ramming at
-// 200 m/s (320 MJ) hits as about 3/4 of a Mk 82, at 100 m/s a quarter of that. A kind without a mass deals nothing.
-constexpr float kRamJoulesPerDamage=2.87e5f;
+// game's damage at 287 kJ a point (vehicleram.h ram::Damage, the one formula the ground vehicles' ram takes too), scaled
+// by the tier the game gave this aircraft (its max HP over its SGO durability: the same factor scales a weapon's damage,
+// so the ram keeps pace with the mission's difficulty), times ini PlayerJetRamDamage. A 16 t fighter ramming at 200 m/s
+// (320 MJ) hits as about 3/4 of a Mk 82, at 100 m/s a quarter of that. A kind without a mass deals nothing. The blast is
+// the kind's size (Kind::ram, half its model's width), never the damage's: the damage already carries mass and speed.
 // The aircraft's mass now (kg; 0: its kind has none).
 float RamMass(const PJet& j,const unsigned char* v) noexcept {
     const JetMass* const kind=JetMassOf(BodyMark(v));
@@ -479,7 +488,7 @@ float RamDamage(const PJet& j,const unsigned char* v,float closing) noexcept {
     const float kg=RamMass(j,v);
     const float hpMax=At<float>(v,kHpMax);
     const float tier=kind->durability>0.0f && hpMax>0.0f ? hpMax/kind->durability : 1.0f;
-    return Cfg().playerJetRamDamage*tier*0.5f*kg*closing*closing/kRamJoulesPerDamage;
+    return ram::Damage(kg,closing,tier,Cfg().playerJetRamDamage);
 }
 
 void Ram(const PJet& j,unsigned char* v,const RamHit& hit) noexcept {
@@ -662,42 +671,17 @@ void FlightWatch(PJet& j,const unsigned char* v,const Stick& s,const float* dir,
     j.watchAt=ms;j.watchBank=bank;j.watchHead=head;
 }
 
-// The mouse's aim moved by this frame's mouse (see kAimPerUnit): its heading about the world's up, its elevation.
-void MoveAim(PJet& j,const Stick& s) noexcept {
-    float flat[3]={j.aim[0],0.0f,j.aim[2]};
-    if(!Normalize(flat)){flat[0]=0.0f;flat[2]=1.0f;}
-    const float k=kAimPerUnit*Cfg().playerJetMouseSpeed;
-    float right[3];RightOf(flat,right);
-    const float a=s.aimX*k,co=std::cos(a),si=std::sin(a);
-    for(int i=0;i<3;++i)flat[i]=flat[i]*co+right[i]*si;
-    const float was=std::asin(Clamp(j.aim[1],-1.0f,1.0f));
-    const float el=Clamp(was+s.aimY*k,was<-kAimMaxEl ? was : -kAimMaxEl,was>kAimMaxEl ? was : kAimMaxEl);
-    j.aim[0]=flat[0]*std::cos(el);j.aim[1]=std::sin(el);j.aim[2]=flat[2]*std::cos(el);
-}
+// The mouse's aim moved by this frame's mouse (see kAimPerUnit; heliaim.h Move): its heading about the world's up, its
+// elevation.
+void MoveAim(PJet& j,const Stick& s) noexcept { aim::Move(j.aim,s.aimX,s.aimY,kAimPerUnit*Cfg().playerJetMouseSpeed); }
 
-// Whether the aim's mark lies within kAimOnScreen of the screen (view-projection `vp`, row vectors).
-bool AimOnScreen(const float* vp,const float* pos,const float* aim) noexcept {
-    const float p[3]={pos[0]+aim[0]*kAimMark,pos[1]+aim[1]*kAimMark,pos[2]+aim[2]*kAimMark};
-    float c[4];
-    for(int k=0;k<4;++k)c[k]=p[0]*vp[k]+p[1]*vp[4+k]+p[2]*vp[8+k]+vp[12+k];
-    return c[3]>1e-3f && std::fabs(c[0]/c[3])<=kAimOnScreen && std::fabs(c[1]/c[3])<=kAimOnScreen;
-}
-
-// See kAimOnScreen: the aim as it was (`was`) when this frame's mouse took it off the screen; still off (the camera
-// turned), toward the flight path `dir` until it is on.
+// See kAimOnScreen (heliaim.h KeepOnScreen): the aim as it was (`was`) when this frame's mouse took it off the screen;
+// still off (the camera turned), toward the flight path `dir` until it is on.
 void KeepAimOnScreen(PJet& j,const unsigned char* v,const float* dir,const float* was) noexcept {
     if(j.autopilot || j.steered)return;   // the catch's autopilot (the pylon turn) aims off the player's screen
     float vp[16];
     if(!LastViewProj(vp))return;
-    const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    if(AimOnScreen(vp,pos,j.aim))return;
-    std::memcpy(j.aim,was,12);
-    for(int step=0;step<10 && !AimOnScreen(vp,pos,j.aim);++step) {
-        float a[3];
-        for(int i=0;i<3;++i)a[i]=j.aim[i]*0.8f+dir[i]*0.2f;
-        if(!Normalize(a))break;
-        std::memcpy(j.aim,a,12);
-    }
+    aim::KeepOnScreen(vp,reinterpret_cast<const float*>(v+kPosition),j.aim,was,dir,kAimMark,kAimOnScreen);
 }
 
 // The lift (along the plane's up, as Air's pitch) that turns its path toward the mouse's aim (kSteer) and holds it
@@ -773,6 +757,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     float lift[3];
     for(int i=0;i<3;++i)lift[i]=j.up[i]*pitch;
     j.stall=most<kStallWarn*across;
+    j.stallShare=most>1e-6f ? kStallWarn*across/most : 2.0f;
     float next[3];
     for(int i=0;i<3;++i)next[i]=dir[i]+(lift[i]+gPerp[i])*dt/speed;
     if(!Normalize(next))std::memcpy(next,dir,12);
@@ -827,9 +812,10 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     j.blockedSince=0;
     const float made=Dot(j.measured,j.sent)/sent;
     Log("PJET v=%p blocked %s: sent %.0f m/s, made %.0f",v,kPhaseNames[static_cast<int>(j.phase)],sent,made);
-    // Where it hit: its nose along the way it was sent; how fast it closed: what it lost of that way.
+    // Where it hit: its nose (half its size, Kind::ram, ahead) along the way it was sent; how fast it closed: what it
+    // lost of that way. The blast round the nose, its radius the same half size (Ram): what the airframe ran into.
     RamHit ram{};
-    for(int i=0;i<3;++i)ram.at[i]=pos[i]+j.sent[i]/sent*j.kind->ram*0.5f;
+    for(int i=0;i<3;++i)ram.at[i]=pos[i]+j.sent[i]/sent*j.kind->ram;
     ram.closing=sent-made;
     Crash(j,v,0.0f,sent-made+j.kind->landMax,false,ms,&ram);
     if(!j.active)return;
@@ -902,8 +888,8 @@ constexpr float kThreatRadius=20.0f;
 
 void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Store st[kMostStores];
-    const int real=ReadStores(v,st,j.board ? kMostStores-1 : kMostStores);
-    const int n=real+SpecialStore(j,v,st+real);   // the aircraft's own weapon as one more store (playerjet_board.inc)
+    const int real=ReadStores(v,st,j.board ? kMostStores-SpecialRoom(j) : kMostStores);
+    const int n=real+SpecialStore(j,v,st+real);   // the aircraft's own weapons as more stores (playerjet_board.inc)
     j.stores=n;j.bomb=j.hasImpact=false;j.lock=0;
     j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,real);
     if(n==0)return;   // none known: the 506's own fire bytes stand
@@ -926,8 +912,8 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     audio::LockTone(j.lock,j.lockProgress);
     // Being locked on (the user, 2026-10-05: "being locked on should sound a warning too"): a missile homing on it
     // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.
+    // Heard through warn.cpp WarnTick (from the threats Threats gathers), with every aircraft the player flies.
     j.threat=MissileHoming(pos,kThreatRadius) ? 2 : jet::LockingOn(v) ? 1 : 0;
-    audio::ThreatTone(j.threat);
     Flares(j,v,s,pos);
     for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;}
     // The impact point before the trigger: the bomb bay opens on it (FireSpecial kBay). Only what falls as a bomb (a
@@ -1026,6 +1012,20 @@ void Threats(PJet& j,const unsigned char* v,const float* pos) noexcept {
     y.threats=n+locks;
 }
 
+// The ground-proximity warning (the user, 2026-10-05: "warn me to pull up when I'm about to hit the ground"; 2026-10-06:
+// "more realistic"): warn.cpp ClosureIn looking kTerrainSeconds ahead, a real GPWS's modes (GpwsOf): PULL UP within
+// kPullUpSeconds of the ground or what stands on it, TERRAIN / SINK RATE as a caution before. A landing (sinking no
+// faster than the airframe lands: kLandSink for a wing, the kind's landMax for a rotor craft) raises nothing. In the air
+// only; last frame's velocity and climb (one frame late, as the HUD shows them).
+void Proximity(PJet& j,const float* pos,float clear) noexcept {
+    j.gpws=Gpws::none;j.impactIn=-1.0f;
+    if(j.phase!=Phase::air)return;
+    const bool rotor=j.board && j.board->frame==pjet::Airframe::rotor;
+    bool rising=false;
+    j.impactIn=ClosureIn(pos,j.vel,j.climb,clear,rotor ? j.kind->landMax : kLandSink,kTerrainSeconds,&rising);
+    j.gpws=GpwsOf(j.impactIn,rising);
+}
+
 // The caught jet's speed for its boarding (see kCatchAfterMs).
 // The catch's jet flying in (see kCatchFrom): the jet, where it makes for (under the parachuting player, led by their
 // drift), its speed there.
@@ -1099,6 +1099,7 @@ struct Bailout {
     ObjRef caught; ULONGLONG caughtAt;
     bool open;                       // past the top: the parachute is open (the canopy shows: Chute)
     const char* why;                 // how it ended (state none), for the canopy's CHUTE line
+    bool cutUp;                      // the cut key seen up since the ejection (see EjectTick)
 } bail{};
 
 // The ejection over (state none), `why` kept for the canopy's line (ChuteTick): its one exit. Caught (the player in
@@ -1254,7 +1255,12 @@ void EjectTick() noexcept {
     const unsigned char support=h[kHumanSupport];
     const float clear=GroundClearance(reinterpret_cast<const float*>(h+kPosition));
     const bool landed=ms-bail.at>300 && (support!=0 || (clear!=kNoGround && clear<kChuteLand));
-    const bool cut=ms-bail.at>kChuteCutAfterMs && KeyDown(Cfg().playerJetChuteCutKey);
+    // A press made after the ejection cuts it, not one held through it: the cut key is the flare key (X both), and X
+    // held for flares through a bail-out under a missile cut the parachute 0.5 s in, the catch with it (the log of
+    // 2026-10-05 22:35 has a cut 2.4 s into an ejection, before any catch: a held key is the likely one).
+    const bool cutKey=KeyDown(Cfg().playerJetChuteCutKey);
+    if(!cutKey)bail.cutUp=true;
+    const bool cut=ms-bail.at>kChuteCutAfterMs && bail.cutUp && cutKey;
     if(ms-bail.at>kChuteMostMs || landed || cut || vel[1]>bail.vy+kChuteBoost) {
         const char* const why=landed ? "landed" : cut ? "cut by the player" : vel[1]>bail.vy+kChuteBoost ? "flying by itself" : "too long";
         Log("PJET parachute: %s",why);
@@ -1400,6 +1406,24 @@ void Leave(PJet& j,unsigned char* v,float clear,bool alive,const char* how) noex
     Left(j,v,clear,alive,eject);   // any of the plugin's other aircraft: parked, caught or handed back (playerjet_board.inc)
 }
 
+// Whether a local player sits in a seat of `v` other than `seat` (seatswitch.cpp moves them between the gunship's seats).
+bool AboardElsewhere(unsigned char* v,unsigned seat) noexcept {
+    const unsigned count=SeatCount(v);
+    for(unsigned i=0;i<count;++i)if(i!=seat && SeatRider(SeatAt(v,i))==Rider::player)return true;
+    return false;
+}
+
+// The player moved from the stick to another seat of the aircraft (seatswitch.cpp: the gunship's gun): not out of it, so
+// no ejection and no catch; the flight given up as Leave gives it up, its NPC pilot flying on (HandBack: one seated by
+// the stock RideAi when the gunner's EnsurePilot has not already).
+void Moved(PJet& j,unsigned char* v) noexcept {
+    j.driven=false;j.active=false;j.turnIn=j.pitchIn=j.yawIn=j.rollIn=0.0f;j.hasUp=false;j.hasAim=false;
+    if(j.insetSaved)Put<float>(v,kAreaInset,j.savedInset);
+    j.insetSaved=false;
+    Log("PJET v=%p the player moved to another seat (%s, %.0f m/s): no ejection",v,kPhaseNames[static_cast<int>(j.phase)],Len(j.vel));
+    if(j.board)HandBack(j,v,"the player moved to another seat");
+}
+
 void Report(PJet& j,const unsigned char* v,const Stick& s,const float* pos,float clear,bool water,ULONGLONG ms) noexcept {
     if(!Cfg().debug || ms-j.logAt<kLogMs)return;
     j.logAt=ms;
@@ -1481,7 +1505,8 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     if(!driven && j.hail.phase!=kHailNone && !v[kDead]){HailFly(j,v,pos,dt,ms);return;}   // called down for the player
     if(!driven) {
         if(j.autopilot){j.autopilot=false;j.active=false;if(j.board)HandBack(j,v,"the catch is over");}
-        if(j.driven)Leave(j,v,GroundClearance(pos),true,"got out");
+        if(j.driven && AboardElsewhere(v,0))Moved(j,v);
+        else if(j.driven)Leave(j,v,GroundClearance(pos),true,"got out");
         if(wet)Crash(j,v,0.0f,0.0f,false,ms,nullptr);   // empty and afloat: it breaks up
         return;
     }
@@ -1494,6 +1519,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     Stores(j,v,s,pos);
     Sight(j,v,pos,dt);
     Threats(j,v,pos);
+    Proximity(j,pos,clear);
     SpecialFrame(j,v,s,pos,ms);
     CrewGunner(j,v,dt,ms);   // the gunship's NPC gunner (playerjet_crew.inc)
     // The heli stays out of it: no rotor lift, no heli stick (docs/heli-input-re.md §2a).
@@ -1589,21 +1615,25 @@ void PreloadPlayerJets() noexcept {
         chutePreloaded);
 }
 
-// The ground-proximity warning (the user, 2026-10-05: "warn me to pull up when I'm about to hit the ground"): in
-// the air, at its sink rate it reaches the ground within kPullUpSeconds faster than a landing takes (kLandSink),
-// or its path within kPullUpSeconds runs into something standing higher than the ground under it (a hill, a
-// building) or into the ground while it sinks faster than a landing. A gentle landing approach raises nothing.
-constexpr float kPullUpSeconds=3.0f,kPullUpRise=5.0f;
-bool PullUpNeeded(const PJet& j,const float* pos) noexcept {
-    if(j.phase!=Phase::air)return false;
-    const float sink=-j.climb;
-    if(j.clear!=kNoGround && sink>kLandSink && j.clear<sink*kPullUpSeconds)return true;
-    const float end[3]={pos[0]+j.vel[0]*kPullUpSeconds,pos[1]+j.vel[1]*kPullUpSeconds,pos[2]+j.vel[2]*kPullUpSeconds};
-    float hit[3];
-    if(MapRay(pos,end,hit)<0.0f)return false;
-    const float under=j.clear!=kNoGround ? pos[1]-j.clear : hit[1];
-    return sink>kLandSink || hit[1]>under+kPullUpRise;
+// The guns' rounds for the cockpit's stores line (the stock gauge's gun panels gone, stockgauge.cpp): seat 0's weapons
+// that are neither a store nor the fuel tank (pylib/vcobjects.py JETS: guns L / R first), how many, and the fewest rounds
+// in one (the pair fires together: the first dry stops the burst's other half).
+namespace {
+void GunRounds(const unsigned char* v,PlayerJetReadout& r) noexcept {
+    r.guns=0;r.gunRounds=0;
+    const unsigned char* const seat=SeatAt(const_cast<unsigned char*>(v),0);
+    const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+    const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(!n || n>8 || !Readable(holders,n*8))return;
+    for(std::uint64_t i=0;i<n;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const unsigned char* const w=At<const unsigned char*>(holders[i],kHolderWeapon);
+        if(!Readable(w,kWeaponAmmo+4) || IsStoreWeapon(w) || IsFuelTank(w))continue;
+        const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
+        r.gunRounds=r.guns++==0 || ammo<r.gunRounds ? ammo : r.gunRounds;
+    }
 }
+}  // namespace
 
 bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;
@@ -1619,7 +1649,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);r.load=air ? j.load : 1.0f;
             const Kind* const kind=KindOf(v);
             r.rotate=kind ? kind->rotate : 0.0f;
-            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=PullUpNeeded(j,pos);r.threat=j.threat;r.flares=j.flares;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
+            r.air=air;r.stall=air && j.stall;r.ground=ground;r.pullUp=air && j.gpws==Gpws::pullUp;r.threat=j.threat;r.flares=j.flares;r.keys=j.keys;r.aiming=air && j.keys && j.hasAim && Cfg().playerJetMouseFlight && j.mouseFlies;
             float path[3]={j.vel[0],j.vel[1],j.vel[2]};
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
@@ -1628,6 +1658,21 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
             r.sym=j.sym;
+            FuelGauge(v,&r.fuel);   // its 506 body's tank, which the stock FUEL gauge showed (stockgauge.cpp)
+            GunRounds(v,r);
+            r.gpws=air ? j.gpws : Gpws::none;r.impactIn=r.gpws!=Gpws::none ? j.impactIn : -1.0f;
+            const bool rotor=j.board && j.board->frame==pjet::Airframe::rotor;
+            r.liftShare=air && !rotor ? j.stallShare : 0.0f;
+            if(rotor) {   // the helicopter HUD's (hud.cpp HeliHud)
+                HeliFlight& f=r.heli;
+                r.rotor=true;r.aiming=false;
+                std::memcpy(f.vel,j.vel,12);
+                f.speed=std::sqrt(j.vel[0]*j.vel[0]+j.vel[2]*j.vel[2]);f.clear=r.clear;f.ground=ground;f.climb=j.climb;
+                f.hp=r.hp;f.hpMax=r.hpMax;f.keys=j.keys;f.landed=!air;
+                f.aiming=j.keys && j.hasAim && Cfg().heliMouseAim;f.holding=f.aiming && j.hover.holding;
+                f.setSpeed=j.hover.speed;f.top=j.hoverTop;std::memcpy(f.aim,r.aim,12);
+                f.gpws=r.gpws;f.impactIn=r.impactIn;
+            }
             *out=r;
             return true;
         } __except(EXCEPTION_EXECUTE_HANDLER){continue;}

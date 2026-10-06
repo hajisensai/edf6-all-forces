@@ -33,8 +33,13 @@
 // dropped at a new mission (ResetHelis, with the player's track and the rescue) and reused only once its heli
 // has not been flown for kStaleMs: a full table takes on no new heli rather than drop a live one.
 #include "crew.h"
+#include "body506.h"
+#include "heliaim.h"
 #include "layout.h"
 #include "memory.h"
+#include "roundaim.h"
+#include "edf/weapon.h"
+#include "warn.h"
 #include <cmath>
 
 namespace crew {
@@ -59,6 +64,7 @@ constexpr float kRotorGain=4.0f;     // throttle per unit the rotor is off the w
 // stick per m/s off the wanted velocity, rotor speed per m/s of climb-rate error, and how fast the rotor speed
 // that holds height is learned.
 constexpr float kMoveGain=0.04f,kBrakeGain=0.12f,kClimbGain=0.08f,kHoverLearn=0.03f;
+constexpr aim::RotorGains kRotorGains{kClimbGain,kHoverLearn,kRotorGain};   // the throttle's (heliaim.h StockThrottle)
 // Take-off: no horizontal stick on the ground and for kLiftOffMs after leaving it, so it climbs straight
 // up. (With full forward stick before the rotor spun up, a heli slid along the ground into a tank and both
 // blew up.)
@@ -134,6 +140,23 @@ constexpr float kTurretReach=70.0f;
 // dry. Short of that the guns fire kBurstMs bursts with kBurstRest between.
 constexpr ULONGLONG kReloadGunMs=8000,kReloadAltMs=15000,kBurstMs=2000,kBurstRest=1000;
 constexpr float kMissileMin=50.0f;   // m: no missile closer than this
+// The store: an unguided weapon on the missile byte (holder 2, docs/heli-input-re.md 2b) of a nose-gun heli that strafes:
+// the N9 Eros Blaze's, Vulture ZA's and ZAM's twin napalm gun (V_506HELI_NAPALM01: a NapalmBullet01 at 3 m/frame,
+// AmmoGravityFactor 1, FireAccuracy 0.2 rad, bursts of 6) and the Eros No. 6's napalm drop pod (V_506HELI_UNDER_NAPALM01:
+// 0.1 m/frame along FireVector (0,-1,0), AmmoGravityFactor 2, AmmoOwnerMove 1). Until 2026-10-06 it was fired as if it
+// were the homing missile: the nose within kMissileCone (10 deg) of the gun's lead (the gatling's 240 m/s straight line,
+// no drop) anywhere from kMissileMin to HeliRange. The napalm falls 28 m over 350 m and the cone is 61 m wide there; the
+// pod fell under the heli with the target 50-350 m ahead (the user, 2026-10-06: "npc直升机的烧夷弹好像射的非常不准").
+// Now its own round is flown (roundaim.h, the bullet core's per-frame step): the nose is aimed so its muzzle's arc meets
+// the target where it will be (a pod has no aim: it falls), and the store fires only while the arc from the muzzle as it
+// points now passes within what the weapon's own scatter misses by anyway (roundaim::Worth, at least kHitRadius or its
+// blast), its scatter at most kStoreSpread there (the napalm gun: 120 m), and not within kStoreClear of the player.
+// The weapon's fields: FireVector (weapon+0x350, a float4 the SGO reader writes at 0x68CCFA only when the list is not
+// empty: H; fire reads it at 0x691943, its frame there not traced: M, taken in the vehicle's frame, which a level heli
+// does not tell apart from the world's) and AmmoExplosion (weapon+0x8B0, written at 0x68D82F: M).
+constexpr std::uint64_t kStoreHolder=2;
+constexpr std::size_t kWeaponFireVector=0x350,kWeaponExplosion=0x8B0;
+constexpr float kStoreSpread=12.0f,kStoreClear=15.0f;
 constexpr float kKeepTarget=30.0f;   // m: the current target counts this much nearer (less switching)
 // The 410 circles its target (kGunshipRadius) and its door guns pick their own: the target is only the
 // circle's centre, so it keeps it unless another is kCircleKeep nearer, and the turn (kTurnCost) does not
@@ -257,11 +280,14 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 
 // Metres along a->b to the nearest terrain/building, or -1 with none (or no physics world). `hit`
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
-float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr) noexcept {
+// `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
+constexpr std::uint32_t kMapLayer=0x16;
+float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
+              std::uint32_t filter=kMapLayer) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},0x16,0,0};
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
     RayHits col{};
     *reinterpret_cast<const void**>(col.raw)=image+(any ? kHitVtbl : kGroundVtbl);
     reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
@@ -376,6 +402,8 @@ struct Heli {
     float extendTo[3];    // where it extends to
     struct Arm { unsigned char* weapon; std::int32_t full; ULONGLONG emptyAt; } arms[4];   // weapon: identity only
     ULONGLONG burstAt,restUntil;   // the gun's current burst began / it rests until
+    std::int32_t storeAmmo;        // the store's rounds last frame, and when a burst of it last left (see kStoreHolder)
+    ULONGLONG storeShotAt;
     ObjRef passed;        // the target it last broke off from (see kPassedMs)
     ULONGLONG passedUntil;
     bool firing;
@@ -891,9 +919,14 @@ Orbit GuardOrbit(Heli& h,const float* pos,const float* fwd,const float* centre,f
 // (LockonType 1) and the straight rockets (slow, accelerating rounds). Refills an emptied one (see
 // kReloadGunMs). Reads the gun's round speed and drop for the lead.
 struct Loadout { float gunSpeed,gunGravity,rocketGravity; bool gun,missile,rockets; std::int32_t ammo[4],rocketAmmo;
-                 const unsigned char* gunWeapon; };   // the fastest gun (its barrel: the 409's turret)
+                 const unsigned char* gunWeapon;    // the fastest gun (its barrel: the 409's turret)
+                 const unsigned char* store; };     // the unguided store (see kStoreHolder), or null
+// Whether holder `i` of a heli of type `t` is the store: holder 2 of a strafing nose-gun type, not homing.
+bool IsStore(const HeliType* t,std::uint64_t i,bool homing) noexcept {
+    return t && i==kStoreHolder && !homing && t->guns==Guns::nose && t->attack==Attack::strafe;
+}
 Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
-    Loadout l{kBulletSpeed,0.0f,1.0f,false,false,false,{-1,-1,-1,-1},0,nullptr};
+    Loadout l{kBulletSpeed,0.0f,1.0f,false,false,false,{-1,-1,-1,-1},0,nullptr,nullptr};
     if(SeatCount(v)==0)return l;
     const auto seat=SeatAt(v,0);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
@@ -910,15 +943,17 @@ Loadout Arms(Heli& h,unsigned char* v,ULONGLONG ms) noexcept {
         if(ammo>arm.full)arm.full=ammo;
         const float speed=At<float>(weapon,kWeaponSpeed)*60.0f,gravity=At<float>(weapon,kWeaponGravity);
         const bool homing=At<std::int32_t>(weapon,kWeaponLockon)==kHoming,rocket=!homing && speed<120.0f;
+        const bool store=IsStore(h.type,i,homing);
         if(ammo<=0 && arm.full>0 && !h.called) {
             if(!arm.emptyAt)arm.emptyAt=ms;
-            else if(ms-arm.emptyAt>((homing || rocket) ? kReloadAltMs : kReloadGunMs)) {
+            else if(ms-arm.emptyAt>((homing || rocket || store) ? kReloadAltMs : kReloadGunMs)) {
                 Put<std::int32_t>(weapon,kWeaponAmmo,arm.full);arm.emptyAt=0;
                 if(Cfg().debug)Log("HELI v=%p reloaded weapon %llu (%p) to %d",v,static_cast<unsigned long long>(i),weapon,arm.full);
             }
         } else arm.emptyAt=0;
         l.ammo[i]=ammo;
-        if(homing)l.missile=true;
+        if(store)l.store=weapon;
+        else if(homing)l.missile=true;
         else if(rocket){l.rockets=true;l.rocketAmmo+=ammo>0 ? ammo : 0;if(std::isfinite(gravity))l.rocketGravity=gravity;}
         else if(std::isfinite(speed) && speed>best) {
             best=speed;l.gun=true;l.gunSpeed=speed;l.gunGravity=std::isfinite(gravity) && gravity>0.0f ? gravity : 0.0f;
@@ -1388,6 +1423,12 @@ struct Sense {
     float aim[3],lead[3],gunLead[3];
     float dist,dipWant,losRate,range,aimRange,bearingOff;
     Loadout arms;
+    // The store (see kStoreHolder), engaged: read (store), its muzzle (storeFrom), the pass of a round fired now
+    // (storePass, storeRange m from the muzzle, storeTol the miss allowed, storeWorth: the gate), and the aim point
+    // that puts its muzzle on the solved arc (storeLead; storeAim: it has one: not a dropped round, solved in reach).
+    bool store,storeAim,storeWorth;
+    roundaim::Pass storePass;
+    float storeRange,storeTol,storeFrom[3],storeLead[3];
 };
 // What a mode wants: the horizontal velocity and the height, how far it is off where it is going, and for
 // the guard orbit its state (the log's).
@@ -1396,6 +1437,87 @@ struct Want { float vel[3],height,off; Orbit orbit; float orbitShift; };
 struct Control { float stickF,stickL,throttle,rotor,yaw,offYaw; Avoidance avoid; };
 // What the guns did, for the log.
 struct Shot { bool gun,missile; float miss,cone; };
+
+// In contact (veh+0x1580 bit 1, see kGroundContact) and on the ground: the map (terrain, a building's roof) within
+// kGroundContact under it (`below`, m: the ray down, < 0 none), else perched on another body (a heli, a vehicle, an
+// enemy). Without the ray (`probed` false) every contact counts as the ground. The NPC's Sense and the player's
+// PlayerHeli both.
+bool OnGround(bool contact,bool probed,float below) noexcept {
+    return contact && (!probed || (below>=0.0f && below<kGroundContact));
+}
+
+// The store's round as its weapon fires it (see kStoreHolder): its speed, fall (the world's gravity, or kGravity down
+// when that cannot be read), owner move and life; the cone (FireAccuracy x weapon+0xE14 as launcher.cpp Cone reads it),
+// the blast and the FireVector (in the vehicle's frame; zero: none). False when it cannot be read.
+struct StoreRound { roundaim::Round r; float cone,blast,fireVector[3]; };
+bool ReadStore(const unsigned char* w,StoreRound* out) noexcept {
+    __try {
+        if(!Readable(w,edf::kWeaponAccuracyScale+4))return false;
+        const float speed=At<float>(w,kWeaponSpeed),factor=At<float>(w,kWeaponGravity),move=At<float>(w,edf::kWeaponAmmoOwnerMove);
+        const std::int32_t alive=At<std::int32_t>(w,kWeaponAlive);
+        if(!std::isfinite(speed) || speed<0.0f || !std::isfinite(factor) || !std::isfinite(move) || alive<=0 || alive>100000)return false;
+        float g[3]={0.0f,-kGravity,0.0f};
+        float world[3];
+        if(edf::WorldGravity(image,world) && vec::Len(world)>1.0f)std::memcpy(g,world,12);
+        out->r.speed=speed;out->r.ownerMove=move;out->r.alive=alive;
+        for(int i=0;i<3;++i)out->r.drop[i]=g[i]*factor/3600.0f;
+        const float accuracy=At<float>(w,edf::kWeaponAccuracy),scale=At<float>(w,edf::kWeaponAccuracyScale);
+        const float k=std::isfinite(scale) && scale>0.0f && scale<=4.0f ? scale : 1.0f;
+        out->cone=std::isfinite(accuracy) && accuracy>0.0f && accuracy<1.0f ? accuracy*k : 0.0f;
+        const float blast=At<float>(w,kWeaponExplosion);
+        out->blast=std::isfinite(blast) && blast>0.0f && blast<100.0f ? blast : 0.0f;
+        std::memcpy(out->fireVector,w+kWeaponFireVector,12);
+        if(!std::isfinite(out->fireVector[0]+out->fireVector[1]+out->fireVector[2]) || vec::Len(out->fireVector)<0.5f)
+            std::memset(out->fireVector,0,12);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// The store's muzzle (its muzzles' mean, as fire builds a shot) and the way its round leaves now: along the muzzle,
+// or a FireVector turned by the vehicle's rows. False when it cannot be read.
+bool StoreMuzzle(const unsigned char* v,const unsigned char* w,const StoreRound& sr,float* pos,float* dir) noexcept {
+    __try {
+        if(!edf::MeanMuzzle(w,8,pos,dir))return false;
+        const float* at=reinterpret_cast<const float*>(v+kPosition);
+        if(vec::Dist(pos,at)>kMuzzleReach)return false;
+        if(vec::Len(sr.fireVector)>0.5f) {
+            const float* m=reinterpret_cast<const float*>(v+kMatrix);
+            for(int i=0;i<3;++i)dir[i]=m[i]*sr.fireVector[0]+m[4+i]*sr.fireVector[1]+m[8+i]*sr.fireVector[2];
+            if(!vec::Normalize(dir))return false;
+        }
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// The store, engaged (see kStoreHolder): the pass of a round fired now and the gate, and (a round it aims) the point the
+// nose is to be put on so the muzzle lies along the solved arc: the nose turned by what the muzzle is off the solution
+// (the muzzle sits fixed on the airframe, so turning the nose turns it the same).
+void StoreSense(const Heli& h,Sense& s) noexcept {
+    s.store=s.storeAim=s.storeWorth=false;
+    const unsigned char* w=s.arms.store;
+    StoreRound sr{};
+    float dir[3];
+    if(!w || !ReadStore(w,&sr) || !StoreMuzzle(s.v,w,sr,s.storeFrom,dir))return;
+    s.store=true;
+    s.storePass=roundaim::Fire(sr.r,s.storeFrom,dir,h.vel,s.aim,h.tgtVel);
+    s.storeRange=vec::Dist(s.storeFrom,s.storePass.round);
+    const float hit=sr.blast>kHitRadius ? sr.blast : kHitRadius;
+    s.storeWorth=roundaim::Worth(s.storePass,s.storeRange,sr.cone,hit,kStoreSpread,&s.storeTol);
+    if(vec::Len(sr.fireVector)>0.5f)return;   // a dropped round: nothing to aim, the run takes it over the target
+    float want[3];roundaim::Pass solved{};
+    if(!roundaim::Solve(sr.r,s.storeFrom,h.vel,s.aim,h.tgtVel,hit,want,&solved))return;
+    float nose[3];
+    for(int i=0;i<3;++i)nose[i]=s.nose[i]+want[i]-dir[i];
+    if(!vec::Normalize(nose))return;
+    const float reach=vec::Dist(s.pos,s.aim);
+    for(int i=0;i<3;++i)s.storeLead[i]=s.pos[i]+nose[i]*reach;
+    s.storeAim=true;
+}
+
+// Whether the store may fire now (its rounds left, HeliMissileMs since its last burst left): then the run aims it.
+bool StoreReady(const Heli& h,const Sense& s) noexcept {
+    return s.store && Cfg().heliMissile && h.storeAmmo>0 && s.ms-h.storeShotAt>static_cast<ULONGLONG>(Cfg().heliMissileMs);
+}
 
 // The first frame (false): it only starts its state. Else (true) the frame's sensing in `s`.
 bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
@@ -1424,13 +1546,9 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     }
     for(int i=0;i<3;++i){const float raw=(pos[i]-h.prev[i])/dt;h.vel[i]+= (raw-h.vel[i])*0.3f;h.prev[i]=pos[i];}
     // In contact (see kGroundContact): on the ground, or perched on another body.
-    const bool contact=(v[kContact]&kContactGround)!=0;
-    s.grounded=contact;
-    if(contact && Cfg().heliAvoid && rayOk) {
-        const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
-        const float below=CastRay(pos,down);
-        s.grounded=below>=0.0f && below<kGroundContact;
-    }
+    const bool contact=(v[kContact]&kContactGround)!=0,probed=contact && Cfg().heliAvoid && rayOk;
+    const float down[3]={pos[0],pos[1]-kRoofProbe*2.0f,pos[2]};
+    s.grounded=OnGround(contact,probed,probed ? CastRay(pos,down) : -1.0f);
     s.perched=contact && !s.grounded;
 
     // Learn the yaw sign from the turn the last input produced.
@@ -1480,10 +1598,18 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // Lead the target by the rounds' flight time and drop: the gun's, and the rockets' for a rocket-run type
     // (the 409), whose nose aims them (its gun is in a turret). The nose, the dip and the fire test use the lead.
     s.dist=s.dipWant=s.losRate=0.0f;
+    // The store's rounds: a burst left when its count fell (the weapon's own interval and burst decide when).
+    if(s.arms.store) {
+        const std::int32_t ammo=s.arms.ammo[kStoreHolder];
+        if(ammo<h.storeAmmo)h.storeShotAt=ms;
+        h.storeAmmo=ammo;
+    }
     if(s.engage) {
         const float gunSpeed=s.arms.gunSpeed>1.0f ? s.arms.gunSpeed : kBulletSpeed;
         LeadPoint(pos,s.aim,h.tgtVel,s.arms.gunGravity,[gunSpeed](float d) noexcept { return d/gunSpeed; },s.gunLead);
+        StoreSense(h,s);
         if(s.type->attack==Attack::rocketRun && s.arms.rockets)LeadPoint(pos,s.aim,h.tgtVel,s.arms.rocketGravity,RocketTime,s.lead);
+        else if(s.storeAim && StoreReady(h,s))std::memcpy(s.lead,s.storeLead,12);   // the nose onto the store's arc
         else std::memcpy(s.lead,s.gunLead,12);
         const float d[3]={s.lead[0]-pos[0],s.lead[1]-pos[1],s.lead[2]-pos[2]};
         s.dist=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
@@ -1691,10 +1817,8 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
 
     // Horizontal: the stick for the wanted velocity (full stick flies h.top) plus kBrakeGain per m/s it is
     // off, on the heading rows.
-    float cv[3]={w.vel[0]/h.top+(w.vel[0]-h.vel[0])*kBrakeGain,0,w.vel[2]/h.top+(w.vel[2]-h.vel[2])*kBrakeGain};
-    Limit2(cv,1.0f);
-    float forward=Clamp(Dot2(cv,s.fwd),-1.0f,1.0f);
-    const float lateral=Clamp(Dot2(cv,s.right),-1.0f,1.0f);
+    float forward=0.0f,lateral=0.0f;
+    aim::StockStick(w.vel,h.vel,h.top,kBrakeGain,s.fwd,s.right,&forward,&lateral);
     // Aiming, the forward stick is the nose dip (kMaxTilt at full stick), and it creeps along the nose.
     if(mode==Mode::aim)forward=Clamp((s.dipWant+(s.dipWant-s.dip)*kPitchGain)/kMaxTilt,-1.0f,1.0f);
 
@@ -1704,11 +1828,8 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     // climb rate is not saturated (learning on the climb winds it up to 1 and it overshoots by 20 m).
     const float dy=w.height-pos[1];
     const float climb=Clamp(dy*0.25f,-3.0f,3.0f);
-    const float err=climb-h.vel[1];
-    if(std::fabs(dy)<6.0f)h.hover=Clamp(h.hover+err*kHoverLearn*s.dt,0.1f,1.0f);
-    const float wantRotor=Clamp(h.hover+err*kClimbGain,0.0f,1.0f);
     c.rotor=At<float>(s.v,kRotor);
-    c.throttle=std::isfinite(c.rotor) ? Clamp(wantRotor+(wantRotor-c.rotor)*kRotorGain,0.0f,1.0f) : wantRotor;
+    c.throttle=aim::StockThrottle(climb,h.vel[1],c.rotor,&h.hover,std::fabs(dy)<6.0f,s.dt,kRotorGains);
     c.stickF=forward;c.stickL=lateral;
     if(s.grounded)h.groundAt=s.ms;
     if(land && s.grounded){c.throttle=0.0f;c.stickF=c.stickL=0.0f;}
@@ -1723,7 +1844,7 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     c.yaw=0.0f;c.offYaw=kPi;
     if(Dot2(face,face)>1.0f) {
         c.offYaw=Wrap(std::atan2(face[0],face[2])-s.heading);
-        c.yaw=Clamp(c.offYaw*1.5f-(h.yawRate-faceRate)*kYawDamp+faceRate*kYawFeed,-1.0f,1.0f)*static_cast<float>(h.yawSign);
+        c.yaw=aim::StockYaw(c.offYaw,h.yawRate,faceRate,kYawDamp,kYawFeed)*static_cast<float>(h.yawSign);
     }
     h.lastYaw=c.yaw;
 
@@ -1768,6 +1889,17 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
             float rocketDist=0.0f;
             const float rocketMiss=missOf(s.lead,&rocketDist);
             shot.missile=rocketMiss<coneAt(kRocketCone,rocketDist) && rocketDist<kRocketRange;
+        } else if(s.arms.store) {
+            // The store's own arc from its muzzle as it points now (StoreSense): held while the heli's attitude has it
+            // off the solution, and never onto the player. Unread this frame (s.store false), it holds.
+            const bool clear=!player.at || s.ms-player.at>2000 ||
+                             (vec::Dist(s.storePass.round,player.pos)>kStoreClear && !NearLine(s.storeFrom,s.storePass.round,player.pos,8.0f));
+            shot.missile=s.store && StoreReady(h,s) && s.storeWorth && clear;
+            if(shot.missile && Cfg().debug && s.ms-h.missileAt>500) {
+                h.missileAt=s.ms;
+                Log("HELI v=%p store fire: target=%p miss=%.1f m (allowed %.1f) %.0f m from the muzzle, %.0f frames, ammo=%d",
+                    s.v,h.target.obj,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,h.storeAmmo);
+            }
         } else {
             shot.missile=Cfg().heliMissile && shot.miss<kMissileCone && s.dist>kMissileMin && s.dist<Cfg().heliRange &&
                          s.ms-h.missileAt>Cfg().heliMissileMs;
@@ -1811,6 +1943,8 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
         s.engage ? h.target.obj : nullptr,s.dist,c.offYaw*180.0f/kPi,shot.miss,-s.dip*180.0f/kPi,shot.gun,shot.missile,
         speed,std::sqrt(Dot2(w.vel,w.vel)),s.dipWant*180.0f/kPi,shot.cone,aimedLead,std::sqrt(Dot2(h.tgtVel,h.tgtVel)),s.losRate*180.0f/kPi,
         a.ahead,a.clear,a.roof,a.anyRoof,a.anyFlags,h.losLift,s.hidden ? " hidden" : "",s.wallAhead ? " wall" : "");
+    if(s.store)Log("HELI v=%p store: miss=%.1f allowed=%.1f range=%.0f frames=%.0f worth=%d ready=%d aimed=%d ammo=%d",
+                   v,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,s.storeWorth,StoreReady(h,s),s.storeAim,h.storeAmmo);
 }
 
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
@@ -1882,7 +2016,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
         }
     }
     const float yawWant=Cfg().heliYawRate*kPi/180.0f;
-    if(yawWant>yaw){h.params[2]=yawWant;h.params[3]=smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth;h.tuned=true;}
+    if(yawWant>std::fabs(yaw)){h.params[2]=yawWant*aim::YawSign(yaw);h.params[3]=smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth;h.tuned=true;}
     Log("HELI v=%p tune: stock k=%.2f b=%.5f d=%.4f top=%.1fm/s tau=%.1fs yaw=%.0fdeg/s smooth=%.4f -> k=%.2f b=%.5f top=%.1fm/s brake=%.2fm/s2 yaw=%.0fdeg/s smooth=%.4f%s",
         v,k,b,d,stockTop,1.0f/denom/60.0f,yaw*180.0f/kPi,smooth,h.params[0],h.params[1],h.top,h.stopDecel,h.params[2]*180.0f/kPi,h.params[3],h.tuned ? "" : " (stock)");
 }
@@ -1964,6 +2098,185 @@ void PlayerAssist(unsigned char* v) noexcept {
         Log("HELI v=%p player assist: settles over %.1fs (stock %.1fs), top speed %.1f m/s kept",v,sec,1.0f/denom/60.0f,top);
     Put<float>(v,kSpeedGain,top/(frames*blend));Put<float>(v,kBlend,blend);
 }
+
+// ---- The player at the stick of a stock helicopter: the mouse-aim flight and the helicopter HUD's readout ----
+// The mouse-aim flight (ini HeliMouseAim, heliaim.h; keyboard and mouse only: a pad keeps the stock control): the stock
+// input (slot 55) copies LX, the trigger, LY and RX to the heli and never RY, so the mouse's Y only ever moved the camera
+// (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads this frame's
+// values) the input block is written from what aim::Fly asks, through the NPC pilot's own law (Steer's StockStick,
+// StockThrottle and StockYaw): the forward value drives the nose's tilt and the forward speed both, the lateral the
+// sidestep, the yaw the turn onto the aim's heading (+ grows the heading angle with a positive max yaw rate, aim::YawSign:
+// the stock writes -RX and the mouse to the right turns the heli right, docs/player-jet-re.md §2), the throttle the rotor
+// for the climb (the height held with the rotor that holds it, learned as the NPC's is, from the takeoff cue's stock hover
+// speed on). PlayerAssist's settle runs first: with the setpoint at 0 it stops within PlayerHeliStopSec. On the ground
+// (OnGround: contact bit 1 with the map under it, not perched on a body) nothing horizontal and the stock throttle (Space
+// lifts it off, as before), and for kLiftOffMs after it no horizontal stick and no speed set (the NPC's lift-off).
+// The descend key is the brake key (ini PlayerJetBrakeKey): the stock keyboard has none, letting go of Space only spun
+// the rotor down.
+// The readout (PlayerHeliHud) is gathered while the mouse flies it, the HUD (ini HeliFlightHud) is on or the warnings are
+// heard (ini WarnAudio, warn.cpp): the mouse's aim is drawn whenever it flies, the HUD around it only with HeliFlightHud.
+constexpr std::size_t kSeatPad=0x2B0,kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kSeatAscend=0x2E0;   // §4
+constexpr float kPlayerClimb=6.0f;     // m/s: Space / the brake key (the stock rotor's most is ~8: aircraft-re.md)
+constexpr float kPlayerMark=800.0f;    // m: the aim's mark ahead (playerjet.cpp kAimMark), kept within kAimOnScreen
+constexpr float kAimOnScreen=0.85f;
+constexpr float kMovingSpeed=5.0f;     // m/s: slower, it has no flight path to mark (the HUD shows its drift)
+constexpr float kThreatRadius=20.0f;   // m: a missile's lock point this near it homes on it (playerjet.cpp's)
+constexpr float kGpwsSlack=1.0f;       // m/s over the descent key's sink before the ground-proximity warning counts it
+struct Pilot {
+    ObjRef ref;
+    ULONGLONG seen,lastMs,groundAt;
+    float prev[3],vel[3];
+    bool havePrev;
+    float aim[3];                      // the mouse's aim (heliaim.h), a world direction
+    aim::Hold hold;
+    float hover;                       // the rotor that holds its height (learned, StockThrottle)
+    float prevHeading,yawRate;
+    bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
+};
+Pilot pilots[4];
+
+// Its record: a new one (a free slot or a stale one) starts level, at a hover, the aim on its nose.
+Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
+    for(auto& p:pilots)if(p.ref.Is(v) && ms-p.seen<=kAssistStaleMs)return &p;
+    Pilot* p=nullptr;
+    for(auto& x:pilots)if(!p && (!x.ref || x.ref.Is(v) || ms-x.seen>kAssistStaleMs))p=&x;
+    if(!p)return nullptr;
+    *p=Pilot{};p->ref=ObjRef::Of(v);p->lastMs=p->seen=ms;
+    std::memcpy(p->aim,fwd,12);
+    const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass);   // the takeoff cue's hover speed
+    p->hover=lift>1.0f && mass>0.0f && std::isfinite(lift+mass) ? Clamp(kStockHover*kStockLift/lift*mass,0.1f,1.0f) : 0.5f;
+    p->prevHeading=std::atan2(fwd[0],fwd[2]);
+    return p;
+}
+
+// The heli's own top speed now (its params as PlayerAssist leaves them: b k / (1 - d (1 - b))), else kTopSpeed.
+float PlayerTop(const unsigned char* v) noexcept {
+    const float k=At<float>(v,kSpeedGain),b=At<float>(v,kBlend),d=At<float>(v,kDamp),denom=1.0f-d*(1.0f-b);
+    const float top=denom>1e-6f ? b*k/denom : 0.0f;
+    return std::isfinite(top) && top>1.0f ? top : kTopSpeed;
+}
+
+bool KeyDown(int vk) noexcept {
+    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+}
+float SeatAxis(const unsigned char* seat,std::size_t at) noexcept {
+    const float x=At<float>(seat,at);
+    return std::isfinite(x) ? Clamp(x,-1.0f,1.0f) : 0.0f;
+}
+
+// The mouse-aim flight's frame (see the top): the aim moved, the want, the input block written.
+void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos,const float* fwd,const float* right,bool grounded,
+            float clear,float dt,ULONGLONG ms) noexcept {
+    const float ly=SeatAxis(seat,kSeatLY),ry=SeatAxis(seat,kSeatRY);
+    const aim::Keys keys{ly<-0.3f ? 1.0f : ly>0.3f ? -1.0f : 0.0f,SeatAxis(seat,kSeatLX),
+                         (At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-(KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f)};
+    float was[3];std::memcpy(was,p.aim,12);
+    aim::Move(p.aim,SeatAxis(seat,kSeatRX),Cfg().playerJetInvertPitch ? ry : -ry,aim::kPerUnit*Cfg().playerJetMouseSpeed);
+    float vp[16];
+    if(LastViewProj(vp))aim::KeepOnScreen(vp,pos,p.aim,was,fwd,kPlayerMark,kAimOnScreen);
+    const float top=PlayerTop(v);
+    if(grounded)p.groundAt=ms;
+    const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal (and no setpoint)
+    const aim::Want w=aim::Fly(p.hold,p.aim,fwd,pos,p.vel,keys,top,kPlayerClimb,grounded,lifting,clear,dt);
+    float forward=0.0f,lateral=0.0f;
+    aim::StockStick(w.vel,p.vel,top,kBrakeGain,fwd,right,&forward,&lateral);
+    if(lifting)forward=lateral=0.0f;
+    const float heading=std::atan2(fwd[0],fwd[2]);
+    // Turned by its own max yaw rate's sign (aim::YawSign): the NPC learns its sign from how it turns (Sense's votes); the
+    // player's flight reads it, the turn right from the first frame.
+    const float yaw=aim::StockYaw(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,0.0f,kYawDamp,kYawFeed)*
+                    aim::YawSign(At<float>(v,kMaxYaw));
+    Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
+    if(!grounded) {   // on the ground the stock throttle (the ascend key) lifts it off
+        const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
+        Put<float>(v,kInThrottle,aim::StockThrottle(w.climb,p.vel[1],At<float>(v,kRotor),&p.hover,learn,dt,kRotorGains));
+    }
+    if(!p.flying)Log("HELI v=%p the mouse-aim flight: top %.1f m/s, hover rotor %.3f",v,top,p.hover);
+    p.flying=true;
+}
+
+// The HUD's readout (the flight's state; the threats as the jets' Threats gathers them), published for HudPublish.
+SRWLOCK heliHudLock=SRWLOCK_INIT;
+PlayerHeliReadout heliHud{};
+ULONGLONG heliHudAt=0;
+void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,float clear,bool keys) noexcept {
+    PlayerHeliReadout r{};
+    HeliFlight& f=r.f;
+    std::memcpy(f.vel,p.vel,12);
+    f.speed=std::sqrt(p.vel[0]*p.vel[0]+p.vel[2]*p.vel[2]);
+    f.ground=clear!=kNoGround;f.clear=f.ground ? clear : pos[1];f.climb=p.vel[1];
+    f.hp=At<float>(v,kHp);f.hpMax=At<float>(v,kHpMax);
+    f.keys=keys;f.aiming=p.flying;f.holding=p.flying && p.hold.holding;f.landed=grounded;
+    f.setSpeed=p.hold.speed;f.top=PlayerTop(v);
+    // The ground-proximity warning (warn.cpp), off the ground: sinking faster than the descent key's kPlayerClimb (plus
+    // kGpwsSlack) onto the ground, or the path into something standing higher than it.
+    f.gpws=Gpws::none;f.impactIn=-1.0f;
+    if(!grounded) {
+        bool rising=false;
+        f.impactIn=ClosureIn(pos,p.vel,p.vel[1],clear,kPlayerClimb+kGpwsSlack,kTerrainSeconds,&rising);
+        f.gpws=GpwsOf(f.impactIn,rising);
+        if(f.gpws==Gpws::none)f.impactIn=-1.0f;
+    }
+    for(int i=0;i<3;++i)f.aim[i]=pos[i]+p.aim[i]*kPlayerMark;
+    if(grounded) {
+        const float lift=At<float>(v,kLiftPerRotor),mass=At<float>(v,kLiftMass),rotor=At<float>(v,kRotor);
+        if(lift>1.0f && mass>0.0f && std::isfinite(lift+mass+rotor)){f.rotor=rotor;f.hover=kStockHover*kStockLift/lift*mass;}
+    }
+    PlayerJetSymbols& y=r.sym;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    std::memcpy(y.pos,pos,12);
+    y.nose[0]=m[8];y.nose[1]=m[9];y.nose[2]=m[10];
+    const float nl=std::sqrt(y.nose[0]*y.nose[0]+y.nose[1]*y.nose[1]+y.nose[2]*y.nose[2]);
+    if(std::isfinite(nl) && nl>0.5f)for(auto& c:y.nose)c/=nl;
+    else{y.nose[0]=0.0f;y.nose[1]=0.0f;y.nose[2]=1.0f;}
+    const float sp=std::sqrt(p.vel[0]*p.vel[0]+p.vel[1]*p.vel[1]+p.vel[2]*p.vel[2]);
+    y.moving=sp>kMovingSpeed;
+    if(y.moving)for(int i=0;i<3;++i)y.dir[i]=p.vel[i]/sp;
+    int n=MissilesHomingAt(pos,kThreatRadius,y.threatAt,kMostThreats);
+    if(n>kMostThreats)n=kMostThreats;
+    for(int i=0;i<n;++i)y.threatKind[i]=2;
+    const int locks=jet::LockersOf(v,y.threatAt+n,kMostThreats-n);
+    for(int i=n;i<n+locks;++i)y.threatKind[i]=1;
+    y.threats=n+locks;
+    FuelGauge(v,&r.fuel);   // the tank the stock FUEL gauge showed (stockgauge.cpp): HeliStrip's line, LOW FUEL
+    AcquireSRWLockExclusive(&heliHudLock);
+    heliHud=r;heliHudAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&heliHudLock);
+}
+
+// The player in seat 0 of a stock heli, each frame after PlayerAssist.
+void PlayerHeli(unsigned char* v) noexcept {
+    if(!Cfg().heliMouseAim && !Cfg().heliFlightHud && !Cfg().warnAudio)return;
+    float fwd[3],right[3];
+    if(!Row(v,kHeadForward,fwd) || !Row(v,kHeadRight,right))return;
+    const ULONGLONG ms=GameMs();
+    Pilot* const p=PilotOf(v,fwd,ms);
+    if(!p)return;
+    const float* pos=reinterpret_cast<const float*>(v+kPosition);
+    const float dt=GameStep(ms-p->lastMs);   // game time: a slow frame moved it no more than 1/60 s (body506.h)
+    p->lastMs=ms;p->seen=ms;
+    if(p->havePrev)for(int i=0;i<3;++i)p->vel[i]+=((pos[i]-p->prev[i])/dt-p->vel[i])*0.3f;
+    std::memcpy(p->prev,pos,12);p->havePrev=true;
+    const float heading=std::atan2(fwd[0],fwd[2]);
+    p->yawRate+=(Wrap(heading-p->prevHeading)/dt-p->yawRate)*0.3f;
+    p->prevHeading=heading;
+    // On the ground as the NPC tells it (OnGround): contact on top of an enemy, a vehicle or another heli is not the
+    // ground. Taken as the ground, a low scrape over one zeroed the speed set, handed the throttle back to the stock and
+    // locked the sidestep for kLiftOffMs.
+    const float clear=GroundClearance(pos);
+    const bool grounded=OnGround((v[kContact]&kContactGround)!=0,rayOk,clear==kNoGround ? -1.0f : clear);
+    const unsigned char* seat=SeatAt(v,0);
+    const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    if(Cfg().heliMouseAim && keys)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
+    else {
+        if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
+        p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
+    }
+    if(Cfg().heliFlightHud || p->flying || Cfg().warnAudio)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
+}
 }  // namespace
 
 void HeliFrame(unsigned char* vehicle) noexcept {
@@ -1972,7 +2285,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
-        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player)PlayerAssist(vehicle);
+        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerHeli(vehicle);}
         else AssistOff(vehicle);
         return;
     }
@@ -1988,6 +2301,14 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     bool playerAboard=false;
     for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || SeatRider(SeatAt(vehicle,i))==Rider::player;
     Fly(*h,vehicle,playerAboard);
+}
+
+bool PlayerHeliHud(PlayerHeliReadout* out) noexcept {
+    AcquireSRWLockShared(&heliHudLock);
+    const bool fresh=heliHudAt && GetTickCount64()-heliHudAt<=kCueFreshMs;
+    if(fresh)*out=heliHud;
+    ReleaseSRWLockShared(&heliHudLock);
+    return fresh;
 }
 
 void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept {
@@ -2317,6 +2638,10 @@ bool InstallDoorGuns() noexcept {
 }
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+// Layer 27 (filter 0x1B) collides with layers 15, 16, 17, 18 and 20 alone (the CollisionFilter ctor 0x105510's pair
+// table, docs/emc-re.md §3): the layers the map objects' creation code puts buildings on (docs/raycast-re.md §3), not
+// 19 / 26 (the terrain's and the units' / vehicles'). With the plain nearest-hit collector: every hit on those layers.
+float BuildingRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit,true,nullptr,0x1B); }
 Sea SeaAt(float x,float z,float* surface) noexcept { return SeaProbe(x,z,surface); }
 
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept {
@@ -2378,6 +2703,7 @@ bool CheckHeliProfile() noexcept {
 void ResetHelis() noexcept {
     for(auto& h:helis)h=Heli{};
     for(auto& a:assists)a=Assist{};
+    for(auto& p:pilots)p=Pilot{};
     fullLoggedAt=0;
     ResetTrack();
     rescue=Rescue{};

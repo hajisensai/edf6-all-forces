@@ -43,7 +43,7 @@ constexpr unsigned kPreload=0x7A3780;
 constexpr unsigned kDecoyParamVtable=0x17A4FF0,kDecoyVtable=0x17D3F88,kDecoySetup=0x5ACC30;
 constexpr std::size_t kDecoyFollow=0x10D0;
 constexpr std::int32_t kTeamDecoy=4;
-constexpr float kDollBelow=4.0f,kDollHp=2000.0f;
+constexpr float kDollHp=2000.0f;
 const unsigned char kDecoySetupSig[]={0x0F,0x28,0xC2,0xF3,0x0F,0x11,0x91,0xF4,0x02,0x00,0x00};
 const wchar_t* const kDollSgo[]={L"app:/object/e_throw_decoyscreen_ayame.sgo",L"app:/object/e_throw_decoyscreen_mio.sgo",
                                  L"app:/object/e_throw_decoyscreen_fubuki.sgo"};
@@ -59,13 +59,18 @@ struct alignas(16) InitParamDecoy { const void* vtable; unsigned char rest[0x38]
 using DecoyCreateFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParamDecoy*);
 using DecoySetupFn=void(__fastcall*)(void*,const float*,float,std::int32_t);
 
-// Doll `i`'s matrix: kDollBelow under drone `v`, upright, its nose's heading.
-void DollPose(int i,const unsigned char* v) noexcept {
+// Doll `i`'s matrix: kDollBelow under drone `v`, upright, its nose's heading; its feet never under the ground (or the
+// roof) beneath the drone, `clear` (GroundClearance) under it (the user, 2026-10-05: "人偶无人机的人偶会穿到地里面").
+// The doll has no body of its own (the Decoy copies this matrix every frame, docs/decoy-blast-re.md), so this is the
+// one place that keeps it out of the ground: a drone flies down to 1 m (HoldOffGround), lands, parks, docks under a
+// carrier set down.
+void DollPose(int i,const unsigned char* v,float clear) noexcept {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const float* p=reinterpret_cast<const float*>(v+kPosition);
     float f[3]={m[8],0.0f,m[10]};
     if(!Normalize(f)){f[0]=0;f[2]=1;}
-    const float pose[16]={f[2],0,-f[0],0, 0,1,0,0, f[0],0,f[2],0, p[0],p[1]-kDollBelow,p[2],1};
+    const float below=clear!=kNoGround && clear<kDollBelow ? clear : kDollBelow;
+    const float pose[16]={f[2],0,-f[0],0, 0,1,0,0, f[0],0,f[2],0, p[0],p[1]-below,p[2],1};
     std::memcpy(dolls[i].m,pose,sizeof(pose));
 }
 
@@ -300,7 +305,7 @@ void DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept {
     if(!dollOk || !At<void*>(image,kObjectMgr))return;
     static unsigned next=0;
     const wchar_t* const sgo=kDollSgo[next++%(sizeof(kDollSgo)/sizeof(kDollSgo[0]))];
-    DollPose(i,v);
+    DollPose(i,v,GroundClearance(reinterpret_cast<const float*>(v+kPosition)));
     unsigned char* const d=DollCreate(sgo,dolls[i].m);
     if(!d){Log("JET doll %ls: not made (DLC not installed?)",sgo);return;}
     __try {
@@ -333,8 +338,8 @@ void DollFree(int i) noexcept {
     } __except(FaultLog("JET doll delete",GetExceptionInformation())){}
 }
 
-void DollFrame(int i,const unsigned char* v) noexcept {
-    if(i>=0 && i<kMaxJets && dolls[i].obj)DollPose(i,v);
+void DollFrame(int i,const unsigned char* v,float clear) noexcept {
+    if(i>=0 && i<kMaxJets && dolls[i].obj)DollPose(i,v,clear);
 }
 
 void ResetDolls() noexcept {

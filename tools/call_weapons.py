@@ -7,6 +7,10 @@ The vehicle requests (Call.brings 'vehicle') are clones of the stock eWeapon394 
 category 308): the stock request brings the player jet SGO (tools/make_jets.py EDF6VC_PJET_*.SGO, which
 must be installed first) with the jet's mark and guns in the request's vehicle setup, empty, for the player
 to fly (src/playerjet.cpp).
+The thrown drones (Call.brings 'throw') are clones of the stock eWeapon217 (Patroller, Weapon_Sub, category 331,
+the Robot Bomb list) with a marker in AmmoHitSizeAdjust (calls.throw_mark: about 1.0004, so the bomb hits as the
+stock one): the plugin turns the bomb into its drone where it lands (src/airstrike.cpp kThrows); without the
+plugin the weapon is a plain Patroller.
 
   python tools/call_weapons.py build OUTDIR [--game DIR]     write the SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
@@ -63,6 +67,7 @@ from dsgo import Node  # noqa: E402
 
 TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
 VEHICLE_TEMPLATE = 'eWeapon394'  # N9 Eros (a heli vehicle request)
+THROW_TEMPLATE = 'eWeapon217'    # Patroller (a Robot Bomb: Weapon_Sub, BombBullet01)
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
 TABLE = 'WEAPON/WEAPONTABLE.SGO'
 TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
@@ -124,10 +129,13 @@ def row_ids(table: bytes) -> list[str]:
 
 
 def template_of(call: Call) -> str:
-    """The stock row a call's row and SGO are made from: the bomber call, the N9 Eros request (a player jet), or a
-    ground vehicle's own request (vcobjects.GROUND_VEHICLES: the Naegling's for the Katyusha)."""
+    """The stock row a call's row and SGO are made from: the bomber call, the N9 Eros request (a player jet), a
+    ground vehicle's own request (vcobjects.GROUND_VEHICLES: the Naegling's for the Katyusha), or the Patroller (a
+    thrown drone: its row, and so its place in the Robot Bomb list, category 331)."""
     if call.ground:
         return vc.GROUND_VEHICLES[call.ground].request
+    if call.brings == 'throw':
+        return THROW_TEMPLATE
     return VEHICLE_TEMPLATE if call.brings == 'vehicle' else TEMPLATE
 
 
@@ -222,8 +230,10 @@ def vehicle_weapons(call: Call) -> tuple[str, ...]:
 
 def vehicle_needs(call: Call) -> list[str]:
     """What a vehicle request's SGO names and so needs installed (by tools/make_jets.py, or the ground vehicle's own
-    tool): the vehicle SGO and its weapons."""
-    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in vehicle_weapons(call)]
+    tool): the vehicle SGO and its weapons of ours (EDF6VC_*). A stock weapon it keeps (the sidecar bike's guns and
+    fuel tank) is the game's own, in Root.cpk: nothing to install."""
+    ours = [w for w in vehicle_weapons(call) if w.split('/')[-1].upper().startswith('EDF6VC_')]
+    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in ours]
 
 
 def _object_path(call: Call) -> str:
@@ -286,8 +296,9 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float]) -> bytes
     if not call.ground:
         setup.items[1].items[0] = float(call.mark)   # the heli params' speed gain: the jet's mark
     # The weapon list: the setup's last entry ([multipliers, heli params, fuel, weapons] in the Eros's request;
-    # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's).
-    at = 2 if call.ground else 3
+    # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's; [multipliers, bike params, fuel,
+    # weapons] in the Freed bike's, the sidecar's).
+    at = len(setup.items) - 1 if call.ground else 3
     weapons = setup.items[at].items
     entry = weapons[0]
     jet_weapons = vehicle_weapons(call)
@@ -323,9 +334,26 @@ def vehicle_durability(game_root: str, call: Call) -> float:
     return hp * request_tier(request_curve(game_root, request_family(call)), call.level)[0]
 
 
+def throw_sgo(template: bytes, call: Call) -> bytes:
+    """The Patroller with the thrown drone's marker (calls.throw_mark), its magazine (AmmoCount[0]: the bombs, so the
+    drones, a reload), its reload (frames) and names; all else the stock bomb's (thrown and landing as it does)."""
+    doc = dsgo.parse(template)
+    r = doc.root
+    r.set('AmmoHitSizeAdjust', float(call.mark))
+    r.get('AmmoCount').items[0] = float(call.count)
+    r.get('ReloadTime').items[0] = float(call.reload)
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
 def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None) -> bytes:
     if call.brings == 'vehicle':
         return vehicle_sgo(template, call, request_tier(curve or [], call.level))
+    if call.brings == 'throw':
+        return throw_sgo(template, call)
     doc = dsgo.parse(template)
     r = doc.root
     r.set('AmmoHitSizeAdjust', float(call.mark))
@@ -356,6 +384,9 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
     row = copy.deepcopy(template)
     row.items[0] = call_name(call, lang)
     row.items[1] = calls.call_description(call, lang)
+    if call.brings == 'throw':
+        _throw_stats(row, call)
+        return row
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
@@ -366,6 +397,22 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
         if len(stat.items) == 3 and str(stat.items[1]).startswith('$0pt') and isinstance(stat.items[2], Node):
             stat.items[2].items[0] = float(call.reload)
     return row
+
+
+# The Patroller's stat list: [count, damage, search distance, reload, blast range]. A thrown drone's bomb never goes
+# off as the Patroller's, so only its count and reload (seconds, the list's curve: ReloadTime frames / 60) stay.
+_THROW_COUNT_STAT, _THROW_RELOAD_STAT = 0, 3
+
+
+def _throw_stats(row: Node, call: Call) -> None:
+    stats = row.items[2].items
+    if len(stats) <= _THROW_RELOAD_STAT:
+        return   # another tool rewrote the Patroller's text: left as it is
+    keep = [stats[_THROW_COUNT_STAT], stats[_THROW_RELOAD_STAT]]
+    for stat, value in zip(keep, (float(call.count), float(call.reload) / 60.0)):
+        if len(stat.items) == 3 and isinstance(stat.items[2], Node) and stat.items[2].items:
+            stat.items[2].items[0] = value
+    row.items[2].items = keep
 
 
 def _retired_table_row(template: Node, call: Call) -> Node:

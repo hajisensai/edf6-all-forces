@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
 #include <intrin.h>
 
 namespace crew {
@@ -66,15 +67,16 @@ Carrier carriers[kMaxCarriers];
 bool sigOk=false,broken=false;
 // The jets' nozzles by their mark (pylib/vcobjects.py JETS; read off their models, pylib/jet_models.py NOZZLES, which
 // tools/selftest.py holds this table to): the bomber501 the strike jets and the player's strike jet fly, the interceptor
-// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones'. Each flame on its
-// exhaust's exit (its centre, in the exit plane: a flame set back inside the nozzle showed high in it from behind), as
-// big as the engine: width the exit's diameter, length jet_models.FLAME_LENGTH_PER_DIAMETER of it (m); with the
-// afterburner (the player's boost) kBurnerLength times as long.
+// model the interceptors, the enemy fighter and the player's fighter fly, the multirole's, the drones', the gunship's
+// bomber401 (it had none: its mark is its own, 7011, and kBomberNozzles is only looked up under the strike mark). Each
+// flame on its exhaust's exit (its centre, in the exit plane: a flame set back inside the nozzle showed high in it from
+// behind), as big as the engine: width the exit's diameter, length jet_models.FLAME_LENGTH_PER_DIAMETER of it (m); with
+// the afterburner (the player's boost) kBurnerLength times as long.
 struct JetNozzles { float mark; int count; float at[2][3]; float size[2]; };
 constexpr JetNozzles kJetNozzles[]={
-    {7001.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
-    {7002.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
-    {7202.0f,1,{{0.0f,2.067f,-12.182f},{0.0f,0.0f,0.0f}},{4.351f,0.87f}},
+    {7001.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
+    {7002.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
+    {7202.0f,2,{{3.58f,2.325f,-12.006f},{-3.58f,2.325f,-12.006f}},{9.197f,1.839f}},
     {7003.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
     {7020.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
     {7201.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
@@ -82,6 +84,7 @@ constexpr JetNozzles kJetNozzles[]={
     {7006.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
     {7007.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
     {7008.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
+    {7011.0f,1,{{0.0f,1.267f,-1.597f},{0.0f,0.0f,0.0f}},{4.755f,0.951f}},   // the gunship: the stock bomber401 (kBomberNozzles)
 };
 // The stock bombers a strike jet took over (airstrike.cpp) fly their own models under the strike jet's mark (crew.h
 // BomberBody tells them apart): their exits, measured on those models as they are (pylib/jet_models.py STOCK_BOMBERS;
@@ -255,20 +258,43 @@ namespace {
 // The model's frame is its mesh bone's world matrix as drawn (ModelBone; the vehicle's own matrix if none): on the
 // vehicle's matrix the player fighter's two flames showed above and outside its nozzles, and on the root bone ("mdl")
 // both sat in one dot with no direction (the user's pictures, 2026-10-05): the root's record is not kept up as drawn.
-// The mesh bone (the root's first child) as drawn is the model's origin itself: FLAME logged it 1.05 m under and 1.77
-// m behind the vehicle's origin (the collision box's centre, jet_models.model_box (0, 1.06, 1.69)), its rows the
-// vehicle's. The nozzles go on it as they are (a lift of mdl's bind 0.835 m taken off them put both flames at the
-// bottom of the tail: the user, 2026-10-05). FLAME logs the frame once per jet.
+// The mesh bone as drawn is the model's origin itself, at the collision box frame's origin: FLAME logged the player
+// fighter's 1.385 m under and 1.69 m behind the vehicle's origin (its box's centre (0, 1.381, 1.688)), the strike jet's
+// (0, -2.12, -2.72) (its box's (0, 2.123, 2.723)), its rows the vehicle's. The models are bound with it at their origin
+// (pylib/jet_models.py lift_mdb), so the nozzles (in the grounded model's frame) go on it as they are. It is the bone the
+// jet SGO's animation_model_bone_mapping drives (vcobjects.jet_sgo: Jet.body), found by name (kMeshBones): bone 1 on
+// the bombers' models, bone 2 on the drone's (bone 1 its globalSRT node) and the stock BOMBER501_2's (its bomber501_2
+// node). FLAME logs the frame once per jet.
+const wchar_t* const kMeshBones[]={L"bomber501",L"bomber401",L"body"};
 const unsigned char* ModelBone(const unsigned char* v) noexcept {
     const unsigned char* inst=v+kModelInst506;
     if(!Readable(inst,kInstBones506+8))return nullptr;
     const auto bones=At<const unsigned char*>(inst,kInstBones506);
     const auto count=At<std::int32_t>(inst,kInstBoneCount);
-    if(!bones || count<2 || !Readable(bones+kBoneStride,kBoneStride))return nullptr;
-    const unsigned char* rec=bones+kBoneStride;   // bone 1: the mesh bone under the root
+    if(!bones || count<2 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return nullptr;
+    const unsigned char* rec=bones+kBoneStride;   // bone 1 when no bone is named so
+    for(std::int32_t i=1;i<count;++i) {
+        const unsigned char* const r=bones+static_cast<std::size_t>(i)*kBoneStride;
+        const auto name=At<const wchar_t*>(r,0);
+        if(!name || !Readable(name,2))continue;
+        bool hit=false;
+        for(const auto* want:kMeshBones)hit=hit || std::wcsncmp(name,want,32)==0;
+        if(hit){rec=r;break;}
+    }
     const float* m=reinterpret_cast<const float*>(rec+kBoneWorld506);
     const float l=m[0]*m[0]+m[1]*m[1]+m[2]*m[2];
     return l>0.01f ? rec : nullptr;   // a matrix the game keeps up (the root's was none)
+}
+// The frame the exhausts sit in: the mesh bone's world matrix (the vehicle's without it), its rows made unit length.
+const unsigned char* ExhaustBasis(const unsigned char* v,float* b) noexcept {
+    const unsigned char* root=ModelBone(v);
+    std::memcpy(b,root ? root+kBoneWorld506 : v+kMatrix,64);
+    for(int r=0;r<3;++r) {
+        float* const row=b+r*4;
+        const float l=std::sqrt(row[0]*row[0]+row[1]*row[1]+row[2]*row[2]);
+        if(l>1e-4f)for(int k=0;k<3;++k)row[k]/=l;
+    }
+    return root;
 }
 void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* size,float intensity,ULONGLONG ms) noexcept {
     Carrier* const c=Find(v,ms);
@@ -276,19 +302,13 @@ void JetFrame(const unsigned char* v,const float (*at)[3],int n,const float* siz
     const bool fresh=!c->n[0].obj && !c->n[0].ctrl;   // no flame made for it yet
     c->seen=ms;
     float b[16];
-    const unsigned char* root=ModelBone(v);
-    std::memcpy(b,root ? root+kBoneWorld506 : v+kMatrix,64);
+    const unsigned char* root=ExhaustBasis(v,b);
     if(fresh && Cfg().debug) {
         const float* p=reinterpret_cast<const float*>(v+kPosition);
         const float* vm=reinterpret_cast<const float*>(v+kMatrix);
         Log("FLAME v=%p bone %s at (%.2f,%.2f,%.2f) from the vehicle's origin; its rows x(%.2f,%.2f,%.2f) y(%.2f,%.2f,%.2f) "
             "z(%.2f,%.2f,%.2f); the vehicle's z (%.2f,%.2f,%.2f)",v,root ? "found" : "missing (vehicle matrix)",b[12]-p[0],b[13]-p[1],
             b[14]-p[2],b[0],b[1],b[2],b[4],b[5],b[6],b[8],b[9],b[10],vm[8],vm[9],vm[10]);
-    }
-    for(int r=0;r<3;++r) {
-        float* const row=b+r*4;
-        const float l=std::sqrt(row[0]*row[0]+row[1]*row[1]+row[2]*row[2]);
-        if(l>1e-4f)for(int k=0;k<3;++k)row[k]/=l;
     }
     for(int i=0;i<n && i<kNozzles;++i) {
         Nozzle& z=c->n[i];
@@ -398,10 +418,160 @@ void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float inten
     __except(MakeFault(GetExceptionInformation())) {}
 }
 
+void SmokeSweep(ULONGLONG ms) noexcept;   // below, with the arrival's smoke
 void BoosterSweep(ULONGLONG ms) noexcept {
     if(!sigOk || broken)return;
-    __try { Sweep(ms);FlareSweep(ms); }
+    __try { Sweep(ms);FlareSweep(ms);SmokeSweep(ms); }
     __except(FaultLog("FLAME sweep",GetExceptionInformation())) {}
+}
+
+namespace {
+// --- The arrival's smoke (the user, 2026-10-05: "飞机入场 感觉还能更帅点 要不要放烟 有人想要尾迹"; ini JetEntrySmoke):
+// a called jet arriving (jet_internal.h Entering) trails smoke from each exhaust; the smoke stays in the air where it
+// was laid and fades. The stock LineStripObject, the emitter of the missiles' smoke ribbon as an object of its own
+// (static RE, EDF.dll 0x678CCB46; H unless noted):
+//   factory 0x842E0(mgr, out[2], matrix16, InitParam*): new, construct (0x2F47F0), register; *out = a weak
+//   reference {obj, ctrl} (0x84412: lock inc [ctrl+0xC]). InitParam: vtable 0x1762138 (InitParam@LineStripObject),
+//   the emitter's parameters at +0x30 (0x2F4490 fills the defaults; laid out below), +0x150..+0x160 its warm-up
+//   (count 0: none).
+//   The object (vtable 0x17A8930): its emitter at +0x190 (+0x40 emitting, +0x50 where, +0x60 which way); its update
+//   task (0x2F64F0) runs the emitter (0x2F6110) and deletes the object once it is off with no node left alive
+//   (+0x2D0): stopped, the smoke laid fades over its life and the object goes by itself.
+//   The texture: the missiles' smoke, L"噴射煙_01.dds" (0x17A1CC8), got from EffectGenUtil (0x20B2980) by 0x2E8510
+//   (a name it cannot find is dereferenced as null: the name's bytes are checked), copied (0xF5E10), freed (0x1120820).
+// Its look in a mission is unconfirmed (M): the factory's one stock caller is a debug scene. A jet's arrival makes a
+// new object for each exhaust (one stopped and restarted would join its old tail to the new start).
+constexpr unsigned kTrailMake=0x842E0,kTrailParams=0x2F4490,kTrailTex=0x2E8510,kTexCopy=0xF5E10,kTexFree=0x1120820;
+constexpr unsigned kTrailUpdate=0x2F64F0,kTrailEmit=0x2F6110,kTrailVtable=0x17A8930,kTrailParamVtable=0x1762138,kSmokeName=0x17A1CC8;
+constexpr std::size_t kEffectGen=0x20B2980,kTrailCore=0x190,kTrailParamAt=0x30,kTrailParamSize=0x180,kTrailSize=0x3D0;
+// The emitter's parameters (core +0x00..+0x120): life min / max frames +0x04 / +0x08 (and +0x00, +0x0C as the
+// missile's), per-frame drift +0x20, emitting +0x40, where +0x50, which way +0x60, the cone +0x84, speeds +0x88 / +0x8C,
+// width mode +0x90 (0: grows by +0x9C a frame), width +0x94..+0x98, colour from +0xA0 to +0xB0 over its life, the
+// smoke's flags +0xC0 / +0xC1 (as the missile's: 1, 1), the texture +0xD0, the strip's UV +0x10C / +0x114 (0.5, 0.3).
+constexpr int kSmokeLife=150;                              // frames: 2.5 s, 500 m behind a jet at 200 m/s
+constexpr float kSmokeWidth=2.0f,kSmokeGrow=0.04f,kSmokeRise=0.003f;   // m, m a frame, m/s^2-ish drift up a frame
+alignas(16) const float kSmokeFrom[4]={0.92f,0.92f,0.95f,0.55f},kSmokeTo[4]={0.95f,0.95f,0.97f,0.0f};
+constexpr int kSmokeSets=16,kSmokeTrails=2;
+constexpr ULONGLONG kSmokeStaleMs=500;
+const unsigned char kTrailMakeSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x20,0x57};
+const unsigned char kTrailParamsSig[]={0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x48,0xC7,0x41,0x2C,0x00,0x00};
+const unsigned char kTrailTexSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x57,0x48,0x83,0xEC,0x40,0x33};
+const unsigned char kTrailUpdateSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x8B,0x49,0x08,0x48,0x81,0xC1,0x90,0x01,
+                                       0x00,0x00,0x48,0x8B,0x53,0x10,0xE8,0x03,0xFC,0xFF,0xFF,0x48,0x8B,0x4B,0x08,0x48,0x83,0xB9,
+                                       0xD0,0x02,0x00,0x00,0x00,0x75,0x13,0x80,0xB9,0xD0,0x01,0x00,0x00,0x00};
+const unsigned char kTrailEmitSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x80,0x79,0x40,0x00};
+const unsigned char kTexCopySig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57};
+const unsigned char kTexFreeSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x8D,0x05,0x00,0xE5,0x67,0x00};
+const unsigned char kSmokeNameBytes[]={0x74,0x56,0x04,0x5C,0x59,0x71,0x5F,0x00,0x30,0x00,0x31,0x00};
+bool smokeOk=false;
+
+struct Trail { unsigned char* obj; void* ctrl; };
+struct SmokeSet { const unsigned char* v; const void* ctrl; ULONGLONG seen; Trail t[kSmokeTrails]; };
+SmokeSet smokeSets[kSmokeSets];
+
+bool TrailLive(const Trail& t) noexcept {
+    return t.obj && t.ctrl && Readable(t.obj,kTrailSize) && Readable(t.ctrl,0x10) && At<const void*>(t.obj,0)==image+kTrailVtable &&
+           At<long>(t.ctrl,8)>0 && !(t.obj[kObjFlags]&kObjDeleted);
+}
+// Off: it lays no more; what it laid fades and the object deletes itself (kTrailUpdate). Our weak reference goes.
+void TrailStop(Trail& t) noexcept {
+    if(TrailLive(t))t.obj[kTrailCore+0x40]=0;
+    DropWeak(t.ctrl);
+    t=Trail{};
+}
+void TrailMake(Trail& t,const float* m) noexcept {
+    void* const mgr=At<void*>(image,kObjectMgr);
+    void* const gen=At<void*>(image,kEffectGen);
+    if(!mgr || !gen)return;
+    alignas(16) unsigned char p[kTrailParamSize]={};
+    alignas(16) unsigned char tex[0x30]={};
+    alignas(16) void* out[2]={};
+    unsigned char* const e=p+kTrailParamAt;
+    reinterpret_cast<void(*)(void*)>(image+kTrailParams)(e);
+    Put<const void*>(p,0,image+kTrailParamVtable);
+    reinterpret_cast<void*(*)(void*,void*,const wchar_t*)>(image+kTrailTex)(gen,tex,reinterpret_cast<const wchar_t*>(image+kSmokeName));
+    reinterpret_cast<void(*)(void*,const void*)>(image+kTexCopy)(e+0xD0,tex);
+    reinterpret_cast<void(*)(void*)>(image+kTexFree)(tex);
+    Put<int>(e,0x00,kSmokeLife);Put<int>(e,0x04,kSmokeLife*9/10);Put<int>(e,0x08,kSmokeLife*11/10);Put<int>(e,0x0C,1);
+    Put<float>(e,0x20,0.0f);Put<float>(e,0x24,kSmokeRise);Put<float>(e,0x28,0.0f);
+    e[0x40]=1;
+    const float at[4]={m[12],m[13],m[14],1.0f},back[4]={-m[8],-m[9],-m[10],0.0f};
+    std::memcpy(e+0x50,at,16);std::memcpy(e+0x60,back,16);
+    Put<float>(e,0x80,0.0f);Put<float>(e,0x84,0.2f);Put<float>(e,0x88,0.0f);Put<float>(e,0x8C,0.0f);   // laid, not blown
+    Put<int>(e,0x90,0);Put<float>(e,0x94,kSmokeWidth*0.6f);Put<float>(e,0x98,kSmokeWidth);Put<float>(e,0x9C,kSmokeGrow);
+    std::memcpy(e+0xA0,kSmokeFrom,16);std::memcpy(e+0xB0,kSmokeTo,16);
+    e[0xC0]=1;e[0xC1]=1;Put<float>(e,0x10C,0.5f);Put<float>(e,0x114,0.3f);
+    reinterpret_cast<void*(*)(void*,void**,const float*,void*)>(image+kTrailMake)(mgr,out,m,p);
+    reinterpret_cast<void(*)(void*)>(image+kTexFree)(e+0xD0);   // the parameters' copy (the stock's 0x268EFC)
+    t.obj=static_cast<unsigned char*>(out[0]);t.ctrl=out[1];
+    if(!TrailLive(t))TrailStop(t);
+}
+
+SmokeSet* SmokeSetOf(const unsigned char* v,bool make,ULONGLONG ms) noexcept {
+    const void* const ctrl=At<const void*>(v,kSelfCtrl);
+    SmokeSet* slot=nullptr;
+    for(auto& s:smokeSets) {
+        if(s.v==v && s.ctrl==ctrl)return &s;
+        if(!s.v && !slot)slot=&s;
+    }
+    if(!make || !slot)return nullptr;
+    *slot=SmokeSet{v,ctrl,ms,{}};
+    return slot;
+}
+void SmokeEnd(SmokeSet& s) noexcept {
+    for(auto& t:s.t)TrailStop(t);
+    s=SmokeSet{};
+}
+
+void SmokeFrame(const unsigned char* v,bool on,ULONGLONG ms) noexcept {
+    SmokeSet* const s=SmokeSetOf(v,on,ms);
+    if(!s)return;
+    if(!on || v[kDead]){SmokeEnd(*s);return;}
+    const JetNozzles* const nz=NozzlesOf(v,BodyMark(v));
+    if(!nz){SmokeEnd(*s);return;}
+    s->seen=ms;
+    float b[16];
+    ExhaustBasis(v,b);
+    for(int i=0;i<nz->count && i<kSmokeTrails;++i) {
+        const float* const a=nz->at[i];
+        alignas(16) float m[16];
+        for(int k=0;k<3;++k) {   // as the flame's (JetFrame): turned pi about y, at the exhaust's exit
+            m[k]=-b[k];m[4+k]=b[4+k];m[8+k]=-b[8+k];
+            m[12+k]=b[12+k]+a[0]*b[k]+a[1]*b[4+k]+a[2]*b[8+k];
+        }
+        m[3]=m[7]=m[11]=0.0f;m[15]=1.0f;
+        Trail& t=s->t[i];
+        if(!t.obj && !t.ctrl) {
+            TrailMake(t,m);
+            if(t.obj && Cfg().debug)Log("SMOKE v=%p exhaust %d: trail %p laid",v,i,t.obj);
+            continue;
+        }
+        if(!TrailLive(t))continue;   // gone with the mission's objects: none again for this arrival
+        const float at[4]={m[12],m[13],m[14],1.0f},back[4]={m[8],m[9],m[10],0.0f};   // m's z: the flame's, rearward
+        std::memcpy(t.obj+kTrailCore+0x50,at,16);std::memcpy(t.obj+kTrailCore+0x60,back,16);
+    }
+}
+
+int SmokeFault(const EXCEPTION_POINTERS* e) noexcept {
+    const auto r=e->ExceptionRecord;
+    Log("SMOKE the game faulted on an arrival's smoke (%08lX at EDF+%llX): the smoke is off until the game restarts",r->ExceptionCode,
+        static_cast<unsigned long long>(static_cast<const unsigned char*>(r->ExceptionAddress)-image));
+    smokeOk=false;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+}  // namespace
+
+void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept {
+    if(!smokeOk || !v)return;
+    __try { SmokeFrame(v,on && Cfg().jetEntrySmoke,ms); }
+    __except(SmokeFault(GetExceptionInformation())) {}
+}
+
+// Once a frame (BoosterSweep): a jet not seen for kSmokeStaleMs (gone, reaped, flown by the player) has its smoke stopped.
+void SmokeSweep(ULONGLONG ms) noexcept {
+    if(!smokeOk)return;
+    __try { for(auto& s:smokeSets)if(s.v && ms-s.seen>kSmokeStaleMs)SmokeEnd(s); }
+    __except(SmokeFault(GetExceptionInformation())) {}
 }
 
 bool InstallBoosters() noexcept {
@@ -414,6 +584,12 @@ bool InstallBoosters() noexcept {
               Readable(image+kParamVtable,8) && Readable(image+kConstA,16) && Readable(image+kConstB,16) &&
               Readable(image+kConstC,16) && Readable(image+kConstD,16);
         Log("HOOK carrier flames=%d%s",sigOk,sigOk ? "" : " (off: unexpected EDF.dll code)");
+        smokeOk=sigOk && Matches(kTrailMake,kTrailMakeSig,sizeof(kTrailMakeSig)) && Matches(kTrailParams,kTrailParamsSig,sizeof(kTrailParamsSig)) &&
+                Matches(kTrailTex,kTrailTexSig,sizeof(kTrailTexSig)) && Matches(kTrailUpdate,kTrailUpdateSig,sizeof(kTrailUpdateSig)) &&
+                Matches(kTrailEmit,kTrailEmitSig,sizeof(kTrailEmitSig)) && Matches(kTexCopy,kTexCopySig,sizeof(kTexCopySig)) &&
+                Matches(kTexFree,kTexFreeSig,sizeof(kTexFreeSig)) && Matches(kSmokeName,kSmokeNameBytes,sizeof(kSmokeNameBytes)) &&
+                Readable(image+kTrailVtable,8) && Readable(image+kTrailParamVtable,8);
+        Log("HOOK arrival smoke=%d%s",smokeOk,smokeOk ? "" : " (off: unexpected EDF.dll code)");
         return sigOk;
     } __except(FaultLog("FLAME install",GetExceptionInformation())){return false;}
 }
@@ -428,6 +604,10 @@ void ResetBoosters() noexcept {
     for(auto& f:flareSets) {
         for(auto& z:f.n)DropWeak(z.ctrl);
         f=FlareSet{};
+    }
+    for(auto& s:smokeSets) {   // gone with the mission's objects: only our weak references let go
+        for(auto& t:s.t)DropWeak(t.ctrl);
+        s=SmokeSet{};
     }
 }
 }  // namespace crew
