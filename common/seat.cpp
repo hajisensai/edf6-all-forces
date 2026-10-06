@@ -3,8 +3,10 @@
 #include "edf/memory.h"
 
 namespace edf {
+// Online, another machine's player is copied here with its player flag and may carry a pad object too: it is that
+// machine's player, never this one's (its keys, its camera, its riding are run there).
 bool IsPlayer(const unsigned char* human) noexcept {
-    return Readable(human,kHumanPlayer+1) && human[kHumanPlayer] && At<const void*>(human,kHumanPad);
+    return Readable(human,kHumanPlayer+1) && human[kHumanPlayer] && At<const void*>(human,kHumanPad) && !RemoteRider(human);
 }
 
 bool RemoteRider(const unsigned char* rider) noexcept {

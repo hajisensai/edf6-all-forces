@@ -6,6 +6,7 @@
 // parameters; it then flies at its strike point from the first frame.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "online_authority.h"
 #include <cstdio>
 #include <cwchar>
 
@@ -37,7 +38,6 @@ bool levelOk=false;
 bool preloaded[kBodyCount]{};   // the body's SGO was preloaded for this mission (PreloadJets)
 bool broken[kBodyCount]{};      // its spawn faulted in the game's init (CreateJet): off until the game restarts
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
-using RideAiFn=void(*)(void*,bool);
 
 // The heli's "body" part: its init (0x64E9D1) looks the part up by that name in the vehicle's parts
 // (vehicle+0x1320, 0x6EA4B0(parts, name) -> index or -1) and keeps the index at +0x1530, which slot 61
@@ -147,7 +147,7 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     if(bodyPartOk)FixBodyPart506(v,"JET");
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
     LevelVehicle(v);
-    reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
+    SeatNpcRider(v,true);   // a copy this machine just made: never registered, so its own here (online_authority.h)
     const BodyRow& row=Row(b);
     const bool jet=row.mark>0.0f;
     Role role=Role::fighter;

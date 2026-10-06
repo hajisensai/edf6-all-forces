@@ -49,7 +49,7 @@ int main() {
     wchar_t banner[256]{};
     Check(InSession(),"fixture is online");
     Check(IsPlayer(local) && IsPlayer(splitScreen),"both local split-screen players use the real player predicate");
-    Check(IsPlayer(remote) && edf::RemoteRider(remote),"remote-owned player cannot inherit the local picker even with a pad");
+    Check(!IsPlayer(remote) && edf::RemoteRider(remote),"another machine's player is no player of this machine, even with a pad");
 
     picked.store(-1);
     CallPick(1,banner,_countof(banner));

@@ -27,6 +27,7 @@
 #include "heli.h"
 #include "layout.h"
 #include "memory.h"
+#include "online_authority.h"
 #include "playarea.h"
 #include "warn.h"
 #include <cmath>
@@ -76,7 +77,6 @@ void SeeFrame(const void* vehicle) noexcept {
 }
 namespace {
 using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
-using RideAiFn=void(__fastcall*)(void*,bool);
 // Forwarded with all four register arguments: CarBase's input (slot 55) also reads r8 (its drive block)
 // and the 502's pre-update (slot 4) takes `this` alone.
 using InputFn=edf::VehicleInputFn;   // the slot 55 signature both plugins chain (common/edf/layout.h)
@@ -552,6 +552,10 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
+    // Online, a registered vehicle gets its NPC driver on the host only (online_authority.h): a DummyVehicleRider has no
+    // network identity, so a client that seated one would take the vehicle for its own and send its pose against the
+    // host's (docs/online-re.md sections 3.4, 5). A client's copy is driven by what the host's copy replicates.
+    if(!OnlineMaySeatNpc(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
     // A heli no player has ridden yet stays where it stands for them (the user, 2026-10-05: the range's parked helis
     // "all took off by themselves, I could not get in": crewed 9 s in, a heli lifts off at once, where a crewed tank
@@ -577,8 +581,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // the vehicle gets a fresh driver from the stock RideAi rather than a hand-moved one.
     for(unsigned i=0;i<count && dummies;++i)
         if(SeatRider(SeatAt(vehicle,i))==Rider::dummy)reinterpret_cast<SeatFn>(image+kSeatKick)(vehicle,SeatAt(vehicle,i));
-    auto rideAi=reinterpret_cast<RideAiFn*>(At<void**>(vehicle,0))[kSlotRideAi];
-    rideAi(vehicle,false);
+    if(!SeatNpcRider(vehicle,false))return;
     st.crewedAt=now;st.emptySince=0;st.ownTeam=team;
     if(IsHelicopter(vehicle))HeliCrewed(vehicle);   // false (its table full): logged there, the heli sits
     Log("CREW v=%p %s seats=%u driver=%d",vehicle,kClasses[cls].name,count,SeatRider(SeatAt(vehicle,0))==Rider::dummy);

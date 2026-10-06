@@ -25,6 +25,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
+# Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
+target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -305,6 +307,10 @@ set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(split_fuse_test tests/split_fuse_test.cpp)
 target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME split_fuse COMMAND split_fuse_test)
+# The online gates (src/online_authority.h): their rules on every case, and a source guard that the plugin asks them.
+add_executable(online_authority_test tests/online_authority_test.cpp)
+target_compile_options(online_authority_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME online_authority COMMAND online_authority_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check

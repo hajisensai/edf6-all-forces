@@ -41,6 +41,7 @@
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"
+#include "online_authority.h"
 #include "playarea.h"
 #include "sight.h"
 #include "vehicleram.h"

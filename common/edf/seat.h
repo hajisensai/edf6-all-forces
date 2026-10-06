@@ -4,11 +4,12 @@
 
 namespace edf {
 // none: the seat's rider weak_ptr is expired or empty. dummy: the DummyVehicleRider an NPC-crewed vehicle
-// is driven through. player: a human driven by a pad on this machine. other: anything else (an NPC soldier,
-// a rider that cannot be read).
+// is driven through. player: a human driven by a pad on this machine (IsPlayer). other: anything else (an NPC
+// soldier, another machine's player, a rider that cannot be read).
 enum class Rider { none, dummy, player, other };
 Rider SeatRider(const unsigned char* image,const unsigned char* seat) noexcept;
-// A human driven by a pad on this machine (pad set and the player-controlled flag on).
+/// A human driven by a pad on this machine (pad set and the player-controlled flag on, and not another machine's
+// player copied here: RemoteRider).
 bool IsPlayer(const unsigned char* human) noexcept;
 // Whether another machine runs this rider (online): its network object's flag bit 0.
 bool RemoteRider(const unsigned char* rider) noexcept;

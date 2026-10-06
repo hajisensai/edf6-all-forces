@@ -32,6 +32,7 @@
 #include "subcarrier.h"
 #include "body506.h"
 #include "memory.h"
+#include "online_authority.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -210,7 +211,6 @@ struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 using CreateObjectFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
 using SetTeamFn=void(*)(void*,std::int32_t,bool);
-using RideAiFn=void(*)(void*,bool);
 using DeleteFn=void(*)(void*);
 using GaugeFn=void(__fastcall*)(void*,void*,void*,void*,void*);
 
@@ -1118,7 +1118,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         FixBodyPart506(v,"SUB");
         reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
         LevelVehicle(v);   // as a script's CreateFriend: the hull's tier (Thicken) is then the difficulty's
-        reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
+        SeatNpcRider(v,true);   // a copy this machine just made: its own here (online_authority.h)
         if(!IsSub(v)) {
             Log("SUB launch: %p is no carrier (mark %.0f): deleted",v,BodyMark(v));
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
