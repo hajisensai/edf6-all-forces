@@ -80,6 +80,19 @@ void Report(unsigned char* v,bool host) noexcept {
 }
 }  // namespace
 
+// Whether a session is on. An EDF.dll whose session function is not the one read counts as in a session: the
+// callers turn off what must run the same on every machine, which is safe offline too (logged once).
+bool InSession() noexcept {
+    static int sig=0;   // 0 not checked, 1 the function read, -1 another
+    if(!sig) {
+        bool ok=false;
+        __try { ok=edf::Matches(image,kOnline,kSigs[0].bytes,sizeof(kSigs[0].bytes)); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
+        sig=ok ? 1 : -1;
+        if(!ok)Log("NET session check off: EDF+%#x does not match docs/online-re.md, the plugin acts as if online",kOnline);
+    }
+    return sig<0 || reinterpret_cast<OnlineFn>(image+kOnline)(nullptr);
+}
+
 void NetProbe(unsigned char* v) noexcept {
     if(!Cfg().debug || !IsHelicopter(v))return;
     if(!checked) {

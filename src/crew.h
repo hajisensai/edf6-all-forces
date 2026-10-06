@@ -754,6 +754,10 @@ void HeliSightFrame(unsigned char* vehicle) noexcept;
 // netprobe.cpp: Debug=1, online only: once a second per helicopter-class vehicle, which machine runs it and how its
 // pose replication stands (the NET lines, docs/online-re.md). Reads only.
 void NetProbe(unsigned char* vehicle) noexcept;
+// Whether this machine is in an online session (netprobe.cpp; true when the session function is not the one read).
+// Every machine of a room makes its own aircraft for the same calls (docs/online-re.md §2): what only one machine
+// does (the call picked here) gives each machine different aircraft for the same call.
+bool InSession() noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
 // `most`; how many.
