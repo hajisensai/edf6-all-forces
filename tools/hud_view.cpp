@@ -1,13 +1,15 @@
 // The aircraft's HUD drawn without the game, to look at its layout: src/hud.cpp included whole, its draw run on a
 // stand-in "EDF.dll" image whose quad and text functions (the RVAs hud.cpp calls) jump to recorders here, for a few
 // scenes of the warnings (warn.h) on a jet, a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the
-// drill tank, a Nix; at 16:9 and 21:9) under threat. Each scene's quads (as triangles) and text
+// drill tank, a Nix, the Proteus walking behind its front shield and deployed with its field, barrier and a mark; at
+// 16:9 and 21:9) under threat. Each scene's quads (as triangles) and text
 // lines go to DIR/<scene>.txt; tools/hud_view.py turns them into PNGs. The text's size is a stand-in (the game's
 // glyphs are not here: kGlyphH px a unit of font scale, kGlyphW of that a character), so read the layout, not the
 // lettering.
 //
 // The stock HUD's layout is also checked: the RWR scope's box and the hull / turret block's (StockBlock, with its drill
-// line) must not overlap at 16:9 or 21:9; exit code 1 when they do.
+// line, and with the Proteus's lines and bars) must not overlap at 16:9 or 21:9, nor leave the screen; exit code 1 when
+// they do.
 //
 //   hud_view [--out DIR]      (default %TEMP%\edf6_hud_view), then: python tools/hud_view.py DIR
 #include "../src/hud.cpp"
@@ -20,7 +22,8 @@ PlayerFix player{};
 namespace {
 Config config{};
 // The scene: what the stubs hand the HUD.
-bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false;
+bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasProteus=false;
+ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
 Warnings sceneWarn{};
@@ -78,6 +81,7 @@ bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
+bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
@@ -157,7 +161,7 @@ template<class F> Box Measured(F draw) {
 }
 
 // The stock HUD's RWR scope (Threats' side for it) and its block, at `width` x 1080: apart.
-bool StockLayoutApart(int width) {
+bool StockLayoutApart(int width,const ProteusReadout* proteus=nullptr) {
     const float w=static_cast<float>(width),h=1080.0f,s=1.0f;
     void* const drawer=At<void*>(image,kQuadDrawer);
     static unsigned char ctx[16]{};
@@ -166,12 +170,13 @@ bool StockLayoutApart(int width) {
     y.threats=sceneStock.threats;
     for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
     const Box rwr=Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);});
-    const StockExtras x{nullptr,&sceneDrill,false};
+    const StockExtras x{nullptr,proteus ? nullptr : &sceneDrill,false,proteus};
     const Box block=Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);});
     const bool apart=rwr.x1<block.x0 || block.x1<rwr.x0 || rwr.y1<block.y0 || block.y1<rwr.y0;
-    std::printf("%s  %dx1080: RWR scope (%.0f,%.0f)-(%.0f,%.0f), stock block (%.0f,%.0f)-(%.0f,%.0f)\n",apart ? "ok  " : "FAIL",width,
-                rwr.x0,rwr.y0,rwr.x1,rwr.y1,block.x0,block.y0,block.x1,block.y1);
-    return apart && rwr.any && block.any && rwr.x1<=w && block.x0>=0.0f;
+    const bool inside=rwr.x1<=w && block.x0>=0.0f && block.y0>=0.0f && block.y1<=h;
+    std::printf("%s  %dx1080%s: RWR scope (%.0f,%.0f)-(%.0f,%.0f), stock block (%.0f,%.0f)-(%.0f,%.0f)\n",apart && inside ? "ok  " : "FAIL",width,
+                proteus ? " (Proteus)" : "",rwr.x0,rwr.y0,rwr.x1,rwr.y1,block.x0,block.y0,block.x1,block.y1);
+    return apart && rwr.any && block.any && inside;
 }
 
 // A stock tank (three weapons, a missile and a lock on it) at `pos`, heading +z, the turret 30 degrees right.
@@ -279,6 +284,34 @@ int wmain(int argc,wchar_t** argv) {
     sceneNix.dir[0]=std::sin(0.7f);sceneNix.dir[2]=std::cos(0.7f);sceneNix.held=true;
     Scene(dir,L"stock_nix",ground);
     hasNix=false;
+    // The Proteus: walking behind its front shield (the allies' focus up), then deployed: the field's ring, the barrier
+    // taken down, the directional shield hot, a target marked, the salvo cooling down; its gunner's cannon in the list.
+    StockTank(ground);
+    strcpy_s(sceneStock.kind,"BigBegaruta");
+    sceneStock.arms=0;sceneStock.aimOk=false;sceneStock.speed=9.0f;sceneStock.hp=9000.0f;sceneStock.hpMax=11000.0f;
+    hasProteus=true;
+    sceneProteus=ProteusReadout{};
+    std::memcpy(sceneProteus.pos,ground,12);sceneProteus.hull[2]=1.0f;
+    sceneProteus.driver=true;sceneProteus.keys=true;sceneProteus.mode=proteus::Mode::walk;sceneProteus.stagger=1.0f;
+    sceneProteus.shieldOn=sceneProteus.shieldUp=true;sceneProteus.priority=true;sceneProteus.shieldHalfArc=60.0f*kDeg;
+    sceneProteus.barrier=1.0f;sceneProteus.barrierHp=3300.0f;sceneProteus.salvoArmed=true;sceneProteus.salvoCooldown=30.0f;
+    sceneProteus.modeKey=0x54;sceneProteus.modeButton=0x20;sceneProteus.shieldKey=0x42;sceneProteus.shieldButton=0x10;
+    sceneProteus.markKey=0x51;sceneProteus.markButton=0x04;sceneProteus.salvoKey=0x02;
+    Scene(dir,L"stock_proteus_walk",ground);
+    sceneProteus.mode=proteus::Mode::deployed;sceneProteus.dirShield=true;sceneProteus.priority=false;sceneProteus.heat=0.74f;
+    sceneProteus.barrier=0.42f;sceneProteus.marked=true;sceneProteus.markAt[0]=-120.0f;sceneProteus.markAt[1]=8.0f;sceneProteus.markAt[2]=420.0f;
+    sceneProteus.markRange=437.0f;sceneProteus.salvoWait=12.4f;sceneProteus.gun=true;sceneProteus.fieldRadius=60.0f;sceneProteus.allies=5;
+    sceneProteus.ringCount=kProteusRing;
+    for(int i=0;i<kProteusRing;++i) {
+        const float a=2.0f*3.14159265f*static_cast<float>(i)/static_cast<float>(kProteusRing);
+        sceneProteus.ring[i][0]=60.0f*std::cos(a);sceneProteus.ring[i][1]=0.5f;sceneProteus.ring[i][2]=60.0f*std::sin(a);
+    }
+    sceneStock.arms=1;strcpy_s(sceneStock.arm[0].label,"CANNON");sceneStock.arm[0].ammo=140;sceneStock.arm[0].ammoMax=200;
+    Scene(dir,L"stock_proteus_deployed",ground);
+    Scene(dir,L"stock_proteus_deployed_219",ground,2520);
+    failed+=!StockLayoutApart(1920,&sceneProteus);
+    failed+=!StockLayoutApart(2520,&sceneProteus);
+    hasProteus=false;
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     return failed ? 1 : 0;
 }
