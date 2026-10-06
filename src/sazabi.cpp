@@ -287,7 +287,7 @@ void Animate(Mech& m,float dt,bool driven) noexcept {
     p.t+=dt;
     const float strideWant=m.air || !driven ? 0.0f : Clamp(ground/Cfg().sazabiRun,0.0f,1.0f);
     p.stride+=(strideWant-p.stride)*std::fmin(1.0f,4.0f*dt);
-    if(!m.air)p.gait=sazabi::GaitStep(p.gait,ground,dt);
+    if(!m.air)p.gait=sazabi::GaitStep(p.gait,ground,p.stride,dt);
     p.air+=((m.air ? 1.0f : 0.0f)-p.air)*std::fmin(1.0f,kAirBlendRate*dt);
     const float leanWant=m.air ? Clamp(ground/Cfg().sazabiFly,0.0f,1.0f)*28.0f*sazabi::kDeg : 0.0f;
     p.lean+=(leanWant+(m.dashLeft>0.0f ? 15.0f*sazabi::kDeg : 0.0f)-p.lean)*std::fmin(1.0f,5.0f*dt);

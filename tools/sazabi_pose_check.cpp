@@ -32,6 +32,7 @@ constexpr float kBuiltIn[kBoneCount][3]={
     {-2.577f,12.061f,-0.430f},{-5.584f,9.913f,0.859f},{-7.087f,4.329f,-1.289f},
     {7.897f,16.350f,2.770f},{4.609f,19.228f,-1.341f},
 };
+constexpr float kAnkleMiss=0.15f;   // m: the IK's miss at most
 constexpr float kSink=1.5f;   // m: a sole this far under the floor at most (the gait's bob and the crouch's drop)
 constexpr int kFrames=24;
 
@@ -111,6 +112,17 @@ void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Pose
         Apply(bind,p.modelRot[b],nose);
         const float* d=in.funnelDir[k];
         if(nose[0]*d[0]+nose[1]*d[1]+nose[2]*d[2]<std::cos(1.0f*kDeg))Fail(s.name,f,"a flying funnel's nose off its direction");
+    }
+    if(in.air==0.0f) {   // each ankle where its step puts it (Gait's IK); Plant moves both by the same height after
+        const int foot[2]={kFootL,kFootR};
+        float dy[2];
+        for(int k=0;k<2;++k) {
+            const float* a=p.modelPos[foot[k]];
+            const float ex=a[0]-p.ankleStand[k][0],ez=a[2]-(p.ankleStand[k][2]+p.footDz[k]);
+            dy[k]=a[1]-(p.ankleStand[k][1]+p.footLift[k]);
+            if(std::sqrt(ex*ex+ez*ez)>kAnkleMiss){std::printf("  ankle %d off by (%.2f, %.2f)\n",k,ex,ez);Fail(s.name,f,"an ankle not where its step puts it");}
+        }
+        if(std::fabs(dy[0]-dy[1])>kAnkleMiss)Fail(s.name,f,"an ankle not at its step's height");
     }
     constexpr int kFeet[2]={kFootL,kFootR};
     for(int k=0;k<2;++k) {   // the soles stand on the floor in the stance: an ankle this far under its stance height sinks

@@ -124,6 +124,14 @@ struct Pose {
     float scale[kBoneCount];  // 1 drawn, 0 shrunk to its joint
     M3 modelRot[kBoneCount];  // after Finish: each bone's rotation and joint in sz_root's frame
     float modelPos[kBoneCount][3];
+    // the gait's plan (Legs), per leg [0] left [1] right: the ankle and the foot's rotation standing (sz_root's frame,
+    // before the torso leans), the knee's stance bend (rad), the step (FootPlan), how far ahead the leg is (-1 .. 1)
+    float ankleStand[2][3];
+    M3 footStand[2];
+    float kneeStand[2];
+    float footDz[2],footLift[2],footToe[2],legFore[2];
+    float gaitW;              // 0 .. 1 how much of the gait is on (stepping; 0 standing or in the air)
+    float sway;               // m the pelvis moves toward the left foot (+) / the right (-)
 };
 // Each bone's joint in sz_root's frame at the bind (the bone records' bind world, sazabi.cpp Joints).
 struct Rig { float joint[kBoneCount][3]; };
@@ -164,10 +172,17 @@ inline void LocalMatrix(const Pose& p,int i,float* out) {
 }
 
 // ------------------------------------------------------------------------------------------ the poses
-// Gait (degrees): a giant's stride (a leg ~12 m from hip to sole; one cycle kStride m of ground), the thigh's swing,
-// the knee's bend while the leg swings forward, the foot kept flat, the pelvis's bob and the waist's counter-twist.
-constexpr float kStride=16.0f;
-constexpr float kThighSwing=26.0f,kKneeSwing=42.0f,kKneeStance=8.0f,kFootFlat=1.0f;
+// Gait: walked by the feet's paths (Plan), solved onto the legs (Gait). A cycle (two steps) covers StrideLength m of
+// ground, longer the faster it goes (a leg ~12.9 m from hip to sole: a walk's cycle ~19 m, a run's 22 m, as a person's
+// is ~1.5 and ~1.7 leg lengths: a planted foot goes from ~5.3 m ahead of its stance to as far behind); each foot is on the ground for Duty of it, going back under the body exactly as fast as
+// the body goes forward (planted: it does not slide), then lifted kLift m and carried ahead for the next step. Below
+// kGaitOn of the stride the steps fade out into the stance. The pelvis sways kSway m over the foot that carries it.
+// kReach of the leg at its straightest (the knee's stance bend undone: the shin is not in line with the thigh there) is
+// the farthest a step stretches it (the pelvis comes down rather than the foot lift off).
+constexpr float kStrideWalk=16.0f,kStrideRun=22.0f,kDutyWalk=0.62f,kDutyRun=0.5f,kLiftWalk=1.0f,kLiftRun=2.2f;
+constexpr int kIkIterations=20;
+constexpr float kIkStep=12.0f*kDeg;
+constexpr float kGaitOn=0.15f,kSway=0.5f,kReach=0.97f,kSwingToe=12.0f,kFootFlat=1.0f;
 constexpr float kWaistTwist=7.0f,kArmSwing=14.0f,kRunLean=8.0f;
 // The stance (tools/sazabi_stance.py works it out from the model): the source stands as it hovers (legs spread wide,
 // shins raked back, toes pointing down), so on its feet each leg is turned to stand: the thigh Rx(thighX) Rz(thighZ),
@@ -256,6 +271,18 @@ constexpr float kGuardRaise=62.0f,kGuardIn=-38.0f,kGuardElbow=-70.0f;
 constexpr float kWindUp=0.35f,kStrike=0.6f,kGripAhead=1.1f;
 
 inline float Smooth(float x) { x=x<0?0:x>1?1:x; return x*x*(3-2*x); }
+// The rotation nearest `a` keeping its forward (+z row) and then its up (Gram-Schmidt).
+inline M3 Orthonormal(const M3& a) {
+    float z[3]={a.m[6],a.m[7],a.m[8]},y[3]={a.m[3],a.m[4],a.m[5]};
+    float l=std::sqrt(z[0]*z[0]+z[1]*z[1]+z[2]*z[2]);
+    for(float& c:z)c/=l;
+    const float d=y[0]*z[0]+y[1]*z[1]+y[2]*z[2];
+    for(int k=0;k<3;++k)y[k]-=d*z[k];
+    l=std::sqrt(y[0]*y[0]+y[1]*y[1]+y[2]*y[2]);
+    for(float& c:y)c/=l;
+    const float x[3]={y[1]*z[2]-y[2]*z[1],y[2]*z[0]-y[0]*z[2],y[0]*z[1]-y[1]*z[0]};
+    return {{x[0],x[1],x[2], y[0],y[1],y[2], z[0],z[1],z[2]}};
+}
 inline float Clamp(float x,float lo,float hi) { return x<lo?lo:x>hi?hi:x; }
 
 // The lowest of the legs' undersides (kSole, both legs) as posed, in sz_root's frame (the floor y = 0).
@@ -273,24 +300,152 @@ inline float LowestSole(const Pose& p) {
     return lowest;
 }
 
-// The legs: the stance, the gait, the crouch (Plant puts them on the floor).
+// A cycle's length (m of ground) and the share of it a foot is on the ground, at `stride` (0 walk .. 1 run).
+inline float StrideLength(float stride) { return kStrideWalk+(kStrideRun-kStrideWalk)*Clamp(stride,0.0f,1.0f); }
+inline float Duty(float stride) { return kDutyWalk+(kDutyRun-kDutyWalk)*Clamp(stride,0.0f,1.0f); }
+
+// One foot's step at gait phase `gait` (rad; the right foot half a cycle behind the left): its offset ahead of where it
+// stands (m, + forward), its lift (m), its toe's turn up (deg), whether it is on the ground and its place in that part
+// (0 .. 1).
+struct FootPlan { float dz,lift,toe,s; bool stance; };
+inline FootPlan Plan(float gait,float stride,int side) {
+    float u=gait/(2.0f*kPi)+(side==0 ? 0.0f : 0.5f);
+    u-=std::floor(u);
+    const float duty=Duty(stride),travel=StrideLength(stride)*duty;
+    FootPlan f{};
+    if(u<duty) {   // planted: from travel/2 ahead to travel/2 behind, at the body's speed
+        f.stance=true;f.s=u/duty;
+        f.dz=travel*(0.5f-f.s);
+        return f;
+    }
+    f.s=(u-duty)/(1.0f-duty);   // swung: back to front, lifted, its toe up
+    f.dz=travel*(-0.5f+0.5f*(1.0f-std::cos(kPi*f.s)));
+    f.lift=(kLiftWalk+(kLiftRun-kLiftWalk)*Clamp(stride,0.0f,1.0f))*std::sin(kPi*f.s);
+    f.toe=kSwingToe*std::sin(kPi*f.s);
+    return f;
+}
+
+// The legs standing (the stance and the crouch; Plant puts them on the floor) and the gait's plan for them: where each
+// ankle and foot stand (before the torso leans: the ground's frame), each step, the pelvis's sway. Gait walks them.
 inline void Legs(const PoseInput& in,Pose* p) {
-    const float s=std::sin(in.gait),c=std::cos(in.gait),st=in.stride,air=in.air,cr=in.crouch,feet=1.0f-air;
+    const float cr=in.crouch,feet=1.0f-in.air;
     for(int side=0;side<2;++side) {
         const Stance& k=kStance[side];
-        const float sw=side==0 ? s : -s,fwd=side==0 ? c : -c;   // the right leg half a cycle behind
-        float thigh=-kThighSwing*sw*st;                          // - forward
-        float knee=(kKneeSwing*(fwd>0 ? fwd : 0)+kKneeStance)*st;
-        thigh=thigh*feet+kCrouchThigh*cr;
-        knee=knee*feet+kCrouchKnee*cr;
-        const float foot=-kFootFlat*(thigh+knee)*feet;
+        const float thigh=kCrouchThigh*cr,knee=kCrouchKnee*cr;
+        const float foot=-kFootFlat*(thigh+knee);
         const int t=side==0 ? kThighL : kThighR;
-        // the stance first (in the pelvis's frame), the gait's swing about the pelvis's x after it
-        p->rot[t]=Mul(Mul(RotX(k.thighX*feet*kDeg),RotZ(k.thighZ*feet*kDeg)),RotX(thigh*kDeg));
-        p->rot[t+1]=RotX((k.knee*feet+knee)*kDeg);
+        p->rot[t]=Mul(RotX(k.thighX*feet*kDeg),RotZ(k.thighZ*feet*kDeg));
+        p->rot[t]=Mul(p->rot[t],RotX(thigh*kDeg));
+        p->kneeStand[side]=(k.knee*feet+knee)*kDeg;
+        p->rot[t+1]=RotX(p->kneeStand[side]);
         p->rot[t+2]=Mul(RotX(foot*kDeg),Mul(RotX(k.footX*feet*kDeg),RotZ(k.footZ*feet*kDeg)));
     }
     p->pos[kPelvis][1]+=-kCrouchDrop*cr-kStanceDrop*feet;
+    Finish(p);
+    p->gaitW=Smooth(in.stride/kGaitOn)*feet;
+    for(int side=0;side<2;++side) {
+        const int f=side==0 ? kFootL : kFootR;
+        std::memcpy(p->ankleStand[side],p->modelPos[f],sizeof p->ankleStand[side]);
+        p->footStand[side]=p->modelRot[f];
+        const FootPlan plan=Plan(in.gait,in.stride,side);
+        const float half=0.5f*StrideLength(in.stride)*Duty(in.stride);
+        p->footDz[side]=plan.dz*p->gaitW;
+        p->footLift[side]=plan.lift*p->gaitW;
+        p->footToe[side]=plan.toe*p->gaitW;
+        p->legFore[side]=plan.dz/half*p->gaitW;
+    }
+    // over the left foot at the middle of its stance (+x: the left), over the right half a cycle on
+    float u=in.gait/(2.0f*kPi);
+    u-=std::floor(u);
+    p->sway=kSway*p->gaitW*std::cos(2.0f*kPi*(u-0.5f*Duty(in.stride)));
+}
+
+// The leg `side`'s ankle (sz_root's frame) with its thigh turned `th` more about the pelvis's x (forward / back) and
+// `ab` about its z (out / in) and its knee bent `kn` more, the rest of the pose as Finish left it.
+inline M3 ThighTurn(float th,float ab) { return Mul(RotX(th),RotZ(ab)); }
+inline void AnkleWith(const Pose& p,int side,float th,float kn,float ab,float* out) {
+    const int t=side==0 ? kThighL : kThighR,par=kBones[t].parent;
+    const M3 thigh=Mul(Mul(p.rot[t],ThighTurn(th,ab)),p.modelRot[par]);
+    const M3 shin=Mul(Mul(RotX(kn),p.rot[t+1]),thigh);
+    float a[3],b[3];
+    Apply(p.pos[t+1],thigh,a);
+    Apply(p.pos[t+2],shin,b);
+    for(int k=0;k<3;++k)out[k]=p.modelPos[t][k]+a[k]+b[k];
+}
+
+// The steps onto the legs (after the torso's lean): the pelvis over the carrying foot and low enough for the longest
+// step, then each leg's thigh and knee turned (least squares, Gauss-Newton) so its ankle is where its step puts it, and
+// its foot flat on the ground (its standing rotation) but for the swung toe.
+inline void Gait(const PoseInput& in,Pose* p) {
+    const float feet=1.0f-in.air;
+    if(!(feet>0.0f))return;
+    float target[2][3];
+    for(int side=0;side<2;++side) {
+        target[side][0]=p->ankleStand[side][0];
+        target[side][1]=p->ankleStand[side][1]+p->footLift[side];
+        target[side][2]=p->ankleStand[side][2]+p->footDz[side];
+    }
+    p->pos[kPelvis][0]+=p->sway;
+    Finish(p);
+    float down=0.0f;
+    for(int side=0;side<2;++side) {
+        const int t=side==0 ? kThighL : kThighR;
+        float straight[3];
+        AnkleWith(*p,side,0.0f,-p->kneeStand[side],0.0f,straight);
+        const float e[3]={straight[0]-p->modelPos[t][0],straight[1]-p->modelPos[t][1],straight[2]-p->modelPos[t][2]};
+        const float reach=kReach*std::sqrt(e[0]*e[0]+e[1]*e[1]+e[2]*e[2]);
+        const float d[3]={target[side][0]-p->modelPos[t][0],target[side][1]-p->modelPos[t][1],target[side][2]-p->modelPos[t][2]};
+        const float level=reach*reach-d[0]*d[0]-d[2]*d[2];
+        const float need=-d[1]-std::sqrt(level>0.0f ? level : 0.0f);
+        down=need>down ? need : down;
+    }
+    p->pos[kPelvis][1]-=down;
+    Finish(p);
+    for(int side=0;side<2;++side) {
+        // q = (thigh forward/back, knee, thigh out/in); damped Gauss-Newton on the ankle's miss, each step at most kIkStep
+        // (a full step from the stance can leap onto the knee folded the wrong way: the run's longest steps did)
+        float q[3]={0.0f,0.0f,0.0f};
+        const float lo[3]={-80.0f*kDeg,-p->kneeStand[side],-25.0f*kDeg},hi[3]={60.0f*kDeg,130.0f*kDeg-p->kneeStand[side],25.0f*kDeg};
+        for(int it=0;it<kIkIterations;++it) {
+            float a[3],j[3][3],r[3];
+            AnkleWith(*p,side,q[0],q[1],q[2],a);
+            for(int c=0;c<3;++c) {
+                constexpr float h=1e-3f;
+                float d[3]={q[0],q[1],q[2]},b[3];
+                d[c]+=h;
+                AnkleWith(*p,side,d[0],d[1],d[2],b);
+                for(int k=0;k<3;++k)j[c][k]=(b[k]-a[k])/h;
+            }
+            for(int k=0;k<3;++k)r[k]=target[side][k]-a[k];
+            float m[3][3],g[3];   // (J^T J + damping) step = J^T r
+            for(int x=0;x<3;++x) {
+                g[x]=j[x][0]*r[0]+j[x][1]*r[1]+j[x][2]*r[2];
+                for(int y=0;y<3;++y)m[x][y]=j[x][0]*j[y][0]+j[x][1]*j[y][1]+j[x][2]*j[y][2]+(x==y ? 1e-3f : 0.0f);
+            }
+            const float det=m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])-m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])+
+                            m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+            if(!(std::fabs(det)>1e-12f))break;
+            for(int c=0;c<3;++c) {   // Cramer: column c replaced by g
+                float n[3][3];
+                for(int x=0;x<3;++x)for(int y=0;y<3;++y)n[x][y]=y==c ? g[x] : m[x][y];
+                const float dc=n[0][0]*(n[1][1]*n[2][2]-n[1][2]*n[2][1])-n[0][1]*(n[1][0]*n[2][2]-n[1][2]*n[2][0])+
+                               n[0][2]*(n[1][0]*n[2][1]-n[1][1]*n[2][0]);
+                q[c]=Clamp(q[c]+Clamp(dc/det,-kIkStep,kIkStep),lo[c],hi[c]);
+            }
+        }
+        const float th=q[0],kn=q[1];
+        const int t=side==0 ? kThighL : kThighR;
+        p->rot[t]=Mul(p->rot[t],ThighTurn(th,q[2]));
+        p->rot[t+1]=Mul(RotX(kn),p->rot[t+1]);
+    }
+    Finish(p);
+    for(int side=0;side<2;++side) {   // the foot flat as it stands (the ground's frame), its toe up while swung
+        const int f=side==0 ? kFootL : kFootR;
+        const M3 want=Mul(RotX(-p->footToe[side]*kDeg),p->footStand[side]);
+        M3 blend{};
+        for(int k=0;k<9;++k)blend.m[k]=p->modelRot[f].m[k]*(1.0f-feet)+want.m[k]*feet;
+        p->rot[f]=Mul(Orthonormal(blend),T(p->modelRot[kBones[f].parent]));
+    }
 }
 
 // On its feet, the feet planted: the pelvis up or down by what puts the lowest of the legs' undersides on the floor
@@ -302,7 +457,7 @@ inline void Plant(const PoseInput& in,Pose* p) {
 }
 
 inline void Torso(const PoseInput& in,Pose* p) {
-    const float twist=kWaistTwist*std::sin(in.gait)*in.stride*(1-in.air)*kDeg;
+    const float twist=kWaistTwist*0.5f*(p->legFore[0]-p->legFore[1])*kDeg;   // the shoulders against the hips
     const float yaw=Clamp(in.aimYaw,-kMostAimYaw*kDeg,kMostAimYaw*kDeg)*kChestShare*in.aim;
     const float breathe=0.6f*std::sin(in.t*1.3f)*kDeg;
     p->rot[kPelvis]=Mul(RotZ(-in.bank),RotX(in.lean+kRunLean*kDeg*in.stride*(1-in.air)));
@@ -316,7 +471,7 @@ inline void Torso(const PoseInput& in,Pose* p) {
 
 // The left arm: swinging with the gait, or the shield up across the chest.
 inline void LeftArm(const PoseInput& in,Pose* p) {
-    const float sw=kArmSwing*std::sin(in.gait)*in.stride*(1-in.air)*(1-in.guard);
+    const float sw=kArmSwing*p->legFore[1]*(1-in.guard);   // forward with the other leg
     const float g=Smooth(in.guard);
     p->rot[kUpperArmL]=Mul(RotX(-(sw+kGuardRaise*g)*kDeg),RotY(kGuardIn*g*kDeg));
     p->rot[kForearmL]=RotY(kGuardElbow*g*kDeg);
@@ -325,7 +480,7 @@ inline void LeftArm(const PoseInput& in,Pose* p) {
 // The right arm raised so that the rifle (+z of sz_rifle, which follows the hand rigidly) points along the aim.
 inline void AimRifle(const PoseInput& in,Pose* p) {
     const float a=Smooth(in.aim);
-    const float sw=kArmSwing*std::sin(in.gait+kPi)*in.stride*(1-in.air)*(1-a);
+    const float sw=kArmSwing*p->legFore[0]*(1-a);
     p->rot[kUpperArmR]=Mul(RotX(-(kAimRaise*a+sw)*kDeg),RotZ(-kAimOut*a*kDeg));
     p->rot[kForearmR]=RotX(kAimElbow*a*kDeg);
     Finish(p);
@@ -402,6 +557,7 @@ inline void Animate(const PoseInput& in,const Rig& rig,Pose* p) {
     Reset(rig,p);
     Legs(in,p);
     Torso(in,p);
+    Gait(in,p);
     Plant(in,p);
     LeftArm(in,p);
     AimRifle(in,p);
@@ -410,9 +566,9 @@ inline void Animate(const PoseInput& in,const Rig& rig,Pose* p) {
     Finish(p);
 }
 
-// The gait's phase after `dt` s covering `ground` m/s.
-inline float GaitStep(float phase,float ground,float dt) {
-    phase+=2.0f*kPi*ground/kStride*dt;
+// The gait's phase after `dt` s covering `ground` m/s at `stride` (a cycle a StrideLength: the planted foot keeps pace).
+inline float GaitStep(float phase,float ground,float stride,float dt) {
+    phase+=2.0f*kPi*ground/StrideLength(stride)*dt;
     return phase>200.0f*kPi ? phase-200.0f*kPi : phase;
 }
 }  // namespace sazabi
