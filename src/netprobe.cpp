@@ -80,17 +80,18 @@ void Report(unsigned char* v,bool host) noexcept {
 }
 }  // namespace
 
-// Whether a session is on. An EDF.dll whose session function is not the one read counts as in a session: the
-// callers turn off what must run the same on every machine, which is safe offline too (logged once).
+// Whether a session is on. An EDF.dll whose session function is not the one read counts as no session (logged once):
+// the plugin then does what it does offline, as it did before the online gates (AutoCrew, its damage, its pilots); an
+// unknown session state never switches them off for a player who is not online at all.
 bool InSession() noexcept {
     // Both the picker and game thread call this: C++ initializes the signature once, with synchronization.
     static const bool sig=[]() noexcept {
         bool ok=false;
         __try { ok=edf::Matches(image,kOnline,kSigs[0].bytes,sizeof(kSigs[0].bytes)); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
-        if(!ok)Log("NET session check off: EDF+%#x does not match docs/online-re.md, the plugin acts as if online",kOnline);
+        if(!ok)Log("NET session check off: EDF+%#x does not match docs/online-re.md, the plugin acts as offline",kOnline);
         return ok;
     }();
-    return !sig || reinterpret_cast<OnlineFn>(image+kOnline)(nullptr);
+    return sig && reinterpret_cast<OnlineFn>(image+kOnline)(nullptr);
 }
 
 void NetProbe(unsigned char* v) noexcept {

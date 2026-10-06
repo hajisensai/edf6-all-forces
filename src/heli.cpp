@@ -2358,10 +2358,11 @@ void PlayerHeli(unsigned char* v) noexcept {
 // trigger; heli-input-re.md §2a). Elsewhere (Replay) the pilot does not fly it: its NPC exists on the authority only (a
 // RideAi rider has no network identity, so seat 0 is empty here, and slot 55 then zeroes the block), so the replicated
 // stick is copied to the input block as slot 55 would, under the same params Tune gives the pilot (ini HeliSpeed /
-// HeliAgility / HeliYawRate, the same on every machine with the same ini). A stick not received for kStickFresh frames
-// (the stock zeroes it then) is no pilot's: the heli's own params go back and its record goes (ReplicaOff).
-constexpr std::size_t kRxStickFrames=0x1D7C;   // frames since seat 0's stick came in (slot 8 clears it, slot 51 counts)
-constexpr int kStickFresh=30;
+// HeliAgility / HeliYawRate, the same on every machine with the same ini). A stick block all zero is no pilot's: the
+// stock zeroes it after 30 frames without a packet (slot 51 0x652259: the frame count +0x1D7C reaching 30 clears the
+// block by 0x62C120 and starts the count again at 0, so the count never stays up and tells nothing by itself), a heli
+// never flown has it zero from its constructor, and the pilot's hover throttle is never 0 in the air. Then the heli's own
+// params go back and its record goes (ReplicaOff), and nothing is written: the stock input stands.
 Heli replicas[8]{};
 
 void MirrorStick(unsigned char* v,const Control& c) noexcept {
@@ -2369,6 +2370,11 @@ void MirrorStick(unsigned char* v,const Control& c) noexcept {
     unsigned char* const seat=SeatAt(v,0);
     Put<float>(seat,kSeatLX,-c.stickL);Put<float>(seat,kSeatLY,-c.stickF);Put<float>(seat,kSeatRX,-c.yaw);
     Put<float>(seat,kSeatAscend,Clamp(c.throttle,0.0f,1.0f));
+}
+
+// Seat 0's stick holds a value (see above: all zero is no pilot's).
+bool StickLive(const unsigned char* seat) noexcept {
+    return At<float>(seat,kSeatLX)!=0.0f || At<float>(seat,kSeatLY)!=0.0f || At<float>(seat,kSeatRX)!=0.0f || At<float>(seat,kSeatAscend)!=0.0f;
 }
 
 Heli* ReplicaOf(unsigned char* v,ULONGLONG ms) noexcept {
@@ -2397,7 +2403,7 @@ void ReplicaOff(unsigned char* v) noexcept {
 // pilot's params.
 void Replay(unsigned char* v) noexcept {
     // No stick coming in: no pilot's (a parked heli takes no record, so the table keeps room for the flown ones).
-    if(At<std::int32_t>(v,kRxStickFrames)>=kStickFresh){ReplicaOff(v);return;}
+    if(!StickLive(SeatAt(v,0))){ReplicaOff(v);return;}
     const ULONGLONG ms=GameMs();
     Heli* const h=ReplicaOf(v,ms);
     if(!h)return;

@@ -121,6 +121,8 @@ def check_heli(root: str) -> None:
         fail('src/heli.cpp Fly: the pilot\'s input is not put on seat 0\'s stick (MirrorStick)')
     if 'OnlineRunsHere(v)' not in body(code, 'bool Replica(unsigned char* v)'):
         fail('src/heli.cpp Replica: does not ask OnlineRunsHere')
+    if not before(body(code, 'void Replay(unsigned char* v)'), 'StickLive(', 'ReplicaOf('):
+        fail('src/heli.cpp Replay: a heli with no stick coming in takes a replica record (the stock frame count +0x1D7C cycles)')
     mirror = body(code, 'void MirrorStick(unsigned char* v,const Control& c)')
     replay = body(code, 'void Replay(unsigned char* v)')
     pairs = (('kSeatLX,-c.stickL', 'kInLateral,-SeatAxis(seat,kSeatLX)'), ('kSeatLY,-c.stickF', 'kInForward,-SeatAxis(seat,kSeatLY)'),
@@ -156,6 +158,12 @@ def check_calls(root: str) -> None:
         fail("src/airstrike.cpp: the call's pick is no longer sent (InstallPickSend)")
 
 
+def check_session(root: str) -> None:
+    session = body(code_only(read(root, 'src/netprobe.cpp')), 'bool InSession()')
+    if 'return sig && ' not in session:
+        fail('src/netprobe.cpp InSession: unknown session code counts as online (offline play would lose the gated features)')
+
+
 def check_player(root: str) -> None:
     if 'RemoteRider(human)' not in body(code_only(read(root, 'common/seat.cpp')), 'bool IsAnyPlayer('):
         fail("common/seat.cpp IsAnyPlayer: another machine's player copied here is no longer a player")
@@ -171,7 +179,8 @@ def main() -> int:
     root = parser.parse_args().root
     files = sources(root)
     checks = (lambda: check_rvas(root, files), lambda: check_ride_ai(root, files), lambda: check_damage(root),
-              lambda: check_heli(root), lambda: check_frames(root), lambda: check_calls(root), lambda: check_player(root))
+              lambda: check_heli(root), lambda: check_frames(root), lambda: check_calls(root), lambda: check_session(root),
+              lambda: check_player(root))
     for c in checks:
         c()
     for f in failures:
