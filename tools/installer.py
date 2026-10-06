@@ -104,7 +104,7 @@ _SECTION = re.compile(r'^\s*\[([^\]]+)\]')
 
 
 def _keys(lines: list[str]) -> dict[str, int]:
-    """Key (lower case) -> its line, within [VehicleCrew]."""
+    """Key (lower case) -> its line, within [VehicleCrew]; section names are case-insensitive as in Win32."""
     out: dict[str, int] = {}
     section = ''
     for i, line in enumerate(lines):
@@ -113,7 +113,7 @@ def _keys(lines: list[str]) -> dict[str, int]:
             section = m.group(1).strip()
             continue
         m = _KEY.match(line)
-        if m and section == SECTION:
+        if m and section.lower() == SECTION.lower():
             out.setdefault(m.group(1).lower(), i)
     return out
 
@@ -141,7 +141,7 @@ def merge_ini(user: str, shipped: str) -> tuple[str, list[str], list[str]]:
         return user, added, gone
     lines = user.splitlines()
     heads = [(i, m.group(1).strip()) for i, m in ((i, _SECTION.match(x)) for i, x in enumerate(lines)) if m]
-    start = next((i for i, name in heads if name == SECTION), None)
+    start = next((i for i, name in heads if name.lower() == SECTION.lower()), None)
     if start is None:
         lines.append(f'[{SECTION}]')
         start = len(lines) - 1
