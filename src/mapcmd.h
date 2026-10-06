@@ -13,7 +13,10 @@ using mapcmd::Command;
 using mapcmd::Order;
 // A unit an AI module takes map commands for: the vehicle, a short name for the map, the command it stands under,
 // whether it flies (its icon is on it; a ground unit's is up its pin).
-struct CommandUnit { const void* v; const char* name; Command now; bool air; };
+// `v` is an identity only outside the owning module; positions are copied while the object is verified live.
+struct CommandUnit { const void* v; const char* name; Command now; bool air; float pos[3]; };
+bool CommandVehicleLive(const ObjRef& ref) noexcept;
+bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept;
 // Each module's units that take a command now (live, flown or driven by the plugin's NPC, not withdrawing), at most
 // `most`; how many. Game thread.
 int HeliCommandUnits(CommandUnit* out,int most) noexcept;
@@ -35,8 +38,9 @@ struct MapCmdInput {
     float dx,dy;
     float eye[3],look[3];
 };
-// True when the map should centre on `centre` (a unit just selected by Tab / pad X). Game thread.
-bool MapCommandFrame(const MapCmdInput& in,float* centre) noexcept;
+// True when the map should centre on `centre` (a unit just selected by Tab / pad X). Updates in.usingPad to the
+// source of this frame's command or pointer input so the map keeps the same mode next frame. Game thread.
+bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept;
 void ResetMapCommands() noexcept;   // map.cpp ResetMap: a new mission (the selection dropped)
 // The map's view as the HUD draws it (hud.cpp MapScreen, draw thread): the selection's box and clicks and the pointer's
 // ground point are found on it.

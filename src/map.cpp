@@ -157,7 +157,6 @@ using HudShowFn=void(__fastcall*)(void*,bool);
 bool hudOk=false;
 maphud::Record hudRecord{};
 SRWLOCK hudLock=SRWLOCK_INIT;
-std::atomic<bool> hudHeld{false};   // the draw thread's view of it (subcarrier.cpp GaugeHook: the followers' bars)
 
 // --- The objective markers (under `markerLock`; the destructor takes one out before it is freed) ---
 const void* markers[kMarkers]{};
@@ -622,6 +621,7 @@ bool Frame(unsigned char* human) noexcept {
     in.mouse=front && MouseDelta(human,&in.dx,&in.dy);
     std::memcpy(in.eye,eye,12);std::memcpy(in.look,look,12);
     if(MapCommandFrame(in,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
+    game.pad=in.usingPad;
     if(now-game.gatherAt>=kGatherMs){game.gatherAt=now;Gather(game,human);}
     Publish(game,human,eye,look);
     ViewMapClip(true,c.mapViewDistance,vec::Clamp(mapcam::Distance(v)*0.004f,0.5f,5.0f));
@@ -690,12 +690,10 @@ void StockHud(unsigned char* cam,std::uint64_t generation) noexcept {
     const bool hide=camSide.shown && camSide.cam==cam && cameraSession.Current(generation);
     AcquireSRWLockExclusive(&hudLock);
     const bool was=hudRecord.hidden && hudRecord.cam==cam;
-    bool held=false;
-    __try { held=maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown); }
-    __except(EXCEPTION_EXECUTE_HANDLER){hudRecord=maphud::Record{};held=false;}
+    __try { maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown); }
+    __except(EXCEPTION_EXECUTE_HANDLER){hudRecord=maphud::Record{};}
     const bool now=hudRecord.hidden && hudRecord.cam==cam,want=hudRecord.want;
     ReleaseSRWLockExclusive(&hudLock);
-    hudHeld.store(held);
     if(was!=now)Log(now ? "MAP the stock HUD hidden on camera %p (its switch +0x200 was %d)" : "MAP the stock HUD back on camera %p (%d)",
                     static_cast<void*>(cam),now ? static_cast<int>(want) : static_cast<int>(cam[kCamHudShown]));
 }
@@ -823,7 +821,6 @@ void ResetMap() noexcept {
     cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
     cameraSession.Reset();   // the camera hook drops its old matrix on its own thread, before restoring it
-    hudHeld.store(false);    // the stock HUD's hold is the last mission's (map_stock_hud.h Step lets it go on the camera)
     pose=Pose{};readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
 }
@@ -838,7 +835,12 @@ bool PlayerMap(MapReadout* out) noexcept {
 
 bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed); }
 bool MapOwnsView() noexcept { return cameraSession.Owns(); }
-bool MapHidesStockHud() noexcept { return hudHeld.load(std::memory_order_relaxed); }
+bool MapHidesStockHud(const void* camera) noexcept {
+    AcquireSRWLockShared(&hudLock);
+    const bool hidden=maphud::Hides(hudRecord,camera,cameraSession.Generation());
+    ReleaseSRWLockShared(&hudLock);
+    return hidden;
+}
 }  // namespace crew
 
 // EDF6AutoTurret asks whether the map holds the keys before it reads its own (common/edf/aimlink.h InputHeldV1).

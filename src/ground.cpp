@@ -311,13 +311,14 @@ void GroundFrame(unsigned char* vehicle) noexcept {
 
 namespace {
 constexpr ULONGLONG kCommandSeenMs=500;   // game ms: a crawler GroundFrame drove this recently is the plugin's now
-bool Commandable(const Robo& r,ULONGLONG ms) noexcept { return r.ref && r.seen && ms-r.seen<=kCommandSeenMs; }
+bool Commandable(const Robo& r,ULONGLONG ms) noexcept { return r.ref && r.seen && ms-r.seen<=kCommandSeenMs && CommandVehicleLive(r.ref); }
 }  // namespace
 
 int GroundCommandUnits(CommandUnit* out,int most) noexcept {
     int n=0;
     const ULONGLONG ms=GameMs();
-    for(const auto& r:robos)if(n<most && Commandable(r,ms))out[n++]=CommandUnit{r.ref.obj,"CRAWLER",r.cmd,false};
+    for(const auto& r:robos)
+        if(n<most && Commandable(r,ms) && ReadCommandUnit(r.ref,"CRAWLER",r.cmd,false,&out[n]))++n;
     return n;
 }
 

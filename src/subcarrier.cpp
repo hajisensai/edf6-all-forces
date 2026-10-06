@@ -820,7 +820,10 @@ unsigned char* CreateSub(const float* m,InitParam* param) noexcept {
 // (docs/hud-re.md §11).
 void __fastcall GaugeHook(void* hud,void* viewProj,void* owner,void* r9,void* fifth) {
     const auto draw=reinterpret_cast<GaugeFn>(image+kGaugeFn);
-    if(!MapHidesStockHud())draw(hud,viewProj,owner,r9,fifth);
+    bool hide=false;
+    __try { hide=MapHidesStockHud(At<const void*>(hud,0x18)); }  // HUiHud's owning camera, as the other stock HUDs use
+    __except(EXCEPTION_EXECUTE_HANDLER){}
+    if(!hide)draw(hud,viewProj,owner,r9,fifth);
     __try {
         const Snapshot& shot=Latest();
         const bool fresh=GetTickCount64()-shot.tick<=kGaugeMs;   // the game thread still publishing (not paused)

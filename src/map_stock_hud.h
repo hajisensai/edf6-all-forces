@@ -19,6 +19,11 @@ struct Record {
     bool want=true;              // what the game last asked for: put back when the hold ends
 };
 
+// Follower gauges do not read the stock switch. Suppress only gauges belonging to the camera held this mission.
+inline bool Hides(const Record& r,const void* cam,std::uint64_t generation) noexcept {
+    return cam && r.hidden && r.cam==cam && r.generation==generation;
+}
+
 // The camera `cam` in its step (alive: it is being stepped), the mission `generation`, whether the map shows on it
 // (`hide`), its switch byte `shown`. Returns whether a hold is on (this camera's or another's).
 inline bool Step(Record& r,const void* cam,std::uint64_t generation,bool hide,unsigned char* shown) noexcept {

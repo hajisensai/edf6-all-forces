@@ -81,6 +81,24 @@ inline bool ScreenRay(const float* vp,float w,float h,float x,float y,float* eye
     return std::isfinite(eye[0]+eye[1]+eye[2]);
 }
 
+// The pointer awaits the first rendered view: a map opens before that view exists. Resizing keeps its normalized
+// position; callers cancel a drag when this returns true, because its starting corner was in the previous viewport.
+struct PointerPosition { float x=0.0f,y=0.0f,w=0.0f,h=0.0f; bool placed=false; };
+inline bool FitPointer(PointerPosition& p,float w,float h) noexcept {
+    if(!(w>0.0f && h>0.0f) || !std::isfinite(w+h))return false;
+    const bool changed=!p.placed || p.w!=w || p.h!=h;
+    if(!changed)return false;
+    p.x=p.placed ? p.x*w/p.w : w*0.5f;
+    p.y=p.placed ? p.y*h/p.h : h*0.5f;
+    p.x=std::fmax(0.0f,std::fmin(p.x,w-1.0f));p.y=std::fmax(0.0f,std::fmin(p.y,h-1.0f));
+    p.w=w;p.h=h;p.placed=true;
+    return true;
+}
+// Actual command input also selects the map's input source. Merely having a controller connected does not.
+inline bool UsingPad(bool wasPad,bool mouseOrKey,bool padPress) noexcept {
+    return mouseOrKey ? false : padPress ? true : wasPad;
+}
+
 // --- The selection ---
 constexpr int kMaxSel=96;
 struct Selection {

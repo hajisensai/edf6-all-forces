@@ -432,7 +432,7 @@ bool Commandable(const Jet& j,ULONGLONG ms) noexcept {
     if(!j.ref || j.reap || !Alive(j.ref) || IsPrimer(j) || MotherOf(j))return false;
     if(j.mode==Mode::withdraw || ms-j.seen>kCommandSeenMs)return false;
     const unsigned char* v=j.Vehicle();
-    return !v[kDead] && !HostileJet(v) && !PlayerJetHolds(v);
+    return CommandVehicleLive(j.ref) && !HostileJet(v) && !PlayerJetHolds(v);
 }
 }  // namespace
 
@@ -441,7 +441,7 @@ int JetCommandUnits(CommandUnit* out,int most) noexcept {
     __try {
         const ULONGLONG ms=GameMs();
         for(const auto& j:jets)
-            if(n<most && Commandable(j,ms))out[n++]=CommandUnit{j.ref.obj,KindOf(j).name,j.cmd,true};
+            if(n<most && Commandable(j,ms) && ReadCommandUnit(j.ref,KindOf(j).name,j.cmd,true,&out[n]))++n;
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     return n;
 }

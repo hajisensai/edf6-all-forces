@@ -19,6 +19,7 @@
 #include "crew.h"
 #include "hudtext.h"
 #include "layout.h"
+#include "memory.h"
 #include "map_cam.h"
 #include <Xinput.h>
 #include <algorithm>
@@ -29,6 +30,25 @@
 #include <cstring>
 
 namespace crew {
+// A recently stepped address is not a lifetime guarantee. Read game memory only before publishing, and tolerate a
+// vehicle removed since the last input frame. In particular no external object is dereferenced under the HUD lock.
+bool CommandVehicleLive(const ObjRef& ref) noexcept {
+    __try {
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+        return v && Readable(v,kSeatCount+8) && !v[kDead] && ref.Is(v) && SeatCount(v)>0 &&
+               SeatRider(SeatAt(v,0))==Rider::dummy;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept {
+    __try {
+        if(!CommandVehicleLive(ref))return false;
+        CommandUnit unit{ref.obj,name,cmd,air,{}};
+        std::memcpy(unit.pos,static_cast<const unsigned char*>(ref.obj)+kPosition,12);
+        if(!std::isfinite(unit.pos[0]+unit.pos[1]+unit.pos[2]))return false;
+        *out=unit;
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 namespace {
 constexpr ULONGLONG kFreshMs=300;        // a readout older than this (wall) is the map closed
 constexpr ULONGLONG kNoteMs=3000;        // the last command's word shown this long
@@ -51,7 +71,7 @@ struct Game {
     ULONGLONG frameAt;          // wall ms of the last frame (a gap: the map was closed, no edges the first frame)
     int count;
     Entry list[kCmdUnits];
-    float px,py;                // the pointer (screen px)
+    mapcmd::PointerPosition pointer; // placed once the first rendered viewport arrives
     bool boxing,pressing;       // a Ctrl + left drag / a plain left press (a click unless it moves kClickMove)
     float bx,by,moved;
     wchar_t note[80];
@@ -91,8 +111,6 @@ bool Give(const Entry& e,const Command& c) noexcept {
     }
     return false;
 }
-
-const float* PosOf(const void* v) noexcept { return reinterpret_cast<const float*>(static_cast<const unsigned char*>(v)+kPosition); }
 
 // The ground point along the ray from `eye` along unit `dir`: the map ray's hit, else the level plane at `level`.
 bool GroundAlong(const float* eye,const float* dir,float level,float* point) noexcept {
@@ -144,7 +162,7 @@ int Marks(const Game& g,const View& v,const MapCmdInput& in,mapcmd::Mark* out) n
     const float pin=mapcam::PinHeight(dist,pitch);
     for(int i=0;i<g.count;++i) {
         const Entry& e=g.list[i];
-        float p[3];std::memcpy(p,PosOf(e.u.v),12);
+        float p[3];std::memcpy(p,e.u.pos,12);
         if(!e.u.air)p[1]+=pin;
         out[i]=mapcmd::Mark{e.u.v,0.0f,0.0f,false};
         out[i].on=mapcmd::Project(v.vp,p,v.w,v.h,&out[i].x,&out[i].y);
@@ -155,26 +173,27 @@ int Marks(const Game& g,const View& v,const MapCmdInput& in,mapcmd::Mark* out) n
 // The pointer, the box and the clicks (the mouse; `v`: the view, or nullptr while the HUD has drawn none).
 void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept {
     if(!v){g.boxing=g.pressing=false;return;}
+    if(mapcmd::FitPointer(g.pointer,v->w,v->h))g.boxing=g.pressing=false;
     const float s=v->h/1080.0f;
     // The pointer moves with the mouse unless a button moves the map (the ground slides under it); a box drags it.
     const bool right=in.front && Down(VK_RBUTTON);
     if(in.mouse && (g.boxing || (!k.left && !right))) {
-        g.px=mapcam::Clamp(g.px+in.dx*kPointerGain*s,0.0f,v->w-1.0f);
-        g.py=mapcam::Clamp(g.py+in.dy*kPointerGain*s,0.0f,v->h-1.0f);
+        g.pointer.x=mapcam::Clamp(g.pointer.x+in.dx*kPointerGain*s,0.0f,v->w-1.0f);
+        g.pointer.y=mapcam::Clamp(g.pointer.y+in.dy*kPointerGain*s,0.0f,v->h-1.0f);
     }
     if(in.mouse && g.pressing)g.moved+=std::fabs(in.dx)+std::fabs(in.dy);
     if(k.left && !g.was.left) {
-        if(k.ctrl){g.boxing=true;g.bx=g.px;g.by=g.py;}
+        if(k.ctrl){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
         else{g.pressing=true;g.moved=0.0f;}
     }
     if(k.left || !g.was.left)return;
     // Let go: a box, or a click (a Ctrl box too small to be one, or a plain press that did not pan).
     mapcmd::Mark marks[kCmdUnits];
     const int n=Marks(g,*v,in,marks);
-    const bool box=g.boxing && (std::fabs(g.px-g.bx)>=kClickBox*s || std::fabs(g.py-g.by)>=kClickBox*s);
+    const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
     const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
-    if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.px,g.py,k.shift);
-    else if(click)mapcmd::Click(g.sel,marks,n,g.px,g.py,kClickRadius*s,k.shift);
+    if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
+    else if(click)mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
     g.boxing=g.pressing=false;
 }
 
@@ -182,7 +201,7 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
 bool TargetPoint(const Game& g,const MapCmdInput& in,const View* v,float* point) noexcept {
     std::memcpy(point,in.look,12);
     float eye[3],dir[3];
-    if(!in.usingPad && v && mapcmd::ScreenRay(v->vp,v->w,v->h,g.px,g.py,eye,dir))return GroundAlong(eye,dir,in.look[1],point);
+    if(!in.usingPad && v && mapcmd::ScreenRay(v->vp,v->w,v->h,g.pointer.x,g.pointer.y,eye,dir))return GroundAlong(eye,dir,in.look[1],point);
     float c[3]={in.look[0]-in.eye[0],in.look[1]-in.eye[1],in.look[2]-in.eye[2]};
     const float len=std::sqrt(c[0]*c[0]+c[1]*c[1]+c[2]*c[2]);
     if(!(len>1e-3f) || !std::isfinite(len))return false;
@@ -216,12 +235,12 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,g.count);r.selected=g.sel.n;r.pointOk=pointOk;
     std::memcpy(r.point,point,12);
-    r.pointer=pointer;r.px=g.px;r.py=g.py;r.boxing=pointer && g.boxing;r.bx=g.bx;r.by=g.by;
+    r.pointer=pointer;r.px=g.pointer.x;r.py=g.pointer.y;r.boxing=pointer && g.boxing;r.bx=g.bx;r.by=g.by;
     r.count=g.count;
     for(int i=0;i<g.count;++i) {
         const Entry& e=g.list[i];
         CmdMark& m=r.unit[i];
-        std::memcpy(m.pos,PosOf(e.u.v),12);
+        std::memcpy(m.pos,e.u.pos,12);
         m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);
         m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
@@ -233,7 +252,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
 }
 }  // namespace
 
-bool MapCommandFrame(const MapCmdInput& in,float* centre) noexcept {
+bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     Game& g=game;
     const ULONGLONG now=GetTickCount64();
     const Keys k=ReadKeys(in);
@@ -246,9 +265,14 @@ bool MapCommandFrame(const MapCmdInput& in,float* centre) noexcept {
     // held from before), the pointer at the centre.
     if(now-g.frameAt>kFreshMs) {
         g.was=k;g.boxing=g.pressing=false;
-        g.px=haveView ? v.w*0.5f : 960.0f;g.py=haveView ? v.h*0.5f : 540.0f;
+        g.pointer=mapcmd::PointerPosition{};
     }
     g.frameAt=now;
+    const bool mouseOrKey=(in.mouse && (in.dx!=0.0f || in.dy!=0.0f)) || (k.left && !g.was.left) ||
+        (k.tab && !g.was.tab) || (k.guard && !g.was.guard) || (k.follow && !g.was.follow) || (k.release && !g.was.release);
+    const bool padPress=(k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
+        (k.padFollow && !g.was.padFollow) || (k.padRelease && !g.was.padRelease);
+    in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
     List(g);
     const void* ids[kCmdUnits];
     for(int i=0;i<g.count;++i)ids[i]=g.list[i].u.v;
@@ -284,7 +308,9 @@ bool MapCommandFrame(const MapCmdInput& in,float* centre) noexcept {
     }
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(!picked)return false;
-    std::memcpy(centre,PosOf(g.sel.id[0]),12);
+    const int selected=mapcmd::IndexOf(ids,g.count,g.sel.id[0]);
+    if(selected<0)return false;
+    std::memcpy(centre,g.list[selected].u.pos,12);
     return std::isfinite(centre[0]+centre[1]+centre[2]);
 }
 

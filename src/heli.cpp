@@ -2398,7 +2398,7 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
 namespace {
 // A heli a map command reaches: flown by its NPC now (as HeliReap tells a live one), not on its way out.
 bool Commandable(const Heli& h) noexcept {
-    return h.ref && h.seenFrame && GameFrame()-h.seenFrame<=kAliveFrames && !h.leaving && !h.reap;
+    return h.ref && h.seenFrame && GameFrame()-h.seenFrame<=kAliveFrames && !h.leaving && !h.reap && CommandVehicleLive(h.ref);
 }
 }  // namespace
 
@@ -2407,7 +2407,7 @@ bool HeliSharesPost() noexcept { return Cfg().heliGuardRadius>0.0f; }   // Guard
 int HeliCommandUnits(CommandUnit* out,int most) noexcept {
     int n=0;
     for(const auto& h:helis)
-        if(n<most && Commandable(h))out[n++]=CommandUnit{h.ref.obj,h.type ? h.type->name : "heli",h.cmd,true};
+        if(n<most && Commandable(h) && ReadCommandUnit(h.ref,h.type ? h.type->name : "heli",h.cmd,true,&out[n]))++n;
     return n;
 }
 
