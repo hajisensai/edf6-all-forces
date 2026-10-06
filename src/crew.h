@@ -700,9 +700,10 @@ struct GunnerOrder { bool centred; float at[3],home[3]; };
 bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // The gunner's sight (hud.cpp GunnerMarks, game thread): where the screen's centre meets the ground (`ground`: within
 // the camera's reach), its range from the gunship and whether the picked gun reaches it, that gun's wait (s, 0: ready;
-// `ready`: its rounds are there and it is), the pylon turn's centre; `cannon`: the gun picked is the long-range cannon
-// (else the shells), `both`: the cannon is there to switch to. False with the player not at a gunship's gun.
-struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred,cannon,both; };
+// `ready`: its rounds are there and it is), the pylon turn's centre; `gun`: the gun picked (GunnerGun), `guns`: the
+// guns there to switch between (a bit each, 1 << GunnerGun; the shells always). False with the player not at a gunship's gun.
+enum class GunnerGun : int { shells, cannon, gatling, count };
+struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
@@ -769,9 +770,9 @@ struct PlayerJetReadout {
     float aim[3],path[3];
     int stores,store;
     int storeButton,targetButton; // actual seat-button masks used by this aircraft
-    const char* storeName[6];
-    int storeRounds[6];
-    int storeRole[6];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
+    const char* storeName[kMostStores];
+    int storeRounds[kMostStores];
+    int storeRole[kMostStores];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
     bool bomb,hasImpact;
     float impact[3];
     int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)

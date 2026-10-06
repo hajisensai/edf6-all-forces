@@ -38,6 +38,7 @@ int main() {
     Check(StoreIconOf("AGM-114",1)==StoreIcon::agmLight,"AGM-114");
     Check(StoreIconOf("Mk 82",2)==StoreIcon::bomb,"Mk 82");
     Check(StoreIconOf("Hydra 70",3)==StoreIcon::rocket,"Hydra 70");
+    Check(StoreIconOf("CANNON",2)==StoreIcon::gun && StoreIconOf("GATLING",2)==StoreIcon::gun,"the gunship's side guns: rounds");
     Check(StoreIconOf("NEW",1)==StoreIcon::agm && StoreIconOf("NEW",2)==StoreIcon::bomb && StoreIconOf("NEW",3)==StoreIcon::rocket &&
           StoreIconOf(nullptr,0)==StoreIcon::aam,"by role");
     // The stock rounds (vhud.h RoundKind: none 0, arc 1, rocket 2, homing 3).

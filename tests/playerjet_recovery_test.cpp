@@ -103,9 +103,11 @@ bool PlayerShell(unsigned char*,const float*,ULONGLONG) noexcept { MissingRecove
 bool ShellsReady() noexcept { MissingRecoveryDependency();return false; }
 bool CrewShell(unsigned char*,float,ULONGLONG) noexcept { MissingRecoveryDependency();return false; }
 float ShellWait(const unsigned char*,ULONGLONG) noexcept { MissingRecoveryDependency();return 0.0f; }
-bool PlayerCannon(unsigned char*,const float*,ULONGLONG) noexcept { MissingRecoveryDependency();return false; }
-bool CannonReady() noexcept { MissingRecoveryDependency();return false; }
-float CannonWait(const unsigned char*,ULONGLONG) noexcept { MissingRecoveryDependency();return 0.0f; }
+bool PlayerSideGun(unsigned char*,SideGun,const float*,ULONGLONG) noexcept { MissingRecoveryDependency();return false; }
+bool SideGunReady(SideGun) noexcept { MissingRecoveryDependency();return false; }
+float SideGunWait(const unsigned char*,SideGun,ULONGLONG) noexcept { MissingRecoveryDependency();return 0.0f; }
+float SideGunReach(SideGun) noexcept { MissingRecoveryDependency();return 0.0f; }
+float ShellReach() noexcept { MissingRecoveryDependency();return 0.0f; }
 void ResumeNpc(unsigned char*,const float*) noexcept { MissingRecoveryDependency(); }
 Jet* Adopt(unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
 }

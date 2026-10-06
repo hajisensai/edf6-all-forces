@@ -129,26 +129,37 @@ bool Sight(float* out) noexcept {
 // --- Its own weapon, as one more store (see the file comment) ---
 // No weapon behind them (Store::weapon null): stores.cpp's lock, trigger and cycle calls pass them by; FireSpecial
 // fires them. Their role: bomb draws the cockpit's impact cross (the bay's CCIP; the shells', cannon's and drones' aim
-// point). The gunship has two (SHELLS, then CANNON when its round is installed: jet_bay.cpp kCannonSgo; an install from
-// before has the shells alone, the preload logs the cannon missing), every other aircraft one at most (SpecialRoom).
+// point). The gunship has up to three (SHELLS, then CANNON and GATLING each when its round is installed: jet_bay.cpp
+// kSideGuns; an install from before has the guns it had, the preload logs the one missing), every other aircraft one at
+// most (SpecialRoom).
 constexpr StoreSpec kSpecials[]={
     {L"","BOMB BAY",StoreRole::bomb,0.0f,0.0f},
     {L"","SHELLS",StoreRole::bomb,0.0f,0.0f},
     {L"","DRONES",StoreRole::bomb,0.0f,0.0f},
     {L"","CHARGE",StoreRole::ground,0.0f,0.0f},
     {L"","CANNON",StoreRole::bomb,0.0f,0.0f},
+    {L"","GATLING",StoreRole::bomb,0.0f,0.0f},
 };
-constexpr int kBay=0,kShells=1,kDrones=2,kCharge=3,kCannon=4;
+constexpr int kBay=0,kShells=1,kDrones=2,kCharge=3,kCannon=4,kGatling=5;
+// The gunship's side guns as stores, in jet::SideGun's order, each listed while its round is there (jet::SideGunReady).
+struct SideGunStore { int special; jet::SideGun gun; };
+constexpr SideGunStore kSideGunStores[]={{kCannon,jet::SideGun::cannon},{kGatling,jet::SideGun::gatling}};
 constexpr int kSpecialCount=static_cast<int>(sizeof(kSpecials)/sizeof(kSpecials[0]));
-// The gunship's guns never run out (as its NPC's): shown as 99. Its cannon is no different: a magazine with a reload
-// would only be a pause the NPC crew's gun does not have, and its rate (2 a second, jet_bay.cpp kCannonGapMs) is its limit.
+// The gunship's guns never run out (as its NPC's): shown as 99. Its cannon and gatling are no different: a magazine with a
+// reload would only be a pause the NPC crew's guns do not have, and their rates (2 and 10 a second, jet_bay.cpp
+// kCannonGapMs / kGatlingGapMs) are their limits.
 constexpr int kShellRounds=99;
 constexpr ULONGLONG kChargeFireMs=100,kChargeMs=300;   // jet_carrier.cpp kBlastFireMs / kBlastMs
 constexpr float kOrderUp=40.0f;   // m: the drones' point over the sight (they work round it, jet.cpp)
 
-// The room its own weapons take in the cockpit's cycle (kMostStores in all): the gunship's two guns (the cannon only when
-// its round is installed, SpecialStore: else its slot is a pylon's), else one.
-int SpecialRoom(const PJet& j) noexcept { return j.board && j.board->arm==pjet::Arm::shells && jet::CannonReady() ? 2 : 1; }
+// The room its own weapons take in the cockpit's cycle (kMostStores in all): the gunship's shells and its side guns whose
+// rounds are installed (SpecialStore: a missing one's slot is a pylon's), else one.
+int SpecialRoom(const PJet& j) noexcept {
+    if(!j.board || j.board->arm!=pjet::Arm::shells)return 1;
+    int n=1;
+    for(const auto& g:kSideGunStores)n+=jet::SideGunReady(g.gun) ? 1 : 0;
+    return n;
+}
 
 // Its own weapons as stores, at most SpecialRoom of them: their count.
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept {
@@ -160,9 +171,11 @@ int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept {
     else if(j.board->arm==pjet::Arm::charge){which=kCharge;rounds=j.blastAt ? 0 : 1;}
     if(which<0)return 0;
     out[0]=Store{nullptr,&kSpecials[which],rounds,0,0.0f};
-    if(which!=kShells || !jet::CannonReady())return 1;
-    out[1]=Store{nullptr,&kSpecials[kCannon],kShellRounds,0,0.0f};
-    return 2;
+    if(which!=kShells)return 1;
+    int n=1;
+    for(const auto& g:kSideGunStores)
+        if(jet::SideGunReady(g.gun))out[n++]=Store{nullptr,&kSpecials[g.special],kShellRounds,0,0.0f};
+    return n;
 }
 
 int SpecialOf(const StoreSpec* spec) noexcept {
@@ -173,7 +186,7 @@ int SpecialOf(const StoreSpec* spec) noexcept {
 // What falls as a bomb when let go (its CCIP traced, Stores): a bomb store's weapon, or the bay's.
 bool FallsAsBomb(const Store& st) noexcept { return st.weapon!=nullptr || SpecialOf(st.spec)==kBay; }
 
-// The point the shells, the cannon and the drones go for: the pylon turn's centre while it flies one, else the
+// The point the shells, the side guns and the drones go for: the pylon turn's centre while it flies one, else the
 // camera's sight.
 const float* AimPoint(const PJet& j) noexcept { return j.orbiting ? j.orbitAt : j.hasSight ? j.sight : nullptr; }
 
@@ -189,7 +202,10 @@ void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noex
         if(at)jet::PlayerShell(v,at,ms);
         break;
     case kCannon:   // held, a round every kCannonGapMs (the fire byte is set again each frame it is held)
-        if(at)jet::PlayerCannon(v,at,ms);
+        if(at)jet::PlayerSideGun(v,jet::SideGun::cannon,at,ms);
+        break;
+    case kGatling:  // held, a round every kGatlingGapMs, scattered round the aim
+        if(at)jet::PlayerSideGun(v,jet::SideGun::gatling,at,ms);
         break;
     case kDrones:
         if(at) {
@@ -205,7 +221,7 @@ void FireSpecial(PJet& j,unsigned char* v,const Store& st,const float* pos) noex
     }
 }
 
-// The gunship's pylon turn (the target key held with its shells or its cannon picked): round the point the camera
+// The gunship's pylon turn (the target key held with one of its guns picked): round the point the camera
 // looked at when it was pressed, kOrbitMin to kOrbitMax out (where it was), that point on its left (the AC-130's guns'
 // side), at the height it had; the plane steered by the aim's law (Air: steered), the player's mouse left to the camera.
 constexpr float kOrbitMin=400.0f,kOrbitMax=900.0f;
@@ -235,7 +251,7 @@ void SpecialFrame(PJet& j,unsigned char* v,Stick& s,const float* pos,ULONGLONG m
     j.hasSight=Sight(j.sight);
     int special=-1;
     for(int i=0;i<kSpecialCount;++i)if(j.stores>0 && j.store<j.stores && j.storeName[j.store]==kSpecials[i].name)special=i;
-    const bool gun=special==kShells || special==kCannon;
+    const bool gun=special==kShells || special==kCannon || special==kGatling;
     Orbit(j,v,pos,gun && s.nextTarget);
     if(j.steered){s.aimX=0.0f;s.aimY=0.0f;}   // the pylon turn steers; the mouse only turns the camera
     if(gun || special==kDrones) {   // the cross on where they go, not a bomb's fall

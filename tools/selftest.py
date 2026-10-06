@@ -1878,11 +1878,12 @@ def gunship_gunner_seat() -> None:
 
 @test
 def gunship_cannon_round() -> None:
-    """tools/make_jets.py cannon_round / check_cannon_round on a synthetic stock round (no game needed): the gunship
-    cannon's round is the stock gunship's solid round with the cannon's numbers, nothing else changed, and the check
-    refuses a round that falls short of the reach or penetrates. The C++ side fires the file the tool writes, with the
-    tool's reach and speed (src/jet_bay.cpp kCannon*), as a store of the gunship's (src/playerjet_board.inc CANNON); the
-    installer writes it (make_jets.names) and the README tells of it."""
+    """tools/make_jets.py gun_round / check_gun_round on a synthetic stock round (no game needed), for each side gun
+    (the long-range cannon and the 25 mm gatling): its round is the stock gunship's solid round with the gun's numbers,
+    nothing else changed, and the check refuses a round that falls short of the reach or penetrates. The C++ side fires
+    the files the tool writes, with the tool's reach and speed (src/jet_bay.cpp kCannon* / kGatling*), as stores of the
+    gunship's (src/playerjet_board.inc CANNON, GATLING); the installer writes them (make_jets.names) and the README tells
+    of them. The three guns carry the same damage a second (shells 300 / 2.5 s, cannon 60 x 2, gatling 12 x 10)."""
     import sgo
     stock = {'xgs_scene_object_class': 'DemoIndirectFire', 'indirect_fire_damage': 2000.0,
              'indirect_fire_param': [[1.2, 0.0], [800.0, 0.0], 1, 0, 'SolidBullet01', 20.0, 0.0, 10.0, 2.0, 0.0, 600, 1,
@@ -1894,34 +1895,51 @@ def gunship_cannon_round() -> None:
             assert (folder, name) == ('OBJECT', make_jets.IMPACT_STOCK), (folder, name)
             return sgo.write(0x102, stock)
 
-    data = make_jets.cannon_round(Game())
-    make_jets.check_cannon_round(data)
-    old, new = sgo.read(Game().read('OBJECT', make_jets.IMPACT_STOCK))[1], sgo.read(data)[1]
-    assert set(old) == set(new) and [k for k in old if old[k] != new[k]] == ['indirect_fire_damage', 'indirect_fire_param']
-    changed = [i for i, (a, b) in enumerate(zip(old['indirect_fire_param'], new['indirect_fire_param'])) if a != b]
-    assert changed == [0, 5, 7, 9, 10, 11, 12, 15], changed   # scatter, speed, size, blast, life, penetration, colour, wait
-    assert new['indirect_fire_param'][17] == old['indirect_fire_param'][17], 'the stock cannon fire sound kept'
-    for i, value, why in ((10, 100, 'a life short of the reach'), (11, 1, 'a penetrating round'), (9, 25.0, 'a whale-sized blast')):
-        version, bad = sgo.read(data)
-        bad['indirect_fire_param'][i] = value
-        try:
-            make_jets.check_cannon_round(sgo.write(version, bad))
-        except make_jets.CannonRoundError:
-            continue
-        raise AssertionError(f'check_cannon_round took {why}')
+    bay, board, readme = src('src/jet_bay.cpp'), src('src/playerjet_board.inc'), src('README.md')
+    for gun, cpp, name in ((make_jets.CANNON, 'Cannon', 'CANNON'), (make_jets.GATLING, 'Gatling', 'GATLING')):
+        data = make_jets.gun_round(Game(), gun)
+        make_jets.check_gun_round(data, gun)
+        old, new = sgo.read(Game().read('OBJECT', make_jets.IMPACT_STOCK))[1], sgo.read(data)[1]
+        assert set(old) == set(new) and [k for k in old if old[k] != new[k]] == ['indirect_fire_damage', 'indirect_fire_param']
+        changed = [i for i, (a, b) in enumerate(zip(old['indirect_fire_param'], new['indirect_fire_param'])) if a != b]
+        assert changed == [0, 5, 7, 9, 10, 11, 12, 15], (name, changed)   # scatter, speed, size, blast, life, penetration, colour, wait
+        assert new['indirect_fire_param'][17] == old['indirect_fire_param'][17], 'the stock cannon fire sound kept'
+        for i, value, why in ((10, 50, 'a life short of the reach'), (11, 1, 'a penetrating round'), (9, 25.0, 'a whale-sized blast')):
+            version, bad = sgo.read(data)
+            bad['indirect_fire_param'][i] = value
+            try:
+                make_jets.check_gun_round(sgo.write(version, bad), gun)
+            except make_jets.GunRoundError:
+                continue
+            raise AssertionError(f'check_gun_round ({name}) took {why}')
+        assert gun.speed * gun.life >= gun.reach, name
+        assert f'k{cpp}File[]=L"{gun.file}"' in bay, f'src/jet_bay.cpp k{cpp}File'
+        assert f'k{cpp}Sgo[]=L"app:/object/{gun.file.lower()}"' in bay, f'src/jet_bay.cpp k{cpp}Sgo'
+        m = re.search(rf'k{cpp}Reach=([\d.]+)f', bay)
+        assert m and float(m.group(1)) == gun.reach, f'src/jet_bay.cpp k{cpp}Reach'
+        m = re.search(rf'k{cpp}Speed=([\d.]+)f', bay)
+        assert m and float(m.group(1)) == gun.speed * 60.0, f'src/jet_bay.cpp k{cpp}Speed (m/s) is the round\'s speed a frame'
+        assert f'OBJECT/{gun.file}' in make_jets.names(), gun.file
+        assert '{L"","' + name + '",StoreRole::bomb' in board, f'src/playerjet_board.inc kSpecials {name}'
+        assert gun.file in readme, f'README.md: {gun.file}'
+    assert make_jets.SIDE_GUNS == (make_jets.CANNON, make_jets.GATLING), 'src/jet_bay.cpp kSideGuns\' order'
+    assert re.search(r'kSideGuns\[\]=\{\s*\{kCannonSgo,kCannonFile,[^}]*\},\s*\{kGatlingSgo,kGatlingFile,', bay), 'kSideGuns in that order'
     assert 3.0 <= make_jets.CANNON_RADIUS <= 6.0, 'a few metres of blast (and >= 3 m: as the drill charge, docs/drill-re.md §3)'
-    assert make_jets.CANNON_SPEED * make_jets.CANNON_LIFE >= make_jets.CANNON_REACH
-    bay = src('src/jet_bay.cpp')
-    assert f'kCannonFile[]=L"{make_jets.CANNON_FILE}"' in bay, 'src/jet_bay.cpp kCannonFile'
-    assert f'kCannonSgo[]=L"app:/object/{make_jets.CANNON_FILE.lower()}"' in bay, 'src/jet_bay.cpp kCannonSgo'
-    m = re.search(r'kCannonReach=([\d.]+)f', bay)
-    assert m and float(m.group(1)) == make_jets.CANNON_REACH, 'src/jet_bay.cpp kCannonReach'
-    m = re.search(r'kCannonSpeed=([\d.]+)f', bay)
-    assert m and float(m.group(1)) == make_jets.CANNON_SPEED * 60.0, 'src/jet_bay.cpp kCannonSpeed (m/s) is CANNON_SPEED a frame'
-    assert f'OBJECT/{make_jets.CANNON_FILE}' in make_jets.names()
-    assert '{L"","CANNON",StoreRole::bomb' in src('src/playerjet_board.inc'), 'src/playerjet_board.inc kSpecials CANNON'
-    readme = src('README.md')
-    assert make_jets.CANNON_FILE in readme and '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
+    assert make_jets.GATLING_RADIUS < 3.0, 'the 25 mm round does not break buildings (under the drill charge\'s 3 m)'
+    assert make_jets.GATLING_REACH < make_jets.CANNON_REACH and make_jets.GATLING_SIZE < make_jets.CANNON_SIZE
+    num = r'([\d.]+)f'
+    rate = {}
+    for cpp in ('Cannon', 'Gatling'):
+        gap = re.search(rf'constexpr ULONGLONG k{cpp}GapMs=(\d+);', bay)
+        dmg = re.search(rf'constexpr float k{cpp}Damage=' + num, bay)
+        assert gap and dmg, cpp
+        rate[cpp] = float(dmg.group(1)) * 1000.0 / float(gap.group(1))
+    gap = re.search(r'constexpr ULONGLONG kGunshipGapMs=(\d+);', bay)
+    dmg = re.search(r'constexpr float kGunshipDamage=' + num, bay)
+    assert gap and dmg
+    rate['Shells'] = float(dmg.group(1)) * 1000.0 / float(gap.group(1))
+    assert max(rate.values()) - min(rate.values()) < 1e-6, f'the three guns carry the same damage a second: {rate}'
+    assert '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
 
 
 def _recoil_game(mission_weapon: str, mission_recoil: list, call_weapon: str, call_recoil: list,
@@ -2042,14 +2060,16 @@ def gunship_muzzle_wired() -> None:
     assert got == want, f'src/gunmuzzle.h kGunship {got}, tools/make_jets.py GUNSHIP_AIRFRAME {want}'
     m = re.search(r'kCannonHit=' + num, head)
     assert m and abs(float(m.group(1)) - make_jets.CANNON_SIZE * make_jets.CANNON_HIT) < 1e-6, 'src/gunmuzzle.h kCannonHit'
+    m = re.search(r'kGatlingHit=' + num, head)
+    assert m and abs(float(m.group(1)) - make_jets.GATLING_SIZE * make_jets.GATLING_HIT) < 1e-6, 'src/gunmuzzle.h kGatlingHit'
     m = re.search(r'kShellHit=' + num, head)
     assert m and float(m.group(1)) == make_jets.SHELL_HIT, 'src/gunmuzzle.h kShellHit'
     assert 'check_gunship_muzzle(game)' in src('tools/make_jets.py'), 'tools/make_jets.py build checks the muzzle numbers'
     bay = src('src/jet_bay.cpp')
     assert f'kGunshipSgo[]=L"app:/object/{make_jets.SHELL_STOCK.lower()}"' in bay, 'src/jet_bay.cpp kGunshipSgo is SHELL_STOCK'
-    fired = re.findall(r'Shell\((kGunshipSgo|kCannonSgo),(?:gunshipReady|cannonReady),v,(\w+),', bay)
+    fired = re.findall(r'Shell\((kGunshipSgo|gun\.sgo),(?:gunshipReady|gun\.ready),v,(\w+),', bay)
     assert len(fired) == 3 and all(f == 'muzzle' for _sgo, f in fired), f'the gunship fires from its muzzle: {fired}'
-    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the cannon, its sight line and both shells'
+    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the side guns, their sight line and both shells'
     assert re.search(r'MapRay\(muzzle,at,hit\)', bay), 'the NPC cannon looks along the line its round flies'
     make = bay.split('unsigned char* ShellMake(', 1)[1].split('\n}\n', 1)[0]
     assert 'if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);' in make, 'ShellMake zeroes the first-round wait'
