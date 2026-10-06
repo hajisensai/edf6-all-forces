@@ -39,6 +39,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "turretcam.h"
+#include "stab.h"
 #include "sight.h"
 #include "turretaim.h"
 #include "edf/weapon.h"
@@ -75,6 +76,7 @@ constexpr float kReturnRate=0.25f,kReturnDone=0.005f;   // the free look's swing
 constexpr float kRigEase=0.12f;                // a frame, the rig's move between its shapes (normal / high)
 constexpr int kBlendFrames=15;                 // frames the view eases in when the plugin takes the camera over
 constexpr float kOnTarget=0.0087f;             // rad (0.5 deg): the turret is on the point
+constexpr float kPivotReach=40.0f;             // m: a turret pivot farther from the muzzle than this is not one (TurretPivot)
 constexpr float kLargeRig=17.0f;               // m: a rig this long counts as a big vehicle (HighCamClass 2)
 constexpr ULONGLONG kFreshMs=200,kAimFreshMs=150,kLogMs=1000;
 
@@ -117,7 +119,7 @@ struct GameSide {
     float backYaw,backPitch;   // the view to swing back to (decoupled)
     float aim[3];bool hasAim;  // the point under the screen's centre this frame
     bool aimHit,holdHit;       // ... a real map hit (else kAimFar along an empty view) / the held point's
-    float lastWant[2],drift[2];bool hasWant;
+    tcam::SteerState steer;    // the turret command's last wants and their drift (turretcam.h SteerAxes)
     bool foreign;              // the aim's input was not the rider's stick last frame
     ULONGLONG logAt;
 };
@@ -213,24 +215,35 @@ void Drop(const char* why) noexcept {
 
 // --- the turret, from the aim step (game thread) ---
 
-// The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`: from the muzzle, in the hull's frame, with
-// `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line),
-// else the bore line (turretcam.h BallisticAim).
-bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,bool ballistic,float* want) noexcept {
+// The centre the seat's turret turns about: its look-at camera point's bone (seat +0x218 {locator, bone}), the turret's
+// yaw axis the stock camera orbits (StockRig takes it so too; docs/camera-re.md §3b: the Blacker's `cannon_main`, the
+// Grape's `Barrel` whose origin is its trunnion on the bore line, 0.42 m ahead of the yaw axis). False when unreadable.
+bool TurretPivot(const unsigned char* seat,const float* muzzle,float* pivot) noexcept {
+    const auto bone=At<const unsigned char*>(seat,kSeatCamLook+kPointBone);
+    if(!Readable(bone,kBoneOrigin+12))return false;
+    std::memcpy(pivot,bone+kBoneOrigin,12);
+    return std::isfinite(pivot[0]+pivot[1]+pivot[2]) && vec::Dist(pivot,muzzle)<kPivotReach;
+}
+
+// The axes' wants (yaw, pitch: the aim's own senses) that put the gun on `p`, seen in `frame` (world rows x, up, nose:
+// the frame the stabilizer's held axes are seen in, else the hull's now; stab.h HeldIn): the bore line through `p` from
+// the bore's point at the turret's pivot (turretcam.h AimOrigin: not from the muzzle, which swings with the gun), with
+// `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line), else
+// the bore line (turretcam.h BallisticAim).
+bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ballistic,float* want) noexcept {
     const unsigned char* gun=Gun(seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,16,muzzle,dir))return false;
-    const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    float a[3],b[3];
-    vec::ToLocal(m,p,a);vec::ToLocal(m,muzzle,b);
-    const float l[3]={a[0]-b[0],a[1]-b[1],a[2]-b[2]};
-    const float x=std::sqrt(l[0]*l[0]+l[2]*l[2]);
+    float pivot[3],origin[3];
+    tcam::AimOrigin(muzzle,dir,TurretPivot(seat,muzzle,pivot) ? pivot : nullptr,origin);
+    float l[3],x=0.0f;
+    tcam::LocalTo(frame,origin,p,l,&x);
     if(!(x>1e-3f || std::fabs(l[1])>1e-3f))return false;
     float elevation=std::atan2(l[1],x),frames=0.0f,g[3];
     const float speed=At<float>(gun,edf::kWeaponAmmoSpeed),factor=At<float>(gun,edf::kWeaponAmmoGravity);
     const bool lofted=At<std::int32_t>(gun,edf::kWeaponMark)==edf::kMarkLofted;
     if(ballistic && !lofted && std::isfinite(speed) && speed>0.0f && std::isfinite(factor) && factor>0.0f && edf::WorldGravity(image,g)) {
-        const double drop=factor*-(g[0]*m[4]+g[1]*m[5]+g[2]*m[6])/3600.0;
+        const double drop=factor*-(g[0]*frame[3]+g[1]*frame[4]+g[2]*frame[5])/3600.0;
         float e=0.0f;
         if(drop>0.0 && edf::BallisticArc(x,l[1],speed,drop,false,e,frames) && std::isfinite(e))elevation=e;
     }
@@ -239,30 +252,23 @@ bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,bool 
     return std::isfinite(want[0]) && std::isfinite(want[1]);
 }
 
-// The input that turns each axis onto `want` (each wanted angle's drift a frame fed forward), and whether it is on. A gun
-// the stabilizer holds (stab.cpp StabHeld) is steered in its frame: from the axes it holds the gun at with no command,
-// the hull's turn taken out of the want's drift (the stabilizer turns the gun by it after the step: counted here too, the
-// turret would be sent past the point by it a second time, and the command would move the stabilizer's reference).
-bool Steer(const unsigned char* seat,const float* want,float* in) noexcept {
-    const float* params=reinterpret_cast<const float*>(seat+kSeatAim+kAimParams);
-    float held[2],hull[2];
-    StabHeld(seat+kSeatAim,held,hull);
-    bool on=true;
-    for(int i=0;i<2;++i) {
-        const float* axis=AxisAt(seat,i);
-        const bool full=axis[1]-axis[0]>=2.0f*kPi-0.01f;
-        const float target=full ? want[i] : vec::Clamp(want[i],axis[0],axis[1]);
-        const float error=full ? tcam::Wrap(target-held[i]) : target-held[i];
-        if(game.hasWant) {
-            const float moved=(full ? tcam::Wrap(target-game.lastWant[i]) : target-game.lastWant[i])-hull[i];
-            game.drift[i]+=(vec::Clamp(moved,-0.2f,0.2f)-game.drift[i])*0.5f;
-        }
-        game.lastWant[i]=target;
-        in[i]=tcam::AxisCommand(error,At<float>(axis,kAxisRate),game.drift[i],params);
-        on=on && std::fabs(error)<kOnTarget;
-    }
-    game.hasWant=true;
-    return on;
+// What the turret is steered against this frame: `held` / `hull` (stab.cpp StabHeld: a gun the stabilizer holds is
+// steered from the axes it holds the gun at with no command, the hull's turn out of the drift; else the axes as they are,
+// 0) and the frame the wants are seen in (the one `held` is seen in; the hull's now with nothing held).
+struct Steering { float held[2],hull[2],frame[9]; };
+void SteeringOf(const unsigned char* v,const unsigned char* seat,Steering* s) noexcept {
+    if(StabHeld(seat+kSeatAim,s->held,s->hull,s->frame))return;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    stab::Frame now{};
+    if(stab::FromMatrix(m,&now))std::memcpy(s->frame,now.r,sizeof(now.r));
+    else for(int r=0;r<3;++r)std::memcpy(s->frame+3*r,m+4*r,12);
+}
+
+// The input that turns each axis onto `want` (turretcam.h SteerAxes), and whether it is on.
+bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* in) noexcept {
+    const tcam::Axis axes[2]={{AxisAt(seat,0)[0],AxisAt(seat,0)[1],AxisAt(seat,0)[2],At<float>(AxisAt(seat,0),kAxisRate)},
+                              {AxisAt(seat,1)[0],AxisAt(seat,1)[1],AxisAt(seat,1)[2],At<float>(AxisAt(seat,1),kAxisRate)}};
+    return tcam::SteerAxes(game.steer,want,s.held,s.hull,axes,reinterpret_cast<const float*>(seat+kSeatAim+kAimParams),kOnTarget,in);
 }
 
 void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic) noexcept {
@@ -339,10 +345,12 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     const bool ballistic=tcam::BallisticAim(s.free || s.returning ? game.holdHit : game.aimHit,LeadCircleOn());
     const bool steer=s.decoupled && !foreign && (game.hasAim || s.free || s.returning);
     s.steering=false;
-    if(foreign){cmd[0]=in[0];cmd[1]=in[1];game.hasWant=false;}
-    else if(steer && Wants(s.v,seat,target,ballistic,want)){on=Steer(seat,want,cmd);s.steering=true;}
+    Steering st{};
+    if(steer)SteeringOf(s.v,seat,&st);
+    if(foreign){cmd[0]=in[0];cmd[1]=in[1];game.steer.hasWant=false;}
+    else if(steer && Wants(seat,st.frame,target,ballistic,want)){on=Steer(seat,st,want,cmd);s.steering=true;}
     else if(s.free || s.returning){cmd[0]=0.0f;cmd[1]=0.0f;}   // coupled: the turret stands while the view looks round
-    else{cmd[0]=in[0];cmd[1]=in[1];game.hasWant=false;}
+    else{cmd[0]=in[0];cmd[1]=in[1];game.steer.hasWant=false;}
     AcquireSRWLockExclusive(&lock);
     if(shared.seat==seat){shared.aimMs=s.aimMs;shared.free=s.free;shared.returning=s.returning;shared.view=s.view;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=s.steering;}
     ReleaseSRWLockExclusive(&lock);

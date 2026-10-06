@@ -576,13 +576,14 @@ bool PlayerTurretCam(TurretCamReadout* out) noexcept;
 // (turretcam.cpp Steer, EDF6AutoTurret through common/edf/aimlink.h V3), the axes the stabilizer holds it at with no
 // command (`held`, rad, the aim's senses) and how much of that is the hull's turn since the last step (`hull`): it steers
 // from `held` and takes `hull` out of its want's drift and of the axes' motion it learns from (false: not held; `held`
-// the axes as they are, `hull` 0); StabState: 1 the seat's gun is held, 2 held but the drive is outrun, 0 not held
-// (vhud.cpp).
+// the axes as they are, `hull` 0); `frame` (9 floats, may be null; written only when held): the world rows (x, up, nose)
+// `held` is seen in, the frame its wants must be seen in too (stab.h HeldIn); StabState: 1 the seat's gun is held, 2
+// held but the drive is outrun, 0 not held (vhud.cpp).
 using AimStepFn=void(__fastcall*)(void*,const float*);
 bool InstallStabilizer() noexcept;
 void StabFrame(unsigned char* vehicle) noexcept;
 void StabStep(void* aim,const float* in,AimStepFn next) noexcept;
-bool StabHeld(const void* aim,float* held,float* hull) noexcept;
+bool StabHeld(const void* aim,float* held,float* hull,float* frame) noexcept;
 int StabState(unsigned char* vehicle,unsigned seat) noexcept;
 void ResetStabilizer() noexcept;
 

@@ -314,7 +314,7 @@ void StabFrame(unsigned char* v) noexcept {
 
 void StabStep(void* aim,const float* in,AimStepFn next) noexcept { StepHook(aim,in,next); }
 
-bool StabHeld(const void* aim,float* held,float* hull) noexcept {
+bool StabHeld(const void* aim,float* held,float* hull,float* frame) noexcept {
     const auto* a=static_cast<const unsigned char*>(aim);
     const float axes[2]={AxisOf(a,0)[2],AxisOf(a,1)[2]};
     held[0]=axes[0];held[1]=axes[1];hull[0]=hull[1]=0.0f;
@@ -327,7 +327,10 @@ bool StabHeld(const void* aim,float* held,float* hull) noexcept {
     Frame mount{},seen{};
     Frames(e->choice,now,&e->hull,std::isfinite(seat0) ? seat0 : 0.0f,&mount,&seen);
     const stab::Stops stops[2]={StopsAt(a,0),StopsAt(a,1)};
-    return stab::Held(e->hold,stops,seen,axes,held,hull);
+    Frame in{};
+    const bool isHeld=stab::HeldIn(e->hold,stops,seen,now,axes,held,hull,&in);
+    if(isHeld && frame)std::memcpy(frame,in.r,sizeof(in.r));
+    return isHeld;
 }
 
 int StabState(unsigned char* vehicle,unsigned seat) noexcept {
@@ -350,6 +353,6 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_StabilizerV3(const
     __try {
         auto* v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
         if(seat>=crew::SeatCount(v))return false;
-        return crew::StabHeld(crew::SeatAt(v,seat)+crew::kSeatAim,held,hull);
+        return crew::StabHeld(crew::SeatAt(v,seat)+crew::kSeatAim,held,hull,nullptr);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

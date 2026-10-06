@@ -817,8 +817,21 @@ def gun_stabilizer_wired() -> None:
     assert '&StabFrame,v' in crew and 'ResetStabilizer();' in mission and 'InstallStabilizer();' in plugin
     assert 'src/stab.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/stab_check.cpp' in cmake
     assert '#include "../src/stab.h"' in src('tools/stab_check.cpp') and '#include "stab.h"' in code
-    steer = src('src/turretcam.cpp').split('bool Steer(', 1)[1].split('\n}\n', 1)[0]
-    assert 'StabHeld(seat+kSeatAim,held,hull);' in steer and 'target-held[i]' in steer and '-hull[i];' in steer
+    tc = src('src/turretcam.cpp')
+    steering = tc.split('void SteeringOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StabHeld(seat+kSeatAim,s->held,s->hull,s->frame)' in steering
+    steer = tc.split('bool Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert 'tcam::SteerAxes(game.steer,want,s.held,s.hull,' in steer
+    axes = src('src/turretcam.h').split('inline bool SteerAxes(', 1)[1].split('\n}\n', 1)[0]
+    assert 'target-held[i]' in axes and '-hull[i];' in axes
+    # The wants are seen in the frame the held axes are (stab.h HeldIn), from the bore's point at the turret's pivot
+    # (turretcam.h AimOrigin): the Grape's barrel twitched left and right without either (tools/grape_turret_check.cpp).
+    wants = tc.split('bool Wants(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Wants(seat,st.frame,target,ballistic,want)' in tc and 'tcam::AimOrigin(' in wants and 'tcam::LocalTo(frame,' in wants
+    assert 'stab::HeldIn(' in code and 'EXCLUDE_FROM_ALL tools/grape_turret_check.cpp' in cmake
+    assert 'grape_turret_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    gtc = src('tools/grape_turret_check.cpp')
+    assert all(f in gtc for f in ('tcam::AimOrigin(', 'stab::HeldIn(', 'tcam::SteerAxes(', 'stab::Step('))
     flak = src('autoturret/src/plugin.cpp')
     assert 'Stabilized(vehicle,0,stock,held,hull);' in flak and '-hull;' in flak.split('float AxisInput(', 1)[1].split('\n}\n', 1)[0]
     assert 'Stabilized(vehicle,s,aim.angle,held,hull);' in src('autoturret/src/gunner.cpp')
