@@ -384,7 +384,15 @@ struct Plan { const char* move; bool fire; int arm; };
 int ChooseArm(Soldier& s,unsigned char* h,const Arms& a,const Enemy* t,const float* eye,const float* pos) noexcept {
     if(!t || a.n==0)return a.current;
     const float dist=npc::Dist(eye,t->aim);
-    const int pick=npc::PickArm(a.arm,a.n,a.current,dist,KindOf(*t,pos),FriendNear(h,t->aim,kFriendNearTarget));
+    const auto kind=KindOf(*t,pos);
+    const bool friendNear=FriendNear(h,t->aim,kFriendNearTarget);
+    const int pick=npc::PickArm(a.arm,a.n<3 ? a.n : 3,a.current,dist,kind,friendNear);
+    // Only d82..d84 exist. An inaccessible fourth weapon must not hide a usable second one, but an already held
+    // fourth weapon can still win the same hysteresis comparison and be fired without selecting it again.
+    if(a.current>=3 && a.current<a.n) {
+        const float held=npc::ArmScore(a.arm[a.current],dist,kind,friendNear);
+        if(held>0.0f && (pick<0 || held*1.25f>=npc::ArmScore(a.arm[pick],dist,kind,friendNear)))return a.current;
+    }
     if(s.wantArm>=0) {
         if(a.current==s.wantArm){s.wantArm=-1;s.armMiss=0;}
         else if(++s.armMiss>kArmMissFrames) {
@@ -426,7 +434,12 @@ float LargestBlast(const Arms& a) noexcept {
     for(int i=0;i<a.n;++i)if(a.arm[i].blast>b)b=a.arm[i].blast;
     return b;
 }
-void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast) noexcept {
+float LongestReach(const Arms& a) noexcept {
+    float reach=0.0f;
+    for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
+    return reach;
+}
+void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {
     if(!h[kTrigger] && !h[kTrigger+1])return;
     npc::Friend fr[kMaxFriends];
     const int n=FriendsBut(h,fr);
@@ -435,8 +448,9 @@ void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast) noexcept
         float dir[3];
         const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
         dir[0]=std::sin(yaw)*std::cos(pitch);dir[1]=-std::sin(pitch);dir[2]=std::cos(yaw)*std::cos(pitch);
-        const float to[3]={eye[0]+dir[0]*60.0f,eye[1]+dir[1]*60.0f,eye[2]+dir[2]*60.0f};
-        if(npc::ShotClear(eye,to,kSpread,0.0f,fr,n))return;
+        float to[3]={eye[0]+dir[0]*reach,eye[1]+dir[1]*reach,eye[2]+dir[2]*reach},hit[3];
+        if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
+        if(reach>0.0f && npc::ShotClear(eye,to,kSpread,blast,fr,n))return;
     }
     h[kTrigger]=0;h[kTrigger+1]=0;
 }
@@ -448,7 +462,9 @@ Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const f
     const Enemy* t=StockTarget(h);
     if(t && a.current>=0)p.arm=ChooseArm(s,h,a,t,eye,pos);
     if(p.arm<0 && a.current>=0)h[kTrigger]=h[kTrigger+1]=0;   // switching
-    Veto(h,t,eye,p.arm>=0 && p.arm<a.n ? a.arm[p.arm].blast : LargestBlast(a));
+    // d71 is the Fencer's independently held second weapon. Until both sets are resolved, either trigger must
+    // pass the largest carried blast, not just the primary weapon's (which may be a nonexplosive gun).
+    Veto(h,t,eye,LargestBlast(a),LongestReach(a));
     p.fire=h[kTrigger]!=0;
     return p;
 }
@@ -584,7 +600,8 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
         // within ScriptNpcSettleSec: a squad of the plugin's now; with ScriptNpcRecruit the player may recruit it.
         const bool held=Routed(top) || (root && !IsPlayer(root) && Routed(root)) || (At<std::uint32_t>(top,kObjectFlags)&kFixPosition);
         if(npc::Step(q->script,held,ms,static_cast<std::uint64_t>(Cfg().scriptNpcSettleSec*1000.0f))) {
-            const bool open=Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow];
+            const bool open=!InSession() && !(At<std::uint8_t>(top,kNet)&1) &&
+                            Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow];
             if(open)top[kAutoFollow]=1;
             Log("NPCAI squad %p: the script let it go (%s): the plugin's now%s",top,ControlName(q->control),open ? ", recruitable" : "");
         }
@@ -617,7 +634,6 @@ Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
 // block each frame (0x573A7C), the stock driver's output among it; seat 0 stays AutoCrew's.
 constexpr unsigned kRideVehicle=0x5765E0;
 constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSeat=0x1540,kHumanRiding=0x1548;
-constexpr float kBoardReach=3.0f;          // m from the seat's riding point (beside the stock reach, which needs its profile)
 constexpr ULONGLONG kBoardMs=20000;        // a board order not done in this long is dropped
 const unsigned char kRideSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x48};
 const unsigned char kRideReleaseSig[]={0x49,0x8B,0x5E,0x08,0x48,0x85,0xDB,0x74,0x27,0x8B,0xC7,0xF0,0x0F,0xC1,0x43,0x08};   // 0x57690D
@@ -640,9 +656,14 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
         s.boardV=ObjRef{};
         return false;
     }
-    float at[3],reach=kBoardReach;
-    if(!SeatPoint(v,static_cast<unsigned>(s.boardSeat),at,&reach))std::memcpy(at,Pos(v),12);
-    if(npc::Horiz(pos,at)>(reach>kBoardReach ? reach : kBoardReach)) {
+    float at[3],reach=0.0f;
+    if(!SeatPoint(v,static_cast<unsigned>(s.boardSeat),at,&reach) || !std::isfinite(reach) || reach<=0.0f) {
+        s.boardV=ObjRef{};
+        return false;
+    }
+    // RideVehicle does not check distance itself. Match the seat's real spherical reach, including height;
+    // horizontal distance alone would seat a soldier standing on a different floor.
+    if(npc::Dist(pos,at)>=reach) {
         MoveTo(h,pos,at,0.5f);
         return true;
     }
@@ -677,7 +698,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(a.current<0) {
         // The held weapon not known (§3.5's M claim does not hold for this soldier): its look and trigger stay the stock
         // AI's, vetoed against friends with its largest blast; the plugin only moves it.
-        Veto(h,StockTarget(h),eye,LargestBlast(a));
+        Veto(h,StockTarget(h),eye,LargestBlast(a),LongestReach(a));
         p.fire=h[kTrigger]!=0;
     } else if(t.e) {
         p.arm=ChooseArm(s,h,a,t.e,eye,pos);
@@ -685,11 +706,11 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         if(mask&kMaskLook)Look(h,dir);
         p.fire=ShotOk(s,h,a,p.arm,*t.e,eye) && (mask&kMaskTrigger);
         h[kTrigger]=p.fire ? 1 : 0;
-        Veto(h,t.e,eye,LargestBlast(a));   // the second hand (d71) the stock may have pulled
+        Veto(h,t.e,eye,LargestBlast(a),LongestReach(a));   // the second hand (d71) the stock may have pulled
     } else {
         s.spotSet=false;
         h[kTrigger]=0;
-        Veto(h,StockTarget(h),eye,LargestBlast(a));
+        Veto(h,StockTarget(h),eye,LargestBlast(a),LongestReach(a));
     }
     if(!(mask&kMaskMove))return p;
     // Its moves, the first that applies.
@@ -810,7 +831,9 @@ int OtherSquads(const unsigned char* except,bool playersOnly,unsigned char** lea
     int n=0;
     for(int i=0;i<world.friends && n<most;++i) {
         const auto o=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
-        if(o==except || !IsSoldierClass(o) || IsPlayer(o) || o[kDead] || Routed(o))continue;
+        if(o==except || !IsSoldierClass(o) || IsPlayer(o) || o[kDead] ||
+           npc::Scripted(ControlOf(o,RootLeader(o))))continue;
+        if(const Squad* q=FindSquad(o); q && q->dismissed)continue;
         const auto up=At<const unsigned char*>(o,kLeader);
         const auto count=At<std::uint64_t>(o,kFollowerCount);
         if((up && !IsPlayer(up)) || (count==0 && !up))continue;   // a follower, or alone and not recruited
@@ -824,6 +847,10 @@ void Succeed(unsigned char* dead) noexcept {
     unsigned char* m[kMaxSquad];
     const int n=Followers(dead,m,kMaxSquad);
     if(!n)return;
+    // Reparenting any one of these changes the native tree for all of them. Keep the whole transition native if
+    // the leader or any affected member is under mission control, even when the Think caller itself is free.
+    if(npc::Scripted(ControlOf(dead,RootLeader(dead))))return;
+    for(int i=0;i<n;++i)if(npc::Scripted(ControlOf(m[i],RootLeader(m[i]))))return;
     npc::Member members[kMaxSquad];
     for(int i=0;i<n;++i) {
         members[i]=npc::Member{static_cast<std::uint32_t>(i),true,false,At<float>(m[i],kHumanHp),0,{}};
@@ -836,7 +863,9 @@ void Succeed(unsigned char* dead) noexcept {
     if(up && (!Readable(up,kDead+1) || up[kDead]))up=nullptr;
     // Too few left: join another squad instead (the nearest with room).
     unsigned char* others[32];float at[32][3];int sizes[32];
-    const int k=n<Cfg().npcSquadMin ? OtherSquads(dead,up && IsPlayer(up),others,at,sizes,32) : 0;
+    const Squad* const oldSquad=FindSquad(dead);
+    const int k=n<Cfg().npcSquadMin && !(oldSquad && oldSquad->dismissed) ?
+                OtherSquads(dead,up && IsPlayer(up),others,at,sizes,32) : 0;
     const int join=k ? npc::JoinSquad(n,Cfg().npcSquadMin,Pos(lead),at,sizes,k,Cfg().npcSquadMax,Cfg().npcSquadJoinRange) : -1;
     unsigned char* const top=join>=0 ? others[join] : lead;
     if(join<0)Follow(lead,up);
@@ -858,6 +887,8 @@ void Succeed(unsigned char* dead) noexcept {
 
 void PreThink(unsigned char* h) noexcept {
     if(!followOk || !Cfg().npcSquadSuccession || IsPlayer(h) || h[kDead] || (At<std::uint8_t>(h,kNet)&1))return;
+    const auto team=At<std::int32_t>(h,kTeam);
+    if(team!=0 && team!=kTeamFriend)return;
     const auto leader=At<unsigned char*>(h,kLeader);
     if(!leader || !Readable(leader,kObjectFlags+4) || !leader[kDead] || IsPlayer(leader))return;
     if(At<std::uint32_t>(leader,kObjectFlags)&kAutoResurrect)return;   // it comes back: the stock keeps following it
@@ -994,6 +1025,16 @@ int Members(unsigned char* top,unsigned char** out,int most) noexcept {
     return n;
 }
 
+int CancelBoarding(unsigned char* top) noexcept {
+    unsigned char* members[kMaxSquad];
+    const int n=Members(top,members,kMaxSquad);
+    int cancelled=0;
+    for(int i=0;i<n;++i)for(auto& s:soldiers)if(s.ref.Is(members[i]) && s.boardV) {
+        s.boardV=ObjRef{};++cancelled;break;
+    }
+    return cancelled;
+}
+
 // The vehicle a squad boards: the one the player rides when it has a seat for them, else the nearest friendly vehicle
 // within kBoardFar of the top with one.
 constexpr float kBoardFar=150.0f;
@@ -1040,8 +1081,9 @@ bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {
 }
 
 // Every riding member off (SeatKick: the get-off message, a real soldier lands and walks on; a dummy rider would die,
-// so only soldiers are kicked); false when none rode.
+// so only soldiers are kicked). Also cancels members still walking to a seat; false when neither applied.
 bool DismountSquad(unsigned char* top) noexcept {
+    const int cancelled=CancelBoarding(top);
     unsigned char* m[kMaxSquad];
     const int n=Members(top,m,kMaxSquad);
     int off=0;
@@ -1054,7 +1096,7 @@ bool DismountSquad(unsigned char* top) noexcept {
         ++off;
     }
     Log("NPCAI squad %p dismounts: %d off",top,off);
-    return off>0;
+    return off>0 || cancelled>0;
 }
 }  // namespace
 
@@ -1063,6 +1105,7 @@ bool DismountSquad(unsigned char* top) noexcept {
 // recruited squad where it stands and starts the cooldown (+0x540 cleared meanwhile, or the stock would take it back at
 // once). The squads of a mission script take none (§4.3).
 bool SquadCommand(const void* leader,const Command& c) noexcept {
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return false;
     __try {
         const ULONGLONG ms=GameMs();
         Squad* const q=FindSquad(leader);
@@ -1109,6 +1152,7 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
         default:
             return false;
         }
+        if(c.order!=Order::board)CancelBoarding(top);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -1132,7 +1176,7 @@ void GunnerVisit(void* ctx,const void* object,const float* aim) {
 }  // namespace
 
 void NpcGunnersInput(unsigned char* v) noexcept {
-    if(!ok || !Cfg().customNpcAi || !Cfg().npcBoarding || v[kDead])return;
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || InSession() || v[kDead])return;
     static int sig=0;
     if(!sig)sig=Matches(kSeatFire,kSeatFireSig,sizeof(kSeatFireSig)) ? 1 : -1;
     if(sig<0)return;
