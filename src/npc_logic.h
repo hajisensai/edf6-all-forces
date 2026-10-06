@@ -112,6 +112,12 @@ inline Control Classify(const ScriptFacts& f) noexcept {
     return f.npcLeader ? Control::squad : Control::free;
 }
 inline bool Scripted(Control c) noexcept { return c==Control::script || c==Control::hold || c==Control::escort; }
+// Who leads a squad: the plugin's own AI (free, or an NPC squad of any size), the player who recruited it, or the
+// mission's script. A panel order (a guard point, an engage area) means something only under the lead it was given in:
+// the stock changes the lead on its own (a player walking up recruits a squad, a script takes it), and an order kept
+// across that change pins the squad to a point its new lead never asked for (§6.2).
+enum class Lead : std::uint8_t { own, player, script };
+inline Lead LeadOf(Control c) noexcept { return Scripted(c) ? Lead::script : c==Control::recruited ? Lead::player : Lead::own; }
 // The end of a script's control (A3, §4.4): a unit the script controlled and no longer does, `settleMs` running (not
 // the gap between two of the script's orders), is released once: Step is true that one time. Scripted again before or
 // after: watched again from the start.

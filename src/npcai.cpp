@@ -565,6 +565,7 @@ struct Squad {
     int alive,counting,cls;
     npc::Control control;
     Command cmd;
+    npc::Lead cmdLead;         // the lead `cmd` was given under; another lead drops it (npc::LeadOf)
     std::uint8_t autoFollow;   // +0x540 before a dismissal (put back when its cooldown ends)
     bool dismissed;
     npc::ScriptWatch script;   // the end of a script's control over it (§4.4)
@@ -612,6 +613,10 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
         // Its control from its top's own fields (the top may be another machine's soldier, whose Think does not get here).
         const unsigned char* const root=RootLeader(top);
         q->control=h==top ? control : ControlOf(top,root);
+        if(q->cmd.order!=Order::none && npc::LeadOf(q->control)!=q->cmdLead) {
+            Log("NPCAI squad %p: led by %s now, its order dropped",top,ControlName(q->control));
+            q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
+        }
         // The script let it go (its route ended, it was unfollowed, its position freed) and has not taken it back
         // within ScriptNpcSettleSec: a squad of the plugin's now; with ScriptNpcRecruit the player may recruit it.
         const bool held=Routed(top) || (root && !IsPlayer(root) && Routed(root)) || (At<std::uint32_t>(top,kObjectFlags)&kFixPosition);
@@ -1131,11 +1136,11 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
         const bool recruited=q->control==npc::Control::recruited;
         switch(c.order) {
         case Order::guard:
-            q->cmd=c;
+            q->cmd=c;q->cmdLead=npc::LeadOf(q->control);
             break;
         case Order::engage:
         case Order::focus:   // the mark (mapcmd refuses it with none)
-            q->cmd=c;std::memcpy(q->cmd.at,Pos(top),12);
+            q->cmd=c;q->cmdLead=npc::LeadOf(q->control);std::memcpy(q->cmd.at,Pos(top),12);
             break;
         case Order::none:
             q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
@@ -1156,7 +1161,9 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
             Follow(top,nullptr);
             cooldowns.Start(SquadKey(top),ms,static_cast<std::uint64_t>(Cfg().npcRecruitCooldownSec*1000.0f));
             q->dismissed=true;++dismissedCount;
-            q->cmd=Command{Order::guard,{0.0f,0.0f,0.0f}};std::memcpy(q->cmd.at,Pos(top),12);
+            // It holds where it was let go, as its own squad: the guard is the plugin's lead's, so the player recruiting it
+            // again after the cooldown (the stock walk-up) drops it and the squad follows them.
+            q->cmd=Command{Order::guard,{0.0f,0.0f,0.0f}};q->cmdLead=npc::Lead::own;std::memcpy(q->cmd.at,Pos(top),12);
             Log("NPCAI squad %p dismissed: it holds here, recruitable again in %.0f s",top,Cfg().npcRecruitCooldownSec);
             break;
         case Order::board:

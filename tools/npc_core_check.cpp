@@ -142,5 +142,26 @@ int main() {
     walking->boardV=ObjRef::Of(vehicle);
     Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}) && !walking->boardV,
            "a new guard order replaces the earlier walk-to-seat order");
+    // A panel order lives only under the lead it was given in (npc::LeadOf).
+    Reset();Put<void*>(human,kLeader,nullptr);q=SeeSquad(human,human,0,npc::Control::recruited,now);
+    Expect(SquadCommand(human,Command{Order::dismiss,{}}) && q->cmd.order==Order::guard,"a dismissed squad holds where it was let go");
+    ++frame;++now;SeeSquad(human,human,0,npc::Control::free,now);
+    Expect(q->cmd.order==Order::guard,"the dismissal's hold stays while the squad is its own");
+    now+=static_cast<ULONGLONG>(config.npcRecruitCooldownSec*1000.0f)+1;++frame;SeeSquad(human,human,0,npc::Control::free,now);
+    Expect(!q->dismissed && q->cmd.order==Order::guard,"the cooldown ending does not move it by itself");
+    ++frame;++now;SeeSquad(human,human,0,npc::Control::recruited,now);
+    Expect(q->cmd.order==Order::none,"recruited again by the stock walk-up after the cooldown: the hold is dropped and it follows");
+    Reset();Put<void*>(human,kLeader,nullptr);q=SeeSquad(human,human,0,npc::Control::free,now);
+    Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}),"a free squad takes a guard order");
+    ++frame;++now;SeeSquad(human,human,0,npc::Control::squad,now);
+    Expect(q->cmd.order==Order::guard,"a squad gaining or losing members keeps its order (still its own lead)");
+    ++frame;++now;SeeSquad(human,human,0,npc::Control::recruited,now);
+    Expect(q->cmd.order==Order::none,"a guarding squad the player walks up to and recruits follows them, as the panel says");
+    Reset();Put<void*>(human,kLeader,nullptr);q=SeeSquad(human,human,0,npc::Control::recruited,now);
+    Expect(SquadCommand(human,Command{Order::guard,{10,0,0}}),"a recruited squad takes a guard order");
+    ++frame;++now;SeeSquad(human,human,0,npc::Control::recruited,now);
+    Expect(q->cmd.order==Order::guard,"a recruited squad told to guard keeps guarding while the player still leads it");
+    ++frame;++now;SeeSquad(human,human,0,npc::Control::script,now);
+    Expect(q->cmd.order==Order::none,"a script taking the squad drops the player's order");
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
