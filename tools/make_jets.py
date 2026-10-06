@@ -165,6 +165,22 @@ HELIS: dict[str, str] = {
     'EDF6VC_HELI_410.SGO': 'VEHICLE410_HELI',
     'EDF6VC_HELI_506.SGO': 'V506_HELI',
 }
+# The medic heli (the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，自瞄也是锁队友」; src/heli.cpp Medic):
+# the call-in Brute 410 made script-placeable like EDF6VC_HELI_410, its door guns' weapon MEDIC_GUN_STOCK swapped for
+# MEDIC_GUN_FILE. That gun is the stock door gun with a negative AmmoDamage: the stock Reverser's way of healing (aWeapon209
+# 「リバーサー」: AmmoDamage -1.6, AmmoExplosion 0). A round with no blast skips the team check (docs/bullet-pass-re.md §1,
+# 3.2 step 4: AmmoExplosion 0 -> core+0xA27/0xA28 = 0), so it hits a friend and its damage, negative, is a heal. Not
+# penetrating (one body a round: it does not pass on to whoever is behind, an enemy maybe), more rounds (the plugin refills
+# no called heli's guns: MEDIC_GUN_AMMO at its 2 a second is two minutes of healing a gun), green (the Reverser's
+# AmmoColor). The plugin knows a medic by this negative damage (src/heli.cpp HealingGun): its gunners then aim at hurt
+# friends, never enemies.
+MEDIC_HELI_FILE = 'EDF6VC_HELI_MEDIC.SGO'
+MEDIC_GUN_FILE = 'EDF6VC_MEDIC_GUN.SGO'
+MEDIC_GUN_STOCK = 'V_410HELI_GATLING01.SGO'
+MEDIC_GUN_HEAL = 150.0       # HP a round, at the base tier (the call's tier multiplies it as it does the stock 200 damage)
+MEDIC_GUN_AMMO = 240.0
+MEDIC_GUN_COLOR = (0.3, 1.0, 0.6, 1.0)
+MEDIC_GUN_NAMES = {'ja': 'メディックガン', 'en': 'Medic Gun', 'cn': '救護機砲', 'kr': '메딕 건', 'sc': '救护机炮'}
 MODEL_FILE = vc.JET_ELEVON_FILE
 MODEL = vc.JET_ELEVON_MODEL
 
@@ -205,7 +221,41 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{CANNON_FILE}'] = cannon
     for name, stock in HELIS.items():
         out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
+    out[f'WEAPON/{MEDIC_GUN_FILE}'] = medic_gun(game.read('WEAPON', MEDIC_GUN_STOCK))
+    out[f'OBJECT/{MEDIC_HELI_FILE}'] = medic_heli(out[f'OBJECT/EDF6VC_HELI_410.SGO'])
     return out
+
+
+def medic_gun(stock: bytes) -> bytes:
+    """MEDIC_GUN_FILE from the stock door gun `stock` (MEDIC_GUN_STOCK's bytes): see MEDIC_HELI_FILE."""
+    import dsgo
+    doc = dsgo.parse(stock)
+    r = doc.root
+    if (r.get('AmmoClass') != 'SolidBullet01' or not r.get('AmmoDamage') > 0 or r.get('AmmoExplosion') != 0
+            or len(r.get('AmmoColor').items) != 4):
+        raise ValueError(f'{MEDIC_GUN_STOCK} 不是预期的 410 门炮（实弹、无爆炸、正伤害）')
+    for key, value in (('AmmoDamage', -MEDIC_GUN_HEAL), ('AmmoCount', MEDIC_GUN_AMMO), ('AmmoIsPenetration', 0.0)):
+        r.set(key, value)
+    r.get('AmmoColor').items[:] = list(MEDIC_GUN_COLOR)
+    for lang, name in MEDIC_GUN_NAMES.items():
+        r.set(f'name.{lang}', name)
+    return dsgo.write(doc)
+
+
+def medic_heli(heli410: bytes) -> bytes:
+    """MEDIC_HELI_FILE from EDF6VC_HELI_410.SGO's bytes: its door guns' weapon MEDIC_GUN_FILE, the rest as it is."""
+    import sgo
+    version, m = sgo.read(heli410)
+    stock, ours = f'app:/weapon/{MEDIC_GUN_STOCK.lower()}', f'app:/weapon/{MEDIC_GUN_FILE.lower()}'
+    weapons = m['mission_setup'][3]
+    swapped = 0
+    for w in weapons:
+        if isinstance(w, list) and w and isinstance(w[0], str) and w[0].lower() == stock:
+            w[0] = ours
+            swapped += 1
+    if swapped != 1:
+        raise ValueError(f'EDF6VC_HELI_410 的 mission_setup 武器表里 {stock} 出现 {swapped} 次（应为 1）')
+    return sgo.write(version, m)
 
 
 def bomber_sgo(game: vc.Game, name: str) -> bytes:
@@ -218,8 +268,9 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
 
 def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
-    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, CANNON_FILE, *HELIS, MODEL_FILE, *MODEL_FILES, *vc.PORTAL_LASER_FILES]
-    return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in vc.JET_WEAPON_FILES]
+    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, CANNON_FILE, *HELIS, MEDIC_HELI_FILE, MODEL_FILE, *MODEL_FILES,
+               *vc.PORTAL_LASER_FILES]
+    return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)]
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

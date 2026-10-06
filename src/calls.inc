@@ -22,6 +22,8 @@ const Call kCalls[]={
     {7117.0f,Brings::sub,std::nullopt,std::nullopt,1,0,true,"submarine carrier",L"EDF6VC_CALL_SUB"},
     {7118.0f,Brings::jets,JetRole::gunship,std::nullopt,1,600,false,"gunship (guard)",L"EDF6VC_CALL_GUNSHIP"},
     {7119.0f,Brings::jets,JetRole::gunship,std::nullopt,1,600,true,"gunship (follow)",L"EDF6VC_CALL_GUNSHIP_F"},
+    {7120.0f,Brings::helis,std::nullopt,HeliBody::medic410,2,360,false,"medic helis (guard)",L"EDF6VC_CALL_MEDIC_HELI"},
+    {7121.0f,Brings::helis,std::nullopt,HeliBody::medic410,2,360,true,"medic helis (follow)",L"EDF6VC_CALL_MEDIC_HELI_F"},
 };
 constexpr int kCallCount=static_cast<int>(sizeof(kCalls)/sizeof(kCalls[0]));
 // kCalls' names on the in-mission pick's banner (the SC names the weapons carry).
@@ -45,6 +47,8 @@ const wchar_t* const kCallLabels[]={
     L"潜水母舰支援",
     L"炮舰机·守点",
     L"炮舰机·跟随",
+    L"救护直升机·守点",
+    L"救护直升机·跟随",
 };
 static_assert(sizeof(kCallLabels)/sizeof(kCallLabels[0])==kCallCount,"a label per call");
 // Every weapon table row tools/call_weapons.py installs, vehicle requests too, in table order of a
@@ -87,6 +91,8 @@ const CallRow kCallRows[]={
     {L"EDF6VC_CALL_FLY_DOLL_CARRIER",L"EDF6VC_CALL_FLY_DOLL_CARRIER.SGO",L"EDF6VC_FLY_DOLL_CARRIER.SGO"},
     {L"EDF6VC_CALL_SIDECAR",L"EDF6VC_CALL_SIDECAR.SGO",L"EDF6VC_SIDECAR.SGO"},
     {L"EDF6VC_CALL_BOARDING_GUN",L"EDF6VC_CALL_BOARDING_GUN.SGO",nullptr},
+    {L"EDF6VC_CALL_MEDIC_HELI",L"EDF6VC_CALL_MEDIC_HELI.SGO",nullptr},
+    {L"EDF6VC_CALL_MEDIC_HELI_F",L"EDF6VC_CALL_MEDIC_HELI_F.SGO",nullptr},
 };
 constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));
 // The thrown drones: their weapons' AmmoHitSizeAdjust bits (weapon +0x8C4), in tools/calls.py CALLS order.

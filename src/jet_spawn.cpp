@@ -329,7 +329,7 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 }
 
 unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {
-    const Body b=as==HeliBody::brute410 ? Body::heli410 : Body::heli506;
+    const Body b=as==HeliBody::brute410 ? Body::heli410 : as==HeliBody::medic410 ? Body::heliMedic : Body::heli506;
     if(!spawnOk || !Preloaded(b) || !At<void*>(image,kObjectMgr))return nullptr;
     __try {
         float start[3]={from[0],from[1],from[2]};
