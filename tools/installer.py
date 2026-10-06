@@ -14,7 +14,8 @@ What install does, with EDF6.exe closed:
      pylib/ledger.py), then the weapon table, its texts and the call SGOs in one transaction (all or none,
      call_weapons.commit), and last the plugin: EDF6VehicleCrew.dll, and the .ini (a new one when there is
      none; else the player's own, with only the settings this version adds appended: merge_ini); then the big map
-     (it sets BigWorld in that ini) and the test range's grand battle mission (testrange/gen.py, on its slot), so
+     (it sets BigWorld in that ini) and the test range mission (testrange/gen.py target_range: targets only, no enemy;
+     every vehicle we added, on its slot), so
      everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack to play with
      others). The test range's forced loadout is never written: everyone picks their own class.
 
@@ -345,8 +346,8 @@ def install(game: str) -> None:
         cache.record('bigmap', {f'MAP/{make_bigmap.MAP_FILE}': mac,
                                 **{f'MAP/{name}': data for name, data in pieces.items()}})
     cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
-    print('写入测试场「大混战」关卡（联机时大家要有同样的关卡和物体）……')
-    for line in gen.install(game, gen.grand_battle(gen.Plan())):
+    print('写入测试场关卡（只有靶子，没有敌人；联机时大家要有同样的关卡和物体）……')
+    for line in gen.install(game, gen.target_range(gen.Plan())):
         print('  ', line)
     print('\n安装完成。启动游戏即可。')
 
