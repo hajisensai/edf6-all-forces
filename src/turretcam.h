@@ -78,6 +78,78 @@ inline Rig High(float height,float back,float pitchDeg) noexcept {
     return Rig{up,0.0f,0.0f,r,height-up,{0.0f,0.0f,0.0f}};
 }
 
+constexpr float kPitchMost=80.0f*kPi/180.0f,kViewMost=85.0f*kPi/180.0f;
+
+// The high view's aim (README 高视角; the user, 2026-10-06): a point on the ground the mouse moves, not a pitch. As a
+// pitch it went wrong two ways: toggling swung the screen's centre (and the turret after it) 28 deg onto another point,
+// and a far shot looked along the ground from 45 m (600 m: -3.7 deg), where a frame of stick moved the point hundreds of
+// metres and a little more lost it over the horizon. So the high view holds `yaw` (the bearing from the hull's origin,
+// the view's heading) and `range` (m, level from the origin), the point `dy` m over the origin's height (the ground
+// point's own when taken: a hill keeps its height). The stick turns the bearing as it turns any view and moves the range
+// by a share of it (HighTurn: about 10 m a frame of full stick at 600 m), between kHighMinRange and kHighMaxRange:
+// the view can never look past the ground.
+constexpr float kHighMinRange=10.0f,kHighMaxRange=1500.0f;
+constexpr float kHighRangeStep=3.0f,kHighRangeShare=0.012f;   // m a frame of full stick: 3 m + 1.2 % of the range
+// The line of sight to the point never shallower than this: far off, the eye goes up (the view looks down onto the
+// point instead of along the ground).
+constexpr float kHighMinSight=25.0f*kPi/180.0f;
+struct HighAim { float yaw,range,dy; };
+
+// The high aim at world point `p` from the hull's origin (`yaw` kept when p is over the origin).
+inline HighAim HighAimAt(const float* origin,const float* p,float yaw) noexcept {
+    const float d[3]={p[0]-origin[0],0.0f,p[2]-origin[2]};
+    const float level=std::sqrt(d[0]*d[0]+d[2]*d[2]);
+    return HighAim{level>1e-3f ? YawOf(d) : yaw,vec::Clamp(level,kHighMinRange,kHighMaxRange),p[1]-origin[1]};
+}
+// The point itself.
+inline void HighPoint(const float* origin,const HighAim& a,float* p) noexcept {
+    float fwd[3],right[3];
+    Flat(a.yaw,fwd,right);
+    p[0]=origin[0]+fwd[0]*a.range;p[1]=origin[1]+a.dy;p[2]=origin[2]+fwd[2]*a.range;
+}
+// The camera: the eye `back` m behind the origin along the bearing and `height` m over it, raised so that its line to
+// the point is no shallower than kHighMinSight; it looks at the point (the screen's centre is on it).
+inline void HighPlace(const float* origin,const HighAim& a,float height,float back,float* eye,float* look) noexcept {
+    float fwd[3],right[3];
+    Flat(a.yaw,fwd,right);
+    HighPoint(origin,a,look);
+    const float level=a.range+back,least=a.dy+level*std::tan(kHighMinSight);
+    const float h=std::fmax(height,least);
+    eye[0]=origin[0]-fwd[0]*back;eye[1]=origin[1]+h;eye[2]=origin[2]-fwd[2]*back;
+}
+// The range a frame of input `in` (-1..1; positive lowers a view: brings the point nearer) moves it.
+inline float HighRangeStep(float range) noexcept { return kHighRangeStep+kHighRangeShare*range; }
+// A frame of stick: `yawIn` turns the bearing by `rate` as a view turns (positive: the heading falls), `rangeIn` moves the
+// point in (positive) or out.
+inline void HighTurn(HighAim& a,float yawIn,float rangeIn,float rate) noexcept {
+    a.yaw=Wrap(a.yaw-yawIn*rate);
+    a.range=vec::Clamp(a.range-rangeIn*HighRangeStep(a.range),kHighMinRange,kHighMaxRange);
+}
+
+// The view (yaw, pitch) of rig `r` whose screen's centre goes through world point `p` (the high view handing back: the
+// normal view comes back on the point the high one was on). The centre's line goes through O, raised with the eye when
+// the eye would be under O + rise (Place); found by going round a few times (O turns with the heading, the raise
+// follows the pitch).
+constexpr int kAimAtRounds=64;
+inline void AimAt(const Rig& r,const float* origin,const float* p,float* yaw,float* pitch) noexcept {
+    float d[3]={p[0]-origin[0],0.0f,p[2]-origin[2]};
+    float y=d[0]*d[0]+d[2]*d[2]>1e-6f ? YawOf(d) : *yaw,pt=0.0f;
+    for(int i=0;i<kAimAtRounds;++i) {   // the raise's pull on the pitch is slow to settle looking up at a hill
+        float fwd[3],right[3];
+        Flat(y,fwd,right);
+        float o[3];
+        for(int k=0;k<3;++k)o[k]=origin[k]+r.fixed[k]+fwd[k]*r.ahead+right[k]*r.side;
+        o[1]+=r.up+std::fmax(0.0f,r.rise+std::sin(pt)*r.radius);
+        for(int k=0;k<3;++k)d[k]=p[k]-o[k];
+        if(!vec::Normalize(d))break;
+        const float ny=YawOf(d),np=PitchOf(d);
+        const bool settled=std::fabs(Wrap(ny-y))<1e-7f && std::fabs(np-pt)<1e-7f;
+        y=ny;pt=np;
+        if(settled)break;
+    }
+    *yaw=y;*pitch=vec::Clamp(pt,-kPitchMost,kPitchMost);
+}
+
 // Who turns the player's turret this frame (common/edf/aimlink.h V2): `steers` EDF6AutoTurret's answer (1: it wrote the
 // seat's input this frame, 0: it did not, -1: no answer, an older peer or none), `in` the aim's input, `stick` the
 // rider's as the aim gets it. Another hand's: the camera leaves the turret to it for the frame. With no answer, V1's
