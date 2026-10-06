@@ -1126,7 +1126,8 @@ def vehicle_sound_wired() -> None:
     plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/sound-re.md')
     code, audio, audio_h, crew, mission, cmake = (src('src/vehsound.cpp'), src('src/jetaudio.cpp'), src('src/jetaudio.h'),
                                                   src('src/crew.cpp'), src('src/mission.cpp'), src('CMakeLists.txt'))
-    keys = ('VehicleSound', 'VehicleEngineVolume', 'VehicleTurretVolume', 'VehicleReloadVolume', 'VehicleGunVolume')
+    keys = ('VehicleSound', 'VehicleEngineVolume', 'VehicleTurretVolume', 'VehicleReloadVolume', 'VehicleGunVolume', 'VehicleMgVolume',
+            'VehicleMissileVolume')
     for key in keys:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in keys[1:]:
@@ -1140,9 +1141,11 @@ def vehicle_sound_wired() -> None:
     for name in names:
         assert f'`{name}`' in readme, f'README.md: the WAV name {name}'
     assert 'EDF6VehicleCrew_veh_<名字>.wav' in readme and '_veh_%ls.wav' in audio
-    assert 'kEnginePresets[3]={0,1,2}' in code and 'kTurretPresets[2]={13,14}' in code
+    assert 'kEnginePresets[3]={0,1,2}' in code and 'kTurretPresets[4]={13,14,15,16}' in code
     assert 'kEngineHandles[3]={0x1A40,0x1A50,0x1A60}' in code and 'kFirePreset=0x380' in code and 'kEngineLoad=0x1A80' in code
-    for rva in ('0x676370', '0x1A20', '0x1A40', '0x1A80', '0x632BD0', '0x380', '0x36C', '0xE0C', '0xE68', '0x7A8CD0'):
+    assert 'kAimTableVtable=0x17DDEA8' in code and 'kFireLoop=0xE28' in code and 'kAimEntry=0xB0' in code
+    for rva in ('0x676370', '0x1A20', '0x1A40', '0x1A80', '0x632BD0', '0x380', '0x36C', '0xE0C', '0xE68', '0x7A8CD0', '0x1A38',
+                '0x17DDEA8', '0x5F33F0', '0xE28', '0x698005'):
         assert rva in doc, f'docs/sound-re.md: {rva}'
     # Every RVA the file names (a code address: 0x5..../0x6..../0x7....) is in its signature table or checked by name.
     sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
