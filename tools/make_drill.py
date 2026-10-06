@@ -34,6 +34,7 @@ sys.path.insert(0, HERE)
 import drill_model  # noqa: E402
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+import ragdoll_fit  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
@@ -118,7 +119,28 @@ def vehicle_sgo(game: vc.Game, model: list[str] | None = None) -> bytes:
     cam = m['game_object_camera_setting']
     m['game_object_camera_setting'] = [list(CAMERA[0]), list(CAMERA[1]), cam[2], cam[3]]
     m['game_object_durability'] = VEHICLE.durability
+    if list(model) != STOCK_MODEL:
+        m['ragdoll'] = [m['ragdoll'][0], free_spin_bone(bytes(m['ragdoll'][1]))]
     return sgo.write(version, m)
+
+
+def free_spin_bone(blob: bytes) -> bytes:
+    """The Blacker's ragdoll binding (the SGO's ragdoll[1], pylib/ragdoll_fit.py) without its one animation_from_ragdoll
+    row onto drill_model.SPIN_BONE: stock, `catapi_body` is drawn from the hull's proxy (RagDollProxys.body, offset
+    (0, 0.881, 0): the track rig's root, where the Blacker's bind has it). Every frame the game writes such a bone's
+    world from its proxy and clears its compose flag (EDF.dll 0x6EDCA0, docs/artillery-re.md §2), so the drill's bone
+    was drawn 0.88 m over the hull's origin, turned as the hull: the drill sat 2.5 m low and 4.2 m back inside the
+    hull and never turned whatever local matrix the plugin wrote (docs/drill-re.md §5.6). Without the row the bone is
+    animated like any other: its local (the plugin's spin) times `body`'s world. Every other row stays as stock."""
+    version, inner = sgo.read(blob)
+    if sgo.write_depth_first(version, inner) != blob:
+        raise ValueError(f'{VEHICLE.stock}.SGO: ragdoll 绑定无法原样写回')
+    rows = inner['animation_from_ragdoll']
+    keep = [e for e in rows if str(e[0][1]) != drill_model.SPIN_BONE]
+    if len(rows) - len(keep) != 1 or any(str(e[0][0]) == drill_model.SPIN_BONE for e in inner['ragdoll_from_animation']):
+        raise ValueError(f'{VEHICLE.stock}.SGO: ragdoll 绑定里 {drill_model.SPIN_BONE} 不是预期的一行')
+    inner['animation_from_ragdoll'] = keep
+    return sgo.write_depth_first(version, inner)
 
 
 def charge_sgo(game: vc.Game) -> bytes:
@@ -175,6 +197,11 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
         arc = files[f'OBJECT/{MODEL_FILE}']
         drill_model.check(arc, drill_model.stock_bones(game) if game is not None else None)
         md = mdb_read(next(f for f in rab_read(arc).files if f.name.lower() == MODEL_MDB.lower()).data)
+        if game is not None:     # the ragdoll draws no bone of the model away from its bind (the drill's spin bone)
+            rag = sgo.read(files[f'OBJECT/{SGO_FILE}'])[1]['ragdoll']
+            shkt = game.read('OBJECT', str(rag[0]).rsplit('/', 1)[1].upper())
+            bad = ragdoll_fit.problems(md, shkt, bytes(rag[1]))
+            assert not bad, "the ragdoll binding is not the model's: " + '; '.join(bad)
         names = {md.name_of(b.name) for b in md.bones}
         missing = {b for b, _ in v['vehicle_weapon_setting']} - names
         assert not missing, f'model lacks weapon bones {missing}'
