@@ -8,6 +8,7 @@
 // origin/feat/primer-swarm tools/primer_flight_sim.cpp.
 //
 //   jet_obstacle_sim --scenario a|b|b2|c|c2|d|d0 [--kind strike|fighter] [--seconds N] [--out DIR] [--tag NAME]
+//   jet_obstacle_sim --selftest [--out DIR]
 //
 //   a   level 60 m over the ground at cruise, heading +z, a 150 m tall 60x60 building 1500 m ahead
 //   b   the same at a 400 m tall 80x80 tower (too steep to climb: it must turn)
@@ -19,11 +20,20 @@
 //   d   a strike dive at a ground point with a 120 m building 150-210 m in front of it (Attack -> Strike)
 //   d0  d with no building (the dive as it is when nothing is in the way)
 //
+// --selftest (CTest jet_attack_runs): the attack runs the 2026-10-06 log showed failing, each case printed, exit 1 on any
+// failure:
+//   pull  a dive Guard alone must pull out of (the guidance holds the dive into the ground): every kind that dives, loaded
+//         and clean, 15-80 deg, 150-250 m/s, upright and inverted, over flat ground and with a 150 m plateau where its
+//         pull-out bottoms, started just high enough for that pull-out (1.3 times PredictPullOut's drop, 60 m more): the
+//         lowest it gets over what is under it is kPullMargin or more;
+//   entry a called strike jet arriving with its missiles at a ground target ahead and off its nose (Attack -> Strike,
+//         Fire): its guns and its missiles fire within its arrival (kEntryMs), the game's lock given.
 // Writes DIR/<tag>.csv (the trajectory, every frame) and DIR/<tag>.log (the plugin's own log), prints the summary.
 // The "before" build (jet_obstacle_sim_before) compiles the same files with Wing's Ahead call and Strike's InSight
 // test cut out (CMakeLists.txt makes the copies), so the two show what Ahead and InSight change.
 #include "../src/jet_internal.h"
 #include "../src/gear.h"
+#include "../src/jet_pullout.h"
 #include "../src/stores.h"
 #include <cmath>
 #include <cstdarg>
@@ -167,6 +177,159 @@ Role RoleNamed(const char* n) {
     if(!std::strcmp(n,"multirole"))return Role::multirole;
     return Role::strike;
 }
+
+// --- --selftest ---
+constexpr float kPullMargin=15.0f;   // m: the least a pull-out may leave under it (Guard aims at kMinAlt, 25)
+
+// A body for a selftest case: at `at`, flying `dir` (unit) at `speed`, rolled `bank` rad about its path (0 upright).
+void Place(Jet& j,unsigned char* v,unsigned char* ctrl,Role role,const float* at,const float* dir,float speed,float bank) {
+    std::memset(v,0,kBodySize);
+    float f[3]={dir[0],dir[1],dir[2]};Normalize(f);
+    float r[3]={f[2],0.0f,-f[0]};   // right: as main() builds it (heading +z: right +x)
+    if(!Normalize(r)){r[0]=1;r[1]=0;r[2]=0;}
+    float u[3];Cross(f,r,u);Normalize(u);
+    if(u[1]<0.0f)for(int i=0;i<3;++i)u[i]=-u[i];
+    const float c=std::cos(bank),sn=std::sin(bank);
+    float u2[3],r2[3];
+    for(int i=0;i<3;++i){u2[i]=u[i]*c+r[i]*sn;r2[i]=r[i]*c-u[i]*sn;}
+    const float mat[16]={r2[0],r2[1],r2[2],0, u2[0],u2[1],u2[2],0, f[0],f[1],f[2],0, at[0],at[1],at[2],1};
+    std::memcpy(v+kMatrix,mat,64);
+    std::memcpy(v+kPosition,at,12);
+    Put<float>(v,kHpMax,1000.0f);Put<float>(v,kHp,1000.0f);
+    std::memset(ctrl,0,kCtrlSize);
+    Put<long>(ctrl,8,1);
+    Put<const void*>(v,kSelfCtrl,ctrl);
+    j=Jet{};
+    j.ref=ObjRef{v,ctrl};j.role=role;j.mode=Mode::patrol;j.drone.slot=-1;
+    j.bornAt=j.modeAt=j.seen=nowMs;
+    for(int i=0;i<3;++i)j.m.vel[i]=f[i]*speed;
+}
+
+// One pull case: the lowest it got over what is under it (GroundClearance), or -1 if it went into it.
+float PullCase(Role role,float mass,float diveDeg,float speed,bool inverted,bool plateau,float* startY) {
+    boxes.clear();
+    const Kind& k=KindOf(role);
+    const float dive=diveDeg*kPi/180.0f,dir[3]={0.0f,-std::sin(dive),std::cos(dive)};
+    const float top=k.attack*1.3f<kBodyTop ? k.attack*1.3f : kBodyTop;
+    const PullOutIn in{speed,std::sin(dive),k.maxG/mass,inverted ? kPi-0.05f : 0.0f,k.roll,6.0f,1.0f,k.thrust/mass,top,kG};
+    const PullOut p=PredictPullOut(in);
+    const float ground=plateau ? 150.0f : 0.0f;
+    const float y0=ground+p.drop*1.3f+60.0f;
+    *startY=y0;
+    // The plateau: from half the pull-out's run on (under where it bottoms), none under the start.
+    if(plateau)AddBox(0.0f,p.run*0.5f+p.run*2.0f,4000.0f,p.run*4.0f,ground);
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    const float at[3]={0.0f,y0,0.0f};
+    Place(j,v,ctrl.data(),role,at,dir,speed,inverted ? kPi-0.05f : 0.0f);
+    j.burden=Burden{mass,0.0f};
+    float lowest=1e9f;
+    bool into=false;
+    for(int f=0;f<60*30;++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3]={dir[0],dir[1],dir[2]};   // held in the dive: only Guard pulls it out
+        Wing(j,k,v,pos,nose,want,k.attack,kDt,nowMs);
+        const float sink=j.m.vel[1];
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        if(j.m.vel[1]>sink+0.01f)into=true;   // the floor caught it: it would have gone in
+        j.m.ready=true;
+        if(Move(j,v))into=true;
+        const float c=GroundClearance(pos);
+        if(c!=kNoGround && c<lowest)lowest=c;
+        if(f>60 && j.m.vel[1]>20.0f)break;   // climbing away: out of it
+    }
+    return into ? -1.0f : lowest;
+}
+
+// The entry case: a called strike jet (loaded) 2600 m from its target and 150 m over it, the target `offDeg` off its
+// nose, the game locking its missiles. When (s since it came) its guns first fire and its first missile goes (-1:
+// never), and its height over the target at its first burst.
+void EntryCase(float offDeg,float* gunAt,float* missileAt,float* overAtFire) {
+    boxes.clear();
+    const Role role=Role::strike;
+    const Kind& k=KindOf(role);
+    const float aim[3]={0.0f,0.0f,0.0f};
+    const float off=offDeg*kPi/180.0f;
+    const float at[3]={0.0f,150.0f,-2600.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
+    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+    unsigned char* v=mem.data();
+    Jet& j=jets[0];
+    Place(j,v,ctrl.data(),role,at,dir,k.cruise,0.0f);
+    j.launched=true;j.burden=Burden{1.21f,0.0f};
+    static int targetDummy=0;
+    j.t.target=&targetDummy;j.t.flyer=false;std::memcpy(j.t.aim,aim,12);std::memcpy(j.t.tgtPrev,aim,12);
+    Arms arms{};arms.gunSpeed=960.0f;arms.gunRange=960.0f;arms.pick=-1;arms.rocket=-1;arms.guns=3600;arms.hasGun=true;
+    arms.hasMissile=true;arms.missiles=6;arms.locked=1;arms.missileRange=1800.0f;
+    const ULONGLONG born=nowMs;
+    *gunAt=*missileAt=-1.0f;*overAtFire=0.0f;
+    for(int f=0;f<60*20;++f) {
+        nowMs+=16;
+        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        float nose[3]={m[8],m[9],m[10]};
+        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+        j.seen=nowMs;
+        Sense(j,pos,nowMs);
+        const float clear=GroundClearance(pos);
+        float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
+        bool gunsOk=false,missileOk=false;
+        Attack(j,arms,pos,nose,aim,aim[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
+        Wing(j,k,v,pos,nose,want,speed,kDt,nowMs);
+        HoldOffGround(j,pos,clear,kDt,nowMs);
+        j.m.ready=true;
+        Fire(j,v,pos,nose,aim,gunsOk,missileOk,arms,nowMs);
+        const float t=static_cast<float>(nowMs-born)*0.001f;
+        if(v[kFireGun] && *gunAt<0.0f){*gunAt=t;*overAtFire=pos[1]-aim[1];}
+        if(v[kFireMissile] && *missileAt<0.0f)*missileAt=t;
+        Move(j,v);
+    }
+}
+
+int SelfTest(const char* outDir) {
+    const std::string logPath=std::string(outDir)+"/selftest.log";
+    logFile=std::fopen(logPath.c_str(),"w");
+    config.debug=true;config.jetPilot=true;
+    int bad=0,cases=0;
+    float worst=1e9f;
+    // Loaded: the strike jet's 6 AGM, 6 Mk 82, 38 rockets and 2 AIM-9X on its 22 t (1.21); the multirole's load on 18 t.
+    const struct { Role role; float mass; } loads[]={{Role::strike,1.21f},{Role::strike,1.0f},{Role::multirole,1.18f},
+                                                     {Role::fighter,1.0f},{Role::drone,1.0f}};
+    const float dives[]={15.0f,30.0f,45.0f,60.0f,80.0f},speeds[]={150.0f,200.0f,250.0f};
+    for(const auto& l:loads)for(float d:dives)for(float s:speeds)for(int inv=0;inv<2;++inv)for(int pl=0;pl<2;++pl) {
+        float y0=0.0f;
+        const float low=PullCase(l.role,l.mass,d,s,inv!=0,pl!=0,&y0);
+        ++cases;
+        const bool ok=low>=kPullMargin;
+        if(!ok)++bad;
+        if(low<worst)worst=low;
+        std::printf("pull %-9s x%.2f %2.0f deg %3.0f m/s %-8s %-7s from %5.0f m: lowest %6.1f m %s\n",KindOf(l.role).name,
+                    static_cast<double>(l.mass),static_cast<double>(d),static_cast<double>(s),inv ? "inverted" : "upright",
+                    pl ? "plateau" : "flat",static_cast<double>(y0),static_cast<double>(low),ok ? "ok" : "FAIL");
+    }
+    std::printf("pull: %d cases, %d failed, lowest %.1f m (margin %.0f m)\n",cases,bad,static_cast<double>(worst),
+                static_cast<double>(kPullMargin));
+    const float offs[]={0.0f,15.0f,30.0f};
+    for(float off:offs) {
+        float gun=0.0f,msl=0.0f,over=0.0f;
+        EntryCase(off,&gun,&msl,&over);
+        const float entry=static_cast<float>(kEntryMs)*0.001f;
+        const bool ok=gun>=0.0f && gun<entry && msl>=0.0f && msl<entry;
+        if(!ok)++bad;
+        std::printf("entry target %2.0f deg off the nose: guns at %.1f s (%.0f m over it), missile at %.1f s %s\n",
+                    static_cast<double>(off),static_cast<double>(gun),static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
+    }
+    if(logFile)std::fclose(logFile);
+    std::printf("%s\n",bad ? "SELFTEST FAILED" : "selftest passed");
+    return bad ? 1 : 0;
+}
 }  // namespace
 
 int main(int argc,char** argv) {
@@ -175,19 +338,22 @@ int main(int argc,char** argv) {
     const char* outDir=".";
     std::string tag;
     float seconds=0.0f;
+    bool selftest=false;
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--scenario") && a+1<argc)scenario=argv[++a];
         else if(!std::strcmp(argv[a],"--kind") && a+1<argc)kindName=argv[++a];
         else if(!std::strcmp(argv[a],"--seconds") && a+1<argc)seconds=static_cast<float>(std::atof(argv[++a]));
         else if(!std::strcmp(argv[a],"--out") && a+1<argc)outDir=argv[++a];
         else if(!std::strcmp(argv[a],"--tag") && a+1<argc)tag=argv[++a];
+        else if(!std::strcmp(argv[a],"--selftest"))selftest=true;
         else {std::fprintf(stderr,"unknown argument %s\n",argv[a]);return 1;}
     }
-    if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     // The image: zeroed, so the ceiling's pointer (image+0x20B2998) reads null: no ceiling (CeilingY 1e9).
     static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
     image=fakeImage.data();
     config.debug=true;
+    if(selftest)return SelfTest(outDir);
+    if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     const std::string csvPath=std::string(outDir)+"/"+tag+".csv",logPath=std::string(outDir)+"/"+tag+".log";
     logFile=std::fopen(logPath.c_str(),"w");
     std::FILE* csv=std::fopen(csvPath.c_str(),"w");

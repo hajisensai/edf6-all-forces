@@ -4,6 +4,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
 #include "gear.h"
+#include "jet_pullout.h"
 #include <cwchar>
 
 namespace crew {
@@ -490,6 +491,15 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
         mo.obstSide=TurnSide(pos,mo.obstAt);
 }
 
+// What PredictPullOut needs of jet `j` now: its speed and dive, the g and thrust its stores leave it (JetSteer's
+// Burden), the roll its lift is from up (RollToLift) and the attitude's gain and rate, kReact.
+PullOutIn PullOutFor(const Jet& j,const Kind& k) noexcept {
+    const float s=Len(j.m.vel),mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
+    const float top=j.m.top>0.0f ? j.m.top : k.attack*1.3f;
+    return PullOutIn{s,s>1.0f ? Clamp(-j.m.vel[1]/s,0.0f,1.0f) : 0.0f,k.maxG/mass,RollToLift(j),k.roll,kAttGain,kReact,
+                     k.thrust/mass,top<kBodyTop ? top : kBodyTop,kG};
+}
+
 // Keeps `want` off the walls and the ground and under the ceiling. The ground is the highest under it now and
 // kLookAhead seconds along its track; sinking, the lowest it gets is where a maxG pull-out started
 // kReact seconds from now bottoms out (so a dive runs down to kMinAlt instead of pulling up 100 m early);
@@ -533,11 +543,19 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float lowest=there!=kNoGround ? probe[1]-there : seen;
     float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
     if(j.m.obstUntil && j.m.obstTop>floorY)floorY=j.m.obstTop;
+    // Sinking: the lowest it gets is the bottom of a pull-out begun kReact from now (PredictPullOut: at the g its stores
+    // leave it, against gravity, gaining speed), over the ground where that bottom is as well (rising terrain past the
+    // look-ahead's point).
     float bottom=pos[1];
     if(s>1.0f && j.m.vel[1]<0.0f) {
-        const float sinDive=Clamp(-j.m.vel[1]/s,0.0f,1.0f),cosDive=std::sqrt(1.0f-sinDive*sinDive);
-        const float t=kReact+RollToLift(j)/k.roll;
-        bottom-=s*s/(k.maxG*kG)*(1.0f-cosDive)-j.m.vel[1]*t+0.5f*kGravity*sinDive*sinDive*t*t;
+        const PullOut p=PredictPullOut(PullOutFor(j,k));
+        bottom-=p.drop;
+        float flat[3]={j.m.vel[0],0.0f,j.m.vel[2]};
+        if(Normalize(flat)) {
+            const float end[3]={pos[0]+flat[0]*p.run,pos[1],pos[2]+flat[2]*p.run};
+            const float under=GroundClearance(end);
+            if(under!=kNoGround && end[1]-under>floorY)floorY=end[1]-under;
+        }
     }
     if(bottom<floorY+kMinAlt) {
         // Pulling up, never turning back at the same time: `want` behind it made JetSteer's shortest arc go through
