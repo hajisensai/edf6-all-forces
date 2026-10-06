@@ -9,8 +9,23 @@
 // SGOs' car_base_all_rigid_body[0] where the class has one, else estimates (L, docs/vehicle-ram-re.md §3).
 #pragma once
 #include <cmath>
+#include <cstdint>
 
 namespace ram {
+// Pick only an unused/expired hit slot. Evicting a live cooldown lets a crowded
+// contact list hit the same enemies every frame. A full table defers new targets.
+template<class Hit,class Matches>
+int CooldownSlot(const Hit* hits,int count,std::uint64_t now,std::uint64_t gap,Matches matches) noexcept {
+    int free=-1;
+    for(int i=0;i<count;++i) {
+        const Hit& h=hits[i];
+        if(h.target && now-h.at<gap) {
+            if(matches(h.target))return -1;
+        } else if(free<0)free=i;
+    }
+    return free;
+}
+
 // E = 1/2 m v^2 in the game's damage at kJoulesPerDamage J a point: the mod's Mk 82 (1500 damage, pylib/vcobjects.py
 // STORES) carries some 430 MJ of explosive (87 kg of tritonal, ~103 kg of TNT at 4.184 MJ/kg): 2.87e5 J a point. Times
 // `tier` (the rammer's max HP over its SGO durability: the factor the game scales a vehicle's weapons by, so the ram

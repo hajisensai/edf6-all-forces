@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 namespace {
 int failures=0;
@@ -32,6 +33,39 @@ const ram::Profile* Find(const char* name) {
 
 // The vehicle standing at the origin facing +z (veh+0x60: right, up, forward rows).
 constexpr float kIdentity[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+
+void CooldownChecks() {
+    struct Hit { int target; std::uint64_t at; };
+    constexpr int capacity=64;
+    // Nine contacts overflowed the old eight-slot ring on every frame. Sixteen
+    // is a full contact scan; neither crowd may get a second hit in this second.
+    for(int enemies : {9,16}) {
+        Hit hits[capacity]{};
+        int counts[16]{};
+        for(int frame=0;frame<60;++frame) {
+            const auto now=static_cast<std::uint64_t>(frame*1000/60);
+            for(int enemy=1;enemy<=enemies;++enemy) {
+                const int slot=ram::CooldownSlot(hits,capacity,now,1000,[enemy](int target){return target==enemy;});
+                if(slot>=0){hits[slot]=Hit{enemy,now};++counts[enemy-1];}
+            }
+        }
+        for(int enemy=1;enemy<=enemies;++enemy) {
+            Expect(counts[enemy-1]==1,"crowd keeps one hit per enemy per second",counts[enemy-1],enemies);
+            const int slot=ram::CooldownSlot(hits,capacity,1000,1000,[enemy](int target){return target==enemy;});
+            Expect(slot>=0,"enemy becomes due at one second",enemy);
+            if(slot>=0)hits[slot]=Hit{enemy,1000};
+        }
+    }
+    Hit full[capacity]{};
+    for(int i=0;i<capacity;++i)full[i]=Hit{i+1,100};
+    Expect(ram::CooldownSlot(full,capacity,200,1000,[](int target){return target==65;})<0,
+           "full cooldown table defers new targets");
+    for(int enemy=1;enemy<=capacity;++enemy)
+        Expect(ram::CooldownSlot(full,capacity,200,1000,[enemy](int target){return target==enemy;})<0,
+               "full table preserves existing cooldowns",enemy);
+    Expect(ram::CooldownSlot(full,capacity,1100,1000,[](int target){return target==65;})>=0,
+           "expired full table accepts a new target");
+}
 
 void FormulaChecks() {
     // The jets' formula as playerjet.cpp had it: 1/2 m v^2 / 2.87e5.
@@ -167,6 +201,7 @@ void Cases() {
 }  // namespace
 
 int main() {
+    CooldownChecks();
     FormulaChecks();
     ProfileChecks();
     ContactChecks();

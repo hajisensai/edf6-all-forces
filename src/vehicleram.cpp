@@ -57,7 +57,7 @@ constexpr ULONGLONG kStaleMs=2000;    // a vehicle not seen this long is gone: i
 constexpr ULONGLONG kMissLogMs=2000;  // Debug: a moving vehicle's near miss at most this often
 constexpr float kMissLogWithin=15.0f; // ...when an enemy's body came within this of a part's centre
 constexpr ULONGLONG kResyncMs=250;    // a step longer than this (a pause, a new ride): the parts' motion starts over
-constexpr int kMaxRammers=48,kHits=8,kMostContacts=16;
+constexpr int kMaxRammers=48,kMostContacts=16,kHits=kMostContacts*4;
 
 struct PartState {
     unsigned char* rec;   // the part's bone record (nullptr: the hull, or the bone not in this model)
@@ -74,7 +74,6 @@ struct Rammer {
     bool fromCar;         // kg is the game's CarBase sum (else the class's stock SGO mass)
     PartState parts[kMostParts];
     Hit hits[kHits];
-    int nextHit;
 };
 Rammer rammers[kMaxRammers]{};
 bool carMassOk=false;
@@ -205,9 +204,9 @@ void SeeEnemy(void* ctx,const void* object,const float* lock) noexcept {
 
 // Whether `object` was hit by this vehicle within kHitGapMs; if not, it is now (true: hit it).
 bool Due(Rammer& r,const void* object,ULONGLONG ms) noexcept {
-    for(auto& h:r.hits)if(h.target.Is(object) && ms-h.at<kHitGapMs)return false;
-    r.hits[r.nextHit]=Hit{ObjRef::Of(object),ms};
-    r.nextHit=(r.nextHit+1)%kHits;
+    const int slot=ram::CooldownSlot(r.hits,kHits,ms,kHitGapMs,[object](const ObjRef& target){return target.Is(object);});
+    if(slot<0)return false;
+    r.hits[slot]=Hit{ObjRef::Of(object),ms};
     return true;
 }
 
