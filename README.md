@@ -8,7 +8,7 @@ EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Stea
 | 插件 | 目录 | 做什么 |
 |---|---|---|
 | `EDF6VehicleCrew` | `src/` | NPC 开载具 / 开直升机，玩家随时顶替（本文下面全部内容） |
-| `EDF6AutoTurret` | `autoturret/` | 防空车（KG6 克卜勒系）改高射炮并自瞄、玻尔斯对地自瞄；泰坦和带炮手座坦克的两门副炮自瞄，炮手座没人时自动开火（算驾驶员的）；关卡里 NPC 开的防空车换成 mod 版防空车，NPC 泰坦补上副炮。说明见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md) |
+| `EDF6AutoTurret` | `autoturret/` | 防空车（KG6 克卜勒系）改高射炮并自瞄、玻尔斯对地自瞄；泰坦和带炮手座坦克的两门副炮自瞄，炮手座没人时自动开火（算驾驶员的）；关卡里 NPC 开的防空车换成 mod 版防空车，NPC 泰坦补上副炮，关卡里的坦克开炮时有和玩家版一样的车体后坐力。说明见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md) |
 
 两个插件各自独立，可以只装一个。根目录 `build.cmd` 一次构建两个，DLL 和 ini 都输出到 `build/Mods/Plugins/`（构建产物，不进仓库）。
 `EDF6AutoTurret` 的武器 / 载具数据由你自己的游戏数据生成，不进仓库：
@@ -18,7 +18,7 @@ python autoturret\tools\build.py install      （游戏关闭时；--mods DIR �
 python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 MOD 的文件不动）
 ```
 
-它写 `Mods/WEAPON/`（防空车、玻尔斯的呼叫和炮）、`Mods/OBJECT/`（关卡防空车 `V603_FLAK_*`、NPC 泰坦 `VEHICLE404_BIGTANK_AI`）以及 `WEAPONTEXT` 里这几辆车的说明行，只改自己的行；
+它写 `Mods/WEAPON/`（防空车、玻尔斯的呼叫和炮）、`Mods/OBJECT/`（关卡防空车 `V603_FLAK_*`、NPC 泰坦 `VEHICLE404_BIGTANK_AI` 和其它关卡坦克，见 `autoturret/tools/npc_recoil.py`）以及 `WEAPONTEXT` 里这几辆车的说明行，只改自己的行；
 做了什么记在 `Mods/.edf6at_data.json`（含备份），卸载照它恢复。这些数据不依赖插件也能用：插件被停用或删掉时，这些炮照原版方式开火，只是没有自瞄和近炸引信。
 
 ## 功能
