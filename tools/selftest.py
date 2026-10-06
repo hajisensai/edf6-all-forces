@@ -2582,6 +2582,34 @@ def incremental_install_regressions() -> None:
     run_checks()
 
 
+
+@test
+def soft_edge_wired() -> None:
+    """The flyers' soft edge (src/airbound.h, the user 2026-10-06): the NPC jets' Guard turns them in by it (not the old
+    world walls), their rotor goals and anchors are put inside it, their targets past it let be, the helis' wanted
+    velocity is cut by it; its ini keys are read, range-checked, shipped and documented; its two offline tests are CTest
+    tests; a blocked jet logs what it hit (src/impact.cpp, built)."""
+    flight, jet, combat, heli = src('src/jet_flight.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/heli.cpp')
+    guard = flight[flight.index('void Guard(Jet& j,'):flight.index('void ResetWalls()')]
+    assert 'SoftEdge(j,pos,want);' in guard and 'WorldWalls' not in flight, 'Guard: the soft edge, not the world walls'
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);' in flight
+    assert 'airbound::CapClimb(' in flight
+    hover = flight[flight.index('void Hover(Jet& j,'):]
+    assert 'airbound::ClampIn(JetSoftBox(j),inside,0.0f);' in hover[:1500], 'Hover: the goal inside the soft edge'
+    assert 'anchor=SoftAnchor(*j,anchor,anchorIn);' in jet
+    assert 'if(PastEdge(*k.j,p))return;' in combat
+    fly = heli[heli.index('void Fly(Heli& h,unsigned char* v,bool playerAboard)'):]
+    assert 'SoftEdge(h,s,mode,w);' in fly[:600] and 'airbound::LimitOut(' in heli
+    assert 'LogImpact("JET",v,pos,was);' in jet and 'LogImpact("PJET",v,pos,j.sent);' in src('src/playerjet.cpp')
+    cm = src('CMakeLists.txt')
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)' in cm
+    assert 'add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite' in cm and 'airbound_check)' in cm
+    assert '#include "../src/airbound.h"' in src('tools/airbound_check.cpp')
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):
+        assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin, key
+        assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
+
 def main() -> int:
     failed = 0
     for fn in TESTS:

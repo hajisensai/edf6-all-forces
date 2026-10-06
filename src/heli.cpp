@@ -35,6 +35,7 @@
 #include "crew.h"
 #include "body506.h"
 #include "heliaim.h"
+#include "airbound.h"
 #include "layout.h"
 #include "memory.h"
 #include "roundaim.h"
@@ -414,6 +415,7 @@ struct Heli {
     ULONGLONG enemyAt;    // game ms: an enemy was last within heliRange of whom it follows
     float pPrev[3],pVel[3];
     float top,stopDecel;  // m/s at full stick, and the braking it plans with (see Tune)
+    bool edgeOut;         // past its soft edge (SoftEdge): logged once each way
     bool tuned;           // Fly writes params (k, b, max yaw, yaw smoothing) every frame
     float params[4];
     float stock[4];       // ...and the heli's own (Tune read them): put back when its NPC stops flying it (Restore)
@@ -1947,12 +1949,45 @@ void FlyLog(Heli& h,const Sense& s,Mode mode,const Want& w,const Control& c,cons
                    v,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,s.storeWorth,StoreReady(h,s),s.storeAim,h.storeAmmo);
 }
 
+// The soft edge (airbound.h; the user 2026-10-06: a small edge before the edge, past it they come back). A heli is
+// held inside the move area (shrunk by its inset, veh+kAreaInset) by the stock input, which teleports it back: one
+// chasing out there sat on that edge (or, on the big map, 650 m out past the ground's edge, BigWorld's widened area).
+// Its edge: that box and the play edge (crew.h PlayEdge) overlapped; its soft edge that less the band (ini HeliSoftEdge,
+// at least what it takes to stop from full speed, kHeliSoftReact s of it at full speed included). Its post and its hold
+// are put inside it (a guard post or a map command's point out there: its guard circle stays inside), and its wanted
+// velocity out across it is cut to what still stops on it (LimitOut); past it, in at kHeliBackShare of its top speed.
+// Rescuing or landing by the player it goes where the player is.
+constexpr std::size_t kAreaInset=0xE00;
+constexpr float kHeliSoftReact=0.5f,kHeliBackShare=0.3f;
+void SoftEdge(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
+    const airbound::Box edge=HeldBox(At<float>(s.v,kAreaInset));   // mapbounds.h
+    const float brake=h.stopDecel>0.5f ? h.stopDecel : 0.5f;
+    const float stop=h.top*h.top/(2.0f*brake)+h.top*kHeliSoftReact,least=Cfg().heliSoftEdge;
+    float band=stop>least ? stop : least;
+    const float most=airbound::HalfOf(edge)*0.5f;
+    if(band>most)band=most;
+    const airbound::Box soft=airbound::Inset(edge,band);
+    airbound::ClampIn(soft,h.post,Cfg().heliGuardRadius);
+    airbound::ClampIn(soft,h.hold,0.0f);
+    const bool out=!airbound::Inside(soft,s.pos);
+    if(out!=h.edgeOut) {
+        h.edgeOut=out;
+        Log("HELI v=%p %s its soft edge at (%.0f,%.0f): band %.0f, edge (%.0f,%.0f)-(%.0f,%.0f)",s.v,out ? "past" : "back inside",s.pos[0],
+            s.pos[2],band,edge.lo[0],edge.lo[1],edge.hi[0],edge.hi[1]);
+    }
+    if(mode==Mode::rescue || mode==Mode::land)return;
+    airbound::LimitOut(soft,s.pos,brake,kHeliSoftReact,h.top*kHeliBackShare,w.vel);
+    const float top=CeilingY()-Cfg().airSoftCeil;
+    if(w.height>top)w.height=top;
+}
+
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     Sense s{};
     if(!SenseFrame(h,v,playerAboard,s))return;
     Advance(h,s);
     const Mode mode=SelectMode(h,s);
     Want w=FlyMode(h,s,mode);
+    SoftEdge(h,s,mode,w);
     const Control c=Steer(h,s,mode,w);
     const Shot shot=Fire(h,s,mode);
     FlyLog(h,s,mode,w,c,shot);
@@ -2649,6 +2684,23 @@ Sea SeaAt(float x,float z,float* surface) noexcept { return SeaProbe(x,z,surface
 
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept {
     return ForEachEnemy(vehicle,[&](const void* object,const float* aim) noexcept { visit(ctx,object,aim); });
+}
+
+bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept {
+    const auto registry=At<const unsigned char*>(image,kRegistry);
+    if(!Readable(registry,kRegList+0x10))return false;
+    const auto head=At<const unsigned char*>(registry,kRegList);
+    if(!Readable(head,0x10))return false;
+    int n=0;
+    for(auto node=At<const unsigned char*>(head,0);node!=head && n<kMaxNodes;node=At<const unsigned char*>(node,0),++n) {
+        const auto target=At<const unsigned char*>(node,kNodeTarget);
+        if(!target || target[0]!=0 || !target[kTargetValid])continue;
+        const auto object=At<const unsigned char*>(target,kTargetObject);
+        if(!object || object[kDead])continue;
+        const float* a=reinterpret_cast<const float*>(target+kTargetAim);
+        if(std::isfinite(a[0]) && std::isfinite(a[1]) && std::isfinite(a[2]))visit(ctx,object,a);
+    }
+    return true;
 }
 
 bool VisitEnemiesOf(std::int32_t team,EnemyVisitor visit,void* ctx) noexcept {

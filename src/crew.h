@@ -206,6 +206,11 @@ struct Config {
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
+    // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
+    float airSoftEdge=600.0f;       // m: the jets' band is at least this wide
+    float airSoftTurns=1.0f;        // ...and at least this many of the kind's full-speed turn diameters (at most half the edge)
+    float airSoftCeil=150.0f;       // m under the ceiling the jets turn level from (soft ceiling)
+    float heliSoftEdge=150.0f;      // m: the NPC helis' band inside their edge (plus what they need to stop)
     bool primer=true;          // the Primer creatures (enemies: EDF6VC_CENTIPEDE / _DRAGONFLY a mission places) are flown (primer.cpp)
     float primerHpScale=1.0f;  // ...their HP, times the SGO's (centipede 400, dragonfly 600)
     bool primerFire=true;      // ...their guns fire
@@ -263,6 +268,9 @@ void ResetMissiles() noexcept;    // missile.cpp
 void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
 void BigWorldProbe() noexcept;
+// What a jet ran into (impact.cpp), logged when it is held back ("blocked"): the nearest map surface round `pos`
+// (terrain or a building) and the nearest objects (class, team, distance). `who` "JET" / "PJET", `way` its velocity.
+void LogImpact(const char* who,const void* self,const float* pos,const float* way) noexcept;
 // m: the physics world's half size (3000 stock, ini BigWorld when raised): the plugin's walls stand inside it.
 // The edge of the play area every flyer keeps inside (the user, 2026-10-05: "don't let them go out there; a buffer
 // before it; past the line, coming back comes first"): the stock world's 2400 (600 m inside its +-3000), or the big
@@ -816,6 +824,7 @@ unsigned char* PlayerHuman() noexcept;
 #include "hud.h"
 #include "nix.h"
 #include "vhud.h"
+#include "mapbounds.h"
 #include "payload.h"
 #include "map.h"
 #include "proteus.h"
