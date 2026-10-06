@@ -477,6 +477,12 @@ void Wind(Jet& j,const Kind& k,unsigned char* v,const float* pos,bool hasAim,flo
 // back to it and fires them. Each fires only with its barrel on its line (BarrelAlong: the mount as the game posed
 // it). What it fired (1 spit, 2 stinger, 4 barbs).
 int CentipedeFire(Jet& j,unsigned char* v,const float* pos,const float* aim,bool arm,bool head,bool tail) noexcept {
+    if(!arm) {   // With no target, aim has no value. Reset every mount and trigger before reading it.
+        AimPart(j,v,kAimGun,nullptr);AimPart(j,v,kAimSting,nullptr);
+        if(unsigned char* const w=HolderWeapon(v,kBarbHolder); w && Readable(w+kWeaponTrigger,1,true))w[kWeaponTrigger]=0;
+        v[kFireGun]=0;v[kFireMissile]=0;
+        return 0;
+    }
     int fired=0;
     const float to[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
     const float across=std::sqrt(to[0]*to[0]+to[2]*to[2]),dist=Len(to);
@@ -719,6 +725,13 @@ void Trace(Jet& j,const float* pos,const unsigned char* v,ULONGLONG ms) noexcept
 
 void PrimerUnlinked(Jet& j,bool front,ULONGLONG ms) noexcept {
     PrimerState& s=j.primer;
+    // Release may notify entries whose weak references outlived their bodies. They need only lose the link;
+    // a dead or deleted body must not supply the new front's position or begin a regrowth animation.
+    if(!Alive(j.ref) || j.Vehicle()[kDead]) {
+        if(front)s.ahead=nullptr;
+        else s.behind=nullptr;
+        return;
+    }
     if(front) {
         if(!s.ahead)return;
         // A front again, headless at first (its head grows back: CentipedeFrame); its winding then starts from

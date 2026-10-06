@@ -172,7 +172,35 @@ void Player(const char* how,float t,float total) {
 }
 }  // namespace
 
+int LifecycleTest() {
+    nowMs=100;player.at=nowMs;
+    unsigned char ctrl[kCtrlSize]{};   // expired strong ownership, retained weak control block
+    void* const expired=VirtualAlloc(nullptr,kBodySize,MEM_RESERVE|MEM_COMMIT,PAGE_NOACCESS);
+    if(!expired)return 2;
+    Jet gone{};
+    gone.ref=ObjRef{expired,ctrl};gone.primer.ahead=ctrl;gone.primer.behind=ctrl;
+    PrimerUnlinked(gone,true,nowMs);PrimerUnlinked(gone,false,nowMs);
+    VirtualFree(expired,0,MEM_RELEASE);
+    if(gone.primer.ahead || gone.primer.behind || gone.primer.regrowAt || gone.primer.tailAt)return 1;
+    SimBody body{};
+    const float at[3]={10.0f,3.0f,20.0f};
+    unsigned char* const v=Make(body,Role::centipede,at,150.0f,0.0f);
+    Jet* const live=FindJet(v);
+    if(!live)return 2;
+    live->primer.ahead=ctrl;
+    PrimerUnlinked(*live,true,nowMs);
+    if(live->primer.ahead || live->primer.regrowAt!=nowMs)return 1;
+    player.at=0;   // no player: a frame must disarm and produce finite movement
+    v[kFireGun]=1;v[kFireMissile]=1;
+    PrimerFrame(*live,v,at,kDt,nowMs);
+    if(v[kFireGun] || v[kFireMissile])return 1;
+    for(float x:live->m.vel)if(!std::isfinite(x))return 1;
+    std::puts("primer lifecycle: expired weak reference, living split and missing player passed");
+    return 0;
+}
+
 int main(int argc,char** argv) {
+    if(argc==2 && std::strcmp(argv[1],"--selftest")==0)return LifecycleTest();
     int centipedes=6,dragonflies=2,friendly=0;
     float seconds=90.0f;
     const char* how="stand";
