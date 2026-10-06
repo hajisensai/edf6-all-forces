@@ -1157,7 +1157,7 @@ def cockpit_warnings_wired() -> None:
 
 @test
 def vehicle_sound_wired() -> None:
-    """The ground vehicles' sounds (src/vehsound.cpp, vsynth.h, vehmix.h; README 功能 15, docs/sound-re.md §9): their ini
+    """The ground vehicles' sounds (src/vehsound.cpp, vsynth.h, vehmix.h; README 功能 16, docs/sound-re.md §9): their ini
     keys are read, range-checked, shipped and documented; every clip jetaudio.cpp makes has a WAV name, a loop flag and a
     peak, and README names every WAV a player may put next to the DLL; the stock presets silenced are the ones the doc
     gives (car_base_se_table's idle / drive / turn and the turret's move / stop, the engine's loop handles, FireSe's
@@ -1991,6 +1991,80 @@ def vehicle_ram_wired() -> None:
     for key, default in (('VehicleRam', '1'), ('VehicleRamDamage', '20')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
     assert 'Fix("VehicleRamDamage"' in plugin, 'VehicleRamDamage is range-checked'
+
+
+@test
+def map_wired() -> None:
+    """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
+    documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the
+    bytes EDF.dll has there; the shim the soldier pre-update jumps to branches where it means to (its jumps land on the
+    no-pad jump, its absolute targets are where the code writes them); every key the plugin reads gives way to it; it
+    is installed, reset with the mission, built, and its offline checks (tools/map_cam_check.cpp, hud_view's scenes)
+    are wired."""
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
+    code, cmake, mission, hud = src('src/map.cpp'), src('CMakeLists.txt'), src('src/mission.cpp'), src('src/hud.cpp')
+    for key in ('Map', 'MapKey', 'MapButton', 'MapViewDistance'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    for key in ('MapKey', 'MapButton', 'MapViewDistance'):
+        assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
+    for name, rva in (('kHoldAt', '0x572F0C'), ('kHoldResume', '0x572F1C'), ('kNoPad', '0x573A4D'), ('kCamVtable', '0x1768C10'),
+                      ('kCamStep', '0xF86A0'), ('kLookTo', '0x4E220'), ('kTeamWalk', '0x5E11D0'), ('kMarkerVtable', '0x17D4378'),
+                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750')):
+        assert re.search(rf'\b{name}={rva}\b', code), (name, rva)
+        assert rva in doc, rva
+    for name, off in (('kCamTargetRef', '0x350'), ('kCamTarget', '0x360'), ('kCamMatrix', '0x220'), ('kHumanRecord', '0xD40'),
+                      ('kRecordStride', '0xA80'), ('kMouseX', '0x66C'), ('kMouseY', '0x684'), ('kMarkerAt', '0x1F0')):
+        assert re.search(rf'\b{name}={off}\b', code), (name, off)
+        assert off in doc or off.lower() in doc, off
+
+    # The shim: parse its bytes, put the three 8-byte values where the code copies them, follow its branches.
+    body = re.search(r'unsigned char shim\[\]=\{(.*?)\};', code, re.S).group(1)
+    shim = [int(b, 16) if b.startswith('0x') else int(b) for b in re.findall(r'0x[0-9A-Fa-f]+|\b\d+\b', body)]
+    copies = [int(o) for o in re.findall(r'std::memcpy\(shim\+(\d+),&(?:fn|resume|noPad),8\)', code)]
+    jumps = [i for i in range(len(shim) - 1) if shim[i] == 0xFF and shim[i + 1] == 0x25]
+    assert len(jumps) == 2 and copies == [9, jumps[0] + 6, jumps[1] + 6], (jumps, copies)
+    assert shim[7:9] == [0x48, 0xB8] and shim[17:19] == [0xFF, 0xD0], 'mov rax,imm64; call rax'
+    assert len(shim) == jumps[1] + 14
+    branches = [i for i in range(len(shim) - 1) if shim[i] in (0x74, 0x75) and i in (32, 37)]
+    assert branches == [32, 37], branches
+    for at in branches:
+        assert at + 2 + shim[at + 1] == jumps[1], ('a hold branch misses the no-pad jump', at, shim[at + 1])
+    assert shim[23:30] == [0x48, 0x8B, 0x9E, 0x40, 0x03, 0x00, 0x00] and shim[0:3] == [0x48, 0x89, 0xF1]
+    try:
+        import capstone
+        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+        listing = [(i.address, i.mnemonic, i.op_str) for i in md.disasm(bytes(shim[:jumps[0] + 6]), 0)]
+        assert [m for _, m, _ in listing] == ['mov', 'sub', 'movabs', 'call', 'add', 'mov', 'test', 'jne', 'test', 'je', 'jmp'], listing
+        assert all(int(o, 16) == jumps[1] for _, m, o in listing if m in ('jne', 'je')), listing
+        assert listing[-1][2] == 'qword ptr [rip]', listing[-1]
+    except ImportError:
+        pass
+
+    # With the game: the signatures are what EDF.dll has.
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if os.path.exists(dll):
+        import edfre
+        consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
+        for arr, at in (('kHoldCode', consts['kHoldAt']), ('kNoPadCode', consts['kNoPad']), ('kCamStepCode', consts['kCamStep']),
+                        ('kLookToCode', consts['kLookTo']), ('kLookToUse', 0xFC0D3), ('kTeamWalkCode', consts['kTeamWalk']),
+                        ('kMarkerUpdateCode', consts['kMarkerUpdate'])):
+            want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
+            assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
+
+    # Every key the plugin reads gives way to the map.
+    for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp'):
+        assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
+    assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
+    readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
+    assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
+                                      'overlay.cpp', 'map.cpp']), f'a new key reader: make it give way to the map ({readers})'
+
+    assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
+    assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
+    assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
+    assert 'MapScene(dir,L"map_mid"' in src('tools/hud_view.cpp')
+    assert 'ViewMapClip(true,' in code and 'ViewMapClip(false,' in code
 
 
 def main() -> int:

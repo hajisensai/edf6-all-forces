@@ -9,6 +9,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).
 target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
+# The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
+target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -142,3 +144,10 @@ target_include_directories(hud_view PRIVATE src common third_party/EDFModLoader 
 target_link_libraries(hud_view PRIVATE edf6common)
 target_compile_options(hud_view PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hud_view PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The map view's camera and grid math (src/map_cam.h: the eye, the drag that grabs the ground, the zoom's limits, the
+# grid's reach), offline (tools/map_cam_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_cam_check && build\map_cam_check.exe
+add_executable(map_cam_check EXCLUDE_FROM_ALL tools/map_cam_check.cpp)
+target_compile_options(map_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

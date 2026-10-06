@@ -162,6 +162,9 @@ void Validate(Config& n) noexcept {
     Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
     n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
     n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
+    n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
+    n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
+    if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -306,6 +309,10 @@ void LoadConfig() noexcept {
     n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
+    n.map=ReadBool(L"Map",n.map);
+    n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
+    n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
+    n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
     n.stockHeliStores=ReadBool(L"StockHeliStores",n.stockHeliStores);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
     n.seatNextKey=ReadInt(L"SeatNextKey",static_cast<DWORD>(n.seatNextKey));
@@ -348,6 +355,7 @@ void LoadConfig() noexcept {
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
+    Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
     Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d",n.stockHeliStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
@@ -539,6 +547,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
+    InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();

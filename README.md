@@ -232,7 +232,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - **旧版安装**：撞击装药 2 / 4 / 12 米是这次新增的，要重新运行安装器选「安装」才有；没有时用已装的里最接近的（日志 `JET impact ... a 8 m charge instead`）。
    - **待游戏内确认**：部件框的大小是否合适（敌人身体比锁定点大多少，`Debug=1` 时日志 `RAM ... missed` 记下擦过时离得多近）、巴尔加 / Proteus 自己的每帧钩子、各类车读到的质量（日志 `RAM v=... t (the game's body mass)`）。
 
-15. **地面载具音效**（`src/vehsound.cpp` 决定、`src/vsynth.h` 合成、`src/jetaudio.cpp` 播放，ini `VehicleSound` / `VehicleEngineVolume` / `VehicleTurretVolume` / `VehicleReloadVolume` / `VehicleGunVolume`，逆向笔记 `docs/sound-re.md` §9；2026-10-06 用户：「加点或者修改下音效：引擎声和炮塔旋转的声音，还有炮弹装填和退壳的声音，炮声换得更有力一些」）：地面载具（玩家和 NPC 的都算）的下面几种声音由插件自己播放、替换原版的同类声音，和喷气机引擎声一样按镜头位置分左右声道、远处变小变闷、开过时有多普勒变调，跟随游戏的主音量 × 效果音量，暂停时静音：
+16. **地面载具音效**（`src/vehsound.cpp` 决定、`src/vsynth.h` 合成、`src/jetaudio.cpp` 播放，ini `VehicleSound` / `VehicleEngineVolume` / `VehicleTurretVolume` / `VehicleReloadVolume` / `VehicleGunVolume`，逆向笔记 `docs/sound-re.md` §9；2026-10-06 用户：「加点或者修改下音效：引擎声和炮塔旋转的声音，还有炮弹装填和退壳的声音，炮声换得更有力一些」）：地面载具（玩家和 NPC 的都算）的下面几种声音由插件自己播放、替换原版的同类声音，和喷气机引擎声一样按镜头位置分左右声道、远处变小变闷、开过时有多普勒变调，跟随游戏的主音量 × 效果音量，暂停时静音：
    - **引擎**：坦克、Kepler、自行榴弹炮、钻头战车、Titan、Maser 是 V12 柴油机（低沉、一顿一顿），Grape、卡车、Naegling 是六缸柴油机（轻一些、高一些）；分「怠速」和「负荷」两层，按原版引擎自己的油门量（CarBase `+0x1A80`）交叉淡入，转速随油门和车速升高（音调最多升到 2.3～2.6 倍）。有人坐上驾驶座时引擎启动（约 1.2 秒升到怠速），下车后约 2 秒熄火。坦克另有履带声（履带板的咔嗒声、负重轮的闷响），随车速变快变响，原地转向也会响。摩托车、机甲保留原版的声音；
    - **炮塔转动**：炮塔或炮管转动时有伺服电机的嗡鸣（电机音 + 齿轮啸叫 + 液压嘶声），转得越快越响、越尖（按各座位瞄准轴的转速相对它自己的最快转速），转动停下时「咔」一声刹住；
    - **主炮装填**（只对主炮，见下一条，射击间隔或弹匣装填至少 1.5 秒的）：射击后约 0.4 秒退壳（闭锁打开、弹壳滑出、落地叮当弹跳），快装好时推弹入膛（装好前约 0.9 秒）、闭锁「咣」一声（装好前约 0.27 秒），时间跟着原版武器自己的计时（射击间隔 `+0xE0C`，打空后的弹匣装填 `+0xE68`，和载具 HUD 的装填条同一个数）；
@@ -241,6 +241,15 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - **自定义录音**：在 DLL 旁边放 `EDF6VehicleCrew_veh_<名字>.wav`（16 位 PCM，单声道或立体声，任意采样率）就用它代替对应的合成音，名字：`engine_heavy_idle` / `engine_heavy_load` / `engine_light_idle` / `engine_light_load`（引擎的怠速层 / 负荷层，录在怠速转速，循环）、`tracks`（履带，录在约 8 m/s，循环）、`turret`（炮塔转动，最快转速时，循环）、`turret_stop`、`gun_near`、`gun_far`、`reload_eject`、`reload_load`、`reload_close`。
    - **试听**：`cmake --build build --target vsound_check && build\vsound_check.exe` 把所有合成音和一段坦克的场景混音（启动、怠速、起步、转炮塔、开炮、装填、远处另一辆开炮）写到 `%TEMP%\edf6_vsound_check`，同时检查电平（不削波、无直流偏移、循环无缝）。
    - **待游戏内确认**：各组的音量平衡；原版声音确实都被清掉（引擎的怠速 / 行驶 / 转向循环、炮塔的转动 / 停止声、主炮的射击声，见 `docs/sound-re.md` §9 的可信度）；`Debug=1` 时日志 `HOOK vehicle sound` 一行是签名检查的结果。
+
+17. **地图**（`src/map.cpp`、`src/map_cam.h`，ini `Map` / `MapKey` / `MapButton` / `MapViewDistance`，逆向与设计 `docs/camera-re.md` §8；2026-10-06 用户：「增加一个 m 看地图的功能，要有地形显示，并且可以放大缩小，和正常 3d 地图一样」）：
+   - 按 **M**（`MapKey`；手柄 **Back**，`MapButton`，XInput 按键位）打开：你自己的镜头平滑升到头顶上空，**游戏照常画出真实的三维地形、建筑、载具和敌人**（不是贴图，就是游戏画面换了个机位），像普通 3D 地图一样操作——键鼠：按住左键拖动 / WASD / 方向键**平移**（抓着地面拖），按住右键拖动 / Q E **转向**，R F 调**俯角**（30°~88°），滚轮 / + - / PageUp PageDown **缩放**（离地 200 米 ~ 3 公里），空格（Home）**回到你身上**（之后跟着你走，屏幕上方显示 FOLLOW，平移后停止跟随）；手柄：左摇杆平移，右摇杆转向 / 调俯角，RT 放大、LT 缩小，A 回到你身上。再按 M、按 **Esc**（游戏的暂停菜单也会照常打开）或手柄 **B** 关闭，镜头平滑回到原位。
+   - 画面上叠加：地面**网格**（格距随高度取 50 米 ~ 1 公里的整数，穿过你的两条线加粗，每条线标着离你多远、在你哪一边：北 = 地图的 +Z 方向，东在它右边）、右上角**指北针**、左下角**比例尺**、你（白色圆圈 + 朝向箭头）、**队友**（绿点；其它友军步兵是暗绿点）、**友军载具**（绿框）、**飞机**（直升机、插件的战机，青色菱形）、**空中航母**（青色双框）、**敌人**（红点，敌方飞机是红色菱形；就是锁定系统知道的那些目标，和原版雷达一样不分远近都在）、**任务目标点**（黄圈，标着离你的距离）、左侧图例和屏幕下方的按键说明。地图开着时插件的其它 HUD（载具 HUD、瞄准标记等）暂不显示，游戏自己的 HUD 照常。
+   - **地图打开时你的角色 / 载具不接受操作**：用的是游戏自己「这个士兵没有手柄」时的那条路径，人物不走、不转、不开火，载具收不到摇杆、扳机和按键；插件自己的按键（换座、挂载切换、高视角、呼叫切换……）也全部让开。**游戏不暂停**（敌人照常行动），所以危险时先关地图。
+   - **远处也看得见**：打开期间把视距（近景镜头的远裁剪面）临时抬到 `MapViewDistance`（默认 6000 米），并把近裁剪面从 0.1 米抬到 0.5~5 米（离地越高越大，免得远处地形闪烁），关闭后两者都恢复原值。
+   - 炮塔、喀秋莎、瞄准具等按「屏幕中心看的地方」瞄准的功能，地图开着时仍按你打开地图前的视线，不会跟着地图镜头乱转。
+   - 离线检查：`cmake --build build --target map_cam_check` 再运行 `build\map_cam_check.exe`（镜头位置、拖动时地面跟着鼠标走、缩放上下限、网格覆盖整个画面）；`build\hud_view.exe` + `python tools\hud_view.py` 画出三张地图叠加层的布局图（`map_mid` / `map_high_pad` / `map_low`）。
+   - **待游戏内确认**（`Debug=1` 时日志 `MAP` 行）：镜头确实换成地图机位（`MAP open`；若画面没变，说明你此刻用的不是玩家镜头 `CharacterGhostCamera`）；鼠标拖动的方向（日志 `MAP mouse delta`；反了就是游戏鼠标位移的正负与推断相反）；任务目标点是否就是游戏里的 `DestinationMarker`（`MAP marker ...`）；手柄 Back 键在游戏里是否另有用途（有就改 `MapButton`）；驾驶摩托 / 汽车时个别车型自己直接读手柄的按键（例如鸣笛）不在保持范围内。
 
 所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。
 
@@ -372,6 +381,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/katyusha.cpp`：喀秋莎发射架的姿态（只抬发射架、不动镜头）和伸缩液压杆，逆向笔记见 `autoturret/docs/re-notes.md`「The Katyusha's camera and pose」。
 - `src/turretcam.cpp`：坐车时的镜头（战争雷霆式炮塔镜头、观察键、镜头摆放和高视角的位置；替换游戏每帧取的两个镜头目标点，游戏照常做缓动和碰撞），数学在 `src/turretcam.h`（`tools/turret_cam_check.cpp` 离线核对炮塔指令和摆放），镜头逆向见 `docs/camera-re.md`。
 - `src/highcam.cpp`：高视角的开关（哪些车有、按键、提示）。
+- `src/map.cpp`：地图（M 键：玩家镜头升到空中、平移 / 转向 / 缩放，打开期间保持玩家输入，收集地图上要标的单位和任务目标点），镜头与网格的数学在 `src/map_cam.h`（`tools/map_cam_check.cpp` 离线核对），叠加层在 `src/hud.cpp` 的 `MapScreen`，逆向与设计见 `docs/camera-re.md` §7。
 - `src/nix.cpp`：尼克斯的上下半身分离（腿转向时上半身在世界里保持朝向，`NixTorsoTwist`），逆向见 `docs/nix-re.md`，离线验算 `tools/nix_twist_check.cpp`。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。
