@@ -23,6 +23,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 # The map's real play area: the walls where its ground ends (src/playarea.cpp, src/playarea.h).
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
+# The stock split missiles (MissileBullet02) split short of a big target's surface.
+target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -299,6 +301,10 @@ set_target_properties(grape_turret_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 add_executable(view_clip_check EXCLUDE_FROM_ALL tools/view_clip_check.cpp)
 target_compile_options(view_clip_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The split missiles' surface distance against a simulated Blood Storm flight (src/split_fuse.h).
+add_executable(split_fuse_test tests/split_fuse_test.cpp)
+target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME split_fuse COMMAND split_fuse_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check

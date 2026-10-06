@@ -314,6 +314,7 @@ void LoadConfig() noexcept {
     n.carrierLaserBreak=ReadFloat(L"CarrierLaserBreak",n.carrierLaserBreak);
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
+    n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
@@ -520,7 +521,8 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
-    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d",n.vehicleWelding,n.giantContactCap);
+    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d",n.vehicleWelding,n.giantContactCap,
+        n.splitMissileSurface);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }
@@ -722,6 +724,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
+    InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();

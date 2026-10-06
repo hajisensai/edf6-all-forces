@@ -70,6 +70,7 @@ struct Config {
     float carrierLaserBreak=0.15f;   // the share of the ship's max HP that, taken during the charge, breaks it off
     bool vehicleWelding=true;  // wheeled chassis get the VEHICLE body quality (motion welding) instead of CHARACTER (physics.cpp)
     bool giantContactCap=true; // vertical contacts with dynamic bodies limited to maxForce*dt like EDF5's hkp (physics.cpp)
+    bool splitMissileSurface=true;// split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
     float vehicleHudRange=500.0f;// ...within this many metres of the player
@@ -300,6 +301,8 @@ bool CameraRay(float* eye,float* dir) noexcept;
 bool InstallBigWorld() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
+// The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
+bool InstallSplitMissiles() noexcept;
 // The jets' engine sound (jetsound.cpp): checked at load; per vehicle input (it picks the plugin's jets itself);
 // once a frame, the plugin off too (the camera's motion; the sounds of jets gone, or all with the plugin off, stopped).
 bool InstallJetSound() noexcept;
