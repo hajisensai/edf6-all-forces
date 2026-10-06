@@ -62,6 +62,12 @@ int main() {
         Check(Move(f,pos,out,stop,false,hyst,ramp,stick),"wall: a point out from the wall moves it");
         WorldMove(f,stick,w);
         Check(w[1]<-0.9f,"wall: it goes down the wall first",w[1]);
+        // Straight out at its own height (across a corridor, a ledge opposite): nothing of it lies along the wall; it
+        // still goes, down the wall onto the floor.
+        const float across[3]={-60.0f,15.0f,0.0f};
+        Check(Move(f,pos,across,stop,false,hyst,ramp,stick),"wall: a point straight across moves it");
+        WorldMove(f,stick,w);
+        Check(w[1]<-0.9f,"wall: across: down the wall",w[1]);
         // Along the floor at the wall's foot, 80 m to +z: down and along.
         const float along[3]={-2.0f,0.0f,80.0f};
         Check(Move(f,pos,along,stop,false,hyst,ramp,stick),"wall: a point along the wall's foot moves it");
