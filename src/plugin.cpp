@@ -291,6 +291,7 @@ void LoadConfig() noexcept {
     n.turretCamRate=ReadFloat(L"TurretCamRate",n.turretCamRate);
     n.freeLookKey=ReadInt(L"FreeLookKey",static_cast<DWORD>(n.freeLookKey));
     n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
+    n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.stockHeliStores=ReadBool(L"StockHeliStores",n.stockHeliStores);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
@@ -519,6 +520,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
+    InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();

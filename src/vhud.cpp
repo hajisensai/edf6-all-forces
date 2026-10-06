@@ -4,7 +4,8 @@
 // howitzer, the Maser...; not the plugin's aircraft and carrier, which have their own), what its seat holds and does,
 // gathered here once a frame on the game thread and drawn by hud.cpp StockVehicleHud (docs/hud-re.md §7):
 //  - the vehicle: its kind, its nose and the way its first weapon points (the hull / turret indicator against the
-//    camera's look: CameraRay), its level speed (its own position's change over the game clock), its HP;
+//    camera's look: CameraRay), its level speed (its own position's change over the game clock), its HP, whether the
+//    seat's gun stabilizer holds it (stab.cpp StabState);
 //  - the seat's weapons (holders seat+0xC8, at most kStockArms): label by the round's class (rounds.cpp), rounds left of
 //    the magazine (+0xBE8 / AmmoCount +0x248), the reload as the stock gauge reads it (weapon status 0x692100: once
 //    empty, 1 - left / ReloadTime: +0xE68 / +0x20C, or +0xE7C / +0x22C where that one is set);
@@ -169,6 +170,7 @@ void StockHudFrame(unsigned char* v) noexcept {
     r.lookOk=CameraRay(eye,r.look);
     r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);
     Speed(v,r,ms);
+    r.stab=StabState(v,r.seat);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.

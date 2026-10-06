@@ -46,8 +46,10 @@ bool KeyHeld(int vk) noexcept {
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
 }
 
+}  // namespace
+
 // Whether the seat holds an indirect-fire weapon (kIndirectLife).
-bool IndirectFire(const unsigned char* seat) noexcept {
+bool IndirectFireSeat(const unsigned char* seat) noexcept {
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
     if(!count || count>8 || !Readable(holders,count*8))return false;
@@ -61,12 +63,14 @@ bool IndirectFire(const unsigned char* seat) noexcept {
     return false;
 }
 
+namespace {
+
 // Whether the toggle is offered in `v` (seat 0 the player's): turretcam.cpp places its camera, and HighCamClass
 // takes it in.
 bool Offered(const unsigned char* v,const unsigned char* seat) noexcept {
     if(!TurretCamServes(v))return false;
     const int cls=Cfg().highCamClass;
-    return (cls>=1 && IndirectFire(seat)) || (cls>=2 && TurretCamLarge(v)) || cls>=3;
+    return (cls>=1 && IndirectFireSeat(seat)) || (cls>=2 && TurretCamLarge(v)) || cls>=3;
 }
 
 void Publish(bool on,bool keys,const void* v) noexcept {

@@ -32,7 +32,9 @@
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
 // weapon and its yaw axis turns (more than kMinTraverse): a turret. Helicopters and the plugin's jets do not. The view is
 // decoupled only while the aim hook sees that seat's aim stepped (a class that turns its turret some other way keeps the
-// stock camera). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+// stock camera). The AddSe aim step's hook is also the gun stabilizer's way in (stab.cpp StabStep runs the stock step and
+// then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
+// (Steer: stab.cpp StabHeld). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
@@ -77,7 +79,6 @@ constexpr float kLargeRig=17.0f;               // m: a rig this long counts as a
 constexpr ULONGLONG kFreshMs=200,kAimFreshMs=150,kLogMs=1000;
 
 using PointFn=float*(__fastcall*)(const void*,float*);
-using AimStepFn=void(__fastcall*)(void*,const float*);
 AimStepFn nextAim=nullptr;
 bool lookOk=false;
 
@@ -238,17 +239,22 @@ bool Wants(const unsigned char* v,const unsigned char* seat,const float* p,bool 
     return std::isfinite(want[0]) && std::isfinite(want[1]);
 }
 
-// The input that turns each axis onto `want` (each wanted angle's drift a frame fed forward), and whether it is on.
+// The input that turns each axis onto `want` (each wanted angle's drift a frame fed forward), and whether it is on. A gun
+// the stabilizer holds (stab.cpp StabHeld) is steered in its frame: from the axes it holds the gun at with no command,
+// the hull's turn taken out of the want's drift (the stabilizer turns the gun by it after the step: counted here too, the
+// turret would be sent past the point by it a second time, and the command would move the stabilizer's reference).
 bool Steer(const unsigned char* seat,const float* want,float* in) noexcept {
     const float* params=reinterpret_cast<const float*>(seat+kSeatAim+kAimParams);
+    float held[2],hull[2];
+    StabHeld(seat+kSeatAim,held,hull);
     bool on=true;
     for(int i=0;i<2;++i) {
         const float* axis=AxisAt(seat,i);
         const bool full=axis[1]-axis[0]>=2.0f*kPi-0.01f;
         const float target=full ? want[i] : vec::Clamp(want[i],axis[0],axis[1]);
-        const float error=full ? tcam::Wrap(target-axis[2]) : target-axis[2];
+        const float error=full ? tcam::Wrap(target-held[i]) : target-held[i];
         if(game.hasWant) {
-            const float moved=full ? tcam::Wrap(target-game.lastWant[i]) : target-game.lastWant[i];
+            const float moved=(full ? tcam::Wrap(target-game.lastWant[i]) : target-game.lastWant[i])-hull[i];
             game.drift[i]+=(vec::Clamp(moved,-0.2f,0.2f)-game.drift[i])*0.5f;
         }
         game.lastWant[i]=target;
@@ -351,7 +357,7 @@ void __fastcall AimHook(void* aim,const float* in) {
     if(Cfg().enabled && lookOk && aim==(shared.seat ? shared.seat+kSeatAim : nullptr)) {
         __try { Aim(static_cast<unsigned char*>(aim)-kSeatAim,in,cmd); } __except(EXCEPTION_EXECUTE_HANDLER){std::memcpy(cmd,in,sizeof(cmd));}
     }
-    nextAim(aim,cmd);
+    StabStep(aim,cmd,nextAim);   // the stock step, then the gun stabilizer's turn (stab.cpp; every AddSe seat it holds)
 }
 
 // --- the camera, from the look-at fetch (the camera's update) ---
@@ -482,32 +488,41 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     return r;
 }
+
+// The look-at fetch's redirect (the camera) and the AddSe aim step's chain (the turret, and the gun stabilizer's way
+// in: stab.cpp StabStep) go in apart: either one's code changed leaves the other in.
+bool InstallLook() noexcept {
+    if(!Matches(kLookSite,kLookSiteCode,sizeof(kLookSiteCode))) {
+        Log("TURRETCAM the riding camera's code changed: the stock vehicle cameras (no turret camera, no high view)");
+        return false;
+    }
+    // The shim: mov r8, rsi (the camera); jmp [rip] -> LookHook.
+    unsigned char shim[3+14]={0x49,0x89,0xF0,0xFF,0x25,0,0,0,0};
+    const auto hook=reinterpret_cast<std::uintptr_t>(&LookHook);
+    std::memcpy(shim+9,&hook,8);
+    void* const page=AllocateNearCode(image+kLookCall,shim,sizeof(shim));
+    if(!page){Log("TURRETCAM no code page near EDF.dll");return false;}
+    bool changed=false;
+    if(!RedirectCall(image+kLookCall,image+kPoint,page,changed)){VirtualFree(page,0,MEM_RELEASE);Log("TURRETCAM look-at call not redirected");return false;}
+    return true;
+}
+
+void InstallAim() noexcept {
+    if(!Matches(kAimStep,kAimStepCode,sizeof(kAimStepCode))){Log("TURRETCAM the seat aim's step changed: the high view only, no stabilizer on its seats");return;}
+    auto slot=reinterpret_cast<void**>(image+kAimVtable)+kAimStepSlot;
+    void* next=nullptr;
+    if(*slot!=image+kAimStep)Log("TURRETCAM the seat aim's step is patched already (%p): left alone, the high view only",*slot);   // another plugin's turret aim
+    else if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&AimHook),&next))Log("TURRETCAM the seat aim's step not hooked: the high view only");
+    else nextAim=reinterpret_cast<AimStepFn>(next);
+}
 }  // namespace
 
 bool InstallTurretCam() noexcept {
     __try {
-        if(!Matches(kLookSite,kLookSiteCode,sizeof(kLookSiteCode)) || !Matches(kAimStep,kAimStepCode,sizeof(kAimStepCode))) {
-            Log("TURRETCAM the riding camera's code or the seat aim's step changed: the stock vehicle cameras (no turret camera, no high view)");
-            return false;
-        }
-        auto slot=reinterpret_cast<void**>(image+kAimVtable)+kAimStepSlot;
-        const bool aimStock=*slot==image+kAimStep;   // another plugin's hook there: its turret aim is left alone
-        // The shim: mov r8, rsi (the camera); jmp [rip] -> LookHook.
-        unsigned char shim[3+14]={0x49,0x89,0xF0,0xFF,0x25,0,0,0,0};
-        const auto hook=reinterpret_cast<std::uintptr_t>(&LookHook);
-        std::memcpy(shim+9,&hook,8);
-        void* const page=AllocateNearCode(image+kLookCall,shim,sizeof(shim));
-        if(!page){Log("TURRETCAM no code page near EDF.dll");return false;}
-        bool changed=false;
-        if(!RedirectCall(image+kLookCall,image+kPoint,page,changed)){VirtualFree(page,0,MEM_RELEASE);Log("TURRETCAM look-at call not redirected");return false;}
-        void* next=nullptr;
-        if(!aimStock)Log("TURRETCAM the seat aim's step is patched already (%p): left alone, the high view only",*slot);
-        else if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&AimHook),&next)) {
-            Log("TURRETCAM the seat aim's step not hooked: the high view only");
-        } else nextAim=reinterpret_cast<AimStepFn>(next);
-        lookOk=true;
-        Log("TURRETCAM hooks: look-at=1 aim=%d",nextAim!=nullptr);
-        return true;
+        lookOk=InstallLook();
+        InstallAim();
+        Log("TURRETCAM hooks: look-at=%d aim=%d",lookOk,nextAim!=nullptr);
+        return lookOk || nextAim;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 

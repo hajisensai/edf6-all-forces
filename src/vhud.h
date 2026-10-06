@@ -60,6 +60,7 @@ struct StockHudReadout {
     bool aimOk,lookOk;
     float speed;                 // m/s, level (its own position's change)
     float hp,hpMax;
+    int stab;                    // the seat's gun stabilizer (stab.cpp StabState): 1 holding, 2 outrun by the hull, 0 none
     int arms,selected;           // selected: SetStockSelectedStore's (-1 none)
     StockArm arm[kStockArms];
     int threats;                 // 2 a missile homing on it, 1 a jet's lock (missile.cpp, jet.cpp: as the jets' threat ring)

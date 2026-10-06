@@ -128,6 +128,7 @@ struct Config {
     float turretCamRate=90.0f;      // ...the camera's turn at a full stick, deg/s (never slower than the turret's own)
     int freeLookKey=0x04;           // ...free look while held: the camera turns, the turret holds (VK_MBUTTON; 0 none)
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
+    bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     bool stockHeliStores=false;     // the stock 506 helis' requests carry the jets' rockets and Hellfires (the installer,
                                     // tools/make_stock_stores.py) and their secondary switches between them (payload.cpp)
@@ -414,6 +415,9 @@ bool SidecarLevelHooked() noexcept;
 void HighCamFrame(unsigned char* vehicle) noexcept;
 bool PlayerHighCam(bool* on,bool* keys) noexcept;
 bool HighCamOn(const void* vehicle) noexcept;   // turretcam.cpp: the high view is on in `vehicle` now
+// The seat holds an indirect-fire weapon (the Katyusha's rockets, the howitzer's shells: lofted or ground marked, rounds
+// living 10 s or more): its high view (HighCamClass 1) and no gun stabilizer (stab.cpp: it fires from a halt).
+bool IndirectFireSeat(const unsigned char* seat) noexcept;
 void ResetHighCam() noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
@@ -436,6 +440,22 @@ void ResetTurretCam() noexcept;
 // and its direction; `onTarget` both axes within half a degree of their want.
 struct TurretCamReadout { bool decoupled,freeLook,high,onTarget; float aim[3],gun[3],muzzle[3],gunDir[3]; };
 bool PlayerTurretCam(TurretCamReadout* out) noexcept;
+
+// stab.cpp: the gun stabilizer (README 炮管稳定器, docs/camera-re.md §7). InstallStabilizer at load (the plain seat aim's
+// step; the AddSe one comes through turretcam.cpp's hook, which calls StabStep in place of the next step); StabFrame from
+// every vehicle's input (registers its seats' aims); StabHeld: for a controller of `aim`'s gun before this frame's step
+// (turretcam.cpp Steer, EDF6AutoTurret through common/edf/aimlink.h V3), the axes the stabilizer holds it at with no
+// command (`held`, rad, the aim's senses) and how much of that is the hull's turn since the last step (`hull`): it steers
+// from `held` and takes `hull` out of its want's drift and of the axes' motion it learns from (false: not held; `held`
+// the axes as they are, `hull` 0); StabState: 1 the seat's gun is held, 2 held but the drive is outrun, 0 not held
+// (vhud.cpp).
+using AimStepFn=void(__fastcall*)(void*,const float*);
+bool InstallStabilizer() noexcept;
+void StabFrame(unsigned char* vehicle) noexcept;
+void StabStep(void* aim,const float* in,AimStepFn next) noexcept;
+bool StabHeld(const void* aim,float* held,float* hull) noexcept;
+int StabState(unsigned char* vehicle,unsigned seat) noexcept;
+void ResetStabilizer() noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
