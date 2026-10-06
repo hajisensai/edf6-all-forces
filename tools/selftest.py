@@ -2337,6 +2337,85 @@ def artillery_ragdoll_is_the_models() -> None:
     assert r.items[0] == make_artillery.RAGDOLL and r.items[1].data == new_blob, r.items[0]
     assert make_artillery.RAGDOLL == f'app:/object/{make_artillery.RAGDOLL_FILE.lower()}'
 
+
+@test
+def artillery_turret_fixed_guns_mounted() -> None:
+    """The self-propelled howitzer's turret is fixed (the user, 2026-10-06): its car_base_constraint_data turret entry
+    gets TURRET_LIMITS (the hinge and, through 0x669BA0, the seat's yaw stops), a stock entry already limited is
+    refused, and the turret camera still serves its fixed indirect-fire gun (src/turretcam.cpp Turret). The guns'
+    MAB points (muzzle, casing) are found once each in the stock Kepler guns. With the twin tank's model folder: the
+    built guns put the shell on each barrel's mouth (the stock offsets put it 2.9 m in front of it) and the casing
+    just ahead of the trunnion outside the turret (make_artillery.gun_problems); the stock MAB on that model fails."""
+    import artillery_model as am
+    import rootcpk
+    tc = src('src/turretcam.cpp')
+    assert '(yaw[1]-yaw[0]>kMinTraverse || IndirectFireSeat(seat))' in tc, 'src/turretcam.cpp Turret: a fixed howitzer'
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = vc.Game(rootcpk.DEFAULT_GAME)
+    for own in (False, True):
+        if own and am.model_dir() is None:
+            continue
+        r = dsgo.parse(make_artillery.vehicle_sgo(game, own)).root
+        assert dsgo.to_py(make_artillery.turret_constraint(r).items[1].items[1]) == make_artillery.TURRET_LIMITS
+        try:
+            make_artillery.lock_turret(r)
+            raise AssertionError('a turret entry with stops was locked again')
+        except ValueError:
+            pass
+    for stock in make_artillery.STOCK_GUNS:
+        mab = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model').items[2].data
+        muzzle, eject = make_artillery.gun_points(mab)
+        for got, want in ((muzzle, make_artillery.STOCK_MUZZLE), (eject, make_artillery.STOCK_EJECT)):
+            assert max(abs(abs(a) - abs(b)) for a, b in zip(got, want)) < 1e-3, (stock, got, want)
+    folder = am.model_dir()
+    if folder is None:
+        return
+    files = make_artillery.build(rootcpk.DEFAULT_GAME)
+    _arc, md, _info = am.build_with_info(game, folder)
+    assert make_artillery.gun_problems(files, game, md) == []
+    stock = dict(files)
+    for s, path in zip(make_artillery.STOCK_GUNS, make_artillery.VEHICLE.weapons):
+        stock[f'WEAPON/{path.split("/")[-1].upper()}'] = make_artillery.howitzer_sgo(game, s)
+    bad = make_artillery.gun_problems(stock, game, md)
+    assert len(bad) == 4 and sum('the shell leaves at' in x for x in bad) == 2, bad
+
+
+@test
+def drill_spin_bone_free_of_the_ragdoll() -> None:
+    """The drill tank's spin bone (drill_model.SPIN_BONE, the Blacker's catapi_body) is drawn from its local matrix,
+    not from the hull's physics proxy: the Blacker's ragdoll binding draws catapi_body from RagDollProxys.body every
+    frame (0x6EDCA0), which put the rehomed drill 2.5 m low inside the hull and kept it from turning. With Root.cpk:
+    the stock binding against the Blacker skeleton with the spin bone rehomed is refused (ragdoll_fit.problems names
+    catapi_body), make_drill.free_spin_bone's is accepted with only that row gone, and the drill SGO carries it."""
+    import drill_model
+    import make_drill
+    import ragdoll_fit as rf
+    import rootcpk
+    import sgo
+    from mdb import mdb_read, rab_read
+    assert 'free_spin_bone(' in src('tools/make_drill.py') and 'ragdoll_fit.problems' in src('tools/make_drill.py')
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    _v, m = sgo.read(game.read('OBJECT', 'V505_TANK.SGO'))
+    blob, shkt = bytes(m['ragdoll'][1]), game.read('OBJECT', str(m['ragdoll'][0]).rsplit('/', 1)[1].upper())
+    stock = mdb_read(next(f for f in rab_read(game.read('OBJECT', drill_model.HOST_ARC)).files
+                          if f.name.lower() == drill_model.HOST_MDB).data)
+    assert rf.problems(stock, shkt, blob) == []
+    moved, _i = drill_model.rehome_spin_bone(stock, drill_model.SPIN_BONE, drill_model.DRILL_PARENT, drill_model.DRILL_BASE)
+    before = rf.problems(moved, shkt, blob)
+    assert len(before) == 1 and before[0].startswith(f'bone {drill_model.SPIN_BONE} '), before
+    free = make_drill.free_spin_bone(blob)
+    assert rf.problems(moved, shkt, free) == [], rf.problems(moved, shkt, free)
+    rows = lambda b, k: [tuple(map(str, e[0])) for e in sgo.read(b)[1][k]]  # noqa: E731
+    gone = set(rows(blob, 'animation_from_ragdoll')) - set(rows(free, 'animation_from_ragdoll'))
+    assert gone == {('RagDollProxys.body', drill_model.SPIN_BONE)}, gone
+    assert rows(blob, 'ragdoll_from_animation') == rows(free, 'ragdoll_from_animation')
+    built = sgo.read(make_drill.vehicle_sgo(game, [f'app:/Object/{make_drill.MODEL_FILE.lower()}', make_drill.MODEL_MDB]))[1]
+    assert bytes(built['ragdoll'][1]) == free
+    assert bytes(sgo.read(make_drill.vehicle_sgo(game, make_drill.STOCK_MODEL))[1]['ragdoll'][1]) == blob
+
 @test
 def stock_payload_and_seats_wired() -> None:
     """The stock vehicles' payload readout and store switch (src/payload.cpp) and the seat switch (src/seatswitch.cpp):

@@ -30,7 +30,8 @@
 //    eye never under the rig's own height over its point. The high view: tcam::High of HighCamHeight / HighCamBack /
 //    HighCamPitch, scaled up for a big vehicle.
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
-// weapon and its yaw axis turns (more than kMinTraverse): a turret. Helicopters and the plugin's jets do not. The view is
+// weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
+// howitzer). Helicopters and the plugin's jets do not. The view is
 // decoupled only while the aim hook sees that seat's aim stepped (a class that turns its turret some other way keeps the
 // stock camera). The AddSe aim step's hook is also the gun stabilizer's way in (stab.cpp StabStep runs the stock step and
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
@@ -155,11 +156,13 @@ const unsigned char* Gun(const unsigned char* seat) noexcept {
     return nullptr;
 }
 
-// A seat 0 the plugin's camera serves: Type 1 locators, a weapon, a yaw axis that turns.
+// A seat 0 the plugin's camera serves: Type 1 locators, a weapon, a yaw axis that turns, or an indirect-fire gun that
+// does not (the self-propelled howitzer's turret is fixed, tools/make_artillery.py TURRET_LIMITS: its rider still picks
+// the target with the view and takes the high view; the guns only elevate, the hull is turned to lay them).
 bool Turret(const unsigned char* v,const unsigned char* seat) noexcept {
     if(IsHelicopter(v) || IsPlayerJet(v) || At<std::int32_t>(seat,kSeatCamType)!=1 || !Gun(seat))return false;
     const float* yaw=AxisAt(seat,0);
-    return std::isfinite(yaw[0]) && std::isfinite(yaw[1]) && yaw[1]-yaw[0]>kMinTraverse;
+    return std::isfinite(yaw[0]) && std::isfinite(yaw[1]) && (yaw[1]-yaw[0]>kMinTraverse || IndirectFireSeat(seat));
 }
 
 // The aim's direction in the world: the hull's rows turned by the axes (yaw: right positive; pitch: negative up).

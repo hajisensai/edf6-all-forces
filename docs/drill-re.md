@@ -193,7 +193,7 @@ Debug 新增姿态日志（每 3 秒）直接对照「写入的角度」和「�
 
 修法（根因在「几何挂在一根画面不更新的骨骼上」）：钻头几何改蒙到原版骨骼 `catapi_body`。它在 CAS 骨架里；这辆车没有履带物体，
 它本来不带任何几何；SGO（`car_base_*`、`tank_caterpillar_animation`、`vehicle_*`）、ragdoll（`Ragdoll_v505_tank.shkt`）和
-EDF.dll 的字符串里都没有它的名字（H，逐个搜过），所以挪动它不影响物理、履带动画和任何代码。它的 14 个子骨骼改挂 `body`，
+EDF.dll 的字符串里都没有它的名字（H，逐个搜过），所以挪动它不影响物理、履带动画和任何代码。**更正（2026-10-06，§5.6）：漏查了 SGO `ragdoll` 第二项的物理绑定，那里有一行 `RagDollProxys.body -> catapi_body`。**它的 14 个子骨骼改挂 `body`，
 绑定世界矩阵不变，钻头转时它们不跟着转。`edf6vc_drill` 留作标记骨骼（认车用），不带几何。
 仍需实机确认（L）：钻头是否转；`catapi_body` 是否被 CAS 片段（`default` / `fire`）的轨道每帧改写（会记 `its spin bone's local matrix was
 rewritten`）。Debug 姿态行同时打印 `spin bone world`、`drawn pose`（`inst+0x30` 数组里该骨骼那一项）和 `marker world`：
@@ -207,6 +207,34 @@ rewritten`）。Debug 姿态行同时打印 `spin bone world`、`drawn pose`（`
 2.4 m 以上，稍偏一点就超过 3.5 m；那几次最近的敌人在车辆原点附近（along 1.1～1.7 m），离轴线约 4.5 m，在车身侧前方。
 钻头往前顶的时候，真正被「钻」的是车头前方从地面到钻头顶这整块空间里的东西。所以改成 §4 的钻头区箱子，敌人按身体（脚下到锁定点
 这一段，加 1 m）算。仍需实机：箱子是否偏大（车头前 6 m 内地面上的敌人都会挨钻）、侧面贴车身的敌人不算接触是否合适。
+
+### 5.6 2026-10-06：0.8.0 试玩「钻头的模型依旧有问题」——钻头被物理绑定拉进车体
+
+离线实跑生成器（`python tools/make_drill.py --out <wt>/tmp/drill`）后用 `ragdoll_fit.problems(模型, Ragdoll_v505_tank.shkt, SGO 的绑定)`
+核对，只有一条不一致（H，数据）：
+
+    bone catapi_body is at (-0.000, 3.368, 4.194), its proxy RagDollProxys.body draws it at (0.000, 0.881, 0.000)
+
+V505_TANK.SGO 的 `ragdoll` 第二项（`animation_from_ragdoll`，按名字）有 44 行，其中 `RagDollProxys.body -> catapi_body`，偏移 (0, 0.881, 0)
+（原版 Blacker 的 `catapi_body` 就在那里）。每帧 `0x6EDCA0` 把动力学刚体的世界矩阵乘偏移写进这些骨骼的世界行，并清掉骨骼的组合标志
+（`docs/artillery-re.md` §2，H）。所以 §5.4 把钻头挪到 `catapi_body` 以后：
+
+- 画出来的钻头 = 顶点 × 逆绑定（−钻头根部）× 车体刚体 ∘ (0, 0.881, 0)：整根钻头被平移 (0, −2.49, −4.19)。实算钻头 4882 个顶点的包围盒，
+  应在 x ±0.97、y 2.40～4.34、z 4.20～7.96（车头前），被画在 y −0.09～1.85、z 0.00～3.77（车体 z −2.78～4.26 之内，还略低于地面）：
+  **钻头埋在车体里**，只有尖端可能从车头下部露一点。
+- 插件写的局部矩阵不参与（世界矩阵直接由刚体写入、标志被清），钻头仍然不转；它不改写局部矩阵，所以插件也记不到 `rewritten`。
+
+修法（`tools/make_drill.py free_spin_bone`）：钻头战车自己的 SGO 去掉这一行，其余 43 行和 `ragdoll_from_animation` 原样（stock 绑定先核对能原样写回）。
+`catapi_body` 于是像普通动画骨骼一样按「局部 × `body` 的世界」组合：钻头画在车头前、按插件写的角度转。`check()` 在有 Root.cpk 时
+用 `ragdoll_fit.problems` 核对物理绑定把模型每根骨骼都画在它的绑定位置（变异：不去掉这一行 → check 报上面那条）。selftest
+`drill_spin_bone_free_of_the_ragdoll` 在原版 Blacker 骨架上重放（挪动 `catapi_body` → 原版绑定报错，去掉那一行 → 一致）。
+
+其余系统检查（离线，无异常）：三个网格的绕序与法线一致（几何法线与存储法线 100% 同向，体积为正，和原版 E551 相同约定）；
+UV 已按游戏的左上原点翻转、贴图渲染位置正常（`pylib/model_view.py --color @tex`）；钻头在 +Z（车头），车底贴地（最低 −0.00）；
+蒙皮只到 `body` / `catapi_body`。无法离线判断：铁雨模型导出时是否镜像（贴图上没有文字可对照；钻头和车体基本对称）。
+
+仍需实机（L）：钻头是否画在车头前并转动（Debug 姿态行的 `drawn pose` 应跟着 `written` 走）；`catapi_body` 的组合是否用到本帧车体的
+世界矩阵（若用上一帧，高速行驶时钻头会落后车体一帧）。
 
 ## 6. 镜头（`tools/make_drill.py CAMERA`）
 

@@ -16,7 +16,8 @@ with every stock mesh taken out and the OBJ in their place:
     bones the vehicle's CAS skeleton (v505_tank.cas) names; a bone of our own composes its world matrix all right
     (the 2026-10-05 19:56 play logged it turning) but is drawn at its bind pose, so the drill never turned on screen
     (docs/drill-re.md §5.4). `catapi_body` is in that skeleton, carries nothing of ours but the drill (the track
-    object is left out), and no SGO entry, ragdoll shape or EDF.dll string names it;
+    object is left out), and no SGO entry, ragdoll shape or EDF.dll string names it but one row of the ragdoll's
+    binding (the hull's proxy draws it), which the drill tank's SGO drops (tools/make_drill.py free_spin_bone);
   - a marker bone DRILL_BONE (no geometry) inserted at the end of `body`'s subtree, at the drill's base: the plugin
     tells the drill tank from a stock Blacker by it (the object bones after it move one index on; no stock data
     refers to bones by index: the SGO, CAS, ragdoll and constraints name them);
