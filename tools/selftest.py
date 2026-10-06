@@ -1896,10 +1896,15 @@ def map_wired() -> None:
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
     assert 'MapScene(dir,L"map_mid"' in src('tools/hud_view.cpp')
     assert 'ViewMapClip(true,' in code and 'ViewMapClip(false,' in code
-    # The pins: every enemy the radar's hostile walk finds (the nearest kMapEnemies drawn, the cap the README says), the
+    # The enemies: every one the radar's hostile walk finds; the large ones pins by HP (kMapLargeEnemies), the small ones
+    # dots by distance (kMapDots), the caps the README says; the
     # pin's height from map_cam.h (checked offline), drawn for every kind.
-    assert '0x82B8C3' in doc and 'HUiHudRader' in doc and '256' in readme and 'kMapEnemies' in readme
-    assert re.search(r'kMapEnemies=256\b', src('src/map.h')) and 'std::partial_sort(foes' in code
+    mh = src('src/map.h')
+    assert '0x82B8C3' in doc and 'HUiHudRader' in doc
+    for name, value in (('kMapLargeEnemies', '64'), ('kMapDots', '1024')):
+        assert re.search(rf'\b{name}={value}\b', mh) and name in readme and f'**{value}**' in readme and value in doc, name
+    assert 'a.hpMax>b.hpMax' in code and 'a.d2<b.d2' in code and 'std::partition(foes' in code
+    assert 'MapDot1(' in hud and 'kMapFlying' in hud and 'Dot(' in src('tools/hud_view.cpp')
     assert 'mapcam::PinHeight(' in hud and 'PinHeight(' in src('tools/map_cam_check.cpp')
     kinds = re.search(r'enum class MapKind : std::uint8_t \{(.*?)\};', src('src/map.h')).group(1).replace(' ', '').split(',')
     icon = hud[hud.index('void MapIcon('):hud.index('struct Pin {')]
