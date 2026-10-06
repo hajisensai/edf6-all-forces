@@ -181,6 +181,53 @@ def gear_legs_as_the_models_fold_them() -> None:
 
 
 @test
+def gear_mount_reaches_the_skin() -> None:
+    """pylib/jet_gear.py mounts on synthetic data: a slanted cylinder (the donor's shock absorber: its hub end at the
+    origin, 0.65 forward and 0.42 up to its upper end, 0.07 of that inside its donor body) placed x 1.5 under a level
+    skin 0.5 over where its end would be: reach() raises the end until it goes 0.07 x 1.5 into the skin, _shear keeps
+    the hub end, lifts the upper end by exactly that, and leaves every normal perpendicular to the sheared surface."""
+    import math
+    import jet_gear as jg
+    ring = 8
+    axis_d = (0.0, 0.42, 0.65)
+    ln = math.hypot(axis_d[1], axis_d[2])
+    ax = (0.0, axis_d[1] / ln, axis_d[2] / ln)
+    u = (1.0, 0.0, 0.0)
+    w = (0.0, ax[2], -ax[1])     # u x axis: perpendicular to both
+    r = 0.04
+    rows, P = [], []
+    for end in (0.0, 1.0):
+        for k in range(ring):
+            a = 2 * math.pi * k / ring
+            nrm = tuple(math.cos(a) * u[c] + math.sin(a) * w[c] for c in range(3))
+            p = tuple(end * axis_d[c] + r * nrm[c] for c in range(3))
+            P.append(p)
+            rows.append([p, nrm, ax])
+    m = jg.mount_of(0, 0, P, set(range(2 * ring)), 0.07)
+    assert abs(m.length - ln) < 1e-9 and all(abs(m.axis[c] - ax[c]) < 1e-9 for c in range(3)), (m.axis, m.length)
+    s, off = 1.5, (0.0, 0.0, 0.0)
+    skin_y = m.top[1] * s + 0.5
+    rise = jg.reach(m, s, off, lambda _x, _z: skin_y)
+    top, short = jg.mount_gap(m, s, off, lambda _x, _z: skin_y, rise)
+    assert abs(short) < 1e-9 and abs(top[1] - (skin_y + 0.07 * s)) < 1e-9, (top, short, rise)
+    assert jg.reach(m, s, (0.0, 1.0, 0.0), lambda _x, _z: skin_y) == 0.0, 'a mount already deep enough is not moved'
+    keys = ['position:0', 'normal:0', 'tangent:0']
+    out = [jg._shear(m, rise, row, keys) for row in rows]
+    for k in range(ring):
+        lo, hi = out[k], out[ring + k]
+        assert max(abs(lo[0][c] - rows[k][0][c]) for c in range(3)) < 1e-9, 'the hub end moved'
+        assert abs(hi[0][1] - rows[ring + k][0][1] - rise * m.t(rows[ring + k][0])) < 1e-9
+        side = [hi[0][c] - lo[0][c] for c in range(3)]               # along the sheared surface
+        an = 2 * math.pi * k / ring
+        around = [-math.sin(an) * u[c] + math.cos(an) * w[c] for c in range(3)]   # the hub ring's tangent there
+        for e in (side, around):
+            dot = sum(lo[1][c] * e[c] for c in range(3)) / math.sqrt(sum(x * x for x in e))
+            assert abs(dot) < 1e-9, f'normal {lo[1]} not across the sheared surface ({dot:.3g})'
+        nl = math.sqrt(sum(x * x for x in lo[1]))
+        assert abs(nl - 1.0) < 1e-9
+
+
+@test
 def chute_canopy_geometry() -> None:
     """pylib/chute_model.py canopy(): a dome 2 x RADIUS across and HEIGHT over its rim, open underneath (nothing under
     the rim but the lines, which stay inside it and end at the riser point), the outside shell facing out and the

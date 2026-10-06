@@ -80,17 +80,17 @@ constexpr JetNozzles kJetNozzles[]={
     {7003.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
     {7020.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
     {7201.0f,2,{{2.327f,1.511f,-7.804f},{-2.327f,1.511f,-7.804f}},{5.976f,1.195f}},
-    {7004.0f,1,{{0.0f,1.07f,-0.799f},{0.0f,0.0f,0.0f}},{2.377f,0.475f}},
+    {7004.0f,2,{{1.916f,1.157f,-0.457f},{-1.916f,1.157f,-0.457f}},{3.69f,0.738f}},
     {7006.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
     {7007.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
     {7008.0f,1,{{0.0f,1.005f,-1.261f},{0.0f,0.0f,0.0f}},{1.616f,0.323f}},
-    {7011.0f,1,{{0.0f,1.267f,-1.597f},{0.0f,0.0f,0.0f}},{4.755f,0.951f}},   // the gunship: the stock bomber401 (kBomberNozzles)
+    {7011.0f,2,{{3.831f,1.44f,-0.913f},{-3.831f,1.44f,-0.913f}},{7.39f,1.478f}},   // the gunship: the stock bomber401 (kBomberNozzles)
 };
 // The stock bombers a strike jet took over (airstrike.cpp) fly their own models under the strike jet's mark (crew.h
 // BomberBody tells them apart): their exits, measured on those models as they are (pylib/jet_models.py STOCK_BOMBERS;
 // mark 0: not looked up by mark).
 constexpr JetNozzles kBomberNozzles[]={
-    {0.0f,1,{{0.0f,1.267f,-1.597f},{0.0f,0.0f,0.0f}},{4.755f,0.951f}},   // JetBody::bomber401
+    {0.0f,2,{{3.831f,1.44f,-0.913f},{-3.831f,1.44f,-0.913f}},{7.39f,1.478f}},   // JetBody::bomber401
     {0.0f,2,{{3.58f,0.039f,-12.006f},{-3.58f,0.039f,-12.006f}},{9.195f,1.839f}},   // JetBody::bomber501_2
 };
 constexpr float kStrikeMark=7001.0f;
