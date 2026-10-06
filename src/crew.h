@@ -227,10 +227,14 @@ void SuppressBump(bool on) noexcept;
 bool BumpSuppressed() noexcept;
 
 // --- Time ---
-// The game clock, game thread only: wall time, except that a gap between two reads longer than 250 ms
-// (pause menu, loading) counts as one 16 ms frame. Every timer of the plugin's logic, the player fix's
-// included, is on this clock; wall time (GetTickCount64) is for log throttles and other threads only.
+// The game clock, game thread only (game_clock.h): wall time, stopped while the game is paused (GamePaused), and a
+// gap between two reads longer than 250 ms (loading) counts as one 16 ms frame. Every timer of the plugin's logic,
+// the player fix's included, is on this clock; wall time (GetTickCount64) is for log throttles and other threads only.
 ULONGLONG GameMs() noexcept;
+// The game's own pause (the pause menu: xgs::game::System's pause bits, docs/hud-re.md §10); any thread. False when
+// CheckPauseFlag (at load, patches nothing) found the code different.
+bool CheckPauseFlag() noexcept;
+bool GamePaused() noexcept;
 // The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
 // (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
 ULONGLONG GameFrame() noexcept;

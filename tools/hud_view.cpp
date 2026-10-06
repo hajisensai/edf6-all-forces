@@ -27,6 +27,7 @@ Config config{};
 bool hasTurret=false;
 edf::aimlink::TurretReadoutV1 sceneTurret{};
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false;
+bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
 MapReadout sceneMap{};
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
@@ -80,6 +81,7 @@ void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return GetTickCount64(); }
+bool GamePaused() noexcept { return paused; }
 bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return hasJet; }
 bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;return hasHeli; }
 bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; }
@@ -297,6 +299,26 @@ bool StockLayoutApart(int width,const ProteusReadout* proteus=nullptr) {
     return apart && rwr.any && block.any && inside;
 }
 
+// The pause menu (docs/hud-re.md §10): the scene now up draws, and the same scene draws nothing while the game is paused.
+bool PausedDrawsNothing(const float* pos,const float* fwd) {
+    float vp[16];
+    Camera(pos,fwd,1920.0f,1080.0f,vp);
+    struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
+    Box shown[2]{};
+    for(int p=0;p<2;++p) {
+        paused=p==1;
+        HudPublish();
+        box=Box{};boxing=true;
+        HudDraw(vp,image,&viewport,nullptr,0);
+        boxing=false;shown[p]=box;
+    }
+    paused=false;
+    const bool ok=shown[0].any && !shown[1].any;
+    std::printf("%s  paused: drawn (%.0f,%.0f)-(%.0f,%.0f) running, %s paused\n",ok ? "ok  " : "FAIL",shown[0].x0,shown[0].y0,shown[0].x1,
+                shown[0].y1,shown[1].any ? "something" : "nothing");
+    return ok;
+}
+
 // EDF6AutoTurret's mode lines (TurretAimMarks: the state, the keys; the longest: the lead circle, a lock) at `width` x
 // 1080: apart from the stock HUD's block and its RWR scope, on the screen, and saying plainly on or off.
 bool TurretLayoutApart(int width) {
@@ -465,6 +487,7 @@ int wmain(int argc,wchar_t** argv) {
     int failed=0;
     failed+=!StockLayoutApart(1920);
     failed+=!StockLayoutApart(2520);
+    failed+=!PausedDrawsNothing(ground,sceneStock.hull);
     // EDF6AutoTurret's turret (the tank's gun the player is at): auto-aim on, then flipped to the lead circle (its banner).
     hasTurret=true;
     sceneTurret=edf::aimlink::TurretReadoutV1{};

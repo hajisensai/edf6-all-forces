@@ -2614,6 +2614,27 @@ def map_wired() -> None:
 
 
 @test
+def game_clock_and_hud_stop_with_the_pause() -> None:
+    """The pause menu (docs/hud-re.md §10): the game clock stops while the game's own pause flag says paused (the camera
+    step still reads it every frame of the pause), and the HUD draws nothing then. GameMs runs game_clock.h, the rule
+    tools/pause_clock_check.cpp checks; the pause flag is read from the System the pause menu sets, its code checked at
+    load and named in the doc."""
+    crew, hud, plugin, clock, doc = (src('src/crew.cpp'), src('src/hud.cpp'), src('src/plugin.cpp'), src('src/game_clock.h'),
+                                     src('docs/hud-re.md'))
+    assert '#include "game_clock.h"' in crew
+    assert re.search(r'ULONGLONG GameMs\(\) noexcept \{ return gameclock::Read\(clock,GetTickCount64\(\),GamePaused\(\)\); \}', crew)
+    assert 'if(c.wall && !paused)' in clock, 'game_clock.h: a paused read must not move the clock'
+    assert 'CheckPauseFlag();' in plugin
+    draw = hud[hud.index('void HudDraw('):]
+    assert draw.index('if(GamePaused())return;') < draw.index('MapScreen('), 'HudDraw must stop before it draws anything'
+    for rva in ('0x20B2958', '0xCD8', '0xCDC', '0x934A46', '0x934ED3', '0x1196FC0', '0x11990C', '0x119953B'):
+        assert rva in doc, f'docs/hud-re.md §10 does not mention {rva}'
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(pause_clock_check EXCLUDE_FROM_ALL tools/pause_clock_check.cpp)' in cmake
+    assert '#include "../src/game_clock.h"' in src('tools/pause_clock_check.cpp')
+
+
+@test
 def hud_switch_cues_wired() -> None:
     """The loadout strip (every store's picture, name and rounds; the picked one large for a moment after a switch) and
     EDF6AutoTurret's aim mode said as on / off with a banner on a flip (the user, 2026-10-06) are drawn where the stores
