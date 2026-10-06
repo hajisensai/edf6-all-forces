@@ -2630,6 +2630,40 @@ def hud_switch_cues_wired() -> None:
 
 
 @test
+def npc_ai_wired() -> None:
+    """The friendly soldiers' own AI (src/npcai.cpp, docs/npc-ai-design.md): its Think hook runs the stock Think first and
+    rewrites the intent block after it (§3.2), is installed with the inputs (after every plugin) and reset per mission;
+    a script's unit (§4.3) keeps its stock moves (the scripted branch writes no move); only this machine's soldiers are
+    driven; its ini keys are read, range-checked, shipped and documented; its offline check runs under CTest."""
+    code, crew, mission, cmake = src('src/npcai.cpp'), src('src/crew.cpp'), src('src/mission.cpp'), src('CMakeLists.txt')
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/npc-ai-design.md')
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('nextThink[I](human,dt);') < hook.index('Think(static_cast<unsigned char*>(human),I)'), 'stock Think first'
+    assert '!Cfg().customNpcAi' in hook, 'CustomNpcAi=0 must leave every soldier stock'
+    scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
+    for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
+        assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
+    assert 'h[kTrigger]=0;' in scripted and 'h[kTrigger]=1' not in scripted, 'a scripted unit: the trigger only taken off'
+    think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert '(At<std::uint8_t>(h,kNet)&1)' in think and 'IsPlayer(h)' in think, "only this machine's NPC soldiers"
+    assert 'npc::Scripted(control) ? Scripted(' in think
+    ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
+    assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')
+    assert 'ResetNpcAi();' in mission and 'src/npcai.cpp' in cmake
+    assert 'EXCLUDE_FROM_ALL tools/npc_ai_check.cpp' in cmake and 'npc_ai_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    for key, default in (('CustomNpcAi', '1'), ('NpcFireLane', '1'), ('NpcLaneWidth', '2.5'), ('NpcLaneLength', '150'),
+                         ('NpcFlankDeg', '45'), ('NpcWeaponSwitch', '1'), ('NpcEngageShare', '0.85'), ('NpcEvade', '1'),
+                         ('NpcDangerRange', '15'), ('NpcGrabRange', '4'), ('NpcCrowd', '1.5'), ('NpcRollSec', '2.5'),
+                         ('NpcRetreatHp', '0.3'), ('NpcLeash', '40')):
+        assert f'L"{key}"' in plugin, key
+        assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
+                'NpcRollSec', 'NpcRetreatHp', 'NpcLeash'):
+        assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+
+
+@test
 def incremental_install_regressions() -> None:
     from test_installer_incremental import run_checks
     run_checks()

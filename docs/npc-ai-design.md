@@ -281,7 +281,12 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 
 ## 11. 验证状态
 
-见文末各阶段记录（随实现更新）。所有阶段在实机验收前都是 `implemented_unverified`。
+所有阶段在实机验收前都是 `implemented_unverified`。
+
+| 阶段 | 状态 | 离线证据 | 未验证 |
+|---|---|---|---|
+| P0 | 完成 | `npc_ai_check`（CTest）全部决策函数；14 个变异全部被抓 | — |
+| P1 | implemented_unverified | 编译（/W4 /WX）；`npc_ai_check`；selftest `npc_ai_wired`（钩子先跑原版、脚本分支不写移动、只驱动本机士兵、ini 读 / 范围 / 发布 / 文档） | §3.1 的 M 项：`+0x1A & 8` 与 AI 列表的对应、d82..d84 对应武器数组前三项、`+0xBE8` 弹数、翻滚输入；全部行为 |
 
 ### 实机验收清单（用户）
 

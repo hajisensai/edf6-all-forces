@@ -108,22 +108,22 @@ void Arms() {
     // 0 an assault rifle (300 m), 1 a rocket launcher (blast 8 m, 400 m), 2 a homing launcher (anti-air), 3 a shotgun (60 m)
     Arm a[4]={{300.0f,0.0f,100.0f,false,true,false},{400.0f,8.0f,150.0f,false,true,false},
               {500.0f,4.0f,80.0f,true,true,true},{60.0f,0.0f,400.0f,false,true,false}};
-    Check(PickArm(a,4,-1,30.0f,TargetKind::small,false)==3,"close: the shotgun",PickArm(a,4,-1,30.0f,TargetKind::small,false));
+    Check(PickArm(a,4,-1,30.0f,TargetKind::light,false)==3,"close: the shotgun",PickArm(a,4,-1,30.0f,TargetKind::light,false));
     Check(PickArm(a,4,-1,250.0f,TargetKind::large,false)==1,"far, large: the rocket",PickArm(a,4,-1,250.0f,TargetKind::large,false));
     Check(PickArm(a,4,-1,250.0f,TargetKind::large,true)==0,"far, large, a friend by it: no blast",PickArm(a,4,-1,250.0f,TargetKind::large,true));
     Check(PickArm(a,4,-1,200.0f,TargetKind::air,false)==2,"a flyer: the homing launcher",PickArm(a,4,-1,200.0f,TargetKind::air,false));
-    Check(PickArm(a,4,-1,450.0f,TargetKind::small,false)==2,"past the rifle and rocket: only the 500 m one");
-    Check(PickArm(a,4,-1,600.0f,TargetKind::small,false)==-1,"out of every reach: none");
+    Check(PickArm(a,4,-1,450.0f,TargetKind::light,false)==2,"past the rifle and rocket: only the 500 m one");
+    Check(PickArm(a,4,-1,600.0f,TargetKind::light,false)==-1,"out of every reach: none");
     Check(PickArm(a,4,-1,10.0f,TargetKind::large,false)==3,"inside the blast's minimum: never the rocket");
     a[3].ready=false;
-    Check(PickArm(a,4,-1,30.0f,TargetKind::small,false)==1,"the shotgun reloading: the rocket (30 m is past its blast)");
-    Check(PickArm(a,4,-1,12.0f,TargetKind::small,false)==0,"the shotgun reloading, 12 m: the rifle (inside the blast)");
+    Check(PickArm(a,4,-1,30.0f,TargetKind::light,false)==1,"the shotgun reloading: the rocket (30 m is past its blast)");
+    Check(PickArm(a,4,-1,12.0f,TargetKind::light,false)==0,"the shotgun reloading, 12 m: the rifle (inside the blast)");
     a[3].ready=true;
     // Hysteresis: the current arm is kept while it is within a quarter of the best.
     Arm b[2]={{300.0f,0.0f,100.0f,false,true,false},{300.0f,0.0f,110.0f,false,true,false}};
-    Check(PickArm(b,2,0,100.0f,TargetKind::small,false)==0,"a 10% better arm does not take over");
+    Check(PickArm(b,2,0,100.0f,TargetKind::light,false)==0,"a 10% better arm does not take over");
     b[1].dps=200.0f;
-    Check(PickArm(b,2,0,100.0f,TargetKind::small,false)==1,"a twice better arm takes over");
+    Check(PickArm(b,2,0,100.0f,TargetKind::light,false)==1,"a twice better arm takes over");
     // Every pick is usable: in reach, out of its blast, ready.
     for(float d=1.0f;d<700.0f;d+=13.0f)
         for(int k=0;k<3;++k) {
@@ -221,8 +221,8 @@ void Marks() {
 void Posts() {
     using namespace npc;
     const float post[3]={0.0f,0.0f,0.0f},north[3]={0.0f,0.0f,1.0f};
-    const float near[3]={0.0f,0.0f,-1.0f};
-    Check(!ReturnToPost(near,north,post,3.0f,25.0f,2.0f,0.31f).active,"within the hold: nothing");
+    const float inside[3]={0.0f,0.0f,-1.0f};
+    Check(!ReturnToPost(inside,north,post,3.0f,25.0f,2.0f,0.31f).active,"within the hold: nothing");
     // Pushed back 10 m by the recoil, still facing the post's way... the post is ahead: drive forward.
     const float back10[3]={0.0f,0.0f,-10.0f};
     Steer s=ReturnToPost(back10,north,post,3.0f,25.0f,2.0f,0.31f);

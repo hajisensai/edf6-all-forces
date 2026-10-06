@@ -214,6 +214,21 @@ struct Config {
     float centipedeLinkRange=150.0f;// ...m a centipede goes to join another's tail from
     float centipedeWoundDamage=3.0f;// ...a split's headless front takes this many times the damage until its head is back
     float primerBlood=1.0f;         // ...their blood splash (hit and death) times the giant ant's size; 0: none
+    // npcai.cpp: the plugin's own AI for the friendly NPC soldiers (docs/npc-ai-design.md §3, §4).
+    bool customNpcAi=true;          // the master switch (off: every soldier's AI is the stock one)
+    bool npcFireLane=true;          // ...they keep out of the player's line of fire (the camera's centre line)
+    float npcLaneWidth=2.5f;        // ...m either side of that line
+    float npcLaneLength=150.0f;     // ...m along it (shorter where it meets the map)
+    float npcFlankDeg=45.0f;        // ...their combat spot this many degrees off the player's own line to the target
+    bool npcWeaponSwitch=true;      // ...they switch weapons for the target's range and kind
+    float npcEngageShare=0.85f;     // ...they fight at this share of their longest weapon's true reach (the stock: half, at least 25 m)
+    bool npcEvade=true;             // ...crowded, they back off, side-step and roll
+    float npcDangerRange=15.0f;     // ...m: enemies this near press on them
+    float npcGrabRange=4.0f;        // ...m: one this near makes them roll (or back off)
+    float npcCrowd=1.5f;            // ...the pressure (enemies near, nearer weigh more) they back off from
+    float npcRollSec=2.5f;          // ...s between two rolls
+    float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
+    float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -821,3 +836,4 @@ unsigned char* PlayerHuman() noexcept;
 #include "map.h"
 #include "mapcmd.h"
 #include "proteus.h"
+#include "npcai.h"

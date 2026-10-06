@@ -781,6 +781,7 @@ void InstallInputs() noexcept {
 void EnsureInputs() noexcept {
     if(InterlockedCompareExchange(&inputsHooked,1,0)!=0)return;
     InstallInputs();
+    InstallNpcAi();   // the soldiers' Think, chained after any other plugin's the same way (npcai.cpp)
 }
 
 bool InstallCrew() noexcept {

@@ -149,7 +149,7 @@ inline bool ShotClear(const float* from,const float* to,float spread,float blast
 }
 
 // --- Arms (B2, B3) ---
-enum class TargetKind : std::uint8_t { small, large, air };
+enum class TargetKind : std::uint8_t { light, large, air };   // (not "small": a Windows macro)
 // One weapon the soldier carries: its true reach (m: speed x life), its blast radius (0: none), homing, its shots ready
 // (ammo in the magazine and not reloading), its damage a second (any consistent measure), whether it is fit to hit
 // flyers, and its own minimum range (a blast weapon: the blast must not reach the shooter).
@@ -163,7 +163,7 @@ inline float ArmScore(const Arm& a,float dist,TargetKind kind,bool friendNearTar
     float s=a.dps>0.0f ? a.dps : 1.0f;
     if(kind==TargetKind::air)s*=a.homing || a.antiAir ? 3.0f : 0.5f;
     if(kind==TargetKind::large && a.blast>0.0f)s*=1.5f;
-    if(kind==TargetKind::small && a.blast>0.0f)s*=1.2f;   // a crowd of small ones: the blast takes several
+    if(kind==TargetKind::light && a.blast>0.0f)s*=1.2f;   // a crowd of small ones: the blast takes several
     // The far end of a reach is where rounds miss most: a little credit for the target well inside it.
     return s*(1.2f-0.4f*dist/a.reach);
 }
@@ -196,7 +196,7 @@ inline float EngageRange(const Arm* arms,int n,float share) noexcept {
 // --- Crowding (B4, B5) ---
 struct Threat { float pos[3],radius; };   // radius: how big it is (its reach to bite or grab)
 enum class Move : std::uint8_t { hold, back, sidestep, roll };
-struct Evade { Move move; float dir[3]; float pressure; int near; };
+struct Evade { Move move; float dir[3]; float pressure; int close; };
 // What to do with `threats` round `pos`: each within `danger` m (past its own radius) presses with (1 - gap/danger);
 // the way out is away from their weighted centre. A pressure of `crowd` or more, or one within `grab` m: back off;
 // one within `grab` with the roll ready: roll (out, along the way out); else side-step across the nearest's line
@@ -212,7 +212,7 @@ inline Evade CrowdResponse(const float* pos,const Threat* threats,int n,float da
         float d[3];
         if(!HorizDir(threats[i].pos,pos,d)){d[0]=1.0f;d[2]=0.0f;}
         for(int k=0;k<3;k+=2)push[k]+=d[k]*w;
-        e.pressure+=w;++e.near;
+        e.pressure+=w;++e.close;
         if(gap<nearest){nearest=gap;ni=i;}
     }
     if(ni<0)return e;
@@ -221,7 +221,7 @@ inline Evade CrowdResponse(const float* pos,const Threat* threats,int n,float da
     else HorizDir(threats[ni].pos,pos,e.dir);   // surrounded evenly: straight away from the nearest
     if(nearest<grab && rollReady){e.move=Move::roll;return e;}
     if(nearest<grab || e.pressure>=crowd){e.move=Move::back;return e;}
-    if(e.near==1) {   // one coming on: step across its line
+    if(e.close==1) {   // one coming on: step across its line
         const float right[3]={e.dir[2],0.0f,-e.dir[0]};
         for(int k=0;k<3;++k)e.dir[k]=right[k];
         e.move=Move::sidestep;
