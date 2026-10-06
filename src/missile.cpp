@@ -266,10 +266,9 @@ void Guide(unsigned char* b) noexcept {
 }
 
 void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
-    if(Cfg().enabled) {
-        __try { if(!TvSteer(static_cast<unsigned char*>(b)))Guide(static_cast<unsigned char*>(b)); }
-        __except(EXCEPTION_EXECUTE_HANDLER){}
-    }
+    // TV releases its temporary guidance override in the live round's callback, even after disable.
+    __try { if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(static_cast<unsigned char*>(b)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){}
     nextUpdate(b,a2,a3,a4);
 }
 }  // namespace
