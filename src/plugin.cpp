@@ -668,7 +668,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallJets();      // the jets and the carrier are flown from HeliFrame: no heli pilot, none of them
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
-    InstallBoarding();      // after the jets' addBody hook and the heli profile's board button
+    InstallBoarding();      // after the heli profile's board button check
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)

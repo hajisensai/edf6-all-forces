@@ -1,9 +1,9 @@
 // The boarding gun (tools/calls.py EDF6VC_CALL_BOARDING_GUN): a KFF 50 LS (laser sight, 5.5x scope) whose rounds
 // carry a tag (tools/call_weapons.py gun_sgo). A round of it at a friendly vehicle does it no harm and puts the
 // player into it:
-//  1. the bullets' candidate collector (jet_hooks.cpp AddBodyHook, docs/bullet-pass-re.md) is offered the vehicle's
-//     body; BoardingCandidate leaves it out (the round passes through: no hit, no damage) and asks for that vehicle
-//     (the nearest to the round's sweep start, when one round passes several in a frame);
+//  1. the stock collision pipeline finds a real hit, after map clipping and object shape casts. Its damage call
+//     (0x230EA6 in 0x230CA0) is intercepted: BoardingHit suppresses only that friendly hit's damage and asks for
+//     the vehicle (the nearest actual contact to the sweep start). Stock hit events and bullet lifetime still run;
 //  2. the next frame, on the game thread and outside any team walk (FrameTick), BoardingTick presses the stock board
 //     button for the player (0x56D700, heli.cpp PressBoardButtonBumping) with
 //       - the player's position, for the seat check's reach alone (CanRideSeat 0x6346D0 measures human+0x90 to the
@@ -24,30 +24,32 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "layout.h"
+#include "memory.h"
 #include <atomic>
 #include <cmath>
 
 namespace crew {
 namespace {
-constexpr unsigned kBodyObject=0x108260;                         // body id -> its object (docs/bullet-pass-re.md §6)
-constexpr std::size_t kCollectorCore=0x88,kBulletOwner=0x9A8,kSweepFrom=0xB80;
+constexpr unsigned kHitDamageCall=0x230EA6,kHitDamage=0x541FF0;
+constexpr std::size_t kDamageBlock=0x6E0,kHitRecords=0x7A8,kBulletOwner=0x9A8,kSweepFrom=0xB80;
 constexpr std::size_t kHumanVehicle=0x1548;                      // the vehicle a human rides (weak_ptr object)
 constexpr ULONGLONG kAskMs=250;                                   // an ask older than this (wall clock) is dropped
 constexpr ULONGLONG kLogMs=2000;
-using BodyObjectFn=const void*(__fastcall*)(std::uint32_t);
+using HitDamageFn=void(__fastcall*)(void*,const void*,void*);
+HitDamageFn nextHitDamage=nullptr;
 
 bool ready=false;
-// The local player's human as the game thread last saw it (BoardingTick), for the collector's test of a round's owner:
-// the collector is not proven to run on the game thread (docs/bullet-pass-re.md §4.1 "M"), PlayerHuman() is.
+// The local player's human as the game thread last saw it (BoardingTick), for the hit's test of a round's owner.
+// The bullet batch is not proven to run on the game thread (docs/bullet-pass-re.md §4.1 "M"), PlayerHuman() is.
 std::atomic<const void*> shooter{nullptr};
 
-// The vehicle the last round asked for. Written by the collector, taken by the tick.
+// The vehicle the last round asked for. Written by the hit hook, taken by the tick.
 struct Ask { const void* vehicle; const void* ctrl; float dist2; ULONGLONG at; };
 Ask ask{};
 SRWLOCK askLock=SRWLOCK_INIT;
 const void* only=nullptr;   // BoardingOnly: game thread, for the length of one press
 
-struct SaidAt { ULONGLONG candidate; } said{};
+thread_local ULONGLONG saidAt=0;
 
 // The tag: the gun's AmmoColor alpha (call_weapons.gun_sgo), 1 + its mark (tools/calls.py, 7301) ulps over 1.0. The
 // weapon init reads AmmoColor as 4 floats into weapon+0x8D0 (0x68D978), the round's parameters are the weapon's from
@@ -65,6 +67,11 @@ const Signature kTagSignatures[]={
     {0x68D978,{0x0F,0x28,0x45,0x50,0x0F,0x11,0x86,0xD0,0x08,0x00,0x00,0x4C,0x89,0xB5,0xE0,0x05},16},   // AmmoColor
     {0x68D5AD,{0x48,0x8D,0x8E,0x38,0x08,0x00,0x00,0x48,0x8D,0x55,0xE0,0xE8,0x83,0x15,0xF0,0xFF},16},   // the owner
     {0x69712F,{0x49,0x8D,0x97,0x30,0x08,0x00,0x00,0x49,0x8D,0x8F,0x10,0x0A,0x00,0x00,0xE8,0xAE},16},   // fire's copy
+    {0x230E34,{0x41,0x8B,0x07,0x48,0x8B,0x8B,0xA8,0x07,0x00,0x00,0x89,0x41,0x20},13}, // body's id in the hit record
+    {0x230E41,{0x48,0x8B,0x83,0xA8,0x07,0x00,0x00,0x48,0x8B,0x4D,0x6F,0x0F,0x10,0x01,0x0F,0x11},16}, // actual contact
+    {0x230E70,{0x48,0x8D,0x8B,0xE0,0x06,0x00,0x00,0x0F,0x57,0xC0,0xF3,0x0F,0x7F,0x44,0x24,0x20},16}, // damage block
+    {0x230E80,{0x49,0x8B,0x56,0x30,0x48,0x85,0xD2,0x74,0x11,0x49,0x8B,0x46,0x28,0x48,0x89,0x44},16}, // target weak reference
+    {0x230E9A,{0x4C,0x8D,0x83,0x30,0x07,0x00,0x00,0x48,0x8D,0x54,0x24,0x20,0xE8,0x45,0x11,0x31},16}, // three arguments
 };
 
 bool TaggedOk() noexcept {
@@ -151,30 +158,40 @@ void BoardStep(unsigned char* human,ULONGLONG ms) noexcept {
         boarding.team,count,boarding.presses,away,At<unsigned char>(human,0x128),At<std::uint32_t>(human,0x5D0),At<std::int32_t>(human,0x39C));
     EndBoarding(v,false);
 }
-}  // namespace
-
-bool BoardingCandidate(void* collector,std::uint32_t body) noexcept {
+bool BoardingHit(const unsigned char* core,const void* object) noexcept {
     if(!ready || !Cfg().enabled || !Cfg().boardingGun)return false;
     const void* const shot=shooter.load(std::memory_order_relaxed);
     if(!shot)return false;
-    const auto core=At<const unsigned char*>(collector,kCollectorCore);
     if(!core || At<const void*>(core,kBulletOwner)!=shot || !Tagged(core))return false;
-    const void* const object=reinterpret_cast<BodyObjectFn>(image+kBodyObject)(body);
     if(!object || VehicleClassOf(object)<0)return false;
-    // Only a vehicle of the player's side passes: an enemy's takes the round (the tick checks the rest).
+    // Only a vehicle of the player's side is spared: an enemy's takes the round (the tick checks the rest).
     const std::int32_t team=At<std::int32_t>(object,kTeam);
     if(!Friendly(team,At<std::int32_t>(shot,kTeam)))return false;
     const float* from=reinterpret_cast<const float*>(core+kSweepFrom);
-    const float* at=reinterpret_cast<const float*>(static_cast<const unsigned char*>(object)+kPosition);
+    const float* at=At<const float*>(core,kHitRecords);   // 0x230E41..0x230E4F copied the actual contact here
+    if(!at)return false;
     const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
     const float dist2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+    if(!std::isfinite(dist2))return false;
     const ULONGLONG now=GetTickCount64();
+    const void* const ctrl=At<const void*>(object,kSelfCtrl);   // no game-memory read while holding the lock
     AcquireSRWLockExclusive(&askLock);
-    if(!ask.vehicle || now-ask.at>kAskMs || dist2<ask.dist2)ask=Ask{object,At<const void*>(object,kSelfCtrl),dist2,now};
+    if(!ask.vehicle || now-ask.at>kAskMs || dist2<ask.dist2)ask=Ask{object,ctrl,dist2,now};
     ReleaseSRWLockExclusive(&askLock);
-    if(Cfg().debug && now-said.candidate>kLogMs){said.candidate=now;Log("BOARDING round at v=%p (team %d): passes through",object,team);}
+    if(Cfg().debug && now-saidAt>kLogMs){saidAt=now;Log("BOARDING hit v=%p (team %d): damage suppressed",object,team);}
     return true;
 }
+
+// Only the direct-hit damage call in 0x230CA0 is redirected. Its target argument is the weak reference the stock
+// code just took from the hit object. Keep the surrounding hit bookkeeping, effects and bullet stop/penetration.
+void __fastcall HitDamageHook(void* damage,const void* target,void* info) {
+    bool board=false;
+    __try {
+        board=BoardingHit(static_cast<const unsigned char*>(damage)-kDamageBlock,At<const void*>(target,0));
+    } __except(EXCEPTION_EXECUTE_HANDLER) { Log("BOARDING hit: fault (stock damage retained)");board=false; }
+    if(!board)nextHitDamage(damage,target,info);
+}
+}  // namespace
 
 void BoardingTick() noexcept {
     if(!ready)return;
@@ -210,8 +227,14 @@ void ResetBoarding() noexcept {
 }
 
 bool InstallBoarding() noexcept {
-    ready=TaggedOk() && BoardButtonReady() && jet::PassThrough();
-    Log("HOOK boarding gun=%d (tag=%d board button=%d addBody=%d)",ready,TaggedOk(),BoardButtonReady(),jet::PassThrough());
+    const bool profile=TaggedOk();
+    if(profile && BoardButtonReady()) {
+        nextHitDamage=reinterpret_cast<HitDamageFn>(image+kHitDamage);
+        bool changed=false;
+        ready=RedirectCall(image+kHitDamageCall,image+kHitDamage,reinterpret_cast<void*>(&HitDamageHook),changed);
+        if(!ready && changed)Log("BOARDING hit damage call half patched: the hook forwards every hit");
+    }
+    Log("HOOK boarding gun=%d (profile=%d board button=%d)",ready,profile,BoardButtonReady());
     return ready;
 }
 }  // namespace crew

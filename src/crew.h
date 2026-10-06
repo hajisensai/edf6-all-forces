@@ -645,12 +645,10 @@ struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wa
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
-// The boarding gun (boarding.cpp): from the bullets' candidate collector (jet_hooks.cpp AddBodyHook), true when the
-// candidate is a vehicle hit by one of its rounds (left out: the round passes through); once a frame (FrameTick)
-// the player boards the last vehicle asked for.
-bool BoardingCandidate(void* collector,std::uint32_t body) noexcept;
+// The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the
+// vehicle. Broadphase candidates alone never request boarding; FrameTick handles the pending actual hit.
 void BoardingTick() noexcept;
-bool InstallBoarding() noexcept;   // after CheckHeliProfile and InstallJets (the board button, the addBody hook)
+bool InstallBoarding() noexcept;   // after CheckHeliProfile (the board button)
 void ResetBoarding() noexcept;
 // While the boarding gun presses the board button for the player: the one vehicle a seat may be found in (crew.cpp
 // FindSeatHook gives none in any other), else null.

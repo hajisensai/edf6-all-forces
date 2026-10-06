@@ -45,6 +45,10 @@ jobs:
         shell: cmd
         run: call build.cmd
 
+      - name: Native regression tests
+        shell: pwsh
+        run: ctest --test-dir build --output-on-failure
+
       - name: Check data tools compile
         shell: pwsh
         run: |

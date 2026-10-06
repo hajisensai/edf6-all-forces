@@ -401,6 +401,21 @@ def boarding_tag_in_plugin() -> None:
 
 
 @test
+def boarding_only_after_collision() -> None:
+    """Broadphase candidates include misses and objects behind walls. Only the native hit's damage call may
+    request boarding; keep the executable production-hook test in CI, with original damage on all other paths."""
+    board = src('src/boarding.cpp')
+    assert 'BoardingCandidate' not in src('src/jet_hooks.cpp')
+    assert 'BoardingHit' not in src('src/jet_hooks.cpp')
+    assert 'kHitDamageCall=0x230EA6,kHitDamage=0x541FF0' in board
+    assert 'RedirectCall(image+kHitDamageCall,image+kHitDamage' in board
+    assert 'if(!board)nextHitDamage(damage,target,info);' in board
+    assert 'At<const float*>(core,kHitRecords)' in board
+    assert 'add_test(NAME boarding_hit COMMAND boarding_hit_test)' in src('CMakeLists.txt')
+    assert 'ctest --test-dir build --output-on-failure' in src('.github/workflows/build.yml')
+
+
+@test
 def calls_inc_current() -> None:
     with open(gen_calls.OUT, encoding='utf-8', newline='') as f:
         assert f.read().replace('\r\n', '\n') == gen_calls.render(), 'src/calls.inc is stale: python tools/gen_calls.py'
