@@ -16,9 +16,16 @@
 //     +0xD50 (a pad's, or an NPC AI's) into the walk's velocity in one call, 0x56D350 at 0x573B72; that call is
 //     redirected here and the stick zeroed first for a held gunner (MoveIntent). The player's stick is kept as an
 //     order to the bike (below);
-//   - each frame (the bike's input) a held gunner is put back on the platform's top (kGunnerX/Y/Z in the bike's
-//     frame) through the game's own character warp (0x11B9870, the call the ride state's exit makes, 0x57B187) when
-//     they have drifted, with the bike's velocity as their carried velocity (+0x6B0);
+//   - they ride along through the walk controller's own one-step velocity (docs/sidecar-re.md §3a): in the same
+//     pre-update the game adds a step's velocity to the controller (0x11B8D90: ctrl+0x60 += v, the stock call at
+//     0x573E3A moves a human to a target as (target - position) x 60), the controller's step (0x11B9890, in the
+//     human's update) adds it to the character's velocity for this physics step and clears it (0x11B9A92,
+//     0x11B9CB7). The held gunner gets the bike's velocity plus the stock (target - position) x 60 toward the
+//     platform's point (Follow), so they move WITH the bike in each physics step. The carried velocity +0x6B0 is no
+//     use for this: on the ground the step zeroes it every frame (0x11B9A48) - writing it (the first version) left
+//     them standing still in the world while the bike drove off, put back by a warp every 0.25 m: the stutter;
+//   - the game's own character warp (0x11B9870, the call the ride state's exit makes, 0x57B187) is left only for
+//     a gunner who has still drifted kHold off (a snag, a bike moved by other means);
 //   - the platform is solid (the ragdoll's body hull tools/make_sidecar.py moves there), so they stand on it.
 // Getting in: the player's board button by the bike (crew.cpp FindSeatHook asks SidecarBoard first) takes the
 // sidecar when they stand nearer its platform than the saddle's door, or the saddle is not theirs to take. Getting
@@ -62,6 +69,15 @@ const unsigned char kBikePadSig[]={0x8B,0x80,0xE4,0x00,0x00,0x00,0x33,0xD2,0x41,
 // +0x6B0 (m/s; docs/player-jet-re.md §7), attached / ragdolled +0x39C, a remote copy +0x128 bit 0.
 constexpr std::size_t kHumanMove=0xD50,kHumanBoard=0xD78,kHumanCtrl=0x680,kHumanCarry=0x6B0,kHumanAttach=0x39C,kNetFlags=0x128;
 constexpr unsigned kMoveIntent=0x56D350,kMoveIntentCall=0x573B72,kWarp=0x11B9870;
+// The walk controller's one-step velocity (docs/sidecar-re.md §3a): 0x11B8D90(ctrl, v) adds v (xyz, m/s) to
+// ctrl+0x60; the step 0x11B9890 adds ctrl+0x60 to this step's velocity (0x11B9A92) and clears it (0x11B9CB7). The
+// stock pre-update moves a human to a target by it as (target - position) x kStepRate (0x573E10, the 60.0s at
+// 0x1768E20); the step's gravity is per 1/60 s too (0x11B98EA).
+constexpr unsigned kAddStep=0x11B8D90;
+constexpr float kStepRate=60.0f;
+const unsigned char kAddStepSig[]={0x48,0x83,0xEC,0x18,0x0F,0x10,0x49,0x60,0x0F,0x58,0x0A};   // 0x11B8D90
+const unsigned char kStepUseSig[]={0x0F,0x58,0x73,0x60};     // 0x11B9A92 addps xmm6,[rbx+0x60]
+const unsigned char kStepClearSig[]={0x4C,0x89,0x73,0x60};   // 0x11B9CB7 mov [rbx+0x60],r14
 const unsigned char kMoveCallSig[]={0x48,0x8B,0xCE,0xE8,0xD9,0x97,0xFF,0xFF,0x48,0x8D,0x8E,0x60,0x0D,0x00,0x00};   // 0x573B6F
 const unsigned char kWarpSig[]={0x48,0x8B,0x09,0xE9,0xF8,0x6B,0x02,0x00};                                       // 0x11B9870
 const unsigned char kExitWarpSig[]={0x48,0x8D,0x55,0xE7,0x48,0x8D,0x8F,0x80,0x06,0x00,0x00,0xE8};             // 0x57B17C
@@ -108,6 +124,7 @@ ObjRef boardHeld;
 bool ok=false,moveOk=false,driveOk=false;
 using MoveIntentFn=std::uintptr_t(__fastcall*)(void*);
 using WarpFn=void(__fastcall*)(void*,const float*);
+using AddStepFn=void(__fastcall*)(void*,const float*);
 using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -226,12 +243,37 @@ void Hold(Sidecar& s,unsigned char* v) noexcept {
     const float off=std::sqrt(Dot(d,d));
     const bool rising=p[1]-s.lastY>kJumpRise;
     s.lastY=p[1];
-    if(s.gunnerPlayer && d[1]>kJumpOut && rising){Let(s,v,"jumped off");return;}
+    if(s.gunnerPlayer && d[1]>kJumpOut && rising) {
+        // In the air the carried velocity keeps its x and z (docs/player-jet-re.md §7): off with the bike's way on.
+        float* carry=reinterpret_cast<float*>(h+kHumanCarry);
+        const float* vel=reinterpret_cast<const float*>(v+kChassisVel);
+        carry[0]=vel[0];carry[2]=vel[2];
+        Let(s,v,"jumped off");return;
+    }
     if(off>kLeave){Let(s,v,"thrown off");return;}
-    float* carry=reinterpret_cast<float*>(h+kHumanCarry);
-    const float* vel=reinterpret_cast<const float*>(v+kChassisVel);
-    for(int c=0;c<3;++c)carry[c]=vel[c];
+    // Riding along is Follow's (the walk's step velocity); the warp only catches a gunner that still drifted off.
     if(off>kHold)Warp(h,at);
+}
+
+// The step velocity that keeps a held gunner on the platform's point through this physics step: the bike's velocity,
+// and toward the point at the stock rate (the pre-update's own (target - position) x 60, 0x573E10) across the
+// ground only. Height is the bike's velocity alone: the platform's top holds them up, gravity brings them down to
+// it, and a pull down would eat a jump (the player's way off).
+void FollowVelocity(const float* target,const float* pos,const float* bikeVel,float* out) noexcept {
+    out[0]=bikeVel[0]+(target[0]-pos[0])*kStepRate;
+    out[1]=bikeVel[1];
+    out[2]=bikeVel[2]+(target[2]-pos[2])*kStepRate;
+    out[3]=0.0f;
+}
+
+// From MoveIntent (the human's pre-update, before its update's controller step consumes the step velocity).
+void Follow(const Sidecar& s,unsigned char* h) noexcept {
+    const auto v=static_cast<const unsigned char*>(s.ref.obj);
+    if(!s.ref.Is(v))return;
+    float at[3];FramePoint(v,kGunnerX,kGunnerY,kGunnerZ,at);
+    alignas(16) float step[4];
+    FollowVelocity(at,Pos(h),reinterpret_cast<const float*>(v+kChassisVel),step);
+    reinterpret_cast<AddStepFn>(image+kAddStep)(h+kHumanCtrl,step);
 }
 
 // The player in the sidecar, nobody on the saddle: the bike driven the way the camera looks while the stick is
@@ -383,6 +425,7 @@ std::uintptr_t __fastcall MoveIntent(void* human) noexcept {
                 }
             }
             move[0]=move[1]=move[2]=0.0f;
+            if(s.gunner.Is(h))Follow(s,h);
             break;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
@@ -415,7 +458,9 @@ void SidecarLevel(const void* body,float* w) noexcept {
 bool InstallSidecar() noexcept {
     __try {
         ok=Matches(kTeamWalk,kTeamWalkSig,sizeof(kTeamWalkSig)) && Matches(kWarp,kWarpSig,sizeof(kWarpSig)) &&
-           Matches(0x57B17C,kExitWarpSig,sizeof(kExitWarpSig)) && Matches(0x6746D3,kVelSig,sizeof(kVelSig));
+           Matches(0x57B17C,kExitWarpSig,sizeof(kExitWarpSig)) && Matches(0x6746D3,kVelSig,sizeof(kVelSig)) &&
+           Matches(kAddStep,kAddStepSig,sizeof(kAddStepSig)) && Matches(0x11B9A92,kStepUseSig,sizeof(kStepUseSig)) &&
+           Matches(0x11B9CB7,kStepClearSig,sizeof(kStepClearSig));
         driveOk=Matches(0x673AAC,kBlockSig,sizeof(kBlockSig)) && Matches(0x658D6D,kBikePadSig,sizeof(kBikePadSig));
         moveOk=false;
         if(ok && Matches(kMoveIntentCall-3,kMoveCallSig,sizeof(kMoveCallSig))) {
