@@ -485,10 +485,22 @@ Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const f
     return p;
 }
 
-// Where it fights from: the combat spot (re-picked every kSpotMs) no farther than the leash from its anchor.
-void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,float engage,float leash,ULONGLONG ms) noexcept {
+// The player a soldier fights for: the one who recruited its squad (this machine's or another's: IsPlayer holds for a
+// remote player too), else this machine's player. `look` is known for this machine's player alone (its camera); for
+// another machine's it is nullptr and "behind them" is taken from the threat instead.
+struct Served { const float* at; const float* look; };
+Served ServedBy(npc::Control control,const unsigned char* root) noexcept {
+    if(control==npc::Control::recruited && root && root!=PlayerHuman())return Served{Pos(root),nullptr};
+    if(!world.player)return Served{nullptr,nullptr};
+    return Served{world.playerAt,world.lookOk ? world.look : nullptr};
+}
+
+// Where it fights from: the combat spot (re-picked every kSpotMs) no farther than the leash from its anchor, flanking
+// the target off the line from the player it fights for.
+void Spot(Soldier& s,const float* pos,const float* aim,const float* anchor,const float* servedAt,float engage,float leash,
+          ULONGLONG ms) noexcept {
     if(s.spotSet && ms-s.spotAt<kSpotMs)return;
-    npc::CombatSpot(pos,aim,world.player ? world.playerAt : nullptr,engage,Cfg().npcFlankDeg*npc::kPi/180.0f,s.spot);
+    npc::CombatSpot(pos,aim,servedAt,engage,Cfg().npcFlankDeg*npc::kPi/180.0f,s.spot);
     const float off=npc::Horiz(anchor,s.spot);
     if(off>leash) {
         const float k=leash/off;
@@ -522,25 +534,29 @@ bool Evade(Soldier& s,unsigned char* h,const SoldierClass& c,const float* pos,UL
     return true;
 }
 
-// Hurt (§3.6, §3.7): behind the player (out of their lane, a wall between it and the nearest threat when one of a few
-// points has one), else away from the nearest threat.
+// Hurt (§3.6, §3.7): behind the player it fights for (out of their lane, a wall between it and the nearest threat when
+// one of a few points has one). Behind: against their look, or, their look not known (another machine's player), on
+// their side away from the nearest threat; neither known: at the player.
 constexpr ULONGLONG kFallMs=1000;
-bool FallBack(Soldier& sol,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
+bool FallBack(Soldier& sol,unsigned char* h,const float* pos,const Served& served,ULONGLONG ms) noexcept {
     const float hpMax=At<float>(h,kHumanHpMax),hp=At<float>(h,kHumanHp);
-    if(!(hpMax>0.0f) || !(hp/hpMax<Cfg().npcRetreatHp) || !world.player)return false;
+    if(!(hpMax>0.0f) || !(hp/hpMax<Cfg().npcRetreatHp) || !served.at)return false;
     if(sol.fallAt && ms-sol.fallAt<kFallMs){MoveTo(h,pos,sol.fallTo,kSpotStop);return true;}
-    float back[3]={-world.look[0],0.0f,-world.look[2]};
-    const float l=std::sqrt(back[0]*back[0]+back[2]*back[2]);
-    if(!world.lookOk || l<1e-3f){back[0]=0.0f;back[2]=-1.0f;}else{back[0]/=l;back[2]/=l;}
     const Enemy* nearest=nullptr;float nd=1e30f;
     for(int i=0;i<world.enemies;++i){const float d=npc::Horiz(pos,world.enemy[i].aim);if(d<nd){nd=d;nearest=&world.enemy[i];}}
-    float to[3]={world.playerAt[0]+back[0]*kBehindPlayer,world.playerAt[1],world.playerAt[2]+back[2]*kBehindPlayer};
-    if(nearest) {
+    float back[3]={0.0f,0.0f,0.0f};
+    if(served.look){back[0]=-served.look[0];back[2]=-served.look[2];}
+    else if(nearest){back[0]=served.at[0]-nearest->aim[0];back[2]=served.at[2]-nearest->aim[2];}
+    const float l=std::sqrt(back[0]*back[0]+back[2]*back[2]);
+    if(l<1e-3f)back[0]=back[2]=0.0f;else{back[0]/=l;back[2]/=l;}
+    const float* const at=served.at;
+    float to[3]={at[0]+back[0]*kBehindPlayer,at[1],at[2]+back[2]*kBehindPlayer};
+    if(nearest && l>=1e-3f) {
         // A few points on the half circle behind the player: the first one the nearest threat cannot see.
         for(int k=-2;k<=2;++k) {
             const float a=static_cast<float>(k)*0.5f,c=std::cos(a),s=std::sin(a);
-            const float p[3]={world.playerAt[0]+(back[0]*c-back[2]*s)*kBehindPlayer,world.playerAt[1]+kEye,
-                              world.playerAt[2]+(back[0]*s+back[2]*c)*kBehindPlayer};
+            const float p[3]={at[0]+(back[0]*c-back[2]*s)*kBehindPlayer,at[1]+kEye,
+                              at[2]+(back[0]*s+back[2]*c)*kBehindPlayer};
             float hit[3];
             if(MapRay(nearest->aim,p,hit)>=0.0f){to[0]=p[0];to[2]=p[2];break;}
         }
@@ -701,8 +717,10 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,const Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
-    // Its anchor: the player it follows, its NPC leader, the spot it was free at; a map order's point over them.
-    const Orders o=OrdersOf(q,s.control==npc::Control::recruited && world.player ? world.playerAt :
+    // Its anchor: the player it follows (the one who recruited it, whichever machine's), its NPC leader, the spot it
+    // was free at; a map order's point over them.
+    const Served served=ServedBy(s.control,root);
+    const Orders o=OrdersOf(q,s.control==npc::Control::recruited && served.at ? served.at :
                                s.control==npc::Control::squad && root ? Pos(root) : s.home);
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
@@ -737,11 +755,11 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     // Its moves, the first that applies.
     if(Evade(s,h,c,pos,ms,&p.move))return p;
     if(s.boardV && Board(s,h,pos,ms)){p.move="to its seat";return p;}
-    if(FallBack(s,h,pos,ms)){p.move="fall back";return p;}
+    if(FallBack(s,h,pos,served,ms)){p.move="fall back";return p;}
     float out[3];
     if(world.lane && npc::LaneEscape(world.laneOf,pos,out)){Move(h,out,1.0f);p.move="out of the lane";return p;}
     if(t.e) {
-        Spot(s,pos,t.e->aim,anchor,engage,o.leash,ms);
+        Spot(s,pos,t.e->aim,anchor,served.at,engage,o.leash,ms);
         MoveTo(h,pos,s.spot,kSpotStop);
         p.move="combat spot";
     } else if(o.hold) {   // within its post's radius it stands (the stock follow of a recruited squad would pull it away)

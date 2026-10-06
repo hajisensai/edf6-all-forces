@@ -79,7 +79,7 @@
 ### 3.3 每帧决策（`npcai.cpp` Decide，纯函数在 `npc_logic.h`）
 
 ```
-anchor  = 命令点（驻守 / 前往）| 玩家（已招募）| 原版队长（脚本或 NPC 队长）| 自身原地（自由）
+anchor  = 命令点（驻守 / 前往）| 招募它的那位玩家（已招募；联机时可能是另一台机器的玩家，见 §9）| 原版队长（脚本或 NPC 队长）| 自身原地（自由）
 threats = 每帧快照：本机玩家队伍的敌人锁定点（VisitEnemiesOf）
 friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5E11D0）
 1. 脚本控制（§4.2 判据）→ 只做 §3.4 的火线否决与 §3.5 的换枪，移动 / 目标全交原版
@@ -260,6 +260,11 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 | Q 标记（§6.3） | 本机 | 无（影响本机拥有的单位） | 开，只影响本机拥有的单位 |
 | 上下车 / 炮手（§7） | 本机 | 原版乘车状态复制未核实 | 单机 |
 | 坦克回位（§8） | 房主 | 原版位姿复制（dummy 驾驶员的权威问题见 online-re §3.4） | 开（房主） |
+
+已招募小队的「玩家」是**招募它的那位玩家**（小队根队长，`IsPlayer` 对远端玩家同样成立），不是本机玩家：锚点、找目标范围、
+站位的侧翼参考、低血撤退都以那位玩家为准（`ServedBy`）。客人招募的小队由房主机器上的插件驱动（士兵归房主），所以这一点在
+联机里直接决定客人的小队会不会被拉向房主。远端玩家的镜头读不到：撤退的「身后」改为那位玩家背对最近威胁的一侧；
+枪线回避（§3.4）只对本机玩家有，远端玩家本人仍在友军射线检查里。
 
 ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
 

@@ -1,5 +1,6 @@
 // Execute npcai.cpp itself against stand-in memory and recording native entry points. No game is loaded or started.
 #include "../src/npcai.cpp"
+#include <cmath>
 #include <cstdio>
 #include <initializer_list>
 
@@ -163,5 +164,23 @@ int main() {
     Expect(q->cmd.order==Order::guard,"a recruited squad told to guard keeps guarding while the player still leads it");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::script,now);
     Expect(q->cmd.order==Order::none,"a script taking the squad drops the player's order");
+    // The player a soldier fights for is the one who recruited its squad, whichever machine's (this harness's
+    // PlayerHuman is nullptr: `other` stands for another machine's player).
+    Reset();Put<float>(other,kPosition,300.0f);Put<float>(other,kPosition+8,40.0f);
+    world.player=true;world.playerAt[0]=world.playerAt[1]=world.playerAt[2]=0.0f;
+    {
+        const Served remote=ServedBy(npc::Control::recruited,other);
+        Expect(remote.at==Pos(other) && !remote.look,"a squad another machine's player recruited fights for that player, not this one");
+        const Served local=ServedBy(npc::Control::free,nullptr);
+        Expect(local.at==world.playerAt,"an unrecruited soldier still takes this machine's player as its reference");
+        world.player=false;
+        Expect(!ServedBy(npc::Control::free,nullptr).at,"no player known here: no one to fall back behind");
+        Put<float>(human,kHumanHpMax,100.0f);Put<float>(human,kHumanHp,10.0f);
+        world.enemies=1;world.enemy[0]=Enemy{dead,{300.0f,1.5f,60.0f},1};
+        Soldier hurt{};const float at[3]={290.0f,0.0f,40.0f};
+        Expect(FallBack(hurt,human,at,remote,now),"a hurt soldier of a remote player's squad falls back");
+        Expect(std::fabs(hurt.fallTo[0]-300.0f)<0.01f && std::fabs(hurt.fallTo[2]-(40.0f-kBehindPlayer))<0.01f,
+               "behind that player, on their side away from the threat (their camera is not this machine's)");
+    }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
