@@ -252,8 +252,8 @@ float Tier(const unsigned char* v) noexcept {
 
 // Where a gunship round of hit radius `hit` leaves gunship `v` for `at`: off its airframe on the line to `at`
 // (gunmuzzle.h: from the vehicle's origin, its belly's floor, the line climbed through the plane it circles banked).
-void GunshipMuzzle(const unsigned char* v,const float* at,float hit,float* out) noexcept {
-    gunmuzzle::Muzzle(reinterpret_cast<const float*>(v+kMatrix),gunmuzzle::kGunship,at,hit+gunmuzzle::kMargin,out);
+bool GunshipMuzzle(const unsigned char* v,const float* at,float hit,float* out) noexcept {
+    return gunmuzzle::Muzzle(reinterpret_cast<const float*>(v+kMatrix),gunmuzzle::kGunship,at,hit+gunmuzzle::kMargin,out);
 }
 
 // A cannon round fired by `who` from the gunship (`pos`, its reach measured from there) at `at` (see kCannonSgo), leaving
@@ -263,10 +263,10 @@ bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,U
     if(!cannonReady || ms-j.shells.cannonAt<kCannonGapMs)return false;
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kCannonReach)return false;
-    j.shells.cannonAt=ms;
     const float damage=kCannonDamage*Tier(v);
     float muzzle[3];
-    GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle);
+    if(!GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle))return false;
+    j.shells.cannonAt=ms;
     if(!Shell(kCannonSgo,cannonReady,v,muzzle,at,damage,true,"gunship cannon"))return false;
     if(Cfg().debug && j.shells.cannonShots%10==0)
         Log("JET v=%p gunship cannon round #%d from %s at (%.0f,%.0f,%.0f), %.0f m, %.0f damage",v,j.shells.cannonShots+1,who,at[0],at[1],
@@ -293,7 +293,7 @@ bool CannonAtTarget(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms,
     if(Len(to)>kCannonReach)return false;
     j.shells.cannonLookAt=ms;
     float muzzle[3],hit[3];
-    GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle);   // the line the round flies (CannonShot)
+    if(!GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle))return false;   // no clear line to a target inside the airframe
     if(MapRay(muzzle,at,hit)>=0.0f) {
         const float gap[3]={hit[0]-at[0],hit[1]-at[1],hit[2]-at[2]};
         if(Len(gap)>kCannonSightSlack) {
@@ -376,9 +376,9 @@ void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) no
     if(ms-j.shells.gunAt<kGunshipGapMs)return;
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
-    j.shells.gunAt=ms;
     float muzzle[3];
-    GunshipMuzzle(v,j.t.aim,gunmuzzle::kShellHit,muzzle);
+    if(!GunshipMuzzle(v,j.t.aim,gunmuzzle::kShellHit,muzzle))return;
+    j.shells.gunAt=ms;
     if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,j.t.aim,kGunshipDamage*Tier(v),false,"gunship shell"))return;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d at %p (%.0f m)",v,j.shells.gunShots,j.t.target,Len(d));
@@ -422,9 +422,9 @@ bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* w
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kGunshipReach)return false;
-    j.shells.gunAt=ms;
     float muzzle[3];
-    GunshipMuzzle(v,at,gunmuzzle::kShellHit,muzzle);
+    if(!GunshipMuzzle(v,at,gunmuzzle::kShellHit,muzzle))return false;
+    j.shells.gunAt=ms;
     if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,at,kGunshipDamage*Tier(v),false,"gunship shell"))return false;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d from %s at (%.0f,%.0f,%.0f), %.0f m",v,j.shells.gunShots,who,at[0],at[1],at[2],Len(d));

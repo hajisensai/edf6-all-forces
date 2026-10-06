@@ -126,6 +126,20 @@ void GeometryChecks() {
     Expect(std::fabs(out[0]-m[12])<1e-3f && std::fabs(out[2]-m[14])<1e-3f,"straight down: under the centre");
     const float near[3]={m[12],m[13]+2.0f,m[14]+3.0f};
     Expect(!gunmuzzle::Muzzle(m,gunmuzzle::kGunship,near,2.0f,out),"an aim inside the box: no muzzle");
+    // A player can aim at nearby terrain during low flight: no minimum range is imposed by CameraRay.
+    // A target outside the bare model can still be inside the shell's 10 m collision clearance. The firing
+    // callers must preserve false here and decline the shot, rather than spawning at the returned centre.
+    float low[16];
+    for(int i=0;i<16;++i)low[i]=m[i];
+    low[13]=5.0f;
+    const float ground[3]={low[12],0.0f,low[14]};
+    Expect(!gunmuzzle::Muzzle(low,gunmuzzle::kGunship,ground,gunmuzzle::kShellHit+gunmuzzle::kMargin,out),
+           "low flight: do not fire a shell at terrain inside its collision clearance");
+    Expect(gunmuzzle::Muzzle(low,gunmuzzle::kGunship,ground,gunmuzzle::kCannonHit+gunmuzzle::kMargin,out),
+           "low flight: cannon can still fire when its smaller hit sphere clears the belly");
+    low[13]=1.0f;
+    Expect(!gunmuzzle::Muzzle(low,gunmuzzle::kGunship,ground,gunmuzzle::kCannonHit+gunmuzzle::kMargin,out),
+           "near terrain: do not fire cannon from the airframe centre");
     const float side[3]={m[12]-1000.0f,m[13]+2.136f,m[14]};   // level out of the left wingtip
     Expect(gunmuzzle::Muzzle(m,gunmuzzle::kGunship,side,1.0f,out) && std::fabs(out[0]-(m[12]-25.938f-1.0f))<1e-2f,
            "level to the side: off the wingtip",out[0],m[12]-26.938f);
