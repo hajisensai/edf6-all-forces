@@ -37,6 +37,7 @@
 #include "edf/weapon.h"
 #include "gear.h"
 #include "heliaim.h"
+#include "hover_lift.h"
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"

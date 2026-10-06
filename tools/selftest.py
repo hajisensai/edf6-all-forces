@@ -1116,10 +1116,11 @@ def carrier_camera_and_ragdoll_on_its_box_centre() -> None:
 def jet_door_on_the_ground_beside_its_box() -> None:
     """pylib/vcobjects.py move_door / check_door (docs/player-jet-re.md §12): a jet's boarding point (the V506's door
     locator, read out of a MAB block by mab_locator) goes on the ground DOOR_OUT m outside its collision box's right side,
-    with a radius that reaches a human DOOR_STEP m off it on the ground under its box (the door is at the box frame's
-    origin: on the ground for a box on its origin, over it for a stock bomber's box reaching under it) (the parked
-    carrier's door was under its middle, 4.9 m in from its box's side: no prompt anywhere, 2026-10-05); check_door
-    refuses a door inside the box or out of reach. On a block of its own (the selftest runs without the game)."""
+    with a radius that reaches a human DOOR_STEP m off it on the ground under its box (the door's parent `mdl` is the
+    box's centre, so the ground is -hy on it: the DOOR log of 2026-10-06 read the carrier's y-0 door 8.52 m over the
+    ground, boarded only through the plugin's own hook) (the parked carrier's door was under its middle, 4.9 m in from its
+    box's side: no prompt anywhere, 2026-10-05); check_door refuses a door inside the box, off the ground or out of
+    reach. On a block of its own (the selftest runs without the game)."""
     import struct
     import sgo
     door, seat = '搭乗口１', '操縦席１'
@@ -1160,25 +1161,30 @@ def jet_door_on_the_ground_beside_its_box() -> None:
     moved = sgo.write(1, m)
     vc.check_door(moved)
     _, low = sgo.read(moved)
-    low['heli_rigid_body'] = [[0.0, 3.516, -3.109], [29.703, 8.516, 38.422], 0.3]   # its bottom 5 m under the door
-    refused(sgo.write(1, low), 'a door out of reach (5 m over the ground its box stands on)')
+    low['heli_rigid_body'] = [[0.0, 13.516, -3.109], [29.703, 13.516, 38.422], 0.3]   # its bottom 5 m under the door
+    refused(sgo.write(1, low), 'a door 5 m over the ground its box stands on')
+    _, old = sgo.read(moved)   # §12's door: y 0 on `mdl`, the box's centre, 8.516 m up
+    ob = bytearray(old['animation_model'][2])
+    struct.pack_into('<f', ob, vc.mab_locator(bytes(ob), door)[0] + 4, 0.0)
+    old['animation_model'][2] = bytes(ob)
+    refused(sgo.write(1, old), "the door at the box's centre height (8.516 m over the ground)")
     block = m['animation_model'][2]
     vec, rad = vc.mab_locator(block, door)
     x, y, z = struct.unpack_from('<3f', block, vec)
     radius = struct.unpack_from('<f', block, rad)[0]
-    assert abs(x - (29.703 + vc.DOOR_OUT)) < 1e-3 and y == 0.0 and abs(z - 1.8) < 1e-6, (x, y, z)
+    assert abs(x - (29.703 + vc.DOOR_OUT)) < 1e-3 and abs(y + 8.516) < 1e-4 and abs(z - 1.8) < 1e-6, (x, y, z)
     assert abs(radius - 1.8) < 1e-6, radius   # on the ground: the stock radius reaches
     assert vc.mab_locator(block, seat) == (vecs + 16, 0x64 + 0x10)
     assert struct.unpack_from('<4f', block, vecs + 16) == struct.unpack_from('<4f', mab, vecs + 16), 'the seat moved'
     # A small jet keeps the stock radius (1.8) when that reaches; the door stays within the box's length.
     at, r = vc.door_point([[0.0, 1.381, 1.688], [8.047, 1.381, 9.922]], (2.15, 0.0, 1.8), 1.8)
-    assert at == [8.647, 0.0, 1.8] and r == 1.8, (at, r)
+    assert at == [8.647, -1.381, 1.8] and r == 1.8, (at, r)
     at, r = vc.door_point([[0.0, 1.255, 0.0], [12.969, 1.255, 1.0]], (2.15, 0.0, 1.8), 1.8)
     assert at[2] == 1.0, at
-    # A box reaching under its origin (a stock bomber's) puts the door over the ground: a radius that reaches it.
-    assert abs(vc.door_height([[0.0, 0.339, 2.723], [1.983, 1.624, 15.137]]) - 1.285) < 1e-9
-    at, r = vc.door_point([[0.0, -1.0, 0.0], [2.0, 2.0, 5.0]], (2.15, 0.0, 1.8), 1.8)
-    assert r == round((3.0 ** 2 + vc.DOOR_STEP ** 2) ** 0.5 - vc.DOOR_SLACK + vc.DOOR_MARGIN, 3), r
+    # A box reaching under its model's origin (a stock bomber's): the door at the box's bottom all the same, the ground
+    # it lands on; the stock radius reaches.
+    at, r = vc.door_point([[0.0, 0.339, 2.723], [1.983, 1.624, 15.137]], (2.15, 0.0, 1.8), 1.8)
+    assert at == [2.583, -1.624, 1.8] and r == 1.8, (at, r)
 
 
 @test

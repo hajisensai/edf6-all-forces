@@ -537,12 +537,13 @@ def on_origin(box) -> list[list[float]]:
 # was 4.9 m in from its fuselage box's side at the ground (no prompt anywhere round it: 「空母缺少登机口」, 2026-10-05),
 # a player jet's 10 m in from its whole-model box. move_door puts it where the stock heli has its own: on the ground,
 # DOOR_OUT m outside the box's right side (+x, the V506's side), at the stock door's z (within the box's length).
-# Every model's `mdl` and mesh bone are bound at its origin (pylib/jet_models.py lift_mdb: the grounding lifts what
-# hangs on the mesh bone, not it), the box frame's origin, so the door (y 0 on `mdl`) is as high over the box's bottom
-# as the origin is: on the ground for a grounded jet (its box's bottom is the origin), door_height over it for a stock
-# bomber's box that reaches under its origin (on the ground once it has landed). Its radius makes it reachable from
-# DOOR_STEP m across the ground, from the human's feet or HUMAN_HEIGHT over them (which of the two its position is, is
-# not settled). The stock radius is never cut.
+# `mdl` is the vehicle's position, the collision box's centre (seat_camera: the DOOR log, 2026-10-06), not the model's
+# origin as first thought (§12 put the door at y 0 on `mdl`: 8.52 m over the ground on the carrier, 1.38 m on the
+# fighter; the carrier was boarded only through the plugin's own board hook, the stock prompt found no door in reach).
+# So the door is placed in the box's own frame: at its bottom (-hy: the ground it stands on, a box reaching under its
+# model's origin included, once it has landed), DOOR_OUT m outside its right side (hx), at the stock door's z within its
+# length (docs/player-jet-re.md §15). Its radius makes it reachable from DOOR_STEP m across the ground, from the human's
+# feet or HUMAN_HEIGHT over them (which of the two its position is, is not settled). The stock radius is never cut.
 DOOR_SLACK = 0.5      # EDF.dll 0x1C36990
 DOOR_OUT = 0.6        # m: outside the box's side, where a human standing against it is
 DOOR_STEP = 1.0       # m: across the ground from the door point, still in reach
@@ -575,21 +576,13 @@ def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
     return vec, r + 0x10
 
 
-def door_height(box) -> float:
-    """How far a jet's door (y 0 on `mdl`, the box frame's origin) is over the bottom of its collision box `box`
-    ([centre, half extents]): where it stands on the ground. 0 for a box on its origin (on_origin)."""
-    (_cx, cy, _cz), (_hx, hy, _hz) = box
-    return max(0.0, hy - cy)
-
-
 def door_point(box, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
     """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]);
     `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
-    (cx, _cy, cz), (hx, _hy, hz) = box
-    z = min(max(stock[2], cz - hz), cz + hz)
-    rise = max(door_height(box), HUMAN_HEIGHT)   # the most the door can be over (or under) the human's position
-    need = (rise * rise + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
-    return [round(cx + hx + DOOR_OUT, 3), 0.0, round(z, 3)], round(max(radius, need), 3)
+    _centre, (hx, hy, hz) = box   # `mdl` is the box's centre: the box spans -half..half round it
+    z = min(max(stock[2], -hz), hz)
+    need = (HUMAN_HEIGHT * HUMAN_HEIGHT + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
+    return [round(hx + DOOR_OUT, 3), round(-hy, 3), round(z, 3)], round(max(radius, need), 3)
 
 
 def door_name(m: dict) -> str:
@@ -613,9 +606,9 @@ def move_door(m: dict, box) -> None:
 
 
 def check_door(data: bytes) -> None:
-    """Re-read a jet SGO and raise DoorError unless its door is at its origin's height (y 0 on `mdl`), outside its
-    collision box (heli_rigid_body) across its right side by DOOR_OUT, within its length, and a human standing DOOR_STEP m
-    from it on the ground under its box (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
+    """Re-read a jet SGO and raise DoorError unless its door (on `mdl`, the collision box's centre) is at its collision
+    box's (heli_rigid_body) bottom, the ground, outside its right side by DOOR_OUT, within its length, and a human standing
+    DOOR_STEP m from it on that ground (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
     _, m = sgo.read(data)
     mab = m['animation_model'][2]
     name = door_name(m)
@@ -623,11 +616,10 @@ def check_door(data: bytes) -> None:
     x, y, z = struct.unpack_from('<3f', mab, vec)
     reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
     box = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
-    (cx, cy, cz), (hx, hy, hz) = box
-    if abs(y) > 1e-4 or x < cx + hx + DOOR_OUT - 1e-3 or not cz - hz - 1e-3 <= z <= cz + hz + 1e-3:
-        raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱右侧外 {DOOR_OUT} m 的地面上')
-    door = door_height(box)
-    worst = max(((DOOR_STEP ** 2 + (door - feet) ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
+    _centre, (hx, hy, hz) = box
+    if abs(y + hy) > 2e-3 or x < hx + DOOR_OUT - 1e-3 or not -hz - 1e-3 <= z <= hz + 1e-3:
+        raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱（中心起半尺寸 {hx:.2f},{hy:.2f},{hz:.2f}）右侧外 {DOOR_OUT} m 的地面上')
+    worst = max(((DOOR_STEP ** 2 + feet ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
     if worst > reach:
         raise DoorError(f'站在上车点旁 {DOOR_STEP} m 的地面上够不着（要 {worst:.2f} m，能 {reach:.2f} m）')
 

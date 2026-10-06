@@ -43,6 +43,12 @@ target_link_libraries(sidecar_board_check PRIVATE edf6common)
 target_compile_options(sidecar_board_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(sidecar_board_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# A rotor craft's acceleration budget flown offline (tools/hover_lift_check.cpp, src/hover_lift.h); not part of the plugin build:
+# cmake --build build --target hover_lift_check && build\hover_lift_check.exe
+add_executable(hover_lift_check EXCLUDE_FROM_ALL tools/hover_lift_check.cpp)
+target_compile_options(hover_lift_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hover_lift_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The boardable aircraft's flight numbers checked offline (tools/pjet_kinds.cpp); not part of the plugin build:
 # cmake --build build --target pjet_kinds && build\pjet_kinds.exe
 add_executable(pjet_kinds EXCLUDE_FROM_ALL tools/pjet_kinds.cpp)
@@ -221,7 +227,7 @@ add_test(NAME call_pick COMMAND call_pick_test)
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check emc_check proteus_check sidecar_board_check)
+    vehicle_ram_check stab_check vsound_check map_cam_check emc_check proteus_check sidecar_board_check hover_lift_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})

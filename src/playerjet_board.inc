@@ -278,7 +278,8 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
         const float reach=speed*speed/(2.0f*k.brake)+5.0f;   // far enough that Hover's braking curve asks the whole speed
         goal[0]+=dir[0]*reach;goal[2]+=dir[2]*reach;
     }
-    jet::Hover(e,k,v,pos,goal,face,speed,HoverClimb(k),dt);
+    const JetMass* const mass=JetMassOf(BodyMark(v));   // the player's own lift (hover_lift.h; the NPCs' Hover passes none)
+    jet::Hover(e,k,v,pos,goal,face,speed,HoverClimb(k),dt,mass ? hover::PlayerLift(mass->mass,Cfg().playerRotorLift) : 0.0f);
 }
 
 // The rotor craft's flight done: the player's record from its entry's, the nacelles, the doll; parked when it sits

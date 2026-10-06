@@ -134,6 +134,7 @@ void Validate(Config& n) noexcept {
     n.playerJetGearButton=static_cast<int>(FixInt("PlayerJetGearButton",n.playerJetGearButton,0,255));
     n.playerJetChuteCutKey=static_cast<int>(FixInt("PlayerJetChuteCutKey",n.playerJetChuteCutKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
+    Fix("PlayerRotorLift",n.playerRotorLift,0.0f,4.0f);
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
@@ -315,6 +316,7 @@ void LoadConfig() noexcept {
     n.playerJetChuteCutKey=ReadInt(L"PlayerJetChuteCutKey",static_cast<DWORD>(n.playerJetChuteCutKey));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
+    n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
     n.heliMouseAim=ReadBool(L"HeliMouseAim",n.heliMouseAim);
     n.heliFlightHud=ReadBool(L"HeliFlightHud",n.heliFlightHud);
@@ -448,8 +450,9 @@ void LoadConfig() noexcept {
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange,
         n.stockVehicleHud,n.hideStockGauges);
-    Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
-        n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
+    Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
+        n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,
+        n.playerRotorLift,n.jetSound,n.jetSoundVolume);
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",
         n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
         n.warnVolume);
