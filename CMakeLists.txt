@@ -17,6 +17,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
+# The map's real play area: the walls where its ground ends (src/playarea.cpp, src/playarea.h).
+target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -227,3 +229,12 @@ foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
 endforeach()
 add_test(NAME hud_layout COMMAND hud_view --out "${CMAKE_BINARY_DIR}/hud-review")
+# The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
+# offline (tools/play_area_check.cpp). Not part of the plugin build:
+# cmake --build build --target play_area_check && build\play_area_check.exe
+add_executable(play_area_check EXCLUDE_FROM_ALL tools/play_area_check.cpp)
+target_include_directories(play_area_check PRIVATE src)
+target_compile_options(play_area_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(play_area_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+add_dependencies(offline_checks play_area_check)
+add_test(NAME play_area_check COMMAND play_area_check)

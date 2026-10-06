@@ -40,6 +40,7 @@
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"
+#include "playarea.h"
 #include "sight.h"
 #include "vehicleram.h"
 #include "playerjet_kinds.h"
@@ -149,9 +150,10 @@ constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude t
 // slowed this far (pulled up too long) has its path fall through: the nose drops and it dives out, a stall.
 constexpr float kStallFloor=25.0f;
 constexpr float kBodyTop=340.0f;       // m/s: the steepest dive's (the drag holds it about there; jetprops.cpp 600)
-// The world's walls (the play edge, crew.h PlayEdge, inside the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
-// turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
-constexpr float kWallIn=0.3f;   // past the play edge, at least this share of the path points back in
+// The walls where the map's ground ends (playarea.h, WallTurn): a path out through one is turned along it and kWallIn
+// back in, so the plane never stops at the wall and never flies out over the void.
+constexpr float kWallIn=0.3f;   // past a wall, at least this share of the path points back in
+constexpr float kAreaWarn=kEdgeBuffer+500.0f;   // m: heading out at a wall this near, the cockpit's AREA caution
 // The ground (Clear): the body's origin rests on the ground (the models are grounded and the boxes measured off
 // them, pylib/jet_models.py grounded / vcobjects.on_origin), so under kTouch it is on it; over kOffGround in the air.
 constexpr float kTouch=3.0f,kOffGround=6.0f;
@@ -219,6 +221,7 @@ struct PJet {
     float stallShare;            // ...the share of all its wing gives its path needs, kStallWarn over (>= 1: stall)
     Gpws gpws;                   // the ground-proximity warning (Proximity), impactIn s to the impact (<0: none)
     float impactIn;
+    int area;                    // the cockpit's AREA state (WallTurn): 2 turned back by a wall, 1 heading out near one
     float vel[3],omega[3];
     float prev[3];               // its position last frame
     bool havePrev;
@@ -317,9 +320,11 @@ PJet* Make(unsigned char* v,const Kind* kind) noexcept {
 }
 
 // Metres over what is under `p`: the ground or the water's surface, the higher (map rays see the seabed under the
-// sea, docs/water-re.md); kNoGround with neither. `water`: it is the water.
+// sea, docs/water-re.md), a void within the walls floored (see below); kNoGround with neither. `water`: it is the water.
 float Clear(const float* p,bool* water) noexcept {
-    const float ground=GroundClearance(p);
+    // A void within the walls (the big map's seams) floored at the area's lowest ground (playarea.h FloorClear): a map
+    // ray finds nothing there, and with no floor the jet sank on into it uncrashed.
+    const float ground=area::FloorClear(MapPlayArea(),p,GroundClearance(p),kNoGround);
     float surface=0.0f;
     *water=false;
     if(SeaAt(p[0],p[2],&surface)!=Sea::water)return ground;
@@ -430,29 +435,29 @@ void RightOf(const float* dir,float* right) noexcept {
     if(!Normalize(right)){right[0]=-1.0f;right[1]=0.0f;right[2]=0.0f;}
 }
 
-void WallTurn(const float* pos,float* dir) noexcept {
-    // The play edge (crew.h PlayEdge) with its buffer: the share of the path allowed outward falls from all of it
-    // kEdgeBuffer m in to none at the edge, and past it the path must point back in by kWallIn: the plane is
-    // bent round smoothly, its heading never flipped (it was a hard turn at the wall, its sense flipping between
-    // frames: the heading snapped +-17 deg every few seconds along it).
-    const float edge=PlayEdge();
-    for(int i=0;i<3;i+=2) {
-        const float out=pos[i]>0.0f ? 1.0f : -1.0f,away=dir[i]*out;
-        const float most=Clamp((edge-std::fabs(pos[i]))/kEdgeBuffer,-kWallIn,1.0f);
-        if(away<=most)continue;
-        const int o=2-i;   // the other horizontal axis: along the edge
-        const float flat=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
-        if(flat<1e-4f)continue;
-        const float target=most*flat,along=std::sqrt(std::fmax(flat*flat-target*target,0.0f));
-        float sense=dir[o];
-        if(std::fabs(sense)<1e-3f) {   // straight at the edge: along it to its right
-            float right[3];RightOf(dir,right);
-            sense=right[o];
-        }
-        dir[i]=out*target;
-        dir[o]=(sense>=0.0f ? 1.0f : -1.0f)*along;
-    }
-    if(!Normalize(dir)){dir[0]=0.0f;dir[1]=0.0f;dir[2]=1.0f;}
+// The walls (playarea.h): where the map's ground ends, kVoidMargin inside it (until 2026-10-06 the play edge, crew.h
+// PlayEdge: the physics world's square, km out over the void on a stock map). From kEdgeBuffer m in the share of the
+// path allowed out at a wall falls from all of it to none at the wall, and past it the path must point back in by
+// kWallIn: the plane is bent round smoothly along it, its heading never flipped (a hard turn at the wall flipped its
+// sense between frames: the heading snapped +-17 deg every few seconds along it). Returns the cockpit's AREA state
+// (area::EdgeState: 2 turned back by a wall this frame or past one, 1 heading out at one within kAreaWarn m, 0 neither).
+int WallTurn(const float* pos,float* dir) noexcept {
+    const PlayArea a=MapPlayArea();
+    float was[3]={dir[0],dir[1],dir[2]};
+    const bool bent=area::EdgeTurn(a,pos,dir,kEdgeBuffer,kWallIn);
+    return bent ? 2 : area::EdgeState(a,pos,was,kAreaWarn);
+}
+// A rotor craft's velocity asked for (HoverStep) bent off the walls as a wing's path is, its speed kept (it hovers: a
+// velocity under kWallSlow is left as it is). The same AREA state.
+constexpr float kWallSlow=0.5f;
+int WallTurnVelocity(const float* pos,float* vel) noexcept {
+    const float flat=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+    float dir[3]={vel[0],0.0f,vel[2]};
+    if(flat<kWallSlow){dir[0]=0.0f;dir[2]=0.0f;return area::EdgeState(MapPlayArea(),pos,dir,kAreaWarn);}
+    dir[0]/=flat;dir[2]/=flat;
+    const int state=WallTurn(pos,dir);
+    vel[0]=dir[0]*flat;vel[2]=dir[2]*flat;
+    return state;
 }
 
 // Its death (see body506.h Die506). Without that path it is kept at 1 HP: alive and flying, the next hit the
@@ -761,7 +766,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     float next[3];
     for(int i=0;i<3;++i)next[i]=dir[i]+(lift[i]+gPerp[i])*dt/speed;
     if(!Normalize(next))std::memcpy(next,dir,12);
-    WallTurn(pos,next);
+    j.area=WallTurn(pos,next);
     Across(j.up,next);   // carried along the new path
     if(!aiming){std::memcpy(j.aim,next,12);j.hasAim=s.keys;}
     FlightWatch(j,v,s,next,!s.keys ? 2 : aiming ? 1 : 0);
@@ -1661,6 +1666,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             FuelGauge(v,&r.fuel);   // its 506 body's tank, which the stock FUEL gauge showed (stockgauge.cpp)
             GunRounds(v,r);
             r.gpws=air ? j.gpws : Gpws::none;r.impactIn=r.gpws!=Gpws::none ? j.impactIn : -1.0f;
+            r.area=air ? j.area : 0;
             const bool rotor=j.board && j.board->frame==pjet::Airframe::rotor;
             r.liftShare=air && !rotor ? j.stallShare : 0.0f;
             if(rotor) {   // the helicopter HUD's (hud.cpp HeliHud)

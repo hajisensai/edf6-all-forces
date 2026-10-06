@@ -718,6 +718,7 @@ struct PlayerJetReadout {
     HeliFlight heli;
     FuelReading fuel;            // its airframe's tank (the 506 body's: what the stock FUEL gauge showed)
     int guns,gunRounds;          // its guns (seat 0's weapons neither a store nor the tank) and the fewest rounds in one
+    int area;                    // the play area's walls (playarea.h): 2 turned back by one, 1 heading out near one, 0 neither
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked
