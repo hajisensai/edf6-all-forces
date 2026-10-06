@@ -2,8 +2,8 @@
 // map"). Design and RE: docs/camera-re.md §8. M (ini MapKey) or a pad button (MapButton, XInput bits) lifts the player's
 // own camera into an overhead view of the real world: the game keeps drawing its terrain, buildings, vehicles and
 // enemies, the mouse / left stick pans it, the right drag / right stick turns and tilts it, the wheel / +- / triggers
-// zoom it from 200 m to 3 km; hud.cpp lays the marks over it (a grid with distances, north, the player, the squad and
-// friendly vehicles, the enemies the lock-on registry holds, the plugin's aircraft and carriers, the objective
+// zoom it from 200 m to 3 km; hud.cpp lays 3D pins over it (a grid with distances, north, the player, the squad and
+// friendly vehicles, every enemy the stock radar finds, the plugin's aircraft and carriers, the locks, the objective
 // markers). While it is open the player's controls are held (the game runs on: there is no pause the plugin may take).
 //  - The hold (H): every soldier class's pre-update (slot 4) is 0x572DF0. Before it reads a pad it tests the human's
 //    pad pointer (0x572F0C: mov rbx,[rsi+340h]; test rbx,rbx; je 0x573A4D); with none it takes the stock no-pad path
@@ -19,7 +19,7 @@
 //  - The far clip: view.cpp ViewMapClip (MapViewDistance) while it is open; the HUD keeps the last game view for the
 //    aim (CameraRay), so a turret, a launcher or a sight does not swing onto the map's view.
 //  - The marks: the friendly side by the team walk the board prompt makes (0x5E11D0, sidecar.cpp), the enemies by the
-//    lock-on registry (heli.cpp VisitEnemiesOf), the objective markers (DestinationMarker, vtable 0x17D4378: its
+//    hostile walk the stock radar makes (0x5E0F20; the nearest kMapEnemies kept), the objective markers (DestinationMarker, vtable 0x17D4378: its
 //    transform update, slot 3, puts it in a table, its destructor, slot 1, takes it out; its matrix at +0x1C0, L that
 //    these are the mission's objective markers), gathered every kGatherMs.
 //  - The wheel: the game window's procedure is subclassed for WM_MOUSEWHEEL (swallowed while the map is open); the
@@ -27,10 +27,13 @@
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "layout.h"
 #include "map_cam.h"
 #include "memory.h"
+#include "turretaim.h"
 #include "vecmath.h"
 #include <Xinput.h>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -55,6 +58,11 @@ constexpr std::int32_t kRecords=4;
 // friendly to `team`.
 constexpr unsigned kTeamWalk=0x5E11D0,kTeamManager=0x20B2978;
 const unsigned char kTeamWalkCode[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
+// The hostile walk the stock radar makes (HUiHudRader 0x82B4D0, at 0x82B8CA and 0x82BBB0): the same functor call for
+// every live object of every team hostile to `team` (relation 2; the dead, +0x2E8, skipped).
+constexpr unsigned kHostileWalk=0x5E0F20;
+const unsigned char kHostileWalkCode[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x55,0x41,0x56};
+const unsigned char kRadarCall[]={0x48,0x8B,0x0D,0xAE,0x70,0x88,0x01,0xE8,0x51,0x56,0xDB,0xFF};   // 0x82B8C3: mov rcx,[mgr]; call
 // DestinationMarker: its vtable, destructor (slot 1), transform update (slot 3: lea rdx,[rcx+1C0h]; add rcx,120h; jmp).
 constexpr unsigned kMarkerVtable=0x17D4378,kMarkerDtor=0x5B0410,kMarkerUpdate=0x5B2750;
 constexpr std::size_t kMarkerDtorSlot=1,kMarkerUpdateSlot=3,kMarkerAt=0x1F0;
@@ -67,6 +75,9 @@ constexpr int kEaseIn=24,kEaseOut=15;   // frames the camera eases into the map'
 constexpr float kEyeClear=40.0f;        // m: the eye kept at least this over the ground under it
 constexpr float kStickDead=0.2f;
 constexpr float kMouseMost=4000.0f;     // a mouse delta past this is no delta (an unread record)
+constexpr float kFlyingClear=15.0f;     // m over the ground under it: an enemy flies (its pin's stem goes down)
+constexpr float kLargeShare=6.0f;       // an enemy whose HP max is this many times the median of all of them is large
+constexpr float kLargeHp=30000.0f;      // ...or this much HP max whatever the others have
 
 using CamStepFn=void(__fastcall*)(void*,void*);
 using LookToFn=float*(__fastcall*)(float*,const float*);
@@ -75,7 +86,7 @@ using MarkerDtorFn=void*(__fastcall*)(void*,unsigned);
 using MarkerUpdateFn=void*(__fastcall*)(void*,void*,void*,void*);
 using XInputGetStateFn=DWORD(WINAPI*)(DWORD,XINPUT_STATE*);
 
-bool holdOk=false,camOk=false,walkOk=false,markerOk=false;
+bool holdOk=false,camOk=false,walkOk=false,hostileOk=false,markerOk=false;
 CamStepFn nextCamStep=nullptr;
 MarkerDtorFn nextMarkerDtor=nullptr;
 MarkerUpdateFn nextMarkerUpdate=nullptr;
@@ -101,6 +112,7 @@ struct Game {
     int count;
     MapUnit unit[kMapUnits];
     bool loggedMouse;
+    ULONGLONG loggedAt;         // the marks' debug line
 };
 Game game{};
 
@@ -209,10 +221,23 @@ float GroundAt(float x,float z,float fallback) noexcept {
 }
 
 // --- The marks ---
-void Add(Game& g,const float* p,MapKind kind) noexcept {
-    if(g.count>=kMapUnits || !std::isfinite(p[0]+p[1]+p[2]))return;
+MapUnit* Add(Game& g,const float* p,MapKind kind) noexcept {
+    if(g.count>=kMapUnits || !std::isfinite(p[0]+p[1]+p[2]))return nullptr;
     MapUnit& u=g.unit[g.count++];
-    std::memcpy(u.pos,p,12);u.kind=kind;
+    u=MapUnit{};
+    std::memcpy(u.pos,p,12);u.ground=p[1];u.hp=-1.0f;u.kind=kind;
+    return &u;
+}
+// An object's level heading (its matrix's forward row) into the unit.
+void Heading(MapUnit* u,const unsigned char* o) noexcept {
+    const float* m=reinterpret_cast<const float*>(o+kMatrix);
+    const float x=m[8],z=m[10],len=std::sqrt(x*x+z*z);
+    if(len>1e-3f && std::isfinite(len)){u->dir[0]=x/len;u->dir[1]=z/len;}
+}
+float HpShare(const unsigned char* o,float* hpMax) noexcept {
+    const float most=At<float>(o,kHpMax),hp=At<float>(o,kHp);
+    *hpMax=std::isfinite(most) && most>0.0f ? most : 0.0f;
+    return *hpMax>0.0f && std::isfinite(hp) ? vec::Clamp(hp/most,0.0f,1.0f) : -1.0f;
 }
 bool Aircraft(const void* v) noexcept { return IsJet(v) || IsPlayerJet(v) || IsHelicopter(v); }
 
@@ -221,30 +246,106 @@ void __fastcall WalkVisit(void* self,void* object) noexcept {
     __try {
         const auto& w=*static_cast<Walk*>(self);
         const auto o=static_cast<const unsigned char*>(object);
-        if(!o || o==w.self || o==w.ride || !Readable(o,kDead+1) || o[kDead])return;
+        if(!o || o==w.self || o==w.ride || !Readable(o,kHp+4) || o[kDead])return;
         const float* p=PosOf(o);
-        if(IsVehicleObject(o))Add(*w.g,p,IsSub(o) ? MapKind::carrier : Aircraft(o) ? MapKind::air : MapKind::vehicle);
-        else Add(*w.g,p,At<std::int32_t>(o,kTeam)==w.team ? MapKind::squad : MapKind::ally);
+        if(!IsVehicleObject(o)){Add(*w.g,p,At<std::int32_t>(o,kTeam)==w.team ? MapKind::squad : MapKind::ally);return;}
+        const bool air=!IsSub(o) && Aircraft(o);
+        MapUnit* u=Add(*w.g,p,IsSub(o) ? MapKind::carrier : air ? MapKind::air : MapKind::vehicle);
+        if(u)Heading(u,o);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 void __fastcall WalkDtor(void*,unsigned) noexcept {}
 void* kWalkVtable[]={reinterpret_cast<void*>(&WalkDtor),reinterpret_cast<void*>(&WalkVisit)};
 
+// The enemies as the stock radar finds them (HUiHudRader's update 0x82B4D0 walks 0x5E0F20(manager, its team, functor):
+// every live object of every team hostile to it, relation 2), all of them gathered here, the nearest kMapEnemies kept.
+struct Foe { const unsigned char* o; float d2,hpMax; };
+constexpr int kFoes=4096;
+Foe foes[kFoes];
+int foeCount=0;
+struct Hostile { void** vtable; const float* me; };
+void __fastcall HostileVisit(void* self,void* object) noexcept {
+    __try {
+        const auto o=static_cast<const unsigned char*>(object);
+        if(foeCount>=kFoes || !o || !Readable(o,kHp+4) || o[kDead])return;
+        const float* p=PosOf(o);
+        const float* me=static_cast<Hostile*>(self)->me;
+        const float d[3]={p[0]-me[0],p[1]-me[1],p[2]-me[2]};
+        const float d2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+        if(!std::isfinite(d2))return;
+        float hpMax=0.0f;HpShare(o,&hpMax);
+        foes[foeCount++]=Foe{o,d2,hpMax};
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+void* kHostileVtable[]={reinterpret_cast<void*>(&WalkDtor),reinterpret_cast<void*>(&HostileVisit)};
+
+// The lock-registry fallback (the hostile walk's code not as expected): the enemies the lock-on system knows.
 void EnemyVisit(void* ctx,const void* object,const float* aim) {
-    Add(*static_cast<Game*>(ctx),aim,IsVehicleObject(object) && Aircraft(object) ? MapKind::enemyAir : MapKind::enemy);
+    (void)aim;
+    auto& h=*static_cast<Hostile*>(ctx);
+    HostileVisit(&h,const_cast<void*>(object));
+}
+
+// The enemies kept (nearest first, kMapEnemies at most): flying (an aircraft, or kFlyingClear over the ground under
+// it: its stem goes down), large (HP max kLargeShare times the median of all of them, or kLargeHp: its HP bar shown).
+void Enemies(Game& g) noexcept {
+    if(!foeCount)return;
+    static float hps[kFoes];
+    int n=0;
+    for(int i=0;i<foeCount;++i)if(foes[i].hpMax>0.0f)hps[n++]=foes[i].hpMax;
+    float median=0.0f;
+    if(n){std::nth_element(hps,hps+n/2,hps+n);median=hps[n/2];}
+    const int keep=foeCount<kMapEnemies ? foeCount : kMapEnemies;
+    std::partial_sort(foes,foes+keep,foes+foeCount,[](const Foe& a,const Foe& b){return a.d2<b.d2;});
+    for(int i=0;i<keep;++i) {
+        const unsigned char* o=foes[i].o;
+        const float* p=PosOf(o);
+        const float ground=GroundAt(p[0],p[2],p[1]);
+        const bool flying=(IsVehicleObject(o) && Aircraft(o)) || p[1]-ground>kFlyingClear;
+        MapUnit* u=Add(g,p,flying ? MapKind::enemyAir : MapKind::enemy);
+        if(!u)break;
+        if(flying)u->ground=ground;
+        Heading(u,o);
+        float hpMax=0.0f;
+        const float share=HpShare(o,&hpMax);
+        if(hpMax>=kLargeHp || (n>=2 && hpMax>=median*kLargeShare)){u->flags|=kMapLarge;u->hp=share;}
+        if(i==0)u->flags|=kMapNearest;
+    }
+}
+
+// The player's locks this moment (EDF6AutoTurret's designation, a player jet's or a stock vehicle's or heli's homing
+// store): a box each.
+void Locks(Game& g) noexcept {
+    auto add=[&](int state,const float* at){
+        if(state<=0)return;
+        if(MapUnit* u=Add(g,at,MapKind::lock))u->flags|=state==1 ? kMapAcquiring : 0;
+    };
+    edf::aimlink::TurretReadoutV1 t{};
+    if(AutoTurretReadout(&t) && t.target)add(t.lock==edf::aimlink::Lock::locked ? 2 : t.lock==edf::aimlink::Lock::acquiring ? 1 : 0,t.at);
+    PlayerJetReadout j{};
+    if(PlayerJetHud(&j))add(j.lock,j.lockAt);
+    HeliSightReadout h{};
+    if(PlayerHeliSight(&h))add(h.lock,h.armAt);
+    StockHudReadout s{};
+    if(PlayerStockHud(&s))for(int i=0;i<s.arms && i<kStockArms;++i)add(s.arm[i].lock,s.arm[i].at);
 }
 
 void Gather(Game& g,const unsigned char* human) noexcept {
     g.count=0;
     const std::int32_t team=At<std::int32_t>(human,kTeam);
     const unsigned char* body=Body(human);
-    if(walkOk) {
-        if(const auto manager=At<void*>(image,kTeamManager)) {
-            Walk w{kWalkVtable,&g,human,body!=human ? body : nullptr,team};
-            reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&w);
-        }
+    const auto manager=At<void*>(image,kTeamManager);
+    Hostile hostile{kHostileVtable,PosOf(body)};
+    foeCount=0;
+    if(hostileOk && manager)reinterpret_cast<WalkFn>(image+kHostileWalk)(manager,team,&hostile);
+    else VisitEnemiesOf(team,&EnemyVisit,&hostile);
+    Enemies(g);
+    if(walkOk && manager) {
+        Walk w{kWalkVtable,&g,human,body!=human ? body : nullptr,team};
+        reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&w);
+        for(int i=0;i<g.count;++i)   // the friendly aircraft's ground (outside the walk: it holds the team lock)
+            if(g.unit[i].kind==MapKind::air || g.unit[i].kind==MapKind::carrier)g.unit[i].ground=GroundAt(g.unit[i].pos[0],g.unit[i].pos[2],g.unit[i].pos[1]);
     }
-    VisitEnemiesOf(team,&EnemyVisit,&g);
     if(markerOk) {
         AcquireSRWLockShared(&markerLock);
         for(const void* m:markers) {
@@ -253,6 +354,12 @@ void Gather(Game& g,const unsigned char* human) noexcept {
             if(Readable(p,12))Add(g,p,MapKind::marker);
         }
         ReleaseSRWLockShared(&markerLock);
+    }
+    Locks(g);
+    if(Cfg().debug && GetTickCount64()-g.loggedAt>=5000) {
+        g.loggedAt=GetTickCount64();
+        Log("MAP marks: %d enemies (%s; %d drawn, nearest first), %d marks in all",foeCount,hostileOk ? "the radar's hostile walk" : "the lock registry",
+            foeCount<kMapEnemies ? foeCount : kMapEnemies,g.count);
     }
 }
 
@@ -532,8 +639,9 @@ bool InstallMap() noexcept {
         camOk=InstallCamera();
         holdOk=camOk && InstallHold();
         walkOk=Matches(kTeamWalk,kTeamWalkCode,sizeof(kTeamWalkCode));
+        hostileOk=Matches(kHostileWalk,kHostileWalkCode,sizeof(kHostileWalkCode)) && Matches(0x82B8C3,kRadarCall,sizeof(kRadarCall));
         markerOk=holdOk && InstallMarkers() && nextMarkerUpdate;
-        Log("MAP hooks: camera=%d hold=%d team walk=%d markers=%d%s",camOk,holdOk,walkOk,markerOk,
+        Log("MAP hooks: camera=%d hold=%d team walk=%d hostile walk=%d markers=%d%s",camOk,holdOk,walkOk,hostileOk,markerOk,
             holdOk ? "" : " (the map is off: unexpected EDF.dll code)");
         return holdOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

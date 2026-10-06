@@ -2176,7 +2176,7 @@ def map_wired() -> None:
         assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
     for name, rva in (('kHoldAt', '0x572F0C'), ('kHoldResume', '0x572F1C'), ('kNoPad', '0x573A4D'), ('kCamVtable', '0x1768C10'),
                       ('kCamStep', '0xF86A0'), ('kLookTo', '0x4E220'), ('kTeamWalk', '0x5E11D0'), ('kMarkerVtable', '0x17D4378'),
-                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750')):
+                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750'), ('kHostileWalk', '0x5E0F20')):
         assert re.search(rf'\b{name}={rva}\b', code), (name, rva)
         assert rva in doc, rva
     for name, off in (('kCamTargetRef', '0x350'), ('kCamTarget', '0x360'), ('kCamMatrix', '0x220'), ('kHumanRecord', '0xD40'),
@@ -2215,7 +2215,8 @@ def map_wired() -> None:
         consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
         for arr, at in (('kHoldCode', consts['kHoldAt']), ('kNoPadCode', consts['kNoPad']), ('kCamStepCode', consts['kCamStep']),
                         ('kLookToCode', consts['kLookTo']), ('kLookToUse', 0xFC0D3), ('kTeamWalkCode', consts['kTeamWalk']),
-                        ('kMarkerUpdateCode', consts['kMarkerUpdate'])):
+                        ('kMarkerUpdateCode', consts['kMarkerUpdate']), ('kHostileWalkCode', consts['kHostileWalk']),
+                        ('kRadarCall', 0x82B8C3)):
             want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
@@ -2233,6 +2234,15 @@ def map_wired() -> None:
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
     assert 'MapScene(dir,L"map_mid"' in src('tools/hud_view.cpp')
     assert 'ViewMapClip(true,' in code and 'ViewMapClip(false,' in code
+    # The pins: every enemy the radar's hostile walk finds (the nearest kMapEnemies drawn, the cap the README says), the
+    # pin's height from map_cam.h (checked offline), drawn for every kind.
+    assert '0x82B8C3' in doc and 'HUiHudRader' in doc and '256' in readme and 'kMapEnemies' in readme
+    assert re.search(r'kMapEnemies=256\b', src('src/map.h')) and 'std::partial_sort(foes' in code
+    assert 'mapcam::PinHeight(' in hud and 'PinHeight(' in src('tools/map_cam_check.cpp')
+    kinds = re.search(r'enum class MapKind : std::uint8_t \{(.*?)\};', src('src/map.h')).group(1).replace(' ', '').split(',')
+    icon = hud[hud.index('void MapIcon('):hud.index('struct Pin {')]
+    for kind in kinds:
+        assert f'case MapKind::{kind}:' in icon, f'MapIcon draws no {kind}'
 
 
 def main() -> int:
