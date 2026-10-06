@@ -19,13 +19,14 @@
 // Docs: docs/missile-re.md. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "memory.h"
+#include "pn.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
 
 namespace crew {
 namespace {
-using vec::Clamp;using vec::Cross;using vec::Dot;using vec::Len;using vec::Normalize;
+using vec::Clamp;using vec::Dot;using vec::Len;using vec::Normalize;
 constexpr std::size_t kVtable=0x17A1C10,kUpdate=0x26A880,kSlotUpdate=5;
 const unsigned char kUpdateSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57};
 // The round (B): its lock entry (+0x10 the aim point, +0x29 valid), velocities (m a frame), CP[4] / CP[6] / CP[8] /
@@ -44,6 +45,7 @@ constexpr float kCoastDrag=0.004f;       // of its speed a frame after burnout (
 constexpr float kMinSpeed=1.0f;          // m a frame: no slower (it falls out of the sky as its life ends)
 constexpr float kFuseShare=0.6f,kFuseLeast=4.0f;   // m
 constexpr float kG=9.8f;
+constexpr float kJumpM=20.0f;          // a lock point moving more in a frame went to another target
 
 // Each round guided: the target where it was last frame (its velocity, m a frame), and the game frame it was last
 // guided in: an entry not guided for kStaleFrames is a round gone (dead rounds are never told of), free again.
@@ -186,6 +188,38 @@ void Detonate(unsigned char* b,const float* r) noexcept {
     if(Cfg().debug)Log("MISSILE %p proximity fuse: %.1f m off, age %d",b,Len(r),At<std::int32_t>(b,kAge));
 }
 
+}  // namespace
+
+bool TrackRound(const unsigned char* b,std::int32_t age,const float* pos,const float* dir,const unsigned char* lockAt,
+                float* aimOut,float* tv) noexcept {
+    Round& round=RoundOf(b,age,GameFrame());
+    round.age=age;round.frame=GameFrame();
+    std::memcpy(round.pos,pos,12);std::memcpy(round.dir,dir,12);
+    // As the stock steering takes it (0x269C0A): the entry is the target's (its lock point, rewritten every frame by
+    // its own update, 0x6C7700); the round's reference is weak: with the target gone the point stops, so a dead
+    // entry (use count 0) is no lock, it flies on.
+    const auto lock=At<const unsigned char*>(lockAt,0);
+    const auto ctrl=At<const unsigned char*>(lockAt,8);
+    if(!lock || !ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)<=0 || !Readable(lock,kLockValid+1) || !lock[kLockValid]) {
+        round.seen=false;   // no lock: the next one starts its target's motion afresh
+        return false;
+    }
+    const float* aim=reinterpret_cast<const float*>(lock+kLockAim);
+    float decoyAt[3];
+    if(round.decoy) {   // fooled by a flare: at it while it burns, then on at where it was last
+        const Flare& f=flares[round.decoy-1];
+        std::memcpy(decoyAt,GameMs()<f.until ? f.pos : round.last,12);
+        aim=decoyAt;
+    }
+    tv[0]=tv[1]=tv[2]=0.0f;
+    if(round.seen)for(int i=0;i<3;++i)tv[i]=aim[i]-round.last[i];
+    if(Len(tv)>kJumpM)tv[0]=tv[1]=tv[2]=0.0f;   // the lock moved to another target: no velocity from that
+    std::memcpy(round.last,aim,12);round.seen=true;
+    std::memcpy(aimOut,aim,12);
+    return true;
+}
+
+namespace {
 void Guide(unsigned char* b) noexcept {
     if(At<const void*>(b,0)!=image+kVtable)return;
     if(At<std::int32_t>(b,kHomingDelay)!=kNoStockHoming || At<std::int32_t>(b,kHomingFrames)!=kPluginMark)return;
@@ -194,8 +228,6 @@ void Guide(unsigned char* b) noexcept {
     // left to it.
     if(At<std::int32_t>(b,kFlown)<At<std::int32_t>(b,kIgnition))return;
     const std::int32_t age=At<std::int32_t>(b,kAge);
-    Round& round=RoundOf(b,age,GameFrame());
-    round.age=age;round.frame=GameFrame();
     float* own=reinterpret_cast<float*>(b+kOwn);
     float* inherited=reinterpret_cast<float*>(b+kInherited);
     float vel[3];
@@ -208,47 +240,21 @@ void Guide(unsigned char* b) noexcept {
     const float burn=std::isfinite(guidance[0]) ? Clamp(guidance[0],0.0f,kBurnMost) : 0.0f;
     const float maxG=std::isfinite(guidance[1]) ? Clamp(guidance[1],kGLeast,kGMost) : kGLeast;
     const float nav=std::isfinite(guidance[2]) ? Clamp(guidance[2],kNavLeast,kNavMost) : kNavLeast;
-    // Proportional navigation at the lock point.
-    const auto lock=At<const unsigned char*>(b,kLock);
-    const auto ctrl=At<const unsigned char*>(b,kLockCtrl);
     const float* pos=reinterpret_cast<const float*>(b+kPos);
-    std::memcpy(round.pos,pos,12);std::memcpy(round.dir,dir,12);
-    // As the stock steering takes it (0x269C0A): the entry is the target's (its lock point, rewritten every frame by
-    // its own update, 0x6C7700); the round's reference is weak: with the target gone the point stops, so a dead
-    // entry (use count 0) is no lock, it flies on.
-    if(lock && ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)>0 && Readable(lock,kLockValid+1) && lock[kLockValid]) {
-        const float* aim=reinterpret_cast<const float*>(lock+kLockAim);
-        float decoyAt[3];
-        if(round.decoy) {   // fooled by a flare: at it while it burns, then on at where it was last
-            const Flare& f=flares[round.decoy-1];
-            std::memcpy(decoyAt,GameMs()<f.until ? f.pos : round.last,12);
-            aim=decoyAt;
-        }
-        float tv[3]={0.0f,0.0f,0.0f};
-        if(round.seen)for(int i=0;i<3;++i)tv[i]=aim[i]-round.last[i];
-        if(Len(tv)>20.0f)tv[0]=tv[1]=tv[2]=0.0f;   // the lock moved to another target: no velocity from that
-        std::memcpy(round.last,aim,12);round.seen=true;
+    float aim[3],tv[3];
+    if(TrackRound(b,age,pos,dir,b+kLock,aim,tv)) {
+        // Closest approach within the coming frame.
         const float r[3]={aim[0]-pos[0],aim[1]-pos[1],aim[2]-pos[2]};
         const float rv[3]={tv[0]-vel[0],tv[1]-vel[1],tv[2]-vel[2]};
-        const float r2=Dot(r,r);
-        // Closest approach within the coming frame.
         const float v2=Dot(rv,rv),t=v2>1e-6f ? Clamp(-Dot(r,rv)/v2,0.0f,1.0f) : 0.0f;
         const float miss[3]={r[0]+rv[0]*t,r[1]+rv[1]*t,r[2]+rv[2]*t};
         const float blast=At<float>(b,kBlast),fuse=std::isfinite(blast) && blast*kFuseShare>kFuseLeast ? blast*kFuseShare : kFuseLeast;
         if(Len(miss)<fuse){Detonate(b,miss);return;}
-        if(r2>1.0f) {
-            float w[3];Cross(r,rv,w);
-            for(auto& x:w)x/=r2;   // the line of sight's turn, rad a frame
-            float a[3];Cross(w,vel,a);
-            for(auto& x:a)x*=nav;
-            const float along=Dot(a,dir);
-            for(int i=0;i<3;++i)a[i]-=dir[i]*along;
-            const float most=maxG*kG*kFrame*kFrame,len=Len(a);
-            if(len>most)for(auto& x:a)x*=most/len;
-            for(int i=0;i<3;++i)dir[i]=vel[i]+a[i];
-            if(!Normalize(dir))return;
-        }
-    } else round.seen=false;   // no lock: the next one starts its target's motion afresh
+        float a[3];
+        pn::Lateral(pos,vel,aim,tv,nav,maxG*kG*kFrame*kFrame,a);
+        for(int i=0;i<3;++i)dir[i]=vel[i]+a[i];
+        if(!Normalize(dir))return;
+    }
     // The motor: the stock code adds CP[4] along its velocity after this; past its burn that is taken back here.
     if(static_cast<float>(age)>burn) {
         const float accel=At<float>(b,kAccel);

@@ -25,6 +25,7 @@
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"
+#include "lockon.h"
 #include "stores.h"
 #include <cmath>
 #include <cstring>
@@ -189,7 +190,7 @@ bool HolderAlive(const unsigned char* v,const unsigned char* w) noexcept {
 void Lock(unsigned char* w) noexcept {
     if(!IsStoreWeapon(w))return;   // the stock missile beeps itself
     float at[3],progress=0.0f;
-    const int lock=StoreLock(Store{w,nullptr,0,0,0.0f},at,&progress);
+    const int lock=WeaponLock(w,at,&progress);
     audio::LockTone(lock,progress);
 }
 
@@ -216,7 +217,7 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
             const int next=(at+k)%n;
             if(!Spent(ws[list[next]]) || k==n){at=next;break;}
         }
-        if(at!=was){ClearStoreLock(Store{ws[list[was]],nullptr,0,0,0.0f});ClearStoreLock(Store{ws[list[at]],nullptr,0,0,0.0f});}
+        if(at!=was){ClearWeaponLock(ws[list[was]]);ClearWeaponLock(ws[list[at]]);}
         if(press)Log("PAYLOAD v=%p secondary: %ls (%d rounds)",v,r.entry[list[at]].name,r.entry[list[at]].rounds);
     }
     p.weapon=ws[list[at]];
