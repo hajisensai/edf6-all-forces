@@ -169,8 +169,10 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址全部是 RVA。纯静态分析
   来自原子弹 `core+0x740/+0x748`，`0x2355F0` 和 `core+0x9A8/+0x9B0` 从同一 owner 写入。
   只重定向逐目标伤害调用 `0x542FD4` / `0x54360E` → `0x541FF0`，使用同一当前乘员关系判定。
   不取消爆炸、不改弹伤/范围/弹道/敌人伤害；副驾驶下车后，其旧弹药也恢复原版对车辆的伤害。
-- 控制器 getter、两个爆炸调用点和 attacker 拷贝都有字节签名。候选 hook、移动 hook 或爆炸 hook 任一不可用，
-  不开放虚拟乘员；已经重定向的调用在功能禁用时直接转交原版。
+- 控制器 getter、两个爆炸调用点和 attacker 拷贝都有字节签名。移动 hook 不可用则不开放虚拟乘员（乘员每帧走出车斗）；
+  候选 hook（`jet_hooks.cpp InstallBulletPass`，只看自身 addBody / body→object 签名，不随直升机 profile 与
+  `InstallJets`）和爆炸 hook 是各自独立的子能力：缺哪个就只有那一路按原版友伤命中本车和司机，日志
+  `SIDECAR no bullet pass-through` / `SIDECAR no blast filter` 说明，乘员功能照常。已经重定向的调用在功能禁用时直接转交原版。
 
 验证与接入：
 

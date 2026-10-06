@@ -409,7 +409,7 @@ add_test(NAME vehicle_cas COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/t
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
-foreach(check IN ITEMS heli_command_test jet_command_test rocket_guide_prediction_test rocket_impact_readout_test npc_post_test map_command_identity_test)
+foreach(check IN ITEMS heli_command_test jet_command_test bullet_pass_test rocket_guide_prediction_test rocket_impact_readout_test npc_post_test map_command_identity_test)
     add_executable(${check} EXCLUDE_FROM_ALL tests/${check}.cpp)
     target_include_directories(${check} PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
     target_link_libraries(${check} PRIVATE edf6common user32)

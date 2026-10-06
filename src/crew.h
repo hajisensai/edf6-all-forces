@@ -445,6 +445,9 @@ bool JetInLine(const float* from,const float* to,const void* self) noexcept;   /
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 bool InstallJets() noexcept;
+// jet_hooks.cpp: the bullets' candidate hook (a jet's rounds through its wingmen, a passenger's through their own
+// bike), on its own signatures: before InstallJets and InstallSidecar, whichever profiles they have.
+bool InstallBulletPass() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
 bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
 bool InstallShields() noexcept;                    // shield.cpp: the Shield Bearer's shield lets slow things through
@@ -591,7 +594,7 @@ bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
 // Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
 bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
-bool SidecarBulletHooked() noexcept;
+bool SidecarBulletHooked() noexcept;  // jet_hooks.cpp: the bullets' candidate hook is in (InstallBulletPass)
 void SidecarLevel(const void* body,float* w) noexcept;
 void ResetSidecars() noexcept;
 // physics.cpp: the car step's final setAngVel (0x6746C6) goes through the plugin (SidecarLevel), redirected at load.

@@ -579,9 +579,14 @@ bool InstallSidecar() noexcept {
             blastOk=edf::RedirectCall(image+kBlastDamageCall,image+kDamage,reinterpret_cast<void*>(&PassengerBlastDamage),changed);
             if(blastOk)blastOk=edf::RedirectCall(image+kBlastListDamageCall,image+kDamage,reinterpret_cast<void*>(&PassengerBlastDamage),changed);
         }
-        // If either required channel cannot be installed, no virtual passengers are admitted.
-        ok=ok && moveOk && blastOk && SidecarBulletHooked();
-        Log("HOOK sidecar blast=%d",blastOk);
+        // Without the walk taken away a held gunner walks out of the tub every frame: no sidecar at all. A passenger's
+        // rounds (the bullets' hook, jet_hooks.cpp InstallBulletPass) and blasts (above) left out of their own bike are
+        // each a channel of its own: one missing, that one hits the bike and its driver as any friendly fire does.
+        ok=ok && moveOk;
+        const bool shotsOk=ok && SidecarBulletHooked();
+        if(ok && !shotsOk)Log("SIDECAR no bullet pass-through: a passenger's rounds hit their own bike and driver (stock)");
+        if(ok && !blastOk)Log("SIDECAR no blast filter: a passenger's explosions hurt their own bike and driver (stock)");
+        Log("HOOK sidecar own-vehicle pass: rounds=%d blasts=%d",shotsOk,blastOk);
     } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
     Log("HOOK sidecar=%d (move=%d drive=%d level=%d) config %d",ok,moveOk,driveOk,ok && SidecarLevelHooked(),Cfg().sidecar);
     return ok;

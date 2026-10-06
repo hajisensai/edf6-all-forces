@@ -767,6 +767,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
+    InstallBulletPass();    // the bullets' candidate hook: the jets' wingmen and the sidecar's passengers, whatever the heli profile
     if(heli) {
         InstallDoorGuns();  // the 410's door guns are part of the heli pilot
         InstallJets();      // the jets and the carrier are flown from HeliFrame: no heli pilot, none of them
