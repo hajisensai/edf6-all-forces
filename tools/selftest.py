@@ -3214,7 +3214,14 @@ def stock_payload_and_seats_wired() -> None:
     # sends it off with the player aboard); Crew() never does while a player rides, so Pilot must.
     pilot = seat.split('void Pilot(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(!heli && !NpcDrivable(v))return;' in pilot and 'kSlotRideAi' in pilot
-    assert 'return TankAi(v) && At<std::uint64_t>(v,kHolderCount)>0;' in src('src/npcpost.cpp')
+    assert 'bool NpcDrivable(const unsigned char* v) noexcept { return TankAi(v); }' in src('src/npcpost.cpp')
+    # Every vehicle an NPC can drive (the user 2026-10-07: "所有载具都要支持ai"): the unarmed trucks of the Grape's class
+    # too, and the CarBase classes whose slot 49 is a preferred-seat wrapper (the trucks 607 / 60X, the rescue 507).
+    crew_src = src('src/crew.cpp')
+    assert 'armedOnly' not in crew_src, 'an unarmed vehicle gets an NPC driver too'
+    for entry in ('{0x17DCAB0,0x65A390,"607_RoboTruck",0x65B910}', '{0x17DCFB8,0x65A390,"60X_Truck",0x65B910}',
+                  '{0x17DB590,0x61BFD0,"507_Rescuetank",0x61D310}'):
+        assert entry in crew_src, entry
     assert 'if(moved && at==0)Pilot(v);' in seat
 
 

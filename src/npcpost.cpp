@@ -86,9 +86,7 @@ void Relinquish(const unsigned char* v) noexcept {
 }
 }  // namespace
 
-bool NpcDrivable(const unsigned char* v) noexcept {
-    return TankAi(v) && At<std::uint64_t>(v,kHolderCount)>0;   // an unarmed truck of the Grape's class: no driver (crew.cpp Crew)
-}
+bool NpcDrivable(const unsigned char* v) noexcept { return TankAi(v); }
 
 void NpcPostInput(unsigned char* v) noexcept {
     if(!Cfg().customNpcAi || !Cfg().tankReturnToPost || v[kDead] || !TankAi(v))return;

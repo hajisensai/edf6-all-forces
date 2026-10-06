@@ -25,11 +25,13 @@ EDF.dll TimeDateStamp 0x678CCB46，地址全部是 RVA。「确认」= 反汇编
 
 **根因（确认）**：游戏本身**有** AI。问题在插件：`InstallCrew` 要求 `kClasses` 每个类的 slot 49 都是 stock `0x633B80`，Vehicle_Car 的 slot 49 是 `0x65B910`，所以它从未登记进 `kClasses`，`Crew()` 从不对它运行，也就从不派 NPC。
 
-**修法**：`kClasses` 新增 `{0x17E01B0, 0x65A390, "Car", findSeat=0x65B910, slot 55, armedOnly}`；FindSeat hook 改为按类调用各自的原 slot 49；`InstallCrew` 对 slot 49 不符的类改为记日志跳过（不再整体失败）。同一 vtable 还被 `V512_KEITRUCK`、`V513_TRAILERTRUCK01CAB` 使用，二者 `vehicle_setup` 武器表为空，所以加 `armedOnly`：武器 holder 数 veh+0x648 为 0 的不派人。
+**修法**：`kClasses` 新增 `{0x17E01B0, 0x65A390, "Car", findSeat=0x65B910, slot 55}`（当时带 `armedOnly`，2026-10-07 删除，见下）；FindSeat hook 改为按类调用各自的原 slot 49；`InstallCrew` 对 slot 49 不符的类改为记日志跳过（不再整体失败）。同一 vtable 还被 `V512_KEITRUCK`、`V513_TRAILERTRUCK01CAB` 使用，二者 `vehicle_setup` 武器表为空，所以加 `armedOnly`：武器 holder 数 veh+0x648 为 0 的不派人。
 
 **推断/待验证**：NPC 坐上后由 `0x661440` 驾驶（与坦克同一 action），炮塔由 seat0 的 VehicleWeaponAim 瞄准开火——未进游戏验证。
 
-同因被排除、本次未处理：607 RoboTruck（0x17DCAB0）、60X Truck（0x17DCFB8），slot 49 都是 0x65B910；507 Rescuetank（0x17DB590）slot 49 是 0x61D310。
+同因被排除、2026-10-07 已登记（用户：「所有载具都要支持 ai」）：607 RoboTruck（0x17DCAB0）、60X Truck（0x17DCFB8），slot 49 都是 0x65B910、slot 55 都是 Car 的 0x65A390，slot 6（0x6234E0 / 0x6266B0）第一步就调 CarBase 的 0x6731C0（确认），所以 AI action 0x661440 照样注册；507 Rescuetank（0x17DB590，slot 4 是 TankBase 的 0x67FAD0，slot 55 0x61BFD0）slot 49 是 0x61D310：与 0x65B910 同形，全局选项不成立时尾调 0x633B80（0x61D50D），否则按 0x633AE0 的首选顺序找座（确认）。同日 `armedOnly` 删除：没有武器的车（轻卡、拖车头、卡车、救援车）也派 NPC 司机，0x661440 原版就给任务里的无武器卡车沿路线开车用；没有路线时由 npcpost.cpp 按驻守点 / 地图命令开车（推断：未进游戏验证）。
+
+全部载具类的 vtable（2026-10-07，按 slot 50 = RideAi 0x633030 扫 .rdata）：slot 72 = 0x661440 的是 402 / 403 / 404 / 503 / 505 / 507 / 510 / 511 / 601 / 603 / 607 / 60X / Car（含 BikeBase、CarBase、TankBase）；54 槽的 501 FortressRobo、502 GroundRobo，57 槽的 504 begaruta、Begaruta、612 nix，62～64 槽的直升机 506 / 409 / 410 / HelicopterBase 没有这个 AI action。
 
 ## 深渊爬行者（Depth Crawler，デプスクロウラー）
 
