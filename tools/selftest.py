@@ -3364,8 +3364,10 @@ def map_hides_stock_hud() -> None:
     assert 'maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown)' in code
     assert 'maphud::GameSet(hudRecord,cam,cameraSession.Generation(),show)' in code
     assert 'if(write)reinterpret_cast<HudShowFn>(image+kHudShow)(cam,show);' in code
-    assert 'hudHeld.store(false);' in code.split('void ResetMap() noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(!MapHidesStockHud())draw(hud,viewProj,owner,r9,fifth);' in sub
+    assert 'cameraSession.Reset();' in code.split('void ResetMap() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'maphud::Hides(hudRecord,camera,cameraSession.Generation())' in code
+    assert 'MapHidesStockHud(At<const void*>(hud,0x18))' in sub
+    assert 'if(!hide)draw(hud,viewProj,owner,r9,fifth);' in sub
     draw = hud.split('void HudDraw(const float* viewProj', 1)[1]
     assert draw.index('if(MapScreen(drawer,ctx,t,viewProj') < draw.index('if(MapOwnsView()){FreeText(text);return;}') < draw.index('CarrierBars(')
     assert 'inline bool Step(' in h and 'inline bool GameSet(' in h
@@ -3516,7 +3518,7 @@ def hud_text_localized() -> None:
     shown |= set(re.findall(r'\{kVt\w+,"(\w+)"', src('src/heli.cpp'))) - {'506', '409', '410'}
     shown |= set(re.findall(r'^\s+\{"(\w+)",\{', src('src/subcarrier.cpp'), re.M))
     shown |= set(re.findall(r'Kind\(d,"(\w+)"\)', src('src/hud.cpp')))
-    shown |= set(re.findall(r'CommandUnit\{\w+\.ref\.obj,"(\w+)"', src('src/ground.cpp')))
+    shown |= set(re.findall(r'ReadCommandUnit\(\w+\.ref,"(\w+)"', src('src/ground.cpp')))
     assert {'GUN', 'WPN', 'ROCKETS', 'RKT', 'fighter', 'turretA', 'heli', 'CRAWLER', 'base'} <= shown, shown
     assert shown <= ids, f'shown on the HUD without a word: {sorted(shown - ids)}'
     hud, plugin, ini, readme = src('src/hud.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')

@@ -333,3 +333,13 @@ add_dependencies(offline_checks play_area_check)
 add_test(NAME play_area_check COMMAND play_area_check)
 add_dependencies(offline_checks pjet_turn_sim)
 add_test(NAME pjet_turn_check COMMAND pjet_turn_sim --check)
+
+add_executable(map_command_runtime_check EXCLUDE_FROM_ALL tools/map_command_runtime_check.cpp)
+target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
+target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks map_command_runtime_check)
+add_test(NAME map_command_runtime COMMAND map_command_runtime_check)
+add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-suite)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
+    --compiler "${CMAKE_CXX_COMPILER}")
