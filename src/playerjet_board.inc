@@ -79,10 +79,18 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
     (void)clear;
     if(!j.board)return;
     j.steered=false;j.orbiting=false;
-    if(eject)bail.mark=0.0f;   // no jet of its kind to make for the catch (kPlayerJetFiles): the parachute, or itself (below)
+    // Ejected, the catch (playerjet.cpp Catch) makes its row's catch jet (playerjet_kinds.h catchWith: its own kind's
+    // requested twin, else a player jet) unless this one comes back for them itself (below). It used to be no jet at all
+    // (bail.mark 0: only the player jets' SGOs could be made), so one shot down under them left them to the parachute
+    // (2026-10-06, a multirole crashed 859 m up: "nobody came for me").
     // Destroyed: its wreck is the game's. `alive` is only that its object can still be read (PlayerJetFrame's kDead
-    // branch leaves a shot-down jet readable): a dead one neither waits, nor catches the parachute, nor flies on.
-    if(!alive || v[kDead])return;
+    // branch leaves a shot-down jet readable): a dead one neither waits, nor catches the parachute, nor flies on. Its
+    // entry is let go of (Forget): the catch is a new object with an entry of its own (PlayerJetFrame Make, Boarded).
+    if(!alive || v[kDead]) {
+        if(eject)Log("PJET v=%p lost under the player: the catch makes a jet for them",v);
+        j=PJet{};
+        return;
+    }
     if(j.phase!=Phase::air){j.keep=true;Log("PJET v=%p left on the ground: it waits there for the player",v);return;}
     if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch) {
         // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
@@ -94,10 +102,11 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
         if(!Normalize(f)){f[0]=0.0f;f[2]=1.0f;}
         catchFlight=CatchFlight{v,{pos[0]+j.vel[0]*5.0f,pos[1]+j.vel[1]*5.0f,pos[2]+j.vel[2]*5.0f},speed,{0.0f,0.0f,0.0f},
                                 {f[0],0.0f,f[2]}};
-        bail.caught=ObjRef::Of(v);bail.caughtAt=GameMs();
+        bail.caught=ObjRef::Of(v);bail.caughtAt=GameMs();bail.self=true;
         Log("PJET v=%p left in the air: it comes back to catch the player",v);
         return;
     }
+    // A rotor craft (or the catch off): its NPC flies it on; ejected, the catch makes a wing for them (catchWith).
     HandBack(j,v,"the player left it in the air");
 }
 

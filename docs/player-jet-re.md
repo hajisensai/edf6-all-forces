@@ -200,6 +200,8 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
 - 地面上（`Phase` 不是 air）：`keep`，原地等玩家。
 - 空中且弹射、固定翼、`PlayerJetCatch=1`：这架飞机本身就是接机的那架（`catchFlight` / `bail.caught` 指向它，§7 的 `AutoFly` / `Catch` 原样用）；没接上（玩家落地、死亡，或 45 s 放弃）就交回 NPC。
 - 其它空中情况：`HandBack`：座位空则 `RideAi(false)` 坐上 NPC，`ResumeNpc`。
+- 接机用哪架（`EjectStart` 的 `bail.catchWith`，表在 `playerjet_kinds.h` 的 `kCatchFiles` 和每行的 `catchWith`）：飞机自己回不来（在玩家身下被击毁 / 坠毁，或是旋翼机：接机是固定翼的飞法 `AutoFly`）时，`Catch` 另造一架。有「申请自驾」双胞胎的固定翼（截击机、制空战斗机、多用途机、炮舰机、无人机）用它自己那种的 `EDF6VC_FLY_<KIND>.SGO`（同标记、同模型、全职业可坐、整机碰撞盒）；对地攻击机和接管原版轰炸机的用玩家攻击机；三种空中航母（59 x 77 m）和自爆 / 人偶无人机用玩家战斗机。以前 `Left` 一弹射就 `bail.mark = 0`（只有两种玩家战斗机的 SGO 能造），被击毁的那架就再没人来接（2026-10-06 日志：多用途机 859 m 高坠毁，之后只有降落伞）。自己飞回来接的那架在路上没了（`bail.self`），也另造一架。被毁那架的 `PJet` 条目在 `Left` 里清掉，新造的那架被登上时走正常的 `Make` / `Boarded`。
+- 预加载（`PreloadPlayerJets`）：两种玩家飞机的 SGO 照旧总是预加载；双胞胎只在 `PlayerJetAll=1` 且 `PlayerJetCatch=1` 时预加载。每个约 10 KB（实测 9.6-10.5 KB），模型与 NPC 机体共用（`jet_spawn.cpp PreloadJets` 已经加载），不额外加载模型。日志 `PJET preload for the catch: player-fighter=1 player-strike=1 interceptor=1 ...`，接机时 `PJET catch: making EDF6VC_FLY_MULTIROLE.SGO (multirole) for the multirole they left: its own kind's requested twin`。
 
 ### 10.5 验证状态
 
@@ -235,7 +237,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
 - 玩家坐驾驶座：同 §10，`PJet` 的整条路径。炮手座上有 NPC 时 `CrewGunner` → `jet::CrewShell`：`PickTarget` 以炮舰机自己为中心、1800 m 内选地面目标，炮好了就打一发（`ResumeNpc` 交回时会清掉这个目标）。空中下机照 §10.4（接机或 `HandBack`：驾驶座空则原版 RideAi 坐一个新的 NPC），炮手留着；`JetReap` 现在踢掉所有 NPC 座位再删除，任何座位上有玩家就不删。
 - 玩家坐炮手座（`GunnerFrame`，在 `PlayerJetFrame` 开头、`Held` 之前）：呼叫下来在等的（hail）或停着等玩家的（keep）立刻 `HandBack`（驾驶座空则 RideAi，`ResumeNpc` 在地面上转 takeoff）；之后由 `jet.cpp JetFrame` 的 NPC 飞行照常飞，只是：`GunnerHold`（这一帧的时间加到 `bornAt`，燃料与出击计时停住；正在撤离的取消）、不问 `Leave`、不开 NPC 自己的炮、锚点 = `GunnerAnchor`（玩家 30 s 内打中的地面点 → 呼叫的标记 → 上机点；跟随型不再把锚点拉到 `player.pos`，因为玩家就在机上）。盘旋是原有的 `Patrol`：切向 (out.z, 0, -out.x)，中心在航迹左侧。驾驶座若空，`EnsurePilot` 用原版 RideAi 补一次（失败只记日志，不重试）。
 - 炮手的扳机：座位 `+0x2E4 ≥ 0.8`（所有载具的主射击约定，heli-input-re.md §3）；瞄准点 = 屏幕中心视线与地面的交点（`CameraRay` + `MapRay`，3000 m 内）；`jet::PlayerShell` 开炮（共用一门炮的间隔）。HUD：`hud.cpp GunnerMarks`（黄色落点十字、超射程红色、距离与 READY / 装填秒数、青色方框 = 盘旋中心），只在玩家不在驾驶座时画。
-- 炮手下机（`GunnerLeft`）：离地 15 m 以上用 §7 的弹射跳伞（`EjectStart`，`bail.mark = 0`：不接机）；驾驶座有 NPC 且队伍不是友军 2 时 `SetObjectTeam` 回 2（玩家上车时原版可能把载具改成玩家的队伍，呼叫键只找友军队伍的飞机）。炮舰机不见了（删除、残骸消失）由 `GunnerTick` 每帧检查。
+- 炮手下机（`GunnerLeft`）：离地 15 m 以上用 §7 的弹射跳伞（`EjectStart`，`bail.catchWith = kCatchNone`：不接机）；驾驶座有 NPC 且队伍不是友军 2 时 `SetObjectTeam` 回 2（玩家上车时原版可能把载具改成玩家的队伍，呼叫键只找友军队伍的飞机）。炮舰机不见了（删除、残骸消失）由 `GunnerTick` 每帧检查。
 - 炮手在机上时 `hud.cpp HudSee` 不在这架上方画 NPC 载具读数。
 
 ### 11.3 验证状态

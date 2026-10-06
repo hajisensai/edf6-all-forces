@@ -1006,6 +1006,62 @@ def every_boardable_aircraft_requested() -> None:
 
 
 @test
+def every_boardable_aircraft_caught() -> None:
+    """Whatever the player ejects from has a catch jet (src/playerjet_kinds.h kCatchFiles, each row's catchWith, the
+    user, 2026-10-06: 「我在天上好像还是没来接我」 after a multirole crashed under them): a jet's SGO the installer writes
+    (tools/make_jets.py FILES) with its mark and a seat every class takes, its own kind's requested twin when there is one
+    (pylib/vcobjects.py REQUEST_KINDS), else a player jet; always a wing (the catch flies in as one: AutoFly). Every catch
+    SGO is preloaded at the mission's start (src/playerjet.cpp PreloadPlayerJets over kCatchFiles) and is the one table
+    SpawnCatchJet makes from; the jet left does not take the catch away (playerjet_board.inc Left)."""
+    head = src('src/playerjet_kinds.h')
+    order = re.search(r'enum CatchWith : int \{(.*?)\};', head, re.S).group(1).replace(' ', '').replace('\n', '').split(',')
+    assert order[0] == 'kCatchNone=-1', order
+    order = order[1:]
+    table = head.split('kCatchFiles[]={', 1)[1].split('};', 1)[0]
+    files = re.findall(r'\{"([\w-]+)",(\d+)\.0f,L"([^"]+)",L"([^"]+)",(true|false)\}', table)
+    assert len(files) == len(order) >= 3, (len(files), order)
+    marks = {}
+    by_file = {}
+    for (name, mark, sgo_path, file, player), enum in zip(files, order):
+        assert sgo_path == 'app:/object/' + file.lower(), file
+        assert file in make_jets.FILES, f'{file}: tools/make_jets.py does not write it (the installer would not install it)'
+        jet = vc.JETS[make_jets.FILES[file]]
+        assert jet.mark == float(mark), f'{file}: mark {jet.mark}, kCatchFiles says {mark}'
+        assert (player == 'true') == jet.player and (jet.player or (jet.parked and jet.requested)), file
+        marks[enum] = float(mark)
+        by_file[enum] = (file, jet)
+    body_marks = {body: float(mark) for body, mark in re.findall(
+        r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1]))}
+    rows = re.findall(r'\{Body::(\w+),Airframe::(\w+),Arm::\w+,(?:Wing|Rotor)\(.*?\),(\w+),(\w+)\},', head)
+    frames = dict(re.findall(r'\{Body::(\w+),Airframe::(\w+),', head))
+    assert len(rows) == len(frames) >= 13, (len(rows), len(frames))
+    twins = {vc.JETS[k].mark: k for k in vc.REQUEST_KINDS}
+    wing_marks = {body_marks[b] for b, f in frames.items() if f == 'wing'}
+    for body, frame, catch, why in rows:
+        assert catch in by_file, f'{body}: catchWith {catch} is no kCatchFiles row'
+        file, jet = by_file[catch]
+        mark = body_marks[body]
+        if frame == 'wing' and mark in twins:   # its own kind's twin first
+            assert file == make_jets.request_file(twins[mark]) and why == 'kOwnTwin', f'{body}: caught by {file}, not its own twin'
+        else:
+            assert jet.player and why != 'kOwnTwin', f'{body} ({frame}): no twin of its own to fly in: a player jet, not {file}'
+        assert jet.player or jet.mark in wing_marks, f'{body}: its catch {file} is no wing'
+    jets = src('src/playerjet.cpp')
+    preload = jets[jets.index('void PreloadPlayerJets()'):]
+    preload = preload[:preload.index('\n}\n')]
+    assert 'i<pjet::kCatchFileCount' in preload and 'kPreloadFn)(mgr,f.sgo' in preload, 'PreloadPlayerJets: not every catch SGO'
+    spawn = jets[jets.index('unsigned char* SpawnCatchJet('):]
+    spawn = spawn[:spawn.index('\n}\n')]
+    assert 'pjet::kCatchFiles[which]' in spawn and 'playerJetPreloaded[which]' in spawn, 'SpawnCatchJet: not the catch table'
+    assert 'kPlayerJetFiles' not in jets and 'bail.mark' not in jets, 'a second catch table / the old mark'
+    board = src('src/playerjet_board.inc')
+    left = board[board.index('void Left('):]
+    left = left[:left.index('\n}\n')]
+    assert not re.search(r'bail\.(catchWith|mark)\s*=(?!=)', left), 'Left takes the catch away from the jet left'
+    assert 'bail.catchWith=CatchOf(j,&bail.catchWhy);' in jets, 'EjectStart: the catch of the jet left'
+
+
+@test
 def range_parks_every_boardable_aircraft_apart() -> None:
     """The grand battle parks one of each of our aircraft the player boards that has a range SGO (testrange/gen.py
     BOARDABLE_PARKED: every mark of src/playerjet_kinds.h kBoardable among pylib/vcobjects.py JETS) empty, none of them
