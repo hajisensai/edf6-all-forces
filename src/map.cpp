@@ -29,6 +29,7 @@
 #include "crew.h"
 #include "layout.h"
 #include "map_cam.h"
+#include "map_camera_state.h"
 #include "memory.h"
 #include "turretaim.h"
 #include "vecmath.h"
@@ -97,7 +98,8 @@ Pose pose{};
 MapReadout readout{};
 ULONGLONG readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
-std::atomic<bool> holds{false},owns{false};
+std::atomic<bool> holds{false};
+mapcam::CameraSession cameraSession;
 std::atomic<int> wheel{0};   // WM_MOUSEWHEEL's delta since the game thread last took it
 
 // --- The game thread's own ---
@@ -122,7 +124,7 @@ Game game{};
 // --- The camera hook's own ---
 // The stock matrix (`stock`) is kept and put back before the camera's next step: its state 1 eases its eye from the
 // last +0x250 (0xFB03E..0xFB101), so the map's eye left there would pull the stock camera down from the sky after.
-struct CamSide { const void* cam; bool shown,leaving,haveStock; int blend; float eye[3],look[3]; float stock[16]; };
+using CamSide=mapcam::CameraState;
 CamSide camSide{};
 
 // --- The objective markers (under `markerLock`; the destructor takes one out before it is freed) ---
@@ -597,11 +599,12 @@ bool PutView(unsigned char* cam,const float* eye,const float* look) noexcept {
 
 void Ease(float* at,const float* to,float k) noexcept { for(int i=0;i<3;++i)at[i]+=(to[i]-at[i])*k; }
 
-void Camera(unsigned char* cam) noexcept {
+void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
     if(camSide.shown && camSide.cam!=cam)return;   // another camera (a second local player's): the map is not its
     AcquireSRWLockShared(&lock);
     const Pose p=pose;
     ReleaseSRWLockShared(&lock);
+    if(!cameraSession.Current(generation))return;
     // The camera's target: the soldier it follows (+0x350 its weak reference, +0x360 the SoldierBase cast of it).
     const bool mine=p.human && (At<const void*>(cam,kCamTargetRef)==p.human || At<const void*>(cam,kCamTarget)==p.human);
     const bool open=p.open && mine && GetTickCount64()-p.at<=kFreshMs;
@@ -615,23 +618,25 @@ void Camera(unsigned char* cam) noexcept {
         if(!camSide.shown || camSide.leaving) {   // taken: from where the camera is (or the way back), easing in
             if(!camSide.shown){std::memcpy(camSide.eye,stockEye,12);std::memcpy(camSide.look,stockLook,12);}
             camSide.cam=cam;camSide.shown=true;camSide.leaving=false;camSide.blend=kEaseIn;
-            owns.store(true);
+            cameraSession.Publish(generation,true);
         }
         const float k=camSide.blend>0 ? 1.0f/static_cast<float>(camSide.blend--) : 1.0f;
         Ease(camSide.eye,p.eye,k);Ease(camSide.look,p.look,k);
     } else {
         if(!camSide.leaving){camSide.leaving=true;camSide.blend=kEaseOut;}
-        if(camSide.blend<=0){camSide=CamSide{};owns.store(false);return;}
+        if(camSide.blend<=0){camSide=CamSide{};cameraSession.Publish(generation,false);return;}
         const float k=1.0f/static_cast<float>(camSide.blend--);
         Ease(camSide.eye,stockEye,k);Ease(camSide.look,stockLook,k);
     }
-    if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};owns.store(false);}
+    if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};cameraSession.Publish(generation,false);}
 }
 
 void __fastcall CamStepHook(void* cam,void* step) {
+    const auto generation=cameraSession.Begin(camSide);
     if(camSide.shown && camSide.cam==cam && camSide.haveStock)std::memcpy(static_cast<unsigned char*>(cam)+kCamMatrix,camSide.stock,sizeof(camSide.stock));
     nextCamStep(cam,step);
-    __try { Camera(static_cast<unsigned char*>(cam)); } __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};owns.store(false);}
+    __try { Camera(static_cast<unsigned char*>(cam),generation); }
+    __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);}
 }
 
 // --- The objective markers ---
@@ -718,6 +723,7 @@ void ResetMap() noexcept {
     for(auto& c:cells)c=Cell{};
     cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
+    cameraSession.Reset();   // the camera hook drops its old matrix on its own thread, before restoring it
     pose=Pose{};readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
 }
@@ -731,7 +737,7 @@ bool PlayerMap(MapReadout* out) noexcept {
 }
 
 bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed); }
-bool MapOwnsView() noexcept { return owns.load(std::memory_order_relaxed); }
+bool MapOwnsView() noexcept { return cameraSession.Owns(); }
 }  // namespace crew
 
 // EDF6AutoTurret asks whether the map holds the keys before it reads its own (common/edf/aimlink.h InputHeldV1).

@@ -5,6 +5,7 @@
 // construction 0x118AFC0).
 //   cmake --build build --target map_cam_check && build\map_cam_check.exe      (exit code 1 on a failure)
 #include "../src/map_cam.h"
+#include "../src/map_camera_state.h"
 #include <cstdio>
 
 namespace {
@@ -36,6 +37,33 @@ void ScreenOf(const mapcam::View& v,const float* p,float* right,float* up) {
 int main() {
     using namespace mapcam;
     int cases=0;
+    // Restart while the map owns a camera: there need not be a final update of the
+    // old camera. The new camera may also reuse its address. Exercise the actual
+    // lifecycle gate used before the hook restores a stock matrix.
+    {
+        CameraSession session;
+        CameraState state;
+        int oldCamera=0,newCamera=0;
+        const auto first=session.Begin(state);
+        state.cam=&oldCamera;state.shown=state.haveStock=true;state.stock[12]=900.0f;
+        session.Publish(first,true);
+        Check(session.Owns(),"map owns the current mission camera");
+        session.Begin(state);
+        Check(state.cam==&oldCamera && state.shown && state.haveStock,"same mission retains camera and stock matrix");
+        Check(state.shown && state.cam!=&newCamera,"second local camera is still excluded in the same mission");
+        session.Reset();
+        Check(!session.Owns(),"mission reset invalidates ownership before any camera callback");
+        session.Publish(first,true);   // an old callback finishing after MissionStart
+        Check(!session.Owns(),"late old callback cannot reclaim new mission ownership");
+        const auto second=session.Begin(state);
+        Check(second!=first && !state.shown && !state.haveStock && !state.cam,"new camera can claim after restart");
+        state.cam=&newCamera;state.shown=state.haveStock=true;
+        session.Publish(second,true);
+        Check(session.Owns(),"new mission camera owns its map");
+        session.Reset();
+        session.Begin(state);
+        Check(!state.haveStock && !state.shown && !state.cam,"reused camera address cannot restore a previous mission matrix");
+    }
     // The eye: `height` over the focus, height / tan(pitch) behind it along the heading, looking down `pitch` at it.
     for(float yawDeg=-180.0f;yawDeg<=180.0f;yawDeg+=45.0f)
         for(float pitchDeg=30.0f;pitchDeg<=88.0f;pitchDeg+=14.5f)
