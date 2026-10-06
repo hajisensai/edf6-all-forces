@@ -84,6 +84,8 @@ struct Config {
     int playerJetChuteCutKey=0x58;  // the key that cuts the parachute after an ejection ('X')
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
+    float playerJetRollScale=1.0f;  // ...the fixed wings' roll rate, every kind's times this (pjet_handling.h PathRoll; the body keeps up)
+    float playerJetAimGain=1.0f;    // ...how hard the mouse's aim turns the plane toward it (times kSteer)
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
@@ -726,6 +728,7 @@ struct PlayerJetReadout {
     HeliFlight heli;
     FuelReading fuel;            // its airframe's tank (the 506 body's: what the stock FUEL gauge showed)
     int guns,gunRounds;          // its guns (seat 0's weapons neither a store nor the tank) and the fewest rounds in one
+    int area;                    // the play area's walls (playarea.h): 2 turned back by one, 1 heading out near one, 0 neither
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked

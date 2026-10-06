@@ -2473,6 +2473,26 @@ def vehicle_ram_wired() -> None:
 
 
 @test
+def play_area_wired() -> None:
+    """The player-flown aircraft keep inside the map's ground (src/playarea.h, docs/player-jet-re.md §3): the walls are the
+    measured play area's, not the physics square's (crew.h PlayEdge, km out over the void on a stock map); the rotor craft
+    are kept in too; it is measured every mission; a void within the walls is floored; the cockpit shows AREA; the offline
+    check runs in CTest."""
+    pj, board = src('src/playerjet.cpp'), src('src/playerjet_board.inc')
+    wall = pj.split('int WallTurn(const float* pos,float* dir) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'MapPlayArea()' in wall and 'area::EdgeTurn' in wall and 'PlayEdge' not in wall, 'WallTurn takes the measured walls'
+    assert 'j.area=WallTurn(pos,next);' in pj, 'a wing\'s path is bent off the walls (Air)'
+    assert 'j.area=WallTurnVelocity(pos,want);' in board, 'a rotor craft\'s velocity is bent off the walls (HoverStep)'
+    clear = pj.split('float Clear(const float* p,bool* water) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'area::FloorClear(MapPlayArea()' in clear, 'a void within the walls is floored'
+    assert 'GuardedTick(kStepUnderground,&PlayAreaTick);' in src('src/crew.cpp'), 'measured once a mission'
+    assert 'ResetPlayArea();' in src('src/mission.cpp'), 'measured again each mission'
+    assert 'kWarnArea' in src('src/warn.h') and 'kWarnArea' in src('src/warn.cpp') and 'L"AREA EDGE"' in src('src/hud.cpp')
+    cm = src('CMakeLists.txt')
+    assert 'src/playarea.cpp' in cm and 'add_test(NAME play_area_check COMMAND play_area_check)' in cm
+
+
+@test
 def map_wired() -> None:
     """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
     documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the

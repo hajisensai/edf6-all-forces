@@ -495,14 +495,28 @@ float TurnRadiusOf(const Kind& k,float mass,float speed) noexcept {
     return airbound::TurnRadius(speed,std::sqrt(g*g>1.0f ? g*g-1.0f : 0.25f))*kTurnWide;
 }
 
+// m/s: the most a wing flies inside a play area too small for its turns at its attack speed (a stock map's ground,
+// some 1.5 km a side: a 245 m/s fighter's turn is 2.9 km across): the speed whose turn's radius is kTightShare of the
+// area's half size, so it turns back inside the ground (at least kTightLeast times its least speed). Its attack speed
+// where the area holds that.
+constexpr float kTightShare=0.3f,kTightLeast=1.15f;
+float TightSpeed(const Kind& k,float half) noexcept {
+    float g=1.0f+k.thrust/kTurnBleed;
+    if(g>k.maxG)g=k.maxG;
+    const float lat=std::sqrt(g*g>1.0f ? g*g-1.0f : 0.25f);
+    const float s=std::sqrt(kTightShare*half*lat*airbound::kGrav/kTurnWide);
+    return Clamp(s,k.minSpeed*kTightLeast,k.attack);
+}
+
 airbound::Box JetSoftBox(const Jet& j,float* band) noexcept {
     const Kind& k=KindOf(j);
-    const float edge=PlayEdge();
+    const airbound::Box play=PlayBox();   // mapbounds.h: the ground's walls
+    const float half=airbound::HalfOf(play);
     const float reach=k.flight==FlightModel::rotor ? k.attack*k.attack/(4.0f*(k.brake>1.0f ? k.brake : 1.0f))
-                                                   : TurnRadiusOf(k,1.0f,k.attack);
-    const float b=airbound::Band(reach,Cfg().airSoftTurns,Cfg().airSoftEdge,edge);
+                                                   : TurnRadiusOf(k,1.0f,TightSpeed(k,half));
+    const float b=airbound::Band(reach,Cfg().airSoftTurns,Cfg().airSoftEdge,half);
     if(band)*band=b;
-    return airbound::Inset(PlayBox(),b);   // mapbounds.h
+    return airbound::Inset(play,b);
 }
 
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept {
@@ -525,8 +539,8 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     const bool was=j.m.edgeBack;
     airbound::KeepIn(soft,pos,j.m.vel,r,react,want,&j.m.edgeBack,&j.m.edgeTurn);
     if(j.m.edgeBack!=was)
-        Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft %.0f, band %.0f, %.0f m/s%s",j.Vehicle(),was ? "back inside" : "past",
-            pos[0],pos[2],PlayEdge()-band,band,s,was ? "" : ": back in first");
+        Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
+            was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,was ? "" : ": back in first");
     // Over the top it pushes over: its lift down at most kNegG, gravity with it (JetSteer), a radius of s^2 / ((1 + kNegG) g).
     const float top=CeilingY()-kCeilingGap-Cfg().airSoftCeil;
     airbound::CapClimb(pos[1],j.m.vel[1],s3,top,airbound::TurnRadius(s3,1.0f+kNegG)*kTurnWide,react,0.15f,want);
@@ -717,6 +731,9 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
 }
 
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* nose,float* want,float speed,float dt,ULONGLONG ms) noexcept {
+    // A play area too small for its turns at full speed: no faster than turns inside it (TightSpeed). A bomber on its
+    // run keeps its run's speed.
+    if(j.mode!=Mode::bomb){const float most=TightSpeed(k,airbound::HalfOf(PlayBox()));if(speed>most)speed=most;}
     Ahead(j,pos,ms);
     Guard(j,pos,want,ms);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);

@@ -8,8 +8,9 @@ namespace crew {
 // The warnings, in the annunciator's order (most urgent first). Warnings (red) are the ones that kill now: PULL UP, STALL,
 // a missile coming, the gear not down that low and slow; the rest are cautions (amber).
 // LOW FUEL: its tank (FuelReading) under kLowFuelShare or kLowFuelSec at its burn (vhud.h FuelLow).
+// AREA: at the play area's walls (playarea.h, the map's ground's edge): heading out near one, or being turned back.
 enum Warn : int { kWarnPullUp, kWarnMissile, kWarnStall, kWarnGear, kWarnTerrain, kWarnSinkRate, kWarnLock, kWarnGearSpeed,
-                  kWarnWow, kWarnFuel, kWarnCount };
+                  kWarnWow, kWarnFuel, kWarnArea, kWarnCount };
 constexpr bool IsWarning(int w) noexcept { return w==kWarnPullUp || w==kWarnMissile || w==kWarnStall || w==kWarnGear; }
 struct Warnings {
     unsigned on;                  // 1 << Warn for each lit

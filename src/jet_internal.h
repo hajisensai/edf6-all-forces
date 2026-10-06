@@ -494,6 +494,8 @@ void Guard(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept;
 // The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (crew.h PlayEdge) less its band (ini
 // AirSoftEdge / AirSoftTurns: at least that many of its full-speed turn diameters); `band` gets the band's width.
 airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
+// m/s: the most a wing of kind `k` flies inside a play area of half size `half` (turns that fit it; jet_flight.cpp).
+float TightSpeed(const Kind& k,float half) noexcept;
 // The anchor it works round, put inside its soft box less its patrol circle (`room` holds the copy when it moved).
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept;

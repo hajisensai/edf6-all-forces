@@ -26,6 +26,7 @@
 #include "heli.h"
 #include "layout.h"
 #include "memory.h"
+#include "playarea.h"
 #include "warn.h"
 #include <cmath>
 
@@ -702,6 +703,7 @@ void FrameTick() noexcept {
     GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
     GuardedTick(kStepHudPublish,&HudPublish);
     GuardedTick(kStepUnderground,&BigWorldProbe);
+    GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
     GuardedTick(kStepView,&ViewTick);
     GuardedTick(kStepBoarding,&BoardingTick);

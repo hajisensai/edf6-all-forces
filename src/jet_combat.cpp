@@ -104,9 +104,9 @@ bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
 
 // A target it lets be for its edge (airbound.h, jet_flight.cpp SoftEdge): flying back in from past its soft edge,
 // anything out past that (the one it chased out there too, the user 2026-10-06: "过了这个小边界会往回走"); else anything out
-// past the play edge, where it never goes.
+// past the play area's walls (mapbounds.h PlayBox: the ground's edge), where it never goes.
 bool PastEdge(const Jet& j,const float* p) noexcept {
-    return !airbound::Inside(j.m.edgeBack ? JetSoftBox(j) : airbound::Square(PlayEdge()),p);
+    return !airbound::Inside(j.m.edgeBack ? JetSoftBox(j) : PlayBox(),p);
 }
 
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {

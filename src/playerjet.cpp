@@ -40,9 +40,11 @@
 #include "jetaudio.h"
 #include "layout.h"
 #include "memory.h"
+#include "playarea.h"
 #include "sight.h"
 #include "vehicleram.h"
 #include "playerjet_kinds.h"
+#include "pjet_handling.h"
 #include "vecmath.h"
 #include "warn.h"
 #include <cmath>
@@ -97,6 +99,7 @@ constexpr float kThrottleRate=1.0f;    // the throttle lever's travel a second (
 // In the air the throttle is Ace Combat's: held forward (or ascend) it boosts to full, held back it closes and brakes,
 // let go it returns to kCruiseThrottle; on the ground it stays where the stick left it (taxi, hold, roll out).
 constexpr float kCruiseThrottle=0.55f;
+static_assert(kCruiseThrottle==handling::kCruiseThrottle,"pjet_handling.h's cruise is the throttle let go");
 constexpr float kAirThrottleRate=1.5f;
 constexpr float kDeadZone=0.08f;
 constexpr float kTaxiTurn=0.8f;        // rad/s: the slowest taxi turn rate (the nose wheel), less fast
@@ -104,13 +107,13 @@ constexpr float kTaxiFull=25.0f;       // ...from this ground speed on (rate tim
 constexpr float kGroundBrake=12.0f;    // m/s^2 rolling with the throttle closed
 constexpr float kParkSpeed=0.5f;       // below this, throttle closed: parked (the stock code holds it)
 constexpr float kBellyBrake=10.0f;     // m/s^2 sliding on its belly (gear.cpp: landed with the gear not down)
-// The plane's own up (PJet::up), carried along its path: the roll rotates it about the nose at kRollRate; let go it
-// returns to the bank the turn stick asks for (kTurnBank at full, a coordinated turn: Air), at most kLevelRate, unless the pitch stick is held
-// (kLevelPull: pulled through the top it loops, as in Ace Combat) or it points
-// within kVertical of straight up or down (no "level" there: it keeps its up).
-constexpr float kRollRate=4.2f;        // rad/s at full roll stick (a full roll in 1.5 s)
-constexpr float kLevelRate=1.8f;       // rad/s
-constexpr float kTurnBank=1.2f;        // rad (69 deg, 2.8 g to hold the height): the bank of a full turn stick
+// The plane's own up (PJet::up), carried along its path: the roll rotates it about the nose at its kind's PathRoll; let go
+// it returns to the bank the turn stick asks for (its kind's TurnBank at full, a coordinated turn: Air), at most
+// kLevelRate, unless the pitch stick is held (kLevelPull: pulled through the top it loops, as in Ace Combat) or it points
+// within kVertical of straight up or down (no "level" there: it keeps its up). The rates, the bank and the body's cap per
+// kind: pjet_handling.h (until 2026-10-06 kRollRate 4.2 and a 69 deg bank for every kind, the body capped at Kind::roll).
+using handling::kLevelRate;
+using handling::kMinBankCos;   // a turn's hold (its lift / cos bank) at most 5 g of it
 constexpr float kRollDead=0.08f;       // the roll stick under this is let go
 constexpr float kLevelPull=0.15f;      // ...and it levels only with the pitch stick under this (held, it loops)
 constexpr float kVertical=0.97f;       // sine of the climb past which there is no level to return to
@@ -119,7 +122,6 @@ constexpr float kVertical=0.97f;       // sine of the climb past which there is 
 // more it holds, all of it there: level flight settles into a sink of kSettleSink (over ~13 s), a climb bends
 // slowly over, a dive is held. Never more than the wing gives at its speed.
 constexpr float kHold=0.988f,kSettleSink=1.5f;   // m/s
-constexpr float kMinBankCos=0.25f;     // a turn's hold (its lift / cos bank) at most 4 g of it
 constexpr float kPush=0.5f;            // the stick forward: down to kPush of the most lift, negative
 // Drag (Air): parasitic, Kind::thrust * (speed / top)^2 (full throttle levels off at top); induced, kInduced per g^2
 // pulled at the corner speed, more as the square of corner / speed (a 6 g turn at the corner: 11 m/s^2).
@@ -129,9 +131,11 @@ constexpr float kStallWarn=1.05f;
 // on the keyboard: the frame's movement, at most 1), times ini PlayerJetMouseSpeed, its elevation likewise; the mouse
 // takes it no farther than aim::kMaxEl from level (an aim already past, the nose's when W was let go, stays). The plane
 // turns its path toward it at kSteer times the angle off (rad/s), the lift for that and for holding the path up (Hold)
-// along its up. Turning (the aim kAimTurnFrom off or more) it banks toward that lift at kRollRate; on the aim it only
-// levels its wings, gently (kLevelRate), and not at all climbing or diving steeper than kAimSteep (sine): letting W go
-// in a steep climb or over the top of a loop keeps the attitude it has (it snapped upright at kRollRate before,
+// along its up. Turning it banks toward that lift at handling::AimRoll (its PathRoll kAimRollFull off, easing to kLevelRate
+// on the aim: a step at kAimTurnFrom before 2026-10-06), the sideways demand eased in near the aim (handling::AimShare,
+// times ini PlayerJetAimGain); on the aim it only levels its wings, and not at all climbing or diving steeper than
+// kAimSteep (sine): letting W go in a steep climb or over the top of a loop keeps the attitude it has (it snapped upright
+// at the full roll rate before,
 // 2026-10-04). Under kAimBankMin g of lift it keeps its bank.
 constexpr float kMouseMoved=0.02f;    // a frame's mouse movement past this hands the plane to the aim
 constexpr float kAimPerUnit=aim::kPerUnit,kSteer=1.6f,kAimBankMin=0.3f,kAimTurnFrom=0.09f,kAimSteep=0.77f;
@@ -149,9 +153,10 @@ constexpr float kAttGain=6.0f;         // 1/s: the body closes on its attitude t
 // slowed this far (pulled up too long) has its path fall through: the nose drops and it dives out, a stall.
 constexpr float kStallFloor=25.0f;
 constexpr float kBodyTop=340.0f;       // m/s: the steepest dive's (the drag holds it about there; jetprops.cpp 600)
-// The world's walls (the play edge, crew.h PlayEdge, inside the Havok broadphase's edge, 3000 m a side unless ini BigWorld raises it): a path out through one is
-// turned along it and kWallIn back in, so the plane never stops at the wall (WallTurn).
-constexpr float kWallIn=0.3f;   // past the play edge, at least this share of the path points back in
+// The walls where the map's ground ends (playarea.h, WallTurn): a path out through one is turned along it and kWallIn
+// back in, so the plane never stops at the wall and never flies out over the void.
+constexpr float kWallIn=0.3f;   // past a wall, at least this share of the path points back in
+constexpr float kAreaWarn=kEdgeBuffer+500.0f;   // m: heading out at a wall this near, the cockpit's AREA caution
 // The ground (Clear): the body's origin rests on the ground (the models are grounded and the boxes measured off
 // them, pylib/jet_models.py grounded / vcobjects.on_origin), so under kTouch it is on it; over kOffGround in the air.
 constexpr float kTouch=3.0f,kOffGround=6.0f;
@@ -192,7 +197,7 @@ struct PJet {
     float throttle;              // 0..1, the lever the stick moves
     float turnIn,pitchIn;        // the stick's turn and pitch, smoothed (SmoothStick)
     float yawIn,rollIn;          // ...the air's turn (right stick) and roll (left stick sideways), smoothed
-    float up[3];                 // the plane's own up in the air (see kRollRate)
+    float up[3];                 // the plane's own up in the air (see kLevelPull, pjet_handling.h)
     bool hasUp;
     float throttleIn;            // the stick's throttle command last frame (-1, 0, +1): a change is logged
     float clear,climb;           // its height over the floor and climb last frame (the cockpit readout)
@@ -219,6 +224,7 @@ struct PJet {
     float stallShare;            // ...the share of all its wing gives its path needs, kStallWarn over (>= 1: stall)
     Gpws gpws;                   // the ground-proximity warning (Proximity), impactIn s to the impact (<0: none)
     float impactIn;
+    int area;                    // the cockpit's AREA state (WallTurn): 2 turned back by a wall, 1 heading out near one
     float vel[3],omega[3];
     float prev[3];               // its position last frame
     bool havePrev;
@@ -317,9 +323,11 @@ PJet* Make(unsigned char* v,const Kind* kind) noexcept {
 }
 
 // Metres over what is under `p`: the ground or the water's surface, the higher (map rays see the seabed under the
-// sea, docs/water-re.md); kNoGround with neither. `water`: it is the water.
+// sea, docs/water-re.md), a void within the walls floored (see below); kNoGround with neither. `water`: it is the water.
 float Clear(const float* p,bool* water) noexcept {
-    const float ground=GroundClearance(p);
+    // A void within the walls (the big map's seams) floored at the area's lowest ground (playarea.h FloorClear): a map
+    // ray finds nothing there, and with no floor the jet sank on into it uncrashed.
+    const float ground=area::FloorClear(MapPlayArea(),p,GroundClearance(p),kNoGround);
     float surface=0.0f;
     *water=false;
     if(SeaAt(p[0],p[2],&surface)!=Sea::water)return ground;
@@ -430,29 +438,29 @@ void RightOf(const float* dir,float* right) noexcept {
     if(!Normalize(right)){right[0]=-1.0f;right[1]=0.0f;right[2]=0.0f;}
 }
 
-void WallTurn(const float* pos,float* dir) noexcept {
-    // The play edge (crew.h PlayEdge) with its buffer: the share of the path allowed outward falls from all of it
-    // kEdgeBuffer m in to none at the edge, and past it the path must point back in by kWallIn: the plane is
-    // bent round smoothly, its heading never flipped (it was a hard turn at the wall, its sense flipping between
-    // frames: the heading snapped +-17 deg every few seconds along it).
-    const float edge=PlayEdge();
-    for(int i=0;i<3;i+=2) {
-        const float out=pos[i]>0.0f ? 1.0f : -1.0f,away=dir[i]*out;
-        const float most=Clamp((edge-std::fabs(pos[i]))/kEdgeBuffer,-kWallIn,1.0f);
-        if(away<=most)continue;
-        const int o=2-i;   // the other horizontal axis: along the edge
-        const float flat=std::sqrt(dir[0]*dir[0]+dir[2]*dir[2]);
-        if(flat<1e-4f)continue;
-        const float target=most*flat,along=std::sqrt(std::fmax(flat*flat-target*target,0.0f));
-        float sense=dir[o];
-        if(std::fabs(sense)<1e-3f) {   // straight at the edge: along it to its right
-            float right[3];RightOf(dir,right);
-            sense=right[o];
-        }
-        dir[i]=out*target;
-        dir[o]=(sense>=0.0f ? 1.0f : -1.0f)*along;
-    }
-    if(!Normalize(dir)){dir[0]=0.0f;dir[1]=0.0f;dir[2]=1.0f;}
+// The walls (playarea.h): where the map's ground ends, kVoidMargin inside it (until 2026-10-06 the play edge, crew.h
+// PlayEdge: the physics world's square, km out over the void on a stock map). From kEdgeBuffer m in the share of the
+// path allowed out at a wall falls from all of it to none at the wall, and past it the path must point back in by
+// kWallIn: the plane is bent round smoothly along it, its heading never flipped (a hard turn at the wall flipped its
+// sense between frames: the heading snapped +-17 deg every few seconds along it). Returns the cockpit's AREA state
+// (area::EdgeState: 2 turned back by a wall this frame or past one, 1 heading out at one within kAreaWarn m, 0 neither).
+int WallTurn(const float* pos,float* dir) noexcept {
+    const PlayArea a=MapPlayArea();
+    float was[3]={dir[0],dir[1],dir[2]};
+    const bool bent=area::EdgeTurn(a,pos,dir,kEdgeBuffer,kWallIn);
+    return bent ? 2 : area::EdgeState(a,pos,was,kAreaWarn);
+}
+// A rotor craft's velocity asked for (HoverStep) bent off the walls as a wing's path is, its speed kept (it hovers: a
+// velocity under kWallSlow is left as it is). The same AREA state.
+constexpr float kWallSlow=0.5f;
+int WallTurnVelocity(const float* pos,float* vel) noexcept {
+    const float flat=std::sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+    float dir[3]={vel[0],0.0f,vel[2]};
+    if(flat<kWallSlow){dir[0]=0.0f;dir[2]=0.0f;return area::EdgeState(MapPlayArea(),pos,dir,kAreaWarn);}
+    dir[0]/=flat;dir[2]/=flat;
+    const int state=WallTurn(pos,dir);
+    vel[0]=dir[0]*flat;vel[2]=dir[2]*flat;
+    return state;
 }
 
 // Its death (see body506.h Die506). Without that path it is kept at 1 HP: alive and flying, the next hit the
@@ -604,7 +612,13 @@ bool Across(float* u,const float* dir) noexcept {
     return Normalize(u);
 }
 
-// The plane's up for this step (see kRollRate): the roll stick turns it about the path, let go it returns toward the
+// The kind's handling (pjet_handling.h): its path's roll rate (times ini PlayerJetRollScale), its body's rate cap, the
+// bank of a full turn stick.
+float PathRoll(const Kind& k) noexcept { return handling::PathRoll(k.roll,Cfg().playerJetRollScale); }
+float BodyCap(const Kind& k) noexcept { return handling::BodyCap(k.roll,k.maxG,k.corner,Cfg().playerJetRollScale); }
+float TurnBank(const Kind& k) noexcept { return handling::TurnBank(k.maxG,k.corner,k.minAir,k.top); }
+
+// The plane's up for this step (see kLevelPull): the roll stick turns it about the path, let go it returns toward the
 // bank the turn stick asks for. `level`: the world's up off the path (valid unless `vertical`).
 // The plane's up across `dir`: newly in the air, the body's own up.
 void EnsureUp(PJet& j,const unsigned char* v,const float* dir,const float* level,bool vertical) noexcept {
@@ -626,11 +640,11 @@ void BankToward(float* up,const float* dir,const float* want,float most) noexcep
 void Roll(PJet& j,const unsigned char* v,const Stick& s,const float* dir,const float* level,bool vertical,float dt) noexcept {
     EnsureUp(j,v,dir,level,vertical);
     if(std::fabs(s.roll)>kRollDead) {
-        Turn(j.up,dir,s.roll*kRollRate*dt);   // dir x up is the right: a right roll tips the up toward it
+        Turn(j.up,dir,s.roll*PathRoll(*j.kind)*dt);   // dir x up is the right: a right roll tips the up toward it
     } else if(!vertical && std::fabs(s.pitch)<kLevelPull) {   // pulling through the top: a loop, not a half roll
         float want[3];std::memcpy(want,level,12);
-        Turn(want,dir,Clamp(s.yaw,-1.0f,1.0f)*kTurnBank);
-        BankToward(j.up,dir,want,kLevelRate*dt);
+        Turn(want,dir,Clamp(s.yaw,-1.0f,1.0f)*TurnBank(*j.kind));
+        BankToward(j.up,dir,want,std::fmin(kLevelRate,PathRoll(*j.kind))*dt);
     }
     Across(j.up,dir);
 }
@@ -700,13 +714,13 @@ float AimSteer(PJet& j,const unsigned char* v,const Stick& s,const float* dir,co
         if(c>0.0f)toward[0]=toward[1]=toward[2]=0.0f;
         else RightOf(dir,toward);
     }
-    const float off=std::acos(c),turn=kSteer*off*speed,across=Len(gPerp);
+    const float off=std::acos(c),turn=kSteer*Cfg().playerJetAimGain*handling::AimShare(off)*off*speed,across=Len(gPerp);
     float lift[3];
     for(int i=0;i<3;++i)lift[i]=toward[i]*turn-(across>1e-4f ? gPerp[i]/across*hold : 0.0f);
     float want[3];std::memcpy(want,lift,12);
     const bool turning=off>=kAimTurnFrom,steep=vertical || std::fabs(dir[1])>kAimSteep;
     if(Len(lift)>kAimBankMin*kG && (turning || !steep) && Across(want,dir))
-        BankToward(j.up,dir,want,(turning ? kRollRate : kLevelRate)*dt);
+        BankToward(j.up,dir,want,handling::AimRoll(PathRoll(*j.kind),off)*dt);
     return Clamp(Dot(lift,j.up),-kPush*most,most);
 }
 
@@ -761,7 +775,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     float next[3];
     for(int i=0;i<3;++i)next[i]=dir[i]+(lift[i]+gPerp[i])*dt/speed;
     if(!Normalize(next))std::memcpy(next,dir,12);
-    WallTurn(pos,next);
+    j.area=WallTurn(pos,next);
     Across(j.up,next);   // carried along the new path
     if(!aiming){std::memcpy(j.aim,next,12);j.hasAim=s.keys;}
     FlightWatch(j,v,s,next,!s.keys ? 2 : aiming ? 1 : 0);
@@ -784,7 +798,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     if(Normalize(bodyUp)){const float c=std::cos(j.aoa),sn=std::sin(j.aoa);
         for(int i=0;i<3;++i){const float n=nose[i],u=bodyUp[i];nose[i]=n*c+u*sn;bodyUp[i]=u*c-n*sn;}}
     else std::memcpy(bodyUp,up,12);
-    BodyAttitude(v,nose,bodyUp,kAttGain,k.roll,j.omega);
+    BodyAttitude(v,nose,bodyUp,kAttGain,BodyCap(k),j.omega);
     // The floor (ground or water): under it, out (it went through); touching it or about to within kFloorSweep
     // frames, a landing or a crash, its descent cut to stop kFloorGap over it (jet.cpp HoldOffGround).
     if(clear==kNoGround)return;
@@ -1476,7 +1490,7 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
         const float closing=std::fmin(std::fmin(dist*kCatchGain,catchFlight.speed),std::sqrt(2.0f*kCatchBrake*dist));
         for(int i=0;i<3;++i)j.vel[i]=catchFlight.drift[i]+to[i]*closing;
         const float up[3]={0.0f,1.0f,0.0f};
-        if(j.kind)BodyAttitude(v,catchFlight.heading,up,kAttGain,j.kind->roll,j.omega);
+        if(j.kind)BodyAttitude(v,catchFlight.heading,up,kAttGain,BodyCap(*j.kind),j.omega);
     }
     j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
@@ -1662,6 +1676,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             FuelGauge(v,&r.fuel);   // its 506 body's tank, which the stock FUEL gauge showed (stockgauge.cpp)
             GunRounds(v,r);
             r.gpws=air ? j.gpws : Gpws::none;r.impactIn=r.gpws!=Gpws::none ? j.impactIn : -1.0f;
+            r.area=air ? j.area : 0;
             const bool rotor=j.board && j.board->frame==pjet::Airframe::rotor;
             r.liftShare=air && !rotor ? j.stallShare : 0.0f;
             if(rotor) {   // the helicopter HUD's (hud.cpp HeliHud)
