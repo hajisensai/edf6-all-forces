@@ -584,12 +584,12 @@ void Lead(const unsigned char* vehicle,Track& track,const void* target,const flo
 // Turret input for one axis: feed-forward at the wanted angle's own rate plus a correction on the
 // error. A pure proportional input lags a crossing target by rate/(gain x k), which put every
 // round behind the target.
-float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,float gain) noexcept {
+float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,float gain,float hull) noexcept {
     if(track.k[a]<=0.0f)track.k[a]=kTurnPerInput;
     if(track.frames>=1) {
-        const float wanted=wrap ? Wrap(want-track.want[a]) : want-track.want[a];
+        const float wanted=(wrap ? Wrap(want-track.want[a]) : want-track.want[a])-hull;
         track.rate[a]+=0.3f*(wanted-track.rate[a]);
-        const float moved=wrap ? Wrap(angle-track.axis[a]) : angle-track.axis[a];
+        const float moved=(wrap ? Wrap(angle-track.axis[a]) : angle-track.axis[a])-hull;
         if(std::fabs(track.in[a])>0.15f) {
             const float k=moved/track.in[a];
             if(k>kTurnPerInputMin && k<kTurnPerInputMax)track.k[a]+=0.05f*(k-track.k[a]);
@@ -668,12 +668,17 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     if(!AimAngles(local,shot,wantYaw,wantPitch,flight)){diag.stop="out-of-reach";return -1.0f;}
     if(!rule.steer)return flight;   // the time fuse still bursts the flak at the target's range
     const auto axes=seat+kSeatAim+kAimAxes;
-    const float yaw=At<float>(axes,kAxisAngle),pitch=At<float>(axes+kAxisStride,kAxisAngle);
-    if(!std::isfinite(yaw) || !std::isfinite(pitch)){diag.stop="bad-axis";return flight;}
+    const float stock[2]={At<float>(axes,kAxisAngle),At<float>(axes+kAxisStride,kAxisAngle)};
+    if(!std::isfinite(stock[0]) || !std::isfinite(stock[1])){diag.stop="bad-axis";return flight;}
+    // A gun EDF6VehicleCrew's stabilizer holds is steered from where it holds it, the hull's turn not counted twice.
+    float held[2],hull[2];
+    Stabilized(vehicle,0,stock,held,hull);
+    const float yaw=held[0],pitch=held[1];
     wantPitch=Clamp(wantPitch,At<float>(axes+kAxisStride,kAxisMin),At<float>(axes+kAxisStride,kAxisMax));
     const bool fullCircle=At<float>(axes,kAxisMax)-At<float>(axes,kAxisMin)>=2*kPi-0.01f;
     const float yawError=fullCircle ? Wrap(wantYaw-yaw) : wantYaw-yaw;
-    const float in[2]={AxisInput(*track,0,wantYaw,yaw,yawError,fullCircle,cfg.gain),AxisInput(*track,1,wantPitch,pitch,wantPitch-pitch,false,cfg.gain)};
+    const float in[2]={AxisInput(*track,0,wantYaw,yaw,yawError,fullCircle,cfg.gain,hull[0]),
+                       AxisInput(*track,1,wantPitch,pitch,wantPitch-pitch,false,cfg.gain,hull[1])};
     if(!std::isfinite(in[0]) || !std::isfinite(in[1])){diag.stop="bad-input";return flight;}
     Put<float>(vehicle,kTurn,in[0]);Put<float>(vehicle,kTurn+4,in[1]);
     track->steered=Frame();
@@ -912,6 +917,10 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_SteersV2(const void
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     return false;
 }
+
+// EDF6VehicleCrew's gun stabilizer asks whether this plugin steers its guns from the held axes (aimlink.h V3): an older
+// one would count the hull's turn twice, and gets no stabilizer on the seats it steers.
+extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_StabilizerAwareV3() { return true; }
 
 BOOL WINAPI DllMain(HINSTANCE instance,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH){autoturret::module=instance;DisableThreadLibraryCalls(instance);}

@@ -209,7 +209,9 @@ void Log(const char* format,...) noexcept;
 bool Finite(const unsigned char* base,std::size_t offset,float* out) noexcept;
 float Down(const unsigned char* vehicle) noexcept;
 bool Ballistic(const float* local,const Shot& shot,float& elevation,float& time) noexcept;
-float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,float gain) noexcept;
+// `hull`: the part of the want's change and of the axis' motion since the last frame that is EDF6VehicleCrew's gun
+// stabilizer's (Stabilized below), taken out of both (0 for a gun it does not hold).
+float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,float gain,float hull) noexcept;
 void ReloadConfigIfChanged() noexcept;
 
 // --- The player's turret (designate.cpp) ---
@@ -230,6 +232,10 @@ bool LeadCircle() noexcept;
 // EDF6VehicleCrew's turret camera turns `vehicle`'s seat `seat` after the player's view (common/edf/aimlink.h
 // CameraTurret); false without that plugin (or an older one): the player's gun is this plugin's as in V1.
 bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
+// EDF6VehicleCrew's gun stabilizer holds `vehicle`'s seat `seat` (common/edf/aimlink.h V3): `held` the axes it holds the
+// gun at this frame with no input (steer from these), `hull` the hull's part of that since the last frame (AxisInput's).
+// False (the plugin absent, older, or the seat not held): `held` = `axes` (the axes as they are), `hull` 0.
+bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,float* held,float* hull) noexcept;
 // The readout for EDF6VehicleCrew's HUD (common/edf/aimlink.h), from the player's seat this frame: `ownGun` the seat's
 // gun is the plugin's; `target` what the gun works on (null: nothing) at `world`, led from `muzzle` along `bore` with
 // `shot` against the target's velocity `vel` (m/frame); `life` the round's frames (0: unknown).

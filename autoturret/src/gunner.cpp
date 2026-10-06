@@ -335,11 +335,15 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     if(!rule.steer)return;
     float want[2],error[2],axis[2],time,distance;
     if(!Solve(vehicle,gun,aimAt,want,time,distance) || !AxisTargets(aim,want,error,axis)){track.firing=false;return;}
-    for(int a=0;a<2;++a)axis[a]=Clamp(axis[a],aim.min[a],aim.max[a]);
+    // A gun EDF6VehicleCrew's stabilizer holds: its barrel (the last pose) already shows where the stabilizer holds it, so
+    // the turn it still needs (axis - angle) is taken from the held axes, and the hull's turn is not counted twice.
+    float held[2],hull[2];
+    Stabilized(vehicle,s,aim.angle,held,hull);
+    for(int a=0;a<2;++a)axis[a]=Clamp(held[a]+axis[a]-aim.angle[a],aim.min[a],aim.max[a]);
     float in[2];
     for(int a=0;a<2;++a) {
         const float k=track.k[a]>0.0f ? track.k[a] : kTurnPerInput;
-        in[a]=AxisInput(track,a,axis[a],aim.angle[a],axis[a]-aim.angle[a],false,1.0f/(k*kSettleFrames));
+        in[a]=AxisInput(track,a,axis[a],held[a],axis[a]-held[a],false,1.0f/(k*kSettleFrames),hull[a]);
     }
     if(!AllFinite(in,2))return;
     Put<float>(vehicle,kTurn+s*kTurnStride,in[0]);Put<float>(vehicle,kTurn+s*kTurnStride+4,in[1]);

@@ -61,7 +61,8 @@ ULONGLONG readoutAt=0;
 link::ViewRayFn viewRay=nullptr;
 link::MapRayFn mapRay=nullptr;
 link::SeatQueryFn cameraTurret=nullptr;
-ULONGLONG viewTried=0,mapTried=0,cameraTried=0;
+link::StabilizerFn stabilizer=nullptr;
+ULONGLONG viewTried=0,mapTried=0,cameraTried=0,stabTried=0;
 
 bool KeyHeld(int vk) noexcept {
     if(vk<=0 || vk>0xFE)return false;
@@ -209,6 +210,16 @@ bool LeadCircle() noexcept { return mode==link::Mode::leadCircle; }
 
 bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept {
     return link::Resolve(link::kCrewDll,link::kCameraTurret,cameraTurret,cameraTried) && cameraTurret(vehicle,seat);
+}
+
+bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,float* held,float* hull) noexcept {
+    held[0]=axes[0];held[1]=axes[1];hull[0]=hull[1]=0.0f;
+    if(!link::Resolve(link::kCrewDll,link::kStabilizer,stabilizer,stabTried))return false;
+    float h[2],d[2];
+    if(!stabilizer(vehicle,seat,h,d))return false;
+    for(int i=0;i<2;++i)if(!std::isfinite(h[i]) || !std::isfinite(d[i]))return false;
+    held[0]=h[0];held[1]=h[1];hull[0]=d[0];hull[1]=d[1];
+    return true;
 }
 
 void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const float* muzzle,const float* bore,
