@@ -57,6 +57,7 @@ constexpr Scenario kScenarios[]={
 };
 
 int failures=0;
+float standAnkle[2]{};   // the ankles' height standing still (the stance: the soles on the floor)
 void Fail(const char* scenario,int frame,const char* what) {
     std::printf("FAIL %s frame %d: %s\n",scenario,frame,what);
     ++failures;
@@ -88,8 +89,8 @@ void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Pose
     for(int k=0;k<6;++k)
         if((p.scale[kFunnels[k]]==0.0f)!=in.funnelOut[k])Fail(s.name,f,"a funnel shown / hidden wrongly");
     constexpr int kFeet[2]={kFootL,kFootR};
-    for(int foot:kFeet) {   // the sole is its ankle's bind height under the ankle: it sinks as the ankle drops
-        const float drop=rig.joint[foot][1]-p.modelPos[foot][1];
+    for(int k=0;k<2;++k) {   // the soles stand on the floor in the stance: an ankle this far under its stance height sinks
+        const float drop=standAnkle[k]-p.modelPos[kFeet[k]][1];
         if(in.air==0.0f && drop>kSink)Fail(s.name,f,"a sole sinks through the floor");
     }
 }
@@ -122,6 +123,10 @@ int main(int argc,char** argv) {
     std::FILE* out=dump ? std::fopen(dump,"w") : nullptr;
     if(dump && !out){std::printf("cannot write %s\n",dump);return 2;}
     static Pose p;
+    PoseInput still;
+    still.aim=0.0f;
+    Animate(still,rig,&p);
+    standAnkle[0]=p.modelPos[kFootL][1];standAnkle[1]=p.modelPos[kFootR][1];
     for(const Scenario& s:kScenarios) {
         for(int f=0;f<kFrames;++f) {
             const PoseInput in=s.at(static_cast<float>(f)/(kFrames-1));

@@ -128,6 +128,9 @@ def assign(scene: gltf.Scene, piece: np.ndarray) -> np.ndarray:
     segs = mirrored(BONE_SEGMENTS)
     names = list(segs)
     d = np.stack([_seg_dist(c, np.array(segs[n][0], float), np.array(segs[n][1], float)) for n in names], axis=1)
+    # sz_root is the frame the stance and the gait move the rest in: it carries no piece (one plate on it stayed behind,
+    # floating, when the pelvis came down to stand, 2026-10-07)
+    d[:, names.index('sz_root')] = np.inf
     bone = np.array([sz.BONE_NAMES.index(names[i]) for i in d.argmin(axis=1)])
     idx = sz.BONE_NAMES.index
     for side in ('l', 'r'):
@@ -152,6 +155,33 @@ def assign(scene: gltf.Scene, piece: np.ndarray) -> np.ndarray:
         for j, p in enumerate(sorted(funnels, key=lambda q: -c[q, 1])):   # 1 the top one
             bone[p] = idx(f'sz_funnel_{side}{j + 1}')
     return bone[piece]
+
+
+# ------------------------------------------------------------------------------------------ the legs mirrored
+
+LEG_BONES = ('thigh', 'shin', 'foot')
+
+
+def mirror_legs(scene: gltf.Scene, tri_bone: np.ndarray, piece: np.ndarray
+                ) -> tuple[gltf.Scene, np.ndarray, np.ndarray]:
+    """The scene with its right leg's triangles replaced by the left leg's mirrored (x -> -x, winding reversed), on the
+    right leg's bones. The source poses its legs apart (its right foot 2.8 m further back and 0.6 m higher than its
+    left: measured on the two foot pieces), so the right leg's joints, the left's mirrored (BONE_SEGMENTS), sat off its
+    geometry and a stance turned its foot through the floor (2026-10-07). The Sazabi is symmetric: one leg serves both."""
+    idx = sz.BONE_NAMES.index
+    right = np.isin(tri_bone, [idx(f'sz_{b}_r') for b in LEG_BONES])
+    left = np.where(np.isin(tri_bone, [idx(f'sz_{b}_l') for b in LEG_BONES]))[0]
+    keep = np.where(~right)[0]
+    used, inv = np.unique(scene.triangles[left].ravel(), return_inverse=True)
+    mirrored = scene.positions[used] * np.array([-1.0, 1.0, 1.0])
+    base = len(scene.positions)
+    tris_m = inv.reshape(-1, 3)[:, ::-1] + base
+    bones_m = np.array([idx(sz.BONE_NAMES[b][:-2] + '_r') for b in tri_bone[left]])
+    out = gltf.Scene(np.vstack([scene.positions, mirrored]), None,
+                     np.vstack([scene.triangles[keep], tris_m]), np.concatenate([scene.material[keep], scene.material[left]]),
+                     scene.materials, scene.extras)
+    pieces_m = piece[left] + int(piece.max()) + 1
+    return out, np.concatenate([tri_bone[keep], bones_m]), np.concatenate([piece[keep], pieces_m])
 
 
 # ------------------------------------------------------------------------------------------ joints
@@ -303,6 +333,7 @@ def main(argv: list[str]) -> int:
     scene = gltf.read(a.gltf)
     piece = pieces(scene)
     tri_bone = assign(scene, piece)
+    scene, tri_bone, piece = mirror_legs(scene, tri_bone, piece)
     joint = joints(scene, tri_bone)
     info = write(scene, tri_bone, piece, a.out)
     joint = {k: v if k in sz.FIXED_JOINTS else [v[0], v[1] + info['lift'], v[2]] for k, v in joint.items()}

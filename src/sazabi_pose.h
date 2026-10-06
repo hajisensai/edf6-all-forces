@@ -162,10 +162,82 @@ inline void LocalMatrix(const Pose& p,int i,float* out) {
 // Gait (degrees): a giant's stride (a leg ~12 m from hip to sole; one cycle kStride m of ground), the thigh's swing,
 // the knee's bend while the leg swings forward, the foot kept flat, the pelvis's bob and the waist's counter-twist.
 constexpr float kStride=16.0f;
-constexpr float kThighSwing=26.0f,kKneeSwing=42.0f,kKneeStance=8.0f,kFootFlat=0.6f;
-constexpr float kBob=0.55f,kWaistTwist=7.0f,kArmSwing=14.0f,kRunLean=8.0f;
-// Air: the legs trail and the feet point down; landing / crouch: knees bend, the pelvis drops.
-constexpr float kAirThigh=-14.0f,kAirKnee=34.0f,kAirFoot=30.0f;
+constexpr float kThighSwing=26.0f,kKneeSwing=42.0f,kKneeStance=8.0f,kFootFlat=1.0f;
+constexpr float kWaistTwist=7.0f,kArmSwing=14.0f,kRunLean=8.0f;
+// The stance (tools/sazabi_stance.py works it out from the model): the source stands as it hovers (legs spread wide,
+// shins raked back, toes pointing down), so on its feet each leg is turned to stand: the thigh Rx(thighX) Rz(thighZ),
+// the knee Rx(knee), the foot Rx(footX) Rz(footZ) (degrees), [0] the left leg, [1] the right; the pelvis drops
+// kStanceDrop m to put the soles on the floor. Off its feet (air 1) the stance goes and the legs are the source's own:
+// its hovering pose is the flight's.
+struct Stance { float thighX,thighZ,knee,footX,footZ; };
+inline constexpr Stance kStance[2]={{-10.0f,-20.25f,5.0f,-42.0f,18.0f},{-10.0f,20.25f,5.0f,-42.0f,-18.0f}};
+constexpr float kStanceDrop=1.53f;
+// The left leg's underside (tools/sazabi_stance.py: its shin's and foot's points furthest along each of 64 directions,
+// directions in the stance; kSole), each in its bone's own frame from its joint; the right leg's are these mirrored (x -> -x,
+// the right bone: the right leg is the left mirrored). The feet are planted on the lowest of them (Legs).
+struct SolePoint { int bone; float at[3]; };
+inline constexpr SolePoint kSole[]={
+    {kShinL,{3.479f,-5.307f,1.373f}},
+    {kShinL,{-0.146f,-6.541f,-0.670f}},
+    {kShinL,{2.510f,-4.764f,-3.277f}},
+    {kShinL,{3.588f,-5.248f,1.393f}},
+    {kShinL,{-0.338f,-6.502f,-0.886f}},
+    {kShinL,{4.408f,-4.401f,-1.927f}},
+    {kShinL,{2.611f,-5.772f,1.785f}},
+    {kShinL,{-1.719f,-5.444f,-3.847f}},
+    {kShinL,{-1.824f,-5.627f,-3.502f}},
+    {kShinL,{0.451f,-3.600f,-5.933f}},
+    {kShinL,{-2.064f,-5.834f,-1.736f}},
+    {kShinL,{4.065f,-2.463f,-3.666f}},
+    {kShinL,{2.877f,-5.155f,2.303f}},
+    {kShinL,{-1.844f,-5.444f,-3.830f}},
+    {kShinL,{4.377f,-4.534f,-1.627f}},
+    {kShinL,{-1.377f,-5.936f,-0.275f}},
+    {kShinL,{1.049f,-2.385f,-6.519f}},
+    {kShinL,{3.213f,-4.905f,2.237f}},
+    {kShinL,{4.330f,-1.440f,-3.791f}},
+    {kShinL,{2.674f,-5.596f,1.940f}},
+    {kShinL,{0.475f,-3.498f,-6.004f}},
+    {kShinL,{3.408f,-5.006f,1.905f}},
+    {kShinL,{-2.314f,-5.608f,-1.359f}},
+    {kShinL,{2.358f,-1.080f,-5.910f}},
+    {kShinL,{2.971f,-5.049f,2.330f}},
+    {kShinL,{-2.590f,-3.752f,-4.757f}},
+    {kShinL,{4.338f,-1.416f,-3.750f}},
+    {kShinL,{-2.795f,-5.202f,-2.493f}},
+    {kShinL,{3.955f,-0.627f,-4.382f}},
+    {kShinL,{-2.016f,-2.639f,-5.750f}},
+    {kShinL,{4.424f,-1.940f,-2.773f}},
+    {kShinL,{-2.193f,-5.666f,-1.170f}},
+    {kShinL,{3.088f,-4.959f,2.287f}},
+    {kShinL,{4.150f,-0.807f,-4.119f}},
+    {kShinL,{-0.990f,-2.088f,-6.172f}},
+    {kShinL,{3.307f,-4.905f,2.137f}},
+    {kShinL,{3.447f,-0.463f,-4.871f}},
+    {kShinL,{-2.228f,-2.854f,-5.566f}},
+    {kShinL,{4.135f,-0.791f,-3.240f}},
+    {kShinL,{3.713f,-0.463f,-4.609f}},
+    {kShinL,{0.928f,-2.690f,1.834f}},
+    {kFootL,{3.717f,-4.010f,1.485f}},
+    {kFootL,{-1.005f,-2.379f,0.047f}},
+    {kFootL,{-2.618f,2.144f,-4.508f}},
+    {kFootL,{-3.669f,1.593f,-3.918f}},
+    {kFootL,{2.116f,-0.747f,-1.711f}},
+    {kFootL,{2.991f,-4.387f,1.891f}},
+    {kFootL,{-2.915f,-0.647f,-1.696f}},
+    {kFootL,{0.233f,1.000f,-3.469f}},
+    {kFootL,{1.132f,-3.596f,1.201f}},
+    {kFootL,{0.616f,0.757f,-3.239f}},
+    {kFootL,{-2.689f,-0.971f,-1.375f}},
+    {kFootL,{2.092f,-0.417f,-1.688f}},
+    {kFootL,{3.186f,-2.521f,0.043f}},
+    {kFootL,{-0.072f,1.875f,-2.950f}},
+    {kFootL,{-3.599f,1.878f,-3.715f}},
+    {kFootL,{-1.279f,-2.073f,0.093f}},
+    {kFootL,{-2.681f,2.359f,-4.231f}},
+    {kFootL,{1.561f,1.339f,0.660f}}
+};
+// Landing / crouch: knees bend, the pelvis drops.
 constexpr float kCrouchThigh=-24.0f,kCrouchKnee=48.0f,kCrouchDrop=2.2f;
 // The rifle arm raised: the upper arm forward and out, the forearm bent a little; the wrist then turns the rifle
 // onto the aim exactly (AimRifle).
@@ -181,23 +253,47 @@ constexpr float kWindUp=0.35f,kStrike=0.6f,kGripAhead=1.1f;
 inline float Smooth(float x) { x=x<0?0:x>1?1:x; return x*x*(3-2*x); }
 inline float Clamp(float x,float lo,float hi) { return x<lo?lo:x>hi?hi:x; }
 
+// The lowest of the legs' undersides (kSole, both legs) as posed, in sz_root's frame (the floor y = 0).
+inline float LowestSole(const Pose& p) {
+    float lowest=1e9f;
+    for(int side=0;side<2;++side)
+        for(const SolePoint& sp:kSole) {
+            const int bone=side==0 ? sp.bone : sp.bone+(kThighR-kThighL);
+            const float local[3]={side==0 ? sp.at[0] : -sp.at[0],sp.at[1],sp.at[2]};
+            float w[3];
+            Apply(local,p.modelRot[bone],w);
+            const float y=p.modelPos[bone][1]+w[1];
+            lowest=y<lowest ? y : lowest;
+        }
+    return lowest;
+}
+
+// The legs: the stance, the gait, the crouch (Plant puts them on the floor).
 inline void Legs(const PoseInput& in,Pose* p) {
-    const float s=std::sin(in.gait),c=std::cos(in.gait),st=in.stride,air=in.air,cr=in.crouch;
+    const float s=std::sin(in.gait),c=std::cos(in.gait),st=in.stride,air=in.air,cr=in.crouch,feet=1.0f-air;
     for(int side=0;side<2;++side) {
+        const Stance& k=kStance[side];
         const float sw=side==0 ? s : -s,fwd=side==0 ? c : -c;   // the right leg half a cycle behind
         float thigh=-kThighSwing*sw*st;                          // - forward
         float knee=(kKneeSwing*(fwd>0 ? fwd : 0)+kKneeStance)*st;
-        thigh=thigh*(1-air)+kAirThigh*air;
-        knee=knee*(1-air)+kAirKnee*air;
-        thigh+=kCrouchThigh*cr;
-        knee+=kCrouchKnee*cr;
-        const float foot=-kFootFlat*(thigh+knee)*(1-air)+kAirFoot*air;
+        thigh=thigh*feet+kCrouchThigh*cr;
+        knee=knee*feet+kCrouchKnee*cr;
+        const float foot=-kFootFlat*(thigh+knee)*feet;
         const int t=side==0 ? kThighL : kThighR;
-        p->rot[t]=RotX(thigh*kDeg);
-        p->rot[t+1]=RotX(knee*kDeg);
-        p->rot[t+2]=RotX(foot*kDeg);
+        // the stance first (in the pelvis's frame), the gait's swing about the pelvis's x after it
+        p->rot[t]=Mul(Mul(RotX(k.thighX*feet*kDeg),RotZ(k.thighZ*feet*kDeg)),RotX(thigh*kDeg));
+        p->rot[t+1]=RotX((k.knee*feet+knee)*kDeg);
+        p->rot[t+2]=Mul(RotX(foot*kDeg),Mul(RotX(k.footX*feet*kDeg),RotZ(k.footZ*feet*kDeg)));
     }
-    p->pos[kPelvis][1]+=kBob*st*(1-air)*std::cos(2*in.gait)-kCrouchDrop*cr;
+    p->pos[kPelvis][1]+=-kCrouchDrop*cr-kStanceDrop*feet;
+}
+
+// On its feet, the feet planted: the pelvis up or down by what puts the lowest of the legs' undersides on the floor
+// (LowestSole), so whichever foot carries it stays on the floor through the stride, a crouch and the lean (the bob is the
+// legs' own geometry); off its feet that hold fades out (air). After the legs and the torso's lean, before the arms.
+inline void Plant(const PoseInput& in,Pose* p) {
+    Finish(p);
+    p->pos[kPelvis][1]-=LowestSole(*p)*(1.0f-in.air);
 }
 
 inline void Torso(const PoseInput& in,Pose* p) {
@@ -285,6 +381,7 @@ inline void Animate(const PoseInput& in,const Rig& rig,Pose* p) {
     Reset(rig,p);
     Legs(in,p);
     Torso(in,p);
+    Plant(in,p);
     LeftArm(in,p);
     AimRifle(in,p);
     Tomahawk(in,rig,p);

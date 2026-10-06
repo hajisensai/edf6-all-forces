@@ -20,6 +20,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
 #include "layout.h"
+#include "heli.h"
 #include "map.h"
 #include "memory.h"
 #include "sazabi_pose.h"
@@ -168,6 +169,16 @@ bool Rig(Mech& m,unsigned char* v) noexcept {
     m.rigOk=true;
     Log("SAZABI v=%p rig: %d bones, pelvis at %.2f m, rifle muzzle (%.2f,%.2f,%.2f)",v,sazabi::kBoneCount,
         m.rig.joint[sazabi::kPelvis][1],m.rig.joint[sazabi::kMuzzle][0],m.rig.joint[sazabi::kMuzzle][1],m.rig.joint[sazabi::kMuzzle][2]);
+    // Where the frames are in the world (docs/sazabi-re.md §3: the MAB's seat, door and camera hang on `mdl`).
+    const unsigned char* mdl=BoneRecord506(inst,L"mdl");
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    const float* rw=reinterpret_cast<const float*>(m.rec[sazabi::kRoot]+kBoneWorld506);
+    const float* mw=mdl ? reinterpret_cast<const float*>(mdl+kBoneWorld506) : p;
+    float door[3]{},reach=0.0f;
+    const bool seat=SeatPoint(v,0,door,&reach);
+    Log("SAZABI v=%p frames: vehicle (%.2f,%.2f,%.2f) mdl (%.2f,%.2f,%.2f) sz_root (%.2f,%.2f,%.2f) door %d (%.2f,%.2f,%.2f) reach %.2f "
+        "ground under the vehicle %.2f m",v,p[0],p[1],p[2],mw[12],mw[13],mw[14],rw[12],rw[13],rw[14],seat,door[0],door[1],door[2],reach,
+        GroundClearance(p));
     return true;
 }
 
