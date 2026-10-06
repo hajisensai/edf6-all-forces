@@ -216,7 +216,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 - 座位：人物掩码 `+0x31C`（Ranger 1、Wing Diver 2、Fencer 4、Air Raider 8，H）、座位 `+0x30 & +0x34`（M）。只选空的、掩码相容的座位。士兵**不占 0 号座**：真士兵当驾驶员时它每帧会清自己座位的输入（`0x573A7C`），原版车辆 AI 的输出可能被抹掉（H/M），而插件没有给每种车写驾驶器。0 号座空着就交给 AutoCrew 的 dummy。
 - 炮手：士兵坐的炮位由插件在 slot 55 前置步骤里调原版 `0x65F6F0(veh, seatIdx, target)`（瞄准写右摇杆、按射程和视线开火，H），目标取该车附近最近的敌人或标记。原版只对 0 号座调它，所以这一步是让 NPC 炮手真的会打（B6「多人乘坐」）。
 - 上车流程：B → 选最近的、有空位的友方载具（玩家坐着的优先）→ 每个队员被分一个座位 → 插件把它的移动改成走向上车点（`SeatPoint`）→ 进入原版上车距离后调 `RideVehicle`。下车 N：对每个乘车队员调 `SeatKick 0x62E1A0(veh, seat)`（消息 0x10000015，真士兵会正常落地并恢复步行，M）。
-- crew.cpp 的顶替（Bump）与 AutoCrew 目前把非玩家乘员都当 dummy 处理，真士兵乘员必须排除：Bump 只顶 dummy；`SeatKick` 一名真士兵是下车而不是死亡。
+- 已核实 crew.cpp 的顶替（Bump）只处理 dummy（`Rider::dummy`），真士兵坐着的座位玩家顶不了（原版行为），要坐先下令下车；AutoCrew 只看 0 号座，士兵坐炮手座时照常给 0 号座派 dummy 司机。插件只对真士兵调 `SeatKick`（下车，不是死亡）。
 - 单机限定。
 
 ## 8. 地面载具回位（D，P2）
@@ -292,6 +292,7 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 | P3 | implemented_unverified | 编译；`npc_ai_check`（PickLeader / JoinSquad / 冷却）；selftest（在原版 Think 之前、仅房主、经原版 SetFollow 与 vslot 39 同步、ini） | 跟随链表遍历（`+0x550` 节点布局，H 但未实测）、vslot 39 单机调用无副作用（M）、整体行为 |
 | P4 | implemented_unverified | 编译；`map_cmd_check`（新指令的按键判定、车辆只收三种指令、无标记时拒绝集中火力）；hud_view 地图场景渲染（面板与按键行不重叠）；selftest（脚本小队不受令、解除招募清 `+0x540` 并开始冷却、冷却结束恢复、车辆指令过滤、ini） | 小队表的计数与状态、解除 / 招募的原版行为（SetFollow + 第 39 槽）、面板实际显示 |
 | P5 | implemented_unverified | 编译；`npc_ai_check`（MarkInReach）；`map_cmd_check`（无标记拒绝集中火力）；hud_view 新场景 `npc_mark`（菱形与距离）；selftest（只在步行时读键、键读取让给地图、HUD 画、ini） | 屏幕中心取敌是否与玩家感受一致、NPC 转火 |
+| P6 | implemented_unverified | 编译；selftest（不占 0 号座、RideVehicle 前先加一个强引用、只对真士兵 SeatKick、炮手只在 slot 70 为原版函数的车上、写在原版输入之前、ini） | 座位掩码 `+0x30/+0x34`（M）、RideVehicle 的乘车状态、士兵下车后恢复步行（M）、炮手座的输入在士兵自己清座位块之后是否仍被读到（M）；全部行为 |
 
 ### 实机验收清单（用户）
 

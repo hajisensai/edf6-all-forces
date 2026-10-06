@@ -21,4 +21,6 @@ void NpcPostInput(unsigned char* vehicle) noexcept;
 // A tank's post moved to `at` (a map command); false when the vehicle keeps no post now.
 bool NpcPostCommand(const void* vehicle,const float* at) noexcept;
 void ResetNpcPosts() noexcept;   // a new mission
+// The soldiers in a CarBase vehicle's gunner seats aim and fire (§7): each vehicle's input, before the stock input.
+void NpcGunnersInput(unsigned char* vehicle) noexcept;
 }  // namespace crew
