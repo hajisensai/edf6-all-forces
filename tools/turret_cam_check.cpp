@@ -15,6 +15,7 @@
 #include "../src/turretcam.h"
 #include <cmath>
 #include <cstdio>
+#include <initializer_list>
 
 namespace {
 using namespace crew;
@@ -165,43 +166,116 @@ void Owners() {
     Expect(!tcam::BallisticAim(false,false) && !tcam::BallisticAim(false,true),"no hit (the made-up far point): the bore line");
 }
 
-// The high view's pitch (README 高视角; the user, 2026-10-06: "动几下就显示不对了"). The view's pitch is the normal rig's,
-// the camera draws it `offset` lower (tcam::ViewOffset: the Katyusha's authored rig base -11.9 deg under HighCamPitch 40,
-// -28.1 deg). Two ways it went wrong, both by the offset:
-//  - a view started from the camera as drawn (a take-over: back in the seat, a seat change, the rider check flickering
-//    while boarding, as at 14:56:23 in the user's log; the coupled free look) took the drawn pitch as the view's: the
-//    camera then sank by the offset, again at every start, down to the clamp;
-//  - the view's pitch was kept within +-80 deg of its own while the camera stops at -85: under the high view's offset
-//    the stick turned a pitch the camera could not show (-57..-80 deg), and coming back up the view did not move
-//    until it was undone.
+// The high view (README 高视角; the user, 2026-10-06: "动几下就显示不对了"): its aim is a ground point (tcam::HighAim).
+//  - Switching keeps the screen's centre on its point both ways: the normal view's centre point taken as the high
+//    view's, and the high view's point handed back through the normal rig (tcam::AimAt), over ranges 20..1200 m, any
+//    heading, the point level with the hull or on a hill.
+//  - Far off it is not touchy: a frame of full stick at 600 m against the old high view (a pitch: tcam::High at
+//    HighCam 45 / 35 / 40, the eye at 45 m looking -3.7 deg), and it never looks past the ground (the old one was over
+//    the horizon after a few frames up).
+// The Katyusha's authored rig (game_object_camera_setting: look (0, 4.5, 4), eye (0, 8.5, -15); the user's log: r 19.4).
+float GroundAlong(const float* eye,const float* look,float y,float* hit) {
+    const float d[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
+    if(!(std::fabs(d[1])>1e-6f))return -1.0f;
+    const float t=(y-eye[1])/d[1];
+    for(int i=0;i<3;++i)hit[i]=eye[i]+d[i]*t;
+    return t;
+}
+float OffLine(const float* eye,const float* look,const float* p) {   // p's distance from the line eye -> look
+    float d[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
+    vec::Normalize(d);
+    const float w[3]={p[0]-eye[0],p[1]-eye[1],p[2]-eye[2]};
+    const float t=w[0]*d[0]+w[1]*d[1]+w[2]*d[2];
+    const float q[3]={w[0]-d[0]*t,w[1]-d[1]*t,w[2]-d[2]*t};
+    return std::sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]);
+}
+// The old high view's ground point `range` m out (flat ground at the hull's height): its pitch found by bisection, then
+// how far a frame of full stick down (1.5 deg, TurretCamRate 90) moves it, and how many frames up lose it.
+void OldHighView(float range,float* step,int* lost) {
+    const tcam::Rig high=tcam::High(45.0f,35.0f,40.0f);
+    const float origin[3]={0.0f,0.0f,0.0f};
+    auto hitAt=[&](float pitch) {
+        float d[3],eye[3],look[3],hit[3];
+        tcam::Dir(0.0f,pitch,d);
+        tcam::Place(high,origin,0.0f,d,eye,look);
+        return GroundAlong(eye,look,0.0f,hit)>0.0f ? std::sqrt(hit[0]*hit[0]+hit[2]*hit[2]) : 1e9f;
+    };
+    float lo=-80.0f*kDeg,hi=-0.01f*kDeg;
+    for(int i=0;i<60;++i){const float mid=0.5f*(lo+hi);(hitAt(mid)<range ? lo : hi)=mid;}
+    const float rate=1.5f*kDeg;
+    *step=range-hitAt(lo-rate);
+    *lost=0;
+    for(float pitch=lo;hitAt(pitch)<1e8f && *lost<100;pitch+=rate)++*lost;
+}
 void HighView() {
-    const float offset=tcam::ViewOffset(true,40.0f,-11.9f*kDeg);
-    Expect(std::fabs(offset/kDeg+28.1f)<0.01f,"the Katyusha's high view offset",offset/kDeg,-28.1);
-    Expect(tcam::ViewOffset(false,40.0f,-11.9f*kDeg)==0.0f,"no offset off the high view");
-    // Five starts in a row, each from the camera as the last one drew it: the camera stays where it was.
-    float drawn=-40.0f*kDeg;
-    for(int take=0;take<5;++take) {
-        const float pitch=tcam::PitchFrom(drawn,offset);
-        const float next=tcam::CameraPitch(pitch,offset);
-        Expect(std::fabs(next-drawn)<1e-4f,"a start from the drawn camera keeps it",next/kDeg,drawn/kDeg);
-        drawn=next;
+    float look[3],eye[3];
+    tcam::Rig rig{};
+    const float alook[3]={0.0f,4.5f,4.0f},aeye[3]={0.0f,8.5f,-15.0f};
+    Expect(tcam::Authored(alook,aeye,&rig),"the Katyusha's rig");
+    const float origin[3]={120.0f,6.0f,-40.0f};
+    float worstOn=0.0f,worstBack=0.0f;
+    for(float range:{20.0f,60.0f,150.0f,300.0f,600.0f,1200.0f})
+        for(float yaw:{-2.5f,-0.7f,0.0f,1.1f,3.0f})
+            for(float hill:{0.0f,30.0f}) {
+                // Normal view on the point: then the high view taken on it.
+                float fwd[3],right[3];
+                tcam::Flat(yaw,fwd,right);
+                const float p[3]={origin[0]+fwd[0]*range,origin[1]+hill,origin[2]+fwd[2]*range};
+                float vy=yaw,vp=0.0f,d[3];
+                tcam::AimAt(rig,origin,p,&vy,&vp);
+                tcam::Dir(vy,vp,d);
+                tcam::Place(rig,origin,vy,d,eye,look);
+                float g[3];
+                if(!(GroundAlong(eye,look,p[1],g)>0.0f)){Expect(false,"the normal view's centre meets the point's height ahead",range,yaw);continue;}
+                worstBack=std::fmax(worstBack,std::sqrt((g[0]-p[0])*(g[0]-p[0])+(g[2]-p[2])*(g[2]-p[2])));
+                const tcam::HighAim a=tcam::HighAimAt(origin,g,vy);
+                float he[3],hl[3],hg[3];
+                tcam::HighPlace(origin,a,45.0f,35.0f,he,hl);
+                GroundAlong(he,hl,g[1],hg);
+                worstOn=std::fmax(worstOn,std::sqrt((hg[0]-g[0])*(hg[0]-g[0])+(hg[2]-g[2])*(hg[2]-g[2])));
+                // The high view handed back: the normal view's centre through the high one's point.
+                float hp[3];tcam::HighPoint(origin,a,hp);
+                float by=a.yaw,bp=0.0f;
+                tcam::AimAt(rig,origin,hp,&by,&bp);
+                tcam::Dir(by,bp,d);
+                tcam::Place(rig,origin,by,d,eye,look);
+                worstBack=std::fmax(worstBack,OffLine(eye,look,hp));
+                Expect(tcam::Wrap(a.yaw-yaw)<1e-3f && tcam::Wrap(a.yaw-yaw)>-1e-3f,"the high view's bearing is the point's",a.yaw,yaw);
+            }
+    std::printf("high view switch: worst miss on 0.000 m by design, measured %.4f m on, %.4f m back\n",worstOn,worstBack);
+    Expect(worstOn<0.01f,"switching on keeps the screen's centre on its point",worstOn,0.01);
+    Expect(worstBack<0.05f,"switching back keeps the screen's centre on its point",worstBack,0.05);
+    // Far off: a frame of full stick at 600 m, old against new; the old one's horizon.
+    float oldStep=0.0f;int oldLost=0;
+    OldHighView(600.0f,&oldStep,&oldLost);
+    tcam::HighAim a{0.0f,600.0f,0.0f};
+    const tcam::HighAim before=a;
+    tcam::HighTurn(a,0.0f,1.0f,1.5f*kDeg);
+    const float newStep=before.range-a.range;
+    tcam::HighAim side=before;
+    tcam::HighTurn(side,1.0f,0.0f,1.5f*kDeg);
+    float p0[3],p1[3];
+    const float o0[3]={0.0f,0.0f,0.0f};
+    tcam::HighPoint(o0,before,p0);tcam::HighPoint(o0,side,p1);
+    const float newSide=std::sqrt((p1[0]-p0[0])*(p1[0]-p0[0])+(p1[2]-p0[2])*(p1[2]-p0[2]));
+    std::printf("high view at 600 m, a frame of full stick: old %.1f m along (over the horizon after %d frames up), new %.1f m along, %.1f m aside\n",
+                oldStep,oldLost,newStep,newSide);
+    Expect(newStep*10.0f<oldStep,"far off the range moves a tenth of the old view's step or less",newStep,oldStep);
+    // Up as far as it goes: the range stops, the sight never shallower than kHighMinSight (the point stays on the ground).
+    float shallow=1.0f;
+    for(int f=0;f<2000;++f) {
+        tcam::HighTurn(a,0.0f,-1.0f,1.5f*kDeg);
+        tcam::HighPlace(o0,a,45.0f,35.0f,eye,look);
+        const float d[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
+        shallow=std::fmin(shallow,-tcam::PitchOf(d));
     }
-    std::printf("high view: after 5 starts the camera at %.2f deg (it was -40.00)\n",drawn/kDeg);
-    // Mouse down for 2 s at 1.5 deg a frame (90 deg/s), then one frame up: the camera rises at once.
-    const float step=1.5f*kDeg;
-    float pitch=tcam::PitchFrom(-40.0f*kDeg,offset);
-    for(int f=0;f<120;++f)pitch=tcam::ClampView(pitch-step,offset);
-    const float low=tcam::CameraPitch(pitch,offset);
-    int frames=0;
-    for(;frames<60 && !(tcam::CameraPitch(pitch,offset)>low+0.5f*step);++frames)pitch=tcam::ClampView(pitch+step,offset);
-    std::printf("high view: looked down to %.1f deg, the camera rises after %d frame(s) of stick up\n",low/kDeg,frames);
-    Expect(std::fabs(low/kDeg+85.0f)<0.01f,"down as far as the camera goes",low/kDeg,-85.0);
-    Expect(frames==1,"the camera rises on the first frame of stick up",frames,1.0);
-    // Up as far as it goes: the camera's +85 or the view's own +80, whichever comes first; and the normal view keeps +-80.
-    for(int f=0;f<200;++f)pitch=tcam::ClampView(pitch+step,offset);
-    Expect(std::fabs(tcam::CameraPitch(pitch,offset)/kDeg-(80.0f-28.1f))<0.05f,"the high view's top",tcam::CameraPitch(pitch,offset)/kDeg,51.9);
-    Expect(std::fabs(tcam::ClampView(2.0f,0.0f)-tcam::kPitchMost)<1e-6f && std::fabs(tcam::ClampView(-2.0f,0.0f)+tcam::kPitchMost)<1e-6f,
-           "the normal view: +-80 deg as before");
+    std::printf("high view: stick up for 2000 frames: range %.0f m, the sight never shallower than %.2f deg\n",a.range,shallow/kDeg);
+    Expect(std::fabs(a.range-tcam::kHighMaxRange)<1e-3f,"the range stops at its most",a.range,tcam::kHighMaxRange);
+    Expect(shallow>=tcam::kHighMinSight-1e-4f,"the sight never past the ground's least angle",shallow/kDeg,tcam::kHighMinSight/kDeg);
+    // Near: the eye as HighCamHeight / Back put it (45 m up, 35 m back), the sight steeper than the least.
+    a=tcam::HighAim{0.0f,20.0f,0.0f};
+    tcam::HighPlace(o0,a,45.0f,35.0f,eye,look);
+    Expect(std::fabs(eye[1]-45.0f)<1e-3f && std::fabs(eye[2]+35.0f)<1e-3f,"near: the eye where HighCam puts it",eye[1],eye[2]);
 }
 
 int main() {
