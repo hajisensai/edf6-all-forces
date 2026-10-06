@@ -249,21 +249,21 @@ float PullCase(Role role,float mass,float diveDeg,float speed,bool inverted,bool
     return into ? -1.0f : lowest;
 }
 
-// The entry case: a called strike jet (loaded) 2600 m from its target and 150 m over it, the target `offDeg` off its
-// nose, the game locking its missiles. When (s since it came) its guns first fire and its first missile goes (-1:
-// never), and its height over the target at its first burst.
-void EntryCase(float offDeg,float* gunAt,float* missileAt,float* overAtFire) {
+// The entry case: a strike jet (loaded) 2600 m from its target and `over` over it, the target `offDeg` off its nose, the
+// game locking its missiles; called (`launched`: arriving, Entering) or not. When (s since it came) its guns first fire
+// and its first missile goes (-1: never), and its height over the target at its first burst.
+void EntryCase(float offDeg,float over,bool launched,float* gunAt,float* missileAt,float* overAtFire) {
     boxes.clear();
     const Role role=Role::strike;
     const Kind& k=KindOf(role);
     const float aim[3]={0.0f,0.0f,0.0f};
     const float off=offDeg*kPi/180.0f;
-    const float at[3]={0.0f,150.0f,-2600.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
+    const float at[3]={0.0f,over,-2600.0f},dir[3]={std::sin(off),0.0f,std::cos(off)};
     std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
     unsigned char* v=mem.data();
     Jet& j=jets[0];
     Place(j,v,ctrl.data(),role,at,dir,k.cruise,0.0f);
-    j.launched=true;j.burden=Burden{1.21f,0.0f};
+    j.launched=launched;j.burden=Burden{launched ? 1.21f : 1.0f,0.0f};
     static int targetDummy=0;
     j.t.target=&targetDummy;j.t.flyer=false;std::memcpy(j.t.aim,aim,12);std::memcpy(j.t.tgtPrev,aim,12);
     Arms arms{};arms.gunSpeed=960.0f;arms.gunRange=960.0f;arms.pick=-1;arms.rocket=-1;arms.guns=3600;arms.hasGun=true;
@@ -316,15 +316,20 @@ int SelfTest(const char* outDir) {
     }
     std::printf("pull: %d cases, %d failed, lowest %.1f m (margin %.0f m)\n",cases,bad,static_cast<double>(worst),
                 static_cast<double>(kPullMargin));
-    const float offs[]={0.0f,15.0f,30.0f};
-    for(float off:offs) {
+    // Called, arriving 150 m over its target (as the 2026-10-06 log's did); and runs in at its attack height (alt), not
+    // arriving: the ordinary strike run must fire as well.
+    const float alt=KindOf(Role::strike).alt;
+    const struct { float off,over; bool launched; } runs[]={{0.0f,150.0f,true},{15.0f,150.0f,true},{30.0f,150.0f,true},
+                                                            {0.0f,alt,false},{20.0f,alt,false}};
+    for(const auto& r:runs) {
         float gun=0.0f,msl=0.0f,over=0.0f;
-        EntryCase(off,&gun,&msl,&over);
+        EntryCase(r.off,r.over,r.launched,&gun,&msl,&over);
         const float entry=static_cast<float>(kEntryMs)*0.001f;
         const bool ok=gun>=0.0f && gun<entry && msl>=0.0f && msl<entry;
         if(!ok)++bad;
-        std::printf("entry target %2.0f deg off the nose: guns at %.1f s (%.0f m over it), missile at %.1f s %s\n",
-                    static_cast<double>(off),static_cast<double>(gun),static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
+        std::printf("%s %3.0f m over, target %2.0f deg off the nose: guns at %.1f s (%.0f m over it), missile at %.1f s %s\n",
+                    r.launched ? "entry" : "run  ",static_cast<double>(r.over),static_cast<double>(r.off),static_cast<double>(gun),
+                    static_cast<double>(over),static_cast<double>(msl),ok ? "ok" : "FAIL");
     }
     if(logFile)std::fclose(logFile);
     std::printf("%s\n",bad ? "SELFTEST FAILED" : "selftest passed");

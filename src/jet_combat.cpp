@@ -342,11 +342,10 @@ void PickTarget(Jet& j,unsigned char* v,const float* pos,const float* anchor,flo
 // kLockMs): the dive is what puts the nose on a ground target. Until 2026-10-06 any jet with missiles left stood off
 // with them first (Missile): at a ground target that is a climb to its kind's height over it (450 m for the strike jet)
 // and, inside missileRange, the nose pushed 34 deg and more down onto it, which it rolled inverted to do and overflew
-// before the lock came; the log of 2026-10-06 has 5 Mavericks fired in 1857 s of it (none by a strike jet, 66 "no
+// before the lock came; the user's log read 2026-10-06 has 5 Mavericks fired in 1857 s of it (none by a strike jet, 66 "no
 // missile lock" and its 15 s of guns after it). A called strike jet's arrival (Entering) is in Strike only, so it never
 // came: of 21 called strike jets 9 first fired their guns or rockets 60-91 s after they came, 12 never (bombs aside).
 // Air targets: the standoff as ever.
-
 void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,ULONGLONG ms,float* want,
             float* speed,bool* gunsOk,bool* missileOk) noexcept {
     const Kind& kind=KindOf(j);

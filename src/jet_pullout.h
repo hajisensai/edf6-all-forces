@@ -9,8 +9,8 @@
 // left of its 5; (2) gravity: lifting at n g out of a dive at angle a the path turns at (n - cos a) g / v, so the bottom
 // of the pull-out turns at (n - 1) g, a fifth less than n g for a strike jet; (3) the speed it gains meanwhile (g sin a a
 // second), and the slow start of a roll from inverted (the attitude gain acts on the sine of the error: near 180 deg
-// it hardly turns). The log of 2026-10-06 22:33: a multirole jet dived inverted at -187 m/s, Guard began its pull at
-// about 900 m and it reached the ground (held off it at y=26 at -121 m/s: "held off the ground").
+// it hardly turns). The user's log read 2026-10-06 (22:33:52-22:34:00): a multirole jet dived inverted at -187 m/s, Guard
+// began its pull at about 900 m and it reached the ground (held off it at y=26 at -121 m/s: "held off the ground").
 #pragma once
 #include <cmath>
 

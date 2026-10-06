@@ -35,6 +35,7 @@ constexpr float kBombG=1.5f,kBombTau=2.0f;
 constexpr float kLoiterTan=1.73f,kLoiterMin=1.15f;
 constexpr float kAttGain=6.0f;         // 1/s: the body closes on the attitude it should have this fast
 constexpr float kNegG=1.0f;            // g: the most it pushes (lift down the body's up)
+constexpr float kPushAngle=0.35f;      // rad: a turn down by less than this is pushed, not rolled into (JetSteer)
 constexpr float kLookAhead=2.5f;       // s: the ground and the ceiling are checked this far ahead too
 // Angle of attack (JetSteer, PitchBy): the nose rides kAoaPerG (1.5 deg) above the path per g pulled at cruise,
 // more as it slows (lift ~ aoa * speed^2), kAoaMin to kAoaMax (-3 to 10 deg), eased over kAoaTau s. Only pitch:
@@ -200,6 +201,17 @@ void JetSteer(Jet& j,const Kind& k,const float* fwd,const float* bodyUp,const fl
     for(int i=0;i<3;++i)lift[i]-=dir[i]*along;
     std::memcpy(up,lift,12);
     if(!Normalize(up)){up[0]=0;up[1]=1;up[2]=0;}
+    // A small push (the path wanted under it by less than kPushAngle: the lift asked for points down): pushed, upright,
+    // at what kNegG gives, instead of rolled inverted to pull. Rolled over for a few degrees, a strike jet rolling in
+    // on a dive from 150 or 450 m over its target spent the dive inverted, its nose off the target, and was still
+    // inverted where it had to pull out (2026-10-06 offline, tools/jet_obstacle_sim.cpp --selftest; the log's
+    // multirole that hit the ground had dived at bank 165-180).
+    float sky[3]={-dir[0]*dir[1],1.0f-dir[1]*dir[1],-dir[2]*dir[1]};   // the world's up square to the path
+    if(angle<kPushAngle && Dot(up,sky)<0.0f && Normalize(sky)) {
+        const float d=Dot(up,dir);
+        for(int i=0;i<3;++i)up[i]=-(up[i]-dir[i]*d);
+        if(!Normalize(up))std::memcpy(up,sky,12);
+    }
     // What the wing gives along the body's up now, and the path that bends.
     const float pull=Clamp(Dot(lift,bodyUp),-kNegG*kG,(bombing ? maxG+1.0f : maxG)*kG);
     float acc[3]={bodyUp[0]*pull,bodyUp[1]*pull-kG,bodyUp[2]*pull};
@@ -492,11 +504,15 @@ void Ahead(Jet& j,const float* pos,ULONGLONG ms) noexcept {
 }
 
 // What PredictPullOut needs of jet `j` now: its speed and dive, the g and thrust its stores leave it (JetSteer's
-// Burden), the roll its lift is from up (RollToLift) and the attitude's gain and rate, kReact.
+// Burden), the roll its lift is from up (RollToLift) and the attitude's gain and rate, kPullReact.
+// kPullReact: s before the pull the prediction allows. Guard and Strike's dive turn `want` up the frame they see it and
+// JetSteer lifts along the body's up as it is (the roll is in the prediction itself); this is the body's attitude
+// catching up (kAttGain) and a margin. (kReact, 1 s, stays the look-ahead's: Ahead, the walls.)
+constexpr float kPullReact=0.3f;
 PullOutIn PullOutFor(const Jet& j,const Kind& k) noexcept {
     const float s=Len(j.m.vel),mass=j.burden.mass>1.0f ? j.burden.mass : 1.0f;
     const float top=j.m.top>0.0f ? j.m.top : k.attack*1.3f;
-    return PullOutIn{s,s>1.0f ? Clamp(-j.m.vel[1]/s,0.0f,1.0f) : 0.0f,k.maxG/mass,RollToLift(j),k.roll,kAttGain,kReact,
+    return PullOutIn{s,s>1.0f ? Clamp(-j.m.vel[1]/s,0.0f,1.0f) : 0.0f,k.maxG/mass,RollToLift(j),k.roll,kAttGain,kPullReact,
                      k.thrust/mass,top<kBodyTop ? top : kBodyTop,kG};
 }
 
@@ -543,7 +559,7 @@ void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     const float lowest=there!=kNoGround ? probe[1]-there : seen;
     float floorY=here!=kNoGround && pos[1]-here>lowest ? pos[1]-here : lowest;
     if(j.m.obstUntil && j.m.obstTop>floorY)floorY=j.m.obstTop;
-    // Sinking: the lowest it gets is the bottom of a pull-out begun kReact from now (PredictPullOut: at the g its stores
+    // Sinking: the lowest it gets is the bottom of a pull-out begun kPullReact from now (PredictPullOut: at the g its stores
     // leave it, against gravity, gaining speed), over the ground where that bottom is as well (rising terrain past the
     // look-ahead's point).
     float bottom=pos[1];
