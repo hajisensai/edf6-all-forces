@@ -61,6 +61,19 @@ using SeatQueryFn=bool(__cdecl*)(const void* vehicle,unsigned seat);
 constexpr char kCameraTurret[]="EDF6VehicleCrew_CameraTurretV2";
 constexpr char kSteers[]="EDF6AutoTurret_SteersV2";
 
+// V1, where the allies look first (EDF6VehicleCrew's Proteus, its front shield up; the user, 2026-10-06: "己方 NPC 和自动炮塔
+// 会优先攻击"): an enemy within `radius` m of `centre`, or whose own target is `vehicle` (compared, never read through), weighs
+// `weight` (0..1) of its distance in a turret's choice of a new target. False: no zone this moment (or no EDF6VehicleCrew).
+struct PriorityZoneV1 { float centre[3]; float radius; float weight; const void* vehicle; };
+using PriorityZoneFn=bool(__cdecl*)(PriorityZoneV1* out);
+constexpr char kPriorityZone[]="EDF6VehicleCrew_PriorityZoneV1";
+// The weight of an enemy at `pos` whose target is `target` under zone `z` (1: none).
+inline float PriorityWeight(const PriorityZoneV1& z,const float* pos,const void* target) noexcept {
+    const float d[3]={pos[0]-z.centre[0],pos[1]-z.centre[1],pos[2]-z.centre[2]};
+    const bool in=(target && target==z.vehicle) || d[0]*d[0]+d[1]*d[1]+d[2]*d[2]<=z.radius*z.radius;
+    return in && z.weight>0.0f && z.weight<1.0f ? z.weight : 1.0f;
+}
+
 // What EDF6AutoTurret does with the player's own gun in a frame (a pure rule: tools/turret_lead_check.cpp checks it):
 // `steer` it turns the gun onto its target, `drag` a stick past DragDeadzone is the player aiming by hand (the target
 // let go). `cameraTurret` the camera turns the gun (CameraTurret above), `lead` the lead-circle mode, `locked` the
