@@ -2740,6 +2740,11 @@ def pack_install_upgrade_uninstall() -> None:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
                 enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+            # the stock vehicles' stores (on by default): a vehicle and a request, gone again with the uninstall
+            stores = {'OBJECT/EDF6VC_FAKE_STORES.SGO': b'stores', 'WEAPON/FAKE_STORES_REQUEST.SGO': b'request'}
+            enter(patched(importlib.import_module('make_stock_stores'),
+                          build=lambda game, overlay=None: (dict(stores), [], {}),
+                          store_files=lambda: []))   # the fake make_jets writes no store weapons to need
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -2753,6 +2758,8 @@ def pack_install_upgrade_uninstall() -> None:
                 assert 'Gain=7.5' in at_text and 'Gain=3.0' not in at_text, 'the player\'s AutoTurret setting lost'
                 assert 'BurstVisualScale=2.5' in at_text and at_text.count('[AutoTurret]') == 1, 'missing key not added'
                 assert installer.check(game), 'check fails right after install'
+                for rel, data in stores.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'stores file {rel} not installed'
                 modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
                 assert not installer.check(game), 'check passes an old EDF6AutoTurret.dll'
                 # The upgrade: new DLLs, a setting the new ini adds.
@@ -3164,7 +3171,9 @@ def stock_payload_and_seats_wired() -> None:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('SeatNextKey', 'SeatButton'):
         assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
-    assert re.search(r'^StockVehicleStores=0', ini, re.M) and not mss.wanted(ini), 'StockVehicleStores ships off'
+    assert re.search(r'^StockVehicleStores=1', ini, re.M) and mss.wanted(ini), 'StockVehicleStores ships on'
+    assert not mss.wanted('[VehicleCrew]\nStockVehicleStores=0\n'), 'the player can turn it off'
+    assert 'bool stockStores=true;' in src('src/crew.h'), 'the plugin defaults it on as the ini does'
     assert mss.wanted('[VehicleCrew]\nStockVehicleStores=1 ; on\n') and not mss.wanted('[Other]\nStockVehicleStores=1\n')
     # the older key (the helicopters alone) still turns it on, in the plugin and the installer alike
     assert 'L"StockHeliStores"' in plugin and mss.wanted('[VehicleCrew]\nStockVehicleStores=0\nStockHeliStores=1\n')
@@ -3207,6 +3216,40 @@ def stock_payload_and_seats_wired() -> None:
     seat = src('src/seatswitch.cpp')
     for c in ('kAnnounce=0x5763E0', 'kSetAction=0x551C30', 'kRideAction=0x56C9F0', 'kReserve=0x633FE0', 'kClear=0x634940'):
         assert c in seat, c
+
+
+@test
+def new_defaults_on_once() -> None:
+    """The settings whose default became on (the user, 2026-10-07: "还有什么默认是关的，都打开"): the shipped ini and the
+    plugin's own defaults have them on; an existing ini still holding the old default gets the new one, once (its mark
+    keeps a later install from undoing the player's own 0), a value the player set is kept; the install reads the ini as
+    it will be (player_ini_text), so the stores are built on the first install; the uninstall that keeps the call
+    weapons still takes the stores back, EDF6AutoTurret's flak requests rewritten first."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    for key, (old, new) in installer.NEW_DEFAULTS[installer.SECTION].items():
+        assert re.search(rf'^{key}={new}\b', ini, re.M), f'{key} ships {new}'
+    for field in ('DWORD heliLandMs=5000;', 'bool rescueAutoBoard=true;', 'bool stockStores=true;', 'bool seatSwitchOnline=true;'):
+        assert field in crew, field
+    user = '[VehicleCrew]\nEnabled=1\nHeliLandMs=0\nRescueAutoBoard=0 ; mine\nSeatSwitchOnline=1\nStockHeliStores=0\n'
+    text, flipped = installer.apply_new_defaults(user)
+    assert sorted(flipped) == ['HeliLandMs', 'RescueAutoBoard'], flipped
+    assert 'HeliLandMs=5000' in text and 'RescueAutoBoard=1 ; mine' in text and installer.DEFAULTS_MARK in text
+    again = text.replace('RescueAutoBoard=1', 'RescueAutoBoard=0')
+    assert installer.apply_new_defaults(again) == (again, []), 'a later install undid the player\'s own 0'
+    planned = installer.planned_ini(user, ini)
+    assert 'StockVehicleStores' in planned[1] and planned[3] and make_stock_stores_wanted(planned[0])
+    inst = src('tools/installer.py')
+    assert 'return planned_ini(' in inst.split('def player_ini_text(', 1)[1].split('\ndef ', 1)[0], 'the install reads the ini as it will be'
+    un = inst.split('def uninstall(game: str)', 1)[1].split('\ndef ', 1)[0]
+    assert "if choice == '2':" in un and 'uninstall_stock_stores(game)' in un, 'the plugin-only uninstall keeps the stores'
+    body = inst.split('def uninstall_stock_stores(', 1)[1].split('\ndef ', 1)[0]
+    assert body.index('install_autoturret(') < body.index('make_stock_stores.remove('), 'its requests rewritten before the vehicles go'
+
+
+def make_stock_stores_wanted(text: str) -> bool:
+    import make_stock_stores
+    return make_stock_stores.wanted(text)
 
 
 @test

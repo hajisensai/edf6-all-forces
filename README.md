@@ -105,7 +105,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
      - 顺带修正：自爆 / 人偶无人机没有目标时原来停在「锚点下方 30 米」（本意是母舰下方），锚点是玩家指定的地面点时会钻进地里；现在没目标时停在母舰下方，投掷来的停在落点上方；
      - **未经游戏实测**（只做了静态逆向）：Weapon_Sub 的第 17 槽 `0x6AD370` 在扔出时拿到炸弹、`BombBullet01` 第 5 槽 `0x2962A0` 的落地字节 `+0xD40`、炸弹主人 `+0xAE8`、在炸弹自己的更新里删除它是否干净、武器说明只留「设置数」「装填」两项后菜单显示是否正常，都要进游戏核对；
    - **局内切换呼叫**：任务中按 `]` / `[`（ini `CallNextKey` / `CallPrevKey`，虚拟键码，0 关闭）在「按各武器原样」和 19 种呼叫之间切换，之后本机玩家的任何一把插件呼叫武器开火都叫来选中的那种；游戏窗口上方显示当前选择（独占全屏时看不到，但照样生效，日志 `CALLS pick`）；
-   - **落水救援**（ini `SeaRescue` / `RescueBelow` / `RescueAutoBoard`，`docs/rescue-re.md`）：有潜水母舰在场时，步行玩家落海（低于 `RescueBelow` 持续 1.5 秒），从母舰甲板上空飞来一架布鲁特（410，有两个侧门座位），降到玩家身边悬停，玩家自己按上车；上车后飞回甲板上空约 8 米悬停，玩家自己跳下。插件从不移动玩家（不传送）；`RescueAutoBoard=1` 时，侧门上车点进入原版上车距离内后替玩家按一次上车键；
+   - **落水救援**（ini `SeaRescue` / `RescueBelow` / `RescueAutoBoard`，`docs/rescue-re.md`）：有潜水母舰在场时，步行玩家落海（低于 `RescueBelow` 持续 1.5 秒），从母舰甲板上空飞来一架布鲁特（410，有两个侧门座位），降到玩家身边悬停，侧门座位进入原版上车距离时插件替你按上车键（`RescueAutoBoard=1`，默认；0 = 自己按）；上车后飞回甲板上空约 8 米悬停，玩家自己跳下。插件从不移动玩家（不传送）；`RescueAutoBoard=1` 时，侧门上车点进入原版上车距离内后替玩家按一次上车键；
    - 安装：游戏关闭时运行安装器（开发者：`python tools/make_jets.py` 生成呼叫用直升机 `EDF6VC_HELI_410/506.SGO`、近炸无人机 `EDF6VC_JET_BLAST/DOLL.SGO` 和炸药 `EDF6VC_BLAST/DOLL_CHARGE.SGO`，`python tools/call_weapons.py install` 写武器行）。存档按行号记武器，所以本插件的行一旦装上就不再挪动：已有的行（按 ID 找，不要求连续）原地更新，缺的行追加在表末尾，后面有别的 MOD 的行也没关系；其它行的内容逐行核对不变。新呼叫只会追加在 `tools/calls.py` 末尾（CI 的 `tools/selftest.py` 检查历次发布的顺序）。插件在每次读档时把它们设为已拥有（不用在任务里捡箱子，第一次进本部会带 NEW 标记，出击一次后消失）；
    - **卸载不影响正常游玩**：这些武器本身就是 KM6 的复制品（投掷式无人机是巡逻炸弹的复制品），只删插件时它们照原版 KM6 轰炸机呼叫（巡逻炸弹）。安装器「卸载」→ 1 连武器一起删时，武器表里本插件的行变成「已卸载」占位行（原版 KM6 / N9 Eros / 巡逻炸弹的行，名字标明已卸载）：行号不变，存档装备着也不会崩溃，别的 MOD 的行不会前移、也不会继承这些行的「已拥有」；以后重新安装会用回这些行。真要删掉行只能用 `python tools/call_weapons.py uninstall --delete-rows --unequipped`，而且只删表末尾、后面没有别人的行（之前必须在所有存档里卸下这些武器）；
    - 插件启动时检查武器表，有呼叫武器的行缺失（例如别的 MOD 覆盖了 `WEAPONTABLE.SGO`）会在日志里写 `CALLS ... missing`，关掉游戏重新运行安装器选「安装」即可补回（插件自己不写共享的武器表）；`python tools/call_weapons.py check` 列出每一行的位置、是否被挪过；
@@ -211,9 +211,9 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
     - 刚上车（有两个以上座位的载具）、刚换完座位、按住换座键时，屏幕下方显示一行座位表：`SEATS  1 PILOT NPC  [2 GUN YOU]  3 GUN -   [F] next   [1-3] pick`（方括号是你坐的座位，`-` 是空座）；换不了时变成琥珀色并写 `SEAT n TAKEN` / `NO FREE SEAT`。
     - 离开原版直升机的驾驶座（例如 Brute 驾驶员去开舱门炮）时，NPC 飞行员接手驾驶（`SeatPilot=1`，用的是原版派 NPC 的同一个调用），飞机不会掉下来，带着你在附近找敌人打；你按 1 回驾驶座时 NPC 挪去你原来的座位。地面载具离开驾驶座后车就停着（没有 NPC 接手）。
     - 炮舰机：空中也能从驾驶座换到炮手座（NPC 飞行员接手，不会弹射）；从炮手座回驾驶座和上车一样，只在地面上或叫下来等你的时候可以。
-    - 换座走的是原版上车按钮自己的那几步（腾出原座位、给你预留新座位、开始乘坐动作、向房间广播上车消息），只是不用走到门边。联机未实测，默认只在单机（含本地分屏）可用（`SeatSwitchOnline=0`）。
-13. **原版载具的挂载切换**（`src/payload.cpp`、`src/stores.cpp`、`tools/make_stock_stores.py`，ini `StockVehicleStores`（旧的 `StockHeliStores=1` 仍算开），默认关；逆向笔记 `docs/stock-payload-re.md`；2026-10-06 用户：「原版载具也补充上可切换载荷的设定」；2026-10-07 用户：「给载具应有的多种挂载增加多种挂载。例如原版坦克、aa车、直升机等」「应该有的都得有，比如导弹车」）：
-    - 把 `StockVehicleStores=1` 后**重新运行安装器选「安装」**：原版载具的请求加上它们该有的挂载（武器都是插件战机那一套，另加一挺同轴机枪）：
+    - 换座走的是原版上车按钮自己的那几步（腾出原座位、给你预留新座位、开始乘坐动作、向房间广播上车消息），只是不用走到门边。联机未实测，默认联机时也能换（`SeatSwitchOnline=1`；0 = 只在单机和本地分屏可用）。
+13. **原版载具的挂载切换**（`src/payload.cpp`、`src/stores.cpp`、`tools/make_stock_stores.py`，ini `StockVehicleStores`（旧的 `StockHeliStores=1` 仍算开），默认开；逆向笔记 `docs/stock-payload-re.md`；2026-10-06 用户：「原版载具也补充上可切换载荷的设定」；2026-10-07 用户：「给载具应有的多种挂载增加多种挂载。例如原版坦克、aa车、直升机等」「应该有的都得有，比如导弹车」）：
+    - 安装器默认就生成（`StockVehicleStores=1`；改成 0 再运行安装器就恢复原版请求）：原版载具的请求加上它们该有的挂载（武器都是插件战机那一套，另加一挺同轴机枪）：
 
       | 载具 | 加上的挂载 | 和哪件原版武器同一个键 |
       |---|---|---|
@@ -325,7 +325,8 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    两种都会删掉两个插件的 DLL、ini 和日志（含轮换出的 `.log.1`）。
 3. 游戏运行中安装、卸载会拒绝执行（游戏占着插件 DLL），不会替你关游戏。输入 5 检查安装状态：两个插件是不是本安装包的版本、ini 缺不缺新设置、
    `EDF6AutoTurret` 数据、呼叫武器和生成的文件是否完整；它只读，游戏开着也能查。
-4. 原版载具的挂载（`StockVehicleStores`，见功能 13）是选装的：在 ini 里改成 1 后运行安装器选「安装」才生成，改回 0 再运行就删掉。
+4. 原版载具的挂载（`StockVehicleStores`，见功能 13）默认开，安装时生成；在 ini 里改成 0 再运行安装器选「安装」就删掉。卸载插件时（两种卸载方式都是）安装器自动把它们删掉，装了 EDF6AutoTurret 的，防空车请求也会改回不带挂载的版本。
+5. 2026-10-07 起 `HeliLandMs`（5000）、`RescueAutoBoard`、`SeatSwitchOnline`、`StockVehicleStores` 默认开启。以前装过的 ini 里这几项如果还是旧默认值 0，安装器会改成开启一次，并在 `[VehicleCrew]` 下留一行 `; edf6vc-defaults-2026-10-07` 标记；之后你再改回 0，安装器不会再动。
 5. 升级：退出游戏后直接运行新版安装器选「安装」即可，旧版装的武器行原位更新、新行追加在表尾；新版本新增的模型（例如炮舰机 `EDF6VC_JET_GUNSHIP.SGO` 及其炮手座、撞击装药 `EDF6VC_IMPACT_*.SGO`（2 / 4 / 12 米三个是载具撞击伤害一起加的）、炮舰机的机炮炮弹 `EDF6VC_GUNSHIP_CANNON.SGO`、EMC 蓄力光束的 `EDF6VC_EMC_*.SGO`）要这样重新安装后才有。
 
 更新会按资源组校验并复用已有模型和地图，不再每次全量生成和重写。首次使用支持增量更新的安装器仍需生成一次；
@@ -396,10 +397,10 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 | 3 | 走到 NPC 坦克边 | 出现上车提示；按键能上去，NPC 挪到副座 | `BUMP ... moved to gunner seat`（没有副座则为 `kicked`） |
 | 4 | 玩家开着车、NPC 在副座 | 副座机枪是否会自己打（403/404 由 AutoTurret 负责，其他车看原版） | — |
 | 5 | 下车走开 | 3 秒后 NPC 回到驾驶位 | `CREW` |
-| 6 | 呼叫直升机（空降兵），站在旁边不动 | NPC 上机、起飞，绕着你盘旋（默认 `HeliLandMs=0`，从不自己降落） | `HELI v=... crewed`，每秒一行 `HELI ... orbit` |
+| 6 | 呼叫直升机（空降兵），站在旁边不动 | NPC 上机、起飞，绕着你盘旋（`HeliLandMs=0` 时从不自己降落；默认 5000，见第 9 步） | `HELI v=... crewed`，每秒一行 `HELI ... orbit` |
 | 7 | 走开 30 米以上 | 起飞，飞到你头顶约 35 米处跟随 | `HELI ... follow`，`y` 接近 `goal`，`vy` 绕 0 波动 |
 | 8 | 有敌人时 | 机头转向敌人，机枪开火、导弹齐射 | `target=...`、`gun=1`、`msl=1` |
-| 9 | 把 ini 的 `HeliLandMs` 改成 6000，站着不动 6 秒、附近没有敌人 | 降落到你身边约 20 米处 | `land`，`ground=1` |
+| 9 | 站着不动 5 秒（ini `HeliLandMs`，默认 5000）、附近没有敌人 | 降落到你身边约 20 米处 | `land`，`ground=1` |
 | 10 | 走过去按上车 | 你坐上驾驶位，NPC 挪到副座（如有） | `BUMP` |
 | 11 | 坐到 NPC 直升机的副座 | 炮艇模式：不再跟随你，以直升机自己为中心打 `HeliRange` 米内的敌人，没敌人时悬停 | `HELI ...` 行为 `run` / `aim`（交战）或 `hold` |
 | 12 | 启动器勾强制装备（例如空袭兵 + 载具格选一台车），安装，进测试场那一项 | 兵种和武器是启动器选的；呼叫的载具是选的那台 | 启动时 `HOOK mission preload=2/2 online=2/2` 和 `HOOK loadout create=5/5`，进关 `MISSION start`、`LOADOUT preload ...` 和 `LOADOUT create ...` |

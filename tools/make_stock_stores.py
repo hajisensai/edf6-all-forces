@@ -1,4 +1,4 @@
-"""Stores for the stock vehicles (ini StockVehicleStores, or the older StockHeliStores; off unless the player turns it on;
+"""Stores for the stock vehicles (ini StockVehicleStores, or the older StockHeliStores; on by default since 2026-10-07;
 src/payload.cpp, src/stores.cpp, docs/stock-payload-re.md §4). The user, 2026-10-07: "给载具应有的多种挂载增加多种挂载。
 例如原版坦克、aa车、直升机等" "应该有的都得有，比如导弹车". What each stock vehicle should carry besides its own (LOADOUTS):
 
@@ -29,7 +29,7 @@ another mod already put into Mods/WEAPON is left as it is (said); this tool neve
 EDF6AutoTurret's flak and Bohr requests (autoturret/tools/build.py) are its own: the installer hands them here first
 (build's `overlay`) and writes them back through EDF6AutoTurret's manifest with the stores added, this tool writing only
 the vehicle they bring. Without the plugin the stock builds make their own holders and no more: a store's holder has no
-weapon and nothing fires it, so turn the option off (and run the installer) before removing the plugin. Everyone in an
+weapon and nothing fires it; the installer's uninstall takes them back either way (installer.uninstall_stock_stores). Everyone in an
 online room needs the same files: a machine without them has another weapon list for the same request.
 
 Built in memory first, written atomically and recorded in the ledger as this tool's (pylib/ledger.py), the store

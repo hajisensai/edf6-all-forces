@@ -46,7 +46,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址都是 RVA。全部是静态分析（
 原版的武器量表 `0x692100(weapon, out)`：弹数大于 0 → 已装好；否则 `+0x22C > 0` 时进度 = `1 - E7C / 22C`，不然进度 = `1 - E68 / ReloadTime`
 （`0x6921A1`..`0x6921EB`，H）。插件照这个公式自己读，不调用它（它还会调 `0x6911A0`）。剩余秒数 = `E68 / 60`。
 
-## 4. 给原版载具加挂载（`StockVehicleStores`，默认关；旧键 `StockHeliStores=1` 仍算开）
+## 4. 给原版载具加挂载（`StockVehicleStores`，默认开（2026-10-07 用户：「都装mod了，肯定要打开」）；旧键 `StockHeliStores=1` 仍算开）
 
 2026-10-07 用户：「给载具应有的多种挂载增加多种挂载。例如原版坦克、aa车、直升机等」「应该有的都得有，比如导弹车」。
 挂载表见 `tools/make_stock_stores.py` 的 `LOADOUTS`（README 功能 13 有中文表）。
@@ -94,6 +94,7 @@ EDF6AutoTurret（`gunner.cpp`）和 `proteus.cpp` 只**调用**它。
 - 自检：每个载具的挂点数 = 原版 + 挂载数，挂载行是被复制的原版行；每个请求的武器表项数 = 挂点数，挂载在最后且都在预载列表里；所有挂载都是 `EDF6VC_` 文件；每种载具的类都在插件会补造的类里。
 - 别的 mod 已放的同名请求跳过。EDF6AutoTurret 的防空车 / 玻尔斯请求：安装器把它要写的字节交给 `build(overlay=...)`，加上挂载后还给它写（记在它自己的清单里）；`--remove` 时还被别的工具的请求引用的派生载具保留。
 - 挂载武器文件登记为「需要」（由 make_jets 写），同轴机枪由本工具写。
+- 卸载：两种卸载方式都删它们（没有插件就没人造额外挂点、也没人开火）；只删插件（选项 2）时，AutoTurret 的数据留着，安装器先让它把防空车请求按不带挂载的版本重写（`installer.uninstall_stock_stores`），再删派生载具。
 
 ## 5. 载具内换座位（`src/seatswitch.cpp`）
 
@@ -127,7 +128,7 @@ RideVehicle `0x5765E0` 对已经在同一辆车里的人（别的座位）：先
   地面载具不派司机。RideAi 会把每个持有者的 `weapon+0x8B6` 清 0（`docs/heli-input-re.md` §4，作用不明，L），炮舰机的 `EnsurePilot` 也一样。
 - 插件的飞机：只有炮舰机的两个座位。`playerjet.cpp` 分辨「换座」和「下车」（`AboardElsewhere`）：驾驶员换到炮手座不弹射、不叫接机，交给 NPC 飞行员（`HandBack`）；
   炮手换到驾驶座不跳伞（`GunnerFrame`）。去驾驶座只在可以上车的时候（`PlayerJetBoardable`：地面上或被叫下来等你），因为接手驾驶走的是上车的同一条路径（`Board`）。
-- 联机：`0x7748F0(nullptr)` 为真时默认不换（`SeatSwitchOnline=0`）。
+- 联机：`0x7748F0(nullptr)` 为真时看 `SeatSwitchOnline`（默认 1，可换；0 不换）。
 
 ## 6. 待游戏内确认
 
