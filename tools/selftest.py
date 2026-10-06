@@ -1876,7 +1876,7 @@ def vehicle_ram_wired() -> None:
     assert re.search(r'add_executable\(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check\.cpp\)', cm)
     assert '#include "../src/vehicleram.h"' in src('tools/vehicle_ram_check.cpp')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    for key, default in (('VehicleRam', '1'), ('VehicleRamDamage', '1.0')):
+    for key, default in (('VehicleRam', '1'), ('VehicleRamDamage', '20')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
     assert 'Fix("VehicleRamDamage"' in plugin, 'VehicleRamDamage is range-checked'
 

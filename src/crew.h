@@ -104,7 +104,7 @@ struct Config {
     bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
     bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
-    float vehicleRamDamage=1.0f;    // ...their kinetic energy's damage (the jets' formula) times this (0: none)
+    float vehicleRamDamage=20.0f;   // ...their kinetic energy's damage (the jets' formula) times this (0: none; 20: a ground vehicle is 5-10x slower than a jet, so 1 would leave the ram unnoticeable)
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
     float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
