@@ -38,6 +38,7 @@ void HingePose(const float* bind,float angle,float* out) noexcept;
 struct MessageRestore { float* at; float was; };
 bool SubMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept;        // subcarrier.cpp
 bool PlayerJetMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept;  // playerjet.cpp
+bool PrimerMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept;     // primer.cpp
 constexpr std::uint32_t kMsgDamage=0x10000000,kMsgWater=0x10000025,kMsgDie=0x1000000F;
 bool Body506MessageOk() noexcept;   // the slot 9 hook is in
 // The vehicle's death as the game delivers it: message 0x1000000F through its own message slot, which the 506

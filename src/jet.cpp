@@ -64,23 +64,19 @@ constexpr ULONGLONG kFullLogMs=5000;   // wall ms between "the table is full" li
 using KickFn=void(*)(void*,void*);
 using CtrlFn=void(*)(void*);
 
-// The weak reference an entry holds on its object's control block (MSVC _Ref_count_base: uses +8, weaks +0xC,
-// vtable slot 1 deletes the block; booster.cpp holds its boosters' the same way).
-void HoldRef(const ObjRef& r) noexcept {
-    _InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(const_cast<void*>(r.ctrl))+0xC));
-}
-void DropRef(const ObjRef& r) noexcept {
-    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(r.ctrl));
-    if(!ctrl)return;
-    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(ctrl+0xC),-1)==1)(*reinterpret_cast<CtrlFn* const*>(ctrl))[1](ctrl);
-}
-
 // An entry of this mission let go of: its bay and doll torn down, its drones told their carrier is gone, the
 // reference dropped.
 void Release(Jet& j) noexcept {
     BayFree(j.bay.ifc);
     DollFree(IndexOf(j));
-    for(auto& d:jets)if(d.ref && d.drone.mother==j.ref.ctrl)d.drone.mother=nullptr;
+    for(auto& d:jets) {
+        if(d.ref && d.drone.mother==j.ref.ctrl)d.drone.mother=nullptr;
+        // A centipede linked to it: the link goes (the part behind gets a front of its own).
+        if(d.ref && d.primer.ahead==j.ref.ctrl)PrimerUnlinked(d,true,GameMs());
+        if(d.ref && d.primer.behind==j.ref.ctrl)PrimerUnlinked(d,false,GameMs());
+        if(d.ref && d.primer.joining==j.ref.ctrl)d.primer.joining=nullptr;
+    }
+    if(IsPrimer(j))PrimerDied(j);   // a shot-down centipede's body is posed on as it falls (its own reference)
     DropRef(j.ref);
     j=Jet{};
 }
@@ -211,6 +207,8 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     case Weapon::drones:
         Circle(j,pos,anchor,height,ms,want,speed);
         return;
+    case Weapon::primer:   // flown by PrimerFrame, never here (its kind has no patrol circle)
+        return;
     }
 }
 
@@ -278,6 +276,18 @@ void Sweep(ULONGLONG ms) noexcept {
     BoosterSweep(ms);
 }
 }  // namespace
+
+// The weak reference an entry holds on its object's control block (MSVC _Ref_count_base: uses +8, weaks +0xC,
+// vtable slot 1 deletes the block; booster.cpp holds its boosters' the same way).
+void HoldRef(const ObjRef& r) noexcept {
+    _InterlockedIncrement(reinterpret_cast<volatile long*>(static_cast<unsigned char*>(const_cast<void*>(r.ctrl))+0xC));
+}
+void DropRef(const ObjRef& r) noexcept {
+    using CtrlDelete=void(*)(void*);
+    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(r.ctrl));
+    if(!ctrl)return;
+    if(_InterlockedExchangeAdd(reinterpret_cast<volatile long*>(ctrl+0xC),-1)==1)(*reinterpret_cast<CtrlDelete* const*>(ctrl))[1](ctrl);
+}
 
 bool Alive(const ObjRef& r) noexcept {
     if(!r.obj || !r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return false;
@@ -438,6 +448,7 @@ void JetFrame(unsigned char* v) noexcept {
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,1.0f);Put<float>(v,kInW,1.0f);
     if(j->drone.blastAt){Blast(*j,v,ms);return;}
+    if(IsPrimer(*j)){PrimerFrame(*j,v,pos,dt,ms);return;}   // the Primer creatures: enemies, flown by primer.cpp
 
     const Kind& kind=KindOf(*j);
     Arms arms=ReadArms(v);
@@ -588,6 +599,7 @@ jet::Jet* jet::Adopt(unsigned char* v) noexcept {
 // still there to drop it from, and keeping it would leak the block every mission.
 void ResetJets() noexcept {
     for(auto& j:jets){DropRef(j.ref);j=Jet{};}
+    ResetCorpses();
     ResetDolls();
     ResetWalls();
     ResetTargets();
@@ -625,6 +637,11 @@ int jet::BreakLocks(const void* target,float chance) noexcept {
 
 bool IsJet(const void* vehicle) noexcept {
     return IsJetVehicle(static_cast<const unsigned char*>(vehicle),nullptr,nullptr);
+}
+
+bool IsPrimerVehicle(const void* vehicle) noexcept {
+    Role role=Role::fighter;
+    return IsJetVehicle(static_cast<const unsigned char*>(vehicle),&role,nullptr) && (role==Role::centipede || role==Role::dragonfly);
 }
 
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept {

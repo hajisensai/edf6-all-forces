@@ -161,6 +161,9 @@ DERIVED: dict[str, str] = {
 BIG = frozenset({'edf6tr_sub_carrier_mission'})
 
 
+# The Primer creatures (see PRIMER_FILES): what the range places, at most how many a wave, in all, and how far
+# over the ground spot it comes out (the centipede crawls: just over it; the dragonfly flies).
+PRIMER_KINDS: dict[str, tuple[int, int, float]] = {'edf6vc_centipede': (16, 64, 4.0), 'edf6vc_dragonfly': (4, 16, 40.0)}
 # (sgo, label, flying)
 ENEMIES: list[tuple[str, str, bool]] = [
     ('giantant01', '巨蚁', False),
@@ -176,7 +179,16 @@ ENEMIES: list[tuple[str, str, bool]] = [
     ('e515_imperialufo', '帝国 UFO（飞）', True),
     ('dragonsmall401', '小龙（飞）', True),
     ('shootingtarget', '训练靶子（地面 + 空中，不动）', False),
+    ('edf6vc_centipede', '星导者·百足龙虫（插件；会合体成长龙）', False),
+    ('edf6vc_dragonfly', '星导者·蜻蜓空优机（插件，飞）', True),
 ]
+# The Primer creatures (src/primer.cpp, docs/primer-plan.md) are placed like a jet (CreateFriend; the plugin turns
+# them to the enemy's side). Their SGOs are the installer's (tools/make_jets.py), which the range only uses
+# (PRIMER_FILES). per_wave of them (at most PRIMER_KINDS' first) come once no enemy is left, at most its second
+# in all: without the plugin they stay friends and would pile up.
+PRIMER_FILES = ('OBJECT/EDF6VC_CENTIPEDE.SGO', 'OBJECT/EDF6VC_DRAGONFLY.SGO', 'OBJECT/EDF6VC_CENTIPEDE.MRAB',
+                'OBJECT/EDF6VC_DRAGONFLY.MRAB', 'WEAPON/EDF6VC_PRIMER_SPIT.SGO', 'WEAPON/EDF6VC_PRIMER_NEEDLE.SGO',
+                'WEAPON/EDF6VC_PRIMER_BARB.SGO', 'WEAPON/EDF6VC_PRIMER_STING.SGO')
 # The targets (enemy TARGET): groups of per_wave on the target spots (target_spots), every other spot raised
 # TARGET_AIR m (the written MISSION.RMPA, rmpa.raised) for targets in the air, the jets' fighters' prey. One
 # target a raised spot stayed up there on 2026-10-03 (EDF6VehicleCrew.log: its jets' targets marked (air)).
@@ -594,6 +606,30 @@ def script(plan: Plan, lay: Layout) -> str:
             '\t\tWait(1.0);',
             '\t}',
         ]
+    elif w.enabled and lay.enemy_points and w.enemy in PRIMER_KINDS:
+        most, total, _ = PRIMER_KINDS[w.enemy]
+        per = max(1, min(int(w.per_wave), most))
+        pts = ', '.join(_q(p.name) for p in lay.enemy_points)
+        lines += [
+            '',
+            '\t// The Primer creatures (EDF6VehicleCrew turns each to the enemy): the next',
+            f'\t// {per} once no enemy is left, at most {total} in all.',
+            f'\tarray<string> spots = {{ {pts} }};',
+            '\tuint next = 0;',
+            '\tuint made = 0;',
+            f'\tWait({w.first_delay:.1f});',
+            '\twhile( true ) {',
+            f'\t\tif( GetTeamObjectCount(TEAM_ID_ENEMY) == 0 && made < {total} ) {{',
+            f'\t\t\tfor( uint i = 0; i < {per}; i++ ) {{',
+            f'\t\t\t\tCreateFriend(spots[next % spots.length()], {_q("app:/object/" + w.enemy + ".sgo")}, {w.level:.2f}, false);',
+            '\t\t\t\tnext++;',
+            '\t\t\t\tmade++;',
+            '\t\t\t}',
+            f'\t\t\tWait({max(w.interval, 10.0):.1f});',
+            '\t\t}',
+            '\t\tWait(1.0);',
+            '\t}',
+        ]
     elif w.enabled and lay.enemy_points:
         spawn = 'CreateEnemyGroup'
         pts = ', '.join(_q(p.name) for p in lay.enemy_points)
@@ -745,15 +781,18 @@ def has_mission_setup(game: Game, sgo_name: str) -> bool:
     return isinstance(values, dict) and 'mission_setup' in values
 
 
-def _write_derived(game_root: str, game: Game, wanted: set[str]) -> None:
+def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str, ...] = ()) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only), with the
     models and guns they use, and records in the ledger (pylib/ledger.py) every file the range now needs:
-    what it wrote and what it uses from tools/make_jets.py (the elevon bomber). What it needed before and does
-    not now is released, so a model or gun nobody else needs goes with it."""
+    what it wrote and what it uses from tools/make_jets.py (the elevon bomber, `uses`: the Primer creatures'). What it
+    needed before and does not now is released, so a model or gun nobody else needs goes with it."""
     led = ledger.Ledger(game_root)
     before = set(led.owned_by(OWNER))
     jets = wanted & JETS.keys()
     held = {ledger.key(f'OBJECT/{name.upper()}.SGO') for name in wanted}
+    for rel in uses:
+        led.need(OWNER, rel)
+        held.add(ledger.key(rel))
     for f in sorted({JETS[n].file for n in jets if JETS[n].file}):
         held.add(_need_model(led, game, f))
     if jets:
@@ -777,6 +816,8 @@ def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
     rel = f'OBJECT/{file}'
     if os.path.isfile(led.disk(rel)):
         led.need(OWNER, rel)
+    elif file in jet_models.GENERATED_FILES:
+        led.put(OWNER, rel, jet_models.generated(game, file))
     else:
         recipe = {**jet_models.MODELS, **jet_models.SUB_MODELS}[file]
         led.put(OWNER, rel, jet_models.build(game, {file: recipe})[file])
@@ -844,8 +885,14 @@ def install(game_root: str, plan: Plan) -> list[str]:
             points_file = rmpa.raised(points_file, {p.name}, dy)
     if plan.waves.enabled and plan.waves.enemy == TARGET and not plan.air.enabled:
         points_file = rmpa.raised(points_file, {p.name for p in air_targets(lay)}, TARGET_AIR)
+    if plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS:
+        points_file = rmpa.raised(points_file, {p.name for p in lay.enemy_points}, PRIMER_KINDS[plan.waves.enemy][2])
+    primer = plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS
+    if primer and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in PRIMER_FILES):
+        raise RuntimeError('没有星导者生物的机体（Mods/OBJECT/EDF6VC_CENTIPEDE / _DRAGONFLY.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
     os.makedirs(out, exist_ok=True)
-    _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED})
+    _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED},
+                   PRIMER_FILES if primer else ())
     with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
         f.write(b'\xef\xbb\xbf' + text.encode('utf-8'))
     with open(os.path.join(out, 'MISSION.RMPA'), 'wb') as f:

@@ -384,9 +384,25 @@ def replace_member(raw: bytes, model: str, data: bytes, donor=None, textures: li
     return rab_write(rab)
 
 
+# Models made from primitives rather than scaled (file -> builder module): the Primer creatures (src/primer.cpp),
+# written into stock archives so they use those models' materials and textures.
+GENERATED: dict[str, str] = {'EDF6VC_DRAGONFLY.MRAB': 'dragonfly_model', 'EDF6VC_CENTIPEDE.MRAB': 'centipede_model'}
+GENERATED_FILES = tuple(GENERATED)
+
+
+def generated(game, name: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
+    """The archive of GENERATED entry `name`."""
+    import importlib
+    return importlib.import_module(GENERATED[name]).build(game)
+
+
 def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  # noqa: ANN001 - rootcpk.Game
-    """Output file name -> archive bytes, every one checked (`check`); `models` default MODELS."""
+    """Output file name -> archive bytes, every one checked (`check`); `models` default MODELS, and then the
+    GENERATED_FILES too."""
     out: dict[str, bytes] = {}
+    if models is None:
+        for name in GENERATED_FILES:
+            out[name] = generated(game, name)
     for name, r in (MODELS if models is None else models).items():
         raw = game.read('OBJECT', r.archive)
         src = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data)

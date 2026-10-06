@@ -53,8 +53,9 @@ constexpr unsigned kPlacedFlight=1;    // the jets a mission places (see jet_hoo
 // Flight, per role (Kind). Speeds m/s, heights m above the target (or the anchor: the player, or where
 // it first flew). The stock bombers fly 3 m a frame (180 m/s): the strike jet attacks at that, the fighter
 // is faster and pulls harder. Every distance of an attack scales with the turn radius v^2/(n g).
-enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship, primer };
-constexpr int kRoleCount=10;
+enum class Role { strike, fighter, interceptor, multirole, carrier, drone, blast, doll, gunship, primer, centipede,
+                  dragonfly };
+constexpr int kRoleCount=12;
 // What a role goes for first: ground or flying targets (the other only with none of its own), or either.
 enum class Prefer { ground, air, any };
 // How it flies: a wing (JetSteer: lift along its up, it banks to turn) or a rotor craft (Hover: it goes
@@ -62,8 +63,8 @@ enum class Prefer { ground, air, any };
 enum class FlightModel { wing, rotor };
 // What it fights with: guns and missiles (it flies at its targets: Strike, Chase, Missile), shells from where
 // it flies (the gunship: GunshipFire), drones it launches (the carrier: LaunchDrones), or a charge it carries
-// into the enemy (the blast and doll drones: Detonate).
-enum class Weapon { guns, shells, drones, charge };
+// into the enemy (the blast and doll drones: Detonate), or the Primer creatures' own (primer.cpp: enemies).
+enum class Weapon { guns, shells, drones, charge, primer };
 // The bones it moves: elevons (Elevons), the carrier's nacelles (Thrusters), the Primer fighter's wings (Flap), or none.
 enum class Pose { none, elevons, thrusters, flap };
 // How a rotor craft shows its thrust: `pitchShare` of the fore-and-aft part leans its body (1: all, as a
@@ -89,8 +90,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter };
-constexpr int kBodyCount=17;
+                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly };
+constexpr int kBodyCount=19;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -130,6 +131,9 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     // the enemy's, flapping (Role::primer, Pose::flap).
     {Body::primerFighter,L"app:/object/edf6vc_jet_primer_fighter.sgo",L"EDF6VC_JET_PRIMER_FIGHTER.SGO",7030.0f,Role::primer,
      Role::drone,"primerFighter",true},
+    // The Primer creatures (primer.cpp, docs/primer-plan.md), enemies a mission places.
+    {Body::centipede,L"app:/object/edf6vc_centipede.sgo",L"EDF6VC_CENTIPEDE.SGO",7012.0f,Role::centipede,Role::drone,"centipede"},
+    {Body::dragonfly,L"app:/object/edf6vc_dragonfly.sgo",L"EDF6VC_DRAGONFLY.SGO",7013.0f,Role::dragonfly,Role::drone,"dragonfly"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -214,6 +218,12 @@ inline constexpr Kind kKinds[kRoleCount]={
     {Role::primer,"primer",Prefer::air,FlightModel::wing,Weapon::guns,Pose::flap,nullptr, 170.0f,195.0f,80.0f, 18.0f,22.0f, 7.0f,3.0f,
      450.0f, 1400.0f,90.0f,2000.0f, 900.0f,100.0f, 1200.0f,120.0f, 120.0f,35.0f, 1800.0f, 0.0f,1.0f, 0.0f,false,
      Body::primerFighter},
+    // The Primer creatures (primer.cpp flies them; only cruise, thrust, brake, roll and the lean are read): rotor
+    // craft, the centipede steady, the dragonfly quick to dart.
+    {Role::centipede,"centipede",Prefer::any,FlightModel::rotor,Weapon::primer,Pose::none,&kRotorLean, 35.0f,35.0f,0.0f, 18.0f,18.0f,
+     2.0f,1.6f, 45.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1500.0f, 0.0f,1.0f, 0.0f,false,Body::centipede},
+    {Role::dragonfly,"dragonfly",Prefer::air,FlightModel::rotor,Weapon::primer,Pose::none,&kRotorLean, 85.0f,95.0f,0.0f, 45.0f,45.0f,
+     6.0f,4.0f, 60.0f, 0.0f,0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 0.0f,0.0f, 1500.0f, 0.0f,1.0f, 0.0f,false,Body::dragonfly},
 };
 constexpr bool KindsInOrder() noexcept {
     for(int i=0;i<kRoleCount;++i) {
@@ -323,6 +333,43 @@ struct DroneState {
     int slot;
     ULONGLONG blastAt;       // a charge: game ms it went (0: not yet)
 };
+// The Primer creatures' (primer.cpp). A centipede: the ones ahead of it and behind it in a long one (their
+// entries' control blocks, nullptr: none), the tail it makes for to join, the trail it leaves (kPrimerTrail samples
+// kTrailStep apart, newest at trailHead-1), its orbit and dives. A dragonfly: its hunt (0 hunting, 1 striking,
+// 2 darting off) and where it darts to. Both: their moving parts' bone records and bind locals (Pose), the
+// legs' phase, the abdomen's curl.
+constexpr int kPrimerTrail=24,kPrimerParts=16;
+struct PrimerState {
+    bool init;
+    const void* ahead;
+    const void* behind;
+    const void* joining;
+    ULONGLONG lookAt;        // its last look for a tail to join
+    float trail[kPrimerTrail][3],last[3];
+    int trailCount,trailHead;
+    bool flying;
+    float orbit,seed;
+    bool dive;
+    float diveTo[3];
+    ULONGLONG diveAt;
+    int hunt;
+    ULONGLONG huntAt;
+    float dartTo[3];
+    const unsigned char* poseModel;
+    unsigned char* poseRec[kPrimerParts];
+    float poseBind[kPrimerParts][16];
+    bool posed;              // every part found (its moving parts, then its aimed mounts: Pose)
+    float phase,curl;
+    ULONGLONG logAt;
+    ULONGLONG regrowAt;      // a split's new front: game ms its head began to grow back (0: not growing)
+    ULONGLONG tailAt;        // ...a split's new end: game ms its tail began to grow back (0: not growing)
+    float writheFace[3];     // writhing: the way it pointed when it began (Writhe swings it about that)
+    float bloodAt[3],bloodDamage;   // hits since its last frame (PrimerMessage): the last one's point, their damage
+    float headShown,tailShown;   // how much of its head / tail showed last frame (a corpse keeps them)
+    const char* what;        // what it did this frame, and what it fired (Debug, Trace: 1 spit, 2 stinger, 4 barbs)
+    int fired;
+    ULONGLONG traceAt;
+};
 // The bomb bay of a jet that takes over a bomber (jet_bay.cpp).
 struct BayState {
     unsigned char* ifc;      // the bomb bay (see kIfcCtor), or nullptr
@@ -379,6 +426,7 @@ struct Jet {
     float reach=0.0f;
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
+    PrimerState primer;
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -552,7 +600,9 @@ float TargetRange(const Kind& k) noexcept;
 void Facing(const float* heading,const float* at,float* m) noexcept;
 // Whether body `b`'s SGO was preloaded this mission (PreloadJets): only those are spawned.
 bool Preloaded(Body b) noexcept;
-unsigned char* SpawnJet(Body b,const float* m) noexcept;
+// CreateFriend's steps (CreateObject, SetTeam(team), RideAi(true)): the vehicle, or nullptr.
+unsigned char* SpawnJet(Body b,const float* m,std::int32_t team=kTeamFriend) noexcept;
+unsigned NewFlight() noexcept;   // a flight number no jet has (the Primer creatures')
 bool ModFileThere(const wchar_t* file) noexcept;   // Mods/OBJECT (next to the game's exe) holds `file`
 // A jet launched now from `source`, flying `b` along `heading` at `speed` to work round `target`: its entry
 // (role from its mark), or nullptr (not preloaded, JetPilot off, the game failed to build it, kMaxJets). It starts
@@ -569,6 +619,24 @@ bool SpawnReady() noexcept;
 bool InstallSpawn() noexcept;
 bool InstallFarRender() noexcept;
 void ResetFlights() noexcept;
+
+// --- primer.cpp ---
+inline bool IsPrimer(const Jet& j) noexcept { return j.role==Role::centipede || j.role==Role::dragonfly; }
+// Its dummy pilot and then itself on the enemy's team (a vehicle's team is its riders': primer.cpp's head).
+void PrimerTeam(unsigned char* v) noexcept;
+// A centipede lost the one ahead of it (`front`: it is a front again) or the one behind it, shot down: its head (or
+// tail) grows back from now on (primer.cpp). From its own frame, or from Release when the other's entry goes first.
+void PrimerUnlinked(Jet& j,bool front,ULONGLONG ms) noexcept;
+// A centipede's entry let go of because it was shot down: its body is posed on as it falls (true: the corpse
+// took a reference on its control block); each physics step of a dead jet poses its corpse; a new mission
+// forgets them.
+bool PrimerDied(const Jet& j) noexcept;
+void PrimerCorpseStep(unsigned char* v) noexcept;
+void ResetCorpses() noexcept;
+void HoldRef(const ObjRef& r) noexcept;   // jet.cpp: a weak reference on an object's control block
+void DropRef(const ObjRef& r) noexcept;
+// A Primer creature's frame (from JetFrame, which has set the stock input aside and the clock).
+void PrimerFrame(Jet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept;
 
 // --- jet_hooks.cpp ---
 // The read-only copy of who is in which flight the bullets' pass-through reads (any thread): published by

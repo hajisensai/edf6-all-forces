@@ -76,12 +76,16 @@ StepFn StepOf(PluginBody body) noexcept {
         default: return nullptr;
     }
 }
+// Enemy creature damage and a player-flown jet's water handling share the 506 body.
+bool JetOrPlayerMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept {
+    return PrimerMessage(v,msg,data,restore) || PlayerJetMessage(v,msg,data,restore);
+}
+
 OwnerMessageFn MessageOwner(PluginBody body) noexcept {
     switch(body) {
         case PluginBody::sub: return &SubMessage;
         case PluginBody::playerJet: return &PlayerJetMessage;
-        // The jets take their messages as the stock 506 does, but for one the player flies (its water: the plugin's crash).
-        case PluginBody::jet: return &PlayerJetMessage;
+        case PluginBody::jet: return &JetOrPlayerMessage;
         default: return nullptr;
     }
 }

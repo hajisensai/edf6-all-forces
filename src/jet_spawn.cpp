@@ -122,6 +122,7 @@ bool ModFileThere(const wchar_t* file) noexcept {
 }
 
 bool Preloaded(Body b) noexcept { return preloaded[static_cast<int>(b)]; }
+unsigned NewFlight() noexcept { return nextFlight++; }
 bool SpawnReady() noexcept { return spawnOk; }
 
 void Facing(const float* heading,const float* at,float* m) noexcept {
@@ -136,13 +137,15 @@ void SetJetTeam(unsigned char* v,std::int32_t team) noexcept {
 }
 
 // CreateFriend's steps (CreateObject, SetTeam, RideAi(true)); the object, deleted again when it is not what
-// its body is (a jet SGO without its mark, a heli SGO that is a jet), or nullptr.
-unsigned char* SpawnJet(Body b,const float* m) noexcept {
+// its body is (a jet SGO without its mark, a heli SGO that is a jet), or nullptr. `team`: friend, or the enemy
+// for an enemy, set before RideAi seats the pilot as for CreateFriend (whose pilot is a friend all the same:
+// primer.cpp PrimerTeam).
+unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     InitParam param{image+kInitParamVtable,{}};
     unsigned char* v=CreateJet(b,m,&param);
     if(!v)return nullptr;
     if(bodyPartOk)FixBodyPart506(v,"JET");
-    reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
+    reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
     LevelVehicle(v);
     reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
     const BodyRow& row=Row(b);
@@ -238,7 +241,9 @@ void PreloadJets() noexcept {
         char line[512];
         int at=0;
         for(int k=0;k<kBodyCount;++k) {
-            preloaded[k]=!broken[k] && ModFileThere(kBodies[k].file);
+            // The Primer creatures only come from a mission, which preloads them itself (docs/primer-plan.md).
+            const bool missionOnly=kBodies[k].body==Body::centipede || kBodies[k].body==Body::dragonfly;
+            preloaded[k]=!broken[k] && !missionOnly && ModFileThere(kBodies[k].file);
             if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kBodies[k].sgo,2,-1);
             const int n=sprintf_s(line+at,sizeof(line)-at,"%s%s=%d",k ? " " : "",kBodies[k].name,preloaded[k]);
             if(n>0)at+=n;

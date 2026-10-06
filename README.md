@@ -262,6 +262,16 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 
 19. **普罗透斯重构**（`src/proteus.cpp`，ini `ProteusRework` 和其它 `Proteus*`，逆向笔记 `docs/proteus-re.md`；2026-10-06 用户需求）：你坐进普罗透斯时，它变成两个座位（驾驶员 + 炮手）、两种姿态的机甲：行走模式移速和步高提高、有手动开关的正面护盾（打开时减速，友军优先攻击它附近的敌人），炮偏散偏慢、不能用导弹；架设模式有硬直、架好后镜头升高，展开减伤 / 增伤 / 射速 / 回能的力场，有自身恢复护盾和带热量的单向盾，炮又准又快，驾驶员有机炮和标记后呼叫的导弹齐射。详见下文「普罗透斯」。
 
+9. **星导者生物（敌人）**（`src/primer.cpp`，设计与依据见 `docs/primer-plan.md`，ini `Primer` / `PrimerHpScale` / `PrimerFire` / `CentipedeLinkMax` / `CentipedeLinkRange`）：两种新的**敌方**生物，都是插件驾驶的 506 机体（同战斗机），只是队伍设为敌方、外形是插件自己生成的模型（安装器生成，用原版星导者模型的材质与贴图）：
+   - **百足龙虫**（`edf6vc_centipede.sgo`）：**一节就是一只**（3 米长的甲壳节、一对长腿，用原版球潮虫的甲壳贴图，受伤不冒烟，受击和死亡用巨蚁的音效：甲壳受击、喷血、惨叫；中弹在命中点溅出黄褐色酸液、死时爆开一大团再留一摊，用原版虫子的喷溅特效，ini `PrimerBlood` 调大小，0 关掉）。单只贴地爬行，S 形逼近玩家、到近处绕着转。附近的龙虫会首尾相接合成**一条长龙**（短的接到长的尾巴后面，最多 `CentipedeLinkMax` 节，默认 24）：接上的沿前一节走过的轨迹跟进，腿的摆动一节接一节往后传，中间各节的头尾隐藏，整条只有一个头一个尾；两节以上就**起飞**，在玩家周围蛇行盘旋、不时俯冲穿过。**每一节都会攻击**，按它在链里的位置：头（单只或龙头）对准玩家时向前喷绿色酸弹；中段各节把背上的棘刺转向玩家连射琥珀色棘针；尾节把尾刺沿高抛弧线打到玩家头上（越过掩体，落地爆炸）。中间被打掉一节就从那里断开：后半段的第一节先失控挣扎（减速下沉、左右甩、头尾抽搐、不开火、不接龙）约 2.5 秒，头从断口慢慢长出来（带一点弹出感）之后才重新当龙头；这段时间断口那一节受到 `CentipedeWoundDamage`（默认 3）倍伤害；前半段的尾巴也会慢慢长回；只剩一节就落地爬行。被打死的那节坠落时腿往里收、一抽一抽地蹬，头垂下、尾巴卷起；
+   - **蜻蜓空优机**（`edf6vc_dragonfly.sgo`，长 14 米、翼展 13.5 米，金色胸部、蓝色发光翅膀）：优先追打空中目标（友军战机、离地的玩家），没有才打地面上的玩家。像真蜻蜓那样按拦截航线从目标下后方突进，在 140 米外悬停跟随，腹部卷起对准——**卷到位才开火**（攻击前的提示），连射紫色针弹后向侧上方急转脱离，再绕回来；
+   - **出场**：任务脚本像放置战斗机一样放——`Preload("app:/object/edf6vc_centipede.sgo", -1);` 和 `CreateFriend("点名", "app:/object/edf6vc_centipede.sgo", 1.0, false);`（蜻蜓换成 `edf6vc_dragonfly.sgo`；放置点离地：龙虫 2–4 米、蜻蜓 15 米以上）。插件第一次看到就把它改到敌方队伍，按 `PrimerHpScale` 放大耐久（龙虫 400、蜻蜓 600）。测试场的敌人波次里选「星导者·百足龙虫」或「星导者·蜻蜓空优机」即可；
+   - 队伍（`docs/swarm-team-re.md`，静态逆向）：载具的队伍每帧按乘员重算，RideAi 的假驾驶员写死是友军，所以插件每帧把驾驶员也改到敌方；子弹的队伍取载具的。它们算任务里的敌人（全灭任务会等它们），玩家的锁定武器应能锁定（推断，待实机）。死亡是原版坠毁；
+   - 不进游戏也能看效果：`build.cmd` 后运行 `python tools/primer_pose_view.py centipede`（或 `dragonfly`）看单只的动作，`python tools/primer_chain_view.py --flying` 看一条长龙（都用插件同一份姿态代码离线跑），图在 `build/`；
+   - 不进游戏跑飞行和战斗：`build\primer_flight_sim.exe --centipedes 6 --dragonflies 2 --seconds 90 --player stand --kill 45:1`（在 `build` 目录里运行）把插件自己的 `primer.cpp` 和飞控代码放进一个替身世界（平地、按脚本走的玩家、按插件给的速度移动的机体；`--player stand|walk|fly|land`，`--jets N` 加友军战机，`--kill 秒:编号` 在那一刻打掉一只），插件的轨迹记录照常写出；再 `python tools/primer_trace_view.py build/Mods/Plugins/EDF6VehicleCrew.primer.csv` 画俯视轨迹（开火点、合体时刻）、高度曲线、最长龙的长度曲线。游戏里打开 ini 的 `PrimerTrace=1` 也会记录同一种轨迹，用同一个脚本画；`python tools/primer_sim_video.py --camera follow -- --centipedes 6 --seconds 45 --kill-middle 30 --shoot 50 --shoot-from 31` 把这场模拟按画面渲染成 MP4（模型贴图、插件写出的骨骼姿态、模拟出的位置朝向，透视相机：`chase` 玩家身后 / `overview` 高处全景 / `follow` 跟着龙虫；需要 ffmpeg）。这是替身渲染，不是游戏引擎的画面：没有光影特效、建筑和子弹；
+   - 只瞄准本机玩家；联机未验证；两种生物只由放置它们的任务加载，不增加其它关卡的加载量；`Primer=0` 时场上的星导者生物被删除；
+   - **升级时必须重新运行安装器**：标记 7012 / 7013 以前（未发布的开发版）属于群体合体机，只换 DLL 不重新生成机体，旧机体会被当成龙虫 / 蜻蜓来飞。
+
 所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。
 
 ## 安装 / 卸载
@@ -322,6 +332,9 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 | 12 | 启动器勾强制装备（例如空袭兵 + 载具格选一台车），安装，进测试场那一项 | 兵种和武器是启动器选的；呼叫的载具是选的那台 | 启动时 `HOOK mission preload=2/2 online=2/2` 和 `HOOK loadout create=5/5`，进关 `MISSION start`、`LOADOUT preload ...` 和 `LOADOUT create ...` |
 | 13 | 撤退回主菜单，看装备界面 | 还是你原来的装备（强制装备没进存档） | — |
 | 14 | 任务中重试（暂停菜单） | 强制装备仍在 | 又一对 `LOADOUT` |
+| 15 | 测试场敌人选「星导者·百足龙虫」，每波 4，安装后进关等 30 秒 | 几只黑色龙虫贴地爬向你；靠近的会首尾相接，接上第二只就一起起飞成长龙，在你周围盘旋、俯冲，中间各只的头尾不显示 | `PRIMER v=... centipede: enemy team 1`、`makes for the tail`、`linked behind ...: N long`，`Debug=1` 每 2 秒一行 `PRIMER v=... crawling/linked/front (flying)` |
+| 16 | 打掉长龙中间的一只 | 龙从那里断开，后半段的第一只露出头，成为新的龙头 | `the one ahead of it is gone: a front again` |
+| 17 | 测试场敌人选「星导者·蜻蜓空优机」，自己开直升机或玩家战斗机升空 | 蜻蜓追向你、从下后方切入，在一段距离外悬停、腹部卷起后连射紫色针弹，然后急转飞开再绕回来；你落地后它改打地面上的你 | `dragonfly strikes at the flying player`，`Debug=1` 行里 `hunt` / `strike` / `dart` |
 
 如果直升机飞得不对，把整个 `.log` 发回来。飞控每秒记录模式（`orbit` / `follow` / `run` / `aim` / `hold` …）、高度、爬升率、油门、悬停油门、旋翼转速、三个摇杆量和偏航学习状态。
 飞控增益（旧版的 `HeliMoveGain` / `HeliBrakeGain` / `HeliClimbGain` / `HeliHoverLearn`）已固定为常量，ini 里还有这几项会被忽略（日志说一次）。常见现象：
@@ -394,6 +407,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/highcam.cpp`：高视角的开关（哪些车有、按键、提示）。
 - `src/map.cpp`：地图（M 键：玩家镜头升到空中、平移 / 转向 / 缩放，打开期间保持玩家输入，收集地图上要标的单位和任务目标点），镜头与网格的数学在 `src/map_cam.h`（`tools/map_cam_check.cpp` 离线核对），叠加层在 `src/hud.cpp` 的 `MapScreen`，逆向与设计见 `docs/camera-re.md` §7。
 - `src/nix.cpp`：尼克斯的上下半身分离（腿转向时上半身在世界里保持朝向，`NixTorsoTwist`），逆向见 `docs/nix-re.md`，离线验算 `tools/nix_twist_check.cpp`。
+- `src/primer.cpp`：星导者生物（敌人：百足龙虫、蜻蜓空优机，`docs/primer-plan.md`）；`src/primer_pose.h` 它们的骨骼动作（插件和离线模拟 `tools/primer_pose_sim.cpp` 共用）；`pylib/centipede_model.py`、`pylib/dragonfly_model.py` 模型（`pylib/procmesh.py` 共用的生成器）；`pylib/model_view.py` 离线看模型。
 - `src/jet.cpp`：战斗机飞控与运行时生成；`src/airstrike.cpp`：空袭接管与呼叫武器（`src/calls.inc` 由 `tools/gen_calls.py` 生成）；`tools/make_jets.py`：生成战斗机 SGO（`pylib/vcobjects.py`）。
 - `src/boarding.cpp`：登车狙击枪（`docs/boarding-re.md`）。
 - `src/loadout.cpp`：测试场强制装备（`docs/loadout-re.md` 是逆向笔记，`docs/weapons.csv` 是武器 ID 表）。

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(EDF6VehicleCrew VERSION 0.7.1 LANGUAGES CXX)
+project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp)
@@ -16,6 +16,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -174,3 +175,13 @@ set_target_properties(hud_view PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINA
 add_executable(map_cam_check EXCLUDE_FROM_ALL tools/map_cam_check.cpp)
 target_compile_options(map_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Primer creatures' pose code run offline (tools/primer_pose_view.py, tools/primer_chain_view.py render it):
+# not part of the plugin.
+add_executable(primer_pose_sim tools/primer_pose_sim.cpp)
+set_target_properties(primer_pose_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The Primer creatures' flight and fight run without the game (tools/primer_flight_sim.cpp): the plugin's own
+# primer.cpp and the jets' flight code against a stand-in world; tools/primer_trace_view.py draws its trace.
+add_executable(primer_flight_sim tools/primer_flight_sim.cpp src/primer.cpp src/jet_flight.cpp src/body506.cpp)
+target_link_libraries(primer_flight_sim PRIVATE edf6common)
+set_target_properties(primer_flight_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

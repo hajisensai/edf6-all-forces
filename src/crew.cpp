@@ -526,7 +526,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(anyPlayer){st.playerAt=now;st.emptySince=0;return;}
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
-    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle)){st.emptySince=0;return;}
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
     // A heli no player has ridden yet stays where it stands for them (the user, 2026-10-05: the range's parked helis
     // "all took off by themselves, I could not get in": crewed 9 s in, a heli lifts off at once, where a crewed tank

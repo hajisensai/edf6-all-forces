@@ -206,6 +206,14 @@ struct Config {
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
+    bool primer=true;          // the Primer creatures (enemies: EDF6VC_CENTIPEDE / _DRAGONFLY a mission places) are flown (primer.cpp)
+    float primerHpScale=1.0f;  // ...their HP, times the SGO's (centipede 400, dragonfly 600)
+    bool primerFire=true;      // ...their guns fire
+    bool primerTrace=false;    // ...a line each 0.1 s per creature into EDF6VehicleCrew.primer.csv (tools/primer_trace_view.py)
+    int centipedeLinkMax=24;   // ...the most centipedes (one segment each) linked into one (2-48)
+    float centipedeLinkRange=150.0f;// ...m a centipede goes to join another's tail from
+    float centipedeWoundDamage=3.0f;// ...a split's headless front takes this many times the damage until its head is back
+    float primerBlood=1.0f;         // ...their blood splash (hit and death) times the giant ant's size; 0: none
 };
 // Every value is range-checked when the ini is read (plugin.cpp Validate): a value out of range is clamped and
 // the change logged.
@@ -375,6 +383,7 @@ void ResetPlayer() noexcept;
 
 // jet.cpp
 bool IsJet(const void* vehicle) noexcept;          // a 506 body from an edf6tr_jet_* SGO
+bool IsPrimerVehicle(const void* vehicle) noexcept;// ...a Primer creature's (an enemy: primer.cpp)
 bool JetInLine(const float* from,const float* to,const void* self) noexcept;   // a wingman in the way (no pass-through)
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update

@@ -213,6 +213,11 @@ void Validate(Config& n) noexcept {
     Fix("ProteusSalvoRange",n.proteusSalvoRange,100.0f,1800.0f);   // the gunship shell's reach (jet_bay.cpp kGunshipReach)
     Fix("ProteusPriority",n.proteusPriority,0.05f,1.0f);
     Fix("ProteusPriorityRadius",n.proteusPriorityRadius,0.0f,1000.0f);
+    Fix("PrimerHpScale",n.primerHpScale,0.05f,100.0f);
+    n.centipedeLinkMax=static_cast<int>(FixInt("CentipedeLinkMax",n.centipedeLinkMax,2,48));
+    Fix("CentipedeLinkRange",n.centipedeLinkRange,10.0f,2000.0f);
+    Fix("CentipedeWoundDamage",n.centipedeWoundDamage,1.0f,20.0f);
+    Fix("PrimerBlood",n.primerBlood,0.0f,5.0f);
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -421,6 +426,14 @@ void LoadConfig() noexcept {
     n.proteusSalvoRange=ReadFloat(L"ProteusSalvoRange",n.proteusSalvoRange);
     n.proteusPriority=ReadFloat(L"ProteusPriority",n.proteusPriority);
     n.proteusPriorityRadius=ReadFloat(L"ProteusPriorityRadius",n.proteusPriorityRadius);
+    n.primer=ReadBool(L"Primer",n.primer);
+    n.primerHpScale=ReadFloat(L"PrimerHpScale",n.primerHpScale);
+    n.primerFire=ReadBool(L"PrimerFire",n.primerFire);
+    n.primerTrace=ReadBool(L"PrimerTrace",n.primerTrace);
+    n.centipedeLinkMax=ReadInt(L"CentipedeLinkMax",static_cast<DWORD>(n.centipedeLinkMax));
+    n.centipedeLinkRange=ReadFloat(L"CentipedeLinkRange",n.centipedeLinkRange);
+    n.centipedeWoundDamage=ReadFloat(L"CentipedeWoundDamage",n.centipedeWoundDamage);
+    n.primerBlood=ReadFloat(L"PrimerBlood",n.primerBlood);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -447,6 +460,8 @@ void LoadConfig() noexcept {
         n.gunshipGunnerKey);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d throwDrones=%d",n.jetPilot,n.jetFuelSec,
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike,n.throwDrones);
+    Log("CONFIG primer=%d hpScale=%.2f fire=%d trace=%d centipede linkMax=%d linkRange=%.0f woundDamage=%.1f blood=%.2f",n.primer,
+        n.primerHpScale,n.primerFire,n.primerTrace,n.centipedeLinkMax,n.centipedeLinkRange,n.centipedeWoundDamage,n.primerBlood);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,

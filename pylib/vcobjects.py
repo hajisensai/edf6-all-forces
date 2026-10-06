@@ -51,6 +51,8 @@ class Jet:
     box_model: str | None = None
     # The stock heli SGO it is made from (its body, rigid body, crash and weapons): every jet is a V506.
     stock: str = 'V506_HELI'
+    # A Primer creature's sounds (CREATURE_SOUNDS), and no damage smoke (vehicle_damage_effect 0: it is no machine).
+    creature: str | None = None
     # mission_setup[0]: the vehicle's tier, the two multipliers the game's vehicle requests scale a vehicle by (its
     # durability and its weapons' damage): JET_TIER unless set.
     tier: tuple[float, float] | None = None
@@ -266,12 +268,45 @@ _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
 JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
               7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
               7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0}
+# The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
+# round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread,
+# the share of the world's gravity it falls at). Damage is per round against the player (the stock gatling's is 10,
+# 20 a second). src/primer.cpp's reaches and the stinger's lob (kStingSpeed, kGravityLob) are these numbers.
+PRIMER_GUN_STOCK = 'V_506HELI_GATLING01_L.SGO'
+PRIMER_GUN_FILES: dict[str, tuple[float, float, float, float, float, float, tuple[float, float, float, float], float, float]] = {
+    # the dragonfly's needles: fast thin violet rounds, 15 a second, 360 m
+    'EDF6VC_PRIMER_NEEDLE.SGO': (8.0, 4.0, 12.0, 30.0, 0.4, 0.0, (2.2, 0.6, 3.4, 1.0), 0.01, 0.0),
+    # a centipede head's spit: a slow green glob with a small blast, about one a second, 420 m
+    'EDF6VC_PRIMER_SPIT.SGO': (30.0, 45.0, 3.5, 120.0, 1.2, 4.0, (0.9, 2.4, 0.5, 1.0), 0.03, 0.0),
+    # a middle segment's barbs: thin amber darts from its back, 3 a second, 320 m
+    'EDF6VC_PRIMER_BARB.SGO': (6.0, 20.0, 8.0, 40.0, 0.35, 0.0, (2.4, 1.6, 0.4, 1.0), 0.03, 0.0),
+    # the tail's stinger: a heavy round lobbed on a high arc (90 m/s, falling at the world's 14.7 m/s^2: up to
+    # 550 m, 12 s up and down), a blast where it comes down, one every 2 s
+    'EDF6VC_PRIMER_STING.SGO': (60.0, 120.0, 1.5, 720.0, 1.0, 6.0, (2.6, 0.8, 0.3, 1.0), 0.02, 1.0),
+}
+_PRIMER_NEEDLE, _PRIMER_SPIT, _PRIMER_BARB, _PRIMER_STING = ('app:/weapon/' + f.lower() for f in PRIMER_GUN_FILES)
+# What a creature sounds like (a Jet's `creature`): the sound bank its cues are in (added to game_sound), the 506's
+# heli_se_table rows (index -> SEPRESET cue: 3 hit, 4 crash, 5 rotor crash, 6-8 the explosions: which of those its
+# death plays is not known, so all three), and ragdoll_contact's cue. A cue the banks do not hold is silence.
+CREATURE_SOUNDS: dict[str, tuple[str, dict[int, str], str]] = {
+    # the giant ant's (GIANTANT01.SGO ant_DamageEffectSe / ant_BloodSe / ant_DeadSe)
+    'centipede': ('app:/sound/adx/tikyuu4_en_GiantAnt.acb',
+                  {3: '巨大蟻ヒットエフェクト', 4: '巨大蟻衝突', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき大', 7: '敵共通血しぶき小',
+                   8: '巨大蟻死亡'}, '巨大蟻衝突'),
+    # the giant bee's (GIANTBEE01.SGO bee_DamageEffectSe / bee_DamageSe / bee_DeadBloodSe / bee_DeadSe)
+    'dragonfly': ('app:/sound/adx/tikyuu4_en_GiantBee.acb',
+                  {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
+                   8: '蜂死亡'}, '蜂ダメージ'),
+}
+# kg: a jet's mass without stores, by its mark (src/stores.inc kJetMasses: what its stores' mass is weighed against).
+JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7006.0: 2200.0, 7020.0: 16000.0,
+              7201.0: 16000.0, 7202.0: 22000.0}
 STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP)
                             if store_of(w)}))
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *STORE_FILES)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *STORE_FILES, *PRIMER_GUN_FILES)
 # A derived weapon's stock file: in a vehicle's weapon list it takes the stock one's per-weapon parameters.
 _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
-             for d, st in (*JET_GUN_FILES.items(),
+             for d, st in (*JET_GUN_FILES.items(), *((f, PRIMER_GUN_STOCK) for f in PRIMER_GUN_FILES),
                            *((f, JET_BOMB_STOCK if STORES[store_of(_weapon(f))[0]].role == 'bomb' else JET_MISSILE_STOCK)
                              for f in STORE_FILES))}
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
@@ -400,6 +435,20 @@ JETS: dict[str, Jet] = {
                             'EDF6VC_DRONE.MRAB', 'body', 'body'),
     'edf6tr_jet_doll': Jet(7008.0, 800.0, _GUNS + (_BLAST[1],), ('app:/object/edf6vc_drone.mrab', 'pd607_Drone_airstrike.mdb'),
                            'EDF6VC_DRONE.MRAB', 'body', 'body'),
+    # The Primer creatures (src/primer.cpp, docs/primer-plan.md), enemies a mission places, in models of their own:
+    # the centipede, one segment a creature (pylib/centipede_model.py: 3 m of plate, in the giant pill bug's archive
+    # and chitin; its box the plate's middle 2.2 m, so that linked ones 3 m apart do not touch), its weapons by its
+    # place in a chain: [0, 1] the spit on its head (veh+0x2020), [2] the stinger on its tail (+0x2021), [3] the barbs
+    # on its back (their own trigger); and the dragonfly (pylib/dragonfly_model.py: 14 m long, 13.5 m across the
+    # wings, in the gold drone's; its box the body, not the wings), three needle guns (src/stores.cpp: four holders
+    # at least; primer.cpp fires the gun pair only).
+    'edf6tr_centipede_mission': Jet(7012.0, 150.0, (_PRIMER_SPIT, _PRIMER_SPIT, _PRIMER_STING, _PRIMER_BARB),
+                                    ('app:/object/edf6vc_centipede.mrab', 'e514_dango.mdb'), 'EDF6VC_CENTIPEDE.MRAB',
+                                    'body', 'body', rigid=((0.0, 0.2, 0.0), (1.2, 0.6, 1.1)),
+                                    weapon_bones=('head', 'head', 'sting', 'gun'), creature='centipede'),
+    'edf6tr_dragonfly_mission': Jet(7013.0, 600.0, (_PRIMER_NEEDLE,) * 3,
+                                    ('app:/object/edf6vc_dragonfly.mrab', 'e507_goldufo.mdb'), 'EDF6VC_DRAGONFLY.MRAB',
+                                    'body', 'body', rigid=((0.0, -0.134, -1.32), (1.529, 1.454, 7.04)), creature='dragonfly'),
     # the submarine carrier (src/subcarrier.cpp, tools/make_sub.py, docs/subcarrier-re.md): the mission
     # object EV603_MARINE's model at its own size, 1664 m long; the box is the 30 m of hull under its main
     # deck (y 163.08..193.08 over the origin; the tower above is not solid). Not the whole hull: afloat its
@@ -714,6 +763,14 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         raise ValueError('V506_HELI 的 heli_se_table 不是预期的样子')
     for i in JET_ROTOR_SE_ROWS:
         se[i] = JET_SILENT_SE
+    if jet.creature:
+        bank, cues, contact = CREATURE_SOUNDS[jet.creature]
+        if bank not in m['game_sound']:
+            m['game_sound'] = list(m['game_sound']) + [bank]
+        for i, cue in cues.items():
+            se[i] = cue
+        m['ragdoll_contact'][0] = contact
+        m['vehicle_damage_effect'] = [0.0]   # the 506's damage smoke: none (a scale of 1.0 when the key is missing)
     out = sgo.write(version, m)
     if door:
         check_door(out)
@@ -816,6 +873,20 @@ def jet_guns(game: Game) -> dict[str, bytes]:
             raise ValueError(f'{stock} 不是预期的直升机机炮')
         r.set('AmmoSpeed', JET_GUN_SPEED)
         r.set('AmmoAlive', JET_GUN_ALIVE)
+        out[name] = dsgo.write(doc)
+    for name, (damage, gap, speed, alive, size, blast, colour, spread, gravity) in PRIMER_GUN_FILES.items():
+        doc = dsgo.parse(game.read('WEAPON', PRIMER_GUN_STOCK))
+        r = doc.root
+        if r.get('AmmoClass') != 'SolidBullet01' or len(r.get('AmmoColor').items) != 4:
+            raise ValueError(f'{PRIMER_GUN_STOCK} 不是预期的直升机机炮')
+        flash = r.get('MuzzleFlash_CustomParameter')
+        for key, value in (('AmmoCount', 99999.0), ('AmmoDamage', damage), ('FireInterval', gap), ('AmmoSpeed', speed),
+                           ('AmmoAlive', alive), ('AmmoSize', size), ('AmmoExplosion', blast), ('FireAccuracy', spread),
+                           ('AmmoGravityFactor', gravity)):
+            r.set(key, value)
+        r.get('AmmoColor').items[:] = list(colour)
+        if len(flash.items) == 10 and isinstance(flash.items[8], dsgo.Node) and len(flash.items[8].items) == 4:
+            flash.items[8].items[:] = list(colour)   # the muzzle flash in the round's colour
         out[name] = dsgo.write(doc)
     for name, (damage, radius) in JET_BLAST_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', JET_BLAST_STOCK))

@@ -16,6 +16,9 @@ Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model wi
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
 impact charges a crash or a ground vehicle's ram sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64 / _02 / _04 / _12.SGO, and the gunship's
 long-range side cannon's round (src/jet_bay.cpp CannonShot): EDF6VC_GUNSHIP_CANNON.SGO.
+Also the Primer creatures, enemies (src/primer.cpp, docs/primer-plan.md): EDF6VC_CENTIPEDE / _DRAGONFLY.SGO, their
+own models EDF6VC_CENTIPEDE / _DRAGONFLY.MRAB (pylib/centipede_model.py, pylib/dragonfly_model.py) and their guns
+EDF6VC_PRIMER_SPIT / _NEEDLE.SGO.
 Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
 EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (vcobjects.portal_lasers).
 
@@ -72,6 +75,9 @@ FILES: dict[str, str] = {
     # one's requested twin (vcobjects.REQUEST_KINDS), with vehicle_setup as well as mission_setup. The gunship's gets
     # the NPC gunship's gunner seat (with_gunner_seat).
     **{request_file(k): vc.request_name(k) for k in vc.REQUEST_KINDS},
+    # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies a mission places.
+    'EDF6VC_CENTIPEDE.SGO': 'edf6tr_centipede_mission',
+    'EDF6VC_DRAGONFLY.SGO': 'edf6tr_dragonfly_mission',
 }
 # Their own models (pylib/jet_models.py).
 MODEL_FILES = sorted({vc.JETS[j].file for j in FILES.values() if vc.JETS[j].file})
