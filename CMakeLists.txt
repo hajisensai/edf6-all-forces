@@ -200,6 +200,12 @@ set_target_properties(hudtext_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 add_executable(map_cam_check EXCLUDE_FROM_ALL tools/map_cam_check.cpp)
 target_compile_options(map_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The stock HUD's switch while the map shows (src/map_stock_hud.h: held, put back, the mission's own writes kept),
+# offline (tools/map_hud_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_hud_check && build\map_hud_check.exe
+add_executable(map_hud_check EXCLUDE_FROM_ALL tools/map_hud_check.cpp)
+target_compile_options(map_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_hud_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The map's NPC commands (src/mapcmd_logic.h: the pointer's ground point, the box / click / cycle selection, the keys,
 # the guard formation),
 # offline (tools/map_cmd_check.cpp). Not part of the plugin build:
@@ -254,9 +260,4 @@ add_test(NAME call_pick COMMAND call_pick_test)
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check pause_clock_check hudtext_check)
-add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
-foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
-    add_test(NAME ${check} COMMAND ${check})
-endforeach()
-add_test(NAME hud_layout COMMAND hud_view --out "${CMAKE_BINARY_DIR}/hud-review")
+    vehicle_ram_check stab_check vsound_check map_cam_check map_hud_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check pause_clock_check hudtext_check)

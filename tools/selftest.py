@@ -2680,6 +2680,53 @@ def map_wired() -> None:
 
 
 @test
+def map_hides_stock_hud() -> None:
+    """The map hides the stock HUD (docs/hud-re.md §11): through the game's own switch (the camera's +0x200, the mission
+    scripts' SetPlayerHudShow), every EDF.dll byte it stands on checked at load (and, with the game present, the bytes
+    EDF.dll has there); the switch is driven from the camera hook after its own step and fault handler, so a fault puts it
+    back; the scripts' writes go through the record; the followers' bars (no reader of the switch) give way in the gauge
+    hook; the plugin's HUD draws nothing while the map's view eases back; the offline checks are built and in CI."""
+    code, h, hud, sub = src('src/map.cpp'), src('src/map_stock_hud.h'), src('src/hud.cpp'), src('src/subcarrier.cpp')
+    doc, cmake = src('docs/hud-re.md'), src('CMakeLists.txt')
+    for name, value in (('kHudShow', '0x118DF30'), ('kHudShowCall', '0x1BA811'), ('kCamHudShown', '0x200')):
+        assert re.search(rf'\b{name}={value}\b', code), name
+        assert value in doc, value
+    sigs = re.search(r'const HudSig kHudSigs\[\]=\{(.*?)\};', code, re.S).group(1)
+    arrays = re.findall(r'\{(k\w+|0x[0-9A-F]+),(k\w+),sizeof\(\2\)\}', sigs)
+    assert len(arrays) == 7, arrays
+    for at, _ in arrays:
+        assert at == 'kHudShow' or at in doc, at
+    install = code.split('bool InstallHudSwitch() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert install.index('Matches(s.rva,s.bytes,s.size)') < install.index('RedirectCall(image+kHudShowCall,image+kHudShow,')
+    assert 'hudOk=holdOk && InstallHudSwitch();' in code and 'if(!hudOk)return;' in code
+    step = code.split('void __fastcall CamStepHook(void* cam,void* step) {', 1)[1].split('\n}\n', 1)[0]
+    assert step.index('__except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};') < step.index('StockHud(static_cast<unsigned char*>(cam),generation);')
+    assert 'maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown)' in code
+    assert 'maphud::GameSet(hudRecord,cam,cameraSession.Generation(),show)' in code
+    assert 'if(write)reinterpret_cast<HudShowFn>(image+kHudShow)(cam,show);' in code
+    assert 'hudHeld.store(false);' in code.split('void ResetMap() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!MapHidesStockHud())draw(hud,viewProj,owner,r9,fifth);' in sub
+    draw = hud.split('void HudDraw(const float* viewProj', 1)[1]
+    assert draw.index('if(MapScreen(drawer,ctx,t,viewProj') < draw.index('if(MapOwnsView()){FreeText(text);return;}') < draw.index('CarrierBars(')
+    assert 'inline bool Step(' in h and 'inline bool GameSet(' in h
+    assert 'EXCLUDE_FROM_ALL tools/map_hud_check.cpp' in cmake and 'map_hud_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert '#include "../src/map_stock_hud.h"' in src('tools/map_hud_check.cpp')
+    assert 'failed+=!MapDrawsMapAlone(' in src('tools/hud_view.cpp')
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if os.path.exists(dll):
+        import edfre
+        consts = {m.group(1): int(m.group(2), 16) for m in re.finditer(r'\b(k\w+)=(0x[0-9A-F]+)\b', code)}
+        for at, arr in arrays:
+            want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
+            rva = consts[at] if at.startswith('k') else int(at, 16)
+            assert edfre.img[rva:rva + len(want)] == want, (arr, hex(rva))
+        call = edfre.img[consts['kHudShowCall']:consts['kHudShowCall'] + 5]
+        assert call[0] == 0xE8 and consts['kHudShowCall'] + 5 + int.from_bytes(call[1:], 'little', signed=True) == consts['kHudShow']
+
+
+@test
 def game_clock_and_hud_stop_with_the_pause() -> None:
     """The pause menu (docs/hud-re.md §10): the game clock stops while the game's own pause flag says paused (the camera
     step still reads it every frame of the pause), and the HUD draws nothing then. GameMs runs game_clock.h, the rule

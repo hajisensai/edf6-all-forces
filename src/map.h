@@ -43,4 +43,6 @@ bool PlayerMap(MapReadout* out) noexcept;
 bool MapHoldsKeys() noexcept;
 // The camera is the map's this frame (open, or easing back): the HUD keeps its last game view for the aim (CameraRay).
 bool MapOwnsView() noexcept;
+// The map's view holds the stock HUD off (its own switch, map_stock_hud.h): the follower gauge's bars give way too.
+bool MapHidesStockHud() noexcept;
 }  // namespace crew

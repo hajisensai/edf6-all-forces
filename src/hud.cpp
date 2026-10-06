@@ -2882,6 +2882,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             FreeText(text);
             return;
         }
+        // The map's camera easing back to the player (map.cpp Camera, kEaseOut frames): its readout is gone and the view is
+        // still the map's, so the world marks (the impact rings, the turret's box, the vehicle HUD) would land on a
+        // view they were not made for. Nothing, like the stock HUD (its switch held until the camera is back).
+        if(MapOwnsView()){FreeText(text);return;}
         const ULONGLONG now=GetTickCount64();
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
