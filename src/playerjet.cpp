@@ -47,6 +47,7 @@
 #include "sight.h"
 #include "vehicleram.h"
 #include "playerjet_kinds.h"
+#include "pjet_catch.h"
 #include "pjet_handling.h"
 #include "vecmath.h"
 #include "warn.h"
@@ -280,6 +281,8 @@ struct PJet {
 void Boarded(PJet& j,unsigned char* v,const float* pos,float clear) noexcept;
 void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept;
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept;
+float RestOver(const unsigned char* v,const float* pos) noexcept;
+float FloorClear(const PJet& j,const unsigned char* v,const float* pos,float clear) noexcept;
 void Forget(const unsigned char* v) noexcept;
 int SpecialRoom(const PJet& j) noexcept;
 int SpecialStore(PJet& j,const unsigned char* v,Store* out) noexcept;
@@ -566,7 +569,7 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     j.vel[1]=vy;
     const float up[3]={0.0f,1.0f,0.0f};
     BodyAttitude(v,turned,up,kAttGain,k.roll,j.omega);
-    if(!belly && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
+    if(!belly && j.throttle>0.02f && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
         j.phase=Phase::air;j.vel[1]=kLiftOffClimb;j.hasAim=false;
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
         return;
@@ -579,12 +582,21 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     j.phase=speed<kParkSpeed && j.throttle<0.02f ? Phase::parked : Phase::rolling;
 }
 
+// The transition to ground control: an uncommanded air cruise setting must not power the rollout. An explicit boost
+// remains a touch-and-go request. No air lift/aim/warning state survives a supported landing.
+void Landed(PJet& j) noexcept {
+    j.phase=Phase::rolling;j.vel[1]=0.0f;
+    if(j.throttleIn<=0.0f)j.throttle=0.0f;
+    j.hasUp=false;j.hasAim=false;j.mouseFlies=false;j.aoa=0.0f;
+    j.stall=false;j.stallShare=0.0f;j.load=1.0f;j.gpws=Gpws::none;j.impactIn=-1.0f;
+}
+
 // A landing with the gear not down and locked (gear.cpp): a crash (Crash's damage for its sink and speed), then it slides
 // on its belly to a stop (Ground) until the gear is down.
 void BellyLanding(PJet& j,unsigned char* v,float sink,float speed,ULONGLONG ms) noexcept {
     Log("PJET v=%p belly landing at %.0f m/s, sink %.1f m/s: the gear is not down",v,speed,sink);
     Crash(j,v,sink,speed,false,ms,nullptr);
-    j.phase=Phase::rolling;j.vel[1]=0.0f;
+    Landed(j);
 }
 
 // Touching the ground in the air: a landing (it rolls on) or a crash. Touching the water is always a crash.
@@ -595,12 +607,17 @@ void Touch(PJet& j,unsigned char* v,float speed,bool water,ULONGLONG ms) noexcep
     const bool banked=m[5]<kLandBank;
     if(!water && sink<=kLandSink && !banked && dirY>=kLandNose && speed<=j.kind->landMax) {
         if(!GearDown(v)){BellyLanding(j,v,sink,speed,ms);return;}
-        j.phase=Phase::rolling;j.vel[1]=0.0f;
+        Landed(j);
         Log("PJET v=%p landed at %.0f m/s, sink %.1f m/s",v,speed,sink);
         return;
     }
     if(water)Log("PJET v=%p hit the water at %.0f m/s, sink %.1f m/s",v,speed,sink);
     Crash(j,v,sink,speed,banked,ms,nullptr);
+}
+
+void ReconcileGround(PJet& j,unsigned char* v,float clear,bool water,bool wet,ULONGLONG ms) noexcept {
+    if(j.phase==Phase::air && !water && !wet && (v[0x1580]&2)!=0 && clear!=kNoGround && clear<=kTouch)
+        Touch(j,v,Len(j.vel),false,ms);
 }
 
 // `v` turned `angle` about the unit `axis` (toward axis x v).
@@ -810,9 +827,10 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     if(clear<0.0f){j.vel[1]=j.vel[1]>kUnderClimb ? j.vel[1] : kUnderClimb;return;}
     float floorY=pos[1]-clear;
     if(j.vel[1]<0.0f && !water) {
-        const float end[3]={pos[0]+j.vel[0]*dt*kFloorSweep,pos[1]+j.vel[1]*dt*kFloorSweep-kFloorGap,pos[2]+j.vel[2]*dt*kFloorSweep};
+        const float rest=RestOver(v,pos),from[3]={pos[0],pos[1]-rest,pos[2]};
+        const float end[3]={pos[0]+j.vel[0]*dt*kFloorSweep,from[1]+j.vel[1]*dt*kFloorSweep-kFloorGap,pos[2]+j.vel[2]*dt*kFloorSweep};
         float hit[3];
-        if(MapRay(pos,end,hit)>=0.0f && hit[1]>floorY && hit[1]<pos[1])floorY=hit[1];
+        if(MapRay(from,end,hit)>=0.0f && hit[1]+rest>floorY && hit[1]<from[1])floorY=hit[1]+rest;
     }
     const float need=(floorY+kTouch-pos[1])/dt;
     if(j.vel[1]>=0.0f || j.vel[1]>=need)return;
@@ -1050,7 +1068,7 @@ void Proximity(PJet& j,const float* pos,float clear) noexcept {
 // The catch's jet flying in (see kCatchFrom): the jet, where it makes for (under the parachuting player, led by their
 // drift), its speed there.
 // `drift`: the player's velocity (the formation's); `heading`: the way it flew in, level (its nose in the formation).
-struct CatchFlight { const void* v; float target[3],speed; float drift[3],heading[3]; } catchFlight{};
+struct CatchFlight { const void* v; float target[3],speed; float drift[3],heading[3]; bool hasDoor=false; } catchFlight{};
 // The catch's last stretch (the user, 2026-10-05: "the catch jet twitches under my feet": it made straight for its
 // point at full speed and overshot it every frame): within kCatchHoming it flies in formation, the player's drift
 // plus a correction at kCatchGain of the gap, no more than a stop at kCatchBrake would allow, its nose level along
@@ -1112,7 +1130,7 @@ enum class Eject { none, pending, chute };
 // speed it flew in. kCatchMostMs without them aboard, it is given up (it flies on, empty, and comes down).
 constexpr ULONGLONG kCatchAfterMs=4000,kCatchMostMs=45000;
 constexpr float kCatchClear=40.0f,kCatchBelow=2.0f,kCatchOver=40.0f,kCatchFrom=1500.0f,kCatchFloor=30.0f;
-constexpr float kCatchHoming=250.0f,kCatchReach=9.0f,kCatchLead=1.0f;
+constexpr float kCatchHoming=250.0f;
 struct Bailout {
     Eject state; ULONGLONG at; float carry[2],vy;
     float heading[3],speed;          // the jet left: its nose, its speed (the catch)
@@ -1246,19 +1264,24 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
         bail.caught=ObjRef{};bail.catchWith=pjet::kCatchNone;bail.self=false;catchFlight=CatchFlight{};
         return;
     }
-    // Where it makes for: its pilot seat's riding point onto the player (that point within the stock reach is what the
-    // board button needs; the jet's own origin is the collision box's centre, metres off it), kCatchLead s ahead of
-    // their drift; without the point, kCatchBelow under them.
+    // Only the native boarding point is a valid rendezvous. Relative motion predicts its next physics step, while
+    // the player's velocity (minus the door's rotation) is supplied separately as formation feed-forward.
     const float* vp=reinterpret_cast<const float*>(v+kPosition);
     float seatAt[3],reach=0.0f;
-    const bool point=SeatPoint(v,0,seatAt,&reach);
-    for(int i=0;i<3;++i)catchFlight.target[i]=p[i]+hv[i]*kCatchLead+(point ? vp[i]-seatAt[i] : 0.0f);
-    if(!point)catchFlight.target[1]-=kCatchBelow;
-    std::memcpy(catchFlight.drift,hv,12);
-    const float* boardAt=point ? seatAt : vp;
-    const float d[3]={p[0]-boardAt[0],p[1]-boardAt[1],p[2]-boardAt[2]};
+    catchFlight.hasDoor=SeatPoint(v,0,seatAt,&reach) && reach>0.0f;
+    if(!catchFlight.hasDoor)return;
+    const PJet* j=Find(v);
+    const float zero[3]={0.0f,0.0f,0.0f};
+    pjet::CatchDoor(p,hv,vp,seatAt,j ? j->vel : zero,j ? j->omega : zero,GameStep(0),catchFlight.target,catchFlight.drift);
+    const float d[3]={p[0]-seatAt[0],p[1]-seatAt[1],p[2]-seatAt[2]};
     const float gap=Len(d);
-    if(gap>=(point ? reach : kCatchReach))return;
+    if(gap>=reach) {
+        if(ms-catchSaidAt>kCatchSayMs) {
+            catchSaidAt=ms;
+            Log("PJET catch: native door gap %.2f m (reach %.2f), player y %.2f door y %.2f body y %.2f",gap,reach,p[1],seatAt[1],vp[1]);
+        }
+        return;
+    }
     if(!catchReachAt){catchReachAt=ms;Log("PJET catch: the seat in reach (%.1f m, reach %.1f m): boarding",gap,reach);}
     PressBoardButton(h);
     if(ms-catchReachAt>1000 && ms-catchSaidAt>kCatchSayMs) {
@@ -1309,7 +1332,6 @@ void EjectTick() noexcept {
         BailEnd("caught: the player is in the catch jet",true);
         return;
     }
-    Catch(h,ms);
     const unsigned char support=h[kHumanSupport];
     const float clear=GroundClearance(reinterpret_cast<const float*>(h+kPosition));
     const bool landed=ms-bail.at>300 && (support!=0 || (clear!=kNoGround && clear<kChuteLand));
@@ -1338,6 +1360,7 @@ void EjectTick() noexcept {
         push[0]*=keep;push[2]*=keep;shove[0]*=keep;shove[2]*=keep;
     }
     bail.vy=vel[1];
+    Catch(h,ms);   // guide with the parachute's clamped velocity actually sent to the next physics step
 }
 
 // The parachute's canopy (the user, 2026-10-05: the parachute "only slows the fall, no model"): from the parachute's
@@ -1515,12 +1538,11 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
         Log("PJET catch: v=%p on the autopilot",v);
     }
     bool water=false;
-    const float clear=Clear(pos,&water);
+    const float clear=FloorClear(j,v,pos,Clear(pos,&water));
     float to[3]={catchFlight.target[0]-pos[0],catchFlight.target[1]-pos[1],catchFlight.target[2]-pos[2]};
     if(clear!=kNoGround && clear<kCatchFloor && to[1]<0.0f)to[1]=0.0f;   // not into the ground
     const float dist=Len(to);
-    if(!Normalize(to))return;
-    std::memcpy(j.aim,to,12);j.hasAim=true;
+    if(Normalize(to)){std::memcpy(j.aim,to,12);j.hasAim=true;}
     j.throttle=dist>kCatchHoming ? 1.0f : 0.7f;
     Stick s{};
     s.keys=true;
@@ -1528,13 +1550,12 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
     j.clear=clear;j.climb=j.vel[1];
-    Air(j,v,s,pos,clear,water,dt,ms);
-    if(dist<kCatchHoming) {   // the last stretch: in formation under the player (see kCatchGain)
-        const float closing=std::fmin(std::fmin(dist*kCatchGain,catchFlight.speed),std::sqrt(2.0f*kCatchBrake*dist));
-        for(int i=0;i<3;++i)j.vel[i]=catchFlight.drift[i]+to[i]*closing;
+    if(catchFlight.hasDoor && dist<kCatchHoming) {   // formation is not an airborne wing: no Air's stall floor or landing/crash step
+        pjet::CatchVelocity(pos,catchFlight.target,catchFlight.drift,catchFlight.speed,kCatchGain,kCatchBrake,j.vel);
+        if(clear!=kNoGround)j.vel[1]=std::fmax(j.vel[1],std::fmin((kCatchFloor-clear)/dt,kUnderClimb));
         const float up[3]={0.0f,1.0f,0.0f};
         if(j.kind)BodyAttitude(v,catchFlight.heading,up,kAttGain,BodyCap(*j.kind),j.omega);
-    }
+    } else if(catchFlight.hasDoor)Air(j,v,s,pos,clear,water,dt,ms);
     j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
     Elevons(j,v,s.pitch,s.roll,dt);
@@ -1569,7 +1590,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
         return;
     }
     bool water=false;
-    const float clear=FloorClear(j,v,pos,Clear(pos,&water));   // a rotor craft's from its bottom
+    const float clear=FloorClear(j,v,pos,Clear(pos,&water));   // every airframe's actual bottom, not its rigid-body centre
     if(!j.driven)Board(j,v,pos,clear);
     Stick s=ReadStick(SeatAt(v,0));
     SmoothStick(j,s,dt);
@@ -1587,7 +1608,11 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     if(j.board && j.board->frame==pjet::Airframe::rotor){HoverStep(j,v,s,pos,clear,water || wet,dt,ms);Report(j,v,s,pos,clear,water,ms);return;}
     Blocked(j,v,pos,ms);
     if(v[kDead]){j.active=false;return;}
-    Lever(j,v,s,dt);
+    Lever(j,v,s,dt);   // record this frame's command before touchdown decides whether this is a touch-and-go
+    // A physics-supported airframe can be held just above the ray's old origin threshold, or rebound with upward
+    // velocity. Reconcile that real contact before choosing air/ground motion; a nearby unit is not ground.
+    ReconcileGround(j,v,clear,water,wet,ms);
+    if(v[kDead]){j.active=false;return;}
     j.clear=clear;j.climb=j.vel[1];
     if(j.phase==Phase::air) {
         // In the water, though the surface probe saw none (off, unknown map): it touched it.
