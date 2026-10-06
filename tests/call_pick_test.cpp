@@ -40,7 +40,7 @@ void LocalHuman(unsigned char* human) {
 
 int main() {
     using namespace crew;
-    alignas(16) unsigned char weapon[0x1700]{},local[0x400]{},splitScreen[0x400]{},remote[0x400]{},npc[0x400]{},noPad[0x400]{};
+    alignas(16) unsigned char weapon[0x1A00]{},local[0x400]{},splitScreen[0x400]{},remote[0x400]{},npc[0x400]{},noPad[0x400]{};
     void* const ifc=weapon+kWeaponIfc;
     LocalHuman(local);LocalHuman(splitScreen);LocalHuman(remote);
     Put<unsigned char>(remote,edf::kRiderNet+edf::kNetFlags,1);
@@ -98,45 +98,62 @@ int main() {
     testOnline=true;
     Check(CallOf(ifc,local)==&kCalls[0],"joining a session does not erase the local selection");
     Check(CallOf(ifc,remote)==&kCalls[kCallCount-1],"joining a session does not apply that selection to remote calls");
-    // The pick sent with the call (call_net.h): every heading carries every pick and back, moved at most 2^-11 of itself;
-    // a heading no modded machine wrote (zero, random bits) almost never decodes.
-    Check(callnet::Decode(0.0f)==callnet::kNoMark,"a zero heading carries no pick");
-    const float headings[]={0.0f,0.001f,-0.5f,1.0f,3.14159f,-3.14159f,6.28f,-1.0e-7f};
-    for(const float h:headings)
+    // The pick sent with the call (call_net.h, in the seed's high 32 bits): every pick round-trips with the seed's own low
+    // 32 bits kept; a seed nobody marked decodes as no pick.
+    const std::uint64_t seeds[]={0ull,1ull,0xFFFFFFFFull,0x123456789ABCDEF0ull,~0ull,0x8000000000000000ull};
+    for(const std::uint64_t seed:seeds) {
+        Check(callnet::Decode(seed)==callnet::kNoMark,"an unmarked seed carries no pick");
         for(int p=callnet::kOwnCall;p<kCallCount;++p) {
-            const float e=callnet::Encode(h,p);
+            const std::uint64_t e=callnet::Encode(seed,p);
             Check(callnet::Decode(e)==p,"the pick sent is the pick decoded");
-            Check(std::fabs(e-h)<=std::fabs(h)*0.0005f+1e-30f,"the heading moves by at most 2^-11 of itself");
-            Check(callnet::Decode(callnet::Encode(e,p))==p,"encoding twice keeps the pick");
+            Check((e&0xFFFFFFFFull)==(seed&0xFFFFFFFFull),"the seed's low 32 bits are kept");
         }
-    std::uint32_t lcg=12345u;
-    int falsePicks=0;
-    for(int i=0;i<100000;++i) {
-        lcg=lcg*1664525u+1013904223u;
-        const float f=callnet::Float(lcg);
-        falsePicks+=std::isfinite(f) && callnet::Decode(f)!=callnet::kNoMark;
     }
-    Check(falsePicks<1500,"random headings decode as a pick at most 1.5% of the time (7 check bits)");
-    // CallOf with a sent pick: the caller's and the others' copies of the weapon take it over their local state.
+    std::uint64_t lcg=0x9E3779B97F4A7C15ull;
+    int falsePicks=0;
+    for(int i=0;i<1000000;++i) {
+        lcg=lcg*0x5D588B656C078965ull+0x269EC3ull;   // the weapon's own random state's step (0x69355B)
+        falsePicks+=callnet::Decode(lcg)!=callnet::kNoMark;
+    }
+    Check(falsePicks==0,"a million of the weapon's own seeds: none carries the 26-bit mark");
+    // Offline nothing is decoded: whatever the received seed holds, origin/main's rule.
+    testOnline=false;
+    Put<float>(weapon,kWeaponHitSize,kCalls[4].mark);
+    picked.store(2);
+    for(int sent=callnet::kOwnCall;sent<kCallCount;++sent) {
+        Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0x1234ull,sent));
+        Check(CallOf(ifc,local)==&kCalls[2],"offline: the local player's call takes this machine's pick, never a seed");
+        Check(CallOf(ifc,remote)==&kCalls[4],"offline: any other call keeps the weapon's own, never a seed");
+        Check(CallOf(ifc,npc)==&kCalls[4],"offline: an NPC's call keeps the weapon's own");
+    }
+    // Online, a call of another machine's player: the pick its caller sent, else the weapon's own.
+    testOnline=true;
     for(int own=0;own<kCallCount;own+=3) {
         Put<float>(weapon,kWeaponHitSize,kCalls[own].mark);
         for(int sent=callnet::kOwnCall;sent<kCallCount;++sent) {
-            Put<float>(weapon,kWeaponHeading,callnet::Encode(1.25f,sent));
-            const Call* const want=sent<0 ? &kCalls[own] : &kCalls[sent];
+            Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0xABCDull,sent));
             picked.store((sent+5)%kCallCount);   // this machine's own pick differs from the one sent
-            Check(CallOf(ifc,remote)==want,"a remote call replays the pick its caller sent");
-            Check(CallOf(ifc,local)==want,"the caller replays the pick it sent, not its picker now");
-            Check(CallOf(ifc,npc)==want,"whoever the owner, the sent pick decides");
+            Check(CallOf(ifc,remote)==(sent<0 ? &kCalls[own] : &kCalls[sent]),"a remote call replays the pick its caller sent");
+            Check(CallOf(ifc,npc)==&kCalls[own],"an NPC's call never reads a seed");
         }
+        Put<std::uint64_t>(weapon,kWeaponRxSeed,0x0123456789ABCDEFull);
+        Check(CallOf(ifc,remote)==&kCalls[own],"a remote call whose seed nobody marked keeps the weapon's own");
     }
+    // Online, this machine's player: the pick it sent (not its picker now), else this machine's pick; never the received seed.
     Put<float>(weapon,kWeaponHitSize,kCalls[0].mark);
-    Put<float>(weapon,kWeaponHeading,1.25f);
-    Check(callnet::Decode(1.25f)==callnet::kNoMark,"the fixture's plain heading carries no pick");
+    Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0ull,7));
     picked.store(2);
-    Check(CallOf(ifc,local)==&kCalls[2] && CallOf(ifc,remote)==&kCalls[0],"no pick sent: the local picker for the local call only");
+    Check(CallOf(ifc,local)==&kCalls[2],"no pick sent yet: this machine's pick, the received seed ignored");
+    sentPicks[0]=SentPick{weapon,5};
+    picked.store(9);
+    Check(CallOf(ifc,local)==&kCalls[5],"the caller replays the pick it sent");
+    testOnline=false;
+    Check(CallOf(ifc,local)==&kCalls[9],"offline the sent record is not used");
+    testOnline=true;
+    sentPicks[0]=SentPick{};
     Put<float>(weapon,kWeaponHitSize,1.0f);
-    Put<float>(weapon,kWeaponHeading,callnet::Encode(1.25f,3));
-    Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its heading carries");
+    Put<std::uint64_t>(weapon,kWeaponRxSeed,callnet::Encode(0ull,3));
+    Check(CallOf(ifc,remote)==nullptr,"a stock call is never converted, whatever its seed carries");
     std::printf("call picker: %d checks passed\n",checks);
     return 0;
 }

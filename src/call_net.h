@@ -1,44 +1,34 @@
-// The Air Raider call's pick carried in its own message (airstrike.cpp; docs/online-re.md sections 1 and 9).
+// The Air Raider call's pick carried in its own message (airstrike.cpp; docs/online-re.md sections 1, 9 and 10).
 // Online, the caller's machine sends message 9 (the confirm state 0x6A9270: heading, target, seed, sequence) and every
 // other machine replays the call from it; nothing in it said which call the caller's picker turned the weapon into, so
-// the others flew the weapon's own. The heading goes out as its exact 4 bytes (0x12B57E0: a 0xC2 tag and the float), so
-// its 12 lowest mantissa bits can carry the pick: 5 bits of the pick + 1 (0: "each its own"), 7 of a check over the rest
-// of the float. The heading moves by at most 2^-11 of itself (0.09 degrees at pi), on every machine alike, since every
-// machine builds the call's matrix from the value sent. A heading no modded machine wrote (no check) decodes to kNoMark.
+// the others flew the weapon's own. The seed goes out as its exact 8 bytes (0x12B5690) and the receiver keeps them at
+// weapon +0x1958 until the next call (0x6A8724), so the seed's high 32 bits carry the pick: a fixed 26-bit mark and 6
+// bits of the pick + 1 (0: "each its own"). The low 32 bits stay the weapon's own random state; the caller keeps the seed
+// it sent (+0xBC8), so every machine's replay starts from the same value as before.
+// Only a call received from another machine is ever decoded (airstrike.cpp CallOf: online, the owner another machine's).
+// A seed nobody marked (another version, an unmodded caller) carries the mark by chance once in 2^26 (1.5e-8) calls.
 #pragma once
-#include <cmath>
 #include <cstdint>
-#include <cstring>
 
 namespace crew {
 namespace callnet {
 constexpr int kNoMark=-2;      // no pick in it: the call is replayed as before
 constexpr int kOwnCall=-1;     // the caller's picker said "each its own"
-constexpr int kMostPicks=31;   // 5 bits less the "each its own" code
-constexpr std::uint32_t kLowMask=0xFFFu,kCheckMask=0x7Fu;
+constexpr int kMostPicks=62;   // 6 bits less the "each its own" code, less one spare
+constexpr std::uint64_t kMark=0x2ED6C0Full;   // 26 bits
+constexpr unsigned kMarkShift=38,kCodeShift=32;
 
-constexpr std::uint32_t Check(std::uint32_t high,std::uint32_t code) noexcept {
-    std::uint32_t x=(high*0x9E3779B1u)^(code*0x85EBCA6Bu)^0x5A17C0DEu;
-    x^=x>>15;x*=0x2C1B3C6Du;x^=x>>12;
-    return x&kCheckMask;
+// `seed` with `pick` (kOwnCall or 0..kMostPicks-1) in its high 32 bits; a pick out of range: `seed` as it is.
+constexpr std::uint64_t Encode(std::uint64_t seed,int pick) noexcept {
+    if(pick<kOwnCall || pick>=kMostPicks)return seed;
+    return (kMark<<kMarkShift)|(static_cast<std::uint64_t>(pick+1)<<kCodeShift)|(seed&0xFFFFFFFFull);
 }
 
-inline std::uint32_t Bits(float f) noexcept { std::uint32_t u;std::memcpy(&u,&f,4);return u; }
-inline float Float(std::uint32_t u) noexcept { float f;std::memcpy(&f,&u,4);return f; }
-
-// `heading` with `pick` (kOwnCall or 0..kMostPicks-1) in it; a heading that is not finite, or a pick out of range, as it is.
-inline float Encode(float heading,int pick) noexcept {
-    if(!std::isfinite(heading) || pick<kOwnCall || pick>=kMostPicks)return heading;
-    const std::uint32_t u=Bits(heading),high=u&~kLowMask,code=static_cast<std::uint32_t>(pick+1);
-    return Float(high|(code<<7)|Check(high>>12,code));
-}
-
-// The pick in `heading`: kNoMark, kOwnCall or the pick.
-inline int Decode(float heading) noexcept {
-    if(!std::isfinite(heading))return kNoMark;
-    const std::uint32_t u=Bits(heading),high=u&~kLowMask,code=(u>>7)&0x1Fu;
-    if((u&kCheckMask)!=Check(high>>12,code))return kNoMark;
-    return static_cast<int>(code)-1;
+// The pick in a received `seed`: kNoMark, kOwnCall or the pick.
+constexpr int Decode(std::uint64_t seed) noexcept {
+    if((seed>>kMarkShift)!=kMark)return kNoMark;
+    const int code=static_cast<int>((seed>>kCodeShift)&0x3Full);
+    return code<=kMostPicks ? code-1 : kNoMark;
 }
 }  // namespace callnet
 }  // namespace crew

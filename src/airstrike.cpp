@@ -16,9 +16,9 @@
 //    0x6A8DFB) the plugin launches that call's jets or helis instead of its bombers, which it keeps home
 //    (the call's plane count, ifc+0x80, set to 0 after IFC_Start: the call is spent, its state machine
 //    goes back to idle). A guard call works round its marker, a follow call round the player. Each
-//    modded machine does this when it replays the call, from the call's own heading (message 9's). The local
-//    picker changes only a local player's call; online the pick goes out in the call's message (call_net.h,
-//    HeadingSendHook) and every machine, the caller's too, replays that pick (docs/online-re.md sections 1 and 9).
+//    modded machine does this when it replays the call; online from the call's own heading (message 9's). The local
+//    picker changes only a local player's call; online the pick goes out in the call's seed (call_net.h,
+//    SeedSendHook) and every machine, the caller's too, replays that pick (docs/online-re.md sections 1, 9, 10).
 //  - The call weapons are owned from the start (docs/loadout-re.md section 8): before the game's own
 //    "grant the installed DLC weapons" step (0xDC550, UnlockDownloadContents: after every save load, and
 //    in a new game's reset; its two entries, a call at 0xDC348 and the script thunk's jump at 0x70FF87,
@@ -70,13 +70,14 @@ constexpr unsigned char kUnlockDlcSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74
 constexpr unsigned char kUnlockThunkSig[]={0x48,0x8B,0x0D};   // 0x70FF80: mov rcx,[GS]; jmp 0xDC550
 // The weapon a radio call's IndirectFireControl is in (ifc = weapon+0x1660), and its AmmoHitSizeAdjust.
 constexpr std::size_t kWeaponIfc=0x1660,kWeaponHitSize=0x8C4;
-// RadioContact: its owner (+0x120, 0x6A938A), the call's heading (+0x1650, the aim state's, message 9's float); the
-// confirm state's send of that heading (0x6A9343: movss xmm1,[rbx+0x1650]; lea rcx,[rbp-0x60]; call 0x12B57E0, rbx the
-// weapon) and the message's float writer (0x12B57E0: tag 0xC2, the 4 bytes as they are). See call_net.h.
-constexpr std::size_t kWeaponOwner=0x120,kWeaponHeading=0x1650;
-constexpr unsigned kHeadingSend=0x6A9343,kHeadingCall=0x6A934F,kWriteFloat=0x12B57E0;
-const unsigned char kHeadingSendSig[]={0xF3,0x0F,0x10,0x8B,0x50,0x16,0x00,0x00,0x48,0x8D,0x4D,0xA0,0xE8};
-const unsigned char kWriteFloatSig[]={0x4C,0x8D,0x41,0x10,0xF3,0x0F,0x11,0x4C,0x24,0x10};
+// RadioContact: its owner (+0x120, 0x6A938A), its random state (+0xBC8, message 9's seed), the seed a received call
+// brought (+0x1958, written by the receive slot 30 at 0x6A8724, kept until the next one); the confirm state's send of the
+// seed (0x6A936A: mov rdx,[rbx+0xBC8]; lea rcx,[rbp-0x60]; call 0x12B5690, rbx the weapon) and the message's u64 writer
+// (0x12B5690: the value as it is). See call_net.h.
+constexpr std::size_t kWeaponOwner=0x120,kWeaponSeed=0xBC8,kWeaponRxSeed=0x1958;
+constexpr unsigned kSeedSend=0x6A936A,kSeedCall=0x6A9375,kWriteU64=0x12B5690;
+const unsigned char kSeedSendSig[]={0x48,0x8B,0x93,0xC8,0x0B,0x00,0x00,0x48,0x8D,0x4D,0xA0,0xE8};
+const unsigned char kWriteU64Sig[]={0x4C,0x8B,0xC1,0x48,0x8D,0x82,0xFF,0xFF,0xFF,0x7F,0xB9,0xFD,0xFF,0xFF,0xFF};
 
 const unsigned char kIfcStartSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05};
 // call IFC_Start; then the caller marks the call active and copies the plane count (+0x16E0 -> +0x16E4)
@@ -205,42 +206,81 @@ const Call* OwnCall(const unsigned char* w) noexcept {
     return nullptr;
 }
 
-// The call weapon `ifc` is in, or nullptr (a stock call). Online, the pick the caller's machine sent with the call
-// (call_net.h, in its heading: the same on every machine, the caller's own too); otherwise (offline, or a call no modded
-// machine sent) a local player's call takes this machine's pick and any other its weapon's own. The owner comes from
-// IFC_Start's parameter weak pair, populated by the native RadioContact call state.
+// The picks this machine sent with its calls (SeedSendHook), per weapon: the caller replays the pick it sent even if its
+// picker moved during the confirm state. Game thread only.
+struct SentPick { const unsigned char* weapon; int pick; };
+SentPick sentPicks[8]{};
+int sentNext=0;
+
+int SentPickOf(const unsigned char* w) noexcept {
+    for(const auto& s:sentPicks)if(s.weapon==w)return s.pick;
+    return callnet::kNoMark;
+}
+
+// The call weapon `ifc` is in, or nullptr (a stock call). The owner comes from IFC_Start's parameter weak pair, populated
+// by the native RadioContact call state.
+//  - offline (no message is sent, nothing is decoded): a local player's call takes this machine's pick, any other its
+//    weapon's own: origin/main's rule;
+//  - online, a call of another machine's player (the only kind replayed from a received message): the pick its caller
+//    sent (call_net.h, the received seed +0x1958), else the weapon's own;
+//  - online, this machine's player: the pick it sent (SentPickOf), else this machine's pick.
 const Call* CallOf(const void* ifc,const unsigned char* owner) noexcept {
     const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
     const Call* const own=OwnCall(w);
     if(!own)return nullptr;
-    const int sent=Readable(w+kWeaponHeading,4) ? callnet::Decode(At<float>(w,kWeaponHeading)) : callnet::kNoMark;
-    const int p=sent!=callnet::kNoMark ? sent : IsPlayer(owner) ? picked.load() : -1;
+    int p=-1;
+    if(InSession() && edf::RemoteRider(owner)) {
+        const int sent=Readable(w+kWeaponRxSeed,8) ? callnet::Decode(At<std::uint64_t>(w,kWeaponRxSeed)) : callnet::kNoMark;
+        p=sent!=callnet::kNoMark ? sent : -1;
+    } else if(IsPlayer(owner)) {
+        const int sent=InSession() ? SentPickOf(w) : callnet::kNoMark;
+        p=sent!=callnet::kNoMark ? sent : picked.load();
+    }
     return p>=0 && p<kCallCount ? &kCalls[p] : own;
 }
 
-// The confirm state's send of the call's heading (kHeadingCall, through HeadingStub: rcx the message, rdx the weapon,
-// xmm2 the heading): a local player's call of one of ours goes out with this machine's pick in it, and the weapon keeps
-// the heading sent, so the caller replays the same pick as everyone else (CallOf).
-using WriteFloatFn=bool(__fastcall*)(void*,float);
-bool __fastcall HeadingSendHook(void* message,unsigned char* weapon,float heading) {
-    float sent=heading;
+// The confirm state's send of the call's seed (kSeedCall, through a stub: rcx the message, rdx the seed, r8 the weapon):
+// a local player's call of one of ours goes out with this machine's pick in the seed, and the weapon keeps the seed sent
+// (its random state goes on from the value every other machine replays from).
+using WriteU64Fn=bool(__fastcall*)(void*,std::uint64_t);
+bool __fastcall SeedSendHook(void* message,std::uint64_t seed,unsigned char* weapon) {
+    std::uint64_t sent=seed;
     __try {
         if(Cfg().enabled && Cfg().jetAirRaider && OwnCall(weapon) && IsPlayer(At<const unsigned char*>(weapon,kWeaponOwner))) {
-            sent=callnet::Encode(heading,picked.load());
-            Put<float>(weapon,kWeaponHeading,sent);
+            const int pick=picked.load();
+            sent=callnet::Encode(seed,pick);
+            Put<std::uint64_t>(weapon,kWeaponSeed,sent);
+            SentPick* slot=nullptr;
+            for(auto& s:sentPicks)if(s.weapon==weapon)slot=&s;
+            if(!slot){slot=&sentPicks[sentNext];sentNext=(sentNext+1)%8;}
+            *slot=SentPick{weapon,pick};
         }
-    } __except(FaultLog("AIRSTRIKE call pick send (the heading as it was)",GetExceptionInformation())) { sent=heading; }
-    return reinterpret_cast<WriteFloatFn>(image+kWriteFloat)(message,sent);
+    } __except(FaultLog("AIRSTRIKE call pick send (the seed as it was)",GetExceptionInformation())) { sent=seed; }
+    return reinterpret_cast<WriteU64Fn>(image+kWriteU64)(message,sent);
 }
 
-// The call's jets or helis at `target`, coming in along the call's heading (`forward`: the forward row of the matrix
-// the call state builds from the caller's heading, +0x1650; jets kApproach out and kAboveTarget up, helis kHeliApproach
-// out), side by side; how many came. The heading is the call's own (message 9 carries it), so every machine that replays
-// the call launches it from the same points; the local player's position (the old way) differed per machine.
+// Where a call comes in from (LaunchCall's `dir`). Offline from behind the target as the player sees it (origin/main).
+// Online along the call's heading (`forward`: the forward row of the matrix the call state builds from +0x1650, which
+// message 9 carries), so every machine that replays the call launches it from the same points; each machine's own player
+// stands somewhere else.
+void CallDirection(const float* target,const float* forward,float* dir) noexcept {
+    dir[0]=0.0f;dir[1]=0.0f;dir[2]=1.0f;
+    if(InSession()) {
+        const float l=std::sqrt(forward[0]*forward[0]+forward[2]*forward[2]);
+        if(std::isfinite(l) && l>0.1f){dir[0]=forward[0]/l;dir[2]=forward[2]/l;}
+        return;
+    }
+    if(player.at && GameMs()-player.at<10000) {
+        const float dx=target[0]-player.pos[0],dz=target[2]-player.pos[2],l=std::sqrt(dx*dx+dz*dz);
+        if(l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
+    }
+}
+
+// The call's jets or helis at `target`, coming in from CallDirection (jets kApproach out and kAboveTarget up, helis
+// kHeliApproach out), side by side; how many came.
 int LaunchCall(const Call& c,const float* target,const float* forward) noexcept {
-    float dir[3]={0,0,1};
-    const float l=std::sqrt(forward[0]*forward[0]+forward[2]*forward[2]);
-    if(std::isfinite(l) && l>0.1f){dir[0]=forward[0]/l;dir[2]=forward[2]/l;}
+    float dir[3];
+    CallDirection(target,forward,dir);
     if(c.brings==Brings::sub) {
         const float at[3]={target[0]+dir[0]*kSubAhead,target[1],target[2]+dir[2]*kSubAhead};
         const bool ok=SubLaunch(at,dir)!=nullptr;
@@ -559,21 +599,21 @@ bool InstallOwnership() noexcept {
     return ok;
 }
 
-// The call's pick into its message (HeadingSendHook): the confirm state's call of the float writer at kHeadingCall, through
-// a stub that hands the hook the weapon (rbx there) and the heading as its third argument. Off (the calls replay each
+// The call's pick into its message (SeedSendHook): the confirm state's call of the u64 writer at kSeedCall, through a stub
+// that hands the hook the weapon (rbx there) as its third argument. Off (the calls replay each
 // weapon's own on the other machines, as before) when either piece of code is not the one read.
 bool InstallPickSend() noexcept {
-    if(!Matches(kHeadingSend,kHeadingSendSig,sizeof(kHeadingSendSig)) || !Matches(kWriteFloat,kWriteFloatSig,sizeof(kWriteFloatSig))) {
+    if(!Matches(kSeedSend,kSeedSendSig,sizeof(kSeedSendSig)) || !Matches(kWriteU64,kWriteU64Sig,sizeof(kWriteU64Sig))) {
         Log("AIRSTRIKE call pick send: profile mismatch (online, the others fly each call weapon's own)");
         return false;
     }
-    // movaps xmm2,xmm1; mov rdx,rbx; mov rax,HeadingSendHook; jmp rax
-    unsigned char stub[]={0x0F,0x28,0xD1,0x48,0x89,0xDA,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
-    void* const hook=reinterpret_cast<void*>(&HeadingSendHook);
-    std::memcpy(stub+8,&hook,sizeof(hook));
-    void* const code=AllocateNearCode(image+kHeadingCall,stub,sizeof(stub));
+    // mov r8,rbx; mov rax,SeedSendHook; jmp rax
+    unsigned char stub[]={0x49,0x89,0xD8,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    void* const hook=reinterpret_cast<void*>(&SeedSendHook);
+    std::memcpy(stub+5,&hook,sizeof(hook));
+    void* const code=AllocateNearCode(image+kSeedCall,stub,sizeof(stub));
     bool changed=false;
-    const bool ok=code && RedirectCall(image+kHeadingCall,image+kWriteFloat,code,changed);
+    const bool ok=code && RedirectCall(image+kSeedCall,image+kWriteU64,code,changed);
     if(!ok)Log("AIRSTRIKE call pick send %s",changed ? "half patched" : "not patched");
     return ok;
 }

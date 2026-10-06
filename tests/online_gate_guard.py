@@ -10,10 +10,12 @@ a failure. What it holds in place:
     seat 0's stick (Fly -> MirrorStick), and a replica copies that stick back with the same signs;
   - the shield's push, the crawler's NPC driver, the jets' NPC pilot run where the vehicle is run, and a teleportation
     ship's portal laser starts only where the ship is run;
-  - the Air Raider's calls launch along the call's own heading, read the pick sent with the call, and send it;
+  - the Air Raider's calls: online along the call's own heading (offline as before), the pick sent in the seed and
+    decoded only from a call another machine sent;
   - the shield's push, the crawler's NPC driver, the jets' NPC pilot run where the vehicle is run, and a teleportation
     ship's portal laser starts only where the ship is run;
-  - the Air Raider's calls launch along the call's own heading, read the pick sent with the call, and send it;
+  - the Air Raider's calls: online along the call's own heading (offline as before), the pick sent in the seed and
+    decoded only from a call another machine sent;
   - IsPlayer (common/seat.cpp) leaves out another machine's player.
 """
 from __future__ import annotations
@@ -150,10 +152,17 @@ def check_frames(root: str) -> None:
 def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
     launch = body(code, 'int LaunchCall(')
-    if 'player.' in launch:
-        fail("src/airstrike.cpp LaunchCall: the call's direction comes from this machine's player, not the call's heading")
-    if 'callnet::Decode(' not in body(code, 'const Call* CallOf('):
-        fail('src/airstrike.cpp CallOf: the pick sent with the call is not read')
+    if 'player.' in launch or 'CallDirection(' not in launch:
+        fail("src/airstrike.cpp LaunchCall: its direction is not CallDirection's (online: the call's own heading)")
+    call_of = body(code, 'const Call* CallOf(')
+    remote = re.search(r'if\(InSession\(\) && edf::RemoteRider\(owner\)\) \{(.*?)\}', call_of, re.S)
+    if not remote or 'callnet::Decode(' not in remote.group(1) or call_of.count('callnet::Decode(') != 1:
+        fail('src/airstrike.cpp CallOf: a pick is decoded outside a call received from another machine')
+    direction = body(code, 'void CallDirection(')
+    if not before(direction, 'if(InSession())', 'player.'):
+        fail("src/airstrike.cpp CallDirection: offline the call no longer comes from behind as the player sees it")
+    if 'Put<std::uint64_t>(weapon,kWeaponSeed,sent)' not in body(code, 'bool __fastcall SeedSendHook('):
+        fail("src/airstrike.cpp SeedSendHook: the caller does not keep the seed it sent")
     if 'InstallPickSend()' not in body(code, 'bool InstallAirstrikes()'):
         fail("src/airstrike.cpp: the call's pick is no longer sent (InstallPickSend)")
 
