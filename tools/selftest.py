@@ -646,7 +646,9 @@ def hand_copies_agree() -> None:
     files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
-    written = {n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)   # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py
+    # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py
+    written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
+               | set(vc.SAZABI_ROUND_FILES))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -706,7 +708,13 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast \};', src('src/crew.h')), 'src/crew.h EmcRound'
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel \};',
+                     src('src/crew.h')), 'src/crew.h EmcRound'
+    # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
+    sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
+    assert [f for _, f in sz_files] == list(vc.SAZABI_ROUND_FILES) and all(s == f.lower() for s, f in sz_files), sz_files
+    assert bay.index('EDF6VC_EMC_BLAST.SGO') < bay.index(vc.SAZABI_ROUND_FILES[0]), "kEmcFiles: the EMC's first"
+    assert 'vc.sazabi_rounds(game)' in src('tools/make_sazabi.py'), "tools/make_sazabi.py writes the Sazabi's beams"
     assert make_emc.names() == [f'OBJECT/{n}' for n in vc.EMC_FILES] and make_emc.OWNER in ledger.OWNERS
     m = re.search(r'kBeamRange=([\d.]+)f', plan)
     assert m and float(m.group(1)) == vc.EMC_BEAM_RANGE == vc.EMC_BEAM_SPEED * vc.EMC_BEAM_LIFE, m and m.group(1)
