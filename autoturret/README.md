@@ -103,6 +103,10 @@ Requires EDF6 (Steam) with [EDFModLoader](https://github.com/BlueAmulet/EDFModLo
    in `Mods\.edf6at_backup\`). Run it again after installing another mod that replaces `WEAPONTEXT`.
    `--no-text` leaves the text tables alone; `check` reports what is installed.
 
+An interrupted install or upgrade can be rerun without `--force`, or uninstalled: the manifest records
+both sides of each pending file/text replacement and retains the first backups. Subsequent edits by
+other mods are still protected. `check` reports missing or pending files as incomplete.
+
 To uninstall, run `python autoturret\tools\build.py uninstall` (game closed), then delete the plugin.
 It restores the files it replaced, deletes the ones it created and puts the original text back in
 its eight `WEAPONTEXT` rows; other mods' files and rows stay (anything changed since the install is
