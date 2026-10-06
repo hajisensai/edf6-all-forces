@@ -1847,6 +1847,40 @@ def impact_charges_agree() -> None:
     readme = src('README.md')
     assert '战斗机约 8 米、攻击机约 12 米' in readme and '约 10 米' not in readme.split('**撞击伤害**', 1)[1].split('\n', 1)[0]
 
+
+@test
+def vehicle_ram_wired() -> None:
+    """The ground vehicles' ram (src/vehicleram.cpp, src/vehicleram.h): every class it knows is one crew.cpp names (the same
+    vtable and name), the hooked ones get it from the input hook and the two crew.cpp leaves alone (the Barga, the
+    Proteus) from its own update hooks; it is reset with the mission, built (its own target_sources line) with its offline
+    check an EXCLUDE_FROM_ALL target; its ini keys are read, range-checked, shipped and documented."""
+    h, c, crew = src('src/vehicleram.h'), src('src/vehicleram.cpp'), src('src/crew.cpp')
+    known = dict((name, int(vt, 16)) for vt, name in re.findall(r'\{(0x[0-9A-Fa-f]+|kVt\w+),[^{}]*?"(\w+)"', crew)
+                 if vt.startswith('0x'))
+    known['502_GroundRobo'] = int(re.search(r'kVt502=(0x[0-9A-Fa-f]+)', src('src/layout.h')).group(1), 16)
+    profiles = re.findall(r'(?:Hull|Walker)\((0x[0-9A-Fa-f]+),"(\w+)"|Profile\{(0x[0-9A-Fa-f]+),"(\w+)"', h)
+    profiles = [(a or c2, b or d) for a, b, c2, d in profiles]
+    assert len(profiles) >= 16, profiles
+    for vt, name in profiles:
+        assert known.get(name) == int(vt, 16), f'src/vehicleram.h {name} {vt}: not as crew.cpp kClasses has it'
+    unhooked = dict(re.findall(r'\{(0x[0-9A-Fa-f]+),0,"(\w+)"\}', crew))
+    extras = re.findall(r'\{(0x[0-9A-Fa-f]+),4,0x[0-9A-Fa-f]+,\{[^}]*\},"(\w+)"\}', c)
+    assert sorted(n for _, n in extras) == ['501_FortressRobo', 'BigBegaruta'], extras
+    for vt, name in extras:
+        assert unhooked.get(vt) == name, f'{name}: crew.cpp hooks it (no own hook needed) or names it otherwise'
+    hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
+    assert '&VehicleRamFrame,' in hook, 'src/crew.cpp InputHook: the ram step'
+    assert 'ResetVehicleRams();' in src('src/mission.cpp') and 'InstallVehicleRam();' in src('src/plugin.cpp')
+    cm = src('CMakeLists.txt')
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)' in cm
+    assert re.search(r'add_executable\(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check\.cpp\)', cm)
+    assert '#include "../src/vehicleram.h"' in src('tools/vehicle_ram_check.cpp')
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key, default in (('VehicleRam', '1'), ('VehicleRamDamage', '1.0')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
+    assert 'Fix("VehicleRamDamage"' in plugin, 'VehicleRamDamage is range-checked'
+
+
 def main() -> int:
     failed = 0
     for fn in TESTS:

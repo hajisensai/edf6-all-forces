@@ -103,6 +103,8 @@ struct Config {
     bool warnAudio=true;            // the cockpit's warnings heard (warn.cpp): PULL UP, stall horn, launch warble, callouts
     bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
+    bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
+    float vehicleRamDamage=1.0f;    // ...their kinetic energy's damage (the jets' formula) times this (0: none)
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
     float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
@@ -371,10 +373,16 @@ bool Body506Ok() noexcept;                         // the physics hook is in
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
-// An impact `by` the plugin's vehicle (a crash, jet.cpp / playerjet.cpp) at `at`: `damage` to the enemies
-// of its side within `radius` metres (a charge of the vehicle's own, as the blast drones' is: its team, its
-// kills, friends untouched). False when it could not be dealt (no charge preloaded this mission).
+// An impact `by` a vehicle (a crash, jet.cpp / playerjet.cpp; a ground vehicle's ram, vehicleram.cpp) at `at`: `damage`
+// to the enemies of its side within about `radius` metres (the charge nearest that size: vehicleram.h NearestCharge; a
+// charge of the vehicle's own, as the blast drones' is: its team, its kills, friends untouched). False when it could not
+// be dealt (no charge preloaded this mission).
 bool ImpactDamage(const unsigned char* by,const float* at,float damage,float radius) noexcept;
+// vehicleram.cpp: the ground vehicles' ram (README 载具撞击伤害). Install at load (the CarBase mass read's check, the
+// Barga's and the Proteus' own update hooks); the frame from every vehicle's input (crew.cpp) and those hooks.
+bool InstallVehicleRam() noexcept;
+void VehicleRamFrame(unsigned char* vehicle) noexcept;
+void ResetVehicleRams() noexcept;
 // jet_bay.cpp: a bite of the drill tank's drill: its charge fired by `by` straight from `from` at `at` with `damage`
 // (its side's enemies, its kills, the map's buildings and rocks). False when not fired (not preloaded this mission).
 bool DrillCharge(const unsigned char* by,const float* from,const float* at,float damage) noexcept;

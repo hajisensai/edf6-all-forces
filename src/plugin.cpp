@@ -121,6 +121,7 @@ void Validate(Config& n) noexcept {
     Fix("VehicleHudRange",n.vehicleHudRange,0.0f,10000.0f);
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
+    Fix("VehicleRamDamage",n.vehicleRamDamage,0.0f,100.0f);
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
     n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
@@ -267,6 +268,8 @@ void LoadConfig() noexcept {
     n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
     n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.vehicleRam=ReadBool(L"VehicleRam",n.vehicleRam);
+    n.vehicleRamDamage=ReadFloat(L"VehicleRamDamage",n.vehicleRamDamage);
     n.drill=ReadBool(L"Drill",n.drill);
     n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
     n.drillSpinUpSec=ReadFloat(L"DrillSpinUpSec",n.drillSpinUpSec);
@@ -326,6 +329,7 @@ void LoadConfig() noexcept {
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
         n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
+    Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
@@ -515,6 +519,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
+    InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot

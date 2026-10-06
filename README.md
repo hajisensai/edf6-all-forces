@@ -210,6 +210,16 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    - **高视角**（按 **C** / 手柄 **R3**，见「喀秋莎火箭炮车」）：除了喀秋莎、自行榴弹炮，大车（镜头离车 17 米以上：Titan、钻头战车、Proteus、大型机甲、Maser 等）也有（ini `HighCamClass`：1 只给间接射击的车，2 再加大车（默认），3 所有炮塔车）；大车的高视角按车的大小放高、放远。屏幕下方的 `HIGH CAM [C]` 提示只在这辆车有高视角时出现。
    - **待游戏内确认**：各车类都经座位瞄准接收玩家的转向输入（静态只核对了 Naegling、Kepler；没有的车类不接管视角，只有高视角）、输入方向（镜头左右上下没反），`Debug=1` 时日志 `TURRETCAM` 行（见 `docs/camera-re.md` §6）。
 
+15. **载具撞击伤害**（`src/vehicleram.cpp`、`src/vehicleram.h`，ini `VehicleRam` / `VehicleRamDamage`，逆向与设计 `docs/vehicle-ram-re.md`；2026-10-06 用户：「载具增加碰撞伤害，和飞机一样，要看质量和速度的关系。这里的速度指的是子部件，比如脚踩」）：有人驾驶（玩家或 NPC）的地面载具用车体或部件撞到敌人时，敌人受到和飞机撞击同一公式的伤害：
+   - **伤害** = ½ · 部件带的质量 · 部件撞上去的速度² ÷ 287 kJ × 本车强度倍率（最大耐久 ÷ 车体文件的耐久，随难度 / 呼叫等级放大）× `VehicleRamDamage`（默认 1.0，0 关闭）。
+   - **速度是撞上去的那个部件自己的速度**（按部件每帧的实际位移算），只算朝着敌人的那一部分：坦克、Grape / 卡车、摩托、Maser、深渊爬行者是车头（倒车时是车尾）；Begaruta / Nix / Proteus 等机甲是两只脚——脚往下踩到敌人身上按踩下去的速度算，从旁边擦过不算，冲刺时脚往前撞也算；巴尔加是两只脚和两只拳头。
+   - **质量**：坦克、车、摩托用游戏自己算好的车体总质量（例：Blacker 17 吨、E551 24.6 吨、Titan 227.5 吨、摩托 0.2 吨、轻卡 2.4 吨），读不到时用这类车原版文件的质量；机甲文件里没有质量，按体型估：Begaruta / Nix 30 吨、Proteus 150 吨、巴尔加 2000 吨、深渊爬行者 10 吨。车头 / 车尾带整车质量，一只脚带一半（腿加上压下来的半个车身），巴尔加的一只拳头带十分之一。
+   - **爆炸范围 = 撞上去的部件的大小**（车头取车宽的一半、脚取脚掌、拳头取拳头），用安装器生成的撞击装药里最接近的一个（2 / 4 / 8 / 12 / 16 / 32 / 64 米）；伤害只按上面的公式算，不随范围变。
+   - 同一辆车对同一个敌人 1 秒内只算一次；接近速度不到 2 m/s（推着走）或伤害不到 1 点不算。不伤友军（装药的阵营是本车的），本车自己撞东西掉的耐久照原版。空车（没人开）滑过去不算。
+   - **按真实动能，数值偏小**（倍率 1、最低难度）：Blacker 20 km/h 撞巨蚁约 0.9 点（不到 1 点不算）、60 km/h 约 8 点；Titan 30 km/h 约 28 点；摩托 100 km/h 约 0.3 点；Nix 一脚（每秒 4 米踩下）约 0.4 点、冲刺时脚每秒 20 米撞上约 10 点；Proteus 一脚约 3 点；巴尔加一脚（每秒 6～12 米）约 60～250 点、一拳（每秒 15 米）约 80 点；对比：战斗机空挂 100 m/s 约 280 点。想让坦克、摩托撞人也有明显伤害就把 `VehicleRamDamage` 调大（例如 20）。`tools/vehicle_ram_check.cpp` 离线算出这些数并核对部件和接触判定。
+   - **旧版安装**：撞击装药 2 / 4 / 12 米是这次新增的，要重新运行安装器选「安装」才有；没有时用已装的里最接近的（日志 `JET impact ... a 8 m charge instead`）。
+   - **待游戏内确认**：部件框的大小是否合适（敌人身体比锁定点大多少，`Debug=1` 时日志 `RAM ... missed` 记下擦过时离得多近）、巴尔加 / Proteus 自己的每帧钩子、各类车读到的质量（日志 `RAM v=... t (the game's body mass)`）。
+
 所有参数都在 `EDF6VehicleCrew.ini`（中文注释）。游戏运行中改完保存，约 1 秒内生效。
 
 ## 安装 / 卸载
@@ -227,7 +237,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
    选 2 只删插件，武器照原版 KM6 轰炸机呼叫，不影响游玩。
 3. 游戏运行中安装器会拒绝执行，不会替你关游戏。
 4. 原版直升机的挂载（`StockHeliStores`，见功能 13）是选装的：在 ini 里改成 1 后运行安装器选「安装」才生成，改回 0 再运行就删掉。
-5. 升级：退出游戏后直接运行新版安装器选「安装」即可，旧版装的武器行原位更新、新行追加在表尾；新版本新增的模型（例如炮舰机 `EDF6VC_JET_GUNSHIP.SGO` 及其炮手座、撞击装药 `EDF6VC_IMPACT_*.SGO`（2 / 4 / 12 米三个是后加的）、炮舰机的机炮炮弹 `EDF6VC_GUNSHIP_CANNON.SGO`）要这样重新安装后才有。
+5. 升级：退出游戏后直接运行新版安装器选「安装」即可，旧版装的武器行原位更新、新行追加在表尾；新版本新增的模型（例如炮舰机 `EDF6VC_JET_GUNSHIP.SGO` 及其炮手座、撞击装药 `EDF6VC_IMPACT_*.SGO`（2 / 4 / 12 米三个是载具撞击伤害一起加的）、炮舰机的机炮炮弹 `EDF6VC_GUNSHIP_CANNON.SGO`）要这样重新安装后才有。
 
 **开发者**：`build.cmd` 构建到 `build/Mods/Plugins/`（DLL 和 ini 都在那里，ini 由 CMake 自动复制）。
 `python tools/build_release.py` 用 PyInstaller 打出 `release/EDF6VehicleCrew-<版本>.zip`（安装器 exe 内含 DLL 与 ini）；
@@ -333,6 +343,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - `src/crew.cpp`：NPC 上车（Vehicle_RideAi）、顶替（slot 49 FindSeat + 上车提示访问器）、每帧入口（slot 55 串接）。
 - `src/heli.cpp`：直升机自动驾驶。
 - `src/playerjet.cpp`：玩家驾驶的战斗机 / 攻击机飞控（`docs/player-jet-re.md`）。
+- `src/vehicleram.cpp`：地面载具的撞击伤害（部件、速度、接触、伤害；公式和部件表在 `src/vehicleram.h`，`tools/vehicle_ram_check.cpp` 离线核对；`docs/vehicle-ram-re.md`）。
 - `src/drill.cpp`：钻头战车的钻头（转速、旋转、热量、近战伤害、钻开建筑；`docs/drill-re.md`）。
 - `src/sidecar.cpp`：边三轮摩托的边车射手（站在边车上用自己的武器）、车身保持水平、玩家坐边车时替玩家开车（`docs/sidecar-re.md`）。
 - `src/launcher.cpp`：喀秋莎的落点显示（CCIP）和高抛瞄准（按镜头看的地面点算发射架仰角），弹道模型与离线验证见 `pylib/ballistics.py` 和 `autoturret/docs/re-notes.md`「Rounds in flight」。

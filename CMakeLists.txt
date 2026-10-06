@@ -5,6 +5,8 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
+# The ground vehicles' ram (its own line, as above).
+target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -68,6 +70,12 @@ set_target_properties(rounds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_
 add_executable(turret_cam_check EXCLUDE_FROM_ALL tools/turret_cam_check.cpp)
 target_compile_options(turret_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(turret_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The ram's pure part (src/vehicleram.h: the kinetic-energy formula the jets and the ground vehicles share, the parts that
+# hit, the contact, the impact charge's pick) and representative rams' damage, offline (tools/vehicle_ram_check.cpp).
+# Not part of the plugin build: cmake --build build --target vehicle_ram_check && buildehicle_ram_check.exe
+add_executable(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check.cpp)
+target_compile_options(vehicle_ram_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(vehicle_ram_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # NPC jets against buildings, offline (tools/jet_obstacle_sim.cpp): the plugin's own jet_flight.cpp, jet_combat.cpp and
 # body506.cpp against a stand-in world of flat ground and box buildings; tools/jet_obstacle_view.py draws its trace.
