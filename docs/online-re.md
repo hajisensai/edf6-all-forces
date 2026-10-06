@@ -325,31 +325,34 @@ NET v=<载具> host=<0/1> auth=<0x630DF0(v,0,0,0,1)> op=<0x630F90(v,1,1)：0 无
 
 | 函数 | 含义 | 单机 |
 |---|---|---|
-| `InSession()`（netprobe.cpp，原有） | 在会话中 | false |
+| `InSession()`（netprobe.cpp，原有） | 在会话中；`0x7748F0` 字节对不上时按**不在会话**（单机原行为），日志 `NET session check off` | false |
 | `OnlineHostOnly()` | 只该在房间里做一次的事：单机或房主 | true |
 | `IsOnlineAuthority(obj)` | 这个对象上插件工作的**结果**算在本机（伤害、NPC 的决定）| true |
 | `OnlineRunsHere(obj)` | 本机运行这个对象自己的模拟（飞控、驾驶）| true |
 | `OnlineMaySeatNpc(veh)` / `SeatNpcRider(veh, spawned)` | 本机可以给它放 NPC 乘员；后者是插件调原版 RideAi 的唯一入口 | true |
+| `OnlineShotCounts(owner, Shooter)` | 这一发插件伤害弹在本机结算（每发恰好一台机器） | true |
+| `NoteLocalCopy(obj, parent)` / `SetSpawnOwner(owner)` / `CopyOwnerOfCaller(human)` | 记录插件副本归谁（呼叫者 / 投掷者 / 救援的本机玩家；载具母舰的无人机随母舰） | — |
 
 规则（`online::Authority` / `RunsHere` / `MaySeatNpc`）：
 
 - 注册过的载具：`0x630F90(v, 1, 1) == 1`（座位 0 乘员的机器，否则最近一位驾驶员的机器，否则房主）。
 - 座位 0 是**没有网络身份**的乘员（RideAi 的 DummyVehicleRider）：只有房主是权威。客机只要放了一个，原版就会把它当成本机的（§3.3）。
-- 插件自己 `CreateObject` 的对象（`+0x128` 低两位为 0）：每台机器都运行自己那份（`RunsHere`）；结果算在**有本机玩家乘坐的那份**，否则算在房主那份（`Authority`）。
+- 插件自己 `CreateObject` 的对象（`+0x128` 低两位为 0）：每台机器都运行自己那份（`RunsHere`）；结果算在**生成它的那台机器的玩家**那份上（呼叫者、投掷者、救援的玩家；母舰放出的无人机随母舰），没有记录的算房主那份（`Authority`）。玩家坐在别人机器所属的副本里开火不结算：那台机器上同一架飞机的副本由 NPC 照样作战。
+- 伤害（`ShotCounts`）：插件副本只看归属，谁开火都一样；注册过的载具上，本机玩家自己扣的扳机（`Shooter::localPlayer`，炮舰的玩家炮弹 / 机炮）在本机结算；载具自己的伤害（NPC 乘员、驾驶员的撞击 / 钻头 / EMC）算在载具的权威上。`tests/online_authority_test.cpp` 用两机判定表断言每种情形恰好一台结算。
 - 其他注册对象：看它自己的标志位，bit0 为 0 就是本机的。
-- 会话函数字节对不上：联机时谁都不是权威（除了本机自己生成的副本），日志 `NET authority off`。
-- `IsPlayer` 改为只认**本机**玩家（另一台机器复制过来的玩家人物带着玩家标志，`RemoteRider` 为真），所以 `Rider::player`、玩家定位（`SeePlayer`）都只指本机玩家。区分 NPC 和玩家用 `IsAnyPlayer`。
+- 会话函数字节对不上：`0x7748F0` 不对按单机；`0x784210` / `0x630F90` 不对时联机下注册对象谁都不是权威（本机记录过归属的副本照常），日志 `NET authority off`。
+- `IsPlayer` 改为只认**本机**玩家（另一台机器复制过来的玩家人物带着玩家标志，`RemoteRider` 为真），所以 `Rider::player`、玩家定位（`SeePlayer`）都只指本机玩家。区分 NPC 和玩家用 `IsAnyPlayer`；「有玩家在车上，交给他」用 `AnyPlayerIn(seat)`（AutoCrew 不放 NPC、410 门炮 AI 不覆盖别人的门炮、NPC 直升机的玩家乘客模式、喷气机回收不删有人的机）。
 
 ### 10.2 已接入的门
 
 | 功能 | 门 | 效果 |
 |---|---|---|
 | AutoCrew（crew.cpp `Crew`）、换座位的驾驶员、玩家飞机交还 / 炮手座的驾驶员 | `OnlineMaySeatNpc` + `SeatNpcRider` | 注册过的载具只在房主那边放 NPC；客机上的副本由原版复制驱动 |
-| 插件伤害弹（jet_bay.cpp `ShellMake`：撞击、钻头、EMC、炮舰机炮、Proteus） | `IsOnlineAuthority(owner)` | 非权威机器照样生成同一发弹（看得见），伤害为 0：只结算一次 |
-| NPC 直升机飞控（heli.cpp） | `OnlineRunsHere` + `MirrorStick` / `Replay` | 只在权威机器飞；写进输入块的值同时按原版读回的方式写进座位 0 摇杆块（LX=-横移、LY=-前后、RX=-偏航、`+0x2E0`=油门），经掩码 4 复制；其他机器把复制来的摇杆拷回输入块，用同一组 Tune 参数；30 帧没收到就还原参数 |
+| 插件伤害弹（jet_bay.cpp `ShellMake`：撞击、钻头、EMC、炮舰机炮、Proteus） | `OnlineShotCounts(owner, by)` | 不结算的机器照样生成同一发弹（看得见），伤害为 0：每发恰好结算一次 |
+| NPC 直升机飞控（heli.cpp） | `OnlineRunsHere` + `MirrorStick` / `Replay` | 只在权威机器飞；写进输入块的值同时按原版读回的方式写进座位 0 摇杆块（LX=-横移、LY=-前后、RX=-偏航、`+0x2E0`=油门），经掩码 4 复制；其他机器把复制来的摇杆拷回输入块，用同一组 Tune 参数；摇杆块全为 0（原版 30 帧收不到就清零；`+0x1D7C` 计数到 30 清块后归 0 循环，`0x652259`，不能当新鲜度用；从没飞过的直升机构造时就是 0）时不建记录、不写输入、还原参数 |
 | 插件喷气机 NPC、502 爬行者 NPC 驾驶、盾兵的盾推直升机（写速度） | `OnlineRunsHere` | 只在运行它的机器上做 |
 | 传送舰激光（carrierlaser.cpp `Start`） | `IsOnlineAuthority(ship)` | 只在敌舰的权威（原版敌人：房主）上开始 |
-| 空袭兵呼叫（airstrike.cpp） | 呼叫自带的航向 + 选择编码 | 进场方向取 IFC_Start 参数矩阵的前向行（由消息 9 的航向算出，各机相同）；本机选择写进航向浮点最低 12 位（`call_net.h`：5 位机种 + 7 位校验，航向至多偏 2^-11），由确认态发送航向的那次调用（`0x6A934F` → `0x12B57E0`，经桩把武器 `rbx` 交给钩子）发出，呼叫者和其他机器都按解出的机种生成 |
+| 空袭兵呼叫（airstrike.cpp） | 呼叫自带的航向 + 种子里的选择 | 单机完全照旧。联机时进场方向取 IFC_Start 参数矩阵的前向行（`+0x40`，由消息 9 的航向算出，各机相同；行的正负没实测）；本机选择写进消息 9 种子的高 32 位（`call_net.h`：26 位固定标记 + 6 位机种，误认 2^-26），由确认态发送种子的那次调用（`0x6A9375` → `0x12B5690`，经桩把武器 `rbx` 交给钩子）发出，呼叫者保留发出的种子（`+0xBC8`）。只有联机且呼叫者是别的机器的玩家时才从收到的种子（`+0x1958`）解码；本机玩家用自己记下的发出值 |
 
 ### 10.3 没做到的，和原因
 
@@ -367,6 +370,7 @@ NET v=<载具> host=<0/1> auth=<0x630DF0(v,0,0,0,1)> op=<0x630F90(v,1,1)：0 无
 - 「只有房主决定」：用 `OnlineHostOnly()`，不要再加 `IsRoomHost()`（p7 在 netprobe.cpp 里新加的那个和它是同一件事）。
 - 「这个士兵由本机运行」：用 `IsOnlineAuthority(soldier)` / `OnlineRunsHere(soldier)`，不要自己读 `+0x128` bit0（规则相同，但没注册的对象会按房主处理）。
 - 「这辆车上的 NPC 坦克 / 炮手由谁开」（npcpost.cpp 写座位 0 摇杆、`NpcGunnersInput`）：`IsOnlineAuthority(vehicle)`；座位 0 摇杆写在权威机器上本来就会经掩码 4 复制。
+- 插件伤害弹走 `ShellMake` 就自动过 `OnlineShotCounts`；NPC 士兵开的算载具 / 士兵权威（`Shooter::vehicle`），只有本机玩家自己扣扳机才传 `Shooter::localPlayer`。插件新生成的对象调 `NoteLocalCopy`。
 - 放 NPC 乘员一律走 `SeatNpcRider`；让 NPC 下车（`SeatKick`）也只在 `OnlineMaySeatNpc(vehicle)` 的机器上做。
 - 区分「NPC 士兵 / 玩家」用 `IsAnyPlayer`：`IsPlayer` 现在只认本机玩家，p7 `npcai.cpp` 里 `!IsPlayer(o)` 当作「是 NPC」的几处（553、802、813、816 行）合并前要改成 `!IsAnyPlayer(o)`，否则房主会把客机玩家当成可招募的 NPC。
 - 标记键（Q）、地图命令：本机输入。小队由房主决定时，客机玩家的标记 / 命令要么只在单机生效，要么需要一条新的联机消息，现在没有。
