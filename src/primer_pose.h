@@ -168,12 +168,16 @@ inline void AimLocal(const float* bind,const float* dir,float* out) {
 }
 
 // The elevation (rad) that lobs a round of `speed` m/s falling at `g` m/s^2 onto a point `across` m away and `up` m
-// higher: the high arc (a mortar's: over cover), at most `most`; false when out of its reach.
+// higher: prefer the high arc (a mortar's: over cover), or the low arc when only it fits the mount's `most` angle.
+// A clamped angle is not a trajectory to the target. False when neither solution is within reach and the limit.
 inline bool LobElevation(float across,float up,float speed,float g,float most,float* out) {
-    const float v2=speed*speed,disc=v2*v2-g*(g*across*across+2.0f*up*v2);
+    const double v2=static_cast<double>(speed)*speed,disc=v2*v2-g*(static_cast<double>(g)*across*across+2.0*up*v2);
     if(disc<0.0f || across<1.0f)return false;
-    const float a=std::atan2(v2+std::sqrt(disc),g*across);
-    *out=a>most ? most : a;
+    const double root=std::sqrt(disc),den=static_cast<double>(g)*across;
+    double angle=std::atan2(v2+root,den);
+    if(angle>most)angle=std::atan2(v2-root,den);
+    if(angle>most)return false;
+    *out=static_cast<float>(angle);
     return true;
 }
 }  // namespace primer

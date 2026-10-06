@@ -187,3 +187,9 @@ add_executable(primer_flight_sim tools/primer_flight_sim.cpp src/primer.cpp src/
 target_compile_options(primer_flight_sim PRIVATE /utf-8)
 target_link_libraries(primer_flight_sim PRIVATE edf6common)
 set_target_properties(primer_flight_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(primer_ballistics_test tools/primer_ballistics_test.cpp)
+    add_test(NAME primer_ballistics COMMAND primer_ballistics_test)
+endif()
