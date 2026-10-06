@@ -210,6 +210,7 @@ struct PJet {
     int stores;                  // what it carries, for the cockpit
     const char* storeName[kMostStores];
     int storeRounds[kMostStores];
+    int storeRole[kMostStores];
     bool bomb,hasImpact;         // the store picked is a bomb; where it would hit now (Impact)
     float impact[3];
     bool targetHeld;             // the target key / X down last frame
@@ -915,7 +916,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     // Heard through warn.cpp WarnTick (from the threats Threats gathers), with every aircraft the player flies.
     j.threat=MissileHoming(pos,kThreatRadius) ? 2 : jet::LockingOn(v) ? 1 : 0;
     Flares(j,v,s,pos);
-    for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;}
+    for(int i=0;i<n;++i){j.storeName[i]=st[i].spec->name;j.storeRounds[i]=st[i].ammo;j.storeRole[i]=static_cast<int>(st[i].spec->role);}
     // The impact point before the trigger: the bomb bay opens on it (FireSpecial kBay). Only what falls as a bomb (a
     // bomb store, the bay); the shells' and drones' cross is their aim point (SpecialFrame), no fall to trace.
     j.bomb=st[j.store].spec->role==StoreRole::bomb;
@@ -1654,7 +1655,7 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
             if(!Normalize(path))std::memcpy(path,j.aim,12);
             for(int i=0;i<3;++i){r.aim[i]=pos[i]+j.aim[i]*kAimMark;r.path[i]=pos[i]+path[i]*kAimMark;}
             r.stores=j.stores;r.store=j.store;
-            for(int i=0;i<j.stores && i<kMostStores;++i){r.storeName[i]=j.storeName[i];r.storeRounds[i]=j.storeRounds[i];}
+            for(int i=0;i<j.stores && i<kMostStores;++i){r.storeName[i]=j.storeName[i];r.storeRounds[i]=j.storeRounds[i];r.storeRole[i]=j.storeRole[i];}
             r.bomb=j.bomb;r.hasImpact=j.hasImpact;std::memcpy(r.impact,j.impact,12);
             r.lock=j.lock;std::memcpy(r.lockAt,j.lockAt,12);r.lockProgress=j.lockProgress;
             r.sym=j.sym;
