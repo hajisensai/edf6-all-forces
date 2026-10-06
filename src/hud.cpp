@@ -21,6 +21,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "gear.h"
+#include "hudscale.h"
 #include "map_cam.h"
 #include "map_marks.h"
 #include "hud_cue.h"
@@ -72,11 +73,19 @@ const Sig kTextSigs[]={
     {kTextFree,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48},12},
     {0x808568,{0x48,0x8B,0x0D,0x51,0xA4,0x8A,0x01},7},            // the rescue message's font manager: [EDF+0x20B29C0]
 };
+// The screen the game's HUD is laid out on (src/hudscale.h, docs/hud-re.md §0.1): *(*(EDF+0x2137090)+0x10), its width
+// and height (int) at +0x20 / +0x24. A HUD text of the game's reads it so (0x94E24F: mov rax,[EDF+0x2137090];
+// mov rcx,[rax+0x10]; mov eax,[rcx+0x20]), as does the follower gauge's bar (0x8044B1).
+constexpr std::size_t kUiScreen=0x2137090,kUiScreenObj=0x10,kUiW=0x20,kUiH=0x24;
+const Sig kUiSigs[]={
+    {0x94E24F,{0x48,0x8B,0x05,0x3A,0x8E,0x7E,0x01,0x48,0x8B,0x48,0x10,0x8B},12},
+    {0x8044B1,{0x48,0x8B,0x05,0xD8,0x2B,0x93,0x01},7},
+};
 // The rescue message's draw (0x808410) makes these calls in this order: the sequence this file repeats.
 const unsigned kTextCalls[][2]={{0x808611,kTextMake},{0x808622,kTextBegin},{0x80863F,kTextMeasure},{0x8086A9,kTextDraw},
                                 {0x8086B5,kTextEnd},{0x8086BF,kTextFree}};
 
-bool quadOk=false,textOk=false;
+bool quadOk=false,textOk=false,uiOk=false;
 
 // --- What the game thread gathers (HudSee) and publishes (HudPublish) ---
 constexpr ULONGLONG kFreshMs=500;   // a readout whose vehicle has not been seen this long (game ms) is not drawn,
@@ -264,6 +273,7 @@ struct Text {
     unsigned char* font;          // kFontSize bytes, 16-aligned
     bool made;                    // the renderer made (on the first line measured: none when nothing is shown)
     bool begun;                   // between a Begin and its End: a fault in between still owes the End
+    float s=1.0f;                 // the HUD's scale (hudscale.h): every line's font scale is times it
 };
 float TextScale(float scale) noexcept {
     const float snapped=std::round(scale/kTextScaleStep)*kTextScaleStep;
@@ -282,7 +292,7 @@ void Font(Text& t,float scale) noexcept {
     Put<float>(t.font,4,scale);Put<float>(t.font,8,scale);   // 0x113A3F0
 }
 void Measure(Text& t,Line& l) noexcept {
-    Font(t,l.scale);
+    Font(t,hudscale::Font(l.scale,t.s));
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
     t.begun=true;
     alignas(16) float size[4]{};
@@ -293,7 +303,7 @@ void Measure(Text& t,Line& l) noexcept {
     l.h=std::isfinite(size[1]) && size[1]>0.0f ? size[1] : 0.0f;
 }
 void Draw(Text& t,const Line& l) noexcept {
-    Font(t,l.scale);
+    Font(t,hudscale::Font(l.scale,t.s));
     reinterpret_cast<TextBeginFn>(image+kTextBegin)(t.renderer,t.ctx,t.font);
     t.begun=true;
     alignas(16) const float m[16]={1.0f,0.0f,0.0f,0.0f, 0.0f,1.0f,0.0f,0.0f, 0.0f,0.0f,1.0f,0.0f, l.x,l.y,0.0f,1.0f};
@@ -2134,6 +2144,23 @@ int StockCells(const StockHudReadout& r,LoadCell* cells) noexcept {
     return n;
 }
 
+// The game's screen (kUiScreen): 0 x 0 when it is not there to read (hudscale.h then takes the viewport's).
+void UiScreen(int* w,int* h) noexcept {
+    *w=*h=0;
+    if(!uiOk)return;
+    __try {
+        const void* const holder=At<const void*>(image,kUiScreen);
+        const void* const screen=holder ? At<const void*>(holder,kUiScreenObj) : nullptr;
+        if(screen){*w=At<std::int32_t>(screen,kUiW);*h=At<std::int32_t>(screen,kUiH);}
+    } __except(EXCEPTION_EXECUTE_HANDLER){*w=*h=0;}
+}
+// The HUD's scale for a viewport `w` x `h` (hudscale.h: the game's screen, the ini's HudScale).
+float HudScaleOf(int w,int h) noexcept {
+    int uiW,uiH;
+    UiScreen(&uiW,&uiH);
+    return hudscale::Of(uiW,uiH,w,h,Cfg().hudScale);
+}
+
 // What is drawn, logged when it changes (Debug, once in 10 s at most).
 void DrawLog(int shown,int panels,const Line* lines,int count,int width,int height) noexcept {
     static int lastShown=-1,lastPanels=-1;
@@ -2141,7 +2168,10 @@ void DrawLog(int shown,int panels,const Line* lines,int count,int width,int heig
     const ULONGLONG now=GetTickCount64();
     if(!Cfg().debug || (shown==lastShown && panels==lastPanels) || now-at<10000)return;
     at=now;lastShown=shown;lastPanels=panels;
-    Log("HUD draw %dx%d: %d readout(s), %d carrier panel(s), text=%d",width,height,shown,panels,textOk);
+    int uiW,uiH;
+    UiScreen(&uiW,&uiH);
+    Log("HUD draw %dx%d (screen %dx%d, scale %.3f): %d readout(s), %d carrier panel(s), text=%d",width,height,uiW,uiH,
+        HudScaleOf(width,height),shown,panels,textOk);
     for(int i=0;i<count && i<12;++i)Log("HUD   \"%ls\" at (%.0f,%.0f) %.0fx%.0f",lines[i].text,lines[i].x,lines[i].y,lines[i].w,lines[i].h);
 }
 }  // namespace
@@ -2152,8 +2182,11 @@ bool InstallHud() noexcept {
         for(const auto& q:kQuadSigs)quad=quad && Matches(q.rva,q.bytes,q.size);
         for(const auto& t:kTextSigs)text=text && Matches(t.rva,t.bytes,t.size);
         for(const auto& c:kTextCalls)text=text && CallsTo(c[0],c[1]);
-        quadOk=quad;textOk=quad && text;
-        Log("HOOK hud quad=%d text=%d (drawn from the follower gauge's call: HOOK sub gauge=1 needed)",quadOk,textOk);
+        bool ui=true;
+        for(const auto& u:kUiSigs)ui=ui && Matches(u.rva,u.bytes,u.size);
+        quadOk=quad;textOk=quad && text;uiOk=ui;
+        Log("HOOK hud quad=%d text=%d screen=%d (drawn from the follower gauge's call: HOOK sub gauge=1 needed; screen=0: sized "
+            "on the viewport)",quadOk,textOk,uiOk);
         return quadOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -2733,10 +2766,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         void* const drawer=At<void*>(image,kQuadDrawer);
         const int w=At<std::int32_t>(viewport,8),h=At<std::int32_t>(viewport,0xC);
         if(!drawer || w<=0 || h<=0)return;
-        const float width=static_cast<float>(w),height=static_cast<float>(h),s=height/1080.0f;
+        const float width=static_cast<float>(w),height=static_cast<float>(h),s=HudScaleOf(w,h);
         alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
         Text text{};
-        text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);
+        text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines];
         int at=0,shown=0;
