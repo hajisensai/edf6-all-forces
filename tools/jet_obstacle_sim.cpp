@@ -10,6 +10,7 @@
 //   jet_obstacle_sim --scenario a|b|b2|c|c2|d|d0 [--kind strike|fighter] [--seconds N] [--out DIR] [--tag NAME]
 //   jet_obstacle_sim --selftest [--out DIR]
 //   jet_obstacle_sim --edge-suite   (the soft edge's cases, EdgeSuite: exit 1 when one fails; edge_suite.log here)
+//   jet_obstacle_sim --player-rotor-suite (real Hover: player/hail goals in the NPC band remain reachable)
 //
 //   a   level 60 m over the ground at cruise, heading +z, a 150 m tall 60x60 building 1500 m ahead
 //   b   the same at a 400 m tall 80x80 tower (too steep to climb: it must turn)
@@ -485,6 +486,42 @@ EdgeOut EdgeRun(const EdgeCase& c) {
     return o;
 }
 
+// The player and a hail use Hover too. At a legal position outside the NPC soft box, a player's outward input must
+// remain outward, and a requested landing point must stay reachable. NPCs must still return to their inner box.
+int PlayerRotorSuite() {
+    config=Config{};groundHalf=1500.0f;
+    int failures=0,cases=0;
+    for(const Role role:{Role::carrier,Role::blast,Role::doll})for(const int axis:{0,2})for(const float lift:{0.0f,10.0f}) {
+        const Kind& kind=KindOf(role);
+        std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+        Jet j{};j.role=role;
+        const airbound::Box soft=JetSoftBox(j),hard=PlayBox();
+        const int k=axis/2;
+        const float start=0.5f*(soft.hi[k]+hard.hi[k]);
+        float at[3]={0.0f,100.0f,0.0f},goal[3]={0.0f,100.0f,0.0f};
+        at[axis]=start;goal[axis]=start+100.0f;
+        const float direction[3]={0.0f,0.0f,1.0f};
+        for(const bool npc:{false,true}) {
+            Place(j,mem.data(),ctrl.data(),role,at,direction,0.0f,0.0f);
+            float* pos=reinterpret_cast<float*>(mem.data()+kPosition);
+            Hover(j,kind,mem.data(),pos,goal,goal,20.0f,kHoverClimb,kDt,lift,npc);
+            const bool rightWay=npc ? j.m.vel[axis]<0.0f : j.m.vel[axis]>0.0f;
+            for(int frame=0;frame<3600;++frame) {
+                Hover(j,kind,mem.data(),pos,goal,goal,20.0f,kHoverClimb,kDt,lift,npc);
+                for(int i=0;i<3;++i)pos[i]+=j.m.vel[i]*kDt;
+            }
+            const float expected=npc ? soft.hi[k] : goal[axis];
+            const bool reached=npc ? pos[axis]<=expected+15.0f : std::fabs(pos[axis]-expected)<15.0f;
+            const bool ok=rightWay && reached;
+            failures+=!ok;++cases;
+            std::printf("rotor %-7s %s axis %d lift %.0f: start %.0f, goal %.0f, reached %.1f (%s)\n",kind.name,
+                        npc ? "NPC   " : "player",axis,lift,start,expected,pos[axis],ok ? "ok" : "FAIL");
+        }
+    }
+    std::printf("player rotor suite: %d production Hover cases, %d failed\n",cases,failures);
+    return failures ? 1 : 0;
+}
+
 int EdgeSuite() {
     static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
     image=fakeImage.data();
@@ -549,7 +586,7 @@ int main(int argc,char** argv) {
     const char* outDir=".";
     std::string tag;
     float seconds=0.0f;
-    bool selftest=false;
+    bool selftest=false,playerRotors=false;
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--scenario") && a+1<argc)scenario=argv[++a];
@@ -558,12 +595,14 @@ int main(int argc,char** argv) {
         else if(!std::strcmp(argv[a],"--out") && a+1<argc)outDir=argv[++a];
         else if(!std::strcmp(argv[a],"--tag") && a+1<argc)tag=argv[++a];
         else if(!std::strcmp(argv[a],"--selftest"))selftest=true;
+        else if(!std::strcmp(argv[a],"--player-rotor-suite"))playerRotors=true;
         else {std::fprintf(stderr,"unknown argument %s\n",argv[a]);return 1;}
     }
     // The image: zeroed, so the ceiling's pointer (image+0x20B2998) reads null: no ceiling (CeilingY 1e9).
     static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
     image=fakeImage.data();
     config.debug=true;
+    if(playerRotors)return PlayerRotorSuite();
     if(selftest)return SelfTest(outDir);
     if(tag.empty())tag=std::string(scenario)+"_"+kindName;
     const std::string csvPath=std::string(outDir)+"/"+tag+".csv",logPath=std::string(outDir)+"/"+tag+".log";

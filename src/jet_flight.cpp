@@ -694,13 +694,13 @@ void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) no
 // `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.m.thrust gets the thrust
 // asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
-           float dt,float lift) noexcept {
+           float dt,float lift,bool npcGoal) noexcept {
     const Lean& how=*k.lean;
     Motion& mo=j.m;
-    // Its goal inside its soft edge (airbound.h): it brakes onto it (below), so it stops there, never past it.
+    // NPC goals stop inside their soft edge. Player flight and its hail retain their requested goal instead.
     float inside[3];
     std::memcpy(inside,goal,12);
-    airbound::ClampIn(JetSoftBox(j),inside,0.0f);
+    if(npcGoal)airbound::ClampIn(JetSoftBox(j),inside,0.0f);
     goal=inside;
     float to[3]={goal[0]-pos[0],0.0f,goal[2]-pos[2]};
     const float d=Len(to);

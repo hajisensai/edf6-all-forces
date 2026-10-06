@@ -32,8 +32,11 @@ constexpr float kHailRange=6000.0f;   // m: the farthest one it calls
 // Whether the plugin holds `v` for the player (see the file comment).
 bool Held(const unsigned char* v) noexcept {
     if(SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::player)return true;
+    // A newly spawned catch twin has no PJet entry until PlayerJetFrame passes this gate and calls Make.
+    // Check its control block too: an address reused after the catch disappeared is not the catch.
+    if(catchFlight.v==v && bail.caught.Is(v))return true;
     const PJet* j=Find(v);
-    return j && (j->driven || j->autopilot || j->hail.phase!=kHailNone || j->keep || catchFlight.v==v);
+    return j && (j->driven || j->autopilot || j->hail.phase!=kHailNone || j->keep);
 }
 // Its entry, once it is not held: let go of.
 void Forget(const unsigned char* v) noexcept {
@@ -288,7 +291,8 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
         goal[0]+=dir[0]*reach;goal[2]+=dir[2]*reach;
     }
     const JetMass* const mass=JetMassOf(BodyMark(v));   // the player's own lift (hover_lift.h; the NPCs' Hover passes none)
-    jet::Hover(e,k,v,pos,goal,face,speed,HoverClimb(k),dt,mass ? hover::PlayerLift(mass->mass,Cfg().playerRotorLift) : 0.0f);
+    // Player flight already uses the map walls; a hail must reach its landing point outside the NPC patrol band too.
+    jet::Hover(e,k,v,pos,goal,face,speed,HoverClimb(k),dt,mass ? hover::PlayerLift(mass->mass,Cfg().playerRotorLift) : 0.0f,false);
 }
 
 // The rotor craft's flight done: the player's record from its entry's, the nacelles, the doll; parked when it sits

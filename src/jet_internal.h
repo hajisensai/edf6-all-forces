@@ -502,8 +502,9 @@ const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
 // `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
+// `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
-           float dt,float lift=0.0f) noexcept;
+           float dt,float lift=0.0f,bool npcGoal=true) noexcept;
 // A wing's step toward `want` at `speed`: the path, the body's attitude onto it, its pose (elevons).
 void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* nose,float* want,float speed,float dt,ULONGLONG ms) noexcept;
 void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noexcept;
