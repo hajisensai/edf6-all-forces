@@ -2432,7 +2432,8 @@ void HeliFrame(unsigned char* vehicle) noexcept {
         return;
     }
     AssistOff(vehicle);   // an NPC in its seat again: Tune's stock is the heli's own
-    if(IsJet(vehicle)){if(Cfg().jetPilot)JetFrame(vehicle);return;}
+    // The plugin's jets: its own copies, flown on every machine (OnlineRunsHere); a registered one only where it is run.
+    if(IsJet(vehicle)){if(Cfg().jetPilot && OnlineRunsHere(vehicle))JetFrame(vehicle);return;}
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(!Cfg().heliPilot)return;

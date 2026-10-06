@@ -23,6 +23,7 @@
 #include "crew.h"
 #include "heli.h"
 #include "memory.h"
+#include "online_authority.h"
 #include <cmath>
 
 namespace crew {
@@ -184,6 +185,9 @@ void ShieldVehicle(unsigned char* v) noexcept {
     // The plugin's bodies: from their own steps. The helicopters only (stock and called): their rigid body is at
     // +0x1650 (docs/aircraft-re.md); a ground vehicle's is not known yet, and only a bike gets near kBlockSpeed.
     if(!ok || BodyOf(v)!=PluginBody::none || v[kDead] || !IsHelicopter(v))return;
+    // Online, only where the heli is run (online_authority.h): a copy run elsewhere is pulled to the pose it is sent, and
+    // a velocity written here would fight that pull.
+    if(!OnlineRunsHere(v))return;
     void* const body=At<void*>(v,kHeliBody);
     if(!body)return;
     const float* now=reinterpret_cast<GetVecFn>(image+kGetLinVel)(body);

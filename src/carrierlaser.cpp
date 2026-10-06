@@ -38,6 +38,7 @@
 // deleted) when the last carrier is gone, though nothing of the carriers runs any more.
 #include "crew.h"
 #include "memory.h"
+#include "online_authority.h"
 #include "subcarrier.h"
 #include "vecmath.h"
 #include <cmath>
@@ -397,6 +398,9 @@ void Moving(Ship& s,ULONGLONG ms) noexcept {
 
 // Ship `s` (idle, due) starts: sent over the nearest carrier within kShipRange, or the fallback charge.
 bool Start(Ship& s,const Carriers& live,ULONGLONG ms) noexcept {
+    // Online, only where the ship is run (online_authority.h: its owner, the host for the stock enemies): elsewhere its
+    // copy follows that machine's flight, and a second charge would fly it against it and burn a second beam.
+    if(!IsOnlineAuthority(s.ship))return false;
     const float* pos=reinterpret_cast<const float*>(s.ship+kPosition);
     int best=-1;float bestD=kShipRange;
     for(int i=0;i<live.n;++i) {

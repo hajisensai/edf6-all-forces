@@ -8,7 +8,11 @@ a failure. What it holds in place:
     made with no damage where its owner is not the authority;
   - the NPC heli pilot flies only where the heli is run (heli.cpp HeliFrame's Replica before Fly), puts its input on
     seat 0's stick (Fly -> MirrorStick), and a replica copies that stick back with the same signs;
+  - the shield's push, the crawler's NPC driver, the jets' NPC pilot run where the vehicle is run, and a teleportation
+    ship's portal laser starts only where the ship is run;
   - the Air Raider's calls launch along the call's own heading, read the pick sent with the call, and send it;
+  - the shield's push, the crawler's NPC driver, the jets' NPC pilot run where the vehicle is run, and a teleportation
+    ship's portal laser starts only where the ship is run;
   - the Air Raider's calls launch along the call's own heading, read the pick sent with the call, and send it;
   - IsPlayer (common/seat.cpp) leaves out another machine's player.
 """
@@ -126,6 +130,21 @@ def check_heli(root: str) -> None:
             fail(f'src/heli.cpp: MirrorStick ({put}) and Replay ({back}) no longer the stock copy\'s signs')
 
 
+# Per-frame plugin work on another machine's object: each must ask the gate first (file, function, the gate's call).
+FRAME_GATES = (
+    ('src/shield.cpp', 'void ShieldVehicle(unsigned char* v)', 'OnlineRunsHere(v)', 'kSetLinVel'),
+    ('src/ground.cpp', 'void GroundFrame(unsigned char* vehicle)', 'OnlineRunsHere(vehicle)', 'Drive('),
+    ('src/carrierlaser.cpp', 'bool Start(Ship& s,const Carriers& live,ULONGLONG ms)', 'IsOnlineAuthority(s.ship)', 's.carrier='),
+    ('src/heli.cpp', 'void HeliFrame(unsigned char* vehicle)', 'OnlineRunsHere(vehicle))JetFrame(', 'JetFrame('),
+)
+
+
+def check_frames(root: str) -> None:
+    for rel, signature, gate, work in FRAME_GATES:
+        if not before(body(code_only(read(root, rel)), signature), gate, work):
+            fail(f'{rel} {signature.split("(")[0]}: {work} runs without {gate} before it')
+
+
 def check_calls(root: str) -> None:
     code = code_only(read(root, 'src/airstrike.cpp'))
     launch = body(code, 'int LaunchCall(')
@@ -150,7 +169,7 @@ def main() -> int:
     root = parser.parse_args().root
     files = sources(root)
     checks = (lambda: check_rvas(root, files), lambda: check_ride_ai(root, files), lambda: check_damage(root),
-              lambda: check_heli(root), lambda: check_calls(root), lambda: check_player(root))
+              lambda: check_heli(root), lambda: check_frames(root), lambda: check_calls(root), lambda: check_player(root))
     for c in checks:
         c()
     for f in failures:
