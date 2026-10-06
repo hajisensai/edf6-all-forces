@@ -16,11 +16,23 @@
 // stock HUD drawn whole (HudDraw) at 1280x720 .. 3840x2160 and in split viewports, its text and its block / RWR scope
 // against the 1080-line design times the scale, in size and in place; exit code 1 when one is off.
 //
-//   hud_view [--out DIR]      (default %TEMP%\edf6_hud_view), then: python tools/hud_view.py DIR
+// Every scene is drawn in each of the HUD's languages (src/hudtext.h): English into DIR, the others into DIR\<language>
+// (zh-CN, zh-TW, ja). The stand-in text is as wide as the game's fonts make it (the game's font chain, docs/hud-re.md
+// §11: a CJK character a full em; Latin half an em in English and Japanese, whose first font is the monospaced New
+// Cezanne, and the Chinese fonts' own advances in Chinese). In each language every scene's text must stay on the
+// screen, and no two of its lines may overlap that do not in English; the layout checks above run in each language too.
+// Each scene's glyphs (character and font scale: the game's glyph cache keys, §2.1) are counted.
+//
+//   hud_view [--out DIR] [--lang en|zh-CN|zh-TW|ja]      (default %TEMP%\edf6_hud_view, every language), then:
+//   python tools/hud_view.py DIR
 #include "../src/hud.cpp"
 #include "../src/map_cam.h"
 #include <cstdio>
+#include <map>
+#include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -32,6 +44,9 @@ bool hasTurret=false;
 edf::aimlink::TurretReadoutV1 sceneTurret{};
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false;
 bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
+// When the scene's readouts were taken (the game thread's tick): before HudDraw takes its own `now`. The gear's read the
+// tick in the middle of the draw, a 16 ms tick later at times: `now - tick` wrapped and the gear panel was not drawn.
+ULONGLONG sceneTick=0;
 MapReadout sceneMap{};
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
@@ -58,11 +73,39 @@ void SetScreen(int w,int h) {
     std::memcpy(uiScreen+kUiW,&w,4);std::memcpy(uiScreen+kUiH,&h,4);
 }
 constexpr float kGlyphH=40.0f,kGlyphW=0.52f;
+// A character's advance in em (see the top): CJK and full-width a whole em; Latin by the language's first font.
+// kChineseLatin: the Chinese fonts' (AR UDJingXiHei G30 / B5, Root.cpk UI/) advances of ' ' .. '~'.
+constexpr float kChineseLatin[95]={0.283f,0.344f,0.449f,0.706f,0.553f,0.862f,0.728f,0.25f,0.33f,0.33f,0.506f,0.543f,0.295f,0.464f,
+    0.268f,0.418f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.302f,0.303f,0.544f,0.544f,0.544f,0.539f,0.714f,
+    0.678f,0.699f,0.672f,0.712f,0.632f,0.618f,0.684f,0.737f,0.292f,0.55f,0.694f,0.6f,0.874f,0.762f,0.706f,0.678f,0.709f,0.699f,
+    0.635f,0.588f,0.725f,0.623f,0.929f,0.623f,0.592f,0.61f,0.349f,0.418f,0.349f,0.624f,0.585f,0.46f,0.571f,0.582f,0.509f,0.582f,
+    0.546f,0.329f,0.587f,0.6f,0.262f,0.279f,0.564f,0.305f,0.945f,0.599f,0.549f,0.582f,0.582f,0.464f,0.535f,0.348f,0.6f,0.531f,
+    0.814f,0.508f,0.522f,0.504f,0.371f,0.358f,0.371f,0.495f};
+float Advance(wchar_t c) {
+    if(c>=0x2E80)return 1.0f;
+    const hudtext::Lang l=hudtext::InUse();
+    if((l==hudtext::Lang::zhCN || l==hudtext::Lang::zhTW) && c>=0x20 && c<0x7F)return kChineseLatin[c-0x20];
+    return kGlyphW;
+}
+float Width(const wchar_t* text) {
+    float w=0.0f;
+    for(;*text;++text)w+=Advance(*text);
+    return w*kGlyphH*fontScale;
+}
+// The text lines a scene drew (while `recording`) and its glyphs: (character, font scale in kTextScaleStep units).
+struct Drew { float x0,y0,x1,y1; std::wstring text; };
+std::vector<Drew> drew;
+std::set<std::pair<wchar_t,int>> glyphs;
 
 // The recorders the stand-in image's functions jump to.
+struct PanelBox { float x0,y0,x1,y1; };
+std::vector<PanelBox> panels;   // the scene's panels (the HUD's kPanel rects) while `recording`
+bool recording=false;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     float p[4][2];
     for(int i=0;i<n && i<4;++i){p[i][0]=v[i*3]*m[0]+v[i*3+1]*m[4]+m[12];p[i][1]=v[i*3]*m[1]+v[i*3+1]*m[5]+m[13];}
+    if(recording && n==4 && std::memcmp(rgba,kPanel,16)==0 && p[0][1]==p[1][1] && p[0][0]==p[2][0])
+        panels.push_back(PanelBox{p[0][0],p[0][1],p[3][0],p[3][1]});
     if(boxing)for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);
     if(!out)return;
     for(int i=0;i+2<n && i<2;++i)
@@ -72,11 +115,16 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
 void* __fastcall MakeRec(void*,void* r) { return r; }
 void __fastcall BeginRec(void*,void*,void* font) { fontScale=*reinterpret_cast<const float*>(static_cast<unsigned char*>(font)+4); }
 void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bool) {
-    size[0]=static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale;size[1]=kGlyphH*fontScale;
+    size[0]=Width(text);size[1]=kGlyphH*fontScale;
 }
 void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar_t* text,std::int64_t) {
     tallest=std::fmax(tallest,kGlyphH*fontScale);
-    if(boxing){Grow(m[12],m[13]);Grow(m[12]+static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale,m[13]+kGlyphH*fontScale);}
+    if(boxing){Grow(m[12],m[13]);Grow(m[12]+Width(text),m[13]+kGlyphH*fontScale);}
+    if(recording) {
+        drew.push_back(Drew{m[12],m[13],m[12]+Width(text),m[13]+kGlyphH*fontScale,text});
+        const int step=static_cast<int>(std::lround(fontScale/kTextScaleStep));
+        for(const wchar_t* c=text;*c;++c)if(*c!=L' ')glyphs.insert({*c,step});
+    }
     if(!out)return;
     char narrow[256];
     WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
@@ -116,7 +164,7 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
-    *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=GetTickCount64();
+    *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
     return true;
 }
 bool IsSub(const void*) noexcept { return false; }
@@ -159,6 +207,65 @@ void MapCamera(const MapReadout& m,float width,float height,float* vp) {
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
 }
+// What a scene's text did, per language: the pairs of its lines that overlap (by draw order), English's kept to compare.
+struct SceneText { std::set<std::pair<int,int>> overlaps; std::vector<std::wstring> texts; };
+std::map<std::wstring,SceneText> english;
+int textFailed=0;
+std::size_t mostGlyphs=0;
+std::string mostGlyphsAt;
+std::string Narrow(const std::wstring& w) {
+    char n[512];
+    WideCharToMultiByte(CP_UTF8,0,w.c_str(),-1,n,sizeof(n),nullptr,nullptr);
+    return n;
+}
+// `draw` recorded as scene `name` on a screen `width` x 1080: its text on the screen, its overlaps none English lacks.
+template<class F> void Record(const wchar_t* name,F draw,int width) {
+    drew.clear();glyphs.clear();panels.clear();recording=true;sceneTick=GetTickCount64();
+    draw();
+    recording=false;
+    SceneText t;
+    const float w=static_cast<float>(width),h=1080.0f;
+    for(std::size_t i=0;i<drew.size();++i) {
+        const Drew& a=drew[i];
+        t.texts.push_back(a.text);
+        if(a.text.find_first_not_of(L' ')==std::wstring::npos)continue;   // nothing drawn (a line emptied: under a panel)
+        // A line on a panel (its middle in it) stays inside it across (the panels are sized to their text).
+        for(const PanelBox& q:panels) {
+            const float mx=(a.x0+a.x1)*0.5f,my=(a.y0+a.y1)*0.5f;
+            if(mx<q.x0 || mx>q.x1 || my<q.y0 || my>q.y1)continue;
+            if(a.x0>=q.x0-0.5f && a.x1<=q.x1+0.5f)continue;
+            std::printf("FAIL  %s %ls: out of its panel: \"%s\" (%.0f-%.0f), panel (%.0f-%.0f)\n",hudtext::Name(hudtext::InUse()),name,
+                        Narrow(a.text).c_str(),a.x0,a.x1,q.x0,q.x1);
+            ++textFailed;
+        }
+        if(a.x0<-0.5f || a.y0<-0.5f || a.x1>w+0.5f || a.y1>h+0.5f) {
+            std::printf("FAIL  %s %ls: off the screen: \"%s\" (%.0f,%.0f)-(%.0f,%.0f)\n",hudtext::Name(hudtext::InUse()),name,
+                        Narrow(a.text).c_str(),a.x0,a.y0,a.x1,a.y1);
+            ++textFailed;
+        }
+        for(std::size_t k=0;k<i;++k) {
+            const Drew& b=drew[k];
+            if(b.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1)t.overlaps.insert({static_cast<int>(k),static_cast<int>(i)});
+        }
+    }
+    if(hudtext::InUse()==hudtext::Lang::en)english[name]=t;
+    else if(english.count(name)) {
+        const SceneText& e=english[name];
+        if(e.texts.size()!=t.texts.size())std::printf("note  %s %ls: %zu lines (English %zu)\n",hudtext::Name(hudtext::InUse()),name,
+                                                      t.texts.size(),e.texts.size());
+        for(const auto& p:t.overlaps) {
+            if(e.overlaps.count(p))continue;
+            std::printf("FAIL  %s %ls: \"%s\" overlaps \"%s\" (not in English)\n",hudtext::Name(hudtext::InUse()),name,
+                        Narrow(t.texts[static_cast<std::size_t>(p.second)]).c_str(),Narrow(t.texts[static_cast<std::size_t>(p.first)]).c_str());
+            ++textFailed;
+        }
+    }
+    std::printf("      %s %ls: %zu lines, %zu glyphs, %zu overlapping pairs\n",hudtext::Name(hudtext::InUse()),name,drew.size(),glyphs.size(),
+                t.overlaps.size());
+    if(glyphs.size()>mostGlyphs){mostGlyphs=glyphs.size();mostGlyphsAt=Narrow(name)+" ("+hudtext::Name(hudtext::InUse())+")";}
+}
+
 // A unit at (x, y, z) heading `headingDeg` (compass: 0 +z, growing to its right, -x), on flat ground at 0.
 MapUnit& Unit(MapKind kind,float x,float y,float z,float headingDeg=-999.0f) {
     static MapUnit spare{};
@@ -219,11 +326,14 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     };
     const float heli[3]={-150.0f,80.0f,300.0f},jet[3]={400.0f,300.0f,-100.0f},guard[3]={60.0f,0.0f,420.0f};
     const float slot1[3]={60.0f,0.0f,450.0f},robo1[3]={-60.0f,0.0f,90.0f},robo2[3]={80.0f,0.0f,40.0f};
-    cmdUnit(heli,true,"HELI 506",Order::guard,guard,false);
-    cmdUnit(jet,true,"JET fighter",Order::follow,nullptr,false);
+    cmdUnit(heli,true,"506",Order::guard,guard,false);
+    sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerHeli;
+    cmdUnit(jet,true,"fighter",Order::follow,nullptr,false);
+    sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerJet;
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
-    std::swprintf(sceneCmd.note,_countof(sceneCmd.note),L"GUARD (60, 420): 2 UNITS");
+    sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
+    std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardMany),Tr(Tx::orderGuard),60.0,420.0,2);
     sceneCmd.noteFresh=true;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
@@ -233,7 +343,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     float vp[16];
     MapCamera(sceneMap,1920.0f,1080.0f,vp);
     struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
-    HudDraw(vp,image,&viewport,nullptr,0);
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},1920);
     std::fclose(out);out=nullptr;
     hasMap=false;
     std::printf("%ls\n",path.c_str());
@@ -261,13 +371,14 @@ void Scene(const std::wstring& dir,const wchar_t* name,const float* pos,int widt
     Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
     HudPublish();
     struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
-    HudDraw(vp,image,&viewport,nullptr,0);
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},width);
     std::fclose(out);out=nullptr;
     std::printf("%ls\n",path.c_str());
 }
 
 // A frame drawn and not recorded: what the HUD sees before a scene (a switch's banner needs the value before it).
 void Prime(const float* pos,int width=1920) {
+    sceneTick=GetTickCount64();
     float vp[16];
     const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
     Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
@@ -346,12 +457,12 @@ bool TurretLayoutApart(int width) {
     bool off=false,on=false;
     const Box lines=Measured([&](Text* t,Line* l,int* at){
         TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
-        for(int i=0;i<*at;++i)off=off || wcsstr(l[i].text,L"AUTO-AIM OFF")!=nullptr;
+        for(int i=0;i<*at;++i)off=off || wcsstr(l[i].text,Tr(Tx::autoAimOffCircle))!=nullptr;
     });
     r.mode=edf::aimlink::Mode::autoAim;
     Measured([&](Text* t,Line* l,int* at){
         TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
-        for(int i=0;i<*at;++i)on=on || (wcsstr(l[i].text,L"AUTO-AIM ON")!=nullptr) ;
+        for(int i=0;i<*at;++i)on=on || (wcsstr(l[i].text,Tr(Tx::autoAimOn))!=nullptr) ;
     });
     PlayerJetSymbols y{};
     std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
@@ -485,26 +596,10 @@ int ScaleDrawnChecks() {
     config.hudScale=1.0f;
     return failed;
 }
-}  // namespace
-
-int wmain(int argc,wchar_t** argv) {
-    wchar_t temp[MAX_PATH]{};
-    GetTempPathW(MAX_PATH,temp);
-    std::wstring dir=std::wstring(temp)+L"edf6_hud_view";
-    for(int i=1;i+1<argc;++i)if(!wcscmp(argv[i],L"--out"))dir=argv[i+1];
-    CreateDirectoryW(dir.c_str(),nullptr);
-    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
-    static unsigned char fontMgr[0x200]{},drawer[16]{};
-    *reinterpret_cast<void**>(image+kQuadDrawer)=drawer;
-    *reinterpret_cast<void**>(image+kFontMgr)=fontMgr;
-    Jump(kQuad,reinterpret_cast<const void*>(&QuadRec));
-    Jump(kTextMake,reinterpret_cast<const void*>(&MakeRec));Jump(kTextBegin,reinterpret_cast<const void*>(&BeginRec));
-    Jump(kTextMeasure,reinterpret_cast<const void*>(&MeasureRec));Jump(kTextDraw,reinterpret_cast<const void*>(&DrawRec));
-    Jump(kTextEnd,reinterpret_cast<const void*>(&EndRec));Jump(kTextFree,reinterpret_cast<const void*>(&FreeRec));
-    *reinterpret_cast<void**>(image+kUiScreen)=uiHolder;
-    *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
-    SetScreen(1920,1080);
-    quadOk=textOk=uiOk=true;
+// Every scene and the layout checks in the language in use (hudtext::InUse), written into `dir`: the failures.
+int Scenes(const std::wstring& dir) {
+    int failed=0;
+    hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=false;   // as the first run began
     const ULONGLONG now=GetTickCount64();
     const float pos[3]={0.0f,120.0f,0.0f};
 
@@ -599,7 +694,6 @@ int wmain(int argc,wchar_t** argv) {
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
     strcpy_s(sceneStock.kind,"DrillTank");
     Scene(dir,L"stock_drill",ground);
-    int failed=0;
     failed+=!StockLayoutApart(1920);
     failed+=!StockLayoutApart(2520);
     failed+=!PausedDrawsNothing(ground,sceneStock.hull);
@@ -644,6 +738,7 @@ int wmain(int argc,wchar_t** argv) {
     StockTank(ground);
     strcpy_s(sceneStock.kind,"BigBegaruta");
     sceneStock.arms=0;sceneStock.aimOk=false;sceneStock.speed=9.0f;sceneStock.hp=9000.0f;sceneStock.hpMax=11000.0f;
+    hasStock=true;   // the Proteus's lines are the stock block's (its scenes drew nothing without it)
     hasProteus=true;
     sceneProteus=ProteusReadout{};
     std::memcpy(sceneProteus.pos,ground,12);sceneProteus.hull[2]=1.0f;
@@ -667,6 +762,57 @@ int wmain(int argc,wchar_t** argv) {
     failed+=!StockLayoutApart(1920,&sceneProteus);
     failed+=!StockLayoutApart(2520,&sceneProteus);
     hasProteus=false;
+    // The next language's run begins as this one did: EDF6AutoTurret's mode last seen as auto-aim, and seen long enough
+    // ago that no switch's banner (hud_cue.h Changed, a wall-clock kSwitchMs) carries over into its turret scenes.
+    hasStock=hasTurret=true;
+    sceneTurret.mode=edf::aimlink::Mode::autoAim;
+    Prime(ground);
+    hasStock=hasTurret=false;
+    Sleep(static_cast<DWORD>(kSwitchMs)+50);
+    return failed;
+}
+}  // namespace
+
+int wmain(int argc,wchar_t** argv) {
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(MAX_PATH,temp);
+    std::wstring dir=std::wstring(temp)+L"edf6_hud_view";
+    int only=-1;   // --lang: that language (and English, which the others are compared with) alone
+    for(int i=1;i+1<argc;++i) {
+        if(!wcscmp(argv[i],L"--out"))dir=argv[i+1];
+        if(!wcscmp(argv[i],L"--lang"))only=hudtext::ParseSetting(argv[i+1]);
+    }
+    CreateDirectoryW(dir.c_str(),nullptr);
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
+    static unsigned char fontMgr[0x200]{},drawer[16]{};
+    *reinterpret_cast<void**>(image+kQuadDrawer)=drawer;
+    *reinterpret_cast<void**>(image+kFontMgr)=fontMgr;
+    Jump(kQuad,reinterpret_cast<const void*>(&QuadRec));
+    Jump(kTextMake,reinterpret_cast<const void*>(&MakeRec));Jump(kTextBegin,reinterpret_cast<const void*>(&BeginRec));
+    Jump(kTextMeasure,reinterpret_cast<const void*>(&MeasureRec));Jump(kTextDraw,reinterpret_cast<const void*>(&DrawRec));
+    Jump(kTextEnd,reinterpret_cast<const void*>(&EndRec));Jump(kTextFree,reinterpret_cast<const void*>(&FreeRec));
+    *reinterpret_cast<void**>(image+kUiScreen)=uiHolder;
+    *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
+    SetScreen(1920,1080);
+    quadOk=textOk=uiOk=true;
+    int failed=0;
+    for(int l=0;l<hudtext::kLangs;++l) {   // English first: the others are compared with it
+        const hudtext::Lang lang=static_cast<hudtext::Lang>(l);
+        if(only>1 && only!=l+1 && lang!=hudtext::Lang::en)continue;
+        config.hudLanguage=l+1;   // hudtext::Setting: en, zh-CN, zh-TW, ja
+        hudtext::Use(lang);
+        std::wstring at=dir;
+        if(lang!=hudtext::Lang::en) {
+            const char* n=hudtext::Name(lang);
+            at+=L"\\"+std::wstring(n,n+std::strlen(n));
+            CreateDirectoryW(at.c_str(),nullptr);
+        }
+        failed+=Scenes(at);
+    }
+    std::printf(textFailed ? "text: %d FAILED\n" : "text: on the screen, inside its panels, no overlap English lacks, in every language\n",textFailed);
+    std::printf("glyphs: at most %zu in one scene (%s)\n",mostGlyphs,mostGlyphsAt.c_str());
+    failed+=textFailed;
+    config.hudLanguage=1;hudtext::Use(hudtext::Lang::en);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     // The HUD's scale (src/hudscale.h).
     hasStock=true;

@@ -187,6 +187,13 @@ target_link_libraries(hud_view PRIVATE edf6common)
 target_compile_options(hud_view PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hud_view PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The HUD's string table offline (tools/hudtext_check.cpp: src/hudtext.h): every text in every language, the same printf
+# arguments as the English, the run-time words, the language picked from the game and the ini. Not part of the plugin build:
+# cmake --build build --target hudtext_check && build\hudtext_check.exe
+add_executable(hudtext_check EXCLUDE_FROM_ALL tools/hudtext_check.cpp)
+target_compile_options(hudtext_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hudtext_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The map view's camera and grid math (src/map_cam.h: the eye, the drag that grabs the ground, the zoom's limits, the
 # grid's reach), offline (tools/map_cam_check.cpp). Not part of the plugin build:
 # cmake --build build --target map_cam_check && build\map_cam_check.exe
@@ -247,7 +254,7 @@ add_test(NAME call_pick COMMAND call_pick_test)
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check pause_clock_check)
+    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check pause_clock_check hudtext_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})

@@ -47,7 +47,10 @@ bool MapCommandBoxing() noexcept;
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.
 constexpr int kCmdUnits=96;
-struct CmdMark { float pos[3]; Command now; bool selected,air; char name[24]; };
+// A unit's mark: `name` its kind as the plugin names it (a jet's role, a heli's type, CRAWLER: hud.cpp shows it in the
+// HUD's language, hudtext.h Word), `owner` whose unit it is (the HUD names a heli's and a jet's so).
+constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
+struct CmdMark { float pos[3]; Command now; bool selected,air; std::uint8_t owner; char name[24]; };
 struct MapCommandReadout {
     bool allowed;              // commands work (offline: InSession false)
     bool all;                  // every unit selected (more than one)

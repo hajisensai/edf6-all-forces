@@ -822,7 +822,8 @@ def gun_stabilizer_wired() -> None:
     flak = src('autoturret/src/plugin.cpp')
     assert 'Stabilized(vehicle,0,stock,held,hull);' in flak and '-hull;' in flak.split('float AxisInput(', 1)[1].split('\n}\n', 1)[0]
     assert 'Stabilized(vehicle,s,aim.angle,held,hull);' in src('autoturret/src/gunner.cpp')
-    assert 'r.stab=StabState(v,r.seat);' in src('src/vhud.cpp') and 'L"    STAB"' in src('src/hud.cpp')
+    assert 'r.stab=StabState(v,r.seat);' in src('src/vhud.cpp') and 'Tx::stab' in src('src/hud.cpp')
+    assert 'HUDTEXT(stab,L"STAB",' in src('src/hudtext.inc')
     hooked = set(re.findall(r'\{(0x[0-9A-F]{7}),0x[0-9A-F]+,"', crew))
     table = code.split('const Class kClasses[]={', 1)[1].split('};', 1)[0]
     vts = re.findall(r'\{(0x[0-9A-F]{7}),"', table)
@@ -1199,7 +1200,8 @@ def heli_mouse_aim_wired() -> None:
     # The hover rotor from the lift as it is in memory (heliaim.h HoverRotor), not the old 70 the 602 clamped to 1.0 on.
     assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
     hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
-    assert 'SPACE: up' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
+    assert 'Tx::heliKeysAir' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
+    assert 'SPACE: up' in src('src/hudtext.inc').split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
     assert 'aim::Fly(' in fly and 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 
 
@@ -1367,8 +1369,10 @@ def cockpit_warnings_wired() -> None:
     warn_h, audio_h, audio, hud = src('src/warn.h'), src('src/jetaudio.h'), src('src/jetaudio.cpp'), src('src/hud.cpp')
     warns = re.search(r'enum Warn : int \{([^}]*)\}', warn_h).group(1)
     n_warn = len([w for w in warns.split(',') if w.strip() and 'kWarnCount' not in w])
-    texts = hud.split('kWarnText[kWarnCount]={', 1)[1].split('};', 1)[0]
-    assert len(re.findall(r'(?<!\w)L"', texts)) == n_warn, (texts, n_warn)
+    texts = hud.split('kWarnText[kWarnCount]={', 1)[1].split('};', 1)[0]   # the texts' keys (src/hudtext.inc)
+    keys = re.findall(r'Tx::(\w+)', texts)
+    assert len(keys) == n_warn, (texts, n_warn)
+    assert all(f'HUDTEXT({k},' in src('src/hudtext.inc') for k in keys), keys
     calls = re.search(r'enum Callout : int \{([^}]*)\}', audio_h).group(1)
     n_call = len([c for c in calls.split(',') if c.strip() and 'kCallCount' not in c])
     for table in ('kCallName[kCallCount]={', 'kCallText[kCallCount]={'):
@@ -1660,7 +1664,8 @@ def stock_gauges_wired() -> None:
     vhud = src('src/vhud.cpp').split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
     assert 'IsFuelTank(w)' in vhud and 'FuelGauge(v,&r.fuel)' in vhud
     assert 'FuelGauge(v,&r.fuel)' in src('src/playerjet.cpp') and 'FuelGauge(v,&r.fuel)' in src('src/heli.cpp')
-    assert 'kWarnFuel' in src('src/warn.h') and 'kWarnFuel' in src('src/warn.cpp') and 'L"LOW FUEL"' in hud
+    assert 'kWarnFuel' in src('src/warn.h') and 'kWarnFuel' in src('src/warn.cpp') and 'Tx::lowFuel' in hud
+    assert 'HUDTEXT(lowFuel,L"LOW FUEL",' in src('src/hudtext.inc')
     assert 'jet_lowfuel' in src('tools/hud_view.cpp')
 
 
@@ -2704,7 +2709,9 @@ def hud_switch_cues_wired() -> None:
     for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
                  'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at)'):
         assert call in hud, call
-    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'L"AUTO-AIM ON"' in hud and 'AUTO-AIM OFF' in hud
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAimOn' in hud and 'Tx::autoAimOffCircle' in hud
+    table = src('src/hudtext.inc')
+    assert 'HUDTEXT(autoAimOn,L"AUTO-AIM ON",' in table and 'HUDTEXT(autoAimOffCircle,L"AUTO-AIM OFF' in table
     assert 'hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])' in hud
     assert 'r.storeRole[i]=j.storeRole[i];' in src('src/playerjet.cpp')
     assert 'EXCLUDE_FROM_ALL tools/hud_cue_check.cpp' in cmake and 'hud_cue_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
@@ -2715,6 +2722,98 @@ def hud_switch_cues_wired() -> None:
 def incremental_install_regressions() -> None:
     from test_installer_incremental import run_checks
     run_checks()
+
+
+# The HUD's sources whose text the player reads: every word comes from src/hudtext.inc (hudtext.h Tr / Word).
+HUD_TEXT_SOURCES = ('src/hud.cpp', 'src/mapcmd.cpp')
+# What may stay in a wide literal of those: printf conversions, digits, punctuation, single letters (pad buttons A B X
+# Y, L3 / R3, the RWR's J / M symbols, the g symbol G), the pad's two-letter buttons and the units.
+HUD_LITERAL_WORDS = {'LB', 'RB', 'LT', 'RT', 'km'}
+HUD_SPEC = re.compile(r'%[-+ #0]*\d*(?:\.\d+)?(?:hs|ls|l?[dufxXsc]|%)')
+
+
+def hud_literal_words(text: str) -> list[tuple[int, str]]:
+    """The words (two letters or more, or any non-ASCII character) in a source's wide literals, with their lines."""
+    found = []
+    for m in re.finditer(r'L"((?:[^"\\]|\\.)*)"', text):
+        line = text.count('\n', 0, m.start()) + 1
+        core = HUD_SPEC.sub('', m.group(1))
+        found += [(line, w) for w in re.findall(r'[A-Za-z]{2,}', core) if w not in HUD_LITERAL_WORDS]
+        found += [(line, ch) for ch in core if ord(ch) > 0x7E]
+    return found
+
+
+def hudtext_entries() -> list[tuple[str, list[str]]]:
+    """src/hudtext.inc's texts: (key, [en, zh-CN, zh-TW, ja])."""
+    table = re.sub(r'//[^\n]*', '', src('src/hudtext.inc'))
+    out = []
+    for m in re.finditer(r'HUDTEXT\((\w+),(.*?)\)\s*(?=HUDTEXT\(|\Z)', table, re.S):
+        texts = [t.encode('utf-8').decode('unicode_escape').encode('latin-1').decode('utf-8')
+                 for t in re.findall(r'L"((?:[^"\\]|\\.)*)"', m.group(2))]
+        out.append((m.group(1), texts))
+    return out
+
+
+@test
+def hud_text_localized() -> None:
+    """The HUD's words in English, Simplified and Traditional Chinese and Japanese (src/hudtext.h, docs/hud-re.md §11):
+    no English or CJK literal left in the HUD's sources (every text a key of the table), every key four texts, each
+    language's characters its own script's (zh-CN in GB2312, zh-TW in Big5, ja in Shift JIS: a Traditional character in
+    the Simplified text, or a Simplified one in the Traditional, is caught), the run-time identifiers the HUD shows (a
+    round's class label, a jet's role, a carrier part) each a word of the table; the language follows the game's
+    Option_Language (read signature-checked) and the ini's HudLanguage, which is read, shipped and documented; the
+    offline checks (tools/hudtext_check.cpp, hud_view in every language) are CTests. With the game here, every character
+    is in one of the game's four fonts (the font chain the game draws with: Root.cpk UI/*.TTF)."""
+    for path in HUD_TEXT_SOURCES:
+        left = hud_literal_words(src(path))
+        assert not left, f'{path}: words outside src/hudtext.inc: {left[:12]}'
+    entries = hudtext_entries()
+    keys = [k for k, _ in entries]
+    assert len(keys) == len(set(keys)) and len(keys) > 200, len(keys)
+    for key, texts in entries:
+        assert len(texts) == 4 and all(texts), (key, texts)
+        en, zh_cn, zh_tw, ja = texts
+        assert all(ord(c) < 0x7F for c in en), (key, en)
+        for text, codec in ((zh_cn, 'gb2312'), (zh_tw, 'big5'), (ja, 'cp932')):
+            for ch in text:
+                if ord(ch) >= 0x2E80:
+                    try:
+                        ch.encode(codec)
+                    except UnicodeEncodeError:
+                        raise AssertionError(f'{key}: {ch!r} is not {codec} in {text!r}') from None
+    words = set(re.findall(r'\{"([^"]+)",Tx::(\w+)\}', src('src/hudtext.h').split('kWords[]={', 1)[1].split('};', 1)[0]))
+    ids = {w for w, _ in words}
+    assert all(k in keys for _, k in words), words
+    shown = set(re.findall(r'\{0x[0-9A-F]+,"[^"]+","(\w+)",Cls::', src('src/rounds.cpp')))
+    shown |= set(re.findall(r'm\.label="(\w+)"', src('src/rounds.cpp') + src('src/vhud.cpp')))
+    shown |= set(re.findall(r'strncpy_s\(a\.label,(?:m\.label \? m\.label : )?"(\w+)"', src('src/vhud.cpp')))
+    shown |= set(re.findall(r'\{Role::\w+,"(\w+)"', src('src/jet_internal.h')))
+    shown |= set(re.findall(r'\{kVt\w+,"(\w+)"', src('src/heli.cpp'))) - {'506', '409', '410'}
+    shown |= set(re.findall(r'^\s+\{"(\w+)",\{', src('src/subcarrier.cpp'), re.M))
+    shown |= set(re.findall(r'Kind\(d,"(\w+)"\)', src('src/hud.cpp')))
+    shown |= set(re.findall(r'CommandUnit\{\w+\.ref\.obj,"(\w+)"', src('src/ground.cpp')))
+    assert {'GUN', 'WPN', 'ROCKETS', 'RKT', 'fighter', 'turretA', 'heli', 'CRAWLER', 'base'} <= shown, shown
+    assert shown <= ids, f'shown on the HUD without a word: {sorted(shown - ids)}'
+    hud, plugin, ini, readme = src('src/hud.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert 'kLangValue=0x20B2B30' in hud and 'CallsTo(0x963724,kLangGet) && CallsTo(0x96372E,kFontLoad)' in hud
+    assert 'hudtext::Use(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));' in hud
+    assert 'GetPrivateProfileStringW(L"VehicleCrew",L"HudLanguage"' in plugin and 'n.hudLanguage=ReadLanguage(' in plugin
+    assert re.search(r'^HudLanguage=auto$', ini, re.M) and 'HudLanguage' in readme and '§11' in src('src/hudtext.h')
+    cmake = src('CMakeLists.txt')
+    assert 'EXCLUDE_FROM_ALL tools/hudtext_check.cpp' in cmake and 'hudtext_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'failed+=Scenes(at);' in src('tools/hud_view.cpp')
+    try:
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import hud_view
+        fonts = hud_view.game_fonts()
+    except Exception:  # noqa: BLE001 - no game here (CI): the fonts are not checked
+        fonts = {}
+    if fonts:
+        from fontTools.ttLib import TTFont
+        import io
+        cmaps = [set(TTFont(io.BytesIO(data), lazy=True).getBestCmap()) for data in fonts.values()]
+        missing = sorted({ch for _, texts in entries for t in texts for ch in t if not any(ord(ch) in c for c in cmaps)})
+        assert not missing, f'characters in none of the game\'s fonts: {missing}'
 
 
 def main() -> int:

@@ -16,6 +16,7 @@
 #pragma warning(pop)
 #include "crew.h"
 #include "hudscale.h"
+#include "hudtext.h"
 #include "memory.h"
 #include "subcarrier.h"
 #include "edf/host.h"
@@ -72,6 +73,16 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     wchar_t* end=nullptr;
     const float v=std::wcstof(text,&end);
     return end!=text && std::isfinite(v) ? v : fallback;
+}
+// HudLanguage: auto / en / zh-CN / zh-TW / ja (hudtext.h ParseSetting); anything else is logged and auto used.
+int ReadLanguage(int fallback) noexcept {
+    wchar_t text[32]{};
+    GetPrivateProfileStringW(L"VehicleCrew",L"HudLanguage",L"",text,32,iniPath);
+    if(!text[0])return fallback;
+    const int v=hudtext::ParseSetting(text);
+    if(v>=0)return v;
+    Log("CONFIG HudLanguage=%ls unknown (auto / en / zh-CN / zh-TW / ja): auto used",text);
+    return static_cast<int>(hudtext::Setting::automatic);
 }
 bool ReadBool(const wchar_t* key,bool fallback) noexcept {
     return GetPrivateProfileIntW(L"VehicleCrew",key,fallback ? 1 : 0,iniPath)!=0;
@@ -300,6 +311,7 @@ void LoadConfig() noexcept {
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
     n.hudScale=ReadFloat(L"HudScale",n.hudScale);
+    n.hudLanguage=ReadLanguage(n.hudLanguage);
     n.playerJet=ReadBool(L"PlayerJet",n.playerJet);
     n.playerJetInvertPitch=ReadBool(L"PlayerJetInvertPitch",n.playerJetInvertPitch);
     n.playerJetRamDamage=ReadFloat(L"PlayerJetRamDamage",n.playerJetRamDamage);
@@ -449,8 +461,8 @@ void LoadConfig() noexcept {
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
-    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f",n.vehicleHud,n.vehicleHudCount,
-        n.vehicleHudRange,n.stockVehicleHud,n.hideStockGauges,n.hudScale);
+    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d",n.vehicleHud,
+        n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud,n.hideStockGauges,n.hudScale,n.hudLanguage);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",

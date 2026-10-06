@@ -17,6 +17,7 @@
 // Online the commands are off (InSession): the plugin's AI runs on each machine for its own copies (the call aircraft
 // have no network identity, docs/online-re.md §1-3), so an order given here would change this machine's copy alone.
 #include "crew.h"
+#include "hudtext.h"
 #include "layout.h"
 #include "map_cam.h"
 #include <Xinput.h>
@@ -121,7 +122,12 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
     return k;
 }
 
-const wchar_t* OrderName(Order o) noexcept { return o==Order::guard ? L"GUARD" : o==Order::follow ? L"FOLLOW" : L"RELEASE"; }
+// An order's name for the log (English) and its word on the HUD (the HUD's language).
+const char* OrderName(Order o) noexcept { return o==Order::guard ? "GUARD" : o==Order::follow ? "FOLLOW" : "RELEASE"; }
+const wchar_t* OrderText(Order o) noexcept {
+    using hudtext::Tx;
+    return hudtext::Tr(o==Order::guard ? Tx::orderGuard : o==Order::follow ? Tx::orderFollow : Tx::orderRelease);
+}
 
 void Note(Game& g,const wchar_t* format,...) noexcept {
     va_list a;va_start(a,format);
@@ -217,7 +223,8 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         CmdMark& m=r.unit[i];
         std::memcpy(m.pos,PosOf(e.u.v),12);
         m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);
-        std::snprintf(m.name,sizeof(m.name),"%s%s",e.owner==Owner::heli ? "HELI " : e.owner==Owner::jet ? "JET " : "",e.u.name ? e.u.name : "?");
+        m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
+        std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
     }
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
@@ -262,14 +269,17 @@ bool MapCommandFrame(const MapCmdInput& in,float* centre) noexcept {
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=!InSession();
     const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk);
-    if(s.why==mapcmd::Refusal::online)Note(g,L"COMMANDS: OFFLINE ONLY");
-    else if(s.why==mapcmd::Refusal::noUnit)Note(g,g.count ? L"SELECT UNITS FIRST (%ls)" : L"NO UNIT TO COMMAND",in.usingPad ? L"X" : L"CTRL+DRAG / CLICK / TAB");
-    else if(s.why==mapcmd::Refusal::noPoint)Note(g,L"NO GROUND THERE");
+    using hudtext::Tr;
+    using hudtext::Tx;
+    if(s.why==mapcmd::Refusal::online)Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));
+    else if(s.why==mapcmd::Refusal::noUnit && g.count)Note(g,Tr(Tx::cmdSelectFirst),in.usingPad ? L"X" : Tr(Tx::cmdSelectHowMouse));
+    else if(s.why==mapcmd::Refusal::noUnit)Note(g,L"%ls",Tr(Tx::cmdNoUnit));
+    else if(s.why==mapcmd::Refusal::noPoint)Note(g,L"%ls",Tr(Tx::cmdNoGround));
     if(s.issue) {
         const int given=Issue(g,s.cmd);
-        if(s.cmd.order==Order::guard)Note(g,L"%ls (%.0f, %.0f): %d UNIT%ls",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,given==1 ? L"" : L"S");
-        else Note(g,L"%ls: %d UNIT%ls",OrderName(s.cmd.order),given,given==1 ? L"" : L"S");
-        Log("MAPCMD %ls (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
+        if(s.cmd.order==Order::guard)Note(g,Tr(given==1 ? Tx::cmdGuardOne : Tx::cmdGuardMany),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given);
+        else Note(g,Tr(given==1 ? Tx::cmdGivenOne : Tx::cmdGivenMany),OrderText(s.cmd.order),given);
+        Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
             g.sel.n,given,g.count);
     }
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);

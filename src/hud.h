@@ -4,6 +4,9 @@
 namespace crew {
 bool InstallHud() noexcept;                         // at load: checks the draw and text functions it calls
 void HudSee(unsigned char* vehicle) noexcept;       // from every vehicle's input hook (game thread): a readout's data
+// The game's text language (Option_Language: 0 ja, 1 en, 2 kr, 3 cn, 4 sc), -1 when its read did not check out at load
+// (docs/hud-re.md §11). The HUD's words follow it unless the ini's HudLanguage names a language (hudtext.h).
+int GameTextLanguage() noexcept;
 // Once a game frame (crew.cpp FrameTick, game thread): what HudSee gathered is published, whole, for the draw.
 void HudPublish() noexcept;
 // A carrier's panel (subcarrier.cpp publishes it from the game thread): the hull, each deck part, and where each
