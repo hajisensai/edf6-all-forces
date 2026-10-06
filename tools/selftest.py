@@ -2098,6 +2098,30 @@ def artillery_ragdoll_is_the_models() -> None:
         md, shkt, blob = stock(name)
         assert rf.problems(md, shkt, blob) == [], (name, rf.problems(md, shkt, blob)[:3])
     kepler, shkt, blob = stock('V603_FLAK.SGO')
+    # The Kepler is a ragdoll with constraints. Reading a constraint's type must not make it look like a plain
+    # physics system and silently skip the reference pose in both the checker and the fitter.
+    import copy
+    import struct
+    parsed = rf.Shkt(shkt)
+    assert parsed.joints and len(parsed.ref) == len(parsed.bodies) == 22, 'the Kepler reference pose was not loaded'
+    corrupted = bytearray(shkt)
+    struct.pack_into('<f', corrupted, parsed.ref[0], parsed.ref_t(0)[0] + 1.0)
+    assert any(x.startswith('reference pose of ') for x in rf.problems(kepler, bytes(corrupted), blob)), \
+        'a corrupt reference pose escaped validation'
+    # Move a real stock turret without requiring an external model folder: fitting must rewrite the serialized
+    # reference pose as well as body/joint transforms. Restoring the old pose must make the checker fail again.
+    moved = copy.deepcopy(kepler)
+    next(b for b in moved.bones if moved.name_of(b.name) == 'cannon_main').local[12] += 2.0
+    moved_shkt, moved_blob = rf.fit(moved, shkt, blob, kepler)
+    fitted = rf.Shkt(moved_shkt)
+    changed = [k for k in range(len(parsed.ref)) if rf.dist(parsed.ref_t(k), fitted.ref_t(k)) > 1e-3]
+    assert changed, 'the moved turret retained the stock reference pose'
+    assert rf.problems(moved, moved_shkt, moved_blob) == []
+    stale = bytearray(moved_shkt)
+    for k in changed:
+        struct.pack_into('<3f', stale, fitted.ref[k], *parsed.ref_t(k))
+    assert any(x.startswith('reference pose of ') for x in rf.problems(moved, bytes(stale), moved_blob)), \
+        'refitting stopped checking the serialized reference pose'
     assert make_artillery.ragdoll(game, kepler) == (shkt, blob), 'refitting the Kepler to itself changed it'
     folder = am.model_dir()
     if folder is None:

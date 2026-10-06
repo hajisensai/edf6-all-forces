@@ -120,8 +120,8 @@ class Shkt:
         scene = t.root_variant('hknpPhysicsSceneData')
         _, sat, ns = t.item(t.u32(scene + t.offset('hknpPhysicsSceneData', 'systemDatas')))
         _req(ns == 1, f'{ns} physics systems, a vehicle ragdoll has one')
-        typ, rag, _ = t.item(t.u32(sat))
-        _req(typ in ('hknpRagdollData', 'hknpPhysicsSystemData'), f'the physics system is a {typ}')
+        system_type, rag, _ = t.item(t.u32(sat))
+        _req(system_type in ('hknpRagdollData', 'hknpPhysicsSystemData'), f'the physics system is a {system_type}')
         B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
         _, bat, nb = t.item(t.u32(rag + t.offset('hknpPhysicsSystemData', 'bodyCinfos')))
         o_name, o_pos, o_q = t.offset(B, 'name'), t.offset(B, 'position'), t.offset(B, 'orientation')
@@ -136,13 +136,13 @@ class Shkt:
         self.joints = []
         for j in range(nc):
             at = cat + j * t.size(C)
-            typ, dat, _ = t.item(t.u32(at + t.offset(C, 'constraintData')))
-            tr = dat + t.offset(typ, 'atoms') + t.offset(f'{typ}::Atoms', 'transforms')
+            constraint_type, dat, _ = t.item(t.u32(at + t.offset(C, 'constraintData')))
+            tr = dat + t.offset(constraint_type, 'atoms') + t.offset(f'{constraint_type}::Atoms', 'transforms')
             A = 'hkpSetLocalTransformsConstraintAtom'
             self.joints.append(Joint(t.u32(at + t.offset(C, 'bodyA')), t.u32(at + t.offset(C, 'bodyB')),
                                      tr + t.offset(A, 'transformA'), tr + t.offset(A, 'transformB')))
         self.parents, self.bone_body, self.ref = [], [], []
-        if typ != 'hknpRagdollData':     # a plain physics system (the Blacker's): no ragdoll skeleton
+        if system_type != 'hknpRagdollData':     # a plain physics system (the Blacker's): no ragdoll skeleton
             return
         _, sat, _ = t.item(t.u32(rag + t.offset('hknpRagdollData', 'skeleton')))
         S = 'hkaSkeleton'
