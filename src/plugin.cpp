@@ -161,6 +161,16 @@ void Validate(Config& n) noexcept {
     Fix("SazabiThrusterRegen",n.sazabiThrusterRegen,0.0f,5.0f);
     n.sazabiDashKey=static_cast<int>(FixInt("SazabiDashKey",n.sazabiDashKey,0,254));
     n.sazabiDescendKey=static_cast<int>(FixInt("SazabiDescendKey",n.sazabiDescendKey,0,254));
+    n.sazabiSwitchKey=static_cast<int>(FixInt("SazabiSwitchKey",n.sazabiSwitchKey,0,254));
+    n.sazabiSwitchButton=static_cast<int>(FixInt("SazabiSwitchButton",n.sazabiSwitchButton,0,255));
+    n.sazabiMeleeKey=static_cast<int>(FixInt("SazabiMeleeKey",n.sazabiMeleeKey,0,254));
+    n.sazabiMeleeButton=static_cast<int>(FixInt("SazabiMeleeButton",n.sazabiMeleeButton,0,255));
+    n.sazabiGuardKey=static_cast<int>(FixInt("SazabiGuardKey",n.sazabiGuardKey,0,254));
+    n.sazabiGuardButton=static_cast<int>(FixInt("SazabiGuardButton",n.sazabiGuardButton,0,255));
+    Fix("SazabiGuardShare",n.sazabiGuardShare,0.0f,1.0f);
+    Fix("SazabiAxeDamage",n.sazabiAxeDamage,0.0f,1000000.0f);
+    Fix("SazabiCannonDamage",n.sazabiCannonDamage,0.0f,100000.0f);
+    Fix("SazabiFunnelDamage",n.sazabiFunnelDamage,0.0f,100000.0f);
     Fix("PlayerJetRollScale",n.playerJetRollScale,0.5f,2.0f);
     Fix("PlayerJetAimGain",n.playerJetAimGain,0.5f,2.0f);
     Fix("PlayerRotorLift",n.playerRotorLift,0.0f,4.0f);
@@ -396,6 +406,16 @@ void LoadConfig() noexcept {
     n.sazabiInvertAim=ReadBool(L"SazabiInvertAim",n.sazabiInvertAim);
     n.sazabiDashKey=ReadInt(L"SazabiDashKey",static_cast<DWORD>(n.sazabiDashKey));
     n.sazabiDescendKey=ReadInt(L"SazabiDescendKey",static_cast<DWORD>(n.sazabiDescendKey));
+    n.sazabiSwitchKey=ReadInt(L"SazabiSwitchKey",static_cast<DWORD>(n.sazabiSwitchKey));
+    n.sazabiSwitchButton=ReadInt(L"SazabiSwitchButton",static_cast<DWORD>(n.sazabiSwitchButton));
+    n.sazabiMeleeKey=ReadInt(L"SazabiMeleeKey",static_cast<DWORD>(n.sazabiMeleeKey));
+    n.sazabiMeleeButton=ReadInt(L"SazabiMeleeButton",static_cast<DWORD>(n.sazabiMeleeButton));
+    n.sazabiGuardKey=ReadInt(L"SazabiGuardKey",static_cast<DWORD>(n.sazabiGuardKey));
+    n.sazabiGuardButton=ReadInt(L"SazabiGuardButton",static_cast<DWORD>(n.sazabiGuardButton));
+    n.sazabiGuardShare=ReadFloat(L"SazabiGuardShare",n.sazabiGuardShare);
+    n.sazabiAxeDamage=ReadFloat(L"SazabiAxeDamage",n.sazabiAxeDamage);
+    n.sazabiCannonDamage=ReadFloat(L"SazabiCannonDamage",n.sazabiCannonDamage);
+    n.sazabiFunnelDamage=ReadFloat(L"SazabiFunnelDamage",n.sazabiFunnelDamage);
     n.sazabiTestBoard=ReadBool(L"SazabiTestBoard",n.sazabiTestBoard);
     n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
     n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
@@ -567,9 +587,11 @@ void LoadConfig() noexcept {
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d",n.vehicleHud,
         n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud,n.hideStockGauges,n.hudScale,n.hudLanguage);
-    Log("CONFIG sazabi=%d walk=%.0f run=%.0f fly=%.0f dash=%.0f climb=%.0f gravity=%.1f turn=%.0f mouse=%.2f thrusters=%.1fs regen=%.2f invert=%d dashKey=0x%X descendKey=0x%X testBoard=%d",
+    Log("CONFIG sazabi=%d walk=%.0f run=%.0f fly=%.0f dash=%.0f climb=%.0f gravity=%.1f turn=%.0f mouse=%.2f thrusters=%.1fs regen=%.2f invert=%d dashKey=0x%X descendKey=0x%X switch=0x%X/%d melee=0x%X/%d guard=0x%X/%d share=%.2f axe=%.0f cannon=%.0f funnel=%.0f testBoard=%d",
         n.sazabi,n.sazabiWalk,n.sazabiRun,n.sazabiFly,n.sazabiDash,n.sazabiClimb,n.sazabiGravity,n.sazabiTurn,n.sazabiMouseTurn,
-        n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiTestBoard);
+        n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiSwitchKey,
+        n.sazabiSwitchButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
+        n.sazabiAxeDamage,n.sazabiCannonDamage,n.sazabiFunnelDamage,n.sazabiTestBoard);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
         n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,
         n.playerRotorLift,n.jetSound,n.jetSoundVolume);

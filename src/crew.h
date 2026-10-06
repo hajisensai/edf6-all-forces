@@ -112,6 +112,16 @@ struct Config {
     bool sazabiInvertAim=false;     // the aim's up and down the other way
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
+    int sazabiSwitchKey=0x52;       // the special the secondary fires: shield missiles, funnels, cannon (R; a pad's LB)
+    int sazabiSwitchButton=0x10;
+    int sazabiMeleeKey=0x56;        // the beam tomahawk swung (V; a pad's X)
+    int sazabiMeleeButton=0x04;
+    int sazabiGuardKey=0x42;        // held: the shield up (B; a pad's RB)
+    int sazabiGuardButton=0x20;
+    float sazabiGuardShare=0.25f;   // of a hit from ahead the shield lets through
+    float sazabiAxeDamage=12000.0f; // a tomahawk strike, each enemy in reach
+    float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
+    float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)

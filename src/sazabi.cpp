@@ -16,14 +16,20 @@
 // model's origin) and draws them (slot 3, 0x1100F10), a frame late at worst (docs/sazabi-re.md §2). The plugin
 // composes none itself: SetWorld called with the vehicle matrix (veh+0x60, the box's centre, 12.7 m over the soles,
 // not the model's origin) drew the mech that much too high every other frame, two of it flickering (2026-10-07).
+// Its arms (the beam rifle, the shield missiles, the tomahawk and the shield's guard, the funnels, the chest's mega
+// particle cannon), their effects and sounds, the thrusters' flames and the HUD's cue: sazabi_arms.inc.
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea: it wades).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "exhaust_pose.h"
 #include "layout.h"
 #include "heli.h"
+#include "lockon.h"
 #include "map.h"
 #include "memory.h"
+#include "sazabi_arms.h"
 #include "sazabi_pose.h"
+#include "sazabi_sound.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -31,6 +37,7 @@
 namespace crew {
 namespace {
 using vec::Clamp;using vec::Len;
+using namespace szarms;
 constexpr float kSazabiMark=7401.0f;   // pylib/vcobjects.py SAZABI_MARK (tools/selftest.py sazabi_bones_agree)
 constexpr std::size_t kBody=0x1650;
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
@@ -72,6 +79,10 @@ struct Mech {
     unsigned char* rec[sazabi::kBoneCount]{};
     sazabi::Rig rig{};
     sazabi::PoseInput pose{};
+    exhaust::BodyTrack track{};         // the body's matrix last frame and now (sz_root's world carried: RootFrame)
+    float root[16]{},rootInv[16]{};     // sz_root's world this frame, and its inverse
+    bool rootOk=false;
+    Arms arms{};
 };
 constexpr int kMaxMechs=8;
 Mech mechs[kMaxMechs]{};
@@ -201,6 +212,8 @@ float FeetClear(const Mech& m) noexcept {
     return clear==kNoGround ? kNoGround : clear-kProbeUp;
 }
 
+#include "sazabi_arms.inc"
+
 // ------------------------------------------------------------------------------------------ driving
 void Board(Mech& m,unsigned char* v) noexcept {
     m.driven=true;
@@ -215,6 +228,7 @@ void Board(Mech& m,unsigned char* v) noexcept {
 }
 
 void Leave(Mech& m,unsigned char* v,bool alive,const char* how) noexcept {
+    DropArms(m);
     m.driven=false;m.active=false;m.dashLeft=0.0f;
     if(m.insetSaved && alive)Put<float>(v,kAreaInset,m.savedInset);
     m.insetSaved=false;
@@ -244,6 +258,7 @@ void Air(Mech& m,const Controls& c,float dt) noexcept {
     if(m.feetClear!=kNoGround && m.feetClear<=kFloat+0.2f && m.vel[1]<=0.0f) {   // down: the knees take it
         m.pose.crouch=std::fmax(m.pose.crouch,Clamp(-m.vel[1]/kLandHard,0.3f,1.0f));
         m.air=false;
+        if(m.rootOk)Sfx(m,SzSfx::land,m.root+12);
         m.vel[1]=0.0f;
     }
 }
@@ -260,6 +275,7 @@ void Move(Mech& m,const Controls& c,float dt) noexcept {
     if(c.dash && !m.dashHeld && m.thruster>=kDashLeast) {
         m.dashLeft=kDashSec;
         m.thruster-=kDashCost;
+        if(m.rootOk)Sfx(m,SzSfx::dash,m.root+12);
         for(int i=0;i<3;++i)m.dashDir[i]=mag>0.1f ? want[i]/mag : fwd[i];
     }
     m.dashHeld=c.dash;
@@ -315,12 +331,16 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     const bool driven=SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::player;
     if(!driven) {
         if(m.driven)Leave(m,v,true,"got out");
+        RootFrame(m,v);
         Animate(m,dt,false);
+        ArmsPose(m);
         Pose(m,v);
         return;
     }
     if(!m.driven)Board(m,v);
+    RootFrame(m,v);
     const Controls c=Read(SeatAt(v,0),dt);
+    const ArmsInput arms=TakeButtons(v,SeatAt(v,0));
     m.yawRate=c.turn;
     m.heading+=c.turn*dt;
     if(m.heading>sazabi::kPi)m.heading-=2.0f*sazabi::kPi;
@@ -336,7 +356,13 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Put<float>(v,kAreaInset,kNoInset);
     m.active=true;
     Animate(m,dt,true);
+    ArmsStep(m,v,arms,dt);
     Pose(m,v);
+    // the thrusters push while it climbs, dashes or flies on
+    const float thrust=m.dashLeft>0.0f ? 1.0f : m.air ? std::fmax(c.ascend,Clamp(Len(m.vel)/Cfg().sazabiFly,0.0f,1.0f)*0.6f) : 0.0f;
+    ArmsFire(m,v,arms,thrust,dt);
+    Footsteps(m);
+    PublishCue(m);
     Report(m,v,c,ms);
 }
 // SazabiTestBoard (tests only): kTestBoardMs after the first Sazabi is seen, the player on foot is put into it once.
@@ -354,8 +380,12 @@ void TestBoard(const Mech& m,unsigned char* v) noexcept {
 
 bool IsSazabi(const void* vehicle) noexcept { return BodyOf(vehicle)==PluginBody::sazabi; }
 
-// The HUD's view of the player's Sazabi (crew.h SazabiCue): not published yet (the weapons are not in).
-bool PlayerSazabiCue(SazabiCue* out) noexcept { (void)out;return false; }
+// The HUD's view of the player's Sazabi (crew.h SazabiCue): published each frame it is driven (PublishCue).
+bool PlayerSazabiCue(SazabiCue* out) noexcept {
+    if(!out || !cueMs || GameMs()-cueMs>kSazabiCueMs)return false;
+    *out=cue;
+    return true;
+}
 
 void SazabiFrame(unsigned char* v) noexcept {
     if(!installed || !Cfg().sazabi || !IsSazabi(v))return;
@@ -379,10 +409,24 @@ bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     return true;
 }
 
-// The 506's messages to it: the water is no ditching for a mech wading (taken whole).
+// The 506's messages to it: the water is no ditching for a mech wading (taken whole); with the shield up, a hit from
+// ahead (its point of impact or blast centre, GameDamageInfo +0x30, in front of the mech) does SazabiGuardShare of its
+// damage (+0x50; put back after the stock handler, the copy is the queue's own: primer.cpp PrimerMessage).
 bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore* restore) noexcept {
-    (void)v;(void)data;(void)restore;
-    return msg==kMsgWater && Cfg().enabled && Cfg().sazabi;
+    if(!Cfg().enabled || !Cfg().sazabi)return false;
+    if(msg==kMsgWater)return true;
+    constexpr std::size_t kHitPoint=0x30,kDamage=0x50;
+    if(msg!=kMsgDamage || !data || v[kDead])return false;
+    const Mech* m=Find(v);
+    if(!m || !m->driven || m->arms.guard<0.5f)return false;
+    const float* hit=reinterpret_cast<const float*>(static_cast<unsigned char*>(data)+kHitPoint);
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    if((hit[0]-p[0])*std::sin(m->heading)+(hit[2]-p[2])*std::cos(m->heading)<=0.0f)return false;   // from behind
+    float* const damage=reinterpret_cast<float*>(static_cast<unsigned char*>(data)+kDamage);
+    if(!(*damage>0.0f))return false;
+    restore->at=damage;restore->was=*damage;
+    *damage*=Cfg().sazabiGuardShare;
+    return false;
 }
 
 bool InstallSazabi() noexcept {
@@ -393,6 +437,7 @@ bool InstallSazabi() noexcept {
 
 void ResetSazabi() noexcept {
     for(auto& m:mechs)m=Mech{};
+    cueMs=0;
     testBoarded=false;
     firstSeenMs=0;
 }

@@ -786,12 +786,29 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 | 推进器：地上起跳，空中爬升 / 悬停 | LT（上升） | 空格（上升） |
 | 冲刺（沿移动方向，没有方向时向前） | A | Shift（`SazabiDashKey`） |
 | 空中加速下落 | — | Ctrl（`SazabiDescendKey`） |
+| 光束步枪 | RT（主射击） | 鼠标左键（主射击） |
+| 特殊武器：护盾飞弹 / 浮游炮 / 扩散米加粒子炮（按住蓄力、松开发射） | 副射击 | 鼠标右键（副射击） |
+| 切换特殊武器 | LB（`SazabiSwitchButton`） | R（`SazabiSwitchKey`） |
+| 挥光束战斧（挥砍中再按接下一刀） | X（`SazabiMeleeButton`） | V（`SazabiMeleeKey`） |
+| 按住举盾 | RB（`SazabiGuardButton`） | B（`SazabiGuardKey`） |
 
 **移动**：机体离地约 0.15 米悬浮着「走」，跟着脚下地形的高度走（坡、路沿、瓦砾都不会卡住）；走出悬崖就落下。
 推进剂（`SazabiThrusterSec` 秒全力推进）在空中推进和冲刺时消耗，站在地上恢复（`SazabiThrusterRegen`）。落地越重，膝盖屈得越深。
 水不是危险：它能涉水（原版直升机碰水会坠毁，这里不会）。速度、爬升、重力、转身速度都在 ini 的 `Sazabi*` 里。
 
-**动作**：插件每帧写每根骨骼的姿态：走和跑的步态（大腿前后摆、摆腿时屈膝、脚掌放平、骨盆起伏、腰部反向扭转）、
+**武器**（`src/sazabi_arms.inc`；原版直升机的两个射击键被插件接管，不再同时打出步枪和导弹）：
+- **光束步枪**（右手，粉色光束，每发 1800，0.5 秒一发）；画面上有粉色准星。
+- **护盾飞弹**（盾上，12 发、一次 3 发，游戏原版锁定：准星对准敌人等锁定完成再按）。
+- **浮游炮**：6 个一齐从背包飞出，各自绕到附近（320 米内）的敌人周围约 28 米处盘旋，机头对着敌人每 1.6 秒左右打一道细光束
+  （每发 `SazabiFunnelDamage`）；没有敌人时在机体上方待命；15 秒后飞回背包，冷却 20 秒。飞行时尾部有推进火焰。
+- **扩散米加粒子炮**（胸口）：按住副射击蓄力（胸口的光球越来越大，机体下蹲架稳），松开时打出 5 道扇形粗光束，持续 1.5 秒、
+  跟着胸口转向扫动（满蓄力每发 `SazabiCannonDamage`，蓄力越少越弱，至少蓄 25%），冷却 6 秒。
+- **光束战斧**：从盾里取出、光刃点亮、举过右肩劈下；劈中时前方约 17 米内的敌人每个受 `SazabiAxeDamage`，前方的建筑也会被劈开。
+- **举盾**：左臂把盾横在胸前，来自正面的伤害只剩 `SazabiGuardShare`（默认四分之一），背后照常。
+- 推进时背包两个喷口有火焰；所有动作都有音效（见下面「声音」）。
+
+**动作**：插件每帧写每根骨骼的姿态：走和跑的步态（按脚的轨迹解算：支撑脚踩定在地上不打滑、随身体前进匀速后退，
+摆动脚抬起迈到身体前方；三自由度腿部逆运动学；骨盆左右移到支撑脚上方；步长随速度变长；腰部反向扭转、手臂反向摆）、
 飞行（腿后收、脚尖朝下、按速度前倾，背后两根推进筒上扬）、冲刺前倾、转身时侧倾、落地下蹲；驾驶时右臂举枪，
 手腕解算让步枪始终正对瞄准方向。动作先在离线工具里看过（`tools/sazabi_pose_check.cpp` 检查、`tools/sazabi_pose_view.py`
 在模型上渲染），实机效果待测试。
@@ -808,7 +825,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
   （锁定中黄色方框逐渐收拢，锁定后红色菱形）。
 - 布局在离线工具里看过（`tools/hud_view.cpp` 的 `sazabi_*` 场景：满状态、推进剂不足、粒子炮蓄力 / 冷却、浮游炮放出、
   锁定中 / 已锁定、全部打空；四种语言；1280x720 ~ 3840x2160、21:9、分屏和 `HudScale` 1.5 下都在屏幕内、不压准星）。
-  目前 `sazabi.cpp` 还没发布这份数据（武器尚未接入），所以实机暂时不显示，接入后待实机确认。
+  数据由 `sazabi.cpp` 每帧发布；实机显示效果待确认。
 
 **声音**（`src/sazabi_sound.cpp`、合成在 `src/vsynth.h`，`docs/sound-re.md` §10）：光束步枪（尖锐的电光爆裂 + 低沉余音）、命中、光束战斧的点亮 / 熄灭 / 嗡鸣（带抖动的电流声循环）/ 挥砍风声 / 砍中（噼啪 + 低沉轰响）、胸部扩散炮的蓄能（音调随蓄能升高的电流啸叫循环）和发射（多层轰鸣）、浮游炮的射出 / 射击（更细更高的电光声）/ 收回、盾牌导弹的发射（与载具导弹同一个声音）、25 米机体沉重的金属脚步声和低频隆隆声、落地、冲刺和主推进器的轰鸣（随推力变响变高），都由插件合成、和地面载具音效一样按镜头分左右声道、远处变闷、有多普勒和传播延迟，随 `VehicleSound` 开关；音量：移动类（脚步、落地、冲刺、推进器）跟 `VehicleEngineVolume`，光束 / 光束战斧 / 扩散炮 / 浮游炮跟 `VehicleGunVolume`，导弹跟 `VehicleMissileVolume`。可在 DLL 旁边放 `EDF6VehicleCrew_veh_<名字>.wav` 替换，名字：`sazabi_beam_shot`、`sazabi_beam_hit`、`sazabi_saber_on`、`sazabi_saber_off`、`sazabi_whoosh`、`sazabi_saber_hit`、`sazabi_cannon_shot`、`sazabi_funnel_launch`、`sazabi_funnel_shot`、`sazabi_funnel_dock`、`sazabi_footstep`、`sazabi_land`、`sazabi_dash`、`sazabi_thrusters`（全推力，循环）、`sazabi_saber_hum`（循环）、`sazabi_cannon_charge`（蓄能开始时的音调，循环）。离线检查 `vsound_check`；游戏里的听感待实机确认。
 
