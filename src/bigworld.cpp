@@ -107,6 +107,14 @@ constexpr unsigned kSetMoveBox=0x5AA5C0;
 constexpr float kMoveMargin=100.0f;
 const unsigned char kSetMoveBoxSig[]={0x48,0x83,0xEC,0x18,0x0F,0x10,0x12,0x0F,0x28,0xDA,0x0F,0xC6,0xD2,0xFF};
 
+bool MoveAreaBox(float* lo,float* hi) noexcept {
+    const auto p=At<unsigned char*>(image,kMoveArea);
+    unsigned char* const m=p ? p-8 : nullptr;
+    if(!m || !Readable(m,kMoveMax+16))return false;
+    std::memcpy(lo,m+kMoveMin,12);std::memcpy(hi,m+kMoveMax,12);
+    return std::isfinite(lo[0]) && std::isfinite(hi[0]) && std::isfinite(lo[2]) && std::isfinite(hi[2]) && lo[0]<hi[0] && lo[2]<hi[2];
+}
+
 void WidenMoveArea() noexcept {
     const float want=Cfg().bigWorld-kMoveMargin;
     if(!(want>1000.0f) || !Matches(kSetMoveBox,kSetMoveBoxSig,sizeof(kSetMoveBoxSig)))return;

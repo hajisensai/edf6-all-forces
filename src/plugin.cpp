@@ -135,6 +135,10 @@ void Validate(Config& n) noexcept {
     n.playerJetChuteCutKey=static_cast<int>(FixInt("PlayerJetChuteCutKey",n.playerJetChuteCutKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
+    Fix("AirSoftEdge",n.airSoftEdge,0.0f,3000.0f);
+    Fix("AirSoftTurns",n.airSoftTurns,0.0f,3.0f);
+    Fix("AirSoftCeil",n.airSoftCeil,0.0f,1000.0f);
+    Fix("HeliSoftEdge",n.heliSoftEdge,0.0f,1000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
@@ -337,6 +341,10 @@ void LoadConfig() noexcept {
     n.vehicleMgVolume=ReadFloat(L"VehicleMgVolume",n.vehicleMgVolume);
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
+    n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
+    n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
+    n.heliSoftEdge=ReadFloat(L"HeliSoftEdge",n.heliSoftEdge);
     n.vehicleRam=ReadBool(L"VehicleRam",n.vehicleRam);
     n.vehicleRamDamage=ReadFloat(L"VehicleRamDamage",n.vehicleRamDamage);
     n.drill=ReadBool(L"Drill",n.drill);
@@ -445,6 +453,7 @@ void LoadConfig() noexcept {
         n.heliFlightHud);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
+    Log("CONFIG soft edge: jets %.0f m / %.1f turns, ceiling %.0f m, helis %.0f m",n.airSoftEdge,n.airSoftTurns,n.airSoftCeil,n.heliSoftEdge);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange,
         n.stockVehicleHud,n.hideStockGauges);

@@ -158,7 +158,7 @@ void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float
     *speed=bomber && j.bay.bombSpeed>kind.attack ? j.bay.bombSpeed : kind.attack;
     const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
     const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
-    const bool edge=walled || NearWall(pos,turn*1.5f,ms);
+    const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
     if(gone>kGone || (gone>kGoneStuck && (edge || ms-j.modeAt>kStuckMs))) {
         if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
         j.reap=true;
@@ -463,9 +463,15 @@ void JetFrame(unsigned char* v) noexcept {
     const float* anchor=gunner ? GunnerAnchor(*j,crewOrder) : ordered ? mother->carrier.order :
                         mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : follow && !j->launched ? player.pos : j->anchor;
     const float* viewer=follow ? player.pos : anchor;
+    // Worked round from inside its soft edge (airbound.h): a strike point, a guard post or a commanded point out past it
+    // is taken in by its patrol circle, so the circle and the fight round it stay in.
+    float anchorIn[3];
+    anchor=SoftAnchor(*j,anchor,anchorIn);
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     if(!gunner)Leave(*j,kind,arms,mother,hp,hpMax,ms);   // held for the player at the gun: no withdrawal
+    const float was[3]={j->m.vel[0],j->m.vel[1],j->m.vel[2]};
     const bool walled=Sense(*j,pos,ms);
+    if(walled)LogImpact("JET",v,pos,was);   // what held it back (impact.cpp)
 
     // The target and its motion.
     if(j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)PickTarget(*j,v,pos,anchor,ordered ? kOrderRange : j->reach>0.0f ? j->reach : TargetRange(kind),dt,ms);

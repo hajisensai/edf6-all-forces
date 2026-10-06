@@ -17,6 +17,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
+# What a blocked jet ran into, logged (src/impact.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -112,6 +114,11 @@ set_target_properties(stab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BI
 # The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
 # the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
 # cmake --build build --target proteus_check && build\proteus_check.exe
+# The flyers' soft edge's rules offline (tools/airbound_check.cpp, src/airbound.h). Not part of the plugin build.
+add_executable(airbound_check EXCLUDE_FROM_ALL tools/airbound_check.cpp)
+target_compile_options(airbound_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(airbound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)
 target_compile_options(proteus_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(proteus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -221,7 +228,7 @@ add_test(NAME call_pick COMMAND call_pick_test)
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check emc_check proteus_check sidecar_board_check)
+    vehicle_ram_check stab_check vsound_check map_cam_check emc_check proteus_check sidecar_board_check airbound_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
@@ -231,3 +238,6 @@ add_test(NAME hud_layout COMMAND hud_view --out "${CMAKE_BINARY_DIR}/hud-review"
 # the ground in every dive it is given, and a called strike jet's guns and missiles fire as it arrives.
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/jet-attack-runs")
 add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE_BINARY_DIR}/jet-attack-runs")
+# The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
+# edge (jet_obstacle_sim --edge-suite).
+add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")

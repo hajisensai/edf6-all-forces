@@ -812,6 +812,7 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     j.blockedSince=0;
     const float made=Dot(j.measured,j.sent)/sent;
     Log("PJET v=%p blocked %s: sent %.0f m/s, made %.0f",v,kPhaseNames[static_cast<int>(j.phase)],sent,made);
+    LogImpact("PJET",v,pos,j.sent);   // what it ran into (impact.cpp)
     // Where it hit: its nose (half its size, Kind::ram, ahead) along the way it was sent; how fast it closed: what it
     // lost of that way. The blast round the nose, its radius the same half size (Ram): what the airframe ran into.
     RamHit ram{};

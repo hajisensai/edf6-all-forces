@@ -12,6 +12,7 @@
 #include "crew.h"
 #include "body506.h"
 #include "memory.h"
+#include "airbound.h"
 #include <cmath>
 
 namespace crew {
@@ -294,6 +295,8 @@ struct Motion {
     float obstTop,obstAt[3]; // the highest thing Ahead found on its track: its top, where its face was hit
     ULONGLONG obstUntil;     // ...kept till then (0: none), or till the jet is past it or off its track
     std::int8_t obstSide;    // ...too steep to climb: the side it turns off to (+1 / -1, picked once; 0 none)
+    bool edgeBack;           // past its soft edge: flying back in first (airbound.h KeepIn), its targets out there let be
+    signed char edgeTurn;    // ...turning back from it: the side it turns on (KeepIn: +1 left, -1 right, 0 none)
 };
 // What it goes for (Pick, Lead) and its guns' and missiles' state (Fire, Missile).
 struct Aim {
@@ -486,8 +489,13 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept;
 void Toward(const float* pos,const float* goal,float* out) noexcept;
 void Level(const float* pos,const float* dir,float height,float* out) noexcept;
 bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept;
-bool NearWall(const float* pos,float range,ULONGLONG ms) noexcept;
-void Guard(const Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept;
+bool NearWall(const Jet& j,const float* pos,float range,ULONGLONG ms) noexcept;
+void Guard(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept;
+// The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (crew.h PlayEdge) less its band (ini
+// AirSoftEdge / AirSoftTurns: at least that many of its full-speed turn diameters); `band` gets the band's width.
+airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
+// The anchor it works round, put inside its soft box less its patrol circle (`room` holds the copy when it moved).
+const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
 void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
