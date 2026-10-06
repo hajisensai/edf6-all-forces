@@ -31,7 +31,7 @@ user32.SetProcessDPIAware()
 CDB = r'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'
 LOG = ('Mods', 'Plugins', 'EDF6VehicleCrew.log')
 SCAN = {'enter': 0x1C, 'esc': 0x01, 'space': 0x39, 'tab': 0x0F, 'w': 0x11, 'a': 0x1E, 's': 0x1F, 'd': 0x20,
-        'e': 0x12, 'q': 0x10, 'r': 0x13, 'f': 0x21, 'x': 0x2D, 'z': 0x2C, 'c': 0x2E, 'v': 0x2F, 'g': 0x22,
+        'e': 0x12, 'q': 0x10, 'r': 0x13, 'f': 0x21, 'x': 0x2D, 'z': 0x2C, 'c': 0x2E, 'v': 0x2F, 'g': 0x22, 'b': 0x30,
         'shift': 0x2A, 'ctrl': 0x1D, 'alt': 0x38, 'f4': 0x3E, '1': 0x02, '2': 0x03, '3': 0x04, '4': 0x05,
         '5': 0x06, 'up': (0x48, True), 'down': (0x50, True), 'left': (0x4B, True), 'right': (0x4D, True),
         'home': (0x47, True), 'pgup': (0x49, True), 'pgdn': (0x51, True)}
@@ -143,6 +143,18 @@ class Runner:
         user32.mouse_event(up, 0, 0, 0, 0)
         time.sleep(0.12)
 
+    def press(self, name: str, down: bool) -> None:
+        """A key or mouse button pressed (`down`) or let go, held across the steps between (shots while held)."""
+        if down:
+            self.guard()
+        if name in MOUSE:
+            user32.mouse_event(MOUSE[name][0 if down else 1], 0, 0, 0, 0)
+        else:
+            code = SCAN[name]
+            code, ext = code if isinstance(code, tuple) else (code, False)
+            user32.keybd_event(0, code, (0x8 if down else 0xA) | (0x1 if ext else 0), 0)
+        time.sleep(0.05)
+
     def look(self, dx: int, dy: int, steps: int = 20) -> None:
         self.guard()
         for i in range(steps):
@@ -222,7 +234,7 @@ class Runner:
         return path
 
     def act(self, script: str) -> None:
-        """`wait:S key:NAME[:MS] hold:mouse1:MS look:DX:DY shot:NAME repeat:N:KEY` separated by spaces.
+        """`wait:S key:NAME[:MS] hold:mouse1:MS down:NAME up:NAME look:DX:DY shot:NAME repeat:N:KEY` separated by spaces.
         look moves the mouse by DX, DY counts in small steps (camera turn; +DY looks down)."""
         for step in script.split():
             kind, _, rest = step.partition(':')
@@ -236,6 +248,8 @@ class Runner:
                 self.mouse(name, int(ms) / 1000)
             elif kind == 'shot':
                 self.shot(rest)
+            elif kind in ('down', 'up'):
+                self.press(rest, kind == 'down')
             elif kind == 'look':
                 dx, _, dy = rest.partition(':')
                 self.look(int(dx), int(dy or 0))
