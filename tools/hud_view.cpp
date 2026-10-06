@@ -151,6 +151,12 @@ MapUnit& Unit(MapKind kind,float x,float y,float z,float headingDeg=-999.0f) {
     if(headingDeg>-900.0f){u.dir[0]=-std::sin(headingDeg*kDeg);u.dir[1]=std::cos(headingDeg*kDeg);}
     return u;
 }
+// A small enemy's dot at (x, y, z).
+void Dot(float x,float y,float z,std::uint8_t flags) {
+    if(sceneMap.dots>=kMapDots)return;
+    MapDot& d=sceneMap.dot[sceneMap.dots++];
+    d.pos[0]=x;d.pos[1]=y;d.pos[2]=z;d.flags=flags;
+}
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
 void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad) {
@@ -165,11 +171,14 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     Unit(MapKind::air,-150.0f,80.0f,300.0f,10.0f);Unit(MapKind::air,400.0f,300.0f,-100.0f,200.0f);
     Unit(MapKind::carrier,-500.0f,240.0f,-350.0f,45.0f).kind=MapKind::carrier;
     // The enemies nearest first (map.cpp Enemies): the nearest bracketed, two large ones with HP bars, a large flyer.
-    Unit(MapKind::enemy,40.0f,0.0f,330.0f).flags=kMapNearest;
-    for(int i=0;i<40;++i)Unit(MapKind::enemy,-300.0f+std::fmod(static_cast<float>(i)*137.0f,700.0f),0.0f,600.0f+std::fmod(static_cast<float>(i)*91.0f,500.0f));
+    // The small enemies (map.cpp Enemies): dots, a swarm of 300 ants and 40 flyers, the nearest one bracketed; the large
+    // ones pins with HP bars, a large flyer among them.
+    Dot(40.0f,0.0f,330.0f,kMapNearest);
+    for(int i=0;i<300;++i)Dot(-400.0f+std::fmod(static_cast<float>(i)*137.0f,900.0f),0.0f,500.0f+std::fmod(static_cast<float>(i)*91.0f,700.0f),0);
+    for(int i=0;i<40;++i)Dot(150.0f+std::fmod(static_cast<float>(i)*53.0f,300.0f),120.0f+static_cast<float>(i%5)*20.0f,
+                             750.0f+std::fmod(static_cast<float>(i)*29.0f,250.0f),kMapFlying);
     MapUnit& big=Unit(MapKind::enemy,-120.0f,0.0f,520.0f,180.0f);big.flags=kMapLarge;big.hp=0.62f;
     MapUnit& big2=Unit(MapKind::enemy,320.0f,0.0f,700.0f,150.0f);big2.flags=kMapLarge;big2.hp=0.18f;
-    for(int i=0;i<3;++i)Unit(MapKind::enemyAir,200.0f+static_cast<float>(i)*60.0f,250.0f,900.0f,170.0f);
     MapUnit& ship=Unit(MapKind::enemyAir,-420.0f,400.0f,820.0f,90.0f);ship.flags=kMapLarge;ship.hp=0.9f;
     Unit(MapKind::lock,-120.0f,6.0f,522.0f);
     Unit(MapKind::marker,250.0f,0.0f,450.0f);Unit(MapKind::marker,-700.0f,0.0f,1200.0f);

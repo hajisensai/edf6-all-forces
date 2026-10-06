@@ -19,7 +19,7 @@
 //  - The far clip: view.cpp ViewMapClip (MapViewDistance) while it is open; the HUD keeps the last game view for the
 //    aim (CameraRay), so a turret, a launcher or a sight does not swing onto the map's view.
 //  - The marks: the friendly side by the team walk the board prompt makes (0x5E11D0, sidecar.cpp), the enemies by the
-//    hostile walk the stock radar makes (0x5E0F20; the nearest kMapEnemies kept), the objective markers (DestinationMarker, vtable 0x17D4378: its
+//    hostile walk the stock radar makes (0x5E0F20: large ones pins, small ones dots), the objective markers (DestinationMarker, vtable 0x17D4378: its
 //    transform update, slot 3, puts it in a table, its destructor, slot 1, takes it out; its matrix at +0x1C0, L that
 //    these are the mission's objective markers), gathered every kGatherMs.
 //  - The wheel: the game window's procedure is subclassed for WM_MOUSEWHEEL (swallowed while the map is open); the
@@ -112,6 +112,8 @@ struct Game {
     ULONGLONG frameAt,gatherAt;  // wall ms: the last frame of the owner, the last gather
     int count;
     MapUnit unit[kMapUnits];
+    int dots,larges;            // the small enemies' dots, the large enemies' pins (of `count`)
+    MapDot dot[kMapDots];
     bool loggedMouse;
     ULONGLONG loggedAt;         // the marks' debug line
 };
@@ -259,7 +261,7 @@ void __fastcall WalkDtor(void*,unsigned) noexcept {}
 void* kWalkVtable[]={reinterpret_cast<void*>(&WalkDtor),reinterpret_cast<void*>(&WalkVisit)};
 
 // The enemies as the stock radar finds them (HUiHudRader's update 0x82B4D0 walks 0x5E0F20(manager, its team, functor):
-// every live object of every team hostile to it, relation 2), all of them gathered here, the nearest kMapEnemies kept.
+// every live object of every team hostile to it, relation 2), all of them gathered here (kFoes at most).
 struct Foe { const unsigned char* o; float d2,hpMax; };
 constexpr int kFoes=4096;
 Foe foes[kFoes];
@@ -287,18 +289,55 @@ void EnemyVisit(void* ctx,const void* object,const float* aim) {
     HostileVisit(&h,const_cast<void*>(object));
 }
 
-// The enemies kept (nearest first, kMapEnemies at most): flying (an aircraft, or kFlyingClear over the ground under
-// it: its stem goes down), large (HP max kLargeShare times the median of all of them, or kLargeHp: its HP bar shown).
+// The ground under a small enemy, for its dot's "flying" (the user, 2026-10-06: small enemies get no pin, so no ray of
+// their own): a cache of the ground's height on a kCellM grid (one map ray a cell at its centre, the first time a small
+// enemy is in it; at most kCellRays new cells a gather, the rest known by the next ones), dropped with the mission.
+constexpr float kCellM=48.0f;
+constexpr int kCells=8192,kCellRays=48;
+struct Cell { std::int32_t x,z; float h; bool used; };
+Cell cells[kCells];
+int cellsUsed=0;
+// The cached ground at (x, z): true with `h`; false not known yet (a ray is cast when `rays` allows, counting down).
+bool CellGround(float x,float z,float y,int* rays,float* h) noexcept {
+    const auto cx=static_cast<std::int32_t>(std::floor(x/kCellM)),cz=static_cast<std::int32_t>(std::floor(z/kCellM));
+    std::uint32_t k=(static_cast<std::uint32_t>(cx)*73856093u)^(static_cast<std::uint32_t>(cz)*19349663u);
+    for(int probe=0;probe<16;++probe,++k) {
+        Cell& c=cells[k%kCells];
+        if(c.used && c.x==cx && c.z==cz){*h=c.h;return true;}
+        if(c.used)continue;
+        if(*rays<=0 || cellsUsed>=kCells*3/4)return false;   // full: the rest stay "on the ground"
+        --*rays;++cellsUsed;
+        c=Cell{cx,cz,GroundAt((static_cast<float>(cx)+0.5f)*kCellM,(static_cast<float>(cz)+0.5f)*kCellM,y),true};
+        *h=c.h;
+        return true;
+    }
+    return false;
+}
+
+// The enemies (the user, 2026-10-06: "按距离取最近 256 个 不合理吧，我觉得优先显示大型敌人"): large (HP max kLargeShare
+// times the median of all of them, or kLargeHp) ones are pins, kMapLargeEnemies at most, the highest HP max first, each
+// with its own ground ray (flying: an aircraft, or kFlyingClear over the ground under it: its stem goes down) and HP
+// bar; the small ones are dots, kMapDots at most, the nearest first, flying by the cell cache. No count switches the
+// style: large or small is the only split. The nearest enemy of all is flagged, pin or dot.
 void Enemies(Game& g) noexcept {
+    g.dots=0;g.larges=0;
     if(!foeCount)return;
     static float hps[kFoes];
     int n=0;
     for(int i=0;i<foeCount;++i)if(foes[i].hpMax>0.0f)hps[n++]=foes[i].hpMax;
     float median=0.0f;
     if(n){std::nth_element(hps,hps+n/2,hps+n);median=hps[n/2];}
-    const int keep=foeCount<kMapEnemies ? foeCount : kMapEnemies;
-    std::partial_sort(foes,foes+keep,foes+foeCount,[](const Foe& a,const Foe& b){return a.d2<b.d2;});
-    for(int i=0;i<keep;++i) {
+    int nearest=0;
+    for(int i=1;i<foeCount;++i)if(foes[i].d2<foes[nearest].d2)nearest=i;
+    const unsigned char* nearestObj=foes[nearest].o;
+    // Large ones to the front, the highest HP max first; the small ones after them, the nearest first.
+    auto large=[&](const Foe& f){ return f.hpMax>=kLargeHp || (n>=2 && f.hpMax>=median*kLargeShare); };
+    Foe* split=std::partition(foes,foes+foeCount,large);
+    const int larges=static_cast<int>(split-foes),smalls=foeCount-larges;
+    const int keepLarge=larges<kMapLargeEnemies ? larges : kMapLargeEnemies,keepSmall=smalls<kMapDots ? smalls : kMapDots;
+    std::partial_sort(foes,foes+keepLarge,split,[](const Foe& a,const Foe& b){return a.hpMax>b.hpMax;});
+    std::partial_sort(split,split+keepSmall,foes+foeCount,[](const Foe& a,const Foe& b){return a.d2<b.d2;});
+    for(int i=0;i<keepLarge;++i) {
         const unsigned char* o=foes[i].o;
         const float* p=PosOf(o);
         const float ground=GroundAt(p[0],p[2],p[1]);
@@ -308,9 +347,20 @@ void Enemies(Game& g) noexcept {
         if(flying)u->ground=ground;
         Heading(u,o);
         float hpMax=0.0f;
-        const float share=HpShare(o,&hpMax);
-        if(hpMax>=kLargeHp || (n>=2 && hpMax>=median*kLargeShare)){u->flags|=kMapLarge;u->hp=share;}
-        if(i==0)u->flags|=kMapNearest;
+        u->hp=HpShare(o,&hpMax);
+        u->flags|=kMapLarge|(o==nearestObj ? kMapNearest : 0);
+        ++g.larges;
+    }
+    int rays=kCellRays;
+    for(int i=0;i<keepSmall;++i) {
+        const unsigned char* o=split[i].o;
+        const float* p=PosOf(o);
+        if(!std::isfinite(p[0]+p[1]+p[2]))continue;
+        MapDot& d=g.dot[g.dots++];
+        std::memcpy(d.pos,p,12);
+        float h=0.0f;
+        const bool flying=(KnownVehicle(o) && Aircraft(o)) || (CellGround(p[0],p[2],p[1],&rays,&h) && p[1]-h>kFlyingClear);
+        d.flags=static_cast<std::uint8_t>((flying ? kMapFlying : 0)|(o==nearestObj ? kMapNearest : 0));
     }
 }
 
@@ -359,8 +409,8 @@ void Gather(Game& g,const unsigned char* human) noexcept {
     Locks(g);
     if(Cfg().debug && GetTickCount64()-g.loggedAt>=5000) {
         g.loggedAt=GetTickCount64();
-        Log("MAP marks: %d enemies (%s; %d drawn, nearest first), %d marks in all",foeCount,hostileOk ? "the radar's hostile walk" : "the lock registry",
-            foeCount<kMapEnemies ? foeCount : kMapEnemies,g.count);
+        Log("MAP marks: %d enemies (%s): %d large pins, %d small dots; %d pins in all, %d ground cells",foeCount,
+            hostileOk ? "the radar's hostile walk" : "the lock registry",g.larges,g.dots,g.count,cellsUsed);
     }
 }
 
@@ -378,6 +428,8 @@ void Publish(const Game& g,const unsigned char* human,const float* eye,const flo
     if(!vec::Normalize(r.meDir)){r.meDir[0]=0.0f;r.meDir[2]=1.0f;}
     r.count=g.count;
     std::memcpy(r.unit,g.unit,sizeof(MapUnit)*static_cast<std::size_t>(g.count));
+    r.dots=g.dots;
+    std::memcpy(r.dot,g.dot,sizeof(MapDot)*static_cast<std::size_t>(g.dots));
     r.mapKey=c.mapKey;r.mapButton=c.mapButton;
     readoutAt=pose.at;
     ReleaseSRWLockExclusive(&lock);
@@ -662,7 +714,9 @@ bool InstallMap() noexcept {
 
 void ResetMap() noexcept {
     Close("a new mission");
-    game.human=ObjRef{};game.count=0;
+    game.human=ObjRef{};game.count=0;game.dots=0;
+    for(auto& c:cells)c=Cell{};
+    cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
     pose=Pose{};readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
