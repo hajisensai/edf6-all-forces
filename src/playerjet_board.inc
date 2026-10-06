@@ -337,6 +337,7 @@ void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float cl
     j.hoverTop=k.cruise;
     j.yaw=nose+Clamp(std::remainder(j.yaw-nose,2.0f*kWatchPi),-kHoverLead,kHoverLead);
     if(!aimFlight)HoverStick(j,k,s,down,want,&vz);
+    j.area=WallTurnVelocity(pos,want);   // the walls where the map's ground ends (playarea.h), as a wing's
     const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
     const float asked=Len(want);
     // Coming down near the ground it slows (kSettleShare of its height a second, at least kSettle): set down, not dropped.

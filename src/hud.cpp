@@ -748,14 +748,16 @@ void CockpitCue(const PlayerJetReadout& j,wchar_t* cue,std::size_t size,bool* ro
     if(j.pullUp)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::pullUpTerrain));
     else if(j.threat==2)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::missileBang));
     else if(j.threat==1)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::locked));
+    else if(j.area==2)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::areaTurning));
+    else if(j.area==1)_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::areaAhead));
     else if(!cue[0] && FuelLow(j.fuel))_snwprintf_s(cue,size,_TRUNCATE,L"%ls",Tr(Tx::lowFuel));
 }
 // The cue's colour (over `calm` without one): the ground and a missile blink red and white (8 Hz), a lock is yellow,
-// a stall red, the pull-up cue blinks green (4 Hz).
+// a stall red, the area's edge amber (blinking while a wall turns it back), the pull-up cue blinks green (4 Hz).
 const float* CueColour(const PlayerJetReadout& j,bool rotate,const float* calm) noexcept {
     const bool blink=(GetTickCount64()/125)%2==0;
     return j.pullUp || j.threat==2 ? (blink ? kRed : kWhite) : j.threat==1 ? kYellow : j.stall ? kRed :
-           rotate && blink ? kGreen : rotate ? kYellow : calm;
+           j.area==2 ? (blink ? kAmber : kWhite) : j.area==1 ? kAmber : rotate && blink ? kGreen : rotate ? kYellow : calm;
 }
 
 // The cockpit readout of the jet the player flies (drawn whatever VehicleHud says): at the bottom centre, its
@@ -1368,7 +1370,7 @@ void StallCue(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 // the warnings red and the cautions amber in a frame; the warnings blink, and so does a caution its first kNewMs.
 constexpr ULONGLONG kNewMs=3000;
 const Tx kWarnText[kWarnCount]={Tx::warnPullUp,Tx::warnMissile,Tx::warnStall,Tx::warnGear,Tx::warnTerrain,Tx::warnSinkRate,Tx::warnLock,
-                                Tx::warnGearSpeed,Tx::warnWeightOnWheels,Tx::warnLowFuel};
+                                Tx::warnGearSpeed,Tx::warnWeightOnWheels,Tx::warnLowFuel,Tx::warnArea};
 void Annunciator(void* drawer,void* ctx,Text* text,float width,float height,float s,const Warnings& w,Line* lines,int* at) noexcept {
     if(!w.on)return;
     const ULONGLONG now=GetTickCount64();

@@ -19,6 +19,10 @@ target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
+# What a blocked jet ran into, logged (src/impact.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
+# The map's real play area: the walls where its ground ends (src/playarea.cpp, src/playarea.h).
+target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -50,6 +54,13 @@ set_target_properties(sidecar_board_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$
 add_executable(pjet_kinds EXCLUDE_FROM_ALL tools/pjet_kinds.cpp)
 target_include_directories(pjet_kinds PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(pjet_kinds PRIVATE /W4 /WX /utf-8 /permissive-)
+# The fixed wings' turn handling under the player's flight model (tools/pjet_turn_sim.cpp: src/pjet_handling.h against the
+# code before 2026-10-06), and its bounds (--check, in CTest):
+# cmake --build build --target pjet_turn_sim && build\pjet_turn_sim.exe --both
+add_executable(pjet_turn_sim EXCLUDE_FROM_ALL tools/pjet_turn_sim.cpp)
+target_include_directories(pjet_turn_sim PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(pjet_turn_sim PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(pjet_turn_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The stock heli's mouse-aim flight (src/heliaim.h) against a stand-in of its flight law, offline: the signs of the keys and
 # the mouse (tools/heli_aim_check.cpp). Not part of the plugin build:
@@ -133,6 +144,11 @@ set_target_properties(stab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BI
 # The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
 # the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
 # cmake --build build --target proteus_check && build\proteus_check.exe
+# The flyers' soft edge's rules offline (tools/airbound_check.cpp, src/airbound.h). Not part of the plugin build.
+add_executable(airbound_check EXCLUDE_FROM_ALL tools/airbound_check.cpp)
+target_compile_options(airbound_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(airbound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)
 target_compile_options(proteus_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(proteus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -276,9 +292,23 @@ set_target_properties(grape_turret_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check)
+    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
 endforeach()
 add_test(NAME hud_layout COMMAND hud_view --out "${CMAKE_BINARY_DIR}/hud-review")
+# The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
+# edge (jet_obstacle_sim --edge-suite).
+add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The play area's walls (src/playarea.h: the ground's edge found by map rays, the walls' turn), a jet flown out at them
+# offline (tools/play_area_check.cpp). Not part of the plugin build:
+# cmake --build build --target play_area_check && build\play_area_check.exe
+add_executable(play_area_check EXCLUDE_FROM_ALL tools/play_area_check.cpp)
+target_include_directories(play_area_check PRIVATE src)
+target_compile_options(play_area_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(play_area_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+add_dependencies(offline_checks play_area_check)
+add_test(NAME play_area_check COMMAND play_area_check)
+add_dependencies(offline_checks pjet_turn_sim)
+add_test(NAME pjet_turn_check COMMAND pjet_turn_sim --check)

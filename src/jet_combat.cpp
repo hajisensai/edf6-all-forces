@@ -102,8 +102,16 @@ bool Flies(const void* object,const float* p,ULONGLONG ms) noexcept {
     return m.flyer;
 }
 
+// A target it lets be for its edge (airbound.h, jet_flight.cpp SoftEdge): flying back in from past its soft edge,
+// anything out past that (the one it chased out there too, the user 2026-10-06: "过了这个小边界会往回走"); else anything out
+// past the play area's walls (mapbounds.h PlayBox: the ground's edge), where it never goes.
+bool PastEdge(const Jet& j,const float* p) noexcept {
+    return !airbound::Inside(j.m.edgeBack ? JetSoftBox(j) : PlayBox(),p);
+}
+
 void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     auto& k=*static_cast<Pick*>(ctx);
+    if(PastEdge(*k.j,p))return;
     const float d[3]={p[0]-k.anchor[0],p[1]-k.anchor[1],p[2]-k.anchor[2]};
     // New targets only within the range of the anchor; the current one is chased wherever it goes.
     if(object!=k.j->t.target && Dot(d,d)>k.range*k.range)return;
@@ -445,11 +453,12 @@ void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,f
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     const float* aim=j.t.aim;
     const float d=j.t.target ? std::sqrt((aim[0]-pos[0])*(aim[0]-pos[0])+(aim[1]-pos[1])*(aim[1]-pos[1])+(aim[2]-pos[2])*(aim[2]-pos[2])) : 0.0f;
-    Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f real=%.0f vy=%.1f bank=%.0f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d",
+    Log("JET v=%p %s %s y=%.0f clear=%.0f ceil=%.0f spd=%.0f/%.0f real=%.0f vy=%.1f bank=%.0f target=%p%s dist=%.0f guns=%d msl=%d hp=%.0f/%.0f fuel=%.0fs fire=%d/%d at=(%.0f,%.0f) soft=%.0f%s",
         v,KindOf(j).name,kModeNames[static_cast<int>(j.mode)],pos[1],clear,CeilingY(),Len(j.m.vel),speed,j.m.real,j.m.vel[1],
         std::acos(Clamp(At<float>(v,kMatrix+0x14)/std::sqrt(1.0f-At<float>(v,kMatrix+0x24)*At<float>(v,kMatrix+0x24)+1e-6f),-1.0f,1.0f))*180.0f/kPi,
         j.t.target,j.t.flyer ? "(air)" : "",d,a.guns,a.missiles,hp,hpMax,
-        static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile]);
+        static_cast<float>(j.fuelMs)*0.001f-static_cast<float>(ms-j.bornAt)*0.001f,v[kFireGun],v[kFireMissile],pos[0],pos[2],
+        airbound::Depth(JetSoftBox(j),pos),j.m.edgeBack ? " back" : "");
     // Each weapon's barrel against the nose: the guns must point where the nose does.
     if(SeatCount(v)==0)return;
     const auto seat=SeatAt(const_cast<unsigned char*>(v),0);

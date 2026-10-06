@@ -100,6 +100,7 @@ void WarnTick() noexcept {
         if(gear.blocked)on|=1u<<kWarnWow;
     }
     if(fuel && FuelLow(*fuel))on|=1u<<kWarnFuel;
+    if(y==&j.sym && j.area)on|=1u<<kWarnArea;
     for(int k=0;k<kWarnCount;++k)if((on>>k&1u) && !(state.on>>k&1u))state.litAt[k]=now;
     state.on=on;state.tick=now;
     Publish(true);

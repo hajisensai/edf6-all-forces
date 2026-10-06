@@ -40,6 +40,8 @@ ULONGLONG nowMs=0;
 std::FILE* logFile=nullptr;
 }  // namespace
 const Config& Cfg() noexcept { return config; }
+// The play area (playarea.cpp measures the map's ground in the game): here the physics square.
+PlayArea MapPlayArea() noexcept { const float e=PlayEdge(); return PlayArea{{-e,-e},{e,e},false,0.0f,false}; }
 ULONGLONG GameMs() noexcept { return nowMs; }
 ULONGLONG GameFrame() noexcept { return nowMs/16; }
 void Log(const char* format,...) noexcept {

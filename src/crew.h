@@ -86,6 +86,8 @@ struct Config {
     int playerJetChuteCutKey=0x58;  // the key that cuts the parachute after an ejection ('X')
     int playerJetTargetKey=0x51;    // ...and the key that locks the next target in the cone ('Q'; on a pad X)
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
+    float playerJetRollScale=1.0f;  // ...the fixed wings' roll rate, every kind's times this (pjet_handling.h PathRoll; the body keeps up)
+    float playerJetAimGain=1.0f;    // ...how hard the mouse's aim turns the plane toward it (times kSteer)
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
@@ -208,6 +210,11 @@ struct Config {
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
+    // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
+    float airSoftEdge=600.0f;       // m: the jets' band is at least this wide
+    float airSoftTurns=1.0f;        // ...and at least this many of the kind's full-speed turn diameters (at most half the edge)
+    float airSoftCeil=150.0f;       // m under the ceiling the jets turn level from (soft ceiling)
+    float heliSoftEdge=150.0f;      // m: the NPC helis' band inside their edge (plus what they need to stop)
     bool primer=true;          // the Primer creatures (enemies: EDF6VC_CENTIPEDE / _DRAGONFLY a mission places) are flown (primer.cpp)
     float primerHpScale=1.0f;  // ...their HP, times the SGO's (centipede 400, dragonfly 600)
     bool primerFire=true;      // ...their guns fire
@@ -269,6 +276,9 @@ void ResetMissiles() noexcept;    // missile.cpp
 void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
 void BigWorldProbe() noexcept;
+// What a jet ran into (impact.cpp), logged when it is held back ("blocked"): the nearest map surface round `pos`
+// (terrain or a building) and the nearest objects (class, team, distance). `who` "JET" / "PJET", `way` its velocity.
+void LogImpact(const char* who,const void* self,const float* pos,const float* way) noexcept;
 // m: the physics world's half size (3000 stock, ini BigWorld when raised): the plugin's walls stand inside it.
 // The edge of the play area every flyer keeps inside (the user, 2026-10-05: "don't let them go out there; a buffer
 // before it; past the line, coming back comes first"): the stock world's 2400 (600 m inside its +-3000), or the big
@@ -726,6 +736,7 @@ struct PlayerJetReadout {
     HeliFlight heli;
     FuelReading fuel;            // its airframe's tank (the 506 body's: what the stock FUEL gauge showed)
     int guns,gunRounds;          // its guns (seat 0's weapons neither a store nor the tank) and the fewest rounds in one
+    int area;                    // the play area's walls (playarea.h): 2 turned back by one, 1 heading out near one, 0 neither
 };
 bool PlayerJetHud(PlayerJetReadout* out) noexcept;
 // launcher.cpp: the Katyusha's impact point (CCIP) while the player rides a vehicle whose seat 0 holds a launcher marked
@@ -824,6 +835,7 @@ unsigned char* PlayerHuman() noexcept;
 #include "hud.h"
 #include "nix.h"
 #include "vhud.h"
+#include "mapbounds.h"
 #include "payload.h"
 #include "map.h"
 #include "mapcmd.h"

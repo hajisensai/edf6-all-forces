@@ -296,3 +296,7 @@ HUDTEXT(kindCrawler,L"crawler",L"深渊爬行者",L"深淵爬行者",L"デプス
 HUDTEXT(kindDrill,L"drill",L"钻头战车",L"鑽頭戰車",L"ドリル戦車")
 HUDTEXT(unitCrawler,L"CRAWLER",L"深渊爬行者",L"深淵爬行者",L"デプス・クロウラー")
 HUDTEXT(kindNpc,L"npc",L"NPC",L"NPC",L"NPC")
+
+HUDTEXT(areaTurning,L"AREA EDGE: TURNING BACK",L"接近边界：正在返航",L"接近邊界：正在返航",L"エリア境界：旋回中")
+HUDTEXT(areaAhead,L"AREA EDGE AHEAD: TURN BACK",L"前方边界：请返航",L"前方邊界：請返航",L"前方エリア境界：引き返せ")
+HUDTEXT(warnArea,L"AREA EDGE",L"区域边界",L"區域邊界",L"エリア境界")
