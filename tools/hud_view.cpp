@@ -155,6 +155,7 @@ bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;r
 bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
+bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
 bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
 bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
 bool PlayerGunnerHud(GunnerReadout*) noexcept { return false; }

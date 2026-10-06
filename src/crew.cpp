@@ -21,6 +21,7 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "boarding_entrance.h"
 #include "body506.h"
 #include "game_clock.h"
 #include "edf/host.h"
@@ -548,7 +549,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
         Log("VEH v=%p %s team=%d playerTeam=%d seats=[%s] pos=(%.0f,%.0f,%.0f) dist=%.0f",vehicle,kClasses[cls].name,
             At<std::int32_t>(vehicle,kTeam),player.team,riders,p[0],p[1],p[2],player.at ? std::sqrt(Distance2(vehicle,player.pos)) : -1.0f);
     }
-    if(anyPlayer){st.playerAt=now;st.emptySince=0;return;}
+    if(anyPlayer){if(SeatRider(SeatAt(vehicle,0))==Rider::player)st.playerAt=now;st.emptySince=0;return;}
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
@@ -560,7 +561,9 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // range's air carrier, there an NPC-flown friend, "flew straight off"; testrange/gen.py now parks them empty).
     // The Proteus the same (decided 2026-10-06): a parked one no player has ridden stays for them, its RideAi would seat
     // NPCs in all four seats and walk it off; one a player rode and left is crewed as any vehicle is.
-    if((IsHelicopter(vehicle) || IsProteus(vehicle)) && !st.playerAt)return;
+    // Every first-use parked vehicle belongs to the waiting player, not only helicopters/Proteus.
+    // An existing mission NPC is untouched above; a player must have driven seat 0 before auto-crew is eligible.
+    if(!st.playerAt)return;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
     ULONGLONG since=st.emptySince;
@@ -852,6 +855,40 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
 }
 
 bool KnownVehicle(const void* object) noexcept { return ClassOf(object)>=0; }
+
+bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
+    if(!out || !Cfg().enabled || !Cfg().playerJet)return false;
+    __try {
+        const auto* human=PlayerHuman();
+        if(!human || human[kDead])return false;
+        const auto* riding=At<const unsigned char*>(human,kHumanVehicleCtrl);
+        if(riding && At<std::int32_t>(riding,8)>0)return false;
+        const auto mask=At<std::uint32_t>(human,0x31C);
+        const auto* pos=reinterpret_cast<const float*>(human+kPosition);
+        float best=120.0f*120.0f;
+        bool found=false;
+        const ULONGLONG now=GameMs();
+        for(const auto& st:states) {
+            if(!st.ref || now-st.seen>300)continue;
+            auto* v=static_cast<unsigned char*>(const_cast<void*>(st.ref.obj));
+            if(!Readable(v,kSeatCount+8) || !st.ref.Is(v) || !IsJet(v) || !PlayerJetBoardable(v))continue;
+            for(unsigned i=0;i<SeatCount(v);++i) {
+                const auto* seat=SeatAt(v,i);
+                const Rider rider=SeatRider(seat);
+                if(rider!=Rider::none && !(rider==Rider::dummy && Cfg().bump))continue;
+                if(!(mask & At<std::uint32_t>(seat,0x30) & At<std::uint32_t>(seat,0x34)))continue;
+                float point[3],reach=0.0f;
+                if(!SeatPoint(v,i,point,&reach) || !std::isfinite(reach) || reach<=0.0f)continue;
+                const float dx=point[0]-pos[0],dy=point[1]-pos[1],dz=point[2]-pos[2];
+                const float d=dx*dx+dy*dy+dz*dz;
+                if(!std::isfinite(d) || d>=best)continue;
+                best=d;found=true;
+                std::memcpy(out->at,point,12);out->reach=reach;out->distance=std::sqrt(d);out->inReach=d<=reach*reach;
+            }
+        }
+        return found;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 const char* VehicleClassName(const void* vehicle) noexcept {
     const int c=ClassOf(vehicle);

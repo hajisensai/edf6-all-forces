@@ -20,6 +20,7 @@
 // is the wall clock: a snapshot older than kFreshMs (loading, mission over) is not drawn; nothing is while the game is paused.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "boarding_entrance.h"
 #include "gear.h"
 #include "hudscale.h"
 #include "map_cam.h"
@@ -128,6 +129,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool stock; StockHudReadout stockHud;
                   bool warned; Warnings warn;
                   bool seats; SeatPrompt seatPrompt;
+                  bool entrance; BoardingEntrance boardingEntrance;
                   bool turretCamOk; TurretCamReadout turretCam;
                   bool nix; NixTorso nixTorso;
                   bool proteus; ProteusReadout proteusRo; };
@@ -893,6 +895,21 @@ void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,
     l.scale=scale;l.rgba=rgba;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
     l.x=x-(align==1 ? l.w*0.5f : align==2 ? l.w : 0.0f);l.y=y-l.h*0.5f;
+}
+
+// Mark the real seat locator before the player is within the stock prompt's short reach. Large carriers place
+// this beside their outer hull/wing: an origin-centred hint would direct the player to the wrong place.
+void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
+                  const BoardingEntrance& e,Line* lines,int* at) noexcept {
+    float x,y,depth;
+    if(!Project(vp,e.at,width,height,&x,&y,&depth) || x<0.0f || x>width || y<0.0f || y>height)return;
+    const float* colour=e.inReach ? kHud : kCyan;
+    Arc(drawer,ctx,x,y,13.0f*s,0.0f,kTurn,2.0f*s,24,colour);
+    Seg(drawer,ctx,x-20.0f*s,y,x-14.0f*s,y,2.0f*s,colour);
+    Seg(drawer,ctx,x+14.0f*s,y,x+20.0f*s,y,2.0f*s,colour);
+    const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y+30.0f*s,30.0f*s,height-30.0f*s);
+    if(e.inReach)Label(text,lines,at,tx,ty,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
+    else Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingEntry),static_cast<int>(std::ceil(e.distance)));
 }
 
 // --- The loadout strip (the user, 2026-10-06: "切换挂载应该有图片显示，而非仅文字"): every store a cell with its picture
@@ -2359,6 +2376,7 @@ void HudPublish() noexcept {
     s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
     s.warned=WarnLatest(&s.warn);   // the aircraft's warnings (warn.cpp WarnTick, this frame's: it runs first)
     s.seats=PlayerSeatPrompt(&s.seatPrompt);
+    s.entrance=PlayerBoardingEntrance(&s.boardingEntrance);
     s.turretCamOk=PlayerTurretCam(&s.turretCam);   // the turret camera (turretcam.cpp): the gun's mark, free look
     s.nix=PlayerNixTorso(&s.nixTorso);   // the Nix's legs and torso (nix.cpp): the stock HUD's hull / turret ring
     // The stock weapon gauge gives way (stockgauge.cpp, HideStockGauges) where HudDraw lists the vehicle's weapons and
@@ -2945,6 +2963,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.turretCamOk && !snap.cockpit)TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
