@@ -250,12 +250,13 @@ void End(unsigned char* v,Emc& e,const float* from,const float* dir) noexcept {
         sized || !blast.obj ? "" : " (the SGO's: its radius could not be written)");
 }
 
-void Publish(const Emc& e,const unsigned char* weapon) noexcept {
+void Publish(const Emc& e,const unsigned char* v,const unsigned char* weapon) noexcept {
     const std::int32_t ammo=At<std::int32_t>(weapon,kWeaponAmmo),burst=At<std::int32_t>(weapon,kWeaponBurst);
     EmcCue c{};
     c.charge=e.st.charge;c.beamLeft=e.st.beamLeft;c.rearm=e.st.rearm;
     c.beams=burst>0 ? (ammo+burst-1)/burst : 0;
     c.charging=e.st.phase==emc::Phase::charging;c.firing=e.st.phase==emc::Phase::firing;c.empty=ammo<=0;
+    std::memcpy(c.pos,v+kPosition,12);
     AcquireSRWLockExclusive(&cueLock);
     cue=c;cueAt=GetTickCount64();
     ReleaseSRWLockExclusive(&cueLock);
@@ -272,8 +273,9 @@ Emc* EmcOfVehicle(unsigned char* v,unsigned char** weapon) noexcept {
     return e;
 }
 
+// The charged beam is on: its code checked, the plugin and EmcBeam on, its rounds preloaded.
 bool Ready() noexcept {
-    return triggerOk && weaponOk && Cfg().emcBeam && EmcRoundReady(EmcRound::beam) && EmcRoundReady(EmcRound::breakCharge) &&
+    return triggerOk && weaponOk && Cfg().enabled && Cfg().emcBeam && EmcRoundReady(EmcRound::beam) && EmcRoundReady(EmcRound::breakCharge) &&
            EmcRoundReady(EmcRound::blast);
 }
 }  // namespace
@@ -308,6 +310,8 @@ void EmcInput(unsigned char* v) noexcept {
 }
 
 // After the stock input: the charge / beam / rearm step (emc_plan.h Step) and what it starts and ends, once a frame.
+// The plugin off too (crew.cpp InputHook runs it before the Enabled test): Ready() is false then, and a charge going is
+// let go (its loop stopped, its glow deleted) as for EmcBeam=0; a beam already out finishes (it was fired).
 void EmcFrame(unsigned char* v) noexcept {
     if(!Is510(v))return;
     unsigned char* weapon=nullptr;
@@ -360,12 +364,15 @@ void EmcFrame(unsigned char* v) noexcept {
     } else if(e->st.phase==emc::Phase::firing) {
         Beam(v,*e,from,dir,dt,ms);
     }
-    if(e->player)Publish(*e,weapon);
+    if(e->player)Publish(*e,v,weapon);
 }
 
-// Once a frame (crew.cpp FrameTick): an EMC no longer seen (deleted mid-charge or mid-beam: its input never comes round
+// Once a frame (crew.cpp InputHook, the plugin off too): an EMC no longer seen (deleted mid-charge or mid-beam: its input never comes round
 // again) has its charge loop stopped and its rounds deleted (a looped sound would play on to the mission's end).
 void EmcTick() noexcept {
+    static ULONGLONG tickFrame=0;   // run from every vehicle's input, the plugin off too: once a frame
+    if(tickFrame==GameFrame())return;
+    tickFrame=GameFrame();
     const ULONGLONG ms=GameMs();
     for(auto& e:emcs)
         if(e.ref && ms-e.seen>kGoneMs && (e.sounding || e.sight.obj || e.beam.obj)) {

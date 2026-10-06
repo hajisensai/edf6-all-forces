@@ -531,7 +531,9 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // stays to be bumped). One a player has ridden and left is crewed as before (it follows them). The plugin's aircraft
     // are 506 bodies (IsHelicopter by the vtable): one a mission placed empty waits too (the user, 2026-10-05: the
     // range's air carrier, there an NPC-flown friend, "flew straight off"; testrange/gen.py now parks them empty).
-    if(IsHelicopter(vehicle) && !st.playerAt)return;
+    // The Proteus the same (decided 2026-10-06): a parked one no player has ridden stays for them, its RideAi would seat
+    // NPCs in all four seats and walk it off; one a player rode and left is crewed as any vehicle is.
+    if((IsHelicopter(vehicle) || IsProteus(vehicle)) && !st.playerAt)return;
     // Wait out the delay since it emptied, since a player left it and since a bump (the player is
     // walking up to the seat it reserved).
     ULONGLONG since=st.emptySince;
@@ -700,7 +702,6 @@ void FrameTick() noexcept {
     GuardedTick(kStepUnderground,&BigWorldProbe);
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
     GuardedTick(kStepView,&ViewTick);
-    GuardedTick(kStepEmc,&EmcTick);
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
@@ -719,6 +720,8 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepProteus,&ProteusFrame,v);          // the plugin off too: a reworked Proteus gets its stock numbers back
     Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: the high view goes then
     Guarded(kStepVehicleSound,&VehicleSound,v);     // the plugin off too: the stock sounds are given back then
+    Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
+    GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
     if(!Cfg().enabled)return;
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);
@@ -733,7 +736,6 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHeli,&HeliCueStep,v);
     Guarded(kStepGround,&GroundStep,v);
     Guarded(kStepDrill,&DrillFrame,v);
-    Guarded(kStepEmc,&EmcFrame,v);
     Guarded(kStepSidecar,&SidecarFrame,v);
     Guarded(kStepRam,&VehicleRamFrame,v);       // after the drill and the sidecar: what the parts drove into this frame
     Guarded(kStepHud,&HudSee,v);
@@ -820,14 +822,13 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
     return found;
 }
 
-bool KnownVehicle(const void* vehicle) noexcept { return ClassOf(vehicle)>=0; }
+bool KnownVehicle(const void* object) noexcept { return ClassOf(object)>=0; }
 
 const char* VehicleClassName(const void* vehicle) noexcept {
     const int c=ClassOf(vehicle);
     return c>=0 ? kClasses[c].name : "vehicle";
 }
 
-bool IsVehicleObject(const void* object) noexcept { return ClassOf(object)>=0; }
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {

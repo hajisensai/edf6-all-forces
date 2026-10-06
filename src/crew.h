@@ -289,6 +289,7 @@ void LockSound(unsigned char* vehicle) noexcept;
 // the unit line from it to the camera.
 struct SoundPlace { float left,right,distance,doppler; float toCamera[3]; };
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;   // false: no listener this frame
+bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
 bool InstallVehicleSound() noexcept;
@@ -456,7 +457,8 @@ bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // pla
 // be dealt (no charge preloaded this mission).
 bool ImpactDamage(const unsigned char* by,const float* at,float damage,float radius) noexcept;
 // vehicleram.cpp: the ground vehicles' ram (README 载具撞击伤害). Install at load (the CarBase mass read's check, the
-// Barga's and the Proteus' own update hooks); the frame from every vehicle's input (crew.cpp) and those hooks.
+// Barga's own update hook: the one class crew.cpp does not chain); the frame from every vehicle's input (crew.cpp, the
+// Proteus's among them) and that hook.
 bool InstallVehicleRam() noexcept;
 void VehicleRamFrame(unsigned char* vehicle) noexcept;
 void ResetVehicleRams() noexcept;
@@ -504,8 +506,8 @@ void EmcFrame(unsigned char* vehicle) noexcept;
 void ResetEmc() noexcept;
 void EmcTick() noexcept;   // once a frame: an EMC gone mid-charge or mid-beam has its sound and rounds dropped
 // The local player's EMC (hud.cpp): the charge (0..1), the beam's seconds left, the beams its rounds still make (the stock
-// burst's rounds each), and its state. False with none.
-struct EmcCue { float charge,beamLeft,rearm; int beams; bool charging,firing,empty; };
+// burst's rounds each), and its state; `pos` the EMC's (the HUD draws the line only on that vehicle's block). False with none.
+struct EmcCue { float charge,beamLeft,rearm; int beams; bool charging,firing,empty; float pos[3]; };
 bool PlayerEmcCue(EmcCue* out) noexcept;
 
 // sidecar.cpp: the sidecar motorcycle (EDF6VC_SIDECAR.SGO, docs/sidecar-re.md): a Freed bike whose second rider stands
@@ -780,8 +782,6 @@ bool InstallPlayerJets() noexcept;                      // after InstallSub (it 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
 unsigned char* PlayerHuman() noexcept;
-// crew.cpp: `object` is a vehicle of a class crew.cpp knows (its vtable among the hooked classes).
-bool IsVehicleObject(const void* object) noexcept;
 }  // namespace crew
 
 // The core modules' declarations (self-contained; every file that includes crew.h sees them as before).

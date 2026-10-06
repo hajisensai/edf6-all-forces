@@ -1855,22 +1855,32 @@ float HeadingOfYaw(float yaw) noexcept {
 // The block left of the bottom centre (see above). A Nix: the ring's hull is its legs, its gun the torso (nix.cpp), the
 // twist's limits ticked and its angle on the info line. The drill tank: its drill's RPM and heat a line under the
 // weapons (DrillPanel's colours), OVERHEAT the warning. The EMC (emc.cpp): its charged beam a line under the weapons
-// and a bar under it (EmcLine).
+// and a bar under it (EmcLine). The readouts of a kind (the Nix's, the EMC's, the Proteus's) are taken only when they are
+// this vehicle's (their position on it). Out of lines (a crowded frame): the head always (it carries the warnings), then
+// as many weapons as fit, then the extras that fit whole; never the whole block dropped (with the stock gauge hidden,
+// stockgauge.cpp, it is the vehicle's only readout).
 void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float s,const StockHudReadout& r,const StockExtras& x,
                 Line* lines,int* at) noexcept {
-    const int arms=r.arms<kStockArms ? r.arms : kStockArms;
-    const bool drillOn=x.drill && x.drill->maxRpm>0.0f;
+    int room=kMaxLines-*at-3;   // the head's three lines first
+    if(room<0)return;
+    const int want=r.arms<kStockArms ? r.arms : kStockArms;
+    const int arms=want<room ? want : room;
+    room-=arms;
+    const bool drillOn=x.drill && x.drill->maxRpm>0.0f && room>0;
+    room-=drillOn ? 1 : 0;
+    const EmcCue* const emc=x.emc && vec::Dist(x.emc->pos,r.pos)<2.0f && room>0 ? x.emc : nullptr;   // this vehicle's
+    room-=emc ? 1 : 0;
     const ProteusReadout* const prot=x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f ? x.proteus : nullptr;   // this vehicle's
-    if(*at+3+arms+(drillOn ? 1 : 0)+(x.emc ? 1 : 0)+(prot ? kProteusLines : 0)>kMaxLines)return;
+    const bool protLines=prot && room>=kProteusLines;
     Line& warn=lines[(*at)++];
     Line& title=lines[(*at)++];
     Line& info=lines[(*at)++];
     Line* const arm=&lines[*at];
     *at+=arms;
     Line* const drill=drillOn ? &lines[(*at)++] : nullptr;
-    Line* const emcLine=x.emc ? &lines[(*at)++] : nullptr;
+    Line* const emcLine=emc ? &lines[(*at)++] : nullptr;
     ProteusLine pl[kProteusLines]{};
-    const int prots=prot ? ProteusLinesOf(*prot,&lines[*at],pl) : 0;
+    const int prots=protLines ? ProteusLinesOf(*prot,&lines[*at],pl) : 0;
     *at+=prots;
     const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;   // the Nix readout is this vehicle's
     bool missile=false,locked=false,dry=arms>0;
@@ -1911,7 +1921,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     float emcBar=0.0f;
     const float* emcColour=kHud;
     if(emcLine) {
-        EmcLine(*emcLine,*x.emc,&emcBar,&emcColour);
+        EmcLine(*emcLine,*emc,&emcBar,&emcColour);
         emcLine->w=emcLine->h=0.0f;
         if(text)MeasureAll(*text,emcLine,1);
     }
