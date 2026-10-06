@@ -1979,7 +1979,7 @@ constexpr int kMapLabels=12;             // at most this many labels an axis (ev
 constexpr float kMapLabelGap=34.0f;      // px (at 1080 lines) between two labels of an axis
 constexpr float kMapFarFade=0.45f;       // a pin three times the focus's distance away (and on) drawn this opaque
 constexpr float kMapLockNear=40.0f;      // m: a lock point this near an enemy's pin brackets that pin
-constexpr int kMapLegendRows=12;
+constexpr int kMapLegendRows=13;
 constexpr float kMapGuard=1.25f;         // a grid line is cut to this much of the screen's half size round it
 constexpr float kMapNearW=1.0f;          // ...and to this clip w (m in front of the eye)
 
@@ -2150,6 +2150,12 @@ void MapIcon(void* drawer,void* ctx,float x,float y,float s,MapKind kind,std::ui
     if(hp>=0.0f)Bar(drawer,ctx,x-17.0f*s,y+15.0f*s,34.0f*s,4.0f*s,hp,hp,MapFade(HpColour(hp),fade,b),s);
 }
 
+// A small enemy's dot at (x, y): filled on the ground, hollow flying (kMapFlying).
+void MapDot1(void* drawer,void* ctx,float x,float y,float s,std::uint8_t flags,const float* rgba) noexcept {
+    if(flags&kMapFlying)MapBox(drawer,ctx,x,y,3.5f*s,1.5f*s,rgba);
+    else Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,rgba);
+}
+
 // Where a unit's pin is on the screen: its icon (`ix`, `iy`), its stem's other end (`bx`, `by`; false: none shown), its
 // heading on the screen, its depth. A ground unit's stem stands `pin` m up from it to the icon; an aircraft's icon is
 // on the aircraft, its stem down to the ground under it (its height read off the stem).
@@ -2179,10 +2185,18 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     const float dist=mapcam::Distance(view),pin=mapcam::PinHeight(dist,m.pitch);
     // Depth fade: full at the focus's distance and nearer, kMapFarFade past three times it.
     auto fade=[&](float depth){ return 1.0f-(1.0f-kMapFarFade)*Unit((depth-dist)/(2.0f*dist)); };
-    // The enemies first, the friendly side over them, the markers and the locks on top.
+    alignas(16) float c[4];
+    // The small enemies first: flat dots (no pin), filled on the ground, hollow flying.
+    for(int i=0;i<m.dots && i<kMapDots;++i) {
+        const MapDot& d=m.dot[i];
+        float x,y,depth;
+        if(!Project(vp,d.pos,width,height,&x,&y,&depth))continue;
+        MapDot1(drawer,ctx,x,y,s,d.flags,MapFade(kMapEnemy,fade(depth),c));
+        if(d.flags&kMapNearest)MapBrackets(drawer,ctx,x,y,10.0f*s,2.0f*s,MapFade(kAmber,fade(depth),c));
+    }
+    // The large enemies' pins, the friendly side over them, the markers and the locks on top.
     static const MapKind kOrder[]={MapKind::enemy,MapKind::enemyAir,MapKind::ally,MapKind::squad,MapKind::vehicle,MapKind::air,
                                    MapKind::carrier,MapKind::marker};
-    alignas(16) float c[4];
     for(MapKind kind:kOrder) {
         for(int i=0;i<m.count && i<kMapUnits;++i) {
             const MapUnit& u=m.unit[i];
@@ -2201,20 +2215,25 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
             }
         }
     }
-    // The locks: brackets on the enemy pin nearest the lock point (within kMapLockNear m), else on the point itself.
+    // The locks: brackets on the enemy (a large one's pin, a small one's dot) nearest the lock point within kMapLockNear m,
+    // else on the point itself.
+    auto d2=[](const float* a,const float* b){ const float d[3]={a[0]-b[0],a[1]-b[1],a[2]-b[2]};return d[0]*d[0]+d[1]*d[1]+d[2]*d[2]; };
     for(int i=0;i<m.count && i<kMapUnits;++i) {
         const MapUnit& l=m.unit[i];
         if(l.kind!=MapKind::lock)continue;
+        const float* rgba=l.flags&kMapAcquiring ? kAmber : kMapEnemy;
         const MapUnit* on=&l;
+        const MapDot* dot=nullptr;
         float best=kMapLockNear*kMapLockNear;
         for(int k=0;k<m.count && k<kMapUnits;++k) {
             const MapUnit& u=m.unit[k];
-            if(u.kind!=MapKind::enemy && u.kind!=MapKind::enemyAir)continue;
-            const float d[3]={u.pos[0]-l.pos[0],u.pos[1]-l.pos[1],u.pos[2]-l.pos[2]},dd=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
-            if(dd<best){best=dd;on=&u;}
+            if((u.kind==MapKind::enemy || u.kind==MapKind::enemyAir) && d2(u.pos,l.pos)<best){best=d2(u.pos,l.pos);on=&u;}
         }
+        for(int k=0;k<m.dots && k<kMapDots;++k)if(d2(m.dot[k].pos,l.pos)<best){best=d2(m.dot[k].pos,l.pos);dot=&m.dot[k];}
+        float x,y,depth;
         Pin p;
-        if(MapPin(vp,width,height,*on,pin,&p))MapBrackets(drawer,ctx,p.ix,p.iy,20.0f*s,2.5f*s,l.flags&kMapAcquiring ? kAmber : kMapEnemy);
+        if(dot){if(Project(vp,dot->pos,width,height,&x,&y,&depth))MapBrackets(drawer,ctx,x,y,13.0f*s,2.5f*s,rgba);}
+        else if(MapPin(vp,width,height,*on,pin,&p))MapBrackets(drawer,ctx,p.ix,p.iy,20.0f*s,2.5f*s,rgba);
     }
     // The player: a white pin, a ring and an arrow along their heading.
     MapUnit me{};
@@ -2242,8 +2261,9 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     }
     struct Entry { MapKind kind; std::uint8_t flags; const wchar_t* name; };
     static const Entry kLegend[]={{MapKind::squad,0,L"SQUAD"},{MapKind::ally,0,L"FRIENDLY"},{MapKind::vehicle,0,L"VEHICLE"},
-                                  {MapKind::air,0,L"AIRCRAFT"},{MapKind::carrier,0,L"CARRIER"},{MapKind::enemy,0,L"ENEMY"},
-                                  {MapKind::enemy,kMapLarge,L"ENEMY LARGE"},{MapKind::enemyAir,0,L"ENEMY AIR"},{MapKind::marker,0,L"OBJECTIVE"}};
+                                  {MapKind::air,0,L"AIRCRAFT"},{MapKind::carrier,0,L"CARRIER"},
+                                  {MapKind::enemy,kMapLarge,L"LARGE ENEMY"},{MapKind::enemyAir,kMapLarge,L"LARGE ENEMY AIR"},
+                                  {MapKind::marker,0,L"OBJECTIVE"}};
     float y=height*0.30f;
     Arc(drawer,ctx,40.0f*s,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"YOU");
@@ -2252,6 +2272,12 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
         MapIcon(drawer,ctx,40.0f*s,y,s,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
         Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",e.name);
     }
+    y+=28.0f*s;
+    MapDot1(drawer,ctx,40.0f*s,y,s,0,kMapEnemy);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"ENEMY");
+    y+=28.0f*s;
+    MapDot1(drawer,ctx,40.0f*s,y,s,kMapFlying,kMapEnemy);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"ENEMY FLYING");
     y+=28.0f*s;
     MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kMapEnemy);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"LOCK");
