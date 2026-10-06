@@ -6,6 +6,14 @@
 
 namespace {
 int failures=0,opens=0,closes=0,sets=0;
+// A stand-in fault: raised inside a stub, `faultPending` while the stub's frame is still on the stack (the filter
+// runs then; the stub's __finally clears it when the stack unwinds, before the handler).
+bool faultPending=false,setFaults=false,jetFaults=false;
+int closesBeforeUnwind=0;
+void RaiseFault() noexcept {
+    __try { faultPending=true;RaiseException(EXCEPTION_ACCESS_VIOLATION,0,0,nullptr); }
+    __finally { faultPending=false; }
+}
 ULONGLONG nowMs=1000,nowFrame=60;
 crew::Config config{};
 crew::jetsound::State flight{};
@@ -35,13 +43,13 @@ namespace jetsound {
 bool PlayerState(const unsigned char*,State* out) noexcept {*out=flight;return playerState;}
 }
 namespace jet {
-Jet* FindJet(const unsigned char*) noexcept {return npcState ? &npc : nullptr;}
+Jet* FindJet(const unsigned char*) noexcept {if(jetFaults)RaiseFault();return npcState ? &npc : nullptr;}
 }
 namespace audio {
 bool Start() noexcept {return true;}
 int Open() noexcept {return opens++;}
-void Close(int slot) noexcept {if(slot>=0)++closes;}
-void Set(int,const Mix& mix) noexcept {++sets;lastMix=mix;}
+void Close(int slot) noexcept {if(slot<0)return;++closes;if(faultPending)++closesBeforeUnwind;}
+void Set(int,const Mix& mix) noexcept {if(setFaults)RaiseFault();++sets;lastMix=mix;}
 void Beat(float) noexcept {}
 }
 }
@@ -80,6 +88,22 @@ int main() {
     const auto fast=jetsound::For({true,true,false,false,1.0f,150.0f});
     const auto taxi=jetsound::For({true,true,false,false,0.1f,3.0f});
     Check(fast.power>taxi.power && fast.power==1.0f,"engine load still follows throttle and flight speed");
+    // A fault: the filter only decides, the voices are dealt with after the stack unwinds (never inside the call that
+    // faulted). One in the game's memory: the sound voices are closed.
+    ResetJetSound();broken=false;npcState=false;playerState=true;occupied=true;flight={false,true,false,false,0.5f,100.0f};
+    nowMs+=16;++nowFrame;JetSound(v);
+    const int closedBefore=closes;
+    playerState=false;jetFaults=true;nowMs+=16;++nowFrame;JetSound(v);jetFaults=false;
+    Check(broken && closes==closedBefore+1 && closesBeforeUnwind==0 && !sounds[0].ref,
+          "a game-memory fault closes the voices after unwinding, not in the filter");
+    // One inside a voice call: no voice is called into again, neither in the filter nor after.
+    broken=false;playerState=true;nowMs+=16;++nowFrame;JetSound(v);
+    const int closedThen=closes,openedThen=opens;
+    setFaults=true;nowMs+=16;++nowFrame;JetSound(v);setFaults=false;
+    Check(broken && closes==closedThen && closesBeforeUnwind==0 && !sounds[0].ref && !inAudio,
+          "a fault inside a voice call lets the voices go untouched");
+    nowMs+=16;++nowFrame;JetSound(v);Tick();
+    Check(closes==closedThen && opens==openedThen,"jet sound stays off after a fault");
     std::printf("%d failures; %d voices opened, %d closed, %d mixes\n",failures,opens,closes,sets);
     return failures ? 1 : 0;
 }
