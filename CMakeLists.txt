@@ -361,3 +361,10 @@ add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-sui
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
     --compiler "${CMAKE_CXX_COMPILER}")
+
+add_executable(lockon_test EXCLUDE_FROM_ALL tests/lockon_test.cpp)
+target_link_libraries(lockon_test PRIVATE edf6common)
+target_include_directories(lockon_test PRIVATE src common)
+target_compile_options(lockon_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks lockon_test)
+add_test(NAME lockon COMMAND lockon_test)

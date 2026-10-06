@@ -3575,7 +3575,7 @@ def stock_guidance_wired() -> None:
     assert 'TvView(&tvHuman,tvEye,tvLook)' in m, 'the TV through the map camera hook'
     assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
     assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
-    assert 'if(!TvSteer(static_cast<unsigned char*>(b)))Guide(' in src('src/missile.cpp')
+    assert 'if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(' in src('src/missile.cpp')
     crew, vini, readme = src('src/crew.h'), src('EDF6VehicleCrew.ini'), src('README.md')
     for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
                        ('tempestTv', 'TempestTv')):
