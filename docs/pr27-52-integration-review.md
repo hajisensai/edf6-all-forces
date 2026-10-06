@@ -16,6 +16,6 @@ This batch preserves all 25 original PR heads and merges their shared dependenci
 
 ## Verification
 
-The batch is checked with both Windows plugin builds, native CTest regressions, Python installation/recovery tests, generated calls/stores consistency, and installer packaging. Tests read local game data where available; installation mutation tests use temporary fixtures. The split-missile hook's ten signatures were compared against the local EDF.dll.
+Both Windows plugins built successfully with MSVC warnings treated as errors. All 42 CTest checks and 101 Python installation/data checks passed. Generated calls/stores match their sources; tracked Python sources compile and the whitespace check passes. PyInstaller produced the installer package; its embedded DLLs and INI files match both plugins' build outputs and the data builders are present. Tests read local game data where available; installation mutation tests use temporary fixtures. The split-missile hook's ten signatures were compared against the local EDF.dll.
 
 No live game session was launched. In-game controls, rendering, injection and multi-machine online behavior remain unverified; offline fixtures and static signatures do not establish game E2E correctness.
