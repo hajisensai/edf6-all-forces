@@ -19,7 +19,8 @@
 // gun, the gunner to the stick). Another player's seat, one their class may not sit in (the seat's class mask
 // +0x30 & +0x34 against human +0x31C, CanRideSeat 0x6346FC) are refused, shown a moment. Out of a stock helicopter's
 // pilot seat the stock RideAi seats an NPC pilot (ini SeatPilot; heli.cpp then flies it with the player aboard: it
-// fights round itself), as the gunship's gunner gets one (playerjet_crew.inc EnsurePilot). The plugin's aircraft: only
+// fights round itself), as the gunship's gunner gets one (playerjet_crew.inc EnsurePilot); out of a ground vehicle's
+// with the stock driving AI an NPC driver (Pilot: the map can then send it off). The plugin's aircraft: only
 // the gunship's two seats, its stick taken only where it may be boarded (PlayerJetBoardable: on the ground, or come
 // down for the player); playerjet.cpp tells a move from getting out (no ejection). Offline unless SeatSwitchOnline.
 // The prompt (hud.cpp SeatLine): the seats and who holds them. With SeatList (the user, 2026-10-07: "能看到同载具席位
@@ -29,6 +30,7 @@
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
+#include "npcai.h"
 #include "stores.h"
 #include <cstring>
 #include <cwchar>
@@ -185,11 +187,18 @@ bool Move(unsigned char* v,unsigned char* human,unsigned from,unsigned to,bool n
     return moved;
 }
 
-// A stock helicopter's pilot seat left empty in the move: the stock RideAi seats an NPC pilot (once; heli.cpp flies it).
+// The driver's seat left empty in the move: the stock RideAi seats an NPC there (once). A stock helicopter: heli.cpp
+// flies it. A ground vehicle with the stock driving AI (NpcDrivable; the user 2026-10-07: "也可以开车，也就是通过m地图
+// 指引以后可以让内部的npc开走"): the stock AI drives and fights, npcpost.cpp keeps it on its post (where it is now), and
+// the map lists it with the tanks, so a guard order drives it away with the player aboard. Crew() never seats one while
+// a player rides (anyPlayer), so this is the only way a driver comes. Others (a truck, the Proteus) stand.
 void Pilot(unsigned char* v) noexcept {
-    if(!Cfg().seatPilot || !IsHelicopter(v) || BodyOf(v)!=PluginBody::none || SeatRider(SeatAt(v,0))!=Rider::none)return;
+    if(!Cfg().seatPilot || BodyOf(v)!=PluginBody::none || SeatRider(SeatAt(v,0))!=Rider::none)return;
+    const bool heli=IsHelicopter(v);
+    if(!heli && !NpcDrivable(v))return;
     reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,false);
-    Log("SEAT v=%p the pilot seat empty: %s",v,SeatRider(SeatAt(v,0))==Rider::dummy ? "an NPC pilot seated" : "the stock RideAi seated no one");
+    Log("SEAT v=%p the %s seat empty: %s",v,heli ? "pilot" : "driver",SeatRider(SeatAt(v,0))==Rider::dummy ?
+        (heli ? "an NPC pilot seated" : "an NPC driver seated (the map's tanks)") : "the stock RideAi seated no one");
 }
 
 // Whether a move to `to` may be made now (see the top), the seat's holder `h`.

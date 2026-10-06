@@ -169,7 +169,8 @@ struct Config {
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
     int seatButton=0x02;            // ...on a pad: the seat's button bit (docs/stores-re.md §4: 0x02 B; 0 none)
-    bool seatPilot=true;            // ...out of a stock helicopter's pilot seat: an NPC (the stock RideAi) takes the stick
+    bool seatPilot=true;            // ...out of a stock helicopter's pilot seat (or a ground vehicle's with the stock driving
+                                    // AI: the tanks, the Titan, the Grape): an NPC (the stock RideAi) takes the stick
     bool seatSwitchOnline=false;    // ...in an online room too (off: offline only)
     bool seatList=true;             // the seats line shown the whole ride in a vehicle with more than one seat (who holds
                                     // which), not only a moment after boarding / a move; with SeatSwitch off and online too

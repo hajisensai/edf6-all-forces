@@ -3210,6 +3210,12 @@ def stock_payload_and_seats_wired() -> None:
     assert 'DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms)' in heli, 'the player-piloted 410: no refill, no hold'
     assert 'PlayerHeli(vehicle);CrewDoorGuns(vehicle);' in heli
     assert re.search(r'^NpcGunners=1', ini, re.M) and 'L"NpcGunners"' in plugin and 'NpcGunners' in readme
+    # Out of a ground vehicle's driver seat with the stock driving AI an NPC driver takes it (the user 2026-10-07: the map
+    # sends it off with the player aboard); Crew() never does while a player rides, so Pilot must.
+    pilot = seat.split('void Pilot(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!heli && !NpcDrivable(v))return;' in pilot and 'kSlotRideAi' in pilot
+    assert 'return TankAi(v) && At<std::uint64_t>(v,kHolderCount)>0;' in src('src/npcpost.cpp')
+    assert 'if(moved && at==0)Pilot(v);' in seat
 
 
 @test
