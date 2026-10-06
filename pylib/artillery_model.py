@@ -40,6 +40,7 @@ import struct
 from dataclasses import dataclass, replace
 
 import graft_pure as g
+import cas_pose
 import obj_model as om
 import texfile
 from graft_pure import Vec3
@@ -47,6 +48,7 @@ from mdb import Material, Mdb, Mesh, Rab, RabFile, bind_world, cmpl_compress, cm
     mmul, rab_read, rab_write
 
 HOST_ARC, HOST_MDB = 'V603_FLAK.MRAB', 'v603_flak.mdb'
+HOST_CAS, OUT_CAS = 'V603_FLAK.CAS', 'EDF6VC_ARTILLERY.CAS'
 REF_ARC, REF_MDB = 'V505_TANK.MRAB', 'v505_tank.mdb'
 MODEL = 'twin_tank'                    # model folder name and OBJ file stem
 OBJ_FILE = 'twin_tank.obj'
@@ -392,6 +394,16 @@ def build_with_info(game, folder: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN0
 def build(game, folder: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
     """The finished EDF6VC_ARTILLERY.MRAB (the Kepler's archive layout: its skeleton, this model, its textures)."""
     return build_with_info(game, folder)[0]
+
+
+def animation(game, md: Mdb) -> bytes:  # noqa: ANN001
+    """Retarget the absolute background clip; the additive fire_loop stays byte-identical.
+
+    The radar loop also contains every bone's absolute translation, including the gun
+    slides. Leaving it stock pulls the longer tubes back into the turret every frame.
+    """
+    host = mdb_read(member(rab_read(game.read('OBJECT', HOST_ARC)), HOST_MDB).data)
+    return cas_pose.retarget(game.read('OBJECT', HOST_CAS), host, md, {'doppler_radar_loop'})
 
 
 # ------------------------------------------------------------------------------------------ check

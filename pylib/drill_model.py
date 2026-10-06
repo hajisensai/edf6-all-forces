@@ -17,7 +17,9 @@ with every stock mesh taken out and the OBJ in their place:
     (the 2026-10-05 19:56 play logged it turning) but is drawn at its bind pose, so the drill never turned on screen
     (docs/drill-re.md §5.4). `catapi_body` is in that skeleton, carries nothing of ours but the drill (the track
     object is left out), and no SGO entry, ragdoll shape or EDF.dll string names it but one row of the ragdoll's
-    binding (the hull's proxy draws it), which the drill tank's SGO drops (tools/make_drill.py free_spin_bone);
+    binding (the hull's proxy draws it), which the drill tank's SGO drops (tools/make_drill.py free_spin_bone).
+    Its stock CAS also writes this bone's old translation in default/fire; animation() removes those tracks
+    from a private CAS so the runtime spin remains at the new bind instead of dropping into the hull;
   - a marker bone DRILL_BONE (no geometry) inserted at the end of `body`'s subtree, at the drill's base: the plugin
     tells the drill tank from a stock Blacker by it (the object bones after it move one index on; no stock data
     refers to bones by index: the SGO, CAS, ragdoll and constraints name them);
@@ -37,12 +39,14 @@ import struct
 from dataclasses import replace
 
 import graft_pure as g
+import cas_pose
 import obj_model as om
 import texfile
 from mdb import Bone, Mdb, bind_world, cmpl_compress, cmpl_decompress, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write
 from mdb_jet import link
 
 HOST_ARC, HOST_MDB = 'V505_TANK.MRAB', 'v505_tank.mdb'
+HOST_CAS, OUT_CAS = 'V505_TANK.CAS', 'EDF6VC_DRILL.CAS'
 OUT_ARC = 'EDF6VC_DRILL.MRAB'
 MODEL_SUBDIR, OBJ_FILE = 'drill_tank', 'drill_tank.obj'
 TEXTURE_FILES = {'MI_Tank_C': 'Tank_C_BC.png'}        # the OBJ's materials' textures in its folder (the MTL has no map_Kd)
@@ -257,6 +261,16 @@ def build_with_info(game, obj_file: str) -> tuple[bytes, Mdb, dict]:  # noqa: AN
 def build(game, obj_file: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
     """The finished EDF6VC_DRILL.MRAB."""
     return build_with_info(game, obj_file)[0]
+
+
+def animation(game, md: Mdb) -> bytes:  # noqa: ANN001
+    """The stock clips retargeted to this skeleton, leaving the plugin's spin bone alone.
+
+    Its name remains in the CANM table; only the default/fire writes to its local pose
+    are removed. Keeping those writes returns the cone to the old track-rig position.
+    """
+    host = mdb_read(member(rab_read(game.read('OBJECT', HOST_ARC)), HOST_MDB).data)
+    return cas_pose.retarget(game.read('OBJECT', HOST_CAS), host, md, {'default', 'fire'}, {SPIN_BONE})
 
 
 # ------------------------------------------------------------------------------------------ check

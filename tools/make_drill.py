@@ -120,6 +120,7 @@ def vehicle_sgo(game: vc.Game, model: list[str] | None = None) -> bytes:
     m['game_object_camera_setting'] = [list(CAMERA[0]), list(CAMERA[1]), cam[2], cam[3]]
     m['game_object_durability'] = VEHICLE.durability
     if list(model) != STOCK_MODEL:
+        m['animation_model'][1] = f'app:/object/{drill_model.OUT_CAS.lower()}'
         m['ragdoll'] = [m['ragdoll'][0], free_spin_bone(bytes(m['ragdoll'][1]))]
     return sgo.write(version, m)
 
@@ -194,10 +195,13 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
     assert [list(cam[0]), list(cam[1])] == [list(CAMERA[0]), list(CAMERA[1])], cam
     camera_check()
     if built:
+        assert v['animation_model'][1] == f'app:/object/{drill_model.OUT_CAS.lower()}'
+        assert f'OBJECT/{drill_model.OUT_CAS}' in files, 'the retargeted drill animation is missing'
         arc = files[f'OBJECT/{MODEL_FILE}']
         drill_model.check(arc, drill_model.stock_bones(game) if game is not None else None)
         md = mdb_read(next(f for f in rab_read(arc).files if f.name.lower() == MODEL_MDB.lower()).data)
         if game is not None:     # the ragdoll draws no bone of the model away from its bind (the drill's spin bone)
+            assert files[f'OBJECT/{drill_model.OUT_CAS}'] == drill_model.animation(game, md), 'stale drill animation'
             rag = sgo.read(files[f'OBJECT/{SGO_FILE}'])[1]['ragdoll']
             shkt = game.read('OBJECT', str(rag[0]).rsplit('/', 1)[1].upper())
             bad = ragdoll_fit.problems(md, shkt, bytes(rag[1]))
@@ -215,7 +219,7 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
 
 
 def build(root: str, models: str | None = None) -> dict[str, bytes]:
-    """Every file this tool writes, {path under Mods: bytes}, checked, from the game's Root.cpk (only read) and the
+    """Every file this tool writes (including the model's private CAS), {path under Mods: bytes}, checked, from the game's Root.cpk (only read) and the
     drill tank's OBJ (`models`: its folder's parent, default drill_model.model_dir())."""
     game = vc.Game(root)
     obj = drill_model.obj_path(models)
@@ -226,7 +230,9 @@ def build(root: str, models: str | None = None) -> dict[str, bytes]:
         files[f'OBJECT/{SGO_FILE}'] = vehicle_sgo(game, STOCK_MODEL)
         files[f'WEAPON/{BIT_FILE}'] = bit_sgo(game, plain=True)
     else:
-        files[f'OBJECT/{MODEL_FILE}'] = drill_model.build(game, obj)
+        arc, md, _info = drill_model.build_with_info(game, obj)
+        files[f'OBJECT/{MODEL_FILE}'] = arc
+        files[f'OBJECT/{drill_model.OUT_CAS}'] = drill_model.animation(game, md)
         files[f'OBJECT/{SGO_FILE}'] = vehicle_sgo(game, [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB])
         files[f'WEAPON/{BIT_FILE}'] = bit_sgo(game, plain=False)
     check(files, game)
