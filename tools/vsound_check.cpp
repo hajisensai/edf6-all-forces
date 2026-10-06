@@ -4,8 +4,8 @@
 // punchier near than far), the mix's rules against cases (the revs, the tracks, the turret, the report's near / far fade
 // and its delay, which guns are main guns, the loader's cues against a fire interval and a magazine's reload), and a
 // scenario mixed down as the plugin mixes it frame by frame (a tank starting, idling, driving off, turning its turret,
-// firing near, reloading, a second gun firing far off), its peak under full scale. No sound is played: the XAudio2
-// engine is never started.
+// firing near, reloading, a second gun firing far off), its peak under full scale; the Sazabi's clips, its mix's
+// rules and a scenario of its own the same way. No sound is played: the XAudio2 engine is never started.
 //
 //   vsound_check [--out DIR]      (DIR: where the WAVs go; default %TEMP%\edf6_vsound_check)
 //
@@ -395,6 +395,134 @@ void SmallScenario(const std::wstring& dir) {
         pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));
     WriteWav(dir+L"\\scenario_small_guns.wav",pcmOut,2);
 }
+// --- The Sazabi (src/sazabi_sound.cpp; docs/sound-re.md §10) ---
+// What each of its clips is for, in its sound (their levels and loops are checked with the rest in Clips).
+void SazabiClips() {
+    using namespace audio;
+    char what[220];
+    auto bands=[&](int c,float from,float to,float lowHz,double* low,double* high) {
+        Bands(Floats(pcm[c]),static_cast<std::size_t>(from*s::kRate),static_cast<std::size_t>(to*s::kRate),lowHz,2000.0f,low,high);
+    };
+    double lo,hi,lo2,hi2;
+    bands(kClipSzBeamShot,0.0f,0.05f,120.0f,&lo,&hi);
+    bands(kClipSzBeamShot,0.2f,1.2f,120.0f,&lo2,&hi2);
+    sprintf_s(what,"the beam rifle: a bright crack (over 2 kHz %.0f%% of its first 50 ms), a deep tail (under 120 Hz %.0f%% of 0.2-1.2 s)",hi*100.0,lo2*100.0);
+    Check(hi>0.1 && lo2>0.3,what);
+    double fhi,flo;
+    bands(kClipSzFunnelShot,0.0f,0.1f,120.0f,&flo,&fhi);
+    bands(kClipSzBeamShot,0.0f,0.1f,120.0f,&lo,&hi);
+    sprintf_s(what,"a funnel's beam thinner than the rifle's (under 120 Hz %.1f%% against %.1f%% of their first 0.1 s)",flo*100.0,lo*100.0);
+    Check(flo<lo*0.5,what);
+    const std::vector<float> step=Floats(pcm[kClipSzFootstep]),land=Floats(pcm[kClipSzLand]),cannon=Floats(pcm[kClipSzCannonShot]),
+                             beam=Floats(pcm[kClipSzBeamShot]);
+    bands(kClipSzFootstep,0.0f,0.5f,120.0f,&lo,&hi);
+    sprintf_s(what,"a footfall: heavy (under 120 Hz %.0f%% of its first 0.5 s) with the armour's ring over it (over 2 kHz %.2f%%)",lo*100.0,hi*100.0);
+    Check(lo>0.4 && hi>0.0005,what);
+    const double stepTail=Rms(step,s::kRate*3/10,s::kRate*12/10),landTail=Rms(land,s::kRate*3/10,s::kRate*12/10);
+    sprintf_s(what,"a landing longer than a step (0.3-1.2 s: rms %.3f against %.3f)",landTail,stepTail);
+    Check(landTail>stepTail*1.2,what);
+    const double cannonBody=Rms(cannon,0,s::kRate),beamBody=Rms(beam,0,s::kRate),cannonTail=Rms(cannon,s::kRate,s::kRate*2);
+    sprintf_s(what,"the chest cannon over the rifle (its first second's rms %.3f against %.3f) and rolling on (1-2 s: %.3f)",cannonBody,beamBody,cannonTail);
+    Check(cannonBody>beamBody && cannonTail>0.03,what);
+    double hum,humHi;
+    bands(kClipSzSaberHum,0.0f,1.0f,300.0f,&hum,&humHi);
+    sprintf_s(what,"the blade's hum: a low buzz (under 300 Hz %.0f%%) with its crackle (over 2 kHz %.1f%%)",hum*100.0,humHi*100.0);
+    Check(hum>0.3 && humHi>0.01,what);
+    double tlo,thi;
+    bands(kClipSzThrusters,0.0f,2.0f,120.0f,&tlo,&thi);
+    sprintf_s(what,"the thrusters' roar: broad, a rumble (under 120 Hz %.0f%%) and a hiss (over 2 kHz %.1f%%)",tlo*100.0,thi*100.0);
+    Check(tlo>0.1 && thi>0.005,what);
+}
+// Its mix's rules (src/vehmix.h).
+void SazabiRules() {
+    using namespace vmix;
+    bool silent=true,rising=true;
+    for(int k=0;k<static_cast<int>(SzLoop::count);++k) {
+        const SzLoop w=static_cast<SzLoop>(k);
+        silent=silent && SazabiLoopMix(w,0.0f).gain==0.0f && SazabiLoopMix(w,-1.0f).gain==0.0f && SazabiLoopMix(w,NAN).gain==0.0f;
+        SzLoopMix last=SazabiLoopMix(w,0.01f);
+        for(float l=0.05f;l<=1.0f;l+=0.05f) {
+            const SzLoopMix m=SazabiLoopMix(w,l);
+            rising=rising && m.gain>=last.gain && m.ratio>=last.ratio && m.gain<=1.0f && m.ratio>0.25f && m.ratio<4.0f;
+            last=m;
+        }
+    }
+    Check(silent,"the Sazabi's loops: silent at level 0 (or none, or nonsense)");
+    const float lowCharge=SazabiLoopMix(SzLoop::cannonCharge,0.05f).ratio,fullCharge=SazabiLoopMix(SzLoop::cannonCharge,1.0f).ratio;
+    char what[200];
+    sprintf_s(what,"the Sazabi's loops: louder and higher with their level, the charge's whine climbing %.1f octaves",std::log2(fullCharge/lowCharge));
+    Check(rising && SazabiLoopMix(SzLoop::thrusters,1.0f).ratio>SazabiLoopMix(SzLoop::thrusters,0.2f).ratio && fullCharge>=1.8f*lowCharge,what);
+    float g=1.0f,t=0.0f;
+    while(g>0.0f && t<2.0f){g=SzFade(g,0.0f,1.0f/60.0f);t+=1.0f/60.0f;}
+    float up=0.0f;
+    for(int i=0;i<60;++i)up=SzFade(up,0.5f,1.0f/60.0f);
+    sprintf_s(what,"a loop let go of: out in %.2f s (no click: kSzFadeOut), up to its level without passing it (%.3f)",t,up);
+    Check(t>=kSzFadeOut-0.02f && t<=kSzFadeOut+0.05f && up==0.5f && SzFade(0.2f,0.2f,0.1f)==0.2f,what);
+    bool sane=true;
+    for(const SzSound& x:kSzSfx)sane=sane && x.share>0.0f && x.share<=1.0f && x.ref>0.0f && x.fall>=1.0f && x.jitter>=0.0f && x.jitter<0.1f;
+    for(const SzSound& x:kSzLoop)sane=sane && x.share>0.0f && x.share<=1.0f && x.ref>0.0f && x.fall>=1.0f;
+    Check(sane && kSzSfx[static_cast<int>(SzSfx::missileLaunch)].group==SzGroup::missile &&
+          kSzSfx[static_cast<int>(SzSfx::footstep)].group==SzGroup::move && kSzSfx[static_cast<int>(SzSfx::beamShot)].group==SzGroup::gun,
+          "the Sazabi's sounds: shares, distances and groups (the missiles the launches', the steps the engines', the beams the guns')");
+}
+// The Sazabi seen from its riding camera (35 m off): walking (a step every 0.9 s), a dash and a jump on its thrusters
+// (their level up and down), landing, two rifle shots and their hits 200 m off, the blade lit, two swings and a hit, put
+// out, the chest cannon charging and fired, a missile, a funnel volley 100 m off (launched, six shots, docked). Each
+// sound as SazabiSfx / SazabiLoop and SazabiSoundTick hear it (its share, its distance's fall and delay, a loop eased).
+void SazabiScenario(const std::wstring& dir) {
+    using namespace vmix;
+    using namespace audio;
+    constexpr float kSec=18.0f,kPan=0.70710678f,kCam=35.0f;
+    const int frames=static_cast<int>(kSec*60.0f),spf=s::kRate/60;
+    std::vector<float> out(static_cast<std::size_t>(frames*spf),0.0f);
+    std::vector<float> clip[kClipCount];
+    for(int c=0;c<kClipCount;++c)clip[c]=Floats(pcm[c]);
+    auto at=[&](float sec){ return static_cast<std::size_t>(sec*static_cast<float>(s::kRate)); };
+    auto play=[&](SzSfx w,float sec,float d) {
+        const SzSound& x=kSzSfx[static_cast<int>(w)];
+        OneShot(out,clip[kSazabiSfxClip[static_cast<int>(w)]],at(sec+d/kSoundSpeed),x.share*Falloff(d,x.ref,x.fall)*kPan);
+    };
+    Player loop[3]={{&clip[kSazabiLoopClip[0]]},{&clip[kSazabiLoopClip[1]]},{&clip[kSazabiLoopClip[2]]}};
+    float gain[3]{};   // each loop's level as SazabiSoundTick eases it
+    for(int f=0;f<frames;++f) {
+        const float t=static_cast<float>(f)/60.0f;
+        const float level[3]={t>3.0f && t<5.0f ? 0.6f+0.4f*std::sin(3.0f*(t-3.0f)) : 0.0f,t>8.2f && t<10.5f ? 1.0f : 0.0f,
+                              t>11.0f && t<13.0f ? (t-11.0f)/2.0f : 0.0f};
+        const std::size_t a=static_cast<std::size_t>(f*spf),n=static_cast<std::size_t>(spf);
+        for(int k=0;k<3;++k) {
+            const SzLoopMix m=SazabiLoopMix(static_cast<SzLoop>(k),level[k]);
+            const float next=SzFade(gain[k],m.gain,1.0f/60.0f),g=kSzLoop[k].share*Falloff(kCam,kSzLoop[k].ref,kSzLoop[k].fall)*kPan;
+            loop[k].Mix(out,a,n,m.ratio,gain[k]*g,next*g);
+            gain[k]=next;
+        }
+    }
+    for(float t=0.3f;t<2.8f;t+=0.9f)play(SzSfx::footstep,t,kCam);
+    play(SzSfx::dash,3.0f,kCam);
+    play(SzSfx::land,5.4f,kCam);
+    for(float t=6.0f;t<7.5f;t+=0.9f)play(SzSfx::footstep,t,kCam);
+    play(SzSfx::beamShot,6.5f,kCam);play(SzSfx::beamHit,6.7f,200.0f);
+    play(SzSfx::beamShot,7.2f,kCam);play(SzSfx::beamHit,7.4f,200.0f);
+    play(SzSfx::saberOn,8.0f,kCam);play(SzSfx::whoosh,8.8f,kCam);play(SzSfx::whoosh,9.4f,kCam);
+    play(SzSfx::saberHit,9.6f,kCam);play(SzSfx::saberOff,10.5f,kCam);
+    play(SzSfx::cannonShot,13.0f,kCam);
+    play(SzSfx::missileLaunch,14.0f,kCam);
+    play(SzSfx::funnelLaunch,14.5f,kCam);
+    for(int k=0;k<6;++k)play(SzSfx::funnelShot,15.2f+0.05f*static_cast<float>(k),100.0f);
+    play(SzSfx::funnelDock,17.0f,kCam);
+    float peak=0.0f;
+    for(float v:out)peak=std::fabs(v)>peak ? std::fabs(v) : peak;
+    char what[200];
+    sprintf_s(what,"the Sazabi's scenario at full volume: peak %.2f of full scale (each ear; under 1: no clipping)",peak);
+    Check(peak<1.0f && peak>0.3f,what);
+    const float delay=kCam/kSoundSpeed;
+    const double steps=Rms(out,at(0.3f+delay),at(0.8f+delay)),cannon=Rms(out,at(13.0f+delay),at(13.5f+delay)),thrusters=Rms(out,at(3.6f),at(4.6f));
+    sprintf_s(what,"the cannon over a footstep (%.1f dB), the thrusters heard (rms %.3f)",20.0*std::log10(cannon/steps),thrusters);
+    Check(cannon>steps && thrusters>0.02,what);
+    std::vector<std::int16_t> pcmOut(out.size()*2);
+    for(std::size_t i=0;i<out.size();++i)
+        pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));
+    WriteWav(dir+L"\\scenario_sazabi.wav",pcmOut,2);
+}
 }  // namespace
 }  // namespace crew
 
@@ -411,6 +539,9 @@ int wmain(int argc,wchar_t** argv) {
     Loaders();
     Scenario(out);
     SmallScenario(out);
+    SazabiClips();
+    SazabiRules();
+    SazabiScenario(out);
     std::printf("      the sounds are in %ls\n",out.c_str());
     std::printf(failures ? "%d check(s) FAILED\n" : "all checks passed\n",failures);
     return failures ? 1 : 0;

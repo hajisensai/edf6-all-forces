@@ -442,4 +442,339 @@ inline Wave MissileLaunch() {
     }
     return Normalized(std::move(x),1.0f);
 }
+
+// --- The Sazabi (a 25 m mobile suit: sazabi_sound.cpp plays these, vehmix.h kSzSfx mixes them; docs/sound-re.md §10) ---
+// Its sounds are a sci-fi mech's, none of them a recording's stand-in: the beams' zaps (a tone gliding down fast,
+// driven into a soft clip for its buzz) over a crack and a deep tail, the blade's buzz (a sawtooth with a wobble), the
+// thrusters' roar, a heavy machine's footfall (a falling boom, the ground's rumble, the armour's ring). Missiles launch
+// with MissileLaunch above. The heaviest one-shots have their offset taken out (DcBlock): a long low boom pushes one way.
+inline float Rise(float t,float attack) noexcept { return t<attack ? t/attack : 1.0f; }
+inline float Env(float t,float attack,float decay) noexcept { return t<0.0f ? 0.0f : Rise(t,attack)*std::exp(-t/decay); }
+// A gliding oscillator: its frequency from `from` to `to` Hz along exp(-t / `glide`).
+struct Glide {
+    float from,to,glide,phase=0.0f;
+    Glide(float f,float t,float g) noexcept : from(f),to(t),glide(g) {}
+    float Next(float t) noexcept { phase+=kTau*(to+(from-to)*std::exp(-t/glide))/static_cast<float>(kRate);return phase; }
+};
+// A sawtooth of `harmonics` partials at phase `ph` (a blade's buzz).
+inline float Saw(float ph,int harmonics) noexcept {
+    float v=0.0f;
+    for(int k=1;k<=harmonics;++k)v+=std::sin(static_cast<float>(k)*ph)/static_cast<float>(k);
+    return v;
+}
+// `b` retuned to `to`'s coefficients, its state kept (a sweeping filter without clicks).
+inline void Retune(Biquad& b,const Biquad& to) noexcept { b.b0=to.b0;b.b1=to.b1;b.b2=to.b2;b.a1=to.a1;b.a2=to.a2; }
+// `dry` duller (low-passed at `hz`) `delay` s later into `x` at `gain`: the ground and the buildings throwing it back.
+inline void Echo(Wave& x,const Wave& dry,float delay,float gain,float hz) {
+    Biquad lp=Lp(hz);
+    const int d=Samples(delay);
+    for(int i=d;i<static_cast<int>(x.size());++i)x[static_cast<std::size_t>(i)]+=gain*lp.Run(dry[static_cast<std::size_t>(i-d)]);
+}
+inline Wave DcBlock(Wave x) {
+    Biquad a=Hp(18.0f),b=Hp(18.0f);
+    for(auto& v:x)v=b.Run(a.Run(v));
+    return x;
+}
+// A crackle: sparse clicks of noise at random, `rate` a second dying along exp(-t / `decay`), through a band at `hz`.
+inline void Crackle(Wave& x,float at,float rate,float decay,float hz,float gain,std::uint32_t seed) {
+    Rng r(seed);
+    Biquad bp=Bp(hz,0.9f);
+    for(int i=Samples(at);i<static_cast<int>(x.size());++i) {
+        const float t=static_cast<float>(i-Samples(at))/static_cast<float>(kRate);
+        const bool click=r.Uni()<rate*std::exp(-t/decay)/static_cast<float>(kRate);
+        x[static_cast<std::size_t>(i)]+=gain*bp.Run(click ? r.Next()*8.0f : 0.0f);
+    }
+}
+
+// The beam rifle: the beam's zap (3.6 kHz gliding to 260 Hz in tens of ms, buzzing) with a fifth over it, the muzzle's
+// crack, the beam's electric buzz (a band of noise round 1.4 kHz throbbing at 90 Hz), a deep boom (75 to 30 Hz) and a
+// long low tail, its echo.
+inline Wave BeamShot() {
+    Wave x(static_cast<std::size_t>(Samples(1.8f)),0.0f),dry(x.size(),0.0f);
+    Rng r(0xBE41u);
+    Biquad crackHp=Hp(2500.0f),buzzBp=Bp(1400.0f,2.5f),bodyLp=Lp(600.0f),tailLp=Lp(180.0f),tailLp2=Lp(180.0f);
+    Glide zap(3600.0f,260.0f,0.035f),fifth(5400.0f,390.0f,0.03f),boom(75.0f,30.0f,0.08f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        const float z=std::tanh(3.0f*std::sin(zap.Next(t)))*Env(t,0.0008f,0.09f)+0.45f*std::sin(fifth.Next(t))*Env(t,0.0008f,0.05f);
+        const float buzz=buzzBp.Run(w)*Env(t,0.001f,0.06f)*3.0f*(1.0f+0.6f*std::sin(kTau*90.0f*t));
+        const float low=std::sin(boom.Next(t))*Env(t,0.004f,0.35f)*1.4f+bodyLp.Run(w)*Env(t,0.002f,0.12f)*2.0f;
+        const float tail=tailLp2.Run(tailLp.Run(w))*Env(t,0.03f,0.7f)*4.0f;
+        dry[i]=low;
+        x[i]=0.8f*z+crackHp.Run(w)*std::exp(-t/0.004f)*2.5f+buzz+low+tail;
+    }
+    Echo(x,dry,0.3f,0.25f,800.0f);
+    x=Normalized(DcBlock(std::move(x)),1.0f);
+    for(auto& v:x)v=SoftLimit(v,1.3f);
+    return Normalized(std::move(x),1.0f);
+}
+// A beam's impact: the burn's sizzle (a band round 2.8 kHz and its crackle), a short zap down, a boom and a low tail.
+inline Wave BeamHit() {
+    Wave x(static_cast<std::size_t>(Samples(1.4f)),0.0f);
+    Rng r(0xB417u);
+    Biquad sizzle=Bp(2800.0f,1.2f),bodyLp=Lp(450.0f),tailLp=Lp(160.0f),tailLp2=Lp(160.0f);
+    Glide zap(1500.0f,200.0f,0.02f),boom(65.0f,30.0f,0.07f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        x[i]=sizzle.Run(w)*Env(t,0.002f,0.2f)*2.5f+0.6f*std::tanh(2.0f*std::sin(zap.Next(t)))*Env(t,0.0005f,0.04f)+
+             std::sin(boom.Next(t))*Env(t,0.003f,0.3f)*1.3f+bodyLp.Run(w)*Env(t,0.001f,0.1f)*2.5f+
+             tailLp2.Run(tailLp.Run(w))*Env(t,0.03f,0.55f)*4.0f;
+    }
+    Crackle(x,0.0f,900.0f,0.18f,3500.0f,0.5f,0xB418u);
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+
+// The beam tomahawk's blade (the hum's own pitch: kSaberHz) lit: the emitter's crack, the buzz swelling up from 40 Hz
+// to its pitch, a rush of air rising from 400 Hz to 2.5 kHz.
+constexpr float kSaberHz=110.0f;
+inline Wave SaberOn() {
+    Wave x(static_cast<std::size_t>(Samples(0.9f)),0.0f);
+    Rng r(0x5AB1u);
+    Biquad crack=Hp(2000.0f),rush=Bp(400.0f,1.5f);
+    Glide buzz(40.0f,kSaberHz,0.12f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        if(i%64==0)Retune(rush,Bp(400.0f+2100.0f*(1.0f-std::exp(-t/0.12f)),1.5f));
+        const float hold=t<0.45f ? 1.0f : std::exp(-(t-0.45f)/0.15f);
+        x[i]=0.6f*Saw(buzz.Next(t),10)*Rise(t,0.06f)*hold+crack.Run(w)*std::exp(-t/0.01f)*2.0f+rush.Run(w)*Env(t,0.03f,0.2f)*3.0f;
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// ...put out: the buzz falling from its pitch to 35 Hz and dying, the air's rush falling, a click.
+inline Wave SaberOff() {
+    Wave x(static_cast<std::size_t>(Samples(0.7f)),0.0f);
+    Rng r(0x5AB0u);
+    Biquad click=Bp(3000.0f,2.0f),rush=Bp(2000.0f,1.5f);
+    Glide buzz(kSaberHz,35.0f,0.15f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        if(i%64==0)Retune(rush,Bp(300.0f+1700.0f*std::exp(-t/0.1f),1.5f));
+        x[i]=0.6f*Saw(buzz.Next(t),10)*Env(t,0.002f,0.18f)+click.Run(w)*std::exp(-t/0.004f)*2.0f+rush.Run(w)*Env(t,0.005f,0.12f)*2.5f;
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// A swing through the air: a band of noise sweeping up to 1.85 kHz and down as the blade passes (a bell 0.28 s in),
+// the air's low rush and the lit blade's buzz bent by its speed under it.
+inline Wave Whoosh() {
+    Wave x(static_cast<std::size_t>(Samples(0.8f)),0.0f);
+    Rng r(0x3005u);
+    Biquad band=Bp(250.0f,1.2f),low=Lp(250.0f);
+    float ph=0.0f;
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        const float u=(t-0.28f)/0.13f,bell=std::exp(-u*u);
+        if(i%64==0)Retune(band,Bp(250.0f+1600.0f*bell,1.2f));
+        ph+=kTau*kSaberHz*(1.0f+0.35f*bell)/static_cast<float>(kRate);
+        x[i]=(band.Run(w)*3.0f+low.Run(w)*2.0f)*bell+0.12f*Saw(ph,8)*bell;
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// The blade biting: its crackle and sizzle, its buzz driven hard for a moment, a low boom, the body and tail.
+inline Wave SaberHit() {
+    Wave x(static_cast<std::size_t>(Samples(1.3f)),0.0f);
+    Rng r(0x5A81u);
+    Biquad sizzle=Bp(3500.0f,1.0f),bodyLp=Lp(400.0f),tailLp=Lp(150.0f),tailLp2=Lp(150.0f);
+    Glide buzz(140.0f,120.0f,0.1f),boom(75.0f,32.0f,0.06f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        x[i]=0.7f*std::tanh(4.0f*Saw(buzz.Next(t),8))*Env(t,0.001f,0.12f)+sizzle.Run(w)*Env(t,0.002f,0.25f)*2.0f+
+             std::sin(boom.Next(t))*Env(t,0.003f,0.3f)*1.5f+bodyLp.Run(w)*Env(t,0.001f,0.15f)*2.5f+
+             tailLp2.Run(tailLp.Run(w))*Env(t,0.03f,0.6f)*4.0f;
+    }
+    Crackle(x,0.0f,1500.0f,0.15f,2600.0f,0.7f,0x5A82u);
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+
+// The chest cannon's fan of beams: five zaps 12 ms apart (each a little higher), the crack, a buzz, a big boom
+// (90 to 26 Hz), the body, a long rolling tail and three echoes; driven into a soft limit for its weight.
+inline Wave CannonShot() {
+    Wave x(static_cast<std::size_t>(Samples(3.2f)),0.0f),dry(x.size(),0.0f);
+    Rng r(0xCA77u);
+    Biquad crackHp=Hp(2000.0f),buzzBp=Bp(1100.0f,2.0f),bodyLp=Lp(700.0f),tailLp=Lp(160.0f),tailLp2=Lp(160.0f),modLp=Lp(3.0f);
+    Glide boom(90.0f,26.0f,0.12f);
+    for(int k=0;k<5;++k) {
+        const float fk=static_cast<float>(k),at=0.012f*fk;
+        Glide z(2600.0f+300.0f*fk,180.0f+20.0f*fk,0.05f);
+        for(int i=Samples(at);i<Samples(at+0.5f);++i) {
+            const float t=static_cast<float>(i)/static_cast<float>(kRate)-at;
+            x[static_cast<std::size_t>(i)]+=0.45f*std::tanh(3.0f*std::sin(z.Next(t)))*Env(t,0.001f,0.15f);
+        }
+    }
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        const float low=std::sin(boom.Next(t))*Env(t,0.004f,0.6f)*2.0f+bodyLp.Run(w)*Env(t,0.002f,0.2f)*3.0f;
+        const float mod=0.8f+0.2f*modLp.Run(r.Next())*20.0f;
+        dry[i]=low;
+        x[i]+=crackHp.Run(w)*std::exp(-t/0.005f)*3.0f+buzzBp.Run(w)*Env(t,0.001f,0.12f)*3.0f+low+
+              tailLp2.Run(tailLp.Run(w))*Env(t,0.04f,1.2f)*mod*5.0f;
+    }
+    const float delays[3]={0.35f,0.8f,1.4f},gains[3]={0.3f,0.2f,0.12f};
+    for(int e=0;e<3;++e)Echo(x,dry,delays[e],gains[e],900.0f-200.0f*static_cast<float>(e));
+    x=Normalized(DcBlock(std::move(x)),1.0f);
+    for(auto& v:x)v=SoftLimit(v,1.4f);
+    return Normalized(std::move(x),1.0f);
+}
+
+// A funnel let go of by its pack: the latch's clank (a knock, a small steel part's ring) and its thruster's puff.
+inline Wave FunnelLaunch() {
+    Wave x(static_cast<std::size_t>(Samples(0.7f)),0.0f);
+    const float steel[3]={620.0f,1710.0f,3100.0f},ring[3]={0.08f,0.05f,0.03f};
+    Knock(x,0.0f,0.7f,2600.0f,180.0f,0xF1A1u);
+    Strike(x,0.0f,0.35f,steel,ring,3);
+    Rng r(0xF1A2u);
+    Biquad puff=Bp(1800.0f,0.8f),low=Lp(300.0f);
+    for(int i=Samples(0.05f);i<static_cast<int>(x.size());++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate)-0.05f,w=r.Next();
+        x[static_cast<std::size_t>(i)]+=puff.Run(w)*Env(t,0.01f,0.12f)*2.0f+low.Run(w)*Env(t,0.01f,0.15f)*2.0f;
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// A funnel's beam: a thin zap (5.2 kHz gliding to 1.1 kHz), a crack, a hiss and a small thump: the rifle's, smaller
+// and higher.
+inline Wave FunnelShot() {
+    Wave x(static_cast<std::size_t>(Samples(0.7f)),0.0f);
+    Rng r(0xF5A7u);
+    Biquad crackHp=Hp(3000.0f),hiss=Bp(1500.0f,1.5f),tailLp=Lp(400.0f);
+    Glide zap(5200.0f,1100.0f,0.02f),thump(140.0f,90.0f,0.02f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        x[i]=std::tanh(1.5f*std::sin(zap.Next(t)))*Env(t,0.0005f,0.05f)+crackHp.Run(w)*std::exp(-t/0.002f)*2.0f+
+             hiss.Run(w)*Env(t,0.001f,0.08f)*2.0f+0.6f*std::sin(thump.Next(t))*Env(t,0.002f,0.05f)+
+             tailLp.Run(w)*Env(t,0.01f,0.25f)*0.8f;
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// A funnel back in its pack: its retro puff, the clank of it seating, the latch.
+inline Wave FunnelDock() {
+    Wave x(static_cast<std::size_t>(Samples(0.6f)),0.0f);
+    Rng r(0xF0D0u);
+    Biquad puff=Bp(1500.0f,0.8f);
+    for(int i=0;i<Samples(0.15f);++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate);
+        x[static_cast<std::size_t>(i)]+=puff.Run(r.Next())*Env(t,0.005f,0.06f)*2.0f;
+    }
+    const float steel[3]={540.0f,1490.0f,2780.0f},ring[3]={0.1f,0.06f,0.035f};
+    Knock(x,0.09f,0.8f,2200.0f,150.0f,0xF0D1u);
+    Strike(x,0.09f,0.4f,steel,ring,3);
+    Knock(x,0.16f,0.3f,4000.0f,300.0f,0xF0D2u);
+    return Normalized(std::move(x),1.0f);
+}
+
+// A struck armour: the inharmonic ring of a big steel part (Strike's partials) at `at` s.
+inline void Armour(Wave& x,float at,float gain,float base,float decay) {
+    const float hz[5]={base,base*2.6f,base*5.2f,base*8.6f,base*13.8f};
+    const float ring[5]={decay,decay*0.63f,decay*0.43f,decay*0.29f,decay*0.17f};
+    Strike(x,at,gain,hz,ring,5);
+}
+// A foot of a 25 m machine coming down (`gain`, the boom from `hz` x 2.5 down to `hz` dying in `decay`) at `at` s:
+// the boom, the impact's thud, the ground's rumble, the armour's ring and the joints' hydraulic hiss after it.
+inline void Footfall(Wave& x,float at,float gain,float hz,float decay,std::uint32_t seed) {
+    Rng r(seed);
+    Biquad impact=Lp(350.0f),rumble=Lp(90.0f),rumble2=Lp(90.0f),hiss=Bp(2500.0f,1.0f);
+    Glide boom(hz*2.5f,hz,0.05f);
+    for(int i=Samples(at);i<static_cast<int>(x.size());++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate)-at,w=r.Next();
+        x[static_cast<std::size_t>(i)]+=gain*(std::sin(boom.Next(t))*Env(t,0.003f,decay)*1.8f+impact.Run(w)*Env(t,0.001f,0.05f)*3.0f+
+                                             rumble2.Run(rumble.Run(w))*Env(t,0.02f,decay*2.0f)*8.0f+
+                                             hiss.Run(w)*Env(t-0.04f,0.01f,0.08f)*0.6f);
+    }
+    Knock(x,at,0.6f*gain,900.0f,hz*2.0f,seed+1u);
+    Armour(x,at,0.6f*gain,180.0f,0.35f);
+}
+inline Wave Footstep() {
+    Wave x(static_cast<std::size_t>(Samples(1.5f)),0.0f);
+    Footfall(x,0.0f,1.0f,28.0f,0.28f,0xF007u);
+    x=Normalized(DcBlock(std::move(x)),1.0f);
+    for(auto& v:x)v=SoftLimit(v,1.4f);
+    return Normalized(std::move(x),1.0f);
+}
+// Landing from the air: both feet (70 ms apart), deeper and longer, a bigger part's clank, the joints settling (their
+// hiss) and the debris knocked loose.
+inline Wave Land() {
+    Wave x(static_cast<std::size_t>(Samples(2.2f)),0.0f);
+    Footfall(x,0.0f,1.0f,22.0f,0.5f,0x1A4Du);
+    Footfall(x,0.07f,0.85f,24.0f,0.45f,0x1A4Eu);
+    Armour(x,0.02f,0.5f,120.0f,0.5f);
+    Rng r(0x1A4Fu);
+    Biquad settle=Bp(1800.0f,1.2f);
+    for(int i=Samples(0.15f);i<static_cast<int>(x.size());++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate)-0.15f;
+        x[static_cast<std::size_t>(i)]+=settle.Run(r.Next())*Env(t,0.02f,0.25f)*0.8f;
+    }
+    for(int k=0;k<6;++k)Knock(x,0.12f+0.07f*static_cast<float>(k)+0.03f*r.Next(),0.12f,1500.0f+400.0f*r.Uni(),220.0f,0x1A50u+static_cast<std::uint32_t>(k));
+    x=Normalized(DcBlock(std::move(x)),1.0f);
+    for(auto& v:x)v=SoftLimit(v,1.5f);
+    return Normalized(std::move(x),1.0f);
+}
+// A dash's thruster burst: the ignition's pop, the roar coming up in 25 ms (a broad band round 900 Hz, the hiss over
+// it) and falling away, a low rumble under it.
+inline Wave Dash() {
+    Wave x(static_cast<std::size_t>(Samples(1.3f)),0.0f);
+    Rng r(0xDA54u);
+    Biquad pop=Hp(1500.0f),roar=Bp(900.0f,0.7f),body=Lp(2500.0f),hiss=Hp(3000.0f),rumble=Lp(80.0f),rumble2=Lp(80.0f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        x[i]=pop.Run(w)*std::exp(-t/0.006f)*2.0f+(roar.Run(w)*2.5f+body.Run(w)*0.8f)*Env(t,0.025f,0.4f)+
+             hiss.Run(w)*Env(t,0.02f,0.25f)*0.6f+rumble2.Run(rumble.Run(w))*Env(t,0.03f,0.5f)*10.0f;
+    }
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+
+// --- The Sazabi's loops (periodic by construction, see the top) ---
+// The main thrusters at full thrust (the mixer lowers their level and pitch with the thrust): the exhaust's roar
+// (noise between 50 Hz and 1.1 kHz), its low rumble, the hiss round 3.2 kHz, all flickering a little, a 48 Hz drone
+// (whole cycles of the 2 s loop) under them; 20 Hz high-passed round the loop.
+constexpr float kThrusterLoopSec=2.0f;
+inline Wave Thrusters() {
+    const int n=Samples(kThrusterLoopSec);
+    const Wave a=NoiseTable(n,0x7A57u),b=NoiseTable(n,0x7A58u),m=NoiseTable(n,0x7A59u);
+    const Wave roar=Steady(a,[lp=Lp(1100.0f),hp=Hp(50.0f)](float v) mutable { return hp.Run(lp.Run(v)); });
+    const Wave rumble=Steady(b,[l1=Lp(70.0f),l2=Lp(70.0f)](float v) mutable { return l2.Run(l1.Run(v)); });
+    const Wave hiss=Steady(a,[bp=Bp(3200.0f,0.9f)](float v) mutable { return bp.Run(v); });
+    Wave flicker=Steady(m,[l1=Lp(9.0f),l2=Lp(9.0f)](float v) mutable { return l2.Run(l1.Run(v)); });
+    const float fp=Peak(flicker);
+    Wave x(static_cast<std::size_t>(n));
+    for(int i=0;i<n;++i) {
+        const std::size_t k=static_cast<std::size_t>(i);
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),f=flicker[k]/(fp>1e-9f ? fp : 1.0f);
+        x[k]=(1.4f*roar[k]+12.0f*rumble[k]+0.6f*hiss[k])*(1.0f+0.25f*f)+0.12f*std::sin(kTau*48.0f*t);
+    }
+    x=Steady(x,[hp=Hp(20.0f)](float v) mutable { return hp.Run(v); });   // the rumble's slow drift's offset out, round the loop
+    return Normalized(std::move(x),1.0f);
+}
+// The lit blade's hum: a sawtooth at kSaberHz wobbling in pitch (3 Hz) beating against a second one 1 Hz higher, its
+// level throbbing (5 Hz) and fluttering, a crackle of the beam over it. Every tone whole cycles of the 1 s loop.
+constexpr float kSaberLoopSec=1.0f;
+inline Wave SaberHum() {
+    const int n=Samples(kSaberLoopSec);
+    const Wave c=NoiseTable(n,0x5A4Du),m=NoiseTable(n,0x5A4Eu);
+    const Wave crackle=Steady(c,[bp=Bp(3000.0f,1.5f)](float v) mutable { return bp.Run(v); });
+    const Wave flutter=Steady(m,[l1=Lp(8.0f),l2=Lp(8.0f)](float v) mutable { return l2.Run(l1.Run(v)); });
+    const float fp=Peak(flutter);
+    Wave x(static_cast<std::size_t>(n));
+    for(int i=0;i<n;++i) {
+        const std::size_t k=static_cast<std::size_t>(i);
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),f=flutter[k]/(fp>1e-9f ? fp : 1.0f);
+        const float ph=kTau*kSaberHz*t+0.35f*std::sin(kTau*3.0f*t),ph2=kTau*(kSaberHz+1.0f)*t;
+        const float am=1.0f+0.15f*std::sin(kTau*5.0f*t)+0.2f*f;
+        x[k]=(0.6f*Saw(ph,10)+0.35f*(std::sin(ph2)+0.5f*std::sin(2.0f*ph2)))*am+0.8f*crackle[k]*(0.6f+0.4f*f);
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// The chest cannon charging, made at its start (the mixer raises its pitch with the charge): a whine at 520 Hz and its
+// harmonics, an octave over it 1 Hz off (its shimmer), a 16 Hz tremolo, a 60 Hz hum and the crackle round 4.5 kHz.
+constexpr float kChargeLoopSec=1.0f;
+inline Wave CannonCharge() {
+    const int n=Samples(kChargeLoopSec);
+    const Wave c=NoiseTable(n,0xC4A6u);
+    const Wave crackle=Steady(c,[bp=Bp(4500.0f,2.0f)](float v) mutable { return bp.Run(v); });
+    Wave x(static_cast<std::size_t>(n));
+    for(int i=0;i<n;++i) {
+        const std::size_t k=static_cast<std::size_t>(i);
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),ph=kTau*520.0f*t;
+        const float whine=std::sin(ph)+0.45f*std::sin(2.0f*ph)+0.25f*std::sin(3.0f*ph)+0.15f*std::sin(5.0f*ph)+0.4f*std::sin(kTau*1041.0f*t);
+        x[k]=whine*(1.0f+0.3f*std::sin(kTau*16.0f*t))+0.3f*std::sin(kTau*60.0f*t)+1.5f*crackle[k];
+    }
+    return Normalized(std::move(x),1.0f);
+}
 }  // namespace crew::vsynth
