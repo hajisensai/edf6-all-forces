@@ -1578,6 +1578,36 @@ def stock_vehicle_hud_wired() -> None:
 
 
 @test
+def stock_gun_sight_ranged() -> None:
+    """The stock vehicles' gun sight in the sky (the user 2026-10-06, an E551's cannon at a flying saucer, "CANNON 3132 m":
+    "这个好像一直不动也对不上"): an arc gun's marks come from roundaim.h GunSight (ranged on the enemy under the view:
+    pipper and lead mark; the map hit; else none), not from the point its round crosses the 3000 m reach; hud.cpp draws
+    the ranged pipper with the lead mark and, with nothing to range on, the boresight alone; tools/rounds_check.cpp
+    flies the E551 gun Root.cpk has (re-read when the game is there) and lays both sights on a saucer."""
+    import rootcpk
+    vhud, hud, check = src('src/vhud.cpp'), src('src/hud.cpp'), src('tools/rounds_check.cpp')
+    arm = vhud.split('void Arm(', 1)[1].split('\n}\n', 1)[0]
+    assert 'GunMarkOf(w,m,pos,dir,a)' in arm, 'src/vhud.cpp Arm: an arc gun\'s marks are GunMarkOf\'s'
+    mark = vhud.split('void GunMarkOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'roundaim::GunSight(' in mark and 'target.ok ? target.at : nullptr' in mark
+    assert 'RangeTarget(v,r,eye,ms);' in vhud.split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
+    stock = hud.split('void StockMark(', 1)[1].split('\n}\n', 1)[0]
+    ranged = stock.split('if(a.ranged) {', 1)[1].split('return;', 1)[0]
+    assert 'LeadMark(' in ranged and 'Pipper(' in ranged, 'src/hud.cpp StockMark: the ranged pipper with its lead mark'
+    tail = stock.split('Boresight(drawer,ctx,vp,width,height,s,a.bore);\n    if(a.hit)', 1)
+    assert len(tail) == 2 and 'kHudDim' not in tail[1].split('} else', 1)[0], 'StockMark: no dim pipper at the reach any more'
+    assert 'SkySight();' in check.split('int main()', 1)[1]
+    row = re.search(r'kE551Gun=\{"(V_\w+) \([^)]*\)",([\d.]+)f,([\d.]+)f,([\d.]+)f,(\d+)\}', check)
+    assert row, 'tools/rounds_check.cpp: kE551Gun'
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        name, speed, factor, owner, alive = row.groups()
+        w = dsgo.to_py(dsgo.parse(rootcpk.default().read('WEAPON', name + '.SGO')).root)
+        got = (w['AmmoSpeed'], w['AmmoGravityFactor'], w['AmmoOwnerMove'], w['AmmoAlive'])
+        assert all(abs(float(g) - float(x)) < 1e-4 for g, x in zip(got, (speed, factor, owner, alive))), (name, got)
+        assert w['AmmoClass'] == 'RocketBullet01', (name, w['AmmoClass'])
+
+
+@test
 def stock_gauges_wired() -> None:
     """The stock weapon gauges (src/stockgauge.cpp; the user, 2026-10-06: "删掉原版挂载和油料显示"): its ini key is read,
     shipped and documented; it is installed at load and only through the gauge's update slot (no draw call skipped); the
