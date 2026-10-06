@@ -597,7 +597,9 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // jet_bay.cpp: the EMC's rounds (emc.cpp; pylib/vcobjects.py EMC_*, tools/make_emc.py), DemoIndirectFire objects owned
 // by the EMC (its team: its side's enemies hurt, its kills, friends spared): the beam, the charge's glow (sight), the
 // break charge fired at each building on the beam's line, the blast at its end. Ready: preloaded this mission.
-enum class EmcRound { beam, sight, breakCharge, blast };
+// The Sazabi's beams are made and fired the same way (sazabi.cpp; pylib/vcobjects.py SAZABI_ROUND_FILES): the mega
+// particle cannon's beam, its charge's glow at the chest, a funnel's burst.
+enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;

@@ -5,7 +5,7 @@
 //                                             frame's bone transforms into OUT for tools/sazabi_pose_view.py to draw
 // Checks: every scenario's every bone finite; the rifle (+z of sz_rifle) along the aim within 2 deg whenever the arm is
 // fully raised; the drawn tomahawk's grip within 1.5 m of the right hand and its blade lit, the stowed one dark and
-// within its bind offset of the shield; a hidden funnel shrunk; the soles never more than kSink under the floor walking.
+// within its bind offset of the shield; a flying funnel where it flies, nose along its course, a docked one in its pack; the soles never more than kSink under the floor walking.
 // Built on request only: cmake --build build --target sazabi_pose_check && build\sazabi_pose_check.exe
 #define _CRT_SECURE_NO_WARNINGS
 #include "../src/sazabi_pose.h"
@@ -49,7 +49,17 @@ PoseInput Aim(float u) {
 PoseInput AimWalk(float u) { PoseInput i=Aim(0.5f); i.gait=u*2.0f*kPi; i.stride=0.6f; return i; }
 PoseInput Guard(float u) { PoseInput i; i.t=u; i.guard=u<0.5f ? u*2.0f : 1.0f; i.aim=1.0f; return i; }
 PoseInput Swing(float u) { PoseInput i; i.t=u; i.swing=u; i.aim=0.0f; return i; }
-PoseInput Funnels(float u) { PoseInput i; i.t=u; for(int k=0;k<6;++k)i.funnelOut[k]=u*6.0f>static_cast<float>(k); return i; }
+// the funnels launched one by one, each flying a ring 30 m ahead at its chest's height, nose to the ring's centre
+PoseInput Funnels(float u) {
+    PoseInput i; i.t=u;
+    for(int k=0;k<6;++k) {
+        i.funnelOut[k]=u*6.0f>static_cast<float>(k);
+        const float a=u*2.0f*kPi+static_cast<float>(k)*kPi/3.0f;
+        i.funnelAt[k][0]=8.0f*std::cos(a);i.funnelAt[k][1]=20.0f+8.0f*std::sin(a);i.funnelAt[k][2]=30.0f;
+        i.funnelDir[k][0]=-std::cos(a);i.funnelDir[k][1]=-std::sin(a);i.funnelDir[k][2]=0.0f;
+    }
+    return i;
+}
 PoseInput Cannon(float u) { PoseInput i; i.t=u; i.cannon=u; i.crouch=0.3f*u; i.aim=0.0f; return i; }
 constexpr Scenario kScenarios[]={
     {"stand",Stand},{"walk",Walk},{"run",Run},{"fly",Fly},{"land",Land},{"aim",Aim},{"aimwalk",AimWalk},
@@ -86,8 +96,22 @@ void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Pose
         if(std::fabs(Dist(p.modelPos[kAxe],p.modelPos[kShield])-bindOff)>0.01f)Fail(s.name,f,"the stowed tomahawk left the shield");
         if(p.scale[kAxeBlade]!=0.0f)Fail(s.name,f,"the stowed tomahawk's blade is lit");
     }
-    for(int k=0;k<6;++k)
-        if((p.scale[kFunnels[k]]==0.0f)!=in.funnelOut[k])Fail(s.name,f,"a funnel shown / hidden wrongly");
+    for(int k=0;k<6;++k) {   // a flying funnel where it flies, its nose along its direction; a docked one in its pack
+        const int b=kFunnels[k];
+        if(p.scale[b]!=1.0f)Fail(s.name,f,"a funnel not drawn");
+        if(!in.funnelOut[k]) {
+            const int pack=kBones[b].parent;
+            if(std::fabs(Dist(p.modelPos[b],p.modelPos[pack])-Dist(rig.joint[b],rig.joint[pack]))>0.01f)Fail(s.name,f,"a docked funnel left its pack");
+            continue;
+        }
+        if(Dist(p.modelPos[b],in.funnelAt[k])>0.01f)Fail(s.name,f,"a flying funnel not where it flies");
+        float nose[3];
+        const float l=std::sqrt(kFunnelNose[0]*kFunnelNose[0]+kFunnelNose[1]*kFunnelNose[1]+kFunnelNose[2]*kFunnelNose[2]);
+        const float bind[3]={kFunnelNose[0]/l,kFunnelNose[1]/l,kFunnelNose[2]/l};
+        Apply(bind,p.modelRot[b],nose);
+        const float* d=in.funnelDir[k];
+        if(nose[0]*d[0]+nose[1]*d[1]+nose[2]*d[2]<std::cos(1.0f*kDeg))Fail(s.name,f,"a flying funnel's nose off its direction");
+    }
     constexpr int kFeet[2]={kFootL,kFootR};
     for(int k=0;k<2;++k) {   // the soles stand on the floor in the stance: an ankle this far under its stance height sinks
         const float drop=standAnkle[k]-p.modelPos[kFeet[k]][1];

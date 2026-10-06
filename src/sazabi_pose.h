@@ -52,6 +52,9 @@ constexpr bool ParentsFirst() {
 }
 static_assert(ParentsFirst(),"kBones: every parent before its children");
 inline constexpr int kFunnels[6]={kFunnelL1,kFunnelL2,kFunnelL3,kFunnelR1,kFunnelR2,kFunnelR3};
+// A funnel's nose (its glowing muzzle's end) at the bind, unit, the model's frame: every funnel lies along it in its pack
+// (the model folder's sz_funnel_* pieces' long axis, toward their glowing material: 0.035..0.061, 0.76, 0.645).
+inline constexpr float kFunnelNose[3]={0.048f,0.763f,0.645f};
 
 // ------------------------------------------------------------------------------------------ 3 x 3 rotations
 struct M3 { float m[9]; };
@@ -111,7 +114,9 @@ struct PoseInput {
     float guard=0.0f;       // 0 .. 1 the shield held up across the chest
     float swing=-1.0f;      // the tomahawk: < 0 stowed; 0 .. 1 one swing (wind-up, strike, recover)
     float cannon=0.0f;      // 0 .. 1 bracing for the chest cannon
-    bool funnelOut[6]{};    // a funnel launched: hidden in its pack (it flies as a drone of its own)
+    bool funnelOut[6]{};    // a funnel launched: drawn where it flies (funnelAt), not in its pack
+    float funnelAt[6][3]{}; // ...its centre, in sz_root's frame (sazabi.cpp flies it in the world)
+    float funnelDir[6][3]{};// ...where its nose points (unit, sz_root's frame)
 };
 struct Pose {
     M3 rot[kBoneCount];       // local rotations
@@ -376,6 +381,22 @@ inline void Tomahawk(const PoseInput& in,const Rig& rig,Pose* p) {
     p->scale[kAxeBlade]=1.0f;
 }
 
+// The funnels flying (funnelOut): each at its funnelAt, its nose along funnelDir (the bind lies every funnel along
+// kFunnelNose with no turn of its own, so its model rotation is the turn taking that onto the direction). Docked: as bound.
+inline void Funnels(const PoseInput& in,Pose* p) {
+    Finish(p);
+    float nose[3]={kFunnelNose[0],kFunnelNose[1],kFunnelNose[2]};
+    const float l=std::sqrt(nose[0]*nose[0]+nose[1]*nose[1]+nose[2]*nose[2]);
+    for(float& c:nose)c/=l;
+    for(int k=0;k<6;++k) {
+        if(!in.funnelOut[k])continue;
+        float dir[3]={in.funnelDir[k][0],in.funnelDir[k][1],in.funnelDir[k][2]};
+        const float d=std::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+        if(!(d>1e-4f)){dir[0]=nose[0];dir[1]=nose[1];dir[2]=nose[2];}else for(float& c:dir)c/=d;
+        PlaceAt(p,kFunnels[k],Align(nose,dir),in.funnelAt[k]);
+    }
+}
+
 // The whole pose for `in` on `rig`.
 inline void Animate(const PoseInput& in,const Rig& rig,Pose* p) {
     Reset(rig,p);
@@ -385,7 +406,7 @@ inline void Animate(const PoseInput& in,const Rig& rig,Pose* p) {
     LeftArm(in,p);
     AimRifle(in,p);
     Tomahawk(in,rig,p);
-    for(int k=0;k<6;++k)p->scale[kFunnels[k]]=in.funnelOut[k] ? 0.0f : 1.0f;
+    Funnels(in,p);
     Finish(p);
 }
 
