@@ -16,6 +16,7 @@
 //   tx       the pose's send throttle (+0x1D80: countdown, interval, min, max frames; +0x1D90 the fast flag),
 //            the send rate statics could not find (docs/online-re.md section 4)
 #include "crew.h"
+#include "gunnerrecoil.h"
 #include "heli.h"
 #include "memory.h"
 #include <cmath>
@@ -91,6 +92,18 @@ bool InSession() noexcept {
         return ok;
     }();
     return !sig || reinterpret_cast<OnlineFn>(image+kOnline)(nullptr);
+}
+
+bool VehicleAuthority(unsigned char* v) noexcept {
+    static const bool sig=[]() noexcept {
+        bool ok=false;
+        __try { ok=edf::Matches(image,kSeatLocal,kSigs[2].bytes,sizeof(kSigs[2].bytes)); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
+        if(!ok)Log("NET authority check off: EDF+%#x does not match docs/online-re.md, no machine counts as a vehicle's authority",kSeatLocal);
+        return ok;
+    }();
+    // 0x630F90 reads seat 0's +0x268 / +0x308: a vehicle without seats has no authority to ask about.
+    if(!sig || !At<const void*>(v,kSeats) || !At<std::size_t>(v,kSeatCount))return false;
+    return reinterpret_cast<SeatLocalFn>(image+kSeatLocal)(v,0,0,0,true);
 }
 
 void NetProbe(unsigned char* v) noexcept {

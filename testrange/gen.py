@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))   # the ground vehicles' builders (GROUND_MISSION)
 import jet_models  # noqa: E402
 import ledger  # noqa: E402
+import recoil  # noqa: E402
 import rmpa  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
 from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
@@ -831,6 +832,44 @@ GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'e
                                   'edf6tr_drill_mission': 'make_drill', 'edf6tr_sidecar_mission': 'make_sidecar'}
 
 
+# The stock ground vehicles the range makes placeable from their call-in SGO (DERIVED), and the player call whose gun
+# mounts they take (the first tier: its guns are the call-in SGO's). The call-in OBJECT's own vehicle_setup is not what
+# the player gets (the call carries its own setup), and its recoil is not the call's: the Grape's [0.3, 5.5] against
+# the call's [0.01, 0.1]; the helis' [0.0001, 0.1] / [0.01, 0.1] against [0, 0] (docs/recoil-re.md). The Nereid (409)
+# already agrees; the Depth Crawler's mounts carry no recoil.
+PLAYER_CALLS: dict[str, str] = {
+    'edf6tr_vehicle401_striker_mission': 'EVEHICLE_STRIKER01',     # Grape
+    'edf6tr_v506_heli_mission': 'EWEAPON394',                       # N9 Eros
+    # Eros No. 6: its own call (DLC_VEHICLE_HELI_EDF6BENEFITS) carries napalm where the call-in SGO has the Eros's
+    # missile, so it takes the call that mounts the same guns.
+    'edf6tr_v506_heli_edf6benefits_mission': 'EWEAPON394',
+    'edf6tr_v602_heli_mission': 'AWEAPON371',                       # Heron YG10E (the YG10 has no missile)
+    'edf6tr_vehicle410_heli_mission': 'AWEAPON367',                 # HU04 Brute
+}
+
+
+def player_mounts(game: Game, sgo_name: str) -> list[recoil.Mount | None] | None:
+    """The gun mounts (weapon, recoil) of the call that brings this vehicle to the player: ours (GROUND_MISSION) are
+    requested by their own call, which tools/call_weapons.py makes from the vehicle's stock request
+    (vcobjects.GROUND_VEHICLES); the stock ones by PLAYER_CALLS. None: no player call to follow."""
+    if sgo_name in GROUND_MISSION:
+        import call_weapons
+        key = sgo_name.removeprefix(DERIVED_PREFIX).removesuffix('_mission')
+        call = next(c for c in call_weapons.CALLS if c.ground == key)
+        template = game.read('WEAPON', call_weapons.template_of(call).upper() + '.SGO')
+        # The tier only scales the multipliers; the mounts are the request's whatever the level.
+        return recoil.mounts_of(call_weapons.weapon_sgo(template, call, [(0.0, 1.0, 1.0)]), call.id)
+    if sgo_name in PLAYER_CALLS:
+        return recoil.mounts_of(game.read('WEAPON', PLAYER_CALLS[sgo_name] + '.SGO'), PLAYER_CALLS[sgo_name])
+    return None
+
+
+def _with_player_recoil(game: Game, sgo_name: str, data: bytes) -> bytes:
+    """`data` with every mission_setup gun mount's recoil the player call's (pylib/recoil.py), when there is one."""
+    mounts = player_mounts(game, sgo_name)
+    return data if mounts is None else recoil.align_data(data, mounts, sgo_name)[0]
+
+
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
     if sgo_name in JETS:
@@ -839,10 +878,11 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
         import importlib
         data = importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game)
         # The Freed bike's SGO (the sidecar's) is a script's already: it has its mission_setup next to vehicle_setup.
-        return data if 'mission_setup'.encode('utf-16le') + b'\0\0' in data else as_mission_sgo(data)
+        data = data if 'mission_setup'.encode('utf-16le') + b'\0\0' in data else as_mission_sgo(data)
+        return _with_player_recoil(game, sgo_name, data)
     stock = DERIVED.get(sgo_name)
     if stock:
-        return as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
+        return _with_player_recoil(game, sgo_name, as_mission_sgo(game.read('OBJECT', stock + '.SGO')))
     return game.read('OBJECT', sgo_name.upper() + '.SGO')
 
 
