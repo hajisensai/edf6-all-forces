@@ -706,7 +706,9 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     }
     auto ctrl=At<unsigned char*>(v,kSelfCtrl);
     if(!rideOk || !ctrl || At<std::int32_t>(ctrl,8)==0){s.boardV=ObjRef{};return false;}
-    _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));   // the reference RideVehicle lets go of (0x57690D)
+    // The by-value shared_ptr's reference: RideVehicle (callee-destroyed argument) lets go of it on every return, the
+    // seated or refused path at 0x57690D and the already-in-that-seat one through 0x8DF40 (0x576723), so none leaks.
+    _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
     SharedRef ref{v,ctrl};
     reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,s.boardSeat);
     Log("NPCAI soldier %p boards v=%p seat %d: %s",h,v,s.boardSeat,HumanOnFoot(h) ? "refused by the stock ride" : "seated");
