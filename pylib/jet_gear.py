@@ -12,7 +12,9 @@ skinned to one bone each, in one material (MaterialLibrary.helicopter6: the heli
 jet's archive). Each main leg is one of them; the nose leg is both side by side (a twin-wheel nose gear). A leg is
 copied whole (its triangles, material, textures), scaled uniformly and moved (no turn, so its normals / tangents stay
 valid) so that its wheel touches one ground plane `drop` under the model's lowest point and the line where it enters
-the donor's body (the donor body's underside over the strut's top) lies on the jet's underside at the gear's (x, z).
+the donor's body (the donor body's underside over the strut's top) lies on the jet's underside at the gear's (x, z). Every other
+piece of the leg that enters the donor body (its shock absorber, `Mount`) is then raised by a shear (its normals
+carried through) until it goes into the jet as deep as it went into the donor: the jet's underside is not the heli's.
 (Gear doors: the stock wells' covers, Vehicle409_heli tailWheelCover_l / _r, are V-shaped shells; on a jet's underside
 they either hang under it as a fairing or cut through the folded wheels: left out.)
 
@@ -27,6 +29,7 @@ off it (vcobjects.jet_sgo) has its bottom on the wheels' contact points.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 import graft_pure as g
@@ -168,6 +171,191 @@ def leg_part(md: Mdb, name: str) -> Part:
     return Part(bone, lo, top, skin)  # type: ignore[arg-type]
 
 
+# ------------------------------------------------------------------------------------------ the legs' upper ends
+# A donor leg meets its body in two places, not one: its oleo strut (its top, `Part.top`) and its trailing arm's
+# shock absorber, a cylinder from the wheel's hub 0.65 m forward and up to the heli's body, which curves down there
+# (its underside 0.60 m over the cylinder's end against 0.94 m over the strut). plan() puts the strut's skin line on the
+# jet's underside, but a jet's underside is about level there: the cylinder's end hung 0.22..0.72 m under the jet's skin
+# (the user's picture, 2026-10-06: 「起落架没完全接上」). So every piece of a leg that enters its donor body (`Mount`)
+# is raised until its end goes as deep into the jet as it went into the donor (`reach`): a shear that keeps the piece's
+# lower end (the hub) where it is and lifts its upper end straight up, each vertex by its share of the way along the
+# piece's axis (p' = p + t(p) D, t 0 at the lower end's middle, 1 at the upper end's; D = (0, rise, 0)); its normals
+# go through the inverse transpose and its tangents through the shear (`raised`), so it stays lit as a cylinder.
+
+@dataclass(frozen=True)
+class Mount:
+    """A piece of a donor leg that enters the donor body: its vertices in mesh (obj, mesh) of the donor, the middles of
+    its lower and upper ends (`base`, base + axis x length), its top vertex (`top`, `t_top` of the way along) and how
+    deep that top goes into the donor body (`embed`, over the body's underside there)."""
+    obj: int
+    mesh: int
+    verts: tuple[int, ...]
+    base: Vec3
+    axis: Vec3
+    length: float
+    top: Vec3
+    t_top: float
+    embed: float
+
+    def t(self, p: Vec3) -> float:
+        """How far along the piece `p` is: 0 at its lower end's middle, 1 at its upper end's."""
+        return sum((p[c] - self.base[c]) * self.axis[c] for c in range(3)) / self.length
+
+
+def _pieces(P: list[Vec3], tris: list[tuple[int, int, int]]) -> list[set[int]]:
+    """The connected pieces of `tris` (vertices at the same position, to 1 mm, joined)."""
+    parent: dict[int, int] = {}
+
+    def root(a: int) -> int:
+        parent.setdefault(a, a)
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def join(a: int, b: int) -> None:
+        parent[root(a)] = root(b)
+    first: dict[tuple[float, float, float], int] = {}
+    for t in tris:
+        for v in t:
+            join(v, first.setdefault((round(P[v][0], 3), round(P[v][1], 3), round(P[v][2], 3)), v))
+        join(t[1], t[0])
+        join(t[2], t[0])
+    out: dict[int, set[int]] = {}
+    for t in tris:
+        for v in t:
+            out.setdefault(root(v), set()).add(v)
+    return list(out.values())
+
+
+def _mean(pts: list[Vec3]) -> Vec3:
+    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts), sum(p[2] for p in pts) / len(pts))
+
+
+def _unit(d: Vec3) -> tuple[Vec3, float]:
+    n = math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+    _req(n > 1e-3, 'a mount piece with no length')
+    return (d[0] / n, d[1] / n, d[2] / n), n
+
+
+def mount_of(k: int, j: int, P: list[Vec3], piece: set[int], embed: float) -> Mount:
+    """Piece `piece` of mesh (k, j) as a Mount: its axis first through its lowest and highest fifths, then (split
+    at its middle along that) through its two ends' middles (a cylinder's two rings: exact)."""
+    pts = [P[v] for v in piece]
+    top = max(pts, key=lambda p: p[1])
+    lo, hi = min(p[1] for p in pts), top[1]
+    band = 0.2 * (hi - lo)
+    a, b = _mean([p for p in pts if p[1] <= lo + band]), _mean([p for p in pts if p[1] >= hi - band])
+    rough, _n = _unit((b[0] - a[0], b[1] - a[1], b[2] - a[2]))
+    t = {v: sum((P[v][c] - a[c]) * rough[c] for c in range(3)) for v in piece}
+    mid = (min(t.values()) + max(t.values())) / 2
+    low_end, high_end = _mean([P[v] for v in piece if t[v] <= mid]), _mean([P[v] for v in piece if t[v] > mid])
+    axis, length = _unit((high_end[0] - low_end[0], high_end[1] - low_end[1], high_end[2] - low_end[2]))
+    m = Mount(k, j, tuple(sorted(piece)), low_end, axis, length, top, 0.0, embed)
+    return replace(m, t_top=m.t(top))
+
+
+_MOUNTS: dict[tuple[int, str], list[Mount]] = {}
+
+
+def mounts(md: Mdb, name: str) -> list[Mount]:
+    """The pieces of the donor leg `name` whose top is inside the donor body (over its underside there), measured once
+    per donor model."""
+    key = (id(md), name)
+    if key not in _MOUNTS:
+        _MOUNTS[key] = _measure_mounts(md, name)
+    return _MOUNTS[key]
+
+
+def _measure_mounts(md: Mdb, name: str) -> list[Mount]:
+    bone = g.bone_by_name(md, name)
+    BP, BT = model_tris(md, {g.bone_by_name(md, DONOR_BODY)})
+    out: list[Mount] = []
+    for k, o in enumerate(md.objects):
+        for j, me in enumerate(o.meshes):
+            if not me.flags[1]:
+                continue
+            owner = [int(i[0]) for i in g.skin_columns(me)[0]]
+            P = g.mesh_positions(me)
+            for piece in _pieces(P, [t for t in g.triangles(me) if owner[t[0]] == bone]):
+                top = max((P[v] for v in piece), key=lambda p: p[1])
+                skin = underside(BP, BT, top[0], top[2])
+                if skin is not None and top[1] >= skin:
+                    out.append(mount_of(k, j, P, piece, top[1] - skin))
+    _req(len(out) >= 1, f'{name}: no piece enters the donor body')
+    return out
+
+
+def mount_gap(m: Mount, s: float, off: Vec3, under: Callable[[float, float], float], rise: float) -> tuple[Vec3, float]:
+    """Mount `m` raised `rise` (donor metres, at its upper end) and placed p -> p * s + off: its top, and how far that
+    top is short of going m.embed x s into the jet over it (`under(x, z)`: the jet's underside)."""
+    top = (m.top[0] * s + off[0], (m.top[1] + m.t_top * rise) * s + off[1], m.top[2] * s + off[2])
+    return top, under(top[0], top[2]) + m.embed * s - top[1]
+
+
+def reach(m: Mount, s: float, off: Vec3, under: Callable[[float, float], float]) -> float:
+    """How far (donor metres, >= 0) mount `m` of a leg placed p -> p * s + off must rise at its upper end for its top to
+    go as deep into the jet as it went into its donor (its top only moves up: the underside over it stays)."""
+    _top, short = mount_gap(m, s, off, under, 0.0)
+    return max(0.0, short / (s * m.t_top))
+
+
+def _shear(m: Mount, rise: float, row: list[tuple[float, ...]], keys: list[str]) -> list[tuple[float, ...]]:
+    """One vertex of mount `m` raised `rise` (the section's doc): position p + t(p) D; tangents / binormals
+    x' = x + (x.axis / length) D; normals n' = n - axis (D.n) / (length + axis.D) (the inverse transpose); all three
+    renormalised."""
+    out = list(row)
+    for i, key in enumerate(keys):
+        kind = key.split(':')[0].lower()
+        x = list(row[i])
+        if kind == 'position':
+            x[1] += m.t((x[0], x[1], x[2])) * rise
+        elif kind in ('tangent', 'binormal', 'normal'):
+            if kind == 'normal':
+                k = rise * x[1] / (m.length + m.axis[1] * rise)
+                v = [x[c] - m.axis[c] * k for c in range(3)]
+            else:
+                v = [x[0], x[1] + rise * sum(x[c] * m.axis[c] for c in range(3)) / m.length, x[2]]
+            n = math.sqrt(sum(c * c for c in v)) or 1.0
+            x[0], x[1], x[2] = v[0] / n, v[1] / n, v[2] / n
+        out[i] = tuple(x)
+    return out
+
+
+def raised(md: Mdb, rises: list[tuple[Mount, float]]) -> Mdb:
+    """`md` with each mount raised its rise (`_shear`); the rest of it as it is."""
+    by_mesh: dict[tuple[int, int], list[tuple[Mount, float]]] = {}
+    for m, rise in rises:
+        if rise > 0.0:
+            by_mesh.setdefault((m.obj, m.mesh), []).append((m, rise))
+    if not by_mesh:
+        return md
+    objects = []
+    for k, o in enumerate(md.objects):
+        meshes = []
+        for j, me in enumerate(o.meshes):
+            if (k, j) in by_mesh:
+                keys, rows = vertex_table(me)
+                for m, rise in by_mesh[(k, j)]:
+                    for v in m.verts:
+                        rows[v] = _shear(m, rise, rows[v], keys)
+                me = replace(me, vdata=b''.join(pack_vertex(me.elems, me.vsize, r) for r in rows))
+            meshes.append(me)
+        objects.append(replace(o, meshes=meshes))
+    return replace(md, objects=objects)
+
+
+def mount_check(name: str, Q: list[Vec3], ms: list[Mount], rises: tuple[float, ...], s: float, off: Vec3,
+                under: Callable[[float, float], float]) -> None:
+    """The leg's grafted vertices `Q` hold every mount's raised top (the shear reached the mesh), and each goes into
+    the jet as deep as it went into its donor (to 5 mm x scale: the positions are half floats)."""
+    for m, rise in zip(ms, rises):
+        top, short = mount_gap(m, s, off, under, rise)
+        near = min(sum((q[c] - top[c]) ** 2 for c in range(3)) for q in Q) ** 0.5
+        _req(near < 5e-3 * max(s, 1.0), f'{name}: a mount top {top} not in the grafted mesh ({near:.4f} m off)')
+        _req(short < 5e-3 * max(s, 1.0), f'{name}: a mount ends {short:.3f} m short of going into the body over it')
+
+
 # ------------------------------------------------------------------------------------------ bones
 
 def frame(origin: Vec3, z_axis: Vec3) -> Mat:
@@ -240,6 +428,7 @@ class Placed:
     scale: float
     parts: tuple[tuple[int, Vec3], ...]   # (donor bone, offset): donor point p -> p * scale + offset
     bind: Mat                              # the new bone's bind (model space)
+    rises: tuple[tuple[float, ...], ...] = ()     # per part: how far each of its leg's mounts rises (reach)
 
 
 def body_bone(md: Mdb) -> int:
@@ -254,11 +443,15 @@ def plan(md: Mdb, spec: GearSpec, d: Donors) -> list[Placed]:
     P, T = model_tris(md)
     ground = min(p[1] for p in P) - spec.drop
     legs = {sign: leg_part(d.model, DONOR_LEG[sign]) for sign in (1.0, -1.0)}
+    tops = {sign: mounts(d.model, DONOR_LEG[sign]) for sign in (1.0, -1.0)}
 
     def at(x: float, z: float) -> float:
         y = underside(P, T, x, z)
         _req(y is not None, f'no underside at ({x}, {z})')
         return y  # type: ignore[return-value]
+
+    def rises(sign: float, s: float, off: Vec3) -> tuple[float, ...]:
+        return tuple(reach(m, s, off, at) for m in tops[sign])
 
     def placed(leg: Part, x: float, z: float, skin: float) -> tuple[float, Vec3]:
         """(scale, offset) putting `leg`'s strut top over (x, z), its skin line at `skin`, its wheel on the ground."""
@@ -269,18 +462,21 @@ def plan(md: Mdb, spec: GearSpec, d: Donors) -> list[Placed]:
     # the nose: both donor legs side by side, their skin line nose_inset over the underside at the centre line, one hinge
     skin = at(0.0, spec.nose_z) + spec.nose_inset
     parts = []
+    grow = []
     s = 1.0
     for sign, leg in legs.items():
         s, off = placed(leg, sign * spec.nose_track, spec.nose_z, skin)
         parts.append((leg.bone, off))
+        grow.append(rises(sign, s, off))
     top_y = legs[1.0].top[1] * s + parts[0][1][1]
-    out.append(Placed('gear_nose', s, tuple(parts), frame((0.0, top_y, spec.nose_z), (0.0, 0.0, -NOSE_FOLD))))
+    out.append(Placed('gear_nose', s, tuple(parts), frame((0.0, top_y, spec.nose_z), (0.0, 0.0, -NOSE_FOLD)), tuple(grow)))
     for side, sign in (('l', 1.0), ('r', -1.0)):
         leg = legs[sign]
         x = sign * spec.main_x
         s, off = placed(leg, x, spec.main_z, at(x, spec.main_z))
         top = (x, leg.top[1] * s + off[1], spec.main_z)
-        out.append(Placed(f'gear_main_{side}', s, ((leg.bone, off),), frame(top, (sign, 0.0, 0.0))))
+        out.append(Placed(f'gear_main_{side}', s, ((leg.bone, off),), frame(top, (sign, 0.0, 0.0)),
+                          (rises(sign, s, off),)))
     _req(tuple(p.name for p in out) == GEAR_BONES, 'gear order')
     return out
 
@@ -291,12 +487,21 @@ def add_gear(md: Mdb, spec: GearSpec, d: Donors) -> tuple[Mdb, list[str]]:
     _req(len(md.objects) == 1 and all(me.flags[1] for me in md.objects[0].meshes), 'not one skinned object')
     _req(all(md.bone_index(n) < 0 for n in GEAR_BONES), 'the model has gear already')
     places = plan(md, spec, d)
+    BP, BT = model_tris(md)
+
+    def under(x: float, z: float) -> float:
+        y = underside(BP, BT, x, z)
+        _req(y is not None, f'no underside at ({x}, {z})')
+        return y  # type: ignore[return-value]
     md, idx = insert_bones(md, body_bone(md), [(p.name, p.bind) for p in places])
     meshes: list[tuple[int, Mesh]] = []
     for p, i in zip(places, idx):
-        for part, off in p.parts:
-            got = g.extract_meshes(d.model, lambda _o, _m, _me: True, {part: i}, p.scale, off)
+        for (part, off), grow in zip(p.parts, p.rises):
+            sign = next(k for k, n in DONOR_LEG.items() if g.bone_by_name(d.model, n) == part)
+            ms = mounts(d.model, DONOR_LEG[sign])
+            got = g.extract_meshes(raised(d.model, list(zip(ms, grow))), lambda _o, _m, _me: True, {part: i}, p.scale, off)
             _req(bool(got), f'{p.name}: nothing taken from the donor')
+            mount_check(p.name, [q for _mat, me in got for q in g.mesh_positions(me)], ms, grow, p.scale, off, under)
             meshes += got
     used = sorted({m for m, _me in meshes})
     md, mat_map = g.merge_materials(md, d.model, used)
