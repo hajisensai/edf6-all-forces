@@ -183,14 +183,6 @@ Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept
     return *free;
 }
 
-}  // namespace
-
-void DetonateRound(unsigned char* b) noexcept {
-    Put<std::uint32_t>(b,kFlags,At<std::uint32_t>(b,kFlags)|kBlastOnExpiry);
-    Put<std::int32_t>(b,kAge,At<std::int32_t>(b,kLife));
-}
-
-namespace {
 void Detonate(unsigned char* b,const float* r) noexcept {
     Put<std::uint32_t>(b,kFlags,At<std::uint32_t>(b,kFlags)|kBlastOnExpiry);
     Put<std::int32_t>(b,kAge,At<std::int32_t>(b,kLife));

@@ -1,6 +1,6 @@
 // TV guidance for the Air Raider's Tempest cruise missiles (src/tvguide.cpp, docs/tvguide-re.md): the player's own
 // Tempest, once it is out, is flown from its nose; the camera rides it, the soldier stands still (the map's hold),
-// mouse / right stick steer it at its own stock turn, fire blasts it there, Esc / B hands it back to its laser.
+// mouse / right stick steer it at its own stock turn, fire boosts it (for good), Esc / B hands it back to its laser.
 #pragma once
 #include <cstdint>
 

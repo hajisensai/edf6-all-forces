@@ -3479,7 +3479,9 @@ def stock_guidance_wired() -> None:
     for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
                        ('tempestTv', 'TempestTv')):
         assert f'bool {field}=true;' in crew and re.search(rf'^{key}=1', vini, re.M) and key in readme, key
-    for key in ('StockMissileNav', 'TempestTvMouseSpeed'):
+    tvg = src('src/tvguide.cpp')
+    assert 'else if(in.fire && !tv.boost){tv.boost=true;' in tvg and 'DetonateRound' not in tvg, 'fire boosts, once'
+    for key in ('StockMissileNav', 'TempestTvMouseSpeed', 'TempestTvBoost'):
         assert re.search(rf'^{key}=', vini, re.M) and key in readme, key
     cm = src('CMakeLists.txt')
     for f in ('src/guidance.cpp', 'src/lockon.cpp', 'src/tvguide.cpp'):

@@ -161,8 +161,8 @@ TV 制导最省事的做法：在已有的 MissileBullet01 第 5 槽钩子（`sr
   没有交还过（交还的那一枚按「地址 + 年龄单调」记下，不再接管）。ini `TempestTv=1`。
 - 接管：`B+0x13B8` 写成 1000000（原版和 `src/guidance.cpp` 都不再转它）；每帧把自身速度 `+0x13D0` 朝玩家操纵的航向转，最多原版转角 CP5，保持速度大小；
   同时用 look-to 写机头前三行（type 2 的 A1 / A2 沿机头推力，而 update 只对 type 0 按速度重建姿态：`0x26AA8F..0x26AB25`）。
-- 输入（`src/map.cpp TvRead`）：游戏自己的鼠标位移（`MouseDelta`）× 0.003 rad × `TempestTvMouseSpeed`，右摇杆满偏 = 每帧原版转角；左键 / RT 引爆
-  （`DetonateRound`：core 标志 0x20、年龄 = 寿命）；Esc / B 交还（`B+0x13B8` 恢复 720，已过延迟，立即追激光点）；地图打开也交还。叫出导弹时按着的左键要先松开一次才算引爆。
+- 输入（`src/map.cpp TvRead`）：游戏自己的鼠标位移（`MouseDelta`）× 0.003 rad × `TempestTvMouseSpeed`，右摇杆满偏 = 每帧原版转角；左键 / RT 加速
+  （一次、不可取消：极速 CP6 `+0x13A8` × `TempestTvBoost`，加速度 CP4 `+0x13A0` 至少够 30 帧加满；原版 update 照常加速、钳到新极速）；Esc / B 交还（`B+0x13B8` 恢复 720，已过延迟，立即追激光点）；地图打开也交还。叫出导弹时按着的左键要先松开一次才算加速。
 - 冻结人物：地图的同一个 shim（`MapHumanFrame` 里 `Frame` 之后调 `TvFrame`）；结束时按着的键沿用「松开前一直保持」；`MapHoldsKeys` 同时看电视制导。
 - 镜头：地图的同一个第 4 槽钩子（`Camera()`：地图没开且电视制导有画面时用它的眼睛 = 导弹位置 + 机头 × 4 m、看向机头前 300 m），缓动进出与隐藏原版 HUD 同地图。
 - 没做：§6 的激光改道（让别人机器上的副本也追同一点）。

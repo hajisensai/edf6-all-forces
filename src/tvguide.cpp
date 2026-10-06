@@ -9,7 +9,11 @@
 //    heading the player steers at most its own stock turn a frame (CP[5], +0x13A4), its speed kept; the stock step
 //    then speeds it up, clamps it, builds its frame along it and moves it.
 //  - Handing it back (Esc / B, the map opened): its delay put back to 720 (it is past that: it homes on the laser at
-//    once, by guidance.cpp's PN); it is not taken again. Fire blasts it where it is (missile.cpp DetonateRound).
+//    once, by guidance.cpp's PN); it is not taken again.
+//  - Fire boosts it (the user, 2026-10-06: "left button speeds the missile up, and it cannot be taken back"): its
+//    own top speed (CP[6], +0x13A8) times TempestTvBoost, its acceleration (CP[4], +0x13A0) enough to reach that in
+//    kBoostFrames; once, for good (handed back it keeps it). Its turn a frame stays its own: faster, wider turns.
+//    It blasts when it meets something, as stock.
 //  - The view is the map's camera hook's (map.cpp Camera: one owner of the camera step), the soldier held by the map's
 //    hold (map.cpp MapHumanFrame); after the key that ended it the hold stays until it is let go.
 // Online each machine flies its own copy of the round (docs/guidance-re.md §6): the other players' copies home on the
@@ -26,6 +30,8 @@ namespace crew {
 namespace {
 constexpr std::size_t kVtable=0x17A1C10;
 constexpr std::size_t kDelay=0x13B8,kTurn=0x13A4,kOwn=0x13D0,kFlown=0x1400,kLock=0xB10,kEntryOwner=0x08;
+constexpr std::size_t kAccel=0x13A0,kTop=0x13A8;
+constexpr float kBoostFrames=30.0f;     // the boost reaches its top speed in about this many frames
 constexpr std::size_t kPos=0x90,kNose=0x80,kFlags=0xC34;
 constexpr std::uint32_t kTempestDelay=720,kNoStockHoming=1000000,kRoundDead=1;
 constexpr std::int32_t kTakeWithin=60;     // frames since launch: a Tempest older than this is not taken
@@ -44,6 +50,7 @@ struct Tv {
     std::int32_t age;          // its frames since launch, as last seen (a younger one at that address is another)
     ULONGLONG seen;            // the game frame it was last updated in
     bool active,armed,draining;
+    bool boost,boosted;        // fire asked for the boost; it is applied to the round (once, for good)
     float yaw,pitch;           // the steer asked since its last update (rad)
 };
 Tv tv{};
@@ -91,7 +98,19 @@ void Heading(const float* dir,float yaw,float pitch,float* out) noexcept {
     out[0]=std::cos(p)*std::sin(h);out[1]=std::sin(p);out[2]=std::cos(p)*std::cos(h);
 }
 
+// The boost, once: its top speed raised (TempestTvBoost times its own), its acceleration to reach it in kBoostFrames.
+void Boost(unsigned char* b) noexcept {
+    tv.boosted=true;
+    const float top=At<float>(b,kTop),accel=At<float>(b,kAccel);
+    if(!std::isfinite(top) || !(top>0.0f))return;
+    const float boosted=top*vec::Clamp(Cfg().tempestTvBoost,1.0f,10.0f);
+    Put<float>(b,kTop,boosted);
+    const float need=(boosted-top)/kBoostFrames;
+    if(!std::isfinite(accel) || accel<need)Put<float>(b,kAccel,need);
+}
+
 void Fly(unsigned char* b) noexcept {
+    if(tv.boost && !tv.boosted)Boost(b);
     float* own=reinterpret_cast<float*>(b+kOwn);
     const float speed=vec::Len(own);
     float dir[3]={own[0],own[1],own[2]};
@@ -129,7 +148,7 @@ bool TvSteer(unsigned char* b) noexcept {
         return true;
     }
     if(tv.active || tv.draining || !Cfg().enabled || !Cfg().tempestTv || !IsPlayersTempest(b,age))return false;
-    tv=Tv{b,PlayerHuman(),age,GameFrame(),true,false,false,0.0f,0.0f};
+    tv=Tv{b,PlayerHuman(),age,GameFrame(),true,false,false,false,false,0.0f,0.0f};
     holding.store(true);
     Put<std::uint32_t>(b,kDelay,kNoStockHoming);
     Log("TV take: the player's Tempest %p at %d frames",static_cast<void*>(b),age);
@@ -146,11 +165,7 @@ bool TvFrame(unsigned char* human,bool mapOpen,const TvInput& in) noexcept {
     if(GameFrame()-tv.seen>kStaleFrames){End("the round is gone");return false;}
     if(mapOpen){HandBack("the map opened");return false;}
     if(!tv.armed){tv.armed=!in.fire;}   // the button that called it may still be down: armed once it is let go
-    else if(in.fire && GameFrame()-tv.seen<=1) {
-        DetonateRound(tv.b);
-        tv.draining=true;End("fired: blast");
-        return true;
-    }
+    else if(in.fire && !tv.boost){tv.boost=true;Log("TV boost: round %p",static_cast<void*>(tv.b));}
     if(in.leave){tv.draining=true;HandBack("Esc / B");return true;}
     const float stock=GameFrame()-tv.seen<=1 ? At<float>(tv.b,kTurn) : 0.0f;   // read only while it is fresh
     const float turn=std::isfinite(stock) && stock>0.0f ? stock : 0.03f;
