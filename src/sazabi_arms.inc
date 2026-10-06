@@ -114,6 +114,7 @@ void SeeEnemies(const unsigned char* v,const float* from,Enemies* e) noexcept {
 }
 
 // ------------------------------------------------------------------------------------------ the arms each frame
+// One-shots wherever it is (the player's or an NPC's); its loops are the player's alone (sazabi_sound.h: one of each).
 void Sfx(const Mech& m,SzSfx which,const float* at) noexcept { if(m.driven)SazabiSfx(which,at); }
 
 void DropArms(Mech& m) noexcept {
@@ -162,7 +163,7 @@ void Tomahawk(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     a.swing+=dt/kSwingSec;
     float blade[3];
     BoneAt(m,sazabi::kAxeBlade,nullptr,blade);
-    if(m.driven)SazabiLoop(SzLoop::saberHum,blade,m.vel,1.0f);
+    if(m.driven && !m.npc)SazabiLoop(SzLoop::saberHum,blade,m.vel,1.0f);
     if(!a.whooshed && a.swing>=sazabi::kWindUp){a.whooshed=true;Sfx(m,SzSfx::whoosh,blade);}
     if(!a.struck && a.swing>=0.5f*(sazabi::kWindUp+sazabi::kStrike)){a.struck=true;Strike(m,v,blade);}
     if(a.swing<1.0f)return;
@@ -207,7 +208,7 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
         if(!a.glow.obj && EmcRoundReady(EmcRound::szCharge))a.glow=EmcFire(EmcRound::szCharge,v,from,tip,0.0f);
         RoundSteer(a.glow,from,tip);
         RoundSize(a.glow,kGlowThin+(kGlowThick-kGlowThin)*a.charge);
-        if(m.driven)SazabiLoop(SzLoop::cannonCharge,from,m.vel,a.charge);
+        if(m.driven && !m.npc)SazabiLoop(SzLoop::cannonCharge,from,m.vel,a.charge);
         a.brace=a.charge;
         return;
     }
@@ -340,7 +341,7 @@ void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
         ++n;
     }
     if(n)FlareFlames(v,at,vel,n,GameMs());
-    if(m.driven && thrust>0.05f) {
+    if(m.driven && !m.npc && thrust>0.05f) {
         float mid[3];
         for(int k=0;k<3;++k)mid[k]=0.5f*(at[0][k]+at[1][k]);
         SazabiLoop(SzLoop::thrusters,mid,m.vel,thrust);

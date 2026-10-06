@@ -767,7 +767,10 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 ## 沙扎比（MSN-04）
 
 空袭兵的载具请求「沙扎比（MSN-04）」（武器表的最后一行）叫来一台空着的沙扎比，站在信号弹处等你；按上车键坐进去由插件驾驶。
-插件不派 NPC 驾驶它，也不会把它当原版直升机来开。
+插件不会把它当原版直升机来开。你开过它、下车后，它和其它空着的友军载具一样，过 `CrewDelayMs` 由 NPC 接手（`AutoCrew`，
+`CrewRange` 内）：NPC 跟在你附近（远了就走或跑过来，你在高处时用推进器爬上去），面向最近的敌人，用光束步枪射击，
+敌人多时放出浮游炮，锁定后发射护盾飞弹，贴近时挥战斧；不用米加粒子炮（蓄力会让它停步、扇形光束容易扫到友军）。
+NPC 驾驶时的单次音效照常能听到，HUD 只在你自己驾驶时显示（`src/sazabi_pilot.inc`）。
 
 **外形**：用户提供的 Sketchfab 模型「P-Japran color ver」（原模型 kunnatee「SAZABI MSN-04 Gundam」，授权 CC BY-NC-SA 4.0：
 非商用、署名、衍生作品同协议）。模型和由它生成的文件不在本仓库里，安装器从模型目录（`models/sazabi`；开发者用

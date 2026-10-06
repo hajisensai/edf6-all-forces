@@ -70,7 +70,7 @@ constexpr ULONGLONG kTestBoardMs=6000;   // SazabiTestBoard: this long after it 
 struct Mech {
     ObjRef ref;
     unsigned char* vehicle=nullptr;
-    bool driven=false,active=false,insetSaved=false,havePrev=false,air=false,dashHeld=false,rigOk=false,rigSaid=false;
+    bool driven=false,npc=false,active=false,insetSaved=false,havePrev=false,air=false,dashHeld=false,rigOk=false,rigSaid=false;
     float savedInset=0.0f;
     ULONGLONG frame=0,lastMs=0,logAt=0;
     float prev[3]{},measured[3]{},vel[3]{},omega[3]{};
@@ -213,23 +213,24 @@ float FeetClear(const Mech& m) noexcept {
 }
 
 #include "sazabi_arms.inc"
+#include "sazabi_pilot.inc"
 
 // ------------------------------------------------------------------------------------------ driving
-void Board(Mech& m,unsigned char* v) noexcept {
-    m.driven=true;
+void Board(Mech& m,unsigned char* v,bool npc) noexcept {
+    m.driven=true;m.npc=npc;
     if(!m.insetSaved){m.savedInset=At<float>(v,kAreaInset);m.insetSaved=true;}
     const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
     m.heading=std::atan2(f[0],f[2]);
     m.aimPitch=0.0f;
     std::memcpy(m.vel,m.measured,12);
     m.air=m.feetClear==kNoGround || m.feetClear>kOffGround;
-    Log("SAZABI v=%p boarded: hp %.0f/%.0f, %s, %.1f m over the ground, thrusters %.0f%%",v,At<float>(v,kHp),At<float>(v,kHpMax),
-        m.air ? "in the air" : "on its feet",m.feetClear,m.thruster*100.0f);
+    Log("SAZABI v=%p boarded by %s: hp %.0f/%.0f, %s, %.1f m over the ground, thrusters %.0f%%",v,npc ? "an NPC" : "the player",
+        At<float>(v,kHp),At<float>(v,kHpMax),m.air ? "in the air" : "on its feet",m.feetClear,m.thruster*100.0f);
 }
 
 void Leave(Mech& m,unsigned char* v,bool alive,const char* how) noexcept {
     DropArms(m);
-    m.driven=false;m.active=false;m.dashLeft=0.0f;
+    m.driven=false;m.npc=false;m.active=false;m.dashLeft=0.0f;
     if(m.insetSaved && alive)Put<float>(v,kAreaInset,m.savedInset);
     m.insetSaved=false;
     Log("SAZABI v=%p left: %s",v,how);
@@ -342,19 +343,23 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dt=Measure(m,pos,ms);
     m.feetClear=FeetClear(m);
-    const bool driven=SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::player;
+    // who drives it: the player in seat 0, or an NPC crew.cpp seated (sazabi_pilot.inc); a change of driver boards anew
+    const Rider rider=SeatCount(v)>0 ? SeatRider(SeatAt(v,0)) : Rider::none;
+    const bool driven=rider==Rider::player || rider==Rider::dummy,npc=rider==Rider::dummy;
+    if(m.driven && (!driven || m.npc!=npc))Leave(m,v,true,m.npc ? "the NPC got out" : "got out");
     if(!driven) {
-        if(m.driven)Leave(m,v,true,"got out");
         RootFrame(m,v);
         Animate(m,dt,false);
         ArmsPose(m);
         Pose(m,v);
         return;
     }
-    if(!m.driven)Board(m,v);
+    if(!m.driven)Board(m,v,npc);
     RootFrame(m,v);
-    const Controls c=Read(SeatAt(v,0),dt);
-    const ArmsInput arms=TakeButtons(v,SeatAt(v,0));
+    Controls c{};
+    ArmsInput arms{};
+    if(npc){Pilot(m,v,dt,&c,&arms);v[kFireGun]=0;v[kFireMissile]=0;}   // the 506 fires nothing of its own
+    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));}
     m.yawRate=c.turn;
     m.heading+=c.turn*dt;
     if(m.heading>sazabi::kPi)m.heading-=2.0f*sazabi::kPi;
@@ -376,7 +381,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     const float thrust=m.dashLeft>0.0f ? 1.0f : m.air ? std::fmax(c.ascend,Clamp(Len(m.vel)/Cfg().sazabiFly,0.0f,1.0f)*0.6f) : 0.0f;
     ArmsFire(m,v,arms,thrust,dt);
     Footsteps(m);
-    PublishCue(m);
+    if(!npc)PublishCue(m);
     Report(m,v,c,ms);
 }
 // SazabiTestBoard (tests only): kTestBoardMs after the first Sazabi is seen, the player on foot is put into it once.

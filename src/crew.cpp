@@ -553,9 +553,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     if(anyPlayer){if(SeatRider(SeatAt(vehicle,0))==Rider::player)st.playerAt=now;st.emptySince=0;return;}
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
-    // The Sazabi waits for the player too (sazabi.cpp: no crew AI walks it).
-    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle) ||
-       IsSazabi(vehicle)){st.emptySince=0;return;}
+    if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){
+        st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
     // Every first-use parked vehicle belongs to the waiting player, not only helicopters/Proteus.
     // An existing mission NPC is untouched above; a player must have driven seat 0 before auto-crew is eligible.
@@ -579,7 +578,8 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     auto rideAi=reinterpret_cast<RideAiFn*>(At<void**>(vehicle,0))[kSlotRideAi];
     rideAi(vehicle,false);
     st.crewedAt=now;st.emptySince=0;st.ownTeam=team;
-    if(IsHelicopter(vehicle))HeliCrewed(vehicle);   // false (its table full): logged there, the heli sits
+    // false (its table full): logged there, the heli sits. The Sazabi is a 506 but its NPC walks it (sazabi_pilot.inc).
+    if(IsHelicopter(vehicle) && !IsSazabi(vehicle))HeliCrewed(vehicle);
     Log("CREW v=%p %s seats=%u driver=%d",vehicle,kClasses[cls].name,count,SeatRider(SeatAt(vehicle,0))==Rider::dummy);
 }
 
