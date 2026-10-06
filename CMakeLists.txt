@@ -73,6 +73,11 @@ target_link_libraries(turret_lead_check PRIVATE edf6common)
 target_compile_options(turret_lead_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(turret_lead_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The game clock through the pause menu (src/game_clock.h), offline (tools/pause_clock_check.cpp).
+# Not part of the plugin build: cmake --build build --target pause_clock_check && build\pause_clock_check.exe
+add_executable(pause_clock_check EXCLUDE_FROM_ALL tools/pause_clock_check.cpp)
+target_compile_options(pause_clock_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(pause_clock_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Nix's torso hold (src/nix_twist.h) against a stand-in of the stock update's order, offline (tools/nix_twist_check.cpp).
 # Not part of the plugin build: cmake --build build --target nix_twist_check && build\nix_twist_check.exe
 add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)
@@ -242,7 +247,7 @@ add_test(NAME call_pick COMMAND call_pick_test)
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check)
+    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check pause_clock_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})

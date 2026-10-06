@@ -660,6 +660,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     const bool ground=CheckGroundProfile();
     Log("HELI profile=%d",heli);
     Log("GROUND profile=%d",ground);
+    CheckPauseFlag();       // the game's pause flag (the game clock and the HUD stop with it): read only
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
