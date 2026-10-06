@@ -106,8 +106,8 @@ def range_writes_every_generated_sgo_its_script_creates() -> None:
                for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
     air = gen.Plan()
     air.air.enabled = True
-    for plan in (gen.grand_battle(gen.Plan()), air, gen.Plan()):
-        lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan.scenario))
+    for plan in (gen.grand_battle(gen.Plan()), gen.target_range(gen.Plan()), air, gen.Plan()):
+        lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
         named = set(re.findall(r'app:/object/(edf6tr_[a-z0-9_]+)\.sgo', gen.script(plan, lay)))
         missing = named - {x for x in gen.spawned(plan) if x in gen.DERIVED}
         assert not missing, f'{plan.scenario or ("air" if plan.air.enabled else "waves")}: never written {sorted(missing)}'
@@ -1176,7 +1176,7 @@ def range_parks_every_boardable_aircraft_apart() -> None:
     points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
     points += [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
                for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
-    lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan.scenario))
+    lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
     taken = [(lay.player, gen.SPOT)]
     for sgo, _npc, p in gen.spots_for(plan, lay):
         r = gen.footprint(sgo)
@@ -1200,11 +1200,124 @@ def grand_battle_fits_the_real_plain() -> None:
     import rmpa
     plan = gen.grand_battle(gen.Plan())
     points = rmpa.points(gen.Game(rootcpk.DEFAULT_GAME).read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA'))
-    reserve = gen.far_reserved(plan.scenario)
+    reserve = gen.far_reserved(plan)
     lay = gen.layout(points, gen.small_count(plan), reserve)
     assert len(gen.spots_for(plan, lay)) == len(gen.placements(plan))
     assert len(gen.grand_points(lay)) == len(gen.GRAND_SHIPS)
     gen.script(plan, gen.layout(points, gen.small_count(plan), reserve))
+
+
+def _range_grid() -> list:
+    """A map of its own (the selftest runs without the game): the player start and a point every 25 m out to 1 km."""
+    import rmpa
+    points = [rmpa.Point('プレイヤー', (0.0, 0.0, 0.0), (0.0, 0.0, 1.0))]
+    return points + [rmpa.Point(f'p{x}_{z}', (x * 25.0, 0.0, z * 25.0), (0.0, 0.0, 1.0))
+                     for x in range(-40, 41) for z in range(-40, 41) if (x, z) != (0, 0) and x * x + z * z <= 1600]
+
+
+def _range_checked(gen, plan, points: list) -> tuple[list, list]:  # noqa: ANN001 - the testrange module, a gen.Plan
+    """Lays `plan` out on `points` and checks it: every placement on a spot of its own, no footprint reaching
+    OVERLAP_SLACK into another's or the player's start, and (a range of targets) every target spot's group clear of them
+    all. Returns (placed, target spots)."""
+    lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
+    placed = gen.spots_for(plan, lay)
+    assert len(placed) == len(gen.placements(plan)) == len({p.name for _, _, p in placed}), 'a placement without a spot'
+    taken = [(lay.player, gen.SPOT)]
+    for sgo, _npc, p in placed:
+        r = gen.footprint(sgo)
+        assert gen.overlap(p, r, taken) == 0.0, f'{sgo} at {p.name} reaches {gen.overlap(p, r, taken):.1f} m into another'
+        taken.append((p, r))
+    targets = gen.target_spots(lay) if gen.target_ranged(plan) else []
+    for t in targets:
+        assert gen.overlap(t, gen.TARGET_SPREAD, taken) == 0.0, f'targets at {t.name} come out on a vehicle'
+    return placed, targets
+
+
+@test
+def installer_range_has_targets_and_no_enemy() -> None:
+    """The range the installer writes (testrange/gen.py target_range; the user, 2026-10-06: 「测试场的怪给我去掉吧，留下靶子。
+    然后载具再补充一下我们新加的」): the installer writes it (not the grand battle); its script makes targets and nothing
+    hostile (no ship, no thread, no other enemy, no Primer, no enemy jet); every vehicle we added or rework that the player
+    drives is placed empty; and on a map of its own every vehicle has room and no target group comes out on one."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert re.search(r'gen\.install\(game, gen\.target_range\(gen\.Plan\(\)\)\)', src('tools/installer.py')), \
+        'the installer writes another range'
+    plan = gen.target_range(gen.Plan())
+    assert gen.target_ranged(plan) and plan.scenario == '' and gen.far_reserved(plan) == gen.TARGET_SPOTS
+    placed, targets = _range_checked(gen, plan, _range_grid())
+    assert len(targets) >= gen.TARGET_SPOTS, f'{len(targets)} target spots'
+    text = gen.script(plan, gen.layout(_range_grid(), gen.small_count(plan), gen.far_reserved(plan)))
+    made = re.findall(r'(Create\w+)\(([^;]*)\);', text)
+    hostile = [(f, a) for f, a in made if f.startswith('CreateEnemy') and gen.TARGET + '.sgo' not in a]
+    assert not hostile, hostile
+    assert any(f == 'CreateEnemyGroup' for f, _ in made), 'no target in the script'
+    assert not re.search(r'internal_CreateThread\("Grand', text) and 'CreateFriendSquad' not in text
+    friends = {re.search(r'object/(\w+)\.sgo', a).group(1) for f, a in made if f == 'CreateFriend'}
+    assert friends == set(gen.RANGE_FRIENDS), f'NPC-placed {sorted(friends)}'
+    hostile_jets = {s for s, j in gen.JETS.items() if j.mark in (7020.0, 7030.0)} | {s for s, _, _ in gen.ENEMIES}
+    assert not {s for s, _ in gen.placements(plan)} & hostile_jets
+    # Ours, the player's to drive (README: the player's jets, every boardable kind parked, the ground vehicles our tools
+    # make, the helicopters the range makes placeable, the Depth Crawler, the tanks and the flak EDF6AutoTurret arms,
+    # and the stock vehicles the plugin reworks: EMC, Nix, Proteus).
+    ours = ({'edf6tr_pjet_fighter_mission', 'edf6tr_pjet_strike_mission'} | set(gen.BOARDABLE_PARKED) | set(gen.GROUND_MISSION)
+            | {'edf6tr_v506_heli_mission', 'edf6tr_vehicle409_heli_mission', 'edf6tr_vehicle410_heli_mission',
+               'edf6tr_v602_heli_mission', 'edf6tr_vehicle502_groundrobo_mission', 'vehicle403_tank_mission',
+               'vehicle404_bigtank', 'v603_flak_mission', 'v510_maser_mission', 'v612_nix_g_mission',
+               'v614_proteus_mk2_mission'})
+    empty = {s for s, npc, _ in placed if not npc}
+    assert ours <= empty, f'not placed for the player: {sorted(ours - empty)}'
+    assert ours <= {s for s, _ in gen.VEHICLES}
+
+
+@test
+def target_range_fits_the_real_plain() -> None:
+    """The installer's range laid out on the game's own M045 points (48, 36 of them flat vehicle spots): every
+    placement gets a spot of its own, no footprint reaches into another (the grand battle's 37 and the three reworked
+    ones overlapped by up to 6.2 m there), and the targets have their spots, clear of every vehicle."""
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import rmpa
+    plan = gen.target_range(gen.Plan())
+    points = rmpa.points(gen.Game(rootcpk.DEFAULT_GAME).read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA'))
+    _placed, targets = _range_checked(gen, plan, points)
+    assert len(targets) >= gen.TARGET_SPOTS, f'{len(targets)} target spots on the plain'
+    gen.script(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan)))
+
+
+@test
+def footprint_covers_the_stock_models() -> None:
+    """testrange/gen.py footprint for each stock-model vehicle the installer's range places: at least how far its model
+    reaches from its origin across the ground (the bind pose's vertices, Root.cpk), OVERLAP_SLACK aside (the EMC's
+    barrel reaches 21.0 m: as a SPOT, 7.5 m, it stood over its neighbours)."""
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import jet_models
+    import mdb
+    import sgo
+    game = gen.Game(rootcpk.DEFAULT_GAME)
+    seen = 0
+    for name in sorted({s for s, _ in gen.placements(gen.target_range(gen.Plan()))} - gen.JETS.keys()):
+        model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')
+        path, member = model[0][0], model[0][1]
+        folder, file = path.split('app:/')[1].rsplit('/', 1)
+        try:
+            archive = mdb.rab_read(game.read(folder.upper(), file.upper()))
+        except KeyError:   # a model our own tools make (the Katyusha's, ...): not in Root.cpk
+            continue
+        data = next(f for f in archive.files if f.name.lower() == member.lower()).data
+        with contextlib.suppress(Exception):
+            data = mdb.cmpl_decompress(data)
+        reach = max((x * x + z * z) ** 0.5 for x, _y, z in jet_models.bind_positions(mdb.mdb_read(data)))
+        assert gen.footprint(name) + gen.OVERLAP_SLACK >= reach, f'{name}: footprint {gen.footprint(name)}, model {reach:.1f} m'
+        seen += 1
+    assert seen >= 8, f'measured {seen} models'
 
 
 @test

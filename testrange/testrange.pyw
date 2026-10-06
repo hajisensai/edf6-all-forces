@@ -96,7 +96,9 @@ class App(tk.Tk):
         w = self.plan.waves
         box = ttk.LabelFrame(parent, text='敌人波次（离玩家 180–450 米刷出）')
         self.w_on = tk.BooleanVar(value=w.enabled)
-        ttk.Checkbutton(box, text='刷敌人', variable=self.w_on).grid(row=0, column=0, columnspan=2, sticky='w')
+        ttk.Checkbutton(box, text='刷敌人', variable=self.w_on).grid(row=0, column=0, sticky='w')
+        ttk.Button(box, text='靶场预设（安装器装的那一版：只有靶子，新加的载具各一台）', command=self.target_range).grid(
+            row=0, column=1, sticky='w', padx=6)
         labels = [e[1] for e in gen.ENEMIES]
         self.w_enemy = tk.StringVar(value=next((l for s, l, _ in gen.ENEMIES if s == w.enemy), labels[0]))
         ttk.Label(box, text='敌人种类').grid(row=1, column=0, sticky='w')
@@ -142,6 +144,19 @@ class App(tk.Tk):
         self.w_on.set(False)
         self.a_on.set(False)
         self.grand.set(True)
+
+    def target_range(self) -> None:
+        plan = gen.target_range(gen.Plan())
+        for s, var in self.counts.items():
+            var.set(plan.vehicles.get(s, 0))
+        for s, var in self.npc_counts.items():
+            var.set(plan.friends.get(s, 0))
+        self.w_on.set(True)
+        self.w_enemy.set(next(l for s, l, _ in gen.ENEMIES if s == plan.waves.enemy))
+        for k, var in self.w_vars.items():
+            var.set(getattr(plan.waves, k))
+        self.a_on.set(False)
+        self.grand.set(False)
 
     def air_battle(self) -> None:
         plan = gen.air_battle(gen.Plan())
