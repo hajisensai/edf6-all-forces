@@ -2625,6 +2625,8 @@ def pack_install_upgrade_uninstall() -> None:
             def mission(game: str, plan: object) -> list[str]:
                 out = gen.mission_dir(game, gen.SLOTS[0].mission)
                 modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
+                modfiles.atomic_write(os.path.join(out, 'MISSION.AC'), b'script')
+                modfiles.atomic_write(os.path.join(out, 'MISSION.RMPA'), b'points')
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
@@ -3565,6 +3567,12 @@ def soft_edge_wired() -> None:
     for key, default in (('AirSoftEdge', '600'), ('AirSoftTurns', '1'), ('AirSoftCeil', '150'), ('HeliSoftEdge', '150')):
         assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin, key
         assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
+
+@test
+def installer_recovery_regressions() -> None:
+    from test_installer_recovery import run_checks
+    run_checks()
+
 
 def main() -> int:
     import rootcpk
