@@ -40,6 +40,7 @@
 #include "heliaim.h"
 #include "hover_lift.h"
 #include "jetaudio.h"
+#include "jetsound_state.h"
 #include "layout.h"
 #include "memory.h"
 #include "playarea.h"
@@ -1775,6 +1776,18 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept {
 bool PlayerGunnerHud(GunnerReadout* out) noexcept {
     if(!gunner.ref || gunner.frame+1<GameFrame())return false;
     *out=gunner.hud;
+    return true;
+}
+
+bool jetsound::PlayerState(const unsigned char* v,jetsound::State* out) noexcept {
+    if(!flyOk || !Cfg().playerJet)return false;
+    const PJet* const j=Find(v);
+    if(!j || j->frame!=GameFrame())return false;
+    // A record can survive getting out; its old phase/throttle must not start an empty engine.
+    const bool controlled=j->driven || j->autopilot || j->hail.phase!=kHailNone || j->keep;
+    if(!controlled)return false;
+    *out={false,controlled,j->keep || j->phase==Phase::parked,
+          j->board && j->board->frame==pjet::Airframe::rotor,j->throttle,Len(j->vel)};
     return true;
 }
 
