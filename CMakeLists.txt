@@ -108,6 +108,15 @@ target_link_libraries(warn_check PRIVATE edf6common xaudio2 sapi ole32)
 target_compile_options(warn_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(warn_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The ground vehicles' sounds offline (tools/vsound_check.cpp): every clip src/vsynth.h makes written out as a WAV, their
+# levels and loops measured, src/vehmix.h's rules against cases, a tank's scenario mixed down (no sound played). Not part
+# of the plugin build: cmake --build build --target vsound_check && build\vsound_check.exe
+add_executable(vsound_check EXCLUDE_FROM_ALL tools/vsound_check.cpp)
+target_include_directories(vsound_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(vsound_check PRIVATE edf6common xaudio2 sapi ole32)
+target_compile_options(vsound_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(vsound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp against a stand-in image whose draw functions record;
 # tools/hud_view.py makes the PNGs): the warnings' layout to look at. Not part of the plugin build:
 # cmake --build build --target hud_view && build\hud_view.exe && python tools\hud_view.py %TEMP%\edf6_hud_view
