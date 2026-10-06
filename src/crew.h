@@ -589,6 +589,9 @@ bool IsSidecar(const void* vehicle) noexcept;
 void SidecarFrame(unsigned char* vehicle) noexcept;
 bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
+// Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
+bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
+bool SidecarBulletHooked() noexcept;
 void SidecarLevel(const void* body,float* w) noexcept;
 void ResetSidecars() noexcept;
 // physics.cpp: the car step's final setAngVel (0x6746C6) goes through the plugin (SidecarLevel), redirected at load.
