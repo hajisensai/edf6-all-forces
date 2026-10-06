@@ -63,7 +63,7 @@ constexpr float Root(float x) noexcept {
 }
 constexpr float Most(float a,float b) noexcept { return a>b ? a : b; }
 
-// A wing's Perf from its NPC flight row (see the file comment). `ram`: m, the reach of what it rams (its size).
+// A wing's Perf from its NPC flight row (see the file comment). `ram`: m, its ram's blast radius (half its size).
 constexpr Perf Wing(const char* name,float mark,const jet::Kind& n,float ram) noexcept {
     const float top=n.attack+kTopOver;
     const float maxG=n.maxG+(n.prefer==jet::Prefer::air ? 1.0f : 0.0f);
@@ -86,14 +86,15 @@ inline constexpr jet::Kind kStockBomber{jet::Role::strike,"bomber",jet::Prefer::
 constexpr const jet::Kind& Npc(jet::Role r) noexcept { return jet::KindOf(r); }
 constexpr float MarkOf(Body b) noexcept { return jet::Row(b).mark; }
 
-// `ram` from each model's size (pylib/vcobjects.py JETS): the bomber501 jets 25 m across, the interceptor 16 m, the
-// multirole 26 m, the carrier 59 x 77 m, the drones 5.7 m long, the bomber401 bodies (gunship, BOMBER401) ~40 m.
+// `ram`: the ram's blast radius, half each model's size (pylib/vcobjects.py JETS): the bomber501 jets 25 m across (12),
+// the interceptor 16 m (8), the multirole 26 m (13), the carrier 59 x 77 m (35), the drones 5.7 m long (3), the
+// bomber401 bodies (gunship, BOMBER401) ~40 m (20). jet_bay.cpp ImpactDamage takes the impact charge nearest it.
 inline constexpr Boardable kBoardable[]={
     {Body::strike,Airframe::wing,Arm::none,Wing("strike",MarkOf(Body::strike),Npc(jet::Role::strike),12.0f)},
     {Body::fighter,Airframe::wing,Arm::none,Wing("fighter",MarkOf(Body::fighter),Npc(jet::Role::fighter),12.0f)},
     {Body::bomber401,Airframe::wing,Arm::none,Wing("bomber401",MarkOf(Body::bomber401),kStockBomber,20.0f)},
     {Body::bomber501_2,Airframe::wing,Arm::none,Wing("bomber501_2",MarkOf(Body::bomber501_2),kStockBomber,12.0f)},
-    {Body::interceptor,Airframe::wing,Arm::none,Wing("interceptor",MarkOf(Body::interceptor),Npc(jet::Role::interceptor),10.0f)},
+    {Body::interceptor,Airframe::wing,Arm::none,Wing("interceptor",MarkOf(Body::interceptor),Npc(jet::Role::interceptor),8.0f)},
     {Body::multirole,Airframe::wing,Arm::none,Wing("multirole",MarkOf(Body::multirole),Npc(jet::Role::multirole),13.0f)},
     {Body::carrier,Airframe::rotor,Arm::drones,Rotor("carrier",MarkOf(Body::carrier),Npc(jet::Role::carrier),35.0f)},
     {Body::blastCarrier,Airframe::rotor,Arm::drones,Rotor("blastCarrier",MarkOf(Body::blastCarrier),Npc(jet::Role::carrier),35.0f)},

@@ -122,9 +122,10 @@ using namespace jet;
 
 // The 506 physics step (body506.cpp), after the stock one: the jet's velocity and spin replace the heli's.
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
+    if(v[kDead]){PrimerCorpseStep(v);return false;}   // a shot-down centipede's body curls as it falls
     const ULONGLONG ms=GameMs();
     Jet* j=FindJet(v);
-    if(!j || !j->m.ready || v[kDead] || ms-j->seen>200)return false;
+    if(!j || !j->m.ready || ms-j->seen>200)return false;
     const auto body=At<void*>(v,kBody);
     if(!body)return false;
     JetMotionProps(body);

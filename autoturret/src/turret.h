@@ -13,6 +13,7 @@
 #include "edf/patch.h"
 #include "edf/seat.h"
 #include "edf/weapon.h"
+#include "edf/aimlink.h"
 
 namespace autoturret {
 using edf::At;
@@ -58,6 +59,15 @@ struct Config {
     float gunnerMinDistance=15.0f;  // metres from the muzzle; the AI holds fire on anything closer
     float gunnerYawSign=1.0f;  // side-gun axis angle change per radian of geometric turn
     float gunnerPitchSign=-1.0f;
+    // The player's turret (designate.cpp): the mode it starts in (0 auto-aim, 1 lead circle) and the bindings that flip
+    // it and lock the target nearest the view (virtual-key codes, pad button bits; 0 = none), the lock's cone (deg off
+    // the view) and range (m, 0 = the gun's), how long a held lock binding takes to let the lock go.
+    int aimMode=0;
+    int modeKey=0x5A,modeButton=0;      // Z; no pad button (L3 is EDF6VehicleCrew's FreeLookButton in the same seats)
+    int lockKey=0x51,lockButton=0x04;   // Q, X (the jets' next-target bindings)
+    float lockCone=20.0f;
+    float lockRange=0.0f;
+    DWORD lockClearMs=600;
 };
 extern Config cfg;
 
@@ -156,6 +166,7 @@ struct Track {
     float in[2];           // last input written
     float k[2];            // learned rad per frame per unit input
     bool player;           // a player aims with it: never given up for an NPC's seat (TrackFor)
+    ULONGLONG steered;     // the game frame (Frame) this plugin last wrote the seat's turn input (aimlink Steers)
     bool dragging;         // the rider is aiming by hand
     const void* dropped;   // target dragged away from
     ULONGLONG droppedUntil;
@@ -198,8 +209,43 @@ void Log(const char* format,...) noexcept;
 bool Finite(const unsigned char* base,std::size_t offset,float* out) noexcept;
 float Down(const unsigned char* vehicle) noexcept;
 bool Ballistic(const float* local,const Shot& shot,float& elevation,float& time) noexcept;
-float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,float gain) noexcept;
+// `hull`: the part of the want's change and of the axis' motion since the last frame that is EDF6VehicleCrew's gun
+// stabilizer's (Stabilized below), taken out of both (0 for a gun it does not hold).
+float AxisInput(Track& track,int a,float want,float angle,float error,bool wrap,float gain,float hull) noexcept;
 void ReloadConfigIfChanged() noexcept;
+
+// --- The player's turret (designate.cpp) ---
+// The world's lock points this frame (taken on first use in a frame, as ScanEnemies takes them), and their count.
+const Enemy* World(int* count) noexcept;
+// The object at `obj` is still the one whose weak-this control block was `ctrl`, and alive (plugin.cpp).
+bool Same(const void* obj,const void* ctrl) noexcept;
+// The seat's own gun: the weapon in its first holder (the one its aim turns), or nullptr.
+const unsigned char* SeatGun(const unsigned char* seat) noexcept;
+// Once a frame for the seat this machine's player is at, in a vehicle whose aim this plugin runs: its bindings (the
+// mode, the lock) and its lock kept up. `muzzle` / `bore`: the seat's gun (null: none read; the lock then looks along
+// the camera, else the vehicle's nose), `range` the lock range when the ini gives none (the gun's, m).
+void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned char* seat,const float* muzzle,const float* bore,float range) noexcept;
+// The player's lock in `vehicle` (the object; `world` its first lock point), or nullptr: none, or the player is elsewhere.
+const void* Designated(const unsigned char* vehicle,float* world) noexcept;
+// The lead-circle mode: the player's own turret is not steered, the HUD shows where to aim.
+bool LeadCircle() noexcept;
+// EDF6VehicleCrew's turret camera turns `vehicle`'s seat `seat` after the player's view (common/edf/aimlink.h
+// CameraTurret); false without that plugin (or an older one): the player's gun is this plugin's as in V1.
+bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
+// EDF6VehicleCrew's gun stabilizer holds `vehicle`'s seat `seat` (common/edf/aimlink.h V3): `held` the axes it holds the
+// gun at this frame with no input (steer from these), `hull` the hull's part of that since the last frame (AxisInput's).
+// False (the plugin absent, older, or the seat not held): `held` = `axes` (the axes as they are), `hull` 0.
+bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,float* held,float* hull) noexcept;
+
+// EDF6VehicleCrew's priority zone (common/edf/aimlink.h PriorityZoneV1: its Proteus's front shield up), asked once a game
+// frame: the weight of an enemy (`e`: its first lock point and its object, whose own target +0x518 is compared, never read
+// through) in a turret's choice of a new target: its distance times this. 1: no zone (or no EDF6VehicleCrew, or an older one).
+float PriorityWeight(const Enemy& e) noexcept;
+// The readout for EDF6VehicleCrew's HUD (common/edf/aimlink.h), from the player's seat this frame: `ownGun` the seat's
+// gun is the plugin's; `target` what the gun works on (null: nothing) at `world`, led from `muzzle` along `bore` with
+// `shot` against the target's velocity `vel` (m/frame); `life` the round's frames (0: unknown).
+void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const float* muzzle,const float* bore,
+                const Shot* shot,const float* vel,float life) noexcept;
 
 // gunner.cpp: hooks the Titan's and the gunner-seat tanks' input and weapon-user slots; the number of
 // slots it patched (0: it left them stock).

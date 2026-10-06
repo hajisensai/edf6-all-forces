@@ -121,6 +121,7 @@ void Validate(Config& n) noexcept {
     Fix("VehicleHudRange",n.vehicleHudRange,0.0f,10000.0f);
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
+    Fix("VehicleRamDamage",n.vehicleRamDamage,0.0f,100.0f);
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
     n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
@@ -136,6 +137,13 @@ void Validate(Config& n) noexcept {
     if(n.bigWorld!=0.0f)Fix("BigWorld",n.bigWorld,3000.0f,20000.0f);
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
+    Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
+    Fix("VehicleEngineVolume",n.vehicleEngineVolume,0.0f,4.0f);
+    Fix("VehicleTurretVolume",n.vehicleTurretVolume,0.0f,4.0f);
+    Fix("VehicleReloadVolume",n.vehicleReloadVolume,0.0f,4.0f);
+    Fix("VehicleGunVolume",n.vehicleGunVolume,0.0f,4.0f);
+    Fix("VehicleMgVolume",n.vehicleMgVolume,0.0f,4.0f);
+    Fix("VehicleMissileVolume",n.vehicleMissileVolume,0.0f,4.0f);
     Fix("DrillMaxRpm",n.drillMaxRpm,30.0f,1200.0f);
     Fix("DrillSpinUpSec",n.drillSpinUpSec,0.2f,10.0f);
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
@@ -144,24 +152,90 @@ void Validate(Config& n) noexcept {
     Fix("DrillHeatSec",n.drillHeatSec,1.0f,600.0f);
     Fix("DrillCoolSec",n.drillCoolSec,1.0f,600.0f);
     Fix("DrillResumeHeat",n.drillResumeHeat,0.0f,0.95f);
+    Fix("EmcChargeSec",n.emcChargeSec,0.5f,10.0f);
+    Fix("EmcBeamSec",n.emcBeamSec,0.5f,5.0f);
+    Fix("EmcBlastRadius",n.emcBlastRadius,10.0f,1000.0f);
+    Fix("EmcBlastShare",n.emcBlastShare,0.0f,10.0f);
+    Fix("EmcBreak",n.emcBreak,0.0f,1.0e7f);
+    Fix("SidecarNpcRange",n.sidecarNpcRange,0.0f,200.0f);
     n.highCamKey=static_cast<int>(FixInt("HighCamKey",n.highCamKey,0,254));
     n.highCamButton=static_cast<int>(FixInt("HighCamButton",n.highCamButton,0,255));
     Fix("HighCamHeight",n.highCamHeight,10.0f,200.0f);
     Fix("HighCamBack",n.highCamBack,0.0f,200.0f);
     Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
+    n.seatNextKey=static_cast<int>(FixInt("SeatNextKey",n.seatNextKey,0,254));
+    n.seatButton=static_cast<int>(FixInt("SeatButton",n.seatButton,0,255));
+    n.highCamClass=static_cast<int>(FixInt("HighCamClass",n.highCamClass,1,3));
+    Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
+    n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
+    n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
+    n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
+    n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
+    if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
+    n.proteusModeKey=static_cast<int>(FixInt("ProteusModeKey",n.proteusModeKey,0,254));
+    n.proteusModeButton=static_cast<int>(FixInt("ProteusModeButton",n.proteusModeButton,0,255));
+    n.proteusShieldKey=static_cast<int>(FixInt("ProteusShieldKey",n.proteusShieldKey,0,254));
+    n.proteusShieldButton=static_cast<int>(FixInt("ProteusShieldButton",n.proteusShieldButton,0,255));
+    n.proteusMarkKey=static_cast<int>(FixInt("ProteusMarkKey",n.proteusMarkKey,0,254));
+    n.proteusMarkButton=static_cast<int>(FixInt("ProteusMarkButton",n.proteusMarkButton,0,255));
+    n.proteusSalvoKey=static_cast<int>(FixInt("ProteusSalvoKey",n.proteusSalvoKey,0,254));
+    Fix("ProteusWalkSpeed",n.proteusWalkSpeed,0.2f,4.0f);
+    Fix("ProteusWalkTurn",n.proteusWalkTurn,0.2f,4.0f);
+    Fix("ProteusStepHeight",n.proteusStepHeight,0.0f,4.0f);   // 4 m: the walkable test's floor (StepNormal 0.2 on the 5 m foot)
+    Fix("ProteusShieldSlow",n.proteusShieldSlow,0.0f,1.0f);
+    Fix("ProteusShieldArc",n.proteusShieldArc,10.0f,360.0f);
+    Fix("ProteusShieldBlock",n.proteusShieldBlock,0.0f,1.0f);
+    Fix("ProteusWalkGunRate",n.proteusWalkGunRate,0.1f,5.0f);
+    Fix("ProteusWalkGunSpread",n.proteusWalkGunSpread,0.0f,10.0f);
+    Fix("ProteusDeploySec",n.proteusDeploySec,0.0f,10.0f);
+    Fix("ProteusStowSec",n.proteusStowSec,0.0f,10.0f);
+    Fix("ProteusDeployTurn",n.proteusDeployTurn,0.0f,2.0f);
+    Fix("ProteusDeployGunRate",n.proteusDeployGunRate,0.1f,5.0f);
+    Fix("ProteusDeployGunSpread",n.proteusDeployGunSpread,0.0f,10.0f);
+    Fix("ProteusViewLift",n.proteusViewLift,0.0f,60.0f);
+    Fix("ProteusHeatSec",n.proteusHeatSec,1.0f,600.0f);
+    Fix("ProteusCoolSec",n.proteusCoolSec,1.0f,600.0f);
+    Fix("ProteusResumeHeat",n.proteusResumeHeat,0.0f,0.95f);
+    Fix("ProteusBarrier",n.proteusBarrier,0.0f,5.0f);
+    Fix("ProteusBarrierRegenSec",n.proteusBarrierRegenSec,1.0f,3600.0f);
+    Fix("ProteusBarrierDelaySec",n.proteusBarrierDelaySec,0.0f,600.0f);
+    Fix("ProteusFieldRadius",n.proteusFieldRadius,0.0f,500.0f);
+    Fix("ProteusFieldDefense",n.proteusFieldDefense,0.0f,0.95f);
+    Fix("ProteusFieldAttack",n.proteusFieldAttack,0.0f,5.0f);
+    Fix("ProteusFieldFireRate",n.proteusFieldFireRate,1.0f,5.0f);
+    Fix("ProteusFieldEnergy",n.proteusFieldEnergy,0.0f,1.0f);
+    Fix("ProteusFieldPower",n.proteusFieldPower,0.0f,10000.0f);
+    Fix("ProteusGunRate",n.proteusGunRate,0.0f,20.0f);
+    Fix("ProteusGunDamage",n.proteusGunDamage,0.0f,1.0e6f);
+    n.proteusSalvoCount=static_cast<int>(FixInt("ProteusSalvoCount",n.proteusSalvoCount,1,60));
+    Fix("ProteusSalvoDamage",n.proteusSalvoDamage,0.0f,1.0e6f);
+    Fix("ProteusSalvoCooldownSec",n.proteusSalvoCooldownSec,0.0f,3600.0f);
+    Fix("ProteusSalvoRange",n.proteusSalvoRange,100.0f,1800.0f);   // the gunship shell's reach (jet_bay.cpp kGunshipReach)
+    Fix("ProteusPriority",n.proteusPriority,0.05f,1.0f);
+    Fix("ProteusPriorityRadius",n.proteusPriorityRadius,0.0f,1000.0f);
+    Fix("PrimerHpScale",n.primerHpScale,0.05f,100.0f);
+    n.centipedeLinkMax=static_cast<int>(FixInt("CentipedeLinkMax",n.centipedeLinkMax,2,48));
+    Fix("CentipedeLinkRange",n.centipedeLinkRange,10.0f,2000.0f);
+    Fix("CentipedeWoundDamage",n.centipedeWoundDamage,1.0f,20.0f);
+    Fix("PrimerBlood",n.primerBlood,0.0f,5.0f);
 }
 
-// The flight controller's gains became constants (heli.cpp): an old ini that still sets them loads as before,
-// the keys ignored (said once).
+constexpr const char* kGainsFixed="the flight controller's gains are fixed";
+// Keys no longer read: an old ini that still sets them loads as before, the keys ignored (said once). The flight
+// controller's gains became constants (heli.cpp); the heli's mouse lever (HeliMousePitch) became the mouse-aim flight
+// (HeliMouseAim, heliaim.h).
 void IgnoreRetired() noexcept {
-    static const wchar_t* const kRetired[]={L"HeliMoveGain",L"HeliBrakeGain",L"HeliClimbGain",L"HeliHoverLearn"};
-    static bool said[4]{};
-    for(int i=0;i<4;++i) {
+    struct Retired { const wchar_t* key; const char* why; };
+    static const Retired kRetired[]={{L"HeliMoveGain",kGainsFixed},{L"HeliBrakeGain",kGainsFixed},{L"HeliClimbGain",kGainsFixed},
+                                     {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"}};
+    constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
+    static bool said[kCount]{};
+    for(int i=0;i<kCount;++i) {
         wchar_t text[8]{};
-        GetPrivateProfileStringW(L"VehicleCrew",kRetired[i],L"",text,8,iniPath);
+        GetPrivateProfileStringW(L"VehicleCrew",kRetired[i].key,L"",text,8,iniPath);
         if(!text[0] || said[i])continue;
         said[i]=true;
-        Log("CONFIG %ls is no longer read (the flight controller's gains are fixed): ignored",kRetired[i]);
+        Log("CONFIG %ls is no longer read (%s): ignored",kRetired[i].key,kRetired[i].why);
     }
 }
 
@@ -190,6 +264,8 @@ void LoadConfig() noexcept {
     n.heliAgility=ReadFloat(L"HeliAgility",n.heliAgility);
     n.playerHeliStopSec=ReadFloat(L"PlayerHeliStopSec",n.playerHeliStopSec);
     n.playerHeliGunSight=ReadBool(L"PlayerHeliGunSight",n.playerHeliGunSight);
+    n.stockVehicleHud=ReadBool(L"StockVehicleHud",n.stockVehicleHud);
+    n.hideStockGauges=ReadBool(L"HideStockGauges",n.hideStockGauges);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
     n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
@@ -199,6 +275,7 @@ void LoadConfig() noexcept {
     n.jetSortieSec=FixInt("JetSortieSec",ReadInt(L"JetSortieSec",n.jetSortieSec),0,3600);
     n.jetAirRaider=ReadBool(L"JetAirRaider",n.jetAirRaider);
     n.jetMissionStrike=ReadBool(L"JetMissionStrike",n.jetMissionStrike);
+    n.throwDrones=ReadBool(L"ThrowDrones",n.throwDrones);
     n.groundPilot=ReadBool(L"GroundPilot",n.groundPilot);
     n.groundFollow=ReadFloat(L"GroundFollow",n.groundFollow);
     n.groundRange=ReadFloat(L"GroundRange",n.groundRange);
@@ -209,6 +286,7 @@ void LoadConfig() noexcept {
     n.seaRescue=ReadBool(L"SeaRescue",n.seaRescue);
     n.rescueBelow=ReadFloat(L"RescueBelow",n.rescueBelow);
     n.rescueAutoBoard=ReadBool(L"RescueAutoBoard",n.rescueAutoBoard);
+    n.boardingGun=ReadBool(L"BoardingGun",n.boardingGun);
     n.subHullHp=ReadFloat(L"SubHullHp",n.subHullHp);
     n.subHeavyHit=ReadFloat(L"SubHeavyHit",n.subHeavyHit);
     n.carrierLaser=ReadBool(L"CarrierLaser",n.carrierLaser);
@@ -238,12 +316,29 @@ void LoadConfig() noexcept {
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
     n.playerJetMouseFlight=ReadBool(L"PlayerJetMouseFlight",n.playerJetMouseFlight);
+    n.heliMouseAim=ReadBool(L"HeliMouseAim",n.heliMouseAim);
+    n.heliFlightHud=ReadBool(L"HeliFlightHud",n.heliFlightHud);
+    n.jetEntrySmoke=ReadBool(L"JetEntrySmoke",n.jetEntrySmoke);
     n.playerJetGunSight=ReadBool(L"PlayerJetGunSight",n.playerJetGunSight);
     n.playerJetFlightHud=ReadBool(L"PlayerJetFlightHud",n.playerJetFlightHud);
     n.playerJetThreatHud=ReadBool(L"PlayerJetThreatHud",n.playerJetThreatHud);
+    n.playerJetLockByView=ReadBool(L"PlayerJetLockByView",n.playerJetLockByView);
+    n.turretAimHud=ReadBool(L"TurretAimHud",n.turretAimHud);
     n.jetSound=ReadBool(L"JetSound",n.jetSound);
     n.jetSoundVolume=ReadFloat(L"JetSoundVolume",n.jetSoundVolume);
+    n.warnAudio=ReadBool(L"WarnAudio",n.warnAudio);
+    n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
+    n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
+    n.vehicleSound=ReadBool(L"VehicleSound",n.vehicleSound);
+    n.vehicleEngineVolume=ReadFloat(L"VehicleEngineVolume",n.vehicleEngineVolume);
+    n.vehicleTurretVolume=ReadFloat(L"VehicleTurretVolume",n.vehicleTurretVolume);
+    n.vehicleReloadVolume=ReadFloat(L"VehicleReloadVolume",n.vehicleReloadVolume);
+    n.vehicleGunVolume=ReadFloat(L"VehicleGunVolume",n.vehicleGunVolume);
+    n.vehicleMgVolume=ReadFloat(L"VehicleMgVolume",n.vehicleMgVolume);
+    n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.vehicleRam=ReadBool(L"VehicleRam",n.vehicleRam);
+    n.vehicleRamDamage=ReadFloat(L"VehicleRamDamage",n.vehicleRamDamage);
     n.drill=ReadBool(L"Drill",n.drill);
     n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
     n.drillSpinUpSec=ReadFloat(L"DrillSpinUpSec",n.drillSpinUpSec);
@@ -253,13 +348,92 @@ void LoadConfig() noexcept {
     n.drillHeatSec=ReadFloat(L"DrillHeatSec",n.drillHeatSec);
     n.drillCoolSec=ReadFloat(L"DrillCoolSec",n.drillCoolSec);
     n.drillResumeHeat=ReadFloat(L"DrillResumeHeat",n.drillResumeHeat);
+    n.emcBeam=ReadBool(L"EmcBeam",n.emcBeam);
+    n.emcChargeSec=ReadFloat(L"EmcChargeSec",n.emcChargeSec);
+    n.emcBeamSec=ReadFloat(L"EmcBeamSec",n.emcBeamSec);
+    n.emcBlastRadius=ReadFloat(L"EmcBlastRadius",n.emcBlastRadius);
+    n.emcBlastShare=ReadFloat(L"EmcBlastShare",n.emcBlastShare);
+    n.emcBreak=ReadFloat(L"EmcBreak",n.emcBreak);
+    n.sidecar=ReadBool(L"Sidecar",n.sidecar);
+    n.sidecarNpcGunner=ReadBool(L"SidecarNpcGunner",n.sidecarNpcGunner);
+    n.sidecarNpcRange=ReadFloat(L"SidecarNpcRange",n.sidecarNpcRange);
     n.highCam=ReadBool(L"HighCam",n.highCam);
     n.highCamKey=ReadInt(L"HighCamKey",static_cast<DWORD>(n.highCamKey));
     n.highCamButton=ReadInt(L"HighCamButton",static_cast<DWORD>(n.highCamButton));
     n.highCamHeight=ReadFloat(L"HighCamHeight",n.highCamHeight);
     n.highCamBack=ReadFloat(L"HighCamBack",n.highCamBack);
     n.highCamPitch=ReadFloat(L"HighCamPitch",n.highCamPitch);
+    n.nixTorsoTwist=ReadBool(L"NixTorsoTwist",n.nixTorsoTwist);
+    n.highCamClass=ReadInt(L"HighCamClass",static_cast<DWORD>(n.highCamClass));
+    n.decoupledTurretCam=ReadBool(L"DecoupledTurretCam",n.decoupledTurretCam);
+    n.turretCamRate=ReadFloat(L"TurretCamRate",n.turretCamRate);
+    n.freeLookKey=ReadInt(L"FreeLookKey",static_cast<DWORD>(n.freeLookKey));
+    n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
+    n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
+    n.map=ReadBool(L"Map",n.map);
+    n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
+    n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
+    n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
+    n.stockHeliStores=ReadBool(L"StockHeliStores",n.stockHeliStores);
+    n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
+    n.seatNextKey=ReadInt(L"SeatNextKey",static_cast<DWORD>(n.seatNextKey));
+    n.seatNumberKeys=ReadBool(L"SeatNumberKeys",n.seatNumberKeys);
+    n.seatButton=ReadInt(L"SeatButton",static_cast<DWORD>(n.seatButton));
+    n.seatPilot=ReadBool(L"SeatPilot",n.seatPilot);
+    n.seatSwitchOnline=ReadBool(L"SeatSwitchOnline",n.seatSwitchOnline);
+    n.proteus=ReadBool(L"ProteusRework",n.proteus);
+    n.proteusModeKey=ReadInt(L"ProteusModeKey",static_cast<DWORD>(n.proteusModeKey));
+    n.proteusModeButton=ReadInt(L"ProteusModeButton",static_cast<DWORD>(n.proteusModeButton));
+    n.proteusShieldKey=ReadInt(L"ProteusShieldKey",static_cast<DWORD>(n.proteusShieldKey));
+    n.proteusShieldButton=ReadInt(L"ProteusShieldButton",static_cast<DWORD>(n.proteusShieldButton));
+    n.proteusMarkKey=ReadInt(L"ProteusMarkKey",static_cast<DWORD>(n.proteusMarkKey));
+    n.proteusMarkButton=ReadInt(L"ProteusMarkButton",static_cast<DWORD>(n.proteusMarkButton));
+    n.proteusSalvoKey=ReadInt(L"ProteusSalvoKey",static_cast<DWORD>(n.proteusSalvoKey));
+    n.proteusTwoSeats=ReadBool(L"ProteusTwoSeats",n.proteusTwoSeats);
+    n.proteusWalkSpeed=ReadFloat(L"ProteusWalkSpeed",n.proteusWalkSpeed);
+    n.proteusWalkTurn=ReadFloat(L"ProteusWalkTurn",n.proteusWalkTurn);
+    n.proteusStepHeight=ReadFloat(L"ProteusStepHeight",n.proteusStepHeight);
+    n.proteusShieldSlow=ReadFloat(L"ProteusShieldSlow",n.proteusShieldSlow);
+    n.proteusShieldArc=ReadFloat(L"ProteusShieldArc",n.proteusShieldArc);
+    n.proteusShieldBlock=ReadFloat(L"ProteusShieldBlock",n.proteusShieldBlock);
+    n.proteusWalkGunRate=ReadFloat(L"ProteusWalkGunRate",n.proteusWalkGunRate);
+    n.proteusWalkGunSpread=ReadFloat(L"ProteusWalkGunSpread",n.proteusWalkGunSpread);
+    n.proteusDeploySec=ReadFloat(L"ProteusDeploySec",n.proteusDeploySec);
+    n.proteusStowSec=ReadFloat(L"ProteusStowSec",n.proteusStowSec);
+    n.proteusDeployTurn=ReadFloat(L"ProteusDeployTurn",n.proteusDeployTurn);
+    n.proteusDeployGunRate=ReadFloat(L"ProteusDeployGunRate",n.proteusDeployGunRate);
+    n.proteusDeployGunSpread=ReadFloat(L"ProteusDeployGunSpread",n.proteusDeployGunSpread);
+    n.proteusViewLift=ReadFloat(L"ProteusViewLift",n.proteusViewLift);
+    n.proteusHeatSec=ReadFloat(L"ProteusHeatSec",n.proteusHeatSec);
+    n.proteusCoolSec=ReadFloat(L"ProteusCoolSec",n.proteusCoolSec);
+    n.proteusResumeHeat=ReadFloat(L"ProteusResumeHeat",n.proteusResumeHeat);
+    n.proteusBarrier=ReadFloat(L"ProteusBarrier",n.proteusBarrier);
+    n.proteusBarrierRegenSec=ReadFloat(L"ProteusBarrierRegenSec",n.proteusBarrierRegenSec);
+    n.proteusBarrierDelaySec=ReadFloat(L"ProteusBarrierDelaySec",n.proteusBarrierDelaySec);
+    n.proteusFieldRadius=ReadFloat(L"ProteusFieldRadius",n.proteusFieldRadius);
+    n.proteusFieldDefense=ReadFloat(L"ProteusFieldDefense",n.proteusFieldDefense);
+    n.proteusFieldAttack=ReadFloat(L"ProteusFieldAttack",n.proteusFieldAttack);
+    n.proteusFieldFireRate=ReadFloat(L"ProteusFieldFireRate",n.proteusFieldFireRate);
+    n.proteusFieldEnergy=ReadFloat(L"ProteusFieldEnergy",n.proteusFieldEnergy);
+    n.proteusFieldPower=ReadFloat(L"ProteusFieldPower",n.proteusFieldPower);
+    n.proteusDriverGun=ReadBool(L"ProteusDriverGun",n.proteusDriverGun);
+    n.proteusGunRate=ReadFloat(L"ProteusGunRate",n.proteusGunRate);
+    n.proteusGunDamage=ReadFloat(L"ProteusGunDamage",n.proteusGunDamage);
+    n.proteusSalvoCount=ReadInt(L"ProteusSalvoCount",static_cast<DWORD>(n.proteusSalvoCount));
+    n.proteusSalvoDamage=ReadFloat(L"ProteusSalvoDamage",n.proteusSalvoDamage);
+    n.proteusSalvoCooldownSec=ReadFloat(L"ProteusSalvoCooldownSec",n.proteusSalvoCooldownSec);
+    n.proteusSalvoRange=ReadFloat(L"ProteusSalvoRange",n.proteusSalvoRange);
+    n.proteusPriority=ReadFloat(L"ProteusPriority",n.proteusPriority);
+    n.proteusPriorityRadius=ReadFloat(L"ProteusPriorityRadius",n.proteusPriorityRadius);
+    n.primer=ReadBool(L"Primer",n.primer);
+    n.primerHpScale=ReadFloat(L"PrimerHpScale",n.primerHpScale);
+    n.primerFire=ReadBool(L"PrimerFire",n.primerFire);
+    n.primerTrace=ReadBool(L"PrimerTrace",n.primerTrace);
+    n.centipedeLinkMax=ReadInt(L"CentipedeLinkMax",static_cast<DWORD>(n.centipedeLinkMax));
+    n.centipedeLinkRange=ReadFloat(L"CentipedeLinkRange",n.centipedeLinkRange);
+    n.centipedeWoundDamage=ReadFloat(L"CentipedeWoundDamage",n.centipedeWoundDamage);
+    n.primerBlood=ReadFloat(L"PrimerBlood",n.primerBlood);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -267,26 +441,52 @@ void LoadConfig() noexcept {
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
     Log("CONFIG heli combatRange=%.0f avoid=%d fireHeight=%.0f cone=%.1f missile=%d/%lums landMs=%lu",
         n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
-    Log("CONFIG playerHeliStopSec=%.2f gunSight=%d",n.playerHeliStopSec,n.playerHeliGunSight);
+    Log("CONFIG playerHeliStopSec=%.2f gunSight=%d mouseAim=%d flightHud=%d",n.playerHeliStopSec,n.playerHeliGunSight,n.heliMouseAim,
+        n.heliFlightHud);
     Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
         n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
-    Log("CONFIG hud vehicles=%d count=%d range=%.0f",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange);
+    Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d",n.vehicleHud,n.vehicleHudCount,n.vehicleHudRange,
+        n.stockVehicleHud,n.hideStockGauges);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f jetSound=%d volume=%.2f",n.playerJet,
         n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,n.jetSound,n.jetSoundVolume);
-    Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d",n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud);
+    Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",
+        n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
+        n.warnVolume);
     Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
+    Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
+        n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X",n.playerJetAll,n.playerJetHailKey,n.gunshipBoardGunner,
         n.gunshipGunnerKey);
-    Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d",n.jetPilot,n.jetFuelSec,
-        n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike);
+    Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d throwDrones=%d",n.jetPilot,n.jetFuelSec,
+        n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike,n.throwDrones);
+    Log("CONFIG primer=%d hpScale=%.2f fire=%d trace=%d centipede linkMax=%d linkRange=%.0f woundDamage=%.1f blood=%.2f",n.primer,
+        n.primerHpScale,n.primerFire,n.primerTrace,n.centipedeLinkMax,n.centipedeLinkRange,n.centipedeWoundDamage,n.primerBlood);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
         n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
+    Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
+    Log("CONFIG emcBeam=%d charge=%.1fs beam=%.1fs blast=%.0fm x%.2f break=%.0f/s",n.emcBeam,n.emcChargeSec,n.emcBeamSec,n.emcBlastRadius,
+        n.emcBlastShare,n.emcBreak);
+    Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
-    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
+    Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
+    Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d",n.stockHeliStores,n.seatSwitch,
+        n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline);
+    Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X mark=0x%X/0x%X salvo=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f arc %.0f block %.2f",
+        n.proteus,n.proteusModeKey,n.proteusModeButton,n.proteusShieldKey,n.proteusShieldButton,n.proteusMarkKey,n.proteusMarkButton,n.proteusSalvoKey,
+        n.proteusTwoSeats,n.proteusWalkSpeed,n.proteusWalkTurn,n.proteusStepHeight,n.proteusShieldSlow,n.proteusShieldArc,n.proteusShieldBlock);
+    Log("CONFIG proteus guns walk x%.2f/x%.2f deployed x%.2f/x%.2f stagger %.1f/%.1fs deployTurn %.2f lift %.0fm heat %.0f/%.0fs resume %.2f barrier %.2f regen %.0fs delay %.0fs",
+        n.proteusWalkGunRate,n.proteusWalkGunSpread,n.proteusDeployGunRate,n.proteusDeployGunSpread,n.proteusDeploySec,n.proteusStowSec,n.proteusDeployTurn,
+        n.proteusViewLift,n.proteusHeatSec,n.proteusCoolSec,n.proteusResumeHeat,n.proteusBarrier,n.proteusBarrierRegenSec,n.proteusBarrierDelaySec);
+    Log("CONFIG proteus field %.0fm defense %.2f attack %.2f fireRate %.2f energy %.2f power %.0f; gun=%d %.1f/s %.0f; salvo %d x %.0f cooldown %.0fs range %.0f; priority %.2f within %.0fm",
+        n.proteusFieldRadius,n.proteusFieldDefense,n.proteusFieldAttack,n.proteusFieldFireRate,n.proteusFieldEnergy,n.proteusFieldPower,n.proteusDriverGun,
+        n.proteusGunRate,n.proteusGunDamage,n.proteusSalvoCount,n.proteusSalvoDamage,n.proteusSalvoCooldownSec,n.proteusSalvoRange,n.proteusPriority,
+        n.proteusPriorityRadius);
+    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
     Log("CONFIG physics vehicleWelding=%d giantContactCap=%d",n.vehicleWelding,n.giantContactCap);
@@ -468,17 +668,30 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallJets();      // the jets and the carrier are flown from HeliFrame: no heli pilot, none of them
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
+    InstallBoarding();      // after the heli profile's board button check
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
+    InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
+    InstallEmc();           // the EMC's charged beam (its rounds are the jets' shells too: jet_bay.cpp)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
-    InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp)
+    InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
+    InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
+    InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
+    InstallProteus();       // chain both aims after the turret camera and plain-aim stabilizer hooks
+    InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
+    InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
+    InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
+    InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
+    InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallJetSound();
+    InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
+    InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

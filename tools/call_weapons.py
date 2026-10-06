@@ -7,6 +7,10 @@ The vehicle requests (Call.brings 'vehicle') are clones of the stock eWeapon394 
 category 308): the stock request brings the player jet SGO (tools/make_jets.py EDF6VC_PJET_*.SGO, which
 must be installed first) with the jet's mark and guns in the request's vehicle setup, empty, for the player
 to fly (src/playerjet.cpp).
+The thrown drones (Call.brings 'throw') are clones of the stock eWeapon217 (Patroller, Weapon_Sub, category 331,
+the Robot Bomb list) with a marker in AmmoHitSizeAdjust (calls.throw_mark: about 1.0004, so the bomb hits as the
+stock one): the plugin turns the bomb into its drone where it lands (src/airstrike.cpp kThrows); without the
+plugin the weapon is a plain Patroller.
 
   python tools/call_weapons.py build OUTDIR [--game DIR]     write the SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
@@ -46,6 +50,7 @@ import copy
 import json
 import os
 import shutil
+import struct
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -63,6 +68,7 @@ from dsgo import Node  # noqa: E402
 
 TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
 VEHICLE_TEMPLATE = 'eWeapon394'  # N9 Eros (a heli vehicle request)
+THROW_TEMPLATE = 'eWeapon217'    # Patroller (a Robot Bomb: Weapon_Sub, BombBullet01)
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
 TABLE = 'WEAPON/WEAPONTABLE.SGO'
 TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
@@ -124,10 +130,15 @@ def row_ids(table: bytes) -> list[str]:
 
 
 def template_of(call: Call) -> str:
-    """The stock row a call's row and SGO are made from: the bomber call, the N9 Eros request (a player jet), or a
-    ground vehicle's own request (vcobjects.GROUND_VEHICLES: the Naegling's for the Katyusha)."""
+    """The stock row a call's row and SGO are made from: the bomber call, the N9 Eros request (a player jet), a
+    ground vehicle's own request (vcobjects.GROUND_VEHICLES: the Naegling's for the Katyusha), or the Patroller (a
+    thrown drone: its row, and so its place in the Robot Bomb list, category 331)."""
+    if call.gun:
+        return call.gun
     if call.ground:
         return vc.GROUND_VEHICLES[call.ground].request
+    if call.brings == 'throw':
+        return THROW_TEMPLATE
     return VEHICLE_TEMPLATE if call.brings == 'vehicle' else TEMPLATE
 
 
@@ -222,8 +233,10 @@ def vehicle_weapons(call: Call) -> tuple[str, ...]:
 
 def vehicle_needs(call: Call) -> list[str]:
     """What a vehicle request's SGO names and so needs installed (by tools/make_jets.py, or the ground vehicle's own
-    tool): the vehicle SGO and its weapons."""
-    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in vehicle_weapons(call)]
+    tool): the vehicle SGO and its weapons of ours (EDF6VC_*). A stock weapon it keeps (the sidecar bike's guns and
+    fuel tank) is the game's own, in Root.cpk: nothing to install."""
+    ours = [w for w in vehicle_weapons(call) if w.split('/')[-1].upper().startswith('EDF6VC_')]
+    return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in ours]
 
 
 def _object_path(call: Call) -> str:
@@ -286,8 +299,9 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float]) -> bytes
     if not call.ground:
         setup.items[1].items[0] = float(call.mark)   # the heli params' speed gain: the jet's mark
     # The weapon list: the setup's last entry ([multipliers, heli params, fuel, weapons] in the Eros's request;
-    # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's).
-    at = 2 if call.ground else 3
+    # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's; [multipliers, bike params, fuel,
+    # weapons] in the Freed bike's, the sidecar's).
+    at = len(setup.items) - 1 if call.ground else 3
     weapons = setup.items[at].items
     entry = weapons[0]
     jet_weapons = vehicle_weapons(call)
@@ -323,9 +337,62 @@ def vehicle_durability(game_root: str, call: Call) -> float:
     return hp * request_tier(request_curve(game_root, request_family(call)), call.level)[0]
 
 
+def throw_sgo(template: bytes, call: Call) -> bytes:
+    """The Patroller with the thrown drone's marker (calls.throw_mark), its magazine (AmmoCount[0]: the bombs, so the
+    drones, a reload), its reload (frames) and names; all else the stock bomb's (thrown and landing as it does)."""
+    doc = dsgo.parse(template)
+    r = doc.root
+    r.set('AmmoHitSizeAdjust', float(call.mark))
+    r.get('AmmoCount').items[0] = float(call.count)
+    r.get('ReloadTime').items[0] = float(call.reload)
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
+# The boarding gun (Call.brings 'gun'): the template's rounds fly GUN_RANGE times as long (AmmoAlive), so as far.
+GUN_RANGE = 1.6
+# ...and carry its tag in AmmoColor's alpha: the float 1 + mark ulps (src/boarding.cpp kTagBits compares the bits). The
+# colour is the one bullet parameter copied as it is (no star curve, no fire modifier) that only the drawing reads.
+GUN_TAG = 'AmmoColor'
+
+
+def gun_tag_bits(mark: float) -> int:
+    return 0x3F800000 + int(mark)
+
+
+def gun_tag(color: Node, mark: float) -> Node:
+    """The template's AmmoColor [r, g, b, a] with a = the tag (gun_tag_bits as a float)."""
+    tagged = copy.deepcopy(color)
+    while len(tagged.items) < 4:
+        tagged.items.append(1.0)
+    tagged.items[3] = struct.unpack('<f', struct.pack('<I', gun_tag_bits(mark)))[0]
+    return tagged
+
+
+def gun_sgo(template: bytes, call: Call) -> bytes:
+    """The boarding gun: the stock sniper rifle (laser sight, scope) under its own name, its rounds tagged with the
+    call's mark (GUN_TAG, which src/boarding.cpp reads off the bullet) and reaching GUN_RANGE times as far."""
+    doc = dsgo.parse(template)
+    r = doc.root
+    r.set(GUN_TAG, gun_tag(r.get(GUN_TAG), call.mark))
+    r.set('AmmoAlive', float(r.get('AmmoAlive')) * GUN_RANGE)
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
 def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None) -> bytes:
+    if call.brings == 'gun':
+        return gun_sgo(template, call)
     if call.brings == 'vehicle':
         return vehicle_sgo(template, call, request_tier(curve or [], call.level))
+    if call.brings == 'throw':
+        return throw_sgo(template, call)
     doc = dsgo.parse(template)
     r = doc.root
     r.set('AmmoHitSizeAdjust', float(call.mark))
@@ -352,20 +419,55 @@ def _table_row(template: Node, call: Call) -> Node:
     return row
 
 
-def _text_row(template: Node, call: Call, lang: str, durability: float | None = None) -> Node:
+def gun_range(template: bytes) -> float:
+    """A hand weapon's range as its menu shows it: AmmoSpeed (m a frame, the base of its star curve) times AmmoAlive."""
+    r = dsgo.parse(template).root
+    return float(r.get('AmmoSpeed').items[0]) * float(r.get('AmmoAlive'))
+
+
+def _text_row(template: Node, call: Call, lang: str, durability: float | None = None,
+              gun_range_base: float = 0.0) -> Node:
     row = copy.deepcopy(template)
     row.items[0] = call_name(call, lang)
     row.items[1] = calls.call_description(call, lang)
+    if call.brings == 'throw':
+        _throw_stats(row, call)
+        return row
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
         stats[1].items[1] = f'{durability:.0f}'
+    if call.brings == 'gun':
+        # A gun keeps its template's stats but the range line (gun_sgo: AmmoAlive times GUN_RANGE), told by its value
+        # (gun_range: the labels differ by language), which must be there once.
+        lines = [st for st in row.items[2].items if len(st.items) == 3 and isinstance(st.items[2], Node)
+                 and float(st.items[2].items[0]) == gun_range_base]
+        if len(lines) != 1:
+            raise ValueError(f'{call.id} {lang}: {len(lines)} range lines of {gun_range_base} m in its template text')
+        lines[0].items[2].items[0] = gun_range_base * GUN_RANGE
+        return row
     # The stat list stays KM6's, except the reload line's curve, which the game shows as $0pt
     # from that list: it must be the weapon's own ReloadTime or the menu shows KM6's 1020.
     for stat in row.items[2].items:
         if len(stat.items) == 3 and str(stat.items[1]).startswith('$0pt') and isinstance(stat.items[2], Node):
             stat.items[2].items[0] = float(call.reload)
     return row
+
+
+# The Patroller's stat list: [count, damage, search distance, reload, blast range]. A thrown drone's bomb never goes
+# off as the Patroller's, so only its count and reload (seconds, the list's curve: ReloadTime frames / 60) stay.
+_THROW_COUNT_STAT, _THROW_RELOAD_STAT = 0, 3
+
+
+def _throw_stats(row: Node, call: Call) -> None:
+    stats = row.items[2].items
+    if len(stats) <= _THROW_RELOAD_STAT:
+        return   # another tool rewrote the Patroller's text: left as it is
+    keep = [stats[_THROW_COUNT_STAT], stats[_THROW_RELOAD_STAT]]
+    for stat, value in zip(keep, (float(call.count), float(call.reload) / 60.0)):
+        if len(stat.items) == 3 and isinstance(stat.items[2], Node) and stat.items[2].items:
+            stat.items[2].items[0] = value
+    row.items[2].items = keep
 
 
 def _retired_table_row(template: Node, call: Call) -> Node:
@@ -425,11 +527,12 @@ def stack(game_root: str) -> dict[str, bytes]:
         _put(rows, plan.at[c.id], _table_row(row_template[c.id], c))
     out[TABLE] = dsgo.compact(s.table)
     durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
+    ranges = {c.id: gun_range(template_sgo[template_of(c)]) for c in CALLS if c.brings == 'gun'}
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
         for c in order:
-            _put(text, plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id]))
+            _put(text, plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id], ranges.get(c.id, 0.0)))
         out[rel] = dsgo.compact(s.texts[rel])
     verify(game_root, out, plan)
     return out

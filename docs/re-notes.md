@@ -67,7 +67,7 @@ RideVehicle 碰到有人的座位时，会先调 `0x6313C0` 请对方下车，�
 
 ## 载具 vtable
 
-除 BigBegaruta（`0x6490C0`）外，各类第 49 槽都是 `0x633B80`，第 50 槽都是 `0x633030`。
+各类第 49 槽都是 `0x633B80`；第 50 槽除 BigBegaruta（普罗透斯，`0x6490C0`：先 RideAi 再给每个座位放 NPC，`docs/proteus-re.md` §1）外都是 `0x633030`。
 
 | 类 | vtable | 第 55 槽 |
 |---|---|---|

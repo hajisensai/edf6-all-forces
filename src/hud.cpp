@@ -21,10 +21,13 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "gear.h"
+#include "map_cam.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
+#include "turretaim.h"
 #include "vecmath.h"
+#include "warn.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -91,9 +94,16 @@ Work work[kEntries]{};
 // The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
 // waits in `middle` (its index, kFresh while the draw has not taken it).
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
-                  bool drill; DrillCue drillCue;
+                  bool drill; DrillCue drillCue; bool emc; EmcCue emcCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
-                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; };
+                  bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
+                  bool turret; edf::aimlink::TurretReadoutV1 turretAim;
+                  bool stock; StockHudReadout stockHud;
+                  bool warned; Warnings warn;
+                  bool seats; SeatPrompt seatPrompt;
+                  bool turretCamOk; TurretCamReadout turretCam;
+                  bool nix; NixTorso nixTorso;
+                  bool proteus; ProteusReadout proteusRo; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -467,15 +477,20 @@ void KeyName(int vk,wchar_t* out,int size) noexcept {
     if(vk<=0 || !scan || GetKeyNameTextW(static_cast<LONG>(scan<<16),out,size)<=0)wcscpy_s(out,static_cast<rsize_t>(size),L"?");
 }
 
+// The mouse's aim: a hollow cyan square at `at` (the jets' and the helis', heliaim.h).
+void AimSquare(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* at) noexcept {
+    float sx,sy,depth;
+    if(!Project(vp,at,width,height,&sx,&sy,&depth))return;
+    const float r=14.0f*s,t=2.0f*s;
+    Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kCyan);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kCyan);
+    Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kCyan);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kCyan);
+}
+
 // The mouse's aim on the keyboard and mouse: a hollow square where it aims, a small dot where the plane flies (with the
 // flight HUD on, its flight path marker shows that: FighterHud).
 void AimMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
+    AimSquare(drawer,ctx,vp,width,height,s,j.aim);
     float sx,sy,depth;
-    if(Project(vp,j.aim,width,height,&sx,&sy,&depth)) {
-        const float r=14.0f*s,t=2.0f*s;
-        Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kCyan);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kCyan);
-        Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kCyan);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kCyan);
-    }
     if(!Cfg().playerJetFlightHud && Project(vp,j.path,width,height,&sx,&sy,&depth)) {
         const float r=4.0f*s;
         Rect(drawer,ctx,sx-r,sy-r,sx+r,sy+r,kWhite);
@@ -533,9 +548,56 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
     l.x=(width-l.w)*0.5f;l.y=height*0.86f+2.0f*s;
 }
 
-// The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a shell fired now lands
-// (where the screen's centre meets the ground), red out of its reach; under it the range and READY or the gun's wait;
-// a cyan square on the pylon turn's centre (the point last shelled). No ground under the centre: the line alone.
+// The seats of the vehicle the player sits in (seatswitch.cpp, the user 2026-10-06): a line low on the screen, each seat's
+// number, what it is and who holds it, the player's in brackets, the keys that move them; amber a moment after a refused
+// press (the seat named taken, or no free seat), grey online with SeatSwitchOnline off.
+void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
+    if(*at>=kMaxLines || p.seats<2)return;
+    Line& l=lines[(*at)++];
+    Format(l,L"SEATS");
+    static const wchar_t* const kHolder[]={L"-",L"YOU",L"NPC",L"TAKEN"};
+    for(int i=0;i<p.seats && i<kMostSeatsShown;++i) {
+        const wchar_t* const what=i==0 ? (p.aircraft ? L"PILOT" : L"DRIVER") : p.gun[i] ? L"GUN" : L"SEAT";
+        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,what,kHolder[static_cast<int>(p.holder[i])&3]);
+    }
+    if(p.locked)Append(l,L"   (online: SeatSwitchOnline=0)");
+    else if(p.keys) {
+        wchar_t key[32];
+        KeyName(Cfg().seatNextKey,key,32);
+        if(Cfg().seatNextKey>0)Append(l,L"   [%ls] next",key);
+        if(Cfg().seatNumberKeys)Append(l,L"   [1-%d] pick",p.seats<9 ? p.seats : 9);
+    } else if(Cfg().seatButton==0x02)Append(l,L"   [B] next");
+    else if(Cfg().seatButton>0)Append(l,L"   [button 0x%X] next",Cfg().seatButton);
+    if(p.refused==-2)Append(l,L"   NO FREE SEAT");
+    else if(p.refused>=0)Append(l,L"   SEAT %d TAKEN",p.refused+1);
+    alignas(16) static const float kGrey[4]={0.7f,0.7f,0.7f,0.9f};
+    l.scale=kLineScale*0.85f;l.rgba=p.locked ? kGrey : p.refused!=-1 ? kWarn : kWhite;l.w=l.h=0.0f;
+    if(text)MeasureAll(*text,&l,1);
+    l.x=(width-l.w)*0.5f;l.y=height*0.82f;
+}
+
+// The turret camera (turretcam.cpp): while the turret has not come onto the point the view sends it to, a hollow
+// square where its gun points (where its round would be at that point's range); looking round (free look), a cyan
+// cross on the point it holds. The rest is a vehicle HUD's to draw (TurretCamReadout). `square` false: the stock
+// vehicles' HUD is up and its gun's boresight and pipper already show where the gun is against the screen's centre
+// (one gun, one mark).
+void TurretMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const TurretCamReadout& r,bool square) noexcept {
+    float sx,sy;
+    if(square && !r.onTarget && sight::ToScreen(vp,r.gun,1.0f,width,height,&sx,&sy)) {
+        const float h=9.0f*s,t=2.0f*s;
+        Rect(drawer,ctx,sx-h,sy-h,sx+h,sy-h+t,kWhite);Rect(drawer,ctx,sx-h,sy+h-t,sx+h,sy+h,kWhite);
+        Rect(drawer,ctx,sx-h,sy-h,sx-h+t,sy+h,kWhite);Rect(drawer,ctx,sx+h-t,sy-h,sx+h,sy+h,kWhite);
+    }
+    if(r.freeLook && sight::ToScreen(vp,r.aim,1.0f,width,height,&sx,&sy)) {
+        const float h=7.0f*s,t=2.0f*s;
+        Rect(drawer,ctx,sx-h,sy-t*0.5f,sx+h,sy+t*0.5f,kCyan);Rect(drawer,ctx,sx-t*0.5f,sy-h,sx+t*0.5f,sy+h,kCyan);
+    }
+}
+
+// The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a round of the picked gun
+// fired now lands (where the screen's centre meets the ground), red out of its reach; under it the gun (SHELLS or
+// CANNON, the other one named when the switch has one to go to), the range and READY or the gun's wait; a cyan square
+// on the pylon turn's centre (the point last fired at). No ground under the centre: the line alone.
 void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const GunnerReadout& g,
                  Line* lines,int* at) noexcept {
     float sx=width*0.5f,sy=height*0.5f,depth;
@@ -552,47 +614,107 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
     if(*at>=kMaxLines)return;
     Line& line=lines[(*at)++];
-    if(!g.ground)Format(line,L"SHELLS   NO GROUND IN SIGHT");
-    else if(!g.inReach)Format(line,L"SHELLS   %d m   OUT OF RANGE",static_cast<int>(std::lround(g.range)));
-    else if(g.ready)Format(line,L"SHELLS   %d m   READY",static_cast<int>(std::lround(g.range)));
-    else Format(line,L"SHELLS   %d m   %.1f s",static_cast<int>(std::lround(g.range)),g.wait);
+    const wchar_t* const gun=g.both ? (g.cannon ? L"[CANNON] SHELLS" : L"[SHELLS] CANNON") : L"SHELLS";
+    if(!g.ground)Format(line,L"%ls   NO GROUND IN SIGHT",gun);
+    else if(!g.inReach)Format(line,L"%ls   %d m   OUT OF RANGE",gun,static_cast<int>(std::lround(g.range)));
+    else if(g.ready)Format(line,L"%ls   %d m   READY",gun,static_cast<int>(std::lround(g.range)));
+    else Format(line,L"%ls   %d m   %.1f s",gun,static_cast<int>(std::lround(g.range)),g.wait);
     line.scale=kLineScale;line.rgba=g.ground && g.inReach ? (g.ready ? kGreen : kYellow) : kRed;line.w=line.h=0.0f;
     if(text)MeasureAll(*text,&line,1);
     line.x=sx-line.w*0.5f;line.y=sy+22.0f*s;
 }
 
-// The picked store's lock: locking, a yellow square closing in as it locks; locked, a red diamond on the target. The
-// missile flies at what this marks (stores.cpp StoreLock reads the same entry the round will hold).
-void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
-    float sx,sy,depth;
-    if(!j.lock || !Project(vp,j.lockAt,width,height,&sx,&sy,&depth))return;
+// A lock (stores.h StoreLock: `lock` 2 locked, 1 locking at `progress`, on the lock point `p`): locking, a yellow
+// square closing in as it locks; locked, a red diamond on the target. False off the screen (`sx`, `sy`: its point).
+bool LockAt(void* drawer,void* ctx,const float* vp,float width,float height,float s,int lock,const float* p,float progress,float* sx,
+            float* sy) noexcept {
+    float depth;
+    if(!lock || !Project(vp,p,width,height,sx,sy,&depth))return false;
     const float t=2.0f*s;
-    if(j.lock==1) {
-        const float r=(40.0f-24.0f*j.lockProgress)*s;
-        Rect(drawer,ctx,sx-r,sy-r,sx+r,sy-r+t,kYellow);Rect(drawer,ctx,sx-r,sy+r-t,sx+r,sy+r,kYellow);
-        Rect(drawer,ctx,sx-r,sy-r,sx-r+t,sy+r,kYellow);Rect(drawer,ctx,sx+r-t,sy-r,sx+r,sy+r,kYellow);
-        return;
+    if(lock==1) {
+        const float r=(40.0f-24.0f*progress)*s;
+        const float x=*sx,y=*sy;
+        Rect(drawer,ctx,x-r,y-r,x+r,y-r+t,kYellow);Rect(drawer,ctx,x-r,y+r-t,x+r,y+r,kYellow);
+        Rect(drawer,ctx,x-r,y-r,x-r+t,y+r,kYellow);Rect(drawer,ctx,x+r-t,y-r,x+r,y+r,kYellow);
+        return true;
     }
-    const float r=14.0f*s;
+    const float r=14.0f*s,x=*sx,y=*sy;
     for(int k=0;k<6;++k) {   // a diamond from small squares along its four edges
         const float f=static_cast<float>(k)/6.0f,d=r*f,e=r-d;
-        Rect(drawer,ctx,sx+d-t,sy-e-t,sx+d+t,sy-e+t,kRed);Rect(drawer,ctx,sx-d-t,sy-e-t,sx-d+t,sy-e+t,kRed);
-        Rect(drawer,ctx,sx+d-t,sy+e-t,sx+d+t,sy+e+t,kRed);Rect(drawer,ctx,sx-d-t,sy+e-t,sx-d+t,sy+e+t,kRed);
+        Rect(drawer,ctx,x+d-t,y-e-t,x+d+t,y-e+t,kRed);Rect(drawer,ctx,x-d-t,y-e-t,x-d+t,y-e+t,kRed);
+        Rect(drawer,ctx,x+d-t,y+e-t,x+d+t,y+e+t,kRed);Rect(drawer,ctx,x-d-t,y+e-t,x-d+t,y+e+t,kRed);
     }
+    return true;
 }
 
-// The stores line: each store's name and rounds, the picked one in brackets.
-void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
-    wchar_t text[128]=L"";
+// The picked store's lock (LockAt). The missile flies at what this marks (stores.cpp StoreLock reads the same entry the
+// round will hold).
+void LockMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetReadout& j) noexcept {
+    float sx,sy;
+    LockAt(drawer,ctx,vp,width,height,s,j.lock,j.lockAt,j.lockProgress,&sx,&sy);
+}
+
+// The stores: the guns' rounds (the fewest in one), each store's name and rounds, the picked one in brackets, and the
+// flares in the air.
+void StoresText(wchar_t* text,std::size_t size,const PlayerJetReadout& j) noexcept {
+    text[0]=L'\0';
     std::size_t at=0;
+    if(j.guns>0) {
+        const int n=_snwprintf_s(text,size,_TRUNCATE,L"GUN %d  ",j.gunRounds>0 ? j.gunRounds : 0);
+        if(n>0)at=static_cast<std::size_t>(n);
+    }
     for(int i=0;i<j.stores && i<6;++i) {
-        const int n=_snwprintf_s(text+at,_countof(text)-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
+        const int n=_snwprintf_s(text+at,size-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
                                  j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
         if(n<0)break;
         at+=static_cast<std::size_t>(n);
     }
-    if(j.air)_snwprintf_s(text+at,_countof(text)-at,_TRUNCATE,L"FLARE %d",j.flares);
+    if(j.air)_snwprintf_s(text+at,size-at,_TRUNCATE,L"FLARE %d",j.flares);
+}
+void StoresLine(Line& l,const PlayerJetReadout& j) noexcept {
+    wchar_t text[128];
+    StoresText(text,_countof(text),j);
     Format(l,L"%ls",text);
+}
+
+// The fuel tank's readout (empty with none): FUEL and the share left, and the time left at its burn under 100 minutes (a
+// jet's 506 body idles its rotor: a full tank lasts some 21 hours, no time worth showing). It replaces the stock gauge's
+// FUEL panel (stockgauge.cpp).
+void FuelText(wchar_t* out,std::size_t size,const FuelReading& f) noexcept {
+    out[0]=L'\0';
+    if(!f.ok)return;
+    const int share=static_cast<int>(std::lround(f.share*100.0f));
+    if(f.sec>=0.0f && f.sec<5999.5f) {
+        const int sec=static_cast<int>(std::lround(f.sec));
+        _snwprintf_s(out,size,_TRUNCATE,L"FUEL %d%% %d:%02d",share,sec/60,sec%60);
+    } else _snwprintf_s(out,size,_TRUNCATE,L"FUEL %d%%",share);
+}
+
+// The takeoff roll's cue (empty: none; `rotate`: the cue to pull up is showing). On the takeoff roll (not in the air:
+// j.ground only says there is ground under it, so the cue stayed on after takeoff, 2026-10-05): the speed it may lift
+// off from coming up, then the cue to pull up (the user, 2026-10-05).
+void TakeoffCue(const PlayerJetReadout& j,wchar_t* cue,std::size_t size,bool* rotate) noexcept {
+    const int rotateKmh=static_cast<int>(std::lround(j.rotate*3.6f));
+    const bool rolling=!j.air && j.rotate>0.0f && j.speed>1.0f;
+    *rotate=rolling && j.speed>=j.rotate;
+    cue[0]=L'\0';
+    if(*rotate)_snwprintf_s(cue,size,_TRUNCATE,L"ROTATE: PULL UP (W / SPACE)");
+    else if(rolling && j.speed>=j.rotate*0.7f)_snwprintf_s(cue,size,_TRUNCATE,L"ROTATE AT %d km/h",rotateKmh);
+}
+// The old panel's cue (empty: none): the ground-proximity warning, a missile, a lock, else the takeoff's (TakeoffCue).
+void CockpitCue(const PlayerJetReadout& j,wchar_t* cue,std::size_t size,bool* rotate) noexcept {
+    TakeoffCue(j,cue,size,rotate);
+    if(j.pullUp)_snwprintf_s(cue,size,_TRUNCATE,L"PULL UP! TERRAIN");
+    else if(j.threat==2)_snwprintf_s(cue,size,_TRUNCATE,L"MISSILE!");
+    else if(j.threat==1)_snwprintf_s(cue,size,_TRUNCATE,L"LOCKED");
+    else if(!cue[0] && FuelLow(j.fuel))_snwprintf_s(cue,size,_TRUNCATE,L"LOW FUEL");
+}
+// The cue's colour (over `calm` without one): the ground and a missile blink red and white (8 Hz), a lock is yellow,
+// a stall red, the pull-up cue blinks green (4 Hz).
+const float* CueColour(const PlayerJetReadout& j,bool rotate,const float* calm) noexcept {
+    const bool blink=(GetTickCount64()/125)%2==0;
+    return j.pullUp || j.threat==2 ? (blink ? kRed : kWhite) : j.threat==1 ? kYellow : j.stall ? kRed :
+           rotate && blink ? kGreen : rotate ? kYellow : calm;
 }
 
 // The cockpit readout of the jet the player flies (drawn whatever VehicleHud says): at the bottom centre, its
@@ -611,18 +733,14 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Format(info,L"SPD %d km/h    ALT%ls %d m    %ls %d m/s    HP %d%%",static_cast<int>(std::lround(j.speed*3.6f)),
            j.ground ? L"" : L"*",static_cast<int>(std::lround(alt)),j.climb>=0.0f ? L"UP" : L"DOWN",
            static_cast<int>(std::lround(std::fabs(j.climb))),static_cast<int>(std::lround(j.hpMax>0.0f ? 100.0f*j.hp/j.hpMax : 0.0f)));
-    // On the takeoff roll (not in the air: j.ground only says there is ground under it, so the cue stayed on after
-    // takeoff, 2026-10-05): the speed it may lift off from coming up, then the cue to pull up (the user, 2026-10-05).
-    // In the air, the ground-proximity warning (PlayerJetReadout::pullUp) in its place.
     const int rotateKmh=static_cast<int>(std::lround(j.rotate*3.6f));
-    const bool rolling=!j.air && j.rotate>0.0f && j.speed>1.0f,rotate=rolling && j.speed>=j.rotate;
-    wchar_t cue[64]=L"";
-    if(j.pullUp)std::swprintf(cue,64,L"    PULL UP! TERRAIN");
-    else if(j.threat==2)std::swprintf(cue,64,L"    MISSILE!");
-    else if(j.threat==1)std::swprintf(cue,64,L"    LOCKED");
-    else if(rotate)std::swprintf(cue,64,L"    ROTATE: PULL UP (W / SPACE)");
-    else if(rolling && j.speed>=j.rotate*0.7f)std::swprintf(cue,64,L"    ROTATE AT %d km/h",rotateKmh);
-    Format(thr,L"THROTTLE %d%%    G %.1f%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),j.load,j.stall ? L"    STALL" : L"",cue);
+    wchar_t cue[64];
+    bool rotate=false;
+    CockpitCue(j,cue,_countof(cue),&rotate);
+    wchar_t fuel[32];
+    FuelText(fuel,_countof(fuel),j.fuel);
+    Format(thr,L"THROTTLE %d%%%ls%ls    G %.1f%ls%ls%ls",static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"    " : L"",fuel,j.load,
+           j.stall ? L"    STALL" : L"",cue[0] ? L"    " : L"",cue);
     StoresLine(arms,j);
     if(j.keys) {
         wchar_t boost[32],brake[32],swap[32];
@@ -646,11 +764,8 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
         Format(keys2,L"TAKE OFF: pull the right stick back (from %d km/h)",rotateKmh);
     }
     info.scale=kTitleScale;info.rgba=kWhite;
-    // The rotate cue blinks green (4 Hz) over the throttle line's cyan; the pull-up warning red and white (8 Hz).
-    const bool blink=(GetTickCount64()/125)%2==0;
     thr.scale=kLineScale;
-    thr.rgba=j.pullUp || j.threat==2 ? (blink ? kRed : kWhite) : j.threat==1 ? kYellow : j.stall ? kRed :
-             rotate && blink ? kGreen : rotate ? kYellow : kCyan;
+    thr.rgba=CueColour(j,rotate,kCyan);
     arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kWhite;
     keys.scale=keys2.scale=kLineScale*0.85f;keys.rgba=keys2.rgba=kWhite;
     info.w=info.h=thr.w=thr.h=arms.w=arms.h=keys.w=keys.h=keys2.w=keys2.h=0.0f;
@@ -806,12 +921,13 @@ void HeadingTape(void* drawer,void* ctx,Text* text,float width,float height,floa
     Label(text,lines,at,cx,base+26.0f*s,1,kLineScale,kHud,L"%03d",static_cast<int>(std::lround(hdg))%360);
 }
 
-// The boxes left and right of the middle: the speed (km/h) with the g under it, the height over the floor (ALT*: over
-// the world's zero, nothing under it) with the climb under it. The landing gear's indicator (branch feat/jet-gear) has
-// the row under the g: (width / 2 - kBoxOff * s, height / 2 + 2 * kBoxRow * s).
+// The boxes left and right of the middle: the speed (km/h) with `under` under it (the jets' g, the helis' speed set), the
+// height over the floor (ALT*: over the world's zero, nothing under it) with the climb under it. The landing gear's
+// indicator (branch feat/jet-gear) has the row under the left one: (width / 2 - kBoxOff * s, height / 2 + 2 * kBoxRow * s).
 constexpr float kBoxOff=280.0f,kBoxW=120.0f,kBoxH=34.0f,kBoxRow=30.0f;
-void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
-                   int* at) noexcept {
+constexpr float kBarHalf=100.0f;   // px: the half length of the bars beside the boxes (a heli's height, a jet's lift)
+void Boxes(void* drawer,void* ctx,Text* text,float width,float height,float s,float speed,const wchar_t* under,const float* underRgba,
+           float clear,bool ground,float climb,Line* lines,int* at) noexcept {
     const float cy=height*0.5f,w=kBoxW*s*0.5f,hh=kBoxH*s*0.5f,t=2.0f*s;
     const float left=width*0.5f-kBoxOff*s,right=width*0.5f+kBoxOff*s;
     const float boxes[2]={left,right};
@@ -819,13 +935,19 @@ void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,fl
         Seg(drawer,ctx,x-w,cy-hh,x+w,cy-hh,t,kHud);Seg(drawer,ctx,x-w,cy+hh,x+w,cy+hh,t,kHud);
         Seg(drawer,ctx,x-w,cy-hh,x-w,cy+hh,t,kHud);Seg(drawer,ctx,x+w,cy-hh,x+w,cy+hh,t,kHud);
     }
-    const float alt=std::fmax(-9999.0f,std::fmin(j.clear,99999.0f));
-    Label(text,lines,at,left,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(j.speed*3.6f)));
+    const float alt=std::fmax(-9999.0f,std::fmin(clear,99999.0f));
+    Label(text,lines,at,left,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(speed*3.6f)));
     Label(text,lines,at,left,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"KM/H");
-    Label(text,lines,at,left,cy+kBoxRow*s,1,kLineScale,j.load>5.0f ? kWarn : kHud,L"G %.1f",j.load);
+    if(under && under[0])Label(text,lines,at,left,cy+kBoxRow*s,1,kLineScale,underRgba,L"%ls",under);
     Label(text,lines,at,right,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(alt)));
-    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,j.ground ? L"ALT M" : L"ALT* M");
-    Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,L"VS %+d",static_cast<int>(std::lround(j.climb)));
+    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,ground ? L"ALT M" : L"ALT* M");
+    Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,L"VS %+d",static_cast<int>(std::lround(climb)));
+}
+void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
+                   int* at) noexcept {
+    wchar_t g[16];
+    std::swprintf(g,16,L"G %.1f",j.load);
+    Boxes(drawer,ctx,text,width,height,s,j.speed,g,j.load>5.0f ? kWarn : kHud,j.clear,j.ground,j.climb,lines,at);
 }
 
 // The boresight: a cross with a gap at its centre on the direction `dir` (where it vanishes: the guns' line, far).
@@ -869,39 +991,129 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
     }
 }
 
-// A stock helicopter's gun sight (helisight.cpp; ini PlayerHeliGunSight): the jet sight's boresight and pipper, the
-// pipper where a round fired now first hits the ground (dim: none in its life, it is where the round ends), its
-// distance in metres to its right.
+// A stock helicopter's weapons' sight (helisight.cpp; ini PlayerHeliGunSight). The gun (the primary trigger's): the
+// jet sight's boresight and pipper, the pipper where a round fired now first hits the ground (dim: none in its life,
+// it is where the round ends), its distance in metres to its right. The other weapon (the secondary button's), each
+// in its own shape so neither is taken for the gun's pipper: the missile's lock as the jets' (LockAt: a yellow square
+// closing in, a red diamond locked) with MSL and its distance, or with no lock a dim ring of kMissileRing round its
+// boresight with MSL and the range it locks within; the rockets' mark a hollow diamond where their path (flown as the
+// game flies them: vhud.h RoundLands) meets the map with its label (RKT, GREN...) and distance (none met: a dim one on
+// their boresight).
+constexpr float kMissileRing=34.0f,kRocketMark=11.0f;   // px at 1080 lines
+void RocketDiamond(void* drawer,void* ctx,float x,float y,float s,const float* rgba) noexcept {
+    const float r=kRocketMark*s,t=2.0f*s;
+    Seg(drawer,ctx,x,y-r,x+r,y,t,rgba);Seg(drawer,ctx,x+r,y,x,y+r,t,rgba);
+    Seg(drawer,ctx,x,y+r,x-r,y,t,rgba);Seg(drawer,ctx,x-r,y,x,y-r,t,rgba);
+}
 void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliSightReadout& h,
                   Line* lines,int* at) noexcept {
-    const float* c=h.hit ? kHud : kHudDim;
     float x,y;
-    Boresight(drawer,ctx,vp,width,height,s,h.bore);
-    if(Pipper(drawer,ctx,vp,width,height,s,h.pipper,c,&x,&y))
-        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,kLineScale*0.85f,c,L"%d m",static_cast<int>(std::lround(h.range)));
+    const float note=kLineScale*0.85f;
+    if(h.gun) {
+        const float* c=h.hit ? kHud : kHudDim;
+        Boresight(drawer,ctx,vp,width,height,s,h.bore);
+        if(Pipper(drawer,ctx,vp,width,height,s,h.pipper,c,&x,&y))
+            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%d m",static_cast<int>(std::lround(h.range)));
+    }
+    if(h.arm==HeliArm::missile) {
+        if(LockAt(drawer,ctx,vp,width,height,s,h.lock,h.armAt,h.lockProgress,&x,&y))
+            Label(text,lines,at,x,y+44.0f*s,1,note,h.lock==2 ? kRed : kYellow,L"MSL %d m",static_cast<int>(std::lround(h.armRange)));
+        else if(!h.lock && sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
+            Arc(drawer,ctx,x,y,kMissileRing*s,0.0f,kTurn,2.0f*s,24,kHudDim);
+            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,L"MSL %d m",static_cast<int>(std::lround(h.lockRange)));
+        }
+    } else if(h.arm==HeliArm::rockets) {
+        if(h.armHit && sight::ToScreen(vp,h.armAt,1.0f,width,height,&x,&y)) {
+            RocketDiamond(drawer,ctx,x,y,s,kHud);
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHud,L"%hs %d m",h.armLabel ? h.armLabel : "RKT",
+                  static_cast<int>(std::lround(h.armRange)));
+        } else if(sight::ToScreen(vp,h.armBore,0.0f,width,height,&x,&y)) {
+            RocketDiamond(drawer,ctx,x,y,s,kHudDim);
+            Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,kHudDim,L"%hs",h.armLabel ? h.armLabel : "RKT");
+        }
+    }
 }
 
-// The threats (the user, 2026-10-05: "locked on, it should show the direction"): round the screen's middle a faint
-// ring (red with a missile coming, amber with locks only), on it an arrow toward each threat wherever it is (behind
-// too: sight::Toward): a missile's red (blinking) with its distance, an enemy jet's lock amber; one in view also
-// marked where it is (a missile a red circle with a cross, a jet amber brackets).
-constexpr float kThreatRing=0.30f;   // of the screen's height
-void ThreatRing(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const PlayerJetSymbols& y,
-                Line* lines,int* at) noexcept {
-    if(y.threats<=0)return;
-    const float cx=width*0.5f,cy=height*0.5f,r=kThreatRing*height,t=2.0f*s;
-    bool missile=false;
-    for(int i=0;i<y.threats && i<kMostThreats;++i)missile=missile || y.threatKind[i]==2;
-    alignas(16) const float faint[4]={1.0f,missile ? 0.25f : 0.7f,missile ? 0.2f : 0.15f,0.35f};
-    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,t,48,faint);
-    const bool blink=(GetTickCount64()/125)%2==0;
+// The mouse-aim flight's aim of a heli or rotor craft (heliaim.h): the jets' cyan square, FLY beside it, so it is not
+// taken for a weapon's mark (the user, 2026-10-05: the flight's aim and the gun's pipper were confused). The jets keep
+// the bare square: theirs is where both the flight and the nose's guns go.
+void FlightAim(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const float* p,Line* lines,
+               int* at) noexcept {
+    float x,y,depth;
+    AimSquare(drawer,ctx,vp,width,height,s,p);
+    if(Project(vp,p,width,height,&x,&y,&depth))Label(text,lines,at,x+22.0f*s,y,0,kLineScale*0.75f,kCyan,L"FLY");
+}
+
+// --- The warnings (the user, 2026-10-06: "告警换成更现实一点的如何。比如圆圈告警这种。还有拉起、失速提示音和拉起提示"):
+// what warn.cpp decides, drawn as a real cockpit shows it instead of a line of text: the threats on a radar warning
+// receiver's scope (RwrScope) and marked in view (ThreatMarks), the ground's chevrons, break X and pull-up arrow
+// (GroundCue), the stall's lift tape and box (StallCue), and every warning lit on a fixed annunciator (Annunciator). ---
+alignas(16) const float kInk[4]={0.03f,0.03f,0.03f,1.0f};
+
+// The threats (the user, 2026-10-05: "locked on, it should show the direction"; 2026-10-06: "圆圈告警"): a radar warning
+// receiver's scope low at the left of the HUD, heading up (the aircraft's level nose at its top, its right at its
+// right), two rings, a tick every 30 degrees and the aircraft at its centre. Each threat at its bearing off the nose,
+// nearer the centre the nearer it is (kRwrRange at the outer ring, spaced by the square root: the near ones apart, as
+// a real scope puts the most lethal inside): an enemy's lock an amber J under an airborne threat's hat, a missile a red
+// M with its distance (km), the nearest one in a diamond (the priority threat). A launch (warn.cpp: more missiles
+// coming than a moment before) flashes the scope and its missiles red, LAUNCH over it, for kLaunchMs. With none the
+// scope stays, dim: a real one is always there. `side` -1: left of the HUD (the aircraft's, beside their left box), +1:
+// mirrored to the right (the stock vehicles': their hull / turret block is on the left, StockBlock).
+constexpr float kRwrR=86.0f,kRwrRange=5000.0f;   // px at 1080 lines; m at the outer ring
+void RwrCentre(float width,float height,float s,float side,float* cx,float* cy) noexcept {
+    *cx=width*0.5f+side*((kBoxOff+kBoxW*0.5f+60.0f+kRwrR)*s);
+    *cy=height*0.80f-(kRwrR+10.0f)*s;
+}
+void RwrScope(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetSymbols& y,ULONGLONG launchAt,
+              ULONGLONG now,float side,Line* lines,int* at) noexcept {
+    const float r=kRwrR*s,t=2.0f*s;
+    float cx,cy;
+    RwrCentre(width,height,s,side,&cx,&cy);
+    const bool launch=launchAt && now-launchAt<kLaunchMs,blink=(now/125)%2==0;
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,launch ? 3.0f*s : t,48,launch && blink ? kRed : y.threats>0 ? kHud : kHudDim);
+    Arc(drawer,ctx,cx,cy,r*0.5f,0.0f,kTurn,t,32,kHudDim);
+    for(int i=0;i<12;++i) {
+        const float a=static_cast<float>(i)*kTurn/12.0f,dx=std::sin(a),dy=-std::cos(a),tick=(i==0 ? 10.0f : 5.0f)*s;
+        Seg(drawer,ctx,cx+dx*r,cy+dy*r,cx+dx*(r+tick),cy+dy*(r+tick),t,y.threats>0 ? kHud : kHudDim);
+    }
+    Seg(drawer,ctx,cx-9.0f*s,cy+1.0f*s,cx+9.0f*s,cy+1.0f*s,t,kHud);   // the aircraft: wings, fuselage, tail
+    Seg(drawer,ctx,cx,cy-7.0f*s,cx,cy+8.0f*s,t,kHud);
+    Seg(drawer,ctx,cx-4.0f*s,cy+7.0f*s,cx+4.0f*s,cy+7.0f*s,t,kHud);
+    if(launch)Label(text,lines,at,cx,cy-r-22.0f*s,1,kLineScale,blink ? kRed : kWhite,L"LAUNCH");
+    float fwd[3]={y.nose[0],0.0f,y.nose[2]};
+    if(y.threats<=0 || !vec::Normalize(fwd))return;
+    const float right[3]={-fwd[2],0.0f,fwd[0]};   // its level right (playerjet.cpp RightOf)
+    int nearest=-1;
+    for(int i=0;i<y.threats && i<kMostThreats;++i)
+        if(y.threatKind[i]==2 && (nearest<0 || vec::Dist(y.threatAt[i],y.pos)<vec::Dist(y.threatAt[nearest],y.pos)))nearest=i;
+    for(int i=0;i<y.threats && i<kMostThreats;++i) {
+        const float* p=y.threatAt[i];
+        const float d[3]={p[0]-y.pos[0],p[1]-y.pos[1],p[2]-y.pos[2]},dist=vec::Dist(p,y.pos);
+        const float across=d[0]*right[0]+d[2]*right[2],along=d[0]*fwd[0]+d[2]*fwd[2];
+        const float b=across*across+along*along>1e-6f ? std::atan2(across,along) : 0.0f;
+        const float rr=r*(0.15f+0.85f*std::sqrt(Unit(dist/kRwrRange)));
+        const float x=cx+std::sin(b)*rr,yy=cy-std::cos(b)*rr;
+        if(y.threatKind[i]!=2) {
+            Label(text,lines,at,x,yy+2.0f*s,1,kLineScale*0.8f,kAmber,L"J");
+            Seg(drawer,ctx,x-8.0f*s,yy-8.0f*s,x,yy-14.0f*s,t,kAmber);Seg(drawer,ctx,x,yy-14.0f*s,x+8.0f*s,yy-8.0f*s,t,kAmber);
+            continue;
+        }
+        const float* c=launch && !blink ? kWhite : kRed;
+        Label(text,lines,at,x,yy,1,kLineScale*0.8f,c,L"M");
+        Label(text,lines,at,x+12.0f*s,yy+12.0f*s,0,kLineScale*0.6f,kRed,L"%.1f",dist*0.001f);
+        if(i!=nearest)continue;
+        const float q=13.0f*s;
+        Seg(drawer,ctx,x,yy-q,x+q,yy,t,c);Seg(drawer,ctx,x+q,yy,x,yy+q,t,c);
+        Seg(drawer,ctx,x,yy+q,x-q,yy,t,c);Seg(drawer,ctx,x-q,yy,x,yy-q,t,c);
+    }
+}
+
+// A threat in view, marked where it is: a missile a red circle with a cross, an enemy jet amber brackets.
+void ThreatMarks(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetSymbols& y) noexcept {
+    const float t=2.0f*s;
     for(int i=0;i<y.threats && i<kMostThreats;++i) {
         const float* p=y.threatAt[i];
         const bool m=y.threatKind[i]==2;
-        float dx,dy;
-        sight::Toward(vp,p,width,height,&dx,&dy);
-        Tri(drawer,ctx,cx+dx*r,cy+dy*r,cx+dx*(r+22.0f*s),cy+dy*(r+22.0f*s),11.0f*s,m ? (blink ? kRed : kWhite) : kAmber);
-        if(m)Label(text,lines,at,cx+dx*(r+42.0f*s),cy+dy*(r+42.0f*s),1,kLineScale*0.85f,kRed,L"%.1f km",vec::Dist(p,y.pos)*0.001f);
         float x,yy;
         if(!sight::ToScreen(vp,p,1.0f,width,height,&x,&yy) || x<0.0f || x>width || yy<0.0f || yy>height)continue;
         const float q=14.0f*s;
@@ -917,26 +1129,274 @@ void ThreatRing(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         }
     }
 }
+void Threats(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const PlayerJetSymbols& y,
+             ULONGLONG launchAt,Line* lines,int* at,float side=-1.0f) noexcept {
+    RwrScope(drawer,ctx,text,width,height,s,y,launchAt,GetTickCount64(),side,lines,at);
+    ThreatMarks(drawer,ctx,vp,width,height,s,y);
+}
 
-// The fighter HUD of the aircraft the player flies, part by part as the ini switches them.
+// The ground (warn.cpp's GPWS; the F-16's and its Auto-GCAS's symbols): two chevrons either side of the flight path marker
+// (the nose's point hovering) closing in on it as the impact nears, amber from kTerrainSeconds out, red at
+// kPullUpSeconds, the seconds to the impact under it; with PULL UP a large blinking break X over the HUD's centre, PULL
+// UP under it, and an arrow off the marker the way the path must go to climb away (toward the sky: rolled over, that
+// is down the screen).
+void GroundCue(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const PlayerJetSymbols& y,Gpws g,
+               float impactIn,Line* lines,int* at) noexcept {
+    if(g==Gpws::none)return;
+    const ULONGLONG now=GetTickCount64();
+    const bool pull=g==Gpws::pullUp,blink=(now/125)%2==0;
+    const float* c=pull ? (blink ? kRed : kWhite) : kAmber;
+    const float* base=y.moving ? y.dir : y.nose;
+    float cx=width*0.5f,cy=height*0.5f,x,yy;
+    if(sight::ToScreen(vp,base,0.0f,width,height,&x,&yy)){cx=x;cy=yy;}
+    const float t=3.0f*s,k=12.0f*s;
+    const float off=(30.0f+110.0f*Unit((impactIn-kPullUpSeconds)/(kTerrainSeconds-kPullUpSeconds)))*s;
+    for(int side=-1;side<=1;side+=2) {   // pointing in at the marker
+        const float e=static_cast<float>(side),bx=cx+e*off;
+        Seg(drawer,ctx,bx,cy-k,bx-e*k,cy,t,c);Seg(drawer,ctx,bx-e*k,cy,bx,cy+k,t,c);
+    }
+    if(impactIn>=0.0f)Label(text,lines,at,cx,cy+28.0f*s,1,kLineScale*0.8f,c,L"%.1f s",impactIn);
+    // The way the path's point moves on the screen as the path turns toward the world's up across it: the projection's
+    // derivative there ((u w_b - b w_u) / w_b^2 of the clip coordinates, the square dropped: only the way counts), so it
+    // holds with the marker off the screen too (a steep sink: the escape's point on and the path's off it pointed the
+    // arrow down, found offline with tools/hud_view.cpp). Behind the eye or straight down: up the screen.
+    float up[3]={-base[0]*base[1],1.0f-base[1]*base[1],-base[2]*base[1]};   // the world's up across the path
+    float dx=0.0f,dy=-1.0f;
+    if(vec::Normalize(up)) {
+        float b[4],u[4];
+        for(int i=0;i<4;++i){b[i]=base[0]*vp[i]+base[1]*vp[4+i]+base[2]*vp[8+i];u[i]=up[0]*vp[i]+up[1]*vp[4+i]+up[2]*vp[8+i];}
+        const float mx=(u[0]*b[3]-b[0]*u[3])*width*0.5f,my=-(u[1]*b[3]-b[1]*u[3])*height*0.5f,len=std::sqrt(mx*mx+my*my);
+        if(b[3]>1e-6f && std::isfinite(len) && len>1e-6f){dx=mx/len;dy=my/len;}
+    }
+    const float from=22.0f*s,to=(pull ? 95.0f : 70.0f)*s,head=14.0f*s;
+    Seg(drawer,ctx,cx+dx*from,cy+dy*from,cx+dx*(to-head),cy+dy*(to-head),4.0f*s,c);
+    Tri(drawer,ctx,cx+dx*(to-head),cy+dy*(to-head),cx+dx*to,cy+dy*to,9.0f*s,c);
+    if(!pull)return;
+    const float mx=width*0.5f,my=height*0.5f,r=110.0f*s;
+    Seg(drawer,ctx,mx-r,my-r,mx+r,my+r,5.0f*s,c);Seg(drawer,ctx,mx-r,my+r,mx+r,my-r,5.0f*s,c);
+    Label(text,lines,at,mx,my+r+22.0f*s,1,kTitleScale,c,L"PULL UP");
+}
+
+// The stall (the user: "失速提示"): a lift tape left of the speed box, the share of all the wing gives that its path needs
+// (an AoA indexer's job: this flight model has the wing's lift, not an angle of attack, playerjet.cpp Air) from 0 at
+// the bottom to the stall at the top, red over kStallNear, a caret at the share; stalled, a blinking STALL box beside
+// the flight path marker. `share` 0: on the ground or a rotor craft, none.
+constexpr float kStallNear=0.85f;
+void StallCue(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const PlayerJetSymbols& y,float share,
+              bool stall,Line* lines,int* at) noexcept {
+    if(!(share>0.0f))return;
+    const bool blink=(GetTickCount64()/125)%2==0;
+    const float x=width*0.5f-(kBoxOff+kBoxW*0.5f+18.0f)*s,cy=height*0.5f,half=kBarHalf*s,t=2.0f*s;
+    const float bottom=cy+half,per=2.0f*half;
+    Seg(drawer,ctx,x,cy-half,x,bottom,t,kHudDim);
+    Seg(drawer,ctx,x,cy-half,x,bottom-per*kStallNear,4.0f*s,kRed);
+    for(int q=0;q<=4;++q)Seg(drawer,ctx,x,bottom-per*0.25f*static_cast<float>(q),x+(q%2==0 ? 10.0f : 6.0f)*s,bottom-per*0.25f*static_cast<float>(q),t,kHud);
+    const float yy=bottom-per*Unit(share);
+    const float* c=stall ? kRed : share>kStallNear ? kAmber : kHud;
+    Tri(drawer,ctx,x-14.0f*s,yy,x-2.0f*s,yy,6.0f*s,c);
+    Label(text,lines,at,x,cy-half-14.0f*s,1,kLineScale*0.7f,kHudDim,L"LIFT");
+    if(!stall)return;
+    float fx=width*0.5f,fy=height*0.5f,px,py;
+    if(y.moving && sight::ToScreen(vp,y.dir,0.0f,width,height,&px,&py)){fx=px;fy=py;}
+    const float* box=blink ? kRed : kWhite;
+    const int first=*at;
+    Label(text,lines,at,fx+46.0f*s,fy,0,kTitleScale,box,L"STALL");
+    if(*at==first)return;
+    const Line& l=lines[first];
+    const float w=(l.w>0.0f ? l.w : 70.0f*s)+12.0f*s,h=(l.h>0.0f ? l.h : 24.0f*s)+8.0f*s,x0=l.x-6.0f*s,y0=fy-h*0.5f;
+    Seg(drawer,ctx,x0,y0,x0+w,y0,t,box);Seg(drawer,ctx,x0,y0+h,x0+w,y0+h,t,box);
+    Seg(drawer,ctx,x0,y0,x0,y0+h,t,box);Seg(drawer,ctx,x0+w,y0,x0+w,y0+h,t,box);
+}
+
+// The annunciator (a real cockpit's master caution and its lights: one fixed place to look): a row of lit tiles under
+// the heading tape, MASTER WARN (red) or MASTER CAUTION (amber) filled first, then each warning lit in warn.h's order,
+// the warnings red and the cautions amber in a frame; the warnings blink, and so does a caution its first kNewMs.
+constexpr ULONGLONG kNewMs=3000;
+const wchar_t* const kWarnText[kWarnCount]={L"PULL UP",L"MISSILE",L"STALL",L"GEAR",L"TERRAIN",L"SINK RATE",L"LOCK",L"GEAR SPEED",
+                                            L"WEIGHT ON WHEELS",L"LOW FUEL"};
+void Annunciator(void* drawer,void* ctx,Text* text,float width,float height,float s,const Warnings& w,Line* lines,int* at) noexcept {
+    if(!w.on)return;
+    const ULONGLONG now=GetTickCount64();
+    const bool blink=(now/125)%2==0;
+    int lit[kWarnCount],n=0;
+    bool warning=false;
+    for(int k=0;k<kWarnCount;++k)if(w.on>>k&1u){lit[n++]=k;warning=warning || IsWarning(k);}
+    if(*at+n+1>kMaxLines)return;
+    Line* const tile=&lines[*at];
+    Format(tile[0],warning ? L"MASTER WARN" : L"MASTER CAUTION");
+    tile[0].rgba=kInk;
+    for(int i=0;i<n;++i) {
+        const int k=lit[i];
+        const bool launch=k==kWarnMissile && w.launchAt && now-w.launchAt<kLaunchMs;
+        Format(tile[1+i],L"%ls",launch ? L"MSL LAUNCH" : kWarnText[k]);
+        const bool flash=IsWarning(k) || now-w.litAt[k]<kNewMs;
+        tile[1+i].rgba=flash && !blink ? kWhite : IsWarning(k) ? kRed : kAmber;
+    }
+    for(int i=0;i<=n;++i){tile[i].scale=kLineScale*0.85f;tile[i].w=tile[i].h=0.0f;}
+    if(text)MeasureAll(*text,tile,n+1);
+    const float pad=8.0f*s,gap=6.0f*s,t=2.0f*s;
+    float textH=0.0f,total=-gap;
+    for(int i=0;i<=n;++i){textH=tile[i].h>textH ? tile[i].h : textH;total+=(tile[i].w>0.0f ? tile[i].w : 80.0f*s)+2.0f*pad+gap;}
+    const float h=(textH>0.0f ? textH : 18.0f*s)+2.0f*4.0f*s,y0=height*0.11f+44.0f*s;
+    float x=(width-total)*0.5f;
+    for(int i=0;i<=n;++i) {
+        Line& l=tile[i];
+        const float tw=(l.w>0.0f ? l.w : 80.0f*s)+2.0f*pad;
+        const float* c=i==0 ? (warning ? kRed : kAmber) : l.rgba;
+        if(i==0)Rect(drawer,ctx,x,y0,x+tw,y0+h,c);
+        else {
+            Rect(drawer,ctx,x,y0,x+tw,y0+h,kBarBack);
+            Rect(drawer,ctx,x,y0,x+tw,y0+t,c);Rect(drawer,ctx,x,y0+h-t,x+tw,y0+h,c);
+            Rect(drawer,ctx,x,y0,x+t,y0+h,c);Rect(drawer,ctx,x+tw-t,y0,x+tw,y0+h,c);
+        }
+        l.x=x+pad;l.y=y0+(h-l.h)*0.5f;
+        x+=tw+gap;
+    }
+    *at+=n+1;
+}
+
+// The fighter HUD of the aircraft the player flies, part by part as the ini switches them (`launchAt`: warn.cpp's).
 void FighterHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const PlayerJetReadout& j,
-                Line* lines,int* at) noexcept {
+                ULONGLONG launchAt,Line* lines,int* at) noexcept {
     const PlayerJetSymbols& y=j.sym;
     if(Cfg().playerJetFlightHud) {
         if(j.air){Ladder(drawer,ctx,text,vp,width,height,s,y,lines,at);FlightPath(drawer,ctx,vp,width,height,s,y);}
         HeadingTape(drawer,ctx,text,width,height,s,y,lines,at);
         SpeedAltBoxes(drawer,ctx,text,width,height,s,j,lines,at);
+        GroundCue(drawer,ctx,text,vp,width,height,s,y,j.gpws,j.impactIn,lines,at);
+        StallCue(drawer,ctx,text,vp,width,height,s,y,j.liftShare,j.stall,lines,at);
     }
     if(Cfg().playerJetGunSight)GunSight(drawer,ctx,vp,width,height,s,y);
-    if(Cfg().playerJetThreatHud)ThreatRing(drawer,ctx,text,vp,width,height,s,y,lines,at);
+    if(Cfg().playerJetThreatHud)Threats(drawer,ctx,text,vp,width,height,s,y,launchAt,lines,at);
+}
+
+// With the flight HUD on (ini PlayerJetFlightHud; the user, 2026-10-05: "飞机底部的旧hud可以删了吧") the old cockpit
+// panel goes: its speed, height, climb and g are the HUD's boxes (SpeedAltBoxes), its HP the game's own vehicle bar,
+// its key list the README's, its warnings the annunciator's and the HUD's symbols (2026-10-06: "只留挂载和告警").
+// What only it showed stays, as HUD text without a panel under the HUD's centre: one line of the throttle, the fuel (the
+// stock gauge's FUEL panel gone, stockgauge.cpp), the stores (the picked one in brackets) and the flares, and over it on
+// the takeoff roll its cue (TakeoffCue).
+void CockpitStrip(Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,int* at) noexcept {
+    if(*at+2>kMaxLines)return;
+    Line& warn=lines[(*at)++];
+    Line& arms=lines[(*at)++];
+    wchar_t cue[64],stores[128],fuel[32];
+    bool rotate=false;
+    TakeoffCue(j,cue,_countof(cue),&rotate);
+    StoresText(stores,_countof(stores),j);
+    FuelText(fuel,_countof(fuel),j.fuel);
+    Format(warn,L"%ls",cue);
+    Format(arms,L"THR %d%%%ls%ls    %ls",static_cast<int>(std::lround(j.throttle*100.0f)),fuel[0] ? L"  " : L"",fuel,stores);
+    warn.scale=kTitleScale;warn.rgba=rotate ? ((GetTickCount64()/125)%2==0 ? kGreen : kYellow) : kHud;
+    arms.scale=kLineScale;arms.rgba=j.bomb ? kYellow : kHud;
+    warn.w=warn.h=arms.w=arms.h=0.0f;
+    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&arms,1);}
+    const float armsH=arms.h>0.0f ? arms.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
+    arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
+    warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
+}
+
+// --- The helicopter HUD (the user, 2026-10-05: "a helicopter HUD": the flight instruments, the weapons' aim, the hover's
+// aids, the old panel gone; ini HeliFlightHud): for a stock helicopter the player flies (heli.cpp PlayerHeliHud) and a
+// rotor craft of the plugin (PlayerJetReadout::rotor), from their HeliFlight and the fighter HUD's symbols. The fighter
+// HUD's horizon, ladder, heading tape and boxes (the left one's under-line the speed W / S set), the flight path marker
+// once it flies (kMovingSpeed), else and low over the ground the hover's: a drift circle (its level velocity on the
+// nose's frame, kDriftFull at the ring) and a bar of the height over the ground up to kLowHover. The mouse's aim is the
+// jets' cyan square. The weapons' aim is the stock heli's gun sight (HeliGunSight, drawn apart) or the rotor craft's the
+// jets' (GunSight, LockMark, ImpactMark); the threat ring the fighter's. One line under the HUD's centre in place of the
+// old panel (HeliStrip): the warning or the takeoff cue over the speed set, the height held and the stores. ---
+constexpr float kDriftShown=8.0f;    // m/s: slower than this (level) the drift circle shows
+constexpr float kDriftFull=5.0f;     // m/s: the drift at the circle's ring
+constexpr float kDriftR=40.0f,kDriftDown=150.0f;   // px (at 1080 lines): its radius, its centre under the screen's
+constexpr float kLowHover=30.0f;     // m over the ground: the height bar's top (shown under it)
+
+// The hover's drift: a ring round a centre cross under the screen's middle, an arrow from the centre the way it drifts
+// (up: along the nose, right: to its right), kDriftFull m/s at the ring; faster, the arrow stops at the ring, amber.
+void DriftMark(void* drawer,void* ctx,float width,float height,float s,const HeliFlight& f,const PlayerJetSymbols& y) noexcept {
+    float nose[3]={y.nose[0],0.0f,y.nose[2]};
+    if(!vec::Normalize(nose))return;
+    const float right[3]={-nose[2],0.0f,nose[0]};   // its level right (playerjet.cpp RightOf)
+    const float fore=f.vel[0]*nose[0]+f.vel[2]*nose[2],side=f.vel[0]*right[0]+f.vel[2]*right[2];
+    const float cx=width*0.5f,cy=height*0.5f+kDriftDown*s,r=kDriftR*s,t=2.0f*s;
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,t,24,kHudDim);
+    Seg(drawer,ctx,cx-6.0f*s,cy,cx+6.0f*s,cy,t,kHud);Seg(drawer,ctx,cx,cy-6.0f*s,cx,cy+6.0f*s,t,kHud);
+    const float drift=std::sqrt(fore*fore+side*side);
+    if(drift<0.2f)return;
+    const float len=r*vec::Clamp(drift/kDriftFull,0.0f,1.0f),dx=side/drift,dy=-fore/drift;
+    const float* c=drift>kDriftFull ? kAmber : kHud;
+    const float tipX=cx+dx*len,tipY=cy+dy*len,head=8.0f*s;
+    if(len>head)Seg(drawer,ctx,cx,cy,tipX-dx*head,tipY-dy*head,3.0f*s,c);
+    Tri(drawer,ctx,tipX-dx*head,tipY-dy*head,tipX,tipY,5.0f*s,c);
+}
+
+// The height over the ground for the landing and the low hover: a bar right of the height box from 0 to kLowHover m, a
+// tick every 5 m, a caret at the height, amber sinking faster than kSinkWarn under kSinkLow m.
+void HeightBar(void* drawer,void* ctx,float width,float height,float s,const HeliFlight& f) noexcept {
+    if(!f.ground || !(f.clear<kLowHover))return;
+    const float x=width*0.5f+(kBoxOff+kBoxW*0.5f+18.0f)*s,cy=height*0.5f,half=kBarHalf*s,t=2.0f*s;
+    const float bottom=cy+half,per=2.0f*half/kLowHover;
+    Seg(drawer,ctx,x,cy-half,x,bottom,t,kHudDim);
+    for(int m=0;m<=static_cast<int>(kLowHover);m+=5)Seg(drawer,ctx,x,bottom-per*static_cast<float>(m),x+(m%10==0 ? 10.0f : 6.0f)*s,
+                                                        bottom-per*static_cast<float>(m),t,kHud);
+    const float at=bottom-per*vec::Clamp(f.clear,0.0f,kLowHover);
+    const bool sink=f.clear<kSinkLow && f.climb<-kSinkWarn;
+    Tri(drawer,ctx,x-14.0f*s,at,x-2.0f*s,at,6.0f*s,sink ? kAmber : kHud);
+}
+
+// The helicopter HUD's instruments (see above); the weapons' aim and the mouse's aim (drawn with the HUD off too) are the
+// caller's.
+void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliFlight& f,
+             const PlayerJetSymbols& y,ULONGLONG launchAt,Line* lines,int* at) noexcept {
+    if(!f.landed)Ladder(drawer,ctx,text,vp,width,height,s,y,lines,at);
+    if(y.moving && !f.landed)FlightPath(drawer,ctx,vp,width,height,s,y);
+    if(!f.landed && (f.speed<kDriftShown || (f.ground && f.clear<kLowHover)))DriftMark(drawer,ctx,width,height,s,f,y);
+    HeadingTape(drawer,ctx,text,width,height,s,y,lines,at);
+    wchar_t set[32]=L"";
+    if(f.aiming)std::swprintf(set,32,f.setSpeed==0.0f ? L"SET HOVER" : L"SET %d",static_cast<int>(std::lround(f.setSpeed*3.6f)));
+    Boxes(drawer,ctx,text,width,height,s,f.speed,set,kCyan,f.clear,f.ground,f.climb,lines,at);
+    HeightBar(drawer,ctx,width,height,s,f);
+    GroundCue(drawer,ctx,text,vp,width,height,s,y,f.gpws,f.impactIn,lines,at);
+    if(Cfg().playerJetThreatHud)Threats(drawer,ctx,text,vp,width,height,s,y,launchAt,lines,at);
+}
+
+// The lines in place of the old panel (see above; its warnings are the annunciator's and the HUD's symbols): on top on
+// the ground the takeoff cue (the rotor's share of the lift-off speed; LIFT OK blinking from there); under it the speed
+// set and the height held (the mouse-aim flight); at the bottom `stores` (a rotor craft's; nullptr: none) on a line of
+// their own (with the speed and ALT HOLD on one line, 5-6 stores ran past a line's 128 characters: the last cut off).
+// The fuel (`fuel`, the stock gauge's FUEL panel gone: stockgauge.cpp) goes on the speed set's line.
+void HeliStrip(Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,const wchar_t* stores,Line* lines,
+               int* at) noexcept {
+    if(*at+3>kMaxLines)return;
+    Line& warn=lines[(*at)++];
+    Line& info=lines[(*at)++];
+    Line& arms=lines[(*at)++];
+    const bool blink=(GetTickCount64()/125)%2==0,lift=f.landed && f.hover>0.0f && f.rotor>0.01f,liftOk=lift && f.rotor>=f.hover;
+    if(liftOk){Format(warn,L"LIFT OK: TAKE OFF (ascend)");warn.rgba=blink ? kGreen : kYellow;}
+    else if(lift){Format(warn,L"ROTOR %d%% of lift-off",static_cast<int>(std::lround(100.0f*f.rotor/f.hover)));warn.rgba=kCyan;}
+    else{Format(warn,L"");warn.rgba=kHud;}
+    Format(info,L"");
+    if(f.aiming)Append(info,f.setSpeed==0.0f ? L"SPEED SET: HOVER" : L"SPEED SET %d km/h",static_cast<int>(std::lround(f.setSpeed*3.6f)));
+    if(f.holding)Append(info,L"%lsALT HOLD",info.text[0] ? L"    " : L"");
+    wchar_t tank[32];
+    FuelText(tank,_countof(tank),fuel);
+    if(tank[0])Append(info,L"%ls%ls",info.text[0] ? L"    " : L"",tank);
+    Format(arms,L"%ls",stores ? stores : L"");
+    warn.scale=kTitleScale;info.scale=arms.scale=kLineScale;info.rgba=arms.rgba=kHud;
+    warn.w=warn.h=info.w=info.h=arms.w=arms.h=0.0f;
+    if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);MeasureAll(*text,&arms,1);}
+    const float lineH=18.0f*s,armsH=arms.h>0.0f ? arms.h : (arms.text[0] ? lineH : 0.0f);
+    const float infoH=info.h>0.0f ? info.h : lineH,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
+    arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
+    info.x=(width-info.w)*0.5f;info.y=arms.y-infoH-(arms.text[0] ? 4.0f*s : 0.0f);
+    warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
 }
 
 // The landing gear (gear.cpp GearHudLatest; the jets with gear only), at the screen's right over the cockpit's line: its
 // three lights as a real gear panel lays them out (the nose's over the two mains'): green down and locked, amber in
 // transit, out (an empty frame) up and locked; under them DOWN / TRANSIT / UP and the key. Warnings over it: GEAR! (red,
 // blinking) low and slow with it not down, GEAR SPEED (amber) over the gear's limit with it not up, WEIGHT ON WHEELS
-// (amber) an up command refused on the ground.
-void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at,ULONGLONG now) noexcept {
+// (amber) an up command refused on the ground; with the annunciator up (`annunciated`) those are its tiles instead.
+void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,bool annunciated,Line* lines,int* at,ULONGLONG now) noexcept {
     GearHud g{};
     if(!GearHudLatest(&g) || now-g.tick>kFreshMs || *at+2>kMaxLines)return;
     const float box=24.0f*s,gap=10.0f*s,pad=10.0f*s,w=3.0f*box+4.0f*gap+2.0f*pad,h=2.0f*box+gap+2.0f*pad+60.0f*s;
@@ -965,7 +1425,7 @@ void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
     if(text)MeasureAll(*text,&state,1);
     state.x=cx-state.w*0.5f;state.y=top+2.0f*box+gap+8.0f*s;
     const wchar_t* const what=g.warn ? L"GEAR!" : g.overspeed ? L"GEAR SPEED" : g.blocked ? L"WEIGHT ON WHEELS" : nullptr;
-    if(!what)return;
+    if(!what || annunciated)return;
     Line& warn=lines[(*at)++];
     Format(warn,L"%ls",what);
     warn.scale=kLineScale;warn.rgba=g.warn ? ((now/125)%2==0 ? kRed : kWhite) : kAmber;
@@ -1059,6 +1519,492 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
 }
 
+// EDF6AutoTurret's turret the player is at (turretaim.cpp, common/edf/aimlink.h; the user, 2026-10-06: "auto-aim
+// switchable to a lead circle, a lock box on the target I pick"). The lock as the jets' (LockAt: a yellow square closing
+// in while its track settles, then the red diamond). In the lead-circle mode the lead circle (预瞄圈: a ring with a dot
+// where the gun's line must pass for the round to meet the target on its arc) and the gun's bore cross (where its line
+// passes now, at the same range): the cross in the ring, the round meets the target; dim when the round's life does
+// not reach. Under the ring the range and the flight time. Low on the screen the mode and its bindings.
+constexpr float kLeadCircle=22.0f;   // px at 1080 lines
+void ButtonName(int bits,wchar_t* out,int size) noexcept {
+    static const wchar_t* const kNames[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
+    for(int i=0;i<8;++i)if(bits==(1<<i)){wcscpy_s(out,static_cast<rsize_t>(size),kNames[i]);return;}
+    std::swprintf(out,static_cast<std::size_t>(size),L"0x%X",bits);
+}
+void Binding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
+    if(keys)KeyName(key,out,size);
+    else ButtonName(button,out,size);
+}
+void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
+                    const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at) noexcept {
+    namespace link=edf::aimlink;
+    float x,y;
+    if(r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
+    const bool circle=r.ownGun && r.mode==link::Mode::leadCircle;
+    if(circle && r.lead) {
+        const float t=2.0f*s,* c=r.inReach ? kHud : kHudDim;
+        float bx,by;
+        if(sight::ToScreen(vp,r.boreAt,1.0f,width,height,&bx,&by)) {   // the bore cross, its centre open
+            const float b=9.0f*s,g=3.0f*s;
+            Seg(drawer,ctx,bx-b,by,bx-g,by,t,kWhite);Seg(drawer,ctx,bx+g,by,bx+b,by,t,kWhite);
+            Seg(drawer,ctx,bx,by-b,bx,by-g,t,kWhite);Seg(drawer,ctx,bx,by+g,bx,by+b,t,kWhite);
+        }
+        if(sight::ToScreen(vp,r.leadAt,1.0f,width,height,&x,&y)) {
+            Arc(drawer,ctx,x,y,kLeadCircle*s,0.0f,kTurn,t,20,c);
+            Rect(drawer,ctx,x-1.5f*s,y-1.5f*s,x+1.5f*s,y+1.5f*s,c);
+            Label(text,lines,at,x,y+(kLeadCircle+12.0f)*s,1,kLineScale*0.85f,c,L"%d m  %.1f s%ls",static_cast<int>(std::lround(r.range)),
+                  r.flight,r.inReach ? L"" : L"  OUT OF RANGE");
+        }
+    }
+    wchar_t mode[32],lock[32];
+    Binding(r.keys,r.modeKey,r.modeButton,mode,32);
+    Binding(r.keys,r.lockKey,r.lockButton,lock,32);
+    const bool hasMode=r.keys ? r.modeKey>0 : r.modeButton>0,hasLock=r.keys ? r.lockKey>0 : r.lockButton>0;
+    const wchar_t* const state=!r.ownGun ? L"GUNNERS" : circle ? L"LEAD CIRCLE" : L"AUTO-AIM";
+    wchar_t keys[96]=L"";
+    if(r.ownGun && hasMode)std::swprintf(keys,96,L"   [%ls] %ls",mode,circle ? L"auto-aim" : L"lead circle");
+    if(hasLock) {
+        const std::size_t n=wcslen(keys);
+        std::swprintf(keys+n,96-n,L"   [%ls] %ls (hold: clear)",lock,r.lock==link::Lock::none ? L"lock" : L"next");
+    }
+    Label(text,lines,at,width*0.5f,height*0.90f,1,kLineScale*0.85f,r.lock==link::Lock::locked ? kRed : kWhite,L"%ls%ls",state,keys);
+}
+
+// --- The stock vehicles' HUD (vhud.cpp gathers it; ini StockVehicleHud; docs/hud-re.md §7): for the stock vehicle the
+// player drives or mans, in the helis' green and drawn with the same quads and text (exclusive full screen too):
+//  - each weapon's impact point (StockMarks): a gun's or a cannon's the helis' boresight and pipper (dim: no ground
+//    within its reach, where its round ends), a grenade's or a mortar's (and any round flying longer than kLobSec) the
+//    artillery's yellow cross as the Katyusha's (LauncherMarks) with its range and flight time, the rockets' the helis'
+//    diamond, a missile's lock the helis' (LockAt; no lock: a dim ring round its boresight and its LockonRange); its
+//    label and range beside it; the selected store's label in brackets. Weapons that land together (a pair of guns)
+//    are drawn once;
+//  - the heading tape at the top (the gun's heading, a caret under it for the hull's: StockTape);
+//  - left of the bottom centre (StockBlock): the hull / turret indicator (the hull's outline and the gun's line, up the
+//    camera's look: which way the hull points against where the player looks and aims), the vehicle's kind and seat,
+//    its speed and HP with the HP bar (STAB on that line while the gun stabilizer holds the seat's gun), a line per
+//    weapon (rounds of the magazine; RELOAD and its share and seconds; EMPTY when it never reloads), and over it the warning (a missile, a lock, the hull critical, out of ammo);
+//  - the threat ring of the aircraft (ThreatRing) round the screen's middle. ---
+constexpr float kLobSec=2.5f;        // s: a round in the air longer than this is lobbed (the cross, with its flight time)
+constexpr float kSamePoint=2.0f;     // m: two weapons' points this near and of one label are drawn once
+constexpr float kIndicatorR=34.0f;   // px (1080 lines): the hull / turret indicator's ring
+const char kStockHpKey=0;            // the HP bar's damage trail's key (an address of our own: never a vehicle's)
+
+// `a` - `b` in degrees, in (-180, 180].
+float HdgDiff(float a,float b) noexcept {
+    float d=std::fmod(a-b,360.0f);
+    if(d>180.0f)d-=360.0f;
+    if(d<=-180.0f)d+=360.0f;
+    return d;
+}
+
+// The heading tape for `hdg` (the gun's) with a caret under it at `hull`'s heading when within the tape (HeadingTape's
+// look: a tick every 5 degrees, the tens numbered).
+void StockTape(void* drawer,void* ctx,Text* text,float width,float height,float s,float hdg,float hull,Line* lines,int* at) noexcept {
+    const float cx=width*0.5f,base=height*0.11f,k=kTapePx*s,t=2.0f*s;
+    Seg(drawer,ctx,cx-kTapeHalf*k,base,cx+kTapeHalf*k,base,t,kHudDim);
+    for(int d=static_cast<int>(std::ceil((hdg-kTapeHalf)/5.0f))*5;static_cast<float>(d)<=hdg+kTapeHalf;d+=5) {
+        const float x=cx+(static_cast<float>(d)-hdg)*k;
+        const bool ten=d%10==0;
+        Seg(drawer,ctx,x,base,x,base-(ten ? 10.0f : 5.0f)*s,t,kHud);
+        if(ten)Label(text,lines,at,x,base-22.0f*s,1,kLineScale*0.8f,kHud,L"%03d",((d%360)+360)%360);
+    }
+    Tri(drawer,ctx,cx,base+12.0f*s,cx,base+2.0f*s,6.0f*s,kHud);
+    Label(text,lines,at,cx,base+26.0f*s,1,kLineScale,kHud,L"%03d",static_cast<int>(std::lround(hdg))%360);
+    if(hull<0.0f)return;
+    const float off=HdgDiff(hull,hdg);
+    if(std::fabs(off)>kTapeHalf)return;
+    const float x=cx+off*k;
+    Tri(drawer,ctx,x,base+14.0f*s,x,base+4.0f*s,5.0f*s,kAmber);
+    Label(text,lines,at,x,base+40.0f*s,1,kLineScale*0.7f,kAmber,L"HULL");
+}
+
+// One weapon's mark (see above); `name` its label (bracketed when selected).
+void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const wchar_t* name,
+               Line* lines,int* at) noexcept {
+    float x,y;
+    const float note=kLineScale*0.85f;
+    const int metres=static_cast<int>(std::lround(a.range));
+    if(a.kind==RoundKind::homing) {
+        if(LockAt(drawer,ctx,vp,width,height,s,a.lock,a.at,a.lockProgress,&x,&y))
+            Label(text,lines,at,x,y+44.0f*s,1,note,a.lock==2 ? kRed : kYellow,L"%ls %d m",name,metres);
+        else if(!a.lock && sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
+            Arc(drawer,ctx,x,y,kMissileRing*s,0.0f,kTurn,2.0f*s,24,kHudDim);
+            Label(text,lines,at,x,y+(kMissileRing+12.0f)*s,1,note,kHudDim,L"%ls %d m",name,metres);
+        }
+        return;
+    }
+    if(a.kind==RoundKind::rocket) {
+        if(sight::ToScreen(vp,a.at,1.0f,width,height,&x,&y) || sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
+            const float* c=a.hit ? kHud : kHudDim;
+            RocketDiamond(drawer,ctx,x,y,s,c);
+            if(a.hit)Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,c,L"%ls %d m",name,metres);
+            else Label(text,lines,at,x,y+(kRocketMark+12.0f)*s,1,note,c,L"%ls",name);
+        }
+        return;
+    }
+    if((a.lobbed || a.flight>kLobSec) && a.hit) {
+        if(ImpactCross(drawer,ctx,vp,width,height,s,a.at,&x,&y))
+            Label(text,lines,at,x,y+26.0f*s,1,note,kYellow,L"%ls %d m   %.1f s",name,metres,a.flight);
+        return;
+    }
+    const float* c=a.hit ? kHud : kHudDim;
+    Boresight(drawer,ctx,vp,width,height,s,a.bore);
+    if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y))
+        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
+}
+
+// What the stock vehicles' HUD takes from the other readouts: the Nix's legs and torso (its ring), the drill tank's drill
+// (a line in the block instead of DrillPanel), the EMC's charged beam (a line and its bar: emc.cpp), and whether
+// EDF6AutoTurret's lead circle is on the seat's own gun (the
+// seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
+struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; };
+// --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to five
+// lines with a bar under some: the stance (and the stagger's progress), the shield (deployed its heat), the barrier, the
+// salvo (its cooldown, the mark's range), the field (its allies) and the driver's gun; the bindings named where the
+// driver has a press to make. On the hull ring the standing shield's arc; on the ground the field's edge; on the marked
+// target a red diamond with its range. ---
+constexpr int kProteusLines=5;
+const char kBarrierKey=0;            // the barrier bar's damage trail's key (an address of our own)
+struct ProteusLine { Line* line; bool bar; float share; const float* fill; const void* trailKey; };
+
+// A binding's name: the mouse's buttons by name (GetKeyNameText has none for them), the keys as KeyName, a pad's button.
+void ProteusBinding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
+    static const wchar_t* const kMouse[]={L"?",L"LMB",L"RMB",L"?",L"MMB",L"MB4",L"MB5"};
+    if(keys && key>0 && key<=6){wcscpy_s(out,static_cast<rsize_t>(size),kMouse[key]);return;}
+    Binding(keys,key,button,out,size);
+}
+
+// The block's Proteus lines (see above) into `pl` (`n` of them): the lines are `lines`' next ones.
+int ProteusLinesOf(const ProteusReadout& p,Line* lines,ProteusLine* pl) noexcept {
+    wchar_t mode[16],shield[16],mark[16],salvo[16];
+    ProteusBinding(p.keys,p.modeKey,p.modeButton,mode,16);
+    ProteusBinding(p.keys,p.shieldKey,p.shieldButton,shield,16);
+    ProteusBinding(p.keys,p.markKey,p.markButton,mark,16);
+    ProteusBinding(p.keys,p.salvoKey,0,salvo,16);
+    if(!p.keys)wcscpy_s(salvo,L"LT");
+    const bool blink=(GetTickCount64()/125)%2==0;
+    int n=0;
+    const auto add=[&](bool bar,float share,const float* fill)->Line& {
+        Line& l=lines[n];
+        l.scale=kLineScale*0.85f;l.rgba=kHud;l.text[0]=L'\0';
+        pl[n]=ProteusLine{&l,bar,share,fill,nullptr};
+        ++n;
+        return l;
+    };
+    // The stance.
+    {
+        const bool stagger=p.mode==proteus::Mode::deploying || p.mode==proteus::Mode::stowing;
+        Line& l=add(stagger,p.stagger,kAmber);
+        switch(p.mode) {
+            case proteus::Mode::walk: Format(l,L"WALK");if(p.driver)Append(l,L"   [%ls] DEPLOY",mode);break;
+            case proteus::Mode::deploying: Format(l,L"DEPLOYING %d%%",static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
+            case proteus::Mode::deployed: Format(l,L"DEPLOYED");if(p.driver)Append(l,L"   [%ls] STOW",mode);l.rgba=kCyan;break;
+            case proteus::Mode::stowing: Format(l,L"STOWING %d%%",static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
+        }
+    }
+    // The shield.
+    {
+        const bool deployed=p.mode==proteus::Mode::deployed;
+        Line& l=add(deployed,p.heat,p.overheated ? kRed : p.heat>=0.7f ? kAmber : kYellow);
+        Format(l,deployed ? L"SHIELD %ls  HEAT %d%%" : L"FRONT SHIELD %ls",p.overheated ? L"OVERHEAT" : p.shieldUp ? L"UP" : L"OFF",
+               static_cast<int>(std::lround(p.heat*100.0f)));
+        if(p.driver)Append(l,L"   [%ls]",shield);
+        if(p.priority)Append(l,L"   ALLIES FOCUS");
+        l.rgba=p.overheated ? (blink ? kRed : kWhite) : p.shieldUp ? kCyan : kHudDim;
+    }
+    if(p.mode==proteus::Mode::deployed) {
+        // The barrier.
+        Line& b=add(true,p.barrier,HullColour(p.barrier));
+        pl[n-1].trailKey=&kBarrierKey;
+        Format(b,L"BARRIER %d%%",static_cast<int>(std::lround(p.barrier*100.0f)));
+        b.rgba=p.barrier>0.25f ? kHud : kAmber;
+        // The field and the gun.
+        Line& f=add(false,0.0f,nullptr);
+        Format(f,L"FIELD %d m  ALLIES %d",static_cast<int>(std::lround(p.fieldRadius)),p.allies);
+        if(p.gun)Append(f,p.keys ? L"   GUN [LMB]" : L"   GUN [RT]");
+        f.rgba=kTeal;
+    }
+    // The salvo.
+    {
+        Line& l=add(false,0.0f,nullptr);
+        if(!p.salvoArmed){Format(l,L"SALVO OFFLINE");l.rgba=kHudDim;}
+        else if(p.mode!=proteus::Mode::deployed){Format(l,L"SALVO  DEPLOY FIRST");l.rgba=kHudDim;}
+        else if(p.salvoLeft>0){Format(l,L"SALVO  %d IN THE AIR",p.salvoLeft);l.rgba=kRed;}
+        else if(p.salvoWait>0.0f){Format(l,L"SALVO %.1fs",p.salvoWait);l.rgba=kAmber;}
+        else if(!p.marked){Format(l,L"SALVO READY  MARK A TARGET");if(p.driver)Append(l,L" [%ls]",mark);l.rgba=kYellow;}
+        else{Format(l,L"SALVO READY");if(p.driver)Append(l,L" [%ls]",salvo);l.rgba=blink ? kRed : kYellow;}
+        if(p.marked)Append(l,L"   MARK %d m",static_cast<int>(std::lround(p.markRange)));
+    }
+    return n;
+}
+
+// The field's edge on the ground and the marked target (see above).
+void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const ProteusReadout& p,Line* lines,
+                  int* at) noexcept {
+    for(int i=0;i<p.ringCount && i<kProteusRing;++i) {
+        if(i%2)continue;   // dashed
+        float x0,y0,x1,y1;
+        const int k=(i+1)%p.ringCount;
+        if(sight::ToScreen(vp,p.ring[i],1.0f,width,height,&x0,&y0) && sight::ToScreen(vp,p.ring[k],1.0f,width,height,&x1,&y1))
+            Seg(drawer,ctx,x0,y0,x1,y1,2.0f*s,kTeal);
+    }
+    float x,y;
+    if(p.marked && sight::ToScreen(vp,p.markAt,1.0f,width,height,&x,&y)) {
+        const float r=16.0f*s,t=2.5f*s;
+        Seg(drawer,ctx,x,y-r,x+r,y,t,kRed);Seg(drawer,ctx,x+r,y,x,y+r,t,kRed);
+        Seg(drawer,ctx,x,y+r,x-r,y,t,kRed);Seg(drawer,ctx,x-r,y,x,y-r,t,kRed);
+        Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.85f,kRed,L"MARK %d m",static_cast<int>(std::lround(p.markRange)));
+    }
+}
+
+
+// The marks of every aimed weapon but the Katyusha's (launcher.cpp's), those landing on another's drawn once.
+void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
+                const StockExtras& x,Line* lines,int* at) noexcept {
+    for(int i=0;i<r.arms && i<kStockArms;++i) {
+        const StockArm& a=r.arm[i];
+        if(!a.aimed || a.lofted)continue;
+        if(i==0 && x.leadGun && a.kind!=RoundKind::homing)continue;   // the lead circle's gun
+        bool twin=false;
+        for(int k=0;k<i && !twin && i!=r.selected;++k) {
+            const StockArm& b=r.arm[k];
+            twin=b.aimed && !b.lofted && b.kind==a.kind && std::strcmp(a.label,b.label)==0 && vec::Dist(a.at,b.at)<kSamePoint;
+        }
+        if(twin)continue;
+        wchar_t name[24];
+        std::swprintf(name,24,i==r.selected ? L"[%hs]" : L"%hs",a.label);
+        StockMark(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
+    }
+}
+
+// The hull / turret indicator at (cx, cy): up is the way the camera looks (`up` its heading); the hull an outline turned
+// by its heading off it, the gun a line from the middle by its heading off it (headings < 0: none); `stops` (a Nix:
+// the torso's twist limits as headings, each < 0: none) two amber ticks outside the ring.
+void HullTurret(void* drawer,void* ctx,float cx,float cy,float s,float up,float hull,float gun,const float* stops=nullptr) noexcept {
+    const float r=kIndicatorR*s,t=2.0f*s;
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,t,24,kHudDim);
+    Tri(drawer,ctx,cx,cy-r+6.0f*s,cx,cy-r-2.0f*s,4.0f*s,kHudDim);   // the look's mark at the top
+    for(int k=0;stops && k<2;++k) {
+        if(stops[k]<0.0f)continue;
+        const float a=HdgDiff(stops[k],up)*kDeg,fx=std::sin(a),fy=-std::cos(a);
+        Seg(drawer,ctx,cx+fx*(r+2.0f*s),cy+fy*(r+2.0f*s),cx+fx*(r+9.0f*s),cy+fy*(r+9.0f*s),t,kAmber);
+    }
+    if(hull>=0.0f) {
+        const float a=HdgDiff(hull,up)*kDeg,fx=std::sin(a),fy=-std::cos(a),rx=-fy,ry=fx;   // its nose and right on the screen
+        const float l=0.62f*r,w=0.38f*r;
+        const float corner[4][2]={{l,w},{l,-w},{-l,-w},{-l,w}};
+        float px[4],py[4];
+        for(int k=0;k<4;++k){px[k]=cx+fx*corner[k][0]+rx*corner[k][1];py[k]=cy+fy*corner[k][0]+ry*corner[k][1];}
+        for(int k=0;k<4;++k)Seg(drawer,ctx,px[k],py[k],px[(k+1)%4],py[(k+1)%4],t,kHud);
+        Tri(drawer,ctx,cx+fx*l*0.55f,cy+fy*l*0.55f,cx+fx*l*0.95f,cy+fy*l*0.95f,w*0.5f,kHud);   // its front
+    }
+    if(gun>=0.0f) {
+        const float a=HdgDiff(gun,up)*kDeg,fx=std::sin(a),fy=-std::cos(a);
+        Arc(drawer,ctx,cx,cy,0.2f*r,0.0f,kTurn,t,10,kCyan);
+        Seg(drawer,ctx,cx+fx*0.2f*r,cy+fy*0.2f*r,cx+fx*1.05f*r,cy+fy*1.05f*r,3.0f*s,kCyan);
+    }
+}
+
+// A weapon's line: its label (bracketed when selected), the rounds of the magazine, its reload; its colour by its state.
+void ArmLine(Line& l,const StockArm& a,bool selected) noexcept {
+    Format(l,selected ? L"[%hs]" : L"%hs",a.label);
+    if(a.ammoMax>1)Append(l,L" %d/%d",a.ammo>0 ? a.ammo : 0,a.ammoMax);
+    else if(a.ammo>1)Append(l,L" %d",a.ammo);   // no magazine read (WeaponStatusOk false): the rounds alone
+    else if(a.ammo>0)Append(l,L" READY");
+    if(a.ammo<=0 && a.reload<1.0f) {
+        Append(l,L" RELOAD %d%%",static_cast<int>(std::lround(a.reload*100.0f)));
+        if(a.reloadSec>=0.0f)Append(l,L" %.1fs",a.reloadSec);
+        l.rgba=kAmber;
+    } else if(a.ammo<=0) {
+        Append(l,a.canReload ? L" RELOAD" : L" EMPTY");
+        l.rgba=a.canReload ? kAmber : kRed;
+    } else l.rgba=selected ? kCyan : kHud;
+    l.scale=kLineScale*0.85f;
+}
+
+// The EMC's line (EmcCue): charging, its share and an amber bar filling; the beam out, BEAM and the seconds left, its bar
+// emptying, white; after it, REARM; ready, the beams its rounds still make, green (a charge let go drains on its bar); no rounds, EMPTY, red.
+void EmcLine(Line& l,const EmcCue& c,float* bar,const float** colour) noexcept {
+    const float beam=Cfg().emcBeamSec>0.0f ? Cfg().emcBeamSec : 1.0f;
+    if(c.firing) {
+        Format(l,L"EMC BEAM %.1fs",c.beamLeft);
+        *bar=Unit(c.beamLeft/beam);*colour=kWhite;
+    } else if(c.charging) {
+        Format(l,L"EMC CHARGE %d%%",static_cast<int>(std::lround(Unit(c.charge)*100.0f)));
+        *bar=Unit(c.charge);*colour=kAmber;
+    } else if(c.empty) {
+        Format(l,L"EMC EMPTY");
+        *bar=0.0f;*colour=kRed;
+    } else if(c.rearm>0.0f) {
+        Format(l,L"EMC REARM %.1fs",c.rearm);
+        *bar=0.0f;*colour=kHudDim;
+    } else {
+        Format(l,L"EMC READY x%d  HOLD FIRE",c.beams);
+        *bar=Unit(c.charge);*colour=kGreen;
+    }
+    l.rgba=*colour;
+    l.scale=kLineScale*0.85f;
+}
+
+// A heading (sight::HeadingOf's degrees) of world yaw `yaw` (nix.h's: rad, atan2(x, z)).
+float HeadingOfYaw(float yaw) noexcept {
+    const float d[3]={std::sin(yaw),0.0f,std::cos(yaw)};
+    return sight::HeadingOf(d);
+}
+
+// The block left of the bottom centre (see above). A Nix: the ring's hull is its legs, its gun the torso (nix.cpp), the
+// twist's limits ticked and its angle on the info line. The drill tank: its drill's RPM and heat a line under the
+// weapons (DrillPanel's colours), OVERHEAT the warning. The EMC (emc.cpp): its charged beam a line under the weapons
+// and a bar under it (EmcLine). The readouts of a kind (the Nix's, the EMC's, the Proteus's) are taken only when they are
+// this vehicle's (their position on it). Out of lines (a crowded frame): the head always (it carries the warnings), then
+// as many weapons as fit, then the extras that fit whole; never the whole block dropped (with the stock gauge hidden,
+// stockgauge.cpp, it is the vehicle's only readout).
+void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float s,const StockHudReadout& r,const StockExtras& x,
+                Line* lines,int* at) noexcept {
+    int room=kMaxLines-*at-3;   // the head's three lines first
+    if(room<0)return;
+    const int want=r.arms<kStockArms ? r.arms : kStockArms;
+    const int arms=want<room ? want : room;
+    room-=arms;
+    const bool drillOn=x.drill && x.drill->maxRpm>0.0f && room>0;
+    room-=drillOn ? 1 : 0;
+    const EmcCue* const emc=x.emc && vec::Dist(x.emc->pos,r.pos)<2.0f && room>0 ? x.emc : nullptr;   // this vehicle's
+    room-=emc ? 1 : 0;
+    const ProteusReadout* const prot=x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f ? x.proteus : nullptr;   // this vehicle's
+    const bool protLines=prot && room>=kProteusLines;
+    Line& warn=lines[(*at)++];
+    Line& title=lines[(*at)++];
+    Line& info=lines[(*at)++];
+    Line* const arm=&lines[*at];
+    *at+=arms;
+    Line* const drill=drillOn ? &lines[(*at)++] : nullptr;
+    Line* const emcLine=emc ? &lines[(*at)++] : nullptr;
+    ProteusLine pl[kProteusLines]{};
+    const int prots=protLines ? ProteusLinesOf(*prot,&lines[*at],pl) : 0;
+    *at+=prots;
+    const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;   // the Nix readout is this vehicle's
+    bool missile=false,locked=false,dry=arms>0;
+    for(int i=0;i<r.threats && i<kStockThreats;++i){missile=missile || r.threatKind[i]==2;locked=locked || r.threatKind[i]==1;}
+    for(int i=0;i<arms;++i)dry=dry && r.arm[i].ammo<=0 && !r.arm[i].canReload;
+    const float hp=r.hpMax>0.0f ? Unit(r.hp/r.hpMax) : 0.0f;
+    const bool blink=(GetTickCount64()/125)%2==0;
+    if(missile){Format(warn,L"MISSILE!");warn.rgba=blink ? kRed : kWhite;}
+    else if(locked){Format(warn,L"LOCKED");warn.rgba=kYellow;}
+    else if(hp<0.25f && r.hpMax>0.0f){Format(warn,L"HULL CRITICAL");warn.rgba=blink ? kRed : kWhite;}
+    else if(drill && x.drill->overheated){Format(warn,L"DRILL OVERHEAT");warn.rgba=blink ? kRed : kWhite;}
+    else if(FuelLow(r.fuel)){Format(warn,L"LOW FUEL");warn.rgba=kAmber;}
+    else if(dry){Format(warn,L"NO AMMO");warn.rgba=kAmber;}
+    else{Format(warn,L"");warn.rgba=kHud;}
+    const char* const kind=prot ? "PROTEUS" : r.kind;
+    if(r.seat==0)Format(title,L"%hs",kind);
+    else Format(title,L"%hs  GUNNER %u",kind,r.seat);
+    Format(info,L"SPD %d km/h    HP %d%%",static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
+    if(nix)Append(info,L"    TWIST %+d",static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));   // right positive, as headings
+    if(r.stab)Append(info,r.stab==2 ? L"    STAB LAG" : L"    STAB");   // the gun stabilizer holds it (LAG: the hull outruns its drive)
+    wchar_t fuel[32];
+    FuelText(fuel,_countof(fuel),r.fuel);   // a bike's tank (the stock gauge's FUEL panel gone: stockgauge.cpp)
+    if(fuel[0])Append(info,L"    %ls",fuel);
+    warn.scale=kTitleScale;title.scale=info.scale=kLineScale;title.rgba=info.rgba=kHud;
+    for(int i=0;i<arms;++i)ArmLine(arm[i],r.arm[i],i==r.selected);
+    if(drill) {
+        const DrillCue& c=*x.drill;
+        const float share=Unit(c.rpm/c.maxRpm);
+        Format(*drill,L"DRILL %d RPM  HEAT %d%%%ls",static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(Unit(c.heat)*100.0f)),
+               c.overheated ? L"  OVERHEAT" : c.touching && c.rpm>0.0f ? L"  DRILLING" : L"");
+        drill->scale=kLineScale*0.85f;
+        drill->rgba=c.overheated ? kRed : c.heat>=0.7f ? HeatColour(Unit(c.heat),false) : share>=0.99f ? kGreen : share>0.0f ? kAmber : kCyan;
+    }
+    Line* const head[]={&warn,&title,&info};
+    for(Line* l:head){l->w=l->h=0.0f;if(text)MeasureAll(*text,l,1);}
+    for(int i=0;i<arms;++i){arm[i].w=arm[i].h=0.0f;if(text)MeasureAll(*text,&arm[i],1);}
+    if(drill){drill->w=drill->h=0.0f;if(text)MeasureAll(*text,drill,1);}
+    float emcBar=0.0f;
+    const float* emcColour=kHud;
+    if(emcLine) {
+        EmcLine(*emcLine,*emc,&emcBar,&emcColour);
+        emcLine->w=emcLine->h=0.0f;
+        if(text)MeasureAll(*text,emcLine,1);
+    }
+    for(int i=0;i<prots;++i){pl[i].line->w=pl[i].line->h=0.0f;if(text)MeasureAll(*text,pl[i].line,1);}
+    const float lineH=18.0f*s,gap=3.0f*s,barW=150.0f*s,barH=6.0f*s;
+    float h=(title.h>0.0f ? title.h : lineH)+gap+(info.h>0.0f ? info.h : lineH)+gap+barH+gap*2.0f;
+    for(int i=0;i<arms;++i)h+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;
+    if(drill)h+=(drill->h>0.0f ? drill->h : lineH)+gap;
+    if(emcLine)h+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap+barH+gap;
+    for(int i=0;i<prots;++i)h+=(pl[i].line->h>0.0f ? pl[i].line->h : lineH)+gap+(pl[i].bar ? barH+gap : 0.0f);
+    const float cx=width*0.5f-460.0f*s,tx=cx+kIndicatorR*s+18.0f*s;
+    float y=height*0.80f-h;
+    float hull=sight::HeadingOf(r.hull),gun=r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
+    const float look=r.lookOk ? sight::HeadingOf(r.look) : -1.0f;
+    float stops[2]={-1.0f,-1.0f};
+    if(nix) {
+        hull=HeadingOfYaw(x.nix->legsYaw);gun=sight::HeadingOf(x.nix->dir);
+        stops[0]=HeadingOfYaw(x.nix->legsYaw+x.nix->twistMin);stops[1]=HeadingOfYaw(x.nix->legsYaw+x.nix->twistMax);
+    }
+    const float up=look>=0.0f ? look : gun>=0.0f ? gun : hull;
+    HullTurret(drawer,ctx,cx,y+kIndicatorR*s+4.0f*s,s,up<0.0f ? 0.0f : up,hull,gun,nix ? stops : nullptr);
+    if(prot && prot->shieldUp) {   // the standing shield round the hull's nose, on the ring
+        const float half=prot->shieldHalfArc,a=HdgDiff(hull,up<0.0f ? 0.0f : up)*kDeg-1.5707963f;
+        Arc(drawer,ctx,cx,y+kIndicatorR*s+4.0f*s,(kIndicatorR+6.0f)*s,a-half,2.0f*half,3.0f*s,12,prot->overheated ? kRed : kCyan);
+    }
+    const float x0=tx;
+    warn.x=x0;warn.y=y-(warn.h>0.0f ? warn.h : 24.0f*s)-4.0f*s;
+    title.x=x0;title.y=y;y+=(title.h>0.0f ? title.h : lineH)+gap;
+    info.x=x0;info.y=y;y+=(info.h>0.0f ? info.h : lineH)+gap;
+    Bar(drawer,ctx,x0,y,barW,barH,hp,TrailOf(&kStockHpKey,hp,GetTickCount64()),HpColour(hp),s);
+    y+=barH+gap*2.0f;
+    for(int i=0;i<arms;++i){arm[i].x=x0;arm[i].y=y;y+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;}
+    if(drill){drill->x=x0;drill->y=y;y+=(drill->h>0.0f ? drill->h : lineH)+gap;}
+    if(emcLine) {
+        emcLine->x=x0;emcLine->y=y;y+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap;
+        Bar(drawer,ctx,x0,y,barW,barH,emcBar,emcBar,emcColour,s);
+        y+=barH+gap;   // the Proteus's lines (a vehicle has one or the other) under it
+    }
+    for(int i=0;i<prots;++i) {
+        pl[i].line->x=x0;pl[i].line->y=y;
+        y+=(pl[i].line->h>0.0f ? pl[i].line->h : lineH)+gap;
+        if(!pl[i].bar)continue;
+        const float trail=pl[i].trailKey ? TrailOf(pl[i].trailKey,pl[i].share,GetTickCount64()) : pl[i].share;
+        Bar(drawer,ctx,x0,y,barW,barH,pl[i].share,trail,pl[i].fill,s);
+        y+=barH+gap;
+    }
+}
+
+// The stock vehicle HUD, part by part (see above). A stock heli's are elsewhere (HeliHud, HeliGunSight, StockStores).
+void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
+                     const StockExtras& x,Line* lines,int* at) noexcept {
+    StockMarks(drawer,ctx,text,vp,width,height,s,r,x,lines,at);
+    if(x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f)ProteusMarks(drawer,ctx,text,vp,width,height,s,*x.proteus,lines,at);
+    const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;
+    const float hull=nix ? HeadingOfYaw(x.nix->legsYaw) : sight::HeadingOf(r.hull);
+    const float gun=nix ? sight::HeadingOf(x.nix->dir) : r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
+    if(gun>=0.0f)StockTape(drawer,ctx,text,width,height,s,gun,hull,lines,at);
+    else if(hull>=0.0f)StockTape(drawer,ctx,text,width,height,s,hull,-1.0f,lines,at);
+    StockBlock(drawer,ctx,text,width,height,s,r,x,lines,at);
+    if(Cfg().playerJetThreatHud && r.threats>0) {
+        PlayerJetSymbols y{};
+        std::memcpy(y.pos,r.pos,12);
+        y.threats=r.threats<kMostThreats ? r.threats : kMostThreats;
+        for(int i=0;i<y.threats && i<kStockThreats;++i){std::memcpy(y.threatAt[i],r.threatAt[i],12);y.threatKind[i]=r.threatKind[i];}
+        std::memcpy(y.nose,r.lookOk ? r.look : r.hull,12);   // the scope's up: where the player looks (else the hull)
+        // The warnings' RWR scope and the marks (no launch cue: ours); the scope right of the centre, clear of the block.
+        Threats(drawer,ctx,text,vp,width,height,s,y,0,lines,at,1.0f);
+    }
+}
+
+// A stock heli's stores for the helicopter HUD's bottom line (HeliStrip): each weapon, its rounds, its reload.
+void StockStores(const StockHudReadout& r,wchar_t* out,std::size_t size) noexcept {
+    out[0]=L'\0';
+    std::size_t n=0;
+    for(int i=0;i<r.arms && i<kStockArms;++i) {
+        Line l{};
+        ArmLine(l,r.arm[i],i==r.selected);
+        const int k=_snwprintf_s(out+n,size-n,_TRUNCATE,L"%ls%ls",n ? L"   " : L"",l.text);
+        if(k<0)break;
+        n+=static_cast<std::size_t>(k);
+    }
+}
+
 // What is drawn, logged when it changes (Debug, once in 10 s at most).
 void DrawLog(int shown,int panels,const Line* lines,int count,int width,int height) noexcept {
     static int lastShown=-1,lastPanels=-1;
@@ -1082,6 +2028,8 @@ bool InstallHud() noexcept {
         return quadOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+
+bool HudReady() noexcept { return quadOk; }
 
 void HudSee(unsigned char* v) noexcept {
     if(!Cfg().vehicleHud || !quadOk || v[kDead] || IsSub(v))return;
@@ -1135,11 +2083,25 @@ void HudPublish() noexcept {
     s.count=0;
     s.cockpit=PlayerJetHud(&s.jet);
     s.heli=PlayerHeliCue(&s.heliCue);
+    s.heliFly=PlayerHeliHud(&s.heliHud);   // the HUD (HeliFlightHud), or only the mouse-aim flight's square
     s.drill=PlayerDrillCue(&s.drillCue);
+    s.emc=PlayerEmcCue(&s.emcCue);
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
+    s.turret=PlayerTurretAim(&s.turretAim);
+    s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
+    s.warned=WarnLatest(&s.warn);   // the aircraft's warnings (warn.cpp WarnTick, this frame's: it runs first)
+    s.seats=PlayerSeatPrompt(&s.seatPrompt);
+    s.turretCamOk=PlayerTurretCam(&s.turretCam);   // the turret camera (turretcam.cpp): the gun's mark, free look
+    s.nix=PlayerNixTorso(&s.nixTorso);   // the Nix's legs and torso (nix.cpp): the stock HUD's hull / turret ring
+    // The stock weapon gauge gives way (stockgauge.cpp, HideStockGauges) where HudDraw lists the vehicle's weapons and
+    // their rounds: a plugin aircraft's stores line (CockpitStrip, the old Cockpit, HeliStrip), StockBlock, a stock heli's
+    // HeliStrip (HeliFlightHud). Its text must draw: the lists are text.
+    const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
+    SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists));
+    s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shields, salvo, field (proteus.cpp)
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -1210,8 +2172,347 @@ bool CameraRay(float* eye,float* dir) noexcept {
     return c[3]>0.0f && std::isfinite(eye[0]+eye[1]+eye[2]);
 }
 
+// --- The map view's marks (map.cpp; README 地图, docs/camera-re.md §8): drawn over the real world the map's camera
+// shows, in place of every other HUD element while it is open: a ground grid (its lines a round step apart, through the
+// player, labelled with their distance from the player and the side: north is the world's +z, east its -x, the game's
+// level right of +z), the north arrow, a scale bar, the player, the squad, friendly vehicles, aircraft and carriers, the
+// enemies the lock-on registry knows, the objective markers, a legend and the keys. ---
+namespace {
+alignas(16) const float kMapGrid[4]={0.85f,0.95f,1.0f,0.28f};
+alignas(16) const float kMapAxis[4]={0.85f,0.95f,1.0f,0.6f};
+alignas(16) const float kMapBand[4]={0.0f,0.0f,0.0f,0.45f};
+alignas(16) const float kMapSquad[4]={0.35f,1.0f,0.45f,1.0f};
+alignas(16) const float kMapAlly[4]={0.45f,0.85f,0.5f,0.8f};
+alignas(16) const float kMapEnemy[4]={1.0f,0.22f,0.18f,1.0f};
+alignas(16) const float kMapMarker[4]={1.0f,0.85f,0.2f,1.0f};
+constexpr int kMapLabels=12;             // at most this many labels an axis (every other line past that)
+constexpr float kMapLabelGap=34.0f;      // px (at 1080 lines) between two labels of an axis
+constexpr float kMapFarFade=0.45f;       // a pin three times the focus's distance away (and on) drawn this opaque
+constexpr float kMapLockNear=40.0f;      // m: a lock point this near an enemy's pin brackets that pin
+constexpr int kMapLegendRows=13;
+constexpr float kMapGuard=1.25f;         // a grid line is cut to this much of the screen's half size round it
+constexpr float kMapNearW=1.0f;          // ...and to this clip w (m in front of the eye)
+
+// The world segment a..b, cut in clip space to the part in front of the eye and on the screen (with a guard band:
+// Liang-Barsky on the planes w >= kMapNearW, |x|, |y| <= kMapGuard w), drawn as one line: a straight line stays
+// straight in a perspective view, and a line whose ends are both off the screen may still cross it.
+void MapLine(void* drawer,void* ctx,const float* vp,float width,float height,const float* a,const float* b,float t,const float* rgba) noexcept {
+    float ca[4],cb[4];
+    for(int k=0;k<4;++k) {
+        ca[k]=a[0]*vp[k]+a[1]*vp[4+k]+a[2]*vp[8+k]+vp[12+k];
+        cb[k]=b[0]*vp[k]+b[1]*vp[4+k]+b[2]*vp[8+k]+vp[12+k];
+    }
+    // Each plane as d(c) >= 0, linear in the clip coordinates.
+    const float da[5]={ca[3]-kMapNearW,kMapGuard*ca[3]+ca[0],kMapGuard*ca[3]-ca[0],kMapGuard*ca[3]+ca[1],kMapGuard*ca[3]-ca[1]};
+    const float db[5]={cb[3]-kMapNearW,kMapGuard*cb[3]+cb[0],kMapGuard*cb[3]-cb[0],kMapGuard*cb[3]+cb[1],kMapGuard*cb[3]-cb[1]};
+    float t0=0.0f,t1=1.0f;
+    for(int i=0;i<5;++i) {
+        if(da[i]<0.0f && db[i]<0.0f)return;
+        if(da[i]<0.0f)t0=std::fmax(t0,da[i]/(da[i]-db[i]));
+        else if(db[i]<0.0f)t1=std::fmin(t1,da[i]/(da[i]-db[i]));
+    }
+    if(!(t0<t1))return;
+    float p[2][2];
+    for(int e=0;e<2;++e) {
+        const float f=e ? t1 : t0;
+        float c[4];
+        for(int k=0;k<4;++k)c[k]=ca[k]+(cb[k]-ca[k])*f;
+        p[e][0]=width*0.5f*(c[0]/c[3])+width*0.5f;p[e][1]=height*0.5f-height*0.5f*(c[1]/c[3]);
+    }
+    Seg(drawer,ctx,p[0][0],p[0][1],p[1][0],p[1][1],t,rgba);
+}
+
+// A distance on the map: "850 m" / "1.5 km".
+void MapDistance(wchar_t* out,std::size_t size,float m) noexcept {
+    if(m<1000.0f)_snwprintf_s(out,size,_TRUNCATE,L"%.0f m",m);
+    else _snwprintf_s(out,size,_TRUNCATE,L"%.1f km",m*0.001f);
+}
+
+// Whether a grid label at (x, y) keeps clear of the bands (title, keys), the legend and the scale bar.
+bool MapLabelFree(float x,float y,float width,float height,float s) noexcept {
+    if(y<60.0f*s || y>height-60.0f*s || x>width-140.0f*s)return false;
+    if(x<240.0f*s && y>height*0.28f && y<height*0.30f+static_cast<float>(kMapLegendRows)*28.0f*s+20.0f*s)return false;   // the legend
+    return !(x<420.0f*s && y>height-140.0f*s);                                             // the scale bar (MapScale)
+}
+
+// The grid, its axes through the player, its labels (where each line meets the other axis through the focus; one at
+// least kMapLabelGap px from the last one drawn of its axis: they crowd toward the horizon).
+void MapGrid(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    const float step=mapcam::GridStep(m.height);
+    const int n=mapcam::GridLines(m.height,m.pitch,step);
+    const float y=m.focus[1],reach=static_cast<float>(n)*step;
+    for(int axis=0;axis<2;++axis) {   // 0: the lines of constant x (east / west of the player), 1: of constant z
+        const int c=axis*2,o=2-c;
+        const int k0=static_cast<int>(std::floor((m.focus[c]-reach-m.me[c])/step)),k1=static_cast<int>(std::ceil((m.focus[c]+reach-m.me[c])/step));
+        const int every=(k1-k0+1)>kMapLabels*2 ? 2 : 1;
+        float lastX=-1e9f,lastY=-1e9f;
+        for(int k=k0;k<=k1;++k) {
+            float a[3],b[3];
+            a[1]=b[1]=y;a[c]=b[c]=m.me[c]+static_cast<float>(k)*step;
+            a[o]=m.focus[o]-reach;b[o]=m.focus[o]+reach;
+            MapLine(drawer,ctx,vp,width,height,a,b,(k==0 ? 2.0f : 1.0f)*s,k==0 ? kMapAxis : kMapGrid);
+            if(k==0 || k%every)continue;
+            float p[3];p[1]=y;p[c]=a[c];p[o]=m.focus[o];
+            float x,yy,depth;
+            if(!Project(vp,p,width,height,&x,&yy,&depth) || !MapLabelFree(x,yy,width,height,s))continue;
+            if(std::fabs(x-lastX)<kMapLabelGap*s && std::fabs(yy-lastY)<kMapLabelGap*s)continue;
+            lastX=x;lastY=yy;
+            // +x is west of +z (north), -x east; +z north, -z south.
+            const wchar_t* side=axis==0 ? (k>0 ? L"W" : L"E") : (k>0 ? L"N" : L"S");
+            wchar_t d[24];MapDistance(d,_countof(d),std::fabs(static_cast<float>(k))*step);
+            Label(text,lines,at,x+4.0f*s,yy-10.0f*s,0,kLineScale*0.7f,kMapAxis,L"%ls %ls",side,d);
+        }
+    }
+}
+
+// The north arrow (top right): north's way on the screen from the focus.
+void MapCompass(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    const float north[3]={m.focus[0],m.focus[1],m.focus[2]+mapcam::GridStep(m.height)};
+    float x0,y0,x1,y1,depth;
+    if(!Project(vp,m.focus,width,height,&x0,&y0,&depth) || !Project(vp,north,width,height,&x1,&y1,&depth))return;
+    float dx=x1-x0,dy=y1-y0;
+    const float len=std::sqrt(dx*dx+dy*dy);
+    if(!(len>0.5f))return;
+    dx/=len;dy/=len;
+    const float r=34.0f*s,cx=width-70.0f*s,cy=110.0f*s;
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,2.0f*s,32,kMapAxis);
+    Tri(drawer,ctx,cx,cy,cx+dx*r,cy+dy*r,8.0f*s,kMapEnemy);     // north red
+    Tri(drawer,ctx,cx,cy,cx-dx*r,cy-dy*r,8.0f*s,kWhite);        // south white
+    Label(text,lines,at,cx+dx*(r+14.0f*s),cy+dy*(r+14.0f*s),1,kLineScale*0.8f,kWhite,L"N");
+}
+
+// The scale bar (bottom left): one grid step across the screen at the focus.
+void MapScale(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    const float step=mapcam::GridStep(m.height);
+    float r[3];mapcam::Right(m.yaw,r);
+    const float b[3]={m.focus[0]+r[0]*step,m.focus[1],m.focus[2]+r[2]*step};
+    float x0,y0,x1,y1,depth;
+    if(!Project(vp,m.focus,width,height,&x0,&y0,&depth) || !Project(vp,b,width,height,&x1,&y1,&depth))return;
+    const float len=std::sqrt((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0));
+    if(!(len>4.0f) || len>width*0.5f)return;
+    const float x=40.0f*s,y=height-110.0f*s;
+    Rect(drawer,ctx,x,y-2.0f*s,x+len,y+2.0f*s,kWhite);
+    Rect(drawer,ctx,x-1.0f*s,y-8.0f*s,x+1.0f*s,y+8.0f*s,kWhite);
+    Rect(drawer,ctx,x+len-1.0f*s,y-8.0f*s,x+len+1.0f*s,y+8.0f*s,kWhite);
+    wchar_t d[24];MapDistance(d,_countof(d),step);
+    Label(text,lines,at,x+len*0.5f,y-18.0f*s,1,kLineScale*0.75f,kWhite,L"%ls",d);
+}
+
+// A hollow square / diamond of half size `h` round (x, y).
+void MapBox(void* drawer,void* ctx,float x,float y,float h,float t,const float* rgba) noexcept {
+    Seg(drawer,ctx,x-h,y-h,x+h,y-h,t,rgba);Seg(drawer,ctx,x+h,y-h,x+h,y+h,t,rgba);
+    Seg(drawer,ctx,x+h,y+h,x-h,y+h,t,rgba);Seg(drawer,ctx,x-h,y+h,x-h,y-h,t,rgba);
+}
+void MapDiamond(void* drawer,void* ctx,float x,float y,float h,float t,const float* rgba) noexcept {
+    Seg(drawer,ctx,x,y-h,x+h,y,t,rgba);Seg(drawer,ctx,x+h,y,x,y+h,t,rgba);
+    Seg(drawer,ctx,x,y+h,x-h,y,t,rgba);Seg(drawer,ctx,x-h,y,x,y-h,t,rgba);
+}
+// Corner brackets round (x, y), half size `h` (a lock, the nearest enemy).
+void MapBrackets(void* drawer,void* ctx,float x,float y,float h,float t,const float* rgba) noexcept {
+    const float k=h*0.4f;
+    for(int sx=-1;sx<=1;sx+=2)for(int sy=-1;sy<=1;sy+=2) {
+        const float cx=x+static_cast<float>(sx)*h,cy=y+static_cast<float>(sy)*h;
+        Seg(drawer,ctx,cx,cy,cx-static_cast<float>(sx)*k,cy,t,rgba);Seg(drawer,ctx,cx,cy,cx,cy-static_cast<float>(sy)*k,t,rgba);
+    }
+}
+
+// The pins' colours by side, and the icon's shape by kind (the user, 2026-10-06: "3D 显示各个友方微缩模型或者标记，
+// 敌方也显示"): a constant size on the screen, at the top of the pin's stem (or, an aircraft, at the unit itself).
+const float* MapColour(MapKind kind) noexcept {
+    switch(kind) {
+    case MapKind::squad: case MapKind::vehicle: return kMapSquad;
+    case MapKind::ally: return kMapAlly;
+    case MapKind::air: case MapKind::carrier: return kCyan;
+    case MapKind::marker: return kMapMarker;
+    default: return kMapEnemy;
+    }
+}
+// `rgba` with its alpha times `fade` (into `out`, 16-aligned as the quad reads it).
+const float* MapFade(const float* rgba,float fade,float* out) noexcept {
+    out[0]=rgba[0];out[1]=rgba[1];out[2]=rgba[2];out[3]=rgba[3]*fade;
+    return out;
+}
+
+// One icon at (x, y): `dx, dy` its heading on the screen (0, 0: none), `hp` its HP bar (<0: none).
+void MapIcon(void* drawer,void* ctx,float x,float y,float s,MapKind kind,std::uint8_t flags,float dx,float dy,float hp,float fade) noexcept {
+    alignas(16) float c[4],b[4];
+    const float* rgba=MapFade(MapColour(kind),fade,c);
+    const float t=2.0f*s;
+    float tick=0.0f;   // the heading tick's start, from the centre
+    switch(kind) {
+    case MapKind::squad: Rect(drawer,ctx,x-4.5f*s,y-4.5f*s,x+4.5f*s,y+4.5f*s,rgba);break;
+    case MapKind::ally: Rect(drawer,ctx,x-3.5f*s,y-3.5f*s,x+3.5f*s,y+3.5f*s,rgba);break;
+    case MapKind::vehicle: MapBox(drawer,ctx,x,y,8.0f*s,t,rgba);Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,rgba);tick=8.0f*s;break;
+    case MapKind::air: MapDiamond(drawer,ctx,x,y,9.0f*s,t,rgba);Rect(drawer,ctx,x-2.0f*s,y-2.0f*s,x+2.0f*s,y+2.0f*s,rgba);tick=9.0f*s;break;
+    case MapKind::carrier: MapBox(drawer,ctx,x,y,13.0f*s,t,rgba);MapBox(drawer,ctx,x,y,7.0f*s,t,rgba);tick=13.0f*s;break;
+    case MapKind::enemy:
+        if(flags&kMapLarge){MapBox(drawer,ctx,x,y,11.0f*s,t,rgba);Rect(drawer,ctx,x-6.0f*s,y-6.0f*s,x+6.0f*s,y+6.0f*s,rgba);tick=11.0f*s;}
+        else Tri(drawer,ctx,x,y-5.0f*s,x,y+6.0f*s,6.0f*s,rgba);   // a small one: a red triangle, its point down onto it
+        break;
+    case MapKind::enemyAir:
+        MapDiamond(drawer,ctx,x,y,(flags&kMapLarge ? 12.0f : 8.0f)*s,t,rgba);Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,rgba);
+        tick=(flags&kMapLarge ? 12.0f : 8.0f)*s;
+        break;
+    case MapKind::marker: Arc(drawer,ctx,x,y,13.0f*s,0.0f,kTurn,t,20,rgba);Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,rgba);break;
+    case MapKind::lock: break;
+    }
+    if(tick>0.0f && (dx!=0.0f || dy!=0.0f))Seg(drawer,ctx,x+dx*tick,y+dy*tick,x+dx*(tick+8.0f*s),y+dy*(tick+8.0f*s),t,rgba);
+    if(hp>=0.0f)Bar(drawer,ctx,x-17.0f*s,y+15.0f*s,34.0f*s,4.0f*s,hp,hp,MapFade(HpColour(hp),fade,b),s);
+}
+
+// A small enemy's dot at (x, y): filled on the ground, hollow flying (kMapFlying).
+void MapDot1(void* drawer,void* ctx,float x,float y,float s,std::uint8_t flags,const float* rgba) noexcept {
+    if(flags&kMapFlying)MapBox(drawer,ctx,x,y,3.5f*s,1.5f*s,rgba);
+    else Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,rgba);
+}
+
+// Where a unit's pin is on the screen: its icon (`ix`, `iy`), its stem's other end (`bx`, `by`; false: none shown), its
+// heading on the screen, its depth. A ground unit's stem stands `pin` m up from it to the icon; an aircraft's icon is
+// on the aircraft, its stem down to the ground under it (its height read off the stem).
+struct Pin { float ix,iy,bx,by,dx,dy,depth; bool stem; };
+bool MapPin(const float* vp,float width,float height,const MapUnit& u,float pin,Pin* p) noexcept {
+    const bool air=u.kind==MapKind::air || u.kind==MapKind::carrier || u.kind==MapKind::enemyAir || u.kind==MapKind::lock;
+    float top[3]={u.pos[0],u.pos[1],u.pos[2]},base[3]={u.pos[0],u.pos[1],u.pos[2]};
+    if(air)base[1]=u.ground;
+    else top[1]+=pin;
+    float depth;
+    if(!Project(vp,top,width,height,&p->ix,&p->iy,&p->depth))return false;
+    p->stem=(!air || u.pos[1]-u.ground>1.0f) && u.kind!=MapKind::lock && Project(vp,base,width,height,&p->bx,&p->by,&depth);
+    p->dx=p->dy=0.0f;
+    if(u.dir[0]!=0.0f || u.dir[1]!=0.0f) {
+        const float ahead[3]={top[0]+u.dir[0]*pin*0.5f,top[1],top[2]+u.dir[1]*pin*0.5f};
+        float x,y;
+        if(Project(vp,ahead,width,height,&x,&y,&depth)) {
+            const float dx=x-p->ix,dy=y-p->iy,len=std::sqrt(dx*dx+dy*dy);
+            if(len>0.5f){p->dx=dx/len;p->dy=dy/len;}
+        }
+    }
+    return true;
+}
+
+void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    const mapcam::View view{{m.focus[0],m.focus[1],m.focus[2]},m.yaw,m.pitch,m.height};
+    const float dist=mapcam::Distance(view),pin=mapcam::PinHeight(dist,m.pitch);
+    // Depth fade: full at the focus's distance and nearer, kMapFarFade past three times it.
+    auto fade=[&](float depth){ return 1.0f-(1.0f-kMapFarFade)*Unit((depth-dist)/(2.0f*dist)); };
+    alignas(16) float c[4];
+    // The small enemies first: flat dots (no pin), filled on the ground, hollow flying.
+    for(int i=0;i<m.dots && i<kMapDots;++i) {
+        const MapDot& d=m.dot[i];
+        float x,y,depth;
+        if(!Project(vp,d.pos,width,height,&x,&y,&depth))continue;
+        MapDot1(drawer,ctx,x,y,s,d.flags,MapFade(kMapEnemy,fade(depth),c));
+        if(d.flags&kMapNearest)MapBrackets(drawer,ctx,x,y,10.0f*s,2.0f*s,MapFade(kAmber,fade(depth),c));
+    }
+    // The large enemies' pins, the friendly side over them, the markers and the locks on top.
+    static const MapKind kOrder[]={MapKind::enemy,MapKind::enemyAir,MapKind::ally,MapKind::squad,MapKind::vehicle,MapKind::air,
+                                   MapKind::carrier,MapKind::marker};
+    for(MapKind kind:kOrder) {
+        for(int i=0;i<m.count && i<kMapUnits;++i) {
+            const MapUnit& u=m.unit[i];
+            Pin p;
+            if(u.kind!=kind || !MapPin(vp,width,height,u,pin,&p))continue;
+            const float f=fade(p.depth);
+            if(p.stem) {
+                Seg(drawer,ctx,p.bx,p.by,p.ix,p.iy,1.5f*s,MapFade(MapColour(kind),f*0.7f,c));
+                if(kind==MapKind::air || kind==MapKind::carrier || kind==MapKind::enemyAir)Arc(drawer,ctx,p.bx,p.by,4.0f*s,0.0f,kTurn,1.5f*s,10,c);   // its ground point
+            }
+            MapIcon(drawer,ctx,p.ix,p.iy,s,kind,u.flags,p.dx,p.dy,u.flags&kMapLarge ? u.hp : -1.0f,f);
+            if(u.flags&kMapNearest)MapBrackets(drawer,ctx,p.ix,p.iy,16.0f*s,2.0f*s,MapFade(kAmber,f,c));
+            if(kind==MapKind::marker && MapLabelFree(p.ix,p.iy-24.0f*s,width,height,s)) {
+                wchar_t d[24];MapDistance(d,_countof(d),vec::Flat(u.pos,m.me));
+                Label(text,lines,at,p.ix,p.iy-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
+            }
+        }
+    }
+    // The locks: brackets on the enemy (a large one's pin, a small one's dot) nearest the lock point within kMapLockNear m,
+    // else on the point itself.
+    auto d2=[](const float* a,const float* b){ const float d[3]={a[0]-b[0],a[1]-b[1],a[2]-b[2]};return d[0]*d[0]+d[1]*d[1]+d[2]*d[2]; };
+    for(int i=0;i<m.count && i<kMapUnits;++i) {
+        const MapUnit& l=m.unit[i];
+        if(l.kind!=MapKind::lock)continue;
+        const float* rgba=l.flags&kMapAcquiring ? kAmber : kMapEnemy;
+        const MapUnit* on=&l;
+        const MapDot* dot=nullptr;
+        float best=kMapLockNear*kMapLockNear;
+        for(int k=0;k<m.count && k<kMapUnits;++k) {
+            const MapUnit& u=m.unit[k];
+            if((u.kind==MapKind::enemy || u.kind==MapKind::enemyAir) && d2(u.pos,l.pos)<best){best=d2(u.pos,l.pos);on=&u;}
+        }
+        for(int k=0;k<m.dots && k<kMapDots;++k)if(d2(m.dot[k].pos,l.pos)<best){best=d2(m.dot[k].pos,l.pos);dot=&m.dot[k];}
+        float x,y,depth;
+        Pin p;
+        if(dot){if(Project(vp,dot->pos,width,height,&x,&y,&depth))MapBrackets(drawer,ctx,x,y,13.0f*s,2.5f*s,rgba);}
+        else if(MapPin(vp,width,height,*on,pin,&p))MapBrackets(drawer,ctx,p.ix,p.iy,20.0f*s,2.5f*s,rgba);
+    }
+    // The player: a white pin, a ring and an arrow along their heading.
+    MapUnit me{};
+    std::memcpy(me.pos,m.me,12);me.ground=m.me[1];me.dir[0]=m.meDir[0];me.dir[1]=m.meDir[2];
+    Pin p;
+    if(!MapPin(vp,width,height,me,pin,&p))return;
+    if(p.stem)Seg(drawer,ctx,p.bx,p.by,p.ix,p.iy,2.0f*s,kWhite);
+    Arc(drawer,ctx,p.ix,p.iy,11.0f*s,0.0f,kTurn,2.5f*s,24,kWhite);
+    if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
+}
+
+// The legend (left), the title and the keys (top and bottom bands).
+void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    Rect(drawer,ctx,0.0f,0.0f,width,46.0f*s,kMapBand);
+    Rect(drawer,ctx,0.0f,height-46.0f*s,width,height,kMapBand);
+    wchar_t h[24],g[24];
+    MapDistance(h,_countof(h),m.height);MapDistance(g,_countof(g),mapcam::GridStep(m.height));
+    Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,L"MAP   height %ls   grid %ls%ls",h,g,m.follow ? L"   FOLLOW" : L"");
+    if(m.pad)Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,
+                   L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close");
+    else {
+        wchar_t key[32];KeyName(m.mapKey,key,32);
+        Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,
+              L"LMB drag / WASD pan   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",key);
+    }
+    struct Entry { MapKind kind; std::uint8_t flags; const wchar_t* name; };
+    static const Entry kLegend[]={{MapKind::squad,0,L"SQUAD"},{MapKind::ally,0,L"FRIENDLY"},{MapKind::vehicle,0,L"VEHICLE"},
+                                  {MapKind::air,0,L"AIRCRAFT"},{MapKind::carrier,0,L"CARRIER"},
+                                  {MapKind::enemy,kMapLarge,L"LARGE ENEMY"},{MapKind::enemyAir,kMapLarge,L"LARGE ENEMY AIR"},
+                                  {MapKind::marker,0,L"OBJECTIVE"}};
+    float y=height*0.30f;
+    Arc(drawer,ctx,40.0f*s,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"YOU");
+    for(const Entry& e:kLegend) {
+        y+=28.0f*s;
+        MapIcon(drawer,ctx,40.0f*s,y,s,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
+        Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",e.name);
+    }
+    y+=28.0f*s;
+    MapDot1(drawer,ctx,40.0f*s,y,s,0,kMapEnemy);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"ENEMY");
+    y+=28.0f*s;
+    MapDot1(drawer,ctx,40.0f*s,y,s,kMapFlying,kMapEnemy);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"ENEMY FLYING");
+    y+=28.0f*s;
+    MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kMapEnemy);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"LOCK");
+    y+=28.0f*s;
+    MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kAmber);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"NEAREST ENEMY");
+}
+
+// The map view open: its marks drawn (true), nothing else of the HUD.
+bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    static MapReadout m;   // the draw thread's (too big for its stack)
+    if(!PlayerMap(&m))return false;
+    MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapText(drawer,ctx,text,width,height,s,m,lines,at);
+    return true;
+}
+}  // namespace
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
-    if(viewProj)KeepViewProj(viewProj);
+    // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
+    // hold where the player left them.
+    if(viewProj && !MapOwnsView())KeepViewProj(viewProj);
     if(!quadOk || !viewProj || !ctx || !viewport)return;   // the carriers' bars are drawn whatever VehicleHud says
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
@@ -1224,23 +2525,68 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines];
         int at=0,shown=0;
+        if(MapScreen(drawer,ctx,t,viewProj,width,height,s,lines,&at)) {   // the map view: its marks alone
+            if(t && textOk)DrawAll(*t,lines,at);
+            FreeText(text);
+            return;
+        }
         const ULONGLONG now=GetTickCount64();
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
+        const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
+        const ULONGLONG launchAt=snap.warned ? snap.warn.launchAt : 0;
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
             if(snap.jet.bomb)ImpactMark(drawer,ctx,viewProj,width,height,s,snap.jet);
             else LockMark(drawer,ctx,viewProj,width,height,s,snap.jet);
-            FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,lines,&at);
-            Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
-            GearPanel(drawer,ctx,t,width,height,s,lines,&at,now);
+            if(snap.jet.rotor && snap.jet.heli.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli.aim,lines,&at);   // HUD or not
+            if(rotorHud) {
+                HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.jet.heli,snap.jet.sym,launchAt,lines,&at);
+                if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
+                wchar_t stores[128];
+                StoresText(stores,_countof(stores),snap.jet);
+                HeliStrip(t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,lines,&at);
+            } else {
+                FighterHud(drawer,ctx,t,viewProj,width,height,s,snap.jet,launchAt,lines,&at);
+                if(Cfg().playerJetFlightHud)CockpitStrip(t,width,height,s,snap.jet,lines,&at);
+                else Cockpit(drawer,ctx,t,width,height,s,snap.jet,lines,&at);
+            }
+            const bool annunciated=snap.warned && (rotorHud || Cfg().playerJetFlightHud);   // else the old panel's text
+            if(annunciated)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
+            GearPanel(drawer,ctx,t,width,height,s,annunciated,lines,&at,now);
         }
-        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
+        // A stock heli: the mouse-aim flight's square whenever the mouse flies it (HeliMouseAim), the helicopter HUD round it
+        // with HeliFlightHud (off: the takeoff panel, as before).
+        const bool heliFresh=now-snap.tick<=kFreshMs && snap.heliFly && !snap.cockpit,heliHud=heliFresh && Cfg().heliFlightHud;
+        if(heliFresh && snap.heliHud.f.aiming)FlightAim(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f.aim,lines,&at);
+        if(heliHud) {
+            HeliHud(drawer,ctx,t,viewProj,width,height,s,snap.heliHud.f,snap.heliHud.sym,launchAt,lines,&at);
+            wchar_t stores[192];
+            const bool own=snap.stock && snap.stockHud.heli;   // its weapons, rounds and reloads (vhud.cpp)
+            if(own)StockStores(snap.stockHud,stores,_countof(stores));
+            HeliStrip(t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,own ? stores : nullptr,lines,&at);
+            if(snap.warned)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
+        }
+        if(now-snap.tick<=kFreshMs && snap.heli && !snap.cockpit && !heliHud)HeliPanel(drawer,ctx,t,width,height,s,snap.heliCue,lines,&at);
+        // The stock vehicles' HUD up (StockVehicleHud): it carries the drill's line and the gun's marks, so DrillPanel and
+        // TurretMark's square give way to it.
+        const bool stockHud=now-snap.tick<=kFreshMs && snap.stock && !snap.cockpit && !snap.stockHud.heli;
+        if(now-snap.tick<=kFreshMs && snap.drill && !snap.cockpit && !snap.heli && !stockHud)DrillPanel(drawer,ctx,t,width,height,s,snap.drillCue,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.turretCamOk && !snap.cockpit)TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,lines,&at);
+        if(stockHud) {
+            const bool fresh=now-snap.tick<=kFreshMs;
+            const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
+                                snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
+                                fresh && snap.emc ? &snap.emcCue : nullptr,
+                                fresh && snap.proteus ? &snap.proteusRo : nullptr};
+            StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
+        }
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

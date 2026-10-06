@@ -41,6 +41,45 @@ Why: the stock Keplers deal a third to a half of the damage per second of same-l
 helicopters, with under half their durability, and the shortest range of any of them. The Bohr
 already out-damages the same-level Barrias TZ4 but has well under half its durability.
 
+## Your own turret: auto-aim or a lead circle, lock what you look at
+
+In a gun position the plugin aims (the Kepler, Bohr and howitzer turrets; the Titan's and the Ranger tanks' gunner
+seats; driving those tanks you get the lock too):
+
+- **Two modes**, switched with **Z** (pad: none by default, since L3 is EDF6VehicleCrew's free look; ini `AimModeKey` / `AimModeButton`, the starting one `AimMode`):
+  - **Auto-aim** (default, as before): the turret turns itself onto the target, leading it on the round's arc.
+  - **Lead circle**: the turret is yours alone; the HUD draws a green **lead circle**: put the gun's line through its
+    centre and the round meets the target where the target will be (the gun's real round speed and drop, the target's
+    tracked velocity: the auto-aim's own solve). A white cross shows where the gun's line points now at that range:
+    the cross in the circle hits. Range and flight time under it; dim with `OUT OF RANGE` when the round's life falls
+    short. The flak's time fuse still bursts at the target's range.
+- **Lock by look**: **Q** (pad: X, the jets' next-target button; ini `LockKey` / `LockButton`) locks the enemy **nearest
+  the screen's centre**: within `LockCone` (20 deg) of the view, within `LockRange` (0 = the gun's range), not behind
+  terrain or a building (while EDF6VehicleCrew's map is open, Q turns the map: this plugin reads none of its keys then).
+  Press again for the next one out from the centre, round to the nearest after the last. **Hold**
+  it (`LockClearMs`, 0.6 s) to let the lock go. Locked: a yellow square closing in while it settles (~0.4 s), then the
+  jets' red diamond; auto-aim fights **that target only** (it waits when the gun cannot reach it); the lead circle is on
+  it; the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops
+  being lockable, gets 1.5x the lock range away, or you leave the seat. Unlocked, the auto-aim picks its own targets as
+  before and the lead circle shows on its pick.
+- A line low on the screen names the mode and both bindings (red while locked).
+- **With EDF6VehicleCrew's turret camera** (its `DecoupledTurretCam=1`, the default: the mouse / right stick turns the
+  camera and your turret follows the screen's centre), the gun you sit at is the camera's by default: this plugin never
+  turns it onto a target of its own picking. In auto-aim it turns it onto **your lock** only (lock with Q / X); the
+  camera stays yours meanwhile, and when the lock goes the turret follows the view again. In the lead-circle mode it
+  never turns it. The stick is the camera's there, so it is never read as you dragging the gun (`DragDeadzone` does
+  not apply to that seat). The two plugins tell each other who turns which seat (`common/edf/aimlink.h` V2); without
+  EDF6VehicleCrew, with its turret camera off, or with an EDF6VehicleCrew older than that link, everything here works
+  as described above (auto-aim on its own pick, the stick dragging the gun). The flak's time fuse still bursts at the
+  tracked target's range either way. NPC gunners are unchanged.
+  EDF6VehicleCrew's gun stabilizer (its `GunStabilizer`) holds a stabilized gun on its line in the world while the hull
+  bumps and turns; this plugin then steers that gun (the flak's, a gunner seat's) from where the stabilizer holds it and
+  leaves the hull's turn to it (`common/edf/aimlink.h` V3), so the hull's turn is never compensated twice.
+
+The HUD, the camera's view ray and the line-of-sight test come from EDF6VehicleCrew (ini `TurretAimHud`). With this
+plugin alone the modes and the lock still work, without anything drawn; the lock then looks along the barrel and does
+not test line of sight. A Katyusha the player rides stays out of it (left alone, see above).
+
 ## Install
 
 Requires EDF6 (Steam) with [EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) installed.

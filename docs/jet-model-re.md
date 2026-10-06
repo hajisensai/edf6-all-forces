@@ -356,10 +356,10 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
 - 自爆无人机的装药是挂在无人机 2 号武器位上的 GrenadeBullet01（`EDF6VC_BLAST_CHARGE.SGO`），伤害和半径写在武器 SGO 里，
   而且必须由带这把武器的载具开火；玩家喷气机没有这把武器，运行时也没有已逆向的改写入口（`docs/decoy-blast-re.md` §1.3 说
   直接调 `ApplyAreaDamage` 要伪造 GameDamageInfo，不可取）。
-- 所以撞击伤害走炮舰炮弹同一条已逆向的路：DemoIndirectFire（`tools/make_jets.py` 的 `EDF6VC_IMPACT_08/16/32/64.SGO`，由原版
+- 所以撞击伤害走炮舰炮弹同一条已逆向的路：DemoIndirectFire（`tools/make_jets.py` 的 `EDF6VC_IMPACT_08/16/32/64.SGO`，2026-10-06 追加 02/04/12，由原版
   `DEMOGUNSHIPFIREE25` 改成 1 发（#2）、无间隔（#3）、无等待（#15）、子弹类 GrenadeBullet01（#4，CustomParameter #13 = [1,0,1,0,0,0]：
-  到期必爆、无重力、不反弹、无随机寿命）、速度 0.25 m/帧（#5）、无重力（#6）、不穿透（#11）、2 帧寿命（#10）、爆炸半径 8/16/32/64 m（#9 AmmoExplosion），
-  下标见 `docs/carrier-laser-re.md` §3）。插件按请求半径选不小于它的最小一档（没有就选最大一档），
+  到期必爆、无重力、不反弹、无随机寿命）、速度 0.25 m/帧（#5）、无重力（#6）、不穿透（#11）、2 帧寿命（#10）、爆炸半径 8/16/32/64（及 2/4/12）m（#9 AmmoExplosion），
+  下标见 `docs/carrier-laser-re.md` §3）。插件按请求半径选比例上最接近的一档（|ln(档位/半径)| 最小，相同时取小的；`src/vehicleram.h` `ram::NearestCharge`；2026-10-06 前是「不小于它的最小一档」，25 m 的机体因此炸 32 m），旧安装缺新档位时取已装的最接近一档并记日志，
   归属设为撞击者（IFC 每步从归属者 +0x314 取队伍：击杀算撞击者的，只伤敌对方——H），伤害由插件写 `+0xDC`，从撞击点上方 0.5 m
   沿直线（IFC +0x2F8 = 0）朝撞击点打下去，2 帧后在撞击点爆开（碰到东西则提前爆）。没预载（没装或本关没预载）时返回 false 并限频记日志。
 - 限制：半径只能按档位。

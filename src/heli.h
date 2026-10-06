@@ -8,6 +8,12 @@ namespace crew {
 bool IsHelicopter(const void* vehicle) noexcept;
 // The player's board button pressed for them (the stock button's code: the nearest seat they may take in reach).
 void PressBoardButton(unsigned char* human) noexcept;
+// ...the same, but the player's own way: a seat an NPC holds is taken too (crew.cpp FindSeatHook bumps the NPC).
+void PressBoardButtonBumping(unsigned char* human) noexcept;
+// Whether the board button and the seats' riding points can be used (their code checked, CheckHeliProfile).
+bool BoardButtonReady() noexcept;
+// Whether `human` rides no vehicle (its vehicle weak_ptr +0x1550 empty or expired).
+bool HumanOnFoot(const unsigned char* human) noexcept;
 // Seat `seat`'s riding point (world) and the stock reach round it a human must be within to board it (CanRideSeat);
 // false when they cannot be read.
 bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noexcept;
@@ -26,6 +32,8 @@ bool CheckHeliProfile() noexcept;
 bool InstallDoorGuns() noexcept;   // after CheckHeliProfile: the 410's door guns (their weapon-user hook)
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point).
 float MapRay(const float* a,const float* b,float* hit) noexcept;
+// emc.cpp: the same against the buildings alone (layer 27: no terrain, no units), metres to the nearest or -1.
+float BuildingRay(const float* a,const float* b,float* hit) noexcept;
 // Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
 // highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
 enum class Sea { unknown, land, water };

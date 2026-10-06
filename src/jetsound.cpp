@@ -7,6 +7,7 @@
 // the game would: from the camera (the sound system's listener 0, SoundSystem +0x58: its position and its matrix's
 // inverse), at the game's master and effect volume (GameStatus +0x2E8 / +0x2F0) times JetSoundVolume.
 // Doppler ratio (c - v_listener.u) / (c - v_source.u), u the unit line from the jet to the camera, c kSoundSpeed.
+// The same listener places the ground vehicles' sounds (SoundAt, vehsound.cpp).
 // The stock 506's rotor loop the jets were built on is silenced in their SGOs (tools/make_jets.py); the lock-on beeps
 // of NPC seats are silenced here (LockSound).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -98,32 +99,46 @@ float GameVolume() noexcept {
     return std::isfinite(m) && std::isfinite(e) ? Clamp01(m)*Clamp01(e) : 1.0f;
 }
 
-// What jet `v` at `pos`, flying `vel` at `share` of kFullSpeed, sounds like at the camera.
-audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,float share) noexcept {
-    audio::Mix m{};
-    if(!hasListener)return m;
+// Where a sound at `pos` moving `vel` (m/s) is heard from the camera (see SoundPlace); false with no listener.
+bool Place(const float* pos,const float* vel,SoundPlace* out) noexcept {
+    if(!hasListener)return false;
     const float* r=listener+4;   // the inverse's rows
     float local[3];
     for(int c=0;c<3;++c)local[c]=pos[0]*r[c]+pos[1]*r[4+c]+pos[2]*r[8+c]+r[12+c];
     const float d=std::sqrt(Dot(local,local));
     const float right=d>1.0f ? -local[0]/d : 0.0f;
-    const float leftGain=std::sqrt(0.5f*(1.0f-kSpread*right)),rightGain=std::sqrt(0.5f*(1.0f+kSpread*right));
-    // Toward the camera from the jet; its nose: the whine carries ahead of it, the roar behind.
+    SoundPlace p{};
+    p.left=std::sqrt(0.5f*(1.0f-kSpread*right));p.right=std::sqrt(0.5f*(1.0f+kSpread*right));
+    p.distance=d;p.doppler=1.0f;
+    // Toward the camera from the sound: the Doppler ratio along it.
     float u[3]={listener[0]-pos[0],listener[1]-pos[1],listener[2]-pos[2]};
-    float doppler=1.0f,ahead=0.0f;
     const float n=std::sqrt(Dot(u,u));
     if(n>1.0f) {
         for(auto& c:u)c/=n;
-        const float* mat=reinterpret_cast<const float*>(v+kMatrix);
-        ahead=mat[8]*u[0]+mat[9]*u[1]+mat[10]*u[2];
         float vs=Dot(vel,u),vl=Dot(listenerVel,u);   // the source closing in; the listener going away
         vs=vs>kMaxClosing ? kMaxClosing : vs<-kMaxClosing ? -kMaxClosing : vs;
         vl=vl>kMaxClosing ? kMaxClosing : vl<-kMaxClosing ? -kMaxClosing : vl;
-        doppler=(kSoundSpeed-vl)/(kSoundSpeed-vs);
+        p.doppler=(kSoundSpeed-vl)/(kSoundSpeed-vs);
+        std::memcpy(p.toCamera,u,12);
     }
+    *out=p;
+    return true;
+}
+
+// What jet `v` at `pos`, flying `vel` at `share` of kFullSpeed, sounds like at the camera.
+audio::Mix MixFor(const unsigned char* v,const float* pos,const float* vel,float share) noexcept {
+    audio::Mix m{};
+    SoundPlace p{};
+    if(!Place(pos,vel,&p))return m;
+    const float d=p.distance,leftGain=p.left,rightGain=p.right,doppler=p.doppler;
+    // The jet's nose against the line to the camera: the whine carries ahead of it, the roar behind.
+    const float* mat=reinterpret_cast<const float*>(v+kMatrix);
+    const float ahead=mat[8]*p.toCamera[0]+mat[9]*p.toCamera[1]+mat[10]*p.toCamera[2];
     const float roarAt=d>kRoarRef ? kRoarRef/d : 1.0f,whineAt=d>kWhineRef ? std::pow(kWhineRef/d,1.3f) : 1.0f;
-    const float roar=(0.45f+0.55f*share)*roarAt*(0.6f+0.4f*(ahead<0.0f ? -ahead : 0.0f));
-    const float whine=(0.2f+0.8f*share)*whineAt*(0.35f+0.65f*(ahead>0.0f ? ahead : 0.0f));
+    // JetSoundVolume here, not on the master voice: the cockpit's warnings share that at their own WarnVolume.
+    const float own=Cfg().jetSoundVolume;
+    const float roar=own*(0.45f+0.55f*share)*roarAt*(0.6f+0.4f*(ahead<0.0f ? -ahead : 0.0f));
+    const float whine=own*(0.2f+0.8f*share)*whineAt*(0.35f+0.65f*(ahead>0.0f ? ahead : 0.0f));
     m.roarL=roar*leftGain;m.roarR=roar*rightGain;
     m.whineL=whine*leftGain;m.whineR=whine*rightGain;
     m.roarRatio=(0.85f+0.3f*share)*doppler;
@@ -167,11 +182,22 @@ void Tick() noexcept {
         }
         std::memcpy(listener,cam,sizeof(listener));listenerFrame=frame;hasListener=true;
     } else hasListener=false;
-    audio::Beat(GameVolume()*Cfg().jetSoundVolume);
+    audio::Beat(GameVolume());
     for(auto& s:sounds)
         if(s.ref && ms-s.seen>kStaleMs)Silence(s);   // deleted, wrecked or gone with the mission
 }
 
+}  // namespace
+
+float GameEffectVolume() noexcept {
+    __try { return GameVolume(); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return 1.0f;}
+}
+
+bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept { return sigOk && !broken && Place(pos,vel,out); }
+bool SoundListening() noexcept { return sigOk && !broken && hasListener; }
+
+namespace {
 // --- The lock-on beeps ---
 // Every weapon loads two presets at init (0x68A920: 0x68E90B 'ロックオンサーチ' into +0xCC0, 0x68E928 'ロックオン完了'
 // into +0xD40; weapon_Common_lockonSearch / _lockonLocked, heard at full out to 10 km) and its lock-on tick plays them
@@ -240,11 +266,15 @@ void JetSound(unsigned char* v) noexcept {
 
 void JetSoundTick() noexcept {
     static ULONGLONG tickFrame=0;
-    if(!sigOk || broken || !started || tickFrame==GameFrame())return;
+    if(!sigOk || broken || tickFrame==GameFrame())return;
     tickFrame=GameFrame();
     __try {
-        if(!Cfg().enabled || !Cfg().jetSound){for(auto& s:sounds)if(s.ref)Silence(s);return;}   // switched off
-        Tick();
+        const bool jets=Cfg().enabled && Cfg().jetSound;
+        if(!jets)for(auto& s:sounds)if(s.ref)Silence(s);   // switched off
+        // The camera is the ground vehicles' listener too (vehsound.cpp SoundAt): kept while either sounds. The jets need
+        // it from their first jet on (started); the vehicles from the switch alone, a mission with no jet in it too.
+        if((jets && started) || (Cfg().enabled && Cfg().vehicleSound))Tick();
+        else hasListener=false;   // not kept: never a stale camera's place for a consumer switched on later
     } __except(Fault(GetExceptionInformation())) {}
 }
 

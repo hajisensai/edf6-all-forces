@@ -58,17 +58,31 @@ void MissionStart() noexcept {
     ResetBoosters();
     ResetShields();
     ResetPlayerJets();
+    ResetBoarding();
     ResetSubs();
     ResetLaser();
     ResetHud();
     ResetLauncher();
     ResetKatyushas();
     ResetHighCam();
+    ResetNix();
+    ResetTurretCam();
+    ResetStabilizer();
+    ResetMap();
     ResetHeliSight();
+    ResetStockHud();
+    ResetStockGauges();
+    ResetPayload();
+    ResetSeatSwitch();
     ResetGear();
     ResetJetSound();
+    ResetVehicleSound();
     ResetMissiles();
     ResetDrills();
+    ResetVehicleRams();
+    ResetEmc();
+    ResetSidecars();
+    ResetProteus();
     ResetBigWorld();
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     PreloadPlayerJets();   // ...and the player jets, for the catch after an ejection (playerjet.cpp)

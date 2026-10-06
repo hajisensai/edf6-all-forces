@@ -39,6 +39,11 @@ bool clearOk=false;
 // For a store the plugin passes a copy scored by the angle off the nose (result +0 |yaw|, +4 |pitch|: yaw^2 +
 // pitch^2), the target the cockpit cycled away from (NextStoreTarget) kSkipScore last. Detour: its first 17 bytes
 // (mov [rsp+18],r8; mov [rsp+10],rdx; push rbx; push r15; sub rsp,48: no rip-relative) into a trampoline.
+// With PlayerJetLockByView (the user, 2026-10-06: "lock the enemy nearest where I look"), the store of a jet the
+// player flies scores by the angle of the candidate's lock point (entry +0x10, ref[0] the entry) off the camera's view
+// ray instead (CameraRay, once a frame): the cone the game searches stays the weapon's, the order within it is the
+// screen's centre outward, as EDF6AutoTurret's lock key picks. The player is the weapon's owner's (weapon +0x120, the
+// vehicle: autoturret/docs/re-notes.md "Who operates a weapon") seat 0 rider.
 constexpr std::size_t kPick=0x691310,kPickCopied=17;
 const unsigned char kPickSig[]={0x4C,0x89,0x44,0x24,0x18,0x48,0x89,0x54,0x24,0x10,0x53,0x41,0x57,0x48,0x83,0xEC,0x48};
 constexpr float kSkipScore=100.0f;
@@ -86,11 +91,18 @@ const StoreSpec* SpecOf(const wchar_t* name,std::size_t length) noexcept {
 
 }  // namespace
 
-bool IsStoreWeapon(const unsigned char* w) noexcept {
-    std::size_t length=0;
-    const wchar_t* name=Readable(w,kWeaponNode+8) ? FileOf(w,&length) : nullptr;
-    return name && SpecOf(name,length);
+const wchar_t* WeaponFile(const unsigned char* w,std::size_t* length) noexcept {
+    *length=0;
+    return Readable(w,kWeaponNode+8) ? FileOf(w,length) : nullptr;
 }
+
+const StoreSpec* StoreOf(const unsigned char* w) noexcept {
+    std::size_t length=0;
+    const wchar_t* name=WeaponFile(w,&length);
+    return name ? SpecOf(name,length) : nullptr;
+}
+
+bool IsStoreWeapon(const unsigned char* w) noexcept { return StoreOf(w)!=nullptr; }
 
 namespace {
 void __fastcall MarkDrawHook(unsigned char* slot,void* ctx,void* camera) {
@@ -123,14 +135,43 @@ void* Detour(std::size_t rva,const unsigned char* sig,std::size_t sigSize,std::s
     return nullptr;
 }
 
+constexpr std::size_t kWeaponOwner=0x120;
+
+// The camera's view ray for this frame's picks (CameraRay inverts the view-projection: once a frame, not per candidate).
+bool PickView(float* eye,float* dir) noexcept {
+    static ULONGLONG at=~0ull;
+    static bool ok=false;
+    static float e[3],d[3];
+    const ULONGLONG ms=GameMs();
+    if(ms!=at){at=ms;ok=CameraRay(e,d);}
+    if(ok){std::memcpy(eye,e,12);std::memcpy(dir,d,12);}
+    return ok;
+}
+
+// The angle (rad) of the candidate `ref` off the view of the player flying `w`'s jet, or -1: not theirs, no view, unread.
+float ViewAngle(void** ref,const unsigned char* w) noexcept {
+    if(!Cfg().playerJetLockByView || !ref || !Readable(w+kWeaponOwner,8))return -1.0f;
+    const auto v=At<unsigned char*>(w,kWeaponOwner);
+    if(!Readable(v,kSeats+0x18) || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::player)return -1.0f;
+    const auto entry=static_cast<const unsigned char*>(ref[0]);
+    float eye[3],dir[3];
+    if(!Readable(entry,kEntryPoint+12) || !PickView(eye,dir))return -1.0f;
+    const float* p=reinterpret_cast<const float*>(entry+kEntryPoint);
+    const float d[3]={p[0]-eye[0],p[1]-eye[1],p[2]-eye[2]};
+    const float l=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    if(!(l>1e-3f))return -1.0f;
+    const float c=(d[0]*dir[0]+d[1]*dir[1]+d[2]*dir[2])/l;
+    return std::acos(c<-1.0f ? -1.0f : c>1.0f ? 1.0f : c);
+}
+
 std::uint64_t __fastcall PickHook(void** ref,unsigned char* result,unsigned char* ctx) {
     __try {
         const auto w=Readable(ctx,8) ? At<const unsigned char*>(ctx,0) : nullptr;
         if(w && Readable(result,0x40) && IsStoreWeapon(w)) {
             alignas(16) unsigned char copy[0x40];
             std::memcpy(copy,result,sizeof(copy));
-            const float yaw=At<float>(copy,0),pitch=At<float>(copy,4);
-            float score=yaw*yaw+pitch*pitch;
+            const float yaw=At<float>(copy,0),pitch=At<float>(copy,4),view=ViewAngle(ref,w);
+            float score=view>=0.0f ? view*view : yaw*yaw+pitch*pitch;
             if(skip.weapon==w && GameMs()<skip.until && ref && ref[0]==skip.entry)score+=kSkipScore;
             if(std::isfinite(score)) {
                 std::memcpy(copy+0x10,&score,4);
