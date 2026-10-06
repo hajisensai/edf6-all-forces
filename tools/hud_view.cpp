@@ -32,6 +32,7 @@ bool hasTurret=false;
 edf::aimlink::TurretReadoutV1 sceneTurret{};
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false;
 bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
+bool mapEasing=false;   // the map's camera easing back to the player: its view, no readout (map.cpp Camera)
 MapReadout sceneMap{};
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
@@ -45,6 +46,7 @@ NixTorso sceneNix{};
 struct Box { float x0,y0,x1,y1; bool any; };
 bool boxing=false;
 Box box{};
+int drawn=0;   // the quads and text lines drawn while `boxing`
 void Grow(float x,float y) {
     if(!box.any){box=Box{x,y,x,y,true};return;}
     box.x0=std::fmin(box.x0,x);box.y0=std::fmin(box.y0,y);box.x1=std::fmax(box.x1,x);box.y1=std::fmax(box.y1,y);
@@ -63,7 +65,7 @@ constexpr float kGlyphH=40.0f,kGlyphW=0.52f;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     float p[4][2];
     for(int i=0;i<n && i<4;++i){p[i][0]=v[i*3]*m[0]+v[i*3+1]*m[4]+m[12];p[i][1]=v[i*3]*m[1]+v[i*3+1]*m[5]+m[13];}
-    if(boxing)for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);
+    if(boxing){++drawn;for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);}
     if(!out)return;
     for(int i=0;i+2<n && i<2;++i)
         std::fprintf(out,"T %.1f %.1f %.1f %.1f %.1f %.1f %.3f %.3f %.3f %.3f\n",p[i][0],p[i][1],p[i+1][0],p[i+1][1],p[i+2][0],p[i+2][1],
@@ -76,7 +78,7 @@ void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bo
 }
 void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar_t* text,std::int64_t) {
     tallest=std::fmax(tallest,kGlyphH*fontScale);
-    if(boxing){Grow(m[12],m[13]);Grow(m[12]+static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale,m[13]+kGlyphH*fontScale);}
+    if(boxing){++drawn;Grow(m[12],m[13]);Grow(m[12]+static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale,m[13]+kGlyphH*fontScale);}
     if(!out)return;
     char narrow[256];
     WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
@@ -110,7 +112,7 @@ bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
 bool PlayerGunnerHud(GunnerReadout*) noexcept { return false; }
 bool PlayerHighCam(bool*,bool*) noexcept { return false; }
 bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
-bool MapOwnsView() noexcept { return hasMap; }
+bool MapOwnsView() noexcept { return hasMap || mapEasing; }
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
 void MapCommandView(const float*,float,float) noexcept {}
@@ -329,6 +331,32 @@ bool PausedDrawsNothing(const float* pos,const float* fwd) {
     const bool ok=shown[0].any && !shown[1].any;
     std::printf("%s  paused: drawn (%.0f,%.0f)-(%.0f,%.0f) running, %s paused\n",ok ? "ok  " : "FAIL",shown[0].x0,shown[0].y0,shown[0].x1,
                 shown[0].y1,shown[1].any ? "something" : "nothing");
+    return ok;
+}
+
+// The map open over a stock vehicle (docs/hud-re.md §11): the map's layer alone, the very quads and lines the map draws
+// with no vehicle; easing back (the map's view, no readout): nothing; the camera back: the vehicle HUD again.
+bool MapDrawsMapAlone(const float* pos,const float* fwd) {
+    struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
+    float mapVp[16],gameVp[16];
+    MapCamera(sceneMap,1920.0f,1080.0f,mapVp);
+    Camera(pos,fwd,1920.0f,1080.0f,gameVp);
+    auto draw=[&](bool stock,bool map,bool easing,const float* vp,int* n){
+        hasStock=stock;hasMap=map;mapEasing=easing;
+        HudPublish();
+        box=Box{};boxing=true;drawn=0;
+        HudDraw(vp,image,&viewport,nullptr,0);
+        boxing=false;*n=drawn;
+        return box;
+    };
+    int alone=0,over=0,easing=0,closed=0;
+    const Box a=draw(false,true,false,mapVp,&alone),o=draw(true,true,false,mapVp,&over),e=draw(true,false,true,mapVp,&easing),
+              b=draw(true,false,false,gameVp,&closed);
+    hasMap=mapEasing=false;hasStock=true;
+    const bool ok=a.any && alone>0 && over==alone && a.x0==o.x0 && a.y0==o.y0 && a.x1==o.x1 && a.y1==o.y1 && !e.any && easing==0 &&
+                  b.any && closed>0;
+    std::printf("%s  map over a tank: %d drawn (the map alone %d), easing back %d, closed %d\n",ok ? "ok  " : "FAIL",over,alone,easing,
+                closed);
     return ok;
 }
 
@@ -639,6 +667,9 @@ int wmain(int argc,wchar_t** argv) {
     MapScene(dir,L"map_mid",700.0f,60.0f,20.0f,false);
     MapScene(dir,L"map_high_pad",3000.0f,85.0f,-40.0f,true);
     MapScene(dir,L"map_low",200.0f,32.0f,0.0f,false);
+    StockTank(ground);
+    failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
+    hasStock=false;
     // The Proteus: walking behind its front shield (the allies' focus up), then deployed: the field's ring, the barrier
     // taken down, the directional shield hot, a target marked, the salvo cooling down; its gunner's cannon in the list.
     StockTank(ground);

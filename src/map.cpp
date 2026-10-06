@@ -31,6 +31,7 @@
 #include "map_cam.h"
 #include "map_marks.h"
 #include "map_camera_state.h"
+#include "map_stock_hud.h"
 #include "memory.h"
 #include "turretaim.h"
 #include "vecmath.h"
@@ -74,6 +75,25 @@ constexpr unsigned kMarkerVtable=0x17D4378,kMarkerDtor=0x5B0410,kMarkerUpdate=0x
 constexpr std::size_t kMarkerDtorSlot=1,kMarkerUpdateSlot=3,kMarkerAt=0x1F0;
 const unsigned char kMarkerUpdateCode[]={0x48,0x8D,0x91,0xC0,0x01,0x00,0x00,0x48,0x81,0xC1,0x20,0x01,0x00,0x00,0xE9};
 constexpr int kMarkers=16;
+// The stock HUD's switch (map_stock_hud.h, docs/hud-re.md §11): the camera's +0x200, written by 0x118DF30 (mov [rcx+200h],
+// dl; ret) from the scripts' SetPlayerHudShow (0x1BA790, its call at kHudShowCall, once per viewport camera from the
+// viewport table 0x1195BE0 walks); read by the HUD draws (HUiHud*Object 0x8168B0, the crosshair 0x8039F0, the rescue line
+// 0x808410, each through its Hud's camera +0x18); the camera's per-frame call (0x118DF40) steps the camera through its
+// slot 4 (the map's kCamStep: CharacterGhostCamera is such a camera) and its HUD list +0x208 on the same object.
+constexpr unsigned kHudShow=0x118DF30,kHudShowCall=0x1BA811;
+constexpr std::size_t kCamHudShown=0x200;
+struct HudSig { unsigned rva; const unsigned char* bytes; std::size_t size; };
+const unsigned char kHudShowCode[]={0x88,0x91,0x00,0x02,0x00,0x00,0xC3};
+const unsigned char kHudShowUse[]={0x40,0x0F,0xB6,0xD6,0xE8,0x1A,0x37,0xFD,0x00};              // 0x1BA80D: movzx edx,sil; call
+const unsigned char kHudShowLoop[]={0x8B,0xD7,0x48,0x8B,0x0D,0x8F,0x81,0xEF,0x01,0xE8,0x12,0xB4,0xFD,0x00};   // 0x1BA7C0: slot i
+const unsigned char kHudObjectDraw[]={0x48,0x8B,0x49,0x18,0x80,0xB9,0x00,0x02,0x00,0x00,0x00,0x0F,0x84};   // 0x8168CF
+const unsigned char kRescueDraw[]={0x48,0x8B,0x49,0x18,0x80,0xB9,0x00,0x02,0x00,0x00,0x00};               // 0x80843B
+const unsigned char kCrossDraw[]={0x80,0xB9,0x00,0x02,0x00,0x00,0x00};                                   // 0x803AC9
+const unsigned char kViewportStep[]={0x48,0x8B,0x01,0x48,0x8B,0xF2,0x48,0x8B,0xF9,0xFF,0x50,0x20,0x48,0x8B,0xBF,0x08,0x02,0x00,0x00};   // 0x118DF4F
+const HudSig kHudSigs[]={{kHudShow,kHudShowCode,sizeof(kHudShowCode)},{0x1BA80D,kHudShowUse,sizeof(kHudShowUse)},
+    {0x1BA7C0,kHudShowLoop,sizeof(kHudShowLoop)},{0x8168CF,kHudObjectDraw,sizeof(kHudObjectDraw)},
+    {0x80843B,kRescueDraw,sizeof(kRescueDraw)},{0x803AC9,kCrossDraw,sizeof(kCrossDraw)},
+    {0x118DF4F,kViewportStep,sizeof(kViewportStep)}};
 
 constexpr ULONGLONG kFreshMs=300;       // a pose / readout older than this (wall) is the map closed (paused, loading)
 constexpr ULONGLONG kGatherMs=100;      // the marks gathered this often
@@ -131,6 +151,13 @@ Game game{};
 // last +0x250 (0xFB03E..0xFB101), so the map's eye left there would pull the stock camera down from the sky after.
 using CamSide=mapcam::CameraState;
 CamSide camSide{};
+
+// --- The stock HUD's switch (under `hudLock`: the camera step and the scripts' SetPlayerHudShow) ---
+using HudShowFn=void(__fastcall*)(void*,bool);
+bool hudOk=false;
+maphud::Record hudRecord{};
+SRWLOCK hudLock=SRWLOCK_INIT;
+std::atomic<bool> hudHeld{false};   // the draw thread's view of it (subcarrier.cpp GaugeHook: the followers' bars)
 
 // --- The objective markers (under `markerLock`; the destructor takes one out before it is freed) ---
 const void* markers[kMarkers]{};
@@ -656,12 +683,39 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
     if(!PutView(cam,camSide.eye,camSide.look)){camSide=CamSide{};cameraSession.Publish(generation,false);}
 }
 
+// The stock HUD held off while the map's view is on this camera (easing in, open, easing back), put back as the game last
+// asked when it is not: after the camera eased back, after a fault (camSide dropped), with the map closed any way.
+void StockHud(unsigned char* cam,std::uint64_t generation) noexcept {
+    if(!hudOk)return;
+    const bool hide=camSide.shown && camSide.cam==cam && cameraSession.Current(generation);
+    AcquireSRWLockExclusive(&hudLock);
+    const bool was=hudRecord.hidden && hudRecord.cam==cam;
+    bool held=false;
+    __try { held=maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown); }
+    __except(EXCEPTION_EXECUTE_HANDLER){hudRecord=maphud::Record{};held=false;}
+    const bool now=hudRecord.hidden && hudRecord.cam==cam,want=hudRecord.want;
+    ReleaseSRWLockExclusive(&hudLock);
+    hudHeld.store(held);
+    if(was!=now)Log(now ? "MAP the stock HUD hidden on camera %p (its switch +0x200 was %d)" : "MAP the stock HUD back on camera %p (%d)",
+                    static_cast<void*>(cam),now ? static_cast<int>(want) : static_cast<int>(cam[kCamHudShown]));
+}
+
+// SetPlayerHudShow's write (its call to 0x118DF30): kept for the end of the hold on the map's camera, else written.
+void __fastcall HudShowHook(void* cam,bool show) {
+    AcquireSRWLockExclusive(&hudLock);
+    const bool write=maphud::GameSet(hudRecord,cam,cameraSession.Generation(),show);
+    ReleaseSRWLockExclusive(&hudLock);
+    if(write)reinterpret_cast<HudShowFn>(image+kHudShow)(cam,show);
+    else Log("MAP the mission asked the HUD %s on camera %p while the map shows: done when it closes",show ? "shown" : "hidden",cam);
+}
+
 void __fastcall CamStepHook(void* cam,void* step) {
     const auto generation=cameraSession.Begin(camSide);
     if(camSide.shown && camSide.cam==cam && camSide.haveStock)std::memcpy(static_cast<unsigned char*>(cam)+kCamMatrix,camSide.stock,sizeof(camSide.stock));
     nextCamStep(cam,step);
     __try { Camera(static_cast<unsigned char*>(cam),generation); }
     __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);}
+    StockHud(static_cast<unsigned char*>(cam),generation);
 }
 
 // --- The objective markers ---
@@ -726,6 +780,21 @@ bool InstallMarkers() noexcept {
     nextMarkerUpdate=reinterpret_cast<MarkerUpdateFn>(next);
     return true;
 }
+// The stock HUD's switch: every byte it stands on as expected, then SetPlayerHudShow's call redirected; else the stock HUD
+// is never touched (the map shows over it, as before).
+bool InstallHudSwitch() noexcept {
+    for(const HudSig& s:kHudSigs)
+        if(!Matches(s.rva,s.bytes,s.size)) {
+            Log("MAP the stock HUD's switch: EDF+%X is not as expected: the stock HUD stays up on the map",s.rva);
+            return false;
+        }
+    bool changed=false;
+    if(!RedirectCall(image+kHudShowCall,image+kHudShow,reinterpret_cast<void*>(&HudShowHook),changed)) {
+        Log("MAP the stock HUD's switch: SetPlayerHudShow's call could not be redirected: the stock HUD stays up on the map");
+        return false;
+    }
+    return true;
+}
 }  // namespace
 
 bool InstallMap() noexcept {
@@ -738,8 +807,9 @@ bool InstallMap() noexcept {
                   Matches(kBoardTeam5Call,kBoardTeam5Code,sizeof(kBoardTeam5Code));
         hostileOk=Matches(kHostileWalk,kHostileWalkCode,sizeof(kHostileWalkCode)) && Matches(0x82B8C3,kRadarCall,sizeof(kRadarCall));
         markerOk=holdOk && InstallMarkers() && nextMarkerUpdate;
-        Log("MAP hooks: camera=%d hold=%d team walk=%d team 5 walk=%d hostile walk=%d markers=%d%s",camOk,holdOk,walkOk,nobodysOk,
-            hostileOk,markerOk,
+        hudOk=holdOk && InstallHudSwitch();
+        Log("MAP hooks: camera=%d hold=%d team walk=%d team 5 walk=%d hostile walk=%d markers=%d stock HUD switch=%d%s",camOk,holdOk,
+            walkOk,nobodysOk,hostileOk,markerOk,hudOk,
             holdOk ? "" : " (the map is off: unexpected EDF.dll code)");
         return holdOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -753,6 +823,7 @@ void ResetMap() noexcept {
     cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
     cameraSession.Reset();   // the camera hook drops its old matrix on its own thread, before restoring it
+    hudHeld.store(false);    // the stock HUD's hold is the last mission's (map_stock_hud.h Step lets it go on the camera)
     pose=Pose{};readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
 }
@@ -767,6 +838,7 @@ bool PlayerMap(MapReadout* out) noexcept {
 
 bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed); }
 bool MapOwnsView() noexcept { return cameraSession.Owns(); }
+bool MapHidesStockHud() noexcept { return hudHeld.load(std::memory_order_relaxed); }
 }  // namespace crew
 
 // EDF6AutoTurret asks whether the map holds the keys before it reads its own (common/edf/aimlink.h InputHeldV1).
