@@ -30,25 +30,6 @@
 #include <cstring>
 
 namespace crew {
-// A recently stepped address is not a lifetime guarantee. Read game memory only before publishing, and tolerate a
-// vehicle removed since the last input frame. In particular no external object is dereferenced under the HUD lock.
-bool CommandVehicleLive(const ObjRef& ref) noexcept {
-    __try {
-        auto* v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
-        return v && Readable(v,kSeatCount+8) && !v[kDead] && ref.Is(v) && SeatCount(v)>0 &&
-               SeatRider(SeatAt(v,0))==Rider::dummy;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
-}
-bool ReadCommandUnit(const ObjRef& ref,const char* name,const Command& cmd,bool air,CommandUnit* out) noexcept {
-    __try {
-        if(!CommandVehicleLive(ref))return false;
-        CommandUnit unit{ref.obj,name,cmd,air,{}};
-        std::memcpy(unit.pos,static_cast<const unsigned char*>(ref.obj)+kPosition,12);
-        if(!std::isfinite(unit.pos[0]+unit.pos[1]+unit.pos[2]))return false;
-        *out=unit;
-        return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
-}
 namespace {
 constexpr ULONGLONG kFreshMs=300;        // a readout older than this (wall) is the map closed
 constexpr ULONGLONG kNoteMs=3000;        // the last command's word shown this long
@@ -59,14 +40,16 @@ constexpr float kClickBox=6.0f;          // px: a Ctrl box smaller than this bot
 constexpr float kClickRadius=22.0f;      // px (at 1080 lines) round a unit's icon a click takes it
 constexpr float kFormationSpacing=30.0f; // m between the slots of a formation round a guard point
 
-enum class Owner : std::uint8_t { heli, jet, ground };
+enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
-struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease; };
+struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
+             engage,focus,board,dismount,dismiss,recruit,digit[9]; };
 
 // --- The game thread's own ---
 struct Game {
     mapcmd::Selection sel;
+    ObjRef selected[kCmdUnits]; // identity when selected; an address recycled since then is another unit
     Keys was;
     ULONGLONG frameAt;          // wall ms of the last frame (a gap: the map was closed, no edges the first frame)
     int count;
@@ -100,7 +83,24 @@ void List(Game& g) noexcept {
     add(HeliCommandUnits(buf,kCmdUnits),Owner::heli);
     add(JetCommandUnits(buf,kCmdUnits-g.count),Owner::jet);
     add(GroundCommandUnits(buf,kCmdUnits-g.count),Owner::ground);
+    add(TankCommandUnits(buf,kCmdUnits-g.count),Owner::tank);
+    add(SquadCommandUnits(buf,kCmdUnits-g.count),Owner::squad);
     std::sort(g.list,g.list+g.count,[](const Entry& a,const Entry& b){ return std::less<const void*>()(a.u.v,b.u.v); });
+}
+
+void KeepSelection(Game& g,const void* const* ids) noexcept {
+    mapcmd::Keep(g.sel,ids,g.count);
+    for(int i=g.sel.n-1;i>=0;--i) {
+        const void* id=g.sel.id[i];
+        bool same=false;
+        if(Readable(id,kSelfCtrl+sizeof(void*)))
+            for(const auto& old:g.selected)if(old.Is(id)){same=true;break;}
+        if(!same)g.sel.Remove(id);
+    }
+}
+
+void RememberSelection(Game& g) noexcept {
+    for(int i=0;i<kCmdUnits;++i)g.selected[i]=i<g.sel.n ? ObjRef::Of(g.sel.id[i]) : ObjRef{};
 }
 
 bool Give(const Entry& e,const Command& c) noexcept {
@@ -108,6 +108,8 @@ bool Give(const Entry& e,const Command& c) noexcept {
     case Owner::heli: return HeliCommand(e.u.v,c);
     case Owner::jet: return JetCommand(e.u.v,c);
     case Owner::ground: return GroundCommand(e.u.v,c);
+    case Owner::squad: return SquadCommand(e.u.v,c);
+    case Owner::tank: return TankCommand(e.u.v,c);
     }
     return false;
 }
@@ -131,6 +133,9 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
     if(in.front) {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
         k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);
+        // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
+        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');
+        for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
     }
     if(in.pad) {
         const WORD b=in.buttons;
@@ -140,11 +145,40 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
     return k;
 }
 
-// An order's name for the log (English) and its word on the HUD (the HUD's language).
-const char* OrderName(Order o) noexcept { return o==Order::guard ? "GUARD" : o==Order::follow ? "FOLLOW" : "RELEASE"; }
+const char* OrderName(Order o) noexcept {
+    switch(o) {
+    case Order::guard: return "GUARD";
+    case Order::follow: return "FOLLOW";
+    case Order::engage: return "ENGAGE";
+    case Order::focus: return "FOCUS FIRE";
+    case Order::board: return "BOARD";
+    case Order::dismount: return "DISMOUNT";
+    case Order::dismiss: return "DISMISS";
+    case Order::recruit: return "RECRUIT";
+    default: return "RELEASE";
+    }
+}
 const wchar_t* OrderText(Order o) noexcept {
     using hudtext::Tx;
-    return hudtext::Tr(o==Order::guard ? Tx::orderGuard : o==Order::follow ? Tx::orderFollow : Tx::orderRelease);
+    switch(o) {
+    case Order::guard: return hudtext::Tr(Tx::orderGuard);
+    case Order::follow: return hudtext::Tr(Tx::orderFollow);
+    case Order::engage: return hudtext::Tr(Tx::orderEngage);
+    case Order::focus: return hudtext::Tr(Tx::orderFocus);
+    case Order::board: return hudtext::Tr(Tx::orderBoard);
+    case Order::dismount: return hudtext::Tr(Tx::orderDismount);
+    case Order::dismiss: return hudtext::Tr(Tx::orderDismiss);
+    case Order::recruit: return hudtext::Tr(Tx::orderRecruit);
+    default: return hudtext::Tr(Tx::orderRelease);
+    }
+}
+// Whether `e` takes order `o` at all: a locked squad (a script's) none, a vehicle only guard / follow / release, a tank
+// no follow (it keeps a post).
+bool Takes(const Entry& e,Order o) noexcept {
+    if(e.u.locked)return false;
+    if(e.owner==Owner::squad)return true;
+    if(e.owner==Owner::tank)return o==Order::guard || o==Order::none;
+    return mapcmd::VehicleOrder(o);
 }
 
 void Note(Game& g,const wchar_t* format,...) noexcept {
@@ -210,20 +244,22 @@ bool TargetPoint(const Game& g,const MapCmdInput& in,const View* v,float* point)
 }
 
 // The command to every selected unit; a guard's formation round the point (helis sharing one orbit stay on it).
-int Issue(Game& g,const Command& cmd) noexcept {
+int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     int k=0;
-    for(int i=0;i<g.count;++i)k+=g.sel.Has(g.list[i].u.v) ? 1 : 0;
+    *skipped=0;
+    for(int i=0;i<g.count;++i)k+=g.sel.Has(g.list[i].u.v) && Takes(g.list[i],cmd.order) ? 1 : 0;
     const bool share=HeliSharesPost();
     int given=0,slot=0;
     for(int i=0;i<g.count;++i) {
         Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v))continue;
+        if(!Takes(e,cmd.order)){++*skipped;continue;}
         Command c=cmd;
         if(cmd.order==Order::guard && !(e.owner==Owner::heli && share)) {
             mapcmd::Formation(slot++,k,cmd.at,kFormationSpacing,c.at);
             c.at[1]=GroundAt(c.at[0],c.at[2],cmd.at[1]);
         }
-        if(!Give(e,c))continue;
+        if(!Give(e,c)){++*skipped;continue;}
         e.u.now=c;
         ++given;
     }
@@ -231,6 +267,10 @@ int Issue(Game& g,const Command& cmd) noexcept {
 }
 
 void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool pointer) noexcept {
+    // The game's memory is read before the lock is taken: a fault in a read (a unit gone between its listing and here)
+    // must not leave the lock held, which would block the draw thread for good.
+    SquadRow rows[16]{};
+    const int squads=SquadRows(rows,16);
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,g.count);r.selected=g.sel.n;r.pointOk=pointOk;
@@ -241,10 +281,13 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         const Entry& e=g.list[i];
         CmdMark& m=r.unit[i];
         std::memcpy(m.pos,e.u.pos,12);
-        m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);
+        m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);m.locked=e.u.locked;
         m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
     }
+    r.squads=squads;
+    std::memcpy(r.squad,rows,sizeof(rows));
+    for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     readoutAt=GetTickCount64();
@@ -276,7 +319,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     List(g);
     const void* ids[kCmdUnits];
     for(int i=0;i<g.count;++i)ids[i]=g.list[i].u.v;
-    mapcmd::Keep(g.sel,ids,g.count);
+    KeepSelection(g,ids);
     Pointer(g,in,k,haveView ? &v : nullptr);
     boxingNow.store(g.boxing);
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
@@ -285,27 +328,45 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         mapcmd::Cycle(g.sel,ids,g.count,next ? 1 : -1);
         picked=g.sel.n==1;
     }
+    // The number keys pick a squad of the panel (its rows in SquadRows' order; Shift adds or takes out).
+    SquadRow rows[9];
+    const int rowCount=SquadRows(rows,9);
+    for(int d=0;d<rowCount;++d) {
+        if(!k.digit[d] || g.was.digit[d])continue;
+        if(!k.shift)g.sel.Clear();
+        if(k.shift && g.sel.Has(rows[d].leader))g.sel.Remove(rows[d].leader);
+        else g.sel.Add(rows[d].leader);
+        mapcmd::Keep(g.sel,ids,g.count);
+        picked=g.sel.n==1;
+    }
     const mapcmd::Press p{next,prev,(k.guard && !g.was.guard) || (k.padGuard && !g.was.padGuard),
                           (k.follow && !g.was.follow) || (k.padFollow && !g.was.padFollow),
-                          (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease)};
+                          (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
+                          k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
+                          k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit};
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=!InSession();
-    const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk);
+    const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     using hudtext::Tr;
     using hudtext::Tx;
     if(s.why==mapcmd::Refusal::online)Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));
     else if(s.why==mapcmd::Refusal::noUnit && g.count)Note(g,Tr(Tx::cmdSelectFirst),in.usingPad ? L"X" : Tr(Tx::cmdSelectHowMouse));
     else if(s.why==mapcmd::Refusal::noUnit)Note(g,L"%ls",Tr(Tx::cmdNoUnit));
     else if(s.why==mapcmd::Refusal::noPoint)Note(g,L"%ls",Tr(Tx::cmdNoGround));
+    else if(s.why==mapcmd::Refusal::noMark)Note(g,L"%ls",Tr(Tx::cmdNoMark));
     if(s.issue) {
-        const int given=Issue(g,s.cmd);
-        if(s.cmd.order==Order::guard)Note(g,Tr(given==1 ? Tx::cmdGuardOne : Tx::cmdGuardMany),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given);
-        else Note(g,Tr(given==1 ? Tx::cmdGivenOne : Tx::cmdGivenMany),OrderText(s.cmd.order),given);
+        int skipped=0;
+        const int given=Issue(g,s.cmd,&skipped);
+        wchar_t tail[40]{};
+        if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
+        if(s.cmd.order==Order::guard)Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
+        else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);
         Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
             g.sel.n,given,g.count);
     }
+    RememberSelection(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(!picked)return false;
     const int selected=mapcmd::IndexOf(ids,g.count,g.sel.id[0]);

@@ -23,6 +23,12 @@ bool HeliCommand(const void*,const Command&) noexcept { return false; }
 bool JetCommand(const void*,const Command&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool HeliSharesPost() noexcept { return true; }
+int SquadCommandUnits(CommandUnit*,int) noexcept {return 0;}
+int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
+int SquadRows(SquadRow*,int) noexcept {return 0;}
+bool SquadCommand(const void*,const Command&) noexcept {return false;}
+bool TankCommand(const void*,const Command&) noexcept {return false;}
+bool NpcMarked() noexcept {return false;}
 namespace {
 int failures=0,cases=0;
 void Check(bool ok,const char* what) noexcept {

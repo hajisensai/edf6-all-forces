@@ -158,6 +158,27 @@ int main() {
     Check(st.issue && st.cmd.order==Order::none,"release");
     st=Decide(3,none,true,point,true);
     Check(!st.issue && st.why==Refusal::none,"no press: nothing");
+    // The squads' orders (docs/npc-ai-design.md §6.2): no point needed; focus needs a mark; vehicles take only three.
+    Press engage{};engage.engage=true;
+    st=Decide(2,engage,true,point,false);
+    Check(st.issue && st.cmd.order==Order::engage,"engage needs no point");
+    Press focus{};focus.focus=true;
+    st=Decide(2,focus,true,point,true,false);
+    Check(!st.issue && st.why==Refusal::noMark,"focus with no mark: refused");
+    st=Decide(2,focus,true,point,true,true);
+    Check(st.issue && st.cmd.order==Order::focus,"focus on the mark");
+    Press dismiss{};dismiss.dismiss=true;dismiss.recruit=true;
+    st=Decide(1,dismiss,true,point,true);
+    Check(st.issue && st.cmd.order==Order::dismiss,"dismiss before recruit (one order a frame)");
+    Press recruit{};recruit.recruit=true;
+    st=Decide(1,recruit,false,point,true);
+    Check(!st.issue && st.why==Refusal::online,"recruit online: refused");
+    Press board{};board.board=true;
+    Check(Decide(1,board,true,point,true).cmd.order==Order::board,"board");
+    Press off{};off.dismount=true;
+    Check(Decide(1,off,true,point,true).cmd.order==Order::dismount,"dismount");
+    Check(VehicleOrder(Order::guard) && VehicleOrder(Order::follow) && VehicleOrder(Order::none),"vehicles: guard, follow, release");
+    Check(!VehicleOrder(Order::engage) && !VehicleOrder(Order::dismiss) && !VehicleOrder(Order::board),"vehicles: no squad orders");
 
     // --- The formation.
     float out[3];

@@ -886,6 +886,8 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         model, body, rigid = list(jet.model), jet.body, [list(x) for x in jet.rigid] if jet.rigid else None
         anchor = jet.anchor
     import jet_models
+    import aircraft_collision
+    airframe = aircraft_collision.model_key(jet, model)
     if jet.player or jet.parked:
         # The player sees the whole plane: its box is the model's (wings, nose and tail), measured, not a fuselage
         # box (an NPC jet's is the fuselage: a formation's wings would catch on each other, low passes scrape; a
@@ -895,6 +897,11 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         rigid = jet_models.fuselage_box(game, jet.file)   # off its model as made (grounded): never under its origin
     elif jet.model is None and rigid is None and model == JET_ELEVON_MODEL:
         rigid = jet_models.fuselage_box(game, None)
+    if airframe is not False:
+        # A shared shape/coordinate frame for NPC, parked and requested copies.
+        # body506 replaces this broad box with the mesh-derived ragdoll compound;
+        # keeping the full-model centre also keeps locators/cameras consistent.
+        rigid = jet_models.model_box(game, airframe)
     version, m = sgo.read(game.read('OBJECT', jet.stock + '.SGO'))
     at, want = JET_MAB_ROOT
     if m['animation_model'][2][at:at + 2 * len(want) + 2] != want.encode('utf-16le') + b'\0\0':
@@ -956,7 +963,8 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         else:
             place_seat_camera(m, box, jet.seat_camera)
     rag = m['ragdoll']
-    m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body, box[0] if door else None)]
+    m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.FILES[airframe].lower(),
+                    _jet_ragdoll(rag[1], body, box[0] if door or airframe is not False else None)]
     se = m.get('heli_se_table')
     if not isinstance(se, list) or len(se) <= max(JET_ROTOR_SE_ROWS):
         raise ValueError('V506_HELI 的 heli_se_table 不是预期的样子')

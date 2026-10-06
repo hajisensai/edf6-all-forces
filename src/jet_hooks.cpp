@@ -87,12 +87,16 @@ void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
     __try { through=ShieldLetsThrough(collector,body); } __except(FaultLog("SHIELD round",GetExceptionInformation())) { through=false; }
     if(through)return;
     bool pass=false;
-    if(flown.load(std::memory_order_relaxed)) {
+    {
         const void* owner=nullptr;
         const void* target=nullptr;
         bool found=false;
         __try { found=Candidate(collector,body,&owner,&target); } __except(FaultLog("BULLET pass-through",GetExceptionInformation())) { found=false; }
-        pass=found && Passes(owner,target);
+        __try {
+            const auto core=At<const unsigned char*>(collector,kCollectorCore);
+            pass=found && (SidecarBulletPass(owner,target,At<const void*>(core,kBulletOwner+8)) ||
+                (flown.load(std::memory_order_relaxed) && Passes(owner,target)));
+        } __except(FaultLog("SIDECAR pass-through",GetExceptionInformation())) { pass=false; }
     }
     if(!pass)nextAddBody(collector,body);
 }
@@ -119,6 +123,8 @@ bool HooksOk() noexcept { return hooksOk; }
 }  // namespace jet
 
 using namespace jet;
+
+bool SidecarBulletHooked() noexcept { return jet::PassThrough(); }
 
 // The 506 physics step (body506.cpp), after the stock one: the jet's velocity and spin replace the heli's.
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {

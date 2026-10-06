@@ -435,6 +435,7 @@ struct Heli {
     // A map command (HeliCommand, mapcmd.cpp) is the same post as a call's: guard / post / hold written as HeliCalled
     // writes them; what they were before the first command kept here to put back on its release.
     Command cmd;
+    bool cmdMoving;
     bool ownGuard;
     float ownPost[3],ownHold[3];
 };
@@ -586,8 +587,8 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
 }
 
 // The enemy lock point to engage, among the enemies within `range` of `around` (a guard's post, the
-// player it follows) and the current target wherever it has gone (it is chased, not dropped when it
-// leaves the range): the one nearest to `from` (the heli: the shortest turn and flight), the current
+// player it follows). Without a map command, the current target is chased beyond that range.
+// The one nearest to `from` (the heli: the shortest turn and flight) wins, the current
 // one counting kKeepTarget nearer and one too close below to aim at kTooClose farther. Returns false
 // with none.
 bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* from,float range,float* aim) noexcept {
@@ -599,7 +600,7 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     ForEachEnemy(v,[&](const void* object,const float* a) noexcept {
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const bool current=h.target.Is(object);
-        if(!current && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
+        if((!current || h.cmd.order!=Order::none) && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
         if(current)score-=circler ? kCircleKeep : kKeepTarget;
@@ -1526,6 +1527,12 @@ bool StoreReady(const Heli& h,const Sense& s) noexcept {
     return s.store && Cfg().heliMissile && h.storeAmmo>0 && s.ms-h.storeShotAt>static_cast<ULONGLONG>(Cfg().heliMissileMs);
 }
 
+bool CommandMoving(Heli& h,const float* pos,const float* anchor) noexcept {
+    const float arrive=std::fmax(40.0f,h.cmd.order==Order::guard ? Cfg().heliGuardRadius+20.0f : Cfg().heliCombatRange);
+    const float leash=std::fmax(Cfg().heliRange,arrive+100.0f);
+    return AirCommandTransit(h.cmd,h.cmdMoving,pos,anchor,arrive,leash);
+}
+
 // The first frame (false): it only starts its state. Else (true) the frame's sensing in `s`.
 bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     LARGE_INTEGER now,freq;QueryPerformanceCounter(&now);QueryPerformanceFrequency(&freq);
@@ -1592,7 +1599,8 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
     const float gunRange=GunRange(*s.type);
     const float pick=s.follow && Cfg().heliCombatRange+gunRange<Cfg().heliRange ? Cfg().heliCombatRange+gunRange : Cfg().heliRange;
-    s.engage=!s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
+    const bool moving=CommandMoving(h,pos,anchor);
+    s.engage=!moving && !s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
     if(s.engage) {
         TrackVelocity(h.tgtPrev,h.tgtVel,s.aim,dt,40.0f,!Same(h.tracked,h.target));
         h.tracked=h.target;
@@ -2170,7 +2178,8 @@ void PlayerAssist(unsigned char* v) noexcept {
 // input (slot 55) copies LX, the trigger, LY and RX to the heli and never RY, so the mouse's Y only ever moved the camera
 // (heli-input-re.md §2, §4). After it (HeliFrame runs in its post-hook, crew.cpp InputHook, so slot 57 reads this frame's
 // values) the input block is written from what aim::Fly asks, through the NPC pilot's own law (Steer's StockStick,
-// StockThrottle and StockYaw): the forward value drives the nose's tilt and the forward speed both, the lateral the
+// StockThrottle and StockYaw). PlayerAttitudeHook substitutes the mouse's pitch only for the attitude calculation;
+// the forward value remains the speed controller's for translation. The lateral drives the
 // sidestep, the yaw the turn onto the aim's heading (+ grows the heading angle with a positive max yaw rate, aim::YawSign:
 // the stock writes -RX and the mouse to the right turns the heli right, docs/player-jet-re.md §2), the throttle the rotor
 // for the climb (the height held with the rotor that holds it, learned as the NPC's is, from the takeoff cue's stock hover
@@ -2190,7 +2199,7 @@ constexpr float kThreatRadius=20.0f;   // m: a missile's lock point this near it
 constexpr float kGpwsSlack=1.0f;       // m/s over the descent key's sink before the ground-proximity warning counts it
 struct Pilot {
     ObjRef ref;
-    ULONGLONG seen,lastMs,groundAt;
+    ULONGLONG seen,lastMs,groundAt,inputLogAt;
     float prev[3],vel[3];
     bool havePrev;
     float aim[3];                      // the mouse's aim (heliaim.h), a world direction
@@ -2200,6 +2209,60 @@ struct Pilot {
     bool flying;                       // the mouse-aim flight wrote its input last frame (logged as it changes)
 };
 Pilot pilots[4];
+
+// In the stock slot-57 physics, 0x654A80 uses input+8 for pitch (0x654E69), then the caller uses the original input+8
+// for forward velocity (0x651E2F). Keep those uses separate only for this frame's local mouse pilot.
+constexpr std::size_t kPlayerAttitude=0x654A80,kPlayerAttitudeCopied=14,kPlayerMaxTilt=0x1640;
+const unsigned char kPlayerAttitudeSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57};
+using PlayerAttitudeFn=void(__fastcall*)(unsigned char*,void*,const float*,const unsigned char*);
+PlayerAttitudeFn playerAttitudeNext=nullptr;
+
+bool PlayerPitch(const unsigned char* attitude,float* pitch) noexcept {
+    if(!Cfg().enabled || !Cfg().heliMouseAim)return false;
+    for(const auto& p:pilots) {
+        const auto v=static_cast<const unsigned char*>(p.ref.obj);
+        if(!v || v+kHeadRight!=attitude || !p.flying || p.lastMs!=GameMs() || !p.ref.Is(v) || v[kDead])continue;
+        if(!SeatCount(v))return false;
+        const auto seat=SeatAt(const_cast<unsigned char*>(v),0);
+        if(SeatRider(seat)!=Rider::player || At<unsigned char>(seat,kSeatPad)!=0)return false;
+        if(edf::RemoteRider(At<const unsigned char*>(seat,kSeatRider)))return false;
+        *pitch=aim::PitchInput(p.aim,At<float>(v,kPlayerMaxTilt));
+        return true;
+    }
+    return false;
+}
+
+void __fastcall PlayerAttitudeHook(unsigned char* attitude,void* body,const float* input,const unsigned char* contact) {
+    alignas(16) float own[5];
+    const float* use=input;
+    __try {
+        float pitch=0.0f;
+        if(input && PlayerPitch(attitude,&pitch)) {
+            std::memcpy(own,input,sizeof(own));own[2]=pitch;use=own;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    playerAttitudeNext(attitude,body,use,contact);
+}
+
+bool InstallPlayerAttitude() noexcept {
+    if(playerAttitudeNext)return true;
+    if(!Matches(kPlayerAttitude,kPlayerAttitudeSig,sizeof(kPlayerAttitudeSig)))return false;
+    unsigned char trampoline[kPlayerAttitudeCopied+14];
+    std::memcpy(trampoline,kPlayerAttitudeSig,kPlayerAttitudeCopied);
+    const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
+    std::memcpy(trampoline+kPlayerAttitudeCopied,jump,6);
+    const auto back=reinterpret_cast<std::uintptr_t>(image+kPlayerAttitude+kPlayerAttitudeCopied);
+    std::memcpy(trampoline+kPlayerAttitudeCopied+6,&back,8);
+    void* const code=edf::AllocateNearCode(image+kPlayerAttitude,trampoline,sizeof(trampoline));
+    if(!code)return false;
+    unsigned char patch[kPlayerAttitudeCopied];std::memcpy(patch,jump,6);
+    const auto hook=reinterpret_cast<std::uintptr_t>(&PlayerAttitudeHook);
+    std::memcpy(patch+6,&hook,8);
+    playerAttitudeNext=reinterpret_cast<PlayerAttitudeFn>(code);
+    if(edf::PatchCode(image+kPlayerAttitude,kPlayerAttitudeSig,patch,sizeof(patch)))return true;
+    playerAttitudeNext=nullptr;VirtualFree(code,0,MEM_RELEASE);
+    return false;
+}
 
 // Its record: a new one (a free slot or a stale one) starts level, at a hover, the aim on its nose.
 Pilot* PilotOf(unsigned char* v,const float* fwd,ULONGLONG ms) noexcept {
@@ -2241,8 +2304,14 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
                          (At<float>(seat,kSeatAscend)>0.5f ? 1.0f : 0.0f)-(KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f)};
     const float mx=SeatAxis(seat,kSeatRX),my=Cfg().playerJetInvertPitch ? ry : -ry,k=aim::kPerUnit*Cfg().playerJetMouseSpeed;
     float vp[16];
-    if(LastViewProj(vp))aim::MoveOnScreen(vp,pos,p.aim,mx,my,k,fwd,kPlayerMark,kAimOnScreen);
-    else aim::Move(p.aim,mx,my,k);
+    if(LastViewProj(vp)) {
+        // A level nose can itself be outside a downward-looking camera. Recover toward the actual view centre,
+        // not that same invisible nose, when the user moves the mouse; no mouse must not introduce a new descent.
+        float centre[3]={fwd[0],fwd[1],fwd[2]},eye[3],view[3];
+        if(CameraRay(eye,view))aim::ViewCentreAim(pos,eye,view,kPlayerMark,centre);
+        const bool visible=aim::OnScreen(vp,pos,p.aim,kPlayerMark,kAimOnScreen);
+        if(visible || mx!=0.0f || my!=0.0f)aim::MoveOnScreen(vp,pos,p.aim,mx,my,k,centre,kPlayerMark,kAimOnScreen);
+    } else aim::Move(p.aim,mx,my,k);
     const float top=PlayerTop(v);
     if(grounded)p.groundAt=ms;
     const bool lifting=ms-p.groundAt<kLiftOffMs;   // the NPC's lift-off: straight up, nothing horizontal (and no setpoint)
@@ -2262,6 +2331,12 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
         Put<float>(v,kInThrottle,aim::StockThrottle(w.climb,p.vel[1],At<float>(v,kRotor),&p.hover,learn,dt,kRotorGains));
     }
     if(!p.flying)Log("HELI v=%p the mouse-aim flight: top %.1f m/s, hover rotor %.3f",v,top,p.hover);
+    if(Cfg().debug && ms-p.inputLogAt>=1000) {
+        p.inputLogAt=ms;
+        Log("HELI INPUT v=%p keys mouse=(%.3f,%.3f) fore=%.1f set=%.2f aim=(%.3f,%.3f,%.3f) pitch=%.3f move=%.3f yaw=%.3f "
+            "ground=%d lift=%d",v,mx,my,keys.fore,p.hold.speed,p.aim[0],p.aim[1],p.aim[2],
+            aim::PitchInput(p.aim,At<float>(v,kPlayerMaxTilt)),forward,yaw,grounded,lifting);
+    }
     p.flying=true;
 }
 
@@ -2337,8 +2412,9 @@ void PlayerHeli(unsigned char* v) noexcept {
     const bool grounded=OnGround((v[kContact]&kContactGround)!=0,rayOk,clear==kNoGround ? -1.0f : clear);
     const unsigned char* seat=SeatAt(v,0);
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
-    PlayerYawTune(v,Cfg().heliMouseAim && keys);
-    if(Cfg().heliMouseAim && keys)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
+    const bool mouse=Cfg().heliMouseAim && keys && playerAttitudeNext;
+    PlayerYawTune(v,mouse);
+    if(mouse)AimFly(*p,v,seat,pos,fwd,right,grounded,clear==kNoGround ? -1.0f : clear,dt,ms);
     else {
         if(p->flying)Log("HELI v=%p the mouse-aim flight off: the stock input flies it",v);
         p->flying=false;std::memcpy(p->aim,fwd,12);p->hold=aim::Hold{};
@@ -2433,6 +2509,8 @@ bool HeliCommand(const void* vehicle,const Command& c) noexcept {
             std::memcpy(h->post,h->ownPost,12);std::memcpy(h->hold,h->ownHold,12);
         }
         h->cmd=c;
+        h->cmdMoving=c.order!=Order::none;
+        h->target=ObjRef{};h->tracked=ObjRef{};h->circleUntil=0;
         // A new centre at once: GuardOrbit eases its centre at 10 m/s, which would drag the orbit across the map.
         h->orbitSet=false;h->extend=false;
         Log("HELI v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
@@ -2805,6 +2883,7 @@ bool CheckHeliProfile() noexcept {
     __try {
         for(const auto& s:kHeliSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("HELI profile mismatch at %#zx",s.rva);return false;}
         profileOk=true;
+        Log("HELI player attitude=%d (mouse pitch separated from forward speed)",InstallPlayerAttitude());
         // Called helis that left are deleted (HeliReap) with the game's Delete, as jet.cpp deletes its jets.
         deleteOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));
         if(!deleteOk)Log("HELI delete: profile mismatch (called helis that leave fly on away instead of being deleted)");

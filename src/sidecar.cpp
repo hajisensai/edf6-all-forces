@@ -70,6 +70,9 @@ const unsigned char kBikePadSig[]={0x8B,0x80,0xE4,0x00,0x00,0x00,0x33,0xD2,0x41,
 // +0x680 (warped by 0x11B9870 with an hkTransform, as the ride exit does: 0x57B17C..0x57B187), its carried velocity
 // +0x6B0 (m/s; docs/player-jet-re.md §7), attached / ragdolled +0x39C, a remote copy +0x128 bit 0.
 constexpr std::size_t kHumanMove=0xD50,kHumanBoard=0xD78,kHumanCtrl=0x680,kHumanCarry=0x6B0,kHumanAttach=0x39C,kNetFlags=0x128;
+constexpr std::size_t kHumanState=0x5D0;
+constexpr unsigned kControllerPosition=0x11B8DD0;
+const unsigned char kPositionSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x33,0xC0,0xC7,0x42,0x0C,0x00,0x00,0x80,0x3F};
 constexpr unsigned kMoveIntent=0x56D350,kMoveIntentCall=0x573B72,kWarp=0x11B9870;
 // The walk controller's one-step velocity (docs/sidecar-re.md §3a): 0x11B8D90(ctrl, v) adds v (xyz, m/s) to
 // ctrl+0x60; the step 0x11B9890 adds ctrl+0x60 to this step's velocity (0x11B9A92) and clears it (0x11B9CB7). The
@@ -112,7 +115,8 @@ struct Sidecar {
     bool marked;                  // has the marker bone (else a stock Freed bike: left alone)
     ObjRef gunner;                // who stands in the sidecar (none: empty)
     bool gunnerPlayer;
-    float lastY;                  // the gunner's height last frame (a jump off)
+    float lastHeight;             // height above the moving tub, not world height
+    bool npcReleased;             // ejection ends recruitment until the driver starts a new ride
     const void* body;             // its chassis body this frame (SidecarLevel)
     // The plugin's driving: the order (the player's stick, its frame), the steering's sign, the throttle's field.
     float order;ULONGLONG orderFrame;
@@ -122,12 +126,38 @@ struct Sidecar {
 Sidecar sidecars[kMaxSidecars]{};
 // The board button that took the player into the sidecar or out of it, until they let go of it: while held it is taken
 // off them (a button held over the next frames would take them straight off again, or onto the saddle).
-ObjRef boardHeld;
+ObjRef boardHeld[kMaxSidecars]{};  // each local player consumes their own press (split screen)
 bool ok=false,moveOk=false,driveOk=false;
 using MoveIntentFn=std::uintptr_t(__fastcall*)(void*);
 using WarpFn=void(__fastcall*)(void*,const float*);
 using AddStepFn=void(__fastcall*)(void*,const float*);
 using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
+using PositionFn=float*(__fastcall*)(void*,float*);
+
+// Published on the game thread; bullet batches may run elsewhere. Never read sidecars from a bullet hook.
+struct PassengerPair { ObjRef vehicle,gunner,driver; ULONGLONG at; };
+PassengerPair passengers[kMaxSidecars]{};
+SRWLOCK passengerLock=SRWLOCK_INIT;
+
+bool BoardHeld(const void* human) noexcept {
+    for(const auto& held:boardHeld)if(held.Is(human))return true;
+    return false;
+}
+void HoldBoard(const void* human) noexcept {
+    for(auto& held:boardHeld)if(!held || held.obj==human || !held.Is(held.obj)){held=ObjRef::Of(human);return;}
+}
+void ReleaseBoard(const void* human) noexcept {
+    for(auto& held:boardHeld)if(held.obj==human)held=ObjRef{};
+}
+
+// +0x90 is refreshed at 0x573D93, AFTER MoveIntent's 0x573B72. Reading it there feeds last frame's
+// rendered pose back into this frame's correction. This is the native foot/body transform, also used by
+// ride exit (0x57B12F..0x57B187); the game's capsule already contains each class's size/shape offset.
+void FootPosition(unsigned char* human,float* out) noexcept {
+    alignas(16) float p[4];
+    reinterpret_cast<PositionFn>(image+kControllerPosition)(human+kHumanCtrl,p);
+    std::memcpy(out,p,12);
+}
 
 float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : v>hi ? hi : v; }
@@ -148,7 +178,21 @@ bool InVehicle(const unsigned char* human) noexcept {
 
 // A human the sidecar can hold: alive, on foot, not attached or ragdolled, run on this machine.
 bool Holdable(const unsigned char* h) noexcept {
-    return h && !h[kDead] && At<std::int32_t>(h,kHumanAttach)==0 && !InVehicle(h) && !(At<std::uint8_t>(h,kNetFlags)&1);
+    return h && !h[kDead] && At<std::int32_t>(h,kHumanAttach)==0 && !(At<unsigned>(h,kHumanState)&4) &&
+        !InVehicle(h) && !(At<std::uint8_t>(h,kNetFlags)&1);
+}
+
+void PublishPassenger(const Sidecar& s) noexcept {
+    PassengerPair pair{};
+    if(s.gunner) {
+        pair.vehicle=s.ref;pair.gunner=s.gunner;pair.at=GetTickCount64();
+        auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.obj));
+        if(SeatCount(v) && SeatRider(SeatAt(v,0))!=Rider::none)
+            pair.driver=ObjRef::Of(At<const void*>(SeatAt(v,0),kSeatRider));
+    }
+    AcquireSRWLockExclusive(&passengerLock);
+    passengers[&s-sidecars]=pair;
+    ReleaseSRWLockExclusive(&passengerLock);
 }
 
 Sidecar* Find(const void* v) noexcept {
@@ -165,6 +209,7 @@ Sidecar* EntryFor(unsigned char* v,ULONGLONG ms) noexcept {
     for(auto& s:sidecars)if(!s.ref || s.ref.obj==v || ms-s.seen>kStaleMs){slot=&s;break;}
     if(!slot){static ULONGLONG at=0;if(ms-at>10000){at=ms;Log("SIDECAR table full: v=%p left alone",v);}return nullptr;}
     *slot=Sidecar{};
+    PublishPassenger(*slot);
     slot->ref=ObjRef::Of(v);slot->seen=ms;slot->steerSign=1;
     slot->marked=BoneRecord506(v+kModelInst506,kMarkerBone)!=nullptr;
     if(slot->marked)Log("SIDECAR v=%p a sidecar motorcycle",v);
@@ -182,15 +227,19 @@ const char* Who(const Sidecar& s) noexcept { return s.gunnerPlayer ? "the player
 
 void Let(Sidecar& s,const unsigned char* v,const char* why) noexcept {
     Log("SIDECAR v=%p %s off the sidecar: %s",v,Who(s),why);
+    if(!s.gunnerPlayer)s.npcReleased=true;
     s.gunner=ObjRef{};s.gunnerPlayer=false;s.driving=false;
+    s.order=0.0f;s.orderFrame=0;
+    PublishPassenger(s);
 }
 
 void Take(Sidecar& s,unsigned char* v,unsigned char* human,bool byPlayer) noexcept {
     float at[3];FramePoint(v,kGunnerX,kGunnerY,kGunnerZ,at);
     Warp(human,at);
-    s.gunner=ObjRef::Of(human);s.gunnerPlayer=byPlayer;s.lastY=at[1];
-    if(byPlayer)boardHeld=ObjRef::Of(human);   // in by the board button: it gets them out only once let go
-    for(auto& o:sidecars)if(&o!=&s && o.gunner.Is(human))o.gunner=ObjRef{};
+    s.gunner=ObjRef::Of(human);s.gunnerPlayer=byPlayer;s.lastHeight=0.0f;
+    if(byPlayer)HoldBoard(human);   // in by the board button: it gets them out only once let go
+    for(auto& o:sidecars)if(&o!=&s && o.gunner.Is(human))Let(o,static_cast<const unsigned char*>(o.ref.obj),"transferred");
+    PublishPassenger(s);
     Log("SIDECAR v=%p %s %p into the sidecar",v,byPlayer ? "the player" : "an NPC",human);
 }
 
@@ -198,7 +247,7 @@ void Take(Sidecar& s,unsigned char* v,unsigned char* human,bool byPlayer) noexce
 void StepOff(Sidecar& s,unsigned char* v,unsigned char* human,const char* why) noexcept {
     float at[3];FramePoint(v,kTubOut-kStepOff,0.2f,kGunnerZ,at);
     Warp(human,at);
-    boardHeld=ObjRef::Of(human);
+    HoldBoard(human);
     Let(s,v,why);
 }
 
@@ -237,15 +286,16 @@ unsigned char* NearestSquadmate(const unsigned char* v,std::int32_t team) noexce
 void Hold(Sidecar& s,unsigned char* v) noexcept {
     auto h=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.gunner.obj));
     if(!s.gunner.Is(h)){Let(s,v,"gone");return;}
-    if(!Holdable(h)){Let(s,v,h[kDead] ? "dead" : At<std::int32_t>(h,kHumanAttach) ? "knocked down" : "in a vehicle");return;}
+    if(!Holdable(h)){Let(s,v,"no longer able to ride on foot");return;}
     if(s.gunnerPlayer && !IsPlayer(h)){Let(s,v,"no longer the player");return;}
     float at[3];FramePoint(v,kGunnerX,kGunnerY,kGunnerZ,at);
-    const float* p=Pos(h);
+    float p[3];FootPosition(h,p);
     const float d[3]={p[0]-at[0],p[1]-at[1],p[2]-at[2]};
     const float off=std::sqrt(Dot(d,d));
-    const bool rising=p[1]-s.lastY>kJumpRise;
-    s.lastY=p[1];
-    if(s.gunnerPlayer && d[1]>kJumpOut && rising) {
+    const float height=Dot(d,Row(v,1));
+    const bool rising=height-s.lastHeight>kJumpRise;
+    s.lastHeight=height;
+    if(s.gunnerPlayer && height>kJumpOut && rising) {
         // In the air the carried velocity keeps its x and z (docs/player-jet-re.md §7): off with the bike's way on.
         float* carry=reinterpret_cast<float*>(h+kHumanCarry);
         const float* vel=reinterpret_cast<const float*>(v+kChassisVel);
@@ -273,8 +323,9 @@ void Follow(const Sidecar& s,unsigned char* h) noexcept {
     const auto v=static_cast<const unsigned char*>(s.ref.obj);
     if(!s.ref.Is(v))return;
     float at[3];FramePoint(v,kGunnerX,kGunnerY,kGunnerZ,at);
+    float p[3];FootPosition(h,p);
     alignas(16) float step[4];
-    FollowVelocity(at,Pos(h),reinterpret_cast<const float*>(v+kChassisVel),step);
+    FollowVelocity(at,p,reinterpret_cast<const float*>(v+kChassisVel),step);
     reinterpret_cast<AddStepFn>(image+kAddStep)(h+kHumanCtrl,step);
 }
 
@@ -329,7 +380,46 @@ void LogState(Sidecar& s,const unsigned char* v,ULONGLONG ms) noexcept {
     Log("SIDECAR v=%p gunner %s (%.2f m off the point) speed %.1f m/s up (%.2f %.2f %.2f) fwd.y %.2f%s",v,
         s.gunner ? Who(s) : "none",gap,Dot(vel,f),u[0],u[1],u[2],f[1],s.driving ? " plugin-driven" : "");
 }
+
+// Both explosion variants preserve DamageInfo's attacker weak reference (+0x10/+0x18), copied by
+// 0x114210 from the bullet's core+0x730. Filter the two per-target damage calls, never the blast itself:
+// enemies, other allies, the shooter's own damage, radius, knockback and visual effects remain native.
+constexpr unsigned kDamage=0x541FF0,kBlastDamageCall=0x542FD4,kBlastListDamageCall=0x54360E;
+const unsigned char kBlastDamageSig[]={0x4C,0x8D,0x45,0x50,0x48,0x8D,0x54,0x24,0x58,0x48,0x8D,0x4D,0x90,0xE8,0x17,0xF0,0xFF,0xFF};
+const unsigned char kBlastListDamageSig[]={0x4C,0x8D,0x45,0x00,0x48,0x8D,0x54,0x24,0x30,0x48,0x8D,0x4C,0x24,0x70,0xE8,0xDD,0xE9,0xFF,0xFF};
+const unsigned char kAttackerCopySig[]={0x48,0x8B,0x42,0x10,0x48,0x89,0x41,0x10,0x48,0x8B,0x42,0x18,0x48,0x89,0x41,0x18};
+using DamageFn=void(__fastcall*)(void*,const void*,void*);
+void __fastcall PassengerBlastDamage(void* damage,const void* target,void* info) noexcept {
+    bool pass=false;
+    __try {
+        const auto targetCtrl=At<const unsigned char*>(target,8);
+        const void* object=At<const void*>(target,0);
+        if(targetCtrl && At<int>(targetCtrl,8)>0 && object && At<const void*>(object,kSelfCtrl)==targetCtrl)
+            pass=SidecarBulletPass(At<const void*>(info,0x10),object,At<const void*>(info,0x18));
+    } __except(EXCEPTION_EXECUTE_HANDLER) { pass=false; }
+    if(!pass)reinterpret_cast<DamageFn>(image+kDamage)(damage,target,info);
+}
 }  // namespace
+
+bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept {
+    if(!owner || !target || !ownerCtrl || !ok || !Cfg().sidecar)return false;
+    PassengerPair match{};
+    AcquireSRWLockShared(&passengerLock);
+    for(const auto& p:passengers)if(p.gunner.obj==owner && p.gunner.ctrl==ownerCtrl &&
+        (p.vehicle.obj==target || p.driver.obj==target)) {match=p;break;}
+    ReleaseSRWLockShared(&passengerLock);
+    if(!match.gunner || GetTickCount64()-match.at>kGoneMs)return false;
+    __try {
+        auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(match.vehicle.obj));
+        const auto h=static_cast<const unsigned char*>(owner);
+        if(At<int>(ownerCtrl,8)<=0 || !match.vehicle.ctrl || At<int>(match.vehicle.ctrl,8)<=0 ||
+           !match.gunner.Is(owner) || !match.vehicle.Is(v) || v[kDead] || !Holdable(h))return false;
+        if(target==v)return true;
+        // A saved driver who has since stepped off is no longer protected.
+        return match.driver.Is(target) && SeatCount(v) && SeatRider(SeatAt(v,0))!=Rider::none &&
+            At<const void*>(SeatAt(v,0),kSeatRider)==target;
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
 
 bool IsSidecar(const void* vehicle) noexcept {
     const Sidecar* s=Find(vehicle);
@@ -359,7 +449,8 @@ void SidecarFrame(unsigned char* v) noexcept {
     const Rider driver=SeatCount(v) ? SeatRider(SeatAt(v,0)) : Rider::none;
     // An NPC rides along while the player drives; the player off the saddle lets them go.
     if(s.gunner && !s.gunnerPlayer && driver!=Rider::player)Let(s,v,"the player left the saddle");
-    if(!s.gunner && driver==Rider::player && Cfg().sidecarNpcGunner && ms-s.npcScanAt>kNpcScanMs) {
+    if(driver!=Rider::player)s.npcReleased=false;
+    if(!s.gunner && !s.npcReleased && driver==Rider::player && Cfg().sidecarNpcGunner && ms-s.npcScanAt>kNpcScanMs) {
         s.npcScanAt=ms;
         // The player's friends (their team's relation row), the team the player drives on (crew.cpp SeePlayer).
         const std::int32_t team=player.at && ms-player.at<2000 ? player.team : At<std::int32_t>(v,kTeam);
@@ -373,6 +464,7 @@ void SidecarFrame(unsigned char* v) noexcept {
         Log("SIDECAR v=%p its NPC driver got off: the plugin drives for the player in the sidecar",v);
     } else if(s.gunner && s.gunnerPlayer && driver==Rider::none && driveOk)Drive(s,v);
     else if(s.driving){s.driving=false;s.lastSteer=0.0f;}
+    PublishPassenger(s);
     LogState(s,v,ms);
 }
 
@@ -383,7 +475,7 @@ bool SidecarBoard(unsigned char* v,unsigned char* human) noexcept {
     if(BoardingOnly())return false;
     // FindSeat's caller walks every friendly vehicle, even after we return nullptr (there is no real seat).
     // Consume the whole press, including the rest of that walk and a step-off's press, before asking any vehicle.
-    if(boardHeld.Is(human))return true;
+    if(BoardHeld(human))return true;
     for(const auto& held:sidecars)if(held.gunnerPlayer && held.gunner.Is(human))return true;
     Sidecar* s=Find(v);
     if(!s || !s->marked || s->gunner || v[kDead] || !Holdable(human))return false;
@@ -408,26 +500,35 @@ bool SidecarBoard(unsigned char* v,unsigned char* human) noexcept {
 std::uintptr_t __fastcall MoveIntent(void* human) noexcept {
     __try {
         auto h=static_cast<unsigned char*>(human);
-        if(boardHeld.Is(h)) {
+        if(BoardHeld(h)) {
             if(h[kHumanBoard])h[kHumanBoard]=0;   // still the press that took them in or out
-            else boardHeld=ObjRef{};
+            else ReleaseBoard(h);
         }
         for(auto& s:sidecars) {
             if(!s.gunner.Is(h))continue;
             // The bike no longer runs its input (gone: deleted, a new mission): the gunner is free to walk again.
             if(GameMs()-s.seen>kGoneMs){Let(s,static_cast<const unsigned char*>(s.ref.obj),"the bike is gone");break;}
+            auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.obj));
+            // A knockdown may start between the vehicle's input and this pre-update. End the binding BEFORE
+            // suppressing movement or adding any velocity; recovery must require a fresh boarding press.
+            if(!Cfg().sidecar || !s.ref.Is(v) || v[kDead] || !Holdable(h)) {
+                Let(s,v,"passenger or vehicle became unavailable");break;
+            }
+            Hold(s,v);
+            if(!s.gunner)break;
             float* move=reinterpret_cast<float*>(h+kHumanMove);
             if(s.gunnerPlayer) {
                 s.order=std::sqrt(move[0]*move[0]+move[2]*move[2]);s.orderFrame=GameFrame();
                 if(h[kHumanBoard]) {
                     h[kHumanBoard]=0;   // the button gets them off the sidecar, not onto the saddle (0x59B417)
-                    auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.obj));
                     if(s.ref.Is(v))StepOff(s,v,h,"the board button");
                     else Let(s,v,"the bike is gone");
                 }
             }
-            move[0]=move[1]=move[2]=0.0f;
-            if(s.gunner.Is(h))Follow(s,h);
+            if(s.gunner.Is(h)) {
+                move[0]=move[1]=move[2]=0.0f;
+                Follow(s,h);
+            }
             break;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
@@ -460,6 +561,7 @@ void SidecarLevel(const void* body,float* w) noexcept {
 bool InstallSidecar() noexcept {
     __try {
         ok=Matches(kTeamWalk,kTeamWalkSig,sizeof(kTeamWalkSig)) && Matches(kWarp,kWarpSig,sizeof(kWarpSig)) &&
+           Matches(kControllerPosition,kPositionSig,sizeof(kPositionSig)) &&
            Matches(0x57B17C,kExitWarpSig,sizeof(kExitWarpSig)) && Matches(0x6746D3,kVelSig,sizeof(kVelSig)) &&
            Matches(kAddStep,kAddStepSig,sizeof(kAddStepSig)) && Matches(0x11B9A92,kStepUseSig,sizeof(kStepUseSig)) &&
            Matches(0x11B9CB7,kStepClearSig,sizeof(kStepClearSig));
@@ -469,8 +571,17 @@ bool InstallSidecar() noexcept {
             bool changed=false;
             moveOk=edf::RedirectCall(image+kMoveIntentCall,image+kMoveIntent,reinterpret_cast<void*>(&MoveIntent),changed);
         }
-        // Without the walk taken away a held gunner walks out of the tub every frame: no sidecar at all.
-        ok=ok && moveOk;
+        bool blastOk=false;
+        if(ok && Matches(0x542FC7,kBlastDamageSig,sizeof(kBlastDamageSig)) &&
+           Matches(0x543600,kBlastListDamageSig,sizeof(kBlastListDamageSig)) &&
+           Matches(0x114251,kAttackerCopySig,sizeof(kAttackerCopySig))) {
+            bool changed=false;
+            blastOk=edf::RedirectCall(image+kBlastDamageCall,image+kDamage,reinterpret_cast<void*>(&PassengerBlastDamage),changed);
+            if(blastOk)blastOk=edf::RedirectCall(image+kBlastListDamageCall,image+kDamage,reinterpret_cast<void*>(&PassengerBlastDamage),changed);
+        }
+        // If either required channel cannot be installed, no virtual passengers are admitted.
+        ok=ok && moveOk && blastOk && SidecarBulletHooked();
+        Log("HOOK sidecar blast=%d",blastOk);
     } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
     Log("HOOK sidecar=%d (move=%d drive=%d level=%d) config %d",ok,moveOk,driveOk,ok && SidecarLevelHooked(),Cfg().sidecar);
     return ok;
@@ -478,6 +589,9 @@ bool InstallSidecar() noexcept {
 
 void ResetSidecars() noexcept {
     for(auto& s:sidecars)s=Sidecar{};
-    boardHeld=ObjRef{};
+    for(auto& held:boardHeld)held=ObjRef{};
+    AcquireSRWLockExclusive(&passengerLock);
+    for(auto& p:passengers)p=PassengerPair{};
+    ReleaseSRWLockExclusive(&passengerLock);
 }
 }  // namespace crew

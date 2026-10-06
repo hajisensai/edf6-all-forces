@@ -251,15 +251,19 @@ void SpecialFrame(PJet& j,unsigned char* v,Stick& s,const float* pos,ULONGLONG m
     }
 }
 
-// --- A rotor craft's clearance (playerjet_kinds.h RestHeight / BottomClear) ---
-// Its mesh bone (the drawn model's origin, its bottom): the rotor craft's models' is `body` (pylib/vcobjects.py JETS).
+// --- An airframe's clearance (playerjet_kinds.h RestHeight / BottomClear) ---
+// The grounded mesh origin is below the body's position on wings too; use the same fuselage bones as Body506.
 float RestOver(const unsigned char* v,const float* pos) noexcept {
-    const unsigned char* const rec=BoneRecord506(v+kModelInst506,L"body");
-    return rec ? pjet::RestHeight(pos[1],At<float>(rec,kBoneWorld506+0x34)) : 0.0f;   // the world matrix's translation y
+    const wchar_t* const names[]={L"bomber501",L"bomber401",L"body"};
+    for(const auto name:names) {
+        const unsigned char* const rec=BoneRecord506(v+kModelInst506,name);
+        if(rec)return pjet::RestHeight(pos[1],At<float>(rec,kBoneWorld506+0x34));
+    }
+    return 0.0f;
 }
-// `clear` (from its position) as its bottom's, for a rotor craft; a wing's as it is.
+// `clear` (from its position) as its bottom's. A large wing's centre can remain above kTouch while its wheels touch.
 float FloorClear(const PJet& j,const unsigned char* v,const float* pos,float clear) noexcept {
-    if(!j.board || j.board->frame!=pjet::Airframe::rotor)return clear;
+    (void)j;
     return pjet::BottomClear(clear,RestOver(v,pos),kNoGround);
 }
 

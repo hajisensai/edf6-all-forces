@@ -19,8 +19,9 @@ its dark metal and its black, each one even patch of the bike's own texture: not
     to a round bilge and a flat bottom TUB_BOTTOM over the ground, walls WALL thick with a rim, an inner floor at
     FLOOR_Y, a crowned deck over the nose from DECK_Z, an armoured shield plate standing on the deck's edge, a beaded
     cockpit rim, and a bench seat with a back at the tail. The gunner stands in the cockpit at GUNNER_POINT, feet on
-    the floor: the sides (RIM_Y) come up to their hips, the shield to their chest;
-  * its frame: two arms from the bike to the tub, a stub axle from the tub to the wheel, a stay to the mudguard;
+    the floor: low sides (RIM_Y) leave the passenger's upper body free, with a short deflector ahead;
+  * its frame: two crossmembers, longitudinal floor rails and triangulated bike mounts, a stub axle and trailing
+    wheel stay, and a stay to the mudguard;
   * the sidecar's wheel: the bike's own front tyre (its triangles on the front_tire bone) copied to WHEEL_CENTRE,
     outboard of the tub, under a mudguard. It is drawn only: the bike's physics keeps its two wheels (car_base_wheel
     names front_tire and rear_tire; a third wheel the BikeBase class would steer and drive is not something the SGO
@@ -72,22 +73,22 @@ TUB_WAIST_Z, TUB_NOSE, TUB_TAIL = 0.40, 1.50, -0.60
 NOSE_EXP, TAIL_EXP = 2.2, 3.5
 TUB_BOTTOM = 0.20                       # the outer bottom
 FLOOR_Y = 0.30                          # the inner floor: what the gunner stands on
-RIM_Y = 1.18                            # the cockpit's rim: 0.88 m over the floor, a soldier's hips (koshi 0.888)
-NOSE_RIM_Y = 0.82                       # the rim at the nose (it falls from DECK_Z on)
-TAIL_RIM_Y, TAIL_DROP_Z = 1.10, -0.30   # the rim at the tail (it falls behind TAIL_DROP_Z): a rounded tail
+RIM_Y = 0.92                            # lower body sides: 0.62 m over the unchanged standing floor
+NOSE_RIM_Y = 0.64                       # low rounded nose, below the bike's tank
+TAIL_RIM_Y, TAIL_DROP_Z = 0.85, -0.30   # the rim at the tail (it falls behind TAIL_DROP_Z): a rounded tail
 DECK_Z = 0.85                           # the deck covers the tub from here to the nose
-DECK_CROWN = 0.10
+DECK_CROWN = 0.045
 WALL, BILGE = 0.04, 0.22                # the walls' thickness, the outer bilge's radius
 TUMBLE = 0.05                           # the sides lean in this much from the bilge's top to the rim
 KEEL_Z, KEEL_RISE = 0.95, 0.12          # the bottom rises KEEL_RISE from KEEL_Z to the nose (a boat's forefoot)
-SHIELD_TOP = 1.48                       # the shield plate's top: a soldier's chest (mune 1.26 over the floor)
+SHIELD_TOP = 1.10                       # short deflector, clear of a standing passenger's weapon
 TUB: tuple[Vec3, Vec3] = ((TUB_OUT, TUB_BOTTOM, TUB_TAIL), (TUB_IN, SHIELD_TOP, TUB_NOSE))
 # The collision slab (FLOOR_HULL): the tub's plan, from its bottom up to its floor.
 FLOOR: tuple[Vec3, Vec3] = ((TUB_OUT, TUB_BOTTOM, TUB_TAIL), (TUB_IN, FLOOR_Y, TUB_NOSE))
 # Where the gunner stands: on the floor in the cockpit, between the seat and the deck (src/sidecar.cpp kGunnerX/Y/Z).
 GUNNER_POINT: Vec3 = (TUB_X, FLOOR_Y, 0.35)
 # The bench seat (cushion, back) at the tail.
-SEAT_FRONT, SEAT_TOP = -0.06, 0.66
+SEAT_FRONT, SEAT_TOP = -0.06, 0.56
 # The sidecar wheel: its hub outboard of the tub (the tyre TYRE_HALF_WIDTH each side of it, WHEEL_GAP clear of the
 # tub's side), on the ground as the bike's (TYRE_RADIUS is the front tyre's: the hub at that height puts its bottom
 # on y 0); the mudguard over it MUDGUARD_GAP clear of the tyre.
@@ -239,7 +240,7 @@ def tube(part: pm.Part, path: list[Vec3], radius: float, skin: pm.Skin, segs: in
 # ------------------------------------------------------------------------------------------ the sidecar's parts
 
 RING = 72          # points round the plan
-DECK_ROWS, DECK_COLS = 12, 15
+DECK_COLS = 15
 
 
 def _shell(part: pm.Part, skin: pm.Skin, inner: bool) -> list[int]:
@@ -291,19 +292,26 @@ def tub_body(skin: pm.Skin) -> pm.Part:
         j = (i + 1) % RING
         part.tris += [(outer[i], inner[i], inner[j]), (outer[i], inner[j], outer[j])]
     _flip_outward(part, start, lambda c: c - np.array([0.0, 1.0, 0.0]))     # the rim faces up
-    # The deck: rows across the nose from DECK_Z, crowned, just over the rim and over the outer side.
-    zs = [DECK_Z + (TUB_NOSE - 0.004 - DECK_Z) * k / (DECK_ROWS - 1) for k in range(DECK_ROWS)]
+    # Reuse the shell's actual rim vertices, including its inset nose. The old independent
+    # z grid used rim_y(z) on an inset outline, while the shell used the uninset z; their
+    # heights diverged and the deck ran beyond the rim's nose, leaving a visible slit.
+    rim = [i for i in range(RING // 4 + 1) if part.pos[outer[i]][2] >= DECK_Z]
     for under in (False, True):
         rows = []
-        for r, z in enumerate(zs):
-            w = half_width(z, TUMBLE)
+        for r, i in enumerate(rim):
+            left, right = outer[i], outer[RING // 2 - i]
+            x, edge_y, z = part.pos[left]
+            w = TUB_X - x
             row = []
             for c in range(DECK_COLS):
                 t = -1.0 + 2.0 * c / (DECK_COLS - 1)
-                y = rim_y(z) + 0.005 + DECK_CROWN * (1.0 - t * t) * (1.0 - 0.5 * (z - DECK_Z) / (TUB_NOSE - DECK_Z))
-                # The underside meets the top at the sides (on the rim): the deck is closed but at its front edge.
-                row.append(part.add((TUB_X + t * w, y - (0.025 * (1.0 - t ** 4) if under else 0.0), z), skin,
-                                    (c / DECK_COLS, r / DECK_ROWS)))
+                if i == RING // 4 or c in (0, DECK_COLS - 1):
+                    row.append(left if c == 0 or i == RING // 4 else right)
+                    continue
+                taper = w / (TUB_HALF_WIDTH - TUMBLE)
+                y = edge_y + DECK_CROWN * (1.0 - t * t) * taper
+                row.append(part.add((TUB_X + t * w, y - (0.025 * (1.0 - t ** 4) * taper if under else 0.0), z),
+                                    skin, (c / DECK_COLS, r / len(rim))))
             rows.append(row)
         start = len(part.tris)
         pm.grid(part, rows, False)
@@ -315,6 +323,7 @@ def tub_body(skin: pm.Skin) -> pm.Part:
             for c in range(DECK_COLS - 1):
                 part.tris += [(top_front[c], rows[0][c], rows[0][c + 1]), (top_front[c], rows[0][c + 1], top_front[c + 1])]
             _flip_outward(part, start, lambda c: c + np.array([0.0, 0.0, 1.0]))   # the edge faces the cockpit
+    part.tris = [t for t in part.tris if len(set(t)) == 3]  # the shared nose is one vertex, not a zero-width row
     return part
 
 
@@ -323,7 +332,7 @@ def shield(skin: pm.Skin) -> pm.Part:
     part = pm.Part(0, METAL)
     z0, z1, t = DECK_Z + 0.02, DECK_Z - 0.10, 0.025
     y0 = rim_y(DECK_Z) - 0.03
-    w0, w1 = half_width(DECK_Z, TUMBLE) - 0.05, 0.30
+    w0, w1 = half_width(DECK_Z, TUMBLE) - 0.06, 0.24
     hexahedron(part, [(TUB_X - w0, y0, z0), (TUB_X + w0, y0, z0), (TUB_X + w0, y0, z0 + t), (TUB_X - w0, y0, z0 + t),
                       (TUB_X - w1, SHIELD_TOP, z1), (TUB_X + w1, SHIELD_TOP, z1), (TUB_X + w1, SHIELD_TOP, z1 + t),
                       (TUB_X - w1, SHIELD_TOP, z1 + t)], skin)
@@ -367,9 +376,16 @@ def wheel_mount(skin: pm.Skin) -> pm.Part:
     the mudguard's stay."""
     part = pm.Part(0, METAL)
     wx, wy, wz = WHEEL_CENTRE
-    for z, y_bike, y_tub in ((1.25, 0.52, 0.50), (-0.40, 0.72, 0.52)):
-        tube(part, [(-0.22, y_bike, z), (TUB_X + half_width(z) - 0.02, y_tub, z)], 0.035, skin)
+    # Two full crossmembers carry the tub instead of terminating halfway up its sheet metal.
+    # Longitudinal rails lie within the floor slab; upper braces triangulate the bike connection.
+    for z, y_bike in ((1.05, 0.46), (-0.32, 0.58)):
+        tube(part, [(-0.22, y_bike, z), (TUB_IN + 0.04, 0.265, z), (TUB_X - 0.24, 0.265, z)], 0.032, skin)
+    for dx in (-0.24, 0.24):
+        tube(part, [(TUB_X + dx, 0.265, -0.32), (TUB_X + dx, 0.265, 1.05)], 0.025, skin)
+    for z, end_z in ((0.95, 0.70), (-0.32, -0.12)):
+        tube(part, [(-0.24, 0.75, z), (TUB_IN + 0.015, 0.48, end_z)], 0.024, skin)
     tube(part, [(TUB_X - half_width(wz) + 0.02, wy, wz), (wx, wy, wz)], 0.04, skin)
+    tube(part, [(TUB_OUT + 0.08, 0.265, -0.12), (wx + 0.06, wy, wz)], 0.028, skin)
     r = TYRE_RADIUS + MUDGUARD_GAP
     tube(part, [(TUB_X - half_width(wz) + 0.02, wy + r + 0.02, wz), (wx + TYRE_HALF_WIDTH + 0.03, wy + r + 0.02, wz)], 0.025, skin)
     return part

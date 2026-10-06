@@ -924,10 +924,23 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             led.put(OWNER, f'WEAPON/{name}', data)
             held.add(ledger.key(f'WEAPON/{name}'))
     elevon = f'OBJECT/{JET_ELEVON_FILE}'
+    if any(JETS[n].model is None for n in jets) and not os.path.isfile(led.disk(elevon)):
+        # The default bomber's shape is measured on the grounded elevon model.
+        # A standalone range installation must generate that same model too.
+        led.put(OWNER, elevon, jet_models.elevon_archive(game))
     elevons = os.path.isfile(led.disk(elevon))
     if elevons and any(JETS[n].model is None for n in jets):
         led.need(OWNER, elevon)
         held.add(ledger.key(elevon))
+    import aircraft_collision
+    for name in sorted(jets):
+        key = aircraft_collision.model_key(JETS[name], JET_ELEVON_MODEL if elevons else None)
+        if key is not False:
+            rel = f'OBJECT/{aircraft_collision.FILES[key]}'
+            # Rebuild from the same Root.cpk/model recipe, never reuse a stale
+            # loose shape with a different mesh or a previous collision version.
+            led.put(OWNER, rel, aircraft_collision.build(game, key))
+            held.add(ledger.key(rel))
     for name in sorted(wanted):
         led.put(OWNER, f'OBJECT/{name.upper()}.SGO', vehicle_sgo(game, name, JET_ELEVON_MODEL if elevons else None))
     led.release(OWNER, sorted(before - held))

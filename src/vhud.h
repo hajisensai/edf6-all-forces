@@ -19,6 +19,8 @@ struct RoundModel {
     std::int32_t alive;          // AmmoAlive frames
     float accel,top,keepInh,keepOwn;   // the motor (rocket): Ammo_CustomParameter[4], [6], [7][1], [7][2]
     std::int32_t ignite;               // [7][0]
+    bool pluginMotor;                 // unguided CP[8]=1000000 / CP[9]=4242: missile.cpp owns its burn and coast
+    float burn;                       // CP[3][0], frames (the runtime clamps to 0..3600)
 };
 bool InstallRounds() noexcept;   // at load: the reads below (their EDF.dll code checked); off: every round an arc
 // Whether the weapon status fields (rounds, magazine, reload: 0x692100) are where vhud.cpp reads them.

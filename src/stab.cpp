@@ -260,8 +260,7 @@ void Hold(Entry& e,unsigned char* aim,const float* before) noexcept {
     for(int i=0;i<2;++i) {
         if(!std::isfinite(out[i]) || out[i]==after[i])continue;
         float* axis=AxisOf(aim,i);
-        axis[2]=out[i];
-        axisMap(axis,true);   // the bones take the held angle (the stock step mapped the one before it)
+        stab::Remap(axis,before[i],out[i],[](float* mapped) noexcept { axisMap(mapped,true); });
     }
     Debug(e);
 }

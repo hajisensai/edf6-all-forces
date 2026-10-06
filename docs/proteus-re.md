@@ -13,7 +13,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。H = 反汇编里直接看�
 | vtable | `0x17DEC40`，构造 `0x648DE0` / `0x648EE0`；`veh+0x120` 的接口 vtable `0x17DEE10`（构造里写入，`0x648E19`） | H |
 | 与家族的差别 | 和 `VehicleBegaruta`（0x17DE0A8）只差 slot 1（析构）、**50**（`0x6490C0`：先调原版 RideAi，再给**每个**座位放一个 NPC 乘员）、**55**（`0x648F70`：先调家族的 AI 思考 `0x63C1C0`，再做炮手的 AI）、57/58 | H |
 | slot 49 | 原版 FindSeat `0x633B80`（`docs/re-notes.md` 原来写成「BigBegaruta 的第 49 槽是 0x6490C0」，那其实是第 50 槽） | H |
-| 插件以前 | `crew.cpp kClasses` 里它的输入槽填的是 0，所以插件的每帧步骤从没对它跑过（没有载具 HUD、换座位、NPC 驾驶都不生效，虽然 README 提到过 Proteus）。现在填 `0x648F70` | H |
+| 插件入口 | `crew.cpp kClasses` 显式挂 **slot 4 = 0x644350**。旧实现挂 slot 55 = 0x648F70，只是 AI 任务，玩家驾驶无法保证执行；日志显示安装成功却没有 `PROTEUS v=` 行。共享更新链现在包含重构、换座位、GameFrame 与 HUD 发布 | H（代码/原生槽位；实机症状见日志） |
 | 耐久 | 所有这些 SGO 都是 `game_object_durability=7500`（插件按 最大 HP / 7500 算档位，用来放大机炮和齐射的伤害） | H |
 
 座位（`vehicle_riding_position`，4 个）：0 驾驶员（`407_BIGBEGARUTA_DRIVER`）、1 左炮手、2 右炮手、3 中间（导弹）炮手。
@@ -54,7 +54,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。H = 反汇编里直接看�
 
 - slot 4 `0x644350`（家族共用，见 `docs/nix-re.md` §2）：`0x645790`（矩阵、输入 `0x641800`、每个座位的瞄准、移动缓动）→ `0x645190`（朝向、速度、**开火**）。
 - slot 55 `0x648F70` 不是由 slot 4 调的，它经一个转发 thunk（`0x638310`：`mov rax,[rcx]; jmp [rax+0x1B8]`）被 slot 6 `0x642970` 注册成每帧任务（H）。
-  所以 slot 55 和 slot 4 在一帧里的先后不确定；插件写的都是持久的字段（速度参数、台阶、武器倍率、座位掩码），先后最多差一帧。
+  所以它不能代替玩家每帧更新入口。插件链在 slot 4 原版调用之后，保持 `rcx=vehicle, rdx=step`，额外寄存器原样转发；持久字段影响下一次原版更新，重构状态与 HUD 每帧仍会推进。
 - 输入 `0x641800`：每个座位一个块 `[veh+0x19E8] + i × 0x40`：+0 −RX、+4 RY、+0x18 指向「每把武器一个字节」的扳机数组（数目 +0x28），+0x30 模式；
   **先全部清零**，座位有乘员才填：模式 1（这个类的四个座位都是）每个字节 = 主扳机 `seat+0x2E4 ≥ 0.8`（H）。
 - 开火 `0x645432`（`0x645190` 里）：每个非零字节 → `0x62C000(*(veh+0x638) + k × 0x48)`（holder 拉扳机：holder 的弱引用还活着就设 `weapon+0x139 = 1`，H）。
