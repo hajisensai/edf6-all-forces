@@ -43,6 +43,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "vecmath.h"
+#include "seat_aim.h"
 #include "edf/aimlink.h"
 #include "edf/weapon.h"
 #include <cfloat>
@@ -63,6 +64,7 @@ constexpr float kTriggerOn=0.8f;
 // A weapon (docs/proteus-re.md §5): the trigger latch and its held copy, the shot countdown, its rate, the cone's scale.
 constexpr std::size_t kPull=0x139,kHeld=0x13A,kCountdown=0xE0C,kRate=0xE10,kSpread=0xE14;
 constexpr unsigned kPullFn=0x62C000;
+constexpr unsigned kAimVt=0x17D8A68,kAimSeVt=0x17D8A90,kAxisApply=0x5FC280;
 constexpr float kHoldCountdown=kProteusHoldCountdown;   // frames: the stock launcher held (proteus.h: vehsound.cpp reads it)
 // The weapon user (heli.cpp DoorGunUser's): the vehicle's interface at +0x120, its slot 11 (0x62D950).
 constexpr unsigned kUserSlotRva=0x17DEE68,kUserFn=0x62D950;
@@ -107,6 +109,11 @@ const Sig kSigs[]={
     {kPullFn,{0x48,0x8B,0x41,0x08,0x48,0x85,0xC0,0x74,0x11,0x83,0x78,0x08,0x00,0x74,0x0B,0x48},16},
 };
 const Sig kUserSig={kUserFn,{0x41,0x57,0x48,0x83,0xEC,0x30,0x4C,0x69,0x99,0xF8,0x04,0x00,0x00,0x40,0x03,0x00},16};
+const Sig kAimSigs[]={
+    {0x6459D0,{0x48,0x8B,0x8B,0x08,0x06,0x00,0x00,0x48,0x81,0xC1,0xE0,0x00,0x00,0x00},14},
+    {0x6459E9,{0x48,0x03,0xCE,0x48,0x8B,0x01,0xFF,0x50,0x10},9},
+    {kAxisApply,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x68,0x10,0x48,0x89,0x70,0x18},15},
+};
 const Sig kDamageSigs[]={
     {0x54A579,{0x0F,0xB6,0x9F,0xE8,0x02,0x00,0x00,0x48,0x8B,0xD6,0x48,0x8B,0xCF,0xE8,0xA5,0xD6,0xFF,0xFF},18},
     {0x547C70,{0x4C,0x8B,0xEA},3},                                    // the GameDamageInfo kept
@@ -134,6 +141,9 @@ using SearchFn=void(__fastcall*)(void*,void*);
 using PullFn=void(__fastcall*)(void*);
 using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
 using SeatFn=void(__fastcall*)(void*,void*);
+using AimFn=void(__fastcall*)(void*,const float*);
+using AxisApplyFn=void(__fastcall*)(void*,bool);
+AimFn nextAim[2]{};
 UserFn nextUser=nullptr;
 SearchFn nextSearch=nullptr;
 const unsigned char* damageThunk=nullptr;   // where the redirected damage call goes now (the near thunk to DamageHook)
@@ -310,18 +320,7 @@ void TwoSeats(Unit& u,unsigned char* v) noexcept {
             reinterpret_cast<SeatFn>(image+kSeatKick)(v,SeatAt(v,s));
             Log("PROTEUS v=%p: the NPC gunner of seat %u sent off (two seats)",v,s);
         }
-    // The right cannon's aim: the left one's angles, within its own stops.
-    const unsigned char* const left=SeatAt(v,kGunnerSeat);
-    unsigned char* const right=SeatAt(v,kRightSeat);
-    const unsigned char* const la=At<const unsigned char*>(left,kSeatAim);
-    unsigned char* const ra=At<unsigned char*>(right,kSeatAim);
-    if(Readable(la,kAimAxes+2*kAxisStride) && Readable(ra,kAimAxes+2*kAxisStride,true))
-        for(int a=0;a<2;++a) {
-            float* const ax=reinterpret_cast<float*>(ra+kAimAxes+a*kAxisStride);
-            const float want=At<float>(la,kAimAxes+a*kAxisStride+kAxisAngle);
-            if(!std::isfinite(want) || !(ax[1]>ax[0]))continue;
-            ax[2]=vec::Clamp(want,ax[0],ax[1]);ax[3]=0.0f;
-        }
+    // Aim follows in AimHook after the left seat's step, before this frame's fire.
     // ...and its trigger: pulled whenever the left one is.
     unsigned char* const lw=u.weapon[kGunnerSeat];
     if(lw && u.holder[kRightSeat] && (lw[kPull] || lw[kHeld]) && HolderAlive(u.holder[kRightSeat]))
@@ -676,6 +675,27 @@ void Frame(unsigned char* v) noexcept {
 }
 
 // --- the hooks the game calls ---
+void FollowCannon(void* aim) noexcept {
+    if(!Cfg().enabled || !Cfg().proteus || !Cfg().proteusTwoSeats)return;
+    for(const auto& u:units) {
+        if(!u.active || !u.closed)continue;
+        auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(u.ref.obj));
+        if(!u.ref.Is(v) || v[kDead] || SeatCount(v)<kProteusSeats)continue;
+        auto right=seataim::Object(SeatAt(v,kRightSeat));
+        if(aim!=right)continue;
+        const auto left=seataim::Object(SeatAt(v,kGunnerSeat));
+        seataim::Follow(left,right,[](unsigned char* axis) noexcept {
+            reinterpret_cast<AxisApplyFn>(image+kAxisApply)(axis,true);
+        });
+        return;
+    }
+}
+
+template<int I> void __fastcall AimHook(void* aim,const float* input) {
+    nextAim[I](aim,input);
+    __try { FollowCannon(aim); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 float* Shield(void* object,void* gdi,float* was) noexcept {
     Unit* const u=ActiveOf(object);
     if(!u || !damageOk)return nullptr;
@@ -767,6 +787,15 @@ bool InstallProteus() noexcept {
     __try {
         ok=AllMatch(kSigs,sizeof(kSigs)/sizeof(kSigs[0]),"the rework");
         if(!ok){Log("PROTEUS off: the Proteus stays stock");return false;}
+        // Installed after the turret camera: retain its hook, and leave unrelated seats alone.
+        if(!AllMatch(kAimSigs,sizeof(kAimSigs)/sizeof(kAimSigs[0]),"the paired cannons")){ok=false;return false;}
+        const unsigned tables[2]={kAimVt,kAimSeVt};
+        void* hooks[2]={reinterpret_cast<void*>(&AimHook<0>),reinterpret_cast<void*>(&AimHook<1>)};
+        for(int i=0;i<2;++i) {
+            void* next=nullptr;
+            if(!edf::ChainVtableSlot(reinterpret_cast<void**>(image+tables[i])+2,hooks[i],&next)){ok=false;return false;}
+            nextAim[i]=reinterpret_cast<AimFn>(next);
+        }
         bool changed=false;
         damageOk=AllMatch(kDamageSigs,sizeof(kDamageSigs)/sizeof(kDamageSigs[0]),"shields") &&
                  RedirectCall(image+kDamageCall,image+kDamageFn,reinterpret_cast<void*>(&DamageHook),changed);

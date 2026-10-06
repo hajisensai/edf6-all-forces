@@ -23,6 +23,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "nix_twist.h"
+#include "seat_aim.h"
 #include <cmath>
 #include <cstring>
 
@@ -91,7 +92,7 @@ unsigned char* PlayerAim(unsigned char* v) noexcept {
     if(v[kDead] || SeatCount(v)==0)return nullptr;
     unsigned char* const seat=SeatAt(v,0);
     if(SeatRider(seat)!=Rider::player)return nullptr;
-    const auto aim=At<unsigned char*>(seat,kSeatAim);
+    const auto aim=seataim::Object(seat);
     if(!Readable(aim,kAimMode+4))return nullptr;
     const auto vt=At<const unsigned char*>(aim,0);
     return vt==image+kAimVt || vt==image+kAimSeVt ? aim : nullptr;

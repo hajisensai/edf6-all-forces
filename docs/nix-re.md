@@ -43,6 +43,10 @@ EDF.dll TimeDateStamp 0x678CCB46，地址都是 RVA。H = 反汇编 / 表项直�
 
 ## 3. 瞄准轴（VehicleWeaponAim，座位 +0xE0）（H）
 
+- 瞄准对象**内嵌**在 `seat+0xE0`，该处存放的是对象的 vtable，不能再解引用成对象地址。实读 `0x6459D0..0x6459EF`：
+  `mov rcx,[veh+0x608]; add rcx,0xE0; add rcx,seatOffset; mov rax,[rcx]; call [rax+0x10]`。
+  `src/seat_aim.h` 统一这个契约，`tools/seat_aim_check.cpp` 用含真实 vtable 布局的座位缓冲检查对象定位和轴修改。
+
 - vtable 0x17D8A68（`VehicleWeaponAim`）或 0x17D8A90（`VehicleWeaponAimAddSe`，构造 0x5FC950；第 2 槽 0x5FCD80 先调 0x5FBDA0 再放音效）。
 - 轴在 +0x10，步长 0x40：轴 0 = 偏航（输入块 +0），轴 1 = 俯仰（输入块 +4，负值向上）。每轴 `{+0 min, +4 max, +8 angle, +0xC 速度, …}`，
   参数在 +0x90（`0x5FBC00` 的 r8）。

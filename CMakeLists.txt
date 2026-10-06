@@ -71,6 +71,11 @@ add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)
 target_compile_options(nix_twist_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(nix_twist_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+add_executable(seat_aim_check EXCLUDE_FROM_ALL tools/seat_aim_check.cpp)
+target_include_directories(seat_aim_check PRIVATE common)
+target_compile_options(seat_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(seat_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # The vehicles' round models (src/rounds.h: the arcs, MissileBullet01's motor, the first ground along them) against their
 # closed forms and the stock rockets' numbers, offline (tools/rounds_check.cpp). Not part of the plugin build:
 # cmake --build build --target rounds_check && build\rounds_check.exe

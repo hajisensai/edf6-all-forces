@@ -1210,6 +1210,22 @@ def nix_torso_wired() -> None:
 
 
 @test
+def embedded_seat_aim_wired() -> None:
+    """The live-layout fixture is used by Nix and Proteus; paired bone mapping
+    runs after the stock right-seat step, not from the unordered AI task."""
+    nix, proteus, plugin = src('src/nix.cpp'), src('src/proteus.cpp'), src('src/plugin.cpp')
+    player_aim = nix.split('unsigned char* PlayerAim(', 1)[1].split('\n}\n', 1)[0]
+    assert 'seataim::Object(seat)' in player_aim and 'At<unsigned char*>(seat,kSeatAim)' not in player_aim
+    two = proteus.split('void TwoSeats(', 1)[1].split('\n}\n', 1)[0]
+    assert 'kAimAxes' not in two, 'the AI task must not write unmapped cannon angles'
+    hook = proteus.split('void __fastcall AimHook(', 1)[1].split('\n}\n', 1)[0]
+    assert hook.index('nextAim[I](aim,input)') < hook.index('FollowCannon(aim)')
+    assert 'seataim::Follow(left,right' in proteus and '(axis,true)' in proteus
+    assert plugin.index('InstallTurretCam();') < plugin.index('InstallProteus();')
+    assert 'add_executable(seat_aim_check' in src('CMakeLists.txt')
+
+
+@test
 def proteus_wired() -> None:
     """The Proteus rework (src/proteus.cpp, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md): every Proteus* key the
     ini ships is read, range-checked (all but the three switches), and documented in README.md; the class crew.cpp chains

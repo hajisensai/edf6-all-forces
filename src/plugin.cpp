@@ -675,8 +675,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEmc();           // the EMC's charged beam (its rounds are the jets' shells too: jet_bay.cpp)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
-    InstallProteus();       // the Proteus rework: the damage call, its weapon user, the soldiers' target search (proteus.cpp)
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
+    InstallProteus();       // chain its paired cannon aims after the turret camera's aim hook
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
