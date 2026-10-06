@@ -29,6 +29,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "playarea.h"
+#include "sazabi_sound.h"
 #include "warn.h"
 #include <cmath>
 
@@ -753,6 +754,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepVehicleSound,&VehicleSound,v);     // the plugin off too: the stock sounds are given back then
     Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
     GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
+    GuardedTick(kStepSazabi,&SazabiSoundTick);      // the plugin off too: the Sazabi's loops stop then (once a frame)
     if(!Cfg().enabled)return;
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);

@@ -68,7 +68,7 @@ using StopSoundFn=void(__fastcall*)(void*,int);
 using vmix::kEngineRef; using vmix::kTracksRef; using vmix::kTurretRef; using vmix::kReloadRef; using vmix::kTrackHalf;
 using vmix::kEngineShare; using vmix::kTurretShare; using vmix::kReloadShare; using vmix::kGunShare;
 constexpr float kEngineHear=500.0f,kTurretHear=150.0f,kReloadHear=80.0f,kRapidHear=1200.0f,kBrassHear=40.0f;   // m: no voice farther
-constexpr float kFarAt=2500.0f;                     // m: the air's dulling at its fullest (the jets')
+using vmix::kFarAt;                                 // m: the air's dulling at its fullest (the jets')
 constexpr float kStartSec=1.2f,kStopSec=2.0f;       // the engine winding up / down
 constexpr float kMechServo=1.25f;                   // a mech's arm drives: the turret's, quicker and higher
 constexpr float kCaseDelay=0.3f;                    // s: an autocannon's case lands after its round

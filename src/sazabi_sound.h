@@ -33,5 +33,7 @@ enum class SzLoop : int {
 };
 void SazabiSfx(SzSfx which,const float* pos) noexcept;
 void SazabiLoop(SzLoop which,const float* pos,const float* vel,float level) noexcept;
-void SazabiSoundTick() noexcept;   // once a frame (after the Sazabi's frame): loops not set this frame fade out
+void SazabiSoundTick() noexcept;   // once a frame (crew.cpp InputHook, any order against the Sazabi's frame): loops not set
+                                   // this frame or the last fade out; the plugin or VehicleSound off: all silent at once
+void ResetSazabiSound() noexcept;  // a new mission (mission.cpp): every voice let go of, nothing still on its way
 }  // namespace crew

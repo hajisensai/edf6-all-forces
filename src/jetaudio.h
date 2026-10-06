@@ -36,10 +36,21 @@ bool Running() noexcept;   // Start succeeded (Beat keeps it going)
 // made at its idle / its made speed / rate) when there is one, else made here (vsynth.h) once, on a thread of its own:
 // until they are ready (ClipsReady) no voice opens and nothing plays. Engine and tracks loops, the turret's loop and
 // stop, the main gun's report near and far, the loader's three sounds; the bikes' engine; a machine gun's and a
-// gatling's burst loops and a burst's tail, an autocannon's round, the cases raining and one landing; a launch.
+// gatling's burst loops and a burst's tail, an autocannon's round, the cases raining and one landing; a launch. The
+// Sazabi's (sazabi_sound.cpp): its beams' shots and hits, its blade lit, put out, swung and biting, its chest cannon's
+// shot, its funnels leaving, firing and docking, its footfalls, landing and dash; its thrusters', blade's and cannon's
+// charge's loops (its missiles launch with kClipMissile).
 enum Clip : int { kClipHeavyIdle, kClipHeavyLoad, kClipLightIdle, kClipLightLoad, kClipTracks, kClipTurret, kClipTurretStop,
                   kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipBikeIdle, kClipBikeLoad, kClipMg, kClipGatling,
-                  kClipBurstTail, kClipAutocannon, kClipBrass, kClipCaseSmall, kClipMissile, kClipCount };
+                  kClipBurstTail, kClipAutocannon, kClipBrass, kClipCaseSmall, kClipMissile, kClipSzBeamShot, kClipSzBeamHit,
+                  kClipSzSaberOn, kClipSzSaberOff, kClipSzWhoosh, kClipSzSaberHit, kClipSzCannonShot, kClipSzFunnelLaunch,
+                  kClipSzFunnelShot, kClipSzFunnelDock, kClipSzFootstep, kClipSzLand, kClipSzDash, kClipSzThrusters,
+                  kClipSzSaberHum, kClipSzCharge, kClipCount };
+// The Sazabi's one-shots' clips in sazabi_sound.h SzSfx's order (its missiles the vehicles' launch), its loops' in SzLoop's.
+constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kClipSzSaberOff,kClipSzWhoosh,kClipSzSaberHit,
+                                kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,
+                                kClipSzLand,kClipSzDash};
+constexpr int kSazabiLoopClip[]={kClipSzThrusters,kClipSzSaberHum,kClipSzCharge};
 // How a sound is heard this frame: its gain in each ear (the caller's volume in it), its playback rate (pitch and the
 // Doppler ratio together) and how far off it is (0 near .. 1 far: the air takes its highs).
 struct Heard { float left,right,ratio,distance; };

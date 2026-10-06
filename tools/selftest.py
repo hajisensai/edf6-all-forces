@@ -1820,6 +1820,25 @@ def vehicle_sound_wired() -> None:
 
 
 @test
+def sazabi_sound_wired() -> None:
+    """The Sazabi's sounds (src/sazabi_sound.cpp; docs/sound-re.md §10): its tick runs once a frame from every vehicle's
+    input before the plugin's Enabled test (it stops its loops when off) and is reset with the mission; its clips are
+    jetaudio.cpp's (one table, kSazabiSfxClip / kSazabiLoopClip, used by the plugin and the offline check alike, sized
+    against sazabi_sound.h's enums); it hears through the vehicles' switch and their group volumes; the offline check runs
+    its clips, rules and scenario; README and the doc describe it."""
+    crew, mission, code, audio_h, check = (src('src/crew.cpp'), src('src/mission.cpp'), src('src/sazabi_sound.cpp'),
+                                           src('src/jetaudio.h'), src('tools/vsound_check.cpp'))
+    hook = crew.split('void __fastcall InputHook(', 1)[1]
+    assert 0 <= hook.find('&SazabiSoundTick);') < hook.find('if(!Cfg().enabled)return;'), 'SazabiSoundTick before the Enabled test'
+    assert 'ResetSazabiSound();' in mission and '#include "sazabi_sound.h"' in mission
+    assert 'constexpr int kSazabiSfxClip[]=' in audio_h and 'constexpr int kSazabiLoopClip[]=' in audio_h
+    assert 'static_assert(sizeof(kSazabiSfxClip)' in code and 'kSfxClip[' not in code.replace('kSazabiSfxClip[', '')
+    assert 'Cfg().vehicleSound' in code and 'SoundListening()' in code and 'vmix::kSzSfx[' in code and 'vmix::kFarAt' in code
+    assert 'kSazabiSfxClip[' in check and 'SazabiRules();' in check and 'SazabiScenario(out);' in check
+    assert 'sazabi_sound.cpp' in src('README.md') and '## 10. 沙扎比的声音' in src('docs/sound-re.md')
+
+
+@test
 def view_distance_keeps_far_pass_start() -> None:
     """ViewDistance / MapViewDistance raise only the near pass's end (and the far pass's end): the far pass's start
     (env +0x1A4, camera +0x30) is the mission's, because the far-only scenery (the horizon's mountain ring, the

@@ -9,6 +9,7 @@
 #include "gear.h"
 #include "memory.h"
 #include "playarea.h"
+#include "sazabi_sound.h"
 #include <iterator>
 
 namespace crew {
@@ -81,6 +82,7 @@ void MissionStart() noexcept {
     ResetGear();
     ResetJetSound();
     ResetVehicleSound();
+    ResetSazabiSound();
     ResetMissiles();
     ResetDrills();
     ResetVehicleRams();

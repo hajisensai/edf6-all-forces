@@ -810,4 +810,6 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
   锁定中 / 已锁定、全部打空；四种语言；1280x720 ~ 3840x2160、21:9、分屏和 `HudScale` 1.5 下都在屏幕内、不压准星）。
   目前 `sazabi.cpp` 还没发布这份数据（武器尚未接入），所以实机暂时不显示，接入后待实机确认。
 
+**声音**（`src/sazabi_sound.cpp`、合成在 `src/vsynth.h`，`docs/sound-re.md` §10）：光束步枪（尖锐的电光爆裂 + 低沉余音）、命中、光束战斧的点亮 / 熄灭 / 嗡鸣（带抖动的电流声循环）/ 挥砍风声 / 砍中（噼啪 + 低沉轰响）、胸部扩散炮的蓄能（音调随蓄能升高的电流啸叫循环）和发射（多层轰鸣）、浮游炮的射出 / 射击（更细更高的电光声）/ 收回、盾牌导弹的发射（与载具导弹同一个声音）、25 米机体沉重的金属脚步声和低频隆隆声、落地、冲刺和主推进器的轰鸣（随推力变响变高），都由插件合成、和地面载具音效一样按镜头分左右声道、远处变闷、有多普勒和传播延迟，随 `VehicleSound` 开关；音量：移动类（脚步、落地、冲刺、推进器）跟 `VehicleEngineVolume`，光束 / 光束战斧 / 扩散炮 / 浮游炮跟 `VehicleGunVolume`，导弹跟 `VehicleMissileVolume`。可在 DLL 旁边放 `EDF6VehicleCrew_veh_<名字>.wav` 替换，名字：`sazabi_beam_shot`、`sazabi_beam_hit`、`sazabi_saber_on`、`sazabi_saber_off`、`sazabi_whoosh`、`sazabi_saber_hit`、`sazabi_cannon_shot`、`sazabi_funnel_launch`、`sazabi_funnel_shot`、`sazabi_funnel_dock`、`sazabi_footstep`、`sazabi_land`、`sazabi_dash`、`sazabi_thrusters`（全推力，循环）、`sazabi_saber_hum`（循环）、`sazabi_cannon_charge`（蓄能开始时的音调，循环）。离线检查 `vsound_check`；游戏里的听感待实机确认。
+
 **待实机确认**：见 `docs/sazabi-re.md` §4（能否叫来、发光强度、上车点、镜头取景、碰撞盒撞楼、姿态当帧上屏）。
