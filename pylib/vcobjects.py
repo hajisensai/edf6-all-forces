@@ -376,8 +376,9 @@ SAZABI_WEAPONS = ('app:/weapon/edf6vc_sz_rifle.sgo', 'app:/weapon/edf6vc_sz_miss
 SAZABI_WEAPON_BONES = ('sz_muzzle', 'sz_missile', 'sz_muzzle')
 SAZABI_CAMERA = (0.0, 26.0, -48.0)                 # over the 25.6 m mech's shoulder, far enough back to see it whole
 # Riding (the MAB's eye and LookTarget, model frame: x left, y up, z forward): behind and over its right shoulder (the
-# funnel packs reach 25.5 m up and the tubes 15 m back), looking past its chest to the ground ahead.
-SAZABI_SEAT_CAMERA = ((-7.0, 30.0, -38.0), (0.0, 17.0, 2.0))
+# funnel packs reach 25.5 m up and the tubes 15 m back), far enough back that the whole mech is in view, feet and all (the
+# simulated riding view, tools/sazabi_pose_view.py cam, 2026-10-07), the ground ahead above it.
+SAZABI_SEAT_CAMERA = ((-8.0, 28.0, -52.0), (0.0, 13.0, 10.0))
 
 
 # The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its
