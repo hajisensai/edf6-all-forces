@@ -10,8 +10,13 @@ EDFModLoader 插件，只支持 EDF.dll TimeDateStamp `0x678CCB46`（当前 Stea
 | `EDF6VehicleCrew` | `src/` | NPC 开载具 / 开直升机，玩家随时顶替（本文下面全部内容） |
 | `EDF6AutoTurret` | `autoturret/` | 防空车（KG6 克卜勒系）改高射炮并自瞄、玻尔斯对地自瞄；泰坦和带炮手座坦克的两门副炮自瞄，炮手座没人时自动开火（算驾驶员的）；关卡里 NPC 开的防空车换成 mod 版防空车，NPC 泰坦补上副炮。说明见 [autoturret/README.zh-CN.md](autoturret/README.zh-CN.md) |
 
-两个插件各自独立，可以只装一个。根目录 `build.cmd` 一次构建两个，DLL 和 ini 都输出到 `build/Mods/Plugins/`（构建产物，不进仓库）。
-`EDF6AutoTurret` 的武器 / 载具数据由你自己的游戏数据生成，不进仓库：
+**发布包（安装器）两个插件都装**：`EDF6VehicleCrew安装器.exe` 里打包了 `EDF6VehicleCrew.dll` / `.ini` 和 `EDF6AutoTurret.dll` / `.ini`，
+选 1 时连同 `EDF6AutoTurret` 的武器 / 载具数据一起装好，选 2 卸载时一起去掉，选 5 检查（见「安装 / 卸载」）。
+空袭兵呼叫的地面载具、自行榴弹炮、喀秋莎、关卡里的防空车、测试场停放的防空车和坦克副炮都要 `EDF6AutoTurret` 才会自瞄，
+所以它算在全军出击里，不需要另外安装。0.8.0 及以前的安装器只装 `EDF6VehicleCrew`，`EDF6AutoTurret` 停留在玩家自己装过的旧版本；用新安装器选 1 即可换成同版本。
+
+两个插件在代码上各自独立（缺哪个都不影响另一个加载），开发时也可以只装一个。根目录 `build.cmd` 一次构建两个，DLL 和 ini 都输出到 `build/Mods/Plugins/`（构建产物，不进仓库）。
+单独使用 `EDF6AutoTurret` 时，它的武器 / 载具数据用下面的命令由你自己的游戏数据生成（安装器调用的是同一份 `build.py`，同一份清单）：
 
 ```
 python autoturret\tools\build.py install      （游戏关闭时；--mods DIR 指定 Mods 目录）
@@ -281,13 +286,17 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 1. 退出游戏，解压发布包 `EDF6VehicleCrew-<版本>.zip`，双击 `EDF6VehicleCrew安装器.exe`，输入 1。
    它自动在 Steam 库里找游戏目录（也可以把 exe 放进游戏目录再运行；都找不到会让你粘贴路径），然后：
    先用你本机的 `Root.cpk`（只读，不修改）在内存里生成战机 / 直升机 / 无人机 / 潜水母舰和呼叫武器，并检查武器表；
-   全部成功才开始写：生成的模型（每个文件原子替换）→ 武器表和武器说明（整体写入，见上）→ 最后才换插件 DLL。
-   已有的 `EDF6VehicleCrew.ini` 不覆盖：你的设置和注释原样保留，只在原有 `[VehicleCrew]` 节末尾补进新版本新增的设置（带默认值和说明）。节名不区分大小写，与游戏内插件一致；例如 `[vehiclecrew]` 也会保留并补齐，`StockHeliStores` 同样按此读取。
+   全部成功才开始写：生成的模型（每个文件原子替换）→ 武器表和武器说明（整体写入，见上）→ `EDF6AutoTurret` 的武器 / 载具数据
+   （`autoturret/tools/build.py`：防空车、玻尔斯、关卡防空车、NPC 泰坦副炮和它们的说明行，记在 `Mods/.edf6at_data.json`，替换别的 MOD 的文件前先问、同意后备份）
+   → 最后才换两个插件的 DLL（`EDF6VehicleCrew.dll`、`EDF6AutoTurret.dll`）。
+   已有的 `EDF6VehicleCrew.ini` / `EDF6AutoTurret.ini` 不覆盖：你的设置和注释原样保留，只在原有 `[VehicleCrew]` / `[AutoTurret]` 节末尾补进新版本新增的设置（带默认值和说明）。节名不区分大小写，与游戏内插件一致；例如 `[vehiclecrew]` 也会保留并补齐，`StockHeliStores` 同样按此读取。
    这些资源不能预先打包：它们由游戏本体文件派生，武器表又是各 MOD 共用的，只能在你机器上现场生成。
    生成的文件由 `Mods/.edf6vc_files.json` 登记归属（安装器、测试场等谁在用），卸载只删没人再用的文件。
-2. 卸载：运行安装器输入 2。选 1 连呼叫武器一起删（武器行变成「已卸载」占位行，存档装备着也不会崩溃）；
-   选 2 只删插件，武器照原版 KM6 轰炸机呼叫，不影响游玩。
-3. 游戏运行中安装器会拒绝执行，不会替你关游戏。
+2. 卸载：运行安装器输入 2。选 1 连呼叫武器、生成的模型和 `EDF6AutoTurret` 的数据一起删（武器行变成「已卸载」占位行，存档装备着也不会崩溃；
+   `EDF6AutoTurret` 替换过的文件和说明行按清单恢复）；选 2 只删两个插件，武器照原版 KM6 轰炸机呼叫、防空车的炮照原版开火，不影响游玩。
+   两种都会删掉两个插件的 DLL、ini 和日志（含轮换出的 `.log.1`）。
+3. 游戏运行中安装、卸载会拒绝执行（游戏占着插件 DLL），不会替你关游戏。输入 5 检查安装状态：两个插件是不是本安装包的版本、ini 缺不缺新设置、
+   `EDF6AutoTurret` 数据、呼叫武器和生成的文件是否完整；它只读，游戏开着也能查。
 4. 原版直升机的挂载（`StockHeliStores`，见功能 13）是选装的：在 ini 里改成 1 后运行安装器选「安装」才生成，改回 0 再运行就删掉。
 5. 升级：退出游戏后直接运行新版安装器选「安装」即可，旧版装的武器行原位更新、新行追加在表尾；新版本新增的模型（例如炮舰机 `EDF6VC_JET_GUNSHIP.SGO` 及其炮手座、撞击装药 `EDF6VC_IMPACT_*.SGO`（2 / 4 / 12 米三个是载具撞击伤害一起加的）、炮舰机的机炮炮弹 `EDF6VC_GUNSHIP_CANNON.SGO`、EMC 蓄力光束的 `EDF6VC_EMC_*.SGO`）要这样重新安装后才有。
 
@@ -301,7 +310,8 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 输出每次按 SHA-256 与归属清单校验。CPK 不做全盘哈希，手工修改资源包并刻意保留全部时间戳后需删除缓存清单。
 
 **开发者**：`build.cmd` 构建到 `build/Mods/Plugins/`（DLL 和 ini 都在那里，ini 由 CMake 自动复制）。
-`python tools/build_release.py` 用 PyInstaller 打出 `release/EDF6VehicleCrew-<版本>.zip`（安装器 exe 内含 DLL 与 ini）；
+`python tools/build_release.py` 用 PyInstaller 打出 `release/EDF6VehicleCrew-<版本>.zip`（安装器 exe 内含 `tools/installer.py` `PLUGINS` 列出的每个插件的 DLL 与 ini，
+即 `EDF6VehicleCrew` 和 `EDF6AutoTurret`；`tools/selftest.py` 的 `pack_ships_every_plugin` 检查 CMake 构建的每个插件都在这个清单里）；
 版本号只有一处：`CMakeLists.txt` 的 `project(VERSION)`（DLL 自报的版本也来自它）。CI 每次推送都打同样的安装器包，
 推 `vX.Y.Z` 标签时要求它与 `project(VERSION)` 一致。不打包时也可直接 `python tools/installer.py install`（从 `build/` 取 DLL，没构建会提示先运行 `build.cmd`）。
 `python tools/selftest.py` 是安装链的自测（CI 里跑）；改了 `tools/calls.py` 后运行 `python tools/gen_calls.py` 重新生成 `src/calls.inc` 并一起提交。

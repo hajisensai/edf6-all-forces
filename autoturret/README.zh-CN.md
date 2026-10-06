@@ -56,6 +56,10 @@
 
 需要 Steam 版 EDF6，并已安装 [EDFModLoader](https://github.com/BlueAmulet/EDFModLoader)。
 
+**玩家用全军出击的安装包就行**：`EDF6VehicleCrew-<版本>.zip` 里的安装器（见[仓库 README](../README.md)「安装 / 卸载」）选 1 时
+连同本插件的 DLL、ini（已有的保留你的设置，只补新增的项）和下面第 2 步的武器 / 载具数据一起装好，选 2 卸载时一起恢复，选 5 检查。
+下面的手动步骤只在单独使用本插件（或开发）时需要。
+
 1. 把 release（或 CI 构建产物）里的 `EDF6AutoTurret.dll` 和 `EDF6AutoTurret.ini` 放进 `<EDF6>\Mods\Plugins\`。
 2. 用你自己的游戏数据生成武器文件（它们派生自游戏数据，所以不随包分发），需要 Python 3.10+，直接装进游戏的 `Mods` 文件夹（在仓库根目录运行；游戏目录取 `EDF6_DIR`，没有就在 Steam 库里找）：
 

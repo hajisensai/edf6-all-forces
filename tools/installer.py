@@ -12,21 +12,23 @@ What install does, with EDF6.exe closed:
      weapon table is shared with other mods. Nothing is written unless all of it could be made;
   3. writes them: the generated objects (each file atomically, recorded in the ownership ledger,
      pylib/ledger.py), then the weapon table, its texts and the call SGOs in one transaction (all or none,
-     call_weapons.commit), and last the plugin: EDF6VehicleCrew.dll, and the .ini (a new one when there is
-     none; else the player's own, with only the settings this version adds appended: merge_ini); then the big map
-     (it sets BigWorld in that ini) and the test range's grand battle mission (testrange/gen.py, on its slot), so
-     everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack to play with
-     others). The test range's forced loadout is never written: everyone picks their own class.
+     call_weapons.commit), then EDF6AutoTurret's vehicle data (autoturret/tools/build.py: the Kepler flak, the
+     Bohr, the NPC Titan's side guns, their text rows; its own manifest Mods/.edf6at_data.json and backups), and
+     last the plugins (PLUGINS: EDF6VehicleCrew and EDF6AutoTurret): each DLL, and its .ini (a new one when there
+     is none; else the player's own, with only the settings this version adds appended: merge_ini); then the big
+     map (it sets BigWorld in EDF6VehicleCrew.ini) and the test range's grand battle mission (testrange/gen.py, on
+     its slot), so everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack
+     to play with others). The test range's forced loadout is never written: everyone picks their own class.
 
 With StockHeliStores=1 in the player's ini (off by default) install also gives the stock 506-class helicopters'
 requests the jets' rocket pod and Hellfires (tools/make_stock_stores.py); with it 0 it takes back what an earlier install
 gave them.
 
-Uninstall removes the plugin and, when asked, the call weapons (their rows become placeholders that keep the
-row numbers saves use) and the generated objects no other tool still needs.
+Uninstall removes the plugins and, when asked, the call weapons (their rows become placeholders that keep the
+row numbers saves use), EDF6AutoTurret's vehicle data and the generated objects no other tool still needs.
 
-Menu 3 downloads the newest build from the test site and menu 4 sends the logs back to it (tools/testhub.py;
-the site itself is testhub/).
+Menu 3 downloads the newest build from the test site, menu 4 sends the logs back to it (tools/testhub.py;
+the site itself is testhub/), menu 5 checks what is installed (check: reads only, the game may be running).
 """
 from __future__ import annotations
 
@@ -39,7 +41,8 @@ from types import ModuleType
 from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'testrange')):
+for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'testrange'),
+           os.path.join(HERE, '..', 'autoturret', 'tools')):
     sys.path.insert(0, os.path.normpath(_p))
 
 import gamedir  # noqa: E402
@@ -48,6 +51,14 @@ import modfiles  # noqa: E402
 PLUGIN = 'EDF6VehicleCrew'
 PROCESS = modfiles.PROCESS
 SECTION = 'VehicleCrew'
+# Every plugin the pack ships, (file name without .dll / .ini, the ini's section): CMake builds each into
+# build/Mods/Plugins (CMakeLists.txt, autoturret/CMakeLists.txt), tools/build_release.py bundles each one's DLL and
+# ini into the exe, install writes them, uninstall removes them, check compares them (selftest pack_ships_every_plugin).
+PLUGINS = ((PLUGIN, SECTION), ('EDF6AutoTurret', 'AutoTurret'))
+PLUGIN_FILES = ('.dll', '.ini')            # shipped
+# What a plugin writes beside itself: its log, the log rotated away (src/plugin.cpp RotateLog), the Primers' trace
+# (src/primer.cpp TraceFile, ini PrimerTrace).
+PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv')
 ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
 
 
@@ -58,18 +69,18 @@ def bundle_dir() -> str:
     return os.path.normpath(os.path.join(HERE, '..', 'build', 'Mods', 'Plugins'))
 
 
-def plugin_files() -> tuple[bytes, bytes]:
-    """The plugin DLL and its default ini, as shipped (or as build.cmd built them)."""
+def plugin_files() -> dict[str, tuple[bytes, bytes]]:
+    """Each plugin's DLL and default ini (PLUGINS order), as shipped (or as build.cmd built them)."""
     src = bundle_dir()
-    paths = [os.path.join(src, PLUGIN + ext) for ext in ('.dll', '.ini')]
+    paths = [os.path.join(src, name + ext) for name, _ in PLUGINS for ext in PLUGIN_FILES]
     missing = [p for p in paths if not os.path.isfile(p)]
     if missing:
         raise SystemExit(f'找不到 {", ".join(missing)}：先运行 build.cmd 构建插件')
-    out = []
-    for p in paths:
-        with open(p, 'rb') as f:
-            out.append(f.read())
-    return out[0], out[1]
+    out: dict[str, tuple[bytes, bytes]] = {}
+    for name, _ in PLUGINS:
+        dll, ini = (modfiles.read(os.path.join(src, name + ext)) for ext in PLUGIN_FILES)
+        out[name] = (dll, ini)
+    return out
 
 
 def ask(prompt: str) -> str:
@@ -106,8 +117,8 @@ _KEY = re.compile(r'^\s*([A-Za-z0-9_]+)\s*=')
 _SECTION = re.compile(r'^\s*\[([^\]]+)\]')
 
 
-def _keys(lines: list[str]) -> dict[str, int]:
-    """Key (lower case) -> its line, within [VehicleCrew]; section names are case-insensitive as in Win32."""
+def _keys(lines: list[str], section_name: str = SECTION) -> dict[str, int]:
+    """Key (lower case) -> its line, within [section_name]; section names are case-insensitive as in Win32."""
     out: dict[str, int] = {}
     section = ''
     for i, line in enumerate(lines):
@@ -116,19 +127,19 @@ def _keys(lines: list[str]) -> dict[str, int]:
             section = m.group(1).strip()
             continue
         m = _KEY.match(line)
-        if m and section.lower() == SECTION.lower():
+        if m and section.lower() == section_name.lower():
             out.setdefault(m.group(1).lower(), i)
     return out
 
 
-def merge_ini(user: str, shipped: str) -> tuple[str, list[str], list[str]]:
-    """The player's ini with every setting of the shipped one it lacks appended to [VehicleCrew] (each with
+def merge_ini(user: str, shipped: str, section: str = SECTION) -> tuple[str, list[str], list[str]]:
+    """The player's ini with every setting of the shipped one it lacks appended to [section] (each with
     the comment lines above it in the shipped file), and nothing of theirs changed. Returns (text, keys added,
     keys of theirs the shipped ini no longer has: the plugin ignores them)."""
     nl = '\r\n' if '\r\n' in user else '\n'
-    have = _keys(user.splitlines())
+    have = _keys(user.splitlines(), section)
     ship_lines = shipped.splitlines()
-    ship = _keys(ship_lines)
+    ship = _keys(ship_lines, section)
     added: list[str] = []
     block: list[str] = []
     for key, i in ship.items():
@@ -144,11 +155,11 @@ def merge_ini(user: str, shipped: str) -> tuple[str, list[str], list[str]]:
         return user, added, gone
     lines = user.splitlines()
     heads = [(i, m.group(1).strip()) for i, m in ((i, _SECTION.match(x)) for i, x in enumerate(lines)) if m]
-    start = next((i for i, name in heads if name.lower() == SECTION.lower()), None)
+    start = next((i for i, name in heads if name.lower() == section.lower()), None)
     if start is None:
-        lines.append(f'[{SECTION}]')
+        lines.append(f'[{section}]')
         start = len(lines) - 1
-    end = next((i for i, _ in heads if i > start), len(lines))   # [VehicleCrew] runs to the next section
+    end = next((i for i, _ in heads if i > start), len(lines))   # the section runs to the next one
     while end > start + 1 and not lines[end - 1].strip():
         end -= 1
     insert = ['', ADDED_HEADER, *block]
@@ -167,11 +178,11 @@ def player_ini_text(game: str, shipped_ini: bytes) -> str:
     return raw.decode('utf-8', errors='replace')
 
 
-def install_plugin(game: str, dll: bytes, shipped_ini: bytes) -> None:
+def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN, section: str = SECTION) -> None:
     dst = os.path.join(game, 'Mods', 'Plugins')
-    modfiles.atomic_write(os.path.join(dst, PLUGIN + '.dll'), dll)
-    print(f'写入 {os.path.join(dst, PLUGIN + ".dll")}')
-    ini = os.path.join(dst, PLUGIN + '.ini')
+    modfiles.atomic_write(os.path.join(dst, name + '.dll'), dll)
+    print(f'写入 {os.path.join(dst, name + ".dll")}')
+    ini = os.path.join(dst, name + '.ini')
     if not os.path.isfile(ini):
         modfiles.atomic_write(ini, shipped_ini)
         print(f'写入 {ini}')
@@ -180,7 +191,7 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes) -> None:
         raw = f.read()
     bom = raw.startswith(b'\xef\xbb\xbf')
     user = raw[3:].decode('utf-8') if bom else raw.decode('utf-8', errors='surrogateescape')
-    text, added, gone = merge_ini(user, shipped_ini.decode('utf-8'))
+    text, added, gone = merge_ini(user, shipped_ini.decode('utf-8'), section)
     if added:
         modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8', errors='surrogateescape'))
         print(f'保留你的 {ini}，补入新版本新增的设置：{", ".join(added)}')
@@ -191,11 +202,13 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes) -> None:
 
 
 def remove_plugin(game: str) -> None:
-    for ext in ('.dll', '.ini', '.log'):
-        path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + ext)
-        if os.path.isfile(path):
-            os.remove(path)
-            print(f'删除 {path}')
+    """Every plugin of the pack (PLUGINS), its ini and the logs it wrote beside itself."""
+    for name, _ in PLUGINS:
+        for ext in PLUGIN_FILES + PLUGIN_RUNTIME:
+            path = os.path.join(game, 'Mods', 'Plugins', name + ext)
+            if os.path.isfile(path):
+                os.remove(path)
+                print(f'删除 {path}')
 
 
 # ---------------------------------------------------------------- install / uninstall
@@ -259,6 +272,43 @@ def retire_weapons(game: str) -> bool:
     return choice == 's'
 
 
+def build_autoturret(game: str) -> tuple[dict[str, bytes], bool] | None:
+    """EDF6AutoTurret's vehicle data made in memory (autoturret/tools/build.py build_files, from Root.cpk), and
+    whether install_autoturret may back up and overwrite the Mods files it replaces that are not its own (another
+    mod's, or its own changed since: build.py --force, here asked). None: cancelled, nothing written."""
+    import build as at_build
+    files = at_build.build_files()
+    problems = at_build.foreign(os.path.join(game, 'Mods'), files)
+    if not problems:
+        return files, False
+    print('\n！ EDF6AutoTurret 的车辆数据要替换下面这些不是它写的文件（别的 MOD 的，或它写之后被改过）：')
+    for p in problems:
+        print('  ', p)
+    if ask('输入 y 先备份这些文件再替换（卸载时按备份恢复）；其它 = 取消：').lower() != 'y':
+        return None
+    return files, True
+
+
+def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
+    """Writes EDF6AutoTurret's vehicle data and their WEAPONTEXT rows (after the call weapons: the rows go into the
+    tables as call_weapons left them), recorded in its own manifest with backups (autoturret/tools/build.py)."""
+    import build as at_build
+    print('写入 EDF6AutoTurret 的车辆数据（防空车、玻尔斯、关卡防空车、NPC 泰坦副炮和它们的武器说明行；'
+          '记录在 Mods/.edf6at_data.json）……')
+    at_build.install(os.path.join(game, 'Mods'), text=True, force=force, files=files)
+
+
+def remove_autoturret(game: str) -> None:
+    """Puts back what install_autoturret (or autoturret/tools/build.py install) replaced, by its manifest; a file
+    or row changed since by someone else stays. Without the manifest there is nothing recorded to put back."""
+    import build as at_build
+    mods = os.path.join(game, 'Mods')
+    if not at_build.installed(mods):
+        return
+    print('恢复 EDF6AutoTurret 改过的车辆数据（按 Mods/.edf6at_data.json；之后被别的 MOD 改过的文件和行保持原样）……')
+    at_build.uninstall(mods, force=False)
+
+
 def build_asset(cache: Any, module: ModuleType, label: str) -> Any:
     """Only regenerate an asset group when its recipe, inputs or installed outputs changed."""
     started = time.perf_counter()
@@ -285,14 +335,21 @@ def install(game: str) -> None:
     import make_stock_stores
     import make_sidecar
     import make_sub
+    import rootcpk
+    rootcpk.use(game)
     check_loader(game)
-    dll, ini = plugin_files()
-    stock_stores = make_stock_stores.wanted(player_ini_text(game, ini))
+    plugins = plugin_files()
+    stock_stores = make_stock_stores.wanted(player_ini_text(game, plugins[PLUGIN][1]))
     if call_weapons.recover(game):
         print('上次运行没有完成：已把武器表相关文件恢复到那次运行之前。')
     print('检查武器表并生成呼叫武器（只读 Root.cpk 与现有武器表）……')
     weapons = stack_weapons(game)
     if weapons is None:
+        print('已取消，没有写入任何文件。')
+        return
+    print('生成 EDF6AutoTurret 的车辆数据（只读 Root.cpk）……')
+    turret = build_autoturret(game)
+    if turret is None:
         print('已取消，没有写入任何文件。')
         return
     cache = buildcache.Cache(game)
@@ -330,7 +387,9 @@ def install(game: str) -> None:
             print('删除（StockHeliStores=0：原版直升机的请求恢复原样）', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
-    install_plugin(game, dll, ini)
+    install_autoturret(game, *turret)
+    for name, section in PLUGINS:
+        install_plugin(game, *plugins[name], name, section)
     if bigmap is not None:
         for path in make_bigmap.install(game, built=bigmap):
             print('写入', path)
@@ -363,9 +422,13 @@ def uninstall(game: str) -> None:
     import make_stock_stores
     import make_sidecar
     import make_sub
-    print('卸载会删掉插件。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
+    import buildcache
+    import rootcpk
+    rootcpk.use(game)
+    print('卸载会删掉插件（EDF6VehicleCrew、EDF6AutoTurret）。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
     print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
-    choice = ask('输入 1 = 插件和呼叫武器、生成的模型一起删；输入 2 = 只删插件（武器和生成的模型留着，照原版 KM6 呼叫）；其它 = 取消：')
+    choice = ask('输入 1 = 插件和呼叫武器、生成的模型、AutoTurret 的车辆数据一起删；'
+                 '输入 2 = 只删插件（武器、生成的模型和车辆数据留着，照原版 KM6 呼叫、炮照原版开火）；其它 = 取消：')
     if choice not in ('1', '2'):
         print('已取消。')
         return
@@ -373,6 +436,7 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
+        remove_autoturret(game)
         for remove in (make_stock_stores.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
@@ -384,8 +448,59 @@ def uninstall(game: str) -> None:
         print('删除测试场关卡')
     for path in make_bigmap.remove(game)[0]:
         print('删除', path)
+    cache = os.path.join(game, 'Mods', buildcache.MANIFEST)
+    if choice == '1' and os.path.isfile(cache):   # what it describes is gone; with 2 the models stay and it holds
+        os.remove(cache)
+        print('删除', cache)
     remove_plugin(game)
     print('\n卸载完成。')
+
+
+def _text(path: str) -> str | None:
+    raw = modfiles.read(path)
+    if raw is None:
+        return None
+    return (raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw).decode('utf-8', errors='replace')
+
+
+def check(game: str) -> bool:
+    """Menu 5: what is installed against this pack, reading only (the game may be running): each plugin's DLL
+    (this pack's or another build) and ini (settings this version adds still missing), EDF6AutoTurret's vehicle data
+    (autoturret/tools/build.py check), the call weapons (call_weapons.check) and the generated files (the ledger:
+    present and as written). True when everything is this pack's, complete."""
+    import build as at_build
+    import call_weapons
+    import ledger
+    import rootcpk
+    rootcpk.use(game)
+    ok = True
+    shipped = plugin_files()
+    for name, section in PLUGINS:
+        have = modfiles.read(os.path.join(game, 'Mods', 'Plugins', name + '.dll'))
+        same = have == shipped[name][0]
+        ok &= same
+        print(f'{name}.dll：' + ('与本安装包相同' if same else '缺失' if have is None else
+                                 '与本安装包不同（旧版本或别的构建：退出游戏后运行安装器选 1 更新）'))
+        text = _text(os.path.join(game, 'Mods', 'Plugins', name + '.ini'))
+        lacking = merge_ini(text, shipped[name][1].decode('utf-8'), section)[1] if text is not None else []
+        ok &= text is not None and not lacking
+        print(f'{name}.ini：' + ('缺失' if text is None else f'缺少新版本的设置 {", ".join(lacking)}（选 1 会补上）'
+                                 if lacking else '完整'))
+    print('\nEDF6AutoTurret 车辆数据（Mods/.edf6at_data.json）：')
+    ok &= at_build.check(os.path.join(game, 'Mods'))
+    print('\n呼叫武器：')
+    ok &= call_weapons.check(game)
+    led = ledger.Ledger(game)
+    gone = [k for k in sorted(led.files) if not os.path.isfile(led.disk(k))]
+    changed = [k for k in sorted(led.files) if led.changed(k)]
+    ok &= bool(led.files) and not gone and not changed
+    print(f'\n生成的文件（Mods/{ledger.MANIFEST}）：{len(led.files)} 个，缺失 {len(gone)}，被改过 {len(changed)}')
+    for k in gone:
+        print('  缺失', k)
+    for k in changed:
+        print('  被改过', k)
+    print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
+    return ok
 
 
 def build_name() -> str:
@@ -423,11 +538,14 @@ def send_logs() -> int:
 def main(argv: list[str]) -> int:
     print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
     mode = argv[0] if argv else ''
-    if mode not in ('install', 'uninstall', 'update', 'logs'):
-        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，回车退出：')
-        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs'}.get(pick, '')
+    if mode not in ('install', 'uninstall', 'update', 'logs', 'check'):
+        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，回车退出：')
+        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check'}.get(pick, '')
         if not mode:
             return 0
+    if mode == 'check':   # reads only: the game may be running
+        game = pick_game()
+        return 1 if not game else 0 if check(game) else 1
     if mode in ('update', 'logs'):
         import testhub
         try:

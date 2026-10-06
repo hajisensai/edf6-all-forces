@@ -46,3 +46,11 @@ class Game:
 def default() -> Game:
     """DEFAULT_GAME's Root.cpk, opened once per process."""
     return Game(DEFAULT_GAME)
+
+
+def use(root: str) -> None:
+    """Makes `root` DEFAULT_GAME for the rest of the process: the installer's game (found, or pasted by the player)
+    for the tools that read through default() (autoturret/tools/build.py, describe.py)."""
+    global DEFAULT_GAME
+    DEFAULT_GAME = os.path.normpath(root)
+    default.cache_clear()
