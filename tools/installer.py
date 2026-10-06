@@ -34,6 +34,9 @@ import os
 import re
 import sys
 import traceback
+import time
+from types import ModuleType
+from typing import Any
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'testrange')):
@@ -256,7 +259,20 @@ def retire_weapons(game: str) -> bool:
     return choice == 's'
 
 
+def build_asset(cache: Any, module: ModuleType, label: str) -> Any:
+    """Only regenerate an asset group when its recipe, inputs or installed outputs changed."""
+    started = time.perf_counter()
+    if cache.current(module.OWNER):
+        print(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）', flush=True)
+        return None
+    print(f'{label}：生成中（首次安装或输入/输出发生变化）……', flush=True)
+    built = module.build(cache.game)
+    print(f'{label}：生成完成（{time.perf_counter() - started:.1f} 秒）', flush=True)
+    return built
+
+
 def install(game: str) -> None:
+    import buildcache
     import call_weapons
     import gen
     import make_artillery
@@ -279,32 +295,29 @@ def install(game: str) -> None:
     if weapons is None:
         print('已取消，没有写入任何文件。')
         return
-    print('生成战机、直升机、无人机（读取 Root.cpk，不修改它）……')
-    jets = make_jets.build(game)
-    print('生成潜水母舰（约 39 MB）……')
-    sub = make_sub.build(game)
-    print('生成喀秋莎火箭炮车（读取 Root.cpk，不修改它）……')
-    katyusha = make_katyusha.build(game)
-    print('生成自行榴弹炮（读取 Root.cpk，不修改它）……')
-    artillery = make_artillery.build(game)
-    print('生成降落伞（读取 Root.cpk，不修改它）……')
-    chute = make_chute.build(game)
-    print('生成钻头战车（读取 Root.cpk 和钻头战车模型，不修改它们）……')
-    drill = make_drill.build(game)
-    print('生成 EMC 蓄力光束（读取 Root.cpk，不修改它）……')
-    emc = make_emc.build(game)
+    cache = buildcache.Cache(game)
+    jets = build_asset(cache, make_jets, '战机、直升机、无人机')
+    sub = build_asset(cache, make_sub, '潜水母舰')
+    katyusha = build_asset(cache, make_katyusha, '喀秋莎火箭炮车')
+    artillery = build_asset(cache, make_artillery, '自行榴弹炮')
+    chute = build_asset(cache, make_chute, '降落伞')
+    drill = build_asset(cache, make_drill, '钻头战车')
+    emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     stock = None
     if stock_stores:
         print('给原版直升机的请求加上火箭巢和地狱火导弹（ini StockHeliStores=1；读取 Root.cpk，不修改它）……')
         stock = make_stock_stores.build(game)
-    print('生成边三轮摩托（读取 Root.cpk，不修改它）……')
-    sidecar = make_sidecar.build(game)
-    print('生成大地图（测试场平原拼成 3 x 3，无缝；读取 Root.cpk，不修改它，约需一两分钟）……')
-    bigmap = make_bigmap.build(game)
+    sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
+    bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     print('\n全部生成完毕，开始写入。')
-    for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery) + \
-            make_chute.install(game, chute) + make_drill.install(game, drill) + make_emc.install(game, emc) + \
-            make_sidecar.install(game, sidecar):
+    for path in (make_jets.install(game, jets) if jets is not None else []) + \
+            (make_sub.install(game, sub) if sub is not None else []) + \
+            (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
+            (make_artillery.install(game, artillery) if artillery is not None else []) + \
+            (make_chute.install(game, chute) if chute is not None else []) + \
+            (make_drill.install(game, drill) if drill is not None else []) + \
+            (make_emc.install(game, emc) if emc is not None else []) + \
+            (make_sidecar.install(game, sidecar) if sidecar is not None else []):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
         files, skipped = stock
@@ -318,8 +331,20 @@ def install(game: str) -> None:
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
     install_plugin(game, dll, ini)
-    for path in make_bigmap.install(game, built=bigmap):
-        print('写入', path)
+    if bigmap is not None:
+        for path in make_bigmap.install(game, built=bigmap):
+            print('写入', path)
+    else:
+        make_bigmap.set_big_world(game, make_bigmap.world_half(1))
+    for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar)):
+        if files is not None:
+            cache.record(group, files)
+    if bigmap is not None:
+        mac, pieces = bigmap
+        cache.record('bigmap', {f'MAP/{make_bigmap.MAP_FILE}': mac,
+                                **{f'MAP/{name}': data for name, data in pieces.items()}})
+    cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
     print('写入测试场「大混战」关卡（联机时大家要有同样的关卡和物体）……')
     for line in gen.install(game, gen.grand_battle(gen.Plan())):
         print('  ', line)

@@ -269,6 +269,8 @@ GRAND_BEARER = 'app:/object/e513_shieldbearer.sgo'
 GRAND_BEARERS = 2
 GRAND_SOLDIERS = ('app:/object/AiArmySoldier_S_AF_Leader.sgo', 'app:/object/AiArmySoldier_S_Follower1.sgo')
 GRAND_GROUND_CAP, GRAND_AIR_CAP = 30, 14   # enemies on each side it tops up to (counted together: the cap is the sum)
+# Far points the sky's waves spawn on besides the ships' (GrandSky makes its jets on them, on the ground).
+GRAND_SKY_SPAWNS = 2
 
 
 # The plugin's aircraft the player boards (src/playerjet_kinds.h kBoardable) that have a range SGO: the grand battle
@@ -289,7 +291,9 @@ def grand_battle(plan: Plan) -> Plan:
     plan.vehicles = {'edf6tr_pjet_fighter_mission': 4, 'edf6tr_pjet_strike_mission': 3,
                      **{sgo: 1 for sgo in BOARDABLE_PARKED},
                      'edf6tr_katyusha_mission': 2, 'edf6tr_artillery_mission': 2, 'edf6tr_drill_mission': 2,
-                     'edf6tr_sidecar_mission': 2,
+                     # One sidecar: the plain (M045) has 48 points; a second one (38 placements) took a far point the
+                     # ships and the sky's spawns need (grand_points: 5 left of 6, the install stopped, 2026-10-06).
+                     'edf6tr_sidecar_mission': 1,
                      'edf6tr_v506_heli_mission': 1, 'edf6tr_vehicle409_heli_mission': 1, 'edf6tr_vehicle410_heli_mission': 1,
                      'edf6tr_v602_heli_mission': 1, 'vehicle403_tank_mission': 1, 'vehicle404_bigtank': 1,
                      'v603_flak_mission': 1, 'edf6tr_vehicle502_groundrobo_mission': 1}
@@ -306,7 +310,7 @@ def grand_battle(plan: Plan) -> Plan:
 def grand_points(lay: Layout) -> list[tuple[str, float, rmpa.Point]]:
     """(ship SGO, height, its point): the farthest free points, raised (install writes them up in MISSION.RMPA)."""
     far = lay.far_points[::-1]
-    if len(far) < len(GRAND_SHIPS) + 2:
+    if len(far) < far_reserved(GRAND):
         raise ValueError('大混战：这张地图远处的空闲点位不够放舰船')
     return [(sgo, dy, p) for (sgo, dy), p in zip(GRAND_SHIPS, far)]
 
@@ -368,18 +372,27 @@ class Layout:
 SPOT_RINGS = (160.0, 300.0, 450.0, 800.0)
 
 
-def layout(points: list[rmpa.Point], need: int = 0) -> Layout:
+def far_reserved(scenario: str) -> int:
+    """How many of the farthest points `scenario` keeps for itself (no vehicle stands on them): the grand battle's
+    ships and its sky's spawns."""
+    return len(GRAND_SHIPS) + GRAND_SKY_SPAWNS if scenario == GRAND else 0
+
+
+def layout(points: list[rmpa.Point], need: int = 0, reserve: int = 0) -> Layout:
     """Vehicle spots: flat points from 30 m off the player start, 15 m apart, nearest first, out to
     160 m or as far out (SPOT_RINGS) as `need` of them takes; enemy spots 180-450 m, the nearest `need` vehicle
     spots left out (all of them when that leaves none; spots_for then drops the ones it really took: spaced may
-    take farther ones of them for a wide vehicle)."""
+    take farther ones of them for a wide vehicle). The `reserve` farthest points past 450 m are never vehicle spots
+    (far_reserved: the 800 m ring once handed the grand battle's ship points to its jets, 2026-10-06)."""
     player = next(p for p in points if p.name == 'プレイヤー')
     by_distance = sorted(points, key=lambda p: math.dist(p.pos, player.pos))
+    outer = [p for p in by_distance if math.dist(p.pos, player.pos) > 450]
+    kept = {p.name for p in outer[len(outer) - reserve:]} if reserve else set()
     spots: list[rmpa.Point] = []
     for far in SPOT_RINGS:
         for p in by_distance:
             d = math.dist(p.pos, player.pos)
-            if (30 <= d <= far and abs(p.pos[1] - player.pos[1]) < 4 and p not in spots
+            if (30 <= d <= far and abs(p.pos[1] - player.pos[1]) < 4 and p not in spots and p.name not in kept
                     and all(math.dist(p.pos, s.pos) >= 15 for s in spots)):
                 spots.append(p)
         if len(spots) >= need:
@@ -877,9 +890,10 @@ def install(game_root: str, plan: Plan) -> list[str]:
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
-    lay = layout(rmpa.points(points_file), small_count(plan))
+    lay = layout(rmpa.points(points_file), small_count(plan), far_reserved(plan.scenario))
     text = script(plan, lay)
-    placed = [(s, npc, p) for s, npc, p in spots_for(plan, layout(rmpa.points(points_file), small_count(plan)))]
+    placed = [(s, npc, p) for s, npc, p in
+              spots_for(plan, layout(rmpa.points(points_file), small_count(plan), far_reserved(plan.scenario)))]
     if plan.scenario == GRAND:   # the ships' points up in the air
         for _, dy, p in grand_points(lay):
             points_file = rmpa.raised(points_file, {p.name}, dy)

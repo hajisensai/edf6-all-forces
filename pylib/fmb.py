@@ -209,7 +209,11 @@ def _align4(n: int) -> int:
 
 def decode(fmb: bytes) -> list[tuple[float, float, float]]:
     """Every render vertex of every leaf as world (x, y, z).  Vertices on leaf borders appear once per leaf."""
-    f = parse(fmb)
+    return points(parse(fmb))
+
+
+def points(f: Fmb) -> list[tuple[float, float, float]]:
+    """Positions from an already decoded terrain, including its float32-quantized edits."""
     return [(v[0], v[1], v[2]) for i in sorted(f.leaves) for v in f.leaves[i].verts]
 
 
@@ -471,18 +475,29 @@ def build(f: Fmb, exact_cmpl: bool = False) -> bytes:
 
 
 def set_heights(fmb: bytes, fn: Callable[[float, float, float], float], normals: str = 'affected',
-                exact_cmpl: bool = False) -> bytes:
+                exact_cmpl: bool = False, *, batch_fn: Callable | None = None) -> bytes:
     """New FMB with every vertex y replaced by float32(fn(x, y_old, z)).
     normals: 'affected' (default) recomputes normals of vertices touching a moved vertex's triangles,
     'all' recomputes every normal, 'none' keeps the stored ones.  Leaf + node AABBs are always re-derived
     (bit-identical to the stock values when nothing moved).  exact_cmpl: re-encode changed leaves with the
-    full Okumura encoder instead of the fast tail splice (both decode identically in the game)."""
+    full Okumura encoder instead of the fast tail splice (both decode identically in the game).
+    batch_fn, when supplied, returns all new heights for one leaf's vertices in their original order."""
     f = parse(fmb)
+    apply_heights(f, fn, normals, batch_fn=batch_fn)
+    return build(f, exact_cmpl)
+
+
+def apply_heights(f: Fmb, fn: Callable[[float, float, float], float], normals: str = 'affected',
+                  *, batch_fn: Callable | None = None) -> None:
+    """Edit decoded terrain once; keep the same float32 rounding, normals and AABB builder."""
     leaves = [f.leaves[i] for i in sorted(f.leaves)]
     moved: set[tuple[int, int]] = set()
     for lf in leaves:
-        for v in lf.verts:
-            y = f32(float(fn(v[0], v[1], v[2])))
+        heights = list(batch_fn(lf.verts)) if batch_fn is not None and lf.verts else [fn(v[0], v[1], v[2]) for v in lf.verts]
+        if len(heights) != len(lf.verts):
+            raise ValueError('batch height count differs from vertex count')
+        for v, height in zip(lf.verts, heights):
+            y = f32(float(height))
             if struct.pack('<f', y) != struct.pack('<f', v[1]):
                 v[1] = y
                 moved.add(_weld_key(v[0], v[2]))
@@ -499,7 +514,6 @@ def set_heights(fmb: bytes, fn: Callable[[float, float, float], float], normals:
         compute_normals(leaves, touched)
     elif normals not in ('affected', 'none'):
         raise ValueError(normals)
-    return build(f, exact_cmpl)
 
 
 # --------------------------------------------------------------------------------------------- checks

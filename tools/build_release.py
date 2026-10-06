@@ -43,7 +43,10 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
   3. 看到「安装完成」后启动游戏。
 
   不需要装 Python。战机、直升机、潜水母舰、呼叫武器和大地图是安装器用你自己游戏里的
-  Root.cpk 现场生成的（不修改 Root.cpk）；全部生成成功后才开始写文件。
+  Root.cpk 和 Chunk02.cpk 现场生成的（不修改原始资源包）；全部生成成功后才开始写文件。
+  更新时按资源组校验已有文件：生成器、原始资源包和外部模型没有变化，文件也完整时直接复用，
+  不再全量重建。缺失或被修改的资源会重新生成；共享武器表仍会检查，以兼容其它 MOD。
+  首次使用支持增量更新的安装器仍需生成一次，之后更新可复用。每一步会显示生成或复用及耗时。
   自行榴弹炮的外形来自压缩包里的 models 文件夹（双管坦克模型），请和 exe 放在一起解压；
   没有这个文件夹时自行榴弹炮用 Kepler 原版外形。
   安装器还会写入：
@@ -88,6 +91,11 @@ def build_exe(name: str) -> str:
     info = os.path.join(WORK, 'build_info.json')
     with open(info, 'w', encoding='utf-8') as f:
         json.dump({'name': name}, f)
+    sys.path.insert(0, os.path.join(ROOT, 'pylib'))
+    import buildcache
+    recipes = os.path.join(WORK, buildcache.RECIPES)
+    with open(recipes, 'w', encoding='utf-8') as f:
+        json.dump(buildcache.source_recipes(ROOT), f, sort_keys=True)
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', EXE_NAME, '--distpath', os.path.join(WORK, 'dist'), '--workpath', os.path.join(WORK, 'work'),
            '--specpath', WORK]
@@ -95,13 +103,14 @@ def build_exe(name: str) -> str:
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
-                'testhub', 'make_emc', 'centipede_model', 'dragonfly_model'):   # every module installer.py imports in a function (selftest release_imports)
+                'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache'):   # every module installer.py imports in a function (selftest release_imports)
         cmd += ['--hidden-import', mod]
-    for mod in ('PIL', 'matplotlib', 'pandas', 'tkinter'):  # dev-only tools import these (numpy: the big map's seams need it)
+    for mod in ('matplotlib', 'pandas', 'tkinter'):  # Pillow builds procedural textures; numpy builds map seams
         cmd += ['--exclude-module', mod]
     for name in ('EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'):
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
     cmd += ['--add-data', f'{info}{seps}plugin']
+    cmd += ['--add-data', f'{recipes}{seps}plugin']
     cmd.append(os.path.join(ROOT, 'tools', 'installer.py'))
     subprocess.run(cmd, check=True)
     return os.path.join(WORK, 'dist', EXE_NAME + '.exe')
