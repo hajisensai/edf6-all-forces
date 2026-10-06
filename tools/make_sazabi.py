@@ -3,6 +3,8 @@
   Mods/OBJECT/EDF6VC_SAZABI.MRAB     the mech: the user's model folder (tools/prep_sazabi.py) on the plugin's
                                      skeleton, in the Blacker's hull material and three glowing copies of
                                      Retro-Balam's light (pylib/sazabi_model.py)
+  Mods/WEAPON/EDF6VC_SZ_RIFLE.SGO / _MISSILE.SGO   its beam rifle and shield missiles (vcobjects.sazabi_weapons)
+  Mods/OBJECT/EDF6VC_SZ_MEGA.SGO / _CHARGE.SGO / _FUNNEL.SGO   the beams the plugin fires (vcobjects.sazabi_rounds)
   Mods/OBJECT/EDF6VC_SAZABI.SGO      the V506 body (vcobjects.jet_sgo) with that model, the Sazabi's mark,
                                      durability and arms, its box measured off the model, its door beside it
 
@@ -47,7 +49,9 @@ def build(root: str) -> dict[str, bytes]:
         files = {f'OBJECT/{SGO_FILE}': game.read('OBJECT', STOCK_SGO)}
     else:
         arc, _info = sz.build_archive(game, folder)
-        files = {f'OBJECT/{sz.OUT_ARC}': arc, f'OBJECT/{SGO_FILE}': vc.jet_sgo(game, vc.SAZABI_JET)}
+        files = {f'OBJECT/{sz.OUT_ARC}': arc, f'OBJECT/{SGO_FILE}': vc.jet_sgo(game, vc.SAZABI_JET),
+                 **{f'WEAPON/{n}': d for n, d in vc.sazabi_weapons(game).items()},
+                 **{f'OBJECT/{n}': d for n, d in vc.sazabi_rounds(game).items()}}
     check(files)
     return files
 
@@ -72,6 +76,9 @@ def check(files: dict[str, bytes]) -> None:
     names = {md.name_of(b.name) for b in md.bones}
     missing = {b for b, _ in v['vehicle_weapon_setting']} - names
     assert not missing, f'model lacks weapon bones {missing}'
+    held = {w.split('/')[-1].upper() for w in JET.weapons}
+    assert held <= {k.split('/')[-1] for k in files if k.startswith('WEAPON/')}, f'arms not written: {held}'
+    assert all(f'OBJECT/{n}' in files for n in vc.SAZABI_ROUND_FILES), 'beams not written'
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

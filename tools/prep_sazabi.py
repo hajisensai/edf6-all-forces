@@ -3,7 +3,7 @@ CC BY-NC-SA 4.0) into the model folder the installer builds the vehicle from (py
 
     <models>/sazabi/sazabi.obj / .mtl     the mech in game space and metres, one OBJ object per bone of
                                           sazabi_model.SKELETON (every triangle rigid on that bone), decimated to
-                                          about TARGET_TRIS, normals smoothed within AUTO_SMOOTH
+                                          to TARGET_TRIS (None: not decimated), normals smoothed within AUTO_SMOOTH
     <models>/sazabi/sazabi_skeleton.json  each bone's joint (game space, metres): where it turns
     <models>/sazabi/LICENSE.txt           the attribution the licence asks for
 
@@ -37,7 +37,9 @@ import obj_model  # noqa: E402
 import sazabi_model as sz  # noqa: E402
 
 SOURCE_SUBDIR = 'sazabi_source'   # next to the model folder, not in it
-TARGET_TRIS = 54000          # the whole mech (Retro-Balam 54,468, Nix 27,367)
+# The whole mech's triangles; None: every one of the source's 252,848 (the user, 2026-10-07: 「模型的面数好像也好低」 at
+# 62,545, where the decimation also tore the flat armour plates into spikes; one mech this size is no load for the game).
+TARGET_TRIS: int | None = None
 KEEP_SMALL = 48              # pieces this small are kept whole: bolts, vents, the eye
 AUTO_SMOOTH = 40.0           # degrees: sharper creases keep hard edges (it is armour)
 WELD = 1e-3                  # source units: positions this close are one point
@@ -235,7 +237,7 @@ def write(scene: gltf.Scene, tri_bone: np.ndarray, piece: np.ndarray, out_dir: s
     (returned) so its lowest vertex as written is on y = 0, and the joints must move with it (main)."""
     total = len(scene.triangles)
     small = np.bincount(piece)[piece] <= KEEP_SMALL
-    keep = min(1.0, (TARGET_TRIS - small.sum()) / max(1, total - small.sum()))
+    keep = 1.0 if TARGET_TRIS is None else min(1.0, (TARGET_TRIS - small.sum()) / max(1, total - small.sum()))
     chunks: list[tuple[str, str, np.ndarray, np.ndarray, np.ndarray]] = []   # bone, material, positions, normals, tris
     for b, name in enumerate(sz.BONE_NAMES):
         sel = np.where(tri_bone == b)[0]

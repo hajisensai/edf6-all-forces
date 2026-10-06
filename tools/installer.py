@@ -366,7 +366,7 @@ def install(game: str) -> None:
         print('给原版直升机的请求加上火箭巢和地狱火导弹（ini StockHeliStores=1；读取 Root.cpk，不修改它）……')
         stock = make_stock_stores.build(game)
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
-    sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 30 秒）')
+    sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     print('\n全部生成完毕，开始写入。')
     for path in (make_jets.install(game, jets) if jets is not None else []) + \

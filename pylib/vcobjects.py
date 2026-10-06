@@ -371,7 +371,9 @@ SAZABI_JET = 'edf6tr_sazabi_mission'
 SAZABI_MARK = 7401.0
 SAZABI_DURABILITY = 9000.0
 _SAZABI_ARC, _SAZABI_MDB = 'EDF6VC_SAZABI.MRAB', 'edf6vc_sazabi.mdb'
-SAZABI_WEAPONS = (_GUNS[0], _GUNS[1], _GUNS[0])    # placeholders until its own arms (docs/gundam-plan.md stage 3)
+# Its arms (the rifle, the shield missiles, the rifle again: see sazabi_weapons), on its muzzle bones.
+SAZABI_WEAPONS = ('app:/weapon/edf6vc_sz_rifle.sgo', 'app:/weapon/edf6vc_sz_missile.sgo', 'app:/weapon/edf6vc_sz_rifle.sgo')
+SAZABI_WEAPON_BONES = ('sz_muzzle', 'sz_missile', 'sz_muzzle')
 SAZABI_CAMERA = (0.0, 26.0, -48.0)                 # over the 25.6 m mech's shoulder, far enough back to see it whole
 # Riding (the MAB's eye and LookTarget, model frame: x left, y up, z forward): behind and over its right shoulder (the
 # funnel packs reach 25.5 m up and the tubes 15 m back), looking past its chest to the ground ahead.
@@ -484,7 +486,7 @@ JETS: dict[str, Jet] = {
     # the jets (the plugin walks and flies it and poses its bones); its own model (pylib/sazabi_model.py,
     # tools/make_sazabi.py) with the V506's own CAS, its weapons on its rifle bone. Marks 7401-7499 are its own (src/body506.cpp kMarks).
     SAZABI_JET: Jet(SAZABI_MARK, SAZABI_DURABILITY, SAZABI_WEAPONS, (f'app:/object/{_SAZABI_ARC.lower()}', _SAZABI_MDB),
-                    _SAZABI_ARC, 'body', 'body', weapon_bones=('sz_rifle',) * len(SAZABI_WEAPONS), player=True,
+                    _SAZABI_ARC, 'body', 'body', weapon_bones=SAZABI_WEAPON_BONES, player=True,
                     camera=SAZABI_CAMERA, seat_camera=SAZABI_SEAT_CAMERA),
 }
 # The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
@@ -1322,3 +1324,75 @@ def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
     if game is not None:
         stock = emc_stock(game)
         assert abs(stock['reach'] - EMC_BEAM_RANGE) < 1e-3, stock
+
+
+# ------------------------------------------------------------------------------------------ the Sazabi's arms
+# The Sazabi (JETS[SAZABI_JET], src/sazabi.cpp, tools/make_sazabi.py writes these). Its holders (weapon_bones):
+#   0 the beam shot rifle on sz_muzzle: the 506's own laser (a null model: nothing hangs on the muzzle) made a thick
+#     piercing pink beam, 900 m (30 m a frame x 30 frames), two shots a second;
+#   1 the shield missiles on sz_missile: a salvo of three from the shield, the plugin's proportional guidance;
+#   2 the rifle again (never fired: the 506 builds a holder for every vehicle_weapon_setting row, four at least with
+#     the fuel tank, src/stores.cpp).
+# The plugin pulls each one's trigger itself (src/sazabi.cpp: weapon +0x139), the stock fire bytes cleared.
+# Its beams the plugin fires as rounds of its own (src/jet_bay.cpp SazabiFire, the EMC's way: DemoIndirectFire objects
+# it owns, aims and grows, docs/emc-re.md), the satellite laser in the Sazabi's pink:
+#   SAZABI_MEGA_FILE    the chest's diffuse mega particle cannon: a fan of these, a round a frame for SAZABI_MEGA_ROUNDS
+#   SAZABI_CHARGE_FILE  its charge's glow at the chest (thin; the plugin thickens it as it charges), silent
+#   SAZABI_FUNNEL_FILE  a funnel's short burst
+SAZABI_RIFLE_STOCK = 'V_506HELI_LASERCANNON01_L.SGO'
+SAZABI_RIFLE_FILE = 'EDF6VC_SZ_RIFLE.SGO'
+SAZABI_MISSILE_FILE = 'EDF6VC_SZ_MISSILE.SGO'
+SAZABI_PINK = (2.6, 0.55, 1.9, 0.6)
+SAZABI_RIFLE: dict[str, float] = {'AmmoSize': 5.0, 'AmmoSpeed': 30.0, 'AmmoAlive': 30.0, 'AmmoDamage': 1800.0,
+                                  'FireInterval': 30.0, 'AmmoCount': 9999.0, 'AmmoIsPenetration': 1.0, 'FireRecoil': 0.0}
+SAZABI_RIFLE_FIRE_SE = ('weapon_Fencer_CA_blasterCannon01', 0.9, 60.0)   # cue, volume, metres heard at full
+SAZABI_RIFLE_HIT_SE = ('common_damages_impactParticle_S', 0.8, 50.0)
+SAZABI_MISSILE_ROUNDS = 12
+SAZABI_MISSILE = Store('Shield Missile', 'ground', 0.0, 0.0,
+                       Missile('MSN-04 shield missile', burn=1.5, top=220.0, accel=160.0, max_g=30.0, nav=4.0, life=6.0,
+                               damage=900.0, blast=10.0, lock_range=700.0, lock_cone=0.7, lock_time=20.0, burst=3.0,
+                               burst_gap=6.0, interval=150.0))
+SAZABI_MEGA_FILE = 'EDF6VC_SZ_MEGA.SGO'
+SAZABI_CHARGE_FILE = 'EDF6VC_SZ_CHARGE.SGO'
+SAZABI_FUNNEL_FILE = 'EDF6VC_SZ_FUNNEL.SGO'
+SAZABI_ROUND_FILES = (SAZABI_MEGA_FILE, SAZABI_CHARGE_FILE, SAZABI_FUNNEL_FILE)   # src/jet_bay.cpp kSazabiFiles' order
+SAZABI_MEGA_ROUNDS, SAZABI_CHARGE_ROUNDS, SAZABI_FUNNEL_ROUNDS = 90, 120, 6
+SAZABI_MEGA_SIZE, SAZABI_CHARGE_SIZE, SAZABI_FUNNEL_SIZE = 8.0, 0.6, 0.9
+SAZABI_BEAM_COLOUR = (3.0, 0.6, 2.2, 1.0)
+
+
+def sazabi_weapons(game: Game) -> dict[str, bytes]:
+    """The Sazabi's holders' weapons, {Mods/WEAPON file: bytes}: the beam rifle and the shield missiles."""
+    doc = dsgo.parse(game.read('WEAPON', SAZABI_RIFLE_STOCK))
+    r = doc.root
+    flash = r.get('MuzzleFlash_CustomParameter')
+    cp = r.get('Ammo_CustomParameter')
+    if (r.get('AmmoClass') != 'LaserBullet01' or len(r.get('AmmoColor').items) != 4 or len(flash.items) != 4
+            or len(cp.items) != 11 or len(r.get('FireSe').items) != 6):
+        raise ValueError(f'{SAZABI_RIFLE_STOCK} 不是预期的直升机激光炮')
+    for key, value in SAZABI_RIFLE.items():
+        r.set(key, value)
+    r.get('AmmoColor').items[:] = list(SAZABI_PINK)
+    cp.items[0].items[:] = [SAZABI_PINK[0], SAZABI_PINK[1], SAZABI_PINK[2], 1.0]   # the beam's core and glow colours
+    cp.items[1].items[:] = [SAZABI_PINK[0] * 1.5, SAZABI_PINK[1] * 1.5, SAZABI_PINK[2] * 1.5, 1.0]
+    flash.items[1] = 2.0                                     # the muzzle flash: as big as the Nix cannon's
+    flash.items[2].items[:] = list(SAZABI_PINK)
+    flash.items[3] = 40.0
+    fire = r.get('FireSe')
+    fire.items[1], fire.items[2], fire.items[5] = SAZABI_RIFLE_FIRE_SE
+    r.set('AmmoHitSe', _node_se(SAZABI_RIFLE_HIT_SE))
+    _named(r, 'Beam Shot Rifle')
+    return {SAZABI_RIFLE_FILE: dsgo.write(doc), SAZABI_MISSILE_FILE: _missile_sgo(game, SAZABI_MISSILE, SAZABI_MISSILE_ROUNDS)}
+
+
+def _node_se(se: tuple[str, float, float]) -> object:
+    """A sound entry [0, cue, volume, 1, 1, reach] as dsgo writes it."""
+    cue, volume, reach = se
+    return dsgo.Node([0.0, cue, volume, 1.0, 1.0, reach])
+
+
+def sazabi_rounds(game: Game) -> dict[str, bytes]:
+    """The Sazabi's beams the plugin fires (SAZABI_ROUND_FILES), {Mods/OBJECT file: bytes}."""
+    return {SAZABI_MEGA_FILE: _emc_beam(game, SAZABI_MEGA_ROUNDS, SAZABI_MEGA_SIZE, SAZABI_BEAM_COLOUR, 1.0),
+            SAZABI_CHARGE_FILE: _emc_beam(game, SAZABI_CHARGE_ROUNDS, SAZABI_CHARGE_SIZE, SAZABI_BEAM_COLOUR, 0.0),
+            SAZABI_FUNNEL_FILE: _emc_beam(game, SAZABI_FUNNEL_ROUNDS, SAZABI_FUNNEL_SIZE, SAZABI_BEAM_COLOUR, 0.7)}

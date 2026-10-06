@@ -12,8 +12,10 @@
 //  - physics (506 slot 57, body506.cpp -> SazabiBodyStep): that velocity, and the spin that keeps it upright facing its
 //    heading (body506.h BodyAttitude). Empty, nothing is written: the stock body holds it.
 // Every frame (empty too) its bones are posed (sazabi_pose.h: gait, flight, landing, the rifle aimed, the tomahawk
-// stowed): the local matrices written, the worlds composed (SetWorld 0x1100B90) and copied to the drawn pose
-// (0x1100F10), as the vehicle's own slot 3 does (docs/sazabi-re.md §2): the pose is this frame's.
+// stowed): the local matrices written; the engine composes the worlds (its slot 45, SetWorld 0x1100B90, from the
+// model's origin) and draws them (slot 3, 0x1100F10), a frame late at worst (docs/sazabi-re.md §2). The plugin
+// composes none itself: SetWorld called with the vehicle matrix (veh+0x60, the box's centre, 12.7 m over the soles,
+// not the model's origin) drew the mech that much too high every other frame, two of it flickering (2026-10-07).
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea: it wades).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
@@ -37,13 +39,6 @@ constexpr std::size_t kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kS
                       kSeatButtons=0x2E8;
 constexpr std::uint16_t kButtonA=0x01;
 constexpr std::size_t kBoneInvBind=0x30;   // a bone record's inverse bind (rec+0x30, 4x4): -its row 3 is a level bone's joint
-// The drawn pose (docs/sazabi-re.md §2): SetWorld(instance, vehicle matrix) puts the matrix on the root record and composes
-// every world (local x parent's, 0x1100010); 0x1100F10(instance) copies the record worlds into the drawn array.
-constexpr unsigned kSetWorld=0x1100B90,kDrawPose=0x1100F10;
-const unsigned char kSetWorldSig[]={0xC6,0x81,0xB0,0x00,0x00,0x00,0x01,0x0F,0x28,0x02,0x48,0x8B,0x41,0x10};
-const unsigned char kDrawPoseSig[]={0x33,0xD2,0x4C,0x8B,0xC1,0x48,0x39,0x51,0x20,0x76,0x52};
-using SetWorldFn=void(*)(void*,const float*);
-using DrawPoseFn=void(*)(void*);
 constexpr float kDeadZone=0.08f;
 // The hover over the ground (m) the walk keeps, how fast it closes on it (1/s) and its rise and fall at most (m/s);
 // off the ground by more than kOffGround (a ledge walked off) it is in the air.
@@ -80,7 +75,7 @@ struct Mech {
 constexpr int kMaxMechs=8;
 Mech mechs[kMaxMechs]{};
 sazabi::Pose scratch;   // game thread only
-bool installed=false,poseOk=false;
+bool installed=false;
 bool testBoarded=false;   // SazabiTestBoard: once a mission
 ULONGLONG firstSeenMs=0;
 
@@ -184,10 +179,6 @@ void Pose(Mech& m,unsigned char* v) noexcept {
         sazabi::LocalMatrix(scratch,i,local);
         std::memcpy(m.rec[i]+kBoneLocal506,local,sizeof local);
     }
-    if(!poseOk)return;   // the engine composes them in its own slot 45 (a frame late at worst)
-    unsigned char* inst=v+kModelInst506;
-    reinterpret_cast<SetWorldFn>(image+kSetWorld)(inst,reinterpret_cast<const float*>(v+kMatrix));
-    reinterpret_cast<DrawPoseFn>(image+kDrawPose)(inst);
 }
 
 // The soles' height over what is under them: the sz_root bone is at the soles (its world, as last composed).
@@ -382,8 +373,7 @@ bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore*
 
 bool InstallSazabi() noexcept {
     installed=Body506Ok();
-    poseOk=Matches(kSetWorld,kSetWorldSig,sizeof(kSetWorldSig)) && Matches(kDrawPose,kDrawPoseSig,sizeof(kDrawPoseSig));
-    Log("HOOK sazabi body=%d pose=%d (mark %.0f)",installed,poseOk,kSazabiMark);
+    Log("HOOK sazabi body=%d (mark %.0f)",installed,kSazabiMark);
     return installed;
 }
 
