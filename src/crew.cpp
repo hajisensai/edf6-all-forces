@@ -22,6 +22,7 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
 #include "body506.h"
+#include "game_clock.h"
 #include "edf/host.h"
 #include "heli.h"
 #include "layout.h"
@@ -30,16 +31,39 @@
 #include <cmath>
 
 namespace crew {
-// The game clock: wall time, except that a gap between two reads longer than kPauseMs (the pause menu,
-// loading: nothing is flown or updated) counts as one 16 ms frame.
-// The game clock starts an hour in: 0 is "never" for the timestamps it fills (crashAt, missileAt, launchAt, ...).
-namespace { constexpr ULONGLONG kPauseMs=250,kClockStart=3600000; ULONGLONG clockWall=0,clockGame=kClockStart; }
-ULONGLONG GameMs() noexcept {
-    const ULONGLONG wall=GetTickCount64();
-    if(clockWall)clockGame+=wall-clockWall>kPauseMs ? 16 : wall-clockWall;
-    clockWall=wall;
-    return clockGame;
+// The game's pause (docs/hud-re.md §10, H): xgs::game::System (*(EDF+0x20B2958), vtable 0x1AE2278) keeps the pause
+// reasons in +0xCD8 and the ones that count in +0xCDC; the game is paused while they share a bit. The pause menu
+// (HUiPause) sets reason 2 when it is built (0x934A46: 0x1196FC0(system, 2, true)) and clears it when it goes
+// (0x934ED3); the System's update skips the scene (every object's update, the vehicles' input with it) while it is
+// set (0x1198DFE, 0x11990C7) but still steps the viewport cameras (0x119953B on). Checked at load; off (never paused,
+// the old gap rule alone) when any of it differs.
+namespace {
+constexpr std::size_t kSystem=0x20B2958,kPauseWhy=0xCD8,kPauseCounts=0xCDC;
+constexpr unsigned kSystemVtable=0x1AE2278;
+bool pauseOk=false;
+}  // namespace
+bool CheckPauseFlag() noexcept {
+    static const unsigned char kOn[]={0x41,0xB0,0x01,0xBA,0x02,0x00,0x00,0x00,0x48,0x8B,0x0D,0x03,0xDF,0x77,0x01,0xE8,0x66,0x25,0x86,0x00};
+    static const unsigned char kOff[]={0x45,0x33,0xC0,0x41,0x8D,0x50,0x02,0x48,0x8B,0x0D,0x77,0xDA,0x77,0x01,0xE8,0xDA,0x20,0x86,0x00};
+    static const unsigned char kSet[]={0x40,0x56,0x48,0x83,0xEC,0x20,0x44,0x8B,0x89,0xDC,0x0C,0x00,0x00,0x8B,0x81,0xD8,0x0C,0x00,0x00};
+    static const unsigned char kSkip[]={0x41,0x8B,0x86,0xD8,0x0C,0x00,0x00,0x41,0x85,0x86,0xDC,0x0C,0x00,0x00,0x0F,0x85,0x67,0x04,0x00,0x00};
+    pauseOk=Matches(0x934A46,kOn,sizeof(kOn)) && Matches(0x934ED3,kOff,sizeof(kOff)) && Matches(0x1196FC0,kSet,sizeof(kSet)) &&
+            Matches(0x11990C0,kSkip,sizeof(kSkip));
+    Log("HOOK pause flag=%d (the plugin's game clock and HUD stop with the pause menu)",pauseOk);
+    return pauseOk;
 }
+bool GamePaused() noexcept {
+    if(!pauseOk)return false;
+    __try {
+        const unsigned char* const system=At<const unsigned char*>(image,kSystem);
+        if(!system || !Readable(system,kPauseCounts+4) || At<const void*>(system,0)!=image+kSystemVtable)return false;
+        return (At<std::uint32_t>(system,kPauseWhy)&At<std::uint32_t>(system,kPauseCounts))!=0;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// The game clock (game_clock.h): stopped while the game is paused, a gap longer than 250 ms (loading) one 16 ms frame.
+// It starts an hour in: 0 is "never" for the timestamps it fills (crashAt, missileAt, launchAt, ...).
+namespace { gameclock::Clock clock; }
+ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),GamePaused()); }
 // The frame: every vehicle's input runs once a frame, so the first vehicle of a frame coming round again
 // starts the next one. If it is deleted, the next repeat of any vehicle seen this frame does.
 namespace { constexpr int kFrameSeen=128; const void* frameSeen[kFrameSeen]{}; int frameSeenCount=0; ULONGLONG frame=1; }

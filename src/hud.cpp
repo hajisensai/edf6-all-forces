@@ -17,7 +17,7 @@
 // of it, with the player's position, is published as one snapshot (a triple buffer: the game thread never waits,
 // the draw thread always has a whole frame's copy, never half of one and half of the next). The draw reads only
 // the snapshot: it never touches a vehicle, allocates nothing and asks no VirtualQuery. The draw thread's clock
-// is the wall clock: a snapshot older than kFreshMs (paused, loading, mission over) is not drawn.
+// is the wall clock: a snapshot older than kFreshMs (loading, mission over) is not drawn; nothing is while the game is paused.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "gear.h"
@@ -2514,6 +2514,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
     // hold where the player left them.
     if(viewProj && !MapOwnsView())KeepViewProj(viewProj);
     if(!quadOk || !viewProj || !ctx || !viewport)return;   // the carriers' bars are drawn whatever VehicleHud says
+    // The pause menu: nothing of the plugin's (docs/hud-re.md §10). The game still draws the scene and this HUD pass every
+    // frame, and steps the cameras; the stock HUD slides out (its layouts' transition_slide). The snapshot's own age
+    // (kFreshMs, wall) only caught the pause half a second in, and the carriers' bars and the map's marks not at all.
+    if(GamePaused())return;
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
         const int w=At<std::int32_t>(viewport,8),h=At<std::int32_t>(viewport,0xC);
