@@ -1,12 +1,14 @@
 // The map view's camera and grid math (src/map_cam.h) checked offline: where the eye stands for a view, that a drag
 // grabs the ground (the point under the mouse follows it), the keys' and stick's pan, turn and tilt, the zoom's steps
-// and limits (200 m to 3 km), and that the grid reaches past the ground the view shows at every height and pitch
-// (the cameras' field of view pi/4: their construction 0x118AFC0).
+// and limits (200 m to 3 km), that the grid reaches past the ground the view shows at every height and pitch, and that
+// a unit's pin stem reads at the same size on the screen from 200 m to 3 km (the cameras' field of view pi/4: their
+// construction 0x118AFC0).
 //   cmake --build build --target map_cam_check && build\map_cam_check.exe      (exit code 1 on a failure)
 #include "../src/map_cam.h"
 #include <cstdio>
 
 namespace {
+constexpr float kPinPxLeast=20.0f,kPinPxMost=90.0f,kPinSteep=75.0f*mapcam::kPi/180.0f;
 int failures=0;
 void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
     if(ok)return;
@@ -81,6 +83,14 @@ int main() {
                 const float nearBehind=bottom<kPi*0.5f ? h/std::tan(v.pitch)-h/std::tan(bottom) : h/std::tan(v.pitch);
                 Check(static_cast<float>(n)*step>=nearBehind,"grid behind",n*step,nearBehind);
                 Check(n>=2 && n<=kMaxGrid,"grid line count",n);
+                // A pin's stem at the focus reads the same at every height: kPinPxLeast..kPinPxMost px tall on a 1080-line
+                // screen (pi/4 field of view) up to kPinSteep down; steeper it shortens (seen from over it), but stays visible.
+                const float pin=PinHeight(Distance(v),v.pitch);
+                const float topPt[3]={v.focus[0],v.focus[1]+pin,v.focus[2]};
+                float tr,tu;ScreenOf(v,topPt,&tr,&tu);
+                const float px=tu*540.0f/std::tan(kPi/8.0f);
+                if(v.pitch<=kPinSteep)Check(px>=kPinPxLeast && px<=kPinPxMost,"pin stem on the screen",px,pitchDeg);
+                else Check(px>=4.0f,"pin stem seen from over it",px,pitchDeg);
             }
     // Turn: positive turns the view right (the old ahead point shows left), wraps; tilt is held to its limits.
     {

@@ -133,10 +133,15 @@ void MapCamera(const MapReadout& m,float width,float height,float* vp) {
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
 }
-void Unit(MapKind kind,float x,float y,float z) {
-    if(sceneMap.count>=kMapUnits)return;
+// A unit at (x, y, z) heading `headingDeg` (compass: 0 +z, growing to its right, -x), on flat ground at 0.
+MapUnit& Unit(MapKind kind,float x,float y,float z,float headingDeg=-999.0f) {
+    static MapUnit spare{};
+    if(sceneMap.count>=kMapUnits)return spare;
     MapUnit& u=sceneMap.unit[sceneMap.count++];
-    u.pos[0]=x;u.pos[1]=y;u.pos[2]=z;u.kind=kind;
+    u=MapUnit{};
+    u.pos[0]=x;u.pos[1]=y;u.pos[2]=z;u.ground=0.0f;u.hp=-1.0f;u.kind=kind;
+    if(headingDeg>-900.0f){u.dir[0]=-std::sin(headingDeg*kDeg);u.dir[1]=std::cos(headingDeg*kDeg);}
+    return u;
 }
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
@@ -148,11 +153,17 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneMap.mapKey=0x4D;sceneMap.mapButton=0x20;
     for(int i=0;i<4;++i)Unit(MapKind::squad,std::cos(static_cast<float>(i)*1.6f)*12.0f,0.0f,std::sin(static_cast<float>(i)*1.6f)*12.0f-8.0f);
     for(int i=0;i<6;++i)Unit(MapKind::ally,140.0f+static_cast<float>(i)*9.0f,0.0f,-220.0f+static_cast<float>(i)*5.0f);
-    Unit(MapKind::vehicle,-60.0f,0.0f,90.0f);Unit(MapKind::vehicle,80.0f,0.0f,40.0f);
-    Unit(MapKind::air,-150.0f,80.0f,300.0f);Unit(MapKind::air,400.0f,300.0f,-100.0f);
-    Unit(MapKind::carrier,-500.0f,0.0f,-350.0f);
+    Unit(MapKind::vehicle,-60.0f,0.0f,90.0f,30.0f);Unit(MapKind::vehicle,80.0f,0.0f,40.0f,-90.0f);
+    Unit(MapKind::air,-150.0f,80.0f,300.0f,10.0f);Unit(MapKind::air,400.0f,300.0f,-100.0f,200.0f);
+    Unit(MapKind::carrier,-500.0f,240.0f,-350.0f,45.0f).kind=MapKind::carrier;
+    // The enemies nearest first (map.cpp Enemies): the nearest bracketed, two large ones with HP bars, a large flyer.
+    Unit(MapKind::enemy,40.0f,0.0f,330.0f).flags=kMapNearest;
     for(int i=0;i<40;++i)Unit(MapKind::enemy,-300.0f+std::fmod(static_cast<float>(i)*137.0f,700.0f),0.0f,600.0f+std::fmod(static_cast<float>(i)*91.0f,500.0f));
-    for(int i=0;i<3;++i)Unit(MapKind::enemyAir,200.0f+static_cast<float>(i)*60.0f,250.0f,900.0f);
+    MapUnit& big=Unit(MapKind::enemy,-120.0f,0.0f,520.0f,180.0f);big.flags=kMapLarge;big.hp=0.62f;
+    MapUnit& big2=Unit(MapKind::enemy,320.0f,0.0f,700.0f,150.0f);big2.flags=kMapLarge;big2.hp=0.18f;
+    for(int i=0;i<3;++i)Unit(MapKind::enemyAir,200.0f+static_cast<float>(i)*60.0f,250.0f,900.0f,170.0f);
+    MapUnit& ship=Unit(MapKind::enemyAir,-420.0f,400.0f,820.0f,90.0f);ship.flags=kMapLarge;ship.hp=0.9f;
+    Unit(MapKind::lock,-120.0f,6.0f,522.0f);
     Unit(MapKind::marker,250.0f,0.0f,450.0f);Unit(MapKind::marker,-700.0f,0.0f,1200.0f);
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";

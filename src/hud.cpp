@@ -1977,6 +1977,9 @@ alignas(16) const float kMapEnemy[4]={1.0f,0.22f,0.18f,1.0f};
 alignas(16) const float kMapMarker[4]={1.0f,0.85f,0.2f,1.0f};
 constexpr int kMapLabels=12;             // at most this many labels an axis (every other line past that)
 constexpr float kMapLabelGap=34.0f;      // px (at 1080 lines) between two labels of an axis
+constexpr float kMapFarFade=0.45f;       // a pin three times the focus's distance away (and on) drawn this opaque
+constexpr float kMapLockNear=40.0f;      // m: a lock point this near an enemy's pin brackets that pin
+constexpr int kMapLegendRows=12;
 constexpr float kMapGuard=1.25f;         // a grid line is cut to this much of the screen's half size round it
 constexpr float kMapNearW=1.0f;          // ...and to this clip w (m in front of the eye)
 
@@ -2018,7 +2021,7 @@ void MapDistance(wchar_t* out,std::size_t size,float m) noexcept {
 // Whether a grid label at (x, y) keeps clear of the bands (title, keys), the legend and the scale bar.
 bool MapLabelFree(float x,float y,float width,float height,float s) noexcept {
     if(y<60.0f*s || y>height-60.0f*s || x>width-140.0f*s)return false;
-    if(x<190.0f*s && y>height*0.28f && y<height*0.30f+8.0f*28.0f*s+20.0f*s)return false;   // the legend (MapText)
+    if(x<240.0f*s && y>height*0.28f && y<height*0.30f+static_cast<float>(kMapLegendRows)*28.0f*s+20.0f*s)return false;   // the legend
     return !(x<420.0f*s && y>height-140.0f*s);                                             // the scale bar (MapScale)
 }
 
@@ -2094,48 +2097,133 @@ void MapDiamond(void* drawer,void* ctx,float x,float y,float h,float t,const flo
     Seg(drawer,ctx,x,y-h,x+h,y,t,rgba);Seg(drawer,ctx,x+h,y,x,y+h,t,rgba);
     Seg(drawer,ctx,x,y+h,x-h,y,t,rgba);Seg(drawer,ctx,x-h,y,x,y-h,t,rgba);
 }
-
-// One unit's mark at the screen point (x, y).
-void MapUnitMark(void* drawer,void* ctx,float x,float y,float s,MapKind kind) noexcept {
-    const float t=2.0f*s;
-    switch(kind) {
-    case MapKind::squad: Rect(drawer,ctx,x-4.0f*s,y-4.0f*s,x+4.0f*s,y+4.0f*s,kMapSquad);break;
-    case MapKind::ally: Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,kMapAlly);break;
-    case MapKind::vehicle: MapBox(drawer,ctx,x,y,7.0f*s,t,kMapSquad);Rect(drawer,ctx,x-2.0f*s,y-2.0f*s,x+2.0f*s,y+2.0f*s,kMapSquad);break;
-    case MapKind::air: MapDiamond(drawer,ctx,x,y,8.0f*s,t,kCyan);break;
-    case MapKind::carrier: MapBox(drawer,ctx,x,y,12.0f*s,t,kCyan);MapBox(drawer,ctx,x,y,6.0f*s,t,kCyan);break;
-    case MapKind::enemy: Rect(drawer,ctx,x-3.5f*s,y-3.5f*s,x+3.5f*s,y+3.5f*s,kMapEnemy);break;
-    case MapKind::enemyAir: MapDiamond(drawer,ctx,x,y,7.0f*s,t,kMapEnemy);break;
-    case MapKind::marker: Arc(drawer,ctx,x,y,13.0f*s,0.0f,kTurn,t,20,kMapMarker);Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,kMapMarker);break;
+// Corner brackets round (x, y), half size `h` (a lock, the nearest enemy).
+void MapBrackets(void* drawer,void* ctx,float x,float y,float h,float t,const float* rgba) noexcept {
+    const float k=h*0.4f;
+    for(int sx=-1;sx<=1;sx+=2)for(int sy=-1;sy<=1;sy+=2) {
+        const float cx=x+static_cast<float>(sx)*h,cy=y+static_cast<float>(sy)*h;
+        Seg(drawer,ctx,cx,cy,cx-static_cast<float>(sx)*k,cy,t,rgba);Seg(drawer,ctx,cx,cy,cx,cy-static_cast<float>(sy)*k,t,rgba);
     }
 }
 
+// The pins' colours by side, and the icon's shape by kind (the user, 2026-10-06: "3D 显示各个友方微缩模型或者标记，
+// 敌方也显示"): a constant size on the screen, at the top of the pin's stem (or, an aircraft, at the unit itself).
+const float* MapColour(MapKind kind) noexcept {
+    switch(kind) {
+    case MapKind::squad: case MapKind::vehicle: return kMapSquad;
+    case MapKind::ally: return kMapAlly;
+    case MapKind::air: case MapKind::carrier: return kCyan;
+    case MapKind::marker: return kMapMarker;
+    default: return kMapEnemy;
+    }
+}
+// `rgba` with its alpha times `fade` (into `out`, 16-aligned as the quad reads it).
+const float* MapFade(const float* rgba,float fade,float* out) noexcept {
+    out[0]=rgba[0];out[1]=rgba[1];out[2]=rgba[2];out[3]=rgba[3]*fade;
+    return out;
+}
+
+// One icon at (x, y): `dx, dy` its heading on the screen (0, 0: none), `hp` its HP bar (<0: none).
+void MapIcon(void* drawer,void* ctx,float x,float y,float s,MapKind kind,std::uint8_t flags,float dx,float dy,float hp,float fade) noexcept {
+    alignas(16) float c[4],b[4];
+    const float* rgba=MapFade(MapColour(kind),fade,c);
+    const float t=2.0f*s;
+    float tick=0.0f;   // the heading tick's start, from the centre
+    switch(kind) {
+    case MapKind::squad: Rect(drawer,ctx,x-4.5f*s,y-4.5f*s,x+4.5f*s,y+4.5f*s,rgba);break;
+    case MapKind::ally: Rect(drawer,ctx,x-3.5f*s,y-3.5f*s,x+3.5f*s,y+3.5f*s,rgba);break;
+    case MapKind::vehicle: MapBox(drawer,ctx,x,y,8.0f*s,t,rgba);Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,rgba);tick=8.0f*s;break;
+    case MapKind::air: MapDiamond(drawer,ctx,x,y,9.0f*s,t,rgba);Rect(drawer,ctx,x-2.0f*s,y-2.0f*s,x+2.0f*s,y+2.0f*s,rgba);tick=9.0f*s;break;
+    case MapKind::carrier: MapBox(drawer,ctx,x,y,13.0f*s,t,rgba);MapBox(drawer,ctx,x,y,7.0f*s,t,rgba);tick=13.0f*s;break;
+    case MapKind::enemy:
+        if(flags&kMapLarge){MapBox(drawer,ctx,x,y,11.0f*s,t,rgba);Rect(drawer,ctx,x-6.0f*s,y-6.0f*s,x+6.0f*s,y+6.0f*s,rgba);tick=11.0f*s;}
+        else Tri(drawer,ctx,x,y-5.0f*s,x,y+6.0f*s,6.0f*s,rgba);   // a small one: a red triangle, its point down onto it
+        break;
+    case MapKind::enemyAir:
+        MapDiamond(drawer,ctx,x,y,(flags&kMapLarge ? 12.0f : 8.0f)*s,t,rgba);Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,rgba);
+        tick=(flags&kMapLarge ? 12.0f : 8.0f)*s;
+        break;
+    case MapKind::marker: Arc(drawer,ctx,x,y,13.0f*s,0.0f,kTurn,t,20,rgba);Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,rgba);break;
+    case MapKind::lock: break;
+    }
+    if(tick>0.0f && (dx!=0.0f || dy!=0.0f))Seg(drawer,ctx,x+dx*tick,y+dy*tick,x+dx*(tick+8.0f*s),y+dy*(tick+8.0f*s),t,rgba);
+    if(hp>=0.0f)Bar(drawer,ctx,x-17.0f*s,y+15.0f*s,34.0f*s,4.0f*s,hp,hp,MapFade(HpColour(hp),fade,b),s);
+}
+
+// Where a unit's pin is on the screen: its icon (`ix`, `iy`), its stem's other end (`bx`, `by`; false: none shown), its
+// heading on the screen, its depth. A ground unit's stem stands `pin` m up from it to the icon; an aircraft's icon is
+// on the aircraft, its stem down to the ground under it (its height read off the stem).
+struct Pin { float ix,iy,bx,by,dx,dy,depth; bool stem; };
+bool MapPin(const float* vp,float width,float height,const MapUnit& u,float pin,Pin* p) noexcept {
+    const bool air=u.kind==MapKind::air || u.kind==MapKind::carrier || u.kind==MapKind::enemyAir || u.kind==MapKind::lock;
+    float top[3]={u.pos[0],u.pos[1],u.pos[2]},base[3]={u.pos[0],u.pos[1],u.pos[2]};
+    if(air)base[1]=u.ground;
+    else top[1]+=pin;
+    float depth;
+    if(!Project(vp,top,width,height,&p->ix,&p->iy,&p->depth))return false;
+    p->stem=(!air || u.pos[1]-u.ground>1.0f) && u.kind!=MapKind::lock && Project(vp,base,width,height,&p->bx,&p->by,&depth);
+    p->dx=p->dy=0.0f;
+    if(u.dir[0]!=0.0f || u.dir[1]!=0.0f) {
+        const float ahead[3]={top[0]+u.dir[0]*pin*0.5f,top[1],top[2]+u.dir[1]*pin*0.5f};
+        float x,y;
+        if(Project(vp,ahead,width,height,&x,&y,&depth)) {
+            const float dx=x-p->ix,dy=y-p->iy,len=std::sqrt(dx*dx+dy*dy);
+            if(len>0.5f){p->dx=dx/len;p->dy=dy/len;}
+        }
+    }
+    return true;
+}
+
 void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
-    // The enemies first, the friendly side over them, the markers on top.
+    const mapcam::View view{{m.focus[0],m.focus[1],m.focus[2]},m.yaw,m.pitch,m.height};
+    const float dist=mapcam::Distance(view),pin=mapcam::PinHeight(dist,m.pitch);
+    // Depth fade: full at the focus's distance and nearer, kMapFarFade past three times it.
+    auto fade=[&](float depth){ return 1.0f-(1.0f-kMapFarFade)*Unit((depth-dist)/(2.0f*dist)); };
+    // The enemies first, the friendly side over them, the markers and the locks on top.
     static const MapKind kOrder[]={MapKind::enemy,MapKind::enemyAir,MapKind::ally,MapKind::squad,MapKind::vehicle,MapKind::air,
                                    MapKind::carrier,MapKind::marker};
+    alignas(16) float c[4];
     for(MapKind kind:kOrder) {
         for(int i=0;i<m.count && i<kMapUnits;++i) {
             const MapUnit& u=m.unit[i];
-            float x,y,depth;
-            if(u.kind!=kind || !Project(vp,u.pos,width,height,&x,&y,&depth))continue;
-            MapUnitMark(drawer,ctx,x,y,s,kind);
-            if(kind==MapKind::marker) {
+            Pin p;
+            if(u.kind!=kind || !MapPin(vp,width,height,u,pin,&p))continue;
+            const float f=fade(p.depth);
+            if(p.stem) {
+                Seg(drawer,ctx,p.bx,p.by,p.ix,p.iy,1.5f*s,MapFade(MapColour(kind),f*0.7f,c));
+                if(kind==MapKind::air || kind==MapKind::carrier || kind==MapKind::enemyAir)Arc(drawer,ctx,p.bx,p.by,4.0f*s,0.0f,kTurn,1.5f*s,10,c);   // its ground point
+            }
+            MapIcon(drawer,ctx,p.ix,p.iy,s,kind,u.flags,p.dx,p.dy,u.flags&kMapLarge ? u.hp : -1.0f,f);
+            if(u.flags&kMapNearest)MapBrackets(drawer,ctx,p.ix,p.iy,16.0f*s,2.0f*s,MapFade(kAmber,f,c));
+            if(kind==MapKind::marker && MapLabelFree(p.ix,p.iy-24.0f*s,width,height,s)) {
                 wchar_t d[24];MapDistance(d,_countof(d),vec::Flat(u.pos,m.me));
-                Label(text,lines,at,x,y-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
+                Label(text,lines,at,p.ix,p.iy-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
             }
         }
     }
-    // The player: a ring and an arrow along their heading.
-    float x,y,depth,x1,y1;
-    const float ahead[3]={m.me[0]+m.meDir[0]*10.0f,m.me[1],m.me[2]+m.meDir[2]*10.0f};
-    if(!Project(vp,m.me,width,height,&x,&y,&depth))return;
-    Arc(drawer,ctx,x,y,11.0f*s,0.0f,kTurn,2.5f*s,24,kWhite);
-    if(Project(vp,ahead,width,height,&x1,&y1,&depth)) {
-        float dx=x1-x,dy=y1-y;
-        const float len=std::sqrt(dx*dx+dy*dy);
-        if(len>0.01f){dx/=len;dy/=len;Tri(drawer,ctx,x-dx*5.0f*s,y-dy*5.0f*s,x+dx*20.0f*s,y+dy*20.0f*s,7.0f*s,kWhite);}
+    // The locks: brackets on the enemy pin nearest the lock point (within kMapLockNear m), else on the point itself.
+    for(int i=0;i<m.count && i<kMapUnits;++i) {
+        const MapUnit& l=m.unit[i];
+        if(l.kind!=MapKind::lock)continue;
+        const MapUnit* on=&l;
+        float best=kMapLockNear*kMapLockNear;
+        for(int k=0;k<m.count && k<kMapUnits;++k) {
+            const MapUnit& u=m.unit[k];
+            if(u.kind!=MapKind::enemy && u.kind!=MapKind::enemyAir)continue;
+            const float d[3]={u.pos[0]-l.pos[0],u.pos[1]-l.pos[1],u.pos[2]-l.pos[2]},dd=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+            if(dd<best){best=dd;on=&u;}
+        }
+        Pin p;
+        if(MapPin(vp,width,height,*on,pin,&p))MapBrackets(drawer,ctx,p.ix,p.iy,20.0f*s,2.5f*s,l.flags&kMapAcquiring ? kAmber : kMapEnemy);
     }
+    // The player: a white pin, a ring and an arrow along their heading.
+    MapUnit me{};
+    std::memcpy(me.pos,m.me,12);me.ground=m.me[1];me.dir[0]=m.meDir[0];me.dir[1]=m.meDir[2];
+    Pin p;
+    if(!MapPin(vp,width,height,me,pin,&p))return;
+    if(p.stem)Seg(drawer,ctx,p.bx,p.by,p.ix,p.iy,2.0f*s,kWhite);
+    Arc(drawer,ctx,p.ix,p.iy,11.0f*s,0.0f,kTurn,2.5f*s,24,kWhite);
+    if(p.dx!=0.0f || p.dy!=0.0f)Tri(drawer,ctx,p.ix-p.dx*5.0f*s,p.iy-p.dy*5.0f*s,p.ix+p.dx*20.0f*s,p.iy+p.dy*20.0f*s,7.0f*s,kWhite);
 }
 
 // The legend (left), the title and the keys (top and bottom bands).
@@ -2152,18 +2240,24 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,
               L"LMB drag / WASD pan   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",key);
     }
-    struct Entry { MapKind kind; const wchar_t* name; };
-    static const Entry kLegend[]={{MapKind::squad,L"SQUAD"},{MapKind::vehicle,L"VEHICLE"},{MapKind::air,L"AIRCRAFT"},
-                                  {MapKind::carrier,L"CARRIER"},{MapKind::enemy,L"ENEMY"},{MapKind::enemyAir,L"ENEMY AIR"},
-                                  {MapKind::marker,L"OBJECTIVE"}};
+    struct Entry { MapKind kind; std::uint8_t flags; const wchar_t* name; };
+    static const Entry kLegend[]={{MapKind::squad,0,L"SQUAD"},{MapKind::ally,0,L"FRIENDLY"},{MapKind::vehicle,0,L"VEHICLE"},
+                                  {MapKind::air,0,L"AIRCRAFT"},{MapKind::carrier,0,L"CARRIER"},{MapKind::enemy,0,L"ENEMY"},
+                                  {MapKind::enemy,kMapLarge,L"ENEMY LARGE"},{MapKind::enemyAir,0,L"ENEMY AIR"},{MapKind::marker,0,L"OBJECTIVE"}};
     float y=height*0.30f;
     Arc(drawer,ctx,40.0f*s,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"YOU");
     for(const Entry& e:kLegend) {
         y+=28.0f*s;
-        MapUnitMark(drawer,ctx,40.0f*s,y,s,e.kind);
+        MapIcon(drawer,ctx,40.0f*s,y,s,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
         Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",e.name);
     }
+    y+=28.0f*s;
+    MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kMapEnemy);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"LOCK");
+    y+=28.0f*s;
+    MapBrackets(drawer,ctx,40.0f*s,y,9.0f*s,2.0f*s,kAmber);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"NEAREST ENEMY");
 }
 
 // The map view open: its marks drawn (true), nothing else of the HUD.

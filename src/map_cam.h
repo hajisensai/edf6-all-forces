@@ -67,6 +67,15 @@ inline void Zoom(View& v,float notches) noexcept {
     v.height=Clamp(v.height*std::pow(kNotchZoom,notches),kMinHeight,kMaxHeight);
 }
 
+// A pin's stem (map.cpp's marks, hud.cpp MapPin): this share of the view distance tall, so it reads the same at 200 m and
+// at 3 km; taller the steeper the view (a vertical stem seen from straight over it is foreshortened to nothing), at
+// most 1 / kPinCosLeast of it.
+constexpr float kPinShare=0.05f,kPinCosLeast=0.5f;
+inline float PinHeight(float distance,float pitch) noexcept {
+    const float c=std::cos(pitch);
+    return kPinShare*distance/(c>kPinCosLeast ? c : kPinCosLeast);
+}
+
 // The grid's step for a view `height` m up: a round number about a third of the height (10 or so lines across).
 inline float GridStep(float height) noexcept {
     const float steps[]={50.0f,100.0f,200.0f,250.0f,500.0f,1000.0f,2000.0f};
