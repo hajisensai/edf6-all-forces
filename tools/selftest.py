@@ -1701,6 +1701,30 @@ def ini_merge_only_adds() -> None:
     assert set(a.lower() for a in added) == set(installer._keys(shipped.splitlines()))
 
 
+@test
+def ini_sections_match_windows() -> None:
+    import make_stock_stores
+    shipped = '[VehicleCrew]\nEnabled=1\nStockHeliStores=0\nNewOption=2\n'
+    for section in ('vehiclecrew', 'VEHICLECREW', 'vEhIcLeCrEw'):
+        user = f'[{section}]\nEnabled=0\nStockHeliStores=1\n[Other]\nNewOption=99\n'
+        merged, added, gone = installer.merge_ini(user, shipped)
+        assert added == ['NewOption'] and not gone, (added, gone)
+        assert merged.count('[') == 2 and merged.startswith(user.split('[Other]')[0])
+        assert installer.merge_ini(merged, shipped) == (merged, [], [])
+        assert make_stock_stores.wanted(merged), 'the installer disabled stores that the plugin enables'
+        assert not make_stock_stores.wanted(f'[{section}]\nStockHeliStores=0\n')
+        if os.name == 'nt':
+            import ctypes
+            read_int = ctypes.WinDLL('kernel32', use_last_error=True).GetPrivateProfileIntW
+            read_int.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_int, ctypes.c_wchar_p]
+            read_int.restype = ctypes.c_uint
+            with tempfile.TemporaryDirectory(prefix='edf6vc-ini-') as temp:
+                path = os.path.join(temp, 'plugin.ini')
+                modfiles.atomic_write(path, merged.encode('utf-8'))
+                assert read_int('VehicleCrew', 'Enabled', 99, path) == 0
+                assert read_int('VehicleCrew', 'NewOption', 99, path) == 2
+
+
 # ---------------------------------------------------------------- interrupted runs
 
 
@@ -1750,6 +1774,11 @@ def autoturret_interrupted_install() -> None:
                 else:
                     raise AssertionError('the failing write did not fail')
             # Killed right after the write of AT_B landed, before its sha was saved.
+            # Emulate the older manifest too: it recorded only sha=None, without write-ahead fingerprints.
+            manifest = at_build._load_manifest(mods)
+            for entry in manifest['files'].values():
+                entry.pop('pending_sha', None)
+            modfiles.save_json(at_build._manifest_path(mods), manifest)
             modfiles.atomic_write(os.path.join(mods, 'WEAPON', 'AT_B.SGO'), b'b')
             at_build.install(mods, text=False, force=False)   # refused before: "changed since this tool wrote it"
             for rel, data in AT_FILES.items():
@@ -1761,6 +1790,10 @@ def autoturret_interrupted_install() -> None:
                     at_build.install(mods, text=False, force=False)
                 except OSError:
                     pass
+            manifest = at_build._load_manifest(mods)
+            for entry in manifest['files'].values():
+                entry.pop('pending_sha', None)
+            modfiles.save_json(at_build._manifest_path(mods), manifest)
             modfiles.atomic_write(os.path.join(mods, 'WEAPON', 'AT_B.SGO'), b'b')
             at_build.uninstall(mods, force=False)
             left = [rel for rel in AT_FILES if os.path.exists(os.path.join(mods, *rel.split('/')))]
@@ -1770,9 +1803,150 @@ def autoturret_interrupted_install() -> None:
         shutil.rmtree(mods, ignore_errors=True)
 
 
+@test
+def autoturret_interrupted_upgrade() -> None:
+    """Every whole-file upgrade cut point remains owned, even under a later builder version."""
+    upgraded = {rel: b'new ' + data for rel, data in AT_FILES.items()}
+    later = {rel: b'later ' + data for rel, data in AT_FILES.items()}
+    for cut in ('before_file', 'after_file', 'after_manifest'):
+        for rel in AT_FILES:
+            for action in ('retry', 'uninstall'):
+                with tempfile.TemporaryDirectory(prefix='edf6at-upgrade-') as mods:
+                    path = os.path.join(mods, *rel.split('/'))
+                    # This file belongs to another mod before the first, explicitly forced install.
+                    modfiles.atomic_write(path, b'original mod')
+                    with patched(at_build, build_files=lambda legacy=False: dict(AT_FILES),
+                                 _refuse_while_running=lambda mods: None), \
+                         patched(at_build.describe, table_ids=lambda mods: []):
+                        at_build.install(mods, text=False, force=True)
+                        write = modfiles.atomic_write
+                        save = modfiles.save_json
+                        fired = False
+
+                        def fail_file(dst: str, data: bytes) -> None:
+                            nonlocal fired
+                            if dst == path and cut != 'after_manifest':
+                                fired = True
+                                if cut == 'after_file':
+                                    write(dst, data)
+                                raise OSError('interrupted upgrade (test)')
+                            write(dst, data)
+
+                        def fail_manifest(dst: str, value: dict) -> None:
+                            nonlocal fired
+                            save(dst, value)
+                            if cut == 'after_manifest' and value['files'][rel]['sha'] == modfiles.sha256(upgraded[rel]):
+                                fired = True
+                                raise OSError('interrupted after manifest (test)')
+
+                        with patched(at_build, build_files=lambda legacy=False: dict(upgraded)):
+                            with patched(modfiles, atomic_write=fail_file, save_json=fail_manifest):
+                                try:
+                                    at_build.install(mods, text=False, force=False)
+                                except OSError:
+                                    pass
+                                else:
+                                    raise AssertionError('the interrupted upgrade did not fail')
+                        assert fired, (cut, rel)
+                        # A newer package must not need the failed version's generator to recover ownership.
+                        with patched(at_build, build_files=lambda legacy=False: dict(later)):
+                            if action == 'retry':
+                                at_build.install(mods, text=False, force=False)
+                                for name, data in later.items():
+                                    assert _read(os.path.join(mods, *name.split('/'))) == data
+                                assert at_build.check(mods), 'completed retry still reported as pending'
+                            at_build.uninstall(mods, force=False)
+                        assert _read(path) == b'original mod', 'the first backup was not restored'
+                        assert not os.path.exists(os.path.join(mods, at_build.MANIFEST))
+                        for name in AT_FILES:
+                            if name != rel:
+                                assert not os.path.exists(os.path.join(mods, *name.split('/')))
+
+
 def _sgo_table(key: str, ids: list[str]) -> bytes:
     """A minimal weapon table (key 'table') or text table (key 'text_table'): one row per id."""
     return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([dsgo.Node([i]) for i in ids])], {0: key}), []))
+
+
+@test
+def autoturret_interrupted_text_upgrade() -> None:
+    """An unwritten text upgrade still owns its old rows; unrelated and subsequently edited rows survive."""
+    from types import SimpleNamespace
+    rel = 'WEAPON/WEAPONTEXT.EN.SGO'
+    stock = _sgo_table('text_table', ['stock', 'other stock'])
+    for cut in ('before_file', 'after_file'):
+        for foreign in (False, True):
+            with tempfile.TemporaryDirectory(prefix='edf6at-text-') as mods:
+                path = os.path.join(mods, *rel.split('/'))
+                original = _sgo_table('text_table', ['original mod', 'unrelated mod'])
+                modfiles.atomic_write(path, original)
+
+                def texts(version: str) -> at_build.describe.Texts:
+                    doc = dsgo.parse(modfiles.read(path))
+                    rows = doc.root.get('text_table').items
+                    before = rows[0]
+                    rows[0] = dsgo.Node([version])
+                    return at_build.describe.Texts({rel: dsgo.compact(doc)}, {rel: {'A': (before, rows[0])}})
+
+                with patched(at_build, build_files=lambda legacy=False: dict(AT_FILES),
+                             build_texts=lambda files, mods: texts('old'), _refuse_while_running=lambda mods: None), \
+                     patched(at_build.describe, table_ids=lambda mods: ['A', 'B']), \
+                     patched(at_build.rootcpk, default=lambda: SimpleNamespace(read=lambda folder, name: stock)):
+                    at_build.install(mods, text=True, force=False)
+                    write = modfiles.atomic_write
+                    fired = False
+
+                    def fail(dst: str, data: bytes) -> None:
+                        nonlocal fired
+                        if dst == path:
+                            fired = True
+                            if cut == 'after_file':
+                                write(dst, data)
+                            raise OSError('interrupted text update (test)')
+                        write(dst, data)
+
+                    with patched(at_build, build_texts=lambda files, mods: texts('new')), \
+                         patched(modfiles, atomic_write=fail):
+                        try:
+                            at_build.install(mods, text=True, force=False)
+                        except OSError:
+                            pass
+                        else:
+                            raise AssertionError('the text update did not fail')
+                    assert fired
+                    if foreign:
+                        modfiles.atomic_write(path, _sgo_table('text_table', ['later mod', 'unrelated mod']))
+                    at_build.uninstall(mods, force=False)
+                    rows = dsgo.parse(modfiles.read(path)).root.get('text_table').items
+                    assert dsgo.dump(rows[0]) == dsgo.dump(dsgo.Node(['later mod' if foreign else 'original mod']))
+                    assert dsgo.dump(rows[1]) == dsgo.dump(dsgo.Node(['unrelated mod']))
+                    assert os.path.exists(os.path.join(mods, at_build.MANIFEST)) == foreign
+
+
+@test
+def autoturret_pending_files_protect_foreign_edits() -> None:
+    with tempfile.TemporaryDirectory(prefix='edf6at-pending-') as mods:
+        with patched(at_build, build_files=_at_build_files, _refuse_while_running=lambda mods: None), \
+             patched(at_build.describe, table_ids=lambda mods: []):
+            with patched(modfiles, atomic_write=_failing_write('AT_A.SGO')):
+                try:
+                    at_build.install(mods, text=False, force=False)
+                except OSError:
+                    pass
+                else:
+                    raise AssertionError('expected a failed first write')
+            assert not at_build.check(mods), 'missing pending files were reported as installed'
+            path = os.path.join(mods, 'WEAPON', 'AT_A.SGO')
+            modfiles.atomic_write(path, b'other mod after interruption')
+            try:
+                at_build.install(mods, text=False, force=False)
+            except SystemExit:
+                pass
+            else:
+                raise AssertionError('a foreign edit was overwritten')
+            at_build.uninstall(mods, force=False)
+            assert modfiles.read(path) == b'other mod after interruption'
+            assert os.path.isfile(os.path.join(mods, at_build.MANIFEST))
 
 
 def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:

@@ -24,9 +24,10 @@ unaimed and bursts at its full range; nothing goes silent.
 install records what it did in Mods/.edf6at_data.json:
   files: every whole file it wrote, with the SHA-256 written and the Mods file it replaced (backed up into
          Mods/.edf6at_backup/ the first time). A Mods file that is not ours (another mod's, or ours
-         changed since) is not overwritten without --force.
+         changed since) is not overwritten without --force. While installing, pending_sha records the
+         replacement before it lands; sha still identifies the file before that write.
   texts: for each WEAPONTEXT table, whether install created it and every row it rewrote, as it was
-         before and as written.
+         before and as written. Until the table lands, previous also identifies the pre-write row.
 uninstall puts that back: a whole file still as we wrote it is restored from its backup or deleted (one
 changed since is left alone, unless --force); each text row still as we wrote it gets its original
 back, and a table we created that is then stock again is deleted. Other mods' rows and files stay.
@@ -313,8 +314,8 @@ class Built:
         return data is not None and data == self._files(True).get(rel)
 
     def owns_unsaved(self, mods: str, rel: str, entry: dict) -> bool:
-        """An entry without a sha is one an install recorded and then died before saving the sha of the file it
-        wrote (install saves each sha right after its write). The file is still ours if it is absent, reads as
+        """Compatibility with manifests predating pending_sha: an entry without a sha is one an install
+        recorded and then died before saving the sha of the file it wrote. The file is still ours if it is absent, reads as
         this build or the old build.py writes it, or is still the Mods file the entry backed up (not written
         yet)."""
         data = modfiles.read(_path(mods, rel))
@@ -331,6 +332,10 @@ def _foreign(mods: str, rel: str, manifest: dict, built: Built) -> str | None:
     entry = manifest['files'].get(rel)
     if entry is None:
         return None if built.legacy_owns(mods, rel) else f'{rel}: already in Mods and not written by this tool (another mod?)'
+    if sha == entry.get('pending_sha'):
+        return None   # the file landed before its final manifest update
+    if 'pending_sha' in entry:
+        return None if sha == entry['sha'] else f'{rel}: changed since this tool wrote it (another mod?)'
     if entry['sha'] is None:
         return None if built.owns_unsaved(mods, rel, entry) else f'{rel}: changed since this tool wrote it (another mod?)'
     if sha != entry['sha']:
@@ -381,15 +386,26 @@ def install(mods: str, text: bool, force: bool) -> None:
                 original = _stock_row(rel, row_id)   # already ours (the old build.py): what it replaced is unknown
             else:
                 original = dsgo.dump(before)
-            entry['rows'][row_id] = {'original': original, 'ours': dsgo.dump(written)}
+            # Uninstall must recognize the old row too if a whole-file write fails before this table lands.
+            entry['rows'][row_id] = {'original': original, 'ours': dsgo.dump(written), 'previous': dsgo.dump(before)}
+    # Write-ahead fingerprints: both sides of every atomic replacement belong to this install. This applies
+    # to upgrades too, whose sha is already set. A later tool version can recognize an interrupted write
+    # from these hashes without regenerating the failed version's bytes. Preserve the first backup.
+    for rel, data in files.items():
+        entry = manifest['files'][rel]
+        entry['sha'] = modfiles.sha256_file(_path(mods, rel))
+        entry['pending_sha'] = modfiles.sha256(data)
     modfiles.save_json(_manifest_path(mods), manifest)
-    # Each file's sha is saved right after it is written, so a run killed or out of disk at any point leaves a
-    # manifest that agrees with Mods: at most the one file in flight has sha None, which Built.owns_unsaved
-    # still knows as ours (a rerun overwrites it, uninstall removes it).
+    # Clear each pending fingerprint only after the file has landed; either manifest state recognizes it.
     for rel, data in {**files, **texts.files}.items():
         modfiles.atomic_write(_path(mods, rel), data)
         if rel in manifest['files']:
             manifest['files'][rel]['sha'] = modfiles.sha256(data)
+            manifest['files'][rel].pop('pending_sha', None)
+            modfiles.save_json(_manifest_path(mods), manifest)
+        if rel in texts.files:
+            for row in manifest['texts'][rel]['rows'].values():
+                row.pop('previous', None)
             modfiles.save_json(_manifest_path(mods), manifest)
         print(f'{rel:36s} {len(data):>10d}')
 
@@ -412,7 +428,7 @@ def _restore_texts(mods: str, texts: dict, force: bool) -> dict:
                 print(f'{rel}: row {row_id} is gone from WEAPONTABLE: left as is')
                 continue
             at = ids.index(row_id)
-            if dsgo.dump(rows[at]) != row['ours'] and not force:
+            if dsgo.dump(rows[at]) not in (row['ours'], row.get('previous')) and not force:
                 print(f'{rel}: row {row_id} changed since this tool wrote it: left as is (--force restores it)')
                 left.setdefault(rel, {'created': entry['created'], 'rows': {}})['rows'][row_id] = row
                 continue
@@ -441,7 +457,8 @@ def uninstall(mods: str, force: bool) -> None:
         path = _path(mods, rel)
         backup = _path(mods, f'{BACKUP}/{entry["backup"]}') if entry['backup'] else None
         sha = modfiles.sha256_file(path)
-        ours = sha is None or (built.owns_unsaved(mods, rel, entry) if entry['sha'] is None else sha == entry['sha'])
+        ours = sha is None or sha in (entry['sha'], entry.get('pending_sha')) or (
+            entry['sha'] is None and 'pending_sha' not in entry and built.owns_unsaved(mods, rel, entry))
         if not ours and not force:
             print(f'{rel}: changed since this tool wrote it (another mod?): left as is (--force restores it)')
             left['files'][rel] = entry
@@ -492,8 +509,10 @@ def check(mods: str) -> bool:
     ok = True
     for rel, entry in manifest['files'].items():
         sha = modfiles.sha256_file(_path(mods, rel))
-        state = 'ours' if sha == entry['sha'] else ('missing' if sha is None else 'CHANGED by someone else')
-        ok &= sha == entry['sha']
+        complete = sha is not None and sha == entry['sha'] and 'pending_sha' not in entry
+        state = 'ours' if complete else ('missing' if sha is None else
+                'pending install' if sha in (entry['sha'], entry.get('pending_sha')) else 'CHANGED by someone else')
+        ok &= complete
         print(f'{rel:36s} {state}{" (replaced a Mods file, backed up)" if entry["backup"] else ""}')
     ids = describe.table_ids(mods)
     for rel, entry in manifest['texts'].items():
@@ -507,7 +526,7 @@ def check(mods: str) -> bool:
         ok &= aligned
         print(f'{rel}: {len(rows)} rows, {"aligned" if aligned else "NOT ALIGNED"} with WEAPONTABLE ({len(ids)})')
         for row_id, row in entry['rows'].items():
-            same = aligned and row_id in ids and dsgo.dump(rows[ids.index(row_id)]) == row['ours']
+            same = aligned and row_id in ids and dsgo.dump(rows[ids.index(row_id)]) == row['ours'] and 'previous' not in row
             ok &= same
             print(f'  {row_id:24s} {"ours" if same else "CHANGED or gone"}')
     return ok

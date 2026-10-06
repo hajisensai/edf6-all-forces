@@ -256,7 +256,7 @@ def wanted(ini_text: str) -> bool:
             section = s[1:-1].strip()
             continue
         m = re.match(r'([A-Za-z0-9_]+)\s*=\s*([^;]*)', s)
-        if m and section == 'VehicleCrew' and m.group(1).lower() == INI_KEY.lower():
+        if m and section.lower() == 'vehiclecrew' and m.group(1).lower() == INI_KEY.lower():
             return m.group(2).strip() not in ('', '0')
     return False
 
