@@ -1373,6 +1373,27 @@ def cockpit_warnings_wired() -> None:
         assert f'add_executable({target} EXCLUDE_FROM_ALL' in cmake, target
 
 
+
+@test
+def hud_scale_one_source() -> None:
+    """The plugin HUD's size (src/hudscale.h, docs/hud-re.md §0.1): HudDraw takes its scale from hudscale::Of over the
+    game's screen (the read signature-checked) and the ini's HudScale, not from the viewport's own height; every line's
+    font scale is times it (Measure and Draw); HudScale is read, range-checked on hudscale's limits, shipped and
+    documented; the offline check (tools/hud_view.cpp) runs the scale cases and is a CTest."""
+    hud, plugin, ini, readme = src('src/hud.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert '#include "hudscale.h"' in hud
+    assert '/1080' not in hud.replace(' ', ''), 'a size from the viewport height alone: hudscale::Of'
+    draw = hud.split('void HudDraw(', 1)[1].split('\n}', 1)[0]
+    assert 's=HudScaleOf(w,h)' in draw and 'text.s=s' in draw
+    assert 'hudscale::Of(uiW,uiH,w,h,Cfg().hudScale)' in hud
+    for fn in ('void Measure(Text& t,Line& l)', 'void Draw(Text& t,const Line& l)'):
+        assert 'Font(t,hudscale::Font(l.scale,t.s))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
+    assert 'for(const auto& u:kUiSigs)' in hud and '0x94E24F' in hud
+    assert 'L"HudScale"' in plugin and 'Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax)' in plugin
+    assert re.search(r'^HudScale=1\.0', ini, re.M) and '`HudScale`' in readme
+    view = src('tools/hud_view.cpp')
+    assert 'ScaleOfChecks()+ScaleDrawnChecks()' in view and 'add_test(NAME hud_layout COMMAND hud_view' in src('CMakeLists.txt')
+
 @test
 def vehicle_sound_wired() -> None:
     """The ground vehicles' sounds (src/vehsound.cpp, vsynth.h, vehmix.h; README 功能 16, docs/sound-re.md §9): their ini
