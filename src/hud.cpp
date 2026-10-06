@@ -1082,13 +1082,21 @@ bool Pipper(void* drawer,void* ctx,const float* vp,float width,float height,floa
     return true;
 }
 
+// The target's lead mark: a cross in a circle at `at` (where the rounds meet it, hud.cpp GunSight / StockMark).
+void LeadMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* at,const float* rgba) noexcept {
+    float x,y;
+    if(!sight::ToScreen(vp,at,1.0f,width,height,&x,&y))return;
+    const float r=7.0f*s,t=2.0f*s;
+    Arc(drawer,ctx,x,y,r,0.0f,kTurn,t,10,rgba);
+    Seg(drawer,ctx,x-r,y-r,x+r,y+r,t,rgba);Seg(drawer,ctx,x-r,y+r,x+r,y-r,t,rgba);
+}
+
 // The guns' sight: a cross on the boresight (where the nose points: the guns' line), the pipper (a circle, a dot in it)
 // where the rounds fired now will be at the target's range (else at the sight's own), the target's lead mark (a cross
 // in a circle, dim out of the rounds' reach) and the range as an arc round the pipper (from its top, the share of the
 // reach). Pipper on the lead mark: the rounds meet the target.
 void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,float s,const PlayerJetSymbols& y) noexcept {
     if(!y.gun)return;
-    const float t=2.0f*s;
     float x,yy;
     Boresight(drawer,ctx,vp,width,height,s,y.nose);
     if(Pipper(drawer,ctx,vp,width,height,s,y.pipper,kHud,&x,&yy) && y.lead && y.gunRange>0.0f) {
@@ -1096,12 +1104,7 @@ void GunSight(void* drawer,void* ctx,const float* vp,float width,float height,fl
         const int sides=static_cast<int>(std::ceil(share*24.0f));
         if(sides>0)Arc(drawer,ctx,x,yy,(kPipper+5.0f)*s,-0.25f*kTurn,share*kTurn,3.0f*s,sides,y.leadInRange ? kHud : kHudDim);
     }
-    if(y.lead && sight::ToScreen(vp,y.leadAt,1.0f,width,height,&x,&yy)) {
-        const float r=7.0f*s;
-        const float* c=y.leadInRange ? kHud : kHudDim;
-        Arc(drawer,ctx,x,yy,r,0.0f,kTurn,t,10,c);
-        Seg(drawer,ctx,x-r,yy-r,x+r,yy+r,t,c);Seg(drawer,ctx,x-r,yy+r,x+r,yy-r,t,c);
-    }
+    if(y.lead)LeadMark(drawer,ctx,vp,width,height,s,y.leadAt,y.leadInRange ? kHud : kHudDim);
 }
 
 // A stock helicopter's weapons' sight (helisight.cpp; ini PlayerHeliGunSight). The gun (the primary trigger's): the
@@ -1721,8 +1724,10 @@ void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float widt
 
 // --- The stock vehicles' HUD (vhud.cpp gathers it; ini StockVehicleHud; docs/hud-re.md §7): for the stock vehicle the
 // player drives or mans, in the helis' green and drawn with the same quads and text (exclusive full screen too):
-//  - each weapon's impact point (StockMarks): a gun's or a cannon's the helis' boresight and pipper (dim: no ground
-//    within its reach, where its round ends), a grenade's or a mortar's (and any round flying longer than kLobSec) the
+//  - each weapon's impact point (StockMarks): a gun's or a cannon's the helis' boresight and pipper where its round
+//    meets the map, or with an enemy under the view the jets' gun sight on it (the pipper where the round passes it, its
+//    lead mark where it is then: pipper on the mark, a hit; dim out of the round's reach); neither (the sky): the
+//    boresight alone with its label (roundaim.h GunSight), a grenade's or a mortar's (and any round flying longer than kLobSec) the
 //    artillery's yellow cross as the Katyusha's (LauncherMarks) with its range and flight time, the rockets' the helis'
 //    diamond, a missile's lock the helis' (LockAt; no lock: a dim ring round its boresight and its LockonRange); its
 //    label and range beside it; the selected store's label in brackets. Weapons that land together (a pair of guns)
@@ -1791,15 +1796,26 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         }
         return;
     }
+    if(a.ranged) {
+        const float* c=a.inReach ? kHud : kHudDim;
+        Boresight(drawer,ctx,vp,width,height,s,a.bore);
+        LeadMark(drawer,ctx,vp,width,height,s,a.lead,c);
+        if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y))
+            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
+        return;
+    }
     if((a.lobbed || a.flight>kLobSec) && a.hit) {
         if(ImpactCross(drawer,ctx,vp,width,height,s,a.at,&x,&y))
             Label(text,lines,at,x,y+26.0f*s,1,note,kYellow,L"%ls %d m   %.1f s",name,metres,a.flight);
         return;
     }
-    const float* c=a.hit ? kHud : kHudDim;
     Boresight(drawer,ctx,vp,width,height,s,a.bore);
-    if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y))
-        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
+    if(a.hit) {
+        if(Pipper(drawer,ctx,vp,width,height,s,a.at,kHud,&x,&y))
+            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,kHud,L"%ls %d m",name,metres);
+    } else if(sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
+        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,kHudDim,L"%ls",name);   // the sky: nothing to range it on
+    }
 }
 
 // What the stock vehicles' HUD takes from the other readouts: the Nix's legs and torso (its ring), the drill tank's drill
