@@ -12,6 +12,10 @@
 // line, and with the Proteus's lines and bars) must not overlap at 16:9 or 21:9, nor leave the screen; exit code 1 when
 // they do.
 //
+// The HUD's scale (src/hudscale.h) is checked too: hudscale::Of on the typical screens and split viewports, and the
+// stock HUD drawn whole (HudDraw) at 1280x720 .. 3840x2160 and in split viewports, its text and its block / RWR scope
+// against the 1080-line design times the scale, in size and in place; exit code 1 when one is off.
+//
 //   hud_view [--out DIR]      (default %TEMP%\edf6_hud_view), then: python tools/hud_view.py DIR
 #include "../src/hud.cpp"
 #include "../src/map_cam.h"
@@ -46,7 +50,13 @@ void Grow(float x,float y) {
     box.x0=std::fmin(box.x0,x);box.y0=std::fmin(box.y0,y);box.x1=std::fmax(box.x1,x);box.y1=std::fmax(box.y1,y);
 }
 std::FILE* out=nullptr;
-float fontScale=1.0f;
+float fontScale=1.0f,tallest=0.0f;   // the font scale begun; the tallest glyph drawn since `tallest` was zeroed
+// The game's screen hud.cpp reads (kUiScreen): the global points at a holder, the holder's +0x10 at the screen, its
+// width and height at +0x20 / +0x24.
+alignas(16) unsigned char uiScreen[0x40]{},uiHolder[0x20]{};
+void SetScreen(int w,int h) {
+    std::memcpy(uiScreen+kUiW,&w,4);std::memcpy(uiScreen+kUiH,&h,4);
+}
 constexpr float kGlyphH=40.0f,kGlyphW=0.52f;
 
 // The recorders the stand-in image's functions jump to.
@@ -65,6 +75,7 @@ void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bo
     size[0]=static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale;size[1]=kGlyphH*fontScale;
 }
 void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar_t* text,std::int64_t) {
+    tallest=std::fmax(tallest,kGlyphH*fontScale);
     if(boxing){Grow(m[12],m[13]);Grow(m[12]+static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale,m[13]+kGlyphH*fontScale);}
     if(!out)return;
     char narrow[256];
@@ -218,6 +229,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return;}
     std::fprintf(out,"W 1920 1080\n");
+    SetScreen(1920,1080);
     float vp[16];
     MapCamera(sceneMap,1920.0f,1080.0f,vp);
     struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
@@ -243,6 +255,7 @@ void Scene(const std::wstring& dir,const wchar_t* name,const float* pos,int widt
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out)return;
     std::fprintf(out,"W %d 1080\n",width);
+    SetScreen(width,1080);
     float vp[16];
     const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
     Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
@@ -264,11 +277,11 @@ void Prime(const float* pos,int width=1920) {
 }
 
 // What `draw` puts on the screen (its quads and its text lines drawn), as a box.
-template<class F> Box Measured(F draw) {
+template<class F> Box Measured(F draw,float s=1.0f) {
     alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
     static unsigned char ctx[16]{};
     Text text{};
-    text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);
+    text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
     Line lines[kMaxLines];
     int at=0;
     box=Box{};boxing=true;
@@ -373,6 +386,105 @@ void StockTank(const float* pos) {
     sceneStock.threatKind[0]=2;sceneStock.threatAt[0][0]=pos[0]-600.0f;sceneStock.threatAt[0][1]=pos[1]+80.0f;sceneStock.threatAt[0][2]=pos[2]+900.0f;
     sceneStock.threatKind[1]=1;sceneStock.threatAt[1][0]=pos[0]+1500.0f;sceneStock.threatAt[1][1]=pos[1]+300.0f;sceneStock.threatAt[1][2]=pos[2]-800.0f;
 }
+
+// hudscale::Of against what it must give: the game's screen (uiW x uiH), the viewport drawn in, the ini's HudScale.
+int ScaleOfChecks() {
+    struct Case { const char* what; int uiW,uiH,viewW,viewH; float user,want; };
+    const Case cases[]={
+        {"1280x720",1280,720,1280,720,1.0f,720.0f/1080.0f},
+        {"1920x1080",1920,1080,1920,1080,1.0f,1.0f},
+        {"2560x1440",2560,1440,2560,1440,1.0f,1440.0f/1080.0f},
+        {"3840x2160",3840,2160,3840,2160,1.0f,2.0f},
+        {"3440x1440 (21:9: by the height)",3440,1440,3440,1440,1.0f,1440.0f/1080.0f},
+        {"3840x2160 split left/right (1920x2160)",3840,2160,1920,2160,1.0f,2.0f},
+        {"1920x1080 split top/bottom (1920x540)",1920,1080,1920,540,1.0f,1.0f},
+        {"screen unread: the viewport 2560x1440",0,0,2560,1440,1.0f,1440.0f/1080.0f},
+        {"screen 1280x720 under a 1920x1080 viewport",1280,720,1920,1080,1.0f,1.0f},
+        {"HudScale 1.5 at 1080",1920,1080,1920,1080,1.5f,1.5f},
+        {"HudScale 10 held to 3",1920,1080,1920,1080,10.0f,3.0f},
+        {"HudScale 0.1 held to 0.5",1920,1080,1920,1080,0.1f,0.5f},
+        {"HudScale NaN: none of it",1920,1080,1920,1080,std::nanf(""),1.0f},
+    };
+    int failed=0;
+    for(const Case& c:cases) {
+        const float got=hudscale::Of(c.uiW,c.uiH,c.viewW,c.viewH,c.user);
+        const bool ok=std::fabs(got-c.want)<1e-4f;
+        failed+=!ok;
+        std::printf("%s  scale %-46s %.4f (want %.4f)\n",ok ? "ok  " : "FAIL",c.what,got,c.want);
+    }
+    return failed;
+}
+
+// The stock tank's HUD at a viewport (viewW x viewH) of the game's screen (uiW x uiH): the tallest glyph HudDraw drew,
+// and the stock block's and the RWR scope's boxes drawn at the scale `s`, taken from their anchor (W/2, 0.80 H) and
+// divided by `s`: in design pixels, the same on every screen when the HUD scales as one.
+struct Drawn { float glyph; Box block,rwr; };
+Box Design(Box b,float w,float h,float s) {
+    const float ax=w*0.5f,ay=h*0.80f;
+    return Box{(b.x0-ax)/s,(b.y0-ay)/s,(b.x1-ax)/s,(b.y1-ay)/s,b.any};
+}
+Drawn DrawnAt(int uiW,int uiH,int viewW,int viewH,float s) {
+    SetScreen(uiW,uiH);
+    const float w=static_cast<float>(viewW),h=static_cast<float>(viewH);
+    float vp[16];
+    Camera(sceneStock.pos,sceneStock.hull,w,h,vp);
+    HudPublish();
+    struct { std::int32_t x,y,w,h; } viewport{0,0,viewW,viewH};
+    tallest=0.0f;
+    HudDraw(vp,image,&viewport,nullptr,0);
+    Drawn d{};
+    d.glyph=tallest;
+    void* const drawer=At<void*>(image,kQuadDrawer);
+    static unsigned char ctx[16]{};
+    PlayerJetSymbols y{};
+    std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
+    y.threats=sceneStock.threats;
+    for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
+    const StockExtras x{nullptr,nullptr,false,nullptr,nullptr};
+    d.block=Design(Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);},s),w,h,s);
+    d.rwr=Design(Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);},s),w,h,s);
+    return d;
+}
+// A design box the same as the design's `b`: within 4 design px and 4% of b's width / height on every side (the text
+// in it is sized on 1/32 font steps, hud.cpp kTextScaleStep: up to ~3% apart between two scales).
+bool Same(const Box& a,const Box& b) {
+    const float tx=4.0f+0.04f*(b.x1-b.x0),ty=4.0f+0.04f*(b.y1-b.y0);
+    return a.any && b.any && std::fabs(a.x0-b.x0)<=tx && std::fabs(a.y0-b.y0)<=ty && std::fabs(a.x1-b.x1)<=tx &&
+           std::fabs(a.y1-b.y1)<=ty;
+}
+// The stock HUD on the typical screens and split viewports against the 1920x1080 design: its glyphs (from HudDraw,
+// which reads the screen itself) the design's times the scale, its block and RWR scope the same in design pixels.
+// The text's scale is held to 1/32 steps (hud.cpp kTextScaleStep): a glyph within 4%, a box as Same.
+int ScaleDrawnChecks() {
+    const float ground[3]={0.0f,0.0f,0.0f};
+    StockTank(ground);
+    config.hudScale=1.0f;
+    const Drawn ref=DrawnAt(1920,1080,1920,1080,1.0f);
+    std::printf("      1920x1080 design: glyph %.1f px, block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f) from (W/2, 0.80 H)\n",
+                ref.glyph,ref.block.x0,ref.block.y0,ref.block.x1,ref.block.y1,ref.rwr.x0,ref.rwr.y0,ref.rwr.x1,ref.rwr.y1);
+    struct Case { const char* what; int uiW,uiH,viewW,viewH; float user,s; };
+    const Case cases[]={
+        {"1280x720",1280,720,1280,720,1.0f,720.0f/1080.0f},
+        {"2560x1440",2560,1440,2560,1440,1.0f,1440.0f/1080.0f},
+        {"3840x2160",3840,2160,3840,2160,1.0f,2.0f},
+        {"3840x2160 split left/right: 1920x2160",3840,2160,1920,2160,1.0f,2.0f},
+        {"1920x1080 split top/bottom: 1920x540",1920,1080,1920,540,1.0f,1.0f},
+        {"3840x2160, HudScale 1.5",3840,2160,3840,2160,1.5f,3.0f},
+    };
+    int failed=0;
+    for(const Case& c:cases) {
+        config.hudScale=c.user;
+        const Drawn d=DrawnAt(c.uiW,c.uiH,c.viewW,c.viewH,c.s);
+        const float glyph=d.glyph/c.s;
+        const bool ok=std::fabs(glyph-ref.glyph)<=0.04f*ref.glyph && Same(d.block,ref.block) && Same(d.rwr,ref.rwr);
+        failed+=!ok;
+        std::printf("%s  %-40s s=%.3f glyph %.1f px (%.1f design), block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f)\n",
+                    ok ? "ok  " : "FAIL",c.what,c.s,d.glyph,glyph,d.block.x0,d.block.y0,d.block.x1,d.block.y1,d.rwr.x0,d.rwr.y0,
+                    d.rwr.x1,d.rwr.y1);
+    }
+    config.hudScale=1.0f;
+    return failed;
+}
 }  // namespace
 
 int wmain(int argc,wchar_t** argv) {
@@ -389,7 +501,10 @@ int wmain(int argc,wchar_t** argv) {
     Jump(kTextMake,reinterpret_cast<const void*>(&MakeRec));Jump(kTextBegin,reinterpret_cast<const void*>(&BeginRec));
     Jump(kTextMeasure,reinterpret_cast<const void*>(&MeasureRec));Jump(kTextDraw,reinterpret_cast<const void*>(&DrawRec));
     Jump(kTextEnd,reinterpret_cast<const void*>(&EndRec));Jump(kTextFree,reinterpret_cast<const void*>(&FreeRec));
-    quadOk=textOk=true;
+    *reinterpret_cast<void**>(image+kUiScreen)=uiHolder;
+    *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
+    SetScreen(1920,1080);
+    quadOk=textOk=uiOk=true;
     const ULONGLONG now=GetTickCount64();
     const float pos[3]={0.0f,120.0f,0.0f};
 
@@ -553,5 +668,11 @@ int wmain(int argc,wchar_t** argv) {
     failed+=!StockLayoutApart(2520,&sceneProteus);
     hasProteus=false;
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
+    // The HUD's scale (src/hudscale.h).
+    hasStock=true;
+    const int scaled=ScaleOfChecks()+ScaleDrawnChecks();
+    hasStock=false;
+    std::printf(scaled ? "scale: %d FAILED\n" : "scale: all as designed\n",scaled);
+    failed+=scaled;
     return failed ? 1 : 0;
 }
