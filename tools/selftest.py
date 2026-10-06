@@ -2716,6 +2716,12 @@ def npc_ai_wired() -> None:
     inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert inputs.index('Guarded(kStepNpcPost,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
     assert f'L"NpcBoarding"' in plugin and re.search(r'^NpcBoarding=1\s*$', ini, re.M) and 'NpcBoarding' in readme and 'NpcBoarding' in doc
+    # A script's squad let go (§4.4): released once by npc::Step after the settle time, recruitable only with
+    # ScriptNpcRecruit and never while a dismissal's cooldown keeps +0x540 clear.
+    assert 'npc::Step(q->script,npc::Scripted(control),ms,' in see
+    assert 'Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow]' in see
+    for key, default in (('ScriptNpcRecruit', '1'), ('ScriptNpcSettleSec', '5')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
 

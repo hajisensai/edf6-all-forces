@@ -293,6 +293,7 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 | P4 | implemented_unverified | 编译；`map_cmd_check`（新指令的按键判定、车辆只收三种指令、无标记时拒绝集中火力）；hud_view 地图场景渲染（面板与按键行不重叠）；selftest（脚本小队不受令、解除招募清 `+0x540` 并开始冷却、冷却结束恢复、车辆指令过滤、ini） | 小队表的计数与状态、解除 / 招募的原版行为（SetFollow + 第 39 槽）、面板实际显示 |
 | P5 | implemented_unverified | 编译；`npc_ai_check`（MarkInReach）；`map_cmd_check`（无标记拒绝集中火力）；hud_view 新场景 `npc_mark`（菱形与距离）；selftest（只在步行时读键、键读取让给地图、HUD 画、ini） | 屏幕中心取敌是否与玩家感受一致、NPC 转火 |
 | P6 | implemented_unverified | 编译；selftest（不占 0 号座、RideVehicle 前先加一个强引用、只对真士兵 SeatKick、炮手只在 slot 70 为原版函数的车上、写在原版输入之前、ini） | 座位掩码 `+0x30/+0x34`（M）、RideVehicle 的乘车状态、士兵下车后恢复步行（M）、炮手座的输入在士兵自己清座位块之后是否仍被读到（M）；全部行为 |
+| P7 | implemented_unverified | 编译；`npc_ai_check`（`ScriptWatch`：只释放一次、空档短于等待时间不算结束、从未受控不释放）；selftest（释放时机、不动解除招募中的小队、ini） | 判据在真实任务里的时序（路线走完 → `+0x4A8` 清零，H；任务后续是否还会对已招募小队下路线：§4.4 的风险） |
 
 ### 实机验收清单（用户）
 

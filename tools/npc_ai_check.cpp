@@ -63,6 +63,18 @@ void Intent() {
     f=ScriptFacts{};f.route=true;f.rootPlayer=true;
     Check(Classify(f)==Control::script,"a route wins over recruited");
     f=ScriptFacts{};f.fixed=true;Check(Classify(f)==Control::hold,"fixed: hold");
+    // The end of the script's control: once, after the settle time; never for a unit the script never had; a gap
+    // between two of the script's orders shorter than the settle time is no end.
+    ScriptWatch w{};
+    Check(!Step(w,false,1000,3000) && !Step(w,false,9000,3000),"never scripted: never released");
+    Check(!Step(w,true,10000,3000),"scripted: not released");
+    Check(!Step(w,false,11000,3000) && !Step(w,false,13999,3000),"settling");
+    Check(!Step(w,true,13999,3000),"scripted again within the settle: watched afresh");
+    Check(!Step(w,false,15000,3000) && !Step(w,false,17000,3000),"settling again");
+    Check(Step(w,false,18000,3000),"released after the settle");
+    Check(!Step(w,false,30000,3000),"released once");
+    ScriptWatch z{};Step(z,true,1,0);
+    Check(Step(z,false,2,0) && !Step(z,false,3,0),"settle 0: the first frame off, once");
 }
 
 void Lanes() {

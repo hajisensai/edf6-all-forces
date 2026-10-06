@@ -676,6 +676,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - **指挥面板**（地图视图 `M` 里，和地图指挥同一套选择 / 框选 / 发令）：左上角列出本关所有 NPC 小队（兵种、存活人数、状态、当前指令），数字键 1–9 选中对应小队（Shift 加选），也能像别的单位一样点选、框选、Tab 轮换。键：G 驻守指针处（队员留在 `NpcGuardRadius` 米内）、V 跟随（未招募的小队 = 招募）、X 解除指令、J 自由交战（以当前位置为中心追击 `NpcFreeRange` 米内的敌人）、K 解除招募（小队原地驻守，`NpcRecruitCooldownSec` 秒内走近也不会再加入，面板显示 WAIT 倒计时）、U 招募。任务脚本正在控制的小队显示为灰色（SCRIPT / ESCORT / HOLD），可以选中但不接受指令。NPC 坦克也出现在地图指挥里：G 把它的驻守点移到指针处，X 放回出生点。和地图指挥一样只在单机可用。
 - **Q 标记**（`NpcMarkKey` / `NpcMarkCone`）：步行时（地图关着）按 Q 标记屏幕中心 `NpcMarkCone` 度内最近的敌人（琥珀色菱形 + 距离），再按一次取消。每名 NPC 在这个敌人处于「最长武器射程 + 当前指令允许的移动范围」以内时优先打它；地图里对小队下「集中火力」（H）则无论远近都去打它。标记只影响本机运行的 NPC。
 - **上下车**（`NpcBoarding`）：地图里选中小队按 B，队员走到最近的、有空座位的友方载具（玩家正坐着的优先）各自的座位旁上车；只坐副座 / 炮手座，驾驶座留给自动派的 NPC 司机（士兵坐驾驶座时原版驾驶 AI 的输入会被它自己清掉）。按 N 全队下车。坐在坦克等车辆炮手座上的 NPC 士兵会自己瞄准开火（原版只给驾驶座开火），优先打 Q 标记。士兵坐着的座位玩家不能顶替（原版如此），要坐先让他们下车。只在单机可用。
+- **脚本 NPC 转为普通单位**（`ScriptNpcRecruit` / `ScriptNpcSettleSec`）：脚本控制期间的小队在面板里灰色显示（SCRIPT / ESCORT / HOLD）；脚本放手（路线走完、解除跟随、原地待命解除）且 `ScriptNpcSettleSec` 秒内没再被接管后，它转为插件的普通小队（日志 `the script let it go`），可以下令；`ScriptNpcRecruit=1` 时还可以被招募（原版里有些任务小队本来不可招募）。
 - **NPC 坦克回位**（`src/npcpost.cpp`，`TankReturnToPost` / `TankPostHold` / `TankReverseMax`）：NPC 驾驶的坦克、泰坦、格雷普斯原版只会走任务路线或追射程外的敌人，被主炮后坐力或撞击推开后就停在原地。插件在它偏离驻守点 `TankPostHold` 米后按原版驾驶输出的写法开回去：驻守点在车后且不超过 `TankReverseMax` 米时倒车，否则掉头开回（驻守点 = 地图指挥给的点，否则出生点）。走路线和正在追敌人的车不碰；联机只在房主上算。
 
 日志（`Debug=1`）：每名士兵每 2 秒一行 `NPCAI <兵种> <地址> <状态> pos=... arms=... held=... arm=... reach=... target=... move=... fire=...`；状态变化（`free -> recruited`、`script -> free` 等）各一行。
@@ -698,3 +699,4 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 14. 步行按 Q 对准一只敌人：屏幕上出现琥珀色菱形和 MARK 距离；射程内的 NPC 转火打它（日志 `target=` 与标记一致）。再按 Q 取消。坐进载具后按 Q 不会标记。
 15. 地图里选中小队按 H（已标记时）：小队去打标记目标；没有标记时提示 `MARK AN ENEMY FIRST`。
 16. 停一辆有炮手座的友方坦克在附近，地图里选中小队按 B：队员走到车边上车（日志 `boards v=... seat N: seated`）；司机座位不被士兵占。有敌人时炮手座的炮转向敌人开火。按 N 全队下车（`dismounts: N off`），下车后照常步行作战。若日志是 `refused by the stock ride`，请回传。
+17. 有剧情路线的任务（友军小队沿路线行进 / 护送）：路线期间面板里该小队是灰色 SCRIPT / ESCORT、不接受指令，任务照常推进；路线走完约 5 秒后日志 `the script let it go ... recruitable`，面板里变成 FREE，可以下令、走近可招募。若某任务在这之后卡住，请回传日志（`ScriptNpcRecruit=0` 可保持原版不可招募）。

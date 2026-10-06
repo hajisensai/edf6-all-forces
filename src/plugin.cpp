@@ -236,6 +236,7 @@ void Validate(Config& n) noexcept {
     Fix("NpcGuardRadius",n.npcGuardRadius,2.0f,500.0f);
     Fix("NpcFreeRange",n.npcFreeRange,10.0f,2000.0f);
     Fix("NpcRecruitCooldownSec",n.npcRecruitCooldownSec,0.0f,3600.0f);
+    Fix("ScriptNpcSettleSec",n.scriptNpcSettleSec,0.0f,600.0f);
     Fix("TankPostHold",n.tankPostHold,1.0f,100.0f);
     Fix("TankReverseMax",n.tankReverseMax,0.0f,200.0f);
 }
@@ -478,6 +479,8 @@ void LoadConfig() noexcept {
     n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
     n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
     n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
+    n.scriptNpcRecruit=ReadBool(L"ScriptNpcRecruit",n.scriptNpcRecruit);
+    n.scriptNpcSettleSec=ReadFloat(L"ScriptNpcSettleSec",n.scriptNpcSettleSec);
     n.tankReturnToPost=ReadBool(L"TankReturnToPost",n.tankReturnToPost);
     n.tankPostHold=ReadFloat(L"TankPostHold",n.tankPostHold);
     n.tankReverseMax=ReadFloat(L"TankReverseMax",n.tankReverseMax);
@@ -515,6 +518,7 @@ void LoadConfig() noexcept {
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding);
     Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
+    Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);

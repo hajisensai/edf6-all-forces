@@ -504,6 +504,7 @@ struct Squad {
     Command cmd;
     std::uint8_t autoFollow;   // +0x540 before a dismissal (put back when its cooldown ends)
     bool dismissed;
+    npc::ScriptWatch script;   // the end of a script's control over it (§4.4)
 };
 Squad squads[kMaxSquads]{};
 npc::Cooldowns<kMaxSquads> cooldowns;
@@ -541,7 +542,16 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
     if(q->frame!=GameFrame()){q->alive=q->counting;q->counting=0;q->frame=GameFrame();}
     ++q->counting;
     q->seen=ms;
-    if(h==top){q->cls=cls;q->control=control;}
+    if(h==top) {
+        q->cls=cls;q->control=control;
+        // The script let it go (its route ended, it was unfollowed, its position freed) and has not taken it back
+        // within ScriptNpcSettleSec: a squad of the plugin's now; with ScriptNpcRecruit the player may recruit it.
+        if(npc::Step(q->script,npc::Scripted(control),ms,static_cast<std::uint64_t>(Cfg().scriptNpcSettleSec*1000.0f))) {
+            const bool open=Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow];
+            if(open)top[kAutoFollow]=1;
+            Log("NPCAI squad %p: the script let it go (%s): the plugin's now%s",top,ControlName(control),open ? ", recruitable" : "");
+        }
+    }
     // The dismissal's cooldown over: the stock "joins a player who comes near" back (§5.4).
     if(q->dismissed && cooldowns.Ready(SquadKey(top),ms)) {
         top[kAutoFollow]=q->autoFollow;q->dismissed=false;
