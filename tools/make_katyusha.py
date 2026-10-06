@@ -1,13 +1,15 @@
 """Writes the Katyusha rocket truck (pylib/vcobjects.py GROUND_VEHICLES['katyusha']) into <game>/Mods:
 
   Mods/OBJECT/EDF6VC_KATYUSHA.MRAB          the Naegling's model with the V607 truck in place of its hull and tracks,
-                                            its rocket rack on the truck bed, the truck's tyres on its wheel bones
+                                            its rocket rack on the truck bed (a BM-13 rail pack: 8 rails, 16 rockets
+                                            in place of the Naegling's box), the truck's tyres on its wheel bones
                                             (pylib/katyusha_model.py; built from the player's own Root.cpk), its
                                             elevation ram telescopic (a rod bone of its own)
   Mods/OBJECT/EDF6VC_KATYUSHA.SGO           the Naegling's vehicle (Vehicle402_Rocket: its turret, its wheels) with that
                                             model, the truck's wheel radii and the rockets below
   Mods/WEAPON/EDF6VC_KATYUSHA_ROCKETS.SGO   the Naegling's launcher made a multiple rocket launcher: unguided rockets (the
-                                            Goliath's rocket model) on a ballistic arc (GrenadeBullet01, impact fuse,
+                                            Goliath's rocket model at the M-13's length) leaving from the rails' front
+                                            ends (the muzzles moved there) on a ballistic arc (GrenadeBullet01, impact fuse,
                                             smoke trail), a 40-round ripple, a slow reload; LockonTargetType kMarkLofted
                                             (EDF6AutoTurret: an NPC crew's aimed by itself at ground targets on the
                                             rockets' high arc; EDF6VehicleCrew: the player's lifted onto the arc to where
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 import math
 import os
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -46,6 +49,7 @@ SGO_FILE = f'{VEHICLE.sgo}.SGO'
 MODEL_FILE = f'{VEHICLE.sgo}.MRAB'
 MODEL_MDB = 'Vehicle402_Rocket.mdb'   # the host's own model file name, inside the archive
 STOCK_WEAPON = 'V_402ROCKET_ROCKETCANNON.SGO'
+MUZZLE_NODE = 'v_Null'   # the weapon model's root: its muzzles hang on it (set_muzzles)
 # The truck's tyres (pylib/katyusha_model.py: each axle's tyres on two of the Naegling's wheel bones, the hubs 0.534 m
 # up): car_base_wheel [8] is a wheel's radius, the hub's height over the ground (the Naegling's 0.528 / 0.452).
 TYRE_RADIUS = 0.534
@@ -77,11 +81,18 @@ CAMERA = ([0.0, 4.5, 4.0], [0.0, 8.5, -15.0])
 # rocket launchers fire, accelerates and steers by its CustomParameter), gravity on its velocity as above, an impact
 # fuse, and the round the plugins already know. Base values the request's tier multiplies: its vehicle setup's
 # [durability, damage] multipliers (tools/call_weapons.py request_tier), not the speed.
+# Its size: AmmoSize scales the model uniformly (tools/make_artillery.py, the shell): bullet_rocket.rab is a slim
+# finned rocket ROCKET_MODEL_LEN long at size 1, so ROCKET_SIZE flies the M-13's length (katyusha_model.ROCKET_LEN,
+# the rockets on the rails; rockets_sgo measures the stock model), and AmmoHitSizeAdjust keeps its contact sphere
+# (AmmoSize x AmmoHitSizeAdjust) the ROCKET_CONTACT it was at size 1.5.
 ROCKET_MODEL = 'app:/WEAPON/bullet_rocket.rab'
+ROCKET_MODEL_LEN = 1.052
+ROCKET_SIZE = round(katyusha_model.ROCKET_LEN / ROCKET_MODEL_LEN, 2)   # 1.34
+ROCKET_CONTACT = 1.5
 ROCKETS = {
     'AmmoClass': 'GrenadeBullet01', 'AmmoModel': ROCKET_MODEL, 'AmmoSpeed': 2.0, 'AmmoGravityFactor': 1.0,
     'AmmoAlive': 1500.0, 'AmmoOwnerMove': 0.0, 'AmmoDamage': 300.0, 'AmmoExplosion': 12.0, 'AmmoHitImpulseAdjust': 0.3,
-    'AmmoSize': 1.5, 'AmmoCount': 160.0, 'FireCount': 1.0, 'FireBurstCount': 40.0, 'FireBurstInterval': 4.0,
+    'AmmoSize': ROCKET_SIZE, 'AmmoHitSizeAdjust': round(ROCKET_CONTACT / ROCKET_SIZE, 4), 'AmmoCount': 160.0, 'FireCount': 1.0, 'FireBurstCount': 40.0, 'FireBurstInterval': 4.0,
     'FireInterval': 600.0, 'FireAccuracy': 0.02,
     # EDF6AutoTurret's gun lock-on (autoturret/tools/build.py gun_lockon): no lock (type 0, range 0), its mark in
     # LockonTargetType, distribution 0.
@@ -108,7 +119,9 @@ def rockets_sgo(game: vc.Game) -> bytes:
     r = doc.root
     if r.get('xgs_scene_object_class') != 'Weapon_VehicleShoot' or r.get('AmmoClass') != 'MissileBullet01':
         raise ValueError(f'{STOCK_WEAPON} 不是预期的 Naegling 发射器')
-    game.read('WEAPON', ROCKET_MODEL.rsplit('/', 1)[1].upper())   # the stock rocket model is there (KeyError if not)
+    length = rocket_model_length(game.read('WEAPON', ROCKET_MODEL.rsplit('/', 1)[1].upper()))   # KeyError: not there
+    if abs(length * ROCKET_SIZE - katyusha_model.ROCKET_LEN) > 0.02:
+        raise ValueError(f'{ROCKET_MODEL} 长 {length:.3f} m，AmmoSize {ROCKET_SIZE} 飞出去不是 M-13 的长度')
     stock_model = r.get('AmmoModel')
     for key, value in ROCKETS.items():
         if r.get(key) is None:
@@ -121,7 +134,31 @@ def rockets_sgo(game: vc.Game) -> bytes:
     for lang, name in NAMES.items():
         if r.get(f'name.{lang}') is not None:
             r.set(f'name.{lang}', name)
+    model = r.get('animation_model')
+    model.items[2] = dsgo.Blob(set_muzzles(model.items[2].data), model.items[2].kind)
     return dsgo.write(doc)
+
+
+def rocket_model_length(raw: bytes) -> float:
+    """The length (m, along z) of the rocket model in the archive `raw` at AmmoSize 1."""
+    from mdb import mdb_read, rab_read
+    md = mdb_read(next(f for f in rab_read(raw).files if f.name.lower().endswith('.mdb')).data)
+    zs = [p[2] for o in md.objects for me in o.meshes for p in katyusha_model.g.mesh_positions(me)]
+    return max(zs) - min(zs)
+
+
+def set_muzzles(mab: bytes) -> bytes:
+    """The Naegling launcher's MAB block with its 10 muzzles (vcobjects.mab_muzzles: 5 x 2 on the box's front face,
+    on the weapon model's root `v_Null`, which hangs on Rocketcannon_main: vehicle_weapon_setting) moved to the rails'
+    front ends, on the rockets' axes (katyusha_model.MUZZLES, the launcher's frame). Positions only, in place."""
+    found = vc.mab_muzzles(mab)
+    want = dict(katyusha_model.MUZZLES)
+    if [n for n, _node, _at in found] != list(want) or {node for _n, node, _at in found} != {MUZZLE_NODE}:
+        raise ValueError(f'{STOCK_WEAPON} 的炮口不是预期的 01..10 / {MUZZLE_NODE}: {[(n, node) for n, node, _ in found]}')
+    out = bytearray(mab)
+    for name, _node, at in found:
+        struct.pack_into('<4f', out, at, *want[name], 1.0)
+    return bytes(out)
 
 
 def _value(v: object) -> object:
@@ -185,6 +222,13 @@ def check(files: dict[str, bytes]) -> None:
     assert w['LockonTargetType'] == MARK_LOFTED and w['LockonType'] == 0.0 and w['AmmoClass'] == 'GrenadeBullet01', w
     assert w['AmmoModel'] == ROCKET_MODEL and ROCKET_MODEL in w['resource'], (w['AmmoModel'], w['resource'])
     assert 'app:/WEAPON/bullet_missile.rab' not in w['resource'], w['resource']
+    assert abs(w['AmmoSize'] * w['AmmoHitSizeAdjust'] - ROCKET_CONTACT) < 1e-3, (w['AmmoSize'], w['AmmoHitSizeAdjust'])
+    # The muzzles are the model's: at the rails' front ends (katyusha_model.check_launcher found them there).
+    mab = dsgo.parse(files[f'WEAPON/{vc.KATYUSHA_ROCKETS}']).root.get('animation_model').items[2].data
+    got = {n: struct.unpack_from('<3f', mab, at) for n, _node, at in vc.mab_muzzles(mab)}
+    assert got.keys() == dict(katyusha_model.MUZZLES).keys() and all(
+        max(abs(a - b) for a, b in zip(got[n], p)) < 1e-5 for n, p in katyusha_model.MUZZLES), got
+    katyusha_model.check_launcher(md, [(n, p) for n, p in got.items()])
     # The high arc fits: a rocket at the elevation stop lands (on flat ground) well inside its life, and the high arc
     # spans a useful band of the range.
     env = ballistics.envelope(w['AmmoSpeed'], ballistics.drop_per_frame(factor=w['AmmoGravityFactor']),

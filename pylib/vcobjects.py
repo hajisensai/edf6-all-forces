@@ -575,6 +575,37 @@ def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
     return vec, r + 0x10
 
 
+def mab_muzzles(mab: bytes) -> list[tuple[str, str, int]]:
+    """A weapon's muzzles in the MAB block `mab` (its SGO's animation_model[2]), in order: (name, the weapon-model node
+    it hangs on, offset of its local position vec4). The weapon's constructor walks them (EDF.dll 0x68B62F..0x68BC97,
+    the block at weapon+0x11B0): the list's header at the i32 at 0x14, u16 +2 the count, i32 +4 the first record from
+    the header, records 0x20 apart: i32 +0 the name and +4 the node (UTF-16, from the record; a node the weapon model
+    lacks: 'muzzle node not found'), +0xC the position vec4 (from the record); the grip list's header follows at
+    +0x10. ValueError unless every position is a point (w 1) between the u32s at 0x1C and 0x20 and no two share one."""
+    if mab[:4] != b'MAB\0':
+        raise ValueError('不是 MAB 块')
+    head = struct.unpack_from('<i', mab, 0x14)[0]
+    vecs, strings = struct.unpack_from('<2I', mab, 0x1C)
+    count = struct.unpack_from('<H', mab, head + 2)[0]
+    first = head + struct.unpack_from('<i', mab, head + 4)[0]
+
+    def text(at: int) -> str:
+        end = at
+        while mab[end:end + 2] != b'\0\0':
+            end += 2
+        return mab[at:end].decode('utf-16le')
+    out = []
+    for r in range(first, first + 0x20 * count, 0x20):
+        name, node, _kind, vec = struct.unpack_from('<4i', mab, r)
+        at = r + vec
+        if not (vecs <= at and at + 16 <= strings and struct.unpack_from('<f', mab, at + 12)[0] == 1.0):
+            raise ValueError(f'炮口 {text(r + name)!r} 的坐标不在 MAB 的坐标区')
+        out.append((text(r + name), text(r + node), at))
+    if len({at for _n, _p, at in out}) != len(out):
+        raise ValueError('MAB 里有炮口共用一个坐标')
+    return out
+
+
 def door_height(box) -> float:
     """How far a jet's door (y 0 on `mdl`, the box frame's origin) is over the bottom of its collision box `box`
     ([centre, half extents]): where it stands on the ground. 0 for a box on its origin (on_origin)."""
