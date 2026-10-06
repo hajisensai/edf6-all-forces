@@ -89,6 +89,36 @@ inline bool Solve(const Round& r,const float* pos,const float* shooter,const flo
     return bestPass.ok && bestPass.miss<close;
 }
 
+// What an unguided gun's sight on the stock vehicles' HUD shows (vhud.cpp Arm, hud.cpp StockMark; the user 2026-10-06,
+// a tank's cannon aimed at a flying saucer: "it never moves and does not match"). The round fired now along `dir`:
+//  - ranged: a target is picked (`target`, moving `tvel` m/s) and the round passes it before it meets the map: the
+//    jets' gun sight's convention (hud.cpp GunSight): `pipper` where the round is at its nearest pass by the target,
+//    `lead` where the target is then; pipper on lead, the round meets it (drop and lead both in it). inReach: the pass
+//    comes before the round's life ends (else it is the life's end: both dim);
+//  - ground: the round meets the map first (`landed`, at `landAt` after `landFrames`): the pipper there;
+//  - none: neither. The sight used to put its pipper where the round crossed its 3000 m reach: in the sky that point
+//    depends on nothing but the bore, so with the turret on the screen's centre it sat at one place under the
+//    boresight whatever was flying there, and showed the drop at 3 km for a target at 800 m.
+enum class SightMark : unsigned char { none, ground, ranged };
+struct GunMark { SightMark mark; bool inReach; float frames,pipper[3],lead[3]; };
+inline GunMark GunSight(const Round& r,const float* pos,const float* dir,const float* shooter,bool landed,const float* landAt,
+                        float landFrames,const float* target,const float* tvel) noexcept {
+    GunMark g{SightMark::none,false,0.0f,{0.0f,0.0f,0.0f},{0.0f,0.0f,0.0f}};
+    if(target) {
+        const Pass p=Fire(r,pos,dir,shooter,target,tvel);
+        if(p.ok && !(landed && landFrames<p.frames)) {
+            g.mark=SightMark::ranged;g.inReach=p.frames<static_cast<float>(r.alive)-1.0f;g.frames=p.frames;
+            std::memcpy(g.pipper,p.round,12);std::memcpy(g.lead,p.where,12);
+            return g;
+        }
+    }
+    if(landed) {
+        g.mark=SightMark::ground;g.inReach=true;g.frames=landFrames;
+        std::memcpy(g.pipper,landAt,12);std::memcpy(g.lead,landAt,12);
+    }
+    return g;
+}
+
 // The miss of a cone's centre that the cone's own scatter already makes (m at `range`): the game draws a shot's
 // angle off the centre uniformly in [0, cone] (fire 0x691B02 -> 0x4E820, common/edf/weapon.h), half of it the median.
 inline float Scatter(float cone,float range) noexcept { return 0.5f*cone*range; }

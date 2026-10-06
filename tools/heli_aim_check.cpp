@@ -28,10 +28,21 @@ using namespace crew;
 constexpr float kBrakeGain=0.12f,kYawDamp=1.2f,kYawFeed=1.1f,kPlayerClimb=6.0f,kPi=3.14159265f;
 constexpr aim::RotorGains kGains{0.08f,0.03f,4.0f};
 // The stand-in stock heli (see the top).
-constexpr float kDamp=0.999f,kTop=18.5f,kStopFrames=60.0f,kYawMost=1.0f,kYawLag=0.8f,kDt=1.0f/60.0f;
+// kYawMost: the max yaw rate heli.cpp PlayerYawTune gives it (ini HeliYawRate 50 deg/s, with the NPC's smoothing whose
+// lag the logs measured, kYawLag).
+constexpr float kDamp=0.999f,kTop=18.5f,kStopFrames=60.0f,kYawMost=50.0f*3.14159265f/180.0f,kYawLag=0.8f,kDt=1.0f/60.0f;
+// The screen: the camera rides behind the nose (docs/camera-re.md 3b: the seat's anchors on the heli), so the aim's
+// mark stays on the screen while it is at most kScreenYaw off the nose (MoveOnScreen in the game).
+constexpr float kScreenYaw=0.55f;
 constexpr float kHover=0.288f,kIdle=0.13f,kFall=9.8f/60.0f,kLift=kFall/kHover,kHoverDamp=0.95f;
 
 struct Heli { float pos[3],vel[3],a,yawRate,rotor,maxYaw; };
+bool stockYawLaw=false;   // the old law (the NPC's StockYaw) for the comparison in FollowsTheMouse
+float Wrap(float a) noexcept {
+    while(a>kPi)a-=2.0f*kPi;
+    while(a<-kPi)a+=2.0f*kPi;
+    return a;
+}
 struct Inputs { float lateral,forward,throttle,yaw; };
 
 void Step(Heli& h,const Inputs& in) noexcept {
@@ -63,7 +74,14 @@ Inputs Fly(Pilot& p,const Heli& h,const Hand& hand,float t,int frame) noexcept {
     const bool held=t>=hand.from && t<hand.to;
     const aim::Keys keys{held ? hand.fore : 0.0f,held ? hand.side : 0.0f,held ? hand.vert : 0.0f};
     const int mouseFrame=static_cast<int>(std::lround(hand.mouseAt/kDt));
-    if(frame>=mouseFrame && frame<mouseFrame+hand.frames)aim::Move(p.aim,hand.mx,hand.my,aim::kPerUnit);
+    if(frame>=mouseFrame && frame<mouseFrame+hand.frames) {
+        // The stand-in's MoveOnScreen: a turn that takes the aim past the screen's edge is not taken, the climb is.
+        float a[3];std::memcpy(a,p.aim,12);
+        aim::Move(a,hand.mx,0.0f,aim::kPerUnit);
+        const float off=std::fabs(Wrap(std::atan2(a[0],a[2])-h.a)),was=std::fabs(Wrap(std::atan2(p.aim[0],p.aim[2])-h.a));
+        if(off<=kScreenYaw || off<was)std::memcpy(p.aim,a,12);
+        aim::Move(p.aim,0.0f,hand.my,aim::kPerUnit);
+    }
     const float fwd[3]={std::sin(h.a),0.0f,std::cos(h.a)},right[3]={-std::cos(h.a),0.0f,std::sin(h.a)};
     const bool grounded=h.pos[1]<=0.0f;
     if(grounded)p.groundAt=t;
@@ -76,7 +94,8 @@ Inputs Fly(Pilot& p,const Heli& h,const Hand& hand,float t,int frame) noexcept {
     while(off>kPi)off-=2*kPi;
     while(off<-kPi)off+=2*kPi;
     p.yawRate+=((h.a-p.yawPrev)/kDt-p.yawRate)*0.3f;p.yawPrev=h.a;
-    in.yaw=aim::StockYaw(off,p.yawRate,0.0f,kYawDamp,kYawFeed)*aim::YawSign(h.maxYaw);   // the craft's param, read
+    in.yaw=(stockYawLaw ? aim::StockYaw(off,p.yawRate,0.0f,kYawDamp,kYawFeed) : aim::PlayerYaw(off,p.yawRate,std::fabs(h.maxYaw)))*
+           aim::YawSign(h.maxYaw);   // the craft's param, read
     const bool learn=p.hold.holding && std::fabs(p.hold.y-h.pos[1])<6.0f;
     in.throttle=aim::StockThrottle(w.climb,h.vel[1],h.rotor,&p.hover,learn,kDt,kGains);
     return in;
@@ -107,6 +126,61 @@ bool Run(const Scenario& sc) noexcept {
     return ok;
 }
 }  // namespace
+
+// The mouse swept right and kept going (1 unit a frame for 4 s, aim::kPerUnit 0.05 rad a unit), held at the screen's
+// edge as the game does, the heli at a hover: the turn rate it keeps from 2 s to 4 s. The user (2026-10-06): "the mouse
+// moves and nothing changes, it does not follow the mouse"; their log had the 506 turning 5-17 deg/s. Pushed on, the
+// heading must turn at kFollowShare of the craft's max yaw rate or more, and the old law (the NPC's StockYaw, damped on
+// the turn itself) must not: that is what was wrong.
+constexpr float kFollowShare=0.8f;
+float SweepRate(bool stockLaw) noexcept {
+    stockYawLaw=stockLaw;
+    Heli h{{0.0f,50.0f,0.0f},{0.0f,0.0f,0.0f},0.0f,0.0f,kHover,kYawMost};
+    Pilot p{};
+    p.aim[2]=1.0f;p.hover=kHover;p.groundAt=-10.0f;
+    const Hand sweep{0,0,0,0,0,1.0f,0,0,240};
+    float at2=0.0f;
+    const int frames=static_cast<int>(4/kDt);
+    for(int f=0;f<frames;++f) {
+        if(f==frames/2)at2=h.a;
+        Step(h,Fly(p,h,sweep,static_cast<float>(f)*kDt,f));
+    }
+    stockYawLaw=false;
+    return -(h.a-at2)/2.0f;   // rad/s, + to the right
+}
+bool FollowsTheMouse() noexcept {
+    const float now=SweepRate(false),old=SweepRate(true),want=kFollowShare*kYawMost;
+    const bool ok=now>=want && old<want;
+    std::printf("%-26s %-34s turns %.1f deg/s (want >= %.0f, its most %.0f); old law %.1f deg/s  %s\n","mouse swept right 4 s",
+                "the heading follows the mouse",now*180.0f/kPi,want*180.0f/kPi,kYawMost*180.0f/kPi,old*180.0f/kPi,ok ? "ok" : "WRONG");
+    return ok;
+}
+
+// The rotor that holds the height (aim::HoverRotor) from the SGOs' lift as it is in memory (heli_movement[0][1] / 60):
+// the 506 / 409 / 410 (34) at the NPC's learned 0.424, the 602 (70) near what the NPC learned flying it (0.23-0.26
+// climbing), never pinned at the clamp's 1.0 (the old guess: the 602 climbed on full throttle).
+bool HoverRotors() noexcept {
+    const float h506=aim::HoverRotor(34.0f/60.0f,1.0f),h602=aim::HoverRotor(70.0f/60.0f,1.0f);
+    const bool ok=std::fabs(h506-0.424f)<0.005f && h602>0.18f && h602<0.26f;
+    std::printf("%-26s %-34s 506 %.3f  602 %.3f  %s\n","hover rotor","from the lift as it is in memory",h506,h602,ok ? "ok" : "WRONG");
+    return ok;
+}
+
+// MoveOnScreen: the aim at the screen's right edge, the mouse up and right: the turn is not taken, the climb is.
+bool MovesPerAxis() noexcept {
+    // A plain projection: the camera at the origin looking +z, row vectors, clip (x, y, 0, z): screen x / z, y / z.
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,0,1, 0,0,0,0};
+    const float pos[3]={0.0f,0.0f,0.0f},dir[3]={0.0f,0.0f,1.0f};
+    const float edge=std::atan(0.84f);
+    float a[3]={-std::sin(edge),0.0f,std::cos(edge)};   // at the edge's side (x = -0.84 on the screen)
+    const float before=a[1];
+    const float mx=-a[0]>0.0f ? 1.0f : -1.0f;   // the turn that takes it on past the edge (heliaim.h RightOf: right lowers x)
+    aim::MoveOnScreen(vp,pos,a,mx,1.0f,aim::kPerUnit,dir,800.0f,0.85f);
+    const bool on=aim::OnScreen(vp,pos,a,800.0f,0.85f),ok=a[1]>before+0.03f && on;
+    std::printf("%-26s %-34s elevation %+.3f -> %+.3f, on screen %d  %s\n","mouse up and out at the edge","still climbs (axis by axis)",
+                before,a[1],on ? 1 : 0,ok ? "ok" : "WRONG");
+    return ok;
+}
 
 int main() {
     //                                              fore side vert from to   mx    my   mouseAt frames  s     fwd right up turn
@@ -156,6 +230,9 @@ int main() {
     std::printf("%-26s %-34s up %+.1f m, fwd %+.1f m, most set %.1f m/s  %s\n","Space + W 1.2 s from ground","lifts straight, no speed set",
                 g.pos[1],g.pos[2],setMost,still ? "ok" : "WRONG");
     bad+=still ? 0 : 1;
+    bad+=FollowsTheMouse() ? 0 : 1;
+    bad+=HoverRotors() ? 0 : 1;
+    bad+=MovesPerAxis() ? 0 : 1;
     std::printf("%s\n",bad ? "SOME SIGNS WRONG" : "all signs as meant");
     return bad ? 1 : 0;
 }

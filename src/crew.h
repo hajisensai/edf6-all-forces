@@ -73,6 +73,8 @@ struct Config {
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
     float vehicleHudRange=500.0f;// ...within this many metres of the player
+    float hudScale=1.0f;       // every HUD the plugin draws, times this on top of the screen's own scale (src/hudscale.h)
+    int hudLanguage=0;         // the HUD's words: 0 the game's text language, else hudtext::Setting (en, zh-CN, zh-TW, ja)
     bool playerJet=true;       // the player jets (edf6tr_pjet_* / EDF6VC_PJET_* SGOs) fly as planes with the player at the stick (playerjet.cpp)
     bool playerJetInvertPitch=false;// ...the right stick / mouse Y pitches the other way (pulled back = nose down)
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
@@ -227,10 +229,14 @@ void SuppressBump(bool on) noexcept;
 bool BumpSuppressed() noexcept;
 
 // --- Time ---
-// The game clock, game thread only: wall time, except that a gap between two reads longer than 250 ms
-// (pause menu, loading) counts as one 16 ms frame. Every timer of the plugin's logic, the player fix's
-// included, is on this clock; wall time (GetTickCount64) is for log throttles and other threads only.
+// The game clock, game thread only (game_clock.h): wall time, stopped while the game is paused (GamePaused), and a
+// gap between two reads longer than 250 ms (loading) counts as one 16 ms frame. Every timer of the plugin's logic,
+// the player fix's included, is on this clock; wall time (GetTickCount64) is for log throttles and other threads only.
 ULONGLONG GameMs() noexcept;
+// The game's own pause (the pause menu: xgs::game::System's pause bits, docs/hud-re.md §10); any thread. False when
+// CheckPauseFlag (at load, patches nothing) found the code different.
+bool CheckPauseFlag() noexcept;
+bool GamePaused() noexcept;
 // The game frame number, game thread only: it steps when a vehicle's per-frame input comes round again
 // (crew.cpp InputHook calls SeeFrame), so "once a frame" work compares frame numbers, not clocks.
 ULONGLONG GameFrame() noexcept;
@@ -709,6 +715,7 @@ struct PlayerJetReadout {
     int stores,store;
     const char* storeName[6];
     int storeRounds[6];
+    int storeRole[6];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
     bool bomb,hasImpact;
     float impact[3];
     int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
@@ -818,4 +825,5 @@ unsigned char* PlayerHuman() noexcept;
 #include "vhud.h"
 #include "payload.h"
 #include "map.h"
+#include "mapcmd.h"
 #include "proteus.h"

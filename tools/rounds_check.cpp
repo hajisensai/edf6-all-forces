@@ -11,6 +11,7 @@
 // Exit code 1 when a check fails. Built on request only: cmake --build build --target rounds_check && build\rounds_check.exe
 #include "../src/rounds.h"
 #include "../src/sight.h"
+#include "../src/roundaim.h"
 #include <cmath>
 #include <cstdio>
 
@@ -115,12 +116,123 @@ void StockRockets() {
     std::printf("      409 rockets 5 deg down from 50 m: land %.0f m ahead, the straight line said %.0f m\n",hit[2],line);
     Expect(hit[2]<line-50.0f,"the 409's rockets land short of their line (m)",hit[2],line);
 }
+// --- The stock vehicles' gun sight against a target in the sky (src/roundaim.h GunSight; the user 2026-10-06, an E551
+// with V_505TANK_DLC_CANNON04L aimed at a flying saucer, the HUD showing "CANNON 3132 m": "it never moves and does not
+// match"). The turret camera (turretcam.cpp) keeps the bore on the point kAimFar out along the view when the view meets
+// no map (the sky): bore = muzzle -> eye + look x 800. The eye and muzzle are the E551's rig as its log gives it
+// (rig authored r=15.5 up=4.0). The player lays the sight's marks on the target by turning the view (the turret
+// following it): the old sight's pipper on the target, the new sight's pipper on its lead mark. ---
+struct Gun { const char* name; float speed,factor,ownerMove; int alive; };
+const Gun kE551Gun={"V_505TANK_DLC_CANNON04L (E551)",11.0f,0.25f,0.0f,600};   // Root.cpk: AmmoSpeed, AmmoGravityFactor, AmmoOwnerMove, AmmoAlive
+constexpr float kAimFar=800.0f,kReach=3000.0f;
+const float kEye[3]={0.0f,8.0f,-14.0f},kMuzzle[3]={0.0f,3.5f,1.5f},kStill[3]={0.0f,0.0f,0.0f};
+
+float NoGround(const float*,const float*,float*) { return -1.0f; }   // the sky: the map ray meets nothing
+
+roundaim::Round RoundOf(const Gun& g) {
+    roundaim::Round r{};
+    r.speed=g.speed;r.ownerMove=g.ownerMove;r.alive=g.alive;
+    r.drop[0]=0.0f;r.drop[1]=-kGravity*g.factor/3600.0f;r.drop[2]=0.0f;
+    return r;
+}
+void Unit(float* v) { vec::Normalize(v); }
+void Toward(const float* from,const float* to,float* dir) { for(int i=0;i<3;++i)dir[i]=to[i]-from[i];Unit(dir); }
+// The bore the turret camera turns the gun onto for a view `look` meeting nothing.
+void BoreOf(const float* look,float* bore) {
+    const float far[3]={kEye[0]+look[0]*kAimFar,kEye[1]+look[1]*kAimFar,kEye[2]+look[2]*kAimFar};
+    Toward(kMuzzle,far,bore);
+}
+// The old sight's pipper: where the round crosses kReach (rounds::FirstHit, no ground in the sky).
+void OldPipper(const Gun& g,const float* bore,float* at) {
+    rounds::Arc a{{bore[0]*g.speed,bore[1]*g.speed,bore[2]*g.speed},{0.0f,-kGravity*g.factor/3600.0f,0.0f}};
+    float hit[3],took=0.0f;
+    rounds::FirstHit(a,kMuzzle,g.alive,15,kReach,&NoGround,hit,at,&took);
+}
+// The new sight's marks for the target (`target`, `tvel`).
+roundaim::GunMark NewMarks(const Gun& g,const float* bore,const float* target,const float* tvel) {
+    const float none[3]={0.0f,0.0f,0.0f};
+    return roundaim::GunSight(RoundOf(g),kMuzzle,bore,kStill,false,none,0.0f,target,tvel);
+}
+// The angle (deg) between the directions from the eye to `a` and to `b`: how far apart they are on the screen.
+float Apart(const float* a,const float* b) {
+    float da[3],db[3];Toward(kEye,a,da);Toward(kEye,b,db);
+    return std::acos(vec::Clamp(vec::Dot(da,db),-1.0f,1.0f))*57.29578f;
+}
+// The view turned until the mark `mark(look, out[2][3])` gives out[0] over out[1] on the screen (the player laying it).
+template<class Mark> void Lay(float* look,Mark mark) {
+    for(int k=0;k<200;++k) {
+        float at[2][3];mark(look,at);
+        float have[3],want[3];Toward(kEye,at[0],have);Toward(kEye,at[1],want);
+        for(int i=0;i<3;++i)look[i]+=want[i]-have[i];
+        Unit(look);
+    }
+}
+
+void SkySight() {
+    const Gun& g=kE551Gun;
+    const roundaim::Round round=RoundOf(g);
+    // 1. "It never moves": the old pipper's place on the screen: within half a degree of the view's centre whatever the
+    // view's elevation and whatever is flying there (it is the bore's point at 3 km, and the bore follows the view).
+    float lo=1e9f,hi=-1e9f;
+    for(float e=5.0f;e<=60.0f;e+=11.0f) {
+        const float r=e*0.0174532925f,look[3]={0.0f,std::sin(r),std::cos(r)};
+        float bore[3],at[3];BoreOf(look,bore);OldPipper(g,bore,at);
+        const float centre[3]={kEye[0]+look[0]*1000.0f,kEye[1]+look[1]*1000.0f,kEye[2]+look[2]*1000.0f};
+        const float off=Apart(at,centre);
+        std::printf("      old sight, view %4.0f deg up: pipper %.2f deg off the centre, %.0f m out\n",e,off,vec::Dist(kMuzzle,at));
+        lo=std::fmin(lo,off);hi=std::fmax(hi,off);
+    }
+    Expect(hi<0.6f,"old sight: its pipper stays on the screen's centre (deg off it, at most)",hi,0.6);
+    // 2. "It does not match": a saucer 20 deg up at 600..2500 m, still or crossing at 40 m/s. The miss when each sight's
+    // marks are laid on it (the round's nearest pass, roundaim::Nearest: the bullet core's per-frame step).
+    const float elev=20.0f*0.0174532925f;
+    const float ranges[]={600.0f,1200.0f,2000.0f,2500.0f};
+    const float crossing[3]={40.0f,0.0f,0.0f};
+    for(int moving=0;moving<2;++moving)
+        for(float d:ranges) {
+            const float* tvel=moving ? crossing : kStill;
+            const float target[3]={kEye[0],kEye[1]+d*std::sin(elev),kEye[2]+d*std::cos(elev)};
+            float oldLook[3]={0.0f,std::sin(elev),std::cos(elev)},newLook[3]={0.0f,std::sin(elev),std::cos(elev)};
+            Lay(oldLook,[&](const float* look,float (*at)[3]) {
+                float bore[3];BoreOf(look,bore);OldPipper(g,bore,at[0]);std::memcpy(at[1],target,12);
+            });
+            Lay(newLook,[&](const float* look,float (*at)[3]) {
+                float bore[3];BoreOf(look,bore);
+                const roundaim::GunMark m=NewMarks(g,bore,target,tvel);
+                std::memcpy(at[0],m.pipper,12);std::memcpy(at[1],m.lead,12);
+            });
+            float oldBore[3],newBore[3];BoreOf(oldLook,oldBore);BoreOf(newLook,newBore);
+            const roundaim::Pass was=roundaim::Fire(round,kMuzzle,oldBore,kStill,target,tvel);
+            const roundaim::Pass now=roundaim::Fire(round,kMuzzle,newBore,kStill,target,tvel);
+            const roundaim::GunMark m=NewMarks(g,newBore,target,tvel);
+            std::printf("      saucer %4.0f m%s: old pipper on it misses by %5.1f m; new pipper on its lead mark misses by %.2f m"
+                        " (label %4.0f m, %.1f s)\n",d,moving ? " crossing 40 m/s" : "                ",was.miss,now.miss,
+                        vec::Dist(kMuzzle,m.lead),m.frames/60.0f);
+            Expect(m.mark==roundaim::SightMark::ranged && m.inReach,"new sight: ranged on the saucer, within reach",m.inReach,1.0);
+            Expect(now.miss<0.5f,"new sight: its pipper on the lead mark meets the saucer (miss, m)",now.miss,0.0);
+            if(moving)Expect(was.miss>30.0f,"old sight: its pipper on a crossing saucer misses it (no lead; m)",was.miss,30.0);
+        }
+    // 3. Nothing there: no pipper (none), not a point at the reach. Beyond the round's life: ranged but out of reach.
+    float bore[3];const float look[3]={0.0f,std::sin(elev),std::cos(elev)};BoreOf(look,bore);
+    const roundaim::GunMark empty=NewMarks(g,bore,nullptr,kStill);
+    Expect(empty.mark==roundaim::SightMark::none,"new sight: the sky with nothing in it: no pipper",static_cast<int>(empty.mark),0.0);
+    const float far[3]={kEye[0],kEye[1]+9000.0f*std::sin(elev),kEye[2]+9000.0f*std::cos(elev)};
+    const roundaim::GunMark gone=NewMarks(g,bore,far,kStill);
+    Expect(gone.mark==roundaim::SightMark::ranged && !gone.inReach,"new sight: a saucer past its 6.6 km reach: dim",gone.inReach,0.0);
+    // 4. The ground first: a hill 300 m out in front of a saucer at 1200 m: the ground's pipper.
+    const float target[3]={kEye[0],kEye[1]+1200.0f*std::sin(elev),kEye[2]+1200.0f*std::cos(elev)};
+    const float hill[3]={0.0f,100.0f,300.0f};
+    const roundaim::GunMark ground=roundaim::GunSight(round,kMuzzle,bore,kStill,true,hill,30.0f,target,kStill);
+    Expect(ground.mark==roundaim::SightMark::ground && vec::Dist(ground.pipper,hill)<1e-3f,"new sight: the map met first: its pipper",
+           static_cast<int>(ground.mark),1.0);
+}
 }  // namespace
 
 int main() {
     ArcChecks();
     MotorChecks();
     StockRockets();
+    SkySight();
     std::printf("%s\n",failed ? "FAILED" : "all passed");
     return failed ? 1 : 0;
 }

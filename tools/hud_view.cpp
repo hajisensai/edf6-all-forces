@@ -12,11 +12,27 @@
 // line, and with the Proteus's lines and bars) must not overlap at 16:9 or 21:9, nor leave the screen; exit code 1 when
 // they do.
 //
-//   hud_view [--out DIR]      (default %TEMP%\edf6_hud_view), then: python tools/hud_view.py DIR
+// The HUD's scale (src/hudscale.h) is checked too: hudscale::Of on the typical screens and split viewports, and the
+// stock HUD drawn whole (HudDraw) at 1280x720 .. 3840x2160 and in split viewports, its text and its block / RWR scope
+// against the 1080-line design times the scale, in size and in place; exit code 1 when one is off.
+//
+// Every scene is drawn in each of the HUD's languages (src/hudtext.h): English into DIR, the others into DIR\<language>
+// (zh-CN, zh-TW, ja). The stand-in text is as wide as the game's fonts make it (the game's font chain, docs/hud-re.md
+// §11: a CJK character a full em; Latin half an em in English and Japanese, whose first font is the monospaced New
+// Cezanne, and the Chinese fonts' own advances in Chinese). In each language every scene's text must stay on the
+// screen, and no two of its lines may overlap that do not in English; the layout checks above run in each language too.
+// Each scene's glyphs (character and font scale: the game's glyph cache keys, §2.1) are counted.
+//
+//   hud_view [--out DIR] [--lang en|zh-CN|zh-TW|ja]      (default %TEMP%\edf6_hud_view, every language), then:
+//   python tools/hud_view.py DIR
 #include "../src/hud.cpp"
 #include "../src/map_cam.h"
 #include <cstdio>
+#include <map>
+#include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -24,7 +40,13 @@ PlayerFix player{};
 namespace {
 Config config{};
 // The scene: what the stubs hand the HUD.
+bool hasTurret=false;
+edf::aimlink::TurretReadoutV1 sceneTurret{};
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false;
+bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
+// When the scene's readouts were taken (the game thread's tick): before HudDraw takes its own `now`. The gear's read the
+// tick in the middle of the draw, a 16 ms tick later at times: `now - tick` wrapped and the gear panel was not drawn.
+ULONGLONG sceneTick=0;
 MapReadout sceneMap{};
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
@@ -43,13 +65,47 @@ void Grow(float x,float y) {
     box.x0=std::fmin(box.x0,x);box.y0=std::fmin(box.y0,y);box.x1=std::fmax(box.x1,x);box.y1=std::fmax(box.y1,y);
 }
 std::FILE* out=nullptr;
-float fontScale=1.0f;
+float fontScale=1.0f,tallest=0.0f;   // the font scale begun; the tallest glyph drawn since `tallest` was zeroed
+// The game's screen hud.cpp reads (kUiScreen): the global points at a holder, the holder's +0x10 at the screen, its
+// width and height at +0x20 / +0x24.
+alignas(16) unsigned char uiScreen[0x40]{},uiHolder[0x20]{};
+void SetScreen(int w,int h) {
+    std::memcpy(uiScreen+kUiW,&w,4);std::memcpy(uiScreen+kUiH,&h,4);
+}
 constexpr float kGlyphH=40.0f,kGlyphW=0.52f;
+// A character's advance in em (see the top): CJK and full-width a whole em; Latin by the language's first font.
+// kChineseLatin: the Chinese fonts' (AR UDJingXiHei G30 / B5, Root.cpk UI/) advances of ' ' .. '~'.
+constexpr float kChineseLatin[95]={0.283f,0.344f,0.449f,0.706f,0.553f,0.862f,0.728f,0.25f,0.33f,0.33f,0.506f,0.543f,0.295f,0.464f,
+    0.268f,0.418f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.54f,0.302f,0.303f,0.544f,0.544f,0.544f,0.539f,0.714f,
+    0.678f,0.699f,0.672f,0.712f,0.632f,0.618f,0.684f,0.737f,0.292f,0.55f,0.694f,0.6f,0.874f,0.762f,0.706f,0.678f,0.709f,0.699f,
+    0.635f,0.588f,0.725f,0.623f,0.929f,0.623f,0.592f,0.61f,0.349f,0.418f,0.349f,0.624f,0.585f,0.46f,0.571f,0.582f,0.509f,0.582f,
+    0.546f,0.329f,0.587f,0.6f,0.262f,0.279f,0.564f,0.305f,0.945f,0.599f,0.549f,0.582f,0.582f,0.464f,0.535f,0.348f,0.6f,0.531f,
+    0.814f,0.508f,0.522f,0.504f,0.371f,0.358f,0.371f,0.495f};
+float Advance(wchar_t c) {
+    if(c>=0x2E80)return 1.0f;
+    const hudtext::Lang l=hudtext::InUse();
+    if((l==hudtext::Lang::zhCN || l==hudtext::Lang::zhTW) && c>=0x20 && c<0x7F)return kChineseLatin[c-0x20];
+    return kGlyphW;
+}
+float Width(const wchar_t* text) {
+    float w=0.0f;
+    for(;*text;++text)w+=Advance(*text);
+    return w*kGlyphH*fontScale;
+}
+// The text lines a scene drew (while `recording`) and its glyphs: (character, font scale in kTextScaleStep units).
+struct Drew { float x0,y0,x1,y1; std::wstring text; };
+std::vector<Drew> drew;
+std::set<std::pair<wchar_t,int>> glyphs;
 
 // The recorders the stand-in image's functions jump to.
+struct PanelBox { float x0,y0,x1,y1; };
+std::vector<PanelBox> panels;   // the scene's panels (the HUD's kPanel rects) while `recording`
+bool recording=false;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     float p[4][2];
     for(int i=0;i<n && i<4;++i){p[i][0]=v[i*3]*m[0]+v[i*3+1]*m[4]+m[12];p[i][1]=v[i*3]*m[1]+v[i*3+1]*m[5]+m[13];}
+    if(recording && n==4 && std::memcmp(rgba,kPanel,16)==0 && p[0][1]==p[1][1] && p[0][0]==p[2][0])
+        panels.push_back(PanelBox{p[0][0],p[0][1],p[3][0],p[3][1]});
     if(boxing)for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);
     if(!out)return;
     for(int i=0;i+2<n && i<2;++i)
@@ -59,10 +115,16 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
 void* __fastcall MakeRec(void*,void* r) { return r; }
 void __fastcall BeginRec(void*,void*,void* font) { fontScale=*reinterpret_cast<const float*>(static_cast<unsigned char*>(font)+4); }
 void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bool) {
-    size[0]=static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale;size[1]=kGlyphH*fontScale;
+    size[0]=Width(text);size[1]=kGlyphH*fontScale;
 }
 void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar_t* text,std::int64_t) {
-    if(boxing){Grow(m[12],m[13]);Grow(m[12]+static_cast<float>(wcslen(text))*kGlyphH*kGlyphW*fontScale,m[13]+kGlyphH*fontScale);}
+    tallest=std::fmax(tallest,kGlyphH*fontScale);
+    if(boxing){Grow(m[12],m[13]);Grow(m[12]+Width(text),m[13]+kGlyphH*fontScale);}
+    if(recording) {
+        drew.push_back(Drew{m[12],m[13],m[12]+Width(text),m[13]+kGlyphH*fontScale,text});
+        const int step=static_cast<int>(std::lround(fontScale/kTextScaleStep));
+        for(const wchar_t* c=text;*c;++c)if(*c!=L' ')glyphs.insert({*c,step});
+    }
     if(!out)return;
     char narrow[256];
     WideCharToMultiByte(CP_UTF8,0,text,-1,narrow,sizeof(narrow),nullptr,nullptr);
@@ -78,6 +140,7 @@ void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return GetTickCount64(); }
+bool GamePaused() noexcept { return paused; }
 bool PlayerJetHud(PlayerJetReadout* o) noexcept { if(hasJet)*o=sceneJet;return hasJet; }
 bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;return hasHeli; }
 bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; }
@@ -88,7 +151,7 @@ bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;ret
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
-bool PlayerTurretAim(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
+bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
 bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
@@ -96,9 +159,12 @@ bool PlayerGunnerHud(GunnerReadout*) noexcept { return false; }
 bool PlayerHighCam(bool*,bool*) noexcept { return false; }
 bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap; }
+MapCommandReadout sceneCmd{};
+bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
+void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
-    *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=GetTickCount64();
+    *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
     return true;
 }
 bool IsSub(const void*) noexcept { return false; }
@@ -141,6 +207,65 @@ void MapCamera(const MapReadout& m,float width,float height,float* vp) {
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
 }
+// What a scene's text did, per language: the pairs of its lines that overlap (by draw order), English's kept to compare.
+struct SceneText { std::set<std::pair<int,int>> overlaps; std::vector<std::wstring> texts; };
+std::map<std::wstring,SceneText> english;
+int textFailed=0;
+std::size_t mostGlyphs=0;
+std::string mostGlyphsAt;
+std::string Narrow(const std::wstring& w) {
+    char n[512];
+    WideCharToMultiByte(CP_UTF8,0,w.c_str(),-1,n,sizeof(n),nullptr,nullptr);
+    return n;
+}
+// `draw` recorded as scene `name` on a screen `width` x 1080: its text on the screen, its overlaps none English lacks.
+template<class F> void Record(const wchar_t* name,F draw,int width) {
+    drew.clear();glyphs.clear();panels.clear();recording=true;sceneTick=GetTickCount64();
+    draw();
+    recording=false;
+    SceneText t;
+    const float w=static_cast<float>(width),h=1080.0f;
+    for(std::size_t i=0;i<drew.size();++i) {
+        const Drew& a=drew[i];
+        t.texts.push_back(a.text);
+        if(a.text.find_first_not_of(L' ')==std::wstring::npos)continue;   // nothing drawn (a line emptied: under a panel)
+        // A line on a panel (its middle in it) stays inside it across (the panels are sized to their text).
+        for(const PanelBox& q:panels) {
+            const float mx=(a.x0+a.x1)*0.5f,my=(a.y0+a.y1)*0.5f;
+            if(mx<q.x0 || mx>q.x1 || my<q.y0 || my>q.y1)continue;
+            if(a.x0>=q.x0-0.5f && a.x1<=q.x1+0.5f)continue;
+            std::printf("FAIL  %s %ls: out of its panel: \"%s\" (%.0f-%.0f), panel (%.0f-%.0f)\n",hudtext::Name(hudtext::InUse()),name,
+                        Narrow(a.text).c_str(),a.x0,a.x1,q.x0,q.x1);
+            ++textFailed;
+        }
+        if(a.x0<-0.5f || a.y0<-0.5f || a.x1>w+0.5f || a.y1>h+0.5f) {
+            std::printf("FAIL  %s %ls: off the screen: \"%s\" (%.0f,%.0f)-(%.0f,%.0f)\n",hudtext::Name(hudtext::InUse()),name,
+                        Narrow(a.text).c_str(),a.x0,a.y0,a.x1,a.y1);
+            ++textFailed;
+        }
+        for(std::size_t k=0;k<i;++k) {
+            const Drew& b=drew[k];
+            if(b.text.find_first_not_of(L' ')==std::wstring::npos)continue;
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1)t.overlaps.insert({static_cast<int>(k),static_cast<int>(i)});
+        }
+    }
+    if(hudtext::InUse()==hudtext::Lang::en)english[name]=t;
+    else if(english.count(name)) {
+        const SceneText& e=english[name];
+        if(e.texts.size()!=t.texts.size())std::printf("note  %s %ls: %zu lines (English %zu)\n",hudtext::Name(hudtext::InUse()),name,
+                                                      t.texts.size(),e.texts.size());
+        for(const auto& p:t.overlaps) {
+            if(e.overlaps.count(p))continue;
+            std::printf("FAIL  %s %ls: \"%s\" overlaps \"%s\" (not in English)\n",hudtext::Name(hudtext::InUse()),name,
+                        Narrow(t.texts[static_cast<std::size_t>(p.second)]).c_str(),Narrow(t.texts[static_cast<std::size_t>(p.first)]).c_str());
+            ++textFailed;
+        }
+    }
+    std::printf("      %s %ls: %zu lines, %zu glyphs, %zu overlapping pairs\n",hudtext::Name(hudtext::InUse()),name,drew.size(),glyphs.size(),
+                t.overlaps.size());
+    if(glyphs.size()>mostGlyphs){mostGlyphs=glyphs.size();mostGlyphsAt=Narrow(name)+" ("+hudtext::Name(hudtext::InUse())+")";}
+}
+
 // A unit at (x, y, z) heading `headingDeg` (compass: 0 +z, growing to its right, -x), on flat ground at 0.
 MapUnit& Unit(MapKind kind,float x,float y,float z,float headingDeg=-999.0f) {
     static MapUnit spare{};
@@ -169,6 +294,10 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<6;++i)Unit(MapKind::ally,140.0f+static_cast<float>(i)*9.0f,0.0f,-220.0f+static_cast<float>(i)*5.0f);
     Unit(MapKind::vehicle,-60.0f,0.0f,90.0f,30.0f);Unit(MapKind::vehicle,80.0f,0.0f,40.0f,-90.0f);
     Unit(MapKind::air,-150.0f,80.0f,300.0f,10.0f);Unit(MapKind::air,400.0f,300.0f,-100.0f,200.0f);
+    Unit(MapKind::air,180.0f,60.0f,180.0f,-40.0f).flags=kMapRotor;   // a helicopter
+    // Nobody's (team 5, map_marks.h): two parked jets on the ground and an empty tank.
+    Unit(MapKind::air,-260.0f,0.0f,40.0f,90.0f).flags=kMapEmpty;Unit(MapKind::air,-260.0f,0.0f,-10.0f,90.0f).flags=kMapEmpty;
+    Unit(MapKind::vehicle,30.0f,0.0f,-140.0f,0.0f).flags=kMapEmpty;
     Unit(MapKind::carrier,-500.0f,240.0f,-350.0f,45.0f).kind=MapKind::carrier;
     // The enemies nearest first (map.cpp Enemies): the nearest bracketed, two large ones with HP bars, a large flyer.
     // The small enemies (map.cpp Enemies): dots, a swarm of 300 ants and 40 flyers, the nearest one bracketed; the large
@@ -182,14 +311,39 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     MapUnit& ship=Unit(MapKind::enemyAir,-420.0f,400.0f,820.0f,90.0f);ship.flags=kMapLarge;ship.hp=0.9f;
     Unit(MapKind::lock,-120.0f,6.0f,522.0f);
     Unit(MapKind::marker,250.0f,0.0f,450.0f);Unit(MapKind::marker,-700.0f,0.0f,1200.0f);
+    // The NPC commands (mapcmd.cpp): two crawlers (selected) sent to guard a point, standing in their formation slots
+    // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
+    // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
+    sceneCmd=MapCommandReadout{};
+    sceneCmd.allowed=true;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
+    sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
+    auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
+        CmdMark& c=sceneCmd.unit[sceneCmd.count++];
+        std::memcpy(c.pos,pos,12);c.air=air;c.selected=selected;c.now.order=order;
+        if(at)std::memcpy(c.now.at,at,12);
+        std::snprintf(c.name,sizeof(c.name),"%s",name);
+        if(selected)++sceneCmd.selected;
+    };
+    const float heli[3]={-150.0f,80.0f,300.0f},jet[3]={400.0f,300.0f,-100.0f},guard[3]={60.0f,0.0f,420.0f};
+    const float slot1[3]={60.0f,0.0f,450.0f},robo1[3]={-60.0f,0.0f,90.0f},robo2[3]={80.0f,0.0f,40.0f};
+    cmdUnit(heli,true,"506",Order::guard,guard,false);
+    sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerHeli;
+    cmdUnit(jet,true,"fighter",Order::follow,nullptr,false);
+    sceneCmd.unit[sceneCmd.count-1].owner=kCmdOwnerJet;
+    cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
+    cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
+    sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
+    std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardMany),Tr(Tx::orderGuard),60.0,420.0,2);
+    sceneCmd.noteFresh=true;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return;}
     std::fprintf(out,"W 1920 1080\n");
+    SetScreen(1920,1080);
     float vp[16];
     MapCamera(sceneMap,1920.0f,1080.0f,vp);
     struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
-    HudDraw(vp,image,&viewport,nullptr,0);
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},1920);
     std::fclose(out);out=nullptr;
     hasMap=false;
     std::printf("%ls\n",path.c_str());
@@ -211,22 +365,34 @@ void Scene(const std::wstring& dir,const wchar_t* name,const float* pos,int widt
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out)return;
     std::fprintf(out,"W %d 1080\n",width);
+    SetScreen(width,1080);
+    float vp[16];
+    const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
+    Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
+    HudPublish();
+    struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},width);
+    std::fclose(out);out=nullptr;
+    std::printf("%ls\n",path.c_str());
+}
+
+// A frame drawn and not recorded: what the HUD sees before a scene (a switch's banner needs the value before it).
+void Prime(const float* pos,int width=1920) {
+    sceneTick=GetTickCount64();
     float vp[16];
     const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
     Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
     HudPublish();
     struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
     HudDraw(vp,image,&viewport,nullptr,0);
-    std::fclose(out);out=nullptr;
-    std::printf("%ls\n",path.c_str());
 }
 
 // What `draw` puts on the screen (its quads and its text lines drawn), as a box.
-template<class F> Box Measured(F draw) {
+template<class F> Box Measured(F draw,float s=1.0f) {
     alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
     static unsigned char ctx[16]{};
     Text text{};
-    text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);
+    text.ctx=ctx;text.renderer=renderer;text.font=font;text.mgr=At<unsigned char*>(image,kFontMgr);text.s=s;
     Line lines[kMaxLines];
     int at=0;
     box=Box{};boxing=true;
@@ -257,6 +423,61 @@ bool StockLayoutApart(int width,const ProteusReadout* proteus=nullptr) {
     return apart && rwr.any && block.any && inside;
 }
 
+// The pause menu (docs/hud-re.md §10): the scene now up draws, and the same scene draws nothing while the game is paused.
+bool PausedDrawsNothing(const float* pos,const float* fwd) {
+    float vp[16];
+    Camera(pos,fwd,1920.0f,1080.0f,vp);
+    struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
+    Box shown[2]{};
+    for(int p=0;p<2;++p) {
+        paused=p==1;
+        HudPublish();
+        box=Box{};boxing=true;
+        HudDraw(vp,image,&viewport,nullptr,0);
+        boxing=false;shown[p]=box;
+    }
+    paused=false;
+    const bool ok=shown[0].any && !shown[1].any;
+    std::printf("%s  paused: drawn (%.0f,%.0f)-(%.0f,%.0f) running, %s paused\n",ok ? "ok  " : "FAIL",shown[0].x0,shown[0].y0,shown[0].x1,
+                shown[0].y1,shown[1].any ? "something" : "nothing");
+    return ok;
+}
+
+// EDF6AutoTurret's mode lines (TurretAimMarks: the state, the keys; the longest: the lead circle, a lock) at `width` x
+// 1080: apart from the stock HUD's block and its RWR scope, on the screen, and saying plainly on or off.
+bool TurretLayoutApart(int width) {
+    const float w=static_cast<float>(width),h=1080.0f,s=1.0f;
+    void* const drawer=At<void*>(image,kQuadDrawer);
+    static unsigned char ctx[16]{};
+    float vp[16];
+    Camera(sceneStock.pos,sceneStock.hull,w,h,vp);
+    edf::aimlink::TurretReadoutV1 r=sceneTurret;
+    r.lock=edf::aimlink::Lock::locked;r.mode=edf::aimlink::Mode::leadCircle;r.lead=false;
+    std::memset(r.at,0,12);r.at[2]=-1000.0f;   // behind the camera: no lock box, the lines alone
+    bool off=false,on=false;
+    const Box lines=Measured([&](Text* t,Line* l,int* at){
+        TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
+        for(int i=0;i<*at;++i)off=off || wcsstr(l[i].text,Tr(Tx::autoAimOffCircle))!=nullptr;
+    });
+    r.mode=edf::aimlink::Mode::autoAim;
+    Measured([&](Text* t,Line* l,int* at){
+        TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
+        for(int i=0;i<*at;++i)on=on || (wcsstr(l[i].text,Tr(Tx::autoAimOn))!=nullptr) ;
+    });
+    PlayerJetSymbols y{};
+    std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
+    y.threats=sceneStock.threats;
+    for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
+    const Box rwr=Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);});
+    const StockExtras x{nullptr,&sceneDrill,false,&sceneEmc,nullptr};
+    const Box block=Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);});
+    auto apart=[](const Box& a,const Box& b){return a.x1<b.x0 || b.x1<a.x0 || a.y1<b.y0 || b.y1<a.y0;};
+    const bool ok=lines.any && apart(lines,rwr) && apart(lines,block) && lines.x0>=0.0f && lines.x1<=w && lines.y1<=h && on && off;
+    std::printf("%s  %dx1080: aim-mode lines (%.0f,%.0f)-(%.0f,%.0f), ON %d OFF %d; block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f)\n",
+                ok ? "ok  " : "FAIL",width,lines.x0,lines.y0,lines.x1,lines.y1,on,off,block.x0,block.y0,block.x1,block.y1,rwr.x0,rwr.y0,rwr.x1,rwr.y1);
+    return ok;
+}
+
 // A stock tank (three weapons, a missile and a lock on it) at `pos`, heading +z, the turret 30 degrees right.
 void StockTank(const float* pos) {
     sceneStock=StockHudReadout{};
@@ -276,23 +497,109 @@ void StockTank(const float* pos) {
     sceneStock.threatKind[0]=2;sceneStock.threatAt[0][0]=pos[0]-600.0f;sceneStock.threatAt[0][1]=pos[1]+80.0f;sceneStock.threatAt[0][2]=pos[2]+900.0f;
     sceneStock.threatKind[1]=1;sceneStock.threatAt[1][0]=pos[0]+1500.0f;sceneStock.threatAt[1][1]=pos[1]+300.0f;sceneStock.threatAt[1][2]=pos[2]-800.0f;
 }
-}  // namespace
 
-int wmain(int argc,wchar_t** argv) {
-    wchar_t temp[MAX_PATH]{};
-    GetTempPathW(MAX_PATH,temp);
-    std::wstring dir=std::wstring(temp)+L"edf6_hud_view";
-    for(int i=1;i+1<argc;++i)if(!wcscmp(argv[i],L"--out"))dir=argv[i+1];
-    CreateDirectoryW(dir.c_str(),nullptr);
-    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
-    static unsigned char fontMgr[0x200]{},drawer[16]{};
-    *reinterpret_cast<void**>(image+kQuadDrawer)=drawer;
-    *reinterpret_cast<void**>(image+kFontMgr)=fontMgr;
-    Jump(kQuad,reinterpret_cast<const void*>(&QuadRec));
-    Jump(kTextMake,reinterpret_cast<const void*>(&MakeRec));Jump(kTextBegin,reinterpret_cast<const void*>(&BeginRec));
-    Jump(kTextMeasure,reinterpret_cast<const void*>(&MeasureRec));Jump(kTextDraw,reinterpret_cast<const void*>(&DrawRec));
-    Jump(kTextEnd,reinterpret_cast<const void*>(&EndRec));Jump(kTextFree,reinterpret_cast<const void*>(&FreeRec));
-    quadOk=textOk=true;
+// hudscale::Of against what it must give: the game's screen (uiW x uiH), the viewport drawn in, the ini's HudScale.
+int ScaleOfChecks() {
+    struct Case { const char* what; int uiW,uiH,viewW,viewH; float user,want; };
+    const Case cases[]={
+        {"1280x720",1280,720,1280,720,1.0f,720.0f/1080.0f},
+        {"1920x1080",1920,1080,1920,1080,1.0f,1.0f},
+        {"2560x1440",2560,1440,2560,1440,1.0f,1440.0f/1080.0f},
+        {"3840x2160",3840,2160,3840,2160,1.0f,2.0f},
+        {"3440x1440 (21:9: by the height)",3440,1440,3440,1440,1.0f,1440.0f/1080.0f},
+        {"3840x2160 split left/right (1920x2160)",3840,2160,1920,2160,1.0f,2.0f},
+        {"1920x1080 split top/bottom (1920x540)",1920,1080,1920,540,1.0f,1.0f},
+        {"screen unread: the viewport 2560x1440",0,0,2560,1440,1.0f,1440.0f/1080.0f},
+        {"screen 1280x720 under a 1920x1080 viewport",1280,720,1920,1080,1.0f,1.0f},
+        {"HudScale 1.5 at 1080",1920,1080,1920,1080,1.5f,1.5f},
+        {"HudScale 10 held to 3",1920,1080,1920,1080,10.0f,3.0f},
+        {"HudScale 0.1 held to 0.5",1920,1080,1920,1080,0.1f,0.5f},
+        {"HudScale NaN: none of it",1920,1080,1920,1080,std::nanf(""),1.0f},
+    };
+    int failed=0;
+    for(const Case& c:cases) {
+        const float got=hudscale::Of(c.uiW,c.uiH,c.viewW,c.viewH,c.user);
+        const bool ok=std::fabs(got-c.want)<1e-4f;
+        failed+=!ok;
+        std::printf("%s  scale %-46s %.4f (want %.4f)\n",ok ? "ok  " : "FAIL",c.what,got,c.want);
+    }
+    return failed;
+}
+
+// The stock tank's HUD at a viewport (viewW x viewH) of the game's screen (uiW x uiH): the tallest glyph HudDraw drew,
+// and the stock block's and the RWR scope's boxes drawn at the scale `s`, taken from their anchor (W/2, 0.80 H) and
+// divided by `s`: in design pixels, the same on every screen when the HUD scales as one.
+struct Drawn { float glyph; Box block,rwr; };
+Box Design(Box b,float w,float h,float s) {
+    const float ax=w*0.5f,ay=h*0.80f;
+    return Box{(b.x0-ax)/s,(b.y0-ay)/s,(b.x1-ax)/s,(b.y1-ay)/s,b.any};
+}
+Drawn DrawnAt(int uiW,int uiH,int viewW,int viewH,float s) {
+    SetScreen(uiW,uiH);
+    const float w=static_cast<float>(viewW),h=static_cast<float>(viewH);
+    float vp[16];
+    Camera(sceneStock.pos,sceneStock.hull,w,h,vp);
+    HudPublish();
+    struct { std::int32_t x,y,w,h; } viewport{0,0,viewW,viewH};
+    tallest=0.0f;
+    HudDraw(vp,image,&viewport,nullptr,0);
+    Drawn d{};
+    d.glyph=tallest;
+    void* const drawer=At<void*>(image,kQuadDrawer);
+    static unsigned char ctx[16]{};
+    PlayerJetSymbols y{};
+    std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
+    y.threats=sceneStock.threats;
+    for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
+    const StockExtras x{nullptr,nullptr,false,nullptr,nullptr};
+    d.block=Design(Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);},s),w,h,s);
+    d.rwr=Design(Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);},s),w,h,s);
+    return d;
+}
+// A design box the same as the design's `b`: within 4 design px and 4% of b's width / height on every side (the text
+// in it is sized on 1/32 font steps, hud.cpp kTextScaleStep: up to ~3% apart between two scales).
+bool Same(const Box& a,const Box& b) {
+    const float tx=4.0f+0.04f*(b.x1-b.x0),ty=4.0f+0.04f*(b.y1-b.y0);
+    return a.any && b.any && std::fabs(a.x0-b.x0)<=tx && std::fabs(a.y0-b.y0)<=ty && std::fabs(a.x1-b.x1)<=tx &&
+           std::fabs(a.y1-b.y1)<=ty;
+}
+// The stock HUD on the typical screens and split viewports against the 1920x1080 design: its glyphs (from HudDraw,
+// which reads the screen itself) the design's times the scale, its block and RWR scope the same in design pixels.
+// The text's scale is held to 1/32 steps (hud.cpp kTextScaleStep): a glyph within 4%, a box as Same.
+int ScaleDrawnChecks() {
+    const float ground[3]={0.0f,0.0f,0.0f};
+    StockTank(ground);
+    config.hudScale=1.0f;
+    const Drawn ref=DrawnAt(1920,1080,1920,1080,1.0f);
+    std::printf("      1920x1080 design: glyph %.1f px, block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f) from (W/2, 0.80 H)\n",
+                ref.glyph,ref.block.x0,ref.block.y0,ref.block.x1,ref.block.y1,ref.rwr.x0,ref.rwr.y0,ref.rwr.x1,ref.rwr.y1);
+    struct Case { const char* what; int uiW,uiH,viewW,viewH; float user,s; };
+    const Case cases[]={
+        {"1280x720",1280,720,1280,720,1.0f,720.0f/1080.0f},
+        {"2560x1440",2560,1440,2560,1440,1.0f,1440.0f/1080.0f},
+        {"3840x2160",3840,2160,3840,2160,1.0f,2.0f},
+        {"3840x2160 split left/right: 1920x2160",3840,2160,1920,2160,1.0f,2.0f},
+        {"1920x1080 split top/bottom: 1920x540",1920,1080,1920,540,1.0f,1.0f},
+        {"3840x2160, HudScale 1.5",3840,2160,3840,2160,1.5f,3.0f},
+    };
+    int failed=0;
+    for(const Case& c:cases) {
+        config.hudScale=c.user;
+        const Drawn d=DrawnAt(c.uiW,c.uiH,c.viewW,c.viewH,c.s);
+        const float glyph=d.glyph/c.s;
+        const bool ok=std::fabs(glyph-ref.glyph)<=0.04f*ref.glyph && Same(d.block,ref.block) && Same(d.rwr,ref.rwr);
+        failed+=!ok;
+        std::printf("%s  %-40s s=%.3f glyph %.1f px (%.1f design), block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f)\n",
+                    ok ? "ok  " : "FAIL",c.what,c.s,d.glyph,glyph,d.block.x0,d.block.y0,d.block.x1,d.block.y1,d.rwr.x0,d.rwr.y0,
+                    d.rwr.x1,d.rwr.y1);
+    }
+    config.hudScale=1.0f;
+    return failed;
+}
+// Every scene and the layout checks in the language in use (hudtext::InUse), written into `dir`: the failures.
+int Scenes(const std::wstring& dir) {
+    int failed=0;
+    hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=false;   // as the first run began
     const ULONGLONG now=GetTickCount64();
     const float pos[3]={0.0f,120.0f,0.0f};
 
@@ -302,8 +609,9 @@ int wmain(int argc,wchar_t** argv) {
     sceneJet.speed=95.0f;sceneJet.throttle=0.8f;sceneJet.clear=120.0f;sceneJet.climb=-45.0f;sceneJet.load=2.1f;sceneJet.air=true;
     sceneJet.ground=true;sceneJet.stall=true;sceneJet.liftShare=1.04f;sceneJet.pullUp=true;sceneJet.gpws=Gpws::pullUp;
     sceneJet.impactIn=2.4f;sceneJet.stores=3;sceneJet.store=1;
-    static const char* names[]={"AAM","AGM","BOMB"};
-    for(int i=0;i<3;++i){sceneJet.storeName[i]=names[i];sceneJet.storeRounds[i]=4-i;}
+    static const char* names[]={"AIM-120","AGM-65","Mk 82","AIM-9X","Hydra 70","AGM-114"};
+    static const int roles[]={0,1,2,0,3,1};
+    for(int i=0;i<3;++i){sceneJet.storeName[i]=names[i];sceneJet.storeRounds[i]=4-i;sceneJet.storeRole[i]=roles[i];}
     sceneJet.fuel=FuelReading{true,0.62f,-1.0f};   // the 506 body's idle burn: no time worth showing
     sceneJet.guns=2;sceneJet.gunRounds=1786;
     Symbols(sceneJet.sym,pos,-10.0f,-25.0f);
@@ -330,6 +638,14 @@ int wmain(int argc,wchar_t** argv) {
     sceneWarn.on=1u<<kWarnFuel;sceneWarn.litAt[kWarnFuel]=now-500;
     Scene(dir,L"jet_lowfuel",pos);
     sceneJet.fuel=FuelReading{true,0.62f,-1.0f};
+    // All six stores, the switch from the AIM-120 to the AIM-9X just made: the loadout strip with the banner over it.
+    sceneWarn.on=0;
+    sceneJet.stores=6;sceneJet.store=0;
+    for(int i=0;i<6;++i){sceneJet.storeName[i]=names[i];sceneJet.storeRounds[i]=i==2 ? 0 : 6-i;sceneJet.storeRole[i]=roles[i];}
+    Prime(pos);
+    sceneJet.store=3;
+    Scene(dir,L"jet_switch",pos);
+    sceneJet.stores=3;sceneJet.store=1;
 
     // A rotor craft sinking onto the ground, hovering slowly (the helicopter HUD).
     sceneJet.rotor=true;config.heliFlightHud=true;
@@ -350,6 +666,22 @@ int wmain(int argc,wchar_t** argv) {
     sceneHeli.fuel=FuelReading{true,0.41f,1830.0f};
     sceneWarn.on=1u<<kWarnSinkRate;sceneWarn.litAt[kWarnSinkRate]=now-4000;
     Scene(dir,L"heli_sinkrate",pos);
+    // The same stock heli with its weapons (StockHeliStores: the stock missile, the Hydra pod, the Hellfires; vhud.cpp
+    // labels by the round's class), the rockets just picked.
+    hasStock=true;
+    StockTank(pos);
+    sceneStock.heli=true;sceneStock.arms=3;sceneStock.threats=0;
+    {
+        static const char* labels[]={"MSL","RKT","MSL"};
+        static const RoundKind kinds[]={RoundKind::homing,RoundKind::rocket,RoundKind::homing};
+        for(int i=0;i<3;++i){StockArm& a=sceneStock.arm[i];strcpy_s(a.label,labels[i]);a.kind=kinds[i];a.ammo=i==1 ? 19 : 4;a.ammoMax=a.ammo;}
+        sceneStock.arm[2].ammo=0;sceneStock.arm[2].reload=0.4f;sceneStock.arm[2].reloadSec=6.0f;
+    }
+    sceneStock.selected=0;
+    Prime(pos);
+    sceneStock.selected=1;
+    Scene(dir,L"heli_stores",pos);
+    hasStock=false;
 
     // The stock vehicles' HUD: a tank under a missile and a lock, at 16:9 and 21:9; the drill tank overheating; a Nix
     // with its torso twisted 40 degrees left of its legs.
@@ -362,9 +694,21 @@ int wmain(int argc,wchar_t** argv) {
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
     strcpy_s(sceneStock.kind,"DrillTank");
     Scene(dir,L"stock_drill",ground);
-    int failed=0;
     failed+=!StockLayoutApart(1920);
     failed+=!StockLayoutApart(2520);
+    failed+=!PausedDrawsNothing(ground,sceneStock.hull);
+    // EDF6AutoTurret's turret (the tank's gun the player is at): auto-aim on, then flipped to the lead circle (its banner).
+    hasTurret=true;
+    sceneTurret=edf::aimlink::TurretReadoutV1{};
+    sceneTurret.mode=edf::aimlink::Mode::autoAim;sceneTurret.keys=true;sceneTurret.ownGun=true;
+    sceneTurret.modeKey=0x5A;sceneTurret.lockKey=0x51;sceneTurret.modeButton=0;sceneTurret.lockButton=0x04;
+    Prime(ground);
+    Scene(dir,L"stock_turret_auto",ground);
+    sceneTurret.mode=edf::aimlink::Mode::leadCircle;
+    Scene(dir,L"stock_turret_lead_switch",ground);
+    failed+=!TurretLayoutApart(1920);
+    failed+=!TurretLayoutApart(2520);
+    hasTurret=false;
     hasDrill=false;
     // The EMC charging (62%) and firing (1.4 s of its beam left).
     hasEmc=true;
@@ -394,6 +738,7 @@ int wmain(int argc,wchar_t** argv) {
     StockTank(ground);
     strcpy_s(sceneStock.kind,"BigBegaruta");
     sceneStock.arms=0;sceneStock.aimOk=false;sceneStock.speed=9.0f;sceneStock.hp=9000.0f;sceneStock.hpMax=11000.0f;
+    hasStock=true;   // the Proteus's lines are the stock block's (its scenes drew nothing without it)
     hasProteus=true;
     sceneProteus=ProteusReadout{};
     std::memcpy(sceneProteus.pos,ground,12);sceneProteus.hull[2]=1.0f;
@@ -417,6 +762,63 @@ int wmain(int argc,wchar_t** argv) {
     failed+=!StockLayoutApart(1920,&sceneProteus);
     failed+=!StockLayoutApart(2520,&sceneProteus);
     hasProteus=false;
+    // The next language's run begins as this one did: EDF6AutoTurret's mode last seen as auto-aim, and seen long enough
+    // ago that no switch's banner (hud_cue.h Changed, a wall-clock kSwitchMs) carries over into its turret scenes.
+    hasStock=hasTurret=true;
+    sceneTurret.mode=edf::aimlink::Mode::autoAim;
+    Prime(ground);
+    hasStock=hasTurret=false;
+    Sleep(static_cast<DWORD>(kSwitchMs)+50);
+    return failed;
+}
+}  // namespace
+
+int wmain(int argc,wchar_t** argv) {
+    wchar_t temp[MAX_PATH]{};
+    GetTempPathW(MAX_PATH,temp);
+    std::wstring dir=std::wstring(temp)+L"edf6_hud_view";
+    int only=-1;   // --lang: that language (and English, which the others are compared with) alone
+    for(int i=1;i+1<argc;++i) {
+        if(!wcscmp(argv[i],L"--out"))dir=argv[i+1];
+        if(!wcscmp(argv[i],L"--lang"))only=hudtext::ParseSetting(argv[i+1]);
+    }
+    CreateDirectoryW(dir.c_str(),nullptr);
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
+    static unsigned char fontMgr[0x200]{},drawer[16]{};
+    *reinterpret_cast<void**>(image+kQuadDrawer)=drawer;
+    *reinterpret_cast<void**>(image+kFontMgr)=fontMgr;
+    Jump(kQuad,reinterpret_cast<const void*>(&QuadRec));
+    Jump(kTextMake,reinterpret_cast<const void*>(&MakeRec));Jump(kTextBegin,reinterpret_cast<const void*>(&BeginRec));
+    Jump(kTextMeasure,reinterpret_cast<const void*>(&MeasureRec));Jump(kTextDraw,reinterpret_cast<const void*>(&DrawRec));
+    Jump(kTextEnd,reinterpret_cast<const void*>(&EndRec));Jump(kTextFree,reinterpret_cast<const void*>(&FreeRec));
+    *reinterpret_cast<void**>(image+kUiScreen)=uiHolder;
+    *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
+    SetScreen(1920,1080);
+    quadOk=textOk=uiOk=true;
+    int failed=0;
+    for(int l=0;l<hudtext::kLangs;++l) {   // English first: the others are compared with it
+        const hudtext::Lang lang=static_cast<hudtext::Lang>(l);
+        if(only>1 && only!=l+1 && lang!=hudtext::Lang::en)continue;
+        config.hudLanguage=l+1;   // hudtext::Setting: en, zh-CN, zh-TW, ja
+        hudtext::Use(lang);
+        std::wstring at=dir;
+        if(lang!=hudtext::Lang::en) {
+            const char* n=hudtext::Name(lang);
+            at+=L"\\"+std::wstring(n,n+std::strlen(n));
+            CreateDirectoryW(at.c_str(),nullptr);
+        }
+        failed+=Scenes(at);
+    }
+    std::printf(textFailed ? "text: %d FAILED\n" : "text: on the screen, inside its panels, no overlap English lacks, in every language\n",textFailed);
+    std::printf("glyphs: at most %zu in one scene (%s)\n",mostGlyphs,mostGlyphsAt.c_str());
+    failed+=textFailed;
+    config.hudLanguage=1;hudtext::Use(hudtext::Lang::en);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
+    // The HUD's scale (src/hudscale.h).
+    hasStock=true;
+    const int scaled=ScaleOfChecks()+ScaleDrawnChecks();
+    hasStock=false;
+    std::printf(scaled ? "scale: %d FAILED\n" : "scale: all as designed\n",scaled);
+    failed+=scaled;
     return failed ? 1 : 0;
 }

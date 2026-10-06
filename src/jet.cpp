@@ -414,7 +414,48 @@ void GunnerHold(Jet& j,ULONGLONG ms) noexcept {
 const float* GunnerAnchor(const Jet& j,const GunnerOrder& o) noexcept {
     return o.centred ? o.at : j.launched ? j.anchor : o.home;
 }
+
+constexpr ULONGLONG kCommandSeenMs=500;   // game ms: a jet JetFrame stepped this recently is flown by the plugin now
+
+// What a jet works round under a map command (mapcmd.cpp): the point it was sent to guard, the player it was told to
+// follow (while they are seen), else `own` (its call's strike point, the player it escorts, where it was placed).
+const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
+    if(j.cmd.order==Order::guard)return j.cmd.at;
+    if(j.cmd.order==Order::follow && follow)return player.pos;
+    return own;
+}
+
+// A jet a map command reaches: the friendly side's, flown by the plugin's NPC now (JetFrame stamped it just now: not one
+// the player flies or that is called down for them), not withdrawing or being deleted, not a
+// carrier's drone (its carrier sends it) nor a Primer creature.
+bool Commandable(const Jet& j,ULONGLONG ms) noexcept {
+    if(!j.ref || j.reap || !Alive(j.ref) || IsPrimer(j) || MotherOf(j))return false;
+    if(j.mode==Mode::withdraw || ms-j.seen>kCommandSeenMs)return false;
+    const unsigned char* v=j.Vehicle();
+    return !v[kDead] && !HostileJet(v) && !PlayerJetHolds(v);
+}
 }  // namespace
+
+int JetCommandUnits(CommandUnit* out,int most) noexcept {
+    int n=0;
+    __try {
+        const ULONGLONG ms=GameMs();
+        for(const auto& j:jets)
+            if(n<most && Commandable(j,ms))out[n++]=CommandUnit{j.ref.obj,KindOf(j).name,j.cmd,true};
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return n;
+}
+
+bool JetCommand(const void* vehicle,const Command& c) noexcept {
+    __try {
+        Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || !Commandable(*j,GameMs()))return false;
+        j->cmd=c;
+        Log("JET v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
+            c.at[0],c.at[1],c.at[2]);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 void JetFrame(unsigned char* v) noexcept {
     if(!HooksOk())return;
@@ -461,7 +502,8 @@ void JetFrame(unsigned char* v) noexcept {
     // The player's carrier sends its drones to a point (PlayerLaunchDrone): they work round that.
     const bool ordered=mother && mother->carrier.ordered;
     const float* anchor=gunner ? GunnerAnchor(*j,crewOrder) : ordered ? mother->carrier.order :
-                        mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) : follow && !j->launched ? player.pos : j->anchor;
+                        mother ? reinterpret_cast<const float*>(mother->Vehicle()+kPosition) :
+                        CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor);
     const float* viewer=follow ? player.pos : anchor;
     const float hp=At<float>(v,kHp),hpMax=At<float>(v,kHpMax);
     if(!gunner)Leave(*j,kind,arms,mother,hp,hpMax,ms);   // held for the player at the gun: no withdrawal

@@ -195,6 +195,16 @@ bool ReadRound(const unsigned char* w,RoundModel* out) noexcept {
     return true;
 }
 
+bool ArcRoundOf(const unsigned char* w,const RoundModel& m,roundaim::Round* round,float* shooter) noexcept {
+    float g[3];
+    if(m.kind!=RoundKind::arc || !edf::WorldGravity(image,g))return false;
+    const float share=At<float>(w,edf::kWeaponAmmoOwnerMove);
+    const float* v=reinterpret_cast<const float*>(w+edf::kWeaponOwnerVel);
+    round->speed=m.speed;round->alive=m.alive;round->ownerMove=std::isfinite(share) ? share : 0.0f;
+    for(int i=0;i<3;++i){round->drop[i]=g[i]*m.factor/3600.0f;shooter[i]=std::isfinite(v[i]) ? v[i] : 0.0f;}
+    return true;
+}
+
 bool RoundLands(const unsigned char* w,const RoundModel& m,const float* pos,const float* dir,float reach,float* at,float* sec) noexcept {
     float g[3],owner[3],hit[3],took=0.0f;
     if(m.kind==RoundKind::homing || m.kind==RoundKind::none || !edf::WorldGravity(image,g))return false;

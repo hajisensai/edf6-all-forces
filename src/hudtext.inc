@@ -1,0 +1,298 @@
+// The HUD's texts (src/hudtext.h): HUDTEXT(key, English, Simplified Chinese, Traditional Chinese, Japanese).
+// A text is a printf format: each language takes the English one's arguments, in its order (tools/hudtext_check.cpp).
+// The Chinese and Japanese follow the game's own words where it has them (its text tables, Root.cpk
+// ETC/TEXTTABLE_STEAM.*.TXT_SGO): 飞弹 / 飛彈 / ミサイル, 机炮 / 機砲 / 機関砲, 加农炮 / 加農砲 / キャノン, 装填 / 裝填 / リロード,
+// 载具 / 載具 / ビークル, 坐席 / 座席, 驾驶席, 准星, 加速, 减速, 替换武器, 鼠标左键 / 滑鼠左鍵 / マウス左ボタン; the plugin's own
+// units by the names README.md gives them (炮舰机, 潜水母舰, 钻头战车, 深渊爬行者, 人偶无人机 ...).
+
+// --- Over a friendly NPC vehicle (hud.cpp Readouts) ---
+HUDTEXT(readoutGuns,L"  G %d",L"  机炮 %d",L"  機砲 %d",L"  機関砲 %d")
+HUDTEXT(readoutMissiles,L"  M %d",L"  飞弹 %d",L"  飛彈 %d",L"  ミサイル %d")
+HUDTEXT(readoutDrones,L"  D %d",L"  无人机 %d",L"  無人機 %d",L"  ドローン %d")
+HUDTEXT(readoutFuel,L"  F %d:%02d",L"  燃料 %d:%02d",L"  燃料 %d:%02d",L"  燃料 %d:%02d")
+HUDTEXT(readoutRtb,L"  RTB",L"  返航",L"  返航",L"  帰投")
+
+// --- The submarine carrier's panel and badge ---
+HUDTEXT(carrierTitleN,L"SUBMARINE CARRIER %d",L"潜水母舰 %d",L"潛水母艦 %d",L"潜水母艦 %d")
+HUDTEXT(carrierTitle,L"SUBMARINE CARRIER",L"潜水母舰",L"潛水母艦",L"潜水母艦")
+HUDTEXT(carrierHull,L"HULL %d%%   %.0f / %.0f",L"舰体 %d%%   %.0f / %.0f",L"艦體 %d%%   %.0f / %.0f",L"船体 %d%%   %.0f / %.0f")
+HUDTEXT(carrierPartDown,L"%ls   DOWN  repair %d:%02d",L"%ls   损毁  修复 %d:%02d",L"%ls   損毀  修復 %d:%02d",L"%ls   損壊  修理 %d:%02d")
+HUDTEXT(carrierBadge,L"SUBMARINE CARRIER  %d%%",L"潜水母舰  %d%%",L"潛水母艦  %d%%",L"潜水母艦  %d%%")
+HUDTEXT(carrierPartDownShort,L"%ls  DOWN %d:%02d",L"%ls  损毁 %d:%02d",L"%ls  損毀 %d:%02d",L"%ls  損壊 %d:%02d")
+HUDTEXT(partTurretA,L"turretA",L"炮塔A",L"砲塔A",L"砲塔A")
+HUDTEXT(partTurretB,L"turretB",L"炮塔B",L"砲塔B",L"砲塔B")
+HUDTEXT(partMissiles,L"missiles",L"飞弹舱",L"飛彈艙",L"ミサイル区画")
+HUDTEXT(partDroneBay,L"dronebay",L"无人机舱",L"無人機艙",L"ドローン格納庫")
+
+// --- Aim marks and cues ---
+HUDTEXT(launcherLine,L"%d m   %.1f s   ELEV %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d")
+HUDTEXT(padButton,L"button 0x%X",L"手柄键 0x%X",L"手把鍵 0x%X",L"ボタン 0x%X")
+HUDTEXT(highCamOn,L"HIGH CAM ON [%ls]",L"俯瞰视角 开 [%ls]",L"俯瞰視角 開 [%ls]",L"俯瞰カメラ オン [%ls]")
+HUDTEXT(highCamOff,L"HIGH CAM [%ls]",L"俯瞰视角 [%ls]",L"俯瞰視角 [%ls]",L"俯瞰カメラ [%ls]")
+HUDTEXT(gunnerShells,L"SHELLS",L"炮弹",L"砲彈",L"砲弾")
+HUDTEXT(gunnerCannon,L"CANNON",L"加农炮",L"加農砲",L"キャノン")
+HUDTEXT(gunnerNoGround,L"%ls   NO GROUND IN SIGHT",L"%ls   视野内没有地面",L"%ls   視野內沒有地面",L"%ls   地面が見えない")
+HUDTEXT(gunnerOutOfRange,L"%ls   %d m   OUT OF RANGE",L"%ls   %d m   超出射程",L"%ls   %d m   超出射程",L"%ls   %d m   射程外")
+HUDTEXT(gunnerReady,L"%ls   %d m   READY",L"%ls   %d m   就绪",L"%ls   %d m   就緒",L"%ls   %d m   発射可")
+HUDTEXT(outOfRange,L"OUT OF RANGE",L"超出射程",L"超出射程",L"射程外")
+HUDTEXT(fly,L"FLY",L"飞行",L"飛行",L"飛行")
+HUDTEXT(missileRange,L"MSL %d m",L"飞弹 %d m",L"飛彈 %d m",L"ミサイル %d m")
+
+// --- The seats line (seatswitch.cpp) ---
+HUDTEXT(seats,L"SEATS",L"坐席",L"座席",L"座席")
+HUDTEXT(holderYou,L"YOU",L"你",L"你",L"自分")
+HUDTEXT(holderNpc,L"NPC",L"NPC",L"NPC",L"NPC")
+HUDTEXT(holderTaken,L"TAKEN",L"有人",L"有人",L"使用中")
+HUDTEXT(seatPilot,L"PILOT",L"驾驶席",L"駕駛席",L"操縦席")
+HUDTEXT(seatDriver,L"DRIVER",L"驾驶席",L"駕駛席",L"運転席")
+HUDTEXT(seatGun,L"GUN",L"炮手席",L"砲手席",L"砲手席")
+HUDTEXT(seatOther,L"SEAT",L"坐席",L"座席",L"座席")
+HUDTEXT(seatOnlineLocked,L"   (online: SeatSwitchOnline=0)",L"   （联机：SeatSwitchOnline=0）",L"   （連線：SeatSwitchOnline=0）",L"   （オンライン：SeatSwitchOnline=0）")
+HUDTEXT(seatNextKey,L"   [%ls] next",L"   [%ls] 下一个",L"   [%ls] 下一個",L"   [%ls] 次へ")
+HUDTEXT(seatPick,L"   [1-%d] pick",L"   [1-%d] 选择",L"   [1-%d] 選擇",L"   [1-%d] 選択")
+HUDTEXT(seatNoFree,L"   NO FREE SEAT",L"   没有空位",L"   沒有空位",L"   空席なし")
+HUDTEXT(seatTaken,L"   SEAT %d TAKEN",L"   坐席 %d 有人",L"   座席 %d 有人",L"   座席 %d 使用中")
+
+// --- The jets' cockpit (the strip, the old panel) and the fuel ---
+HUDTEXT(storesGun,L"GUN %d  ",L"机炮 %d  ",L"機砲 %d  ",L"機関砲 %d  ")
+HUDTEXT(storesFlare,L"FLARE %d",L"热焰弹 %d",L"熱焰彈 %d",L"フレア %d")
+HUDTEXT(fuelTime,L"FUEL %d%% %d:%02d",L"燃料 %d%% %d:%02d",L"燃料 %d%% %d:%02d",L"燃料 %d%% %d:%02d")
+HUDTEXT(fuelShare,L"FUEL %d%%",L"燃料 %d%%",L"燃料 %d%%",L"燃料 %d%%")
+HUDTEXT(rotateNow,L"ROTATE: PULL UP (W / SPACE)",L"抬头：拉起（W / 空格）",L"抬頭：拉起（W / 空白鍵）",L"機首上げ：引き起こし（W / スペース）")
+HUDTEXT(rotateAt,L"ROTATE AT %d km/h",L"抬头速度 %d km/h",L"抬頭速度 %d km/h",L"機首上げ %d km/h")
+HUDTEXT(pullUpTerrain,L"PULL UP! TERRAIN",L"拉起！地形",L"拉起！地形",L"プルアップ！地表")
+HUDTEXT(missileBang,L"MISSILE!",L"飞弹！",L"飛彈！",L"ミサイル！")
+HUDTEXT(locked,L"LOCKED",L"被锁定",L"被鎖定",L"被ロック")
+HUDTEXT(lowFuel,L"LOW FUEL",L"燃料不足",L"燃料不足",L"燃料低下")
+HUDTEXT(jetInfo,L"SPD %d km/h    ALT%ls %d m    %ls %d m/s    HP %d%%",L"速度 %d km/h    高度%ls %d m    %ls %d m/s    耐久 %d%%",
+        L"速度 %d km/h    高度%ls %d m    %ls %d m/s    耐久 %d%%",L"速度 %d km/h    高度%ls %d m    %ls %d m/s    耐久 %d%%")
+HUDTEXT(climbUp,L"UP",L"上升",L"上升",L"上昇")
+HUDTEXT(climbDown,L"DOWN",L"下降",L"下降",L"下降")
+HUDTEXT(jetThrottle,L"THROTTLE %d%%%ls%ls    G %.1f%ls%ls%ls",L"油门 %d%%%ls%ls    G %.1f%ls%ls%ls",L"油門 %d%%%ls%ls    G %.1f%ls%ls%ls",
+        L"スロットル %d%%%ls%ls    G %.1f%ls%ls%ls")
+HUDTEXT(stall,L"STALL",L"失速",L"失速",L"失速")
+HUDTEXT(jetKeysMouse,L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll",
+        L"鼠标：瞄准（方框）    W / 空格：拉起    S：压低    A / D：滚转",L"滑鼠：瞄準（方框）    W / 空白鍵：拉起    S：壓低    A / D：滾轉",
+        L"マウス：照準（四角）    W / スペース：機首上げ    S：機首下げ    A / D：ロール")
+HUDTEXT(jetKeysHand,L"W / SPACE: pull up    S: push down    A / D: roll    (let go: wings level)",
+        L"W / 空格：拉起    S：压低    A / D：滚转    （松开：改平）",L"W / 空白鍵：拉起    S：壓低    A / D：滾轉    （放開：改平）",
+        L"W / スペース：機首上げ    S：機首下げ    A / D：ロール    （離すと水平）")
+HUDTEXT(jetKeysMouseHand,L"MOUSE: aim    W / SPACE / S / A / D: fly by hand (the mouse takes over once it moves)",
+        L"鼠标：瞄准    W / 空格 / S / A / D：手动飞行（鼠标一动即接管）",L"滑鼠：瞄準    W / 空白鍵 / S / A / D：手動飛行（滑鼠一動即接管）",
+        L"マウス：照準    W / スペース / S / A / D：手動操縦（マウスを動かすと戻る）")
+HUDTEXT(jetKeysAir,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target    %ls: flares",
+        L"%ls：加速    %ls：减速    %ls：替换武器    %ls：下一个目标    %ls：热焰弹",L"%ls：加速    %ls：減速    %ls：替換武器    %ls：下一個目標    %ls：熱焰彈",
+        L"%ls：ブースト    %ls：ブレーキ    %ls：武器切替    %ls：次の目標    %ls：フレア")
+HUDTEXT(jetKeysGround,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",L"%ls：加油门    %ls：减油门    A / D、鼠标：转向",
+        L"%ls：加油門    %ls：減油門    A / D、滑鼠：轉向",L"%ls：スロットル上げ    %ls：スロットル下げ    A / D・マウス：旋回")
+HUDTEXT(jetKeysTakeoff,L"W / SPACE: pull up to take off (from %d km/h)",L"W / 空格：拉起起飞（%d km/h 起）",L"W / 空白鍵：拉起起飛（%d km/h 起）",
+        L"W / スペース：引き起こして離陸（%d km/h から）")
+HUDTEXT(jetPadAir,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways",L"加速：前进 / 上升    减速：后退    滚转：左摇杆左右",
+        L"加速：前進 / 上升    減速：後退    滾轉：左搖桿左右",L"ブースト：前進 / 上昇    ブレーキ：後退    ロール：左スティック左右")
+HUDTEXT(jetPadAir2,L"PITCH, TURN: right stick    LB: switch weapon    X: next target",L"俯仰、转向：右摇杆    LB：替换武器    X：下一个目标",
+        L"俯仰、轉向：右搖桿    LB：替換武器    X：下一個目標",L"ピッチ・旋回：右スティック    LB：武器切替    X：次の目標")
+HUDTEXT(jetPadGround,L"THROTTLE: forward / ascend = up, back = down    TURN: sticks",L"油门：前进 / 上升 = 加，后退 = 减    转向：摇杆",
+        L"油門：前進 / 上升 = 加，後退 = 減    轉向：搖桿",L"スロットル：前進 / 上昇 = 上げ、後退 = 下げ    旋回：スティック")
+HUDTEXT(jetPadTakeoff,L"TAKE OFF: pull the right stick back (from %d km/h)",L"起飞：右摇杆向后拉（%d km/h 起）",L"起飛：右搖桿向後拉（%d km/h 起）",
+        L"離陸：右スティックを引く（%d km/h から）")
+HUDTEXT(strip,L"THR %d%%%ls%ls    %ls",L"油门 %d%%%ls%ls    %ls",L"油門 %d%%%ls%ls    %ls",L"スロットル %d%%%ls%ls    %ls")
+
+// --- The flight instruments ---
+HUDTEXT(speedLabel,L"KM/H",L"速度 km/h",L"速度 km/h",L"速度 km/h")
+HUDTEXT(altLabel,L"ALT M",L"高度 m",L"高度 m",L"高度 m")
+HUDTEXT(altLabelNoGround,L"ALT* M",L"高度* m",L"高度* m",L"高度* m")
+HUDTEXT(climbRate,L"VS %+d",L"升降 %+d",L"升降 %+d",L"昇降 %+d")
+HUDTEXT(launch,L"LAUNCH",L"发射",L"發射",L"発射")
+HUDTEXT(pullUp,L"PULL UP",L"拉起",L"拉起",L"プルアップ")
+HUDTEXT(lift,L"LIFT",L"升力",L"升力",L"揚力")
+HUDTEXT(compassN,L"N",L"北",L"北",L"北")
+HUDTEXT(compassS,L"S",L"南",L"南",L"南")
+HUDTEXT(compassE,L"E",L"东",L"東",L"東")
+HUDTEXT(compassW,L"W",L"西",L"西",L"西")
+
+// --- The annunciator (warn.h) ---
+HUDTEXT(warnPullUp,L"PULL UP",L"拉起",L"拉起",L"プルアップ")
+HUDTEXT(warnMissile,L"MISSILE",L"飞弹",L"飛彈",L"ミサイル")
+HUDTEXT(warnStall,L"STALL",L"失速",L"失速",L"失速")
+HUDTEXT(warnGear,L"GEAR",L"起落架",L"起落架",L"ギア")
+HUDTEXT(warnTerrain,L"TERRAIN",L"地形",L"地形",L"地表")
+HUDTEXT(warnSinkRate,L"SINK RATE",L"下沉率",L"下沉率",L"降下率")
+HUDTEXT(warnLock,L"LOCK",L"锁定",L"鎖定",L"ロック")
+HUDTEXT(warnGearSpeed,L"GEAR SPEED",L"起落架超速",L"起落架超速",L"ギア速度超過")
+HUDTEXT(warnWeightOnWheels,L"WEIGHT ON WHEELS",L"轮上有载",L"輪上有載",L"接地中")
+HUDTEXT(warnLowFuel,L"LOW FUEL",L"燃料不足",L"燃料不足",L"燃料低下")
+HUDTEXT(masterWarn,L"MASTER WARN",L"主警告",L"主警告",L"マスター警告")
+HUDTEXT(masterCaution,L"MASTER CAUTION",L"主注意",L"主注意",L"マスター注意")
+HUDTEXT(missileLaunch,L"MSL LAUNCH",L"飞弹发射",L"飛彈發射",L"ミサイル発射")
+
+// --- The helicopters (HeliStrip, HeliHud) and the gear ---
+HUDTEXT(setHover,L"SET HOVER",L"设定 悬停",L"設定 懸停",L"設定 ホバー")
+HUDTEXT(setSpeed,L"SET %d",L"设定 %d",L"設定 %d",L"設定 %d")
+HUDTEXT(heliKeysLanded,L"HOLD SPACE: spin the rotor up and lift off    MOUSE: aim the square",L"按住空格：旋翼加速并升空    鼠标：瞄准方框",
+        L"按住空白鍵：旋翼加速並升空    滑鼠：瞄準方框",L"スペース長押し：ローター加速で離陸    マウス：四角で照準")
+HUDTEXT(heliKeysAir,L"MOUSE: turn / climb to the square    W / S: speed    A / D: slide    SPACE: up    %ls: down",
+        L"鼠标：转向 / 爬升到方框    W / S：速度    A / D：横移    空格：上升    %ls：下降",
+        L"滑鼠：轉向 / 爬升到方框    W / S：速度    A / D：橫移    空白鍵：上升    %ls：下降",
+        L"マウス：四角へ旋回 / 上昇    W / S：速度    A / D：横移動    スペース：上昇    %ls：下降")
+HUDTEXT(liftOk,L"LIFT OK: TAKE OFF (ascend)",L"升力足够：起飞（上升）",L"升力足夠：起飛（上升）",L"揚力十分：離陸（上昇）")
+HUDTEXT(rotorShare,L"ROTOR %d%% of lift-off",L"旋翼 %d%%（离地所需）",L"旋翼 %d%%（離地所需）",L"ローター %d%%（離陸に必要な回転）")
+HUDTEXT(rotorLiftOk,L"ROTOR %d%%    LIFT OK: TAKE OFF (ascend)",L"旋翼 %d%%    升力足够：起飞（上升）",L"旋翼 %d%%    升力足夠：起飛（上升）",
+        L"ローター %d%%    揚力十分：離陸（上昇）")
+HUDTEXT(speedSetHover,L"SPEED SET: HOVER",L"速度设定：悬停",L"速度設定：懸停",L"速度設定：ホバー")
+HUDTEXT(speedSet,L"SPEED SET %d km/h",L"速度设定 %d km/h",L"速度設定 %d km/h",L"速度設定 %d km/h")
+HUDTEXT(altHold,L"%lsALT HOLD",L"%ls高度保持",L"%ls高度保持",L"%ls高度維持")
+HUDTEXT(gearState,L"GEAR %ls  [%ls]",L"起落架 %ls  [%ls]",L"起落架 %ls  [%ls]",L"ギア %ls  [%ls]")
+HUDTEXT(gearDown,L"DOWN",L"放下",L"放下",L"ダウン")
+HUDTEXT(gearUp,L"UP",L"收起",L"收起",L"アップ")
+HUDTEXT(gearTransit,L"TRANSIT",L"转换中",L"轉換中",L"作動中")
+HUDTEXT(gearBang,L"GEAR!",L"起落架！",L"起落架！",L"ギア！")
+
+// --- The drill tank, the turret aim (EDF6AutoTurret), the Proteus, the EMC ---
+HUDTEXT(drillLine,L"DRILL %d RPM    HEAT %d%%%ls",L"钻头 %d RPM    热量 %d%%%ls",L"鑽頭 %d RPM    熱量 %d%%%ls",L"ドリル %d RPM    熱 %d%%%ls")
+HUDTEXT(drillLineShort,L"DRILL %d RPM  HEAT %d%%%ls",L"钻头 %d RPM  热量 %d%%%ls",L"鑽頭 %d RPM  熱量 %d%%%ls",L"ドリル %d RPM  熱 %d%%%ls")
+HUDTEXT(overheat,L"OVERHEAT",L"过热",L"過熱",L"オーバーヒート")
+HUDTEXT(drilling,L"DRILLING",L"钻削中",L"鑽削中",L"掘削中")
+HUDTEXT(gunnersAuto,L"GUNNERS: AUTO-AIM",L"炮手：自动瞄准",L"砲手：自動瞄準",L"砲手：自動照準")
+HUDTEXT(autoAimOffCircle,L"AUTO-AIM OFF  (LEAD CIRCLE)",L"自动瞄准 关  （预瞄圈）",L"自動瞄準 關  （預瞄圈）",L"自動照準 オフ  （偏差円）")
+HUDTEXT(autoAimOn,L"AUTO-AIM ON",L"自动瞄准 开",L"自動瞄準 開",L"自動照準 オン")
+HUDTEXT(autoAimToggle,L"[%ls] auto-aim %ls",L"[%ls] 自动瞄准 %ls",L"[%ls] 自動瞄準 %ls",L"[%ls] 自動照準 %ls")
+HUDTEXT(wordOn,L"on",L"开",L"開",L"オン")
+HUDTEXT(wordOff,L"off",L"关",L"關",L"オフ")
+HUDTEXT(aimModeKeyUnset,L"(no AimModeKey set)",L"（未设置 AimModeKey）",L"（未設定 AimModeKey）",L"（AimModeKey 未設定）")
+HUDTEXT(aimModeButtonUnset,L"(pad: set AimModeButton in EDF6AutoTurret.ini)",L"（手柄：在 EDF6AutoTurret.ini 设置 AimModeButton）",
+        L"（手把：在 EDF6AutoTurret.ini 設定 AimModeButton）",L"（パッド：EDF6AutoTurret.ini で AimModeButton を設定）")
+HUDTEXT(lockKey,L"%ls[%ls] %ls (hold: clear)",L"%ls[%ls] %ls（长按：清除）",L"%ls[%ls] %ls（長按：清除）",L"%ls[%ls] %ls（長押し：解除）")
+HUDTEXT(lockWord,L"lock",L"锁定",L"鎖定",L"ロック")
+HUDTEXT(nextWord,L"next",L"下一个",L"下一個",L"次")
+HUDTEXT(autoAimOffBanner,L"AUTO-AIM OFF  -  LEAD CIRCLE",L"自动瞄准 关  -  预瞄圈",L"自動瞄準 關  -  預瞄圈",L"自動照準 オフ  -  偏差円")
+HUDTEXT(hullMark,L"HULL",L"车体",L"車體",L"車体")
+HUDTEXT(mouseLeft,L"LMB",L"左键",L"左鍵",L"左クリック")
+HUDTEXT(mouseRight,L"RMB",L"右键",L"右鍵",L"右クリック")
+HUDTEXT(mouseMiddle,L"MMB",L"中键",L"中鍵",L"中クリック")
+HUDTEXT(mouseX1,L"MB4",L"鼠标键1",L"滑鼠鍵1",L"マウスボタン1")
+HUDTEXT(mouseX2,L"MB5",L"鼠标键2",L"滑鼠鍵2",L"マウスボタン2")
+HUDTEXT(proteusWalk,L"WALK",L"步行",L"步行",L"歩行")
+HUDTEXT(proteusDeployKey,L"   [%ls] DEPLOY",L"   [%ls] 展开",L"   [%ls] 展開",L"   [%ls] 展開")
+HUDTEXT(proteusDeploying,L"DEPLOYING %d%%",L"展开中 %d%%",L"展開中 %d%%",L"展開中 %d%%")
+HUDTEXT(proteusDeployed,L"DEPLOYED",L"已展开",L"已展開",L"展開完了")
+HUDTEXT(proteusStowKey,L"   [%ls] STOW",L"   [%ls] 收起",L"   [%ls] 收起",L"   [%ls] 収納")
+HUDTEXT(proteusStowing,L"STOWING %d%%",L"收起中 %d%%",L"收起中 %d%%",L"収納中 %d%%")
+HUDTEXT(shieldHeat,L"SHIELD %ls  HEAT %d%%",L"护盾 %ls  热量 %d%%",L"護盾 %ls  熱量 %d%%",L"シールド %ls  熱 %d%%")
+HUDTEXT(frontShield,L"FRONT SHIELD %ls",L"前方护盾 %ls",L"前方護盾 %ls",L"前面シールド %ls")
+HUDTEXT(shieldUp,L"UP",L"开启",L"開啟",L"展開")
+HUDTEXT(shieldOff,L"OFF",L"关闭",L"關閉",L"オフ")
+HUDTEXT(alliesFocus,L"   ALLIES FOCUS",L"   友军集火",L"   友軍集火",L"   味方集中攻撃")
+HUDTEXT(barrier,L"BARRIER %d%%",L"屏障 %d%%",L"屏障 %d%%",L"バリア %d%%")
+HUDTEXT(field,L"FIELD %d m  ALLIES %d",L"力场 %d m  友军 %d",L"力場 %d m  友軍 %d",L"フィールド %d m  味方 %d")
+HUDTEXT(salvoOffline,L"SALVO OFFLINE",L"齐射 不可用",L"齊射 不可用",L"斉射 使用不可")
+HUDTEXT(salvoDeployFirst,L"SALVO  DEPLOY FIRST",L"齐射  请先展开",L"齊射  請先展開",L"斉射  先に展開")
+HUDTEXT(salvoInAir,L"SALVO  %d IN THE AIR",L"齐射  空中 %d 发",L"齊射  空中 %d 發",L"斉射  飛翔中 %d 発")
+HUDTEXT(salvoWait,L"SALVO %.1fs",L"齐射 %.1fs",L"齊射 %.1fs",L"斉射 %.1fs")
+HUDTEXT(salvoMark,L"SALVO READY  MARK A TARGET",L"齐射就绪  请标记目标",L"齊射就緒  請標記目標",L"斉射可能  目標をマーク")
+HUDTEXT(salvoReady,L"SALVO READY",L"齐射就绪",L"齊射就緒",L"斉射可能")
+HUDTEXT(markRange,L"MARK %d m",L"标记 %d m",L"標記 %d m",L"マーク %d m")
+HUDTEXT(armReady,L"READY",L"就绪",L"就緒",L"発射可")
+HUDTEXT(armReload,L"RELOAD %d%%",L"装填 %d%%",L"裝填 %d%%",L"リロード %d%%")
+HUDTEXT(armReloadWord,L"RELOAD",L"装填",L"裝填",L"リロード")
+HUDTEXT(armEmpty,L"EMPTY",L"弹尽",L"彈盡",L"弾切れ")
+HUDTEXT(emcBeam,L"EMC BEAM %.1fs",L"EMC 照射 %.1fs",L"EMC 照射 %.1fs",L"EMC 照射 %.1fs")
+HUDTEXT(emcCharge,L"EMC CHARGE %d%%",L"EMC 充能 %d%%",L"EMC 充能 %d%%",L"EMC チャージ %d%%")
+HUDTEXT(emcEmpty,L"EMC EMPTY",L"EMC 能量耗尽",L"EMC 能量耗盡",L"EMC エネルギー切れ")
+HUDTEXT(emcRearm,L"EMC REARM %.1fs",L"EMC 再装填 %.1fs",L"EMC 再裝填 %.1fs",L"EMC 再装填 %.1fs")
+HUDTEXT(emcReady,L"EMC READY x%d  HOLD FIRE",L"EMC 就绪 x%d  按住射击",L"EMC 就緒 x%d  按住射擊",L"EMC 準備完了 x%d  射撃長押し")
+
+// --- The stock vehicles' block (StockBlock) ---
+HUDTEXT(hullCritical,L"HULL CRITICAL",L"车体危急",L"車體危急",L"車体損傷大")
+HUDTEXT(drillOverheat,L"DRILL OVERHEAT",L"钻头过热",L"鑽頭過熱",L"ドリル過熱")
+HUDTEXT(noAmmo,L"NO AMMO",L"弹药耗尽",L"彈藥耗盡",L"弾切れ")
+HUDTEXT(stockGunner,L"%hs  GUNNER %u",L"%hs  炮手 %u",L"%hs  砲手 %u",L"%hs  砲手 %u")
+HUDTEXT(stockInfo,L"SPD %d km/h    HP %d%%",L"速度 %d km/h    耐久 %d%%",L"速度 %d km/h    耐久 %d%%",L"速度 %d km/h    耐久 %d%%")
+HUDTEXT(twist,L"TWIST %+d",L"扭转 %+d",L"扭轉 %+d",L"ひねり %+d")
+HUDTEXT(stabLag,L"STAB LAG",L"稳定器滞后",L"穩定器滯後",L"スタビ遅れ")
+HUDTEXT(stab,L"STAB",L"稳定器",L"穩定器",L"スタビ")
+
+// --- The map (map.cpp, mapcmd.cpp) ---
+HUDTEXT(orderFollow,L"FOLLOW",L"跟随",L"跟隨",L"追従")
+HUDTEXT(orderGuard,L"GUARD",L"守点",L"守點",L"防衛")
+HUDTEXT(orderRelease,L"RELEASE",L"解除",L"解除",L"解除")
+HUDTEXT(selectedAll,L"SELECTED ALL %d",L"已选全部 %d",L"已選全部 %d",L"全員選択 %d")
+HUDTEXT(selectedOne,L"SELECTED 1 / %d: %ls",L"已选 1 / %d：%ls",L"已選 1 / %d：%ls",L"選択 1 / %d：%ls")
+HUDTEXT(selectedSome,L"SELECTED %d / %d",L"已选 %d / %d",L"已選 %d / %d",L"選択 %d / %d")
+HUDTEXT(npcOfflineOnly,L"NPC COMMANDS: OFFLINE ONLY",L"NPC 指挥：仅限离线",L"NPC 指揮：僅限離線",L"NPC 指揮：オフライン専用")
+HUDTEXT(npcNone,L"NPC COMMANDS: no plugin NPC unit (helis, jets, crawlers)",L"NPC 指挥：没有插件的 NPC 单位（直升机、喷气机、爬行者）",
+        L"NPC 指揮：沒有插件的 NPC 單位（直升機、噴射機、爬行者）",L"NPC 指揮：プラグインの NPC ユニットなし（ヘリ・ジェット・クロウラー）")
+HUDTEXT(npcPadKeys,L"%ls   X select (ALL last)   Y guard crosshair   RB follow me   LB release",
+        L"%ls   X 选择（最后为全部）   Y 守准星处   RB 跟随我   LB 解除",L"%ls   X 選擇（最後為全部）   Y 守準星處   RB 跟隨我   LB 解除",
+        L"%ls   X 選択（最後は全員）   Y 照準点を防衛   RB 自分に追従   LB 解除")
+HUDTEXT(npcMouseKeys,L"%ls   Ctrl+drag box (Shift add)   click pick / clear   Tab cycle   G guard pointer   V follow me   X release",
+        L"%ls   Ctrl+拖动框选（Shift 追加）   点击 选择 / 清除   Tab 轮换   G 守指针处   V 跟随我   X 解除",
+        L"%ls   Ctrl+拖曳框選（Shift 追加）   點擊 選擇 / 清除   Tab 輪換   G 守指標處   V 跟隨我   X 解除",
+        L"%ls   Ctrl+ドラッグで範囲選択（Shift 追加）   クリック 選択 / 解除   Tab 切替   G カーソル地点を防衛   V 自分に追従   X 解除")
+HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
+HUDTEXT(mapPadKeys,L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close",
+        L"左摇杆 平移   右摇杆 旋转 / 俯仰   RT / LT 缩放   A 居中   B / 地图键 关闭",L"左搖桿 平移   右搖桿 旋轉 / 俯仰   RT / LT 縮放   A 置中   B / 地圖鍵 關閉",
+        L"左スティック 移動   右スティック 回転 / 傾き   RT / LT ズーム   A 中央へ   B / マップボタン 閉じる")
+HUDTEXT(mapMouseKeys,L"LMB drag / WASD pan   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",
+        L"左键拖动 / WASD 平移   右键拖动 / Q E 旋转   R F 俯仰   滚轮 / + - 缩放   空格 居中   %ls / Esc 关闭",
+        L"左鍵拖曳 / WASD 平移   右鍵拖曳 / Q E 旋轉   R F 俯仰   滾輪 / + - 縮放   空白鍵 置中   %ls / Esc 關閉",
+        L"左ドラッグ / WASD 移動   右ドラッグ / Q E 回転   R F 傾き   ホイール / + - ズーム   スペース 中央へ   %ls / Esc 閉じる")
+HUDTEXT(legendYou,L"YOU",L"你",L"你",L"自分")
+HUDTEXT(legendSquad,L"SQUAD",L"小队",L"小隊",L"分隊")
+HUDTEXT(legendFriendly,L"FRIENDLY",L"友军",L"友軍",L"味方")
+HUDTEXT(legendVehicle,L"VEHICLE",L"载具",L"載具",L"ビークル")
+HUDTEXT(legendAircraft,L"AIRCRAFT",L"飞机",L"飛機",L"航空機")
+HUDTEXT(legendHelicopter,L"HELICOPTER",L"直升机",L"直升機",L"ヘリコプター")
+HUDTEXT(legendEmpty,L"EMPTY (NO CREW)",L"空载具（无人）",L"空載具（無人）",L"空き（無人）")
+HUDTEXT(legendCarrier,L"CARRIER",L"母舰",L"母艦",L"母艦")
+HUDTEXT(legendLargeEnemy,L"LARGE ENEMY",L"大型敌人",L"大型敵人",L"大型の敵")
+HUDTEXT(legendLargeEnemyAir,L"LARGE ENEMY AIR",L"大型空中敌人",L"大型空中敵人",L"大型の敵（空中）")
+HUDTEXT(legendObjective,L"OBJECTIVE",L"目标",L"目標",L"目標")
+HUDTEXT(legendEnemy,L"ENEMY",L"敌人",L"敵人",L"敵")
+HUDTEXT(legendEnemyFlying,L"ENEMY FLYING",L"飞行的敌人",L"飛行的敵人",L"飛行する敵")
+HUDTEXT(legendLock,L"LOCK",L"锁定",L"鎖定",L"ロック")
+HUDTEXT(legendNearestEnemy,L"NEAREST ENEMY",L"最近的敌人",L"最近的敵人",L"最寄りの敵")
+HUDTEXT(cmdOfflineOnly,L"COMMANDS: OFFLINE ONLY",L"指挥：仅限离线",L"指揮：僅限離線",L"指揮：オフライン専用")
+HUDTEXT(cmdSelectFirst,L"SELECT UNITS FIRST (%ls)",L"请先选择单位（%ls）",L"請先選擇單位（%ls）",L"先にユニットを選択（%ls）")
+HUDTEXT(cmdNoUnit,L"NO UNIT TO COMMAND",L"没有可指挥的单位",L"沒有可指揮的單位",L"指揮できるユニットなし")
+HUDTEXT(cmdSelectHowMouse,L"CTRL+DRAG / CLICK / TAB",L"Ctrl+拖动 / 点击 / Tab",L"Ctrl+拖曳 / 點擊 / Tab",L"Ctrl+ドラッグ / クリック / Tab")
+HUDTEXT(cmdNoGround,L"NO GROUND THERE",L"那里没有地面",L"那裡沒有地面",L"そこに地面がない")
+HUDTEXT(cmdGuardOne,L"%ls (%.0f, %.0f): %d UNIT",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
+HUDTEXT(cmdGuardMany,L"%ls (%.0f, %.0f): %d UNITS",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
+HUDTEXT(cmdGivenOne,L"%ls: %d UNIT",L"%ls：%d 个单位",L"%ls：%d 個單位",L"%ls：%d ユニット")
+HUDTEXT(cmdGivenMany,L"%ls: %d UNITS",L"%ls：%d 个单位",L"%ls：%d 個單位",L"%ls：%d ユニット")
+HUDTEXT(unitHeli,L"HELI %ls",L"直升机 %ls",L"直升機 %ls",L"ヘリ %ls")
+HUDTEXT(unitJet,L"JET %ls",L"%ls",L"%ls",L"%ls")
+
+// --- Words for the run-time identifiers (hudtext.h kWords) ---
+HUDTEXT(wordGun,L"GUN",L"机炮",L"機砲",L"機関砲")
+HUDTEXT(wordCannon,L"CANNON",L"加农炮",L"加農砲",L"キャノン")
+HUDTEXT(wordMissile,L"MSL",L"飞弹",L"飛彈",L"ミサイル")
+HUDTEXT(wordRocket,L"RKT",L"火箭弹",L"火箭彈",L"ロケット")
+HUDTEXT(wordGrenade,L"GREN",L"榴弹",L"榴彈",L"グレネード")
+HUDTEXT(wordLaser,L"LASER",L"激光",L"雷射",L"レーザー")
+HUDTEXT(wordHomingLaser,L"HLASER",L"追踪激光",L"追蹤雷射",L"誘導レーザー")
+HUDTEXT(wordBeam,L"BEAM",L"光束",L"光束",L"ビーム")
+HUDTEXT(wordFlame,L"FLAME",L"火焰",L"火焰",L"火炎")
+HUDTEXT(wordAcid,L"ACID",L"酸液",L"酸液",L"酸")
+HUDTEXT(wordNapalm,L"NAPALM",L"燃烧弹",L"燃燒彈",L"ナパーム")
+HUDTEXT(wordWeapon,L"WPN",L"武器",L"武器",L"武器")
+HUDTEXT(wordRocketPods,L"ROCKETS",L"火箭炮",L"火箭砲",L"ロケット砲")
+HUDTEXT(kindStrike,L"strike",L"攻击机",L"攻擊機",L"攻撃機")
+HUDTEXT(kindFighter,L"fighter",L"战斗机",L"戰鬥機",L"戦闘機")
+HUDTEXT(kindInterceptor,L"interceptor",L"截击机",L"截擊機",L"迎撃機")
+HUDTEXT(kindMultirole,L"multirole",L"多用途机",L"多用途機",L"マルチロール機")
+HUDTEXT(kindCarrier,L"carrier",L"无人机母舰",L"無人機母艦",L"ドローン母艦")
+HUDTEXT(kindDrone,L"drone",L"无人机",L"無人機",L"ドローン")
+HUDTEXT(kindBlast,L"blast",L"自爆无人机",L"自爆無人機",L"自爆ドローン")
+HUDTEXT(kindDoll,L"doll",L"人偶无人机",L"人偶無人機",L"人形ドローン")
+HUDTEXT(kindGunship,L"gunship",L"炮舰机",L"砲艦機",L"ガンシップ")
+HUDTEXT(kindPrimer,L"primer",L"星导者",L"星導者",L"プライマー")
+HUDTEXT(kindCentipede,L"centipede",L"百足龙虫",L"百足龍蟲",L"百足竜虫")
+HUDTEXT(kindDragonfly,L"dragonfly",L"蜻蜓空优机",L"蜻蜓空優機",L"トンボ制空機")
+HUDTEXT(kindJet,L"jet",L"喷气机",L"噴射機",L"ジェット機")
+HUDTEXT(kindHeli,L"heli",L"直升机",L"直升機",L"ヘリ")
+HUDTEXT(kindHeliBase,L"base",L"通用型",L"通用型",L"汎用型")
+HUDTEXT(kindCrawler,L"crawler",L"深渊爬行者",L"深淵爬行者",L"デプス・クロウラー")
+HUDTEXT(kindDrill,L"drill",L"钻头战车",L"鑽頭戰車",L"ドリル戦車")
+HUDTEXT(unitCrawler,L"CRAWLER",L"深渊爬行者",L"深淵爬行者",L"デプス・クロウラー")
+HUDTEXT(kindNpc,L"npc",L"NPC",L"NPC",L"NPC")

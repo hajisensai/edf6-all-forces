@@ -822,7 +822,8 @@ def gun_stabilizer_wired() -> None:
     flak = src('autoturret/src/plugin.cpp')
     assert 'Stabilized(vehicle,0,stock,held,hull);' in flak and '-hull;' in flak.split('float AxisInput(', 1)[1].split('\n}\n', 1)[0]
     assert 'Stabilized(vehicle,s,aim.angle,held,hull);' in src('autoturret/src/gunner.cpp')
-    assert 'r.stab=StabState(v,r.seat);' in src('src/vhud.cpp') and 'L"    STAB"' in src('src/hud.cpp')
+    assert 'r.stab=StabState(v,r.seat);' in src('src/vhud.cpp') and 'Tx::stab' in src('src/hud.cpp')
+    assert 'HUDTEXT(stab,L"STAB",' in src('src/hudtext.inc')
     hooked = set(re.findall(r'\{(0x[0-9A-F]{7}),0x[0-9A-F]+,"', crew))
     table = code.split('const Class kClasses[]={', 1)[1].split('};', 1)[0]
     vts = re.findall(r'\{(0x[0-9A-F]{7}),"', table)
@@ -1188,8 +1189,19 @@ def heli_mouse_aim_wired() -> None:
     heli, board = src('src/heli.cpp'), src('src/playerjet_board.inc')
     steer = heli.split('Control Steer(', 1)[1].split('\n}\n', 1)[0]
     fly = heli.split('void AimFly(', 1)[1].split('\n}\n', 1)[0]
-    for law in ('aim::StockStick(', 'aim::StockThrottle(', 'aim::StockYaw('):
+    for law in ('aim::StockStick(', 'aim::StockThrottle('):
         assert law in steer and law in fly, law
+    # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
+    # (StockYaw), the player's heading chases the mouse's aim (PlayerYaw) at the turn rate PlayerYawTune raises.
+    assert 'aim::StockYaw(' in steer and 'aim::PlayerYaw(' in fly and 'aim::StockYaw(' not in fly
+    assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
+    player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
+    assert 'PlayerYawTune(v,' in player and 'kMaxYaw,a.yaw' in heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
+    # The hover rotor from the lift as it is in memory (heliaim.h HoverRotor), not the old 70 the 602 clamped to 1.0 on.
+    assert 'kStockLift' not in heli and heli.count('aim::HoverRotor(') >= 3
+    hud = src('src/hud.cpp').split('void HeliStrip(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Tx::heliKeysAir' in hud and 'KeyName(Cfg().playerJetBrakeKey' in hud, 'hud.cpp HeliStrip: the keys spelt out'
+    assert 'SPACE: up' in src('src/hudtext.inc').split('HUDTEXT(heliKeysAir,', 1)[1].split('\n', 1)[0]
     assert 'aim::Fly(' in fly and 'aim::Fly(' in board.split('void HoverAim(', 1)[1].split('\n}\n', 1)[0]
 
 
@@ -1357,8 +1369,10 @@ def cockpit_warnings_wired() -> None:
     warn_h, audio_h, audio, hud = src('src/warn.h'), src('src/jetaudio.h'), src('src/jetaudio.cpp'), src('src/hud.cpp')
     warns = re.search(r'enum Warn : int \{([^}]*)\}', warn_h).group(1)
     n_warn = len([w for w in warns.split(',') if w.strip() and 'kWarnCount' not in w])
-    texts = hud.split('kWarnText[kWarnCount]={', 1)[1].split('};', 1)[0]
-    assert len(re.findall(r'(?<!\w)L"', texts)) == n_warn, (texts, n_warn)
+    texts = hud.split('kWarnText[kWarnCount]={', 1)[1].split('};', 1)[0]   # the texts' keys (src/hudtext.inc)
+    keys = re.findall(r'Tx::(\w+)', texts)
+    assert len(keys) == n_warn, (texts, n_warn)
+    assert all(f'HUDTEXT({k},' in src('src/hudtext.inc') for k in keys), keys
     calls = re.search(r'enum Callout : int \{([^}]*)\}', audio_h).group(1)
     n_call = len([c for c in calls.split(',') if c.strip() and 'kCallCount' not in c])
     for table in ('kCallName[kCallCount]={', 'kCallText[kCallCount]={'):
@@ -1372,6 +1386,27 @@ def cockpit_warnings_wired() -> None:
     for target in ('warn_check', 'hud_view'):
         assert f'add_executable({target} EXCLUDE_FROM_ALL' in cmake, target
 
+
+
+@test
+def hud_scale_one_source() -> None:
+    """The plugin HUD's size (src/hudscale.h, docs/hud-re.md §0.1): HudDraw takes its scale from hudscale::Of over the
+    game's screen (the read signature-checked) and the ini's HudScale, not from the viewport's own height; every line's
+    font scale is times it (Measure and Draw); HudScale is read, range-checked on hudscale's limits, shipped and
+    documented; the offline check (tools/hud_view.cpp) runs the scale cases and is a CTest."""
+    hud, plugin, ini, readme = src('src/hud.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert '#include "hudscale.h"' in hud
+    assert '/1080' not in hud.replace(' ', ''), 'a size from the viewport height alone: hudscale::Of'
+    draw = hud.split('void HudDraw(', 1)[1].split('\n}', 1)[0]
+    assert 's=HudScaleOf(w,h)' in draw and 'text.s=s' in draw
+    assert 'hudscale::Of(uiW,uiH,w,h,Cfg().hudScale)' in hud
+    for fn in ('void Measure(Text& t,Line& l)', 'void Draw(Text& t,const Line& l)'):
+        assert 'Font(t,hudscale::Font(l.scale,t.s))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
+    assert 'for(const auto& u:kUiSigs)' in hud and '0x94E24F' in hud
+    assert 'L"HudScale"' in plugin and 'Fix("HudScale",n.hudScale,hudscale::kUserMin,hudscale::kUserMax)' in plugin
+    assert re.search(r'^HudScale=1\.0', ini, re.M) and '`HudScale`' in readme
+    view = src('tools/hud_view.cpp')
+    assert 'ScaleOfChecks()+ScaleDrawnChecks()' in view and 'add_test(NAME hud_layout COMMAND hud_view' in src('CMakeLists.txt')
 
 @test
 def vehicle_sound_wired() -> None:
@@ -1578,6 +1613,36 @@ def stock_vehicle_hud_wired() -> None:
 
 
 @test
+def stock_gun_sight_ranged() -> None:
+    """The stock vehicles' gun sight in the sky (the user 2026-10-06, an E551's cannon at a flying saucer, "CANNON 3132 m":
+    "这个好像一直不动也对不上"): an arc gun's marks come from roundaim.h GunSight (ranged on the enemy under the view:
+    pipper and lead mark; the map hit; else none), not from the point its round crosses the 3000 m reach; hud.cpp draws
+    the ranged pipper with the lead mark and, with nothing to range on, the boresight alone; tools/rounds_check.cpp
+    flies the E551 gun Root.cpk has (re-read when the game is there) and lays both sights on a saucer."""
+    import rootcpk
+    vhud, hud, check = src('src/vhud.cpp'), src('src/hud.cpp'), src('tools/rounds_check.cpp')
+    arm = vhud.split('void Arm(', 1)[1].split('\n}\n', 1)[0]
+    assert 'GunMarkOf(w,m,pos,dir,a)' in arm, 'src/vhud.cpp Arm: an arc gun\'s marks are GunMarkOf\'s'
+    mark = vhud.split('void GunMarkOf(', 1)[1].split('\n}\n', 1)[0]
+    assert 'roundaim::GunSight(' in mark and 'target.ok ? target.at : nullptr' in mark
+    assert 'RangeTarget(v,r,eye,ms);' in vhud.split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
+    stock = hud.split('void StockMark(', 1)[1].split('\n}\n', 1)[0]
+    ranged = stock.split('if(a.ranged) {', 1)[1].split('return;', 1)[0]
+    assert 'LeadMark(' in ranged and 'Pipper(' in ranged, 'src/hud.cpp StockMark: the ranged pipper with its lead mark'
+    tail = stock.split('Boresight(drawer,ctx,vp,width,height,s,a.bore);\n    if(a.hit)', 1)
+    assert len(tail) == 2 and 'kHudDim' not in tail[1].split('} else', 1)[0], 'StockMark: no dim pipper at the reach any more'
+    assert 'SkySight();' in check.split('int main()', 1)[1]
+    row = re.search(r'kE551Gun=\{"(V_\w+) \([^)]*\)",([\d.]+)f,([\d.]+)f,([\d.]+)f,(\d+)\}', check)
+    assert row, 'tools/rounds_check.cpp: kE551Gun'
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        name, speed, factor, owner, alive = row.groups()
+        w = dsgo.to_py(dsgo.parse(rootcpk.default().read('WEAPON', name + '.SGO')).root)
+        got = (w['AmmoSpeed'], w['AmmoGravityFactor'], w['AmmoOwnerMove'], w['AmmoAlive'])
+        assert all(abs(float(g) - float(x)) < 1e-4 for g, x in zip(got, (speed, factor, owner, alive))), (name, got)
+        assert w['AmmoClass'] == 'RocketBullet01', (name, w['AmmoClass'])
+
+
+@test
 def stock_gauges_wired() -> None:
     """The stock weapon gauges (src/stockgauge.cpp; the user, 2026-10-06: "删掉原版挂载和油料显示"): its ini key is read,
     shipped and documented; it is installed at load and only through the gauge's update slot (no draw call skipped); the
@@ -1599,7 +1664,8 @@ def stock_gauges_wired() -> None:
     vhud = src('src/vhud.cpp').split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
     assert 'IsFuelTank(w)' in vhud and 'FuelGauge(v,&r.fuel)' in vhud
     assert 'FuelGauge(v,&r.fuel)' in src('src/playerjet.cpp') and 'FuelGauge(v,&r.fuel)' in src('src/heli.cpp')
-    assert 'kWarnFuel' in src('src/warn.h') and 'kWarnFuel' in src('src/warn.cpp') and 'L"LOW FUEL"' in hud
+    assert 'kWarnFuel' in src('src/warn.h') and 'kWarnFuel' in src('src/warn.cpp') and 'Tx::lowFuel' in hud
+    assert 'HUDTEXT(lowFuel,L"LOW FUEL",' in src('src/hudtext.inc')
     assert 'jet_lowfuel' in src('tools/hud_view.cpp')
 
 
@@ -2473,6 +2539,34 @@ def vehicle_ram_wired() -> None:
 
 
 @test
+def map_commands_wired() -> None:
+    """The map's NPC commands (src/mapcmd.cpp, README 地图 指挥 NPC): its keys are read only while the map is open (map.cpp
+    Frame calls it after its open test, its one key reader is ReadKeys), it is off online, it is reset with the map; each AI
+    module takes the command where it picks what it works round (the jets' anchor, the helis' post as HeliCalled writes it,
+    the crawlers' leader); the box (Ctrl + left drag) never pans the map; its offline check (tools/map_cmd_check.cpp) is
+    built and run by CTest; the README says the keys."""
+    code, mapc, cmake, readme = src('src/mapcmd.cpp'), src('src/map.cpp'), src('CMakeLists.txt'), src('README.md')
+    assert code.count('GetAsyncKeyState') == 1 and 'Down(VK_TAB)' in code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
+    frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
+    assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
+    # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").
+    assert 'if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing()){mapcam::Drag(v,dx,dy);' in mapc
+    assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
+    assert 'ResetMapCommands();' in mapc.split('void ResetMap()', 1)[1].split('\n}', 1)[0]
+    assert 'const bool allowed=!InSession();' in code
+    assert 'src/mapcmd.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/map_cmd_check.cpp' in cmake
+    assert re.search(r'EDF6_OFFLINE_CHECKS[^)]*\bmap_cmd_check\b', cmake), 'map_cmd_check is not run by CTest'
+    jet, heli, ground = src('src/jet.cpp'), src('src/heli.cpp'), src('src/ground.cpp')
+    assert 'CommandAnchor(*j,follow,follow && !j->launched ? player.pos : j->anchor)' in jet
+    assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
+    cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c)', 1)[1].split('\n}\n', 1)[0]
+    assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
+    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', 'OFFLINE ONLY', '框选'):
+        assert key in readme, key
+    assert '指挥 NPC' in readme
+
+
+@test
 def map_wired() -> None:
     """The map view (src/map.cpp, README 功能 17, docs/camera-re.md §8): its ini keys are read, range-checked, shipped and
     documented; the EDF.dll addresses it patches are the doc's, and with the game present its code signatures are the
@@ -2488,7 +2582,8 @@ def map_wired() -> None:
         assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
     for name, rva in (('kHoldAt', '0x572F0C'), ('kHoldResume', '0x572F1C'), ('kNoPad', '0x573A4D'), ('kCamVtable', '0x1768C10'),
                       ('kCamStep', '0xF86A0'), ('kLookTo', '0x4E220'), ('kTeamWalk', '0x5E11D0'), ('kMarkerVtable', '0x17D4378'),
-                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750'), ('kHostileWalk', '0x5E0F20')):
+                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750'), ('kHostileWalk', '0x5E0F20'),
+                      ('kOneTeamWalk', '0x5E0D60')):
         assert re.search(rf'\b{name}={rva}\b', code), (name, rva)
         assert rva in doc, rva
     for name, off in (('kCamTargetRef', '0x350'), ('kCamTarget', '0x360'), ('kCamMatrix', '0x220'), ('kHumanRecord', '0xD40'),
@@ -2528,7 +2623,8 @@ def map_wired() -> None:
         for arr, at in (('kHoldCode', consts['kHoldAt']), ('kNoPadCode', consts['kNoPad']), ('kCamStepCode', consts['kCamStep']),
                         ('kLookToCode', consts['kLookTo']), ('kLookToUse', 0xFC0D3), ('kTeamWalkCode', consts['kTeamWalk']),
                         ('kMarkerUpdateCode', consts['kMarkerUpdate']), ('kHostileWalkCode', consts['kHostileWalk']),
-                        ('kRadarCall', 0x82B8C3)):
+                        ('kRadarCall', 0x82B8C3), ('kOneTeamWalkCode', consts['kOneTeamWalk']),
+                        ('kBoardTeam5Code', consts['kBoardTeam5Call'])):
             want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
@@ -2553,12 +2649,19 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
     assert 'MapScene(dir,L"map_mid"' in src('tools/hud_view.cpp')
+    # The friendly marks walk team 5 (nobody's vehicles: the parked aircraft, every empty vehicle) besides the friends'
+    # walk, which never visits it (2026-10-06: aircraft missing from the map); classified by map_marks.h (checked offline).
+    gather = code.split('void Gather(Game& g,const unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
+    assert 'reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,mapmarks::kNobodysTeam,&w);' in gather, 'map: team 5 not walked'
+    assert 'mapmarks::WalksFor(team)' in gather and 'mapmarks::FriendlyMark(seen,&kind,&flags)' in code
+    assert 'EXCLUDE_FROM_ALL tools/map_marks_check.cpp' in cmake and 'map_marks_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert '0x5E0D60' in doc and 'kMapEmpty' in hud and 'MapAircraft(' in hud
     assert 'ViewMapClip(true,' in code and 'ViewMapClip(false,' in code
     # The enemies: every one the radar's hostile walk finds; the large ones pins by HP (kMapLargeEnemies), the small ones
     # dots by distance (kMapDots), the caps the README says; the
@@ -2577,9 +2680,140 @@ def map_wired() -> None:
 
 
 @test
+def game_clock_and_hud_stop_with_the_pause() -> None:
+    """The pause menu (docs/hud-re.md §10): the game clock stops while the game's own pause flag says paused (the camera
+    step still reads it every frame of the pause), and the HUD draws nothing then. GameMs runs game_clock.h, the rule
+    tools/pause_clock_check.cpp checks; the pause flag is read from the System the pause menu sets, its code checked at
+    load and named in the doc."""
+    crew, hud, plugin, clock, doc = (src('src/crew.cpp'), src('src/hud.cpp'), src('src/plugin.cpp'), src('src/game_clock.h'),
+                                     src('docs/hud-re.md'))
+    assert '#include "game_clock.h"' in crew
+    assert re.search(r'ULONGLONG GameMs\(\) noexcept \{ return gameclock::Read\(clock,GetTickCount64\(\),GamePaused\(\)\); \}', crew)
+    assert 'if(c.wall && !paused)' in clock, 'game_clock.h: a paused read must not move the clock'
+    assert 'CheckPauseFlag();' in plugin
+    draw = hud[hud.index('void HudDraw('):]
+    assert draw.index('if(GamePaused())return;') < draw.index('MapScreen('), 'HudDraw must stop before it draws anything'
+    for rva in ('0x20B2958', '0xCD8', '0xCDC', '0x934A46', '0x934ED3', '0x1196FC0', '0x11990C', '0x119953B'):
+        assert rva in doc, f'docs/hud-re.md §10 does not mention {rva}'
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(pause_clock_check EXCLUDE_FROM_ALL tools/pause_clock_check.cpp)' in cmake
+    assert '#include "../src/game_clock.h"' in src('tools/pause_clock_check.cpp')
+
+
+@test
+def hud_switch_cues_wired() -> None:
+    """The loadout strip (every store's picture, name and rounds; the picked one large for a moment after a switch) and
+    EDF6AutoTurret's aim mode said as on / off with a banner on a flip (the user, 2026-10-06) are drawn where the stores
+    and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
+    hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
+    for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at)'):
+        assert call in hud, call
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAimOn' in hud and 'Tx::autoAimOffCircle' in hud
+    table = src('src/hudtext.inc')
+    assert 'HUDTEXT(autoAimOn,L"AUTO-AIM ON",' in table and 'HUDTEXT(autoAimOffCircle,L"AUTO-AIM OFF' in table
+    assert 'hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])' in hud
+    assert 'r.storeRole[i]=j.storeRole[i];' in src('src/playerjet.cpp')
+    assert 'EXCLUDE_FROM_ALL tools/hud_cue_check.cpp' in cmake and 'hud_cue_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'failed+=!TurretLayoutApart(1920);' in view and 'Scene(dir,L"jet_switch"' in view
+
+
+@test
 def incremental_install_regressions() -> None:
     from test_installer_incremental import run_checks
     run_checks()
+
+
+# The HUD's sources whose text the player reads: every word comes from src/hudtext.inc (hudtext.h Tr / Word).
+HUD_TEXT_SOURCES = ('src/hud.cpp', 'src/mapcmd.cpp')
+# What may stay in a wide literal of those: printf conversions, digits, punctuation, single letters (pad buttons A B X
+# Y, L3 / R3, the RWR's J / M symbols, the g symbol G), the pad's two-letter buttons and the units.
+HUD_LITERAL_WORDS = {'LB', 'RB', 'LT', 'RT', 'km'}
+HUD_SPEC = re.compile(r'%[-+ #0]*\d*(?:\.\d+)?(?:hs|ls|l?[dufxXsc]|%)')
+
+
+def hud_literal_words(text: str) -> list[tuple[int, str]]:
+    """The words (two letters or more, or any non-ASCII character) in a source's wide literals, with their lines."""
+    found = []
+    for m in re.finditer(r'L"((?:[^"\\]|\\.)*)"', text):
+        line = text.count('\n', 0, m.start()) + 1
+        core = HUD_SPEC.sub('', m.group(1))
+        found += [(line, w) for w in re.findall(r'[A-Za-z]{2,}', core) if w not in HUD_LITERAL_WORDS]
+        found += [(line, ch) for ch in core if ord(ch) > 0x7E]
+    return found
+
+
+def hudtext_entries() -> list[tuple[str, list[str]]]:
+    """src/hudtext.inc's texts: (key, [en, zh-CN, zh-TW, ja])."""
+    table = re.sub(r'//[^\n]*', '', src('src/hudtext.inc'))
+    out = []
+    for m in re.finditer(r'HUDTEXT\((\w+),(.*?)\)\s*(?=HUDTEXT\(|\Z)', table, re.S):
+        texts = [t.encode('utf-8').decode('unicode_escape').encode('latin-1').decode('utf-8')
+                 for t in re.findall(r'L"((?:[^"\\]|\\.)*)"', m.group(2))]
+        out.append((m.group(1), texts))
+    return out
+
+
+@test
+def hud_text_localized() -> None:
+    """The HUD's words in English, Simplified and Traditional Chinese and Japanese (src/hudtext.h, docs/hud-re.md §11):
+    no English or CJK literal left in the HUD's sources (every text a key of the table), every key four texts, each
+    language's characters its own script's (zh-CN in GB2312, zh-TW in Big5, ja in Shift JIS: a Traditional character in
+    the Simplified text, or a Simplified one in the Traditional, is caught), the run-time identifiers the HUD shows (a
+    round's class label, a jet's role, a carrier part) each a word of the table; the language follows the game's
+    Option_Language (read signature-checked) and the ini's HudLanguage, which is read, shipped and documented; the
+    offline checks (tools/hudtext_check.cpp, hud_view in every language) are CTests. With the game here, every character
+    is in one of the game's four fonts (the font chain the game draws with: Root.cpk UI/*.TTF)."""
+    for path in HUD_TEXT_SOURCES:
+        left = hud_literal_words(src(path))
+        assert not left, f'{path}: words outside src/hudtext.inc: {left[:12]}'
+    entries = hudtext_entries()
+    keys = [k for k, _ in entries]
+    assert len(keys) == len(set(keys)) and len(keys) > 200, len(keys)
+    for key, texts in entries:
+        assert len(texts) == 4 and all(texts), (key, texts)
+        en, zh_cn, zh_tw, ja = texts
+        assert all(ord(c) < 0x7F for c in en), (key, en)
+        for text, codec in ((zh_cn, 'gb2312'), (zh_tw, 'big5'), (ja, 'cp932')):
+            for ch in text:
+                if ord(ch) >= 0x2E80:
+                    try:
+                        ch.encode(codec)
+                    except UnicodeEncodeError:
+                        raise AssertionError(f'{key}: {ch!r} is not {codec} in {text!r}') from None
+    words = set(re.findall(r'\{"([^"]+)",Tx::(\w+)\}', src('src/hudtext.h').split('kWords[]={', 1)[1].split('};', 1)[0]))
+    ids = {w for w, _ in words}
+    assert all(k in keys for _, k in words), words
+    shown = set(re.findall(r'\{0x[0-9A-F]+,"[^"]+","(\w+)",Cls::', src('src/rounds.cpp')))
+    shown |= set(re.findall(r'm\.label="(\w+)"', src('src/rounds.cpp') + src('src/vhud.cpp')))
+    shown |= set(re.findall(r'strncpy_s\(a\.label,(?:m\.label \? m\.label : )?"(\w+)"', src('src/vhud.cpp')))
+    shown |= set(re.findall(r'\{Role::\w+,"(\w+)"', src('src/jet_internal.h')))
+    shown |= set(re.findall(r'\{kVt\w+,"(\w+)"', src('src/heli.cpp'))) - {'506', '409', '410'}
+    shown |= set(re.findall(r'^\s+\{"(\w+)",\{', src('src/subcarrier.cpp'), re.M))
+    shown |= set(re.findall(r'Kind\(d,"(\w+)"\)', src('src/hud.cpp')))
+    shown |= set(re.findall(r'CommandUnit\{\w+\.ref\.obj,"(\w+)"', src('src/ground.cpp')))
+    assert {'GUN', 'WPN', 'ROCKETS', 'RKT', 'fighter', 'turretA', 'heli', 'CRAWLER', 'base'} <= shown, shown
+    assert shown <= ids, f'shown on the HUD without a word: {sorted(shown - ids)}'
+    hud, plugin, ini, readme = src('src/hud.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    assert 'kLangValue=0x20B2B30' in hud and 'CallsTo(0x963724,kLangGet) && CallsTo(0x96372E,kFontLoad)' in hud
+    assert 'hudtext::Use(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));' in hud
+    assert 'GetPrivateProfileStringW(L"VehicleCrew",L"HudLanguage"' in plugin and 'n.hudLanguage=ReadLanguage(' in plugin
+    assert re.search(r'^HudLanguage=auto$', ini, re.M) and 'HudLanguage' in readme and '§11' in src('src/hudtext.h')
+    cmake = src('CMakeLists.txt')
+    assert 'EXCLUDE_FROM_ALL tools/hudtext_check.cpp' in cmake and 'hudtext_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'failed+=Scenes(at);' in src('tools/hud_view.cpp')
+    try:
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import hud_view
+        fonts = hud_view.game_fonts()
+    except Exception:  # noqa: BLE001 - no game here (CI): the fonts are not checked
+        fonts = {}
+    if fonts:
+        from fontTools.ttLib import TTFont
+        import io
+        cmaps = [set(TTFont(io.BytesIO(data), lazy=True).getBestCmap()) for data in fonts.values()]
+        missing = sorted({ch for _, texts in entries for t in texts for ch in t if not any(ord(ch) in c for c in cmaps)})
+        assert not missing, f'characters in none of the game\'s fonts: {missing}'
 
 
 def main() -> int:

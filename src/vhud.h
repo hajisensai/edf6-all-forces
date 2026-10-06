@@ -3,6 +3,7 @@
 #pragma once
 #include <Windows.h>
 #include <cstdint>
+#include "roundaim.h"
 
 namespace crew {
 // --- rounds.cpp: a weapon's round as the game will fly it ---
@@ -28,6 +29,10 @@ bool ReadRound(const unsigned char* w,RoundModel* out) noexcept;
 // MapRay), at most `reach` m away: `at` and the seconds it flies there; false (`at` where it ends: its life over or past
 // `reach`) when it meets none. The shooter's velocity it takes on is the weapon's (+0x190 x AmmoOwnerMove / 60).
 bool RoundLands(const unsigned char* w,const RoundModel& m,const float* pos,const float* dir,float reach,float* at,float* sec) noexcept;
+// An arc round of `w` (`m`, RoundKind::arc) as roundaim.h flies it (the same step and numbers RoundLands flies it by:
+// AmmoSpeed, the world gravity x AmmoGravityFactor / 3600, AmmoOwnerMove, AmmoAlive) and the shooter's velocity it takes a
+// share of (m/s, the weapon's +0x190). False for another kind, or with the gravity unread.
+bool ArcRoundOf(const unsigned char* w,const RoundModel& m,roundaim::Round* round,float* shooter) noexcept;
 
 // --- vhud.cpp: the stock vehicle the player rides ---
 // crew.cpp: the vehicle's class as crew.cpp hooks it ("403_Tank", "Car"...), "vehicle" for none of them.
@@ -49,8 +54,10 @@ struct StockArm {
     RoundKind kind;
     bool lobbed,lofted;          // lofted: the Katyusha's launcher (launcher.cpp draws its point)
     bool aimed;                  // `bore` and the rest below were worked out this frame
-    bool hit;                    // `at` is where it meets the map; else where it ends (dim)
-    float bore[3],at[3],range,flight;
+    bool hit;                    // `at` is where it meets the map
+    bool ranged,inReach;         // an arc gun's pipper `at` ranged on the target under the view, `lead` where that target
+                                 // is when the round passes it (roundaim.h GunSight); inReach: the round gets there
+    float bore[3],at[3],lead[3],range,flight;   // range: to the map hit / the target (0: neither, only the boresight)
     int lock;                    // homing: 2 locked / 1 locking (lockProgress) on `at`, 0 none (LockonRange `range`)
     float lockProgress;
 };
