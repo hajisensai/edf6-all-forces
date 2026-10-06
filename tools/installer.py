@@ -336,9 +336,6 @@ def install(game: str) -> None:
             print('写入', path)
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
-    print('写入测试场「大混战」关卡（联机时大家要有同样的关卡和物体）……')
-    for line in gen.install(game, gen.grand_battle(gen.Plan())):
-        print('  ', line)
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
                          ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar)):
         if files is not None:
@@ -347,7 +344,10 @@ def install(game: str) -> None:
         mac, pieces = bigmap
         cache.record('bigmap', {f'MAP/{make_bigmap.MAP_FILE}': mac,
                                 **{f'MAP/{name}': data for name, data in pieces.items()}})
-    cache.save()  # only publish after the entire installation succeeds
+    cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
+    print('写入测试场「大混战」关卡（联机时大家要有同样的关卡和物体）……')
+    for line in gen.install(game, gen.grand_battle(gen.Plan())):
+        print('  ', line)
     print('\n安装完成。启动游戏即可。')
 
 

@@ -163,7 +163,18 @@ class IncrementalTests(unittest.TestCase):
             mission.side_effect = RuntimeError('interrupted mission install')
             with self.assertRaisesRegex(RuntimeError, 'interrupted'):
                 installer.install(str(self.game))
-            self.assertEqual(manifest.read_bytes(), before_failure)
+            self.assertNotEqual(manifest.read_bytes(), before_failure)
+            self.assertTrue(buildcache.Cache(str(self.game)).current('chute'))
+            calls = builders['chute'].call_count
+            with self.assertRaisesRegex(RuntimeError, 'interrupted'):
+                installer.install(str(self.game))
+            self.assertEqual(builders['chute'].call_count, calls)
+            before_asset_failure = manifest.read_bytes()
+            self.recipe['chute'] = 'another changed recipe'
+            with patch.object(importlib.import_module('make_chute'), 'install', side_effect=OSError('asset write failed')):
+                with self.assertRaisesRegex(OSError, 'asset write failed'):
+                    installer.install(str(self.game))
+            self.assertEqual(manifest.read_bytes(), before_asset_failure)
             self.assertFalse(buildcache.Cache(str(self.game)).current('chute'))
 
     def test_crilayla_literals_and_overlapping_runs(self) -> None:
