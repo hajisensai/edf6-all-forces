@@ -280,11 +280,14 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 
 // Metres along a->b to the nearest terrain/building, or -1 with none (or no physics world). `hit`
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
-float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr) noexcept {
+// `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
+constexpr std::uint32_t kMapLayer=0x16;
+float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
+              std::uint32_t filter=kMapLayer) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},0x16,0,0};
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
     RayHits col{};
     *reinterpret_cast<const void**>(col.raw)=image+(any ? kHitVtbl : kGroundVtbl);
     reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
@@ -2635,6 +2638,10 @@ bool InstallDoorGuns() noexcept {
 }
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+// Layer 27 (filter 0x1B) collides with layers 15, 16, 17, 18 and 20 alone (the CollisionFilter ctor 0x105510's pair
+// table, docs/emc-re.md §3): the layers the map objects' creation code puts buildings on (docs/raycast-re.md §3), not
+// 19 / 26 (the terrain's and the units' / vehicles'). With the plain nearest-hit collector: every hit on those layers.
+float BuildingRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit,true,nullptr,0x1B); }
 Sea SeaAt(float x,float z,float* surface) noexcept { return SeaProbe(x,z,surface); }
 
 bool VisitEnemies(const unsigned char* vehicle,EnemyVisitor visit,void* ctx) noexcept {

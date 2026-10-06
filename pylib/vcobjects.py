@@ -924,3 +924,118 @@ def portal_lasers(game: Game) -> dict[str, bytes]:
         m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
         out[name] = sgo.write(version, m)
     return out
+
+
+# The EMC's charged beam (src/emc.cpp, docs/emc-re.md; the user 2026-10-06: "蓄力 → 一道粗光束持续 2–3 秒 ... 贯穿，沿途建筑
+# ... 一起摧毁 ... 几百米范围的爆炸"): the EMC (V510_MASER, Vehicle510_Maser, the Air Raider's EMC / EMCS / EMCX requests)
+# fires its stock weapon EMC_STOCK_WEAPON as a 1000-round burst (FireBurstCount), a round a frame for 16.7 s. With the
+# plugin's EmcBeam on, the trigger charges instead and the burst's whole damage (AmmoDamage x FireBurstCount, times the
+# request's damage factor the game puts on the weapon) goes out as one beam. Four DemoIndirectFire SGOs (the IFC as the
+# portal laser's above; the plugin owns, aims and deletes them, docs/carrier-laser-re.md §2-3):
+#   EMC_BEAM_FILE   the beam: the missions' satellite laser (LaserBullet02, penetrating: it passes through every enemy on
+#                   its line) remade thick in the maser's blue, a round a frame for up to EMC_BEAM_ROUNDS frames (the
+#                   plugin ends it at EmcBeamSec), each EMC_BEAM_SPEED m a frame for EMC_BEAM_LIFE frames: EMC_BEAM_RANGE,
+#                   the stock round's reach (AmmoSpeed x AmmoAlive, checked against the stock SGO). Its shot sound once.
+#   EMC_SIGHT_FILE  the charge's glow: the same beam thin and dim, silent, no damage (the plugin thickens it as it charges).
+#   EMC_BREAK_FILE  a break charge (tools/make_jets.py impact_charge's recipe, as the drill's): a EMC_BREAK_RADIUS m blast,
+#                   3 m or more so it takes its damage off the buildings it meets (docs/drill-re.md §3), fired at each
+#                   building on the beam's line; a short flight, so it bursts only on what it meets there.
+#   EMC_BLAST_FILE  the blast at the beam's end: the same, its radius EMC_BLAST_RADIUS (the plugin writes EmcBlastRadius over it).
+# The charges are thin and beam-coloured (they fly a few metres inside the beam); the SGOs' damage is 0 (the plugin's).
+EMC_STOCK_WEAPON = 'V_510_MASER_THUNDER01.SGO'
+EMC_BEAM_FILE = 'EDF6VC_EMC_BEAM.SGO'
+EMC_SIGHT_FILE = 'EDF6VC_EMC_SIGHT.SGO'
+EMC_BREAK_FILE = 'EDF6VC_EMC_BREAK.SGO'
+EMC_BLAST_FILE = 'EDF6VC_EMC_BLAST.SGO'
+EMC_FILES = (EMC_BEAM_FILE, EMC_SIGHT_FILE, EMC_BREAK_FILE, EMC_BLAST_FILE)
+EMC_BEAM_RANGE = 600.0                   # m: the stock round's reach (8 m a frame x 75 frames)
+EMC_BEAM_SPEED, EMC_BEAM_LIFE = 100.0, 6
+EMC_BEAM_ROUNDS, EMC_SIGHT_ROUNDS = 330, 630   # 5.5 s / 10.5 s of rounds: past EmcBeamSec's / EmcChargeSec's top (5 / 10 s)
+EMC_BEAM_SIZE, EMC_SIGHT_SIZE = 12.0, 0.6
+EMC_BEAM_COLOUR = (0.3, 0.6, 3.0, 1.0)   # the stock maser's (0.14, 0.3, 2.5) blue, brighter
+EMC_SIGHT_COLOUR = (0.14, 0.3, 2.5, 1.0)
+EMC_BEAM_SHOT_PITCH = 0.8                # the satellite's shot a little lower
+EMC_BREAK_RADIUS, EMC_BREAK_SPEED, EMC_BREAK_LIFE = 12.0, 2.5, 4
+EMC_BLAST_RADIUS, EMC_BLAST_SPEED, EMC_BLAST_LIFE = 300.0, 3.0, 4
+EMC_CHARGE_SIZE, EMC_CHARGE_HIT = 0.5, 2.0   # the charges' round: thin (hidden in the beam), a 1 m hit radius
+
+
+def _emc_beam(game: Game, rounds: int, size: float, colour: tuple[float, ...], shot_volume: float) -> bytes:
+    """The satellite laser (PORTAL_LASER_STOCK) made one of the EMC's beams (see EMC_BEAM_FILE)."""
+    version, m = sgo.read(game.read('OBJECT', PORTAL_LASER_STOCK))
+    p = m['indirect_fire_param']
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'LaserBullet02' or p[11] != 1 or not isinstance(p[17], list) or len(p[17]) != 6
+            or not isinstance(p[18], list) or len(p[18]) != 6):
+        raise ValueError(f'{PORTAL_LASER_STOCK} 不是预期的卫星激光')
+    p[0] = [0.0, 0.0]
+    p[2], p[3], p[5], p[7], p[9], p[10] = rounds, 0, EMC_BEAM_SPEED, size, 0.0, EMC_BEAM_LIFE
+    p[12] = list(colour)
+    p[14], p[15], p[16] = 0, 0, 0
+    p[17][0] = 1.0                      # its shot sound once for all its rounds
+    p[17][2] = shot_volume
+    p[17][3] = EMC_BEAM_SHOT_PITCH
+    p[18][2] = 0.0                      # no hit sound: a round a frame would play it 60 times a second
+    m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
+    return sgo.write(version, m)
+
+
+def _emc_charge(game: Game, radius: float, speed: float, life: int) -> bytes:
+    """An impact charge (tools/make_jets.py impact_charge's recipe, here so pylib needs no tool) for the EMC: a `radius` m
+    blast, `speed` m a frame for `life` frames, thin and in the beam's colour."""
+    version, m = sgo.read(game.read('OBJECT', 'DEMOGUNSHIPFIRESOLID.SGO'))
+    p = m.get('indirect_fire_param')
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'SolidBullet01' or 'indirect_fire_damage' not in m):
+        raise ValueError('DEMOGUNSHIPFIRESOLID.SGO 不是预期的炮舰炮弹')
+    for i, value in ((2, 1), (3, 0), (5, speed), (6, 0), (9, radius), (10, life), (11, 0), (15, 0)):
+        p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
+    p[0] = [0.0, 0.0]
+    p[7], p[8] = EMC_CHARGE_SIZE, EMC_CHARGE_HIT
+    p[12] = list(EMC_BEAM_COLOUR)
+    m['indirect_fire_damage'] = 0.0
+    return sgo.write(version, m)
+
+
+def emc_rounds(game: Game) -> dict[str, bytes]:
+    """The EMC's four DemoIndirectFire SGOs (EMC_FILES), {Mods/OBJECT file: bytes}."""
+    return {EMC_BEAM_FILE: _emc_beam(game, EMC_BEAM_ROUNDS, EMC_BEAM_SIZE, EMC_BEAM_COLOUR, 1.0),
+            EMC_SIGHT_FILE: _emc_beam(game, EMC_SIGHT_ROUNDS, EMC_SIGHT_SIZE, EMC_SIGHT_COLOUR, 0.0),
+            EMC_BREAK_FILE: _emc_charge(game, EMC_BREAK_RADIUS, EMC_BREAK_SPEED, EMC_BREAK_LIFE),
+            EMC_BLAST_FILE: _emc_charge(game, EMC_BLAST_RADIUS, EMC_BLAST_SPEED, EMC_BLAST_LIFE)}
+
+
+def emc_stock(game: Game) -> dict[str, float]:
+    """The stock EMC weapon's numbers the beam rests on (EMC_STOCK_WEAPON): AmmoDamage, AmmoCount, FireBurstCount,
+    AmmoSpeed, AmmoAlive, and its reach (speed x life)."""
+    w = sgo.load(data=game.read('WEAPON', EMC_STOCK_WEAPON))
+    if not isinstance(w, dict) or w.get('xgs_scene_object_class') != 'Weapon_VehicleMaser':
+        raise ValueError(f'{EMC_STOCK_WEAPON} 不是原版 EMC 的武器（Weapon_VehicleMaser）')
+    out = {k: float(w[k]) for k in ('AmmoDamage', 'AmmoCount', 'FireBurstCount', 'AmmoSpeed', 'AmmoAlive')}
+    out['reach'] = out['AmmoSpeed'] * out['AmmoAlive']
+    return out
+
+
+def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
+    """The EMC's SGOs as src/emc.cpp fires them: the beam and the sight LaserBullet02, penetrating, no blast, a round a frame
+    reaching EMC_BEAM_RANGE, enough rounds for the longest beam / charge, the sight silent; the charges SolidBullet01, one
+    round, not penetrating, the break charge's blast 3 m or more (it breaks buildings), every damage 0 (the plugin's).
+    With the game: EMC_BEAM_RANGE is the stock weapon's reach."""
+    for name in (EMC_BEAM_FILE, EMC_SIGHT_FILE):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'LaserBullet02' and p[11] == 1, name
+        assert p[3] == 0 and p[9] == 0.0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, (name, p)
+        assert abs(p[5] * p[10] - EMC_BEAM_RANGE) < 1e-3, (name, p[5], p[10])
+        assert p[17][0] == 1.0 and p[18][2] == 0.0, name
+    beam, sight = (sgo.load(data=files[n])['indirect_fire_param'] for n in (EMC_BEAM_FILE, EMC_SIGHT_FILE))
+    assert beam[2] >= 5.0 * 60 and sight[2] >= 10.0 * 60 and sight[17][2] == 0.0 and beam[17][2] > 0.0
+    assert beam[7] > sight[7]
+    for name, radius in ((EMC_BREAK_FILE, EMC_BREAK_RADIUS), (EMC_BLAST_FILE, EMC_BLAST_RADIUS)):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', name
+        assert p[2] == 1 and p[11] == 0 and p[9] == radius >= 3.0 and m['indirect_fire_damage'] == 0.0, (name, p)
+    if game is not None:
+        stock = emc_stock(game)
+        assert abs(stock['reach'] - EMC_BEAM_RANGE) < 1e-3, stock

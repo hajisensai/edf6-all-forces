@@ -94,7 +94,7 @@ Work work[kEntries]{};
 // The published frames: `back` is the game thread's to fill, `front` the draw thread's to read, the third
 // waits in `middle` (its index, kFresh while the draw has not taken it).
 struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool cockpit; PlayerJetReadout jet; bool heli; HeliCue heliCue;
-                  bool drill; DrillCue drillCue;
+                  bool drill; DrillCue drillCue; bool emc; EmcCue emcCue;
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
                   bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
                   bool turret; edf::aimlink::TurretReadoutV1 turretAim;
@@ -1653,9 +1653,10 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 }
 
 // What the stock vehicles' HUD takes from the other readouts: the Nix's legs and torso (its ring), the drill tank's drill
-// (a line in the block instead of DrillPanel), and whether EDF6AutoTurret's lead circle is on the seat's own gun (the
+// (a line in the block instead of DrillPanel), the EMC's charged beam (a line and its bar: emc.cpp), and whether
+// EDF6AutoTurret's lead circle is on the seat's own gun (the
 // seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
-struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; };
+struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; };
 
 // The marks of every aimed weapon but the Katyusha's (launcher.cpp's), those landing on another's drawn once.
 void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
@@ -1721,6 +1722,30 @@ void ArmLine(Line& l,const StockArm& a,bool selected) noexcept {
     l.scale=kLineScale*0.85f;
 }
 
+// The EMC's line (EmcCue): charging, its share and an amber bar filling; the beam out, BEAM and the seconds left, its bar
+// emptying, white; after it, REARM; ready, the beams its rounds still make, green (a charge let go drains on its bar); no rounds, EMPTY, red.
+void EmcLine(Line& l,const EmcCue& c,float* bar,const float** colour) noexcept {
+    const float beam=Cfg().emcBeamSec>0.0f ? Cfg().emcBeamSec : 1.0f;
+    if(c.firing) {
+        Format(l,L"EMC BEAM %.1fs",c.beamLeft);
+        *bar=Unit(c.beamLeft/beam);*colour=kWhite;
+    } else if(c.charging) {
+        Format(l,L"EMC CHARGE %d%%",static_cast<int>(std::lround(Unit(c.charge)*100.0f)));
+        *bar=Unit(c.charge);*colour=kAmber;
+    } else if(c.empty) {
+        Format(l,L"EMC EMPTY");
+        *bar=0.0f;*colour=kRed;
+    } else if(c.rearm>0.0f) {
+        Format(l,L"EMC REARM %.1fs",c.rearm);
+        *bar=0.0f;*colour=kHudDim;
+    } else {
+        Format(l,L"EMC READY x%d  HOLD FIRE",c.beams);
+        *bar=Unit(c.charge);*colour=kGreen;
+    }
+    l.rgba=*colour;
+    l.scale=kLineScale*0.85f;
+}
+
 // A heading (sight::HeadingOf's degrees) of world yaw `yaw` (nix.h's: rad, atan2(x, z)).
 float HeadingOfYaw(float yaw) noexcept {
     const float d[3]={std::sin(yaw),0.0f,std::cos(yaw)};
@@ -1729,18 +1754,20 @@ float HeadingOfYaw(float yaw) noexcept {
 
 // The block left of the bottom centre (see above). A Nix: the ring's hull is its legs, its gun the torso (nix.cpp), the
 // twist's limits ticked and its angle on the info line. The drill tank: its drill's RPM and heat a line under the
-// weapons (DrillPanel's colours), OVERHEAT the warning.
+// weapons (DrillPanel's colours), OVERHEAT the warning. The EMC (emc.cpp): its charged beam a line under the weapons
+// and a bar under it (EmcLine).
 void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float s,const StockHudReadout& r,const StockExtras& x,
                 Line* lines,int* at) noexcept {
     const int arms=r.arms<kStockArms ? r.arms : kStockArms;
     const bool drillOn=x.drill && x.drill->maxRpm>0.0f;
-    if(*at+3+arms+(drillOn ? 1 : 0)>kMaxLines)return;
+    if(*at+3+arms+(drillOn ? 1 : 0)+(x.emc ? 1 : 0)>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& title=lines[(*at)++];
     Line& info=lines[(*at)++];
     Line* const arm=&lines[*at];
     *at+=arms;
     Line* const drill=drillOn ? &lines[(*at)++] : nullptr;
+    Line* const emcLine=x.emc ? &lines[(*at)++] : nullptr;
     const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;   // the Nix readout is this vehicle's
     bool missile=false,locked=false,dry=arms>0;
     for(int i=0;i<r.threats && i<kStockThreats;++i){missile=missile || r.threatKind[i]==2;locked=locked || r.threatKind[i]==1;}
@@ -1776,10 +1803,18 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     for(Line* l:head){l->w=l->h=0.0f;if(text)MeasureAll(*text,l,1);}
     for(int i=0;i<arms;++i){arm[i].w=arm[i].h=0.0f;if(text)MeasureAll(*text,&arm[i],1);}
     if(drill){drill->w=drill->h=0.0f;if(text)MeasureAll(*text,drill,1);}
+    float emcBar=0.0f;
+    const float* emcColour=kHud;
+    if(emcLine) {
+        EmcLine(*emcLine,*x.emc,&emcBar,&emcColour);
+        emcLine->w=emcLine->h=0.0f;
+        if(text)MeasureAll(*text,emcLine,1);
+    }
     const float lineH=18.0f*s,gap=3.0f*s,barW=150.0f*s,barH=6.0f*s;
     float h=(title.h>0.0f ? title.h : lineH)+gap+(info.h>0.0f ? info.h : lineH)+gap+barH+gap*2.0f;
     for(int i=0;i<arms;++i)h+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;
     if(drill)h+=(drill->h>0.0f ? drill->h : lineH)+gap;
+    if(emcLine)h+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap+barH+gap;
     const float cx=width*0.5f-460.0f*s,tx=cx+kIndicatorR*s+18.0f*s;
     float y=height*0.80f-h;
     float hull=sight::HeadingOf(r.hull),gun=r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
@@ -1798,7 +1833,11 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     Bar(drawer,ctx,x0,y,barW,barH,hp,TrailOf(&kStockHpKey,hp,GetTickCount64()),HpColour(hp),s);
     y+=barH+gap*2.0f;
     for(int i=0;i<arms;++i){arm[i].x=x0;arm[i].y=y;y+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;}
-    if(drill){drill->x=x0;drill->y=y;}
+    if(drill){drill->x=x0;drill->y=y;y+=(drill->h>0.0f ? drill->h : lineH)+gap;}
+    if(emcLine) {
+        emcLine->x=x0;emcLine->y=y;y+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap;
+        Bar(drawer,ctx,x0,y,barW,barH,emcBar,emcBar,emcColour,s);
+    }
 }
 
 // The stock vehicle HUD, part by part (see above). A stock heli's are elsewhere (HeliHud, HeliGunSight, StockStores).
@@ -1915,6 +1954,7 @@ void HudPublish() noexcept {
     s.heli=PlayerHeliCue(&s.heliCue);
     s.heliFly=PlayerHeliHud(&s.heliHud);   // the HUD (HeliFlightHud), or only the mouse-aim flight's square
     s.drill=PlayerDrillCue(&s.drillCue);
+    s.emc=PlayerEmcCue(&s.emcCue);
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun);
@@ -2290,7 +2330,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(stockHud) {
             const bool fresh=now-snap.tick<=kFreshMs;
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
-                                snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead};
+                                snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
+                                fresh && snap.emc ? &snap.emcCue : nullptr};
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
         if(Cfg().vehicleHud) {

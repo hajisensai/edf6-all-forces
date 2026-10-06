@@ -262,6 +262,7 @@ def install(game: str) -> None:
     import make_artillery
     import make_bigmap
     import make_drill
+    import make_emc
     import make_chute
     import make_jets
     import make_katyusha
@@ -290,6 +291,8 @@ def install(game: str) -> None:
     chute = make_chute.build(game)
     print('生成钻头战车（读取 Root.cpk 和钻头战车模型，不修改它们）……')
     drill = make_drill.build(game)
+    print('生成 EMC 蓄力光束（读取 Root.cpk，不修改它）……')
+    emc = make_emc.build(game)
     stock = None
     if stock_stores:
         print('给原版直升机的请求加上火箭巢和地狱火导弹（ini StockHeliStores=1；读取 Root.cpk，不修改它）……')
@@ -300,7 +303,8 @@ def install(game: str) -> None:
     bigmap = make_bigmap.build(game)
     print('\n全部生成完毕，开始写入。')
     for path in make_jets.install(game, jets) + make_sub.install(game, sub) + make_katyusha.install(game, katyusha) + make_artillery.install(game, artillery) + \
-            make_chute.install(game, chute) + make_drill.install(game, drill) + make_sidecar.install(game, sidecar):
+            make_chute.install(game, chute) + make_drill.install(game, drill) + make_emc.install(game, emc) + \
+            make_sidecar.install(game, sidecar):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
         files, skipped = stock
@@ -327,6 +331,7 @@ def uninstall(game: str) -> None:
     import make_artillery
     import make_bigmap
     import make_drill
+    import make_emc
     import make_chute
     import make_jets
     import make_katyusha
@@ -343,7 +348,7 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
-        for remove in (make_stock_stores.remove, make_sidecar.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
+        for remove in (make_stock_stores.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

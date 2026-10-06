@@ -120,6 +120,12 @@ struct Config {
     float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
     float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
     float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
+    bool emcBeam=true;              // the EMC's trigger charges one thick beam that carries the stock burst's damage (emc.cpp)
+    float emcChargeSec=3.0f;        // ...seconds of the trigger held to charge it (it fires when full)
+    float emcBeamSec=2.5f;          // ...seconds the beam lasts
+    float emcBlastRadius=300.0f;    // ...m: the blast at the beam's end
+    float emcBlastShare=1.0f;       // ...the blast's damage, times the beam's (one stock burst's)
+    float emcBreak=20000.0f;        // ...HP a second off each building on the beam's line
     bool sidecar=true;              // the sidecar motorcycle (sidecar.cpp): its gunner held in the sidecar on foot, its own weapons;
                                     // the bike kept level (the level hook is put in at load: a game restart toggles that part)
     bool sidecarNpcGunner=true;     // ...while the player drives one, the nearest NPC squadmate rides in its sidecar and shoots
@@ -421,6 +427,33 @@ void ResetDrills() noexcept;
 // The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
 struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
+
+// jet_bay.cpp: the EMC's rounds (emc.cpp; pylib/vcobjects.py EMC_*, tools/make_emc.py), DemoIndirectFire objects owned
+// by the EMC (its team: its side's enemies hurt, its kills, friends spared): the beam, the charge's glow (sight), the
+// break charge fired at each building on the beam's line, the blast at its end. Ready: preloaded this mission.
+enum class EmcRound { beam, sight, breakCharge, blast };
+struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
+bool EmcRoundReady(EmcRound kind) noexcept;
+RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
+bool RoundSteer(const RoundObj& r,const float* from,const float* at) noexcept;   // its next rounds' start and aim; false: gone
+bool RoundSize(const RoundObj& r,float size) noexcept;       // its next rounds' thickness (AmmoSize)
+bool RoundBlast(const RoundObj& r,float radius) noexcept;    // its next rounds' blast radius (AmmoExplosion)
+void RoundDrop(RoundObj& r) noexcept;                        // deleted while it is there; forgotten
+bool EmcIfcOk() noexcept;                                    // RoundSize / RoundBlast's IFC fields are where they write
+
+// emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
+// and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.
+// EmcInput before the stock input (the trigger taken for the charge), EmcFrame after it.
+bool InstallEmc() noexcept;
+bool IsEmc(const void* vehicle) noexcept;
+void EmcInput(unsigned char* vehicle) noexcept;
+void EmcFrame(unsigned char* vehicle) noexcept;
+void ResetEmc() noexcept;
+void EmcTick() noexcept;   // once a frame: an EMC gone mid-charge or mid-beam has its sound and rounds dropped
+// The local player's EMC (hud.cpp): the charge (0..1), the beam's seconds left, the beams its rounds still make (the stock
+// burst's rounds each), and its state. False with none.
+struct EmcCue { float charge,beamLeft,rearm; int beams; bool charging,firing,empty; };
+bool PlayerEmcCue(EmcCue* out) noexcept;
 
 // sidecar.cpp: the sidecar motorcycle (EDF6VC_SIDECAR.SGO, docs/sidecar-re.md): a Freed bike whose second rider stands
 // in the sidecar on foot (their own weapons), held there by the plugin. SidecarFrame after the stock input (the held

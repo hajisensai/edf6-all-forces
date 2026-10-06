@@ -22,13 +22,14 @@ PlayerFix player{};
 namespace {
 Config config{};
 // The scene: what the stubs hand the HUD.
-bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false;
+bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false;
 MapReadout sceneMap{};
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
 Warnings sceneWarn{};
 StockHudReadout sceneStock{};
 DrillCue sceneDrill{};
+EmcCue sceneEmc{};
 NixTorso sceneNix{};
 // The bounding box of what is drawn while `boxing` (the layout check).
 struct Box { float x0,y0,x1,y1; bool any; };
@@ -79,6 +80,7 @@ bool PlayerHeliHud(PlayerHeliReadout* o) noexcept { if(hasHeli)*o=sceneHeli;retu
 bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; }
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
+bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
 bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
@@ -221,7 +223,7 @@ bool StockLayoutApart(int width) {
     y.threats=sceneStock.threats;
     for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
     const Box rwr=Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);});
-    const StockExtras x{nullptr,&sceneDrill,false};
+    const StockExtras x{nullptr,&sceneDrill,false,&sceneEmc};   // the drill's line and the EMC's: the tallest block
     const Box block=Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);});
     const bool apart=rwr.x1<block.x0 || block.x1<rwr.x0 || rwr.y1<block.y0 || block.y1<rwr.y0;
     std::printf("%s  %dx1080: RWR scope (%.0f,%.0f)-(%.0f,%.0f), stock block (%.0f,%.0f)-(%.0f,%.0f)\n",apart ? "ok  " : "FAIL",width,
@@ -338,6 +340,16 @@ int wmain(int argc,wchar_t** argv) {
     failed+=!StockLayoutApart(1920);
     failed+=!StockLayoutApart(2520);
     hasDrill=false;
+    // The EMC charging (62%) and firing (1.4 s of its beam left).
+    hasEmc=true;
+    strcpy_s(sceneStock.kind,"510_Maser");
+    sceneStock.arms=1;sceneStock.selected=-1;sceneStock.threats=0;
+    strcpy_s(sceneStock.arm[0].label,"MASER");sceneStock.arm[0].ammo=5000;sceneStock.arm[0].ammoMax=7000;sceneStock.arm[0].canReload=false;
+    sceneEmc=EmcCue{0.62f,0.0f,0.0f,5,true,false,false};
+    Scene(dir,L"stock_emc_charge",ground);
+    sceneEmc=EmcCue{0.0f,1.4f,0.0f,4,false,true,false};
+    Scene(dir,L"stock_emc_beam",ground);
+    hasEmc=false;
     hasNix=true;
     strcpy_s(sceneStock.kind,"612_nix");
     sceneNix=NixTorso{};

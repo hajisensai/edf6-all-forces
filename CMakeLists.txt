@@ -11,6 +11,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
+# The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
+target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -135,6 +137,13 @@ target_include_directories(vsound_check PRIVATE src common third_party/EDFModLoa
 target_link_libraries(vsound_check PRIVATE edf6common xaudio2 sapi ole32)
 target_compile_options(vsound_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vsound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The EMC's charged beam offline (tools/emc_check.cpp: src/emc_plan.h's trigger cycle, damage budget and the scan along the
+# beam against a stand-in line of buildings and a hill). Not part of the plugin build:
+# cmake --build build --target emc_check && build\emc_check.exe
+add_executable(emc_check EXCLUDE_FROM_ALL tools/emc_check.cpp)
+target_compile_options(emc_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(emc_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The aircraft's HUD drawn offline (tools/hud_view.cpp: src/hud.cpp against a stand-in image whose draw functions record;
 # tools/hud_view.py makes the PNGs): the warnings' layout to look at. Not part of the plugin build:

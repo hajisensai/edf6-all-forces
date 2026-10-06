@@ -527,7 +527,7 @@ def hand_copies_agree() -> None:
     files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
-    written = {n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE}   # the drill's: tools/make_drill.py
+    written = {n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)   # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -573,6 +573,51 @@ def drill_copies_agree() -> None:
     assert len(drills) == 1 and drills[0].vehicle == make_drill.VEHICLE.sgo and drills[0].mark == 0
     assert make_drill.OWNER in ledger.OWNERS and make_drill.VEHICLE.tool == 'make_drill'
     assert not drill_model.CONVERSION.mirrors() and drill_model.CONVERSION.point((1.0, 0.0, 0.0))[2] > 0, 'OBJ +X is forward'
+
+
+@test
+def emc_copies_agree() -> None:
+    """The EMC's charged beam (src/emc.cpp, src/emc_plan.h, pylib/vcobjects.py EMC_*, tools/make_emc.py): src/jet_bay.cpp
+    preloads and fires exactly the files tools/make_emc.py writes, in EmcRound's order; the beam's reach is the SGO's
+    (speed x life) and src/emc_plan.h's; the C++ copies of the glow's first thickness, the blast SGO's radius and the
+    charges' flights agree with the SGOs (a break charge reaches past the face it is aimed through); the trigger is taken
+    before the stock input and the frame runs after it; the tool is the installer's and the ledger's; its ini keys are
+    read, shipped and documented; the offline check is a target. With the game here: the SGOs build and pass check_emc."""
+    import make_emc
+    bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
+    files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
+    assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast \};', src('src/crew.h')), 'src/crew.h EmcRound'
+    assert make_emc.names() == [f'OBJECT/{n}' for n in vc.EMC_FILES] and make_emc.OWNER in ledger.OWNERS
+    m = re.search(r'kBeamRange=([\d.]+)f', plan)
+    assert m and float(m.group(1)) == vc.EMC_BEAM_RANGE == vc.EMC_BEAM_SPEED * vc.EMC_BEAM_LIFE, m and m.group(1)
+    m = re.search(r'kSightThin=([\d.]+)f,kSightThick=([\d.]+)f', emc)
+    assert m and float(m.group(1)) == vc.EMC_SIGHT_SIZE and float(m.group(2)) > vc.EMC_SIGHT_SIZE, m and m.groups()
+    m = re.search(r'kSgoBlastRadius=([\d.]+)f', emc)
+    assert m and float(m.group(1)) == vc.EMC_BLAST_RADIUS, m and m.group(1)
+    m = re.search(r'kAhead=([\d.]+)f,kLead=([\d.]+)f,kInto=([\d.]+)f,kBlastLead=([\d.]+)f', emc)
+    assert m, 'src/emc.cpp kAhead / kLead / kInto / kBlastLead'
+    lead, into, blast_lead = (float(m.group(i)) for i in (2, 3, 4))
+    assert lead + into < vc.EMC_BREAK_SPEED * vc.EMC_BREAK_LIFE, 'a break charge must fly past the face it is aimed through'
+    assert blast_lead + into < vc.EMC_BLAST_SPEED * vc.EMC_BLAST_LIFE, 'the blast charge must fly past the end it is aimed at'
+    assert vc.EMC_BREAK_RADIUS >= 3.0 and vc.EMC_BLAST_RADIUS >= 3.0, 'a blast under 3 m breaks no building (docs/drill-re.md §3)'
+    m = re.search(r'kBreakSpacing=([\d.]+)f', plan)
+    assert m and float(m.group(1)) + into <= vc.EMC_BREAK_RADIUS, 'two buildings closer than the spacing are both in one blast'
+    crew = src('src/crew.cpp')
+    hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
+    i_in, i_stock, i_frame = hook.find('&EmcInput,'), hook.find('nextInput[I]('), hook.find('&EmcFrame,')
+    assert 0 <= i_in < i_stock < i_frame, 'src/crew.cpp InputHook: EmcInput before the stock input, EmcFrame after'
+    assert 'ResetEmc();' in src('src/mission.cpp') and 'InstallEmc();' in src('src/plugin.cpp')
+    inst = src('tools/installer.py')
+    assert 'make_emc.build(game)' in inst and 'make_emc.install(game, emc)' in inst and 'make_emc.remove' in inst
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for key in ('EmcBeam', 'EmcChargeSec', 'EmcBeamSec', 'EmcBlastRadius', 'EmcBlastShare', 'EmcBreak'):
+        assert re.search(rf'^{key}=', ini, re.M) and f'L"{key}"' in plugin and key in readme, key
+    cmake = src('CMakeLists.txt')
+    assert 'src/emc.cpp' in cmake and 'add_executable(emc_check EXCLUDE_FROM_ALL tools/emc_check.cpp)' in cmake
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        make_emc.build(rootcpk.DEFAULT_GAME)
 
 
 @test

@@ -150,6 +150,11 @@ void Validate(Config& n) noexcept {
     Fix("DrillHeatSec",n.drillHeatSec,1.0f,600.0f);
     Fix("DrillCoolSec",n.drillCoolSec,1.0f,600.0f);
     Fix("DrillResumeHeat",n.drillResumeHeat,0.0f,0.95f);
+    Fix("EmcChargeSec",n.emcChargeSec,0.5f,10.0f);
+    Fix("EmcBeamSec",n.emcBeamSec,0.5f,5.0f);
+    Fix("EmcBlastRadius",n.emcBlastRadius,10.0f,1000.0f);
+    Fix("EmcBlastShare",n.emcBlastShare,0.0f,10.0f);
+    Fix("EmcBreak",n.emcBreak,0.0f,1.0e7f);
     Fix("SidecarNpcRange",n.sidecarNpcRange,0.0f,200.0f);
     n.highCamKey=static_cast<int>(FixInt("HighCamKey",n.highCamKey,0,254));
     n.highCamButton=static_cast<int>(FixInt("HighCamButton",n.highCamButton,0,255));
@@ -292,6 +297,12 @@ void LoadConfig() noexcept {
     n.drillHeatSec=ReadFloat(L"DrillHeatSec",n.drillHeatSec);
     n.drillCoolSec=ReadFloat(L"DrillCoolSec",n.drillCoolSec);
     n.drillResumeHeat=ReadFloat(L"DrillResumeHeat",n.drillResumeHeat);
+    n.emcBeam=ReadBool(L"EmcBeam",n.emcBeam);
+    n.emcChargeSec=ReadFloat(L"EmcChargeSec",n.emcChargeSec);
+    n.emcBeamSec=ReadFloat(L"EmcBeamSec",n.emcBeamSec);
+    n.emcBlastRadius=ReadFloat(L"EmcBlastRadius",n.emcBlastRadius);
+    n.emcBlastShare=ReadFloat(L"EmcBlastShare",n.emcBlastShare);
+    n.emcBreak=ReadFloat(L"EmcBreak",n.emcBreak);
     n.sidecar=ReadBool(L"Sidecar",n.sidecar);
     n.sidecarNpcGunner=ReadBool(L"SidecarNpcGunner",n.sidecarNpcGunner);
     n.sidecarNpcRange=ReadFloat(L"SidecarNpcRange",n.sidecarNpcRange);
@@ -351,6 +362,8 @@ void LoadConfig() noexcept {
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
         n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
     Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
+    Log("CONFIG emcBeam=%d charge=%.1fs beam=%.1fs blast=%.0fm x%.2f break=%.0f/s",n.emcBeam,n.emcChargeSec,n.emcBeamSec,n.emcBlastRadius,
+        n.emcBlastShare,n.emcBreak);
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
@@ -543,6 +556,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
+    InstallEmc();           // the EMC's charged beam (its rounds are the jets' shells too: jet_bay.cpp)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
