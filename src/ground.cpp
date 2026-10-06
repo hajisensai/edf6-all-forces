@@ -19,13 +19,18 @@
 // enemy's lock point, closes to about 70% of its guns' reach, and fires each gun whose own barrel is on
 // the target, with a clear map ray and the player not in the line. It never goes more than
 // Cfg().groundLeash metres from the player while it has one to follow.
+// It does all of that on whatever surface it clings to (crawl_logic.h; the user, 2026-10-06: "蜘蛛车爬墙上指挥不动了"):
+// the goal is taken onto the crawler's own surface and the turn is measured about its own up, so a crawler on a wall
+// or a ceiling drives to a map command's point (down the wall first when the point lies off it) instead of standing.
 // Per crawler the module keeps a Robo, keyed by its ObjRef (a new object at an old address is a new crawler),
 // dropped at a new mission (ResetGround) and reused only once its crawler has not been driven for kStaleMs:
 // a full table drives no new crawler rather than drop a live one.
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
+#include "crawl_logic.h"
 #include <cmath>
+#include <cstring>
 
 namespace crew {
 namespace {
@@ -35,7 +40,6 @@ constexpr std::size_t kAimPitch=0x1B10;      // rad, clamped to +-pi/2, += look.
 constexpr float kPitchPerInput=0.02f;        // 0x614D16
 // Slot 5 pulls the weapon holders (layout.h kHolders) 0..2.
 constexpr int kGuns=3;
-constexpr float kPi=3.14159265f;
 constexpr float kDefaultReach=150.0f;  // m: a gun whose round's reach cannot be read
 constexpr float kMaxReach=400.0f;      // m: never shoot past this
 constexpr float kMinStandoff=25.0f;    // m: it closes no nearer than this to its target
@@ -71,7 +75,7 @@ struct Robo {
     ULONGLONG seen,loggedAt;
     ObjRef target;
     bool prevValid,moving;
-    float prevHeading,lastTurn;
+    float prevFwd[3],lastTurn;   // its forward row last frame
     int yawSign,votes;      // +1: a positive turn input increases atan2(fwd.x, fwd.z)
     bool yawLocked;
     float pitchSign;        // +1: a rising veh+0x1B10 raises the barrel
@@ -86,7 +90,6 @@ ULONGLONG fullLoggedAt=0;
 
 float Dot3(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : v>hi ? hi : v; }
-float Wrap(float a) noexcept { while(a>kPi)a-=2*kPi; while(a<-kPi)a+=2*kPi; return a; }
 float Horiz(const float* a,const float* b) noexcept {
     const float d[2]={b[0]-a[0],b[2]-a[2]};
     return std::sqrt(d[0]*d[0]+d[1]*d[1]);
@@ -162,42 +165,33 @@ Goal GoalOf(const float* pos,const float* leader,const void* target,const float*
     return g;
 }
 
-// The move stick (vehicle frame: x right, z forward) towards the goal.
+// The move stick (vehicle frame: x right, z forward) towards the goal, on whatever surface it clings to
+// (crawl_logic.h Move: on a wall or a ceiling the goal is measured in 3D and taken onto the surface).
 void MoveStick(Robo& r,const unsigned char* v,const Goal& g,float* stick) noexcept {
     stick[0]=stick[1]=0.0f;
-    if(!g.any){r.moving=false;return;}
-    const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    const float d[3]={g.at[0]-pos[0],0.0f,g.at[2]-pos[2]};
-    const float dist=std::sqrt(d[0]*d[0]+d[2]*d[2]);
-    const float start=g.stop+(r.moving ? 0.0f : kMoveHysteresis);
-    if(dist<start || dist<0.5f){r.moving=false;return;}
-    r.moving=true;
-    const float mag=Clamp((dist-g.stop)/kMoveRamp,0.0f,1.0f)/dist;
-    const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    float x=Dot3(d,m)*mag,z=Dot3(d,m+8)*mag;
-    const float len=std::sqrt(x*x+z*z);
-    if(len>1.0f){x/=len;z/=len;}
-    stick[0]=x;stick[1]=z;
+    crawl::Frame f;
+    if(!g.any || !crawl::MakeFrame(reinterpret_cast<const float*>(v+kMatrix),&f)){r.moving=false;return;}
+    r.moving=crawl::Move(f,reinterpret_cast<const float*>(v+kPosition),g.at,g.stop,r.moving,kMoveHysteresis,kMoveRamp,stick);
 }
 
-// The turn input towards `want` (a world direction; nullptr: none), learning its sign.
+// The turn input towards `want` (a world direction; nullptr: none), learning its sign. The turn spins the crawler about
+// its own up, so both the error and how far it turned are measured about that axis (crawl_logic.h AngleAbout): the
+// same on a floor, a wall or a ceiling.
 float Turn(Robo& r,const unsigned char* v,const float* want) noexcept {
-    const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    const float fx=m[8],fz=m[10];
-    if(std::sqrt(fx*fx+fz*fz)<0.3f){r.prevValid=false;return 0.0f;}   // on a wall: heading undefined
-    const float heading=std::atan2(fx,fz);
+    crawl::Frame f;
+    if(!crawl::MakeFrame(reinterpret_cast<const float*>(v+kMatrix),&f)){r.prevValid=false;return 0.0f;}
     if(r.prevValid && !r.yawLocked && std::fabs(r.lastTurn)>0.3f) {
-        const float turned=Wrap(heading-r.prevHeading);
+        const float turned=crawl::AngleAbout(r.prevFwd,f.fwd,f.up);
         if(std::fabs(turned)>0.002f) {
             r.votes+=(turned>0)==(r.lastTurn*static_cast<float>(r.yawSign)>0) ? 1 : -1;
             if(r.votes<=-15){r.yawSign=-r.yawSign;r.votes=0;Log("GROUND v=%p turn sign flipped to %d",v,r.yawSign);}
             else if(r.votes>=30){r.yawLocked=true;Log("GROUND v=%p turn sign locked at %d",v,r.yawSign);}
         }
     }
-    r.prevHeading=heading;r.prevValid=true;
+    std::memcpy(r.prevFwd,f.fwd,12);r.prevValid=true;
     float in=0.0f;
-    if(want && want[0]*want[0]+want[2]*want[2]>0.01f) {
-        const float err=Wrap(std::atan2(want[0],want[2])-heading);
+    if(want) {
+        const float err=crawl::AngleAbout(f.fwd,want,f.up);
         if(std::fabs(err)>kTurnDeadband)in=Clamp(err*kTurnGain,-1.0f,1.0f)*static_cast<float>(r.yawSign);
     }
     r.lastTurn=in;
@@ -267,8 +261,9 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     MoveStick(r,v,g,move);
     float face[3]{};
     const float* want=nullptr;
-    if(aim){face[0]=aim[0]-pos[0];face[2]=aim[2]-pos[2];want=face;}
-    else if(r.moving){face[0]=g.at[0]-pos[0];face[2]=g.at[2]-pos[2];want=face;}
+    // Faced in 3D: Turn takes it onto the surface the crawler clings to.
+    if(aim){for(int i=0;i<3;++i)face[i]=aim[i]-pos[i];want=face;}
+    else if(r.moving){for(int i=0;i<3;++i)face[i]=g.at[i]-pos[i];want=face;}
     const float turn=Turn(r,v,want);
     const float pitch=Pitch(r,v,ref,aim,ms);
     // Fire: one map ray per frame from the reference barrel.

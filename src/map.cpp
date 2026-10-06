@@ -250,8 +250,14 @@ const unsigned char* Body(const unsigned char* human) noexcept {
     return Readable(v,kPosition+12) ? v : human;
 }
 
-// The ground's height under (x, z): the first map hit from high over it, else `fallback`.
-float GroundAt(float x,float z,float fallback) noexcept {
+// The ground under (x, z) for something at height `y`: of the floors there the one nearest `y` (map_floor.h: a cave's
+// roof seen from above is no floor, a lower level of a cave keeps its own), else `y`.
+float GroundAt(float x,float z,float y) noexcept {
+    float h;
+    return MapGroundNear(x,z,y,&h) ? h : y;
+}
+// The top of everything under (x, z) (the camera stays over it, a cave's roof too), else `fallback`.
+float TopAt(float x,float z,float fallback) noexcept {
     const float top[3]={x,fallback+4000.0f,z},bottom[3]={x,fallback-4000.0f,z};
     float hit[3];
     return MapRay(top,bottom,hit)>=0.0f && std::isfinite(hit[1]) ? hit[1] : fallback;
@@ -610,11 +616,14 @@ bool Frame(unsigned char* human) noexcept {
     Steer(human,dt,front,pad ? &padState : nullptr);
     mapcam::View& v=game.view;
     const float* me=PosOf(Body(human));
+    LearnMapNormals(me);   // once: which side a map hit's normal faces (map_floor.h), for the cave floors below
     if(game.follow){v.focus[0]=me[0];v.focus[2]=me[2];}
-    v.focus[1]+=(GroundAt(v.focus[0],v.focus[2],v.focus[1])-v.focus[1])*0.2f;   // the ground under the focus, eased
+    // The ground under the focus, eased: following, the player's own level (a cave's floor, not its roof); panned, the
+    // level the focus is on.
+    v.focus[1]+=(GroundAt(v.focus[0],v.focus[2],game.follow ? me[1] : v.focus[1])-v.focus[1])*0.2f;
     float eye[3],look[3];
     mapcam::Place(v,eye,look);
-    const float under=GroundAt(eye[0],eye[2],eye[1]-v.height);
+    const float under=TopAt(eye[0],eye[2],eye[1]-v.height);
     if(eye[1]<under+kEyeClear)eye[1]=under+kEyeClear;   // a ridge behind the focus: over it, still looking at the focus
     // The NPC commands (mapcmd.cpp): a unit selected by its key centres the map on it.
     float onto[3];
