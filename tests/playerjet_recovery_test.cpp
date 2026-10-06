@@ -194,6 +194,23 @@ int main() {
     Check(vec::Dist(j.vel,humanVelocity)<0.001f,"zero catch error still replaces stale velocity with parachute drift");
     testDoor=false;const int presses=boardPresses;Catch(recoveryHuman,recoveryTime);
     Check(!catchFlight.hasDoor && boardPresses==presses,"an unreadable door never falls back to boarding by body centre");
+    Check(vec::Dist(catchFlight.target,human)>kCatchBelow-0.001f && vec::Dist(catchFlight.target,human)<kCatchBelow+0.001f &&
+          catchFlight.target[1]<human[1],"with no door the jet is still sent for the player, under them");
+    // No door known (the first frames of a jet just made: hasDoor starts false) is a flight like any other: Air steers,
+    // and the velocity is never last frame's left as it was (2026-10-07 review: up to 45 s with no terrain or stall step).
+    ResetJet(j);j.autopilot=true;j.driven=false;j.vel[0]=j.vel[1]=0.0f;j.vel[2]=150.0f;
+    body[0]=0;body[1]=300;body[2]=0;
+    catchFlight=CatchFlight{recoveryVehicle,{-1500,300,0},150.0f,{0,0,0},{0,0,1}};
+    const float stale[3]={j.vel[0],j.vel[1],j.vel[2]};
+    AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
+    Check(!catchFlight.hasDoor && vec::Dist(j.vel,stale)>0.001f,"no door: the first frame already runs the flight");
+    for(int frame=0;frame<600;++frame) {
+        AutoFly(j,recoveryVehicle,body,1.0f/60.0f,recoveryTime);
+        for(int i=0;i<3;++i)body[i]+=j.vel[i]/60.0f;
+        recoveryTime+=16;
+    }
+    Check(j.vel[0]<0.0f && j.phase==Phase::air && vec::Len(j.vel)>j.kind->rotate,"no door: it turns for the target at flying speed");
+    testDoor=true;
 
     const float at[3]={0,0,0},offsetDoor[3]={20,-2,0},p[3]={20,-2,0},velocity[3]={0,-6,0},spin[3]={0,0.5f,0};
     float target[3],drift[3];pjet::CatchDoor(p,velocity,at,offsetDoor,velocity,spin,1.0f/60.0f,target,drift);
