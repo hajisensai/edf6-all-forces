@@ -9,6 +9,10 @@ bool IsPlayer(const unsigned char* human) noexcept {
     return Readable(human,kHumanPlayer+1) && human[kHumanPlayer] && At<const void*>(human,kHumanPad) && !RemoteRider(human);
 }
 
+bool IsAnyPlayer(const unsigned char* human) noexcept {
+    return Readable(human,kHumanPlayer+1) && human[kHumanPlayer] && (At<const void*>(human,kHumanPad) || RemoteRider(human));
+}
+
 bool RemoteRider(const unsigned char* rider) noexcept {
     return Readable(rider,kRiderNet+kNetFlags+1) && (rider[kRiderNet+kNetFlags]&1)!=0;
 }

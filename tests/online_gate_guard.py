@@ -157,6 +157,8 @@ def check_calls(root: str) -> None:
 
 
 def check_player(root: str) -> None:
+    if 'RemoteRider(human)' not in body(code_only(read(root, 'common/seat.cpp')), 'bool IsAnyPlayer('):
+        fail("common/seat.cpp IsAnyPlayer: another machine's player copied here is no longer a player")
     if '!RemoteRider(human)' not in body(code_only(read(root, 'common/seat.cpp')), 'bool IsPlayer('):
         fail('common/seat.cpp IsPlayer: another machine\'s player counts as this machine\'s')
     if re.search(r'\bkOnline\b', code_only(read(root, 'src/seatswitch.cpp'))):

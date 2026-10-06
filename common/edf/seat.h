@@ -11,6 +11,9 @@ Rider SeatRider(const unsigned char* image,const unsigned char* seat) noexcept;
 /// A human driven by a pad on this machine (pad set and the player-controlled flag on, and not another machine's
 // player copied here: RemoteRider).
 bool IsPlayer(const unsigned char* human) noexcept;
+// A player of any machine: this machine's (IsPlayer), or another's copied here with its player flag on. What a test
+// that tells NPC soldiers from players asks (an NPC's squad, a soldier to seat), not who this machine's keys drive.
+bool IsAnyPlayer(const unsigned char* human) noexcept;
 // Whether another machine runs this rider (online): its network object's flag bit 0.
 bool RemoteRider(const unsigned char* rider) noexcept;
 // The vehicle's seat count (0 when the seat array cannot be read, or holds more than kMaxSeats) and its

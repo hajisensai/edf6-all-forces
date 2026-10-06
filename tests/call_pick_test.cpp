@@ -50,6 +50,11 @@ int main() {
     Check(InSession(),"fixture is online");
     Check(IsPlayer(local) && IsPlayer(splitScreen),"both local split-screen players use the real player predicate");
     Check(!IsPlayer(remote) && edf::RemoteRider(remote),"another machine's player is no player of this machine, even with a pad");
+    Check(edf::IsAnyPlayer(remote) && edf::IsAnyPlayer(local) && !edf::IsAnyPlayer(npc) && !edf::IsAnyPlayer(nullptr),
+          "a player of any machine: this one's and another's, never an NPC");
+    alignas(16) unsigned char remoteNoPad[0x400]{};
+    Put<unsigned char>(remoteNoPad,kHumanPlayer,1);Put<unsigned char>(remoteNoPad,edf::kRiderNet+edf::kNetFlags,1);
+    Check(edf::IsAnyPlayer(remoteNoPad) && !IsPlayer(remoteNoPad),"another machine's player without a pad object here is still a player");
 
     picked.store(-1);
     CallPick(1,banner,_countof(banner));

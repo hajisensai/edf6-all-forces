@@ -214,7 +214,7 @@ void __fastcall PickVisit(void* self,void* object) noexcept {
     __try {
         auto& p=*static_cast<Pick*>(self);
         auto o=static_cast<unsigned char*>(object);
-        if(!o || !IsSoldier(o) || IsPlayer(o) || !Holdable(o))return;
+        if(!o || !IsSoldier(o) || edf::IsAnyPlayer(o) || !Holdable(o))return;   // no player of any machine
         for(const auto& s:sidecars)if(s.gunner.Is(o))return;
         const float* q=Pos(o);
         const float d[3]={q[0]-p.at[0],q[1]-p.at[1],q[2]-p.at[2]};
