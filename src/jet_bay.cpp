@@ -2,7 +2,9 @@
 // shells and its cannon, and the impact charges (ImpactDamage) a crash of the plugin's aircraft sets off.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "vehicleram.h"
 #include <malloc.h>
+#include <cstdio>
 #include <cwchar>
 
 namespace crew {
@@ -82,15 +84,25 @@ bool cannonReady=false;                   // preloaded this mission (PreloadShel
 // radius the charge's (indirect_fire_param #9 AmmoExplosion): a blast's radius is the SGO's, so one charge per
 // radius; its damage the plugin writes. Fired straight (IFC +0x2F8 = 0) from kImpactDrop over the impact point
 // down onto it, it bursts there. The blast spares the owner's team's friends: the IFC's team is its owner's.
+// In make_jets.py's IMPACT_FILES order (appended there, appended here: tools/selftest.py holds the two equal); the
+// pick is by radius (ChargeFor), not by place. 2, 4 and 12 m came with the ground vehicles' ram (vehicleram.cpp: a
+// foot, a fist, a hull's slab are a few metres) and to give the jets their own size (a 12 m strike jet had a 16 m
+// blast); an install from before has the four others alone and takes the nearest of those (logged).
 struct Charge { const wchar_t* sgo; const wchar_t* file; float radius; };
 const Charge kCharges[]={
     {L"app:/object/edf6vc_impact_08.sgo",L"EDF6VC_IMPACT_08.SGO",8.0f},
     {L"app:/object/edf6vc_impact_16.sgo",L"EDF6VC_IMPACT_16.SGO",16.0f},
     {L"app:/object/edf6vc_impact_32.sgo",L"EDF6VC_IMPACT_32.SGO",32.0f},
     {L"app:/object/edf6vc_impact_64.sgo",L"EDF6VC_IMPACT_64.SGO",64.0f},
+    {L"app:/object/edf6vc_impact_02.sgo",L"EDF6VC_IMPACT_02.SGO",2.0f},
+    {L"app:/object/edf6vc_impact_04.sgo",L"EDF6VC_IMPACT_04.SGO",4.0f},
+    {L"app:/object/edf6vc_impact_12.sgo",L"EDF6VC_IMPACT_12.SGO",12.0f},
 };
 constexpr int kChargeCount=static_cast<int>(sizeof(kCharges)/sizeof(kCharges[0]));
 bool chargeReady[kChargeCount]{};         // preloaded this mission (PreloadShells)
+float chargeRadii[kChargeCount]{};        // kCharges' radii, for ram::NearestCharge
+bool chargeAll[kChargeCount]{};           // every one (the nearest there would be with all installed)
+int missionCount=0;                       // PreloadShells calls: the missing-charge note once a mission
 // m over the impact the charge starts, straight down (make_jets.py IMPACT_*: 10 m a frame for 6 frames, bursting on
 // what it meets: the ground under the impact, or the enemy rammed in the air)
 constexpr float kImpactDrop=2.0f;
@@ -171,15 +183,20 @@ bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* f
     } __except(FaultLog("JET shell setup",GetExceptionInformation())){return false;}
 }
 
-// The charge for `radius`: the smallest preloaded one at least that wide, else the widest preloaded; -1: none.
+// The charge for `radius` (a part's size: the blast follows it, never the damage): the preloaded one nearest it in ratio
+// (vehicleram.h ram::NearestCharge); -1: none. When the nearest of all is not installed (an install from before the
+// 2 / 4 / 12 m charges), the nearest that is, said once a mission per size asked.
 int ChargeFor(float radius) noexcept {
-    int best=-1;
-    for(int i=0;i<kChargeCount;++i) {
-        if(!chargeReady[i])continue;
-        best=i;
-        if(kCharges[i].radius>=radius)return i;
+    for(int i=0;i<kChargeCount;++i){chargeRadii[i]=kCharges[i].radius;chargeAll[i]=true;}
+    const int c=ram::NearestCharge(chargeRadii,chargeReady,kChargeCount,radius);
+    const int ideal=ram::NearestCharge(chargeRadii,chargeAll,kChargeCount,radius);
+    static int missingLogged[kChargeCount]{};
+    if(c>=0 && ideal!=c && missingLogged[ideal]!=missionCount) {
+        missingLogged[ideal]=missionCount;
+        Log("JET impact %.1f m: no %ls this mission (python tools/make_jets.py, or the installer): a %.0f m charge instead",radius,
+            kCharges[ideal].file,kCharges[c].radius);
     }
-    return best;
+    return c;
 }
 
 // The tier the game gave aircraft `v` (its max HP over its SGO durability, stores.inc kJetMasses): what a weapon's
@@ -440,8 +457,14 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
     }
     drillReady=shellsOk && ModFileThere(kDrillChargeFile);
     if(drillReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDrillChargeSgo,2,-1);
-    Log("JET preload gunship shells=%d cannon=%d impact charges %d/%d/%d/%d drill charge %d",gunshipReady,cannonReady,chargeReady[0],
-        chargeReady[1],chargeReady[2],chargeReady[3],drillReady);
+    char charges[64];
+    int at=0;
+    for(int i=0;i<kChargeCount;++i) {
+        const int n=sprintf_s(charges+at,sizeof(charges)-at,"%s%.0f=%d",i ? " " : "",kCharges[i].radius,chargeReady[i]);
+        if(n>0)at+=n;
+    }
+    ++missionCount;
+    Log("JET preload gunship shells=%d cannon=%d impact charges (m) %s drill charge %d",gunshipReady,cannonReady,charges,drillReady);
 }
 
 void ResetShells() noexcept {

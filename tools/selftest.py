@@ -1823,6 +1823,30 @@ def stock_stores_build() -> None:
     mss.check(files)
 
 
+@test
+def impact_charges_agree() -> None:
+    """src/jet_bay.cpp's impact charges are tools/make_jets.py's IMPACT_FILES in its order (the 2 / 4 / 12 m ones appended
+    after the four first shipped), each file named by its radius; the pick is the nearest in ratio (vehicleram.h
+    NearestCharge), not the first at least as wide; the jets' ram radius is half the model's size and README says the
+    numbers the code gives."""
+    import make_jets
+    bay = src('src/jet_bay.cpp')
+    rows = re.findall(r'\{L"app:/object/(edf6vc_impact_\d+\.sgo)",L"(EDF6VC_IMPACT_\d+\.SGO)",([\d.]+)f\}', bay)
+    assert [(f, float(r)) for _, f, r in rows] == list(make_jets.IMPACT_FILES.items()), rows
+    assert all(sgo == f.lower() for sgo, f, _ in rows), 'kCharges sgo paths are the files lowercased'
+    assert list(make_jets.IMPACT_FILES)[:4] == [f'EDF6VC_IMPACT_{n:02d}.SGO' for n in (8, 16, 32, 64)], 'the first four stay first'
+    assert all(f == f'EDF6VC_IMPACT_{int(r):02d}.SGO' for f, r in make_jets.IMPACT_FILES.items()), 'a file named by its radius'
+    assert {2.0, 4.0, 12.0} <= set(make_jets.IMPACT_FILES.values())
+    for name in make_jets.IMPACT_FILES:
+        assert f'OBJECT/{name}' in make_jets.names(), f'the installer writes {name}'
+    pick = bay.split('int ChargeFor(', 1)[1].split('\n}\n', 1)[0]
+    assert 'ram::NearestCharge(' in pick, 'src/jet_bay.cpp ChargeFor: the nearest charge'
+    pj = src('src/playerjet.cpp')
+    assert 'ram::Damage(' in pj and 'kRamJoulesPerDamage' not in pj, 'the jets take the one ram formula (vehicleram.h)'
+    assert re.search(r'\{"fighter",7201,.*, 8\.0f\}', pj) and re.search(r'\{"strike", 7202,.*, 12\.0f\}', pj), 'half of 16 m / 25 m'
+    readme = src('README.md')
+    assert '战斗机约 8 米、攻击机约 12 米' in readme and '约 10 米' not in readme.split('**撞击伤害**', 1)[1].split('\n', 1)[0]
+
 def main() -> int:
     failed = 0
     for fn in TESTS:

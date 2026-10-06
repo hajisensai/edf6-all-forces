@@ -14,7 +14,7 @@ weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring, and EDF6VC_FLY_<KIND>.
 (interceptor, fighter, multirole, gunship, drone, the three air carriers) parked empty, which EDF6VC_CALL_FLY_* bring.
 Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model with the gunship's own mark and a gunner seat), the
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
-impact charges a crash sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64.SGO, and the gunship's
+impact charges a crash or a ground vehicle's ram sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64 / _02 / _04 / _12.SGO, and the gunship's
 long-range side cannon's round (src/jet_bay.cpp CannonShot): EDF6VC_GUNSHIP_CANNON.SGO.
 Also the teleportation ships' portal laser (src/carrierlaser.cpp) into <game>/Mods/OBJECT:
 EDF6VC_PORTAL_SIGHT.SGO (the aim light) and EDF6VC_PORTAL_LASER.SGO (the main beam) (vcobjects.portal_lasers).
@@ -119,6 +119,12 @@ IMPACT_FILES: dict[str, float] = {
     'EDF6VC_IMPACT_16.SGO': 16.0,
     'EDF6VC_IMPACT_32.SGO': 32.0,
     'EDF6VC_IMPACT_64.SGO': 64.0,
+    # Appended (src/jet_bay.cpp kCharges keeps this order): the ground vehicles' ram (src/vehicleram.cpp: a foot, a fist,
+    # a hull's slab are a few metres) and the jets' own size (a 12 m strike jet had a 16 m blast). The plugin picks the
+    # one nearest the part's size; an install without these takes the nearest of the four above.
+    'EDF6VC_IMPACT_02.SGO': 2.0,
+    'EDF6VC_IMPACT_04.SGO': 4.0,
+    'EDF6VC_IMPACT_12.SGO': 12.0,
 }
 IMPACT_LIFE = 6
 IMPACT_SPEED = 10.0

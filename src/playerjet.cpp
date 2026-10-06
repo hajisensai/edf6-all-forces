@@ -41,6 +41,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
+#include "vehicleram.h"
 #include "playerjet_kinds.h"
 #include "vecmath.h"
 #include "warn.h"
@@ -81,10 +82,10 @@ struct Kind {
     float corner;        // m/s: ...from this speed up; below, maxG * (speed / corner)^2 (1 g at corner / sqrt(maxG))
     float roll;          // rad/s: how fast the body turns onto its attitude
     float landMax;       // m/s: the fastest it can touch down without damage
-    float ram;           // m: the reach of what it rams (its size: the fighter's model is 16 m across, the strike jet's 25 m)
+    float ram;           // m: its ram's blast radius, half its model's width (the fighter's model is 16 m across, the strike jet's 25 m)
 };
 constexpr Kind kKinds[]={
-    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,150.0f, 2.6f, 130.0f, 10.0f},   // 1 g at 61 m/s
+    {"fighter",7201, 65.0f,75.0f,260.0f, 16.0f,32.0f, 6.0f,150.0f, 2.6f, 130.0f, 8.0f},    // 1 g at 61 m/s
     {"strike", 7202, 60.0f,70.0f,240.0f, 11.0f,26.0f, 5.0f,140.0f, 1.6f, 120.0f, 12.0f},   // 1 g at 63 m/s
 };
 // Every other aircraft of the plugin the player can board (playerjet_kinds.h, the NPC's own performance): their Kinds.
@@ -471,12 +472,11 @@ struct RamHit { float at[3]; float closing; };
 // The ram's damage to what it hit (the user, 2026-10-05: "the blast of a plane should not only go by its speed but by
 // its mass too"): the kinetic energy of the closing speed, E = 1/2 m v^2, with m the aircraft's mass now (its kind's
 // clean mass, stores.inc kJetMasses, times what its stores add: Burden) and v the closing speed along the normal; in the
-// game's damage at kRamJoulesPerDamage J a point, scaled by the tier the game gave this aircraft (its max HP over its
-// SGO durability: the same factor scales a weapon's damage, so the ram keeps pace with the mission's difficulty), times
-// ini PlayerJetRamDamage. kRamJoulesPerDamage: the mod's Mk 82 (1500 damage, pylib/vcobjects.py STORES) carries some
-// 430 MJ of explosive (87 kg of tritonal, ~103 kg of TNT at 4.184 MJ/kg): 2.87e5 J a point. A 16 t fighter ramming at
-// 200 m/s (320 MJ) hits as about 3/4 of a Mk 82, at 100 m/s a quarter of that. A kind without a mass deals nothing.
-constexpr float kRamJoulesPerDamage=2.87e5f;
+// game's damage at 287 kJ a point (vehicleram.h ram::Damage, the one formula the ground vehicles' ram takes too), scaled
+// by the tier the game gave this aircraft (its max HP over its SGO durability: the same factor scales a weapon's damage,
+// so the ram keeps pace with the mission's difficulty), times ini PlayerJetRamDamage. A 16 t fighter ramming at 200 m/s
+// (320 MJ) hits as about 3/4 of a Mk 82, at 100 m/s a quarter of that. A kind without a mass deals nothing. The blast is
+// the kind's size (Kind::ram, half its model's width), never the damage's: the damage already carries mass and speed.
 // The aircraft's mass now (kg; 0: its kind has none).
 float RamMass(const PJet& j,const unsigned char* v) noexcept {
     const JetMass* const kind=JetMassOf(BodyMark(v));
@@ -488,7 +488,7 @@ float RamDamage(const PJet& j,const unsigned char* v,float closing) noexcept {
     const float kg=RamMass(j,v);
     const float hpMax=At<float>(v,kHpMax);
     const float tier=kind->durability>0.0f && hpMax>0.0f ? hpMax/kind->durability : 1.0f;
-    return Cfg().playerJetRamDamage*tier*0.5f*kg*closing*closing/kRamJoulesPerDamage;
+    return ram::Damage(kg,closing,tier,Cfg().playerJetRamDamage);
 }
 
 void Ram(const PJet& j,unsigned char* v,const RamHit& hit) noexcept {
@@ -812,9 +812,10 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     j.blockedSince=0;
     const float made=Dot(j.measured,j.sent)/sent;
     Log("PJET v=%p blocked %s: sent %.0f m/s, made %.0f",v,kPhaseNames[static_cast<int>(j.phase)],sent,made);
-    // Where it hit: its nose along the way it was sent; how fast it closed: what it lost of that way.
+    // Where it hit: its nose (half its size, Kind::ram, ahead) along the way it was sent; how fast it closed: what it
+    // lost of that way. The blast round the nose, its radius the same half size (Ram): what the airframe ran into.
     RamHit ram{};
-    for(int i=0;i<3;++i)ram.at[i]=pos[i]+j.sent[i]/sent*j.kind->ram*0.5f;
+    for(int i=0;i<3;++i)ram.at[i]=pos[i]+j.sent[i]/sent*j.kind->ram;
     ram.closing=sent-made;
     Crash(j,v,0.0f,sent-made+j.kind->landMax,false,ms,&ram);
     if(!j.active)return;
