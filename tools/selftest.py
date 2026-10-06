@@ -696,6 +696,45 @@ def turret_cam_wired() -> None:
 
 
 @test
+def gun_stabilizer_wired() -> None:
+    """The gun stabilizer (src/stab.cpp, README 功能 14, docs/camera-re.md §7): GunStabilizer is read, shipped on and
+    documented; the EDF.dll code it relies on is the doc's and checked by signature (the plain aim step it chains, the axis
+    step's end and the bone map it calls again, the angle / rate writes); the AddSe step reaches it through the turret
+    camera's hook (StabStep in place of the next step), the plain one through its own chain; its seats are registered from
+    every vehicle's input and reset with the mission; the turret camera and EDF6AutoTurret (both its paths) steer from the
+    held axes with the hull's part taken out (StabHeld, aimlink V3); the HUD shows its state; the offline check
+    (tools/stab_check.cpp) is a CMake target on the header the plugin uses; the class table names only vtables crew.cpp
+    hooks (their input is where the seats are registered), and excludes the artillery, the drill and the mechs' pilots."""
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/camera-re.md')
+    code, cmake, crew, mission = src('src/stab.cpp'), src('CMakeLists.txt'), src('src/crew.cpp'), src('src/mission.cpp')
+    assert 'L"GunStabilizer"' in plugin and re.search(r'^GunStabilizer=1', ini, re.M) and 'GunStabilizer' in readme
+    for name, rva in (('kPlainAimVtable', '0x17D8A68'), ('kPlainAimStep', '0x5FBDA0'), ('kAxisStepEnd', '0x5FBD78'),
+                      ('kAxisMap', '0x5FC280'), ('kAxisAngleWrite', '0x5FBD12'), ('kAxisRateWrite', '0x5FBCE8')):
+        assert re.search(rf'{name}={rva}\b', code), (name, rva)
+        assert rva in doc, rva
+    for sig in ('kPlainAimStepCode', 'kAxisStepEndCode', 'kAxisMapCode', 'kAxisAngleWriteCode', 'kAxisRateWriteCode'):
+        assert f'Matches(' in code and f',{sig},sizeof({sig}))' in code, sig
+    assert 'StabStep(aim,cmd,nextAim);' in src('src/turretcam.cpp'), 'the AddSe step runs the stabilizer'
+    assert 'axisMap(axis,true);' in code, 'the bones take the held angle'
+    assert '&StabFrame,v' in crew and 'ResetStabilizer();' in mission and 'InstallStabilizer();' in plugin
+    assert 'src/stab.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/stab_check.cpp' in cmake
+    assert '#include "../src/stab.h"' in src('tools/stab_check.cpp') and '#include "stab.h"' in code
+    steer = src('src/turretcam.cpp').split('bool Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StabHeld(seat+kSeatAim,held,hull);' in steer and 'target-held[i]' in steer and '-hull[i];' in steer
+    flak = src('autoturret/src/plugin.cpp')
+    assert 'Stabilized(vehicle,0,stock,held,hull);' in flak and '-hull;' in flak.split('float AxisInput(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Stabilized(vehicle,s,aim.angle,held,hull);' in src('autoturret/src/gunner.cpp')
+    assert 'r.stab=StabState(v,r.seat);' in src('src/vhud.cpp') and 'L"    STAB"' in src('src/hud.cpp')
+    hooked = set(re.findall(r'\{(0x[0-9A-F]{7}),0x[0-9A-F]+,"', crew))
+    table = code.split('const Class kClasses[]={', 1)[1].split('};', 1)[0]
+    vts = re.findall(r'\{(0x[0-9A-F]{7}),"', table)
+    assert vts and set(vts) <= hooked, set(vts) - hooked
+    assert '0x17D8B50' not in vts, 'the rocket artillery (402) fires from a halt: no stabilizer'
+    assert 'IsDrillTank(v)' in code and 'IndirectFireSeat(seat)' in code
+    assert all(m in table for m in ('"504 Begaruta",{0.0f,0.0f}', '"Begaruta",{0.0f,0.0f}', '"612 Nix",{0.0f,0.0f}')), 'mech pilots: none'
+
+
+@test
 def lofted_arc_solver() -> None:
     """pylib/ballistics.py (the model common/weapon.cpp BallisticArc mirrors): the high and the low root both hit
     their point under the game's per-frame step (v += drop, p += v) within 5 cm, the high one above 45 deg and the low
@@ -770,8 +809,10 @@ def turret_aim_wired() -> None:
     assert 'PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)' in seat
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
-    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers'}, names
+    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware'}, names
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
+    assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
+    assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at
     # The rule itself: with the camera, only a lock in AUTO steers and the stick never drags; without, V1.
     rule = link.split('inline PlayerGun PlayerGunRule(', 1)[1].split('\n}', 1)[0]
     assert 'if(!cameraTurret)return PlayerGun{!lead,!lead};' in rule and 'return PlayerGun{!lead && locked,false};' in rule
