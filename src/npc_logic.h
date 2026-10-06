@@ -32,10 +32,11 @@ inline float Horiz(const float* a,const float* b) noexcept {
     return std::sqrt(dx*dx+dz*dz);
 }
 inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : v>hi ? hi : v; }
+// The angle into [-pi, pi]; no loop (an infinite or huge angle read from the game must not hang the game thread):
+// not finite gives 0.
 inline float Wrap(float a) noexcept {
-    while(a>kPi)a-=2.0f*kPi;
-    while(a<-kPi)a+=2.0f*kPi;
-    return a;
+    if(!std::isfinite(a))return 0.0f;
+    return std::remainder(a,2.0f*kPi);
 }
 // The unit horizontal direction from a to b; false when they stand on one spot.
 inline bool HorizDir(const float* a,const float* b,float* out) noexcept {

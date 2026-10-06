@@ -2643,7 +2643,9 @@ def npc_ai_wired() -> None:
     scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
     for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
         assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
-    assert 'h[kTrigger]=0;' in scripted and 'h[kTrigger]=1' not in scripted, 'a scripted unit: the trigger only taken off'
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger]=0;h[kTrigger+1]=0;' in veto, \
+        'a scripted unit: the trigger (both hands) only taken off'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '(At<std::uint8_t>(h,kNet)&1)' in think and 'IsPlayer(h)' in think, "only this machine's NPC soldiers"
     assert 'npc::Scripted(control) ? Scripted(' in think
@@ -2714,11 +2716,11 @@ def npc_ai_wired() -> None:
     gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'IsSoldierClass(rider)' in gun
     inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
-    assert inputs.index('Guarded(kStepNpcPost,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
     assert f'L"NpcBoarding"' in plugin and re.search(r'^NpcBoarding=1\s*$', ini, re.M) and 'NpcBoarding' in readme and 'NpcBoarding' in doc
     # A script's squad let go (§4.4): released once by npc::Step after the settle time, recruitable only with
     # ScriptNpcRecruit and never while a dismissal's cooldown keeps +0x540 clear.
-    assert 'npc::Step(q->script,npc::Scripted(control),ms,' in see
+    assert 'npc::Step(q->script,held,ms,' in see and 'const bool held=Routed(top)' in see, 'released when its route / fixed position ends (not a direction order)'
     assert 'Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow]' in see
     for key, default in (('ScriptNpcRecruit', '1'), ('ScriptNpcSettleSec', '5')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
