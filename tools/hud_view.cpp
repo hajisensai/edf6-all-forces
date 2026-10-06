@@ -24,6 +24,8 @@ PlayerFix player{};
 namespace {
 Config config{};
 // The scene: what the stubs hand the HUD.
+bool hasTurret=false;
+edf::aimlink::TurretReadoutV1 sceneTurret{};
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false;
 MapReadout sceneMap{};
 ProteusReadout sceneProteus{};
@@ -88,7 +90,7 @@ bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;ret
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
-bool PlayerTurretAim(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
+bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
 bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
@@ -172,6 +174,10 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<6;++i)Unit(MapKind::ally,140.0f+static_cast<float>(i)*9.0f,0.0f,-220.0f+static_cast<float>(i)*5.0f);
     Unit(MapKind::vehicle,-60.0f,0.0f,90.0f,30.0f);Unit(MapKind::vehicle,80.0f,0.0f,40.0f,-90.0f);
     Unit(MapKind::air,-150.0f,80.0f,300.0f,10.0f);Unit(MapKind::air,400.0f,300.0f,-100.0f,200.0f);
+    Unit(MapKind::air,180.0f,60.0f,180.0f,-40.0f).flags=kMapRotor;   // a helicopter
+    // Nobody's (team 5, map_marks.h): two parked jets on the ground and an empty tank.
+    Unit(MapKind::air,-260.0f,0.0f,40.0f,90.0f).flags=kMapEmpty;Unit(MapKind::air,-260.0f,0.0f,-10.0f,90.0f).flags=kMapEmpty;
+    Unit(MapKind::vehicle,30.0f,0.0f,-140.0f,0.0f).flags=kMapEmpty;
     Unit(MapKind::carrier,-500.0f,240.0f,-350.0f,45.0f).kind=MapKind::carrier;
     // The enemies nearest first (map.cpp Enemies): the nearest bracketed, two large ones with HP bars, a large flyer.
     // The small enemies (map.cpp Enemies): dots, a swarm of 300 ants and 40 flyers, the nearest one bracketed; the large
@@ -245,6 +251,16 @@ void Scene(const std::wstring& dir,const wchar_t* name,const float* pos,int widt
     std::printf("%ls\n",path.c_str());
 }
 
+// A frame drawn and not recorded: what the HUD sees before a scene (a switch's banner needs the value before it).
+void Prime(const float* pos,int width=1920) {
+    float vp[16];
+    const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
+    Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
+    HudPublish();
+    struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
+    HudDraw(vp,image,&viewport,nullptr,0);
+}
+
 // What `draw` puts on the screen (its quads and its text lines drawn), as a box.
 template<class F> Box Measured(F draw) {
     alignas(16) unsigned char renderer[kRendererSize]{},font[kFontSize]{};
@@ -279,6 +295,41 @@ bool StockLayoutApart(int width,const ProteusReadout* proteus=nullptr) {
     std::printf("%s  %dx1080%s: RWR scope (%.0f,%.0f)-(%.0f,%.0f), stock block (%.0f,%.0f)-(%.0f,%.0f)\n",apart && inside ? "ok  " : "FAIL",width,
                 proteus ? " (Proteus)" : "",rwr.x0,rwr.y0,rwr.x1,rwr.y1,block.x0,block.y0,block.x1,block.y1);
     return apart && rwr.any && block.any && inside;
+}
+
+// EDF6AutoTurret's mode lines (TurretAimMarks: the state, the keys; the longest: the lead circle, a lock) at `width` x
+// 1080: apart from the stock HUD's block and its RWR scope, on the screen, and saying plainly on or off.
+bool TurretLayoutApart(int width) {
+    const float w=static_cast<float>(width),h=1080.0f,s=1.0f;
+    void* const drawer=At<void*>(image,kQuadDrawer);
+    static unsigned char ctx[16]{};
+    float vp[16];
+    Camera(sceneStock.pos,sceneStock.hull,w,h,vp);
+    edf::aimlink::TurretReadoutV1 r=sceneTurret;
+    r.lock=edf::aimlink::Lock::locked;r.mode=edf::aimlink::Mode::leadCircle;r.lead=false;
+    std::memset(r.at,0,12);r.at[2]=-1000.0f;   // behind the camera: no lock box, the lines alone
+    bool off=false,on=false;
+    const Box lines=Measured([&](Text* t,Line* l,int* at){
+        TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
+        for(int i=0;i<*at;++i)off=off || wcsstr(l[i].text,L"AUTO-AIM OFF")!=nullptr;
+    });
+    r.mode=edf::aimlink::Mode::autoAim;
+    Measured([&](Text* t,Line* l,int* at){
+        TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
+        for(int i=0;i<*at;++i)on=on || (wcsstr(l[i].text,L"AUTO-AIM ON")!=nullptr) ;
+    });
+    PlayerJetSymbols y{};
+    std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
+    y.threats=sceneStock.threats;
+    for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
+    const Box rwr=Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);});
+    const StockExtras x{nullptr,&sceneDrill,false,&sceneEmc,nullptr};
+    const Box block=Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);});
+    auto apart=[](const Box& a,const Box& b){return a.x1<b.x0 || b.x1<a.x0 || a.y1<b.y0 || b.y1<a.y0;};
+    const bool ok=lines.any && apart(lines,rwr) && apart(lines,block) && lines.x0>=0.0f && lines.x1<=w && lines.y1<=h && on && off;
+    std::printf("%s  %dx1080: aim-mode lines (%.0f,%.0f)-(%.0f,%.0f), ON %d OFF %d; block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f)\n",
+                ok ? "ok  " : "FAIL",width,lines.x0,lines.y0,lines.x1,lines.y1,on,off,block.x0,block.y0,block.x1,block.y1,rwr.x0,rwr.y0,rwr.x1,rwr.y1);
+    return ok;
 }
 
 // A stock tank (three weapons, a missile and a lock on it) at `pos`, heading +z, the turret 30 degrees right.
@@ -326,8 +377,9 @@ int wmain(int argc,wchar_t** argv) {
     sceneJet.speed=95.0f;sceneJet.throttle=0.8f;sceneJet.clear=120.0f;sceneJet.climb=-45.0f;sceneJet.load=2.1f;sceneJet.air=true;
     sceneJet.ground=true;sceneJet.stall=true;sceneJet.liftShare=1.04f;sceneJet.pullUp=true;sceneJet.gpws=Gpws::pullUp;
     sceneJet.impactIn=2.4f;sceneJet.stores=3;sceneJet.store=1;
-    static const char* names[]={"AAM","AGM","BOMB"};
-    for(int i=0;i<3;++i){sceneJet.storeName[i]=names[i];sceneJet.storeRounds[i]=4-i;}
+    static const char* names[]={"AIM-120","AGM-65","Mk 82","AIM-9X","Hydra 70","AGM-114"};
+    static const int roles[]={0,1,2,0,3,1};
+    for(int i=0;i<3;++i){sceneJet.storeName[i]=names[i];sceneJet.storeRounds[i]=4-i;sceneJet.storeRole[i]=roles[i];}
     sceneJet.fuel=FuelReading{true,0.62f,-1.0f};   // the 506 body's idle burn: no time worth showing
     sceneJet.guns=2;sceneJet.gunRounds=1786;
     Symbols(sceneJet.sym,pos,-10.0f,-25.0f);
@@ -354,6 +406,14 @@ int wmain(int argc,wchar_t** argv) {
     sceneWarn.on=1u<<kWarnFuel;sceneWarn.litAt[kWarnFuel]=now-500;
     Scene(dir,L"jet_lowfuel",pos);
     sceneJet.fuel=FuelReading{true,0.62f,-1.0f};
+    // All six stores, the switch from the AIM-120 to the AIM-9X just made: the loadout strip with the banner over it.
+    sceneWarn.on=0;
+    sceneJet.stores=6;sceneJet.store=0;
+    for(int i=0;i<6;++i){sceneJet.storeName[i]=names[i];sceneJet.storeRounds[i]=i==2 ? 0 : 6-i;sceneJet.storeRole[i]=roles[i];}
+    Prime(pos);
+    sceneJet.store=3;
+    Scene(dir,L"jet_switch",pos);
+    sceneJet.stores=3;sceneJet.store=1;
 
     // A rotor craft sinking onto the ground, hovering slowly (the helicopter HUD).
     sceneJet.rotor=true;config.heliFlightHud=true;
@@ -374,6 +434,22 @@ int wmain(int argc,wchar_t** argv) {
     sceneHeli.fuel=FuelReading{true,0.41f,1830.0f};
     sceneWarn.on=1u<<kWarnSinkRate;sceneWarn.litAt[kWarnSinkRate]=now-4000;
     Scene(dir,L"heli_sinkrate",pos);
+    // The same stock heli with its weapons (StockHeliStores: the stock missile, the Hydra pod, the Hellfires; vhud.cpp
+    // labels by the round's class), the rockets just picked.
+    hasStock=true;
+    StockTank(pos);
+    sceneStock.heli=true;sceneStock.arms=3;sceneStock.threats=0;
+    {
+        static const char* labels[]={"MSL","RKT","MSL"};
+        static const RoundKind kinds[]={RoundKind::homing,RoundKind::rocket,RoundKind::homing};
+        for(int i=0;i<3;++i){StockArm& a=sceneStock.arm[i];strcpy_s(a.label,labels[i]);a.kind=kinds[i];a.ammo=i==1 ? 19 : 4;a.ammoMax=a.ammo;}
+        sceneStock.arm[2].ammo=0;sceneStock.arm[2].reload=0.4f;sceneStock.arm[2].reloadSec=6.0f;
+    }
+    sceneStock.selected=0;
+    Prime(pos);
+    sceneStock.selected=1;
+    Scene(dir,L"heli_stores",pos);
+    hasStock=false;
 
     // The stock vehicles' HUD: a tank under a missile and a lock, at 16:9 and 21:9; the drill tank overheating; a Nix
     // with its torso twisted 40 degrees left of its legs.
@@ -389,6 +465,18 @@ int wmain(int argc,wchar_t** argv) {
     int failed=0;
     failed+=!StockLayoutApart(1920);
     failed+=!StockLayoutApart(2520);
+    // EDF6AutoTurret's turret (the tank's gun the player is at): auto-aim on, then flipped to the lead circle (its banner).
+    hasTurret=true;
+    sceneTurret=edf::aimlink::TurretReadoutV1{};
+    sceneTurret.mode=edf::aimlink::Mode::autoAim;sceneTurret.keys=true;sceneTurret.ownGun=true;
+    sceneTurret.modeKey=0x5A;sceneTurret.lockKey=0x51;sceneTurret.modeButton=0;sceneTurret.lockButton=0x04;
+    Prime(ground);
+    Scene(dir,L"stock_turret_auto",ground);
+    sceneTurret.mode=edf::aimlink::Mode::leadCircle;
+    Scene(dir,L"stock_turret_lead_switch",ground);
+    failed+=!TurretLayoutApart(1920);
+    failed+=!TurretLayoutApart(2520);
+    hasTurret=false;
     hasDrill=false;
     // The EMC charging (62%) and firing (1.4 s of its beam left).
     hasEmc=true;

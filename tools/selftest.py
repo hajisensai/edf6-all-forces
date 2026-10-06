@@ -2516,7 +2516,8 @@ def map_wired() -> None:
         assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, f'{key} is not range-checked'
     for name, rva in (('kHoldAt', '0x572F0C'), ('kHoldResume', '0x572F1C'), ('kNoPad', '0x573A4D'), ('kCamVtable', '0x1768C10'),
                       ('kCamStep', '0xF86A0'), ('kLookTo', '0x4E220'), ('kTeamWalk', '0x5E11D0'), ('kMarkerVtable', '0x17D4378'),
-                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750'), ('kHostileWalk', '0x5E0F20')):
+                      ('kMarkerDtor', '0x5B0410'), ('kMarkerUpdate', '0x5B2750'), ('kHostileWalk', '0x5E0F20'),
+                      ('kOneTeamWalk', '0x5E0D60')):
         assert re.search(rf'\b{name}={rva}\b', code), (name, rva)
         assert rva in doc, rva
     for name, off in (('kCamTargetRef', '0x350'), ('kCamTarget', '0x360'), ('kCamMatrix', '0x220'), ('kHumanRecord', '0xD40'),
@@ -2556,7 +2557,8 @@ def map_wired() -> None:
         for arr, at in (('kHoldCode', consts['kHoldAt']), ('kNoPadCode', consts['kNoPad']), ('kCamStepCode', consts['kCamStep']),
                         ('kLookToCode', consts['kLookTo']), ('kLookToUse', 0xFC0D3), ('kTeamWalkCode', consts['kTeamWalk']),
                         ('kMarkerUpdateCode', consts['kMarkerUpdate']), ('kHostileWalkCode', consts['kHostileWalk']),
-                        ('kRadarCall', 0x82B8C3)):
+                        ('kRadarCall', 0x82B8C3), ('kOneTeamWalkCode', consts['kOneTeamWalk']),
+                        ('kBoardTeam5Code', consts['kBoardTeam5Call'])):
             want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(rf'{arr}\[\]=\{{(.*?)\}};', code, re.S).group(1)))
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
@@ -2587,6 +2589,13 @@ def map_wired() -> None:
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
     assert 'MapScene(dir,L"map_mid"' in src('tools/hud_view.cpp')
+    # The friendly marks walk team 5 (nobody's vehicles: the parked aircraft, every empty vehicle) besides the friends'
+    # walk, which never visits it (2026-10-06: aircraft missing from the map); classified by map_marks.h (checked offline).
+    gather = code.split('void Gather(Game& g,const unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
+    assert 'reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,mapmarks::kNobodysTeam,&w);' in gather, 'map: team 5 not walked'
+    assert 'mapmarks::WalksFor(team)' in gather and 'mapmarks::FriendlyMark(seen,&kind,&flags)' in code
+    assert 'EXCLUDE_FROM_ALL tools/map_marks_check.cpp' in cmake and 'map_marks_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert '0x5E0D60' in doc and 'kMapEmpty' in hud and 'MapAircraft(' in hud
     assert 'ViewMapClip(true,' in code and 'ViewMapClip(false,' in code
     # The enemies: every one the radar's hostile walk finds; the large ones pins by HP (kMapLargeEnemies), the small ones
     # dots by distance (kMapDots), the caps the README says; the
@@ -2602,6 +2611,22 @@ def map_wired() -> None:
     icon = hud[hud.index('void MapIcon('):hud.index('struct Pin {')]
     for kind in kinds:
         assert f'case MapKind::{kind}:' in icon, f'MapIcon draws no {kind}'
+
+
+@test
+def hud_switch_cues_wired() -> None:
+    """The loadout strip (every store's picture, name and rounds; the picked one large for a moment after a switch) and
+    EDF6AutoTurret's aim mode said as on / off with a banner on a flip (the user, 2026-10-06) are drawn where the stores
+    and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
+    hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
+    for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at)'):
+        assert call in hud, call
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'L"AUTO-AIM ON"' in hud and 'AUTO-AIM OFF' in hud
+    assert 'hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])' in hud
+    assert 'r.storeRole[i]=j.storeRole[i];' in src('src/playerjet.cpp')
+    assert 'EXCLUDE_FROM_ALL tools/hud_cue_check.cpp' in cmake and 'hud_cue_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'failed+=!TurretLayoutApart(1920);' in view and 'Scene(dir,L"jet_switch"' in view
 
 
 @test

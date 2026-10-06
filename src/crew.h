@@ -709,6 +709,7 @@ struct PlayerJetReadout {
     int stores,store;
     const char* storeName[6];
     int storeRounds[6];
+    int storeRole[6];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
     bool bomb,hasImpact;
     float impact[3];
     int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
