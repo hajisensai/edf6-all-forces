@@ -272,23 +272,24 @@ def make_stock_fingerprints(ref: Mdb, ref_rab: Rab) -> tuple[dict[str, str], dic
 
 # ------------------------------------------------------------------------------------------ build
 
-def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - rootcpk.Game
-    """(new model, the archive with the textures (model member not yet replaced), info)."""
+def _sources(game, folder: str) -> tuple[Rab, Rab, Mdb, Mdb, om.ObjFile, dict[str, int], dict[str, int]]:  # noqa: ANN001
+    """(host archive, E551 archive, host model, E551 model, the OBJ, host bone -> index, E551 bone -> index)."""
     host_rab = rab_read(game.read('OBJECT', HOST_ARC))
     ref_rab = rab_read(game.read('OBJECT', REF_ARC))
     host0 = mdb_read(member(host_rab, HOST_MDB).data)
     ref = mdb_read(member(ref_rab, REF_MDB).data)
     obj = om.read_obj(os.path.join(folder, OBJ_FILE))
-    info: dict = {}
     hb = {host0.name_of(b.name): b.index for b in host0.bones}
     rb = {ref.name_of(b.name): b.index for b in ref.bones}
     for n in set(E551_TO_HOST.values()) | set(HOST_AT_E551) | set(GUN_BONES):
         _req(n in hb, f'host bone {n} missing')
     for n in set(E551_TO_HOST) | set(HOST_AT_E551.values()):
         _req(n in rb, f'E551 bone {n} missing')
+    return host_rab, ref_rab, host0, ref, obj, hb, rb
 
-    # 1. the chassis: the E551's own meshes, cut to the triangles on the OBJ's E551 parts (each OBJ triangle must be an
-    #    E551 one), re-skinned onto the Kepler's bones; the turret split into body and barrels
+
+def _split_obj(obj: om.ObjFile) -> tuple[list[om.Part], om.Part]:
+    """(the OBJ's E551 parts, its turret object)."""
     chassis: list[om.Part] = []
     turret: om.Part | None = None
     for part in om.obj_parts(obj):
@@ -299,6 +300,38 @@ def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - r
         else:
             chassis.append(part)
     _req(turret is not None, f'{OBJ_FILE}: no turret object')
+    return chassis, turret  # type: ignore[return-value]
+
+
+def _posed(host0: Mdb, ref: Mdb, hb: dict[str, int], rb: dict[str, int], barrels: dict[str, Barrel]) -> Mdb:
+    """The Kepler's skeleton (no geometry) with its bones moved onto this model (stock rotations): the wheels, tracks
+    and turret onto the E551's, the guns onto the barrels' trunnions and muzzles."""
+    md = replace(host0, objects=[replace(host0.objects[0], meshes=[])], materials=[], textures=[], buffer_order=None)
+    rw = bind_world(ref)
+    for n in sorted(HOST_AT_E551, key=lambda n: hb[n]):      # parents first (bones are stored parent-first)
+        md = g.set_bone_origin(md, hb[n], tuple(rw[rb[HOST_AT_E551[n]]][12:15]))  # type: ignore[arg-type]
+    for s, b in barrels.items():
+        md = g.set_bone_origin(md, hb[f'cannon_{s}'], b.pivot)
+        md = g.set_bone_origin(md, hb[f'cannon_slide_{s}'], b.muzzle)
+    return md
+
+
+def skeleton(game, folder: str) -> Mdb:  # noqa: ANN001 - rootcpk.Game
+    """The model's skeleton alone (what its bones' binds are, without building the meshes and textures): what the
+    vehicle's ragdoll is fitted to (tools/make_artillery.py ragdoll)."""
+    _hr, _rr, host0, ref, obj, hb, rb = _sources(game, folder)
+    _body, barrels = split_turret(_split_obj(obj)[1])
+    return _posed(host0, ref, hb, rb, barrels)
+
+
+def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - rootcpk.Game
+    """(new model, the archive with the textures (model member not yet replaced), info)."""
+    host_rab, ref_rab, host0, ref, obj, hb, rb = _sources(game, folder)
+    info: dict = {}
+
+    # 1. the chassis: the E551's own meshes, cut to the triangles on the OBJ's E551 parts (each OBJ triangle must be an
+    #    E551 one), re-skinned onto the Kepler's bones; the turret split into body and barrels
+    chassis, turret = _split_obj(obj)
     pts, obj_tris = chassis_points(chassis)
     stock, kept = stock_meshes(ref, pts, {rb[n]: hb[h] for n, h in E551_TO_HOST.items()})
     _req(not obj_tris - kept, f'{OBJ_FILE}: {len(obj_tris - kept)} E551-part triangles the E551 does not have')
@@ -308,17 +341,11 @@ def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - r
     info['chassis_tris'] = len(kept)
     _req({ref.name_of(ref.materials[m].name) for m, _me in stock} == set(HULL_MATERIALS),
          'the chassis does not use exactly the E551 materials ' + ', '.join(HULL_MATERIALS))
-    body, barrels = split_turret(turret)  # type: ignore[arg-type]
+    body, barrels = split_turret(turret)
     info['barrels'] = barrels
 
     # 2. the skeleton: the Kepler's, bones moved onto this model (stock rotations)
-    md = replace(host0, objects=[replace(host0.objects[0], meshes=[])], materials=[], textures=[], buffer_order=None)
-    rw = bind_world(ref)
-    for n in sorted(HOST_AT_E551, key=lambda n: hb[n]):      # parents first (bones are stored parent-first)
-        md = g.set_bone_origin(md, hb[n], tuple(rw[rb[HOST_AT_E551[n]]][12:15]))  # type: ignore[arg-type]
-    for s, b in barrels.items():
-        md = g.set_bone_origin(md, hb[f'cannon_{s}'], b.pivot)
-        md = g.set_bone_origin(md, hb[f'cannon_slide_{s}'], b.muzzle)
+    md = _posed(host0, ref, hb, rb, barrels)
 
     # 3. materials and textures: the chassis takes the E551's materials as they are (the tracks under the Kepler's
     #    names) and their stock texture members (stored bytes); the turret the user's albedo (DDS as it is, PNG /
@@ -329,7 +356,7 @@ def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - r
     stock_files = sorted({md.textures[x.texture].filename for m in md.materials for x in m.textures})
     g.copy_texture_members(host_rab, ref_rab, stock_files)
     tm = TURRET_MATERIAL[0]
-    albedo = om.texture_path(obj, turret.material)  # type: ignore[union-attr]
+    albedo = om.texture_path(obj, turret.material)
     tex = {'albedo': os.path.basename(albedo).rsplit('.', 1)[0].lower() + '.dds', 'normal': FLAT_NORMAL[0],
            'param_r_m_occ_hr': PLAIN_RMO[0]}
     made = {tex['albedo']: om.texture_dds(albedo), FLAT_NORMAL[0]: texfile.solid_dxt1(FLAT_NORMAL[1]),
@@ -517,6 +544,19 @@ def weighted_counts(md: Mdb) -> dict[int, int]:
     return out
 
 
+def turret_weights(md: Mdb) -> dict[int, int]:
+    """Per bone, how many vertices of the turret's own material (turret body and barrels) it moves."""
+    mat = next(m.index for m in md.materials if md.name_of(m.name) == TURRET_MATERIAL[0])
+    out: dict[int, int] = {}
+    for o in md.objects:
+        for me in o.meshes:
+            if me.material == mat:
+                for r, wt in zip(*g.skin_columns(me)):
+                    for b in {int(i) for i, x in zip(r, wt) if x > 0}:
+                        out[b] = out.get(b, 0) + 1
+    return out
+
+
 def check(arc: bytes) -> None:
     """Re-read `arc` and raise ArtilleryCheckError unless: archive and model round-trip; < 256 bones; every mesh's
     vertex buffer, indices, blend indices (skin bones only), weights, material and numbering are valid; every
@@ -563,6 +603,9 @@ def check(arc: bytes) -> None:
     pos = {md.name_of(b.name): w[b.index][12:15] for b in md.bones}
     for n in ('doppler_radar', 'tracking_radar'):
         _req(md.bone_index(n) not in weighted, f'{n} carries geometry')
+    driven = {md.bone_index(n): n for n in ['cannon_main'] + GUN_BONES}   # what the class turns (slot 45 / the hinges)
+    _req(set(turret_weights(md)) == set(driven), 'the turret is not skinned to exactly the turret and gun bones: '
+         + ', '.join(sorted(md.name_of(md.bones[b].name) for b in turret_weights(md))))
     for n in MOVED + ['body']:
         _req(weighted.get(md.bone_index(n), 0) >= 8, f'{n}: no geometry')
     for s in 'lr':
