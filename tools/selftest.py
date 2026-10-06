@@ -2570,7 +2570,7 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp'):
+                'src/proteus.cpp', 'src/npcai.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
@@ -2583,7 +2583,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -2695,6 +2695,14 @@ def npc_ai_wired() -> None:
     for key, default in (('NpcGuardRadius', '15'), ('NpcFreeRange', '120'), ('NpcRecruitCooldownSec', '60')):
         assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
         assert key in readme and key in doc, key
+    # The mark (§6.3): its key read on foot only (in a vehicle Q is the vehicle's: Proteus, the jets, the turrets), drawn
+    # by the HUD; the focus order needs it.
+    tick = code.split('void MarkTick() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey)' in tick
+    assert 'NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
+    assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
+    for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
 

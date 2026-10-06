@@ -231,6 +231,8 @@ void Validate(Config& n) noexcept {
     n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
     n.npcSquadMax=static_cast<int>(FixInt("NpcSquadMax",n.npcSquadMax,n.npcSquadMin,32));
     Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
+    n.npcMarkKey=static_cast<int>(FixInt("NpcMarkKey",n.npcMarkKey,0,254));
+    Fix("NpcMarkCone",n.npcMarkCone,1.0f,45.0f);
     Fix("NpcGuardRadius",n.npcGuardRadius,2.0f,500.0f);
     Fix("NpcFreeRange",n.npcFreeRange,10.0f,2000.0f);
     Fix("NpcRecruitCooldownSec",n.npcRecruitCooldownSec,0.0f,3600.0f);
@@ -470,6 +472,8 @@ void LoadConfig() noexcept {
     n.npcSquadMin=ReadInt(L"NpcSquadMin",static_cast<DWORD>(n.npcSquadMin));
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
     n.npcSquadJoinRange=ReadFloat(L"NpcSquadJoinRange",n.npcSquadJoinRange);
+    n.npcMarkKey=ReadInt(L"NpcMarkKey",static_cast<DWORD>(n.npcMarkKey));
+    n.npcMarkCone=ReadFloat(L"NpcMarkCone",n.npcMarkCone);
     n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
     n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
     n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
@@ -508,6 +512,7 @@ void LoadConfig() noexcept {
         n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
+    Log("CONFIG npc markKey=0x%X markCone=%.0f",n.npcMarkKey,n.npcMarkCone);
     Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,

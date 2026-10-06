@@ -100,6 +100,9 @@ bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap; }
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
+// The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
+bool sceneMarkOn=false;float sceneMark[3]{};
+bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
 void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -513,8 +516,16 @@ int wmain(int argc,wchar_t** argv) {
     sceneNix.dir[0]=std::sin(0.7f);sceneNix.dir[2]=std::cos(0.7f);sceneNix.held=true;
     Scene(dir,L"stock_nix",ground);
     hasNix=false;
-    // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.
+    // On foot with an enemy marked for the NPCs (npcai.cpp, the Q mark): the amber diamond and its distance, nothing else.
     hasStock=false;
+    const bool heliWas=hasHeli;hasHeli=false;
+    const float noseWas[3]={sceneHeli.sym.nose[0],sceneHeli.sym.nose[1],sceneHeli.sym.nose[2]};
+    sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
+    sceneMarkOn=true;sceneMark[0]=ground[0]+25.0f;sceneMark[1]=ground[1]+6.0f;sceneMark[2]=ground[2]+180.0f;
+    Scene(dir,L"npc_mark",ground);
+    sceneMarkOn=false;hasHeli=heliWas;
+    std::memcpy(sceneHeli.sym.nose,noseWas,12);
+    // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.
     MapScene(dir,L"map_mid",700.0f,60.0f,20.0f,false);
     MapScene(dir,L"map_high_pad",3000.0f,85.0f,-40.0f,true);
     MapScene(dir,L"map_low",200.0f,32.0f,0.0f,false);

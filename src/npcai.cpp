@@ -159,6 +159,62 @@ void PlayerLane(World& w) noexcept {
     w.lane=true;
 }
 
+// --- The mark (§6.3) ---
+// On foot, the map shut, the game in front: NpcMarkKey marks the enemy lock point nearest the screen's centre within
+// NpcMarkCone degrees (the same one again: the mark let go). Kept while that enemy is in the frame's enemy list. The
+// squads told to focus fire all take it; every other soldier takes it first when it is within its longest reach plus
+// how far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
+struct MarkState { ObjRef obj; float at[3]; bool held; };
+MarkState mark{};
+struct MarkPub { bool on; float at[3]; ULONGLONG wall; };
+MarkPub markPub{};
+SRWLOCK markLock=SRWLOCK_INIT;
+constexpr float kMarkFar=2000.0f;   // m: no mark past this
+
+bool KeyHeld(int vk) noexcept {
+    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+}
+
+const Enemy* MarkedEnemy() noexcept {
+    if(!mark.obj)return nullptr;
+    for(int i=0;i<world.enemies;++i)if(world.enemy[i].object==mark.obj.obj)return &world.enemy[i];
+    return nullptr;
+}
+
+void ToggleMark() noexcept {
+    float eye[3],dir[3];
+    if(!CameraRay(eye,dir))return;
+    const float cone=Cfg().npcMarkCone*npc::kPi/180.0f;
+    const Enemy* best=nullptr;float bestOff=cone;
+    for(int i=0;i<world.enemies;++i) {
+        const Enemy& e=world.enemy[i];
+        const float to[3]={e.aim[0]-eye[0],e.aim[1]-eye[1],e.aim[2]-eye[2]};
+        const float d=npc::Len(to);
+        if(d<1.0f || d>kMarkFar)continue;
+        const float off=std::acos(npc::Clamp(npc::Dot(to,dir)/d,-1.0f,1.0f));
+        if(off<bestOff){bestOff=off;best=&e;}
+    }
+    const bool same=best && mark.obj.obj==best->object;
+    if(best && !same){mark.obj=ObjRef::Of(best->object);std::memcpy(mark.at,best->aim,12);}
+    else mark.obj=ObjRef{};
+    Log("NPCAI mark: %s",best ? (same ? "let go" : "an enemy marked") : "nothing near the screen's centre to mark");
+}
+
+void MarkTick() noexcept {
+    unsigned char* const me=PlayerHuman();
+    const bool down=Cfg().npcMarkKey>0 && me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey);
+    if(down && !mark.held)ToggleMark();
+    mark.held=down;
+    if(const Enemy* e=MarkedEnemy())std::memcpy(mark.at,e->aim,12);
+    else if(mark.obj){mark.obj=ObjRef{};Log("NPCAI mark: the marked enemy is gone");}
+    AcquireSRWLockExclusive(&markLock);
+    markPub.on=static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    ReleaseSRWLockExclusive(&markLock);
+}
+
 void Gather(std::int32_t team) noexcept {
     World& w=world;
     w.frame=GameFrame();w.team=team;w.enemies=w.friends=0;
@@ -170,6 +226,7 @@ void Gather(std::int32_t team) noexcept {
         reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&f);
     }
     PlayerLane(w);
+    MarkTick();
 }
 
 Soldier* Entry(const unsigned char* h,ULONGLONG ms) noexcept {
@@ -497,7 +554,7 @@ Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
     Orders o{anchor,Cfg().npcLeash,false};
     if(!q)return o;
     if(q->cmd.order==Order::guard){o.anchor=q->cmd.at;o.leash=Cfg().npcGuardRadius;o.hold=true;}
-    else if(q->cmd.order==Order::engage){o.anchor=q->cmd.at;o.leash=Cfg().npcFreeRange;}
+    else if(q->cmd.order==Order::engage || q->cmd.order==Order::focus){o.anchor=q->cmd.at;o.leash=Cfg().npcFreeRange;}
     return o;
 }
 
@@ -509,7 +566,14 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
                                s.control==npc::Control::squad && root ? Pos(root) : s.home);
     const float* anchor=o.anchor;
     const float engage=npc::EngageRange(a.arm,a.n,Cfg().npcEngageShare);
-    const Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage) : Pick{nullptr,0.0f};
+    Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage) : Pick{nullptr,0.0f};
+    // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
+    if(const Enemy* m=MarkedEnemy()) {
+        float reach=0.0f;
+        for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
+        const bool focus=q && q->cmd.order==Order::focus;
+        if(focus || npc::MarkInReach(eye,m->aim,reach,o.leash))t=Pick{m,npc::Dist(eye,m->aim)};
+    }
     s.target=t.e ? ObjRef::Of(t.e->object) : ObjRef{};
     const unsigned mask=At<std::uint32_t>(h,kControlMask);
     if(t.e) {
@@ -719,6 +783,7 @@ void ResetNpcAi() noexcept {
     for(auto& s:soldiers)s=Soldier{};
     for(auto& q:squads)q=Squad{};
     cooldowns=npc::Cooldowns<kMaxSquads>{};
+    mark=MarkState{};
     world=World{};
     fullLoggedAt=listLoggedAt=0;
 }
@@ -792,6 +857,7 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
             q->cmd=c;
             break;
         case Order::engage:
+        case Order::focus:   // the mark (mapcmd refuses it with none)
             q->cmd=c;std::memcpy(q->cmd.at,Pos(top),12);
             break;
         case Order::none:
@@ -817,11 +883,19 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
             Log("NPCAI squad %p dismissed: it holds here, recruitable again in %.0f s",top,Cfg().npcRecruitCooldownSec);
             break;
         default:
-            return false;   // focus (P5), board / dismount (P6)
+            return false;   // board / dismount (P6)
         }
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-bool NpcMarked() noexcept { return false; }   // the mark arrives with P5 (docs/npc-ai-design.md §6.3)
+bool NpcMarked() noexcept { return mark.obj.obj!=nullptr; }
+
+bool NpcMarkReadout(float* at) noexcept {
+    AcquireSRWLockShared(&markLock);
+    const bool on=markPub.on && GetTickCount64()-markPub.wall<=500;
+    if(on)std::memcpy(at,markPub.at,12);
+    ReleaseSRWLockShared(&markLock);
+    return on;
+}
 }  // namespace crew
