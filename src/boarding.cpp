@@ -217,6 +217,13 @@ void BoardingTick() noexcept {
 
 const void* BoardingOnly() noexcept { return only; }
 
+// A board request of the plugin's own (sazabi.cpp's SazabiTestBoard): the player into `v` as a boarding gun round at it
+// would put them (StartBoarding; BoardingTick presses on until they are in or kTryMs is out).
+void BoardingRequest(unsigned char* v) noexcept {
+    unsigned char* const human=ready ? PlayerHuman() : nullptr;
+    if(human && v)StartBoarding(human,v,GameMs());
+}
+
 void ResetBoarding() noexcept {
     boarding=Boarding{};   // the mission's objects are gone: nothing to give a team back to
     shooter.store(nullptr,std::memory_order_relaxed);

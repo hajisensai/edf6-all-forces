@@ -112,6 +112,7 @@ struct Config {
     bool sazabiInvertAim=false;     // the aim's up and down the other way
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
+    bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
@@ -537,6 +538,7 @@ bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept;     // saz
 // sazabi.cpp: the Sazabi (docs/gundam-plan.md), a 506 body with the Sazabi mark (7401-7499): never crewed, never flown
 // as a heli; with the player in seat 0 it walks and flies; its bones are posed every frame.
 bool IsSazabi(const void* vehicle) noexcept;
+void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
 void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
 bool InstallSazabi() noexcept;                        // after InstallBody506
 void ResetSazabi() noexcept;                          // a new mission

@@ -396,6 +396,7 @@ void LoadConfig() noexcept {
     n.sazabiInvertAim=ReadBool(L"SazabiInvertAim",n.sazabiInvertAim);
     n.sazabiDashKey=ReadInt(L"SazabiDashKey",static_cast<DWORD>(n.sazabiDashKey));
     n.sazabiDescendKey=ReadInt(L"SazabiDescendKey",static_cast<DWORD>(n.sazabiDescendKey));
+    n.sazabiTestBoard=ReadBool(L"SazabiTestBoard",n.sazabiTestBoard);
     n.playerJetRollScale=ReadFloat(L"PlayerJetRollScale",n.playerJetRollScale);
     n.playerJetAimGain=ReadFloat(L"PlayerJetAimGain",n.playerJetAimGain);
     n.playerRotorLift=ReadFloat(L"PlayerRotorLift",n.playerRotorLift);
@@ -566,9 +567,9 @@ void LoadConfig() noexcept {
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d",n.vehicleHud,
         n.vehicleHudCount,n.vehicleHudRange,n.stockVehicleHud,n.hideStockGauges,n.hudScale,n.hudLanguage);
-    Log("CONFIG sazabi=%d walk=%.0f run=%.0f fly=%.0f dash=%.0f climb=%.0f gravity=%.1f turn=%.0f mouse=%.2f thrusters=%.1fs regen=%.2f invert=%d dashKey=0x%X descendKey=0x%X",
+    Log("CONFIG sazabi=%d walk=%.0f run=%.0f fly=%.0f dash=%.0f climb=%.0f gravity=%.1f turn=%.0f mouse=%.2f thrusters=%.1fs regen=%.2f invert=%d dashKey=0x%X descendKey=0x%X testBoard=%d",
         n.sazabi,n.sazabiWalk,n.sazabiRun,n.sazabiFly,n.sazabiDash,n.sazabiClimb,n.sazabiGravity,n.sazabiTurn,n.sazabiMouseTurn,
-        n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey);
+        n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiTestBoard);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
         n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,
         n.playerRotorLift,n.jetSound,n.jetSoundVolume);

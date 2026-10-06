@@ -62,6 +62,7 @@ constexpr float kAimMost=55.0f*sazabi::kDeg;
 constexpr float kAttitudeGain=6.0f,kAttitudeMost=3.0f;   // BodyAttitude: 1/s, rad/s
 constexpr float kAirBlendRate=4.0f,kCrouchDecay=2.2f,kAimRate=3.0f;
 constexpr ULONGLONG kLogMs=1000;
+constexpr ULONGLONG kTestBoardMs=6000;   // SazabiTestBoard: this long after it is first seen (the player has landed)
 
 struct Mech {
     ObjRef ref;
@@ -80,6 +81,8 @@ constexpr int kMaxMechs=8;
 Mech mechs[kMaxMechs]{};
 sazabi::Pose scratch;   // game thread only
 bool installed=false,poseOk=false;
+bool testBoarded=false;   // SazabiTestBoard: once a mission
+ULONGLONG firstSeenMs=0;
 
 bool Live(const Mech& m) noexcept {
     const auto ctrl=static_cast<const unsigned char*>(m.ref.ctrl);
@@ -334,6 +337,17 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Pose(m,v);
     Report(m,v,c,ms);
 }
+// SazabiTestBoard (tests only): kTestBoardMs after the first Sazabi is seen, the player on foot is put into it once.
+void TestBoard(const Mech& m,unsigned char* v) noexcept {
+    if(!Cfg().sazabiTestBoard || testBoarded || m.driven)return;
+    const ULONGLONG ms=GameMs();
+    if(!firstSeenMs)firstSeenMs=ms;
+    unsigned char* const human=PlayerHuman();
+    if(ms-firstSeenMs<kTestBoardMs || !human || !HumanOnFoot(human))return;
+    testBoarded=true;
+    Log("SAZABI v=%p: SazabiTestBoard puts the player into it",v);
+    BoardingRequest(v);
+}
 }  // namespace
 
 bool IsSazabi(const void* vehicle) noexcept { return BodyOf(vehicle)==PluginBody::sazabi; }
@@ -348,6 +362,7 @@ void SazabiFrame(unsigned char* v) noexcept {
     if(!m && (m=Make(v))==nullptr)return;
     m->frame=GameFrame();
     Drive(*m,v,GameMs());
+    TestBoard(*m,v);
 }
 
 // The 506 physics step (body506.cpp), after the stock one: the walk's or the flight's velocity, the spin upright.
@@ -374,5 +389,7 @@ bool InstallSazabi() noexcept {
 
 void ResetSazabi() noexcept {
     for(auto& m:mechs)m=Mech{};
+    testBoarded=false;
+    firstSeenMs=0;
 }
 }  // namespace crew
