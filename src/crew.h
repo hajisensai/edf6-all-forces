@@ -775,8 +775,8 @@ void HeliSightFrame(unsigned char* vehicle) noexcept;
 // pose replication stands (the NET lines, docs/online-re.md). Reads only.
 void NetProbe(unsigned char* vehicle) noexcept;
 // Whether this machine is in an online session (netprobe.cpp; true when the session function is not the one read).
-// Every machine of a room makes its own aircraft for the same calls (docs/online-re.md §2): what only one machine
-// does (the call picked here) gives each machine different aircraft for the same call.
+// This is a session query, not proof that an object participates in replication: plugin call aircraft do not
+// register a network identity; delivered vehicles do (docs/online-re.md sections 1 and 2).
 bool InSession() noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most

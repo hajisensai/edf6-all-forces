@@ -211,6 +211,13 @@ target_link_libraries(boarding_hit_test PRIVATE edf6common)
 target_compile_options(boarding_hit_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME boarding_hit COMMAND boarding_hit_test)
 
+# Exercise the production call picker with local/remote owners, without a running game.
+add_executable(call_pick_test tests/call_pick_test.cpp)
+target_link_libraries(call_pick_test PRIVATE edf6common)
+target_include_directories(call_pick_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(call_pick_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME call_pick COMMAND call_pick_test)
+
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check

@@ -1,0 +1,98 @@
+// Execute the production picker and resolver with real IsPlayer/RemoteRider and synthetic weapon/human memory.
+// No game is started and no network or spawning functions are called.
+#include "../src/airstrike.cpp"
+#include <cstdio>
+#include <cstdlib>
+
+namespace crew {
+unsigned char* image=nullptr;
+Config config{};
+PlayerFix player{};
+bool testOnline=true;
+const Config& Cfg() noexcept { return config; }
+bool InSession() noexcept { return testOnline; }
+void Log(const char*,...) noexcept {}
+ULONGLONG GameMs() noexcept { return 3600000; }
+int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept { return EXCEPTION_EXECUTE_HANDLER; }
+bool JetLaunch(JetRole,const float*,const float*,const float*,DWORD,const void*,bool) noexcept { return false; }
+unsigned char* HeliLaunch(HeliBody,const float*,const float*) noexcept { return nullptr; }
+void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {}
+unsigned char* SubLaunch(const float*,const float*) noexcept { return nullptr; }
+bool JetLaunchBomber(const float*,const float*,const float*,const BombLoad&,DWORD,const void*,JetBody,const void*) noexcept {
+    return false;
+}
+bool JetHolds(const void*) noexcept { return false; }
+JetBody BomberBody(const unsigned char*) noexcept { return JetBody::kind; }
+unsigned char* JetLaunchThrown(ThrownDrone,const float*,const float*,DWORD,const void*) noexcept { return nullptr; }
+}
+
+namespace {
+int checks=0;
+void Check(bool condition,const char* description) {
+    ++checks;
+    if(!condition){std::fprintf(stderr,"FAIL: %s\n",description);std::exit(1);}
+}
+void LocalHuman(unsigned char* human) {
+    crew::Put<const void*>(human,crew::kHumanPad,human);
+    crew::Put<unsigned char>(human,crew::kHumanPlayer,1);
+}
+}
+
+int main() {
+    using namespace crew;
+    alignas(16) unsigned char weapon[0x1700]{},local[0x400]{},splitScreen[0x400]{},remote[0x400]{},npc[0x400]{},noPad[0x400]{};
+    void* const ifc=weapon+kWeaponIfc;
+    LocalHuman(local);LocalHuman(splitScreen);LocalHuman(remote);
+    Put<unsigned char>(remote,edf::kRiderNet+edf::kNetFlags,1);
+    Put<const void*>(npc,kHumanPad,npc);   // a non-player may have a controller; both player conditions matter
+    Put<unsigned char>(noPad,kHumanPlayer,1);
+    wchar_t banner[256]{};
+    Check(InSession(),"fixture is online");
+    Check(IsPlayer(local) && IsPlayer(splitScreen),"both local split-screen players use the real player predicate");
+    Check(IsPlayer(remote) && edf::RemoteRider(remote),"remote-owned player cannot inherit the local picker even with a pad");
+
+    picked.store(-1);
+    CallPick(1,banner,_countof(banner));
+    Check(picked.load()==0,"online next key changes the pick");
+    Check(std::wcsstr(banner,kCallLabels[0])!=nullptr,"online banner identifies the chosen call");
+    CallPick(-1,banner,_countof(banner));
+    Check(picked.load()==-1,"previous key restores each-weapon-own mode");
+
+    // Five different local choices across every call weapon: a remote call's own mark must always win.
+    const int choices[]={0,2,6,12,kCallCount-1};
+    for(const int chosen:choices) {
+        picked.store(-1);
+        CallPick(chosen+1,banner,_countof(banner));
+        Check(picked.load()==chosen,"online picker reaches each requested choice");
+        for(int own=0;own<kCallCount;++own) {
+            Put<float>(weapon,kWeaponHitSize,kCalls[own].mark);
+            Check(CallOf(ifc,local)==&kCalls[chosen],"local player's call uses the local pick");
+            Check(CallOf(ifc,splitScreen)==&kCalls[chosen],"second local player shares this machine's pick");
+            Check(CallOf(ifc,remote)==&kCalls[own],"remote player's call keeps its weapon definition");
+            Check(CallOf(ifc,nullptr)==&kCalls[own],"unknown caller keeps the weapon definition");
+            Check(CallOf(ifc,npc)==&kCalls[own],"NPC call keeps the weapon definition");
+            Check(CallOf(ifc,noPad)==&kCalls[own],"player flag without a local controller cannot override");
+            Check(At<float>(weapon,kWeaponHitSize)==kCalls[own].mark,"resolution does not rewrite the shared weapon marker");
+        }
+        Put<float>(weapon,kWeaponHitSize,1.0f);
+        Check(CallOf(ifc,local)==nullptr && CallOf(ifc,remote)==nullptr,"stock calls are never converted by the pick");
+        Put<float>(weapon,kWeaponHitSize,9999.0f);
+        Check(CallOf(ifc,local)==nullptr,"an unknown marker is never converted by the pick");
+        CallPick(-chosen-1,banner,_countof(banner));
+        Check(picked.load()==-1,"every choice can return to each-weapon-own mode");
+        for(int own=0;own<kCallCount;++own) {
+            Put<float>(weapon,kWeaponHitSize,kCalls[own].mark);
+            Check(CallOf(ifc,local)==&kCalls[own] && CallOf(ifc,remote)==&kCalls[own],"each-own mode resolves both callers normally");
+        }
+    }
+
+    testOnline=false;
+    CallPick(1,banner,_countof(banner));
+    Put<float>(weapon,kWeaponHitSize,kCalls[kCallCount-1].mark);
+    Check(CallOf(ifc,local)==&kCalls[0],"offline local picker behavior is preserved");
+    testOnline=true;
+    Check(CallOf(ifc,local)==&kCalls[0],"joining a session does not erase the local selection");
+    Check(CallOf(ifc,remote)==&kCalls[kCallCount-1],"joining a session does not apply that selection to remote calls");
+    std::printf("call picker: %d checks passed\n",checks);
+    return 0;
+}

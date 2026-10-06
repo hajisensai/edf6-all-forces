@@ -15,8 +15,9 @@
 //    their AmmoHitSizeAdjust, weapon+0x8C4, kCalls' marks): at the call (its one call of IFC_Start,
 //    0x6A8DFB) the plugin launches that call's jets or helis instead of its bombers, which it keeps home
 //    (the call's plane count, ifc+0x80, set to 0 after IFC_Start: the call is spent, its state machine
-//    goes back to idle). A guard call works round its marker, a follow call round the player. Only the
-//    caller's game does this: in an online game the others see the stock bombers.
+//    goes back to idle). A guard call works round its marker, a follow call round the player. Each
+//    modded machine does this when it replays the call. The local picker changes only a local player's call;
+//    remote players' calls keep their weapon's definition (docs/online-re.md sections 1 and 9).
 //  - The call weapons are owned from the start (docs/loadout-re.md section 8): before the game's own
 //    "grant the installed DLC weapons" step (0xDC550, UnlockDownloadContents: after every save load, and
 //    in a new game's reset; its two entries, a call at 0xDC348 and the script thunk's jump at 0x70FF87,
@@ -127,8 +128,8 @@ struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* ob
 // drone its bomb releases and that drone's fuel.
 struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
 #include "calls.inc"
-// The in-mission pick (CallPick, overlay.cpp's keys): -1 = every call weapon brings its own call, else
-// every call weapon brings kCalls[picked].
+// The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
+// call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
 std::atomic<int> picked{-1};
 
 // Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
@@ -187,15 +188,14 @@ void CheckCallTable() noexcept {
     else Log("CALLS all %d rows in the weapon table, their files there",kCallRowCount);
 }
 
-// The call weapon `ifc` is in, or nullptr (a stock call): what it brings is the picked call, if any. Online every
-// machine makes the aircraft of every player's call (crew.h InSession): the pick is this machine's alone, so there
-// each call weapon brings its own.
-const Call* CallOf(const void* ifc) noexcept {
+// The call weapon `ifc` is in, or nullptr (a stock call). The owner comes from IFC_Start's parameter weak pair,
+// populated by the native RadioContact call state. Never apply this machine's preference to a remote replay.
+const Call* CallOf(const void* ifc,const unsigned char* owner) noexcept {
     const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
     if(!Readable(w+kWeaponHitSize,4))return nullptr;
     const float mark=At<float>(w,kWeaponHitSize);
-    const int p=InSession() ? -1 : picked.load();
-    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return p>=0 ? &kCalls[p] : &c;
+    const int p=IsPlayer(owner) && !edf::RemoteRider(owner) ? picked.load() : -1;
+    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return p>=0 && p<kCallCount ? &kCalls[p] : &c;
     return nullptr;
 }
 
@@ -241,7 +241,8 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
     const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
     if(!Cfg().enabled || !Cfg().jetAirRaider)return result;
     __try {
-        const Call* const c=CallOf(ifc);
+        const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
+        const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
         if(c && std::isfinite(target[0]+target[1]+target[2]) && LaunchCall(*c,target)>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
     } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) {}
@@ -534,11 +535,6 @@ bool Redirect(unsigned site,const unsigned char* sig,std::size_t size,void* hook
 
 // One step through "each its own" and kCalls; `out` gets the banner text.
 void CallPick(int step,wchar_t* out,std::size_t size) noexcept {
-    if(InSession()) {   // CallOf ignores the pick online: say so instead of showing a pick that does nothing
-        swprintf_s(out,size,L"空袭呼叫：联机时按各武器原样（各台机器要一致）");
-        Log("CALLS pick ignored: online");
-        return;
-    }
     const int n=kCallCount+1;
     const int p=((picked.load()+1+step)%n+n)%n-1;
     picked.store(p);
