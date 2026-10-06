@@ -17,7 +17,12 @@
 
 namespace mapcmd {
 // none: the unit does what it did before any command (a call's own guard point or escort, a crewed heli's follow...).
-enum class Order : std::uint8_t { none, guard, follow };
+// The squads' own (docs/npc-ai-design.md §6.2): engage (fight freely round where it stands, a wider reach), focus (every
+// member on the marked enemy), board / dismount (the nearest friendly vehicle with room), dismiss (no longer the
+// player's: it stays where it is and may not be recruited again for a while), recruit (the player's now).
+enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit };
+// Whether a vehicle unit (heli, jet, crawler, tank) takes `o`: guard, follow and release only; the squads take all.
+inline bool VehicleOrder(Order o) noexcept { return o==Order::none || o==Order::guard || o==Order::follow; }
 struct Command { Order order; float at[3]; };   // at: the guard's point (on the ground)
 
 // --- The screen and the ground ---
@@ -164,19 +169,36 @@ inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float 
 
 // --- The keys ---
 // The keys' presses this frame (edges).
-struct Press { bool next,prev,guard,follow,release; };
-enum class Refusal : std::uint8_t { none, noUnit, noPoint, online };
+struct Press { bool next,prev,guard,follow,release,engage,focus,board,dismount,dismiss,recruit; };
+enum class Refusal : std::uint8_t { none, noUnit, noPoint, online, noMark };
 // What a frame's presses come to: a command to the selection (issue), or why not (why). The cycle (next / prev) has
 // already moved the selection (Cycle).
 struct Step { bool issue; Command cmd; Refusal why; };
 
-inline Step Decide(int selected,const Press& p,bool allowed,const float* point,bool pointOk) noexcept {
+// The order a frame's presses give (one at a time, in this order of precedence); false with none pressed.
+inline bool Wanted(const Press& p,Order* o) noexcept {
+    if(p.guard)*o=Order::guard;
+    else if(p.follow)*o=Order::follow;
+    else if(p.release)*o=Order::none;
+    else if(p.engage)*o=Order::engage;
+    else if(p.focus)*o=Order::focus;
+    else if(p.board)*o=Order::board;
+    else if(p.dismount)*o=Order::dismount;
+    else if(p.dismiss)*o=Order::dismiss;
+    else if(p.recruit)*o=Order::recruit;
+    else return false;
+    return true;
+}
+
+// `marked`: an enemy is marked now (the focus order's target).
+inline Step Decide(int selected,const Press& p,bool allowed,const float* point,bool pointOk,bool marked=true) noexcept {
     Step s{false,Command{Order::none,{0.0f,0.0f,0.0f}},Refusal::none};
-    if(!p.guard && !p.follow && !p.release)return s;
-    const Order want=p.guard ? Order::guard : p.follow ? Order::follow : Order::none;
+    Order want=Order::none;
+    if(!Wanted(p,&want))return s;
     if(!allowed)s.why=Refusal::online;
     else if(selected<=0)s.why=Refusal::noUnit;
     else if(want==Order::guard && !pointOk)s.why=Refusal::noPoint;
+    else if(want==Order::focus && !marked)s.why=Refusal::noMark;
     if(s.why!=Refusal::none)return s;
     s.issue=true;s.cmd.order=want;
     if(want==Order::guard)for(int i=0;i<3;++i)s.cmd.at[i]=point[i];

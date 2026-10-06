@@ -509,15 +509,15 @@ float Panel(void* drawer,void* ctx,Text* text,const CarrierPanel& p,int index,in
 // A key's actual binding on this keyboard, including mouse buttons and extended keys.
 void KeyName(int vk,wchar_t* out,int size) noexcept {
     if(vk<=0){wcsncpy_s(out,size,Tr(Tx::controlUnbound),_TRUNCATE);return;}
-    const wchar_t* mouse=vk==VK_LBUTTON ? L"LMB" : vk==VK_RBUTTON ? L"RMB" : vk==VK_MBUTTON ? L"MMB" :
-                         vk==VK_XBUTTON1 ? L"Mouse 4" : vk==VK_XBUTTON2 ? L"Mouse 5" : nullptr;
+    const wchar_t* mouse=vk==VK_LBUTTON ? Tr(Tx::mouseLeft) : vk==VK_RBUTTON ? Tr(Tx::mouseRight) : vk==VK_MBUTTON ? Tr(Tx::mouseMiddle) :
+                         vk==VK_XBUTTON1 ? Tr(Tx::mouseX1) : vk==VK_XBUTTON2 ? Tr(Tx::mouseX2) : nullptr;
     if(mouse){wcsncpy_s(out,size,mouse,_TRUNCATE);return;}
     const UINT scan=MapVirtualKeyW(static_cast<UINT>(vk),MAPVK_VK_TO_VSC_EX);
     // Some layouts return the keypad scan without E0 even for the navigation VKs (Home otherwise reads "Num 7").
     const bool extended=(scan&0xFF00)!=0 || (vk>=VK_PRIOR && vk<=VK_DOWN) || vk==VK_INSERT || vk==VK_DELETE ||
                         vk==VK_DIVIDE || vk==VK_NUMLOCK || vk==VK_RCONTROL || vk==VK_RMENU;
     const LONG bits=static_cast<LONG>(((scan&0xFF)<<16) | (extended ? 0x01000000 : 0));
-    if(!scan || GetKeyNameTextW(bits,out,size)<=0)std::swprintf(out,size,L"VK 0x%X",vk);
+    if(!scan || GetKeyNameTextW(bits,out,size)<=0)std::swprintf(out,size,Tr(Tx::virtualKey),vk);
 }
 
 // These are EDF seat-button bits, not XInput's differently numbered bits. The caller passes the flight/payload
@@ -2825,7 +2825,73 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 alignas(16) const float kMapOrder[4]={0.3f,0.9f,1.0f,1.0f};
 alignas(16) const float kMapOrderDim[4]={0.3f,0.9f,1.0f,0.55f};
 alignas(16) const float kMapBoxFill[4]={0.3f,0.9f,1.0f,0.08f};
+alignas(16) const float kMapLocked[4]={0.6f,0.6f,0.6f,0.6f};   // a squad a mission script drives: shown, takes no order
 constexpr float kMapGuardRing=12.0f;      // m: the ring at a guard order's point (formation slots are 30 m apart)
+// The squad panel (docs/npc-ai-design.md §6.1), the map's right edge under the title band: a row a squad (the number key
+// that picks it, its class, members alive, what it is doing, its order), selected rows white, a script's grey.
+const wchar_t* MapOrderWord(Order o) noexcept {
+    switch(o) {
+    case Order::guard: return Tr(Tx::orderGuard);
+    case Order::follow: return Tr(Tx::orderFollow);
+    case Order::engage: return Tr(Tx::orderEngage);
+    case Order::focus: return Tr(Tx::orderFocus);
+    case Order::board: return Tr(Tx::orderBoard);
+    case Order::dismount: return Tr(Tx::orderDismount);
+    case Order::dismiss: return Tr(Tx::orderDismiss);
+    case Order::recruit: return Tr(Tx::orderRecruit);
+    case Order::none: break;
+    }
+    return L"-";
+}
+// SquadCommandUnits supplies "RANGER x4"; translate the identifier, preserving the live member count.
+void MapUnitName(const char* name,wchar_t* out,std::size_t size) noexcept {
+    const char* count=name ? std::strstr(name," x") : nullptr;
+    if(!count){hudtext::WordTo(name,out,size);return;}
+    char kind[24]{};const std::size_t n=static_cast<std::size_t>(count-name);
+    if(n>=sizeof(kind)){hudtext::WordTo(name,out,size);return;}
+    std::memcpy(kind,name,n);wchar_t translated[32];hudtext::WordTo(kind,translated,_countof(translated));
+    _snwprintf_s(out,size,_TRUNCATE,L"%ls%hs",translated,count);
+}
+void MapSquadStatus(const SquadRow& r,wchar_t* out,std::size_t size) noexcept {
+    if(std::strncmp(r.status,"WAIT ",5)==0)_snwprintf_s(out,size,_TRUNCATE,Tr(Tx::squadWait),r.cooldown);
+    else hudtext::WordTo(r.status,out,size);
+}
+void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,const MapCommandReadout& c,Line* lines,int* at) noexcept {
+    if(c.squads<=0)return;
+    // Top left, under the title band and over the legend (which starts some 270 px down at 1080 lines); the compass
+    // has the top right.
+    const float x0=16.0f*s,rowH=22.0f*s,top=56.0f*s;
+    const int rows=c.squads<9 ? c.squads : 9;
+    if(*at+rows+1>kMaxLines)return;
+    const int first=*at;
+    Line& title=lines[(*at)++];Format(title,L"%ls",Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys));
+    title.rgba=kMapOrder;
+    for(int i=0;i<rows;++i) {
+        const SquadRow& r=c.squad[i];
+        const float* tint=r.locked ? kMapLocked : c.squadSelected[i] ? kWhite : kMapOrder;
+        wchar_t key[4]=L" ";
+        if(i<9)_snwprintf_s(key,_countof(key),_TRUNCATE,L"%d",i+1);
+        wchar_t name[32],status[32];hudtext::WordTo(r.name,name,_countof(name));MapSquadStatus(r,status,_countof(status));
+        Line& row=lines[(*at)++];Format(row,L"%ls  %ls x%d   %ls   %ls",key,name,r.alive,status,MapOrderWord(r.now.order));row.rgba=tint;
+    }
+    float panelW=0.0f;
+    for(int i=first;i<*at;++i) {
+        Line& row=lines[i];row.scale=kLineScale*0.7f;row.w=row.h=0;
+        if(text)MeasureAll(*text,&row,1);
+        const float most=std::fmin(520.0f*s,width-32.0f*s);
+        if(row.w>most && text){row.scale*=most/row.w;MeasureAll(*text,&row,1);}
+        row.x=x0;row.y=top+rowH*static_cast<float>(i-first);
+        panelW=std::fmax(panelW,row.w);
+    }
+    const float left=x0-8.0f*s,right=x0+panelW+8.0f*s,bottom=top+rowH*static_cast<float>(rows+1)+4.0f*s;
+    // Text is batched after all panels. Occlude earlier world/grid labels here too, or they would print over the panel.
+    for(int i=0;i<first;++i) {
+        Line& under=lines[i];
+        if(under.x<right && under.x+under.w>left && under.y<bottom && under.y+under.h>top-6.0f*s)under.text[0]=0;
+    }
+    Rect(drawer,ctx,left,top-6.0f*s,right,bottom,kMapBand);
+}
+
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c))return;
@@ -2844,7 +2910,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Seg(drawer,ctx,x0,y0,x1,y0,1.5f*s,kMapOrder);Seg(drawer,ctx,x1,y0,x1,y1,1.5f*s,kMapOrder);
         Seg(drawer,ctx,x1,y1,x0,y1,1.5f*s,kMapOrder);Seg(drawer,ctx,x0,y1,x0,y0,1.5f*s,kMapOrder);
     }
-    wchar_t one[24]{};
+    wchar_t one[64]{};
     for(int i=0;i<c.count && i<kCmdUnits;++i) {
         const CmdMark& u=c.unit[i];
         MapUnit mu{};
@@ -2864,21 +2930,24 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))Seg(drawer,ctx,p.ix,p.iy,gx,gy,1.5f*s,kMapOrderDim);
         }
         if(!shown)continue;
-        Arc(drawer,ctx,p.ix,p.iy,15.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : kMapOrderDim);
+        Arc(drawer,ctx,p.ix,p.iy,15.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : u.locked ? kMapLocked : kMapOrderDim);
         if(u.selected)MapBrackets(drawer,ctx,p.ix,p.iy,24.0f*s,2.5f*s,kWhite);
         if(u.now.order==Order::follow)Label(text,lines,at,p.ix,p.iy+24.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
         if(u.selected && c.selected==1) {
-            wchar_t kind[24];
-            hudtext::WordTo(u.name,kind,_countof(kind));
+            wchar_t kind[48];
+            MapUnitName(u.name,kind,_countof(kind));
             if(u.owner==kCmdOwnerHeli || u.owner==kCmdOwnerJet)
                 _snwprintf_s(one,_countof(one),_TRUNCATE,Tr(u.owner==kCmdOwnerHeli ? Tx::unitHeli : Tx::unitJet),kind);
             else _snwprintf_s(one,_countof(one),_TRUNCATE,L"%ls",kind);
             Label(text,lines,at,p.ix,p.iy-30.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
         }
     }
-    // The band over the keys: how many are selected, the keys.
-    Rect(drawer,ctx,0.0f,height-80.0f*s,width,height-46.0f*s,kMapBand);
+    MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
+    // The band over the keys: how many are selected, the keys (the squads' own on a second line).
+    Rect(drawer,ctx,0.0f,height-104.0f*s,width,height-46.0f*s,kMapBand);
     const float y=height-63.0f*s;
+    const int footerFirst=*at;
+    if(c.allowed && c.squads>0 && !m.pad)Label(text,lines,at,width*0.5f,height-88.0f*s,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::squadKeys));
     wchar_t sel[64];
     if(c.all)_snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedAll),c.selected);
     else if(c.selected==1 && one[0])_snwprintf_s(sel,_countof(sel),_TRUNCATE,Tr(Tx::selectedOne),c.count,one);
@@ -2886,7 +2955,11 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     if(!c.allowed)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kAmber,L"%ls",Tr(Tx::npcOfflineOnly));
     else if(!c.count)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::npcNone));
     else Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(m.pad ? Tx::npcPadKeys : Tx::npcMouseKeys),sel);
-    if(c.noteFresh)Label(text,lines,at,width*0.5f,height-100.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
+    if(c.noteFresh)Label(text,lines,at,width*0.5f,height-124.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
+    for(int i=footerFirst;i<*at;++i) {
+        Line& row=lines[i];const float centre=row.y+row.h*0.5f,most=width-32.0f*s;
+        if(text && row.w>most){row.scale*=most/row.w;MeasureAll(*text,&row,1);row.x=(width-row.w)*0.5f;row.y=centre-row.h*0.5f;}
+    }
 }
 
 // The legend (left), the title and the keys (top and bottom bands).
@@ -2945,6 +3018,19 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     return true;
 }
 }  // namespace
+
+// The NPCs' mark (npcai.cpp, the user's Q on foot; docs/npc-ai-design.md §6.3): an amber diamond round it, MARK and its
+// distance under it.
+void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    float m[3],x,y,depth;
+    if(!NpcMarkReadout(m) || !Project(vp,m,width,height,&x,&y,&depth))return;
+    const float r=16.0f*s,t=2.0f*s;
+    Seg(drawer,ctx,x,y-r,x+r,y,t,kAmber);Seg(drawer,ctx,x+r,y,x,y+r,t,kAmber);
+    Seg(drawer,ctx,x,y+r,x-r,y,t,kAmber);Seg(drawer,ctx,x-r,y,x,y-r,t,kAmber);
+    float eye[3],dir[3];
+    if(CameraRay(eye,dir))Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,Tr(Tx::npcMarkRange),vec::Dist(eye,m));
+    else Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"%ls",Tr(Tx::npcMark));
+}
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
@@ -3048,6 +3134,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr};
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
+        NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

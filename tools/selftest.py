@@ -3402,7 +3402,7 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp'):
+                'src/proteus.cpp', 'src/npcai.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
@@ -3415,7 +3415,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -3590,6 +3590,105 @@ def stock_guidance_wired() -> None:
     assert 'add_test(NAME pn COMMAND pn_test)' in cm
     for doc in ('guidance-re.md', 'lockon-re.md', 'tvguide-re.md'):
         assert os.path.exists(os.path.join(ROOT, 'docs', doc)), doc
+
+
+@test
+def npc_ai_wired() -> None:
+    """The friendly soldiers' own AI (src/npcai.cpp, docs/npc-ai-design.md): its Think hook runs the stock Think first and
+    rewrites the intent block after it (§3.2), is installed with the inputs (after every plugin) and reset per mission;
+    a script's unit (§4.3) keeps its stock moves (the scripted branch writes no move); only this machine's soldiers are
+    driven; its ini keys are read, range-checked, shipped and documented; its offline check runs under CTest."""
+    code, crew, mission, cmake = src('src/npcai.cpp'), src('src/crew.cpp'), src('src/mission.cpp'), src('CMakeLists.txt')
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/npc-ai-design.md')
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('nextThink[I](human,dt);') < hook.index('Think(static_cast<unsigned char*>(human),I)'), 'stock Think first'
+    assert '!Cfg().customNpcAi' in hook, 'CustomNpcAi=0 must leave every soldier stock'
+    scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
+    for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
+        assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger]=0;h[kTrigger+1]=0;' in veto, \
+        'a scripted unit: the trigger (both hands) only taken off'
+    think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert '(At<std::uint8_t>(h,kNet)&1)' in think and 'IsPlayer(h)' in think, "only this machine's NPC soldiers"
+    assert 'npc::Scripted(control) ? Scripted(' in think
+    ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
+    assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')
+    assert 'ResetNpcAi();' in mission and 'src/npcai.cpp' in cmake
+    assert 'EXCLUDE_FROM_ALL tools/npc_ai_check.cpp' in cmake and 'npc_ai_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    for key, default in (('CustomNpcAi', '1'), ('NpcFireLane', '1'), ('NpcLaneWidth', '2.5'), ('NpcLaneLength', '150'),
+                         ('NpcFlankDeg', '45'), ('NpcWeaponSwitch', '1'), ('NpcEngageShare', '0.85'), ('NpcEvade', '1'),
+                         ('NpcDangerRange', '15'), ('NpcGrabRange', '4'), ('NpcCrowd', '1.5'), ('NpcRollSec', '2.5'),
+                         ('NpcRetreatHp', '0.3'), ('NpcLeash', '40')):
+        assert f'L"{key}"' in plugin, key
+        assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
+                'NpcRollSec', 'NpcRetreatHp', 'NpcLeash', 'TankPostHold', 'TankReverseMax'):
+        assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+    # The tanks' post (§8): seat 0's stick written before the stock input reads it; a route's tank and a remote room's
+    # client left alone; its keys shipped and documented.
+    post = src('src/npcpost.cpp')
+    hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
+    assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(At<const void*>(v,kRoute))return;' in body and 'if(InSession() && !IsRoomHost())return;' in body
+    assert body.index('Chasing(v)') < body.index('Put<float>(seat,kSeatSteer')
+    assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
+    # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
+    # SetFollow and its replication slot.
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('PreThink(static_cast<unsigned char*>(human))') < hook.index('nextThink[I](human,dt);')
+    pre = code.split('void PreThink(unsigned char* h) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(InSession() && !IsRoomHost())return;' in pre and 'kAutoResurrect' in pre
+    follow = code.split('void Follow(unsigned char* h,unsigned char* leader) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'image+kSetFollow' in follow and 'vt[kSlotNetFollow]==image+kNetFollow' in follow
+    for key, default in (('NpcSquadSuccession', '1'), ('NpcSquadMin', '2'), ('NpcSquadMax', '8'), ('NpcSquadJoinRange', '150')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    # The squads on the map (§5.4, §6): a script's squad takes no order; a dismissal clears +0x540 (or the stock takes the
+    # squad back at once) and starts the cooldown, whose end puts +0x540 back; vehicles take only their three orders.
+    cmd = code.split('bool SquadCommand(const void* leader,const Command& c) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'npc::Scripted(q->control)' in cmd.split('switch', 1)[0], "a script's squad takes no order"
+    dismiss = cmd.split('case Order::dismiss:', 1)[1].split('break;', 1)[0]
+    assert dismiss.index('top[kAutoFollow]=0;') < dismiss.index('Follow(top,nullptr);') < dismiss.index('cooldowns.Start(')
+    see = code.split('Squad* SeeSquad(', 1)[1].split('\n}\n', 1)[0]
+    assert 'cooldowns.Ready(SquadKey(top),ms)' in see and 'top[kAutoFollow]=q->autoFollow;' in see
+    mapc = src('src/mapcmd.cpp')
+    takes = mapc.split('bool Takes(const Entry& e,Order o) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'if(e.u.locked)return false;' in takes and 'mapcmd::VehicleOrder(o)' in takes
+    assert 'if(!Takes(e,cmd.order)){++*skipped;continue;}' in mapc
+    for key, default in (('NpcGuardRadius', '15'), ('NpcFreeRange', '120'), ('NpcRecruitCooldownSec', '60')):
+        assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    # The mark (§6.3): its key read on foot only (in a vehicle Q is the vehicle's: Proteus, the jets, the turrets), drawn
+    # by the HUD; the focus order needs it.
+    tick = code.split('void MarkTick() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey)' in tick
+    assert 'NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
+    assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
+    for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    # Boarding (§7): never seat 0; one strong reference taken before RideVehicle (it lets one go at 0x57690D); only a
+    # seated soldier kicked off; the gunners only on a vehicle whose slot 70 is the stock seat fire, before its input.
+    board = code.split('bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'for(unsigned k=1;' in board, 'seat 0 stays the NPC driver\'s'
+    ride = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert ride.index('_InterlockedIncrement(') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
+    off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
+    gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'IsSoldierClass(rider)' in gun
+    inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
+    assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    assert f'L"NpcBoarding"' in plugin and re.search(r'^NpcBoarding=1\s*$', ini, re.M) and 'NpcBoarding' in readme and 'NpcBoarding' in doc
+    # A script's squad let go (§4.4): released once by npc::Step after the settle time, recruitable only with
+    # ScriptNpcRecruit and never while a dismissal's cooldown keeps +0x540 clear.
+    assert 'npc::Step(q->script,held,ms,' in see and 'const bool held=Routed(top)' in see, 'released when its route / fixed position ends (not a direction order)'
+    assert 'Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow]' in see
+    for key, default in (('ScriptNpcRecruit', '1'), ('ScriptNpcSettleSec', '5')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
 
 
 @test
