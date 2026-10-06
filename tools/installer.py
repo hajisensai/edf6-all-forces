@@ -20,9 +20,10 @@ What install does, with EDF6.exe closed:
      its slot), so everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack
      to play with others). The test range's forced loadout is never written: everyone picks their own class.
 
-With StockHeliStores=1 in the player's ini (off by default) install also gives the stock 506-class helicopters'
-requests the jets' rocket pod and Hellfires (tools/make_stock_stores.py); with it 0 it takes back what an earlier install
-gave them.
+With StockVehicleStores=1 (or the older StockHeliStores=1) in the player's ini (off by default) install also gives the
+stock vehicles' requests the stores they should carry (tools/make_stock_stores.py: the tanks, the missile launcher, the
+flak, the bikes, the helicopters; EDF6AutoTurret's flak requests get theirs through its own manifest); with it 0 it takes
+back what an earlier install gave them.
 
 Uninstall removes the plugins and, when asked, the call weapons (their rows become placeholders that keep the
 row numbers saves use), EDF6AutoTurret's vehicle data and the generated objects no other tool still needs.
@@ -362,8 +363,12 @@ def install(game: str) -> None:
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     stock = None
     if stock_stores:
-        print('给原版直升机的请求加上火箭巢和地狱火导弹（ini StockHeliStores=1；读取 Root.cpk，不修改它）……')
-        stock = make_stock_stores.build(game)
+        print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
+        # EDF6AutoTurret's flak / Bohr requests are its own: built on from its bytes and written back through its manifest
+        files, skipped, handed = make_stock_stores.build(game, overlay={rel: data for rel, data in turret[0].items()
+                                                                       if rel.upper().startswith('WEAPON/')})
+        turret = ({**turret[0], **handed}, turret[1])
+        stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     print('\n全部生成完毕，开始写入。')
@@ -384,7 +389,7 @@ def install(game: str) -> None:
             print('跳过（别的 mod 已经放了自己的请求文件，保持原样）', rel)
     else:
         for path in make_stock_stores.remove(game)[0]:
-            print('删除（StockHeliStores=0：原版直升机的请求恢复原样）', path)
+            print('删除（StockVehicleStores=0：原版载具的请求恢复原样）', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
     install_autoturret(game, *turret)

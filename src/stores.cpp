@@ -122,7 +122,116 @@ void* BuildLoopCave() noexcept {
     std::memcpy(cave+16,&top,8);std::memcpy(cave+30,&out,8);
     return edf::AllocateNearCode(image+kLoopEnd,cave,sizeof(cave));
 }
+
+// The other stock classes' weapon builds (slot 46; docs/stock-payload-re.md §4): each calls SetWeaponObject for the
+// holders its own weapons need (403 and the 503 a loop of three, 603 two written out, 404 six, 409 three, 402 / 505 /
+// 601 one), never past them; the Car's (the Grape) loops over the list and builds every entry itself. The stores the installer hangs on their requests (tools/make_stock_stores.py) are holders after those: the
+// hook lets the stock build run, then builds every holder still without a weapon from the same weapon list, as the
+// 506's loop does (SetWeaponObject's second argument, the seat's turret block, is read only for an entry with a third
+// item, the turret's speeds 0x6335D1; a store's entry has two, so it gets none). The weapon list is the child of the
+// setup the build reads (index 2, the helicopters' 3) found by its shape: as many entries as the vehicle has holders,
+// the first a node. A stock vehicle has no holder past its build's, or no entry for it: nothing is built.
+// The SGO nodes are read as rounds.cpp reads them (tag 2 variants; the child and count functions checked at load).
+struct Node { unsigned char data[16]; std::uint16_t tag; unsigned char pad[6]; };
+struct NodePick { Node* out; std::int32_t index; };
+constexpr std::uint16_t kNodeTag=2,kNoTag=0xFFFF;
+constexpr unsigned kNodeChild=0x2390D0,kNodeCount=0x240AF0;
+const unsigned char kNodeChildSig[]={0x40,0x53,0x48,0x83,0xEC,0x30,0x48,0x8B,0x1A,0x48,0x8B,0x01};
+const unsigned char kNodeCountSig[]={0x4C,0x8B,0x01,0x4C,0x8B,0xCA,0x8B,0x51,0x08,0x49,0x39,0x50};
+using NodeChildFn=void(__fastcall*)(const Node*,NodePick*);
+using NodeCountFn=void(__fastcall*)(const Node*,std::int32_t*);
+using SetWeaponFn=void(__fastcall*)(unsigned char* vehicle,void* turret,const Node* entry,int holder);
+using BuildFn=void(__fastcall*)(unsigned char* vehicle,const Node* setup);
+constexpr std::size_t kSlotBuild=46;
+constexpr std::size_t kHolders=0x638,kHolderCount=0x648,kHolderStride=0x48;   // layout.h (the vehicle's holders)
+
+struct BuildClass { unsigned vtable,build; const char* name; };
+const BuildClass kBuilds[]={
+    {0x17D8B50,0x5FDBC0,"402_Rocket"},{0x17D8FA0,0x5FEFB0,"403_Tank"},{0x17D9458,0x6000E0,"404_Tank"},
+    {0x17DA508,0x617CF0,"503_Bike"},{0x17DADB0,0x61B060,"505_Tank"},{0x17DC250,0x620B20,"601_Tank"},
+    {0x17DC620,0x621A50,"603_Flak"},{0x17DEF98,0x64B3C0,"Helicopter409"},{0x17E01B0,0x65A910,"Car"},
+};
+constexpr int kBuildCount=static_cast<int>(sizeof(kBuilds)/sizeof(kBuilds[0]));
+BuildFn nextBuild[kBuildCount]{};
+bool nodesOk=false;
+
+int NodeCount(const Node& n) noexcept {
+    if(n.tag!=kNodeTag)return 0;
+    std::int32_t c=0;
+    reinterpret_cast<NodeCountFn>(image+kNodeCount)(&n,&c);
+    return c;
+}
+bool NodeChild(const Node& n,int index,Node* out) noexcept {
+    if(index<0 || index>=NodeCount(n))return false;
+    *out=Node{};out->tag=kNoTag;
+    NodePick pick{out,index};
+    reinterpret_cast<NodeChildFn>(image+kNodeChild)(&n,&pick);
+    return out->tag==kNodeTag;
+}
+
+unsigned char* HolderWeaponAt(const unsigned char* holders,std::uint64_t i) noexcept {
+    return At<unsigned char*>(holders+i*kHolderStride,kHolderWeapon);
+}
+
+// The setup's weapon list: the child with an entry a holder, its first entry a node (the scale pair and the drive's
+// numbers are numbers). The last such, as the helicopters' list follows their numbers.
+bool WeaponList(const Node& setup,std::uint64_t holders,Node* out) noexcept {
+    bool found=false;
+    const int n=NodeCount(setup);
+    for(int i=0;i<n;++i) {
+        Node c{},first{};
+        if(!NodeChild(setup,i,&c) || static_cast<std::uint64_t>(NodeCount(c))!=holders || !NodeChild(c,0,&first))continue;
+        *out=c;found=true;
+    }
+    return found;
+}
+
+void Fill(unsigned char* v,const Node* setup,int cls) noexcept {
+    __try {
+        const auto holders=At<unsigned char*>(v,kHolders);
+        const auto count=At<std::uint64_t>(v,kHolderCount);
+        if(!holders || count==0 || count>64 || !Readable(holders,count*kHolderStride))return;
+        std::uint64_t built=0;   // one past the last holder the stock build gave a weapon: the ones after it are ours
+        for(std::uint64_t i=0;i<count;++i)if(HolderWeaponAt(holders,i))built=i+1;
+        if(!setup || built>=count)return;
+        Node list{};
+        if(!WeaponList(*setup,count,&list))return;
+        for(std::uint64_t i=built;i<count;++i) {
+            Node entry{};
+            if(!NodeChild(list,static_cast<int>(i),&entry))continue;
+            reinterpret_cast<SetWeaponFn>(image+0x633330)(v,nullptr,&entry,static_cast<int>(i));
+            if(Cfg().debug)Log("STORES v=%p %s: holder %llu built (%p)",v,kBuilds[cls].name,i,HolderWeaponAt(holders,i));
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        Log("STORES v=%p %s: building its extra holders faulted",v,kBuilds[cls].name);
+    }
+}
+
+template<int I> void __fastcall BuildHook(unsigned char* v,const Node* setup) {
+    nextBuild[I](v,setup);
+    Fill(v,setup,I);
+}
+template<int... I> struct BuildHooks { static constexpr BuildFn table[]={&BuildHook<I>...}; };
+using AllBuildHooks=BuildHooks<0,1,2,3,4,5,6,7,8>;
+static_assert(sizeof(AllBuildHooks::table)/sizeof(AllBuildHooks::table[0])==kBuildCount,"one hook per class");
+
+int InstallBuilds() noexcept {
+    int hooked=0;
+    for(int i=0;i<kBuildCount;++i) {
+        auto slot=reinterpret_cast<void**>(image+kBuilds[i].vtable)+kSlotBuild;
+        if(*slot!=image+kBuilds[i].build)Log("HOOK stores %s: its weapon build is %p, not the stock one: chaining onto it",kBuilds[i].name,*slot);
+        void* next=nullptr;
+        if(edf::ChainVtableSlot(slot,reinterpret_cast<void*>(AllBuildHooks::table[i]),&next)){nextBuild[i]=reinterpret_cast<BuildFn>(next);++hooked;}
+    }
+    return hooked;
+}
 }  // namespace
+
+bool IsLoadoutWeapon(const unsigned char* w) noexcept {
+    std::size_t length=0;
+    const wchar_t* name=WeaponFile(w,&length);
+    return name && length>7 && _wcsnicmp(name,L"EDF6VC_",7)==0;
+}
 
 int ReadStores(unsigned char* v,Store* out,int most) noexcept {
     if(SeatCount(v)==0)return 0;   // without the loop patch the first four holders still have their weapons
@@ -184,8 +293,11 @@ bool InstallStores() noexcept {
         if(!storesOk)VirtualFree(cave,0,MEM_RELEASE);
         markNext=reinterpret_cast<MarkDrawFn>(Detour(kMarkDraw,kMarkDrawSig,sizeof(kMarkDrawSig),kMarkCopied,
                                                      reinterpret_cast<void*>(&MarkDrawHook)));
-        Log("HOOK stores=%d (the 506 builds a weapon for every holder; %zu store kinds) stockMarks=%s",
-            storesOk,sizeof(kStores)/sizeof(kStores[0]),markNext ? "hidden for stores" : "kept");
+        nodesOk=Matches(kNodeChild,kNodeChildSig,sizeof(kNodeChildSig)) && Matches(kNodeCount,kNodeCountSig,sizeof(kNodeCountSig));
+        const int builds=nodesOk ? InstallBuilds() : 0;
+        Log("HOOK stores=%d (the 506 builds a weapon for every holder; %zu store kinds) stockMarks=%s builds=%d/%d (the stock "
+            "classes build their extra holders)",storesOk,sizeof(kStores)/sizeof(kStores[0]),markNext ? "hidden for stores" : "kept",
+            builds,kBuildCount);
         return storesOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

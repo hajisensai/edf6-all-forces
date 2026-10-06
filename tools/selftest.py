@@ -3159,13 +3159,25 @@ def stock_payload_and_seats_wired() -> None:
     its stores are store weapons make_jets writes and src/stores.inc knows."""
     import make_stock_stores as mss
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline')
+    keys = ('StockVehicleStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline')
     for key in keys:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('SeatNextKey', 'SeatButton'):
         assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
-    assert re.search(r'^StockHeliStores=0', ini, re.M) and not mss.wanted(ini), 'StockHeliStores ships off'
-    assert mss.wanted('[VehicleCrew]\nStockHeliStores=1 ; on\n') and not mss.wanted('[Other]\nStockHeliStores=1\n')
+    assert re.search(r'^StockVehicleStores=0', ini, re.M) and not mss.wanted(ini), 'StockVehicleStores ships off'
+    assert mss.wanted('[VehicleCrew]\nStockVehicleStores=1 ; on\n') and not mss.wanted('[Other]\nStockVehicleStores=1\n')
+    # the older key (the helicopters alone) still turns it on, in the plugin and the installer alike
+    assert 'L"StockHeliStores"' in plugin and mss.wanted('[VehicleCrew]\nStockVehicleStores=0\nStockHeliStores=1\n')
+    # every stock vehicle's fire goes through the holder pull: payload.cpp takes it over (checked bytes), and the stock
+    # classes build their extra holders (stores.cpp kBuilds: one class each of the installer's BUILT_CLASSES but the 506)
+    payload, stores = src('src/payload.cpp'), src('src/stores.cpp')
+    assert 'kPull=0x62C000' in payload and 'bool InstallPayload()' in payload and 'InstallPayload();' in plugin
+    assert 'PullHook' in payload and 'kFireSecondary' not in payload, 'payload.cpp: the pull lands on the store picked'
+    builds = re.findall(r'\{0x[0-9A-F]+,0x[0-9A-F]+,"([0-9A-Za-z_]+)"\}', stores.split('const BuildClass kBuilds[]={', 1)[1].split('};', 1)[0])
+    want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
+                  for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
+    assert sorted(builds) == want, (builds, want)
+    assert 'IsLoadoutWeapon(w)' in payload and 'L"EDF6VC_"' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     order = [hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
     assert all(x >= 0 for x in order) and order == sorted(order), f'src/crew.cpp InputHook step order: {order}'
@@ -3199,20 +3211,22 @@ def stock_payload_and_seats_wired() -> None:
 
 @test
 def stock_stores_build() -> None:
-    """With the game here (CI has none): every stock request that brings a 506-class helicopter of LOADOUTS gets a vehicle
-    whose holders and weapon list agree, the fuel tank fourth, the stores after it (make_stock_stores.check); only the
-    vehicle, the weapon list and the preload list change."""
+    """With the game here (CI has none): every stock request that brings a vehicle of LOADOUTS gets a vehicle whose
+    holders are its own and one a store (each a copy of the one it hangs beside) and lists a weapon a holder, the stores
+    last (make_stock_stores.check); only the vehicle, the weapon list and the preload list change; every vehicle's class
+    is one the plugin builds the extra holders of; EDF6AutoTurret's requests handed in come back with the stores."""
     import rootcpk
     import make_stock_stores as mss
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         return
     game = rootcpk.default()
     names = mss.requests(game)
-    assert names, 'no stock request brings a helicopter of LOADOUTS'
+    assert names, 'no stock request brings a vehicle of LOADOUTS'
+    rows = {stem: mss.stock_rows(game, stem) for stem in mss.LOADOUTS}
     files: dict[str, bytes] = {}
     stems = set()
     for name in names:
-        data, stem = mss.request_sgo(game.read('WEAPON', name), name)
+        data, stem = mss.request_sgo(game.read('WEAPON', name), name, rows)
         files[f'WEAPON/{name}'] = data
         stems.add(stem)
         before, after = dsgo.to_py(dsgo.parse(game.read('WEAPON', name)).root), dsgo.to_py(dsgo.parse(data).root)
@@ -3220,10 +3234,22 @@ def stock_stores_build() -> None:
         for k in before:
             if k not in ('Ammo_CustomParameter', 'resource'):
                 assert before[k] == after[k], (name, k)
-    assert stems == set(mss.LOADOUTS), stems
+    assert stems == set(mss.LOADOUTS), set(mss.LOADOUTS) - stems
     for stem in stems:
+        assert mss.vehicle_class(game, stem) in mss.BUILT_CLASSES, stem
         files[f'OBJECT/{mss.derived_name(stem)}'] = mss.derived_vehicle(game, stem)
-    mss.check(files)
+    mss.check(files, rows)
+    flak = 'WEAPON/AWEAPON346.SGO'
+    assert flak in files, 'the Kepler is one of them'
+    import build as at_build
+    turret = at_build.build_files()
+    assert flak in turret, 'EDF6AutoTurret writes the Kepler request'
+    handed = mss.build(rootcpk.DEFAULT_GAME,
+                       overlay={k: v for k, v in turret.items() if k.startswith('WEAPON/')})[2]
+    got = dsgo.to_py(dsgo.parse(handed[flak]).root)
+    mine = dsgo.to_py(dsgo.parse(turret[flak]).root)
+    assert [k for k in got if k not in ('Ammo_CustomParameter', 'resource')] == [k for k in mine if k not in ('Ammo_CustomParameter', 'resource')]
+    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_2.sgo' in str(got['resource'])
 
 
 @test

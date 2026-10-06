@@ -163,8 +163,8 @@ struct Config {
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
-    bool stockHeliStores=false;     // the stock 506 helis' requests carry the jets' rockets and Hellfires (the installer,
-                                    // tools/make_stock_stores.py) and their secondary switches between them (payload.cpp)
+    bool stockStores=false;         // the stock vehicles' requests carry the stores they should (the installer,
+                                    // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)

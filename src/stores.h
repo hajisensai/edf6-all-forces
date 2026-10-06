@@ -45,6 +45,10 @@ const StoreSpec* StoreOf(const unsigned char* w) noexcept;
 // The file name of weapon `w`'s SGO (after the last separator of its resource key, upper case), `length` characters;
 // nullptr when it cannot be read. Not zero-terminated where the key goes on.
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* length) noexcept;
-// The 506's weapon build made one weapon a holder (stores.cpp): at load. The stores' locks: lockon.h.
+// Whether weapon `w` is one the installer hung on a stock vehicle besides its own (its SGO file one of the plugin's,
+// EDF6VC_*: the jets' stores, tools/make_stock_stores.py's copies): the stock vehicles' switch goes round them.
+bool IsLoadoutWeapon(const unsigned char* w) noexcept;
+// The 506's weapon build made one weapon a holder, the other stock classes' build their holders past their own (stores.cpp,
+// docs/stock-payload-re.md §4): at load. The stores' locks: lockon.h.
 bool InstallStores() noexcept;
 }  // namespace crew
