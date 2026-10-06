@@ -63,6 +63,9 @@ class Jet:
     # stock heli's rig fitted by seat_camera: a jet's camera must see over the plane, a mech's looks past its shoulder at
     # its back (place_seat_camera / check_seat_camera).
     seat_camera: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+    # Where the MAB's locators (door, seat camera) are measured from (mdl_at): False, the collision box's centre (every
+    # jet's `mdl`, DoorLog); True, the model's origin (the Sazabi's `mdl` lands at its soles: its frames log, 2026-10-07).
+    locators_on_origin: bool = False
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
@@ -488,7 +491,7 @@ JETS: dict[str, Jet] = {
     # tools/make_sazabi.py) with the V506's own CAS, its weapons on its rifle bone. Marks 7401-7499 are its own (src/body506.cpp kMarks).
     SAZABI_JET: Jet(SAZABI_MARK, SAZABI_DURABILITY, SAZABI_WEAPONS, (f'app:/object/{_SAZABI_ARC.lower()}', _SAZABI_MDB),
                     _SAZABI_ARC, 'body', 'body', weapon_bones=SAZABI_WEAPON_BONES, player=True,
-                    camera=SAZABI_CAMERA, seat_camera=SAZABI_SEAT_CAMERA),
+                    camera=SAZABI_CAMERA, seat_camera=SAZABI_SEAT_CAMERA, locators_on_origin=True),
 }
 # The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
 # (Jet.parked), named after it: edf6tr_jet_<kind>_parked_mission. Same mark, model and arms: the plugin tells them
@@ -636,13 +639,24 @@ def mab_muzzles(mab: bytes) -> list[tuple[str, str, int]]:
     return out
 
 
-def door_point(box, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
-    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]);
-    `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
-    _centre, (hx, hy, hz) = box   # `mdl` is the box's centre: the box spans -half..half round it
-    z = min(max(stock[2], -hz), hz)
+def door_point(box, stock: tuple[float, float, float], radius: float, mdl=None) -> tuple[list[float], float]:
+    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]):
+    the box's bottom (the ground), DOOR_OUT outside its right side, within its length; `stock`, `radius`: the V506
+    door's (see DOOR_OUT). `mdl`: where the locators are measured from in the model's frame (mdl_at; None: the box's
+    centre, every jet's)."""
+    (cx, cy, cz), (hx, hy, hz) = box
+    z = min(max(stock[2], -hz), hz)   # the stock door's place along the box, from its centre
     need = (HUMAN_HEIGHT * HUMAN_HEIGHT + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
-    return [round(hx + DOOR_OUT, 3), round(-hy, 3), round(z, 3)], round(max(radius, need), 3)
+    if mdl is None:   # `mdl` is the box's centre: the box spans -half..half round it
+        return [round(hx + DOOR_OUT, 3), round(-hy, 3), round(z, 3)], round(max(radius, need), 3)
+    at = (cx + hx + DOOR_OUT - mdl[0], cy - hy - mdl[1], cz + z - mdl[2])
+    return [round(v, 3) for v in at], round(max(radius, need), 3)
+
+
+def mdl_at(jet: 'Jet') -> tuple[float, float, float] | None:
+    """Where `jet`'s `mdl` (its MAB locators' frame) is in its model's frame: its origin (Jet.locators_on_origin), or
+    None: the collision box's centre, as door_point / place_seat_camera and the checks take it by default."""
+    return (0.0, 0.0, 0.0) if jet.locators_on_origin else None
 
 
 def door_name(m: dict) -> str:
@@ -653,19 +667,19 @@ def door_name(m: dict) -> str:
     return seats[0][0]
 
 
-def move_door(m: dict, box) -> None:
+def move_door(m: dict, box, mdl=None) -> None:
     """`m` (a jet SGO's values) with its door (seat 0's: every seat of a jet shares it, make_jets.with_gunner_seat)
     moved to door_point."""
     mab = bytearray(m['animation_model'][2])
     vec, rad = mab_locator(bytes(mab), door_name(m))
     stock = struct.unpack_from('<3f', mab, vec)
-    at, radius = door_point(box, stock, struct.unpack_from('<f', mab, rad)[0])
+    at, radius = door_point(box, stock, struct.unpack_from('<f', mab, rad)[0], mdl)
     struct.pack_into('<3f', mab, vec, *at)
     struct.pack_into('<f', mab, rad, radius)
     m['animation_model'][2] = bytes(mab)
 
 
-def check_door(data: bytes) -> None:
+def check_door(data: bytes, mdl=None) -> None:
     """Re-read a jet SGO and raise DoorError unless its door (on `mdl`, the collision box's centre) is at its collision
     box's (heli_rigid_body) bottom, the ground, outside its right side by DOOR_OUT, within its length, and a human standing
     DOOR_STEP m from it on that ground (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
@@ -676,7 +690,9 @@ def check_door(data: bytes) -> None:
     x, y, z = struct.unpack_from('<3f', mab, vec)
     reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
     box = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
-    _centre, (hx, hy, hz) = box
+    (cx, cy, cz), (hx, hy, hz) = box
+    if mdl is not None:   # from `mdl` to the box's centre
+        x, y, z = x + mdl[0] - cx, y + mdl[1] - cy, z + mdl[2] - cz
     if abs(y + hy) > 2e-3 or x < hx + DOOR_OUT - 1e-3 or not -hz - 1e-3 <= z <= hz + 1e-3:
         raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱（中心起半尺寸 {hx:.2f},{hy:.2f},{hz:.2f}）右侧外 {DOOR_OUT} m 的地面上')
     worst = max(((DOOR_STEP ** 2 + feet ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
@@ -790,23 +806,26 @@ def check_camera(data: bytes, bounds: Bounds) -> tuple[list[float], list[float]]
     return pts[0], pts[1]
 
 
-def place_seat_camera(m: dict, box, camera: tuple[tuple[float, float, float], tuple[float, float, float]]) -> None:
-    """`m` with its seat camera's eye and look locators at `camera` (model frame): offsets on `mdl`, the collision
-    box's centre `box[0]` (see CAMERA_LOOK_KEY)."""
+def place_seat_camera(m: dict, box, camera: tuple[tuple[float, float, float], tuple[float, float, float]],
+                      mdl=None) -> None:
+    """`m` with its seat camera's eye and look locators at `camera` (model frame): offsets on `mdl`, at `mdl` (mdl_at;
+    None: the collision box's centre `box[0]`, see CAMERA_LOOK_KEY)."""
+    origin = box[0] if mdl is None else mdl
     mab = bytearray(m['animation_model'][2])
     for name, at in zip(camera_names(m), camera):
         vec, _ = mab_locator(bytes(mab), name)
-        struct.pack_into('<3f', mab, vec, *(round(at[i] - float(box[0][i]), 3) for i in range(3)))
+        struct.pack_into('<3f', mab, vec, *(round(at[i] - float(origin[i]), 3) for i in range(3)))
     m['animation_model'][2] = bytes(mab)
 
 
-def check_seat_camera(data: bytes, bounds: Bounds, camera: tuple[tuple[float, float, float], tuple[float, float, float]]
-                      ) -> None:
+def check_seat_camera(data: bytes, bounds: Bounds, camera: tuple[tuple[float, float, float], tuple[float, float, float]],
+                      mdl=None) -> None:
     """Re-read a mech's SGO and raise CameraError unless its seat camera is `camera` (model frame), its eye outside the
-    model's `bounds` and its look point inside them (it looks at the mech)."""
+    model's `bounds` and its look point inside them (it looks at the mech). `mdl`: where its locators are measured
+    from (mdl_at; None: the box's centre)."""
     _, m = sgo.read(data)
     mab = m['animation_model'][2]
-    centre = [float(_value(v)) for v in m['heli_rigid_body'][0]]
+    centre = [float(_value(v)) for v in m['heli_rigid_body'][0]] if mdl is None else list(mdl)
     got = []
     for name in camera_names(m):
         vec, _ = mab_locator(mab, name)
@@ -956,7 +975,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     door = _moves_door(jet)
     bounds = heli = None
     if door:
-        move_door(m, box)
+        move_door(m, box, mdl_at(jet))
         # The models jet_models measures (the ones the player boards): the seat camera and the ragdoll on the box's
         # centre, where `mdl` is (seat_camera, _jet_ragdoll).
         bounds = jet_models.model_bounds(game, jet.file or jet.box_model)
@@ -964,7 +983,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         if jet.seat_camera is None:
             fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]])
         else:
-            place_seat_camera(m, box, jet.seat_camera)
+            place_seat_camera(m, box, jet.seat_camera, mdl_at(jet))
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.FILES[airframe].lower(),
                     _jet_ragdoll(rag[1], body, box[0] if door or airframe is not False else None)]
@@ -983,11 +1002,11 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         m['vehicle_damage_effect'] = [0.0]   # the 506's damage smoke: none (a scale of 1.0 when the key is missing)
     out = sgo.write(version, m)
     if door:
-        check_door(out)
+        check_door(out, mdl_at(jet))
         if jet.seat_camera is None:
             check_camera(out, bounds)
         else:
-            check_seat_camera(out, bounds, jet.seat_camera)
+            check_seat_camera(out, bounds, jet.seat_camera, mdl_at(jet))
     return out
 
 

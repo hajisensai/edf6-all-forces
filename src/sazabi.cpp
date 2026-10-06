@@ -322,6 +322,20 @@ void Report(Mech& m,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
         "in(f %.2f r %.2f turn %.2f asc %.2f)",v,m.air ? "AIR" : "GROUND",m.vel[0],m.vel[1],m.vel[2],m.feetClear,
         m.heading/sazabi::kDeg,m.aimPitch/sazabi::kDeg,m.thruster*100.0f,m.dashLeft,p[0],p[1],p[2],At<float>(v,kHp),c.forward,
         c.right,c.turn,c.ascend);
+    // the frames' axes in the world (docs/sazabi-re.md: what the bones' worlds are against the body), the funnels
+    const float* vm=reinterpret_cast<const float*>(v+kMatrix);
+    const float* mz=reinterpret_cast<const float*>(m.rec[sazabi::kMuzzle]+kBoneWorld506);
+    Log("SAZABI v=%p axes body x(%.2f,%.2f,%.2f) z(%.2f,%.2f,%.2f) root x(%.2f,%.2f,%.2f) z(%.2f,%.2f,%.2f) at (%.1f,%.1f,%.1f) "
+        "muzzle z(%.2f,%.2f,%.2f) at (%.1f,%.1f,%.1f) aim %d (%.0f,%.0f,%.0f)",v,vm[0],vm[1],vm[2],vm[8],vm[9],vm[10],m.root[0],m.root[1],
+        m.root[2],m.root[8],m.root[9],m.root[10],m.root[12],m.root[13],m.root[14],mz[8],mz[9],mz[10],mz[12],mz[13],mz[14],m.arms.hasAim,
+        m.arms.aim[0],m.arms.aim[1],m.arms.aim[2]);
+    for(int k=0;k<kFunnelCount;++k) {
+        const Funnel& f=m.arms.funnels[k];
+        if(f.phase==FunnelPhase::docked)continue;
+        const float* fw=reinterpret_cast<const float*>(m.rec[sazabi::kFunnels[k]]+kBoneWorld506);
+        Log("SAZABI v=%p funnel %d phase %d at (%.1f,%.1f,%.1f) drawn (%.1f,%.1f,%.1f) scale %.2f",v,k,static_cast<int>(f.phase),f.at[0],
+            f.at[1],f.at[2],fw[12],fw[13],fw[14],std::sqrt(fw[0]*fw[0]+fw[1]*fw[1]+fw[2]*fw[2]));
+    }
 }
 
 void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {

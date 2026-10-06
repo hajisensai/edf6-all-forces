@@ -1506,6 +1506,12 @@ def jet_door_on_the_ground_beside_its_box() -> None:
     # it lands on; the stock radius reaches.
     at, r = vc.door_point([[0.0, 0.339, 2.723], [1.983, 1.624, 15.137]], (2.15, 0.0, 1.8), 1.8)
     assert at == [2.583, -1.624, 1.8] and r == 1.8, (at, r)
+    # The Sazabi's `mdl` lands at its model's origin, its soles, not at its box's centre 12.8 m over them (its frames
+    # log, 2026-10-07: written from the centre, the door was 12.8 m underground): the same point, from the origin.
+    assert vc.JETS[vc.SAZABI_JET].locators_on_origin and vc.mdl_at(vc.JETS[vc.SAZABI_JET]) == (0.0, 0.0, 0.0)
+    assert all(vc.mdl_at(j) is None for n, j in vc.JETS.items() if n != vc.SAZABI_JET), 'the jets keep the centre'
+    at, r = vc.door_point([[0.0, 12.805, -1.395], [10.805, 12.805, 13.715]], (2.15, 0.0, 1.8), 1.8, (0.0, 0.0, 0.0))
+    assert at == [11.405, 0.0, 0.405], at
 
 
 @test
