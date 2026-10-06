@@ -322,3 +322,17 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 离线：`tools/hud_view` 新增 `jet_lowfuel`（8%、5:12、LOW FUEL）；`heli_sinkrate` 显示 `FUEL 41% 30:30`，`rotor_pullup` 显示 `FUEL 62%`。
 
 **需实机确认**：插件战机 / 原版直升机 / 坦克 / 摩托上原版武器栏消失、步行和巴尔加时还在；`HideStockGauges=0` 或关掉 `StockVehicleHud` 后（同一次乘坐中）武器栏回来；换座位后武器栏（`HideStockGauges=0` 时）显示新座位的武器；FUEL 百分比与原版数值一致；开火、切换挂载不受影响。
+
+## 挂载图标条与自瞄开关提示（2026-10-06，`src/hud_cue.h`）
+
+- 用户：「切换挂载应该有图片显示，而非仅文字」。HUD 只能画纯色四边形（§1，`0xC2FB0` 的第 8 参传 0 = drawer 自带白纹理）和文字（§2）；
+  要贴游戏自己的武器图标，得先找到游戏 UI 贴图的加载与句柄（没做过、也无法不进游戏验证），所以不硬造：挂载图标是用同一个四边形
+  画出来的矢量剪影（`StoreGlyph`：近 / 中 / 远距空空、空地、地狱火、Mk 82、火箭巢、机炮弹），一格一种挂载、下面写名字和余量
+  （`LoadoutStrip`，插件战机 / 旋翼机按 `PlayerJetReadout::storeRole`，原版直升机按 `StockArm::kind`）。切换时（`hudcue::Changed`，
+  上车 / 重新看到挂载那一下不算切换）选中的那种放大显示 1.5 秒（`LoadoutBanner`）。
+- 用户：「怎么切换自动瞄准和关闭，看不出来」。EDF6AutoTurret 的两种模式本来就是「自瞄」和「预瞄圈（炮塔归玩家）」，旧的提示行写
+  `AUTO-AIM   [Z] lead circle`：模式名后面紧跟着另一种模式的名字，读不出现在是哪种，也没有「关」这个词，切换时只是这行字变了。
+  现在 `TurretAimMarks` 分两行：`AUTO-AIM ON`（绿）/ `AUTO-AIM OFF (LEAD CIRCLE)`（橙），下一行 `[Z] auto-aim off/on` 和锁定键；
+  模式一变（读数 `TurretReadoutV1::mode`）屏幕中上方出现 1.5 秒的横幅。手柄默认没绑 `AimModeButton`，这时提示去 ini 设。
+- 离线：`tools/hud_cue_check.cpp`（切换判定、图标归类），`tools/hud_view.cpp` 的 `jet_switch` / `heli_stores` / `stock_turret_auto` /
+  `stock_turret_lead_switch` 场景，以及模式两行与原版载具块、RWR 不重叠、写明 ON / OFF 的检查（`TurretLayoutApart`）。

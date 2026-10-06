@@ -2586,6 +2586,22 @@ def map_wired() -> None:
 
 
 @test
+def hud_switch_cues_wired() -> None:
+    """The loadout strip (every store's picture, name and rounds; the picked one large for a moment after a switch) and
+    EDF6AutoTurret's aim mode said as on / off with a banner on a flip (the user, 2026-10-06) are drawn where the stores
+    and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
+    hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
+    for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at)'):
+        assert call in hud, call
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'L"AUTO-AIM ON"' in hud and 'AUTO-AIM OFF' in hud
+    assert 'hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])' in hud
+    assert 'r.storeRole[i]=j.storeRole[i];' in src('src/playerjet.cpp')
+    assert 'EXCLUDE_FROM_ALL tools/hud_cue_check.cpp' in cmake and 'hud_cue_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'failed+=!TurretLayoutApart(1920);' in view and 'Scene(dir,L"jet_switch"' in view
+
+
+@test
 def incremental_install_regressions() -> None:
     from test_installer_incremental import run_checks
     run_checks()
