@@ -34,6 +34,7 @@ It has two parts:
 | KG7 Bohr, Bohr B (DLC) | Auto-aim in ground mode: ground targets first, lobbed rounds aimed on their arc, stock impact fuse. Durability x2, blast 4 m -> 6 m, and the blasts now wreck buildings. |
 | Titan (all, incl. DLC side cannons) | Plugin only: both side cannons aim themselves; with no player in a gunner seat they also fire, as the driver's (player or NPC). Main cannon untouched. |
 | NPC Titan (e.g. mission 64) | Data: the stock NPC Titan has empty side-cannon mounts; `build.py` gives it the player Titan's two side cannons, which the plugin then aims and fires. |
+| Tanks and bikes the missions place (NPC Titan, Epsilon, Blacker, Varius, Naegling; boardable Titan, Blacker, Freed bikes) | Data: the stock mission files zero the body recoil (the hull pushed back and rocked on a shot) the player's calls have; `build.py` gives every gun mount the recoil of the same gun in the player's call (`tools/npc_recoil.py`, `docs/recoil-re.md`). |
 | Ranger tanks with gunner seats (Vehicle403) | Plugin only: both side machine guns, as above. Single-seat tanks (Air Raider's, Vehicle601) have no side guns. |
 | Katyusha rocket truck (EDF6VehicleCrew's vehicle, `tools/make_katyusha.py`) | Plugin only, **NPC crews only**: its launcher carries the lofted mark (7303): ground targets first, on the **high arc** (the root above 45 deg); the low one only when the high one is past the launcher's 80 deg elevation stop (a target too close). A Katyusha the player rides is left alone (`PlayerLofted`): the camera follows the seat's aim axes, so steering them turned the player's view to the sky; the player aims with the camera and EDF6VehicleCrew lifts only the launcher's bone onto the arc (`src/katyusha.cpp`). |
 
@@ -101,7 +102,7 @@ are for using this plugin on its own, or for development.
    ```
 
    It writes the vehicles' own call and gun files under `Mods\WEAPON\`, the mission Keplers and
-   the NPC Titan under `Mods\OBJECT\`, and their eight rows of the `WEAPONTEXT.*.SGO` tables
+   the tanks missions place (the NPC Titan among them) under `Mods\OBJECT\`, and their eight rows of the `WEAPONTEXT.*.SGO` tables
    there; it reads the game's `Root.cpk` and never modifies it. It refuses while the game runs, and
    will not overwrite a `Mods` file another mod put there (`--force` backs it up and overwrites it).
    What it wrote and replaced is recorded in `Mods\.edf6at_data.json` (replaced files are backed up
