@@ -50,6 +50,13 @@ set_target_properties(sidecar_board_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$
 add_executable(pjet_kinds EXCLUDE_FROM_ALL tools/pjet_kinds.cpp)
 target_include_directories(pjet_kinds PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(pjet_kinds PRIVATE /W4 /WX /utf-8 /permissive-)
+# The fixed wings' turn handling under the player's flight model (tools/pjet_turn_sim.cpp: src/pjet_handling.h against the
+# code before 2026-10-06), and its bounds (--check, in CTest):
+# cmake --build build --target pjet_turn_sim && build\pjet_turn_sim.exe --both
+add_executable(pjet_turn_sim EXCLUDE_FROM_ALL tools/pjet_turn_sim.cpp)
+target_include_directories(pjet_turn_sim PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(pjet_turn_sim PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(pjet_turn_sim PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The stock heli's mouse-aim flight (src/heliaim.h) against a stand-in of its flight law, offline: the signs of the keys and
 # the mouse (tools/heli_aim_check.cpp). Not part of the plugin build:
@@ -238,3 +245,5 @@ target_compile_options(play_area_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(play_area_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 add_dependencies(offline_checks play_area_check)
 add_test(NAME play_area_check COMMAND play_area_check)
+add_dependencies(offline_checks pjet_turn_sim)
+add_test(NAME pjet_turn_check COMMAND pjet_turn_sim --check)
