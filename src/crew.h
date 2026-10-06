@@ -43,6 +43,7 @@ struct Config {
     bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
+    bool medicGunnerAim=true;  // the player in a medic heli's door seat: the gun aimed for them at hurt friends (heli.cpp)
     float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
     float heliGuardSpeed=12.0f;// ...at this speed (m/s; at most 80% of its top speed)
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin

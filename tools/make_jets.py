@@ -32,6 +32,7 @@ fly) stays. The test range's own jets are its own: it gives them the elevon mode
 """
 from __future__ import annotations
 
+import copy
 import os
 import sys
 
@@ -167,19 +168,25 @@ HELIS: dict[str, str] = {
 }
 # The medic heli (the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，自瞄也是锁队友」; src/heli.cpp Medic):
 # the call-in Brute 410 made script-placeable like EDF6VC_HELI_410, its door guns' weapon MEDIC_GUN_STOCK swapped for
-# MEDIC_GUN_FILE. That gun is the stock door gun with a negative AmmoDamage: the stock Reverser's way of healing (aWeapon209
-# 「リバーサー」: AmmoDamage -1.6, AmmoExplosion 0). A round with no blast skips the team check (docs/bullet-pass-re.md §1,
-# 3.2 step 4: AmmoExplosion 0 -> core+0xA27/0xA28 = 0), so it hits a friend and its damage, negative, is a heal. Not
-# penetrating (one body a round: it does not pass on to whoever is behind, an enemy maybe), more rounds (the plugin refills
-# no called heli's guns: MEDIC_GUN_AMMO at its 2 a second is two minutes of healing a gun), green (the Reverser's
-# AmmoColor). The plugin knows a medic by this negative damage (src/heli.cpp HealingGun): its gunners then aim at hurt
-# friends, never enemies.
+# MEDIC_GUN_FILE. That gun fires the stock healing round (the user, 2026-10-06: 「不是有加血的子弹吗」): the Ranger's Reverse
+# Shooter T1's (MEDIC_ROUND_STOCK, aWeapon213 「リバースシューターＴ１」: a PlasmaBullet01 with a negative AmmoDamage and a
+# blast, healing the friends round where it bursts; the game has no other healing round, the Reverser's own is a flame
+# with a negative damage too). Its class, model, size, colour, hit sound and fuse (MEDIC_ROUND_FIELDS) on the door gun,
+# the door gun's flight kept (its speed, life and drop: its reach, which the plugin's aim reads off the weapon). The heal is
+# MEDIC_GUN_HEAL a round over MEDIC_GUN_BLAST m (T1: 1000 over 15 m, 5 rounds a reload; this one 2 a second), more rounds
+# (the plugin refills no called heli's guns: MEDIC_GUN_AMMO is two minutes of healing a gun). A round with a blast skips a
+# friend's body (docs/bullet-pass-re.md §3.2 step 4), so it bursts on the ground at their feet, where the gunners aim.
+# The plugin knows a medic by this negative damage (src/heli.cpp HealingGun): its gunners then aim at hurt friends, never
+# enemies, and the player's gun in one is aimed for them (ini MedicGunnerAim).
 MEDIC_HELI_FILE = 'EDF6VC_HELI_MEDIC.SGO'
 MEDIC_GUN_FILE = 'EDF6VC_MEDIC_GUN.SGO'
 MEDIC_GUN_STOCK = 'V_410HELI_GATLING01.SGO'
+MEDIC_ROUND_STOCK = 'AWEAPON213.SGO'
+MEDIC_ROUND_FIELDS = ('AmmoClass', 'AmmoModel', 'AmmoSize', 'AmmoHitSizeAdjust', 'AmmoColor', 'Ammo_CustomParameter',
+                      'AmmoHitSe', 'AmmoIsPenetration')
 MEDIC_GUN_HEAL = 150.0       # HP a round, at the base tier (the call's tier multiplies it as it does the stock 200 damage)
+MEDIC_GUN_BLAST = 8.0        # m
 MEDIC_GUN_AMMO = 240.0
-MEDIC_GUN_COLOR = (0.3, 1.0, 0.6, 1.0)
 MEDIC_GUN_NAMES = {'ja': 'メディックガン', 'en': 'Medic Gun', 'cn': '救護機砲', 'kr': '메딕 건', 'sc': '救护机炮'}
 MODEL_FILE = vc.JET_ELEVON_FILE
 MODEL = vc.JET_ELEVON_MODEL
@@ -221,22 +228,26 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{CANNON_FILE}'] = cannon
     for name, stock in HELIS.items():
         out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
-    out[f'WEAPON/{MEDIC_GUN_FILE}'] = medic_gun(game.read('WEAPON', MEDIC_GUN_STOCK))
+    out[f'WEAPON/{MEDIC_GUN_FILE}'] = medic_gun(game.read('WEAPON', MEDIC_GUN_STOCK), game.read('WEAPON', MEDIC_ROUND_STOCK))
     out[f'OBJECT/{MEDIC_HELI_FILE}'] = medic_heli(out[f'OBJECT/EDF6VC_HELI_410.SGO'])
     return out
 
 
-def medic_gun(stock: bytes) -> bytes:
-    """MEDIC_GUN_FILE from the stock door gun `stock` (MEDIC_GUN_STOCK's bytes): see MEDIC_HELI_FILE."""
+def medic_gun(stock: bytes, round_stock: bytes) -> bytes:
+    """MEDIC_GUN_FILE from the stock door gun `stock` (MEDIC_GUN_STOCK's bytes) and the Reverse Shooter T1 `round_stock`
+    (MEDIC_ROUND_STOCK's): see MEDIC_HELI_FILE."""
     import dsgo
-    doc = dsgo.parse(stock)
+    doc, rnd = dsgo.parse(stock), dsgo.parse(round_stock).root
     r = doc.root
-    if (r.get('AmmoClass') != 'SolidBullet01' or not r.get('AmmoDamage') > 0 or r.get('AmmoExplosion') != 0
-            or len(r.get('AmmoColor').items) != 4):
+    if r.get('AmmoClass') != 'SolidBullet01' or not r.get('AmmoDamage') > 0 or r.get('AmmoExplosion') != 0:
         raise ValueError(f'{MEDIC_GUN_STOCK} 不是预期的 410 门炮（实弹、无爆炸、正伤害）')
-    for key, value in (('AmmoDamage', -MEDIC_GUN_HEAL), ('AmmoCount', MEDIC_GUN_AMMO), ('AmmoIsPenetration', 0.0)):
+    heal = rnd.get('AmmoDamage')
+    if rnd.get('AmmoClass') != 'PlasmaBullet01' or not (isinstance(heal, dsgo.Node) and heal.items[0] < 0):
+        raise ValueError(f'{MEDIC_ROUND_STOCK} 不是预期的回复射手（PlasmaBullet01、负伤害）')
+    for key in MEDIC_ROUND_FIELDS:
+        r.set(key, copy.deepcopy(rnd.get(key)))
+    for key, value in (('AmmoDamage', -MEDIC_GUN_HEAL), ('AmmoExplosion', MEDIC_GUN_BLAST), ('AmmoCount', MEDIC_GUN_AMMO)):
         r.set(key, value)
-    r.get('AmmoColor').items[:] = list(MEDIC_GUN_COLOR)
     for lang, name in MEDIC_GUN_NAMES.items():
         r.set(f'name.{lang}', name)
     return dsgo.write(doc)

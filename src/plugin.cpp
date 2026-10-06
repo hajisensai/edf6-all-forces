@@ -290,6 +290,7 @@ void LoadConfig() noexcept {
     n.hideStockGauges=ReadBool(L"HideStockGauges",n.hideStockGauges);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
+    n.medicGunnerAim=ReadBool(L"MedicGunnerAim",n.medicGunnerAim);
     n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
     n.heliGuardSpeed=ReadFloat(L"HeliGuardSpeed",n.heliGuardSpeed);
     n.jetPilot=ReadBool(L"JetPilot",n.jetPilot);
@@ -484,8 +485,8 @@ void LoadConfig() noexcept {
         n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
     Log("CONFIG playerHeliStopSec=%.2f gunSight=%d mouseAim=%d flightHud=%d",n.playerHeliStopSec,n.playerHeliGunSight,n.heliMouseAim,
         n.heliFlightHud);
-    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
-        n.heliGuardRadius,n.heliGuardSpeed);
+    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d medicGunnerAim=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,
+        n.heliAgility,n.heliYawRate,n.heliDoorGuns,n.medicGunnerAim,n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG soft edge: jets %.0f m / %.1f turns, ceiling %.0f m, helis %.0f m",n.airSoftEdge,n.airSoftTurns,n.airSoftCeil,n.heliSoftEdge);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d",n.vehicleHud,

@@ -603,9 +603,10 @@ constexpr unsigned kVisitFriends=0x5E11D0;
 const unsigned char kVisitFriendsSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
 constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
 constexpr float kHurt=0.97f;        // below this share of its HP a friend is hurt
-constexpr float kChest=1.0f;        // m over a soldier's origin (its feet) the gunners aim
+constexpr float kAimOver=0.3f;      // m over a soldier's origin (its feet) the gunners aim: the healing round bursts there
 constexpr float kHurtWeight=200.0f; // m a friend counts farther per share of its HP it still has (the most hurt first)
-constexpr float kEnemyClear=5.0f;   // m: no healing round passes this near an enemy's lock point
+constexpr float kEnemyClear=5.0f;   // m: no healing round passes this near an enemy's lock point (plus the round's blast)
+constexpr std::size_t kWeaponBlast=0x8B0;   // AmmoExplosion, the blast radius (0x68D82F, docs/heli-input-re.md)
 constexpr int kMaxFriends=64;
 bool visitOk=false;                  // 0x5E11D0 is the walk read above (CheckHeliProfile)
 
@@ -630,7 +631,7 @@ void AddFriend(FriendList& l,const unsigned char* o) noexcept {
     const float* p=reinterpret_cast<const float*>(o+kPosition);
     if(!std::isfinite(p[0]+p[1]+p[2]))return;
     Friend& f=l.f[l.n++];
-    f.object=o;f.aim[0]=p[0];f.aim[1]=p[1]+kChest;f.aim[2]=p[2];f.share=hp/max;
+    f.object=o;f.aim[0]=p[0];f.aim[1]=p[1]+kAimOver;f.aim[2]=p[2];f.share=hp/max;
 }
 
 void __fastcall VisitorNone(FriendVisitor*) noexcept {}
@@ -690,10 +691,12 @@ template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) no
     return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f); });
 }
 
-// Would a healing round from `from` to `to` pass within kEnemyClear of an enemy?
-bool EnemyInLine(const unsigned char* v,const float* from,const float* to) noexcept {
+// Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
+bool EnemyInLine(const unsigned char* v,const unsigned char* weapon,const float* from,const float* to) noexcept {
+    const float blast=At<float>(weapon,kWeaponBlast);
+    const float clear=kEnemyClear+(std::isfinite(blast) && blast>0.0f && blast<50.0f ? blast : 0.0f);
     bool close=false;
-    ForEachEnemy(v,[&](const void*,const float* p) noexcept { close=close || NearLine(from,to,p,kEnemyClear); });
+    ForEachEnemy(v,[&](const void*,const float* p) noexcept { close=close || NearLine(from,to,p,clear); });
     return close;
 }
 
@@ -1284,7 +1287,10 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     Door& g=h.doors[i];
     unsigned char* blk=v+kDoorBlock+i*kDoorStride;
     unsigned char* seat=SeatAt(v,static_cast<unsigned>(i+1));
-    if(SeatRider(seat)==Rider::player){g.prevValid=false;return;}   // theirs: their stick, their trigger
+    // The player's gun: their stick, their trigger; a medic's (MedicGunnerAim): aimed for them at the hurt friend it
+    // reaches while there is one, the trigger still theirs (else their stick as it is).
+    const bool theirs=SeatRider(seat)==Rider::player;
+    if(theirs && !Cfg().medicGunnerAim){g.prevValid=false;return;}
     const auto triggers=At<unsigned char*>(v,kHolders);
     if(At<std::uint64_t>(v,kHolderCount)<=static_cast<std::uint64_t>(i) || !Readable(triggers+i*kHolderStride,kHolderStride))return;
     const auto trigger=triggers+i*kHolderStride;
@@ -1292,6 +1298,8 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return;
     const auto weapon=At<unsigned char*>(trigger,kHolderWeapon);
     if(!Readable(weapon,kWeaponAmmo+4,true))return;
+    const bool heals=HealingGun(weapon);
+    if(theirs && !heals){g.prevValid=false;return;}
     float gp[3],gd[3];
     if(!Barrel(v,weapon,gp,gd))return;
     // No weapon of the helis reloads: refill an emptied gun as Arms does.
@@ -1327,7 +1335,6 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     }
     // The target: the cheapest enemy in reach, the current one and the pilot's counting nearer (a healing gun: the cheapest
     // hurt friend, the most hurt counting nearer; see Medic).
-    const bool heals=HealingGun(weapon);
     const float speed=At<float>(weapon,kWeaponSpeed)*60.0f;
     const float reach=At<float>(weapon,kWeaponSpeed)*static_cast<float>(At<std::int32_t>(weapon,kWeaponAlive));
     const float range=std::isfinite(reach) && reach>0.0f && reach<kDoorRange ? reach : kDoorRange;
@@ -1367,17 +1374,19 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
         const float wide=dist>1.0f ? std::atan(kHitRadius/dist) : 1.0f;
         const float cone=(wide>kDoorCone ? wide : kDoorCone)*(g.firing ? kDoorHold : 1.0f);
         // A healing round onto the player is the point; one past an enemy is not (see Medic).
-        fire=!hold && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin &&
-             (heals ? !EnemyInLine(v,gp,lead) : !PlayerInLine(gp,lead));
+        fire=!hold && !theirs && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin &&
+             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead));
     } else g.target=ObjRef{};
-    Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);blk[kDoorPull]=fire ? 1 : 0;
+    if(theirs && !best){g.prevValid=false;return;}   // nobody to heal: their own aim
+    Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);
+    if(!theirs)blk[kDoorPull]=fire ? 1 : 0;
     g.firing=fire;
     for(int k=0;k<2;++k){g.in[k]=in[k];g.axisPrev[k]=a.angle[k];g.barrelPrev[k]=a.barrel[k];}
     g.prevValid=true;
     if(Cfg().debug && ms-g.loggedAt>1000) {
         g.loggedAt=ms;
         Log("GUNNER410 v=%p gun=%d%s t=%p dist=%.0f barrel=(%.2f,%.2f) err=(%.3f,%.3f) axis=(%.2f,%.2f)->(%.2f,%.2f) lim=(%.2f..%.2f, %.2f..%.2f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d ammo=%d",
-            v,i,heals ? " (heals)" : "",best,dist,a.barrel[0],a.barrel[1],err[0],err[1],a.angle[0],a.angle[1],axis[0],axis[1],a.lo[0],a.hi[0],a.lo[1],a.hi[1],
+            v,i,heals ? (theirs ? " (heals, player's)" : " (heals)") : "",best,dist,a.barrel[0],a.barrel[1],err[0],err[1],a.angle[0],a.angle[1],axis[0],axis[1],a.lo[0],a.hi[0],a.lo[1],a.hi[1],
             a.sign[0],a.sign[1],g.k[0],g.k[1],in[0],in[1],fire,ammo);
         // A medic's: the friend's HP now, a line a second (whether the rounds heal shows as it rising).
         const auto friendObj=static_cast<const unsigned char*>(best);
