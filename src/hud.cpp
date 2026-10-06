@@ -22,6 +22,7 @@
 #include "crew.h"
 #include "gear.h"
 #include "map_cam.h"
+#include "map_marks.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
@@ -2189,7 +2190,8 @@ constexpr int kMapLabels=12;             // at most this many labels an axis (ev
 constexpr float kMapLabelGap=34.0f;      // px (at 1080 lines) between two labels of an axis
 constexpr float kMapFarFade=0.45f;       // a pin three times the focus's distance away (and on) drawn this opaque
 constexpr float kMapLockNear=40.0f;      // m: a lock point this near an enemy's pin brackets that pin
-constexpr int kMapLegendRows=13;
+constexpr float kMapEmptyFade=0.55f;     // nobody in it (kMapEmpty): its pin this much of a crewed one's
+constexpr int kMapLegendRows=15;
 constexpr float kMapGuard=1.25f;         // a grid line is cut to this much of the screen's half size round it
 constexpr float kMapNearW=1.0f;          // ...and to this clip w (m in front of the eye)
 
@@ -2333,9 +2335,31 @@ const float* MapFade(const float* rgba,float fade,float* out) noexcept {
     return out;
 }
 
-// One icon at (x, y): `dx, dy` its heading on the screen (0, 0: none), `hp` its HP bar (<0: none).
+// A friendly aircraft (kind air; the user, 2026-10-06: aircraft as plainly on the map as the vehicles, an icon of
+// their own): a fixed-wing one a plane seen from above, its nose along its heading on the screen (`dx`, `dy`; none: up);
+// a helicopter (kMapRotor) its rotor's ring round a short fuselage and tail boom.
+void MapAircraft(void* drawer,void* ctx,float x,float y,float s,bool rotor,float dx,float dy,const float* rgba) noexcept {
+    if(dx==0.0f && dy==0.0f)dy=-1.0f;
+    const float rx=-dy,ry=dx,t=2.0f*s;
+    auto seg=[&](float f0,float r0,float f1,float r1,float w){
+        Seg(drawer,ctx,x+(dx*f0+rx*r0)*s,y+(dy*f0+ry*r0)*s,x+(dx*f1+rx*r1)*s,y+(dy*f1+ry*r1)*s,w,rgba);
+    };
+    if(rotor) {
+        Arc(drawer,ctx,x,y,9.0f*s,0.0f,kTurn,1.5f*s,18,rgba);
+        seg(5.0f,0.0f,-13.0f,0.0f,3.0f*s);seg(-12.0f,-3.0f,-12.0f,3.0f,t);
+        return;
+    }
+    seg(12.0f,0.0f,-10.0f,0.0f,3.0f*s);                        // the fuselage
+    seg(3.0f,0.0f,-4.0f,11.0f,t);seg(3.0f,0.0f,-4.0f,-11.0f,t);   // the swept wings
+    seg(-4.0f,11.0f,-1.0f,0.0f,t);seg(-4.0f,-11.0f,-1.0f,0.0f,t);
+    seg(-7.0f,0.0f,-11.0f,5.0f,t);seg(-7.0f,0.0f,-11.0f,-5.0f,t);   // the tail
+}
+
+// One icon at (x, y): `dx, dy` its heading on the screen (0, 0: none), `hp` its HP bar (<0: none). Nobody in it
+// (kMapEmpty: a vehicle or aircraft of team 5) at kMapEmptyFade of it.
 void MapIcon(void* drawer,void* ctx,float x,float y,float s,MapKind kind,std::uint8_t flags,float dx,float dy,float hp,float fade) noexcept {
     alignas(16) float c[4],b[4];
+    if(flags&kMapEmpty)fade*=kMapEmptyFade;
     const float* rgba=MapFade(MapColour(kind),fade,c);
     const float t=2.0f*s;
     float tick=0.0f;   // the heading tick's start, from the centre
@@ -2343,7 +2367,7 @@ void MapIcon(void* drawer,void* ctx,float x,float y,float s,MapKind kind,std::ui
     case MapKind::squad: Rect(drawer,ctx,x-4.5f*s,y-4.5f*s,x+4.5f*s,y+4.5f*s,rgba);break;
     case MapKind::ally: Rect(drawer,ctx,x-3.5f*s,y-3.5f*s,x+3.5f*s,y+3.5f*s,rgba);break;
     case MapKind::vehicle: MapBox(drawer,ctx,x,y,8.0f*s,t,rgba);Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,rgba);tick=8.0f*s;break;
-    case MapKind::air: MapDiamond(drawer,ctx,x,y,9.0f*s,t,rgba);Rect(drawer,ctx,x-2.0f*s,y-2.0f*s,x+2.0f*s,y+2.0f*s,rgba);tick=9.0f*s;break;
+    case MapKind::air: MapAircraft(drawer,ctx,x,y,s,(flags&kMapRotor)!=0,dx,dy,rgba);tick=flags&kMapRotor ? 9.0f*s : 0.0f;break;
     case MapKind::carrier: MapBox(drawer,ctx,x,y,13.0f*s,t,rgba);MapBox(drawer,ctx,x,y,7.0f*s,t,rgba);tick=13.0f*s;break;
     case MapKind::enemy:
         if(flags&kMapLarge){MapBox(drawer,ctx,x,y,11.0f*s,t,rgba);Rect(drawer,ctx,x-6.0f*s,y-6.0f*s,x+6.0f*s,y+6.0f*s,rgba);tick=11.0f*s;}
@@ -2371,7 +2395,10 @@ void MapDot1(void* drawer,void* ctx,float x,float y,float s,std::uint8_t flags,c
 // on the aircraft, its stem down to the ground under it (its height read off the stem).
 struct Pin { float ix,iy,bx,by,dx,dy,depth; bool stem; };
 bool MapPin(const float* vp,float width,float height,const MapUnit& u,float pin,Pin* p) noexcept {
-    const bool air=u.kind==MapKind::air || u.kind==MapKind::carrier || u.kind==MapKind::enemyAir || u.kind==MapKind::lock;
+    // An aircraft standing on the ground (parked, landed: mapmarks::Landed) gets a ground unit's pin: its icon up on a
+    // stem as a vehicle's, not lost in the ground's clutter at its wheels.
+    const bool air=u.kind==MapKind::lock ||
+                   ((u.kind==MapKind::air || u.kind==MapKind::carrier || u.kind==MapKind::enemyAir) && !mapmarks::Landed(u.pos[1],u.ground));
     float top[3]={u.pos[0],u.pos[1],u.pos[2]},base[3]={u.pos[0],u.pos[1],u.pos[2]};
     if(air)base[1]=u.ground;
     else top[1]+=pin;
@@ -2415,7 +2442,8 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
             const float f=fade(p.depth);
             if(p.stem) {
                 Seg(drawer,ctx,p.bx,p.by,p.ix,p.iy,1.5f*s,MapFade(MapColour(kind),f*0.7f,c));
-                if(kind==MapKind::air || kind==MapKind::carrier || kind==MapKind::enemyAir)Arc(drawer,ctx,p.bx,p.by,4.0f*s,0.0f,kTurn,1.5f*s,10,c);   // its ground point
+                if((kind==MapKind::air || kind==MapKind::carrier || kind==MapKind::enemyAir) && !mapmarks::Landed(u.pos[1],u.ground))
+                    Arc(drawer,ctx,p.bx,p.by,4.0f*s,0.0f,kTurn,1.5f*s,10,c);   // a flying one's ground point
             }
             MapIcon(drawer,ctx,p.ix,p.iy,s,kind,u.flags,p.dx,p.dy,u.flags&kMapLarge ? u.hp : -1.0f,f);
             if(u.flags&kMapNearest)MapBrackets(drawer,ctx,p.ix,p.iy,16.0f*s,2.0f*s,MapFade(kAmber,f,c));
@@ -2471,7 +2499,8 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     }
     struct Entry { MapKind kind; std::uint8_t flags; const wchar_t* name; };
     static const Entry kLegend[]={{MapKind::squad,0,L"SQUAD"},{MapKind::ally,0,L"FRIENDLY"},{MapKind::vehicle,0,L"VEHICLE"},
-                                  {MapKind::air,0,L"AIRCRAFT"},{MapKind::carrier,0,L"CARRIER"},
+                                  {MapKind::air,0,L"AIRCRAFT"},{MapKind::air,kMapRotor,L"HELICOPTER"},
+                                  {MapKind::vehicle,kMapEmpty,L"EMPTY (NO CREW)"},{MapKind::carrier,0,L"CARRIER"},
                                   {MapKind::enemy,kMapLarge,L"LARGE ENEMY"},{MapKind::enemyAir,kMapLarge,L"LARGE ENEMY AIR"},
                                   {MapKind::marker,0,L"OBJECTIVE"}};
     float y=height*0.30f;
