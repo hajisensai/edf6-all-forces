@@ -474,8 +474,8 @@ bool InstallBay(bool spawnOk) noexcept {
     return bayOk;
 }
 
-void PreloadShells(void* mgr,bool gunship) noexcept {
-    gunshipReady=shellsOk && gunship;
+void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept {
+    gunshipReady=shellsOk && (gunship || proteus);
     if(gunshipReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
     cannonReady=gunshipReady && ModFileThere(kCannonFile);
     if(cannonReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCannonSgo,2,-1);
@@ -497,7 +497,7 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         if(n>0)at+=n;
     }
     ++missionCount;
-    Log("JET preload gunship shells=%d cannon=%d impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d",gunshipReady,cannonReady,charges,drillReady,
+    Log("JET preload gunship shells=%d cannon=%d (gunship %d, Proteus %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d",gunshipReady,cannonReady,gunship,proteus,charges,drillReady,
         emcReady[0],emcReady[1],emcReady[2],emcReady[3]);
 }
 
@@ -574,6 +574,20 @@ bool ImpactDamage(const unsigned char* by,const float* at,float damage,float rad
     if(fired && Cfg().debug)Log("JET impact by %p at (%.0f,%.0f,%.0f): %.0f damage, %.0f m charge (asked %.0f m)",by,at[0],at[1],at[2],damage,
                               kCharges[c].radius,radius);
     return fired;
+}
+// The Proteus's driver's gun (proteus.cpp): a round of the gunship's cannon, straight from `from` at `at`.
+bool ProteusGunRound(const unsigned char* by,const float* from,const float* at,float damage) noexcept {
+    if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
+    return Shell(kCannonSgo,cannonReady,by,from,at,damage,true,"Proteus gun");
+}
+// The Proteus's salvo (proteus.cpp): a round of the gunship's shells, on the arc its IFC solves onto `at`.
+bool ProteusSalvoRound(const unsigned char* by,const float* from,const float* at,float damage) noexcept {
+    if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
+    return Shell(kGunshipSgo,gunshipReady,by,from,at,damage,false,"Proteus salvo");
+}
+void ProteusRoundsReady(bool* gun,bool* salvo) noexcept {
+    if(gun)*gun=cannonReady && shellsOk;
+    if(salvo)*salvo=gunshipReady && shellsOk;
 }
 // A bite of the drill tank's drill (drill.cpp): the drill charge fired by `by` straight from `from` (the drill's base)
 // at `at` (what it touches) with `damage`; its team's enemies hurt, its kills, the map's buildings and rocks too.

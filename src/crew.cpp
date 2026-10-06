@@ -65,6 +65,9 @@ using SeatFn=void(__fastcall*)(void*,void*);
 // its stock slot 49 (FindSeat), the slot we chain its per-frame input on, and whether only an armed one
 // (a weapon holder, veh+0x648) gets an NPC driver.
 // The 502 has the 54-slot VehicleBase vtable: no slot 55, its per-frame input copy is slot 4 (0x612D20).
+// VehicleBigBegaruta (the Proteus) has its own slot 55 (0x648F70: the family's AI think 0x63C1C0, then its gunners') and
+// its own slot 50 (0x6490C0: RideAi, every seat), slot 49 the stock FindSeat (docs/proteus-re.md §1); before 2026-10-06
+// its input was 0 here, so no per-frame step of the plugin ever ran for it (no HUD, no seat switch, no crew).
 // Vehicle_Car (the Grape, also the unarmed 512 Kei truck and 513 trailer cab) has its own slot 49
 // (0x65B910, a preferred-seat wrapper round the stock one) and its CarBase input in slot 55 (0x65A390).
 struct VehicleClass {
@@ -77,7 +80,7 @@ const VehicleClass kClasses[]={
     {0x17DA960,0x63C1C0,"504_begaruta"},{0x17DADB0,0x61ACD0,"505_Tank"},{kVt506,0x61B8F0,"506_Helicopter"},
     {0x17DB9D8,0x61DDF0,"510_Maser"},{0x17DBDF8,0x61F080,"511_Bike"},{0x17DC250,0x620790,"601_Tank"},
     {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x63C1C0,"612_nix"},{0x17DD720,0,"VehicleBase"},
-    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0,"BigBegaruta"},{kVt409,0x64C020,"Helicopter409"},
+    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0x648F70,"BigBegaruta"},{kVt409,0x64C020,"Helicopter409"},
     {kVt410,0x64E080,"Helicopter410"},{kVtHeliBase,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
     {0x17E0A80,0,"CarBase"},{0x17E1828,0,"TankBase"},
     {0x17E01B0,0x65A390,"Car",0x65B910,kSlotInput,true},
@@ -570,10 +573,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -713,6 +716,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     SeeFrame(v);               // the frame is a clock: it steps with the plugin off too (body506's steps test it)
     GuardedTick(kStepJetSoundTick,&JetSoundTick);   // once a frame, the plugin off too: it stops the sounds then
     Guarded(kStepTurretCam,&TurretCamFrame,v);      // the plugin off too: it lets the camera go then
+    Guarded(kStepProteus,&ProteusFrame,v);          // the plugin off too: a reworked Proteus gets its stock numbers back
     Guarded(kStepHighCam,&HighCamFrame,v);          // the plugin off too: the high view goes then
     Guarded(kStepVehicleSound,&VehicleSound,v);     // the plugin off too: the stock sounds are given back then
     if(!Cfg().enabled)return;
@@ -815,6 +819,8 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
     }
     return found;
 }
+
+bool KnownVehicle(const void* vehicle) noexcept { return ClassOf(vehicle)>=0; }
 
 const char* VehicleClassName(const void* vehicle) noexcept {
     const int c=ClassOf(vehicle);

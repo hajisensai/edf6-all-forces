@@ -854,7 +854,7 @@ def turret_aim_wired() -> None:
     assert 'PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)' in seat
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
-    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware'}, names
+    assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone'}, names   # the last: proteus_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
     assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at
@@ -1141,6 +1141,7 @@ def heli_store_flies_its_own_arc() -> None:
     assert '#include "../src/roundaim.h"' in check and 'roundaim::Worth(' in check and 'roundaim::Solve(' in check
     assert re.search(r'add_executable\(heli_fire_check EXCLUDE_FROM_ALL tools/heli_fire_check\.cpp\)', src('CMakeLists.txt'))
 
+@test
 def nix_torso_wired() -> None:
     """The Nix's torso twist (src/nix.cpp, src/nix_twist.h): its ini key is read, shipped on and documented; it chains the
     Nix's own class (the vtable crew.cpp knows as 612_nix) and is built (its own target_sources line) with its offline
@@ -1171,6 +1172,70 @@ def nix_torso_wired() -> None:
         assert '±70°' in readme
 
 
+@test
+def proteus_wired() -> None:
+    """The Proteus rework (src/proteus.cpp, src/proteus_logic.h, README 普罗透斯, docs/proteus-re.md): every Proteus* key the
+    ini ships is read, range-checked (all but the three switches), and documented in README.md; the class crew.cpp chains
+    for it (VehicleBigBegaruta, its own slot 55 now, 0 before) is the one proteus.cpp reworks; it is built (its own
+    target_sources line) with its offline check, which includes the rules' header alone; every EDF.dll address it checks is
+    in docs/proteus-re.md; the mission's reset, the per-frame step (before the plugin-off return: it gives the stock numbers
+    back), the install, the turret camera's lift, the shells' preload and the EDF6AutoTurret link (one export name, both
+    turret pickers weighed) are wired; the HUD's layout check covers it. With the game present: every VehicleBigBegaruta SGO
+    has the 5 m foot radius and the 7500 durability the code takes as constants, four seats, and the 50 deg walkable slope
+    whose 1.2 m step README.md quotes."""
+    import math
+    import rootcpk
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/proteus-re.md')
+    code, crew, cmake, check = src('src/proteus.cpp'), src('src/crew.cpp'), src('CMakeLists.txt'), src('tools/proteus_check.cpp')
+    keys = re.findall(r'^(Proteus\w+)=', ini, re.M)
+    assert len(keys) >= 40 and 'ProteusRework' in keys, keys
+    for key in keys:
+        assert f'L"{key}"' in plugin and key in readme, key
+        if key not in ('ProteusRework', 'ProteusTwoSeats', 'ProteusDriverGun'):
+            assert f'Fix("{key}"' in plugin or f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
+    vt = re.search(r'kVtBig=(0x[0-9A-F]+)', code).group(1)
+    assert re.search(rf'\{{{vt},0x648F70,"BigBegaruta"\}}', crew), 'crew.cpp does not chain the Proteus input'
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)' in cmake
+    assert 'add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)' in cmake
+    assert re.findall(r'#include "([^"]+)"', check) == ['../src/proteus_logic.h'], 'proteus_check takes the rules alone'
+    rvas = set()
+    for block in re.findall(r'const Sig k\w+\[\]=\{(.*?)\n\};', code, re.S):
+        rvas.update(re.findall(r'\{(0x[0-9A-F]+),\{', block))
+    assert len(rvas) >= 20, rvas
+    for rva in sorted(rvas):
+        assert rva in doc, f'docs/proteus-re.md does not mention {rva}'
+    assert 'ResetProteus();' in src('src/mission.cpp') and 'InstallProteus();' in plugin
+    frame = crew.split('void __fastcall InputHook', 1)[1]
+    assert frame.index('&ProteusFrame') < frame.index('if(!Cfg().enabled)return;'), 'the Proteus step must run with the plugin off'
+    assert 'ProteusViewLift(' in src('src/turretcam.cpp')
+    assert 'Cfg().enabled && Cfg().proteus' in src('src/jet_spawn.cpp') and 'gunship || proteus' in src('src/jet_bay.cpp')
+    link = src('common/edf/aimlink.h')
+    name = re.search(r'kPriorityZone\[\]="(\w+)"', link).group(1)
+    assert f'extern "C" __declspec(dllexport) bool __cdecl {name}(' in code, name
+    assert 'link::kPriorityZone' in src('autoturret/src/designate.cpp')
+    assert 'distance*PriorityWeight(*e)' in src('autoturret/src/plugin.cpp') and 'distance*PriorityWeight(e)' in src('autoturret/src/gunner.cpp')
+    assert 'StockLayoutApart(1920,&sceneProteus)' in src('tools/hud_view.cpp')
+    foot = float(re.search(r'kFootRadius=([0-9.]+)f', code).group(1))
+    durability = float(re.search(r'kDurability=([0-9.]+)f', code).group(1))
+    assert abs(foot * (1.0 - math.sin(math.radians(50.0))) - 1.17) < 0.01 and '1.2 米' in readme
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        import sgo
+        game = rootcpk.default()
+        seen = 0
+        for name in game.names('OBJECT'):
+            if not name.upper().endswith('.SGO') or not ('PROTEUS' in name.upper() or 'BIGBEGARUTA' in name.upper()):
+                continue
+            v = sgo.load(data=game.read('OBJECT', name))
+            if v.get('xgs_scene_object_class') != 'VehicleBigBegaruta':
+                continue
+            seen += 1
+            assert v['begaruta_rigid_body'][1] == foot and v['begaruta_rigid_body'][3] == 50.0, (name, v['begaruta_rigid_body'])
+            assert v['game_object_durability'] == durability, name
+            assert len(v['vehicle_riding_position']) == 4, name
+        assert seen >= 8, seen
+
+
+@test
 def cockpit_warnings_wired() -> None:
     """The cockpit's warnings (src/warn.cpp, hud.cpp, jetaudio.cpp): their ini keys are read, shipped and documented; one
     owner sounds the threats (warn.cpp, not playerjet.cpp any more); every warning has its annunciator text and every
@@ -2065,8 +2130,8 @@ def impact_charges_agree() -> None:
 @test
 def vehicle_ram_wired() -> None:
     """The ground vehicles' ram (src/vehicleram.cpp, src/vehicleram.h): every class it knows is one crew.cpp names (the same
-    vtable and name), the hooked ones get it from the input hook and the two crew.cpp leaves alone (the Barga, the
-    Proteus) from its own update hooks; it is reset with the mission, built (its own target_sources line) with its offline
+    vtable and name), the hooked ones get it from the input hook (the Proteus too, since proteus.cpp) and the one crew.cpp
+    leaves alone (the Barga) from its own update hook; it is reset with the mission, built (its own target_sources line) with its offline
     check an EXCLUDE_FROM_ALL target; its ini keys are read, range-checked, shipped and documented."""
     h, c, crew = src('src/vehicleram.h'), src('src/vehicleram.cpp'), src('src/crew.cpp')
     known = dict((name, int(vt, 16)) for vt, name in re.findall(r'\{(0x[0-9A-Fa-f]+|kVt\w+),[^{}]*?"(\w+)"', crew)
@@ -2079,7 +2144,7 @@ def vehicle_ram_wired() -> None:
         assert known.get(name) == int(vt, 16), f'src/vehicleram.h {name} {vt}: not as crew.cpp kClasses has it'
     unhooked = dict(re.findall(r'\{(0x[0-9A-Fa-f]+),0,"(\w+)"\}', crew))
     extras = re.findall(r'\{(0x[0-9A-Fa-f]+),4,0x[0-9A-Fa-f]+,\{[^}]*\},"(\w+)"\}', c)
-    assert sorted(n for _, n in extras) == ['501_FortressRobo', 'BigBegaruta'], extras
+    assert sorted(n for _, n in extras) == ['501_FortressRobo'], extras
     for vt, name in extras:
         assert unhooked.get(vt) == name, f'{name}: crew.cpp hooks it (no own hook needed) or names it otherwise'
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
@@ -2155,12 +2220,13 @@ def map_wired() -> None:
             assert edfre.img[at:at + len(want)] == want, (arr, hex(at))
 
     # Every key the plugin reads gives way to the map.
-    for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp'):
+    for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
+                'src/proteus.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')

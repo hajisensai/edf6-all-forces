@@ -172,6 +172,47 @@ void Validate(Config& n) noexcept {
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
+    n.proteusModeKey=static_cast<int>(FixInt("ProteusModeKey",n.proteusModeKey,0,254));
+    n.proteusModeButton=static_cast<int>(FixInt("ProteusModeButton",n.proteusModeButton,0,255));
+    n.proteusShieldKey=static_cast<int>(FixInt("ProteusShieldKey",n.proteusShieldKey,0,254));
+    n.proteusShieldButton=static_cast<int>(FixInt("ProteusShieldButton",n.proteusShieldButton,0,255));
+    n.proteusMarkKey=static_cast<int>(FixInt("ProteusMarkKey",n.proteusMarkKey,0,254));
+    n.proteusMarkButton=static_cast<int>(FixInt("ProteusMarkButton",n.proteusMarkButton,0,255));
+    n.proteusSalvoKey=static_cast<int>(FixInt("ProteusSalvoKey",n.proteusSalvoKey,0,254));
+    Fix("ProteusWalkSpeed",n.proteusWalkSpeed,0.2f,4.0f);
+    Fix("ProteusWalkTurn",n.proteusWalkTurn,0.2f,4.0f);
+    Fix("ProteusStepHeight",n.proteusStepHeight,0.0f,4.0f);   // 4 m: the walkable test's floor (StepNormal 0.2 on the 5 m foot)
+    Fix("ProteusShieldSlow",n.proteusShieldSlow,0.0f,1.0f);
+    Fix("ProteusShieldArc",n.proteusShieldArc,10.0f,360.0f);
+    Fix("ProteusShieldBlock",n.proteusShieldBlock,0.0f,1.0f);
+    Fix("ProteusWalkGunRate",n.proteusWalkGunRate,0.1f,5.0f);
+    Fix("ProteusWalkGunSpread",n.proteusWalkGunSpread,0.0f,10.0f);
+    Fix("ProteusDeploySec",n.proteusDeploySec,0.0f,10.0f);
+    Fix("ProteusStowSec",n.proteusStowSec,0.0f,10.0f);
+    Fix("ProteusDeployTurn",n.proteusDeployTurn,0.0f,2.0f);
+    Fix("ProteusDeployGunRate",n.proteusDeployGunRate,0.1f,5.0f);
+    Fix("ProteusDeployGunSpread",n.proteusDeployGunSpread,0.0f,10.0f);
+    Fix("ProteusViewLift",n.proteusViewLift,0.0f,60.0f);
+    Fix("ProteusHeatSec",n.proteusHeatSec,1.0f,600.0f);
+    Fix("ProteusCoolSec",n.proteusCoolSec,1.0f,600.0f);
+    Fix("ProteusResumeHeat",n.proteusResumeHeat,0.0f,0.95f);
+    Fix("ProteusBarrier",n.proteusBarrier,0.0f,5.0f);
+    Fix("ProteusBarrierRegenSec",n.proteusBarrierRegenSec,1.0f,3600.0f);
+    Fix("ProteusBarrierDelaySec",n.proteusBarrierDelaySec,0.0f,600.0f);
+    Fix("ProteusFieldRadius",n.proteusFieldRadius,0.0f,500.0f);
+    Fix("ProteusFieldDefense",n.proteusFieldDefense,0.0f,0.95f);
+    Fix("ProteusFieldAttack",n.proteusFieldAttack,0.0f,5.0f);
+    Fix("ProteusFieldFireRate",n.proteusFieldFireRate,1.0f,5.0f);
+    Fix("ProteusFieldEnergy",n.proteusFieldEnergy,0.0f,1.0f);
+    Fix("ProteusFieldPower",n.proteusFieldPower,0.0f,10000.0f);
+    Fix("ProteusGunRate",n.proteusGunRate,0.0f,20.0f);
+    Fix("ProteusGunDamage",n.proteusGunDamage,0.0f,1.0e6f);
+    n.proteusSalvoCount=static_cast<int>(FixInt("ProteusSalvoCount",n.proteusSalvoCount,1,60));
+    Fix("ProteusSalvoDamage",n.proteusSalvoDamage,0.0f,1.0e6f);
+    Fix("ProteusSalvoCooldownSec",n.proteusSalvoCooldownSec,0.0f,3600.0f);
+    Fix("ProteusSalvoRange",n.proteusSalvoRange,100.0f,1800.0f);   // the gunship shell's reach (jet_bay.cpp kGunshipReach)
+    Fix("ProteusPriority",n.proteusPriority,0.05f,1.0f);
+    Fix("ProteusPriorityRadius",n.proteusPriorityRadius,0.0f,1000.0f);
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -335,6 +376,50 @@ void LoadConfig() noexcept {
     n.seatButton=ReadInt(L"SeatButton",static_cast<DWORD>(n.seatButton));
     n.seatPilot=ReadBool(L"SeatPilot",n.seatPilot);
     n.seatSwitchOnline=ReadBool(L"SeatSwitchOnline",n.seatSwitchOnline);
+    n.proteus=ReadBool(L"ProteusRework",n.proteus);
+    n.proteusModeKey=ReadInt(L"ProteusModeKey",static_cast<DWORD>(n.proteusModeKey));
+    n.proteusModeButton=ReadInt(L"ProteusModeButton",static_cast<DWORD>(n.proteusModeButton));
+    n.proteusShieldKey=ReadInt(L"ProteusShieldKey",static_cast<DWORD>(n.proteusShieldKey));
+    n.proteusShieldButton=ReadInt(L"ProteusShieldButton",static_cast<DWORD>(n.proteusShieldButton));
+    n.proteusMarkKey=ReadInt(L"ProteusMarkKey",static_cast<DWORD>(n.proteusMarkKey));
+    n.proteusMarkButton=ReadInt(L"ProteusMarkButton",static_cast<DWORD>(n.proteusMarkButton));
+    n.proteusSalvoKey=ReadInt(L"ProteusSalvoKey",static_cast<DWORD>(n.proteusSalvoKey));
+    n.proteusTwoSeats=ReadBool(L"ProteusTwoSeats",n.proteusTwoSeats);
+    n.proteusWalkSpeed=ReadFloat(L"ProteusWalkSpeed",n.proteusWalkSpeed);
+    n.proteusWalkTurn=ReadFloat(L"ProteusWalkTurn",n.proteusWalkTurn);
+    n.proteusStepHeight=ReadFloat(L"ProteusStepHeight",n.proteusStepHeight);
+    n.proteusShieldSlow=ReadFloat(L"ProteusShieldSlow",n.proteusShieldSlow);
+    n.proteusShieldArc=ReadFloat(L"ProteusShieldArc",n.proteusShieldArc);
+    n.proteusShieldBlock=ReadFloat(L"ProteusShieldBlock",n.proteusShieldBlock);
+    n.proteusWalkGunRate=ReadFloat(L"ProteusWalkGunRate",n.proteusWalkGunRate);
+    n.proteusWalkGunSpread=ReadFloat(L"ProteusWalkGunSpread",n.proteusWalkGunSpread);
+    n.proteusDeploySec=ReadFloat(L"ProteusDeploySec",n.proteusDeploySec);
+    n.proteusStowSec=ReadFloat(L"ProteusStowSec",n.proteusStowSec);
+    n.proteusDeployTurn=ReadFloat(L"ProteusDeployTurn",n.proteusDeployTurn);
+    n.proteusDeployGunRate=ReadFloat(L"ProteusDeployGunRate",n.proteusDeployGunRate);
+    n.proteusDeployGunSpread=ReadFloat(L"ProteusDeployGunSpread",n.proteusDeployGunSpread);
+    n.proteusViewLift=ReadFloat(L"ProteusViewLift",n.proteusViewLift);
+    n.proteusHeatSec=ReadFloat(L"ProteusHeatSec",n.proteusHeatSec);
+    n.proteusCoolSec=ReadFloat(L"ProteusCoolSec",n.proteusCoolSec);
+    n.proteusResumeHeat=ReadFloat(L"ProteusResumeHeat",n.proteusResumeHeat);
+    n.proteusBarrier=ReadFloat(L"ProteusBarrier",n.proteusBarrier);
+    n.proteusBarrierRegenSec=ReadFloat(L"ProteusBarrierRegenSec",n.proteusBarrierRegenSec);
+    n.proteusBarrierDelaySec=ReadFloat(L"ProteusBarrierDelaySec",n.proteusBarrierDelaySec);
+    n.proteusFieldRadius=ReadFloat(L"ProteusFieldRadius",n.proteusFieldRadius);
+    n.proteusFieldDefense=ReadFloat(L"ProteusFieldDefense",n.proteusFieldDefense);
+    n.proteusFieldAttack=ReadFloat(L"ProteusFieldAttack",n.proteusFieldAttack);
+    n.proteusFieldFireRate=ReadFloat(L"ProteusFieldFireRate",n.proteusFieldFireRate);
+    n.proteusFieldEnergy=ReadFloat(L"ProteusFieldEnergy",n.proteusFieldEnergy);
+    n.proteusFieldPower=ReadFloat(L"ProteusFieldPower",n.proteusFieldPower);
+    n.proteusDriverGun=ReadBool(L"ProteusDriverGun",n.proteusDriverGun);
+    n.proteusGunRate=ReadFloat(L"ProteusGunRate",n.proteusGunRate);
+    n.proteusGunDamage=ReadFloat(L"ProteusGunDamage",n.proteusGunDamage);
+    n.proteusSalvoCount=ReadInt(L"ProteusSalvoCount",static_cast<DWORD>(n.proteusSalvoCount));
+    n.proteusSalvoDamage=ReadFloat(L"ProteusSalvoDamage",n.proteusSalvoDamage);
+    n.proteusSalvoCooldownSec=ReadFloat(L"ProteusSalvoCooldownSec",n.proteusSalvoCooldownSec);
+    n.proteusSalvoRange=ReadFloat(L"ProteusSalvoRange",n.proteusSalvoRange);
+    n.proteusPriority=ReadFloat(L"ProteusPriority",n.proteusPriority);
+    n.proteusPriorityRadius=ReadFloat(L"ProteusPriorityRadius",n.proteusPriorityRadius);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -375,6 +460,16 @@ void LoadConfig() noexcept {
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
     Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d",n.stockHeliStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline);
+    Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X mark=0x%X/0x%X salvo=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f arc %.0f block %.2f",
+        n.proteus,n.proteusModeKey,n.proteusModeButton,n.proteusShieldKey,n.proteusShieldButton,n.proteusMarkKey,n.proteusMarkButton,n.proteusSalvoKey,
+        n.proteusTwoSeats,n.proteusWalkSpeed,n.proteusWalkTurn,n.proteusStepHeight,n.proteusShieldSlow,n.proteusShieldArc,n.proteusShieldBlock);
+    Log("CONFIG proteus guns walk x%.2f/x%.2f deployed x%.2f/x%.2f stagger %.1f/%.1fs deployTurn %.2f lift %.0fm heat %.0f/%.0fs resume %.2f barrier %.2f regen %.0fs delay %.0fs",
+        n.proteusWalkGunRate,n.proteusWalkGunSpread,n.proteusDeployGunRate,n.proteusDeployGunSpread,n.proteusDeploySec,n.proteusStowSec,n.proteusDeployTurn,
+        n.proteusViewLift,n.proteusHeatSec,n.proteusCoolSec,n.proteusResumeHeat,n.proteusBarrier,n.proteusBarrierRegenSec,n.proteusBarrierDelaySec);
+    Log("CONFIG proteus field %.0fm defense %.2f attack %.2f fireRate %.2f energy %.2f power %.0f; gun=%d %.1f/s %.0f; salvo %d x %.0f cooldown %.0fs range %.0f; priority %.2f within %.0fm",
+        n.proteusFieldRadius,n.proteusFieldDefense,n.proteusFieldAttack,n.proteusFieldFireRate,n.proteusFieldEnergy,n.proteusFieldPower,n.proteusDriverGun,
+        n.proteusGunRate,n.proteusGunDamage,n.proteusSalvoCount,n.proteusSalvoDamage,n.proteusSalvoCooldownSec,n.proteusSalvoRange,n.proteusPriority,
+        n.proteusPriorityRadius);
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
@@ -563,6 +658,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEmc();           // the EMC's charged beam (its rounds are the jets' shells too: jet_bay.cpp)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
     InstallNix();           // the Nix's torso twist: its own update (slot 4) chained, apart from the crews' input slot
+    InstallProteus();       // the Proteus rework: the damage call, its weapon user, the soldiers' target search (proteus.cpp)
     InstallTurretCam();     // the riding camera of a turret (decoupled from it, free look, the high view's placement)
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)

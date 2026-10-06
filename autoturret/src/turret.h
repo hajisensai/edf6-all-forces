@@ -236,6 +236,11 @@ bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
 // gun at this frame with no input (steer from these), `hull` the hull's part of that since the last frame (AxisInput's).
 // False (the plugin absent, older, or the seat not held): `held` = `axes` (the axes as they are), `hull` 0.
 bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,float* held,float* hull) noexcept;
+
+// EDF6VehicleCrew's priority zone (common/edf/aimlink.h PriorityZoneV1: its Proteus's front shield up), asked once a game
+// frame: the weight of an enemy (`e`: its first lock point and its object, whose own target +0x518 is compared, never read
+// through) in a turret's choice of a new target: its distance times this. 1: no zone (or no EDF6VehicleCrew, or an older one).
+float PriorityWeight(const Enemy& e) noexcept;
 // The readout for EDF6VehicleCrew's HUD (common/edf/aimlink.h), from the player's seat this frame: `ownGun` the seat's
 // gun is the plugin's; `target` what the gun works on (null: nothing) at `world`, led from `muzzle` along `bore` with
 // `shot` against the target's velocity `vel` (m/frame); `life` the round's frames (0: unknown).

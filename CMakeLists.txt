@@ -13,6 +13,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
 target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
+# The Proteus rework (its own line too).
+target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -89,6 +91,13 @@ set_target_properties(vehicle_ram_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${C
 add_executable(stab_check EXCLUDE_FROM_ALL tools/stab_check.cpp)
 target_compile_options(stab_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(stab_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
+# the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
+# cmake --build build --target proteus_check && build\proteus_check.exe
+add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)
+target_compile_options(proteus_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(proteus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # NPC jets against buildings, offline (tools/jet_obstacle_sim.cpp): the plugin's own jet_flight.cpp, jet_combat.cpp and
 # body506.cpp against a stand-in world of flat ground and box buildings; tools/jet_obstacle_view.py draws its trace.

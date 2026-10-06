@@ -102,7 +102,8 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool warned; Warnings warn;
                   bool seats; SeatPrompt seatPrompt;
                   bool turretCamOk; TurretCamReadout turretCam;
-                  bool nix; NixTorso nixTorso; };
+                  bool nix; NixTorso nixTorso;
+                  bool proteus; ProteusReadout proteusRo; };
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
 std::atomic<unsigned> middle{1};
@@ -1656,7 +1657,106 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 // (a line in the block instead of DrillPanel), the EMC's charged beam (a line and its bar: emc.cpp), and whether
 // EDF6AutoTurret's lead circle is on the seat's own gun (the
 // seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
-struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; };
+struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; };
+// --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to five
+// lines with a bar under some: the stance (and the stagger's progress), the shield (deployed its heat), the barrier, the
+// salvo (its cooldown, the mark's range), the field (its allies) and the driver's gun; the bindings named where the
+// driver has a press to make. On the hull ring the standing shield's arc; on the ground the field's edge; on the marked
+// target a red diamond with its range. ---
+constexpr int kProteusLines=5;
+const char kBarrierKey=0;            // the barrier bar's damage trail's key (an address of our own)
+struct ProteusLine { Line* line; bool bar; float share; const float* fill; const void* trailKey; };
+
+// A binding's name: the mouse's buttons by name (GetKeyNameText has none for them), the keys as KeyName, a pad's button.
+void ProteusBinding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
+    static const wchar_t* const kMouse[]={L"?",L"LMB",L"RMB",L"?",L"MMB",L"MB4",L"MB5"};
+    if(keys && key>0 && key<=6){wcscpy_s(out,static_cast<rsize_t>(size),kMouse[key]);return;}
+    Binding(keys,key,button,out,size);
+}
+
+// The block's Proteus lines (see above) into `pl` (`n` of them): the lines are `lines`' next ones.
+int ProteusLinesOf(const ProteusReadout& p,Line* lines,ProteusLine* pl) noexcept {
+    wchar_t mode[16],shield[16],mark[16],salvo[16];
+    ProteusBinding(p.keys,p.modeKey,p.modeButton,mode,16);
+    ProteusBinding(p.keys,p.shieldKey,p.shieldButton,shield,16);
+    ProteusBinding(p.keys,p.markKey,p.markButton,mark,16);
+    ProteusBinding(p.keys,p.salvoKey,0,salvo,16);
+    if(!p.keys)wcscpy_s(salvo,L"LT");
+    const bool blink=(GetTickCount64()/125)%2==0;
+    int n=0;
+    const auto add=[&](bool bar,float share,const float* fill)->Line& {
+        Line& l=lines[n];
+        l.scale=kLineScale*0.85f;l.rgba=kHud;l.text[0]=L'\0';
+        pl[n]=ProteusLine{&l,bar,share,fill,nullptr};
+        ++n;
+        return l;
+    };
+    // The stance.
+    {
+        const bool stagger=p.mode==proteus::Mode::deploying || p.mode==proteus::Mode::stowing;
+        Line& l=add(stagger,p.stagger,kAmber);
+        switch(p.mode) {
+            case proteus::Mode::walk: Format(l,L"WALK");if(p.driver)Append(l,L"   [%ls] DEPLOY",mode);break;
+            case proteus::Mode::deploying: Format(l,L"DEPLOYING %d%%",static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
+            case proteus::Mode::deployed: Format(l,L"DEPLOYED");if(p.driver)Append(l,L"   [%ls] STOW",mode);l.rgba=kCyan;break;
+            case proteus::Mode::stowing: Format(l,L"STOWING %d%%",static_cast<int>(std::lround(p.stagger*100.0f)));l.rgba=kAmber;break;
+        }
+    }
+    // The shield.
+    {
+        const bool deployed=p.mode==proteus::Mode::deployed;
+        Line& l=add(deployed,p.heat,p.overheated ? kRed : p.heat>=0.7f ? kAmber : kYellow);
+        Format(l,deployed ? L"SHIELD %ls  HEAT %d%%" : L"FRONT SHIELD %ls",p.overheated ? L"OVERHEAT" : p.shieldUp ? L"UP" : L"OFF",
+               static_cast<int>(std::lround(p.heat*100.0f)));
+        if(p.driver)Append(l,L"   [%ls]",shield);
+        if(p.priority)Append(l,L"   ALLIES FOCUS");
+        l.rgba=p.overheated ? (blink ? kRed : kWhite) : p.shieldUp ? kCyan : kHudDim;
+    }
+    if(p.mode==proteus::Mode::deployed) {
+        // The barrier.
+        Line& b=add(true,p.barrier,HullColour(p.barrier));
+        pl[n-1].trailKey=&kBarrierKey;
+        Format(b,L"BARRIER %d%%",static_cast<int>(std::lround(p.barrier*100.0f)));
+        b.rgba=p.barrier>0.25f ? kHud : kAmber;
+        // The field and the gun.
+        Line& f=add(false,0.0f,nullptr);
+        Format(f,L"FIELD %d m  ALLIES %d",static_cast<int>(std::lround(p.fieldRadius)),p.allies);
+        if(p.gun)Append(f,p.keys ? L"   GUN [LMB]" : L"   GUN [RT]");
+        f.rgba=kTeal;
+    }
+    // The salvo.
+    {
+        Line& l=add(false,0.0f,nullptr);
+        if(!p.salvoArmed){Format(l,L"SALVO OFFLINE");l.rgba=kHudDim;}
+        else if(p.mode!=proteus::Mode::deployed){Format(l,L"SALVO  DEPLOY FIRST");l.rgba=kHudDim;}
+        else if(p.salvoLeft>0){Format(l,L"SALVO  %d IN THE AIR",p.salvoLeft);l.rgba=kRed;}
+        else if(p.salvoWait>0.0f){Format(l,L"SALVO %.1fs",p.salvoWait);l.rgba=kAmber;}
+        else if(!p.marked){Format(l,L"SALVO READY  MARK A TARGET");if(p.driver)Append(l,L" [%ls]",mark);l.rgba=kYellow;}
+        else{Format(l,L"SALVO READY");if(p.driver)Append(l,L" [%ls]",salvo);l.rgba=blink ? kRed : kYellow;}
+        if(p.marked)Append(l,L"   MARK %d m",static_cast<int>(std::lround(p.markRange)));
+    }
+    return n;
+}
+
+// The field's edge on the ground and the marked target (see above).
+void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const ProteusReadout& p,Line* lines,
+                  int* at) noexcept {
+    for(int i=0;i<p.ringCount && i<kProteusRing;++i) {
+        if(i%2)continue;   // dashed
+        float x0,y0,x1,y1;
+        const int k=(i+1)%p.ringCount;
+        if(sight::ToScreen(vp,p.ring[i],1.0f,width,height,&x0,&y0) && sight::ToScreen(vp,p.ring[k],1.0f,width,height,&x1,&y1))
+            Seg(drawer,ctx,x0,y0,x1,y1,2.0f*s,kTeal);
+    }
+    float x,y;
+    if(p.marked && sight::ToScreen(vp,p.markAt,1.0f,width,height,&x,&y)) {
+        const float r=16.0f*s,t=2.5f*s;
+        Seg(drawer,ctx,x,y-r,x+r,y,t,kRed);Seg(drawer,ctx,x+r,y,x,y+r,t,kRed);
+        Seg(drawer,ctx,x,y+r,x-r,y,t,kRed);Seg(drawer,ctx,x-r,y,x,y-r,t,kRed);
+        Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.85f,kRed,L"MARK %d m",static_cast<int>(std::lround(p.markRange)));
+    }
+}
+
 
 // The marks of every aimed weapon but the Katyusha's (launcher.cpp's), those landing on another's drawn once.
 void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
@@ -1760,7 +1860,8 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
                 Line* lines,int* at) noexcept {
     const int arms=r.arms<kStockArms ? r.arms : kStockArms;
     const bool drillOn=x.drill && x.drill->maxRpm>0.0f;
-    if(*at+3+arms+(drillOn ? 1 : 0)+(x.emc ? 1 : 0)>kMaxLines)return;
+    const ProteusReadout* const prot=x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f ? x.proteus : nullptr;   // this vehicle's
+    if(*at+3+arms+(drillOn ? 1 : 0)+(x.emc ? 1 : 0)+(prot ? kProteusLines : 0)>kMaxLines)return;
     Line& warn=lines[(*at)++];
     Line& title=lines[(*at)++];
     Line& info=lines[(*at)++];
@@ -1768,6 +1869,9 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     *at+=arms;
     Line* const drill=drillOn ? &lines[(*at)++] : nullptr;
     Line* const emcLine=x.emc ? &lines[(*at)++] : nullptr;
+    ProteusLine pl[kProteusLines]{};
+    const int prots=prot ? ProteusLinesOf(*prot,&lines[*at],pl) : 0;
+    *at+=prots;
     const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;   // the Nix readout is this vehicle's
     bool missile=false,locked=false,dry=arms>0;
     for(int i=0;i<r.threats && i<kStockThreats;++i){missile=missile || r.threatKind[i]==2;locked=locked || r.threatKind[i]==1;}
@@ -1781,8 +1885,9 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     else if(FuelLow(r.fuel)){Format(warn,L"LOW FUEL");warn.rgba=kAmber;}
     else if(dry){Format(warn,L"NO AMMO");warn.rgba=kAmber;}
     else{Format(warn,L"");warn.rgba=kHud;}
-    if(r.seat==0)Format(title,L"%hs",r.kind);
-    else Format(title,L"%hs  GUNNER %u",r.kind,r.seat);
+    const char* const kind=prot ? "PROTEUS" : r.kind;
+    if(r.seat==0)Format(title,L"%hs",kind);
+    else Format(title,L"%hs  GUNNER %u",kind,r.seat);
     Format(info,L"SPD %d km/h    HP %d%%",static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
     if(nix)Append(info,L"    TWIST %+d",static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));   // right positive, as headings
     if(r.stab)Append(info,r.stab==2 ? L"    STAB LAG" : L"    STAB");   // the gun stabilizer holds it (LAG: the hull outruns its drive)
@@ -1810,11 +1915,13 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
         emcLine->w=emcLine->h=0.0f;
         if(text)MeasureAll(*text,emcLine,1);
     }
+    for(int i=0;i<prots;++i){pl[i].line->w=pl[i].line->h=0.0f;if(text)MeasureAll(*text,pl[i].line,1);}
     const float lineH=18.0f*s,gap=3.0f*s,barW=150.0f*s,barH=6.0f*s;
     float h=(title.h>0.0f ? title.h : lineH)+gap+(info.h>0.0f ? info.h : lineH)+gap+barH+gap*2.0f;
     for(int i=0;i<arms;++i)h+=(arm[i].h>0.0f ? arm[i].h : lineH)+gap;
     if(drill)h+=(drill->h>0.0f ? drill->h : lineH)+gap;
     if(emcLine)h+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap+barH+gap;
+    for(int i=0;i<prots;++i)h+=(pl[i].line->h>0.0f ? pl[i].line->h : lineH)+gap+(pl[i].bar ? barH+gap : 0.0f);
     const float cx=width*0.5f-460.0f*s,tx=cx+kIndicatorR*s+18.0f*s;
     float y=height*0.80f-h;
     float hull=sight::HeadingOf(r.hull),gun=r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
@@ -1826,6 +1933,10 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     }
     const float up=look>=0.0f ? look : gun>=0.0f ? gun : hull;
     HullTurret(drawer,ctx,cx,y+kIndicatorR*s+4.0f*s,s,up<0.0f ? 0.0f : up,hull,gun,nix ? stops : nullptr);
+    if(prot && prot->shieldUp) {   // the standing shield round the hull's nose, on the ring
+        const float half=prot->shieldHalfArc,a=HdgDiff(hull,up<0.0f ? 0.0f : up)*kDeg-1.5707963f;
+        Arc(drawer,ctx,cx,y+kIndicatorR*s+4.0f*s,(kIndicatorR+6.0f)*s,a-half,2.0f*half,3.0f*s,12,prot->overheated ? kRed : kCyan);
+    }
     const float x0=tx;
     warn.x=x0;warn.y=y-(warn.h>0.0f ? warn.h : 24.0f*s)-4.0f*s;
     title.x=x0;title.y=y;y+=(title.h>0.0f ? title.h : lineH)+gap;
@@ -1837,6 +1948,15 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     if(emcLine) {
         emcLine->x=x0;emcLine->y=y;y+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap;
         Bar(drawer,ctx,x0,y,barW,barH,emcBar,emcBar,emcColour,s);
+        y+=barH+gap;   // the Proteus's lines (a vehicle has one or the other) under it
+    }
+    for(int i=0;i<prots;++i) {
+        pl[i].line->x=x0;pl[i].line->y=y;
+        y+=(pl[i].line->h>0.0f ? pl[i].line->h : lineH)+gap;
+        if(!pl[i].bar)continue;
+        const float trail=pl[i].trailKey ? TrailOf(pl[i].trailKey,pl[i].share,GetTickCount64()) : pl[i].share;
+        Bar(drawer,ctx,x0,y,barW,barH,pl[i].share,trail,pl[i].fill,s);
+        y+=barH+gap;
     }
 }
 
@@ -1844,6 +1964,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
 void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
                      const StockExtras& x,Line* lines,int* at) noexcept {
     StockMarks(drawer,ctx,text,vp,width,height,s,r,x,lines,at);
+    if(x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f)ProteusMarks(drawer,ctx,text,vp,width,height,s,*x.proteus,lines,at);
     const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;
     const float hull=nix ? HeadingOfYaw(x.nix->legsYaw) : sight::HeadingOf(r.hull);
     const float gun=nix ? sight::HeadingOf(x.nix->dir) : r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
@@ -1970,6 +2091,7 @@ void HudPublish() noexcept {
     // HeliStrip (HeliFlightHud). Its text must draw: the lists are text.
     const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
     SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists));
+    s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shields, salvo, field (proteus.cpp)
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -2331,7 +2453,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             const bool fresh=now-snap.tick<=kFreshMs;
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
                                 snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
-                                fresh && snap.emc ? &snap.emcCue : nullptr};
+                                fresh && snap.emc ? &snap.emcCue : nullptr,
+                                fresh && snap.proteus ? &snap.proteusRo : nullptr};
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
         if(Cfg().vehicleHud) {

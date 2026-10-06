@@ -485,6 +485,8 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
     __try {
         if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
             Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
+        // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.
+        else if(Cfg().enabled)ProteusViewLift(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,lookOut+28);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     return r;
 }

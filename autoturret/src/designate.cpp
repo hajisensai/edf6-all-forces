@@ -222,6 +222,28 @@ bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,flo
     return true;
 }
 
+namespace {
+link::PriorityZoneFn priorityZone=nullptr;
+ULONGLONG zoneTried=0;
+struct ZoneCache { ULONGLONG tick; bool on; link::PriorityZoneV1 z; } zoneCache{};
+constexpr std::size_t kTargetOfEnemy=0x518;   // GameObjectBase: the object's own target (weak, its object pointer)
+}  // namespace
+
+float PriorityWeight(const Enemy& e) noexcept {
+    const ULONGLONG now=GetTickCount64();
+    if(now!=zoneCache.tick) {   // a frame's turrets share one answer (the tick: no clock of the game's here)
+        zoneCache.tick=now;zoneCache.on=false;
+        if(link::Resolve(link::kCrewDll,link::kPriorityZone,priorityZone,zoneTried))zoneCache.on=priorityZone(&zoneCache.z);
+    }
+    if(!zoneCache.on)return 1.0f;
+    const void* target=nullptr;
+    __try {
+        if(e.object && Readable(static_cast<const unsigned char*>(e.object)+kTargetOfEnemy,8))
+            target=At<const void*>(e.object,kTargetOfEnemy);
+    } __except(EXCEPTION_EXECUTE_HANDLER){target=nullptr;}
+    return link::PriorityWeight(zoneCache.z,e.pos,target);
+}
+
 void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const float* muzzle,const float* bore,
                 const Shot* shot,const float* vel,float life) noexcept {
     link::TurretReadoutV1 r{};

@@ -51,11 +51,11 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址全部是 RVA。纯静态分析
 
 ## 4. 每帧在哪里跑
 
-- crew.cpp 挂了输入钩子的类：`InputHook` 里 `VehicleRamFrame`（钻头、边车之后）。
-- crew.cpp 不挂的两类各自串一个更新钩子（`kExtras`，签名 = 原函数前 16 字节，槽里不是原函数时串在别的插件后面）：
+- crew.cpp 挂了输入钩子的类：`InputHook` 里 `VehicleRamFrame`（钻头、边车之后）。Proteus（BigBegaruta）自 proteus.cpp 起由 crew.cpp
+  挂它自己的第 55 槽 `0x648F70`，也走这里；此前它不在 crew.cpp 里，曾由下面的第 4 槽 `0x644350` 单独串钩子，已删，免得一台车两个入口。
+- crew.cpp 不挂的一类串一个更新钩子（`kExtras`，签名 = 原函数前 16 字节，槽里不是原函数时串在别的插件后面）：
   - 501_FortressRobo（vtable 0x17D98C8）第 4 槽 `0x60AEC0`：开头 `call 0x62EEC0`（VehicleBase 的每帧前置，502 的第 4 槽同样如此），每帧一次。(M)
-  - BigBegaruta（vtable 0x17DEC40）第 4 槽 `0x644350`：Begaruta 家族的更新（`docs/nix-re.md`，nix.cpp 串的是 612 自己的表），每帧一次。(H)
-  - 第 55 槽：BigBegaruta 是 `0x648F70`（先调 `0x63C1C0`），501 是副表 thunk；都不用。
+  - 第 55 槽：501 是副表 thunk，不用。
 - 只算有人驾驶（0 号座位是玩家或 NPC）的车；同一帧只算一次。
 
 ## 5. 接触与速度
@@ -85,7 +85,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址全部是 RVA。纯静态分析
 ## 7. 待实机核对
 
 1. 各类读到的质量（日志 `RAM v=... t (the game's body mass)`），尤其 503 / 511 摩托与边三轮。
-2. 巴尔加、Proteus 的更新钩子每帧都跑（日志有 `RAM v=...` 行）。
+2. 巴尔加的更新钩子、Proteus 的输入钩子每帧都跑（日志有 `RAM v=...` 行）。
 3. 框和余量：巨蚁、蜘蛛、大型敌人被车头 / 脚碰到时是否判到（`missed` 行的距离）。
 4. 脚的骨骼世界矩阵是否每帧更新（脚踩时接近速度应接近脚的下落速度）。
 5. 新装药（2 / 4 / 12 m）的爆炸特效大小。

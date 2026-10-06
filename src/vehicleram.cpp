@@ -19,9 +19,9 @@
 //    kLeastDamage, at most one a kHitGapMs per enemy and vehicle.
 //  - The blast: the impact charge nearest the part's size (vehicleram.h BlastRadius), on the body's point nearest it.
 //  - Who: a vehicle with a driver in seat 0 (the player or an NPC); an empty one rolling on is nobody's ram.
-//  - Where it runs: every hooked class's input (crew.cpp InputHook); the two classes crew.cpp leaves alone, the Barga
-//    (501_FortressRobo, slot 4 0x60AEC0) and the Proteus (BigBegaruta, slot 4 0x644350, the Begaruta family's update),
-//    get a chained update of their own here (kExtras) that runs this alone.
+//  - Where it runs: every hooked class's input (crew.cpp InputHook, the Proteus's own slot 55 among them since
+//    proteus.cpp); the one class crew.cpp leaves alone, the Barga (501_FortressRobo, slot 4 0x60AEC0), gets a chained
+//    update of its own here (kExtras) that runs this alone.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "body506.h"
@@ -247,7 +247,6 @@ bool Driven(unsigned char* v) noexcept {
 struct Extra { unsigned vtable; std::size_t slot; unsigned stock; unsigned char sig[16]; const char* name; };
 const Extra kExtras[]={
     {0x17D98C8,4,0x60AEC0,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x68,0x10,0x48,0x89,0x70,0x18,0x48},"501_FortressRobo"},
-    {0x17DEC40,4,0x644350,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57,0x48,0x83,0xEC,0x30,0x48},"BigBegaruta"},
 };
 constexpr int kExtraCount=static_cast<int>(sizeof(kExtras)/sizeof(kExtras[0]));
 edf::VehicleInputFn nextExtra[kExtraCount]{};
@@ -267,7 +266,7 @@ template<int I> void __fastcall ExtraHook(void* v,std::uintptr_t a2,void* a3,voi
     if(!Cfg().enabled)return;
     __try { VehicleRamFrame(static_cast<unsigned char*>(v)); } __except(ExtraFault(GetExceptionInformation())) {}
 }
-constexpr edf::VehicleInputFn kExtraHooks[]={&ExtraHook<0>,&ExtraHook<1>};
+constexpr edf::VehicleInputFn kExtraHooks[]={&ExtraHook<0>};
 static_assert(sizeof(kExtraHooks)/sizeof(kExtraHooks[0])==kExtraCount,"one hook per extra class");
 }  // namespace
 
@@ -285,7 +284,7 @@ bool InstallVehicleRam() noexcept {
         nextExtra[i]=reinterpret_cast<edf::VehicleInputFn>(next);
         ++hooked;
     }
-    Log("HOOK vehicle ram: car mass=%d, own updates %d/%d (Barga, Proteus)",carMassOk,hooked,kExtraCount);
+    Log("HOOK vehicle ram: car mass=%d, own updates %d/%d (Barga)",carMassOk,hooked,kExtraCount);
     return true;
 }
 
