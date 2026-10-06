@@ -28,12 +28,15 @@ namespace crew {
 namespace {
 constexpr std::size_t kLockList=0xC60,kLockCount=0xC68,kLocking=0xC70,kLockingCtrl=0xC78,kLockProgress=0xC80;
 constexpr std::size_t kLockFailed=0xCA0,kLockTime=0x6D4,kLockMost=0x6DC,kWeaponOwner=0x120;
+constexpr std::size_t kLockSoundTimer=0xCB8;
 constexpr std::size_t kNodeEntry=0x10,kNodeCtrl=0x18,kEntryPoint=0x10;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
-constexpr std::size_t kClearLock=0x68FF60,kDropLocking=0x68FEE0;
+constexpr std::size_t kClearLock=0x68FF60,kDropLocking=0x68FEE0,kCancelLocking=0x695150;
 const unsigned char kClearLockSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x41,0x56,0x48,0x83,0xEC,0x20};
 const unsigned char kDropLockingSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x33,0xFF,0x48,0x8B,0xD9,0x48};
+// Sends the stock type-6 cancellation (the timeout path calls it at 0x6964E6, before dropping the local entry).
+const unsigned char kCancelLockingSig[]={0x40,0x53,0x48,0x81,0xEC,0x40,0x06,0x00,0x00,0x48,0x8B,0x05,0xF8,0x9E,0x95,0x01};
 constexpr std::size_t kPick=0x691310,kPickCopied=17;
 const unsigned char kPickSig[]={0x4C,0x89,0x44,0x24,0x18,0x48,0x89,0x54,0x24,0x10,0x53,0x41,0x57,0x48,0x83,0xEC,0x48};
 constexpr float kSkipScore=100.0f,kRepeatScore=20.0f;   // past any angle squared (pi^2 < 10); a skip past repeats
@@ -196,8 +199,12 @@ void NextLockTarget(unsigned char* w) noexcept {
     if(locking && dropOk) {   // a lock in progress: that one dropped, the locks made kept (a multi-lock keeps its count)
         s.entries[s.count++]=locking;
         skip=s;
+        // The remote copy keeps its own in-progress entry at +0xC88. Dropping only +0xC70 locally leaves that copy
+        // reporting a lock on the old target when no replacement is found. Follow the stock timeout's order.
+        reinterpret_cast<EntryFn>(image+kCancelLocking)(w);
         reinterpret_cast<EntryFn>(image+kDropLocking)(w+kLocking);
         Put<std::uint32_t>(w,kLockFailed,0);
+        Put<std::uint32_t>(w,kLockSoundTimer,0);
         return;
     }
     EachLock(w,[&](const unsigned char* node){if(s.count<kMostSkips)s.entries[s.count++]=At<const void*>(node,kNodeEntry);});
@@ -209,7 +216,9 @@ void NextLockTarget(unsigned char* w) noexcept {
 bool InstallLockon() noexcept {
     __try {
         clearOk=Matches(kClearLock,kClearLockSig,sizeof(kClearLockSig));
-        dropOk=Matches(kDropLocking,kDropLockingSig,sizeof(kDropLockingSig));
+        // Partial cancellation is available only with both halves of the stock cancellation path verified.
+        dropOk=Matches(kDropLocking,kDropLockingSig,sizeof(kDropLockingSig)) &&
+               Matches(kCancelLocking,kCancelLockingSig,sizeof(kCancelLockingSig));
         const bool pickOk=Matches(kPick,kPickSig,sizeof(kPickSig)) && HookPick();
         Log("HOOK lockon pick=%d clearLock=%d dropLocking=%d (the player's weapons lock nearest the view first)",pickOk,
             clearOk,dropOk);

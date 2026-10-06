@@ -15,6 +15,7 @@ int WeaponLock(const unsigned char* w,float* point,float* progress) noexcept;
 void ClearWeaponLock(unsigned char* w) noexcept;
 // The target cycle (the jets' target key): the lock in progress dropped, or with none in progress every lock dropped;
 // either way the targets dropped come last in the order for a while, so the next one in the cone is locked.
+// Partial cancellation sends the game's type-6 notification before dropping the local entry; completed locks stay.
 void NextLockTarget(unsigned char* w) noexcept;
 // Whether the player on this machine holds weapon `w`: a soldier's weapon in their hand, or a vehicle weapon in the
 // holders of a seat they ride.
