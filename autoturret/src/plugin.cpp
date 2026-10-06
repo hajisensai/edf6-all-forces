@@ -21,6 +21,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "edf/host.h"
+#include "append_log.h"
 #include "turret.h"
 
 namespace autoturret {
@@ -127,9 +128,11 @@ bool legacySeen=false;
 void Log(const char* format,...) noexcept {
     if(!logPath[0])return;
     char text[1000]{};va_list args;va_start(args,format);vsnprintf_s(text,sizeof(text),_TRUNCATE,format,args);va_end(args);
-    FILE* f=nullptr;if(_wfopen_s(&f,logPath,L"ab") || !f)return;
     SYSTEMTIME t{};GetLocalTime(&t);
-    fprintf(f,"[%02u:%02u:%02u] %s\r\n",t.wHour,t.wMinute,t.wSecond,text);fclose(f);
+    char line[1100];
+    const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u] %s\r\n",t.wHour,t.wMinute,t.wSecond,text);
+    static edf::AppendLog log;
+    if(n>0)log.Write(logPath,line,static_cast<DWORD>(n));
 }
 
 void SeeVehicle(const void* vehicle) noexcept {
