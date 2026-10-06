@@ -236,5 +236,56 @@ inline float AxisCommand(float error,float rate,float drift,const float* p) noex
     }
     return best;
 }
+
+// Where the gun's wants are measured from: the point on its bore line (through `muzzle` along the unit `dir`) nearest
+// `pivot`, the centre the turret turns about (turretcam.cpp TurretPivot); the muzzle itself with no pivot. Not the
+// muzzle: it sits R m out from the pivot and swings with the gun, so a want measured from it moves as the gun turns
+// toward it, D/(D-R) of the turn ahead of it for a point D m from the pivot. The step after overshoots by that, the next
+// one back: near points (the ground just ahead of a short, low rig: the Grape's) the barrel jerks left and right every
+// frame, and under D = 2R it never settles. From the pivot the want does not move with the gun's own turn; the bore line
+// through the point is the same, so far points are aimed as before.
+inline void AimOrigin(const float* muzzle,const float* dir,const float* pivot,float* origin) noexcept {
+    for(int i=0;i<3;++i)origin[i]=muzzle[i];
+    if(!pivot)return;
+    const float back[3]={pivot[0]-muzzle[0],pivot[1]-muzzle[1],pivot[2]-muzzle[2]};
+    const float t=vec::Dot(back,dir);
+    if(!std::isfinite(t))return;
+    for(int i=0;i<3;++i)origin[i]=muzzle[i]+dir[i]*t;
+}
+
+// The point `to` (world) from `from` in the frame `rows` (world rows: the local x, up, nose): `l` local, `across` its
+// horizontal distance. The axes' wants for the bore line through it are atan2(l[0], l[2]) and -atan2(l[1], across).
+inline void LocalTo(const float* rows,const float* from,const float* to,float* l,float* across) noexcept {
+    const float d[3]={to[0]-from[0],to[1]-from[1],to[2]-from[2]};
+    for(int i=0;i<3;++i)l[i]=vec::Dot(rows+3*i,d);
+    *across=std::sqrt(l[0]*l[0]+l[2]*l[2]);
+}
+
+// One frame's turret command (turretcam.cpp Steer): the input that turns each axis onto `want` (the aim's senses), each
+// wanted angle's drift a frame fed forward; true when both are on within `onTarget` rad. `held` / `hull`: what the
+// stabilizer holds the gun at with no command and the hull's part of that since the last step (stab.h Held; the axes as
+// they are and 0 with none): steered from `held`, the hull's turn out of the drift (the stabilizer turns the gun by it
+// after the step: fed forward here too it would send the gun past the point a second time). `want` must be seen in the
+// frame `held` is (stab.h HeldIn).
+struct SteerState { float lastWant[2],drift[2]; bool hasWant; };
+inline bool SteerAxes(SteerState& g,const float* want,const float* held,const float* hull,const Axis* axes,const float* params,
+                      float onTarget,float* in) noexcept {
+    bool on=true;
+    for(int i=0;i<2;++i) {
+        const Axis& x=axes[i];
+        const bool full=x.hi-x.lo>=2.0f*kPi-0.01f;
+        const float target=full ? want[i] : vec::Clamp(want[i],x.lo,x.hi);
+        const float error=full ? Wrap(target-held[i]) : target-held[i];
+        if(g.hasWant) {
+            const float moved=(full ? Wrap(target-g.lastWant[i]) : target-g.lastWant[i])-hull[i];
+            g.drift[i]+=(vec::Clamp(moved,-0.2f,0.2f)-g.drift[i])*0.5f;
+        }
+        g.lastWant[i]=target;
+        in[i]=AxisCommand(error,x.rate,g.drift[i],params);
+        on=on && std::fabs(error)<onTarget;
+    }
+    g.hasWant=true;
+    return on;
+}
 }  // namespace tcam
 }  // namespace crew
