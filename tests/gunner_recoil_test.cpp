@@ -35,12 +35,14 @@ float recoilSeen[64]{};
 unsigned char operatorNet[16]{};
 bool operatorKnown=true;
 int stockCalls=0;
+bool failFired=false;
 
 void __fastcall StockMessage(unsigned char*,void*) { ++stockCalls; Put<std::int32_t>(gWeapon,kWeaponShots,messageShots); }
 void __fastcall ClassFired(unsigned char* v,unsigned char* holder) {
     Check(v==gVehicle && At<unsigned char*>(holder,kHolderWeapon)==gWeapon,"slot 48 gets the gVehicle and the gun's holder");
     if(fires<64)recoilSeen[fires]=At<float>(gWeapon,kWeaponRecoil);
     ++fires;
+    if(failFired)RaiseException(0xE0000049,0,0,nullptr);
 }
 const unsigned char* __fastcall Operator(void*,const void* w) { Check(w==gWeapon,"operator asked for the gun"); return operatorKnown ? operatorNet : nullptr; }
 
@@ -100,6 +102,10 @@ int main() {
     Check(stockCalls==1,"the stock message always runs");
     Check(fires==1 && recoilSeen[0]==0.6f,"authority: one shot of the remote gunner, at the gun's FireRecoil");
     Check(At<float>(gun,kWeaponRecoil)==0.125f,"the copy's own recoil value is put back");
+
+    failFired=true;Reset(5);Message(6);failFired=false;
+    Check(fires==1 && stockCalls==1,"native recoil failure is contained after one stock message");
+    Check(At<float>(gun,kWeaponRecoil)==0.125f,"temporary strength is restored after a native fault");
 
     Reset(5);Message(8);
     Check(fires==3,"one push per shot the message carried");

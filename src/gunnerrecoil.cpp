@@ -101,11 +101,15 @@ void Fire(unsigned char* v,int cls,unsigned char* holder,int shots) noexcept {
     unsigned char* weapon=At<unsigned char*>(holder,kHolderWeapon);
     const float kept=At<float>(weapon,kWeaponRecoil);
     const auto fired=reinterpret_cast<FireFn>(image+kRecoilClasses[cls].fired);
-    for(int s=0;s<shots;++s) {
-        Put<float>(weapon,kWeaponRecoil,At<float>(weapon,kWeaponFireRecoil));
-        fired(v,holder);
+    __try {
+        for(int s=0;s<shots;++s) {
+            Put<float>(weapon,kWeaponRecoil,At<float>(weapon,kWeaponFireRecoil));
+            fired(v,holder);
+        }
+    } __finally {
+        // MessageHook contains native faults; do not leave its temporary strength in the live weapon.
+        Put<float>(weapon,kWeaponRecoil,kept);
     }
-    Put<float>(weapon,kWeaponRecoil,kept);
 }
 
 void After(unsigned char* v,int cls,const std::int32_t* before,std::uint64_t n) noexcept {

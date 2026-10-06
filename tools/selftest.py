@@ -1952,6 +1952,21 @@ def _recoil_game(mission_weapon: str, mission_recoil: list, call_weapon: str, ca
 
 
 @test
+def recoil_call_formats_agree() -> None:
+    """Both call formats expose the same mounts, including classic SGO's lossless Float wrapper."""
+    import recoil
+    import sgo
+    game = _recoil_game('app:/weapon/v_9tank_ai_cannon01.sgo', [0.0, 2.0],
+                        'app:/weapon/v_9tank_cannon01.sgo', [0.25, 0.5], True)
+    modern = game.read('WEAPON', 'CALL.SGO')
+    custom = recoil.plain(dsgo.parse(modern).root.get('Ammo_CustomParameter'))
+    classic = sgo.write_depth_first(258, {'Ammo_CustomParameter': recoil._as_sgo(custom)})
+    expected = [('v_9tank_cannon01.sgo', [0.25, 0.5])]
+    assert recoil.mounts_of(modern, 'DSGO call') == expected
+    assert recoil.mounts_of(classic, 'classic SGO call') == expected
+
+
+@test
 def npc_recoil_takes_the_player_call() -> None:
     """autoturret/tools/npc_recoil.py: a mission mount takes the recoil of the same gun in the player's call, in
     either file format; the AI copy of a gun (`_ai` part) and the object's own vehicle_setup gun count as the

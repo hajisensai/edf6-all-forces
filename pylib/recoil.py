@@ -83,7 +83,7 @@ def gun_of(mount: object) -> list | None:
 
 def _is_setup(n: object) -> bool:
     items = items_of(n)
-    if not items or len(items) < 3 or not items_of(items[0]) or not isinstance(items_of(items[0])[0], float):
+    if not items or len(items) < 3 or not items_of(items[0]) or not isinstance(plain(items_of(items[0])[0]), float):
         return False
     try:
         guns_of(n, '')
