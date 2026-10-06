@@ -229,6 +229,10 @@ struct Config {
     float npcRollSec=2.5f;          // ...s between two rolls
     float npcRetreatHp=0.3f;        // ...under this share of their HP they fall back behind the player (0: never)
     float npcLeash=40.0f;           // ...m from their anchor (the player they follow, their leader, their post) they go to fight
+    bool npcSquadSuccession=true;   // ...a squad whose leader dies gets a new one (or joins another), not split up
+    int npcSquadMin=2;              // ...fewer left than this: it joins the nearest squad with room
+    int npcSquadMax=8;              // ...a squad takes in others up to this many
+    float npcSquadJoinRange=150.0f; // ...within this many m
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round

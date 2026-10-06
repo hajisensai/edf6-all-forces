@@ -288,6 +288,7 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 | P0 | 完成 | `npc_ai_check`（CTest）全部决策函数；`tools/npc_ai_mutate.py` 变异检查 | — |
 | P1 | implemented_unverified | 编译（/W4 /WX）；`npc_ai_check`；selftest `npc_ai_wired`（钩子先跑原版、脚本分支不写移动、只驱动本机士兵、ini 读 / 范围 / 发布 / 文档） | §3.1 的 M 项：`+0x1A & 8` 与 AI 列表的对应、d82..d84 对应武器数组前三项、`+0xBE8` 弹数、翻滚输入；全部行为 |
 | P2 | implemented_unverified | 编译；`npc_ai_check` 回位决策（原版方位角与摇杆符号、倒车、原地转向、坦克模型从各方向回到驻守点）；`tools/npc_ai_mutate.py` 21/21 变异被抓；selftest（写在原版输入之前、有路线不碰、联机仅房主） | 实机方向是否与原版 0x661020 一致（日志 `NPCPOST`）；`+0x25E0` 作为出生点（M） |
+| P3 | implemented_unverified | 编译；`npc_ai_check`（PickLeader / JoinSquad / 冷却）；selftest（在原版 Think 之前、仅房主、经原版 SetFollow 与 vslot 39 同步、ini） | 跟随链表遍历（`+0x550` 节点布局，H 但未实测）、vslot 39 单机调用无副作用（M）、整体行为 |
 
 ### 实机验收清单（用户）
 
