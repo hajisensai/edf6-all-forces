@@ -554,13 +554,6 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // A sidecar bike with the player in its sidecar is driven for them by the plugin (sidecar.cpp): no NPC driver.
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle)){st.emptySince=0;return;}
     if(!st.emptySince)st.emptySince=now;
-    // A heli no player has ridden yet stays where it stands for them (the user, 2026-10-05: the range's parked helis
-    // "all took off by themselves, I could not get in": crewed 9 s in, a heli lifts off at once, where a crewed tank
-    // stays to be bumped). One a player has ridden and left is crewed as before (it follows them). The plugin's aircraft
-    // are 506 bodies (IsHelicopter by the vtable): one a mission placed empty waits too (the user, 2026-10-05: the
-    // range's air carrier, there an NPC-flown friend, "flew straight off"; testrange/gen.py now parks them empty).
-    // The Proteus the same (decided 2026-10-06): a parked one no player has ridden stays for them, its RideAi would seat
-    // NPCs in all four seats and walk it off; one a player rode and left is crewed as any vehicle is.
     // Every first-use parked vehicle belongs to the waiting player, not only helicopters/Proteus.
     // An existing mission NPC is untouched above; a player must have driven seat 0 before auto-crew is eligible.
     if(!st.playerAt)return;

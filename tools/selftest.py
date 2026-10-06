@@ -788,7 +788,7 @@ def sidecar_tub_holds_the_gunner() -> None:
     got = sm.check_tub(sm.parts_triangles(list(sm.sidecar_parts(2).values())), sm.SOLDIER_REACH)
     assert got['floor y'] == sm.FLOOR_Y == sm.FLOOR[1][1] == sm.GUNNER_POINT[1], got
     assert got['rays walled'] == 144 and got['faces seen from behind'] == 0, got
-    assert sm.RIM_Y - sm.FLOOR_Y >= 0.85, "the rim at a standing soldier's hips (koshi 0.888 over their feet)"
+    assert 0.60 <= sm.RIM_Y - sm.FLOOR_Y <= 0.70, "low side wall preserves leg space without enclosing the standing gunner"
     assert abs(sm.half_width(sm.GUNNER_POINT[2]) - sm.TUB_HALF_WIDTH) < 0.05, "the gunner at the tub's widest"
 
 
@@ -882,7 +882,7 @@ def gun_stabilizer_wired() -> None:
     for sig in ('kPlainAimStepCode', 'kAxisStepEndCode', 'kAxisMapCode', 'kAxisAngleWriteCode', 'kAxisRateWriteCode'):
         assert f'Matches(' in code and f',{sig},sizeof({sig}))' in code, sig
     assert 'StabStep(aim,cmd,nextAim);' in src('src/turretcam.cpp'), 'the AddSe step runs the stabilizer'
-    assert 'axisMap(axis,true);' in code, 'the bones take the held angle'
+    assert 'stab::Remap(' in code, 'the bones include the complete corrected displacement during remapping'
     assert '&StabFrame,v' in crew and 'ResetStabilizer();' in mission and 'InstallStabilizer();' in plugin
     assert 'src/stab.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/stab_check.cpp' in cmake
     assert '#include "../src/stab.h"' in src('tools/stab_check.cpp') and '#include "stab.h"' in code
@@ -1633,7 +1633,7 @@ def proteus_wired() -> None:
         if key not in ('ProteusRework', 'ProteusTwoSeats', 'ProteusDriverGun'):
             assert f'Fix("{key}"' in plugin or f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
     vt = re.search(r'kVtBig=(0x[0-9A-F]+)', code).group(1)
-    assert re.search(rf'\{{{vt},0x648F70,"BigBegaruta"\}}', crew), 'crew.cpp does not chain the Proteus input'
+    assert re.search(rf'\{{{vt},0x644350,"BigBegaruta",kFindSeat,4\}}', crew), 'crew.cpp must chain the Proteus player update'
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)' in cmake
     assert 'add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)' in cmake
     assert re.findall(r'#include "([^"]+)"', check) == ['../src/proteus_logic.h'], 'proteus_check takes the rules alone'
@@ -1656,7 +1656,7 @@ def proteus_wired() -> None:
     assert 'Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);' in give and '1.0f' not in give
     assert 'u.active && u.ref.Is(v)' in code and 'u.ref.obj==' not in code, 'a Proteus unit by its live object, not its address'
     # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
-    assert '(IsHelicopter(vehicle) || IsProteus(vehicle)) && !st.playerAt' in crew
+    assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
     assert 'kProteusHoldCountdown*0.5f' in src('src/vehsound.cpp') and 'kHoldCountdown=kProteusHoldCountdown' in code
     # The damage call both read: the carrier's check takes the Proteus's redirect as intact (no install order between them).
     sub = src('src/subcarrier.cpp')
