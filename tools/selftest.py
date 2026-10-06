@@ -296,6 +296,9 @@ def release_imports() -> None:
     local = {os.path.splitext(f)[0] for d in ('tools', 'pylib', 'testrange') for f in os.listdir(os.path.join(ROOT, d)) if f.endswith('.py')}
     lazy = set(re.findall(r'^[ \t]+import (\w+)', inst, re.M)) & local
     assert 'make_emc' in lazy, 'release_imports: the scan reads installer.py'
+    # Procedural models use importlib, so PyInstaller cannot infer these from the import graph.
+    import jet_models
+    lazy.update(jet_models.GENERATED.values())
     missing = sorted(lazy - hidden)
     assert not missing, f'tools/build_release.py: hidden imports missing {missing}'
 
@@ -519,7 +522,7 @@ def placeholders_keep_rows() -> None:
 def jet_masses_cover_every_jet() -> None:
     """Every aircraft kind has a clean mass and a durability (src/stores.inc kJetMasses): any of them the player flies
     rams with its own mass (src/playerjet.cpp RamDamage), scaled by its HP over that durability."""
-    marks = {j.mark for j in vc.JETS.values() if j.mark != 7101.0} | {make_jets.GUNSHIP_MARK}   # 7101: the sub, no jet
+    marks = {j.mark for j in vc.JETS.values() if j.mark != 7101.0 and not j.creature} | {make_jets.GUNSHIP_MARK}   # the sub and enemy creatures have no player stores or ram mass
     missing = sorted(marks - set(vc.JET_MASSES))
     assert not missing, f'pylib/vcobjects.py JET_MASSES: no mass for marks {missing}'
     durability = gen_stores.durabilities()

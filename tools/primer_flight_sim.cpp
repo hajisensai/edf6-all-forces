@@ -81,6 +81,9 @@ void DropRef(const ObjRef&) noexcept {}
 }  // namespace jet
 void CarrierFlames(const unsigned char*,unsigned char* const*,float,ULONGLONG) noexcept {}
 void JetFlames(const unsigned char*,float,bool,ULONGLONG) noexcept {}
+// The stand-in world has no smoke emitters or deployable landing gear.
+void JetSmoke(const unsigned char*,bool,ULONGLONG) noexcept {}
+void NpcGear(unsigned char*,float,float) noexcept {}
 // No barrels in the stand-in world (the weapons' muzzles are the game's): nothing ever has its barrel on a line.
 bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept { return false; }
 bool JetBodyStep(unsigned char*,float*,float*) noexcept { return false; }

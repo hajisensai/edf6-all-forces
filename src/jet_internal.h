@@ -132,8 +132,8 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     {Body::primerFighter,L"app:/object/edf6vc_jet_primer_fighter.sgo",L"EDF6VC_JET_PRIMER_FIGHTER.SGO",7030.0f,Role::primer,
      Role::drone,"primerFighter",true},
     // The Primer creatures (primer.cpp, docs/primer-plan.md), enemies a mission places.
-    {Body::centipede,L"app:/object/edf6vc_centipede.sgo",L"EDF6VC_CENTIPEDE.SGO",7012.0f,Role::centipede,Role::drone,"centipede"},
-    {Body::dragonfly,L"app:/object/edf6vc_dragonfly.sgo",L"EDF6VC_DRAGONFLY.SGO",7013.0f,Role::dragonfly,Role::drone,"dragonfly"},
+    {Body::centipede,L"app:/object/edf6vc_centipede.sgo",L"EDF6VC_CENTIPEDE.SGO",7012.0f,Role::centipede,Role::drone,"centipede",true},
+    {Body::dragonfly,L"app:/object/edf6vc_dragonfly.sgo",L"EDF6VC_DRAGONFLY.SGO",7013.0f,Role::dragonfly,Role::drone,"dragonfly",true},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
