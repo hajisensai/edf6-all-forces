@@ -1097,7 +1097,7 @@ void HeadingTape(void* drawer,void* ctx,Text* text,float width,float height,floa
 constexpr float kBoxOff=280.0f,kBoxW=120.0f,kBoxH=34.0f,kBoxRow=30.0f;
 constexpr float kBarHalf=100.0f;   // px: the half length of the bars beside the boxes (a heli's height, a jet's lift)
 void Boxes(void* drawer,void* ctx,Text* text,float width,float height,float s,float speed,const wchar_t* under,const float* underRgba,
-           float clear,bool ground,float climb,Line* lines,int* at) noexcept {
+           float clear,bool ground,float climb,Line* lines,int* at,bool heli=false) noexcept {
     const float cy=height*0.5f,w=kBoxW*s*0.5f,hh=kBoxH*s*0.5f,t=2.0f*s;
     const float left=width*0.5f-kBoxOff*s,right=width*0.5f+kBoxOff*s;
     const float boxes[2]={left,right};
@@ -1107,10 +1107,10 @@ void Boxes(void* drawer,void* ctx,Text* text,float width,float height,float s,fl
     }
     const float alt=std::fmax(-9999.0f,std::fmin(clear,99999.0f));
     Label(text,lines,at,left,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(speed*3.6f)));
-    Label(text,lines,at,left,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"%ls",Tr(Tx::speedLabel));
+    Label(text,lines,at,left,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"%ls",Tr(heli ? Tx::heliSpeedLabel : Tx::speedLabel));
     if(under && under[0])Label(text,lines,at,left,cy+kBoxRow*s,1,kLineScale,underRgba,L"%ls",under);
     Label(text,lines,at,right,cy,1,kTitleScale,kHud,L"%d",static_cast<int>(std::lround(alt)));
-    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"%ls",Tr(ground ? Tx::altLabel : Tx::altLabelNoGround));
+    Label(text,lines,at,right,cy-hh-12.0f*s,1,kLineScale*0.8f,kHud,L"%ls",Tr(ground ? (heli ? Tx::heliHeightLabel : Tx::altLabel) : Tx::altLabelNoGround));
     Label(text,lines,at,right,cy+kBoxRow*s,1,kLineScale,kHud,Tr(Tx::climbRate),static_cast<int>(std::lround(climb)));
 }
 void SpeedAltBoxes(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,Line* lines,
@@ -1533,10 +1533,14 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
     HeadingTape(drawer,ctx,text,width,height,s,y,lines,at);
     wchar_t set[32]=L"";
     if(f.aiming)std::swprintf(set,32,Tr(f.setSpeed==0.0f ? Tx::setHover : Tx::setSpeed),static_cast<int>(std::lround(f.setSpeed*3.6f)));
-    Boxes(drawer,ctx,text,width,height,s,f.speed,set,kCyan,f.clear,f.ground,f.climb,lines,at);
+    Boxes(drawer,ctx,text,width,height,s,f.speed,set,kCyan,f.clear,f.ground,f.climb,lines,at,true);
     HeightBar(drawer,ctx,width,height,s,f);
     GroundCue(drawer,ctx,text,vp,width,height,s,y,f.gpws,f.impactIn,lines,at);
-    if(Cfg().playerJetThreatHud)Threats(drawer,ctx,text,vp,width,height,s,y,launchAt,lines,at);
+    if(Cfg().playerJetThreatHud) {
+        float cx,cy;RwrCentre(width,height,s,-1.0f,&cx,&cy);
+        Label(text,lines,at,cx,cy+kRwrR*s+18.0f*s,1,kLineScale*0.7f,kHudDim,L"%ls",Tr(Tx::heliThreatScope));
+        Threats(drawer,ctx,text,vp,width,height,s,y,launchAt,lines,at);
+    }
 }
 
 // The lines in place of the old panel (see above; its warnings are the annunciator's and the HUD's symbols): on top on

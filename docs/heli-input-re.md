@@ -236,7 +236,45 @@ carry the homing `v_506heli_missile01`.
 The NPC pilot (heli.cpp kStoreHolder, src/roundaim.h) flies this round's arc for its aim and fire gate;
 tools/heli_fire_check.cpp compares that with the homing-missile gate it used before.
 
-## 7. Open items for a live cdb session
+## 7. Player mouse pitch and a downward camera (2026-10-06)
+
+The user reported W/S changing both speed and pitch, with no visible mouse response. The installed `c871652` log
+confirms the mouse controller actually ran on the pictured `Helicopter409` (`18:50:42.970`, vehicle
+`000001B4D71668F0`, top 18.5 m/s, hover 0.424); this was not HeliMouseAim being off or the pad branch being selected.
+The following corrections are based on source tracing and read-only disassembly of the matching EDF.dll; no running
+game state was modified.
+
+- Input order is correct: `crew.cpp InputHook` first calls the stock slot 55, then `HeliFrame` / `AimFly`; slot 57
+  consumes the result. The seat's RX/RY offsets and keyboard device byte remain those in §4.
+- The original mouse controller only separated **desired speed** from **desired climb**. It still wrote a forward
+  channel that the stock attitude used as pitch. In `0x654A80(attitude, bodyRef, input, contact)`, `0x654E69` multiplies
+  `input+8` by max tilt; after that function returns, `0x651E2F` also uses the original forward input for horizontal
+  velocity. Thus W/S necessarily tilted the nose, and mouse elevation never directly set pitch.
+- `PlayerAttitudeHook` now passes a copy of the five-float input block to that attitude function. Only its forward
+  element is replaced with `-asin(aim.y) / maxTilt`, clamped to ±1. The original movement input stays intact for the
+  caller's velocity calculation. All body/contact arguments, ground gates and stock pitch smoothing remain in the
+  original function. It applies only to a live vehicle whose current-frame mouse pilot is still the local player
+  in keyboard mode, with Enabled and HeliMouseAim on. Other vehicles, NPCs, remote players, pads and stale records
+  receive the original input pointer unchanged.
+- The detour copies exactly 14 complete, non-RIP-relative prologue bytes, checked against the DLL:
+  `48 8B C4 48 89 58 18 55 56 57 41 56 41 57`. Failed signature/installation keeps mouse flight off and logs the
+  failed attitude hook; it does not advertise independent mouse pitch while still using coupled stock pitch.
+- The invisible mouse square had a separate cause: `MoveOnScreen` recovered an off-screen aim toward the **level
+  nose**, which is itself outside a steeply downward-looking camera. Every mouse step could therefore be undone.
+  The player controller now intersects the camera's centre ray with the aim-distance sphere and uses that visible
+  direction for recovery when the mouse moves. A downward camera alone, without mouse input, does not command a dive.
+- The HUD's left value is horizontal speed; its under-line now explicitly says **forward speed target**, including
+  zero instead of “hover”. The right value says **height above ground**. The hold strip distinguishes forward-speed
+  hold from vertical altitude hold. The two circles on the left are this plugin's `RwrScope`, not leftover stock HUD;
+  the helicopter HUD labels them “threat direction”.
+
+`tests/heli_player_input_test.cpp` includes production `heli.cpp`: it executes AimFly and the attitude hook with a
+recording stock function. It checks speed/pitch separation, preservation of the original input and other arguments,
+all ownership/device gates, signature rejection/installation, and recovery of the mouse aim under a 30-degree
+downward camera. `tools/heli_aim_check.cpp` continues to cover the flight law. These are offline regressions; actual
+mouse feel and the installed-game path still require the integration owner's subsequent in-game check.
+
+## 8. Open items for a live cdb session
 
 - World-axis sign of `+0x1540` and `+0x1550`, and the actual gains `veh+0x162C/0x1630/0x1634/0x1640`.
 - Rotor speed at hover for V602, and the time from idle to lift-off.

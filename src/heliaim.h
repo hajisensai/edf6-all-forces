@@ -11,7 +11,8 @@
 //    and descend at the craft's most; everything let go it holds its height and flies at the setpoint (0: it stops).
 // What a craft is asked (Fly: a horizontal velocity, a climb, a heading) is flown by its own law: a stock heli's input
 // block through the NPC pilot's stick law (StockStick, StockThrottle, StockYaw: heli.cpp Steer flies the NPC with the
-// same three), the plugin's rotor craft through jet::Hover (playerjet_board.inc HoverStep).
+// same three), the plugin's rotor craft through jet::Hover (playerjet_board.inc HoverStep). The stock heli's attitude
+// takes PitchInput separately through PlayerAttitudeHook, leaving the speed channel independent of mouse pitch.
 // Pure math (no EDF.dll): tools/heli_aim_check.cpp runs it against the stock heli's flight law (docs/aircraft-re.md) to
 // show the signs.
 #pragma once
@@ -54,6 +55,25 @@ inline bool OnScreen(const float* vp,const float* pos,const float* aim,float mar
     return c[3]>1e-3f && std::fabs(c[0]/c[3])<=limit && std::fabs(c[1]/c[3])<=limit;
 }
 
+// The direction from the aircraft to the view centre at `mark` metres from the aircraft. Intersect the centre ray
+// with that sphere: unlike the level nose, this is a valid on-screen fallback for a camera looking steeply down.
+inline bool ViewCentreAim(const float* pos,const float* eye,const float* view,float mark,float* out) noexcept {
+    const float d[3]={eye[0]-pos[0],eye[1]-pos[1],eye[2]-pos[2]};
+    const float b=vec::Dot(d,view),q=b*b+mark*mark-vec::Dot(d,d);
+    if(!(q>=0.0f) || !(mark>0.0f))return false;
+    const float t=-b+std::sqrt(q);
+    if(!(t>0.0f))return false;
+    for(int i=0;i<3;++i)out[i]=(d[i]+view[i]*t)/mark;
+    return vec::Normalize(out);
+}
+
+// The stock attitude's forward channel tilts the nose down at +maxTilt; speed has a separate use of that channel
+// later in the physics step. A mouse-flown heli substitutes only the attitude copy, so W/S cannot set its pitch.
+inline float PitchInput(const float* direction,float maxTilt) noexcept {
+    if(!(maxTilt>1e-3f) || !std::isfinite(direction[1]))return 0.0f;
+    return vec::Clamp(-std::asin(vec::Clamp(direction[1],-1.0f,1.0f))/maxTilt,-1.0f,1.0f);
+}
+
 // The aim kept on the screen (the user, 2026-10-05: the aim ran off the screen and the craft turned on after it, unseen):
 // a frame's mouse that took it off is not taken (back to `was`); still off (the camera turned), it is drawn toward `dir`
 // (the way the craft flies or faces) until it is on.
@@ -66,6 +86,7 @@ inline void KeepOnScreen(const float* vp,const float* pos,float* aim,const float
         if(!vec::Normalize(a))break;
         std::memcpy(aim,a,12);
     }
+    if(!OnScreen(vp,pos,aim,mark,limit) && OnScreen(vp,pos,dir,mark,limit))std::memcpy(aim,dir,12);
 }
 
 // The aim moved by a frame's mouse and kept on the screen one axis at a time: the turn (`x`) taken if its mark stays on

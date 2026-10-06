@@ -126,21 +126,24 @@ HUDTEXT(masterCaution,L"MASTER CAUTION",L"主注意",L"主注意",L"マスター
 HUDTEXT(missileLaunch,L"MSL LAUNCH",L"飞弹发射",L"飛彈發射",L"ミサイル発射")
 
 // --- The helicopters (HeliStrip, HeliHud) and the gear ---
-HUDTEXT(setHover,L"SET HOVER",L"设定 悬停",L"設定 懸停",L"設定 ホバー")
-HUDTEXT(setSpeed,L"SET %d",L"设定 %d",L"設定 %d",L"設定 %d")
+HUDTEXT(heliSpeedLabel,L"GROUND KM/H",L"水平速 km/h",L"水平速 km/h",L"水平速度 km/h")
+HUDTEXT(heliHeightLabel,L"AGL M",L"离地 m",L"離地 m",L"対地高度 m")
+HUDTEXT(heliThreatScope,L"THREATS",L"威胁方向",L"威脅方向",L"脅威方向")
+HUDTEXT(setHover,L"FWD SET 0",L"前速目标 0",L"前速目標 0",L"前進設定 0")
+HUDTEXT(setSpeed,L"FWD SET %d",L"前速目标 %d",L"前速目標 %d",L"前進設定 %d")
 HUDTEXT(heliKeysLanded,L"HOLD SPACE: spin the rotor up and lift off    MOUSE: aim the square",L"按住空格：旋翼加速并升空    鼠标：瞄准方框",
         L"按住空白鍵：旋翼加速並升空    滑鼠：瞄準方框",L"スペース長押し：ローター加速で離陸    マウス：四角で照準")
-HUDTEXT(heliKeysAir,L"MOUSE: turn / climb to the square    W / S: speed    A / D: slide    SPACE: up    %ls: down",
-        L"鼠标：转向 / 爬升到方框    W / S：速度    A / D：横移    空格：上升    %ls：下降",
-        L"滑鼠：轉向 / 爬升到方框    W / S：速度    A / D：橫移    空白鍵：上升    %ls：下降",
-        L"マウス：四角へ旋回 / 上昇    W / S：速度    A / D：横移動    スペース：上昇    %ls：下降")
+HUDTEXT(heliKeysAir,L"MOUSE: turn / pitch    W / S: forward speed    A / D: slide    SPACE: up    %ls: down",
+        L"鼠标：转向 / 俯仰    W / S：前速    A / D：横移    空格：上升    %ls：下降",
+        L"滑鼠：轉向 / 俯仰    W / S：前速    A / D：橫移    空白鍵：上升    %ls：下降",
+        L"マウス：旋回 / 機首上下    W / S：前進速度    A / D：横移動    スペース：上昇    %ls：下降")
 HUDTEXT(liftOk,L"LIFT OK: TAKE OFF (ascend)",L"升力足够：起飞（上升）",L"升力足夠：起飛（上升）",L"揚力十分：離陸（上昇）")
 HUDTEXT(rotorShare,L"ROTOR %d%% of lift-off",L"旋翼 %d%%（离地所需）",L"旋翼 %d%%（離地所需）",L"ローター %d%%（離陸に必要な回転）")
 HUDTEXT(rotorLiftOk,L"ROTOR %d%%    LIFT OK: TAKE OFF (ascend)",L"旋翼 %d%%    升力足够：起飞（上升）",L"旋翼 %d%%    升力足夠：起飛（上升）",
         L"ローター %d%%    揚力十分：離陸（上昇）")
-HUDTEXT(speedSetHover,L"SPEED SET: HOVER",L"速度设定：悬停",L"速度設定：懸停",L"速度設定：ホバー")
-HUDTEXT(speedSet,L"SPEED SET %d km/h",L"速度设定 %d km/h",L"速度設定 %d km/h",L"速度設定 %d km/h")
-HUDTEXT(altHold,L"%lsALT HOLD",L"%ls高度保持",L"%ls高度保持",L"%ls高度維持")
+HUDTEXT(speedSetHover,L"FORWARD HOLD 0 km/h",L"前速保持 0 km/h",L"前速保持 0 km/h",L"前進速度維持 0 km/h")
+HUDTEXT(speedSet,L"FORWARD HOLD %d km/h",L"前速保持 %d km/h",L"前速保持 %d km/h",L"前進速度維持 %d km/h")
+HUDTEXT(altHold,L"%lsALTITUDE HOLD",L"%ls垂直：定高",L"%ls垂直：定高",L"%ls垂直：高度維持")
 HUDTEXT(gearState,L"GEAR %ls  [%ls]",L"起落架 %ls  [%ls]",L"起落架 %ls  [%ls]",L"ギア %ls  [%ls]")
 HUDTEXT(gearDown,L"DOWN",L"放下",L"放下",L"ダウン")
 HUDTEXT(gearUp,L"UP",L"收起",L"收起",L"アップ")
