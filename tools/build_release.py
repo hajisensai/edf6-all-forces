@@ -1,11 +1,13 @@
 """Builds the unzip-and-run release: release/EDF6VehicleCrew-<version>.zip holding
-  EDF6VehicleCrew安装器.exe  (tools/installer.py frozen by PyInstaller, plugin dll + ini inside)
+  EDF6VehicleCrew安装器.exe  (tools/installer.py frozen by PyInstaller; inside it every plugin of installer.PLUGINS,
+                              EDF6VehicleCrew and EDF6AutoTurret, each its dll + ini, and the data builders,
+                              autoturret/tools/build.py among them)
   说明.txt
   models/<name>/...           the user-supplied vehicle models (RELEASE_MODELS) found by pylib/obj_model.py model_dir()
                               ($EDF6VC_MODELS, models/ in the repository, the developer's folder); the installer reads
                               them from models/ next to itself, and skips what a missing one would make
 The version is the one CMakeLists.txt project(VERSION) sets, the same the DLL reports (src/version.h.in).
-Run build.cmd first: the exe bundles build/Mods/Plugins/EDF6VehicleCrew.dll and .ini as they are now.
+Run build.cmd first: the exe bundles build/Mods/Plugins/<plugin>.dll and .ini (plugin_data()) as they are now.
 Needs PyInstaller (python -m pip install pyinstaller).
 
 Usage: python tools/build_release.py [--suffix=TEXT] [--expect VERSION]
@@ -28,12 +30,23 @@ ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 PLUGINS = os.path.join(ROOT, 'build', 'Mods', 'Plugins')
 EXE_NAME = 'EDF6VehicleCrew安装器'
 OUT = os.path.join(ROOT, 'release')
+sys.path.insert(0, os.path.join(ROOT, 'tools'))
+import installer  # noqa: E402  (PLUGINS: what the exe ships and installs)
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
 RELEASE_MODELS = ('twin_tank', 'drill_tank')     # pylib/artillery_model.py MODEL, drill_model.MODEL_SUBDIR
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
 前提：游戏目录里已经装好 EDFModLoader（winmm.dll + ModLoader.ini + Mods 文件夹）。
+
+包里有什么（安装器一次全装，不用再单独装别的）：
+  - 插件 EDF6VehicleCrew.dll + EDF6VehicleCrew.ini：NPC 开载具 / 直升机、空中支援、战机、各种新载具；
+  - 插件 EDF6AutoTurret.dll + EDF6AutoTurret.ini：防空车 / 玻尔斯 / 自行榴弹炮 / 喀秋莎的自瞄和近炸引信，
+    泰坦和炮手座坦克的副炮自瞄，炮塔镜头下的锁定；
+  - AutoTurret 的车辆数据：防空车（KG6 克卜勒系）改高射炮、玻尔斯对地、关卡里的 NPC 防空车、NPC 泰坦的副炮，
+    以及这几辆车的武器说明行；
+  - 呼叫武器、战机 / 直升机 / 无人机、潜水母舰、喀秋莎、自行榴弹炮、钻头战车、边三轮、降落伞、EMC 光束、
+    大地图和测试场「大混战」关卡（都在你机器上现场生成，见下）。
 
 安装 / 更新：
   1. 先退出游戏。
@@ -60,13 +73,19 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
   测试场关卡不限制兵种和武器，各自选自己的。
   武器表只动本插件自己的行（已有的行原地更新，新的追加在末尾），别的 MOD 的行原样保留，
   武器表和武器说明要么全部写入、要么保持原样。
-  已有的 Mods/Plugins/EDF6VehicleCrew.ini 不会被覆盖：你的设置保留，只补进新版本新增的设置。
+  已有的 Mods/Plugins/EDF6VehicleCrew.ini 和 EDF6AutoTurret.ini 不会被覆盖：你的设置保留，只补进新版本新增的设置。
+  AutoTurret 的车辆数据只替换它自己写过的文件；要替换别的 MOD 的文件时会先问你，同意后先备份，卸载时恢复。
 
 卸载：
   运行安装器输入 2。
-  选 1 = 连呼叫武器一起删：武器表里它们的行变成「已卸载」的占位行（效果同原版 KM6 轰炸机呼叫），
-         行号不变，存档里装备着也不会崩溃，以后重新安装会用回这些行。
-  选 2 = 只删插件：武器留着，会按原版轰炸机呼叫，不影响游玩。
+  选 1 = 连呼叫武器、生成的模型和 AutoTurret 的车辆数据一起删：武器表里呼叫武器的行变成「已卸载」的占位行
+         （效果同原版 KM6 轰炸机呼叫），行号不变，存档里装备着也不会崩溃，以后重新安装会用回这些行；
+         AutoTurret 改过的文件按备份恢复。
+  选 2 = 只删两个插件：武器和车辆数据留着，会按原版轰炸机呼叫、防空车的炮照原版开火（没有自瞄），不影响游玩。
+
+检查：
+  运行安装器输入 5：逐项检查两个插件是不是本安装包的版本、ini 缺不缺新设置、AutoTurret 车辆数据、
+  呼叫武器和生成的文件是否完整（只读，游戏开着也能查）。
 
 测试（和开发者一起测）：
   测试站 https://edf6.fushi.moe （账号密码问开发者要）：下载测试版、看要测什么、提交反馈和录屏、看开发者回复。
@@ -85,6 +104,11 @@ def cmake_version() -> str:
     return m.group(1)
 
 
+def plugin_data() -> list[str]:
+    """The build/Mods/Plugins files the exe bundles: each plugin installer.PLUGINS installs, its dll and its ini."""
+    return [name + ext for name, _ in installer.PLUGINS for ext in installer.PLUGIN_FILES]
+
+
 def build_exe(name: str) -> str:
     """name: the zip's name without .zip, bundled as plugin/build_info.json (the installer shows it, and its
     menu 3 compares it with the test site's newest build)."""
@@ -101,15 +125,18 @@ def build_exe(name: str) -> str:
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', EXE_NAME, '--distpath', os.path.join(WORK, 'dist'), '--workpath', os.path.join(WORK, 'work'),
            '--specpath', WORK]
-    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange')):
+    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange'),
+              os.path.join(ROOT, 'autoturret', 'tools')):
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
-                'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache'):   # every module installer.py imports in a function (selftest release_imports)
+                'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
+                'build'):   # every module installer.py imports in a function (selftest release_imports); build is
+        # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
     for mod in ('matplotlib', 'pandas', 'tkinter'):  # Pillow builds procedural textures; numpy builds map seams
         cmd += ['--exclude-module', mod]
-    for name in ('EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'):
+    for name in plugin_data():
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
     cmd += ['--add-data', f'{info}{seps}plugin']
     cmd += ['--add-data', f'{recipes}{seps}plugin']
@@ -142,7 +169,7 @@ def main(argv: list[str]) -> int:
     version = cmake_version()
     if a.expect and a.expect.lstrip('v') != version:
         raise SystemExit(f'CMakeLists.txt says {version}, expected {a.expect}: bump project(VERSION) first')
-    for name in ('EDF6VehicleCrew.dll', 'EDF6VehicleCrew.ini'):
+    for name in plugin_data():
         if not os.path.isfile(os.path.join(PLUGINS, name)):
             raise SystemExit(f'missing {name} in build/Mods/Plugins: run build.cmd first')
     exe = build_exe(f'EDF6VehicleCrew-{version}{a.suffix}')

@@ -354,10 +354,24 @@ def _refuse_while_running(mods: str) -> None:
         modfiles.refuse_while_running()
 
 
-def install(mods: str, text: bool, force: bool) -> None:
+def foreign(mods: str, files: dict[str, bytes]) -> list[str]:
+    """Why install would refuse without --force: the Mods files among `files` (build_files) that are not this tool's
+    to overwrite (another mod's, or ours changed since). tools/installer.py asks before it writes anything."""
+    manifest = _load_manifest(mods) or {'version': MANIFEST_VERSION, 'files': {}, 'texts': {}}
+    built = Built(files)
+    return [p for p in (_foreign(mods, rel, manifest, built) for rel in files) if p]
+
+
+def installed(mods: str) -> bool:
+    """A manifest is there: install (this tool's, or tools/installer.py's) wrote into `mods`."""
+    return os.path.isfile(_manifest_path(mods))
+
+
+def install(mods: str, text: bool, force: bool, files: dict[str, bytes] | None = None) -> None:
+    """`files`: build_files() made earlier (tools/installer.py builds everything before it writes anything)."""
     _refuse_while_running(mods)
     manifest = _load_manifest(mods) or {'version': MANIFEST_VERSION, 'files': {}, 'texts': {}}
-    files = build_files()
+    files = build_files() if files is None else files
     texts = build_texts(files, mods) if text else describe.Texts({}, {})
     built = Built(files)
     problems = [p for p in (_foreign(mods, rel, manifest, built) for rel in files) if p]

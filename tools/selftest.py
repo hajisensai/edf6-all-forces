@@ -11,6 +11,9 @@
   - the ownership ledger (pylib/ledger.py) deletes a file only when nobody needs it, and never one someone
     else changed;
   - the installer's ini merge (installer.merge_ini) only adds settings and changes nothing of the player's;
+  - the pack: every plugin CMake builds is shipped by tools/build_release.py and in installer.PLUGINS, every writer
+    installer.install calls has its remover in uninstall, and a stand-in game's install -> upgrade -> uninstall of
+    both plugins and EDF6AutoTurret's data leaves Mods as other mods left it;
   - interrupted or refused runs: autoturret/tools/build.py install killed half way still reinstalls and
     uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
     uninstall over a misaligned table offers repair or skipping the table instead of failing;
@@ -21,6 +24,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import os
 import re
 import shutil
@@ -340,9 +344,10 @@ def release_imports() -> None:
     from the released exe."""
     inst, rel = src('tools/installer.py'), src('tools/build_release.py')
     hidden = set(re.findall(r"'(\w+)'", rel.split("for mod in ('call_weapons'", 1)[1].split('):', 1)[0])) | {'call_weapons'}
-    local = {os.path.splitext(f)[0] for d in ('tools', 'pylib', 'testrange') for f in os.listdir(os.path.join(ROOT, d)) if f.endswith('.py')}
+    local = {os.path.splitext(f)[0] for d in ('tools', 'pylib', 'testrange', 'autoturret/tools')
+             for f in os.listdir(os.path.join(ROOT, d)) if f.endswith('.py')}
     lazy = set(re.findall(r'^[ \t]+import (\w+)', inst, re.M)) & local
-    assert 'make_emc' in lazy, 'release_imports: the scan reads installer.py'
+    assert {'make_emc', 'build'} <= lazy, 'release_imports: the scan reads installer.py'
     # Procedural models use importlib, so PyInstaller cannot infer these from the import graph.
     import jet_models
     lazy.update(jet_models.GENERATED.values())
@@ -2490,6 +2495,177 @@ def uninstall_misaligned_skips_table() -> None:
         shutil.rmtree(game, ignore_errors=True)
 
 
+# ---------------------------------------------------------------- the pack: everything built is shipped, installed, removed
+
+
+def _cmake_plugins() -> dict[str, str]:
+    """Every plugin DLL a CMakeLists.txt builds (add_library SHARED) -> the ini it copies beside it into
+    build/Mods/Plugins (configure_file), as a path in the repository."""
+    out: dict[str, str] = {}
+    for top, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in ('build', 'release', '.git', 'models', 'node_modules')]
+        if 'CMakeLists.txt' not in files:
+            continue
+        text = src(os.path.relpath(os.path.join(top, 'CMakeLists.txt'), ROOT).replace(os.sep, '/'))
+        for name in re.findall(r'add_library\(\s*(\w+)\s+SHARED\b', text):
+            ini = re.search(r'configure_file\(\s*(\S+\.ini)\s+"\$\{CMAKE_BINARY_DIR\}/Mods/Plugins/' + name + r'\.ini"', text)
+            assert ini, f'{name}: CMake copies no {name}.ini into build/Mods/Plugins'
+            out[name] = os.path.join(top, ini.group(1))
+    return out
+
+
+@test
+def pack_ships_every_plugin() -> None:
+    """Every plugin CMake builds is in installer.PLUGINS (install writes it, uninstall removes it, check compares it)
+    with its ini's own section, and tools/build_release.py bundles its dll and ini. 0.8.0 shipped EDF6VehicleCrew
+    alone: the player's EDF6AutoTurret stayed the old build, which fought the turret camera for the Kepler."""
+    import build_release
+    built = _cmake_plugins()
+    assert {'EDF6VehicleCrew', 'EDF6AutoTurret'} <= set(built), f'the scan reads every CMakeLists.txt: {built}'
+    sections = dict(installer.PLUGINS)
+    missing = sorted(set(built) - set(sections))
+    assert not missing, f'installer.PLUGINS lacks {missing}: built by CMake but never shipped or installed'
+    for name, ini in built.items():
+        with open(ini, encoding='utf-8-sig') as f:
+            first = re.search(r'^\s*\[([^\]]+)\]', f.read(), re.M)
+        assert first and first.group(1).lower() == sections[name].lower(), \
+            f'{name}: installer.PLUGINS section {sections[name]}, the ini says {first and first.group(1)}'
+    unbundled = sorted({n + e for n in built for e in installer.PLUGIN_FILES} - set(build_release.plugin_data()))
+    assert not unbundled, f'tools/build_release.py does not bundle {unbundled}'
+
+
+def _function(text: str, name: str) -> str:
+    return text.split(f'\ndef {name}(', 1)[1].split('\ndef ', 1)[0]
+
+
+@test
+def installer_removes_what_it_writes() -> None:
+    """Every writer tools/installer.py install() calls has its remover in uninstall(): X.install( -> X.remove / X.uninstall,
+    install_Y( -> remove_Y(; the call weapons go through retire_weapons (placeholders keep their rows)."""
+    inst = src('tools/installer.py')
+    body, undo = _function(inst, 'install'), _function(inst, 'uninstall')
+    modules = set(re.findall(r'\b(\w+)\.install\(', body))
+    helpers = set(re.findall(r'\binstall_(\w+)\(', body))
+    assert {'make_jets', 'gen', 'call_weapons'} <= modules and {'plugin', 'autoturret'} <= helpers, (modules, helpers)
+    lacking = sorted(m for m in modules - {'call_weapons'} if f'{m}.remove' not in undo and f'{m}.uninstall(' not in undo)
+    lacking += sorted(f'install_{h}' for h in helpers if f'remove_{h}(' not in undo)
+    lacking += [] if 'retire_weapons(' in undo else ['call_weapons']
+    assert not lacking, f'installer.uninstall never undoes {lacking}'
+
+
+def _pack_bundle(folder: str, version: bytes, extra: dict[str, str] | None = None) -> None:
+    """A stand-in build/Mods/Plugins: each plugin's DLL (`version` bytes) and its real shipped ini (+ `extra` lines)."""
+    for name, ini in _cmake_plugins().items():
+        modfiles.atomic_write(os.path.join(folder, name + '.dll'), version + name.encode())
+        with open(ini, 'rb') as f:
+            text = f.read()
+        modfiles.atomic_write(os.path.join(folder, name + '.ini'), text + (extra or {}).get(name, '').encode())
+
+
+def _tree(game: str) -> dict[str, bytes]:
+    out = {}
+    for top, _, files in os.walk(os.path.join(game, 'Mods')):
+        for f in files:
+            path = os.path.join(top, f)
+            out[os.path.relpath(path, game).replace(os.sep, '/')] = _read(path)
+    return out
+
+
+@test
+def pack_install_upgrade_uninstall() -> None:
+    """The whole pack round trip on a stand-in game (generators stubbed; their install / remove, the ledger, the
+    AutoTurret manifest and backups, the plugins and ini merge real): an old EDF6AutoTurret (DLL, ini with the
+    player's settings, data from build.py) is upgraded to the pack's, another mod's file it replaces is backed up
+    after asking, check sees a stale DLL, a second install keeps the player's settings and adds only new keys, and
+    uninstall 1 leaves Mods exactly as other mods left it."""
+    import buildcache
+    import call_weapons
+    import describe
+    import gen
+    import importlib
+    import rootcpk
+    game = tempfile.mkdtemp(prefix='edf6vc-pack-')
+    bundle = os.path.join(game, 'bundle')
+    try:
+        for name, data in (('Root.cpk', b'root'), ('Chunk02.cpk', b'map'), ('EDF6.exe', b'exe')):
+            modfiles.atomic_write(os.path.join(game, name), data)
+        foreign = {'Mods/Plugins/EDF6ClearLoot.dll': b'another mod', 'Mods/WEAPON/OTHER.SGO': b'another mod',
+                   'Mods/WEAPON/AT_C.SGO': b'another mod at a path AutoTurret writes'}
+        for rel, data in foreign.items():
+            modfiles.atomic_write(os.path.join(game, *rel.split('/')), data)
+        at_ini = _cmake_plugins()['EDF6AutoTurret']
+        with open(at_ini, encoding='utf-8') as f:
+            shipped_at = f.read()
+        assert 'Gain=3.0\n' in shipped_at and 'BurstVisualScale=' in shipped_at
+        old_ini = shipped_at.replace('Gain=3.0\n', 'Gain=7.5\n').replace('BurstVisualScale=2.5\n', '')
+        plugins = os.path.join(game, 'Mods', 'Plugins')
+        modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
+        modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.ini'), old_ini.encode())
+        modfiles.atomic_write(os.path.join(plugins, 'EDF6VehicleCrew.log.1'), b'rotated log')
+        mods = os.path.join(game, 'Mods')
+        old_data = {rel: b'old ' + data for rel, data in AT_FILES.items() if rel != 'WEAPON/AT_C.SGO'}
+        texts = describe.Texts({}, {})
+        answers: list[str] = []
+        with contextlib.ExitStack() as stack:
+            enter = stack.enter_context
+            enter(patched(at_build, build_files=lambda legacy=False: old_data, _refuse_while_running=lambda mods: None,
+                          build_texts=lambda files, mods: texts))
+            with contextlib.redirect_stdout(io.StringIO()):
+                at_build.install(mods, text=True, force=False)   # the player's earlier build.py install
+            enter(patched(at_build, build_files=_at_build_files))
+            enter(patched(describe, table_ids=lambda mods: []))
+            enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
+                          stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
+                          ask=lambda prompt: answers.pop(0)))
+            enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
+                          check=lambda game: True))
+            enter(patched(buildcache, recipes=lambda: {g: 'recipe' for g in buildcache.GROUPS}))
+            enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
+
+            def mission(game: str, plan: object) -> list[str]:
+                out = gen.mission_dir(game, gen.SLOTS[0].mission)
+                modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
+                ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
+                return []
+            enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
+            for group in buildcache.GROUPS:
+                made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
+                    {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
+                enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+            with contextlib.redirect_stdout(io.StringIO()):
+                _pack_bundle(bundle, b'v1 ')
+                answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
+                installer.install(game)
+                assert not answers, 'install did not ask before replacing the other mod\'s AT_C'
+                for name in _cmake_plugins():
+                    assert _read(os.path.join(plugins, name + '.dll')) == b'v1 ' + name.encode(), f'{name}.dll not installed'
+                for rel, data in AT_FILES.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'AutoTurret data {rel} not installed'
+                at_text = _read(os.path.join(plugins, 'EDF6AutoTurret.ini')).decode()
+                assert 'Gain=7.5' in at_text and 'Gain=3.0' not in at_text, 'the player\'s AutoTurret setting lost'
+                assert 'BurstVisualScale=2.5' in at_text and at_text.count('[AutoTurret]') == 1, 'missing key not added'
+                assert installer.check(game), 'check fails right after install'
+                modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
+                assert not installer.check(game), 'check passes an old EDF6AutoTurret.dll'
+                # The upgrade: new DLLs, a setting the new ini adds.
+                _pack_bundle(bundle, b'v2 ', {'EDF6AutoTurret': '\r\n; new in v2\r\nNewTurretKey=5\r\n'})
+                installer.install(game)
+                assert _read(os.path.join(plugins, 'EDF6AutoTurret.dll')) == b'v2 EDF6AutoTurret'
+                at_text = _read(os.path.join(plugins, 'EDF6AutoTurret.ini')).decode()
+                assert 'Gain=7.5' in at_text and 'NewTurretKey=5' in at_text and installer.ADDED_HEADER in at_text
+                assert at_text.count('BurstVisualScale=') == 1 and at_text.count('[AutoTurret]') == 1
+                assert installer.check(game)
+                for name in ('.log', '.log.1'):
+                    modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret' + name), b'log')
+                answers[:] = ['1']
+                installer.uninstall(game)
+        left = _tree(game)
+        assert left == foreign, f'uninstall left {sorted(set(left) - set(foreign))}, changed ' \
+            f'{sorted(r for r in foreign if left.get(r) != foreign[r])}'
+    finally:
+        shutil.rmtree(game, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- model import (pylib/obj_model.py, pylib/texfile.py)
 
 def _cube_part(skip_face: int | None = None) -> 'object':
@@ -3391,6 +3567,8 @@ def soft_edge_wired() -> None:
         assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme, key
 
 def main() -> int:
+    import rootcpk
+    game = rootcpk.DEFAULT_GAME
     failed = 0
     for fn in TESTS:
         try:
@@ -3400,6 +3578,8 @@ def main() -> int:
             failed += 1
             print(f'FAIL  {fn.__name__}')
             traceback.print_exc()
+        finally:   # installer.install / uninstall point it at their stand-in game: the real-data tests after need the real one
+            rootcpk.use(game)
     print(f'{len(TESTS) - failed}/{len(TESTS)} passed')
     return 1 if failed else 0
 

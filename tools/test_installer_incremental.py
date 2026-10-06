@@ -127,11 +127,16 @@ class IncrementalTests(unittest.TestCase):
         import make_bigmap
         import make_stock_stores
         with ExitStack() as stack, redirect_stdout(io.StringIO()):
+            plugins = {name: (b'dll', f'[{section}]\nBigWorld=0\n'.encode()) for name, section in installer.PLUGINS}
             for name, replacement in {'check_loader': lambda g: None,
-                                      'plugin_files': lambda: (b'dll', b'[VehicleCrew]\nBigWorld=0\n'),
-                                      'stack_weapons': lambda g: {}}.items():
+                                      'plugin_files': lambda: plugins,
+                                      'stack_weapons': lambda g: {},
+                                      'build_autoturret': lambda g: ({}, False),
+                                      'install_autoturret': lambda g, files, force: None}.items():
                 stack.enter_context(patch.object(installer, name, replacement))
             stack.enter_context(patch.object(call_weapons, 'recover', lambda g: False))
+            import rootcpk   # the installer points it at its game: not this stand-in, for the tests after this one
+            stack.enter_context(patch.object(rootcpk, 'use', lambda root: None))
             shared = stack.enter_context(patch.object(call_weapons, 'install'))
             mission = stack.enter_context(patch.object(gen, 'install', return_value=[]))
             stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))

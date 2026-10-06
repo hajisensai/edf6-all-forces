@@ -84,6 +84,11 @@ not test line of sight. A Katyusha the player rides stays out of it (left alone,
 
 Requires EDF6 (Steam) with [EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) installed.
 
+**Players: the EDF All Forces pack installs this too.** Its installer (`EDF6VehicleCrew-<version>.zip`, see the
+[repository README](../README.md)) writes this plugin's DLL, its ini (yours kept, only new settings added) and the
+weapon / vehicle data of step 2 on menu 1, puts them back on menu 2 and checks them on menu 5. The manual steps below
+are for using this plugin on its own, or for development.
+
 1. Copy `EDF6AutoTurret.dll` and `EDF6AutoTurret.ini` from a release (or a CI build artifact) into
    `<EDF6>\Mods\Plugins\`.
 2. Build the weapon files from your own game data (they are derived from it, so they are not
