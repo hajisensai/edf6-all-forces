@@ -765,6 +765,15 @@ def sidecar_copies_agree() -> None:
     assert 'SidecarLevel(body,spin)' in phys and '&ChassisSetAngVel' in phys and '&FinalAngProbe' not in phys
     assert 'src/sidecar.cpp' in src('CMakeLists.txt') and 'InstallSidecar();' in src('src/plugin.cpp')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    # The passengers' rounds pass their own bike by the bullets' hook (jet_hooks.cpp InstallBulletPass): installed on
+    # its own, ahead of the heli profile's jets and the sidecar, never from InstallJets (a heli mismatch took it away),
+    # and no part of the sidecar's switch.
+    load = plugin.split('EML6_Load(', 1)[1]
+    assert load.index('InstallBulletPass();') < load.index('if(heli)') < load.index('InstallSidecar();'), 'InstallBulletPass'
+    jets = src('src/jet_hooks.cpp').split('bool InstallJets() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'kAddBodySlot' not in jets, 'the bullets hook installed from InstallJets'
+    switch = src('src/sidecar.cpp').split('ok=ok && moveOk', 1)[1].split(';', 1)[0]
+    assert 'Hooked' not in switch and 'blastOk' not in switch, 'a sidecar sub-channel in its master switch'
     for key in ('Sidecar', 'SidecarNpcGunner', 'SidecarNpcRange'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     assert 'Fix("SidecarNpcRange"' in plugin, 'SidecarNpcRange is not range-checked'
