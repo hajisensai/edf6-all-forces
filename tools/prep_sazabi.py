@@ -7,9 +7,12 @@ CC BY-NC-SA 4.0) into the model folder the installer builds the vehicle from (py
     <models>/sazabi/sazabi_skeleton.json  each bone's joint (game space, metres): where it turns
     <models>/sazabi/LICENSE.txt           the attribution the licence asks for
 
+The source is read from <models>/sazabi_source/scene.gltf by default: outside the model folder, which the installer's
+cache hashes and tools/build_release.py ships whole (the installer needs only the files above).
+
 It needs numpy, scipy and fast-simplification (pip): none of them is in the installer, which only reads the result.
 
-    python tools/prep_sazabi.py [<models>/sazabi/source/scene.gltf] [--out <models>/sazabi]
+    python tools/prep_sazabi.py [<models>/sazabi_source/scene.gltf] [--out <models>/sazabi]
 
 The source (measured, docs/sazabi-re.md §1): 252,848 triangles in 68 meshes that are not body parts (Sketchfab merged
 by material, then cut ~5000 triangles a mesh), 20 plain-colour materials (three emissive), no skin, no texture; +Y up,
@@ -33,6 +36,7 @@ import gltf  # noqa: E402
 import obj_model  # noqa: E402
 import sazabi_model as sz  # noqa: E402
 
+SOURCE_SUBDIR = 'sazabi_source'   # next to the model folder, not in it
 TARGET_TRIS = 54000          # the whole mech (Retro-Balam 54,468, Nix 27,367)
 KEEP_SMALL = 48              # pieces this small are kept whole: bolts, vents, the eye
 AUTO_SMOOTH = 40.0           # degrees: sharper creases keep hard edges (it is armour)
@@ -290,7 +294,7 @@ Sotsu / Sunrise (Bandai Namco); this is an unofficial fan work.
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     default_dir = obj_model.model_dir(sz.MODEL_SUBDIR) or os.path.join(obj_model.DEV_MODELS, sz.MODEL_SUBDIR)
-    ap.add_argument('gltf', nargs='?', default=os.path.join(default_dir, 'source', 'scene.gltf'))
+    ap.add_argument('gltf', nargs='?', default=os.path.join(os.path.dirname(default_dir), SOURCE_SUBDIR, 'scene.gltf'))
     ap.add_argument('--out', default=default_dir)
     a = ap.parse_args(argv)
     scene = gltf.read(a.gltf)

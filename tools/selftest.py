@@ -610,6 +610,10 @@ def hand_copies_agree() -> None:
         if c.brings != 'vehicle' or c.ground:
             continue
         jet = vc.JETS[c.jet]
+        if c.jet == vc.SAZABI_JET:   # the Sazabi: tools/make_sazabi.py writes it, src/sazabi.cpp knows its mark
+            import make_sazabi
+            assert jet.mark == c.mark == vc.SAZABI_MARK and make_sazabi.SGO_FILE == f'{c.vehicle}.SGO', c.id
+            continue
         assert jet.mark == c.mark and make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
         if jet.player:   # a player jet: its mark src/playerjet.cpp kKinds'
             assert float(pjet[c.kind.removeprefix('pjet_')]) == c.mark, f'src/playerjet.cpp kKinds disagrees on {c.id}'

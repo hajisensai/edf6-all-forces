@@ -1,12 +1,14 @@
-"""EDF6VC_SAZABI.MRAB / EDF6VC_SAZABI.CAS: the Sazabi (MSN-04) the player pilots (src/sazabi.cpp, docs/sazabi-re.md),
+"""EDF6VC_SAZABI.MRAB: the Sazabi (MSN-04) the player pilots (src/sazabi.cpp, docs/sazabi-re.md),
 built at install from the model folder tools/prep_sazabi.py makes out of the user's glTF (never in the repository:
 CC BY-NC-SA 4.0, see that folder's LICENSE.txt) and the player's own Root.cpk.
 
 The skeleton (SKELETON, preorder; every bone bound level, so the plugin's poses are plain rotations):
   mdl (root: the V506 MAB's locators hang on it, vcobjects.JET_MAB_ROOT) -> sazabi (the skinned object's bone),
-  globalSRT -> body (the V506's anchor: its seat, weapons and dead effect; no geometry; at BODY_AT, where the V506
-  CAS's `default` clip puts it) and sz_root -> the mech. Every sz_ bone is added to the V506 CAS (pylib/cas.py
-  add_bones), because the game draws a bone's pose only when the vehicle's CAS names it (docs/drill-re.md §5.4).
+  globalSRT -> body (the V506's anchor: its seat, weapons and dead effect, and the bone its ragdoll drives when it
+  dies; at BODY_AT, where the V506 CAS's `default` clip puts it; no geometry of its own) -> sz_root (at the floor,
+  under body so that the crash's tilt and the wreck carry the whole mech) -> the mech. The V506's CAS animates none of
+  the sz_ bones (it names them not), so the plugin's local matrices stay; every bone's world is drawn each frame
+  (docs/sazabi-re.md §2). The names it does animate (mdl, globalSRT, body) sit where its `default` clip puts them.
 Joints come from the model folder's SKELETON_FILE (tools/prep_sazabi.py BONE_SEGMENTS' heads).
 
 The model: every OBJ object is one bone's rigid pieces; the body in the Blacker's hull material (snd_BRDF, one UV set:
@@ -16,7 +18,7 @@ docs/gundam-plan.md §2). No texture of the source (it has none): every material
 (PALETTE x PALETTE, CELL-square cells, each vertex's UV at its material's cell centre), with matching roughness /
 metal maps made from the glTF's factors.
 
-    python pylib/sazabi_model.py [OUT_DIR]     build both files from the model folder and the game, check, write
+    python pylib/sazabi_model.py [OUT_DIR]     build the archive from the model folder and the game, check, write
 """
 from __future__ import annotations
 
@@ -25,11 +27,11 @@ import os
 import struct
 from dataclasses import dataclass, replace
 
-import cas
 import obj_model as om
+import sazabi_arms
 import texfile
-from mdb import (Mdb, Object, Rab, RabFile, bind_world, cmpl_compress, cmpl_decompress, insert_member, mdb_read,
-                 mdb_write, mmul, rab_read, rab_write)
+from mdb import (Mdb, Object, Rab, RabFile, bind_world, cmpl_compress, insert_member, mdb_read, mdb_write, mmul,
+                 rab_read, rab_write)
 
 MODEL_SUBDIR = 'sazabi'
 OBJ_FILE = 'sazabi.obj'
@@ -37,7 +39,6 @@ MTL_FILE = 'sazabi.mtl'
 SKELETON_FILE = 'sazabi_skeleton.json'
 OUT_ARC = 'EDF6VC_SAZABI.MRAB'
 OUT_MDB = 'edf6vc_sazabi.mdb'
-OUT_CAS = 'EDF6VC_SAZABI.CAS'
 # Canonical size (the user, 2026-10-06: 「按原设身高」): head 23.0 m, overall 25.6 m. The source runs from its soles at
 # y = -84 to the funnel packs' top at y = 1108 (1192 units): 25.6 m / 1192.
 SOURCE_SOLE_Y = -84.0
@@ -49,7 +50,7 @@ SKELETON: list[tuple[str, str | None]] = [
     ('sazabi', 'mdl'),
     ('globalSRT', 'mdl'),
     ('body', 'globalSRT'),
-    ('sz_root', 'globalSRT'),
+    ('sz_root', 'body'),
     ('sz_pelvis', 'sz_root'),
     ('sz_waist', 'sz_pelvis'),
     ('sz_chest', 'sz_waist'),
@@ -82,7 +83,9 @@ SKELETON: list[tuple[str, str | None]] = [
     ('sz_shin_r', 'sz_thigh_r'),
     ('sz_foot_r', 'sz_shin_r'),
     ('sz_axe', 'sz_root'),     # the plugin places it in world terms: in the shield, or in the right hand
+    ('sz_axe_blade', 'sz_axe'),   # its beam: scaled to nothing while stowed
 ]
+ARM_BONES = ('sz_rifle', 'sz_shield', 'sz_axe', 'sz_axe_blade')   # pylib/sazabi_arms.py models them and sets their joints
 BONE_NAMES = [n for n, _ in SKELETON]
 FIXED_JOINTS: dict[str, tuple[float, float, float]] = {
     'mdl': (0.0, 0.0, 0.0), 'sazabi': (0.0, 0.0, 0.0), 'globalSRT': (0.0, 0.0, 0.0), 'body': BODY_AT,
@@ -108,6 +111,7 @@ GLOW_MATERIALS: dict[str, tuple[str, float]] = {
     '14___Default': ('sz_glow_eye', 6.0),        # the mono-eye (cyan)
     '13___Default': ('sz_glow_thruster', 3.0),   # the thruster throats and the funnels' nozzles (yellow)
     '15___Default': ('sz_glow_lamp', 4.0),       # the chest lamps (red)
+    sazabi_arms.BEAM: ('sz_glow_blade', 8.0),    # the beam tomahawk's blade (pink)
 }
 BODY_MATERIAL = 'sz_body'
 OBJECT_NAME = 'sazabi'
@@ -179,12 +183,14 @@ def model_files(folder: str) -> list[str]:
 
 
 def skeleton(folder: str) -> list[tuple[str, int, tuple[float, float, float]]]:
-    """procmesh Joints (name, parent index, model-space joint) from the folder's SKELETON_FILE."""
+    """procmesh Joints (name, parent index, model-space joint) from the folder's SKELETON_FILE, the arms' from
+    sazabi_arms.joints."""
     with open(os.path.join(folder, SKELETON_FILE), encoding='utf-8') as h:
         at = json.load(h)
     _req(set(at) == set(BONE_NAMES), f'{SKELETON_FILE}: bones {sorted(set(at) ^ set(BONE_NAMES))} differ from SKELETON')
-    return [(n, BONE_NAMES.index(p) if p else -1, (float(at[n][0]), float(at[n][1]), float(at[n][2])))
-            for n, p in SKELETON]
+    pts = {n: (float(v[0]), float(v[1]), float(v[2])) for n, v in at.items()}
+    pts.update(sazabi_arms.joints(pts))
+    return [(n, BONE_NAMES.index(p) if p else -1, pts[n]) for n, p in SKELETON]
 
 
 def _byte(x: float) -> int:
@@ -256,12 +262,17 @@ def build_model(game, folder: str) -> tuple[Mdb, dict[str, bytes], dict]:  # noq
     import numpy as np
     import procmesh
     colours = read_mtl(os.path.join(folder, MTL_FILE))
+    colours[sazabi_arms.BEAM] = Colour(sazabi_arms.BEAM_KD, 0.5, 0.0, sazabi_arms.BEAM_KD)
     _req(set(GLOW_MATERIALS) <= set(colours), f'{MTL_FILE} lacks the glow materials {sorted(set(GLOW_MATERIALS) - set(colours))}')
     uv, tex = palette(colours)
     joints = skeleton(folder)
     body_md, body_mesh = _host(game, BODY_HOST)
     light_md, light_mesh = _host(game, LIGHT_HOST)
     pieces = parts(folder, colours, uv)
+    at = {n: j for n, _, j in joints}
+    for p in sazabi_arms.parts(at):
+        _req(p.material in colours, f'sazabi_arms: material {p.material} not in the palette')
+        pieces.append((replace(p, verts=[replace(v, uv=uv[p.material]) for v in p.verts]), BONE_NAMES.index(p.name)))
     md = Mdb(body_md.version, [n for n, _, _ in joints], [], [], [], [])
     md, body = om.add_material(md, body_md, BODY_HOST[2], BODY_MATERIAL, dict(zip(BODY_SLOTS, (TEX_ALBEDO, TEX_NORMAL, TEX_RMO))))
     groups = [(body, body_mesh, [(p, b) for p, b in pieces if p.material not in GLOW_MATERIALS])]
@@ -299,29 +310,6 @@ def build_archive(game, folder: str) -> tuple[bytes, dict]:  # noqa: ANN001 - ro
     out = rab_write(rab)
     check_archive(out)
     return out, info
-
-
-def cas_bones(folder: str) -> list[tuple[str, tuple[float, float, float]]]:
-    """Every sz_ bone with its bind position in its parent's frame (all bound level: a plain difference)."""
-    joints = skeleton(folder)
-    out = []
-    for name, parent, at in joints:
-        if name.startswith('sz_'):
-            p = joints[parent][2]
-            out.append((name, (at[0] - p[0], at[1] - p[1], at[2] - p[2])))
-    return out
-
-
-def build_cas(game, folder: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
-    """EDF6VC_SAZABI.CAS: the V506's own animation set with every sz_ bone added at its bind position (the `default`
-    clip; zero in the additive ones), so the game draws the poses the plugin writes into them (docs/drill-re.md §5.4).
-    Stored as the stock one is (CMPL or raw)."""
-    stored = game.read('OBJECT', 'V506_HELI.CAS')
-    raw = cmpl_decompress(stored)
-    add = cas_bones(folder)
-    new = cas.add_bones(raw, add)
-    cas.check_added(raw, new, add)
-    return cmpl_compress(new) if stored[:4] == b'CMPL' else new
 
 
 # ------------------------------------------------------------------------------------------ check
@@ -370,8 +358,6 @@ def main(argv: list[str]) -> int:
     arc, info = build_archive(game, folder)
     with open(os.path.join(out, OUT_ARC), 'wb') as h:
         h.write(arc)
-    with open(os.path.join(out, OUT_CAS), 'wb') as h:
-        h.write(build_cas(game, folder))
     print(json.dumps(info, indent=1))
     return 0
 

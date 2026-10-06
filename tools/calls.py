@@ -152,6 +152,10 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_SIDECAR', 0, 'sidecar', False, 0, 4000, 1.0, 'vehicle', vehicle='EDF6VC_SIDECAR', ground='sidecar'),
     # Appended 2026-10-05: the boarding gun (src/boarding.cpp), a Ranger sniper rifle; no call, a row like the calls'.
     Call('EDF6VC_CALL_BOARDING_GUN', 7301, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='aWeapon081'),
+    # Appended 2026-10-06 (the user: 「增加高达」): the Sazabi (src/sazabi.cpp, tools/make_sazabi.py), a mobile suit the
+    # player pilots, requested empty like the player jets; `mark` its body's (pylib/vcobjects.py SAZABI_MARK).
+    Call('EDF6VC_CALL_SAZABI', 7401, 'sazabi', False, 0, 15000, 2.6, 'vehicle', vehicle='EDF6VC_SAZABI',
+         jet='edf6tr_sazabi_mission'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -171,6 +175,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'aircraft to fly and air carriers (2026-10-06)': IDS[:35],
     'sidecar motorcycle (2026-10-06)': IDS[:36],
     'boarding gun (integrated 2026-10-06)': IDS[:37],
+    'Sazabi (2026-10-06)': IDS[:38],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -421,6 +426,18 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                                         'that aims at ground targets by itself and lobs a 40-rocket salvo over an area. '
                                         'Slow to reload.'),
     },
+    'sazabi': {
+        'SC': ('沙扎比（MSN-04）', '请求一台由你自己驾驶的沙扎比（MSN-04，全高 25.6 米），空着送到信号弹处。能走能跑，'
+                              '推进器冲刺和飞行；光束步枪、光束战斧、盾牌（带导弹）、浮游炮，以及胸部的扩散粒子炮。'),
+        'CN': ('沙薩比（MSN-04）', '請求一台由你自己駕駛的沙薩比（MSN-04，全高 25.6 公尺），空著送到信號彈處。能走能跑，'
+                              '推進器衝刺和飛行；光束步槍、光束戰斧、盾牌（帶飛彈）、浮游砲，以及胸部的擴散粒子砲。'),
+        'JA': ('サザビー（MSN-04）', '自分で操縦するサザビー（MSN-04、全高 25.6 m）を信号弾の位置へ要請する。歩行と走行、'
+                               'スラスターによるダッシュと飛行。ビーム・ショット・ライフル、ビーム・トマホーク、シールド（ミサイル付き）、'
+                               'ファンネル、そして腹部の拡散メガ粒子砲。'),
+        'EN': ('Sazabi (MSN-04)', 'Requests a Sazabi (MSN-04, 25.6 m tall) you pilot yourself, delivered empty to the '
+                                  'flare. It walks and runs, dashes and flies on its thrusters; beam shot rifle, beam '
+                                  'tomahawk, shield (with missiles), funnels, and the chest mega particle cannon.'),
+    },
     'pjet_fighter': {
         'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
                          '前推左摇杆或按上升键加油门，后拉减油门；右摇杆或鼠标转弯和俯仰。'),
@@ -525,6 +542,17 @@ VEHICLE_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the aircraft files tools/make_jets.py writes (EDF6VC_PJET_* / '
           'EDF6VC_FLY_*.SGO).',
 }
+# A plugin vehicle request whose files need more than tools/make_jets.py: its notes in place of VEHICLE_NOTES.
+VEHICLE_NOTES_BY_KIND: dict[str, dict[str, str]] = {
+    'sazabi': {
+        'SC': '需要 EDF6VehicleCrew 插件，以及安装器用沙扎比模型（models/sazabi）生成的文件；没有模型时请求来的是普通的 N9 Eros 直升机。',
+        'CN': '需要 EDF6VehicleCrew 插件，以及安裝器用沙薩比模型（models/sazabi）產生的檔案；沒有模型時請求來的是普通的 N9 Eros 直升機。',
+        'JA': 'EDF6VehicleCrew プラグインと、インストーラーがサザビーのモデル（models/sazabi）から書き出すファイルが必要。'
+              'モデルがない場合は通常の N9 エロス ヘリが来る。',
+        'EN': 'Needs the EDF6VehicleCrew plugin and the files the installer makes from the Sazabi model (models/sazabi); '
+              'without the model the request brings a plain N9 Eros heli.',
+    },
+}
 THROW_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 插件和安装器生成的无人机文件；未安装插件时为普通巡逻炸弹。',
     'CN': '需要 EDF6VehicleCrew 插件和安裝器生成的無人機檔案；未安裝插件時為普通巡邏炸彈。',
@@ -577,7 +605,8 @@ def call_name(call: Call, lang: str) -> str:
 def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
     if call.brings == 'vehicle':
-        notes = GROUND_NOTES_BY_KIND.get(call.kind, GROUND_NOTES) if call.ground else VEHICLE_NOTES
+        notes = GROUND_NOTES_BY_KIND.get(call.kind, GROUND_NOTES) if call.ground else \
+            VEHICLE_NOTES_BY_KIND.get(call.kind, VEHICLE_NOTES)
         return KINDS[call.kind][lang][1] + '\n\n' + notes[lang]
     if call.brings == 'throw':
         return KINDS[call.kind][lang][1] + '\n\n' + THROW_NOTES[lang]

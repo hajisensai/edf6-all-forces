@@ -33,7 +33,7 @@ OUT = os.path.join(ROOT, 'release')
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import installer  # noqa: E402  (PLUGINS: what the exe ships and installs)
 WORK = os.path.join(ROOT, 'build', 'pyinstaller')
-RELEASE_MODELS = ('twin_tank', 'drill_tank')     # pylib/artillery_model.py MODEL, drill_model.MODEL_SUBDIR
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -131,6 +131,7 @@ def build_exe(name: str) -> str:
     for mod in ('call_weapons', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'hkcms', 'hktag', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh',
                 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]

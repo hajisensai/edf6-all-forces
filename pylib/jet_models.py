@@ -429,7 +429,8 @@ def model_bounds(game, file: str | None) -> tuple[tuple[float, float, float], tu
     return tuple(round(x, 3) for x in lo), tuple(round(x, 3) for x in hi)  # type: ignore[return-value]
 
 
-HELI_ARCHIVE, HELI_MODEL = 'V506_HELI.MRAB', 'v506_heli.mdb'   # the stock heli every jet SGO is made from
+HELI_ARCHIVE, HELI_MODEL = 'V506_HELI.MRAB', 'v506_heli.mdb'
+SAZABI_FILE = 'EDF6VC_SAZABI.MRAB'   # pylib/sazabi_model.py OUT_ARC   # the stock heli every jet SGO is made from
 
 
 def heli_bounds(game) -> tuple[tuple[float, float, float], tuple[float, float, float]]:  # noqa: ANN001 - rootcpk.Game
@@ -455,6 +456,12 @@ def _model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
 def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     if file is None:
         return elevon_model(game)
+    if file == SAZABI_FILE:   # made from the user's model folder (pylib/sazabi_model.py), not from a stock archive
+        import sazabi_model
+        folder = sazabi_model.model_dir()
+        if folder is None:
+            raise FileNotFoundError(f'no {sazabi_model.MODEL_SUBDIR} model folder')
+        return sazabi_model.build_model(game, folder)[0]
     if file in STOCK_BOMBERS:
         arc, mdl = STOCK_BOMBERS[file]
         return mdb_read(next(f for f in rab_read(game.read('OBJECT', arc)).files if f.name.lower() == mdl).data)

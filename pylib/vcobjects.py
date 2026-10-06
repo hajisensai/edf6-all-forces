@@ -56,6 +56,13 @@ class Jet:
     # mission_setup[0]: the vehicle's tier, the two multipliers the game's vehicle requests scale a vehicle by (its
     # durability and its weapons' damage): JET_TIER unless set.
     tier: tuple[float, float] | None = None
+    # Its own animation set (animation_model[1]) in place of the V506's (None: the V506's). Not needed for bones the
+    # plugin poses: every bone's record world is drawn each frame (docs/sazabi-re.md §2).
+    cas: str | None = None
+    # Its seat camera (the MAB's eye and LookTarget locators, riding) given in its model's frame, in place of the
+    # stock heli's rig fitted by seat_camera: a jet's camera must see over the plane, a mech's looks past its shoulder at
+    # its back (place_seat_camera / check_seat_camera).
+    seat_camera: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
@@ -267,7 +274,8 @@ _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
 # fighter's, the blast / doll drones the drone's, the gunship (tools/make_jets.py GUNSHIP_MARK) an AC-130's.
 JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
               7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
-              7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0}
+              7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0,
+              7401.0: 71200.0}   # the Sazabi: its canonical full weight (30.5 t empty)
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
 # round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread,
 # the share of the world's gravity it falls at). Damage is per round against the player (the stock gatling's is 10,
@@ -356,6 +364,18 @@ def check_artillery_camera(camera: tuple[list[float], list[float]]) -> dict[str,
     assert ARTILLERY_VIEW_GROUND[0] <= out['ground'] <= ARTILLERY_VIEW_GROUND[1], f'the view meets the ground too near / far: {out}'
     assert out['height'] > 4.0, f'the eye is no higher than the stock: {out}'
     return out
+
+
+# The Sazabi (JETS[SAZABI_JET]): its file names are pylib/sazabi_model.py's (checked by tools/make_sazabi.py check).
+SAZABI_JET = 'edf6tr_sazabi_mission'
+SAZABI_MARK = 7401.0
+SAZABI_DURABILITY = 9000.0
+_SAZABI_ARC, _SAZABI_MDB = 'EDF6VC_SAZABI.MRAB', 'edf6vc_sazabi.mdb'
+SAZABI_WEAPONS = (_GUNS[0], _GUNS[1], _GUNS[0])    # placeholders until its own arms (docs/gundam-plan.md stage 3)
+SAZABI_CAMERA = (0.0, 26.0, -48.0)                 # over the 25.6 m mech's shoulder, far enough back to see it whole
+# Riding (the MAB's eye and LookTarget, model frame: x left, y up, z forward): behind and over its right shoulder (the
+# funnel packs reach 25.5 m up and the tubes 15 m back), looking past its chest to the ground ahead.
+SAZABI_SEAT_CAMERA = ((-7.0, 30.0, -38.0), (0.0, 17.0, 2.0))
 
 
 # The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its
@@ -460,6 +480,12 @@ JETS: dict[str, Jet] = {
     'edf6tr_pjet_fighter_mission': Jet(7201.0, 1400.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                        'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', player=True, camera=(0.0, 6.0, -24.0)),
     'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _STRIKE, player=True, camera=(0.0, 8.0, -32.0)),
+    # The Sazabi (src/sazabi.cpp, docs/gundam-plan.md): a 25.6 m mobile suit the player pilots, on the V506 body like
+    # the jets (the plugin walks and flies it and poses its bones); its own model (pylib/sazabi_model.py,
+    # tools/make_sazabi.py) with the V506's own CAS, its weapons on its rifle bone. Marks 7401-7499 are its own (src/body506.cpp kMarks).
+    SAZABI_JET: Jet(SAZABI_MARK, SAZABI_DURABILITY, SAZABI_WEAPONS, (f'app:/object/{_SAZABI_ARC.lower()}', _SAZABI_MDB),
+                    _SAZABI_ARC, 'body', 'body', weapon_bones=('sz_rifle',) * len(SAZABI_WEAPONS), player=True,
+                    camera=SAZABI_CAMERA, seat_camera=SAZABI_SEAT_CAMERA),
 }
 # The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
 # (Jet.parked), named after it: edf6tr_jet_<kind>_parked_mission. Same mark, model and arms: the plugin tells them
@@ -761,6 +787,33 @@ def check_camera(data: bytes, bounds: Bounds) -> tuple[list[float], list[float]]
     return pts[0], pts[1]
 
 
+def place_seat_camera(m: dict, box, camera: tuple[tuple[float, float, float], tuple[float, float, float]]) -> None:
+    """`m` with its seat camera's eye and look locators at `camera` (model frame): offsets on `mdl`, the collision
+    box's centre `box[0]` (see CAMERA_LOOK_KEY)."""
+    mab = bytearray(m['animation_model'][2])
+    for name, at in zip(camera_names(m), camera):
+        vec, _ = mab_locator(bytes(mab), name)
+        struct.pack_into('<3f', mab, vec, *(round(at[i] - float(box[0][i]), 3) for i in range(3)))
+    m['animation_model'][2] = bytes(mab)
+
+
+def check_seat_camera(data: bytes, bounds: Bounds, camera: tuple[tuple[float, float, float], tuple[float, float, float]]
+                      ) -> None:
+    """Re-read a mech's SGO and raise CameraError unless its seat camera is `camera` (model frame), its eye outside the
+    model's `bounds` and its look point inside them (it looks at the mech)."""
+    _, m = sgo.read(data)
+    mab = m['animation_model'][2]
+    centre = [float(_value(v)) for v in m['heli_rigid_body'][0]]
+    got = []
+    for name in camera_names(m):
+        vec, _ = mab_locator(mab, name)
+        got.append([round(centre[i] + struct.unpack_from('<3f', mab, vec)[i], 3) for i in range(3)])
+    if any(abs(got[k][i] - camera[k][i]) > 2e-3 for k in range(2) for i in range(3)):
+        raise CameraError(f'座位镜头 {got} 不是 {camera}')
+    if _inside(got[0], bounds) or not _inside(got[1], bounds):
+        raise CameraError(f'座位镜头眼睛 {got[0]} 应在模型 {bounds} 外、注视点 {got[1]} 应在模型内')
+
+
 def _value(v) -> float:
     """An SGO number node's value (sgo.Float keeps its bytes)."""
     return v.value if isinstance(v, sgo.Float) else float(v)
@@ -874,7 +927,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     mab = model[2]
     for at, old in JET_MAB_BONES:
         mab = sgo.replace_utf16(mab, at, old, anchor)
-    m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
+    m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), jet.cas or model[1], mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
     m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))], [anchor, -1])
@@ -898,7 +951,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         # centre, where `mdl` is (seat_camera, _jet_ragdoll).
         bounds = jet_models.model_bounds(game, jet.file or jet.box_model)
         heli = jet_models.heli_bounds(game)
-        fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]])
+        if jet.seat_camera is None:
+            fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]])
+        else:
+            place_seat_camera(m, box, jet.seat_camera)
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body, box[0] if door else None)]
     se = m.get('heli_se_table')
@@ -917,7 +973,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     out = sgo.write(version, m)
     if door:
         check_door(out)
-        check_camera(out, bounds)
+        if jet.seat_camera is None:
+            check_camera(out, bounds)
+        else:
+            check_seat_camera(out, bounds, jet.seat_camera)
     return out
 
 
@@ -927,7 +986,8 @@ def _moves_door(jet: Jet) -> bool:
     ground), whose door stays the V506's."""
     import jet_models
     # A requested body measured on a stock bomber model (box_model: the gunship) is boarded on the ground too.
-    return jet.file is None or jet.file in jet_models.MODELS or jet.box_model is not None
+    # A player's vehicle with a model another builder makes (the Sazabi) is boarded on the ground too.
+    return jet.file is None or jet.file in jet_models.MODELS or jet.box_model is not None or jet.player
 
 
 def as_mission_sgo(data: bytes) -> bytes:
