@@ -5,6 +5,8 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
+# The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
+target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -116,3 +118,10 @@ target_include_directories(hud_view PRIVATE src common third_party/EDFModLoader 
 target_link_libraries(hud_view PRIVATE edf6common)
 target_compile_options(hud_view PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hud_view PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The map view's camera and grid math (src/map_cam.h: the eye, the drag that grabs the ground, the zoom's limits, the
+# grid's reach), offline (tools/map_cam_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_cam_check && build\map_cam_check.exe
+add_executable(map_cam_check EXCLUDE_FROM_ALL tools/map_cam_check.cpp)
+target_compile_options(map_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

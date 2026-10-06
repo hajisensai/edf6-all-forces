@@ -129,6 +129,10 @@ struct Config {
     int freeLookKey=0x04;           // ...free look while held: the camera turns, the turret holds (VK_MBUTTON; 0 none)
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
+    bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
+    int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
+    int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
+    float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
     bool stockHeliStores=false;     // the stock 506 helis' requests carry the jets' rockets and Hellfires (the installer,
                                     // tools/make_stock_stores.py) and their secondary switches between them (payload.cpp)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
@@ -173,6 +177,9 @@ void ResetAirstrikes() noexcept;  // airstrike.cpp
 void ResetBoosters() noexcept;    // booster.cpp
 void ResetShields() noexcept;     // shield.cpp
 void ViewTick() noexcept;         // view.cpp: once a frame, the view distance raised
+// view.cpp: while the map view is open (map.cpp, game thread, each frame) the cameras' far clip raised to `farClip` and
+// their near clip to `nearClip` (the depth range for a view from up to 3 km); off: the values from before put back.
+void ViewMapClip(bool on,float farClip,float nearClip) noexcept;
 void ResetSubs() noexcept;        // subcarrier.cpp
 void ResetLaser() noexcept;       // carrierlaser.cpp
 void ResetPlayerJets() noexcept;  // playerjet.cpp
@@ -637,6 +644,8 @@ bool InstallPlayerJets() noexcept;                      // after InstallSub (it 
 // The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
 // kPlayerHumanMs or no longer the same live player object.
 unsigned char* PlayerHuman() noexcept;
+// crew.cpp: `object` is a vehicle of a class crew.cpp knows (its vtable among the hooked classes).
+bool IsVehicleObject(const void* object) noexcept;
 }  // namespace crew
 
 // The core modules' declarations (self-contained; every file that includes crew.h sees them as before).
@@ -647,3 +656,4 @@ unsigned char* PlayerHuman() noexcept;
 #include "nix.h"
 #include "vhud.h"
 #include "payload.h"
+#include "map.h"

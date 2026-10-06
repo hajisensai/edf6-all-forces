@@ -11,6 +11,7 @@
 //
 //   hud_view [--out DIR]      (default %TEMP%\edf6_hud_view), then: python tools/hud_view.py DIR
 #include "../src/hud.cpp"
+#include "../src/map_cam.h"
 #include <cstdio>
 #include <string>
 
@@ -20,7 +21,8 @@ PlayerFix player{};
 namespace {
 Config config{};
 // The scene: what the stubs hand the HUD.
-bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false;
+bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false;
+MapReadout sceneMap{};
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
 Warnings sceneWarn{};
@@ -85,6 +87,8 @@ bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
 bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
 bool PlayerGunnerHud(GunnerReadout*) noexcept { return false; }
 bool PlayerHighCam(bool*,bool*) noexcept { return false; }
+bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
+bool MapOwnsView() noexcept { return hasMap; }
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=GetTickCount64();
@@ -112,6 +116,55 @@ void Camera(const float* pos,const float* fwdIn,float width,float height,float* 
     auto dot=[](const float* a,const float* b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
+}
+// The map view's camera (map.cpp: mapcam::Place, its eye looking at the focus): the row-vector view-projection, its
+// level right the game's (-f.z, 0, f.x) as Camera's, its up right x forward.
+void MapCamera(const MapReadout& m,float width,float height,float* vp) {
+    mapcam::View v{{m.focus[0],m.focus[1],m.focus[2]},m.yaw,m.pitch,m.height};
+    float eye[3],look[3];
+    mapcam::Place(v,eye,look);
+    float f[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
+    vec::Normalize(f);
+    float r[3]={-f[2],0.0f,f[0]};
+    vec::Normalize(r);
+    float u[3];vec::Cross(r,f,u);
+    const float fy=1.0f/std::tan(0.5f*55.0f*kDeg),fx=fy/(width/height),n=1.0f,fa=20000.0f,A=fa/(fa-n),B=-n*fa/(fa-n);
+    auto dot=[](const float* a,const float* b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
+    for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
+    vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
+}
+void Unit(MapKind kind,float x,float y,float z) {
+    if(sceneMap.count>=kMapUnits)return;
+    MapUnit& u=sceneMap.unit[sceneMap.count++];
+    u.pos[0]=x;u.pos[1]=y;u.pos[2]=z;u.kind=kind;
+}
+// The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
+// two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
+void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad) {
+    sceneMap=MapReadout{};
+    sceneMap.pad=pad;sceneMap.follow=true;
+    sceneMap.yaw=yawDeg*kDeg;sceneMap.pitch=pitchDeg*kDeg;sceneMap.height=height;
+    sceneMap.meDir[0]=std::sin(0.5f);sceneMap.meDir[2]=std::cos(0.5f);
+    sceneMap.mapKey=0x4D;sceneMap.mapButton=0x20;
+    for(int i=0;i<4;++i)Unit(MapKind::squad,std::cos(static_cast<float>(i)*1.6f)*12.0f,0.0f,std::sin(static_cast<float>(i)*1.6f)*12.0f-8.0f);
+    for(int i=0;i<6;++i)Unit(MapKind::ally,140.0f+static_cast<float>(i)*9.0f,0.0f,-220.0f+static_cast<float>(i)*5.0f);
+    Unit(MapKind::vehicle,-60.0f,0.0f,90.0f);Unit(MapKind::vehicle,80.0f,0.0f,40.0f);
+    Unit(MapKind::air,-150.0f,80.0f,300.0f);Unit(MapKind::air,400.0f,300.0f,-100.0f);
+    Unit(MapKind::carrier,-500.0f,0.0f,-350.0f);
+    for(int i=0;i<40;++i)Unit(MapKind::enemy,-300.0f+std::fmod(static_cast<float>(i)*137.0f,700.0f),0.0f,600.0f+std::fmod(static_cast<float>(i)*91.0f,500.0f));
+    for(int i=0;i<3;++i)Unit(MapKind::enemyAir,200.0f+static_cast<float>(i)*60.0f,250.0f,900.0f);
+    Unit(MapKind::marker,250.0f,0.0f,450.0f);Unit(MapKind::marker,-700.0f,0.0f,1200.0f);
+    hasMap=true;
+    const std::wstring path=dir+L"\\"+name+L".txt";
+    if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return;}
+    std::fprintf(out,"W 1920 1080\n");
+    float vp[16];
+    MapCamera(sceneMap,1920.0f,1080.0f,vp);
+    struct { std::int32_t x,y,w,h; } viewport{0,0,1920,1080};
+    HudDraw(vp,image,&viewport,nullptr,0);
+    std::fclose(out);out=nullptr;
+    hasMap=false;
+    std::printf("%ls\n",path.c_str());
 }
 void Symbols(PlayerJetSymbols& y,const float* pos,float pitchDeg,float pathDeg) {
     std::memcpy(y.pos,pos,12);
@@ -279,6 +332,11 @@ int wmain(int argc,wchar_t** argv) {
     sceneNix.dir[0]=std::sin(0.7f);sceneNix.dir[2]=std::cos(0.7f);sceneNix.held=true;
     Scene(dir,L"stock_nix",ground);
     hasNix=false;
+    // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.
+    hasStock=false;
+    MapScene(dir,L"map_mid",700.0f,60.0f,20.0f,false);
+    MapScene(dir,L"map_high_pad",3000.0f,85.0f,-40.0f,true);
+    MapScene(dir,L"map_low",200.0f,32.0f,0.0f,false);
     std::printf(failed ? "layout: %d FAILED\n" : "layout: all apart\n",failed);
     return failed ? 1 : 0;
 }

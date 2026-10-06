@@ -21,6 +21,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "gear.h"
+#include "map_cam.h"
 #include "layout.h"
 #include "memory.h"
 #include "sight.h"
@@ -1961,8 +1962,227 @@ bool CameraRay(float* eye,float* dir) noexcept {
     return c[3]>0.0f && std::isfinite(eye[0]+eye[1]+eye[2]);
 }
 
+// --- The map view's marks (map.cpp; README 地图, docs/camera-re.md §7): drawn over the real world the map's camera
+// shows, in place of every other HUD element while it is open: a ground grid (its lines a round step apart, through the
+// player, labelled with their distance from the player and the side: north is the world's +z, east its -x, the game's
+// level right of +z), the north arrow, a scale bar, the player, the squad, friendly vehicles, aircraft and carriers, the
+// enemies the lock-on registry knows, the objective markers, a legend and the keys. ---
+namespace {
+alignas(16) const float kMapGrid[4]={0.85f,0.95f,1.0f,0.28f};
+alignas(16) const float kMapAxis[4]={0.85f,0.95f,1.0f,0.6f};
+alignas(16) const float kMapBand[4]={0.0f,0.0f,0.0f,0.45f};
+alignas(16) const float kMapSquad[4]={0.35f,1.0f,0.45f,1.0f};
+alignas(16) const float kMapAlly[4]={0.45f,0.85f,0.5f,0.8f};
+alignas(16) const float kMapEnemy[4]={1.0f,0.22f,0.18f,1.0f};
+alignas(16) const float kMapMarker[4]={1.0f,0.85f,0.2f,1.0f};
+constexpr int kMapLabels=12;             // at most this many labels an axis (every other line past that)
+constexpr float kMapLabelGap=34.0f;      // px (at 1080 lines) between two labels of an axis
+constexpr float kMapGuard=1.25f;         // a grid line is cut to this much of the screen's half size round it
+constexpr float kMapNearW=1.0f;          // ...and to this clip w (m in front of the eye)
+
+// The world segment a..b, cut in clip space to the part in front of the eye and on the screen (with a guard band:
+// Liang-Barsky on the planes w >= kMapNearW, |x|, |y| <= kMapGuard w), drawn as one line: a straight line stays
+// straight in a perspective view, and a line whose ends are both off the screen may still cross it.
+void MapLine(void* drawer,void* ctx,const float* vp,float width,float height,const float* a,const float* b,float t,const float* rgba) noexcept {
+    float ca[4],cb[4];
+    for(int k=0;k<4;++k) {
+        ca[k]=a[0]*vp[k]+a[1]*vp[4+k]+a[2]*vp[8+k]+vp[12+k];
+        cb[k]=b[0]*vp[k]+b[1]*vp[4+k]+b[2]*vp[8+k]+vp[12+k];
+    }
+    // Each plane as d(c) >= 0, linear in the clip coordinates.
+    const float da[5]={ca[3]-kMapNearW,kMapGuard*ca[3]+ca[0],kMapGuard*ca[3]-ca[0],kMapGuard*ca[3]+ca[1],kMapGuard*ca[3]-ca[1]};
+    const float db[5]={cb[3]-kMapNearW,kMapGuard*cb[3]+cb[0],kMapGuard*cb[3]-cb[0],kMapGuard*cb[3]+cb[1],kMapGuard*cb[3]-cb[1]};
+    float t0=0.0f,t1=1.0f;
+    for(int i=0;i<5;++i) {
+        if(da[i]<0.0f && db[i]<0.0f)return;
+        if(da[i]<0.0f)t0=std::fmax(t0,da[i]/(da[i]-db[i]));
+        else if(db[i]<0.0f)t1=std::fmin(t1,da[i]/(da[i]-db[i]));
+    }
+    if(!(t0<t1))return;
+    float p[2][2];
+    for(int e=0;e<2;++e) {
+        const float f=e ? t1 : t0;
+        float c[4];
+        for(int k=0;k<4;++k)c[k]=ca[k]+(cb[k]-ca[k])*f;
+        p[e][0]=width*0.5f*(c[0]/c[3])+width*0.5f;p[e][1]=height*0.5f-height*0.5f*(c[1]/c[3]);
+    }
+    Seg(drawer,ctx,p[0][0],p[0][1],p[1][0],p[1][1],t,rgba);
+}
+
+// A distance on the map: "850 m" / "1.5 km".
+void MapDistance(wchar_t* out,std::size_t size,float m) noexcept {
+    if(m<1000.0f)_snwprintf_s(out,size,_TRUNCATE,L"%.0f m",m);
+    else _snwprintf_s(out,size,_TRUNCATE,L"%.1f km",m*0.001f);
+}
+
+// Whether a grid label at (x, y) keeps clear of the bands (title, keys), the legend and the scale bar.
+bool MapLabelFree(float x,float y,float width,float height,float s) noexcept {
+    if(y<60.0f*s || y>height-60.0f*s || x>width-140.0f*s)return false;
+    if(x<190.0f*s && y>height*0.28f && y<height*0.30f+8.0f*28.0f*s+20.0f*s)return false;   // the legend (MapText)
+    return !(x<420.0f*s && y>height-140.0f*s);                                             // the scale bar (MapScale)
+}
+
+// The grid, its axes through the player, its labels (where each line meets the other axis through the focus; one at
+// least kMapLabelGap px from the last one drawn of its axis: they crowd toward the horizon).
+void MapGrid(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    const float step=mapcam::GridStep(m.height);
+    const int n=mapcam::GridLines(m.height,m.pitch,step);
+    const float y=m.focus[1],reach=static_cast<float>(n)*step;
+    for(int axis=0;axis<2;++axis) {   // 0: the lines of constant x (east / west of the player), 1: of constant z
+        const int c=axis*2,o=2-c;
+        const int k0=static_cast<int>(std::floor((m.focus[c]-reach-m.me[c])/step)),k1=static_cast<int>(std::ceil((m.focus[c]+reach-m.me[c])/step));
+        const int every=(k1-k0+1)>kMapLabels*2 ? 2 : 1;
+        float lastX=-1e9f,lastY=-1e9f;
+        for(int k=k0;k<=k1;++k) {
+            float a[3],b[3];
+            a[1]=b[1]=y;a[c]=b[c]=m.me[c]+static_cast<float>(k)*step;
+            a[o]=m.focus[o]-reach;b[o]=m.focus[o]+reach;
+            MapLine(drawer,ctx,vp,width,height,a,b,(k==0 ? 2.0f : 1.0f)*s,k==0 ? kMapAxis : kMapGrid);
+            if(k==0 || k%every)continue;
+            float p[3];p[1]=y;p[c]=a[c];p[o]=m.focus[o];
+            float x,yy,depth;
+            if(!Project(vp,p,width,height,&x,&yy,&depth) || !MapLabelFree(x,yy,width,height,s))continue;
+            if(std::fabs(x-lastX)<kMapLabelGap*s && std::fabs(yy-lastY)<kMapLabelGap*s)continue;
+            lastX=x;lastY=yy;
+            // +x is west of +z (north), -x east; +z north, -z south.
+            const wchar_t* side=axis==0 ? (k>0 ? L"W" : L"E") : (k>0 ? L"N" : L"S");
+            wchar_t d[24];MapDistance(d,_countof(d),std::fabs(static_cast<float>(k))*step);
+            Label(text,lines,at,x+4.0f*s,yy-10.0f*s,0,kLineScale*0.7f,kMapAxis,L"%ls %ls",side,d);
+        }
+    }
+}
+
+// The north arrow (top right): north's way on the screen from the focus.
+void MapCompass(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    const float north[3]={m.focus[0],m.focus[1],m.focus[2]+mapcam::GridStep(m.height)};
+    float x0,y0,x1,y1,depth;
+    if(!Project(vp,m.focus,width,height,&x0,&y0,&depth) || !Project(vp,north,width,height,&x1,&y1,&depth))return;
+    float dx=x1-x0,dy=y1-y0;
+    const float len=std::sqrt(dx*dx+dy*dy);
+    if(!(len>0.5f))return;
+    dx/=len;dy/=len;
+    const float r=34.0f*s,cx=width-70.0f*s,cy=110.0f*s;
+    Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,2.0f*s,32,kMapAxis);
+    Tri(drawer,ctx,cx,cy,cx+dx*r,cy+dy*r,8.0f*s,kMapEnemy);     // north red
+    Tri(drawer,ctx,cx,cy,cx-dx*r,cy-dy*r,8.0f*s,kWhite);        // south white
+    Label(text,lines,at,cx+dx*(r+14.0f*s),cy+dy*(r+14.0f*s),1,kLineScale*0.8f,kWhite,L"N");
+}
+
+// The scale bar (bottom left): one grid step across the screen at the focus.
+void MapScale(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    const float step=mapcam::GridStep(m.height);
+    float r[3];mapcam::Right(m.yaw,r);
+    const float b[3]={m.focus[0]+r[0]*step,m.focus[1],m.focus[2]+r[2]*step};
+    float x0,y0,x1,y1,depth;
+    if(!Project(vp,m.focus,width,height,&x0,&y0,&depth) || !Project(vp,b,width,height,&x1,&y1,&depth))return;
+    const float len=std::sqrt((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0));
+    if(!(len>4.0f) || len>width*0.5f)return;
+    const float x=40.0f*s,y=height-110.0f*s;
+    Rect(drawer,ctx,x,y-2.0f*s,x+len,y+2.0f*s,kWhite);
+    Rect(drawer,ctx,x-1.0f*s,y-8.0f*s,x+1.0f*s,y+8.0f*s,kWhite);
+    Rect(drawer,ctx,x+len-1.0f*s,y-8.0f*s,x+len+1.0f*s,y+8.0f*s,kWhite);
+    wchar_t d[24];MapDistance(d,_countof(d),step);
+    Label(text,lines,at,x+len*0.5f,y-18.0f*s,1,kLineScale*0.75f,kWhite,L"%ls",d);
+}
+
+// A hollow square / diamond of half size `h` round (x, y).
+void MapBox(void* drawer,void* ctx,float x,float y,float h,float t,const float* rgba) noexcept {
+    Seg(drawer,ctx,x-h,y-h,x+h,y-h,t,rgba);Seg(drawer,ctx,x+h,y-h,x+h,y+h,t,rgba);
+    Seg(drawer,ctx,x+h,y+h,x-h,y+h,t,rgba);Seg(drawer,ctx,x-h,y+h,x-h,y-h,t,rgba);
+}
+void MapDiamond(void* drawer,void* ctx,float x,float y,float h,float t,const float* rgba) noexcept {
+    Seg(drawer,ctx,x,y-h,x+h,y,t,rgba);Seg(drawer,ctx,x+h,y,x,y+h,t,rgba);
+    Seg(drawer,ctx,x,y+h,x-h,y,t,rgba);Seg(drawer,ctx,x-h,y,x,y-h,t,rgba);
+}
+
+// One unit's mark at the screen point (x, y).
+void MapUnitMark(void* drawer,void* ctx,float x,float y,float s,MapKind kind) noexcept {
+    const float t=2.0f*s;
+    switch(kind) {
+    case MapKind::squad: Rect(drawer,ctx,x-4.0f*s,y-4.0f*s,x+4.0f*s,y+4.0f*s,kMapSquad);break;
+    case MapKind::ally: Rect(drawer,ctx,x-3.0f*s,y-3.0f*s,x+3.0f*s,y+3.0f*s,kMapAlly);break;
+    case MapKind::vehicle: MapBox(drawer,ctx,x,y,7.0f*s,t,kMapSquad);Rect(drawer,ctx,x-2.0f*s,y-2.0f*s,x+2.0f*s,y+2.0f*s,kMapSquad);break;
+    case MapKind::air: MapDiamond(drawer,ctx,x,y,8.0f*s,t,kCyan);break;
+    case MapKind::carrier: MapBox(drawer,ctx,x,y,12.0f*s,t,kCyan);MapBox(drawer,ctx,x,y,6.0f*s,t,kCyan);break;
+    case MapKind::enemy: Rect(drawer,ctx,x-3.5f*s,y-3.5f*s,x+3.5f*s,y+3.5f*s,kMapEnemy);break;
+    case MapKind::enemyAir: MapDiamond(drawer,ctx,x,y,7.0f*s,t,kMapEnemy);break;
+    case MapKind::marker: Arc(drawer,ctx,x,y,13.0f*s,0.0f,kTurn,t,20,kMapMarker);Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,kMapMarker);break;
+    }
+}
+
+void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    // The enemies first, the friendly side over them, the markers on top.
+    static const MapKind kOrder[]={MapKind::enemy,MapKind::enemyAir,MapKind::ally,MapKind::squad,MapKind::vehicle,MapKind::air,
+                                   MapKind::carrier,MapKind::marker};
+    for(MapKind kind:kOrder) {
+        for(int i=0;i<m.count && i<kMapUnits;++i) {
+            const MapUnit& u=m.unit[i];
+            float x,y,depth;
+            if(u.kind!=kind || !Project(vp,u.pos,width,height,&x,&y,&depth))continue;
+            MapUnitMark(drawer,ctx,x,y,s,kind);
+            if(kind==MapKind::marker) {
+                wchar_t d[24];MapDistance(d,_countof(d),vec::Flat(u.pos,m.me));
+                Label(text,lines,at,x,y-24.0f*s,1,kLineScale*0.7f,kMapMarker,L"%ls",d);
+            }
+        }
+    }
+    // The player: a ring and an arrow along their heading.
+    float x,y,depth,x1,y1;
+    const float ahead[3]={m.me[0]+m.meDir[0]*10.0f,m.me[1],m.me[2]+m.meDir[2]*10.0f};
+    if(!Project(vp,m.me,width,height,&x,&y,&depth))return;
+    Arc(drawer,ctx,x,y,11.0f*s,0.0f,kTurn,2.5f*s,24,kWhite);
+    if(Project(vp,ahead,width,height,&x1,&y1,&depth)) {
+        float dx=x1-x,dy=y1-y;
+        const float len=std::sqrt(dx*dx+dy*dy);
+        if(len>0.01f){dx/=len;dy/=len;Tri(drawer,ctx,x-dx*5.0f*s,y-dy*5.0f*s,x+dx*20.0f*s,y+dy*20.0f*s,7.0f*s,kWhite);}
+    }
+}
+
+// The legend (left), the title and the keys (top and bottom bands).
+void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
+    Rect(drawer,ctx,0.0f,0.0f,width,46.0f*s,kMapBand);
+    Rect(drawer,ctx,0.0f,height-46.0f*s,width,height,kMapBand);
+    wchar_t h[24],g[24];
+    MapDistance(h,_countof(h),m.height);MapDistance(g,_countof(g),mapcam::GridStep(m.height));
+    Label(text,lines,at,width*0.5f,23.0f*s,1,kTitleScale,kWhite,L"MAP   height %ls   grid %ls%ls",h,g,m.follow ? L"   FOLLOW" : L"");
+    if(m.pad)Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,
+                   L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close");
+    else {
+        wchar_t key[32];KeyName(m.mapKey,key,32);
+        Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,
+              L"LMB drag / WASD pan   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",key);
+    }
+    struct Entry { MapKind kind; const wchar_t* name; };
+    static const Entry kLegend[]={{MapKind::squad,L"SQUAD"},{MapKind::vehicle,L"VEHICLE"},{MapKind::air,L"AIRCRAFT"},
+                                  {MapKind::carrier,L"CARRIER"},{MapKind::enemy,L"ENEMY"},{MapKind::enemyAir,L"ENEMY AIR"},
+                                  {MapKind::marker,L"OBJECTIVE"}};
+    float y=height*0.30f;
+    Arc(drawer,ctx,40.0f*s,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
+    Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"YOU");
+    for(const Entry& e:kLegend) {
+        y+=28.0f*s;
+        MapUnitMark(drawer,ctx,40.0f*s,y,s,e.kind);
+        Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",e.name);
+    }
+}
+
+// The map view open: its marks drawn (true), nothing else of the HUD.
+bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    static MapReadout m;   // the draw thread's (too big for its stack)
+    if(!PlayerMap(&m))return false;
+    MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapText(drawer,ctx,text,width,height,s,m,lines,at);
+    return true;
+}
+}  // namespace
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
-    if(viewProj)KeepViewProj(viewProj);
+    // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
+    // hold where the player left them.
+    if(viewProj && !MapOwnsView())KeepViewProj(viewProj);
     if(!quadOk || !viewProj || !ctx || !viewport)return;   // the carriers' bars are drawn whatever VehicleHud says
     __try {
         void* const drawer=At<void*>(image,kQuadDrawer);
@@ -1975,6 +2195,11 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         Text* const t=textOk && text.mgr ? &text : nullptr;
         Line lines[kMaxLines];
         int at=0,shown=0;
+        if(MapScreen(drawer,ctx,t,viewProj,width,height,s,lines,&at)) {   // the map view: its marks alone
+            if(t && textOk)DrawAll(*t,lines,at);
+            FreeText(text);
+            return;
+        }
         const ULONGLONG now=GetTickCount64();
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();

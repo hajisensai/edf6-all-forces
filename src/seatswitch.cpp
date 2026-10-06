@@ -100,7 +100,7 @@ Rider_* RiderFor(const unsigned char* human,ULONGLONG ms) noexcept {
 
 // Whether the virtual key `vk` is down while the game has the foreground (0: never).
 bool KeyDown(int vk) noexcept {
-    if(vk<=0)return false;
+    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
     DWORD pid=0;
     GetWindowThreadProcessId(GetForegroundWindow(),&pid);
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;

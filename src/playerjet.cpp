@@ -371,7 +371,7 @@ struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; boo
 
 // Whether the virtual key `vk` is down while the game has the foreground (0: never).
 bool KeyDown(int vk) noexcept {
-    if(vk<=0)return false;
+    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
     DWORD pid=0;
     GetWindowThreadProcessId(GetForegroundWindow(),&pid);
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;

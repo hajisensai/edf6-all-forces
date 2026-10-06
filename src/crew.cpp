@@ -814,6 +814,8 @@ const char* VehicleClassName(const void* vehicle) noexcept {
     return c>=0 ? kClasses[c].name : "vehicle";
 }
 
+bool IsVehicleObject(const void* object) noexcept { return ClassOf(object)>=0; }
+
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
     for(auto& s:states)s=State{};
