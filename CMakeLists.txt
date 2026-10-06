@@ -15,6 +15,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)

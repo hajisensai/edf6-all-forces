@@ -363,12 +363,13 @@ def calls_table_consistent() -> None:
     drones = set(re.search(r'enum class ThrownDrone \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     for c in calls.CALLS:
         assert c.kind in calls.KINDS, c.id
-        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw'), c.id
+        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun'), c.id
         thrown = c.brings == 'throw'
         assert bool(c.drone) == thrown and (not c.drone or c.drone in drones), c.id
         # A thrown drone's marker: the bits of 1.0 with its code in the low ones, never 1.0 itself (calls.throw_mark).
         bits = calls.mark_bits(c)
         assert not thrown or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
+        assert bool(c.gun) == (c.brings == 'gun') and (not c.gun or c.reload == 0), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
         assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
@@ -383,6 +384,17 @@ def calls_table_consistent() -> None:
         assert not calls.retired_id(c.id).startswith(calls.ID_PREFIX)   # GrantCalls never owns a placeholder
     names = [calls.call_name(c, 'SC') for c in calls.FLOWN]
     assert len(set(names)) == len(names), 'two calls with one banner label'
+
+
+@test
+def boarding_tag_in_plugin() -> None:
+    """The boarding gun's tag: src/boarding.cpp compares the bits call_weapons.gun_tag writes (1 + mark ulps)."""
+    guns = [c for c in calls.CALLS if c.brings == 'gun']
+    assert len(guns) == 1, 'one boarding gun'
+    bits = re.search(r'kTagBits=0x3F800000u\+(\d+)u;', src('src/boarding.cpp'))
+    assert bits and int(bits.group(1)) == int(guns[0].mark) == guns[0].mark, "src/boarding.cpp kTagBits is not the gun's mark"
+    assert cw.gun_tag_bits(guns[0].mark) == 0x3F800000 + int(guns[0].mark)
+    assert '#include' in src('src/boarding.cpp') and 'src/boarding.cpp' in src('CMakeLists.txt')
 
 
 @test

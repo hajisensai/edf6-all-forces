@@ -2400,13 +2400,13 @@ void EndRescue(const char* why,bool leave,ULONGLONG ms) noexcept {
     rescue=Rescue{};rescue.retryAt=ms+kAgainMs;
 }
 
-// Presses the board button for `human` (see kBoardButton), with the bump off: it takes a free seat in the
-// stock reach or nothing, never the NPC pilot's.
-void PressBoard(unsigned char* human) noexcept {
-    SuppressBump(true);
+// Presses the board button for `human` (see kBoardButton). `bump` off: it takes a free seat in the stock reach or
+// nothing, never the NPC pilot's; on (the boarding gun): an NPC's seat too, as the player's own press does.
+void PressBoard(unsigned char* human,bool bump=false) noexcept {
+    if(!bump)SuppressBump(true);
     __try { reinterpret_cast<void(__fastcall*)(void*)>(image+kBoardButton)(human); }
-    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE board button: fault");boardOk=false;}
-    SuppressBump(false);
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("BOARD button: fault (the button is off from now)");boardOk=false;}
+    if(!bump)SuppressBump(false);
 }
 
 // Whether `p` is in the sea, and the surface there: under a water area's surface (SeaAt) by kUnderSurface;
@@ -2573,6 +2573,9 @@ void RescueStep() noexcept {
 }  // namespace
 
 void PressBoardButton(unsigned char* human) noexcept { PressBoard(human); }
+void PressBoardButtonBumping(unsigned char* human) noexcept { PressBoard(human,true); }
+bool BoardButtonReady() noexcept { return profileOk && boardOk; }
+bool HumanOnFoot(const unsigned char* human) noexcept { return OnFoot(human); }
 
 bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noexcept {
     if(!reachOk || seat>=SeatCount(v))return false;

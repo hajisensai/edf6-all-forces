@@ -281,6 +281,7 @@ void LoadConfig() noexcept {
     n.seaRescue=ReadBool(L"SeaRescue",n.seaRescue);
     n.rescueBelow=ReadFloat(L"RescueBelow",n.rescueBelow);
     n.rescueAutoBoard=ReadBool(L"RescueAutoBoard",n.rescueAutoBoard);
+    n.boardingGun=ReadBool(L"BoardingGun",n.boardingGun);
     n.subHullHp=ReadFloat(L"SubHullHp",n.subHullHp);
     n.subHeavyHit=ReadFloat(L"SubHeavyHit",n.subHeavyHit);
     n.carrierLaser=ReadBool(L"CarrierLaser",n.carrierLaser);
@@ -470,7 +471,7 @@ void LoadConfig() noexcept {
         n.proteusFieldRadius,n.proteusFieldDefense,n.proteusFieldAttack,n.proteusFieldFireRate,n.proteusFieldEnergy,n.proteusFieldPower,n.proteusDriverGun,
         n.proteusGunRate,n.proteusGunDamage,n.proteusSalvoCount,n.proteusSalvoDamage,n.proteusSalvoCooldownSec,n.proteusSalvoRange,n.proteusPriority,
         n.proteusPriorityRadius);
-    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard);
+    Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
     Log("CONFIG physics vehicleWelding=%d giantContactCap=%d",n.vehicleWelding,n.giantContactCap);
@@ -652,6 +653,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
         InstallJets();      // the jets and the carrier are flown from HeliFrame: no heli pilot, none of them
         InstallSub();
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
+    InstallBoarding();      // after the jets' addBody hook and the heli profile's board button
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
