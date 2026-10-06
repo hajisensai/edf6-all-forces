@@ -29,6 +29,7 @@
 #include "crew.h"
 #include "layout.h"
 #include "map_cam.h"
+#include "map_marks.h"
 #include "map_camera_state.h"
 #include "memory.h"
 #include "turretaim.h"
@@ -56,9 +57,13 @@ const unsigned char kLookToUse[]={0xE8,0x48,0x21,0xF5,0xFF,0x0F,0x10,0x00,0x0F,0
 constexpr std::size_t kHumanRecord=0xD40,kRecordStride=0xA80,kMouseX=0x66C,kMouseY=0x684,kHumanVehicle=0x1548;
 constexpr std::int32_t kRecords=4;
 // The team walk (sidecar.cpp): 0x5E11D0(manager, team, functor) calls functor slot 1 with every object of every team
-// friendly to `team`.
-constexpr unsigned kTeamWalk=0x5E11D0,kTeamManager=0x20B2978;
+// friendly to `team` (relation 1) -- not team 5's. The one-team walk 0x5E0D60(manager, team, functor) the same for one
+// team's set alone: the board prompt walks team 5 (nobody's vehicles) with it first (0x56D75C: mov edx,5; mov rcx,[mgr];
+// call 0x5E0D60) and the friends after it (map_marks.h).
+constexpr unsigned kTeamWalk=0x5E11D0,kTeamManager=0x20B2978,kOneTeamWalk=0x5E0D60,kBoardTeam5Call=0x56D75C;
 const unsigned char kTeamWalkCode[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
+const unsigned char kOneTeamWalkCode[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7C,0x24,0x18,0x41,0x56};
+const unsigned char kBoardTeam5Code[]={0xBA,0x05,0x00,0x00,0x00,0x48,0x8B,0x0D,0x10,0x52,0xB4,0x01,0xE8,0xF3,0x35,0x07,0x00};
 // The hostile walk the stock radar makes (HUiHudRader 0x82B4D0, at 0x82B8CA and 0x82BBB0): the same functor call for
 // every live object of every team hostile to `team` (relation 2; the dead, +0x2E8, skipped).
 constexpr unsigned kHostileWalk=0x5E0F20;
@@ -87,7 +92,7 @@ using MarkerDtorFn=void*(__fastcall*)(void*,unsigned);
 using MarkerUpdateFn=void*(__fastcall*)(void*,void*,void*,void*);
 using XInputGetStateFn=DWORD(WINAPI*)(DWORD,XINPUT_STATE*);
 
-bool holdOk=false,camOk=false,walkOk=false,hostileOk=false,markerOk=false;
+bool holdOk=false,camOk=false,walkOk=false,nobodysOk=false,hostileOk=false,markerOk=false;
 CamStepFn nextCamStep=nullptr;
 MarkerDtorFn nextMarkerDtor=nullptr;
 MarkerUpdateFn nextMarkerUpdate=nullptr;
@@ -246,17 +251,23 @@ float HpShare(const unsigned char* o,float* hpMax) noexcept {
 }
 bool Aircraft(const void* v) noexcept { return IsJet(v) || IsPlayerJet(v) || IsHelicopter(v); }
 
-struct Walk { void** vtable; Game* g; const void* self; const void* ride; std::int32_t team; };
+// The friendly side's walks (map_marks.h): `nobodys` while it walks team 5.
+struct Walk { void** vtable; Game* g; const void* self; const void* ride; std::int32_t team; bool nobodys; };
 void __fastcall WalkVisit(void* self,void* object) noexcept {
     __try {
         const auto& w=*static_cast<Walk*>(self);
         const auto o=static_cast<const unsigned char*>(object);
         if(!o || o==w.self || o==w.ride || !Readable(o,kHp+4) || o[kDead])return;
-        const float* p=PosOf(o);
-        if(!KnownVehicle(o)){Add(*w.g,p,At<std::int32_t>(o,kTeam)==w.team ? MapKind::squad : MapKind::ally);return;}
-        const bool air=!IsSub(o) && Aircraft(o);
-        MapUnit* u=Add(*w.g,p,IsSub(o) ? MapKind::carrier : air ? MapKind::air : MapKind::vehicle);
-        if(u)Heading(u,o);
+        const bool vehicle=KnownVehicle(o);
+        const mapmarks::Seen seen{vehicle,vehicle && IsSub(o),vehicle && (IsJet(o) || IsPlayerJet(o)),vehicle && IsHelicopter(o),
+                                  At<std::int32_t>(o,kTeam)==w.team,w.nobodys};
+        MapKind kind;
+        std::uint8_t flags;
+        if(!mapmarks::FriendlyMark(seen,&kind,&flags))return;
+        MapUnit* u=Add(*w.g,PosOf(o),kind);
+        if(!u)return;
+        u->flags|=flags;
+        if(vehicle)Heading(u,o);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 void __fastcall WalkDtor(void*,unsigned) noexcept {}
@@ -394,8 +405,13 @@ void Gather(Game& g,const unsigned char* human) noexcept {
     else VisitEnemiesOf(team,&EnemyVisit,&hostile);
     Enemies(g);
     if(walkOk && manager) {
-        Walk w{kWalkVtable,&g,human,body!=human ? body : nullptr,team};
+        const mapmarks::Walks walks=mapmarks::WalksFor(team);
+        Walk w{kWalkVtable,&g,human,body!=human ? body : nullptr,team,false};
         reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&w);
+        if(walks.nobodys && nobodysOk) {   // nobody's vehicles: the empty ones, the parked and delivered aircraft
+            w.nobodys=true;
+            reinterpret_cast<WalkFn>(image+kOneTeamWalk)(manager,mapmarks::kNobodysTeam,&w);
+        }
         for(int i=0;i<g.count;++i)   // the friendly aircraft's ground (outside the walk: it holds the team lock)
             if(g.unit[i].kind==MapKind::air || g.unit[i].kind==MapKind::carrier)g.unit[i].ground=GroundAt(g.unit[i].pos[0],g.unit[i].pos[2],g.unit[i].pos[1]);
     }
@@ -411,8 +427,10 @@ void Gather(Game& g,const unsigned char* human) noexcept {
     Locks(g);
     if(Cfg().debug && GetTickCount64()-g.loggedAt>=5000) {
         g.loggedAt=GetTickCount64();
-        Log("MAP marks: %d enemies (%s): %d large pins, %d small dots; %d pins in all, %d ground cells",foeCount,
-            hostileOk ? "the radar's hostile walk" : "the lock registry",g.larges,g.dots,g.count,cellsUsed);
+        int air=0,empty=0;
+        for(int i=0;i<g.count;++i){air+=g.unit[i].kind==MapKind::air;empty+=(g.unit[i].flags&kMapEmpty)!=0;}
+        Log("MAP marks: %d enemies (%s): %d large pins, %d small dots; %d pins in all (%d aircraft, %d empty from team 5), %d ground cells",
+            foeCount,hostileOk ? "the radar's hostile walk" : "the lock registry",g.larges,g.dots,g.count,air,empty,cellsUsed);
     }
 }
 
@@ -484,7 +502,8 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         float dx=0.0f,dy=0.0f;
         if(MouseDelta(human,&dx,&dy) && (dx!=0.0f || dy!=0.0f)) {
             if(!game.loggedMouse && Cfg().debug){game.loggedMouse=true;Log("MAP mouse delta (%.1f,%.1f) a frame",dx,dy);}
-            if(Down(VK_LBUTTON)){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
+            // Ctrl + left drag is the NPC commands' selection box (mapcmd.cpp), not a pan.
+            if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing()){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
             else if(Down(VK_RBUTTON)){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
         }
     }
@@ -570,6 +589,12 @@ bool Frame(unsigned char* human) noexcept {
     mapcam::Place(v,eye,look);
     const float under=GroundAt(eye[0],eye[2],eye[1]-v.height);
     if(eye[1]<under+kEyeClear)eye[1]=under+kEyeClear;   // a ridge behind the focus: over it, still looking at the focus
+    // The NPC commands (mapcmd.cpp): a unit selected by its key centres the map on it.
+    float onto[3];
+    MapCmdInput in{front,pad,game.pad,false,pad ? padState.Gamepad.wButtons : static_cast<WORD>(0),0.0f,0.0f,{},{}};
+    in.mouse=front && MouseDelta(human,&in.dx,&in.dy);
+    std::memcpy(in.eye,eye,12);std::memcpy(in.look,look,12);
+    if(MapCommandFrame(in,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
     if(now-game.gatherAt>=kGatherMs){game.gatherAt=now;Gather(game,human);}
     Publish(game,human,eye,look);
     ViewMapClip(true,c.mapViewDistance,vec::Clamp(mapcam::Distance(v)*0.004f,0.5f,5.0f));
@@ -709,9 +734,12 @@ bool InstallMap() noexcept {
         camOk=InstallCamera();
         holdOk=camOk && InstallHold();
         walkOk=Matches(kTeamWalk,kTeamWalkCode,sizeof(kTeamWalkCode));
+        nobodysOk=walkOk && Matches(kOneTeamWalk,kOneTeamWalkCode,sizeof(kOneTeamWalkCode)) &&
+                  Matches(kBoardTeam5Call,kBoardTeam5Code,sizeof(kBoardTeam5Code));
         hostileOk=Matches(kHostileWalk,kHostileWalkCode,sizeof(kHostileWalkCode)) && Matches(0x82B8C3,kRadarCall,sizeof(kRadarCall));
         markerOk=holdOk && InstallMarkers() && nextMarkerUpdate;
-        Log("MAP hooks: camera=%d hold=%d team walk=%d hostile walk=%d markers=%d%s",camOk,holdOk,walkOk,hostileOk,markerOk,
+        Log("MAP hooks: camera=%d hold=%d team walk=%d team 5 walk=%d hostile walk=%d markers=%d%s",camOk,holdOk,walkOk,nobodysOk,
+            hostileOk,markerOk,
             holdOk ? "" : " (the map is off: unexpected EDF.dll code)");
         return holdOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -719,6 +747,7 @@ bool InstallMap() noexcept {
 
 void ResetMap() noexcept {
     Close("a new mission");
+    ResetMapCommands();
     game.human=ObjRef{};game.count=0;game.dots=0;
     for(auto& c:cells)c=Cell{};
     cellsUsed=0;

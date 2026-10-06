@@ -11,6 +11,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
+# The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
+target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 # The EMC's charged beam (src/emc.cpp, src/emc_plan.h).
 target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # The Proteus rework (its own line too).
@@ -186,6 +188,25 @@ set_target_properties(hud_view PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINA
 add_executable(map_cam_check EXCLUDE_FROM_ALL tools/map_cam_check.cpp)
 target_compile_options(map_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The map's NPC commands (src/mapcmd_logic.h: the pointer's ground point, the box / click / cycle selection, the keys,
+# the guard formation),
+# offline (tools/map_cmd_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_cmd_check && build\map_cmd_check.exe
+add_executable(map_cmd_check EXCLUDE_FROM_ALL tools/map_cmd_check.cpp)
+target_compile_options(map_cmd_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_cmd_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# What the map marks of the friendly side (src/map_marks.h: team 5's walk, the aircraft's icon), offline
+# (tools/map_marks_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_marks_check && build\map_marks_check.exe
+add_executable(map_marks_check EXCLUDE_FROM_ALL tools/map_marks_check.cpp)
+target_compile_options(map_marks_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_marks_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The HUD's switch cues (src/hud_cue.h: the banner of a store / aim-mode switch, a store's picture), offline
+# (tools/hud_cue_check.cpp). Not part of the plugin build:
+# cmake --build build --target hud_cue_check && build\hud_cue_check.exe
+add_executable(hud_cue_check EXCLUDE_FROM_ALL tools/hud_cue_check.cpp)
+target_compile_options(hud_cue_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(hud_cue_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Primer creatures' pose code run offline (tools/primer_pose_view.py, tools/primer_chain_view.py render it):
 # not part of the plugin.
 add_executable(primer_pose_sim tools/primer_pose_sim.cpp)
@@ -221,7 +242,7 @@ add_test(NAME call_pick COMMAND call_pick_test)
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check
-    vehicle_ram_check stab_check vsound_check map_cam_check emc_check proteus_check sidecar_board_check)
+    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})

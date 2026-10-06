@@ -430,6 +430,11 @@ struct Heli {
     float orbitCentre[3];
     bool orbitSet,orbiting;
     ULONGLONG orbitLogAt;
+    // A map command (HeliCommand, mapcmd.cpp) is the same post as a call's: guard / post / hold written as HeliCalled
+    // writes them; what they were before the first command kept here to put back on its release.
+    Command cmd;
+    bool ownGuard;
+    float ownPost[3],ownHold[3];
 };
 Heli helis[16]{};
 constexpr ULONGLONG kStaleMs=2000;   // a heli flown every frame; one not flown this long is gone (or not NPC-flown)
@@ -2325,6 +2330,51 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
         if(!(std::isfinite(rotor) && rotor>0.2f))Put<float>(vehicle,kRotor,0.5f);
         Log("HELI v=%p called: %s at (%.0f,%.0f,%.0f), fuel %lus",vehicle,guard ? "guard" : "follow",post[0],post[1],post[2],fuelSec);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+namespace {
+// A heli a map command reaches: flown by its NPC now (as HeliReap tells a live one), not on its way out.
+bool Commandable(const Heli& h) noexcept {
+    return h.ref && h.seenFrame && GameFrame()-h.seenFrame<=kAliveFrames && !h.leaving && !h.reap;
+}
+}  // namespace
+
+bool HeliSharesPost() noexcept { return Cfg().heliGuardRadius>0.0f; }   // GuardOrbit spaces helis on one post round it
+
+int HeliCommandUnits(CommandUnit* out,int most) noexcept {
+    int n=0;
+    for(const auto& h:helis)
+        if(n<most && Commandable(h))out[n++]=CommandUnit{h.ref.obj,h.type ? h.type->name : "heli",h.cmd,true};
+    return n;
+}
+
+// guard: the post moved to the point (its guard orbit round it, HeliGuardRadius out; HeliHeight over it with the orbit
+// off), as a guard call's; follow: no post (it follows the player, Fly's escort / orbit); none: the call's own back.
+bool HeliCommand(const void* vehicle,const Command& c) noexcept {
+    __try {
+        Heli* const h=Find(vehicle);
+        if(!h || !Commandable(*h))return false;
+        if(h->cmd.order==Order::none) {
+            h->ownGuard=h->guard;
+            std::memcpy(h->ownPost,h->post,12);std::memcpy(h->ownHold,h->hold,12);
+        }
+        if(c.order==Order::guard) {
+            h->guard=true;
+            std::memcpy(h->post,c.at,12);
+            h->hold[0]=c.at[0];h->hold[1]=c.at[1]+Cfg().heliHeight;h->hold[2]=c.at[2];
+        } else if(c.order==Order::follow) {
+            h->guard=false;
+        } else if(h->cmd.order!=Order::none) {
+            h->guard=h->ownGuard;
+            std::memcpy(h->post,h->ownPost,12);std::memcpy(h->hold,h->ownHold,12);
+        }
+        h->cmd=c;
+        // A new centre at once: GuardOrbit eases its centre at 10 m/s, which would drag the orbit across the map.
+        h->orbitSet=false;h->extend=false;
+        Log("HELI v=%p map command: %s (%.0f,%.0f,%.0f)",vehicle,c.order==Order::guard ? "guard" : c.order==Order::follow ? "follow" : "release",
+            c.at[0],c.at[1],c.at[2]);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 bool HeliFuel(const void* vehicle,float* sec) noexcept {

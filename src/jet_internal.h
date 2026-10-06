@@ -427,6 +427,7 @@ struct Jet {
     int flares=4;               // flare pairs left (jet.cpp NpcFlares)
     ULONGLONG flareAt=0,flareLook=0;   // its last pair; its last look for a missile coming
     PrimerState primer;
+    Command cmd{};              // a map command (JetCommand, mapcmd.cpp): what it works round instead (jet.cpp JetFrame)
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
