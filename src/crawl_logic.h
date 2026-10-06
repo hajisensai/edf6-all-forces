@@ -9,7 +9,8 @@
 //  - on a floor, arrived means that in-surface distance within the stop (the level distance, as before: a goal far over
 //    a flat floor -- the player in a heli -- does not make it circle under them);
 //  - on a wall or a ceiling (up less than kFloorUp), arrived means the 3D distance within the stop; a goal that lies off
-//    the surface (straight out from the wall, kOffSurface) is reached by going down the wall first, onto the floor;
+//    the surface (straight out from the wall, kOffSurface) is reached by going down the wall first, onto the floor, or,
+//    lying behind the wall (past a building), up and over it; on a ceiling right over it, it stays;
 //  - a turn is measured about the crawler's up: the error to a wanted direction and how far it turned between frames,
 //    the same sign convention as atan2(x, z) on a level floor (a positive angle from +z towards +x).
 #pragma once
@@ -53,11 +54,14 @@ inline bool Move(const Frame& f,const float* pos,const float* goal,float stop,bo
     if(!std::isfinite(gap) || gap<start || gap<0.5f)return false;
     float way[3]={t[0],t[1],t[2]};
     if(!floor && plane<kOffSurface*dist) {
-        // Off this surface (straight out from the wall): down the wall first. On a ceiling "down" is off it as well:
-        // then the in-surface way is all there is.
-        const float down[3]={0.0f,-1.0f,0.0f};
-        float g[3];Tangent(down,f.up,g);
-        if(Len(g)>0.2f)for(int i=0;i<3;++i)way[i]=g[i];
+        // Off this surface. In front of the wall (out where its face looks): down the wall onto the floor. Behind it
+        // (a point past a building, the wall in between): up and over it -- going down there only drives it back into
+        // the same wall. On a ceiling neither way lies on it: a point under it is as near as it gets (no stick: the
+        // in-surface remainder is noise, normalized it would dart about over the point).
+        const float vertical[3]={0.0f,Dot(d,f.up)>=0.0f ? -1.0f : 1.0f,0.0f};
+        float g[3];Tangent(vertical,f.up,g);
+        if(!(Len(g)>0.2f))return false;
+        for(int i=0;i<3;++i)way[i]=g[i];
     }
     const float w=Len(way);
     if(!(w>1e-3f))return false;

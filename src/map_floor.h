@@ -19,9 +19,14 @@ namespace mapfloor {
 enum class Normals : std::uint8_t { unknown, own, facing };
 constexpr float kBackDot=0.05f;   // a hit is on the back when the ray runs along its own normal by more than this
 constexpr float kStep=0.05f;      // m past a skipped hit the next ray starts
-constexpr int kMaxHits=8;         // hits a walk looks at
+constexpr int kMaxHits=8;         // hits a pick looks at
+constexpr int kMaxHitsDown=24;    // hits a vertical ray from high over a point looks at (each cave level over it
+                                  // costs two: its roof's back and its floor)
 
 // A floor under the player seen from above (`fromAbove`: the hit's normal) and from just below it (`fromBelow`).
+// `own` is for good (a facing normal never looks like the triangle's own from both sides); `facing` may be a thin
+// slab's underside or a second body just under the floor seen from below, so it is only kept until a floor shows
+// `own` (heli.cpp LearnMapNormals keeps asking now and then).
 inline Normals Learn(const float* fromAbove,const float* fromBelow) noexcept {
     if(!(fromAbove[1]>0.5f))return Normals::unknown;   // not a floor: nothing learned
     if(fromBelow[1]>0.5f)return Normals::own;
@@ -37,13 +42,13 @@ inline bool Back(Normals k,const float* dir,const float* n) noexcept {
 // Walks the segment a->b hit by hit (`ray(from, to, hit, normal)`: metres to the nearest hit, or < 0 with none), each
 // front hit handed to `take(hit, metres from a)` until it returns true. False when none was taken.
 template<class Ray,class Take>
-bool Walk(const float* a,const float* b,Normals k,Ray ray,Take take) noexcept {
+bool Walk(const float* a,const float* b,Normals k,Ray ray,Take take,int most=kMaxHits) noexcept {
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
     const float len=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
     if(!(len>1e-3f) || !std::isfinite(len))return false;
     const float dir[3]={d[0]/len,d[1]/len,d[2]/len};
     float from[3]={a[0],a[1],a[2]},gone=0.0f;
-    for(int i=0;i<kMaxHits;++i) {
+    for(int i=0;i<most;++i) {
         float hit[3],n[3];
         const float m=ray(from,b,hit,n);
         if(!(m>=0.0f) || !std::isfinite(m))return false;
@@ -64,15 +69,19 @@ float Floor(const float* a,const float* b,Normals k,Ray ray,float* hit) noexcept
     return at;
 }
 
-// Of the front hits on the vertical ray from `top` down to `bottom` (x, z the same), the height nearest `y`: true with
-// `h`.
-template<class Ray>
-bool Near(const float* top,const float* bottom,float y,Normals k,Ray ray,float* h) noexcept {
+// Of the front hits on the vertical ray from `top` down to `bottom` (x, z the same) that `ok(point)` takes, the height
+// nearest `y`: true with `h`.
+template<class Ray,class Ok>
+bool Near(const float* top,const float* bottom,float y,Normals k,Ray ray,Ok ok,float* h) noexcept {
     bool any=false;
     Walk(top,bottom,k,ray,[&](const float* p,float){
-        if(!any || std::fabs(p[1]-y)<std::fabs(*h-y)){*h=p[1];any=true;}
-        return p[1]<y;   // the rest are lower still: farther
-    });
+        if(ok(p) && (!any || std::fabs(p[1]-y)<std::fabs(*h-y))){*h=p[1];any=true;}
+        return any && p[1]<y;   // the rest are lower still: farther
+    },kMaxHitsDown);
     return any;
+}
+template<class Ray>
+bool Near(const float* top,const float* bottom,float y,Normals k,Ray ray,float* h) noexcept {
+    return Near(top,bottom,y,k,ray,[](const float*){ return true; },h);
 }
 }  // namespace mapfloor

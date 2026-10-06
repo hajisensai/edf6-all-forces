@@ -247,6 +247,22 @@ int main() {
         const Face flat[]={{3.0f,1.0f}};
         const Cave open{flat,1,false};
         Check(mapfloor::Near(top,bottom,50.0f,Normals::own,open,&h) && h==3.0f,"ground: open ground as before",h);
+        // A building on open ground: its roof, its underside half a metre up, the ground under it. A slot asked for at
+        // ground height but inside its footprint stands on the roof (the ground there has no room over it).
+        const Face building[]={{30.0f,1.0f},{0.5f,-1.0f},{0.0f,1.0f}};
+        const Cave block{building,3,false};
+        auto room=[&](const float* p){
+            float hh[3],nn[3];
+            const float lo[3]={p[0],p[1]+0.3f,p[2]},hi[3]={p[0],p[1]+2.5f,p[2]};
+            return block(lo,hi,hh,nn)<0.0f;
+        };
+        Check(mapfloor::Near(top,bottom,0.0f,Normals::own,block,room,&h) && h==30.0f,"slot: inside a building's footprint, on its roof",h);
+        Check(mapfloor::Near(top,bottom,0.0f,Normals::own,block,&h) && h==0.0f,"ground (any): the ground nearest",h);
+        // Five cave levels over the one asked about (two hits each from the sky): still found.
+        const Face deep[]={{0.0f,1.0f},{8.0f,-1.0f},{20.0f,1.0f},{28.0f,-1.0f},{40.0f,1.0f},{48.0f,-1.0f},{60.0f,1.0f},
+                           {68.0f,-1.0f},{80.0f,1.0f},{88.0f,-1.0f},{100.0f,1.0f},{108.0f,-1.0f}};
+        const Cave stack{deep,12,false};
+        Check(mapfloor::Near(top,bottom,1.0f,Normals::own,stack,&h) && Near(h,0.0f,0.01f),"ground: the bottom level under five more",h);
         const Cave empty{flat,0,false};
         Check(!mapfloor::Near(top,bottom,0.0f,Normals::own,empty,&h),"ground: none (off the world)");
     }

@@ -2758,15 +2758,23 @@ bool InstallDoorGuns() noexcept {
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
 // The floor along a map ray (map_floor.h): the hits on a triangle's back skipped once the normals are known to be the
-// triangles' own. Learned from the player's floor (LearnMapNormals), kept for the run: it is the engine's, not the map's.
+// triangles' own. Learned from the player's floor (LearnMapNormals): `own` is kept for the run (it is the engine's, not
+// the map's); `facing` is asked again every kRelearnMs (a thin slab or a second body under the floor reads as facing).
+// Game thread only (the map's frame, the commands, the marks).
 namespace {
 mapfloor::Normals mapNormals=mapfloor::Normals::unknown;
+ULONGLONG normalsAskedAt=0;
+constexpr ULONGLONG kRelearnMs=1000;
+constexpr float kStandClear=2.5f;   // m of open air over a floor a unit can stand on
 float FloorHit(const float* from,const float* to,float* hit,float* normal) noexcept {
     return CastRay(from,to,hit,false,nullptr,kMapLayer,normal);
 }
 }  // namespace
 void LearnMapNormals(const float* standing) noexcept {
-    if(mapNormals!=mapfloor::Normals::unknown || !rayOk || !std::isfinite(standing[0]+standing[1]+standing[2]))return;
+    if(mapNormals==mapfloor::Normals::own || !rayOk || !std::isfinite(standing[0]+standing[1]+standing[2]))return;
+    const ULONGLONG now=GetTickCount64();
+    if(mapNormals==mapfloor::Normals::facing && now-normalsAskedAt<kRelearnMs)return;
+    normalsAskedAt=now;
     const float top[3]={standing[0],standing[1]+1.5f,standing[2]},bottom[3]={standing[0],standing[1]-20.0f,standing[2]};
     float h1[3],n1[3];
     if(CastRay(top,bottom,h1,false,nullptr,kMapLayer,n1)<0.0f)return;
@@ -2774,8 +2782,11 @@ void LearnMapNormals(const float* standing) noexcept {
     const float below[3]={h1[0],h1[1]-0.08f,h1[2]},above[3]={h1[0],h1[1]+0.08f,h1[2]};
     float h2[3],n2[3];
     if(CastRay(below,above,h2,false,nullptr,kMapLayer,n2)<0.0f || std::fabs(h2[1]-h1[1])>0.05f)return;
-    mapNormals=mapfloor::Learn(n1,n2);
-    if(mapNormals!=mapfloor::Normals::unknown)
+    const mapfloor::Normals was=mapNormals;
+    const mapfloor::Normals learned=mapfloor::Learn(n1,n2);
+    if(learned==mapfloor::Normals::unknown)return;
+    mapNormals=learned;
+    if(mapNormals!=was)
         Log("MAP ray normals: %s (a floor at y=%.1f: from above (%.2f,%.2f,%.2f), from below (%.2f,%.2f,%.2f))%s",
             mapNormals==mapfloor::Normals::own ? "the triangles' own" : "facing the ray",h1[1],n1[0],n1[1],n1[2],n2[0],n2[1],n2[2],
             mapNormals==mapfloor::Normals::own ? ": cave roofs seen from above are skipped" : ": cave roofs cannot be told apart");
@@ -2783,9 +2794,15 @@ void LearnMapNormals(const float* standing) noexcept {
 float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
     return mapfloor::Floor(a,b,mapNormals,&FloorHit,hit);
 }
-bool MapGroundNear(float x,float z,float y,float* h) noexcept {
+bool MapGroundNear(float x,float z,float y,float* h,bool standable) noexcept {
     const float top[3]={x,y+4000.0f,z},bottom[3]={x,y-4000.0f,z};
-    return mapfloor::Near(top,bottom,y,mapNormals,&FloorHit,h) && std::isfinite(*h);
+    // Standable: open air over it (not the ground inside a building's or a rock's collision under its roof).
+    auto room=[standable](const float* p){
+        if(!standable)return true;
+        const float a[3]={p[0],p[1]+0.3f,p[2]},b[3]={p[0],p[1]+kStandClear,p[2]};
+        return CastRay(a,b)<0.0f;
+    };
+    return mapfloor::Near(top,bottom,y,mapNormals,&FloorHit,room,h) && std::isfinite(*h);
 }
 // Layer 27 (filter 0x1B) collides with layers 15, 16, 17, 18 and 20 alone (the CollisionFilter ctor 0x105510's pair
 // table, docs/emc-re.md §3): the layers the map objects' creation code puts buildings on (docs/raycast-re.md §3), not

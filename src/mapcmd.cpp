@@ -120,11 +120,11 @@ bool GroundAlong(const float* eye,const float* dir,float level,float* point) noe
     if(MapFloorRay(eye,end,hit)>=0.0f && std::isfinite(hit[0]+hit[1]+hit[2])){std::memcpy(point,hit,12);return true;}
     return mapcmd::RayLevel(eye,dir,level,point);
 }
-// The ground under (x, z) on the level of height `y` (a formation slot round a guard point in a cave: its floor, not
-// the roof over it nor a level above), else `y`.
+// The ground under (x, z) on the level of height `y` a unit can stand on (a formation slot round a guard point in a
+// cave: its floor, not the roof over it nor a level above; over a building: its roof, not the ground inside it), else `y`.
 float GroundAt(float x,float z,float y) noexcept {
     float h;
-    return MapGroundNear(x,z,y,&h) ? h : y;
+    return MapGroundNear(x,z,y,&h,true) ? h : y;
 }
 
 Keys ReadKeys(const MapCmdInput& in) noexcept {

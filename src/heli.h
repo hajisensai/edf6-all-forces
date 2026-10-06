@@ -33,10 +33,11 @@ bool InstallDoorGuns() noexcept;   // after CheckHeliProfile: the 410's door gun
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point).
 float MapRay(const float* a,const float* b,float* hit) noexcept;
 // The map's ground in caves and indoors (map_floor.h): the first floor along a->b (a cave roof seen from above skipped;
-// metres, -1 with none), and of the floors over / under (x, z) the height nearest `y`. LearnMapNormals(a point the
-// player stands on) settles once which side a hit's normal faces (map.cpp calls it while the map is open).
+// metres, -1 with none), and of the floors over / under (x, z) the height nearest `y` (`standable`: only those with
+// room to stand over them). LearnMapNormals(a point the player stands on) settles which side a hit's normal faces (map.cpp
+// calls it while the map is open).
 float MapFloorRay(const float* a,const float* b,float* hit) noexcept;
-bool MapGroundNear(float x,float z,float y,float* h) noexcept;
+bool MapGroundNear(float x,float z,float y,float* h,bool standable=false) noexcept;
 void LearnMapNormals(const float* standing) noexcept;
 // emc.cpp: the same against the buildings alone (layer 27: no terrain, no units), metres to the nearest or -1.
 float BuildingRay(const float* a,const float* b,float* hit) noexcept;

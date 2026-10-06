@@ -68,6 +68,15 @@ int main() {
         Check(Move(f,pos,across,stop,false,hyst,ramp,stick),"wall: a point straight across moves it");
         WorldMove(f,stick,w);
         Check(w[1]<-0.9f,"wall: across: down the wall",w[1]);
+        // Behind the wall (a point past the building whose wall it is on): up and over, never down (down drives it back
+        // into the same wall: it went up and down it for ever).
+        const float behind[3]={60.0f,0.0f,0.0f},behindHigh[3]={60.0f,40.0f,0.0f};
+        Check(Move(f,pos,behind,stop,false,hyst,ramp,stick),"wall: a point behind it moves it");
+        WorldMove(f,stick,w);
+        Check(w[1]>0.9f,"wall: behind: up the wall (over the top)",w[1]);
+        Check(Move(f,pos,behindHigh,stop,false,hyst,ramp,stick),"wall: a point behind and above moves it");
+        WorldMove(f,stick,w);
+        Check(w[1]>0.9f,"wall: behind and above: up",w[1]);
         // Along the floor at the wall's foot, 80 m to +z: down and along.
         const float along[3]={-2.0f,0.0f,80.0f};
         Check(Move(f,pos,along,stop,false,hyst,ramp,stick),"wall: a point along the wall's foot moves it");
@@ -95,6 +104,10 @@ int main() {
         Check(Move(f,pos,goal,stop,false,hyst,ramp,stick),"ceiling: a point off to the side moves it");
         WorldMove(f,stick,w);
         Check(w[0]>0.9f,"ceiling: towards the point",w[0]);
+        // Right over the point (a tall cave's floor 40 m below, past the stop): it stays, no darting about over it.
+        const float high[3]={0.0f,40.0f,0.0f},below[3]={0.4f,0.0f,-0.3f};
+        Check(!Move(f,high,below,stop,false,hyst,ramp,stick) && stick[0]==0.0f && stick[1]==0.0f,"ceiling: right over the point it stays");
+        Check(!Move(f,high,below,stop,true,hyst,ramp,stick),"ceiling: right over the point, moving, it stops");
     }
     std::printf("crawl_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;

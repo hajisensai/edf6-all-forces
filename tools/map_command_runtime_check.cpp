@@ -17,7 +17,7 @@ void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1.0f; }
-bool MapGroundNear(float,float,float,float*) noexcept { return false; }
+bool MapGroundNear(float,float,float,float*,bool) noexcept { return false; }
 int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
