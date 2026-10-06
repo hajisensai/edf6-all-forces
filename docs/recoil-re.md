@@ -47,6 +47,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址全部是 RVA。纯静态分析（`to
 | 布莱克战车 505 主炮 | `EWEAPON418` / `EVEHICLE_TANK01` `[0.1, 1]` | `V505_TANK_AI`、`V505_TANK_MISSION` `[0, 2]` | NPC 与关卡可上车版都没有后推（摆是 2 倍） |
 | 霸里亚斯 601 主炮 | `AWEAPON351` 等 `[0.25, 0.5]` | `V601_TANK_AI` `[0, 2]` | NPC 没有后推 |
 | 尼库林格移动飞弹 402 | `EWEAPON401` 等 `[0.025, 0.1]` | `VEHICLE402_ROCKET_AI` `[0, 0]` | NPC 完全没有 |
+| 奔驰装甲机车 503 / 613（含 OMEGA、6 号） | 每种呼叫 `BodyRecoil [0, 0]` | `V503_BIKE`、`_EDF6BENEFITS`、`_OMEGAZ`、`V613_BIKE` 的机枪 `[0.02, 0.02]` | 关卡版反而比玩家版多一点 |
 | 克卜勒 603、巴尔加 605、607 / 610 / 611 卡车 | 603：`[0, 0.01]` 两边相同；605 / 607 / 610 / 611 没有玩家呼叫版 | — | 不受影响 / 无可对照 |
 
 `python autoturret/tools/npc_recoil.py audit` 重新扫一遍：所有带 `mission_setup` 的原版 OBJECT 文件逐炮位对照所有呼叫，列出不一致的，
@@ -58,6 +59,24 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址全部是 RVA。纯静态分析（`to
 文件格式（旧 SGO / DSGO）和其余内容不动。「同一门炮」是核出来的：炮位的武器本身、去掉 `_ai` 的名字（原版 AI 炮的命名）、
 或这个文件自己的 `vehicle_setup` 在同一槽放的玩家炮，必须有一个等于呼叫在该槽的炮，否则拒绝生成。NPC 泰坦先由 `titan_ai.py` 装副炮，
 再走同一条规则（所以它的副炮也是玩家值 `[0.05, 0.5]`，而不是关卡版的 `[0.5, 1.5]`）。
+
+### 5.1 测试场生成的载具（`testrange/gen.py`）
+
+测试场把呼叫型载具 SGO 的 `vehicle_setup` 改名成 `mission_setup`（`pylib/vcobjects.py` `as_mission_sgo`）来放置，后坐力因此来自 OBJECT 文件
+自己的 `vehicle_setup`，而玩家拿到的是呼叫里的那一份，两者并不相同。`gen.vehicle_sgo` 现在对生成的地面载具 / 直升机走同一条规则
+（通用代码在 `pylib/recoil.py`）：原版派生的按 `gen.PLAYER_CALLS` 找呼叫，我们自己的车（喀秋莎、自行榴弹炮、钻头战车、边三轮）
+按 `tools/call_weapons.py` 生成的那份呼叫。改动（`audit` 的测试场部分逐炮位核对，现在全部一致）：
+
+| 测试场载具 | 原来 | 现在（玩家呼叫） |
+|---|---|---|
+| 武装装甲车格雷普 401（`edf6tr_vehicle401_striker_mission`） | `[0.3, 5.5]`（OBJECT `VEHICLE401_STRIKER` 的 `vehicle_setup`） | `[0.01, 0.1]`（`EVEHICLE_STRIKER01`） |
+| 喀秋莎 | `[0, 0]` | `[0.025, 0.1]`（它的呼叫取自尼库林格的请求） |
+| 钻头战车 | `[0, 2]` | `[0.1, 1]`（取自布莱克战车的请求） |
+| 边三轮的两挺机枪 | `BodyRecoil [0.02, 0.02]` | `[0, 0]` |
+| 风神 506、风神 6 号、赫隆 602 | `[0.0001, 0.1]` / 导弹 `[0.01, 0.1]` | `[0, 0]`（506 / 602 类没有 slot 48 后坐力，实际无感） |
+| 狂暴直升机 410 | `AimRecoil [0.000436, 0.001047]` | `[0, 0]`（410 走 `0x5F9F10` 抖准星，现在与玩家版一样不抖） |
+
+自行榴弹炮、409 Nereid、502 Depth Crawler 原本就一致（502 的炮位没有后坐力项）。
 
 ## 6. 联机
 

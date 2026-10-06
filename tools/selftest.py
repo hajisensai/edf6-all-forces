@@ -1608,6 +1608,12 @@ def npc_recoil_takes_the_player_call() -> None:
                 pass
             else:
                 raise AssertionError('a mount of another gun took the call recoil')
+    # The range's own placeable vehicles follow the same rule (testrange/gen.py vehicle_sgo).
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert set(gen.PLAYER_CALLS) <= set(gen.DERIVED) - set(gen.JETS), 'gen.PLAYER_CALLS names a vehicle the range does not derive'
+    body = src('testrange/gen.py').split('def vehicle_sgo(', 1)[1].split('\ndef ', 1)[0]
+    assert body.count('_with_player_recoil(game, sgo_name,') == 2, 'gen.vehicle_sgo: GROUND_MISSION and DERIVED both take the player recoil'
     assert titan_ai.NAME in npc_recoil.PLAYER_CALL, 'build.py writes the NPC Titan through npc_recoil.PLAYER_CALL'
     code = src('autoturret/tools/build.py')
     assert 'for name in npc_recoil.PLAYER_CALL:' in code and 'titan_ai.build() if name == titan_ai.NAME' in code
