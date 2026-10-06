@@ -210,6 +210,23 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     cmdUnit(jet,true,"JET fighter",Order::follow,nullptr,false);
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
+    // The squads (npcai.cpp, docs/npc-ai-design.md §6.1): a recruited one guarding, a free one, a script's (locked, grey),
+    // one dismissed waiting out its cooldown; their panel on the right.
+    const float sq1[3]={-30.0f,0.0f,150.0f},sq2[3]={200.0f,0.0f,250.0f},sq3[3]={-250.0f,0.0f,500.0f};
+    cmdUnit(sq1,false,"RANGER x4",Order::guard,guard,true);
+    cmdUnit(sq2,false,"FENCER x2",Order::none,nullptr,false);
+    cmdUnit(sq3,false,"RANGER x6",Order::none,nullptr,false);
+    sceneCmd.unit[sceneCmd.count-1].locked=true;
+    auto row=[](const char* name,int alive,const char* status,Order order,bool locked,bool selected){
+        SquadRow& r=sceneCmd.squad[sceneCmd.squads];
+        std::snprintf(r.name,sizeof(r.name),"%s",name);std::snprintf(r.status,sizeof(r.status),"%s",status);
+        r.alive=alive;r.now.order=order;r.locked=locked;
+        sceneCmd.squadSelected[sceneCmd.squads++]=selected;
+    };
+    row("RANGER",4,"RECRUITED",Order::guard,false,true);
+    row("FENCER",2,"FREE",Order::none,false,false);
+    row("RANGER",6,"SCRIPT",Order::none,true,false);
+    row("AIR RAIDER",3,"WAIT 42s",Order::guard,false,false);
     std::swprintf(sceneCmd.note,_countof(sceneCmd.note),L"GUARD (60, 420): 2 UNITS");
     sceneCmd.noteFresh=true;
     hasMap=true;

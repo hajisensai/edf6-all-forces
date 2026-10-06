@@ -2680,6 +2680,21 @@ def npc_ai_wired() -> None:
     assert 'image+kSetFollow' in follow and 'vt[kSlotNetFollow]==image+kNetFollow' in follow
     for key, default in (('NpcSquadSuccession', '1'), ('NpcSquadMin', '2'), ('NpcSquadMax', '8'), ('NpcSquadJoinRange', '150')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    # The squads on the map (§5.4, §6): a script's squad takes no order; a dismissal clears +0x540 (or the stock takes the
+    # squad back at once) and starts the cooldown, whose end puts +0x540 back; vehicles take only their three orders.
+    cmd = code.split('bool SquadCommand(const void* leader,const Command& c) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'npc::Scripted(q->control)' in cmd.split('switch', 1)[0], "a script's squad takes no order"
+    dismiss = cmd.split('case Order::dismiss:', 1)[1].split('break;', 1)[0]
+    assert dismiss.index('top[kAutoFollow]=0;') < dismiss.index('Follow(top,nullptr);') < dismiss.index('cooldowns.Start(')
+    see = code.split('Squad* SeeSquad(', 1)[1].split('\n}\n', 1)[0]
+    assert 'cooldowns.Ready(SquadKey(top),ms)' in see and 'top[kAutoFollow]=q->autoFollow;' in see
+    mapc = src('src/mapcmd.cpp')
+    takes = mapc.split('bool Takes(const Entry& e,Order o) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'if(e.u.locked)return false;' in takes and 'mapcmd::VehicleOrder(o)' in takes
+    assert 'if(!Takes(e,cmd.order)){++*skipped;continue;}' in mapc
+    for key, default in (('NpcGuardRadius', '15'), ('NpcFreeRange', '120'), ('NpcRecruitCooldownSec', '60')):
+        assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
     for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
 

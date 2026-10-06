@@ -233,6 +233,9 @@ struct Config {
     int npcSquadMin=2;              // ...fewer left than this: it joins the nearest squad with room
     int npcSquadMax=8;              // ...a squad takes in others up to this many
     float npcSquadJoinRange=150.0f; // ...within this many m
+    float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay
+    float npcFreeRange=120.0f;      // ...a squad told to engage freely: m round where it stood it goes after enemies
+    float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round

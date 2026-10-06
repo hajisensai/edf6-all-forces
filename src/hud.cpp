@@ -2600,7 +2600,40 @@ void MapUnits(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 alignas(16) const float kMapOrder[4]={0.3f,0.9f,1.0f,1.0f};
 alignas(16) const float kMapOrderDim[4]={0.3f,0.9f,1.0f,0.55f};
 alignas(16) const float kMapBoxFill[4]={0.3f,0.9f,1.0f,0.08f};
+alignas(16) const float kMapLocked[4]={0.6f,0.6f,0.6f,0.6f};   // a squad a mission script drives: shown, takes no order
 constexpr float kMapGuardRing=12.0f;      // m: the ring at a guard order's point (formation slots are 30 m apart)
+// The squad panel (docs/npc-ai-design.md §6.1), the map's right edge under the title band: a row a squad (the number key
+// that picks it, its class, members alive, what it is doing, its order), selected rows white, a script's grey.
+const wchar_t* MapOrderWord(Order o) noexcept {
+    switch(o) {
+    case Order::guard: return L"GUARD";
+    case Order::follow: return L"FOLLOW";
+    case Order::engage: return L"ENGAGE";
+    case Order::focus: return L"FOCUS";
+    case Order::board: return L"BOARD";
+    case Order::dismount: return L"DISMOUNT";
+    case Order::dismiss: case Order::recruit: case Order::none: break;
+    }
+    return L"-";
+}
+void MapSquadPanel(void* drawer,void* ctx,Text* text,float s,const MapCommandReadout& c,Line* lines,int* at) noexcept {
+    if(c.squads<=0)return;
+    // Top left, under the title band and over the legend (which starts some 270 px down at 1080 lines); the compass
+    // has the top right.
+    const float x0=16.0f*s,rowH=22.0f*s,top=56.0f*s;
+    const int rows=c.squads<9 ? c.squads : 9;
+    Rect(drawer,ctx,x0-8.0f*s,top-6.0f*s,x0+430.0f*s,top+rowH*static_cast<float>(rows+1)+4.0f*s,kMapBand);
+    Label(text,lines,at,x0,top+rowH*0.5f,0,kLineScale*0.7f,kMapOrder,L"SQUADS  (1-9 pick, Shift add)");
+    for(int i=0;i<rows;++i) {
+        const SquadRow& r=c.squad[i];
+        const float* tint=r.locked ? kMapLocked : c.squadSelected[i] ? kWhite : kMapOrder;
+        wchar_t key[4]=L" ";
+        if(i<9)_snwprintf_s(key,_countof(key),_TRUNCATE,L"%d",i+1);
+        Label(text,lines,at,x0,top+rowH*(static_cast<float>(i)+1.5f),0,kLineScale*0.7f,tint,L"%ls  %-10hs x%-2d %-10hs %ls",key,r.name,r.alive,
+              r.status,MapOrderWord(r.now.order));
+    }
+}
+
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c))return;
@@ -2639,7 +2672,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))Seg(drawer,ctx,p.ix,p.iy,gx,gy,1.5f*s,kMapOrderDim);
         }
         if(!shown)continue;
-        Arc(drawer,ctx,p.ix,p.iy,15.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : kMapOrderDim);
+        Arc(drawer,ctx,p.ix,p.iy,15.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : u.locked ? kMapLocked : kMapOrderDim);
         if(u.selected)MapBrackets(drawer,ctx,p.ix,p.iy,24.0f*s,2.5f*s,kWhite);
         if(u.now.order==Order::follow)Label(text,lines,at,p.ix,p.iy+24.0f*s,1,kLineScale*0.6f,kMapOrder,L"FOLLOW");
         if(u.selected && c.selected==1) {
@@ -2647,20 +2680,23 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             Label(text,lines,at,p.ix,p.iy-30.0f*s,1,kLineScale*0.7f,kWhite,L"%ls",one);
         }
     }
-    // The band over the keys: how many are selected, the keys.
-    Rect(drawer,ctx,0.0f,height-80.0f*s,width,height-46.0f*s,kMapBand);
+    MapSquadPanel(drawer,ctx,text,s,c,lines,at);
+    // The band over the keys: how many are selected, the keys (the squads' own on a second line).
+    Rect(drawer,ctx,0.0f,height-104.0f*s,width,height-46.0f*s,kMapBand);
     const float y=height-63.0f*s;
+    if(c.allowed && c.squads>0 && !m.pad)Label(text,lines,at,width*0.5f,height-88.0f*s,1,kLineScale*0.75f,kWhite,
+        L"SQUADS:  1-9 pick   J engage   H focus fire (Q mark)   K dismiss   U recruit   B board   N dismount");
     wchar_t sel[48];
     if(c.all)_snwprintf_s(sel,_countof(sel),_TRUNCATE,L"SELECTED ALL %d",c.selected);
     else if(c.selected==1 && one[0])_snwprintf_s(sel,_countof(sel),_TRUNCATE,L"SELECTED 1 / %d: %ls",c.count,one);
     else _snwprintf_s(sel,_countof(sel),_TRUNCATE,L"SELECTED %d / %d",c.selected,c.count);
     if(!c.allowed)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kAmber,L"NPC COMMANDS: OFFLINE ONLY");
-    else if(!c.count)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"NPC COMMANDS: no plugin NPC unit (helis, jets, crawlers)");
+    else if(!c.count)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,L"NPC COMMANDS: no NPC unit (squads, helis, jets, crawlers, tanks)");
     else if(m.pad)Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,
                         L"%ls   X select (ALL last)   Y guard crosshair   RB follow me   LB release",sel);
     else Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,
                L"%ls   Ctrl+drag box (Shift add)   click pick / clear   Tab cycle   G guard pointer   V follow me   X release",sel);
-    if(c.noteFresh)Label(text,lines,at,width*0.5f,height-100.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
+    if(c.noteFresh)Label(text,lines,at,width*0.5f,height-124.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
 }
 
 // The legend (left), the title and the keys (top and bottom bands).

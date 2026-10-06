@@ -38,10 +38,11 @@ constexpr float kClickBox=6.0f;          // px: a Ctrl box smaller than this bot
 constexpr float kClickRadius=22.0f;      // px (at 1080 lines) round a unit's icon a click takes it
 constexpr float kFormationSpacing=30.0f; // m between the slots of a formation round a guard point
 
-enum class Owner : std::uint8_t { heli, jet, ground };
+enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
-struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease; };
+struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
+             engage,focus,board,dismount,dismiss,recruit,digit[9]; };
 
 // --- The game thread's own ---
 struct Game {
@@ -79,6 +80,8 @@ void List(Game& g) noexcept {
     add(HeliCommandUnits(buf,kCmdUnits),Owner::heli);
     add(JetCommandUnits(buf,kCmdUnits-g.count),Owner::jet);
     add(GroundCommandUnits(buf,kCmdUnits-g.count),Owner::ground);
+    add(TankCommandUnits(buf,kCmdUnits-g.count),Owner::tank);
+    add(SquadCommandUnits(buf,kCmdUnits-g.count),Owner::squad);
     std::sort(g.list,g.list+g.count,[](const Entry& a,const Entry& b){ return std::less<const void*>()(a.u.v,b.u.v); });
 }
 
@@ -87,6 +90,8 @@ bool Give(const Entry& e,const Command& c) noexcept {
     case Owner::heli: return HeliCommand(e.u.v,c);
     case Owner::jet: return JetCommand(e.u.v,c);
     case Owner::ground: return GroundCommand(e.u.v,c);
+    case Owner::squad: return SquadCommand(e.u.v,c);
+    case Owner::tank: return TankCommand(e.u.v,c);
     }
     return false;
 }
@@ -112,6 +117,9 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
     if(in.front) {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
         k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);
+        // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
+        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');
+        for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
     }
     if(in.pad) {
         const WORD b=in.buttons;
@@ -121,7 +129,28 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
     return k;
 }
 
-const wchar_t* OrderName(Order o) noexcept { return o==Order::guard ? L"GUARD" : o==Order::follow ? L"FOLLOW" : L"RELEASE"; }
+const wchar_t* OrderName(Order o) noexcept {
+    switch(o) {
+    case Order::guard: return L"GUARD";
+    case Order::follow: return L"FOLLOW";
+    case Order::engage: return L"ENGAGE";
+    case Order::focus: return L"FOCUS FIRE";
+    case Order::board: return L"BOARD";
+    case Order::dismount: return L"DISMOUNT";
+    case Order::dismiss: return L"DISMISS";
+    case Order::recruit: return L"RECRUIT";
+    case Order::none: break;
+    }
+    return L"RELEASE";
+}
+// Whether `e` takes order `o` at all: a locked squad (a script's) none, a vehicle only guard / follow / release, a tank
+// no follow (it keeps a post).
+bool Takes(const Entry& e,Order o) noexcept {
+    if(e.u.locked)return false;
+    if(e.owner==Owner::squad)return true;
+    if(e.owner==Owner::tank)return o==Order::guard || o==Order::none;
+    return mapcmd::VehicleOrder(o);
+}
 
 void Note(Game& g,const wchar_t* format,...) noexcept {
     va_list a;va_start(a,format);
@@ -185,14 +214,16 @@ bool TargetPoint(const Game& g,const MapCmdInput& in,const View* v,float* point)
 }
 
 // The command to every selected unit; a guard's formation round the point (helis sharing one orbit stay on it).
-int Issue(Game& g,const Command& cmd) noexcept {
+int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     int k=0;
-    for(int i=0;i<g.count;++i)k+=g.sel.Has(g.list[i].u.v) ? 1 : 0;
+    *skipped=0;
+    for(int i=0;i<g.count;++i)k+=g.sel.Has(g.list[i].u.v) && Takes(g.list[i],cmd.order) ? 1 : 0;
     const bool share=HeliSharesPost();
     int given=0,slot=0;
     for(int i=0;i<g.count;++i) {
         Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v))continue;
+        if(!Takes(e,cmd.order)){++*skipped;continue;}
         Command c=cmd;
         if(cmd.order==Order::guard && !(e.owner==Owner::heli && share)) {
             mapcmd::Formation(slot++,k,cmd.at,kFormationSpacing,c.at);
@@ -216,9 +247,11 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         const Entry& e=g.list[i];
         CmdMark& m=r.unit[i];
         std::memcpy(m.pos,PosOf(e.u.v),12);
-        m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);
+        m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);m.locked=e.u.locked;
         std::snprintf(m.name,sizeof(m.name),"%s%s",e.owner==Owner::heli ? "HELI " : e.owner==Owner::jet ? "JET " : "",e.u.name ? e.u.name : "?");
     }
+    r.squads=SquadRows(r.squad,16);
+    for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     readoutAt=GetTickCount64();
@@ -254,21 +287,38 @@ bool MapCommandFrame(const MapCmdInput& in,float* centre) noexcept {
         mapcmd::Cycle(g.sel,ids,g.count,next ? 1 : -1);
         picked=g.sel.n==1;
     }
+    // The number keys pick a squad of the panel (its rows in SquadRows' order; Shift adds or takes out).
+    SquadRow rows[9];
+    const int rowCount=SquadRows(rows,9);
+    for(int d=0;d<rowCount;++d) {
+        if(!k.digit[d] || g.was.digit[d])continue;
+        if(!k.shift)g.sel.Clear();
+        if(k.shift && g.sel.Has(rows[d].leader))g.sel.Remove(rows[d].leader);
+        else g.sel.Add(rows[d].leader);
+        mapcmd::Keep(g.sel,ids,g.count);
+        picked=g.sel.n==1;
+    }
     const mapcmd::Press p{next,prev,(k.guard && !g.was.guard) || (k.padGuard && !g.was.padGuard),
                           (k.follow && !g.was.follow) || (k.padFollow && !g.was.padFollow),
-                          (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease)};
+                          (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
+                          k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
+                          k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit};
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=!InSession();
-    const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk);
+    const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     if(s.why==mapcmd::Refusal::online)Note(g,L"COMMANDS: OFFLINE ONLY");
     else if(s.why==mapcmd::Refusal::noUnit)Note(g,g.count ? L"SELECT UNITS FIRST (%ls)" : L"NO UNIT TO COMMAND",in.usingPad ? L"X" : L"CTRL+DRAG / CLICK / TAB");
     else if(s.why==mapcmd::Refusal::noPoint)Note(g,L"NO GROUND THERE");
+    else if(s.why==mapcmd::Refusal::noMark)Note(g,L"MARK AN ENEMY FIRST (Q ON FOOT)");
     if(s.issue) {
-        const int given=Issue(g,s.cmd);
-        if(s.cmd.order==Order::guard)Note(g,L"%ls (%.0f, %.0f): %d UNIT%ls",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,given==1 ? L"" : L"S");
-        else Note(g,L"%ls: %d UNIT%ls",OrderName(s.cmd.order),given,given==1 ? L"" : L"S");
+        int skipped=0;
+        const int given=Issue(g,s.cmd,&skipped);
+        wchar_t tail[40]{};
+        if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,L" (%d CANNOT)",skipped);
+        if(s.cmd.order==Order::guard)Note(g,L"%ls (%.0f, %.0f): %d UNIT%ls%ls",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,given==1 ? L"" : L"S",tail);
+        else Note(g,L"%ls: %d UNIT%ls%ls",OrderName(s.cmd.order),given,given==1 ? L"" : L"S",tail);
         Log("MAPCMD %ls (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
             g.sel.n,given,g.count);
     }
