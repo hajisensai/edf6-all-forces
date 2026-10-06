@@ -167,6 +167,7 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     Facing(heading,start,m);
     unsigned char* const v=SpawnJet(b,m);
     if(!v)return nullptr;
+    NoteLocalCopy(v,source);   // whose its damage is online: its carrier's owner, else the call's (online_authority.h)
     Jet* const j=NewEntry(v,ms);
     if(!j){reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;}
     j->launched=true;j->mode=Mode::patrol;
@@ -337,6 +338,7 @@ unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) no
         alignas(16) float m[16];
         Facing(heading,start,m);
         unsigned char* const v=SpawnJet(b,m);
+        NoteLocalCopy(v,nullptr);   // whose its damage is online: the call's / the rescue's (online_authority.h)
         if(v)Log("HELI v=%p launched: %ls at (%.0f,%.0f,%.0f)",v,Row(b).file,start[0],start[1],start[2]);
         return v;
     } __except(FaultLog("HELI launch",GetExceptionInformation())){return nullptr;}

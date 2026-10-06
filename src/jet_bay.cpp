@@ -197,13 +197,14 @@ unsigned char* ShellCreate(const wchar_t* sgo,const float* m,bool& ok) noexcept 
 // solves by default.
 // The object (nullptr: not made), for a caller that keeps steering it (the EMC's beams: EmcFire).
 unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,
-                         bool straight,const char* what) noexcept {
+                         bool straight,const char* what,online::Shooter by=online::Shooter::vehicle) noexcept {
     if(!ok || !shellsOk || !At<void*>(image,kObjectMgr))return nullptr;
-    // Online, the damage is dealt where its owner's plugin work counts (online_authority.h IsOnlineAuthority: the
-    // driver's machine; the host for an NPC-driven vehicle or an unregistered copy no local player rides). Every
-    // machine runs the ram, the drill, the EMC and the guns on its own copy, so elsewhere the round still flies and
-    // bursts (the same sight) with no damage: the hit counts once, not once per machine.
-    if(damage>0.0f && !IsOnlineAuthority(owner))damage=0.0f;
+    // Online, the damage is dealt on the one machine where this round counts (online_authority.h ShotCounts: a player of
+    // this machine at a registered vehicle's gun; else the vehicle's authority, its driver's machine or the host for an
+    // NPC driver; for the plugin's own copies, the machine whose player made them). Every machine runs the ram, the drill,
+    // the EMC and the guns on its own copy, so elsewhere the round still flies and bursts (the same sight) with no damage:
+    // the hit counts once, not once per machine and not nowhere.
+    if(damage>0.0f && !OnlineShotCounts(owner,by))damage=0.0f;
     alignas(16) const float m[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, aim[0],aim[1],aim[2],1};
     unsigned char* const o=ShellCreate(sgo,m,ok);
     if(!o)return nullptr;
@@ -228,8 +229,8 @@ unsigned char* ShellMake(const wchar_t* sgo,bool& ok,const unsigned char* owner,
 }
 
 bool Shell(const wchar_t* sgo,bool& ok,const unsigned char* owner,const float* from,const float* aim,float damage,bool straight,
-           const char* what) noexcept {
-    return ShellMake(sgo,ok,owner,from,aim,damage,straight,what)!=nullptr;
+           const char* what,online::Shooter by=online::Shooter::vehicle) noexcept {
+    return ShellMake(sgo,ok,owner,from,aim,damage,straight,what,by)!=nullptr;
 }
 
 // The charge for `radius` (a part's size: the blast follows it, never the damage): the preloaded one nearest it in ratio
@@ -265,7 +266,8 @@ bool GunshipMuzzle(const unsigned char* v,const float* at,float hit,float* out) 
 // A cannon round fired by `who` from the gunship (`pos`, its reach measured from there) at `at` (see kCannonSgo), leaving
 // from its muzzle (GunshipMuzzle): kCannonGapMs after its last, within kCannonReach. Every tenth logged (Debug): two a
 // second would drown the log.
-bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,ULONGLONG ms,const char* who) noexcept {
+bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,ULONGLONG ms,const char* who,
+                online::Shooter by=online::Shooter::vehicle) noexcept {
     if(!cannonReady || ms-j.shells.cannonAt<kCannonGapMs)return false;
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
     if(Len(d)>kCannonReach)return false;
@@ -273,7 +275,7 @@ bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,U
     float muzzle[3];
     if(!GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle))return false;
     j.shells.cannonAt=ms;
-    if(!Shell(kCannonSgo,cannonReady,v,muzzle,at,damage,true,"gunship cannon"))return false;
+    if(!Shell(kCannonSgo,cannonReady,v,muzzle,at,damage,true,"gunship cannon",by))return false;
     if(Cfg().debug && j.shells.cannonShots%10==0)
         Log("JET v=%p gunship cannon round #%d from %s at (%.0f,%.0f,%.0f), %.0f m, %.0f damage",v,j.shells.cannonShots+1,who,at[0],at[1],
             at[2],Len(d),damage);
@@ -423,7 +425,7 @@ void PlayerBayFrame(unsigned char* v,const float* pos) noexcept {
 namespace {
 // A gunship's shell fired by its crew at `at`: as GunshipFire's (kGunshipGapMs apart, within kGunshipReach). One gun:
 // the pilot's SHELLS, the player at the gunner seat and the NPC gunner under a player pilot share its gap.
-bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* who) noexcept {
+bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* who,online::Shooter by=online::Shooter::vehicle) noexcept {
     if(ms-j.shells.gunAt<kGunshipGapMs)return false;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
@@ -431,7 +433,7 @@ bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* w
     float muzzle[3];
     if(!GunshipMuzzle(v,at,gunmuzzle::kShellHit,muzzle))return false;
     j.shells.gunAt=ms;
-    if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,at,kGunshipDamage*Tier(v),false,"gunship shell"))return false;
+    if(!Shell(kGunshipSgo,gunshipReady,v,muzzle,at,kGunshipDamage*Tier(v),false,"gunship shell",by))return false;
     ++j.shells.gunShots;
     if(Cfg().debug)Log("JET v=%p gunship shell #%d from %s at (%.0f,%.0f,%.0f), %.0f m",v,j.shells.gunShots,who,at[0],at[1],at[2],Len(d));
     return true;
@@ -441,14 +443,14 @@ bool CrewFire(Jet& j,unsigned char* v,const float* at,ULONGLONG ms,const char* w
 // The gunship's shell from the player (the pilot's SHELLS, the gunner seat): at `at`.
 bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
     Jet* const j=FindJet(v);
-    return j && CrewFire(*j,v,at,ms,"the player");
+    return j && CrewFire(*j,v,at,ms,"the player",online::Shooter::localPlayer);
 }
 
 // The gunship's cannon from the player (the pilot's CANNON, the gunner seat): at `at`, where they aim (no lead: the
 // round flies 2.6 s to its reach, the player leads a mover themselves).
 bool PlayerCannon(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
     Jet* const j=FindJet(v);
-    return j && CannonShot(*j,v,reinterpret_cast<const float*>(v+kPosition),at,ms,"the player");
+    return j && CannonShot(*j,v,reinterpret_cast<const float*>(v+kPosition),at,ms,"the player",online::Shooter::localPlayer);
 }
 
 // The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the

@@ -43,6 +43,7 @@
 #include "call_net.h"
 #include "jet_internal.h"   // FaultLog
 #include "memory.h"
+#include "online_authority.h"
 #include <atomic>
 #include <cmath>
 #include <cwchar>
@@ -319,8 +320,13 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
         const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
         const float* forward=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartForward);
-        if(c && std::isfinite(target[0]+target[1]+target[2]) && LaunchCall(*c,target,forward)>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
-    } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) {}
+        if(c && std::isfinite(target[0]+target[1]+target[2])) {
+            const online::CopyOwner was=SetSpawnOwner(CopyOwnerOfCaller(owner));   // its copies are the caller's (online_authority.h)
+            const int launched=LaunchCall(*c,target,forward);
+            SetSpawnOwner(was);
+            if(launched>0)Put<std::int32_t>(ifc,kIfcPlanes,0);
+        }
+    } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) { SetSpawnOwner(online::kCopyHost); }
     return result;
 }
 
@@ -493,7 +499,10 @@ bool BombStep(unsigned char* bullet) noexcept {
             std::memcpy(at,bullet+kBombPos,12);
             if(!std::isfinite(at[0]+at[1]+at[2]))return false;
             ThrowHeading(at,dir);
-            if(!JetLaunchThrown(t->drone,at,dir,t->fuelSec,&kThrowSource)) {
+            const online::CopyOwner was=SetSpawnOwner(online::kCopyHere);   // the thrower is this machine's player (IsPlayer above)
+            const bool thrown=JetLaunchThrown(t->drone,at,dir,t->fuelSec,&kThrowSource)!=nullptr;
+            SetSpawnOwner(was);
+            if(!thrown) {
                 Log("THROW %s: no drone (not installed, not preloaded or too many out): it stays a Patroller",t->name);
                 return false;
             }
@@ -502,7 +511,7 @@ bool BombStep(unsigned char* bullet) noexcept {
             return true;
         }
         return false;
-    } __except(FaultLog("THROW bomb update (the stock bomb)",GetExceptionInformation())) { return false; }
+    } __except(FaultLog("THROW bomb update (the stock bomb)",GetExceptionInformation())) { SetSpawnOwner(online::kCopyHost); return false; }
 }
 
 void __fastcall BombStepHook(unsigned char* bullet,const void* frame) {

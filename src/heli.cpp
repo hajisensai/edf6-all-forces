@@ -2632,7 +2632,9 @@ void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
     float dir[3]={p[0]-deck[0],0.0f,p[2]-deck[2]};
     const float away=std::sqrt(Dot2(dir,dir));
     if(away>1.0f){dir[0]/=away;dir[2]/=away;}else{dir[0]=0.0f;dir[2]=1.0f;}
+    const online::CopyOwner was=SetSpawnOwner(online::kCopyHere);   // this machine's player's rescue (online_authority.h)
     unsigned char* const v=HeliLaunch(HeliBody::brute410,from,dir);
+    SetSpawnOwner(was);
     if(!v) {
         Log("RESCUE no heli could be made (EDF6VC_HELI_410.SGO not installed or not preloaded this mission): retry in %llus",kRetryMs/1000);
         rescue.retryAt=ms+kRetryMs;
@@ -2781,7 +2783,7 @@ void RescueTick() noexcept {
     if(!profileOk || rescue.frame==GameFrame())return;   // it flies the heli through Fly; at most once a frame
     rescue.frame=GameFrame();
     __try { RescueStep(); }
-    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the rescue");RescueFault();}
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the rescue");SetSpawnOwner(online::kCopyHost);RescueFault();}
 }
 
 namespace {

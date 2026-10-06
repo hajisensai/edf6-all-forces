@@ -1115,6 +1115,7 @@ unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
         InitParam param{image+kInitParamVtable,{}};
         unsigned char* v=CreateSub(m,&param);
         if(!v)return nullptr;
+        NoteLocalCopy(v,nullptr);   // whose its damage is online: the call's (online_authority.h)
         FixBodyPart506(v,"SUB");
         reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
         LevelVehicle(v);   // as a script's CreateFriend: the hull's tier (Thicken) is then the difficulty's

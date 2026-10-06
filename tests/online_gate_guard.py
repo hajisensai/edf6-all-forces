@@ -5,7 +5,8 @@ a failure. What it holds in place:
   - the stock RideAi (VehicleBase slot 50) is called only from SeatNpcRider, behind OnlineMaySeatNpc;
   - AutoCrew (crew.cpp Crew) asks OnlineMaySeatNpc before it seats a driver;
   - every plugin damage round (jet_bay.cpp ShellMake: the ram, the drill, the EMC, the gunship's guns, the Proteus) is
-    made with no damage where its owner is not the authority;
+    made with no damage except on the one machine where it counts (OnlineShotCounts; the player's own rounds marked,
+    every copy's owner recorded, a call's copies its caller's);
   - the NPC heli pilot flies only where the heli is run (heli.cpp HeliFrame's Replica before Fly), puts its input on
     seat 0's stick (Fly -> MirrorStick), and a replica copies that stick back with the same signs;
   - the shield's push, the crawler's NPC driver, the jets' NPC pilot run where the vehicle is run, and a teleportation
@@ -106,9 +107,21 @@ def check_ride_ai(root: str, files: list[str]) -> None:
 
 def check_damage(root: str) -> None:
     make = body(code_only(read(root, 'src/jet_bay.cpp')), 'unsigned char* ShellMake(')
-    if not re.search(r'if\(damage>0\.0f && !IsOnlineAuthority\(owner\)\)damage=0\.0f;', make) or \
-            not before(make, 'IsOnlineAuthority(owner)', 'ShellCreate('):
-        fail('src/jet_bay.cpp ShellMake: a damage round is made without the owner\'s authority gate')
+    if not re.search(r'if\(damage>0\.0f && !OnlineShotCounts\(owner,by\)\)damage=0\.0f;', make) or \
+            not before(make, 'OnlineShotCounts(owner,by)', 'ShellCreate('):
+        fail('src/jet_bay.cpp ShellMake: a damage round is made without the exactly-once gate (OnlineShotCounts)')
+    bay = code_only(read(root, 'src/jet_bay.cpp'))
+    for fn in ('bool PlayerShell(', 'bool PlayerCannon('):
+        if 'online::Shooter::localPlayer' not in body(bay, fn):
+            fail(f'src/jet_bay.cpp {fn[5:-1]}: the player\'s own round is not marked as theirs (nobody would count it)')
+    # Every copy the plugin makes is recorded with its owner, and a call's copies are its caller's.
+    for rel, fn in (('src/jet_spawn.cpp', 'Jet* Launch('), ('src/jet_spawn.cpp', 'unsigned char* HeliLaunch('),
+                    ('src/subcarrier.cpp', 'unsigned char* SubLaunch(')):
+        if 'NoteLocalCopy(v,' not in body(code_only(read(root, rel)), fn):
+            fail(f'{rel} {fn}: a copy is made without its owner recorded (its damage would count on the host only)')
+    radio = body(code_only(read(root, 'src/airstrike.cpp')), 'std::uintptr_t __fastcall RadioStartHook(')
+    if not before(radio, 'SetSpawnOwner(CopyOwnerOfCaller(owner))', 'LaunchCall('):
+        fail("src/airstrike.cpp RadioStartHook: the call's copies are not made as its caller's")
     for rel, call in (('src/vehicleram.cpp', 'ImpactDamage('), ('src/drill.cpp', 'DrillCharge('), ('src/emc.cpp', 'EmcFire(')):
         if call not in code_only(read(root, rel)):
             fail(f'{rel}: no longer deals its damage through {call} (ShellMake\'s gate): gate the new path too')

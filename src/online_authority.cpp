@@ -38,27 +38,40 @@ bool NpcSeat0(const unsigned char* v) noexcept {
     return Readable(rider,kNetWord+2) && online::LocalCopy(At<std::uint16_t>(rider,kNetWord));
 }
 
-// A seat holds a player of this machine (Rider::player: IsPlayer leaves out another machine's, common/seat.cpp).
-bool LocalPlayerAboard(const unsigned char* v) noexcept {
-    const unsigned n=SeatCount(v);
-    for(unsigned i=0;i<n;++i)if(SeatRider(SeatAt(const_cast<unsigned char*>(v),i))==Rider::player)return true;
-    return false;
+// The unregistered copies' owners (NoteLocalCopy), by object and its weak-this block (a new object at an old address is
+// not the old one). Game thread only. A full table takes the place of a gone object first, else the oldest record.
+struct CopyRecord { const void* obj; const void* ctrl; online::CopyOwner owner; };
+constexpr int kCopyRecords=128;
+CopyRecord copies[kCopyRecords]{};
+int copyNext=0;
+online::CopyOwner spawnScope=online::kCopyHost;
+
+bool Live(const CopyRecord& r) noexcept {
+    return r.obj && Readable(r.obj,kSelfCtrl+8) && At<const void*>(r.obj,kSelfCtrl)==r.ctrl;
+}
+
+// The recorded owner of `object` (a pointer compared first: `object` may be no object at all, as a jet's flight source).
+online::CopyOwner RecordedOwner(const void* object) noexcept {
+    if(!object)return online::kCopyHost;
+    for(const auto& r:copies)if(r.obj==object && Live(r))return r.owner;
+    return online::kCopyHost;
 }
 
 // The facts of one question; false when the object cannot be read (online: then nothing is this machine's).
 bool Read(const void* object,online::Facts* f) noexcept {
-    *f=online::Facts{InSession(),true,false,0,false,false,false,0};
+    *f=online::Facts{InSession(),true,false,0,false,false,online::kCopyHost,0};
     if(!f->session)return true;
     f->known=Known();
     f->host=Host();
     const auto o=static_cast<const unsigned char*>(object);
-    if(!f->known || !Readable(o,kNetWord+2))return false;
+    if(!Readable(o,kNetWord+2))return false;
     __try {
         f->net=At<std::uint16_t>(o,kNetWord);
+        if(online::LocalCopy(f->net)){f->copyOwner=RecordedOwner(o);return true;}
+        if(!f->known)return true;
         f->vehicle=Readable(o,kSeatCount+8) && SeatCount(o)>0 && KnownVehicle(o);
         if(f->vehicle) {
             f->npcSeat0=NpcSeat0(o);
-            f->localPlayer=LocalPlayerAboard(o);
             f->stock=reinterpret_cast<OperatorFn>(image+kOperator)(const_cast<unsigned char*>(o),true,true);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
@@ -84,6 +97,33 @@ bool OnlineRunsHere(const void* object) noexcept {
 bool OnlineMaySeatNpc(const void* vehicle) noexcept {
     online::Facts f;
     return Read(vehicle,&f) && online::MaySeatNpc(f);
+}
+
+bool OnlineShotCounts(const void* owner,online::Shooter by) noexcept {
+    online::Facts f;
+    return Read(owner,&f) && online::ShotCounts(f,by);
+}
+
+online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept {
+    const online::CopyOwner previous=spawnScope;
+    spawnScope=owner;
+    return previous;
+}
+
+online::CopyOwner CopyOwnerOfCaller(const unsigned char* human) noexcept {
+    if(IsPlayer(human))return online::kCopyHere;
+    return human && edf::RemoteRider(human) ? online::kCopyElsewhere : online::kCopyHost;
+}
+
+void NoteLocalCopy(const void* object,const void* parent) noexcept {
+    if(!object)return;
+    const online::CopyOwner inherited=RecordedOwner(parent);
+    const online::CopyOwner owner=inherited!=online::kCopyHost ? inherited : spawnScope;
+    CopyRecord* slot=nullptr;
+    for(auto& r:copies)if(!slot && r.obj==object)slot=&r;
+    for(auto& r:copies)if(!slot && !Live(r))slot=&r;
+    if(!slot){slot=&copies[copyNext];copyNext=(copyNext+1)%kCopyRecords;}
+    *slot=CopyRecord{object,At<const void*>(object,kSelfCtrl),owner};
 }
 
 bool SeatNpcRider(unsigned char* vehicle,bool spawned) noexcept {

@@ -24,6 +24,8 @@ bool JetLaunchBomber(const float*,const float*,const float*,const BombLoad&,DWOR
 bool JetHolds(const void*) noexcept { return false; }
 JetBody BomberBody(const unsigned char*) noexcept { return JetBody::kind; }
 unsigned char* JetLaunchThrown(ThrownDrone,const float*,const float*,DWORD,const void*) noexcept { return nullptr; }
+online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }   // no copies are made here
+online::CopyOwner CopyOwnerOfCaller(const unsigned char*) noexcept { return online::kCopyHost; }
 }
 
 namespace {
