@@ -537,12 +537,13 @@ def on_origin(box) -> list[list[float]]:
 # was 4.9 m in from its fuselage box's side at the ground (no prompt anywhere round it: 「空母缺少登机口」, 2026-10-05),
 # a player jet's 10 m in from its whole-model box. move_door puts it where the stock heli has its own: on the ground,
 # DOOR_OUT m outside the box's right side (+x, the V506's side), at the stock door's z (within the box's length).
-# Every model's `mdl` and mesh bone are bound at its origin (pylib/jet_models.py lift_mdb: the grounding lifts what
-# hangs on the mesh bone, not it), the box frame's origin, so the door (y 0 on `mdl`) is as high over the box's bottom
-# as the origin is: on the ground for a grounded jet (its box's bottom is the origin), door_height over it for a stock
-# bomber's box that reaches under its origin (on the ground once it has landed). Its radius makes it reachable from
-# DOOR_STEP m across the ground, from the human's feet or HUMAN_HEIGHT over them (which of the two its position is, is
-# not settled). The stock radius is never cut.
+# `mdl` is the vehicle's position, the collision box's centre (seat_camera: the DOOR log, 2026-10-06), not the model's
+# origin as first thought (§12 put the door at y 0 on `mdl`: 8.52 m over the ground on the carrier, 1.38 m on the
+# fighter; the carrier was boarded only through the plugin's own board hook, the stock prompt found no door in reach).
+# So the door is placed in the box's own frame: at its bottom (-hy: the ground it stands on, a box reaching under its
+# model's origin included, once it has landed), DOOR_OUT m outside its right side (hx), at the stock door's z within its
+# length (docs/player-jet-re.md §15). Its radius makes it reachable from DOOR_STEP m across the ground, from the human's
+# feet or HUMAN_HEIGHT over them (which of the two its position is, is not settled). The stock radius is never cut.
 DOOR_SLACK = 0.5      # EDF.dll 0x1C36990
 DOOR_OUT = 0.6        # m: outside the box's side, where a human standing against it is
 DOOR_STEP = 1.0       # m: across the ground from the door point, still in reach
@@ -575,21 +576,13 @@ def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
     return vec, r + 0x10
 
 
-def door_height(box) -> float:
-    """How far a jet's door (y 0 on `mdl`, the box frame's origin) is over the bottom of its collision box `box`
-    ([centre, half extents]): where it stands on the ground. 0 for a box on its origin (on_origin)."""
-    (_cx, cy, _cz), (_hx, hy, _hz) = box
-    return max(0.0, hy - cy)
-
-
 def door_point(box, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
     """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]);
     `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
-    (cx, _cy, cz), (hx, _hy, hz) = box
-    z = min(max(stock[2], cz - hz), cz + hz)
-    rise = max(door_height(box), HUMAN_HEIGHT)   # the most the door can be over (or under) the human's position
-    need = (rise * rise + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
-    return [round(cx + hx + DOOR_OUT, 3), 0.0, round(z, 3)], round(max(radius, need), 3)
+    _centre, (hx, hy, hz) = box   # `mdl` is the box's centre: the box spans -half..half round it
+    z = min(max(stock[2], -hz), hz)
+    need = (HUMAN_HEIGHT * HUMAN_HEIGHT + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
+    return [round(hx + DOOR_OUT, 3), round(-hy, 3), round(z, 3)], round(max(radius, need), 3)
 
 
 def door_name(m: dict) -> str:
@@ -613,9 +606,9 @@ def move_door(m: dict, box) -> None:
 
 
 def check_door(data: bytes) -> None:
-    """Re-read a jet SGO and raise DoorError unless its door is at its origin's height (y 0 on `mdl`), outside its
-    collision box (heli_rigid_body) across its right side by DOOR_OUT, within its length, and a human standing DOOR_STEP m
-    from it on the ground under its box (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
+    """Re-read a jet SGO and raise DoorError unless its door (on `mdl`, the collision box's centre) is at its collision
+    box's (heli_rigid_body) bottom, the ground, outside its right side by DOOR_OUT, within its length, and a human standing
+    DOOR_STEP m from it on that ground (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
     _, m = sgo.read(data)
     mab = m['animation_model'][2]
     name = door_name(m)
@@ -623,13 +616,118 @@ def check_door(data: bytes) -> None:
     x, y, z = struct.unpack_from('<3f', mab, vec)
     reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
     box = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
-    (cx, cy, cz), (hx, hy, hz) = box
-    if abs(y) > 1e-4 or x < cx + hx + DOOR_OUT - 1e-3 or not cz - hz - 1e-3 <= z <= cz + hz + 1e-3:
-        raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱右侧外 {DOOR_OUT} m 的地面上')
-    door = door_height(box)
-    worst = max(((DOOR_STEP ** 2 + (door - feet) ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
+    _centre, (hx, hy, hz) = box
+    if abs(y + hy) > 2e-3 or x < hx + DOOR_OUT - 1e-3 or not -hz - 1e-3 <= z <= hz + 1e-3:
+        raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱（中心起半尺寸 {hx:.2f},{hy:.2f},{hz:.2f}）右侧外 {DOOR_OUT} m 的地面上')
+    worst = max(((DOOR_STEP ** 2 + feet ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
     if worst > reach:
         raise DoorError(f'站在上车点旁 {DOOR_STEP} m 的地面上够不着（要 {worst:.2f} m，能 {reach:.2f} m）')
+
+
+# The seat camera (docs/camera-re.md §3b, docs/player-jet-re.md §14). Riding, the game's camera is seat 0's MAB camera
+# locator (the eye, vehicle_riding_position[0][2][0], `カメラ１`) looking at the locator its own SGO names LookTarget
+# (`カメラ１注目`); both hang on the V506's root bone `mdl`. On a 506 `mdl` is the vehicle's position, the collision box's
+# centre (heli_rigid_body[0]), not the model's origin: the game logged the parked carrier's door, a locator on `mdl` at
+# (30.30, 0, 1.8), at exactly (30.30, -0.00, 1.80) from its centre (crew.cpp DoorLog, 2026-10-06 14:56:51), the fighter's
+# (8.65, 0, 1.8) the same, while the drawn model's mesh bone is 1.38 / 2.12 m under it (booster.cpp FLAME): the model's
+# origin is the centre less heli_rigid_body[0]. The stock rig (eye (0, 5.4, -14.45), look (0, 2.75, 1.1) off `mdl`) was
+# made for the 13.6 m heli; on the 77 m, 17 m high carrier it is 8.5 m over the model's origin, its eye inside the hull
+# (the user, 2026-10-06: 「空母的视角在空母底下」). seat_camera keeps the stock rig wherever its eye is outside the model
+# (every other jet) and otherwise scales it with the model: the stock rig in the heli's model frame (its box centre plus
+# the offsets) times the model's length over the heli's, so the camera frames the plane as the stock camera frames the
+# heli; check_camera re-reads it.
+CAMERA_LOOK_KEY = 'LookTarget'
+Bounds = tuple[tuple[float, float, float], tuple[float, float, float]]   # (min xyz, max xyz) in the model's frame
+
+
+class CameraError(Exception):
+    """A jet's seat camera sees its own model from inside, or over nothing (check_camera)."""
+
+
+def _mab_record(mab: bytes, name: str) -> int:
+    """The offset of the MAB locator record named `name` (see mab_locator)."""
+    vec, _rad = mab_locator(mab, name)
+    table, end = struct.unpack_from('<2I', mab, 0x14)
+    for r in range(table + 0x20, end, 0x20):
+        if r + struct.unpack_from('<i', mab, r + 0xC)[0] == vec:
+            return r
+    raise ValueError(f'定位点 {name!r} 没有记录')
+
+
+def camera_names(m: dict) -> tuple[str, str]:
+    """(eye, look) locator names of seat 0's camera: the seat's camera entry and the LookTarget of that locator's SGO
+    (record +0x1C, relative to the record)."""
+    seat = m['vehicle_riding_position'][0]
+    eye = seat[2][0] if isinstance(seat[2], list) and seat[2] and isinstance(seat[2][0], str) else None
+    if eye is None:
+        raise ValueError('座位 0 没有镜头定位点')
+    mab = m['animation_model'][2]
+    r = _mab_record(mab, eye)
+    at = struct.unpack_from('<i', mab, r + 0x1C)[0]
+    look = sgo.read(mab[r + at:])[1].get(CAMERA_LOOK_KEY) if at else None
+    if not isinstance(look, str):
+        raise ValueError(f'镜头定位点 {eye!r} 没有 {CAMERA_LOOK_KEY}')
+    return eye, look
+
+
+def _inside(p: list[float] | tuple[float, ...], bounds: Bounds) -> bool:
+    lo, hi = bounds
+    return all(lo[i] <= p[i] <= hi[i] for i in range(3))
+
+
+def sight_problem(eye, look, bounds: Bounds) -> str | None:
+    """Why a camera at `eye` looking at `look` (model frame) does not see the plane from outside: its eye in the model's
+    bounds, or behind it with the line of sight under the model's top at its tail. None when it does."""
+    lo, hi = bounds
+    if _inside(eye, bounds):
+        return f'眼睛 {tuple(round(x, 2) for x in eye)} 在模型包围盒 {lo}..{hi} 里'
+    if eye[2] < lo[2] and look[2] > eye[2]:
+        y = eye[1] + (look[1] - eye[1]) * (lo[2] - eye[2]) / (look[2] - eye[2])
+        if y < hi[1]:
+            return f'视线在机尾 z={lo[2]:.2f} 处高 {y:.2f}，低于机顶 {hi[1]:.2f}'
+    return None
+
+
+def seat_camera(eye, look, centre, bounds: Bounds, heli: Bounds, heli_centre) -> tuple[list[float], list[float]] | None:
+    """New (eye, look) locator offsets on `mdl` for a jet whose box centre is `centre` and model `bounds` (its frame), from
+    the stock ones (`eye`, `look`; `heli`, `heli_centre`: the V506 model's bounds and box centre); None to keep them."""
+    if not _inside([centre[i] + eye[i] for i in range(3)], bounds):
+        return None
+    s = (bounds[1][2] - bounds[0][2]) / (heli[1][2] - heli[0][2])
+    return ([round(s * (heli_centre[i] + eye[i]) - centre[i], 3) for i in range(3)],
+            [round(s * (heli_centre[i] + look[i]) - centre[i], 3) for i in range(3)])
+
+
+def fit_camera(m: dict, box, bounds: Bounds, heli: Bounds, heli_centre) -> None:
+    """`m` (a jet SGO's values, collision box `box` [centre, half extents], model `bounds`) with its seat camera moved by
+    seat_camera."""
+    mab = bytearray(m['animation_model'][2])
+    eye_name, look_name = camera_names(m)
+    (eye_at, _), (look_at, _) = mab_locator(bytes(mab), eye_name), mab_locator(bytes(mab), look_name)
+    eye, look = struct.unpack_from('<3f', mab, eye_at), struct.unpack_from('<3f', mab, look_at)
+    fit = seat_camera(eye, look, box[0], bounds, heli, heli_centre)
+    if fit is None:
+        return
+    struct.pack_into('<3f', mab, eye_at, *fit[0])
+    struct.pack_into('<3f', mab, look_at, *fit[1])
+    m['animation_model'][2] = bytes(mab)
+
+
+def check_camera(data: bytes, bounds: Bounds) -> tuple[list[float], list[float]]:
+    """Re-read a jet SGO and raise CameraError unless its seat camera (on `mdl`, at its collision box's centre) sees its
+    model (`bounds`, model frame) from outside (sight_problem). Returns (eye, look) in the model's frame."""
+    _, m = sgo.read(data)
+    mab = m['animation_model'][2]
+    centre = [float(_value(v)) for v in m['heli_rigid_body'][0]]
+    eye_name, look_name = camera_names(m)
+    pts = []
+    for name in (eye_name, look_name):
+        vec, _ = mab_locator(mab, name)
+        pts.append([round(centre[i] + struct.unpack_from('<3f', mab, vec)[i], 3) for i in range(3)])
+    why = sight_problem(pts[0], pts[1], bounds)
+    if why:
+        raise CameraError(why)
+    return pts[0], pts[1]
 
 
 def _value(v) -> float:
@@ -662,19 +760,30 @@ def _dead_effect(effects: list) -> list:
     return effects
 
 
-def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE) -> bytes:
+def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE, centre: list[float] | tuple[float, ...] | None = None) -> bytes:
     """The ragdoll's embedded binding SGO with every model-side bone one the bomber has.
     RagdollController::BindDependency (0x6E6A50): each animation_from_ragdoll entry looks its model bone
     up (0x6E7B98); found, the proxy's record gets the bone (+0x60, first entry wins) and the bone gets the
     proxy (+8, last entry wins). Every proxy must end up with a bone: the loop at 0x6E8280 reads each
     record's +0x60 unchecked (crashed 2026-10-03 with the V506 bone names, then with only the body proxy
     bound). So every proxy is bound to the fuselage bone, the body proxy last so it is what drives it
-    (the rotor proxies spin); ragdoll_from_animation has them all follow it."""
+    (the rotor proxies spin); ragdoll_from_animation has them all follow it.
+    `centre`: the collision box's centre (heli_rigid_body[0], the vehicle's position; see seat_camera), in the body's
+    frame. The body bone is drawn at the model's origin, the centre less that; with the V506's zero offsets the proxies (a
+    13.6 m heli's hull and rotors, y -1.7..+1.95 round their origin) sat at the model's origin: under the carrier's belly
+    (3.49 m over it), a heli-sized body hanging under the plane (the user, 2026-10-06: 「碰撞体积也是」在空母底下). Every
+    proxy goes on `centre` (proxy = bone o (centre)), every bone it drives back off it (bone = proxy o (-centre)), so
+    the two bindings stay each other's inverse and the proxies keep their places relative to each other. None: the
+    V506's offsets as they are (a model jet_models does not measure: the Primer creatures, the submarine carrier)."""
     version, inner = sgo.read(blob)
-    inner['ragdoll_from_animation'] = [[[body, e[0][1]]] + e[1:] for e in inner['ragdoll_from_animation']]
+    up = None if centre is None else [float(c) for c in centre]
+
+    def offset(e: list, sign: float) -> list:
+        return e[1:] if up is None else [[sign * c for c in up]] + e[2:]
+    inner['ragdoll_from_animation'] = [[[body, e[0][1]]] + offset(e, 1.0) for e in inner['ragdoll_from_animation']]
     drive: dict[str, list] = {}
     for e in inner['animation_from_ragdoll']:
-        drive.setdefault(e[0][0], [[e[0][0], body]] + e[1:])   # globalSRT: a second body entry, dropped
+        drive.setdefault(e[0][0], [[e[0][0], body]] + offset(e, -1.0))   # globalSRT: a second body entry, dropped
     body = drive.pop('RagDollProxys.body')
     inner['animation_from_ragdoll'] = list(drive.values()) + [body]
     return sgo.write(version, inner)
@@ -751,10 +860,16 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     box = [list(box[0]), list(box[1])] if airborne else on_origin(box)
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
     door = _moves_door(jet)
+    bounds = heli = None
     if door:
         move_door(m, box)
+        # The models jet_models measures (the ones the player boards): the seat camera and the ragdoll on the box's
+        # centre, where `mdl` is (seat_camera, _jet_ragdoll).
+        bounds = jet_models.model_bounds(game, jet.file or jet.box_model)
+        heli = jet_models.heli_bounds(game)
+        fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]])
     rag = m['ragdoll']
-    m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body)]
+    m['ragdoll'] = [rag[0], _jet_ragdoll(rag[1], body, box[0] if door else None)]
     se = m.get('heli_se_table')
     if not isinstance(se, list) or len(se) <= max(JET_ROTOR_SE_ROWS):
         raise ValueError('V506_HELI 的 heli_se_table 不是预期的样子')
@@ -771,6 +886,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     out = sgo.write(version, m)
     if door:
         check_door(out)
+        check_camera(out, bounds)
     return out
 
 

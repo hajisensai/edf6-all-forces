@@ -124,6 +124,27 @@ constexpr bool BoardableConsistent() noexcept {
 }
 static_assert(BoardableConsistent(),"kBoardable: rotor rows rotor craft, jet bodies of our side once each, flyable wings");
 
+// A rotor craft's height over the floor (docs/player-jet-re.md §14). The ground probe (body506.cpp GroundClearance)
+// measures from the vehicle's position, which on a 506 is its collision box's centre (heli_rigid_body[0]), while the
+// drawn model's origin, its lowest point (pylib/jet_models.py grounded), is its mesh bone, `rest` m under it. The rotor
+// flight (HoverStep, HoverDone, RotorHail) reads "on the ground" as under kTouch (3 m): the carrier's position is
+// 8.516 m over its bottom, so standing on the ground it read 9 m up (2026-10-06 14:56:55, "air ... 9 m over the
+// ground"): never set down, never parked, left on the ground it was handed back to its NPC pilot as if in the air, a
+// called-down one never reached its spot. Its clearance is its bottom's: the position's less `rest`. (The wings keep
+// the position's: their rests, 1.38 / 2.12 m, are under kTouch, which their landing was tuned on.)
+constexpr float kRestMost=100.0f;   // m: a rest no airframe of ours has (the bone not where it should be: none)
+// The rest from the position's height and the mesh bone's: 0 when it is not a plausible one (or NaN).
+constexpr float RestHeight(float posY,float meshY) noexcept {
+    const float r=posY-meshY;
+    return r>0.0f && r<kRestMost ? r : 0.0f;
+}
+// The bottom's clearance from the position's (`none`: no ground seen, kept).
+constexpr float BottomClear(float clear,float rest,float none) noexcept { return clear==none ? clear : clear-rest; }
+static_assert(BottomClear(8.516f,RestHeight(108.516f,100.0f),-1e9f)<0.01f,"a carrier standing on the ground is on it");
+static_assert(BottomClear(20.0f,RestHeight(108.516f,100.0f),-1e9f)>11.0f,"a carrier 11.5 m up is in the air");
+static_assert(RestHeight(100.0f,108.0f)==0.0f && RestHeight(500.0f,100.0f)==0.0f,"no rest from a bone out of place");
+static_assert(BottomClear(-1e9f,8.0f,-1e9f)==-1e9f,"no ground stays no ground");
+
 // The row of body `b`, or nullptr (not boardable).
 constexpr const Boardable* Row(Body b) noexcept {
     for(const auto& r:kBoardable)if(r.body==b)return &r;

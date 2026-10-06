@@ -5,6 +5,7 @@
 #include "jet_internal.h"
 #include "gear.h"
 #include "jet_pullout.h"
+#include "hover_lift.h"
 #include <cwchar>
 
 namespace crew {
@@ -693,7 +694,7 @@ void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) no
 // `climb`: m/s up or down at the most (kHoverClimb; a blast drone dives faster). j.m.thrust gets the thrust
 // asked for (gravity held, the acceleration, the drag shown), which the lean and the thrusters follow.
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
-           float dt) noexcept {
+           float dt,float lift) noexcept {
     const Lean& how=*k.lean;
     Motion& mo=j.m;
     // Its goal inside its soft edge (airbound.h): it brakes onto it (below), so it stops there, never past it.
@@ -711,15 +712,7 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
     wantV[1]=Clamp((goal[1]-pos[1])*0.5f,-climb,climb);
     float acc[3];
     const float respond=how.respond>dt ? how.respond : dt;
-    for(int i=0;i<3;++i)acc[i]=(wantV[i]-mo.vel[i])/respond;
-    const float a=Len(acc),most=k.thrust;
-    if(a>most)for(int i=0;i<3;++i)acc[i]*=most/a;
-    if(how.jerk>0.0f) {
-        float change[3]={acc[0]-mo.acc[0],acc[1]-mo.acc[1],acc[2]-mo.acc[2]};
-        const float c=Len(change),step=how.jerk*dt;
-        if(c>step)for(int i=0;i<3;++i)change[i]*=step/c;
-        for(int i=0;i<3;++i)acc[i]=mo.acc[i]+change[i];
-    }
+    hover::Accel(wantV,mo.vel,respond,hover::Budget{k.thrust,lift,how.jerk},mo.acc,dt,acc);   // hover_lift.h
     std::memcpy(mo.acc,acc,12);
     for(int i=0;i<3;++i)mo.vel[i]+=acc[i]*dt;
     for(int i=0;i<3;++i)mo.thrust[i]=acc[i]+mo.vel[i]*how.drag;

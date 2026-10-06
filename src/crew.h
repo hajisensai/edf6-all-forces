@@ -88,6 +88,7 @@ struct Config {
     float playerJetMouseSpeed=1.0f; // ...how fast the mouse moves its aim
     float playerJetRollScale=1.0f;  // ...the fixed wings' roll rate, every kind's times this (pjet_handling.h PathRoll; the body keeps up)
     float playerJetAimGain=1.0f;    // ...how hard the mouse's aim turns the plane toward it (times kSteer)
+    float playerRotorLift=1.0f;     // a rotor craft the player flies: its vertical acceleration apart from its thrust, times the derived one (hover_lift.h; 0: one budget, the NPCs')
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
