@@ -106,6 +106,11 @@ struct Config {
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
     bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
     float vehicleRamDamage=20.0f;   // ...their kinetic energy's damage (the jets' formula) times this (0: none; 20: a ground vehicle is 5-10x slower than a jet, so 1 would leave the ram unnoticeable)
+    bool vehicleSound=true;         // the ground vehicles' engines, turrets, loaders and main guns heard as the plugin makes them (vehsound.cpp)
+    float vehicleEngineVolume=1.0f; // ...each group's volume, times the game's own; 0: that group's stock sound kept
+    float vehicleTurretVolume=1.0f;
+    float vehicleReloadVolume=1.0f;
+    float vehicleGunVolume=1.0f;
     bool drill=true;                // the drill tank's drill (drill.cpp): spun by the trigger, bites what it touches
     float drillMaxRpm=300.0f;       // ...its top RPM (what it shows and turns at)
     float drillSpinUpSec=1.8f;      // ...seconds from still to the top RPM, the trigger held
@@ -219,6 +224,16 @@ void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)
 // The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
 void LockSound(unsigned char* vehicle) noexcept;
+// Where a sound is heard from the camera (jetsound.cpp, the sound system's listener 0, as the jets' engines are placed):
+// its gain in each ear (equal power, the spread kept), its distance (m), the Doppler ratio between it and the camera,
+// the unit line from it to the camera.
+struct SoundPlace { float left,right,distance,doppler; float toCamera[3]; };
+bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;   // false: no listener this frame
+// The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
+// too (then it gives the stock sounds back); a new mission.
+bool InstallVehicleSound() noexcept;
+void VehicleSound(unsigned char* vehicle) noexcept;
+void ResetVehicleSound() noexcept;
 
 // --- EDF.dll layout ---
 // The facts EDF6AutoTurret rests on too live in common/edf/layout.h (one definition for both plugins):

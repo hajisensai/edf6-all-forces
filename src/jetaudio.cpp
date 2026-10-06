@@ -11,8 +11,12 @@
 // tone, the stall horn, and the warnings' callouts (PULL UP's whoops and voice, TERRAIN, SINK RATE...) one at a time on
 // a voice of their own. The callouts' voice is the Windows one (SAPI 5, rendered into memory once on a thread of its
 // own: an English one when there is one), or the player's WAVs next to the DLL; with neither, tones made here.
+// The ground vehicles' sounds play here too (OpenLoop / PlayOnce, vehsound.cpp decides them): their clips made in
+// vsynth.h on a thread of their own (MakeClips) or read from the player's WAVs, looping voices from a pool of kLoops and
+// one-shots from a pool of kShots, each with its filter and its ears as the jets' are.
 #include "jetaudio.h"
 #include "crew.h"
+#include "vsynth.h"
 #include <windows.h>
 #include <xaudio2.h>
 #pragma warning(push,0)
@@ -471,6 +475,76 @@ void ThreatTone(int state,bool launch,ULONGLONG now) noexcept {
     Pan(threatVoice,volume,volume);
     threatVoice->SetVolume(1.0f);
 }
+
+// --- The ground vehicles' sounds ---
+const wchar_t* const kClipName[kClipCount]={L"engine_heavy_idle",L"engine_heavy_load",L"engine_light_idle",L"engine_light_load",
+                                            L"tracks",L"turret",L"turret_stop",L"gun_near",L"gun_far",L"reload_eject",
+                                            L"reload_load",L"reload_close"};
+constexpr bool kClipLoops[kClipCount]={true,true,true,true,true,true,false,false,false,false,false,false};
+// Peak of each clip as made, of full scale: the loops a little under (several play at once), the gun's report at the top.
+constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f};
+constexpr int kLoops=64,kShots=24;
+struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
+ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
+std::atomic<bool> clipsReady{false};
+bool clipsAsked=false;
+struct LoopVoice { IXAudio2SourceVoice* v; bool used; };
+LoopVoice loops[kLoops]{};
+struct ShotVoice { IXAudio2SourceVoice* v; UINT32 rate; };
+ShotVoice shots[kShots]{};
+UINT32 loopStart=0;                // where the next loop begins to play (spread: two tanks idling are not in phase)
+
+std::vector<float> MadeClip(int c) {
+    namespace s=vsynth;
+    switch(c) {
+    case kClipHeavyIdle: return s::EngineLayer(s::kHeavyEngine,false);
+    case kClipHeavyLoad: return s::EngineLayer(s::kHeavyEngine,true);
+    case kClipLightIdle: return s::EngineLayer(s::kLightEngine,false);
+    case kClipLightLoad: return s::EngineLayer(s::kLightEngine,true);
+    case kClipTracks: return s::Tracks();
+    case kClipTurret: return s::Turret();
+    case kClipTurretStop: return s::TurretStop();
+    case kClipGunNear: return s::GunNear();
+    case kClipGunFar: return s::GunFar();
+    case kClipEject: return s::ReloadEject();
+    case kClipLoad: return s::ReloadLoad();
+    default: return s::ReloadClose();
+    }
+}
+void MakeClipsNow() {
+    int own=0;
+    for(int c=0;c<kClipCount;++c) {
+        wchar_t path[MAX_PATH],suffix[48];
+        UINT32 rate=kRate;
+        swprintf_s(suffix,L"_veh_%ls.wav",kClipName[c]);
+        if(BesideDll(suffix,path) && ReadWav(path,clips[c].pcm,rate)){++own;Log("SOUND vehicles: %ls from %ls",kClipName[c],path);}
+        else{rate=kRate;clips[c].pcm=Pcm16(MadeClip(c),kClipPeak[c]);}
+        clips[c].format=Mono16(rate);
+    }
+    clipsReady.store(true,std::memory_order_release);
+    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's",kClipCount-own,own);
+}
+DWORD WINAPI MakeClips(void*) {
+    __try { MakeClipsNow(); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { Log("SOUND vehicles: making the sounds faulted: the vehicles keep the stock ones"); }
+    return 0;
+}
+
+// The filter a sound `distance` (0..1) off is heard through (as Set's).
+XAUDIO2_FILTER_PARAMETERS FarFilter(float distance) noexcept {
+    const float d=distance<0.0f ? 0.0f : distance>1.0f ? 1.0f : distance;
+    const float cutoff=kNearCutoff*std::pow(kFarCutoff/kNearCutoff,d);
+    const float radians=2.0f*std::sin(3.14159265f*cutoff/static_cast<float>(kRate));
+    return XAUDIO2_FILTER_PARAMETERS{LowPassFilter,radians<XAUDIO2_MAX_FILTER_FREQUENCY ? radians : XAUDIO2_MAX_FILTER_FREQUENCY,1.0f};
+}
+float Ratio(float r) noexcept { return !(r>1.0f/kMaxRatio) ? 1.0f/kMaxRatio : r>kMaxRatio ? kMaxRatio : r; }
+void Hear(IXAudio2SourceVoice* v,const Heard& h) noexcept {
+    const XAUDIO2_FILTER_PARAMETERS f=FarFilter(h.distance);
+    v->SetFrequencyRatio(Ratio(h.ratio));
+    v->SetFilterParameters(&f);
+    Pan(v,std::isfinite(h.left) ? h.left : 0.0f,std::isfinite(h.right) ? h.right : 0.0f);
+    v->SetVolume(1.0f);
+}
 }  // namespace
 
 bool Start() noexcept {
@@ -607,5 +681,75 @@ void Beat(float volume) noexcept {
     }
     masterVolume=volume<0.0f ? 0.0f : volume>4.0f ? 4.0f : volume;
     beatAt=GetTickCount64();
+}
+
+bool ClipsReady() noexcept {
+    if(!Start())return false;
+    if(!clipsAsked) {
+        clipsAsked=true;
+        const HANDLE t=CreateThread(nullptr,0,&MakeClips,nullptr,0,nullptr);
+        if(t)CloseHandle(t);
+        else Log("SOUND vehicles: no thread to make the sounds on: the vehicles keep the stock ones");
+    }
+    return clipsReady.load(std::memory_order_acquire);
+}
+
+int OpenLoop(int clip) noexcept {
+    if(clip<0 || clip>=kClipCount || !kClipLoops[clip] || !ClipsReady())return -1;
+    for(int i=0;i<kLoops;++i) {
+        if(loops[i].used)continue;
+        const ClipPcm& c=clips[clip];
+        IXAudio2SourceVoice* v=nullptr;
+        if(FAILED(engine->CreateSourceVoice(&v,&c.format,XAUDIO2_VOICE_USEFILTER,kMaxRatio)))return -1;
+        XAUDIO2_BUFFER b{};
+        b.AudioBytes=static_cast<UINT32>(c.pcm.size()*2);b.pAudioData=reinterpret_cast<const BYTE*>(c.pcm.data());
+        b.LoopCount=XAUDIO2_LOOP_INFINITE;
+        loopStart=(loopStart+7919u*61u)%static_cast<UINT32>(c.pcm.size());
+        b.PlayBegin=loopStart;   // the loop region stays the whole clip (LoopBegin 0 < PlayBegin + the rest)
+        if(FAILED(v->SubmitSourceBuffer(&b))){v->DestroyVoice();return -1;}
+        Pan(v,0.0f,0.0f);
+        v->Start();
+        loops[i]=LoopVoice{v,true};
+        return i;
+    }
+    return -1;
+}
+
+void SetLoop(int i,const Heard& h) noexcept {
+    if(i<0 || i>=kLoops || !loops[i].used)return;
+    Hear(loops[i].v,h);
+}
+
+void CloseLoop(int i) noexcept {
+    if(i<0 || i>=kLoops || !loops[i].used)return;
+    loops[i].v->DestroyVoice();
+    loops[i]=LoopVoice{};
+}
+
+void PlayOnce(int clip,const Heard& h) noexcept {
+    if(clip<0 || clip>=kClipCount || kClipLoops[clip] || !ClipsReady())return;
+    const ClipPcm& c=clips[clip];
+    const UINT32 rate=c.format.nSamplesPerSec;
+    // An idle voice already at this clip's rate, else any idle one (remade at it); none idle: dropped (a burst past kShots).
+    ShotVoice* pick=nullptr;
+    for(auto& s:shots) {
+        XAUDIO2_VOICE_STATE st{};
+        if(s.v)s.v->GetState(&st,XAUDIO2_VOICE_NOSAMPLESPLAYED);
+        if(s.v && st.BuffersQueued)continue;
+        const bool fits=s.v && s.rate==rate;
+        if(!pick || (fits && !(pick->v && pick->rate==rate)))pick=&s;
+    }
+    if(!pick)return;
+    if(pick->v && pick->rate!=rate){pick->v->DestroyVoice();*pick=ShotVoice{};}
+    if(!pick->v) {
+        if(FAILED(engine->CreateSourceVoice(&pick->v,&c.format,XAUDIO2_VOICE_USEFILTER,kMaxRatio))){*pick=ShotVoice{};return;}
+        pick->rate=rate;
+    }
+    XAUDIO2_BUFFER b{};
+    b.Flags=XAUDIO2_END_OF_STREAM;b.AudioBytes=static_cast<UINT32>(c.pcm.size()*2);b.pAudioData=reinterpret_cast<const BYTE*>(c.pcm.data());
+    pick->v->Stop(0);pick->v->FlushSourceBuffers();
+    if(FAILED(pick->v->SubmitSourceBuffer(&b)))return;
+    Hear(pick->v,h);
+    pick->v->Start(0);
 }
 }  // namespace crew::audio

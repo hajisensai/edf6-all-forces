@@ -30,6 +30,22 @@ enum Callout : int { kCallPullUp, kCallMissile, kCallStall, kCallTerrain, kCallS
 struct Cockpit { int threat; bool launch,stall; unsigned callouts; };
 void Warn(const Cockpit& c) noexcept;
 bool Running() noexcept;   // Start succeeded (Beat keeps it going)
+
+// --- The ground vehicles' sounds (vehsound.cpp decides them, vsynth.h makes them; docs/sound-re.md §9) ---
+// Each clip is the player's <dll name>_veh_<kClipName>.wav next to the DLL (16-bit PCM, mono or stereo, any rate; a loop
+// made at its idle / its made speed) when there is one, else made here (vsynth.h) once, on a thread of its own: until
+// they are ready (ClipsReady) no voice opens and nothing plays. Engine and tracks loops, the turret's loop and stop,
+// the main gun's report near and far, the loader's three sounds.
+enum Clip : int { kClipHeavyIdle, kClipHeavyLoad, kClipLightIdle, kClipLightLoad, kClipTracks, kClipTurret, kClipTurretStop,
+                  kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipCount };
+// How a sound is heard this frame: its gain in each ear (the caller's volume in it), its playback rate (pitch and the
+// Doppler ratio together) and how far off it is (0 near .. 1 far: the air takes its highs).
+struct Heard { float left,right,ratio,distance; };
+bool ClipsReady() noexcept;               // Start succeeded and the clips are made (the first call has them made)
+int OpenLoop(int clip) noexcept;          // a looping voice of `clip`, silent until set; -1: none free, or not ready
+void SetLoop(int loop,const Heard& h) noexcept;
+void CloseLoop(int loop) noexcept;
+void PlayOnce(int clip,const Heard& h) noexcept;   // a one-shot (dropped with every one-shot voice busy)
 // Once a game frame: the game runs. With no beat for kQuietMs (paused, loading, a menu) the watchdog silences
 // everything until the next beat, at `volume` (the game's master and effect volume; each sound's own share is its
 // caller's: the engines' JetSoundVolume in their Mix, the cockpit's Cfg().warnVolume here).

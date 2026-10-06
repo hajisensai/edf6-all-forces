@@ -1156,6 +1156,51 @@ def cockpit_warnings_wired() -> None:
 
 
 @test
+def vehicle_sound_wired() -> None:
+    """The ground vehicles' sounds (src/vehsound.cpp, vsynth.h, vehmix.h; README 功能 15, docs/sound-re.md §9): their ini
+    keys are read, range-checked, shipped and documented; every clip jetaudio.cpp makes has a WAV name, a loop flag and a
+    peak, and README names every WAV a player may put next to the DLL; the stock presets silenced are the ones the doc
+    gives (car_base_se_table's idle / drive / turn and the turret's move / stop, the engine's loop handles, FireSe's
+    preset) and every EDF.dll address the file reads is signature-checked; the step runs from every vehicle's input
+    before the plugin's Enabled test (it gives the stock sounds back when off), is installed and reset with the mission;
+    the offline check is a CMake target built from the headers the plugin uses, and the plugin builds the file."""
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/sound-re.md')
+    code, audio, audio_h, crew, mission, cmake = (src('src/vehsound.cpp'), src('src/jetaudio.cpp'), src('src/jetaudio.h'),
+                                                  src('src/crew.cpp'), src('src/mission.cpp'), src('CMakeLists.txt'))
+    keys = ('VehicleSound', 'VehicleEngineVolume', 'VehicleTurretVolume', 'VehicleReloadVolume', 'VehicleGunVolume')
+    for key in keys:
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    for key in keys[1:]:
+        assert re.search(rf'Fix\("{key}",n\.\w+,0\.0f,4\.0f\)', plugin), f'{key} is not range-checked 0..4'
+    clips = re.search(r'enum Clip : int \{([^}]*)\}', audio_h).group(1)
+    n_clip = len([c for c in clips.split(',') if c.strip() and 'kClipCount' not in c])
+    names = re.findall(r'L"([a-z_]+)"', audio.split('kClipName[kClipCount]={', 1)[1].split('};', 1)[0])
+    assert len(names) == n_clip, (names, n_clip)
+    for table in ('kClipLoops[kClipCount]={', 'kClipPeak[kClipCount]={'):
+        assert len(audio.split(table, 1)[1].split('};', 1)[0].split(',')) == n_clip, table
+    for name in names:
+        assert f'`{name}`' in readme, f'README.md: the WAV name {name}'
+    assert 'EDF6VehicleCrew_veh_<名字>.wav' in readme and '_veh_%ls.wav' in audio
+    assert 'kEnginePresets[3]={0,1,2}' in code and 'kTurretPresets[2]={13,14}' in code
+    assert 'kEngineHandles[3]={0x1A40,0x1A50,0x1A60}' in code and 'kFirePreset=0x380' in code and 'kEngineLoad=0x1A80' in code
+    for rva in ('0x676370', '0x1A20', '0x1A40', '0x1A80', '0x632BD0', '0x380', '0x36C', '0xE0C', '0xE68', '0x7A8CD0'):
+        assert rva in doc, f'docs/sound-re.md: {rva}'
+    # Every RVA the file names (a code address: 0x5..../0x6..../0x7....) is in its signature table or checked by name.
+    sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
+    for rva in set(re.findall(r'\b0x[5-7][0-9A-F]{5}\b', re.sub(r'//[^\n]*', '', code))):
+        named = re.search(rf'(\w+)={rva}\b', code)
+        assert rva in sigs or (named and (named.group(1) in sigs or f'Matches({named.group(1)},' in code)), f'{rva} is not checked'
+    hook = crew.split('void __fastcall InputHook(', 1)[1]
+    assert 0 <= hook.find('&VehicleSound,v') < hook.find('if(!Cfg().enabled)return;'), 'VehicleSound before the Enabled test'
+    assert 'ResetVehicleSound();' in mission and 'InstallVehicleSound();' in plugin
+    assert 'src/vehsound.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
+    assert 'add_executable(vsound_check EXCLUDE_FROM_ALL tools/vsound_check.cpp)' in cmake
+    check = src('tools/vsound_check.cpp')
+    assert '#include "../src/jetaudio.cpp"' in check and '#include "../src/vehmix.h"' in check
+    assert '#include "vsynth.h"' in audio and '#include "vehmix.h"' in code and 'vsound_check' in readme
+
+
+@test
 def gunship_gunner_seat() -> None:
     """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second
     seat with the pilot's locators and the stock door gunner's pose, class mask and key row, and nothing else changes; a

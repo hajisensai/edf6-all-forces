@@ -138,6 +138,10 @@ void Validate(Config& n) noexcept {
     if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,10000.0f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
+    Fix("VehicleEngineVolume",n.vehicleEngineVolume,0.0f,4.0f);
+    Fix("VehicleTurretVolume",n.vehicleTurretVolume,0.0f,4.0f);
+    Fix("VehicleReloadVolume",n.vehicleReloadVolume,0.0f,4.0f);
+    Fix("VehicleGunVolume",n.vehicleGunVolume,0.0f,4.0f);
     Fix("DrillMaxRpm",n.drillMaxRpm,30.0f,1200.0f);
     Fix("DrillSpinUpSec",n.drillSpinUpSec,0.2f,10.0f);
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
@@ -268,6 +272,11 @@ void LoadConfig() noexcept {
     n.warnAudio=ReadBool(L"WarnAudio",n.warnAudio);
     n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
     n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
+    n.vehicleSound=ReadBool(L"VehicleSound",n.vehicleSound);
+    n.vehicleEngineVolume=ReadFloat(L"VehicleEngineVolume",n.vehicleEngineVolume);
+    n.vehicleTurretVolume=ReadFloat(L"VehicleTurretVolume",n.vehicleTurretVolume);
+    n.vehicleReloadVolume=ReadFloat(L"VehicleReloadVolume",n.vehicleReloadVolume);
+    n.vehicleGunVolume=ReadFloat(L"VehicleGunVolume",n.vehicleGunVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.vehicleRam=ReadBool(L"VehicleRam",n.vehicleRam);
     n.vehicleRamDamage=ReadFloat(L"VehicleRamDamage",n.vehicleRamDamage);
@@ -324,6 +333,8 @@ void LoadConfig() noexcept {
         n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
         n.warnVolume);
     Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
+    Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f",n.vehicleSound,n.vehicleEngineVolume,n.vehicleTurretVolume,
+        n.vehicleReloadVolume,n.vehicleGunVolume);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X",n.playerJetAll,n.playerJetHailKey,n.gunshipBoardGunner,
         n.gunshipGunnerKey);
     Log("CONFIG jet pilot=%d fuel=%lus sortie=%lus airRaider=%d missionStrike=%d throwDrones=%d",n.jetPilot,n.jetFuelSec,
@@ -537,6 +548,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallJetSound();
+    InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
