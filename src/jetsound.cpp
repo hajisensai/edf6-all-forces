@@ -195,6 +195,7 @@ float GameEffectVolume() noexcept {
 }
 
 bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept { return sigOk && !broken && Place(pos,vel,out); }
+bool SoundListening() noexcept { return sigOk && !broken && hasListener; }
 
 namespace {
 // --- The lock-on beeps ---
@@ -270,8 +271,10 @@ void JetSoundTick() noexcept {
     __try {
         const bool jets=Cfg().enabled && Cfg().jetSound;
         if(!jets)for(auto& s:sounds)if(s.ref)Silence(s);   // switched off
-        // The camera is the ground vehicles' listener too (vehsound.cpp SoundAt): kept while either sounds.
-        if(jets ? started : Cfg().enabled && Cfg().vehicleSound)Tick();
+        // The camera is the ground vehicles' listener too (vehsound.cpp SoundAt): kept while either sounds. The jets need
+        // it from their first jet on (started); the vehicles from the switch alone, a mission with no jet in it too.
+        if((jets && started) || (Cfg().enabled && Cfg().vehicleSound))Tick();
+        else hasListener=false;   // not kept: never a stale camera's place for a consumer switched on later
     } __except(Fault(GetExceptionInformation())) {}
 }
 

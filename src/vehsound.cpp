@@ -445,6 +445,9 @@ void GunStep(unsigned char* v,Vehicle& s,float frames) noexcept {
             const float vol=GroupVolume(g->kind);
             Keep(w+kFirePreset+kCues,g->fire,vol>0.0f);
             if(vol>0.0f && g->kind==vmix::GunKind::rapid)StopPlaying(w+kFireLoop);   // a stock loop begun before it was held
+            // The Proteus rework's held launcher (proteus.h kProteusHoldCountdown): its countdown parked, no shot. Its
+            // jump there is not a shot's wait, nor its drop back to 0 when given back (the wait only falls then).
+            if(At<float>(w,kCooldown)>=kProteusHoldCountdown*0.5f){CloseLoop(g->burst);CloseLoop(g->brass);continue;}
             const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
             const float wait=WaitOf(w),before=g->wait,sinceBefore=g->since;
             const bool shot=ammo<g->ammo || (wait>before+2.0f && At<float>(w,kCooldown)>before+2.0f) ||
@@ -526,8 +529,10 @@ bool InstallVehicleSound() noexcept {
 void VehicleSound(unsigned char* v) noexcept {
     if(!sigOk || broken)return;
     __try {
-        // Ours only with the sounds made (and the engine up): until then, and whenever switched off, the stock ones.
-        const bool on=Cfg().enabled && Cfg().vehicleSound && !v[kDead] && audio::ClipsReady();
+        // Ours only while they can be heard: the sounds made (and the engine up) and the camera's listener placed (jetsound.cpp
+        // JetSoundTick, the frame's first step: no listener, no voice of ours would sound). Until then, and whenever
+        // switched off, the stock ones: never a stock sound silenced with nothing in its place.
+        const bool on=Cfg().enabled && Cfg().vehicleSound && !v[kDead] && audio::ClipsReady() && SoundListening();
         if(!on) {
             if(Vehicle* s=EntryFor(v,GameMs(),false)){Release(*s,v);s->ref=ObjRef{};}
             return;

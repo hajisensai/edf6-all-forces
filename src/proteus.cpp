@@ -18,7 +18,8 @@
 //    0x11B95EB) set for ProteusStepHeight m on the 5 m foot capsule (proteus::StepNormal), walking only.
 //  - The guns (weapon +0xE10 the countdown's rate, +0xE14 the accuracy cone's scale: both 1.0 from the constructor,
 //    read every frame / every shot, written by nothing else for this class): walking loose and slow, deployed tight and
-//    quick. The stock launcher is held (+0xE10 0, its countdown full) in either stance.
+//    quick. The stock launcher is held (+0xE10 0, its countdown parked at kProteusHoldCountdown) in either stance while the
+//    salvo takes its place (the shells preloaded, its seat closed), and given back the frame either is not so (Guns).
 //  - Deployed, the driver's own gun (ProteusDriverGun): a round of the gunship's 40 mm cannon (jet_bay.cpp) at the
 //    screen's centre, at the marked target led when it is near the centre (the anti-air turret); the salvo (the second
 //    trigger, a target marked, the cooldown over): ProteusSalvoCount rounds of the gunship's shells on their arcs at the
@@ -62,7 +63,7 @@ constexpr float kTriggerOn=0.8f;
 // A weapon (docs/proteus-re.md §5): the trigger latch and its held copy, the shot countdown, its rate, the cone's scale.
 constexpr std::size_t kPull=0x139,kHeld=0x13A,kCountdown=0xE0C,kRate=0xE10,kSpread=0xE14;
 constexpr unsigned kPullFn=0x62C000;
-constexpr float kHoldCountdown=1.0e9f;   // frames: the stock launcher held
+constexpr float kHoldCountdown=kProteusHoldCountdown;   // frames: the stock launcher held (proteus.h: vehsound.cpp reads it)
 // The weapon user (heli.cpp DoorGunUser's): the vehicle's interface at +0x120, its slot 11 (0x62D950).
 constexpr unsigned kUserSlotRva=0x17DEE68,kUserFn=0x62D950;
 constexpr std::size_t kUserIface=0x120;
@@ -135,6 +136,7 @@ using WalkFn=void(__fastcall*)(void*,std::int32_t,void*);
 using SeatFn=void(__fastcall*)(void*,void*);
 UserFn nextUser=nullptr;
 SearchFn nextSearch=nullptr;
+const unsigned char* damageThunk=nullptr;   // where the redirected damage call goes now (the near thunk to DamageHook)
 
 // One Proteus a local player rides (a slot not seen for kStaleMs is free).
 struct Unit {
@@ -148,6 +150,8 @@ struct Unit {
     bool closed;                       // seats 2 and 3 closed
     unsigned char* weapon[kProteusSeats];   // the seats' first weapons (seat 0: none)
     unsigned char* holder[kProteusSeats];
+    float rate[kProteusSeats],spread[kProteusSeats];   // their countdown rate and cone scale as taken (given back)
+    bool launcherHeld;                 // the stock launcher parked: the salvo is its (Guns)
     bool held[4];                      // the driver's mode, shield, mark, salvo buttons last frame
     // The mark: the enemy, its lock point and velocity (m/s, smoothed).
     const void* mark;
@@ -206,7 +210,7 @@ Unit* UnitOf(const void* v,bool make) noexcept {
 
 // The active unit of the vehicle (game thread: the hooks the game calls on it).
 Unit* ActiveOf(const void* v) noexcept {
-    for(auto& u:units)if(u.active && u.ref.obj==v)return &u;
+    for(auto& u:units)if(u.active && u.ref.Is(v))return &u;   // the same object, not a new one at its address
     return nullptr;
 }
 
@@ -242,9 +246,10 @@ void GiveBack(Unit& u,unsigned char* v,const char* why) noexcept {
     for(unsigned s=1;s<kProteusSeats;++s) {
         unsigned char* const w=u.weapon[s];
         if(!w || !Readable(w,kSpread+4,true))continue;
-        Put<float>(w,kRate,1.0f);Put<float>(w,kSpread,1.0f);
+        Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);   // the numbers it had when taken
         if(s==kLauncherSeat && At<float>(w,kCountdown)>=kHoldCountdown*0.5f)Put<float>(w,kCountdown,0.0f);
     }
+    u.launcherHeld=false;
     u.st=proteus::State{};u.lift=0.0f;u.salvoLeft=0;u.mark=nullptr;
     Log("PROTEUS v=%p: stock again (%s)",v,why);
 }
@@ -265,7 +270,10 @@ void Legs(Unit& u,unsigned char* v,const Config& c) noexcept {
     Put<float>(v,kStepNormal,walking && want<u.stepNormal ? want : u.stepNormal);
 }
 
-void Guns(Unit& u,const Config& c) noexcept {
+// The cannons get the stance's numbers. The stock launcher is the salvo's only while the salvo can take its place: the
+// gunship's shells preloaded this mission (ProteusRoundsReady) and its seat closed (TwoSeats: nobody else fires it);
+// otherwise it is the launcher it always was. Decided every frame (`salvo`: the shells are there).
+void Guns(Unit& u,bool salvo,const Config& c) noexcept {
     const bool deployed=u.st.mode==proteus::Mode::deployed;
     const float rate=deployed ? c.proteusDeployGunRate : c.proteusWalkGunRate,spread=deployed ? c.proteusDeployGunSpread : c.proteusWalkGunSpread;
     for(unsigned s=kGunnerSeat;s<=kRightSeat;++s) {
@@ -273,10 +281,17 @@ void Guns(Unit& u,const Config& c) noexcept {
         if(!w)continue;
         Put<float>(w,kRate,rate);Put<float>(w,kSpread,spread);
     }
-    if(unsigned char* const m=u.weapon[kLauncherSeat]) {   // the stock launcher held: the salvo is the launcher now
+    unsigned char* const m=u.weapon[kLauncherSeat];
+    if(!m)return;
+    const bool hold=salvo && u.closed;
+    if(hold) {
         Put<float>(m,kRate,0.0f);
         if(At<float>(m,kCountdown)<kHoldCountdown*0.5f)Put<float>(m,kCountdown,kHoldCountdown);
+    } else if(u.launcherHeld) {   // given back: its own rate, its countdown run out (ready, as before it was held)
+        Put<float>(m,kRate,u.rate[kLauncherSeat]);
+        if(At<float>(m,kCountdown)>=kHoldCountdown*0.5f)Put<float>(m,kCountdown,0.0f);
     }
+    u.launcherHeld=hold;
 }
 
 // Seats 2 and 3 closed, their dummy gunners sent off; the right cannon follows the left one.
@@ -609,7 +624,11 @@ void Frame(unsigned char* v) noexcept {
     if(!u->active) {   // taken: its stock numbers kept, its weapons found
         u->walk=At<float>(v,kWalk);u->walkEase=At<float>(v,kWalkEase);u->turn=At<float>(v,kTurn);
         u->jump=At<float>(v,kJump);u->stepNormal=At<float>(v,kStepNormal);
-        for(unsigned s=1;s<kProteusSeats;++s)u->weapon[s]=SeatWeapon(v,s,&u->holder[s]);
+        for(unsigned s=1;s<kProteusSeats;++s) {
+            u->weapon[s]=SeatWeapon(v,s,&u->holder[s]);
+            u->rate[s]=u->weapon[s] ? At<float>(u->weapon[s],kRate) : 1.0f;
+            u->spread[s]=u->weapon[s] ? At<float>(u->weapon[s],kSpread) : 1.0f;
+        }
         u->active=true;u->lastMs=ms;
         u->st=proteus::State{};
         Log("PROTEUS v=%p: reworked (player in seat %d; seats %u; walk %.2f turn %.3f jump %.1f step normal %.2f = %.1f m; weapons %p %p %p)",v,
@@ -639,12 +658,12 @@ void Frame(unsigned char* v) noexcept {
     }
     if(o.salvoFired){u->salvoLeft=c.proteusSalvoCount;u->salvoAt=0;Log("PROTEUS v=%p: salvo of %d at %.0f m",v,u->salvoLeft,vec::Dist(u->markAt,Pos(v)));}
     Legs(*u,v,c);
-    Guns(*u,c);
     if(c.proteusTwoSeats)TwoSeats(*u,v);
     else if(u->closed) {
         for(unsigned s=kRightSeat;s<kProteusSeats;++s)Put<std::int32_t>(SeatAt(v,s),kSeatClassMask,u->seatMask[s]);
         u->closed=false;
     }
+    Guns(*u,salvoReady,c);   // after the seats: whether seat 3 is closed decides the launcher's
     if(driver)DriverGun(*u,v,driverSeat,ms,c);
     Salvo(*u,v,ms,c);
     FieldFrame(*u,v,dt,c);
@@ -736,6 +755,10 @@ bool AllMatch(const Sig* s,std::size_t n,const char* what) noexcept {
 }
 }  // namespace
 
+bool ProteusReady() noexcept { return ok; }
+
+bool ProteusDamageThunk(const void* target) noexcept { return damageThunk && target==damageThunk; }
+
 bool IsProteus(const void* vehicle) noexcept {
     __try { return vehicle && Big(vehicle); } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -747,6 +770,11 @@ bool InstallProteus() noexcept {
         bool changed=false;
         damageOk=AllMatch(kDamageSigs,sizeof(kDamageSigs)/sizeof(kDamageSigs[0]),"shields") &&
                  RedirectCall(image+kDamageCall,image+kDamageFn,reinterpret_cast<void*>(&DamageHook),changed);
+        if(damageOk) {   // the call's new target, for subcarrier.cpp's check of the same call (ProteusDamageThunk)
+            std::int32_t rel=0;
+            std::memcpy(&rel,image+kDamageCall+1,4);
+            damageThunk=image+kDamageCall+5+rel;
+        }
         if(Matches(kUserSig.rva,kUserSig.bytes,kUserSig.size)) {
             void** const slot=reinterpret_cast<void**>(image+kUserSlotRva);
             void* next=nullptr;
@@ -774,6 +802,7 @@ bool ProteusViewLift(const unsigned char* seat,float* look,float* eye) noexcept 
     for(const auto& u:units) {
         if(!u.active || u.lift<0.05f)continue;
         const auto v=static_cast<const unsigned char*>(u.ref.obj);
+        if(!Readable(v,kSelfCtrl+8) || !u.ref.Is(v))continue;   // gone, or another object at its address: not this unit
         const auto first=At<const unsigned char*>(v,kSeats);
         if(seat<first || seat>=first+SeatCount(v)*kSeatStride)continue;
         float back[3]={eye[0]-look[0],0.0f,eye[2]-look[2]};

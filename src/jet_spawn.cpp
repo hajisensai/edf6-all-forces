@@ -247,8 +247,9 @@ void PreloadJets() noexcept {
         const bool dolls=PreloadDolls(mgr,Preloaded(Body::doll));
         Log("JET preload %s (dolls %d)",line,dolls);
         // The gunship's shells (GunshipFire), with its body; the impact charges.
-        // ...and for the Proteus's gun and salvo (proteus.cpp), whenever the rework is on: a Proteus may be called any time.
-        PreloadShells(mgr,Preloaded(Body::gunship),Cfg().enabled && Cfg().proteus);
+        // ...and for the Proteus's gun and salvo (proteus.cpp) whenever its rework's code checked out at load, whatever the
+        // ini says now: a Proteus may be called any time, and ProteusRework (or Enabled) may be switched on mid-mission.
+        PreloadShells(mgr,Preloaded(Body::gunship),ProteusReady());
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;
         ResetShells();
