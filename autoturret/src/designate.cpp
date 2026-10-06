@@ -62,10 +62,14 @@ link::ViewRayFn viewRay=nullptr;
 link::MapRayFn mapRay=nullptr;
 link::SeatQueryFn cameraTurret=nullptr;
 link::StabilizerFn stabilizer=nullptr;
-ULONGLONG viewTried=0,mapTried=0,cameraTried=0,stabTried=0;
+link::InputHeldFn inputHeld=nullptr;
+ULONGLONG viewTried=0,mapTried=0,cameraTried=0,stabTried=0,heldTried=0;
+
+// EDF6VehicleCrew's map view holds the keys (aimlink.h InputHeldV1): Q turns the map there, not the lock.
+bool MapHolds() noexcept { return link::Resolve(link::kCrewDll,link::kInputHeld,inputHeld,heldTried) && inputHeld(); }
 
 bool KeyHeld(int vk) noexcept {
-    if(vk<=0 || vk>0xFE)return false;
+    if(vk<=0 || vk>0xFE || MapHolds())return false;
     DWORD pid=0;
     GetWindowThreadProcessId(GetForegroundWindow(),&pid);
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;

@@ -91,6 +91,13 @@ inline float PriorityWeight(const PriorityZoneV1& z,const float* pos,const void*
     return in && z.weight>0.0f && z.weight<1.0f ? z.weight : 1.0f;
 }
 
+// V1, the map view holds the player's keys (EDF6VehicleCrew src/map.cpp MapHoldsKeys): while it is open, and until the key
+// that closed it is let go, the keyboard is the map's (Q / E turn it, R / F tilt it, W A S D pan it): EDF6AutoTurret
+// reads no key of its own then (its LockKey Q, its AimModeKey Z). The pad needs no asking: the hold clears the seat's
+// buttons before either plugin reads them. False: not held (or no EDF6VehicleCrew).
+using InputHeldFn=bool(__cdecl*)();
+constexpr char kInputHeld[]="EDF6VehicleCrew_InputHeldV1";
+
 // What EDF6AutoTurret does with the player's own gun in a frame (a pure rule: tools/turret_lead_check.cpp checks it):
 // `steer` it turns the gun onto its target, `drag` a stick past DragDeadzone is the player aiming by hand (the target
 // let go). `cameraTurret` the camera turns the gun (CameraTurret above), `lead` the lead-circle mode, `locked` the

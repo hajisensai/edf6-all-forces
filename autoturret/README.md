@@ -55,7 +55,8 @@ seats; driving those tanks you get the lock too):
     short. The flak's time fuse still bursts at the target's range.
 - **Lock by look**: **Q** (pad: X, the jets' next-target button; ini `LockKey` / `LockButton`) locks the enemy **nearest
   the screen's centre**: within `LockCone` (20 deg) of the view, within `LockRange` (0 = the gun's range), not behind
-  terrain or a building. Press again for the next one out from the centre, round to the nearest after the last. **Hold**
+  terrain or a building (while EDF6VehicleCrew's map is open, Q turns the map: this plugin reads none of its keys then).
+  Press again for the next one out from the centre, round to the nearest after the last. **Hold**
   it (`LockClearMs`, 0.6 s) to let the lock go. Locked: a yellow square closing in while it settles (~0.4 s), then the
   jets' red diamond; auto-aim fights **that target only** (it waits when the gun cannot reach it); the lead circle is on
   it; the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops

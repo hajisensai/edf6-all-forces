@@ -105,6 +105,7 @@ struct Keys { bool map,esc,centre,padMap,padClose,padCentre; };
 struct Game {
     ObjRef human;               // the player the map is for
     bool open,follow,pad;
+    bool draining;              // closed by a key still down: the input held until every closing key is let go
     mapcam::View view;
     Keys was;                   // the toggles as last read (a press is the edge)
     LARGE_INTEGER last;         // the last frame (dt)
@@ -248,7 +249,7 @@ void __fastcall WalkVisit(void* self,void* object) noexcept {
         const auto o=static_cast<const unsigned char*>(object);
         if(!o || o==w.self || o==w.ride || !Readable(o,kHp+4) || o[kDead])return;
         const float* p=PosOf(o);
-        if(!IsVehicleObject(o)){Add(*w.g,p,At<std::int32_t>(o,kTeam)==w.team ? MapKind::squad : MapKind::ally);return;}
+        if(!KnownVehicle(o)){Add(*w.g,p,At<std::int32_t>(o,kTeam)==w.team ? MapKind::squad : MapKind::ally);return;}
         const bool air=!IsSub(o) && Aircraft(o);
         MapUnit* u=Add(*w.g,p,IsSub(o) ? MapKind::carrier : air ? MapKind::air : MapKind::vehicle);
         if(u)Heading(u,o);
@@ -301,7 +302,7 @@ void Enemies(Game& g) noexcept {
         const unsigned char* o=foes[i].o;
         const float* p=PosOf(o);
         const float ground=GroundAt(p[0],p[2],p[1]);
-        const bool flying=(IsVehicleObject(o) && Aircraft(o)) || p[1]-ground>kFlyingClear;
+        const bool flying=(KnownVehicle(o) && Aircraft(o)) || p[1]-ground>kFlyingClear;
         MapUnit* u=Add(g,p,flying ? MapKind::enemyAir : MapKind::enemy);
         if(!u)break;
         if(flying)u->ground=ground;
@@ -382,7 +383,9 @@ void Publish(const Game& g,const unsigned char* human,const float* eye,const flo
     ReleaseSRWLockExclusive(&lock);
 }
 
+// The map shut (any reason but a closing key: that one drains first, see Frame); its hold let go.
 void Close(const char* why) noexcept {
+    if(game.draining){game.draining=false;holds.store(false);}
     if(!game.open)return;
     game.open=false;
     holds.store(false);
@@ -487,7 +490,17 @@ bool Frame(unsigned char* human) noexcept {
     const bool close=(k.esc && !game.was.esc) || (k.padClose && !game.was.padClose);
     const bool centre=(k.centre && !game.was.centre) || (k.padCentre && !game.was.padCentre);
     game.was=k;
-    if(game.open && (toggle || close)){Close(close ? "Esc / B" : "the map key");return false;}
+    if(game.open && (toggle || close)) {
+        Close(close ? "Esc / B" : "the map key");
+        // The key that closed it is still down: let through now, the stock pad read would take this frame's B as the
+        // vehicle's or the soldier's (the seat switch, a stock B action), Esc as the pause menu's. The hold stays on
+        // (and the plugin's keys with it, MapHoldsKeys) until every closing key and button is let go.
+        game.draining=true;holds.store(true);
+    }
+    if(game.draining) {
+        if(k.map || k.esc || k.padMap || k.padClose)return true;
+        game.draining=false;holds.store(false);
+    }
     if(!game.open) {
         if(!toggle)return false;
         Open(human);
@@ -666,3 +679,6 @@ bool PlayerMap(MapReadout* out) noexcept {
 bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed); }
 bool MapOwnsView() noexcept { return owns.load(std::memory_order_relaxed); }
 }  // namespace crew
+
+// EDF6AutoTurret asks whether the map holds the keys before it reads its own (common/edf/aimlink.h InputHeldV1).
+extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_InputHeldV1() { return crew::MapHoldsKeys(); }
