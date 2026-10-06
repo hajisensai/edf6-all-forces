@@ -1428,6 +1428,26 @@ def vehicle_sound_wired() -> None:
 
 
 @test
+def view_distance_keeps_far_pass_start() -> None:
+    """ViewDistance / MapViewDistance raise only the near pass's end (and the far pass's end): the far pass's start
+    (env +0x1A4, camera +0x30) is the mission's, because the far-only scenery (the horizon's mountain ring, the
+    simulator's sky dome) is drawn by nothing else. 2026-10-06: moved out to ViewDistance-500 it cut NW_HENDEN's
+    mountains nearer than 2500 m and the rest hung in the sky. The rule is src/view_clip.h, run by
+    tools/view_clip_check.cpp; view.cpp writes only the far clip and the far pass's end."""
+    code, rule, cmake = src('src/view.cpp'), src('src/view_clip.h'), src('CMakeLists.txt')
+    assert '#include "view_clip.h"' in code and 'viewclip::Raise(' in code
+    assert 'kOverlap' not in code and 'kCamDistantNear' not in code, 'view.cpp: the far pass start must not be moved'
+    raise_fn = code.split('bool Raise(', 1)[1].split('\n}', 1)[0]
+    puts = re.findall(r'Put<float>\(at,([^,]+),', raise_fn)
+    assert puts == ['farClip', 'farClip+8'], f'view.cpp Raise writes {puts}: only the far clip and the far pass end'
+    body = rule.split('inline bool Raise(', 1)[1].split('\n}', 1)[0]
+    assert 'distantNear' not in body, 'view_clip.h Raise: the far pass start is the mission\'s'
+    assert 'add_executable(view_clip_check EXCLUDE_FROM_ALL tools/view_clip_check.cpp)' in cmake
+    assert 'view_clip_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0], 'view_clip_check runs in CTest'
+    assert '#include "../src/view_clip.h"' in src('tools/view_clip_check.cpp')
+
+
+@test
 def gunship_gunner_seat() -> None:
     """tools/make_jets.py with_gunner_seat / check_gunner_seat on synthetic SGOs (no game needed): the gunship gets a second
     seat with the pilot's locators and the stock door gunner's pose, class mask and key row, and nothing else changes; a

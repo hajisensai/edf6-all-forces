@@ -1,15 +1,16 @@
 // The view distance (视距; the user, 2026-10-05: "raise the game's view distance a little").
-// The game draws the world with two cameras (docs/view-distance-re.md): the near one from 0.1 m to the LightEnv's
-// FarClipZ (env+0x1A0, 1000 m in every mission) draws the vehicles, soldiers, enemies and everything else; the far one
-// from DistantViewNearClipZ (env+0x1A4, 500 m) to DistantViewFarClipZ (env+0x1A8, 20000 m) draws only far-render
-// nodes (the ground, the big buildings). So past 1000 m everything but the scenery was gone. The env is
-// *(*(image+0x20B2990)+0x258); the game copies its three values into its cameras every frame (0x1230A0), so the
-// plugin raises them at the source once a frame (the mission's load writes the stock ones back each mission):
-// FarClipZ to Cfg().viewDistance, the far camera's start kept the stock 500 m short of it (the cameras overlap as
-// stock), its end no nearer than the near one's. 0: the stock values are left alone. (Static RE: M; untested in
-// game. The depth range grows with it: far/near 30000 at 3000 m, the stock 10000.)
+// The game draws the world with two cameras (docs/view-distance-re.md, src/view_clip.h): the near one from 0.1 m to
+// the LightEnv's FarClipZ (env+0x1A0, 1000 m in every mission) draws the vehicles, soldiers, enemies and the near
+// ground; the far one from DistantViewNearClipZ (env+0x1A4, 500 m) to DistantViewFarClipZ (env+0x1A8, 20000 m) draws
+// only far-render nodes (the far-only scenery: the horizon's mountains, the far ground, the simulator's sky dome).
+// So past 1000 m everything but the scenery was gone. The env is *(*(image+0x20B2990)+0x258); the plugin raises
+// FarClipZ to Cfg().viewDistance once a frame (the mission's load writes the stock values back each mission) and the
+// far camera's end to no nearer than it. The far camera's start is left as the mission set it (view_clip.h: moving it
+// out cut the far-only mountains nearer than it, 2026-10-06). 0: the stock values are left alone. (Static RE: M;
+// untested in game. The depth range grows with it: far/near 30000 at 3000 m, the stock 10000.)
 #include "crew.h"
 #include "memory.h"
+#include "view_clip.h"
 
 // The cameras themselves too (2026-10-05, the user: "a little farther and it is gone", with VIEW logging 1000 -> 3000
 // every mission): the copy from the env into the cameras (0x1230A0, at 0x1232B5) has two callers, a setup (0x9D700)
@@ -20,19 +21,18 @@ namespace crew {
 namespace {
 constexpr unsigned kEnvHolder=0x20B2990,kCameraMgr=0x20B2958;
 constexpr std::size_t kEnv=0x258,kFarClip=0x1A0,kDistantNear=0x1A4,kDistantFar=0x1A8;
-constexpr std::size_t kCameras=0x4D8,kCameraStride=0x188,kCamFar=0x2C,kCamDistantNear=0x30,kCamDistantFar=0x34;
+constexpr std::size_t kCameras=0x4D8,kCameraStride=0x188,kCamFar=0x2C,kCamDistantFar=0x34;   // (+0x30: the far pass's start, view_clip.h)
 constexpr int kCameraCount=4;
-constexpr float kOverlap=500.0f;   // the stock 1000 m near camera and 500 m far camera overlap by this
 const void* loggedEnv=nullptr;
 const void* loggedCam[kCameraCount]{};
 
-// One clip set (far, the far pass's start and end) raised to `want` (never lowered); true when it changed.
-bool Raise(unsigned char* at,std::size_t farClip,std::size_t distantNear,std::size_t distantFar,float want) noexcept {
-    const float was=At<float>(at,farClip);   // (not `far`: a Windows header macro)
-    if(!(was>0.0f) || was>=want)return false;
-    Put<float>(at,farClip,want);
-    if(At<float>(at,distantNear)<want-kOverlap)Put<float>(at,distantNear,want-kOverlap);
-    if(At<float>(at,distantFar)<want)Put<float>(at,distantFar,want);
+// One clip set (far, the far pass's start and end: three floats from `farClip`) raised to `want` (view_clip.h: never
+// lowered, the far pass's start untouched); true when it changed.
+bool Raise(unsigned char* at,std::size_t farClip,float want) noexcept {
+    viewclip::Clip c{At<float>(at,farClip),At<float>(at,farClip+4),At<float>(at,farClip+8)};
+    if(!viewclip::Raise(c,want))return false;
+    Put<float>(at,farClip,c.farClip);
+    Put<float>(at,farClip+8,c.distantFar);
     return true;
 }
 
@@ -43,7 +43,7 @@ void RaiseCameras(float want) noexcept {
         const auto cam=At<unsigned char*>(mgr,kCameras+static_cast<std::size_t>(i)*kCameraStride);
         if(!cam || !Readable(cam+kCamDistantFar,4,true))continue;
         const float was=At<float>(cam,kCamFar);
-        if(Raise(cam,kCamFar,kCamDistantNear,kCamDistantFar,want) && cam!=loggedCam[i]) {
+        if(Raise(cam,kCamFar,want) && cam!=loggedCam[i]) {
             loggedCam[i]=cam;
             Log("VIEW camera %d far clip %.0f -> %.0f m",i,was,want);
         }
@@ -104,8 +104,8 @@ void ViewMapClip(bool on,float farClip,float nearClip) noexcept {
         Log("VIEW map open: far clip %.0f m, near %.2f m",farClip,nearClip);
     }
     if(farClip>0.0f) {
-        if(auto env=EnvNow())Raise(env,kFarClip,kDistantNear,kDistantFar,farClip);
-        for(int i=0;i<kCameraCount;++i)if(auto cam=CameraNow(i))Raise(cam,kCamFar,kCamDistantNear,kCamDistantFar,farClip);
+        if(auto env=EnvNow())Raise(env,kFarClip,farClip);
+        for(int i=0;i<kCameraCount;++i)if(auto cam=CameraNow(i))Raise(cam,kCamFar,farClip);
     }
     // The near clip only on the cameras the map saw at its start (a camera made since has no saved value to go back to)
     // and only up from the stock sub-metre one (a camera with its own larger near clip is left alone).
@@ -125,7 +125,7 @@ void ViewTick() noexcept {
     const auto env=At<unsigned char*>(holder,kEnv);
     if(!env || !Readable(env+kDistantFar,4,true))return;
     const float was=At<float>(env,kFarClip);
-    if(Raise(env,kFarClip,kDistantNear,kDistantFar,want) && env!=loggedEnv) {
+    if(Raise(env,kFarClip,want) && env!=loggedEnv) {
         loggedEnv=env;
         Log("VIEW far clip %.0f -> %.0f m (far camera from %.0f m)",was,want,At<float>(env,kDistantNear));
     }

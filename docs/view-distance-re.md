@@ -5,7 +5,8 @@
 ## 2026-10-05 追加：全局视距（src/view.cpp，ViewDistance）
 
 - 用户要求把视距拉高。插件每帧把 `env+0x1A0`（FarClipZ）抬到 `ViewDistance`（默认 3000 m，范围 1000~10000，0 = 不动）。`env = *(*(base+0x20B2990)+0x258)`。
-- 远景相机的起点 `env+0x1A4` 抬到 `ViewDistance-500`，和原版一样两个相机重叠 500 m；它的终点 `env+0x1A8` 不小于 `ViewDistance`。
+- 远景相机的起点 `env+0x1A4` / 相机 `+0x30` **保持任务原值（默认 500 m）不动**；它的终点 `env+0x1A8` 不小于 `ViewDistance`。规则在 `src/view_clip.h`，离线检查 `tools/view_clip_check.cpp`。
+- 2026-10-06 更正：原先把远景起点抬到 `ViewDistance-500`（2500 m）是错的。只带 far-render 位的远景件（各图的远山环、远景地面，模拟器任务的 `ev609_VirtualDome` 半径 10 km 的网格天球）只有远景 pass 画，近景 pass 不画它们；远景起点一推远，2500 m 以内的远景件就被裁掉。实例：DLC 模拟器任务 M304（`nw_Henden.mac`，天气 finecloud，MAE 只写 `_farClipZ 1000` / `_distantFarClipZ 20000`，起点用默认 500）的远山 `ig_FarMt_Henden_Out`（Chunk02.cpk `NW_HENDEN.RAB`，far-only，摆在 y=-39）从半径约 1500 m 开始隆起，2500 m 处坡面已到 243 m 高；2500 m 以内的山脚被裁掉后，剩下的山体悬在天上成一条深色带（用户截图）。网格天球本身是原版的（M304 `Preload("app:/object/ev609_VirtualDome.sgo")`，SGO 类 `FarEventObject`，Root.cpk `EV609_VIRTUALDOME.MRAB` 只有一个 `SkyDome` 球面网格，半径 9994–10005 m，不含山）。
 - 每关加载时 env 被写回原版值，插件下一帧再抬上去。日志：`VIEW far clip 1000 -> 3000 m`。
 - 未验证：帧率；深度精度（远近比从 10000 变成 30000）；雾的终点（FogEnd ≥ 5000，应该不挡）。
 
