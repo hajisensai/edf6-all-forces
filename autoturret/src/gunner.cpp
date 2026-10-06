@@ -232,12 +232,20 @@ bool ReadAim(const unsigned char* vehicle,const unsigned char* seat,const Gun& g
     return true;
 }
 
+bool FullAxis(const Aim& aim,int a) noexcept { return aim.max[a]-aim.min[a]>=2.0f*kPi-0.01f; }
+float AxisAngle(const Aim& aim,int a,float angle) noexcept {
+    if(!FullAxis(aim,a))return Clamp(angle,aim.min[a],aim.max[a]);
+    const float centre=0.5f*(aim.min[a]+aim.max[a]);
+    return centre+Wrap(angle-centre);
+}
+
 // Geometric error to `want`, and the axis angles that close it; false when an axis can't get there.
 bool AxisTargets(const Aim& aim,const float* want,float* error,float* axis) noexcept {
     error[0]=Wrap(want[0]-aim.barrel[0]);error[1]=want[1]-aim.barrel[1];
     for(int a=0;a<2;++a) {
         axis[a]=aim.angle[a]+aim.sign[a]*error[a];
-        if(axis[a]<aim.min[a]-kPitchMargin || axis[a]>aim.max[a]+kPitchMargin)return false;
+        if(FullAxis(aim,a))axis[a]=AxisAngle(aim,a,axis[a]);
+        else if(axis[a]<aim.min[a]-kPitchMargin || axis[a]>aim.max[a]+kPitchMargin)return false;
     }
     return true;
 }
@@ -339,11 +347,16 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     // the turn it still needs (axis - angle) is taken from the held axes, and the hull's turn is not counted twice.
     float held[2],hull[2];
     Stabilized(vehicle,s,aim.angle,held,hull);
-    for(int a=0;a<2;++a)axis[a]=Clamp(held[a]+axis[a]-aim.angle[a],aim.min[a],aim.max[a]);
+    for(int a=0;a<2;++a) {
+        const float delta=FullAxis(aim,a) ? Wrap(axis[a]-aim.angle[a]) : axis[a]-aim.angle[a];
+        axis[a]=AxisAngle(aim,a,held[a]+delta);
+    }
     float in[2];
     for(int a=0;a<2;++a) {
         const float k=track.k[a]>0.0f ? track.k[a] : kTurnPerInput;
-        in[a]=AxisInput(track,a,axis[a],held[a],axis[a]-held[a],false,1.0f/(k*kSettleFrames),hull[a]);
+        const bool full=FullAxis(aim,a);
+        const float off=full ? Wrap(axis[a]-held[a]) : axis[a]-held[a];
+        in[a]=AxisInput(track,a,axis[a],held[a],off,full,1.0f/(k*kSettleFrames),hull[a]);
     }
     if(!AllFinite(in,2))return;
     Put<float>(vehicle,kTurn+s*kTurnStride,in[0]);Put<float>(vehicle,kTurn+s*kTurnStride+4,in[1]);
@@ -438,7 +451,7 @@ void LogSkip(const unsigned char* vehicle,const char* why) noexcept {
 constexpr std::size_t kAimNetwork=0xC0;
 constexpr unsigned kAimLocal=0x5FB880;
 void TakeFromNetwork(const unsigned char* vehicle,unsigned s,unsigned char* seat) noexcept {
-    const auto aim=At<unsigned char*>(seat,kSeatAim);
+    const auto aim=seat+kSeatAim;
     if(!Readable(aim,kAimNetwork+8,true) || !aim[kAimNetwork])return;
     reinterpret_cast<void(__fastcall*)(void*)>(image+kAimLocal)(aim);
     if(cfg.debug)LogOnce(vehicle,0x100+s,"seat=%u was the network's (co-op host): steered here",s);
@@ -447,7 +460,7 @@ void TakeFromNetwork(const unsigned char* vehicle,unsigned s,unsigned char* seat
 // A seat other than the driver's (seat 0, the main cannon, which the driver aims) whose own gun is turned
 // by its own aim controller: a gunner seat.
 bool GunnerSeat(const unsigned char* seat) noexcept {
-    return SeatGun(seat) && Readable(At<const unsigned char*>(seat,kSeatAim)+kAimAxes,2*kAxisStride);
+    return SeatGun(seat) && Readable(seat+kSeatAim+kAimAxes,2*kAxisStride);
 }
 
 void Gunners(unsigned char* vehicle) noexcept {

@@ -91,9 +91,9 @@ using SeatFn=void(__fastcall*)(void*,void*);
 // its stock slot 49 (FindSeat), the slot we chain its per-frame input on, and whether only an armed one
 // (a weapon holder, veh+0x648) gets an NPC driver.
 // The 502 has the 54-slot VehicleBase vtable: no slot 55, its per-frame input copy is slot 4 (0x612D20).
-// VehicleBigBegaruta (the Proteus) has its own slot 55 (0x648F70: the family's AI think 0x63C1C0, then its gunners') and
-// its own slot 50 (0x6490C0: RideAi, every seat), slot 49 the stock FindSeat (docs/proteus-re.md §1); before 2026-10-06
-// its input was 0 here, so no per-frame step of the plugin ever ran for it (no HUD, no seat switch, no crew).
+// VehicleBigBegaruta (Proteus): slot 55 is its AI task, not the player's update. Chain slot 4 (0x644350), as for
+// the crawler, so a player-driven Proteus runs the rework, publishes HUD and advances the clock even with no AI task.
+// That function takes (vehicle, step); the shared four-register forwarding preserves both and it ignores r8/r9.
 // Vehicle_Car (the Grape, also the unarmed 512 Kei truck and 513 trailer cab) has its own slot 49
 // (0x65B910, a preferred-seat wrapper round the stock one) and its CarBase input in slot 55 (0x65A390).
 struct VehicleClass {
@@ -106,7 +106,7 @@ const VehicleClass kClasses[]={
     {0x17DA960,0x63C1C0,"504_begaruta"},{0x17DADB0,0x61ACD0,"505_Tank"},{kVt506,0x61B8F0,"506_Helicopter"},
     {0x17DB9D8,0x61DDF0,"510_Maser"},{0x17DBDF8,0x61F080,"511_Bike"},{0x17DC250,0x620790,"601_Tank"},
     {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x63C1C0,"612_nix"},{0x17DD720,0,"VehicleBase"},
-    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0x648F70,"BigBegaruta"},{kVt409,0x64C020,"Helicopter409"},
+    {0x17DE0A8,0x63C1C0,"Begaruta"},{0x17DEC40,0x644350,"BigBegaruta",kFindSeat,4},{kVt409,0x64C020,"Helicopter409"},
     {kVt410,0x64E080,"Helicopter410"},{kVtHeliBase,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
     {0x17E0A80,0,"CarBase"},{0x17E1828,0,"TankBase"},
     {0x17E01B0,0x65A390,"Car",0x65B910,kSlotInput,true},
