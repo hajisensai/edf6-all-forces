@@ -69,6 +69,13 @@ add_executable(turret_cam_check EXCLUDE_FROM_ALL tools/turret_cam_check.cpp)
 target_compile_options(turret_cam_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(turret_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The Proteus rework's rules (src/proteus_logic.h: the stances and their stagger, the directional shield's heat, the barrier,
+# the salvo's cooldown, the step height) offline (tools/proteus_check.cpp). Not part of the plugin build:
+# cmake --build build --target proteus_check && build\proteus_check.exe
+add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)
+target_compile_options(proteus_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(proteus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # NPC jets against buildings, offline (tools/jet_obstacle_sim.cpp): the plugin's own jet_flight.cpp, jet_combat.cpp and
 # body506.cpp against a stand-in world of flat ground and box buildings; tools/jet_obstacle_view.py draws its trace.
 # jet_obstacle_sim_before: the same with Wing's Ahead call and Strike's InSight test cut out of copies of the two files,
