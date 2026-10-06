@@ -55,6 +55,7 @@ SKELETON: list[tuple[str, str | None]] = [
     ('sz_waist', 'sz_pelvis'),
     ('sz_chest', 'sz_waist'),
     ('sz_head', 'sz_chest'),
+    ('sz_cannon', 'sz_chest'),    # the chest mega particle cannon's muzzle (no geometry)
     ('sz_backpack', 'sz_chest'),
     ('sz_funnelpack_l', 'sz_backpack'),
     ('sz_funnel_l1', 'sz_funnelpack_l'),
@@ -71,11 +72,13 @@ SKELETON: list[tuple[str, str | None]] = [
     ('sz_forearm_l', 'sz_upperarm_l'),
     ('sz_hand_l', 'sz_forearm_l'),
     ('sz_shield', 'sz_forearm_l'),
+    ('sz_missile', 'sz_shield'),  # the shield's missile ports (no geometry)
     ('sz_shoulder_r', 'sz_chest'),
     ('sz_upperarm_r', 'sz_chest'),
     ('sz_forearm_r', 'sz_upperarm_r'),
     ('sz_hand_r', 'sz_forearm_r'),
     ('sz_rifle', 'sz_hand_r'),
+    ('sz_muzzle', 'sz_rifle'),    # the rifle's muzzle (no geometry): its rounds leave from here
     ('sz_thigh_l', 'sz_pelvis'),
     ('sz_shin_l', 'sz_thigh_l'),
     ('sz_foot_l', 'sz_shin_l'),
@@ -85,7 +88,8 @@ SKELETON: list[tuple[str, str | None]] = [
     ('sz_axe', 'sz_root'),     # the plugin places it in world terms: in the shield, or in the right hand
     ('sz_axe_blade', 'sz_axe'),   # its beam: scaled to nothing while stowed
 ]
-ARM_BONES = ('sz_rifle', 'sz_shield', 'sz_axe', 'sz_axe_blade')   # pylib/sazabi_arms.py models them and sets their joints
+# pylib/sazabi_arms.py models these and sets their joints; the muzzles carry no geometry (the weapons hang on them).
+ARM_BONES = ('sz_rifle', 'sz_muzzle', 'sz_shield', 'sz_missile', 'sz_axe', 'sz_axe_blade', 'sz_cannon')
 BONE_NAMES = [n for n, _ in SKELETON]
 FIXED_JOINTS: dict[str, tuple[float, float, float]] = {
     'mdl': (0.0, 0.0, 0.0), 'sazabi': (0.0, 0.0, 0.0), 'globalSRT': (0.0, 0.0, 0.0), 'body': BODY_AT,

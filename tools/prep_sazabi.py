@@ -68,7 +68,8 @@ BONE_SEGMENTS: dict[str, tuple[tuple[float, float, float], tuple[float, float, f
 }
 WAIST_HALF_WIDTH = 60.0   # a waist piece further out than this is a front skirt plate, the pelvis's
 SKIRT_TOP = 490.0        # a thigh piece over this is a side skirt, the pelvis's
-ARM_SKIRT = (700.0, 260.0)   # an arm piece under y 700 within |x| 260 is a skirt too (the arms hang over them)
+ARM_SKIRT = (700.0, 230.0)   # an arm piece under y 700 within |x| 230 is a skirt too (the arms hang over them; the
+                             # right forearm hangs from |x| 247 out: measured, the skirts are the three a side at 144..197)
 FUNNEL_MATERIAL = '13___Default'   # the funnels' glowing nozzles: a funnel is a pack piece with this colour in it
 FUNNEL_MIN_TRIS = 500
 

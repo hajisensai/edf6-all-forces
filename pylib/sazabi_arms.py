@@ -8,6 +8,8 @@ pylib/sazabi_model.py's palette paints them), each rigid on its bone (game space
                 swing it: it hangs on sz_root and is placed in world terms, src/sazabi.cpp)
   sz_axe_blade  its beam blade, a glowing plate (sazabi_model GLOW_MATERIALS[BEAM]); the plugin scales it to nothing
                 while stowed
+  sz_muzzle, sz_missile, sz_cannon   no geometry: where the rifle's, the shield missiles' and the chest cannon's
+                rounds leave (the weapons hang on them, vcobjects JETS[SAZABI_JET].weapon_bones)
 
 joints(at) gives these bones' joints from the arm joints tools/prep_sazabi.py measured.
 """
@@ -26,6 +28,7 @@ RIFLE_MUZZLE = (0.0, 0.25, 10.6)       # sz_rifle frame: where its rounds leave 
 SHIELD_OUT = 1.7                       # m from the forearm's axis to the shield's back
 SHIELD_SCALE = 0.85                    # 8.4 m point to top, 4.6 m across
 AXE_HANDLE = 6.0
+CANNON_AT = (0.0, 16.9, 3.3)           # the chest's front, under the cockpit hatch (the mega particle cannon)
 BLADE_SPAN = 3.4
 
 
@@ -102,8 +105,11 @@ def joints(at: dict[str, Vec]) -> dict[str, Vec]:
     s = shield_frame(at)
     centre, u, _w, n = s
     grip = _add(centre, _mul(n, -0.9))
-    return {'sz_rifle': at['sz_hand_r'], 'sz_shield': _add(centre, _mul(n, -SHIELD_OUT)),
-            'sz_axe': _add(grip, _mul(u, AXE_HANDLE / 2)), 'sz_axe_blade': _add(grip, _mul(u, -AXE_HANDLE / 2))}
+    return {'sz_rifle': at['sz_hand_r'], 'sz_muzzle': _add(at['sz_hand_r'], RIFLE_MUZZLE),
+            'sz_shield': _add(centre, _mul(n, -SHIELD_OUT)),
+            'sz_missile': _add(centre, _add(_mul(u, -3.6 * SHIELD_SCALE), _mul(n, 1.1))),
+            'sz_axe': _add(grip, _mul(u, AXE_HANDLE / 2)), 'sz_axe_blade': _add(grip, _mul(u, -AXE_HANDLE / 2)),
+            'sz_cannon': CANNON_AT}
 
 
 def shield_frame(at: dict[str, Vec]) -> tuple[Vec, Vec, Vec, Vec]:

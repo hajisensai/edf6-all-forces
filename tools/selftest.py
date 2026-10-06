@@ -603,6 +603,23 @@ def jet_masses_cover_every_jet() -> None:
 
 
 @test
+def sazabi_bones_agree() -> None:
+    """src/sazabi_pose.h kBones is pylib/sazabi_model.py SKELETON's sz_ bones, in its order, each with its parent; the
+    Sazabi's request mark is src/body506.cpp's Sazabi range and src/sazabi.cpp's."""
+    import sazabi_model as sz
+    rows = re.findall(r'\{L"(sz_\w+)",(-1|k\w+)\}', src('src/sazabi_pose.h').split('kBones[kBoneCount]={', 1)[1].split('};', 1)[0])
+    names = [n for n, _ in sz.SKELETON if n.startswith('sz_')]
+    assert [n for n, _ in rows] == names, f'src/sazabi_pose.h kBones: {[n for n, _ in rows]} != {names}'
+    enum = re.findall(r'\b(k[A-Z]\w*)', src('src/sazabi_pose.h').split('enum Bone {', 1)[1].split('kBoneCount', 1)[0])
+    parent = dict(sz.SKELETON)
+    for (name, par), _ in zip(rows, enum):
+        want = parent[name]
+        assert (par == '-1') == (want == 'body') and (par == '-1' or names[enum.index(par)] == want), f'{name}: parent {par}'
+    assert f'{{{vc.SAZABI_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Sazabi'
+    assert f'kSazabiMark={vc.SAZABI_MARK:.1f}f' in src('src/sazabi.cpp'), 'src/sazabi.cpp kSazabiMark'
+
+
+@test
 def hand_copies_agree() -> None:
     # kKinds rows: {"name",mark,...}, the mark an integer or a float literal.
     pjet = dict(re.findall(r'\{"(\w+)",\s*(\d+)(?:\.0f)?\s*,', src('src/playerjet.cpp').split('kKinds[]={', 1)[1].split('};', 1)[0]))
