@@ -311,6 +311,8 @@ add_test(NAME split_fuse COMMAND split_fuse_test)
 add_executable(online_authority_test tests/online_authority_test.cpp)
 target_compile_options(online_authority_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME online_authority COMMAND online_authority_test)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check

@@ -1,0 +1,150 @@
+"""Source guard of the online gates (src/online_authority.h): python tests/online_gate_guard.py [--root DIR], exit 1 on
+a failure. What it holds in place:
+  - the session / host / operator functions (0x7748F0, 0x784210, 0x630F90, 0x630DF0) are called for a decision only from
+    src/online_authority.cpp (and read by the NET probe, src/netprobe.cpp): no module asks them on its own;
+  - the stock RideAi (VehicleBase slot 50) is called only from SeatNpcRider, behind OnlineMaySeatNpc;
+  - AutoCrew (crew.cpp Crew) asks OnlineMaySeatNpc before it seats a driver;
+  - every plugin damage round (jet_bay.cpp ShellMake: the ram, the drill, the EMC, the gunship's guns, the Proteus) is
+    made with no damage where its owner is not the authority;
+  - the NPC heli pilot flies only where the heli is run (heli.cpp HeliFrame's Replica before Fly), puts its input on
+    seat 0's stick (Fly -> MirrorStick), and a replica copies that stick back with the same signs;
+  - IsPlayer (common/seat.cpp) leaves out another machine's player.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+
+DECISION_RVAS = ('0x7748F0', '0x784210', '0x630F90', '0x630DF0')
+ALLOWED_RVA_FILES = {'src/online_authority.cpp', 'src/netprobe.cpp'}
+SOURCE_DIRS = ('src', 'common', 'autoturret/src')
+failures: list[str] = []
+
+
+def fail(message: str) -> None:
+    failures.append(message)
+
+
+def code_only(text: str) -> str:
+    """The text with // comments cut (enough for this code base: no // inside its string literals the checks read)."""
+    return '\n'.join(re.sub(r'//.*', '', line) for line in text.splitlines())
+
+
+def read(root: str, rel: str) -> str:
+    with open(os.path.join(root, rel), encoding='utf-8') as f:
+        return f.read()
+
+
+def body(text: str, signature: str) -> str:
+    """The braces-balanced body of the first definition starting with `signature` ('' when not found): a
+    declaration (a ; before its {) is passed over."""
+    at = text.find(signature)
+    while at >= 0:
+        open_at = text.find('{', at)
+        if open_at < 0:
+            return ''
+        if ';' not in text[at:open_at]:
+            break
+        at = text.find(signature, at + 1)
+    if at < 0:
+        return ''
+    depth = 0
+    for i in range(open_at, len(text)):
+        if text[i] == '{':
+            depth += 1
+        elif text[i] == '}':
+            depth -= 1
+            if depth == 0:
+                return text[open_at:i + 1]
+    return ''
+
+
+def before(text: str, first: str, then: str) -> bool:
+    a, b = text.find(first), text.find(then)
+    return a >= 0 and b >= 0 and a < b
+
+
+def sources(root: str) -> list[str]:
+    out: list[str] = []
+    for d in SOURCE_DIRS:
+        for base, _, files in os.walk(os.path.join(root, d)):
+            for name in files:
+                if name.endswith(('.cpp', '.h', '.inc')):
+                    out.append(os.path.relpath(os.path.join(base, name), root).replace(os.sep, '/'))
+    return sorted(out)
+
+
+def check_rvas(root: str, files: list[str]) -> None:
+    for rel in files:
+        code = code_only(read(root, rel)).upper()
+        for rva in DECISION_RVAS:
+            if rva.upper() in code and rel not in ALLOWED_RVA_FILES:
+                fail(f'{rel}: calls {rva} itself; ask src/online_authority.h (InSession / OnlineHostOnly / IsOnlineAuthority)')
+
+
+def check_ride_ai(root: str, files: list[str]) -> None:
+    for rel in files:
+        if '[kSlotRideAi]' in code_only(read(root, rel)) and rel != 'src/online_authority.cpp':
+            fail(f'{rel}: calls the stock RideAi itself; seat NPC riders through SeatNpcRider (online_authority.h)')
+    seat = body(code_only(read(root, 'src/online_authority.cpp')), 'bool SeatNpcRider(')
+    if not before(seat, 'OnlineMaySeatNpc(', '[kSlotRideAi]'):
+        fail('src/online_authority.cpp SeatNpcRider: RideAi is not behind OnlineMaySeatNpc')
+    crew = body(code_only(read(root, 'src/crew.cpp')), 'void Crew(unsigned char* vehicle,int cls)')
+    if not before(crew, 'OnlineMaySeatNpc(vehicle)', 'SeatNpcRider('):
+        fail('src/crew.cpp Crew: AutoCrew seats a driver without asking OnlineMaySeatNpc first')
+
+
+def check_damage(root: str) -> None:
+    make = body(code_only(read(root, 'src/jet_bay.cpp')), 'unsigned char* ShellMake(')
+    if not re.search(r'if\(damage>0\.0f && !IsOnlineAuthority\(owner\)\)damage=0\.0f;', make) or \
+            not before(make, 'IsOnlineAuthority(owner)', 'ShellCreate('):
+        fail('src/jet_bay.cpp ShellMake: a damage round is made without the owner\'s authority gate')
+    for rel, call in (('src/vehicleram.cpp', 'ImpactDamage('), ('src/drill.cpp', 'DrillCharge('), ('src/emc.cpp', 'EmcFire(')):
+        if call not in code_only(read(root, rel)):
+            fail(f'{rel}: no longer deals its damage through {call} (ShellMake\'s gate): gate the new path too')
+
+
+def check_heli(root: str) -> None:
+    code = code_only(read(root, 'src/heli.cpp'))
+    frame = body(code, 'void HeliFrame(unsigned char* vehicle)')
+    if not before(frame, 'Replica(vehicle)', 'Fly('):
+        fail('src/heli.cpp HeliFrame: the NPC pilot flies before the replica test')
+    if 'MirrorStick(v,c);' not in body(code, 'void Fly(Heli& h,unsigned char* v,bool playerAboard)'):
+        fail('src/heli.cpp Fly: the pilot\'s input is not put on seat 0\'s stick (MirrorStick)')
+    if 'OnlineRunsHere(v)' not in body(code, 'bool Replica(unsigned char* v)'):
+        fail('src/heli.cpp Replica: does not ask OnlineRunsHere')
+    mirror = body(code, 'void MirrorStick(unsigned char* v,const Control& c)')
+    replay = body(code, 'void Replay(unsigned char* v)')
+    pairs = (('kSeatLX,-c.stickL', 'kInLateral,-SeatAxis(seat,kSeatLX)'), ('kSeatLY,-c.stickF', 'kInForward,-SeatAxis(seat,kSeatLY)'),
+             ('kSeatRX,-c.yaw', 'kInYaw,-SeatAxis(seat,kSeatRX)'), ('kSeatAscend,Clamp(c.throttle', 'kInThrottle,Clamp(At<float>(seat,kSeatAscend)'))
+    for put, back in pairs:
+        if put not in mirror or back not in replay:
+            fail(f'src/heli.cpp: MirrorStick ({put}) and Replay ({back}) no longer the stock copy\'s signs')
+
+
+def check_player(root: str) -> None:
+    if '!RemoteRider(human)' not in body(code_only(read(root, 'common/seat.cpp')), 'bool IsPlayer('):
+        fail('common/seat.cpp IsPlayer: another machine\'s player counts as this machine\'s')
+    if re.search(r'\bkOnline\b', code_only(read(root, 'src/seatswitch.cpp'))):
+        fail('src/seatswitch.cpp: its own session check is back; ask InSession')
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--root', default=os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')))
+    root = parser.parse_args().root
+    files = sources(root)
+    checks = (lambda: check_rvas(root, files), lambda: check_ride_ai(root, files), lambda: check_damage(root),
+              lambda: check_heli(root), lambda: check_player(root))
+    for c in checks:
+        c()
+    for f in failures:
+        print('FAIL:', f)
+    print(f'online_gate_guard: {len(files)} files, {len(checks)} checks, {len(failures)} failures')
+    return 1 if failures else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
