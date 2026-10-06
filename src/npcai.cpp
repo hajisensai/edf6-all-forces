@@ -31,7 +31,7 @@ namespace {
 // --- The human (docs/npc-ai-design.md §3.1) ---
 constexpr std::size_t kMoveX=0xD50,kMoveY=0xD54,kMoveZ=0xD58,kMoveW=0xD5C;   // the move stick, local (x, 0, z, 1)
 constexpr std::size_t kLookPitch=0xD60,kLookYaw=0xD64;                       // the look's change this frame (rad)
-constexpr std::size_t kTrigger=0xD70;                                         // WeaponSet 0's trigger (held)
+constexpr std::size_t kTrigger=0xD70;                                         // WeaponSet i's trigger (held) at +i
 constexpr std::size_t kJumpPress=0xD76;                                       // jump / evade pressed
 constexpr std::size_t kPickWeapon=0xD82;                                      // pick weapon 0..2 (+i)
 constexpr std::size_t kAimPitch=0x1230,kAimYaw=0x1234;                        // the look's target (0x573BA8 adds d60 to it)
@@ -41,6 +41,10 @@ constexpr std::size_t kNet=0x128;                                             //
 constexpr std::size_t kControlMask=0x158C;                                    // bit 0 move, 1 look, 4 trigger 0, 11 roll
 constexpr unsigned kMaskMove=0x1,kMaskLook=0x2,kMaskTrigger=0x10,kMaskRoll=0x800;
 constexpr std::size_t kWeapons=0x1950,kWeaponCount=0x1960,kSets=0x1970,kSetCount=0x1980,kSetWeapon=0x40;
+// The WeaponSets are an array of kSetStride each; set i holds **(set+kSetWeapon) and fires on kTrigger+i (0x59ACE2 walks
+// it, 0x59ADE9 tests d70+i, 0x59B15E steps 0x150, H). Two hands: the Fencer's second weapon is set 1 (d71).
+constexpr std::size_t kSetStride=0x150;
+constexpr int kHands=2;
 constexpr std::size_t kStockTarget=0x1CD0,kStockTargetCtrl=0x1CD8;
 constexpr std::size_t kHumanHpMax=0x2F4,kHumanHp=0x2F8;
 // --- Script control (§4.1) ---
@@ -294,24 +298,30 @@ const char* ControlName(npc::Control c) noexcept {
 }
 
 // --- Its weapons (§3.5) ---
-struct Arms { int n,current; npc::Arm arm[kMaxArms]; };
+// held[k]: the index in arm[] of the weapon WeaponSet k holds (its trigger kTrigger+k), -1 when not known. held[0] is
+// the one the plugin picks and aims; held[1] is the Fencer's second hand, which only the stock pulls.
+struct Arms { int n=0; int held[kHands]{-1,-1}; npc::Arm arm[kMaxArms]{}; };
+// WeaponSet k's weapon, nullptr when it has none or is not readable.
+const unsigned char* SetWeapon(const unsigned char* h,int k) noexcept {
+    if(At<std::uint64_t>(h,kSetCount)<=static_cast<std::uint64_t>(k))return nullptr;
+    const auto set=At<const unsigned char*>(h,kSets)+k*kSetStride;
+    if(!Readable(set,kSetWeapon+8))return nullptr;
+    const auto entry=At<unsigned char* const*>(set,kSetWeapon);
+    return Readable(entry,8) ? *entry : nullptr;
+}
 Arms ArmsOf(const unsigned char* h) noexcept {
-    Arms a{};a.current=-1;
+    Arms a{};
     const auto list=At<unsigned char* const*>(h,kWeapons);
     const auto count=At<std::uint64_t>(h,kWeaponCount);
     if(!count || count>16 || !Readable(list,count*8))return a;
-    const unsigned char* held=nullptr;
-    const auto sets=At<const unsigned char*>(h,kSets);
-    if(At<std::uint64_t>(h,kSetCount)>0 && Readable(sets,kSetWeapon+8)) {
-        const auto entry=At<unsigned char* const*>(sets,kSetWeapon);
-        if(Readable(entry,8))held=*entry;
-    }
+    const unsigned char* held[kHands];
+    for(int k=0;k<kHands;++k)held[k]=SetWeapon(h,k);
     a.n=count<kMaxArms ? static_cast<int>(count) : kMaxArms;
     for(int i=0;i<a.n;++i) {
         const unsigned char* w=list[i];
         npc::Arm& m=a.arm[i];m=npc::Arm{};
         if(!Readable(w,kWeaponAmmo+4))continue;
-        if(w==held)a.current=i;
+        for(int k=0;k<kHands;++k)if(w==held[k])a.held[k]=i;
         const float reach=At<float>(w,kArmReach),damage=At<float>(w,kArmDamage),blast=At<float>(w,kArmBlast);
         m.reach=std::isfinite(reach) && reach>0.0f ? reach : 0.0f;
         m.blast=std::isfinite(blast) && blast>0.0f ? blast : 0.0f;
@@ -382,26 +392,26 @@ struct Plan { const char* move; bool fire; int arm; };
 // The weapon for the target: picked through d82+i (only the first three can be: §3.5), the trigger off while the
 // pick goes through; a pick the soldier never takes turns the picking off for it (the RE's M claim proven wrong there).
 int ChooseArm(Soldier& s,unsigned char* h,const Arms& a,const Enemy* t,const float* eye,const float* pos) noexcept {
-    if(!t || a.n==0)return a.current;
+    if(!t || a.n==0)return a.held[0];
     const float dist=npc::Dist(eye,t->aim);
     const auto kind=KindOf(*t,pos);
     const bool friendNear=FriendNear(h,t->aim,kFriendNearTarget);
-    const int pick=npc::PickArm(a.arm,a.n<3 ? a.n : 3,a.current,dist,kind,friendNear);
+    const int pick=npc::PickArm(a.arm,a.n<3 ? a.n : 3,a.held[0],dist,kind,friendNear);
     // Only d82..d84 exist. An inaccessible fourth weapon must not hide a usable second one, but an already held
     // fourth weapon can still win the same hysteresis comparison and be fired without selecting it again.
-    if(a.current>=3 && a.current<a.n) {
-        const float held=npc::ArmScore(a.arm[a.current],dist,kind,friendNear);
-        if(held>0.0f && (pick<0 || held*1.25f>=npc::ArmScore(a.arm[pick],dist,kind,friendNear)))return a.current;
+    if(a.held[0]>=3 && a.held[0]<a.n) {
+        const float held=npc::ArmScore(a.arm[a.held[0]],dist,kind,friendNear);
+        if(held>0.0f && (pick<0 || held*1.25f>=npc::ArmScore(a.arm[pick],dist,kind,friendNear)))return a.held[0];
     }
     if(s.wantArm>=0) {
-        if(a.current==s.wantArm){s.wantArm=-1;s.armMiss=0;}
+        if(a.held[0]==s.wantArm){s.wantArm=-1;s.armMiss=0;}
         else if(++s.armMiss>kArmMissFrames) {
             s.noSwitch=true;
-            Log("NPCAI soldier %p: weapon %d picked for %d frames, still holding %d: weapon picking off for it",h,s.wantArm,kArmMissFrames,a.current);
+            Log("NPCAI soldier %p: weapon %d picked for %d frames, still holding %d: weapon picking off for it",h,s.wantArm,kArmMissFrames,a.held[0]);
             s.wantArm=-1;
         }
     }
-    if(pick<0 || pick==a.current || pick>=3 || s.noSwitch || !Cfg().npcWeaponSwitch)return a.current;
+    if(pick<0 || pick==a.held[0] || pick>=3 || s.noSwitch || !Cfg().npcWeaponSwitch)return a.held[0];
     h[kPickWeapon+pick]=1;
     if(s.wantArm!=pick){s.wantArm=pick;s.armMiss=0;}
     return -1;   // switching: no shot this frame
@@ -427,8 +437,9 @@ bool ShotOk(Soldier& s,unsigned char* h,const Arms& a,int i,const Enemy& t,const
     return npc::ShotClear(eye,t.aim,kSpread,a.arm[i].blast,fr,n);
 }
 
-// The stock trigger (both WeaponSets: the Fencer's second hand is d71) taken off a shot at `t` that would hit a friend,
-// tested with blast `blast` (the held weapon's, or the largest of its weapons when the held one is not known).
+// A pulled trigger taken off a shot at `t` that would hit a friend. Each hand is tested with the weapon its own WeaponSet
+// holds (d70: set 0, d71: the Fencer's set 1): a rifle in one hand is never vetoed for the rocket launcher carried in the
+// list. Only a hand whose weapon is not known is tested with the largest blast and the longest reach it carries.
 float LargestBlast(const Arms& a) noexcept {
     float b=0.0f;
     for(int i=0;i<a.n;++i)if(a.arm[i].blast>b)b=a.arm[i].blast;
@@ -439,32 +450,37 @@ float LongestReach(const Arms& a) noexcept {
     for(int i=0;i<a.n;++i)if(a.arm[i].reach>reach)reach=a.arm[i].reach;
     return reach;
 }
-void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {
-    if(!h[kTrigger] && !h[kTrigger+1])return;
+// Whether a round of `blast` at `t` (none: along the look, as far as `reach` or the ground) keeps off every friend.
+bool ShotSafe(const unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {
     npc::Friend fr[kMaxFriends];
     const int n=FriendsBut(h,fr);
-    if(t && npc::ShotClear(eye,t->aim,kSpread,blast,fr,n))return;
-    if(!t) {   // no target known to the plugin: the shot along its look, as far as its blast weapon would reach
-        float dir[3];
-        const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
-        dir[0]=std::sin(yaw)*std::cos(pitch);dir[1]=-std::sin(pitch);dir[2]=std::cos(yaw)*std::cos(pitch);
-        float to[3]={eye[0]+dir[0]*reach,eye[1]+dir[1]*reach,eye[2]+dir[2]*reach},hit[3];
-        if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
-        if(reach>0.0f && npc::ShotClear(eye,to,kSpread,blast,fr,n))return;
+    if(t)return npc::ShotClear(eye,t->aim,kSpread,blast,fr,n);
+    if(reach<=0.0f)return false;
+    float dir[3];
+    const float pitch=At<float>(h,kViewPitch),yaw=At<float>(h,kViewYaw);
+    dir[0]=std::sin(yaw)*std::cos(pitch);dir[1]=-std::sin(pitch);dir[2]=std::cos(yaw)*std::cos(pitch);
+    float to[3]={eye[0]+dir[0]*reach,eye[1]+dir[1]*reach,eye[2]+dir[2]*reach},hit[3];
+    if(MapRay(eye,to,hit)>=0.0f)std::memcpy(to,hit,12);
+    return npc::ShotClear(eye,to,kSpread,blast,fr,n);
+}
+void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {
+    for(int k=0;k<kHands;++k) {
+        if(!h[kTrigger+k])continue;
+        const int w=a.held[k];
+        const bool known=w>=0 && w<a.n;
+        if(!ShotSafe(h,t,eye,known ? a.arm[w].blast : LargestBlast(a),known ? a.arm[w].reach : LongestReach(a)))h[kTrigger+k]=0;
     }
-    h[kTrigger]=0;h[kTrigger+1]=0;
 }
 
 // A script's unit (§4.3): its moves and target the stock AI's; the trigger taken off a shot that would hit a friend,
 // the weapon picked for the stock target (not while the held one is unknown).
 Plan Scripted(Soldier& s,unsigned char* h,const Arms& a,const float* eye,const float* pos) noexcept {
-    Plan p{"stock",false,a.current};
+    Plan p{"stock",false,a.held[0]};
     const Enemy* t=StockTarget(h);
-    if(t && a.current>=0)p.arm=ChooseArm(s,h,a,t,eye,pos);
-    if(p.arm<0 && a.current>=0)h[kTrigger]=h[kTrigger+1]=0;   // switching
-    // d71 is the Fencer's independently held second weapon. Until both sets are resolved, either trigger must
-    // pass the largest carried blast, not just the primary weapon's (which may be a nonexplosive gun).
-    Veto(h,t,eye,LargestBlast(a),LongestReach(a));
+    if(t && a.held[0]>=0)p.arm=ChooseArm(s,h,a,t,eye,pos);
+    if(p.arm<0 && a.held[0]>=0)h[kTrigger]=h[kTrigger+1]=0;   // switching
+    // Each hand against its own WeaponSet's weapon: d71 is the Fencer's independently held second one.
+    Veto(h,t,eye,a);
     p.fire=h[kTrigger]!=0;
     return p;
 }
@@ -679,7 +695,7 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
 
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,const Squad* q,ULONGLONG ms) noexcept {
-    Plan p{"stock",false,a.current};
+    Plan p{"stock",false,a.held[0]};
     // Its anchor: the player it follows, its NPC leader, the spot it was free at; a map order's point over them.
     const Orders o=OrdersOf(q,s.control==npc::Control::recruited && world.player ? world.playerAt :
                                s.control==npc::Control::squad && root ? Pos(root) : s.home);
@@ -695,10 +711,10 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     }
     s.target=t.e ? ObjRef::Of(t.e->object) : ObjRef{};
     const unsigned mask=At<std::uint32_t>(h,kControlMask);
-    if(a.current<0) {
+    if(a.held[0]<0) {
         // The held weapon not known (§3.5's M claim does not hold for this soldier): its look and trigger stay the stock
-        // AI's, vetoed against friends with its largest blast; the plugin only moves it.
-        Veto(h,StockTarget(h),eye,LargestBlast(a),LongestReach(a));
+        // AI's, vetoed against friends (an unknown hand with its largest blast); the plugin only moves it.
+        Veto(h,StockTarget(h),eye,a);
         p.fire=h[kTrigger]!=0;
     } else if(t.e) {
         p.arm=ChooseArm(s,h,a,t.e,eye,pos);
@@ -706,11 +722,11 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         if(mask&kMaskLook)Look(h,dir);
         p.fire=ShotOk(s,h,a,p.arm,*t.e,eye) && (mask&kMaskTrigger);
         h[kTrigger]=p.fire ? 1 : 0;
-        Veto(h,t.e,eye,LargestBlast(a),LongestReach(a));   // the second hand (d71) the stock may have pulled
+        Veto(h,t.e,eye,a);   // the second hand (d71) the stock may have pulled, with its own weapon
     } else {
         s.spotSet=false;
         h[kTrigger]=0;
-        Veto(h,StockTarget(h),eye,LargestBlast(a),LongestReach(a));
+        Veto(h,StockTarget(h),eye,a);
     }
     if(!(mask&kMaskMove))return p;
     // Its moves, the first that applies.
@@ -768,7 +784,7 @@ void Think(unsigned char* h,int cls) noexcept {
     if(Cfg().debug && ms-s->loggedAt>kLogMs) {
         s->loggedAt=ms;
         Log("NPCAI %s %p %s pos=(%.0f,%.0f,%.0f) arms=%d held=%d arm=%d reach=%.0f target=%p move=%s fire=%d",kSoldiers[cls].name,h,
-            ControlName(control),pos[0],pos[1],pos[2],a.n,a.current,p.arm,p.arm>=0 && p.arm<a.n ? a.arm[p.arm].reach : 0.0f,s->target.obj,
+            ControlName(control),pos[0],pos[1],pos[2],a.n,a.held[0],p.arm,p.arm>=0 && p.arm<a.n ? a.arm[p.arm].reach : 0.0f,s->target.obj,
             p.move,p.fire);
     }
 }

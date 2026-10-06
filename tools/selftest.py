@@ -3606,9 +3606,12 @@ def npc_ai_wired() -> None:
     scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
     for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
         assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
-    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger]=0;h[kTrigger+1]=0;' in veto, \
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger+k]=0' in veto, \
         'a scripted unit: the trigger (both hands) only taken off'
+    assert 'k<kHands' in veto and 'a.held[k]' in veto and 'LargestBlast(a)' in veto, \
+        "each hand vetoed with its own WeaponSet's weapon; the largest blast only for a hand whose weapon is unknown"
+    assert 'LargestBlast(a),LongestReach(a)' not in code.replace(veto, ''), 'no caller vetoes both hands with the largest blast'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '(At<std::uint8_t>(h,kNet)&1)' in think and 'IsPlayer(h)' in think, "only this machine's NPC soldiers"
     assert 'npc::Scripted(control) ? Scripted(' in think
