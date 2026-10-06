@@ -1534,6 +1534,43 @@ def gunship_cannon_round() -> None:
 
 
 @test
+def gunship_muzzle_wired() -> None:
+    """The gunship's rounds leave off its airframe, now (the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」「炮舰机的轰炸炮弹，
+    感觉在飞机后面出现的」): src/gunmuzzle.h's airframe and hit radii are tools/make_jets.py's (GUNSHIP_AIRFRAME, held to the
+    bomber401 model and the stock shell by check_gunship_muzzle when the files are made; CANNON_SIZE x CANNON_HIT; SHELL_HIT);
+    every gunship round in src/jet_bay.cpp leaves from GunshipMuzzle, none from the vehicle's origin; ShellMake zeroes the IFC's
+    first-round wait (+0x2D8, param #15: the stock shell's 60 frames left it where the gunship had been a second before)
+    behind its signatures; the offline check (tools/gunship_muzzle_check.cpp) is one of the offline checks CTest runs."""
+    head = src('src/gunmuzzle.h')
+    num = r'(-?[\d.]+)f'
+    m = re.search(r'kGunship\{\{' + ','.join([num] * 3) + r'\},\{' + ','.join([num] * 3) + r'\}\}', head)
+    assert m, 'src/gunmuzzle.h kGunship'
+    got = [float(m.group(k)) for k in range(1, 7)]
+    want = [v for part in make_jets.GUNSHIP_AIRFRAME for v in part]
+    assert got == want, f'src/gunmuzzle.h kGunship {got}, tools/make_jets.py GUNSHIP_AIRFRAME {want}'
+    m = re.search(r'kCannonHit=' + num, head)
+    assert m and abs(float(m.group(1)) - make_jets.CANNON_SIZE * make_jets.CANNON_HIT) < 1e-6, 'src/gunmuzzle.h kCannonHit'
+    m = re.search(r'kShellHit=' + num, head)
+    assert m and float(m.group(1)) == make_jets.SHELL_HIT, 'src/gunmuzzle.h kShellHit'
+    assert 'check_gunship_muzzle(game)' in src('tools/make_jets.py'), 'tools/make_jets.py build checks the muzzle numbers'
+    bay = src('src/jet_bay.cpp')
+    assert f'kGunshipSgo[]=L"app:/object/{make_jets.SHELL_STOCK.lower()}"' in bay, 'src/jet_bay.cpp kGunshipSgo is SHELL_STOCK'
+    fired = re.findall(r'Shell\((kGunshipSgo|kCannonSgo),(?:gunshipReady|cannonReady),v,(\w+),', bay)
+    assert len(fired) == 3 and all(f == 'muzzle' for _sgo, f in fired), f'the gunship fires from its muzzle: {fired}'
+    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the cannon, its sight line and both shells'
+    assert re.search(r'MapRay\(muzzle,at,hit\)', bay), 'the NPC cannon looks along the line its round flies'
+    make = bay.split('unsigned char* ShellMake(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);' in make, 'ShellMake zeroes the first-round wait'
+    assert 'constexpr std::size_t kIfcWait=0x2D8;' in bay
+    assert 'for(const auto& b:kIfcWaitSigs)ifcWaitOk=ifcWaitOk && Matches(' in bay, 'the wait behind its signatures'
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(gunship_muzzle_check EXCLUDE_FROM_ALL tools/gunship_muzzle_check.cpp)' in cmake
+    checks = cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    assert 'gunship_muzzle_check' in checks.split(), 'CTest runs gunship_muzzle_check'
+    assert '炮舰机的炮口' in src('README.md'), 'README.md: the gunship muzzle'
+
+
+@test
 def readme_counts() -> None:
     readme = src('README.md')
     assert f'{len(calls.FLOWN)} 种呼叫' in readme, f'README.md: say {len(calls.FLOWN)} 种呼叫 (tools/calls.py FLOWN)'

@@ -151,6 +151,14 @@ CANNON_REACH = 2500.0
 CANNON_SIZE = 0.8
 CANNON_HIT = 2.0
 CANNON_COLOR = (6.0, 3.0, 0.6, 1.0)
+# Where the gunship's rounds leave (src/gunmuzzle.h; the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」): off its airframe,
+# the stock bomber401 model's whole box [centre, half extents] (jet_models.model_box, the vehicle's axes and origin), on
+# the line from the box's centre to the aim, a round's hit radius (#7 AmmoSize x #8 AmmoHitSizeAdjust) and a margin past
+# it. From the vehicle's origin, the belly's floor, the line to a target inside the banked circle crossed the plane.
+# check_gunship_muzzle holds these to the game's model and the stock shell; tools/selftest.py holds src/gunmuzzle.h to them.
+GUNSHIP_AIRFRAME = ((0.0, 2.136, 0.0), (25.938, 2.009, 8.078))
+SHELL_STOCK = 'DEMOGUNSHIPFIREE25.SGO'   # the gunship's shells (src/jet_bay.cpp kGunshipSgo), fired as the game has them
+SHELL_HIT = 10.0                         # its hit radius: #7 10 x #8 1
 # The helis the Air Raider's call weapons bring (src/jet.cpp HeliLaunch, tools/call_weapons.py): the stock
 # call-in helis made script-placeable (vcobjects.as_mission_sgo), so RideAi(true) gives them their weapons.
 HELIS: dict[str, str] = {
@@ -193,6 +201,7 @@ def build(root: str) -> dict[str, bytes]:
         out[f'OBJECT/{name}'] = data
     cannon = cannon_round(game)
     check_cannon_round(cannon)
+    check_gunship_muzzle(game)
     out[f'OBJECT/{CANNON_FILE}'] = cannon
     for name, stock in HELIS.items():
         out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
@@ -334,6 +343,23 @@ def cannon_round(game: vc.Game) -> bytes:
     p[7], p[8] = float(CANNON_SIZE), float(CANNON_HIT)
     p[12] = [float(c) for c in CANNON_COLOR]
     return sgo.write(version, m)
+
+
+class GunshipMuzzleError(Exception):
+    """The gunship's model or stock shell is not what src/gunmuzzle.h fires from (check_gunship_muzzle)."""
+
+
+def check_gunship_muzzle(game: vc.Game) -> None:
+    """Raise GunshipMuzzleError unless the stock bomber401's whole box is GUNSHIP_AIRFRAME and the stock shell's hit radius
+    (#7 x #8) SHELL_HIT: the numbers src/gunmuzzle.h puts the gunship's muzzle off its airframe with."""
+    import sgo
+    box = jet_models.model_box(game, 'bomber401')
+    if any(not _same(a, b) for got, want in zip(box, GUNSHIP_AIRFRAME) for a, b in zip(got, want)):
+        raise GunshipMuzzleError(f'bomber401 的整机包围盒是 {box}，不是 GUNSHIP_AIRFRAME {GUNSHIP_AIRFRAME}')
+    p = sgo.read(game.read('OBJECT', SHELL_STOCK))[1].get('indirect_fire_param')
+    hit = _number(p[7]) * _number(p[8]) if isinstance(p, list) and len(p) == 19 and None not in (_number(p[7]), _number(p[8])) else None
+    if hit is None or not _same(hit, SHELL_HIT):
+        raise GunshipMuzzleError(f'{SHELL_STOCK} 的命中半径是 {hit}，不是 SHELL_HIT {SHELL_HIT}')
 
 
 class CannonRoundError(Exception):
