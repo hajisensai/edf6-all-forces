@@ -32,7 +32,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址全部是 RVA。纯静态分析（`to
 | 读 `FireRecoil` | `0x68CF34` | 武器 SGO 的 `FireRecoil` → `weapon+0x37C` | H |
 | 开火 | `0x6982A5` / `0x6982B7` | `weapon+0xBD4 = 1`（本帧开过火），`weapon+0xBD8 = weapon+0x37C`（`0x693A42` 每帧乘 0.9 衰减） | H |
 | 逐炮位 | VehicleBase slot 5 `0x630250`，`0x630471` | 遍历 `veh+0x638`（个数 `veh+0x648`）的 holder，武器 `+0xBD4 == 1` 就调本类 slot 48（`vtbl+0x180`）。**没有座位 / 乘员 / 网络判断** | H |
-| 各类 slot 48 | 402 `0x5FD9F0`、403 `0x5FED60`、404 `0x5FFEE0`、503 `0x617B80`、505 `0x61AEA0`、601 `0x620960`、603 `0x621700` | 载具死了（`veh+0x2E8`）就跳过；否则取 holder `+0x20` 的 BodyRecoil 参数，调 `0x5F9FB0`（403 的 AimRecoil 炮位、511、410 走 `0x5F9F10` 抖准星） | H |
+| 各类 slot 48 | 402 `0x5FD9F0`、403 `0x5FED60`、404 `0x5FFEE0`、503 `0x617B80`、505 `0x61AEA0`、601 `0x620960`、603 `0x621700`、Car（格雷普 401）`0x65A740` | 载具死了（`veh+0x2E8`）就跳过；否则取 holder `+0x20` 的 BodyRecoil 参数，调 `0x5F9FB0`（403 的 AimRecoil 炮位、511、410 走 `0x5F9F10` 抖准星） | H |
 | 加到车体 | `0x5F9FB0(参数, 车体刚体 veh+0x1698, FireRecoil, 炮的矩阵 weapon+0xB0)` | 线速度 += −FireRecoil × 推 × 60 × 0.7 × 矩阵第 3 行（炮管方向）；角速度 += −FireRecoil × 摆 × 0.3 × 矩阵第 1 行。读写函数与 `src/physics.cpp` 的 `kGetLinVel 0x11B1300` / `kSetLinVel 0x11B18F0` / `kGetAngVel 0x11B1060` / `kSetAngVel 0x11B1760` 相同 | 公式 H；「第 3 行 = 炮管方向、第 1 行 = 横轴」M |
 
 所以「推」= 车体被往后推，「摆」= 车体前后晃。`FireRecoil` 在 NPC 用的 AI 炮和玩家炮里相同（泰坦主炮都是 0.8），不是差异来源。(H)
@@ -85,7 +85,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址全部是 RVA。纯静态分析（`to
   （`docs/online-re.md` §3、§4）。所以后坐力造成的位移在权威机器上由物理算出来，再随位姿复制到各端；非权威端即使本地也加了后坐力，
   也会被拉回权威的位姿。(H 结构 / M 端到端)
 - 这次只改数据，不改这条链路；前提是各台机器装同一版本的 mod（`Mods/OBJECT` 里这几个文件相同），和插件其它关卡文件的要求一样。
-- 已知的原版行为（不在本次范围）：远端玩家坐炮手座开副炮时，后坐力只在他自己的机器上加，权威机器上没有这一下（玩家泰坦也一样）；
+- 原版行为（另见 PR #61 `fix/gunner-recoil-sync`、`docs/online-re.md` §10，已逆向确认）：远端玩家坐炮手座开副炮时，后坐力只在他自己的机器上加，权威机器收到射击计数但不重放开火（`0x690420` 在操作者是别的机器时跳过），车体没有这一下（玩家泰坦也一样）；
   NPC 驾驶员（RideAi 的 `DummyVehicleRider`）不注册网络身份，见 `docs/online-re.md` §3.4 的隐患。(M)
 
 ## 7. 待实机核对
