@@ -2670,6 +2670,16 @@ def npc_ai_wired() -> None:
     assert 'if(At<const void*>(v,kRoute))return;' in body and 'if(InSession() && !IsRoomHost())return;' in body
     assert body.index('Chasing(v)') < body.index('Put<float>(seat,kSeatSteer')
     assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
+    # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
+    # SetFollow and its replication slot.
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('PreThink(static_cast<unsigned char*>(human))') < hook.index('nextThink[I](human,dt);')
+    pre = code.split('void PreThink(unsigned char* h) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(InSession() && !IsRoomHost())return;' in pre and 'kAutoResurrect' in pre
+    follow = code.split('void Follow(unsigned char* h,unsigned char* leader) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'image+kSetFollow' in follow and 'vt[kSlotNetFollow]==image+kNetFollow' in follow
+    for key, default in (('NpcSquadSuccession', '1'), ('NpcSquadMin', '2'), ('NpcSquadMax', '8'), ('NpcSquadJoinRange', '150')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
 

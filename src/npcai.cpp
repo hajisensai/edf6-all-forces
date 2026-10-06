@@ -509,7 +509,99 @@ int Fault(const EXCEPTION_POINTERS* e) noexcept {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// --- The leader's death (§5.3) ---
+// The stock (0x596C1B..0x596D91): a follower whose leader is dead (and comes back by no auto-resurrection) unfollows,
+// each one alone. Before that code runs for any of them (the first follower's Think of the frame), the plugin picks
+// the next leader among the live followers (PickLeader), puts it under the dead one's own leader (the player for a
+// recruited squad) and the others under it; a squad down to fewer than NpcSquadMin joins the nearest squad within
+// NpcSquadJoinRange with room (JoinSquad). Every change through the stock SetFollow and its replication (vslot 39).
+constexpr std::size_t kFollowers=0x550,kListNodeNext=0x0,kListNodeObject=0x10,kFollowerCount=0x558;
+constexpr std::uint32_t kAutoResurrect=0x20000;
+constexpr unsigned kSetFollow=0x54EC50;
+constexpr std::size_t kSlotNetFollow=39;
+constexpr unsigned kNetFollow=0x59C3D0;
+const unsigned char kSetFollowSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,
+                                     0x89,0x7C,0x24,0x20,0x41,0x56,0x48,0x83,0xEC,0x30,0x45,0x0F,0xB6,0xF0,0x48,0x8B,0xFA,0x48,0x8B,0xD9,
+                                     0xE8,0xC7,0xF0,0xFF,0xFF};   // ...movzx r14d,r8b; mov rdi,rdx; mov rbx,rcx; call Unfollow 0x54DD40
+using SetFollowFn=void(__fastcall*)(void*,void*,bool);
+bool followOk=false;
+constexpr int kMaxSquad=16;
+
+// Follow `leader` (nullptr: none) the stock way, and tell the other machines (the soldier's vslot 39, 0x59C3D0).
+void Follow(unsigned char* h,unsigned char* leader) noexcept {
+    reinterpret_cast<SetFollowFn>(image+kSetFollow)(h,leader,false);
+    const auto vt=At<void* const*>(h,0);
+    if(vt[kSlotNetFollow]==image+kNetFollow)reinterpret_cast<SetFollowFn>(vt[kSlotNetFollow])(h,leader,false);
+}
+
+// The live NPC soldiers following `leader` (its +0x550 list), at most `most`.
+int Followers(const unsigned char* leader,unsigned char** out,int most) noexcept {
+    const auto head=At<const unsigned char*>(leader,kFollowers);
+    if(!Readable(head,0x18))return 0;
+    int n=0,guard=0;
+    for(auto node=At<const unsigned char*>(head,kListNodeNext);node && node!=head && n<most && guard<64;
+        node=At<const unsigned char*>(node,kListNodeNext),++guard) {
+        if(!Readable(node,0x18))break;
+        const auto o=At<unsigned char*>(node,kListNodeObject);
+        if(o && Readable(o,kDead+1) && !o[kDead] && IsSoldierClass(o) && !IsPlayer(o))out[n++]=o;
+    }
+    return n;
+}
+
+// The squads a leaderless remnant may join: live, unscripted NPC soldiers leading followers (or recruited by the
+// player), but `except`; their places and sizes.
+int OtherSquads(const unsigned char* except,unsigned char** leaders,float (*at)[3],int* sizes,int most) noexcept {
+    int n=0;
+    for(int i=0;i<world.friends && n<most;++i) {
+        const auto o=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
+        if(o==except || !IsSoldierClass(o) || IsPlayer(o) || o[kDead] || Routed(o))continue;
+        const auto up=At<const unsigned char*>(o,kLeader);
+        const auto count=At<std::uint64_t>(o,kFollowerCount);
+        if((up && !IsPlayer(up)) || (count==0 && !up))continue;   // a follower, or alone and not recruited
+        leaders[n]=o;std::memcpy(at[n],Pos(o),12);sizes[n]=static_cast<int>(count<64 ? count : 64)+1;++n;
+    }
+    return n;
+}
+
+void Succeed(unsigned char* dead) noexcept {
+    unsigned char* m[kMaxSquad];
+    const int n=Followers(dead,m,kMaxSquad);
+    if(!n)return;
+    npc::Member members[kMaxSquad];
+    for(int i=0;i<n;++i) {
+        members[i]=npc::Member{static_cast<std::uint32_t>(i),true,false,At<float>(m[i],kHumanHp),0,{}};
+        std::memcpy(members[i].pos,Pos(m[i]),12);
+    }
+    const int pick=npc::PickLeader(members,n);
+    if(pick<0)return;
+    unsigned char* const lead=m[pick];
+    auto up=At<unsigned char*>(dead,kLeader);
+    if(up && (!Readable(up,kDead+1) || up[kDead]))up=nullptr;
+    // Too few left: join another squad instead (the nearest with room).
+    unsigned char* others[32];float at[32][3];int sizes[32];
+    const int k=n<Cfg().npcSquadMin ? OtherSquads(dead,others,at,sizes,32) : 0;
+    const int join=k ? npc::JoinSquad(n,Cfg().npcSquadMin,Pos(lead),at,sizes,k,Cfg().npcSquadMax,Cfg().npcSquadJoinRange) : -1;
+    unsigned char* const top=join>=0 ? others[join] : lead;
+    if(join<0)Follow(lead,up);
+    for(int i=0;i<n;++i)if(m[i]!=top)Follow(m[i],top);
+    if(join>=0)Log("NPCAI squad of dead leader %p: %d left, joined squad %p (%d)",dead,n,top,sizes[join]);
+    else Log("NPCAI squad of dead leader %p: %p leads the %d left%s",dead,lead,n,up ? (IsPlayer(up) ? " (still the player's)" : " (under its leader)") : "");
+}
+
+void PreThink(unsigned char* h) noexcept {
+    if(!followOk || !Cfg().npcSquadSuccession || IsPlayer(h) || h[kDead] || (At<std::uint8_t>(h,kNet)&1))return;
+    const auto leader=At<unsigned char*>(h,kLeader);
+    if(!leader || !Readable(leader,kObjectFlags+4) || !leader[kDead] || IsPlayer(leader))return;
+    if(At<std::uint32_t>(leader,kObjectFlags)&kAutoResurrect)return;   // it comes back: the stock keeps following it
+    if(InSession() && !IsRoomHost())return;                            // the host decides squads (§2.2)
+    if(world.frame!=GameFrame())Gather(At<std::int32_t>(h,kTeam));
+    Succeed(leader);
+}
+
 template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
+    if(ok && Cfg().enabled && Cfg().customNpcAi) {
+        __try { PreThink(static_cast<unsigned char*>(human)); } __except(Fault(GetExceptionInformation())) {}
+    }
     nextThink[I](human,dt);
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return;
     __try { Think(static_cast<unsigned char*>(human),I); } __except(Fault(GetExceptionInformation())) {}
@@ -529,6 +621,8 @@ bool InstallNpcAi() noexcept {
     __try {
         for(const auto& s:kSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("NPCAI profile mismatch at %#zx: the soldiers' AI stays stock",s.rva);return false;}
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    __try { followOk=Matches(kSetFollow,kSetFollowSig,sizeof(kSetFollowSig)); } __except(EXCEPTION_EXECUTE_HANDLER){followOk=false;}
+    if(!followOk)Log("NPCAI SetFollow not as read: squads are not reorganized when a leader dies");
     int hooked=0;
     for(int i=0;i<kClasses;++i) {
         auto slot=reinterpret_cast<void**>(image+kSoldiers[i].vtable)+kSlotThink;
