@@ -58,6 +58,11 @@ bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
 }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return true; }
+float MapFloorRay(const float*,const float*,float*) noexcept { return -1.0f; }
+int MapCommandGuardAt(const float*) noexcept { return -1; }
+// The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
+const void* lockOf=nullptr;float lockAt[3]{};
+bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
 }
 int main() {
     using namespace crew;
@@ -187,6 +192,38 @@ int main() {
         Expect(FallBack(hurt,human,at,remote,now),"a hurt soldier of a remote player's squad falls back");
         Expect(std::fabs(hurt.fallTo[0]-300.0f)<0.01f && std::fabs(hurt.fallTo[2]-(40.0f-kBehindPlayer))<0.01f,
                "behind that player, on their side away from the threat (their camera is not this machine's)");
+    }
+    // The mark (§6.3) is kept until its enemy dies or is gone (the user, 2026-10-07: "标记还很快消失", "标记效果应该先打死
+    // 才换吧"), not only while its lock point is lockable this frame.
+    {
+        Reset();
+        unsigned char foeCtrl[0x10]{};
+        Put<void*>(other,kSelfCtrl,foeCtrl);Put<int>(other,kTeam,1);
+        const float seen[3]={10.0f,1.0f,10.0f};
+        Expect(NpcMarkEnemy(other,seen,true) && NpcMarked(),"the map marks an enemy");
+        world.enemies=1;world.enemy[0]=Enemy{other,{12.0f,1.0f,14.0f},1};
+        MarkTick();
+        Expect(NpcMarked() && mark.at[0]==12.0f && mark.at[2]==14.0f,"a lockable marked enemy: kept, followed");
+        world.enemies=0;lockOf=other;lockAt[0]=30.0f;lockAt[1]=2.0f;lockAt[2]=-5.0f;
+        MarkTick();
+        Expect(NpcMarked(),"the marked enemy out of the lockable list a frame: the mark kept");
+        Expect(mark.at[0]==30.0f && mark.at[2]==-5.0f,"...where its lock point still is");
+        lockOf=nullptr;
+        MarkTick();MarkTick();
+        Expect(NpcMarked() && mark.at[0]==30.0f,"no lock point at all: kept where it was last seen");
+        other[kDead]=1;
+        MarkTick();
+        Expect(!NpcMarked(),"the marked enemy dead: the mark let go");
+        other[kDead]=0;
+        Expect(NpcMarkEnemy(other,seen,true),"marked again");
+        unsigned char otherCtrl[0x10]{};
+        Put<void*>(other,kSelfCtrl,otherCtrl);
+        MarkTick();
+        Expect(!NpcMarked(),"a new object at the marked one's address: the mark let go");
+        Put<void*>(other,kSelfCtrl,foeCtrl);
+        Expect(NpcMarkEnemy(other,seen,true) && !NpcMarkEnemy(other,seen,true) && !NpcMarked(),"the same enemy again: let go");
+        Expect(NpcMarkEnemy(other,seen,true) && NpcMarkEnemy(other,seen,false) && NpcMarked(),"the focus order's mark never lets go");
+        Put<void*>(other,kSelfCtrl,nullptr);
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
