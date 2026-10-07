@@ -12,8 +12,9 @@ name inside the archive, CMPL-compressed like pylib/mdb_jet.py does); every othe
 
 The fixed-wing models carry retractable landing gear (pylib/jet_gear.py, Recipe.gear): three legs grafted from a stock
 helicopter's gear, extended in the bind pose, the wheels the model's lowest points (so the grounded model stands on
-them and its box's bottom is their contact); the archive gains the donor's textures. Hover craft (the carrier, the
-drone) have none.
+them and its box's bottom is their contact); the archive gains the donor's textures. Hover craft have none: the
+carrier stands on its landing pods; the drone, whose lowest point was its gun pod, has fixed skids (pylib/jet_skids.py,
+Recipe.skids: two rails, level, 0.25 m under the gun, its bottom and its collision's contact).
 
 Every jet model's root bone is `mdl` (pylib/vcobjects.py JET_MAB_ROOT: the V506 locators hang on that name), so
 a model whose root is called otherwise gets it renamed (Recipe.root; only that bone uses the name).
@@ -50,6 +51,7 @@ from mdb import (Bone, Mat, Mdb, Mesh, Object, bind_world, cmpl_compress, cmpl_d
 import gamedir  # noqa: E402
 import graft_pure  # noqa: E402
 import jet_gear  # noqa: E402
+import jet_skids  # noqa: E402
 import mdb_jet  # noqa: E402
 
 Box = tuple[list[float], list[float]]          # (min xyz, max xyz)
@@ -68,13 +70,15 @@ class Recipe:
     grounded: bool = True     # lifted so its lowest point is the model origin (grounded): the game puts a vehicle's origin
                               # on the ground; a model under it sinks into the ground, a box under it falls through it
     gear: str | None = None   # its landing gear (jet_gear.SPECS key) before scaling; None: none (hover craft)
+    skids: str | None = None  # its fixed skids (jet_skids.SPECS key) before scaling; None: none
 
 
 MODELS: dict[str, Recipe] = {
     'EDF6VC_INTERCEPTOR.MRAB': Recipe('BOMBER501.MRAB', 'bomber501_2.mdb', 0.65, split=True, fuselage_x=2.0, gear='bomber501'),
     'EDF6VC_MULTIROLE.MRAB': Recipe('BOMBER401.MRAB', 'bomber401.mdb', 0.5, fuselage_x=2.5, gear='bomber401'),
     'EDF6VC_CARRIER.MRAB': Recipe('V508_TRANSPORT.MRAB', 'v508_transport.mdb', 1.6, fuselage_x=4.5),
-    'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body'),
+    'EDF6VC_DRONE.MRAB': Recipe('PD607_DRONE_AIRSTRIKE.MRAB', 'pd607_Drone_airstrike.mdb', 3.0, root='mdl', level='body',
+                                skids='pd607'),
 }
 # The submarine carrier (tools/make_sub.py, docs/subcarrier-re.md): the mission object EV603_MARINE's model,
 # at its size in the missions (x 1: 1664 m long, 355 m wide, hull bottom to main deck 360 m). Its `body` is bound turned (x -> y, y -> z, z -> x) like the
@@ -349,12 +353,14 @@ def level_bone(md: Mdb, name: str) -> Mdb:
 
 
 def unscaled(src: Mdb, r: Recipe, d: jet_gear.Donors | None) -> tuple[Mdb, list[str]]:
-    """The model `r` makes of `src` before its scale (levelled, split, with its gear) and the gear's textures."""
+    """The model `r` makes of `src` before its scale (levelled, split, with its gear or skids) and the gear's textures."""
     if r.split:
         split, surfaces, _stats = mdb_jet.build(collapse_501_2(src))
         mdb_jet.self_check(mdb_write(split), surfaces)        # hinge / bind checks on the unscaled split model
-        return with_gear(split, r.gear, d)
-    return with_gear(level_bone(src, r.level) if r.level else src, r.gear, d)
+        md, tex = with_gear(split, r.gear, d)
+    else:
+        md, tex = with_gear(level_bone(src, r.level) if r.level else src, r.gear, d)
+    return (jet_skids.add_skids(md, jet_skids.SPECS[r.skids]) if r.skids else md), tex
 
 
 def finish(md: Mdb, r: Recipe) -> Mdb:
@@ -371,7 +377,10 @@ def make_model(src: Mdb, r: Recipe, d: jet_gear.Donors | None = None) -> Mdb:
 
 def replace_member(raw: bytes, model: str, data: bytes, donor=None, textures: list[str] | None = None) -> bytes:  # noqa: ANN001 - mdb.Rab
     """The archive `raw` with member `model` replaced by `data` (CMPL-compressed) and the texture files `textures`
-    (each with its .lod variant) copied in from the archive `donor` (graft_pure.copy_texture_members)."""
+    (each with its .lod variant) copied in from the archive `donor` (graft_pure.copy_texture_members); every other
+    model and the textures only they use taken out (graft_pure.prune_members: the SGOs name `model` alone; the
+    interceptor's archive carried the stock bomber501.mdb, the elevon jet's bomber501_2.mdb, each with its own
+    diffuse texture, 0.5 MB that nothing loaded)."""
     rab = rab_read(raw)
     assert rab_write(rab) == raw, 'stock archive does not round-trip'
     hits = [f for f in rab.files if f.name.lower() == model.lower()]
@@ -381,6 +390,7 @@ def replace_member(raw: bytes, model: str, data: bytes, donor=None, textures: li
     hits[0].stored = stored
     if textures:
         graft_pure.copy_texture_members(rab, donor, textures)
+    graft_pure.prune_members(rab, [model])
     return rab_write(rab)
 
 
@@ -484,7 +494,8 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
 #    (x 1.22..2.69, y 0.94..1.41, z -0.88..-0.15: the two dark trapezoids the user sees from behind). The first tables
 #    put one flame on a 0.68 x 0.26 m box under the centre body (x 0, z -0.8), a light panel, not an engine: from
 #    behind it burned under the belly's middle, off both exhausts (the user's picture, 2026-10-06, 548 km/h).
-#  - the drone: a round 0.33 m nozzle at z -1.26 (the old table had it 0.33 m above and 0.24 m behind it).
+#  - the drone: a round 0.33 m nozzle at z -1.26 (the old table had it 0.33 m above and 0.24 m behind it); 0.25 m higher
+#    since its skids (jet_skids) stand it 0.25 m higher.
 # Each flame sits on its exit's centre in the exit plane and is as big as its engine (the user, 2026-10-05:
 # 「尾焰大小应该根据引擎大小来」): width the exit's diameter (a circle of the exit's area; an exit that is only an edge:
 # its length), length FLAME_LENGTH_PER_DIAMETER of that. NOZZLE_EXITS picks each exit's rim vertices (a box in the
@@ -499,14 +510,15 @@ STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bo
 STOCK_FUSELAGE_X: dict[str, float] = {'bomber401': 2.5, 'bomber501_2': ELEVON_FUSELAGE_X}
 # The landing gear (Recipe.gear) stands each model up on its wheels, so its grounding lifts it by the gear's height
 # more (2026-10-05): the bomber501 1.0 m, the interceptor 0.65 m (both: jet_gear.SPECS drop x scale), the multirole
-# 0.4365 m ((1.0 - its stock lowest point 0.127) x 0.5); the drone has no gear. The exit boxes are in the lifted frame.
+# 0.4365 m ((1.0 - its stock lowest point 0.127) x 0.5); the drone's skids 0.25 m (jet_skids.SPECS drop x 3). The exit
+# boxes are in the lifted frame.
 FLAME_LENGTH_PER_DIAMETER = 5.0
 ExitBox = tuple[tuple[float, float], tuple[float, float], tuple[float, float]]   # (x0, x1), (y0, y1), (z0, z1)
 NOZZLE_EXITS: dict[str | None, tuple[ExitBox, bool]] = {    # (box, mirrored: a left twin at -x)
     None: (((1.5, 5.6), (0.0, 4.6), (-12.95, -11.69)), True),
     'EDF6VC_INTERCEPTOR.MRAB': (((1.0, 3.6), (0.0, 3.0), (-8.4, -7.6)), True),
     'EDF6VC_MULTIROLE.MRAB': (((1.0, 2.9), (0.85, 1.5), (-1.0, -0.1)), True),
-    'EDF6VC_DRONE.MRAB': (((-0.3, 0.3), (0.7, 1.3), (-1.3, -1.22)), False),
+    'EDF6VC_DRONE.MRAB': (((-0.3, 0.3), (0.95, 1.55), (-1.3, -1.22)), False),
     'bomber401': (((2.0, 5.8), (0.8, 2.15), (-2.0, -0.2)), True),
     'bomber501_2': (((1.5, 5.6), (-2.3, 2.3), (-12.95, -11.69)), True),
 }
@@ -515,7 +527,7 @@ NOZZLES: dict[str | None, tuple[Nozzle, ...]] = {
     None: (((3.58, 2.325, -12.006), 1.839), ((-3.58, 2.325, -12.006), 1.839)),
     'EDF6VC_INTERCEPTOR.MRAB': (((2.327, 1.511, -7.804), 1.195), ((-2.327, 1.511, -7.804), 1.195)),
     'EDF6VC_MULTIROLE.MRAB': (((1.916, 1.157, -0.457), 0.738), ((-1.916, 1.157, -0.457), 0.738)),
-    'EDF6VC_DRONE.MRAB': (((0.0, 1.005, -1.261), 0.323),),
+    'EDF6VC_DRONE.MRAB': (((0.0, 1.255, -1.261), 0.323),),
     'bomber401': (((3.831, 1.44, -0.913), 1.478), ((-3.831, 1.44, -0.913), 1.478)),
     'bomber501_2': (((3.58, 0.039, -12.006), 1.839), ((-3.58, 0.039, -12.006), 1.839)),
 }
@@ -615,7 +627,8 @@ def close(a: float, b: float) -> bool:
 
 
 def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None) -> None:
-    """Re-read the written archive: the stock members in their order, untouched ones byte-identical, plus (a model with
+    """Re-read the written archive: the stock members in their order, untouched ones byte-identical, but for the ones
+    nothing loads (replace_member: other models, textures no texture table of the new model names), plus (a model with
     gear) exactly the gear's donor textures, their bytes the donor's; the new model round-trips; bone names as the
     unscaled model it was made from (unscaled: the stock skeleton, the elevon split, the gear), every bone's bind x
     inv_bind and world translation consistent with that x scale; the stock geometry's box == the source box x scale
@@ -631,13 +644,21 @@ def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None) -
     for f in added:
         assert f.stored == next(x for x in d.rab.files if x.name.lower() == f.name.lower()).stored  # type: ignore[union-attr]
     kept = [f for f in b.files if f not in added]
-    assert [(f.name, a.folders[f.folder], f.flag) for f in a.files] == [(f.name, b.folders[f.folder], f.flag) for f in kept]
-    for fa, fb in zip(a.files, kept):
-        if fa.name.lower() != r.model.lower():
-            assert fa.stored == fb.stored, f'{fa.name} changed'
     data = next(f for f in b.files if f.name.lower() == r.model.lower()).data
     new = mdb_read(data)
     assert mdb_write(new) == data, 'new model does not round-trip'
+    used = {x.name.lower() for t in new.textures for x in graft_pure.texture_members(b, t.filename)}
+    assert all(len(graft_pure.texture_members(b, t.filename)) == 2 for t in new.textures), 'a texture of the model is no member'
+    gone = [f for f in a.files if f.name.lower() not in {x.name.lower() for x in kept}]
+    for f in gone:   # only what nothing loads went
+        n = f.name.lower()
+        ok = (n.endswith('.mdb') and n != r.model.lower()) or (graft_pure.is_texture_member(n) and n not in used)
+        assert ok, f'{f.name} taken out'
+    stay = [f for f in a.files if f not in gone]
+    assert [(f.name, a.folders[f.folder], f.flag) for f in stay] == [(f.name, b.folders[f.folder], f.flag) for f in kept]
+    for fa, fb in zip(stay, kept):
+        if fa.name.lower() != r.model.lower():
+            assert fa.stored == fb.stored, f'{fa.name} changed'
 
     names = [ref.name_of(x.name) for x in ref.bones]
     if r.root:
@@ -651,7 +672,9 @@ def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None) -
     shift = (0.0, lift, 0.0)
     gear = {new.bone_index(n) for n in jet_gear.GEAR_BONES} if r.gear else set()
     stock = set(range(len(new.bones))) - gear
-    for (l0, h0), pts in (((lo0, hi0), bind_positions(new)), (bbox(bind_positions(src)), bind_positions(new, stock))):
+    # the stock geometry: without the skids' mesh (jet_skids.skid_mesh: the last)
+    bare = replace(new, objects=[replace(new.objects[0], meshes=new.objects[0].meshes[:-1])]) if r.skids else new
+    for (l0, h0), pts in (((lo0, hi0), bind_positions(new)), (bbox(bind_positions(src)), bind_positions(bare, stock))):
         lo1, hi1 = bbox(pts)
         for i in range(3):
             assert close(lo1[i], l0[i] * r.scale + shift[i]) and close(hi1[i], h0[i] * r.scale + shift[i]), \
@@ -666,6 +689,8 @@ def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None) -
         assert all(abs(x1.half[c] - x0.half[c] * r.scale) < 1e-4 for c in range(3))
     if r.gear:
         jet_gear.check_gear(new, r.scale)
+    if r.skids:
+        jet_skids.check_skids(new, jet_skids.SPECS[r.skids], r.scale)
 
 
 # ------------------------------------------------------------------------------------------ main

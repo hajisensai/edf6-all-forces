@@ -111,7 +111,7 @@ int BreakLocks(const void*,float) noexcept { MissingRecoveryDependency();return 
 int LockersOf(const void*,float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
 bool Alive(const ObjRef&) noexcept { MissingRecoveryDependency();return false; }
 Jet* FindJet(const unsigned char*) noexcept { MissingRecoveryDependency();return nullptr; }
-void HoldOffGround(Jet&,const float*,float,float,ULONGLONG) noexcept { MissingRecoveryDependency(); }
+void HoldOffGround(Jet&,const float*,float,float,ULONGLONG,float) noexcept { MissingRecoveryDependency(); }
 void Hover(Jet&,const Kind&,const unsigned char*,const float*,const float*,const float*,float,float,float,float,bool) noexcept { MissingRecoveryDependency(); }
 void Thrusters(Jet&,const Kind&,unsigned char*,float,ULONGLONG) noexcept { MissingRecoveryDependency(); }
 void DollFrame(int,const unsigned char*,float) noexcept { MissingRecoveryDependency(); }

@@ -22,6 +22,7 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
 #include "boarding_entrance.h"
+#include "exit_ground.h"
 #include "body506.h"
 #include "game_clock.h"
 #include "edf/host.h"
@@ -709,6 +710,30 @@ void UnderPlayer() noexcept {
     if(const auto human=PlayerHuman())WatchUnder(human,"player",human);
 }
 
+// The player off a vehicle onto the floor (exit_ground.h): from the frame they are on foot, kExitWatchMs in which the
+// stock get-off (0x5701B0) and the ride state's exit (0x57B12F's warp to the same point) put them down; whenever in it
+// they are in the floor under them, they are put on it.
+constexpr ULONGLONG kExitWatchMs=1000;
+struct ExitWatch { const void* human; bool riding; ULONGLONG off; } exitWatch{};
+void ExitGroundTick() noexcept {
+    if(!Cfg().enabled){exitWatch=ExitWatch{};return;}
+    unsigned char* const human=PlayerHuman();
+    if(human!=exitWatch.human)exitWatch=ExitWatch{human,false,0};
+    if(!human || human[kDead]){exitWatch=ExitWatch{};return;}
+    const auto ctrl=At<const unsigned char*>(human,kHumanVehicleCtrl);
+    if(ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)!=0){exitWatch.riding=true;exitWatch.off=0;return;}
+    const ULONGLONG ms=GameMs();
+    if(exitWatch.riding){exitWatch.riding=false;exitWatch.off=ms;}
+    if(!exitWatch.off)return;
+    if(ms-exitWatch.off>kExitWatchMs){exitWatch.off=0;return;}
+    const float* p=reinterpret_cast<const float*>(human+kPosition);
+    float to=0.0f;
+    if(!std::isfinite(p[0]+p[1]+p[2]) || !exitground::Correct(p,&MapFloorRay,&MapGroundNear,&to))return;
+    const float at[3]={p[0],to,p[2]};
+    const float was=p[1];
+    if(WarpHuman(human,at))Log("EXIT the player put down %.2f m in the floor at (%.1f,%.1f,%.1f): put on it",to-exitground::kLift-was,at[0],at[1],at[2]);
+}
+
 void UnderVehicle(unsigned char* v) noexcept {
     const int c=ClassOf(v);
     WatchUnder(v,c>=0 ? kClasses[c].name : "vehicle",nullptr);
@@ -738,6 +763,7 @@ void FrameTick() noexcept {
     tickFrame=GameFrame();
     PerfTick();
     GuardedTick(kStepUnderground,&UnderPlayer);
+    GuardedTick(kStepUnderground,&ExitGroundTick);   // off a vehicle: on the floor, not in it (exit_ground.h)
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
     GuardedTick(kStepHudPublish,&HudPublish);
@@ -903,9 +929,16 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
                 if(!std::isfinite(d) || d>=best)continue;
                 best=d;found=true;
                 std::memcpy(out->at,point,12);out->reach=reach;out->distance=std::sqrt(d);out->inReach=d<=reach*reach;
+                out->hail=out->coming=false;
             }
         }
-        return found;
+        if(found)return true;
+        // None to board near them: the one up in the air the hail key calls down (the user, 2026-10-07: "the carrier has
+        // no boarding point": an NPC carrier holds 150 m up, boardable only once called down, and nothing said so).
+        float at[3],distance=0.0f;bool coming=false;
+        if(!PlayerJetHailHint(pos,at,&distance,&coming))return false;
+        std::memcpy(out->at,at,12);out->reach=0.0f;out->distance=distance;out->inReach=false;out->hail=true;out->coming=coming;
+        return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -917,6 +950,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
+    exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
     for(auto& p:doorLogged)p=nullptr;

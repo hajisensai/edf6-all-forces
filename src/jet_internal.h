@@ -529,7 +529,7 @@ airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
 float TightSpeed(const Kind& k,float half) noexcept;
 // The anchor it works round, put inside its soft box less its patrol circle (`room` holds the copy when it moved).
 const float* SoftAnchor(const Jet& j,const float* anchor,float* room) noexcept;
-void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept;
+void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest=0.0f) noexcept;
 float Patrol(const Jet& j,const float* pos,const float* anchor,float height,float* want) noexcept;
 // `lift`: m/s^2 of vertical acceleration apart from the kind's thrust (hover_lift.h: the player's); 0, one budget (the NPCs').
 // `npcGoal`: clamp autonomous goals to the NPC soft band; player control and its hail pass false.

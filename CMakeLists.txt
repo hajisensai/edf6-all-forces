@@ -168,6 +168,12 @@ set_target_properties(turret_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CM
 add_executable(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check.cpp)
 target_compile_options(vehicle_ram_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vehicle_ram_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Katyusha's rack (src/katyusha_rack.h: which rockets are on their rails) against its launcher stepped as the game
+# steps it, offline (tools/katyusha_rack_check.cpp). Not part of the plugin build:
+# cmake --build build --target katyusha_rack_check && build\katyusha_rack_check.exe
+add_executable(katyusha_rack_check EXCLUDE_FROM_ALL tools/katyusha_rack_check.cpp)
+target_compile_options(katyusha_rack_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(katyusha_rack_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The gunship's muzzle (src/gunmuzzle.h) on the circles it flies: no round's line through its airframe, its start where the
 # muzzle is when it leaves, against the old origin start and the shell's stock wait, offline (tools/gunship_muzzle_check.cpp).
@@ -380,7 +386,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check sazabi_assist_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check sazabi_assist_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
@@ -411,6 +417,7 @@ target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permiss
 add_dependencies(offline_checks map_command_runtime_check)
 add_test(NAME map_command_runtime COMMAND map_command_runtime_check)
 add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-suite)
+add_test(NAME jet_ground_settle COMMAND jet_obstacle_sim --ground-settle-suite)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
     --compiler "${CMAKE_CXX_COMPILER}")
@@ -555,6 +562,8 @@ add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_
 set_tests_properties(npc_gunner_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME medic_native_heal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/medic_native_heal_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(medic_native_heal PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME katyusha_native_rack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_native_rack_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(katyusha_native_rack PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp)
 target_link_libraries(npc_gunners_online_test PRIVATE edf6common user32)

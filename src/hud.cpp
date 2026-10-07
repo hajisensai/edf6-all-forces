@@ -982,8 +982,11 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
     Seg(drawer,ctx,x-20.0f*s,y,x-14.0f*s,y,2.0f*s,colour);
     Seg(drawer,ctx,x+14.0f*s,y,x+20.0f*s,y,2.0f*s,colour);
     const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y+30.0f*s,30.0f*s,height-30.0f*s);
-    if(e.inReach)Label(text,lines,at,tx,ty,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
-    else Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingEntry),static_cast<int>(std::ceil(e.distance)));
+    const int metres=static_cast<int>(std::ceil(e.distance));
+    if(e.hail && e.coming)Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingHailing),metres);
+    else if(e.hail){wchar_t key[32];KeyName(Cfg().playerJetHailKey,key,32);Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingHail),key,metres);}
+    else if(e.inReach)Label(text,lines,at,tx,ty,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
+    else Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingEntry),metres);
 }
 
 // --- The loadout strip (the user, 2026-10-06: "切换挂载应该有图片显示，而非仅文字"): every store a cell with its picture

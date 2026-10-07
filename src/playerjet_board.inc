@@ -317,7 +317,7 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
 // The rotor craft's flight done: the player's record from its entry's, the nacelles, the doll; parked when it sits
 // still on the ground with nothing asked (`still`).
 void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const float* pos,float clear,bool still,float dt,ULONGLONG ms) noexcept {
-    jet::HoldOffGround(e,pos,clear,dt,ms);
+    jet::HoldOffGround(e,pos,clear,dt,ms,RestOver(v,pos));   // `clear` is its bottom's (FloorClear)
     if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms);
     jet::DollFrame(jet::IndexOf(e),v,clear);
     const bool down=clear!=kNoGround && clear<kTouch;
@@ -697,6 +697,23 @@ void Hail(jet::Jet& e,ULONGLONG ms) noexcept {
 // NPC pilot, not leaving, of our side) within kHailRange down to the player; a hail going is let go first (its jet
 // back to its call), so the next press calls the next nearest. (A catch the parachute ended without is let go in
 // EndEject, for every kind of jet.)
+// The aircraft the hail key calls for a player at `p` (HailTick; the HUD's hint, PlayerJetHailHint, shows the same one):
+// the nearest within kHailRange of ours, alive, flown by its NPC pilot, not leaving, `skip` aside; `*dist` its distance.
+jet::Jet* HailChoice(const float* p,const void* skip,float* dist) noexcept {
+    jet::Jet* best=nullptr;
+    float bestD=kHailRange;
+    for(auto& e:jet::jets) {
+        if(!e.ref || e.reap || e.mode==jet::Mode::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
+        unsigned char* const v=e.Vehicle();
+        if(v==skip || v[kDead] || At<std::int32_t>(v,kTeam)!=jet::kTeamFriend || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy ||
+           !BoardRowOf(v) || Held(v))continue;
+        const float d=vec::Dist(reinterpret_cast<const float*>(v+kPosition),p);
+        if(d<bestD){bestD=d;best=&e;}
+    }
+    if(dist)*dist=bestD;
+    return best;
+}
+
 void HailTick() noexcept {
     static bool held=false;
     const bool down=KeyDown(Cfg().playerJetHailKey);
@@ -709,17 +726,7 @@ void HailTick() noexcept {
     const void* skip=nullptr;
     for(auto& j:jets)
         if(j.vehicle && j.hail.phase!=kHailNone && Live(j)){skip=j.vehicle;HandBack(j,j.vehicle,"the player called another");}
-    const float* p=reinterpret_cast<const float*>(human+kPosition);
-    jet::Jet* best=nullptr;
-    float bestD=kHailRange;
-    for(auto& e:jet::jets) {
-        if(!e.ref || e.reap || e.mode==jet::Mode::withdraw || e.drone.blastAt || !jet::Alive(e.ref))continue;
-        unsigned char* const v=e.Vehicle();
-        if(v==skip || v[kDead] || At<std::int32_t>(v,kTeam)!=jet::kTeamFriend || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy ||
-           !BoardRowOf(v) || Held(v))continue;
-        const float d=vec::Dist(reinterpret_cast<const float*>(v+kPosition),p);
-        if(d<bestD){bestD=d;best=&e;}
-    }
+    jet::Jet* const best=HailChoice(reinterpret_cast<const float*>(human+kPosition),skip,nullptr);
     if(!best){Log("PJET hail: no aircraft of ours to call");return;}
     Hail(*best,ms);
 }

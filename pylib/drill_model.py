@@ -27,7 +27,9 @@ with every stock mesh taken out and the OBJ in their place:
   - two materials made from the Blacker's hull material (its shader and parameters): MI_Tank_C with the OBJ's
     Tank_C_BC.png, MI_Tank_B_CS (the tracks and running gear, whose texture is not in the OBJ's folder) a plain dark
     steel; their normal maps flat, their roughness / metal / occlusion maps one neutral value.
-The track object (Caterpi) is left out; its materials stay (the SGO's tank_caterpillar_animation names them).
+The track object (Caterpi) is left out; its materials stay (the SGO's tank_caterpillar_animation names them), as do
+the Blacker's hull and light materials, but no mesh draws any of the five: their texture slots take the model's own
+plain textures (blank_unused_materials) and the Blacker's textures (12 MB, 74% of the archive) are not written.
 
 The OBJ is the user's (a ripped game asset, never in the repository): model_dir() finds it where obj_model.model_dir
 looks ($EDF6VC_MODELS, `models` next to the installer, the developer's folder).
@@ -216,6 +218,28 @@ def textures(obj: om.ObjFile) -> dict[str, bytes]:
     return out
 
 
+def blank_unused_materials(md: Mdb) -> tuple[Mdb, list[str]]:
+    """`md` with every material no mesh draws (the Blacker's own five: kept, the SGO scrolls the tracks' by name) on the
+    model's plain textures (a normal slot NORMAL_TEX, an albedo the dark steel, any other RMO_TEX: all in the archive,
+    4 x 4 each), and its texture table cut to the files a material names (renumbered, order kept). What they drew with
+    is never drawn: the Blacker's textures then go from the archive (build_with_info, graft_pure.prune_members).
+    Returns the model and the blanked materials' names."""
+    drawn = {me.material for o in md.objects for me in o.meshes}
+    files = {t.filename.lower(): t.index for t in md.textures}
+    plain = {'normal': NORMAL_TEX, 'albedo': f"{TEX_STEM['MI_Tank_B_CS']}.dds"}
+    mats, blank = [], []
+    for m in md.materials:
+        if m.index not in drawn:
+            m = replace(m, textures=[replace(x, texture=files[plain.get(x.kind.lower(), RMO_TEX).lower()]) for x in m.textures])
+            blank.append(md.name_of(m.name))
+        mats.append(m)
+    named = sorted({x.texture for m in mats for x in m.textures})
+    new = {old: k for k, old in enumerate(named)}
+    texs = [replace(md.textures[old], index=new[old]) for old in named]
+    mats = [replace(m, textures=[replace(x, texture=new[x.texture]) for x in m.textures]) for m in mats]
+    return replace(md, textures=texs, materials=mats), blank
+
+
 def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dict]:  # noqa: ANN001 - rootcpk.Game
     """(model, host Rab, new textures, info)."""
     rab = rab_read(game.read('OBJECT', HOST_ARC))
@@ -248,8 +272,10 @@ def build_model(game, obj_file: str) -> tuple[Mdb, object, dict[str, bytes], dic
     meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
     md = replace(md, objects=[replace(md.objects[0], meshes=meshes)])
     md = g.recompute_bounds(md)
+    md, blank = blank_unused_materials(md)
     info = {'drill base': base, 'drill length': length, 'drill radius': radius, 'drill repeat': share, 'meshes': len(meshes),
-            'triangles': sum(len(me.indices) // 6 for me in meshes), 'drill bone': drill_bone, 'marker bone': marker}
+            'triangles': sum(len(me.indices) // 6 for me in meshes), 'drill bone': drill_bone, 'marker bone': marker,
+            'blanked materials': blank}
     return md, rab, textures(obj), info
 
 
@@ -261,6 +287,7 @@ def build_with_info(game, obj_file: str) -> tuple[bytes, Mdb, dict]:  # noqa: AN
     member(rab, HOST_MDB).stored = stored
     for name, dds in tex.items():
         om.add_texture(rab, name, dds)
+    info['members taken out'] = g.prune_members(rab, [HOST_MDB])
     return rab_write(rab), md, info
 
 

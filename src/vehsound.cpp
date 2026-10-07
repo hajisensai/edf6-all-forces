@@ -10,15 +10,24 @@
 //  - the turret: the traverse drive whining with the fastest of the seats' aim axes against their top rate (their
 //    rates, seat aim +0x1C / +0x5C: the stock axis step's), a stop's clunk when it comes to rest; the mechs' arms the
 //    same drive, quicker (the Begaruta, the Nix: their begaruta_aim_se_table);
-//  - the loader, on a main gun with a wait of a loader's length (vehmix.h ReloadCues): the case thrown out after the
-//    shot, the next round rammed and the breech closed as the wait runs out (the fire interval +0xE0C after a shot, the
-//    magazine's reload +0xE68 when it is empty: the stock gauge's own counters, vhud.cpp);
-//  - every gun (vehmix.h KindOf): the main gun's report of its own, punchy near and rumbling far; an autocannon's or a
-//    grenade launcher's round; a machine gun's, a gatling's or the flak's burst as a loop while it fires (its rate
-//    pitching it) with the cases raining near it and its echo when it stops (rapid fire stacks no one-shots); a
-//    missile's or a rocket's launch. The reports and rounds arrive late by the distance (sound at 340 m/s). Every
-//    vehicle's guns, the helicopters' and the plugin's aircraft's too (their missiles keep the launch sounds their
-//    weapon files were made with); the engine and the turret only on the ground.
+//  - every gun by its calibre (vehmix.h ProfileOf, kProfiles; the user, 2026-10-07: "closer to the real thing, by
+//    calibre and round"): a main gun's report of its own (a 75-105 mm gun's, a 120 mm tank gun's, a 155 mm howitzer's, a
+//    super-heavy gun's: the bigger the lower and the longer; a rail gun's discharge: a crack, no boom of powder), punchy
+//    near and rumbling far; an autocannon's round, a 40 mm grenade launcher's thump; a machine gun's, a gatling's or the
+//    flak's burst as a loop while it fires (its rate pitching it) with the cases raining near it and its echo when it
+//    stops (rapid fire stacks no one-shots); a rocket's ignition off each rail of a ripple; a missile's launch. The
+//    reports and rounds arrive late by the distance (sound at 340 m/s). Every vehicle's guns, the helicopters' and the
+//    plugin's aircraft's too (their missiles keep the launch sounds their weapon files were made with); the engine and
+//    the turret only on the ground. A shot fired by another machine's gunner (online) is heard by its shot count;
+//  - the cases: each round's case landing as its calibre's (a 30-40 mm brass, a 40 mm grenade's aluminium, a 75-105 mm
+//    brass case on the turret floor, the 120 mm combustible case's steel stub base inside the turret: muffled), after a
+//    fall; none for a rail gun, rockets, a howitzer's or a super-heavy gun's separate loading; none either for a weapon
+//    that throws its own physical case (ShellCase: +0x4E0), which lands with its own sound: one case, one sound;
+//  - the loader, on a gun with a wait of a loader's length (vehmix.h ReloadCues): its calibre's steps, each at its time
+//    after the shot or before it is ready (a tank gun's case out, round rammed, breech closed; the howitzer's breech
+//    opened, shell rammed, charges pushed in one by one, breech closed, primer; the rail gun's capacitors charging and
+//    its ready click; the rocket rails' next rockets latched on), drawn in when the wait is short (the fire interval
+//    +0xE0C after a shot, the magazine's reload +0xE68 when it is empty: the stock gauge's own counters, vhud.cpp).
 // The stock sounds these replace are silenced on that vehicle (its own copies: the SePresets live in the object): the
 // engine's idle / drive / turn presets ([0], [1], [2] of car_base_se_table, the vector at +0x1A20) with their loops
 // stopped (handles +0x1A40 / +0x1A50 / +0x1A60, CarBase's engine sound 0x676370), the turret's move / stop presets
@@ -59,6 +68,10 @@ constexpr int kMostAimSounds=6;
 // The weapon (docs/hud-re.md §7, vhud.cpp): FireSe's preset, the handle its loop plays on, FireInterval (frames), the
 // wait to the next shot (frames left, a float), ReloadTime and its frames left.
 constexpr std::size_t kFirePreset=0x380,kFireLoop=0xE28,kFireInterval=0x36C,kCooldown=0xE0C,kReloadTime=0x20C,kReloadLeft=0xE68;
+// ...and what stands for its calibre (vehmix.h GunFacts): FireBurstCount, AmmoDamage, AmmoExplosion; the factory of the
+// physical case it throws (ShellCase's class: null with none, docs/sound-re.md §9.5); the shot count it was sent
+// (+0x1544, stored by 0x690420) and the shots its own copy fired (+0xBD0: 0x690420 counts them up, a local shot sends it).
+constexpr std::size_t kFireBurst=0x370,kWeaponDamage=0x89C,kWeaponBlast=0x8B0,kCaseFactory=0x4E0,kWeaponShots=0x1544,kWeaponFired=0xBD0;
 // The seat's aim: its params {brake, accel, top rate} and each axis' rate (rad a frame), turretcam.h AxisStep.
 constexpr std::size_t kAimParams=0x90,kAxisRate=0xC;
 constexpr unsigned kIsPlaying=0x7A8A20,kStopSound=0x7A8CD0;
@@ -66,23 +79,23 @@ using IsPlayingFn=bool(__fastcall*)(void*);
 using StopSoundFn=void(__fastcall*)(void*,int);
 
 using vmix::kEngineRef; using vmix::kTracksRef; using vmix::kTurretRef; using vmix::kReloadRef; using vmix::kTrackHalf;
-using vmix::kEngineShare; using vmix::kTurretShare; using vmix::kReloadShare; using vmix::kGunShare;
+using vmix::kEngineShare; using vmix::kTurretShare; using vmix::kReloadShare;
 constexpr float kEngineHear=500.0f,kTurretHear=150.0f,kReloadHear=80.0f,kRapidHear=1200.0f,kBrassHear=40.0f;   // m: no voice farther
 using vmix::kFarAt;                                 // m: the air's dulling at its fullest (the jets')
 constexpr float kStartSec=1.2f,kStopSec=2.0f;       // the engine winding up / down
 constexpr float kMechServo=1.25f;                   // a mech's arm drives: the turret's, quicker and higher
-constexpr float kCaseDelay=0.3f;                    // s: an autocannon's case lands after its round
 constexpr ULONGLONG kStaleMs=300;                   // a vehicle not seen this long (game ms) is gone: its voices too
-constexpr int kVehicles=48,kMostGuns=8,kPending=48;
+constexpr int kVehicles=48,kMostGuns=8,kPending=96;   // a Katyusha's ripple: forty rockets on their way
 
 enum class Body : std::uint8_t { none, heavy, light, bike, mech };
 enum Loop : int { kLoopIdle, kLoopLoad, kLoopTracks, kLoopTurret, kLoopCount };
 struct Saved { unsigned char cues[kCueBytes]; bool held; };
 struct Gun {
     const unsigned char* w;
-    vmix::GunKind kind;
+    vmix::Bore bore;
+    bool stockCase;           // it throws a physical case of its own (kCaseFactory): no case sound of ours
     Saved fire;
-    std::int32_t ammo;
+    std::int32_t ammo,shots;  // its rounds, the shot count it was sent (kWeaponShots)
     float wait,total,since;   // frames: to the next shot / the cycle's full wait / since the shot
     int burst=-1,brass=-1;    // a rapid gun's loops while it fires (jetaudio.h OpenLoop), -1: none
 };
@@ -121,6 +134,15 @@ const Sig kSigs[]={
     {0x68CFC6,{0x48,0x8D,0x8E,0x80,0x03,0x00,0x00,0xE8},8},     // FireSe into weapon +0x380 (0x7B3EA0)
     {0x697FE4,{0x49,0x8D,0x9F,0x80,0x03,0x00,0x00},7},          // ...played from there at a shot
     {0x698005,{0x49,0x8D,0x8F,0x28,0x0E,0x00,0x00},7},          // ...a looped one on the handle +0xE28
+    {0x68CE85,{0x89,0x86,0x70,0x03,0x00,0x00},6},               // FireBurstCount into +0x370
+    {0x68D6EC,{0xF3,0x0F,0x11,0x86,0x9C,0x08,0x00,0x00},8},     // AmmoDamage into +0x89C
+    {0x68D82F,{0xF3,0x0F,0x11,0x86,0xB0,0x08,0x00,0x00},8},     // AmmoExplosion into +0x8B0
+    {0x68DC6D,{0x48,0x89,0xBE,0xE0,0x04,0x00,0x00},7},          // ShellCase: its factory +0x4E0 null (rdi 0)...
+    {0x68DCA2,{0x48,0x89,0x86,0xE0,0x04,0x00,0x00},7},          // ...or its class's, when [0] names one
+    {0x690540,{0x89,0xAB,0x44,0x15,0x00,0x00},6},               // the shot count sent, into +0x1544
+    {0x690505,{0xFF,0x83,0xD0,0x0B,0x00,0x00},6},               // ...the copy's own shots +0xBD0 counted up to it
+    {0x690586,{0x84,0xC0,0x0F,0x85,0xB8,0x00,0x00,0x00},8},     // ...not for another machine's operator (no fire, no count)
+    {0x6947AD,{0x8B,0x83,0xD0,0x0B,0x00,0x00,0x48,0x8B,0xCB,0x89,0x83,0x44,0x15,0x00,0x00},15},   // a local shot sent from +0xBD0
     {0x68CE36,{0x89,0x86,0x6C,0x03,0x00,0x00},6},               // FireInterval into +0x36C
     {0x6981E0,{0x41,0x8B,0x87,0x6C,0x03,0x00,0x00},7},          // a shot: the wait +0xE0C set to it
     {0x6981F7,{0xF3,0x41,0x0F,0x11,0x87,0x0C,0x0E,0x00,0x00},9},
@@ -213,6 +235,7 @@ Body BodyOfVehicle(const unsigned char* v) noexcept {
 }
 vmix::Round RoundOf(const RoundModel& m) noexcept {
     if(!m.label)return vmix::Round::other;
+    if(m.rtti && !std::strcmp(m.rtti,".?AVFactory@SolidBullet01Rail@@"))return vmix::Round::rail;   // CANNON on the HUD
     if(!std::strcmp(m.label,"CANNON"))return vmix::Round::cannon;
     if(!std::strcmp(m.label,"BEAM"))return vmix::Round::beam;
     if(!std::strcmp(m.label,"GREN"))return vmix::Round::grenade;
@@ -220,15 +243,15 @@ vmix::Round RoundOf(const RoundModel& m) noexcept {
     if(!std::strcmp(m.label,"MSL") || !std::strcmp(m.label,"RKT"))return vmix::Round::missile;
     return vmix::Round::other;
 }
-vmix::GunKind KindOfWeapon(const unsigned char* v,const unsigned char* w) noexcept {
+vmix::Bore BoreOfWeapon(const unsigned char* v,const unsigned char* w) noexcept {
     RoundModel m{};
-    if(!ReadRound(w,&m))return vmix::GunKind::none;
-    const vmix::Round r=RoundOf(m);
-    // A missile's homing is its round's, not a gun's: it still launches with a whoosh.
-    const vmix::GunKind k=vmix::KindOf(r,r!=vmix::Round::missile && m.kind==RoundKind::homing,At<std::int32_t>(w,kFireInterval),
-                                       At<unsigned char>(w,kFirePreset+kPresetLoops)!=0,At<float>(w,kFirePreset+kPresetVolume));
+    if(!ReadRound(w,&m))return vmix::Bore::stock;
+    const vmix::GunFacts f{RoundOf(m),m.kind==RoundKind::homing,At<unsigned char>(w,kFirePreset+kPresetLoops)!=0,
+                           At<std::int32_t>(w,kFireInterval),At<std::int32_t>(w,kFireBurst),At<float>(w,kFirePreset+kPresetVolume),
+                           At<float>(w,kWeaponDamage),At<float>(w,kWeaponBlast),m.speed};
+    const vmix::Bore b=vmix::ProfileOf(f);
     // The plugin's aircraft fly missiles whose launch sounds their weapon files were made with (pylib/vcobjects.py).
-    return k==vmix::GunKind::missile && BodyOf(v)!=PluginBody::none ? vmix::GunKind::none : k;
+    return vmix::ProfileFor(b).group==vmix::Group::missile && BodyOf(v)!=PluginBody::none ? vmix::Bore::stock : b;
 }
 // The wait to `w`'s next shot (frames): its interval after a shot, its magazine's reload once empty (the stock gauge's).
 float WaitOf(const unsigned char* w) noexcept {
@@ -237,12 +260,11 @@ float WaitOf(const unsigned char* w) noexcept {
     const std::int32_t left=At<std::int32_t>(w,kReloadLeft);
     return left>0 ? static_cast<float>(left) : 0.0f;
 }
-float GroupVolume(vmix::GunKind k) noexcept {
-    const float v=k==vmix::GunKind::main ? Cfg().vehicleGunVolume : k==vmix::GunKind::missile ? Cfg().vehicleMissileVolume :
-                  k==vmix::GunKind::none ? 0.0f : Cfg().vehicleMgVolume;
-    return std::isfinite(v) && v>0.0f ? (v>4.0f ? 4.0f : v) : 0.0f;
-}
 float Volume(float v) noexcept { return std::isfinite(v) && v>0.0f ? (v>4.0f ? 4.0f : v) : 0.0f; }
+float GroupVolume(vmix::Group g) noexcept {
+    return Volume(g==vmix::Group::main ? Cfg().vehicleGunVolume : g==vmix::Group::missile ? Cfg().vehicleMissileVolume :
+                  g==vmix::Group::mg ? Cfg().vehicleMgVolume : 0.0f);
+}
 
 // --- Bookkeeping ---
 void CloseLoop(int& l) noexcept { audio::CloseLoop(l);l=-1; }
@@ -287,19 +309,20 @@ Vehicle* EntryFor(unsigned char* v,ULONGLONG ms,bool make) noexcept {
 }
 
 // --- Hearing ---
-audio::Heard HeardAt(const SoundPlace& p,float gain,float ratio) noexcept {
-    return audio::Heard{gain*p.left,gain*p.right,ratio*p.doppler,p.distance/kFarAt};
+// `muffle`: more of the air's dulling (a case landing inside the turret).
+audio::Heard HeardAt(const SoundPlace& p,float gain,float ratio,float muffle=0.0f) noexcept {
+    return audio::Heard{gain*p.left,gain*p.right,ratio*p.doppler,vmix::Muffled(p.distance/kFarAt,muffle)};
 }
 void Set(int& loop,int clip,bool want,const audio::Heard& h) noexcept {
     if(!want){CloseLoop(loop);return;}
     if(loop<0)loop=audio::OpenLoop(clip);   // none free (or not made yet): again next frame
     audio::SetLoop(loop,h);
 }
-// `clip` heard from `at` after the sound's travel time (and `after` s more), at `gain` falling as (ref / d) beyond `ref`.
-void Later(int clip,const SoundPlace& p,float gain,float after) noexcept {
-    if(gain<0.002f)return;
+// `clip` heard from `at` after the sound's travel time (and `after` s more), at `gain` (`muffle`: HeardAt's).
+void Later(int clip,const SoundPlace& p,float gain,float after,float muffle=0.0f) noexcept {
+    if(gain<0.002f || clip<0)return;
     for(auto& q:pending)
-        if(q.clip<0){q=Pending{clip,HeardAt(p,gain,1.0f),GameMs()+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+after)*1000.0f)};return;}
+        if(q.clip<0){q=Pending{clip,HeardAt(p,gain,1.0f,muffle),GameMs()+static_cast<ULONGLONG>((p.distance/vmix::kSoundSpeed+after)*1000.0f)};return;}
     // more on their way than kPending: the rest are not heard
 }
 
@@ -377,60 +400,73 @@ Gun* GunFor(unsigned char* v,Vehicle& s,const unsigned char* w) noexcept {
     if(s.guns>=kMostGuns)return nullptr;
     Gun& g=s.gun[s.guns++];
     g=Gun{};
-    g.w=w;g.kind=KindOfWeapon(v,w);
-    g.ammo=At<std::int32_t>(w,kWeaponAmmo);g.wait=WaitOf(w);g.total=g.wait;g.since=1e9f;
+    g.w=w;g.bore=BoreOfWeapon(v,w);g.stockCase=At<const void*>(w,kCaseFactory)!=nullptr;
+    g.ammo=At<std::int32_t>(w,kWeaponAmmo);g.shots=At<std::int32_t>(w,kWeaponShots);g.wait=WaitOf(w);g.total=g.wait;g.since=1e9f;
     return &g;
 }
-void Report(const float* at,const float* vel,float gain) noexcept {
+// A main gun's report: its calibre's near and far clips faded across by the distance.
+void Report(const vmix::Profile& pf,const float* at,const float* vel,float gain) noexcept {
     SoundPlace p{};
     if(!SoundAt(at,vel,&p))return;
     const vmix::GunMix m=vmix::Gun(p.distance);
-    Later(audio::kClipGunNear,p,gain*m.nearGain,0.0f);
-    Later(audio::kClipGunFar,p,gain*m.farGain,0.0f);
+    Later(pf.nearClip,p,gain*m.nearGain,0.0f);
+    Later(pf.farClip,p,gain*m.farGain,0.0f);
 }
-void Cue(int clip,const float* at,const float* vel,float gain) noexcept {
+void Cue(int clip,const float* at,const float* vel,float gain,float pitch) noexcept {
     SoundPlace p{};
     if(!SoundAt(at,vel,&p) || p.distance>kReloadHear)return;
-    audio::PlayOnce(clip,HeardAt(p,gain*vmix::Falloff(p.distance,kReloadRef,1.3f),1.0f));
+    audio::PlayOnce(clip,HeardAt(p,gain*vmix::Falloff(p.distance,kReloadRef,1.3f),pitch));
 }
-// A main gun's frame: its shot (gathered into one report per vehicle) and its loader's cues.
-void MainGun(unsigned char* w,Gun& g,const float* at,const float* vel,bool shot,float before,float sinceBefore) noexcept {
+// A shot's case landing (its calibre's, kProfiles), `delay` after the shot, unless the weapon throws a physical case of
+// its own (ShellCase) that lands with its own sound. A main gun's is the loader's work (VehicleReloadVolume), a small
+// gun's its own group's.
+void CaseOf(const Gun& g,const vmix::Profile& pf,const float* at,const float* vel) noexcept {
+    if(g.stockCase || pf.casing.clip<0 || pf.fire==vmix::Fire::burst)return;
+    const float vol=pf.group==vmix::Group::main ? Volume(Cfg().vehicleReloadVolume) : GroupVolume(pf.group);
+    SoundPlace p{};
+    if(vol<=0.0f || !SoundAt(at,vel,&p) || p.distance>=kBrassHear)return;
+    Later(pf.casing.clip,p,vol*vmix::kBrassShare*vmix::Falloff(p.distance,kReloadRef,1.3f),pf.casing.delay,pf.casing.muffle);
+}
+// A gun's loader: its calibre's steps, each as its time comes in the wait (the fire interval +0xE0C after a shot, the
+// magazine's reload +0xE68 once empty: the stock gauge's counters, vhud.cpp).
+void Loader(const unsigned char* w,const Gun& g,const vmix::Profile& pf,const float* at,const float* vel,bool shot,float before,
+            float sinceBefore) noexcept {
     const float reloadVol=Volume(Cfg().vehicleReloadVolume);
-    if(reloadVol<=0.0f)return;
-    // The case goes out after any shot of a gun with a loader's interval (the magazine's last too, whose own wait is
-    // the short one before the reload begins).
+    if(reloadVol<=0.0f || pf.steps<=0)return;
+    // The steps run in the gun's cycle: its interval, or the whole wait when longer (the magazine's last round: its own
+    // wait is the short one before the reload begins).
     const float cycle=std::fmax(g.total,static_cast<float>(At<std::int32_t>(w,kFireInterval)));
-    const unsigned cues=vmix::ReloadCues(before,g.wait,cycle,shot ? -1.0f : sinceBefore,g.since);
-    const float rg=reloadVol*kReloadShare;
-    if(cues&vmix::kCueEject)Cue(audio::kClipEject,at,vel,rg);
-    if(cues&vmix::kCueLoad)Cue(audio::kClipLoad,at,vel,rg);
-    if(cues&vmix::kCueClose)Cue(audio::kClipClose,at,vel,rg);
+    const unsigned cues=vmix::ReloadCues(pf,before,g.wait,cycle,shot ? -1.0f : sinceBefore,g.since);
+    for(int i=0;i<pf.steps;++i)
+        if(cues&(1u<<i))Cue(pf.step[i].clip,at,vel,reloadVol*kReloadShare,pf.step[i].pitch);
 }
-// A rapid gun's frame: its burst loop (and the cases raining) open while it fires, its tail when it stops.
-void Rapid(unsigned char* w,Gun& g,const float* at,const float* vel,float vol) noexcept {
+// A rapid gun's frame: its burst loop (the profile's two: made at kMgRate and at kGatlingRate, the nearer one to its
+// rate) and the cases raining open while it fires, its tail when it stops.
+void Rapid(const unsigned char* w,Gun& g,const vmix::Profile& pf,const float* at,const float* vel,float vol) noexcept {
     const float frames=static_cast<float>(At<std::int32_t>(w,kFireInterval));
     SoundPlace p{};
     const bool placed=SoundAt(at,vel,&p);
     const bool firing=vmix::Firing(g.since,frames) && placed && p.distance<kRapidHear;
     if(!firing) {
-        if(g.burst>=0 && placed)Later(audio::kClipBurstTail,p,vol*vmix::kRapidShare*vmix::Falloff(p.distance,vmix::kRapidRef,1.0f),0.0f);
+        if(g.burst>=0 && placed)Later(audio::kClipBurstTail,p,vol*pf.share*vmix::Falloff(p.distance,pf.ref,1.0f),0.0f);
         CloseLoop(g.burst);CloseLoop(g.brass);
         return;
     }
     const bool gatling=frames<60.0f/(0.5f*(vsynth::kMgRate+vsynth::kGatlingRate));   // the nearer of the two made rates
     const float made=gatling ? vsynth::kGatlingRate : vsynth::kMgRate;
-    const float gain=vol*vmix::kRapidShare*vmix::Falloff(p.distance,vmix::kRapidRef,1.0f);
-    Set(g.burst,gatling ? audio::kClipGatling : audio::kClipMg,true,HeardAt(p,gain,vmix::BurstRatio(frames,made)));
-    const bool close=p.distance<kBrassHear;
-    Set(g.brass,audio::kClipBrass,close,HeardAt(p,vol*vmix::kBrassShare*vmix::Falloff(p.distance,kReloadRef,1.3f),
-                                               vmix::BurstRatio(frames,vsynth::kBrassRate)));
+    const float gain=vol*pf.share*vmix::Falloff(p.distance,pf.ref,1.0f);
+    Set(g.burst,gatling ? pf.farClip : pf.nearClip,true,HeardAt(p,gain,vmix::BurstRatio(frames,made)));
+    const bool close=!g.stockCase && pf.casing.clip>=0 && p.distance<kBrassHear;
+    Set(g.brass,pf.casing.clip,close,HeardAt(p,vol*vmix::kBrassShare*vmix::Falloff(p.distance,kReloadRef,1.3f),
+                                             vmix::BurstRatio(frames,vsynth::kBrassRate)));
 }
 void GunStep(unsigned char* v,Vehicle& s,float frames) noexcept {
     if(!WeaponStatusOk())return;
-    const float gunVol=Volume(Cfg().vehicleGunVolume);
     const unsigned seats=SeatCount(v);
-    bool fired=false;
-    float firedAt[3]{};
+    // The reports this frame, one a calibre (guns firing together, the howitzer's pair: one report).
+    constexpr int kBores=static_cast<int>(vmix::Bore::count);
+    bool fired[kBores]{};
+    float firedAt[kBores][3]{};
     for(unsigned si=0;si<seats && si<8;++si) {
         const unsigned char* const seat=SeatAt(v,si);
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
@@ -439,48 +475,47 @@ void GunStep(unsigned char* v,Vehicle& s,float frames) noexcept {
         for(std::uint64_t i=0;i<n;++i) {
             if(!Readable(holders[i],kHolderWeapon+8))continue;
             unsigned char* const w=At<unsigned char*>(holders[i],kHolderWeapon);
-            if(!Readable(w,kReloadLeft+4))continue;
+            if(!Readable(w,kWeaponShots+4))continue;
             Gun* const g=GunFor(v,s,w);
-            if(!g || g->kind==vmix::GunKind::none)continue;
-            const float vol=GroupVolume(g->kind);
+            if(!g || g->bore==vmix::Bore::stock)continue;
+            const vmix::Profile& pf=vmix::ProfileFor(g->bore);
+            const float vol=GroupVolume(pf.group);
             Keep(w+kFirePreset+kCues,g->fire,vol>0.0f);
-            if(vol>0.0f && g->kind==vmix::GunKind::rapid)StopPlaying(w+kFireLoop);   // a stock loop begun before it was held
+            if(vol>0.0f && pf.fire==vmix::Fire::burst)StopPlaying(w+kFireLoop);   // a stock loop begun before it was held
             // The Proteus rework's held launcher (proteus.h kProteusHoldCountdown): its countdown parked, no shot. Its
             // jump there is not a shot's wait, nor its drop back to 0 when given back (the wait only falls then).
             if(At<float>(w,kCooldown)>=kProteusHoldCountdown*0.5f){CloseLoop(g->burst);CloseLoop(g->brass);continue;}
-            const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo);
+            const std::int32_t ammo=At<std::int32_t>(w,kWeaponAmmo),sent=At<std::int32_t>(w,kWeaponShots);
             const float wait=WaitOf(w),before=g->wait,sinceBefore=g->since;
             const bool shot=ammo<g->ammo || (wait>before+2.0f && At<float>(w,kCooldown)>before+2.0f) ||
-                            (g->kind==vmix::GunKind::rapid && wait>before+0.5f);   // a rapid gun's short wait jumps less
+                            (pf.fire==vmix::Fire::burst && wait>before+0.5f) ||   // a rapid gun's short wait jumps less
+                            vmix::RemoteShot(g->shots,sent,At<std::int32_t>(w,kWeaponFired));
             if(wait>before+1.0f)g->total=wait;   // a new wait: a shot's interval, or the magazine's reload begun
             g->since=shot ? 0.0f : g->since+frames;
-            g->ammo=ammo;g->wait=wait;
+            g->ammo=ammo;g->shots=sent;g->wait=wait;
             float at[3],dir[3];
             if(!edf::MeanMuzzle(w,64,at,dir))std::memcpy(at,v+kPosition,12);
             if(vol<=0.0f){CloseLoop(g->burst);CloseLoop(g->brass);continue;}
             SoundPlace p{};
-            switch(g->kind) {
-            case vmix::GunKind::main:
-                if(shot){fired=true;std::memcpy(firedAt,at,12);}
-                MainGun(w,*g,at,s.vel,shot,before,sinceBefore);
+            switch(pf.fire) {
+            case vmix::Fire::report:
+                if(shot){fired[static_cast<int>(g->bore)]=true;std::memcpy(firedAt[static_cast<int>(g->bore)],at,12);}
                 break;
-            case vmix::GunKind::rapid:
-                Rapid(w,*g,at,s.vel,vol);
+            case vmix::Fire::burst:
+                Rapid(w,*g,pf,at,s.vel,vol);
                 break;
-            case vmix::GunKind::autocannon:
-                if(shot && SoundAt(at,s.vel,&p)) {
-                    Later(audio::kClipAutocannon,p,vol*vmix::kAutoShare*vmix::Falloff(p.distance,vmix::kRapidRef,1.0f),0.0f);
-                    if(p.distance<kBrassHear)Later(audio::kClipCaseSmall,p,vol*vmix::kBrassShare*vmix::Falloff(p.distance,kReloadRef,1.3f),kCaseDelay);
-                }
-                break;
-            case vmix::GunKind::missile:
-                if(shot && SoundAt(at,s.vel,&p))Later(audio::kClipMissile,p,vol*vmix::kMissileShare*vmix::Falloff(p.distance,vmix::kMissileRef,1.0f),0.0f);
+            case vmix::Fire::round:
+                if(shot && SoundAt(at,s.vel,&p))Later(pf.nearClip,p,vol*pf.share*vmix::Falloff(p.distance,pf.ref,1.0f),0.0f);
                 break;
             default: break;
             }
+            if(shot)CaseOf(*g,pf,at,s.vel);
+            Loader(w,*g,pf,at,s.vel,shot,before,sinceBefore);
         }
     }
-    if(fired)Report(firedAt,s.vel,gunVol*kGunShare);   // guns firing together (the howitzer's pair): one report
+    const float gunVol=GroupVolume(vmix::Group::main);
+    for(int b=0;b<kBores;++b)
+        if(fired[b])Report(vmix::ProfileFor(static_cast<vmix::Bore>(b)),firedAt[b],s.vel,gunVol*vmix::ProfileFor(static_cast<vmix::Bore>(b)).share);
 }
 
 // Once a frame: the sounds whose time has come played, the vehicles gone forgotten.
