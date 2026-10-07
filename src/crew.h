@@ -301,6 +301,10 @@ struct Config {
     int npcFormationKey=0x54;       // ...on foot: cycles it ('T'; 0: off; the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers
     int npcGuardFormation=0;        // a guard order's defence (0 stock radius, 10 perimeter, 5 line, 3 wedge)
+    int npcPickupKey=0x59;          // on foot: the recruited squads spread out and fetch the item boxes ('Y'; 0: off)
+    float npcPickupRange=80.0f;     // ...the boxes within this many m of the player
+    float npcPickupSec=90.0f;       // ...for at most this long
+    bool npcPickupHealth=false;     // ...health boxes too (a hurt soldier for itself; offline only)
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay
     float npcFreeRange=120.0f;      // ...a squad told to engage freely: m round where it stood it goes after enemies
     float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s

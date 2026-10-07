@@ -337,10 +337,12 @@ HUDTEXT(cmdGuardResult,L"%ls (%.0f, %.0f): %d UNIT(S)%ls",L"%ls（%.0f, %.0f）�
 HUDTEXT(cmdOrderResult,L"%ls: %d UNIT(S)%ls",L"%ls：%d 个单位%ls",L"%ls：%d 個單位%ls",L"%ls：%d ユニット%ls")
 HUDTEXT(squadTitle,L"SQUADS",L"小队",L"小隊",L"分隊")
 HUDTEXT(squadTitleKeys,L"SQUADS (1-9 pick, Shift add)",L"小队（1-9 选择，Shift 追加）",L"小隊（1-9 選擇，Shift 追加）",L"分隊（1-9 選択、Shift 追加）")
-HUDTEXT(squadKeys,L"SQUADS: 1-9 pick   J engage   H focus (Q mark)   K dismiss   U recruit   B board   N dismount   T formation",
-        L"小队：1-9 选择   J 交战   H 集火（Q 标记）   K 解散   U 招募   B 上车   N 下车   T 编队",
-        L"小隊：1-9 選擇   J 交戰   H 集火（Q 標記）   K 解散   U 招募   B 上車   N 下車   T 編隊",
-        L"分隊：1-9 選択   J 交戦   H 集中攻撃（Q マーク）   K 解散   U 加入   B 搭乗   N 降車   T 隊形")
+HUDTEXT(squadKeys,L"SQUADS: 1-9 pick   J engage   H focus (Q mark)   K dismiss   U recruit   B board   N dismount   T formation   P split   L join",
+        L"小队：1-9 选择   J 交战   H 集火（Q 标记）   K 解散   U 招募   B 上车   N 下车   T 编队   P 分组   L 合并",
+        L"小隊：1-9 選擇   J 交戰   H 集火（Q 標記）   K 解散   U 招募   B 上車   N 下車   T 編隊   P 分組   L 合併",
+        L"分隊：1-9 選択   J 交戦   H 集中攻撃（Q マーク）   K 解散   U 加入   B 搭乗   N 降車   T 隊形   P 分割   L 合流")
+HUDTEXT(cmdSplitResult,L"SPLIT: %d SQUAD(S), %d TOO SMALL",L"分组：%d 个小队，%d 个人数不够",L"分組：%d 個小隊，%d 個人數不夠",L"分割：%d 分隊、%d 分隊は人数不足")
+HUDTEXT(cmdMergeResult,L"JOINED: %d SQUAD(S), %d CANNOT",L"合并：%d 个小队，%d 个无法合并",L"合併：%d 個小隊，%d 個無法合併",L"合流：%d 分隊、%d 分隊は不可")
 // The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText).
 HUDTEXT(formStock,L"DEFAULT",L"默认",L"預設",L"標準")
 HUDTEXT(formColumn,L"COLUMN",L"纵队",L"縱隊",L"縦隊")
@@ -354,6 +356,9 @@ HUDTEXT(formDiamond,L"DIAMOND",L"菱形",L"菱形",L"菱形")
 HUDTEXT(formBounding,L"BOUNDING OVERWATCH",L"交替掩护",L"交替掩護",L"交互躍進")
 HUDTEXT(formPerimeter,L"PERIMETER",L"环形防御",L"環形防禦",L"全周防御")
 HUDTEXT(cmdFormationResult,L"FORMATION %ls: %d SQUAD(S)",L"编队 %ls：%d 个小队",L"編隊 %ls：%d 個小隊",L"隊形 %ls：%d 分隊")
+HUDTEXT(sweepOn,L"FETCHING BOXES: %d LEFT, %d IN   [%ls] call back",L"拾取箱子：剩 %d 个，已捡 %d   [%ls] 召回",L"拾取箱子：剩 %d 個，已撿 %d   [%ls] 召回",
+        L"アイテム回収：残り %d、回収 %d   [%ls] 呼び戻し")
+HUDTEXT(sweepDone,L"BOXES FETCHED: %d",L"拾取结束：捡到 %d 个",L"拾取結束：撿到 %d 個",L"回収終了：%d 個")
 HUDTEXT(formationCue,L"FORMATION: %ls   [%ls]",L"编队：%ls   [%ls]",L"編隊：%ls   [%ls]",L"隊形：%ls   [%ls]")
 HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")

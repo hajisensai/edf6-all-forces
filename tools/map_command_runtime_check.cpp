@@ -36,6 +36,8 @@ const void* guardLeader=nullptr;
 int guardCalls=0,marchCalls=0;
 int CycleGuardFormation(const void* leader) noexcept { ++guardCalls;return leader==guardLeader ? 10 : -1; }
 int CycleMarchFormation() noexcept { ++marchCalls;return 3; }
+int SplitSquad(const void*) noexcept {return -1;}
+bool MergeSquads(const void*,const void*) noexcept {return false;}
 const wchar_t* FormationText(int) noexcept { return L"SHAPE"; }
 namespace {
 int failures=0,cases=0;

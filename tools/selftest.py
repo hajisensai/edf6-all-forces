@@ -4230,6 +4230,31 @@ def stock_guidance_wired() -> None:
 
 
 @test
+def npc_pickup_wired() -> None:
+    """The squad's box sweep (src/pickup.h, npcai.cpp SweepFrame / PickUp, docs/itembox-re.md): the run to a box
+    after the lane move and before the combat spot; weapon / armour through the stock Collect with the player as
+    the one who picks and the 5 cm reach, health boxes only offline, allowed and hurt; the code it calls checked at
+    load; its ini keys read, range-checked, shipped and documented; pickup_check under CTest."""
+    code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
+    readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
+    drive = code.split('Plan Drive(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
+    run = drive.index('PickUp(s,h,pos)')
+    assert drive.index('npc::LaneEscape(') < run < drive.index('Spot(s,pos,t.e->aim')
+    pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert '(m,me,at,kBoxGrab,0.0f,&quiet)' in pick and 'alignas(16) float at[4]' in pick
+    assert '!Cfg().npcPickupHealth || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
+    assert 'kBoxGrab=0.05f' in code and 'InstallBoxes();' in code
+    for key, default in (('NpcPickupKey', '89'), ('NpcPickupRange', '80'), ('NpcPickupSec', '90'), ('NpcPickupHealth', '0')):
+        assert f'L"{key}"' in plugin, key
+        assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    for key in ('NpcPickupKey', 'NpcPickupRange', 'NpcPickupSec'):
+        assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, key
+    assert '0x2C8AC0' in src('docs/itembox-re.md')
+    assert 'EXCLUDE_FROM_ALL tools/pickup_check.cpp' in cmake and 'pickup_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+
+
+@test
 def npc_formation_wired() -> None:
     """The squads' formations (src/formation.h, npcai.cpp FormationMove, docs/npc-ai-design.md §6.4): the formation move
     only when the soldier has nothing to fight (after the evade / board / fall-back / lane moves), its ini keys read,

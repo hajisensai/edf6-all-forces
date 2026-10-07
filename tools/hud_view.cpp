@@ -178,6 +178,9 @@ bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMar
 // The squads' formation banner (npcai.cpp PlayerFormationCue): on in the npc_formation scene.
 int sceneFormation=-1;
 bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return false;o->shape=sceneFormation;o->key=0x54;return true; }
+// The box sweep banner (npcai.cpp PlayerSweepCue): on in the npc_sweep scenes.
+bool sceneSweepOn=false;SweepCue sceneSweep{};
+bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
 void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -1172,6 +1175,25 @@ int Scenes(const std::wstring& dir) {
         failed+=!(named && apart);
         std::printf("%s  npc_formation: the banner named %d, no text overlapping %d\n",named && apart ? "ok  " : "FAIL",named,apart);
     }
+    // The box sweep under it: going (boxes left, in, the key to call back) and over (the count), with the formation's banner.
+    for(int done=0;done<2;++done) {
+        sceneSweepOn=true;sceneSweep=SweepCue{done==0,12,7,0x59};
+        const wchar_t* name=done ? L"npc_sweep_done" : L"npc_sweep";
+        Scene(dir,name,ground);
+        bool line=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.find(L"7")!=std::wstring::npos && (done || p.text.find(L"12")!=std::wstring::npos))
+                line=line || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(line && apart);
+        std::printf("%s  %ls: the sweep line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",name,line,apart);
+    }
+    sceneSweepOn=false;
     sceneFormation=-1;
     sceneMarkOn=false;hasHeli=heliWas;
     std::memcpy(sceneHeli.sym.nose,noseWas,12);

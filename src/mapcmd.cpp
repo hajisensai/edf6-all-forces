@@ -46,7 +46,7 @@ enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
 struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
-             engage,focus,board,dismount,dismiss,recruit,formation,digit[9]; };
+             engage,focus,board,dismount,dismiss,recruit,formation,split,merge,digit[9]; };
 
 // --- The game thread's own ---
 struct Game {
@@ -137,7 +137,7 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
         k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);
         // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
-        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');
+        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.split=Down('P');k.merge=Down('L');
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
     }
     if(in.pad) {
@@ -292,6 +292,27 @@ void Formation(Game& g,bool allowed) noexcept {
         marchShape>=0 ? npc::formation::Name(static_cast<npc::formation::Shape>(marchShape)) : "unchanged");
 }
 
+// P (the map open): each selected squad split in two fireteams; L: the selected squads joined under the first selected.
+void Teams(Game& g,bool allowed,bool split) noexcept {
+    using hudtext::Tr;
+    using hudtext::Tx;
+    if(!allowed){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
+    const void* first=nullptr;
+    int done=0,squads=0;
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(!g.sel.Has(e.u.v) || e.owner!=Owner::squad)continue;
+        ++squads;
+        if(split){if(SplitSquad(e.u.v)>0)++done;continue;}
+        if(!first){first=e.u.v;continue;}
+        if(MergeSquads(first,e.u.v))++done;
+    }
+    if(!squads){Note(g,L"%ls",Tr(Tx::cmdNoUnit));return;}
+    if(split)Note(g,Tr(Tx::cmdSplitResult),done,squads-done);
+    else Note(g,Tr(Tx::cmdMergeResult),done,squads>1 ? squads-1-done : 0);
+    Log("MAPCMD %s: %d of %d selected squads",split ? "split" : "merge",done,squads);
+}
+
 void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool pointer) noexcept {
     // The game's memory is read before the lock is taken: a fault in a read (a unit gone between its listing and here)
     // must not leave the lock held, which would block the draw thread for good.
@@ -370,7 +391,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                           (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
                           k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
                           k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit};
-    const bool formation=k.formation && !g.was.formation;
+    const bool formation=k.formation && !g.was.formation,split=k.split && !g.was.split,merge=k.merge && !g.was.merge;
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
@@ -394,6 +415,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
             g.sel.n,given,g.count);
     }
     if(formation)Formation(g,allowed);
+    if(split || merge)Teams(g,allowed,split);
     RememberSelection(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(!picked)return false;

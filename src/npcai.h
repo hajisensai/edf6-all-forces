@@ -19,9 +19,17 @@ bool NpcMarkReadout(float* at) noexcept;
 // player's recruited squads (CycleMarchFormation: the new shape). The HUD's banner: the march's shape, shown a
 // moment after it changes (wall clock), and the key that cycles it.
 int CycleGuardFormation(const void* leader) noexcept;
+// Fireteams (the map's P and L): split a squad in two (the soldiers moved to the new one, -1 when it cannot be), put
+// squad `from` under squad `into`'s top (false when either takes no orders or the two are more than a squad holds).
+int SplitSquad(const void* leader) noexcept;
+bool MergeSquads(const void* into,const void* from) noexcept;
 int CycleMarchFormation() noexcept;
 struct FormationCue { int shape; int key; };
 bool PlayerFormationCue(FormationCue* out) noexcept;
+// The box sweep (the player's NpcPickupKey): going (`on`: the boxes still to fetch `left`) or just over, the boxes
+// brought in so far (`taken`), the key.
+struct SweepCue { bool on; int left,taken,key; };
+bool PlayerSweepCue(SweepCue* out) noexcept;
 const wchar_t* FormationText(int shape) noexcept;   // hud.cpp: a shape's name as the HUD says it
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input

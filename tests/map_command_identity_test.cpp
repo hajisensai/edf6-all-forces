@@ -9,6 +9,8 @@ bool InSession() noexcept { return false; }
 bool NpcMarked() noexcept { return false; }
 int CycleGuardFormation(const void*) noexcept {return -2;}
 int CycleMarchFormation() noexcept {return 0;}
+int SplitSquad(const void*) noexcept {return -1;}
+bool MergeSquads(const void*,const void*) noexcept {return false;}
 const wchar_t* FormationText(int) noexcept {return L"";}
 float MapRay(const float*,const float*,float*) noexcept { return -1; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1; }

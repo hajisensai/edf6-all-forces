@@ -22,6 +22,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "formation.h"
+#include "pickup.h"
 #include "npc_logic.h"
 #include "online_authority.h"
 #include "vhud.h"
@@ -108,6 +109,10 @@ struct Soldier {
     float fallTo[3];         // the fall-back's point (re-picked every kFallMs)
     ULONGLONG fallAt;
     npc::formation::Progress slotWay;   // its headway to its formation slot (formation.h GiveUp)
+    void* pickUnit;          // the box it goes for (the sweep: DropItemManager::Unit*), this frame's (pickFrame)
+    float pickPos[3];
+    int pickKind;
+    ULONGLONG pickFrame;
 };
 Soldier soldiers[kMaxSoldiers]{};
 ULONGLONG fullLoggedAt=0,listLoggedAt=0;
@@ -228,6 +233,10 @@ void MarkTick() noexcept {
     ReleaseSRWLockExclusive(&markLock);
 }
 
+void SweepFrame() noexcept;   // the box sweep (below): its key and who goes for which box, once a frame
+void ResetSweep() noexcept;   // ...over, a new mission
+void InstallBoxes() noexcept;   // ...at load: the item boxes' code checked
+
 // --- Formations (formation.h; the user, 2026-10-08) ---
 // The march: the player's recruited squads as one formation round the player (FormationKey cycles it, the map's T
 // too); a guard: each squad told to guard its own (NpcGuardFormation, the map's T on it).
@@ -286,6 +295,7 @@ void Gather(std::int32_t team) noexcept {
     PlayerLane(w);
     MarkTick();
     FormationTick();
+    SweepFrame();
 }
 
 Soldier* Entry(const unsigned char* h,ULONGLONG ms) noexcept {
@@ -764,6 +774,7 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
 
 bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,const unsigned char* root,ULONGLONG ms,
                    const char** move) noexcept;
+bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept;
 
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,const Squad* q,ULONGLONG ms) noexcept {
@@ -809,6 +820,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(FallBack(s,h,pos,served,ms)){p.move="fall back";return p;}
     float out[3];
     if(world.lane && npc::LaneEscape(world.laneOf,pos,out)){Move(h,out,1.0f);p.move="out of the lane";return p;}
+    if(s.pickUnit && s.pickFrame==GameFrame() && PickUp(s,h,pos)){p.move="to a box";return p;}
     if(!t.e && FormationMove(s,h,pos,q,root,ms,&p.move))return p;
     if(t.e) {
         Spot(s,pos,t.e->aim,anchor,served.at,engage,o.leash,ms);
@@ -1025,6 +1037,7 @@ bool InstallNpcAi() noexcept {
     __except(EXCEPTION_EXECUTE_HANDLER){rideOk=false;}
     if(!rideOk)Log("NPCAI RideVehicle not as read: squads do not board vehicles");
     if(!followOk)Log("NPCAI SetFollow not as read: squads are not reorganized when a leader dies");
+    InstallBoxes();
     int hooked=0;
     for(int i=0;i<kClasses;++i) {
         auto slot=reinterpret_cast<void**>(image+kSoldiers[i].vtable)+kSlotThink;
@@ -1046,6 +1059,9 @@ void ResetNpcAi() noexcept {
     dismissedCount=0;
     mark=MarkState{};
     world=World{};
+    march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
+    march.movers=march.pending=march.moversLast=march.pendingLast=0;
+    ResetSweep();
     fullLoggedAt=listLoggedAt=0;
 }
 
@@ -1180,6 +1196,183 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     return true;
 }
 
+// --- The box sweep (pickup.h; docs/itembox-re.md; the user, 2026-10-08) ---
+// The player's key (NpcPickupKey, on foot) sends the recruited squads with no order out for the item boxes within
+// NpcPickupRange of the player, one soldier a box (pickup::Assign), until none is left or NpcPickupSec is up (the key
+// again calls them back). The boxes are DropItemManager's list (H): not objects, read where they are each frame.
+//  - Weapon and armour boxes are taken the stock way: Collect 0x2C8AC0 with the player as the one who picks (its
+//    gate is the player's pad, +0x340), the box's own position and a 5 cm reach, so only that box: the game counts it
+//    for the mission, plays its sound, and online asks the host as it does for a player's own (§4.4). The callback
+//    is a quiet one (its slot 5 says no effect: the stock's would flash on the player, far from the box).
+//  - A health box heals the soldier that took it (the plugin marks it taken and calls the stock heal 0x547870 on
+//    that soldier with the box's share of its full health); offline only, NpcPickupHealth on, a hurt soldier.
+constexpr unsigned kDropManager=0x20B2988,kBoxVtable=0x17A6C18,kCollect=0x2C8AC0,kHealHuman=0x547870,kNodePos=0x11B15B0;
+constexpr std::size_t kBoxList=0xDE0,kBoxNodeUnit=0x18,kBoxModel=0xB0,kBoxKind=0xC0,kBoxTaken=0xC4;
+constexpr int kMaxBoxes=128;
+constexpr float kBoxGrab=0.05f;      // m: the reach handed to Collect round the box's own position
+const unsigned char kCollectSig[]={0x4C,0x8B,0xDC,0x55,0x41,0x56,0x41,0x57,0x48,0x83,0xEC,0x60,0x48,0x83,0xBA,0x40,0x03,0x00,0x00,0x00};
+const unsigned char kHealHumanSig[]={0x80,0xB9,0xE8,0x02,0x00,0x00,0x00,0x75,0x20,0xF3,0x0F,0x58,0x89,0xF8,0x02,0x00,0x00,0xF3,0x0F,0x5D};
+const unsigned char kNodePosSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x8B,0x91,0xF0,0x00,0x00,0x00,0x48,0x8B,0x48};
+using CollectFn=void(__fastcall*)(void*,void*,const float*,float,float,void*);
+using HealHumanFn=void(__fastcall*)(void*,float);
+using NodePosFn=const float*(__fastcall*)(const void*);
+bool boxesOk=false;
+
+// Collect's callback (a 16-byte {vtable, owner} on the caller's stack): slot 5 asked whether to play the pick-up's
+// effect (no), slot 1 the effect (never called then); the others never called by Collect.
+bool __fastcall QuietAsk(void*) { return false; }
+void __fastcall QuietNone(void*) {}
+void* const kQuietVtable[8]={reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),
+                             reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietAsk),
+                             reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone)};
+struct QuietCallback { void* const* vt; void* owner; };
+
+struct SweepBox { void* unit; float pos[3]; int kind; };
+struct Sweep {
+    bool on,held,logged;
+    ULONGLONG until,frame;
+    int taken,left;
+    ULONGLONG endedAt;    // wall clock: the HUD's closing line
+};
+Sweep sweep{};
+SRWLOCK sweepLock=SRWLOCK_INIT;
+
+void* DropManager() noexcept {
+    void* const m=At<void*>(image,kDropManager);
+    return m && Readable(m,kBoxList+0x10) ? m : nullptr;
+}
+
+// The boxes on the ground (not taken), at most `most`: their Unit, position (the model's, as Collect reads it) and kind.
+int Boxes(SweepBox* out,int most) noexcept {
+    unsigned char* const m=static_cast<unsigned char*>(DropManager());
+    if(!m)return 0;
+    const auto head=At<unsigned char*>(m,kBoxList);
+    if(!Readable(head,0x20))return 0;
+    int n=0,guard=0;
+    for(auto node=At<unsigned char*>(head,0);node && node!=head && n<most && guard<kMaxBoxes*2;node=At<unsigned char*>(node,0),++guard) {
+        if(!Readable(node,0x20))break;
+        auto u=At<unsigned char*>(node,kBoxNodeUnit);
+        if(!Readable(u,kBoxTaken+1) || At<const void*>(u,0)!=image+kBoxVtable || u[kBoxTaken])continue;
+        const int kind=At<std::int32_t>(u,kBoxKind);
+        const void* const model=At<const void*>(u,kBoxModel);
+        if(kind<0 || kind>3 || !model)continue;
+        const float* p=reinterpret_cast<NodePosFn>(image+kNodePos)(model);
+        if(!p || !std::isfinite(p[0]+p[1]+p[2]))continue;
+        out[n++]=SweepBox{u,{p[0],p[1],p[2]},kind};
+    }
+    return n;
+}
+
+void EndSweep(const char* why) noexcept {
+    if(!sweep.on)return;
+    AcquireSRWLockExclusive(&sweepLock);
+    sweep.on=false;sweep.endedAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&sweepLock);
+    Log("NPCAI box sweep over (%s): %d taken",why,sweep.taken);
+}
+
+void InstallBoxes() noexcept {
+    __try {
+        boxesOk=Matches(kCollect,kCollectSig,sizeof(kCollectSig)) && Matches(kHealHuman,kHealHumanSig,sizeof(kHealHumanSig)) &&
+                Matches(kNodePos,kNodePosSig,sizeof(kNodePosSig));
+    } __except(EXCEPTION_EXECUTE_HANDLER){boxesOk=false;}
+    if(!boxesOk)Log("NPCAI the item boxes' code is not as docs/itembox-re.md reads it: no box sweep");
+}
+
+void ResetSweep() noexcept {
+    AcquireSRWLockExclusive(&sweepLock);
+    sweep.on=false;sweep.held=false;sweep.taken=sweep.left=0;sweep.endedAt=0;
+    ReleaseSRWLockExclusive(&sweepLock);
+}
+
+void SweepFrame() noexcept {
+    const Config& c=Cfg();
+    unsigned char* const me=PlayerHuman();
+    const bool down=c.npcPickupKey>0 && me && HumanOnFoot(me) && KeyHeld(c.npcPickupKey);
+    const ULONGLONG ms=GameMs();
+    if(down && !sweep.held) {
+        if(sweep.on)EndSweep("called back by the key");
+        else if(!boxesOk){if(!sweep.logged){sweep.logged=true;Log("NPCAI box sweep: the item boxes are not as docs/itembox-re.md reads them: off");}}
+        else {
+            AcquireSRWLockExclusive(&sweepLock);
+            sweep.on=true;sweep.taken=0;sweep.left=0;sweep.endedAt=0;sweep.until=ms+static_cast<ULONGLONG>(c.npcPickupSec*1000.0f);
+            ReleaseSRWLockExclusive(&sweepLock);
+            Log("NPCAI box sweep: out for the boxes within %.0f m (health boxes %s)",c.npcPickupRange,
+                c.npcPickupHealth && !InSession() ? "too, for the hurt" : "left alone");
+        }
+    }
+    sweep.held=down;
+    if(!sweep.on)return;
+    if(!me || !world.player){EndSweep("the player is gone");return;}
+    if(ms>=sweep.until){EndSweep("its time is up");return;}
+    SweepBox boxes[kMaxBoxes];
+    const int nb=Boxes(boxes,kMaxBoxes);
+    MarchRoster(ms);
+    npc::pickup::Box b[kMaxBoxes];
+    for(int i=0;i<nb;++i){std::memcpy(b[i].pos,boxes[i].pos,12);b[i].kind=boxes[i].kind;}
+    npc::pickup::Picker p[32];
+    const int np=march.n;
+    for(int i=0;i<np;++i) {
+        auto h=static_cast<const unsigned char*>(march.member[i]);
+        std::memcpy(p[i].pos,Pos(h),12);
+        p[i].hp=At<float>(h,kHumanHp);p[i].hpMax=At<float>(h,kHumanHpMax);
+    }
+    npc::pickup::Rules r{c.npcPickupHealth,InSession(),c.npcPickupRange,{world.playerAt[0],world.playerAt[1],world.playerAt[2]}};
+    int out[32];
+    const int given=npc::pickup::Assign(b,nb,p,np,r,out);
+    int left=0;
+    for(int i=0;i<nb;++i)for(int k=0;k<np;++k)if(npc::pickup::Takes(b[i],p[k],r)){++left;break;}
+    sweep.left=left;
+    if(!given){EndSweep(np ? "no box left within reach" : "no soldier to send");return;}
+    for(int k=0;k<np;++k) {
+        if(out[k]<0)continue;
+        Soldier* s=Entry(static_cast<const unsigned char*>(march.member[k]),ms);
+        if(!s)continue;
+        const SweepBox& x=boxes[out[k]];
+        s->pickUnit=x.unit;std::memcpy(s->pickPos,x.pos,12);s->pickKind=x.kind;s->pickFrame=GameFrame();
+    }
+}
+
+// The box still lying where the sweep saw it this frame (not taken since): its exact position for Collect.
+bool BoxStill(const void* unit,float* at4) noexcept {
+    SweepBox boxes[kMaxBoxes];
+    const int n=Boxes(boxes,kMaxBoxes);
+    for(int i=0;i<n;++i) {
+        if(boxes[i].unit!=unit)continue;
+        const float* p=reinterpret_cast<NodePosFn>(image+kNodePos)(At<const void*>(static_cast<const unsigned char*>(unit),kBoxModel));
+        std::memcpy(at4,p,16);
+        return true;
+    }
+    return false;
+}
+
+// Runs to its box and takes it there; false when the box is gone (someone took it): the soldier's other moves then.
+bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {
+    if(npc::pickup::Level(pos,s.pickPos)>npc::pickup::kReach){MoveTo(h,pos,s.pickPos,0.5f);return true;}
+    alignas(16) float at[4];
+    auto u=static_cast<unsigned char*>(s.pickUnit);
+    s.pickUnit=nullptr;
+    if(!boxesOk || !BoxStill(u,at))return false;
+    Stand(h);
+    if(npc::pickup::IsHeal(s.pickKind)) {
+        const float hpMax=At<float>(h,kHumanHpMax);
+        if(!Cfg().npcPickupHealth || InSession() || !(At<float>(h,kHumanHp)<hpMax))return true;   // healed meanwhile: leave it
+        u[kBoxTaken]=1;
+        reinterpret_cast<HealHumanFn>(image+kHealHuman)(h,npc::pickup::HealShare(s.pickKind)*hpMax);
+        ++sweep.taken;
+        Log("NPCAI soldier %p took a health box: %.0f/%.0f",h,At<float>(h,kHumanHp),hpMax);
+        return true;
+    }
+    unsigned char* const me=PlayerHuman();
+    void* const m=DropManager();
+    if(!me || !m || !At<const void*>(me,0x340))return true;
+    QuietCallback quiet{kQuietVtable,me};
+    reinterpret_cast<CollectFn>(image+kCollect)(m,me,at,kBoxGrab,0.0f,&quiet);
+    if(u[kBoxTaken]){++sweep.taken;Log("NPCAI soldier %p brought in a %s box",h,s.pickKind==npc::pickup::kWeapon ? "weapon" : "armour");}
+    else Log("NPCAI soldier %p at a box Collect did not take (at %.1f,%.1f,%.1f)",h,at[0],at[1],at[2]);
+    return true;
+}
+
 int CancelBoarding(unsigned char* top) noexcept {
     unsigned char* members[kMaxSquad];
     const int n=Members(top,members,kMaxSquad);
@@ -1260,6 +1453,57 @@ bool DismountSquad(unsigned char* top) noexcept {
 // player's (the stock SetFollow, as the stock recruit does), refused during its dismissal's cooldown; dismiss lets go a
 // recruited squad where it stands and starts the cooldown (+0x540 cleared meanwhile, or the stock would take it back at
 // once). The squads of a mission script take none (§4.3).
+// --- Fireteams (the user, 2026-10-08: "支持编组") ---
+// A squad is the stock follow tree (§5.1); a fireteam is a squad of its own: SplitSquad makes one squad two (its places
+// in Members' order: the even ones stay under the top, the odd ones under the first of them, who follows the top's own
+// leader: the player for a recruited squad, nobody for a free one), every member re-parented explicitly (a moved
+// soldier's own followers are not dragged along with it); MergeSquads puts other squads' tops under one squad's top.
+// Each half is then a squad like any other: its own row on the panel, its own orders and formation. Offline only (as
+// the other orders: the follow tree's changes are replicated by vslot 39, but the panel's orders are not, §9).
+namespace {
+Squad* Commandable(const void* leader) noexcept {
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession() || !followOk)return nullptr;
+    Squad* const q=FindSquad(leader);
+    if(!q || npc::Scripted(q->control) || q->dismissed || GameMs()-q->seen>kOrderSeenMs)return nullptr;
+    auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
+    return q->top.Is(top) && !top[kDead] && IsSoldierClass(top) ? q : nullptr;
+}
+}  // namespace
+
+int SplitSquad(const void* leader) noexcept {
+    __try {
+        Squad* const q=Commandable(leader);
+        if(!q)return -1;
+        auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
+        unsigned char* m[kMaxSquad];
+        const int n=Members(top,m,kMaxSquad);
+        if(n<2)return -1;
+        unsigned char* const above=At<unsigned char*>(top,kLeader);
+        unsigned char* const second=m[1];
+        Follow(second,above);
+        for(int i=2;i<n;++i)Follow(m[i],i%2 ? second : top);
+        CancelBoarding(top);
+        Log("NPCAI squad %p split: %d stay, %d go with %p",top,(n+1)/2,n/2,second);
+        return n/2;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+
+bool MergeSquads(const void* into,const void* from) noexcept {
+    __try {
+        Squad* const a=Commandable(into);
+        Squad* const b=Commandable(from);
+        if(!a || !b || a==b)return false;
+        auto top=static_cast<unsigned char*>(const_cast<void*>(into));
+        auto other=static_cast<unsigned char*>(const_cast<void*>(from));
+        unsigned char* m[kMaxSquad];
+        if(Members(top,m,kMaxSquad)+Members(other,m,kMaxSquad)>kMaxSquad)return false;   // the panel's squad size
+        Follow(other,top);
+        b->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
+        Log("NPCAI squad %p joins squad %p",other,top);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 int CycleGuardFormation(const void* leader) noexcept {
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return -2;
     Squad* const q=FindSquad(leader);
@@ -1274,6 +1518,17 @@ int CycleMarchFormation() noexcept {
     const npc::formation::Shape s=npc::formation::Next(MarchShape(),false);
     SetMarchShape(s,"the map");
     return static_cast<int>(s);
+}
+
+constexpr ULONGLONG kSweepEndMs=3000;
+bool PlayerSweepCue(SweepCue* out) noexcept {
+    AcquireSRWLockShared(&sweepLock);
+    const SweepCue c{sweep.on,sweep.left,sweep.taken,Cfg().npcPickupKey};
+    const ULONGLONG ended=sweep.endedAt;
+    ReleaseSRWLockShared(&sweepLock);
+    if(!c.on && (!ended || GetTickCount64()-ended>kSweepEndMs))return false;
+    *out=c;
+    return true;
 }
 
 constexpr ULONGLONG kFormationCueMs=2500;

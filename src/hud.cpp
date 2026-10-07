@@ -3478,6 +3478,17 @@ void FormationBanner(Text* text,float width,float height,float s,Line* lines,int
     Label(text,lines,at,width*0.5f,height*0.5f+190.0f*s,1,kLineScale,kCyan,Tr(Tx::formationCue),FormationText(c.shape),key);
 }
 
+// The box sweep (npcai.cpp, the player's NpcPickupKey): the boxes still to fetch and the ones in while it goes, the
+// count a moment after it is over; under the formation's banner.
+void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    SweepCue c{};
+    if(!PlayerSweepCue(&c))return;
+    wchar_t key[24];
+    KeyName(c.key,key,_countof(key));
+    if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
+    else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
+}
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
     // hold where the player left them.
@@ -3585,6 +3596,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
+        SweepBanner(t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;
