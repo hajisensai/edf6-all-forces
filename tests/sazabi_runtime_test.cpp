@@ -6,6 +6,9 @@ namespace crew {
 unsigned char* image=nullptr;
 Config config{};
 PlayerFix player{};
+const void* visibleObjects[4]{};
+float visiblePositions[4][3]{};
+int visibleCount=0;
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { return nullptr; }
@@ -29,7 +32,10 @@ void RoundDrop(RoundObj&) noexcept {}
 unsigned char* PlayerHuman() noexcept { return nullptr; }
 bool HumanOnFoot(const unsigned char*) noexcept { return false; }
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
-bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
+bool VisitEnemies(const unsigned char*,EnemyVisitor visitor,void* context) noexcept {
+    for(int i=0;i<visibleCount;++i)visitor(context,visibleObjects[i],visiblePositions[i]);
+    return visibleCount>0;
+}
 bool MapHoldsKeys() noexcept { return true; }
 void BodyAttitude(const unsigned char*,const float*,const float*,float,float,float*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
@@ -101,6 +107,29 @@ int main() {
     Check(Near(dock,got),"funnel dock remains this mech's after another mech is posed");
     BoneAt(a,sazabi::kAxeBlade,nullptr,got);
     Check(Near(blade,got),"melee blade remains this mech's after another mech is posed");
+
+    // Run the production target collection and funnel flight: A vanishes while a funnel still attacks B.
+    visibleCount=4;
+    for(int i=0;i<visibleCount;++i) {
+        visibleObjects[i]=&objects[i];
+        visiblePositions[i][0]=static_cast<float>(50+i*10);
+        visiblePositions[i][1]=13.0f;
+    }
+    FlyFunnels(a,vehicle,false,1.0f/60.0f);
+    Check(a.arms.funnelSlot[1]==&objects[1],"B initially occupies target slot 1");
+    auto& onB=a.arms.funnels[0];
+    onB.phase=FunnelPhase::station;onB.target=1;onB.wait=1.0f;
+    std::memcpy(onB.at,visiblePositions[1],12);
+    float bPosition[3];std::memcpy(bPosition,onB.at,12);
+    auto& onA=a.arms.funnels[1];
+    onA.phase=FunnelPhase::station;onA.target=0;onA.wait=1.0f;
+    std::memcpy(onA.at,visiblePositions[0],12);
+    for(int i=0;i<3;++i){visibleObjects[i]=visibleObjects[i+1];std::memcpy(visiblePositions[i],visiblePositions[i+1],12);}
+    visibleCount=3;
+    FlyFunnels(a,vehicle,false,1.0f/60.0f);
+    Check(a.arms.funnelSlot[0]==&objects[1] && onB.target==0,"B's funnel follows B to its compacted slot");
+    Check(onB.phase==FunnelPhase::station && Near(onB.at,bPosition),"B's funnel stays on station without teleporting to C");
+    Check(onA.phase==FunnelPhase::transit,"the lost A target is reacquired through a flight path");
     std::printf("Sazabi runtime: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

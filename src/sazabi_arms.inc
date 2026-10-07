@@ -272,6 +272,13 @@ void FlyFunnels(Mech& m,unsigned char* v,bool launch,float dt) noexcept {
     }
     for(int i=0;i<e.n && n<kFunnelSlots;++i)   // the nearest others into the slots left
         if(!kept[i]){kept[i]=true;slots[n]=e.obj[i];std::memcpy(ts[n].at,e.at[i],12);++n;}
+    // A funnel owns a target identity, not its place in the compacted list. Keep a surviving target; a lost target
+    // becomes -1 so the flight state can acquire another through its transit path instead of snapping to it.
+    for(auto& f:a.funnels) {
+        const void* previous=f.target>=0 && f.target<kFunnelSlots ? a.funnelSlot[f.target] : nullptr;
+        f.target=-1;
+        if(previous)for(int s=0;s<n;++s)if(slots[s]==previous){f.target=s;break;}
+    }
     for(int s=0;s<kFunnelSlots;++s)a.funnelSlot[s]=s<n ? slots[s] : nullptr;
     float docks[kFunnelCount][3],fwd[3];
     for(int k=0;k<kFunnelCount;++k)DockPoint(m,k,docks[k]);
