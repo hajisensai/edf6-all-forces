@@ -62,6 +62,7 @@ PluginBody BodyOf(const void*) noexcept { MissingRecoveryDependency();return Plu
 float BodyMark(const void*) noexcept { MissingRecoveryDependency();return 0.0f; }
 bool Body506Ok() noexcept { MissingRecoveryDependency();return false; }
 bool ImpactDamage(const unsigned char*,const float*,float,float) noexcept { MissingRecoveryDependency();return false; }
+bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { MissingRecoveryDependency();return false; }
 bool RoundImpact(const float*,const float*,const float*,int,float*,float*) noexcept { MissingRecoveryDependency();return false; }
 bool MissileHoming(const float*,float) noexcept { MissingRecoveryDependency();return false; }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
