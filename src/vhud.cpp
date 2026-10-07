@@ -127,6 +127,7 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
         if(!a.hit)a.range=0.0f;   // no ground: no pipper (rounds that are not ranged keep the boresight alone)
         return;
     }
+    a.ladder=gunsight::Of(round,pos,dir,shooter);
     const roundaim::GunMark g=roundaim::GunSight(round,pos,dir,shooter,a.hit,a.at,a.flight*60.0f,target.ok ? target.at : nullptr,
                                                  target.vel);
     if(g.mark==roundaim::SightMark::none){a.range=0.0f;return;}   // `at` stays where the round ends (twin guns told apart by it)
