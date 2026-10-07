@@ -923,6 +923,15 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
         for name, data in jet_guns(game).items():
             led.put(OWNER, f'WEAPON/{name}', data)
             held.add(ledger.key(f'WEAPON/{name}'))
+    if SAZABI_JET in jets:
+        from vcobjects import sazabi_weapons, sazabi_rounds
+        # A standalone range needs both the mounted weapons and plugin-fired beams. Register these
+        # even after a full install, so removing that install cannot break a range still using them.
+        for folder, files in (('WEAPON', sazabi_weapons(game)), ('OBJECT', sazabi_rounds(game))):
+            for name, data in files.items():
+                rel = f'{folder}/{name}'
+                led.put(OWNER, rel, data)
+                held.add(ledger.key(rel))
     elevon = f'OBJECT/{JET_ELEVON_FILE}'
     if any(JETS[n].model is None for n in jets) and not os.path.isfile(led.disk(elevon)):
         # The default bomber's shape is measured on the grounded elevon model.

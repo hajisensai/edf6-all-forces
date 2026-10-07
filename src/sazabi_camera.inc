@@ -92,7 +92,7 @@ void Aim(Mech& m) noexcept {
     // the arm onto the aim point: its direction from the right shoulder, in sz_root's frame (x left, z ahead)
     float local[3],sh[3];
     ToRoot(m,a.aim,local);
-    std::memcpy(sh,scratch.modelPos[sazabi::kShoulderR],12);
+    std::memcpy(sh,m.posed.modelPos[sazabi::kShoulderR],12);
     const float r[3]={local[0]-sh[0],local[1]-sh[1],local[2]-sh[2]};
     const float flat=std::sqrt(r[0]*r[0]+r[2]*r[2]);
     if(flat>1.0f) {
