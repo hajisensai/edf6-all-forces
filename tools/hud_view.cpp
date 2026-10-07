@@ -165,7 +165,8 @@ bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
 bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
 bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
-bool PlayerGunnerHud(GunnerReadout*) noexcept { return false; }
+bool hasGunner=false;GunnerReadout sceneGunner{};
+bool PlayerGunnerHud(GunnerReadout* o) noexcept { if(hasGunner)*o=sceneGunner;return hasGunner; }
 bool PlayerHighCam(bool*,bool*) noexcept { return false; }
 bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap || mapEasing; }
@@ -174,6 +175,7 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
+bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -193,13 +195,14 @@ void SetStockGaugeCover(bool) noexcept {}
 using namespace crew;
 
 namespace {
+float sceneFov=55.0f;   // degrees, the camera's vertical field of view (a zoomed sight's scene narrows it)
 // A level camera kBack m behind and kUp over `pos`, looking along `fwd` (level): the row-vector view-projection.
 void Camera(const float* pos,const float* fwdIn,float width,float height,float* vp) {
     float f[3]={fwdIn[0],0.0f,fwdIn[2]};
     vec::Normalize(f);
     const float r[3]={-f[2],0.0f,f[0]},u[3]={0.0f,1.0f,0.0f};
     const float eye[3]={pos[0]-f[0]*24.0f,pos[1]+5.0f,pos[2]-f[2]*24.0f};
-    const float fy=1.0f/std::tan(0.5f*55.0f*kDeg),fx=fy/(width/height),n=1.0f,fa=20000.0f,A=fa/(fa-n),B=-n*fa/(fa-n);
+    const float fy=1.0f/std::tan(0.5f*sceneFov*kDeg),fx=fy/(width/height),n=1.0f,fa=20000.0f,A=fa/(fa-n),B=-n*fa/(fa-n);
     auto dot=[](const float* a,const float* b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
@@ -625,6 +628,107 @@ void StockTank(const float* pos) {
     sceneStock.threatKind[1]=1;sceneStock.threatAt[1][0]=pos[0]+1500.0f;sceneStock.threatAt[1][1]=pos[1]+300.0f;sceneStock.threatAt[1][2]=pos[2]-800.0f;
 }
 
+// The gun reticle (hud.cpp GunReticle, src/gunsight.h): the E551's cannon (Root.cpk V_505TANK_DLC_CANNON04L: 11 m/frame,
+// gravity x 0.25, 600 frames; rounds_check kE551Gun) the seat's sight gun, the ground 1300 m off; drawn at the game's
+// view and at a 4x narrower one (the ladder's ticks stand apart, the mils show). Checked: the rangefinder line reads
+// the gun's range, the ladder's labels go down the screen as their ranges go up, no two texts overlap; zoomed, the
+// flat cannon's ladder shows a labelled tick (its round drops 3 m in 1000 m: most of its ticks stand within a label's
+// height of each other even 4x zoomed, numbered only where one fits; gunsight_check checks where they are).
+int TankSightScenes(const std::wstring& dir,const float* ground) {
+    StockTank(ground);
+    StockArm& a=sceneStock.arm[0];
+    const float muzzle[3]={ground[0],ground[1]+2.6f,ground[2]+4.0f};
+    float bore[3]={0.0f,0.004f,1.0f};vec::Normalize(bore);
+    const roundaim::Round round{11.0f,{0.0f,-9.8f*0.25f/3600.0f,0.0f},0.0f,600};
+    const float still[3]={0.0f,0.0f,0.0f};
+    a.aimed=true;a.hit=true;a.kind=RoundKind::arc;
+    std::memcpy(a.bore,bore,12);
+    a.ladder=gunsight::Of(round,muzzle,bore,still);
+    a.at[0]=muzzle[0];a.at[1]=ground[1];a.at[2]=muzzle[2]+1300.0f;
+    a.range=1300.0f;a.flight=1300.0f/660.0f;
+    int failed=0;
+    const auto check=[&](const wchar_t* name,int wantTicks){
+        Scene(dir,name,ground);
+        bool lrf=false,order=true,apart=true;int ticks=0,lastRange=0;float lastY=-1e9f;
+        for(const Drew& d:drew) {
+            if(d.text.find(L"1300 m")!=std::wstring::npos)lrf=true;   // Tx::sightRange, in any language
+            if(d.text.size()<=2 && !d.text.empty() && d.text[0]>=L'1' && d.text[0]<=L'9') {
+                const int r=std::stoi(d.text);
+                order=order && r>lastRange && d.y0>lastY;   // farther ranges further down
+                lastRange=r;lastY=d.y0;++ticks;
+            }
+        }
+        for(std::size_t i=0;i<drew.size();++i)
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& p=drew[i];const Drew& q=drew[k];
+                if(p.text.empty() || q.text.empty())continue;
+                if(p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1){apart=false;std::printf("      overlap: %ls / %ls\n",p.text.c_str(),q.text.c_str());}
+            }
+        const bool ok=lrf && ticks>=wantTicks && order && apart;
+        failed+=!ok;
+        std::printf("%s  %ls: rangefinder line %d, ladder labels %d (want >= %d) in order %d, no text overlapping %d\n",
+                    ok ? "ok  " : "FAIL",name,lrf,ticks,wantTicks,order,apart);
+    };
+    check(L"stock_tank_sight",0);
+    sceneFov=55.0f/3.0f;sceneStock.zoom=3.0f;   // the sight at 3x (sightzoom.cpp: the camera's field of view a third)
+    check(L"stock_tank_sight_zoom",1);
+    bool named=false;
+    for(const Drew& d:drew)named=named || d.text.find(L"3x")!=std::wstring::npos;
+    failed+=!named;
+    std::printf("%s  stock_tank_sight_zoom: the magnification named (3x) %d\n",named ? "ok  " : "FAIL",named);
+    // A 250 m ladder must say 2.5 / 7.5 hundreds, not truncate those ranges to 2 / 7.
+    a.ladder={};a.ladder.step=250.0f;a.ladder.ticks=2;
+    for(int i=0;i<2;++i) {
+        a.ladder.range[i]=i ? 750.0f : 250.0f;
+        a.ladder.at[i][0]=ground[0];a.ladder.at[i][1]=ground[1]-(i ? 45.0f : 10.0f);
+        a.ladder.at[i][2]=ground[2]+a.ladder.range[i];
+    }
+    Scene(dir,L"stock_tank_sight_fractional_ranges",ground);
+    bool half250=false,half750=false;
+    for(const Drew& d:drew){half250=half250 || d.text==L"2.5";half750=half750 || d.text==L"7.5";}
+    failed+=!(half250 && half750);
+    std::printf("%s  250 m ladder labels preserve half hundreds\n",half250 && half750 ? "ok  " : "FAIL");
+    sceneFov=55.0f;sceneStock.zoom=1.0f;
+    StockTank(ground);
+    return failed;
+}
+
+// The gunship's gunner (hud.cpp GunshipFrame, GunnerMarks): the frame round the screen's centre with each gun's centre
+// mark, the impact cross 1500 m off on the ground under the centre, the gun line under it. Checked: the gun line is
+// drawn, inside the screen, apart from every other text.
+int GunshipSightScenes(const std::wstring& dir,const float* ground) {
+    hasStock=false;hasGunner=true;
+    int failed=0;
+    static const wchar_t* names[]={L"gunship_sight_shells",L"gunship_sight_cannon",L"gunship_sight_gatling"};
+    for(int g=0;g<3;++g) {
+        sceneGunner=GunnerReadout{};
+        sceneGunner.ground=sceneGunner.inReach=sceneGunner.ready=true;
+        sceneGunner.range=1500.0f;
+        sceneGunner.sight[0]=ground[0];sceneGunner.sight[1]=ground[1]+5.0f;sceneGunner.sight[2]=ground[2]+19.0f;   // the camera's centre ray at the ground
+        sceneGunner.gun=static_cast<GunnerGun>(g);sceneGunner.guns=7u;
+        sceneGunner.zoom=g==2 ? 6.0f : 1.0f;   // the gatling's sight at 6x: its magnification over the frame
+        StockTank(ground);   // its camera only (Scene looks along sceneStock.hull when hasStock; with it off, along the jet's nose)
+        sceneJet.sym.nose[0]=0.0f;sceneJet.sym.nose[1]=0.0f;sceneJet.sym.nose[2]=1.0f;
+        Scene(dir,names[g],ground);
+        bool line=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.find(L"1500 m")!=std::wstring::npos)line=line || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        bool named=false;
+        for(const Drew& d:drew)named=named || d.text==L"6x";
+        const bool ok=line && apart && named==(g==2);
+        failed+=!ok;
+        std::printf("%s  %ls: gun line %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",names[g],line,apart);
+    }
+    hasGunner=false;
+    return failed;
+}
+
 // hudscale::Of against what it must give: the game's screen (uiW x uiH), the viewport drawn in, the ini's HudScale.
 int ScaleOfChecks() {
     struct Case { const char* what; int uiW,uiH,viewW,viewH; float user,want; };
@@ -741,8 +845,10 @@ void SazabiState(int k,const float* pos) {
     SazabiCue& c=sceneSazabi;
     if(k==1){c.guard=c.air=c.swinging=c.overheat=true;c.hasLock=true;c.missileLock=1.0f;c.thruster=0.0f;c.special=2;c.cannonCharge=0.62f;
              c.altitude=9999.0f;c.speed=99.0f;c.climb=-30.0f;c.aimRange=99999.0f;}
-    if(k==2){c.special=1;c.funnelsOut=4;c.funnelReady=0.3f;}
-    if(k==3){c.air=c.boosting=true;c.altitude=312.0f;c.speed=48.0f;c.climb=14.0f;c.thruster=0.2f;c.hasLock=true;c.missileLock=0.5f;}
+    if(k==2){c.special=1;c.funnelsOut=4;c.funnelReady=0.3f;
+             c.hasAssist=true;c.assist[0]=pos[0]-6.0f;c.assist[1]=pos[1]+18.0f;c.assist[2]=pos[2]+240.0f;}   // the aim assist's enemy
+    if(k==3){c.hasAssist=c.lockOn=true;c.assist[0]=pos[0]+20.0f;c.assist[1]=pos[1]+30.0f;c.assist[2]=pos[2]+260.0f;   // locked on
+             c.air=c.boosting=true;c.altitude=312.0f;c.speed=48.0f;c.climb=14.0f;c.thruster=0.2f;c.hasLock=true;c.missileLock=0.5f;}
 }
 constexpr int kSazabiStates=4;
 // A box in design px from the screen's centre (the Sazabi's gauges' anchor).
@@ -1013,6 +1119,8 @@ int Scenes(const std::wstring& dir) {
     StockTank(ground);
     Scene(dir,L"stock_tank",ground);
     Scene(dir,L"stock_tank_219",ground,2520);
+    failed+=TankSightScenes(dir,ground);
+    failed+=GunshipSightScenes(dir,ground);
     hasDrill=true;
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
     strcpy_s(sceneStock.kind,"DrillTank");

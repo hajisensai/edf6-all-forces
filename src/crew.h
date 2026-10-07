@@ -111,6 +111,13 @@ struct Config {
     float sazabiThrusterSec=8.0f;   // s of boost or climb a full gauge holds
     float sazabiThrusterRegen=0.4f; // of a full gauge a second, on its feet (three times that just after landing)
     bool sazabiInvertAim=false;     // the aim's up and down the other way
+    bool sazabiAimAssist=true;      // aim assist (sazabi_assist.h): an enemy within SazabiAssistCone of the reticle is aimed at
+    float sazabiAssistCone=8.0f;    // deg round the screen's centre an enemy is picked within
+    float sazabiAssistRange=600.0f; // m: the farthest enemy picked
+    float sazabiAssistPull=4.0f;    // 1/s: the camera eased onto the picked enemy (a pad's lock-on feel; 0: the shots alone)
+    bool sazabiAssistMousePull=false; // ...the camera eased with the mouse too (off: on the mouse the shots alone)
+    int sazabiLockKey=0x04;         // the lock-on (Sekiro's): pressed, the enemy nearest the reticle held, the camera on it (VK_MBUTTON; 0 none)
+    int sazabiLockButton=0x80;      // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
     int sazabiSwitchKey=0x52;       // the special the secondary fires: shield missiles, funnels, cannon (R; a pad's LB)
@@ -193,6 +200,9 @@ struct Config {
     float turretCamRate=90.0f;      // ...the camera's turn at a full stick, deg/s (never slower than the turret's own)
     int freeLookKey=0x04;           // ...free look while held: the camera turns, the turret holds (VK_MBUTTON; 0 none)
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
+    bool sightZoom=true;            // a vehicle gun's sight magnifies: 1x -> 3x -> 6x (sightzoom.cpp, docs/zoom-re.md)
+    int sightZoomKey=0x5A;          // ...its key ('Z'; a Windows virtual-key code, 0: none)
+    int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered; 0 none)
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
@@ -606,6 +616,9 @@ struct SazabiCue {
     float aimRange;          // m from the muzzle to the aim point
     bool aimHit;             // the centre's ray meets something within the reticle's reach (else the aim is its far end)
     bool centred;            // the camera is the Sazabi's own (sazabi.cpp): the aim point is the screen's centre
+    bool hasAssist;
+    float assist[3];         // the aim assist's enemy (its lock point, world): the aim point is it (sazabi_assist.h)
+    bool lockOn;             // ...held by the lock-on (its key pressed: the camera follows it)
 };
 constexpr ULONGLONG kSazabiCueMs=250;
 bool PlayerSazabiCue(SazabiCue* out) noexcept;
@@ -691,6 +704,8 @@ bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
 // Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
 bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
+// The game's warp of a human's character controller to `pos` (sidecar.cpp, as the ride exit does); false: not known.
+bool WarpHuman(unsigned char* human,const float* pos) noexcept;
 int SidecarPassengers() noexcept;     // passengers riding now (the bullets' hook's quick "nothing to pass" test)
 bool SidecarBulletHooked() noexcept;  // jet_hooks.cpp: the bullets' candidate hook is in (InstallBulletPass)
 void SidecarLevel(const void* body,float* w) noexcept;
@@ -709,6 +724,18 @@ bool HighCamOn(const void* vehicle) noexcept;   // turretcam.cpp: the high view 
 // living 10 s or more): its high view (HighCamClass 1) and no gun stabilizer (stab.cpp: it fires from a halt).
 bool IndirectFireSeat(const unsigned char* seat) noexcept;
 void ResetHighCam() noexcept;
+// The high view is offered in `vehicle` (seat 0 the player's, HighCam on): its button is the high view's there.
+bool HighCamOffered(unsigned char* vehicle) noexcept;
+
+// sightzoom.cpp: a vehicle gun's sight magnified (src/sightzoom.h, docs/zoom-re.md). InstallSightZoom at load (the
+// player camera's step, chained with map.cpp's); SightZoomFrame from the frame of the seat the player sits at (its key
+// or, `padButton`, its pad button steps 1x -> 3x -> 6x; a seat taken again starts at 1x), SightZoomStock from every stock
+// vehicle's input (the player's seat in it); SightZoomNow: the magnification now (in `vehicle`, nullptr any), 1 with none.
+bool InstallSightZoom() noexcept;
+void SightZoomFrame(unsigned char* vehicle,unsigned seat,bool padButton) noexcept;
+void SightZoomStock(unsigned char* vehicle) noexcept;
+float SightZoomNow(const void* vehicle) noexcept;
+void ResetSightZoom() noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
 // camera's look-at fetch, the seat aim's step); TurretCamFrame from every vehicle's input, the plugin off too (it lets
@@ -787,6 +814,9 @@ bool IsPlayerJet(const void* vehicle) noexcept;
 // slow enough: crew.cpp bumps its NPC pilot for them); the plugin holds it for them (they fly it, it comes down for
 // them, catches them or waits where they left it): jet.cpp does not fly it then, crew.cpp does not crew it.
 bool PlayerJetBoardable(const void* vehicle) noexcept;
+// The aircraft the hail key would call down for a player at `from` (none boardable near them: the HUD's hint), or the
+// one called coming down (`*coming`): its position and distance. False: none, or no hail key.
+bool PlayerJetHailHint(const float* from,float* at,float* distance,bool* coming) noexcept;
 bool PlayerJetHolds(const void* vehicle) noexcept;
 // The gunship's crew (playerjet_crew.inc, README 炮舰机): seat 0 its pilot, kGunnerSeat its side gunner (tools/make_jets.py
 // with_gunner_seat; a gunship installed before has the one seat, and none of this). Whether `vehicle` is such a
@@ -804,7 +834,9 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // `ready`: its rounds are there and it is), the pylon turn's centre; `gun`: the gun picked (GunnerGun), `guns`: the
 // guns there to switch between (a bit each, 1 << GunnerGun; the shells always). False with the player not at a gunship's gun.
 enum class GunnerGun : int { shells, cannon, gatling, count };
-struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns; };
+// zoom: the sight's magnification (sightzoom.cpp; 1 none).
+struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns;
+                       float zoom; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;

@@ -99,12 +99,54 @@ JET_MISSILE_STOCK = 'V_506HELI_MISSILE01.SGO'
 JET_MISSILE_FIRE_SE = ('weapon_KUBAKU_missile_shot', 1.0, 80.0)            # cue, volume, metres heard at full
 JET_MISSILE_FLIGHT_SE = ('weapon_KUBAKUBallisticMissle01_go', 0.6, 80.0)
 MISSILE_NO_STOCK_HOMING, MISSILE_MARK = 1000000.0, 4242.0   # src/missile.cpp kNoStockHoming, kPluginMark
+# What a store's round looks like in flight (the user, 2026-10-07: 「不同挂载要有不同模型，射出去的时候也应该是对应模型」):
+# both templates fire WEAPON/bullet_missile.rab (the 506 missile at AmmoSize 2: 2.1 m; the 409 bomb at 8: an 8.4 x 2.5 m
+# "missile"), so every store looked the same. Each weapon now names a stock projectile model (STORE_MODELS: Root.cpk
+# WEAPON/<model>.rab, read where the stock rounds' are) and its real length: AmmoSize scales the model uniformly to that
+# length (make_katyusha.py's way), AmmoHitSizeAdjust keeps the template's contact sphere (AmmoSize x AmmoHitSizeAdjust),
+# and the weapon's preload list names that model in the template's place (_look). A real air-to-air missile's body is
+# ~20 diameters long, every stock model's ~10, so each weapon takes the model nearest its real body and fin span at its
+# real length, and the rounds one control cycles (a carrier's stores, and a stock vehicle's own weapon beside its stores:
+# the helis' and the Naegling's fire bullet_missile) never share a model (tools/selftest.py store_looks). Measured on the
+# models (mid-length median radius, largest radius), m at AmmoSize 1, then at the weapon's length against the real one:
+#   bullet_rpg              1.015 long, body 0.06, fins 0.30   AIM-9X 3.02 m: 0.18 / 0.88 (real 0.127 / 0.45)
+#   bullet_mediummissile01  4.013 long, body 0.36, fins 0.62   AIM-120, ESSM 3.66 m: 0.33 / 0.57 (real 0.18-0.25 / 0.45-0.6)
+#   bullet_icbm01           1.250 long, body 0.12, fins 0.29   AIM-54 3.96 m: 0.37 / 0.91 (real 0.38 / 0.91);
+#                                                              AGM-114 1.63 m: 0.15 / 0.37 (real 0.18 / 0.33);
+#                                                              Mk 82 2.22 m: 0.21 / 0.51 (real 0.27 / 0.38), tail fins only
+#   airtortoise_missile     1.271 long, body 0.16, fins 0.29   AGM-65 2.49 m: 0.31 / 0.57 (real 0.30 / 0.72), mid wings
+#   bullet_missile          1.050 long, body 0.10, fins 0.31   the Sazabi's shield missile (2.1 m, as the 506's)
+#   bullet_rocket           1.052 long, body 0.11, fins 0.44   Hydra 70 1.4 m (the stock rocket launchers' round)
+# There is no stock bomb model: a Mods/WEAPON .rab of our own, or a round model read from Mods/OBJECT, is not proven to
+# load (only Mods/OBJECT vehicle models are), so the Mk 82 flies the tail-finned icbm01 at its real length. bullet_rpg and
+# bullet_mediummissile01 are in Root.cpk but no stock weapon fires them (their material is one stock rounds use).
+STORE_MODELS: dict[str, float] = {'bullet_rpg': 1.015, 'bullet_mediummissile01': 4.013, 'bullet_icbm01': 1.250,
+                                  'bullet_missile': 1.050, 'airtortoise_missile': 1.271, 'bullet_rocket': 1.052}
+STORE_MODEL_SLACK = 0.002   # m: the model measured on the player's Root.cpk against STORE_MODELS (_look)
+STORE_LENGTH_SLACK = 0.01   # m: AmmoSize (3 places) x the model's length against the weapon's real length
+
+
+@dataclass(frozen=True)
+class Look:
+    """A round's model (a STORE_MODELS key) and the real weapon's length (m) it flies at."""
+    model: str
+    length: float
+
+    @property
+    def path(self) -> str:
+        return f'app:/WEAPON/{self.model}.rab'
+
+    @property
+    def size(self) -> float:
+        """AmmoSize: the model scaled uniformly to the weapon's length."""
+        return round(self.length / STORE_MODELS[self.model], 3)
 
 
 @dataclass(frozen=True)
 class Missile:
     """One class of missile. Speeds in m/s and s (written as the game's m a frame and frames)."""
     model: str            # the real missile it follows
+    look: Look            # its round's model, at the real missile's length
     burn: float           # s of motor
     top: float            # m/s
     accel: float          # m/s^2 while it burns (to its top speed)
@@ -145,6 +187,7 @@ class Bomb:
     """A free-fall bomb (GrenadeBullet01, impact fuse: Ammo_CustomParameter[0] 0): released with the launcher's velocity
     (AmmoOwnerMove 1), falling at the world's gravity (AmmoGravityFactor 1); no drag in the game's model."""
     model: str
+    look: Look            # its round's model, at the real bomb's length
     damage: float
     blast: float
     life: float = 30.0      # s: it bursts on impact long before
@@ -170,34 +213,38 @@ class Store:
 
 
 STORES: dict[str, Store] = {
-    # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead.
-    'AAM_S': Store('AIM-9X', 'air', 85.0, 0.006, Missile('AIM-9X', burn=5.0, top=850.0, accel=300.0, max_g=50.0, nav=4.0,
-                   life=12.0, damage=500.0, blast=10.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0)),
-    # Medium-range air-to-air, active radar (AIM-120): a long burn, fast.
-    'AAM_M': Store('AIM-120', 'air', 152.0, 0.010, Missile('AIM-120', burn=8.0, top=1200.0, accel=250.0, max_g=40.0, nav=4.0,
-                   life=16.0, damage=600.0, blast=12.0, lock_range=2500.0, lock_cone=0.35, lock_time=30.0)),
-    # Long-range air-to-air (AIM-54): a very long burn, very fast, a big warhead, not agile.
-    'AAM_L': Store('AIM-54', 'air', 450.0, 0.025, Missile('AIM-54', burn=20.0, top=1500.0, accel=150.0, max_g=25.0, nav=3.0,
-                   life=30.0, damage=700.0, blast=15.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0, interval=90.0)),
-    # Air-to-ground (AGM-65 Maverick): subsonic, a heavy warhead, a slow lock.
-    'AGM': Store('AGM-65', 'ground', 300.0, 0.020, Missile('AGM-65', burn=3.5, top=320.0, accel=120.0, max_g=15.0, nav=3.0,
-                 life=15.0, damage=1500.0, blast=18.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0, interval=60.0)),
-    # Light air-to-ground (AGM-114 Hellfire): what a drone carries.
-    'AGM_L': Store('AGM-114', 'ground', 50.0, 0.004, Missile('AGM-114', burn=3.0, top=425.0, accel=180.0, max_g=20.0, nav=3.0,
-                   life=12.0, damage=800.0, blast=10.0, lock_range=1200.0, lock_cone=0.3, lock_time=30.0)),
+    # Short-range air-to-air, infrared, high off-boresight (AIM-9X): quick to lock, very agile, light warhead. 3.02 m.
+    'AAM_S': Store('AIM-9X', 'air', 85.0, 0.006, Missile('AIM-9X', Look('bullet_rpg', 3.02), burn=5.0, top=850.0, accel=300.0,
+                   max_g=50.0, nav=4.0, life=12.0, damage=500.0, blast=10.0, lock_range=1500.0, lock_cone=0.6, lock_time=10.0)),
+    # Medium-range air-to-air, active radar (AIM-120): a long burn, fast. 3.66 m.
+    'AAM_M': Store('AIM-120', 'air', 152.0, 0.010, Missile('AIM-120', Look('bullet_mediummissile01', 3.66), burn=8.0, top=1200.0,
+                   accel=250.0, max_g=40.0, nav=4.0, life=16.0, damage=600.0, blast=12.0, lock_range=2500.0, lock_cone=0.35,
+                   lock_time=30.0)),
+    # Long-range air-to-air (AIM-54): a very long burn, very fast, a big warhead, not agile. 3.96 m.
+    'AAM_L': Store('AIM-54', 'air', 450.0, 0.025, Missile('AIM-54', Look('bullet_icbm01', 3.96), burn=20.0, top=1500.0, accel=150.0,
+                   max_g=25.0, nav=3.0, life=30.0, damage=700.0, blast=15.0, lock_range=3000.0, lock_cone=0.3, lock_time=45.0,
+                   interval=90.0)),
+    # Air-to-ground (AGM-65 Maverick): subsonic, a heavy warhead, a slow lock. 2.49 m.
+    'AGM': Store('AGM-65', 'ground', 300.0, 0.020, Missile('AGM-65', Look('airtortoise_missile', 2.49), burn=3.5, top=320.0, accel=120.0,
+                 max_g=15.0, nav=3.0, life=15.0, damage=1500.0, blast=18.0, lock_range=1800.0, lock_cone=0.3, lock_time=40.0,
+                 interval=60.0)),
+    # Light air-to-ground (AGM-114 Hellfire): what a drone carries. 1.63 m.
+    'AGM_L': Store('AGM-114', 'ground', 50.0, 0.004, Missile('AGM-114', Look('bullet_icbm01', 1.63), burn=3.0, top=425.0,
+                   accel=180.0, max_g=20.0, nav=3.0, life=12.0, damage=800.0, blast=10.0, lock_range=1200.0, lock_cone=0.3,
+                   lock_time=30.0)),
     # Ship-launched air defence from a vertical launcher (RIM-162 ESSM): the bay need not face the target (a wide cone),
-    # very fast, very agile, fired two at a target (the submarine carrier, src/subcarrier.cpp: no mass that matters).
-    'ESSM': Store('RIM-162 ESSM', 'air', 0.0, 0.0, Missile('RIM-162 ESSM', burn=4.0, top=1300.0, accel=400.0, max_g=50.0,
-                  nav=4.0, life=15.0, damage=600.0, blast=15.0, lock_range=3000.0, lock_cone=1.2, lock_time=20.0, burst=2.0,
-                  interval=120.0, eject=0.5)),
-    # General-purpose 500 lb free-fall bomb (Mk 82): a heavier warhead than the Maverick's, a wider blast.
-    'MK82': Store('Mk 82', 'bomb', 230.0, 0.015, Bomb('Mk 82', damage=1500.0, blast=25.0)),
+    # very fast, very agile, fired two at a target (the submarine carrier, src/subcarrier.cpp: no mass that matters). 3.66 m.
+    'ESSM': Store('RIM-162 ESSM', 'air', 0.0, 0.0, Missile('RIM-162 ESSM', Look('bullet_mediummissile01', 3.66), burn=4.0,
+                  top=1300.0, accel=400.0, max_g=50.0, nav=4.0, life=15.0, damage=600.0, blast=15.0, lock_range=3000.0,
+                  lock_cone=1.2, lock_time=20.0, burst=2.0, interval=120.0, eject=0.5)),
+    # General-purpose 500 lb free-fall bomb (Mk 82): a heavier warhead than the Maverick's, a wider blast. 2.22 m.
+    'MK82': Store('Mk 82', 'bomb', 230.0, 0.015, Bomb('Mk 82', Look('bullet_icbm01', 2.22), damage=1500.0, blast=25.0)),
     # Unguided 70 mm rockets (Hydra 70) from a pod of 19: a short burn to about Mach 2, a light warhead; a trigger pull
     # ripples 4. Strafing runs fire them before the guns (src/jet_combat.cpp kRocket*); the player fires them along
-    # the nose. A round's mass and drag carry its pod's share.
-    'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0015, Missile('Hydra 70', burn=1.1, top=740.0, accel=650.0, max_g=1.0, nav=1.0,
-                 life=6.0, damage=250.0, blast=6.0, lock_range=0.0, lock_cone=0.3, lock_time=0.0, burst=4.0, burst_gap=4.0,
-                 interval=20.0, eject=0.6, guided=False)),
+    # the nose. A round's mass and drag carry its pod's share. About 1.4 m with its M151 warhead (the Mk 66 motor 1.06 m).
+    'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0015, Missile('Hydra 70', Look('bullet_rocket', 1.4), burn=1.1, top=740.0,
+                 accel=650.0, max_g=1.0, nav=1.0, life=6.0, damage=250.0, blast=6.0, lock_range=0.0, lock_cone=0.3, lock_time=0.0,
+                 burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, guided=False)),
 }
 JET_MISSILE_STOCK, JET_BOMB_STOCK = JET_MISSILE_STOCK, 'V_409HELI_BOMB01.SGO'
 
@@ -320,7 +367,13 @@ _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
-PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15   # jet_sgo: a player jet's seat
+PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15   # jet_sgo: the seat of an aircraft the player boards
+# The marks of the plugin's aircraft the player boards (src/playerjet_kinds.h kBoardable, its bodies' marks in
+# src/jet_internal.h kBodies; tools/selftest.py boardable_seats_take_every_class holds them together): every SGO of one
+# takes every class into its seat, the NPC body's too (the user, 2026-10-07: the carrier an NPC called took Rangers and Air
+# Raiders only), whatever brings it: the NPC jet, its parked and requested twins, the airstrike bombers and the gunship
+# made from the strike jet (7001). The enemy's, the Primer creatures' and the submarine carrier keep the 506's seat.
+BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0})
 
 
 @dataclass(frozen=True)
@@ -937,10 +990,13 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     setup[3] = with_fuel([[w, stock[_STOCK_OF[w]][1]] if _STOCK_OF.get(w) in stock else stock.get(w, [w, [0.0001, 0.1]])
                           for w in jet.weapons], stock['app:/weapon/v_fuel01.sgo'])
     m['mission_setup'] = setup
-    if jet.player or jet.parked:
+    if jet.player or jet.mark in BOARDABLE_MARKS:
         # Every class flies it (the user, 2026-10-05: Wing Divers and Fencers too): the seat's class mask (R 1, WD 2,
         # F 4, AR 8; the 506's 9) to 15, and a driver's pose every class has (the stock gives 15 only to seats like
-        # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9).
+        # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9). An NPC body's pilot is the stock RideAi's dummy
+        # rider (online_authority.cpp SeatNpcRider), the same one a requested twin gets in this seat when the player
+        # leaves it in the air (playerjet_board.inc). No soldier comes in by the mask: crew.cpp Crew seats that dummy
+        # too, npcai.cpp BoardSquad fills seats from 1 on.
         seat = m['vehicle_riding_position'][0]
         seat[3], seat[4] = PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES
     if jet.player or jet.requested:
@@ -1171,6 +1227,7 @@ def _missile_sgo(game: Game, store: Store, rounds: int) -> bytes:
         else:
             cp.items[i] = value
     cone.items[0] = cone.items[1] = missile.lock_cone
+    _look(game, r, missile.look, JET_MISSILE_STOCK)
     _named(r, store.name)
     return dsgo.write(doc)
 
@@ -1188,8 +1245,37 @@ def _bomb_sgo(game: Game, store: Store, rounds: int) -> bytes:
         if r.get(key) is None:
             raise ValueError(f'{JET_BOMB_STOCK} 缺少 {key}')
         r.set(key, value)
+    _look(game, r, bomb.look, JET_BOMB_STOCK)
     _named(r, store.name)
     return dsgo.write(doc)
+
+
+def model_length(raw: bytes) -> float:
+    """The length (m, along z: a round's model points down +z) of the model in the archive `raw` at AmmoSize 1."""
+    from graft_pure import mesh_positions
+    from mdb import mdb_read, rab_read
+    md = mdb_read(next(f for f in rab_read(raw).files if f.name.lower().endswith('.mdb')).data)
+    zs = [p[2] for o in md.objects for me in o.meshes for p in mesh_positions(me)]
+    return max(zs) - min(zs)
+
+
+def _look(game: Game, r: dsgo.Node, look: Look, stock: str) -> None:
+    """A store weapon's round as `look` (see STORE_MODELS), in place: AmmoModel the model, AmmoSize its real length,
+    AmmoHitSizeAdjust keeping the template's contact sphere (AmmoSize x AmmoHitSizeAdjust: what it hits with stays as it
+    was), the preload list (`resource`) that model in place of the template's one. The model is measured on this
+    Root.cpk: one of another length would fly at another length (ValueError)."""
+    length = model_length(game.read('WEAPON', f'{look.model}.rab'))   # KeyError: not there
+    if abs(length - STORE_MODELS[look.model]) > STORE_MODEL_SLACK:
+        raise ValueError(f'{look.model}.rab 长 {length:.3f} m，不是 STORE_MODELS 的 {STORE_MODELS[look.model]} m')
+    res = r.get('resource')
+    model = r.get('AmmoModel')
+    if not isinstance(res, dsgo.Node) or [str(x).lower() for x in res.items] != [str(model).lower()]:
+        raise ValueError(f'{stock} 的 resource 不是只预载它的弹体模型 {model}')
+    contact = r.get('AmmoSize') * r.get('AmmoHitSizeAdjust')
+    r.set('AmmoModel', look.path)
+    r.set('AmmoSize', look.size)
+    r.set('AmmoHitSizeAdjust', contact / look.size)
+    res.items[:] = [look.path]
 
 
 # The teleportation ships' portal laser (src/carrierlaser.cpp): two DemoIndirectFire objects (the class of
@@ -1370,9 +1456,9 @@ SAZABI_RIFLE_FIRE_SE = ('weapon_Fencer_CA_blasterCannon01', 0.9, 60.0)   # cue, 
 SAZABI_RIFLE_HIT_SE = ('common_damages_impactParticle_S', 0.8, 50.0)
 SAZABI_MISSILE_ROUNDS = 12
 SAZABI_MISSILE = Store('Shield Missile', 'ground', 0.0, 0.0,
-                       Missile('MSN-04 shield missile', burn=1.5, top=220.0, accel=160.0, max_g=30.0, nav=4.0, life=6.0,
-                               damage=900.0, blast=10.0, lock_range=700.0, lock_cone=0.7, lock_time=20.0, burst=3.0,
-                               burst_gap=6.0, interval=150.0))
+                       Missile('MSN-04 shield missile', Look('bullet_missile', 2.1), burn=1.5, top=220.0, accel=160.0,
+                               max_g=30.0, nav=4.0, life=6.0, damage=900.0, blast=10.0, lock_range=700.0, lock_cone=0.7,
+                               lock_time=20.0, burst=3.0, burst_gap=6.0, interval=150.0))
 SAZABI_MEGA_FILE = 'EDF6VC_SZ_MEGA.SGO'
 SAZABI_CHARGE_FILE = 'EDF6VC_SZ_CHARGE.SGO'
 SAZABI_FUNNEL_FILE = 'EDF6VC_SZ_FUNNEL.SGO'

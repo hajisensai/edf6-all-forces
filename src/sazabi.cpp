@@ -28,6 +28,7 @@
 #include "map.h"
 #include "memory.h"
 #include "sazabi_arms.h"
+#include "sazabi_assist.h"
 #include "sazabi_flames.h"
 #include "sazabi_flight.h"
 #include "sazabi_pose.h"
@@ -109,10 +110,11 @@ Mech* Find(const unsigned char* v) noexcept {
     for(auto& m:mechs)if(m.vehicle==v && m.ref.Is(v))return &m;
     return nullptr;
 }
+void DropLocalAim(Arms& a) noexcept;
 Mech* Make(unsigned char* v) noexcept {
     for(auto& m:mechs) {
         if(m.vehicle && Live(m))continue;
-        m=Mech{};m.ref=ObjRef::Of(v);m.vehicle=v;
+        DropLocalAim(m.arms);m=Mech{};m.ref=ObjRef::Of(v);m.vehicle=v;
         return &m;
     }
     static const void* refused=nullptr;
@@ -333,12 +335,13 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Controls c{};
     ArmsInput arms{};
     if(npc){Pilot(m,v,dt,&c,&arms);v[kFireGun]=0;v[kFireMissile]=0;}   // the 506 fires nothing of its own
-    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));}
+    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));LockInput(m,v,c,dt);}   // locked, the stick is the lock's
     m.yawRate=c.turn;
     m.heading+=c.turn*dt;
     if(m.heading>sazabi::kPi)m.heading-=2.0f*sazabi::kPi;
     if(m.heading<-sazabi::kPi)m.heading+=2.0f*sazabi::kPi;
     m.aimPitch=Clamp(m.aimPitch+c.pitch,-kAimMost,kAimMost);
+    if(!npc)Assist(m,v,dt);     // the lock-on's enemy or the aim assist's, the camera pulled onto it (sazabi_camera.inc)
     Fly(m,v,c,dt);
     const float nose[3]={std::sin(m.heading),0.0f,std::cos(m.heading)},up[3]={0.0f,1.0f,0.0f};
     BodyAttitude(v,nose,up,kAttitudeGain,kAttitudeMost,m.omega);
@@ -460,7 +463,7 @@ bool InstallSazabi() noexcept {
 }
 
 void ResetSazabi() noexcept {
-    for(auto& m:mechs)m=Mech{};
+    for(auto& m:mechs){DropLocalAim(m.arms);m=Mech{};}
     DropView();
     cueMs=0;
     testBoarded=false;

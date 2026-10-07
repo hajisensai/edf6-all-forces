@@ -16,7 +16,7 @@
                                        arc (GrenadeBullet01, impact fuse), both firing together (two shells a salvo),
                                        a slow reload; LockonTargetType kMarkGround (EDF6AutoTurret aims them at ground
                                        targets on the shells' arc). Shell and ejected casing sized to the model's
-                                       bore (BORE).
+                                       bore (BORE), the casing landing with the stock game's biggest case's sound.
 
 The request is tools/calls.py EDF6VC_CALL_ARTILLERY (tools/call_weapons.py, the Kepler's request as its template).
 Built in memory first, written atomically and recorded in the ledger as this tool's; --remove releases them.
@@ -65,6 +65,13 @@ SHELL_SIZE = round(0.9 * BORE / 0.063, 2)          # 5.0
 CASE_SCALE = round(0.9 * BORE / 0.070, 2)          # 4.5
 HIT_SPHERE = 1.2
 CASE_MODEL = 'app:/Weapon/ShellCase401l.rab'
+# The casing's landing sound (ShellCase [2], an SePreset: loop, cue, volume, pitch, ...). The Kepler gun's is a rifle
+# case's (weapon_Common_shell_srifle): a 0.93 m case clinking like a cartridge. The stock game's biggest is
+# weapon_Common_shell_huge (the hand weapons with the biggest cases, AWEAPON172 and the like, at 0.32), at the Kepler
+# gun's lower pitch. The plugin adds no case sound of its own to a gun that throws a physical one (src/vehsound.cpp
+# CaseOf): this is the howitzer's only one.
+STOCK_CASE_SE = [0.0, 'weapon_Common_shell_srifle', 0.2, 0.8, 1.0, 5.0]
+CASE_SE = [0.0, 'weapon_Common_shell_huge', 0.32, 0.8, 1.0, 5.0]
 # A 155 mm-class shell cut to the game's world: ~240 m/s off the muzzle on a ballistic arc (about 4 km at 45 deg in the
 # game's gravity: the world's whole width), a 25 m blast; one a gun every 5 s, both guns together. Base values the
 # request's tier multiplies.
@@ -112,6 +119,12 @@ def _node(v: object) -> object:
 
 
 Vec3 = tuple[float, float, float]
+
+
+def same_se(got: object, want: list) -> bool:
+    """An SePreset list equal to `want` (its numbers as the SGO's float32 holds them)."""
+    return (isinstance(got, list) and len(got) == len(want)
+            and all(g == w if isinstance(w, str) else isinstance(g, float) and abs(g - w) < 1e-6 for g, w in zip(got, want)))
 
 
 def mab_point(mab: bytes, near: Vec3) -> int:
@@ -162,8 +175,12 @@ def howitzer_sgo(game: vc.Game, stock: str, mount: tuple[Vec3, Vec3] | None = No
         if r.get(key) is None:
             raise ValueError(f'{stock} 缺少 {key}')
         r.set(key, _node(value))
-    if dsgo.to_py(r.get('ShellCase'))[1] != CASE_MODEL:
+    case = r.get('ShellCase')
+    if dsgo.to_py(case)[1] != CASE_MODEL:
         raise ValueError(f'{stock} 的弹壳不是 {CASE_MODEL}')
+    if not same_se(dsgo.to_py(case)[2], STOCK_CASE_SE):
+        raise ValueError(f'{stock} 的弹壳落地声不是预期的 {STOCK_CASE_SE}: {dsgo.to_py(case)[2]}')
+    case.items[2] = _node(CASE_SE)
     r.set('ShellCase_CustomParameter', dsgo.Node([CASE_SCALE], {0: 'scale'}))
     res = r.get('resource')
     if SHELL_MODEL not in res.items:
@@ -287,6 +304,7 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
         assert abs(g['AmmoSize'] * 0.063 - 0.9 * BORE) < 0.01, g['AmmoSize']
         assert abs(g['AmmoSize'] * g['AmmoHitSizeAdjust'] - HIT_SPHERE) < 1e-3, g['AmmoHitSizeAdjust']
         assert g['ShellCase'][1] == CASE_MODEL, g['ShellCase']
+        assert same_se(g['ShellCase'][2], CASE_SE), g['ShellCase']
         assert abs(g['ShellCase_CustomParameter']['scale'] * 0.070 - 0.9 * BORE) < 0.01, g['ShellCase_CustomParameter']
 
 

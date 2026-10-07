@@ -159,6 +159,11 @@ void Validate(Config& n) noexcept {
     Fix("SazabiMouseTurn",n.sazabiMouseTurn,0.05f,10.0f);
     Fix("SazabiThrusterSec",n.sazabiThrusterSec,0.5f,120.0f);
     Fix("SazabiThrusterRegen",n.sazabiThrusterRegen,0.0f,5.0f);
+    Fix("SazabiAssistCone",n.sazabiAssistCone,0.5f,30.0f);
+    Fix("SazabiAssistRange",n.sazabiAssistRange,50.0f,800.0f);
+    Fix("SazabiAssistPull",n.sazabiAssistPull,0.0f,20.0f);
+    n.sazabiLockKey=static_cast<int>(FixInt("SazabiLockKey",n.sazabiLockKey,0,254));
+    n.sazabiLockButton=static_cast<int>(FixInt("SazabiLockButton",n.sazabiLockButton,0,255));
     n.sazabiDashKey=static_cast<int>(FixInt("SazabiDashKey",n.sazabiDashKey,0,254));
     n.sazabiDescendKey=static_cast<int>(FixInt("SazabiDescendKey",n.sazabiDescendKey,0,254));
     n.sazabiSwitchKey=static_cast<int>(FixInt("SazabiSwitchKey",n.sazabiSwitchKey,0,254));
@@ -220,6 +225,8 @@ void Validate(Config& n) noexcept {
     Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
     n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
     n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
+    n.sightZoomKey=static_cast<int>(FixInt("SightZoomKey",n.sightZoomKey,0,254));
+    n.sightZoomButton=static_cast<int>(FixInt("SightZoomButton",n.sightZoomButton,0,255));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
@@ -414,6 +421,13 @@ void LoadConfig() noexcept {
     n.sazabiThrusterSec=ReadFloat(L"SazabiThrusterSec",n.sazabiThrusterSec);
     n.sazabiThrusterRegen=ReadFloat(L"SazabiThrusterRegen",n.sazabiThrusterRegen);
     n.sazabiInvertAim=ReadBool(L"SazabiInvertAim",n.sazabiInvertAim);
+    n.sazabiAimAssist=ReadBool(L"SazabiAimAssist",n.sazabiAimAssist);
+    n.sazabiAssistCone=ReadFloat(L"SazabiAssistCone",n.sazabiAssistCone);
+    n.sazabiAssistRange=ReadFloat(L"SazabiAssistRange",n.sazabiAssistRange);
+    n.sazabiAssistPull=ReadFloat(L"SazabiAssistPull",n.sazabiAssistPull);
+    n.sazabiAssistMousePull=ReadBool(L"SazabiAssistMousePull",n.sazabiAssistMousePull);
+    n.sazabiLockKey=ReadInt(L"SazabiLockKey",static_cast<DWORD>(n.sazabiLockKey));
+    n.sazabiLockButton=ReadInt(L"SazabiLockButton",static_cast<DWORD>(n.sazabiLockButton));
     n.sazabiDashKey=ReadInt(L"SazabiDashKey",static_cast<DWORD>(n.sazabiDashKey));
     n.sazabiDescendKey=ReadInt(L"SazabiDescendKey",static_cast<DWORD>(n.sazabiDescendKey));
     n.sazabiSwitchKey=ReadInt(L"SazabiSwitchKey",static_cast<DWORD>(n.sazabiSwitchKey));
@@ -498,6 +512,9 @@ void LoadConfig() noexcept {
     n.turretCamRate=ReadFloat(L"TurretCamRate",n.turretCamRate);
     n.freeLookKey=ReadInt(L"FreeLookKey",static_cast<DWORD>(n.freeLookKey));
     n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
+    n.sightZoom=ReadBool(L"SightZoom",n.sightZoom);
+    n.sightZoomKey=ReadInt(L"SightZoomKey",static_cast<DWORD>(n.sightZoomKey));
+    n.sightZoomButton=ReadInt(L"SightZoomButton",static_cast<DWORD>(n.sightZoomButton));
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
@@ -615,6 +632,8 @@ void LoadConfig() noexcept {
         n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiSwitchKey,
         n.sazabiSwitchButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
         n.sazabiAxeDamage,n.sazabiCannonDamage,n.sazabiFunnelDamage,n.sazabiTestBoard);
+    Log("CONFIG sazabi assist=%d cone=%.1f range=%.0f pull=%.1f mousePull=%d lock=0x%X/0x%X",n.sazabiAimAssist,n.sazabiAssistCone,
+        n.sazabiAssistRange,n.sazabiAssistPull,n.sazabiAssistMousePull,n.sazabiLockKey,n.sazabiLockButton);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
         n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,
         n.playerRotorLift,n.jetSound,n.jetSoundVolume);
@@ -651,6 +670,7 @@ void LoadConfig() noexcept {
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
+    Log("CONFIG sightZoom=%d key=0x%X button=0x%X",n.sightZoom,n.sightZoomKey,n.sightZoomButton);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
@@ -863,6 +883,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // chain both aims after the turret camera and plain-aim stabilizer hooks
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
+    InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)

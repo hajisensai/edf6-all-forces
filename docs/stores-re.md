@@ -148,3 +148,39 @@ EDF.dll TimeDateStamp 0x678CCB46，RVA。置信度：H 读代码确认，M 推�
 - 挂载：攻击机 38 发（2 巢），多用途战机 19 发（1 巢）。挂载种类 `StoreRole::rocket`。
 - NPC：俯冲扫射时，机炮提前量点离机头不到 1.5°、距离在 1400 m 到 2.5 倍机炮最近距离之间时，每 0.6 s 齐射一轮，之后照常用机炮（`jet_combat.cpp` `kRocket*`）。
 - 玩家：切到火箭巢，按住开火即按射速齐射，沿机头飞。不显示锁定框。
+
+## 10. 弹体模型（2026-10-07）
+
+用户：「换不同挂载，不同挂载要有不同模型（如应有的话），射出去的时候也应该是对应模型」。
+
+- 原来两个模板的弹体都是 `WEAPON/bullet_missile.rab`（H，读 Root.cpk）：`V_506HELI_MISSILE01` 的 `AmmoSize` 2（2.1 m 长），`V_409HELI_BOMB01` 的 `AmmoSize` 8（8.4 m 长、2.5 m 粗，`AmmoHitSizeAdjust` 0.1）。所有导弹看起来一样，Mk 82 是一枚巨大的导弹。
+- `AmmoSize` 对模型等比缩放（喀秋莎火箭弹已在游戏里验证，`tools/make_katyusha.py`）。碰撞球半径 = `AmmoSize × AmmoHitSizeAdjust`（`docs/carrier-laser-re.md` §3），所以换尺寸时 `AmmoHitSizeAdjust` 按比例反算，碰撞球不变（导弹 2.0，炸弹 0.8）。
+- 每种弹种的 `Look`（`pylib/vcobjects.py`）：原版弹体模型 + 真实长度；`AmmoSize` = 真实长度 ÷ 模型长度（三位小数）。`resource`（预载列表）把模板的 `bullet_missile.rab` 换成该模型（模板的预载列表只有这一项）。生成时在玩家自己的 Root.cpk 上量模型长度，和 `STORE_MODELS` 差 2 mm 以上就拒绝生成。
+- 候选（Root.cpk `WEAPON/*.rab`，量的是网格顶点，单位 m，`AmmoSize` 1 时）：
+
+  | 模型 | 长 | 弹身直径（中段中位半径 ×2） | 翼展（最大半径 ×2） | 原版谁在用 |
+  |---|---|---|---|---|
+  | bullet_missile | 1.050 | 0.10 | 0.31 | 73 件导弹武器、直升机导弹 / 炸弹 |
+  | bullet_rocket | 1.052 | 0.11 | 0.44 | 35 件火箭筒 |
+  | bullet_mediummissile01 | 4.013 | 0.36 | 0.62 | 没有 |
+  | bullet_icbm01 | 1.250 | 0.12 | 0.29 | 17 件 EWEAPON 武器（`AmmoSize` 30） |
+  | bullet_rpg | 1.015 | 0.06 | 0.30 | 没有 |
+  | airtortoise_missile | 1.271 | 0.16 | 0.29 | AWEAPON146、MISSILE_SKYTT（导弹）、21 件 EWEAPON |
+
+  原版没有炸弹模型，也没有长细比接近真实空空导弹（弹身约 20 倍直径）的模型，都在 8–11 倍。
+- 选择：按真实长度缩放后弹身直径和翼展都最接近真实的那个；同一个键轮换的弹体互不相同——插件飞机的几种挂载之间，原版载具的挂载和它旁边那件原版武器之间（原版直升机、Naegling 的导弹是 `bullet_missile`，所以挂载都不用它；AGM-65 用翼展略小的 AirTortoise 导弹）。`tools/selftest.py` `store_looks` 检查每个组合：
+
+  | 弹种 | 模型 | `AmmoSize` | 缩放后 弹身 / 翼展 | 真实 长 / 弹身 / 翼展 |
+  |---|---|---|---|---|
+  | AIM-9X | bullet_rpg | 2.975 | 0.18 / 0.88 | 3.02 / 0.127 / 0.45 |
+  | AIM-120 | bullet_mediummissile01 | 0.912 | 0.33 / 0.57 | 3.66 / 0.178 / 0.45–0.53 |
+  | AIM-54 | bullet_icbm01 | 3.168 | 0.37 / 0.91 | 3.96 / 0.38 / 0.91 |
+  | AGM-65 | airtortoise_missile | 1.959 | 0.31 / 0.57 | 2.49 / 0.30 / 0.72 |
+  | AGM-114 | bullet_icbm01 | 1.304 | 0.15 / 0.37 | 1.63 / 0.178 / 0.33 |
+  | RIM-162 ESSM | bullet_mediummissile01 | 0.912 | 0.33 / 0.57 | 3.66 / 0.254 / — |
+  | Hydra 70 | bullet_rocket | 1.331 | 0.15 / 0.59 | 约 1.4（带 M151 战斗部；Mk 66 发动机 1.06）/ 0.07 / — |
+  | Mk 82 | bullet_icbm01 | 1.776 | 0.21 / 0.51 | 2.22 / 0.273 / 约 0.38 |
+  | 沙扎比护盾导弹 | bullet_missile | 2.0 | 不变 | 原样（2.1 m） |
+
+- 自制模型：没有走。插件已证实能读的只有 `Mods/OBJECT` 的载具模型（`animation_model`）；弹体模型走 `AmmoModel` / `resource` 的读取路径，`Mods/WEAPON/*.rab` 或指向 `Mods/OBJECT` 的弹体模型都没在游戏里验证过，离线证明不了，所以不发。
+- 未实测：`bullet_rpg` 和 `bullet_mediummissile01` 原版没有武器用（材质 `snd_Common_Basic` 有原版弹体在用，贴图齐全），在游戏里的样子没看过；`MissileBullet01` 的尾焰 / 尾烟是否随 `AmmoSize` 缩放（AIM-120 / ESSM 从 2.0 降到 0.912）没确认。

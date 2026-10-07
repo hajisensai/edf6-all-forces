@@ -173,6 +173,7 @@ bool ReadRound(const unsigned char* w,RoundModel* out) noexcept {
     if(!std::isfinite(m.speed) || m.speed<0.0f || !std::isfinite(m.factor) || m.alive<=0)return false;
     const ClassInfo* c=ClassOf(w);
     m.label=c ? c->label : "WPN";
+    m.rtti=c ? c->rtti : nullptr;
     m.kind=At<std::int32_t>(w,kWeaponLockon)==kHoming ? RoundKind::homing : RoundKind::arc;
     if(c && c->cls==Cls::homing)m.kind=RoundKind::homing;
     m.lobbed=c && c->cls==Cls::lobbed;

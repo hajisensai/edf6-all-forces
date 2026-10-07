@@ -700,8 +700,47 @@ void TurretMark(void* drawer,void* ctx,const float* vp,float width,float height,
 // or GATLING in brackets, the others there named after it, in the switch's order), the range and READY or the gun's
 // wait; a cyan square
 // on the pylon turn's centre (the point last fired at). No ground under the centre: the line alone.
+// The gunship gunner's sight (the user, 2026-10-08: "the gunship too"), as an AC-130's sensor view frames its guns:
+// round the screen's centre (the gunner's line of sight: the camera aims the guns) four corner brackets and a
+// crosshair broken at the middle (its lower arm under the gun line), and round the middle a mark for the gun picked, each its own shape so a glance tells
+// which is up: the shells' (105 mm) a square, the cannon's (40 mm) a diamond, the gatling's (25 mm) a ring. Drawn dim
+// under GunnerMarks' impact cross (the round's point, which the frame is not).
+alignas(16) const float kFrameTint[4]={0.85f,0.95f,0.85f,0.55f};   // a sensor view's symbols: pale, under the HUD's marks
+constexpr float kFrameW=200.0f,kFrameH=130.0f,kFrameLeg=44.0f,kHairGap=18.0f,kHairOut=110.0f;   // px at 1080 lines
+// px under the centre the lower hair starts at: GunnerMarks' gun line is under the centre (22 px), clear of it
+constexpr float kHairUnder=44.0f,kGunMark=15.0f;
+void Seg(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float t,const float* rgba) noexcept;
+void Arc(void* drawer,void* ctx,float cx,float cy,float r,float from,float span,float t,int sides,const float* rgba) noexcept;
+void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const float* rgba,const wchar_t* format,...) noexcept;
+void GunshipFrame(void* drawer,void* ctx,float width,float height,float s,GunnerGun gun) noexcept {
+    const float cx=width*0.5f,cy=height*0.5f,t=2.0f*s,w=kFrameW*s,h=kFrameH*s,leg=kFrameLeg*s;
+    for(int sxi=-1;sxi<=1;sxi+=2)
+        for(int syi=-1;syi<=1;syi+=2) {
+            const float x=cx+sxi*w,y=cy+syi*h;
+            Seg(drawer,ctx,x,y,x-sxi*leg,y,t,kFrameTint);Seg(drawer,ctx,x,y,x,y-syi*leg,t,kFrameTint);
+        }
+    const float gap=kHairGap*s,out=kHairOut*s,thin=1.5f*s;
+    Seg(drawer,ctx,cx-out,cy,cx-gap,cy,thin,kFrameTint);Seg(drawer,ctx,cx+gap,cy,cx+out,cy,thin,kFrameTint);
+    Seg(drawer,ctx,cx,cy-out,cx,cy-gap,thin,kFrameTint);Seg(drawer,ctx,cx,cy+kHairUnder*s,cx,cy+out,thin,kFrameTint);
+    const float m=kGunMark*s;   // round the impact cross (12 px): the cross stays the round's point, the mark the gun's
+    switch(gun) {
+        case GunnerGun::shells:
+            Seg(drawer,ctx,cx-m,cy-m,cx+m,cy-m,t,kFrameTint);Seg(drawer,ctx,cx+m,cy-m,cx+m,cy+m,t,kFrameTint);
+            Seg(drawer,ctx,cx+m,cy+m,cx-m,cy+m,t,kFrameTint);Seg(drawer,ctx,cx-m,cy+m,cx-m,cy-m,t,kFrameTint);
+            break;
+        case GunnerGun::cannon:
+            Seg(drawer,ctx,cx,cy-m,cx+m,cy,t,kFrameTint);Seg(drawer,ctx,cx+m,cy,cx,cy+m,t,kFrameTint);
+            Seg(drawer,ctx,cx,cy+m,cx-m,cy,t,kFrameTint);Seg(drawer,ctx,cx-m,cy,cx,cy-m,t,kFrameTint);
+            break;
+        default: Arc(drawer,ctx,cx,cy,m,0.0f,6.2831853f,t,16,kFrameTint);break;
+    }
+}
+
 void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const GunnerReadout& g,
                  Line* lines,int* at) noexcept {
+    GunshipFrame(drawer,ctx,width,height,s,g.gun);
+    if(g.zoom>1.0f)Label(text,lines,at,width*0.5f-kFrameW*s,height*0.5f-(kFrameH+14.0f)*s,0,kLineScale*0.85f,kFrameTint,L"%.0fx",
+                         g.zoom);   // over the top left bracket
     float sx=width*0.5f,sy=height*0.5f,depth;
     if(g.centred && Project(vp,g.centre,width,height,&sx,&sy,&depth)) {
         const float r=10.0f*s,t=2.0f*s;
@@ -982,8 +1021,11 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
     Seg(drawer,ctx,x-20.0f*s,y,x-14.0f*s,y,2.0f*s,colour);
     Seg(drawer,ctx,x+14.0f*s,y,x+20.0f*s,y,2.0f*s,colour);
     const float tx=vec::Clamp(x,160.0f*s,width-160.0f*s),ty=vec::Clamp(y+30.0f*s,30.0f*s,height-30.0f*s);
-    if(e.inReach)Label(text,lines,at,tx,ty,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
-    else Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingEntry),static_cast<int>(std::ceil(e.distance)));
+    const int metres=static_cast<int>(std::ceil(e.distance));
+    if(e.hail && e.coming)Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingHailing),metres);
+    else if(e.hail){wchar_t key[32];KeyName(Cfg().playerJetHailKey,key,32);Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingHail),key,metres);}
+    else if(e.inReach)Label(text,lines,at,tx,ty,1,kLineScale,colour,L"%ls",Tr(Tx::boardingReady));
+    else Label(text,lines,at,tx,ty,1,kLineScale,colour,Tr(Tx::boardingEntry),metres);
 }
 
 // --- The loadout strip (the user, 2026-10-06: "切换挂载应该有图片显示，而非仅文字"): every store a cell with its picture
@@ -1842,6 +1884,20 @@ void SazabiReticle(void* drawer,void* ctx,const float* vp,float width,float heig
     Rect(drawer,ctx,x-dot,y-dot,x+dot,y+dot,ink);
     if(locked)Arc(drawer,ctx,x,y,out+4.0f*s,0.0f,kTurn,1.5f*s,40,ink);
 }
+// The aim assist's enemy (cue.hasAssist, sazabi_assist.h): four pink corner brackets round its lock point, the shots'
+// point; held by the lock-on (cue.lockOn) they are red, thicker and tighter, with a dot on the point.
+void SazabiAssistMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const SazabiCue& c) noexcept {
+    float x,y,depth;
+    if(!c.hasAssist || !Project(vp,c.assist,width,height,&x,&y,&depth))return;
+    const float* const ink=c.lockOn ? kSazabiLocked : kSazabiPink;
+    const float h=(c.lockOn ? 20.0f : 26.0f)*s,arm=(c.lockOn ? 11.0f : 9.0f)*s,t=(c.lockOn ? 3.0f : 2.0f)*s;
+    for(int i=0;i<4;++i) {
+        const float sx=i&1 ? 1.0f : -1.0f,sy=i&2 ? 1.0f : -1.0f,cx=x+sx*h,cy=y+sy*h;
+        Rect(drawer,ctx,std::fmin(cx,cx-sx*arm),cy-t*0.5f,std::fmax(cx,cx-sx*arm),cy+t*0.5f,ink);
+        Rect(drawer,ctx,cx-t*0.5f,std::fmin(cy,cy-sy*arm),cx+t*0.5f,std::fmax(cy,cy-sy*arm),ink);
+    }
+    if(c.lockOn)Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,ink);
+}
 // The range under the reticle (see the top).
 void SazabiRange(Text* text,const float* vp,float width,float height,float s,const SazabiCue& c,Line* lines,int* at) noexcept {
     float x,y;
@@ -2043,6 +2099,7 @@ void SazabiHud(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
                Line* lines,int* at) noexcept {
     float x,y;
     if(c.hasLock)LockAt(drawer,ctx,vp,width,height,s,c.missileLock>=1.0f ? 2 : 1,c.lock,Unit(c.missileLock),&x,&y);
+    SazabiAssistMark(drawer,ctx,vp,width,height,s,c);
     SazabiReticle(drawer,ctx,vp,width,height,s,c);
     SazabiRange(text,vp,width,height,s,c,lines,at);
     SazabiThrusterArc(drawer,ctx,text,width,height,s,c,lines,at);
@@ -2217,8 +2274,72 @@ void ArmName(const StockArm& a,bool selected,wchar_t* out,std::size_t size) noex
 }
 
 // One weapon's mark (see above); `name` its label (bracketed when selected).
+// A direct-fire gun's sight (gunsight.h; the user, 2026-10-08: "a sight HUD on every vehicle and weapon that has one,
+// tanks above all"), as a tank gunner's: on the gun's line (the boresight, where the gun points: it follows the camera
+// a moment late) a chevron, its tip the aim point; either side a stadia line, ticked every kMilTick mils when the
+// view is narrow enough for them to stand apart (a zoomed sight); under it the range ladder, a tick where a round
+// fired now is when it has gone that far over the ground (labelled in hundreds of metres, or metres for a short
+// gun's 50 m steps; a tick too near the last labelled one unlabelled), ticks too close to the one above left out; over the left stadia the gun, over the right its
+// rangefinder (the map hit or the ranged target: the pipper's `range`). The pipper and the lead mark stay StockMark's.
+constexpr float kChevron=14.0f,kStadiaIn=26.0f,kStadiaOut=112.0f,kLadderTick=9.0f,kLadderApart=4.0f,kLabelApart=16.0f;   // px at 1080
+constexpr float kMilTick=5.0f,kMilApart=8.0f;   // mils a tick; px they must be apart to be drawn
+void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,
+                const wchar_t* name,float zoom,Line* lines,int* at) noexcept {
+    float cx,cy;
+    if(!sight::ToScreen(vp,a.bore,0.0f,width,height,&cx,&cy))return;
+    const float t=2.0f*s,c=kChevron*s;
+    Seg(drawer,ctx,cx-c,cy+c*0.85f,cx,cy,t,kHud);Seg(drawer,ctx,cx,cy,cx+c,cy+c*0.85f,t,kHud);
+    const float in=kStadiaIn*s,out=kStadiaOut*s;
+    Seg(drawer,ctx,cx-out,cy,cx-in,cy,t,kHud);Seg(drawer,ctx,cx+in,cy,cx+out,cy,t,kHud);
+    Seg(drawer,ctx,cx-out,cy-5.0f*s,cx-out,cy+5.0f*s,t,kHud);Seg(drawer,ctx,cx+out,cy-5.0f*s,cx+out,cy+5.0f*s,t,kHud);
+    // The mils: the bore turned kMilTick mils about the up axis, where it lands on the screen.
+    const float up[3]={0.0f,1.0f,0.0f};
+    float side[3];vec::Cross(a.bore,up,side);
+    if(vec::Normalize(side)) {
+        const float m=kMilTick*0.001f;
+        const float turned[3]={a.bore[0]+side[0]*m,a.bore[1]+side[1]*m,a.bore[2]+side[2]*m};
+        float mx,my;
+        if(sight::ToScreen(vp,turned,0.0f,width,height,&mx,&my)) {
+            const float apart=std::fabs(mx-cx);
+            for(int k=1;apart>=kMilApart*s && k*apart<=out;++k) {
+                const float x=k*apart;
+                if(x<in)continue;
+                const float tall=(k%2==0 ? 6.0f : 3.5f)*s;
+                Seg(drawer,ctx,cx-x,cy,cx-x,cy+tall,t,kHud);Seg(drawer,ctx,cx+x,cy,cx+x,cy+tall,t,kHud);
+            }
+        }
+    }
+    // The ladder.
+    float last=cy+c*0.85f,lastX=cx,labelled=-1e9f;
+    bool any=false;
+    for(int k=0;k<a.ladder.ticks;++k) {
+        float lx,ly;
+        if(!sight::ToScreen(vp,a.ladder.at[k],1.0f,width,height,&lx,&ly))continue;
+        if(ly<last+kLadderApart*s)continue;
+        const float h=kLadderTick*s;
+        Seg(drawer,ctx,lx-h,ly,lx+h,ly,t,kHud);
+        const int metres=static_cast<int>(std::lround(a.ladder.range[k]));
+        if(ly>=labelled+kLabelApart*s) {   // its number where there is room for it (a tick too near the last one's: none)
+            if(a.ladder.step>=100.0f && metres%100!=0)
+                Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%.1f",metres/100.0);
+            else Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",a.ladder.step>=100.0f ? metres/100 : metres);
+            labelled=ly;
+        }
+        if(any)Seg(drawer,ctx,lastX,last,lx,ly,1.0f*s,kHudDim);
+        last=ly;lastX=lx;any=true;
+    }
+    const float over=cy-16.0f*s,note=kLineScale*0.85f;
+    if(zoom>1.0f)Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls  %.0fx",name,zoom);
+    else Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
+    if(a.range>0.0f && (a.hit || a.ranged))
+        Label(text,lines,at,cx+in,over,0,note,a.ranged && !a.inReach ? kHudDim : kHud,Tr(Tx::sightRange),static_cast<int>(std::lround(a.range)));
+    else Label(text,lines,at,cx+in,over,0,note,kHudDim,L"%ls",Tr(Tx::sightNoRange));
+}
+
+// `reticle`: this gun's sight is GunReticle (the seat's sight gun: StockMarks), its pipper unlabelled (the reticle
+// reads its range); `zoom` the sight's magnification.
 void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const wchar_t* name,
-               Line* lines,int* at) noexcept {
+               bool reticle,float zoom,Line* lines,int* at) noexcept {
     float x,y;
     const float note=kLineScale*0.85f;
     const int metres=static_cast<int>(std::lround(a.range));
@@ -2242,15 +2363,21 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     }
     if(a.ranged) {
         const float* c=a.inReach ? kHud : kHudDim;
-        Boresight(drawer,ctx,vp,width,height,s,a.bore);
+        if(reticle)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,zoom,lines,at);
+        else Boresight(drawer,ctx,vp,width,height,s,a.bore);
         LeadMark(drawer,ctx,vp,width,height,s,a.lead,c);
-        if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y))
+        if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y) && !reticle)
             Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
         return;
     }
     if((a.lobbed || a.flight>kLobSec) && a.hit) {
         if(ImpactCross(drawer,ctx,vp,width,height,s,a.at,&x,&y))
             Label(text,lines,at,x,y+26.0f*s,1,note,kYellow,L"%ls %d m   %.1f s",name,metres,a.flight);
+        return;
+    }
+    if(reticle) {
+        GunReticle(drawer,ctx,text,vp,width,height,s,a,name,zoom,lines,at);
+        if(a.hit)Pipper(drawer,ctx,vp,width,height,s,a.at,kHud,&x,&y);
         return;
     }
     Boresight(drawer,ctx,vp,width,height,s,a.bore);
@@ -2368,8 +2495,23 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
 
 
 // The marks of every aimed weapon but the Katyusha's (launcher.cpp's), those landing on another's drawn once.
+// The seat's sight gun (GunReticle's): the picked weapon when it is a direct-fire gun with a ladder, else the first such
+// (a tank's main gun before its coaxial machine gun); -1 for none. Not the gun EDF6AutoTurret's lead circle is on
+// (`leadGun`: arm 0 has its marks).
+int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
+    const auto sights=[&](int i){
+        const StockArm& a=r.arm[i];
+        return a.aimed && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && a.ladder.ticks>0 && !(i==0 && leadGun);
+    };
+    if(r.selected>=0 && r.selected<r.arms && r.selected<kStockArms && sights(r.selected))return r.selected;
+    for(int i=0;i<r.arms && i<kStockArms;++i)
+        if(sights(i))return i;
+    return -1;
+}
+
 void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
                 const StockExtras& x,Line* lines,int* at) noexcept {
+    const int sightGun=SightGun(r,x.leadGun);
     for(int i=0;i<r.arms && i<kStockArms;++i) {
         const StockArm& a=r.arm[i];
         if(!a.aimed || a.lofted)continue;
@@ -2382,7 +2524,7 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         if(twin)continue;
         wchar_t name[32];
         ArmName(a,i==r.selected,name,_countof(name));
-        StockMark(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
+        StockMark(drawer,ctx,text,vp,width,height,s,a,name,i==sightGun,r.zoom,lines,at);
     }
 }
 
@@ -3212,6 +3354,12 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Seg(drawer,ctx,x0,y0,x1,y0,1.5f*s,kMapOrder);Seg(drawer,ctx,x1,y0,x1,y1,1.5f*s,kMapOrder);
         Seg(drawer,ctx,x1,y1,x0,y1,1.5f*s,kMapOrder);Seg(drawer,ctx,x0,y1,x0,y0,1.5f*s,kMapOrder);
     }
+    // The enemy under the pointer: amber brackets on it, what Q and H do with it.
+    float hx,hy,hd;
+    if(c.hover && Project(vp,c.hoverAt,width,height,&hx,&hy,&hd)) {
+        MapBrackets(drawer,ctx,hx,hy,20.0f*s,2.0f*s,kAmber);
+        Label(text,lines,at,hx,hy-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
+    }
     wchar_t one[64]{};
     for(int i=0;i<c.count && i<kCmdUnits;++i) {
         const CmdMark& u=c.unit[i];
@@ -3306,6 +3454,8 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
 }
 
+void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
+
 // The map view open: its marks drawn (true), nothing else of the HUD.
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
@@ -3314,13 +3464,12 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    NpcMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // which enemy the NPCs are set on, on the map too
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
     return true;
 }
-}  // namespace
-
 // The NPCs' mark (npcai.cpp, the user's Q on foot; docs/npc-ai-design.md §6.3): an amber diamond round it, MARK and its
 // distance under it.
 void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -3333,6 +3482,22 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     if(CameraRay(eye,dir))Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,Tr(Tx::npcMarkRange),vec::Dist(eye,m));
     else Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"%ls",Tr(Tx::npcMark));
 }
+
+// The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): a ring where it points, for a moment, and
+// what came of it (the selected units sent there, how many; none selected; online).
+void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    NpcPing p{};
+    float x,y,depth;
+    if(!NpcPingReadout(&p) || !Project(vp,p.at,width,height,&x,&y,&depth))return;
+    const float* tint=p.given>0 ? kMapOrder : kAmber;
+    Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
+    Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
+    if(p.given>=0)Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
+    else Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
+               Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
+}
+
+}  // namespace
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
@@ -3440,6 +3605,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

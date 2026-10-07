@@ -199,63 +199,72 @@ inline Wave TurretStop() {
     return Normalized(std::move(x),1.0f);
 }
 
-// --- The main gun ---
+// --- The guns' reports ---
 // Heard near (GunNear): the muzzle's crack (bright noise falling in 3 ms), the blast (noise falling in 45 ms), the boom (a
 // sine falling from 93 to 38 Hz in 60 ms, lasting 0.3 s: the punch in the chest), the body (low noise, 0.25 s) and the
 // tail (the air and the ground rolling it back: low noise over a second and more, three echoes of the blast), the
 // whole driven into a soft limit (tanh) for its density. Heard far (GunFar): no crack, the highs gone, a slower front, a
 // longer and lower rumble with more echoes. The mixer fades between the two over the distance and delays them by it.
+// Those are the 120 mm tank gun's (kTankReport); a calibre's ReportSpec scales them: `scale` its charge against that
+// gun's, every frequency (the boom's, the bands' corners) divided by it and every decay and the clip's length times it
+// (a bigger charge burns longer and lower: the 155 mm's boom from 69 to 28 Hz, the 75-105 mm's from 129 to 53 Hz); the
+// echoes' delays are the ground's and stay. `drive` its soft limit, the seeds its noise.
+struct ReportSpec { float scale,drive; std::uint32_t nearSeed,farSeed; };
+constexpr ReportSpec kMediumReport{0.72f,1.15f,0x60Cu,0xFA5u},kTankReport{1.0f,1.2f,0x60Bu,0xFA4u},
+                     kHowitzerReport{1.35f,1.3f,0x60Du,0xFA6u},kHeavyReport{1.6f,1.4f,0x60Eu,0xFA7u};
 inline float SoftLimit(float x,float drive) noexcept { return std::tanh(drive*x)/std::tanh(drive); }
-inline Wave GunNear() {
-    const int n=Samples(3.2f);
+inline Wave GunNear(const ReportSpec& sp) {
+    const float k=sp.scale;
+    const int n=Samples(3.2f*k);
     Wave dry(static_cast<std::size_t>(n),0.0f),x(static_cast<std::size_t>(n),0.0f);
-    Rng r(0x60Bu);
-    Biquad crackHp=Hp(1800.0f),blastLp=Lp(5000.0f),bodyLp=Lp(500.0f),bodyLp2=Lp(500.0f),tailLp=Lp(220.0f),tailLp2=Lp(220.0f),
-           modLp=Lp(4.0f);
+    Rng r(sp.nearSeed);
+    Biquad crackHp=Hp(1800.0f/k),blastLp=Lp(5000.0f/k),bodyLp=Lp(500.0f/k),bodyLp2=Lp(500.0f/k),tailLp=Lp(220.0f/k),
+           tailLp2=Lp(220.0f/k),modLp=Lp(4.0f);
     float phase=0.0f;
     for(int i=0;i<n;++i) {
         const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
-        const float crack=crackHp.Run(w)*std::exp(-t/0.003f)*3.0f;
-        const float blast=blastLp.Run(w)*std::exp(-t/0.045f)*2.4f;
-        phase+=kTau*(38.0f+55.0f*std::exp(-t/0.06f))/static_cast<float>(kRate);
-        const float boom=std::sin(phase)*std::exp(-t/0.28f)*std::fmin(1.0f,t/0.002f)*1.6f;
-        const float body=bodyLp2.Run(bodyLp.Run(w))*std::exp(-t/0.25f)*3.0f;
+        const float crack=crackHp.Run(w)*std::exp(-t/(0.003f*k))*3.0f;
+        const float blast=blastLp.Run(w)*std::exp(-t/(0.045f*k))*2.4f;
+        phase+=kTau*(38.0f+55.0f*std::exp(-t/(0.06f*k)))/k/static_cast<float>(kRate);
+        const float boom=std::sin(phase)*std::exp(-t/(0.28f*k))*std::fmin(1.0f,t/0.002f)*1.6f;
+        const float body=bodyLp2.Run(bodyLp.Run(w))*std::exp(-t/(0.25f*k))*3.0f;
         const float mod=0.8f+0.2f*modLp.Run(r.Next())*20.0f;
-        const float tail=tailLp2.Run(tailLp.Run(w))*std::exp(-t/1.1f)*std::fmin(1.0f,t/0.03f)*mod*4.0f;
+        const float tail=tailLp2.Run(tailLp.Run(w))*std::exp(-t/(1.1f*k))*std::fmin(1.0f,t/(0.03f*k))*mod*4.0f;
         dry[static_cast<std::size_t>(i)]=blast+boom;
         x[static_cast<std::size_t>(i)]=crack+blast+boom+body+tail;
     }
     // The echoes: the blast and boom back off the ground and what stands on it, duller each time.
     const float delays[3]={0.32f,0.74f,1.3f},gains[3]={0.28f,0.18f,0.1f};
     for(int e=0;e<3;++e) {
-        Biquad lp=Lp(900.0f-200.0f*static_cast<float>(e));
+        Biquad lp=Lp((900.0f-200.0f*static_cast<float>(e))/k);
         const int d=Samples(delays[e]);
         for(int i=d;i<n;++i)x[static_cast<std::size_t>(i)]+=gains[e]*lp.Run(dry[static_cast<std::size_t>(i-d)]);
     }
     x=Normalized(std::move(x),1.0f);
-    for(auto& v:x)v=SoftLimit(v,1.2f);
+    for(auto& v:x)v=SoftLimit(v,sp.drive);
     return Normalized(std::move(x),1.0f);
 }
-inline Wave GunFar() {
-    const int n=Samples(4.5f);
+inline Wave GunFar(const ReportSpec& sp) {
+    const float k=sp.scale;
+    const int n=Samples(4.5f*k);
     Wave dry(static_cast<std::size_t>(n),0.0f),x(static_cast<std::size_t>(n),0.0f);
-    Rng r(0xFA4u);
-    Biquad blastLp=Lp(500.0f),blastLp2=Lp(500.0f),tailLp=Lp(160.0f),tailLp2=Lp(160.0f),modLp=Lp(2.5f);
+    Rng r(sp.farSeed);
+    Biquad blastLp=Lp(500.0f/k),blastLp2=Lp(500.0f/k),tailLp=Lp(160.0f/k),tailLp2=Lp(160.0f/k),modLp=Lp(2.5f);
     float phase=0.0f;
     for(int i=0;i<n;++i) {
         const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
-        const float front=std::fmin(1.0f,t/0.02f);
-        const float blast=blastLp2.Run(blastLp.Run(w))*std::exp(-t/0.12f)*front*3.0f;
-        phase+=kTau*(30.0f+30.0f*std::exp(-t/0.1f))/static_cast<float>(kRate);
-        const float boom=std::sin(phase)*std::exp(-t/0.45f)*front*1.2f;
+        const float front=std::fmin(1.0f,t/(0.02f*k));
+        const float blast=blastLp2.Run(blastLp.Run(w))*std::exp(-t/(0.12f*k))*front*3.0f;
+        phase+=kTau*(30.0f+30.0f*std::exp(-t/(0.1f*k)))/k/static_cast<float>(kRate);
+        const float boom=std::sin(phase)*std::exp(-t/(0.45f*k))*front*1.2f;
         const float mod=0.75f+0.25f*modLp.Run(r.Next())*25.0f;
-        const float tail=tailLp2.Run(tailLp.Run(w))*std::exp(-t/1.8f)*std::fmin(1.0f,t/0.08f)*mod*5.0f;
+        const float tail=tailLp2.Run(tailLp.Run(w))*std::exp(-t/(1.8f*k))*std::fmin(1.0f,t/(0.08f*k))*mod*5.0f;
         dry[static_cast<std::size_t>(i)]=blast+boom;
         x[static_cast<std::size_t>(i)]=blast+boom+tail;
     }
     const float delays[4]={0.4f,0.9f,1.6f,2.4f},gains[4]={0.45f,0.35f,0.25f,0.15f};
     for(int e=0;e<4;++e) {
-        Biquad lp=Lp(300.0f);
+        Biquad lp=Lp(300.0f/k);
         const int d=Samples(delays[e]);
         for(int i=d;i<n;++i)x[static_cast<std::size_t>(i)]+=gains[e]*lp.Run(dry[static_cast<std::size_t>(i-d)]);
     }
@@ -283,31 +292,48 @@ inline void Knock(Wave& x,float at,float gain,float hz,float thud,std::uint32_t 
         x[static_cast<std::size_t>(i)]+=gain*(3.0f*bp.Run(r.Next()*std::exp(-t/0.002f))+std::sin(kTau*thud*t)*std::exp(-t/0.03f));
     }
 }
-// The spent case thrown out: the breech opening (a knock), the brass case's ring as it slides out, its fall on the
-// floor and a bounce, a short roll.
+// A scrape from `at` s for `len` s: noise between `low` and `high` Hz swelling to its end (a part sliding along steel).
+inline void Scrape(Wave& x,float at,float len,float gain,float low,float high,std::uint32_t seed) {
+    Rng r(seed);
+    Biquad lp=Lp(high),hp=Hp(low);
+    for(int i=0;i<Samples(len) && Samples(at)+i<static_cast<int>(x.size());++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate);
+        x[static_cast<std::size_t>(Samples(at)+i)]+=gain*hp.Run(lp.Run(r.Next()))*(t/len)*2.0f;
+    }
+}
+// The breech opened and the spent case drawn out of it (a medium or a tank gun's): the block's knock, the case's ring as
+// it slides out over the scrape. Its landing is the calibre's case clip (vehmix.h kProfiles: on the turret floor, or
+// the tank gun's stub base in its bag), or the weapon's own physical case's.
 inline Wave ReloadEject() {
-    Wave x(static_cast<std::size_t>(Samples(1.1f)),0.0f);
-    const float brass[4]={740.0f,1980.0f,3560.0f,5200.0f},ring[4]={0.25f,0.18f,0.12f,0.08f},bounce[4]={760.0f,2030.0f,3610.0f,5300.0f};
+    Wave x(static_cast<std::size_t>(Samples(0.55f)),0.0f);
+    const float brass[4]={740.0f,1980.0f,3560.0f,5200.0f},ring[4]={0.25f,0.18f,0.12f,0.08f};
     Knock(x,0.0f,0.8f,2500.0f,140.0f,0xE1u);
+    Scrape(x,0.05f,0.16f,0.3f,600.0f,3500.0f,0xE2u);
     Strike(x,0.08f,0.25f,brass,ring,4);
-    Strike(x,0.24f,0.9f,brass,ring,4);
-    Strike(x,0.46f,0.45f,bounce,ring,4);
-    Rng r(0x2011u);
-    for(int k=0;k<6;++k)Strike(x,0.58f+0.045f*static_cast<float>(k)+0.01f*r.Next(),0.12f*(1.0f-0.12f*static_cast<float>(k)),bounce,ring,2);
+    Strike(x,0.2f,0.4f,brass,ring,4);
     return Normalized(std::move(x),1.0f);
 }
-// The round rammed home: the shell sliding in (a rising scrape), the ram's clank (a thud, a ring of steel).
-inline Wave ReloadLoad() {
-    Wave x(static_cast<std::size_t>(Samples(0.75f)),0.0f);
-    Rng r(0x10ADu);
-    Biquad lp=Lp(1200.0f),hp=Hp(250.0f);
-    for(int i=0;i<Samples(0.28f);++i) {
-        const float t=static_cast<float>(i)/static_cast<float>(kRate);
-        x[static_cast<std::size_t>(i)]+=0.35f*hp.Run(lp.Run(r.Next()))*(t/0.28f)*2.0f;
-    }
-    const float steel[3]={430.0f,1150.0f,2380.0f},ring[3]={0.12f,0.08f,0.05f};
-    Knock(x,0.28f,0.9f,1900.0f,110.0f,0x7A5u);
-    Strike(x,0.28f,0.5f,steel,ring,3);
+// The breech opened with no case in it (separate loading: the howitzer's, the super-heavy gun's): the block's heavy
+// knock and its ring, the operating lever's clack.
+inline Wave BreechOpen() {
+    Wave x(static_cast<std::size_t>(Samples(0.6f)),0.0f);
+    const float steel[3]={280.0f,760.0f,1600.0f},ring[3]={0.14f,0.09f,0.05f};
+    Knock(x,0.0f,0.9f,2200.0f,120.0f,0xB0E1u);
+    Strike(x,0.0f,0.4f,steel,ring,3);
+    Knock(x,0.12f,0.35f,3800.0f,240.0f,0xB0E2u);
+    return Normalized(std::move(x),1.0f);
+}
+// A round rammed home: the shell sliding in (a rising scrape for `slide` s through `low`..`high` Hz), the rammer's clank
+// (a knock at `knock` Hz with a thud at `thud`, a ring of steel). A tank gun's fixed round (kRoundRam) and a 155 mm shell
+// on its loading tray (kShellRam: longer, lower, heavier).
+struct RamSpec { float slide,low,high,knock,thud; float steel[3],ring[3]; float sec; std::uint32_t seed; };
+constexpr RamSpec kRoundRam{0.28f,250.0f,1200.0f,1900.0f,110.0f,{430.0f,1150.0f,2380.0f},{0.12f,0.08f,0.05f},0.75f,0x10ADu};
+constexpr RamSpec kShellRam{0.5f,150.0f,900.0f,1300.0f,75.0f,{260.0f,720.0f,1500.0f},{0.18f,0.12f,0.07f},1.1f,0x5E11u};
+inline Wave ReloadLoad(const RamSpec& sp) {
+    Wave x(static_cast<std::size_t>(Samples(sp.sec)),0.0f);
+    Scrape(x,0.0f,sp.slide,0.35f,sp.low,sp.high,sp.seed);
+    Knock(x,sp.slide,0.9f,sp.knock,sp.thud,sp.seed+1u);
+    Strike(x,sp.slide,0.5f,sp.steel,sp.ring,3);
     return Normalized(std::move(x),1.0f);
 }
 // The breech block closing: a sharp clack, a heavy thunk, the gun's ring, the latch.
@@ -317,6 +343,29 @@ inline Wave ReloadClose() {
     Knock(x,0.0f,1.0f,3000.0f,80.0f,0xC105u);
     Strike(x,0.0f,0.45f,steel,ring,3);
     Knock(x,0.09f,0.3f,4200.0f,200.0f,0x1A7u);
+    return Normalized(std::move(x),1.0f);
+}
+// A charge module pushed into the chamber behind the shell (a rigid combustible case: hollow, light): its slide, the
+// hollow knock of it seating against the next, a soft thud; no ring of steel.
+inline Wave ChargeModule() {
+    Wave x(static_cast<std::size_t>(Samples(0.5f)),0.0f);
+    Rng r(0xC4A9u);
+    Biquad slide=Bp(700.0f,0.8f),hollow=Bp(360.0f,6.0f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        const float s=t<0.24f ? slide.Run(w)*(t/0.24f)*1.5f : slide.Run(0.0f);
+        const float knock=t>=0.24f ? w*std::exp(-(t-0.24f)/0.004f)*6.0f : 0.0f;
+        x[i]=s+hollow.Run(knock)+(t>=0.24f ? std::sin(kTau*140.0f*(t-0.24f))*std::exp(-(t-0.24f)/0.025f)*0.6f : 0.0f);
+    }
+    return Normalized(std::move(x),1.0f);
+}
+// The primer seated in the breech's vent and its lock snapped shut: two small clicks and a little steel ring.
+inline Wave Primer() {
+    Wave x(static_cast<std::size_t>(Samples(0.16f)),0.0f);
+    const float steel[2]={2900.0f,7300.0f},ring[2]={0.03f,0.015f};
+    Knock(x,0.0f,0.5f,6000.0f,900.0f,0x9A1u);
+    Strike(x,0.0f,0.3f,steel,ring,2);
+    Knock(x,0.06f,0.7f,4500.0f,600.0f,0x9A2u);
     return Normalized(std::move(x),1.0f);
 }
 
@@ -411,16 +460,6 @@ inline Wave Brass() {
     }
     return Normalized(std::move(x),1.0f);
 }
-// One autocannon case landing: a clink and its bounce.
-inline Wave CaseSmall() {
-    Wave x(static_cast<std::size_t>(Samples(0.5f)),0.0f);
-    const float brass[3]={1300.0f,3400.0f,6100.0f},ring[3]={0.12f,0.07f,0.04f},bounce[3]={1330.0f,3460.0f,6200.0f};
-    Strike(x,0.0f,1.0f,brass,ring,3);
-    Strike(x,0.17f,0.45f,bounce,ring,3);
-    Strike(x,0.29f,0.2f,bounce,ring,2);
-    return Normalized(std::move(x),1.0f);
-}
-
 // --- Missiles and rockets ---
 // A launch: the motor's ignition (a pop), its roar coming up in 30 ms and falling away (a band of noise sliding from
 // 1.6 kHz down to 450 Hz as it leaves), the launcher's back-blast under it.
@@ -774,6 +813,140 @@ inline Wave CannonCharge() {
         const float t=static_cast<float>(i)/static_cast<float>(kRate),ph=kTau*520.0f*t;
         const float whine=std::sin(ph)+0.45f*std::sin(2.0f*ph)+0.25f*std::sin(3.0f*ph)+0.15f*std::sin(5.0f*ph)+0.4f*std::sin(kTau*1041.0f*t);
         x[k]=whine*(1.0f+0.3f*std::sin(kTau*16.0f*t))+0.3f*std::sin(kTau*60.0f*t)+1.5f*crackle[k];
+    }
+    return Normalized(std::move(x),1.0f);
+}
+
+// --- The calibres' own (vehmix.h kProfiles) ---
+// A case landing: struck on the ground (inharmonic partials over `hz`, ringing down in `ring` s), a thud of its weight
+// (`thud` Hz at `weight`), a bounce `bounce` s later and a smaller one after it. The bigger the case the lower its ring,
+// the longer it rings and the heavier its thud: an autocannon's (30-40 mm brass), a 40 mm grenade's (thin aluminium,
+// dull), a 75-105 mm gun's (a big brass case on the turret floor, rolling), a 120 mm tank gun's stub base (the steel
+// stub the combustible case leaves, dropped into its bag: a short clunk).
+struct CaseSpec { float hz,ring,thud,weight,bounce,sec; int rolls; std::uint32_t seed; };
+constexpr CaseSpec kCaseSmall{1300.0f,0.12f,0.0f,0.0f,0.17f,0.5f,0,0xCA51u},kCaseGrenade{1750.0f,0.045f,190.0f,0.5f,0.14f,0.45f,0,0xCA52u},
+                   kCaseMedium{640.0f,0.24f,110.0f,0.6f,0.24f,1.1f,5,0xCA53u},kCaseStub{420.0f,0.07f,85.0f,1.2f,0.2f,0.6f,0,0xCA54u};
+inline Wave Case(const CaseSpec& sp) {
+    Wave x(static_cast<std::size_t>(Samples(sp.sec)),0.0f);
+    const float hz[3]={sp.hz,sp.hz*2.62f,sp.hz*4.7f},ring[3]={sp.ring,sp.ring*0.58f,sp.ring*0.33f};
+    const float bounce[3]={hz[0]*1.023f,hz[1]*1.018f,hz[2]*1.016f};
+    Strike(x,0.0f,1.0f,hz,ring,3);
+    if(sp.weight>0.0f)Knock(x,0.0f,sp.weight,900.0f,sp.thud,sp.seed);
+    Strike(x,sp.bounce,0.45f,bounce,ring,3);
+    Strike(x,sp.bounce*1.7f,0.2f,bounce,ring,2);
+    Rng r(sp.seed+1u);
+    for(int k=0;k<sp.rolls;++k)
+        Strike(x,sp.bounce*2.2f+0.06f*static_cast<float>(k)+0.012f*r.Next(),0.1f*(1.0f-0.15f*static_cast<float>(k)),bounce,ring,2);
+    return Normalized(std::move(x),1.0f);
+}
+// A 40 mm low-pressure grenade launcher: no crack to speak of, a hollow pop (a band of noise round 380 Hz), a thump
+// falling from 160 to 95 Hz, the tube's short ring, a little tail and its echo.
+inline Wave GrenadeShot() {
+    Wave x(static_cast<std::size_t>(Samples(1.0f)),0.0f),dry(x.size(),0.0f);
+    Rng r(0x6E4Du);
+    Biquad pop=Bp(380.0f,1.2f),click=Hp(3000.0f),tail=Lp(500.0f);
+    Glide thump(160.0f,95.0f,0.03f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        const float body=pop.Run(w)*Env(t,0.001f,0.025f)*4.0f+std::sin(thump.Next(t))*Env(t,0.002f,0.05f)*1.2f;
+        dry[i]=body;
+        x[i]=body+click.Run(w)*std::exp(-t/0.001f)*0.6f+tail.Run(w)*Env(t,0.01f,0.25f)*1.2f;
+    }
+    const float tube[2]={540.0f,1450.0f},ring[2]={0.05f,0.03f};
+    Strike(x,0.0f,0.3f,tube,ring,2);
+    Echo(x,dry,0.35f,0.2f,600.0f);
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+// A rocket leaving its rail (an unguided ripple: one a rail): the motor's ignition (a pop), its harsh roar coming up in
+// 15 ms and going away (a band sliding from 2.4 kHz down to 700 Hz), the motor's crackle, a short hiss and a small
+// back-blast; shorter and brighter than a missile's launch (kClipMissile): the rockets go one after another.
+inline Wave RocketRail() {
+    Wave x(static_cast<std::size_t>(Samples(1.2f)),0.0f);
+    Rng r(0x4A11u);
+    Biquad band=Bp(2400.0f,1.4f),hiss=Hp(4000.0f),back=Lp(250.0f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        if(i%64==0)Retune(band,Bp(700.0f+1700.0f*std::exp(-t/0.3f),1.4f));
+        x[i]=w*std::exp(-t/0.003f)*1.5f+band.Run(w)*Env(t,0.015f,0.35f)*3.0f+hiss.Run(w)*Env(t,0.005f,0.12f)*0.8f+
+             back.Run(w)*Env(t,0.003f,0.12f)*2.0f;
+    }
+    Crackle(x,0.01f,600.0f,0.3f,3000.0f,0.6f,0x4A12u);
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+// The next rocket slid onto its rail and latched: the slide's scrape, the latch's knock and its small ring.
+inline Wave RocketLoad() {
+    Wave x(static_cast<std::size_t>(Samples(0.5f)),0.0f);
+    const float steel[3]={880.0f,2300.0f,4100.0f},ring[3]={0.06f,0.04f,0.025f};
+    Scrape(x,0.0f,0.18f,0.35f,800.0f,2500.0f,0x4A13u);
+    Knock(x,0.18f,0.9f,2600.0f,200.0f,0x4A14u);
+    Strike(x,0.18f,0.35f,steel,ring,3);
+    return Normalized(std::move(x),1.0f);
+}
+// A rail gun's discharge, near: no powder, so no blast or boom of a charge: the round's supersonic crack (a sharp
+// bipolar pulse over bright noise), the arc's zap (4 kHz gliding to 600 Hz, buzzing) and its electric buzz throbbing at
+// 120 Hz, the rails ringing (high inharmonic partials), the muzzle plasma's small thump (90 to 45 Hz), a short hissing
+// tail and an echo of the crack.
+inline Wave RailShot() {
+    Wave x(static_cast<std::size_t>(Samples(2.0f)),0.0f),dry(x.size(),0.0f);
+    Rng r(0x4A1Cu);
+    Biquad crack=Hp(2500.0f),buzz=Bp(1800.0f,2.0f),tail=Bp(700.0f,0.7f);
+    Glide zap(4000.0f,600.0f,0.025f),thump(90.0f,45.0f,0.04f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        const float n=t<0.0012f ? (t<0.0006f ? 1.0f : -1.0f)*2.0f : 0.0f;   // the N-wave
+        const float c=n+crack.Run(w)*std::exp(-t/0.002f)*3.0f;
+        dry[i]=c;
+        x[i]=c+0.7f*std::tanh(2.5f*std::sin(zap.Next(t)))*Env(t,0.0005f,0.05f)+
+             buzz.Run(w)*Env(t,0.001f,0.1f)*2.5f*(1.0f+0.6f*std::sin(kTau*120.0f*t))+
+             std::sin(thump.Next(t))*Env(t,0.002f,0.12f)*0.5f+tail.Run(w)*Env(t,0.01f,0.5f)*1.5f;
+    }
+    const float rails[3]={1850.0f,4700.0f,8300.0f},ring[3]={0.3f,0.18f,0.1f};
+    Strike(x,0.0f,0.25f,rails,ring,3);
+    Echo(x,dry,0.3f,0.25f,3000.0f);
+    x=Normalized(DcBlock(std::move(x)),1.0f);
+    for(auto& v:x)v=SoftLimit(v,1.3f);
+    return Normalized(std::move(x),1.0f);
+}
+// ...far: the crack dulled (under 1.2 kHz, 8 ms), the plasma's low thump, a thin rumbling tail and its echoes: it carries
+// as a whip's crack, not a rolling boom.
+inline Wave RailFar() {
+    Wave x(static_cast<std::size_t>(Samples(3.0f)),0.0f),dry(x.size(),0.0f);
+    Rng r(0x4A1Du);
+    Biquad crack=Lp(1200.0f),tail=Lp(250.0f),tail2=Lp(250.0f);
+    Glide thump(60.0f,35.0f,0.08f);
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),w=r.Next();
+        const float c=crack.Run(w)*Env(t,0.001f,0.008f)*4.0f;
+        dry[i]=c;
+        x[i]=c+std::sin(thump.Next(t))*Env(t,0.005f,0.25f)*0.8f+tail2.Run(tail.Run(w))*Env(t,0.04f,1.0f)*4.0f;
+    }
+    const float delays[3]={0.4f,0.95f,1.7f},gains[3]={0.4f,0.28f,0.16f};
+    for(int e=0;e<3;++e)Echo(x,dry,delays[e],gains[e],900.0f);
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+// The capacitors charging for the next shot (1.5 s, ending as the gun is ready): a whine climbing from 180 Hz to 3.2 kHz
+// (and its harmonics) swelling up, the transformer's 100 Hz hum rising under it, a sparse crackle; let go in 50 ms.
+constexpr float kRailChargeSec=1.5f;
+inline Wave RailCharge() {
+    Wave x(static_cast<std::size_t>(Samples(kRailChargeSec)),0.0f);
+    float ph=0.0f;
+    for(std::size_t i=0;i<x.size();++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate),u=t/kRailChargeSec;
+        ph+=kTau*180.0f*std::pow(3200.0f/180.0f,u)/static_cast<float>(kRate);
+        const float end=t>kRailChargeSec-0.05f ? (kRailChargeSec-t)/0.05f : 1.0f;
+        const float whine=std::sin(ph)+0.35f*std::sin(2.0f*ph)+0.15f*std::sin(3.0f*ph);
+        x[i]=(whine*(0.15f+0.85f*u)+0.5f*std::sin(kTau*100.0f*t)*u)*Rise(t,0.02f)*end;
+    }
+    Crackle(x,0.2f,40.0f,10.0f,5000.0f,0.15f,0x4A1Eu);
+    return Normalized(DcBlock(std::move(x)),1.0f);
+}
+// ...ready: the relay's clunk and a short tone.
+inline Wave RailReady() {
+    Wave x(static_cast<std::size_t>(Samples(0.2f)),0.0f);
+    Knock(x,0.0f,0.8f,3200.0f,160.0f,0x4A1Fu);
+    for(int i=Samples(0.02f);i<Samples(0.11f);++i) {
+        const float t=static_cast<float>(i)/static_cast<float>(kRate)-0.02f;
+        x[static_cast<std::size_t>(i)]+=0.5f*std::sin(kTau*2400.0f*t)*Rise(t,0.004f)*(t>0.08f ? (0.09f-t)/0.01f : 1.0f);
     }
     return Normalized(std::move(x),1.0f);
 }

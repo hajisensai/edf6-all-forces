@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from graft_pure import prune_members
 from mdb import (Bone, Mdb, Mesh, Object, cmpl_compress, cmpl_decompress, ident, inverse_affine, mdb_read, mdb_write,
                  rab_read, rab_write, read_elem)
 
@@ -47,24 +48,31 @@ class Part:
 
 
 def grid(part: Part, rows: list[list[int]], close: bool) -> None:
-    """Quads between consecutive rows of vertex indices (each row a ring when `close`)."""
+    """Quads between consecutive rows of vertex indices (each row a ring when `close`). A triangle with two corners at
+    one point (a row shrunk to a point: an ellipsoid's poles) has no area: it draws nothing and adds nothing to the
+    smooth normals (frames), so it is not written."""
     for a, b in zip(rows, rows[1:]):
         n = len(a)
         for i in range(n if close else n - 1):
             j = (i + 1) % n
-            part.tris.append((a[i], b[i], b[j]))
-            part.tris.append((a[i], b[j], a[j]))
+            for t in ((a[i], b[i], b[j]), (a[i], b[j], a[j])):
+                p = [part.pos[k] for k in t]
+                if not (np.array_equal(p[0], p[1]) or np.array_equal(p[1], p[2]) or np.array_equal(p[0], p[2])):
+                    part.tris.append(t)
 
 
 def ellipsoid(part: Part, c, r, skin, rings: int = 12, segs: int = 16) -> None:
-    """An ellipsoid at `c` with radii `r`, its axis along z; `skin`: a Skin, or a function of the point."""
+    """An ellipsoid at `c` with radii `r`, its axis along z; `skin`: a Skin, or a function of the point. Its first and
+    last rows are its poles, every vertex of each exactly there (sin(pi) is 1.2e-16, not 0: the far pole's vertices
+    were apart by that, and only met in the model's half floats), so grid leaves out their empty triangles."""
     rows = []
     for k in range(rings + 1):
         th = math.pi * k / rings
+        sin_th, cos_th = (0.0, 1.0 - 2.0 * (k > 0)) if k in (0, rings) else (math.sin(th), math.cos(th))
         row = []
         for s in range(segs):
             ph = 2 * math.pi * s / segs
-            p = (c[0] + r[0] * math.sin(th) * math.cos(ph), c[1] + r[1] * math.sin(th) * math.sin(ph), c[2] + r[2] * math.cos(th))
+            p = (c[0] + r[0] * sin_th * math.cos(ph), c[1] + r[1] * sin_th * math.sin(ph), c[2] + r[2] * cos_th)
             row.append(part.add(p, skin(p) if callable(skin) else skin, (s / segs, k / rings)))
         rows.append(row)
     grid(part, rows, True)
@@ -286,7 +294,9 @@ def albedos(rab, src: Mdb) -> dict:  # noqa: ANN001 - mdb.Rab
 
 def build_archive(game, archive: str, member: str, joints: list[Joint], object_bone: str, parts: list[Part],  # noqa: ANN001
                   scale: float) -> bytes:
-    """`archive` (Root.cpk OBJECT, read only) with its `member` model replaced by the one made of `parts`."""
+    """`archive` (Root.cpk OBJECT, read only) with its `member` model replaced by the one made of `parts`, and only what
+    that model uses kept (graft_pure.prune_members: the generated SGO names `member` alone; the stock creature's LODs,
+    debris and colour variants and the textures only they use went with it, 6 MB of the dragonfly's and centipede's)."""
     rab = rab_read(game.read('OBJECT', archive))
     hits = [f for f in rab.files if f.name.lower() == member.lower()]
     assert len(hits) == 1, f'{archive}: {member}'
@@ -297,4 +307,5 @@ def build_archive(game, archive: str, member: str, joints: list[Joint], object_b
     assert [back.name_of(b.name) for b in back.bones] == [n for n, _, _ in joints]
     hits[0].stored = cmpl_compress(data)
     assert cmpl_decompress(hits[0].stored) == data
+    prune_members(rab, [member])
     return rab_write(rab)

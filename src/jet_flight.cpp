@@ -659,15 +659,18 @@ void ResetWalls() noexcept {
 //  - over the ground, its descent is cut to stop kFloorGap over the floor: the surface under it, or where the
 //    next kFloorSweep frames of its track meet the ground. Only the descent: it is not lifted (a carrier or a
 //    jet standing on the ground stays put; terrain rising ahead is Guard's);
-//  - under the ground (Clearance found the surface above it: clear < 0; or no ground under it at all and
+//  - under the ground (its position under the surface: clear < -rest; or no ground under it at all and
 //    below the surface last seen under it, off the map's edge) it climbs at kFloorClimb at least.
-// `clear` is GroundClearance(pos) (kNoGround: none found).
+// `clear` is the clearance the floor is kept from (kNoGround: none found): GroundClearance(pos) for the NPCs (rest 0),
+// a player craft's bottom's (playerjet FloorClear, rest its position's height over its bottom). Sunk is the position
+// under the surface, not the bottom: a craft standing on a bump reads its bottom a few cm under it, and taking that
+// for sunk threw it up at kFloorClimb every time it settled (the user, 2026-10-07: the aircraft shake on the ground).
 constexpr float kFloorGap=1.0f,kFloorClimb=80.0f,kFloorSweep=3.0f;
-void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms) noexcept {
+void HoldOffGround(Jet& j,const float* pos,float clear,float dt,ULONGLONG ms,float rest) noexcept {
     Motion& mo=j.m;
     if(clear!=kNoGround){mo.groundY=pos[1]-clear;mo.groundSeen=true;}
     if(!mo.groundSeen)return;
-    const bool under=clear!=kNoGround ? clear<0.0f : pos[1]<mo.groundY;
+    const bool under=clear!=kNoGround ? clear< -rest : pos[1]<mo.groundY-rest;
     float floorY=mo.groundY,need=kFloorClimb;
     if(!under) {
         if(mo.vel[1]>=0.0f)return;

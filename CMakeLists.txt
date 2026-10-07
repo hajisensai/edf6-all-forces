@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 # The ground vehicles' ram (its own line, as above).
@@ -138,6 +138,12 @@ add_executable(sazabi_funnel_check EXCLUDE_FROM_ALL tools/sazabi_funnel_check.cp
 target_compile_options(sazabi_funnel_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(sazabi_funnel_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The Sazabi's aim assist (src/sazabi_assist.h): the pick round the reticle, the camera's pull onto it
+# (tools/sazabi_assist_check.cpp).
+add_executable(sazabi_assist_check EXCLUDE_FROM_ALL tools/sazabi_assist_check.cpp)
+target_compile_options(sazabi_assist_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(sazabi_assist_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_executable(seat_aim_check EXCLUDE_FROM_ALL tools/seat_aim_check.cpp)
 target_include_directories(seat_aim_check PRIVATE common)
 target_compile_options(seat_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -149,6 +155,13 @@ set_target_properties(seat_aim_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAK
 add_executable(rounds_check EXCLUDE_FROM_ALL tools/rounds_check.cpp)
 target_compile_options(rounds_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(rounds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# A vehicle gun's range ladder (src/gunsight.h) against the round flown as the game flies it (roundaim.h), offline
+# (tools/gunsight_check.cpp). Not part of the plugin build:
+# cmake --build build --target gunsight_check && build\gunsight_check.exe
+add_executable(gunsight_check EXCLUDE_FROM_ALL tools/gunsight_check.cpp)
+target_compile_options(gunsight_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(gunsight_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The turret camera's rig and turret command (src/turretcam.h) against the stock aim axis step, offline
 # (tools/turret_cam_check.cpp). Not part of the plugin build:
@@ -162,6 +175,12 @@ set_target_properties(turret_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CM
 add_executable(vehicle_ram_check EXCLUDE_FROM_ALL tools/vehicle_ram_check.cpp)
 target_compile_options(vehicle_ram_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(vehicle_ram_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Katyusha's rack (src/katyusha_rack.h: which rockets are on their rails) against its launcher stepped as the game
+# steps it, offline (tools/katyusha_rack_check.cpp). Not part of the plugin build:
+# cmake --build build --target katyusha_rack_check && build\katyusha_rack_check.exe
+add_executable(katyusha_rack_check EXCLUDE_FROM_ALL tools/katyusha_rack_check.cpp)
+target_compile_options(katyusha_rack_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(katyusha_rack_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The gunship's muzzle (src/gunmuzzle.h) on the circles it flies: no round's line through its airframe, its start where the
 # muzzle is when it leaves, against the old origin start and the shell's stock wait, offline (tools/gunship_muzzle_check.cpp).
@@ -324,6 +343,10 @@ if(BUILD_TESTING)
     add_test(NAME primer_lifecycle COMMAND primer_flight_sim --selftest)
 endif()
 enable_testing()
+add_executable(sightzoom_test tests/sightzoom_test.cpp)
+target_link_libraries(sightzoom_test PRIVATE edf6common)
+target_compile_options(sightzoom_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME sightzoom COMMAND sightzoom_test)
 add_executable(boarding_hit_test tests/boarding_hit_test.cpp)
 target_link_libraries(boarding_hit_test PRIVATE edf6common)
 target_compile_options(boarding_hit_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -374,7 +397,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check sazabi_assist_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
@@ -405,6 +428,7 @@ target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permiss
 add_dependencies(offline_checks map_command_runtime_check)
 add_test(NAME map_command_runtime COMMAND map_command_runtime_check)
 add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-suite)
+add_test(NAME jet_ground_settle COMMAND jet_obstacle_sim --ground-settle-suite)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
     --compiler "${CMAKE_CXX_COMPILER}")
@@ -549,6 +573,8 @@ add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_
 set_tests_properties(npc_gunner_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME medic_native_heal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/medic_native_heal_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(medic_native_heal PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME katyusha_native_rack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_native_rack_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(katyusha_native_rack PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(edf5_campaign_native_test EXCLUDE_FROM_ALL tests/edf5_campaign_native_test.cpp)
 target_include_directories(edf5_campaign_native_test PRIVATE src common)

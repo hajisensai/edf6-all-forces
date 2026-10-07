@@ -11,6 +11,7 @@
 //   jet_obstacle_sim --selftest [--out DIR]
 //   jet_obstacle_sim --edge-suite   (the soft edge's cases, EdgeSuite: exit 1 when one fails; edge_suite.log here)
 //   jet_obstacle_sim --player-rotor-suite (real Hover: player/hail goals in the NPC band remain reachable)
+//   jet_obstacle_sim --ground-settle-suite (real HoldOffGround: a craft standing on the ground is not thrown up)
 //
 //   a   level 60 m over the ground at cruise, heading +z, a 150 m tall 60x60 building 1500 m ahead
 //   b   the same at a 400 m tall 80x80 tower (too steep to climb: it must turn)
@@ -37,6 +38,7 @@
 #include "../src/gear.h"
 #include "../src/jet_pullout.h"
 #include "../src/stores.h"
+#include "../src/pjet_handling.h"
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -524,6 +526,53 @@ int PlayerRotorSuite() {
     return failures ? 1 : 0;
 }
 
+// --ground-settle-suite (CTest jet_ground_settle): the production HoldOffGround with a player rotor craft's bottom
+// clearance (playerjet FloorClear, `rest` its position over its bottom: the carrier's 8.516 m) standing on the ground,
+// its bottom a few cm under a bump or over it, settling or still: never thrown up (the user, 2026-10-07: "the aircraft
+// shake on the ground": it read its bottom under a bump as sunk and climbed at kFloorClimb). Its position truly under
+// the surface still climbs out. And pjet_handling.h GroundUp: level ground straight up, a slope followed, the steep
+// capped.
+int GroundSettleSuite() {
+    config=Config{};
+    int failures=0,cases=0;
+    auto check=[&](bool ok,const char* what,float a,float b) {
+        failures+=!ok;++cases;
+        std::printf("%-58s %8.3f %8.3f (%s)\n",what,a,b,ok ? "ok" : "FAIL");
+    };
+    const float rest=8.516f;
+    for(const float bottom:{-0.3f,-0.05f,0.0f,0.05f,0.3f})for(const float vy:{-1.0f,0.0f}) {
+        Jet j{};
+        j.m.vel[1]=vy;
+        const float pos[3]={0.0f,rest+bottom,0.0f};
+        HoldOffGround(j,pos,bottom,kDt,0,rest);
+        char what[96];std::snprintf(what,sizeof(what),"standing: bottom %+.2f m, vy %+.1f -> not thrown up",bottom,vy);
+        check(j.m.vel[1]<=0.0f,what,bottom,j.m.vel[1]);
+    }
+    {
+        Jet j{};
+        const float pos[3]={0.0f,-2.0f,0.0f};
+        HoldOffGround(j,pos,-2.0f-rest,kDt,0,rest);
+        check(j.m.vel[1]>=79.0f,"sunk: position 2 m under the surface -> climbs out",-2.0f,j.m.vel[1]);
+    }
+    {
+        Jet j{};   // an NPC (rest 0, GroundClearance from its position): under the surface climbs, as before
+        const float pos[3]={0.0f,-0.5f,0.0f};
+        HoldOffGround(j,pos,-0.5f,kDt,0);
+        check(j.m.vel[1]>=79.0f,"NPC: position 0.5 m under (rest 0) -> climbs out",-0.5f,j.m.vel[1]);
+    }
+    const float nose[3]={0.0f,0.0f,1.0f},side[3]={-1.0f,0.0f,0.0f};
+    float up[3];
+    handling::GroundUp(0.0f,0.0f,0.0f,0.0f,3.0f,nose,side,0.35f,up);
+    check(std::fabs(up[1]-1.0f)<1e-5f,"GroundUp: level ground -> straight up",up[1],1.0f);
+    const float rise=std::tan(0.0873f)*3.0f;   // a 5 deg slope up ahead
+    handling::GroundUp(rise,-rise,0.0f,0.0f,3.0f,nose,side,0.35f,up);
+    check(std::fabs(std::acos(up[1])-0.0873f)<1e-3f && up[2]<0.0f,"GroundUp: 5 deg up ahead -> tilted back 5 deg",std::acos(up[1]),0.0873f);
+    handling::GroundUp(0.0f,0.0f,3.0f,-3.0f,3.0f,nose,side,0.35f,up);
+    check(std::fabs(std::acos(up[1])-0.35f)<1e-3f,"GroundUp: 45 deg across -> capped at 0.35 rad",std::acos(up[1]),0.35f);
+    std::printf("ground settle suite: %d cases, %d failed\n",cases,failures);
+    return failures ? 1 : 0;
+}
+
 int EdgeSuite() {
     static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
     image=fakeImage.data();
@@ -597,6 +646,7 @@ int main(int argc,char** argv) {
         else if(!std::strcmp(argv[a],"--out") && a+1<argc)outDir=argv[++a];
         else if(!std::strcmp(argv[a],"--tag") && a+1<argc)tag=argv[++a];
         else if(!std::strcmp(argv[a],"--selftest"))selftest=true;
+        else if(!std::strcmp(argv[a],"--ground-settle-suite"))return GroundSettleSuite();
         else if(!std::strcmp(argv[a],"--player-rotor-suite"))playerRotors=true;
         else {std::fprintf(stderr,"unknown argument %s\n",argv[a]);return 1;}
     }
