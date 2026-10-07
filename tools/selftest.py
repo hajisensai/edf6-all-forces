@@ -67,6 +67,13 @@ def src(rel: str) -> str:
         return f.read()
 
 
+def disabled_return_offset(hook: str) -> int:
+    """The early return may first restore native state, such as the vehicle's zoom."""
+    branch = re.search(r'if\(!Cfg\(\)\.enabled\)\s*(?:return;|\{[^}]*\breturn;[^}]*\})', hook)
+    assert branch, 'InputHook keeps a plugin-disabled return (with optional native-state cleanup)'
+    return branch.start()
+
+
 # ---------------------------------------------------------------- the code
 
 
@@ -897,9 +904,7 @@ def emc_copies_agree() -> None:
     i_in, i_stock, i_frame = hook.find('&EmcInput,'), hook.find('nextInput[I]('), hook.find('&EmcFrame,')
     assert 0 <= i_in < i_stock < i_frame, 'src/crew.cpp InputHook: EmcInput before the stock input, EmcFrame after'
     # The plugin off mid-charge: the frame and the tick still run (the charge let go, a gone EMC's loop stopped).
-    off_branch = re.search(r'if\(!Cfg\(\)\.enabled\)\s*(?:return;|\{[^}]*\breturn;[^}]*\})', hook)
-    assert off_branch, 'InputHook keeps a plugin-disabled return (with optional native-state cleanup)'
-    off = off_branch.start()
+    off = disabled_return_offset(hook)
     assert i_frame < off and 0 <= hook.find('&EmcTick)') < off, 'EmcFrame / EmcTick run with the plugin off'
     assert 'Cfg().enabled && Cfg().emcBeam' in emc, 'emc.cpp Ready: off with the plugin'
     # The HUD's EMC line is the EMC's own vehicle's (its position), as the Proteus readout is.
@@ -2030,7 +2035,7 @@ def proteus_wired() -> None:
         assert rva in doc, f'docs/proteus-re.md does not mention {rva}'
     assert 'ResetProteus();' in src('src/mission.cpp') and 'InstallProteus();' in plugin
     frame = crew.split('void __fastcall InputHook', 1)[1]
-    assert frame.index('&ProteusFrame') < frame.index('if(!Cfg().enabled)return;'), 'the Proteus step must run with the plugin off'
+    assert frame.index('&ProteusFrame') < disabled_return_offset(frame), 'the Proteus step must run with the plugin off'
     assert frame.index('&ProteusFrame') < frame.index('&SeatSwitchFrame'), 'the seats it closes are closed before the seat switch asks'
     # The stock launcher is the salvo's only while the salvo can be fired and its seat is closed, decided each frame after
     # the seats; what is given back is what was taken.
@@ -2168,7 +2173,7 @@ def vehicle_sound_wired() -> None:
         named = re.search(rf'(\w+)={rva}\b', code)
         assert rva in sigs or (named and (named.group(1) in sigs or f'Matches({named.group(1)},' in code)), f'{rva} is not checked'
     hook = crew.split('void __fastcall InputHook(', 1)[1]
-    assert 0 <= hook.find('&VehicleSound,v') < hook.find('if(!Cfg().enabled)return;'), 'VehicleSound before the Enabled test'
+    assert 0 <= hook.find('&VehicleSound,v') < disabled_return_offset(hook), 'VehicleSound before the Enabled test'
     assert 'ResetVehicleSound();' in mission and 'InstallVehicleSound();' in plugin
     # The listener is the camera's for the vehicles too: placed whenever VehicleSound is on (not only once a jet sounded),
     # and a stock sound is held only while ours can be heard (the clips made and the listener placed).
@@ -2241,7 +2246,7 @@ def sazabi_sound_wired() -> None:
     crew, mission, code, audio_h, check = (src('src/crew.cpp'), src('src/mission.cpp'), src('src/sazabi_sound.cpp'),
                                            src('src/jetaudio.h'), src('tools/vsound_check.cpp'))
     hook = crew.split('void __fastcall InputHook(', 1)[1]
-    assert 0 <= hook.find('&SazabiSoundTick);') < hook.find('if(!Cfg().enabled)return;'), 'SazabiSoundTick before the Enabled test'
+    assert 0 <= hook.find('&SazabiSoundTick);') < disabled_return_offset(hook), 'SazabiSoundTick before the Enabled test'
     assert 'ResetSazabiSound();' in mission and '#include "sazabi_sound.h"' in mission
     assert 'constexpr int kSazabiSfxClip[]=' in audio_h and 'constexpr int kSazabiLoopClip[]=' in audio_h
     assert 'static_assert(sizeof(kSazabiSfxClip)' in code and 'kSfxClip[' not in code.replace('kSazabiSfxClip[', '')
