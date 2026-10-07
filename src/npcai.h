@@ -14,6 +14,14 @@ bool IsSoldierClass(const void* human) noexcept;
 bool NpcMarked() noexcept;
 // The mark for the HUD (draw thread): where it is; false with none (or none published lately).
 bool NpcMarkReadout(float* at) noexcept;
+// The map marks an enemy (mapcmd.cpp: the mark key or the focus order with the pointer on it; game thread): `object` an
+// enemy's, `at` its lock point. `toggle`: the one marked already is let go. True when it is marked now.
+bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept;
+// The mark key on foot with no enemy near the screen's centre: the point the selected units were sent to and how many took
+// it (MapCommandGuardAt's result: -1 none selected, -2 online), `wall` when (GetTickCount64).
+struct NpcPing { bool on; float at[3]; int given; ULONGLONG wall; };
+// The last point for the HUD (draw thread): false when there is none shown now.
+bool NpcPingReadout(NpcPing* out) noexcept;
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
 // reads seat 0's stick (crew.cpp InputHook).

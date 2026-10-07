@@ -168,6 +168,7 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
+bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;

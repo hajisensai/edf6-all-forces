@@ -25,12 +25,39 @@ bool HeliCommand(const void*,const Command&) noexcept { return false; }
 bool JetCommand(const void*,const Command&) noexcept { return false; }
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool HeliSharesPost() noexcept { return true; }
-int SquadCommandUnits(CommandUnit*,int) noexcept {return 0;}
+// One stand-in squad (when `squadOn`), its last order; the enemies the lock registry would list; the mark npcai.cpp keeps.
+unsigned char squadObj[0x100]{},squadCtrl[0x10]{};
+bool squadOn=false;
+Command squadGot{};int squadOrders=0;
+int SquadCommandUnits(CommandUnit* out,int most) noexcept {
+    if(!squadOn || most<1)return 0;
+    out[0]=CommandUnit{squadObj,"squad",Command{},false,{0.0f,0.0f,0.0f}};
+    return 1;
+}
 int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
 int SquadRows(SquadRow*,int) noexcept {return 0;}
-bool SquadCommand(const void*,const Command&) noexcept {return false;}
+bool SquadCommand(const void* leader,const Command& c) noexcept {
+    if(leader!=squadObj)return false;
+    squadGot=c;++squadOrders;
+    return true;
+}
 bool TankCommand(const void*,const Command&) noexcept {return false;}
-bool NpcMarked() noexcept {return false;}
+struct StubEnemy { const void* object; float aim[3]; };
+StubEnemy stubEnemies[2]{};int stubEnemyCount=0;
+bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
+    for(int i=0;i<stubEnemyCount;++i)visit(ctx,stubEnemies[i].object,stubEnemies[i].aim);
+    return true;
+}
+const void* marked=nullptr;int markCalls=0;
+bool NpcMarked() noexcept {return marked!=nullptr;}
+bool NpcMarkEnemy(const void* object,const float*,bool toggle) noexcept {
+    ++markCalls;
+    if(toggle && marked==object){marked=nullptr;return false;}
+    marked=object;
+    return true;
+}
+PlayerFix player{};
+const Config& Cfg() noexcept { static const Config c{};return c; }   // NpcMarkKey 'Q'
 namespace {
 int failures=0,cases=0;
 void Check(bool ok,const char* what) noexcept {
@@ -113,6 +140,58 @@ void PointerAndInput() noexcept {
     MapCommandView(vp,800,600);MapCommandFrame(in,centre);
     Check(game.pointer.x==400.0f && game.pointer.y==300.0f,"reopened small viewport starts inside at centre");
 }
+// The mark key and H with the pointer on an enemy (the user, 2026-10-07: "应该在地图里面也能按q标记"); the mark key on
+// foot with no enemy near the centre sends the selection there (MapCommandGuardAt).
+void MarkFromMap() noexcept {
+    ResetMapCommands();view=View{};marked=nullptr;markCalls=0;squadOn=false;squadOrders=0;
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};   // world (x, y) in [-1, 1] across the screen
+    const char foe=0;
+    stubEnemies[0]=StubEnemy{&foe,{0.0f,0.0f,0.5f}};stubEnemyCount=1;   // under the centred pointer
+    MapCmdInput in{};in.front=true;in.eye[1]=100.0f;
+    float centre[3]{};
+    MapCommandView(vp,1280,720);
+    MapCommandFrame(in,centre);   // opened: the pointer at the centre, on the enemy
+    MapCommandReadout r{};
+    Check(PlayerMapCommands(&r) && r.hover,"an enemy under the pointer is shown as such");
+    inputstub::keys['Q']=true;
+    Check(MapCommandEats('Q'),"Q on an enemy is not the map's turn");
+    Check(!MapCommandEats('E'),"E stays the map's");
+    MapCommandFrame(in,centre);
+    Check(marked==&foe && markCalls==1,"Q on an enemy marks it");
+    Check(MapCommandEats('Q'),"the press held: still not the map's");
+    MapCommandFrame(in,centre);
+    Check(markCalls==1,"Q held: marked once");
+    inputstub::keys['Q']=false;
+    Check(!MapCommandEats('Q'),"Q let go");
+    MapCommandFrame(in,centre);
+    inputstub::keys['Q']=true;MapCommandEats('Q');MapCommandFrame(in,centre);
+    Check(marked==nullptr && markCalls==2,"Q again on the marked enemy lets it go");
+    inputstub::keys['Q']=false;MapCommandEats('Q');MapCommandFrame(in,centre);
+    // The pointer off the enemy: Q turns the map, marks nothing.
+    in.mouse=true;in.dx=300.0f;MapCommandFrame(in,centre);in.mouse=false;in.dx=0.0f;
+    Check(PlayerMapCommands(&r) && !r.hover,"the pointer off the enemy: no enemy under it");
+    inputstub::keys['Q']=true;
+    Check(!MapCommandEats('Q'),"Q off an enemy turns the map");
+    MapCommandFrame(in,centre);
+    Check(markCalls==2,"Q off an enemy marks nothing");
+    inputstub::keys['Q']=false;MapCommandEats('Q');MapCommandFrame(in,centre);
+    // H with no mark and nothing under the pointer: refused, nothing marked.
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);squadOn=true;
+    game.sel.Clear();game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);
+    inputstub::keys['H']=true;MapCommandFrame(in,centre);inputstub::keys['H']=false;MapCommandFrame(in,centre);
+    Check(squadOrders==0 && marked==nullptr,"H with no mark and no enemy under the pointer: refused");
+    // H on the enemy: marked and the squad focuses on it in one press.
+    in.mouse=true;in.dx=-300.0f;MapCommandFrame(in,centre);in.mouse=false;in.dx=0.0f;
+    inputstub::keys['H']=true;MapCommandFrame(in,centre);inputstub::keys['H']=false;MapCommandFrame(in,centre);
+    Check(marked==&foe && squadOrders==1 && squadGot.order==Order::focus,"H on an enemy marks it and the squad focuses on it");
+    // On foot: the point goes to the selection kept from the map.
+    const float at[3]={50.0f,2.0f,-80.0f};
+    Check(MapCommandGuardAt(at)==1 && squadOrders==2 && squadGot.order==Order::guard && squadGot.at[0]==50.0f &&
+          squadGot.at[2]==-80.0f,"the mark key's point: the selected squad guards it");
+    game.sel.Clear();
+    Check(MapCommandGuardAt(at)==-1 && squadOrders==2,"the mark key's point with nothing selected: no order");
+    squadOn=false;stubEnemyCount=0;
+}
 void CameraIsolation() noexcept {
     maphud::Record r{};int first=0,second=0;unsigned char shown=1;
     maphud::Step(r,&first,1,true,&shown);
@@ -125,7 +204,7 @@ void CameraIsolation() noexcept {
 }  // namespace
 }  // namespace crew
 int main() {
-    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();
+    crew::UnitLifetime();crew::PointerAndInput();crew::MarkFromMap();crew::CameraIsolation();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

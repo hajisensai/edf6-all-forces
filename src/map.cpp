@@ -528,7 +528,10 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
     if(front) {
         ahead=static_cast<float>((Down('W') || Down(VK_UP))-(Down('S') || Down(VK_DOWN)));
         right=static_cast<float>((Down('D') || Down(VK_RIGHT))-(Down('A') || Down(VK_LEFT)));
-        turn=static_cast<float>(Down('E')-Down('Q'))*mapcam::kTurnRate*dt;
+        // The mark key pressed with the pointer on an enemy marks it (mapcmd.cpp), the map does not turn with it.
+        const bool eatE=MapCommandEats('E'),eatQ=MapCommandEats('Q');   // asked every frame: a release ends the press
+        const bool turnRight=Down('E') && !eatE,turnLeft=Down('Q') && !eatQ;
+        turn=static_cast<float>(static_cast<int>(turnRight)-static_cast<int>(turnLeft))*mapcam::kTurnRate*dt;
         tilt=static_cast<float>(Down('R')-Down('F'))*mapcam::kTurnRate*0.5f*dt;
         zoom=static_cast<float>((Down(VK_OEM_PLUS) || Down(VK_ADD) || Down(VK_PRIOR))-(Down(VK_OEM_MINUS) || Down(VK_SUBTRACT) || Down(VK_NEXT)));
         keys=ahead!=0.0f || right!=0.0f || turn!=0.0f || tilt!=0.0f || zoom!=0.0f;

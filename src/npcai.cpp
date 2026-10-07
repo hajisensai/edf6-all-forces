@@ -172,15 +172,21 @@ void PlayerLane(World& w) noexcept {
 
 // --- The mark (§6.3) ---
 // On foot, the map shut, the game in front: NpcMarkKey marks the enemy lock point nearest the screen's centre within
-// NpcMarkCone degrees (the same one again: the mark let go). Kept while that enemy is in the frame's enemy list. The
-// squads told to focus fire all take it; every other soldier takes it first when it is within its longest reach plus
+// NpcMarkCone degrees (the same one again: the mark let go); with no enemy there it is a point instead: the units
+// selected on the map (mapcmd.cpp) guard where the centre meets the ground (MapCommandGuardAt), the mark kept. In the map
+// the key marks the enemy under the pointer (mapcmd.cpp NpcMarkEnemy). The mark is kept until that enemy dies or is gone
+// (the user, 2026-10-07: "标记效果应该先打死才换吧"): not only while it is in the frame's enemy list, which holds the
+// lockable lock points alone and drops an enemy out of sight or out of lock range for a moment. The squads told to focus
+// fire all take it while it is in that list; every other soldier takes it first when it is within its longest reach plus
 // how far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
 struct MarkState { ObjRef obj; float at[3]; bool held; };
 MarkState mark{};
-struct MarkPub { bool on; float at[3]; ULONGLONG wall; };
+struct MarkPub { bool on; float at[3]; ULONGLONG wall; NpcPing ping; };
 MarkPub markPub{};
+NpcPing ping{};
 SRWLOCK markLock=SRWLOCK_INIT;
-constexpr float kMarkFar=2000.0f;   // m: no mark past this
+constexpr float kMarkFar=2000.0f;   // m: no mark past this, no point past this
+constexpr ULONGLONG kPingMs=3000;   // wall ms a point's ring and its result are shown
 
 bool KeyHeld(int vk) noexcept {
     if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
@@ -193,6 +199,38 @@ const Enemy* MarkedEnemy() noexcept {
     if(!mark.obj)return nullptr;
     for(int i=0;i<world.enemies;++i)if(world.enemy[i].object==mark.obj.obj)return &world.enemy[i];
     return nullptr;
+}
+
+// The marked object still the one marked (not an address recycled since) and alive.
+bool MarkAlive() noexcept {
+    const auto o=static_cast<const unsigned char*>(mark.obj.obj);
+    if(!o || !Readable(o,kSelfCtrl+sizeof(void*)) || !Readable(o,kDead+1))return false;
+    __try { return mark.obj.Is(o) && !o[kDead]; } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
+}
+
+// Where the marked enemy is while it is not lockable: its lock point still valid in the registry, else where it was.
+struct LastSeen { const void* object; float* at; };
+void SeeMarked(void* ctx,const void* object,const float* aim) {
+    auto& l=*static_cast<LastSeen*>(ctx);
+    if(object==l.object)std::memcpy(l.at,aim,12);
+}
+
+void Mark(const void* object,const float* at) noexcept {
+    mark.obj=ObjRef::Of(object);
+    if(at)std::memcpy(mark.at,at,12);
+}
+
+// The point under the screen's centre the selected units are sent to (no enemy near the centre).
+void SendToPoint(const float* eye,const float* dir) noexcept {
+    const float end[3]={eye[0]+dir[0]*kMarkFar,eye[1]+dir[1]*kMarkFar,eye[2]+dir[2]*kMarkFar};
+    float hit[3];
+    if(!(MapFloorRay(eye,end,hit)>=0.0f) || !std::isfinite(hit[0]+hit[1]+hit[2])) {
+        Log("NPCAI mark: nothing near the screen's centre to mark, no ground under it");
+        return;
+    }
+    const int given=MapCommandGuardAt(hit);
+    ping=NpcPing{true,{hit[0],hit[1],hit[2]},given,GetTickCount64()};
+    Log("NPCAI mark: no enemy near the screen's centre: the point (%.0f,%.0f,%.0f) -> %d",hit[0],hit[1],hit[2],given);
 }
 
 void ToggleMark() noexcept {
@@ -208,10 +246,11 @@ void ToggleMark() noexcept {
         const float off=std::acos(npc::Clamp(npc::Dot(to,dir)/d,-1.0f,1.0f));
         if(off<bestOff){bestOff=off;best=&e;}
     }
-    const bool same=best && mark.obj.obj==best->object;
-    if(best && !same){mark.obj=ObjRef::Of(best->object);std::memcpy(mark.at,best->aim,12);}
-    else mark.obj=ObjRef{};
-    Log("NPCAI mark: %s",best ? (same ? "let go" : "an enemy marked") : "nothing near the screen's centre to mark");
+    if(!best){SendToPoint(eye,dir);return;}   // a miss never lets the mark go: only the same enemy again does
+    const bool same=mark.obj.obj==best->object;
+    if(same)mark.obj=ObjRef{};
+    else Mark(best->object,best->aim);
+    Log("NPCAI mark: %s",same ? "let go" : "an enemy marked");
 }
 
 void MarkTick() noexcept {
@@ -220,9 +259,11 @@ void MarkTick() noexcept {
     if(down && !mark.held)ToggleMark();
     mark.held=down;
     if(const Enemy* e=MarkedEnemy())std::memcpy(mark.at,e->aim,12);
-    else if(mark.obj){mark.obj=ObjRef{};Log("NPCAI mark: the marked enemy is gone");}
+    else if(MarkAlive()){LastSeen l{mark.obj.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
+    else if(mark.obj){mark.obj=ObjRef{};Log("NPCAI mark: the marked enemy is dead or gone");}
     AcquireSRWLockExclusive(&markLock);
     markPub.on=static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    markPub.ping=ping;
     ReleaseSRWLockExclusive(&markLock);
 }
 
@@ -995,7 +1036,7 @@ void ResetNpcAi() noexcept {
     for(auto& q:squads)q=Squad{};
     cooldowns=npc::Cooldowns<kMaxSquads>{};
     dismissedCount=0;
-    mark=MarkState{};
+    mark=MarkState{};ping=NpcPing{};
     world=World{};
     fullLoggedAt=listLoggedAt=0;
 }
@@ -1261,11 +1302,26 @@ void NpcGunnersInput(unsigned char* v) noexcept {
 
 bool NpcMarked() noexcept { return mark.obj.obj!=nullptr; }
 
+bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
+    if(!object)return false;
+    if(toggle && mark.obj.obj==object){mark.obj=ObjRef{};Log("NPCAI mark: let go (the map)");return false;}
+    if(mark.obj.obj!=object)Log("NPCAI mark: an enemy marked (the map)");
+    Mark(object,at);
+    return true;
+}
+
 bool NpcMarkReadout(float* at) noexcept {
     AcquireSRWLockShared(&markLock);
     const bool on=markPub.on && GetTickCount64()-markPub.wall<=500;
     if(on)std::memcpy(at,markPub.at,12);
     ReleaseSRWLockShared(&markLock);
     return on;
+}
+
+bool NpcPingReadout(NpcPing* out) noexcept {
+    AcquireSRWLockShared(&markLock);
+    *out=markPub.ping;
+    ReleaseSRWLockShared(&markLock);
+    return out->on && GetTickCount64()-out->wall<=kPingMs;
 }
 }  // namespace crew

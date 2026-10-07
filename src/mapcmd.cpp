@@ -12,6 +12,10 @@
 //    fights what comes within its range of it, circles / patrols it; several stand round it in a formation
 //    (mapcmd_logic.h Formation; guard helis share one orbit round the point instead: heli.cpp GuardOrbit spaces them).
 //    V (pad RB): follow the player; X (pad LB): release (back to what it did before any command).
+//  - an enemy under the pointer (the user, 2026-10-07: "应该在地图里面也能按q标记"): the mark key (NpcMarkKey, Q) marks it
+//    for the NPCs (npcai.cpp NpcMarkEnemy; the same one again: let go) instead of turning the map, and H (focus fire)
+//    marks it and sends the selected squads at it in one press. With no enemy under the pointer Q turns the map and H
+//    focuses on the mark there is (made on foot or here).
 // The pointer's point: the map ray under it (mapcmd_logic.h ScreenRay on the view the HUD last drew), else that ray's
 // meeting with the level ground through the focus (RayLevel).
 // Online the commands are off (InSession): the plugin's AI runs on each machine for its own copies (the call aircraft
@@ -44,7 +48,7 @@ enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
 struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
-             engage,focus,board,dismount,dismiss,recruit,digit[9]; };
+             engage,focus,board,dismount,dismiss,recruit,mark,digit[9]; };
 
 // --- The game thread's own ---
 struct Game {
@@ -59,6 +63,9 @@ struct Game {
     float bx,by,moved;
     wchar_t note[80];
     ULONGLONG noteAt;
+    const void* hover;          // the enemy under the pointer this frame (nullptr: none), its lock point
+    float hoverAt[3];
+    bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
 };
 Game game{};
 std::atomic<bool> boxingNow{false};
@@ -136,6 +143,7 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
         k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);
         // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
         k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');
+        k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
     }
     if(in.pad) {
@@ -189,12 +197,17 @@ void Note(Game& g,const wchar_t* format,...) noexcept {
     g.noteAt=GetTickCount64();
 }
 
-// The units' icons on the screen of view `v` (a ground unit's at the top of its pin, as hud.cpp MapPin draws it).
-int Marks(const Game& g,const View& v,const MapCmdInput& in,mapcmd::Mark* out) noexcept {
+// How tall a ground icon's pin stands in the camera of `in` (hud.cpp MapPin).
+float PinOf(const MapCmdInput& in) noexcept {
     const float d[3]={in.look[0]-in.eye[0],in.look[1]-in.eye[1],in.look[2]-in.eye[2]};
     const float dist=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
     const float pitch=dist>1e-3f ? std::asin(mapcam::Clamp(-d[1]/dist,-1.0f,1.0f)) : mapcam::kStartPitch;
-    const float pin=mapcam::PinHeight(dist,pitch);
+    return mapcam::PinHeight(dist,pitch);
+}
+
+// The units' icons on the screen of view `v` (a ground unit's at the top of its pin, as hud.cpp MapPin draws it).
+int Marks(const Game& g,const View& v,const MapCmdInput& in,mapcmd::Mark* out) noexcept {
+    const float pin=PinOf(in);
     for(int i=0;i<g.count;++i) {
         const Entry& e=g.list[i];
         float p[3];std::memcpy(p,e.u.pos,12);
@@ -244,6 +257,43 @@ bool TargetPoint(const Game& g,const MapCmdInput& in,const View* v,float* point)
     return GroundAlong(in.eye,c,in.look[1],point);
 }
 
+// The enemies the NPCs can be set on (the lockable lock points, as npcai.cpp's frame list) on the screen of view `v`: each
+// lock point at its point and up its pin (a large enemy's icon stands at its pin's top, a small one's dot on it).
+constexpr int kEnemyMarks=1024;
+struct EnemyMarks { const View* v; float pin; int n; mapcmd::Mark m[kEnemyMarks]; float at[kEnemyMarks][3]; };
+EnemyMarks enemyMarks{};   // the game thread's (too big for its stack)
+void SeeEnemyMark(void* ctx,const void* object,const float* aim) {
+    auto& e=*static_cast<EnemyMarks*>(ctx);
+    const float up[3]={aim[0],aim[1]+e.pin,aim[2]};
+    for(const float* p:{aim,up}) {
+        if(e.n>=kEnemyMarks)return;
+        mapcmd::Mark& m=e.m[e.n];
+        m=mapcmd::Mark{object,0.0f,0.0f,false};
+        m.on=mapcmd::Project(e.v->vp,p,e.v->w,e.v->h,&m.x,&m.y);
+        std::memcpy(e.at[e.n++],aim,12);
+    }
+}
+// The enemy under the pointer (with a pad: the screen's centre), within the click's radius of one of its marks.
+void Hover(Game& g,const MapCmdInput& in,const View* v) noexcept {
+    g.hover=nullptr;
+    if(!v)return;
+    EnemyMarks& e=enemyMarks;
+    e.v=v;e.pin=PinOf(in);e.n=0;
+    VisitEnemiesOf(player.team,&SeeEnemyMark,&e);
+    const float x=in.usingPad ? v->w*0.5f : g.pointer.x,y=in.usingPad ? v->h*0.5f : g.pointer.y;
+    const int i=mapcmd::Nearest(e.m,e.n,x,y,kClickRadius*v->h/1080.0f);
+    if(i<0)return;
+    g.hover=e.m[i].id;
+    std::memcpy(g.hoverAt,e.at[i],12);
+}
+
+// The units that take an order now (`ids`: their identities), the selection kept to those of them selected before.
+void Refresh(Game& g,const void** ids) noexcept {
+    List(g);
+    for(int i=0;i<g.count;++i)ids[i]=g.list[i].u.v;
+    KeepSelection(g,ids);
+}
+
 // The command to every selected unit; a guard's formation round the point (helis sharing one orbit stay on it).
 int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     int k=0;
@@ -289,6 +339,8 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.squads=squads;
     std::memcpy(r.squad,rows,sizeof(rows));
     for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
+    r.hover=g.hover!=nullptr;
+    std::memcpy(r.hoverAt,g.hoverAt,12);
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     readoutAt=GetTickCount64();
@@ -308,7 +360,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
     if(now-g.frameAt>kFreshMs) {
-        g.was=k;g.boxing=g.pressing=false;
+        g.was=k;g.boxing=g.pressing=false;g.hover=nullptr;
         g.pointer=mapcmd::PointerPosition{};
     }
     g.frameAt=now;
@@ -317,11 +369,10 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     const bool padPress=(k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
         (k.padFollow && !g.was.padFollow) || (k.padRelease && !g.was.padRelease);
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
-    List(g);
     const void* ids[kCmdUnits];
-    for(int i=0;i<g.count;++i)ids[i]=g.list[i].u.v;
-    KeepSelection(g,ids);
+    Refresh(g,ids);
     Pointer(g,in,k,haveView ? &v : nullptr);
+    Hover(g,in,haveView ? &v : nullptr);
     boxingNow.store(g.boxing);
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
     bool picked=false;
@@ -345,13 +396,17 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                           (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
                           k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
                           k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit};
+    const bool markPress=k.mark && !g.was.mark;
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=!InSession();
-    const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     using hudtext::Tr;
     using hudtext::Tx;
+    // The enemy under the pointer: the mark key marks it (or lets it go), the focus order marks it first.
+    if(markPress && g.hover)Note(g,L"%ls",Tr(NpcMarkEnemy(g.hover,g.hoverAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
+    if(p.focus && g.hover && allowed && g.sel.n)NpcMarkEnemy(g.hover,g.hoverAt,false);
+    const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     if(s.why==mapcmd::Refusal::online)Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));
     else if(s.why==mapcmd::Refusal::noUnit && g.count)Note(g,Tr(Tx::cmdSelectFirst),in.usingPad ? L"X" : Tr(Tx::cmdSelectHowMouse));
     else if(s.why==mapcmd::Refusal::noUnit)Note(g,L"%ls",Tr(Tx::cmdNoUnit));
@@ -391,6 +446,31 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept {
 }
 
 bool MapCommandBoxing() noexcept { return boxingNow.load(); }
+
+bool MapCommandEats(int vk) noexcept {
+    Game& g=game;
+    if(vk<=0 || vk!=Cfg().npcMarkKey)return false;
+    if(GetTickCount64()-g.frameAt>kFreshMs)g.hover=nullptr;   // the map just opened: last time's enemy is no pointer's
+    const bool down=Down(vk);
+    if(!down)g.eat=false;
+    else if(!g.eatWas)g.eat=g.hover!=nullptr;   // the pointer's enemy of the last frame (Steer reads before the frame)
+    g.eatWas=down;
+    return g.eat;
+}
+
+int MapCommandGuardAt(const float* at) noexcept {
+    if(InSession())return -2;
+    Game& g=game;
+    const void* ids[kCmdUnits];
+    Refresh(g,ids);
+    if(!g.sel.n)return -1;
+    int skipped=0;
+    const int given=Issue(g,Command{Order::guard,{at[0],at[1],at[2]}},&skipped);
+    RememberSelection(g);
+    Log("MAPCMD GUARD (%.0f,%.0f,%.0f) by the mark key on foot to %d selected: %d of %d units took it",at[0],at[1],at[2],
+        g.sel.n,given,g.count);
+    return given;
+}
 
 bool PlayerMapCommands(MapCommandReadout* out) noexcept {
     AcquireSRWLockShared(&lock);
