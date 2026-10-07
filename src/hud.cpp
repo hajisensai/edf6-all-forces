@@ -20,6 +20,8 @@
 // is the wall clock: a snapshot older than kFreshMs (loading, mission over) is not drawn; nothing is while the game is paused.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "formation.h"
+#include "map_buttons.h"
 #include "boarding_entrance.h"
 #include "gear.h"
 #include "hudscale.h"
@@ -3336,6 +3338,60 @@ void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pa
     Rect(drawer,ctx,left,top-6.0f*s,right,bottom,kMapBand);
 }
 
+// The map's command buttons (map_buttons.h; the user, 2026-10-08: "the M map should do all of it, best by clicking the
+// HUD"): every squad order, the formation (named as it is), the fireteams, the box sweep (FETCH / CALL BACK) and its
+// health-box switch (named as it is), each with its key, in rows over the note line. Lit: the guard waiting for its
+// point, the sweep going, health boxes for the hurt; dim: an order with nothing selected, or online. The rectangles
+// drawn go to mapcmd.cpp (MapCommandButtons), which takes a click on one for the button. With a pad: none (its keys).
+alignas(16) const float kBtnFill[4]={0.03f,0.05f,0.06f,0.78f};
+alignas(16) const float kBtnLit[4]={0.10f,0.42f,0.50f,0.90f};
+constexpr float kBtnRowH=26.0f,kBtnGap=6.0f,kBtnPad=10.0f,kBtnMargin=16.0f,kBtnBottom=142.0f;   // px at 1080 lines
+void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float s,bool pad,const MapCommandReadout& c,Line* lines,
+                int* at) noexcept {
+    using mapbtn::Id;
+    if(pad){MapCommandButtons(nullptr,nullptr,0);return;}
+    constexpr int n=mapbtn::kCount;
+    static const Tx kOrders[]={Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,Tx::orderFocus,Tx::orderBoard,
+                               Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit};
+    static const wchar_t kKeys[n]={L'G',L'V',L'X',L'J',L'H',L'B',L'N',L'K',L'U',L'T',L'P',L'L',L'Y',L'O'};
+    static_assert(sizeof(kOrders)/sizeof(kOrders[0])==static_cast<std::size_t>(Id::formation),"an order a button");
+    wchar_t name[n][64];
+    for(int i=0;i<static_cast<int>(Id::formation);++i)_snwprintf_s(name[i],64,_TRUNCATE,L"%ls",Tr(kOrders[i]));
+    _snwprintf_s(name[static_cast<int>(Id::formation)],64,_TRUNCATE,Tr(Tx::btnFormation),FormationText(c.march));
+    _snwprintf_s(name[static_cast<int>(Id::split)],64,_TRUNCATE,L"%ls",Tr(Tx::btnSplit));
+    _snwprintf_s(name[static_cast<int>(Id::merge)],64,_TRUNCATE,L"%ls",Tr(Tx::btnMerge));
+    _snwprintf_s(name[static_cast<int>(Id::sweep)],64,_TRUNCATE,L"%ls",Tr(c.sweepOn ? Tx::btnSweepStop : Tx::btnSweep));
+    _snwprintf_s(name[static_cast<int>(Id::health)],64,_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
+    const float scale=kLineScale*0.7f;
+    float w[n];
+    for(int i=0;i<n;++i) {
+        Line probe{};
+        Format(probe,L"%ls  %lc",name[i],kKeys[i]);
+        probe.scale=scale;
+        if(text)MeasureAll(*text,&probe,1);
+        w[i]=(text ? probe.w : static_cast<float>(wcslen(probe.text))*9.0f*s)+2.0f*kBtnPad*s;
+    }
+    mapbtn::Rect r[n]{};
+    mapbtn::Flow(w,n,width,height-kBtnBottom*s,kBtnRowH*s,kBtnGap*s,kBtnMargin*s,r);
+    float rects[n*4];int ids[n];int placed=0;
+    for(int i=0;i<n;++i) {
+        if(!(r[i].x1>r[i].x0))continue;   // no room for its row
+        const bool order=i<static_cast<int>(Id::sweep);
+        const bool enabled=order ? c.allowed && c.selected>0 : true;
+        const bool lit=(i==static_cast<int>(Id::guard) && c.guardArmed) || (i==static_cast<int>(Id::sweep) && c.sweepOn) ||
+                       (i==static_cast<int>(Id::health) && c.healthOn);
+        Rect(drawer,ctx,r[i].x0,r[i].y0,r[i].x1,r[i].y1,lit ? kBtnLit : kBtnFill);
+        const float* edge=enabled ? kMapOrder : kMapOrderDim;
+        const float t=1.5f*s;
+        Seg(drawer,ctx,r[i].x0,r[i].y0,r[i].x1,r[i].y0,t,edge);Seg(drawer,ctx,r[i].x1,r[i].y0,r[i].x1,r[i].y1,t,edge);
+        Seg(drawer,ctx,r[i].x1,r[i].y1,r[i].x0,r[i].y1,t,edge);Seg(drawer,ctx,r[i].x0,r[i].y1,r[i].x0,r[i].y0,t,edge);
+        Label(text,lines,at,(r[i].x0+r[i].x1)*0.5f,(r[i].y0+r[i].y1)*0.5f,1,scale,enabled ? kWhite : kMapOrderDim,L"%ls  %lc",name[i],kKeys[i]);
+        rects[placed*4]=r[i].x0;rects[placed*4+1]=r[i].y0;rects[placed*4+2]=r[i].x1;rects[placed*4+3]=r[i].y1;ids[placed]=i;
+        ++placed;
+    }
+    MapCommandButtons(rects,ids,placed);
+}
+
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c))return;
@@ -3393,6 +3449,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         }
     }
     MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
+    MapButtons(drawer,ctx,text,width,height,s,m.pad,c,lines,at);
     // The band over the keys: how many are selected, the keys (the squads' own on a second line).
     Rect(drawer,ctx,0.0f,height-104.0f*s,width,height-46.0f*s,kMapBand);
     const float y=height-63.0f*s;
@@ -3483,6 +3540,37 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     else Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"%ls",Tr(Tx::npcMark));
 }
 
+// The march formation just cycled (npcai.cpp; the player's key on foot or the map's T): its name and the key, a moment
+// under the screen's centre.
+// The formation's name (formation.h Shape) as the HUD says it (mapcmd.cpp's notes too).
+}  // namespace
+
+const wchar_t* FormationText(int shape) noexcept {
+    using hudtext::Tx;
+    static const Tx kNames[]={Tx::formStock,Tx::formColumn,Tx::formStaggered,Tx::formWedge,Tx::formVee,Tx::formLine,
+                              Tx::formEchelonLeft,Tx::formEchelonRight,Tx::formDiamond,Tx::formBounding,Tx::formPerimeter};
+    static_assert(sizeof(kNames)/sizeof(kNames[0])==static_cast<std::size_t>(npc::formation::kShapes),"a name a shape");
+    return hudtext::Tr(shape>=0 && shape<npc::formation::kShapes ? kNames[shape] : Tx::formStock);
+}
+namespace {
+void FormationBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    FormationCue c{};
+    if(!PlayerFormationCue(&c))return;
+    wchar_t key[24];
+    KeyName(c.key,key,_countof(key));
+    Label(text,lines,at,width*0.5f,height*0.5f+190.0f*s,1,kLineScale,kCyan,Tr(Tx::formationCue),FormationText(c.shape),key);
+}
+
+// The box sweep (npcai.cpp, the player's NpcPickupKey): the boxes still to fetch and the ones in while it goes, the
+// count a moment after it is over; under the formation's banner.
+void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    SweepCue c{};
+    if(!PlayerSweepCue(&c))return;
+    wchar_t key[24];
+    KeyName(c.key,key,_countof(key));
+    if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
+    else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
+}
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): a ring where it points, for a moment, and
 // what came of it (the selected units sent there, how many; none selected; online).
 void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -3605,6 +3693,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        FormationBanner(t,width,height,s,lines,&at);
+        SweepBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);

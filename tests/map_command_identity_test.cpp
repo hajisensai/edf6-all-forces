@@ -7,6 +7,16 @@ unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
 bool NpcMarked() noexcept { return false; }
+int CycleGuardFormation(const void*) noexcept {return -2;}
+int CycleMarchFormation() noexcept {return 0;}
+int SplitSquad(const void*) noexcept {return -1;}
+bool MergeSquads(const void*,const void*) noexcept {return false;}
+bool NpcSweepToggle(const void* const*,int) noexcept {return false;}
+bool NpcSweepOn() noexcept {return false;}
+bool NpcPickupHealthToggle() noexcept {return false;}
+bool NpcPickupHealthOn() noexcept {return false;}
+int NpcMarchShape() noexcept {return 0;}
+const wchar_t* FormationText(int) noexcept {return L"";}
 bool NpcMarkEnemy(const void*,const float*,bool) noexcept { return false; }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
 PlayerFix player{};

@@ -156,6 +156,27 @@ add_executable(rounds_check EXCLUDE_FROM_ALL tools/rounds_check.cpp)
 target_compile_options(rounds_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(rounds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The map's command buttons (src/map_buttons.h): their layout and the click's button, offline
+# (tools/map_buttons_check.cpp). Not part of the plugin build:
+# cmake --build build --target map_buttons_check && build\map_buttons_check.exe
+add_executable(map_buttons_check EXCLUDE_FROM_ALL tools/map_buttons_check.cpp)
+target_compile_options(map_buttons_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(map_buttons_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The squad's box sweep (src/pickup.h): who goes for which box, the health-box rules, offline
+# (tools/pickup_check.cpp). Not part of the plugin build:
+# cmake --build build --target pickup_check && build\pickup_check.exe
+add_executable(pickup_check EXCLUDE_FROM_ALL tools/pickup_check.cpp)
+target_compile_options(pickup_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(pickup_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+# The squads' formations (src/formation.h): the slots, the heading, bounding overwatch, giving a blocked slot up,
+# offline (tools/formation_check.cpp). Not part of the plugin build:
+# cmake --build build --target formation_check && build\formation_check.exe
+add_executable(formation_check EXCLUDE_FROM_ALL tools/formation_check.cpp)
+target_compile_options(formation_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(formation_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 # A vehicle gun's range ladder (src/gunsight.h) against the round flown as the game flies it (roundaim.h), offline
 # (tools/gunsight_check.cpp). Not part of the plugin build:
 # cmake --build build --target gunsight_check && build\gunsight_check.exe
@@ -397,7 +418,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check sazabi_assist_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check formation_check pickup_check map_buttons_check sazabi_assist_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
@@ -494,6 +515,9 @@ target_compile_options(npc_core_check PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(npc_core_check PRIVATE /OPT:REF)
 add_dependencies(offline_checks npc_core_check)
 add_test(NAME npc_core_check COMMAND npc_core_check)
+set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
+add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
     --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
 # Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
@@ -568,7 +592,6 @@ target_link_libraries(npc_gunner_aim_test PRIVATE edf6common)
 target_compile_options(npc_gunner_aim_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks npc_gunner_aim_test)
 add_test(NAME npc_gunner_aim COMMAND npc_gunner_aim_test)
-set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native gunner checks")
 add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_gunner_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_gunner_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME medic_native_heal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/medic_native_heal_audit.py" "${EDF6_NATIVE_DLL}")

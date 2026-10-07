@@ -14,6 +14,31 @@ bool IsSoldierClass(const void* human) noexcept;
 bool NpcMarked() noexcept;
 // The mark for the HUD (draw thread): where it is; false with none (or none published lately).
 bool NpcMarkReadout(float* at) noexcept;
+// The squads' formations (formation.h): the map's T on a selected squad cycles a guarding squad's defence
+// (CycleGuardFormation: the new shape, -1 when it guards nothing, -2 when it takes no orders) or the march of the
+// player's recruited squads (CycleMarchFormation: the new shape). The HUD's banner: the march's shape, shown a
+// moment after it changes (wall clock), and the key that cycles it.
+int CycleGuardFormation(const void* leader) noexcept;
+// Fireteams (the map's P and L): split a squad in two (the soldiers moved to the new one, -1 when it cannot be), put
+// squad `from` under squad `into`'s top (false when either takes no orders or the two are more than a squad holds).
+int SplitSquad(const void* leader) noexcept;
+bool MergeSquads(const void* into,const void* from) noexcept;
+int CycleMarchFormation() noexcept;
+struct FormationCue { int shape; int key; };
+bool PlayerFormationCue(FormationCue* out) noexcept;
+// The box sweep (the player's NpcPickupKey): going (`on`: the boxes still to fetch `left`) or just over, the boxes
+// brought in so far (`taken`), the key.
+struct SweepCue { bool on; int left,taken,key; };
+// The map's buttons (mapcmd.cpp): the sweep started for the squads whose tops are `tops` (`n` 0: the player's
+// recruited squads) or called back (the new state); the health-box switch flipped (the new state: hurt soldiers may
+// take them); the states and the march's formation for the buttons' labels.
+bool NpcSweepToggle(const void* const* tops,int n) noexcept;
+bool NpcSweepOn() noexcept;
+bool NpcPickupHealthToggle() noexcept;
+bool NpcPickupHealthOn() noexcept;
+int NpcMarchShape() noexcept;
+bool PlayerSweepCue(SweepCue* out) noexcept;
+const wchar_t* FormationText(int shape) noexcept;   // hud.cpp: a shape's name as the HUD says it
 // The mark key on foot (marking the enemy at the screen's centre, or sending the map's selection to the ground there) and
 // the mark kept while its enemy is in the game: every frame of the local player `human` (map.cpp MapHumanFrame, game
 // thread), `mapOpen` while the map view is (the key is the map's then).

@@ -216,6 +216,36 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 - 所有本机自由 / 已招募单位：标记目标满足 `MarkInReach(位置, 标记, 最长武器真实射程, 指令的移动半径)` 时取它为目标；接到「集中火力」的小队无论远近都取它。实现上不改写原版目标 `h+0x1CD0`：插件的瞄准、扳机、移动已经覆盖原版输出，改写原版目标还要经过它的 weak 引用赋值函数，收益为零。
 - 标记只在本机（插件状态，§2.3）；单位的开火结果按原版复制走。
 
+### 6.4 战术编队（2026-10-08 用户：「支持战术编队，支持各种现代编队行进/战术/防御方案」）
+
+- 纯逻辑 `src/formation.h`（离线 `tools/formation_check.cpp`）：形状（`Shape`）、每人槽位（`Offset`：编队锚点右 x、前 z 米）、世界坐标（`World`，右 = 游戏相机的水平右 (-f.z, f.x)）、行进朝向（`Track`：锚点走过 2 米才更新）、交替掩护（`Step`：两半轮流，到位或 `kBoundMost` 8 秒交换）、走不到位置时放弃（`GiveUp`：`kStuckMs` 3 秒内没接近 0.5 米则让给原版跟随 `kRestMs` 6 秒）。
+- 接入 `npcai.cpp` `Drive`：在躲避、上车、后撤、躲枪线之后，**没有目标时**走 `FormationMove`；有目标时照旧去交战位置。
+- **行进**（`NpcFormation`，步行键 `NpcFormationKey` T / 地图 T）：本机玩家招募的、没有地图指令的小队合成一份名单（`MarchRoster`：按小队表顺序、每队 `Members` 广度优先，只要步行的），玩家是锚点；名单每帧重建，阵亡后后面的人补位；士兵间距 `NpcFormationSpacing`（2~30 米，默认 5）。
+- **防御**（`NpcGuardFormation`，地图里选中警戒中的小队按 T）：每个警戒小队自己一份（`Members`），锚点 = 警戒点，朝向 = 下令时玩家→ 警戒点（`SquadCommand` 记在 `Squad::guardFwd`）。
+- 地图 T：选中的小队里警戒中的各自循环防御方案（`CycleGuardFormation`），其余（跟随玩家的）只循环一次行进编队（`CycleMarchFormation`），离线 `map_command_runtime_check` `FormationKey`。
+- 不寻路：和原版之外的其他插件移动一样，直推摇杆直线走；被挡住时 `GiveUp` 把士兵交还原版跟随（原版跟随会绕路）。
+- 联机：只驱动本机权威的 NPC（同 §9）；地图指令联机不可用，步行键的行进编队只影响本机玩家招募的小队。
+
+### 6.4.1 编组（2026-10-08 用户：「支持编组」）
+
+- 火力组就是一个独立的小队（原版跟随树，§5.1）：`SplitSquad` 按 `Members` 顺序单双号对半，奇数位的第一人当新组长、跟原小队队长的上级（招募的跟玩家、自由的没有），其余奇数位跟新组长，偶数位跟原队长——每人都显式重新 `Follow`，不会把某人的下级连带拖走；`MergeSquads` 把另一个小队的队长挂到这个队长下面（合计 ≤ `kMaxSquad` 16）。之后两组各是普通小队：面板各一行、各自的指令和编队。
+- 地图键：P 分组（选中的每个小队）、L 合并（并到第一个选中的）；联机拒绝（同 §9 地图指令）。离线 `npc_core_check` 用假的跟随树核对重挂关系。
+
+### 6.4.2 地图按钮（2026-10-08 用户：「这个要在m里面设置。还有事m里面进行操作要支持。最好能直接点击hud那种」）
+
+- `src/map_buttons.h`（离线 `tools/map_buttons_check.cpp`）：按钮 `Id`（9 个指令 + 编队、分组、合并、拾取、回复箱开关）、`Flow` 按标签宽度排成居中的行（放不下换行，向上叠）、`Hit` 点中哪个。
+- `hud.cpp` `MapButtons` 按实际画出的标签量宽度排版、画出，把矩形交给 `mapcmd.cpp` `MapCommandButtons`；`Pointer` 在松开左键时先测按钮（点中按钮不算点单位），警戒按钮先「上膛」（`guardArmed`），下一次点地面就是警戒点。按钮与键共用同一套动作（`Press`、`Formation`、`Teams`、`Sweep`、`Health`）。离线 `map_command_runtime_check` `ButtonClicks` 用真实的 `MapCommandFrame` 走一遍点击。
+- 回复箱开关是运行时状态（`npcai.cpp` `healthPick`：-1 = 用 ini 的 `NpcPickupHealth`），地图里切换后整局有效；地图里拾取可以只派选中的小队（`Sweep::top`）。
+
+### 6.5 分散拾取道具箱（2026-10-08 用户：「一键分散拾取箱子。支持开启和禁止拾取医疗箱（因为玩家也需要这个回血，满血的时候也不会拾取）」）
+
+- 逆向见 `docs/itembox-re.md`：箱子不是游戏对象，是 `DropItemManager`（`*(EDF+0x20B2988)`）里的链表（`+0xDE0`），类型 `+0xC0`（0 武器 1 护甲 2 小回复 3 大回复）、已拾取 `+0xC4`；原版只有带手柄对象（`+0x340`）的玩家能捡，NPC 走上去不会捡。
+- 纯逻辑 `src/pickup.h`（离线 `tools/pickup_check.cpp`）：`Assign` 每次在剩下的人和箱子里取最近的一对，一人一箱、一箱一人；`Takes`：离玩家 `NpcPickupRange` 以内，武器 / 护甲谁都行，回复箱要 `NpcPickupHealth`、不联机、这名士兵没满血。
+- 游戏侧 `npcai.cpp`：`NpcPickupKey`（步行）开 / 召回；`SweepFrame`（每帧一次，`Gather` 里）读箱子、拿跟随玩家的名单（同 §6.4 的 `MarchRoster`）分配；`Drive` 里在躲枪线之后、交战位置之前跑向箱子（开火照常）；`PickUp` 到当前箱子位置的三维距离 1.5 米内时：武器 / 护甲执行原版 Collect 的单箱处理顺序 `Notify 0x2C7D50(mgr,id,kind,本机玩家)` → `Apply 0x2C7540(mgr,本机玩家,kind,0)` → 标记该箱子已拾取（不调用半径遍历，以免误吃重叠的回复箱），回复箱置 `+0xC4` 后对这名士兵调原版加耐久 `0x547870`（比例 × 最大耐久）。离线 `npc_core_check` 用假的管理器和记录器核对生产路径；`item_pickup_native_audit.py` 在 EDF.dll 私有映射中执行真实拾取、音效请求、序列化和回血函数，仍不等于游戏或双机实测。
+- 结束：没有可捡的箱子、`NpcPickupSec` 到、再按一次键、玩家没了、换任务。
+- 联机：武器 / 护甲走原版路径（客机由房主仲裁，同玩家自己捡）；回复箱不捡。
+- 安全：`Notify`、`Apply`、加耐久、模型位置四个函数入口按字节核对（`InstallBoxes`），不符整项关闭；箱子的 vtable 必须是 `0x17A6C18`。
+
 ## 7. 上下车（B6、C3，P6）
 
 - 原版没有让士兵上车的路径（脚本 `RideVehicle` 放的是 dummy，H）。插件用人物侧 `RideVehicle 0x5765E0(Human*, shared_ptr<Vehicle>* byValue, int seat)`：它自己做下旧车、写 `+0x1540/+0x1548/+0x1550`、`SeatRide(force=0)`、切乘车状态；**结束时释放一个强引用**，调用前先把 ctrl+8 加 1（H）。前置：活着、`+0x39C == 0`、座位空；不查队伍 / 掩码 / 距离，所以插件自己查。
@@ -341,6 +371,12 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 ### 实机验收清单（用户）
 
 见 README「NPC 自制 AI」一节末尾，随阶段补充。
+
+### 2026-10-08 PR #83 审查修正
+
+- 扫箱名单每帧重新检查脚本、NPC 权威和当前队长身份，联机不改变其他玩家招募的小队；召回立即使当帧已分配拾箱失效。
+- 拆组在修改原生跟随链前取消双方登车请求；合并立即注销旧队长条目，禁止反向合并形成跟随环。任一受影响成员由任务脚本控制时，整次重编组拒绝。
+- 原版半径拾取即便半径只有 0.05 米，也会消费同坐标的回复箱。精确单箱路径保留原版房主仲裁和计数，邻箱不变；三维到达判据避免隔楼层收箱。
 
 
 ### NPC gunner seats online (2026-10-07)

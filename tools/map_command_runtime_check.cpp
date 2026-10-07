@@ -42,6 +42,20 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
     return true;
 }
 bool TankCommand(const void*,const Command&) noexcept {return false;}
+// The formations (npcai.cpp): a squad at `guardLeader` guards, the others follow; the calls counted.
+const void* guardLeader=nullptr;
+int guardCalls=0,marchCalls=0;
+int CycleGuardFormation(const void* leader) noexcept { ++guardCalls;return leader==guardLeader ? 10 : -1; }
+int CycleMarchFormation() noexcept { ++marchCalls;return 3; }
+int SplitSquad(const void*) noexcept {return -1;}
+bool MergeSquads(const void*,const void*) noexcept {return false;}
+int sweepCalls=0,healthCalls=0;bool sweepState=false,healthState=false;
+bool NpcSweepToggle(const void* const*,int) noexcept { ++sweepCalls;sweepState=!sweepState;return sweepState; }
+bool NpcSweepOn() noexcept { return sweepState; }
+bool NpcPickupHealthToggle() noexcept { ++healthCalls;healthState=!healthState;return healthState; }
+bool NpcPickupHealthOn() noexcept { return healthState; }
+int NpcMarchShape() noexcept { return 0; }
+const wchar_t* FormationText(int) noexcept { return L"SHAPE"; }
 struct StubEnemy { const void* object; float aim[3]; };
 StubEnemy stubEnemies[2]{};int stubEnemyCount=0;
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
@@ -141,8 +155,85 @@ void PointerAndInput() noexcept {
     MapCommandView(vp,800,600);MapCommandFrame(in,centre);
     Check(game.pointer.x==400.0f && game.pointer.y==300.0f,"reopened small viewport starts inside at centre");
 }
+// T on the map: each selected squad that guards cycles its own defence, the march once however many follow; online
+// (orders refused) nothing changes.
+void FormationKey() noexcept {
+    static int a=0,b=0,c=0,d=0;
+    Game g{};
+    g.count=4;
+    const void* who[4]={&a,&b,&c,&d};
+    for(int i=0;i<4;++i){g.list[i]=Entry{CommandUnit{who[i],"squad",Command{}},Owner::squad};}
+    g.sel.Add(&a);g.sel.Add(&b);g.sel.Add(&c);   // d not selected
+    guardLeader=&a;guardCalls=marchCalls=0;
+    Formation(g,true);
+    Check(guardCalls==3 && marchCalls==1,"T: the guard squad cycled, the march once for two following squads");
+    guardCalls=marchCalls=0;
+    Formation(g,false);
+    Check(guardCalls==0 && marchCalls==0,"T online: nothing cycled");
+    g.sel.Clear();g.sel.Add(&a);guardCalls=marchCalls=0;
+    Formation(g,true);
+    Check(guardCalls==1 && marchCalls==0,"T on a guarding squad alone: the march untouched");
+}
+// The map's buttons (hud.cpp draws them and hands their rectangles over): a click on the sweep's button runs it and
+// selects nothing; the guard's arms the next click on the ground (no unit picked by it), clicked again disarms it;
+// Y and O do what the sweep's and the health switch's buttons do.
+void ButtonClicks() noexcept {
+    ResetMapCommands();view=View{};
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;
+    float centre[3]{};
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    MapCommandView(vp,1280,720);
+    MapCommandFrame(in,centre);   // the pointer placed at the centre (640, 360)
+    const float rects[8]={600,340,680,380, 700,340,780,380};
+    const int ids[2]={static_cast<int>(mapbtn::Id::sweep),static_cast<int>(mapbtn::Id::guard)};
+    MapCommandButtons(rects,ids,2);
+    sweepCalls=healthCalls=0;sweepState=healthState=false;
+    const auto click=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
+    click();
+    Check(sweepCalls==1 && sweepState && game.sel.n==0,"a click on the sweep's button runs it, nothing selected by it");
+    // The pointer onto the guard's button (100 px right): armed; again: disarmed.
+    in.dx=100.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
+    click();
+    Check(game.guardArmed,"the guard's button arms the next click on the ground");
+    click();
+    Check(!game.guardArmed,"clicked again: disarmed");
+    click();
+    in.dy=150.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dy=0.0f;   // off the buttons, on the ground
+    click();
+    Check(!game.guardArmed && game.sel.n==0,"armed, a click on the ground is the guard's point (taken, disarmed), no unit picked");
+    inputstub::keys['Y']=true;MapCommandFrame(in,centre);inputstub::keys['Y']=false;MapCommandFrame(in,centre);
+    Check(sweepCalls==2 && !sweepState,"Y as the sweep's button: called back");
+    inputstub::keys['O']=true;MapCommandFrame(in,centre);inputstub::keys['O']=false;MapCommandFrame(in,centre);
+    Check(healthCalls==1 && healthState,"O flips the health-box switch");
+    MapCommandReadout r{};
+    Check(PlayerMapCommands(&r) && r.healthOn && !r.sweepOn,"the readout carries the switches for the buttons' labels");
+}
+
 // The mark key and H with the pointer on an enemy (the user, 2026-10-07: "应该在地图里面也能按q标记"); the mark key on
 // foot with no enemy near the centre sends the selection there (MapCommandGuardAt).
+void FocusButtonPreservesMark() noexcept {
+    ResetMapCommands();view=View{};config=Config{};
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    unsigned char foe[0x400]{},control[0x10]{};static int earlier;
+    Put<void*>(foe,kSelfCtrl,control);Put<long>(control,8,1);Put<long>(control,0xC,1);
+    stubEnemies[0]=StubEnemy{foe,{0,0,0.5f}};stubEnemyCount=1;marked=&earlier;markCalls=0;
+    squadOn=true;squadOrders=0;Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;float centre[3]{};
+    const float vp[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);
+    const float rect[4]={600,340,680,380};const int id=static_cast<int>(mapbtn::Id::focus);
+    MapCommandButtons(rect,&id,1);
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(squadOrders==1 && squadGot.order==Order::focus && marked==&earlier && markCalls==0,
+          "the focus button uses the existing mark, never the map enemy behind its HUD rectangle");
+    Check(!game.hover && At<long>(control,0xC)==1,"HUD buttons release and occlude enemy hover identities");
+    game.guardArmed=true;SuspendMapCommands();
+    Check(!game.guardArmed && !view.buttons && game.sel.Has(squadObj),"closing clears armed buttons and their stale rectangles but keeps selection");
+    ResetMapCommands();view=View{};squadOn=false;stubEnemyCount=0;marked=nullptr;
+}
+
 void MarkFromMap() noexcept {
     ResetMapCommands();view=View{};marked=nullptr;markCalls=0;squadOn=false;squadOrders=0;
     const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};   // world (x, y) in [-1, 1] across the screen
@@ -275,7 +366,8 @@ void CameraIsolation() noexcept {
 }  // namespace
 }  // namespace crew
 int main() {
-    crew::UnitLifetime();crew::PointerAndInput();crew::MarkFromMap();crew::MarkLifetimeAndConfig();crew::CameraIsolation();
+    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();
+    crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

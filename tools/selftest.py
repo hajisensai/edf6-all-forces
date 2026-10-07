@@ -4383,6 +4383,64 @@ def stock_guidance_wired() -> None:
 
 
 @test
+def npc_pickup_wired() -> None:
+    """The squad's box sweep (src/pickup.h, npcai.cpp SweepFrame / PickUp, docs/itembox-re.md): the run to a box
+    after the lane move and before the combat spot; weapon / armour through the stock per-box Notify and Apply with the player as
+    the one who picks, health boxes only offline, allowed and hurt; the code it calls checked at
+    load; its ini keys read, range-checked, shipped and documented; pickup_check under CTest."""
+    code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
+    readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
+    drive = code.split('Plan Drive(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
+    run = drive.index('PickUp(s,h,pos)')
+    assert drive.index('npc::LaneEscape(') < run < drive.index('Spot(s,pos,t.e->aim')
+    pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'reinterpret_cast<NotifyBoxFn>' in pick and 'reinterpret_cast<ApplyBoxFn>' in pick
+    assert pick.index('image+kNotifyBox') < pick.index('image+kApplyBox')
+    assert 'npc::Dist(pos,at)>npc::pickup::kReach' in pick
+    assert '!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
+    assert 'healthPick<0 ? Cfg().npcPickupHealth' in code, 'the ini is the default until the map flips it'
+    # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; Y and O keys.
+    mapcmd, hud = src('src/mapcmd.cpp'), src('src/hud.cpp')
+    assert 'mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
+    assert "k.sweep=Down('Y');k.health=Down('O');" in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
+    assert 'EXCLUDE_FROM_ALL tools/map_buttons_check.cpp' in cmake and 'map_buttons_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    assert 'kNotifyBoxSig' in code and 'kApplyBoxSig' in code and 'InstallBoxes();' in code
+    for key, default in (('NpcPickupKey', '89'), ('NpcPickupRange', '80'), ('NpcPickupSec', '90'), ('NpcPickupHealth', '0')):
+        assert f'L"{key}"' in plugin, key
+        assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    for key in ('NpcPickupKey', 'NpcPickupRange', 'NpcPickupSec'):
+        assert f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin, key
+    assert '0x2C8AC0' in src('docs/itembox-re.md')
+    assert 'EXCLUDE_FROM_ALL tools/pickup_check.cpp' in cmake and 'pickup_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+
+
+@test
+def npc_formation_wired() -> None:
+    """The squads' formations (src/formation.h, npcai.cpp FormationMove, docs/npc-ai-design.md §6.4): the formation move
+    only when the soldier has nothing to fight (after the evade / board / fall-back / lane moves), its ini keys read,
+    range-checked, shipped and documented, the map's T and the on-foot key wired, the HUD names every shape, and
+    formation_check runs under CTest."""
+    code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
+    readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
+    drive = code.split('Plan Drive(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
+    form = drive.index('if(!t.e && FormationMove(')
+    for before in ('Evade(s,h,c,pos,ms,&p.move)', 'Board(s,h,pos,ms)', 'FallBack(s,h,pos,served,ms)', 'npc::LaneEscape('):
+        assert drive.index(before) < form, before
+    for key, default in (('NpcFormation', '0'), ('NpcFormationKey', '84'), ('NpcFormationSpacing', '5'), ('NpcGuardFormation', '0')):
+        assert f'L"{key}"' in plugin and (f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin), key
+        assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    assert 'FormationTick();' in code and 'k.formation=Down(\'T\')' in src('src/mapcmd.cpp')
+    table = src('src/hudtext.inc')
+    shapes = re.findall(r'^\s*(\w+),\s*//', src('src/formation.h').split('enum class Shape', 1)[1].split('};', 1)[0], re.M)
+    assert len(shapes) == 11, shapes
+    for s in shapes:
+        assert f'HUDTEXT(form{s[0].upper()}{s[1:]},' in table, s
+    assert 'EXCLUDE_FROM_ALL tools/formation_check.cpp' in cmake and 'formation_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+
+
+@test
 def npc_ai_wired() -> None:
     """The friendly soldiers' own AI (src/npcai.cpp, docs/npc-ai-design.md): its Think hook runs the stock Think first and
     rewrites the intent block after it (§3.2), is installed with the inputs (after every plugin) and reset per mission;
