@@ -72,22 +72,22 @@ void DropView() noexcept {
 // the enemy on the reticle and keeps it there while it moves.
 constexpr float kAssistKeep=1.6f;     // the held enemy kept this many times the cone
 constexpr float kAssistMostPull=1.5f; // rad/s: the pull's fastest
-constexpr float kAssistBehind=3.0f;   // m: a wall hit this short of the point does not hide it (its own hull's edge)
 constexpr int kAssistRays=4;
-struct AssistSeen { float eye[3],dir[3],cone,range; int n; sazabi::assist::Point pts[kMostTargets]; };
+struct AssistSeen {
+    float eye[3],dir[3],cone,keep,range;
+    const void* held;
+    sazabi::assist::Candidates<kMostTargets> candidates;
+};
 void SeeAssist(void* ctx,const void* obj,const float* at) {
     AssistSeen* const s=static_cast<AssistSeen*>(ctx);
-    if(s->n>=kMostTargets || !at || !std::isfinite(at[0]+at[1]+at[2]))return;
-    float dist;
-    if(sazabi::assist::Angle(s->dir,s->eye,at,&dist)>s->cone || dist>s->range)return;
-    s->pts[s->n].obj=obj;std::memcpy(s->pts[s->n].at,at,12);++s->n;
+    if(!at)return;
+    s->candidates.Add({obj,{at[0],at[1],at[2]}},s->eye,s->dir,s->cone,s->keep,s->range,s->held);
 }
 bool SeenFrom(const float* eye,const float* at) noexcept {
     float hit[3];
     const float wall=MapRay(eye,at,hit);
-    if(wall<0.0f)return true;
     const float d[3]={at[0]-eye[0],at[1]-eye[1],at[2]-eye[2]};
-    return wall>=Len(d)-kAssistBehind;
+    return sazabi::assist::Visible(Len(d),wall);
 }
 void Assist(Mech& m,unsigned char* v,float dt) noexcept {
     namespace as=sazabi::assist;
@@ -97,18 +97,19 @@ void Assist(Mech& m,unsigned char* v,float dt) noexcept {
     if(!m.rootOk || !Cfg().sazabiAimAssist || a.swing>=0.0f)return;
     const float cone=Cfg().sazabiAssistCone*sazabi::kDeg,keep=cone*kAssistKeep,range=Cfg().sazabiAssistRange;
     AssistSeen s{};
-    s.cone=keep;s.range=range;
+    s.cone=cone;s.keep=keep;s.range=range;s.held=held;
     ViewRay(ViewOf(m),m.root+12,s.eye,s.dir);
     VisitEnemies(v,SeeAssist,&s);
+    auto& candidates=s.candidates;
     int pick=-1;
-    for(int tries=0;tries<kAssistRays && s.n>0;++tries) {
-        const int i=as::Pick(s.eye,s.dir,s.pts,s.n,cone,keep,range,held);
+    for(int tries=0;tries<kAssistRays && candidates.n>0;++tries) {
+        const int i=as::Pick(s.eye,s.dir,candidates.pts,candidates.n,cone,keep,range,held);
         if(i<0)break;
-        if(SeenFrom(s.eye,s.pts[i].at)){pick=i;break;}
-        s.pts[i]=s.pts[--s.n];   // hidden: the next
+        if(SeenFrom(s.eye,candidates.pts[i].at)){pick=i;break;}
+        candidates.pts[i]=candidates.pts[--candidates.n];   // hidden: the next
     }
     if(pick<0)return;
-    a.hasAssist=true;a.assistObj=s.pts[pick].obj;std::memcpy(a.assist,s.pts[pick].at,12);
+    a.hasAssist=true;a.assistObj=candidates.pts[pick].obj;std::memcpy(a.assist,candidates.pts[pick].at,12);
     const unsigned char* const seat=SeatAt(v,0);
     const bool pad=At<unsigned char>(seat,kSeatPad)!=0;
     if(Cfg().sazabiAssistPull<=0.0f || (!pad && !Cfg().sazabiAssistMousePull))return;

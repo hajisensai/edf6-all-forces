@@ -8,6 +8,7 @@
 #include "../src/sazabi_assist.h"
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace {
 using namespace sazabi::assist;
@@ -66,6 +67,39 @@ void Picks() {
     g[1].obj=&a;Beside(o,3.0f,0.0f,200.0f,g[1].at);
     g[2].obj=&b;Beside(o,0.5f,0.0f,200.0f,g[2].at);
     Check(Pick(eye,dir,g,3,kCone,kKeep,kRange,&a)==1,"of the held one's points the nearest the centre",0.0f);
+}
+
+void CrowdsAndCover() {
+    const float o[3]={0,0,0};
+    float eye[3],dir[3];Ray(o,0,0,eye,dir);
+    int objects[40]{};
+    Candidates<32> crowd;
+    auto add=[&](int id,float angle,const void* held) {
+        Point p{};p.obj=&objects[id];Beside(o,angle,0,300,p.at);
+        crowd.Add(p,eye,dir,kCone,kKeep,kRange,held);
+    };
+    for(int i=0;i<32;++i)add(i,7.0f,nullptr);
+    add(32,0.1f,nullptr);
+    int pick=Pick(eye,dir,crowd.pts,crowd.n,kCone,kKeep,kRange,nullptr);
+    Check(crowd.n==32 && pick>=0 && crowd.pts[pick].obj==&objects[32],
+          "the reticle's nearest enemy survives a full registry buffer",0);
+    crowd={};
+    for(int i=0;i<32;++i)add(i,1.0f,&objects[33]);
+    add(33,11.0f,&objects[33]);
+    pick=Pick(eye,dir,crowd.pts,crowd.n,kCone,kKeep,kRange,&objects[33]);
+    Check(pick>=0 && crowd.pts[pick].obj==&objects[33],"a late held enemy survives nearer unheld enemies",0);
+    crowd={};
+    for(int i=0;i<32;++i)add(i,11.0f,nullptr);
+    Check(crowd.n==0,"unheld enemies in only the keep cone cannot fill the candidate buffer",0);
+    add(34,2.0f,nullptr);
+    const Point bad{&objects[35],{std::numeric_limits<float>::quiet_NaN(),0,0}};
+    crowd.Add(bad,eye,dir,kCone,kKeep,kRange,nullptr);
+    Check(crowd.n==1,"nonfinite registry points are rejected",0);
+    Check(Visible(300,-1),"an unobstructed ray is visible",0);
+    Check(Visible(300,300),"a map hit at the target itself is visible",0);
+    Check(!Visible(300,299),"a target one metre behind a wall is hidden",0);
+    Check(!Visible(300,297.1f),"a target within the former three metre grace is hidden",0);
+    Check(!Visible(300,100),"a distant wall hides the target",0);
 }
 
 void Solves() {
@@ -136,6 +170,7 @@ void Flights() {
 
 int main() {
     Picks();
+    CrowdsAndCover();
     Solves();
     Pulls();
     Flights();

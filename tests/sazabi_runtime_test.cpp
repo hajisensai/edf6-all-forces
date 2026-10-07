@@ -11,9 +11,10 @@ ULONGLONG testNow=1000;
 int emcCalls=0,damageCalls=0,enemyVisits=0,soundCalls=0;
 sazabi_net::State lastNetwork;
 PlayerFix player{};
-const void* visibleObjects[4]{};
-float visiblePositions[4][3]{};
+const void* visibleObjects[40]{};
+float visiblePositions[40][3]{};
 int visibleCount=0;
+float testMapHit=-1.0f;
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { return nullptr; }
@@ -38,7 +39,7 @@ bool RoundSize(const RoundObj&,float) noexcept { return false; }
 void RoundDrop(RoundObj&) noexcept {}
 unsigned char* PlayerHuman() noexcept { return nullptr; }
 bool HumanOnFoot(const unsigned char*) noexcept { return false; }
-float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
+float MapRay(const float*,const float*,float*) noexcept { return testMapHit; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor visitor,void* context) noexcept {
     ++enemyVisits;
     for(int i=0;i<visibleCount;++i)visitor(context,visibleObjects[i],visiblePositions[i]);
@@ -88,6 +89,37 @@ int main() {
     bool sorted=true,allReal=true;
     for(int i=0;i<enemies.n;++i){allReal=allReal && enemies.obj[i];if(i)sorted=sorted && enemies.d2[i-1]<=enemies.d2[i];}
     Check(sorted && allReal,"a full target list stays sorted and contains no phantom origin enemy");
+
+    // Production Assist -> Aim, using the actual registry callback and camera rig.
+    alignas(16) unsigned char assistVehicle[0x2100]{},assistSeat[kSeatStride]{};
+    Put<void*>(assistVehicle,kSeats,assistSeat);
+    Mech assisted{};assisted.rootOk=true;
+    for(int i=0;i<16;++i)assisted.root[i]=assisted.rootInv[i]=i%5==0 ? 1.0f : 0.0f;
+    config.sazabiAimAssist=true;config.sazabiAssistPull=0;
+    float eye[3],dir[3];ViewRay(ViewOf(assisted),assisted.root+12,eye,dir);
+    visibleCount=kMostTargets+1;
+    for(int i=0;i<visibleCount;++i) {
+        visibleObjects[i]=&objects[i];
+        const float angle=(i==kMostTargets ? 0.1f : 7.0f)*sazabi::kDeg;
+        visiblePositions[i][0]=eye[0]+300*std::sin(angle);
+        visiblePositions[i][1]=eye[1];visiblePositions[i][2]=eye[2]+300*std::cos(angle);
+    }
+    Assist(assisted,assistVehicle,1.0f/60.0f);Aim(assisted);
+    Check(assisted.arms.hasAssist && assisted.arms.assistObj==&objects[kMostTargets],
+          "production assist picks a late central enemy from a crowd");
+    Check(assisted.arms.hasAim && Near(assisted.arms.aim,visiblePositions[kMostTargets]),
+          "production Aim passes the assisted point to weapons");
+    testMapHit=299.0f;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.hasAssist,"production assist releases a held target one metre behind a wall");
+    testMapHit=-1;Assist(assisted,assistVehicle,1.0f/60.0f);
+    assisted.arms.swing=0;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.hasAssist,"swinging suppresses assistance");
+    assisted.arms.swing=-1;Assist(assisted,assistVehicle,1.0f/60.0f);
+    config.sazabiAimAssist=false;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.hasAssist,"disabling assistance releases the held target");
+    config.sazabiAimAssist=true;Assist(assisted,assistVehicle,1.0f/60.0f);DropArms(assisted);
+    Check(!assisted.arms.hasAssist && !assisted.arms.assistObj,"leaving clears the previous pilot's held target");
+    config=Config{};visibleCount=0;
 
     // Real Pose writes and BoneAt/DockPoint reads, interleaved across two different rigs/poses.
     // Both bone arrays are already resolved, so no game model lookup is needed.

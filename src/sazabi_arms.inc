@@ -130,6 +130,7 @@ void Sfx(Mech& m,SzSfx which,const float* at) noexcept {
 
 void DropArms(Mech& m) noexcept {
     Arms& a=m.arms;
+    a.hasAssist=false;a.assistObj=nullptr;
     RoundDrop(a.glow);
     for(auto& r:a.mega)RoundDrop(r);
     for(auto& f:a.funnels)f=Funnel{};

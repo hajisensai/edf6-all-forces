@@ -9,6 +9,7 @@
 //    turn still wins (at the cone's edge the pull is a few deg/s, the stick's full turn 110 deg/s).
 #pragma once
 #include <cmath>
+#include <cstddef>
 
 namespace sazabi::assist {
 
@@ -37,6 +38,36 @@ inline int Pick(const float* eye,const float* dir,const Point* pts,int n,float c
         if(a<=bestA){best=i;bestA=a;}
     }
     return kept>=0 ? kept : best;
+}
+
+// The registry's order is unrelated to the reticle. Keep the best candidates, including the held object's points,
+// even when they are visited after the fixed-size buffer fills. Ranking matches Pick: held first, then angle.
+template<std::size_t Capacity>
+struct Candidates {
+    Point pts[Capacity]{};
+    float angles[Capacity]{};
+    int n=0;
+    void Add(const Point& point,const float* eye,const float* dir,float cone,float keep,float range,const void* held) noexcept {
+        float dist;
+        const float angle=Angle(dir,eye,point.at,&dist);
+        const bool holding=held && point.obj==held;
+        if(!std::isfinite(angle) || !std::isfinite(dist) || angle>(holding ? keep : cone) || dist>range)return;
+        int at=0;
+        while(at<n) {
+            const bool otherHeld=held && pts[at].obj==held;
+            if((holding && !otherHeld) || (holding==otherHeld && angle<angles[at]))break;
+            ++at;
+        }
+        if(at==static_cast<int>(Capacity))return;
+        if(n<static_cast<int>(Capacity))++n;
+        for(int i=n-1;i>at;--i){pts[i]=pts[i-1];angles[i]=angles[i-1];}
+        pts[at]=point;angles[at]=angle;
+    }
+};
+
+// MapRay excludes units: a hit just in front of the target is still a wall, never the enemy's hull.
+inline bool Visible(float distance,float mapHit) noexcept {
+    return std::isfinite(distance) && std::isfinite(mapHit) && (mapHit<0.0f || mapHit>=distance-0.02f);
 }
 
 // The heading and pitch (rad; forward = (sin yaw, 0, cos yaw), pitch up +) that put `at` on the centre's ray of a camera
