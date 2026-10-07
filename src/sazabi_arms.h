@@ -46,6 +46,11 @@ struct Arms {
     const void* assistObj=nullptr;
     bool hasAssist=false;
     float assist[3]{};
+    // the lock-on (sazabi_camera.inc LockInput): the enemy held while it lives, its key's state, the flick toward the
+    // next one, how long it has been out of sight
+    const void* lockOnObj=nullptr;
+    bool lockOn=false,lockKeyHeld=false;
+    float flick=0.0f,flickCool=0.0f,lockHidden=0.0f;
     bool stance[2]{true,true};   // each foot on the ground last frame (its footstep when it comes down)
 };
 }  // namespace crew::szarms

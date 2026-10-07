@@ -128,14 +128,18 @@ void Sfx(Mech& m,SzSfx which,const float* at) noexcept {
     m.net.soundAt[slot]=GameMs();m.net.dirty=true;
 }
 
+void DropLocalAim(Arms& a) noexcept {
+    a.hasAssist=false;a.assistObj=nullptr;a.lockOn=false;a.lockOnObj=nullptr;a.flick=0.0f;a.lockHidden=0.0f;
+    a.lockKeyHeld=false;a.flickCool=0.0f;
+}
 void DropArms(Mech& m) noexcept {
     Arms& a=m.arms;
-    a.hasAssist=false;a.assistObj=nullptr;
     RoundDrop(a.glow);
     for(auto& r:a.mega)RoundDrop(r);
     for(auto& f:a.funnels)f=Funnel{};
     a.swing=-1.0f;a.charge=0.0f;a.megaLeft=0.0f;a.queued=false;a.funnelsOut=false;
     for(auto& slot:a.funnelSlot)slot=nullptr;
+    DropLocalAim(a);
 }
 
 // The tomahawk: drawn and swung; its strike half way through.
@@ -473,6 +477,7 @@ void PublishCue(const Mech& m) noexcept {
     c.overheat=m.fl.overheat;
     c.special=static_cast<int>(a.special);
     c.aimRange=a.aimRange;c.aimHit=a.aimHit;c.centred=a.centred;
-    c.hasAssist=a.hasAssist && a.hasAim;std::memcpy(c.assist,a.assist,12);
+    c.hasAssist=a.hasAssist && (a.hasAim || a.lockOn);std::memcpy(c.assist,a.assist,12);
+    c.lockOn=a.lockOn && a.hasAssist;
     cue=c;cueMs=GameMs();
 }

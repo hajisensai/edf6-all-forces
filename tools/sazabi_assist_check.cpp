@@ -152,6 +152,54 @@ float Fly(const float* start,const float* vel,float secs,float stick,bool* held)
     return OffCentre(o,yaw,pitch,at);
 }
 
+void Switches() {
+    const float o[3]={0.0f,0.0f,0.0f};
+    float eye[3],dir[3];
+    Ray(o,0.0f,0.0f,eye,dir);
+    int held=0,l1=0,l2=0,r1=0,distant=0;
+    Point p[6];
+    p[0].obj=&held;Beside(o,0.0f,0.0f,300.0f,p[0].at);   // the locked one, dead ahead
+    p[1].obj=&l1;Beside(o,-10.0f,0.0f,300.0f,p[1].at);   // left of it (Beside: + is the camera's right)
+    p[2].obj=&l2;Beside(o,-30.0f,0.0f,200.0f,p[2].at);
+    p[3].obj=&r1;Beside(o,20.0f,0.0f,250.0f,p[3].at);
+    p[4].obj=&distant;Beside(o,-5.0f,0.0f,900.0f,p[4].at);   // past the range
+    p[5].obj=&held;Beside(o,-3.0f,5.0f,300.0f,p[5].at);  // another of the locked one's points
+    const float yaw=0.0f;
+    // the heading's way up (turn > 0) is the camera's left
+    Check(Switch(eye,yaw,p[0].at,p,6,&held,1.0f,kRange,80.0f*kDeg)==1,"a flick left takes the next one left",0.0f);
+    Check(Switch(eye,yaw,p[0].at,p,6,&held,-1.0f,kRange,80.0f*kDeg)==3,"a flick right takes the next one right",0.0f);
+    Check(Switch(eye,yaw,p[1].at,p,6,&held,1.0f,kRange,80.0f*kDeg)==2,"from the left one, further left",0.0f);
+    Check(Switch(eye,yaw,p[2].at,p,6,&held,1.0f,kRange,80.0f*kDeg)==-1,"none further that way",0.0f);
+    Check(Switch(eye,yaw,p[0].at,p,6,&held,1.0f,kRange,20.0f*kDeg)==1 && Switch(eye,yaw,p[1].at,p,6,&held,1.0f,kRange,20.0f*kDeg)==-1,
+          "only within the view's reach",0.0f);
+}
+
+// The lock's pull (sazabi_camera.inc kLockPull 10/s, at most 3 rad/s): an enemy crossing fast close by stays on the
+// reticle; one off to the side is brought round.
+void LockPulls() {
+    const float o[3]={0.0f,0.0f,0.0f};
+    auto follow=[&](const float* start,const float* vel,float secs) {
+        float yaw=0.0f,pitch=0.0f,at[3]={start[0],start[1],start[2]},worst=0.0f;
+        for(int i=0;i<static_cast<int>(secs/kDt);++i) {
+            for(int k=0;k<3;++k)at[k]+=vel[k]*kDt;
+            float wy,wp;
+            Solve(at,yaw,pitch,[&](float y,float pp,float* e){float d[3];Ray(o,y,pp,e,d);},&wy,&wp);
+            yaw=WrapPi(yaw+Pull(yaw,wy,10.0f,3.0f,kDt));
+            pitch+=Pull(pitch,wp,10.0f,3.0f,kDt);
+            if(i*kDt>0.6f)worst=std::fmax(worst,OffCentre(o,yaw,pitch,at));
+        }
+        return worst;
+    };
+    float start[3];
+    const float cross[3]={-60.0f,0.0f,0.0f},still[3]={0.0f,0.0f,0.0f};
+    Beside(o,0.0f,0.0f,150.0f,start);
+    float worst=follow(start,cross,3.0f);   // 60 m/s across, 150 m out: about 20 deg/s
+    Check(worst<2.0f*kDeg,"the lock keeps a fast crossing enemy on the reticle",worst/kDeg);
+    Beside(o,24.0f,8.0f,200.0f,start);
+    worst=follow(start,still,2.0f);
+    Check(worst<0.3f*kDeg,"the lock brings an enemy 24 deg off onto the reticle",worst/kDeg);
+}
+
 void Flights() {
     float start[3];
     const float o[3]={0.0f,0.0f,0.0f},still[3]={0.0f,0.0f,0.0f},cross[3]={-20.0f,0.0f,0.0f};
@@ -173,6 +221,8 @@ int main() {
     CrowdsAndCover();
     Solves();
     Pulls();
+    Switches();
+    LockPulls();
     Flights();
     if(failures){std::printf("sazabi_assist_check: %d failed\n",failures);return 1;}
     std::printf("sazabi_assist_check: all passed\n");

@@ -119,6 +119,41 @@ int main() {
     Check(!assisted.arms.hasAssist,"disabling assistance releases the held target");
     config.sazabiAimAssist=true;Assist(assisted,assistVehicle,1.0f/60.0f);DropArms(assisted);
     Check(!assisted.arms.hasAssist && !assisted.arms.assistObj,"leaving clears the previous pilot's held target");
+    // The hard lock must survive crowded scenes, and switching must rank on the requested side rather than keeping
+    // the first registry points (or only those nearest the centre on the wrong side).
+    assistSeat[kSeatPad]=1;Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
+    Controls lockControls{};LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(assisted.arms.lockOn && assisted.arms.lockOnObj==&objects[kMostTargets],
+          "hard lock acquisition finds the late central enemy in a crowd");
+    Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(assisted.arms.lockOn && assisted.arms.hasAssist && assisted.arms.assistObj==&objects[kMostTargets],
+          "hard lock retention only gathers its held enemy beyond a full registry buffer");
+    assisted.heading=assisted.aimPitch=0;
+    ViewRay(ViewOf(assisted),assisted.root+12,eye,dir);
+    visibleCount=kMostTargets+2;
+    for(int i=0;i<visibleCount;++i) {
+        visibleObjects[i]=&objects[i];
+        const float angle=(i==kMostTargets ? 0.0f : i==kMostTargets+1 ? 20.0f : -5.0f)*sazabi::kDeg;
+        visiblePositions[i][0]=eye[0]+300*std::sin(angle);visiblePositions[i][1]=eye[1];
+        visiblePositions[i][2]=eye[2]+300*std::cos(angle);
+    }
+    std::memcpy(assisted.arms.assist,visiblePositions[kMostTargets],12);
+    assisted.arms.flickCool=0;Put<std::uint16_t>(assistSeat,kSeatButtons,0);
+    lockControls.turn=20;lockControls.pitch=0.1f;
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(assisted.arms.lockOnObj==&objects[kMostTargets+1],"flick finds the next enemy despite a crowd on the wrong side");
+    Check(lockControls.turn==0 && lockControls.pitch==0,"hard lock consumes view input for target switching");
+    testMapHit=1;Assist(assisted,assistVehicle,2.0f);
+    Check(!assisted.arms.lockOn && !assisted.arms.hasAssist,"hard lock releases after sustained map occlusion");
+    testMapHit=-1;assisted.arms.lockOn=true;assisted.arms.lockOnObj=&objects[0];visibleCount=0;
+    Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn,"hard lock releases a deleted enemy");
+    assisted.arms.lockOn=true;assisted.arms.lockOnObj=&objects[0];
+    assisted.arms.lockKeyHeld=false;Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
+    lockControls.turn=1;LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(!assisted.arms.lockOn && lockControls.turn==1,"pressing the lock key again restores manual view input");
+    DropArms(assisted);
+    Check(!assisted.arms.lockKeyHeld && assisted.arms.flickCool==0,"leaving clears hard-lock input latches");
     config=Config{};visibleCount=0;
 
     // Real Pose writes and BoneAt/DockPoint reads, interleaved across two different rigs/poses.

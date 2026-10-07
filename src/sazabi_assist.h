@@ -7,6 +7,8 @@
 //  - Pull: the heading and the aim's pitch eased toward where they would put the picked point at the screen's centre,
 //    a share `gain` a second of what is left (exponential), at most `most` rad/s: a pad's lock-on feel; the player's own
 //    turn still wins (at the cone's edge the pull is a few deg/s, the stick's full turn 110 deg/s).
+//  - The lock-on (the user: 「只狼什么的也会拉镜头吧，按下锁定以后」): its key held enemy picked as Pick does, pulled onto
+//    hard (the same Pull, a stronger gain) on the mouse as on a pad; a flick of the stick or the mouse switches (Switch).
 #pragma once
 #include <cmath>
 #include <cstddef>
@@ -52,6 +54,10 @@ struct Candidates {
         const float angle=Angle(dir,eye,point.at,&dist);
         const bool holding=held && point.obj==held;
         if(!std::isfinite(angle) || !std::isfinite(dist) || angle>(holding ? keep : cone) || dist>range)return;
+        Insert(point,angle,held);
+    }
+    void Insert(const Point& point,float angle,const void* held) noexcept {
+        const bool holding=held && point.obj==held;
         int at=0;
         while(at<n) {
             const bool otherHeld=held && pts[at].obj==held;
@@ -92,6 +98,27 @@ inline float WrapPi(float a) noexcept {
     while(a>kPi)a-=2.0f*kPi;
     while(a<-kPi)a+=2.0f*kPi;
     return a;
+}
+
+// The lock-on's switch (the right stick / the mouse flicked while locked, as Sekiro's): of the other enemies' points
+// within `range` and `most` rad of the view's heading `yaw`, the next one round from the locked point `from` the way
+// the flick turned (`turn` > 0: the heading's way up, its left; < 0 its right: the yaw of a point is atan2(x, z) from
+// the eye, as the heading's). The point picked, or -1 (none that way).
+inline int Switch(const float* eye,float yaw,const float* from,const Point* pts,int n,const void* held,float turn,float range,
+                  float most) noexcept {
+    const float base=std::atan2(from[0]-eye[0],from[2]-eye[2]);
+    int best=-1;
+    float bestStep=1e9f;
+    for(int i=0;i<n;++i) {
+        if(pts[i].obj==held)continue;
+        const float d[3]={pts[i].at[0]-eye[0],pts[i].at[1]-eye[1],pts[i].at[2]-eye[2]};
+        if(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)continue;
+        const float y=std::atan2(d[0],d[2]);
+        if(std::fabs(WrapPi(y-yaw))>most)continue;
+        const float step=WrapPi(y-base)*(turn>0.0f ? 1.0f : -1.0f);
+        if(step>1e-3f && step<bestStep){best=i;bestStep=step;}
+    }
+    return best;
 }
 
 // One frame's pull of `now` toward `want` (rad): `gain` 1/s of what is left, at most `most` rad/s. The change.
