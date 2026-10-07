@@ -68,6 +68,8 @@ void ResetMapCommands() noexcept;   // map.cpp ResetMap: a new mission (the sele
 void MapCommandView(const float* viewProj,float width,float height) noexcept;
 // The left drag is the box's, not the map's pan (Ctrl held when it began): map.cpp Steer leaves the ground alone.
 bool MapCommandBoxing() noexcept;
+// map.cpp Close: discard hover, pending presses and the rendered view immediately, preserving selected units.
+void SuspendMapCommands() noexcept;
 // The mark key (NpcMarkKey) pressed with the pointer on an enemy marks it instead of what the map does with that key (Q: the
 // camera's turn left): map.cpp Steer asks every frame before it reads its keys (`front`: the game window in front). True
 // while that press lasts; the enemy is the one under the pointer when it began (MapCommandFrame marks that one). Game

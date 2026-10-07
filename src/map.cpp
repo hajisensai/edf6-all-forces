@@ -493,6 +493,7 @@ void Close(const char* why) noexcept {
     if(game.draining){game.draining=false;holds.store(false);}
     if(!game.open)return;
     game.open=false;
+    SuspendMapCommands();
     holds.store(false);
     AcquireSRWLockExclusive(&lock);
     pose.open=false;readoutAt=0;

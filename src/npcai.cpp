@@ -22,6 +22,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "npc_logic.h"
+#include "npc_mark.h"
 #include "online_authority.h"
 #include "vhud.h"
 #include <cmath>
@@ -195,22 +196,16 @@ SRWLOCK markLock=SRWLOCK_INIT;
 constexpr float kMarkFar=2000.0f;   // m: no mark past this, no point past this
 constexpr float kPointClear=3.0f;   // the point needs no enemy within this many times NpcMarkCone of the centre
 constexpr ULONGLONG kPingMs=3000;   // wall ms a point's ring and its result are shown
-constexpr std::size_t kObjFlags=0x18;   // GameObjectBase flags: kObjDeleted once the object is removed (jet_internal.h)
-constexpr unsigned char kObjDeleted=4;
 
 const Enemy* MarkedEnemy() noexcept {
-    if(!mark.obj)return nullptr;
+    if(!npcmark::Alive(mark.obj))return nullptr;
     for(int i=0;i<world.enemies;++i)if(mark.obj.Is(world.enemy[i].object))return &world.enemy[i];
     return nullptr;
 }
 
 // The marked object still the one marked and in the game (jet.cpp Alive) and alive.
 bool MarkAlive() noexcept {
-    const ObjRef& r=mark.obj;
-    if(!r.obj || !r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return false;
-    const auto o=static_cast<const unsigned char*>(r.obj);
-    if(!Readable(o,kSelfCtrl+sizeof(void*)) || !Readable(o,kDead+1))return false;
-    return At<const void*>(o,kSelfCtrl)==r.ctrl && !(o[kObjFlags]&kObjDeleted) && !o[kDead];
+    return npcmark::Alive(mark.obj);
 }
 
 // Where the marked enemy's lock point is now (lockable or not); where it was when it has none.
@@ -221,7 +216,7 @@ void SeeMarked(void* ctx,const void* object,const float* aim) {
 }
 
 void Mark(const void* object,const float* at) noexcept {
-    mark.obj=ObjRef::Of(object);
+    npcmark::Assign(mark.obj,npcmark::Capture(object));
     if(at)std::memcpy(mark.at,at,12);
 }
 
@@ -264,7 +259,7 @@ void ToggleMark(std::int32_t team) noexcept {
         return;
     }
     const bool same=mark.obj.Is(a.best);
-    if(same)mark.obj=ObjRef{};
+    if(same)npcmark::Assign(mark.obj,{});
     else Mark(a.best,a.at);
     Log("NPCAI mark: %s",same ? "let go" : "an enemy marked");
 }
@@ -272,10 +267,11 @@ void ToggleMark(std::int32_t team) noexcept {
 // The mark kept while its enemy is in the game, at its lock point; published for the HUD.
 void KeepMark() noexcept {
     if(MarkAlive()){LastSeen l{&mark.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
-    else if(mark.obj){mark.obj=ObjRef{};Log("NPCAI mark: the marked enemy is dead or gone");}
+    else if(mark.obj){npcmark::Assign(mark.obj,{});Log("NPCAI mark: the marked enemy is dead or gone");}
     AcquireSRWLockExclusive(&markLock);
-    markPub.on=static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    markPub.on=npcmark::Enabled() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
     markPub.ping=ping;
+    if(!npcmark::Enabled())markPub.ping.on=false;
     ReleaseSRWLockExclusive(&markLock);
 }
 
@@ -1048,7 +1044,8 @@ void ResetNpcAi() noexcept {
     for(auto& q:squads)q=Squad{};
     cooldowns=npc::Cooldowns<kMaxSquads>{};
     dismissedCount=0;
-    mark=MarkState{};ping=NpcPing{};
+    npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};
+    AcquireSRWLockExclusive(&markLock);markPub=MarkPub{};ReleaseSRWLockExclusive(&markLock);
     world=World{};
     fullLoggedAt=listLoggedAt=0;
 }
@@ -1349,12 +1346,12 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     }
 }
 
-bool NpcMarked() noexcept { return mark.obj.obj!=nullptr; }
+bool NpcMarked() noexcept { return npcmark::Enabled() && MarkAlive(); }
 
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
-    if(!object)return false;
+    if(!npcmark::Enabled() || !npcmark::Capture(object))return false;
     const bool same=mark.obj.Is(object);
-    if(toggle && same){mark.obj=ObjRef{};Log("NPCAI mark: let go (the map)");return false;}
+    if(toggle && same){npcmark::Assign(mark.obj,{});Log("NPCAI mark: let go (the map)");return false;}
     if(!same)Log("NPCAI mark: an enemy marked (the map)");
     Mark(object,at);
     return true;

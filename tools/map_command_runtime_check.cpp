@@ -57,7 +57,8 @@ bool NpcMarkEnemy(const void* object,const float*,bool toggle) noexcept {
     return true;
 }
 PlayerFix player{};
-const Config& Cfg() noexcept { static const Config c{};return c; }   // NpcMarkKey 'Q'
+Config config{};
+const Config& Cfg() noexcept { return config; }   // NpcMarkKey 'Q'
 namespace {
 int failures=0,cases=0;
 void Check(bool ok,const char* what) noexcept {
@@ -145,18 +146,21 @@ void PointerAndInput() noexcept {
 void MarkFromMap() noexcept {
     ResetMapCommands();view=View{};marked=nullptr;markCalls=0;squadOn=false;squadOrders=0;
     const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};   // world (x, y) in [-1, 1] across the screen
-    const char foe=0;
-    stubEnemies[0]=StubEnemy{&foe,{0.0f,0.0f,0.5f}};stubEnemyCount=1;   // under the centred pointer
+    unsigned char foe[0x400]{},foeCtrl[0x10]{};
+    Put<void*>(foe,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
+    stubEnemies[0]=StubEnemy{foe,{0.0f,0.0f,0.5f}};stubEnemyCount=1;   // under the centred pointer
     MapCmdInput in{};in.front=true;in.eye[1]=100.0f;
     float centre[3]{};
     MapCommandView(vp,1280,720);
     MapCommandFrame(in,centre);   // opened: the pointer at the centre, on the enemy
     MapCommandReadout r{};
     Check(PlayerMapCommands(&r) && r.hover,"an enemy under the pointer is shown as such");
+    Check(At<long>(foeCtrl,0xC)==2,"hover pins the enemy's control block without keeping the enemy alive");
     inputstub::keys['Q']=true;
     Check(MapCommandEats(true),"Q on an enemy is not the map's turn");
+    Check(At<long>(foeCtrl,0xC)==3,"the pending press holds its own identity token");
     MapCommandFrame(in,centre);
-    Check(marked==&foe && markCalls==1,"Q on an enemy marks it");
+    Check(marked==foe && markCalls==1,"Q on an enemy marks it");
     Check(MapCommandEats(true),"the press held: still not the map's");
     MapCommandFrame(in,centre);
     Check(markCalls==1,"Q held: marked once");
@@ -182,14 +186,82 @@ void MarkFromMap() noexcept {
     // H on the enemy: marked and the squad focuses on it in one press.
     in.mouse=true;in.dx=-300.0f;MapCommandFrame(in,centre);in.mouse=false;in.dx=0.0f;
     inputstub::keys['H']=true;MapCommandFrame(in,centre);inputstub::keys['H']=false;MapCommandFrame(in,centre);
-    Check(marked==&foe && squadOrders==1 && squadGot.order==Order::focus,"H on an enemy marks it and the squad focuses on it");
+    Check(marked==foe && squadOrders==1 && squadGot.order==Order::focus,"H on an enemy marks it and the squad focuses on it");
     // On foot: the point goes to the selection kept from the map.
     const float at[3]={50.0f,2.0f,-80.0f};
     Check(MapCommandGuardAt(at)==1 && squadOrders==2 && squadGot.order==Order::guard && squadGot.at[0]==50.0f &&
           squadGot.at[2]==-80.0f,"the mark key's point: the selected squad guards it");
     game.sel.Clear();
     Check(MapCommandGuardAt(at)==-1 && squadOrders==2,"the mark key's point with nothing selected: no order");
-    squadOn=false;stubEnemyCount=0;
+    squadOn=false;stubEnemyCount=0;ResetMapCommands();
+    Check(At<long>(foeCtrl,0xC)==1,"map reset balances both hover and press weak references");
+}
+
+void MarkLifetimeAndConfig() noexcept {
+    auto* foe=static_cast<unsigned char*>(VirtualAlloc(nullptr,4096,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    Check(foe!=nullptr,"allocate a hover target");
+    if(!foe)return;
+    unsigned char control[0x10]{},replacement[0x10]{};
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    MapCmdInput in{};in.front=true;in.eye[1]=100.0f;
+    float centre[3]{};
+    for(int scenario=0;scenario<8;++scenario) {
+        ResetMapCommands();view=View{};config=Config{};marked=nullptr;markCalls=0;
+        std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+        std::memset(foe,0,4096);Put<void*>(foe,kSelfCtrl,control);Put<long>(control,8,1);Put<long>(replacement,8,1);
+        Put<long>(control,0xC,1);Put<long>(replacement,0xC,1);
+        stubEnemies[0]=StubEnemy{foe,{0,0,0.5f}};stubEnemyCount=1;
+        MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+        // The captured pointer predates the next update. Removal, identity reuse and toggling settings all fit in one frame.
+        DWORD protect=0;
+        if(scenario==0)Put<void*>(foe,kSelfCtrl,replacement);
+        if(scenario==1)foe[kDead]=1;
+        if(scenario==2)foe[0x18]=4;
+        if(scenario==3)Put<long>(control,8,0);
+        if(scenario==4)Check(VirtualProtect(foe,4096,PAGE_NOACCESS,&protect)!=FALSE,"protect a removed hover target");
+        if(scenario==5)config.customNpcAi=false;
+        if(scenario==6)config.enabled=false;
+        if(scenario==7) {
+            game.sel.Add(squadObj);
+            SuspendMapCommands();
+            Check(game.sel.Has(squadObj),"closing the map preserves the selected units");
+            MapCommandReadout read{};
+            Check(!PlayerMapCommands(&read) && !view.at,"closing discards its readout and previous view immediately");
+        }
+        stubEnemyCount=0;
+        inputstub::keys['Q']=true;
+        Check(!MapCommandEats(true),"invalid or disabled hover cannot swallow the camera key");
+        MapCommandFrame(in,centre);
+        Check(markCalls==0 && !marked,"invalid or disabled hover cannot mark a replacement or removed enemy");
+        Check(At<long>(control,0xC)==1,"discarded hover releases its original control block");
+        if(scenario==4){DWORD ignored=0;VirtualProtect(foe,4096,protect,&ignored);}
+    }
+    // Revalidate after the press was latched too: the target can disappear before dispatch in this frame.
+    ResetMapCommands();view=View{};config=Config{};marked=nullptr;markCalls=0;
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    Put<void*>(foe,kSelfCtrl,control);Put<long>(control,8,1);Put<long>(control,0xC,1);
+    stubEnemies[0]=StubEnemy{foe,{0,0,0.5f}};stubEnemyCount=1;
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    inputstub::keys['Q']=true;Check(MapCommandEats(true),"live target press is latched");
+    Put<void*>(foe,kSelfCtrl,replacement);stubEnemyCount=0;
+    MapCommandFrame(in,centre);
+    Check(!markCalls,"replacement after latching is not marked");
+
+    // With NPC AI off, even a current registry entry must not be offered as Q/H's target.
+    for(bool disabled:{false,true}) {
+        ResetMapCommands();view=View{};config=Config{};marked=nullptr;markCalls=0;
+        std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+        config.customNpcAi=!disabled;config.enabled=disabled;
+        stubEnemyCount=1;
+        MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+        inputstub::keys['Q']=true;inputstub::keys['H']=true;
+        Check(!MapCommandEats(true),"disabled NPC marking does not consume its camera key");
+        MapCommandFrame(in,centre);
+        MapCommandReadout read{};
+        Check(PlayerMapCommands(&read) && !read.hover && !markCalls,"disabled marking exposes no target or action");
+    }
+    config=Config{};std::memset(inputstub::keys,0,sizeof(inputstub::keys));stubEnemyCount=0;ResetMapCommands();
+    VirtualFree(foe,0,MEM_RELEASE);
 }
 void CameraIsolation() noexcept {
     maphud::Record r{};int first=0,second=0;unsigned char shown=1;
@@ -203,7 +275,7 @@ void CameraIsolation() noexcept {
 }  // namespace
 }  // namespace crew
 int main() {
-    crew::UnitLifetime();crew::PointerAndInput();crew::MarkFromMap();crew::CameraIsolation();
+    crew::UnitLifetime();crew::PointerAndInput();crew::MarkFromMap();crew::MarkLifetimeAndConfig();crew::CameraIsolation();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

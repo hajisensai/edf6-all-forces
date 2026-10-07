@@ -25,6 +25,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "map_cam.h"
+#include "npc_mark.h"
 #include <Xinput.h>
 #include <algorithm>
 #include <atomic>
@@ -63,10 +64,10 @@ struct Game {
     float bx,by,moved;
     wchar_t note[80];
     ULONGLONG noteAt;
-    const void* hover;          // the enemy under the pointer this frame (nullptr: none), its lock point
+    ObjRef hover;               // original identity under the pointer; never recaptured from a cached address
     float hoverAt[3];
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
-    const void* eatHover;       // ...that enemy, its lock point
+    ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
 };
 Game game{};
@@ -277,15 +278,15 @@ void SeeEnemyMark(void* ctx,const void* object,const float* aim) {
 }
 // The enemy under the pointer (with a pad: the screen's centre), within the click's radius of one of its marks.
 void Hover(Game& g,const MapCmdInput& in,const View* v) noexcept {
-    g.hover=nullptr;
-    if(!v)return;
+    npcmark::Assign(g.hover,{});
+    if(!v || !npcmark::Enabled())return;
     EnemyMarks& e=enemyMarks;
     e.v=v;e.pin=PinOf(in);e.n=0;
     VisitEnemiesOf(player.team,&SeeEnemyMark,&e);
     const float x=in.usingPad ? v->w*0.5f : g.pointer.x,y=in.usingPad ? v->h*0.5f : g.pointer.y;
     const int i=mapcmd::Nearest(e.m,e.n,x,y,kClickRadius*v->h/1080.0f);
     if(i<0)return;
-    g.hover=e.m[i].id;
+    npcmark::Assign(g.hover,npcmark::Capture(e.m[i].id));
     std::memcpy(g.hoverAt,e.at[i],12);
 }
 
@@ -341,7 +342,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.squads=squads;
     std::memcpy(r.squad,rows,sizeof(rows));
     for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
-    r.hover=g.hover!=nullptr;
+    r.hover=static_cast<bool>(g.hover);
     std::memcpy(r.hoverAt,g.hoverAt,12);
     std::memcpy(r.note,g.note,sizeof(r.note));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
@@ -362,7 +363,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
     if(now-g.frameAt>kFreshMs) {
-        g.was=k;g.boxing=g.pressing=false;g.hover=nullptr;
+        g.was=k;g.boxing=g.pressing=false;npcmark::Assign(g.hover,{});
         g.pointer=mapcmd::PointerPosition{};
     }
     g.frameAt=now;
@@ -406,8 +407,9 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     using hudtext::Tr;
     using hudtext::Tx;
     // The enemy under the pointer: the mark key marks it (or lets it go), the focus order marks it first.
-    if(markPress && g.eat)Note(g,L"%ls",Tr(NpcMarkEnemy(g.eatHover,g.eatAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
-    if(p.focus && g.hover && allowed && g.sel.n)NpcMarkEnemy(g.hover,g.hoverAt,false);
+    if(markPress && g.eat && npcmark::Enabled() && npcmark::Alive(g.eatHover))
+        Note(g,L"%ls",Tr(NpcMarkEnemy(g.eatHover.obj,g.eatAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
+    if(p.focus && npcmark::Alive(g.hover) && allowed && g.sel.n)NpcMarkEnemy(g.hover.obj,g.hoverAt,false);
     const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     if(s.why==mapcmd::Refusal::online)Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));
     else if(s.why==mapcmd::Refusal::noUnit && g.count)Note(g,Tr(Tx::cmdSelectFirst),in.usingPad ? L"X" : Tr(Tx::cmdSelectHowMouse));
@@ -434,6 +436,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
 }
 
 void ResetMapCommands() noexcept {
+    npcmark::Assign(game.hover,{});npcmark::Assign(game.eatHover,{});
     game=Game{};
     boxingNow.store(false);
     AcquireSRWLockExclusive(&lock);
@@ -449,15 +452,25 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept {
 
 bool MapCommandBoxing() noexcept { return boxingNow.load(); }
 
+void SuspendMapCommands() noexcept {
+    // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
+    Game& g=game;
+    npcmark::Assign(g.hover,{});npcmark::Assign(g.eatHover,{});
+    g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=false;
+    boxingNow.store(false);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
+}
+
 bool MapCommandEats(bool front) noexcept {
     Game& g=game;
-    if(GetTickCount64()-g.frameAt>kFreshMs)g.hover=nullptr;   // the map just opened: last time's enemy is no pointer's
+    if(GetTickCount64()-g.frameAt>kFreshMs)npcmark::Assign(g.hover,{});
     const int vk=Cfg().npcMarkKey;
     const bool down=front && vk>0 && Down(vk);
-    if(!down)g.eat=false;
+    if(!down || !npcmark::Enabled()){g.eat=false;npcmark::Assign(g.eatHover,{});}
     else if(!g.eatWas) {   // the press begins: the pointer's enemy of the last frame (Steer reads before the frame)
-        g.eat=g.hover!=nullptr;
-        g.eatHover=g.hover;
+        g.eat=npcmark::Alive(g.hover);
+        npcmark::Assign(g.eatHover,g.eat ? g.hover : ObjRef{});
         std::memcpy(g.eatAt,g.hoverAt,12);
     }
     g.eatWas=down;
