@@ -3,6 +3,7 @@
 #pragma once
 #include <Windows.h>
 #include <cstdint>
+#include "gunsight.h"
 #include "roundaim.h"
 
 namespace crew {
@@ -63,6 +64,7 @@ struct StockArm {
     float bore[3],at[3],lead[3],range,flight;   // range: to the map hit / the target (0: neither, only the boresight)
     int lock;                    // homing: 2 locked / 1 locking (lockProgress) on `at`, 0 none (LockonRange `range`)
     float lockProgress;
+    gunsight::Ladder ladder;     // a direct-fire arc gun's range ladder (gunsight.h; no ticks: none), hud.cpp GunReticle
 };
 struct StockHudReadout {
     char kind[16];
@@ -72,6 +74,7 @@ struct StockHudReadout {
     bool aimOk,lookOk;
     float speed;                 // m/s, level (its own position's change)
     float hp,hpMax;
+    float zoom;                  // the sight's magnification (sightzoom.cpp SightZoomNow: 1 none)
     int stab;                    // the seat's gun stabilizer (stab.cpp StabState): 1 holding, 2 outrun by the hull, 0 none
     FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
     int arms,selected;           // selected: SetStockSelectedStore's (-1 none)
