@@ -42,6 +42,9 @@ def main() -> int:
     if not compiler:
         raise RuntimeError('MSVC environment did not provide cl.exe')
     controls = [
+        ('cooling-enemies-starve-batch', 'src/playerjet.cpp',
+         'if(ram::CooldownSlot(sc.hits,kEnemyRamHits,sc.ms,kEnemyRamGapMs,[object](const ObjRef& t){return t.Is(object);})<0)return;',
+         '(void)sc.hits;(void)sc.ms;'),
         ('one-second-player-lead', 'src/pjet_catch.h',
          'const float relative=playerVelocity[i]-bodyVelocity[i]-spin[i];',
          '(void)bodyVelocity;(void)dt;const float relative=playerVelocity[i]/dt;'),

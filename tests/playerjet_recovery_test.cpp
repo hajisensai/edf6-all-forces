@@ -19,6 +19,11 @@ bool testGearDown=true,testDoor=true;
 float doorOffset[3]={8.65f,-1.38f,1.8f};
 int boardPresses=0;
 unsigned char recoveryBone[0x200]{};
+bool ramScenario=false,ramDeathWorks=true;
+int ramEnemyCount=0,ramBlasts=0,ramDeaths=0,ramVisits=0;
+float ramDamage=0.0f;
+alignas(16) unsigned char ramEnemies[20][0x200]{};
+const JetMass ramMass{7201.0f,16000.0f,1000.0f};
 const Config& Cfg() noexcept { return recoveryConfig; }
 ULONGLONG GameMs() noexcept { return recoveryTime; }
 ULONGLONG GameFrame() noexcept { return recoveryTime/16; }
@@ -48,10 +53,10 @@ void MissingRecoveryDependency() noexcept { void(*volatile stop)()=std::abort;st
 int ReadStores(unsigned char*,Store*,int) noexcept { MissingRecoveryDependency();return 0; }
 void TriggerStore(const Store&) noexcept { MissingRecoveryDependency(); }
 Burden BurdenOf(float,const Store*,int) noexcept { MissingRecoveryDependency();return Burden{1.0f,0.0f}; }
-const JetMass* JetMassOf(float) noexcept { MissingRecoveryDependency();return nullptr; }
+const JetMass* JetMassOf(float) noexcept { if(!ramScenario)MissingRecoveryDependency();return &ramMass; }
 bool IsStoreWeapon(const unsigned char*) noexcept { MissingRecoveryDependency();return false; }
 void LevelVehicle(unsigned char*) noexcept { MissingRecoveryDependency(); }
-void LogImpact(const char*,const void*,const float*,const float*) noexcept { MissingRecoveryDependency(); }
+void LogImpact(const char*,const void*,const float*,const float*) noexcept { if(!ramScenario)MissingRecoveryDependency(); }
 bool LastViewProj(float*) noexcept { MissingRecoveryDependency();return false; }
 bool CameraRay(float*,float*) noexcept { MissingRecoveryDependency();return false; }
 void SetObjectTeam(unsigned char*,std::int32_t) noexcept { MissingRecoveryDependency(); }
@@ -59,10 +64,18 @@ float ShieldBlock(const unsigned char*,float*) noexcept { MissingRecoveryDepende
 bool JetMotionProps(void*) noexcept { MissingRecoveryDependency();return false; }
 JetBody BomberBody(const unsigned char*) noexcept { MissingRecoveryDependency();return JetBody{}; }
 PluginBody BodyOf(const void*) noexcept { MissingRecoveryDependency();return PluginBody{}; }
-float BodyMark(const void*) noexcept { MissingRecoveryDependency();return 0.0f; }
+float BodyMark(const void*) noexcept { if(!ramScenario)MissingRecoveryDependency();return ramMass.mark; }
 bool Body506Ok() noexcept { MissingRecoveryDependency();return false; }
-bool ImpactDamage(const unsigned char*,const float*,float,float) noexcept { MissingRecoveryDependency();return false; }
-bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { MissingRecoveryDependency();return false; }
+bool ImpactDamage(const unsigned char*,const float*,float damage,float) noexcept {
+    if(!ramScenario)MissingRecoveryDependency();
+    ++ramBlasts;ramDamage=damage;return true;
+}
+bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
+    if(!ramScenario)MissingRecoveryDependency();
+    ++ramVisits;
+    for(int i=0;i<ramEnemyCount;++i)visit(ctx,ramEnemies[i],reinterpret_cast<const float*>(ramEnemies[i]+kPosition));
+    return true;
+}
 bool RoundImpact(const float*,const float*,const float*,int,float*,float*) noexcept { MissingRecoveryDependency();return false; }
 bool MissileHoming(const float*,float) noexcept { MissingRecoveryDependency();return false; }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
@@ -77,7 +90,10 @@ bool FixBodyPart506(unsigned char*,const char*) noexcept { MissingRecoveryDepend
 bool BodyPartOk() noexcept { MissingRecoveryDependency();return false; }
 void HingePose(const float*,float,float*) noexcept { MissingRecoveryDependency(); }
 bool Body506MessageOk() noexcept { MissingRecoveryDependency();return false; }
-bool Die506(unsigned char*) noexcept { MissingRecoveryDependency();return false; }
+bool Die506(unsigned char* v) noexcept {
+    if(!ramScenario)MissingRecoveryDependency();
+    ++ramDeaths;if(ramDeathWorks){v[kDead]=1;Put<float>(v,kHp,0.0f);}return ramDeathWorks;
+}
 bool Die506Ok() noexcept { MissingRecoveryDependency();return false; }
 int WeaponLock(const unsigned char*,float*,float*) noexcept { MissingRecoveryDependency();return 0; }
 void ClearWeaponLock(unsigned char*) noexcept { MissingRecoveryDependency(); }
@@ -223,6 +239,51 @@ int main() {
     const float at[3]={0,0,0},offsetDoor[3]={20,-2,0},p[3]={20,-2,0},velocity[3]={0,-6,0},spin[3]={0,0.5f,0};
     float target[3],drift[3];pjet::CatchDoor(p,velocity,at,offsetDoor,velocity,spin,1.0f/60.0f,target,drift);
     Check(std::fabs(drift[2]-10.0f)<0.001f,"door rotation is cancelled in formation translation feed-forward");
+    // Real EnemyRam and Blocked, with only enemy enumeration, native charge creation and native death replaced.
+    ramScenario=true;recoveryConfig.playerJetRamDamage=1.0f;
+    const float ramPos[3]={0,0,0};
+    auto resetRam=[&]() {
+        ResetJet(j);j.active=true;j.measured[2]=200.0f;
+        ramBlasts=ramDeaths=ramVisits=0;ramEnemyCount=1;ramDeathWorks=true;recoveryVehicle[kDead]=0;
+        Put<float>(recoveryVehicle,kHpMax,1000.0f);Put<float>(recoveryVehicle,kHp,1000.0f);
+        for(int i=0;i<20;++i) {
+            Put<const void*>(ramEnemies[i],kSelfCtrl,ramEnemies[i]);
+            Put<float>(ramEnemies[i],kPosition,0.0f);
+            Put<float>(ramEnemies[i],kPosition+4,j.kind->ram*kRamBoxHeight);
+            Put<float>(ramEnemies[i],kPosition+8,5.0f);
+        }
+    };
+    resetRam();EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(ramBlasts==1 && std::fabs(ramDamage-ram::Damage(16000.0f,200.0f,1.0f,1.0f))<0.01f,"contact uses production kinetic-energy ram damage");
+    Check(std::fabs(At<float>(recoveryVehicle,kHp)-900.0f)<0.01f,"enemy ram takes speed-scaled self damage once");
+    EnemyRam(j,recoveryVehicle,ramPos,10500);
+    Check(ramBlasts==1 && At<float>(recoveryVehicle,kHp)==900.0f,"same enemy remains throttled for a full second");
+    EnemyRam(j,recoveryVehicle,ramPos,11000);
+    Check(ramBlasts==2 && At<float>(recoveryVehicle,kHp)==800.0f,"enemy becomes eligible at cooldown boundary");
+    resetRam();Put<float>(ramEnemies[0],kPosition+8,30.0f);EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(ramBlasts==0 && At<float>(recoveryVehicle,kHp)==1000.0f,"nearby non-contact enemy cannot trigger a blast");
+    Put<float>(ramEnemies[0],kPosition+8,-5.0f);EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(ramBlasts==0,"receding enemy cannot trigger a blast");
+    resetRam();j.measured[2]=19.0f;EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(ramVisits==0 && ramBlasts==0,"slow movement does not enumerate enemies or ram");
+    resetRam();ramEnemyCount=20;EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(ramBlasts==8 && At<float>(recoveryVehicle,kHp)==900.0f,"swarm is batched and takes only one self hit");
+    EnemyRam(j,recoveryVehicle,ramPos,10016);
+    Check(ramBlasts==16 && At<float>(recoveryVehicle,kHp)==900.0f,"cooling first batch cannot starve later enemies or multiply self damage");
+    EnemyRam(j,recoveryVehicle,ramPos,10032);
+    Check(ramBlasts==16,"full cooldown table never evicts live hits");
+    resetRam();EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Put<const void*>(ramEnemies[0],kSelfCtrl,recoveryCtrl);EnemyRam(j,recoveryVehicle,ramPos,10016);
+    Check(ramBlasts==2,"reused address with a new object identity is a fresh contact");
+    resetRam();j.measured[2]=1000.0f;EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(At<float>(recoveryVehicle,kHp)==750.0f,"extreme closing speed caps self damage at a quarter of max HP");
+    resetRam();Put<float>(recoveryVehicle,kHp,50.0f);EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(ramDeaths==1 && recoveryVehicle[kDead] && !j.active,"lethal contact follows native Kill path");
+    resetRam();ramDeathWorks=false;Put<float>(recoveryVehicle,kHp,50.0f);EnemyRam(j,recoveryVehicle,ramPos,10000);
+    Check(ramDeaths==1 && !recoveryVehicle[kDead] && At<float>(recoveryVehicle,kHp)==1.0f,"unavailable native death preserves existing one-HP fallback");
+    resetRam();EnemyRam(j,recoveryVehicle,ramPos,10000);j.sent[2]=200.0f;j.measured[2]=0.0f;j.blockedSince=10000;
+    Blocked(j,recoveryVehicle,ramPos,10200);
+    Check(ramBlasts==1,"blocked recovery does not duplicate a recent enemy blast");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("playerjet_recovery: %d production-path checks passed\n",checks);
     return 0;
