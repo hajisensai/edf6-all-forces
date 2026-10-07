@@ -154,27 +154,26 @@ void MarkFromMap() noexcept {
     MapCommandReadout r{};
     Check(PlayerMapCommands(&r) && r.hover,"an enemy under the pointer is shown as such");
     inputstub::keys['Q']=true;
-    Check(MapCommandEats('Q'),"Q on an enemy is not the map's turn");
-    Check(!MapCommandEats('E'),"E stays the map's");
+    Check(MapCommandEats(true),"Q on an enemy is not the map's turn");
     MapCommandFrame(in,centre);
     Check(marked==&foe && markCalls==1,"Q on an enemy marks it");
-    Check(MapCommandEats('Q'),"the press held: still not the map's");
+    Check(MapCommandEats(true),"the press held: still not the map's");
     MapCommandFrame(in,centre);
     Check(markCalls==1,"Q held: marked once");
     inputstub::keys['Q']=false;
-    Check(!MapCommandEats('Q'),"Q let go");
+    Check(!MapCommandEats(true),"Q let go");
     MapCommandFrame(in,centre);
-    inputstub::keys['Q']=true;MapCommandEats('Q');MapCommandFrame(in,centre);
+    inputstub::keys['Q']=true;MapCommandEats(true);MapCommandFrame(in,centre);
     Check(marked==nullptr && markCalls==2,"Q again on the marked enemy lets it go");
-    inputstub::keys['Q']=false;MapCommandEats('Q');MapCommandFrame(in,centre);
+    inputstub::keys['Q']=false;MapCommandEats(true);MapCommandFrame(in,centre);
     // The pointer off the enemy: Q turns the map, marks nothing.
     in.mouse=true;in.dx=300.0f;MapCommandFrame(in,centre);in.mouse=false;in.dx=0.0f;
     Check(PlayerMapCommands(&r) && !r.hover,"the pointer off the enemy: no enemy under it");
     inputstub::keys['Q']=true;
-    Check(!MapCommandEats('Q'),"Q off an enemy turns the map");
+    Check(!MapCommandEats(true),"Q off an enemy turns the map");
     MapCommandFrame(in,centre);
     Check(markCalls==2,"Q off an enemy marks nothing");
-    inputstub::keys['Q']=false;MapCommandEats('Q');MapCommandFrame(in,centre);
+    inputstub::keys['Q']=false;MapCommandEats(true);MapCommandFrame(in,centre);
     // H with no mark and nothing under the pointer: refused, nothing marked.
     Put<void*>(squadObj,kSelfCtrl,squadCtrl);squadOn=true;
     game.sel.Clear();game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);

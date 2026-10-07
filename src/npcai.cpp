@@ -172,13 +172,18 @@ void PlayerLane(World& w) noexcept {
 
 // --- The mark (§6.3) ---
 // On foot, the map shut, the game in front: NpcMarkKey marks the enemy lock point nearest the screen's centre within
-// NpcMarkCone degrees (the same one again: the mark let go); with no enemy there it is a point instead: the units
-// selected on the map (mapcmd.cpp) guard where the centre meets the ground (MapCommandGuardAt), the mark kept. In the map
-// the key marks the enemy under the pointer (mapcmd.cpp NpcMarkEnemy). The mark is kept until that enemy dies or is gone
-// (the user, 2026-10-07: "标记效果应该先打死才换吧"): not only while it is in the frame's enemy list, which holds the
-// lockable lock points alone and drops an enemy out of sight or out of lock range for a moment. The squads told to focus
-// fire all take it while it is in that list; every other soldier takes it first when it is within its longest reach plus
-// how far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
+// NpcMarkCone degrees (the same one again: the mark let go; another: the mark moves to it). With no enemy within
+// kPointClear times that cone it is a point instead: the units selected on the map (mapcmd.cpp) guard where the centre
+// meets the ground (MapCommandGuardAt), the mark kept; between the two (a near miss) nothing is done but a word that the
+// key marks what it is aimed at. In the map the key marks the enemy under the pointer (mapcmd.cpp NpcMarkEnemy).
+// The key is read on the player's own frame (map.cpp MapHumanFrame -> NpcMarkFrame), not in a soldier's Think: the point
+// order is for any unit the map commands (helis, jets, tanks), with or without a friendly soldier in the mission.
+// The mark is kept until that enemy dies or is gone (the user, 2026-10-07: "标记效果应该先打死才换吧"): not only while its
+// lock point is lockable (the frame's enemy list holds the lockable ones alone: an enemy out of sight or out of lock range
+// for a moment dropped the mark). Gone: its control block's strong count spent, another object at its address, or the
+// object deleted (removed without dying: a script's despawn); jet.cpp Alive's test. The squads told to focus fire all
+// take it while it is in the enemy list; every other soldier takes it first when it is within its longest reach plus how
+// far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
 struct MarkState { ObjRef obj; float at[3]; bool held; };
 MarkState mark{};
 struct MarkPub { bool on; float at[3]; ULONGLONG wall; NpcPing ping; };
@@ -186,39 +191,39 @@ MarkPub markPub{};
 NpcPing ping{};
 SRWLOCK markLock=SRWLOCK_INIT;
 constexpr float kMarkFar=2000.0f;   // m: no mark past this, no point past this
+constexpr float kPointClear=3.0f;   // the point needs no enemy within this many times NpcMarkCone of the centre
 constexpr ULONGLONG kPingMs=3000;   // wall ms a point's ring and its result are shown
-
-bool KeyHeld(int vk) noexcept {
-    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
-    DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
-}
+constexpr std::size_t kObjFlags=0x18;   // GameObjectBase flags: kObjDeleted once the object is removed (jet_internal.h)
+constexpr unsigned char kObjDeleted=4;
 
 const Enemy* MarkedEnemy() noexcept {
     if(!mark.obj)return nullptr;
-    for(int i=0;i<world.enemies;++i)if(world.enemy[i].object==mark.obj.obj)return &world.enemy[i];
+    for(int i=0;i<world.enemies;++i)if(mark.obj.Is(world.enemy[i].object))return &world.enemy[i];
     return nullptr;
 }
 
-// The marked object still the one marked (not an address recycled since) and alive.
+// The marked object still the one marked and in the game (jet.cpp Alive) and alive.
 bool MarkAlive() noexcept {
-    const auto o=static_cast<const unsigned char*>(mark.obj.obj);
-    if(!o || !Readable(o,kSelfCtrl+sizeof(void*)) || !Readable(o,kDead+1))return false;
-    __try { return mark.obj.Is(o) && !o[kDead]; } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
+    const ObjRef& r=mark.obj;
+    if(!r.obj || !r.ctrl || !Readable(r.ctrl,0x10) || At<long>(r.ctrl,8)<=0)return false;
+    const auto o=static_cast<const unsigned char*>(r.obj);
+    if(!Readable(o,kSelfCtrl+sizeof(void*)) || !Readable(o,kDead+1))return false;
+    return At<const void*>(o,kSelfCtrl)==r.ctrl && !(o[kObjFlags]&kObjDeleted) && !o[kDead];
 }
 
-// Where the marked enemy is while it is not lockable: its lock point still valid in the registry, else where it was.
-struct LastSeen { const void* object; float* at; };
+// Where the marked enemy's lock point is now (lockable or not); where it was when it has none.
+struct LastSeen { const ObjRef* ref; float* at; };
 void SeeMarked(void* ctx,const void* object,const float* aim) {
     auto& l=*static_cast<LastSeen*>(ctx);
-    if(object==l.object)std::memcpy(l.at,aim,12);
+    if(object==l.ref->obj)std::memcpy(l.at,aim,12);
 }
 
 void Mark(const void* object,const float* at) noexcept {
     mark.obj=ObjRef::Of(object);
     if(at)std::memcpy(mark.at,at,12);
 }
+
+void Ping(const float* at,int given) noexcept { ping=NpcPing{true,{at[0],at[1],at[2]},given,GetTickCount64()}; }
 
 // The point under the screen's centre the selected units are sent to (no enemy near the centre).
 void SendToPoint(const float* eye,const float* dir) noexcept {
@@ -229,37 +234,42 @@ void SendToPoint(const float* eye,const float* dir) noexcept {
         return;
     }
     const int given=MapCommandGuardAt(hit);
-    ping=NpcPing{true,{hit[0],hit[1],hit[2]},given,GetTickCount64()};
+    Ping(hit,given);
     Log("NPCAI mark: no enemy near the screen's centre: the point (%.0f,%.0f,%.0f) -> %d",hit[0],hit[1],hit[2],given);
 }
 
-void ToggleMark() noexcept {
+// The enemy lock point nearest the centre's ray (the lock registry's lockable ones of the player's side's enemies).
+struct Aimed { const float* eye; const float* dir; const void* best; float off; float at[3]; };
+void SeeAimed(void* ctx,const void* object,const float* aim) {
+    auto& a=*static_cast<Aimed*>(ctx);
+    const float to[3]={aim[0]-a.eye[0],aim[1]-a.eye[1],aim[2]-a.eye[2]};
+    const float d=npc::Len(to);
+    if(d<1.0f || d>kMarkFar)return;
+    const float off=std::acos(npc::Clamp(npc::Dot(to,a.dir)/d,-1.0f,1.0f));
+    if(off<a.off){a.off=off;a.best=object;std::memcpy(a.at,aim,12);}
+}
+
+void ToggleMark(std::int32_t team) noexcept {
     float eye[3],dir[3];
     if(!CameraRay(eye,dir))return;
     const float cone=Cfg().npcMarkCone*npc::kPi/180.0f;
-    const Enemy* best=nullptr;float bestOff=cone;
-    for(int i=0;i<world.enemies;++i) {
-        const Enemy& e=world.enemy[i];
-        const float to[3]={e.aim[0]-eye[0],e.aim[1]-eye[1],e.aim[2]-eye[2]};
-        const float d=npc::Len(to);
-        if(d<1.0f || d>kMarkFar)continue;
-        const float off=std::acos(npc::Clamp(npc::Dot(to,dir)/d,-1.0f,1.0f));
-        if(off<bestOff){bestOff=off;best=&e;}
+    Aimed a{eye,dir,nullptr,cone*kPointClear,{}};
+    VisitEnemiesOf(team,&SeeAimed,&a);
+    if(!a.best){SendToPoint(eye,dir);return;}   // a miss never lets the mark go: only the same enemy again does
+    if(a.off>cone) {                             // near an enemy, not on it: neither a mark nor a point
+        Ping(a.at,kPingNearEnemy);
+        Log("NPCAI mark: an enemy %.1f deg off the centre (the mark takes %.1f): nothing done",a.off*180.0f/npc::kPi,Cfg().npcMarkCone);
+        return;
     }
-    if(!best){SendToPoint(eye,dir);return;}   // a miss never lets the mark go: only the same enemy again does
-    const bool same=mark.obj.obj==best->object;
+    const bool same=mark.obj.Is(a.best);
     if(same)mark.obj=ObjRef{};
-    else Mark(best->object,best->aim);
+    else Mark(a.best,a.at);
     Log("NPCAI mark: %s",same ? "let go" : "an enemy marked");
 }
 
-void MarkTick() noexcept {
-    unsigned char* const me=PlayerHuman();
-    const bool down=Cfg().npcMarkKey>0 && me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey);
-    if(down && !mark.held)ToggleMark();
-    mark.held=down;
-    if(const Enemy* e=MarkedEnemy())std::memcpy(mark.at,e->aim,12);
-    else if(MarkAlive()){LastSeen l{mark.obj.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
+// The mark kept while its enemy is in the game, at its lock point; published for the HUD.
+void KeepMark() noexcept {
+    if(MarkAlive()){LastSeen l{&mark.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
     else if(mark.obj){mark.obj=ObjRef{};Log("NPCAI mark: the marked enemy is dead or gone");}
     AcquireSRWLockExclusive(&markLock);
     markPub.on=static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
@@ -283,7 +293,6 @@ void Gather(std::int32_t team) noexcept {
         reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&f);
     }
     PlayerLane(w);
-    MarkTick();
 }
 
 Soldier* Entry(const unsigned char* h,ULONGLONG ms) noexcept {
@@ -1304,10 +1313,24 @@ bool NpcMarked() noexcept { return mark.obj.obj!=nullptr; }
 
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
     if(!object)return false;
-    if(toggle && mark.obj.obj==object){mark.obj=ObjRef{};Log("NPCAI mark: let go (the map)");return false;}
-    if(mark.obj.obj!=object)Log("NPCAI mark: an enemy marked (the map)");
+    const bool same=mark.obj.Is(object);
+    if(toggle && same){mark.obj=ObjRef{};Log("NPCAI mark: let go (the map)");return false;}
+    if(!same)Log("NPCAI mark: an enemy marked (the map)");
     Mark(object,at);
     return true;
+}
+
+void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
+    const Config& c=Cfg();
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (GetAsyncKeyState(c.npcMarkKey)&0x8000)!=0;
+    // Held is followed while the map holds the keys too: a press made in the map (mapcmd.cpp) and still down when it
+    // closes is not a second press on foot.
+    if(down && !mark.held && !mapOpen && !MapHoldsKeys() && c.enabled && c.customNpcAi && HumanOnFoot(human))
+        ToggleMark(At<std::int32_t>(human,kTeam));
+    mark.held=down;
+    KeepMark();
 }
 
 bool NpcMarkReadout(float* at) noexcept {

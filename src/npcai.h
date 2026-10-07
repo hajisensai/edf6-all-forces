@@ -14,11 +14,17 @@ bool IsSoldierClass(const void* human) noexcept;
 bool NpcMarked() noexcept;
 // The mark for the HUD (draw thread): where it is; false with none (or none published lately).
 bool NpcMarkReadout(float* at) noexcept;
+// The mark key on foot (marking the enemy at the screen's centre, or sending the map's selection to the ground there) and
+// the mark kept while its enemy is in the game: every frame of the local player `human` (map.cpp MapHumanFrame, game
+// thread), `mapOpen` while the map view is (the key is the map's then).
+void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept;
 // The map marks an enemy (mapcmd.cpp: the mark key or the focus order with the pointer on it; game thread): `object` an
 // enemy's, `at` its lock point. `toggle`: the one marked already is let go. True when it is marked now.
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept;
 // The mark key on foot with no enemy near the screen's centre: the point the selected units were sent to and how many took
-// it (MapCommandGuardAt's result: -1 none selected, -2 online), `wall` when (GetTickCount64).
+// it (MapCommandGuardAt's result: -1 none selected, -2 online; kPingNearEnemy: an enemy near the centre but outside the
+// mark's cone, nothing sent), `wall` when (GetTickCount64).
+constexpr int kPingNearEnemy=-3;
 struct NpcPing { bool on; float at[3]; int given; ULONGLONG wall; };
 // The last point for the HUD (draw thread): false when there is none shown now.
 bool NpcPingReadout(NpcPing* out) noexcept;

@@ -66,6 +66,8 @@ struct Game {
     const void* hover;          // the enemy under the pointer this frame (nullptr: none), its lock point
     float hoverAt[3];
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
+    const void* eatHover;       // ...that enemy, its lock point
+    float eatAt[3];
 };
 Game game{};
 std::atomic<bool> boxingNow{false};
@@ -259,7 +261,7 @@ bool TargetPoint(const Game& g,const MapCmdInput& in,const View* v,float* point)
 
 // The enemies the NPCs can be set on (the lockable lock points, as npcai.cpp's frame list) on the screen of view `v`: each
 // lock point at its point and up its pin (a large enemy's icon stands at its pin's top, a small one's dot on it).
-constexpr int kEnemyMarks=1024;
+constexpr int kEnemyMarks=4096;   // two a lock point
 struct EnemyMarks { const View* v; float pin; int n; mapcmd::Mark m[kEnemyMarks]; float at[kEnemyMarks][3]; };
 EnemyMarks enemyMarks{};   // the game thread's (too big for its stack)
 void SeeEnemyMark(void* ctx,const void* object,const float* aim) {
@@ -404,7 +406,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     using hudtext::Tr;
     using hudtext::Tx;
     // The enemy under the pointer: the mark key marks it (or lets it go), the focus order marks it first.
-    if(markPress && g.hover)Note(g,L"%ls",Tr(NpcMarkEnemy(g.hover,g.hoverAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
+    if(markPress && g.eat)Note(g,L"%ls",Tr(NpcMarkEnemy(g.eatHover,g.eatAt,true) ? Tx::cmdMarked : Tx::cmdUnmarked));
     if(p.focus && g.hover && allowed && g.sel.n)NpcMarkEnemy(g.hover,g.hoverAt,false);
     const mapcmd::Step s=mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked());
     if(s.why==mapcmd::Refusal::online)Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));
@@ -447,13 +449,17 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept {
 
 bool MapCommandBoxing() noexcept { return boxingNow.load(); }
 
-bool MapCommandEats(int vk) noexcept {
+bool MapCommandEats(bool front) noexcept {
     Game& g=game;
-    if(vk<=0 || vk!=Cfg().npcMarkKey)return false;
     if(GetTickCount64()-g.frameAt>kFreshMs)g.hover=nullptr;   // the map just opened: last time's enemy is no pointer's
-    const bool down=Down(vk);
+    const int vk=Cfg().npcMarkKey;
+    const bool down=front && vk>0 && Down(vk);
     if(!down)g.eat=false;
-    else if(!g.eatWas)g.eat=g.hover!=nullptr;   // the pointer's enemy of the last frame (Steer reads before the frame)
+    else if(!g.eatWas) {   // the press begins: the pointer's enemy of the last frame (Steer reads before the frame)
+        g.eat=g.hover!=nullptr;
+        g.eatHover=g.hover;
+        std::memcpy(g.eatAt,g.hoverAt,12);
+    }
     g.eatWas=down;
     return g.eat;
 }

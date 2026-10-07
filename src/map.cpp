@@ -525,12 +525,13 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
     mapcam::View& v=game.view;
     float ahead=0.0f,right=0.0f,turn=0.0f,tilt=0.0f,zoom=0.0f;
     bool keys=false;
+    // The mark key pressed with the pointer on an enemy marks it (mapcmd.cpp), the map does not turn with it. Asked every
+    // frame, in front or not: a release ends the press.
+    const bool eat=MapCommandEats(front);
     if(front) {
         ahead=static_cast<float>((Down('W') || Down(VK_UP))-(Down('S') || Down(VK_DOWN)));
         right=static_cast<float>((Down('D') || Down(VK_RIGHT))-(Down('A') || Down(VK_LEFT)));
-        // The mark key pressed with the pointer on an enemy marks it (mapcmd.cpp), the map does not turn with it.
-        const bool eatE=MapCommandEats('E'),eatQ=MapCommandEats('Q');   // asked every frame: a release ends the press
-        const bool turnRight=Down('E') && !eatE,turnLeft=Down('Q') && !eatQ;
+        const bool turnRight=Down('E') && !(eat && Cfg().npcMarkKey=='E'),turnLeft=Down('Q') && !(eat && Cfg().npcMarkKey=='Q');
         turn=static_cast<float>(static_cast<int>(turnRight)-static_cast<int>(turnLeft))*mapcam::kTurnRate*dt;
         tilt=static_cast<float>(Down('R')-Down('F'))*mapcam::kTurnRate*0.5f*dt;
         zoom=static_cast<float>((Down(VK_OEM_PLUS) || Down(VK_ADD) || Down(VK_PRIOR))-(Down(VK_OEM_MINUS) || Down(VK_SUBTRACT) || Down(VK_NEXT)));
@@ -662,6 +663,7 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
         const bool open=Frame(human);
+        NpcMarkFrame(human,open && game.open);
         return TvFrame(human,open && game.open,TvRead(human)) || open;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
