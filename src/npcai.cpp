@@ -1143,11 +1143,12 @@ void MarchRoster(ULONGLONG ms) noexcept {
     for(const Squad& q:squads) {
         if(!Live(q,ms) || q.control!=npc::Control::recruited || q.cmd.order!=Order::none)continue;
         auto top=static_cast<unsigned char*>(const_cast<void*>(q.top.obj));
-        if(RootLeader(top)!=me)continue;
+        if(!q.top.Is(top) || top[kDead] || TopNpc(top)!=top || RootLeader(top)!=me)continue;
         unsigned char* m[kMaxSquad];
         const int k=Members(top,m,kMaxSquad);
         for(int i=0;i<k && march.n<static_cast<int>(sizeof(march.member)/sizeof(march.member[0]));++i)
-            if(HumanOnFoot(m[i]))march.member[march.n++]=m[i];
+            if(HumanOnFoot(m[i]) && IsOnlineAuthority(m[i]) && !npc::Scripted(ControlOf(m[i],RootLeader(m[i]))))
+                march.member[march.n++]=m[i];
     }
 }
 
@@ -1200,32 +1201,23 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
 // The player's key (NpcPickupKey, on foot) sends the recruited squads with no order out for the item boxes within
 // NpcPickupRange of the player, one soldier a box (pickup::Assign), until none is left or NpcPickupSec is up (the key
 // again calls them back). The boxes are DropItemManager's list (H): not objects, read where they are each frame.
-//  - Weapon and armour boxes are taken the stock way: Collect 0x2C8AC0 with the player as the one who picks (its
-//    gate is the player's pad, +0x340), the box's own position and a 5 cm reach, so only that box: the game counts it
-//    for the mission, plays its sound, and online asks the host as it does for a player's own (§4.4). The callback
-//    is a quiet one (its slot 5 says no effect: the stock's would flash on the player, far from the box).
+//  - Weapon and armour boxes use Collect's per-box body: Notify 0x2C7D50, Apply 0x2C7540, then mark this Unit taken.
+//    The radius-based Collect itself can consume overlapping health boxes, even with a tiny radius. These native
+//    calls preserve the player's mission credit, sound and online arbitration without touching adjacent boxes.
 //  - A health box heals the soldier that took it (the plugin marks it taken and calls the stock heal 0x547870 on
 //    that soldier with the box's share of its full health); offline only, NpcPickupHealth on, a hurt soldier.
-constexpr unsigned kDropManager=0x20B2988,kBoxVtable=0x17A6C18,kCollect=0x2C8AC0,kHealHuman=0x547870,kNodePos=0x11B15B0;
-constexpr std::size_t kBoxList=0xDE0,kBoxNodeUnit=0x18,kBoxModel=0xB0,kBoxKind=0xC0,kBoxTaken=0xC4;
+constexpr unsigned kDropManager=0x20B2988,kBoxVtable=0x17A6C18,kNotifyBox=0x2C7D50,kApplyBox=0x2C7540,kHealHuman=0x547870,kNodePos=0x11B15B0;
+constexpr std::size_t kBoxList=0xDE0,kBoxNodeUnit=0x18,kBoxModel=0xB0,kBoxKind=0xC0,kBoxTaken=0xC4,kBoxId=0xC8;
 constexpr int kMaxBoxes=128;
-constexpr float kBoxGrab=0.05f;      // m: the reach handed to Collect round the box's own position
-const unsigned char kCollectSig[]={0x4C,0x8B,0xDC,0x55,0x41,0x56,0x41,0x57,0x48,0x83,0xEC,0x60,0x48,0x83,0xBA,0x40,0x03,0x00,0x00,0x00};
+const unsigned char kNotifyBoxSig[]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48,0x81,0xEC,0x60,0x06,0x00,0x00};
+const unsigned char kApplyBoxSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x0F,0x29,0x74,0x24,0x20};
 const unsigned char kHealHumanSig[]={0x80,0xB9,0xE8,0x02,0x00,0x00,0x00,0x75,0x20,0xF3,0x0F,0x58,0x89,0xF8,0x02,0x00,0x00,0xF3,0x0F,0x5D};
 const unsigned char kNodePosSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x8B,0x91,0xF0,0x00,0x00,0x00,0x48,0x8B,0x48};
-using CollectFn=void(__fastcall*)(void*,void*,const float*,float,float,void*);
+using NotifyBoxFn=void(__fastcall*)(void*,std::int32_t,std::int32_t,void*);
+using ApplyBoxFn=void(__fastcall*)(void*,void*,std::int32_t,float);
 using HealHumanFn=void(__fastcall*)(void*,float);
 using NodePosFn=const float*(__fastcall*)(const void*);
 bool boxesOk=false;
-
-// Collect's callback (a 16-byte {vtable, owner} on the caller's stack): slot 5 asked whether to play the pick-up's
-// effect (no), slot 1 the effect (never called then); the others never called by Collect.
-bool __fastcall QuietAsk(void*) { return false; }
-void __fastcall QuietNone(void*) {}
-void* const kQuietVtable[8]={reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),
-                             reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietAsk),
-                             reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone)};
-struct QuietCallback { void* const* vt; void* owner; };
 
 struct SweepBox { void* unit; float pos[3]; int kind; };
 constexpr int kSweepTops=16;
@@ -1255,7 +1247,7 @@ int Boxes(SweepBox* out,int most) noexcept {
     for(auto node=At<unsigned char*>(head,0);node && node!=head && n<most && guard<kMaxBoxes*2;node=At<unsigned char*>(node,0),++guard) {
         if(!Readable(node,0x20))break;
         auto u=At<unsigned char*>(node,kBoxNodeUnit);
-        if(!Readable(u,kBoxTaken+1) || At<const void*>(u,0)!=image+kBoxVtable || u[kBoxTaken])continue;
+        if(!Readable(u,kBoxId+sizeof(std::int32_t)) || At<const void*>(u,0)!=image+kBoxVtable || u[kBoxTaken])continue;
         const int kind=At<std::int32_t>(u,kBoxKind);
         const void* const model=At<const void*>(u,kBoxModel);
         if(kind<0 || kind>3 || !model)continue;
@@ -1276,7 +1268,8 @@ void EndSweep(const char* why) noexcept {
 
 void InstallBoxes() noexcept {
     __try {
-        boxesOk=Matches(kCollect,kCollectSig,sizeof(kCollectSig)) && Matches(kHealHuman,kHealHumanSig,sizeof(kHealHumanSig)) &&
+        boxesOk=Matches(kNotifyBox,kNotifyBoxSig,sizeof(kNotifyBoxSig)) && Matches(kApplyBox,kApplyBoxSig,sizeof(kApplyBoxSig)) &&
+                Matches(kHealHuman,kHealHumanSig,sizeof(kHealHumanSig)) &&
                 Matches(kNodePos,kNodePosSig,sizeof(kNodePosSig));
     } __except(EXCEPTION_EXECUTE_HANDLER){boxesOk=false;}
     if(!boxesOk)Log("NPCAI the item boxes' code is not as docs/itembox-re.md reads it: no box sweep");
@@ -1299,11 +1292,13 @@ void StartSweep(const void* const* tops,int n,const char* by) noexcept {
         if(!sweep.logged){sweep.logged=true;Log("NPCAI box sweep: the item boxes are not as docs/itembox-re.md reads them: off");}
         return;
     }
+    ObjRef selected[kSweepTops];int count=0;
+    for(int i=0;i<n && count<kSweepTops;++i)if(tops[i])selected[count++]=ObjRef::Of(tops[i]);
     AcquireSRWLockExclusive(&sweepLock);
     sweep.on=true;sweep.taken=0;sweep.left=0;sweep.endedAt=0;
     sweep.until=GameMs()+static_cast<ULONGLONG>(c.npcPickupSec*1000.0f);
-    sweep.tops=0;
-    for(int i=0;i<n && sweep.tops<kSweepTops;++i)if(tops[i])sweep.top[sweep.tops++]=ObjRef::Of(tops[i]);
+    sweep.tops=count;
+    for(int i=0;i<count;++i)sweep.top[i]=selected[i];
     ReleaseSRWLockExclusive(&sweepLock);
     Log("NPCAI box sweep (%s): %s out for the boxes within %.0f m (health boxes %s)",by,sweep.tops ? "the selected squads" : "the recruited squads",
         c.npcPickupRange,PickupHealth() && !InSession() ? "too, for the hurt" : "left alone");
@@ -1321,10 +1316,13 @@ int SweepRoster(ULONGLONG ms,const void** out,int most) noexcept {
         auto t=static_cast<unsigned char*>(const_cast<void*>(sweep.top[i].obj));
         if(!sweep.top[i].Is(t) || t[kDead])continue;
         const Squad* q=FindSquad(t);
-        if(!q || !Live(*q,ms) || npc::Scripted(q->control))continue;
+        if(!q || !Live(*q,ms) || q->dismissed || TopNpc(t)!=t || npc::Scripted(ControlOf(t,RootLeader(t))))continue;
+        const unsigned char* const root=RootLeader(t);
+        if(InSession() && root && IsAnyPlayer(root) && root!=PlayerHuman())continue;
         unsigned char* m[kMaxSquad];
         const int k=Members(t,m,kMaxSquad);
-        for(int j=0;j<k && n<most;++j)if(HumanOnFoot(m[j]))out[n++]=m[j];
+        for(int j=0;j<k && n<most;++j)
+            if(HumanOnFoot(m[j]) && IsOnlineAuthority(m[j]) && !npc::Scripted(ControlOf(m[j],RootLeader(m[j]))))out[n++]=m[j];
     }
     return n;
 }
@@ -1359,7 +1357,7 @@ void SweepFrame() noexcept {
     const int given=npc::pickup::Assign(b,nb,p,np,r,out);
     int left=0;
     for(int i=0;i<nb;++i)for(int k=0;k<np;++k)if(npc::pickup::Takes(b[i],p[k],r)){++left;break;}
-    sweep.left=left;
+    AcquireSRWLockExclusive(&sweepLock);sweep.left=left;ReleaseSRWLockExclusive(&sweepLock);
     if(!given){EndSweep(np ? "no box left within reach" : "no soldier to send");return;}
     for(int k=0;k<np;++k) {
         if(out[k]<0)continue;
@@ -1370,7 +1368,7 @@ void SweepFrame() noexcept {
     }
 }
 
-// The box still lying where the sweep saw it this frame (not taken since): its exact position for Collect.
+// The box still lying where the sweep saw it this frame (not taken since): its current position.
 bool BoxStill(const void* unit,float* at4) noexcept {
     SweepBox boxes[kMaxBoxes];
     const int n=Boxes(boxes,kMaxBoxes);
@@ -1385,28 +1383,31 @@ bool BoxStill(const void* unit,float* at4) noexcept {
 
 // Runs to its box and takes it there; false when the box is gone (someone took it): the soldier's other moves then.
 bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {
-    if(npc::pickup::Level(pos,s.pickPos)>npc::pickup::kReach){MoveTo(h,pos,s.pickPos,0.5f);return true;}
+    if(!sweep.on || !IsOnlineAuthority(h) || h[kDead])return false;
+    if(npc::Dist(pos,s.pickPos)>npc::pickup::kReach){MoveTo(h,pos,s.pickPos,0.5f);return true;}
     alignas(16) float at[4];
     auto u=static_cast<unsigned char*>(s.pickUnit);
-    s.pickUnit=nullptr;
     if(!boxesOk || !BoxStill(u,at))return false;
+    if(npc::Dist(pos,at)>npc::pickup::kReach){MoveTo(h,pos,at,0.5f);return true;}
+    s.pickUnit=nullptr;
     Stand(h);
     if(npc::pickup::IsHeal(s.pickKind)) {
         const float hpMax=At<float>(h,kHumanHpMax);
         if(!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax))return true;   // healed meanwhile: leave it
         u[kBoxTaken]=1;
         reinterpret_cast<HealHumanFn>(image+kHealHuman)(h,npc::pickup::HealShare(s.pickKind)*hpMax);
-        ++sweep.taken;
+        AcquireSRWLockExclusive(&sweepLock);++sweep.taken;ReleaseSRWLockExclusive(&sweepLock);
         Log("NPCAI soldier %p took a health box: %.0f/%.0f",h,At<float>(h,kHumanHp),hpMax);
         return true;
     }
     unsigned char* const me=PlayerHuman();
     void* const m=DropManager();
     if(!me || !m || !At<const void*>(me,0x340))return true;
-    QuietCallback quiet{kQuietVtable,me};
-    reinterpret_cast<CollectFn>(image+kCollect)(m,me,at,kBoxGrab,0.0f,&quiet);
-    if(u[kBoxTaken]){++sweep.taken;Log("NPCAI soldier %p brought in a %s box",h,s.pickKind==npc::pickup::kWeapon ? "weapon" : "armour");}
-    else Log("NPCAI soldier %p at a box Collect did not take (at %.1f,%.1f,%.1f)",h,at[0],at[1],at[2]);
+    reinterpret_cast<NotifyBoxFn>(image+kNotifyBox)(m,At<std::int32_t>(u,kBoxId),s.pickKind,me);
+    reinterpret_cast<ApplyBoxFn>(image+kApplyBox)(m,me,s.pickKind,0.0f);
+    u[kBoxTaken]=1;   // Notify/Apply do not take a Unit pointer; deletion is deferred to the manager's update
+    AcquireSRWLockExclusive(&sweepLock);++sweep.taken;ReleaseSRWLockExclusive(&sweepLock);
+    Log("NPCAI soldier %p brought in a %s box",h,s.pickKind==npc::pickup::kWeapon ? "weapon" : "armour");
     return true;
 }
 
@@ -1503,7 +1504,15 @@ Squad* Commandable(const void* leader) noexcept {
     Squad* const q=FindSquad(leader);
     if(!q || npc::Scripted(q->control) || q->dismissed || GameMs()-q->seen>kOrderSeenMs)return nullptr;
     auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
-    return q->top.Is(top) && !top[kDead] && IsSoldierClass(top) ? q : nullptr;
+    return q->top.Is(top) && !top[kDead] && IsSoldierClass(top) && TopNpc(top)==top &&
+           !npc::Scripted(ControlOf(top,RootLeader(top))) ? q : nullptr;
+}
+
+// A mission can take control of a follower independently of its top. Reparenting changes every affected tree,
+// so reject the whole operation before its first native call when any member belongs to a mission script.
+bool CanRegroup(unsigned char* const* members,int n) noexcept {
+    for(int i=0;i<n;++i)if(npc::Scripted(ControlOf(members[i],RootLeader(members[i]))))return false;
+    return true;
 }
 }  // namespace
 
@@ -1514,12 +1523,12 @@ int SplitSquad(const void* leader) noexcept {
         auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
         unsigned char* m[kMaxSquad];
         const int n=Members(top,m,kMaxSquad);
-        if(n<2)return -1;
+        if(n<2 || !CanRegroup(m,n))return -1;
         unsigned char* const above=At<unsigned char*>(top,kLeader);
         unsigned char* const second=m[1];
+        CancelBoarding(top);   // both halves, before the native follow lists are changed
         Follow(second,above);
         for(int i=2;i<n;++i)Follow(m[i],i%2 ? second : top);
-        CancelBoarding(top);
         Log("NPCAI squad %p split: %d stay, %d go with %p",top,(n+1)/2,n/2,second);
         return n/2;
     } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
@@ -1532,10 +1541,12 @@ bool MergeSquads(const void* into,const void* from) noexcept {
         if(!a || !b || a==b)return false;
         auto top=static_cast<unsigned char*>(const_cast<void*>(into));
         auto other=static_cast<unsigned char*>(const_cast<void*>(from));
-        unsigned char* m[kMaxSquad];
-        if(Members(top,m,kMaxSquad)+Members(other,m,kMaxSquad)>kMaxSquad)return false;   // the panel's squad size
+        unsigned char* aMembers[kMaxSquad];unsigned char* bMembers[kMaxSquad];
+        const int na=Members(top,aMembers,kMaxSquad),nb=Members(other,bMembers,kMaxSquad);
+        if(na+nb>kMaxSquad || !CanRegroup(aMembers,na) || !CanRegroup(bMembers,nb))return false;
+        CancelBoarding(other);
         Follow(other,top);
-        b->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
+        *b=Squad{};   // no stale panel/roster entry may command the former top and form a follow cycle
         Log("NPCAI squad %p joins squad %p",other,top);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}

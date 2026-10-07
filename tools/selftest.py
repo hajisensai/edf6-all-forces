@@ -4232,8 +4232,8 @@ def stock_guidance_wired() -> None:
 @test
 def npc_pickup_wired() -> None:
     """The squad's box sweep (src/pickup.h, npcai.cpp SweepFrame / PickUp, docs/itembox-re.md): the run to a box
-    after the lane move and before the combat spot; weapon / armour through the stock Collect with the player as
-    the one who picks and the 5 cm reach, health boxes only offline, allowed and hurt; the code it calls checked at
+    after the lane move and before the combat spot; weapon / armour through the stock per-box Notify and Apply with the player as
+    the one who picks, health boxes only offline, allowed and hurt; the code it calls checked at
     load; its ini keys read, range-checked, shipped and documented; pickup_check under CTest."""
     code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
     readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
@@ -4241,7 +4241,9 @@ def npc_pickup_wired() -> None:
     run = drive.index('PickUp(s,h,pos)')
     assert drive.index('npc::LaneEscape(') < run < drive.index('Spot(s,pos,t.e->aim')
     pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert '(m,me,at,kBoxGrab,0.0f,&quiet)' in pick and 'alignas(16) float at[4]' in pick
+    assert 'reinterpret_cast<NotifyBoxFn>' in pick and 'reinterpret_cast<ApplyBoxFn>' in pick
+    assert pick.index('image+kNotifyBox') < pick.index('image+kApplyBox')
+    assert 'npc::Dist(pos,at)>npc::pickup::kReach' in pick
     assert '!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
     assert 'healthPick<0 ? Cfg().npcPickupHealth' in code, 'the ini is the default until the map flips it'
     # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; Y and O keys.
@@ -4249,7 +4251,7 @@ def npc_pickup_wired() -> None:
     assert 'mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
     assert "k.sweep=Down('Y');k.health=Down('O');" in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
     assert 'EXCLUDE_FROM_ALL tools/map_buttons_check.cpp' in cmake and 'map_buttons_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
-    assert 'kBoxGrab=0.05f' in code and 'InstallBoxes();' in code
+    assert 'kNotifyBoxSig' in code and 'kApplyBoxSig' in code and 'InstallBoxes();' in code
     for key, default in (('NpcPickupKey', '89'), ('NpcPickupRange', '80'), ('NpcPickupSec', '90'), ('NpcPickupHealth', '0')):
         assert f'L"{key}"' in plugin, key
         assert re.search(rf'^{key}={default}\s*$', ini, re.M), key

@@ -18,7 +18,7 @@ enum Kind : int { kWeapon=0, kArmour=1, kHealSmall=2, kHealBig=3 };
 constexpr bool IsHeal(int kind) noexcept { return kind==kHealSmall || kind==kHealBig; }
 // The share of its full health a health box gives (Apply 0x2C7540: 0.15, 0.30); 0 for the others.
 constexpr float HealShare(int kind) noexcept { return kind==kHealBig ? 0.30f : kind==kHealSmall ? 0.15f : 0.0f; }
-constexpr float kReach=1.5f;   // m (level) from its box the soldier takes it
+constexpr float kReach=1.5f;   // m in 3D from its current box position before the soldier takes it
 
 struct Box { float pos[3]; int kind; };
 struct Picker { float pos[3]; float hp,hpMax; };

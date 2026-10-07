@@ -503,6 +503,9 @@ target_compile_options(npc_core_check PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(npc_core_check PRIVATE /OPT:REF)
 add_dependencies(offline_checks npc_core_check)
 add_test(NAME npc_core_check COMMAND npc_core_check)
+set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
+add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
     --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
 # Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
