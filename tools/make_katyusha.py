@@ -86,7 +86,7 @@ CAMERA = ([0.0, 4.5, 4.0], [0.0, 8.5, -15.0])
 # the rockets on the rails; rockets_sgo measures the stock model), and AmmoHitSizeAdjust keeps its contact sphere
 # (AmmoSize x AmmoHitSizeAdjust) the ROCKET_CONTACT it was at size 1.5.
 ROCKET_MODEL = 'app:/WEAPON/bullet_rocket.rab'
-ROCKET_MODEL_LEN = 1.052
+ROCKET_MODEL_LEN = vc.STORE_MODELS['bullet_rocket']   # 1.052: the jets' Hydra 70 flies the same model
 ROCKET_SIZE = round(katyusha_model.ROCKET_LEN / ROCKET_MODEL_LEN, 2)   # 1.34
 ROCKET_CONTACT = 1.5
 ROCKETS = {
@@ -119,7 +119,7 @@ def rockets_sgo(game: vc.Game) -> bytes:
     r = doc.root
     if r.get('xgs_scene_object_class') != 'Weapon_VehicleShoot' or r.get('AmmoClass') != 'MissileBullet01':
         raise ValueError(f'{STOCK_WEAPON} 不是预期的 Naegling 发射器')
-    length = rocket_model_length(game.read('WEAPON', ROCKET_MODEL.rsplit('/', 1)[1].upper()))   # KeyError: not there
+    length = vc.model_length(game.read('WEAPON', ROCKET_MODEL.rsplit('/', 1)[1].upper()))   # KeyError: not there
     if abs(length * ROCKET_SIZE - katyusha_model.ROCKET_LEN) > 0.02:
         raise ValueError(f'{ROCKET_MODEL} 长 {length:.3f} m，AmmoSize {ROCKET_SIZE} 飞出去不是 M-13 的长度')
     stock_model = r.get('AmmoModel')
@@ -137,14 +137,6 @@ def rockets_sgo(game: vc.Game) -> bytes:
     model = r.get('animation_model')
     model.items[2] = dsgo.Blob(set_muzzles(model.items[2].data), model.items[2].kind)
     return dsgo.write(doc)
-
-
-def rocket_model_length(raw: bytes) -> float:
-    """The length (m, along z) of the rocket model in the archive `raw` at AmmoSize 1."""
-    from mdb import mdb_read, rab_read
-    md = mdb_read(next(f for f in rab_read(raw).files if f.name.lower().endswith('.mdb')).data)
-    zs = [p[2] for o in md.objects for me in o.meshes for p in katyusha_model.g.mesh_positions(me)]
-    return max(zs) - min(zs)
 
 
 def set_muzzles(mab: bytes) -> bytes:
