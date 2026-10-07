@@ -375,7 +375,7 @@ def build_asset(cache: Any, module: ModuleType, label: str) -> Any:
     return built
 
 
-def install(game: str) -> None:
+def install(game: str, campaign_requested: bool = False) -> None:
     import buildcache
     import call_weapons
     import gen
@@ -427,12 +427,13 @@ def install(game: str) -> None:
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
-    print('生成 EDF5 战役（EDF5 的任务接在离线任务列表末尾，脚本和语音都是 EDF6 自带的；只读 Root.cpk）……')
-    try:
-        campaign = make_edf5_campaign.build(game)
-    except make_edf5_campaign.Refused as e:
-        campaign = None
-        print('！ 不安装 EDF5 战役：', e)
+    campaign = None
+    if campaign_requested or make_edf5_campaign.enabled(game):
+        print('生成可选实验 EDF5 战役（追加离线任务；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
+        try:
+            campaign = make_edf5_campaign.build(game)
+        except make_edf5_campaign.Refused as e:
+            print('！ 不安装 EDF5 战役：', e)
     print('\n全部生成完毕，开始写入。')
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
@@ -526,6 +527,10 @@ def uninstall(game: str) -> None:
                  '原版载具的额外挂载要插件才能用，照样删掉）；其它 = 取消：')
     if choice not in ('1', '2'):
         print('已取消。')
+        return
+    import make_edf5_campaign
+    if make_edf5_campaign.removal_blocked(game):
+        print('已取消卸载：EDF5 战役任务列表被其他工具改过，不能安全撤回；保留任务文本和插件以免选关崩溃。')
         return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
         if not retire_weapons(game):
@@ -656,12 +661,35 @@ def send_logs() -> int:
     return 0
 
 
+def manage_campaign(game: str) -> int:
+    """Menu 6: explicit experimental campaign opt-in or removal, without uninstalling the plugins."""
+    import make_edf5_campaign
+    print('EDF5 战役是可选实验：默认关闭。启用会在离线任务列表末尾追加任务。')
+    print('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；缺少资源的 4 关不会安装。')
+    print('当前状态：' + ('已启用' if make_edf5_campaign.enabled(game) else '未启用'))
+    choice = ask('输入 1 启用 / 更新实验战役（同时更新插件），2 停用战役（保留插件），其它 = 取消：')
+    if choice == '1':
+        install(game, campaign_requested=True)
+        return 0 if make_edf5_campaign.enabled(game) and make_edf5_campaign.check(game) else 1
+    if choice == '2':
+        done, kept = make_edf5_campaign.remove(game)
+        for path in done:
+            print('还原', path)
+        for path in kept:
+            print('保留（之后被别的工具改过）', path)
+        if make_edf5_campaign.enabled(game):
+            print('未能停用：任务列表被其他工具改过，已保留它依赖的文本、图片和插件。')
+            return 1
+        print('EDF5 战役已停用，后续普通更新不会重新启用。')
+    return 0
+
+
 def main(argv: list[str]) -> int:
     print(f'== {PLUGIN} 安装程序 {build_name()} ==\n')
     mode = argv[0] if argv else ''
-    if mode not in ('install', 'uninstall', 'update', 'logs', 'check'):
-        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，回车退出：')
-        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check'}.get(pick, '')
+    if mode not in ('install', 'uninstall', 'update', 'logs', 'check', 'campaign'):
+        pick = ask('输入 1 安装 / 更新，2 卸载，3 下载最新测试版，4 回传日志给开发者，5 检查安装状态，6 管理 EDF5 实验战役，回车退出：')
+        mode = {'1': 'install', '2': 'uninstall', '3': 'update', '4': 'logs', '5': 'check', '6': 'campaign'}.get(pick, '')
         if not mode:
             return 0
     if mode == 'check':   # reads only: the game may be running
@@ -680,6 +708,8 @@ def main(argv: list[str]) -> int:
     game = pick_game()
     if not game:
         return 1
+    if mode == 'campaign':
+        return manage_campaign(game)
     (install if mode == 'install' else uninstall)(game)
     return 0
 

@@ -1,13 +1,14 @@
-"""The EDF5 campaign in EDF6: EDF5's missions appended to the offline mission list, with all of their dialogue.
+"""Optional experimental EDF5 campaign: append the missions whose resources are available in EDF6.
 
   python -B tools/make_edf5_campaign.py [GAME_DIR]            install (the game must be closed)
   python -B tools/make_edf5_campaign.py [GAME_DIR] --remove   put the files back as they were
   python -B tools/make_edf5_campaign.py [GAME_DIR] --list     what would be appended (nothing written)
 
-EDF6's Root.cpk already holds everything a mission needs: EDF5's scripts (MISSION/EDF5_OLD_SCRIPT/<id>/MISSION.BVM,
-EDF5's bytecode kept up for EDF6: the only change from EDF5's is a SetUndergroundSoundReverve call), EDF5's voice
-bank (SOUND/PC/TIKYUU5_VOICE.*.AWB) and subtitles (MISSION/EDF6_VOICETABLE.*.SGO), and nearly all of EDF5's maps
-and objects. What is missing is a way in: this writes, under Mods/MISSION/,
+EDF6's Root.cpk holds EDF5's scripts (MISSION/EDF5_OLD_SCRIPT/<id>/MISSION.BVM), subtitles
+(MISSION/EDF6_VOICETABLE.*.SGO), and nearly all of EDF5's maps and objects. Its loose SOUND/PC/ directory holds
+the voice banks TIKYUU5_VOICE.*.AWB. Script strings only add SetUndergroundSoundReverve compared with EDF5;
+that does not establish native bytecode compatibility or completion of every mission. Four DLC missions lack
+resources and are excluded. This explicitly requested tool writes, under Mods/MISSION/,
 
   MISSIONLIST.OFFLINE.LIST.SGO         (DSGO) the list's rows kept as they are, one row per EDF5 mission appended
   MISSIONLIST.OFFLINE.TXT.<lang>.SGO   title and briefing per row, for every language the game ships (CN EN JA KR SC)
@@ -15,7 +16,7 @@ and objects. What is missing is a way in: this writes, under Mods/MISSION/,
 
 The titles and briefings are EDF5's own (edf5campaign/missions.json, tools/make_edf5_campaign_text.py).
 Why appending is safe and what it changes (docs/mission-list-re.md, static, not yet run in the game):
-- the save keeps 512 missions per mode (clear[10][512], seen[512]) indexed by row: 257 rows fit, and an old save's
+- the save keeps 512 missions per mode (clear[10][512], seen[512]) indexed by row: 282 rows fit, and an old save's
   columns past 147 are zero, so the new missions start uncleared and no save is migrated;
 - the stock rows must keep their order (the online story shares the save, M00.MST): only appended to;
 - every row's 11th member must be named "flags" (read by name: missing, the mission start crashes), every
@@ -222,8 +223,13 @@ def build(root: str) -> tuple[dict[str, bytes], int, dict]:
     if any(str(r.items[1]).lower().startswith(f'app:/mission/{SCRIPTS.lower()}/') for r in table):
         raise Refused('任务列表里已经有 EDF5 任务行，但不是本工具留下的那份（没有清单记录，或之后被别的工具改过）：不重复追加。')
     base = len(table)
+    if not p['rows']:
+        raise Refused('没有可安装的 EDF5 任务：不写入空战役入口。')
+    if base + len(p['rows']) > 512:
+        raise Refused(f'任务列表共 {base + len(p["rows"])} 行，超过存档的 512 行容量：不追加。')
     for k, r in enumerate(p['rows']):
         table.append(new_row(base + k, r['path'], r['progress']))
+    table[-1].items[3].items.clear()  # no successor beyond the save/list boundary
     first = table[0].items[3]
     if float(base) not in first.items:
         first.items.append(float(base))
@@ -250,19 +256,52 @@ def build(root: str) -> tuple[dict[str, bytes], int, dict]:
 
 
 # ------------------------------------------------------------------------------------------- writing
+def row_setting(text: str) -> tuple[list[str], int | None, int]:
+    """INI lines, first row-key index and insertion position in [VehicleCrew] (Win32 case/space rules)."""
+    lines = text.splitlines()
+    section = ''
+    first = None
+    end = None
+    key = None
+    for i, line in enumerate(lines):
+        head = re.match(r'^\s*\[([^\]]+)\]', line)
+        if head:
+            if section == 'vehiclecrew' and end is None:
+                end = i
+            section = head.group(1).strip().lower()
+            if section == 'vehiclecrew' and first is None:
+                first = i
+            continue
+        if section == 'vehiclecrew' and key is None and re.match(rf'^\s*{INI_KEY}\s*=', line, re.I):
+            key = i
+    if first is None:
+        lines.append('[VehicleCrew]')
+        end = len(lines)
+    return lines, key, len(lines) if end is None else end
+
+
 def set_rows(root: str, value: int) -> str | None:
-    """The plugin's ini with EDF5CampaignRows=value (the line kept where it is, added if missing); None without ini."""
+    """Set the plugin's actual [VehicleCrew] key; preserve unrelated sections and settings."""
     path = os.path.join(root, 'Mods', INI)
     if not os.path.isfile(path):
         return None
     with open(path, encoding='utf-8-sig') as f:
         text = f.read()
+    lines, key, end = row_setting(text)
     line = f'{INI_KEY}={value}'
-    text, n = re.subn(rf'(?m)^{INI_KEY}=.*$', line, text)
-    if not n:
-        text = text.rstrip('\n') + '\n' + line + '\n'
-    modfiles.atomic_write(path, text.encode('utf-8'))
+    if key is None:
+        lines.insert(end, line)
+    else:
+        lines[key] = line
+    modfiles.atomic_write(path, ('\n'.join(lines) + '\n').encode('utf-8'))
     return path
+
+
+def removal_blocked(root: str) -> bool:
+    """A changed campaign list may still index its text/thumbnail files and require the plugin's cap."""
+    entry = load_manifest(root).get('files', {}).get(LIST)
+    data = modfiles.read(rel_path(root, LIST))
+    return entry is not None and data is not None and not ours(entry, data)
 
 
 def install(root: str, built: tuple[dict[str, bytes], int, dict] | None = None) -> list[str]:
@@ -302,11 +341,16 @@ def install(root: str, built: tuple[dict[str, bytes], int, dict] | None = None) 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
     """Puts back what each file was before (deleted if there was none): (restored or deleted, kept changed).
-    A file changed by someone since stays, and so does its manifest entry (what it replaced is only there); while
-    the list stays the plugin keeps its row count too."""
+    A changed list preserves the whole dependency group and its recovery records. Other changed files stay
+    with their manifest entry (what they replaced is only there)."""
     modfiles.refuse_while_running()
     mpath = os.path.join(root, 'Mods', MANIFEST)
     manifest = load_manifest(root)
+    if removal_blocked(root):
+        # The list and its text/image tables are one unit. Deleting only the tables would leave unchecked
+        # appended-row reads indexing the shorter stock tables. Keep the recovery metadata too.
+        return [], [rel_path(root, rel) for rel in manifest.get('files', {})
+                    if os.path.isfile(rel_path(root, rel))]
     done, kept = [], []
     left: dict[str, dict] = {}
     for rel, entry in manifest.get('files', {}).items():
@@ -335,6 +379,11 @@ def remove(root: str) -> tuple[list[str], list[str]]:
     return done, kept
 
 
+def enabled(root: str) -> bool:
+    """The owned list records opt-in; leftover edited image/text files do not re-enable it."""
+    return LIST in load_manifest(root).get('files', {})
+
+
 def installed(root: str) -> bool:
     return os.path.isfile(os.path.join(root, 'Mods', MANIFEST))
 
@@ -343,13 +392,18 @@ def check(root: str) -> bool:
     """Reading only: the files as written and the plugin's row count as the manifest says. True when complete, or
     not installed (it is optional: refused when another mod's list cannot take it, which the install says)."""
     manifest = load_manifest(root)
-    if not manifest:
-        print('EDF5 战役：未安装（可选；安装时被拒绝的原因会在安装输出里说明）')
+    if LIST not in manifest.get('files', {}):
+        print('EDF5 战役：未启用（可选实验；安装器菜单 6 管理，保留的其他工具文件不算已启用）')
         return True
-    bad = [rel for rel, e in manifest.get('files', {}).items() if not ours(e, modfiles.read(rel_path(root, rel)))]
+    bad = [rel for rel, e in manifest.get('files', {}).items()
+           if 'also' in e or modfiles.sha256_file(rel_path(root, rel)) != e['sha']]
     path = os.path.join(root, 'Mods', INI)
-    text = open(path, encoding='utf-8-sig').read() if os.path.isfile(path) else ''
-    m = re.search(rf'(?m)^{INI_KEY}=(\d+)', text)
+    text = ''
+    if os.path.isfile(path):
+        with open(path, encoding='utf-8-sig') as f:
+            text = f.read()
+    lines, key, _ = row_setting(text)
+    m = re.match(rf'^\s*{INI_KEY}\s*=\s*(\d+)\s*$', lines[key], re.I) if key is not None else None
     rows_ok = m is not None and int(m.group(1)) == manifest.get('rows')
     print(f'EDF5 战役：{len(manifest.get("files", {}))} 个文件，缺失或被改过 {len(bad)}；'
           f'{INI_KEY}=' + (m.group(1) if m else '（缺失）') + ('' if rows_ok else f'（应为 {manifest.get("rows")}）'))

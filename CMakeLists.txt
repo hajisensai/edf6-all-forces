@@ -532,6 +532,16 @@ set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated n
 add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_gunner_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_gunner_native PROPERTIES SKIP_RETURN_CODE 77)
 
+add_executable(edf5_campaign_native_test EXCLUDE_FROM_ALL tests/edf5_campaign_native_test.cpp)
+target_include_directories(edf5_campaign_native_test PRIVATE src common)
+target_link_libraries(edf5_campaign_native_test PRIVATE edf6common)
+target_compile_options(edf5_campaign_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks edf5_campaign_native_test)
+add_test(NAME edf5_campaign_native COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}")
+add_test(NAME edf5_campaign_partial_install COMMAND edf5_campaign_native_test "${EDF6_NATIVE_DLL}" 3)
+set_tests_properties(edf5_campaign_native edf5_campaign_partial_install PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
+
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp)
 target_link_libraries(npc_gunners_online_test PRIVATE edf6common user32)
 target_include_directories(npc_gunners_online_test PRIVATE src common)

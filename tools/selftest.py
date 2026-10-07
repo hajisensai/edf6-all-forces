@@ -3017,7 +3017,8 @@ def pack_install_upgrade_uninstall() -> None:
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
-                installer.install(game)
+                installer.install(game, campaign_requested=True)
+                assert e5c.enabled(game), 'explicit campaign opt-in was not installed'
                 assert not answers, 'install did not ask before replacing the other mod\'s AT_C'
                 for name in _cmake_plugins():
                     assert _read(os.path.join(plugins, name + '.dll')) == b'v1 ' + name.encode(), f'{name}.dll not installed'
@@ -3034,6 +3035,7 @@ def pack_install_upgrade_uninstall() -> None:
                 # The upgrade: new DLLs, a setting the new ini adds.
                 _pack_bundle(bundle, b'v2 ', {'EDF6AutoTurret': '\r\n; new in v2\r\nNewTurretKey=5\r\n'})
                 installer.install(game)
+                assert e5c.enabled(game), 'ordinary update lost the campaign opt-in'
                 assert _read(os.path.join(plugins, 'EDF6AutoTurret.dll')) == b'v2 EDF6AutoTurret'
                 at_text = _read(os.path.join(plugins, 'EDF6AutoTurret.ini')).decode()
                 assert 'Gain=7.5' in at_text and 'NewTurretKey=5' in at_text and installer.ADDED_HEADER in at_text
@@ -4374,6 +4376,40 @@ def edf5_campaign_refusals() -> None:
         members['table'].pop()
         modfiles.atomic_write(e5c.rel_path(root, e5c.TXT['EN']), sgo.write_depth_first(ver, members))
         _e5c_refuses(root, 'a text table one row short')
+
+
+@test
+def edf5_campaign_save_capacity() -> None:
+    """A third-party appended list may fill the 512-slot save: refuse 513 before writing, accept exactly 512."""
+    import sgo
+    if not _e5c_have_game():
+        return
+    with _e5c_game() as (root, game):
+        p = e5c.plan(root)
+        stock = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
+        for total in (513, 512):
+            base = total - len(p['rows'])
+            doc = dsgo.parse(stock)
+            rows = doc.root.get('table').items
+            for i in range(len(rows), base):
+                row = dsgo.Node([float(i), f'app:/Mission/ThirdParty/M{i}', f'ThirdParty/M{i}',
+                                 dsgo.Node([float(i + 1)]), float(i), 0.0, 0.0, 0.0, e5c.BGM, 0.5, 8.0], {10: 'flags'})
+                rows.append(row)
+            modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.compact(doc))
+            for lang, rel in e5c.TXT.items():
+                ver, text = sgo.read(game.read('MISSION', f'MISSIONLIST.OFFLINE.TXT.{lang}.SGO'))
+                text['table'] += [['third-party', 'brief']] * (base - len(text['table']))
+                modfiles.atomic_write(e5c.rel_path(root, rel), sgo.write_depth_first(ver, text))
+            if total > 512:
+                _e5c_refuses(root, '513 missions overflowing the native save')
+                assert not e5c.installed(root), 'refusal wrote a manifest'
+            else:
+                built, count, _ = e5c.build(root)
+                result = dsgo.parse(built[e5c.LIST]).root.get('table').items
+                assert len(result) == 512 and count == base
+                assert result[-1].items[3].items == [], 'the terminal row points past the end'
+        with patched(e5c, plan=lambda _: {'rows': [], 'skipped': []}):
+            _e5c_refuses(root, 'an empty campaign unlocking a nonexistent row')
 
 
 def _e5c_with_edf5_rows() -> bytes:

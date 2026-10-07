@@ -31,6 +31,7 @@ constexpr std::uintptr_t kCurrent=0x48; // mgr+: the current row
 const unsigned char kRowsSig[]={0x48,0x8B,0x91,0xF0,0x00,0x00,0x00,0x48,0x85,0xD2,0x75,0x03};
 // mov [rsp+8],rbx; push rdi; sub rsp,0x30; mov rbx,rcx
 const unsigned char kProgressSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x30,0x48,0x8B,0xD9};
+bool campaignReady=false;
 constexpr unsigned kRowSites[]={
     0x70EDB7,   // IsLastMission (0x70EDA0): current == count-1, the ending
     0xDF9B8,    // the all-clear check (0xDF990): the last row cleared by any class unlocks every difficulty
@@ -54,13 +55,14 @@ static_assert(Progress(0,282,147)==0.0f && Progress(146,282,147)==1.0f && Progre
 static_assert(Progress(147,282,147)==0.0f && Progress(281,282,147)==1.0f && Progress(147,148,147)==0.0f);
 
 int __fastcall RowsHook(std::uintptr_t list) {
-    return Capped(reinterpret_cast<RowsFn>(image+kRows)(list),Cfg().edf5CampaignRows);
+    const int rows=reinterpret_cast<RowsFn>(image+kRows)(list);
+    return campaignReady ? Capped(rows,Cfg().edf5CampaignRows) : rows;
 }
 
 float __fastcall ProgressHook(std::uintptr_t mgr) {
     const int cap=Cfg().edf5CampaignRows;
     const int rows=reinterpret_cast<RowsFn>(image+kRows)(mgr+kList);
-    if(cap<=0 || rows<=cap)return reinterpret_cast<ProgressFn>(image+kProgress)(mgr);
+    if(!campaignReady || cap<=0 || rows<=cap)return reinterpret_cast<ProgressFn>(image+kProgress)(mgr);
     return Progress(*reinterpret_cast<const std::uint32_t*>(mgr+kCurrent),rows,cap);
 }
 
@@ -81,6 +83,7 @@ const Group kGroups[]={
 
 // All or nothing: the ending at the last EDF5 row but the ratio over the story (or the reverse) is worse than stock.
 bool InstallEdf5Campaign() noexcept {
+    if(campaignReady)return true;
     if(!Matches(kRows,kRowsSig,sizeof(kRowsSig))){Log("HOOK edf5 campaign=0 (EDF+%#x does not match)",kRows);return false;}
     if(!Matches(kProgress,kProgressSig,sizeof(kProgressSig))){Log("HOOK edf5 campaign=0 (EDF+%#x does not match)",kProgress);return false;}
     int sites=0;
@@ -96,8 +99,11 @@ bool InstallEdf5Campaign() noexcept {
             if(RedirectCall(image+g.sites[i],image+g.target,g.hook,changed))++done;
             else Log("EDF5 call site %#x %s",g.sites[i],changed ? "half patched" : "not patched");
         }
-    Log("HOOK edf5 campaign=%d (%d/%d calls: the story's length and progress over EDF5CampaignRows=%d rows)",done==sites,done,sites,
+    // A near-thunk allocation/protection failure can occur after earlier calls were redirected. Keep those
+    // redirected calls on the original behavior until every call is installed, including a half-written call.
+    campaignReady=done==sites;
+    Log("HOOK edf5 campaign=%d (%d/%d calls: the story's length and progress over EDF5CampaignRows=%d rows)",campaignReady,done,sites,
         Cfg().edf5CampaignRows);
-    return done==sites;
+    return campaignReady;
 }
 }  // namespace crew
