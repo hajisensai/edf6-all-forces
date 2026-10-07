@@ -156,20 +156,21 @@ void Tomahawk(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     float hand[3];
     if(a.swing<0.0f) {
         if(!press || a.charge>0.0f || a.megaLeft>0.0f)return;
-        a.swing=0.0f;a.struck=false;a.whooshed=false;
+        a.swing=0.0f;a.struck=false;a.whooshed=false;a.combo=0;
         BoneAt(m,sazabi::kHandR,nullptr,hand);
         Sfx(m,SzSfx::saberOn,hand);
         return;
     }
-    if(press)a.queued=true;
-    a.swing+=dt/kSwingSec;
+    if(press && a.combo<2)a.queued=true;   // the next of the combo's three swings
+    a.swing+=dt/sazabi::SwingSec(a.combo);
     float blade[3];
     BoneAt(m,sazabi::kAxeBlade,nullptr,blade);
     if(m.driven && !m.npc)SazabiLoop(SzLoop::saberHum,blade,m.fl.vel,1.0f);
-    if(!a.whooshed && a.swing>=sazabi::kWindUp){a.whooshed=true;Sfx(m,SzSfx::whoosh,blade);}
-    if(!a.struck && a.swing>=0.5f*(sazabi::kWindUp+sazabi::kStrike)){a.struck=true;Strike(m,v,blade);}
+    const float wind=sazabi::WindEnd(a.combo),strike=sazabi::StrikeEnd(a.combo);
+    if(!a.whooshed && a.swing>=wind){a.whooshed=true;Sfx(m,SzSfx::whoosh,blade);}
+    if(!a.struck && a.swing>=0.5f*(wind+strike)){a.struck=true;Strike(m,v,blade);}   // the blade through, mid-strike
     if(a.swing<1.0f)return;
-    if(a.queued){a.queued=false;a.swing=0.0f;a.struck=false;a.whooshed=false;return;}
+    if(a.queued){a.queued=false;a.swing=0.0f;a.struck=false;a.whooshed=false;++a.combo;return;}
     a.swing=-1.0f;
     Sfx(m,SzSfx::saberOff,blade);
 }
@@ -336,10 +337,16 @@ void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
 }
 
 // The pose's share: the swing, the guard, the brace, the funnels where they fly (in sz_root's frame).
-void ArmsPose(Mech& m) noexcept {
+void ArmsPose(Mech& m,float dt) noexcept {
     sazabi::PoseInput& p=m.pose;
     const Arms& a=m.arms;
-    p.swing=a.swing;p.guard=a.guard;p.cannon=a.brace;
+    p.swing=a.swing;p.guard=a.guard;p.cannon=a.brace;p.combo=a.combo;
+    // the rifle's kick: up within kKickIn of a shot, eased off over kKickOut
+    constexpr float kKickIn=0.06f,kKickOut=0.35f;
+    const float s=a.rifleSince;
+    p.recoil=s<kKickIn ? s/kKickIn : s<kKickIn+kKickOut ? sazabi::Smooth(1.0f-(s-kKickIn)/kKickOut) : 0.0f;
+    // the boost dash's pose (a horizontal boost, not a climb), eased in and out
+    p.boost+=((m.fl.boosting ? 1.0f : 0.0f)-p.boost)*std::fmin(1.0f,6.0f*dt);
     p.crouch=std::fmax(p.crouch,0.3f*a.brace);
     for(int k=0;k<kFunnelCount;++k) {
         const Funnel& f=a.funnels[k];
@@ -363,7 +370,7 @@ void ArmsStep(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     if(m.rootOk)Tomahawk(m,v,in,dt);
     const bool launch=in.secondary && !a.secondaryHeld && a.special==Special::funnels;
     if(m.rootOk)FlyFunnels(m,v,launch,dt);
-    ArmsPose(m);
+    ArmsPose(m,dt);
 }
 
 // After the pose (its bones where they are this frame): the guns, the cannon, the flames, the HUD's cue.

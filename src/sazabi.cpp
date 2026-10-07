@@ -266,7 +266,7 @@ void Animate(Mech& m,float dt,bool driven) noexcept {
     if(!m.fl.air)p.gait=sazabi::GaitStep(p.gait,ground,p.stride,dt);
     p.air+=((m.fl.air ? 1.0f : 0.0f)-p.air)*std::fmin(1.0f,kAirBlendRate*dt);
     const float leanWant=m.fl.air ? Clamp(ground/Cfg().sazabiFly,0.0f,1.0f)*28.0f*sazabi::kDeg : 0.0f;
-    p.lean+=(leanWant+(m.fl.boosting ? 15.0f*sazabi::kDeg : 0.0f)-p.lean)*std::fmin(1.0f,5.0f*dt);
+    p.lean+=(leanWant-p.lean)*std::fmin(1.0f,5.0f*dt);   // a boost's own lean: the pose's (PoseInput::boost)
     p.bank+=(Clamp(m.yawRate*0.12f,-0.3f,0.3f)-p.bank)*std::fmin(1.0f,4.0f*dt);
     p.crouch=std::fmax(0.0f,p.crouch-kCrouchDecay*dt);
     p.aimPitch=m.aimPitch;
@@ -309,7 +309,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     if(!driven) {
         RootFrame(m,v);
         Animate(m,dt,false);
-        ArmsPose(m);
+        ArmsPose(m,dt);
         Pose(m,v);
         return;
     }

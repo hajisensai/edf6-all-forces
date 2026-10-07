@@ -133,6 +133,9 @@ struct PoseInput {
     float aim=1.0f;         // 0 .. 1 the rifle raised to aim (1 while it is drawn and not swinging)
     float guard=0.0f;       // 0 .. 1 the shield held up across the chest
     float swing=-1.0f;      // the tomahawk: < 0 stowed; 0 .. 1 one swing (wind-up, strike, recover)
+    int combo=0;            // ...which of the combo's swings: 0 the overhead chop, 1 the slash across, 2 the rising cut
+    float boost=0.0f;       // 0 .. 1 the boost dash's pose (leaning into it, legs trailing, the free arm back)
+    float recoil=0.0f;      // 0 .. 1 the rifle's kick (a shot: up at once, eased off)
     float cannon=0.0f;      // 0 .. 1 bracing for the chest cannon
     bool funnelOut[6]{};    // a funnel launched: drawn where it flies (funnelAt), not in its pack
     float funnelAt[6][3]{}; // ...its centre, in sz_root's frame (sazabi.cpp flies it in the world)
@@ -279,16 +282,38 @@ inline constexpr SolePoint kSole[]={
 };
 // Landing / crouch: knees bend, the pelvis drops.
 constexpr float kCrouchThigh=-24.0f,kCrouchKnee=48.0f,kCrouchDrop=2.2f;
+// Standing (the research: knees bent ~15 deg, the torso leaning ~5 deg): a standing crouch and lean on its feet.
+constexpr float kStandCrouch=0.2f,kStandLean=5.0f;
+// The boost dash (the research: the torso ~35 deg into it, the legs trailing, the free arm swept back).
+constexpr float kBoostLean=35.0f,kBoostThigh=15.0f,kBoostKnee=25.0f,kBoostArm=25.0f;
+// The belly cannon's brace (the research: the cannon is the belly's: feet apart front and back, the belly pushed out,
+// both arms out of its way): each foot kCannonStep m ahead / behind, the chest back kCannonBack, the arms out.
+constexpr float kCannonStep=2.5f,kCannonBack=8.0f,kCannonArms=40.0f;
+// The rifle's kick (the research: elbow bent ~15 deg more, shoulder back ~8 deg, muzzle up).
+constexpr float kRecoilShoulder=8.0f,kRecoilElbow=15.0f,kRecoilMuzzle=5.0f;
 // The rifle arm raised: the upper arm forward and out, the forearm bent a little; the wrist then turns the rifle
 // onto the aim exactly (AimRifle).
 constexpr float kAimRaise=78.0f,kAimOut=12.0f,kAimElbow=-22.0f;
 constexpr float kChestShare=0.45f;   // of the aim's yaw the chest takes (the rest the arm)
 constexpr float kMostAimYaw=60.0f,kMostAimPitch=55.0f;
 // The shield up: the left arm across the chest.
-constexpr float kGuardRaise=62.0f,kGuardIn=-38.0f,kGuardElbow=-70.0f;
-// The tomahawk's swing: wind-up (raised back over the right shoulder) to kWindUp, the strike (down and across) to
-// kStrike, then back. Its grip kGripAhead m along the hand's forward.
-constexpr float kWindUp=0.35f,kStrike=0.6f,kGripAhead=1.1f;
+constexpr float kGuardRaise=75.0f,kGuardIn=-25.0f,kGuardElbow=-95.0f,kGuardTurn=15.0f,kGuardCrouch=0.45f;
+// The tomahawk's combo (the research, 2026-10-07: the games' three swings): each swing winds up to its wind key, strikes
+// to its strike key and recovers to rest, in the seconds given (wind, strike, recover); the keys are the right upper
+// arm's raise (deg forward-up) and swing across (deg, + toward its left) and the chest's twist (deg, + left).
+//  0 the overhead chop, 1 the slash across, 2 the rising cut. A swing's u (0..1) runs over the sum of its times.
+// The grip kGripAhead m along the hand's forward.
+struct Swing { float wind[3],strike[3],secs[3]; };
+inline constexpr Swing kCombo[3]={
+    {{170.0f,-10.0f,-5.0f},{40.0f,30.0f,10.0f},{0.25f,0.12f,0.20f}},
+    {{90.0f,-60.0f,-25.0f},{90.0f,70.0f,25.0f},{0.15f,0.10f,0.20f}},
+    {{-30.0f,-10.0f,-5.0f},{150.0f,20.0f,10.0f},{0.15f,0.12f,0.45f}},
+};
+constexpr float kGripAhead=1.1f;
+// swing `c`'s length (s), and where its wind-up ends and its strike ends (u).
+inline float SwingSec(int c) { const Swing& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return w.secs[0]+w.secs[1]+w.secs[2]; }
+inline float WindEnd(int c) { const Swing& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return w.secs[0]/SwingSec(c); }
+inline float StrikeEnd(int c) { const Swing& w=kCombo[c<0 ? 0 : c>2 ? 2 : c]; return (w.secs[0]+w.secs[1])/SwingSec(c); }
 
 inline float Smooth(float x) { x=x<0?0:x>1?1:x; return x*x*(3-2*x); }
 // The rotation nearest `a` keeping its forward (+z row) and then its up (Gram-Schmidt).
@@ -348,15 +373,16 @@ inline FootPlan Plan(float gait,float stride,int side) {
 // The legs standing (the stance and the crouch; Plant puts them on the floor) and the gait's plan for them: where each
 // ankle and foot stand (before the torso leans: the ground's frame), each step, the pelvis's sway. Gait walks them.
 inline void Legs(const PoseInput& in,Pose* p) {
-    const float cr=in.crouch,feet=1.0f-in.air;
+    const float feet=1.0f-in.air;
+    const float cr=Clamp(in.crouch+(kStandCrouch+kGuardCrouch*Smooth(in.guard))*feet,0.0f,1.0f);
     for(int side=0;side<2;++side) {
         const Stance& k=kStance[side];
         const float thigh=kCrouchThigh*cr,knee=kCrouchKnee*cr;
         const float foot=-kFootFlat*(thigh+knee);
         const int t=side==0 ? kThighL : kThighR;
         p->rot[t]=Mul(RotX(k.thighX*feet*kDeg),RotZ(k.thighZ*feet*kDeg));
-        p->rot[t]=Mul(p->rot[t],RotX(thigh*kDeg));
-        p->kneeStand[side]=(k.knee*feet+knee)*kDeg;
+        p->rot[t]=Mul(p->rot[t],RotX((thigh+kBoostThigh*Smooth(in.boost)*in.air)*kDeg));   // a boost in the air: trailing
+        p->kneeStand[side]=(k.knee*feet+knee+kBoostKnee*Smooth(in.boost)*in.air)*kDeg;
         p->rot[t+1]=RotX(p->kneeStand[side]);
         p->rot[t+2]=Mul(RotX(foot*kDeg),Mul(RotX(k.footX*feet*kDeg),RotZ(k.footZ*feet*kDeg)));
     }
@@ -373,6 +399,7 @@ inline void Legs(const PoseInput& in,Pose* p) {
         p->footLift[side]=plan.lift*p->gaitW;
         p->footToe[side]=plan.toe*p->gaitW;
         p->legFore[side]=plan.dz/half*p->gaitW;
+        p->footDz[side]+=(side==0 ? kCannonStep : -kCannonStep)*Smooth(in.cannon)*feet;   // the brace: feet apart
     }
     // over the left foot at the middle of its stance (+x: the left), over the right half a cycle on
     float u=in.gait/(2.0f*kPi);
@@ -480,9 +507,12 @@ inline void Torso(const PoseInput& in,Pose* p) {
     const float twist=kWaistTwist*0.5f*(p->legFore[0]-p->legFore[1])*kDeg;   // the shoulders against the hips
     const float yaw=Clamp(in.aimYaw,-kMostAimYaw*kDeg,kMostAimYaw*kDeg)*kChestShare*in.aim;
     const float breathe=0.6f*std::sin(in.t*1.3f)*kDeg;
-    p->rot[kPelvis]=Mul(RotZ(-in.bank),RotX(in.lean+kRunLean*kDeg*in.stride*(1-in.air)));
-    p->rot[kWaist]=RotY(twist+yaw*0.4f);
-    p->rot[kChest]=Mul(RotX(breathe-6.0f*kDeg*in.cannon),RotY(yaw*0.6f));
+    // a boost's lean takes over from the flight's (they do not add up: ~35 deg in all, the research's)
+    const float b=Smooth(in.boost);
+    const float lean=(in.lean+(kRunLean*in.stride*(1-in.air)+kStandLean*(1-in.air))*kDeg)*(1.0f-b)+kBoostLean*kDeg*b;
+    p->rot[kPelvis]=Mul(RotZ(-in.bank),RotX(lean));
+    p->rot[kWaist]=RotY(twist+yaw*0.4f+kGuardTurn*Smooth(in.guard)*kDeg);
+    p->rot[kChest]=Mul(RotX(breathe-kCannonBack*kDeg*Smooth(in.cannon)),RotY(yaw*0.6f));
     p->rot[kHead]=RotX(-Clamp(in.aimPitch,-30*kDeg,30*kDeg)*0.4f);
     // the backpack's tubes flare up in flight, the funnel packs open a little
     const float flare=12.0f*in.air*kDeg;
@@ -493,7 +523,8 @@ inline void Torso(const PoseInput& in,Pose* p) {
 inline void LeftArm(const PoseInput& in,Pose* p) {
     const float sw=kArmSwing*p->legFore[1]*(1-in.guard);   // forward with the other leg
     const float g=Smooth(in.guard);
-    p->rot[kUpperArmL]=Mul(RotX(-(sw+kGuardRaise*g)*kDeg),RotY(kGuardIn*g*kDeg));
+    const float back=kBoostArm*Smooth(in.boost)*(1-g),out=kCannonArms*Smooth(in.cannon)*(1-g);
+    p->rot[kUpperArmL]=Mul(Mul(RotX(-(sw+kGuardRaise*g-back)*kDeg),RotY(kGuardIn*g*kDeg)),RotZ(out*kDeg));
     p->rot[kForearmL]=RotY(kGuardElbow*g*kDeg);
 }
 
@@ -501,11 +532,12 @@ inline void LeftArm(const PoseInput& in,Pose* p) {
 inline void AimRifle(const PoseInput& in,Pose* p) {
     const float a=Smooth(in.aim);
     const float sw=kArmSwing*p->legFore[0]*(1-a);
-    p->rot[kUpperArmR]=Mul(RotX(-(kAimRaise*a+sw)*kDeg),RotZ(-kAimOut*a*kDeg));
-    p->rot[kForearmR]=RotX(kAimElbow*a*kDeg);
+    const float kick=in.recoil*a,out=kCannonArms*Smooth(in.cannon);
+    p->rot[kUpperArmR]=Mul(RotX(-(kAimRaise*a+sw-kRecoilShoulder*kick)*kDeg),RotZ(-(kAimOut*a+out)*kDeg));
+    p->rot[kForearmR]=RotX((kAimElbow*a-kRecoilElbow*kick)*kDeg);
     Finish(p);
     const float yaw=Clamp(in.aimYaw,-kMostAimYaw*kDeg,kMostAimYaw*kDeg);
-    const float pitch=Clamp(in.aimPitch,-kMostAimPitch*kDeg,kMostAimPitch*kDeg);
+    const float pitch=Clamp(in.aimPitch,-kMostAimPitch*kDeg,kMostAimPitch*kDeg)+kRecoilMuzzle*kDeg*in.recoil*a;
     const float dir[3]={std::sin(yaw)*std::cos(pitch),std::sin(pitch),std::cos(yaw)*std::cos(pitch)};
     // the hand's model rotation wanted: the aim's (rifle along it), blended from the bind's (hanging, rifle level)
     const M3 want=Facing(dir);
@@ -534,14 +566,19 @@ inline void Tomahawk(const PoseInput& in,const Rig& rig,Pose* p) {
     }
     // drawn: the swing's arm (overrides the aim), then the axe in the hand with its blade along the hand's forward
     const float u=in.swing;
-    float raise,across;
-    if(u<kWindUp){const float k=Smooth(u/kWindUp);raise=150.0f*k;across=-20.0f*k;}
-    else if(u<kStrike){const float k=Smooth((u-kWindUp)/(kStrike-kWindUp));raise=150.0f-170.0f*k;across=-20.0f+70.0f*k;}
-    else {const float k=Smooth((u-kStrike)/(1.0f-kStrike));raise=-20.0f+20.0f*k;across=50.0f-50.0f*k;}
-    p->rot[kUpperArmR]=Mul(RotX(-raise*kDeg),RotY(across*kDeg));
+    const int c=in.combo<0 ? 0 : in.combo>2 ? 2 : in.combo;
+    const Swing& w=kCombo[c];
+    const float a=WindEnd(c),b=StrikeEnd(c);
+    float key[3];   // raise, across, twist
+    for(int i=0;i<3;++i) {
+        if(u<a)key[i]=w.wind[i]*Smooth(u/a);
+        else if(u<b)key[i]=w.wind[i]+(w.strike[i]-w.wind[i])*Smooth((u-a)/(b-a));
+        else key[i]=w.strike[i]*(1.0f-Smooth((u-b)/(1.0f-b)));
+    }
+    p->rot[kUpperArmR]=Mul(RotX(-key[0]*kDeg),RotY(key[1]*kDeg));
     p->rot[kForearmR]=RotX(-25.0f*kDeg);
     p->rot[kHandR]=RotX(-40.0f*kDeg);
-    p->rot[kChest]=Mul(p->rot[kChest],RotY(across*0.3f*kDeg));
+    p->rot[kChest]=Mul(p->rot[kChest],RotY(key[2]*kDeg));
     p->scale[kRifle]=0.0f;   // the rifle away while the tomahawk is out
     Finish(p);
     const float axis[3]={rig.joint[kAxeBlade][0]-rig.joint[kAxe][0],rig.joint[kAxeBlade][1]-rig.joint[kAxe][1],

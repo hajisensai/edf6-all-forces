@@ -50,6 +50,10 @@ PoseInput Aim(float u) {
 PoseInput AimWalk(float u) { PoseInput i=Aim(0.5f); i.gait=u*2.0f*kPi; i.stride=0.6f; return i; }
 PoseInput Guard(float u) { PoseInput i; i.t=u; i.guard=u<0.5f ? u*2.0f : 1.0f; i.aim=1.0f; return i; }
 PoseInput Swing(float u) { PoseInput i; i.t=u; i.swing=u; i.aim=0.0f; return i; }
+PoseInput Slash(float u) { PoseInput i=Swing(u); i.combo=1; return i; }
+PoseInput Rise(float u) { PoseInput i=Swing(u); i.combo=2; return i; }
+PoseInput Boost(float u) { PoseInput i; i.t=u; i.air=1.0f; i.boost=u<0.3f ? u/0.3f : 1.0f; i.lean=20.0f*kDeg; i.aim=1.0f; return i; }
+PoseInput Recoil(float u) { PoseInput i=Aim(0.5f); const float s=u*0.6f; i.recoil=s<0.06f ? s/0.06f : s<0.41f ? Smooth(1.0f-(s-0.06f)/0.35f) : 0.0f; return i; }
 // the funnels launched one by one, each flying a ring 30 m ahead at its chest's height, nose to the ring's centre
 PoseInput Funnels(float u) {
     PoseInput i; i.t=u;
@@ -64,7 +68,8 @@ PoseInput Funnels(float u) {
 PoseInput Cannon(float u) { PoseInput i; i.t=u; i.cannon=u; i.crouch=0.3f*u; i.aim=0.0f; return i; }
 constexpr Scenario kScenarios[]={
     {"stand",Stand},{"walk",Walk},{"run",Run},{"fly",Fly},{"land",Land},{"aim",Aim},{"aimwalk",AimWalk},
-    {"guard",Guard},{"swing",Swing},{"funnels",Funnels},{"cannon",Cannon},
+    {"guard",Guard},{"swing",Swing},{"slash",Slash},{"rise",Rise},{"funnels",Funnels},{"cannon",Cannon},
+    {"boost",Boost},{"recoil",Recoil},
 };
 
 int failures=0;
@@ -87,7 +92,7 @@ void Check(const Scenario& s,int f,const PoseInput& in,const Rig& rig,const Pose
         const float want[3]={std::sin(yaw)*std::cos(pitch),std::sin(pitch),std::cos(yaw)*std::cos(pitch)};
         const float* got=&p.modelRot[kRifle].m[6];
         const float dot=got[0]*want[0]+got[1]*want[1]+got[2]*want[2];
-        if(dot<std::cos(2.0f*kDeg))Fail(s.name,f,"the rifle is off the aim");
+        if(dot<std::cos((2.0f+kRecoilMuzzle*in.recoil)*kDeg))Fail(s.name,f,"the rifle is off the aim (its kick aside)");
     }
     if(in.swing>=0.0f) {
         if(Dist(p.modelPos[kAxe],p.modelPos[kHandR])>1.5f)Fail(s.name,f,"the drawn tomahawk is not in the right hand");

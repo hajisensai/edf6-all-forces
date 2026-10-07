@@ -12,7 +12,7 @@ constexpr std::uint64_t kHolderRifle=0,kHolderMissile=1;
 constexpr float kRifleInterval=0.5f,kMissileInterval=2.5f;     // s: their SGOs' FireInterval (30, 150 frames)
 constexpr float kAimRange=800.0f;                              // m: the reticle's farthest
 // the tomahawk
-constexpr float kSwingSec=0.8f,kAxeAhead=11.0f,kAxeReach=17.0f,kAxeHigh=16.0f;
+constexpr float kAxeAhead=11.0f,kAxeReach=17.0f,kAxeHigh=16.0f;
 constexpr int kAxeMostHits=6;
 // the cannon
 constexpr int kMegaBeams=5;
@@ -30,6 +30,7 @@ using FunnelPhase=sazabi::funnels::Phase;
 struct Arms {
     Special special=Special::missiles;
     bool switchHeld=false,meleeHeld=false,secondaryHeld=false,queued=false,struck=false,whooshed=false;
+    int combo=0;                  // the combo's swing now (sazabi_pose.h kCombo: chop, slash, rising cut)
     float swing=-1.0f,guard=0.0f,charge=0.0f,brace=0.0f,cannonCool=0.0f,megaLeft=0.0f;
     float megaDamage=0.0f,megaYaw[kMegaBeams]{};
     RoundObj glow{},mega[kMegaBeams]{};
