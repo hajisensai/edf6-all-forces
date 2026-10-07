@@ -11,9 +11,10 @@ ULONGLONG testNow=1000;
 int emcCalls=0,damageCalls=0,enemyVisits=0,soundCalls=0;
 sazabi_net::State lastNetwork;
 PlayerFix player{};
-const void* visibleObjects[4]{};
-float visiblePositions[4][3]{};
+const void* visibleObjects[40]{};
+float visiblePositions[40][3]{};
 int visibleCount=0;
+float testMapHit=-1.0f;
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { return nullptr; }
@@ -38,7 +39,7 @@ bool RoundSize(const RoundObj&,float) noexcept { return false; }
 void RoundDrop(RoundObj&) noexcept {}
 unsigned char* PlayerHuman() noexcept { return nullptr; }
 bool HumanOnFoot(const unsigned char*) noexcept { return false; }
-float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
+float MapRay(const float*,const float*,float*) noexcept { return testMapHit; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor visitor,void* context) noexcept {
     ++enemyVisits;
     for(int i=0;i<visibleCount;++i)visitor(context,visibleObjects[i],visiblePositions[i]);
@@ -59,6 +60,10 @@ bool SazabiNetSend(unsigned char*,sazabi_net::State s) noexcept { lastNetwork=s;
 
 namespace {
 int checks=0,failures=0;
+int controlDeletes=0;
+void DeleteControl(void*) { ++controlDeletes; }
+using ControlFn=void(*)(void*);
+ControlFn controlVtable[2]={nullptr,&DeleteControl};
 void Check(bool ok,const char* what) {
     ++checks;
     if(!ok){++failures;std::printf("FAIL %s\n",what);}
@@ -72,7 +77,11 @@ bool Near(const float* a,const float* b) {
 int main() {
     using namespace crew;
     Enemies enemies{};
-    int objects[kMostTargets+2]{};
+    alignas(16) unsigned char objects[kMostTargets+2][0x318]{},targetControls[kMostTargets+2][0x10]{};
+    for(int i=0;i<kMostTargets+2;++i) {
+        Put<void*>(objects[i],kSelfCtrl,targetControls[i]);Put<LONG>(targetControls[i],edf::kCtrlUses,1);
+        Put<void*>(targetControls[i],0,controlVtable);Put<LONG>(targetControls[i],0xC,1);
+    }
     for(int i=0;i<kMostTargets;++i) {
         const float at[3]={static_cast<float>(100+i),0,0};
         SeeEnemy(&enemies,&objects[i],at);
@@ -88,6 +97,107 @@ int main() {
     bool sorted=true,allReal=true;
     for(int i=0;i<enemies.n;++i){allReal=allReal && enemies.obj[i];if(i)sorted=sorted && enemies.d2[i-1]<=enemies.d2[i];}
     Check(sorted && allReal,"a full target list stays sorted and contains no phantom origin enemy");
+
+    // Production Assist -> Aim, using the actual registry callback and camera rig.
+    alignas(16) unsigned char assistVehicle[0x2100]{},assistSeat[kSeatStride]{};
+    Put<void*>(assistVehicle,kSeats,assistSeat);
+    Mech assisted{};assisted.rootOk=true;
+    for(int i=0;i<16;++i)assisted.root[i]=assisted.rootInv[i]=i%5==0 ? 1.0f : 0.0f;
+    config.sazabiAimAssist=true;config.sazabiAssistPull=0;
+    float eye[3],dir[3];ViewRay(ViewOf(assisted),assisted.root+12,eye,dir);
+    visibleCount=kMostTargets+1;
+    for(int i=0;i<visibleCount;++i) {
+        visibleObjects[i]=&objects[i];
+        const float angle=(i==kMostTargets ? 0.1f : 7.0f)*sazabi::kDeg;
+        visiblePositions[i][0]=eye[0]+300*std::sin(angle);
+        visiblePositions[i][1]=eye[1];visiblePositions[i][2]=eye[2]+300*std::cos(angle);
+    }
+    Assist(assisted,assistVehicle,1.0f/60.0f);Aim(assisted);
+    Check(assisted.arms.hasAssist && assisted.arms.assistObj==&objects[kMostTargets],
+          "production assist picks a late central enemy from a crowd");
+    Check(assisted.arms.hasAim && Near(assisted.arms.aim,visiblePositions[kMostTargets]),
+          "production Aim passes the assisted point to weapons");
+    testMapHit=299.0f;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.hasAssist,"production assist releases a held target one metre behind a wall");
+    testMapHit=-1;Assist(assisted,assistVehicle,1.0f/60.0f);
+    assisted.arms.swing=0;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.hasAssist,"swinging suppresses assistance");
+    assisted.arms.swing=-1;Assist(assisted,assistVehicle,1.0f/60.0f);
+    config.sazabiAimAssist=false;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.hasAssist,"disabling assistance releases the held target");
+    config.sazabiAimAssist=true;Assist(assisted,assistVehicle,1.0f/60.0f);DropArms(assisted);
+    Check(!assisted.arms.hasAssist && !assisted.arms.assistObj,"leaving clears the previous pilot's held target");
+    // The hard lock must survive crowded scenes, and switching must rank on the requested side rather than keeping
+    // the first registry points (or only those nearest the centre on the wrong side).
+    assistSeat[kSeatPad]=1;Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
+    Controls lockControls{};LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(assisted.arms.lockOn && assisted.arms.lockOnTarget.obj==&objects[kMostTargets],
+          "hard lock acquisition finds the late central enemy in a crowd");
+    Check(At<LONG>(targetControls[kMostTargets],0xC)==2,"acquisition pins the target control with one weak reference");
+    Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(assisted.arms.lockOn && assisted.arms.hasAssist && assisted.arms.assistObj==&objects[kMostTargets],
+          "hard lock retention only gathers its held enemy beyond a full registry buffer");
+    assisted.heading=assisted.aimPitch=0;
+    ViewRay(ViewOf(assisted),assisted.root+12,eye,dir);
+    visibleCount=kMostTargets+2;
+    for(int i=0;i<visibleCount;++i) {
+        visibleObjects[i]=&objects[i];
+        const float angle=(i==kMostTargets ? 0.0f : i==kMostTargets+1 ? 20.0f : -5.0f)*sazabi::kDeg;
+        visiblePositions[i][0]=eye[0]+300*std::sin(angle);visiblePositions[i][1]=eye[1];
+        visiblePositions[i][2]=eye[2]+300*std::cos(angle);
+    }
+    std::memcpy(assisted.arms.assist,visiblePositions[kMostTargets],12);
+    assisted.arms.flickCool=0;Put<std::uint16_t>(assistSeat,kSeatButtons,0);
+    lockControls.turn=20;lockControls.pitch=0.1f;
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(assisted.arms.lockOnTarget.obj==&objects[kMostTargets+1],"flick finds the next enemy despite a crowd on the wrong side");
+    Check(At<LONG>(targetControls[kMostTargets],0xC)==1 && At<LONG>(targetControls[kMostTargets+1],0xC)==2,
+          "switching transfers exactly one weak reference to the next target");
+    Check(lockControls.turn==0 && lockControls.pitch==0,"hard lock consumes view input for target switching");
+    testMapHit=1;Assist(assisted,assistVehicle,2.0f);
+    Check(!assisted.arms.lockOn && !assisted.arms.hasAssist,"hard lock releases after sustained map occlusion");
+    testMapHit=-1;assisted.arms.lockOn=true;AssignLockTarget(assisted.arms,ObjRef::Of(objects[0]));visibleCount=0;
+    Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn,"hard lock releases a deleted enemy");
+    assisted.arms.lockOn=true;AssignLockTarget(assisted.arms,ObjRef::Of(objects[0]));
+    assisted.arms.lockKeyHeld=false;Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
+    lockControls.turn=1;LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(!assisted.arms.lockOn && lockControls.turn==1,"pressing the lock key again restores manual view input");
+    DropArms(assisted);
+    Check(!assisted.arms.lockKeyHeld && assisted.arms.flickCool==0,"leaving clears hard-lock input latches");
+    // Destroy a locked object and place another live enemy at exactly the same address, with its new control block.
+    visibleCount=1;visibleObjects[0]=objects[0];
+    visiblePositions[0][0]=eye[0];visiblePositions[0][1]=eye[1];visiblePositions[0][2]=eye[2]+300;
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(assisted.arms.lockOn,"real-layout enemy is locked before address reuse");
+    alignas(16) unsigned char replacementControl[0x10]{};Put<LONG>(replacementControl,edf::kCtrlUses,1);
+    Put<void*>(replacementControl,0,controlVtable);Put<LONG>(replacementControl,0xC,1);
+    Put<LONG>(targetControls[0],edf::kCtrlUses,0);InterlockedDecrement(reinterpret_cast<volatile LONG*>(targetControls[0]+0xC));
+    Check(At<LONG>(targetControls[0],0xC)==1 && controlDeletes==0,"enemy destruction cannot recycle the pinned control");
+    Put<void*>(objects[0],kSelfCtrl,replacementControl);
+    Put<std::uint16_t>(assistSeat,kSeatButtons,0);
+    lockControls.turn=20;assisted.arms.flickCool=0;
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn,"same-address replacement enemy cannot inherit a hard lock");
+    Check(lockControls.turn==20 && controlDeletes==1 && At<LONG>(targetControls[0],0xC)==0,
+          "expired identity restores input and deletes its control only after the final weak release");
+    DropArms(assisted);Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(assisted.arms.lockOn && assisted.arms.lockOnTarget.ctrl==replacementControl,"new enemy can be explicitly reacquired");
+    objects[0][kDead]=1;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn && At<LONG>(replacementControl,0xC)==1,"dead enemy releases its held weak");
+    objects[0][kDead]=0;DropArms(assisted);
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    objects[0][0x18]|=4;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn && At<LONG>(replacementControl,0xC)==1,"despawn flag releases the held weak");
+    objects[0][0x18]=0;
+    // The real table reset and stale-slot replacement must release weak references before Mech{} overwrites them.
+    AssignLockTarget(mechs[0].arms,ObjRef::Of(objects[0]));ResetSazabi();
+    Check(At<LONG>(replacementControl,0xC)==1,"mission reset releases hard-lock references before clearing the table");
+    AssignLockTarget(mechs[0].arms,ObjRef::Of(objects[0]));Make(assistVehicle);
+    Check(At<LONG>(replacementControl,0xC)==1,"reusing a mech slot releases the previous lock reference");
+    ResetSazabi();
+    config=Config{};visibleCount=0;
 
     // Real Pose writes and BoneAt/DockPoint reads, interleaved across two different rigs/poses.
     // Both bone arrays are already resolved, so no game model lookup is needed.

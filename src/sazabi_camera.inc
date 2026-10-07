@@ -64,6 +64,161 @@ void DropView() noexcept {
     ReleaseSRWLockExclusive(&viewLock);
 }
 
+// The aim assist and the lock-on (sazabi_assist.h), the player's only.
+//  - The lock-on (Sekiro's; ini SazabiLockKey / SazabiLockButton, the mouse's middle button / R3): pressed, the enemy
+//    nearest the reticle within kLockCone, seen from the eye, is held; the camera (the heading and the aim's pitch) is
+//    pulled hard onto it each frame, on the mouse as on a pad, the mech facing it. While locked the stick's and the
+//    mouse's turn no longer turn the view: a flick (kFlick of turn, fading kFlickFade a second) switches to the next
+//    enemy that way (Switch). It lets go pressed again, its enemy dead or past kLockLetGo x SazabiAssistRange, or out
+//    of sight kLockHiddenSec on end. LockInput runs before the stick turns the view (it takes the stick), Assist after.
+//  - The soft assist (ini SazabiAimAssist ...): not locked, the enemies' lock points within the cone the held one keeps
+//    (SazabiAssistCone x kAssistKeep) are gathered, the one picked must be seen from the eye (no terrain or building
+//    between: MapRay; those hidden are passed over for the next, at most kAssistRays tried). On a pad (or the mouse with
+//    SazabiAssistMousePull) the view is eased toward it (a shooter's pad assist: on the mouse it would fight the hand).
+//  Either way the point is the aim (Aim): every weapon fires at it, and the HUD marks it.
+constexpr float kAssistKeep=1.6f;     // the held enemy kept this many times the cone
+constexpr float kAssistMostPull=1.5f; // rad/s: the soft pull's fastest
+constexpr int kAssistRays=4;
+constexpr float kLockCone=25.0f*sazabi::kDeg,kLockLetGo=1.25f,kLockHiddenSec=1.5f;
+constexpr float kLockPull=10.0f,kLockMostPull=3.0f;   // 1/s, rad/s: the lock's pull
+constexpr float kFlick=12.0f*sazabi::kDeg,kFlickFade=4.0f,kFlickCool=0.35f;
+constexpr float kSwitchMost=80.0f*sazabi::kDeg;      // the next enemy within this of the view's heading
+struct AssistSeen : sazabi::assist::Candidates<kMostTargets> {
+    float eye[3],dir[3],cone,keep,range;
+    const void* held=nullptr;
+    const float* switchFrom=nullptr;
+    float switchYaw=0.0f,switchTurn=0.0f;
+};
+void SeeAssist(void* ctx,const void* obj,const float* at) {
+    AssistSeen* const s=static_cast<AssistSeen*>(ctx);
+    if(!at || !std::isfinite(at[0]+at[1]+at[2]))return;
+    const sazabi::assist::Point point{obj,{at[0],at[1],at[2]}};
+    if(s->switchFrom) {
+        if(sazabi::assist::Switch(s->eye,s->switchYaw,s->switchFrom,&point,1,s->held,s->switchTurn,s->range,kSwitchMost)<0)return;
+        const float fromYaw=std::atan2(s->switchFrom[0]-s->eye[0],s->switchFrom[2]-s->eye[2]);
+        const float targetYaw=std::atan2(at[0]-s->eye[0],at[2]-s->eye[2]);
+        s->Insert(point,std::fabs(sazabi::assist::WrapPi(targetYaw-fromYaw)),nullptr);
+    } else s->Add(point,s->eye,s->dir,s->cone,s->keep,s->range,s->held);
+}
+// The enemies' lock points within `cone` of the centre's ray and `range` of the eye (the view as it is now).
+void Gather(const Mech& m,const unsigned char* v,float cone,float range,AssistSeen* s,const void* held=nullptr,float keep=-1.0f) noexcept {
+    s->n=0;s->cone=cone;s->keep=keep<0.0f ? cone : keep;s->range=range;s->held=held;
+    ViewRay(ViewOf(m),m.root+12,s->eye,s->dir);
+    VisitEnemies(v,SeeAssist,s);
+}
+bool SeenFrom(const float* eye,const float* at) noexcept {
+    float hit[3];
+    const float wall=MapRay(eye,at,hit);
+    const float d[3]={at[0]-eye[0],at[1]-eye[1],at[2]-eye[2]};
+    return sazabi::assist::Visible(Len(d),wall);
+}
+// Pick's point among those seen from the eye (the hidden passed over), or -1.
+int PickSeen(AssistSeen& s,float cone,float keep,const void* held) noexcept {
+    for(int tries=0;tries<kAssistRays && s.n>0;++tries) {
+        const int i=sazabi::assist::Pick(s.eye,s.dir,s.pts,s.n,cone,keep,s.range,held);
+        if(i<0)return -1;
+        if(SeenFrom(s.eye,s.pts[i].at))return i;
+        s.pts[i]=s.pts[--s.n];
+    }
+    return -1;
+}
+// The heading and the aim's pitch eased onto `at` (sazabi_assist.h Solve / Pull).
+void PullOnto(Mech& m,const float* at,float gain,float most,float dt) noexcept {
+    namespace as=sazabi::assist;
+    const View base=ViewOf(m);
+    float wantYaw,wantPitch;
+    as::Solve(at,m.heading,m.aimPitch,[&](float yaw,float pitch,float* eye) noexcept {
+        View w=base;w.yaw=yaw;w.pitch=pitch;
+        float dir[3];
+        ViewRay(w,m.root+12,eye,dir);
+    },&wantYaw,&wantPitch);
+    m.heading=as::WrapPi(m.heading+as::Pull(m.heading,wantYaw,gain,most,dt));
+    m.aimPitch=Clamp(m.aimPitch+as::Pull(m.aimPitch,Clamp(wantPitch,-kAimMost,kAimMost),gain,most,dt),-kAimMost,kAimMost);
+}
+bool LiveLockTarget(const ObjRef& ref) noexcept {
+    const auto object=static_cast<const unsigned char*>(ref.obj);
+    // The held weak keeps this control readable after the enemy dies. Test uses before touching the old object.
+    return object && ref.ctrl && Readable(ref.ctrl,12) && At<std::int32_t>(ref.ctrl,8)>0 &&
+        Readable(object,kDead+1) && ref.Is(object) && !(object[0x18]&4) && !object[kDead];
+}
+void LetGo(Arms& a,const unsigned char* v,const char* why) noexcept {
+    if(a.lockOn)Log("SAZABI v=%p lock-on let go: %s",v,why);
+    AssignLockTarget(a,{});a.lockOn=false;a.flick=0.0f;a.lockHidden=0.0f;
+}
+
+// Before the stick turns the view: the lock key, and while locked the stick's turn taken (a flick switches).
+void LockInput(Mech& m,unsigned char* v,Controls& c,float dt) noexcept {
+    Arms& a=m.arms;
+    const bool key=Pressed(SeatAt(v,0),Cfg().sazabiLockKey,Cfg().sazabiLockButton);
+    const bool press=key && !a.lockKeyHeld;
+    a.lockKeyHeld=key;
+    if(!m.rootOk){LetGo(a,v,"no frame");return;}
+    // Validate before a flick consumes the player's input or can transfer the old lock to another enemy.
+    if(a.lockOn && !LiveLockTarget(a.lockOnTarget)){LetGo(a,v,"target identity expired");return;}
+    const float range=Cfg().sazabiAssistRange;
+    if(press && a.lockOn){LetGo(a,v,"released");return;}
+    if(press) {
+        AssistSeen s{};
+        Gather(m,v,kLockCone,range,&s);
+        const int i=PickSeen(s,kLockCone,kLockCone,nullptr);
+        if(i<0){Log("SAZABI v=%p lock-on: no enemy within %.0f deg of the reticle",v,kLockCone/sazabi::kDeg);return;}
+        const ObjRef target=ObjRef::Of(s.pts[i].obj);
+        if(!LiveLockTarget(target)){LetGo(a,v,"target expired on acquisition");return;}
+        AssignLockTarget(a,target);
+        a.lockOn=true;a.lockHidden=0.0f;a.flick=0.0f;a.flickCool=kFlickCool;
+        Log("SAZABI v=%p lock-on: enemy %p",v,a.lockOnTarget.obj);
+    }
+    if(!a.lockOn)return;
+    a.flick=a.flick*std::exp(-kFlickFade*dt)+c.turn*dt;
+    a.flickCool=std::fmax(0.0f,a.flickCool-dt);
+    c.turn=0.0f;c.pitch=0.0f;   // the view is the lock's
+    if(std::fabs(a.flick)<kFlick || a.flickCool>0.0f || !a.hasAssist)return;
+    AssistSeen s{};
+    s.switchFrom=a.assist;s.switchYaw=m.heading;s.switchTurn=a.flick;
+    Gather(m,v,sazabi::kPi,range,&s,a.lockOnTarget.obj);
+    for(int tries=0;tries<kAssistRays && s.n>0;++tries) {
+        const int i=sazabi::assist::Switch(s.eye,m.heading,a.assist,s.pts,s.n,a.lockOnTarget.obj,a.flick,range,kSwitchMost);
+        if(i<0)break;
+        if(!SeenFrom(s.eye,s.pts[i].at)){s.pts[i]=s.pts[--s.n];continue;}
+        const ObjRef next=ObjRef::Of(s.pts[i].obj);
+        if(!LiveLockTarget(next)){s.pts[i]=s.pts[--s.n];continue;}
+        AssignLockTarget(a,next);a.lockHidden=0.0f;
+        Log("SAZABI v=%p lock-on switched %s: enemy %p",v,a.flick>0.0f ? "left" : "right",a.lockOnTarget.obj);
+        break;
+    }
+    a.flick=0.0f;a.flickCool=kFlickCool;
+}
+
+// After the stick has turned the view: the locked enemy or the soft assist's, and the pull onto it.
+void Assist(Mech& m,unsigned char* v,float dt) noexcept {
+    Arms& a=m.arms;
+    const void* const held=a.hasAssist ? a.assistObj : nullptr;
+    a.hasAssist=false;a.assistObj=nullptr;
+    if(!m.rootOk)return;
+    const float range=Cfg().sazabiAssistRange;
+    AssistSeen s{};
+    if(a.lockOn) {
+        if(!LiveLockTarget(a.lockOnTarget)){LetGo(a,v,"target identity expired");return;}
+        Gather(m,v,-1.0f,range*kLockLetGo,&s,a.lockOnTarget.obj,sazabi::kPi);
+        const int i=sazabi::assist::Pick(s.eye,s.dir,s.pts,s.n,-1.0f,sazabi::kPi,s.range,a.lockOnTarget.obj);   // its points alone
+        if(i<0){LetGo(a,v,"its enemy is gone or out of range");return;}
+        a.lockHidden=SeenFrom(s.eye,s.pts[i].at) ? 0.0f : a.lockHidden+dt;
+        if(a.lockHidden>kLockHiddenSec){LetGo(a,v,"out of sight");return;}
+        a.hasAssist=true;a.assistObj=a.lockOnTarget.obj;std::memcpy(a.assist,s.pts[i].at,12);
+        PullOnto(m,a.assist,kLockPull,kLockMostPull,dt);
+        return;
+    }
+    if(!Cfg().sazabiAimAssist || a.swing>=0.0f)return;
+    const float cone=Cfg().sazabiAssistCone*sazabi::kDeg;
+    Gather(m,v,cone,range,&s,held,cone*kAssistKeep);
+    const int i=PickSeen(s,cone,cone*kAssistKeep,held);
+    if(i<0)return;
+    a.hasAssist=true;a.assistObj=s.pts[i].obj;std::memcpy(a.assist,s.pts[i].at,12);
+    const bool pad=At<unsigned char>(SeatAt(v,0),kSeatPad)!=0;
+    if(Cfg().sazabiAssistPull<=0.0f || (!pad && !Cfg().sazabiAssistMousePull))return;
+    PullOnto(m,a.assist,Cfg().sazabiAssistPull,kAssistMostPull,dt);
+}
+
 // The aim this frame: the player's along the camera's centre ray (what it meets within kAimRange, else its far end);
 // an NPC's from the muzzle along its heading and pitch. The rifle arm is then turned onto it (the pose's aim yaw and
 // pitch from the right shoulder, sazabi_pose.h AimRifle), the cannon's beams and the HUD's reticle go to it.
@@ -84,6 +239,7 @@ void Aim(Mech& m) noexcept {
     for(int k=0;k<3;++k)stop[k]=from[k]+dir[k]*kAimRange;
     a.aimHit=MapRay(from,stop,hit)>=0.0f;
     std::memcpy(a.aim,a.aimHit ? hit : stop,12);
+    if(!m.npc && a.hasAssist){std::memcpy(a.aim,a.assist,12);a.aimHit=true;}   // the assist's enemy (Assist)
     float muzzle[3];
     BoneAt(m,sazabi::kMuzzle,nullptr,muzzle);
     const float d[3]={a.aim[0]-muzzle[0],a.aim[1]-muzzle[1],a.aim[2]-muzzle[2]};
