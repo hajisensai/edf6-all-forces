@@ -33,6 +33,7 @@ bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
 bool AiGunner(const unsigned char*) noexcept { MissingDependency();return false; }
+bool IsSazabi(const void*) noexcept { return false; }
 namespace jet { int LockersOf(const void*,float (*)[3],int) noexcept { MissingDependency();return 0; } }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingDependency();return 0; }
 unsigned char* PlayerHuman() noexcept { MissingDependency();return nullptr; }

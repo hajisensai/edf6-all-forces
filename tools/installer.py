@@ -386,6 +386,7 @@ def install(game: str) -> None:
     import make_chute
     import make_jets
     import make_katyusha
+    import make_sazabi
     import make_stock_stores
     import make_sidecar
     import make_sub
@@ -423,6 +424,7 @@ def install(game: str) -> None:
         turret = ({**turret[0], **handed}, turret[1])
         stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
+    sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     print('\n全部生成完毕，开始写入。')
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
@@ -432,7 +434,8 @@ def install(game: str) -> None:
             (make_chute.install(game, chute) if chute is not None else []) + \
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
-            (make_sidecar.install(game, sidecar) if sidecar is not None else []):
+            (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
+            (make_sazabi.install(game, sazabi) if sazabi is not None else []):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
         files, skipped = stock
@@ -454,7 +457,7 @@ def install(game: str) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sazabi', sazabi)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -495,6 +498,7 @@ def uninstall(game: str) -> None:
     import make_chute
     import make_jets
     import make_katyusha
+    import make_sazabi
     import make_stock_stores
     import make_sidecar
     import make_sub
@@ -514,7 +518,7 @@ def uninstall(game: str) -> None:
             print('已取消，没有删除任何文件。')
             return
         remove_autoturret(game)
-        for remove in (make_stock_stores.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
+        for remove in (make_stock_stores.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

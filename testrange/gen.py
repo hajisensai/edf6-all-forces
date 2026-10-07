@@ -21,8 +21,9 @@ import jet_models  # noqa: E402
 import ledger  # noqa: E402
 import recoil  # noqa: E402
 import rmpa  # noqa: E402
+import sazabi_model  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
-from vcobjects import (DEFAULT_GAME, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
+from vcobjects import (DEFAULT_GAME, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
                        as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
@@ -96,6 +97,7 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_sub_carrier_mission', '航空潜舰（插件驾驶，原尺寸 1664 米，放在最远的点；测试场生成）'),
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
+    (SAZABI_JET, '沙扎比 MSN-04（自己驾驶，空着停放；要有沙扎比模型目录）'),
     # The NPC kinds parked for the player (BOARDABLE_PARKED): each one's parked twin (vcobjects Jet.parked: the whole
     # plane is solid, its boarding point at its side on the ground, every class may fly it).
     (parked_name('edf6tr_jet_fighter_mission'), '制空战斗机·停放（自己驾驶；测试场生成）'),
@@ -153,6 +155,7 @@ DERIVED: dict[str, str] = {
     'edf6tr_sub_carrier_mission': 'V506_HELI',
     'edf6tr_pjet_fighter_mission': 'V506_HELI',
     'edf6tr_pjet_strike_mission': 'V506_HELI',
+    SAZABI_JET: 'V506_HELI',   # the Sazabi: its own model on the V506 body (vcobjects JETS)
     **{parked_name(k): 'V506_HELI' for k in PARKED_KINDS},
     # Ground vehicles with no stock `_mission` SGO: the call-in one, vehicle_setup renamed (same layout).
     'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
@@ -302,6 +305,10 @@ def grand_battle(plan: Plan) -> Plan:
     # are parked above instead (they were here only for the player to fly).
     plan.friends = {'edf6tr_jet_fighter_mission': 2, 'edf6tr_jet_interceptor_mission': 1, 'edf6tr_jet_strike_mission': 2,
                     'vehicle403_tank_mission': 3}
+    if sazabi_model.model_dir():   # the Sazabi (tools/make_sazabi.py) only with its model: without it there is none
+        # The plain's 37 spots are all taken: the second drill tank gives up its spot.
+        plan.vehicles[SAZABI_JET] = 1
+        plan.vehicles['edf6tr_drill_mission'] = 1
     plan.waves.enabled = False
     plan.air = AirWaves(enabled=False)
     plan.scenario = GRAND
@@ -486,7 +493,10 @@ WIDE = frozenset({'edf6tr_v506_heli_mission', 'edf6tr_v506_heli_edf6benefits_mis
 # EMC's barrel 21.0 (v510_maser.mdb), the big tank's 16.6 (in WIDE before: 15), the Proteus's legs 12.0. Each its reach,
 # rounded up.
 REACH: dict[str, float] = {'v510_maser_mission': 21.5, 'vehicle404_bigtank': 17.0, 'v614_proteus_mk2_mission': 12.5,
-                           'vehicle407_bigbegaruta_mission': 11.5}
+                           'vehicle407_bigbegaruta_mission': 11.5,
+                           # the Sazabi: its shield and funnel packs 11.1 m out to a side (its tubes reach 15.1 m back,
+                           # but 13 m up: over every vehicle parked round it)
+                           SAZABI_JET: 12.0}
 # The air carriers (pylib/vcobjects.py JETS: the EDF transport x 1.6, 59 x 77 m): half its diagonal (48.5 m), whichever
 # way it faces, and a margin.
 CARRIER_MODEL = 'EDF6VC_CARRIER.MRAB'
@@ -943,6 +953,11 @@ def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
     rel = f'OBJECT/{file}'
     if os.path.isfile(led.disk(rel)):
         led.need(OWNER, rel)
+    elif file == jet_models.SAZABI_FILE:   # the installer's (tools/make_sazabi.py), else made from its model folder
+        folder = sazabi_model.model_dir()
+        if folder is None:
+            raise RuntimeError('没有沙扎比模型目录（models/sazabi）：测试场放不了沙扎比')
+        led.put(OWNER, rel, sazabi_model.build_archive(game, folder)[0])
     elif file in jet_models.GENERATED_FILES:
         led.put(OWNER, rel, jet_models.generated(game, file))
     else:

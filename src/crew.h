@@ -98,6 +98,32 @@ struct Config {
     float playerJetAimGain=1.0f;    // ...how hard the mouse's aim turns the plane toward it (times kSteer)
     float playerRotorLift=1.0f;     // a rotor craft the player flies: its vertical acceleration apart from its thrust, times the derived one (hover_lift.h; 0: one budget, the NPCs')
     bool playerJetMouseFlight=true; // ...the mouse's aim steers the plane once the mouse moves, the keys once pressed (off: the keys alone)
+    // The Sazabi (sazabi.cpp, docs/gundam-plan.md): walked and flown by the plugin with the player in it.
+    bool sazabi=true;
+    float sazabiWalk=12.0f;         // m/s ...the stick half forward (a walk)
+    float sazabiRun=26.0f;          // m/s ...full forward (a run)
+    float sazabiFly=48.0f;          // m/s ...in the air
+    float sazabiDash=60.0f;         // m/s ...a boost dash (held: on, burning the thrusters)
+    float sazabiClimb=24.0f;        // m/s up at the full ascend trigger
+    float sazabiGravity=20.0f;      // m/s^2 falling with the thrusters off
+    float sazabiTurn=110.0f;        // deg/s at the full right stick
+    float sazabiMouseTurn=0.6f;     // deg of turn / aim per unit of the mouse's frame movement
+    float sazabiThrusterSec=8.0f;   // s of boost or climb a full gauge holds
+    float sazabiThrusterRegen=0.4f; // of a full gauge a second, on its feet (three times that just after landing)
+    bool sazabiInvertAim=false;     // the aim's up and down the other way
+    int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
+    int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
+    int sazabiSwitchKey=0x52;       // the special the secondary fires: shield missiles, funnels, cannon (R; a pad's LB)
+    int sazabiSwitchButton=0x10;
+    int sazabiMeleeKey=0x56;        // the beam tomahawk swung (V; a pad's X)
+    int sazabiMeleeButton=0x04;
+    int sazabiGuardKey=0x42;        // held: the shield up (B; a pad's RB)
+    int sazabiGuardButton=0x20;
+    float sazabiGuardShare=0.25f;   // of a hit from ahead the shield lets through
+    float sazabiAxeDamage=12000.0f; // a tomahawk strike, each enemy in reach
+    float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
+    float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
+    bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
     bool heliMouseAim=true;         // a heli or rotor craft the player flies on the keyboard and mouse: the mouse-aim flight (heliaim.h; off: the stock / keys)
     bool heliFlightHud=true;        // ...and the helicopter HUD (hud.cpp HeliHud) in place of the takeoff panel / the jet cockpit (off: those)
     float playerJetRamDamage=1.0f;  // a player jet's ram: the enemies round it take its kinetic energy's damage times this (0: none)
@@ -476,6 +502,8 @@ void ShieldVehicle(unsigned char* vehicle) noexcept;   // shield.cpp: the same f
 void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
 // booster.cpp: a jet's exhaust flames on its nozzles (by its mark), burning `intensity` (0..1), `burner` longer.
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept;
+// booster.cpp: flames on nozzles placed in the world (+z out of each, rows unit), `size[i]` (length, width m) and `level[i]` (0 out .. 1) each; at most 10.
+void NozzleFlames(const unsigned char* v,const float (*m)[16],int n,const float (*size)[2],const float* level,ULONGLONG ms) noexcept;
 void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept;   // booster.cpp: an arriving jet's smoke trails
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
@@ -530,7 +558,7 @@ JetBody BomberBody(const unsigned char* inst) noexcept;
 // from its SGO's mark (veh+0x162C, kMark* in body506.cpp, the one table of them); the 506's physics step
 // (slot 57) is hooked once, there, and hands each body to its owner's step, which returns the velocity and
 // spin to set (false: leave the stock step's).
-enum class PluginBody { none, jet, sub, playerJet };
+enum class PluginBody { none, jet, sub, playerJet, sazabi };
 PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
@@ -538,6 +566,47 @@ bool Body506Ok() noexcept;                         // the physics hook is in
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
+bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept;     // sazabi.cpp
+// sazabi.cpp: the Sazabi (docs/gundam-plan.md), a 506 body with the Sazabi mark (7401-7499): never crewed, never flown
+// as a heli; with the player in seat 0 it walks and flies; its bones are posed every frame.
+bool IsSazabi(const void* vehicle) noexcept;
+void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
+// The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
+// fresh for kSazabiCueMs). False with none (not riding one).
+struct SazabiCue {
+    float thruster;          // 0..1 the thrusters' charge
+    float rifleReady;        // 0..1 to the beam rifle's next shot (1 ready)
+    int missiles;            // shield missiles left
+    float missileReady;      // 0..1 to the next salvo
+    float missileLock;       // 0..1 the lock's progress (1 locked)
+    float cannonCharge;      // 0..1 the chest cannon charging (0 not)
+    float cannonReady;       // 0..1 to the cannon's next charge
+    int funnelsOut;          // 0..6 funnels flying
+    float funnelReady;       // 0..1 to the next launch
+    bool guard,swinging,air; // the shield up, the tomahawk swinging, off its feet
+    bool hasAim;
+    float aim[3];            // the aim point (world): what the screen's centre looks at, every weapon fires at it
+    bool hasLock;
+    float lock[3];           // the missiles' locked target (world)
+    // The flight (sazabi_flight.h) and the special weapon, for the reticle's gauges and readouts:
+    float altitude;          // m: its soles over what is under them (0 on its feet)
+    float speed;             // m/s over the ground
+    float climb;             // m/s up (+) / down (-)
+    bool boosting;           // the thrusters burning (a boost dash, a climb)
+    bool overheat;           // the thrusters spent: no boost until it lands and they cool
+    int special;             // the secondary's weapon: 0 shield missiles, 1 funnels, 2 mega particle cannon
+    float aimRange;          // m from the muzzle to the aim point
+    bool aimHit;             // the centre's ray meets something within the reticle's reach (else the aim is its far end)
+    bool centred;            // the camera is the Sazabi's own (sazabi.cpp): the aim point is the screen's centre
+};
+constexpr ULONGLONG kSazabiCueMs=250;
+bool PlayerSazabiCue(SazabiCue* out) noexcept;
+// The player's Sazabi's riding camera (turretcam.cpp's look-at hook): seat `seat`'s eye and look point, false when the
+// seat is no player's Sazabi's (the stock camera then).
+bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* wasLook,float* eye,float* look) noexcept;
+void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+bool InstallSazabi() noexcept;                        // after InstallBody506
+void ResetSazabi() noexcept;                          // a new mission
 // An impact `by` a vehicle (a crash, jet.cpp / playerjet.cpp; a ground vehicle's ram, vehicleram.cpp) at `at`: `damage`
 // to the enemies of its side within about `radius` metres (the charge nearest that size: vehicleram.h NearestCharge; a
 // charge of the vehicle's own, as the blast drones' is: its team, its kills, friends untouched). False when it could not
@@ -574,7 +643,9 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // jet_bay.cpp: the EMC's rounds (emc.cpp; pylib/vcobjects.py EMC_*, tools/make_emc.py), DemoIndirectFire objects owned
 // by the EMC (its team: its side's enemies hurt, its kills, friends spared): the beam, the charge's glow (sight), the
 // break charge fired at each building on the beam's line, the blast at its end. Ready: preloaded this mission.
-enum class EmcRound { beam, sight, breakCharge, blast };
+// The Sazabi's beams are made and fired the same way (sazabi.cpp; pylib/vcobjects.py SAZABI_ROUND_FILES): the mega
+// particle cannon's beam, its charge's glow at the chest, a funnel's burst.
+enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;

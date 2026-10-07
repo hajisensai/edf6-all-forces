@@ -480,13 +480,19 @@ void ThreatTone(int state,bool launch,ULONGLONG now) noexcept {
 const wchar_t* const kClipName[kClipCount]={L"engine_heavy_idle",L"engine_heavy_load",L"engine_light_idle",L"engine_light_load",
                                             L"tracks",L"turret",L"turret_stop",L"gun_near",L"gun_far",L"reload_eject",
                                             L"reload_load",L"reload_close",L"engine_bike_idle",L"engine_bike_load",L"mg_burst",
-                                            L"gatling_burst",L"burst_tail",L"autocannon",L"brass",L"case_small",L"missile_launch"};
+                                            L"gatling_burst",L"burst_tail",L"autocannon",L"brass",L"case_small",L"missile_launch",
+                                            L"sazabi_beam_shot",L"sazabi_beam_hit",L"sazabi_saber_on",L"sazabi_saber_off",
+                                            L"sazabi_whoosh",L"sazabi_saber_hit",L"sazabi_cannon_shot",L"sazabi_funnel_launch",
+                                            L"sazabi_funnel_shot",L"sazabi_funnel_dock",L"sazabi_footstep",L"sazabi_land",
+                                            L"sazabi_dash",L"sazabi_thrusters",L"sazabi_saber_hum",L"sazabi_cannon_charge"};
 constexpr bool kClipLoops[kClipCount]={true,true,true,true,true,true,false,false,false,false,false,false,true,true,true,true,false,
-                                       false,true,false,false};
+                                       false,true,false,false,false,false,false,false,false,false,false,false,false,false,false,
+                                       false,false,true,true,true};
 // Peak of each clip as made, of full scale: the loops a little under (several play at once), the gun's report at the top.
 constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.85f,0.8f,
-                                       0.95f,0.6f,0.8f,0.9f};
-constexpr int kLoops=96,kShots=32;
+                                       0.95f,0.6f,0.8f,0.9f,0.95f,0.9f,0.8f,0.8f,0.8f,0.95f,0.98f,0.8f,0.85f,0.8f,0.95f,0.98f,
+                                       0.9f,0.8f,0.7f,0.7f};
+constexpr int kLoops=96,kShots=48;   // the Sazabi's funnels fire six at once: room for them and the vehicles'
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
 std::atomic<bool> clipsReady{false};
@@ -520,13 +526,29 @@ std::vector<float> MadeClip(int c) {
     case kClipAutocannon: return s::Autocannon();
     case kClipBrass: return s::Brass();
     case kClipCaseSmall: return s::CaseSmall();
+    case kClipSzBeamShot: return s::BeamShot();
+    case kClipSzBeamHit: return s::BeamHit();
+    case kClipSzSaberOn: return s::SaberOn();
+    case kClipSzSaberOff: return s::SaberOff();
+    case kClipSzWhoosh: return s::Whoosh();
+    case kClipSzSaberHit: return s::SaberHit();
+    case kClipSzCannonShot: return s::CannonShot();
+    case kClipSzFunnelLaunch: return s::FunnelLaunch();
+    case kClipSzFunnelShot: return s::FunnelShot();
+    case kClipSzFunnelDock: return s::FunnelDock();
+    case kClipSzFootstep: return s::Footstep();
+    case kClipSzLand: return s::Land();
+    case kClipSzDash: return s::Dash();
+    case kClipSzThrusters: return s::Thrusters();
+    case kClipSzSaberHum: return s::SaberHum();
+    case kClipSzCharge: return s::CannonCharge();
     default: return s::MissileLaunch();
     }
 }
 void MakeClipsNow() {
     int own=0;
     for(int c=0;c<kClipCount;++c) {
-        wchar_t path[MAX_PATH],suffix[48];
+        wchar_t path[MAX_PATH],suffix[64];
         UINT32 rate=kRate;
         swprintf_s(suffix,L"_veh_%ls.wav",kClipName[c]);
         if(BesideDll(suffix,path) && ReadWav(path,clips[c].pcm,rate)){++own;Log("SOUND vehicles: %ls from %ls",kClipName[c],path);}

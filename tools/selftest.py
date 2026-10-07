@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import re
 import shutil
@@ -603,6 +604,51 @@ def jet_masses_cover_every_jet() -> None:
 
 
 @test
+def sazabi_bones_agree() -> None:
+    """src/sazabi_pose.h kBones is pylib/sazabi_model.py SKELETON's sz_ bones, in its order, each with its parent; the
+    Sazabi's request mark is src/body506.cpp's Sazabi range and src/sazabi.cpp's."""
+    import sazabi_model as sz
+    rows = re.findall(r'\{L"(sz_\w+)",(-1|k\w+)\}', src('src/sazabi_pose.h').split('kBones[kBoneCount]={', 1)[1].split('};', 1)[0])
+    names = [n for n, _ in sz.SKELETON if n.startswith('sz_')]
+    assert [n for n, _ in rows] == names, f'src/sazabi_pose.h kBones: {[n for n, _ in rows]} != {names}'
+    enum = re.findall(r'\b(k[A-Z]\w*)', src('src/sazabi_pose.h').split('enum Bone {', 1)[1].split('kBoneCount', 1)[0])
+    parent = dict(sz.SKELETON)
+    for (name, par), _ in zip(rows, enum):
+        want = parent[name]
+        assert (par == '-1') == (want == 'body') and (par == '-1' or names[enum.index(par)] == want), f'{name}: parent {par}'
+    assert f'{{{vc.SAZABI_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Sazabi'
+    assert f'kSazabiMark={vc.SAZABI_MARK:.1f}f' in src('src/sazabi.cpp'), 'src/sazabi.cpp kSazabiMark'
+
+
+
+@test
+def sazabi_rifle_files() -> None:
+    """The model folder's rifle (tools/prep_sazabi_rifle.py, pylib/sazabi_arms.py): neither file -> the rifle of boxes and
+    RIFLE_MUZZLE; both -> the OBJ on the right hand and sz_muzzle from the JSON; one without the other -> an error."""
+    import sazabi_arms
+    at = {'sz_hand_r': (1.0, 2.0, 3.0), 'sz_forearm_l': (4.0, 15.0, 0.0), 'sz_hand_l': (4.0, 11.0, 2.0)}
+    d = tempfile.mkdtemp(prefix='edf6vc-selftest-')
+    try:
+        assert sazabi_arms.rifle_files(d) is None and sazabi_arms.muzzle(None) == sazabi_arms.RIFLE_MUZZLE
+        assert sazabi_arms.joints(at, d)['sz_muzzle'] == (1.0, 2.25, 13.6)
+        with open(os.path.join(d, sazabi_arms.RIFLE_FILE), 'w', encoding='utf-8') as h:
+            h.write('\n'.join(['o sz_rifle', 'usemtl 07___Default', 'v 0 0 0', 'v 1 0 0', 'v 0 1 0', 'vn 0 0 1',
+                               'f 1//1 2//1 3//1']) + '\n')
+        try:
+            sazabi_arms.rifle(at, d)
+            raise AssertionError('an OBJ without its JSON is no error')
+        except FileNotFoundError:
+            pass
+        with open(os.path.join(d, sazabi_arms.RIFLE_INFO), 'w', encoding='utf-8') as h:
+            json.dump({'muzzle': [0.5, -2.0, 10.0]}, h)
+        assert sazabi_arms.joints(at, d)['sz_muzzle'] == (1.5, 0.0, 13.0)
+        parts = sazabi_arms.rifle(at, d)
+        assert [p.name for p in parts] == ['sz_rifle'] and parts[0].verts[1].pos == (2.0, 2.0, 3.0), parts
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@test
 def hand_copies_agree() -> None:
     # kKinds rows: {"name",mark,...}, the mark an integer or a float literal.
     pjet = dict(re.findall(r'\{"(\w+)",\s*(\d+)(?:\.0f)?\s*,', src('src/playerjet.cpp').split('kKinds[]={', 1)[1].split('};', 1)[0]))
@@ -610,6 +656,10 @@ def hand_copies_agree() -> None:
         if c.brings != 'vehicle' or c.ground:
             continue
         jet = vc.JETS[c.jet]
+        if c.jet == vc.SAZABI_JET:   # the Sazabi: tools/make_sazabi.py writes it, src/sazabi.cpp knows its mark
+            import make_sazabi
+            assert jet.mark == c.mark == vc.SAZABI_MARK and make_sazabi.SGO_FILE == f'{c.vehicle}.SGO', c.id
+            continue
         assert jet.mark == c.mark and make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
         if jet.player:   # a player jet: its mark src/playerjet.cpp kKinds'
             assert float(pjet[c.kind.removeprefix('pjet_')]) == c.mark, f'src/playerjet.cpp kKinds disagrees on {c.id}'
@@ -625,7 +675,9 @@ def hand_copies_agree() -> None:
     files = set(re.findall(r'L"(EDF6VC_(?!CALL_)[A-Z0-9_]+\.SGO)"', jet_src))
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
-    written = {n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)   # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py
+    # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py
+    written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
+               | set(vc.SAZABI_ROUND_FILES))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -700,7 +752,13 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast \};', src('src/crew.h')), 'src/crew.h EmcRound'
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel \};',
+                     src('src/crew.h')), 'src/crew.h EmcRound'
+    # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
+    sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
+    assert [f for _, f in sz_files] == list(vc.SAZABI_ROUND_FILES) and all(s == f.lower() for s, f in sz_files), sz_files
+    assert bay.index('EDF6VC_EMC_BLAST.SGO') < bay.index(vc.SAZABI_ROUND_FILES[0]), "kEmcFiles: the EMC's first"
+    assert 'vc.sazabi_rounds(game)' in src('tools/make_sazabi.py'), "tools/make_sazabi.py writes the Sazabi's beams"
     assert make_emc.names() == [f'OBJECT/{n}' for n in vc.EMC_FILES] and make_emc.OWNER in ledger.OWNERS
     m = re.search(r'kBeamRange=([\d.]+)f', plan)
     assert m and float(m.group(1)) == vc.EMC_BEAM_RANGE == vc.EMC_BEAM_SPEED * vc.EMC_BEAM_LIFE, m and m.group(1)
@@ -1501,6 +1559,12 @@ def jet_door_on_the_ground_beside_its_box() -> None:
     # it lands on; the stock radius reaches.
     at, r = vc.door_point([[0.0, 0.339, 2.723], [1.983, 1.624, 15.137]], (2.15, 0.0, 1.8), 1.8)
     assert at == [2.583, -1.624, 1.8] and r == 1.8, (at, r)
+    # The Sazabi's `mdl` lands at its model's origin, its soles, not at its box's centre 12.8 m over them (its frames
+    # log, 2026-10-07: written from the centre, the door was 12.8 m underground): the same point, from the origin.
+    assert vc.JETS[vc.SAZABI_JET].locators_on_origin and vc.mdl_at(vc.JETS[vc.SAZABI_JET]) == (0.0, 0.0, 0.0)
+    assert all(vc.mdl_at(j) is None for n, j in vc.JETS.items() if n != vc.SAZABI_JET), 'the jets keep the centre'
+    at, r = vc.door_point([[0.0, 12.805, -1.395], [10.805, 12.805, 13.715]], (2.15, 0.0, 1.8), 1.8, (0.0, 0.0, 0.0))
+    assert at == [11.405, 0.0, 0.405], at
 
 
 @test
@@ -1820,6 +1884,25 @@ def vehicle_sound_wired() -> None:
     check = src('tools/vsound_check.cpp')
     assert '#include "../src/jetaudio.cpp"' in check and '#include "../src/vehmix.h"' in check
     assert '#include "vsynth.h"' in audio and '#include "vehmix.h"' in code and 'vsound_check' in readme
+
+
+@test
+def sazabi_sound_wired() -> None:
+    """The Sazabi's sounds (src/sazabi_sound.cpp; docs/sound-re.md §10): its tick runs once a frame from every vehicle's
+    input before the plugin's Enabled test (it stops its loops when off) and is reset with the mission; its clips are
+    jetaudio.cpp's (one table, kSazabiSfxClip / kSazabiLoopClip, used by the plugin and the offline check alike, sized
+    against sazabi_sound.h's enums); it hears through the vehicles' switch and their group volumes; the offline check runs
+    its clips, rules and scenario; README and the doc describe it."""
+    crew, mission, code, audio_h, check = (src('src/crew.cpp'), src('src/mission.cpp'), src('src/sazabi_sound.cpp'),
+                                           src('src/jetaudio.h'), src('tools/vsound_check.cpp'))
+    hook = crew.split('void __fastcall InputHook(', 1)[1]
+    assert 0 <= hook.find('&SazabiSoundTick);') < hook.find('if(!Cfg().enabled)return;'), 'SazabiSoundTick before the Enabled test'
+    assert 'ResetSazabiSound();' in mission and '#include "sazabi_sound.h"' in mission
+    assert 'constexpr int kSazabiSfxClip[]=' in audio_h and 'constexpr int kSazabiLoopClip[]=' in audio_h
+    assert 'static_assert(sizeof(kSazabiSfxClip)' in code and 'kSfxClip[' not in code.replace('kSazabiSfxClip[', '')
+    assert 'Cfg().vehicleSound' in code and 'SoundListening()' in code and 'vmix::kSzSfx[' in code and 'vmix::kFarAt' in code
+    assert 'kSazabiSfxClip[' in check and 'SazabiRules();' in check and 'SazabiScenario(out);' in check
+    assert 'sazabi_sound.cpp' in src('README.md') and '## 10. 沙扎比的声音' in src('docs/sound-re.md')
 
 
 @test
@@ -3541,7 +3624,7 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp', 'src/npcai.cpp', 'src/drill.cpp'):
+                'src/proteus.cpp', 'src/npcai.cpp', 'src/drill.cpp', 'src/sazabi.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
@@ -3554,7 +3637,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')

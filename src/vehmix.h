@@ -1,6 +1,7 @@
 // vehmix.h: what a ground vehicle sounds like, worked out from what it does (vehsound.cpp reads the game, jetaudio.cpp
 // plays; docs/sound-re.md §9). No game and no XAudio2 in here: tools/vsound_check.cpp checks these against cases.
 #pragma once
+#include "sazabi_sound.h"
 #include <cmath>
 
 namespace crew::vmix {
@@ -115,4 +116,53 @@ constexpr float kEngineRef=12.0f,kTracksRef=10.0f,kTurretRef=5.0f,kReloadRef=4.0
 constexpr float kTrackHalf=1.8f;   // m: a tank's track from its middle (an E551's half width): turning on the spot runs them
 // Gain at `d` m of a sound heard at full within `ref`, falling as (ref / d)^`fall` beyond.
 inline float Falloff(float d,float ref,float fall) noexcept { return d>ref ? std::pow(ref/d,fall) : 1.0f; }
+constexpr float kFarAt=2500.0f;    // m: the air's dulling at its fullest (the jets'): audio::Heard's distance is d / kFarAt
+
+// --- The Sazabi (sazabi_sound.cpp; docs/sound-re.md §10) ---
+// Each of its sounds: the ini group it is heard at (its movement the engine's, VehicleEngineVolume; its beams, cannon,
+// funnels and blade the main guns', VehicleGunVolume; its missiles the launches', VehicleMissileVolume), its share of
+// the mix, the distance it is heard at full within (m) and its fall beyond ((ref / d)^fall), and how much each play's
+// pitch may differ (+-: footfalls and shots that are not all alike).
+enum class SzGroup { move, gun, missile };
+struct SzSound { SzGroup group; float share,ref,fall,jitter; };
+constexpr SzSound kSzSfx[static_cast<int>(SzSfx::count)]={
+    {SzGroup::gun,0.9f,25.0f,1.0f,0.04f},       // beamShot
+    {SzGroup::gun,0.8f,20.0f,1.0f,0.06f},       // beamHit
+    {SzGroup::gun,0.6f,10.0f,1.2f,0.0f},        // saberOn
+    {SzGroup::gun,0.6f,10.0f,1.2f,0.0f},        // saberOff
+    {SzGroup::gun,0.7f,15.0f,1.2f,0.06f},       // whoosh
+    {SzGroup::gun,0.9f,20.0f,1.0f,0.05f},       // saberHit
+    {SzGroup::gun,1.0f,30.0f,1.0f,0.0f},        // cannonShot
+    {SzGroup::gun,0.5f,8.0f,1.2f,0.05f},        // funnelLaunch
+    {SzGroup::gun,0.55f,12.0f,1.1f,0.06f},      // funnelShot
+    {SzGroup::gun,0.45f,8.0f,1.2f,0.05f},       // funnelDock
+    {SzGroup::missile,kMissileShare,kMissileRef,1.0f,0.04f},   // missileLaunch (the vehicles' launch, kClipMissile)
+    {SzGroup::move,0.85f,30.0f,1.0f,0.04f},     // footstep
+    {SzGroup::move,1.0f,30.0f,1.0f,0.0f},       // land
+    {SzGroup::move,0.8f,20.0f,1.0f,0.03f},      // dash
+};
+constexpr SzSound kSzLoop[static_cast<int>(SzLoop::count)]={
+    {SzGroup::move,0.7f,20.0f,1.0f,0.0f},       // thrusters
+    {SzGroup::gun,0.45f,10.0f,1.2f,0.0f},       // saberHum
+    {SzGroup::gun,0.6f,15.0f,1.1f,0.0f},        // cannonCharge
+};
+constexpr float kSzHear=3000.0f;                  // m: no voice farther
+constexpr float kSzFadeIn=0.06f,kSzFadeOut=0.3f;  // s: a loop's level coming up / going out (0 to 1 and back)
+// A loop at `level` (0..1): its gain (before its share and the distance) and pitch. The thrusters roar louder and
+// higher with the thrust, the charge's whine climbs an octave and more as it fills, the blade hums at its level. 0: silent.
+struct SzLoopMix { float gain,ratio; };
+inline SzLoopMix SazabiLoopMix(SzLoop which,float level) noexcept {
+    const float l=std::isfinite(level) ? Clamp01(level) : 0.0f;
+    if(l<=0.0f)return SzLoopMix{0.0f,1.0f};
+    switch(which) {
+    case SzLoop::thrusters: return SzLoopMix{0.3f+0.7f*l,0.75f+0.5f*l};
+    case SzLoop::cannonCharge: return SzLoopMix{0.35f+0.65f*l,0.5f+1.3f*l};
+    default: return SzLoopMix{l,1.0f};
+    }
+}
+// A loop's gain `dt` s later going to `target`: up over kSzFadeIn, down over kSzFadeOut (full scale), never past it.
+inline float SzFade(float gain,float target,float dt) noexcept {
+    const float step=dt/(target>gain ? kSzFadeIn : kSzFadeOut);
+    return target>gain ? (gain+step<target ? gain+step : target) : (gain-step>target ? gain-step : target);
+}
 }  // namespace crew::vmix
