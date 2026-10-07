@@ -116,6 +116,8 @@ struct Config {
     float sazabiAssistRange=600.0f; // m: the farthest enemy picked
     float sazabiAssistPull=4.0f;    // 1/s: the camera eased onto the picked enemy (a pad's lock-on feel; 0: the shots alone)
     bool sazabiAssistMousePull=false; // ...the camera eased with the mouse too (off: on the mouse the shots alone)
+    int sazabiLockKey=0x04;         // the lock-on (Sekiro's): pressed, the enemy nearest the reticle held, the camera on it (VK_MBUTTON; 0 none)
+    int sazabiLockButton=0x80;      // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
     int sazabiSwitchKey=0x52;       // the special the secondary fires: shield missiles, funnels, cannon (R; a pad's LB)
@@ -605,6 +607,7 @@ struct SazabiCue {
     bool centred;            // the camera is the Sazabi's own (sazabi.cpp): the aim point is the screen's centre
     bool hasAssist;
     float assist[3];         // the aim assist's enemy (its lock point, world): the aim point is it (sazabi_assist.h)
+    bool lockOn;             // ...held by the lock-on (its key pressed: the camera follows it)
 };
 constexpr ULONGLONG kSazabiCueMs=250;
 bool PlayerSazabiCue(SazabiCue* out) noexcept;

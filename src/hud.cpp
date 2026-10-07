@@ -1843,16 +1843,18 @@ void SazabiReticle(void* drawer,void* ctx,const float* vp,float width,float heig
     if(locked)Arc(drawer,ctx,x,y,out+4.0f*s,0.0f,kTurn,1.5f*s,40,ink);
 }
 // The aim assist's enemy (cue.hasAssist, sazabi_assist.h): four pink corner brackets round its lock point, the shots'
-// point.
+// point; held by the lock-on (cue.lockOn) they are red, thicker and tighter, with a dot on the point.
 void SazabiAssistMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const SazabiCue& c) noexcept {
     float x,y,depth;
     if(!c.hasAssist || !Project(vp,c.assist,width,height,&x,&y,&depth))return;
-    const float h=26.0f*s,arm=9.0f*s,t=2.0f*s;
+    const float* const ink=c.lockOn ? kSazabiLocked : kSazabiPink;
+    const float h=(c.lockOn ? 20.0f : 26.0f)*s,arm=(c.lockOn ? 11.0f : 9.0f)*s,t=(c.lockOn ? 3.0f : 2.0f)*s;
     for(int i=0;i<4;++i) {
         const float sx=i&1 ? 1.0f : -1.0f,sy=i&2 ? 1.0f : -1.0f,cx=x+sx*h,cy=y+sy*h;
-        Rect(drawer,ctx,std::fmin(cx,cx-sx*arm),cy-t*0.5f,std::fmax(cx,cx-sx*arm),cy+t*0.5f,kSazabiPink);
-        Rect(drawer,ctx,cx-t*0.5f,std::fmin(cy,cy-sy*arm),cx+t*0.5f,std::fmax(cy,cy-sy*arm),kSazabiPink);
+        Rect(drawer,ctx,std::fmin(cx,cx-sx*arm),cy-t*0.5f,std::fmax(cx,cx-sx*arm),cy+t*0.5f,ink);
+        Rect(drawer,ctx,cx-t*0.5f,std::fmin(cy,cy-sy*arm),cx+t*0.5f,std::fmax(cy,cy-sy*arm),ink);
     }
+    if(c.lockOn)Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,ink);
 }
 // The range under the reticle (see the top).
 void SazabiRange(Text* text,const float* vp,float width,float height,float s,const SazabiCue& c,Line* lines,int* at) noexcept {

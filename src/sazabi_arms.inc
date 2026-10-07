@@ -135,6 +135,7 @@ void DropArms(Mech& m) noexcept {
     for(auto& f:a.funnels)f=Funnel{};
     a.swing=-1.0f;a.charge=0.0f;a.megaLeft=0.0f;a.queued=false;a.funnelsOut=false;
     for(auto& slot:a.funnelSlot)slot=nullptr;
+    a.hasAssist=false;a.assistObj=nullptr;a.lockOn=false;a.lockOnObj=nullptr;a.flick=0.0f;a.lockHidden=0.0f;
 }
 
 // The tomahawk: drawn and swung; its strike half way through.
@@ -472,6 +473,7 @@ void PublishCue(const Mech& m) noexcept {
     c.overheat=m.fl.overheat;
     c.special=static_cast<int>(a.special);
     c.aimRange=a.aimRange;c.aimHit=a.aimHit;c.centred=a.centred;
-    c.hasAssist=a.hasAssist && a.hasAim;std::memcpy(c.assist,a.assist,12);
+    c.hasAssist=a.hasAssist && (a.hasAim || a.lockOn);std::memcpy(c.assist,a.assist,12);
+    c.lockOn=a.lockOn && a.hasAssist;
     cue=c;cueMs=GameMs();
 }
