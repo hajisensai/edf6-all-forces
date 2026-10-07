@@ -447,3 +447,11 @@ add_dependencies(offline_checks npc_core_check)
 add_test(NAME npc_core_check COMMAND npc_core_check)
 add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
     --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
+# Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
+add_executable(drill_heat_test EXCLUDE_FROM_ALL tests/drill_heat_test.cpp)
+target_link_libraries(drill_heat_test PRIVATE edf6common user32)
+target_include_directories(drill_heat_test PRIVATE src common)
+target_compile_options(drill_heat_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(drill_heat_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks drill_heat_test)
+add_test(NAME drill_heat COMMAND drill_heat_test)

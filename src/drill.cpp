@@ -498,19 +498,23 @@ void Shed(const unsigned char* v,Drill& d,float amount) noexcept {
     }
 }
 
+// Latch as soon as any heat source reaches the cap, before a subsequent cooling step can lower it again.
+void LatchOverheat(const unsigned char* v,Drill& d) noexcept {
+    if(!d.overheated && d.heat>=1.0f) {
+        d.overheated=true;
+        Log("DRILL v=%p overheated (%s): it stops until it cools to %.0f%%",v,d.player ? "player" : d.npc ? "NPC" : "empty",
+            Cfg().drillResumeHeat*100.0f);
+    }
+}
+
 // The heat over `dt` s at RPM share `share` (`biting`: touched within the last bite): see kBiteHeat. It overheats at 1
 // and cools to DrillResumeHeat before it turns again; both said in the log.
 void Heat(const unsigned char* v,Drill& d,float share,bool biting,float dt) noexcept {
     const auto& c=Cfg();
     d.heat+=(share*(1.0f+(biting ? kBiteHeat : 0.0f))/c.drillOverheatSec-(1.0f-share)/c.drillCoolSec)*dt;
     d.heat=d.heat<0.0f ? 0.0f : d.heat>1.0f ? 1.0f : d.heat;
-    if(!d.overheated && d.heat>=1.0f) {
-        d.overheated=true;
-        Log("DRILL v=%p overheated (%s): it stops until it cools to %.0f%%",v,d.player ? "player" : d.npc ? "NPC" : "empty",
-            c.drillResumeHeat*100.0f);
-    } else if(d.overheated && d.heat<=c.drillResumeHeat) {
-        Shed(v,d,0.0f);
-    }
+    LatchOverheat(v,d);
+    if(d.overheated && d.heat<=c.drillResumeHeat)Shed(v,d,0.0f);
 }
 
 // Whether the enemy `r` is dead: its control block's count gone, the object reused, its dead flag or no HP left.
@@ -547,6 +551,7 @@ void Launch(unsigned char* v,Drill& d) noexcept {
     d.speed=c.drillLaunchSpeed;d.flown=0.0f;d.flightBite=kFlightBiteSec;d.backAt=0;
     d.flight=Flight::out;
     d.heat=d.heat+c.drillLaunchHeat>1.0f ? 1.0f : d.heat+c.drillLaunchHeat;
+    LatchOverheat(v,d);
     Log("DRILL v=%p launched: %.0f m/s out to %.0f m, heat %.0f%%",v,d.speed,c.drillLaunchRange,d.heat*100.0f);
 }
 
