@@ -34,7 +34,9 @@ import base64
 import json
 import os
 import re
+import struct
 import sys
+from typing import Callable, TypeVar
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 for _p in (os.path.join(HERE, '..', 'pylib'),):
@@ -63,6 +65,7 @@ GROUPS = (('main', '[EDF5] '), ('dlc1', '[EDF5 DLC1] '), ('dlc2', '[EDF5 DLC2] '
 # (no branch bits 0x80 / 0x100, no 0x20).
 BGM = 'BGM_E6M29_MissionEDF5'
 FLAGS = 8.0
+T = TypeVar('T')
 
 
 class Refused(RuntimeError):
@@ -78,12 +81,18 @@ def load_manifest(root: str) -> dict:
     return modfiles.load_json(os.path.join(root, 'Mods', MANIFEST), {})
 
 
+def ours(entry: dict | None, data: bytes | None) -> bool:
+    """`data` is a file this tool wrote: the manifest's sha, or while an install is writing (the manifest saved before
+    the files) also the one it is replacing (`also`), so a run cut short leaves every file recognised either way."""
+    return bool(entry) and data is not None and modfiles.sha256(data) in (entry['sha'], *entry.get('also', ()))
+
+
 def base_bytes(root: str, game: rootcpk.Game, rel: str, manifest: dict) -> bytes:
     """What the list file is without this tool: the file it replaced (kept in the manifest) while ours is still in
     place, else the one in Mods (another mod's), else the game's."""
     entry = manifest.get('files', {}).get(rel)
     on_disk = modfiles.read(rel_path(root, rel))
-    if entry and on_disk is not None and modfiles.sha256(on_disk) == entry['sha']:
+    if ours(entry, on_disk):
         if entry['original'] is None:
             return game.read(*rel.split('/'))
         return base64.b64decode(entry['original'])
@@ -190,18 +199,28 @@ def plan(root: str) -> dict:
     return {'rows': rows, 'skipped': skipped}
 
 
+def parsed(rel: str, read: Callable[[], T]) -> T:
+    """`read()` of a list file that may be another mod's: one this tool cannot read refuses the install (said
+    why, nothing written) instead of stopping the whole installer."""
+    try:
+        return read()
+    except (ValueError, KeyError, IndexError, TypeError, AssertionError, struct.error, UnicodeDecodeError) as e:
+        raise Refused(f'Mods/{rel} 读不了（{type(e).__name__}: {e}），可能是别的 MOD 用了别的格式：不改动它。') from e
+
+
 def build(root: str) -> tuple[dict[str, bytes], int, dict]:
     """The files to write (rel under Mods -> bytes), the number of rows before the first EDF5 one, and the plan."""
     game = rootcpk.Game(root)
     manifest = load_manifest(root)
     p = plan(root)
     stock = dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
-    doc = dsgo.parse(base_bytes(root, game, LIST, manifest))
-    table = doc.root.get('table').items
-    if [r.items[2] for r in table[:len(stock)]] != [r.items[2] for r in stock]:
-        raise Refused('Mods/MISSION 里的任务列表改过原版任务的顺序或数量：存档按行号对应，不能再往后追加。')
+    doc = parsed(LIST, lambda: dsgo.parse(base_bytes(root, game, LIST, manifest)))
+    table = parsed(LIST, lambda: doc.root.get('table').items)
+    if any(not isinstance(r, dsgo.Node) or len(r.items) != 11 for r in table) or \
+            [r.items[2] for r in table[:len(stock)]] != [r.items[2] for r in stock]:
+        raise Refused('Mods/MISSION 里的任务列表改过原版任务的顺序、数量或格式：存档按行号对应，不能再往后追加。')
     if any(str(r.items[1]).lower().startswith(f'app:/mission/{SCRIPTS.lower()}/') for r in table):
-        raise Refused('任务列表里已经有 EDF5 任务行，但不是本工具写的（没有清单记录）：不重复追加。')
+        raise Refused('任务列表里已经有 EDF5 任务行，但不是本工具留下的那份（没有清单记录，或之后被别的工具改过）：不重复追加。')
     base = len(table)
     for k, r in enumerate(p['rows']):
         table.append(new_row(base + k, r['path'], r['progress']))
@@ -210,13 +229,14 @@ def build(root: str) -> tuple[dict[str, bytes], int, dict]:
         first.items.append(float(base))
     out = {LIST: dsgo.compact(doc)}
     for lang, rel in TXT.items():
-        ver, members = sgo.read(base_bytes(root, game, rel, manifest))
-        rows = members['table']
+        ver, members = parsed(rel, lambda rel=rel: sgo.read(base_bytes(root, game, rel, manifest)))
+        rows = parsed(rel, lambda members=members: list(members['table']))
+        members['table'] = rows
         if len(rows) != base:
             raise Refused(f'{rel} 有 {len(rows)} 行，任务列表有 {base} 行：文本按行号读，行数不一致会崩溃。')
         rows += [[r['title'][lang], r['brief'][lang]] for r in p['rows']]
         out[rel] = sgo.write_depth_first(ver, members)
-    rab = mdb.rab_read(base_bytes(root, game, IMAGE, manifest))
+    rab = parsed(IMAGE, lambda: mdb.rab_read(base_bytes(root, game, IMAGE, manifest)))
     by_name = {f.name.upper(): f for f in rab.files}
     by_map = stock_maps(game, stock)
     fallback = by_name.get(thumb_name('EDF6/M046').upper(), rab.files[0])
@@ -249,24 +269,31 @@ def install(root: str, built: tuple[dict[str, bytes], int, dict] | None = None) 
     """Writes the files (the ones they replace kept in the manifest) and sets EDF5CampaignRows."""
     modfiles.refuse_while_running()
     files, base, _ = built or build(root)
+    mpath = os.path.join(root, 'Mods', MANIFEST)
     manifest = load_manifest(root)
     kept = manifest.get('files', {})
     entries: dict[str, dict] = {}
     for rel in files:
         old = kept.get(rel)
         on_disk = modfiles.read(rel_path(root, rel))
-        if old and on_disk is not None and modfiles.sha256(on_disk) == old['sha']:
-            original = old['original']   # ours from before: what it replaced stays what to put back
+        entry = {'sha': modfiles.sha256(files[rel])}
+        if ours(old, on_disk):   # ours from before: what it replaced stays what to put back
+            entry['original'] = old['original']
+            entry['also'] = [modfiles.sha256(on_disk)]
         else:
-            original = None if on_disk is None else base64.b64encode(on_disk).decode('ascii')
-        entries[rel] = {'sha': modfiles.sha256(files[rel]), 'original': original}
-    # the manifest first: a write cut short leaves a record of what to put back
-    modfiles.save_json(os.path.join(root, 'Mods', MANIFEST), {'version': 1, 'rows': base, 'files': entries})
+            entry['original'] = None if on_disk is None else base64.b64encode(on_disk).decode('ascii')
+        entries[rel] = entry
+    # The manifest first, accepting the old bytes and the new: a run cut short leaves every file recognised (and
+    # what it replaced on record); once all are written only the new ones are ours.
+    modfiles.save_json(mpath, {'version': 1, 'rows': base, 'files': entries})
     paths = []
     for rel, data in files.items():
         path = rel_path(root, rel)
         modfiles.atomic_write(path, data)
         paths.append(path)
+    for entry in entries.values():
+        entry.pop('also', None)
+    modfiles.save_json(mpath, {'version': 1, 'rows': base, 'files': entries})
     ini = set_rows(root, base)
     if ini:
         paths.append(ini)
@@ -274,18 +301,22 @@ def install(root: str, built: tuple[dict[str, bytes], int, dict] | None = None) 
 
 
 def remove(root: str) -> tuple[list[str], list[str]]:
-    """Puts back what each file was before (deleted if there was none): (restored or deleted, kept changed)."""
+    """Puts back what each file was before (deleted if there was none): (restored or deleted, kept changed).
+    A file changed by someone since stays, and so does its manifest entry (what it replaced is only there); while
+    the list stays the plugin keeps its row count too."""
     modfiles.refuse_while_running()
     mpath = os.path.join(root, 'Mods', MANIFEST)
     manifest = load_manifest(root)
     done, kept = [], []
+    left: dict[str, dict] = {}
     for rel, entry in manifest.get('files', {}).items():
         path = rel_path(root, rel)
         data = modfiles.read(path)
         if data is None:
             continue
-        if modfiles.sha256(data) != entry['sha']:
+        if not ours(entry, data):
             kept.append(path)
+            left[rel] = entry
             continue
         if entry['original'] is None:
             os.remove(path)
@@ -295,9 +326,12 @@ def remove(root: str) -> tuple[list[str], list[str]]:
     for d in (os.path.join(root, 'Mods', 'MISSION'),):
         if os.path.isdir(d) and not os.listdir(d):
             os.rmdir(d)
-    if os.path.isfile(mpath):
+    if left:
+        modfiles.save_json(mpath, {**manifest, 'files': left})
+    elif os.path.isfile(mpath):
         os.remove(mpath)
-    set_rows(root, 0)
+    if LIST not in left:
+        set_rows(root, 0)
     return done, kept
 
 
@@ -306,13 +340,13 @@ def installed(root: str) -> bool:
 
 
 def check(root: str) -> bool:
-    """Reading only: the files as written and the plugin's row count as the manifest says. True when complete."""
+    """Reading only: the files as written and the plugin's row count as the manifest says. True when complete, or
+    not installed (it is optional: refused when another mod's list cannot take it, which the install says)."""
     manifest = load_manifest(root)
     if not manifest:
-        print('EDF5 战役：未安装')
-        return False
-    bad = [rel for rel, e in manifest.get('files', {}).items()
-           if modfiles.sha256(modfiles.read(rel_path(root, rel)) or b'') != e['sha']]
+        print('EDF5 战役：未安装（可选；安装时被拒绝的原因会在安装输出里说明）')
+        return True
+    bad = [rel for rel, e in manifest.get('files', {}).items() if not ours(e, modfiles.read(rel_path(root, rel)))]
     path = os.path.join(root, 'Mods', INI)
     text = open(path, encoding='utf-8-sig').read() if os.path.isfile(path) else ''
     m = re.search(rf'(?m)^{INI_KEY}=(\d+)', text)

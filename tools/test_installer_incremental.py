@@ -170,6 +170,7 @@ class IncrementalTests(unittest.TestCase):
             import make_edf5_campaign   # no Root.cpk here to append to: its files stand in, its install runs for real
             stack.enter_context(patch.object(make_edf5_campaign, 'build', lambda g: (
                 {rel: b'stub' for rel in make_edf5_campaign.FILES}, 147, {'rows': [], 'skipped': []})))
+            stack.enter_context(patch.object(make_edf5_campaign.modfiles, 'refuse_while_running', lambda *a, **k: None))
             builders = {}
             for group in buildcache.GROUPS:
                 module = importlib.import_module('make_' + group)
