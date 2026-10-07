@@ -1025,19 +1025,29 @@ def lofted_arc_solver() -> None:
 
 @test
 def katyusha_bm13_launcher() -> None:
-    """The Katyusha's launcher is a BM-13 rail pack (pylib/katyusha_model.py launcher_parts): the weapon's 10 muzzles
-    (MUZZLES, written into the weapon's MAB by tools/make_katyusha.py set_muzzles) sit at the rails' front ends on the
-    rockets' axes, symmetric about the launcher's middle; the parts' faces are wound outward as the stock ones are
-    ((b - a) x (c - a) along the outward normal). With the game: the built files pass make_katyusha.check (the rails,
-    rockets and muzzles found in the model, the muzzles in the weapon, the launcher over the bed from 0 to the stop)."""
+    """The Katyusha's launcher is a BM-13 rail pack (pylib/katyusha_model.py launcher_parts): the weapon's 16 muzzles
+    (MUZZLES, written into the weapon's MAB by tools/make_katyusha.py set_muzzles) one at each rocket's tail on its axis,
+    01..16 in the order the rockets are fired (rocket_axes; ROCKET_BONES alike), symmetric about the launcher's middle; a
+    salvo is the 16 (FireBurstCount), a load whole salvos; the parts' faces are wound outward as the stock ones are
+    ((b - a) x (c - a) along the outward normal). With the game: the built files pass make_katyusha.check (the rails, each
+    rocket on its own bone, the muzzles at their tails in the model and in the weapon, the launcher over the bed from 0
+    to the stop with its rockets on their stops or slid back to the breech), and the archive lost exactly the textures
+    only undrawn materials used and the triangles of zero area (kept_whole_bar_the_prune: nothing else changed)."""
     import math
     import katyusha_model as km
     import procmesh as pm
     xs, ys = km.rail_xs(), km.rocket_ys()
-    assert len(xs) == km.RAILS == 8 and len(km.MUZZLES) == 10 and [n for n, _ in km.MUZZLES] == [f'{i:02d}' for i in range(1, 11)]
-    for name, (x, y, z) in km.MUZZLES:
-        assert any(abs(x - r) < 1e-9 for r in xs) and any(abs(y - h) < 1e-9 for h in ys) and z == km.RAIL_FRONT, name
-    assert abs(sum(p[0] for _, p in km.MUZZLES)) < 1e-9 and len({p for _, p in km.MUZZLES}) == 10
+    n = km.ROCKET_COUNT
+    assert len(xs) == km.RAILS == 8 and n == 16 and len(km.MUZZLES) == n == len(km.ROCKET_BONES)
+    assert [m for m, _ in km.MUZZLES] == [f'{i:02d}' for i in range(1, n + 1)]
+    assert [b[-2:] for b in km.ROCKET_BONES] == [m for m, _ in km.MUZZLES] and all(len(b) < 16 for b in km.ROCKET_BONES)
+    for (name, (x, y, z)), (ax, ay) in zip(km.MUZZLES, km.rocket_axes()):
+        assert (x, y) == (ax, ay) and z == km.ROCKET_TAIL and any(abs(x - r) < 1e-9 for r in xs), name
+        assert any(abs(y - h) < 1e-9 for h in ys), name
+    assert abs(sum(p[0] for _, p in km.MUZZLES)) < 1e-9 and len({p for _, p in km.MUZZLES}) == n
+    assert {(x, y) for x, y in km.rocket_axes()} == {(x, y) for x in xs for y in ys}
+    assert make_katyusha.ROCKETS['FireBurstCount'] == n and make_katyusha.ROCKETS['AmmoCount'] % n == 0
+    assert abs(km.LOAD - (km.ROCKET_TAIL - km.RAIL_BACK)) < 1e-12 and km.LOAD > 0
     assert ys[0] - km.ROCKET_R > km.RAIL_Y + km.RAIL_H / 2 and ys[1] + km.ROCKET_R < km.RAIL_Y - km.RAIL_H / 2
     # Winding: a box turned off the axes and a tube along x, every face pointing away from the solid's middle.
     part = pm.Part(0)
@@ -1056,6 +1066,107 @@ def katyusha_bm13_launcher() -> None:
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         files = make_katyusha.build(rootcpk.DEFAULT_GAME)   # katyusha_model.check + make_katyusha.check
         make_katyusha.check(files)
+        katyusha_kept_whole_bar_the_prune(rootcpk.DEFAULT_GAME, files[f'OBJECT/{make_katyusha.MODEL_FILE}'])
+
+
+def katyusha_kept_whole_bar_the_prune(game_dir: str, arc: bytes) -> None:
+    """The Katyusha's archive against the same build without its clean-up (katyusha_model.drop_zero_area /
+    prune_textures left out): it is smaller; every member it has is the unpruned build's, byte for byte, but the model;
+    the members gone are exactly the textures (and their .lod) the clean-up dropped, none of them in the texture table
+    or bound by a material; the materials are the same ones, those that draw keep their textures; every mesh keeps all
+    its triangles but the ones of exactly zero area (which draw nothing), each kept one's vertices byte for byte, and
+    only the stock materials that no mesh draws had their texture slots pointed elsewhere."""
+    from collections import Counter
+    from unittest.mock import patch
+    import graft_pure as g
+    import katyusha_model as km
+    import rootcpk
+    from mdb import mdb_read, rab_read
+    game = rootcpk.Game(game_dir)
+    with patch.object(km, 'drop_zero_area', lambda md: (md, 0)), patch.object(km, 'prune_textures', lambda md: (md, [])):
+        raw = km.build(game)
+    old, new = rab_read(raw), rab_read(arc)
+    assert len(arc) < len(raw), (len(arc), len(raw))
+    o, n = {f.name: f for f in old.files}, {f.name: f for f in new.files}
+    assert n.keys() <= o.keys() and all(n[k].stored == o[k].stored for k in n if k != km.HOST_MDB)
+    md_old, md_new = mdb_read(o[km.HOST_MDB].data), mdb_read(n[km.HOST_MDB].data)
+    gone = {t.filename for t in md_old.textures} - {t.filename for t in md_new.textures}
+    want = {f.name for fn in gone for f in g.texture_members(old, fn)}
+    assert set(o) - set(n) == want and len(want) == 2 * len(gone) > 0, (sorted(set(o) - set(n)), sorted(gone))
+    drawn = {me.material for ob in md_old.objects for me in ob.meshes}
+    assert [m.name for m in md_old.materials] == [m.name for m in md_new.materials]
+    for i, (a, b) in enumerate(zip(md_old.materials, md_new.materials)):
+        files = [[md.textures[x.texture].filename for x in m.textures] for md, m in ((md_old, a), (md_new, b))]
+        assert i not in drawn or files[0] == files[1], f'{md_old.name_of(a.name)} draws and its textures changed'
+        assert not set(files[1]) & gone, f'{md_old.name_of(a.name)} binds a texture that left the archive'
+    flat = 0
+    for ob_old, ob_new in zip(md_old.objects, md_new.objects):
+        assert len(ob_old.meshes) == len(ob_new.meshes)
+        for a, b in zip(ob_old.meshes, ob_new.meshes):
+            def faces(me) -> Counter:  # noqa: ANN001 - mdb.Mesh
+                return Counter(tuple(me.vdata[v * me.vsize:(v + 1) * me.vsize] for v in t) for t in g.triangles(me))
+            lost, extra = faces(a) - faces(b), faces(b) - faces(a)
+            assert not extra, 'the clean-up added triangles'
+            pos = g.mesh_positions(a)
+            for t in g.triangles(a):
+                key = tuple(a.vdata[v * a.vsize:(v + 1) * a.vsize] for v in t)
+                if lost[key]:
+                    assert km._zero_area(pos[t[0]], pos[t[1]], pos[t[2]]), 'a triangle with area dropped'
+                    flat += 1
+                    lost[key] -= 1
+    assert flat == 4, f'{flat} zero-area triangles dropped (the V607 cab has 4; the 4 on its bed rails go with the rails)'
+
+
+@test
+def mab_round_trips() -> None:
+    """pylib/mab.py: a MAB block read and written again is the same bytes (a synthetic one here; with the game every
+    stock block of the shape it reads, the Naegling launcher's among them); locators added get records, vec4s and
+    strings of their own laid out as the game's (vec4s by their bytes, strings in UTF-16 order, each once), and
+    vcobjects.mab_muzzles (the game's reading) finds them in order; a block of another shape is refused."""
+    import struct
+    from dataclasses import replace
+    import mab
+    sgo_block = b'SGO\0' + struct.pack('<7I', 0x102, 0, 0x20, 0, 0x20, 0, 0x20)
+    base = mab.Locator('01', 'v_Null', 2, (0.0, 0.4, 4.4, 1.0), (0.05, 0.05, 0.25, 1.0), (0.0, 0.0, 0.0, 1.0), 0, sgo_block)
+    m = mab.Mab((0xF, 0x83, 0), [0, 1, 2], [base, replace(base, name='02', pos=(-0.35, 0.8, 4.4, 1.0))])
+    raw = mab.mab_write(m)
+    back = mab.mab_read(raw)   # the same block again (its floats come back as float32 has them)
+    assert mab.mab_write(back) == raw and [(x.name, x.node, x.sgo) for x in back.locators] == [(x.name, x.node, x.sgo) for x in m.locators]
+    m.locators += [replace(base, name=f'{k:02d}', pos=(0.1 * k, 0.2, 0.55, 1.0)) for k in range(3, 17)]
+    raw = mab.mab_write(m)
+    got = vc.mab_muzzles(raw)
+    assert [n for n, _node, _at in got] == [f'{k:02d}' for k in range(1, 17)] and {nd for _n, nd, _at in got} == {'v_Null'}
+    assert struct.unpack_from('<3f', raw, got[15][2]) == struct.unpack('<3f', struct.pack('<3f', 1.6, 0.2, 0.55))
+    head = struct.unpack_from('<HHHH', raw, 0x0C)
+    assert head == (3, 0, len({mab._vec_key(v) for x in m.locators for v in (x.pos, x.b, x.c)}), 2 * (16 * 3 + len('v_Null') + 1))
+    bad = bytearray(raw)
+    struct.pack_into('<H', bad, 0x0E, 2)
+    try:
+        mab.mab_read(bytes(bad))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a block with the 0x0E table read')
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        game = vc.Game(rootcpk.DEFAULT_GAME)
+        seen = 0
+        for name in game.names('WEAPON'):
+            if not name.upper().endswith('.SGO'):
+                continue
+            with contextlib.suppress(Exception):
+                block = dsgo.parse(game.read('WEAPON', name)).root.get('animation_model').items[2].data
+                assert block[:4] == b'MAB\0'
+                try:
+                    parsed = mab.mab_read(block)
+                except ValueError:
+                    continue
+                if mab.mab_write(parsed) != block:
+                    raise AssertionError(f'{name}: the MAB block does not round-trip')
+                seen += 1
+        assert seen >= 100, f'{seen} stock blocks round-tripped'
+        block = dsgo.parse(game.read('WEAPON', make_katyusha.STOCK_WEAPON)).root.get('animation_model').items[2].data
+        assert mab.mab_write(mab.mab_read(block)) == block
 
 
 @test
@@ -1069,6 +1180,13 @@ def katyusha_pose_agrees() -> None:
     import katyusha_model as km
     assert f'kRod[]=L"{km.RAM_ROD}"' in src('src/katyusha.cpp'), 'src/katyusha.cpp kRod'
     assert make_katyusha.PITCH_STOP_DEG == km.PITCH_STOP_DEG
+    # The rack (src/katyusha_rack.h, src/katyusha.cpp Rockets): its rockets, their bones' names and how far one slides
+    # being loaded are the model's.
+    rack = src('src/katyusha_rack.h')
+    assert f'kRockets={km.ROCKET_COUNT};' in rack and f'kLoad={km.LOAD:g}f;' in rack, 'src/katyusha_rack.h kRockets / kLoad'
+    prefix = km.ROCKET_BONES[0][:-2]
+    assert all(b == f'{prefix}{k + 1:02d}' for k, b in enumerate(km.ROCKET_BONES))
+    assert f'kRocketBone[]=L"{prefix}";' in src('src/katyusha.cpp') and 'L"%ls%02d"' in src('src/katyusha.cpp')
     at = src('autoturret/src/plugin.cpp')
     steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
     assert steer.split('\n')[1].strip().startswith('if(PlayerLofted(seat))'), 'autoturret Steer: PlayerLofted first'
