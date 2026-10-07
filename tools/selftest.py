@@ -456,6 +456,44 @@ def boarding_tag_in_plugin() -> None:
 
 
 @test
+def boarding_debug_gun_parameters_and_text() -> None:
+    """The debug gun changes the intended fields and every locale's numeric rows, keeping star curves and tag."""
+    gun = next(c for c in calls.CALLS if c.brings == 'gun')
+    root = dsgo.Node([])
+    old = {'AmmoSpeed': 25.0, 'FireAccuracy': 0.125, 'AmmoCount': 8.0,
+           'ReloadTime': 360.0, 'FireInterval': 90.0}
+    curves = {}
+    for i, (key, base) in enumerate(old.items()):
+        curves[key] = [base, float(i + 10), 0.5, 2.0, 1.0]
+        root.set(key, dsgo.Node(curves[key].copy()))
+    root.set('AmmoAlive', 40.0)
+    root.set('FireRecoil', 3.0)
+    root.set('AmmoColor', dsgo.Node([0.25, 0.5, 0.75, 1.0]))
+    template = dsgo.write(dsgo.Document(root, []))
+    actual = dsgo.parse(cw.gun_sgo(template, gun)).root
+    for key, base in cw.GUN_CURVES.items():
+        assert actual.get(key).items == [base, *curves[key][1:]], key
+    for key, value in cw.GUN_SCALARS.items():
+        assert actual.get(key) == value, key
+    import struct
+    alpha = actual.get(cw.GUN_TAG).items[3]
+    assert struct.unpack('<I', struct.pack('<f', alpha))[0] == cw.gun_tag_bits(gun.mark)
+    units = {'AmmoCount': 1.0, 'FireInterval': 1.0, 'ReloadTime': 1.0 / cw.FPS,
+             'AmmoSpeed': cw.FPS, 'FireAccuracy': 1.0}
+    lines = [dsgo.Node([f'label-{i}', '', dsgo.Node([curves[key][0] * unit, *curves[key][1:-1], -1.0])])
+             for i, (key, unit) in enumerate(units.items())]
+    lines.append(dsgo.Node(['range', '', dsgo.Node([1000.0, *curves['AmmoSpeed'][1:-1], -1.0])]))
+    damage = dsgo.Node(['damage', '', dsgo.Node([242.0, 999.0, 0.5, 2.0, -1.0])])
+    lines.append(damage)
+    row = dsgo.Node(['title', 'description', dsgo.Node(lines)])
+    expected = [cw.GUN_CURVES[key] * unit for key, unit in units.items()] + [1500.0, 242.0]
+    for lang in cw.LANGS:
+        changed = cw._text_row(row, gun, lang, gun=cw.gun_stats(template))
+        assert [st.items[2].items[0] for st in changed.items[2].items] == expected, lang
+        assert changed.items[2].items[-1] == damage, 'damage and its star parameters stay unchanged'
+
+
+@test
 def boarding_only_after_collision() -> None:
     """Broadphase candidates include misses and objects behind walls. Only the native hit's damage call may
     request boarding; keep the executable production-hook test in CI, with original damage on all other paths."""
@@ -3454,10 +3492,10 @@ def stock_payload_and_seats_wired() -> None:
     # The AI riders in gunner seats work their guns (the user 2026-10-07): RideAi's dummy riders a bump or a seat swap
     # moved there too, and the 410's door seats under a player pilot, on the gun's own rounds.
     npc = src('src/npcai.cpp')
-    assert 'if(who==Rider::dummy)return true;' in npc and 'if(!AiGunner(seat))continue;' in npc
+    assert 'if(who==Rider::dummy)' in npc and 'if(!AiGunner(v,seat))continue;' in npc
     heli = src('src/heli.cpp')
     assert 'DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms)' in heli, 'the player-piloted 410: no refill, no hold'
-    assert 'PlayerHeli(vehicle);CrewDoorGuns(vehicle);' in heli
+    assert heli.index('CrewDoorGuns(vehicle);', heli.index('void HeliFrame(')) < heli.index('Replica(vehicle)', heli.index('void HeliFrame(')), 'NPC gunner authority is independent of the local player pilot'
     assert re.search(r'^NpcGunners=1', ini, re.M) and 'L"NpcGunners"' in plugin and 'NpcGunners' in readme
     # Out of a ground vehicle's driver seat with the stock driving AI an NPC driver takes it (the user 2026-10-07: the map
     # sends it off with the player aboard); Crew() never does while a player rides, so Pilot must.
@@ -4010,9 +4048,12 @@ def npc_ai_wired() -> None:
     off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
     gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(seat))continue;' in gun
-    who = code.split('bool AiGunner(const unsigned char* seat) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(v,seat))continue;' in gun
+    who = code.split('bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'IsSoldierClass(rider)' in who and '!IsAnyPlayer(rider)' in who and 'IsOnlineAuthority(rider)' in who, 'AiGunner: only local NPC soldiers'
+    assert 'OnlineHostOnly()' in who and 'IsOnlineAuthority(vehicle)' in who, 'Dummy ownership follows registered host or copy owner'
+    assert '|| InSession())return' not in who and '|| InSession() ||' not in gun, 'online NPC gunners are enabled'
+    assert gun.index('ReleaseGunnerInputs(v)') < gun.index('if(!ok'), 'disable/ownership changes release our previous inputs'
     assert 'Cfg().customNpcAi' in who and 'Cfg().npcBoarding' in who, 'AiGunner: the soldiers still under NpcBoarding'
     inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
