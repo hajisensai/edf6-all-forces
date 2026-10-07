@@ -329,7 +329,12 @@ HUDTEXT(orderBoard,L"BOARD",L"上车",L"上車",L"搭乗")
 HUDTEXT(orderDismount,L"DISMOUNT",L"下车",L"下車",L"降車")
 HUDTEXT(orderDismiss,L"DISMISS",L"解散",L"解散",L"解散")
 HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
-HUDTEXT(cmdNoMark,L"NO MARK (Q)",L"没有标记（Q）",L"沒有標記（Q）",L"マークなし（Q）")
+HUDTEXT(cmdNoMark,L"NO MARK (Q, OR POINT AT AN ENEMY)",L"没有标记（按 Q，或把指针放到敌人上）",L"沒有標記（按 Q，或把指標放到敵人上）",
+        L"マークなし（Q、または敵にポインターを合わせる）")
+// The enemy under the map's pointer (hud.cpp MapCommands) and what the mark key did with it (mapcmd.cpp).
+HUDTEXT(cmdHoverEnemy,L"Q MARK   H FOCUS FIRE",L"Q 标记   H 集火",L"Q 標記   H 集火",L"Q マーク   H 集中攻撃")
+HUDTEXT(cmdMarked,L"ENEMY MARKED",L"已标记敌人",L"已標記敵人",L"敵をマーク")
+HUDTEXT(cmdUnmarked,L"MARK CLEARED",L"已取消标记",L"已取消標記",L"マーク解除")
 // The optional tail of cmdGuardResult / cmdOrderResult (their last %ls, empty when every unit took the order): the separator
 // is the tail's own, so a result without one ends clean (tools/hudtext_check.cpp Tails).
 HUDTEXT(cmdCannot,L", %d CANNOT",L"，%d 个无法执行",L"，%d 個無法執行",L"、%d ユニットは実行不可")
@@ -378,6 +383,11 @@ HUDTEXT(formationCue,L"FORMATION: %ls   [%ls]",L"编队：%ls   [%ls]",L"編隊�
 HUDTEXT(squadWait,L"WAIT %d s",L"等待 %d 秒",L"等待 %d 秒",L"待機 %d 秒")
 HUDTEXT(npcMark,L"MARK",L"标记",L"標記",L"マーク")
 HUDTEXT(npcMarkRange,L"MARK %.0f m",L"标记 %.0f m",L"標記 %.0f m",L"マーク %.0f m")
+// The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): the units selected on the map sent there.
+HUDTEXT(npcPingSent,L"MOVE HERE: %d UNIT(S)",L"前往此处：%d 个单位",L"前往此處：%d 個單位",L"ここへ移動：%d ユニット")
+HUDTEXT(npcPingNearEnemy,L"AIM AT THE ENEMY TO MARK IT",L"对准敌人才能标记",L"對準敵人才能標記",L"敵に合わせるとマーク")
+HUDTEXT(npcPingNoUnit,L"NO ENEMY HERE (SELECT UNITS ON THE MAP TO SEND THEM)",L"这里没有敌人（在地图上选择单位后可派往此处）",
+        L"這裡沒有敵人（在地圖上選擇單位後可派往此處）",L"ここに敵はいない（マップでユニットを選ぶとここへ送れる）")
 HUDTEXT(npcRanger,L"RANGER",L"游骑兵",L"遊騎兵",L"レンジャー")
 HUDTEXT(npcWingDiver,L"WING DIVER",L"飞翼潜兵",L"飛翼潛兵",L"ウイングダイバー")
 HUDTEXT(npcFencer,L"FENCER",L"剑兵",L"劍兵",L"フェンサー")

@@ -1,5 +1,18 @@
 // Execute npcai.cpp itself against stand-in memory and recording native entry points. No game is loaded or started.
+#include <Windows.h>
+namespace markinput {
+bool down=false;
+SHORT Key(int) noexcept { return down ? static_cast<SHORT>(0x8000) : 0; }
+HWND Window() noexcept { return nullptr; }
+DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; }
+}
+#define GetAsyncKeyState markinput::Key
+#define GetForegroundWindow markinput::Window
+#define GetWindowThreadProcessId markinput::Process
 #include "../src/npcai.cpp"
+#undef GetAsyncKeyState
+#undef GetForegroundWindow
+#undef GetWindowThreadProcessId
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -12,6 +25,11 @@ Config config{};
 ULONGLONG now=1000,frame=1;
 bool sessionOn=false,host=true,door=true;
 bool wall=false;
+bool mapHeld=true,rayOn=false;
+const void* markEnemy=nullptr;
+int pointOrders=0;
+int weakDeletes=0;
+void DeleteWeakRecord(void*) { ++weakDeletes; }
 const void* gunnerEnemy=nullptr;
 online::CopyOwner vehicleCopyOwner=online::kCopyHost;
 float doorAt[3]{},doorReach=3.0f;
@@ -81,6 +99,7 @@ void Reset() {
     Put<unsigned>(human,kHumanMask,1);Put<unsigned>(seats+edf::kSeatStride,kSeatClass,1);Put<unsigned>(seats+edf::kSeatStride,kSeatEnable,1);
     doorAt[0]=doorAt[1]=doorAt[2]=0;doorReach=3.0f;
     gunnerEnemy=nullptr;vehicleCopyOwner=online::kCopyHost;
+    mapHeld=true;rayOn=false;markEnemy=nullptr;pointOrders=0;markinput::down=false;
     ok=followOk=rideOk=true;world.frame=frame;config.npcSquadSuccession=true;
 }
 }
@@ -97,9 +116,12 @@ bool IsOnlineAuthority(const void* o) noexcept {
 }
 bool OnlineMaySeatNpc(const void*) noexcept { return !sessionOn || host; }
 unsigned char* PlayerHuman() noexcept { return playerObj; }
-bool CameraRay(float*,float*) noexcept { return false; }
+bool CameraRay(float* eye,float* dir) noexcept {
+    if(!rayOn)return false;
+    eye[0]=eye[1]=eye[2]=dir[0]=dir[1]=0;dir[2]=1;return true;
+}
 bool HumanOnFoot(const unsigned char* h) noexcept { return !At<void*>(h,kHumanVehicleCtrl); }
-bool MapHoldsKeys() noexcept { return true; }
+bool MapHoldsKeys() noexcept { return mapHeld; }
 bool KnownVehicle(const void* v) noexcept { return v==vehicle; }
 float MapRay(const float*,const float*,float* hit) noexcept {
     if(!wall)return -1.0f;hit[0]=0;hit[1]=1.5f;hit[2]=20;return 20;
@@ -107,7 +129,14 @@ float MapRay(const float*,const float*,float* hit) noexcept {
 bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
     if(!door)return false;std::memcpy(at,doorAt,12);*reach=doorReach;return true;
 }
-bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
+bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
+    if(markEnemy){const float at[3]={0,0,20};visit(ctx,markEnemy,at);}return true;
+}
+float MapFloorRay(const float*,const float*,float* at) noexcept { at[0]=at[1]=0;at[2]=30;return rayOn ? 30.0f : -1.0f; }
+int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
+// The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
+const void* lockOf=nullptr;float lockAt[3]{};
+bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     if(gunnerEnemy){const float aim[3]={0,0,20};visit(ctx,gunnerEnemy,aim);}
     return true;
@@ -336,6 +365,101 @@ int main() {
         sessionOn=false;config.npcPickupHealth=false;fetch.pickUnit=boxUnit[0];
         Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"health boxes switched off: left alone");
         playerObj=nullptr;
+    }
+    // The mark (§6.3) is kept until its enemy dies or is gone (the user, 2026-10-07: "标记还很快消失", "标记效果应该先打死
+    // 才换吧"), not only while its lock point is lockable this frame.
+    {
+        Reset();
+        unsigned char foeCtrl[0x10]{};
+        Put<void*>(other,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);Put<int>(other,kTeam,1);
+        const float seen[3]={10.0f,1.0f,10.0f};
+        Expect(NpcMarkEnemy(other,seen,true) && NpcMarked(),"the map marks an enemy");
+        Expect(At<long>(foeCtrl,0xC)==2,"a long-lived mark pins its identity token against control-block reuse");
+        lockOf=other;lockAt[0]=12.0f;lockAt[1]=1.0f;lockAt[2]=14.0f;   // its lock point in the registry
+        KeepMark();
+        Expect(NpcMarked() && mark.at[0]==12.0f && mark.at[2]==14.0f,"a lockable marked enemy: kept, followed");
+        lockOf=other;lockAt[0]=30.0f;lockAt[1]=2.0f;lockAt[2]=-5.0f;
+        KeepMark();
+        Expect(NpcMarked(),"the marked enemy moved (not lockable now, still in the registry): the mark kept");
+        Expect(mark.at[0]==30.0f && mark.at[2]==-5.0f,"...where its lock point still is");
+        lockOf=nullptr;
+        KeepMark();KeepMark();
+        Expect(NpcMarked() && mark.at[0]==30.0f,"no lock point at all: kept where it was last seen");
+        other[kDead]=1;
+        Expect(!NpcMarked(),"death is rejected even before the player's next mark frame");
+        KeepMark();
+        Expect(!NpcMarked(),"the marked enemy dead: the mark let go");
+        Expect(At<long>(foeCtrl,0xC)==1,"death releases the mark's weak reference");
+        other[kDead]=0;
+        Expect(NpcMarkEnemy(other,seen,true),"marked again");
+        unsigned char otherCtrl[0x10]{};
+        Put<void*>(other,kSelfCtrl,otherCtrl);
+        KeepMark();
+        Expect(!NpcMarked(),"a new object at the marked one's address: the mark let go");
+        Put<void*>(other,kSelfCtrl,foeCtrl);
+        Expect(NpcMarkEnemy(other,seen,true),"marked again");
+        other[npcmark::kFlags]|=npcmark::kDeleted;KeepMark();
+        Expect(!NpcMarked(),"the marked enemy removed without dying (a despawn): the mark let go");
+        other[npcmark::kFlags]=0;
+        Expect(NpcMarkEnemy(other,seen,true),"marked again");
+        Put<long>(foeCtrl,8,0);KeepMark();
+        Expect(!NpcMarked(),"the marked enemy's last strong reference gone: the mark let go");
+        Put<long>(foeCtrl,8,1);
+        Expect(NpcMarkEnemy(other,seen,true) && !NpcMarkEnemy(other,seen,true) && !NpcMarked(),"the same enemy again: let go");
+        Expect(NpcMarkEnemy(other,seen,true) && NpcMarkEnemy(other,seen,false) && NpcMarked(),"the focus order's mark never lets go");
+        config.customNpcAi=false;KeepMark();
+        float shown[3];
+        Expect(!NpcMarked() && !NpcMarkEnemy(other,seen,true) && !NpcMarkReadout(shown),"disabled AI neither marks nor publishes a saved mark");
+        config.customNpcAi=true;KeepMark();
+        Expect(NpcMarked() && NpcMarkReadout(shown),"reenabling AI restores a still-live saved mark");
+        ResetNpcAi();
+        Expect(!NpcMarkReadout(shown),"mission reset immediately drops the old published mark");
+        Expect(At<long>(foeCtrl,0xC)==1,"mission reset releases the saved mark's control block");
+        void* controlVtable[2]={nullptr,reinterpret_cast<void*>(&DeleteWeakRecord)};
+        Put<void*>(foeCtrl,0,controlVtable);
+        Expect(NpcMarkEnemy(other,seen,false),"mark before the engine releases its final weak reference");
+        Put<long>(foeCtrl,8,0);InterlockedDecrement(reinterpret_cast<volatile LONG*>(foeCtrl+0xC));
+        Expect(At<long>(foeCtrl,0xC)==1 && !weakDeletes,"destroyed enemy's identity remains allocated while marked");
+        KeepMark();
+        Expect(At<long>(foeCtrl,0xC)==0 && weakDeletes==1 && !NpcMarked(),"last owned weak calls the native control deleter exactly once");
+        Put<void*>(other,kSelfCtrl,nullptr);
+    }
+    // T/Y, like Q, must not fire a second time when a held map key returns to on-foot control.
+    {
+        Reset();playerObj=human;mapHeld=true;markinput::down=true;
+        march.shape=npc::formation::Shape::wedge;march.shapeSet=true;march.held=false;
+        boxesOk=false;sweep.logged=false;
+        FormationTick();SweepFrame();
+        mapHeld=false;FormationTick();SweepFrame();
+        Expect(march.shape==npc::formation::Shape::wedge && !sweep.logged,
+               "held T/Y from the map cannot change formation or start a second sweep on close");
+        markinput::down=false;FormationTick();SweepFrame();
+        markinput::down=true;FormationTick();SweepFrame();
+        Expect(march.shape==npc::formation::Shape::vee && sweep.logged,"releasing then pressing T/Y starts a fresh on-foot action");
+        markinput::down=false;playerObj=nullptr;boxesOk=true;
+    }
+    // Player-frame edges work without a soldier Think, but never leak out of the map/TV or a held close key.
+    {
+        Reset();mapHeld=false;rayOn=true;
+        unsigned char foeCtrl[0x10]{};Put<void*>(other,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
+        markEnemy=other;markinput::down=true;
+        NpcMarkFrame(human,true);
+        Expect(!NpcMarked(),"a map press does not also mark from the player's camera");
+        NpcMarkFrame(human,false);
+        Expect(!NpcMarked(),"closing the map with Q held does not create a second press");
+        markinput::down=false;NpcMarkFrame(human,false);
+        mapHeld=true;markinput::down=true;NpcMarkFrame(human,false);
+        Expect(!NpcMarked(),"TV or closing-map input hold blocks on-foot marking");
+        markinput::down=false;NpcMarkFrame(human,false);mapHeld=false;
+        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(NpcMarked(),"a fresh player-frame press marks without any NPC Think");
+        markinput::down=false;NpcMarkFrame(human,false);markEnemy=nullptr;
+        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(pointOrders==1 && NpcMarked(),"a ground miss orders selected units without clearing the existing mark");
+        markinput::down=false;NpcMarkFrame(human,false);config.enabled=false;
+        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(pointOrders==1 && !NpcMarked(),"global disable prevents ground orders and hides the mark");
+        ResetNpcAi();Expect(At<long>(foeCtrl,0xC)==1,"player-frame mark releases its identity on reset");
     }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }

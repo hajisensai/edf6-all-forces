@@ -181,6 +181,7 @@ bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return f
 // The box sweep banner (npcai.cpp PlayerSweepCue): on in the npc_sweep scenes.
 bool sceneSweepOn=false;SweepCue sceneSweep{};
 bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
+bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 void MapCommandView(const float*,float,float) noexcept {}
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};

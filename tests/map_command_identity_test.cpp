@@ -17,6 +17,10 @@ bool NpcPickupHealthToggle() noexcept {return false;}
 bool NpcPickupHealthOn() noexcept {return false;}
 int NpcMarchShape() noexcept {return 0;}
 const wchar_t* FormationText(int) noexcept {return L"";}
+bool NpcMarkEnemy(const void*,const float*,bool) noexcept { return false; }
+bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
+PlayerFix player{};
+const Config& Cfg() noexcept { static const Config c{};return c; }
 float MapRay(const float*,const float*,float*) noexcept { return -1; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1; }
 bool MapGroundNear(float,float,float,float*,bool) noexcept { return false; }
