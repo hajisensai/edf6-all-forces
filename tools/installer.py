@@ -231,7 +231,11 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
     print(f'写入 {os.path.join(dst, name + ".dll")}')
     ini = os.path.join(dst, name + '.ini')
     if not os.path.isfile(ini):
-        modfiles.atomic_write(ini, shipped_ini)
+        # A fresh install has already adopted this release's defaults. Record that
+        # now, before the player changes one, so a later update keeps their choice.
+        bom = shipped_ini.startswith(b'\xef\xbb\xbf')
+        text, _ = apply_new_defaults(shipped_ini.decode('utf-8-sig'), section)
+        modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8'))
         print(f'写入 {ini}')
         return
     with open(ini, 'rb') as f:
@@ -239,7 +243,7 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
     bom = raw.startswith(b'\xef\xbb\xbf')
     user = raw[3:].decode('utf-8') if bom else raw.decode('utf-8', errors='surrogateescape')
     text, added, gone, flipped = planned_ini(user, shipped_ini.decode('utf-8'), section)
-    if added or flipped:
+    if text != user:   # the migration marker itself must persist even when every default was already current
         modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8', errors='surrogateescape'))
     if added:
         print(f'保留你的 {ini}，补入新版本新增的设置：{", ".join(added)}')
