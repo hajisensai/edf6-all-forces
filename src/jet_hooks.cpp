@@ -86,16 +86,17 @@ bool Candidate(void* collector,std::uint32_t body,const void** owner,const void*
 }
 
 // online_authority.h SparesRide for this candidate: the bullet's owner a player of this machine, the candidate the vehicle
-// they ride (human +0x1548, the ride's weak object: boarding.cpp). The owner's fields are read only once the candidate
-// is that pointer, and the session asked last.
+// they ride (human +0x1548, the ride's weak object: boarding.cpp). Offline keeps the stock fast path without looking up
+// the candidate. The owner's fields are read only once the candidate is that pointer.
 constexpr std::size_t kHumanVehicle=0x1548;
 bool SparesOwnRide(void* collector,std::uint32_t body) noexcept {
+    if(!InSession())return false;
     const void* owner=nullptr;
     const void* target=nullptr;
     if(!Candidate(collector,body,&owner,&target) || !owner)return false;
     const auto human=static_cast<const unsigned char*>(owner);
     if(!Readable(human,kHumanVehicle+8) || At<const void*>(human,kHumanVehicle)!=target)return false;
-    return online::SparesRide(InSession(),IsPlayer(human),target,target);
+    return online::SparesRide(true,IsPlayer(human),target,target);
 }
 
 void __fastcall AddBodyHook(void* collector,std::uint32_t body) {

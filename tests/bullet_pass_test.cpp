@@ -1,15 +1,15 @@
 // The bullets' candidate hook (src/jet_hooks.cpp AddBodyHook / InstallBulletPass) against a private executable
 // buffer standing in for EDF.dll: no game is loaded. It installs on its own signatures (no 506 physics, no heli
-// profile, no jets), and with no jet flown and no sidecar passenger it hands every round to the stock function
-// without looking up the round's owner or target.
+// profile, no jets). The online local player's own ride is spared; without that exemption, a jet flown, or a sidecar
+// passenger, every round goes to the stock function.
 #include "../src/jet_hooks.cpp"
 #include <cstdio>
 #include <cstdlib>
 
 namespace {
 int failures=0,lookups=0,sidecarAsks=0,stockCalls=0,passengersNow=0;
-bool sidecarPasses=false;
-unsigned char owner[0x100]{},target[0x100]{},core[0xA00]{},collector[0x100]{};
+bool sidecarPasses=false,sessionOn=false;
+unsigned char owner[0x2000]{},target[0x100]{},core[0xA00]{},collector[0x100]{};
 void Check(bool pass,const char* what) {
     std::printf("%s %s\n",pass ? "PASS" : "FAIL",what);
     if(!pass)++failures;
@@ -31,6 +31,7 @@ void Log(const char*,...) noexcept {}
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept { return EXCEPTION_EXECUTE_HANDLER; }
 ULONGLONG GameMs() noexcept { return 1000; }
 ULONGLONG GameFrame() noexcept { return 60; }
+bool InSession() noexcept { return sessionOn; }
 bool ShieldLetsThrough(void*,std::uint32_t) noexcept { return false; }
 int SidecarPassengers() noexcept { return passengersNow; }
 bool SidecarBulletPass(const void* o,const void* t,const void*) noexcept { ++sidecarAsks;return sidecarPasses && o==owner && t==target; }
@@ -90,6 +91,24 @@ int main() {
     jets[0]=Jet{};jets[1]=Jet{};Publish(true);
     addBody(collector,7);
     Check(stockCalls==4 && lookups==3,"no jet flown: the gate shuts");
+
+    // Exercise the online exemption through the installed hook and the real player-identity predicate.
+    owner[edf::kHumanPlayer]=1;Put<const void*>(owner,edf::kHumanPad,owner);
+    Put<const void*>(owner,kHumanVehicle,target);
+    addBody(collector,7);
+    Check(stockCalls==5 && lookups==3,"offline local player's own ride keeps the stock collision without lookup");
+    sessionOn=true;
+    addBody(collector,7);
+    Check(stockCalls==5,"online local player's own ride is spared");
+    owner[edf::kRiderNet+edf::kNetFlags]=1;
+    addBody(collector,7);
+    Check(stockCalls==6,"another machine's player keeps the stock collision");
+    owner[edf::kRiderNet+edf::kNetFlags]=0;owner[edf::kHumanPlayer]=0;
+    addBody(collector,7);
+    Check(stockCalls==7,"a non-player owner keeps the stock collision");
+    owner[edf::kHumanPlayer]=1;Put<const void*>(owner,kHumanVehicle,owner);
+    addBody(collector,7);
+    Check(stockCalls==8,"a local player's round at another vehicle keeps the stock collision");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("bullet_pass_test: %d failures\n",failures);
     return failures ? 1 : 0;

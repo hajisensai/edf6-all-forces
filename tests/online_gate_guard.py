@@ -115,7 +115,9 @@ def check_damage(root: str) -> None:
     hook = body(code_only(read(root, 'src/jet_hooks.cpp')), 'void __fastcall AddBodyHook(')
     if not before(hook, 'SparesOwnRide(collector,body)', 'nextAddBody(collector,body)'):
         fail("src/jet_hooks.cpp AddBodyHook: a round named the player is not kept off the vehicle they ride (self-hit)")
-    if 'online::SparesRide(InSession()' not in body(code_only(read(root, 'src/jet_hooks.cpp')), 'bool SparesOwnRide('):
+    spare = body(code_only(read(root, 'src/jet_hooks.cpp')), 'bool SparesOwnRide(')
+    if not before(spare, 'if(!InSession())return false;', 'Candidate(') or \
+            'online::SparesRide(true,IsPlayer(human),target,target)' not in spare:
         fail('src/jet_hooks.cpp SparesOwnRide: not the online-only rule (offline must stay stock)')
     bay = code_only(read(root, 'src/jet_bay.cpp'))
     for fn in ('bool PlayerShell(', 'bool PlayerSideGun('):
