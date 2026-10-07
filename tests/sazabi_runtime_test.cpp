@@ -5,6 +5,11 @@
 namespace crew {
 unsigned char* image=nullptr;
 Config config{};
+bool netSession=false,netAuthority=true;
+std::int32_t netDriver=42;
+ULONGLONG testNow=1000;
+int emcCalls=0,damageCalls=0,enemyVisits=0,soundCalls=0;
+sazabi_net::State lastNetwork;
 PlayerFix player{};
 const void* visibleObjects[4]{};
 float visiblePositions[4][3]{};
@@ -15,7 +20,7 @@ unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { ret
 bool SeatPoint(const unsigned char*,unsigned,float*,float*) noexcept { return false; }
 float GroundClearance(const float*) noexcept { return kNoGround; }
 // Unused game entry points from the included runtime translation unit.
-ULONGLONG GameMs() noexcept { return 1000; }
+ULONGLONG GameMs() noexcept { return testNow; }
 ULONGLONG GameFrame() noexcept { return 1; }
 float GameStep(ULONGLONG) noexcept { return 1.0f/60.0f; }
 void NozzleFlames(const unsigned char*,const float (*)[16],int,const float (*)[2],const float*,ULONGLONG) noexcept {}
@@ -25,7 +30,9 @@ bool Body506Ok() noexcept { return true; }
 void BoardingRequest(unsigned char*) noexcept {}
 bool DrillCharge(const unsigned char*,const float*,const float*,float) noexcept { return false; }
 bool EmcRoundReady(EmcRound) noexcept { return false; }
-RoundObj EmcFire(EmcRound,const unsigned char*,const float*,const float*,float) noexcept { return {}; }
+RoundObj EmcFire(EmcRound,const unsigned char*,const float*,const float*,float damage) noexcept {
+    ++emcCalls;if(damage>0)++damageCalls;return {};
+}
 bool RoundSteer(const RoundObj&,const float*,const float*) noexcept { return false; }
 bool RoundSize(const RoundObj&,float) noexcept { return false; }
 void RoundDrop(RoundObj&) noexcept {}
@@ -33,14 +40,21 @@ unsigned char* PlayerHuman() noexcept { return nullptr; }
 bool HumanOnFoot(const unsigned char*) noexcept { return false; }
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor visitor,void* context) noexcept {
+    ++enemyVisits;
     for(int i=0;i<visibleCount;++i)visitor(context,visibleObjects[i],visiblePositions[i]);
     return visibleCount>0;
 }
 bool MapHoldsKeys() noexcept { return true; }
 void BodyAttitude(const unsigned char*,const float*,const float*,float,float,float*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
-void SazabiSfx(SzSfx,const float*) noexcept {}
+void SazabiSfx(SzSfx,const float*) noexcept { ++soundCalls; }
 void SazabiLoop(SzLoop,const float*,const float*,float) noexcept {}
+bool InSession() noexcept { return netSession; }
+bool IsOnlineAuthority(const void*) noexcept { return netAuthority; }
+bool InstallSazabiNet() noexcept { return true; }
+std::int32_t SazabiNetController(unsigned char*) noexcept { return netDriver; }
+std::int32_t SazabiNetReference(const void*) noexcept { return -1; }
+bool SazabiNetSend(unsigned char*,sazabi_net::State s) noexcept { lastNetwork=s;return true; }
 }
 
 namespace {

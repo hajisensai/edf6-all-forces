@@ -117,7 +117,16 @@ void SeeEnemies(const unsigned char* v,const float* from,Enemies* e) noexcept {
 
 // ------------------------------------------------------------------------------------------ the arms each frame
 // One-shots wherever it is (the player's or an NPC's); its loops are the player's alone (sazabi_sound.h: one of each).
-void Sfx(const Mech& m,SzSfx which,const float* at) noexcept { if(m.driven)SazabiSfx(which,at); }
+void Sfx(Mech& m,SzSfx which,const float* at) noexcept {
+    if(!m.driven)return;
+    SazabiSfx(which,at);
+    if(!m.net.networked || m.net.remote)return;
+    if(++m.net.soundSerial==0)++m.net.soundSerial;
+    const unsigned slot=m.net.soundSerial%4;
+    auto& sound=m.net.state.sounds[slot];
+    sound.sequence=m.net.soundSerial;sound.kind=static_cast<std::uint32_t>(which);std::memcpy(sound.at,at,12);
+    m.net.soundAt[slot]=GameMs();m.net.dirty=true;
+}
 
 void DropArms(Mech& m) noexcept {
     Arms& a=m.arms;
@@ -196,12 +205,14 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
     a.cannonCool=std::fmax(0.0f,a.cannonCool-dt);
     float from[3];
     BoneAt(m,sazabi::kCannon,nullptr,from);
+    std::memcpy(m.net.state.arms.megaFrom,from,12);
     if(a.megaLeft>0.0f) {   // the fan, steered with the chest
         a.megaLeft-=dt;
         for(int b=0;b<kMegaBeams;++b) {
             float dir[3],end[3];
             CannonDir(m,from,a.megaYaw[b],dir);
             BeamEnd(from,dir,kMegaRange,end);
+            std::memcpy(m.net.state.arms.megaEnd[b],end,12);
             if(a.megaLeft<=0.0f || !RoundSteer(a.mega[b],from,end))RoundDrop(a.mega[b]);
         }
         a.brace=1.0f;
@@ -212,6 +223,7 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
         float fwd[3],tip[3];
         CannonDir(m,from,0.0f,fwd);
         for(int k=0;k<3;++k)tip[k]=from[k]+fwd[k]*0.3f;
+        std::memcpy(m.net.state.arms.megaEnd[0],tip,12);
         if(!a.glow.obj && EmcRoundReady(EmcRound::szCharge))a.glow=EmcFire(EmcRound::szCharge,v,from,tip,0.0f);
         RoundSteer(a.glow,from,tip);
         RoundSize(a.glow,kGlowThin+(kGlowThick-kGlowThin)*a.charge);
@@ -222,13 +234,15 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
     RoundDrop(a.glow);
     if(let && a.charge>=kChargeLeast) {   // the fan of beams
         a.megaDamage=Cfg().sazabiCannonDamage*a.charge;
+        m.net.state.arms.megaSize=kMegaSize*(0.5f+0.5f*a.charge);
         for(int b=0;b<kMegaBeams;++b) {
             float dir[3],end[3];
             a.megaYaw[b]=kMegaFan[b];
             CannonDir(m,from,a.megaYaw[b],dir);
             BeamEnd(from,dir,kMegaRange,end);
+            std::memcpy(m.net.state.arms.megaEnd[b],end,12);
             a.mega[b]=EmcFire(EmcRound::szMega,v,from,end,a.megaDamage);
-            RoundSize(a.mega[b],kMegaSize*(0.5f+0.5f*a.charge));
+            RoundSize(a.mega[b],m.net.state.arms.megaSize);
         }
         a.megaLeft=kMegaSec;a.cannonCool=kCannonCool;
         Sfx(m,SzSfx::cannonShot,from);
@@ -290,6 +304,10 @@ void FlyFunnels(Mech& m,unsigned char* v,bool launch,float dt) noexcept {
     for(int i=0;i<ev.shots;++i) {
         const fn::Shot& s=ev.shot[i];
         if(EmcFire(EmcRound::szFunnel,v,s.from,s.at,Cfg().sazabiFunnelDamage).obj)Sfx(m,SzSfx::funnelShot,s.from);
+        auto& shot=m.net.state.shots[s.funnel];
+        if(++shot.sequence==0)++shot.sequence;
+        std::memcpy(shot.from,s.from,12);std::memcpy(shot.at,s.at,12);
+        m.net.shotAt[s.funnel]=GameMs();m.net.dirty=true;
     }
     if(ev.docked)Sfx(m,SzSfx::funnelDock,docks[0]);
     bool out=false;

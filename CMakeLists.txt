@@ -32,6 +32,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/sazabi_net.cpp)
 # Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
 target_sources(EDF6VehicleCrew PRIVATE src/guidance.cpp)
 # Every lock-on weapon's lock: the order it locks in (the player's nearest the view), the target cycle, reading it.
@@ -504,3 +505,13 @@ target_compile_options(sazabi_runtime_test PRIVATE /W4 /WX /utf-8 /permissive- /
 target_link_options(sazabi_runtime_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks sazabi_runtime_test)
 add_test(NAME sazabi_runtime COMMAND sazabi_runtime_test)
+add_executable(sazabi_net_test tests/sazabi_net_test.cpp)
+target_compile_options(sazabi_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME sazabi_net COMMAND sazabi_net_test)
+add_executable(sazabi_net_runtime_test EXCLUDE_FROM_ALL tests/sazabi_net_runtime_test.cpp)
+target_include_directories(sazabi_net_runtime_test PRIVATE src common)
+target_link_libraries(sazabi_net_runtime_test PRIVATE edf6common user32)
+target_compile_options(sazabi_net_runtime_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(sazabi_net_runtime_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks sazabi_net_test sazabi_net_runtime_test)
+add_test(NAME sazabi_net_runtime COMMAND sazabi_net_runtime_test)
