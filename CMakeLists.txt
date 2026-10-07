@@ -531,6 +531,8 @@ add_test(NAME npc_gunner_aim COMMAND npc_gunner_aim_test)
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native gunner checks")
 add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_gunner_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_gunner_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME medic_native_heal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/medic_native_heal_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(medic_native_heal PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp)
 target_link_libraries(npc_gunners_online_test PRIVATE edf6common user32)
