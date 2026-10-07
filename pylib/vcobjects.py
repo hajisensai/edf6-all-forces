@@ -1363,7 +1363,8 @@ SAZABI_RIFLE_STOCK = 'V_506HELI_LASERCANNON01_L.SGO'
 SAZABI_RIFLE_FILE = 'EDF6VC_SZ_RIFLE.SGO'
 SAZABI_MISSILE_FILE = 'EDF6VC_SZ_MISSILE.SGO'
 SAZABI_PINK = (2.6, 0.55, 1.9, 0.6)
-SAZABI_RIFLE: dict[str, float] = {'AmmoSize': 5.0, 'AmmoSpeed': 30.0, 'AmmoAlive': 30.0, 'AmmoDamage': 1800.0,
+# AmmoSize: the stock heli laser's is 0.9; 5 lit the ground pink tens of metres round the shot (its light grows with it)
+SAZABI_RIFLE: dict[str, float] = {'AmmoSize': 2.5, 'AmmoSpeed': 30.0, 'AmmoAlive': 30.0, 'AmmoDamage': 1800.0,
                                   'FireInterval': 30.0, 'AmmoCount': 9999.0, 'AmmoIsPenetration': 1.0, 'FireRecoil': 0.0}
 SAZABI_RIFLE_FIRE_SE = ('weapon_Fencer_CA_blasterCannon01', 0.9, 60.0)   # cue, volume, metres heard at full
 SAZABI_RIFLE_HIT_SE = ('common_damages_impactParticle_S', 0.8, 50.0)
