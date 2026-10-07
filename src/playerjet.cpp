@@ -855,7 +855,7 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
 
 // What its airframe touches this frame (the enemy walk only collects: a charge is an object, not made inside the walk).
 struct EnemyContact { const void* object; float at[3],closing; };
-struct EnemyScan { const unsigned char* v; float centre[3],vel[3]; ram::Box box; EnemyContact found[kEnemyRamContacts]; int count; };
+struct EnemyScan { const unsigned char* v; const EnemyHit* hits; ULONGLONG ms; float centre[3],vel[3]; ram::Box box; EnemyContact found[kEnemyRamContacts]; int count; };
 
 void SeeRammed(void* ctx,const void* object,const float* lock) noexcept {
     auto& sc=*static_cast<EnemyScan*>(ctx);
@@ -867,6 +867,8 @@ void SeeRammed(void* ctx,const void* object,const float* lock) noexcept {
     if(!ram::Touches(m,sc.centre,sc.box,kRamBodyPad,root,lock,c.at))return;
     c.closing=ram::Closing(sc.centre,sc.vel,c.at);
     if(c.closing<kEnemyRamLeast)return;
+    // Cooling contacts must not consume the bounded batch: later enemies need their turn next frame.
+    if(ram::CooldownSlot(sc.hits,kEnemyRamHits,sc.ms,kEnemyRamGapMs,[object](const ObjRef& t){return t.Is(object);})<0)return;
     c.object=object;
     ++sc.count;
 }
@@ -878,7 +880,7 @@ void EnemyRam(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const float r=j.kind->ram,h=r*kRamBoxHeight;
     EnemyScan sc{};
-    sc.v=v;
+    sc.v=v;sc.hits=j.enemyHits;sc.ms=ms;
     for(int i=0;i<3;++i){sc.centre[i]=pos[i]+m[4+i]*h;sc.vel[i]=j.measured[i];}
     sc.box=ram::Box{{0.0f,0.0f,0.0f},{r,h,r}};
     VisitEnemies(v,&SeeRammed,&sc);
