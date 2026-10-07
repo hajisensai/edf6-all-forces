@@ -781,6 +781,9 @@ bool IsPlayerJet(const void* vehicle) noexcept;
 // slow enough: crew.cpp bumps its NPC pilot for them); the plugin holds it for them (they fly it, it comes down for
 // them, catches them or waits where they left it): jet.cpp does not fly it then, crew.cpp does not crew it.
 bool PlayerJetBoardable(const void* vehicle) noexcept;
+// The aircraft the hail key would call down for a player at `from` (none boardable near them: the HUD's hint), or the
+// one called coming down (`*coming`): its position and distance. False: none, or no hail key.
+bool PlayerJetHailHint(const float* from,float* at,float* distance,bool* coming) noexcept;
 bool PlayerJetHolds(const void* vehicle) noexcept;
 // The gunship's crew (playerjet_crew.inc, README 炮舰机): seat 0 its pilot, kGunnerSeat its side gunner (tools/make_jets.py
 // with_gunner_seat; a gunship installed before has the one seat, and none of this). Whether `vehicle` is such a

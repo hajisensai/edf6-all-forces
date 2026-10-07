@@ -924,9 +924,16 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
                 if(!std::isfinite(d) || d>=best)continue;
                 best=d;found=true;
                 std::memcpy(out->at,point,12);out->reach=reach;out->distance=std::sqrt(d);out->inReach=d<=reach*reach;
+                out->hail=out->coming=false;
             }
         }
-        return found;
+        if(found)return true;
+        // None to board near them: the one up in the air the hail key calls down (the user, 2026-10-07: "the carrier has
+        // no boarding point": an NPC carrier holds 150 m up, boardable only once called down, and nothing said so).
+        float at[3],distance=0.0f;bool coming=false;
+        if(!PlayerJetHailHint(pos,at,&distance,&coming))return false;
+        std::memcpy(out->at,at,12);out->reach=0.0f;out->distance=distance;out->inReach=false;out->hail=true;out->coming=coming;
+        return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
