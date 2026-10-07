@@ -3,8 +3,9 @@
 // scenes of the warnings (warn.h) on a jet (one low on fuel: the fuel readout that replaces the stock FUEL gauge, LOW
 // FUEL lit), a rotor craft and a stock heli, and the stock vehicles' HUD (a tank, the drill tank, a Nix, the Proteus
 // walking behind its front shield and deployed with its field, barrier and a mark; at 16:9 and 21:9) under threat, and
-// the Sazabi's panel and marks (full, low thrust, the cannon charging / cooling, funnels out, locking / locked; its layout
-// checked on the scale cases below: SazabiLayoutChecks). Each
+// the Sazabi's own HUD (idle, no hit, not centred, boosting, low thrust, overheated, each special: the missiles locking /
+// locked, the funnels out, the cannon charging / cooling; every tag lit; on 1280x720, 3840x2160, split screens and
+// HudScale 1.5 too; its layout checked on the scale cases below: SazabiLayoutChecks). Each
 // scene's quads (as triangles) and text
 // lines go to DIR/<scene>.txt; tools/hud_view.py turns them into PNGs. The text's size is a stand-in (the game's
 // glyphs are not here: kGlyphH px a unit of font scale, kGlyphW of that a character), so read the layout, not the
@@ -230,13 +231,13 @@ std::string Narrow(const std::wstring& w) {
     WideCharToMultiByte(CP_UTF8,0,w.c_str(),-1,n,sizeof(n),nullptr,nullptr);
     return n;
 }
-// `draw` recorded as scene `name` on a screen `width` x 1080: its text on the screen, its overlaps none English lacks.
-template<class F> void Record(const wchar_t* name,F draw,int width) {
+// `draw` recorded as scene `name` on a screen `width` x `height`: its text on the screen, its overlaps none English lacks.
+template<class F> void Record(const wchar_t* name,F draw,int width,int height=1080) {
     drew.clear();glyphs.clear();panels.clear();recording=true;sceneTick=GetTickCount64();
     draw();
     recording=false;
     SceneText t;
-    const float w=static_cast<float>(width),h=1080.0f;
+    const float w=static_cast<float>(width),h=static_cast<float>(height);
     for(std::size_t i=0;i<drew.size();++i) {
         const Drew& a=drew[i];
         t.texts.push_back(a.text);
@@ -722,19 +723,45 @@ int ScaleDrawnChecks() {
     config.hudScale=1.0f;
     return failed;
 }
-// The Sazabi (hud.cpp SazabiPanel / SazabiMarks), on its feet at `pos` heading +z: everything ready; low on thrust in the
-// air, the rifle cooling; the cannon charging behind the shield; four funnels out, the tomahawk swinging; the missiles
-// locking, then locked. Its aim 200 m ahead, its lock on a target ahead and to the right (the camera's right is -x).
+// The Sazabi (hud.cpp SazabiHud), on its feet at `pos` heading +z, on its own camera (centred): everything ready, the
+// shield missiles selected, the centre's ray meeting something 412 m out. Its aim 200 m ahead (where the reticle goes
+// when the camera is not its own), its lock on a target ahead and to the right (the camera's right is -x).
 void SazabiCueAt(const float* pos) {
     sceneSazabi=SazabiCue{};
     sceneSazabi.thruster=1.0f;sceneSazabi.rifleReady=1.0f;sceneSazabi.missiles=12;sceneSazabi.missileReady=1.0f;
     sceneSazabi.cannonReady=1.0f;sceneSazabi.funnelReady=1.0f;
     sceneSazabi.hasAim=true;sceneSazabi.aim[0]=pos[0]+8.0f;sceneSazabi.aim[1]=pos[1]+20.0f;sceneSazabi.aim[2]=pos[2]+200.0f;
-    sceneSazabi.lock[0]=pos[0]-60.0f;sceneSazabi.lock[1]=pos[1]+12.0f;sceneSazabi.lock[2]=pos[2]+320.0f;
+    sceneSazabi.lock[0]=pos[0]-90.0f;sceneSazabi.lock[1]=pos[1]+70.0f;sceneSazabi.lock[2]=pos[2]+320.0f;
+    sceneSazabi.centred=true;sceneSazabi.aimHit=true;sceneSazabi.aimRange=412.0f;
 }
-// The Sazabi's panel on the screens and HUD scales hud_view checks the stock HUD on (ScaleDrawnChecks): on the screen and
-// clear of its marks (the reticle, the lock) everywhere; the same in design pixels as at 1920x1080 wherever the screen
-// has room for it at its place (a narrow viewport holds it at the left edge instead). Its lines inside it: Record's check.
+// The Sazabi's states the layout is checked in: idle; the widest (every tag lit, locked, overheated, the cannon charging);
+// the funnels out; low and boosting high in the air with the missiles locking.
+void SazabiState(int k,const float* pos) {
+    SazabiCueAt(pos);
+    SazabiCue& c=sceneSazabi;
+    if(k==1){c.guard=c.air=c.swinging=c.overheat=true;c.hasLock=true;c.missileLock=1.0f;c.thruster=0.0f;c.special=2;c.cannonCharge=0.62f;
+             c.altitude=9999.0f;c.speed=99.0f;c.climb=-30.0f;c.aimRange=99999.0f;}
+    if(k==2){c.special=1;c.funnelsOut=4;c.funnelReady=0.3f;}
+    if(k==3){c.air=c.boosting=true;c.altitude=312.0f;c.speed=48.0f;c.climb=14.0f;c.thruster=0.2f;c.hasLock=true;c.missileLock=0.5f;}
+}
+constexpr int kSazabiStates=4;
+// A box in design px from the screen's centre (the Sazabi's gauges' anchor).
+Box FromCentre(Box b,float w,float h,float s) {
+    const float ax=w*0.5f,ay=h*0.5f;
+    return Box{(b.x0-ax)/s,(b.y0-ay)/s,(b.x1-ax)/s,(b.y1-ay)/s,b.any};
+}
+// The nearest a box comes to (x, y).
+float NearestTo(const Box& b,float x,float y) {
+    const float dx=x<b.x0 ? b.x0-x : x>b.x1 ? x-b.x1 : 0.0f,dy=y<b.y0 ? b.y0-y : y>b.y1 ? y-b.y1 : 0.0f;
+    return std::sqrt(dx*dx+dy*dy);
+}
+bool Apart(const Box& a,const Box& b) { return a.x1<=b.x0 || b.x1<=a.x0 || a.y1<=b.y0 || b.y1<=a.y0; }
+// The Sazabi's HUD on the screens and HUD scales hud_view checks the stock HUD on (ScaleDrawnChecks), in each state of
+// SazabiState: every piece on the screen; the reticle at the screen's exact centre (centred) and its range within the
+// centre's keep-out (hud.cpp kSazabiKeepOut); the thrusters' arc, the altitude and speed, the special's readout and the
+// panel all outside it and apart from each other and from the reticle; the centre's pieces the same in design px as at
+// 1920x1080, and the panel too wherever the screen has room for it at its place (a narrow viewport holds it at the left
+// edge, or at the screen's foot where the gauges would meet it). Its lines inside it: Record's check.
 int SazabiLayoutChecks(const float* pos) {
     struct Case { const char* what; int uiW,uiH,viewW,viewH; float user,s; };
     const Case cases[]={
@@ -745,67 +772,127 @@ int SazabiLayoutChecks(const float* pos) {
         {"3840x2160",3840,2160,3840,2160,1.0f,2.0f},
         {"3840x2160 split left/right: 1920x2160",3840,2160,1920,2160,1.0f,2.0f},
         {"1920x1080 split top/bottom: 1920x540",1920,1080,1920,540,1.0f,1.0f},
+        {"1920x1080, HudScale 1.5",1920,1080,1920,1080,1.5f,1.5f},
         {"3840x2160, HudScale 1.5",3840,2160,3840,2160,1.5f,3.0f},
     };
     void* const drawer=At<void*>(image,kQuadDrawer);
     static unsigned char ctx[16]{};
     const float fwd[3]={0.0f,0.0f,1.0f};
-    SazabiCueAt(pos);
-    sceneSazabi.hasLock=true;sceneSazabi.missileLock=0.5f;   // the lock's widest square
-    sceneSazabi.guard=sceneSazabi.air=sceneSazabi.swinging=true;   // every tag lit but LOCK (locking): the widest title row
-    Box ref{};
     int failed=0;
-    for(const Case& c:cases) {
-        config.hudScale=c.user;
-        SetScreen(c.uiW,c.uiH);
-        const float w=static_cast<float>(c.viewW),h=static_cast<float>(c.viewH);
-        float vp[16];
-        Camera(pos,fwd,w,h,vp);
-        const Box panel=Measured([&](Text* t,Line* l,int* at){SazabiPanel(drawer,ctx,t,w,h,c.s,sceneSazabi,l,at);},c.s);
-        const Box marks=Measured([&](Text*,Line*,int*){SazabiMarks(drawer,ctx,vp,w,h,c.s,sceneSazabi);},c.s);
-        const Box design=Design(panel,w,h,c.s);
-        if(&c==&cases[0])ref=design;
-        const bool room=w*0.5f-kSazabiLeft*c.s>=16.0f*c.s;
-        const bool inside=panel.any && panel.x0>=0.0f && panel.y0>=0.0f && panel.x1<=w && panel.y1<=h;
-        const bool apart=marks.any && (marks.x1<panel.x0 || panel.x1<marks.x0 || marks.y1<panel.y0 || panel.y1<marks.y0);
-        const bool same=!room || Same(design,ref);
-        const bool ok=inside && apart && same;
-        failed+=!ok;
-        std::printf("%s  Sazabi %-40s s=%.3f panel (%.0f,%.0f)-(%.0f,%.0f) (%.0f,%.0f)-(%.0f,%.0f) design%s, marks (%.0f,%.0f)-(%.0f,%.0f)\n",
-                    ok ? "ok  " : "FAIL",c.what,c.s,panel.x0,panel.y0,panel.x1,panel.y1,design.x0,design.y0,design.x1,design.y1,
-                    room ? "" : " (held at the edge)",marks.x0,marks.y0,marks.x1,marks.y1);
+    for(int k=0;k<kSazabiStates;++k) {
+        SazabiState(k,pos);
+        Box ref[5]{};
+        for(const Case& c:cases) {
+            config.hudScale=c.user;
+            SetScreen(c.uiW,c.uiH);
+            const float w=static_cast<float>(c.viewW),h=static_cast<float>(c.viewH),s=c.s,cx=w*0.5f,cy=h*0.5f;
+            float vp[16];
+            Camera(pos,fwd,w,h,vp);
+            const SazabiCue& q=sceneSazabi;
+            const Box ring=Measured([&](Text*,Line*,int*){SazabiReticle(drawer,ctx,vp,w,h,s,q);},s);
+            Box b[5];   // the reticle and its range, the thrusters, the altitude and speed, the special, the panel
+            b[0]=Measured([&](Text* t,Line* l,int* at){SazabiReticle(drawer,ctx,vp,w,h,s,q);SazabiRange(t,vp,w,h,s,q,l,at);},s);
+            b[1]=Measured([&](Text* t,Line* l,int* at){SazabiThrusterArc(drawer,ctx,t,w,h,s,q,l,at);},s);
+            b[2]=Measured([&](Text* t,Line* l,int* at){SazabiAltSpeed(drawer,ctx,t,w,h,s,q,l,at);},s);
+            b[3]=Measured([&](Text* t,Line* l,int* at){SazabiSpecial(drawer,ctx,t,w,h,s,q,l,at);},s);
+            b[4]=Measured([&](Text* t,Line* l,int* at){SazabiPanel(drawer,ctx,t,w,h,s,q,l,at);},s);
+            static const char* const kNames[5]={"reticle","thrusters","alt/speed","special","panel"};
+            char why[256]="";
+            auto fail=[&](const char* f,int i,int j){
+                if(!why[0])std::snprintf(why,sizeof(why),f,kNames[i],j>=0 ? kNames[j] : "");
+            };
+            const float keep=kSazabiKeepOut*s;
+            if(std::fabs((ring.x0+ring.x1)*0.5f-cx)>0.5f || std::fabs((ring.y0+ring.y1)*0.5f-cy)>0.5f)fail("%s not at the centre%s",0,-1);
+            for(int i=0;i<5;++i) {
+                if(!b[i].any || b[i].x0<-0.5f || b[i].y0<-0.5f || b[i].x1>w+0.5f || b[i].y1>h+0.5f)fail("%s off the screen%s",i,-1);
+                if(i>0 && NearestTo(b[i],cx,cy)<keep-0.5f)fail("%s in the centre's keep-out%s",i,-1);
+                for(int j=0;j<i;++j)if(!Apart(b[i],b[j]))fail("%s meets the %s",i,j);
+            }
+            const float corner=std::fmax(std::fmax(std::hypot(b[0].x0-cx,b[0].y0-cy),std::hypot(b[0].x1-cx,b[0].y0-cy)),
+                                         std::fmax(std::hypot(b[0].x0-cx,b[0].y1-cy),std::hypot(b[0].x1-cx,b[0].y1-cy)));
+            if(corner>keep+0.5f)fail("%s past the centre's keep-out%s",0,-1);
+            const bool room=w*0.5f-kSazabiLeft*s>=16.0f*s;
+            for(int i=0;i<5;++i) {   // the panel's anchor (W/2, 0.80 H) as the stock block's, the rest's the centre
+                const Box d=i==4 ? Design(b[i],w,h,s) : FromCentre(b[i],w,h,s);
+                if(&c==&cases[0]){ref[i]=d;continue;}
+                const bool held=i==4 && (!room || b[4].y1>=h-16.0f*s-0.5f);   // at the left edge or the screen's foot
+                if(!held && !Same(d,ref[i]))fail("%s not as at 1920x1080 in design px%s",i,-1);
+            }
+            failed+=why[0]!=0;
+            const Box p=FromCentre(b[4],w,h,s);
+            std::printf("%s  Sazabi %d %-40s s=%.3f panel (%.0f,%.0f)-(%.0f,%.0f) design from C%s%s\n",why[0] ? "FAIL" : "ok  ",k,
+                        c.what,s,p.x0,p.y0,p.x1,p.y1,why[0] ? ": " : "",why);
+        }
     }
     config.hudScale=1.0f;
     SetScreen(1920,1080);
     return failed;
 }
+// A Sazabi scene on a screen of its own: the game's uiW x uiH, the viewport viewW x viewH, the ini's HudScale `user`.
+void SazabiSceneAt(const std::wstring& dir,const wchar_t* name,const float* pos,int uiW,int uiH,int viewW,int viewH,float user) {
+    const std::wstring path=dir+L"\\"+name+L".txt";
+    if(_wfopen_s(&out,path.c_str(),L"w") || !out)return;
+    std::fprintf(out,"W %d %d\n",viewW,viewH);
+    config.hudScale=user;
+    SetScreen(uiW,uiH);
+    float vp[16];
+    const float fwd[3]={0.0f,0.0f,1.0f};
+    Camera(pos,fwd,static_cast<float>(viewW),static_cast<float>(viewH),vp);
+    HudPublish();
+    struct { std::int32_t x,y,w,h; } viewport{0,0,viewW,viewH};
+    Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},viewW,viewH);
+    std::fclose(out);out=nullptr;
+    config.hudScale=1.0f;
+    SetScreen(1920,1080);
+    std::printf("%ls\n",path.c_str());
+}
 int SazabiScenes(const std::wstring& dir,const float* pos) {
     hasSazabi=true;
     const float noseWas[3]={sceneHeli.sym.nose[0],sceneHeli.sym.nose[1],sceneHeli.sym.nose[2]};
     sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;   // Scene's camera: heading +z
+    SazabiCue& c=sceneSazabi;
+    SazabiCueAt(pos);                                   // on its feet, everything ready, the missiles selected
+    Scene(dir,L"sazabi_idle",pos);
+    Scene(dir,L"sazabi_idle_219",pos,2520);
+    Scene(dir,L"sazabi_idle_narrow",pos,1280);
+    SazabiSceneAt(dir,L"sazabi_idle_1280x720",pos,1280,720,1280,720,1.0f);
+    SazabiSceneAt(dir,L"sazabi_idle_3840x2160",pos,3840,2160,3840,2160,1.0f);
+    SazabiSceneAt(dir,L"sazabi_idle_split_lr",pos,3840,2160,1920,2160,1.0f);
+    SazabiSceneAt(dir,L"sazabi_idle_split_tb",pos,1920,1080,1920,540,1.0f);
+    SazabiSceneAt(dir,L"sazabi_idle_hudscale15",pos,1920,1080,1920,1080,1.5f);
+    c.aimHit=false;                                     // the centre's ray meets nothing within reach
+    Scene(dir,L"sazabi_no_hit",pos);
     SazabiCueAt(pos);
-    Scene(dir,L"sazabi_full",pos);
-    Scene(dir,L"sazabi_full_219",pos,2520);
-    Scene(dir,L"sazabi_full_narrow",pos,1280);
-    SazabiCueAt(pos);
-    sceneSazabi.thruster=0.18f;sceneSazabi.air=true;sceneSazabi.rifleReady=0.4f;
+    c.centred=false;                                    // not its own camera: the reticle where the aim projects
+    Scene(dir,L"sazabi_not_centred",pos);
+    SazabiCueAt(pos);                                   // boosting up through 86 m
+    c.air=c.boosting=true;c.altitude=86.0f;c.speed=41.0f;c.climb=12.0f;c.thruster=0.64f;
+    Scene(dir,L"sazabi_boost_air",pos);
+    SazabiCueAt(pos);                                   // low on thrust, falling
+    c.air=true;c.altitude=35.0f;c.speed=18.0f;c.climb=-8.0f;c.thruster=0.18f;c.rifleReady=0.4f;
     Scene(dir,L"sazabi_low_thruster",pos);
-    SazabiCueAt(pos);
-    sceneSazabi.cannonCharge=0.62f;sceneSazabi.guard=true;sceneSazabi.missileReady=0.3f;
-    Scene(dir,L"sazabi_cannon_charging",pos);
-    sceneSazabi.cannonCharge=0.0f;sceneSazabi.cannonReady=0.35f;
-    Scene(dir,L"sazabi_cannon_cooldown",pos);
-    SazabiCueAt(pos);
-    sceneSazabi.funnelsOut=4;sceneSazabi.funnelReady=0.3f;sceneSazabi.swinging=true;
+    SazabiCueAt(pos);                                   // spent: no boost until it lands
+    c.air=c.overheat=true;c.altitude=40.0f;c.speed=22.0f;c.climb=-9.0f;c.thruster=0.0f;
+    Scene(dir,L"sazabi_overheat",pos);
+    SazabiCueAt(pos);                                   // the missiles locking, then locked
+    c.hasLock=true;c.missileLock=0.45f;c.missiles=3;c.missileReady=0.5f;
+    Scene(dir,L"sazabi_missiles_locking",pos);
+    c.missileLock=1.0f;c.guard=true;
+    Scene(dir,L"sazabi_missiles_locked",pos);
+    Scene(dir,L"sazabi_missiles_locked_narrow",pos,1280);
+    SazabiCueAt(pos);                                   // the funnels: four out
+    c.special=1;c.funnelsOut=4;c.funnelReady=0.3f;c.swinging=true;
     Scene(dir,L"sazabi_funnels_out",pos);
-    SazabiCueAt(pos);
-    sceneSazabi.hasLock=true;sceneSazabi.missileLock=0.45f;sceneSazabi.missiles=3;sceneSazabi.missileReady=0.5f;
-    Scene(dir,L"sazabi_locking",pos);
-    sceneSazabi.missileLock=1.0f;sceneSazabi.air=true;sceneSazabi.guard=true;sceneSazabi.swinging=true;
-    Scene(dir,L"sazabi_locked",pos);
-    Scene(dir,L"sazabi_locked_narrow",pos,1280);
-    sceneSazabi.missiles=0;sceneSazabi.missileReady=0.0f;sceneSazabi.funnelsOut=6;sceneSazabi.thruster=0.0f;
-    Scene(dir,L"sazabi_empty",pos);
+    SazabiCueAt(pos);                                   // the cannon charging behind the shield, then cooling
+    c.special=2;c.cannonCharge=0.62f;c.guard=true;c.missileReady=0.3f;
+    Scene(dir,L"sazabi_cannon_charging",pos);
+    c.cannonCharge=0.0f;c.cannonReady=0.35f;c.guard=false;
+    Scene(dir,L"sazabi_cannon_cooldown",pos);
+    SazabiState(1,pos);                                 // the widest: every tag lit, locked, overheated, the cannon charging
+    c.missiles=0;c.missileReady=0.0f;c.funnelsOut=6;
+    Scene(dir,L"sazabi_everything",pos);
+    SazabiSceneAt(dir,L"sazabi_everything_hudscale15",pos,3840,2160,3840,2160,1.5f);
+    SazabiSceneAt(dir,L"sazabi_everything_split_lr",pos,3840,2160,1920,2160,1.0f);
     const int failed=SazabiLayoutChecks(pos);
     std::memcpy(sceneHeli.sym.nose,noseWas,12);
     hasSazabi=false;
