@@ -792,7 +792,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
     GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
     GuardedTick(kStepSazabi,&SazabiSoundTick);      // the plugin off too: the Sazabi's loops stop then (once a frame)
-    if(!Cfg().enabled)return;
+    if(!Cfg().enabled){Guarded(kStepSightZoom,&SightZoomStock,v);return;}
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);
     Guarded(kStepSeats,&SeatSwitchFrame,v);    // before the steps that read who sits where this frame

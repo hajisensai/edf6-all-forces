@@ -2305,7 +2305,9 @@ void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         Seg(drawer,ctx,lx-h,ly,lx+h,ly,t,kHud);
         const int metres=static_cast<int>(std::lround(a.ladder.range[k]));
         if(ly>=labelled+kLabelApart*s) {   // its number where there is room for it (a tick too near the last one's: none)
-            Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",a.ladder.step>=100.0f ? metres/100 : metres);
+            if(a.ladder.step>=100.0f && metres%100!=0)
+                Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%.1f",metres/100.0);
+            else Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",a.ladder.step>=100.0f ? metres/100 : metres);
             labelled=ly;
         }
         if(any)Seg(drawer,ctx,lastX,last,lx,ly,1.0f*s,kHudDim);

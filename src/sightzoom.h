@@ -3,9 +3,9 @@
 // 6x -> 1x while the player sits at a vehicle's gun. How the game zooms (docs/zoom-re.md, H): the player's camera
 // (CharacterGhostCamera, slot 4 0xF86A0) sets its vertical field of view every frame from its zoom (cam+0x410: the
 // soldier's scope, 1 riding): cam+0x24 = (pi/4) / zoom, and builds the projection and the culling frustum from that;
-// sightzoom.cpp sets it again after that step with the sight's magnification as well (Fov). Set, not scaled: the
-// stock write is on one branch of the step only, so a factor applied to what is there would compound on a frame it
-// is not made. Pure arithmetic (no EDF.dll): the steps and the field of view; tools/sight_zoom_check.cpp.
+// sightzoom.cpp retracts its previous FOV write before the next original step, then divides the original result by
+// the seat's magnification. This also restores the no-target branch, which does not rewrite FOV. Pure arithmetic:
+// tools/gunsight_check.cpp; production hook and seat lifecycle: tests/sightzoom_test.cpp.
 #pragma once
 #include <cmath>
 

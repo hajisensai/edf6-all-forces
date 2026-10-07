@@ -675,6 +675,18 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     for(const Drew& d:drew)named=named || d.text.find(L"3x")!=std::wstring::npos;
     failed+=!named;
     std::printf("%s  stock_tank_sight_zoom: the magnification named (3x) %d\n",named ? "ok  " : "FAIL",named);
+    // A 250 m ladder must say 2.5 / 7.5 hundreds, not truncate those ranges to 2 / 7.
+    a.ladder={};a.ladder.step=250.0f;a.ladder.ticks=2;
+    for(int i=0;i<2;++i) {
+        a.ladder.range[i]=i ? 750.0f : 250.0f;
+        a.ladder.at[i][0]=ground[0];a.ladder.at[i][1]=ground[1]-(i ? 45.0f : 10.0f);
+        a.ladder.at[i][2]=ground[2]+a.ladder.range[i];
+    }
+    Scene(dir,L"stock_tank_sight_fractional_ranges",ground);
+    bool half250=false,half750=false;
+    for(const Drew& d:drew){half250=half250 || d.text==L"2.5";half750=half750 || d.text==L"7.5";}
+    failed+=!(half250 && half750);
+    std::printf("%s  250 m ladder labels preserve half hundreds\n",half250 && half750 ? "ok  " : "FAIL");
     sceneFov=55.0f;sceneStock.zoom=1.0f;
     StockTank(ground);
     return failed;
