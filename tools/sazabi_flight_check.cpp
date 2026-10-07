@@ -5,6 +5,7 @@
 // until it lands and cools). Exit 1 on a failure; --trace prints every scenario's path.
 // Built by the offline checks: cmake --build build --target sazabi_flight_check && build\sazabi_flight_check.exe
 #include "../src/sazabi_flight.h"
+#include "../src/sazabi_flames.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -135,6 +136,37 @@ void LedgeAndNoGround() {
     Step(s2,Input{},0.0f,kNoGround,kDt,p);
     if(!s2.air)Fail("ledge","nothing under it: in the air",0.0f);
 }
+// The thrusters' flames (src/sazabi_flames.h): out on its feet, a hover's quarter in the air, a cruise's level boosting;
+// a burst full for kBurstHold then back to cruise over kBurstFall; the flicker within its bounds and smooth (no level
+// jumping more than kMostStep a frame but at a burst's start); the burst nozzles out when not boosting; the waist's
+// attitude jet on the side away from a fast turn.
+void Flames() {
+    namespace fs=sazabi::flames;
+    fs::State s;
+    if(fs::Level(s,0,false,0)!=0.0f)Fail("flames","on its feet, idle: out",fs::Level(s,0,false,0));
+    s.air=true;
+    float lo=9.0f,hi=-9.0f,prev=-1.0f,step=0.0f;
+    for(int i=0;i<600;++i) {   // ten seconds hovering
+        s.t=static_cast<float>(i)*kDt;
+        const float l=fs::Level(s,2,false,0);
+        lo=std::fmin(lo,l);hi=std::fmax(hi,l);
+        if(prev>=0.0f)step=std::fmax(step,std::fabs(l-prev));
+        prev=l;
+    }
+    if(lo<fs::kHover*(1.0f-fs::kFlicker-fs::kSwell)-1e-3f || hi>fs::kHover*(1.0f+fs::kFlicker+fs::kSwell)+1e-3f)Fail("flames","the hover's flicker within its bounds",hi-lo);
+    if(hi-lo<fs::kHover*fs::kFlicker)Fail("flames","the hover flickers at all",hi-lo);
+    if(step>0.05f)Fail("flames","the flicker smooth frame to frame",step);
+    if(fs::Level(s,4,true,0)!=0.0f)Fail("flames","a burst nozzle out while hovering",fs::Level(s,4,true,0));
+    s.boosting=true;s.sinceBurst=0.0f;
+    if(fs::Base(s)!=1.0f)Fail("flames","a burst's start full",fs::Base(s));
+    s.sinceBurst=fs::kBurstHold+fs::kBurstFall*0.5f;
+    if(!(fs::Base(s)<1.0f && fs::Base(s)>fs::kCruise))Fail("flames","half way down from the burst",fs::Base(s));
+    s.sinceBurst=fs::kBurstHold+fs::kBurstFall+0.01f;
+    if(std::fabs(fs::Base(s)-fs::kCruise)>1e-4f)Fail("flames","after the burst, cruise",fs::Base(s));
+    if(fs::Level(s,4,true,0)<=0.0f)Fail("flames","a burst nozzle burns boosting",fs::Level(s,4,true,0));
+    s.boosting=false;s.air=false;s.sinceBurst=1e3f;s.yawRate=1.0f;   // turning left on its feet
+    if(fs::Level(s,9,true,-1)<=0.0f || fs::Level(s,8,true,1)!=0.0f)Fail("flames","turning left: the right waist's attitude jet, not the left's",fs::Level(s,8,true,1));
+}
 }  // namespace
 
 int main(int argc,char** argv) {
@@ -146,6 +178,7 @@ int main(int argc,char** argv) {
     AirBoost();
     Overheat();
     LedgeAndNoGround();
+    Flames();
     std::printf(failures ? "sazabi_flight_check: %d failures\n" : "sazabi_flight_check: all scenarios pass\n",failures);
     return failures ? 1 : 0;
 }

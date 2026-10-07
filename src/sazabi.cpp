@@ -28,6 +28,7 @@
 #include "map.h"
 #include "memory.h"
 #include "sazabi_arms.h"
+#include "sazabi_flames.h"
 #include "sazabi_flight.h"
 #include "sazabi_pose.h"
 #include "sazabi_sound.h"
@@ -70,6 +71,7 @@ struct Mech {
     float prev[3]{},measured[3]{},omega[3]{};
     float heading=0.0f,aimPitch=0.0f,yawRate=0.0f,feetClear=0.0f;
     fl::State fl{};                     // its walk and flight: velocity, in the air, the thrusters' gauge (sazabi_flight.h)
+    float sinceBurst=1e3f;              // s since its last burst (a dash or a jump begun): the flames' (sazabi_flames.h)
     const void* bones=nullptr;          // the instance's bone array the records below were found in
     unsigned char* rec[sazabi::kBoneCount]{};
     sazabi::Rig rig{};
@@ -244,6 +246,7 @@ void Fly(Mech& m,unsigned char* v,const Controls& c,float dt) noexcept {
     in.forward=c.forward;in.right=c.right;in.ascend=c.ascend;in.boost=c.dash;in.descend=c.descend;
     const float feet=m.feetClear==kNoGround ? fl::kNoGround : m.feetClear;
     const fl::Events ev=fl::Step(m.fl,in,m.heading,feet,dt,p);
+    m.sinceBurst=ev.jumped || ev.burst ? 0.0f : m.sinceBurst+dt;
     const float* at=m.rootOk ? m.root+12 : nullptr;
     if(at && (ev.jumped || ev.burst))Sfx(m,SzSfx::dash,at);
     if(ev.landed) {

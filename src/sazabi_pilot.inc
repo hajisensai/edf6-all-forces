@@ -68,9 +68,7 @@ void Pilot(Mech& m,unsigned char* v,float dt,Controls* c,ArmsInput* in) noexcept
     // the special: the funnels when they are home and the enemies many, else the missiles
     int around=0;
     for(int i=0;i<e.n;++i)around+=e.d2[i]<=kFunnelRange*kFunnelRange;
-    bool docked=true;
-    for(const auto& f:a.funnels)docked=docked && f.phase==FunnelPhase::docked;
-    const Special pick=docked && a.funnelCool<=0.0f && around>=kFunnelEnemies ? Special::funnels : Special::missiles;
+    const Special pick=FunnelsReady(a) && around>=kFunnelEnemies ? Special::funnels : Special::missiles;
     in->cycle=a.special!=pick && !a.switchHeld;   // one press a frame until it is picked
     if(a.special==Special::funnels)in->secondary=pick==Special::funnels && !a.secondaryHeld;   // a press: launch
     else if(a.special==Special::missiles)in->secondary=a.hasLock;

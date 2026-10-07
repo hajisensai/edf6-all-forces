@@ -3,14 +3,15 @@
 // holders 0 and 1 together, the beam rifle and the shield missiles) and routed here:
 //  - primary: the beam rifle (holder 0 on sz_muzzle, pylib/vcobjects.py SAZABI_WEAPONS: its trigger latch held);
 //  - secondary: the special picked (SazabiSwitchKey / Button cycles them): the shield missiles (holder 1, the game's
-//    own lock, lockon.h), the funnels (all six launched, each flying at an enemy round the mech and firing its short
-//    beam, back to their packs after kFunnelSec), or the chest's diffuse mega particle cannon (held: it charges, the
+//    own lock, lockon.h), the funnels (all six launched one after another, each curving round to its own side of an
+//    enemy and firing three beams there, then home: sazabi_funnels.h), or the belly's diffuse mega particle cannon (held: it charges, the
 //    glow at its muzzle growing; let go: a fan of kMegaBeams beams for kMegaSec, steered with the chest);
 //  - SazabiMeleeKey / Button: the beam tomahawk drawn and swung (its strike a drill charge at each enemy in reach and
 //    one ahead for the buildings); pressed again mid-swing, another follows;
 //  - SazabiGuardKey / Button held: the shield up, the damage taken from ahead SazabiGuardShare of itself.
 // Beams are the plugin's rounds (crew.h EmcRound sz*: DemoIndirectFire objects of the Sazabi's team, jet_bay.cpp).
-// Funnels fly in the world (a spring to their station) and are drawn there by their bones (sazabi_pose.h Funnels).
+// Funnels fly in the world (sazabi_funnels.h, after the games' and the film's) and are drawn there by their bones
+// (sazabi_pose.h Funnels).
 // The thrusters' flames and the funnels' are Booster flames (booster.cpp FlareFlames). Every effect has its sound
 // (sazabi_sound.h); the HUD reads SazabiCue.
 
@@ -122,7 +123,8 @@ void DropArms(Mech& m) noexcept {
     RoundDrop(a.glow);
     for(auto& r:a.mega)RoundDrop(r);
     for(auto& f:a.funnels)f=Funnel{};
-    a.swing=-1.0f;a.charge=0.0f;a.megaLeft=0.0f;a.queued=false;a.funnelLeft=0.0f;
+    a.swing=-1.0f;a.charge=0.0f;a.megaLeft=0.0f;a.queued=false;a.funnelsOut=false;
+    for(auto& slot:a.funnelSlot)slot=nullptr;
 }
 
 // The tomahawk: drawn and swung; its strike half way through.
@@ -234,94 +236,57 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
     a.brace=std::fmax(0.0f,a.brace-3.0f*dt);
 }
 
-// The funnels' flight: to their station by a spring (round their enemy, or over the mech with none), their nose on
-// their enemy; a beam when near their station and loaded; home to their packs when their time is up.
+// Whether every funnel is in its pack and charged (a launch sends them all), and how far the slowest is (0..1, the HUD).
+bool FunnelsReady(const Arms& a) noexcept {
+    for(const auto& f:a.funnels)if(f.phase!=FunnelPhase::docked || f.recharge>0.0f)return false;
+    return true;
+}
+float FunnelReadiness(const Arms& a) noexcept {
+    float most=0.0f;
+    for(const auto& f:a.funnels) {
+        if(f.phase!=FunnelPhase::docked)return 0.0f;
+        most=std::fmax(most,f.recharge);
+    }
+    return 1.0f-most/sazabi::funnels::kRecharge;
+}
+
+// The funnels' flight (sazabi_funnels.h: the games' and the film's), its targets, its beams and sounds. The targets: the
+// enemies within kFunnelRange of the mech, in slots an enemy keeps while it lives (an empty slot takes the nearest not in
+// one; the slots kept in order, those after an empty one moving up).
 void FlyFunnels(Mech& m,unsigned char* v,bool launch,float dt) noexcept {
+    namespace fn=sazabi::funnels;
     Arms& a=m.arms;
-    int out=0;
-    for(const auto& f:a.funnels)out+=f.phase!=FunnelPhase::docked;
-    if(!out)a.funnelCool=std::fmax(0.0f,a.funnelCool-dt);
-    if(launch && !out && a.funnelCool<=0.0f && EmcRoundReady(EmcRound::szFunnel)) {
-        for(int k=0;k<kFunnelCount;++k) {
-            Funnel& f=a.funnels[k];
-            f=Funnel{};
-            f.phase=FunnelPhase::launching;f.wait=kFunnelLaunchGap*static_cast<float>(k);
-            DockPoint(m,k,f.at);
-            f.shotIn=kFunnelShotSec*0.5f+0.17f*static_cast<float>(k);
-        }
-        a.funnelLeft=kFunnelSec;
-        Log("SAZABI v=%p funnels launched",v);
-        return;
-    }
-    if(!out)return;
-    a.funnelLeft-=dt;
     const float* r=m.root+12;
+    const float body[3]={r[0],r[1]+13.0f,r[2]};
     Enemies e{};
-    SeeEnemies(v,r,&e);
-    const float spin=m.pose.t*25.0f*sazabi::kDeg;
-    int docked=0;
-    for(int k=0;k<kFunnelCount;++k) {
-        Funnel& f=a.funnels[k];
-        float dock[3];
-        DockPoint(m,k,dock);
-        if(f.phase==FunnelPhase::docked){++docked;continue;}
-        if(f.phase==FunnelPhase::launching) {
-            std::memcpy(f.at,dock,12);
-            if((f.wait-=dt)>0.0f)continue;
-            f.phase=FunnelPhase::out;
-            float up[3]={0.0f,1.0f,0.0f},side[3];
-            const float sx=k<3 ? 1.0f : -1.0f;
-            const float local[3]={sx,0.6f,-0.4f};
-            DirToWorld(m,local,side);
-            for(int i=0;i<3;++i)f.vel[i]=side[i]*30.0f+up[i]*15.0f;
-            Sfx(m,SzSfx::funnelLaunch,f.at);
-        }
-        if(f.phase==FunnelPhase::out && a.funnelLeft<=0.0f){f.phase=FunnelPhase::back;f.backFor=0.0f;f.target=nullptr;}
-        float station[3];
-        bool aiming=false;
-        if(f.phase==FunnelPhase::back) {
-            std::memcpy(station,dock,12);
-            f.backFor+=dt;
-            const float d[3]={dock[0]-f.at[0],dock[1]-f.at[1],dock[2]-f.at[2]};
-            if(Len(d)<kFunnelDock || f.backFor>kFunnelBackMost) {
-                f=Funnel{};
-                Sfx(m,SzSfx::funnelDock,dock);
-                ++docked;
-                continue;
-            }
-        } else {
-            int pick=-1;
-            for(int i=0;i<e.n;++i)if(e.obj[i]==f.target){pick=i;break;}
-            if(pick<0 && e.n>0){pick=k%e.n;f.target=e.obj[pick];}
-            const float ang=spin+static_cast<float>(k)*sazabi::kPi/3.0f;
-            if(pick>=0) {
-                std::memcpy(f.aim,e.at[pick],12);
-                station[0]=f.aim[0]+kFunnelOrbit*std::cos(ang);station[1]=f.aim[1]+kFunnelOver;
-                station[2]=f.aim[2]+kFunnelOrbit*std::sin(ang);
-                aiming=true;
-            } else {
-                f.target=nullptr;
-                station[0]=r[0]+kFunnelHome*std::cos(ang);station[1]=r[1]+kFunnelHomeHigh;station[2]=r[2]+kFunnelHome*std::sin(ang);
-            }
-        }
-        const float spring=f.phase==FunnelPhase::back ? 2.0f*kFunnelSpring : kFunnelSpring;
-        for(int i=0;i<3;++i)f.vel[i]+=(spring*(station[i]-f.at[i])-kFunnelDamp*f.vel[i])*dt;
-        const float sp=Len(f.vel);
-        if(sp>kFunnelSpeed)for(float& c:f.vel)c*=kFunnelSpeed/sp;
-        for(int i=0;i<3;++i)f.at[i]+=f.vel[i]*dt;
-        float look[3];
-        if(aiming)for(int i=0;i<3;++i)look[i]=f.aim[i]-f.at[i];
-        else std::memcpy(look,f.vel,12);
-        const float l=Len(look);
-        if(l>1e-3f)for(int i=0;i<3;++i)f.dir[i]=look[i]/l;
-        f.shotIn-=dt;
-        const float off[3]={station[0]-f.at[0],station[1]-f.at[1],station[2]-f.at[2]};
-        if(aiming && f.shotIn<=0.0f && Len(off)<kFunnelNear) {
-            f.shotIn=kFunnelShotSec+0.17f*static_cast<float>(k);
-            if(EmcFire(EmcRound::szFunnel,v,f.at,f.aim,Cfg().sazabiFunnelDamage).obj)Sfx(m,SzSfx::funnelShot,f.at);
-        }
+    SeeEnemies(v,body,&e);
+    bool kept[kMostTargets]{};
+    int n=0;
+    fn::Target ts[kFunnelSlots];
+    const void* slots[kFunnelSlots]{};
+    for(int s=0;s<kFunnelSlots;++s) {   // those still there, in their order
+        for(int i=0;i<e.n;++i)
+            if(a.funnelSlot[s] && e.obj[i]==a.funnelSlot[s] && !kept[i]){kept[i]=true;slots[n]=e.obj[i];std::memcpy(ts[n].at,e.at[i],12);++n;break;}
     }
-    if(docked==kFunnelCount){a.funnelCool=kFunnelCool;Log("SAZABI v=%p funnels home",v);}
+    for(int i=0;i<e.n && n<kFunnelSlots;++i)   // the nearest others into the slots left
+        if(!kept[i]){kept[i]=true;slots[n]=e.obj[i];std::memcpy(ts[n].at,e.at[i],12);++n;}
+    for(int s=0;s<kFunnelSlots;++s)a.funnelSlot[s]=s<n ? slots[s] : nullptr;
+    float docks[kFunnelCount][3],fwd[3];
+    for(int k=0;k<kFunnelCount;++k)DockPoint(m,k,docks[k]);
+    Forward(m,fwd);
+    const bool go=launch && FunnelsReady(a) && EmcRoundReady(EmcRound::szFunnel);
+    const fn::Events ev=fn::Step(a.funnels,docks,body,fwd,ts,n,go,dt);
+    if(go)Log("SAZABI v=%p funnels launched at %d enemies",v,n);
+    if(ev.launched)Sfx(m,SzSfx::funnelLaunch,docks[0]);
+    for(int i=0;i<ev.shots;++i) {
+        const fn::Shot& s=ev.shot[i];
+        if(EmcFire(EmcRound::szFunnel,v,s.from,s.at,Cfg().sazabiFunnelDamage).obj)Sfx(m,SzSfx::funnelShot,s.from);
+    }
+    if(ev.docked)Sfx(m,SzSfx::funnelDock,docks[0]);
+    bool out=false;
+    for(const auto& f:a.funnels)out=out || f.phase!=FunnelPhase::docked;
+    if(a.funnelsOut && !out)Log("SAZABI v=%p funnels home",v);
+    a.funnelsOut=out;
 }
 
 // A nozzle's flame matrix: rows unit, +z `dir` (the way the flame leaves), at `at` (world).
@@ -334,13 +299,15 @@ void NozzleMatrix(const float* at,const float* dir,float* out) noexcept {
 
 // The flames (the user, 2026-10-07: 「飞行时喷气明显不对」, then 「尾焰也没有根据实际喷气孔来」): a Booster flame out of
 // each of the model's own nozzles (sazabi_pose.h kNozzles: the legs' big bells, the backpack's, the calves', the rear
-// binders', the waist's), carried with its bone as posed, as long and wide as its bell makes it, burning with the thrust
-// (`thrust` 0..1; the burst ones only while it boosts or climbs); each flying funnel's small fire behind it.
+// binders', the waist's), carried with its bone as posed, as long and wide as its bell makes it, burning as
+// sazabi_flames.h has it (out on its feet, a hover's quarter in the air, a burst at a dash's start, a soft flicker,
+// the waist's attitude jets in a fast turn); each flying funnel's small fire behind it.
 // Every frame (0 when idle: the flames burn down and their boosters wait for the next burst).
 void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
     alignas(16) float mats[sazabi::kNozzleCount][16];
     float sizes[sazabi::kNozzleCount][2],levels[sazabi::kNozzleCount];
-    const bool burst=m.fl.boosting || m.fl.climbing;
+    sazabi::flames::State fs;
+    fs.air=m.fl.air;fs.boosting=m.fl.boosting || m.fl.climbing;fs.sinceBurst=m.sinceBurst;fs.yawRate=m.yawRate;fs.t=m.pose.t;
     float main[3]{};
     for(int i=0;i<sazabi::kNozzleCount;++i) {
         const sazabi::Nozzle& z=sazabi::kNozzles[i];
@@ -350,7 +317,8 @@ void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
         DirToWorld(m,local,dir);
         NozzleMatrix(at,dir,mats[i]);
         sizes[i][0]=z.flame[0];sizes[i][1]=z.flame[1];
-        levels[i]=z.burst && !burst ? 0.0f : thrust;
+        const int waist=z.bone==sazabi::kPelvis ? (z.at[0]>0.0f ? 1 : -1) : 0;   // the waist's: attitude jets
+        levels[i]=sazabi::flames::Level(fs,i,z.burst,waist);
         if(!z.burst)for(int k=0;k<3;++k)main[k]+=at[k]*0.25f;   // the four main ones' middle: the roar's
     }
     NozzleFlames(v,mats,sazabi::kNozzleCount,sizes,levels,GameMs());
@@ -460,7 +428,7 @@ void PublishCue(const Mech& m) noexcept {
     int out=0;
     for(const auto& f:a.funnels)out+=f.phase!=FunnelPhase::docked;
     c.funnelsOut=out;
-    c.funnelReady=out ? 0.0f : 1.0f-a.funnelCool/kFunnelCool;
+    c.funnelReady=FunnelReadiness(a);
     c.guard=a.guard>0.5f;c.swinging=a.swing>=0.0f;c.air=m.fl.air;
     c.hasAim=a.hasAim;std::memcpy(c.aim,a.aim,12);
     c.hasLock=a.hasLock;std::memcpy(c.lock,a.lock,12);
