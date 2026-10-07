@@ -2656,6 +2656,19 @@ def autoturret_pending_files_protect_foreign_edits() -> None:
             assert os.path.isfile(os.path.join(mods, at_build.MANIFEST))
 
 
+def _sazabi_request_template() -> bytes:
+    """A stock Eros request with distinguishable setup/resource values for the fallback contract."""
+    n = dsgo.Node
+    weapons = n([n([f'app:/weapon/v_506heli_gatling01_{side}.sgo', n([0.01, 0.1])]) for side in ('l', 'r')]
+                + [n(['app:/weapon/v_506heli_missile01.sgo', n([0.01, 0.1])]), n(['app:/weapon/v_fuel01.sgo'])])
+    setup = n([n([1.3, 1.4]), n([0.002, 0.0003]), n([100.0, 1.0]), weapons])
+    vehicle = 'app:/object/v506_heli.sgo'
+    root = n([n([5.0]), n([0.0, 0.0, 0.0, 0.0, n(['transport', 'box', vehicle, setup, 'voice'])]),
+              n([vehicle] + [w.items[0] for w in weapons.items]), 'Eros'],
+             {0: 'ReloadTime', 1: 'Ammo_CustomParameter', 2: 'resource', 3: 'name.en'})
+    return dsgo.write(dsgo.Document(root, []))
+
+
 def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     """What call_weapons.stack would give (shape only), and the jets the vehicle requests need."""
     for c in calls.CALLS:
@@ -2665,7 +2678,63 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
     files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS})
+    for c in calls.CALLS:
+        if c.jet == vc.SAZABI_JET:
+            files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
     return files
+
+
+@test
+def sazabi_fallback_install_upgrade() -> None:
+    """Clean no-model install, then model install/removal, retain the request row and actual dependencies."""
+    import make_sazabi
+    import sazabi_model
+    import sgo
+    call = next(c for c in calls.CALLS if c.jet == vc.SAZABI_JET)
+    template = _sazabi_request_template()
+    original = dsgo.parse(template).root.get('Ammo_CustomParameter').items[4].items[3]
+    stock_object = sgo.write(0x102, {'animation_model': [['app:/object/v506_heli.mrab', 'v506_heli.mdb']],
+                                  'game_object_durability': 1000.0})
+    class Game:
+        def read(self, folder: str, name: str) -> bytes:
+            assert (folder, name) == ('OBJECT', 'V506_HELI.SGO')
+            return stock_object
+
+    with tempfile.TemporaryDirectory(prefix='edf6vc-sazabi-') as game, \
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+            patched(sazabi_model, model_dir=lambda: None), patched(vc, Game=lambda root: Game()):
+        files = _call_files(game, STOCK + list(calls.IDS))
+        arms = {f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.SAZABI_WEAPONS}
+        for rel in arms:
+            os.remove(_mods(game, rel))  # clean CI package: no Sazabi weapons have ever been installed
+        fallback = make_sazabi.build(game)
+        assert fallback == {cw.vehicle_file(call): stock_object}
+        make_sazabi.install(game, fallback)
+        request = cw.vehicle_sgo(template, call, (2.0, 3.0), fallback=True)
+        r = dsgo.parse(request).root
+        assert dsgo.dump(r.get('Ammo_CustomParameter').items[4].items[3]) == dsgo.dump(original)
+        assert r.get('Ammo_CustomParameter').items[4].items[2] == cw._object_path(call)
+        assert not any('edf6vc_sz_' in p for p in r.get('resource').items)
+        assert cw.vehicle_needs(call, request) == [cw.vehicle_file(call)]
+        files[cw.sgo_file(call)] = request
+        cw.install(game, files)
+        row = cw.load_manifest(game)['rows'][call.id]
+        assert cw.check(game)
+        # The installed request is authoritative even if today's model folder differs.
+        with patched(sazabi_model, model_dir=lambda: 'new model folder'):
+            assert cw.check(game)
+        generated = {cw.vehicle_file(call): b'model vehicle', **{rel: b'weapon' for rel in arms}}
+        make_sazabi.install(game, generated)
+        files[cw.sgo_file(call)] = cw.vehicle_sgo(template, call, (2.0, 3.0))
+        cw.install(game, files)
+        assert cw.load_manifest(game)['rows'][call.id] == row
+        assert {ledger.key(p) for p in arms} <= set(ledger.Ledger(game).owned_by(cw.OWNER))
+        make_sazabi.install(game, fallback)
+        files[cw.sgo_file(call)] = request
+        cw.install(game, files)
+        assert cw.load_manifest(game)['rows'][call.id] == row
+        assert not any(os.path.exists(_mods(game, p)) for p in arms)
+        assert cw.check(game)
 
 
 @test
