@@ -520,3 +520,12 @@ add_executable(sazabi_net_native_test EXCLUDE_FROM_ALL tests/sazabi_net_native_t
 target_include_directories(sazabi_net_native_test PRIVATE src common)
 target_link_libraries(sazabi_net_native_test PRIVATE edf6common user32)
 target_compile_options(sazabi_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+
+# EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
+# tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
+# cmake --build build --target EDF6Autopilot
+add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp)
+target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
+target_link_libraries(EDF6Autopilot PRIVATE psapi)
+target_compile_options(EDF6Autopilot PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(EDF6Autopilot PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools")
