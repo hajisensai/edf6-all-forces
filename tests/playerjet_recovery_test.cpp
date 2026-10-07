@@ -7,6 +7,11 @@ namespace crew {
 bool ReadRound(const unsigned char*,RoundModel*) noexcept {return false;}
 bool RoundLands(const unsigned char*,const RoundModel&,const float*,const float*,float,float*,float*) noexcept {return false;}
 unsigned char* image=nullptr;
+// Offline (online_authority.h): an NPC rider may be seated, through the vehicle's own RideAi.
+bool SeatNpcRider(unsigned char* v,bool spawned) noexcept {
+    reinterpret_cast<void(__fastcall* const*)(void*,bool)>(At<void* const*>(v,0))[kSlotRideAi](v,spawned);
+    return true;
+}
 Config recoveryConfig{};
 PlayerFix player{};
 ULONGLONG recoveryTime=10000;

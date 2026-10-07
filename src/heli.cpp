@@ -38,6 +38,7 @@
 #include "airbound.h"
 #include "layout.h"
 #include "memory.h"
+#include "online_authority.h"
 #include "roundaim.h"
 #include "edf/weapon.h"
 #include "warn.h"
@@ -1173,7 +1174,7 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     Door& g=h.doors[i];
     unsigned char* blk=v+kDoorBlock+i*kDoorStride;
     unsigned char* seat=SeatAt(v,static_cast<unsigned>(i+1));
-    if(SeatRider(seat)==Rider::player){g.prevValid=false;return;}   // theirs: their stick, their trigger
+    if(AnyPlayerIn(seat)){g.prevValid=false;return;}   // a player's, of any machine: their stick, their trigger
     const auto triggers=At<unsigned char*>(v,kHolders);
     if(At<std::uint64_t>(v,kHolderCount)<=static_cast<std::uint64_t>(i) || !Readable(triggers+i*kHolderStride,kHolderStride))return;
     const auto trigger=triggers+i*kHolderStride;
@@ -1994,6 +1995,8 @@ void SoftEdge(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     if(w.height>top)w.height=top;
 }
 
+void MirrorStick(unsigned char* v,const Control& c) noexcept;   // online: the input block onto seat 0's stick (below)
+
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     Sense s{};
     if(!SenseFrame(h,v,playerAboard,s))return;
@@ -2002,6 +2005,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     Want w=FlyMode(h,s,mode);
     SoftEdge(h,s,mode,w);
     const Control c=Steer(h,s,mode,w);
+    MirrorStick(v,c);
     const Shot shot=Fire(h,s,mode);
     FlyLog(h,s,mode,w,c,shot);
 }
@@ -2421,20 +2425,98 @@ void PlayerHeli(unsigned char* v) noexcept {
     }
     if(Cfg().heliFlightHud || p->flying || Cfg().warnAudio)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
 }
+// ---- Online: the NPC pilot's flight where the heli's authority is, its stick everywhere (docs/online-re.md §4-5) ----
+// The heli's replication sends seat 0's stick block (mask 4, slot 7 0x6559D0) from the machine that runs it, and every
+// other machine's copy flies on that stick through the stock flight law (slot 55 copies it to the input block while seat
+// 0 has a rider, slot 51 0x651F90 pulls the body to the pose it was sent). The plugin's pilot writes the input block
+// (+0x1540..), which is not replicated, so on its authority (OnlineRunsHere) the block it wrote is also put on seat 0's
+// stick the way the stock copy reads it back (MirrorStick: lateral = -LX, forward = -LY, yaw = -RX, throttle = the ascend
+// trigger; heli-input-re.md §2a). Elsewhere (Replay) the pilot does not fly it: its NPC exists on the authority only (a
+// RideAi rider has no network identity, so seat 0 is empty here, and slot 55 then zeroes the block), so the replicated
+// stick is copied to the input block as slot 55 would, under the same params Tune gives the pilot (ini HeliSpeed /
+// HeliAgility / HeliYawRate, the same on every machine with the same ini). A stick block all zero is no pilot's: the
+// stock zeroes it after 30 frames without a packet (slot 51 0x652259: the frame count +0x1D7C reaching 30 clears the
+// block by 0x62C120 and starts the count again at 0, so the count never stays up and tells nothing by itself), a heli
+// never flown has it zero from its constructor, and the pilot's hover throttle is never 0 in the air. Then the heli's own
+// params go back and its record goes (ReplicaOff), and nothing is written: the stock input stands.
+Heli replicas[8]{};
+
+void MirrorStick(unsigned char* v,const Control& c) noexcept {
+    if(!InSession() || SeatCount(v)==0)return;
+    unsigned char* const seat=SeatAt(v,0);
+    Put<float>(seat,kSeatLX,-c.stickL);Put<float>(seat,kSeatLY,-c.stickF);Put<float>(seat,kSeatRX,-c.yaw);
+    Put<float>(seat,kSeatAscend,Clamp(c.throttle,0.0f,1.0f));
+}
+
+// Seat 0's stick holds a value (see above: all zero is no pilot's).
+bool StickLive(const unsigned char* seat) noexcept {
+    return At<float>(seat,kSeatLX)!=0.0f || At<float>(seat,kSeatLY)!=0.0f || At<float>(seat,kSeatRX)!=0.0f || At<float>(seat,kSeatAscend)!=0.0f;
+}
+
+Heli* ReplicaOf(unsigned char* v,ULONGLONG ms) noexcept {
+    for(auto& h:replicas)if(h.ref.Is(v))return &h;
+    Heli* slot=nullptr;
+    for(auto& h:replicas)if(!slot && (!h.ref || ms-h.seen>kStaleMs))slot=&h;
+    if(!slot)return nullptr;
+    *slot=Heli{};slot->ref=ObjRef::Of(v);slot->type=TypeOf(v);slot->seen=ms;
+    Tune(*slot,v);
+    return slot;
+}
+
+// A stock heli (with seats) another machine runs whose seat 0 is empty here, or holds an NPC seated here (not its
+// authority's): no player of any machine at its stick.
+bool Replica(unsigned char* v) noexcept {
+    const Rider r=SeatRider(SeatAt(v,0));
+    return (r==Rider::none || r==Rider::dummy) && !OnlineRunsHere(v);
+}
+
+// Its replica record's params back, the record dropped: it is run here again (or by a player).
+void ReplicaOff(unsigned char* v) noexcept {
+    for(auto& h:replicas)if(h.ref.Is(v)){Restore(h,v);h=Heli{};}
+}
+
+// A Replica: its replicated stick into the input block, after the stock slot 55 (crew.cpp InputHook), under the
+// pilot's params.
+void Replay(unsigned char* v) noexcept {
+    // No stick coming in: no pilot's (a parked heli takes no record, so the table keeps room for the flown ones).
+    if(!StickLive(SeatAt(v,0))){ReplicaOff(v);return;}
+    const ULONGLONG ms=GameMs();
+    Heli* const h=ReplicaOf(v,ms);
+    if(!h)return;
+    h->seen=ms;
+    if(h->tuned) {
+        Put<float>(v,kSpeedGain,h->params[0]);Put<float>(v,kBlend,h->params[1]);
+        Put<float>(v,kMaxYaw,h->params[2]);Put<float>(v,kYawSmooth,h->params[3]);
+        h->applied=true;
+    }
+    const unsigned char* const seat=SeatAt(v,0);
+    Put<float>(v,kInLateral,-SeatAxis(seat,kSeatLX));Put<float>(v,kInForward,-SeatAxis(seat,kSeatLY));
+    Put<float>(v,kInThrottle,Clamp(At<float>(seat,kSeatAscend),0.0f,1.0f));Put<float>(v,kInW,1.0f);
+    Put<float>(v,kInYaw,-SeatAxis(seat,kSeatRX));
+}
 }  // namespace
 
 void HeliFrame(unsigned char* vehicle) noexcept {
     if(rescue.ref.Is(vehicle))rescue.seenFrame=GameFrame();   // RescueHeliAlive
     if(!profileOk || vehicle[kDead])return;
+    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
+    // Online, a stock heli another machine runs is flown there: here it flies on the stick it sends (Replay).
+    if(stockHeli && SeatCount(vehicle)>0 && Replica(vehicle)) {
+        if(Heli* h=Find(vehicle))Restore(*h,vehicle);
+        AssistOff(vehicle);
+        Replay(vehicle);
+        return;
+    }
+    ReplicaOff(vehicle);
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
-        const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
         if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerHeli(vehicle);}
         else AssistOff(vehicle);
         return;
     }
     AssistOff(vehicle);   // an NPC in its seat again: Tune's stock is the heli's own
-    if(IsJet(vehicle)){if(Cfg().jetPilot)JetFrame(vehicle);return;}
+    // The plugin's jets: its own copies, flown on every machine (OnlineRunsHere); a registered one only where it is run.
+    if(IsJet(vehicle)){if(Cfg().jetPilot && OnlineRunsHere(vehicle))JetFrame(vehicle);return;}
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(!Cfg().heliPilot)return;
@@ -2443,7 +2525,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(!h)return;
     h->seen=GameMs();h->seenFrame=GameFrame();
     bool playerAboard=false;
-    for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || SeatRider(SeatAt(vehicle,i))==Rider::player;
+    for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || AnyPlayerIn(SeatAt(vehicle,i));   // of any machine
     Fly(*h,vehicle,playerAboard);
 }
 
@@ -2628,7 +2710,9 @@ void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
     float dir[3]={p[0]-deck[0],0.0f,p[2]-deck[2]};
     const float away=std::sqrt(Dot2(dir,dir));
     if(away>1.0f){dir[0]/=away;dir[2]/=away;}else{dir[0]=0.0f;dir[2]=1.0f;}
+    const online::CopyOwner was=SetSpawnOwner(online::kCopyHere);   // this machine's player's rescue (online_authority.h)
     unsigned char* const v=HeliLaunch(HeliBody::brute410,from,dir);
+    SetSpawnOwner(was);
     if(!v) {
         Log("RESCUE no heli could be made (EDF6VC_HELI_410.SGO not installed or not preloaded this mission): retry in %llus",kRetryMs/1000);
         rescue.retryAt=ms+kRetryMs;
@@ -2777,7 +2861,7 @@ void RescueTick() noexcept {
     if(!profileOk || rescue.frame==GameFrame())return;   // it flies the heli through Fly; at most once a frame
     rescue.frame=GameFrame();
     __try { RescueStep(); }
-    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the rescue");RescueFault();}
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the rescue");SetSpawnOwner(online::kCopyHost);RescueFault();}
 }
 
 namespace {

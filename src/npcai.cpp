@@ -15,12 +15,14 @@
 //    with the round's line and blast clear of friends and the map ray open; it moves only when it must: crowded (back
 //    off, side-step, roll), hurt (behind the player), in the player's lane (out of it), engaged (to a combat spot beside
 //    the player, never between them and the target); else the stock follow / formation move stands.
-// Online: only the soldiers this machine runs (h+0x128 bit 0 clear), as the stock AI writes only theirs; the block goes
-// to the other machines the way the stock AI's does (§2.1).
+// Online: only the soldiers this machine runs (online_authority.h IsOnlineAuthority: its own registered ones, the host for
+// one with no identity), as the stock AI writes only theirs; the block goes to the other machines the way the stock AI's
+// does (§2.1).
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
 #include "npc_logic.h"
+#include "online_authority.h"
 #include "vhud.h"
 #include <cmath>
 #include <cstdio>
@@ -37,7 +39,6 @@ constexpr std::size_t kPickWeapon=0xD82;                                      //
 constexpr std::size_t kAimPitch=0x1230,kAimYaw=0x1234;                        // the look's target (0x573BA8 adds d60 to it)
 constexpr std::size_t kViewPitch=0x1240,kViewYaw=0x1244;                      // the look as it is (eased onto the target)
 constexpr std::size_t kListFlags=0x1A;constexpr unsigned char kInAiList=8;  // slot 4 leaves the block of these alone
-constexpr std::size_t kNet=0x128;                                             // bit 0: another machine runs it
 constexpr std::size_t kControlMask=0x158C;                                    // bit 0 move, 1 look, 4 trigger 0, 11 roll
 constexpr unsigned kMaskMove=0x1,kMaskLook=0x2,kMaskTrigger=0x10,kMaskRoll=0x800;
 constexpr std::size_t kWeapons=0x1950,kWeaponCount=0x1960,kSets=0x1970,kSetCount=0x1980,kSetWeapon=0x40;
@@ -141,7 +142,7 @@ void __fastcall FriendVisit(void* self,void* object) noexcept {
         auto o=static_cast<const unsigned char*>(object);
         World& w=*f.w;
         if(!o || o[kDead] || w.friends>=kMaxFriends || (w.friends>0 && w.frObject[0]==o))return;
-        const float r=IsSoldierClass(o) || IsPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
+        const float r=IsSoldierClass(o) || IsAnyPlayer(o) ? kSoldierRadius : KnownVehicle(o) ? kVehicleRadius : kOtherRadius;
         const float* p=Pos(o);
         if(!std::isfinite(p[0]+p[1]+p[2]))return;
         npc::Friend& fr=w.fr[w.friends];
@@ -278,7 +279,7 @@ npc::Control ControlOf(const unsigned char* h,const unsigned char* root) noexcep
     npc::ScriptFacts f{};
     f.route=Routed(h);
     f.npcLeader=root!=nullptr;
-    f.rootPlayer=root && IsPlayer(root);
+    f.rootPlayer=root && IsAnyPlayer(root);   // a player of any machine leads it: recruited
     f.rootRouted=root && !f.rootPlayer && Routed(root);
     f.escort=(f.route && Escort(h)) || (f.rootRouted && Escort(root));
     f.fixed=(At<std::uint32_t>(h,kObjectFlags)&kFixPosition)!=0;
@@ -599,7 +600,7 @@ unsigned char* TopNpc(unsigned char* h) noexcept {
     unsigned char* top=h;
     for(int i=0;i<kMaxRoot;++i) {
         const auto up=At<unsigned char*>(top,kLeader);
-        if(!up || !Readable(up,kLeader+8) || IsPlayer(up) || up[kDead] || !IsSoldierClass(up))break;
+        if(!up || !Readable(up,kLeader+8) || IsAnyPlayer(up) || up[kDead] || !IsSoldierClass(up))break;
         top=up;
     }
     return top;
@@ -635,9 +636,9 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
         }
         // The script let it go (its route ended, it was unfollowed, its position freed) and has not taken it back
         // within ScriptNpcSettleSec: a squad of the plugin's now; with ScriptNpcRecruit the player may recruit it.
-        const bool held=Routed(top) || (root && !IsPlayer(root) && Routed(root)) || (At<std::uint32_t>(top,kObjectFlags)&kFixPosition);
+        const bool held=Routed(top) || (root && !IsAnyPlayer(root) && Routed(root)) || (At<std::uint32_t>(top,kObjectFlags)&kFixPosition);
         if(npc::Step(q->script,held,ms,static_cast<std::uint64_t>(Cfg().scriptNpcSettleSec*1000.0f))) {
-            const bool open=!InSession() && !(At<std::uint8_t>(top,kNet)&1) &&
+            const bool open=!InSession() && IsOnlineAuthority(top) &&
                             Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow];
             if(open)top[kAutoFollow]=1;
             Log("NPCAI squad %p: the script let it go (%s): the plugin's now%s",top,ControlName(q->control),open ? ", recruitable" : "");
@@ -772,7 +773,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
 }
 
 void Think(unsigned char* h,int cls) noexcept {
-    if(IsPlayer(h) || h[kDead] || (At<std::uint8_t>(h,kNet)&1))return;
+    if(IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h))return;   // only the NPCs whose AI this machine runs (online_authority.h)
     const std::int32_t team=At<std::int32_t>(h,kTeam);
     if(team!=0 && team!=kTeamFriend)return;
     const ULONGLONG ms=GameMs();
@@ -861,7 +862,7 @@ int Followers(const unsigned char* leader,unsigned char** out,int most) noexcept
         node=At<const unsigned char*>(node,kListNodeNext),++guard) {
         if(!Readable(node,0x18))break;
         const auto o=At<unsigned char*>(node,kListNodeObject);
-        if(o && Readable(o,kDead+1) && !o[kDead] && IsSoldierClass(o) && !IsPlayer(o))out[n++]=o;
+        if(o && Readable(o,kDead+1) && !o[kDead] && IsSoldierClass(o) && !IsAnyPlayer(o))out[n++]=o;
     }
     return n;
 }
@@ -872,12 +873,12 @@ int OtherSquads(const unsigned char* except,bool playersOnly,unsigned char** lea
     int n=0;
     for(int i=0;i<world.friends && n<most;++i) {
         const auto o=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
-        if(o==except || !IsSoldierClass(o) || IsPlayer(o) || o[kDead] ||
+        if(o==except || !IsSoldierClass(o) || IsAnyPlayer(o) || o[kDead] ||
            npc::Scripted(ControlOf(o,RootLeader(o))))continue;
         if(const Squad* q=FindSquad(o); q && q->dismissed)continue;
         const auto up=At<const unsigned char*>(o,kLeader);
         const auto count=At<std::uint64_t>(o,kFollowerCount);
-        if((up && !IsPlayer(up)) || (count==0 && !up))continue;   // a follower, or alone and not recruited
+        if((up && !IsAnyPlayer(up)) || (count==0 && !up))continue;   // a follower, or alone and not recruited
         if(playersOnly && !up)continue;                            // a recruited remnant stays with the player
         leaders[n]=o;std::memcpy(at[n],Pos(o),12);sizes[n]=static_cast<int>(count<64 ? count : 64)+1;++n;
     }
@@ -906,7 +907,7 @@ void Succeed(unsigned char* dead) noexcept {
     unsigned char* others[32];float at[32][3];int sizes[32];
     const Squad* const oldSquad=FindSquad(dead);
     const int k=n<Cfg().npcSquadMin && !(oldSquad && oldSquad->dismissed) ?
-                OtherSquads(dead,up && IsPlayer(up),others,at,sizes,32) : 0;
+                OtherSquads(dead,up && IsAnyPlayer(up),others,at,sizes,32) : 0;
     const int join=k ? npc::JoinSquad(n,Cfg().npcSquadMin,Pos(lead),at,sizes,k,Cfg().npcSquadMax,Cfg().npcSquadJoinRange) : -1;
     unsigned char* const top=join>=0 ? others[join] : lead;
     if(join<0)Follow(lead,up);
@@ -923,17 +924,17 @@ void Succeed(unsigned char* dead) noexcept {
         }
     }
     if(join>=0)Log("NPCAI squad of dead leader %p: %d left, joined squad %p (%d)",dead,n,top,sizes[join]);
-    else Log("NPCAI squad of dead leader %p: %p leads the %d left%s",dead,lead,n,up ? (IsPlayer(up) ? " (still the player's)" : " (under its leader)") : "");
+    else Log("NPCAI squad of dead leader %p: %p leads the %d left%s",dead,lead,n,up ? (IsAnyPlayer(up) ? " (still the player's)" : " (under its leader)") : "");
 }
 
 void PreThink(unsigned char* h) noexcept {
-    if(!followOk || !Cfg().npcSquadSuccession || IsPlayer(h) || h[kDead] || (At<std::uint8_t>(h,kNet)&1))return;
+    if(!followOk || !Cfg().npcSquadSuccession || IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h))return;
     const auto team=At<std::int32_t>(h,kTeam);
     if(team!=0 && team!=kTeamFriend)return;
     const auto leader=At<unsigned char*>(h,kLeader);
-    if(!leader || !Readable(leader,kObjectFlags+4) || !leader[kDead] || IsPlayer(leader))return;
+    if(!leader || !Readable(leader,kObjectFlags+4) || !leader[kDead] || IsAnyPlayer(leader))return;
     if(At<std::uint32_t>(leader,kObjectFlags)&kAutoResurrect)return;   // it comes back: the stock keeps following it
-    if(InSession() && !IsRoomHost())return;                            // the host decides squads (§2.2)
+    if(!OnlineHostOnly())return;                                       // the host decides squads (§2.2; online_authority.h)
     if(world.frame!=GameFrame())Gather(At<std::int32_t>(h,kTeam));
     Succeed(leader);
 }
@@ -1133,6 +1134,7 @@ bool DismountSquad(unsigned char* top) noexcept {
         const auto v=At<unsigned char*>(m[i],kHumanRiding);
         const auto seat=At<unsigned char*>(m[i],kHumanSeat);
         if(!v || !seat || !Readable(seat,kSeatRiderCtrl+8) || At<const void*>(seat,kSeatRider)!=m[i])continue;
+        if(!OnlineMaySeatNpc(v))continue;   // NPC riders come and go where they may be seated (online_authority.h)
         reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kSeatKick)(v,seat);
         ++off;
     }
@@ -1229,7 +1231,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         unsigned char* const seat=SeatAt(v,i);
         if(SeatRider(seat)!=Rider::other)continue;
         const auto rider=At<const unsigned char*>(seat,kSeatRider);
-        if(!IsSoldierClass(rider) || IsPlayer(rider) || (At<std::uint8_t>(rider,kNet)&1))continue;
+        if(!IsSoldierClass(rider) || IsAnyPlayer(rider) || !IsOnlineAuthority(rider))continue;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(!n || n>8 || !Readable(holders,n*8))continue;

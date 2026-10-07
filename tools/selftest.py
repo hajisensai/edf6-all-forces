@@ -3622,7 +3622,7 @@ def npc_ai_wired() -> None:
         "each hand vetoed with its own WeaponSet's weapon; the largest blast only for a hand whose weapon is unknown"
     assert 'LargestBlast(a),LongestReach(a)' not in code.replace(veto, ''), 'no caller vetoes both hands with the largest blast'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert '(At<std::uint8_t>(h,kNet)&1)' in think and 'IsPlayer(h)' in think, "only this machine's NPC soldiers"
+    assert '!IsOnlineAuthority(h)' in think and 'IsAnyPlayer(h)' in think, "only this machine's NPC soldiers (online_authority.h)"
     assert 'npc::Scripted(control) ? Scripted(' in think
     ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
     assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')
@@ -3644,7 +3644,7 @@ def npc_ai_wired() -> None:
     hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(At<const void*>(v,kRoute))' in body and 'if(InSession() && !IsRoomHost())return;' in body
+    assert 'if(At<const void*>(v,kRoute))' in body and 'if(!OnlineHostOnly())return;' in body
     assert body.index('StockDriving(seat)') < body.index('Put<float>(seat,kSeatSteer')
     assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
     # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
@@ -3652,7 +3652,7 @@ def npc_ai_wired() -> None:
     hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
     assert hook.index('PreThink(static_cast<unsigned char*>(human))') < hook.index('nextThink[I](human,dt);')
     pre = code.split('void PreThink(unsigned char* h) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(InSession() && !IsRoomHost())return;' in pre and 'kAutoResurrect' in pre
+    assert 'if(!OnlineHostOnly())return;' in pre and 'kAutoResurrect' in pre
     follow = code.split('void Follow(unsigned char* h,unsigned char* leader) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'image+kSetFollow' in follow and 'vt[kSlotNetFollow]==image+kNetFollow' in follow
     for key, default in (('NpcSquadSuccession', '1'), ('NpcSquadMin', '2'), ('NpcSquadMax', '8'), ('NpcSquadJoinRange', '150')):

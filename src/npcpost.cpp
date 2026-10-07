@@ -13,6 +13,7 @@
 // docs/online-re.md §3.4; the plugin adds no second opinion).
 #include "crew.h"
 #include "layout.h"
+#include "online_authority.h"
 #include "memory.h"
 #include "npc_logic.h"
 #include <cmath>
@@ -94,7 +95,7 @@ void NpcPostInput(unsigned char* v) noexcept {
         return;
     }
     if(At<const void*>(v,kRoute)){Relinquish(v);return;} // even a short script route invalidates the old post
-    if(InSession() && !IsRoomHost())return;
+    if(!OnlineHostOnly())return;   // the NPC driver has no identity: the host alone (online_authority.h)
     const ULONGLONG ms=GameMs();
     Post* const p=PostOf(v,ms);
     if(!p)return;

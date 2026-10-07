@@ -564,7 +564,7 @@ Rider Aboard(unsigned char* v) noexcept {
     Rider r=Rider::none;
     for(unsigned i=0;i<SeatCount(v);++i) {
         const Rider s=SeatRider(SeatAt(v,i));
-        if(s==Rider::player)return s;
+        if(AnyPlayerIn(SeatAt(v,i)))return Rider::player;   // a player of any machine: never deleted under them
         if(s==Rider::dummy)r=s;
     }
     return r;

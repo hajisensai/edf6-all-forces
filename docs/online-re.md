@@ -356,3 +356,61 @@ NET v=<载具> host=<0/1> auth=<0x630DF0(v,0,0,0,1)> op=<0x630F90(v,1,1)：0 无
 - 两机实机未做：本仓没有离线联机测试台（`tests/gamenet` 在 EDF6Coop 仓库，加载的是 EDF6Coop.dll，不加载本插件）。待实机确认：
   远程玩家坐泰坦的副炮座开火时（艾普瑟隆的炮手座是机枪，没有车体后坐力），驾驶者那台的车体被推动；`Debug=1` 时权威端日志有 `GUNNER RECOIL v=... N shot(s)`；
   炮手那台车体不出现两次后坐。
+
+## 11. 联机门（W5，2026-10-06）
+
+插件在每台机器上都对自己那份副本做同样的事；凡是结果必须只算一次、或者会和原版复制打架的，都先问 `src/online_authority.h`。判定规则是纯函数（`tests/online_authority_test.cpp` 逐条覆盖），读游戏的部分在 `src/online_authority.cpp`。除它和 NET 探针（`netprobe.cpp`，只记日志）以外，没有模块自己调 `0x7748F0` / `0x784210` / `0x630F90` / `0x630DF0`，`tests/online_gate_guard.py` 守着这一点。
+
+### 11.1 接口
+
+| 函数 | 含义 | 单机 |
+|---|---|---|
+| `InSession()`（netprobe.cpp，原有） | 在会话中；`0x7748F0` 字节对不上时按**不在会话**（单机原行为），日志 `NET session check off` | false |
+| `OnlineHostOnly()` | 只该在房间里做一次的事：单机或房主 | true |
+| `IsOnlineAuthority(obj)` | 这个对象上插件工作的**结果**算在本机（伤害、NPC 的决定）| true |
+| `OnlineRunsHere(obj)` | 本机运行这个对象自己的模拟（飞控、驾驶）| true |
+| `OnlineMaySeatNpc(veh)` / `SeatNpcRider(veh, spawned)` | 本机可以给它放 NPC 乘员；后者是插件调原版 RideAi 的唯一入口 | true |
+| `OnlineShotCounts(owner, Shooter)` | 这一发插件伤害弹在本机结算（每发恰好一台机器） | true |
+| `NoteLocalCopy(obj, parent)` / `SetSpawnOwner(owner)` / `CopyOwnerOfCaller(human)` | 记录插件副本归谁（呼叫者 / 投掷者 / 救援的本机玩家；载具母舰的无人机随母舰） | — |
+
+规则（`online::Authority` / `RunsHere` / `MaySeatNpc`）：
+
+- 注册过的载具：`0x630F90(v, 1, 1) == 1`（座位 0 乘员的机器，否则最近一位驾驶员的机器，否则房主）。
+- 座位 0 是**没有网络身份**的乘员（RideAi 的 DummyVehicleRider）：只有房主是权威。客机只要放了一个，原版就会把它当成本机的（§3.3）。
+- 插件自己 `CreateObject` 的对象（`+0x128` 低两位为 0）：每台机器都运行自己那份（`RunsHere`）；结果算在**生成它的那台机器的玩家**那份上（呼叫者、投掷者、救援的玩家；母舰放出的无人机随母舰），没有记录的算房主那份（`Authority`）。玩家坐在别人机器所属的副本里开火不结算：那台机器上同一架飞机的副本由 NPC 照样作战。
+- 伤害（`ShotCounts`）：插件副本只看归属，谁开火都一样；注册过的载具上，本机玩家自己扣的扳机（`Shooter::localPlayer`，炮舰的玩家炮弹 / 机炮）在本机结算；载具自己的伤害（NPC 乘员、驾驶员的撞击 / 钻头 / EMC）算在载具的权威上。`tests/online_authority_test.cpp` 用两机判定表断言每种情形恰好一台结算。联机时 `localPlayer` 的弹在注册载具上把 IFC 归属（伤害信息里的攻击者）设成开火的本机玩家而不是载具（`ShooterIsAttacker` / `OnlineAttacker`）：coop 的命中权威（W3，`docs/net-re/damage.md` §9.2 #9）按攻击者的机器判定，攻击者是载具时会判给载具的运行机器，与这里的结算机器不同，整发丢失。单机和插件副本仍以载具为攻击者（击杀归属、队伍、不打自己机体照旧）。归属改成玩家后，原版子弹的自身排除只比较归属指针（`0x232AA0` 第 1 步，`core+0x9A8`；基类单个忽略对象 `+0x30` 对子弹恒为 0，`docs/bullet-pass-re.md` §3.2），不沿玩家的乘坐链排除载具，炮口在载具碰撞体里生成的弹会打中本车；所以子弹候选收集器钩子（`jet_hooks.cpp AddBodyHook`，原已为僚机穿透装上）在联机时把「归属是本机玩家、候选是他乘坐的载具（人物 `+0x1548`）」的候选排除（`SparesRide`）。爆炸不用处理：发弹单元的爆炸只伤与其队伍（`+0xD0`，取自归属 `+0x314`）敌对的对象。收集器钩子没装上时不改攻击者。
+- 其他注册对象：看它自己的标志位，bit0 为 0 就是本机的。
+- 会话函数字节对不上：`0x7748F0` 不对按单机；`0x784210` / `0x630F90` 不对时联机下注册对象谁都不是权威（本机记录过归属的副本照常），日志 `NET authority off`。
+- `IsPlayer` 改为只认**本机**玩家（另一台机器复制过来的玩家人物带着玩家标志，`RemoteRider` 为真），所以 `Rider::player`、玩家定位（`SeePlayer`）都只指本机玩家。区分 NPC 和玩家用 `IsAnyPlayer`；「有玩家在车上，交给他」用 `AnyPlayerIn(seat)`（AutoCrew 不放 NPC、410 门炮 AI 不覆盖别人的门炮、NPC 直升机的玩家乘客模式、喷气机回收不删有人的机）。
+
+### 11.2 已接入的门
+
+| 功能 | 门 | 效果 |
+|---|---|---|
+| AutoCrew（crew.cpp `Crew`）、换座位的驾驶员、玩家飞机交还 / 炮手座的驾驶员 | `OnlineMaySeatNpc` + `SeatNpcRider` | 注册过的载具只在房主那边放 NPC；客机上的副本由原版复制驱动 |
+| 插件伤害弹（jet_bay.cpp `ShellMake`：撞击、钻头、EMC、炮舰机炮、Proteus） | `OnlineShotCounts(owner, by)` | 不结算的机器照样生成同一发弹（看得见），伤害为 0：每发恰好结算一次 |
+| NPC 直升机飞控（heli.cpp） | `OnlineRunsHere` + `MirrorStick` / `Replay` | 只在权威机器飞；写进输入块的值同时按原版读回的方式写进座位 0 摇杆块（LX=-横移、LY=-前后、RX=-偏航、`+0x2E0`=油门），经掩码 4 复制；其他机器把复制来的摇杆拷回输入块，用同一组 Tune 参数；摇杆块全为 0（原版 30 帧收不到就清零；`+0x1D7C` 计数到 30 清块后归 0 循环，`0x652259`，不能当新鲜度用；从没飞过的直升机构造时就是 0）时不建记录、不写输入、还原参数 |
+| 插件喷气机 NPC、502 爬行者 NPC 驾驶、盾兵的盾推直升机（写速度） | `OnlineRunsHere` | 只在运行它的机器上做 |
+| 传送舰激光（carrierlaser.cpp `Start`） | `IsOnlineAuthority(ship)` | 只在敌舰的权威（原版敌人：房主）上开始 |
+| 空袭兵呼叫（airstrike.cpp） | 呼叫自带的航向 + 种子里的选择 | 单机完全照旧。联机时进场方向取 IFC_Start 参数矩阵的前向行（`+0x40`，由消息 9 的航向算出，各机相同；行的正负没实测）；本机选择写进消息 9 种子的高 32 位（`call_net.h`：26 位固定标记 + 6 位机种，误认 2^-26），由确认态发送种子的那次调用（`0x6A9375` → `0x12B5690`，经桩把武器 `rbx` 交给钩子）发出，呼叫者保留发出的种子（`+0xBC8`）。只有联机且呼叫者是别的机器的玩家时才从收到的种子（`+0x1958`）解码；本机玩家用自己记下的发出值 |
+
+### 11.3 没做到的，和原因
+
+- **插件飞机 / 无人机 / 星导者生物的网络身份**：没做。注册族（`0x7813A0` / `0x781950`）只给对象挂一个 ID，ID 要由每台机器从同一个父对象推导（投送链用 `0x776790(父对象, 计数)`），而且所有机器要同时生成同一个 SGO；呼叫飞机的父对象（RadioContact 武器）的 NetworkObject、推导函数的计数来源都没静态确认，注册后 506 机体的复制（slot 7/8）、插件写 Havok 速度（`PlayerJetBodyStep` / `JetBodyStep`）和原版软拉怎样相处也没法静态判断。现在做到的是「各机从同一点、同一机种、同一种子生成」，之后各飞各的、目标各选各的。
+- **投掷的无人机**：只在投掷者本机变成插件无人机，别人看到原版巡逻炸弹（README 已写明）。别的机器上那颗炸弹是复制来的子弹，不经过武器的发射钩子（`SubShotHook`），本机认不出它是插件的投掷物。
+- **星导者生物**：`primer.cpp` 的随机种子取自对象地址，各机不同；它们是插件本机生成的对象，同上没有身份。
+- **任务脚本放的 NPC 载具**：脚本在每台机器上各跑一遍，每台机器都放了自己的 DummyVehicleRider。插件现在只让房主替它飞 / 开，但原版自己会让每台客机也发位姿（座位 0 是「本机的」）——这是原版行为，插件改不了，要真机看 `NET auth=`。
+- **客机玩家上房主 NPC 开着的车**：客机上座位 0 是空的（NPC 不复制），房主那边座位 0 被 NPC 占着，原版上车（`0x5765E0`）对占用的座位只让乘员下车然后失败。座位两边不一致的后果没有静态结论。
+- **玩家驾驶直升机的鼠标飞行（`AimFly`）和悬停辅助（`PlayerAssist`）**：只在驾驶员本机生效（IsPlayer 修正后也不会再替别人的人物跑）。其他机器按复制来的原始摇杆和原版参数飞，与驾驶员机器上的飞行模型不同，靠位姿软拉对齐。座位 `+0x2B0`（手柄 / 键鼠）是否复制没确认，没法在远端照样重放。
+- **AutoTurret（另一个 DLL）**：远端驾驶的载具，本机仍会转动空炮位，但开火由操作者判定（`LocalOperator`），NPC 炮手只在放它的机器上（AutoCrew 改成房主之后就是房主）。没有接入本门（它不链接 `online_authority.cpp`）。
+- **原版命中判定**：§6 未知的「伤害在哪台机器结算」仍未实测。插件伤害现在只在攻击方权威机器生效；如果原版是「被打的那台机器判定」，客机驾驶的载具对房主拥有的敌人造成的插件伤害要靠 W3（命中权威）把伤害消息送到房主。
+
+### 11.4 自制 NPC AI（PR #53–#59）怎样接入
+
+- 「只有房主决定」：用 `OnlineHostOnly()`，不要再加 `IsRoomHost()`（p7 在 netprobe.cpp 里新加的那个和它是同一件事）。
+- 「这个士兵由本机运行」：用 `IsOnlineAuthority(soldier)` / `OnlineRunsHere(soldier)`，不要自己读 `+0x128` bit0（规则相同，但没注册的对象会按房主处理）。
+- 「这辆车上的 NPC 坦克 / 炮手由谁开」（npcpost.cpp 写座位 0 摇杆、`NpcGunnersInput`）：`IsOnlineAuthority(vehicle)`；座位 0 摇杆写在权威机器上本来就会经掩码 4 复制。
+- 插件伤害弹走 `ShellMake` 就自动过 `OnlineShotCounts`；NPC 士兵开的算载具 / 士兵权威（`Shooter::vehicle`），只有本机玩家自己扣扳机才传 `Shooter::localPlayer`。插件新生成的对象调 `NoteLocalCopy`。
+- 放 NPC 乘员一律走 `SeatNpcRider`；让 NPC 下车（`SeatKick`）也只在 `OnlineMaySeatNpc(vehicle)` 的机器上做。
+- 区分「NPC 士兵 / 玩家」用 `IsAnyPlayer`：`IsPlayer` 现在只认本机玩家，p7 `npcai.cpp` 里 `!IsPlayer(o)` 当作「是 NPC」的几处（553、802、813、816 行）合并前要改成 `!IsAnyPlayer(o)`，否则房主会把客机玩家当成可招募的 NPC。
+- 标记键（Q）、地图命令：本机输入。小队由房主决定时，客机玩家的标记 / 命令要么只在单机生效，要么需要一条新的联机消息，现在没有。

@@ -98,7 +98,7 @@ void EnsurePilot(unsigned char* v) noexcept {
     if(SeatRider(SeatAt(v,0))!=Rider::none){gunner.pilotTried=false;return;}
     if(gunner.pilotTried)return;
     gunner.pilotTried=true;
-    reinterpret_cast<void(__fastcall* const*)(void*,bool)>(At<void* const*>(v,0))[kSlotRideAi](v,false);
+    SeatNpcRider(v,false);   // the plugin's aircraft: an unregistered copy, its own here (online_authority.h)
     const bool seated=SeatRider(SeatAt(v,0))==Rider::dummy;
     Log("GUNNER v=%p no one at the stick: %s",v,seated ? "an NPC pilot seated" : "the stock RideAi seated no one");
     if(seated)jet::ResumeNpc(v,gunner.vel);

@@ -424,7 +424,9 @@ using edf::PatchVtableSlot;
 // What sits in a seat (common/seat.cpp).
 using Rider=edf::Rider;
 inline Rider SeatRider(const unsigned char* seat) noexcept { return edf::SeatRider(image,seat); }
-using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer;
+// A player of any machine in the seat (Rider::player is this machine's only: common/seat.cpp).
+inline bool AnyPlayerIn(const unsigned char* seat) noexcept { return edf::AnyPlayerIn(image,seat); }
+using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer; using edf::IsAnyPlayer;
 
 // The player as last seen (on foot through the prompt visitor, or riding through a vehicle input); `at` is
 // GameMs (0: never seen).
@@ -842,12 +844,10 @@ void HeliSightFrame(unsigned char* vehicle) noexcept;
 // netprobe.cpp: Debug=1, online only: once a second per helicopter-class vehicle, which machine runs it and how its
 // pose replication stands (the NET lines, docs/online-re.md). Reads only.
 void NetProbe(unsigned char* vehicle) noexcept;
-// Whether this machine is in an online session (netprobe.cpp; true when the session function is not the one read).
+// Whether this machine is in an online session (netprobe.cpp; false when the session function is not the one read).
 // This is a session query, not proof that an object participates in replication: plugin call aircraft do not
 // register a network identity; delivered vehicles do (docs/online-re.md sections 1 and 2).
 bool InSession() noexcept;
-// Whether this machine is the room's host (offline: true; netprobe.cpp). False when its code is not the one read.
-bool IsRoomHost() noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
 // `most`; how many.

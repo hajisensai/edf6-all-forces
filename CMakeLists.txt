@@ -27,6 +27,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
+# Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
+target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 # Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
 target_sources(EDF6VehicleCrew PRIVATE src/guidance.cpp)
 # Every lock-on weapon's lock: the order it locks in (the player's nearest the view), the target cycle, reading it.
@@ -328,6 +330,12 @@ set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(split_fuse_test tests/split_fuse_test.cpp)
 target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME split_fuse COMMAND split_fuse_test)
+# The online gates (src/online_authority.h): their rules on every case, and a source guard that the plugin asks them.
+add_executable(online_authority_test tests/online_authority_test.cpp)
+target_compile_options(online_authority_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME online_authority COMMAND online_authority_test)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
 add_executable(pn_test tests/pn_test.cpp)
 target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)

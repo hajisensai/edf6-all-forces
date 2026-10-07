@@ -27,6 +27,7 @@
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
+#include "online_authority.h"
 #include "stores.h"
 #include <cstring>
 #include <cwchar>
@@ -39,7 +40,7 @@ constexpr std::size_t kSeatClassMask=0x30,kSeatClassOn=0x34,kSeatKeyRow=0x2B4,kS
 // The seat's input block (docs/heli-input-re.md §4): left stick +0x2C0 (x, y, 0, 1), right stick +0x2D0, the analog
 // triggers +0x2E0 / +0x2E4, the buttons' word +0x2E8.
 constexpr std::size_t kSeatLeft=0x2C0,kSeatRight=0x2D0,kSeatTriggers=0x2E0;
-constexpr unsigned kAnnounce=0x5763E0,kSetAction=0x551C30,kRideAction=0x56C9F0,kReserve=0x633FE0,kClear=0x634940,kOnline=0x7748F0;
+constexpr unsigned kAnnounce=0x5763E0,kSetAction=0x551C30,kRideAction=0x56C9F0,kReserve=0x633FE0,kClear=0x634940;
 constexpr unsigned kBoardTail=0x56D796,kVisitorBlend=0x572734,kClassTest=0x6346FC;
 constexpr ULONGLONG kPromptMs=4000,kRefusedMs=1500,kFreshMs=200;
 constexpr int kKeyRowSpecial=3;   // 0x56D7D8: a seat of this key row sets human +0x3F0
@@ -51,7 +52,6 @@ const unsigned char kSetActionSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x20,0x4C,0x8
 const unsigned char kRideActionSig[]={0x48,0x8B,0x01,0xFF,0xA0,0x78,0x02,0x00,0x00};   // jmp [rax+0x278]: the human's own
 const unsigned char kReserveSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x57};
 const unsigned char kClearSig[]={0x48,0x85,0xD2,0x0F,0x84,0x94,0x00,0x00,0x00,0x48,0x89,0x5C,0x24,0x08,0x57,0x48};
-const unsigned char kOnlineSig[]={0x48,0x8B,0x05,0x99,0xDF,0x93,0x01,0x8B,0x48,0x38,0x83,0xF9,0xFF,0x75,0x03,0x32};
 // The board button's tail: call 0x5763E0(human); the riding action {0x56C9F0, 0} set on human +0x1150 by 0x551C30;
 // seat = human +0x1540; seat +0x2B4 == 3 sets human +0x3F0.
 const unsigned char kBoardTailSig[]={0x48,0x8B,0xCB,0xE8,0x42,0x8C,0x00,0x00,0x48,0x8D,0x8B,0x50,0x11,0x00,0x00,0x48,0x8D,0x05,0x44,0xF2,
@@ -64,7 +64,7 @@ const unsigned char kClassTestSig[]={0x8B,0x82,0x1C,0x03,0x00,0x00,0x41,0x23,0x4
 const Sig kSigs[]={
     {kAnnounce,kAnnounceSig,sizeof(kAnnounceSig)},{kSetAction,kSetActionSig,sizeof(kSetActionSig)},
     {kRideAction,kRideActionSig,sizeof(kRideActionSig)},{kReserve,kReserveSig,sizeof(kReserveSig)},{kClear,kClearSig,sizeof(kClearSig)},
-    {kOnline,kOnlineSig,sizeof(kOnlineSig)},{kBoardTail,kBoardTailSig,sizeof(kBoardTailSig)},
+    {kBoardTail,kBoardTailSig,sizeof(kBoardTailSig)},
     {kVisitorBlend,kVisitorBlendSig,sizeof(kVisitorBlendSig)},{kClassTest,kClassTestSig,sizeof(kClassTestSig)},
 };
 bool ok=false;
@@ -73,8 +73,6 @@ using AnnounceFn=void(__fastcall*)(void*);
 using SetActionFn=void(__fastcall*)(void*,const void*,std::int64_t);
 using ReserveFn=void(__fastcall*)(void*,void*,void*);
 using ClearFn=void(__fastcall*)(void*,void*);
-using OnlineFn=bool(__fastcall*)(const void*);
-using RideAiFn=void(__fastcall*)(void*,bool);
 
 // Per local player (split screen: two): the vehicle they sit in, the keys down last frame, what the prompt shows.
 constexpr int kNumberKeys=9;
@@ -105,8 +103,6 @@ bool KeyDown(int vk) noexcept {
     GetWindowThreadProcessId(GetForegroundWindow(),&pid);
     return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
 }
-
-bool Online() noexcept { return reinterpret_cast<OnlineFn>(image+kOnline)(nullptr); }
 
 SeatHolder HolderOf(const unsigned char* seat,const unsigned char* human) noexcept {
     switch(SeatRider(seat)) {
@@ -186,7 +182,7 @@ bool Move(unsigned char* v,unsigned char* human,unsigned from,unsigned to,bool n
 // A stock helicopter's pilot seat left empty in the move: the stock RideAi seats an NPC pilot (once; heli.cpp flies it).
 void Pilot(unsigned char* v) noexcept {
     if(!Cfg().seatPilot || !IsHelicopter(v) || BodyOf(v)!=PluginBody::none || SeatRider(SeatAt(v,0))!=Rider::none)return;
-    reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,false);
+    if(!SeatNpcRider(v,false)){Log("SEAT v=%p the pilot seat empty: no NPC pilot here (the room's host seats one)",v);return;}
     Log("SEAT v=%p the pilot seat empty: %s",v,SeatRider(SeatAt(v,0))==Rider::dummy ? "an NPC pilot seated" : "the stock RideAi seated no one");
 }
 
@@ -235,7 +231,7 @@ bool Frame(unsigned char* v,unsigned char* human,unsigned at,ULONGLONG ms) noexc
     Rider_* const r=RiderFor(human,ms);
     if(!r)return false;
     r->seen=ms;
-    const bool locked=Online() && !Cfg().seatSwitchOnline;
+    const bool locked=InSession() && !Cfg().seatSwitchOnline;   // the session check every module asks (netprobe.cpp)
     if(!r->vehicle.Is(v)){r->vehicle=ObjRef::Of(v);r->promptUntil=locked ? 0 : ms+kPromptMs;r->refused=-1;r->refusedUntil=0;}
     const unsigned count=SeatCount(v);
     const unsigned char* const seat=SeatAt(v,at);

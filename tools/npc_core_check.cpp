@@ -10,7 +10,7 @@ PlayerFix player{};
 namespace {
 Config config{};
 ULONGLONG now=1000,frame=1;
-bool online=false,host=true,door=true;
+bool sessionOn=false,host=true,door=true;
 bool wall=false;
 float doorAt[3]{},doorReach=3.0f;
 unsigned char human[0x2200]{},dead[0x2200]{},other[0x2200]{},vehicle[0x3000]{},seats[edf::kSeatStride*2]{};
@@ -21,7 +21,7 @@ void __fastcall FollowRec(void* self,void* leader,bool) { Put<void*>(self,kLeade
 void __fastcall RideRec(void*,SharedRef* ref,int) { --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides; }
 void Jump(unsigned rva,const void* to) { auto p=image+rva;p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0; }
 void Reset() {
-    ResetNpcAi();config=Config{};now=1000;frame=1;online=false;host=true;door=true;wall=false;follows=rides=0;
+    ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;follows=rides=0;
     std::memset(human,0,sizeof(human));std::memset(dead,0,sizeof(dead));std::memset(other,0,sizeof(other));
     std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(ctrl,0,sizeof(ctrl));
     for(auto p : {human,dead,other}) { Put<void*>(p,0,image+kSoldiers[0].vtable);Put<int>(p,kTeam,kTeamFriend); }
@@ -38,8 +38,13 @@ void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return now; }
 ULONGLONG GameFrame() noexcept { return frame; }
 void SeeFrame(const void*) noexcept {}
-bool InSession() noexcept { return online; }
-bool IsRoomHost() noexcept { return host; }
+bool InSession() noexcept { return sessionOn; }
+bool OnlineHostOnly() noexcept { return !sessionOn || host; }
+// The real rules (online_authority.h) on the stand-in objects' flags: a soldier, no vehicle facts.
+bool IsOnlineAuthority(const void* o) noexcept {
+    return online::Authority(online::Facts{sessionOn,true,host,At<std::uint16_t>(o,0x128),false,false,online::kCopyHost,0});
+}
+bool OnlineMaySeatNpc(const void*) noexcept { return !sessionOn || host; }
 unsigned char* PlayerHuman() noexcept { return nullptr; }
 bool CameraRay(float*,float*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char* h) noexcept { return !At<void*>(h,kHumanVehicleCtrl); }
@@ -67,7 +72,7 @@ int main() {
     Reset();world.friends=1;world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);Put<unsigned>(other,kObjectFlags,kFixPosition);
     unsigned char* leaders[4];float places[4][3];int sizes[4];
     Expect(OtherSquads(dead,false,leaders,places,sizes,4)==0,"fixed script squads cannot absorb a remnant");
-    Reset();online=true;config.scriptNpcSettleSec=0;Put<void*>(human,kLeader,nullptr);Put<void*>(human,kRoute,other);
+    Reset();sessionOn=true;config.scriptNpcSettleSec=0;Put<void*>(human,kLeader,nullptr);Put<void*>(human,kRoute,other);
     SeeSquad(human,human,0,npc::Control::script,now);++frame;++now;Put<void*>(human,kRoute,nullptr);
     SeeSquad(human,human,0,npc::Control::free,now);
     Expect(human[kAutoFollow]==0,"online script release does not write the unreplicated recruit flag");
@@ -128,13 +133,14 @@ int main() {
     now+=10000;++frame;SeeSquad(human,human,0,npc::Control::free,now);
     Expect(human[kAutoFollow]==1 && dismissedCount==0,"the successor restores recruitment when the inherited cooldown expires");
     Reset();Put<void*>(human,kLeader,nullptr);Squad* q=SeeSquad(human,human,0,npc::Control::free,now);
-    online=true;Expect(!SquadCommand(human,Command{Order::guard,{10,0,0}}) && q->cmd.order==Order::none,
+    sessionOn=true;Expect(!SquadCommand(human,Command{Order::guard,{10,0,0}}) && q->cmd.order==Order::none,
                        "direct squad commands are rejected online");
-    online=false;config.enabled=false;
+    sessionOn=false;config.enabled=false;
     Expect(!SquadCommand(human,Command{Order::guard,{10,0,0}}),"direct squad commands respect the total switch");
-    Reset();Put<std::uint8_t>(human,kNet,1);PreThink(human);
+    // A soldier another machine runs exists only online (its NetworkObject flags +0x128 bit 0): the host does not reorganize it.
+    Reset();sessionOn=true;Put<std::uint8_t>(human,0x128,1);PreThink(human);
     Expect(follows==0,"remote-owned soldier succession remains native");
-    Reset();online=true;host=false;PreThink(human);
+    Reset();sessionOn=true;host=false;PreThink(human);
     Expect(follows==0,"online guest cannot reorganize squads");
     Reset();Put<void*>(human,kLeader,nullptr);SeeSquad(human,human,0,npc::Control::free,now);
     Soldier* walking=Entry(human,now);walking->boardV=ObjRef::Of(vehicle);

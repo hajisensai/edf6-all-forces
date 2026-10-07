@@ -7,11 +7,11 @@ namespace crew {
 unsigned char* image=nullptr;
 Config config{};
 ULONGLONG now=1000;
-bool online=false,host=true;
+bool sessionOn=false,host=true;
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return now; }
-bool InSession() noexcept { return online; }
-bool IsRoomHost() noexcept { return host; }
+bool InSession() noexcept { return sessionOn; }
+bool OnlineHostOnly() noexcept { return !sessionOn || host; }
 void Log(const char*,...) noexcept {}
 }
 namespace {
@@ -58,11 +58,11 @@ int main() {
     v[kDead]=1;Check(listed()==0 && !TankCommand(v,guard),"dead tank rejected before next input");v[kDead]=0;
     Put<void*>(v,kSelfCtrl,otherCtrl);Check(listed()==0 && !TankCommand(v,guard),"reused object address rejected");Put<void*>(v,kSelfCtrl,ctrl);
     now+=501;Check(listed()==0 && !TankCommand(v,guard),"stale tank rejected");
-    neutral();NpcPostInput(v);online=true;host=false;neutral();NpcPostInput(v);
+    neutral();NpcPostInput(v);sessionOn=true;host=false;neutral();NpcPostInput(v);
     Check(At<float>(seat,0x2C4)==0 && !TankCommand(v,guard),"client cannot drive or command");
     host=true;Put<float>(v,kPosition+8,45);neutral();NpcPostInput(v);
     Check(At<float>(seat,0x2C4)>0 && listed()==0,"host returns tank but cannot use offline map commands");
-    online=false;config.customNpcAi=false;Check(listed()==0 && !TankCommand(v,guard),"disabled AI cannot be commanded");
+    sessionOn=false;config.customNpcAi=false;Check(listed()==0 && !TankCommand(v,guard),"disabled AI cannot be commanded");
     ResetNpcPosts();Check(!posts[0].ref,"mission reset drops identity and orders");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_post_test: %d checks passed\n",checks);

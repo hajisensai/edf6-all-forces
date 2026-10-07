@@ -54,8 +54,7 @@ void MirrorEntry(const PJet& j,const unsigned char* v) noexcept {
 void HandBack(PJet& j,unsigned char* v,const char* why) noexcept {
     j.keep=false;j.hail=PJet::Hail{};j.autopilot=false;j.active=false;j.steered=false;j.orbiting=false;
     if(catchFlight.v==v)catchFlight=CatchFlight{};
-    if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::none && !v[kDead])
-        reinterpret_cast<void(__fastcall* const*)(void*,bool)>(At<void* const*>(v,0))[kSlotRideAi](v,false);
+    if(SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::none && !v[kDead])SeatNpcRider(v,false);
     jet::ResumeNpc(v,j.vel);
     Log("PJET v=%p back to its NPC pilot: %s",v,why);
 }
