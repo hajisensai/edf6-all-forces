@@ -334,3 +334,22 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 ### 实机验收清单（用户）
 
 见 README「NPC 自制 AI」一节末尾，随阶段补充。
+
+
+### NPC gunner seats online (2026-10-07)
+
+`NpcGunners` runs on the actual NPC's machine, independently of the driver's machine. A registered vehicle's
+DummyVehicleRider is host-only; an unregistered copy follows its recorded copy owner. Real NPC soldiers retain
+`IsOnlineAuthority(rider)`, `CustomNpcAi` and `NpcBoarding`; all human seats, local or remote, stay untouched.
+The map's boarding and squad-command operations keep their separate offline gate.
+
+Ground seats continue to use native `0x65F6F0`. Only this module's prior inputs are reclaimed on target loss,
+disable or ownership change, without clearing a new rider or an input subsequently changed elsewhere. Brute door
+NPC checks run before the local-pilot/replica split, so a remote pilot does not suppress host NPC gunners. No new
+shot protocol or duplicated projectile spawn is added: native weapon events already reach all vehicle copies.
+
+The 410's native aim-mode call at `0x6525E5` used mode 1, which overwrote received aim on an empty client seat.
+`npc_gunner_aim.cpp` selects the native CarBase mode 0 only for online 410s with NpcGunners enabled, before those
+fields can be overwritten. Its signature/profile guard leaves the enhanced online door-gunner path off on failure.
+The native audit checks local/remote/Dummy/empty seat ownership, fire-start gating and both aim modes on a private
+EDF.dll mapping; no live game or installation is modified. Actual two-machine gameplay remains an E2E boundary.

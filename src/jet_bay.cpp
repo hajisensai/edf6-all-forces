@@ -145,16 +145,20 @@ const wchar_t kDrillChargeSgo[]=L"app:/object/edf6vc_drill_charge.sgo";
 const wchar_t kDrillChargeFile[]=L"EDF6VC_DRILL_CHARGE.SGO";
 bool drillReady=false;                    // preloaded this mission (PreloadShells)
 // The EMC's rounds (emc.cpp, EmcFire; pylib/vcobjects.py EMC_*, tools/make_emc.py): its beam, its charge's glow, the
-// break charge it fires at each building on its line and the blast at its end. Order: EmcRound's.
+// break charge it fires at each building on its line and the blast at its end; then the Sazabi's beams (sazabi.cpp;
+// pylib/vcobjects.py SAZABI_ROUND_FILES, tools/make_sazabi.py). Order: EmcRound's.
 struct EmcFile { const wchar_t* sgo; const wchar_t* file; const char* name; };
 const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_emc_beam.sgo",L"EDF6VC_EMC_BEAM.SGO","beam"},
     {L"app:/object/edf6vc_emc_sight.sgo",L"EDF6VC_EMC_SIGHT.SGO","sight"},
     {L"app:/object/edf6vc_emc_break.sgo",L"EDF6VC_EMC_BREAK.SGO","break charge"},
     {L"app:/object/edf6vc_emc_blast.sgo",L"EDF6VC_EMC_BLAST.SGO","blast"},
+    {L"app:/object/edf6vc_sz_mega.sgo",L"EDF6VC_SZ_MEGA.SGO","Sazabi mega particle cannon"},
+    {L"app:/object/edf6vc_sz_charge.sgo",L"EDF6VC_SZ_CHARGE.SGO","Sazabi charge"},
+    {L"app:/object/edf6vc_sz_funnel.sgo",L"EDF6VC_SZ_FUNNEL.SGO","Sazabi funnel beam"},
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
-static_assert(kEmcCount==static_cast<int>(EmcRound::blast)+1,"kEmcFiles is indexed by EmcRound");
+static_assert(kEmcCount==static_cast<int>(EmcRound::szFunnel)+1,"kEmcFiles is indexed by EmcRound");
 bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
 // The IFC's own copy of the round's AmmoSize (#7) and AmmoExplosion (#9), as its config 0x2B5F40 writes them (r14 = the
 // IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B68C5 movss [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its
@@ -589,8 +593,8 @@ void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept {
         if(n>0)at+=n;
     }
     ++missionCount;
-    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d, Proteus %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,proteus,charges,drillReady,
-        emcReady[0],emcReady[1],emcReady[2],emcReady[3]);
+    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d, Proteus %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d sazabi mega %d charge %d funnel %d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,proteus,charges,drillReady,
+        emcReady[0],emcReady[1],emcReady[2],emcReady[3],emcReady[4],emcReady[5],emcReady[6]);
 }
 
 void ResetShells() noexcept {

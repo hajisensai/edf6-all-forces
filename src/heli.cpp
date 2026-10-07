@@ -41,6 +41,7 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "npcai.h"
+#include "npc_gunner_aim.h"
 #include "roundaim.h"
 #include "edf/weapon.h"
 #include "warn.h"
@@ -594,8 +595,8 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
 
 // ---- The medic heli (tools/make_jets.py MEDIC_HELI_FILE; the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，
 // 自瞄也是锁队友」) ----
-// A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way; a round with no blast
-// skips the team check, docs/bullet-pass-re.md §3.2 step 4, so it hits a friend and its damage heals) aims at hurt friends
+// A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way) aims at hurt friends.
+// Its PlasmaBullet blast also needs the native friendly-damage permission, restored before shooting below. It aims at feet
 // and never at enemies: its pilot circles the most hurt one in its range (PickTarget: as a 410 circles an enemy), its
 // gunners shoot the hurt friends they reach (DoorGun) and hold their fire while an enemy is near the line (the round would
 // hit it first: a heal for the enemy, or nothing; not checked which).
@@ -678,6 +679,50 @@ bool HealingGun(const unsigned char* weapon) noexcept {
     if(!Readable(weapon,kWeaponDamage+4))return false;
     const float d=At<float>(weapon,kWeaponDamage);
     return std::isfinite(d) && d<0.0f;
+}
+
+constexpr std::size_t kWeaponFriendlyDamage=0x8B6;
+constexpr unsigned kMedicShot=0x696FD0;
+// Complete 15-byte prologue: mov rax,rsp; eight pushes, no relative instructions.
+constexpr unsigned char kMedicShotSig[]={0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+using MedicShotFn=void(__fastcall*)(unsigned char*,unsigned,void*,int*,bool);
+MedicShotFn medicShotNext=nullptr;
+
+void RestoreMedicPermission(unsigned char* weapon) noexcept {
+    if(!HealingGun(weapon) || !Readable(weapon+kWeaponFriendlyDamage,1,true))return;
+    const auto owner=At<const unsigned char*>(weapon,0x120);
+    if(Readable(owner,8) && At<const unsigned char*>(owner,0)==image+kVt410)
+        weapon[kWeaponFriendlyDamage]=1;
+}
+
+void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overrideParam,int* counter,bool replay) {
+    // RideAi 0x6330C9 and later script setup 0x632DA0 clear +8B6 even on healing guns. Both the blast filter
+    // and HP handler need its GDI bit 0x20. The common local/replay shot entry repairs it before parameter copying.
+    // Weapon semantics are independent of AI/aim settings and network ownership; positive guns stay untouched.
+    __try { RestoreMedicPermission(weapon); }
+    __except(EXCEPTION_EXECUTE_HANDLER) {}
+    medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+}
+
+bool InstallMedicPermission() noexcept {
+    if(medicShotNext)return true;
+    if(!Matches(kMedicShot,kMedicShotSig,sizeof(kMedicShotSig)))return false;
+    unsigned char trampoline[sizeof(kMedicShotSig)+14];
+    std::memcpy(trampoline,kMedicShotSig,sizeof(kMedicShotSig));
+    const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
+    std::memcpy(trampoline+sizeof(kMedicShotSig),jump,6);
+    const auto back=reinterpret_cast<std::uintptr_t>(image+kMedicShot+sizeof(kMedicShotSig));
+    std::memcpy(trampoline+sizeof(kMedicShotSig)+6,&back,8);
+    void* const code=edf::AllocateNearCode(image+kMedicShot,trampoline,sizeof(trampoline));
+    if(!code)return false;
+    unsigned char patch[sizeof(kMedicShotSig)];std::memset(patch,0x90,sizeof(patch));
+    std::memcpy(patch,jump,6);
+    const auto hook=reinterpret_cast<std::uintptr_t>(&MedicShotHook);
+    std::memcpy(patch+6,&hook,8);
+    medicShotNext=reinterpret_cast<MedicShotFn>(code);
+    if(edf::PatchCode(image+kMedicShot,kMedicShotSig,patch,sizeof(patch)))return true;
+    medicShotNext=nullptr;VirtualFree(code,0,MEM_RELEASE);
+    return false;
 }
 
 // Whether any of `v`'s weapons heals: a medic.
@@ -2213,7 +2258,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
 }  // namespace
 
 bool HeliCrewed(const void* vehicle) noexcept {
-    if(IsJet(vehicle) || IsSub(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp
+    if(IsJet(vehicle) || IsSub(vehicle) || IsSazabi(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp / sazabi.cpp
     const HeliType* const type=TypeOf(vehicle);
     if(!type)return false;
     const ULONGLONG ms=GameMs();
@@ -2531,7 +2576,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     ReleaseSRWLockExclusive(&heliHudLock);
 }
 
-// The 410 under a player pilot: an AI rider in a door seat (AiGunner: an NPC soldier, or the NPC a seat swap moved
+// The 410 without a local NPC pilot (which already drives its guns in Fly): an AI rider in a door seat (AiGunner: an NPC soldier, or the NPC a seat swap moved
 // there; the user 2026-10-07: "上车的npc应该可以用对应的炮塔武器") works its gun as the NPC heli's DoorGun does, on the
 // gun's real rounds (no refill: the player's heli). An empty door seat stays silent (DoorGunUser lends the pilot's
 // user only under an NPC pilot); the player's own seat is theirs.
@@ -2541,6 +2586,7 @@ constexpr ULONGLONG kCrewDoorsStaleMs=2000;
 
 void CrewDoorGuns(unsigned char* v) noexcept {
     if(!doorOk || !Cfg().heliDoorGuns || At<const unsigned char*>(v,0)!=image+kVt410 || SeatCount(v)<3)return;
+    if(InSession() && !NpcGunnerAimReady())return;
     const ULONGLONG ms=GameMs();
     CrewDoors* c=nullptr;
     for(auto& e:crewDoors)if(e.ref.Is(v)){c=&e;break;}
@@ -2549,7 +2595,7 @@ void CrewDoorGuns(unsigned char* v) noexcept {
     const float dt=GameStep(ms-c->lastMs);
     c->lastMs=ms;
     for(int i=0;i<2;++i) {
-        if(AiGunner(SeatAt(v,static_cast<unsigned>(i+1))))DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms);
+        if(AiGunner(v,SeatAt(v,static_cast<unsigned>(i+1))))DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms);
         else c->doors[i].prevValid=false;
     }
 }
@@ -2660,7 +2706,10 @@ void Replay(unsigned char* v) noexcept {
 void HeliFrame(unsigned char* vehicle) noexcept {
     if(rescue.ref.Is(vehicle))rescue.seenFrame=GameFrame();   // RescueHeliAlive
     if(!profileOk || vehicle[kDead])return;
-    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && TypeOf(vehicle);
+    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
+    // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
+    // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
+    if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))!=Rider::dummy)CrewDoorGuns(vehicle);
     // Online, a stock heli another machine runs is flown there: here it flies on the stick it sends (Replay).
     if(stockHeli && SeatCount(vehicle)>0 && Replica(vehicle)) {
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
@@ -2672,7 +2721,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player) {
-            PlayerAssist(vehicle);PlayerHeli(vehicle);CrewDoorGuns(vehicle);
+            PlayerAssist(vehicle);PlayerHeli(vehicle);
         }
         else AssistOff(vehicle);
         return;
@@ -2682,6 +2731,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(IsJet(vehicle)){if(Cfg().jetPilot && OnlineRunsHere(vehicle))JetFrame(vehicle);return;}
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
+    if(IsSazabi(vehicle))return;      // the Sazabi (sazabi.cpp): never flown as a heli
     if(!Cfg().heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){if(!HeliCrewed(vehicle))return;h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
@@ -3074,6 +3124,7 @@ bool InstallDoorGuns() noexcept {
             doorOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&DoorGunUser));
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){doorOk=false;}
+    if(doorOk)InstallNpcGunnerAim();
     Log("HELI door guns=%d (410 door guns aimed by the plugin)",doorOk);
     return doorOk;
 }
@@ -3176,6 +3227,7 @@ bool CheckHeliProfile() noexcept {
     __try {
         for(const auto& s:kHeliSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("HELI profile mismatch at %#zx",s.rva);return false;}
         profileOk=true;
+        Log("HELI medic healing permission=%d (410 local/replayed shots heal friends)",InstallMedicPermission());
         Log("HELI player attitude=%d (mouse pitch separated from forward speed)",InstallPlayerAttitude());
         // Called helis that left are deleted (HeliReap) with the game's Delete, as jet.cpp deletes its jets.
         deleteOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));

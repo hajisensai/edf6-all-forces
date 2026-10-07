@@ -36,7 +36,8 @@ constexpr std::size_t kLevel=0x3EC,kPulse=0x3F0,kHold=0x3F4,kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
 constexpr std::size_t kBoneWorld=0xB0;
 constexpr float kFront[2]={56.0f,16.0f},kBack[2]={40.0f,12.0f};   // V508's 35/10 and 25/7.5, x1.6
-constexpr int kMaxCarriers=64,kNozzles=4;   // carriers and jets (JetFlames) alike
+constexpr int kMaxCarriers=64,kNozzles=10;  // a vehicle's flames at most: the carriers' 4, the jets' 2, the Sazabi's 10
+constexpr int kCarrierNozzles=4;            // the carrier's (V508's) four boosters
 constexpr ULONGLONG kStaleMs=1000;
 
 const unsigned char kOpNewSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xEB,0x0F,0x48,0x8B,0xCB,0xE8,0x47};
@@ -190,7 +191,7 @@ void Make(Nozzle& z,const unsigned char* v,const float* size) noexcept {
 // model is scaled, its bone rows are not). The game makes the flame's matrix L x BoneWorld (0x6BB5A0, row
 // vectors) and the flame leaves along that matrix's +z (the Booster's direction (0,0,1), 0x1765B70): with the bone
 // alone, as here before, it blew out of the pod's front and from its pivot (docs/jet-model-re.md §8.1).
-constexpr float kNozzleAt[kNozzles][3]={{3.44f,-0.064f,-9.52f},{-3.44f,-0.064f,-9.52f},{2.32f,0.0f,-6.88f},{-2.32f,0.0f,-6.88f}};
+constexpr float kNozzleAt[kCarrierNozzles][3]={{3.44f,-0.064f,-9.52f},{-3.44f,-0.064f,-9.52f},{2.32f,0.0f,-6.88f},{-2.32f,0.0f,-6.88f}};
 
 // Nozzle `i`'s flame matrix from its pod bone's world matrix `world` (its record carried to this frame:
 // exhaust_pose.h): with unit rows (the scale is in the sizes), turned pi about its y (x and z negated) and moved to the
@@ -240,7 +241,7 @@ void Frame(const unsigned char* v,unsigned char* const* recs,float intensity,ULO
     if(!c)return;
     c->seen=ms;
     exhaust::Observe(c->track,GameFrame(),reinterpret_cast<const float*>(v+kMatrix));
-    for(int i=0;i<kNozzles;++i) {
+    for(int i=0;i<kCarrierNozzles;++i) {
         Nozzle& z=c->n[i];
         if(!recs[i] || !Readable(recs[i]+kBoneWorld,64))continue;
         float world[16];
@@ -441,6 +442,33 @@ void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) 
         if(!nz)return;
         const float size[2]={nz->size[0]*(burner ? kBurnerLength : 1.0f),nz->size[1]};
         JetFrame(v,nz->at,nz->count,size,intensity,ms);
+    }
+    __except(MakeFault(GetExceptionInformation())) {}
+}
+
+// Flames on nozzles the caller places in the world (the Sazabi's thrust bells and soles, sazabi_arms.inc Flames): each
+// matrix's +z the way its flame leaves, rows unit; `size[i]` its length and width (m) when made; `level[i]` how strongly
+// they burn this frame (0: they burn down, the boosters kept for the next burst). At most kNozzles a vehicle.
+void NozzleFlames(const unsigned char* v,const float (*m)[16],int n,const float (*size)[2],const float* level,ULONGLONG ms) noexcept {
+    if(!sigOk || broken || !v || !m || !size || !level)return;
+    __try {
+        Carrier* const c=Find(v,ms);
+        if(!c)return;
+        c->seen=ms;
+        for(int i=0;i<n && i<kNozzles;++i) {
+            Nozzle& z=c->n[i];
+            std::memcpy(z.m,m[i],sizeof z.m);
+            if(!Live(z)) {
+                if(level[i]<=0.0f)continue;   // nothing to light: none made yet
+                DropWeak(z.ctrl);
+                z.obj=nullptr;z.ctrl=nullptr;
+                Make(z,v,size[i]);
+                if(!Live(z))continue;
+            }
+            Put<float>(z.obj,kLevel,level[i]);
+            Put<float>(z.obj,kPulse,level[i]>0.0f ? 1.0f : 0.0f);
+            Put<int>(z.obj,kHold,level[i]>0.0f ? 3 : 0);
+        }
     }
     __except(MakeFault(GetExceptionInformation())) {}
 }

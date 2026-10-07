@@ -45,7 +45,8 @@ class Call:
     drone: str = ''
 
     # ...or (brings 'gun') a hand weapon made from this stock weapon row (its SGO, row and texts): the boarding gun,
-    # a KFF 50 LS (laser sight, scope) whose rounds put the player into the vehicle they hit (src/boarding.cpp);
+    # a KFF 50 LS (laser sight, scope; a debugging tool: instant rounds, no spread, 999 rounds, call_weapons.GUN_CURVES)
+    # whose rounds put the player into the vehicle they hit (src/boarding.cpp);
     # `mark` is then its bullets' tag (call_weapons.gun_sgo), `reload` 0 (the template's own).
     gun: str = ''
 
@@ -156,6 +157,10 @@ CALLS: tuple[Call, ...] = (
     # heal (tools/make_jets.py MEDIC_HELI_FILE); their gunners aim at hurt friends (src/heli.cpp Medic).
     Call('EDF6VC_CALL_MEDIC_HELI', 7120, 'medic_heli', False, 2, 1800, 0.5, 'helis', 'medic helis (guard)', 360, body='medic410'),
     Call('EDF6VC_CALL_MEDIC_HELI_F', 7121, 'medic_heli', True, 2, 2000, 0.7, 'helis', 'medic helis (follow)', 360, body='medic410'),
+    # Appended 2026-10-07 (the user: 「增加高达」): the Sazabi (src/sazabi.cpp, tools/make_sazabi.py), a mobile suit the
+    # player pilots, requested empty like the player jets; `mark` its body's (pylib/vcobjects.py SAZABI_MARK).
+    Call('EDF6VC_CALL_SAZABI', 7401, 'sazabi', False, 0, 15000, 2.6, 'vehicle', vehicle='EDF6VC_SAZABI',
+         jet='edf6tr_sazabi_mission'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -176,6 +181,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'sidecar motorcycle (2026-10-06)': IDS[:36],
     'boarding gun (integrated 2026-10-06)': IDS[:37],
     'medic helis (2026-10-06)': IDS[:39],
+    'Sazabi (2026-10-07)': IDS[:40],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -395,16 +401,21 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                              'through buildings and rock. Melee: it fires no shells.'),
     },
     'boarding_gun': {
-        'SC': ('登车狙击枪', '装有激光瞄准器和 5.5 倍狙击镜的狙击枪。子弹打中己方载具时不造成伤害，而是让你立刻坐进那台载具'
+        'SC': ('登车狙击枪', '调试用。装有激光瞄准器和 5.5 倍狙击镜的狙击枪：子弹瞬间到达（1500 米约 0.03 秒）、没有散布和后坐力，'
+                        '弹匣 999 发、1 帧换弹、每秒 10 发。子弹打中己方载具时不造成伤害，而是让你立刻坐进那台载具'
                         '（优先驾驶座；NPC 驾驶的载具，NPC 挪到副座或下车）。对敌人照常造成伤害。'),
-        'CN': ('登車狙擊槍', '裝有雷射瞄準器和 5.5 倍狙擊鏡的狙擊槍。子彈打中己方載具時不造成傷害，而是讓你立刻坐進那台載具'
+        'CN': ('登車狙擊槍', '除錯用。裝有雷射瞄準器和 5.5 倍狙擊鏡的狙擊槍：子彈瞬間到達（1500 公尺約 0.03 秒）、沒有散布和後座力，'
+                        '彈匣 999 發、1 幀換彈、每秒 10 發。子彈打中己方載具時不造成傷害，而是讓你立刻坐進那台載具'
                         '（優先駕駛座；NPC 駕駛的載具，NPC 挪到副座或下車）。對敵人照常造成傷害。'),
-        'JA': ('搭乗狙撃銃', 'レーザーサイトと 5.5 倍スコープ付きの狙撃銃。味方のビークルに命中すると、ダメージを与えずに'
-                        'そのビークルへ即座に搭乗する（運転席を優先。NPC が運転中なら NPC は副座へ移るか降車する）。'
+        'JA': ('搭乗狙撃銃', 'デバッグ用。レーザーサイトと 5.5 倍スコープ付きの狙撃銃。弾は一瞬で届き（1500 m を約 0.03 秒）、'
+                        '弾のばらつきと反動はなく、装弾数 999・リロード 1 フレーム・毎秒 10 発。味方のビークルに命中すると、'
+                        'ダメージを与えずにそのビークルへ即座に搭乗する（運転席を優先。NPC が運転中なら NPC は副座へ移るか降車する）。'
                         '敵には通常どおりダメージを与える。'),
-        'EN': ('Boarding Rifle', 'A sniper rifle with a laser sight and a 5.5x scope. A round that hits a friendly '
-                                 'vehicle does it no harm and puts you in it at once (the driver seat first; an NPC '
-                                 'driver moves to a gunner seat or gets off). It hurts enemies as usual.'),
+        'EN': ('Boarding Rifle', 'A debugging tool: a sniper rifle with a laser sight and a 5.5x scope whose rounds '
+                                 'arrive at once (1500 m in about 0.03 s), with no spread and no recoil, 999 rounds, a '
+                                 'one-frame reload and 10 shots a second. A round that hits a friendly vehicle does it '
+                                 'no harm and puts you in it at once (the driver seat first; an NPC driver moves to a '
+                                 'gunner seat or gets off). It hurts enemies as usual.'),
     },
     'artillery': {
         'SC': ('自行榴弹炮', '请求一辆自行榴弹炮：E551 的车体上一座双管炮塔，自动瞄准地面目标，每次曲射两发大口径高爆弹。装填较慢。'),
@@ -425,6 +436,18 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Katyusha Rocket Truck', 'Requests a Katyusha rocket truck: a multiple rocket launcher on a truck bed '
                                         'that aims at ground targets by itself and lobs a 40-rocket salvo over an area. '
                                         'Slow to reload.'),
+    },
+    'sazabi': {
+        'SC': ('沙扎比（MSN-04）', '请求一台由你自己驾驶的沙扎比（MSN-04，全高 25.6 米），空着送到信号弹处。能走能跑，'
+                              '推进器冲刺和飞行；光束步枪、光束战斧、盾牌（带导弹）、浮游炮，以及胸部的扩散粒子炮。'),
+        'CN': ('沙薩比（MSN-04）', '請求一台由你自己駕駛的沙薩比（MSN-04，全高 25.6 公尺），空著送到信號彈處。能走能跑，'
+                              '推進器衝刺和飛行；光束步槍、光束戰斧、盾牌（帶飛彈）、浮游砲，以及胸部的擴散粒子砲。'),
+        'JA': ('サザビー（MSN-04）', '自分で操縦するサザビー（MSN-04、全高 25.6 m）を信号弾の位置へ要請する。歩行と走行、'
+                               'スラスターによるダッシュと飛行。ビーム・ショット・ライフル、ビーム・トマホーク、シールド（ミサイル付き）、'
+                               'ファンネル、そして腹部の拡散メガ粒子砲。'),
+        'EN': ('Sazabi (MSN-04)', 'Requests a Sazabi (MSN-04, 25.6 m tall) you pilot yourself, delivered empty to the '
+                                  'flare. It walks and runs, dashes and flies on its thrusters; beam shot rifle, beam '
+                                  'tomahawk, shield (with missiles), funnels, and the chest mega particle cannon.'),
     },
     'pjet_fighter': {
         'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
@@ -538,6 +561,17 @@ VEHICLE_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the aircraft files tools/make_jets.py writes (EDF6VC_PJET_* / '
           'EDF6VC_FLY_*.SGO).',
 }
+# A plugin vehicle request whose files need more than tools/make_jets.py: its notes in place of VEHICLE_NOTES.
+VEHICLE_NOTES_BY_KIND: dict[str, dict[str, str]] = {
+    'sazabi': {
+        'SC': '需要 EDF6VehicleCrew 插件，以及安装器用沙扎比模型（models/sazabi）生成的文件；没有模型时请求来的是普通的 N9 Eros 直升机。',
+        'CN': '需要 EDF6VehicleCrew 插件，以及安裝器用沙薩比模型（models/sazabi）產生的檔案；沒有模型時請求來的是普通的 N9 Eros 直升機。',
+        'JA': 'EDF6VehicleCrew プラグインと、インストーラーがサザビーのモデル（models/sazabi）から書き出すファイルが必要。'
+              'モデルがない場合は通常の N9 エロス ヘリが来る。',
+        'EN': 'Needs the EDF6VehicleCrew plugin and the files the installer makes from the Sazabi model (models/sazabi); '
+              'without the model the request brings a plain N9 Eros heli.',
+    },
+}
 THROW_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 插件和安装器生成的无人机文件；未安装插件时为普通巡逻炸弹。',
     'CN': '需要 EDF6VehicleCrew 插件和安裝器生成的無人機檔案；未安裝插件時為普通巡邏炸彈。',
@@ -590,7 +624,8 @@ def call_name(call: Call, lang: str) -> str:
 def call_description(call: Call, lang: str) -> str:
     lang = _lang(lang)
     if call.brings == 'vehicle':
-        notes = GROUND_NOTES_BY_KIND.get(call.kind, GROUND_NOTES) if call.ground else VEHICLE_NOTES
+        notes = GROUND_NOTES_BY_KIND.get(call.kind, GROUND_NOTES) if call.ground else \
+            VEHICLE_NOTES_BY_KIND.get(call.kind, VEHICLE_NOTES)
         return KINDS[call.kind][lang][1] + '\n\n' + notes[lang]
     if call.brings == 'throw':
         return KINDS[call.kind][lang][1] + '\n\n' + THROW_NOTES[lang]

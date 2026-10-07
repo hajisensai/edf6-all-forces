@@ -3,6 +3,8 @@
 #include "../src/heli.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
+#include <initializer_list>
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -41,7 +43,10 @@ bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
-bool AiGunner(const unsigned char*) noexcept { MissingDependency();return false; }
+bool InstallNpcGunnerAim() noexcept { MissingDependency();return false; }
+bool NpcGunnerAimReady() noexcept { return true; }
+bool AiGunner(const unsigned char*,const unsigned char*) noexcept { MissingDependency();return false; }
+bool IsSazabi(const void*) noexcept { return false; }
 namespace jet { int LockersOf(const void*,float (*)[3],int) noexcept { MissingDependency();return 0; } }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingDependency();return 0; }
 unsigned char* PlayerHuman() noexcept { MissingDependency();return nullptr; }
@@ -65,6 +70,10 @@ const float* recordedPointer=nullptr;
 const unsigned char* recordedContact=nullptr;
 void* recordedBody=nullptr;
 int checks=0,calls=0;
+alignas(16) unsigned char medicWeapon[0xC00]{};
+int shotCalls=0,shotCounter=7;
+bool shotReplay=false;
+unsigned char shotPermission=0;
 
 void Check(bool condition,const char* what) {
     ++checks;
@@ -83,14 +92,55 @@ void CheckPassThrough(const char* what) {
     Check(recordedPointer==input && std::memcmp(recordedInput,input,sizeof(input))==0,what);
     Check(recordedBody==inputVehicle && recordedContact==&contact,"stock body/contact arguments are preserved");
 }
+
+void __fastcall StockMedicShot(unsigned char* weapon,unsigned muzzle,void* overrideParam,int* counter,bool replay) {
+    Check(weapon==medicWeapon && muzzle==3 && overrideParam==(replay ? inputSeat : nullptr) && counter==&shotCounter,
+          "shot forwards all register arguments unchanged");
+    ++shotCalls;shotReplay=replay;shotPermission=weapon[kWeaponFriendlyDamage];
+}
+
+void CheckMedicPermission() {
+    Check(!InstallMedicPermission() && !medicShotNext,"unknown shot signature leaves hook off");
+    std::memcpy(image+kMedicShot,kMedicShotSig,sizeof(kMedicShotSig));
+    Check(InstallMedicPermission() && InstallMedicPermission(),"matching shot installs once");
+    auto* trampoline=reinterpret_cast<unsigned char*>(medicShotNext);
+    Check(std::memcmp(trampoline,kMedicShotSig,sizeof(kMedicShotSig))==0,"trampoline copies complete 15-byte prologue");
+    Check(At<const void*>(trampoline,sizeof(kMedicShotSig)+6)==image+kMedicShot+sizeof(kMedicShotSig),"trampoline resumes at instruction boundary");
+    medicShotNext=&StockMedicShot;
+    Put<const void*>(medicWeapon,0x120,inputVehicle);Put<const void*>(inputVehicle,0,image+kVt410);
+    Put<float>(medicWeapon,kWeaponDamage,-150.0f);
+    // Invoke the installed entry, including the fifth (stack) replay argument.
+    inputConfig.enabled=false;inputConfig.medicGunnerAim=false;
+    for(bool replay:{false,true}) {
+        medicWeapon[kWeaponFriendlyDamage]=0; // RideAi or subsequent mission script cleared it.
+        reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
+        Check(shotReplay==replay,"shot replay stack argument is preserved");
+        Check(shotPermission==1,"permission restored before local or replay parameter consumption");
+    }
+    Check(shotCalls==2,"native shot called exactly once per invocation");
+    for(float damage:{150.0f,0.0f,std::numeric_limits<float>::quiet_NaN(),-std::numeric_limits<float>::infinity()}) {
+        Put<float>(medicWeapon,kWeaponDamage,damage);medicWeapon[kWeaponFriendlyDamage]=0;
+        MedicShotHook(medicWeapon,3,nullptr,&shotCounter,false);
+        Check(shotPermission==0,"damage/zero/nonfinite gun keeps native no-friendly-fire");
+    }
+    Put<float>(medicWeapon,kWeaponDamage,-150.0f);Put<const void*>(inputVehicle,0,image+kVt506);
+    RestoreMedicPermission(medicWeapon);
+    Check(medicWeapon[kWeaponFriendlyDamage]==0,"non-410 healing weapon is unchanged");
+    Put<const void*>(medicWeapon,0x120,nullptr);RestoreMedicPermission(medicWeapon);
+    Check(medicWeapon[kWeaponFriendlyDamage]==0,"missing owner is unchanged");
+    RestoreMedicPermission(nullptr);
+    inputConfig.enabled=true;inputConfig.medicGunnerAim=true;
+    VirtualFree(trampoline,0,MEM_RELEASE);medicShotNext=nullptr;
+}
 }  // namespace
 
 int main() {
     using namespace crew;
     // The copied prologue ends on an instruction boundary before LEA RBP; a mismatch never patches a foreign body.
-    constexpr std::size_t imageSize=0x660000;
+    constexpr std::size_t imageSize=0x1800000;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,imageSize,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
     Check(image!=nullptr,"stand-in image allocated");
+    CheckMedicPermission();
     Check(!InstallPlayerAttitude() && !playerAttitudeNext,"unknown attitude entry leaves the hook off");
     std::memcpy(image+kPlayerAttitude,kPlayerAttitudeSig,sizeof(kPlayerAttitudeSig));
     Check(InstallPlayerAttitude() && playerAttitudeNext,"matching prologue installs the attitude trampoline");

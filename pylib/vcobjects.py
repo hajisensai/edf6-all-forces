@@ -56,6 +56,16 @@ class Jet:
     # mission_setup[0]: the vehicle's tier, the two multipliers the game's vehicle requests scale a vehicle by (its
     # durability and its weapons' damage): JET_TIER unless set.
     tier: tuple[float, float] | None = None
+    # Its own animation set (animation_model[1]) in place of the V506's (None: the V506's). Not needed for bones the
+    # plugin poses: every bone's record world is drawn each frame (docs/sazabi-re.md §2).
+    cas: str | None = None
+    # Its seat camera (the MAB's eye and LookTarget locators, riding) given in its model's frame, in place of the
+    # stock heli's rig fitted by seat_camera: a jet's camera must see over the plane, a mech's looks past its shoulder at
+    # its back (place_seat_camera / check_seat_camera).
+    seat_camera: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+    # Where the MAB's locators (door, seat camera) are measured from (mdl_at): False, the collision box's centre (every
+    # jet's `mdl`, DoorLog); True, the model's origin (the Sazabi's `mdl` lands at its soles: its frames log, 2026-10-07).
+    locators_on_origin: bool = False
 
 
 # Jets (src/jet.cpp, docs/jet-model-re.md): the V506 heli body (rigid body, HP, weapons, crash) with the
@@ -267,7 +277,8 @@ _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
 # fighter's, the blast / doll drones the drone's, the gunship (tools/make_jets.py GUNSHIP_MARK) an AC-130's.
 JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
               7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
-              7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0}
+              7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0,
+              7401.0: 71200.0}   # the Sazabi: its canonical full weight (30.5 t empty)
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
 # round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread,
 # the share of the world's gravity it falls at). Damage is per round against the player (the stock gatling's is 10,
@@ -356,6 +367,21 @@ def check_artillery_camera(camera: tuple[list[float], list[float]]) -> dict[str,
     assert ARTILLERY_VIEW_GROUND[0] <= out['ground'] <= ARTILLERY_VIEW_GROUND[1], f'the view meets the ground too near / far: {out}'
     assert out['height'] > 4.0, f'the eye is no higher than the stock: {out}'
     return out
+
+
+# The Sazabi (JETS[SAZABI_JET]): its file names are pylib/sazabi_model.py's (checked by tools/make_sazabi.py check).
+SAZABI_JET = 'edf6tr_sazabi_mission'
+SAZABI_MARK = 7401.0
+SAZABI_DURABILITY = 9000.0
+_SAZABI_ARC, _SAZABI_MDB = 'EDF6VC_SAZABI.MRAB', 'edf6vc_sazabi.mdb'
+# Its arms (the rifle, the shield missiles, the rifle again: see sazabi_weapons), on its muzzle bones.
+SAZABI_WEAPONS = ('app:/weapon/edf6vc_sz_rifle.sgo', 'app:/weapon/edf6vc_sz_missile.sgo', 'app:/weapon/edf6vc_sz_rifle.sgo')
+SAZABI_WEAPON_BONES = ('sz_muzzle', 'sz_missile', 'sz_muzzle')
+SAZABI_CAMERA = (0.0, 26.0, -48.0)                 # over the 25.6 m mech's shoulder, far enough back to see it whole
+# Riding (the MAB's eye and LookTarget, model frame: x left, y up, z forward): behind and over its right shoulder (the
+# funnel packs reach 25.5 m up and the tubes 15 m back), far enough back that the whole mech is in view, feet and all (the
+# simulated riding view, tools/sazabi_pose_view.py cam, 2026-10-07), the ground ahead above it.
+SAZABI_SEAT_CAMERA = ((-8.0, 28.0, -52.0), (0.0, 13.0, 10.0))
 
 
 # The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its
@@ -460,6 +486,12 @@ JETS: dict[str, Jet] = {
     'edf6tr_pjet_fighter_mission': Jet(7201.0, 1400.0, _ARMS, ('app:/object/edf6vc_interceptor.mrab', 'bomber501_2.mdb'),
                                        'EDF6VC_INTERCEPTOR.MRAB', 'bomber501', player=True, camera=(0.0, 6.0, -24.0)),
     'edf6tr_pjet_strike_mission': Jet(7202.0, 2200.0, _STRIKE, player=True, camera=(0.0, 8.0, -32.0)),
+    # The Sazabi (src/sazabi.cpp, docs/gundam-plan.md): a 25.6 m mobile suit the player pilots, on the V506 body like
+    # the jets (the plugin walks and flies it and poses its bones); its own model (pylib/sazabi_model.py,
+    # tools/make_sazabi.py) with the V506's own CAS, its weapons on its rifle bone. Marks 7401-7499 are its own (src/body506.cpp kMarks).
+    SAZABI_JET: Jet(SAZABI_MARK, SAZABI_DURABILITY, SAZABI_WEAPONS, (f'app:/object/{_SAZABI_ARC.lower()}', _SAZABI_MDB),
+                    _SAZABI_ARC, 'body', 'body', weapon_bones=SAZABI_WEAPON_BONES, player=True,
+                    camera=SAZABI_CAMERA, seat_camera=SAZABI_SEAT_CAMERA, locators_on_origin=True),
 }
 # The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
 # (Jet.parked), named after it: edf6tr_jet_<kind>_parked_mission. Same mark, model and arms: the plugin tells them
@@ -607,13 +639,24 @@ def mab_muzzles(mab: bytes) -> list[tuple[str, str, int]]:
     return out
 
 
-def door_point(box, stock: tuple[float, float, float], radius: float) -> tuple[list[float], float]:
-    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]);
-    `stock`, `radius`: the V506 door's (see DOOR_OUT)."""
-    _centre, (hx, hy, hz) = box   # `mdl` is the box's centre: the box spans -half..half round it
-    z = min(max(stock[2], -hz), hz)
+def door_point(box, stock: tuple[float, float, float], radius: float, mdl=None) -> tuple[list[float], float]:
+    """(local position on `mdl`, radius) of the boarding point of a jet with collision box `box` ([centre, half extents]):
+    the box's bottom (the ground), DOOR_OUT outside its right side, within its length; `stock`, `radius`: the V506
+    door's (see DOOR_OUT). `mdl`: where the locators are measured from in the model's frame (mdl_at; None: the box's
+    centre, every jet's)."""
+    (cx, cy, cz), (hx, hy, hz) = box
+    z = min(max(stock[2], -hz), hz)   # the stock door's place along the box, from its centre
     need = (HUMAN_HEIGHT * HUMAN_HEIGHT + DOOR_STEP * DOOR_STEP) ** 0.5 - DOOR_SLACK + DOOR_MARGIN
-    return [round(hx + DOOR_OUT, 3), round(-hy, 3), round(z, 3)], round(max(radius, need), 3)
+    if mdl is None:   # `mdl` is the box's centre: the box spans -half..half round it
+        return [round(hx + DOOR_OUT, 3), round(-hy, 3), round(z, 3)], round(max(radius, need), 3)
+    at = (cx + hx + DOOR_OUT - mdl[0], cy - hy - mdl[1], cz + z - mdl[2])
+    return [round(v, 3) for v in at], round(max(radius, need), 3)
+
+
+def mdl_at(jet: 'Jet') -> tuple[float, float, float] | None:
+    """Where `jet`'s `mdl` (its MAB locators' frame) is in its model's frame: its origin (Jet.locators_on_origin), or
+    None: the collision box's centre, as door_point / place_seat_camera and the checks take it by default."""
+    return (0.0, 0.0, 0.0) if jet.locators_on_origin else None
 
 
 def door_name(m: dict) -> str:
@@ -624,19 +667,19 @@ def door_name(m: dict) -> str:
     return seats[0][0]
 
 
-def move_door(m: dict, box) -> None:
+def move_door(m: dict, box, mdl=None) -> None:
     """`m` (a jet SGO's values) with its door (seat 0's: every seat of a jet shares it, make_jets.with_gunner_seat)
     moved to door_point."""
     mab = bytearray(m['animation_model'][2])
     vec, rad = mab_locator(bytes(mab), door_name(m))
     stock = struct.unpack_from('<3f', mab, vec)
-    at, radius = door_point(box, stock, struct.unpack_from('<f', mab, rad)[0])
+    at, radius = door_point(box, stock, struct.unpack_from('<f', mab, rad)[0], mdl)
     struct.pack_into('<3f', mab, vec, *at)
     struct.pack_into('<f', mab, rad, radius)
     m['animation_model'][2] = bytes(mab)
 
 
-def check_door(data: bytes) -> None:
+def check_door(data: bytes, mdl=None) -> None:
     """Re-read a jet SGO and raise DoorError unless its door (on `mdl`, the collision box's centre) is at its collision
     box's (heli_rigid_body) bottom, the ground, outside its right side by DOOR_OUT, within its length, and a human standing
     DOOR_STEP m from it on that ground (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
@@ -647,7 +690,9 @@ def check_door(data: bytes) -> None:
     x, y, z = struct.unpack_from('<3f', mab, vec)
     reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
     box = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
-    _centre, (hx, hy, hz) = box
+    (cx, cy, cz), (hx, hy, hz) = box
+    if mdl is not None:   # from `mdl` to the box's centre
+        x, y, z = x + mdl[0] - cx, y + mdl[1] - cy, z + mdl[2] - cz
     if abs(y + hy) > 2e-3 or x < hx + DOOR_OUT - 1e-3 or not -hz - 1e-3 <= z <= hz + 1e-3:
         raise DoorError(f'上车点 ({x:.2f},{y:.2f},{z:.2f}) 不在碰撞箱（中心起半尺寸 {hx:.2f},{hy:.2f},{hz:.2f}）右侧外 {DOOR_OUT} m 的地面上')
     worst = max(((DOOR_STEP ** 2 + feet ** 2) ** 0.5 for feet in (0.0, HUMAN_HEIGHT)))
@@ -759,6 +804,36 @@ def check_camera(data: bytes, bounds: Bounds) -> tuple[list[float], list[float]]
     if why:
         raise CameraError(why)
     return pts[0], pts[1]
+
+
+def place_seat_camera(m: dict, box, camera: tuple[tuple[float, float, float], tuple[float, float, float]],
+                      mdl=None) -> None:
+    """`m` with its seat camera's eye and look locators at `camera` (model frame): offsets on `mdl`, at `mdl` (mdl_at;
+    None: the collision box's centre `box[0]`, see CAMERA_LOOK_KEY)."""
+    origin = box[0] if mdl is None else mdl
+    mab = bytearray(m['animation_model'][2])
+    for name, at in zip(camera_names(m), camera):
+        vec, _ = mab_locator(bytes(mab), name)
+        struct.pack_into('<3f', mab, vec, *(round(at[i] - float(origin[i]), 3) for i in range(3)))
+    m['animation_model'][2] = bytes(mab)
+
+
+def check_seat_camera(data: bytes, bounds: Bounds, camera: tuple[tuple[float, float, float], tuple[float, float, float]],
+                      mdl=None) -> None:
+    """Re-read a mech's SGO and raise CameraError unless its seat camera is `camera` (model frame), its eye outside the
+    model's `bounds` and its look point inside them (it looks at the mech). `mdl`: where its locators are measured
+    from (mdl_at; None: the box's centre)."""
+    _, m = sgo.read(data)
+    mab = m['animation_model'][2]
+    centre = [float(_value(v)) for v in m['heli_rigid_body'][0]] if mdl is None else list(mdl)
+    got = []
+    for name in camera_names(m):
+        vec, _ = mab_locator(mab, name)
+        got.append([round(centre[i] + struct.unpack_from('<3f', mab, vec)[i], 3) for i in range(3)])
+    if any(abs(got[k][i] - camera[k][i]) > 2e-3 for k in range(2) for i in range(3)):
+        raise CameraError(f'座位镜头 {got} 不是 {camera}')
+    if _inside(got[0], bounds) or not _inside(got[1], bounds):
+        raise CameraError(f'座位镜头眼睛 {got[0]} 应在模型 {bounds} 外、注视点 {got[1]} 应在模型内')
 
 
 def _value(v) -> float:
@@ -881,7 +956,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     mab = model[2]
     for at, old in JET_MAB_BONES:
         mab = sgo.replace_utf16(mab, at, old, anchor)
-    m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), model[1], mab]
+    m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), jet.cas or model[1], mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
     m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))], [anchor, -1])
@@ -900,12 +975,15 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     door = _moves_door(jet)
     bounds = heli = None
     if door:
-        move_door(m, box)
+        move_door(m, box, mdl_at(jet))
         # The models jet_models measures (the ones the player boards): the seat camera and the ragdoll on the box's
         # centre, where `mdl` is (seat_camera, _jet_ragdoll).
         bounds = jet_models.model_bounds(game, jet.file or jet.box_model)
         heli = jet_models.heli_bounds(game)
-        fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]])
+        if jet.seat_camera is None:
+            fit_camera(m, box, bounds, heli, [_value(v) for v in rb[0]])
+        else:
+            place_seat_camera(m, box, jet.seat_camera, mdl_at(jet))
     rag = m['ragdoll']
     m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.FILES[airframe].lower(),
                     _jet_ragdoll(rag[1], body, box[0] if door or airframe is not False else None)]
@@ -924,8 +1002,11 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         m['vehicle_damage_effect'] = [0.0]   # the 506's damage smoke: none (a scale of 1.0 when the key is missing)
     out = sgo.write(version, m)
     if door:
-        check_door(out)
-        check_camera(out, bounds)
+        check_door(out, mdl_at(jet))
+        if jet.seat_camera is None:
+            check_camera(out, bounds)
+        else:
+            check_seat_camera(out, bounds, jet.seat_camera, mdl_at(jet))
     return out
 
 
@@ -935,7 +1016,8 @@ def _moves_door(jet: Jet) -> bool:
     ground), whose door stays the V506's."""
     import jet_models
     # A requested body measured on a stock bomber model (box_model: the gunship) is boarded on the ground too.
-    return jet.file is None or jet.file in jet_models.MODELS or jet.box_model is not None
+    # A player's vehicle with a model another builder makes (the Sazabi) is boarded on the ground too.
+    return jet.file is None or jet.file in jet_models.MODELS or jet.box_model is not None or jet.player
 
 
 def as_mission_sgo(data: bytes) -> bytes:
@@ -1262,3 +1344,76 @@ def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
     if game is not None:
         stock = emc_stock(game)
         assert abs(stock['reach'] - EMC_BEAM_RANGE) < 1e-3, stock
+
+
+# ------------------------------------------------------------------------------------------ the Sazabi's arms
+# The Sazabi (JETS[SAZABI_JET], src/sazabi.cpp, tools/make_sazabi.py writes these). Its holders (weapon_bones):
+#   0 the beam shot rifle on sz_muzzle: the 506's own laser (a null model: nothing hangs on the muzzle) made a thick
+#     piercing pink beam, 900 m (30 m a frame x 30 frames), two shots a second;
+#   1 the shield missiles on sz_missile: a salvo of three from the shield, the plugin's proportional guidance;
+#   2 the rifle again (never fired: the 506 builds a holder for every vehicle_weapon_setting row, four at least with
+#     the fuel tank, src/stores.cpp).
+# The plugin pulls each one's trigger itself (src/sazabi.cpp: weapon +0x139), the stock fire bytes cleared.
+# Its beams the plugin fires as rounds of its own (src/jet_bay.cpp SazabiFire, the EMC's way: DemoIndirectFire objects
+# it owns, aims and grows, docs/emc-re.md), the satellite laser in the Sazabi's pink:
+#   SAZABI_MEGA_FILE    the chest's diffuse mega particle cannon: a fan of these, a round a frame for SAZABI_MEGA_ROUNDS
+#   SAZABI_CHARGE_FILE  its charge's glow at the chest (thin; the plugin thickens it as it charges), silent
+#   SAZABI_FUNNEL_FILE  a funnel's short burst
+SAZABI_RIFLE_STOCK = 'V_506HELI_LASERCANNON01_L.SGO'
+SAZABI_RIFLE_FILE = 'EDF6VC_SZ_RIFLE.SGO'
+SAZABI_MISSILE_FILE = 'EDF6VC_SZ_MISSILE.SGO'
+SAZABI_PINK = (2.6, 0.55, 1.9, 0.6)
+# AmmoSize: the stock heli laser's is 0.9; 5 lit the ground pink tens of metres round the shot (its light grows with it)
+SAZABI_RIFLE: dict[str, float] = {'AmmoSize': 2.5, 'AmmoSpeed': 30.0, 'AmmoAlive': 30.0, 'AmmoDamage': 1800.0,
+                                  'FireInterval': 30.0, 'AmmoCount': 9999.0, 'AmmoIsPenetration': 1.0, 'FireRecoil': 0.0}
+SAZABI_RIFLE_FIRE_SE = ('weapon_Fencer_CA_blasterCannon01', 0.9, 60.0)   # cue, volume, metres heard at full
+SAZABI_RIFLE_HIT_SE = ('common_damages_impactParticle_S', 0.8, 50.0)
+SAZABI_MISSILE_ROUNDS = 12
+SAZABI_MISSILE = Store('Shield Missile', 'ground', 0.0, 0.0,
+                       Missile('MSN-04 shield missile', burn=1.5, top=220.0, accel=160.0, max_g=30.0, nav=4.0, life=6.0,
+                               damage=900.0, blast=10.0, lock_range=700.0, lock_cone=0.7, lock_time=20.0, burst=3.0,
+                               burst_gap=6.0, interval=150.0))
+SAZABI_MEGA_FILE = 'EDF6VC_SZ_MEGA.SGO'
+SAZABI_CHARGE_FILE = 'EDF6VC_SZ_CHARGE.SGO'
+SAZABI_FUNNEL_FILE = 'EDF6VC_SZ_FUNNEL.SGO'
+SAZABI_ROUND_FILES = (SAZABI_MEGA_FILE, SAZABI_CHARGE_FILE, SAZABI_FUNNEL_FILE)   # src/jet_bay.cpp kEmcFiles' order (after the EMC's)
+SAZABI_MEGA_ROUNDS, SAZABI_CHARGE_ROUNDS, SAZABI_FUNNEL_ROUNDS = 90, 120, 6
+SAZABI_MEGA_SIZE, SAZABI_CHARGE_SIZE, SAZABI_FUNNEL_SIZE = 8.0, 0.6, 0.9
+SAZABI_BEAM_COLOUR = (3.0, 0.6, 2.2, 1.0)
+
+
+def sazabi_weapons(game: Game) -> dict[str, bytes]:
+    """The Sazabi's holders' weapons, {Mods/WEAPON file: bytes}: the beam rifle and the shield missiles."""
+    doc = dsgo.parse(game.read('WEAPON', SAZABI_RIFLE_STOCK))
+    r = doc.root
+    flash = r.get('MuzzleFlash_CustomParameter')
+    cp = r.get('Ammo_CustomParameter')
+    if (r.get('AmmoClass') != 'LaserBullet01' or len(r.get('AmmoColor').items) != 4 or len(flash.items) != 4
+            or len(cp.items) != 11 or len(r.get('FireSe').items) != 6):
+        raise ValueError(f'{SAZABI_RIFLE_STOCK} 不是预期的直升机激光炮')
+    for key, value in SAZABI_RIFLE.items():
+        r.set(key, value)
+    r.get('AmmoColor').items[:] = list(SAZABI_PINK)
+    cp.items[0].items[:] = [SAZABI_PINK[0], SAZABI_PINK[1], SAZABI_PINK[2], 1.0]   # the beam's core and glow colours
+    cp.items[1].items[:] = [SAZABI_PINK[0] * 1.5, SAZABI_PINK[1] * 1.5, SAZABI_PINK[2] * 1.5, 1.0]
+    flash.items[1] = 2.0                                     # the muzzle flash: as big as the Nix cannon's
+    flash.items[2].items[:] = list(SAZABI_PINK)
+    flash.items[3] = 4.0                                     # its glow: twice the stock laser's 2.0 (40 lit the ground pink far round it)
+    fire = r.get('FireSe')
+    fire.items[1], fire.items[2], fire.items[5] = SAZABI_RIFLE_FIRE_SE
+    r.set('AmmoHitSe', _node_se(SAZABI_RIFLE_HIT_SE))
+    _named(r, 'Beam Shot Rifle')
+    return {SAZABI_RIFLE_FILE: dsgo.write(doc), SAZABI_MISSILE_FILE: _missile_sgo(game, SAZABI_MISSILE, SAZABI_MISSILE_ROUNDS)}
+
+
+def _node_se(se: tuple[str, float, float]) -> object:
+    """A sound entry [0, cue, volume, 1, 1, reach] as dsgo writes it."""
+    cue, volume, reach = se
+    return dsgo.Node([0.0, cue, volume, 1.0, 1.0, reach])
+
+
+def sazabi_rounds(game: Game) -> dict[str, bytes]:
+    """The Sazabi's beams the plugin fires (SAZABI_ROUND_FILES), {Mods/OBJECT file: bytes}."""
+    return {SAZABI_MEGA_FILE: _emc_beam(game, SAZABI_MEGA_ROUNDS, SAZABI_MEGA_SIZE, SAZABI_BEAM_COLOUR, 1.0),
+            SAZABI_CHARGE_FILE: _emc_beam(game, SAZABI_CHARGE_ROUNDS, SAZABI_CHARGE_SIZE, SAZABI_BEAM_COLOUR, 0.0),
+            SAZABI_FUNNEL_FILE: _emc_beam(game, SAZABI_FUNNEL_ROUNDS, SAZABI_FUNNEL_SIZE, SAZABI_BEAM_COLOUR, 0.7)}

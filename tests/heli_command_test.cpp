@@ -7,7 +7,9 @@
 namespace crew {
 unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
-bool InSession() noexcept { return false; }
+bool gunnerFixture=false,gunnerSession=false,gunnerReady=true;
+int gunnerQueries=0;
+bool InSession() noexcept { return gunnerSession; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }
 PlayerFix player{};
@@ -32,7 +34,12 @@ bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
-bool AiGunner(const unsigned char*) noexcept { MissingDependency();return false; }
+bool InstallNpcGunnerAim() noexcept { MissingDependency();return false; }
+bool NpcGunnerAimReady() noexcept { return gunnerReady; }
+bool AiGunner(const unsigned char*,const unsigned char*) noexcept {
+    if(!gunnerFixture)MissingDependency();++gunnerQueries;return false;
+}
+bool IsSazabi(const void*) noexcept { return false; }
 namespace jet { int LockersOf(const void*,float (*)[3],int) noexcept { MissingDependency();return 0; } }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingDependency();return 0; }
 unsigned char* PlayerHuman() noexcept { MissingDependency();return nullptr; }
@@ -43,7 +50,7 @@ bool MapHoldsKeys() noexcept { MissingDependency();return false; }
 bool ReadCommandUnit(const ObjRef&,const char*,const mapcmd::Command&,bool,CommandUnit*) noexcept { MissingDependency();return false; }
 float GroundClearance(const float*) noexcept { MissingDependency();return 0.0f; }
 float CeilingY() noexcept { MissingDependency();return 0.0f; }
-float GameStep(ULONGLONG) noexcept { MissingDependency();return 1.0f/60.0f; }
+float GameStep(ULONGLONG) noexcept { if(!gunnerFixture)MissingDependency();return 1.0f/60.0f; }
 float ClosureIn(const float*,const float*,float,float,float,float,bool*) noexcept { MissingDependency();return 0.0f; }
 Gpws GpwsOf(float,bool) noexcept { MissingDependency();return Gpws::none; }
 }
@@ -87,6 +94,19 @@ int main() {
     check(HeliCommand(vehicle,Command{Order::follow,{}}),"follow accepted");
     const float leader[3]={1000,0,1000};
     check(CommandMoving(h,pos,leader),"follow first joins the player instead of retaining its old fight");
+    // Enhanced door gunners are independent of local pilot controls; the online aim hook is required online only.
+    alignas(16) unsigned char gunSeats[3*edf::kSeatStride]{},remotePilot[0x500]{};
+    image=reinterpret_cast<unsigned char*>(0x10000000);
+    Put<const void*>(vehicle,0,image+kVt410);Put<void*>(vehicle,kSeats,gunSeats);Put<std::uint64_t>(vehicle,kSeatCount,3);
+    Put<void*>(gunSeats,kSeatRider,remotePilot);Put<void*>(gunSeats,kSeatRiderCtrl,ctrl);
+    remotePilot[edf::kHumanPlayer]=1;Put<std::uint16_t>(remotePilot,0x128,1);
+    check(SeatRider(gunSeats)==Rider::other && AnyPlayerIn(gunSeats),"fixture is another machine's player pilot");
+    gunnerFixture=gunnerSession=true;doorOk=true;commandConfig.heliDoorGuns=true;
+    CrewDoorGuns(vehicle);check(gunnerQueries==2,"remote player's pilot seat does not suppress local NPC gunner checks");
+    gunnerQueries=0;gunnerReady=false;CrewDoorGuns(vehicle);
+    check(gunnerQueries==0,"online door gunners stay off if native aim bridge could not install");
+    gunnerSession=false;CrewDoorGuns(vehicle);
+    check(gunnerQueries==2,"offline door gunners do not require the network aim bridge");
     std::printf("heli_command_test: %d checks passed\n",checks);
     return 0;
 }
