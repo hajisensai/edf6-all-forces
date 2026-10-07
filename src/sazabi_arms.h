@@ -42,6 +42,10 @@ struct Arms {
     bool hasAim=false,hasLock=false,aimHit=false,centred=false;
     float aimRange=0.0f;
     float aim[3]{},lock[3]{};
+    // the aim assist (sazabi_camera.inc Assist): the enemy picked round the reticle and its lock point this frame
+    const void* assistObj=nullptr;
+    bool hasAssist=false;
+    float assist[3]{};
     bool stance[2]{true,true};   // each foot on the ground last frame (its footstep when it comes down)
 };
 }  // namespace crew::szarms

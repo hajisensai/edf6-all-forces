@@ -64,6 +64,66 @@ void DropView() noexcept {
     ReleaseSRWLockExclusive(&viewLock);
 }
 
+// The aim assist (sazabi_assist.h; ini SazabiAimAssist ...): the player's only, after the stick has turned the view.
+// The enemies' lock points within the held cone of the centre's ray are gathered (the cone the held one keeps:
+// SazabiAssistCone x kAssistKeep), the one picked must be seen from the eye (no terrain or building between: MapRay;
+// those hidden are passed over for the next, at most kAssistRays tried), and its point becomes the aim (Aim). On a pad
+// (or the mouse with SazabiAssistMousePull) the heading and pitch are then eased toward it (Pull): the camera settles
+// the enemy on the reticle and keeps it there while it moves.
+constexpr float kAssistKeep=1.6f;     // the held enemy kept this many times the cone
+constexpr float kAssistMostPull=1.5f; // rad/s: the pull's fastest
+constexpr float kAssistBehind=3.0f;   // m: a wall hit this short of the point does not hide it (its own hull's edge)
+constexpr int kAssistRays=4;
+struct AssistSeen { float eye[3],dir[3],cone,range; int n; sazabi::assist::Point pts[kMostTargets]; };
+void SeeAssist(void* ctx,const void* obj,const float* at) {
+    AssistSeen* const s=static_cast<AssistSeen*>(ctx);
+    if(s->n>=kMostTargets || !at || !std::isfinite(at[0]+at[1]+at[2]))return;
+    float dist;
+    if(sazabi::assist::Angle(s->dir,s->eye,at,&dist)>s->cone || dist>s->range)return;
+    s->pts[s->n].obj=obj;std::memcpy(s->pts[s->n].at,at,12);++s->n;
+}
+bool SeenFrom(const float* eye,const float* at) noexcept {
+    float hit[3];
+    const float wall=MapRay(eye,at,hit);
+    if(wall<0.0f)return true;
+    const float d[3]={at[0]-eye[0],at[1]-eye[1],at[2]-eye[2]};
+    return wall>=Len(d)-kAssistBehind;
+}
+void Assist(Mech& m,unsigned char* v,float dt) noexcept {
+    namespace as=sazabi::assist;
+    Arms& a=m.arms;
+    const void* const held=a.hasAssist ? a.assistObj : nullptr;
+    a.hasAssist=false;a.assistObj=nullptr;
+    if(!m.rootOk || !Cfg().sazabiAimAssist || a.swing>=0.0f)return;
+    const float cone=Cfg().sazabiAssistCone*sazabi::kDeg,keep=cone*kAssistKeep,range=Cfg().sazabiAssistRange;
+    AssistSeen s{};
+    s.cone=keep;s.range=range;
+    ViewRay(ViewOf(m),m.root+12,s.eye,s.dir);
+    VisitEnemies(v,SeeAssist,&s);
+    int pick=-1;
+    for(int tries=0;tries<kAssistRays && s.n>0;++tries) {
+        const int i=as::Pick(s.eye,s.dir,s.pts,s.n,cone,keep,range,held);
+        if(i<0)break;
+        if(SeenFrom(s.eye,s.pts[i].at)){pick=i;break;}
+        s.pts[i]=s.pts[--s.n];   // hidden: the next
+    }
+    if(pick<0)return;
+    a.hasAssist=true;a.assistObj=s.pts[pick].obj;std::memcpy(a.assist,s.pts[pick].at,12);
+    const unsigned char* const seat=SeatAt(v,0);
+    const bool pad=At<unsigned char>(seat,kSeatPad)!=0;
+    if(Cfg().sazabiAssistPull<=0.0f || (!pad && !Cfg().sazabiAssistMousePull))return;
+    const View base=ViewOf(m);
+    float wantYaw,wantPitch;
+    as::Solve(a.assist,m.heading,m.aimPitch,[&](float yaw,float pitch,float* eye) noexcept {
+        View w=base;w.yaw=yaw;w.pitch=pitch;
+        float dir[3];
+        ViewRay(w,m.root+12,eye,dir);
+    },&wantYaw,&wantPitch);
+    const float gain=Cfg().sazabiAssistPull;
+    m.heading=as::WrapPi(m.heading+as::Pull(m.heading,wantYaw,gain,kAssistMostPull,dt));
+    m.aimPitch=Clamp(m.aimPitch+as::Pull(m.aimPitch,Clamp(wantPitch,-kAimMost,kAimMost),gain,kAssistMostPull,dt),-kAimMost,kAimMost);
+}
+
 // The aim this frame: the player's along the camera's centre ray (what it meets within kAimRange, else its far end);
 // an NPC's from the muzzle along its heading and pitch. The rifle arm is then turned onto it (the pose's aim yaw and
 // pitch from the right shoulder, sazabi_pose.h AimRifle), the cannon's beams and the HUD's reticle go to it.
@@ -84,6 +144,7 @@ void Aim(Mech& m) noexcept {
     for(int k=0;k<3;++k)stop[k]=from[k]+dir[k]*kAimRange;
     a.aimHit=MapRay(from,stop,hit)>=0.0f;
     std::memcpy(a.aim,a.aimHit ? hit : stop,12);
+    if(!m.npc && a.hasAssist){std::memcpy(a.aim,a.assist,12);a.aimHit=true;}   // the assist's enemy (Assist)
     float muzzle[3];
     BoneAt(m,sazabi::kMuzzle,nullptr,muzzle);
     const float d[3]={a.aim[0]-muzzle[0],a.aim[1]-muzzle[1],a.aim[2]-muzzle[2]};

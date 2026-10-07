@@ -472,5 +472,6 @@ void PublishCue(const Mech& m) noexcept {
     c.overheat=m.fl.overheat;
     c.special=static_cast<int>(a.special);
     c.aimRange=a.aimRange;c.aimHit=a.aimHit;c.centred=a.centred;
+    c.hasAssist=a.hasAssist && a.hasAim;std::memcpy(c.assist,a.assist,12);
     cue=c;cueMs=GameMs();
 }
