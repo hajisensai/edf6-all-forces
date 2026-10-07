@@ -15,6 +15,7 @@ struct RoundModel {
     RoundKind kind;
     bool lobbed;                 // a grenade / mortar class: its point is drawn as the artillery's cross
     const char* label;
+    const char* rtti;            // its factory's class (".?AVFactory@SolidBullet01Rail@@"), nullptr for one not in the list
     float speed,factor;          // AmmoSpeed m/frame, AmmoGravityFactor
     std::int32_t alive;          // AmmoAlive frames
     float accel,top,keepInh,keepOwn;   // the motor (rocket): Ammo_CustomParameter[4], [6], [7][1], [7][2]

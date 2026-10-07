@@ -2000,6 +2000,54 @@ def vehicle_sound_wired() -> None:
 
 
 @test
+def vehicle_gun_calibres_wired() -> None:
+    """The vehicle guns heard by calibre (src/vehmix.h ProfileOf / kProfiles, src/vehsound.cpp; the user, 2026-10-07:
+    "closer to the real thing, by calibre and round: the loading, the shot, the case landing"; docs/sound-re.md §9.5): the
+    weapon's facts are read from the fields the doc gives (FireBurstCount +0x370, AmmoDamage +0x89C, AmmoExplosion +0x8B0,
+    ShellCase's factory +0x4E0, the shot count sent +0x1544 and fired +0xBD0) at signature-checked stores; the rail gun is
+    told apart by its round's class, not its HUD label; a weapon with a physical case of its own gets no case sound of
+    ours, and a case's sound is the profile's; every report, round, case and step clip is one jetaudio.cpp makes; the
+    howitzer's own case lands with the stock game's biggest case's sound (tools/make_artillery.py CASE_SE, not the rifle
+    case's it inherited), checked against the built SGO when the game is there; the offline check runs the calibres."""
+    import rootcpk
+    code, mix, doc, check, rounds = (src('src/vehsound.cpp'), src('src/vehmix.h'), src('docs/sound-re.md'), src('tools/vsound_check.cpp'),
+                                     src('src/rounds.cpp'))
+    assert 'kFireBurst=0x370,kWeaponDamage=0x89C,kWeaponBlast=0x8B0,kCaseFactory=0x4E0,kWeaponShots=0x1544,kWeaponFired=0xBD0' in code
+    sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
+    for rva in ('0x68CE85', '0x68D6EC', '0x68D82F', '0x68DC6D', '0x68DCA2', '0x690540', '0x690505', '0x690586', '0x6947AD'):
+        assert '{' + rva + ',' in sigs, f'src/vehsound.cpp kSigs: {rva}'
+        assert rva in doc, f'docs/sound-re.md: {rva}'
+    for field in ('+0x370', '+0x89C', '+0x8B0', '+0x4E0', '+0x1544', '+0xBD0'):
+        assert field in doc, f'docs/sound-re.md: {field}'
+    assert '".?AVFactory@SolidBullet01Rail@@"' in code and '.?AVFactory@SolidBullet01Rail@@' in rounds and 'm.rtti=c ? c->rtti' in rounds
+    case_of = code.split('void CaseOf(', 1)[1].split('\n}', 1)[0]
+    assert 'g.stockCase' in case_of and 'pf.casing.clip' in case_of, 'CaseOf: no case of ours over a physical one'
+    rapid = code.split('void Rapid(', 1)[1].split('\n}', 1)[0]
+    assert '!g.stockCase' in rapid and 'pf.casing.clip' in rapid, 'Rapid: the brass loop not over a physical case'
+    assert 'g.stockCase=At<const void*>(w,kCaseFactory)!=nullptr' in code
+    assert 'vmix::RemoteShot(g->shots,sent,At<std::int32_t>(w,kWeaponFired))' in code
+    # Every clip the table names is a Clip of jetaudio.h; the calibres the doc lists are the enum's.
+    clips = set(re.findall(r'\b(kClip\w+)\b', src('src/jetaudio.h').split('enum Clip : int {', 1)[1].split('}', 1)[0]))
+    table = mix.split('constexpr Profile kProfiles[', 1)[1].split('};', 1)[0]
+    assert set(re.findall(r'audio::(kClip\w+)', table)) <= clips
+    bores = re.search(r'enum class Bore : int \{([^}]*)\}', mix).group(1)
+    names = [b.strip() for b in bores.split(',') if b.strip() and b.strip() != 'count']
+    assert len(re.findall(r'^    \{Bore::(\w+),', table, re.M)) == len(names), 'kProfiles: one row a calibre'
+    assert re.findall(r'^    \{Bore::(\w+),', table, re.M) == names, 'kProfiles: rows in the enum\'s order'
+    for name in ('Calibres();', 'CalibreScenario(out);', 'scenario_calibres.wav'):
+        assert name in check, f'tools/vsound_check.cpp: {name}'
+    # The howitzer's case: the big case's landing sound, the rifle case's refused as the expected stock one.
+    assert make_artillery.CASE_SE[1] == 'weapon_Common_shell_huge' and make_artillery.STOCK_CASE_SE[1] == 'weapon_Common_shell_srifle'
+    assert make_artillery.same_se([0.0, 'x', 0.2000000029802, 0.8, 1.0, 5.0], [0.0, 'x', 0.2, 0.8, 1.0, 5.0])
+    assert not make_artillery.same_se([0.0, 'y', 0.2, 0.8, 1.0, 5.0], [0.0, 'x', 0.2, 0.8, 1.0, 5.0])
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        game = vc.Game(rootcpk.DEFAULT_GAME)
+        for stock in make_artillery.STOCK_GUNS:
+            g = dsgo.to_py(dsgo.parse(make_artillery.howitzer_sgo(game, stock)).root)
+            assert make_artillery.same_se(g['ShellCase'][2], make_artillery.CASE_SE), (stock, g['ShellCase'])
+
+
+@test
 def sazabi_sound_wired() -> None:
     """The Sazabi's sounds (src/sazabi_sound.cpp; docs/sound-re.md §10): its tick runs once a frame from every vehicle's
     input before the plugin's Enabled test (it stops its loops when off) and is reset with the mission; its clips are
