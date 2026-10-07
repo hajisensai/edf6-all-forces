@@ -19,6 +19,7 @@ const void* boardingOnly=nullptr;
 bool doorReadable=true;
 float doorReach=2.3f;
 int warps=0,failures=0;
+float floorAt=exitground::kNoFloor;   // MapGroundNear's floor (kNoFloor: none)
 void __fastcall WarpRec(void* ctrl,const float* matrix) {
     auto h=static_cast<unsigned char*>(ctrl)-kHumanCtrl;
     std::memcpy(h+kPosition,matrix+12,12);
@@ -110,6 +111,10 @@ void Log(const char*,...) noexcept {}
 ULONGLONG GameMs() noexcept { return 3600000; }
 ULONGLONG GameFrame() noexcept { return 1; }
 bool CameraRay(float*,float*) noexcept { return false; }
+bool MapGroundNear(float,float,float,float* h,bool) noexcept {
+    if(floorAt==exitground::kNoFloor)return false;
+    *h=floorAt;return true;
+}
 bool SidecarLevelHooked() noexcept { return false; }
 bool bulletHooked=true;   // the bullets' hook (jet_hooks.cpp InstallBulletPass) is in
 bool SidecarBulletHooked() noexcept { return bulletHooked; }
@@ -160,6 +165,15 @@ int main() {
     Expect(!sidecars[0].gunner && BoardHeld(human) && SidecarBoard(second,human),"the step-off press cannot board another vehicle");
     human[kHumanBoard]=0;MoveIntent(human);
     Expect(!SidecarBoard(ordinary,human),"release after step-off restores ordinary boarding");
+    // The step-off point in the floor (the bike leaning, a side slope; exit_ground.h): put on it; over it: left there.
+    for(const float floor:{1.0f,-0.5f}) {
+        Reset();HumanAt(kGunnerX,0.0f,kGunnerZ);SidecarBoard(bike,human);MoveIntent(human);
+        floorAt=floor;human[kHumanBoard]=1;MoveIntent(human);
+        const float y=At<float>(human,kPosition+4);
+        Expect(!sidecars[0].gunner && (floor>0.0f ? std::fabs(y-(floor+exitground::kLift))<1e-4f : y<0.5f),
+               floor>0.0f ? "a step-off point 0.8 m in the floor puts them on it" : "a step-off point over the floor is kept");
+        floorAt=exitground::kNoFloor;human[kHumanBoard]=0;MoveIntent(human);
+    }
     // Both split-screen players can press at once; one releasing must not clear the other's guard.
     Reset();Take(sidecars[0],bike,human,true);Take(sidecars[1],second,otherHuman,true);
     human[kHumanBoard]=1;otherHuman[kHumanBoard]=1;

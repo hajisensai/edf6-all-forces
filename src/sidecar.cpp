@@ -43,6 +43,8 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "body506.h"
+#include "exit_ground.h"
+#include "heli.h"
 #include "memory.h"
 #include <atomic>
 #include <cmath>
@@ -129,6 +131,7 @@ Sidecar sidecars[kMaxSidecars]{};
 // off them (a button held over the next frames would take them straight off again, or onto the saddle).
 ObjRef boardHeld[kMaxSidecars]{};  // each local player consumes their own press (split screen)
 bool ok=false,moveOk=false,driveOk=false;
+bool warpOk=false;   // the warp and the ride exit's call of it as known (WarpHuman, crew.cpp ExitGroundTick)
 using MoveIntentFn=std::uintptr_t(__fastcall*)(void*);
 using WarpFn=void(__fastcall*)(void*,const float*);
 using AddStepFn=void(__fastcall*)(void*,const float*);
@@ -250,9 +253,16 @@ void Take(Sidecar& s,unsigned char* v,unsigned char* human,bool byPlayer) noexce
     Log("SIDECAR v=%p %s %p into the sidecar",v,byPlayer ? "the player" : "an NPC",human);
 }
 
-// Out of the tub, beside it on the ground: kStepOff past its outer side, level with the gunner's point.
+// Out of the tub, beside it on the ground: kStepOff past its outer side, level with the gunner's point; on the floor
+// there when that point is in it (the bike leaning or on a side slope: exit_ground.h).
 void StepOff(Sidecar& s,unsigned char* v,unsigned char* human,const char* why) noexcept {
     float at[3];FramePoint(v,kTubOut-kStepOff,0.2f,kGunnerZ,at);
+    float floor=exitground::kNoFloor,to=0.0f;
+    if(!MapGroundNear(at[0],at[2],at[1],&floor))floor=exitground::kNoFloor;
+    if(exitground::LiftOnto(at[1],floor,&to)) {
+        Log("SIDECAR v=%p step-off point %.2f m in the floor: put on it",v,floor-at[1]);
+        at[1]=to;
+    }
     Warp(human,at);
     HoldBoard(human);
     Let(s,v,why);
@@ -428,6 +438,12 @@ bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtr
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
+bool WarpHuman(unsigned char* human,const float* pos) noexcept {
+    if(!warpOk || !human)return false;
+    Warp(human,pos);
+    return true;
+}
+
 int SidecarPassengers() noexcept { return riding.load(std::memory_order_relaxed); }
 
 bool IsSidecar(const void* vehicle) noexcept {
@@ -574,6 +590,7 @@ bool InstallSidecar() noexcept {
            Matches(0x57B17C,kExitWarpSig,sizeof(kExitWarpSig)) && Matches(0x6746D3,kVelSig,sizeof(kVelSig)) &&
            Matches(kAddStep,kAddStepSig,sizeof(kAddStepSig)) && Matches(0x11B9A92,kStepUseSig,sizeof(kStepUseSig)) &&
            Matches(0x11B9CB7,kStepClearSig,sizeof(kStepClearSig));
+        warpOk=Matches(kWarp,kWarpSig,sizeof(kWarpSig)) && Matches(0x57B17C,kExitWarpSig,sizeof(kExitWarpSig));
         driveOk=Matches(0x673AAC,kBlockSig,sizeof(kBlockSig)) && Matches(0x658D6D,kBikePadSig,sizeof(kBikePadSig));
         moveOk=false;
         if(ok && Matches(kMoveIntentCall-3,kMoveCallSig,sizeof(kMoveCallSig))) {

@@ -17,12 +17,13 @@ void* testVtable[80]{};
 int calls=0,failures=0,checks=0;
 bool testJet=false;
 float testDoor[3]={30.3f,0.0f,1.8f};
+float testFloor=exitground::kNoFloor,warpedTo[3]{};int warpCount=0;   // ExitGroundTick's world
 void Check(bool value,const char* why){++checks;if(!value){++failures;std::printf("FAIL %s\n",why);}}
 void __fastcall Ride(void*,bool){++calls;}
 void Time(unsigned ms){clock.game=3600000+ms;clock.wall=GetTickCount64();player.at=clock.game;}
 void Occupy(unsigned seat,unsigned char* rider){Put<void*>(testSeats+seat*kSeatStride,kSeatRider,rider);Put<void*>(testSeats+seat*kSeatStride,kSeatRiderCtrl,rider ? testCtrl : nullptr);}
 void Setup(){
-    ResetCrew();std::memset(testVehicle,0,sizeof(testVehicle));std::memset(testSeats,0,sizeof(testSeats));
+    ResetCrew();exitWatch=ExitWatch{};std::memset(testVehicle,0,sizeof(testVehicle));std::memset(testSeats,0,sizeof(testSeats));
     std::memset(testHuman,0,sizeof(testHuman));std::memset(testDummy,0,sizeof(testDummy));
     calls=0;testJet=false;testConfig=Config{};testConfig.debug=false;pauseOk=false;
     testVtable[kSlotRideAi]=reinterpret_cast<void*>(&Ride);
@@ -50,6 +51,8 @@ bool PlayerJetBoardable(const void*) noexcept{return testJet;}
 unsigned char* PlayerHuman() noexcept{return testHuman;}
 bool SeatPoint(const unsigned char*,unsigned,float* point,float* reach) noexcept{std::memcpy(point,testDoor,12);*reach=2.3f;return true;}
 bool InstallNpcAi() noexcept{return false;}
+bool MapGroundNear(float,float,float,float* h,bool) noexcept{if(testFloor==exitground::kNoFloor)return false;*h=testFloor;return true;}
+bool WarpHuman(unsigned char* h,const float* p) noexcept{std::memcpy(warpedTo,p,12);std::memcpy(h+kPosition,p,12);++warpCount;return true;}
 void NpcPostInput(unsigned char*) noexcept{}
 void NpcGunnersInput(unsigned char*) noexcept{}
 // Unrelated production hooks are linked but must never run in this fixture.
@@ -136,6 +139,27 @@ int main(){
     Put<unsigned>(testHuman,0x31C,2);Check(!PlayerBoardingEntrance(&entry),"incompatible soldier class cannot receive a false entrance");
     Put<unsigned>(testHuman,0x31C,1);Time(5000);
     Check(!PlayerBoardingEntrance(&entry),"stale vehicle entry is not dereferenced for a cue");
+    // Off a vehicle, in the floor (exit_ground.h): put on it, inside the watch only, and only after a ride.
+    auto exitCase=[&](float y,float floor,unsigned after,bool rode) {
+        Setup();testFloor=floor;warpCount=0;
+        if(rode){Put<void*>(testHuman,kHumanVehicleCtrl,testCtrl);ExitGroundTick();}
+        Put<void*>(testHuman,kHumanVehicleCtrl,nullptr);Put<float>(testHuman,kPosition+4,y);ExitGroundTick();
+        Time(100+after);ExitGroundTick();
+        testFloor=exitground::kNoFloor;
+        return warpCount;
+    };
+    Check(exitCase(-1.0f,0.0f,0,true)==1 && warpedTo[1]==exitground::kLift,"a soldier put down a metre in the floor is put on it");
+    Check(exitCase(0.0f,0.05f,0,true)==0,"feet a few cm in a slope are left standing");
+    Check(exitCase(-1.0f,0.0f,0,false)==0,"no ride, no exit: a soldier walking is not touched");
+    Check(exitCase(-12.0f,0.0f,0,true)==0,"a floor 12 m over them (a deck, a roof) is not theirs");
+    {   // in the floor only after the watch: not touched
+        Setup();testFloor=0.0f;warpCount=0;
+        Put<void*>(testHuman,kHumanVehicleCtrl,testCtrl);ExitGroundTick();
+        Put<void*>(testHuman,kHumanVehicleCtrl,nullptr);ExitGroundTick();
+        Time(100+kExitWatchMs+500);Put<float>(testHuman,kPosition+4,-1.0f);ExitGroundTick();
+        testFloor=exitground::kNoFloor;
+        Check(warpCount==0,"past the exit watch the soldier is the game's again");
+    }
     std::printf("crew_first_use_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
