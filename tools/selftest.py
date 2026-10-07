@@ -4476,12 +4476,14 @@ def edf5_campaign_plugin_sites() -> None:
 
 @test
 def edf5_campaign_shipped() -> None:
-    """The released installer carries the campaign's text where make_edf5_campaign reads it when frozen: without it
-    the exe would install no campaign."""
+    """Both the frozen installer and source-tools archive must carry the campaign's required text."""
     rel = src('tools/build_release.py')
     assert '"edf5campaign", "missions.json")}{seps}edf5campaign' in rel
     assert "os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json')" in src('tools/make_edf5_campaign.py')
     assert os.path.isfile(os.path.join(ROOT, 'edf5campaign', 'missions.json'))
+    workflow = src('.github/workflows/build.yml')
+    assert re.search(r'foreach \(\$f in git [^\n]*ls-files [^\n)]*\bedf5campaign\b', workflow), \
+        'source-tools archive omits the campaign text required by make_edf5_campaign.TEXT'
 
 
 def main() -> int:

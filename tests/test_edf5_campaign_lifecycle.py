@@ -20,6 +20,11 @@ import modfiles
 
 class CampaignLifecycleTests(unittest.TestCase):
     def setUp(self) -> None:
+        # CTest pipes stdout on Windows CI, where Python uses cp1252. Capture the installer's Chinese UI
+        # like a user-interface fixture; nested captures below still verify the actual menu text.
+        output = redirect_stdout(io.StringIO())
+        output.__enter__()
+        self.addCleanup(output.__exit__, None, None, None)
         temp = tempfile.TemporaryDirectory(prefix='edf6-campaign-lifecycle-')
         self.addCleanup(temp.cleanup)
         self.root = temp.name
