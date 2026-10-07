@@ -355,6 +355,9 @@ void ResetMissiles() noexcept;    // missile.cpp
 void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
 void BigWorldProbe() noexcept;
+// The process's memory and the machine's, one log row (bigworld.cpp): at the mission's start and once its map is in, so
+// a map's cost shows in the log (the 3 x 3 big map ran an 8 GB machine out of memory, testhub report #3).
+void LogMemory(const char* when) noexcept;
 // What a jet ran into (impact.cpp), logged when it is held back ("blocked"): the nearest map surface round `pos`
 // (terrain or a building) and the nearest objects (class, team, distance). `who` "JET" / "PJET", `way` its velocity.
 void LogImpact(const char* who,const void* self,const float* pos,const float* way) noexcept;

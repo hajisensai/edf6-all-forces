@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from typing import Any
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -148,36 +149,44 @@ class IncrementalTests(unittest.TestCase):
             model.unlink()
             self.assertFalse(buildcache.Cache(str(self.game)).current('drill'))
 
-    def test_second_install_never_builds_or_rewrites_cached_assets(self) -> None:
+    def stub_install(self, stack: ExitStack, memory: list[int]) -> tuple[dict[str, Any], Any, Any]:
+        """installer.install against the stand-in game: every builder stubbed (counted), the plugins, weapon table,
+        AutoTurret and mission stubbed; the machine's RAM is memory[0] (the test changes it between installs).
+        Returns the builders, the weapon table's install and the mission's."""
         import call_weapons
         import gen
         import make_bigmap
         import make_stock_stores
+        stack.enter_context(patch.object(make_bigmap, 'physical_memory', lambda: memory[0]))
+        plugins = {name: (b'dll', f'[{section}]\nBigWorld=0\n'.encode()) for name, section in installer.PLUGINS}
+        for name, replacement in {'check_loader': lambda g: None,
+                                  'plugin_files': lambda: plugins,
+                                  'stack_weapons': lambda g: {},
+                                  'build_autoturret': lambda g: ({}, False),
+                                  'install_autoturret': lambda g, files, force: None}.items():
+            stack.enter_context(patch.object(installer, name, replacement))
+        stack.enter_context(patch.object(call_weapons, 'recover', lambda g: False))
+        import rootcpk   # the installer points it at its game: not this stand-in, for the tests after this one
+        stack.enter_context(patch.object(rootcpk, 'use', lambda root: None))
+        shared = stack.enter_context(patch.object(call_weapons, 'install'))
+        mission = stack.enter_context(patch.object(gen, 'install', return_value=[]))
+        stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))
+        builders = {}
+        for group in buildcache.GROUPS:
+            module = importlib.import_module('make_' + group)
+            files = {f'OBJECT/{group}.SGO': group.encode()}
+            value = (b'mac', {'part': b'map'}) if group == 'bigmap' else files
+            builders[group] = stack.enter_context(patch.object(module, 'build', return_value=value))
+            if group != 'bigmap':
+                def write(game: str, data: dict[str, bytes], owner: str = group) -> list[str]:
+                    led = ledger.Ledger(game)
+                    return [led.put(owner, p, b) for p, b in data.items()]
+                stack.enter_context(patch.object(module, 'install', write))
+        return builders, shared, mission
+
+    def test_second_install_never_builds_or_rewrites_cached_assets(self) -> None:
         with ExitStack() as stack, redirect_stdout(io.StringIO()):
-            plugins = {name: (b'dll', f'[{section}]\nBigWorld=0\n'.encode()) for name, section in installer.PLUGINS}
-            for name, replacement in {'check_loader': lambda g: None,
-                                      'plugin_files': lambda: plugins,
-                                      'stack_weapons': lambda g: {},
-                                      'build_autoturret': lambda g: ({}, False),
-                                      'install_autoturret': lambda g, files, force: None}.items():
-                stack.enter_context(patch.object(installer, name, replacement))
-            stack.enter_context(patch.object(call_weapons, 'recover', lambda g: False))
-            import rootcpk   # the installer points it at its game: not this stand-in, for the tests after this one
-            stack.enter_context(patch.object(rootcpk, 'use', lambda root: None))
-            shared = stack.enter_context(patch.object(call_weapons, 'install'))
-            mission = stack.enter_context(patch.object(gen, 'install', return_value=[]))
-            stack.enter_context(patch.object(make_stock_stores, 'remove', lambda g: ([], [])))
-            builders = {}
-            for group in buildcache.GROUPS:
-                module = importlib.import_module('make_' + group)
-                files = {f'OBJECT/{group}.SGO': group.encode()}
-                value = (b'mac', {'part': b'map'}) if group == 'bigmap' else files
-                builders[group] = stack.enter_context(patch.object(module, 'build', return_value=value))
-                if group != 'bigmap':
-                    def write(game: str, data: dict[str, bytes], owner: str = group) -> list[str]:
-                        led = ledger.Ledger(game)
-                        return [led.put(owner, p, b) for p, b in data.items()]
-                    stack.enter_context(patch.object(module, 'install', write))
+            builders, shared, mission = self.stub_install(stack, [64 * 2**30])
             installer.install(str(self.game))
             paths = list((self.game / 'Mods/OBJECT').glob('*')) + list((self.game / 'Mods/MAP').glob('*'))
             timestamps = {p: p.stat().st_mtime_ns for p in paths}
@@ -208,6 +217,36 @@ class IncrementalTests(unittest.TestCase):
                     installer.install(str(self.game))
             self.assertEqual(manifest.read_bytes(), before_asset_failure)
             self.assertFalse(buildcache.Cache(str(self.game)).current('chute'))
+
+    def test_low_memory_machine_gets_no_big_map(self) -> None:
+        # testhub report #3 (2026-10-07): with 8 GB the game ran out of memory loading the 3 x 3 test range.
+        import make_bigmap
+        ini = self.game / 'Mods/Plugins/EDF6VehicleCrew.ini'
+        mac = self.game / 'Mods/MAP' / make_bigmap.MAP_FILE
+        memory = [64 * 2**30]
+        with ExitStack() as stack, redirect_stdout(io.StringIO()):
+            builders, _, _ = self.stub_install(stack, memory)
+            installer.install(str(self.game))
+            self.assertTrue(mac.is_file())
+            self.assertIn('BigWorld=6000', ini.read_text(encoding='utf-8'))
+            memory[0] = 8 * 2**30 - 2**27   # an 8 GB machine as Windows shows it
+            installer.install(str(self.game))   # the earlier big map taken back, nothing of it built
+            self.assertEqual(builders['bigmap'].call_count, 1)
+            self.assertFalse(mac.exists())
+            self.assertEqual(ledger.Ledger(str(self.game)).owned_by(make_bigmap.OWNER), [])
+            self.assertIn('BigWorld=0', ini.read_text(encoding='utf-8'))
+            self.assertTrue((self.game / 'Mods/OBJECT/chute.SGO').is_file())   # the rest stays
+            memory[0] = 16 * 2**30 - 2**27
+            installer.install(str(self.game))   # memory enough again: built and written again
+            self.assertEqual(builders['bigmap'].call_count, 2)
+            self.assertTrue(mac.is_file())
+            self.assertIn('BigWorld=6000', ini.read_text(encoding='utf-8'))
+
+    def test_big_map_memory_threshold(self) -> None:
+        import make_bigmap
+        self.assertFalse(make_bigmap.fits(8 * 2**30 - 2**27))
+        self.assertTrue(make_bigmap.fits(16 * 2**30 - 2**27))
+        self.assertTrue(make_bigmap.fits(None))   # unreadable: installed as before
 
     def test_crilayla_literals_and_overlapping_runs(self) -> None:
         for length in (3, 4, 5, 6, 12, 13, 43, 44, 299, 300, 555, 1024):

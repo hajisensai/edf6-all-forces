@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <psapi.h>
 
 namespace crew {
 namespace {
@@ -163,6 +164,7 @@ void BigWorldProbe() noexcept {
     if(!probeFrom){probeFrom=ms;return;}
     if(ms-probeFrom<kProbeAfterMs)return;
     probed=true;
+    LogMemory("the map in");
     WidenMoveArea();
     RaiseSky();   // after the widening: it keeps the box's height as it found it
     constexpr int n=2*kProbeHalf+1;
@@ -188,6 +190,19 @@ void BigWorldProbe() noexcept {
         line[n]=0;
         Log("BIGWORLD probe z=%+6.0f %s",static_cast<float>(kProbeHalf-r)*kProbeStep,line);
     }
+}
+
+void LogMemory(const char* when) noexcept {
+    PROCESS_MEMORY_COUNTERS_EX process{};
+    MEMORYSTATUSEX machine{};
+    machine.dwLength=sizeof(machine);
+    if(!GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&process),sizeof(process)) ||
+       !GlobalMemoryStatusEx(&machine))return;
+    constexpr double kMb=1024.0*1024.0;
+    Log("MEMORY %s: the game %.0f MB committed (peak %.0f), %.0f MB in RAM; the machine %.0f of %.0f MB RAM free, "
+        "%.0f of %.0f MB commit free",when,process.PrivateUsage/kMb,process.PeakPagefileUsage/kMb,
+        process.WorkingSetSize/kMb,machine.ullAvailPhys/kMb,machine.ullTotalPhys/kMb,machine.ullAvailPageFile/kMb,
+        machine.ullTotalPageFile/kMb);
 }
 
 void ResetBigWorld() noexcept {
