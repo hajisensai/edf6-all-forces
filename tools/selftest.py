@@ -788,7 +788,7 @@ def sidecar_tub_holds_the_gunner() -> None:
     got = sm.check_tub(sm.parts_triangles(list(sm.sidecar_parts(2).values())), sm.SOLDIER_REACH)
     assert got['floor y'] == sm.FLOOR_Y == sm.FLOOR[1][1] == sm.GUNNER_POINT[1], got
     assert got['rays walled'] == 144 and got['faces seen from behind'] == 0, got
-    assert sm.RIM_Y - sm.FLOOR_Y >= 0.85, "the rim at a standing soldier's hips (koshi 0.888 over their feet)"
+    assert 0.60 <= sm.RIM_Y - sm.FLOOR_Y <= 0.70, "low side wall preserves leg space without enclosing the standing gunner"
     assert abs(sm.half_width(sm.GUNNER_POINT[2]) - sm.TUB_HALF_WIDTH) < 0.05, "the gunner at the tub's widest"
 
 
@@ -882,7 +882,7 @@ def gun_stabilizer_wired() -> None:
     for sig in ('kPlainAimStepCode', 'kAxisStepEndCode', 'kAxisMapCode', 'kAxisAngleWriteCode', 'kAxisRateWriteCode'):
         assert f'Matches(' in code and f',{sig},sizeof({sig}))' in code, sig
     assert 'StabStep(aim,cmd,nextAim);' in src('src/turretcam.cpp'), 'the AddSe step runs the stabilizer'
-    assert 'axisMap(axis,true);' in code, 'the bones take the held angle'
+    assert 'stab::Remap(' in code, 'the bones include the complete corrected displacement during remapping'
     assert '&StabFrame,v' in crew and 'ResetStabilizer();' in mission and 'InstallStabilizer();' in plugin
     assert 'src/stab.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/stab_check.cpp' in cmake
     assert '#include "../src/stab.h"' in src('tools/stab_check.cpp') and '#include "stab.h"' in code
@@ -1042,10 +1042,15 @@ def turret_aim_wired() -> None:
     assert 'tcam::Foreign(AutoTurretSteers(s.v,0),in,stick,kForeign)' in cam and 'tcam::BallisticAim(' in cam
     assert '!TurretCamSteers(v)' in src('src/nix.cpp'), 'nix.cpp: the hold stands aside for the turret camera'
     plugin, vini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    for key in ('PlayerJetLockByView', 'TurretAimHud'):
+    for key in ('PlayerJetLockByView', 'PlayerLockByView', 'TurretAimHud'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=1', vini, re.M) and key in readme, key
-    pick = src('src/stores.cpp').split('float ViewAngle(', 1)[1].split('\n}\n', 1)[0]
-    assert 'Cfg().playerJetLockByView' in pick and 'Rider::player' in pick
+    # The lock order is lockon.cpp's, every weapon's: the jets' stores by PlayerJetLockByView, the stock weapons the
+    # player holds by PlayerLockByView; "the player holds it" is the soldier's own weapon or a seat they ride.
+    lockon = src('src/lockon.cpp')
+    score = lockon.split('bool Score(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Cfg().playerJetLockByView' in score and 'Cfg().playerLockByView' in score and 'PlayerHolds(w)' in score
+    holds = lockon.split('bool PlayerHolds(', 1)[1].split('\n}\n', 1)[0]
+    assert 'Rider::player' in holds and 'IsPlayer(owner)' in holds and 'SeatHolds(seat,w)' in holds
 
 
 @test
@@ -1628,7 +1633,7 @@ def proteus_wired() -> None:
         if key not in ('ProteusRework', 'ProteusTwoSeats', 'ProteusDriverGun'):
             assert f'Fix("{key}"' in plugin or f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
     vt = re.search(r'kVtBig=(0x[0-9A-F]+)', code).group(1)
-    assert re.search(rf'\{{{vt},0x648F70,"BigBegaruta"\}}', crew), 'crew.cpp does not chain the Proteus input'
+    assert re.search(rf'\{{{vt},0x644350,"BigBegaruta",kFindSeat,4\}}', crew), 'crew.cpp must chain the Proteus player update'
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)' in cmake
     assert 'add_executable(proteus_check EXCLUDE_FROM_ALL tools/proteus_check.cpp)' in cmake
     assert re.findall(r'#include "([^"]+)"', check) == ['../src/proteus_logic.h'], 'proteus_check takes the rules alone'
@@ -1651,7 +1656,7 @@ def proteus_wired() -> None:
     assert 'Put<float>(w,kRate,u.rate[s]);Put<float>(w,kSpread,u.spread[s]);' in give and '1.0f' not in give
     assert 'u.active && u.ref.Is(v)' in code and 'u.ref.obj==' not in code, 'a Proteus unit by its live object, not its address'
     # A Proteus no player has ridden is not crewed (the helicopters' rule, crew.cpp Crew).
-    assert '(IsHelicopter(vehicle) || IsProteus(vehicle)) && !st.playerAt' in crew
+    assert 'if(!st.playerAt)return;' in crew, 'every unused parked vehicle waits for its first player driver'
     assert 'kProteusHoldCountdown*0.5f' in src('src/vehsound.cpp') and 'kHoldCountdown=kProteusHoldCountdown' in code
     # The damage call both read: the carrier's check takes the Proteus's redirect as intact (no install order between them).
     sub = src('src/subcarrier.cpp')
@@ -1917,6 +1922,107 @@ def gunship_cannon_round() -> None:
     assert '{L"","CANNON",StoreRole::bomb' in src('src/playerjet_board.inc'), 'src/playerjet_board.inc kSpecials CANNON'
     readme = src('README.md')
     assert make_jets.CANNON_FILE in readme and '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
+
+
+def _recoil_game(mission_weapon: str, mission_recoil: list, call_weapon: str, call_recoil: list,
+                 classic: bool, vehicle_weapon: str | None = None) -> object:
+    """A stand-in Root.cpk for autoturret/tools/npc_recoil.py: one mission object (one gun and an empty
+    mount, the object's own vehicle_setup naming the player gun) and its call (a vehicle setup under
+    Ammo_CustomParameter)."""
+    import struct
+    import sgo
+    def setup(weapon: str, recoil: list) -> list:
+        return [[1.0, 1.0], [0.1, 10.0], [[weapon, recoil, [20.0, 0.01, 0.1]], [0]]]
+    mission = {'game_object_durability': 100.0, 'mission_setup': setup(mission_weapon, mission_recoil),
+               'vehicle_setup': setup(vehicle_weapon or call_weapon, [0.0, 2.0]), 'resource': [mission_weapon]}
+    def n(v: object) -> object:   # DSGO numbers are all doubles (the empty mount is [0.0])
+        return dsgo.Node([n(c) for c in v]) if isinstance(v, list) else float(v) if isinstance(v, int) else v
+    if classic:
+        def f(v: object) -> object:
+            if isinstance(v, list):
+                return [f(c) for c in v]
+            return sgo.Float(struct.pack('<f', v)) if isinstance(v, float) else v
+        obj = sgo.write_depth_first(0x102, {k: f(v) for k, v in mission.items()})
+    else:
+        obj = dsgo.write(dsgo.Document(dsgo.Node([n(v) for v in mission.values()], dict(enumerate(mission))), []))
+    call_setup = n([[1.0, 1.0], [0.1, 10.0], [[call_weapon, call_recoil, [20.0, 0.01, 0.1]]]])
+    call = dsgo.write(dsgo.Document(dsgo.Node([n([1.0, 'app:/object/x.sgo', call_setup])],
+                                             {0: 'Ammo_CustomParameter'}), []))
+    files = {('OBJECT', 'X_AI.SGO'): obj, ('WEAPON', 'CALL.SGO'): call}
+
+    class Game:
+        def read(self, folder: str, name: str) -> bytes:
+            return files[(folder, name)]
+    return Game()
+
+
+@test
+def recoil_call_formats_agree() -> None:
+    """Both call formats expose the same mounts, including classic SGO's lossless Float wrapper."""
+    import recoil
+    import sgo
+    game = _recoil_game('app:/weapon/v_9tank_ai_cannon01.sgo', [0.0, 2.0],
+                        'app:/weapon/v_9tank_cannon01.sgo', [0.25, 0.5], True)
+    modern = game.read('WEAPON', 'CALL.SGO')
+    custom = recoil.plain(dsgo.parse(modern).root.get('Ammo_CustomParameter'))
+    classic = sgo.write_depth_first(258, {'Ammo_CustomParameter': recoil._as_sgo(custom)})
+    expected = [('v_9tank_cannon01.sgo', [0.25, 0.5])]
+    assert recoil.mounts_of(modern, 'DSGO call') == expected
+    assert recoil.mounts_of(classic, 'classic SGO call') == expected
+
+
+@test
+def npc_recoil_takes_the_player_call() -> None:
+    """autoturret/tools/npc_recoil.py: a mission mount takes the recoil of the same gun in the player's call, in
+    either file format; the AI copy of a gun (`_ai` part) and the object's own vehicle_setup gun count as the
+    same gun, any other gun is refused; build.py writes every file the table names, the NPC Titan included."""
+    import npc_recoil
+    import sgo
+    import titan_ai
+    for classic in (True, False):
+        for weapon in ('app:/weapon/v_9tank_ai_cannon01.sgo', 'app:/weapon/v_9tank_cannon01.sgo'):
+            game = _recoil_game(weapon, [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo', [0.25, 0.5], classic)
+            with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+                out = npc_recoil.build('X_AI.SGO', game=game)
+            v = sgo.load(data=out)
+            assert v['mission_setup'][2][0][1] == [0.25, 0.5], v['mission_setup']
+            assert v['mission_setup'][2][1] == [0] and v['vehicle_setup'][2][0][1] == [0.0, 2.0], v
+            assert out[:4] == (b'SGO\0' if classic else b'DSGO')
+        # The object's vehicle_setup names the player gun when the AI gun's name does not carry it.
+        game = _recoil_game('app:/weapon/v_9_tank_ai_cannon01.sgo', [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo',
+                            [0.25, 0.5], classic)
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            assert sgo.load(data=npc_recoil.build('X_AI.SGO', game=game))['mission_setup'][2][0][1] == [0.25, 0.5]
+        # The AI copy's name alone (`_ai` part) is enough when the object's vehicle_setup names another gun.
+        game = _recoil_game('app:/weapon/v_9tank_ai_cannon01.sgo', [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo',
+                            [0.25, 0.5], classic, vehicle_weapon='app:/weapon/v_7other.sgo')
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            assert sgo.load(data=npc_recoil.build('X_AI.SGO', game=game))['mission_setup'][2][0][1] == [0.25, 0.5]
+        # A tagged spec (the Epsilon's ['BodyRecoil', [push, kick]]) is taken whole.
+        game = _recoil_game('app:/weapon/v_9tank_ai_cannon01.sgo', ['BodyRecoil', [0.0, 0.05]],
+                            'app:/weapon/v_9tank_cannon01.sgo', ['BodyRecoil', [0.1, 0.05]], classic)
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            got = sgo.load(data=npc_recoil.build('X_AI.SGO', game=game))['mission_setup'][2][0][1]
+        assert got[0] == 'BodyRecoil' and [round(x, 6) for x in got[1]] == [0.1, 0.05], got   # float32 in both formats
+        # Another gun in the call's slot (and in the object's own vehicle_setup): refused, not overwritten.
+        game = _recoil_game('app:/weapon/v_8gun.sgo', [0.0, 2.0], 'app:/weapon/v_9tank_cannon01.sgo', [0.25, 0.5], classic,
+                            vehicle_weapon='app:/weapon/v_8gun.sgo')
+        with patched(npc_recoil, PLAYER_CALL={'X_AI.SGO': 'CALL.SGO'}):
+            try:
+                npc_recoil.build('X_AI.SGO', game=game)
+            except SystemExit:
+                pass
+            else:
+                raise AssertionError('a mount of another gun took the call recoil')
+    # The range's own placeable vehicles follow the same rule (testrange/gen.py vehicle_sgo).
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert set(gen.PLAYER_CALLS) <= set(gen.DERIVED) - set(gen.JETS), 'gen.PLAYER_CALLS names a vehicle the range does not derive'
+    body = src('testrange/gen.py').split('def vehicle_sgo(', 1)[1].split('\ndef ', 1)[0]
+    assert body.count('_with_player_recoil(game, sgo_name,') == 2, 'gen.vehicle_sgo: GROUND_MISSION and DERIVED both take the player recoil'
+    assert titan_ai.NAME in npc_recoil.PLAYER_CALL, 'build.py writes the NPC Titan through npc_recoil.PLAYER_CALL'
+    code = src('autoturret/tools/build.py')
+    assert 'for name in npc_recoil.PLAYER_CALL:' in code and 'titan_ai.build() if name == titan_ai.NAME' in code
 
 
 @test
@@ -3296,7 +3402,7 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp'):
+                'src/proteus.cpp', 'src/npcai.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
@@ -3309,7 +3415,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -3443,6 +3549,146 @@ def split_missile_wired() -> None:
     assert 'src/splitmissile.cpp' in src('CMakeLists.txt')
     assert 'add_test(NAME split_fuse COMMAND split_fuse_test)' in src('CMakeLists.txt')
     assert 'docs/split-missile-re.md' in sm and os.path.exists(os.path.join(ROOT, 'docs', 'split-missile-re.md'))
+
+
+@test
+def stock_guidance_wired() -> None:
+    """Every stock homing round steers by PN at its own stock strength (guidance.cpp: the six steering calls of
+    MissileBullet01/02 and HomingLaserBullet01 redirected, MissileBullet02's gate result kept); the lock code is one
+    for every weapon (lockon.cpp, stores.cpp has none left); the Tempest's TV shares the map's one camera hook and one
+    soldier hold; the settings default on and are documented; CTest flies the law (docs/guidance-re.md)."""
+    g = src('src/guidance.cpp')
+    for site, target in (('0x26AA85', '0x269AF0'), ('0x26AA76', '0x269EE0'), ('0x26ECCA', '0x26D4B0'),
+                         ('0x26ECBE', '0x26D8D0'), ('0x250918', '0x24FA60'), ('0x25090B', '0x24FE80')):
+        assert site in g and target in g, (site, target)
+    assert 'RedirectCall(image+kind.site[t],image+kind.target[t],kHooks[k][t],changed)' in g
+    assert 'return t>=At<std::uint32_t>(static_cast<unsigned char*>(b),kKinds[1].delay);' in g, 'MB02 keeps its gate result'
+    assert 'own0*turn' in g, 'type 1: the stock turn at its speed'
+    assert 'pn::Lateral(pos,vel,aim,tv,nav,accel,a);' in g, 'type 2: the stock thrust'
+    assert 'At<std::uint32_t>(b,k.delay)==kNoStockHoming' in g, "the plugin's own missiles left to missile.cpp"
+    assert 'pn::Lateral(' in src('src/missile.cpp'), 'one PN law'
+    stores = src('src/stores.cpp')
+    assert '0x691310' not in stores and '0x68FF60' not in stores, "the lock code is lockon.cpp's"
+    assert 'InstallLockon();' in src('src/plugin.cpp') and 'InstallGuidance();' in src('src/plugin.cpp')
+    m = src('src/map.cpp')
+    assert 'return TvFrame(human,open && game.open,TvRead(human)) || open;' in m, 'one hold shim'
+    assert 'TvView(&tvHuman,tvEye,tvLook)' in m, 'the TV through the map camera hook'
+    assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
+    assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
+    assert 'if(!TvSteer(static_cast<unsigned char*>(b)) && Cfg().enabled)Guide(' in src('src/missile.cpp')
+    crew, vini, readme = src('src/crew.h'), src('EDF6VehicleCrew.ini'), src('README.md')
+    for field, key in (('stockMissilePN', 'StockMissilePN'), ('playerLockByView', 'PlayerLockByView'),
+                       ('tempestTv', 'TempestTv')):
+        assert f'bool {field}=true;' in crew and re.search(rf'^{key}=1', vini, re.M) and key in readme, key
+    tvg = src('src/tvguide.cpp')
+    assert 'else if(in.fire && !tv.boost){tv.boost=true;' in tvg and 'DetonateRound' not in tvg, 'fire boosts, once'
+    for key in ('StockMissileNav', 'TempestTvMouseSpeed', 'TempestTvBoost'):
+        assert re.search(rf'^{key}=', vini, re.M) and key in readme, key
+    cm = src('CMakeLists.txt')
+    for f in ('src/guidance.cpp', 'src/lockon.cpp', 'src/tvguide.cpp'):
+        assert f in cm, f
+    assert 'add_test(NAME pn COMMAND pn_test)' in cm
+    for doc in ('guidance-re.md', 'lockon-re.md', 'tvguide-re.md'):
+        assert os.path.exists(os.path.join(ROOT, 'docs', doc)), doc
+
+
+@test
+def npc_ai_wired() -> None:
+    """The friendly soldiers' own AI (src/npcai.cpp, docs/npc-ai-design.md): its Think hook runs the stock Think first and
+    rewrites the intent block after it (§3.2), is installed with the inputs (after every plugin) and reset per mission;
+    a script's unit (§4.3) keeps its stock moves (the scripted branch writes no move); only this machine's soldiers are
+    driven; its ini keys are read, range-checked, shipped and documented; its offline check runs under CTest."""
+    code, crew, mission, cmake = src('src/npcai.cpp'), src('src/crew.cpp'), src('src/mission.cpp'), src('CMakeLists.txt')
+    plugin, ini, readme, doc = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md'), src('docs/npc-ai-design.md')
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('nextThink[I](human,dt);') < hook.index('Think(static_cast<unsigned char*>(human),I)'), 'stock Think first'
+    assert '!Cfg().customNpcAi' in hook, 'CustomNpcAi=0 must leave every soldier stock'
+    scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
+    for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
+        assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger]=0;h[kTrigger+1]=0;' in veto, \
+        'a scripted unit: the trigger (both hands) only taken off'
+    think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert '!IsOnlineAuthority(h)' in think and 'IsAnyPlayer(h)' in think, "only this machine's NPC soldiers (online_authority.h)"
+    assert 'npc::Scripted(control) ? Scripted(' in think
+    ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
+    assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')
+    assert 'ResetNpcAi();' in mission and 'src/npcai.cpp' in cmake
+    assert 'EXCLUDE_FROM_ALL tools/npc_ai_check.cpp' in cmake and 'npc_ai_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+    for key, default in (('CustomNpcAi', '1'), ('NpcFireLane', '1'), ('NpcLaneWidth', '2.5'), ('NpcLaneLength', '150'),
+                         ('NpcFlankDeg', '45'), ('NpcWeaponSwitch', '1'), ('NpcEngageShare', '0.85'), ('NpcEvade', '1'),
+                         ('NpcDangerRange', '15'), ('NpcGrabRange', '4'), ('NpcCrowd', '1.5'), ('NpcRollSec', '2.5'),
+                         ('NpcRetreatHp', '0.3'), ('NpcLeash', '40')):
+        assert f'L"{key}"' in plugin, key
+        assert re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    for key in ('NpcLaneWidth', 'NpcLaneLength', 'NpcFlankDeg', 'NpcEngageShare', 'NpcDangerRange', 'NpcGrabRange', 'NpcCrowd',
+                'NpcRollSec', 'NpcRetreatHp', 'NpcLeash', 'TankPostHold', 'TankReverseMax'):
+        assert f'Fix("{key}"' in plugin, f'{key} is range-checked'
+    # The tanks' post (§8): seat 0's stick written before the stock input reads it; a route's tank and a remote room's
+    # client left alone; its keys shipped and documented.
+    post = src('src/npcpost.cpp')
+    hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
+    assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(At<const void*>(v,kRoute))' in body and 'if(!OnlineHostOnly())return;' in body
+    assert body.index('StockDriving(seat)') < body.index('Put<float>(seat,kSeatSteer')
+    assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
+    # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
+    # SetFollow and its replication slot.
+    hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
+    assert hook.index('PreThink(static_cast<unsigned char*>(human))') < hook.index('nextThink[I](human,dt);')
+    pre = code.split('void PreThink(unsigned char* h) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!OnlineHostOnly())return;' in pre and 'kAutoResurrect' in pre
+    follow = code.split('void Follow(unsigned char* h,unsigned char* leader) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'image+kSetFollow' in follow and 'vt[kSlotNetFollow]==image+kNetFollow' in follow
+    for key, default in (('NpcSquadSuccession', '1'), ('NpcSquadMin', '2'), ('NpcSquadMax', '8'), ('NpcSquadJoinRange', '150')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    # The squads on the map (§5.4, §6): a script's squad takes no order; a dismissal clears +0x540 (or the stock takes the
+    # squad back at once) and starts the cooldown, whose end puts +0x540 back; vehicles take only their three orders.
+    cmd = code.split('bool SquadCommand(const void* leader,const Command& c) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'npc::Scripted(q->control)' in cmd.split('switch', 1)[0], "a script's squad takes no order"
+    dismiss = cmd.split('case Order::dismiss:', 1)[1].split('break;', 1)[0]
+    assert dismiss.index('top[kAutoFollow]=0;') < dismiss.index('Follow(top,nullptr);') < dismiss.index('cooldowns.Start(')
+    see = code.split('Squad* SeeSquad(', 1)[1].split('\n}\n', 1)[0]
+    assert 'cooldowns.Ready(SquadKey(top),ms)' in see and 'top[kAutoFollow]=q->autoFollow;' in see
+    mapc = src('src/mapcmd.cpp')
+    takes = mapc.split('bool Takes(const Entry& e,Order o) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'if(e.u.locked)return false;' in takes and 'mapcmd::VehicleOrder(o)' in takes
+    assert 'if(!Takes(e,cmd.order)){++*skipped;continue;}' in mapc
+    for key, default in (('NpcGuardRadius', '15'), ('NpcFreeRange', '120'), ('NpcRecruitCooldownSec', '60')):
+        assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    # The mark (§6.3): its key read on foot only (in a vehicle Q is the vehicle's: Proteus, the jets, the turrets), drawn
+    # by the HUD; the focus order needs it.
+    tick = code.split('void MarkTick() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey)' in tick
+    assert 'NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
+    assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
+    for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    # Boarding (§7): never seat 0; one strong reference taken before RideVehicle (it lets one go at 0x57690D); only a
+    # seated soldier kicked off; the gunners only on a vehicle whose slot 70 is the stock seat fire, before its input.
+    board = code.split('bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'for(unsigned k=1;' in board, 'seat 0 stays the NPC driver\'s'
+    ride = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert ride.index('_InterlockedIncrement(') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
+    off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
+    gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'IsSoldierClass(rider)' in gun
+    inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
+    assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
+    assert f'L"NpcBoarding"' in plugin and re.search(r'^NpcBoarding=1\s*$', ini, re.M) and 'NpcBoarding' in readme and 'NpcBoarding' in doc
+    # A script's squad let go (§4.4): released once by npc::Step after the settle time, recruitable only with
+    # ScriptNpcRecruit and never while a dismissal's cooldown keeps +0x540 clear.
+    assert 'npc::Step(q->script,held,ms,' in see and 'const bool held=Routed(top)' in see, 'released when its route / fixed position ends (not a direction order)'
+    assert 'Cfg().scriptNpcRecruit && !q->dismissed && !top[kAutoFollow]' in see
+    for key, default in (('ScriptNpcRecruit', '1'), ('ScriptNpcSettleSec', '5')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
+    for key, default in (('TankReturnToPost', '1'), ('TankPostHold', '6'), ('TankReverseMax', '30')):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
 
 
 @test

@@ -173,6 +173,9 @@ def build(root: str) -> dict[str, bytes]:
     """Every file this tool writes, {path under Mods: bytes}, made from the game's Root.cpk (only read)."""
     game = vc.Game(root)
     out: dict[str, bytes] = {}
+    import aircraft_collision
+    for name, data in aircraft_collision.assets(game).items():
+        out[f'OBJECT/{name}'] = data
     for name, data in vc.jet_guns(game).items():
         out[f'WEAPON/{name}'] = data
     for name, data in vc.portal_lasers(game).items():
@@ -218,7 +221,9 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
 
 def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
-    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, CANNON_FILE, *HELIS, MODEL_FILE, *MODEL_FILES, *vc.PORTAL_LASER_FILES]
+    import aircraft_collision
+    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, CANNON_FILE, *HELIS, MODEL_FILE, *MODEL_FILES,
+               *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values()]
     return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in vc.JET_WEAPON_FILES]
 
 

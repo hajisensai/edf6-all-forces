@@ -48,6 +48,7 @@ using FindPartFn=std::int32_t(__fastcall*)(void*,const wchar_t*);
 PhysicsFn nextPhysics=nullptr;
 MessageFn nextMessage=nullptr;
 bool physicsOk=false,messageOk=false,dieOk=false,bodyPartOk=false;
+bool airframeOk=false;
 // The death message's data: the vehicle handler's 0x1000000F case reads only the vehicle (0x6329B0(vehicle));
 // zeros, not garbage, should anything read it.
 alignas(16) unsigned char noData[0xA0]{};
@@ -61,6 +62,91 @@ const unsigned char kWaterCmpSig[]={0x81,0xFA,0x25,0x00,0x00,0x10};   // 0x652E8
 // 0x6329B0: mov [rsp+8],rbx; push rdi; sub rsp,20h; imul rax,[rcx+618h],340h (the seat loop)
 const unsigned char kDieSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x69,0x81,0x18,0x06,0x00,0x00,0x40,0x03,0x00,0x00};
 const unsigned char kFindPartSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x56,0x48,0x83,0xEC,0x50};
+
+// 0x656E90's only shape creation call. rdi is vehicle+0x1580 (its movement
+// object), after the SGO movement/mark has been loaded. The ragdoll was already
+// constructed by VehicleBase; its part records are the ones the crash step
+// 0x650119 reads (+0x1398, stride 0xC0, body wrapper +0x50).
+constexpr std::size_t kShapeCall=0x65713C,kMakeBox=0x11A63F0,kGetShape=0x11B15E0;
+constexpr std::size_t kAddRef=0x978F20,kRelease=0x978FB0,kCompoundVtable=0x18A9860;
+constexpr std::size_t kHelicopterBase=0x17DF790; // constructor 0x64E420, before 506's final vtable
+constexpr std::uint64_t kAirframeMagic=0x4544463641495231ULL; // pylib/aircraft_collision.py
+const unsigned char kShapeCallCode[]={0xE8,0xAF,0xF2,0xB4,0x00};
+const unsigned char kGetShapeCode[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x01,0x00,0x00};
+using MakeBoxFn=bool(*)(void**,const float*);
+using GetShapeFn=void*(*)(void*);
+using RefFn=void(*)(void*);
+
+void* AirframeShape(unsigned char* v) noexcept {
+    __try {
+        if(!Readable(v,kSpeedGain+4))return nullptr;
+        // Construction still has HelicopterBase's vtable: the derived 506
+        // vtable is only assigned by 0x61B5B2 AFTER this constructor returns.
+        // BodyOf/BodyMark intentionally reject that intermediate identity.
+        const auto vt=At<const unsigned char*>(v,0);
+        if(vt!=image+kHelicopterBase && vt!=image+kHeli506)return nullptr;
+        const float mark=At<float>(v,kSpeedGain);
+        bool aircraft=false;
+        for(const auto& r:kMarks)
+            if((r.body==PluginBody::jet || r.body==PluginBody::playerJet) && mark>=r.first && mark<=r.last)
+                aircraft=true;
+        if(!aircraft)return nullptr;
+        // BindDependency indexes model-side names; use the same fuselage names
+        // as FixBodyPart506. The userData tag guards old packs/Primer creatures:
+        // never substitute an unconverted stock helicopter ragdoll for the box.
+        for(const wchar_t* bone:kFuselageBones) {
+            const auto part=reinterpret_cast<FindPartFn>(image+kFindPart)(v+kParts,bone);
+            if(part<0)continue;
+            const auto count=At<std::size_t>(v,0x13A8); // parts+0x88, 0x6E82F3
+            if(count>64 || std::size_t(part)>=count)return nullptr;
+            const auto base=At<unsigned char*>(v,0x1398);
+            if(!base || !Readable(base+std::size_t(part)*0xC0,0x58))return nullptr;
+            void* proxy=At<void*>(base+std::size_t(part)*0xC0,0x50);
+            if(!proxy)return nullptr;
+            auto* shape=static_cast<unsigned char*>(reinterpret_cast<GetShapeFn>(image+kGetShape)(proxy));
+            // hknpShape native header: ctor 0xD89410 / copy 0xD89340: type
+            // +0x18, convexRadius +0x20, userData +0x28 (compact SHKT: +12).
+            if(!Readable(shape,0x30) || At<const unsigned char*>(shape,0)!=image+kCompoundVtable ||
+               At<std::uint64_t>(shape,0x28)!=kAirframeMagic)return nullptr;
+            return shape;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return nullptr;
+}
+
+bool __fastcall MakeAirframe(void** out,const float* extents,unsigned char* v) {
+    if(void* shape=AirframeShape(v)) {
+        // Match MakeBox's ownership contract: out owns one reference. The stock
+        // body creator separately retains it in both cinfo shape references.
+        reinterpret_cast<RefFn>(image+kAddRef)(shape);
+        void* old=*out;*out=shape;
+        if(old)reinterpret_cast<RefFn>(image+kRelease)(old);
+        Log("BODY506 airframe compound: vehicle=%p mark=%.0f shape=%p",v,At<float>(v,kSpeedGain),shape);
+        return true;
+    }
+    // One diagnostic per legacy/unsupported aircraft (not stock helicopters).
+    const float mark=At<float>(v,kSpeedGain);
+    if((mark>=7001.0f && mark<=7099.0f) || (mark>=7201.0f && mark<=7299.0f))
+        Log("BODY506 airframe fallback: vehicle=%p mark=%.0f (no tagged compound; stock box retained)",v,mark);
+    return reinterpret_cast<MakeBoxFn>(image+kMakeBox)(out,extents);
+}
+
+bool InstallAirframeShape() noexcept {
+    if(!bodyPartOk || !Matches(kShapeCall,kShapeCallCode,sizeof(kShapeCallCode)) ||
+       !Matches(kGetShape,kGetShapeCode,sizeof(kGetShapeCode)))return false;
+    // Called with rcx=shape handle, rdx=box extents. Tail-jump preserves the
+    // caller's shadow space and return address; rdi is a preserved register.
+    unsigned char stub[]={0x4C,0x8D,0x87,0x80,0xEA,0xFF,0xFF, // lea r8,[rdi-1580h]
+                          0xFF,0x25,0,0,0,0,0,0,0,0,0,0,0,0};
+    const auto target=reinterpret_cast<std::uintptr_t>(&MakeAirframe);
+    std::memcpy(stub+13,&target,8);
+    void* page=AllocateNearCode(image+kShapeCall,stub,sizeof(stub));
+    if(!page)return false;
+    const auto rel=static_cast<std::int32_t>(static_cast<unsigned char*>(page)-(image+kShapeCall+5));
+    unsigned char call[]={0xE8,0,0,0,0};std::memcpy(call+1,&rel,4);
+    if(edf::PatchCode(image+kShapeCall,kShapeCallCode,call,sizeof(call)))return true;
+    VirtualFree(page,0,MEM_RELEASE);return false;
+}
 
 // A jet is the player's while they fly it (or it comes down for them, playerjet.cpp): its step first, which says no
 // for every jet it does not fly.
@@ -284,11 +370,12 @@ bool InstallBody506() noexcept {
         // The death goes through the 506's own message slot (hooked or not) to the stock handler.
         dieOk=messageOk && Matches(kVehicleDie,kDieSig,sizeof(kDieSig));
         bodyPartOk=Matches(kFindPart,kFindPartSig,sizeof(kFindPartSig));
+        airframeOk=InstallAirframeShape();
         unsigned char noClamp[sizeof(kCeilingClampCode)];
         std::memcpy(noClamp,kCeilingClampCode,sizeof(noClamp));
         noClamp[kCeilingJump]=0xEB;
         ceilingOff=edf::PatchCode(image+kCeilingClamp,kCeilingClampCode,noClamp,sizeof(noClamp));
-        Log("HOOK body506 physics=%d messages=%d die=%d bodyPart=%d ceilingOff=%d",physicsOk,messageOk,dieOk,bodyPartOk,ceilingOff);
+        Log("HOOK body506 physics=%d messages=%d die=%d bodyPart=%d ceilingOff=%d airframe=%d",physicsOk,messageOk,dieOk,bodyPartOk,ceilingOff,airframeOk);
         return physicsOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }

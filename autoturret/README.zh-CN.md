@@ -24,6 +24,7 @@
 | KG7 玻尔斯、玻尔斯 B（DLC） | 对地模式自瞄：优先打地面目标，按抛物线瞄准，保持原版触地爆炸。耐久 ×2，爆炸半径 4m → 6m，爆炸可以破坏建筑。 |
 | 泰坦（全部，含 DLC 副炮） | 仅插件：两门副炮自动瞄准；炮手座没有玩家时还会自动开火，算驾驶员（玩家或 NPC）开的。主炮不动。 |
 | NPC 泰坦（如第 64 关「殿军」） | 数据：原版 NPC 泰坦的两个副炮位是空的；`build.py` 把玩家泰坦的两门副炮装上，再由插件瞄准、开火。 |
+| 关卡里放的坦克和机车（NPC 泰坦、艾普瑟隆、布莱克战车、霸里亚斯、尼库林格；可上车的泰坦、布莱克战车、奔驰装甲机车） | 数据：原版关卡文件把开炮时的车体后坐力（车被往后推、前后晃）写成 0 或与玩家版不同；`build.py` 让每个炮位用玩家呼叫版同一门炮的值（`tools/npc_recoil.py`，逆向见 `docs/recoil-re.md`）。 |
 | 游骑兵带炮手座的坦克（Vehicle403） | 仅插件：两挺副机枪，同上。单座坦克（空爆兵的、Vehicle601）没有副炮。 |
 | 喀秋莎火箭炮车（EDF6VehicleCrew 的载具，`tools/make_katyusha.py`） | 仅插件，**只瞄 NPC 开的车**：发射架带「高抛」标记（7303），优先打地面目标，走**高抛弹道**：仰角取两个解里大于 45° 的那个；高抛解超出发射架的仰角上限（80°）时才退回低伸解（目标太近）。玩家自己开的喀秋莎插件完全不碰（`PlayerLofted`）：游戏的镜头跟着座位的瞄准轴走，插件转瞄准轴就是替玩家转镜头（以前抬到 75°～79° 时镜头一直看天）；玩家用镜头瞄地面点，由 EDF6VehicleCrew 只把发射架骨骼抬到高抛仰角（`src/katyusha.cpp`）。 |
 
@@ -68,7 +69,7 @@
    python autoturret\tools\build.py install
    ```
 
-   它在 `Mods\WEAPON\` 下写这几辆载具自己的 call 和炮文件，在 `Mods\OBJECT\` 下写关卡克卜勒和 NPC 泰坦，以及 `WEAPONTEXT.*.SGO` 里它们的 8 行说明；只读取游戏的 `Root.cpk`，不修改它。游戏运行时它会拒绝执行；`Mods` 里已有别的 mod 放的同名文件时不会覆盖（`--force` 先备份再覆盖）。写了什么、替换了什么记在 `Mods\.edf6at_data.json`（被替换的文件备份在 `Mods\.edf6at_backup\`）。装了别的会整份替换 `WEAPONTEXT` 的 mod 之后要再运行一次。`--no-text` 不动文本表；`check` 查看安装状态。
+   它在 `Mods\WEAPON\` 下写这几辆载具自己的 call 和炮文件，在 `Mods\OBJECT\` 下写关卡克卜勒和关卡里的坦克（含 NPC 泰坦），以及 `WEAPONTEXT.*.SGO` 里它们的 8 行说明；只读取游戏的 `Root.cpk`，不修改它。游戏运行时它会拒绝执行；`Mods` 里已有别的 mod 放的同名文件时不会覆盖（`--force` 先备份再覆盖）。写了什么、替换了什么记在 `Mods\.edf6at_data.json`（被替换的文件备份在 `Mods\.edf6at_backup\`）。装了别的会整份替换 `WEAPONTEXT` 的 mod 之后要再运行一次。`--no-text` 不动文本表；`check` 查看安装状态。
 
 卸载：游戏关闭时运行 `python autoturret\tools\build.py uninstall`，再删掉插件。它恢复被替换的文件、删除自己新建的文件，并把 `WEAPONTEXT` 里那 8 行说明恢复成安装前的原文；别的 mod 的文件和行保持不动（安装后被别人改过的会原样保留，加 `--force` 才恢复）。旧版 `build.py` 装的（没有记录）也能卸，只删除和生成结果逐字节相同的部分。只删插件也安全：数据没有插件照样能用。设置在 `EDF6AutoTurret.ini`，游戏运行中保存即生效；`Debug=1` 会把炮塔的行为写进 `EDF6AutoTurret.log`。
 

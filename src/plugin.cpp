@@ -15,8 +15,10 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crew.h"
+#include "lockon.h"
 #include "hudscale.h"
 #include "hudtext.h"
+#include "gunnerrecoil.h"
 #include "memory.h"
 #include "subcarrier.h"
 #include "edf/host.h"
@@ -238,6 +240,27 @@ void Validate(Config& n) noexcept {
     Fix("CentipedeLinkRange",n.centipedeLinkRange,10.0f,2000.0f);
     Fix("CentipedeWoundDamage",n.centipedeWoundDamage,1.0f,20.0f);
     Fix("PrimerBlood",n.primerBlood,0.0f,5.0f);
+    Fix("NpcLaneWidth",n.npcLaneWidth,0.5f,20.0f);
+    Fix("NpcLaneLength",n.npcLaneLength,10.0f,1000.0f);
+    Fix("NpcFlankDeg",n.npcFlankDeg,10.0f,80.0f);
+    Fix("NpcEngageShare",n.npcEngageShare,0.2f,1.0f);
+    Fix("NpcDangerRange",n.npcDangerRange,2.0f,100.0f);
+    Fix("NpcGrabRange",n.npcGrabRange,0.5f,n.npcDangerRange);
+    Fix("NpcCrowd",n.npcCrowd,0.2f,20.0f);
+    Fix("NpcRollSec",n.npcRollSec,0.5f,30.0f);
+    Fix("NpcRetreatHp",n.npcRetreatHp,0.0f,0.9f);
+    Fix("NpcLeash",n.npcLeash,5.0f,500.0f);
+    n.npcSquadMin=static_cast<int>(FixInt("NpcSquadMin",n.npcSquadMin,1,16));
+    n.npcSquadMax=static_cast<int>(FixInt("NpcSquadMax",n.npcSquadMax,n.npcSquadMin,32));
+    Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
+    n.npcMarkKey=static_cast<int>(FixInt("NpcMarkKey",n.npcMarkKey,0,254));
+    Fix("NpcMarkCone",n.npcMarkCone,1.0f,45.0f);
+    Fix("NpcGuardRadius",n.npcGuardRadius,2.0f,500.0f);
+    Fix("NpcFreeRange",n.npcFreeRange,10.0f,2000.0f);
+    Fix("NpcRecruitCooldownSec",n.npcRecruitCooldownSec,0.0f,3600.0f);
+    Fix("ScriptNpcSettleSec",n.scriptNpcSettleSec,0.0f,600.0f);
+    Fix("TankPostHold",n.tankPostHold,1.0f,100.0f);
+    Fix("TankReverseMax",n.tankReverseMax,0.0f,200.0f);
 }
 
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
@@ -315,6 +338,15 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
+    n.stockMissilePN=ReadBool(L"StockMissilePN",n.stockMissilePN);
+    n.stockMissileNav=ReadFloat(L"StockMissileNav",n.stockMissileNav);
+    if(!(n.stockMissileNav>=2.0f && n.stockMissileNav<=6.0f))n.stockMissileNav=3.0f;
+    n.playerLockByView=ReadBool(L"PlayerLockByView",n.playerLockByView);
+    n.tempestTv=ReadBool(L"TempestTv",n.tempestTv);
+    n.tempestTvMouseSpeed=ReadFloat(L"TempestTvMouseSpeed",n.tempestTvMouseSpeed);
+    if(!(n.tempestTvMouseSpeed>=0.1f && n.tempestTvMouseSpeed<=5.0f))n.tempestTvMouseSpeed=1.0f;
+    n.tempestTvBoost=ReadFloat(L"TempestTvBoost",n.tempestTvBoost);
+    if(!(n.tempestTvBoost>=1.0f && n.tempestTvBoost<=10.0f))n.tempestTvBoost=3.0f;
     n.vehicleHud=ReadBool(L"VehicleHud",n.vehicleHud);
     n.vehicleHudCount=ReadInt(L"VehicleHudCount",static_cast<DWORD>(n.vehicleHudCount));
     n.vehicleHudRange=ReadFloat(L"VehicleHudRange",n.vehicleHudRange);
@@ -464,6 +496,35 @@ void LoadConfig() noexcept {
     n.centipedeLinkRange=ReadFloat(L"CentipedeLinkRange",n.centipedeLinkRange);
     n.centipedeWoundDamage=ReadFloat(L"CentipedeWoundDamage",n.centipedeWoundDamage);
     n.primerBlood=ReadFloat(L"PrimerBlood",n.primerBlood);
+    n.customNpcAi=ReadBool(L"CustomNpcAi",n.customNpcAi);
+    n.npcFireLane=ReadBool(L"NpcFireLane",n.npcFireLane);
+    n.npcLaneWidth=ReadFloat(L"NpcLaneWidth",n.npcLaneWidth);
+    n.npcLaneLength=ReadFloat(L"NpcLaneLength",n.npcLaneLength);
+    n.npcFlankDeg=ReadFloat(L"NpcFlankDeg",n.npcFlankDeg);
+    n.npcWeaponSwitch=ReadBool(L"NpcWeaponSwitch",n.npcWeaponSwitch);
+    n.npcEngageShare=ReadFloat(L"NpcEngageShare",n.npcEngageShare);
+    n.npcEvade=ReadBool(L"NpcEvade",n.npcEvade);
+    n.npcDangerRange=ReadFloat(L"NpcDangerRange",n.npcDangerRange);
+    n.npcGrabRange=ReadFloat(L"NpcGrabRange",n.npcGrabRange);
+    n.npcCrowd=ReadFloat(L"NpcCrowd",n.npcCrowd);
+    n.npcRollSec=ReadFloat(L"NpcRollSec",n.npcRollSec);
+    n.npcRetreatHp=ReadFloat(L"NpcRetreatHp",n.npcRetreatHp);
+    n.npcLeash=ReadFloat(L"NpcLeash",n.npcLeash);
+    n.npcSquadSuccession=ReadBool(L"NpcSquadSuccession",n.npcSquadSuccession);
+    n.npcSquadMin=ReadInt(L"NpcSquadMin",static_cast<DWORD>(n.npcSquadMin));
+    n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
+    n.npcSquadJoinRange=ReadFloat(L"NpcSquadJoinRange",n.npcSquadJoinRange);
+    n.npcBoarding=ReadBool(L"NpcBoarding",n.npcBoarding);
+    n.npcMarkKey=ReadInt(L"NpcMarkKey",static_cast<DWORD>(n.npcMarkKey));
+    n.npcMarkCone=ReadFloat(L"NpcMarkCone",n.npcMarkCone);
+    n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
+    n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
+    n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
+    n.scriptNpcRecruit=ReadBool(L"ScriptNpcRecruit",n.scriptNpcRecruit);
+    n.scriptNpcSettleSec=ReadFloat(L"ScriptNpcSettleSec",n.scriptNpcSettleSec);
+    n.tankReturnToPost=ReadBool(L"TankReturnToPost",n.tankReturnToPost);
+    n.tankPostHold=ReadFloat(L"TankPostHold",n.tankPostHold);
+    n.tankReverseMax=ReadFloat(L"TankReverseMax",n.tankReverseMax);
     Validate(n);
     IgnoreRetired();
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
@@ -494,6 +555,14 @@ void LoadConfig() noexcept {
         n.jetSortieSec,n.jetAirRaider,n.jetMissionStrike,n.throwDrones);
     Log("CONFIG primer=%d hpScale=%.2f fire=%d trace=%d centipede linkMax=%d linkRange=%.0f woundDamage=%.1f blood=%.2f",n.primer,
         n.primerHpScale,n.primerFire,n.primerTrace,n.centipedeLinkMax,n.centipedeLinkRange,n.centipedeWoundDamage,n.primerBlood);
+    Log("CONFIG customNpcAi=%d lane=%d width=%.1f length=%.0f flank=%.0f switch=%d engage=%.2f evade=%d danger=%.0f grab=%.1f crowd=%.1f roll=%.1fs retreatHp=%.2f leash=%.0f",
+        n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
+        n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
+    Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
+    Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding);
+    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
+    Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
+    Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
@@ -521,8 +590,9 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
     Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
-    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d",n.vehicleWelding,n.giantContactCap,
-        n.splitMissileSurface);
+    Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d tempestTv=%d (mouse %.1f, boost x%.1f)",
+        n.vehicleWelding,n.giantContactCap,n.splitMissileSurface,n.stockMissilePN,n.stockMissileNav,n.playerLockByView,
+        n.tempestTv,n.tempestTvMouseSpeed,n.tempestTvBoost);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
 }
@@ -714,6 +784,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallProteus();       // chain both aims after the turret camera and plain-aim stabilizer hooks
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
+    InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)
     InstallLaser();
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
@@ -725,7 +796,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
+    InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
+    InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks

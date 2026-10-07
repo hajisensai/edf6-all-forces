@@ -18,7 +18,7 @@
 //    goes back to idle). A guard call works round its marker, a follow call round the player. Each
 //    modded machine does this when it replays the call; online from the call's own heading (message 9's). The local
 //    picker changes only a local player's call; online the pick goes out in the call's seed (call_net.h,
-//    SeedSendHook) and every machine, the caller's too, replays that pick (docs/online-re.md sections 1, 9, 10).
+//    SeedSendHook) and every machine, the caller's too, replays that pick (docs/online-re.md sections 1, 9, 11).
 //  - The call weapons are owned from the start (docs/loadout-re.md section 8): before the game's own
 //    "grant the installed DLC weapons" step (0xDC550, UnlockDownloadContents: after every save load, and
 //    in a new game's reset; its two entries, a call at 0xDC348 and the script thunk's jump at 0x70FF87,

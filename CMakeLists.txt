@@ -9,6 +9,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).
 target_sources(EDF6VehicleCrew PRIVATE src/stab.cpp)
+# A remote gunner's recoil on the vehicle's authority (src/gunnerrecoil.cpp, docs/online-re.md §10).
+target_sources(EDF6VehicleCrew PRIVATE src/gunnerrecoil.cpp)
 # The map view (src/map.cpp: the overhead camera, the input hold, the marks it gathers).
 target_sources(EDF6VehicleCrew PRIVATE src/map.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
@@ -27,6 +29,15 @@ target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
+# Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
+target_sources(EDF6VehicleCrew PRIVATE src/guidance.cpp)
+# Every lock-on weapon's lock: the order it locks in (the player's nearest the view), the target cycle, reading it.
+target_sources(EDF6VehicleCrew PRIVATE src/lockon.cpp)
+# The Tempest cruise missiles flown from their nose (TV guidance; the view and the hold are the map's).
+target_sources(EDF6VehicleCrew PRIVATE src/tvguide.cpp)
+# The friendly NPC soldiers' own AI (src/npcai.cpp, decisions in src/npc_logic.h; docs/npc-ai-design.md).
+target_sources(EDF6VehicleCrew PRIVATE src/npcai.cpp src/npcpost.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -259,6 +270,12 @@ set_target_properties(map_marks_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(hud_cue_check EXCLUDE_FROM_ALL tools/hud_cue_check.cpp)
 target_compile_options(hud_cue_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(hud_cue_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The NPC AI's decisions (src/npc_logic.h: fire lanes, arms, crowding, the combat spot, squads, the mark, the way back to a
+# post) offline (tools/npc_ai_check.cpp). Not part of the plugin build:
+# cmake --build build --target npc_ai_check && build\npc_ai_check.exe
+add_executable(npc_ai_check EXCLUDE_FROM_ALL tools/npc_ai_check.cpp)
+target_compile_options(npc_ai_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(npc_ai_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The Primer creatures' pose code run offline (tools/primer_pose_view.py, tools/primer_chain_view.py render it):
 # not part of the plugin.
 add_executable(primer_pose_sim tools/primer_pose_sim.cpp)
@@ -290,6 +307,12 @@ target_link_libraries(call_pick_test PRIVATE edf6common)
 target_include_directories(call_pick_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(call_pick_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME call_pick COMMAND call_pick_test)
+# The remote gunner's recoil on the vehicle's authority (src/gunnerrecoil.cpp) against a stand-in EDF.dll.
+add_executable(gunner_recoil_test tests/gunner_recoil_test.cpp)
+target_link_libraries(gunner_recoil_test PRIVATE edf6common)
+target_include_directories(gunner_recoil_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(gunner_recoil_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME gunner_recoil COMMAND gunner_recoil_test)
 
 add_executable(map_hud_check EXCLUDE_FROM_ALL tools/map_hud_check.cpp)
 target_compile_options(map_hud_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -313,11 +336,14 @@ target_compile_options(online_authority_test PRIVATE /W4 /WX /utf-8 /permissive-
 add_test(NAME online_authority COMMAND online_authority_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
+# Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
+add_executable(pn_test tests/pn_test.cpp)
+target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check
-    vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
@@ -351,3 +377,65 @@ add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-sui
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
     --compiler "${CMAKE_CXX_COMPILER}")
+
+add_executable(lockon_test EXCLUDE_FROM_ALL tests/lockon_test.cpp)
+target_link_libraries(lockon_test PRIVATE edf6common)
+target_include_directories(lockon_test PRIVATE src common)
+target_compile_options(lockon_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks lockon_test)
+add_test(NAME lockon COMMAND lockon_test)
+
+add_executable(tvguide_test EXCLUDE_FROM_ALL tests/tvguide_test.cpp)
+target_link_libraries(tvguide_test PRIVATE edf6common)
+target_compile_options(tvguide_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks tvguide_test)
+add_test(NAME tvguide COMMAND tvguide_test)
+
+add_executable(crew_first_use_test EXCLUDE_FROM_ALL tests/crew_first_use_test.cpp)
+target_link_libraries(crew_first_use_test PRIVATE edf6common)
+target_compile_options(crew_first_use_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(crew_first_use_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks crew_first_use_test)
+add_test(NAME crew_first_use COMMAND crew_first_use_test)
+
+foreach(check IN ITEMS proteus_frame_test gunner_aim_object_test stab_interpolation_test heli_player_input_test)
+    add_executable(${check} EXCLUDE_FROM_ALL tests/${check}.cpp)
+    target_include_directories(${check} PRIVATE src common)
+    target_compile_options(${check} PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+    add_dependencies(offline_checks ${check})
+    add_test(NAME ${check} COMMAND ${check})
+endforeach()
+target_link_libraries(proteus_frame_test PRIVATE edf6common user32)
+target_link_libraries(gunner_aim_object_test PRIVATE edf6common)
+target_link_libraries(heli_player_input_test PRIVATE edf6common user32)
+add_executable(jetsound_check EXCLUDE_FROM_ALL tools/jetsound_check.cpp)
+target_include_directories(jetsound_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(jetsound_check PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks jetsound_check)
+add_test(NAME jetsound_check COMMAND jetsound_check)
+add_test(NAME vehicle_cas COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_cas_pose.py")
+add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
+add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
+
+foreach(check IN ITEMS heli_command_test jet_command_test rocket_guide_prediction_test rocket_impact_readout_test npc_post_test map_command_identity_test)
+    add_executable(${check} EXCLUDE_FROM_ALL tests/${check}.cpp)
+    target_include_directories(${check} PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+    target_link_libraries(${check} PRIVATE edf6common user32)
+    target_compile_options(${check} PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+    target_link_options(${check} PRIVATE /OPT:REF)
+    add_dependencies(offline_checks ${check})
+    add_test(NAME ${check} COMMAND ${check})
+endforeach()
+target_sources(jet_command_test PRIVATE src/jet_flight.cpp)
+target_sources(map_command_runtime_check PRIVATE src/command_unit.cpp)
+target_sources(map_command_identity_test PRIVATE src/command_unit.cpp)
+target_sources(npc_post_test PRIVATE src/command_unit.cpp)
+add_executable(npc_core_check EXCLUDE_FROM_ALL tools/npc_core_check.cpp)
+target_include_directories(npc_core_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(npc_core_check PRIVATE edf6common user32)
+target_compile_options(npc_core_check PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(npc_core_check PRIVATE /OPT:REF)
+add_dependencies(offline_checks npc_core_check)
+add_test(NAME npc_core_check COMMAND npc_core_check)
+add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
+    --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)

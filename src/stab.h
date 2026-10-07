@@ -178,6 +178,17 @@ inline bool HeldIn(const Hold& h,const Stops* stops,const Frame& seen,const Fram
     return true;
 }
 
+// 0x5FC280(axis, true) maps TWO bone samples: angle and angle-rate. After stabilization `rate` is still the stock
+// command's velocity, while the pose must interpolate the whole turn from `before` to the corrected angle. Supply
+// that displacement only while mapping; keeping it in the controller would feed the stabilizer into its motor.
+template<class Apply> inline void Remap(float* axis,float before,float corrected,Apply apply) noexcept {
+    const float commandRate=axis[3];
+    axis[2]=corrected;
+    axis[3]=Diff(StopsOf(axis[0],axis[1]),corrected,before);
+    apply(axis);
+    axis[3]=commandRate;
+}
+
 // --- which frame the drawn gun is in (see the top) ---
 
 constexpr int kMounts=2,kTimings=2,kHypotheses=kMounts*kTimings;   // h = mount x 2 + timing (0 same, 1 next)

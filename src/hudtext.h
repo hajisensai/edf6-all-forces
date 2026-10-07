@@ -62,6 +62,10 @@ inline constexpr WordEntry kWords[]={
     {"primer",Tx::kindPrimer},{"centipede",Tx::kindCentipede},{"dragonfly",Tx::kindDragonfly},{"jet",Tx::kindJet},
     {"heli",Tx::kindHeli},{"base",Tx::kindHeliBase},{"crawler",Tx::kindCrawler},{"CRAWLER",Tx::unitCrawler},
     {"drill",Tx::kindDrill},{"npc",Tx::kindNpc},
+    // NPC class and control-state identifiers (npcai.cpp).
+    {"RANGER",Tx::npcRanger},{"WING DIVER",Tx::npcWingDiver},{"FENCER",Tx::npcFencer},{"AIR RAIDER",Tx::npcAirRaider},
+    {"RECRUITED",Tx::npcRecruited},{"FREE",Tx::npcFree},{"SCRIPT",Tx::npcScript},{"SQUAD",Tx::squadTitle},
+    {"HOLD",Tx::npcHold},{"ESCORT",Tx::npcEscort},
     // a submarine carrier's deck part (subcarrier.cpp kSystems)
     {"turretA",Tx::partTurretA},{"turretB",Tx::partTurretB},{"missiles",Tx::partMissiles},{"dronebay",Tx::partDroneBay},
 };

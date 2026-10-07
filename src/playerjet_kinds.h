@@ -166,8 +166,8 @@ static_assert(BoardableConsistent(),"kBoardable: rotor rows rotor craft, jet bod
 // flight (HoverStep, HoverDone, RotorHail) reads "on the ground" as under kTouch (3 m): the carrier's position is
 // 8.516 m over its bottom, so standing on the ground it read 9 m up (2026-10-06 14:56:55, "air ... 9 m over the
 // ground"): never set down, never parked, left on the ground it was handed back to its NPC pilot as if in the air, a
-// called-down one never reached its spot. Its clearance is its bottom's: the position's less `rest`. (The wings keep
-// the position's: their rests, 1.38 / 2.12 m, are under kTouch, which their landing was tuned on.)
+// called-down one never reached its spot. Its clearance is its bottom's: the position's less `rest`. Wings use the
+// same convention: a larger wing's centre may stay above kTouch even while its collision body rests on the ground.
 constexpr float kRestMost=100.0f;   // m: a rest no airframe of ours has (the bone not where it should be: none)
 // The rest from the position's height and the mesh bone's: 0 when it is not a plausible one (or NaN).
 constexpr float RestHeight(float posY,float meshY) noexcept {

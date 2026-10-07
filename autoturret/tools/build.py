@@ -11,7 +11,8 @@ self-aiming ground-attack launcher, built from the player's own Root.cpk into th
 runs.
 
 Overrides the Kepler / Bohr call SGOs and their gun pairs, and the Keplers missions place (NPC and
-boardable) in OBJECT, and gives the NPC Titan its side cannons (titan_ai.py). The guns get flak rounds and
+boardable) in OBJECT, gives the NPC Titan its side cannons (titan_ai.py), and gives the tanks missions
+place the player's body recoil (npc_recoil.py). The guns get flak rounds and
 the EDF6AutoTurret plugin's mark; the calls get more durability and a faster turret. No weapon rows are
 added. The vehicles' own WEAPONTEXT rows are rewritten to show the new numbers, on top of the tables
 already in Mods, so other mods' rows are kept (see describe.py).
@@ -49,6 +50,7 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'pylib'))
 import dsgo  # noqa: E402
 import describe  # noqa: E402
 import modfiles  # noqa: E402
+import npc_recoil  # noqa: E402
 import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 import titan_ai  # noqa: E402
@@ -253,7 +255,10 @@ def build_files(legacy: bool = False) -> dict[str, bytes]:
         files[f'WEAPON/{HV_GUN.format(side=side)}'] = build_hv_gun(side, legacy)
     for name in FLAK_OBJECTS:
         files[f'OBJECT/{name}'] = build_object(name)
-    files[f'OBJECT/{titan_ai.NAME}'] = titan_ai.build()
+    # The missions' NPC / boardable tanks get the player's body recoil (npc_recoil.py); the NPC Titan after
+    # titan_ai.py has given it its side cannons.
+    for name in npc_recoil.PLAYER_CALL:
+        files[f'OBJECT/{name}'] = npc_recoil.build(name, titan_ai.build() if name == titan_ai.NAME else None)
     for name in BOHR_CALLS:
         files[f'WEAPON/{name}'] = build_call(name, None, [])   # its turret is already the fast DLC one
     for side in SIDES:

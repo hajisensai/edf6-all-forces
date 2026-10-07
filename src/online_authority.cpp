@@ -1,6 +1,7 @@
 // The game's side of the online authority (src/online_authority.h has the rules and what each function is).
 #include "online_authority.h"
 #include "crew.h"
+#include "gunnerrecoil.h"
 #include "memory.h"
 
 namespace crew {
@@ -136,6 +137,8 @@ void NoteLocalCopy(const void* object,const void* parent) noexcept {
     if(!slot){slot=&copies[copyNext];copyNext=(copyNext+1)%kCopyRecords;}
     *slot=CopyRecord{object,At<const void*>(object,kSelfCtrl),owner};
 }
+
+bool VehicleAuthority(unsigned char* vehicle) noexcept { return IsOnlineAuthority(vehicle); }   // gunnerrecoil.h
 
 bool SeatNpcRider(unsigned char* vehicle,bool spawned) noexcept {
     if(!OnlineMaySeatNpc(vehicle))return false;

@@ -16,6 +16,7 @@
 //   tx       the pose's send throttle (+0x1D80: countdown, interval, min, max frames; +0x1D90 the fast flag),
 //            the send rate statics could not find (docs/online-re.md section 4)
 #include "crew.h"
+#include "gunnerrecoil.h"
 #include "heli.h"
 #include "memory.h"
 #include <cmath>

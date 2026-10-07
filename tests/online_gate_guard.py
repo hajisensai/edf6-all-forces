@@ -210,6 +210,21 @@ def check_any_player(root: str) -> None:
             fail(f'{rel} {signature.split("(")[0]}: lost "{need}" (another machine\'s player aboard is a player too)')
 
 
+def check_npc_ai(root: str, files: list[str]) -> None:
+    for rel in files:
+        if re.search(r'\bIsRoomHost\b', code_only(read(root, rel))):
+            fail(f'{rel}: IsRoomHost is back; ask OnlineHostOnly (online_authority.h)')
+    ai = code_only(read(root, 'src/npcai.cpp'))
+    if re.search(r'kNet\)&1|0x128\)&1', ai):
+        fail('src/npcai.cpp: a soldier\'s own network bit read for a decision; ask IsOnlineAuthority')
+    if re.search(r'!IsPlayer\(|\|\| IsPlayer\(', ai):
+        fail('src/npcai.cpp: IsPlayer used to tell an NPC from a player; ask IsAnyPlayer (IsPlayer is this machine\'s only)')
+    if not before(body(ai, 'bool DismountSquad('), 'OnlineMaySeatNpc(v)', 'kSeatKick'):
+        fail('src/npcai.cpp DismountSquad: riders kicked where NPC riders may not be seated')
+    if 'IsOnlineAuthority(vehicle)' not in body(code_only(read(root, 'src/online_authority.cpp')), 'bool VehicleAuthority('):
+        fail("src/online_authority.cpp VehicleAuthority: the gunner recoil's authority is not the one rule")
+
+
 def check_player(root: str) -> None:
     if 'RemoteRider(human)' not in body(code_only(read(root, 'common/seat.cpp')), 'bool IsAnyPlayer('):
         fail("common/seat.cpp IsAnyPlayer: another machine's player copied here is no longer a player")
@@ -226,7 +241,8 @@ def main() -> int:
     files = sources(root)
     checks = (lambda: check_rvas(root, files), lambda: check_ride_ai(root, files), lambda: check_damage(root),
               lambda: check_heli(root), lambda: check_frames(root), lambda: check_calls(root), lambda: check_session(root),
-              lambda: check_any_player(root), lambda: check_player(root))
+              lambda: check_any_player(root), lambda: check_npc_ai(root, files),
+              lambda: check_player(root))
     for c in checks:
         c()
     for f in failures:

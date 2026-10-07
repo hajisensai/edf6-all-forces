@@ -11,7 +11,7 @@
 //    empty, 1 - left / ReloadTime: +0xE68 / +0x20C, or +0xE7C / +0x22C where that one is set);
 //  - each weapon's impact point from its own muzzles (edf::MeanMuzzle, as fire builds the shot): rounds.cpp RoundLands
 //    flies its round as the game does (an arc, or the rockets' motor) to the first ground within kReach; a homing one's
-//    lock as the jets' stores read it (StoreLock), else its LockonRange. The Katyusha's lofted launcher is launcher.cpp's
+//    lock as the jets' stores read it (lockon.h WeaponLock), else its LockonRange. The Katyusha's lofted launcher is launcher.cpp's
 //    (its cross and ripple ring): listed here, not aimed twice;
 //  - an arc gun's sight against the enemy under the view (Target: picked within kPickCone of the screen's centre, kept
 //    while within kKeepCone, its velocity measured off its lock point): the pipper where the round passes it and the
@@ -28,6 +28,7 @@
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
+#include "lockon.h"
 #include "stores.h"
 #include "vecmath.h"
 #include "edf/weapon.h"
@@ -157,7 +158,7 @@ void Arm(const unsigned char* w,bool aim,StockArm& a) noexcept {
     if(m.kind==RoundKind::homing) {
         const float range=At<float>(w,kWeaponLockRange);
         a.range=std::isfinite(range) && range>0.0f ? range : 0.0f;
-        a.lock=StoreLock(Store{const_cast<unsigned char*>(w),nullptr,0,0,a.range},a.at,&a.lockProgress);
+        a.lock=WeaponLock(w,a.at,&a.lockProgress);
         if(a.lock)a.range=vec::Dist(pos,a.at);
         return;
     }

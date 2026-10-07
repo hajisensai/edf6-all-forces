@@ -1,4 +1,4 @@
-// The Air Raider call's pick carried in its own message (airstrike.cpp; docs/online-re.md sections 1, 9 and 10).
+// The Air Raider call's pick carried in its own message (airstrike.cpp; docs/online-re.md sections 1, 9 and 11).
 // Online, the caller's machine sends message 9 (the confirm state 0x6A9270: heading, target, seed, sequence) and every
 // other machine replays the call from it; nothing in it said which call the caller's picker turned the weapon into, so
 // the others flew the weapon's own. The seed goes out as its exact 8 bytes (0x12B5690) and the receiver keeps them at
