@@ -2,8 +2,9 @@
 // carry a tag (tools/call_weapons.py gun_sgo). A round of it at a friendly vehicle does it no harm and puts the
 // player into it:
 //  1. the bullets' candidate collector (jet_hooks.cpp AddBodyHook, docs/bullet-pass-re.md) is offered the vehicle's
-//     body; BoardingCandidate leaves it out (the round passes through: no hit, no damage) and asks for that vehicle
-//     (the nearest to the round's sweep start, when one round passes several in a frame);
+//     body; when the vehicle's origin is within kHitRadius of the round's sweep this frame, BoardingCandidate leaves
+//     it out (the round passes through: no hit, no damage) and asks for that vehicle (the one nearest the line, when
+//     the sweep passes several);
 //  2. the next frame, on the game thread and outside any team walk (FrameTick), BoardingTick presses the stock board
 //     button for the player (0x56D700, heli.cpp PressBoardButtonBumping) with
 //       - the player's position, for the seat check's reach alone (CanRideSeat 0x6346D0 measures human+0x90 to the
@@ -24,13 +25,22 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "layout.h"
+#include "memory.h"
 #include <atomic>
 #include <cmath>
 
 namespace crew {
 namespace {
 constexpr unsigned kBodyObject=0x108260;                         // body id -> its object (docs/bullet-pass-re.md §6)
-constexpr std::size_t kCollectorCore=0x88,kBulletOwner=0x9A8,kSweepFrom=0xB80;
+constexpr std::size_t kCollectorCore=0x88,kBulletOwner=0x9A8,kSweepFrom=0xB80,kSweepVel=0xB90;
+// The round's frame: the mover (0x2349D0) adds the acceleration (+0xBA0) to the velocity (+0xB90, m/s), stores it, and
+// with the collision on (+0xBC4) sweeps from the position (+0xB80, not yet moved) to position + velocity / 60 (the
+// constant at 0x176B040), the sweep whose box the broadphase fills the candidates from. The gun's rounds go 750 m a
+// frame (tools/call_weapons.py GUN_CURVES): every vehicle in that box is a candidate, so the vehicle hit is the one
+// whose origin is nearest the sweep's segment, within kHitRadius of it.
+constexpr unsigned kSweepScale=0x176B040;
+constexpr float kFrame=1.0f/60.0f;
+constexpr float kHitRadius=12.0f;   // m from a vehicle's origin: the bigger vehicles' hulls (the helis, the Titan)
 constexpr std::size_t kHumanVehicle=0x1548;                      // the vehicle a human rides (weak_ptr object)
 constexpr ULONGLONG kAskMs=250;                                   // an ask older than this (wall clock) is dropped
 constexpr ULONGLONG kLogMs=2000;
@@ -42,7 +52,7 @@ bool ready=false;
 std::atomic<const void*> shooter{nullptr};
 
 // The vehicle the last round asked for. Written by the collector, taken by the tick.
-struct Ask { const void* vehicle; const void* ctrl; float dist2; ULONGLONG at; };
+struct Ask { const void* vehicle; const void* ctrl; float off2; ULONGLONG at; };   // off2: off the sweep, squared
 Ask ask{};
 SRWLOCK askLock=SRWLOCK_INIT;
 const void* only=nullptr;   // BoardingOnly: game thread, for the length of one press
@@ -65,11 +75,24 @@ const Signature kTagSignatures[]={
     {0x68D978,{0x0F,0x28,0x45,0x50,0x0F,0x11,0x86,0xD0,0x08,0x00,0x00,0x4C,0x89,0xB5,0xE0,0x05},16},   // AmmoColor
     {0x68D5AD,{0x48,0x8D,0x8E,0x38,0x08,0x00,0x00,0x48,0x8D,0x55,0xE0,0xE8,0x83,0x15,0xF0,0xFF},16},   // the owner
     {0x69712F,{0x49,0x8D,0x97,0x30,0x08,0x00,0x00,0x49,0x8D,0x8F,0x10,0x0A,0x00,0x00,0xE8,0xAE},16},   // fire's copy
+    {0x234AAE,{0x0F,0x28,0x15,0x8B,0x65,0x53,0x01,0x0F,0x28,0xCA,0xC7,0x44,0x24,0x3C,0x00,0x00},16},   // the mover's 1/60
+    {0x234ADB,{0x0F,0x58,0x8F,0x90,0x0B,0x00,0x00,0x0F,0xC6,0xC9,0x93,0xF3,0x0F,0x10,0xC8,0xF3},16},   // velocity += ...
+    {0x234AF7,{0x0F,0x11,0x8F,0x90,0x0B,0x00,0x00,0x80,0xBF,0xC4,0x0B,0x00,0x00,0x00,0x0F,0xC6},16},   // ...stored, then +0xBC4
 };
 
 bool TaggedOk() noexcept {
     for(const auto& sig:kTagSignatures)if(!Matches(sig.rva,sig.bytes,sig.size))return false;
-    return true;
+    return Readable(image+kSweepScale,4) && At<float>(image,kSweepScale)==kFrame;
+}
+
+// The squared distance of `p` from the segment a->b.
+float SegmentOff2(const float* a,const float* b,const float* p) noexcept {
+    const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]},q[3]={p[0]-a[0],p[1]-a[1],p[2]-a[2]};
+    const float dd=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+    float t=dd>0.0f ? (q[0]*d[0]+q[1]*d[1]+q[2]*d[2])/dd : 0.0f;
+    t=t<0.0f ? 0.0f : t>1.0f ? 1.0f : t;
+    const float c[3]={q[0]-d[0]*t,q[1]-d[1]*t,q[2]-d[2]*t};
+    return c[0]*c[0]+c[1]*c[1]+c[2]*c[2];
 }
 
 // Whether the round of this core is a boarding gun's.
@@ -165,14 +188,16 @@ bool BoardingCandidate(void* collector,std::uint32_t body) noexcept {
     const std::int32_t team=At<std::int32_t>(object,kTeam);
     if(!Friendly(team,At<std::int32_t>(shot,kTeam)))return false;
     const float* from=reinterpret_cast<const float*>(core+kSweepFrom);
+    const float* vel=reinterpret_cast<const float*>(core+kSweepVel);
+    const float to[3]={from[0]+vel[0]*kFrame,from[1]+vel[1]*kFrame,from[2]+vel[2]*kFrame};
     const float* at=reinterpret_cast<const float*>(static_cast<const unsigned char*>(object)+kPosition);
-    const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
-    const float dist2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+    const float off2=SegmentOff2(from,to,at);
+    if(off2>kHitRadius*kHitRadius)return false;   // in the sweep's box, off its line: the stock shape cast decides
     const ULONGLONG now=GetTickCount64();
     AcquireSRWLockExclusive(&askLock);
-    if(!ask.vehicle || now-ask.at>kAskMs || dist2<ask.dist2)ask=Ask{object,At<const void*>(object,kSelfCtrl),dist2,now};
+    if(!ask.vehicle || now-ask.at>kAskMs || off2<ask.off2)ask=Ask{object,At<const void*>(object,kSelfCtrl),off2,now};
     ReleaseSRWLockExclusive(&askLock);
-    if(Cfg().debug && now-said.candidate>kLogMs){said.candidate=now;Log("BOARDING round at v=%p (team %d): passes through",object,team);}
+    if(Cfg().debug && now-said.candidate>kLogMs){said.candidate=now;Log("BOARDING round at v=%p (team %d, %.1f m off its line): passes through",object,team,std::sqrt(off2));}
     return true;
 }
 
