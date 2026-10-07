@@ -22,6 +22,8 @@
 #include "crew.h"
 #include "body506.h"
 #include "exhaust_pose.h"
+#include "drill_net.h"
+#include "online_authority.h"
 #include "layout.h"
 #include "memory.h"
 #include <cmath>
@@ -146,6 +148,10 @@ struct Drill {
     float pos[3],dir[3],axis[3],speed,flown,lastTip[3],flightBite;
     ULONGLONG backAt;
     Victim victims[kVictims];
+    drill_net::Gate received;
+    bool networked;
+    ULONGLONG sentAt,receivedAt;
+    Flight sentFlight;
 };
 Drill drills[kMaxDrills]{};
 bool triggerOk=false;
@@ -676,11 +682,26 @@ void Publish(const Drill& d) noexcept {
     cueAt=GetTickCount64();
     ReleaseSRWLockExclusive(&cueLock);
 }
+
+// Every copy poses the same drill; only the current vehicle authority integrates its path and tests contacts.
+// Periodic absolute states recover a lost launch/catch and keep RPM/heat in step, including a late joiner.
+void SendState(unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
+    if(!d.networked)return;
+    const ULONGLONG period=d.flight==Flight::home ? 500 : 50;
+    if(d.sentAt && d.sentFlight==d.flight && ms-d.sentAt<period)return;
+    drill_net::State s;
+    s.phase=static_cast<drill_net::Phase>(d.flight);s.overheated=d.overheated ? 1u : 0u;
+    std::memcpy(s.pos,d.pos,12);std::memcpy(s.dir,d.dir,12);std::memcpy(s.axis,d.axis,12);
+    s.speed=d.speed;s.rpm=d.rpm;s.heat=d.heat;s.angle=d.angle;
+    s.flown=d.flown;s.backAgeMs=d.flight==Flight::back ? static_cast<std::uint32_t>(ms-d.backAt) : 0;
+    if(DrillNetSend(v,s)){d.sentAt=ms;d.sentFlight=d.flight;}
+}
 }  // namespace
 
 bool InstallDrill() noexcept {
     triggerOk=Matches(kTriggerRead,kTriggerSig,sizeof(kTriggerSig));
     Log("HOOK drill trigger=%d%s",triggerOk,triggerOk ? "" : " (unexpected EDF.dll code: the drill tank's drill is off)");
+    if(triggerOk)InstallDrillNet();
     return triggerOk;
 }
 
@@ -723,6 +744,21 @@ void DrillFrame(unsigned char* v) noexcept {
     d->lastMs=d->seen=ms;
     const auto& c=Cfg();
     const float top=c.drillMaxRpm;
+    const bool networked=drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128));
+    if(d->networked!=networked) {
+        // Leaving a session cannot leave a remote animation or a queued local keypress running offline.
+        Catch(v,*d,ms,"session changed");
+        d->received=drill_net::Gate{};d->launchAsked=false;d->launchHeld=false;
+        d->sentAt=d->receivedAt=0;d->networked=networked;
+    }
+    if(networked && !IsOnlineAuthority(v)) {
+        d->launchAsked=false;
+        if(d->flight!=Flight::home) {
+            Jet(v,*d,ms);
+            if(!PoseFlight(v,*d))Catch(v,*d,ms,"no remote pose");
+        } else PoseHome(*d);
+        return;
+    }
     if(d->launchAsked) {
         d->launchAsked=false;
         if(c.drillLaunch && d->player && d->flight==Flight::home && !d->overheated)Launch(v,*d);
@@ -754,6 +790,24 @@ void DrillFrame(unsigned char* v) noexcept {
     }
     if(d->rpm>0.0f || d->flight!=Flight::home)LogPose(v,*d,ms);
     if(d->player)Publish(*d);
+    SendState(v,*d,ms);
+}
+
+void DrillNetReceived(unsigned char* v,const drill_net::State& s) noexcept {
+    if(!triggerOk || !drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))return;
+    Drill* const d=DrillTank(v);
+    if(!d || !d->received.Admit(s,true,IsOnlineAuthority(v),DrillNetController(v)))return;
+    const ULONGLONG ms=GameMs();
+    d->networked=true;d->receivedAt=ms;d->seen=ms;
+    const Flight previous=d->flight;
+    d->flight=static_cast<Flight>(s.phase);d->overheated=s.overheated!=0;
+    std::memcpy(d->pos,s.pos,12);std::memcpy(d->dir,s.dir,12);std::memcpy(d->axis,s.axis,12);
+    d->speed=s.speed;d->rpm=s.rpm;d->heat=s.heat;d->angle=s.angle;
+    // Enough integrator state to continue a flight if seat ownership moves here while the drill is away.
+    for(int i=0;i<3;++i)d->lastTip[i]=d->pos[i]+d->dir[i]*kDrillLength;
+    d->flown=s.flown;
+    if(d->flight==Flight::back)d->backAt=ms>=s.backAgeMs ? ms-s.backAgeMs : 0;
+    if(d->flight==Flight::home && previous!=Flight::home)Catch(v,*d,ms,"network catch");
 }
 
 bool PlayerDrillCue(DrillCue* out) noexcept {

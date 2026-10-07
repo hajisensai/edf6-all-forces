@@ -368,3 +368,28 @@ Root.cpk 的 `V505_TANK.CAS` 内嵌 CANM 0x300；`default` 和 `fire` 两个片�
 需要实机（L / 未测）：发射后钻头是否画在飞行位置并在转、回程是否顺滑接住；火焰的位置与大小；飞行中咬敌人是否掉血、击杀降温是否生效
 （Debug 日志 `launched` / `turns back` / `back on the hull` / `kill N`）；撞墙返回是否在墙上留下破坏；放大后车身穿墙的程度是否可接受；
 Y 键是否与原版 505 的某个操作冲突。
+
+### 8.5 联机发射与姿态复制（审查修复）
+
+旧实现只有本机 R/Y 把 `launchAsked` 置位，远端复制的车辆输入里没有这个插件动作；`OnlineShotCounts` 只能避免重复伤害，不能让其它机器的钻头离开车头。
+
+`src/drill_net.cpp` 使用原版车辆的 NetworkObject（车辆 `+0x120`）发送，不另开连接。505 的 NetworkObject vtable 接收槽
+`0x17DB0D0`（slot 17）原指向 `0x6325B0`，发送槽 slot 16（`+0x80`）为 `0x773DA0`，经原版事件 7 和对象描述符送到同一辆车的副本。
+仅链这个接收 vtable 槽；coop 的 GameObjectBase `0x54D770` 中间钩子不改。消息类型 **15**（coop 的伤害 13、RNG 14 原样交给下一接收函数）
+后接固定 96 字节版本化状态块。原版未安装插件的接收器对 15 只读类型后返回，不修改车辆。
+
+状态含进程随机 sender、单调序号、当前/末任驾驶员的原版 ReferenceId、去程/回程/车头阶段、世界位置/方向/轴、速度、自转角、RPM、热量、
+过热锁、已飞距离和回程经过时间。对象身份由原版描述符路由；本地状态绑定 `ObjRef`（地址 + weak-this 控制块），对象地址复用重新建状态。
+驾驶员身份按 `0x630F90` 的 seat 0 当前 weak（`+0x260`）、末任 weak（`+0x300`）顺序取，没人为 host fallback 的 `-1`。
+`0x785050` **按值消费** weak_ptr（`0x78511A..133` 释放 weak count）：传本地增持的副本，绝不把座位里的 weak 原地交给它释放。
+
+只有 `IsOnlineAuthority(vehicle)` 所选机器模拟飞行、判地图碰撞、产生装药；伤害仍走 `OnlineShotCounts`。其它机器 `DrillFrame` 每帧直接画复制姿态和喷气，
+不依赖 `DrillInput` 是否认出本机玩家，也不独立判碰撞。阶段变化立即发送；飞行每 50 game ms 发送绝对快照，车头每 500 game ms 补送，
+所以缺发射、中间状态或末次接住消息都能从后续快照恢复。状态包含接管所需积分量，换驾驶员时新 authority 能继续已有飞行。
+接收先检查会话、505 钻头模型、本机非 authority、当前/末任驾驶员身份、字段有限值，再按 sender 的序号拒绝重复/乱序；驾驶员回来时保留原 sender 水位，
+旧驾驶员的迟到包不能盖过新驾驶员的状态。不在会话或没有注册网络身份时保留原有本地路径；会话退出清飞行、待发射输入和接收水位，任务 reset 清整个 ObjRef 状态。
+
+验证分层：`drill_net_test` 检查格式/边界、重复乱序、驾驶员切换、退出、序号回绕和单端伤害；`drill_sync_test` 直接执行生产
+`DrillNetReceived / DrillFrame / PoseFlight`，检查远端无输入仍改真实骨骼记录、返回/灭火、丢 catch 后补送、对象复用等；
+`drill_net_native_test <EDF.dll>` 以 `DONT_RESOLVE_DLL_REFERENCES` 在独立测试进程映射游戏 DLL（不运行入口，不附加游戏，不写磁盘），
+实跑原版消息读写、生产发送/接收、505 对 tag 15 的忽略和 13/14 透传。离线验证不等同于实际两机房间画面/延迟/伤害 E2E；所有需要显示飞行的机器都要安装此版本。

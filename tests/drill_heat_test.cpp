@@ -21,6 +21,11 @@ float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
 bool MapHoldsKeys() noexcept { return true; }
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { return nullptr; }
+bool InSession() noexcept { return false; }
+bool IsOnlineAuthority(const void*) noexcept { return true; }
+bool InstallDrillNet() noexcept { return true; }
+bool DrillNetSend(unsigned char*,drill_net::State) noexcept { return false; }
+std::int32_t DrillNetController(unsigned char*) noexcept { return -1; }
 }
 
 namespace {
