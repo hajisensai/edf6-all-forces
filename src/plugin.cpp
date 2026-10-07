@@ -171,7 +171,12 @@ void Validate(Config& n) noexcept {
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
     Fix("DrillDamage",n.drillDamage,0.0f,1.0e6f);
     Fix("DrillBreak",n.drillBreak,0.0f,1.0e6f);
-    Fix("DrillHeatSec",n.drillHeatSec,1.0f,600.0f);
+    Fix("DrillOverheatSec",n.drillOverheatSec,1.0f,600.0f);
+    Fix("DrillKillCool",n.drillKillCool,0.0f,1.0f);
+    Fix("DrillLaunchRange",n.drillLaunchRange,5.0f,300.0f);
+    Fix("DrillLaunchSpeed",n.drillLaunchSpeed,5.0f,400.0f);
+    Fix("DrillLaunchDamage",n.drillLaunchDamage,0.0f,1.0e6f);
+    Fix("DrillLaunchHeat",n.drillLaunchHeat,0.0f,1.0f);
     Fix("DrillCoolSec",n.drillCoolSec,1.0f,600.0f);
     Fix("DrillResumeHeat",n.drillResumeHeat,0.0f,0.95f);
     Fix("EmcChargeSec",n.emcChargeSec,0.5f,10.0f);
@@ -187,6 +192,8 @@ void Validate(Config& n) noexcept {
     Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
     n.seatNextKey=static_cast<int>(FixInt("SeatNextKey",n.seatNextKey,0,254));
     n.seatButton=static_cast<int>(FixInt("SeatButton",n.seatButton,0,255));
+    n.drillLaunchKey=static_cast<int>(FixInt("DrillLaunchKey",n.drillLaunchKey,0,254));
+    n.drillLaunchButton=static_cast<int>(FixInt("DrillLaunchButton",n.drillLaunchButton,0,255));
     n.highCamClass=static_cast<int>(FixInt("HighCamClass",n.highCamClass,1,3));
     Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
     n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
@@ -266,11 +273,13 @@ void Validate(Config& n) noexcept {
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
 // Keys no longer read: an old ini that still sets them loads as before, the keys ignored (said once). The flight
 // controller's gains became constants (heli.cpp); the heli's mouse lever (HeliMousePitch) became the mouse-aim flight
-// (HeliMouseAim, heliaim.h).
+// (HeliMouseAim, heliaim.h). The drill's DrillHeatSec became DrillOverheatSec (a new key, so that an ini that still
+// has the old 12 s gets the longer default: the installer only adds keys, it never changes a player's value).
 void IgnoreRetired() noexcept {
     struct Retired { const wchar_t* key; const char* why; };
     static const Retired kRetired[]={{L"HeliMoveGain",kGainsFixed},{L"HeliBrakeGain",kGainsFixed},{L"HeliClimbGain",kGainsFixed},
-                                     {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"}};
+                                     {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"},
+                                     {L"DrillHeatSec","superseded by DrillOverheatSec (30 s by default: 12 s overheated too soon)"}};
     constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
     static bool said[kCount]{};
     for(int i=0;i<kCount;++i) {
@@ -407,7 +416,15 @@ void LoadConfig() noexcept {
     n.drillSpinDownSec=ReadFloat(L"DrillSpinDownSec",n.drillSpinDownSec);
     n.drillDamage=ReadFloat(L"DrillDamage",n.drillDamage);
     n.drillBreak=ReadFloat(L"DrillBreak",n.drillBreak);
-    n.drillHeatSec=ReadFloat(L"DrillHeatSec",n.drillHeatSec);
+    n.drillOverheatSec=ReadFloat(L"DrillOverheatSec",n.drillOverheatSec);
+    n.drillKillCool=ReadFloat(L"DrillKillCool",n.drillKillCool);
+    n.drillLaunch=ReadBool(L"DrillLaunch",n.drillLaunch);
+    n.drillLaunchKey=ReadInt(L"DrillLaunchKey",static_cast<DWORD>(n.drillLaunchKey));
+    n.drillLaunchButton=ReadInt(L"DrillLaunchButton",static_cast<DWORD>(n.drillLaunchButton));
+    n.drillLaunchRange=ReadFloat(L"DrillLaunchRange",n.drillLaunchRange);
+    n.drillLaunchSpeed=ReadFloat(L"DrillLaunchSpeed",n.drillLaunchSpeed);
+    n.drillLaunchDamage=ReadFloat(L"DrillLaunchDamage",n.drillLaunchDamage);
+    n.drillLaunchHeat=ReadFloat(L"DrillLaunchHeat",n.drillLaunchHeat);
     n.drillCoolSec=ReadFloat(L"DrillCoolSec",n.drillCoolSec);
     n.drillResumeHeat=ReadFloat(L"DrillResumeHeat",n.drillResumeHeat);
     n.emcBeam=ReadBool(L"EmcBeam",n.emcBeam);
@@ -567,8 +584,11 @@ void LoadConfig() noexcept {
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
-    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
-        n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
+    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s overheat=%.0fs cool=%.0fs resume=%.0f%% "
+        "killCool=%.0f%%",n.drill,n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillOverheatSec,
+        n.drillCoolSec,n.drillResumeHeat*100.0f,n.drillKillCool*100.0f);
+    Log("CONFIG drillLaunch=%d key=0x%02X button=0x%02X range=%.0fm speed=%.0fm/s damage=%.0f heat=%.0f%%",n.drillLaunch,
+        n.drillLaunchKey,n.drillLaunchButton,n.drillLaunchRange,n.drillLaunchSpeed,n.drillLaunchDamage,n.drillLaunchHeat*100.0f);
     Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
     Log("CONFIG emcBeam=%d charge=%.1fs beam=%.1fs blast=%.0fm x%.2f break=%.0f/s",n.emcBeam,n.emcChargeSec,n.emcBeamSec,n.emcBlastRadius,
         n.emcBlastShare,n.emcBreak);

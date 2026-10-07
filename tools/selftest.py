@@ -654,7 +654,7 @@ def drill_copies_agree() -> None:
     assert f'kDrillBone[]=L"{drill_model.DRILL_BONE}"' in d, 'src/drill.cpp kDrillBone'
     assert f'kSpinBone[]=L"{drill_model.SPIN_BONE}"' in d, 'src/drill.cpp kSpinBone'
     m = re.search(r'kBoxHalfX=([\d.]+)f', d)
-    assert m and 2 * float(m.group(1)) <= 3.8 + 1e-6, 'the contact box is no wider than the 3.8 m hull'
+    assert m and 2 * float(m.group(1)) <= make_drill.HULL_WIDTH + 1e-6, 'the contact box is no wider than the hull'
     m = re.search(r'kHullFront=([\d.]+)f,kChargeFrom=([\d.]+)f', d)
     assert m and float(m.group(1)) < drill_model.DRILL_BASE[2] and float(m.group(2)) >= 3.4, m and m.groups()
     m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
@@ -671,6 +671,21 @@ def drill_copies_agree() -> None:
     assert len(drills) == 1 and drills[0].vehicle == make_drill.VEHICLE.sgo and drills[0].mark == 0
     assert make_drill.OWNER in ledger.OWNERS and make_drill.VEHICLE.tool == 'make_drill'
     assert not drill_model.CONVERSION.mirrors() and drill_model.CONVERSION.point((1.0, 0.0, 0.0))[2] > 0, 'OBJ +X is forward'
+
+
+@test
+def drill_settings_documented() -> None:
+    """Every Drill* key src/plugin.cpp reads is in the shipped ini and the README; the retired DrillHeatSec (its 12 s
+    default overheated too soon; an installed ini keeps the old value, so the longer default came as the new key
+    DrillOverheatSec) is read by nobody, shipped by no ini and named in IgnoreRetired."""
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    keys = set(re.findall(r'Read\w+\(L"(Drill\w*)"', plugin))
+    assert {'DrillOverheatSec', 'DrillKillCool', 'DrillLaunch', 'DrillLaunchKey', 'DrillLaunchButton'} <= keys, keys
+    for key in keys:
+        assert re.search(rf'^{key}=', ini, re.M), f'{key} not in EDF6VehicleCrew.ini'
+        assert key == 'Drill' or key in readme, f'{key} not in README.md'
+    assert 'DrillHeatSec' not in keys and not re.search(r'^DrillHeatSec=', ini, re.M)
+    assert '{L"DrillHeatSec",' in plugin.split('void IgnoreRetired', 1)[1].split('\n}', 1)[0]
 
 
 @test
@@ -3437,7 +3452,7 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp', 'src/npcai.cpp'):
+                'src/proteus.cpp', 'src/npcai.cpp', 'src/drill.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
@@ -3450,7 +3465,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')

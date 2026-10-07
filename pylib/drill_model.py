@@ -6,9 +6,10 @@ Vehicle505_Tank class and V505_TANK.SGO name it, with its ragdoll shapes, CAS cl
 with every stock mesh taken out and the OBJ in their place:
   - the OBJ (MODEL_SUBDIR/OBJ_FILE, one object, two materials) turned from its +X-forward axes into the game's +Z
     forward (AXES), scaled by SCALE and moved OFFSET_Z forward: 13.4 m long, 4.8 m wide and 5.7 m tall in Iron Rain,
-    its hull (7.5 m long) comes to 6.0 x 3.8 x 4.6 m, over the Blacker's 6.8 x 3.2 m hull and collision shapes (the
-    ragdoll's are the physics: a hull much bigger than them would sink into walls it cannot touch), the drill 3.8 m
-    long in front of it (docs/drill-re.md §1);
+    kept at that size (SCALE 1: the user, 2026-10-06, "把钻头车放大一点"; it was 0.8, 6.0 x 3.8 x 4.6 m, to match the
+    Blacker's 6.8 x 3.2 m collision shapes): its hull 7.4 x 4.8 x 5.7 m over those shapes (the ragdoll's are the
+    physics, kept the Blacker's: the hull's sides sink ~0.8 m into a wall before the shapes meet it, its nose ~0.3 m),
+    the drill 4.7 m long in front of it (docs/drill-re.md §2);
   - the hull rigidly on the Blacker's `body` bone, the drill (every triangle past DRILL_SPLIT_Z) rigidly on the stock
     bone SPIN_BONE (`catapi_body`, the track rig's root), moved to the drill's axis at its base with the model's axes
     and made a leaf of `body` (its track children handed to `body`, their binds unchanged), so the plugin
@@ -57,7 +58,7 @@ TEX_STEM = {'MI_Tank_C': 'edf6vc_drill_c', 'MI_Tank_B_CS': 'edf6vc_drill_b'}
 NORMAL_TEX, RMO_TEX = 'edf6vc_drill_n.dds', 'edf6vc_drill_rmo.dds'
 # OBJ (+X forward, +Y up) -> game (+Z forward, +Y up, +X left): x -> z, y -> y, z -> -x (a rotation, no mirror)
 AXES: tuple[om.Vec3, om.Vec3, om.Vec3] = ((0.0, 0.0, 1.0), (0.0, 1.0, 0.0), (-1.0, 0.0, 0.0))
-SCALE = 0.8
+SCALE = 1.0
 OFFSET_Z = 0.25
 CONVERSION = om.Conversion(AXES, SCALE, (0.0, 0.0, OFFSET_Z))
 DRILL_SPLIT_Z = 4.5 * SCALE + OFFSET_Z      # the OBJ has no geometry between its hull (x <= 3.6) and its drill (x >= 4.7)
@@ -66,12 +67,17 @@ DRILL_BONE, DRILL_PARENT = 'edf6vc_drill', 'body'
 SPIN_BONE = 'catapi_body'
 # The drill's length and base radius as built (src/drill.cpp kDrillLength / kDrillRadius; tools/selftest.py holds them
 # equal; check() holds the geometry to them).
-DRILL_LENGTH, DRILL_RADIUS = 3.77, 0.97
+DRILL_LENGTH, DRILL_RADIUS = 4.71, 1.21
 # Its base in the model (= the vehicle's frame: x, y up, z forward; src/drill.cpp kDrillBaseY / kDrillBaseZ, the
 # contact probes' axis) and its rotational repeat: the mesh maps onto itself turned 1/DRILL_FOLDS of a turn (its
 # flutes; src/drill.cpp kSpinRepeat caps the drawn turn a frame under it, docs/drill-re.md §4).
-DRILL_BASE = (0.0, 3.37, 4.19)
+DRILL_BASE = (0.0, 4.21, 5.18)
 DRILL_FOLDS = 16
+# The model's vertex positions are half floats: 4..8 m from the origin one step is 1/256 m, so a stored vertex is up
+# to half of that off where the OBJ put it in each axis, ~0.003 m off the axis radially. check() holds the drill's
+# geometry to its cylinder within one step (it was 1 mm: the drill at 0.8 of its size passed by luck; at full size a
+# flute's edge 5.3 m up is stored 1.2 mm past DRILL_RADIUS).
+STORED_STEP = 1.0 / 256.0
 
 
 class DrillModelError(Exception):
@@ -331,7 +337,7 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
             if bone == di:
                 drill_pts += 1
                 rr = math.hypot(p[0] - origin[0], p[1] - origin[1])
-                _req(rr <= DRILL_RADIUS + 1e-3 and -1e-3 <= p[2] - origin[2] <= DRILL_LENGTH + 0.05,
+                _req(rr <= DRILL_RADIUS + STORED_STEP and -STORED_STEP <= p[2] - origin[2] <= DRILL_LENGTH + 0.05,
                      f'{tag}: drill vertex {p} outside its cylinder')
             else:
                 # the drive shaft reaches from the hull into the drill's base: it stays on the hull, inside the drill

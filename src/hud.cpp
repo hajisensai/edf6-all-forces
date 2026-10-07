@@ -1737,13 +1737,19 @@ void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
 // bar, amber while it spins up or down, green at the top, "DRILLING" while it touches something; the heat's bar beside
 // it, yellow, amber past 70%, red past 90%; overheated, all red and "OVERHEAT" (it turns again once cooled).
 const float* HeatColour(float heat,bool over) noexcept { return over || heat>=0.9f ? kRed : heat>=0.7f ? kAmber : kYellow; }
+// The drill's state word (nullptr: none): overheated, launched (out / on its way back), or biting.
+const wchar_t* DrillState(const DrillCue& c) noexcept {
+    if(c.overheated)return Tr(Tx::overheat);
+    if(c.flying)return Tr(c.returning ? Tx::drillReturning : Tx::drillLaunched);
+    return c.touching && c.rpm>0.0f ? Tr(Tx::drilling) : nullptr;
+}
 void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const DrillCue& c,Line* lines,int* at) noexcept {
     if(*at>=kMaxLines || !(c.maxRpm>0.0f))return;
     Line& l=lines[(*at)++];
     const float share=Unit(c.rpm/c.maxRpm),heat=Unit(c.heat);
     const bool top=share>=0.99f;
     wchar_t state[32]=L"";
-    if(c.overheated || (c.touching && c.rpm>0.0f))std::swprintf(state,32,L"    %ls",Tr(c.overheated ? Tx::overheat : Tx::drilling));
+    if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"    %ls",word);
     Format(l,Tr(Tx::drillLine),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(heat*100.0f)),state);
     l.scale=kTitleScale;
     l.rgba=c.overheated ? kRed : top ? kGreen : share>0.0f ? kAmber : kCyan;
@@ -2230,7 +2236,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
         const DrillCue& c=*x.drill;
         const float share=Unit(c.rpm/c.maxRpm);
         wchar_t state[32]=L"";
-        if(c.overheated || (c.touching && c.rpm>0.0f))std::swprintf(state,32,L"  %ls",Tr(c.overheated ? Tx::overheat : Tx::drilling));
+        if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"  %ls",word);
         Format(*drill,Tr(Tx::drillLineShort),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(Unit(c.heat)*100.0f)),state);
         drill->scale=kLineScale*0.85f;
         drill->rgba=c.overheated ? kRed : c.heat>=0.7f ? HeatColour(Unit(c.heat),false) : share>=0.99f ? kGreen : share>0.0f ? kAmber : kCyan;
