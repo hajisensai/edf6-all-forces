@@ -128,8 +128,22 @@ void Sfx(Mech& m,SzSfx which,const float* at) noexcept {
     m.net.soundAt[slot]=GameMs();m.net.dirty=true;
 }
 
+// Hold the weak control, not the enemy's lifetime. Same contract as jet.cpp HoldRef/DropRef and booster.cpp:
+// uses +8, weaks +0xC; the final weak release deletes the control through vtable slot 1.
+void AssignLockTarget(Arms& a,const ObjRef& next) noexcept {
+    if(next.obj==a.lockOnTarget.obj && next.ctrl==a.lockOnTarget.ctrl)return;
+    if(next.ctrl)InterlockedIncrement(reinterpret_cast<volatile LONG*>(static_cast<unsigned char*>(const_cast<void*>(next.ctrl))+0xC));
+    const ObjRef old=a.lockOnTarget;a.lockOnTarget=next;
+    if(!old.ctrl)return;
+    auto ctrl=static_cast<unsigned char*>(const_cast<void*>(old.ctrl));
+    if(InterlockedExchangeAdd(reinterpret_cast<volatile LONG*>(ctrl+0xC),-1)==1) {
+        using Delete=void(*)(void*);
+        (*reinterpret_cast<Delete* const*>(ctrl))[1](ctrl);
+    }
+}
 void DropLocalAim(Arms& a) noexcept {
-    a.hasAssist=false;a.assistObj=nullptr;a.lockOn=false;a.lockOnObj=nullptr;a.flick=0.0f;a.lockHidden=0.0f;
+    AssignLockTarget(a,{});
+    a.hasAssist=false;a.assistObj=nullptr;a.lockOn=false;a.flick=0.0f;a.lockHidden=0.0f;
     a.lockKeyHeld=false;a.flickCool=0.0f;
 }
 void DropArms(Mech& m) noexcept {

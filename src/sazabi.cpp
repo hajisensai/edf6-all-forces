@@ -110,10 +110,11 @@ Mech* Find(const unsigned char* v) noexcept {
     for(auto& m:mechs)if(m.vehicle==v && m.ref.Is(v))return &m;
     return nullptr;
 }
+void DropLocalAim(Arms& a) noexcept;
 Mech* Make(unsigned char* v) noexcept {
     for(auto& m:mechs) {
         if(m.vehicle && Live(m))continue;
-        m=Mech{};m.ref=ObjRef::Of(v);m.vehicle=v;
+        DropLocalAim(m.arms);m=Mech{};m.ref=ObjRef::Of(v);m.vehicle=v;
         return &m;
     }
     static const void* refused=nullptr;
@@ -462,7 +463,7 @@ bool InstallSazabi() noexcept {
 }
 
 void ResetSazabi() noexcept {
-    for(auto& m:mechs)m=Mech{};
+    for(auto& m:mechs){DropLocalAim(m.arms);m=Mech{};}
     DropView();
     cueMs=0;
     testBoarded=false;

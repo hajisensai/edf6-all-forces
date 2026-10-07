@@ -60,6 +60,10 @@ bool SazabiNetSend(unsigned char*,sazabi_net::State s) noexcept { lastNetwork=s;
 
 namespace {
 int checks=0,failures=0;
+int controlDeletes=0;
+void DeleteControl(void*) { ++controlDeletes; }
+using ControlFn=void(*)(void*);
+ControlFn controlVtable[2]={nullptr,&DeleteControl};
 void Check(bool ok,const char* what) {
     ++checks;
     if(!ok){++failures;std::printf("FAIL %s\n",what);}
@@ -73,7 +77,11 @@ bool Near(const float* a,const float* b) {
 int main() {
     using namespace crew;
     Enemies enemies{};
-    int objects[kMostTargets+2]{};
+    alignas(16) unsigned char objects[kMostTargets+2][0x318]{},targetControls[kMostTargets+2][0x10]{};
+    for(int i=0;i<kMostTargets+2;++i) {
+        Put<void*>(objects[i],kSelfCtrl,targetControls[i]);Put<LONG>(targetControls[i],edf::kCtrlUses,1);
+        Put<void*>(targetControls[i],0,controlVtable);Put<LONG>(targetControls[i],0xC,1);
+    }
     for(int i=0;i<kMostTargets;++i) {
         const float at[3]={static_cast<float>(100+i),0,0};
         SeeEnemy(&enemies,&objects[i],at);
@@ -123,8 +131,9 @@ int main() {
     // the first registry points (or only those nearest the centre on the wrong side).
     assistSeat[kSeatPad]=1;Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
     Controls lockControls{};LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
-    Check(assisted.arms.lockOn && assisted.arms.lockOnObj==&objects[kMostTargets],
+    Check(assisted.arms.lockOn && assisted.arms.lockOnTarget.obj==&objects[kMostTargets],
           "hard lock acquisition finds the late central enemy in a crowd");
+    Check(At<LONG>(targetControls[kMostTargets],0xC)==2,"acquisition pins the target control with one weak reference");
     Assist(assisted,assistVehicle,1.0f/60.0f);
     Check(assisted.arms.lockOn && assisted.arms.hasAssist && assisted.arms.assistObj==&objects[kMostTargets],
           "hard lock retention only gathers its held enemy beyond a full registry buffer");
@@ -141,19 +150,53 @@ int main() {
     assisted.arms.flickCool=0;Put<std::uint16_t>(assistSeat,kSeatButtons,0);
     lockControls.turn=20;lockControls.pitch=0.1f;
     LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
-    Check(assisted.arms.lockOnObj==&objects[kMostTargets+1],"flick finds the next enemy despite a crowd on the wrong side");
+    Check(assisted.arms.lockOnTarget.obj==&objects[kMostTargets+1],"flick finds the next enemy despite a crowd on the wrong side");
+    Check(At<LONG>(targetControls[kMostTargets],0xC)==1 && At<LONG>(targetControls[kMostTargets+1],0xC)==2,
+          "switching transfers exactly one weak reference to the next target");
     Check(lockControls.turn==0 && lockControls.pitch==0,"hard lock consumes view input for target switching");
     testMapHit=1;Assist(assisted,assistVehicle,2.0f);
     Check(!assisted.arms.lockOn && !assisted.arms.hasAssist,"hard lock releases after sustained map occlusion");
-    testMapHit=-1;assisted.arms.lockOn=true;assisted.arms.lockOnObj=&objects[0];visibleCount=0;
+    testMapHit=-1;assisted.arms.lockOn=true;AssignLockTarget(assisted.arms,ObjRef::Of(objects[0]));visibleCount=0;
     Assist(assisted,assistVehicle,1.0f/60.0f);
     Check(!assisted.arms.lockOn,"hard lock releases a deleted enemy");
-    assisted.arms.lockOn=true;assisted.arms.lockOnObj=&objects[0];
+    assisted.arms.lockOn=true;AssignLockTarget(assisted.arms,ObjRef::Of(objects[0]));
     assisted.arms.lockKeyHeld=false;Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
     lockControls.turn=1;LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
     Check(!assisted.arms.lockOn && lockControls.turn==1,"pressing the lock key again restores manual view input");
     DropArms(assisted);
     Check(!assisted.arms.lockKeyHeld && assisted.arms.flickCool==0,"leaving clears hard-lock input latches");
+    // Destroy a locked object and place another live enemy at exactly the same address, with its new control block.
+    visibleCount=1;visibleObjects[0]=objects[0];
+    visiblePositions[0][0]=eye[0];visiblePositions[0][1]=eye[1];visiblePositions[0][2]=eye[2]+300;
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(assisted.arms.lockOn,"real-layout enemy is locked before address reuse");
+    alignas(16) unsigned char replacementControl[0x10]{};Put<LONG>(replacementControl,edf::kCtrlUses,1);
+    Put<void*>(replacementControl,0,controlVtable);Put<LONG>(replacementControl,0xC,1);
+    Put<LONG>(targetControls[0],edf::kCtrlUses,0);InterlockedDecrement(reinterpret_cast<volatile LONG*>(targetControls[0]+0xC));
+    Check(At<LONG>(targetControls[0],0xC)==1 && controlDeletes==0,"enemy destruction cannot recycle the pinned control");
+    Put<void*>(objects[0],kSelfCtrl,replacementControl);
+    Put<std::uint16_t>(assistSeat,kSeatButtons,0);
+    lockControls.turn=20;assisted.arms.flickCool=0;
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn,"same-address replacement enemy cannot inherit a hard lock");
+    Check(lockControls.turn==20 && controlDeletes==1 && At<LONG>(targetControls[0],0xC)==0,
+          "expired identity restores input and deletes its control only after the final weak release");
+    DropArms(assisted);Put<std::uint16_t>(assistSeat,kSeatButtons,0x80);
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    Check(assisted.arms.lockOn && assisted.arms.lockOnTarget.ctrl==replacementControl,"new enemy can be explicitly reacquired");
+    objects[0][kDead]=1;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn && At<LONG>(replacementControl,0xC)==1,"dead enemy releases its held weak");
+    objects[0][kDead]=0;DropArms(assisted);
+    LockInput(assisted,assistVehicle,lockControls,1.0f/60.0f);
+    objects[0][0x18]|=4;Assist(assisted,assistVehicle,1.0f/60.0f);
+    Check(!assisted.arms.lockOn && At<LONG>(replacementControl,0xC)==1,"despawn flag releases the held weak");
+    objects[0][0x18]=0;
+    // The real table reset and stale-slot replacement must release weak references before Mech{} overwrites them.
+    AssignLockTarget(mechs[0].arms,ObjRef::Of(objects[0]));ResetSazabi();
+    Check(At<LONG>(replacementControl,0xC)==1,"mission reset releases hard-lock references before clearing the table");
+    AssignLockTarget(mechs[0].arms,ObjRef::Of(objects[0]));Make(assistVehicle);
+    Check(At<LONG>(replacementControl,0xC)==1,"reusing a mech slot releases the previous lock reference");
+    ResetSazabi();
     config=Config{};visibleCount=0;
 
     // Real Pose writes and BoneAt/DockPoint reads, interleaved across two different rigs/poses.

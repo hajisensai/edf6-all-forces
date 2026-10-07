@@ -22,10 +22,11 @@ int main() {
     s.shots[0].sequence=1;s.shots[0].from[0]=100;s.shots[0].at[0]=140;
     s.sounds[0].sequence=1;s.sounds[0].kind=static_cast<std::uint32_t>(SzSfx::whoosh);
     m->arms.lockOn=m->arms.hasAssist=m->arms.lockKeyHeld=true;
-    m->arms.lockOnObj=m->arms.assistObj=vehicle;
+    Put<LONG>(control,0xC,1);AssignLockTarget(m->arms,ObjRef::Of(vehicle));m->arms.assistObj=vehicle;
     SazabiNetReceived(vehicle,s);const int visits=enemyVisits;
-    Check(!m->arms.lockOn && !m->arms.hasAssist && !m->arms.lockKeyHeld && !m->arms.lockOnObj,
+    Check(!m->arms.lockOn && !m->arms.hasAssist && !m->arms.lockKeyHeld && !m->arms.lockOnTarget,
           "remote authority discards the former pilot's local lock target and input latch");
+    Check(At<LONG>(control,0xC)==1,"remote takeover releases the local hard-lock weak reference");
     Drive(*m,vehicle,testNow);
     Check(m->net.remote && m->driven && !m->active,"remote pilot replays without owning physics");
     Check(m->pose.guard==1 && m->pose.swing==0.4f && m->pose.combo==1,"guard/swing/combo reach the production pose");

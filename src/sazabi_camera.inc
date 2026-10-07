@@ -135,9 +135,15 @@ void PullOnto(Mech& m,const float* at,float gain,float most,float dt) noexcept {
     m.heading=as::WrapPi(m.heading+as::Pull(m.heading,wantYaw,gain,most,dt));
     m.aimPitch=Clamp(m.aimPitch+as::Pull(m.aimPitch,Clamp(wantPitch,-kAimMost,kAimMost),gain,most,dt),-kAimMost,kAimMost);
 }
+bool LiveLockTarget(const ObjRef& ref) noexcept {
+    const auto object=static_cast<const unsigned char*>(ref.obj);
+    // The held weak keeps this control readable after the enemy dies. Test uses before touching the old object.
+    return object && ref.ctrl && Readable(ref.ctrl,12) && At<std::int32_t>(ref.ctrl,8)>0 &&
+        Readable(object,kDead+1) && ref.Is(object) && !(object[0x18]&4) && !object[kDead];
+}
 void LetGo(Arms& a,const unsigned char* v,const char* why) noexcept {
     if(a.lockOn)Log("SAZABI v=%p lock-on let go: %s",v,why);
-    a.lockOn=false;a.lockOnObj=nullptr;a.flick=0.0f;a.lockHidden=0.0f;
+    AssignLockTarget(a,{});a.lockOn=false;a.flick=0.0f;a.lockHidden=0.0f;
 }
 
 // Before the stick turns the view: the lock key, and while locked the stick's turn taken (a flick switches).
@@ -147,6 +153,8 @@ void LockInput(Mech& m,unsigned char* v,Controls& c,float dt) noexcept {
     const bool press=key && !a.lockKeyHeld;
     a.lockKeyHeld=key;
     if(!m.rootOk){LetGo(a,v,"no frame");return;}
+    // Validate before a flick consumes the player's input or can transfer the old lock to another enemy.
+    if(a.lockOn && !LiveLockTarget(a.lockOnTarget)){LetGo(a,v,"target identity expired");return;}
     const float range=Cfg().sazabiAssistRange;
     if(press && a.lockOn){LetGo(a,v,"released");return;}
     if(press) {
@@ -154,8 +162,11 @@ void LockInput(Mech& m,unsigned char* v,Controls& c,float dt) noexcept {
         Gather(m,v,kLockCone,range,&s);
         const int i=PickSeen(s,kLockCone,kLockCone,nullptr);
         if(i<0){Log("SAZABI v=%p lock-on: no enemy within %.0f deg of the reticle",v,kLockCone/sazabi::kDeg);return;}
-        a.lockOn=true;a.lockOnObj=s.pts[i].obj;a.lockHidden=0.0f;a.flick=0.0f;a.flickCool=kFlickCool;
-        Log("SAZABI v=%p lock-on: enemy %p",v,a.lockOnObj);
+        const ObjRef target=ObjRef::Of(s.pts[i].obj);
+        if(!LiveLockTarget(target)){LetGo(a,v,"target expired on acquisition");return;}
+        AssignLockTarget(a,target);
+        a.lockOn=true;a.lockHidden=0.0f;a.flick=0.0f;a.flickCool=kFlickCool;
+        Log("SAZABI v=%p lock-on: enemy %p",v,a.lockOnTarget.obj);
     }
     if(!a.lockOn)return;
     a.flick=a.flick*std::exp(-kFlickFade*dt)+c.turn*dt;
@@ -164,13 +175,15 @@ void LockInput(Mech& m,unsigned char* v,Controls& c,float dt) noexcept {
     if(std::fabs(a.flick)<kFlick || a.flickCool>0.0f || !a.hasAssist)return;
     AssistSeen s{};
     s.switchFrom=a.assist;s.switchYaw=m.heading;s.switchTurn=a.flick;
-    Gather(m,v,sazabi::kPi,range,&s,a.lockOnObj);
+    Gather(m,v,sazabi::kPi,range,&s,a.lockOnTarget.obj);
     for(int tries=0;tries<kAssistRays && s.n>0;++tries) {
-        const int i=sazabi::assist::Switch(s.eye,m.heading,a.assist,s.pts,s.n,a.lockOnObj,a.flick,range,kSwitchMost);
+        const int i=sazabi::assist::Switch(s.eye,m.heading,a.assist,s.pts,s.n,a.lockOnTarget.obj,a.flick,range,kSwitchMost);
         if(i<0)break;
         if(!SeenFrom(s.eye,s.pts[i].at)){s.pts[i]=s.pts[--s.n];continue;}
-        a.lockOnObj=s.pts[i].obj;a.lockHidden=0.0f;
-        Log("SAZABI v=%p lock-on switched %s: enemy %p",v,a.flick>0.0f ? "left" : "right",a.lockOnObj);
+        const ObjRef next=ObjRef::Of(s.pts[i].obj);
+        if(!LiveLockTarget(next)){s.pts[i]=s.pts[--s.n];continue;}
+        AssignLockTarget(a,next);a.lockHidden=0.0f;
+        Log("SAZABI v=%p lock-on switched %s: enemy %p",v,a.flick>0.0f ? "left" : "right",a.lockOnTarget.obj);
         break;
     }
     a.flick=0.0f;a.flickCool=kFlickCool;
@@ -185,12 +198,13 @@ void Assist(Mech& m,unsigned char* v,float dt) noexcept {
     const float range=Cfg().sazabiAssistRange;
     AssistSeen s{};
     if(a.lockOn) {
-        Gather(m,v,-1.0f,range*kLockLetGo,&s,a.lockOnObj,sazabi::kPi);
-        const int i=sazabi::assist::Pick(s.eye,s.dir,s.pts,s.n,-1.0f,sazabi::kPi,s.range,a.lockOnObj);   // its points alone
+        if(!LiveLockTarget(a.lockOnTarget)){LetGo(a,v,"target identity expired");return;}
+        Gather(m,v,-1.0f,range*kLockLetGo,&s,a.lockOnTarget.obj,sazabi::kPi);
+        const int i=sazabi::assist::Pick(s.eye,s.dir,s.pts,s.n,-1.0f,sazabi::kPi,s.range,a.lockOnTarget.obj);   // its points alone
         if(i<0){LetGo(a,v,"its enemy is gone or out of range");return;}
         a.lockHidden=SeenFrom(s.eye,s.pts[i].at) ? 0.0f : a.lockHidden+dt;
         if(a.lockHidden>kLockHiddenSec){LetGo(a,v,"out of sight");return;}
-        a.hasAssist=true;a.assistObj=a.lockOnObj;std::memcpy(a.assist,s.pts[i].at,12);
+        a.hasAssist=true;a.assistObj=a.lockOnTarget.obj;std::memcpy(a.assist,s.pts[i].at,12);
         PullOnto(m,a.assist,kLockPull,kLockMostPull,dt);
         return;
     }
