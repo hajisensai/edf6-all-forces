@@ -28,6 +28,7 @@
 #include "map.h"
 #include "memory.h"
 #include "sazabi_arms.h"
+#include "sazabi_flight.h"
 #include "sazabi_pose.h"
 #include "sazabi_sound.h"
 #include "vecmath.h"
@@ -48,17 +49,10 @@ constexpr std::size_t kSeatLX=0x2C0,kSeatLY=0x2C4,kSeatRX=0x2D0,kSeatRY=0x2D4,kS
 constexpr std::uint16_t kButtonA=0x01;
 constexpr std::size_t kBoneInvBind=0x30;   // a bone record's inverse bind (rec+0x30, 4x4): -its row 3 is a level bone's joint
 constexpr float kDeadZone=0.08f;
-// The hover over the ground (m) the walk keeps, how fast it closes on it (1/s) and its rise and fall at most (m/s);
-// off the ground by more than kOffGround (a ledge walked off) it is in the air.
-constexpr float kFloat=0.15f,kTrack=8.0f,kMostRise=25.0f,kMostDrop=40.0f,kOffGround=3.0f;
+// The walk and the flight: sazabi_flight.h (its hover over the ground, the stick's walk share, the boost, the gauge).
+namespace fl=sazabi::flight;
+using fl::kWalkShare;
 constexpr float kProbeUp=2.0f;            // m over its soles the ground ray starts (under kerbs and rubble it stands on)
-constexpr float kGroundAccel=30.0f,kAirAccel=18.0f;   // m/s^2 toward the stick's speed
-constexpr float kWalkShare=0.6f;          // of the stick's travel, the walk
-constexpr float kJump=0.6f;               // of SazabiClimb, up the moment it leaves the ground
-constexpr float kClimbTake=3.0f;          // 1/s: how fast the climb comes on
-constexpr float kLiftOff=0.3f;            // the ascend trigger past this lifts it
-constexpr float kDashSec=0.45f,kDashCost=0.15f,kDashLeast=0.15f;   // a dash's time, its charge, the charge it needs
-constexpr float kMostFall=60.0f;          // m/s
 constexpr float kLandHard=25.0f;          // m/s down: the deepest crouch
 constexpr float kPitchRate=1.4f;          // rad/s at full right stick (a pad's aim)
 constexpr float kAimMost=55.0f*sazabi::kDeg;
@@ -70,11 +64,12 @@ constexpr ULONGLONG kTestBoardMs=6000;   // SazabiTestBoard: this long after it 
 struct Mech {
     ObjRef ref;
     unsigned char* vehicle=nullptr;
-    bool driven=false,npc=false,active=false,insetSaved=false,havePrev=false,air=false,dashHeld=false,rigOk=false,rigSaid=false;
+    bool driven=false,npc=false,active=false,insetSaved=false,havePrev=false,rigOk=false,rigSaid=false;
     float savedInset=0.0f;
     ULONGLONG frame=0,lastMs=0,logAt=0;
-    float prev[3]{},measured[3]{},vel[3]{},omega[3]{};
-    float heading=0.0f,aimPitch=0.0f,yawRate=0.0f,thruster=1.0f,dashLeft=0.0f,dashDir[3]{},feetClear=0.0f;
+    float prev[3]{},measured[3]{},omega[3]{};
+    float heading=0.0f,aimPitch=0.0f,yawRate=0.0f,feetClear=0.0f;
+    fl::State fl{};                     // its walk and flight: velocity, in the air, the thrusters' gauge (sazabi_flight.h)
     const void* bones=nullptr;          // the instance's bone array the records below were found in
     unsigned char* rec[sazabi::kBoneCount]{};
     sazabi::Rig rig{};
@@ -214,6 +209,7 @@ float FeetClear(const Mech& m) noexcept {
 
 #include "sazabi_arms.inc"
 #include "sazabi_pilot.inc"
+#include "sazabi_camera.inc"
 
 // ------------------------------------------------------------------------------------------ driving
 void Board(Mech& m,unsigned char* v,bool npc) noexcept {
@@ -222,92 +218,52 @@ void Board(Mech& m,unsigned char* v,bool npc) noexcept {
     const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
     m.heading=std::atan2(f[0],f[2]);
     m.aimPitch=0.0f;
-    std::memcpy(m.vel,m.measured,12);
-    m.air=m.feetClear==kNoGround || m.feetClear>kOffGround;
+    std::memcpy(m.fl.vel,m.measured,12);
+    m.fl.air=m.feetClear==kNoGround || m.feetClear>fl::kOffGround;
+    m.fl.boostHeld=true;m.fl.ascendHeld=true;   // a button held while boarding is no press
     Log("SAZABI v=%p boarded by %s: hp %.0f/%.0f, %s, %.1f m over the ground, thrusters %.0f%%",v,npc ? "an NPC" : "the player",
-        At<float>(v,kHp),At<float>(v,kHpMax),m.air ? "in the air" : "on its feet",m.feetClear,m.thruster*100.0f);
+        At<float>(v,kHp),At<float>(v,kHpMax),m.fl.air ? "in the air" : "on its feet",m.feetClear,m.fl.gauge*100.0f);
 }
 
 void Leave(Mech& m,unsigned char* v,bool alive,const char* how) noexcept {
     DropArms(m);
-    m.driven=false;m.npc=false;m.active=false;m.dashLeft=0.0f;
+    if(view.vehicle==v)DropView();   // the stock camera again
+    m.driven=false;m.npc=false;m.active=false;
     if(m.insetSaved && alive)Put<float>(v,kAreaInset,m.savedInset);
     m.insetSaved=false;
     Log("SAZABI v=%p left: %s",v,how);
 }
 
-// The walk: on its feet, tracking the ground's height; or off it.
-void Feet(Mech& m,const Controls& c,float dt) noexcept {
-    if(c.ascend>kLiftOff && m.thruster>kDashLeast) {   // a thruster jump
-        m.air=true;
-        m.vel[1]=Cfg().sazabiClimb*kJump;
-        return;
+// The walk and the flight (sazabi_flight.h: the stick, the ascend trigger, the boost, the gauge), and what they set off:
+// the dash's roar on a jump or a burst, the landing's crouch and thud.
+void Fly(Mech& m,unsigned char* v,const Controls& c,float dt) noexcept {
+    fl::Params p;
+    p.walk=Cfg().sazabiWalk;p.run=Cfg().sazabiRun;p.fly=Cfg().sazabiFly;p.boost=Cfg().sazabiDash;p.climb=Cfg().sazabiClimb;
+    p.gravity=Cfg().sazabiGravity;p.thrusterSec=Cfg().sazabiThrusterSec;p.regen=Cfg().sazabiThrusterRegen;
+    fl::Input in;
+    in.forward=c.forward;in.right=c.right;in.ascend=c.ascend;in.boost=c.dash;in.descend=c.descend;
+    const float feet=m.feetClear==kNoGround ? fl::kNoGround : m.feetClear;
+    const fl::Events ev=fl::Step(m.fl,in,m.heading,feet,dt,p);
+    const float* at=m.rootOk ? m.root+12 : nullptr;
+    if(at && (ev.jumped || ev.burst))Sfx(m,SzSfx::dash,at);
+    if(ev.landed) {
+        m.pose.crouch=std::fmax(m.pose.crouch,Clamp(ev.landSpeed/kLandHard,0.3f,1.0f));
+        if(at)Sfx(m,SzSfx::land,at);
     }
-    if(m.feetClear==kNoGround || m.feetClear>kOffGround){m.air=true;return;}   // walked off a ledge
-    m.vel[1]=Clamp((kFloat-m.feetClear)*kTrack,-kMostDrop,kMostRise);
-    m.thruster=std::fmin(1.0f,m.thruster+Cfg().sazabiThrusterRegen*dt);
-}
-
-void Air(Mech& m,const Controls& c,float dt) noexcept {
-    const float g=Cfg().sazabiGravity;
-    if(c.ascend>0.0f && m.thruster>0.0f) {
-        const float want=Cfg().sazabiClimb*c.ascend;
-        m.vel[1]+=(want-m.vel[1])*std::fmin(1.0f,kClimbTake*dt);
-        m.thruster=std::fmax(0.0f,m.thruster-c.ascend*dt/Cfg().sazabiThrusterSec);
-    } else m.vel[1]-=g*dt*(c.descend ? 2.0f : 1.0f);
-    m.vel[1]=std::fmax(m.vel[1],-kMostFall);
-    if(m.feetClear!=kNoGround && m.feetClear<=kFloat+0.2f && m.vel[1]<=0.0f) {   // down: the knees take it
-        m.pose.crouch=std::fmax(m.pose.crouch,Clamp(-m.vel[1]/kLandHard,0.3f,1.0f));
-        m.air=false;
-        if(m.rootOk)Sfx(m,SzSfx::land,m.root+12);
-        m.vel[1]=0.0f;
-    }
-}
-
-void Move(Mech& m,const Controls& c,float dt) noexcept {
-    const float s=std::sin(m.heading),co=std::cos(m.heading);
-    const float fwd[3]={s,0.0f,co},left[3]={co,0.0f,-s};
-    float want[3]{};
-    float mag=std::sqrt(c.forward*c.forward+c.right*c.right);
-    const float k=mag>1.0f ? 1.0f/mag : 1.0f;
-    for(int i=0;i<3;i+=2)want[i]=(fwd[i]*c.forward-left[i]*c.right)*k;
-    mag=std::fmin(mag,1.0f);
-    // a dash: pressed (not held) with charge enough, along the stick (or ahead), for kDashSec
-    if(c.dash && !m.dashHeld && m.thruster>=kDashLeast) {
-        m.dashLeft=kDashSec;
-        m.thruster-=kDashCost;
-        if(m.rootOk)Sfx(m,SzSfx::dash,m.root+12);
-        for(int i=0;i<3;++i)m.dashDir[i]=mag>0.1f ? want[i]/mag : fwd[i];
-    }
-    m.dashHeld=c.dash;
-    if(m.dashLeft>0.0f) {
-        m.dashLeft-=dt;
-        m.vel[0]=m.dashDir[0]*Cfg().sazabiDash;m.vel[2]=m.dashDir[2]*Cfg().sazabiDash;
-        if(m.air)m.vel[1]=std::fmax(m.vel[1],0.0f);   // a dash holds it up
-        return;
-    }
-    // on its feet the stick to kWalkShare walks (up to SazabiWalk), past it runs (to SazabiRun); in the air it flies
-    const float walk=Cfg().sazabiWalk,run=Cfg().sazabiRun;
-    const float top=m.air ? Cfg().sazabiFly :
-                    mag<=kWalkShare ? walk/kWalkShare : (walk+(mag-kWalkShare)/(1.0f-kWalkShare)*(run-walk))/mag;
-    const float accel=(m.air ? kAirAccel : kGroundAccel)*dt;
-    for(int i=0;i<3;i+=2) {
-        const float d=want[i]*top-m.vel[i];
-        m.vel[i]+=Clamp(d,-accel,accel);
-    }
+    if(ev.overheated)Log("SAZABI v=%p overheated: no boost until it lands",v);
 }
 
 // The pose's inputs from the motion (sazabi_pose.h PoseInput).
 void Animate(Mech& m,float dt,bool driven) noexcept {
     sazabi::PoseInput& p=m.pose;
-    const float ground=std::sqrt(m.vel[0]*m.vel[0]+m.vel[2]*m.vel[2]);
+    const float ground=std::sqrt(m.fl.vel[0]*m.fl.vel[0]+m.fl.vel[2]*m.fl.vel[2]);
     p.t+=dt;
-    const float strideWant=m.air || !driven ? 0.0f : Clamp(ground/Cfg().sazabiRun,0.0f,1.0f);
+    const float strideWant=m.fl.air || !driven ? 0.0f : Clamp(ground/Cfg().sazabiRun,0.0f,1.0f);
     p.stride+=(strideWant-p.stride)*std::fmin(1.0f,4.0f*dt);
-    if(!m.air)p.gait=sazabi::GaitStep(p.gait,ground,p.stride,dt);
-    p.air+=((m.air ? 1.0f : 0.0f)-p.air)*std::fmin(1.0f,kAirBlendRate*dt);
-    const float leanWant=m.air ? Clamp(ground/Cfg().sazabiFly,0.0f,1.0f)*28.0f*sazabi::kDeg : 0.0f;
-    p.lean+=(leanWant+(m.dashLeft>0.0f ? 15.0f*sazabi::kDeg : 0.0f)-p.lean)*std::fmin(1.0f,5.0f*dt);
+    if(!m.fl.air)p.gait=sazabi::GaitStep(p.gait,ground,p.stride,dt);
+    p.air+=((m.fl.air ? 1.0f : 0.0f)-p.air)*std::fmin(1.0f,kAirBlendRate*dt);
+    const float leanWant=m.fl.air ? Clamp(ground/Cfg().sazabiFly,0.0f,1.0f)*28.0f*sazabi::kDeg : 0.0f;
+    p.lean+=(leanWant+(m.fl.boosting ? 15.0f*sazabi::kDeg : 0.0f)-p.lean)*std::fmin(1.0f,5.0f*dt);
     p.bank+=(Clamp(m.yawRate*0.12f,-0.3f,0.3f)-p.bank)*std::fmin(1.0f,4.0f*dt);
     p.crouch=std::fmax(0.0f,p.crouch-kCrouchDecay*dt);
     p.aimPitch=m.aimPitch;
@@ -319,9 +275,9 @@ void Report(Mech& m,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
     if(!Cfg().debug || ms-m.logAt<kLogMs)return;
     m.logAt=ms;
     const float* p=reinterpret_cast<const float*>(v+kPosition);
-    Log("SAZABI v=%p %s vel=(%.1f,%.1f,%.1f) feet %.2f m heading %.0f aim %.0f thr %.0f%% dash %.2f pos=(%.0f,%.0f,%.0f) hp %.0f "
-        "in(f %.2f r %.2f turn %.2f asc %.2f)",v,m.air ? "AIR" : "GROUND",m.vel[0],m.vel[1],m.vel[2],m.feetClear,
-        m.heading/sazabi::kDeg,m.aimPitch/sazabi::kDeg,m.thruster*100.0f,m.dashLeft,p[0],p[1],p[2],At<float>(v,kHp),c.forward,
+    Log("SAZABI v=%p %s vel=(%.1f,%.1f,%.1f) feet %.2f m heading %.0f aim %.0f thr %.0f%% boost %d heat %d pos=(%.0f,%.0f,%.0f) hp %.0f "
+        "in(f %.2f r %.2f turn %.2f asc %.2f)",v,m.fl.air ? "AIR" : "GROUND",m.fl.vel[0],m.fl.vel[1],m.fl.vel[2],m.feetClear,
+        m.heading/sazabi::kDeg,m.aimPitch/sazabi::kDeg,m.fl.gauge*100.0f,m.fl.boosting,m.fl.overheat,p[0],p[1],p[2],At<float>(v,kHp),c.forward,
         c.right,c.turn,c.ascend);
     // the frames' axes in the world (docs/sazabi-re.md: what the bones' worlds are against the body), the funnels
     const float* vm=reinterpret_cast<const float*>(v+kMatrix);
@@ -365,8 +321,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     if(m.heading>sazabi::kPi)m.heading-=2.0f*sazabi::kPi;
     if(m.heading<-sazabi::kPi)m.heading+=2.0f*sazabi::kPi;
     m.aimPitch=Clamp(m.aimPitch+c.pitch,-kAimMost,kAimMost);
-    if(m.air)Air(m,c,dt); else Feet(m,c,dt);
-    Move(m,c,dt);
+    Fly(m,v,c,dt);
     const float nose[3]={std::sin(m.heading),0.0f,std::cos(m.heading)},up[3]={0.0f,1.0f,0.0f};
     BodyAttitude(v,nose,up,kAttitudeGain,kAttitudeMost,m.omega);
     // The heli stays out of it (docs/heli-input-re.md §2a), and the move area's clamp too (playerjet.cpp).
@@ -374,11 +329,13 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
     m.active=true;
+    if(!npc)PublishView(m,v);   // the camera the look-at hook places (sazabi_camera.inc)
     Animate(m,dt,true);
+    Aim(m,v);                   // the aim point, the arm onto it
     ArmsStep(m,v,arms,dt);
     Pose(m,v);
     // the thrusters push while it climbs, dashes or flies on
-    const float thrust=m.dashLeft>0.0f ? 1.0f : m.air ? std::fmax(c.ascend,Clamp(Len(m.vel)/Cfg().sazabiFly,0.0f,1.0f)*0.6f) : 0.0f;
+    const float thrust=m.fl.boosting || m.fl.climbing ? 1.0f : m.fl.air ? Clamp(Len(m.fl.vel)/Cfg().sazabiFly,0.0f,1.0f)*0.4f : 0.0f;
     ArmsFire(m,v,arms,thrust,dt);
     Footsteps(m);
     if(!npc)PublishCue(m);
@@ -398,6 +355,22 @@ void TestBoard(const Mech& m,unsigned char* v) noexcept {
 }  // namespace
 
 bool IsSazabi(const void* vehicle) noexcept { return BodyOf(vehicle)==PluginBody::sazabi; }
+
+// The riding camera of seat `seat` when it is the player's Sazabi's (turretcam.cpp LookHook, whatever thread fetches the
+// camera): its eye and the point it looks at, on the centre ray the game thread aims along (sazabi_camera.inc).
+bool SazabiCamera(const unsigned char* seat,float* eye,float* look) noexcept {
+    if(!seat || !Cfg().enabled || !Cfg().sazabi)return false;
+    AcquireSRWLockShared(&viewLock);
+    const View w=view;
+    ReleaseSRWLockShared(&viewLock);
+    const ULONGLONG now=GameMs();
+    if(w.seat!=seat || !w.vehicle || now-w.ms>kViewFresh || !Readable(w.vehicle+kPosition,12))return false;
+    float dir[3];
+    ViewRay(w,reinterpret_cast<const float*>(w.vehicle+kPosition),eye,dir);
+    for(int k=0;k<3;++k){look[k]=eye[k]+dir[k]*100.0f;if(!std::isfinite(eye[k]) || !std::isfinite(look[k]))return false;}
+    placedMs=now;
+    return true;
+}
 
 // The HUD's view of the player's Sazabi (crew.h SazabiCue): published each frame it is driven (PublishCue).
 bool PlayerSazabiCue(SazabiCue* out) noexcept {
@@ -424,7 +397,7 @@ bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     if(!Cfg().enabled || !Cfg().sazabi)return false;
     const Mech* m=Find(v);
     if(!m || !m->active || !m->driven || v[kDead] || m->frame+1<GameFrame() || !At<void*>(v,kBody))return false;
-    for(int i=0;i<3;++i){lin[i]=m->vel[i];ang[i]=m->omega[i];}
+    for(int i=0;i<3;++i){lin[i]=m->fl.vel[i];ang[i]=m->omega[i];}
     return true;
 }
 
@@ -456,6 +429,7 @@ bool InstallSazabi() noexcept {
 
 void ResetSazabi() noexcept {
     for(auto& m:mechs)m=Mech{};
+    DropView();
     cueMs=0;
     testBoarded=false;
     firstSeenMs=0;

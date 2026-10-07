@@ -39,7 +39,7 @@ void Pilot(Mech& m,unsigned char* v,float dt,Controls* c,ArmsInput* in) noexcept
         const float d[3]={player.pos[0]-r[0],player.pos[1]-r[1],player.pos[2]-r[2]};
         away=std::sqrt(d[0]*d[0]+d[2]*d[2]);
         if(away>kFollowNear){want[0]=d[0]/away;want[2]=d[2]/away;}
-        c->ascend=d[1]>kClimbOver && m.thruster>0.2f ? 1.0f : 0.0f;
+        c->ascend=d[1]>kClimbOver && m.fl.gauge>0.2f ? 1.0f : 0.0f;
     }
     const float walkTo=away>kFollowFar ? Clamp((away-kFollowNear)/(kFollowRun-kFollowNear),kWalkShare,1.0f) :
                        away>kFollowNear ? kWalkShare*0.6f : 0.0f;

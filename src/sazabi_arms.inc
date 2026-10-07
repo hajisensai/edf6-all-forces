@@ -163,7 +163,7 @@ void Tomahawk(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     a.swing+=dt/kSwingSec;
     float blade[3];
     BoneAt(m,sazabi::kAxeBlade,nullptr,blade);
-    if(m.driven && !m.npc)SazabiLoop(SzLoop::saberHum,blade,m.vel,1.0f);
+    if(m.driven && !m.npc)SazabiLoop(SzLoop::saberHum,blade,m.fl.vel,1.0f);
     if(!a.whooshed && a.swing>=sazabi::kWindUp){a.whooshed=true;Sfx(m,SzSfx::whoosh,blade);}
     if(!a.struck && a.swing>=0.5f*(sazabi::kWindUp+sazabi::kStrike)){a.struck=true;Strike(m,v,blade);}
     if(a.swing<1.0f)return;
@@ -172,11 +172,14 @@ void Tomahawk(Mech& m,unsigned char* v,const ArmsInput& in,float dt) noexcept {
     Sfx(m,SzSfx::saberOff,blade);
 }
 
-// The cannon's aim from the chest: the mech's heading, the aim's pitch, `yaw` deg aside; world.
-void CannonDir(const Mech& m,float yaw,float* out) noexcept {
-    const float y=yaw*sazabi::kDeg,p=m.aimPitch;
-    const float local[3]={std::sin(y)*std::cos(p),std::sin(p),std::cos(y)*std::cos(p)};
-    DirToWorld(m,local,out);
+// The cannon's beam from `from` (its muzzle on the chest): at the aim point (sazabi_camera.inc Aim), turned `yaw` deg
+// aside about the vertical (the fan); world, unit.
+void CannonDir(const Mech& m,const float* from,float yaw,float* out) noexcept {
+    float d[3]={m.arms.aim[0]-from[0],m.arms.aim[1]-from[1],m.arms.aim[2]-from[2]};
+    float l=Len(d);
+    if(l<1.0f){d[0]=std::sin(m.heading);d[1]=0.0f;d[2]=std::cos(m.heading);l=1.0f;}
+    const float y=yaw*sazabi::kDeg,c=std::cos(y),s=std::sin(y);
+    out[0]=(d[0]*c+d[2]*s)/l;out[1]=d[1]/l;out[2]=(-d[0]*s+d[2]*c)/l;
 }
 void BeamEnd(const float* from,const float* dir,float range,float* end) noexcept {
     float stop[3],hit[3];
@@ -193,7 +196,7 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
         a.megaLeft-=dt;
         for(int b=0;b<kMegaBeams;++b) {
             float dir[3],end[3];
-            CannonDir(m,a.megaYaw[b],dir);
+            CannonDir(m,from,a.megaYaw[b],dir);
             BeamEnd(from,dir,kMegaRange,end);
             if(a.megaLeft<=0.0f || !RoundSteer(a.mega[b],from,end))RoundDrop(a.mega[b]);
         }
@@ -203,12 +206,12 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
     if(held && a.swing<0.0f && a.cannonCool<=0.0f && EmcRoundReady(EmcRound::szMega)) {   // charging
         a.charge=std::fmin(1.0f,a.charge+dt/kChargeSec);
         float fwd[3],tip[3];
-        CannonDir(m,0.0f,fwd);
+        CannonDir(m,from,0.0f,fwd);
         for(int k=0;k<3;++k)tip[k]=from[k]+fwd[k]*0.3f;
         if(!a.glow.obj && EmcRoundReady(EmcRound::szCharge))a.glow=EmcFire(EmcRound::szCharge,v,from,tip,0.0f);
         RoundSteer(a.glow,from,tip);
         RoundSize(a.glow,kGlowThin+(kGlowThick-kGlowThin)*a.charge);
-        if(m.driven && !m.npc)SazabiLoop(SzLoop::cannonCharge,from,m.vel,a.charge);
+        if(m.driven && !m.npc)SazabiLoop(SzLoop::cannonCharge,from,m.fl.vel,a.charge);
         a.brace=a.charge;
         return;
     }
@@ -218,7 +221,7 @@ void Cannon(Mech& m,unsigned char* v,bool held,bool let,float dt) noexcept {
         for(int b=0;b<kMegaBeams;++b) {
             float dir[3],end[3];
             a.megaYaw[b]=kMegaFan[b];
-            CannonDir(m,a.megaYaw[b],dir);
+            CannonDir(m,from,a.megaYaw[b],dir);
             BeamEnd(from,dir,kMegaRange,end);
             a.mega[b]=EmcFire(EmcRound::szMega,v,from,end,a.megaDamage);
             RoundSize(a.mega[b],kMegaSize*(0.5f+0.5f*a.charge));
@@ -321,30 +324,59 @@ void FlyFunnels(Mech& m,unsigned char* v,bool launch,float dt) noexcept {
     if(docked==kFunnelCount){a.funnelCool=kFunnelCool;Log("SAZABI v=%p funnels home",v);}
 }
 
-// The flames: the thrusters' while they push (`thrust` 0..1), each flying funnel's behind it.
+// A nozzle's flame matrix: rows unit, +z `dir` (the way the flame leaves), at `at` (world).
+void NozzleMatrix(const float* at,const float* dir,float* out) noexcept {
+    const sazabi::M3 r=sazabi::Facing(dir);
+    for(int i=0;i<3;++i){for(int k=0;k<3;++k)out[i*4+k]=r.m[i*3+k];out[i*4+3]=0.0f;}
+    for(int k=0;k<3;++k)out[12+k]=at[k];
+    out[15]=1.0f;
+}
+
+// The flames (the user, 2026-10-07: 「飞行时喷气明显不对」: they were the flares' 4 m fires, trailing against the motion):
+//  - the main thrusters: the backpack's two thrust bells (the model's thruster glow, kNozzleAt / kNozzleDir), a flame
+//    out of each as long as kBellFlame at full thrust and as wide as the bell, burning with the thrust (`thrust` 0..1);
+//  - the soles: while it climbs or hangs in the air on its thrusters, a flame down out of each foot (kSoleFlame);
+//  - each flying funnel's small fire behind it (the flares' Booster set, FlareFlames).
+// Every frame (0 when idle: the flames burn down and their boosters wait for the next burst).
+constexpr float kBellFlame[2]={14.0f,2.4f},kSoleFlame[2]={7.0f,1.6f};
 void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
+    alignas(16) float mats[4][16];
+    const float sizes[4][2]={{kBellFlame[0],kBellFlame[1]},{kBellFlame[0],kBellFlame[1]},{kSoleFlame[0],kSoleFlame[1]},
+                             {kSoleFlame[0],kSoleFlame[1]}};
+    float bells[2][3];
+    for(int i=0;i<2;++i) {
+        float dir[3],local[3];
+        BoneAt(m,sazabi::kBackpack,kNozzleAt[i],bells[i]);
+        sazabi::Apply(kNozzleDir[i],scratch.modelRot[sazabi::kBackpack],local);
+        DirToWorld(m,local,dir);
+        NozzleMatrix(bells[i],dir,mats[i]);
+    }
+    constexpr int kFeet[2]={sazabi::kFootL,sazabi::kFootR};
+    for(int i=0;i<2;++i) {   // down out of the sole: the foot's own -y
+        const float down[3]={0.0f,-1.0f,0.0f},under[3]={0.0f,-1.8f,0.0f};   // the sole, 1.8 m under the ankle
+        float at[3],local[3],dir[3];
+        BoneAt(m,kFeet[i],under,at);
+        sazabi::Apply(down,scratch.modelRot[kFeet[i]],local);
+        DirToWorld(m,local,dir);
+        NozzleMatrix(at,dir,mats[2+i]);
+    }
+    const float sole=m.fl.air && (m.fl.climbing || m.fl.boosting) ? thrust : 0.0f;
+    const float levels[4]={thrust,thrust,sole,sole};
+    NozzleFlames(v,mats,4,sizes,levels,GameMs());
+    // the funnels
     float at[8][3],vel[8][3];
     int n=0;
-    if(thrust>0.05f)
-        for(int i=0;i<2;++i) {
-            float dir[3],local[3];
-            BoneAt(m,sazabi::kBackpack,kNozzleAt[i],at[n]);
-            sazabi::Apply(kNozzleDir[i],scratch.modelRot[sazabi::kBackpack],local);
-            DirToWorld(m,local,dir);
-            for(int k=0;k<3;++k)vel[n][k]=-dir[k];   // the flame trails against `vel`: out of the throat
-            ++n;
-        }
     for(const auto& f:m.arms.funnels) {
         if(f.phase==FunnelPhase::docked || f.phase==FunnelPhase::launching || n>=8)continue;
         for(int k=0;k<3;++k){at[n][k]=f.at[k]-f.dir[k]*1.0f;vel[n][k]=f.vel[k];}
         if(Len(f.vel)<1.0f)for(int k=0;k<3;++k)vel[n][k]=f.dir[k];
         ++n;
     }
-    if(n)FlareFlames(v,at,vel,n,GameMs());
+    FlareFlames(v,at,vel,n,GameMs());
     if(m.driven && !m.npc && thrust>0.05f) {
         float mid[3];
-        for(int k=0;k<3;++k)mid[k]=0.5f*(at[0][k]+at[1][k]);
-        SazabiLoop(SzLoop::thrusters,mid,m.vel,thrust);
+        for(int k=0;k<3;++k)mid[k]=0.5f*(bells[0][k]+bells[1][k]);
+        SazabiLoop(SzLoop::thrusters,mid,m.fl.vel,thrust);
     }
 }
 
@@ -403,16 +435,7 @@ void ArmsFire(Mech& m,unsigned char* v,const ArmsInput& in,float thrust,float dt
         Flames(m,v,thrust);
     }
     a.secondaryHeld=in.secondary;
-    // the reticle: along the rifle from its muzzle to what it meets
-    a.hasAim=false;
-    if(m.rootOk) {
-        float from[3],dir[3],end[3];
-        BoneAt(m,sazabi::kMuzzle,nullptr,from);
-        DirToWorld(m,&scratch.modelRot[sazabi::kRifle].m[6],dir);
-        BeamEnd(from,dir,kAimRange,end);
-        std::memcpy(a.aim,end,12);
-        a.hasAim=a.swing<0.0f;
-    }
+    // the reticle's point: Aim (sazabi_camera.inc), before the pose
     float point[3],progress=0.0f;
     const int lock=missile ? WeaponLock(missile,point,&progress) : 0;
     a.hasLock=lock==2;
@@ -425,13 +448,13 @@ void ArmsFire(Mech& m,unsigned char* v,const ArmsInput& in,float thrust,float dt
 void Footsteps(Mech& m) noexcept {
     for(int side=0;side<2;++side) {
         const sazabi::FootPlan f=sazabi::Plan(m.pose.gait,m.pose.stride,side);
-        const bool down=f.stance && !m.air && scratch.gaitW>0.3f;
+        const bool down=f.stance && !m.fl.air && scratch.gaitW>0.3f;
         if(down && !m.arms.stance[side] && m.rootOk) {
             float at[3];
             BoneAt(m,side==0 ? sazabi::kFootL : sazabi::kFootR,nullptr,at);
             Sfx(m,SzSfx::footstep,at);
         }
-        m.arms.stance[side]=f.stance || m.air;
+        m.arms.stance[side]=f.stance || m.fl.air;
     }
 }
 
@@ -440,7 +463,7 @@ ULONGLONG cueMs=0;
 void PublishCue(const Mech& m) noexcept {
     const Arms& a=m.arms;
     SazabiCue c{};
-    c.thruster=m.thruster;
+    c.thruster=m.fl.gauge;
     c.rifleReady=Clamp(a.rifleSince/kRifleInterval,0.0f,1.0f);
     c.missiles=a.missiles;
     c.missileReady=Clamp(a.missileSince/kMissileInterval,0.0f,1.0f);
@@ -451,8 +474,15 @@ void PublishCue(const Mech& m) noexcept {
     for(const auto& f:a.funnels)out+=f.phase!=FunnelPhase::docked;
     c.funnelsOut=out;
     c.funnelReady=out ? 0.0f : 1.0f-a.funnelCool/kFunnelCool;
-    c.guard=a.guard>0.5f;c.swinging=a.swing>=0.0f;c.air=m.air;
+    c.guard=a.guard>0.5f;c.swinging=a.swing>=0.0f;c.air=m.fl.air;
     c.hasAim=a.hasAim;std::memcpy(c.aim,a.aim,12);
     c.hasLock=a.hasLock;std::memcpy(c.lock,a.lock,12);
+    c.altitude=m.fl.air && m.feetClear!=kNoGround ? std::fmax(0.0f,m.feetClear) : 0.0f;
+    c.speed=std::sqrt(m.fl.vel[0]*m.fl.vel[0]+m.fl.vel[2]*m.fl.vel[2]);
+    c.climb=m.fl.vel[1];
+    c.boosting=m.fl.boosting || m.fl.climbing;
+    c.overheat=m.fl.overheat;
+    c.special=static_cast<int>(a.special);
+    c.aimRange=a.aimRange;c.aimHit=a.aimHit;c.centred=a.centred;
     cue=c;cueMs=GameMs();
 }

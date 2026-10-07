@@ -47,7 +47,8 @@ struct Arms {
     Funnel funnels[kFunnelCount];
     std::int32_t rifleAmmo=-1,missileAmmo=-1,missiles=0;
     float rifleSince=1e3f,missileSince=1e3f,lockProgress=0.0f;
-    bool hasAim=false,hasLock=false;
+    bool hasAim=false,hasLock=false,aimHit=false,centred=false;
+    float aimRange=0.0f;
     float aim[3]{},lock[3]{};
     bool stance[2]{true,true};   // each foot on the ground last frame (its footstep when it comes down)
 };

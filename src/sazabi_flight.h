@@ -145,7 +145,6 @@ inline Events Step(State& st,const Input& in,float heading,float feet,float dt,c
     }
     // spent in the air: overheated until it lands and cools
     if(st.air && st.gauge<=0.0f && !st.overheat){st.overheat=true;ev.overheated=true;}
-    if(st.overheat){st.boosting=false;st.climbing=false;}
     // down: the knees take it
     if(st.air && feet!=kNoGround && feet<=kFloat+0.2f && st.vel[1]<=0.0f) {
         ev.landed=true;ev.landSpeed=-st.vel[1];

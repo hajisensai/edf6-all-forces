@@ -564,8 +564,12 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
 float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) {
     float* const r=reinterpret_cast<PointFn>(image+kPoint)(point,lookOut);
     __try {
+        float eye[3],look[3];
         if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
             Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
+        // the player's Sazabi: its own rig, the screen's centre its aim (sazabi.cpp, sazabi_camera.inc)
+        else if(SazabiCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
+            Place(lookOut+12,lookOut+28,cam,eye,look);
         // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.
         else if(Cfg().enabled)ProteusViewLift(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,lookOut+28);
     } __except(EXCEPTION_EXECUTE_HANDLER){}

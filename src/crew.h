@@ -102,13 +102,13 @@ struct Config {
     float sazabiWalk=12.0f;         // m/s ...the stick half forward (a walk)
     float sazabiRun=26.0f;          // m/s ...full forward (a run)
     float sazabiFly=48.0f;          // m/s ...in the air
-    float sazabiDash=75.0f;         // m/s ...a dash
+    float sazabiDash=60.0f;         // m/s ...a boost dash (held: on, burning the thrusters)
     float sazabiClimb=24.0f;        // m/s up at the full ascend trigger
     float sazabiGravity=20.0f;      // m/s^2 falling with the thrusters off
     float sazabiTurn=110.0f;        // deg/s at the full right stick
     float sazabiMouseTurn=0.6f;     // deg of turn / aim per unit of the mouse's frame movement
-    float sazabiThrusterSec=8.0f;   // s of full thrust a full charge holds
-    float sazabiThrusterRegen=0.25f;   // of a full charge a second, on its feet
+    float sazabiThrusterSec=8.0f;   // s of boost or climb a full gauge holds
+    float sazabiThrusterRegen=0.4f; // of a full gauge a second, on its feet (three times that just after landing)
     bool sazabiInvertAim=false;     // the aim's up and down the other way
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
@@ -482,6 +482,8 @@ void ShieldVehicle(unsigned char* vehicle) noexcept;   // shield.cpp: the same f
 void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept;
 // booster.cpp: a jet's exhaust flames on its nozzles (by its mark), burning `intensity` (0..1), `burner` longer.
 void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) noexcept;
+// booster.cpp: flames on nozzles placed in the world (+z out of each, rows unit), `size[i]` (length, width m) and `level[i]` (0 out .. 1) each; at most 4.
+void NozzleFlames(const unsigned char* v,const float (*m)[16],int n,const float (*size)[2],const float* level,ULONGLONG ms) noexcept;
 void JetSmoke(const unsigned char* v,bool on,ULONGLONG ms) noexcept;   // booster.cpp: an arriving jet's smoke trails
 bool JetMotionProps(void* body) noexcept;          // a jet body's own motion properties (no 200 m/s cap); each physics step
 void PreloadJets() noexcept;                       // from the mission's player preload
@@ -579,6 +581,9 @@ struct SazabiCue {
 };
 constexpr ULONGLONG kSazabiCueMs=250;
 bool PlayerSazabiCue(SazabiCue* out) noexcept;
+// The player's Sazabi's riding camera (turretcam.cpp's look-at hook): seat `seat`'s eye and look point, false when the
+// seat is no player's Sazabi's (the stock camera then).
+bool SazabiCamera(const unsigned char* seat,float* eye,float* look) noexcept;
 void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
 bool InstallSazabi() noexcept;                        // after InstallBody506
 void ResetSazabi() noexcept;                          // a new mission

@@ -445,6 +445,33 @@ void JetFlames(const unsigned char* v,float intensity,bool burner,ULONGLONG ms) 
     __except(MakeFault(GetExceptionInformation())) {}
 }
 
+// Flames on nozzles the caller places in the world (the Sazabi's thrust bells and soles, sazabi_arms.inc Flames): each
+// matrix's +z the way its flame leaves, rows unit; `size[i]` its length and width (m) when made; `level[i]` how strongly
+// they burn this frame (0: they burn down, the boosters kept for the next burst). At most kNozzles a vehicle.
+void NozzleFlames(const unsigned char* v,const float (*m)[16],int n,const float (*size)[2],const float* level,ULONGLONG ms) noexcept {
+    if(!sigOk || broken || !v || !m || !size || !level)return;
+    __try {
+        Carrier* const c=Find(v,ms);
+        if(!c)return;
+        c->seen=ms;
+        for(int i=0;i<n && i<kNozzles;++i) {
+            Nozzle& z=c->n[i];
+            std::memcpy(z.m,m[i],sizeof z.m);
+            if(!Live(z)) {
+                if(level[i]<=0.0f)continue;   // nothing to light: none made yet
+                DropWeak(z.ctrl);
+                z.obj=nullptr;z.ctrl=nullptr;
+                Make(z,v,size[i]);
+                if(!Live(z))continue;
+            }
+            Put<float>(z.obj,kLevel,level[i]);
+            Put<float>(z.obj,kPulse,level[i]>0.0f ? 1.0f : 0.0f);
+            Put<int>(z.obj,kHold,level[i]>0.0f ? 3 : 0);
+        }
+    }
+    __except(MakeFault(GetExceptionInformation())) {}
+}
+
 void CarrierFlames(const unsigned char* v,unsigned char* const* recs,float intensity,ULONGLONG ms) noexcept {
     if(!sigOk || broken || !v || !recs)return;
     __try { Frame(v,recs,intensity,ms); }

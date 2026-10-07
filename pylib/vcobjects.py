@@ -1397,7 +1397,7 @@ def sazabi_weapons(game: Game) -> dict[str, bytes]:
     cp.items[1].items[:] = [SAZABI_PINK[0] * 1.5, SAZABI_PINK[1] * 1.5, SAZABI_PINK[2] * 1.5, 1.0]
     flash.items[1] = 2.0                                     # the muzzle flash: as big as the Nix cannon's
     flash.items[2].items[:] = list(SAZABI_PINK)
-    flash.items[3] = 40.0
+    flash.items[3] = 4.0                                     # its glow: twice the stock laser's 2.0 (40 lit the ground pink far round it)
     fire = r.get('FireSe')
     fire.items[1], fire.items[2], fire.items[5] = SAZABI_RIFLE_FIRE_SE
     r.set('AmmoHitSe', _node_se(SAZABI_RIFLE_HIT_SE))
