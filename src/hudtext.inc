@@ -31,6 +31,7 @@ HUDTEXT(highCamOn,L"HIGH CAM ON [%ls]",L"俯瞰视角 开 [%ls]",L"俯瞰視角 
 HUDTEXT(highCamOff,L"HIGH CAM [%ls]",L"俯瞰视角 [%ls]",L"俯瞰視角 [%ls]",L"俯瞰カメラ [%ls]")
 HUDTEXT(gunnerShells,L"SHELLS",L"炮弹",L"砲彈",L"砲弾")
 HUDTEXT(gunnerCannon,L"CANNON",L"加农炮",L"加農砲",L"キャノン")
+HUDTEXT(gunnerGatling,L"GATLING",L"加特林",L"加特林",L"ガトリング")
 HUDTEXT(gunnerNoGround,L"%ls   NO GROUND IN SIGHT",L"%ls   视野内没有地面",L"%ls   視野內沒有地面",L"%ls   地面が見えない")
 HUDTEXT(gunnerOutOfRange,L"%ls   %d m   OUT OF RANGE",L"%ls   %d m   超出射程",L"%ls   %d m   超出射程",L"%ls   %d m   射程外")
 HUDTEXT(gunnerReady,L"%ls   %d m   READY",L"%ls   %d m   就绪",L"%ls   %d m   就緒",L"%ls   %d m   発射可")

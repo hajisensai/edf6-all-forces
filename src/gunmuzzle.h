@@ -24,6 +24,7 @@ struct Airframe { float centre[3],half[3]; };
 constexpr Airframe kGunship{{0.0f,2.136f,0.0f},{25.938f,2.009f,8.078f}};
 constexpr float kMargin=0.5f;      // m past a round's hit sphere
 constexpr float kCannonHit=1.6f;   // the cannon round's hit radius: make_jets.py CANNON_SIZE x CANNON_HIT
+constexpr float kGatlingHit=0.8f;  // the gatling round's: make_jets.py GATLING_SIZE x GATLING_HIT
 constexpr float kShellHit=10.0f;   // the shell's: DEMOGUNSHIPFIREE25 #7 x #8 (make_jets.py SHELL_HIT, checked on the file)
 
 inline float Dot(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -88,5 +89,29 @@ inline float InsideLength(const float* m,const Airframe& a,const float* from,con
     }
     const float d[3]={q[0]-p[0],q[1]-p[1],q[2]-p[2]};
     return (t1-t0)*std::sqrt(Dot(d,d));
+}
+
+// Where a round with a spread of `spread` rad lands about the aim `at`, fired from `from`, as `out` (world): the `n`th
+// point of a golden-angle (Vogel) disc of kScatterRing points across the cone's width at the aim's distance, in the plane
+// square to the line. A burst covers the disc evenly with no random state (the same burst lands the same: replays and the
+// check see it), its mean on the aim. `spread` 0 or no line: `at` itself.
+constexpr int kScatterRing=16;                 // points in the pattern before it repeats
+constexpr float kGoldenAngle=2.39996323f;      // rad: pi (3 - sqrt 5), the turn between two points
+inline void Scatter(const float* from,const float* at,float spread,int n,float* out) noexcept {
+    for(int c=0;c<3;++c)out[c]=at[c];
+    const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
+    const float len=std::sqrt(Dot(d,d));
+    if(!(spread>0.0f) || !(len>0.0f) || !std::isfinite(len))return;
+    const float dir[3]={d[0]/len,d[1]/len,d[2]/len};
+    const float side[3]={std::fabs(dir[1])<0.99f ? 0.0f : 1.0f,std::fabs(dir[1])<0.99f ? 1.0f : 0.0f,0.0f};   // up, or x near vertical
+    float u[3]={dir[1]*side[2]-dir[2]*side[1],dir[2]*side[0]-dir[0]*side[2],dir[0]*side[1]-dir[1]*side[0]};
+    const float ul=std::sqrt(Dot(u,u));
+    for(int c=0;c<3;++c)u[c]/=ul;
+    const float w[3]={dir[1]*u[2]-dir[2]*u[1],dir[2]*u[0]-dir[0]*u[2],dir[0]*u[1]-dir[1]*u[0]};
+    const unsigned k=static_cast<unsigned>(n)%static_cast<unsigned>(kScatterRing);
+    const float r=len*spread*0.5f*std::sqrt((static_cast<float>(k)+0.5f)/static_cast<float>(kScatterRing));
+    const float a=kGoldenAngle*static_cast<float>(k);
+    const float cs=std::cos(a)*r,sn=std::sin(a)*r;
+    for(int c=0;c<3;++c)out[c]=at[c]+u[c]*cs+w[c]*sn;
 }
 }  // namespace gunmuzzle

@@ -551,7 +551,7 @@ void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targe
 }
 void JetControls(Line& line,const PlayerJetReadout& j) noexcept {
     bool guided=false;
-    for(int i=0;i<j.stores && i<6;++i)guided=guided || j.storeRole[i]==static_cast<int>(StoreRole::air) ||
+    for(int i=0;i<j.stores && i<kMostStores;++i)guided=guided || j.storeRole[i]==static_cast<int>(StoreRole::air) ||
                                                         j.storeRole[i]==static_cast<int>(StoreRole::ground);
     AircraftControls(line,j.keys,j.stores,j.storeButton,j.targetButton,guided,j.stores>0 && Cfg().playerJetFlares>0);
 }
@@ -695,8 +695,9 @@ void TurretMark(void* drawer,void* ctx,const float* vp,float width,float height,
 }
 
 // The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a round of the picked gun
-// fired now lands (where the screen's centre meets the ground), red out of its reach; under it the gun (SHELLS or
-// CANNON, the other one named when the switch has one to go to), the range and READY or the gun's wait; a cyan square
+// fired now lands (where the screen's centre meets the ground), red out of its reach; under it the gun (SHELLS, CANNON
+// or GATLING in brackets, the others there named after it, in the switch's order), the range and READY or the gun's
+// wait; a cyan square
 // on the pylon turn's centre (the point last fired at). No ground under the centre: the line alone.
 void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const GunnerReadout& g,
                  Line* lines,int* at) noexcept {
@@ -714,11 +715,19 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
     if(*at>=kMaxLines)return;
     Line& line=lines[(*at)++];
-    wchar_t gun[48];
-    const wchar_t* const shells=Tr(Tx::gunnerShells);
-    const wchar_t* const cannon=Tr(Tx::gunnerCannon);
-    if(g.both)std::swprintf(gun,48,L"[%ls] %ls",g.cannon ? cannon : shells,g.cannon ? shells : cannon);
-    else std::swprintf(gun,48,L"%ls",shells);
+    wchar_t gun[64];
+    const wchar_t* const names[]={Tr(Tx::gunnerShells),Tr(Tx::gunnerCannon),Tr(Tx::gunnerGatling)};
+    static_assert(sizeof(names)/sizeof(names[0])==static_cast<std::size_t>(GunnerGun::count),"GunnerGun's names");
+    const int picked=static_cast<int>(g.gun),n=static_cast<int>(GunnerGun::count);
+    const bool more=(g.guns&~(1u<<picked))!=0;
+    int used=std::swprintf(gun,64,more ? L"[%ls]" : L"%ls",names[picked]);
+    for(int k=1;k<n && used>0;++k) {   // the others there, from the one the switch goes to next
+        const int i=(picked+k)%n;
+        if(!(g.guns&(1u<<i)))continue;
+        const int w=std::swprintf(gun+used,64-used,L" %ls",names[i]);
+        if(w<0)break;   // no room: the names so far
+        used+=w;
+    }
     if(!g.ground)Format(line,Tr(Tx::gunnerNoGround),gun);
     else if(!g.inReach)Format(line,Tr(Tx::gunnerOutOfRange),gun,static_cast<int>(std::lround(g.range)));
     else if(g.ready)Format(line,Tr(Tx::gunnerReady),gun,static_cast<int>(std::lround(g.range)));
@@ -768,7 +777,7 @@ void StoresText(wchar_t* text,std::size_t size,const PlayerJetReadout& j,bool na
         const int n=_snwprintf_s(text,size,_TRUNCATE,Tr(Tx::storesGun),j.gunRounds>0 ? j.gunRounds : 0);
         if(n>0)at=static_cast<std::size_t>(n);
     }
-    for(int i=0;names && i<j.stores && i<6;++i) {
+    for(int i=0;names && i<j.stores && i<kMostStores;++i) {
         const int n=_snwprintf_s(text+at,size-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
                                  j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
         if(n<0)break;
@@ -1075,7 +1084,7 @@ void LoadoutBanner(void* drawer,void* ctx,Text* text,float width,float bottom,fl
 // dim; the picked one cyan.
 int JetCells(const PlayerJetReadout& j,LoadCell* cells) noexcept {
     int n=0;
-    for(int i=0;i<j.stores && i<6;++i) {
+    for(int i=0;i<j.stores && i<kMostStores;++i) {
         LoadCell& c=cells[n++];
         c.icon=hudcue::StoreIconOf(j.storeName[i],j.storeRole[i]);
         c.picked=i==j.store;
@@ -1535,7 +1544,7 @@ void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,flo
     const float armsH=arms.h>0.0f ? arms.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
     arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
     warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
-    LoadCell cells[6];
+    LoadCell cells[kMostStores];
     const int n=JetCells(j,cells);
     const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
     if(*at<kMaxLines) {
@@ -3099,7 +3108,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
                 wchar_t stores[128];
                 StoresText(stores,_countof(stores),snap.jet,false);
-                LoadCell cells[6];
+                LoadCell cells[kMostStores];
                 const int n=JetCells(snap.jet,cells);
                 Line controls{};JetControls(controls,snap.jet);
                 HeliStrip(drawer,ctx,t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,cells,n,snap.jet.store,storeSwitched,lines,&at,&controls);

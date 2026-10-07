@@ -387,14 +387,21 @@ struct BayState {
     const void* bombOwner;   // whose bombs the bay drops (the caller: the bomb rounds' owner)
     ULONGLONG bombClear;     // game ms until which the owner's rounds still pass its flight (0: bay open)
 };
-// The gunship's shells and its cannon (GunshipFire): two guns, each with its own gap.
+// The gunship's side guns besides its shells (jet_bay.cpp kSideGuns, in this order): the 40 mm long-range cannon and the
+// 25 mm gatling (an AC-130's three guns with the shells).
+enum class SideGun : int { cannon, gatling, count };
+// A side gun's own clock (jet_bay.cpp GunShot / GunAtTarget).
+struct GunClock {
+    ULONGLONG at;            // its last round
+    int shots;               // ...and how many it has fired (the gatling's spread pattern counts on it)
+    ULONGLONG lookAt;        // the NPCs' last look along its line (GunAtTarget: a ray a gap at the most)
+    int held;                // ...and how many found the map in the way (logged every tenth)
+};
+// The gunship's shells and its side guns (GunshipFire): three guns, each with its own gap.
 struct ShellState {
     ULONGLONG gunAt;         // its last shell
     int gunShots;            // ...and how many it has fired
-    ULONGLONG cannonAt;      // its last cannon round (jet_bay.cpp CannonShot)
-    int cannonShots;         // ...and how many it has fired
-    ULONGLONG cannonLookAt;  // the NPCs' last look along the cannon's line (CannonAtTarget: a ray a gap at the most)
-    int cannonHeld;          // ...and how many found the map in the way (logged every tenth)
+    GunClock guns[static_cast<int>(SideGun::count)];
 };
 
 struct Jet {
@@ -620,13 +627,13 @@ bool ShellsReady() noexcept;
 bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept;
 float ShellWait(const unsigned char* v,ULONGLONG ms) noexcept;
 float ShellReach() noexcept;
-// Its long-range cannon (jet_bay.cpp kCannonSgo): a round from the player at `at` (false: not ready, out of reach, no
-// cannon this mission); whether the cannon is there at all (its SGO installed and preloaded: an install from before
-// has none); its wait before the next round (s, 0: ready); its reach (m).
-bool PlayerCannon(unsigned char* v,const float* at,ULONGLONG ms) noexcept;
-bool CannonReady() noexcept;
-float CannonWait(const unsigned char* v,ULONGLONG ms) noexcept;
-float CannonReach() noexcept;
+// Its side guns (jet_bay.cpp kSideGuns: the long-range cannon, the gatling): a round of gun `g` from the player at `at`
+// (false: not ready, out of reach, no such gun this mission); whether the gun is there at all (its SGO installed and
+// preloaded: an install from before has none); its wait before the next round (s, 0: ready); its reach (m).
+bool PlayerSideGun(unsigned char* v,SideGun g,const float* at,ULONGLONG ms) noexcept;
+bool SideGunReady(SideGun g) noexcept;
+float SideGunWait(const unsigned char* v,SideGun g,ULONGLONG ms) noexcept;
+float SideGunReach(SideGun g) noexcept;
 // How far from its anchor kind `k` takes targets (its range; a gunship's further with its cannon: jet.cpp PickTarget).
 float TargetRange(const Kind& k) noexcept;
 

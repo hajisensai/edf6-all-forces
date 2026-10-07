@@ -26,7 +26,7 @@ struct Store {
     std::int32_t locked;     // targets in its lock list (homing ones)
     float lockRange;         // m (homing ones; its SGO's LockonRange)
 };
-constexpr int kMostStores=6;
+constexpr int kMostStores=7;   // the gunship: its four pylons and its shells, cannon and gatling (playerjet_board.inc SpecialRoom)
 
 // The stores aboard `vehicle` (seat 0's holders, in their order: the cockpit's cycle). Their count.
 int ReadStores(unsigned char* vehicle,Store* out,int most) noexcept;

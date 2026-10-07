@@ -80,7 +80,37 @@ constexpr float kCannonDamage=60.0f;      // a round's at the base tier
 constexpr float kCannonSpeed=960.0f;      // m/s: the round's (make_jets.py CANNON_SPEED, 16 m a frame), for the NPCs' lead
 const wchar_t kCannonSgo[]=L"app:/object/edf6vc_gunship_cannon.sgo";
 const wchar_t kCannonFile[]=L"EDF6VC_GUNSHIP_CANNON.SGO";
-bool cannonReady=false;                   // preloaded this mission (PreloadShells)
+// The gunship's 25 mm gatling (README 炮舰机的机炮, the user 2026-10-07: 「炮舰机的机炮等」应该有的挂载都要有; an AC-130's
+// third gun, the GAU-12/U 25 mm, beside the 40 mm and the 105 mm): tools/make_jets.py's EDF6VC_GUNSHIP_GATLING.SGO, the
+// cannon's impact charge made a 25 mm HEI round: 17 m a frame (kGatlingSpeed: 1020 m/s, the GAU-12's ~1040), no fall, 100
+// frames (1700 m, past kGatlingReach), a 2 m blast (under the drill's 3 m: it does not break buildings, a 25 mm shell does
+// not), a thinner, yellower tracer. A round every kGatlingGapMs (10 a second: the real gun's 1800 a minute is 30, but each
+// round is one game object, docs/carrier-laser-re.md §3; 10 keeps a held trigger at ~16 rounds in the air) at
+// kGatlingDamage, a fifth of the cannon's: 12 x 10 = 120 a second, as the cannon's 60 x 2 and the shells' 300 / 2.5 s: the
+// three guns carry the same damage over time at any tier and trade it for reach and spread (shells 1800 m, wide; cannon
+// 2500 m, exact; gatling 1500 m, quick, kGatlingSpread scattered). Its own gap: three guns, three gaps. Without the file
+// (an install from before) there is no gatling: the gunship has the guns it had.
+constexpr ULONGLONG kGatlingGapMs=100;
+constexpr float kGatlingReach=1500.0f;    // m: shorter than the cannon's 2500 (a lighter round, the GAU-12's effective ~1.5 km)
+constexpr float kGatlingDamage=12.0f;     // a round's at the base tier: a fifth of the cannon's 60
+constexpr float kGatlingSpeed=1020.0f;    // m/s: the round's (make_jets.py GATLING_SPEED, 17 m a frame), for the NPCs' lead
+constexpr float kGatlingSpread=0.004f;    // rad: the cone the rounds scatter in (4 mrad: 6 m across at its reach)
+const wchar_t kGatlingSgo[]=L"app:/object/edf6vc_gunship_gatling.sgo";
+const wchar_t kGatlingFile[]=L"EDF6VC_GUNSHIP_GATLING.SGO";
+// The gunship's side guns as one table (GunShot / GunAtTarget fire either), in jet::SideGun's order. `ready`: its file
+// installed and preloaded this mission (PreloadShells). Spread 0: every round on the aim (the cannon).
+struct SideGunSpec {
+    const wchar_t* sgo; const wchar_t* file; const char* name;
+    ULONGLONG gapMs; float reach,damage,speed,hit,spread;
+    bool ready;
+};
+SideGunSpec kSideGuns[]={
+    {kCannonSgo,kCannonFile,"cannon",kCannonGapMs,kCannonReach,kCannonDamage,kCannonSpeed,gunmuzzle::kCannonHit,0.0f,false},
+    {kGatlingSgo,kGatlingFile,"gatling",kGatlingGapMs,kGatlingReach,kGatlingDamage,kGatlingSpeed,gunmuzzle::kGatlingHit,kGatlingSpread,false},
+};
+static_assert(sizeof(kSideGuns)/sizeof(kSideGuns[0])==static_cast<std::size_t>(SideGun::count),"jet::SideGun's order");
+SideGunSpec& GunOf(SideGun g) noexcept { return kSideGuns[static_cast<int>(g)]; }
+bool& cannonReady=kSideGuns[0].ready;     // the Proteus fires the cannon's round too (ProteusGunRound)
 // Impact charges (ImpactDamage): tools/make_jets.py's EDF6VC_IMPACT_*.SGO, the gunship round made a one-round,
 // no-wait GrenadeBullet01 that bursts at the end of its kImpact life (or on what it meets first), its blast
 // radius the charge's (indirect_fire_param #9 AmmoExplosion): a blast's radius is the SGO's, so one charge per
@@ -268,54 +298,67 @@ bool GunshipMuzzle(const unsigned char* v,const float* at,float hit,float* out) 
     return gunmuzzle::Muzzle(reinterpret_cast<const float*>(v+kMatrix),gunmuzzle::kGunship,at,hit+gunmuzzle::kMargin,out);
 }
 
-// A cannon round fired by `who` from the gunship (`pos`, its reach measured from there) at `at` (see kCannonSgo), leaving
-// from its muzzle (GunshipMuzzle): kCannonGapMs after its last, within kCannonReach. Every tenth logged (Debug): two a
-// second would drown the log.
-bool CannonShot(Jet& j,const unsigned char* v,const float* pos,const float* at,ULONGLONG ms,const char* who,
-                online::Shooter by=online::Shooter::vehicle) noexcept {
-    if(!cannonReady || ms-j.shells.cannonAt<kCannonGapMs)return false;
+// A round of side gun `gun` fired by `who` from the gunship (`pos`, its reach measured from there) at `at` (see
+// kSideGuns), leaving from its muzzle (GunshipMuzzle): its gap after its last, within its reach; a gun with a spread puts
+// the round off `at` within that cone (gunmuzzle::Scatter, the round's count its place in the pattern). Every tenth
+// logged (Debug): two to ten a second would drown the log.
+bool GunShot(Jet& j,SideGun g,const unsigned char* v,const float* pos,const float* at,ULONGLONG ms,const char* who,
+             online::Shooter by=online::Shooter::vehicle) noexcept {
+    SideGunSpec& gun=GunOf(g);
+    GunClock& c=j.shells.guns[static_cast<int>(g)];
+    if(!gun.ready || ms-c.at<gun.gapMs)return false;
     const float d[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
-    if(Len(d)>kCannonReach)return false;
-    const float damage=kCannonDamage*Tier(v);
-    float muzzle[3];
-    if(!GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle))return false;
-    j.shells.cannonAt=ms;
-    if(!Shell(kCannonSgo,cannonReady,v,muzzle,at,damage,true,"gunship cannon",by))return false;
-    if(Cfg().debug && j.shells.cannonShots%10==0)
-        Log("JET v=%p gunship cannon round #%d from %s at (%.0f,%.0f,%.0f), %.0f m, %.0f damage",v,j.shells.cannonShots+1,who,at[0],at[1],
-            at[2],Len(d),damage);
-    ++j.shells.cannonShots;
+    if(Len(d)>gun.reach)return false;
+    const float damage=gun.damage*Tier(v);
+    float muzzle[3],aim[3];
+    if(!GunshipMuzzle(v,at,gun.hit,muzzle))return false;
+    gunmuzzle::Scatter(muzzle,at,gun.spread,c.shots,aim);
+    c.at=ms;
+    if(!Shell(gun.sgo,gun.ready,v,muzzle,aim,damage,true,gun.name,by))return false;
+    if(Cfg().debug && c.shots%10==0)
+        Log("JET v=%p gunship %s round #%d from %s at (%.0f,%.0f,%.0f), %.0f m, %.0f damage",v,gun.name,c.shots+1,who,aim[0],aim[1],
+            aim[2],Len(d),damage);
+    ++c.shots;
     return true;
 }
 
-// The NPC crew's cannon at its target (j.t: a ground one), led: where a round fired now meets it as it moves on
+// The NPC crew's side gun `g` at its target (j.t: a ground one), led: where a round fired now meets it as it moves on
 // (tgtVel, m/s) over the round's flight to where it is now. Only with the line from the gunship to that point clear of
-// the map (kCannonSightSlack): the round flies straight at 8-11 deg down from 350 m over up to 2500 m and bursts on the
-// first thing it meets (4 m HE, no penetration), so a target behind a building or a ridge took every round into the
-// building. One ray per gap at the most (cannonLookAt): a blocked look waits a gap before the next, the gun's gap itself
-// left as it was (the player's CANNON shares it). The player's own rounds go where the screen's centre looks, which is
-// the first thing on that line already: no look for them (PlayerCannon).
-constexpr float kCannonSightSlack=20.0f;   // m: what stands this near the aim point short of it is the target's ground
-bool CannonAtTarget(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms,const char* who) noexcept {
-    if(!cannonReady || !j.t.target || j.t.flyer)return false;
-    if(ms-j.shells.cannonAt<kCannonGapMs || ms-j.shells.cannonLookAt<kCannonGapMs)return false;
+// the map (kGunSightSlack): the rounds fly straight at 8-11 deg down from 350 m over up to the gun's reach and burst on
+// the first thing they meet (HE, no penetration), so a target behind a building or a ridge took every round into the
+// building. One ray per gap at the most (lookAt): a blocked look waits a gap before the next, the gun's gap itself left
+// as it was (the player's CANNON / GATLING share it). The player's own rounds go where the screen's centre looks, which
+// is the first thing on that line already: no look for them (PlayerSideGun).
+constexpr float kGunSightSlack=20.0f;   // m: what stands this near the aim point short of it is the target's ground
+bool GunAtTarget(Jet& j,SideGun g,const unsigned char* v,const float* pos,ULONGLONG ms,const char* who) noexcept {
+    const SideGunSpec& gun=GunOf(g);
+    GunClock& c=j.shells.guns[static_cast<int>(g)];
+    if(!gun.ready || !j.t.target || j.t.flyer)return false;
+    if(ms-c.at<gun.gapMs || ms-c.lookAt<gun.gapMs)return false;
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
-    const float t=Len(d)/kCannonSpeed;
+    const float t=Len(d)/gun.speed;
     const float at[3]={j.t.aim[0]+j.t.tgtVel[0]*t,j.t.aim[1]+j.t.tgtVel[1]*t,j.t.aim[2]+j.t.tgtVel[2]*t};
     const float to[3]={at[0]-pos[0],at[1]-pos[1],at[2]-pos[2]};
-    if(Len(to)>kCannonReach)return false;
-    j.shells.cannonLookAt=ms;
+    if(Len(to)>gun.reach)return false;
+    c.lookAt=ms;
     float muzzle[3],hit[3];
-    if(!GunshipMuzzle(v,at,gunmuzzle::kCannonHit,muzzle))return false;   // no clear line to a target inside the airframe
+    if(!GunshipMuzzle(v,at,gun.hit,muzzle))return false;   // no clear line to a target inside the airframe
     if(MapRay(muzzle,at,hit)>=0.0f) {
         const float gap[3]={hit[0]-at[0],hit[1]-at[1],hit[2]-at[2]};
-        if(Len(gap)>kCannonSightSlack) {
-            if(Cfg().debug && j.shells.cannonHeld++%10==0)
-                Log("JET v=%p gunship cannon held (%s): the map %.0f m short of its aim, %.0f m out",v,who,Len(gap),Len(to));
+        if(Len(gap)>kGunSightSlack) {
+            if(Cfg().debug && c.held++%10==0)
+                Log("JET v=%p gunship %s held (%s): the map %.0f m short of its aim, %.0f m out",v,gun.name,who,Len(gap),Len(to));
             return false;
         }
     }
-    return CannonShot(j,v,pos,at,ms,who);
+    return GunShot(j,g,v,pos,at,ms,who);
+}
+
+// Every side gun of the NPC crew at its target, each when its own gap allows: true when one fired.
+bool GunsAtTarget(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms,const char* who) noexcept {
+    bool fired=false;
+    for(int g=0;g<static_cast<int>(SideGun::count);++g)fired=GunAtTarget(j,static_cast<SideGun>(g),v,pos,ms,who) || fired;
+    return fired;
 }
 }  // namespace
 
@@ -380,12 +423,12 @@ void BayFrame(Jet& j,const float* pos) noexcept {
     }
 }
 
-// A gunship's guns while its weapons are free (WeaponsFree, as every jet weapon) at a ground target: its cannon
-// (CannonAtTarget) within kCannonReach, and a shell every kGunshipGapMs within kGunshipReach of the gunship (`pos`), from
-// its muzzle (GunshipMuzzle) onto the target's lock point.
+// A gunship's guns while its weapons are free (WeaponsFree, as every jet weapon) at a ground target: its side guns
+// (GunsAtTarget: the cannon within kCannonReach, the gatling within kGatlingReach, each on its own gap), and a shell every
+// kGunshipGapMs within kGunshipReach of the gunship (`pos`), from its muzzle (GunshipMuzzle) onto the target's lock point.
 void GunshipFire(Jet& j,const unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     if(!WeaponsFree(j) || j.t.flyer)return;
-    CannonAtTarget(j,v,pos,ms,"its NPC crew");
+    GunsAtTarget(j,v,pos,ms,"its NPC crew");
     if(ms-j.shells.gunAt<kGunshipGapMs)return;
     const float d[3]={j.t.aim[0]-pos[0],j.t.aim[1]-pos[1],j.t.aim[2]-pos[2]};
     if(Len(d)>kGunshipReach)return;
@@ -451,16 +494,17 @@ bool PlayerShell(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
     return j && CrewFire(*j,v,at,ms,"the player",online::Shooter::localPlayer);
 }
 
-// The gunship's cannon from the player (the pilot's CANNON, the gunner seat): at `at`, where they aim (no lead: the
-// round flies 2.6 s to its reach, the player leads a mover themselves).
-bool PlayerCannon(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
+// The gunship's side gun `g` from the player (the pilot's CANNON / GATLING, the gunner seat): at `at`, where they aim
+// (no lead: the cannon's round flies 2.6 s to its reach, the gatling's 1.5 s; the player leads a mover themselves).
+bool PlayerSideGun(unsigned char* v,SideGun g,const float* at,ULONGLONG ms) noexcept {
     Jet* const j=FindJet(v);
-    return j && CannonShot(*j,v,reinterpret_cast<const float*>(v+kPosition),at,ms,"the player",online::Shooter::localPlayer);
+    return j && GunShot(*j,g,v,reinterpret_cast<const float*>(v+kPosition),at,ms,"the player",online::Shooter::localPlayer);
 }
 
 // The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
 // gunship itself within the longer gun's reach (PickTarget; the entry's target is its own again when it is handed back:
-// ResumeNpc); the cannon at it (led) and a shell when it is within the shells' reach, each gun when it is ready.
+// ResumeNpc); the side guns at it (led: the cannon, the gatling within its shorter reach) and a shell when it is within
+// the shells' reach, each gun when it is ready.
 // The target is tracked every frame, the guns ready or not: PickTarget takes the target's velocity from its move since
 // the last call over this frame's dt, as the NPC jets call it (jet.cpp JetFrame). Called only when a gun was ready
 // (every 0.5 s), it divided half a second's move by one frame: the velocity 30 times too fast, the cannon's lead 60-150 m
@@ -470,9 +514,9 @@ bool CrewShell(unsigned char* v,float dt,ULONGLONG ms) noexcept {
     if(!j || !Cfg().jetPilot)return false;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     PickTarget(*j,v,pos,pos,cannonReady ? kCannonReach : kGunshipReach,dt,ms);
-    const bool cannon=cannonReady && ms-j->shells.cannonAt>=kCannonGapMs,shell=ms-j->shells.gunAt>=kGunshipGapMs;
-    if((!cannon && !shell) || !j->t.target || j->t.flyer)return false;
-    const bool fired=cannon && CannonAtTarget(*j,v,pos,ms,"its NPC gunner");
+    if(!j->t.target || j->t.flyer)return false;
+    const bool shell=ms-j->shells.gunAt>=kGunshipGapMs;
+    const bool fired=GunsAtTarget(*j,v,pos,ms,"its NPC gunner");   // each side gun on its own gap (none ready: none fires)
     return (shell && CrewFire(*j,v,j->t.aim,ms,"its NPC gunner")) || fired;
 }
 
@@ -487,23 +531,23 @@ float ShellReach() noexcept { return kGunshipReach; }
 
 bool ShellsReady() noexcept { return gunshipReady && shellsOk; }
 
-float CannonWait(const unsigned char* v,ULONGLONG ms) noexcept {
+float SideGunWait(const unsigned char* v,SideGun g,ULONGLONG ms) noexcept {
     const Jet* const j=FindJet(v);
     if(!j)return 0.0f;
-    const ULONGLONG since=ms-j->shells.cannonAt;
-    return since>=kCannonGapMs ? 0.0f : static_cast<float>(kCannonGapMs-since)*0.001f;
+    const ULONGLONG gap=GunOf(g).gapMs,since=ms-j->shells.guns[static_cast<int>(g)].at;
+    return since>=gap ? 0.0f : static_cast<float>(gap-since)*0.001f;
 }
 
-float CannonReach() noexcept { return kCannonReach; }
+float SideGunReach(SideGun g) noexcept { return GunOf(g).reach; }
 
-bool CannonReady() noexcept { return cannonReady && shellsOk; }
+bool SideGunReady(SideGun g) noexcept { return GunOf(g).ready && shellsOk; }
 
 // How far from its anchor kind `k` takes targets (jet.cpp PickTarget): its range; a gunship with its cannon reaches out
 // further, to where the cannon still reaches them from anywhere on its circle (kCannonReach over the circle's height,
 // less the circle and a step of its spacing): about 1800 m instead of 1500, the targets past the shells' reach the
 // cannon's alone.
 float TargetRange(const Kind& k) noexcept {
-    if(k.weapon!=Weapon::shells || !CannonReady())return k.range;
+    if(k.weapon!=Weapon::shells || !SideGunReady(SideGun::cannon))return k.range;
     const float out=std::sqrt(kCannonReach*kCannonReach-k.alt*k.alt)-k.patrol-k.patrolStep;
     return out>k.range ? out : k.range;
 }
@@ -523,9 +567,11 @@ bool InstallBay(bool spawnOk) noexcept {
 void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept {
     gunshipReady=shellsOk && (gunship || proteus);
     if(gunshipReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kGunshipSgo,2,-1);
-    cannonReady=gunshipReady && ModFileThere(kCannonFile);
-    if(cannonReady)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCannonSgo,2,-1);
-    else if(gunshipReady)Log("JET the gunship has no cannon this mission: no %ls (python tools/make_jets.py, or the installer)",kCannonFile);
+    for(auto& gun:kSideGuns) {   // each side gun whose round is installed; one from before the gun: the guns it had
+        gun.ready=gunshipReady && ModFileThere(gun.file);
+        if(gun.ready)reinterpret_cast<PreloadFn>(image+kPreload)(mgr,gun.sgo,2,-1);
+        else if(gunshipReady)Log("JET the gunship has no %s this mission: no %ls (python tools/make_jets.py, or the installer)",gun.name,gun.file);
+    }
     for(int i=0;i<kChargeCount;++i) {
         chargeReady[i]=shellsOk && ModFileThere(kCharges[i].file);
         if(chargeReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kCharges[i].sgo,2,-1);
@@ -543,13 +589,13 @@ void PreloadShells(void* mgr,bool gunship,bool proteus) noexcept {
         if(n>0)at+=n;
     }
     ++missionCount;
-    Log("JET preload gunship shells=%d cannon=%d (gunship %d, Proteus %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d",gunshipReady,cannonReady,gunship,proteus,charges,drillReady,
+    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d, Proteus %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,proteus,charges,drillReady,
         emcReady[0],emcReady[1],emcReady[2],emcReady[3]);
 }
 
 void ResetShells() noexcept {
     gunshipReady=false;
-    cannonReady=false;
+    for(auto& gun:kSideGuns)gun.ready=false;
     for(auto& c:chargeReady)c=false;
     drillReady=false;
     for(auto& e:emcReady)e=false;

@@ -148,8 +148,39 @@ void GeometryChecks() {
 }
 }  // namespace
 
+// The gatling's spread (gunmuzzle.h Scatter): every round within the cone (its radius at most half the width at the aim's
+// distance) and off the aim (but for the pattern's first point, near the centre), the pattern's mean on the aim, the same
+// shot count landing the same, a spread of 0 or no line leaving the aim as it is.
+void ScatterChecks() {
+    const float from[3]={300.0f,350.0f,-200.0f},at[3]={-500.0f,0.0f,400.0f};
+    const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
+    const float len=std::sqrt(gunmuzzle::Dot(d,d)),spread=0.004f,most=len*spread*0.5f;
+    float sum[3]={},out[3],again[3];
+    for(int n=0;n<gunmuzzle::kScatterRing;++n) {
+        gunmuzzle::Scatter(from,at,spread,n,out);
+        const float off[3]={out[0]-at[0],out[1]-at[1],out[2]-at[2]};
+        const float r=std::sqrt(gunmuzzle::Dot(off,off));
+        Expect(r<=most*1.0001f,"scatter: within the cone",r,most);
+        Expect(r>=most*0.17f,"scatter: off the aim",r,most);   // the innermost point: sqrt(0.5 / 16) of the radius
+        Expect(std::fabs(gunmuzzle::Dot(off,d))<=1e-3f*len*most,"scatter: square to the line",gunmuzzle::Dot(off,d),0.0);
+        for(int c=0;c<3;++c)sum[c]+=off[c];
+        gunmuzzle::Scatter(from,at,spread,n+gunmuzzle::kScatterRing,again);
+        Expect(std::fabs(again[0]-out[0])+std::fabs(again[1]-out[1])+std::fabs(again[2]-out[2])<1e-3f,"scatter: the pattern repeats");
+    }
+    const float mean=std::sqrt(gunmuzzle::Dot(sum,sum))/static_cast<float>(gunmuzzle::kScatterRing);
+    Expect(mean<=most*0.15f,"scatter: the pattern's mean on the aim",mean,most);
+    gunmuzzle::Scatter(from,at,0.0f,5,out);
+    Expect(out[0]==at[0] && out[1]==at[1] && out[2]==at[2],"scatter: none with no spread");
+    gunmuzzle::Scatter(at,at,spread,5,out);
+    Expect(out[0]==at[0] && out[1]==at[1] && out[2]==at[2],"scatter: none with no line");
+    const float down[3]={at[0],at[1]+800.0f,at[2]};   // straight down: the other side axis
+    gunmuzzle::Scatter(down,at,spread,3,out);
+    Expect(std::isfinite(out[0]+out[1]+out[2]) && out[1]==at[1],"scatter: straight down stays on the ground plane",out[1],at[1]);
+}
+
 int main() {
     GeometryChecks();
+    ScatterChecks();
     const float playerBank=1.2f;   // playerjet.cpp kTurnBank
     const Orbit orbits[]={
         {"NPC gunship",120.0f,600.0f,350.0f,std::acos(1.0f/2.0f)},   // kKinds gunship: 2 g -> 60 degrees
@@ -159,6 +190,7 @@ int main() {
     };
     for(const Orbit& o:orbits) {
         Scenario(o,"cannon",0,gunmuzzle::kCannonHit);
+        Scenario(o,"gatling",0,gunmuzzle::kGatlingHit);
         Scenario(o,"shell",kShellWait,gunmuzzle::kShellHit);
     }
     std::printf(failures ? "gunship_muzzle_check: %d FAILED\n" : "gunship_muzzle_check: all passed\n",failures);
