@@ -122,6 +122,11 @@ add_executable(sazabi_pose_check EXCLUDE_FROM_ALL tools/sazabi_pose_check.cpp)
 target_compile_options(sazabi_pose_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(sazabi_pose_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# The Sazabi's flight control (src/sazabi_flight.h) flown offline over flat ground (tools/sazabi_flight_check.cpp).
+add_executable(sazabi_flight_check EXCLUDE_FROM_ALL tools/sazabi_flight_check.cpp)
+target_compile_options(sazabi_flight_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(sazabi_flight_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 add_executable(seat_aim_check EXCLUDE_FROM_ALL tools/seat_aim_check.cpp)
 target_include_directories(seat_aim_check PRIVATE common)
 target_compile_options(seat_aim_check PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -343,7 +348,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
