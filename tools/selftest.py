@@ -456,6 +456,44 @@ def boarding_tag_in_plugin() -> None:
 
 
 @test
+def boarding_debug_gun_parameters_and_text() -> None:
+    """The debug gun changes the intended fields and every locale's numeric rows, keeping star curves and tag."""
+    gun = next(c for c in calls.CALLS if c.brings == 'gun')
+    root = dsgo.Node([])
+    old = {'AmmoSpeed': 25.0, 'FireAccuracy': 0.125, 'AmmoCount': 8.0,
+           'ReloadTime': 360.0, 'FireInterval': 90.0}
+    curves = {}
+    for i, (key, base) in enumerate(old.items()):
+        curves[key] = [base, float(i + 10), 0.5, 2.0, 1.0]
+        root.set(key, dsgo.Node(curves[key].copy()))
+    root.set('AmmoAlive', 40.0)
+    root.set('FireRecoil', 3.0)
+    root.set('AmmoColor', dsgo.Node([0.25, 0.5, 0.75, 1.0]))
+    template = dsgo.write(dsgo.Document(root, []))
+    actual = dsgo.parse(cw.gun_sgo(template, gun)).root
+    for key, base in cw.GUN_CURVES.items():
+        assert actual.get(key).items == [base, *curves[key][1:]], key
+    for key, value in cw.GUN_SCALARS.items():
+        assert actual.get(key) == value, key
+    import struct
+    alpha = actual.get(cw.GUN_TAG).items[3]
+    assert struct.unpack('<I', struct.pack('<f', alpha))[0] == cw.gun_tag_bits(gun.mark)
+    units = {'AmmoCount': 1.0, 'FireInterval': 1.0, 'ReloadTime': 1.0 / cw.FPS,
+             'AmmoSpeed': cw.FPS, 'FireAccuracy': 1.0}
+    lines = [dsgo.Node([f'label-{i}', '', dsgo.Node([curves[key][0] * unit, *curves[key][1:-1], -1.0])])
+             for i, (key, unit) in enumerate(units.items())]
+    lines.append(dsgo.Node(['range', '', dsgo.Node([1000.0, *curves['AmmoSpeed'][1:-1], -1.0])]))
+    damage = dsgo.Node(['damage', '', dsgo.Node([242.0, 999.0, 0.5, 2.0, -1.0])])
+    lines.append(damage)
+    row = dsgo.Node(['title', 'description', dsgo.Node(lines)])
+    expected = [cw.GUN_CURVES[key] * unit for key, unit in units.items()] + [1500.0, 242.0]
+    for lang in cw.LANGS:
+        changed = cw._text_row(row, gun, lang, gun=cw.gun_stats(template))
+        assert [st.items[2].items[0] for st in changed.items[2].items] == expected, lang
+        assert changed.items[2].items[-1] == damage, 'damage and its star parameters stay unchanged'
+
+
+@test
 def boarding_only_after_collision() -> None:
     """Broadphase candidates include misses and objects behind walls. Only the native hit's damage call may
     request boarding; keep the executable production-hook test in CI, with original damage on all other paths."""
