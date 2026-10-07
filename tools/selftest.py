@@ -964,6 +964,28 @@ def weapon_marks_agree() -> None:
     assert make_katyusha.ROCKETS['LockonTargetType'] == make_katyusha.MARK_LOFTED
 
 
+@test
+def sight_zoom_wired() -> None:
+    """The vehicle sight's magnification (src/sightzoom.cpp): its ini keys are read, range-checked, shipped and
+    documented; it hooks the camera step docs/zoom-re.md names (CharacterGhostCamera slot 4, the field of view's
+    write checked) by chaining (map.cpp hooks the same slot); the gunship gunner and every stock vehicle's input
+    step it; the turret camera's rate is slowed by it; a new mission puts it back to 1x."""
+    code, ini, readme = src('src/sightzoom.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    plugin, doc = src('src/plugin.cpp'), src('docs/zoom-re.md')
+    for key in ('SightZoom', 'SightZoomKey', 'SightZoomButton'):
+        assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+    for key in ('SightZoomKey', 'SightZoomButton'):
+        assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
+    assert 'kCamVtable=0x1768C10' in code and 'kCamStep=0xF86A0' in code and 'kFovWrite=0xF8906' in code
+    assert '0xF86A0' in doc and '0x1768C30' in doc and 'cam+0x24' in doc
+    assert 'ChainVtableSlot' in code and 'InstallSightZoom();' in plugin
+    assert 'SightZoomFrame(v,kGunnerSeat,true)' in src('src/playerjet_crew.inc')
+    assert '&SightZoomStock,v' in src('src/crew.cpp')
+    assert 'sightzoom::Rate(' in src('src/turretcam.cpp')
+    assert 'ResetSightZoom();' in src('src/mission.cpp')
+    assert 'src/sightzoom.cpp' in src('CMakeLists.txt')
+
+
 BOHR_STOCK_AMMO_ALIVE = 100.0   # V603_FLAK_GLGUN01_DLC_{L,R}.SGO AmmoAlive in the stock Root.cpk
 
 
@@ -4030,7 +4052,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')

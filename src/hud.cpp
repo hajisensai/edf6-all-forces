@@ -711,6 +711,7 @@ constexpr float kFrameW=200.0f,kFrameH=130.0f,kFrameLeg=44.0f,kHairGap=18.0f,kHa
 constexpr float kHairUnder=44.0f,kGunMark=15.0f;
 void Seg(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float t,const float* rgba) noexcept;
 void Arc(void* drawer,void* ctx,float cx,float cy,float r,float from,float span,float t,int sides,const float* rgba) noexcept;
+void Label(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const float* rgba,const wchar_t* format,...) noexcept;
 void GunshipFrame(void* drawer,void* ctx,float width,float height,float s,GunnerGun gun) noexcept {
     const float cx=width*0.5f,cy=height*0.5f,t=2.0f*s,w=kFrameW*s,h=kFrameH*s,leg=kFrameLeg*s;
     for(int sxi=-1;sxi<=1;sxi+=2)
@@ -738,6 +739,8 @@ void GunshipFrame(void* drawer,void* ctx,float width,float height,float s,Gunner
 void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const GunnerReadout& g,
                  Line* lines,int* at) noexcept {
     GunshipFrame(drawer,ctx,width,height,s,g.gun);
+    if(g.zoom>1.0f)Label(text,lines,at,width*0.5f-kFrameW*s,height*0.5f-(kFrameH+14.0f)*s,0,kLineScale*0.85f,kFrameTint,L"%.0fx",
+                         g.zoom);   // over the top left bracket
     float sx=width*0.5f,sy=height*0.5f,depth;
     if(g.centred && Project(vp,g.centre,width,height,&sx,&sy,&depth)) {
         const float r=10.0f*s,t=2.0f*s;
@@ -2266,7 +2269,7 @@ void ArmName(const StockArm& a,bool selected,wchar_t* out,std::size_t size) noex
 constexpr float kChevron=14.0f,kStadiaIn=26.0f,kStadiaOut=112.0f,kLadderTick=9.0f,kLadderApart=4.0f,kLabelApart=16.0f;   // px at 1080
 constexpr float kMilTick=5.0f,kMilApart=8.0f;   // mils a tick; px they must be apart to be drawn
 void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,
-                const wchar_t* name,Line* lines,int* at) noexcept {
+                const wchar_t* name,float zoom,Line* lines,int* at) noexcept {
     float cx,cy;
     if(!sight::ToScreen(vp,a.bore,0.0f,width,height,&cx,&cy))return;
     const float t=2.0f*s,c=kChevron*s;
@@ -2309,16 +2312,17 @@ void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         last=ly;lastX=lx;any=true;
     }
     const float over=cy-16.0f*s,note=kLineScale*0.85f;
-    Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
+    if(zoom>1.0f)Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls  %.0fx",name,zoom);
+    else Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
     if(a.range>0.0f && (a.hit || a.ranged))
-        Label(text,lines,at,cx+in,over,0,note,a.ranged && !a.inReach ? kHudDim : kHud,L"LRF %d m",static_cast<int>(std::lround(a.range)));
-    else Label(text,lines,at,cx+in,over,0,note,kHudDim,L"LRF ----");
+        Label(text,lines,at,cx+in,over,0,note,a.ranged && !a.inReach ? kHudDim : kHud,Tr(Tx::sightRange),static_cast<int>(std::lround(a.range)));
+    else Label(text,lines,at,cx+in,over,0,note,kHudDim,L"%ls",Tr(Tx::sightNoRange));
 }
 
 // `reticle`: this gun's sight is GunReticle (the seat's sight gun: StockMarks), its pipper unlabelled (the reticle
-// reads its range).
+// reads its range); `zoom` the sight's magnification.
 void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const wchar_t* name,
-               bool reticle,Line* lines,int* at) noexcept {
+               bool reticle,float zoom,Line* lines,int* at) noexcept {
     float x,y;
     const float note=kLineScale*0.85f;
     const int metres=static_cast<int>(std::lround(a.range));
@@ -2342,7 +2346,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     }
     if(a.ranged) {
         const float* c=a.inReach ? kHud : kHudDim;
-        if(reticle)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
+        if(reticle)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,zoom,lines,at);
         else Boresight(drawer,ctx,vp,width,height,s,a.bore);
         LeadMark(drawer,ctx,vp,width,height,s,a.lead,c);
         if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y) && !reticle)
@@ -2355,7 +2359,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         return;
     }
     if(reticle) {
-        GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
+        GunReticle(drawer,ctx,text,vp,width,height,s,a,name,zoom,lines,at);
         if(a.hit)Pipper(drawer,ctx,vp,width,height,s,a.at,kHud,&x,&y);
         return;
     }
@@ -2503,7 +2507,7 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
         if(twin)continue;
         wchar_t name[32];
         ArmName(a,i==r.selected,name,_countof(name));
-        StockMark(drawer,ctx,text,vp,width,height,s,a,name,i==sightGun,lines,at);
+        StockMark(drawer,ctx,text,vp,width,height,s,a,name,i==sightGun,r.zoom,lines,at);
     }
 }
 

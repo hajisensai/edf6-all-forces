@@ -193,6 +193,9 @@ struct Config {
     float turretCamRate=90.0f;      // ...the camera's turn at a full stick, deg/s (never slower than the turret's own)
     int freeLookKey=0x04;           // ...free look while held: the camera turns, the turret holds (VK_MBUTTON; 0 none)
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
+    bool sightZoom=true;            // a vehicle gun's sight magnifies: 1x -> 3x -> 6x (sightzoom.cpp, docs/zoom-re.md)
+    int sightZoomKey=0x5A;          // ...its key ('Z'; a Windows virtual-key code, 0: none)
+    int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered; 0 none)
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=3000.0f;     // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it)
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
@@ -703,6 +706,18 @@ bool HighCamOn(const void* vehicle) noexcept;   // turretcam.cpp: the high view 
 // living 10 s or more): its high view (HighCamClass 1) and no gun stabilizer (stab.cpp: it fires from a halt).
 bool IndirectFireSeat(const unsigned char* seat) noexcept;
 void ResetHighCam() noexcept;
+// The high view is offered in `vehicle` (seat 0 the player's, HighCam on): its button is the high view's there.
+bool HighCamOffered(unsigned char* vehicle) noexcept;
+
+// sightzoom.cpp: a vehicle gun's sight magnified (src/sightzoom.h, docs/zoom-re.md). InstallSightZoom at load (the
+// player camera's step, chained with map.cpp's); SightZoomFrame from the frame of the seat the player sits at (its key
+// or, `padButton`, its pad button steps 1x -> 3x -> 6x; a seat taken again starts at 1x), SightZoomStock from every stock
+// vehicle's input (the player's seat in it); SightZoomNow: the magnification now (in `vehicle`, nullptr any), 1 with none.
+bool InstallSightZoom() noexcept;
+void SightZoomFrame(unsigned char* vehicle,unsigned seat,bool padButton) noexcept;
+void SightZoomStock(unsigned char* vehicle) noexcept;
+float SightZoomNow(const void* vehicle) noexcept;
+void ResetSightZoom() noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
 // camera's look-at fetch, the seat aim's step); TurretCamFrame from every vehicle's input, the plugin off too (it lets
@@ -801,7 +816,9 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // `ready`: its rounds are there and it is), the pylon turn's centre; `gun`: the gun picked (GunnerGun), `guns`: the
 // guns there to switch between (a bit each, 1 << GunnerGun; the shells always). False with the player not at a gunship's gun.
 enum class GunnerGun : int { shells, cannon, gatling, count };
-struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns; };
+// zoom: the sight's magnification (sightzoom.cpp; 1 none).
+struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns;
+                       float zoom; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;

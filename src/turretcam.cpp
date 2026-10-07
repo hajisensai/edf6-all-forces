@@ -42,6 +42,7 @@
 #include "turretcam.h"
 #include "stab.h"
 #include "sight.h"
+#include "sightzoom.h"
 #include "turretaim.h"
 #include "edf/weapon.h"
 #include <cmath>
@@ -366,7 +367,9 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     // plugin's (EDF6AutoTurret on the player's lock): then the turret is theirs this frame, the view the rider's.
     const float stick[2]={-At<float>(seat,kSeatStick),At<float>(seat,kSeatStick+4)};
     const bool foreign=tcam::Foreign(AutoTurretSteers(s.v,0),in,stick,kForeign);
-    const float rate=std::fmax(c.turretCamRate*kPi/180.0f/60.0f,At<float>(seat,kSeatAim+kAimParams+8));
+    // Magnified (sightzoom.cpp) the view turns slower by as much: the same sweep across the screen at any zoom.
+    const float rate=sightzoom::Rate(std::fmax(c.turretCamRate*kPi/180.0f/60.0f,At<float>(seat,kSeatAim+kAimParams+8)),
+                                     SightZoomNow(s.v));
     const bool turning=s.decoupled || s.free;
     if(turning && !s.returning) {
         if(s.highView){tcam::HighAim a{s.yaw,s.range,s.dy};tcam::HighTurn(a,stick[0],stick[1],rate);s.yaw=a.yaw;s.range=a.range;}

@@ -82,6 +82,7 @@ void SazabiSoundTick(void) noexcept{unexpectedHook();return;}
 void SidecarFrame(unsigned char *) noexcept{unexpectedHook();return;}
 bool SidecarBoard(unsigned char *,unsigned char *) noexcept{unexpectedHook();return {};}
 void HighCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void SightZoomStock(unsigned char *) noexcept{unexpectedHook();return;}
 void TurretCamFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void StabFrame(unsigned char *) noexcept{unexpectedHook();return;}
 bool IsSub(void const *) noexcept{unexpectedHook();return {};}

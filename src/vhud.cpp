@@ -231,6 +231,7 @@ void StockHudFrame(unsigned char* v) noexcept {
     const unsigned char* const seat=SeatAt(v,static_cast<unsigned>(seatIndex));
     const ULONGLONG ms=GameMs();
     StockHudReadout r{};
+    r.zoom=SightZoomNow(v);
     Kind(v,r);
     r.seat=static_cast<unsigned>(seatIndex);
     r.heli=IsHelicopter(v);

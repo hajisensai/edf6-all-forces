@@ -1861,6 +1861,7 @@ bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept {
 bool PlayerGunnerHud(GunnerReadout* out) noexcept {
     if(!gunner.ref || gunner.frame+1<GameFrame())return false;
     *out=gunner.hud;
+    out->zoom=SightZoomNow(gunner.vehicle);
     return true;
 }
 

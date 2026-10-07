@@ -116,6 +116,11 @@ void HighCamFrame(unsigned char* v) noexcept {
     Publish(cam.on,keys,v);
 }
 
+bool HighCamOffered(unsigned char* v) noexcept {
+    const Config& c=Cfg();
+    return c.enabled && c.highCam && SeatCount(v)>0 && Offered(v,SeatAt(v,0));
+}
+
 bool HighCamOn(const void* vehicle) noexcept {
     AcquireSRWLockShared(&cueLock);
     const Cue c=cue;

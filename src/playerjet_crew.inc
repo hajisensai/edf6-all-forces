@@ -184,6 +184,7 @@ void GunnerFrame(unsigned char* v) noexcept {
     if(mine && !aboard){GunnerLeft(true,v[kDead] ? "the gunship destroyed" : "got out");return;}
     if(!aboard)return;
     if(!mine)GunnerBoarded(v);
+    SightZoomFrame(v,kGunnerSeat,true);   // the gun's sight magnified (sightzoom.cpp): no high view on this seat
     const ULONGLONG ms=GameMs();
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     gunner.frame=GameFrame();

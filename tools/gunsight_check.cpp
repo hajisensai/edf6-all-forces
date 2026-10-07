@@ -4,9 +4,13 @@
 //  - the machine gun (slower, shorter life): finer steps, never more than kMostTicks, none past the round's reach;
 //  - a lofted round: ticks only up to its farthest point, none on the way back;
 //  - the shooter's motion the round takes a share of moves its ticks with it;
-//  - no speed, no life, fired straight up: no ladder.
+//  - no speed, no life, fired straight up: no ladder;
+//  - the sight's magnification (src/sightzoom.h): the field of view the camera is set to (the stock pi/4 at 1x, a third
+//    of it at 3x, the soldier's own zoom on top), the same however often it is set (set, not scaled), never wider
+//    than the stock view for a value that is not a number or under 1; the turret camera's rate slowed by as much.
 // Exit code 1 when one fails. cmake --build build --target gunsight_check && build\gunsight_check.exe
 #include "../src/gunsight.h"
+#include "../src/sightzoom.h"
 #include <cmath>
 #include <cstdio>
 
@@ -120,6 +124,20 @@ int main() {
     }
     Expect(gunsight::StepFor(0.0f)==0.0f && gunsight::StepFor(250.0f)==50.0f && gunsight::StepFor(1200.0f)==200.0f &&
            gunsight::StepFor(1e6f)==500.0f,"steps: none, 50, 200, and the reach held to kMostReach");
+    {
+        using namespace crew::sightzoom;
+        const float pi4=0.785398163f;
+        Expect(std::fabs(Fov(1.0f,1.0f)-pi4)<1e-6f && std::fabs(Fov(1.0f,3.0f)-pi4/3.0f)<1e-6f && std::fabs(Fov(1.0f,6.0f)-pi4/6.0f)<1e-6f,
+               "zoom: the field of view at 1x, 3x, 6x",Fov(1.0f,3.0f),pi4/3.0f);
+        Expect(std::fabs(Fov(5.5f,3.0f)-pi4/16.5f)<1e-6f,"zoom: the soldier's own zoom on top",Fov(5.5f,3.0f),pi4/16.5f);
+        float fov=Fov(1.0f,6.0f);
+        for(int i=0;i<100;++i)fov=Fov(1.0f,6.0f);   // a hundred frames: set, never compounding
+        Expect(fov==Fov(1.0f,6.0f),"zoom: the same after a hundred frames",fov,Fov(1.0f,6.0f));
+        Expect(Fov(std::nanf(""),std::nanf(""))==pi4 && Fov(0.2f,0.5f)==pi4 && Fov(1.0f,-3.0f)==pi4,"zoom: nonsense is the stock view");
+        Expect(std::fabs(Rate(0.03f,3.0f)-0.01f)<1e-7f && Rate(0.03f,1.0f)==0.03f && Rate(0.03f,std::nanf(""))==0.03f,
+               "zoom: the turret camera turns slower by as much",Rate(0.03f,3.0f),0.01f);
+        Expect(At(0)==1.0f && At(Next(0))==3.0f && At(Next(Next(0)))==6.0f && At(Next(Next(Next(0))))==1.0f,"zoom: 1x -> 3x -> 6x -> 1x");
+    }
     std::printf(failures ? "gunsight_check: %d FAILED\n" : "gunsight_check: all ok\n",failures);
     return failures ? 1 : 0;
 }

@@ -650,7 +650,7 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
         Scene(dir,name,ground);
         bool lrf=false,order=true,apart=true;int ticks=0,lastRange=0;float lastY=-1e9f;
         for(const Drew& d:drew) {
-            if(d.text.find(L"LRF 1300 m")!=std::wstring::npos)lrf=true;
+            if(d.text.find(L"1300 m")!=std::wstring::npos)lrf=true;   // Tx::sightRange, in any language
             if(d.text.size()<=2 && !d.text.empty() && d.text[0]>=L'1' && d.text[0]<=L'9') {
                 const int r=std::stoi(d.text);
                 order=order && r>lastRange && d.y0>lastY;   // farther ranges further down
@@ -669,9 +669,13 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
                     ok ? "ok  " : "FAIL",name,lrf,ticks,wantTicks,order,apart);
     };
     check(L"stock_tank_sight",0);
-    sceneFov=55.0f/4.0f;
+    sceneFov=55.0f/3.0f;sceneStock.zoom=3.0f;   // the sight at 3x (sightzoom.cpp: the camera's field of view a third)
     check(L"stock_tank_sight_zoom",1);
-    sceneFov=55.0f;
+    bool named=false;
+    for(const Drew& d:drew)named=named || d.text.find(L"3x")!=std::wstring::npos;
+    failed+=!named;
+    std::printf("%s  stock_tank_sight_zoom: the magnification named (3x) %d\n",named ? "ok  " : "FAIL",named);
+    sceneFov=55.0f;sceneStock.zoom=1.0f;
     StockTank(ground);
     return failed;
 }
@@ -689,6 +693,7 @@ int GunshipSightScenes(const std::wstring& dir,const float* ground) {
         sceneGunner.range=1500.0f;
         sceneGunner.sight[0]=ground[0];sceneGunner.sight[1]=ground[1]+5.0f;sceneGunner.sight[2]=ground[2]+19.0f;   // the camera's centre ray at the ground
         sceneGunner.gun=static_cast<GunnerGun>(g);sceneGunner.guns=7u;
+        sceneGunner.zoom=g==2 ? 6.0f : 1.0f;   // the gatling's sight at 6x: its magnification over the frame
         StockTank(ground);   // its camera only (Scene looks along sceneStock.hull when hasStock; with it off, along the jet's nose)
         sceneJet.sym.nose[0]=0.0f;sceneJet.sym.nose[1]=0.0f;sceneJet.sym.nose[2]=1.0f;
         Scene(dir,names[g],ground);
@@ -701,7 +706,9 @@ int GunshipSightScenes(const std::wstring& dir,const float* ground) {
                 if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
             }
         }
-        const bool ok=line && apart;
+        bool named=false;
+        for(const Drew& d:drew)named=named || d.text==L"6x";
+        const bool ok=line && apart && named==(g==2);
         failed+=!ok;
         std::printf("%s  %ls: gun line %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",names[g],line,apart);
     }

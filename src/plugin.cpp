@@ -220,6 +220,8 @@ void Validate(Config& n) noexcept {
     Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
     n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
     n.freeLookButton=static_cast<int>(FixInt("FreeLookButton",n.freeLookButton,0,255));
+    n.sightZoomKey=static_cast<int>(FixInt("SightZoomKey",n.sightZoomKey,0,254));
+    n.sightZoomButton=static_cast<int>(FixInt("SightZoomButton",n.sightZoomButton,0,255));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.mapButton=static_cast<int>(FixInt("MapButton",n.mapButton,0,0xFFFF));
     if(n.mapViewDistance!=0.0f)Fix("MapViewDistance",n.mapViewDistance,1000.0f,10000.0f);
@@ -496,6 +498,9 @@ void LoadConfig() noexcept {
     n.turretCamRate=ReadFloat(L"TurretCamRate",n.turretCamRate);
     n.freeLookKey=ReadInt(L"FreeLookKey",static_cast<DWORD>(n.freeLookKey));
     n.freeLookButton=ReadInt(L"FreeLookButton",static_cast<DWORD>(n.freeLookButton));
+    n.sightZoom=ReadBool(L"SightZoom",n.sightZoom);
+    n.sightZoomKey=ReadInt(L"SightZoomKey",static_cast<DWORD>(n.sightZoomKey));
+    n.sightZoomButton=ReadInt(L"SightZoomButton",static_cast<DWORD>(n.sightZoomButton));
     n.gunStabilizer=ReadBool(L"GunStabilizer",n.gunStabilizer);
     n.viewDistance=ReadFloat(L"ViewDistance",n.viewDistance);
     n.map=ReadBool(L"Map",n.map);
@@ -649,6 +654,7 @@ void LoadConfig() noexcept {
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
     Log("CONFIG highCam=%d key=0x%X button=0x%X height=%.0f back=%.0f pitch=%.0f",n.highCam,n.highCamKey,n.highCamButton,n.highCamHeight,
         n.highCamBack,n.highCamPitch);
+    Log("CONFIG sightZoom=%d key=0x%X button=0x%X",n.sightZoom,n.sightZoomKey,n.sightZoomButton);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
@@ -861,6 +867,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // chain both aims after the turret camera and plain-aim stabilizer hooks
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
+    InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
     InstallGunnerRecoil();  // a remote gunner's recoil on the vehicle's authority (gunnerrecoil.cpp)
     InstallSidecar();       // the sidecar motorcycle's gunner (sidecar.cpp)

@@ -29,6 +29,8 @@ HUDTEXT(launcherLine,L"%d m   %.1f s   ELEV %d",L"%d m   %.1f s   仰角 %d",L"%
 HUDTEXT(padButton,L"button 0x%X",L"手柄键 0x%X",L"手把鍵 0x%X",L"ボタン 0x%X")
 HUDTEXT(highCamOn,L"HIGH CAM ON [%ls]",L"俯瞰视角 开 [%ls]",L"俯瞰視角 開 [%ls]",L"俯瞰カメラ オン [%ls]")
 HUDTEXT(highCamOff,L"HIGH CAM [%ls]",L"俯瞰视角 [%ls]",L"俯瞰視角 [%ls]",L"俯瞰カメラ [%ls]")
+HUDTEXT(sightRange,L"LRF %d m",L"测距 %d m",L"測距 %d m",L"測距 %d m")
+HUDTEXT(sightNoRange,L"LRF ----",L"测距 ----",L"測距 ----",L"測距 ----")
 HUDTEXT(gunnerShells,L"SHELLS",L"炮弹",L"砲彈",L"砲弾")
 HUDTEXT(gunnerCannon,L"CANNON",L"加农炮",L"加農砲",L"キャノン")
 HUDTEXT(gunnerGatling,L"GATLING",L"加特林",L"加特林",L"ガトリング")

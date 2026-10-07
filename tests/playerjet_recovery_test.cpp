@@ -6,6 +6,8 @@
 namespace crew {
 bool ReadRound(const unsigned char*,RoundModel*) noexcept {return false;}
 bool RoundLands(const unsigned char*,const RoundModel&,const float*,const float*,float,float*,float*) noexcept {return false;}
+float SightZoomNow(const void*) noexcept {return 1.0f;}
+void SightZoomFrame(unsigned char*,unsigned,bool) noexcept {}
 unsigned char* image=nullptr;
 // Offline (online_authority.h): an NPC rider may be seated, through the vehicle's own RideAi.
 bool SeatNpcRider(unsigned char* v,bool spawned) noexcept {
