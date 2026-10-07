@@ -175,8 +175,20 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
+// The squads' formation banner (npcai.cpp PlayerFormationCue): on in the npc_formation scene.
+int sceneFormation=-1;
+bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return false;o->shape=sceneFormation;o->key=0x54;return true; }
+// The box sweep banner (npcai.cpp PlayerSweepCue): on in the npc_sweep scenes.
+bool sceneSweepOn=false;SweepCue sceneSweep{};
+bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 void MapCommandView(const float*,float,float) noexcept {}
+// The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
+int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
+void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
+    sceneButtons=n;
+    for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
@@ -403,6 +415,25 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     };
     shown(Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys),true);
     if(!pad)shown(Tr(Tx::squadKeys));
+    // The command buttons (mouse only): every one placed, on the screen, and no text but its own label in it.
+    if(pad) {
+        if(sceneButtons){++textFailed;std::printf("FAIL map buttons with a pad: %d\n",sceneButtons);}
+    } else {
+        if(sceneButtons!=mapbtn::kCount){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,mapbtn::kCount);}
+        for(int i=0;i<sceneButtons;++i) {
+            const float* b=sceneButton[i];
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL map button %d off the screen\n",i);}
+            int own=0;
+            for(const Drew& d:drew) {
+                if(d.text.empty() || !(d.x0<b[2] && b[0]<d.x1 && d.y0<b[3] && b[1]<d.y1))continue;
+                const float cx=(d.x0+d.x1)*0.5f,cy=(d.y0+d.y1)*0.5f;
+                const bool inside=cx>b[0] && cx<b[2] && cy>b[1] && cy<b[3] && d.x0>=b[0]-1.0f && d.x1<=b[2]+1.0f;
+                if(inside)++own;
+                else{++textFailed;std::printf("FAIL map button %d covers %s\n",sceneButtonId[i],Narrow(d.text).c_str());}
+            }
+            if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
+        }
+    }
     for(int i=0;i<sceneCmd.squads;++i) {
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
@@ -1166,6 +1197,44 @@ int Scenes(const std::wstring& dir) {
     sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
     sceneMarkOn=true;sceneMark[0]=ground[0]+25.0f;sceneMark[1]=ground[1]+6.0f;sceneMark[2]=ground[2]+180.0f;
     Scene(dir,L"npc_mark",ground);
+    // The formation banner just after the key (the longest name: bounding overwatch) with the mark up: on the screen,
+    // apart from the mark's text, naming the shape and the key.
+    sceneFormation=static_cast<int>(npc::formation::Shape::bounding);
+    Scene(dir,L"npc_formation",ground);
+    {
+        bool named=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.find(FormationText(sceneFormation))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
+                named=p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(named && apart);
+        std::printf("%s  npc_formation: the banner named %d, no text overlapping %d\n",named && apart ? "ok  " : "FAIL",named,apart);
+    }
+    // The box sweep under it: going (boxes left, in, the key to call back) and over (the count), with the formation's banner.
+    for(int done=0;done<2;++done) {
+        sceneSweepOn=true;sceneSweep=SweepCue{done==0,12,7,0x59};
+        const wchar_t* name=done ? L"npc_sweep_done" : L"npc_sweep";
+        Scene(dir,name,ground);
+        bool line=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.find(L"7")!=std::wstring::npos && (done || p.text.find(L"12")!=std::wstring::npos))
+                line=line || (p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f);
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(line && apart);
+        std::printf("%s  %ls: the sweep line %d, no text overlapping %d\n",line && apart ? "ok  " : "FAIL",name,line,apart);
+    }
+    sceneSweepOn=false;
+    sceneFormation=-1;
     sceneMarkOn=false;hasHeli=heliWas;
     std::memcpy(sceneHeli.sym.nose,noseWas,12);
     // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.

@@ -66,6 +66,8 @@ void ResetMapCommands() noexcept;   // map.cpp ResetMap: a new mission (the sele
 // The map's view as the HUD draws it (hud.cpp MapScreen, draw thread): the selection's box and clicks and the pointer's
 // ground point are found on it.
 void MapCommandView(const float* viewProj,float width,float height) noexcept;
+// hud.cpp: the command buttons as drawn this frame (map_buttons.h; `id` each one's mapbtn::Id), for the clicks.
+void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
 // The left drag is the box's, not the map's pan (Ctrl held when it began): map.cpp Steer leaves the ground alone.
 bool MapCommandBoxing() noexcept;
 // map.cpp Close: discard hover, pending presses and the rendered view immediately, preserving selected units.
@@ -103,6 +105,9 @@ struct MapCommandReadout {
     int squads;                // the squad panel (number keys 1-9 pick a row)
     SquadRow squad[16];
     bool squadSelected[16];
+    bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
+    bool guardArmed;           // the guard button clicked: the next click on the ground is its point
+    int march;                 // the march's formation (formation.h Shape)
     bool hover;                // an enemy under the pointer (the screen centre with a pad): Q marks it, H focuses on it
     float hoverAt[3];          // its lock point
 };

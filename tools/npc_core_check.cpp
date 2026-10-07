@@ -36,8 +36,56 @@ float doorAt[3]{},doorReach=3.0f;
 unsigned char human[0x2200]{},dead[0x2200]{},other[0x2200]{},vehicle[0x3000]{},seats[edf::kSeatStride*2]{};
 unsigned char head[0x18]{},node[0x18]{},ctrl[0x10]{};
 int follows=0,rides=0,failures=0;
+unsigned char* playerObj=nullptr;   // PlayerHuman (nullptr but in the box sweep's cases)
+// Record the native per-box calls; the native DLL audit separately checks their actual behavior.
+alignas(16) unsigned char boxMgr[0xE60]{},boxHead[0x20]{},boxNode[2][0x20]{},boxUnit[2][0xE0]{};
+alignas(16) float boxModel[2][4]{};
+int collects=0,notifies=0,heals=0;
+const void* collectBy=nullptr;const void* notifyBy=nullptr;
+int notifyId=0,notifyKind=-1,applyKind=-1;float healAmount=0.0f;const void* healed=nullptr;
+bool notifyBeforeApply=false,untakenAtApply=false;
+void __fastcall NotifyRec(void* mgr,std::int32_t id,std::int32_t kind,void* by) {
+    if(mgr==boxMgr){++notifies;notifyId=id;notifyKind=kind;notifyBy=by;}
+}
+void __fastcall ApplyRec(void* mgr,void* by,std::int32_t kind,float) {
+    if(mgr==boxMgr){++collects;collectBy=by;applyKind=kind;notifyBeforeApply=notifies==collects;untakenAtApply=!boxUnit[0][kBoxTaken];}
+}
+void __fastcall HealRec(void* h,float amount) { ++heals;healed=h;healAmount=amount;Put<float>(h,kHumanHp,At<float>(h,kHumanHp)+amount); }
+const float* __fastcall NodePosRec(const void* model) { return static_cast<const float*>(model); }
+void Boxes(int kind0,int kind1) {
+    Put<void*>(image,kDropManager,boxMgr);
+    Put<void*>(boxMgr,kBoxList,boxHead);
+    Put<void*>(boxHead,0,boxNode[0]);Put<void*>(boxNode[0],0,boxNode[1]);Put<void*>(boxNode[1],0,boxHead);
+    const int kinds[2]={kind0,kind1};
+    for(int i=0;i<2;++i) {
+        std::memset(boxUnit[i],0,sizeof(boxUnit[i]));
+        Put<void*>(boxNode[i],kBoxNodeUnit,boxUnit[i]);
+        Put<const void*>(boxUnit[i],0,image+kBoxVtable);Put<void*>(boxUnit[i],kBoxModel,boxModel[i]);
+        Put<std::int32_t>(boxUnit[i],kBoxKind,kinds[i]);Put<std::int32_t>(boxUnit[i],kBoxId,42+i);
+        boxModel[i][0]=50.0f+static_cast<float>(i);boxModel[i][1]=2.0f;boxModel[i][2]=30.0f;boxModel[i][3]=1.0f;
+    }
+    collects=notifies=heals=0;collectBy=notifyBy=healed=nullptr;notifyId=0;notifyKind=applyKind=-1;boxesOk=true;sweep.on=true;
+}
 void Expect(bool pass,const char* what) { std::printf("%s: %s\n",pass ? "PASS" : "FAIL",what);if(!pass)++failures; }
-void __fastcall FollowRec(void* self,void* leader,bool) { Put<void*>(self,kLeader,leader);++follows; }
+bool StaleSweepLeavesLockFree() {
+    const void* stale=reinterpret_cast<const void*>(1);
+    bool caught=false;
+    __try { StartSweep(&stale,1,"test stale selection"); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { caught=true; }
+    const bool free=TryAcquireSRWLockExclusive(&sweepLock)!=0;
+    // On the old path this same thread leaked the lock; release it too so a failed check cannot hang the suite.
+    ReleaseSRWLockExclusive(&sweepLock);
+    return caught && free;
+}
+void* followSelf[16]{};void* followTo[16]{};
+Soldier* nextFollowWatch=nullptr;bool boardingAtFollow=false;
+void __fastcall FollowRec(void* self,void* leader,bool) {
+    if(nextFollowWatch){boardingAtFollow=static_cast<bool>(nextFollowWatch->boardV);nextFollowWatch=nullptr;}
+    Put<void*>(self,kLeader,leader);if(follows<16){followSelf[follows]=self;followTo[follows]=leader;}++follows;
+}
+// Whom `self` was last made to follow (nullptr none; `none` when it was not re-parented).
+const void* none=reinterpret_cast<const void*>(1);
+const void* FollowedBy(const void* self) { const void* to=none;for(int i=0;i<follows && i<16;++i)if(followSelf[i]==self)to=followTo[i];return to; }
 void __fastcall RideRec(void*,SharedRef* ref,int) { --*reinterpret_cast<int*>(static_cast<unsigned char*>(ref->ctrl)+8);++rides; }
 void Jump(unsigned rva,const void* to) { auto p=image+rva;p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0; }
 void Reset() {
@@ -67,7 +115,7 @@ bool IsOnlineAuthority(const void* o) noexcept {
     return online::Authority(online::Facts{sessionOn,true,host,At<std::uint16_t>(o,0x128),false,false,o==vehicle ? vehicleCopyOwner : online::kCopyHost,0});
 }
 bool OnlineMaySeatNpc(const void*) noexcept { return !sessionOn || host; }
-unsigned char* PlayerHuman() noexcept { return nullptr; }
+unsigned char* PlayerHuman() noexcept { return playerObj; }
 bool CameraRay(float* eye,float* dir) noexcept {
     if(!rayOn)return false;
     eye[0]=eye[1]=eye[2]=dir[0]=dir[1]=0;dir[2]=1;return true;
@@ -99,6 +147,8 @@ int main() {
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));
     if(!image)return 2;
     Jump(kSetFollow,reinterpret_cast<const void*>(&FollowRec));Jump(kRideVehicle,reinterpret_cast<const void*>(&RideRec));
+    Jump(kNotifyBox,reinterpret_cast<const void*>(&NotifyRec));Jump(kApplyBox,reinterpret_cast<const void*>(&ApplyRec));Jump(kHealHuman,reinterpret_cast<const void*>(&HealRec));
+    Jump(kNodePos,reinterpret_cast<const void*>(&NodePosRec));
     Reset();Put<int>(human,kTeam,1);PreThink(human);
     Expect(follows==0,"enemy soldiers are never reorganized by friendly NPC AI");
     Reset();Put<unsigned>(human,kObjectFlags,kFixPosition);PreThink(human);
@@ -223,6 +273,99 @@ int main() {
         Expect(std::fabs(hurt.fallTo[0]-300.0f)<0.01f && std::fabs(hurt.fallTo[2]-(40.0f-kBehindPlayer))<0.01f,
                "behind that player, on their side away from the threat (their camera is not this machine's)");
     }
+    // Fireteams (SplitSquad, MergeSquads): a recruited squad of four (its top and three followers in its +0x550 list)
+    // split: the odd places under the first of them, who follows the player; the even under the top; merged back.
+    {
+        static unsigned char top[0x2200]{},f1[0x2200]{},f2[0x2200]{},f3[0x2200]{},list[0x18]{},nodes[3][0x18]{};
+        Reset();
+        unsigned char* const team[4]={top,f1,f2,f3};
+        for(auto t:team){std::memset(t,0,0x2200);Put<void*>(t,0,image+kSoldiers[0].vtable);Put<int>(t,kTeam,kTeamFriend);}
+        Put<void*>(top,kLeader,other);   // `other` stands for the player
+        other[edf::kHumanPlayer]=1;Put<void*>(other,edf::kHumanPad,other);
+        Put<void*>(top,kFollowers,list);Put<void*>(list,0,nodes[0]);
+        for(int i=0;i<3;++i){Put<void*>(nodes[i],0,i<2 ? static_cast<void*>(nodes[i+1]) : static_cast<void*>(list));Put<void*>(nodes[i],0x10,team[i+1]);Put<void*>(team[i+1],kLeader,top);}
+        SeeSquad(top,top,0,npc::Control::recruited,now);
+        sessionOn=true;
+        Expect(SplitSquad(top)==-1 && follows==0,"online: no split (the panel's orders are offline only)");
+        sessionOn=false;
+        Put<void*>(f3,kRoute,f3);
+        Expect(SplitSquad(top)==-1 && follows==0,"a scripted follower blocks the whole split before any reparenting");
+        Put<void*>(f3,kRoute,nullptr);
+        Soldier* const boarding=Entry(f1,now);boarding->boardV=ObjRef::Of(vehicle);boarding->boardSeat=1;
+        nextFollowWatch=boarding;
+        Expect(SplitSquad(top)==2,"a squad of four splits two and two");
+        Expect(!boarding->boardV && !boardingAtFollow,"splitting cancels both halves' boarding requests before changing native follow lists");
+        Expect(FollowedBy(f1)==other && FollowedBy(f3)==f1 && FollowedBy(f2)==top && FollowedBy(top)==none,
+               "the new team's leader follows the player, its other soldier it; the one staying follows the top");
+        // Merged back: the new team's top under the old one (another squad entry of the panel).
+        SeeSquad(f1,f1,0,npc::Control::recruited,now);follows=0;
+        Expect(MergeSquads(top,f1) && FollowedBy(f1)==top && follows==1,"joined: the other team's top follows this one's");
+        Expect(!FindSquad(f1) && !MergeSquads(f1,top) && follows==1,
+               "a merged top is retired immediately: reversing the merge cannot create a follow cycle");
+        Expect(!MergeSquads(top,top),"a squad does not join itself");
+        Reset();Put<void*>(human,kLeader,nullptr);SeeSquad(human,human,0,npc::Control::free,now);
+        Expect(SplitSquad(human)==-1 && follows==0,"one soldier: nothing to split");
+    }
+    // Only NPCs this machine can drive may reserve a box; the map must not redirect another player's recruits.
+    {
+        Reset();playerObj=dead;dead[kDead]=0;dead[edf::kHumanPlayer]=1;Put<void*>(dead,edf::kHumanPad,dead);
+        Put<void*>(dead,kFollowers,nullptr);Put<void*>(human,kLeader,dead);
+        Put<void*>(human,kFollowers,head);Put<void*>(head,0,node);Put<void*>(node,0,head);Put<void*>(node,0x10,other);
+        Put<void*>(other,kLeader,human);Put<std::uint16_t>(other,0x128,1);sessionOn=true;
+        SeeSquad(human,human,0,npc::Control::recruited,now);
+        const void* roster[8]{};
+        Expect(SweepRoster(now,roster,8)==1 && roster[0]==human,"remote-owned followers cannot reserve boxes they will never walk to");
+        sweep.tops=1;sweep.top[0]=ObjRef::Of(human);
+        playerObj=nullptr;
+        Expect(SweepRoster(now,roster,8)==0,"a selected squad recruited by another player is not redirected to this player's sweep online");
+        playerObj=dead;Put<void*>(human,kRoute,human);
+        Expect(SweepRoster(now,roster,8)==0,"a newly scripted selected squad leaves the sweep before the cached squad control updates");
+        playerObj=nullptr;
+    }
+    // The box sweep's taking (PickUp): weapon and armour the stock way for the player, health for the hurt soldier.
+    {
+        static unsigned char me[0x2200]{};
+        Reset();playerObj=me;Put<void*>(me,0x340,me);   // the player's pad object: Collect's gate
+        Boxes(npc::pickup::kWeapon,npc::pickup::kArmour);
+        Expect(StaleSweepLeavesLockFree(),"a stale selected object cannot leave the sweep HUD lock held after SEH");
+        Soldier fetch{};fetch.pickUnit=boxUnit[0];std::memcpy(fetch.pickPos,boxModel[0],12);fetch.pickKind=npc::pickup::kWeapon;
+        const float away[3]={20.0f,2.0f,30.0f},there[3]={50.4f,2.0f,30.0f};
+        Expect(PickUp(fetch,human,away) && collects==0,"a soldier far from its box runs to it, nothing taken yet");
+        const float downstairs[3]={50.0f,-8.0f,30.0f};
+        Expect(PickUp(fetch,human,downstairs) && collects==0 && !boxUnit[0][kBoxTaken],
+               "a soldier directly below a box cannot collect it through another floor");
+        sweep.on=false;
+        Expect(!PickUp(fetch,human,there) && collects==0,"recalling a sweep invalidates its already assigned pickup in the same frame");
+        sweep.on=true;
+        Expect(PickUp(fetch,human,there) && collects==1 && collectBy==me && notifies==1 && notifyBy==me,
+               "at its box: native Notify and Apply once, credited to the local player");
+        Expect(notifyId==42 && notifyKind==npc::pickup::kWeapon && applyKind==notifyKind && notifyBeforeApply && untakenAtApply,
+               "native Collect ordering and exact box identity: Notify, Apply, then mark taken");
+        Expect(boxUnit[0][kBoxTaken]==1 && boxUnit[1][kBoxTaken]==0 && !fetch.pickUnit,"only that box taken, the one a metre off left");
+        Expect(!PickUp(fetch,human,there),"no box any more: the soldier's other moves");
+        fetch.pickUnit=boxUnit[0];
+        Expect(!PickUp(fetch,human,there) && collects==1,"a box someone else took: nothing called");
+        Boxes(npc::pickup::kWeapon,npc::pickup::kHealSmall);
+        std::memcpy(boxModel[1],boxModel[0],16);fetch.pickUnit=boxUnit[0];sessionOn=true;
+        Expect(PickUp(fetch,human,there) && collects==1 && notifies==1 && boxUnit[0][kBoxTaken] && !boxUnit[1][kBoxTaken] && heals==0,
+               "online overlapping boxes: only the selected weapon is taken, the health box is never consumed");
+        sessionOn=false;
+        // Health boxes: the hurt soldier itself, offline, allowed.
+        Boxes(npc::pickup::kHealBig,npc::pickup::kWeapon);
+        config.npcPickupHealth=true;Put<float>(human,kHumanHpMax,1000.0f);Put<float>(human,kHumanHp,400.0f);
+        fetch=Soldier{};fetch.pickUnit=boxUnit[0];std::memcpy(fetch.pickPos,boxModel[0],12);fetch.pickKind=npc::pickup::kHealBig;
+        Expect(PickUp(fetch,human,there) && heals==1 && healed==human && std::fabs(healAmount-300.0f)<0.01f && collects==0 &&
+               boxUnit[0][kBoxTaken]==1 && boxUnit[1][kBoxTaken]==0,
+               "a hurt soldier at a big health box: healed 30% of its full health itself, not the player's Collect");
+        Boxes(npc::pickup::kHealSmall,npc::pickup::kWeapon);
+        Put<float>(human,kHumanHp,1000.0f);fetch.pickUnit=boxUnit[0];fetch.pickKind=npc::pickup::kHealSmall;
+        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"healed to full meanwhile: the box left for the player");
+        Put<float>(human,kHumanHp,400.0f);fetch.pickUnit=boxUnit[0];sessionOn=true;
+        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"online: no health box (the plugin's heal is not synced)");
+        sessionOn=false;config.npcPickupHealth=false;fetch.pickUnit=boxUnit[0];
+        Expect(PickUp(fetch,human,there) && heals==0 && boxUnit[0][kBoxTaken]==0,"health boxes switched off: left alone");
+        playerObj=nullptr;
+    }
     // The mark (§6.3) is kept until its enemy dies or is gone (the user, 2026-10-07: "标记还很快消失", "标记效果应该先打死
     // 才换吧"), not only while its lock point is lockable this frame.
     {
@@ -280,6 +423,20 @@ int main() {
         KeepMark();
         Expect(At<long>(foeCtrl,0xC)==0 && weakDeletes==1 && !NpcMarked(),"last owned weak calls the native control deleter exactly once");
         Put<void*>(other,kSelfCtrl,nullptr);
+    }
+    // T/Y, like Q, must not fire a second time when a held map key returns to on-foot control.
+    {
+        Reset();playerObj=human;mapHeld=true;markinput::down=true;
+        march.shape=npc::formation::Shape::wedge;march.shapeSet=true;march.held=false;
+        boxesOk=false;sweep.logged=false;
+        FormationTick();SweepFrame();
+        mapHeld=false;FormationTick();SweepFrame();
+        Expect(march.shape==npc::formation::Shape::wedge && !sweep.logged,
+               "held T/Y from the map cannot change formation or start a second sweep on close");
+        markinput::down=false;FormationTick();SweepFrame();
+        markinput::down=true;FormationTick();SweepFrame();
+        Expect(march.shape==npc::formation::Shape::vee && sweep.logged,"releasing then pressing T/Y starts a fresh on-foot action");
+        markinput::down=false;playerObj=nullptr;boxesOk=true;
     }
     // Player-frame edges work without a soldier Think, but never leak out of the map/TV or a held close key.
     {
