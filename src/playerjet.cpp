@@ -1275,7 +1275,13 @@ void Catch(unsigned char* h,ULONGLONG ms) noexcept {
     const float* vp=reinterpret_cast<const float*>(v+kPosition);
     float seatAt[3],reach=0.0f;
     catchFlight.hasDoor=SeatPoint(v,0,seatAt,&reach) && reach>0.0f;
-    if(!catchFlight.hasDoor)return;
+    if(!catchFlight.hasDoor) {
+        // No door to read (its seats not set up yet, or unreadable): no boarding and no formation on a guess, but the
+        // jet still flies (AutoFly's Air) for the player as it was made to: its body kCatchBelow under them.
+        for(int i=0;i<3;++i){catchFlight.target[i]=p[i];catchFlight.drift[i]=hv[i];}
+        catchFlight.target[1]-=kCatchBelow;
+        return;
+    }
     const PJet* j=Find(v);
     const float zero[3]={0.0f,0.0f,0.0f};
     pjet::CatchDoor(p,hv,vp,seatAt,j ? j->vel : zero,j ? j->omega : zero,GameStep(0),catchFlight.target,catchFlight.drift);
@@ -1533,8 +1539,10 @@ float Measure(PJet& j,const float* pos,ULONGLONG ms) noexcept {
 }
 
 // The catch's jet with no one aboard (see kCatchFrom): the player jet's own flight (Air) with the mouse aim's steering
-// at the target, the throttle full until kCatchHoming, then the speed it flies in at; its last kCatchHoming m straight
-// for the target at that speed. Never under kCatchFloor over the ground.
+// at the target, the throttle full until kCatchHoming, then the speed it flies in at; its last kCatchHoming m in
+// formation on the door (Catch). Never under kCatchFloor over the ground. With no door known (Catch: a jet just made,
+// or one whose seat cannot be read) it is the flight all the way, its terrain, stall and crash with it: never a frame
+// without one, its velocity left as it was.
 void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) noexcept {
     if(!j.autopilot) {
         j.autopilot=true;j.driven=false;j.phase=Phase::air;j.hasUp=false;
@@ -1561,7 +1569,7 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
         if(clear!=kNoGround)j.vel[1]=std::fmax(j.vel[1],std::fmin((kCatchFloor-clear)/dt,kUnderClimb));
         const float up[3]={0.0f,1.0f,0.0f};
         if(j.kind)BodyAttitude(v,catchFlight.heading,up,kAttGain,BodyCap(*j.kind),j.omega);
-    } else if(catchFlight.hasDoor)Air(j,v,s,pos,clear,water,dt,ms);
+    } else Air(j,v,s,pos,clear,water,dt,ms);
     j.active=!v[kDead];
     std::memcpy(j.sent,j.vel,12);
     Elevons(j,v,s.pitch,s.roll,dt);

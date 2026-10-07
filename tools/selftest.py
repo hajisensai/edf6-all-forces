@@ -765,6 +765,15 @@ def sidecar_copies_agree() -> None:
     assert 'SidecarLevel(body,spin)' in phys and '&ChassisSetAngVel' in phys and '&FinalAngProbe' not in phys
     assert 'src/sidecar.cpp' in src('CMakeLists.txt') and 'InstallSidecar();' in src('src/plugin.cpp')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    # The passengers' rounds pass their own bike by the bullets' hook (jet_hooks.cpp InstallBulletPass): installed on
+    # its own, ahead of the heli profile's jets and the sidecar, never from InstallJets (a heli mismatch took it away),
+    # and no part of the sidecar's switch.
+    load = plugin.split('EML6_Load(', 1)[1]
+    assert load.index('InstallBulletPass();') < load.index('if(heli)') < load.index('InstallSidecar();'), 'InstallBulletPass'
+    jets = src('src/jet_hooks.cpp').split('bool InstallJets() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'kAddBodySlot' not in jets, 'the bullets hook installed from InstallJets'
+    switch = src('src/sidecar.cpp').split('ok=ok && moveOk', 1)[1].split(';', 1)[0]
+    assert 'Hooked' not in switch and 'blastOk' not in switch, 'a sidecar sub-channel in its master switch'
     for key in ('Sidecar', 'SidecarNpcGunner', 'SidecarNpcRange'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     assert 'Fix("SidecarNpcRange"' in plugin, 'SidecarNpcRange is not range-checked'
@@ -1575,7 +1584,7 @@ def nix_torso_wired() -> None:
     code, twist, crew, cmake = src('src/nix.cpp'), src('src/nix_twist.h'), src('src/crew.cpp'), src('CMakeLists.txt')
     assert 'L"NixTorsoTwist"' in plugin and re.search(r'^NixTorsoTwist=1', ini, re.M) and 'NixTorsoTwist' in readme
     vt = re.search(r'kVtNix=(0x[0-9A-F]+)', code).group(1)
-    assert re.search(rf'\{{{vt},0x[0-9A-F]+,"612_nix"\}}', crew), vt
+    assert re.search(rf'\{{{vt},0x644350,"612_nix",kFindSeat,4\}}', crew), vt   # the family's per-frame update (slot 4)
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)' in cmake
     assert 'add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)' in cmake
     sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
@@ -3606,9 +3615,12 @@ def npc_ai_wired() -> None:
     scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
     for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
         assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
-    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger]=0;h[kTrigger+1]=0;' in veto, \
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger+k]=0' in veto, \
         'a scripted unit: the trigger (both hands) only taken off'
+    assert 'k<kHands' in veto and 'a.held[k]' in veto and 'LargestBlast(a)' in veto, \
+        "each hand vetoed with its own WeaponSet's weapon; the largest blast only for a hand whose weapon is unknown"
+    assert 'LargestBlast(a),LongestReach(a)' not in code.replace(veto, ''), 'no caller vetoes both hands with the largest blast'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '(At<std::uint8_t>(h,kNet)&1)' in think and 'IsPlayer(h)' in think, "only this machine's NPC soldiers"
     assert 'npc::Scripted(control) ? Scripted(' in think

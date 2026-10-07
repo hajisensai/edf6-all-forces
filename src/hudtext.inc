@@ -322,7 +322,9 @@ HUDTEXT(orderDismount,L"DISMOUNT",L"下车",L"下車",L"降車")
 HUDTEXT(orderDismiss,L"DISMISS",L"解散",L"解散",L"解散")
 HUDTEXT(orderRecruit,L"RECRUIT",L"招募",L"招募",L"加入指示")
 HUDTEXT(cmdNoMark,L"NO MARK (Q)",L"没有标记（Q）",L"沒有標記（Q）",L"マークなし（Q）")
-HUDTEXT(cmdCannot,L"%d CANNOT",L"%d 个无法执行",L"%d 個無法執行",L"%d ユニットは実行不可")
+// The optional tail of cmdGuardResult / cmdOrderResult (their last %ls, empty when every unit took the order): the separator
+// is the tail's own, so a result without one ends clean (tools/hudtext_check.cpp Tails).
+HUDTEXT(cmdCannot,L", %d CANNOT",L"，%d 个无法执行",L"，%d 個無法執行",L"、%d ユニットは実行不可")
 HUDTEXT(cmdGuardResult,L"%ls (%.0f, %.0f): %d UNIT(S)%ls",L"%ls（%.0f, %.0f）：%d 个单位%ls",L"%ls（%.0f, %.0f）：%d 個單位%ls",L"%ls（%.0f, %.0f）：%d ユニット%ls")
 HUDTEXT(cmdOrderResult,L"%ls: %d UNIT(S)%ls",L"%ls：%d 个单位%ls",L"%ls：%d 個單位%ls",L"%ls：%d ユニット%ls")
 HUDTEXT(squadTitle,L"SQUADS",L"小队",L"小隊",L"分隊")

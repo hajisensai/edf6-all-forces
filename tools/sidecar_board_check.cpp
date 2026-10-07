@@ -111,7 +111,8 @@ ULONGLONG GameMs() noexcept { return 3600000; }
 ULONGLONG GameFrame() noexcept { return 1; }
 bool CameraRay(float*,float*) noexcept { return false; }
 bool SidecarLevelHooked() noexcept { return false; }
-bool SidecarBulletHooked() noexcept { return true; }
+bool bulletHooked=true;   // the bullets' hook (jet_hooks.cpp InstallBulletPass) is in
+bool SidecarBulletHooked() noexcept { return bulletHooked; }
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { return nullptr; }
 bool SeatPoint(const unsigned char* v,unsigned,float* at,float* reach) noexcept {
     if(!doorReadable)return false;
@@ -239,6 +240,17 @@ int main() {
     Expect(sidecars[0].npcReleased && !sidecars[0].gunner,"the NPC scan stays stopped after ejection for this driver's ride");
     sidecars[0].frame=0;Put<void*>(seat,kSeatRiderCtrl,nullptr);SidecarFrame(bike);
     Expect(!sidecars[0].npcReleased,"the driver stepping off permits NPC recruitment on a later ride");
+    // The bullets' hook looks a round up only while someone rides (SidecarPassengers), kept as they board and leave.
+    Reset();
+    Expect(SidecarPassengers()==0,"no passenger: nothing for the bullets' hook to pass");
+    Take(sidecars[0],bike,human,true);Take(sidecars[1],second,otherHuman,true);
+    Expect(SidecarPassengers()==2,"each boarding counts a passenger");
+    Let(sidecars[1],second,"test");
+    Expect(SidecarPassengers()==1,"a passenger leaving uncounts them");
+    Take(sidecars[1],second,human,true);
+    Expect(SidecarPassengers()==1,"a transfer to another sidecar is still one passenger");
+    ResetSidecars();
+    Expect(SidecarPassengers()==0,"the mission's reset leaves no passenger");
     Reset();Take(sidecars[0],bike,human,true);Put<int>(humanRef,8,0);
     Expect(!SidecarBulletPass(human,bike,humanRef),"an expired projectile owner is not protected despite matching addresses");
     // Riding along (the stutter, 2026-10-06): the held gunner moves with the bike in each physics step, with no
@@ -254,16 +266,27 @@ int main() {
     // No EDF.dll is loaded: hooks are redirected only within this VirtualAlloc buffer.
     Reset();
     auto seed=[](unsigned rva,const auto& bytes){std::memcpy(image+rva,bytes,sizeof(bytes));};
-    seed(kTeamWalk,kTeamWalkSig);seed(kWarp,kWarpSig);seed(kControllerPosition,kPositionSig);
-    seed(0x57B17C,kExitWarpSig);seed(0x6746D3,kVelSig);seed(kAddStep,kAddStepSig);
-    seed(0x11B9A92,kStepUseSig);seed(0x11B9CB7,kStepClearSig);seed(0x673AAC,kBlockSig);
-    seed(0x658D6D,kBikePadSig);seed(kMoveIntentCall-3,kMoveCallSig);
-    seed(0x542FC7,kBlastDamageSig);seed(0x543600,kBlastListDamageSig);seed(0x114251,kAttackerCopySig);
+    auto seedAll=[&seed]{   // the native code as shipped, the redirected calls included (each install redirects them)
+        seed(kTeamWalk,kTeamWalkSig);seed(kWarp,kWarpSig);seed(kControllerPosition,kPositionSig);
+        seed(0x57B17C,kExitWarpSig);seed(0x6746D3,kVelSig);seed(kAddStep,kAddStepSig);
+        seed(0x11B9A92,kStepUseSig);seed(0x11B9CB7,kStepClearSig);seed(0x673AAC,kBlockSig);
+        seed(0x658D6D,kBikePadSig);seed(kMoveIntentCall-3,kMoveCallSig);
+        seed(0x542FC7,kBlastDamageSig);seed(0x543600,kBlastListDamageSig);seed(0x114251,kAttackerCopySig);
+    };
+    seedAll();
     Expect(InstallSidecar(),"all verified movement/foot/blast signatures admit the sidecar runtime");
     Expect(image+kBlastDamageCall+5+At<int>(image,kBlastDamageCall+1)!=image+kDamage &&
         image+kBlastListDamageCall+5+At<int>(image,kBlastListDamageCall+1)!=image+kDamage,
         "both native explosion per-target calls are actually redirected");
-    image[kControllerPosition]=0;
+    // The own-vehicle passes are channels of their own: missing, the passengers still ride (their rounds and blasts
+    // then hit the bike as stock friendly fire), not the whole sidecar off with them (the jets' heli profile off).
+    bulletHooked=false;seedAll();
+    Expect(InstallSidecar() && ok,"no bullets' hook: the sidecar still carries passengers");
+    bulletHooked=true;
+    seedAll();image[0x542FC7]=0;
+    Expect(InstallSidecar() && ok && image+kBlastDamageCall+5+At<int>(image,kBlastDamageCall+1)==image+kDamage,
+        "no blast filter: the sidecar still carries passengers, their blasts native");
+    seedAll();image[kControllerPosition]=0;
     Expect(!InstallSidecar() && !ok,"an unsupported controller ABI fails closed");
     VirtualFree(image,0,MEM_RELEASE);
     return failures ? 1 : 0;
