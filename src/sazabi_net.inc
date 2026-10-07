@@ -54,6 +54,7 @@ void DropRemoteEffects(Mech& m) noexcept {
 }
 void AcceptNetwork(Mech& m,unsigned char* v,const sazabi_net::State& s,ULONGLONG ms) noexcept {
     if(!m.net.remote) {
+        DropLocalAim(m.arms); // Local target pointers and key latches never survive a driver authority change.
         DropRemoteEffects(m);m.active=false;
         if(m.insetSaved)Put<float>(v,kAreaInset,m.savedInset);
         m.insetSaved=false;
@@ -132,6 +133,7 @@ bool NetworkFrame(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     }
     if(networked && !IsOnlineAuthority(v)) {
         if(!m.net.remote) {
+            DropLocalAim(m.arms);
             DropRemoteEffects(m);
             if(m.insetSaved)Put<float>(v,kAreaInset,m.savedInset);
             m.insetSaved=false;
