@@ -2738,6 +2738,38 @@ def sazabi_fallback_install_upgrade() -> None:
 
 
 @test
+def sazabi_range_shared_assets() -> None:
+    """Standalone Sazabi ranges own every dependency; either writer can go while the other still uses it."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import make_sazabi
+    import sazabi_model
+    weapons = {vc.SAZABI_RIFLE_FILE: b'rifle', vc.SAZABI_MISSILE_FILE: b'missile'}
+    rounds = {f: f.encode() for f in vc.SAZABI_ROUND_FILES}
+    shared = {f'WEAPON/{n}': d for n, d in weapons.items()} | {f'OBJECT/{n}': d for n, d in rounds.items()}
+    shared[f'OBJECT/{sazabi_model.OUT_ARC}'] = b'model'
+    mission = f'OBJECT/{vc.SAZABI_JET.upper()}.SGO'
+    install_files = {**shared, f'OBJECT/{make_sazabi.SGO_FILE}': b'requested object'}
+    with tempfile.TemporaryDirectory(prefix='edf6vc-sazabi-range-') as game, \
+            patched(gen, jet_guns=lambda game: {}, vehicle_sgo=lambda *args: b'mission object'), \
+            patched(vc, sazabi_weapons=lambda game: weapons, sazabi_rounds=lambda game: rounds), \
+            patched(sazabi_model, model_dir=lambda: 'model folder', build_archive=lambda *args: (b'model', {})):
+        gen._write_derived(game, object(), {vc.SAZABI_JET})
+        assert set(ledger.Ledger(game).owned_by(gen.OWNER)) == {ledger.key(n) for n in [*shared, mission]}
+        for n, data in shared.items():
+            assert _read(_mods(game, n)) == data
+        make_sazabi.install(game, install_files)
+        make_sazabi.remove(game)
+        assert all(_read(_mods(game, n)) == data for n, data in shared.items())
+        make_sazabi.install(game, install_files)
+        gen._write_derived(game, object(), set())
+        assert not os.path.exists(_mods(game, mission))
+        assert all(_read(_mods(game, n)) == data for n, data in shared.items())
+        make_sazabi.remove(game)
+        assert not any(os.path.exists(_mods(game, n)) for n in shared)
+
+
+@test
 def calls_failed_install_records_nothing() -> None:
     """A call_weapons.install whose transaction rolled back must not keep its first-backup records: a later
     install over another mod's table backs that table up, and repair puts it back instead of deleting it."""
