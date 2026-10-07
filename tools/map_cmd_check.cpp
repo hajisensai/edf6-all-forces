@@ -279,6 +279,18 @@ int main() {
         };
         Check(mapfloor::Near(top,bottom,0.0f,Normals::own,block,room,&h) && h==30.0f,"slot: inside a building's footprint, on its roof",h);
         Check(mapfloor::Near(top,bottom,0.0f,Normals::own,block,&h) && h==0.0f,"ground (any): the ground nearest",h);
+        // An obstructed floor just below the requested height must not stop the search: a lower cave floor can be
+        // nearer than the already accepted roof. The y=0 floor has only 1 m clearance; y=-5 has 4 m.
+        const Face obstructed[]={{30.0f,1.0f},{1.0f,-1.0f},{0.0f,1.0f},{-1.0f,-1.0f},{-5.0f,1.0f}};
+        const Cave lower{obstructed,5,false};
+        auto lowerRoom=[&](const float* p){
+            float hh[3],nn[3];
+            const float lo[3]={p[0],p[1]+0.3f,p[2]},hi[3]={p[0],p[1]+2.5f,p[2]};
+            return lower(lo,hi,hh,nn)<0.0f;
+        };
+        const bool lowerFound=mapfloor::Near(top,bottom,0.5f,Normals::own,lower,lowerRoom,&h);
+        Check(lowerFound && Near(h,-5.0f,0.01f),
+              "slot: skip an obstructed floor below the reference to find a nearer standable lower level",h);
         // Five cave levels over the one asked about (two hits each from the sky): still found.
         const Face deep[]={{0.0f,1.0f},{8.0f,-1.0f},{20.0f,1.0f},{28.0f,-1.0f},{40.0f,1.0f},{48.0f,-1.0f},{60.0f,1.0f},
                            {68.0f,-1.0f},{80.0f,1.0f},{88.0f,-1.0f},{100.0f,1.0f},{108.0f,-1.0f}};

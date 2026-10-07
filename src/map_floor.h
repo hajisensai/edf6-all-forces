@@ -75,8 +75,11 @@ template<class Ray,class Ok>
 bool Near(const float* top,const float* bottom,float y,Normals k,Ray ray,Ok ok,float* h) noexcept {
     bool any=false;
     Walk(top,bottom,k,ray,[&](const float* p,float){
-        if(ok(p) && (!any || std::fabs(p[1]-y)<std::fabs(*h-y))){*h=p[1];any=true;}
-        return any && p[1]<y;   // the rest are lower still: farther
+        const bool accepted=ok(p);
+        if(accepted && (!any || std::fabs(p[1]-y)<std::fabs(*h-y))){*h=p[1];any=true;}
+        // Only an accepted floor below y bounds the remaining candidates. A rejected floor can hide a lower,
+        // standable level closer to y than the best floor above it.
+        return accepted && p[1]<y;
     },kMaxHitsDown);
     return any;
 }
