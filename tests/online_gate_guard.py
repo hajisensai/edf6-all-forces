@@ -118,9 +118,11 @@ def check_damage(root: str) -> None:
     if 'online::SparesRide(InSession()' not in body(code_only(read(root, 'src/jet_hooks.cpp')), 'bool SparesOwnRide('):
         fail('src/jet_hooks.cpp SparesOwnRide: not the online-only rule (offline must stay stock)')
     bay = code_only(read(root, 'src/jet_bay.cpp'))
-    for fn in ('bool PlayerShell(', 'bool PlayerCannon('):
+    for fn in ('bool PlayerShell(', 'bool PlayerSideGun('):
         if 'online::Shooter::localPlayer' not in body(bay, fn):
             fail(f'src/jet_bay.cpp {fn[5:-1]}: the player\'s own round is not marked as theirs (nobody would count it)')
+    if 'damage,true,gun.name,by)' not in body(bay, 'bool GunShot('):
+        fail('src/jet_bay.cpp GunShot: side guns discard the player shot authority')
     # Every copy the plugin makes is recorded with its owner, and a call's copies are its caller's.
     for rel, fn in (('src/jet_spawn.cpp', 'Jet* Launch('), ('src/jet_spawn.cpp', 'unsigned char* HeliLaunch('),
                     ('src/subcarrier.cpp', 'unsigned char* SubLaunch(')):
@@ -198,7 +200,7 @@ def check_session(root: str) -> None:
 ANY_PLAYER_SITES = (
     ('src/crew.cpp', 'void Crew(unsigned char* vehicle,int cls)', 'anyPlayer=anyPlayer || AnyPlayerIn('),
     ('src/crew.cpp', 'void Crew(unsigned char* vehicle,int cls)', 'if(localPlayer)SeePlayer('),
-    ('src/heli.cpp', 'void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms)', 'if(AnyPlayerIn(seat))'),
+    ('src/heli.cpp', 'void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms)', 'if(AnyPlayerIn(seat) && !theirs)'),
     ('src/heli.cpp', 'void HeliFrame(unsigned char* vehicle)', 'playerAboard=playerAboard || AnyPlayerIn('),
     ('src/jet.cpp', 'Rider Aboard(unsigned char* v)', 'if(AnyPlayerIn('),
 )
