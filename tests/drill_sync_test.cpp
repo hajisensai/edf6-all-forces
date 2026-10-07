@@ -72,6 +72,13 @@ int main() {
     driver=99;s.sender=8;s.controller=99;s.sequence=1;s.phase=drill_net::Phase::out;DrillNetReceived(vehicle,s);
     s.sender=7;s.controller=42;s.sequence=6;s.phase=drill_net::Phase::home;DrillNetReceived(vehicle,s);
     Check(d->flight==Flight::out,"old driver cannot overwrite new driver's flight");
+    driver=-1;s.sender=9;s.controller=-1;s.sequence=1;s.phase=drill_net::Phase::back;
+    DrillNetReceived(vehicle,s);
+    s.sender=8;s.controller=99;s.sequence=50;s.phase=drill_net::Phase::out;DrillNetReceived(vehicle,s);
+    Check(d->flight==Flight::back,"old client newer packet cannot override host empty/NPC takeover");
+    driver=100;s.sender=10;s.controller=100;s.sequence=1;s.phase=drill_net::Phase::out;DrillNetReceived(vehicle,s);
+    s.sender=9;s.controller=-1;s.sequence=2;s.phase=drill_net::Phase::home;DrillNetReceived(vehicle,s);
+    Check(d->flight==Flight::out,"old host catch cannot override a new registered driver");
     authority=true;DrillNetReceived(vehicle,s);
     Check(d->flight==Flight::out,"authority ignores incoming state");
     d->flight=Flight::home;d->sentAt=0;now+=50;++frameNow;DrillFrame(vehicle);

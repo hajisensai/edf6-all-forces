@@ -20,11 +20,13 @@ struct State {
     float pos[3]{},dir[3]{},axis[3]{},speed=0,rpm=0,heat=0,angle=0;
     float flown=0;
     std::uint32_t backAgeMs=0;
+    std::uint32_t reserved=0; // explicit last four bytes: no uninitialized struct padding goes on the wire
 };
 static_assert(sizeof(State)==96,"fixed little-endian x64 wire layout");
+static_assert(offsetof(State,reserved)==92,"explicit zero reserved bytes occupy the tail");
 inline bool Valid(const State& s) noexcept {
     if(s.magic!=kMagic || s.version!=kVersion || !s.sender || !s.sequence || s.controller< -1 ||
-       s.phase>Phase::back || s.overheated>1)return false;
+       s.phase>Phase::back || s.overheated>1 || s.reserved)return false;
     for(int i=0;i<3;++i)if(!std::isfinite(s.pos[i]) || std::fabs(s.pos[i])>1.0e7f ||
         !std::isfinite(s.dir[i]) || !std::isfinite(s.axis[i]))return false;
     if(s.phase!=Phase::home) {

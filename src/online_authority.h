@@ -17,8 +17,9 @@
 //    it (a call's caller, a drone's thrower, a rescue's player; a carrier's drones its carrier's), recorded as each copy
 //    is made (NoteLocalCopy, the owner set by SetSpawnOwner), else the host's (IsOnlineAuthority). A player riding a copy
 //    another machine owns deals none with it: that machine's copy of the same aircraft fights in its place;
-//  - a vehicle whose seat 0 holds an NPC rider with no identity (RideAi's DummyVehicleRider) counts as "this machine's"
-//    on every machine that seated one: the host is its authority, and only the host seats one (OnlineMaySeatNpc).
+//  - a vehicle without a live REGISTERED seat-0 rider belongs to the host for plugin work, both on the host with its
+//    DummyVehicleRider and on clients whose seat is empty. Deliberately ignore the stock last-driver fallback here:
+//    after a client gets out it would call that client local, while the host's NPC also calls the host local.
 // The decisions are the pure functions below (tests/online_authority_test.cpp runs them on every case); the game is read
 // in src/online_authority.cpp. Nothing else in the plugin calls 0x7748F0 / 0x784210 / 0x630F90 / 0x630DF0 for a
 // decision (tests/online_gate_guard.py checks it), the NET probe (netprobe.cpp) reads them for its log only.
@@ -33,8 +34,8 @@ struct Facts {
     bool known;           // the session functions are the ones read (else: online, nothing is this machine's)
     bool host;            // this machine is the room's owner
     std::uint16_t net;    // the object's network flags word (+0x128)
-    bool vehicle;         // it has seats: `stock` and `npcSeat0` apply
-    bool npcSeat0;        // seat 0 holds a live rider with no network identity (an NPC the plugin or a script seated)
+    bool vehicle;         // it has seats: `stock` and `hostSeat0` apply
+    bool hostSeat0;       // no live registered seat-0 rider: empty, expired or an unregistered NPC -> host
     std::uint8_t copyOwner; // an unregistered copy's owner (CopyOwner): who made it, as recorded here
     int stock;            // vehicles: 0x630F90(v, 1, 1), 1 this machine, 2 another (other objects: their flags decide)
 };
@@ -60,7 +61,7 @@ constexpr bool Authority(const Facts& f) noexcept {
     if(!f.session)return true;
     if(LocalCopy(f.net))return f.copyOwner==kCopyHere || (f.copyOwner==kCopyHost && f.known && f.host);
     if(!f.known)return false;
-    if(f.vehicle && f.npcSeat0)return f.host;
+    if(f.vehicle && f.hostSeat0)return f.host;
     if(f.vehicle)return f.stock==1;
     return (f.net&kNetRemote)==0;
 }

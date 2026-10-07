@@ -25,6 +25,7 @@ int main() {
     bad=launch;bad.phase=static_cast<Phase>(3);Check(!Valid(bad),"unknown phase");
     bad=launch;bad.heat=1.01f;Check(!Valid(bad),"invalid heat");
     bad=launch;bad.sequence=0;Check(!Valid(bad),"reserved sequence");
+    bad=launch;bad.reserved=1;Check(!Decode(&bad,sizeof(bad),decoded),"nonzero reserved wire bytes");
     Gate remote;
     Check(!remote.Admit(launch,false,false,42),"no session does not consume a packet");
     Check(!remote.Admit(launch,true,true,42),"authority ignores its own broadcast");
@@ -43,6 +44,11 @@ int main() {
     Check(!remote.Admit(caught,true,false,99),"old driver's late catch cannot undo new flight");
     Check(!remote.Admit(caught,true,false,42),"returning driver retains sequence watermark");
     launch.sequence=5;Check(remote.Admit(launch,true,false,42),"returning driver's new event");
+    State host=launch;host.sender=99;host.sequence=1;host.controller=-1;
+    Check(remote.Admit(host,true,false,-1),"host takeover after driver exits uses a separate epoch");
+    launch.sequence=6;Check(!remote.Admit(launch,true,false,-1),"old driver's newer delayed packet cannot override host takeover");
+    newDriver.sequence=2;Check(remote.Admit(newDriver,true,false,99),"new registered driver replaces host epoch");
+    host.sequence=2;Check(!remote.Admit(host,true,false,99),"old host snapshot cannot override new registered driver");
     Gate newObject;
     launch.sequence=1;
     Check(newObject.Admit(launch,true,false,42),"new ObjRef has separate replay state");

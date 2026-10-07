@@ -378,20 +378,23 @@ Y 键是否与原版 505 的某个操作冲突。
 仅链这个接收 vtable 槽；coop 的 GameObjectBase `0x54D770` 中间钩子不改。消息类型 **15**（coop 的伤害 13、RNG 14 原样交给下一接收函数）
 后接固定 96 字节版本化状态块。原版未安装插件的接收器对 15 只读类型后返回，不修改车辆。
 
-状态含进程随机 sender、单调序号、当前/末任驾驶员的原版 ReferenceId、去程/回程/车头阶段、世界位置/方向/轴、速度、自转角、RPM、热量、
+状态含进程随机 sender、单调序号、当前注册驾驶员的原版 ReferenceId、去程/回程/车头阶段、世界位置/方向/轴、速度、自转角、RPM、热量、
 过热锁、已飞距离和回程经过时间。对象身份由原版描述符路由；本地状态绑定 `ObjRef`（地址 + weak-this 控制块），对象地址复用重新建状态。
-驾驶员身份按 seat 0 当前 weak（`+0x260`）、末任 weak（`+0x300`）顺序取最近有网络身份的驾驶员；没有注册驾驶员为 `-1`。
-只存在于 host 的 NPC DummyVehicleRider 没有网络身份，跳过它后看末任注册驾驶员，绝不在 host 单独给 Dummy 生成 wire ReferenceId。
+驾驶员身份只取 seat 0 当前 weak（`+0x260`）中的活跃注册驾驶员；空座、过期 weak 和无网络身份的 NPC DummyVehicleRider 都是 host 控制纪元 `-1`，
+不读末任 weak（`+0x300`）。共享 `IsOnlineAuthority` 与 coop W3 同样改为「无活跃注册驾驶员即 host」：主动覆盖原版保留末任驾驶员的插件工作规则，
+否则 host 的 Dummy 与客机的空座 + 本机末任驾驶员会同时宣称权威。玩家 42 下车后双方 epoch 为 `-1`，其迟到包即使序号更大也被丢弃；
+玩家 99 上车后 epoch 为 99，之前 host 的 `-1` 包也不能覆盖新驾驶员。
 `0x785050` **按值消费** weak_ptr（`0x78511A..133` 释放 weak count）：传本地增持的副本，绝不把座位里的 weak 原地交给它释放。
 
 只有 `IsOnlineAuthority(vehicle)` 所选机器模拟飞行、判地图碰撞、产生装药；伤害仍走 `OnlineShotCounts`。其它机器 `DrillFrame` 每帧直接画复制姿态和喷气，
 不依赖 `DrillInput` 是否认出本机玩家，也不独立判碰撞。阶段变化立即发送；飞行每 50 game ms 发送绝对快照，车头每 500 game ms 补送，
 所以缺发射、中间状态或末次接住消息都能从后续快照恢复。状态包含接管所需积分量，换驾驶员时新 authority 能继续已有飞行。
-接收先检查会话、505 钻头模型、本机非 authority、当前/末任驾驶员身份、字段有限值，再按 sender 的序号拒绝重复/乱序；每辆车保留最多 1024 个 sender 水位（与 coop 房间容量一致），驾驶员回来时保留原 sender 水位，
+接收先检查会话、505 钻头模型、本机非 authority、当前驾驶员纪元、字段有限值和显式保留位为 0，再按 sender 的序号拒绝重复/乱序；每辆车保留最多 1024 个 sender 水位（与 coop 房间容量一致），驾驶员回来时保留原 sender 水位，
 旧驾驶员的迟到包不能盖过新驾驶员的状态。不在会话或没有注册网络身份时保留原有本地路径；会话退出清飞行、待发射输入和接收水位，任务 reset 清整个 ObjRef 状态。
 
 验证分层：`drill_net_test` 检查格式/边界、重复乱序、驾驶员切换、退出、序号回绕和单端伤害；`drill_sync_test` 直接执行生产
 `DrillNetReceived / DrillFrame / PoseFlight`，检查远端无输入仍改真实骨骼记录、返回/灭火、丢 catch 后补送、对象复用等；
+`online_authority_seat_test` 直接执行生产 seat/weak 读取，用 host Dummy / client 空座 + 活跃末任玩家的不同内存状态验证两端只有一个 authority；
 `drill_net_native_test <EDF.dll>` 以 `DONT_RESOLVE_DLL_REFERENCES` 在独立测试进程映射游戏 DLL（不运行入口，不附加游戏，不写磁盘），
 实跑原版消息读写、生产发送/接收、505 对 tag 15 的忽略和 13/14 透传，以及真实 `0x785050` 退出支路对 weak_ptr 的消费（有未增持的负对照）。
 离线验证不等同于实际两机房间画面/延迟/伤害 E2E；所有需要显示飞行的机器都要安装此版本。

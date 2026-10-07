@@ -22,8 +22,8 @@ struct Stream {
     Stream() { Fn<void*(__fastcall*)(void*,int)>(kConstruct)(bytes,0x40); }
     ~Stream() { Fn<void(__fastcall*)(void*)>(kDestroy)(bytes); }
 };
-// The most recent REGISTERED driver identifies the control epoch. A host-only NPC dummy must never get a wire id:
-// its peers have no matching object. Skip it and use the last registered rider on every copy, else the -1 epoch.
+// A live REGISTERED current driver identifies the control epoch. Empty and host-only NPC seats both use -1,
+// matching online_authority's host takeover. Never retain the last driver: its late packets must fail the epoch.
 bool RegisteredWeak(const unsigned char* weak) noexcept {
     const auto c=At<const unsigned char*>(weak,8);
     const auto rider=At<const unsigned char*>(weak,0);
@@ -72,7 +72,6 @@ std::int32_t DrillNetController(unsigned char* v) noexcept {
     const unsigned char* seat=SeatAt(v,0);
     if(!seat)return -1;
     const unsigned char* weak=seat+kSeatRider;
-    if(!RegisteredWeak(weak))weak=seat+0x300;
     if(!RegisteredWeak(weak))return -1;
     // 785050 takes weak_ptr BY VALUE: its epilogue (78511A..133) releases the argument's weak count. Passing the
     // seat's resident pair would consume its reference on every snapshot. Copy/addref exactly as its callers do.

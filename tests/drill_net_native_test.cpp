@@ -120,14 +120,16 @@ int main(int argc,char** argv) {
     Check(DrillNetController(vehicle)==-1 && At<LONG>(control,0xC)==2,
           "native current driver lookup consumes only an incremented temporary weak reference");
     Put<void*>(seat,kSeatRider,nullptr);Put<void*>(seat,0x300,vehicle);Put<void*>(seat,0x308,control);
+    // No registry singleton at all: the following calls must not reach 785050 through the live last-driver weak.
+    Put<void*>(image,0x20B2AC0,nullptr);
     Check(DrillNetController(vehicle)==-1 && At<LONG>(control,0xC)==2,
-          "native last driver lookup preserves the seat's resident weak reference");
+          "empty seat selects host epoch without looking up the live last driver");
     alignas(16) unsigned char dummy[0x130]{},dummyControl[16]{};
     Put<LONG>(dummyControl,8,1);Put<LONG>(dummyControl,0xC,2);
     Put<void*>(seat,kSeatRider,dummy);Put<void*>(seat,kSeatRider+8,dummyControl);
     Check(!RegisteredWeak(seat+kSeatRider) && RegisteredWeak(seat+0x300),"unregistered host NPC does not become a wire driver identity");
     Check(DrillNetController(vehicle)==-1 && At<LONG>(dummyControl,0xC)==2 && At<LONG>(control,0xC)==2,
-          "NPC takeover looks up only the previous registered driver and preserves both resident weak references");
+          "NPC takeover and empty client both select host epoch, ignoring their live last driver");
     Put<LONG>(control,8,0);
     Check(DrillNetController(vehicle)==-1 && At<LONG>(control,0xC)==2,"expired last driver uses host fallback without a reference call");
     Put<void*>(image,0x20B2AC0,originalWorld);

@@ -31,12 +31,13 @@ bool Known() noexcept {
 
 bool Host() noexcept { return Known() && reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr); }
 
-// Seat 0 holds a live rider that was never registered (RideAi's DummyVehicleRider, the plugin's NPC).
-bool NpcSeat0(const unsigned char* v) noexcept {
+// No live registered driver: the host's NPC and the clients' empty copies must choose the SAME authority. The
+// stock last-driver fallback is intentionally not used for plugin work (it would retain a second client authority).
+bool HostSeat0(const unsigned char* v) noexcept {
     const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),0);
-    if(SeatRider(seat)==Rider::none)return false;
+    if(!seat || SeatRider(seat)==Rider::none)return true;
     const auto rider=At<const unsigned char*>(seat,kSeatRider);
-    return Readable(rider,kNetWord+2) && online::LocalCopy(At<std::uint16_t>(rider,kNetWord));
+    return !Readable(rider,kNetWord+2) || online::LocalCopy(At<std::uint16_t>(rider,kNetWord));
 }
 
 // The unregistered copies' owners (NoteLocalCopy), by object and its weak-this block (a new object at an old address is
@@ -72,8 +73,8 @@ bool Read(const void* object,online::Facts* f) noexcept {
         if(!f->known)return true;
         f->vehicle=Readable(o,kSeatCount+8) && SeatCount(o)>0 && KnownVehicle(o);
         if(f->vehicle) {
-            f->npcSeat0=NpcSeat0(o);
-            f->stock=reinterpret_cast<OperatorFn>(image+kOperator)(const_cast<unsigned char*>(o),true,true);
+            f->hostSeat0=HostSeat0(o);
+            f->stock=f->hostSeat0 ? 0 : reinterpret_cast<OperatorFn>(image+kOperator)(const_cast<unsigned char*>(o),true,true);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
     return true;

@@ -142,7 +142,8 @@ EDF.dll TimeDateStamp `0x678CCB46`，下文地址全部是 RVA。纯静态分析
 
 ### 3.4 插件怎样判「我是这台载具的权威」
 
-最省事、和原版完全一致的写法：**直接调游戏的 `0x630DF0`**（纯查询：只加减引用计数，不写任何东西）：
+以下是原版查询的历史对照；当前插件工作必须问 `src/online_authority.h` 的 `IsOnlineAuthority`，不能直接拿原版末任驾驶员规则当插件权威。
+原版查询 **`0x630DF0`**（纯查询：只加减引用计数）：
 
 ```cpp
 using SeatLocalFn=bool(__fastcall*)(void* veh,int seat,int role,int mode,bool wantLocal);
@@ -154,6 +155,13 @@ const bool authority=reinterpret_cast<SeatLocalFn>(image+0x630DF0)(veh,0,0,0,tru
 
 注意一个现有隐患（M）：`AutoCrew`（RideAi 放 NPC 驾驶员）如果在**客机**上给房主拥有的载具放了本机的 `DummyVehicleRider`，那台客机就会
 认为自己是权威并开始发位姿，和真正的驾驶员 / 别的机器抢。插件的 NPC 驾驶在联机时必须只在一台机器上做（建议：房主，`0x784210`）。
+
+**2026-10-07 插件与 coop W3 的空座契约修复**：注册载具只有 seat 0 的当前 weak 有活乘员、且乘员 `+0x128` 低两位非 0 时，
+才按 stock runner 判工作/伤害权威；其它情况（空座、weak 过期、无注册身份的 Dummy）都统一为 host。主动不沿用 stock 的 `seat+0x300` 末任驾驶员：
+仅让 host 放 NPC 仍不够，host 的 Dummy 让 stock 回 1，而客机空座的末任玩家也可能让 stock 回 1，会出现两个插件 authority。
+现在 `HostSeat0` 对 host Dummy 和 client 空座都返回 true，插件模拟、`OnlineShotCounts`、炮手反冲和 coop 伤害归属选择同一台机器。
+未注册的插件自建副本仍走原有 copy owner 契约，本节没有改变原版车辆物理/位姿复制函数。
+`tests/online_authority_test.cpp` 覆盖规则，`tests/online_authority_seat_test.cpp` 直接读取生产实现的假车辆/座位/weak 内存并验证下车、NPC 接管、新玩家上车。
 
 ---
 

@@ -5,8 +5,8 @@
 namespace crew {
 // Chains VehicleBase slot 52 (the weapon message, 0x630900) of the classes whose slot 48 adds body recoil. At load.
 bool InstallGunnerRecoil() noexcept;
-// Whether this machine is the vehicle's authority (online_authority.h IsOnlineAuthority: seat 0's rider's machine, its
-// last rider's, the host for an NPC driver with no identity, which every machine that seated one takes for its own).
+// Whether this machine is the vehicle's plugin authority (online_authority.h IsOnlineAuthority): the current registered
+// seat-0 rider's machine, otherwise the host (both an empty seat and a host-only NPC). No stock last-driver fallback.
 // True offline.
 bool VehicleAuthority(unsigned char* vehicle) noexcept;
 
