@@ -98,6 +98,7 @@ constexpr float kProbeStep=500.0f,kProbeTop=3000.0f,kProbeBottom=-3000.0f,kProbe
 constexpr ULONGLONG kProbeAfterMs=5000;
 ULONGLONG probeFrom=0;
 bool probed=false;
+int probeRow=0;   // the grid row the probe casts next
 }  // namespace
 
 // The move area (docs/map-edge-re.md §1): the map's own move_limit box (the test range +-999 m) clamps players, NPCs
@@ -163,32 +164,38 @@ void BigWorldProbe() noexcept {
     if(probed)return;
     if(!probeFrom){probeFrom=ms;return;}
     if(ms-probeFrom<kProbeAfterMs)return;
-    probed=true;
-    LogMemory("the map in");
-    WidenMoveArea();
-    RaiseSky();   // after the widening: it keeps the box's height as it found it
     constexpr int n=2*kProbeHalf+1;
     static float height[n][n];
-    float low=1e9f,high=-1e9f;
-    int found=0;
-    for(int r=0;r<n;++r)for(int c=0;c<n;++c) {
+    static float low,high;
+    static int found;
+    if(probeRow==0) {
+        LogMemory("the map in");
+        WidenMoveArea();
+        RaiseSky();   // after the widening: it keeps the box's height as it found it
+        low=1e9f;high=-1e9f;found=0;
+    }
+    // One row of the grid a frame (33 rays), not all 1089 in one frame: the probe only feeds the log.
+    const int r=probeRow++;
+    for(int c=0;c<n;++c) {
         const float x=static_cast<float>(c-kProbeHalf)*kProbeStep,z=static_cast<float>(kProbeHalf-r)*kProbeStep;
         const float a[3]={x,kProbeTop,z},b[3]={x,kProbeBottom,z};
         float hit[3];
         height[r][c]=MapRay(a,b,hit)>=0.0f ? hit[1] : kNoGround;
         if(height[r][c]!=kNoGround){++found;low=std::fmin(low,hit[1]);high=std::fmax(high,hit[1]);}
     }
+    if(probeRow<n)return;
+    probed=true;
     Log("BIGWORLD probe: %d of %d cells (%.0f m apart, +-%.0f m) have ground, %.0f to %.0f m; rows from +z down, columns from -x;"
         " digit = %.0f m bands over the lowest",found,n*n,kProbeStep,kProbeStep*kProbeHalf,found ? low : 0.0f,found ? high : 0.0f,kProbeBand);
-    for(int r=0;r<n;++r) {
+    for(int row=0;row<n;++row) {
         char line[n+1];
         for(int c=0;c<n;++c) {
-            const float h=height[r][c];
+            const float h=height[row][c];
             const int band=h==kNoGround ? -1 : static_cast<int>((h-low)/kProbeBand);
             line[c]=band<0 ? '.' : band>9 ? '+' : static_cast<char>('0'+band);
         }
         line[n]=0;
-        Log("BIGWORLD probe z=%+6.0f %s",static_cast<float>(kProbeHalf-r)*kProbeStep,line);
+        Log("BIGWORLD probe z=%+6.0f %s",static_cast<float>(kProbeHalf-row)*kProbeStep,line);
     }
 }
 
@@ -206,6 +213,6 @@ void LogMemory(const char* when) noexcept {
 }
 
 void ResetBigWorld() noexcept {
-    logged=0;probeFrom=0;probed=false;
+    logged=0;probeFrom=0;probed=false;probeRow=0;
 }
 }  // namespace crew

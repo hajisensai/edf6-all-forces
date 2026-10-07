@@ -538,7 +538,7 @@ void JetFrame(unsigned char* v) noexcept {
     bool gunsOk=false,missileOk=false;
     Guide(*j,kind,arms,mother,pos,nose,anchor,viewer,lead,height,clear,walled,ms,want,&speed,&gunsOk,&missileOk);
     if(kind.flight==FlightModel::rotor)Rotor(*j,kind,v,mother,pos,anchor,want,height,hp,hpMax,dt,ms);
-    else Wing(*j,kind,v,pos,nose,want,speed,dt,ms);
+    else Wing(*j,kind,v,pos,clear,nose,want,speed,dt,ms);
     HoldOffGround(*j,pos,clear,dt,ms);
     j->m.ready=true;
     BayFrame(*j,pos);

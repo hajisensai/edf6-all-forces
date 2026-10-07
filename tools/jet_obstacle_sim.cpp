@@ -248,7 +248,7 @@ float PullCase(Role role,float mass,float diveDeg,float speed,bool inverted,bool
         Sense(j,pos,nowMs);
         const float clear=GroundClearance(pos);
         float want[3]={dir[0],dir[1],dir[2]};   // held in the dive: only Guard pulls it out
-        Wing(j,k,v,pos,nose,want,k.attack,kDt,nowMs);
+        Wing(j,k,v,pos,GroundClearance(pos),nose,want,k.attack,kDt,nowMs);
         const float sink=j.m.vel[1];
         HoldOffGround(j,pos,clear,kDt,nowMs);
         if(j.m.vel[1]>sink+0.01f)into=true;   // the floor caught it: it would have gone in
@@ -294,7 +294,7 @@ void EntryCase(float offDeg,float over,bool launched,float* gunAt,float* missile
         float want[3]={nose[0],0.0f,nose[2]},speed=k.cruise;
         bool gunsOk=false,missileOk=false;
         Attack(j,arms,pos,nose,aim,aim[1]+k.alt,nowMs,want,&speed,&gunsOk,&missileOk);
-        Wing(j,k,v,pos,nose,want,speed,kDt,nowMs);
+        Wing(j,k,v,pos,GroundClearance(pos),nose,want,speed,kDt,nowMs);
         HoldOffGround(j,pos,clear,kDt,nowMs);
         j.m.ready=true;
         Fire(j,v,pos,nose,aim,gunsOk,missileOk,arms,nowMs);
@@ -462,7 +462,7 @@ EdgeOut EdgeRun(const EdgeCase& c) {
         float want[3];
         Toward(pos,goal,want);
         if(c.chase!=Chase::climb)Level(pos,want,start[1],want);
-        Wing(j,kind,v,pos,nose,want,kind.attack,kDt,nowMs);
+        Wing(j,kind,v,pos,GroundClearance(pos),nose,want,kind.attack,kDt,nowMs);
         HoldOffGround(j,pos,clear,kDt,nowMs);
         j.m.ready=true;
         Move(j,v);
@@ -700,7 +700,7 @@ int main(int argc,char** argv) {
         } else {
             Level(pos,heading,start[1],want);
         }
-        Wing(j,kind,v,pos,nose,want,speed,kDt,nowMs);
+        Wing(j,kind,v,pos,GroundClearance(pos),nose,want,speed,kDt,nowMs);
         HoldOffGround(j,pos,clear,kDt,nowMs);
         j.m.ready=true;
         const bool held=Move(j,v);

@@ -201,12 +201,13 @@ bool BesideDll(const wchar_t* suffix,wchar_t* path) noexcept {
 
 // The watchdog: silent while the game does not beat (see Beat).
 DWORD WINAPI Watch(void*) {
-    bool quiet=false;
+    // The master volume set only when it changes (it was set 40 times a second either way).
+    float set=-1.0f;
     for(;;) {
         Sleep(25);
         const bool stopped=GetTickCount64()-beatAt.load()>kQuietMs;
-        if(stopped && !quiet){master->SetVolume(0.0f);quiet=true;}
-        else if(!stopped){master->SetVolume(masterVolume.load());quiet=false;}
+        const float want=stopped ? 0.0f : masterVolume.load();
+        if(want!=set){master->SetVolume(want);set=want;}
     }
 }
 
