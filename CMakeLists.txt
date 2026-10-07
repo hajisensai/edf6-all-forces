@@ -570,28 +570,13 @@ target_include_directories(sazabi_net_native_test PRIVATE src common)
 target_link_libraries(sazabi_net_native_test PRIVATE edf6common user32)
 target_compile_options(sazabi_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
 
-# EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
-# tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
-# cmake --build build --target EDF6Autopilot
-add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp)
-target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
-target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
-target_include_directories(EDF6Autopilot PRIVATE common)
-target_compile_options(EDF6Autopilot PRIVATE /W4 /WX /utf-8 /permissive-)
-set_target_properties(EDF6Autopilot PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools")
-
-add_executable(fieldshare_test tests/fieldshare_test.cpp)
-target_include_directories(fieldshare_test PRIVATE src common)
-target_link_libraries(fieldshare_test PRIVATE edf6common)
-target_compile_options(fieldshare_test PRIVATE /W4 /WX /utf-8 /permissive-)
-add_test(NAME fieldshare COMMAND fieldshare_test)
-add_test(NAME autopilot_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/autopilot/test_drive.py")
 add_executable(npc_gunner_aim_test EXCLUDE_FROM_ALL tests/npc_gunner_aim_test.cpp)
 target_include_directories(npc_gunner_aim_test PRIVATE src common)
 target_link_libraries(npc_gunner_aim_test PRIVATE edf6common)
 target_compile_options(npc_gunner_aim_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks npc_gunner_aim_test)
 add_test(NAME npc_gunner_aim COMMAND npc_gunner_aim_test)
+set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native gunner checks")
 add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_gunner_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_gunner_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME medic_native_heal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/medic_native_heal_audit.py" "${EDF6_NATIVE_DLL}")
@@ -616,3 +601,19 @@ target_compile_options(npc_gunners_online_test PRIVATE /W4 /WX /utf-8 /permissiv
 target_link_options(npc_gunners_online_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks npc_gunners_online_test)
 add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
+# EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
+# tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
+# cmake --build build --target EDF6Autopilot
+add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp)
+target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
+target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
+target_include_directories(EDF6Autopilot PRIVATE common)
+target_compile_options(EDF6Autopilot PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(EDF6Autopilot PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools")
+
+add_executable(fieldshare_test tests/fieldshare_test.cpp)
+target_include_directories(fieldshare_test PRIVATE src common)
+target_link_libraries(fieldshare_test PRIVATE edf6common)
+target_compile_options(fieldshare_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME fieldshare COMMAND fieldshare_test)
+add_test(NAME autopilot_driver COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/autopilot/test_drive.py")

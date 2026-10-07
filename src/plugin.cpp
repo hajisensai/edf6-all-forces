@@ -473,8 +473,8 @@ void LoadConfig() noexcept {
     n.vehicleMgVolume=ReadFloat(L"VehicleMgVolume",n.vehicleMgVolume);
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
-    n.edf5CampaignRows=FixInt("EDF5CampaignRows",ReadInt(L"EDF5CampaignRows",n.edf5CampaignRows),0,512);
     n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
+    n.edf5CampaignRows=FixInt("EDF5CampaignRows",ReadInt(L"EDF5CampaignRows",n.edf5CampaignRows),0,512);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);

@@ -265,8 +265,8 @@ struct Config {
     float proteusSalvoRange=1500.0f;// ...the farthest mark it goes at (m)
     float proteusPriority=0.3f;     // ...the front shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
-    int edf5CampaignRows=0;          // the offline list's rows before the EDF5 campaign's (edf5campaign.cpp; 0 = no cap): the story's end and clear ratio
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
+    int edf5CampaignRows=0;          // the offline list's rows before the EDF5 campaign's (edf5campaign.cpp; 0 = no cap): the story's end and clear ratio
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
