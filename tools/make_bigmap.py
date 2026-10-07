@@ -16,10 +16,7 @@ over") into <game>/Mods:
   Mods/Plugins/EDF6VehicleCrew.ini  BigWorld (the physics world's half size, src/bigworld.cpp) set to cover it; --remove
                               sets it back to 0.
 
-Only the test range's map: missions on other maps are untouched. Only on a machine with MIN_MEMORY of RAM or more
-(fits): with 8 GB the game ran out of memory loading it (std::bad_alloc in its loader threads, testhub report #3,
-2026-10-07: 45 map pieces and 8856 bodies against the stock 5 and 737); the installer leaves it out (and takes an
-earlier one back) below that. The navmesh still covers only the middle block (the
+Only the test range's map: missions on other maps are untouched. The navmesh still covers only the middle block (the
 ground units' paths), the map's own move area is widened by the plugin with BigWorld.
 
   python tools/make_bigmap.py [game dir] [--radius N]   write / refresh
@@ -62,27 +59,6 @@ BLOCK = 3500.0           # m: the ground (2500) and its edge ring (500 a side)
 SINK = -40000.0          # m: the far mountain ring's drop (out of the far camera's 20 km)
 WORLD_MARGIN = 750.0     # m of physics world past the last block's edge
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
-MIN_MEMORY = 12 * 2**30  # bytes of RAM: an 8 GB machine (Windows shows about 7.9) fails, 16 GB ones (about 15.9) pass
-
-
-def physical_memory() -> int | None:
-    """The machine's RAM in bytes (GlobalMemoryStatusEx ullTotalPhys); None when it cannot be read."""
-    if sys.platform != 'win32':
-        return None
-    import ctypes
-
-    class Status(ctypes.Structure):
-        _fields_ = [('dwLength', ctypes.c_uint32), ('dwMemoryLoad', ctypes.c_uint32)] +                    [(name, ctypes.c_uint64) for name in ('ullTotalPhys', 'ullAvailPhys', 'ullTotalPageFile',
-                                                         'ullAvailPageFile', 'ullTotalVirtual', 'ullAvailVirtual',
-                                                         'ullAvailExtendedVirtual')]
-    status = Status()
-    status.dwLength = ctypes.sizeof(Status)
-    return int(status.ullTotalPhys) if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)) else None
-
-
-def fits(memory: int | None) -> bool:
-    """Whether a machine with `memory` bytes of RAM gets the big map (unknown: it does, as before)."""
-    return memory is None or memory >= MIN_MEMORY
 
 
 def stock_file(root: str, name: str) -> bytes:

@@ -2955,7 +2955,6 @@ def pack_install_upgrade_uninstall() -> None:
                           check=lambda game: True))
             enter(patched(buildcache, recipes=lambda: {g: 'recipe' for g in buildcache.GROUPS}))
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
-            enter(patched(importlib.import_module('make_bigmap'), physical_memory=lambda: 64 * 2**30))   # not the runner's RAM
 
             def mission(game: str, plan: object) -> list[str]:
                 out = gen.mission_dir(game, gen.SLOTS[0].mission)

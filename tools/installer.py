@@ -7,7 +7,7 @@ What install does, with EDF6.exe closed:
      onto the shared weapon table (call_weapons.stack, which also checks the table and its texts line up and
      offers repair when they do not), the jets, helicopters and drones (make_jets.build) and the submarine
      carrier (make_sub.build), the ejection's parachute canopy (make_chute.build), the big map
-     (make_bigmap.build: the test range's plain stitched 3 x 3, seamless; only with make_bigmap.MIN_MEMORY of RAM).
+     (make_bigmap.build: the test range's plain stitched 3 x 3, seamless).
      They cannot be shipped prebuilt: they are derived from the game's files, and the
      weapon table is shared with other mods. Nothing is written unless all of it could be made;
   3. writes them: the generated objects (each file atomically, recorded in the ownership ledger,
@@ -425,14 +425,7 @@ def install(game: str) -> None:
         stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
-    memory = make_bigmap.physical_memory()
-    big = make_bigmap.fits(memory)
-    if big:
-        bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
-    else:
-        bigmap = None
-        print(f'大地图：这台电脑内存 {memory / 2**30:.1f} GB，不到 {make_bigmap.MIN_MEMORY / 2**30:.0f} GB，不装 3 x 3 大地图'
-              '（8 GB 内存进测试场会内存耗尽、游戏崩溃）；测试场用原版地图。', flush=True)
+    bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     print('\n全部生成完毕，开始写入。')
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
@@ -458,10 +451,7 @@ def install(game: str) -> None:
     install_autoturret(game, *turret)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
-    if not big:   # an earlier install's big map taken back, BigWorld 0
-        for path in make_bigmap.remove(game)[0]:
-            print('删除（内存不够，不用大地图）', path)
-    elif bigmap is not None:
+    if bigmap is not None:
         for path in make_bigmap.install(game, built=bigmap):
             print('写入', path)
     else:
