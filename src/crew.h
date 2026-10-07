@@ -43,6 +43,7 @@ struct Config {
     bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
+    bool medicGunnerAim=true;  // the player in a medic heli's door seat: the gun aimed for them at hurt friends (heli.cpp)
     float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
     float heliGuardSpeed=12.0f;// ...at this speed (m/s; at most 80% of its top speed)
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
@@ -506,7 +507,7 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
 // A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
 // friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
-enum class HeliBody { brute410, eros506 };
+enum class HeliBody { brute410, eros506, medic410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic)
 unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.

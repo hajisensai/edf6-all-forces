@@ -91,8 +91,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mission_setup writes into the speed gain k (veh+0x162C; body506.cpp's range 7001-7099 for jets), and what that
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
-                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly };
-constexpr int kBodyCount=19;
+                  gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic };
+constexpr int kBodyCount=20;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -135,6 +135,8 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     // The Primer creatures (primer.cpp, docs/primer-plan.md), enemies a mission places.
     {Body::centipede,L"app:/object/edf6vc_centipede.sgo",L"EDF6VC_CENTIPEDE.SGO",7012.0f,Role::centipede,Role::drone,"centipede",true},
     {Body::dragonfly,L"app:/object/edf6vc_dragonfly.sgo",L"EDF6VC_DRAGONFLY.SGO",7013.0f,Role::dragonfly,Role::drone,"dragonfly",true},
+    // The medic heli (tools/make_jets.py MEDIC_HELI_FILE): the 410 with healing door guns (heli.cpp Medic).
+    {Body::heliMedic,L"app:/object/edf6vc_heli_medic.sgo",L"EDF6VC_HELI_MEDIC.SGO",0.0f,Role::fighter,Role::drone,"heliMedic"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;

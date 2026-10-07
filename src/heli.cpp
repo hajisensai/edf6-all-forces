@@ -427,6 +427,7 @@ struct Heli {
     bool applied;         // params are on the heli now
     ULONGLONG circleUntil;// 409: circling for its turret until then (see kTurretCircleMs)
     Door doors[2];        // 410: left, right
+    bool medic;           // its door guns heal (Medic): it aims at hurt friends, never at enemies
     // A called heli (HeliCalled): its post (guard), when its sortie ends (game ms), leaving since leftAt, and
     // deleted from another object's update once reap is set (HeliReap).
     bool called,guard,leaving,reap;
@@ -591,6 +592,120 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
     return ForEachEnemyOf(At<std::int32_t>(v,kTeam),v,static_cast<F&&>(f));
 }
 
+// ---- The medic heli (tools/make_jets.py MEDIC_HELI_FILE; the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，
+// 自瞄也是锁队友」) ----
+// A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way; a round with no blast
+// skips the team check, docs/bullet-pass-re.md §3.2 step 4, so it hits a friend and its damage heals) aims at hurt friends
+// and never at enemies: its pilot circles the most hurt one in its range (PickTarget: as a 410 circles an enemy), its
+// gunners shoot the hurt friends they reach (DoorGun) and hold their fire while an enemy is near the line (the round would
+// hit it first: a heal for the enemy, or nothing; not checked which).
+// Friends: the soldiers (the four classes, the player's and the NPCs') of every team friendly to the heli's, through the
+// game's own walk 0x5E11D0(team manager, team, functor): under the manager's lock (EnterCriticalSection: reentrant), slot 1
+// (functor, object) for each object of each team whose relation to `team` is 1 (the board button's walk, docs/rescue-re.md).
+// On foot only (a soldier in a vehicle takes no rounds, the vehicle does), alive, below kHurt of its HP (GameObjectBase
+// +0x2F4 / +0x2F8, as a vehicle's). Walked once a frame for every medic (FriendsNow).
+constexpr std::size_t kWeaponDamage=0x89C;   // AmmoDamage (the SGO reader 0x68A920 at 0x68D6E3, docs/boarding-re.md)
+constexpr unsigned kVisitFriends=0x5E11D0;
+const unsigned char kVisitFriendsSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
+constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
+constexpr float kHurt=0.97f;        // below this share of its HP a friend is hurt
+constexpr float kAimOver=0.3f;      // m over a soldier's origin (its feet) the gunners aim: the healing round bursts there
+constexpr float kHurtWeight=200.0f; // m a friend counts farther per share of its HP it still has (the most hurt first)
+constexpr float kEnemyClear=5.0f;   // m: no healing round passes this near an enemy's lock point (plus the round's blast)
+constexpr std::size_t kWeaponBlast=0x8B0;   // AmmoExplosion, the blast radius (0x68D82F, docs/heli-input-re.md)
+constexpr int kMaxFriends=64;
+bool visitOk=false;                  // 0x5E11D0 is the walk read above (CheckHeliProfile)
+
+struct Friend { const void* object; float aim[3]; float share; };
+struct FriendList { Friend f[kMaxFriends]; int n; };
+struct FriendVisitor { const void* const* vtable; FriendList* list; };
+using VisitFriendsFn=void(__fastcall*)(void*,std::int32_t,FriendVisitor*);
+
+bool IsSoldier(const unsigned char* o) noexcept {
+    if(!Readable(o,8))return false;
+    const auto vt=At<const unsigned char*>(o,0);
+    for(const auto r:kSoldierVts)if(vt==image+r)return true;
+    return false;
+}
+
+void AddFriend(FriendList& l,const unsigned char* o) noexcept {
+    if(l.n>=kMaxFriends || !IsSoldier(o) || !Readable(o,kHumanVehicleCtrl+8) || o[kDead])return;
+    const auto ride=At<const unsigned char*>(o,kHumanVehicleCtrl);
+    if(ride && Readable(ride,0x10) && At<std::int32_t>(ride,8)!=0)return;   // in a vehicle (0x56D700's own test)
+    const float hp=At<float>(o,kHp),max=At<float>(o,kHpMax);
+    if(!std::isfinite(hp) || !std::isfinite(max) || !(max>0.0f) || !(hp>0.0f) || hp>=max*kHurt)return;
+    const float* p=reinterpret_cast<const float*>(o+kPosition);
+    if(!std::isfinite(p[0]+p[1]+p[2]))return;
+    Friend& f=l.f[l.n++];
+    f.object=o;f.aim[0]=p[0];f.aim[1]=p[1]+kAimOver;f.aim[2]=p[2];f.share=hp/max;
+}
+
+void __fastcall VisitorNone(FriendVisitor*) noexcept {}
+void __fastcall VisitFriend(FriendVisitor* self,const unsigned char* object) noexcept {
+    __try { AddFriend(*self->list,object); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+const void* const kFriendVisitorVtable[]={reinterpret_cast<const void*>(&VisitorNone),reinterpret_cast<const void*>(&VisitFriend)};
+
+struct FriendsCache { ULONGLONG frame; std::int32_t team; bool ok; FriendList list; };
+FriendsCache friendsCache{};
+
+// This frame's hurt friends of `team` (walked once a frame per team), or nullptr when the walk is not there.
+const FriendList* FriendsNow(std::int32_t team) noexcept {
+    if(!visitOk || team<0 || team>=kMaxTeam)return nullptr;
+    const ULONGLONG frame=GameFrame();
+    if(friendsCache.ok && friendsCache.frame==frame && friendsCache.team==team)return &friendsCache.list;
+    friendsCache.ok=false;friendsCache.frame=frame;friendsCache.team=team;friendsCache.list.n=0;
+    const auto teams=At<void*>(image,kTeams);
+    if(!teams)return nullptr;
+    FriendVisitor visitor{kFriendVisitorVtable,&friendsCache.list};
+    reinterpret_cast<VisitFriendsFn>(image+kVisitFriends)(teams,team,&visitor);
+    friendsCache.ok=true;
+    return &friendsCache.list;
+}
+
+// f(object, aim point, share of its HP) for every hurt friend of `v`'s side (a vehicle nobody owns: the player's).
+template<class F> bool ForEachHurtFriend(const unsigned char* v,F&& f) noexcept {
+    std::int32_t team=At<std::int32_t>(v,kTeam);
+    if(team==kTeamVehicle)team=player.team;
+    const FriendList* l=FriendsNow(team);
+    if(!l)return false;
+    for(int i=0;i<l->n;++i)f(l->f[i].object,l->f[i].aim,l->f[i].share);
+    return true;
+}
+
+// Whether `weapon`'s rounds heal (a negative AmmoDamage).
+bool HealingGun(const unsigned char* weapon) noexcept {
+    if(!Readable(weapon,kWeaponDamage+4))return false;
+    const float d=At<float>(weapon,kWeaponDamage);
+    return std::isfinite(d) && d<0.0f;
+}
+
+// Whether any of `v`'s weapons heals: a medic.
+bool Medic(const unsigned char* v) noexcept {
+    const auto holders=At<const unsigned char*>(v,kHolders);
+    const std::uint64_t count=At<std::uint64_t>(v,kHolderCount);
+    if(count==0 || count>8 || !Readable(holders,count*kHolderStride))return false;
+    for(std::uint64_t i=0;i<count;++i)
+        if(HealingGun(At<const unsigned char*>(holders+i*kHolderStride,kHolderWeapon)))return true;
+    return false;
+}
+
+// What `h` aims at: f(object, lock point, extra score in m). A medic: the hurt friends, the most hurt counting nearest;
+// any other: the enemies.
+template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
+    if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f); });
+}
+
+// Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
+bool EnemyInLine(const unsigned char* v,const unsigned char* weapon,const float* from,const float* to) noexcept {
+    const float blast=At<float>(weapon,kWeaponBlast);
+    const float clear=kEnemyClear+(std::isfinite(blast) && blast>0.0f && blast<50.0f ? blast : 0.0f);
+    bool close=false;
+    ForEachEnemy(v,[&](const void*,const float* p) noexcept { close=close || NearLine(from,to,p,clear); });
+    return close;
+}
+
 // The enemy lock point to engage, among the enemies within `range` of `around` (a guard's post, the
 // player it follows). Without a map command, the current target is chased beyond that range.
 // The one nearest to `from` (the heli: the shortest turn and flight) wins, the current
@@ -602,12 +717,12 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     const ULONGLONG now=GameMs();
     const float speed=std::sqrt(Dot2(h.vel,h.vel));
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
-    ForEachEnemy(v,[&](const void* object,const float* a) noexcept {
+    ForEachTarget(h.medic,v,[&](const void* object,const float* a,float extra) noexcept {
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const bool current=h.target.Is(object);
         if((!current || h.cmd.order!=Order::none) && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
-        float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
+        float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2])+extra;
         if(current)score-=circler ? kCircleKeep : kKeepTarget;
         if(now<h.passedUntil && h.passed.Is(object))score+=kPassed;
         if(!circler && speed>3.0f && Dot2(f,f)>1.0f)
@@ -1179,7 +1294,11 @@ bool Reach(const unsigned char* v,const DoorAim& a,const float* from,const float
 void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noexcept {
     unsigned char* blk=v+kDoorBlock+i*kDoorStride;
     unsigned char* seat=SeatAt(v,static_cast<unsigned>(i+1));
-    if(AnyPlayerIn(seat)){g.prevValid=false;return;}   // a player's, of any machine: their stick, their trigger
+    // The player's gun: their stick, their trigger; a medic's (MedicGunnerAim): aimed for them at the hurt friend it
+    // reaches while there is one, the trigger still theirs (else their stick as it is).
+    const bool theirs=SeatRider(seat)==Rider::player;
+    if(AnyPlayerIn(seat) && !theirs){g.prevValid=false;return;}   // remote players own their gun input
+    if(theirs && !Cfg().medicGunnerAim){g.prevValid=false;return;}
     const auto triggers=At<unsigned char*>(v,kHolders);
     if(At<std::uint64_t>(v,kHolderCount)<=static_cast<std::uint64_t>(i) || !Readable(triggers+i*kHolderStride,kHolderStride))return;
     const auto trigger=triggers+i*kHolderStride;
@@ -1187,6 +1306,8 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return;
     const auto weapon=At<unsigned char*>(trigger,kHolderWeapon);
     if(!Readable(weapon,kWeaponAmmo+4,true))return;
+    const bool heals=HealingGun(weapon);
+    if(theirs && !heals){g.prevValid=false;return;}
     float gp[3],gd[3];
     if(!Barrel(v,weapon,gp,gd))return;
     // No weapon of the helis reloads: refill an emptied gun as Arms does.
@@ -1220,7 +1341,8 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
         if(g.k[k]<=0.0f)g.k[k]=kTurnPerInput;
         a.sign[k]=g.sign[k]>=0.0f ? 1.0f : -1.0f;
     }
-    // The target: the cheapest enemy in reach, the current one and the pilot's counting nearer.
+    // The target: the cheapest enemy in reach, the current one and the pilot's counting nearer (a healing gun: the cheapest
+    // hurt friend, the most hurt counting nearer; see Medic).
     const float speed=At<float>(weapon,kWeaponSpeed)*60.0f;
     const float reach=At<float>(weapon,kWeaponSpeed)*static_cast<float>(At<std::int32_t>(weapon,kWeaponAlive));
     const float range=std::isfinite(reach) && reach>0.0f && reach<kDoorRange ? reach : kDoorRange;
@@ -1228,12 +1350,12 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
     if(!std::isfinite(gravity) || gravity<0.0f)gravity=0.0f;
     const void* best=nullptr;float bestScore=0.0f,bestAt[3]{};
     if(std::isfinite(speed) && speed>1.0f)
-        ForEachEnemy(v,[&](const void* object,const float* p) noexcept {
+        ForEachTarget(heals,v,[&](const void* object,const float* p,float extra) noexcept {
             const float d[3]={p[0]-gp[0],p[1]-gp[1],p[2]-gp[2]};
             const float dist=std::sqrt(Dot3(d,d));
             float err[2],axis[2];
             if(dist>range || dist<kDoorMin || !Reach(v,a,gp,p,err,axis))return;
-            float score=dist+(std::fabs(err[0])+std::fabs(err[1]))*kDoorSlew;
+            float score=dist+extra+(std::fabs(err[0])+std::fabs(err[1]))*kDoorSlew;
             if(g.target.Is(object))score-=kDoorKeep;
             if(share.Is(object))score-=kDoorShare;
             if(!best || score<bestScore){best=object;bestScore=score;std::memcpy(bestAt,p,12);}
@@ -1259,17 +1381,25 @@ void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool
         }
         const float wide=dist>1.0f ? std::atan(kHitRadius/dist) : 1.0f;
         const float cone=(wide>kDoorCone ? wide : kDoorCone)*(g.firing ? kDoorHold : 1.0f);
-        fire=!hold && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin && !PlayerInLine(gp,lead);
+        // A healing round onto the player is the point; one past an enemy is not (see Medic).
+        fire=!hold && !theirs && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin &&
+             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead));
     } else g.target=ObjRef{};
-    Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);blk[kDoorPull]=fire ? 1 : 0;
+    if(theirs && !best){g.prevValid=false;return;}   // nobody to heal: their own aim
+    Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);
+    if(!theirs)blk[kDoorPull]=fire ? 1 : 0;
     g.firing=fire;
     for(int k=0;k<2;++k){g.in[k]=in[k];g.axisPrev[k]=a.angle[k];g.barrelPrev[k]=a.barrel[k];}
     g.prevValid=true;
     if(Cfg().debug && ms-g.loggedAt>1000) {
         g.loggedAt=ms;
-        Log("GUNNER410 v=%p gun=%d t=%p dist=%.0f barrel=(%.2f,%.2f) err=(%.3f,%.3f) axis=(%.2f,%.2f)->(%.2f,%.2f) lim=(%.2f..%.2f, %.2f..%.2f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d ammo=%d",
-            v,i,best,dist,a.barrel[0],a.barrel[1],err[0],err[1],a.angle[0],a.angle[1],axis[0],axis[1],a.lo[0],a.hi[0],a.lo[1],a.hi[1],
+        Log("GUNNER410 v=%p gun=%d%s t=%p dist=%.0f barrel=(%.2f,%.2f) err=(%.3f,%.3f) axis=(%.2f,%.2f)->(%.2f,%.2f) lim=(%.2f..%.2f, %.2f..%.2f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d ammo=%d",
+            v,i,heals ? (theirs ? " (heals, player's)" : " (heals)") : "",best,dist,a.barrel[0],a.barrel[1],err[0],err[1],a.angle[0],a.angle[1],axis[0],axis[1],a.lo[0],a.hi[0],a.lo[1],a.hi[1],
             a.sign[0],a.sign[1],g.k[0],g.k[1],in[0],in[1],fire,ammo);
+        // A medic's: the friend's HP now, a line a second (whether the rounds heal shows as it rising).
+        const auto friendObj=static_cast<const unsigned char*>(best);
+        if(heals && friendObj && Readable(friendObj,kHp+4))
+            Log("MEDIC v=%p gun=%d friend=%p hp %.0f/%.0f",v,i,best,At<float>(friendObj,kHp),At<float>(friendObj,kHpMax));
     }
 }
 
@@ -1605,6 +1735,9 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
     const float gunRange=GunRange(*s.type);
     const float pick=s.follow && Cfg().heliCombatRange+gunRange<Cfg().heliRange ? Cfg().heliCombatRange+gunRange : Cfg().heliRange;
+    const bool medic=Medic(v);
+    if(medic!=h.medic)Log("HELI v=%p %s",v,medic ? "medic: its door guns heal, it aims at hurt friends" : "no longer a medic");
+    h.medic=medic;
     const bool moving=CommandMoving(h,pos,anchor);
     s.engage=!moving && !s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
     if(s.engage) {
@@ -3055,6 +3188,8 @@ bool CheckHeliProfile() noexcept {
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
+        visitOk=Matches(kVisitFriends,kVisitFriendsSig,sizeof(kVisitFriendsSig));
+        Log("HELI friends walk=%d%s",visitOk,visitOk ? "" : " (unexpected EDF.dll code: medic helis aim at nobody)");
         waterOk=true;
         for(const auto& s:kWaterSignatures)waterOk=waterOk && Matches(s.rva,s.bytes,s.size);
         Log("WATER probe=%d%s",waterOk,waterOk ? "" : " (unexpected EDF.dll code: the carrier surfaces anywhere)");
