@@ -39,6 +39,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "npcai.h"
 #include "roundaim.h"
 #include "edf/weapon.h"
 #include "warn.h"
@@ -1170,8 +1171,9 @@ bool Reach(const unsigned char* v,const DoorAim& a,const float* from,const float
 
 // Writes door gun i's block: aims it at the best enemy it can reach (the pilot's target preferred) with
 // lead for its round, and pulls while on it. `hold`: aim but never fire.
-void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noexcept {
-    Door& g=h.doors[i];
+// `g` the gun's state, `share` the pilot's target (preferred; none under a player pilot), `refill` an emptied gun
+// refilled after kReloadGunMs (the NPC heli's own, as Arms does; not a called heli's, not a player's heli).
+void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noexcept {
     unsigned char* blk=v+kDoorBlock+i*kDoorStride;
     unsigned char* seat=SeatAt(v,static_cast<unsigned>(i+1));
     if(AnyPlayerIn(seat)){g.prevValid=false;return;}   // a player's, of any machine: their stick, their trigger
@@ -1189,7 +1191,7 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     if(g.weapon!=weapon || g.weaponCtrl!=ctrl){g.weapon=weapon;g.weaponCtrl=ctrl;g.full=ammo;g.emptyAt=0;}
     if(ammo>g.full)g.full=ammo;
     g.ammo=ammo;g.ammoFrame=GameFrame();   // what LeaveReason counts (it never reads the weapon itself)
-    if(ammo<=0 && g.full>0 && !h.called) {
+    if(ammo<=0 && g.full>0 && refill) {
         if(!g.emptyAt)g.emptyAt=ms;
         else if(ms-g.emptyAt>kReloadGunMs){Put<std::int32_t>(weapon,kWeaponAmmo,g.full);g.emptyAt=0;}
     } else g.emptyAt=0;
@@ -1230,7 +1232,7 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
             if(dist>range || dist<kDoorMin || !Reach(v,a,gp,p,err,axis))return;
             float score=dist+(std::fabs(err[0])+std::fabs(err[1]))*kDoorSlew;
             if(g.target.Is(object))score-=kDoorKeep;
-            if(h.target.Is(object))score-=kDoorShare;
+            if(share.Is(object))score-=kDoorShare;
             if(!best || score<bestScore){best=object;bestScore=score;std::memcpy(bestAt,p,12);}
         });
     float in[2]={0,0},err[2]={0,0},axis[2]={a.angle[0],a.angle[1]},lead[3]{},dist=0.0f;
@@ -1924,7 +1926,7 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
     } else h.firing=false;
     if(s.type->guns==Guns::nose){s.v[kFireGun]=shot.gun;s.v[kFireMissile]=shot.missile;}
     else if(doorOk && Cfg().heliDoorGuns && SeatCount(s.v)>=3)
-        for(int i=0;i<2;++i)DoorGun(h,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
+        for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
     return shot;
 }
 
@@ -2393,6 +2395,29 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     ReleaseSRWLockExclusive(&heliHudLock);
 }
 
+// The 410 under a player pilot: an AI rider in a door seat (AiGunner: an NPC soldier, or the NPC a seat swap moved
+// there; the user 2026-10-07: "上车的npc应该可以用对应的炮塔武器") works its gun as the NPC heli's DoorGun does, on the
+// gun's real rounds (no refill: the player's heli). An empty door seat stays silent (DoorGunUser lends the pilot's
+// user only under an NPC pilot); the player's own seat is theirs.
+struct CrewDoors { ObjRef ref; ULONGLONG lastMs; Door doors[2]; };
+CrewDoors crewDoors[4]{};
+constexpr ULONGLONG kCrewDoorsStaleMs=2000;
+
+void CrewDoorGuns(unsigned char* v) noexcept {
+    if(!doorOk || !Cfg().heliDoorGuns || At<const unsigned char*>(v,0)!=image+kVt410 || SeatCount(v)<3)return;
+    const ULONGLONG ms=GameMs();
+    CrewDoors* c=nullptr;
+    for(auto& e:crewDoors)if(e.ref.Is(v)){c=&e;break;}
+    if(!c)for(auto& e:crewDoors)if(!e.ref || ms-e.lastMs>kCrewDoorsStaleMs){e=CrewDoors{};e.ref=ObjRef::Of(v);e.lastMs=ms;c=&e;break;}
+    if(!c)return;
+    const float dt=GameStep(ms-c->lastMs);
+    c->lastMs=ms;
+    for(int i=0;i<2;++i) {
+        if(AiGunner(SeatAt(v,static_cast<unsigned>(i+1))))DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms);
+        else c->doors[i].prevValid=false;
+    }
+}
+
 // The player in seat 0 of a stock heli, each frame after PlayerAssist.
 void PlayerHeli(unsigned char* v) noexcept {
     if(!Cfg().heliMouseAim && !Cfg().heliFlightHud && !Cfg().warnAudio)return;
@@ -2510,7 +2535,9 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     ReplicaOff(vehicle);
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
-        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerHeli(vehicle);}
+        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player) {
+            PlayerAssist(vehicle);PlayerHeli(vehicle);CrewDoorGuns(vehicle);
+        }
         else AssistOff(vehicle);
         return;
     }

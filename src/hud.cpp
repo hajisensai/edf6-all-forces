@@ -637,18 +637,12 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
     l.x=(width-l.w)*0.5f;l.y=height*0.86f+2.0f*s;
 }
 
-// The seats of the vehicle the player sits in (seatswitch.cpp, the user 2026-10-06): a line low on the screen, each seat's
-// number, what it is and who holds it, the player's in brackets, the keys that move them; amber a moment after a refused
-// press (the seat named taken, or no free seat), grey online with SeatSwitchOnline off.
-void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
-    if(*at>=kMaxLines || p.seats<2)return;
-    Line& l=lines[(*at)++];
-    Format(l,L"%ls",Tr(Tx::seats));
-    const wchar_t* const holders[]={L"-",Tr(Tx::holderYou),Tr(Tx::holderNpc),Tr(Tx::holderTaken)};
-    for(int i=0;i<p.seats && i<kMostSeatsShown;++i) {
-        const Tx what=i==0 ? (p.aircraft ? Tx::seatPilot : Tx::seatDriver) : p.gun[i] ? Tx::seatGun : Tx::seatOther;
-        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,Tr(what),holders[static_cast<int>(p.holder[i])&3]);
-    }
+// The seats of the vehicle the player sits in (seatswitch.cpp, the user 2026-10-06 / 2026-10-07): a line low on the
+// screen, each seat's number, what it is and who holds it, the player's in brackets. The prompt's moment (p.hints) adds
+// the keys that move them; amber a moment after a refused press (the seat named taken, or no free seat), grey online with
+// SeatSwitchOnline off. Outside it (SeatList: the whole ride) the bare list, dimmed.
+// The seats line's tail in the prompt's moment: the keys that move the player, or why they cannot (online).
+void SeatKeys(Line& l,const SeatPrompt& p) noexcept {
     if(p.locked)Append(l,L"%ls",Tr(Tx::seatOnlineLocked));
     else if(p.keys) {
         wchar_t key[32];
@@ -661,10 +655,23 @@ void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* line
         std::swprintf(button,32,Tr(Tx::padButton),Cfg().seatButton);
         Append(l,Tr(Tx::seatNextKey),button);
     }
+}
+
+void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
+    if(*at>=kMaxLines || p.seats<2)return;
+    Line& l=lines[(*at)++];
+    Format(l,L"%ls",Tr(Tx::seats));
+    const wchar_t* const holders[]={L"-",Tr(Tx::holderYou),Tr(Tx::holderNpc),Tr(Tx::holderTaken)};
+    for(int i=0;i<p.seats && i<kMostSeatsShown;++i) {
+        const Tx what=i==0 ? (p.aircraft ? Tx::seatPilot : Tx::seatDriver) : p.gun[i] ? Tx::seatGun : Tx::seatOther;
+        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,Tr(what),holders[static_cast<int>(p.holder[i])&3]);
+    }
+    if(p.hints)SeatKeys(l,p);
     if(p.refused==-2)Append(l,L"%ls",Tr(Tx::seatNoFree));
     else if(p.refused>=0)Append(l,Tr(Tx::seatTaken),p.refused+1);
     alignas(16) static const float kGrey[4]={0.7f,0.7f,0.7f,0.9f};
-    l.scale=kLineScale*0.85f;l.rgba=p.locked ? kGrey : p.refused!=-1 ? kWarn : kWhite;l.w=l.h=0.0f;
+    alignas(16) static const float kDim[4]={1.0f,1.0f,1.0f,0.7f};
+    l.scale=kLineScale*0.85f;l.rgba=!p.hints ? kDim : p.locked ? kGrey : p.refused!=-1 ? kWarn : kWhite;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
     l.x=(width-l.w)*0.5f;l.y=height*0.82f;
 }

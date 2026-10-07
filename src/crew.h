@@ -169,8 +169,11 @@ struct Config {
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
     int seatButton=0x02;            // ...on a pad: the seat's button bit (docs/stores-re.md §4: 0x02 B; 0 none)
-    bool seatPilot=true;            // ...out of a stock helicopter's pilot seat: an NPC (the stock RideAi) takes the stick
+    bool seatPilot=true;            // ...out of a stock helicopter's pilot seat (or a ground vehicle's with the stock driving
+                                    // AI: the tanks, the Titan, the Grape): an NPC (the stock RideAi) takes the stick
     bool seatSwitchOnline=false;    // ...in an online room too (off: offline only)
+    bool seatList=true;             // the seats line shown the whole ride in a vehicle with more than one seat (who holds
+                                    // which), not only a moment after boarding / a move; with SeatSwitch off and online too
     // proteus.cpp: the Proteus rework (README 普罗透斯, docs/proteus-re.md), while a local player rides one.
     bool proteus=true;              // two stances (walk / deployed), two seats, shields, the field, the salvo; off: the stock Proteus
     int proteusModeKey=0x54;        // ...the driver's stance key ('T'; a Windows virtual-key code, 0: none)
@@ -251,6 +254,8 @@ struct Config {
     int npcSquadMax=8;              // ...a squad takes in others up to this many
     float npcSquadJoinRange=150.0f; // ...within this many m
     bool npcBoarding=true;          // ...squads board and leave friendly vehicles on a map order; soldiers in gunner seats shoot
+    bool npcGunners=true;           // AI riders in gunner seats (soldiers, and RideAi's riders a bump or a seat swap moved
+                                    // there) work their guns: ground vehicles (npcai.cpp), the 410's doors under a player pilot
     int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
     float npcMarkCone=8.0f;         // ...within this many degrees of the centre
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay

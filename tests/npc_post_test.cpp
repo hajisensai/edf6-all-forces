@@ -2,6 +2,7 @@
 #include "../src/npcpost.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -64,6 +65,29 @@ int main() {
     Check(At<float>(seat,0x2C4)>0 && listed()==0,"host returns tank but cannot use offline map commands");
     sessionOn=false;config.customNpcAi=false;Check(listed()==0 && !TankCommand(v,guard),"disabled AI cannot be commanded");
     ResetNpcPosts();Check(!posts[0].ref,"mission reset drops identity and orders");
+    // A mech of the Begaruta family (slot 4 0x644350, no slot 72): no CarBase drive bit, and frames with no AI pass
+    // clear nothing, so the plugin's own last stick must not read as the stock AI driving (2026-10-07).
+    config.customNpcAi=true;
+    alignas(16) unsigned char m[0x2700]{},mseat[kSeatStride]{},mrider[0x400]{},mctrl[0x20]{};
+    void* mvt[5]{};mvt[4]=image+0x644350;
+    Put<void**>(m,0,mvt);Put<void*>(m,kSelfCtrl,mctrl);
+    Put<void*>(m,kSeats,mseat);Put<std::uint64_t>(m,kSeatCount,1);
+    Put<void*>(mseat,kSeatRider,mrider);Put<void*>(mseat,kSeatRiderCtrl,mctrl);Put<int>(mctrl,8,1);
+    Put<void*>(mrider,0,image+edf::kDummyRiderVtable);
+    Put<float>(m,kMatrix,1);Put<float>(m,kMatrix+40,1);
+    Check(NpcDrivable(m),"a Begaruta-family mech is NPC-drivable");
+    ++now;NpcPostInput(m);
+    {CommandUnit u[1]{};Check(TankCommandUnits(u,1)==1 && std::strcmp(u[0].name,"MECH")==0,"the mech listed on the map as MECH");}
+    Put<float>(m,kPosition+8,-40);++now;NpcPostInput(m);
+    const float steer=At<float>(mseat,0x2C0),throttle=At<float>(mseat,0x2C4);
+    Check(throttle<0,"a mech behind its post drives forward (no drive bit needed)");
+    ++now;NpcPostInput(m);   // no AI pass: nothing cleared the stick
+    Check(At<float>(mseat,0x2C0)==steer && At<float>(mseat,0x2C4)==throttle && posts[0].active,
+          "its own last stick is not the stock AI driving: it keeps driving");
+    Put<float>(m,kPosition+8,0);++now;NpcPostInput(m);
+    Check(At<float>(mseat,0x2C0)==0 && At<float>(mseat,0x2C4)==0 && !posts[0].active,"back on its post: the stick taken back");
+    Put<float>(m,kPosition+8,-40);Put<float>(mseat,0x2C0,0.7f);++now;NpcPostInput(m);
+    Check(At<float>(mseat,0x2C0)==0.7f && At<float>(mseat,0x2C4)==0,"the stock AI's own turn owns the frame");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_post_test: %d checks passed\n",checks);
 }

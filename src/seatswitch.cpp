@@ -19,15 +19,19 @@
 // gun, the gunner to the stick). Another player's seat, one their class may not sit in (the seat's class mask
 // +0x30 & +0x34 against human +0x31C, CanRideSeat 0x6346FC) are refused, shown a moment. Out of a stock helicopter's
 // pilot seat the stock RideAi seats an NPC pilot (ini SeatPilot; heli.cpp then flies it with the player aboard: it
-// fights round itself), as the gunship's gunner gets one (playerjet_crew.inc EnsurePilot). The plugin's aircraft: only
+// fights round itself), as the gunship's gunner gets one (playerjet_crew.inc EnsurePilot); out of a ground vehicle's
+// with the stock driving AI an NPC driver (Pilot: the map can then send it off). The plugin's aircraft: only
 // the gunship's two seats, its stick taken only where it may be boarded (PlayerJetBoardable: on the ground, or come
 // down for the player); playerjet.cpp tells a move from getting out (no ejection). Offline unless SeatSwitchOnline.
-// The prompt (hud.cpp SeatLine): the seats and who holds them, for kPromptMs after boarding a vehicle with more than
-// one seat and after a move, while the key is held, and kRefusedMs after a refusal.
+// The prompt (hud.cpp SeatLine): the seats and who holds them. With SeatList (the user, 2026-10-07: "能看到同载具席位
+// 情况", not only switch) the whole ride in a vehicle with more than one seat, SeatSwitch off or online too: reading the
+// seats moves nothing. The keys that move them (or the online lock) ride along only for kPromptMs after boarding and
+// after a move, while the key is held, and kRefusedMs after a refusal; SeatList off, the line is shown only then.
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "npcai.h"
 #include "stores.h"
 #include <cstring>
 #include <cwchar>
@@ -179,11 +183,18 @@ bool Move(unsigned char* v,unsigned char* human,unsigned from,unsigned to,bool n
     return moved;
 }
 
-// A stock helicopter's pilot seat left empty in the move: the stock RideAi seats an NPC pilot (once; heli.cpp flies it).
+// The driver's seat left empty in the move: the stock RideAi seats an NPC there (once). A stock helicopter: heli.cpp
+// flies it. A ground vehicle with the stock driving AI (NpcDrivable; the user 2026-10-07: "也可以开车，也就是通过m地图
+// 指引以后可以让内部的npc开走"): the stock AI drives and fights, npcpost.cpp keeps it on its post (where it is now), and
+// the map lists it with the tanks, so a guard order drives it away with the player aboard. Crew() never seats one while
+// a player rides (anyPlayer), so this is the only way a driver comes. Others (a truck, the Proteus) stand.
 void Pilot(unsigned char* v) noexcept {
-    if(!Cfg().seatPilot || !IsHelicopter(v) || BodyOf(v)!=PluginBody::none || SeatRider(SeatAt(v,0))!=Rider::none)return;
-    if(!SeatNpcRider(v,false)){Log("SEAT v=%p the pilot seat empty: no NPC pilot here (the room's host seats one)",v);return;}
-    Log("SEAT v=%p the pilot seat empty: %s",v,SeatRider(SeatAt(v,0))==Rider::dummy ? "an NPC pilot seated" : "the stock RideAi seated no one");
+    if(!Cfg().seatPilot || BodyOf(v)!=PluginBody::none || SeatRider(SeatAt(v,0))!=Rider::none)return;
+    const bool heli=IsHelicopter(v);
+    if(!heli && !NpcDrivable(v))return;
+    if(!SeatNpcRider(v,false)){Log("SEAT v=%p the driver seat empty: no NPC driver here (the room host seats one)",v);return;}
+    Log("SEAT v=%p the %s seat empty: %s",v,heli ? "pilot" : "driver",SeatRider(SeatAt(v,0))==Rider::dummy ?
+        (heli ? "an NPC pilot seated" : "an NPC driver seated (the map's tanks)") : "the stock RideAi seated no one");
 }
 
 // Whether a move to `to` may be made now (see the top), the seat's holder `h`.
@@ -216,13 +227,14 @@ void Publish(unsigned char* v,const unsigned char* human,bool keys,bool locked,c
     p.seats=static_cast<int>(count);p.at=SeatOf(v,human);p.keys=keys;p.locked=locked;
     p.aircraft=IsHelicopter(v) || BodyOf(v)!=PluginBody::none;
     p.refused=ms<r.refusedUntil ? r.refused : -1;
+    p.hints=ms<r.promptUntil || p.refused!=-1;
     for(unsigned i=0;i<count && i<static_cast<unsigned>(kMostSeatsShown);++i) {
         const unsigned char* s=SeatAt(v,i);
         p.holder[i]=HolderOf(s,human);
         p.gun[i]=HasGun(s);
     }
     latest=p;latestMs=ms;
-    const ULONGLONG until=r.promptUntil>r.refusedUntil ? r.promptUntil : r.refusedUntil;
+    const ULONGLONG until=Cfg().seatList ? ms+kFreshMs : r.promptUntil>r.refusedUntil ? r.promptUntil : r.refusedUntil;
     if(until>shownUntil)shownUntil=until;
 }
 
@@ -231,7 +243,13 @@ bool Frame(unsigned char* v,unsigned char* human,unsigned at,ULONGLONG ms) noexc
     Rider_* const r=RiderFor(human,ms);
     if(!r)return false;
     r->seen=ms;
-    const bool locked=InSession() && !Cfg().seatSwitchOnline;   // the session check every module asks (netprobe.cpp)
+    const bool may=ok && Cfg().seatSwitch;   // moves at all (else the seats are only listed, SeatList)
+    if(!may) {
+        if(!r->vehicle.Is(v)){r->vehicle=ObjRef::Of(v);r->promptUntil=0;r->refused=-1;r->refusedUntil=0;}
+        Publish(v,human,false,false,*r,ms);
+        return false;
+    }
+    const bool locked=InSession() && !Cfg().seatSwitchOnline;
     if(!r->vehicle.Is(v)){r->vehicle=ObjRef::Of(v);r->promptUntil=locked ? 0 : ms+kPromptMs;r->refused=-1;r->refusedUntil=0;}
     const unsigned count=SeatCount(v);
     const unsigned char* const seat=SeatAt(v,at);
@@ -269,7 +287,8 @@ bool Frame(unsigned char* v,unsigned char* human,unsigned at,ULONGLONG ms) noexc
 }  // namespace
 
 void SeatSwitchFrame(unsigned char* v) noexcept {
-    if(!ok || !Cfg().seatSwitch || v[kDead])return;
+    if(!(ok && Cfg().seatSwitch) && !Cfg().seatList)return;
+    if(v[kDead])return;
     const unsigned count=SeatCount(v);
     if(count<2)return;
     if(BodyOf(v)!=PluginBody::none && !GunshipCrewSeats(v))return;   // the plugin's other aircraft: one seat, or its own
@@ -293,7 +312,8 @@ bool InstallSeatSwitch() noexcept {
         ok=true;
         for(const auto& s:kSigs)ok=ok && Matches(s.rva,s.bytes,s.size);
     } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
-    Log("HOOK seat switch=%d (%s)",ok,ok ? "the stock board button's steps, within the vehicle" : "unexpected EDF.dll code: off");
+    Log("HOOK seat switch=%d (%s)",ok,ok ? "the stock board button's steps, within the vehicle" :
+        "unexpected EDF.dll code: no moves, the seats line (SeatList) still");
     return ok;
 }
 

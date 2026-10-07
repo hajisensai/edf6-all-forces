@@ -88,8 +88,9 @@ using SeatRideFn=unsigned char*(__fastcall*)(void*,void*,int,bool);
 using SeatFn=void(__fastcall*)(void*,void*);
 
 // Every vehicle class we crew: vtable RVA, the stock function in its input slot (0: not hooked), name,
-// its stock slot 49 (FindSeat), the slot we chain its per-frame input on, and whether only an armed one
-// (a weapon holder, veh+0x648) gets an NPC driver.
+// its stock slot 49 (FindSeat), and the slot we chain its per-frame input on. Every class here gets an NPC
+// driver, armed or not (the user 2026-10-07: "所有载具都要支持ai"): an unarmed truck's driver holds its post and
+// goes where the map sends it (npcpost.cpp).
 // The 502 has the 54-slot VehicleBase vtable: no slot 55, its per-frame input copy is slot 4 (0x612D20).
 // The Begaruta family (504, the 612 Nix, Begaruta, BigBegaruta = Proteus) all share slot 4 0x644350, their per-frame
 // update: the player's input (0x641800) and the guns' fire (0x645190) are reached from it alone (0x6443A2 / 0x6443F6).
@@ -98,22 +99,27 @@ using SeatFn=void(__fastcall*)(void*,void*);
 // the frame. So the whole family chains slot 4, as the crawler does: a player-driven one runs every step (HUD, seat
 // switch, stabilizer, sounds, the Proteus rework) whoever drives it. That function takes (vehicle, step); the shared
 // four-register forwarding preserves both and it ignores r8/r9.
+// Barga (501) also chains slot 4; it has no slot 55.
 // Vehicle_Car (the Grape, also the unarmed 512 Kei truck and 513 trailer cab) has its own slot 49
 // (0x65B910, a preferred-seat wrapper round the stock one) and its CarBase input in slot 55 (0x65A390).
+// The 607 RoboTruck and the 60X truck share both (their slot 6 calls CarBase's 0x6731C0 first: the stock AI
+// action 0x661440 is theirs); the 507 rescue vehicle (TankBase's slot 4) has its own wrapper 0x61D310 of the
+// same shape (no preferred seats: a tail call of 0x633B80; else 0x633AE0's order). docs/ground-ai-re.md.
 struct VehicleClass {
     unsigned vtable; unsigned input; const char* name;
-    unsigned findSeat=kFindSeat; std::size_t inputSlot=kSlotInput; bool armedOnly=false;
+    unsigned findSeat=kFindSeat; std::size_t inputSlot=kSlotInput;
 };
 const VehicleClass kClasses[]={
     {0x17D8B50,0x5FD8E0,"402_Rocket"},{0x17D8FA0,0x5FEBE0,"403_Tank"},{0x17D9458,0x5FFC50,"404_Tank"},
-    {0x17D98C8,0,"501_FortressRobo"},{kVt502,0x612D20,"502_GroundRobo",kFindSeat,4},{0x17DA508,0x6178B0,"503_Bike"},
+    {0x17D98C8,0x60AEC0,"501_FortressRobo",kFindSeat,4},{kVt502,0x612D20,"502_GroundRobo",kFindSeat,4},{0x17DA508,0x6178B0,"503_Bike"},
     {0x17DA960,0x644350,"504_begaruta",kFindSeat,4},{0x17DADB0,0x61ACD0,"505_Tank"},{kVt506,0x61B8F0,"506_Helicopter"},
     {0x17DB9D8,0x61DDF0,"510_Maser"},{0x17DBDF8,0x61F080,"511_Bike"},{0x17DC250,0x620790,"601_Tank"},
     {0x17DC620,0x621460,"603_Flak"},{0x17DD440,0x644350,"612_nix",kFindSeat,4},{0x17DD720,0,"VehicleBase"},
     {0x17DE0A8,0x644350,"Begaruta",kFindSeat,4},{0x17DEC40,0x644350,"BigBegaruta",kFindSeat,4},{kVt409,0x64C020,"Helicopter409"},
     {kVt410,0x64E080,"Helicopter410"},{kVtHeliBase,0x6543A0,"HelicopterBase"},{0x17DFDC8,0,"BikeBase"},
     {0x17E0A80,0,"CarBase"},{0x17E1828,0,"TankBase"},
-    {0x17E01B0,0x65A390,"Car",0x65B910,kSlotInput,true},
+    {0x17E01B0,0x65A390,"Car",0x65B910},{0x17DCAB0,0x65A390,"607_RoboTruck",0x65B910},{0x17DCFB8,0x65A390,"60X_Truck",0x65B910},
+    {0x17DB590,0x61BFD0,"507_Rescuetank",0x61D310},
 };
 constexpr int kClassCount=static_cast<int>(sizeof(kClasses)/sizeof(kClasses[0]));
 // The next function in each patched input slot: the stock one, or another plugin's hook
@@ -577,8 +583,6 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     const auto team=OwnTeam(vehicle);
     if(!player.at || now-player.at>10000 || (team!=player.team && team!=kTeamVehicle))return;
     if(Cfg().crewRange>0.0f && Distance2(vehicle,player.pos)>Cfg().crewRange*Cfg().crewRange)return;
-    // An unarmed truck of an armed vehicle's class: nothing for a driver to do.
-    if(kClasses[cls].armedOnly && At<std::uint64_t>(vehicle,kHolderCount)==0)return;
     // The NPC that moved to a gunner seat when the player boarded goes with the driver seat:
     // the vehicle gets a fresh driver from the stock RideAi rather than a hand-moved one.
     for(unsigned i=0;i<count && dummies;++i)
@@ -791,7 +795,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
 }
 
 template<int... I> struct Hooks { static constexpr InputFn table[]={&InputHook<I>...}; };
-using AllHooks=Hooks<0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23>;
+using AllHooks=Hooks<0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26>;
 static_assert(sizeof(AllHooks::table)/sizeof(AllHooks::table[0])==kClassCount,"one hook per class");
 
 // Chains every concrete class's input slot (see EnsureInputs).

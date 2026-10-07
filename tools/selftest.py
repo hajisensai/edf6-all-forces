@@ -3168,7 +3168,7 @@ def stock_payload_and_seats_wired() -> None:
     its stores are store weapons make_jets writes and src/stores.inc knows."""
     import make_stock_stores as mss
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline')
+    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline', 'SeatList')
     for key in keys:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('SeatNextKey', 'SeatButton'):
@@ -3204,6 +3204,34 @@ def stock_payload_and_seats_wired() -> None:
     seat = src('src/seatswitch.cpp')
     for c in ('kAnnounce=0x5763E0', 'kSetAction=0x551C30', 'kRideAction=0x56C9F0', 'kReserve=0x633FE0', 'kClear=0x634940'):
         assert c in seat, c
+    # The seats line is a reading, not a move (the user 2026-10-07): SeatList lists them the whole ride, with SeatSwitch
+    # off too, and the keys ride along only in the prompt's moment.
+    assert re.search(r'^SeatList=1', ini, re.M), 'SeatList ships on'
+    frame = seat.split('void SeatSwitchFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert '!(ok && Cfg().seatSwitch) && !Cfg().seatList' in frame, 'SeatSwitchFrame: the list runs without the switch'
+    assert 'Cfg().seatList ? ms+kFreshMs' in seat, 'Publish: SeatList keeps the line up the whole ride'
+    assert 'const bool may=ok && Cfg().seatSwitch;' in seat and 'if(p.hints)SeatKeys(l,p);' in src('src/hud.cpp')
+    # The AI riders in gunner seats work their guns (the user 2026-10-07): RideAi's dummy riders a bump or a seat swap
+    # moved there too, and the 410's door seats under a player pilot, on the gun's own rounds.
+    npc = src('src/npcai.cpp')
+    assert 'if(who==Rider::dummy)return true;' in npc and 'if(!AiGunner(seat))continue;' in npc
+    heli = src('src/heli.cpp')
+    assert 'DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms)' in heli, 'the player-piloted 410: no refill, no hold'
+    assert 'PlayerHeli(vehicle);CrewDoorGuns(vehicle);' in heli
+    assert re.search(r'^NpcGunners=1', ini, re.M) and 'L"NpcGunners"' in plugin and 'NpcGunners' in readme
+    # Out of a ground vehicle's driver seat with the stock driving AI an NPC driver takes it (the user 2026-10-07: the map
+    # sends it off with the player aboard); Crew() never does while a player rides, so Pilot must.
+    pilot = seat.split('void Pilot(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!heli && !NpcDrivable(v))return;' in pilot and 'kSlotRideAi' in pilot
+    assert 'bool NpcDrivable(const unsigned char* v) noexcept { return FamilyOf(v)!=Family::none; }' in src('src/npcpost.cpp')
+    # Every vehicle an NPC can drive (the user 2026-10-07: "所有载具都要支持ai"): the unarmed trucks of the Grape's class
+    # too, and the CarBase classes whose slot 49 is a preferred-seat wrapper (the trucks 607 / 60X, the rescue 507).
+    crew_src = src('src/crew.cpp')
+    assert 'armedOnly' not in crew_src, 'an unarmed vehicle gets an NPC driver too'
+    for entry in ('{0x17DCAB0,0x65A390,"607_RoboTruck",0x65B910}', '{0x17DCFB8,0x65A390,"60X_Truck",0x65B910}',
+                  '{0x17DB590,0x61BFD0,"507_Rescuetank",0x61D310}'):
+        assert entry in crew_src, entry
+    assert 'if(moved && at==0)Pilot(v);' in seat
 
 
 @test
@@ -3275,11 +3303,9 @@ def vehicle_ram_wired() -> None:
     assert len(profiles) >= 16, profiles
     for vt, name in profiles:
         assert known.get(name) == int(vt, 16), f'src/vehicleram.h {name} {vt}: not as crew.cpp kClasses has it'
-    unhooked = dict(re.findall(r'\{(0x[0-9A-Fa-f]+),0,"(\w+)"\}', crew))
-    extras = re.findall(r'\{(0x[0-9A-Fa-f]+),4,0x[0-9A-Fa-f]+,\{[^}]*\},"(\w+)"\}', c)
-    assert sorted(n for _, n in extras) == ['501_FortressRobo'], extras
-    for vt, name in extras:
-        assert unhooked.get(vt) == name, f'{name}: crew.cpp hooks it (no own hook needed) or names it otherwise'
+    # The Barga is crew.cpp's now (its slot 4): no own update hook here, or the ram step would run twice a frame.
+    assert '{0x17D98C8,0x60AEC0,"501_FortressRobo",kFindSeat,4}' in crew
+    assert 'kExtras' not in c and 'ChainVtableSlot' not in c, 'src/vehicleram.cpp: an own update hook besides crew.cpp'
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     assert '&VehicleRamFrame,' in hook, 'src/crew.cpp InputHook: the ram step'
     assert 'ResetVehicleRams();' in src('src/mission.cpp') and 'InstallVehicleRam();' in src('src/plugin.cpp')
@@ -3645,7 +3671,14 @@ def npc_ai_wired() -> None:
     assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(At<const void*>(v,kRoute))' in body and 'if(!OnlineHostOnly())return;' in body
-    assert body.index('StockDriving(seat)') < body.index('Put<float>(seat,kSeatSteer')
+    assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
+    # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
+    # last write never read as the stock AI driving, taken back when the drive ends.
+    assert 'f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot' in body and '(image+kBargaWalk)(v,block,point,1.0f,' in body
+    assert 'if(!s.active){TakeBack(v,f,*p);return;}' in body
+    stock = post.split('bool StockDriving(unsigned char* v,Family f,const Post& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'p.wrote && c0==p.last[0] && c1==p.last[1]' in stock
+    assert 'kBargaWalkSig[]={0x40,0x53,' in post, 'the Barga walk prologue (push rbx with REX)'
     assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
     # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
     # SetFollow and its replication slot.
@@ -3689,7 +3722,10 @@ def npc_ai_wired() -> None:
     off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
     gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'IsSoldierClass(rider)' in gun
+    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(seat))continue;' in gun
+    who = code.split('bool AiGunner(const unsigned char* seat) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'IsSoldierClass(rider)' in who and '!IsPlayer(rider)' in who and 'kNet' in who, 'AiGunner: only local NPC soldiers'
+    assert 'Cfg().customNpcAi' in who and 'Cfg().npcBoarding' in who, 'AiGunner: the soldiers still under NpcBoarding'
     inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
     assert f'L"NpcBoarding"' in plugin and re.search(r'^NpcBoarding=1\s*$', ini, re.M) and 'NpcBoarding' in readme and 'NpcBoarding' in doc

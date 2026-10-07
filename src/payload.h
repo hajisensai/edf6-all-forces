@@ -52,9 +52,11 @@ struct SeatPrompt {
     bool aircraft;             // a helicopter or one of the plugin's aircraft: seat 0 is the pilot's
     bool locked;               // no move now: online, with SeatSwitchOnline off
     int refused;               // the seat a press asked for and could not have, shown a moment (-1 none, -2 no seat free)
+    bool hints;                // the prompt's moment (boarding, a move, the key held, a refusal): the keys / lock shown
 };
 void SeatSwitchFrame(unsigned char* vehicle) noexcept; // every vehicle's input, after the crew step
-// The prompt while it is shown (after boarding a vehicle with more than one seat, after a move, the key held).
+// The prompt while it is shown: the whole ride with SeatList, else after boarding a vehicle with more than one seat,
+// after a move, the key held.
 bool PlayerSeatPrompt(SeatPrompt* out) noexcept;
 bool InstallSeatSwitch() noexcept;                     // at load: the stock functions it calls checked
 void ResetSeatSwitch() noexcept;

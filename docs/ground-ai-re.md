@@ -25,11 +25,13 @@ EDF.dll TimeDateStamp 0x678CCB46，地址全部是 RVA。「确认」= 反汇编
 
 **根因（确认）**：游戏本身**有** AI。问题在插件：`InstallCrew` 要求 `kClasses` 每个类的 slot 49 都是 stock `0x633B80`，Vehicle_Car 的 slot 49 是 `0x65B910`，所以它从未登记进 `kClasses`，`Crew()` 从不对它运行，也就从不派 NPC。
 
-**修法**：`kClasses` 新增 `{0x17E01B0, 0x65A390, "Car", findSeat=0x65B910, slot 55, armedOnly}`；FindSeat hook 改为按类调用各自的原 slot 49；`InstallCrew` 对 slot 49 不符的类改为记日志跳过（不再整体失败）。同一 vtable 还被 `V512_KEITRUCK`、`V513_TRAILERTRUCK01CAB` 使用，二者 `vehicle_setup` 武器表为空，所以加 `armedOnly`：武器 holder 数 veh+0x648 为 0 的不派人。
+**修法**：`kClasses` 新增 `{0x17E01B0, 0x65A390, "Car", findSeat=0x65B910, slot 55}`（当时带 `armedOnly`，2026-10-07 删除，见下）；FindSeat hook 改为按类调用各自的原 slot 49；`InstallCrew` 对 slot 49 不符的类改为记日志跳过（不再整体失败）。同一 vtable 还被 `V512_KEITRUCK`、`V513_TRAILERTRUCK01CAB` 使用，二者 `vehicle_setup` 武器表为空，所以加 `armedOnly`：武器 holder 数 veh+0x648 为 0 的不派人。
 
 **推断/待验证**：NPC 坐上后由 `0x661440` 驾驶（与坦克同一 action），炮塔由 seat0 的 VehicleWeaponAim 瞄准开火——未进游戏验证。
 
-同因被排除、本次未处理：607 RoboTruck（0x17DCAB0）、60X Truck（0x17DCFB8），slot 49 都是 0x65B910；507 Rescuetank（0x17DB590）slot 49 是 0x61D310。
+同因被排除、2026-10-07 已登记（用户：「所有载具都要支持 ai」）：607 RoboTruck（0x17DCAB0）、60X Truck（0x17DCFB8），slot 49 都是 0x65B910、slot 55 都是 Car 的 0x65A390，slot 6（0x6234E0 / 0x6266B0）第一步就调 CarBase 的 0x6731C0（确认），所以 AI action 0x661440 照样注册；507 Rescuetank（0x17DB590，slot 4 是 TankBase 的 0x67FAD0，slot 55 0x61BFD0）slot 49 是 0x61D310：与 0x65B910 同形，全局选项不成立时尾调 0x633B80（0x61D50D），否则按 0x633AE0 的首选顺序找座（确认）。同日 `armedOnly` 删除：没有武器的车（轻卡、拖车头、卡车、救援车）也派 NPC 司机，0x661440 原版就给任务里的无武器卡车沿路线开车用；没有路线时由 npcpost.cpp 按驻守点 / 地图命令开车（推断：未进游戏验证）。
+
+全部载具类的 vtable（2026-10-07，按 slot 50 = RideAi 0x633030 扫 .rdata）：slot 72 = 0x661440 的是 402 / 403 / 404 / 503 / 505 / 507 / 510 / 511 / 601 / 603 / 607 / 60X / Car（含 BikeBase、CarBase、TankBase）；54 槽的 501 FortressRobo、502 GroundRobo，57 槽的 504 begaruta、Begaruta、612 nix，62～64 槽的直升机 506 / 409 / 410 / HelicopterBase 没有这个 AI action。
 
 ## 深渊爬行者（Depth Crawler，デプスクロウラー）
 
@@ -43,7 +45,7 @@ EDF.dll TimeDateStamp 0x678CCB46，地址全部是 RVA。「确认」= 反汇编
 
 **第二层根因（确认）**：机器人代码里完全不访问 AI 字段（0x518/0x4A8/0xE08/0xE09/0xE10/0x25A0 均未出现），没有 AI action。即使 RideAi 放了 NPC，它也不会动。所以只补登记不够，需要插件侧驾驶器（src/ground.cpp）。
 
-> 附带更正：re-notes 里「机甲 AI 是 slot 72 的 0x773B50」不对——Begaruta/612 的表只有 57 槽，那也是读到了副表。501_FortressRobo（0x17D98C8）同为 54 槽表、同样问题，本次未处理。
+> 附带更正：re-notes 里「机甲 AI 是 slot 72 的 0x773B50」不对——Begaruta/612 的表只有 57 槽，那也是读到了副表。501_FortressRobo（0x17D98C8）同为 54 槽表，但它**有**原版 AI，见下节「机甲与巴尔加」。
 
 ### 输入数据流（确认）
 
@@ -83,3 +85,20 @@ kClasses 的 502 项改为 `{0x17DA028, 0x612D20, slot 4}`：在 stock slot 4 �
 - profile：`0x612D20`、`0x612D85`、`0x61468B`、`0x614862`、`0x614D0E` 字节签名不符则整个驾驶器关闭。
 
 **全部待进游戏验证（推断）**：holder 1/2 的武器是否对应左右臂；`GunBarrel` 能否给出机器人臂炮的炮口；转身符号与俯仰符号的学习能否收敛；移动速度与地形（爬墙时航向无定义，代码在车身前向水平分量 < 0.3 时停止转向学习）。
+
+## 机甲与巴尔加（2026-10-07，用户：「所有载具都要支持 ai」）
+
+逆向结论（H = 反汇编直接读到，I = 推断）：
+
+| 类 | 原版 AI | 插件以前的问题 | 现在 |
+|---|---|---|---|
+| 504 begaruta（0x17DA960）、Begaruta（0x17DE0A8）、612 nix（0x17DD440）、普罗透斯（0x17DEC40） | 有。第 6 槽 `0x642970` 把转发 thunk `0x638310`（第 55 槽）注册进 veh+0x1FA0 的 ActionTable；AI 遍第 7 槽 `0x643530` 先清每个座位的 +0x2C0..+0x2E9，再以 edx = 1 调第 55 槽 `0x63C1C0`（H） | 插件把第 55 槽当输入入口挂（普罗透斯在 `217b830` 已改），那只是 AI 任务：没人、玩家驾驶时插件的每帧步骤都不跑，`Crew()` 永远派不了司机（H：代码；I：AI 遍是否对空车运行） | 改挂第 4 槽 `0x644350`（家族共用；第 4 槽里的 `0x641800` 不分乘员读 0 号座摇杆，H） |
+| 501 FortressRobo（巴尔加，0x17D98C8） | 有。第 6 槽 `0x609D70` 在 veh+0x16E0 注册待机动作 `0x6049B0`，AI 遍第 7 槽 `0x60A520` 清车自己的 AI 块 +0x1610..+0x1636 再跑当前动作；战斗时 `0x604400` 走向目标（H） | `kClasses` 里 input 填 0，从没挂上 | 挂第 4 槽 `0x60AEC0`（AI 表时拷 AI 块，否则读 0 号座摇杆，H）。撞击模块原来自己给它挂的第 4 槽一并删掉（不然一帧跑两次） |
+
+**无路线时原版 AI 不会自己走**：机甲 `0x63C1C0` 没有路线只会原地转向目标（`0x63BDA0` r8b = 1）、瞄准开火；巴尔加战斗时会走向目标（H）。所以「开到地图指定的点」由 npcpost.cpp 做：
+
+- 机甲：`0x63BDA0` 写 0 号座 +0x2C0 = −clamp(10·偏角, ±1)、+0x2C4 = −(±1)×veh+0x4B8，倒车阈值 2.199、原地转 0.9425（`0x17A3C00`），常数逐个读出与坦克 `0x661020` 同一约定（H）。插件不直接调它（+0x4B8 是路线速度，召唤来的机甲可能为 0，I），而是用 npcpost 自己的 ReturnToPost 写同样的值，原地转阈值换成 0.9425。
+- 巴尔加：调原版 `0x604400(veh, 块, 目标点 vec4*, 速度 xmm3, 到达半径 栈上第 5 参)`：块 +0x14 写转向 ±1、+8 写前进速度，到达半径内返回 false 不写（H；序言 `40 53 48 81 EC 80 00 00 00`）。结果写进 AI 块 +0x1610 并按第 4 槽的拷贝方式镜像到 0 号座（前进 = −LY，转向 = −RX）。
+- 插件记住自己上一帧写的值：AI 遍没跑的帧没人清零，残值不能当成原版在开；到位后把残值收回（npc_post_test 覆盖）。
+
+**待实机确认**：RideAi 放进去的 NPC 让机甲进入 AI 遍（veh+0x1A 第 3 位，对象管理器 `0x1198DA0`）——静态查不到谁置位；同一个 RideAi 派的 NPC 坦克在游戏里会转炮开火（第 7 槽同一机制），所以推断成立。`Debug=1` 看 `NPCPOST v=... family=2/3` 与机甲是否会自己开火。
