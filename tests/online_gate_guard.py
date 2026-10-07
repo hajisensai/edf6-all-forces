@@ -225,6 +225,20 @@ def check_npc_ai(root: str, files: list[str]) -> None:
         fail('src/npcai.cpp: IsPlayer used to tell an NPC from a player; ask IsAnyPlayer (IsPlayer is this machine\'s only)')
     if not before(body(ai, 'bool DismountSquad('), 'OnlineMaySeatNpc(v)', 'kSeatKick'):
         fail('src/npcai.cpp DismountSquad: riders kicked where NPC riders may not be seated')
+    gunner = body(ai, 'void NpcGunnersInput(')
+    role = body(ai, 'bool AiGunner(')
+    if '|| InSession() ||' in gunner or '|| InSession())return' in role:
+        fail('src/npcai.cpp: the offline-only NPC gunner gate is back')
+    if not before(gunner, 'ReleaseGunnerInputs(v)', 'if(!ok') or 'if(!AiGunner(v,seat))continue;' not in gunner:
+        fail('src/npcai.cpp: NPC gunner inputs bypass their ownership/lifecycle checks')
+    if 'OnlineHostOnly()' not in role or 'IsOnlineAuthority(rider)' not in role or '!IsAnyPlayer(rider)' not in role:
+        fail('src/npcai.cpp: Dummy/local NPC authority or human-seat exclusion is missing')
+    heli = code_only(read(root, 'src/heli.cpp'))
+    frame = body(heli, 'void HeliFrame(')
+    if not before(frame, 'CrewDoorGuns(vehicle)', 'Replica(vehicle)'):
+        fail('src/heli.cpp: remote pilot suppresses local NPC door gunners')
+    if 'if(InSession() && !NpcGunnerAimReady())return;' not in body(heli, 'void CrewDoorGuns('):
+        fail('src/heli.cpp: online door gunners lack the verified native aim bridge')
     if 'IsOnlineAuthority(vehicle)' not in body(code_only(read(root, 'src/online_authority.cpp')), 'bool VehicleAuthority('):
         fail("src/online_authority.cpp VehicleAuthority: the gunner recoil's authority is not the one rule")
 

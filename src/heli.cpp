@@ -41,6 +41,7 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "npcai.h"
+#include "npc_gunner_aim.h"
 #include "roundaim.h"
 #include "edf/weapon.h"
 #include "warn.h"
@@ -2531,7 +2532,7 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     ReleaseSRWLockExclusive(&heliHudLock);
 }
 
-// The 410 under a player pilot: an AI rider in a door seat (AiGunner: an NPC soldier, or the NPC a seat swap moved
+// The 410 without a local NPC pilot (which already drives its guns in Fly): an AI rider in a door seat (AiGunner: an NPC soldier, or the NPC a seat swap moved
 // there; the user 2026-10-07: "上车的npc应该可以用对应的炮塔武器") works its gun as the NPC heli's DoorGun does, on the
 // gun's real rounds (no refill: the player's heli). An empty door seat stays silent (DoorGunUser lends the pilot's
 // user only under an NPC pilot); the player's own seat is theirs.
@@ -2541,6 +2542,7 @@ constexpr ULONGLONG kCrewDoorsStaleMs=2000;
 
 void CrewDoorGuns(unsigned char* v) noexcept {
     if(!doorOk || !Cfg().heliDoorGuns || At<const unsigned char*>(v,0)!=image+kVt410 || SeatCount(v)<3)return;
+    if(InSession() && !NpcGunnerAimReady())return;
     const ULONGLONG ms=GameMs();
     CrewDoors* c=nullptr;
     for(auto& e:crewDoors)if(e.ref.Is(v)){c=&e;break;}
@@ -2549,7 +2551,7 @@ void CrewDoorGuns(unsigned char* v) noexcept {
     const float dt=GameStep(ms-c->lastMs);
     c->lastMs=ms;
     for(int i=0;i<2;++i) {
-        if(AiGunner(SeatAt(v,static_cast<unsigned>(i+1))))DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms);
+        if(AiGunner(v,SeatAt(v,static_cast<unsigned>(i+1))))DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms);
         else c->doors[i].prevValid=false;
     }
 }
@@ -2661,6 +2663,9 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(rescue.ref.Is(vehicle))rescue.seenFrame=GameFrame();   // RescueHeliAlive
     if(!profileOk || vehicle[kDead])return;
     const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
+    // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
+    // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
+    if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))!=Rider::dummy)CrewDoorGuns(vehicle);
     // Online, a stock heli another machine runs is flown there: here it flies on the stick it sends (Replay).
     if(stockHeli && SeatCount(vehicle)>0 && Replica(vehicle)) {
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
@@ -2672,7 +2677,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player) {
-            PlayerAssist(vehicle);PlayerHeli(vehicle);CrewDoorGuns(vehicle);
+            PlayerAssist(vehicle);PlayerHeli(vehicle);
         }
         else AssistOff(vehicle);
         return;
@@ -3075,6 +3080,7 @@ bool InstallDoorGuns() noexcept {
             doorOk=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&DoorGunUser));
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){doorOk=false;}
+    if(doorOk)InstallNpcGunnerAim();
     Log("HELI door guns=%d (410 door guns aimed by the plugin)",doorOk);
     return doorOk;
 }
