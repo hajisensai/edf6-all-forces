@@ -132,6 +132,11 @@ class RealModelTests(unittest.TestCase):
         for edge in seam:
             self.assertGreaterEqual(rear_edges[edge], 2, f'open edge {edge} where the tailgate was')
 
+        for before, after in zip(self.before.bones, self.after.bones):
+            self.assertEqual(before.local, after.local)
+            self.assertEqual(before.inv_bind, after.inv_bind)
+        self.assertEqual(self.before.objects[1].meshes, self.after.objects[1].meshes)
+
     def tailgate_seam(self) -> set:
         body = self.before.bone_index('body')
         offset = self.info['truck_offset']
@@ -150,10 +155,6 @@ class RealModelTests(unittest.TestCase):
                     for a, b in ((p[0], p[1]), (p[1], p[2]), (p[2], p[0])):
                         target[tuple(sorted((a, b)))] += 1
         return set(gate) & set(rest)
-        for before, after in zip(self.before.bones, self.after.bones):
-            self.assertEqual(before.local, after.local)
-            self.assertEqual(before.inv_bind, after.inv_bind)
-        self.assertEqual(self.before.objects[1].meshes, self.after.objects[1].meshes)
 
     def test_both_actual_built_archives_and_collision_pass_checks(self) -> None:
         make_katyusha.build(self.game_path)  # includes model, vehicle SGO, rocket SGO and muzzle agreement checks
