@@ -600,9 +600,10 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
 constexpr double kSlowMs=8.0;
 void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
     static ULONGLONG at=0;
-    LARGE_INTEGER f;QueryPerformanceFrequency(&f);
-    const double s=static_cast<double>(stock)*1000.0/static_cast<double>(f.QuadPart),p=static_cast<double>(plugin)*1000.0/static_cast<double>(f.QuadPart);
-    if(!Cfg().debug || (s<kSlowMs && p<kSlowMs))return;
+    static const double msPerTick=[]{LARGE_INTEGER f;QueryPerformanceFrequency(&f);return 1000.0/static_cast<double>(f.QuadPart);}();
+    if(!Cfg().debug)return;
+    const double s=static_cast<double>(stock)*msPerTick,p=static_cast<double>(plugin)*msPerTick;
+    if(s<kSlowMs && p<kSlowMs)return;
     const ULONGLONG now=GetTickCount64();
     if(now-at<1000)return;
     at=now;
@@ -662,16 +663,19 @@ constexpr float kProbeUp=400.0f,kUnder=2.5f,kUnderFloor=20.0f;
 constexpr ULONGLONG kUnderLogMs=5000,kUnderEveryMs=100;
 constexpr std::size_t kHumanSupport=0x711;   // CharacterControl_Walk +0x91: 2 on the ground, 1 sliding, 0 in the air
 struct UnderWatch { const void* object; float y; ULONGLONG ms,loggedAt; bool under; };
-UnderWatch underWatch[64]{};
+// Room for every vehicle and the player at once; when full, the one probed longest ago gives way (it used to be
+// slot 0 whenever none was stale: past 64 objects the newcomers and slot 0 took each other's place every frame,
+// each time with no probe time, so they cast both rays every frame, 2026-10-07 CPU audit).
+UnderWatch underWatch[256]{};
 
-UnderWatch& WatchOf(const void* object,ULONGLONG ms) noexcept {
-    UnderWatch* free=&underWatch[0];
+UnderWatch& WatchOf(const void* object) noexcept {
+    UnderWatch* oldest=&underWatch[0];
     for(auto& w:underWatch) {
         if(w.object==object)return w;
-        if(ms-w.ms>kUnderLogMs*4 && ms-free->ms<=kUnderLogMs*4)free=&w;
+        if(w.ms<oldest->ms)oldest=&w;
     }
-    *free=UnderWatch{object,0.0f,0,0,false};
-    return *free;
+    *oldest=UnderWatch{object,0.0f,0,0,false};
+    return *oldest;
 }
 
 bool UnderTerrain(const float* p,float* top) noexcept {
@@ -687,7 +691,7 @@ void WatchUnder(const unsigned char* object,const char* what,const unsigned char
     const float* p=reinterpret_cast<const float*>(object+kPosition);
     if(!std::isfinite(p[0]+p[1]+p[2]))return;
     const ULONGLONG ms=GameMs();
-    UnderWatch& w=WatchOf(object,ms);
+    UnderWatch& w=WatchOf(object);
     if(w.ms && ms-w.ms<kUnderEveryMs)return;   // two rays an object a kUnderEveryMs, not a frame
     float top=0.0f;
     const bool under=UnderTerrain(p,&top);

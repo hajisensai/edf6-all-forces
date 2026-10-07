@@ -595,8 +595,8 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
 
 // ---- The medic heli (tools/make_jets.py MEDIC_HELI_FILE; the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，
 // 自瞄也是锁队友」) ----
-// A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way; a round with no blast
-// skips the team check, docs/bullet-pass-re.md §3.2 step 4, so it hits a friend and its damage heals) aims at hurt friends
+// A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way) aims at hurt friends.
+// Its PlasmaBullet blast also needs the native friendly-damage permission, restored before shooting below. It aims at feet
 // and never at enemies: its pilot circles the most hurt one in its range (PickTarget: as a 410 circles an enemy), its
 // gunners shoot the hurt friends they reach (DoorGun) and hold their fire while an enemy is near the line (the round would
 // hit it first: a heal for the enemy, or nothing; not checked which).
@@ -679,6 +679,50 @@ bool HealingGun(const unsigned char* weapon) noexcept {
     if(!Readable(weapon,kWeaponDamage+4))return false;
     const float d=At<float>(weapon,kWeaponDamage);
     return std::isfinite(d) && d<0.0f;
+}
+
+constexpr std::size_t kWeaponFriendlyDamage=0x8B6;
+constexpr unsigned kMedicShot=0x696FD0;
+// Complete 15-byte prologue: mov rax,rsp; eight pushes, no relative instructions.
+constexpr unsigned char kMedicShotSig[]={0x48,0x8B,0xC4,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
+using MedicShotFn=void(__fastcall*)(unsigned char*,unsigned,void*,int*,bool);
+MedicShotFn medicShotNext=nullptr;
+
+void RestoreMedicPermission(unsigned char* weapon) noexcept {
+    if(!HealingGun(weapon) || !Readable(weapon+kWeaponFriendlyDamage,1,true))return;
+    const auto owner=At<const unsigned char*>(weapon,0x120);
+    if(Readable(owner,8) && At<const unsigned char*>(owner,0)==image+kVt410)
+        weapon[kWeaponFriendlyDamage]=1;
+}
+
+void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overrideParam,int* counter,bool replay) {
+    // RideAi 0x6330C9 and later script setup 0x632DA0 clear +8B6 even on healing guns. Both the blast filter
+    // and HP handler need its GDI bit 0x20. The common local/replay shot entry repairs it before parameter copying.
+    // Weapon semantics are independent of AI/aim settings and network ownership; positive guns stay untouched.
+    __try { RestoreMedicPermission(weapon); }
+    __except(EXCEPTION_EXECUTE_HANDLER) {}
+    medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+}
+
+bool InstallMedicPermission() noexcept {
+    if(medicShotNext)return true;
+    if(!Matches(kMedicShot,kMedicShotSig,sizeof(kMedicShotSig)))return false;
+    unsigned char trampoline[sizeof(kMedicShotSig)+14];
+    std::memcpy(trampoline,kMedicShotSig,sizeof(kMedicShotSig));
+    const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
+    std::memcpy(trampoline+sizeof(kMedicShotSig),jump,6);
+    const auto back=reinterpret_cast<std::uintptr_t>(image+kMedicShot+sizeof(kMedicShotSig));
+    std::memcpy(trampoline+sizeof(kMedicShotSig)+6,&back,8);
+    void* const code=edf::AllocateNearCode(image+kMedicShot,trampoline,sizeof(trampoline));
+    if(!code)return false;
+    unsigned char patch[sizeof(kMedicShotSig)];std::memset(patch,0x90,sizeof(patch));
+    std::memcpy(patch,jump,6);
+    const auto hook=reinterpret_cast<std::uintptr_t>(&MedicShotHook);
+    std::memcpy(patch+6,&hook,8);
+    medicShotNext=reinterpret_cast<MedicShotFn>(code);
+    if(edf::PatchCode(image+kMedicShot,kMedicShotSig,patch,sizeof(patch)))return true;
+    medicShotNext=nullptr;VirtualFree(code,0,MEM_RELEASE);
+    return false;
 }
 
 // Whether any of `v`'s weapons heals: a medic.
@@ -3183,6 +3227,7 @@ bool CheckHeliProfile() noexcept {
     __try {
         for(const auto& s:kHeliSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("HELI profile mismatch at %#zx",s.rva);return false;}
         profileOk=true;
+        Log("HELI medic healing permission=%d (410 local/replayed shots heal friends)",InstallMedicPermission());
         Log("HELI player attitude=%d (mouse pitch separated from forward speed)",InstallPlayerAttitude());
         // Called helis that left are deleted (HeliReap) with the game's Delete, as jet.cpp deletes its jets.
         deleteOk=Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));

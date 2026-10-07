@@ -453,6 +453,7 @@ void LoadConfig() noexcept {
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
     n.edf5CampaignRows=FixInt("EDF5CampaignRows",ReadInt(L"EDF5CampaignRows",n.edf5CampaignRows),0,512);
+    n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
@@ -882,6 +883,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();
+    InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
