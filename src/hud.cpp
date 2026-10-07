@@ -3230,6 +3230,12 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Seg(drawer,ctx,x0,y0,x1,y0,1.5f*s,kMapOrder);Seg(drawer,ctx,x1,y0,x1,y1,1.5f*s,kMapOrder);
         Seg(drawer,ctx,x1,y1,x0,y1,1.5f*s,kMapOrder);Seg(drawer,ctx,x0,y1,x0,y0,1.5f*s,kMapOrder);
     }
+    // The enemy under the pointer: amber brackets on it, what Q and H do with it.
+    float hx,hy,hd;
+    if(c.hover && Project(vp,c.hoverAt,width,height,&hx,&hy,&hd)) {
+        MapBrackets(drawer,ctx,hx,hy,20.0f*s,2.0f*s,kAmber);
+        Label(text,lines,at,hx,hy-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
+    }
     wchar_t one[64]{};
     for(int i=0;i<c.count && i<kCmdUnits;++i) {
         const CmdMark& u=c.unit[i];
@@ -3324,6 +3330,8 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
 }
 
+void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
+
 // The map view open: its marks drawn (true), nothing else of the HUD.
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
@@ -3332,13 +3340,12 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    NpcMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // which enemy the NPCs are set on, on the map too
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
     return true;
 }
-}  // namespace
-
 // The NPCs' mark (npcai.cpp, the user's Q on foot; docs/npc-ai-design.md §6.3): an amber diamond round it, MARK and its
 // distance under it.
 void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -3351,6 +3358,22 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     if(CameraRay(eye,dir))Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,Tr(Tx::npcMarkRange),vec::Dist(eye,m));
     else Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"%ls",Tr(Tx::npcMark));
 }
+
+// The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): a ring where it points, for a moment, and
+// what came of it (the selected units sent there, how many; none selected; online).
+void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    NpcPing p{};
+    float x,y,depth;
+    if(!NpcPingReadout(&p) || !Project(vp,p.at,width,height,&x,&y,&depth))return;
+    const float* tint=p.given>0 ? kMapOrder : kAmber;
+    Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
+    Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
+    if(p.given>=0)Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
+    else Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
+               Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
+}
+
+}  // namespace
 
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
@@ -3458,6 +3481,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

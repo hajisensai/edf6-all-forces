@@ -4156,8 +4156,15 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp', 'src/npcai.cpp', 'src/drill.cpp', 'src/sazabi.cpp'):
+                'src/proteus.cpp', 'src/drill.cpp', 'src/sazabi.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
+    # NPC marking moved from a soldier's KeyHeld/MarkTick into the local player's frame. Track the held key while
+    # hidden, but dispatch neither behind the map nor while its close/TV input hold is active.
+    mark_frame = src('src/npcai.cpp').split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
+    assert '!mapOpen && !MapHoldsKeys()' in mark_frame and 'mark.held=down;' in mark_frame
+    assert 'NpcMarkFrame(human,open && game.open);' in code
+    close = code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
+    assert 'SuspendMapCommands();' in close, 'closing invalidates the hover/view without waiting for the stale timer'
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
     held = re.search(r'kInputHeld\[\]="(\w+)"', src('common/edf/aimlink.h')).group(1)
@@ -4426,8 +4433,9 @@ def npc_ai_wired() -> None:
         assert key in readme and key in doc, key
     # The mark (§6.3): its key read on foot only (in a vehicle Q is the vehicle's: Proteus, the jets, the turrets), drawn
     # by the HUD; the focus order needs it.
-    tick = code.split('void MarkTick() noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey)' in tick
+    tick = code.split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
+    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys()' in tick
+    assert 'c.enabled && c.customNpcAi && HumanOnFoot(human)' in tick and 'KeepMark();' in tick
     assert 'NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
     assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
     for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
