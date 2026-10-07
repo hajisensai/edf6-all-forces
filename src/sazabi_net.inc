@@ -4,7 +4,7 @@ std::uint32_t EventAge(ULONGLONG now,ULONGLONG at) noexcept {
     return static_cast<std::uint32_t>(now>=at && now-at<60000 ? now-at : 60000);
 }
 bool RemoteFresh(const Mech& m,unsigned char* v,ULONGLONG now) noexcept {
-    return m.net.remote && m.net.receivedAt && now>=m.net.receivedAt && now-m.net.receivedAt<=kSazabiNetFresh &&
+    return m.net.remote && m.net.source && now>=m.net.receivedAt && now-m.net.receivedAt<=kSazabiNetFresh &&
         drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v) &&
         m.net.state.controller==SazabiNetController(v);
 }
@@ -49,7 +49,7 @@ void SendNetwork(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
 }
 void DropRemoteEffects(Mech& m) noexcept {
     RoundDrop(m.arms.glow);for(auto& beam:m.arms.mega)RoundDrop(beam);
-    NozzleFlames(m.vehicle,nullptr,0,nullptr,nullptr,GameMs());
+    if(m.rootOk)Flames(m,m.vehicle,0.0f,true); // NozzleFlames requires real arrays even to write zero levels
     FlareFlames(m.vehicle,nullptr,nullptr,0,GameMs());
 }
 void AcceptNetwork(Mech& m,unsigned char* v,const sazabi_net::State& s,ULONGLONG ms) noexcept {

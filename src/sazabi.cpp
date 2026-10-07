@@ -424,6 +424,7 @@ void SazabiFrame(unsigned char* v) noexcept {
 // The 506 physics step (body506.cpp), after the stock one: the walk's or the flight's velocity, the spin upright.
 bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     if(!Cfg().enabled || !Cfg().sazabi)return false;
+    if(drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v))return false;
     const Mech* m=Find(v);
     if(!m || m->net.remote || !m->active || !m->driven || v[kDead] || m->frame+1<GameFrame() || !At<void*>(v,kBody))return false;
     for(int i=0;i<3;++i){lin[i]=m->fl.vel[i];ang[i]=m->omega[i];}
@@ -440,6 +441,7 @@ bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore*
     if(msg!=kMsgDamage || !data || v[kDead])return false;
     const Mech* m=Find(v);
     if(!m || !m->driven || m->arms.guard<0.5f || (m->net.remote && !RemoteFresh(*m,v,GameMs())))return false;
+    if(!m->net.remote && drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v))return false;
     const float* hit=reinterpret_cast<const float*>(static_cast<unsigned char*>(data)+kHitPoint);
     const float* p=reinterpret_cast<const float*>(v+kPosition);
     if((hit[0]-p[0])*std::sin(m->heading)+(hit[2]-p[2])*std::cos(m->heading)<=0.0f)return false;   // from behind

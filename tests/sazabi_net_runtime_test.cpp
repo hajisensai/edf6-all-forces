@@ -33,6 +33,9 @@ int main() {
     Check(emcCalls==1 && soundCalls==sounds,"one-shot beams and sounds are not replayed every frame");
     float lin[3]{11,12,13},ang[3]{21,22,23};m->active=true;m->frame=GameFrame();
     Check(!SazabiBodyStep(vehicle,lin,ang) && lin[0]==11 && ang[0]==21,"remote snapshot can never override stock body synchronization");
+    m->net.remote=false;
+    Check(!SazabiBodyStep(vehicle,lin,ang),"driver authority change blocks old physics even before the next replay frame");
+    m->net.remote=true;
     alignas(16) unsigned char hit[0x80]{};Put<float>(hit,0x38,20);Put<float>(hit,0x50,100);
     MessageRestore restore{};SazabiMessage(vehicle,kMsgDamage,hit,&restore);
     Check(At<float>(hit,0x50)==20 && restore.was==100,"target owner uses driver's replicated shield share before native damage");

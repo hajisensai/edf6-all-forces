@@ -330,7 +330,7 @@ void NozzleMatrix(const float* at,const float* dir,float* out) noexcept {
 // sazabi_flames.h has it (out on its feet, a hover's quarter in the air, a burst at a dash's start, a soft flicker,
 // the waist's attitude jets in a fast turn); each flying funnel's small fire behind it.
 // Every frame (0 when idle: the flames burn down and their boosters wait for the next burst).
-void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
+void Flames(Mech& m,const unsigned char* v,float thrust,bool extinguish=false) noexcept {
     alignas(16) float mats[sazabi::kNozzleCount][16];
     float sizes[sazabi::kNozzleCount][2],levels[sazabi::kNozzleCount];
     sazabi::flames::State fs;
@@ -345,7 +345,7 @@ void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
         NozzleMatrix(at,dir,mats[i]);
         sizes[i][0]=z.flame[0];sizes[i][1]=z.flame[1];
         const int waist=z.bone==sazabi::kPelvis ? (z.at[0]>0.0f ? 1 : -1) : 0;   // the waist's: attitude jets
-        levels[i]=sazabi::flames::Level(fs,i,z.burst,waist);
+        levels[i]=extinguish ? 0.0f : sazabi::flames::Level(fs,i,z.burst,waist);
         if(!z.burst)for(int k=0;k<3;++k)main[k]+=at[k]*0.25f;   // the four main ones' middle: the roar's
     }
     NozzleFlames(v,mats,sazabi::kNozzleCount,sizes,levels,GameMs());
@@ -353,7 +353,7 @@ void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
     float at[8][3],vel[8][3];
     int n=0;
     for(const auto& f:m.arms.funnels) {
-        if(f.phase==FunnelPhase::docked || f.phase==FunnelPhase::launching || n>=8)continue;
+        if(extinguish || f.phase==FunnelPhase::docked || f.phase==FunnelPhase::launching || n>=8)continue;
         for(int k=0;k<3;++k){at[n][k]=f.at[k]-f.dir[k]*1.0f;vel[n][k]=f.vel[k];}
         if(Len(f.vel)<1.0f)for(int k=0;k<3;++k)vel[n][k]=f.dir[k];
         ++n;

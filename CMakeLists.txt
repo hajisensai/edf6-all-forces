@@ -515,3 +515,8 @@ target_compile_options(sazabi_net_runtime_test PRIVATE /W4 /WX /utf-8 /permissiv
 target_link_options(sazabi_net_runtime_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks sazabi_net_test sazabi_net_runtime_test)
 add_test(NAME sazabi_net_runtime COMMAND sazabi_net_runtime_test)
+add_test(NAME sazabi_net_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sazabi_net_guard.py")
+add_executable(sazabi_net_native_test EXCLUDE_FROM_ALL tests/sazabi_net_native_test.cpp src/drill_net.cpp)
+target_include_directories(sazabi_net_native_test PRIVATE src common)
+target_link_libraries(sazabi_net_native_test PRIVATE edf6common user32)
+target_compile_options(sazabi_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
