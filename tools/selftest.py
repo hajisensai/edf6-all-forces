@@ -531,6 +531,82 @@ def stores_inc_current() -> None:
     assert listed and set(listed) <= built, (listed, built)
     assert f'kSgoHull={vc.JETS["edf6tr_sub_carrier_mission"].durability:.1f}f' in sub, 'subcarrier.cpp kSgoHull'
 
+@test
+def store_looks() -> None:
+    """Every store's round flies a model of its own at its weapon's real length (pylib/vcobjects.py STORE_MODELS, Look; the
+    user, 2026-10-07: 「不同挂载要有不同模型，射出去的时候也应该是对应模型」): each look's model is one of STORE_MODELS and its
+    AmmoSize gives the real length within STORE_LENGTH_SLACK; every model listed is used; the rounds one control cycles
+    never share a model (each jet's stores; a stock vehicle's stores on one holder, make_stock_stores.LOADOUTS, and with
+    the game the stock weapon of the holder they hang beside). With the game: each model measures as STORE_MODELS says on
+    Root.cpk (and _look refuses one that does not); each store SGO jet_guns writes fires its look's model at its size,
+    preloads exactly that model, keeps the template's contact sphere and every other value of the build without the look;
+    the Sazabi's shield missile (its look the template's) is that build byte for byte."""
+    import make_stock_stores as mss
+    looks = {kind: s.weapon.look for kind, s in vc.STORES.items()}
+    every = [*looks.values(), vc.SAZABI_MISSILE.weapon.look]
+    for look in every:
+        assert look.model in vc.STORE_MODELS and look.path == f'app:/WEAPON/{look.model}.rab', look
+        assert abs(look.size * vc.STORE_MODELS[look.model] - look.length) <= vc.STORE_LENGTH_SLACK, look
+    assert {look.model for look in every} == set(vc.STORE_MODELS), 'a model in STORE_MODELS no weapon flies'
+    assert make_katyusha.ROCKET_MODEL_LEN == vc.STORE_MODELS['bullet_rocket'], 'the Katyusha measures the same model'
+
+    def kind(weapon: str) -> str | None:
+        got = vc.store_of(weapon if weapon.startswith('app:/') else 'app:/weapon/' + weapon.lower())
+        return got[0] if got else None
+
+    def apart(where: object, models: list[str]) -> None:
+        assert len(models) == len(set(models)), f'{where}: rounds cycled on one control look alike: {models}'
+
+    for name, jet in vc.JETS.items():
+        apart(name, [looks[k].model for k in sorted({kind(w) for w in jet.weapons} - {None})])
+    beside: dict[tuple[str, int], list[str]] = {}
+    for stem, mounts in mss.LOADOUTS.items():
+        for m in mounts:
+            if kind(m.weapon):
+                beside.setdefault((stem, m.like), []).append(looks[kind(m.weapon)].model)
+    for where, models in beside.items():
+        apart(where, models)
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    for model, length in vc.STORE_MODELS.items():
+        assert abs(vc.model_length(game.read('WEAPON', f'{model}.rab')) - length) <= vc.STORE_MODEL_SLACK, model
+    built = vc.jet_guns(game)
+    with patched(vc, _look=lambda *_: None):
+        plain, plain_sazabi = vc.jet_guns(game), vc.sazabi_weapons(game)
+    assert vc.sazabi_weapons(game)[vc.SAZABI_MISSILE_FILE] == plain_sazabi[vc.SAZABI_MISSILE_FILE], 'the Sazabi missile changed'
+    shape = ('AmmoModel', 'AmmoSize', 'AmmoHitSizeAdjust', 'resource')
+    for name in vc.STORE_FILES:
+        look = looks[kind(name)]
+        got, was = (dsgo.to_py(dsgo.parse(files[name]).root) for files in (built, plain))
+        assert list(got) == list(was) and all(got[k] == was[k] for k in got if k not in shape), name
+        assert was['resource'] == [was['AmmoModel']], f'{name}: the template preloads its own model alone'
+        assert (got['AmmoModel'], got['resource'], got['AmmoSize']) == (look.path, [look.path], look.size), name
+        contact, stock = got['AmmoSize'] * got['AmmoHitSizeAdjust'], was['AmmoSize'] * was['AmmoHitSizeAdjust']
+        assert abs(contact - stock) < 1e-9, f'{name}: contact sphere {contact}, the template {stock}'
+    # The stock weapon on the holder a stock vehicle's stores hang beside: another model than theirs.
+    rows = {stem: mss.stock_rows(game, stem) for stem in mss.LOADOUTS}
+    for request in mss.requests(game):
+        entry, stem = mss._brought(dsgo.parse(game.read('WEAPON', request)))
+        stock = mss._request_list(entry, rows[stem], request)
+        for like in {m.like for m in mss.LOADOUTS[stem]}:
+            w = stock.items[like]
+            path = str(w.items[0] if isinstance(w, dsgo.Node) else w)
+            try:
+                own = dsgo.to_py(dsgo.parse(game.read('WEAPON', path.split('/')[-1])).root).get('AmmoModel')
+            except (KeyError, ValueError):
+                own = None   # no stock file of that name, or not a DSGO weapon: no round model to tell apart
+            mine = [vc.Look(m, 1.0).path.lower() for m in beside.get((stem, like), [])]
+            assert not isinstance(own, str) or own.lower() not in mine, (request, like, own)
+    with patched(vc, STORE_MODELS={**vc.STORE_MODELS, 'bullet_rpg': 1.2}):
+        try:
+            vc.jet_guns(game)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('_look took a model of another length than STORE_MODELS says')
+
 
 @test
 def order_append_only() -> None:
@@ -1154,6 +1230,43 @@ def every_npc_aircraft_boardable() -> None:
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     for key in ('PlayerJetAll', 'PlayerJetHailKey'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
+
+@test
+def boardable_seats_take_every_class() -> None:
+    """Every aircraft the player boards (src/playerjet_kinds.h kBoardable) takes every class into its seat, whatever SGO
+    brings it (the user, 2026-10-07: the carrier an NPC called took Rangers and Air Raiders only): pylib/vcobjects.py
+    BOARDABLE_MARKS is kBoardable's bodies' marks (src/jet_internal.h kBodies), every parked or requested twin is one of
+    them; with the game, seat 0 of every NPC and twin SGO jet_sgo makes, and of the bombers and the gunship make_jets makes
+    from the strike jet, is PLAYER_SEAT_POSE / PLAYER_SEAT_CLASSES (15) exactly when its mark is one of them, the 506's own
+    seat (506_HELI_DRIVER / 9) otherwise. The player jets' are tested by their own builds (always every class)."""
+    import sgo
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    marks = {body: float(mark) for body, mark in
+             re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
+    boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
+    assert len(boardable) >= 13 and boardable <= set(marks), sorted(boardable - set(marks))
+    assert {marks[b] for b in boardable} == vc.BOARDABLE_MARKS, sorted({marks[b] for b in boardable} ^ vc.BOARDABLE_MARKS)
+    assert vc.PLAYER_SEAT_CLASSES == 15, 'R 1 | WD 2 | F 4 | AR 8'
+    for name, jet in vc.JETS.items():
+        assert not (jet.parked or jet.requested) or jet.mark in vc.BOARDABLE_MARKS, f'{name}: a twin the player cannot board'
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+
+    def seat(data: bytes) -> tuple[str, int]:
+        s = sgo.read(data)[1]['vehicle_riding_position'][0]
+        return s[3], s[4]
+
+    every = (vc.PLAYER_SEAT_POSE, vc.PLAYER_SEAT_CLASSES)
+    for name, jet in vc.JETS.items():
+        if not jet.player:
+            want = every if jet.mark in vc.BOARDABLE_MARKS else ('506_HELI_DRIVER', 9)
+            assert seat(vc.jet_sgo(game, name, make_jets.MODEL)) == want, name
+    for name in make_jets.BOMBERS:
+        assert seat(make_jets.bomber_sgo(game, name)) == every, name
+    gunship = make_jets.with_mark(make_jets.bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), make_jets.GUNSHIP_MARK)
+    assert seat(gunship) == every and make_jets.GUNSHIP_MARK in vc.BOARDABLE_MARKS, 'the gunship'
 
 
 @test
