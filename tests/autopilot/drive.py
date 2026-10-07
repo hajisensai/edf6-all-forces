@@ -20,12 +20,13 @@ The game must not be running for install / launch / uninstall (it is the user's:
 from __future__ import annotations
 
 import ctypes
+import hashlib
+import json
 import ctypes.wintypes as wt
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,6 +39,31 @@ KEYS = {'enter': 0x0D, 'esc': 0x1B, 'space': 0x20, 'left': 0x25, 'up': 0x26, 'ri
         'alt': 0x12, 'f4': 0x73, 'shift': 0x10, 'ctrl': 0x11, 'tab': 0x09}
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 gdi32 = ctypes.WinDLL('gdi32')
+# ctypes otherwise defaults to C int, truncating Win64 HWND/HDC/HGDIOBJ values.
+ENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+for lib, name, result, args in (
+    (user32, 'GetForegroundWindow', wt.HWND, []),
+    (user32, 'GetWindow', wt.HWND, [wt.HWND, wt.UINT]),
+    (user32, 'GetDC', wt.HDC, [wt.HWND]),
+    (user32, 'ReleaseDC', ctypes.c_int, [wt.HWND, wt.HDC]),
+    (user32, 'GetWindowThreadProcessId', wt.DWORD, [wt.HWND, ctypes.POINTER(wt.DWORD)]),
+    (user32, 'GetClientRect', wt.BOOL, [wt.HWND, ctypes.POINTER(wt.RECT)]),
+    (user32, 'IsWindowVisible', wt.BOOL, [wt.HWND]),
+    (user32, 'EnumWindows', wt.BOOL, [ENUMPROC, wt.LPARAM]),
+    (user32, 'SetWindowPos', wt.BOOL, [wt.HWND, wt.HWND, ctypes.c_int, ctypes.c_int,
+                                    ctypes.c_int, ctypes.c_int, wt.UINT]),
+    (user32, 'SetForegroundWindow', wt.BOOL, [wt.HWND]),
+    (user32, 'PrintWindow', wt.BOOL, [wt.HWND, wt.HDC, wt.UINT]),
+    (gdi32, 'CreateCompatibleDC', wt.HDC, [wt.HDC]),
+    (gdi32, 'CreateCompatibleBitmap', wt.HBITMAP, [wt.HDC, ctypes.c_int, ctypes.c_int]),
+    (gdi32, 'SelectObject', wt.HGDIOBJ, [wt.HDC, wt.HGDIOBJ]),
+    (gdi32, 'GetDIBits', ctypes.c_int, [wt.HDC, wt.HBITMAP, wt.UINT, wt.UINT,
+                                     ctypes.c_void_p, ctypes.c_void_p, wt.UINT]),
+    (gdi32, 'DeleteObject', wt.BOOL, [wt.HGDIOBJ]),
+    (gdi32, 'DeleteDC', wt.BOOL, [wt.HDC]),
+):
+    fn = getattr(lib, name)
+    fn.restype, fn.argtypes = result, args
 user32.SetProcessDPIAware()
 
 
@@ -47,7 +73,7 @@ def plugins(game: str) -> str:
 
 def game_pids() -> list[int]:
     out = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq EDF6.exe', '/FO', 'CSV', '/NH'], capture_output=True,
-                         text=True).stdout
+                         text=True, check=True).stdout
     return [int(line.split('","')[1]) for line in out.splitlines() if line.startswith('"EDF6.exe"')]
 
 
@@ -74,190 +100,71 @@ def hide(hwnd: int) -> None:
     user32.SetWindowPos(hwnd, 1, left, 0, 0, 0, 0x0001 | 0x0010)   # HWND_BOTTOM, SWP_NOSIZE | SWP_NOACTIVATE
 
 
+SESSION_EXTS = ('.dll', '.keys', '.log', '.cmd', '.keys.tmp', '.cmd.tmp')
+
+
+def require_closed() -> None:
+    if game_pids():
+        raise RuntimeError('EDF6 is running: never touched')
+
+
 def install(game: str) -> None:
-    assert not game_pids(), 'EDF6 is running: never touched'
+    require_closed()
+    directory = plugins(game)
     src = os.path.join(ROOT, 'build', 'tools', NAME + '.dll')
-    shutil.copyfile(src, os.path.join(plugins(game), NAME + '.dll'))
-    print('installed', os.path.join(plugins(game), NAME + '.dll'))
+    with open(src, 'rb') as f:
+        payload = f.read()
+    marker = os.path.join(directory, NAME + '.session.json')
+    # No files from a previous/manual installation may be adopted or overwritten.
+    for ext in SESSION_EXTS:
+        if os.path.lexists(os.path.join(directory, NAME + ext)):
+            raise RuntimeError('Existing autopilot files must be preserved: ' + NAME + ext)
+    with open(marker, 'x', encoding='utf-8') as f:
+        json.dump({'sha256': hashlib.sha256(payload).hexdigest()}, f)
+    created = False
+    dll = os.path.join(directory, NAME + '.dll')
+    try:
+        with open(dll, 'xb') as f:
+            created = True
+            f.write(payload)
+    except BaseException:
+        if created:
+            os.remove(dll)
+        os.remove(marker)
+        raise
+    print('installed', os.path.join(directory, NAME + '.dll'))
 
 
 def uninstall(game: str) -> None:
-    assert not game_pids(), 'EDF6 is running: never touched'
-    for ext in ('.dll', '.keys', '.log', '.cmd'):
-        path = os.path.join(plugins(game), NAME + ext)
+    require_closed()
+    directory = plugins(game)
+    marker = os.path.join(directory, NAME + '.session.json')
+    if not os.path.isfile(marker):
+        raise RuntimeError('No owned autopilot session: existing files left untouched')
+    with open(marker, encoding='utf-8') as f:
+        expected = json.load(f)['sha256']
+    dll = os.path.join(directory, NAME + '.dll')
+    if os.path.exists(dll):
+        with open(dll, 'rb') as f:
+            if hashlib.sha256(f.read()).hexdigest() != expected:
+                raise RuntimeError('Autopilot DLL changed: files left untouched')
+    for ext in SESSION_EXTS:
+        path = os.path.join(directory, NAME + ext)
         if os.path.exists(path):
             os.remove(path)
             print('removed', path)
-
-
-def steam_windows() -> list[tuple[int, str]]:
-    """Steam's own windows (SDL_app): the main "Steam" one and its launching dialog."""
-    # The dialogs are steamwebhelper.exe's windows (its CEF), not steam.exe's.
-    pids: set[int] = set()
-    for image in ('steam.exe', 'steamwebhelper.exe'):
-        out = subprocess.run(['tasklist', '/FI', f'IMAGENAME eq {image}', '/FO', 'CSV', '/NH'], capture_output=True,
-                             text=True).stdout
-        pids |= {int(line.split('","')[1]) for line in out.splitlines() if line.startswith(f'"{image}"')}
-    found: list[tuple[int, str]] = []
-
-    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
-    def each(hwnd: int, _: int) -> bool:
-        pid = wt.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        title = ctypes.create_unicode_buffer(128)
-        user32.GetWindowTextW(hwnd, title, 128)
-        name = ctypes.create_unicode_buffer(64)
-        user32.GetClassNameW(hwnd, name, 64)
-        if pid.value in pids and user32.IsWindowVisible(hwnd) and name.value == 'SDL_app':
-            found.append((hwnd, title.value))
-        return True
-    user32.EnumWindows(each, 0)
-    return found
-
-
-def steam_dialogs() -> list[tuple[int, str]]:
-    return [(hwnd, title) for hwnd, title in steam_windows() if title != 'Steam']
-
-
-def steam_main() -> int | None:
-    return next((hwnd for hwnd, title in steam_windows() if title == 'Steam'), None)
-
-
-def sync_warning_button(img) -> tuple[int, int] | None:  # noqa: ANN001 - PIL.Image
-    """Where the cloud-sync warning's 仍然进行游戏 is in Steam's main window (the user's screenshot, 2026-10-08: 「无法同步」
-    is a modal inside it, not a window; Steam offline fails the sync every launch): a blue button 20-80 px high and
-    100-320 px wide with the grey 取消 right beside it. None when the warning is not up."""
-    w, h = img.size
-    px = img.load()
-
-    def blue(p: tuple[int, int, int]) -> bool:
-        return p[2] > 190 and p[0] < 120 and 80 < p[1] < 170
-
-    def grey(p: tuple[int, int, int]) -> bool:
-        return abs(p[0] - 61) <= 10 and abs(p[1] - 68) <= 10 and abs(p[2] - 80) <= 10
-    # (y, first x, last x) of a row's longest blue run, gaps up to 30 px bridged (the button's white label cuts it)
-    rows: list[tuple[int, int, int]] = []
-    for y in range(0, h, 2):
-        best, start, last = (0, 0, 0), -1, -100
-        for x in range(0, w + 2, 2):
-            if x < w and blue(px[x, y]):
-                if start < 0 or x - last > 30:
-                    if start >= 0:
-                        best = max(best, (last + 1 - start, start, last))
-                    start = x
-                last = x
-        if start >= 0:
-            best = max(best, (last + 1 - start, start, last))
-        if 100 <= best[0] <= 320:
-            rows.append((y, best[1], best[2]))
-    blobs: list[list[tuple[int, int, int]]] = []
-    for r in rows:
-        if blobs and r[0] - blobs[-1][-1][0] <= 4 and abs(r[1] - blobs[-1][-1][1]) <= 6:
-            blobs[-1].append(r)
-        else:
-            blobs.append([r])
-    for blob in blobs:
-        if not 20 <= blob[-1][0] - blob[0][0] <= 80:
-            continue
-        y = (blob[0][0] + blob[-1][0]) // 2
-        left, right = min(r[1] for r in blob), max(r[2] for r in blob)
-        edge = blob[0][0] + 4   # near the top edge, above the 取消 label's glyphs
-        beside = [px[x, edge] for x in range(right + 30, min(right + 140, w), 5)]
-        if beside and sum(grey(p) for p in beside) >= 0.7 * len(beside):
-            return (left + right) // 2, y
-    return None
-
-
-def post_click(hwnd: int, x: int, y: int) -> None:
-    """A left click posted at client (x, y) of a Steam (CEF) window, to its Chrome_WidgetWin_1 input child: no focus
-    taken, the mouse not moved."""
-    target: list[int] = []
-
-    @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
-    def each(child: int, _: int) -> bool:
-        name = ctypes.create_unicode_buffer(64)
-        user32.GetClassNameW(child, name, 64)
-        # The visible one: Steam's main window holds a hidden, zero-sized browser too.
-        rect = wt.RECT()
-        user32.GetClientRect(child, ctypes.byref(rect))
-        if name.value == 'Chrome_WidgetWin_1' and user32.IsWindowVisible(child) and rect.right > 0:
-            target.append(child)
-        return True
-    user32.EnumChildWindows(hwnd, each, 0)
-    into = target[0] if target else hwnd
-    lp = (y << 16) | x
-    for msg, wp in ((0x0200, 0), (0x0201, 1), (0x0202, 0)):   # move, left down, left up
-        user32.PostMessageW(into, msg, wp, lp)
-        time.sleep(0.08)
-
-
-def agree_sync_warning() -> bool:
-    """仍然进行游戏 on Steam's cloud-sync warning when it is up, a picture of it kept first."""
-    main = steam_main()
-    if not main:
-        return False
-    img = capture(main)
-    at = sync_warning_button(img)
-    if not at:
-        return False
-    evidence = os.path.join(tempfile.gettempdir(), f'steam_sync_warning_{int(time.time())}.png')
-    img.save(evidence)
-    post_click(main, *at)
-    print(f'steam: clicked 仍然进行游戏 at {at} (picture {evidence})')
-    return True
-
-
-def dialog_button(hwnd: int, title: str) -> tuple[str, float, float] | None:
-    """The button to agree on, as a fraction of the client: the launching dialog's 打开游戏, the cloud-sync warning's
-    仍然进行游戏 (the user's screenshot, 2026-10-08: 「无法同步」, buttons 仍然进行游戏 / 取消, 868 x 323). Anything
-    else: none (never clicked)."""
-    rect = wt.RECT()
-    user32.GetClientRect(hwnd, ctypes.byref(rect))
-    if title.startswith(('启动中', 'Launching')):
-        return '打开游戏', 0.64, 0.78
-    aspect = rect.right / rect.bottom if rect.bottom else 0.0
-    if 2.4 <= aspect <= 3.0:
-        return '仍然进行游戏', 0.63, 0.86
-    return None
-
-
-def agree(hwnd: int, title: str) -> bool:
-    """A click posted (no focus taken, the mouse not moved) on the dialog's agreeing button, to its CEF input window; a
-    picture of the dialog kept first. False when the dialog is not one this knows."""
-    button = dialog_button(hwnd, title)
-    evidence = os.path.join(tempfile.gettempdir(), f'steam_dialog_{int(time.time())}.png')
-    try:
-        shot(evidence, hwnd)
-    except Exception as e:   # the picture is evidence only
-        print('steam: no picture of the dialog:', e)
-    if not button:
-        print(f'steam: unknown dialog {title!r} left alone (picture {evidence})')
-        return False
-    rect = wt.RECT()
-    user32.GetClientRect(hwnd, ctypes.byref(rect))
-    post_click(hwnd, int(rect.right * button[1]), int(rect.bottom * button[2]))
-    print(f'steam: clicked {button[0]} on {title!r} (picture {evidence})')
-    return True
+    os.remove(marker)
 
 
 def launch() -> None:
-    assert not game_pids(), 'EDF6 is already running'
+    require_closed()
     before = user32.GetForegroundWindow()
     os.startfile(f'steam://rungameid/{APP_ID}')
-    seen: dict[int, float] = {}
-    clicked: dict[int, float] = {}
-    checked = 0.0
+    # Steam dialogs can authorize cloud-save conflicts or unrelated actions. Shape,
+    # color and window title are not semantic identity: leave all confirmations to
+    # the user and only wait for the game this command requested.
     deadline = time.time() + 150
     while time.time() < deadline:
-        for dialog, title in ([] if game_pids() else steam_dialogs()):
-            seen.setdefault(dialog, time.time())
-            if time.time() - seen[dialog] > 5 and time.time() - clicked.get(dialog, 0.0) > 15:
-                agree(dialog, title)
-                clicked[dialog] = time.time()
-        if not game_pids() and time.time() - checked > 5:   # a picture and a scan: not every turn
-            checked = time.time()
-            if time.time() - clicked.get(0, 0.0) > 10 and agree_sync_warning():
-                clicked[0] = time.time()
         hwnd = game_window()
         if hwnd:
             hide(hwnd)
@@ -271,12 +178,15 @@ def launch() -> None:
 def key(game: str, spec: str, ms: int) -> None:
     codes = [KEYS[k.lower()] if k.lower() in KEYS else int(k, 16) for k in spec.split('+')]
     path = os.path.join(plugins(game), NAME + '.keys')
-    for text in (' '.join(f'{c:02x}' for c in codes), ''):
+    def write(text: str) -> None:
         with open(path + '.tmp', 'w') as f:
             f.write(text)
         os.replace(path + '.tmp', path)
-        if text:
-            time.sleep(ms / 1000)
+    try:
+        write(' '.join(f'{c:02x}' for c in codes))
+        time.sleep(ms / 1000)
+    finally:
+        write('')
     time.sleep(0.15)
 
 
@@ -296,23 +206,45 @@ def capture(hwnd: int):  # noqa: ANN201 - PIL.Image
     rect = wt.RECT()
     user32.GetClientRect(hwnd, ctypes.byref(rect))
     w, h = rect.right, rect.bottom
+    if not w or not h:
+        raise RuntimeError('window has no client area')
     hdc = user32.GetDC(hwnd)
-    mem = gdi32.CreateCompatibleDC(hdc)
-    bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
-    gdi32.SelectObject(mem, bmp)
-    user32.PrintWindow(hwnd, mem, 3)   # PW_CLIENTONLY | PW_RENDERFULLCONTENT
-    buf = ctypes.create_string_buffer(w * h * 4)
+    mem = bmp = previous = None
+    try:
+        if not hdc:
+            raise ctypes.WinError(ctypes.get_last_error())
+        mem = gdi32.CreateCompatibleDC(hdc)
+        bmp = gdi32.CreateCompatibleBitmap(hdc, w, h)
+        if not mem or not bmp:
+            raise RuntimeError('could not allocate window capture bitmap')
+        previous = gdi32.SelectObject(mem, bmp)
+        if not previous or previous == ctypes.c_void_p(-1).value:
+            previous = None
+            raise RuntimeError('could not select window capture bitmap')
+        if not user32.PrintWindow(hwnd, mem, 3):
+            raise RuntimeError('PrintWindow failed')
+        # GetDIBits requires a bitmap that is not currently selected into a DC.
+        gdi32.SelectObject(mem, previous)
+        previous = None
+        buf = ctypes.create_string_buffer(w * h * 4)
 
-    class Header(ctypes.Structure):
-        _fields_ = [('size', wt.DWORD), ('w', wt.LONG), ('h', wt.LONG), ('planes', wt.WORD), ('bits', wt.WORD),
-                    ('comp', wt.DWORD), ('img', wt.DWORD), ('x', wt.LONG), ('y', wt.LONG), ('used', wt.DWORD),
-                    ('imp', wt.DWORD)]
-    hdr = Header(ctypes.sizeof(Header), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
-    gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(hdr), 0)
-    gdi32.DeleteObject(bmp)
-    gdi32.DeleteDC(mem)
-    user32.ReleaseDC(hwnd, hdc)
-    return Image.frombuffer('RGBA', (w, h), buf, 'raw', 'BGRA', 0, 1).convert('RGB')
+        class Header(ctypes.Structure):
+            _fields_ = [('size', wt.DWORD), ('w', wt.LONG), ('h', wt.LONG), ('planes', wt.WORD), ('bits', wt.WORD),
+                        ('comp', wt.DWORD), ('img', wt.DWORD), ('x', wt.LONG), ('y', wt.LONG), ('used', wt.DWORD),
+                        ('imp', wt.DWORD)]
+        hdr = Header(ctypes.sizeof(Header), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
+        if gdi32.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(hdr), 0) != h:
+            raise RuntimeError('GetDIBits did not return the complete image')
+        return Image.frombuffer('RGBA', (w, h), buf, 'raw', 'BGRA', 0, 1).convert('RGB')
+    finally:
+        if previous:
+            gdi32.SelectObject(mem, previous)
+        if bmp:
+            gdi32.DeleteObject(bmp)
+        if mem:
+            gdi32.DeleteDC(mem)
+        if hdc:
+            user32.ReleaseDC(hwnd, hdc)
 
 
 def command(game: str, text: str) -> None:
@@ -355,16 +287,22 @@ def commit_of(row: str) -> float:
 
 def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None) -> int:
     install(game)
-    command(game, f'mission {mission} {difficulty}')
     try:
+        command(game, f'mission {mission} {difficulty}')
         launch()
         if not wait_for(game, 'PlayMission_Offline', 240):
             print('the mission never started (see the log)')
             return 1
         print('mission started; staying', seconds, 's')
         end = time.time() + seconds
-        while time.time() < end and game_pids():
+        while time.time() < end:
+            if not game_pids():
+                print('the game exited before the observation period ended')
+                return 1
             time.sleep(1)
+        if not game_pids():
+            print('the game exited before quit was requested')
+            return 1
         command(game, 'quit')
         for _ in range(90):
             if not game_pids():
@@ -384,11 +322,13 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
             return 1
         return 0
     finally:
-        if keep and os.path.exists(os.path.join(plugins(game), NAME + '.log')):
-            shutil.copyfile(os.path.join(plugins(game), NAME + '.log'), keep)
-            print('log kept at', keep)
-        if not game_pids():
-            uninstall(game)
+        try:
+            if keep and os.path.exists(os.path.join(plugins(game), NAME + '.log')):
+                shutil.copyfile(os.path.join(plugins(game), NAME + '.log'), keep)
+                print('log kept at', keep)
+        finally:
+            if not game_pids():
+                uninstall(game)
 
 
 def main(argv: list[str]) -> int:

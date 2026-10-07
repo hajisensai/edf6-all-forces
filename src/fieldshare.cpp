@@ -25,6 +25,7 @@
 #include "memory.h"
 #include <cstdint>
 #include <cstring>
+#include <atomic>
 #include <unordered_map>
 #include <vector>
 
@@ -34,6 +35,7 @@ constexpr std::size_t kInitSite=0x152E1A,kInitSigAt=0x152E01,kInit=0x10E8B0;
 constexpr std::size_t kTaskSite=0x1106B0,kTaskSigAt=0x1106A0,kTask=0x10C7B0;
 constexpr std::size_t kVtable=0x176BF88,kDtorSlot=2,kDtor=0x153E50;
 constexpr std::size_t kNew=0x12D85B0,kEmptyChunk=0x10C130,kChunkBlockVtbl=0x1769868,kDeactivate=0x1104E0,kObbW=0x1765B90;
+constexpr std::size_t kDelete=0x12D85EC;
 constexpr std::size_t kFieldRender=0x10D8,kChunks=8,kChunkCount=0x18;
 constexpr std::size_t kChunkBlock=0x1A0,kParamWorld=0x40;
 const unsigned char kInitSig[]={0x4C,0x8D,0x8D,0xE0,0x00,0x00,0x00,0x4D,0x8B,0x45,0x40,0x48,0x8D,0x15,0xDD,0x41,0xFE,0x01,
@@ -46,6 +48,7 @@ using InitFn=std::uint64_t(__fastcall*)(unsigned char*,void*,const void*,unsigne
 using TaskFn=void**(__fastcall*)(void**,void**,int);
 using DtorFn=void*(__fastcall*)(unsigned char*,unsigned);
 using NewFn=void*(__fastcall*)(std::size_t);
+using DeleteFn=void(__fastcall*)(void*,std::size_t);
 using ChunkCtorFn=void(__fastcall*)(unsigned char*);
 using DeactivateFn=void(__fastcall*)(unsigned char*);
 
@@ -66,7 +69,7 @@ std::unordered_map<const void*,Entry*> byFmb;               // an FMB's entry wh
 std::unordered_map<const unsigned char*,Entry*> byRender;   // an instance's FieldRender -> the entry it uses
 std::unordered_map<const unsigned char*,Entry*> pending;    // a FieldRender inside Initialize -> the entry to copy
 bool installed=false;
-int logged=0;
+std::atomic<int> logged{0};
 constexpr int kMostLogged=24;
 
 void AddRef(unsigned char* block) noexcept { if(block)_InterlockedIncrement(reinterpret_cast<volatile long*>(block+8)); }
@@ -84,8 +87,10 @@ void Release(unsigned char* block) noexcept {
 // A chunk of `fr` for chunk `index`, drawing `donor`'s geometry: as the task builds one (0x10D8A0's block, then the
 // fields 0x10CA9B..0x10CC44 write), its geometry pointer at the donor's chunk.
 bool CopyChunk(unsigned char* fr,const unsigned char* param,int index,const Ref& donor,void** out) noexcept {
+    unsigned char* block=nullptr;
+    bool constructed=false;
     __try {
-        auto block=static_cast<unsigned char*>(reinterpret_cast<NewFn>(image+kNew)(kChunkBlock));
+        block=static_cast<unsigned char*>(reinterpret_cast<NewFn>(image+kNew)(kChunkBlock));
         if(!block)return false;
         std::memset(block,0,0x10);
         *reinterpret_cast<const void**>(block)=image+kChunkBlockVtbl;
@@ -93,6 +98,7 @@ bool CopyChunk(unsigned char* fr,const unsigned char* param,int index,const Ref&
         *reinterpret_cast<int*>(block+0xC)=1;
         unsigned char* const c=block+0x10;
         reinterpret_cast<ChunkCtorFn>(image+kEmptyChunk)(c);
+        constructed=true;
         const unsigned char* const d=donor.chunk;
         *reinterpret_cast<int*>(c)=*reinterpret_cast<const int*>(d);
         std::memcpy(c+0x10,d+0x10,0x20);   // the chunk's model-space box: centre, half extents (clamped)
@@ -116,7 +122,27 @@ bool CopyChunk(unsigned char* fr,const unsigned char* param,int index,const Ref&
         std::memcpy(c+0x100,w,0x40);
         out[0]=c;out[1]=block;
         return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        // A failed copy must not leave its allocation behind when the stock task takes over.
+        if(constructed)Release(block);
+        else if(block)reinterpret_cast<DeleteFn>(image+kDelete)(block,kChunkBlock);
+        return false;
+    }
+}
+
+// Called under the exclusive lock. A completed entry can also lose its last owner while a waiter is waking up;
+// a failed wait then drops the final pin, and must release the cache just as the last destructor would.
+Entry* UnusedEntry(Entry* e) {
+    if(e->users || e->waiting || (!e->ready && !e->failed))return nullptr;
+    if(auto it=byFmb.find(e->fmb);it!=byFmb.end() && it->second==e)byFmb.erase(it);
+    return e;
+}
+
+void DeleteEntry(Entry* e) noexcept {
+    if(!e)return;
+    for(const Ref& ref:e->chunks)Release(ref.block);
+    if(e->done)CloseHandle(e->done);
+    delete e;
 }
 
 InitFn realInit=nullptr;
@@ -165,9 +191,9 @@ std::uint64_t __fastcall InitHook(unsigned char* fr,void* device,const void* fmb
             e->failed=true;
         }
         SetEvent(e->done);
-        Entry* const orphan=e->failed && e->waiting==0 ? e : nullptr;
+        Entry* const orphan=UnusedEntry(e);
         ReleaseSRWLockExclusive(&lock);
-        if(orphan){CloseHandle(orphan->done);delete orphan;}
+        DeleteEntry(orphan);
         return r;
     }
     const bool signalled=WaitForSingleObject(e->done,kWaitMs)==WAIT_OBJECT_0;
@@ -175,18 +201,18 @@ std::uint64_t __fastcall InitHook(unsigned char* fr,void* device,const void* fmb
     --e->waiting;
     const bool share=signalled && e->ready;
     if(share){pending[fr]=e;++e->users;++e->copies;byRender[fr]=e;}
-    Entry* const orphan=e->failed && e->waiting==0 ? e : nullptr;
+    Entry* const orphan=UnusedEntry(e);
     const int copies=e->copies;
     const std::size_t n=e->chunks.size();
     ReleaseSRWLockExclusive(&lock);
-    if(orphan){CloseHandle(orphan->done);delete orphan;}
+    DeleteEntry(orphan);
     if(!signalled)Log("TERRAIN %p: the donor of FMB %p not done in %lu ms: decoded by itself",fr,fmb,kWaitMs);
     const std::uint64_t r=realInit(fr,device,fmb,param);
     if(share) {
         AcquireSRWLockExclusive(&lock);
         pending.erase(fr);
         ReleaseSRWLockExclusive(&lock);
-        if(logged<kMostLogged){++logged;Log("TERRAIN %p: FMB %p drawn from %zu shared chunks (copy %d)",fr,fmb,n,copies);}
+        if(logged.fetch_add(1)<kMostLogged)Log("TERRAIN %p: FMB %p drawn from %zu shared chunks (copy %d)",fr,fmb,n,copies);
     }
     return r;
 }
@@ -224,13 +250,10 @@ void* __fastcall DtorHook(unsigned char* self,unsigned flags) {
     Entry* gone=nullptr;
     AcquireSRWLockExclusive(&lock);
     if(e->donor==fr)e->donor=nullptr;
-    if(--e->users==0 && e->waiting==0){byFmb.erase(e->fmb);gone=e;}
+    --e->users;
+    gone=UnusedEntry(e);
     ReleaseSRWLockExclusive(&lock);
-    if(gone) {
-        for(const Ref& ref:gone->chunks)Release(ref.block);
-        CloseHandle(gone->done);
-        delete gone;
-    }
+    DeleteEntry(gone);
     return r;
 }
 }  // namespace

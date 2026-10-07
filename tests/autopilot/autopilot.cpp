@@ -271,6 +271,16 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     const HMODULE edf=GetModuleHandleW(L"EDF.dll");
     if(!edf){Log("no EDF.dll");return false;}
     image=reinterpret_cast<unsigned char*>(edf);
+    // Every command/hook below uses fixed RVAs, including Quit(). A coroutine
+    // prologue alone does not validate those independent globals on another build.
+    const auto dos=reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
+    if(dos->e_magic!=IMAGE_DOS_SIGNATURE)return false;
+    const auto nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+dos->e_lfanew);
+    if(nt->Signature!=IMAGE_NT_SIGNATURE || nt->FileHeader.Machine!=IMAGE_FILE_MACHINE_AMD64 ||
+       nt->FileHeader.TimeDateStamp!=0x678CCB46 || nt->OptionalHeader.SizeOfImage!=0x22CE000) {
+        Log("unsupported EDF.dll: no hooks or commands installed");
+        return false;
+    }
     realForeground=reinterpret_cast<ForegroundFn>(PatchImport(edf,"USER32.dll","GetForegroundWindow",reinterpret_cast<void*>(&Foreground)));
     realKeyboardState=reinterpret_cast<KeyboardStateFn>(PatchImport(edf,"USER32.dll","GetKeyboardState",reinterpret_cast<void*>(&KeyboardState)));
     realKeyState=reinterpret_cast<KeyStateFn>(PatchImport(edf,"USER32.dll","GetKeyState",reinterpret_cast<void*>(&KeyState)));
