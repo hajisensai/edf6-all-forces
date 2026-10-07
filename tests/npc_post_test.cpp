@@ -69,13 +69,28 @@ int main() {
     // clear nothing, so the plugin's own last stick must not read as the stock AI driving (2026-10-07).
     config.customNpcAi=true;
     alignas(16) unsigned char m[0x2700]{},mseat[kSeatStride]{},mrider[0x400]{},mctrl[0x20]{};
-    void* mvt[5]{};mvt[4]=image+0x644350;
-    Put<void**>(m,0,mvt);Put<void*>(m,kSelfCtrl,mctrl);
+    Put<void*>(m,kSelfCtrl,mctrl);
     Put<void*>(m,kSeats,mseat);Put<std::uint64_t>(m,kSeatCount,1);
     Put<void*>(mseat,kSeatRider,mrider);Put<void*>(mseat,kSeatRiderCtrl,mctrl);Put<int>(mctrl,8,1);
     Put<void*>(mrider,0,image+edf::kDummyRiderVtable);
     Put<float>(m,kMatrix,1);Put<float>(m,kMatrix+40,1);
-    Check(NpcDrivable(m),"a Begaruta-family mech is NPC-drivable");
+    // InstallInputs replaces slot 4 before any NpcPostInput/SeatSwitchFrame runs. Use each real family
+    // vtable and replace that slot just as the installed hook does; its stock function is no longer there.
+    const unsigned mechVtables[]={0x17DA960,0x17DD440,0x17DE0A8,0x17DEC40};
+    for(const unsigned rva:mechVtables) {
+        auto mvt=reinterpret_cast<void**>(image+rva);
+        Put<void**>(m,0,mvt);
+        mvt[4]=image+0x644350;
+        Check(NpcDrivable(m),"each stock Begaruta-family mech is NPC-drivable");
+        mvt[4]=image+0x100;   // stand-in InputHook, never called
+        Check(NpcDrivable(m),"a hooked Begaruta-family mech remains NPC-drivable");
+        ResetNpcPosts();++now;NpcPostInput(m);
+        CommandUnit units[1]{};
+        Check(TankCommandUnits(units,1)==1 && std::strcmp(units[0].name,"MECH")==0,
+              "each hooked mech is still listed as MECH");
+        Check(TankCommand(m,guard),"each hooked mech accepts map orders");
+    }
+    ResetNpcPosts();
     ++now;NpcPostInput(m);
     {CommandUnit u[1]{};Check(TankCommandUnits(u,1)==1 && std::strcmp(u[0].name,"MECH")==0,"the mech listed on the map as MECH");}
     Put<float>(m,kPosition+8,-40);++now;NpcPostInput(m);

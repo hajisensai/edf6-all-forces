@@ -36,7 +36,9 @@ namespace crew {
 namespace {
 constexpr std::size_t kSlotAi=72,kSlotUpdate=4;
 constexpr unsigned kTankAi=0x661440;                 // CarBase's AI action: every tank, the Titan, the Grape
-constexpr unsigned kBegarutaUpdate=0x644350;         // the Begaruta family's slot 4
+// Stable class identities: InstallInputs replaces each family's slot 4 with its InputHook, so the
+// current slot value cannot identify the class once the plugin starts running.
+constexpr unsigned kBegarutaVtables[]={0x17DA960,0x17DD440,0x17DE0A8,0x17DEC40};
 constexpr unsigned kVtBarga=0x17D98C8;               // 501_FortressRobo
 constexpr unsigned kBargaWalk=0x604400;
 const unsigned char kBargaWalkSig[]={0x40,0x53,0x48,0x81,0xEC,0x80,0x00,0x00,0x00,0x0F,0x29,0x74,0x24,0x70,0x48,0x8B};
@@ -63,7 +65,8 @@ Family FamilyOf(const unsigned char* v) noexcept {
     const auto vt=At<void* const*>(v,0);
     if(!Readable(vt,(kSlotUpdate+1)*8))return Family::none;
     if(vt==reinterpret_cast<void* const*>(image+kVtBarga))return Family::barga;          // 54 slots: no slot 72
-    if(vt[kSlotUpdate]==image+kBegarutaUpdate)return Family::mech;                       // 57 slots: no slot 72
+    for(const unsigned rva:kBegarutaVtables)
+        if(vt==reinterpret_cast<void* const*>(image+rva))return Family::mech;            // 57 slots: no slot 72
     return Readable(vt,(kSlotAi+1)*8) && vt[kSlotAi]==image+kTankAi ? Family::carBase : Family::none;
 }
 
