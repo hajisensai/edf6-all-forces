@@ -4,10 +4,12 @@
 // the plugin places the camera itself, through turretcam.cpp's look-at hook (LookHook -> SazabiCamera): a third-person
 // rig over the mech's right shoulder, turning with its heading and pitching with its aim, and the screen's centre is
 // the aim: every weapon fires at what the centre's ray meets (Aim). One ray, ViewRay, for both: the hook places the eye
-// on it each time the game fetches the camera, the game thread aims along it each frame. Both place it off the vehicle's
-// position as they read it then (the body's current one) plus View::soles, where the soles are from that position (the
-// game thread's sz_root world): the position field is no fixed point of the mech (in game 1.2 m over its soles while
-// driven, 13.2 m parked: the camera that took it for the box's centre sat 3 m over the ground, 2026-10-07).
+// on it each time the game fetches the camera, the game thread aims along it each frame. Both place it off the model's
+// origin (the soles), each where it is in its own context (measured 2026-10-07): on the game thread the vehicle's
+// position and matrix are the collision box's centre (y 14.0 standing) and the model's origin is sz_root's world;
+// when the camera is fetched the engine has turned the vehicle's matrix (and its position field) into the model's
+// origin (y 1.2: the box's centre less heli_rigid_body[0], as the frames log found `mdl`). A camera
+// placed off the field in the hook with an offset measured on the game thread sat 12.8 m too low.
 // The rig (tools: camview/rig.png in the preview folder, 2026-10-07): its pivot kViewUp m over the soles (mid-height),
 // the eye kViewBack m behind it along the aim, kViewSide m to the right and kViewRise m up: the whole 25.6 m mech in view
 // left of the centre, level, 20 deg up and 20 deg down; never under kViewFloor m over the ground under the mech.
@@ -22,35 +24,35 @@ struct View {
     const unsigned char* seat=nullptr;
     float yaw=0.0f,pitch=0.0f;   // the mech's heading, the aim's pitch (rad; forward = (sin yaw, 0, cos yaw))
     float floor=-1e9f;           // the ground's height under the mech (world y)
-    float soles[3]{};            // the soles (sz_root's world) from the vehicle's position
     ULONGLONG ms=0;
 };
 SRWLOCK viewLock=SRWLOCK_INIT;
 View view{};
 volatile ULONGLONG placedMs=0;   // GameMs the hook last placed the camera at
 
-// The camera's eye and its centre ray's unit direction for `w` with the vehicle at `pos` (its position field).
-void ViewRay(const View& w,const float* pos,float* eye,float* dir) noexcept {
+// The model's origin as the camera hook sees it: the vehicle's matrix's position then (see the top).
+const float* Where(const unsigned char* v) noexcept { return reinterpret_cast<const float*>(v+kMatrix)+12; }
+
+// The camera's eye and its centre ray's unit direction for `w` with the model's origin (its soles) at `origin`.
+void ViewRay(const View& w,const float* origin,float* eye,float* dir) noexcept {
     const float cp=std::cos(w.pitch);
     dir[0]=std::sin(w.yaw)*cp;dir[1]=std::sin(w.pitch);dir[2]=std::cos(w.yaw)*cp;
     const float right[3]={-std::cos(w.yaw),0.0f,std::sin(w.yaw)};
-    for(int k=0;k<3;++k)eye[k]=pos[k]+w.soles[k]+(k==1 ? kViewUp+kViewRise : 0.0f)-dir[k]*kViewBack+right[k]*kViewSide;
+    for(int k=0;k<3;++k)eye[k]=origin[k]+(k==1 ? kViewUp+kViewRise : 0.0f)-dir[k]*kViewBack+right[k]*kViewSide;
     eye[1]=std::fmax(eye[1],w.floor+kViewFloor);
 }
 
-// The view of `m` now (no vehicle or seat): its heading, its aim's pitch, the ground under it, its soles from `v`'s position.
-View ViewOf(const Mech& m,const unsigned char* v) noexcept {
+// The view of `m` now (no vehicle or seat): its heading, its aim's pitch, the ground under it.
+View ViewOf(const Mech& m) noexcept {
     View w;
     w.yaw=m.heading;w.pitch=m.aimPitch;
     if(!m.rootOk)return w;
-    const float* p=reinterpret_cast<const float*>(v+kPosition);
-    for(int k=0;k<3;++k)w.soles[k]=m.root[12+k]-p[k];
     w.floor=m.root[13]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f);
     return w;
 }
 
 void PublishView(const Mech& m,unsigned char* v) noexcept {
-    View w=ViewOf(m,v);
+    View w=ViewOf(m);
     w.vehicle=v;w.seat=SeatAt(v,0);w.ms=GameMs();
     AcquireSRWLockExclusive(&viewLock);
     view=w;
@@ -65,13 +67,13 @@ void DropView() noexcept {
 // The aim this frame: the player's along the camera's centre ray (what it meets within kAimRange, else its far end);
 // an NPC's from the muzzle along its heading and pitch. The rifle arm is then turned onto it (the pose's aim yaw and
 // pitch from the right shoulder, sazabi_pose.h AimRifle), the cannon's beams and the HUD's reticle go to it.
-void Aim(Mech& m,const unsigned char* v) noexcept {
+void Aim(Mech& m) noexcept {
     Arms& a=m.arms;
     a.hasAim=false;a.aimHit=false;a.centred=false;
     if(!m.rootOk)return;
     float from[3],dir[3];
     if(!m.npc) {
-        ViewRay(ViewOf(m,v),reinterpret_cast<const float*>(v+kPosition),from,dir);
+        ViewRay(ViewOf(m),m.root+12,from,dir);   // the model's origin here: sz_root's world
         a.centred=GameMs()-placedMs<=kCentredMs;
     } else {
         BoneAt(m,sazabi::kMuzzle,nullptr,from);

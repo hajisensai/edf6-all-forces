@@ -331,7 +331,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     m.active=true;
     if(!npc)PublishView(m,v);   // the camera the look-at hook places (sazabi_camera.inc)
     Animate(m,dt,true);
-    Aim(m,v);                   // the aim point, the arm onto it
+    Aim(m);                     // the aim point, the arm onto it
     ArmsStep(m,v,arms,dt);
     Pose(m,v);
     // the thrusters push while it climbs, dashes or flies on
@@ -364,17 +364,18 @@ bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* was
     const View w=view;
     ReleaseSRWLockShared(&viewLock);
     const ULONGLONG now=GameMs();
-    if(w.seat!=seat || !w.vehicle || now-w.ms>kViewFresh || !Readable(w.vehicle+kPosition,12))return false;
+    if(w.seat!=seat || !w.vehicle || now-w.ms>kViewFresh || !Readable(w.vehicle+kPosition,12) || !Readable(w.vehicle+kMatrix,64))return false;
     float dir[3];
-    ViewRay(w,reinterpret_cast<const float*>(w.vehicle+kPosition),eye,dir);
+    ViewRay(w,Where(w.vehicle),eye,dir);
     for(int k=0;k<3;++k){look[k]=eye[k]+dir[k]*100.0f;if(!std::isfinite(eye[k]) || !std::isfinite(look[k]))return false;}
     // Debug: what the camera held when fetched (the game's work on the last placement) against this placement
     static ULONGLONG logAt=0;
     if(Cfg().debug && now-logAt>=1000 && wasEye && wasLook) {
         logAt=now;
-        const float* p=reinterpret_cast<const float*>(w.vehicle+kPosition);
-        Log("SAZABI camera: vehicle (%.1f,%.1f,%.1f) yaw %.0f pitch %.0f placed eye (%.1f,%.1f,%.1f) look (%.1f,%.1f,%.1f) held eye (%.1f,%.1f,%.1f) look (%.1f,%.1f,%.1f)",
-            p[0],p[1],p[2],w.yaw/sazabi::kDeg,w.pitch/sazabi::kDeg,eye[0],eye[1],eye[2],look[0],look[1],look[2],wasEye[0],wasEye[1],wasEye[2],
+        const float* p=Where(w.vehicle);
+        const float* f=reinterpret_cast<const float*>(w.vehicle+kPosition);
+        Log("SAZABI camera: field y %.1f, vehicle (%.1f,%.1f,%.1f) yaw %.0f pitch %.0f placed eye (%.1f,%.1f,%.1f) look (%.1f,%.1f,%.1f) held eye (%.1f,%.1f,%.1f) look (%.1f,%.1f,%.1f)",
+            f[1],p[0],p[1],p[2],w.yaw/sazabi::kDeg,w.pitch/sazabi::kDeg,eye[0],eye[1],eye[2],look[0],look[1],look[2],wasEye[0],wasEye[1],wasEye[2],
             wasLook[0],wasLook[1],wasLook[2]);
     }
     placedMs=now;
