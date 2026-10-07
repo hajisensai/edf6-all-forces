@@ -257,10 +257,9 @@ void Take(Sidecar& s,unsigned char* v,unsigned char* human,bool byPlayer) noexce
 // there when that point is in it (the bike leaning or on a side slope: exit_ground.h).
 void StepOff(Sidecar& s,unsigned char* v,unsigned char* human,const char* why) noexcept {
     float at[3];FramePoint(v,kTubOut-kStepOff,0.2f,kGunnerZ,at);
-    float floor=exitground::kNoFloor,to=0.0f;
-    if(!MapGroundNear(at[0],at[2],at[1],&floor))floor=exitground::kNoFloor;
-    if(exitground::LiftOnto(at[1],floor,&to)) {
-        Log("SIDECAR v=%p step-off point %.2f m in the floor: put on it",v,floor-at[1]);
+    float to=0.0f;
+    if(exitground::Correct(at,&MapFloorRay,&MapGroundNear,&to)) {
+        Log("SIDECAR v=%p step-off point %.2f m in the floor: put on it",v,to-exitground::kLift-at[1]);
         at[1]=to;
     }
     Warp(human,at);

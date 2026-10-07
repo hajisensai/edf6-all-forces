@@ -46,7 +46,7 @@ struct Weapon {
         burstLeft=burst-1;
         return Shot();
     }
-    crew::rack::Launcher State() const { return {rounds,burst,burstLeft,wait,interval,reloadTime,reloadLeft}; }
+    crew::rack::Launcher State() const { return {rounds,capacity,wait,interval,reloadTime,reloadLeft}; }
 };
 
 // A load fired off salvo by salvo, checked every frame (the file comment). Returns the salvos fired.
@@ -93,27 +93,47 @@ void Load() {
     Expect(FireLoad(w,"the rack against the salvos fired")==10,"160 rounds are 10 salvos");
 }
 
+// Network replay decrements ammo but leaves burstLeft at zero and resets the long wait after every round. Compare
+// all rails against the local sender throughout ten salvos, including the gap frames between their individual shots.
+void Remote() {
+    Weapon local,remote;
+    int shots=0;
+    for(int frame=0;frame<10000 && shots<160;++frame) {
+        const int muzzle=local.Step();
+        remote.wait=remote.wait>1.0f ? remote.wait-1.0f : 0.0f;
+        if(muzzle>=0){remote.Shot();++shots;}
+        float a[kRockets],b[kRockets];
+        crew::rack::Rockets(local.State(),a);crew::rack::Rockets(remote.State(),b);
+        for(int k=0;k<kRockets;++k)Expect(a[k]==b[k],"remote rails match local rails after native replay",shots,k);
+    }
+    Expect(shots==160,"remote test covers every salvo including exhaustion",shots);
+    // During a partial salvo the remote wait is longer, but it cannot make fired rockets reappear.
+    crew::rack::Launcher stalled{151,160,1.0f,240,-1,0};
+    float on[kRockets];crew::rack::Rockets(stalled,on);
+    for(int k=0;k<kRockets;++k)Expect(on[k]==(k<9 ? 0.0f : 1.0f),"partial remote salvo does not reload before its remaining shots",k);
+}
+
 void Ends() {
     float on[kRockets];
-    crew::rack::Rockets({160,16,0,0.0f,240,-1,0},on);
+    crew::rack::Rockets({160,160,0.0f,240,-1,0},on);
     for(int k=0;k<kRockets;++k)Expect(on[k]==1.0f,"a full load: the rack full",k);
-    crew::rack::Rockets({0,16,0,0.0f,240,-1,0},on);
+    crew::rack::Rockets({0,160,0.0f,240,-1,0},on);
     for(int k=0;k<kRockets;++k)Expect(on[k]==0.0f,"spent for good: the rack empty",k);
     // With a reload: empty while it waits (+0xE68 still the whole reload), half loaded half way, full at its end.
-    crew::rack::Rockets({0,16,0,0.0f,240,600,600},on);
+    crew::rack::Rockets({0,160,0.0f,240,600,600},on);
     for(int k=0;k<kRockets;++k)Expect(on[k]==0.0f,"the reload not begun: empty",k);
-    crew::rack::Rockets({0,16,0,0.0f,240,600,600-static_cast<int>(600.0f*crew::rack::kLoadedBy/2.0f)},on);
+    crew::rack::Rockets({0,160,0.0f,240,600,600-static_cast<int>(600.0f*crew::rack::kLoadedBy/2.0f)},on);
     for(int k=0;k<kRockets;++k)Expect(on[k]==(k<8 ? 1.0f : 0.0f),"half the reload's loading: the first 8 on",k);
-    crew::rack::Rockets({0,16,0,0.0f,240,600,0},on);
+    crew::rack::Rockets({0,160,0.0f,240,600,0},on);
     for(int k=0;k<kRockets;++k)Expect(on[k]==1.0f,"the reload done: full",k);
     // A quarter of a rocket's turn into its loading: on its rail, 3/4 of kLoad short of its stop.
-    crew::rack::Rockets({160,16,0,240.0f*(1.0f-crew::rack::kLoadedBy*0.25f/16.0f),240,-1,0},on);
+    crew::rack::Rockets({160,160,240.0f*(1.0f-crew::rack::kLoadedBy*0.25f/16.0f),240,-1,0},on);
     Expect(std::fabs(on[0]-0.25f)<1e-4f && on[1]==0.0f,"rocket 0 a quarter in",static_cast<int>(on[0]*100.0f));
     // Fewer rounds left than rockets: the next rounds fire muzzles 16 - rounds .. 15.
-    crew::rack::Rockets({5,16,0,0.0f,240,-1,0},on);
+    crew::rack::Rockets({5,160,0.0f,240,-1,0},on);
     for(int k=0;k<kRockets;++k)Expect(on[k]==(k>=11 ? 1.0f : 0.0f),"5 rounds left: the last 5 rockets",k);
     // A state not read as a salvo or a loading (negative counts, no interval): the rack full.
-    crew::rack::Rockets({160,16,-3,0.0f,0,-1,0},on);
+    crew::rack::Rockets({160,160,0.0f,0,-1,0},on);
     for(int k=0;k<kRockets;++k)Expect(on[k]==1.0f,"an odd state: the rack full",k);
     Expect(crew::rack::kRockets==16 && std::fabs(crew::rack::kLoad-0.8f)<1e-6f,"the model's 16 rockets and LOAD");
 }
@@ -121,11 +141,11 @@ void Ends() {
 // The states tools/katyusha_rack_view.py draws: label, then the 16 values.
 void Dump() {
     const struct { const char* label; crew::rack::Launcher w; } states[]={
-        {"full",{160,16,0,0.0f,240,-1,0}},
-        {"half_fired",{152,16,8,4.0f,240,-1,0}},
-        {"empty",{144,16,0,240.0f,240,-1,0}},
-        {"loading",{144,16,0,240.0f*(1.0f-crew::rack::kLoadedBy*8.5f/16.0f),240,-1,0}},
-        {"spent",{0,16,0,0.0f,240,-1,0}},
+        {"full",{160,160,0.0f,240,-1,0}},
+        {"half_fired",{152,160,4.0f,240,-1,0}},
+        {"empty",{144,160,240.0f,240,-1,0}},
+        {"loading",{144,160,240.0f*(1.0f-crew::rack::kLoadedBy*8.5f/16.0f),240,-1,0}},
+        {"spent",{0,160,0.0f,240,-1,0}},
     };
     for(const auto& s:states) {
         float on[kRockets];
@@ -140,6 +160,7 @@ void Dump() {
 int main(int argc,char** argv) {
     if(argc>1 && std::strcmp(argv[1],"--dump")==0){Dump();return 0;}
     Load();
+    Remote();
     Ends();
     if(failures){std::printf("katyusha_rack_check: %d failures\n",failures);return 1;}
     std::printf("katyusha_rack_check: ok (10 salvos of 16 against the rack frame by frame, the ends)\n");

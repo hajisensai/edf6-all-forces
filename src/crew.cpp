@@ -712,9 +712,10 @@ void UnderPlayer() noexcept {
 constexpr ULONGLONG kExitWatchMs=1000;
 struct ExitWatch { const void* human; bool riding; ULONGLONG off; } exitWatch{};
 void ExitGroundTick() noexcept {
+    if(!Cfg().enabled){exitWatch=ExitWatch{};return;}
     unsigned char* const human=PlayerHuman();
     if(human!=exitWatch.human)exitWatch=ExitWatch{human,false,0};
-    if(!human || human[kDead])return;
+    if(!human || human[kDead]){exitWatch=ExitWatch{};return;}
     const auto ctrl=At<const unsigned char*>(human,kHumanVehicleCtrl);
     if(ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)!=0){exitWatch.riding=true;exitWatch.off=0;return;}
     const ULONGLONG ms=GameMs();
@@ -722,11 +723,11 @@ void ExitGroundTick() noexcept {
     if(!exitWatch.off)return;
     if(ms-exitWatch.off>kExitWatchMs){exitWatch.off=0;return;}
     const float* p=reinterpret_cast<const float*>(human+kPosition);
-    float floor=exitground::kNoFloor,to=0.0f;
-    if(!std::isfinite(p[0]+p[1]+p[2]) || !MapGroundNear(p[0],p[2],p[1],&floor) || !exitground::LiftOnto(p[1],floor,&to))return;
+    float to=0.0f;
+    if(!std::isfinite(p[0]+p[1]+p[2]) || !exitground::Correct(p,&MapFloorRay,&MapGroundNear,&to))return;
     const float at[3]={p[0],to,p[2]};
     const float was=p[1];
-    if(WarpHuman(human,at))Log("EXIT the player put down %.2f m in the floor at (%.1f,%.1f,%.1f): put on it",floor-was,at[0],at[1],at[2]);
+    if(WarpHuman(human,at))Log("EXIT the player put down %.2f m in the floor at (%.1f,%.1f,%.1f): put on it",to-exitground::kLift-was,at[0],at[1],at[2]);
 }
 
 void UnderVehicle(unsigned char* v) noexcept {
@@ -945,6 +946,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
+    exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
     for(auto& p:doorLogged)p=nullptr;
