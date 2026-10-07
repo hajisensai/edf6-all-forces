@@ -18,12 +18,22 @@
 //    gives the rod a bone of its own (kRod, at the eye); both are turned by the angle the line from the cylinder's
 //    pivot to the eye (fixed on the launcher) has turned since bind: the cylinder stays on the turntable, the eye on
 //    the launcher, the rod slides in the cylinder (pylib/katyusha_model.py ram_pose / check_ram are this, offline).
+//  - The rockets. Each of the rack's 16 has a bone of its own (pylib/katyusha_model.py ROCKET_BONES, under the launcher)
+//    and the weapon fires rocket k's muzzle for the k-th round of a salvo; katyusha_rack.h reads from the launcher's
+//    state which are on their rails (Rack): a fired one is shrunk to its bone's joint (its local's rotation rows times
+//    0, as sazabi.cpp hides the rifle), one being loaded sits short of its stop along the rail. Every Katyusha posed
+//    here does it, a player's or an NPC crew's. Online, a copy another machine runs fires its rounds there: whether this
+//    machine's copy of the weapon counts the burst too is not known (not traced; the rack may stay full on it).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "body506.h"
+#include "katyusha_rack.h"
+#include "layout.h"
 #include "memory.h"
+#include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 
 namespace crew {
 namespace {
@@ -36,6 +46,11 @@ constexpr std::size_t kSkeleton=0x0,kSkeletonBones=0x58,kSkeletonLast=0x68,kSkel
 const wchar_t kRod[]=L"edf6vc_ram_rod";
 const wchar_t kMain[]=L"Rocketcannon_main";
 const wchar_t kProp[]=L"Rocketcannon_prop";
+// pylib/katyusha_model.py ROCKET_BONES: edf6vc_rkt_01..16, rocket k fired by the salvo's k-th round.
+const wchar_t kRocketBone[]=L"edf6vc_rkt_";
+// The launcher weapon's state katyusha_rack.h reads (its file comment: where each is written).
+constexpr std::size_t kWeaponBurst=0x370,kWeaponBurstLeft=0xE18,kWeaponWait=0xE0C,kWeaponInterval=0x36C,
+                      kWeaponReloadTime=0x20C,kWeaponReloadLeft=0xE68;
 // How fast the launcher is lifted to the elevation LauncherFrame asks for, rad/s: the stock turret's own pitch rate
 // (about 1.1 rad/s, autoturret/docs/re-notes.md). A request older than kWantMs is gone (the player got out).
 constexpr float kLoftRate=1.1f;
@@ -53,6 +68,9 @@ struct Rack {
     const void* bones;             // the bone array the records are in (looked up again when it changes)
     unsigned char *main,*prop,*rod;   // nullptr rod: its bones unreadable: left stock
     float mainBind[16],propBind[16],rodBind[16];
+    unsigned char* rocket[rack::kRockets];   // the rockets' records (rockets false: a model without them, left stock)
+    float rocketBind[rack::kRockets][16];
+    bool rockets;
     bool aim;                      // LauncherFrame's request: hold the launcher at `want`
     float want;
     ULONGLONG wantAt;
@@ -97,7 +115,7 @@ bool Resolve(Rack& r,const unsigned char* v) noexcept {
     const auto bones=At<const unsigned char*>(inst,kInstBones506);
     if(!bones)return false;
     if(bones==r.bones)return r.rod!=nullptr;
-    r.bones=bones;r.held=false;
+    r.bones=bones;r.held=false;r.rockets=false;
     r.rod=BoneRecord506(inst,kRod);
     r.main=BoneRecord506(inst,kMain);
     r.prop=BoneRecord506(inst,kProp);
@@ -107,8 +125,49 @@ bool Resolve(Rack& r,const unsigned char* v) noexcept {
         r.rod=nullptr;
         return false;
     }
-    Log("KATYUSHA v=%p: launcher, cylinder and rod bones found",v);
+    r.rockets=true;
+    for(int k=0;k<rack::kRockets && r.rockets;++k) {
+        wchar_t name[16];
+        swprintf_s(name,L"%ls%02d",kRocketBone,k+1);
+        r.rocket[k]=BoneRecord506(inst,name);
+        r.rockets=r.rocket[k] && SkeletonBind(inst,bones,r.rocket[k],r.rocketBind[k]);
+    }
+    Log("KATYUSHA v=%p: launcher, cylinder and rod bones found; %s",v,r.rockets ? "16 rockets" : "no rocket bones (an older model): the rack stays as it is");
     return true;
+}
+
+// The launcher weapon of `v` (its holder marked kMarkLofted, as launcher.cpp finds it on the seat), or nullptr.
+const unsigned char* LoftedWeapon(const unsigned char* v) noexcept {
+    const auto holders=At<const unsigned char*>(v,kHolders);
+    const auto count=At<std::uint64_t>(v,kHolderCount);
+    if(!holders || !count || count>16 || !Readable(holders,count*kHolderStride))return nullptr;
+    for(std::uint64_t i=0;i<count;++i) {
+        const auto w=At<const unsigned char*>(holders+i*kHolderStride,kHolderWeapon);
+        if(Readable(w,kWeaponReloadLeft+4) && At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted)return w;
+    }
+    return nullptr;
+}
+
+// Each rocket's local from its bind: shrunk to its joint off the rack, short of its stop along the rail being loaded
+// (the bone's axes are the launcher's: its local z is the rail). No launcher weapon: the rack full.
+void Rockets(Rack& r,const unsigned char* v) noexcept {
+    float on[rack::kRockets];
+    const unsigned char* w=LoftedWeapon(v);
+    if(w) {
+        const rack::Launcher state{At<std::int32_t>(w,kWeaponAmmo),At<std::int32_t>(w,kWeaponBurst),
+                                   At<std::int32_t>(w,kWeaponBurstLeft),At<float>(w,kWeaponWait),At<std::int32_t>(w,kWeaponInterval),
+                                   At<std::int32_t>(w,kWeaponReloadTime),At<std::int32_t>(w,kWeaponReloadLeft)};
+        rack::Rockets(state,on);
+    } else {
+        for(float& x:on)x=1.0f;
+    }
+    for(int k=0;k<rack::kRockets;++k) {
+        float local[16];
+        std::memcpy(local,r.rocketBind[k],sizeof local);
+        if(on[k]<=0.0f)for(int i=0;i<12;++i)local[i]=0.0f;
+        else local[14]-=(1.0f-on[k])*rack::kLoad;
+        std::memcpy(r.rocket[k]+kBoneLocal506,local,sizeof local);
+    }
 }
 
 // `rows` (a 4x4's three rotation rows, row vectors) times the turn `d` rad about the parent's X, the far (backward)
@@ -177,7 +236,7 @@ void Pose(unsigned char* v) noexcept {
     if(!r && BoneRecord506(v+kModelInst506,kRod))r=RackOf(v,ms,true);
     if(r) {
         r->seen=ms;
-        if(Resolve(*r,v)){Launcher(*r,ms);Ram(*r);}
+        if(Resolve(*r,v)){Launcher(*r,ms);Ram(*r);if(r->rockets)Rockets(*r,v);}
     }
     ReleaseSRWLockExclusive(&rackLock);
 }
