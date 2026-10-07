@@ -179,6 +179,17 @@ constexpr ULONGLONG kCrashMs=1000;
 // off at minAir, rolling it stops.
 constexpr float kBlockedPart=0.5f,kBlockedMin=40.0f,kRollBlockedMin=20.0f;
 constexpr ULONGLONG kBlockedMs=150;
+// Flown into an enemy (EnemyRam; the user, 2026-10-07: "飞机撞到怪什么反应没有，我觉得应该有爆炸"): an enemy is pushed
+// aside rather than holding the jet back, so Blocked never sees it. The airframe's box (Kind::ram each way across and
+// along, kRamBoxHeight of it up and down round kRamBoxHeight of it over the origin: the model rests on its origin)
+// grown kRamBodyPad, against each enemy's body (vehicleram.h Touches, the ground vehicles' contact): closing on it at
+// kEnemyRamLeast m/s or more, its blast on the body (ImpactDamage, RamDamage at that closing speed), one an enemy a
+// kEnemyRamGapMs. The jet takes kEnemyRamBase of its max HP plus kEnemyRamPerSpeed per m/s over landMax, at most
+// kEnemyRamMost, at most one a kEnemyRamSelfMs (a swarm flown through is one blow a half second, not one an ant).
+constexpr float kRamBoxHeight=0.3f,kRamBodyPad=2.0f,kEnemyRamLeast=20.0f;
+constexpr float kEnemyRamBase=0.03f,kEnemyRamPerSpeed=0.001f,kEnemyRamMost=0.25f;
+constexpr ULONGLONG kEnemyRamGapMs=1000,kEnemyRamSelfMs=500;
+constexpr int kEnemyRamHits=16,kEnemyRamContacts=8;
 constexpr ULONGLONG kLogMs=2000;
 // Elevons (jet.cpp Elevons): bones elevon_L/R of the jet model, hinged along their local X.
 // The elevons follow the pilot (2026-10-05, the user: the control surfaces should visibly move with the controls): the
@@ -187,6 +198,7 @@ constexpr ULONGLONG kLogMs=2000;
 constexpr float kElevonMax=0.5f,kElevonRate=4.0f,kElevonGain=3.0f;
 const wchar_t* const kElevonNames[2]={L"elevon_L",L"elevon_R"};
 
+struct EnemyHit { ObjRef target; ULONGLONG at; };
 enum class Phase { parked, rolling, air };
 const char* const kPhaseNames[]={"parked","rolling","air"};
 
@@ -248,6 +260,8 @@ struct PJet {
     ULONGLONG frame;             // GameFrame of its last flight step
     ULONGLONG wetFrame;          // GameFrame of the last water message (0: none)
     bool dieLogged;
+    EnemyHit enemyHits[kEnemyRamHits];   // the enemies it flew into, a kEnemyRamGapMs each (EnemyRam)
+    ULONGLONG enemyRamAt;        // game ms it last took an enemy ram's damage itself
     const unsigned char* model;  // the bone array the elevons were found in
     unsigned char* elevon[2];
     float elevonBind[2][16],elevonSet[2][16],elevonAt[2];
@@ -839,6 +853,61 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     if(j.phase==Phase::air && j.vel[1]<need)j.vel[1]=need<0.0f ? need : 0.0f;
 }
 
+// What its airframe touches this frame (the enemy walk only collects: a charge is an object, not made inside the walk).
+struct EnemyContact { const void* object; float at[3],closing; };
+struct EnemyScan { const unsigned char* v; float centre[3],vel[3]; ram::Box box; EnemyContact found[kEnemyRamContacts]; int count; };
+
+void SeeRammed(void* ctx,const void* object,const float* lock) noexcept {
+    auto& sc=*static_cast<EnemyScan*>(ctx);
+    if(sc.count>=kEnemyRamContacts)return;
+    const float* root=reinterpret_cast<const float*>(static_cast<const unsigned char*>(object)+kPosition);
+    if(!std::isfinite(root[0]+root[1]+root[2]))root=lock;
+    const float* m=reinterpret_cast<const float*>(sc.v+kMatrix);
+    EnemyContact& c=sc.found[sc.count];
+    if(!ram::Touches(m,sc.centre,sc.box,kRamBodyPad,root,lock,c.at))return;
+    c.closing=ram::Closing(sc.centre,sc.vel,c.at);
+    if(c.closing<kEnemyRamLeast)return;
+    c.object=object;
+    ++sc.count;
+}
+
+// Flown into an enemy (see kEnemyRamLeast): the blast on each one touched, and the jet's own damage.
+void EnemyRam(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
+    if(j.phase==Phase::parked || !j.fresh || !(Cfg().playerJetRamDamage>0.0f) || v[kDead])return;
+    if(Len(j.measured)<kEnemyRamLeast)return;
+    const float* m=reinterpret_cast<const float*>(v+kMatrix);
+    const float r=j.kind->ram,h=r*kRamBoxHeight;
+    EnemyScan sc{};
+    sc.v=v;
+    for(int i=0;i<3;++i){sc.centre[i]=pos[i]+m[4+i]*h;sc.vel[i]=j.measured[i];}
+    sc.box=ram::Box{{0.0f,0.0f,0.0f},{r,h,r}};
+    VisitEnemies(v,&SeeRammed,&sc);
+    bool hit=false;
+    float hardest=0.0f;
+    for(int i=0;i<sc.count;++i) {
+        const EnemyContact& c=sc.found[i];
+        const void* const object=c.object;
+        const int slot=ram::CooldownSlot(j.enemyHits,kEnemyRamHits,ms,kEnemyRamGapMs,[object](const ObjRef& t){return t.Is(object);});
+        if(slot<0)continue;
+        j.enemyHits[slot]=EnemyHit{ObjRef::Of(object),ms};
+        const float damage=RamDamage(j,v,c.closing);
+        const bool dealt=damage>0.0f && ImpactDamage(v,c.at,damage,r);
+        Log("PJET v=%p flew into enemy %p at (%.0f,%.0f,%.0f), closing %.0f m/s: %.0f damage within %.0f m%s",v,object,c.at[0],c.at[1],c.at[2],
+            c.closing,damage,r,dealt ? "" : " (not dealt: no charge this mission, or no mass for this kind)");
+        hit=true;
+        if(c.closing>hardest)hardest=c.closing;
+    }
+    if(!hit || ms-j.enemyRamAt<kEnemyRamSelfMs)return;
+    j.enemyRamAt=ms;
+    const float hpMax=At<float>(v,kHpMax),hp=At<float>(v,kHp);
+    const float over=hardest>j.kind->landMax ? hardest-j.kind->landMax : 0.0f;
+    const float share=Clamp(kEnemyRamBase+kEnemyRamPerSpeed*over,kEnemyRamBase,kEnemyRamMost);
+    const float left=hp-share*(hpMax>0.0f ? hpMax : 1000.0f);
+    Log("PJET v=%p enemy ram: closing %.0f m/s: %.0f%% of max HP, hp %.0f -> %.0f",v,hardest,share*100.0f,hp,left>0.0f ? left : 0.0f);
+    if(left<=0.0f){Kill(j,v,"rammed an enemy");return;}
+    Put<float>(v,kHp,left);
+}
+
 // Held back by what it flew or rolled into (see kBlockedPart): a crash (what it rammed takes damage too); in the
 // air it bounces off, rolling it stops.
 void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
@@ -856,7 +925,9 @@ void Blocked(PJet& j,unsigned char* v,const float* pos,ULONGLONG ms) noexcept {
     RamHit ram{};
     for(int i=0;i<3;++i)ram.at[i]=pos[i]+j.sent[i]/sent*j.kind->ram;
     ram.closing=sent-made;
-    Crash(j,v,0.0f,sent-made+j.kind->landMax,false,ms,&ram);
+    // Held back by an enemy it just flew into (EnemyRam): that one already took its blast.
+    const bool rammedEnemy=j.enemyRamAt && ms-j.enemyRamAt<kCrashMs;
+    Crash(j,v,0.0f,sent-made+j.kind->landMax,false,ms,rammedEnemy ? nullptr : &ram);
     if(!j.active)return;
     if(j.phase!=Phase::air){j.vel[0]=j.vel[2]=0.0f;return;}
     for(int i=0;i<3;i+=2)j.vel[i]=-j.vel[i];
@@ -1621,6 +1692,8 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
     if(j.board && j.board->frame==pjet::Airframe::rotor){HoverStep(j,v,s,pos,clear,water || wet,dt,ms);Report(j,v,s,pos,clear,water,ms);return;}
+    EnemyRam(j,v,pos,ms);
+    if(v[kDead]){j.active=false;return;}
     Blocked(j,v,pos,ms);
     if(v[kDead]){j.active=false;return;}
     Lever(j,v,s,dt);   // record this frame's command before touchdown decides whether this is a touch-and-go
