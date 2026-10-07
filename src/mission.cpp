@@ -91,6 +91,7 @@ void MissionStart() noexcept {
     ResetSidecars();
     ResetProteus();
     ResetBigWorld();
+    ResetTerrainShare();
     ResetPlayArea();
     PreloadJets();   // the airstrike takeovers' jets (jet.cpp), with the mission's own resources
     PreloadPlayerJets();   // ...and the player jets, for the catch after an ejection (playerjet.cpp)
@@ -98,6 +99,7 @@ void MissionStart() noexcept {
     PreloadLaser();  // ...and the teleportation ships' portal laser (carrierlaser.cpp)
     EnsureInputs();  // every plugin has loaded by now: the per-frame hooks chain onto theirs
     Log("MISSION start: per-object state dropped, resources preloaded");
+    LogMemory("mission start");
 }
 
 bool InstallMission() noexcept {

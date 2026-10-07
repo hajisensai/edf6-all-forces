@@ -22,8 +22,8 @@
 //    and the weapon fires rocket k's muzzle for the k-th round of a salvo; katyusha_rack.h reads from the launcher's
 //    state which are on their rails (Rack): a fired one is shrunk to its bone's joint (its local's rotation rows times
 //    0, as sazabi.cpp hides the rifle), one being loaded sits short of its stop along the rail. Every Katyusha posed
-//    here does it, a player's or an NPC crew's. Online, a copy another machine runs fires its rounds there: whether this
-//    machine's copy of the weapon counts the burst too is not known (not traced; the rack may stay full on it).
+//    here does it, a player's or an NPC crew's. Network replay decrements the same ammunition count as local firing
+//    (0x69820E); it does not count burstLeft, so rails follow the native ammunition/muzzle count instead.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "body506.h"
@@ -49,7 +49,7 @@ const wchar_t kProp[]=L"Rocketcannon_prop";
 // pylib/katyusha_model.py ROCKET_BONES: edf6vc_rkt_01..16, rocket k fired by the salvo's k-th round.
 const wchar_t kRocketBone[]=L"edf6vc_rkt_";
 // The launcher weapon's state katyusha_rack.h reads (its file comment: where each is written).
-constexpr std::size_t kWeaponBurst=0x370,kWeaponBurstLeft=0xE18,kWeaponWait=0xE0C,kWeaponInterval=0x36C,
+constexpr std::size_t kWeaponCapacity=0x248,kWeaponWait=0xE0C,kWeaponInterval=0x36C,
                       kWeaponReloadTime=0x20C,kWeaponReloadLeft=0xE68;
 // How fast the launcher is lifted to the elevation LauncherFrame asks for, rad/s: the stock turret's own pitch rate
 // (about 1.1 rad/s, autoturret/docs/re-notes.md). A request older than kWantMs is gone (the player got out).
@@ -154,8 +154,8 @@ void Rockets(Rack& r,const unsigned char* v) noexcept {
     float on[rack::kRockets];
     const unsigned char* w=LoftedWeapon(v);
     if(w) {
-        const rack::Launcher state{At<std::int32_t>(w,kWeaponAmmo),At<std::int32_t>(w,kWeaponBurst),
-                                   At<std::int32_t>(w,kWeaponBurstLeft),At<float>(w,kWeaponWait),At<std::int32_t>(w,kWeaponInterval),
+        const rack::Launcher state{At<std::int32_t>(w,kWeaponAmmo),At<std::int32_t>(w,kWeaponCapacity),
+                                   At<float>(w,kWeaponWait),At<std::int32_t>(w,kWeaponInterval),
                                    At<std::int32_t>(w,kWeaponReloadTime),At<std::int32_t>(w,kWeaponReloadLeft)};
         rack::Rockets(state,on);
     } else {

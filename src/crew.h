@@ -258,6 +258,7 @@ struct Config {
     float proteusSalvoRange=1500.0f;// ...the farthest mark it goes at (m)
     float proteusPriority=0.3f;     // ...the front shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
+    bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -357,7 +358,12 @@ void ResetMissiles() noexcept;    // missile.cpp
 // What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
 void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
+bool InstallTerrainShare() noexcept;   // fieldshare.cpp
+void ResetTerrainShare() noexcept;
 void BigWorldProbe() noexcept;
+// The process's memory and the machine's, one log row (bigworld.cpp): at the mission's start and once its map is in, so
+// a map's cost shows in the log (the 3 x 3 big map ran an 8 GB machine out of memory, testhub report #3).
+void LogMemory(const char* when) noexcept;
 // What a jet ran into (impact.cpp), logged when it is held back ("blocked"): the nearest map surface round `pos`
 // (terrain or a building) and the nearest objects (class, team, distance). `who` "JET" / "PJET", `way` its velocity.
 void LogImpact(const char* who,const void* self,const float* pos,const float* way) noexcept;
