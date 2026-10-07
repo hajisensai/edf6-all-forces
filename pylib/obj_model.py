@@ -720,7 +720,11 @@ def _row(elems: list, v: Vertex, tb: tuple[Vec3, Vec3], skin: Skin) -> list[tupl
 def build_meshes(template: Mesh, pieces: list[tuple[Part, list[Skin]]], material: int) -> list[Mesh]:
     """Skinned meshes (material index `material`, mesh_index 0: the caller numbers them) of the pieces' triangles in
     `template`'s vertex layout, each with fewer than 65536 vertices (a piece is never split across meshes unless it
-    alone is too big). flags = skinned, max influences actually used (1..4)."""
+    alone is too big). flags = skinned, max influences actually used (1..4).
+    Two kinds of triangle draw nothing and are not written (drawn_triangles): one with two corners at the same point as
+    written (no area; the Sazabi's OBJ has 1,604), and one whose three vertices, packed, are those of one written before in
+    the same turn (the same surface drawn twice). Every vertex's tangent frame is still taken over all of its piece's
+    triangles, so what is written is byte for byte what was, less those."""
     if not any(e.name.lower() == 'blendindices' for e in template.elems):
         raise ObjError('the template mesh is not skinned')
     out: list[Mesh] = []
@@ -735,23 +739,50 @@ def build_meshes(template: Mesh, pieces: list[tuple[Part, list[Skin]]], material
                                vdata=b''.join(rows), indices=struct.pack(f'<{len(idx)}H', *idx)))
         rows, idx, infl = [], [], 1
 
+    seen: set[tuple[bytes, bytes, bytes]] = set()
+    e = next(x for x in template.elems if x.name.lower() == 'position')
+    at = ({1: '<4f', 4: '<3f', 7: '<4e'}[e.fmt], e.offset)
     for part, skins in pieces:
         if len(skins) != len(part.verts) or any(not s or len(s) > 4 for s in skins):
             raise ObjError(f'{part.name}: one skin of 1..4 influences per vertex needed')
         frames = tangent_frames(part)
+        packed: dict[int, bytes] = {}
+
+        def vertex(i: int) -> bytes:
+            if i not in packed:
+                packed[i] = pack_vertex(template.elems, template.vsize, _row(template.elems, part.verts[i], frames[i], skins[i]))
+            return packed[i]
         remap: dict[int, int] = {}
-        for t in part.tris:
+        for t in drawn_triangles(part.tris, vertex, at, seen):
             if len(rows) + sum(i not in remap for i in t) > MAX_VERTS:
                 flush()
                 remap = {}
             for i in t:
                 if i not in remap:
                     remap[i] = len(rows)
-                    rows.append(pack_vertex(template.elems, template.vsize, _row(template.elems, part.verts[i],
-                                                                                   frames[i], skins[i])))
+                    rows.append(vertex(i))
                     infl = max(infl, len(skins[i]))
                 idx.append(remap[i])
     flush()
+    return out
+
+
+def drawn_triangles(tris: list[tuple[int, int, int]], vertex: Callable[[int], bytes], at: tuple[str, int],
+                    seen: set[tuple[bytes, bytes, bytes]]) -> list[tuple[int, int, int]]:
+    """`tris` less the ones that draw nothing: two corners at one point (their packed vertices' (`vertex`) positions,
+    `at` = (struct format, offset), equal as numbers, -0 = 0: no area as drawn), or the three packed vertices of one
+    already in `seen` (any of its three rotations: the same winding), which collects the kept ones' (build_meshes)."""
+    out = []
+    for t in tris:
+        r = tuple(vertex(i) for i in t)
+        a, b, c = (struct.unpack_from(at[0], x, at[1])[:3] for x in r)
+        if a == b or b == c or a == c:
+            continue
+        key = min(r, r[1:] + r[:1], r[2:] + r[:2])
+        if key in seen:
+            continue
+        seen.add(key)   # type: ignore[arg-type]
+        out.append(t)
     return out
 
 
