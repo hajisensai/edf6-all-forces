@@ -49,6 +49,7 @@ import gen_stores  # noqa: E402
 import installer  # noqa: E402
 import ledger  # noqa: E402
 import make_artillery  # noqa: E402
+import make_edf5_campaign as e5c  # noqa: E402
 import make_jets  # noqa: E402
 import make_katyusha  # noqa: E402
 import modfiles  # noqa: E402
@@ -3002,6 +3003,7 @@ def pack_install_upgrade_uninstall() -> None:
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
+            enter(patched(e5c, build=lambda game: _e5c_stub()))   # its own install / remove / check run for real
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
@@ -4197,6 +4199,154 @@ def soft_edge_wired() -> None:
 def installer_recovery_regressions() -> None:
     from test_installer_recovery import run_checks
     run_checks()
+
+
+# ---------------------------------------------------------------- the EDF5 campaign (tools/make_edf5_campaign.py)
+
+
+def _e5c_stub() -> tuple[dict[str, bytes], int, dict]:
+    """make_edf5_campaign.build on a stand-in game (no Root.cpk to read): a file per list, 147 rows before."""
+    return {rel: f'stub {rel}'.encode() for rel in e5c.FILES}, 147, {'rows': [], 'skipped': []}
+
+
+def _e5c_have_game() -> bool:
+    import rootcpk
+    return os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk'))
+
+
+def _e5c_real() -> tuple[object, set[str]]:
+    import rootcpk
+    game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+    return game, e5c.map_names(rootcpk.DEFAULT_GAME, game)
+
+
+@test
+def edf5_campaign_build() -> None:
+    """The appended list from the real Root.cpk: stock rows untouched (row 0 gains the first EDF5 row as a successor),
+    every row 11 members with the 11th named flags (EDF.dll reads it by name), successors in range, one text row per
+    list row in every language, a thumbnail per row, under the save's 512 missions per mode."""
+    import mdb
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
+        return
+    files, base, p = e5c.build(rootcpk.DEFAULT_GAME)
+    rows = dsgo.parse(files[e5c.LIST]).root.get('table').items
+    stock = dsgo.parse(rootcpk.default().read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
+    assert base == len(stock) == 147 and len(rows) == base + len(p['rows']) < 512, (base, len(rows))
+    assert len([r for r in p['rows'] if r['group'] == 'main']) == 110, 'every EDF5 story mission'
+    assert {x[1] for x in p['skipped']} == {'DLC/DM015', 'DLC/DM018', 'DLC/DM019', 'DLC/DM020'}, p['skipped']
+    for a, b in zip(rows[1:base], stock[1:]):
+        assert dsgo.dump(a) == dsgo.dump(b), a.items[2]
+    assert rows[0].items[3].items == [1.0, float(base)] and rows[base - 1].items[3].items == [float(base)]
+    for i, r in enumerate(rows):
+        assert len(r.items) == 11 and r.names == {10: 'flags'}, i
+        assert all(int(x) < len(rows) for x in r.items[3].items) or i == len(rows) - 1, i
+    for r in rows[base:]:
+        assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
+        rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
+    for rel in e5c.TXT.values():
+        assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
+    names = {f.name for f in mdb.rab_read(files[e5c.IMAGE]).files}
+    assert all(e5c.thumb_name(r.items[2]) in names for r in rows)
+    assert dsgo.compact(dsgo.parse(files[e5c.LIST])) == files[e5c.LIST]
+
+
+@test
+def edf5_campaign_install_remove() -> None:
+    """Over another mod's list: install keeps what it replaced, a second install appends once, removal puts the other
+    mod's files back byte for byte (and deletes the ones that were not there), the ini row count follows; a file
+    changed by someone since is left alone."""
+    if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
+        return
+    game, maps = _e5c_real()
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e5c-') as root, \
+            patched(e5c, map_names=lambda _root, _game: maps), \
+            patched(e5c.rootcpk, Game=lambda _root: game), \
+            patched(e5c.modfiles, refuse_while_running=lambda *a, **k: None):
+        other_list = game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), other_list)
+        ini = os.path.join(root, 'Mods', e5c.INI)
+        modfiles.atomic_write(ini, b'[VehicleCrew]\nEnabled=1\n')
+        first = e5c.build(root)
+        e5c.install(root, first)
+        assert 'EDF5CampaignRows=147' in open(ini, encoding='utf-8').read()
+        again = e5c.build(root)
+        assert again[0] == first[0], 'a second install appended again'
+        e5c.install(root, again)
+        done, kept = e5c.remove(root)
+        assert not kept and len(done) == len(e5c.FILES)
+        assert modfiles.read(e5c.rel_path(root, e5c.LIST)) == other_list, "the other mod's list not put back"
+        assert all(modfiles.read(e5c.rel_path(root, rel)) is None for rel in e5c.FILES if rel != e5c.LIST)
+        assert 'EDF5CampaignRows=0' in open(ini, encoding='utf-8').read()
+        assert not os.path.exists(os.path.join(root, 'Mods', e5c.MANIFEST))
+        e5c.install(root, e5c.build(root))
+        modfiles.atomic_write(e5c.rel_path(root, e5c.IMAGE), b'someone else')
+        done, kept = e5c.remove(root)
+        assert kept == [e5c.rel_path(root, e5c.IMAGE)] and modfiles.read(kept[0]) == b'someone else'
+
+
+@test
+def edf5_campaign_refusals() -> None:
+    """Rows are the save's indices: a list whose stock rows were reordered, or a text table one row short, refuses
+    (nothing written)."""
+    import sgo
+    if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
+        return
+    game, maps = _e5c_real()
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e5c-') as root, \
+            patched(e5c, map_names=lambda _root, _game: maps), \
+            patched(e5c.rootcpk, Game=lambda _root: game):
+        doc = dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO'))
+        t = doc.root.get('table').items
+        t[1], t[2] = t[2], t[1]
+        modfiles.atomic_write(e5c.rel_path(root, e5c.LIST), dsgo.write(doc))
+        try:
+            e5c.build(root)
+        except e5c.Refused:
+            pass
+        else:
+            raise AssertionError('reordered stock rows were appended to')
+        os.remove(e5c.rel_path(root, e5c.LIST))
+        ver, members = sgo.read(game.read('MISSION', 'MISSIONLIST.OFFLINE.TXT.EN.SGO'))
+        members['table'].pop()
+        modfiles.atomic_write(e5c.rel_path(root, e5c.TXT['EN']), sgo.write_depth_first(ver, members))
+        try:
+            e5c.build(root)
+        except e5c.Refused:
+            pass
+        else:
+            raise AssertionError('a text table one row short was appended to')
+        assert not os.path.exists(os.path.join(root, 'Mods', e5c.MANIFEST))
+
+
+@test
+def edf5_campaign_shipped() -> None:
+    """The released installer carries the campaign's text where make_edf5_campaign reads it when frozen: without it
+    the exe would install no campaign."""
+    rel = src('tools/build_release.py')
+    assert '"edf5campaign", "missions.json")}{seps}edf5campaign' in rel
+    assert "os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json')" in src('tools/make_edf5_campaign.py')
+    assert os.path.isfile(os.path.join(ROOT, 'edf5campaign', 'missions.json'))
+
+
+@test
+def edf5_campaign_plugin_sites() -> None:
+    """The plugin's row-count call sites are the ones docs/mission-list-re.md lists, each still a stock rel32 call to
+    the row-count accessor in EDF.dll."""
+    import rootcpk
+    code = src('src/edf5campaign.cpp')
+    body = re.sub(r'//[^\n]*', '', code.split('kSites[]=', 1)[1].split('}', 1)[0])
+    sites = [int(x, 16) for x in re.findall(r'0x([0-9A-Fa-f]+)', body)]
+    assert sorted(sites) == sorted([0x70EDB7, 0xDF9B8, 0xDCD3B, 0xDD108, 0xD8586, 0x7480F6]), sites
+    if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
+        return
+    import pefile
+    pe = pefile.PE(os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll'), fast_load=True)
+    img = pe.get_memory_mapped_image()
+    for site in sites:
+        assert img[site] == 0xE8, hex(site)
+        assert site + 5 + int.from_bytes(img[site + 1:site + 5], 'little', signed=True) == 0xE0650, hex(site)
 
 
 def main() -> int:

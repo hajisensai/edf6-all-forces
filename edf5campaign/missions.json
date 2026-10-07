@@ -1,0 +1,2511 @@
+{
+ "source": "EDF5 Root.cpk MISSION/*MISSIONLIST.OFFLINE.*; SC = CN via OpenCC t2s",
+ "main": [
+  {
+   "path": "M000",
+   "progress": 0.0,
+   "title": {
+    "CN": "本日預定事項",
+    "EN": "Today's Schedule",
+    "JA": "本日の予定",
+    "KR": "오늘의 일정",
+    "SC": "本日预定事项"
+   },
+   "brief": {
+    "CN": "今天的工作地點是ＥＤＦ第２２８駐屯基地。到達現場後，請遵從工作人員的指示，確認工作程序。\n\n今日下午開始會有旅行團來參觀基地。ＥＤＦ近年來傾力於與鄰近居民加強交流，因此推測今天也會有大批觀光客。請加強注意安全。",
+    "EN": "Today you're assigned to Base 228. After arrival, please follow the staff's instruction and confirm your duties. \n\nThe base will open up to the public this afternoon. EDF has been putting great efforts in building a better relationship with the neighborhood over the years. A large number of visitors are expected. Security and safety will be your primary concern.",
+    "JA": "今日の現場はＥＤＦ第２２８駐屯基地です。現地到着後、スタッフの指示に従い、段取りの確認をしてください。\n\n本日午後から基地見学ツアーが予定されています。ここ数年、ＥＤＦは近隣住民との交流に力を注いでおり、本日も大勢の来客が予想されています。安全には十分な配慮をお願いします。",
+    "KR": "오늘 현장은…\nEDF 제228 주둔기지입니다.\n현지에 도착하면 스태프의 지시에\n따라 업무 내용을 확인해 주십시오.\n\n오늘 오후에는 기지 견학 투어가 잡혀\n있습니다. 최근 EDF는 지역 주민과의\n교류 활동에 힘을 쏟고 있어 오늘도\n많은 견학자가 방문할 예정입니다.\n안전에 각별히 주의하시기 바랍니다.",
+    "SC": "今天的工作地点是ＥＤＦ第２２８驻屯基地。到达现场后，请遵从工作人员的指示，确认工作程序。\n\n今日下午开始会有旅行团来参观基地。ＥＤＦ近年来倾力于与邻近居民加强交流，因此推测今天也会有大批观光客。请加强注意安全。"
+   }
+  },
+  {
+   "path": "M001",
+   "progress": 0.01,
+   "title": {
+    "CN": "逃出黑暗",
+    "EN": "Escape from Darkness",
+    "JA": "闇からの脱出",
+    "KR": "어둠으로부터의 탈출",
+    "SC": "逃出黑暗"
+   },
+   "brief": {
+    "CN": "不知怪物從何而來，也不清楚黑暗中是否還潛藏著怪物。更糟糕的是無法與地面取得聯繫。換句話說，我們在基地的地底遭遇困境。\n但也不能繼續待在這裡。要找到殘存的夥伴一起逃出這裡。\n老百姓，我會保護你的。但也不知道接下來會發生什麼狀況。要是運氣差，就得跟怪物硬碰硬了。你要做好加入戰鬥的心理準備。",
+    "EN": "The monsters came from nowhere and we don't know if there are more of them lurking in the dark. And to make it worse, we can't make contact with the ground. We're stranded at the bottom of the base.\n\nBut we can't sit around waiting. We must find the rest of our comrades and escape. I will protect you, Civilian, but I don't know what will happen. If we're in bad luck, we're going to fight the monsters. Get prepared for battle.",
+    "JA": "怪物の正体は不明。闇の中にあと何体潜んでいるのかもわからない。最悪なのは、地上と連絡がとれないこと。つまり、俺たちは基地の地下で遭難したも同然というわけだ。\nだが、これ以上ここに留まるわけにはいかない。生き残った仲間を探し、脱出する。\n民間人、守ってやる、と言いたいが、何がおこるかわからない。運が悪ければ怪物とはちあわせだ。お前も戦闘に参加する覚悟をしておけ。",
+    "KR": "괴물의 정체가 무엇인지는 모른다.\n어둠 속에 몇 마리나 더 숨어 있는지도\n모른다. 가장 안 좋은 소식은 지상과\n연락이 두절됐다는 것이다.\n\n즉, 우리는 기지 지하에서 조난 당한\n것이나마찬가지다. 하지만 계속 여기에\n머물러 있을 수는 없다. \n살아남은 동료들을 찾아 탈출한다.\n\n민간인, 자네를 지켜주겠다고 말하고\n싶지만 무슨 일이 일어날지 모른다.\n운이 없으면 괴물과 맞닥뜨리겠지.\n자네도 전투에 참가할 각오를 해둬.",
+    "SC": "不知怪物从何而来，也不清楚黑暗中是否还潜藏著怪物。更糟糕的是无法与地面取得联系。换句话说，我们在基地的地底遭遇困境。\n但也不能继续待在这里。要找到残存的伙伴一起逃出这里。\n老百姓，我会保护你的。但也不知道接下来会发生什么状况。要是运气差，就得跟怪物硬碰硬了。你要做好加入战斗的心理准备。"
+   }
+  },
+  {
+   "path": "M003",
+   "progress": 0.02,
+   "title": {
+    "CN": "２２８基地的危機　前篇",
+    "EN": "Crisis in Base 228: Part 1",
+    "JA": "２２８基地の危機　前篇",
+    "KR": "228 기지의 위기 전편",
+    "SC": "２２８基地的危机　前篇"
+   },
+   "brief": {
+    "CN": "老百姓，得救了。\n只要回到地面上就安全了。\n\n我們必須與部隊會合，解決眼前的情況。就在此道別吧。\n\n……我不會真的這麼說的，放心吧。\n在那之前得先讓你平安回家。",
+    "EN": "We did it, Civilian.\nWe'll be safe once we get back to the ground.\n\nWe have to meet up with the troops to solve this, so it's time to say goodbye.\n\nThat's what I hope to say, but don't worry. I will send you home safely.",
+    "JA": "民間人、助かったぞ。\n地上に出れば安全だ。\n\n俺たちは部隊と合流し、事態に対処しなければならない。ここでお別れだ。\n\n……と言いたいが、安心しろ。\nその前にお前を家に帰してやる。",
+    "KR": "민간인, 이제 살았다.\n지상으로 나가면 안전할 거다.\n\n우리는 부대와 합류해 이 사태를\n해결해야 한다. 여기서 헤어져야겠군.\n\n……이라고 말하고 싶지만 걱정 마라.\n그 전에 자네를 집까지 데려다줄 테니까.",
+    "SC": "老百姓，得救了。\n只要回到地面上就安全了。\n\n我们必须与部队会合，解决眼前的情况。就在此道别吧。\n\n……我不会真的这么说的，放心吧。\n在那之前得先让你平安回家。"
+   }
+  },
+  {
+   "path": "M004",
+   "progress": 0.03,
+   "title": {
+    "CN": "２２８基地的危機　後篇",
+    "EN": "Crisis in Base 228: Part 2",
+    "JA": "２２８基地の危機　後篇",
+    "KR": "228 기지의 위기 후편",
+    "SC": "２２８基地的危机　后篇"
+   },
+   "brief": {
+    "CN": "基地正受到不知名人士的攻擊。\n如今這裡已成為戰場。\n\n即使躲著也不保證就能獲救。\n就用你手中的鎗戰鬥吧。\n你擁有士兵必備的無比勇氣。\n\n嗯！？\n那是！？",
+    "EN": "The base is under attack by unknown hostiles and has turned into a battlefield.\n\nThere is no guarantee for your safety even if you try to hide. Now grab your gun and fight! You have what it takes to be a soldier!\n\nEh!?\nWhat's that?",
+    "JA": "基地は何者かの攻撃を受けている。\n今やここは戦場だ。\n\n隠れていても助かる保証はない。\n戦え。その銃で。\nお前には勇気がある。\n兵士に必要な素質だ。\n\n！？\nあれは！？",
+    "KR": "누군가가 기지를 공격하고 있어.\n이제 여긴 전쟁터다.\n\n숨어 있어도 살아남는다는 보장은 없다.\n그 총을 들어 싸워라.\n자네에게는 그만한 용기가 있다.\n병사에게 꼭 필요한 자질이지.\n\n!?\n저건!?",
+    "SC": "基地正受到不知名人士的攻击。\n如今这里已成为战场。\n\n即使躲著也不保证就能获救。\n就用你手中的鎗战斗吧。\n你拥有士兵必备的无比勇气。\n\n嗯！？\n那是！？"
+   }
+  },
+  {
+   "path": "M005",
+   "progress": 0.04,
+   "title": {
+    "CN": "被毀壞的平穩生活",
+    "EN": "Shattered Peace",
+    "JA": "破られた平穏",
+    "KR": "깨져버린 평온",
+    "SC": "被毁坏的平稳生活"
+   },
+   "brief": {
+    "CN": "朝前方的城市前進。\n只要進入市區，就能喘一口氣了吧。\n支援部隊也快抵達了。\n這麼一來應該就能解決這個狀況。\n\n總有一天能回到家的。放心吧。",
+    "EN": "Head out to the city ahead.\nWe should be able to get some rest once we get there.\nThe reinforcement troop should arrive soon and take care of the situation.\n\nYou'll be home soon. Don't worry.",
+    "JA": "この先の街に向かう。\n街に入れば一息つけるだろう。\nすぐに応援部隊も到着する。\nそれで事態は収束するはずだ。\n\nいずれ家に帰れる。心配するな。",
+    "KR": "이 앞에 있는 도시로 간다.\n도시로 가면 한숨 돌릴 수 있을 거다.\n곧 지원 부대도 도착할 테니\n이 사태도 해결되겠지.\n\n곧 집에 돌아갈 수 있을 거다.\n걱정하지 마라.",
+    "SC": "朝前方的城市前进。\n只要进入市区，就能喘一口气了吧。\n支援部队也快抵达了。\n这么一来应该就能解决这个状况。\n\n总有一天能回到家的。放心吧。"
+   }
+  },
+  {
+   "path": "M006",
+   "progress": 0.05,
+   "title": {
+    "CN": "不明飛行物體",
+    "EN": "Unidentified Flying Objects",
+    "JA": "未確認飛行物体",
+    "KR": "미확인 비행 물체",
+    "SC": "不明飞行物体"
+   },
+   "brief": {
+    "CN": "那個到底是什麼東西啊！？",
+    "EN": "What on earth is that!?",
+    "JA": "あれはいったい何だ！？",
+    "KR": "저건 대체 뭐지!?",
+    "SC": "那个到底是什么东西啊！？"
+   }
+  },
+  {
+   "path": "M006_5",
+   "progress": 0.05,
+   "title": {
+    "CN": "寧靜的威脅",
+    "EN": "The Quiet Threat",
+    "JA": "静かなる脅威",
+    "KR": "조용한 위협",
+    "SC": "宁静的威胁"
+   },
+   "brief": {
+    "CN": "原本打算穿過工業區前往城市……但滿天都是飛碟。謹慎行動吧。",
+    "EN": "The plan was to head to the city through the industrial area...but look at those flying saucers in the sky! We need to be careful.",
+    "JA": "工業地帯を通過して街に向かうつもりだったが……円盤だらけだ。慎重に進むぞ。",
+    "KR": "공업 지대를 통과해\n도시로 갈 생각이었다만……\n온통 원반이 깔려 있군.\n신중히 전진한다.",
+    "SC": "原本打算穿过工业区前往城市……但满天都是飞碟。谨慎行动吧。"
+   }
+  },
+  {
+   "path": "M009",
+   "progress": 0.06,
+   "title": {
+    "CN": "怪物來襲",
+    "EN": "Monsters Attack!",
+    "JA": "怪物襲来",
+    "KR": "괴물의 습격",
+    "SC": "怪物来袭"
+   },
+   "brief": {
+    "CN": "抵達城市了。\n這次總算可以好好休息。\n這裡應該很安全。放心吧。\n\n你活下來了。\n總有一天能回到家的。",
+    "EN": "We made it to the city.\nNow we can finally have some rest.\nWe're safe here, trust me.\n\nYou survived.\nYou'll get back home somehow.",
+    "JA": "街に到着したぞ。\n今度こそ休息がとれる。\nここは安全なはずだ。安心しろ。\n\nお前は生き延びた。\nいずれ家に帰れる。",
+    "KR": "도시에 도착했다.\n이번에는 쉴 수 있겠지.\n여긴 안전할 테니 안심해라.\n\n넌 살아남았으니\n곧 집에 돌아갈 수 있을 거다.",
+    "SC": "抵达城市了。\n这次总算可以好好休息。\n这里应该很安全。放心吧。\n\n你活下来了。\n总有一天能回到家的。"
+   }
+  },
+  {
+   "path": "M013",
+   "progress": 0.07,
+   "title": {
+    "CN": "毀滅的楔柱",
+    "EN": "Wedge of Destruction",
+    "JA": "滅びの楔",
+    "KR": "멸망의 쐐기",
+    "SC": "毁灭的楔柱"
+   },
+   "brief": {
+    "CN": "可惡！這裡也有怪物！\n市民有危險。\n殲滅怪物！",
+    "EN": "Damn! Monsters are here too!\nThe citizens are in danger.\nExterminate the monsters!",
+    "JA": "くそっ！　ここにも怪物か！\n市民が危ない。\n殲滅するぞ！",
+    "KR": "젠장! 여기에도 괴물이 있어!\n시민들이 위험해.\n섬멸한다!",
+    "SC": "可恶！这里也有怪物！\n市民有危险。\n歼灭怪物！"
+   }
+  },
+  {
+   "path": "M018",
+   "progress": 0.08,
+   "title": {
+    "CN": "躲避行動",
+    "EN": "Escape",
+    "JA": "逃避行",
+    "KR": "도피행",
+    "SC": "躲避行动"
+   },
+   "brief": {
+    "CN": "只要越過這座山就會到達城市。\n那裡應該很安全才對。\n雖然辛苦，但可別停下腳步。\n要休息就等到了城市再說吧。",
+    "EN": "We will reach the city once we cross the mountain.\nWe should be safe there.\nI know I'm asking a lot, but you have to keep going.\nYou can rest when we get to the city.",
+    "JA": "この山を抜ければ街がある。\nそこなら安全なはずだ。\nきついだろうが、足を止めるな。\n休むのは街に着いてからだ。",
+    "KR": "이 산을 넘으면 도시가 나온다.\n거기는 안전할 거다.\n힘들겠지만 걸음을 멈추지 마라.\n쉬는 건 도시에 도착한 뒤다.",
+    "SC": "只要越过这座山就会到达城市。\n那里应该很安全才对。\n虽然辛苦，但可别停下脚步。\n要休息就等到了城市再说吧。"
+   }
+  },
+  {
+   "path": "M015_2",
+   "progress": 0.09,
+   "title": {
+    "CN": "天空之炎",
+    "EN": "Burning Sky",
+    "JA": "天空の炎",
+    "KR": "천공의 불꽃",
+    "SC": "天空之炎"
+   },
+   "brief": {
+    "CN": "大型飛碟的編隊似乎正朝著這裡過來。肯定是打算穿過這裡，投放怪物到市區中。要是讓他們成功，會造成無法估計的傷亡。非把牠們擋在這裡不可。\n\n空軍即將抵達。\n擊落飛碟的工作就交給空軍。\n我們負責殲滅怪物。",
+    "EN": "It looks like a troop of large flying saucers is coming this way. It is trying to pass through this area and drop the monsters in the city. If it succeeds, it will result in unimaginable casualties. We must stop it here and now.\n\nThe air force is about to arrive.\nLeave the flying saucers to them.\nWe'll focus on exterminating the monsters.",
+    "JA": "大型円盤の大編隊がこっちに向かっているらしい。ここを通過し、街に怪物を投下するつもりだ。それを許せば、計り知れない被害がでる。絶対にここで食い止めなければならない。\n\nまもなく空軍が到着する。\n円盤の撃墜は空軍に任せよう。\n俺たちは怪物を殲滅する。",
+    "KR": "대형 원반 대편대가 이쪽으로 오고\n있다고 한다. 여길 통과해 도시에\n괴물을 투하할 작정인 것 같다.\n그냥 뒀다가는 막대한 피해가 발생할\n거다. 반드시 여기서 막아야 해.\n\n곧 공군이 도착한다.\n원반 격추는 공군에게 맡기고\n우리는 괴물을 섬멸한다.",
+    "SC": "大型飞碟的编队似乎正朝著这里过来。肯定是打算穿过这里，投放怪物到市区中。要是让他们成功，会造成无法估计的伤亡。非把牠们挡在这里不可。\n\n空军即将抵达。\n击落飞碟的工作就交给空军。\n我们负责歼灭怪物。"
+   }
+  },
+  {
+   "path": "M008",
+   "progress": 0.1,
+   "title": {
+    "CN": "災禍蔓延",
+    "EN": "Spreading Disaster",
+    "JA": "広がる災禍",
+    "KR": "번져나가는 재앙",
+    "SC": "灾祸蔓延"
+   },
+   "brief": {
+    "CN": "大型飛碟入侵市區。\n似乎正在投放怪物。\n\n可惡！他們真是為所欲為啊！\n\n事已至此，無論上空有沒有飛碟盤據都要殺死怪物才行！\n只要消滅怪物就能拯救市民。可別忘了這一點喔。",
+    "EN": "Large flying saucers have invaded the city and are dropping monsters.\n\nDamn it! Doing as they wish!\n\nIgnore the flying saucers for now. Our priority is to exterminate the monsters so that we can save the citizens. Remember that!",
+    "JA": "大型円盤が市街地に侵入した。\n怪物を投下しているらしい。\n\nくそっ！　やつらはやりたい放題だ！\n\nこうなれば上空に円盤がいようが関係ない。怪物を攻撃するぞ！\n怪物を減らせば、それだけ市民が命を拾う。そのことを忘れるな。",
+    "KR": "대형 원반이 시가지에 침입했다.\n괴물을 투하하고 있는 것 같다.\n\n제기랄! 그 자식들, 온통 쑥대밭을\n만들고 있어!\n\n이렇게 되면 상공에 있는 원반은\n제쳐 두고 무조건 괴물을 공격한다!\n괴물이 줄어들면 그만큼 시민들이\n살아남을 수 있다. 그 점을 잊지 마라.",
+    "SC": "大型飞碟入侵市区。\n似乎正在投放怪物。\n\n可恶！他们真是为所欲为啊！\n\n事已至此，无论上空有没有飞碟盘据都要杀死怪物才行！\n只要消灭怪物就能拯救市民。可别忘了这一点喔。"
+   }
+  },
+  {
+   "path": "M015",
+   "progress": 0.11,
+   "title": {
+    "CN": "轉機",
+    "EN": "Turning Point",
+    "JA": "転機",
+    "KR": "전환점",
+    "SC": "转机"
+   },
+   "brief": {
+    "CN": "恭喜你入伍。\n\n從外星生物來襲開始已經過了五個月。\n雖然我們全力應戰，但只要無法擊落大型飛碟，這種每天只能想盡辦法撐過去的艱苦日子就不會出現轉機。\n\n大型飛碟毫不手下留情地持續投放怪物，我們卻只是不斷消耗資源。這樣下去耗盡一切也只是時間的問題。\n即使如此，除了撲滅怪物以外也別無他法。\n要是有破壞大型飛碟的方法就好了……",
+    "EN": "Congratulations! You are enrolled.\n\nFive months have passed since the alien invasion.\nWe fought hard, but as long as the large flying saucers remain out there, our days of hardship will not be over.\n\nThose large flying saucers continue dropping monsters without mercy, and we are having a war of attrition. At this rate, it's only a matter of time till we exhaust all our resources.\nNevertheless, extinguishing monsters is our only choice.\nIf only we could find a way to destroy the large flying saucers...",
+    "JA": "入隊、おめでとうございます。\n\nエイリアン襲来からすでに５カ月。\n我々も善戦しているものの、大型円盤を撃墜する方法がない以上、日々を耐え抜くだけの厳しい状況が続いています。\n\n大型円盤は我がもの顔で怪物を投下し続けており、我々は消耗するばかり。このままでは、力尽きるのも時間の問題です。\nそれでも、怪物駆除以外にできることはありません。\n大型円盤を破壊する方法さえあれば……。",
+    "KR": "입대를 축하합니다.\n\n외계인이 침공한 지도 벌써 5개월.\n우리도 선전하고 있지만 대형 원반을\n격추할 방법을 찾지 못해 하루하루\n간신히 버티고 있는 수준입니다.\n\n대형 원반은 지구가 자기들 것인 양\n괴물을 끊임없이 투하하고 있고\n우리 전력은 계속 소모되고 있습니다.\n이대로 가다간 전력이 바닥나는 것도\n시간문제입니다.\n\n그럼에도 괴물을 제거하는 것 외에는\n달리 손쓸 방도가 없습니다.\n대형 원반을 파괴할 방법만 있으면…….",
+    "SC": "恭喜你入伍。\n\n从外星生物来袭开始已经过了五个月。\n虽然我们全力应战，但只要无法击落大型飞碟，这种每天只能想尽办法撑过去的艰苦日子就不会出现转机。\n\n大型飞碟毫不手下留情地持续投放怪物，我们却只是不断消耗资源。这样下去耗尽一切也只是时间的问题。\n即使如此，除了扑灭怪物以外也别无他法。\n要是有破坏大型飞碟的方法就好了……"
+   }
+  },
+  {
+   "path": "M015_3",
+   "progress": 0.13,
+   "title": {
+    "CN": "撲滅",
+    "EN": "Extermination",
+    "JA": "駆除",
+    "KR": "섬멸",
+    "SC": "扑灭"
+   },
+   "brief": {
+    "CN": "有怪物襲擊了市區。由於事出突然，還來不及讓所有市民避難。請立刻前往現場支援撲滅部隊。此外，目前尚未發現大型飛碟，因此不清楚怪物是如何移動到市區。請謹慎行動。",
+    "EN": "Monsters invaded the city out of the blue. We're caught off guard and we failed to evacuate all citizens. Please head to the site to support the extermination team. Since we haven't found large flying saucers, we have no clue how those monsters got into the city. Make sure you act with caution.",
+    "JA": "市街地に怪物が出現。突然の襲撃のため、市民の避難が終わっていません。ただちに現地に向かい、駆除チームを支援してください。なお、大型円盤は確認されておらず、怪物がどのように移動してきたのか不明です。十分に注意してください。",
+    "KR": "시가지에 괴물이 나타났습니다.\n예기치 못한 습격이라 시민들이\n미처 대피하지 못했습니다.\n즉시 현지로 달려가 섬멸 팀을\n지원해 주십시오.\n\n참고로 대형 원반은 확인되지 않아\n괴물이 어떻게 이동해 왔는지 알 수\n없는 상황입니다. 각별히 주의하십시오.",
+    "SC": "有怪物袭击了市区。由于事出突然，还来不及让所有市民避难。请立刻前往现场支援扑灭部队。此外，目前尚未发现大型飞碟，因此不清楚怪物是如何移动到市区。请谨慎行动。"
+   }
+  },
+  {
+   "path": "M010",
+   "progress": 0.14,
+   "title": {
+    "CN": "巨船破壞作戰",
+    "EN": "Destroy the Giant Ship",
+    "JA": "巨船破壊作戦",
+    "KR": "거함 파괴 작전",
+    "SC": "巨船破坏作战"
+   },
+   "brief": {
+    "CN": "即將展開母艦攻擊作戰。\n母艦正滯留於市區上空。維持在這麼低空的位置，恐怕是為了投放怪物。\n\n放任不管只會讓受害範圍擴大。\n等不到空軍發動攻擊了，地面部隊立刻朝母艦前進。擊殺怪物與無人機。\n清除完怪物與無人機後，對母艦發動攻擊。",
+    "EN": "We're about to commence attack on the Motherships that are hovering over the city. We suspect they keep themselves low in order to drop monsters.\n\nThe damage will be incalculable if we don't do something.\nThere's no time for the Air Force to come and attack. Ground units, head straight to the Motherships. Eliminate all monsters and drones.\nAfter you complete that, fire at the Motherships.",
+    "JA": "マザーシップ攻撃作戦を開始します。\nマザーシップは市街地上空に滞空。これほど低い高度を保つのは、おそらく怪物を投下するためだと思われます。\n\nこのままでは被害が拡大するばかりです。\n空軍の攻撃を待たず、地上部隊はマザーシップに接近。怪物とドローンを駆逐してください。\nその後、マザーシップを攻撃します。",
+    "KR": "마더 십 공격 작전을 개시합니다.\n마더 십은 시가지 상공에 멈춰 있습니다.\n이렇게 낮은 고도를 유지하는 이유는\n괴물을 투하하기 위함으로 보입니다.\n\n이대로 놔뒀다가는 피해가 계속 확대될\n겁니다. 지상 부대는 공군의 공격을\n기다리지 말고 바로 마더 십에 접근해\n괴물과 드론을 해치워 주십시오.\n마더 십은 그 뒤에 공격하겠습니다.",
+    "SC": "即将展开母舰攻击作战。\n母舰正滞留于市区上空。维持在这么低空的位置，恐怕是为了投放怪物。\n\n放任不管只会让受害范围扩大。\n等不到空军发动攻击了，地面部队立刻朝母舰前进。击杀怪物与无人机。\n清除完怪物与无人机后，对母舰发动攻击。"
+   }
+  },
+  {
+   "path": "M011",
+   "progress": 0.15,
+   "title": {
+    "CN": "孤立",
+    "EN": "Isolation",
+    "JA": "孤立",
+    "KR": "고립",
+    "SC": "孤立"
+   },
+   "brief": {
+    "CN": "是你啊！？\n你沒事真是太好了。\n城市似乎被外星生物佔領了。雖然躲進建築物中活了下來……但部隊卻瓦解了。也就是說只剩我們留在敵陣之中。這樣下去被找到後殺掉也是遲早的事。\n我們要展開行動。\n找出生還者，合力脫困。\n放心。我有個辦法。\n先聽我的吧。",
+    "EN": "Oh, it's you!?\nIt's really good to see you in one piece.\nThe city is taken by the aliens. Although we managed to hide in the building and survive...the troops were disintegrated. In other words, we're left alone to the enemy. They will find us sooner or later.\nWe have to search for survivors and escape together.\nCalm down and listen to me.\nI've got an idea.",
+    "JA": "お前か！？\n無事でよかった。\n街はエイリアンに占拠されたようだ。建物に身を潜めて生き延びたが……部隊は壊滅。俺たちは敵の中に取り残されたというわけだ。このままではいずれ発見され、殺されるだろう。\n行動をおこすぞ。\n生存者を捜し、力を合わせて脱出する。\n大丈夫だ。俺に考えがある。\nまず、俺の話を聞け。",
+    "KR": "자네로군!?\n무사해서 다행일세.\n\n도시는 외계인에게 점령된 것 같다.\n건물 안으로 엄폐해 간신히\n살아남았지만…… 부대는 괴멸됐고\n우리는 적진 한가운데에 고립됐다.\n계속 여기 있다가는 머지않아 적에게\n발각되어 죽음을 맞이하겠지.\n\n이대로 가만히 있을 순 없어.\n생존자를 찾아 힘을 합쳐 탈출한다.\n괜찮다. 내게 생각이 있다.\n먼저 내 이야기를 듣게.",
+    "SC": "是你啊！？\n你没事真是太好了。\n城市似乎被外星生物占领了。虽然躲进建筑物中活了下来……但部队却瓦解了。也就是说只剩我们留在敌阵之中。这样下去被找到后杀掉也是迟早的事。\n我们要展开行动。\n找出生还者，合力脱困。\n放心。我有个办法。\n先听我的吧。"
+   }
+  },
+  {
+   "path": "M012",
+   "progress": 0.17,
+   "title": {
+    "CN": "災禍推手",
+    "EN": "Mastermind Revealed",
+    "JA": "災いの使役者",
+    "KR": "재앙을 사역하는 자",
+    "SC": "灾祸推手"
+   },
+   "brief": {
+    "CN": "外星生物的步兵部隊正持續進軍。敵人的主力部隊分散成人數少的小隊，正大範圍地展開壓制行動。\n敵軍步兵也朝這個地區前進。我們已經派遣了攻擊部隊。請前往支援。",
+    "EN": "The alien infantry keeps coming in. They split their main force into smaller teams and take over the territories in a greater scale.\nThe enemy infantry is also heading towards this area. We've already sent out the attack team. Please go for backup.",
+    "JA": "エイリアンの歩兵部隊は進撃を続けています。敵主力部隊は、少数のチームに分散。広範囲を制圧しつつあります。\nこのエリアにも敵歩兵が接近中です。攻撃チームを派遣しました。援護してください。",
+    "KR": "외계인 보병 부대가 계속 진격하고\n있습니다. 적 주력 부대는 소규모\n팀으로 흩어져 넓은 범위를 제압하고\n있습니다.\n\n이 구역에도 적 보병이 접근 중입니다.\n공격 팀을 파견했으니 지원해 주십시오.",
+    "SC": "外星生物的步兵部队正持续进军。敌人的主力部队分散成人数少的小队，正大范围地展开压制行动。\n敌军步兵也朝这个地区前进。我们已经派遣了攻击部队。请前往支援。"
+   }
+  },
+  {
+   "path": "M014",
+   "progress": 0.18,
+   "title": {
+    "CN": "洞穴的秘密",
+    "EN": "Secret of the Cave",
+    "JA": "洞穴の秘密",
+    "KR": "동굴의 비밀",
+    "SC": "洞穴的秘密"
+   },
+   "brief": {
+    "CN": "發現了可能是怪物巢穴的洞窟。雖然知道怪物會經由地底移動，但這卻是首次實際發現牠們潛在地底的模樣。\n接著要進行的是調查殲滅作戰。潛入巢穴雖伴隨著莫大的危險……但這也是為了查明怪物生態的重要作戰。\n由先遣部隊先行進入。在狀況許可下，後續部隊也進駐洞窟。請與後續部隊會合並等待指示。",
+    "EN": "We have confirmed a cave that could be the monster's nest. We knew that monsters would move underground, but it's our first time ever to witness them lurking underground.\nWe will start investigating and commence an operation of annihilation. It's very risky to sneak into the nest...but this is crucial for us to clarify the monster ecology.\nThe vanguard will lead. If the situation allows, the follow-up forces will move in afterwards. Please meet up with the follow-up forces and wait for further instructions.",
+    "JA": "怪物の巣穴らしき洞窟を発見しました。怪物が地底を移動していることはわかっていましたが、実際に潜んでいる姿が確認されたのは初めてです。\nこれより調査、殲滅作戦を開始します。巣穴への潜入は大きな危険を伴いますが……怪物の生態を解明する上でも重要な作戦です。\nまず先行部隊が進入。状況により後続部隊も突入します。後続部隊に合流し、指示を待ってください。",
+    "KR": "괴물이 판 땅굴로 보이는 동굴을\n발견했습니다. 괴물이 땅속을 통해\n이동한다는 건 알고 있었지만 실제로\n지하에 숨어 있는 모습을 확인한 건\n처음입니다. 지금부터 조사 및 섬멸\n작전을 개시하겠습니다.\n\n땅굴 잠입은 위험 부담이 크지만……\n괴물의 생태 파악을 위해서도\n매우 중요한 작전입니다.\n\n일단 선행 부대가 진입하고 상황에 따라\n후속 부대가 돌입할 예정입니다.\n후속 부대와 합류한 뒤 지시를\n기다려 주십시오.",
+    "SC": "发现了可能是怪物巢穴的洞窟。虽然知道怪物会经由地底移动，但这却是首次实际发现牠们潜在地底的模样。\n接著要进行的是调查歼灭作战。潜入巢穴虽伴随著莫大的危险……但这也是为了查明怪物生态的重要作战。\n由先遣部队先行进入。在状况许可下，后续部队也进驻洞窟。请与后续部队会合并等待指示。"
+   }
+  },
+  {
+   "path": "M016",
+   "progress": 0.19,
+   "title": {
+    "CN": "殲滅計畫",
+    "EN": "Eradication Plan",
+    "JA": "殲滅計画",
+    "KR": "섬멸 계획",
+    "SC": "歼灭计划"
+   },
+   "brief": {
+    "CN": "怪物出現於市區中，請與撲滅班一起殲滅怪物。\n\n此外，周邊區域正在進行對怪異生物的大規模攻擊行動，因此這場作戰無法獲得充分的支援。我們很期待撲滅班的表現。",
+    "EN": "Monsters are spotted in the city. Please eliminate them with the extermination squad.\n\nMoreover, large scale attacks on mysterious monsters are taking place in the surrounding area, so you won't have sufficient backup. We expect much from the extermination squad.",
+    "JA": "市街地に怪物が出現。駆除班と共に殲滅してください。\n\nなお、周辺エリアでは怪生物への大規模攻撃がおこなわれています。そのため、この作戦には十分な支援をおこなうことができません。駆除班の働きに期待します。",
+    "KR": "시가지에 괴물이 나타났습니다.\n섬멸 팀과 함께 섬멸해 주십시오.\n\n참고로 주변 구역에서 대대적인 괴생물\n공격이 이뤄지고 있어 이 작전을 충분히\n지원하기 어려운 상황입니다.\n섬멸 팀의 건투를 빌겠습니다.",
+    "SC": "怪物出现于市区中，请与扑灭班一起歼灭怪物。\n\n此外，周边区域正在进行对怪异生物的大规模攻击行动，因此这场作战无法获得充分的支援。我们很期待扑灭班的表现。"
+   }
+  },
+  {
+   "path": "M017",
+   "progress": 0.21,
+   "title": {
+    "CN": "歸途中的偶遇",
+    "EN": "Encounters on Return",
+    "JA": "帰途の遭遇",
+    "KR": "귀로에서의 조우",
+    "SC": "归途中的偶遇"
+   },
+   "brief": {
+    "CN": "執行任務辛苦了。\n請沿著海岸返回基地。\n敬祝回程平安。",
+    "EN": "Mission complete. Good job guys.\nNow return to the base along the shore.\nSafe journey.",
+    "JA": "任務ごくろうさまでした。\n海岸を通過し、基地に帰還してください。\n帰路の無事を祈ります。\n",
+    "KR": "임무, 수고하셨습니다.\n해안을 통과해 기지로 귀환해 주십시오.\n무사 귀환을 빌겠습니다.",
+    "SC": "执行任务辛苦了。\n请沿著海岸返回基地。\n敬祝回程平安。"
+   }
+  },
+  {
+   "path": "M017_5",
+   "progress": 0.22,
+   "title": {
+    "CN": "夜間奇襲作戰",
+    "EN": "Surprise Attack at Night",
+    "JA": "夜間奇襲作戦",
+    "KR": "야간 기습 작전",
+    "SC": "夜间奇袭作战"
+   },
+   "brief": {
+    "CN": "工業區被外星生物佔領了。許多重要的設施都集中於此，失去這個區域對人類而言相當不利，希望能在零毀損的狀態下奪回。由於使用空襲和重戰車必定會損壞設施，因此未獲得許可。\n\n可行的方法只有依靠少數兵力進行夜間奇襲。由於任務相當危險，只召集了精銳部隊。請與部隊會合，在夜色的掩護下接近敵人並予以殲滅。此外，還請盡可能不要破壞設施。",
+    "EN": "The aliens have taken over the industrial area. Many important facilities are gathered here. Losing this area would be devastating to humanity and we wish to reclaim it without damaging the facilities. Since airstrikes and heavy tanks will certainly cause damages, they are excluded from the mission.\n\nThe only choice is to dispatch a few men to launch a surprise attack at night. Given the high risk, we only summon the elites. Please join force with the unit, approach and eliminate the enemy under the cover of night. And please, try your best to avoid damaging the facilities.",
+    "JA": "工業地帯がエイリアンに占拠されました。このエリアには重要な施設が集中しており、失うことは人類にとって大きなマイナス。無傷での奪還が望まれます。空爆や重戦車の投入は、施設の損傷が懸念されるため、不許可との判断が下されました。\n\n残された方法は、少数による夜間奇襲攻撃だけです。危険な任務のため、精鋭部隊を招集しました。部隊に合流し、夜の闇に潜んで敵に接近。殲滅してください。また、施設の被害にも配慮をお願いします。",
+    "KR": "공업 지대가 외계인에게 점령됐습니다.\n이 구역에는 중요 시설이 밀집되어 있어\n빼앗기면 인류에게는 뼈아픈 손실이\n될 겁니다.\n\n반드시 시설을 탈환해야 합니다.\n단, 시설에 미칠 피해가 우려되므로\n공습과 중전차 투입은 허가할 수 없다는\n결정이 내려졌습니다.\n\n남은 방법은 소규모 팀으로\n야간 기습 공격을 감행하는 것뿐입니다.\n임무의 위험성을 감안해 정예 부대를\n소집했습니다. 부대와 합류한 뒤\n어두운 밤을 틈타 적에게 접근\n섬멸해 주십시오. \n\n또한, 시설에 피해가 가지 않게\n주의하시기 바랍니다.",
+    "SC": "工业区被外星生物占领了。许多重要的设施都集中于此，失去这个区域对人类而言相当不利，希望能在零毁损的状态下夺回。由于使用空袭和重战车必定会损坏设施，因此未获得许可。\n\n可行的方法只有依靠少数兵力进行夜间奇袭。由于任务相当危险，只召集了精锐部队。请与部队会合，在夜色的掩护下接近敌人并予以歼灭。此外，还请尽可能不要破坏设施。"
+   }
+  },
+  {
+   "path": "M007",
+   "progress": 0.23,
+   "title": {
+    "CN": "前哨基地　偵查戰",
+    "EN": "Scouting the Outpost",
+    "JA": "前哨基地 偵察戦",
+    "KR": "전초기지 정찰전",
+    "SC": "前哨基地　侦查战"
+   },
+   "brief": {
+    "CN": "在市區中發現巨大建築物。我們推測這座只經過一個晚上就出現的建築物，可能是外星生物的前哨基地。為了進行調查，並在可能的狀況下加以破壞，我們將派遣部隊前往現場。請盡可能接近建築物，並發動攻擊。",
+    "EN": "We found a giant building in the city. This construction that rose up overnight could be the alien outpost. We will send over troops to investigate and destroy the building if possible. Please approach the building as close as you can and launch an attack.",
+    "JA": "市街地に巨大建造物が確認されました。一夜にして出現したこの建造物は、エイリアンの前哨基地のようなものだと推測されます。調査、そして可能であれば破壊するため、部隊を現地に派遣します。できるだけ建造物に接近。攻撃をおこなってください。",
+    "KR": "시가지에서 거대한 건조물을\n확인했습니다.\n하룻밤 사이에 나타난 이 건조물은\n외계인의 전초기지로 추정됩니다.\n\n조사, 그리고 가능하다면 파괴를 위해\n부대를 현지에 파견하겠습니다.\n최대한 건조물에 가까이 다가가\n공격해 주십시오.",
+    "SC": "在市区中发现巨大建筑物。我们推测这座只经过一个晚上就出现的建筑物，可能是外星生物的前哨基地。为了进行调查，并在可能的状况下加以破坏，我们将派遣部队前往现场。请尽可能接近建筑物，并发动攻击。"
+   }
+  },
+  {
+   "path": "M024",
+   "progress": 0.25,
+   "title": {
+    "CN": "楔柱山",
+    "EN": "Mountain of Wedges",
+    "JA": "楔の山",
+    "KR": "쐐기의 산",
+    "SC": "楔柱山"
+   },
+   "brief": {
+    "CN": "於山區發現大量怪物。有塔落下的跡象，因此推測怪物是透過傳送裝置過來的。\n立刻派遣調查部隊。找到塔並加以破壞。",
+    "EN": "Lots of monsters are found in the mountain. There are traces of pylons crashing down, so we suspect those monsters were transmitted by the teleportation devices.\nSend over the investigation team at once. Find the pylons and destroy them.",
+    "JA": "山岳地帯で多数の怪物が確認されました。塔が落下した形跡があることから、怪物は転送装置によって運ばれてきたと推測されます。\nただちに調査チームを派遣。塔を発見し、破壊を試みます。",
+    "KR": "산악 지대에서 수많은 괴물을\n확인했습니다.\n탑이 낙하한 흔적이 있는 것으로 보아\n괴물은 전송 장치를 통해 이동한 것으로\n추정됩니다.\n즉시 조사 팀을 파견, 탑을 찾아내\n파괴하겠습니다.",
+    "SC": "于山区发现大量怪物。有塔落下的迹象，因此推测怪物是透过传送装置过来的。\n立刻派遣调查部队。找到塔并加以破坏。"
+   }
+  },
+  {
+   "path": "M019_5",
+   "progress": 0.26,
+   "title": {
+    "CN": "登陸艇降臨",
+    "EN": "The Landing Ships",
+    "JA": "降下艇飛来",
+    "KR": "상륙함 출현",
+    "SC": "登陆艇降临"
+   },
+   "brief": {
+    "CN": "外星生物的登陸艇正朝著市區前進。請位於預測路徑附近的部隊立刻前往指定地點。\n市區中還有許多居民尚未避難完畢。若發現外星生物登陸時，就立即展開戰鬥。並請協助居民避難。",
+    "EN": "The alien landing ships are heading to the city. All units near the projected path please go to the assigned site.\nMany city residents are still evacuating. If you come across aliens landing, launch a fight immediately and support the residents to evacuate.",
+    "JA": "エイリアンの降下艇が市街地に向かって進んでいます。予想進路の付近にいる部隊は、ただちに指定地点に向かってください。\n市街にはまだ多くの住民が残っています。エイリアンの降下を確認した場合は、ただちに戦闘を開始。住民の避難を助けてください。",
+    "KR": "외계인의 상륙함이 시가지를 향하고\n있습니다. 예상 진로 근처에 있는\n부대는 즉시 지정 지점으로 이동해\n주십시오.\n\n시가지에는 아직 많은 시민들이 남아\n있습니다. 외계인의 강하가 확인되면\n즉시 전투를 개시하여 주민들의 대피를\n도와주십시오.",
+    "SC": "外星生物的登陆艇正朝著市区前进。请位于预测路径附近的部队立刻前往指定地点。\n市区中还有许多居民尚未避难完毕。若发现外星生物登陆时，就立即展开战斗。并请协助居民避难。"
+   }
+  },
+  {
+   "path": "M022",
+   "progress": 0.28,
+   "title": {
+    "CN": "再度進擊",
+    "EN": "Reinvasion",
+    "JA": "再進撃",
+    "KR": "재진격",
+    "SC": "再度进击"
+   },
+   "brief": {
+    "CN": "敵軍對市區發動攻擊。激戰後，雖成功擊退敵人……但城市卻受到毀滅性的破壞，我方的消耗也相當大，因此守備隊只能暫時撤退。但外星生物似乎又再次展開進攻。\n\n請可戰鬥的部隊立刻前往現場。",
+    "EN": "The enemy attacked the city. We defeated them after a fierce battle, but the city was left in ruins. Our troops were worn out, so the garrison had to retreat temporarily; however, the aliens are on the verge of mounting another attack.\n\nAll units that can fight head out and engage.",
+    "JA": "敵軍が市街地に侵攻。激戦の末、撃退には成功したものの……街の被害は壊滅的です。我が方の損耗も激しく、守備隊は一時撤退。しかし、エイリアンは再び侵攻を開始したようです。\n\n戦闘可能な部隊はただちに現地に向かってください。",
+    "KR": "적군이 시가지에 침공했습니다. 치열한\n전투 끝에 적을 물리치기는 했지만……\n도시의 피해는 심각합니다.\n아군의 피해 역시 막심하여 수비대가\n잠시 철수한 상황에서 외계인의 침공이\n다시 시작된 것 같습니다.\n\n전투 가능한 부대는\n즉시 현지로 가 주십시오.",
+    "SC": "敌军对市区发动攻击。激战后，虽成功击退敌人……但城市却受到毁灭性的破坏，我方的消耗也相当大，因此守备队只能暂时撤退。但外星生物似乎又再次展开进攻。\n\n请可战斗的部队立刻前往现场。"
+   }
+  },
+  {
+   "path": "M023",
+   "progress": 0.29,
+   "title": {
+    "CN": "砲兵",
+    "EN": "Artillery Unit",
+    "JA": "砲兵",
+    "KR": "포병",
+    "SC": "砲兵"
+   },
+   "brief": {
+    "CN": "在先前的戰鬥中破壞市區的是外星生物的砲兵部隊。裝備著遠距離用的武器，發射呈現拋物線射出的砲彈。無論距離遠近，都可確實地破壞狙擊的位置。\n\n大多數的部隊都已經遭受砲擊而瓦解。城市也損傷慘重。現在不殲滅他們，今後的戰鬥恐怕會更加嚴峻。\n有冒險一試的價值。我們計畫以步兵部隊突擊敵人砲兵，在極近的距離下將敵人殲滅。請立刻進行準備。",
+    "EN": "It was the alien artillery unit that damaged the city in the past battles. They are equipped with long-ranged weapons which can discharge artillery shells parabolically and destroy the targets regardless of the distance.\n\nMost of our units were destroyed by their artillery fire and the city was damaged severely. If we don't eliminate them now, we'll be put into a more difficult situation.\nIt's a risk worth taking. We will dispatch our infantry to assault the enemy artillery unit and eliminate them within a very close range. Get prepared.",
+    "JA": "先の戦いで市街地を破壊したのは、エイリアンの砲兵部隊です。遠距離用の火器を装備しており、孤を描いて飛ぶ砲弾を発射。距離に関わらず、狙った場所を確実に破壊する力があります。\n\nすでに多くの部隊が砲撃によって壊滅。街の被害も甚大です。今、彼らを殲滅しなければ、今後の戦いはさらに苦しいものとなるでしょう。\n危険を冒す価値はあります。歩兵部隊で敵砲兵に突撃。至近距離で殲滅します。ただちに準備にかかってください。",
+    "KR": "앞선 싸움에서 시가지를 파괴한 건\n외계인 포병 부대입니다.\n그들은 원거리용 화기로 포물선을\n그리는 포탄을 발사하며, 거리에\n상관없이 목표 지점을 정확하게\n파괴합니다.\n\n이미 많은 부대가 포격으로 전멸했고\n도시도 심각한 피해를 입었습니다.\n지금 적 포병을 섬멸하지 않으면\n앞으로의 싸움은 더욱 힘들어질 겁니다.\n\n위험을 무릅쓸 가치는 있습니다.\n보병 부대로 적 포병에게 돌격해\n지근거리에서 섬멸할 예정입니다.\n바로 준비해 주십시오.",
+    "SC": "在先前的战斗中破坏市区的是外星生物的砲兵部队。装备著远距离用的武器，发射呈现抛物线射出的砲弹。无论距离远近，都可确实地破坏狙击的位置。\n\n大多数的部队都已经遭受砲击而瓦解。城市也损伤惨重。现在不歼灭他们，今后的战斗恐怕会更加严峻。\n有冒险一试的价值。我们计划以步兵部队突击敌人砲兵，在极近的距离下将敌人歼灭。请立刻进行准备。"
+   }
+  },
+  {
+   "path": "M025",
+   "progress": 0.3,
+   "title": {
+    "CN": "狙擊部隊",
+    "EN": "Sniper Team",
+    "JA": "狙撃部隊",
+    "KR": "저격 부대",
+    "SC": "狙击部队"
+   },
+   "brief": {
+    "CN": "發現外星生物所率領的侵略生物β集團。雖然是位於已完成避難的區域，但該處距離市區僅數公里遠。因此必須在該處撲滅敵人。\n已派遣怪物撲滅小隊到現場。他們將會以步鎗由遠距離進行射擊來殲滅敵人。請與怪物撲滅小隊會合，並予以支援。",
+    "EN": "We've confirmed a large number of Aggressive Alien Species β. Although they are in a completely evacuated area, it's only a few kilometers from the city. We must eliminate the enemy right there.\nThe monster extermination team has been sent to the scene. They'll destroy the enemy with rifles from range. Link up with the extermination team and offer support.",
+    "JA": "エイリアンに率いられた侵略生物βの群れを確認。場所は避難済み区域ですが、市街地まではたった数キロの距離です。この場所で駆除しなければなりません。\n怪物駆除チームを現地に派遣しました。遠距離からのライフル射撃で殲滅する作戦です。怪物駆除チームに合流。支援してください。",
+    "KR": "외계인이 이끄는 침략 생물 β 무리를\n확인했습니다. 해당 지역의 주민들은\n모두 대피했지만, 불과 수 킬로미터\n떨어진 곳에 시가지가 있으므로\n여기서 반드시 섬멸해야만 합니다.\n\n괴물 섬멸 팀을 현지에 파견했습니다.\n원거리에서 라이플 사격으로\n섬멸 작전을 실행할 예정입니다.\n괴물 섬멸 팀과 합류해 지원해 주십시오.",
+    "SC": "发现外星生物所率领的侵略生物β集团。虽然是位于已完成避难的区域，但该处距离市区仅数公里远。因此必须在该处扑灭敌人。\n已派遣怪物扑灭小队到现场。他们将会以步鎗由远距离进行射击来歼灭敌人。请与怪物扑灭小队会合，并予以支援。"
+   }
+  },
+  {
+   "path": "M019",
+   "progress": 0.32,
+   "title": {
+    "CN": "紅色無人機",
+    "EN": "Red Drones",
+    "JA": "赤色機",
+    "KR": "빨간색 기체",
+    "SC": "红色无人机"
+   },
+   "brief": {
+    "CN": "此任務是要消滅飛抵市區的無人機。請使用對空裝備並前往現場。\n不過，我們在無人機中發現紅色機體。雖尚未查明性能上的差異，但還是請小心戒備。",
+    "EN": "This mission aims to destroy those drones flying into the city. Equip anti-air weapons and head to the site.\nWe have confirmed some red drones among ordinary ones. How they perform remains unknown, but you need to be careful.",
+    "JA": "市街地に飛来したドローンを破壊します。対空装備で現地に向かってください。\nただ、ドローンの中に赤色の機体が確認されています。性能的な差異は不明ですが、十分に警戒してください。",
+    "KR": "시가지에 나타난 드론을 파괴합니다.\n대공 장비를 갖춰 현지로 가 주십시오.\n드론 중에 빨간색 기체가 있는 것을\n확인했습니다. 성능에 차이가 있는지는\n알 수 없지만 각별히 주의하십시오.",
+    "SC": "此任务是要消灭飞抵市区的无人机。请使用对空装备并前往现场。\n不过，我们在无人机中发现红色机体。虽尚未查明性能上的差异，但还是请小心戒备。"
+   }
+  },
+  {
+   "path": "M026",
+   "progress": 0.33,
+   "title": {
+    "CN": "銅牆鐵壁",
+    "EN": "Iron Wall",
+    "JA": "アイアンウォール",
+    "KR": "아이언 월",
+    "SC": "铜墙铁壁"
+   },
+   "brief": {
+    "CN": "有數量非常龐大的外星生物接近中。本該是應避免正面衝突的局面……但市區的避難行動延遲，若不在此阻止敵人前進，預測會造成重大損害。\n我們必須化身為防壁，阻止敵人侵攻。除此之外別無他法。\n\n作戰名為「銅牆鐵壁」。\n在已完成避難的區域進行佈署，架起防衛線，迎擊外星生物的步兵部隊。",
+    "EN": "A large number of aliens are approaching. We're supposed to avoid direct confrontation, but the evacuation progress in the city is falling behind schedule. We must stop them or they'll cause the city significant harm.\nWe will form a protective wall and prevent the enemy from invading. This is the only way.\n\nThis operation is called %dq%Iron Wall.%dq%\nLet's deploy in the areas that have completed evacuation. We will shield the citizens off from the enemy infantry.",
+    "JA": "エイリアンが接近。かなりの大部隊です。正面からの激突は避けるべき局面ですが……市街地の避難が遅れており、ここで食い止めなければ激甚の被害が予想されます。\n我々自身が壁となり、侵攻してくる敵を防ぎ止める。それしか方法はありません。\n\n作戦名、アイアンウォール。\n避難完了エリアに展開。防衛線を構築し、エイリアン歩兵部隊を迎え撃ちます。",
+    "KR": "외계인 대부대가 접근 중입니다.\n정면 충돌은 피해야겠지만……\n시민들의 대피가 늦어지고 있어\n여기서 막지 않으면 어마어마한\n피해가 발생할 겁니다.\n우리가 방어벽이 되어 침공하는 적을\n막는 것 외에는 방법이 없습니다.\n\n작전명 아이언 월.\n대피 완료 구역으로 이동해 방어선을\n구축한 뒤 외계인 보병 부대와\n응전하겠습니다.",
+    "SC": "有数量非常庞大的外星生物接近中。本该是应避免正面冲突的局面……但市区的避难行动延迟，若不在此阻止敌人前进，预测会造成重大损害。\n我们必须化身为防壁，阻止敌人侵攻。除此之外别无他法。\n\n作战名为「铜墙铁壁」。\n在已完成避难的区域进行布署，架起防卫线，迎击外星生物的步兵部队。"
+   }
+  },
+  {
+   "path": "M020_5",
+   "progress": 0.34,
+   "title": {
+    "CN": "前哨基地　破壞作戰　Ａ計畫",
+    "EN": "Destroy the Outpost: Plan A",
+    "JA": "前哨基地 破壊作戦 プランＡ",
+    "KR": "전초기지 파괴 작전 플랜 A",
+    "SC": "前哨基地　破坏作战　Ａ计划"
+   },
+   "brief": {
+    "CN": "外星生物的前哨基地已完全壓制住周遭地區。市區的中心地帶形成敵人的勢力範圍，因此大規模地限制住我們的行動。這樣下去，總有一天必定會被迫放棄這塊區域。必須盡可能迅速地破壞前哨基地。\n我們已經擬定兩種作戰方式。現在開始展開破壞作戰。第一階段執行Ａ計畫。萬一Ａ計畫失敗，將立刻轉為Ｂ計畫。\n\nＡ計畫：挑選數名工兵組成爆破小隊，與步兵部隊一同在沙塵暴的掩護之下接近前哨基地。嘗試以炸彈破壞敵人基地。\n\nＢ計畫：重戰車泰坦發動砲擊。以壓倒性的火力摧毀前哨基地。",
+    "EN": "The alien outpost has completely taken control over the surrounding areas. Since the city center is now the enemy's sphere of influence, our actions are significantly restricted. If the situation continues, we'll be forced to hand over this area. We must destroy their outpost as soon as possible.\nWe have come up with two operation plans to destroy the outpost. Let's carry out Plan A in the first stage. Should Plan A fail, we will immediately switch to Plan B.\n\nPlan A: Select several engineers and form a demolition team. They will work with the infantry unit, using a sandstorm as cover to close in on the enemy outpost and blow it up.\n\nPlan B: Launch an artillery strike with heavy tanks Titans and destroy the outpost with overwhelming fire power.",
+    "JA": "エイリアンの前哨基地により、付近は完全に制圧されました。市街地の中心部に敵勢力圏が出現したことで、我々の活動は大きく制限されるでしょう。このままでは、いずれこのエリアを放棄せざるを得なくなることは確実です。できるだけ迅速に前哨基地を破壊しなければなりません。\nニ段構えの作戦を立案しました。これより破壊作戦を開始します。第一段階ではプランＡを実行。万一失敗するようなことがあれば、ただちにプランＢに移行します。\n\nプランＡ：工兵数人を選抜し、爆破チームを編成。歩兵部隊と共に砂嵐にまぎれて前哨基地に接近。爆弾による破壊を試みます。\n\nプランＢ：重戦車タイタンによる砲撃。圧倒的火力で前哨基地を爆砕します。",
+    "KR": "외계인의 전초기지로 인해 주변 지역이\n완전히 제압됐습니다. 시가지 중심부에\n적 세력권이 구축됐으니 아군의 활동도\n어려워질 것입니다.\n이대로 가다가는 머지않아 이 구역을\n포기해야만 하므로, 최대한 빨리\n전초기지를 파괴해야 합니다.\n\n2단 작전을 입안했으니 지금부터\n파괴 작전을 개시하겠습니다.\n제1단계로 플랜 A를 실행하고\n만약 플랜 A가 실패하면 즉시 플랜 B로\n전환하겠습니다.\n\n플랜 A: 공병 몇 명을 선발해 폭파 팀을\n편성하겠습니다.\n모래바람이 부는 틈을 타 보병 부대와\n함께 전초기지에 접근해 폭탄으로\n폭파해 주십시오.\n\n플랜 B: 중전차 타이탄으로 포격하는\n작전입니다. 압도적인 화력으로\n전초기지를 초토화할 겁니다.",
+    "SC": "外星生物的前哨基地已完全压制住周遭地区。市区的中心地带形成敌人的势力范围，因此大规模地限制住我们的行动。这样下去，总有一天必定会被迫放弃这块区域。必须尽可能迅速地破坏前哨基地。\n我们已经拟定两种作战方式。现在开始展开破坏作战。第一阶段执行Ａ计划。万一Ａ计划失败，将立刻转为Ｂ计划。\n\nＡ计划：挑选数名工兵组成爆破小队，与步兵部队一同在沙尘暴的掩护之下接近前哨基地。尝试以炸弹破坏敌人基地。\n\nＢ计划：重战车泰坦发动砲击。以压倒性的火力摧毁前哨基地。"
+   }
+  },
+  {
+   "path": "M021",
+   "progress": 0.36,
+   "title": {
+    "CN": "前哨基地　破壞作戰　Ｂ計畫",
+    "EN": "Destroy the Outpost: Plan B",
+    "JA": "前哨基地 破壊作戦 プランＢ",
+    "KR": "전초기지 파괴 작전 플랜 B",
+    "SC": "前哨基地　破坏作战　Ｂ计划"
+   },
+   "brief": {
+    "CN": "發生了預料之外的狀況。\n前哨基地正在移動……不，是正在走路！\n\n立刻轉為Ｂ計畫。\n重戰車發動砲擊摧毀敵人基地。\n請步兵部隊立刻退後，\n與後方的重戰車隊會合。",
+    "EN": "Emergency.\nThe outpost is moving...No, it's walking!\n\nLet's switch to Plan B right away, having heavy tanks launch an artillery strike and destroy the enemy outpost.\nInfantry unit, back off. \nMeet up with the heavy tank unit in the rear.",
+    "JA": "想定外の事態が発生しました。\n前哨基地が移動……いえ歩いています！\n\nただちにプランＢに移行。\n重戦車の砲撃で敵基地を破壊します。\n歩兵部隊はただちに後退。\n後方の重戦車隊と合流してください。",
+    "KR": "예기치 못한 사태가 발생했습니다.\n전초기지가 이동……\n아니, 걷고 있습니다!\n\n즉시 플랜 B로 전환해 중전차 포격으로\n적 기지를 파괴하겠습니다.\n보병 부대는 즉시 후퇴해 후방의 중전차\n부대와 합류해 주십시오.",
+    "SC": "发生了预料之外的状况。\n前哨基地正在移动……不，是正在走路！\n\n立刻转为Ｂ计划。\n重战车发动砲击摧毁敌人基地。\n请步兵部队立刻退后，\n与后方的重战车队会合。"
+   }
+  },
+  {
+   "path": "M027",
+   "progress": 0.37,
+   "title": {
+    "CN": "洞穴入侵作戰　第一階段",
+    "EN": "Cave Invasion Stage 1",
+    "JA": "洞穴侵入作戦　第一段階",
+    "KR": "동굴 돌입 작전 제1단계",
+    "SC": "洞穴入侵作战　第一阶段"
+   },
+   "brief": {
+    "CN": "已確認大量的怪物由之前發現的巢穴中出現。怪物很可能正在地底深處增殖。繼續這樣置之不理非常危險。現在就立刻展開巢穴破壞作戰。\n入侵巢穴時，首先會遭遇的困難是「上回遇見怪物集團的地點」。將有再次遇見外星生物巡邏兵的危險。\n作戰的第一階段是由先遣部隊排除敵人巡邏兵。確認周遭安全後，再繼續深入內部。殲滅怪物，為後續部隊開路。",
+    "EN": "Large amount of monsters are confirmed to appear out of the cave we found. It's likely that the monsters reproduce deep underground. It's too dangerous to leave it that way. Let's commence operation cave invasion now.\nWhen invading the nest, the first risk you may face is encountering alien sentinels again at the location where you ran into a horde of monsters last time.\nOperation Stage 1, the vanguard should lead and take out the enemy sentinels. After the place is secured, head deep into the nest and eliminate the monsters, making way for the follow-up forces.",
+    "JA": "以前、確認された巣穴から、多数の怪物が出現していることが判明しました。地底の奥深くで怪物が増殖している可能性があります。これ以上、放置するのは危険です。ただちに巣穴破壊作戦を開始します。\n巣穴侵入にあたり、まず障害となるのが「前回、怪物の大群と遭遇した地点」です。再びエイリアンの歩哨と遭遇する危険があります。\n作戦第一段階では、先行部隊が敵歩哨を排除。周囲を確保した上で、さらに奥へと進入。怪物を殲滅して後続部隊のための道を開きます。",
+    "KR": "지난번에 확인된 땅굴에서 수많은\n괴물이 나타나고 있다는 게\n판명됐습니다.\n땅속 깊숙한 곳에서 괴물이 증식하고\n있을 가능성이 있으므로 이대로 계속\n내버려 두면 위험합니다.\n\n즉시 땅굴 파괴 작전을 개시하겠습니다.\n땅굴 돌입의 첫 번째 난관은 「지난번에\n괴물 무리와 조우한 지점」입니다.\n이 지점에서 또다시 외계인 파수병과\n맞닥뜨릴 위험이 있습니다.\n\n따라서 작전 제1단계에서는\n선행 부대가 적 파수병을 제거해\n주변 지역을 확보한 뒤, 한층 더 안으로\n진입해 괴물을 섬멸함으로써\n후속 부대가 진입할 길을 열겠습니다.",
+    "SC": "已确认大量的怪物由之前发现的巢穴中出现。怪物很可能正在地底深处增殖。继续这样置之不理非常危险。现在就立刻展开巢穴破坏作战。\n入侵巢穴时，首先会遭遇的困难是「上回遇见怪物集团的地点」。将有再次遇见外星生物巡逻兵的危险。\n作战的第一阶段是由先遣部队排除敌人巡逻兵。确认周遭安全后，再继续深入内部。歼灭怪物，为后续部队开路。"
+   }
+  },
+  {
+   "path": "M028",
+   "progress": 0.38,
+   "title": {
+    "CN": "洞穴入侵作戰　第二階段",
+    "EN": "Cave Invasion Stage 2",
+    "JA": "洞穴侵入作戦　第二段階",
+    "KR": "동굴 돌입 작전 제2단계",
+    "SC": "洞穴入侵作战　第二阶段"
+   },
+   "brief": {
+    "CN": "偵查隊發現了巨大的坑洞。\n為了進入深處，必須下到坑洞底部才行。問題是下去的方法……幸運的是，我們發現坑洞上方有土石形成的細長土橋。寬度相當狹窄，十分危險，但人還是有辦法通過。\n\n第二階段由精銳小隊越過細橋，到達坑洞底部。並確保周遭安全。\n但道路狹長，大軍無法通過。因此必須以少數精銳成員來完成任務。已經將路徑資料傳達給小隊長，請遵從他的指示一同行動。",
+    "EN": "The scout found a giant chasm.\nIn order to continue to the deep end, we have to reach the bottom of the chasm. The problem is how...Fortunately, there's an earth-rock passageway in the form of a bridge reaching across the chasm. It's very narrow and dangerous, but it's still possible to get through.\n\nOperation Stage 2, the elite team will go across the narrow bridge and reach the bottom of the chasm to secure the area.\nSince the passageway is too narrow for an army to get through, we have to count on a few elites to complete the mission. Details of the route has been sent to the team leader. Please follow the instruction and act as a team.",
+    "JA": "偵察隊が巨大な縦穴を発見しました。\n深部に進むためには、縦穴を降りる必要があります。問題はその方法ですが……幸いなことに縦穴の上に、岩や土が固まった細い橋のようなものが見つかりました。非常に狭く、危険ですが、なんとか通行が可能とのことです。\n\n第二段階では、選抜チームが橋を渡り、縦穴底部へと到達。周辺を確保します。\nただし道は細く、大勢の通行は不可能です。少数の精鋭で任務を成功させねばなりません。チームリーダーには、ルートを詳細に伝達してあります。彼に従い、共に行動してください。",
+    "KR": "정찰대가 거대한 구멍을 발견했습니다.\n안쪽으로 전진하려면 구멍 밑으로\n내려가야 합니다.\n\n문제는 어떻게 내려가느냐인데……\n다행히도 구멍 위에 흙과 바위로 된\n좁은 다리가 있는 것을 발견했습니다.\n폭이 매우 좁아 위험하지만 지나갈 수는\n있다고 합니다.\n\n제2단계에서는 선발 팀이 다리를 건너\n구멍 밑으로 내려간 뒤, 주변 지역을\n확보합니다.\n\n단, 길이 좁아 많은 인원을 투입할 수\n없습니다. 소수 정예로 임무를\n성공시켜야 합니다. 팀 리더에게 자세한\n경로를 전해 뒀으니 그의 지시에 따라\n함께 행동해 주십시오.",
+    "SC": "侦查队发现了巨大的坑洞。\n为了进入深处，必须下到坑洞底部才行。问题是下去的方法……幸运的是，我们发现坑洞上方有土石形成的细长土桥。宽度相当狭窄，十分危险，但人还是有办法通过。\n\n第二阶段由精锐小队越过细桥，到达坑洞底部。并确保周遭安全。\n但道路狭长，大军无法通过。因此必须以少数精锐成员来完成任务。已经将路径资料传达给小队长，请遵从他的指示一同行动。"
+   }
+  },
+  {
+   "path": "M029",
+   "progress": 0.4,
+   "title": {
+    "CN": "洞穴入侵作戰　最後階段",
+    "EN": "Cave Invasion Final Stage",
+    "JA": "洞穴侵入作戦　最終段階",
+    "KR": "동굴 돌입 작전 최종 단계",
+    "SC": "洞穴入侵作战　最后阶段"
+   },
+   "brief": {
+    "CN": "似乎已經到達最深處。\n現在正是查明\n巢穴深處真相的時刻。\n請謹慎前進。",
+    "EN": "This seems to be the end.\nWhat lies deep down in the nest?\nIt's time to find out.\nTread carefully.",
+    "JA": "最深部に到達したようです。\n巣穴の奥に何があるのか？\nそれを解明する時です。\n慎重に進んでください。",
+    "KR": "최심부에 도착한 것 같습니다.\n이제 땅굴 안에 무엇이 있는지를\n밝혀내야 할 때입니다.\n신중하게 전진해 주십시오.",
+    "SC": "似乎已经到达最深处。\n现在正是查明\n巢穴深处真相的时刻。\n请谨慎前进。"
+   }
+  },
+  {
+   "path": "M020",
+   "progress": 0.41,
+   "title": {
+    "CN": "停泊",
+    "EN": "Berth",
+    "JA": "停船",
+    "KR": "고요한 배",
+    "SC": "停泊"
+   },
+   "brief": {
+    "CN": "傳送飛船正集結於海岸地帶。敵人飛船靜止於低空處。看起來就像是正在休息中。目前發現到７艘，海岸地帶儼然成為敵人的港口。與敵船的數量相比，幾乎沒有發現護衛兵器。可以說是發動奇襲的大好機會。步兵應該能在不被敵人發現的狀態下接近才對。\n為了不驚動敵人，將以最少人數組成攻擊小隊。攻進敵船正下方，將其擊落。在第一階段攻擊成功後，後續部隊就會挺進。必須將所有敵船擊破。",
+    "EN": "The teleportation ships are gathering along the shore. The ships stay low and still as if they are resting. So far, seven of them are spotted. The shore has become the enemy harbor. Compared with the number of enemy ships, there are hardely any defensive weapons, so it is perfect for assault. The infantry should be able to draw close without being noticed.\nTo avoid alerting the enemy, we'll form the attack team with minimum people. They'll rush right below the enemy ships and shoot them down. If the attacks are successfully performed, the follow-up forces will move in. Make sure to destroy all enemy ships.",
+    "JA": "沿岸部にテレポーションシップが集結しています。敵船は低空で停止。まるで体を休めているようです。現在７隻が確認されており、沿岸部は敵の港のような状態になっています。敵船の数に比べ、護衛の兵器はほとんど確認されていません。これは奇襲攻撃のチャンスだといえます。歩兵なら敵に発見されずに接近できるはずです。\n敵の目を引かないよう、攻撃チームは少数で編成。敵船直下に突入し、撃墜します。最初の攻撃が成功した後に、後続部隊を投入。すべての敵船を撃破する作戦です。",
+    "KR": "연안 지역으로 텔레포테이션 십이\n집결하고 있습니다. 적 함선은 마치\n휴식이라도 취하는 것처럼 저고도에서\n정지해 있습니다.\n\n지금까지 7척이 확인됐으며\n현재 연안 지역은 적의 항구나\n다름없는 상황입니다. 다만 적 함선의\n숫자에 비해 호위용 무기는\n거의 보이지 않으므로 기습 공격을\n하려면 지금이 기회입니다.\n보병이라면 적에게 발각되지 않고\n접근할 수 있을 겁니다.\n\n적의 주의를 끌지 않도록 공격 팀은\n소수 정예로 편성하겠습니다.\n적 함선 밑으로 돌격해 격추해 주십시오.\n1단계 공격이 성공하면 후속 부대를\n투입해 모든 적 함선을 격파하겠습니다.",
+    "SC": "传送飞船正集结于海岸地带。敌人飞船静止于低空处。看起来就像是正在休息中。目前发现到７艘，海岸地带俨然成为敌人的港口。与敌船的数量相比，几乎没有发现护卫兵器。可以说是发动奇袭的大好机会。步兵应该能在不被敌人发现的状态下接近才对。\n为了不惊动敌人，将以最少人数组成攻击小队。攻进敌船正下方，将其击落。在第一阶段攻击成功后，后续部队就会挺进。必须将所有敌船击破。"
+   }
+  },
+  {
+   "path": "M036",
+   "progress": 0.42,
+   "title": {
+    "CN": "飛天殺手",
+    "EN": "Flying Killers",
+    "JA": "宙を舞う殺戮者",
+    "KR": "하늘을 나는 살육자",
+    "SC": "飞天杀手"
+   },
+   "brief": {
+    "CN": "發生緊急狀況。\n我們發現了具有飛行能力的怪物。\n怪物已輕易地飛越防線並進入市區。由於來不及進行避難引導，市民正處於毫無防備的狀態。\n\n時間刻不容緩。請佈署於附近的小隊立刻前往現場。",
+    "EN": "Emergency! We found monsters that can fly.\nThey easily flew across the defense line and entered the city. Since the citizens didn't have enough time to evacuate, they're now defenseless.\n\nThe clock is ticking. All teams deployed nearby, please head to the scene immediately.",
+    "JA": "緊急事態です。\n飛行能力を持つ怪物を確認。\n怪物は防衛線を軽々と飛び越え、市街地に侵入しました。避難誘導は間に合わず、市民は無防備な状態です。\n\n一刻を争います。付近に展開中のチームは、ただちに現地に向かってください。",
+    "KR": "비상사태입니다.\n비행 능력을 지닌 괴물을 확인했습니다.\n괴물은 방어선을 손쉽게 돌파해\n시가지로 침입했습니다.\n대피 유도가 제때 이뤄지지 못해\n시민들이 무방비로 노출된 상황입니다.\n\n촌각을 다투는 상황이니 주변 지역에\n있는 팀은 즉시 현지로 가 주십시오.",
+    "SC": "发生紧急状况。\n我们发现了具有飞行能力的怪物。\n怪物已轻易地飞越防线并进入市区。由于来不及进行避难引导，市民正处于毫无防备的状态。\n\n时间刻不容缓。请布署于附近的小队立刻前往现场。"
+   }
+  },
+  {
+   "path": "M032_5",
+   "progress": 0.44,
+   "title": {
+    "CN": "怪異生物擊滅計畫",
+    "EN": "Monster Elimination Plan",
+    "JA": "怪生物撃滅計画",
+    "KR": "괴생물 격파 계획",
+    "SC": "怪异生物击灭计划"
+   },
+   "brief": {
+    "CN": "對怪異生物艾爾基努斯所進行的空襲成功了。艾爾基努斯已經瀕臨死亡。目前正倒在地上無法動彈。已經準備再次進行空襲要完全將牠殺死，但為了預防萬一，還是會在現場佈署地面部隊。\n\n目前預定將特科砲兵部隊所持的十數台「ＥＭＣ」也投入作戰中。做到這個地步，失敗的機率應該是連億分之一都不到吧。",
+    "EN": "The airstrike on the mysterious monster Erginus has succeeded. Erginus is dying and cannot move. We're ready to launch another round of airstrike to kill it completely. We will still deploy ground forces just in case.\n\nDozens of EMCs will also join the mission. We've gone this far, the chance of failure should be less than a hundred million to one.",
+    "JA": "怪生物エルギヌスへの空爆が成功しました。もはやエルギヌスは瀕死。動くこともできず、横たわっています。再度の空爆で完全に息の根を止める計画ですが、さらに地上部隊を現地に展開。万が一の事態にそなえます。\n\n今作戦には、特科の「ＥＭＣ」十数台が投入される予定です。ここまでやれば、億が一にも仕留めそこなうことはないでしょう。",
+    "KR": "괴생물 에르기노스에의 공습이\n성공했습니다.\n현재 에르기노스는 빈사 상태에 빠져\n쓰러진 채로 꼼짝도 못 하고 있습니다.\n재공습으로 완전히 숨통을 끊을\n계획입니다만, 만일의 사태에 대비해\n추가적으로 지상 부대를 현지에\n파견하고자 합니다.\n\n이 작전에는 특과에서 개발한 「EMC」\n십여 대를 투입할 예정입니다.\n이 정도 화력이면 만일의 사태가 아니라\n억일의 사태가 일어난다 해도 실패하지\n않을 겁니다.",
+    "SC": "对怪异生物艾尔基努斯所进行的空袭成功了。艾尔基努斯已经濒临死亡。目前正倒在地上无法动弹。已经准备再次进行空袭要完全将牠杀死，但为了预防万一，还是会在现场布署地面部队。\n\n目前预定将特科砲兵部队所持的十数台「ＥＭＣ」也投入作战中。做到这个地步，失败的机率应该是连亿分之一都不到吧。"
+   }
+  },
+  {
+   "path": "M034",
+   "progress": 0.45,
+   "title": {
+    "CN": "平原的激烈衝突",
+    "EN": "Plain of Conflict",
+    "JA": "激突する平原",
+    "KR": "격돌의 평원",
+    "SC": "平原的激烈冲突"
+   },
+   "brief": {
+    "CN": "外星生物正降落於全世界各地，敵人似乎開始全面進攻。\n目前也有大量外星生物往這個地區接近中。絕不能讓牠們接近市區。將會派出重戰車泰坦建立起防衛線。\n對抗的目標是前所未有的大軍，可想而知會是場激烈的戰鬥。但我們擁有最後王牌。新兵器移動式電磁砲正往這裡過來。在電磁砲到達之前，請維持住戰線。",
+    "EN": "The aliens are spreading around the world. It looks like our enemy is ready for a full scale assault.\nThere are also a great amount of aliens coming at us. We need to stop them from approaching the city. Heavy tanks Titans will be deployed to form a line of defense.\nWe will be confronting an unprecedented large army, so it will be a fierce fight. However, we have a trump card. The new weapon %dq%self-propelled railguns%dq% are on the way. Hold the front line until the railguns arrive.",
+    "JA": "世界のいたるところにエイリアンが降下。敵の大進撃が始まったようです。\nこのエリアにも多数のエイリアンが接近中。市街地に近づけるわけにはいきません。重戦車タイタンを投入し、防衛ラインを構築します。\n敵はかつてないほどの大軍。激しい戦いが予想されます。ですが、我々には切り札があります。新兵器の自走式レールガンがこちらに向かっています。レールガン到着まで、戦線を維持してください。",
+    "KR": "전 세계 곳곳에 외계인이 강하해\n대대적인 진격을 시작했습니다.\n이 구역에도 다수의 외계인이\n접근 중입니다.\n절대 시가지로 들여보내서는 안 됩니다.\n\n중전차 타이탄을 투입해 방어선을\n구축하겠습니다. 사상 최대의 적 병력과\n싸우는 만큼 치열한 싸움이 예상됩니다.\n하지만 우리에게는 비장의 수단이\n있습니다.\n\n신무기인 레일건 자주포를 이쪽으로\n수송 중이니 레일건이 도착할 때까지\n전선을 유지해 주십시오.",
+    "SC": "外星生物正降落于全世界各地，敌人似乎开始全面进攻。\n目前也有大量外星生物往这个地区接近中。绝不能让牠们接近市区。将会派出重战车泰坦建立起防卫线。\n对抗的目标是前所未有的大军，可想而知会是场激烈的战斗。但我们拥有最后王牌。新兵器移动式电磁砲正往这里过来。在电磁砲到达之前，请维持住战线。"
+   }
+  },
+  {
+   "path": "M034_3",
+   "progress": 0.46,
+   "title": {
+    "CN": "眼前的戰況",
+    "EN": "Current Headquarters",
+    "JA": "目前の本営",
+    "KR": "눈앞의 본진",
+    "SC": "眼前的战况"
+   },
+   "brief": {
+    "CN": "你也活下來了啊。\n防線崩壞，我的部隊也潰不成軍了。\n你那邊似乎也一樣啊。\n\n…………\n雖然能重逢很開心，但我得走了。\n快看！那就是外星生物的主力部隊。\n要是牠們展開攻擊，撤退中的友軍就完蛋了。\n必須爭取時間讓部隊重整態勢。\n\n我也知道這麼做實在是有勇無謀。但戰友們危在旦夕。\n我自己一個人去，沒有要拖你下水的打算。\n在地獄裡再會吧。",
+    "EN": "You made it too.\nThe defense line broke and my squad was utterly routed.\nYou seem to be in the same situation.\n\n……\nI'm happy to see you, but I have to go.\nLook! That's the alien main force.\nIf they launch an attack, the retreating allies will be doomed.\nWe have to buy time for the infantry unit to regroup.\n\nI know this is reckless, but our allies are in great danger.\nI will go by myself. I won't drag you with me.\nSee you in the afterlife.",
+    "JA": "お前も生き延びたようだな。\n防衛線は崩壊。俺の部隊はちりぢりだ。\nそっちも同じ状況らしいな。\n\n…………。\n再会を喜びたいところだが、俺は行かなければならない。\n見ろ！　あれはエイリアンの本隊だ。\nやつらが攻撃を開始したら、撤退中の友軍はおしまいだ。\n部隊が態勢を整えるための時間を稼ぐ。\n\n無謀なことはわかっている。だが、戦友たちの命が危ない。\n道連れにする気はない。一人で行く。\n地獄でまた会おう。",
+    "KR": "자네도 살아남았군.\n방어선은 무너졌고 우리 부대는\n뿔뿔이 흩어졌다.\n그쪽도 비슷한 상황인 것 같더군.\n\n………….\n자네와의 재회를 기뻐하고 싶지만\n난 가야만 한다.\n저걸 봐! 저건 외계인의 본대다.\n놈들이 공격을 시작하면 철수 중인\n아군은 모두 끝장이야.\n부대가 전열을 정비할 때까지\n시간을 벌어야 해.\n\n무모한 짓이라는 건 나도 안다.\n하지만 전우의 목숨이 걸린 일이야.\n자네까지 데려갈 생각은 없어.\n나 혼자 가겠다.\n그럼 지옥에서 기다리지.",
+    "SC": "你也活下来了啊。\n防线崩坏，我的部队也溃不成军了。\n你那边似乎也一样啊。\n\n…………\n虽然能重逢很开心，但我得走了。\n快看！那就是外星生物的主力部队。\n要是牠们展开攻击，撤退中的友军就完蛋了。\n必须争取时间让部队重整态势。\n\n我也知道这么做实在是有勇无谋。但战友们危在旦夕。\n我自己一个人去，没有要拖你下水的打算。\n在地狱里再会吧。"
+   }
+  },
+  {
+   "path": "M034_5",
+   "progress": 0.46,
+   "title": {
+    "CN": "嚴苛的戰場",
+    "EN": "Brutal Battlefield",
+    "JA": "苛烈なる戦場",
+    "KR": "치열한 전장",
+    "SC": "严苛的战场"
+   },
+   "brief": {
+    "CN": "敵人大軍逼近。\n我們遍體鱗傷。\n已經沒有生存的希望了。\n\n你還有彈藥吧？\n那些東西沒辦法帶去另一個世界。\n射光吧！把彈藥全送給敵人！",
+    "EN": "The enemy army is closing in.\nWe are on our last leg.\nWe've lost our hope of survival.\n\nHave you still got ammo?\nYou can't take those with you to the other side.\nSo shoot it all! Send all ammo to the enemy!",
+    "JA": "敵の大軍が迫っている。\n俺たちは満身創痍。\n生還の望みは無さそうだ。\n\n弾はまだ残っているな？\nそれはあの世へは持っていけない。\n撃ち尽くせ！　敵に全部くれてやれ！",
+    "KR": "적의 대부대가 접근 중이다.\n우리는 이미 만신창이이니\n살아 돌아가기는 틀린 것 같군.\n\n총알은 아직 남아 있겠지?\n어차피 저승에 들고 갈 수도 없으니\n남김없이 써버려! 전부 적에게 먹여줘라!",
+    "SC": "敌人大军逼近。\n我们遍体鳞伤。\n已经没有生存的希望了。\n\n你还有弹药吧？\n那些东西没办法带去另一个世界。\n射光吧！把弹药全送给敌人！"
+   }
+  },
+  {
+   "path": "M035",
+   "progress": 0.47,
+   "title": {
+    "CN": "前哨基地　突擊作戰",
+    "EN": "Assaulting the Outpost",
+    "JA": "前哨基地 突撃作戦",
+    "KR": "전초기지 돌격 작전",
+    "SC": "前哨基地　突击作战"
+   },
+   "brief": {
+    "CN": "在激戰中獲得勝利，成功守住這個區域。我們不只制止了敵人的攻擊，還大幅消耗了敵軍的戰力。雖然我軍的損失也不輕，但現在正是反擊的大好機會。將集結所有可能的戰力，破壞敵人的前哨基地。\n\n前哨基地有無數砲台守護著，預測會有激烈的砲擊。這次要讓重戰車與戰鬥機體帶頭進攻，以重戰車為防盾，破壞基地的砲台。只要減少砲台，對空砲火也會減弱，空軍就能接近。只要能由陸空兩面夾擊，應該就能擊破前哨基地。",
+    "EN": "We won the tough battle and succeeded in defending this area. We not only stopped the enemy from attacking, but greatly weakened their forces. Although we have taken heavy casualties too, this is the best chance to strike back. We will round up all possible forces to destroy the enemy outpost.\n\nThe outpost is guarded by numerous cannons. Expect heavy artillery fire. This time the heavy tanks and powered exoskeletons will lead the attack. We can shield ourselves with the heavy tanks and destroy those cannons. Once the number of cannons reduces,  the anti-air artillery gets weaker, allowing air force to approach the outpost. If we can launch a double-pronged attack from both land and air, we should be able to destroy the outpost.",
+    "JA": "激戦を制し、このエリアを守り抜くことに成功。我々は攻撃を退けただけでなく、敵軍を大きく消耗させたのです。我が軍の被害も軽くはありませんが、それでも今こそ反撃のチャンスです。可能な限りの戦力を集め、敵前哨基地を破壊します。\n\n前哨基地は無数の砲台で守られており、激しい砲撃が予想されます。そこで、重戦車とコンバットフレームを先頭に進撃。重戦車を盾にして基地の砲台を破壊します。砲台が減れば対空砲火が弱まり、空軍の接近が可能になります。陸と空からの両面攻撃なら前哨基地を撃破することができるはずです。",
+    "KR": "사투 끝에 이 구역을 지키는 데\n성공했습니다. 우리는 적의 공격을\n물리쳤을 뿐만 아니라 적군에게\n큰 타격을 입혔습니다. 아군도 적지\n않은 피해를 입었지만 지금이 아니면\n반격할 기회가 없습니다. 최대한 전력을\n모아 적의 전초기지를 파괴해야 합니다.\n\n수많은 포대가 전초기지를 방어하고\n있어 거센 포격이 예상됩니다. 따라서\n중전차와 컴배트 프레임이 선두에 서서\n전진한 뒤 중전차를 방패로 삼아 기지의\n포대를 파괴하겠습니다.\n포대가 줄면 대공포화가 약해져 공군이\n접근할 수 있습니다. 지상과 상공\n양쪽에서 공격하면 전초기지를 격파할\n수 있을 겁니다.",
+    "SC": "在激战中获得胜利，成功守住这个区域。我们不只制止了敌人的攻击，还大幅消耗了敌军的战力。虽然我军的损失也不轻，但现在正是反击的大好机会。将集结所有可能的战力，破坏敌人的前哨基地。\n\n前哨基地有无数砲台守护著，预测会有激烈的砲击。这次要让重战车与战斗机体带头进攻，以重战车为防盾，破坏基地的砲台。只要减少砲台，对空砲火也会减弱，空军就能接近。只要能由陆空两面夹击，应该就能击破前哨基地。"
+   }
+  },
+  {
+   "path": "M007_5",
+   "progress": 0.48,
+   "title": {
+    "CN": "救援歐洲　作戰１",
+    "EN": "Saving Europe: Operation 1",
+    "JA": "欧州救援 作戦１",
+    "KR": "유럽 지원 작전 1",
+    "SC": "救援欧洲　作战１"
+   },
+   "brief": {
+    "CN": "請參與在歐洲進行的怪物掃蕩作戰。\n\n我們成功擊退了外星生物。下一個目標是徹底消滅怪物。\n現在世界各地都在撲滅怪物。雖然也有將怪物一掃而空的區域，但歐洲如今似乎也與β型侵略生物苦戰中。因此，曾經成功撲滅β型的我們被派遣到這裡。現在的話，即使一部份的戰力不在此處也沒有問題吧。祝你好運。",
+    "EN": "Please participate the monster mop-up operation in Europe.\n\nWe successfully defeated the aliens. Our next objective is to eradicate the monsters.\nForces around the world are trying to eliminate the monsters. Some areas were able to eradicate them, but Europe is still struggling with Aggressive Alien Species β. We were dispatched here since we defeated species β before. I think we can manage to survive without you for now. Good luck.",
+    "JA": "欧州で実施される怪物掃討作戦に参加してください。\n\n我々はエイリアンの撃退に成功しました。次の目標は怪物の根絶です。\n現在、世界各地で怪物駆除が進められています。怪物を一掃したエリアもありますが、欧州は今なおβ型侵略生物に苦しめられているようです。そこで、β型の駆除実績を持つ我々が派遣されることになりました。今なら戦力の一部がこの地を離れても問題ないでしょう。健闘を祈ります。",
+    "KR": "유럽에서 진행 중인 괴물 소탕 작전에\n참가해 주십시오.\n\n우리는 외계인을 물리치는 데\n성공했습니다. 다음 목표는 괴물의\n씨를 말리는 것입니다.\n현재 세계 각지에서 괴물 섬멸 작전이\n진행되고 있습니다. 괴물을 소탕한\n구역도 있지만 유럽에서는 여전히\nβ형 침략 생물로 인해 고전하고\n있는 듯 합니다.\n\n이에 따라 β형 섬멸 경험이 있는\n우리 부대가 파견되게 됐습니다.\n지금이라면 일부 전력이 잠시 자리를\n비워도 문제없을 겁니다.\n건투를 빌겠습니다.",
+    "SC": "请参与在欧洲进行的怪物扫荡作战。\n\n我们成功击退了外星生物。下一个目标是彻底消灭怪物。\n现在世界各地都在扑灭怪物。虽然也有将怪物一扫而空的区域，但欧洲如今似乎也与β型侵略生物苦战中。因此，曾经成功扑灭β型的我们被派遣到这里。现在的话，即使一部份的战力不在此处也没有问题吧。祝你好运。"
+   }
+  },
+  {
+   "path": "M033",
+   "progress": 0.49,
+   "title": {
+    "CN": "救援歐洲　作戰２",
+    "EN": "Saving Europe: Operation 2",
+    "JA": "欧州救援 作戦２",
+    "KR": "유럽 지원 작전 2",
+    "SC": "救援欧洲　作战２"
+   },
+   "brief": {
+    "CN": "數小時後，母艦將會通過上空。推測母艦會投放傳送錨塔，也會落入這個區域。錨塔若是落在市區，必定會造成莫大損害。\n最重要的是，要在錨塔落下後迅速地破壞錨塔。為此將各小隊廣範圍地佈署在各地。作戰方式是由距離落下地點最近的小隊迅速地解決錨塔。\n請於指定地點待命。錨塔落下時，請迅速將其破壞。",
+    "EN": "The motherships will fly over our airspace in a few hours. We suspect those motherships will drop teleportation anchors in this area. If the anchors  crash down into the city, they will cause severe casualties.\nOur first objective is to quickly destroy the anchors the moment they crash down. In order to do this, we're going to deploy our units over a wide area. The team closest to the drop location should take care of them immediately.\nWait at the designated location and swiftly destroy those dropping anchors.",
+    "JA": "数時間後にマザーシップが上空を通過します。マザーシップはテレポーションアンカーを投下しており、このエリアにも落下が予想されます。もし市街地にアンカーが落下すれば、大きな被害がでるでしょう。\n重要なことは、落下後、できるだけ迅速にアンカーを破壊することです。そのため、各チームを広範囲に分散して配置。落下地点に最も近いチームが速やかにアンカーを処理する作戦です。\n指定地点で待機。アンカーが落下してきた場合は迅速に破壊してください。",
+    "KR": "몇 시간 뒤 마더 십이 상공을\n통과합니다. 마더 십은 텔레포테이션\n앵커를 투하하고 있으며, 이 구역도\n앵커가 떨어질 것으로 예상됩니다.\n만약 시가지에 앵커가 떨어지면\n큰 피해가 발생할 겁니다.\n\n중요한 건 낙하 후에 최대한 빨리\n앵커를 파괴하는 것입니다. 이를 위해\n각 팀을 넓게 분산 배치했습니다.\n\n낙하지점과 가장 가까운 팀이 신속하게\n앵커를 처리하면 됩니다. 지정 지점에서\n대기하다가 앵커가 떨어지면 즉시\n파괴해 주십시오.",
+    "SC": "数小时后，母舰将会通过上空。推测母舰会投放传送锚塔，也会落入这个区域。锚塔若是落在市区，必定会造成莫大损害。\n最重要的是，要在锚塔落下后迅速地破坏锚塔。为此将各小队广范围地布署在各地。作战方式是由距离落下地点最近的小队迅速地解决锚塔。\n请于指定地点待命。锚塔落下时，请迅速将其破坏。"
+   }
+  },
+  {
+   "path": "M037",
+   "progress": 0.49,
+   "title": {
+    "CN": "飛天型撲滅作戰",
+    "EN": "Culling the Flying-type",
+    "JA": "飛行型駆除作戦",
+    "KR": "비행형 섬멸 작전",
+    "SC": "飞天型扑灭作战"
+   },
+   "brief": {
+    "CN": "飛天型怪物正接近市區。數量相當龐大。\n已派遣對空飛彈搭載車輛前往現場。對空飛彈已證實能擊落飛天型。\n戰鬥機體也將同行進行護衛。戰鬥機體將會擊落接近車輛的飛天型。\n\n請與部隊一同行動，並給予支援。",
+    "EN": "The flying-type is getting close to the city and they're coming in large number.\nVehicles equipped with anti-air missiles have been dispatched to the site. The anti-air missiles are proved to be effective against the flying-type.\nPowered exoskeletons will provide escort, shooting down any flying-types that approach the vehicles.\n\nPlease join the troops and offer support.",
+    "JA": "飛行型の怪物が市街地に接近中。かなりの大群です。\n対空ミサイル搭載車両を現地に向かわせました。対空ミサイルが飛行型に有効なことは実証済みです。\n護衛のためコンバットフレームも随行。車両に接近した飛行型はコンバットフレームが撃ち落とします。\n\n部隊に同行し、援護してください。",
+    "KR": "비행형 괴물 무리가 시가지로\n접근 중입니다. 숫자가 꽤 많습니다.\n대공 미사일 탑재 차량을 현지에\n파견했습니다. 대공 미사일이\n비행형 괴물에게 효과가 있다는 건\n이미 입증됐습니다.\n\n호위를 위해 컴배트 프레임도 동행할\n예정입니다. 차량에 접근하는\n비행형 괴물은 컴배트 프레임이\n격추할 겁니다.\n\n부대와 동행해 엄호해 주시기 바랍니다.",
+    "SC": "飞天型怪物正接近市区。数量相当庞大。\n已派遣对空飞弹搭载车辆前往现场。对空飞弹已证实能击落飞天型。\n战斗机体也将同行进行护卫。战斗机体将会击落接近车辆的飞天型。\n\n请与部队一同行动，并给予支援。"
+   }
+  },
+  {
+   "path": "M031",
+   "progress": 0.5,
+   "title": {
+    "CN": "空中包圍環",
+    "EN": "Circle Formation",
+    "JA": "空の円環",
+    "KR": "하늘의 고리",
+    "SC": "空中包围环"
+   },
+   "brief": {
+    "CN": "發現傳送飛船的隊伍。\n不久就會到達市區上空。\n請佈署於附近的小隊立刻往現場前進。",
+    "EN": "We found a team of teleportation ships. They will soon reach the sky above the city.\nAll teams deployed nearby head to the scene at once.",
+    "JA": "テレポーションシップの編隊を確認。\nまもなく市街地上空に到達します。\n付近に展開中のチームは、ただちに現地に向かってください。",
+    "KR": "텔레포테이션 십 편대를 확인했습니다.\n곧 시가지 상공에 도착합니다.\n근방에서 전개 중인 팀은 즉시 현지로\n이동해주십시오.",
+    "SC": "发现传送飞船的队伍。\n不久就会到达市区上空。\n请布署于附近的小队立刻往现场前进。"
+   }
+  },
+  {
+   "path": "M041",
+   "progress": 0.51,
+   "title": {
+    "CN": "第二次　巨船破壞作戰",
+    "EN": "Giant Ship Attack : 2nd Attempt",
+    "JA": "第二次 巨船破壊作戦",
+    "KR": "제2차 거함 파괴 작전",
+    "SC": "第二次　巨船破坏作战"
+   },
+   "brief": {
+    "CN": "母艦飛抵市區上空。\n正在投放大量外星生物。\n周遭區域已經被完全壓制。\n\n作戰即將展開。\n地面部隊負責掃蕩外星生物與怪物。\n請從敵人手中奪回市區。",
+    "EN": "The motherships are now floating above the city and dropping numerous aliens.\nThe surrounding areas are under their control.\n\nPrepare for battle.\nGround force, wipe out aliens and monsters.\nReclaim the city from the enemy.",
+    "JA": "マザーシップが市街地上空に飛来。\n多数のエイリアンを投下しています。\n周辺地域は完全に制圧されました。\n\nこれより作戦を開始します。\n地上部隊はエイリアンと怪物を掃討。\n市街地を奪還してください。",
+    "KR": "마더 십이 시가지 상공에 나타나\n다수의 외계인을 투하 중입니다.\n주변 지역은 완전히 제압됐습니다.\n\n지금부터 작전을 개시하겠습니다.\n지상 부대는 외계인과 괴물을 소탕해\n시가지를 탈환해 주십시오.",
+    "SC": "母舰飞抵市区上空。\n正在投放大量外星生物。\n周遭区域已经被完全压制。\n\n作战即将展开。\n地面部队负责扫荡外星生物与怪物。\n请从敌人手中夺回市区。"
+   }
+  },
+  {
+   "path": "M042",
+   "progress": 0.51,
+   "title": {
+    "CN": "生還者",
+    "EN": "Survivors",
+    "JA": "生存者",
+    "KR": "생존자",
+    "SC": "生还者"
+   },
+   "brief": {
+    "CN": "部隊遭到外星生物攻擊，潰不成軍。生還者似乎散落各處並躲藏在建築物中。\n幸運的是，外星生物的身軀龐大，應該無法找出所有躲進建築物中的人。\n\n即使如此，沒有水和糧食，也無法一直躲藏著。一旦走出建築物就會立刻被發現並殺掉吧。只能祈禱他們在救援部隊抵達前能平安無事。",
+    "EN": "Our units got attacked by the aliens and disintegrated. The survivors seem to scatter around hiding in the buildings.\nFortunately, the aliens are huge in size, so it's unlikely for them to find out everyone inside the buildings.\n\nNevertheless, they can't hide forever without water and food. Those aliens will detect and kill them once they go outside. We can only pray for their safety and hope the rescue team will arrive in time.",
+    "JA": "エイリアンの攻撃で部隊は壊滅状態。生き延びた者は、ちりぢりになって建物に身を潜めているようです。\n幸いなのは、エイリアンは巨体のため、建物に入り込んだ人間すべてを見つけることはできない、ということでしょう。\n\nとはいえ、水も食糧も持たず、いつまでも隠れていられるわけではありません。建物を出ればすぐに発見され、殺されてしまうでしょう。救出部隊の到着まで彼らが無事であることを祈るだけです。",
+    "KR": "외계인의 공격으로 부대는\n괴멸됐습니다. 생존자들은 뿔뿔이\n흩어져 건물 안에 숨은 것 같습니다.\n그나마 다행인 점은 외계인은 몸집이 커\n건물 안에 들어간 인간을 찾아낼 수는\n없다는 겁니다.\n\n물도 식량도 없이 계속 숨어 있을\n수만은 없습니다. 건물 밖으로 나갔다간\n바로 발각되어 죽고 말 것입니다.\n구출 부대가 도착할 때까지\n그들이 무사하길 바랄 뿐입니다.",
+    "SC": "部队遭到外星生物攻击，溃不成军。生还者似乎散落各处并躲藏在建筑物中。\n幸运的是，外星生物的身躯庞大，应该无法找出所有躲进建筑物中的人。\n\n即使如此，没有水和粮食，也无法一直躲藏著。一旦走出建筑物就会立刻被发现并杀掉吧。只能祈祷他们在救援部队抵达前能平安无事。"
+   }
+  },
+  {
+   "path": "M046_1",
+   "progress": 0.52,
+   "title": {
+    "CN": "飛碟大進擊",
+    "EN": "The Flying Saucers",
+    "JA": "円盤拡散",
+    "KR": "원반 확산",
+    "SC": "飞碟大进击"
+   },
+   "brief": {
+    "CN": "母艦不斷在市區中投放無人機。受害正不斷擴大中。飛機被大量無人機阻擋，無法靠近。\n\n將會派遣步兵部隊由地面進行掃蕩工作。請在躲避母艦的同時，攻擊上空的無人機。",
+    "EN": "The motherships keep dropping drones in the city and damage continues to spread. Our airplanes are blocked by drones and fail to approach.\n\nWe'll send over infantry unit to commence elimination on the ground. As you evade the motherships' attack, fire at the drones in the sky.",
+    "JA": "マザーシップは、市街地に次々とドローンを投下。被害が広がり続けています。無数のドローンに阻まれ、航空機は近づくことすらできません。\n\n歩兵部隊で地上からの排除をおこないます。マザーシップから身を隠しつつ、上空のドローンを攻撃してください。",
+    "KR": "마더 십이 시가지에 잇달아 드론을 \n투하하면서 피해가 확대되고 있습니다.\n수많은 드론에 가로막혀 항공기는\n접근조차 할 수 없는 상황입니다.\n\n보병 부대로 지상에서 드론을\n제거하겠습니다. 마더 십을 피해 \n상공에 있는 드론을 공격해 주십시오.",
+    "SC": "母舰不断在市区中投放无人机。受害正不断扩大中。飞机被大量无人机阻挡，无法靠近。\n\n将会派遣步兵部队由地面进行扫荡工作。请在躲避母舰的同时，攻击上空的无人机。"
+   }
+  },
+  {
+   "path": "M047",
+   "progress": 0.53,
+   "title": {
+    "CN": "空降戰機　前篇",
+    "EN": "Airborne Fighters: Part 1",
+    "JA": "降下戦機 前篇",
+    "KR": "강하 작전 전편",
+    "SC": "空降战机　前篇"
+   },
+   "brief": {
+    "CN": "母艦正通過市區上空。這艘２號母艦會投放新型戰鬥機器人，推測也會在此區域投放。\n\n步兵部隊會大範圍地分散在市區各處。請在發現新型機器人後前往現場。",
+    "EN": "A mothership is passing over the city's sky. Mothership no.2 will launch new type battle robots and this area might be their target.\n\nInfantry units will spread widely in the city. Please dash to the scene once the new type battle robots are confirmed.",
+    "JA": "マザーシップが市街地上空を通過します。このマザーシップ・ナンバー２は、新型戦闘ロボットを投下しており、このエリアにも落下が予想されます。\n\n歩兵部隊は、市街地に広く分散。新型ロボットが確認されしだい、現地へ向かってください。",
+    "KR": "마더 십이 시가지 상공을 곧 통과합니다.\n이 마더 십 넘버 2는 신형 전투 로봇을\n투하하고 있으며 이 구역에도 낙하할\n것으로 예상됩니다.\n\n보병 부대는 시가지에 넓게 흩어져\n있다가 신형 로봇이 확인되면 즉시\n현지로 가주시기 바랍니다.",
+    "SC": "母舰正通过市区上空。这艘２号母舰会投放新型战斗机器人，推测也会在此区域投放。\n\n步兵部队会大范围地分散在市区各处。请在发现新型机器人后前往现场。"
+   }
+  },
+  {
+   "path": "M047_2",
+   "progress": 0.53,
+   "title": {
+    "CN": "空降戰機　後篇",
+    "EN": "Airborne Fighters: Part 2",
+    "JA": "降下戦機 後篇",
+    "KR": "강하 작전 후편",
+    "SC": "空降战机　后篇"
+   },
+   "brief": {
+    "CN": "２號母艦不斷從軌道上投放戰鬥機器人。\n推測也會大量地投放到這個區域。\n\n請各小隊在發現投放到地面的戰鬥機器人後加以排除。",
+    "EN": "Mothership no.2 continues to launch battle robots. We can imagine a bunch of robots will be dropped in the area.\n\nAll teams should search and destroy the airborne battle robots.",
+    "JA": "マザーシップ・ナンバー２は軌道上から戦闘ロボットを投下し続けています。\nこのエリアにも、多数の落下が予想されます。\n\n各チームは、落下した戦闘ロボットを発見し、排除してください。",
+    "KR": "마더 십 넘버 2는 지구 궤도에서\n전투 로봇을 계속 투하하고 있습니다.\n이 구역에도 여러 대가 낙하할 것으로\n예상됩니다.\n\n각 팀은 낙하한 전투 로봇을 찾아내\n제거해 주십시오.",
+    "SC": "２号母舰不断从轨道上投放战斗机器人。\n推测也会大量地投放到这个区域。\n\n请各小队在发现投放到地面的战斗机器人后加以排除。"
+   }
+  },
+  {
+   "path": "M091",
+   "progress": 0.54,
+   "title": {
+    "CN": "艦隊攻擊計畫",
+    "EN": "Attacking the Fleet",
+    "JA": "船団攻撃計画",
+    "KR": "선단 공격 계획",
+    "SC": "舰队攻击计划"
+   },
+   "brief": {
+    "CN": "傳送飛船的艦隊入侵工業區。靜止於低空處，活動也似乎停止了。\n\n必須在艦隊開始攻擊之前，將艦隊擊沉。但現在正在進行怪異生物攻擊作戰，有大半部隊都不在基地中，無法確保充分的戰力。因此以少數兵力的部隊進行夜間攻擊。\n請隱身於夜色中前進，以奇襲作戰擊落傳送飛船。",
+    "EN": "A fleet of teleportation ships has invaded the industrial area. They stay still and low in the sky. They show no signs of activity.\n\nWe must shoot them down before they attack. But the operation mysterious monsters is on the go, more than half of the troops are away from the base, so our fighting force is very limited. We will launch a night raid with only a few soldiers.\nUse the night as cover to approach and ambush the teleportation ships.",
+    "JA": "テレポーションシップの船団が工業地帯に侵入。低高度で静止したまま、活動を休止しているようです。\n\n船団が攻撃を開始する前に撃沈する必要があります。しかし現在、怪生物攻撃作戦が進行中です。部隊の大半が基地を離れており、十分な戦力を確保できません。そのため、少数の部隊で夜間攻撃を実施します。\n闇にまぎれて接近し、奇襲攻撃でテレポーションシップを撃破してください。",
+    "KR": "텔레포테이션 십 선단이 공업 지대에\n침입했습니다. 저고도에서 정지한 채로\n아무런 움직임을 보이지 않고 있습니다.\n\n선단이 공격을 개시하기 전에 격침해야\n합니다. 하지만 현재 괴생물 공격작전이\n진행 중이라 부대 전력 대부분이 기지를\n비워 충분한 전력을 확보할 수 없는\n상황입니다.\n\n따라서 소규모 부대로 야간 공격을\n감행하겠습니다. 어둠을 틈타 적에게\n접근한 뒤 기습 공격으로\n텔레포테이션 십을 격파해 주십시오.",
+    "SC": "传送飞船的舰队入侵工业区。静止于低空处，活动也似乎停止了。\n\n必须在舰队开始攻击之前，将舰队击沉。但现在正在进行怪异生物攻击作战，有大半部队都不在基地中，无法确保充分的战力。因此以少数兵力的部队进行夜间攻击。\n请隐身于夜色中前进，以奇袭作战击落传送飞船。"
+   }
+  },
+  {
+   "path": "M056",
+   "progress": 0.55,
+   "title": {
+    "CN": "地底陷阱",
+    "EN": "Underground Trap",
+    "JA": "地の底の罠",
+    "KR": "땅속의 함정",
+    "SC": "地底陷阱"
+   },
+   "brief": {
+    "CN": "發現了新的怪物巢穴。先遣部隊已經進入巢穴，卻受到怪物反擊而撤退中。後續部隊立刻開始行動。請找到並救出生還者。",
+    "EN": "A new monster nest is found. The vanguard has taken the lead going into the nest, but was attacked by the monsters and has to retreat. Move in, follow-up forces, search for the survivors and save them.",
+    "JA": "新たな怪物の巣穴が発見されました。すでに先行チームが巣穴に進入。しかし、怪物の反撃を受けて退却中とのことです。後続部隊はただちに行動を開始。生存者を探し、救出してください。",
+    "KR": "괴물이 판 새로운 땅굴을 발견했습니다.\n선행 팀이 땅굴 안으로 진입했으나\n괴물의 반격으로 퇴각 중이라고 합니다.\n\n후속 부대는 즉시 행동을 개시해\n생존자를 수색, 구출해 주십시오.",
+    "SC": "发现了新的怪物巢穴。先遣部队已经进入巢穴，却受到怪物反击而撤退中。后续部队立刻开始行动。请找到并救出生还者。"
+   }
+  },
+  {
+   "path": "M042_2",
+   "progress": 0.56,
+   "title": {
+    "CN": "軍團奇襲",
+    "EN": "The Army Group Raid",
+    "JA": "兵団奇襲",
+    "KR": "병단 기습",
+    "SC": "军团奇袭"
+   },
+   "brief": {
+    "CN": "市區正被武裝的外星生物部隊所佔領。\n請利用建築物前進，攻擊外星生物。",
+    "EN": "The city is under the control of armed alien troops.\nUse buildings as cover to advance and attack those aliens.",
+    "JA": "武装したエイリアンの一団によって、市街地が占拠されています。\n建物にまぎれて接近し、エイリアンを攻撃してください。",
+    "KR": "무장한 외계인 부대가\n시가지를 점령했습니다.\n건물에 엄폐해 접근한 뒤\n외계인을 공격해 주십시오.",
+    "SC": "市区正被武装的外星生物部队所占领。\n请利用建筑物前进，攻击外星生物。"
+   }
+  },
+  {
+   "path": "M030",
+   "progress": 0.56,
+   "title": {
+    "CN": "幕後黑手",
+    "EN": "Wire-puller",
+    "JA": "黒幕",
+    "KR": "흑막",
+    "SC": "幕后黑手"
+   },
+   "brief": {
+    "CN": "外星生物正率領怪物集團攻擊市區。更驚人的是，在怪物之中發現母體生物。看來外星生物也能操控母體生物。\n不能對母體生物置之不管。即刻展開殲滅作戰。",
+    "EN": "The aliens are leading groups of monsters to strike the city. Surprisingly, there are Mother Monsters among them. It looks like that aliens have control over the Mother Monsters as well.\nWe can't just let Mother Monsters roam freely. Eliminate them at once.",
+    "JA": "エイリアンが怪物の群れを率いて市街地を攻撃しています。驚くべきことに、怪物の中にマザーモンスターが確認されました。やはりエイリアンはマザーモンスターをも操ることができるようです。\nマザーモンスターを放置するわけにはいきません。ただちに殲滅作戦を開始します。",
+    "KR": "외계인이 괴물 무리를 이끌고\n시가지를 공격하고 있습니다.\n놀랍게도 괴물 무리 속에 마더 몬스터가\n있는 것을 확인했습니다.\n\n역시 외계인은 마더 몬스터 역시\n조종할 수 있는 것 같습니다.\n마더 몬스터를 이대로 놔둘 순 없습니다. \n즉시 섬멸 작전을 개시하겠습니다.",
+    "SC": "外星生物正率领怪物集团攻击市区。更惊人的是，在怪物之中发现母体生物。看来外星生物也能操控母体生物。\n不能对母体生物置之不管。即刻展开歼灭作战。"
+   }
+  },
+  {
+   "path": "M053",
+   "progress": 0.57,
+   "title": {
+    "CN": "網下潛行者",
+    "EN": "Hiding behind the Web",
+    "JA": "網に潜む者",
+    "KR": "그물 속에 숨은 자",
+    "SC": "网下潜行者"
+   },
+   "brief": {
+    "CN": "已發現新品種怪物。怪物在市區到處張開巨大的網子，並在網子上移動。\n雖然撲滅部隊正朝現場前進，但怪物的能力還是未知數。為了預防萬一，請前往支援部隊。",
+    "EN": "A new species of monster is found. They set up large webs everywhere in the city and move across those webs.\nThe extermination team is on their way, but currently we know nothing about the monsters. Please head over there and back them up.",
+    "JA": "新種の怪物が確認されました。怪物は市街地に巨大なネットを張り巡らせ、その上を移動しているようです。\nすでに駆除部隊が現地に向かっていますが、怪物の能力は未知数です。万一にそなえ、部隊を支援してください。",
+    "KR": "새로운 괴물을 확인했습니다.\n괴물은 시가지에 거대한 그물을 쳐\n그 위를 이동하고 있습니다.\n\n이미 섬멸 부대가 현지에 파견됐지만\n괴물의 능력은 미지수입니다.\n만일의 사태에 대비해 부대를 지원해\n주십시오.",
+    "SC": "已发现新品种怪物。怪物在市区到处张开巨大的网子，并在网子上移动。\n虽然扑灭部队正朝现场前进，但怪物的能力还是未知数。为了预防万一，请前往支援部队。"
+   }
+  },
+  {
+   "path": "M203",
+   "progress": 0.58,
+   "title": {
+    "CN": "絲線捕食者",
+    "EN": "Predators on Thread",
+    "JA": "糸の捕食者",
+    "KR": "실 위의 포식자",
+    "SC": "丝线捕食者"
+   },
+   "brief": {
+    "CN": "我們失去了和厄拉尼亞交戰的飛翼潛行兵的音訊。請立刻前往救援。",
+    "EN": "We have lost contact with Wing Divers that fought against Aranea. Please go for rescue at once.",
+    "JA": "アラネアと交戦したウイングダイバーが消息を絶ちました。ただちに救援に向かってください。",
+    "KR": "아라네아와 교전 중이던 윙 다이버와\n통신이 두절됐습니다.\n즉시 구조하러 가 주십시오.",
+    "SC": "我们失去了和厄拉尼亚交战的飞翼潜行兵的音讯。请立刻前往救援。"
+   }
+  },
+  {
+   "path": "M042_5",
+   "progress": 0.58,
+   "title": {
+    "CN": "市區亂戰",
+    "EN": "Scuffle in the City ",
+    "JA": "市街地の乱戦",
+    "KR": "시가지에서의 난전",
+    "SC": "市区乱战"
+   },
+   "brief": {
+    "CN": "外星生物的步兵部隊對市區發動攻擊。我軍雖然派出大量戰鬥機體應戰，但激戰依然持續到現在。\n\n請於抵達現場後，投入戰鬥之中。",
+    "EN": "The alien infantry has launched an attack on the city. We dispatched many powered exoskeletons to fight against them, but the battle continues till now.\n\nHead out immediately and engage the enemy.",
+    "JA": "エイリアンの歩兵部隊が市街地を攻撃しました。我が軍も多数のコンバットフレームを投入して応戦。現在も激しい戦闘が続いています。\n\n現地に到着し次第、戦闘に参加してください。",
+    "KR": "외계인 보병 부대가 시가지를\n공격했습니다. 아군도 컴배트 프레임\n여러 대를 투입해 응전 중이지만\n여전히 치열한 전투가 이어지고\n있습니다.\n\n현지에 도착하는 대로 전투에 참가해\n주십시오.",
+    "SC": "外星生物的步兵部队对市区发动攻击。我军虽然派出大量战斗机体应战，但激战依然持续到现在。\n\n请于抵达现场后，投入战斗之中。"
+   }
+  },
+  {
+   "path": "M200",
+   "progress": 0.59,
+   "title": {
+    "CN": "隱形的威脅",
+    "EN": "Hidden Threat",
+    "JA": "隠された脅威",
+    "KR": "숨겨진 위협",
+    "SC": "隐形的威胁"
+   },
+   "brief": {
+    "CN": "怪物出現於市區中！\n居民尚未全數避難。似乎是因為附近吹起濃霧而太晚發現怪物接近。\n這樣下去災害將會擴大。請佈署於周遭的部隊立刻前往現場。",
+    "EN": "Monsters are in the city!\nThe residents are still evacuating. They didn't notice the monsters earlier because of the dense fog.\nDamage will increase if we don't do something. Units deployed nearby should immediately head to the scene.",
+    "JA": "市街地に怪物です！\n住民の避難が終わっていません。付近には濃霧が発生しており、怪物の接近に気付くのが遅れたようです。\nこのままでは被害が拡大します。周囲に展開している部隊はただちに現地に向かってください。",
+    "KR": "시가지에 괴물이 나타났습니다!\n아직 시민들이 대피 중입니다.\n주변 지역에 짙은 안개가 발생한 탓에\n괴물의 접근을 알아채는 데 늦은 것\n같습니다.\n\n이대로 두면 피해가 더 커질 겁니다.\n근방에 있는 부대는 즉시 현지로 가\n주십시오.",
+    "SC": "怪物出现于市区中！\n居民尚未全数避难。似乎是因为附近吹起浓雾而太晚发现怪物接近。\n这样下去灾害将会扩大。请布署于周遭的部队立刻前往现场。"
+   }
+  },
+  {
+   "path": "M050",
+   "progress": 0.6,
+   "title": {
+    "CN": "突破防壁",
+    "EN": "Break the Barrier",
+    "JA": "防壁突入",
+    "KR": "방벽 돌입",
+    "SC": "突破防壁"
+   },
+   "brief": {
+    "CN": "與外星生物交戰的突擊兵部隊已經全軍覆沒。原因是外星生物部隊的隨行新兵器「防護者」。\n「防護者」為多足型步行機器，並未配備武器。但會製造出光罩般的防壁，阻斷攻擊。具防禦屏障的功能，可保護外星生物。而且驚人的是，來自外星生物的攻擊不會被阻斷。也就是說，會單方面受到來自光罩內的攻擊。空襲也無法破壞光罩。\n這次的作戰是讓劍兵小隊攻進光罩中，破壞防護者。請與劍兵同行，進行支援。",
+    "EN": "The Rangers in combat with the aliens are wiped out because the alien troops are escorted by the new weapon %dq%shield bearers.%dq%\nShield bearers are multi-legged walking machines. They're unarmed, but will produce a light shield that can block out all attacks, functioning as bunkers to protect the aliens. And this is striking: the aliens can fire through it from inside. That is to say, only the ones outside the shield will get hit. Not even airstrikes can destroy the light barrier.\nThis mission aims to send the Fencer team into the light barrier and destroy the shield bearers. Back up the Fencers.",
+    "JA": "エイリアンと交戦したレンジャー部隊が全滅しました。原因は、エイリアン部隊に随行している新兵器「シールドベアラー」です。\n多脚型の歩行マシンで、武装は確認できません。しかし、輝く壁のようなものを作り出して攻撃を遮断。エイリアンを守るトーチカとして機能します。そして、驚くべきことにエイリアン側の攻撃は遮断しません。つまり壁の中から一方的に攻撃されるのです。この壁は空爆ですら破壊できませんでした。\n今回はフェンサーチームが壁に突入し、突破する作戦です。フェンサーに同行し、援護してください。",
+    "KR": "외계인과 교전하던 레인저 부대가\n전멸했습니다. 원인은 외계인 부대에\n합류한 신무기 「실드 베어러」입니다.\n다족형 보행 기계로 무장은 없는 것으로\n보입니다.\n\n하지만 빛나는 장벽을 펼쳐 공격을\n차단함으로써 외계인을 보호하는\n토치카 역할을 합니다. 또한, 놀랍게도\n외계인의 공격은 차단하지 않습니다.\n\n한마디로 우리는 장벽 밖에서\n일방적으로 공격당하는 셈입니다.\n이 장벽은 공습으로도 파괴할 수\n없었습니다.\n\n이번 작전에서는 펜서 부대가 장벽으로\n돌입해 돌파하겠습니다.\n펜서와 동행해 엄호해 주십시오.",
+    "SC": "与外星生物交战的突击兵部队已经全军覆没。原因是外星生物部队的随行新兵器「防护者」。\n「防护者」为多足型步行机器，并未配备武器。但会制造出光罩般的防壁，阻断攻击。具防御屏障的功能，可保护外星生物。而且惊人的是，来自外星生物的攻击不会被阻断。也就是说，会单方面受到来自光罩内的攻击。空袭也无法破坏光罩。\n这次的作战是让剑兵小队攻进光罩中，破坏防护者。请与剑兵同行，进行支援。"
+   }
+  },
+  {
+   "path": "M038",
+   "progress": 0.6,
+   "title": {
+    "CN": "山岳調查作戰",
+    "EN": "Mountain Investigation",
+    "JA": "山岳調査作戦",
+    "KR": "산악 조사 작전",
+    "SC": "山岳调查作战"
+   },
+   "brief": {
+    "CN": "在山區發現飛天型集團。這還是首次有這麼大量的怪物聚集在一個地方。想必是有某種理由吧。必須進行仔細的調查。\n\n為了進行搜索與撲滅怪物，將派遣三個小隊前往現場。",
+    "EN": "We found a horde of flying-type in the mountain. It's the first time that so many monsters gather in one place. We have to get to the bottom of this.\n\nThree teams will be send over to explore the area and eliminate monsters.",
+    "JA": "山岳地帯で飛行型の群れが確認されました。これほどの数が一つの場所に密集しているのは初めてです。何か理由があると考えるべきでしょう。十分な調査が必要です。\n\n探索、そして駆除のため、３つのチームを現地に派遣します。",
+    "KR": "산악 지대에서 비행형 괴물 무리를\n확인했습니다. 이렇게 많은 비행형이\n한곳에 모인 건 처음입니다.\n분명히 뭔가 이유가 있을 겁니다.\n꼼꼼히 조사해 보는 게 좋겠군요.\n\n탐색 및 섬멸을 위해 3개 팀을\n현지에 파견하겠습니다.",
+    "SC": "在山区发现飞天型集团。这还是首次有这么大量的怪物聚集在一个地方。想必是有某种理由吧。必须进行仔细的调查。\n\n为了进行搜索与扑灭怪物，将派遣三个小队前往现场。"
+   }
+  },
+  {
+   "path": "M091_2",
+   "progress": 0.61,
+   "title": {
+    "CN": "大型飛碟擊落計畫",
+    "EN": "Destroying Large Flying Saucers",
+    "JA": "大型円盤撃墜計画",
+    "KR": "대형 원반 격추 계획",
+    "SC": "大型飞碟击落计划"
+   },
+   "brief": {
+    "CN": "發現大量傳送飛船。\n正在山區投放怪物。\n\n步兵部隊負責由地面攻擊傳送飛船。空軍則使用尚在實驗階段的新武器「弗利剛砲」擊破敵艦。",
+    "EN": "Multiple teleportation ships are found dropping monsters in the mountain.\n\nThe infantry unit will attack the ships from ground while the air force tries out the new weapon %dq%Hooligan cannons%dq% that are still in experimental stage to destroy those enemy ships.",
+    "JA": "多数のテレポーションシップを確認。\n山岳地帯に怪物を投下しています。\n\n歩兵部隊は地上からテレポーションシップを攻撃。さらに空軍が試作段階の新兵器「フーリガン砲」を使って敵船を撃破します。",
+    "KR": "다수의 텔레포테이션 십이 산악 지대에\n괴물을 투하하고 있습니다.\n\n보병 부대는 지상에서\n텔레포테이션 십을 공격해 주십시오.\n그러면 공군이 시범 운용 중인 신무기\n「훌리건포」를 사용해 적 함선을\n격파할 겁니다.",
+    "SC": "发现大量传送飞船。\n正在山区投放怪物。\n\n步兵部队负责由地面攻击传送飞船。空军则使用尚在实验阶段的新武器「弗利刚砲」击破敌舰。"
+   }
+  },
+  {
+   "path": "M061",
+   "progress": 0.62,
+   "title": {
+    "CN": "席捲而來的魔球",
+    "EN": "Sweeping Monster Balls",
+    "JA": "這い寄る魔球",
+    "KR": "다가오는 마구",
+    "SC": "席卷而来的魔球"
+   },
+   "brief": {
+    "CN": "傳送飛船飛抵市區上空。飛船所投放的怪物……似乎是新品種！\n請立刻前往現場。",
+    "EN": "The teleportation ships are hovering over the city. And the monsters they are dropping...seem to be a new species!\nGo to the scene at once.",
+    "JA": "市街地上空にテレポーションシップが飛来。投下している怪物は……新種のようです！\nただちに現地に向かってください。",
+    "KR": "시가지 상공에 텔레포테이션 십이\n나타났습니다. 투하 중인 괴물은……\n신종 같습니다!\n즉시 현지로 가 주십시오.",
+    "SC": "传送飞船飞抵市区上空。飞船所投放的怪物……似乎是新品种！\n请立刻前往现场。"
+   }
+  },
+  {
+   "path": "M043",
+   "progress": 0.63,
+   "title": {
+    "CN": "工業區奪回作戰",
+    "EN": "Recapturing the Industrial Area",
+    "JA": "工業地帯奪還作戦",
+    "KR": "공업 지대 탈환 작전",
+    "SC": "工业区夺回作战"
+   },
+   "brief": {
+    "CN": "大量登陸艇飛抵工業區，且登陸的外星生物已經佔領了鄰近設施。雖然想出動大軍進行攻擊……但事實上，由於擔心波及煉油廠，因此希望能避免大規模攻擊。\n因此，派遣步兵部隊進行夜間攻擊。這場作戰必須盡可能避免破壞設施，僅消滅外星生物。敵人的戰力確認為外星生物步兵部隊與保護他們的防護者。請利用夜色前行，盡可能將敵人各個擊破。",
+    "EN": "A lot of landing ships reached the industrial area which is now occupied by the aliens. Although launching a massive attack would be more optimal, we had to tone it down in order to avoid collateral damage to a nearby refinery.\nSo we'll send out an infantry unit to launch a night raid instead. They should focus only on eliminating aliens and avoid facility damage. The enemy force is made up of alien infantry and escorting shield bearers. Use night as cover and defeat all enemies.",
+    "JA": "工業地帯に多数の揚陸船が飛来。降下したエイリアンによって近隣施設が占拠されました。大部隊での攻撃をおこないたいところですが……精油施設への被害が懸念されることから、大規模戦闘は避けたいのが本音です。\nそのため、歩兵部隊による夜間攻撃を敢行。できるだけ施設を破壊せず、エイリアンだけを撃破する作戦です。敵戦力は、エイリアンの歩兵部隊、それを守るシールドべアラーが確認されています。暗闇を利用し、敵の各個撃破に努めてください。",
+    "KR": "공업 지대에 나타난 다수의 양륙함에서\n외계인이 강하해 주변 시설을\n점령했습니다.\n\n우리도 최대한 전력을 모아\n응전해야겠지만…… 정유 시설에\n미칠 피해가 우려되므로\n대규모 전투는 피하려 합니다.\n\n따라서 보병 부대로 야간 공격을 감행해\n가능한 한 시설을 파괴하지 않고\n외계인만을 격파하도록 하겠습니다.\n\n적 전력으로는 외계인 보병 부대와\n해당 부대를 보호하는 실드 베어러가\n확인됐습니다. 어둠을 이용해 적을\n각개 격파해 주십시오.",
+    "SC": "大量登陆艇飞抵工业区，且登陆的外星生物已经占领了邻近设施。虽然想出动大军进行攻击……但事实上，由于担心波及炼油厂，因此希望能避免大规模攻击。\n因此，派遣步兵部队进行夜间攻击。这场作战必须尽可能避免破坏设施，仅消灭外星生物。敌人的战力确认为外星生物步兵部队与保护他们的防护者。请利用夜色前行，尽可能将敌人各个击破。"
+   }
+  },
+  {
+   "path": "M058",
+   "progress": 0.63,
+   "title": {
+    "CN": "飛翼軍團",
+    "EN": "Winged Legion",
+    "JA": "翼の軍団",
+    "KR": "날개 군단",
+    "SC": "飞翼军团"
+   },
+   "brief": {
+    "CN": "與外星生物的巷戰是我軍佔有優勢。戰鬥雖然持續中，但獲勝也是遲早的事。\n請在抵達現場後參與戰鬥。",
+    "EN": "We have the upper hand when it comes to urban warfare against aliens. The battle is still on, but it's only a matter of time to win.\nEngage the fight upon arrival.",
+    "JA": "エイリアンとの市街戦は、我が軍が優勢です。戦闘は今も継続中ですが、勝利も時間の問題だと思われます。\n現地に到着し次第、戦闘に参加してください。",
+    "KR": "외계인과의 시가전은 아군이\n우세합니다.\n전투는 지금도 계속되고 있지만\n승리는 시간문제로 보입니다.\n현지에 도착하는 대로 전투에 참가해\n주십시오.",
+    "SC": "与外星生物的巷战是我军占有优势。战斗虽然持续中，但获胜也是迟早的事。\n请在抵达现场后参与战斗。"
+   }
+  },
+  {
+   "path": "M045",
+   "progress": 0.64,
+   "title": {
+    "CN": "巨船降落",
+    "EN": "Landing Giant Ship",
+    "JA": "巨船直下",
+    "KR": "거함 밑으로",
+    "SC": "巨船降落"
+   },
+   "brief": {
+    "CN": "母艦降落於市區上空，並投放出外星生物。雖然並沒有打贏母艦的勝算，但也不能因此放棄周邊區域。步兵部隊負責攻擊外星生物。請阻止敵人擴大勢力。",
+    "EN": "A mothership is hovering over the city and launching the aliens. We might have no chance to win, but we shouldn't abandon the surrounding area. Infantry unit will take care of the aliens. Stop the enemy from spreading.",
+    "JA": "マザーシップが市街地上空に降下。エイリアンを投下しています。マザーシップに勝てる見込みはありませんが、周辺地域を放棄するわけにはいきません。歩兵部隊はエイリアンを攻撃。敵の勢力拡大を阻止してください。",
+    "KR": "마더 십이 시가지 상공에 나타나\n외계인을 투하하고 있습니다.\n마더 십이 상대인 이상 승산은 없지만\n그렇다고 주변 지역을 포기할 수는\n없습니다. 보병 부대는 외계인을 공격해\n적의 세력 확대를 저지해 주십시오.",
+    "SC": "母舰降落于市区上空，并投放出外星生物。虽然并没有打赢母舰的胜算，但也不能因此放弃周边区域。步兵部队负责攻击外星生物。请阻止敌人扩大势力。"
+   }
+  },
+  {
+   "path": "M063_5",
+   "progress": 0.65,
+   "title": {
+    "CN": "傾盆魔球",
+    "EN": "Falling Monster Balls",
+    "JA": "降り注ぐ魔球",
+    "KR": "쏟아지는 마구",
+    "SC": "倾盆魔球"
+   },
+   "brief": {
+    "CN": "傳送飛船正朝著市區前進，請立刻前往現場。",
+    "EN": "Teleportation ships are heading towards to city. Go to the site immediately.",
+    "JA": "テレポーションシップが市街地に向かって進んでいます。ただちに現地に向かってください。",
+    "KR": "텔레포테이션 십이 시가지 쪽으로\n이동하고 있습니다.\n즉시 현지로 가 주십시오.",
+    "SC": "传送飞船正朝著市区前进，请立刻前往现场。"
+   }
+  },
+  {
+   "path": "M044",
+   "progress": 0.65,
+   "title": {
+    "CN": "外星騎士",
+    "EN": "Extraterrestrial Riders",
+    "JA": "異星の騎士",
+    "KR": "다른 별의 기사",
+    "SC": "外星骑士"
+   },
+   "brief": {
+    "CN": "外星生物的步兵部隊正在攻擊市區。請與戰鬥機體隊一同發動攻擊，擊破敵人部隊。",
+    "EN": "Alien infantry unit is attacking the city. Please join force with the powered exoskeletons and defeat enemy troops.",
+    "JA": "エイリアンの歩兵部隊が市街地を攻撃しています。コンバットフレーム隊と共に進撃し、敵部隊を撃破してください。",
+    "KR": "외계인 보병 부대가 시가지를 공격하고\n있습니다. 컴배트 프레임 부대와 함께\n적 부대를 격파해 주십시오.",
+    "SC": "外星生物的步兵部队正在攻击市区。请与战斗机体队一同发动攻击，击破敌人部队。"
+   }
+  },
+  {
+   "path": "M065",
+   "progress": 0.66,
+   "title": {
+    "CN": "巨塔落下",
+    "EN": "Crashing Giant Pylons",
+    "JA": "巨塔落下",
+    "KR": "거탑 낙하",
+    "SC": "巨塔落下"
+   },
+   "brief": {
+    "CN": "母艦射出了傳送錨塔。不久也會抵達這個區域。\n我們擔心市區可能受到攻擊。請各部隊破壞降落到附近的傳送錨塔。",
+    "EN": "The motherships launched teleportation anchors. They will be here soon.\nWe're afraid that the city will be under attack. All units, destroy each teleportation anchors falling close to you.",
+    "JA": "マザーシップがテレポーションアンカーを射出。このエリアにも、まもなく到達します。\n市街地への被害が懸念されます。各部隊は付近に落下するテレポーションアンカーを破壊してください。",
+    "KR": "마더 십이 텔레포테이션 앵커를\n사출하고 있습니다. 이 구역에도\n곧 도착할 겁니다.\n시가지에 미칠 피해가 우려됩니다.\n각 부대는 부근에 낙하하는\n텔레포테이션 앵커를 파괴해 주십시오.",
+    "SC": "母舰射出了传送锚塔。不久也会抵达这个区域。\n我们担心市区可能受到攻击。请各部队破坏降落到附近的传送锚塔。"
+   }
+  },
+  {
+   "path": "M076",
+   "progress": 0.67,
+   "title": {
+    "CN": "巨大怪魔",
+    "EN": "Enormous Mutants",
+    "JA": "大いなる怪魔",
+    "KR": "강력한 괴마",
+    "SC": "巨大怪魔"
+   },
+   "brief": {
+    "CN": "β型侵略生物入侵市區。距離現場最近的劍兵小隊已經前往撲滅。請支援劍兵小隊。",
+    "EN": "Aggressive Alien Species β have invaded the city. The Fencer team closest to the scene has gone for elimination. Go reinforce the Fencers.",
+    "JA": "β型侵略生物が市街地に侵入。最も現地に近いフェンサーチームが駆除に向かいました。援護してください。",
+    "KR": "β형 침략 생물이 시가지에\n침입했습니다.\n가장 가까이에 있는 펜서 부대가\n적 섬멸을 위해 파견됐으니\n엄호해 주시기 바랍니다.",
+    "SC": "β型侵略生物入侵市区。距离现场最近的剑兵小队已经前往扑灭。请支援剑兵小队。"
+   }
+  },
+  {
+   "path": "M046_3",
+   "progress": 0.67,
+   "title": {
+    "CN": "空戰機",
+    "EN": "Aircrafts",
+    "JA": "空戦機",
+    "KR": "공중 전투기",
+    "SC": "空战机"
+   },
+   "brief": {
+    "CN": "收到救援請求。現場正與新型無人機交戰，並有許多傷患。\n部隊目前失去領導者而陷入混亂。請立刻前往支援。\n\n……這個部隊應該配有電磁砲才對，但情況如此慘烈，就表示敵人相當棘手。請務必謹慎小心。",
+    "EN": "Emergency support request. Our units are in battle with the new type drones and suffer from heavy casualties. Please head to the site and support.\n\nThis squad is equipped with railguns, but it's still a rather tough war. Be careful.",
+    "JA": "救援要請です。新型ドローンと交戦。負傷者多数とのこと。\n部隊は統率を失い混乱しているようです。ただちに応援に向かってください。\n\n……この隊にはレールガンが配備されていたはず。それすら歯がたたない相手ということです。十分に注意してください。",
+    "KR": "지원 요청이 들어왔습니다.\n신형 드론과의 교전으로 인해\n다수의 부상자가 발생했다고 합니다.\n부대는 와해되어 극심한 혼란에 빠진 것\n같습니다. 즉시 지원하러 가 주십시오.\n\n……이 부대에는 레일건이 배치되어\n있었습니다. 다시 말해 레일건으로도\n이길 수 없는 상대라는 뜻이죠.\n각별히 주의하시기 바랍니다.",
+    "SC": "收到救援请求。现场正与新型无人机交战，并有许多伤患。\n部队目前失去领导者而陷入混乱。请立刻前往支援。\n\n……这个部队应该配有电磁砲才对，但情况如此惨烈，就表示敌人相当棘手。请务必谨慎小心。"
+   }
+  },
+  {
+   "path": "M091_3",
+   "progress": 0.68,
+   "title": {
+    "CN": "錨塔破壞計畫",
+    "EN": "Anchors Destruction Plan",
+    "JA": "アンカー破壊計画",
+    "KR": "앵커 파괴 계획",
+    "SC": "锚塔破坏计划"
+   },
+   "brief": {
+    "CN": "大量傳送錨塔掉落於市區中，出現了大批怪物。\n周遭完全被怪物佔據，光靠步兵似乎難以全數撲滅。為此我們投入了戰鬥機體，對錨塔進行破壞。\n請以游擊隊的身分加入作戰，掩護戰鬥機體。",
+    "EN": "A lot of teleportation anchors crashed into the city and a horde of monsters now show up.\nThe nearby areas are completely under the monsters' control. It's unlikely to wipe them out depending on the infantry unit alone. Therefore, we are deploying powered exoskeletons to destroy those anchors.\nPlease engage the battle as guerrillas and cover the powered exoskeletons.",
+    "JA": "多数のテレポーションアンカーが市街地に落下。怪物を出現させています。\n付近は怪物で埋め尽くされ、歩兵だけでは駆除が難しい状況です。そのためコンバットフレームを投入し、アンカーを破壊します。\n遊撃隊として作戦に参加し、コンバットフレームを援護してください。",
+    "KR": "시가지에 낙하한 다수의 텔레포테이션\n앵커에서 괴물이 나타나고 있습니다.\n\n근방은 괴물들로 가득해 보병만으로는\n섬멸이 어려운 상황입니다. 따라서\n컴배트 프레임을 투입해 앵커를\n파괴하겠습니다.\n\n유격대로 작전에 참가해\n컴배트 프레임을 엄호해 주십시오.",
+    "SC": "大量传送锚塔掉落于市区中，出现了大批怪物。\n周遭完全被怪物占据，光靠步兵似乎难以全数扑灭。为此我们投入了战斗机体，对锚塔进行破坏。\n请以游击队的身分加入作战，掩护战斗机体。"
+   }
+  },
+  {
+   "path": "M201",
+   "progress": 0.69,
+   "title": {
+    "CN": "濃霧中的激戰",
+    "EN": "Battle in the Fog",
+    "JA": "濃霧の激戦",
+    "KR": "짙은 안개 속의 격전",
+    "SC": "浓雾中的激战"
+   },
+   "brief": {
+    "CN": "外星生物集團正在攻擊市區。數量雖然不算太多，但現場有濃霧發生，因此無法出動戰車與直升機。\n只能依靠步兵部隊了。將會在視線不良的狀態下戰鬥，敬請小心注意。",
+    "EN": "The alien legion is attacking the city. Their number isn't striking, but there's thick fog lingering, we cannot dispatch tanks and helicopters.\nThe infantry unit is our only hope. You will be fighting with poor visibility, please be cautious.",
+    "JA": "エイリアンの一団が市街地を攻撃しています。数はさほど多くありませんが、現地には霧が発生しており、戦車やヘリの出動は不可能です。\n歩兵部隊に頼るしか方法がありません。視界の悪い中での戦闘になります。十分に注意してください。",
+    "KR": "외계인 부대가 시가지를 공격 중입니다.\n수는 그리 많지 않지만, 현지에 안개가\n발생한 탓에 전차나 헬기 투입이\n불가능합니다.\n\n보병 부대에 의지하는 것 외에는 방법이\n없습니다. 안개 속에서 전투해야 하므로\n각별히 주의하시기 바랍니다.",
+    "SC": "外星生物集团正在攻击市区。数量虽然不算太多，但现场有浓雾发生，因此无法出动战车与直升机。\n只能依靠步兵部队了。将会在视线不良的状态下战斗，敬请小心注意。"
+   }
+  },
+  {
+   "path": "M051",
+   "progress": 0.7,
+   "title": {
+    "CN": "光芒城塞",
+    "EN": "Light Defenses",
+    "JA": "光の城塞",
+    "KR": "빛의 요새",
+    "SC": "光芒城塞"
+   },
+   "brief": {
+    "CN": "大量的傳送錨塔落入郊外。不僅外星生物，連防護者都被錨塔傳送過來。附近一帶已經成為外星生物的陣地。\n立刻組成攻擊部隊，殲滅敵人。\n\n只有步兵部隊有辦法破壞防護者所保衛的錨塔。祝你好運。",
+    "EN": "A great number of teleportation anchors have landed in the urban area. Not only aliens are being transmitted, but shield bearers too. This neighborhood has been in the aliens' hand.\nAssemble a strike team at once and eliminate the enemy.\n\nOnly the infantry can destroy those anchors protected by the shield bearers. Good luck.",
+    "JA": "郊外に多数のテレポーションアンカーが落下しました。アンカーからはエイリアン、そしてシールドベアラーまでが転送によって出現。周囲一帯は、エイリアンの陣地となりつつあります。\nただちに攻撃部隊を編成。敵を殲滅します。\n\nシールドベアラーに守られたアンカーを破壊できるのは歩兵部隊のみです。健闘を祈ります。",
+    "KR": "외곽에 다수의 텔레포테이션 앵커가\n낙하했습니다. 앵커를 통해 외계인,\n그리고 실드 베어러까지 나타나면서\n주변 일대는 외계인의 진지로\n전락했습니다. 즉시 공격 부대를\n편성해 적을 섬멸하겠습니다.\n\n실드 베어러 안의 앵커를 파괴할 수\n있는 건 보병 부대뿐입니다.\n건투를 빌겠습니다.",
+    "SC": "大量的传送锚塔落入郊外。不仅外星生物，连防护者都被锚塔传送过来。附近一带已经成为外星生物的阵地。\n立刻组成攻击部队，歼灭敌人。\n\n只有步兵部队有办法破坏防护者所保卫的锚塔。祝你好运。"
+   }
+  },
+  {
+   "path": "M068",
+   "progress": 0.7,
+   "title": {
+    "CN": "飛空部隊",
+    "EN": "Flying Unit",
+    "JA": "空の軍勢",
+    "KR": "하늘의 군세",
+    "SC": "飞空部队"
+   },
+   "brief": {
+    "CN": "歐洲發出救援請求！\n敵人飛行部隊開始大舉入侵。歐洲遭受極大損害，目前正在戰鬥中。\n\n即使及時趕上的可能性相當低，但也必須動身前往。",
+    "EN": "Europe is requesting for support!\nThe enemy flying unit now swarms into Europe and causes massive damage. Europe is in war.\n\nEven though we might be too late to back them up, we have to take actions.",
+    "JA": "欧州から救援要請！\n敵の飛行部隊が大侵攻を開始。甚大な被害を被り、現在も戦闘中とのことです。\n\n間に合うとは思えませんが、それでも行かねばなりません。",
+    "KR": "유럽에서 지원 요청이 들어왔습니다!\n적 비행 부대의 대대적인 침공으로\n막대한 피해를 입었으며\n지금도 전투 중이라고 합니다.\n\n제때에 도착할지는 알 수 없지만\n그래도 가야 합니다.",
+    "SC": "欧洲发出救援请求！\n敌人飞行部队开始大举入侵。欧洲遭受极大损害，目前正在战斗中。\n\n即使及时赶上的可能性相当低，但也必须动身前往。"
+   }
+  },
+  {
+   "path": "M048",
+   "progress": 0.71,
+   "title": {
+    "CN": "戰機侵攻",
+    "EN": "Fighters Ambush",
+    "JA": "戦機侵攻",
+    "KR": "전투 로봇 침공",
+    "SC": "战机侵攻"
+   },
+   "brief": {
+    "CN": "２號母艦正不斷投放戰鬥機器人。也投放大量戰鬥機器人在這個地區。機器人正不斷將市區夷為廢墟，並持續進攻。\n為了防止災害擴大，將會埋伏在機器人的行進路線上，藉由戰鬥機體的同時射擊加以消滅。步兵部隊請掩護戰鬥機體。",
+    "EN": "Mothership no.2 continues to launch battle robots and a lot of them are being dropped in the area. Those robots attack without mercy, turning the city into debris.\nTo prevent damages from spreading, we'll ambush the robots on their planned route. Powered exoskeletons will join the force to shoot them down. Infantry unit, cover the powered exoskeletons.",
+    "JA": "マザーシップ・ナンバー２は戦闘ロボットを投下し続けています。このエリアにも多数が落下。ロボットは街を廃墟に変えながら進軍を続けています。\n被害の拡大を防ぐため、ロボットの進路上で待ち構え、コンバットフレームの一斉射撃で粉砕します。歩兵部隊はコンバットフレームを援護してください。",
+    "KR": "마더 십 넘버 2가 전투 로봇을 투하하고\n있습니다. 이 구역에도 전투 로봇\n여럿이 낙하해, 도시를 초토화하며\n진군 중입니다.\n\n피해 확대를 막기 위해 로봇의\n이동 경로에서 대기하다가\n컴배트 프레임으로 집중포화를\n퍼붓겠습니다. 보병 부대는\n컴배트 프레임을 엄호해 주십시오.",
+    "SC": "２号母舰正不断投放战斗机器人。也投放大量战斗机器人在这个地区。机器人正不断将市区夷为废墟，并持续进攻。\n为了防止灾害扩大，将会埋伏在机器人的行进路线上，借由战斗机体的同时射击加以消灭。步兵部队请掩护战斗机体。"
+   }
+  },
+  {
+   "path": "M202",
+   "progress": 0.72,
+   "title": {
+    "CN": "被圍困的城市",
+    "EN": "Sieged City",
+    "JA": "囚われた街",
+    "KR": "그물 속에 갇힌 도시",
+    "SC": "被围困的城市"
+   },
+   "brief": {
+    "CN": "厄拉尼亞入侵市區，也發現到怪物的蹤影。請附近的部隊立刻前往現場。",
+    "EN": "Aranea has intruded the city and intelligence reports of monster activity. All units nearby, go to the scene at once.",
+    "JA": "市街地にアラネアが侵入。怪物の姿も確認されています。付近の部隊は、ただちに現地に向かってください。",
+    "KR": "시가지에 아라네아가 침입했습니다.\n괴물도 확인됐습니다.\n근방에 있는 부대는 즉시 현지로\n가 주십시오.",
+    "SC": "厄拉尼亚入侵市区，也发现到怪物的踪影。请附近的部队立刻前往现场。"
+   }
+  },
+  {
+   "path": "M074",
+   "progress": 0.72,
+   "title": {
+    "CN": "黃昏女王",
+    "EN": "Doomed Queens",
+    "JA": "黄昏の女王",
+    "KR": "황혼의 여왕",
+    "SC": "黄昏女王"
+   },
+   "brief": {
+    "CN": "原本有數個女王保衛著飛天型的巢……但所有的女王卻突然開始移往他處。目前女王們正帶領著無數飛天型集結於山區。\n推測這也是繁殖行動的一環。可能是原本的巢太過擁擠，女王打算另尋地點築新巢。若真是如此，將是非常危險的狀況。必須立刻消滅女王，阻止飛天型增殖。",
+    "EN": "Multiple queens were defending the nest of the flying-type, but suddenly all queens started to move. They led numerous flying-types to the mountain and gathered there.\nIt's likely part of their reproductive behavior. Perhaps those queens found the original nest too crowded and thus tried to find a location for a new hive. If that is the case, it's threatening. We must eliminate the queens and stop the flying-types from multiplying.",
+    "JA": "飛行型の巣は複数のクイーンに守られていましたが……突然、すべてのクイーンが移動を開始しました。クイーンたちは、無数の飛行型を従え、山岳地帯に集結しています。\nこれは繁殖行動の一環と考えられます。手狭となった巣から女王が旅立ち、新たな巣を建造しようとしているのでしょう。もしそうであれば、恐るべき事態です。ただちにクイーンを攻撃し、飛行型の増殖を食い止めなければなりません。",
+    "KR": "비행형 괴물의 집을 지키고 있던\n여러 마리의 퀸이…… 일제히 이동하기\n시작했습니다.\n\n퀸은 수많은 비행형 괴물을 이끌고\n산악 지대로 모이고 있습니다.\n이건 번식 행동의 일환으로 보입니다.\n번식할 공간이 부족해진 집을 떠나\n새로운 집을 지으려는 걸 테죠.\n\n만약 그렇다면 이건 심각한 사태입니다.\n즉시 퀸을 공격해 비행형 괴물의 증식을\n막아야 합니다.",
+    "SC": "原本有数个女王保卫著飞天型的巢……但所有的女王却突然开始移往他处。目前女王们正带领著无数飞天型集结于山区。\n推测这也是繁殖行动的一环。可能是原本的巢太过拥挤，女王打算另寻地点筑新巢。若真是如此，将是非常危险的状况。必须立刻消灭女王，阻止飞天型增殖。"
+   }
+  },
+  {
+   "path": "M091_4",
+   "progress": 0.73,
+   "title": {
+    "CN": "怪物撲滅計畫",
+    "EN": "Monster Extermination",
+    "JA": "怪物駆除計画",
+    "KR": "괴물 섬멸 계획",
+    "SC": "怪物扑灭计划"
+   },
+   "brief": {
+    "CN": "已發現怪物集團。需在災害擴大前加以消滅。\n將派遣撲滅部隊前往現場，並投入ＡＦＶ。\n與撲滅部隊會合後，請掩護ＡＦＶ，殲滅怪物。",
+    "EN": "We have confirmed a horde of monsters. They need to be wiped out before things get worse. The extermination team will be sent over with AFVs.\nPlease meet up with the extermination team, cover the AFVs, and eliminate the monsters.\n",
+    "JA": "怪物の大群を確認しました。被害が拡大する前に撃破します。\n駆除部隊を現地に派遣。さらにＡＦＶも投入します。\n駆除部隊と合流後、ＡＦＶを援護しつつ、怪物を殲滅してください。",
+    "KR": "괴물의 거대 무리를 확인했습니다.\n피해가 확대되기 전에 격파해야 합니다.\n섬멸 부대를 현지에 파견하고 AFV도\n추가로 투입하겠습니다.\n\n섬멸 부대와 합류해 AFV를 엄호하면서\n괴물을 섬멸해 주십시오.",
+    "SC": "已发现怪物集团。需在灾害扩大前加以消灭。\n将派遣扑灭部队前往现场，并投入ＡＦＶ。\n与扑灭部队会合后，请掩护ＡＦＶ，歼灭怪物。"
+   }
+  },
+  {
+   "path": "M067",
+   "progress": 0.74,
+   "title": {
+    "CN": "２２８基地奪回作戰　第一階段",
+    "EN": "Reclaiming Base 228: Stage 1",
+    "JA": "ベース２２８奪還作戦 第一段階",
+    "KR": "228 베이스 탈환 작전 제1단계",
+    "SC": "２２８基地夺回作战　第一阶段"
+   },
+   "brief": {
+    "CN": "將展開被敵人佔領的２２８基地的奪回行動。作戰的第一階段，是讓步兵部隊在不驚動敵人的狀態下，接近基地。請沿著山路前進，抵達基地後方。",
+    "EN": "We are about to commence the operation to reclaim Base 228. The first stage is to make sure the infantry unit can approach the base without alarming the enemy. Move on along the mountain path and reach the rear of the base.",
+    "JA": "敵に制圧されたベース２２８を奪還します。作戦の第一段階は、敵の注意をひかないよう、歩兵部隊が徒歩で基地に接近することです。山道を進み、基地の裏側まで進軍してください。",
+    "KR": "적에게 점령당한 228 베이스를\n탈환하겠습니다. 작전 제1단계는\n적의 주의를 끌지 않도록 보병 부대가\n도보로 기지에 접근하는 것입니다.\n\n산길을 이용해 기지 뒤쪽으로\n진군해 주십시오.",
+    "SC": "将展开被敌人占领的２２８基地的夺回行动。作战的第一阶段，是让步兵部队在不惊动敌人的状态下，接近基地。请沿著山路前进，抵达基地后方。"
+   }
+  },
+  {
+   "path": "M072_1",
+   "progress": 0.75,
+   "title": {
+    "CN": "２２８基地奪回作戰　第二階段",
+    "EN": "Reclaiming Base 228: Stage 2",
+    "JA": "ベース２２８奪還作戦 第二段階",
+    "KR": "228 베이스 탈환 작전 제2단계",
+    "SC": "２２８基地夺回作战　第二阶段"
+   },
+   "brief": {
+    "CN": "已成功接近基地了。\n但接下來才是問題。基地正被敵人佔領著，要潛入地底的機庫，必須先清除地面上的敵人才行。\n\n這就是作戰的第二階段內容。敵人數量相當多。雖是個危險的任務，但空軍會進行掩護。以這個陣容絕對沒有問題。上吧！",
+    "EN": "You have approached the base successfully.\nWhat comes next is the real obstacle. The base is under the enemy's control. We have to wipe out enemies on the ground first in order to sneak into the underground hangar.\n\nAnd that's operation stage 2. The enemy is large in number. This is a dangerous mission, but the air force will provide cover. You can do this. Go!",
+    "JA": "基地への接近に成功したぞ。\n問題はこれからだ。基地は敵に制圧されている。地下の格納庫に潜入する前に、地上の敵を排除しなければならない。\n\nこれが作戦の第二段階だ。敵は多数。危険な任務だが、空軍の援護があるはずだ。このメンバーならやれる。行くぞ！",
+    "KR": "기지 접근에 성공했다.\n문제는 지금부터다.\n기지는 이미 적에게 점령당한 상태다.\n지하 격납고에 잠입하기 전에\n지상에 있는 적을 해치워야 한다.\n\n이것이 작전 제2단계다.\n적도 많고 위험한 임무지만\n공군이 엄호해 줄 거다.\n이 멤버라면 해낼 수 있다. 가자!",
+    "SC": "已成功接近基地了。\n但接下来才是问题。基地正被敌人占领著，要潜入地底的机库，必须先清除地面上的敌人才行。\n\n这就是作战的第二阶段内容。敌人数量相当多。虽是个危险的任务，但空军会进行掩护。以这个阵容绝对没有问题。上吧！"
+   }
+  },
+  {
+   "path": "M072_2",
+   "progress": 0.76,
+   "title": {
+    "CN": "２２８基地奪回作戰　第三階段",
+    "EN": "Reclaiming Base 228: Stage 3",
+    "JA": "ベース２２８奪還作戦 第三段階",
+    "KR": "228 베이스 탈환 작전 제3단계",
+    "SC": "２２８基地夺回作战　第三阶段"
+   },
+   "brief": {
+    "CN": "已經完成地面的壓制。真不愧是精銳部隊。\n很好。進入作戰第三階段。\n接下來要進入地底機庫。內部有怪物殘存的可能性極高。絕對要謹慎小心。",
+    "EN": "The ground is cleared. No wonder you're the elite troop.\nGood. Now's operation stage 3.\nLater on you'll be heading to the underground hangar. There could very well be remaining monsters. Stay alert.",
+    "JA": "地上部分の制圧は完了だ。さすが精鋭部隊だな。\nよし。作戦の第三段階だ。\n今から地下格納庫に入る。中には怪物の生き残りがいる可能性が高い。十分に注意しろ。",
+    "KR": "지상 제압은 완료했다.\n역시 정예 부대로군.\n좋아. 그럼 작전 제3단계를 시작한다.\n지금부터 지하 격납고로 들어간다.\n안에는 괴물이 남아 있을 가능성이\n높으니 각별히 주의하도록.",
+    "SC": "已经完成地面的压制。真不愧是精锐部队。\n很好。进入作战第三阶段。\n接下来要进入地底机库。内部有怪物残存的可能性极高。绝对要谨慎小心。"
+   }
+  },
+  {
+   "path": "M072_3",
+   "progress": 0.77,
+   "title": {
+    "CN": "２２８基地奪回作戰　收兵",
+    "EN": "Reclaiming Base 228: Retreat",
+    "JA": "ベース２２８奪還作戦 撤収",
+    "KR": "228 베이스 탈환 작전 철수",
+    "SC": "２２８基地夺回作战　收兵"
+   },
+   "brief": {
+    "CN": "幹得漂亮。任務成功了。\n啟動起降機，將巴爾加送往地面。\n我們也回到地面上去吧。",
+    "EN": "Well done. Mission complete.\nNow let's activate the crane and send Barga back to the ground.\nWe should go back too.",
+    "JA": "よくやった。任務は成功だ。\nリフトを動かしてバルガを地上に送る。\n俺たちも上に戻るぞ。",
+    "KR": "잘했다. 임무 성공이다.\n승강기를 작동시켜 바르가를\n지상으로 옮긴다.\n우리도 지상으로 돌아간다.",
+    "SC": "干得漂亮。任务成功了。\n启动起降机，将巴尔加送往地面。\n我们也回到地面上去吧。"
+   }
+  },
+  {
+   "path": "M072_4",
+   "progress": 0.77,
+   "title": {
+    "CN": "亞凱魯斯擊滅計畫",
+    "EN": "Defeat Archelus",
+    "JA": "アーケルス撃滅計画",
+    "KR": "아켈루스 격파 계획",
+    "SC": "亚凯鲁斯击灭计划"
+   },
+   "brief": {
+    "CN": "巴爾加已經完成維修檢查。接下來就要開始進行亞凱魯斯擊滅作戰。\n我們已推測出亞凱魯斯的行進路線並設定作戰地點。各部隊請移動至作戰地點。若巴爾加較晚抵達，請阻止亞凱魯斯繼續前進。\n\n目前正用運輸機搬運巴爾加。由於巴爾加的行動力相當低，將會盡可能靠近亞凱魯斯後再行投放。",
+    "EN": "We have finished Barga's maintenance. Next we're going to eliminate Archelus.\nWe've calculated Archlus' moving path and we have decided the strike zone accordingly. All units head to the scene. If Barga arrives late, make sure you stop Archelus from moving on.\n\nBarga is being carried by a transport aircraft. Since Barga has poor mobility, we'll try to drop it as close to Archelus as possible.",
+    "JA": "バルガの整備が完了しました。これよりアーケルス撃破作戦を開始します。\nアーケルスの進路を予想し、作戦ポイントを設定しました。各部隊は作戦ポイントに展開。もしバルガの到着が遅れた場合は、アーケルスを足止めしてください。\n\n現在、輸送機でバルガを運搬中です。バルガは移動力に劣るため、できるだけアーケルスの近くまで接近してから、空中投下します。",
+    "KR": "바르가 정비를 완료했습니다. 지금부터\n아켈루스 격파 작전을 개시하겠습니다.\n아켈루스의 이동 경로를 예상해\n작전 포인트를 설정했습니다.\n각 부대는 작전 포인트에서 대기하다가\n만약 바르가 도착이 늦어지면\n아켈루스의 발을 묶어 주시기 바랍니다.\n\n현재 수송기로 바르가를 운반 중입니다.\n바르가는 이동 속도가 느리므로\n최대한 아켈루스와 거리를 좁힌 뒤에\n공중 투하하겠습니다.",
+    "SC": "巴尔加已经完成维修检查。接下来就要开始进行亚凯鲁斯击灭作战。\n我们已推测出亚凯鲁斯的行进路线并设定作战地点。各部队请移动至作战地点。若巴尔加较晚抵达，请阻止亚凯鲁斯继续前进。\n\n目前正用运输机搬运巴尔加。由于巴尔加的行动力相当低，将会尽可能靠近亚凯鲁斯后再行投放。"
+   }
+  },
+  {
+   "path": "M064",
+   "progress": 0.78,
+   "title": {
+    "CN": "巨塔城市",
+    "EN": "City of Giant Pylons",
+    "JA": "巨塔の街",
+    "KR": "거탑의 도시",
+    "SC": "巨塔城市"
+   },
+   "brief": {
+    "CN": "大量傳送錨塔降落至市區中。是被稱為巨型錨塔的大型種類。請在錨塔開始傳送怪物前，將其摧毀。",
+    "EN": "Many teleportation anchors have landed in the city. They are the larger type called Big Anchors. Destroy them before they start teleporting monsters.",
+    "JA": "市街地に多数のテレポーションアンカーが落下。ビッグアンカーと呼称している大型タイプだと思われます。怪物の転送が始まる前に破壊してください。",
+    "KR": "시가지에 다수의 텔레포테이션 앵커가\n낙하했습니다. 빅 앵커라 명명한\n대형 타입으로 추정됩니다.\n괴물 전송이 시작되기 전에\n파괴해 주십시오.",
+    "SC": "大量传送锚塔降落至市区中。是被称为巨型锚塔的大型种类。请在锚塔开始传送怪物前，将其摧毁。"
+   }
+  },
+  {
+   "path": "M059",
+   "progress": 0.79,
+   "title": {
+    "CN": "幼蟲來襲",
+    "EN": "Incoming Larvae",
+    "JA": "幼生襲来",
+    "KR": "유체 습격",
+    "SC": "幼虫来袭"
+   },
+   "brief": {
+    "CN": "翅膀型外星生物正在接近市區。已經讓正在巡視周遭的突擊兵５１以最快速度前往現場。\n翅膀型外星生物的數量非常龐大。光靠突擊兵５１要維持住防線恐怕相當困難。雖然已經組成支援部隊，但可能來不及趕上。請立刻前往現場支援突擊兵５１。",
+    "EN": "The winged aliens are drawing near the city. We already dispatched Ranger 51 patrolling nearby to rush to the site.\nThe winged aliens come in great numbers. Ranger 51 might have certain difficulties to hold the defense line alone. We've formed a reinforcement troop, but it might be too late. Go offer support to Ranger 51.",
+    "JA": "有翼型エイリアンが市街地に接近しています。付近をパトロール中のレンジャー５１を急行させました。\n有翼型エイリアンはかなりの大軍です。レンジャー５１だけでは持ちこたえるのは困難でしょう。応援部隊を編成していますが、間に合いそうもありません。ただちに現地に向かいレンジャー５１を援護してください。",
+    "KR": "유익형 외계인이 시가지로 접근하고\n있어 근방을 경계 중이던 레인저 51을\n급파했습니다.\n\n유익형 외계인 부대는 상당히 대규모로\n보입니다. 레인저 51만으로는\n버텨낼 수 없을 겁니다. 지원 부대를\n편성 중이지만 제때 도착하긴 힘들 것\n같습니다. 즉시 현지로 가 레인저 51을\n엄호해 주십시오.",
+    "SC": "翅膀型外星生物正在接近市区。已经让正在巡视周遭的突击兵５１以最快速度前往现场。\n翅膀型外星生物的数量非常庞大。光靠突击兵５１要维持住防线恐怕相当困难。虽然已经组成支援部队，但可能来不及赶上。请立刻前往现场支援突击兵５１。"
+   }
+  },
+  {
+   "path": "M057",
+   "progress": 0.8,
+   "title": {
+    "CN": "黑暗的秘密",
+    "EN": "Secret in the Dark",
+    "JA": "暗闇の秘密",
+    "KR": "어둠의 비밀",
+    "SC": "黑暗的秘密"
+   },
+   "brief": {
+    "CN": "發現新的怪物洞窟。雖然在調查小隊的報告中，怪物似乎還尚未開始進行繁殖，但不知為何卻發現了大量怪物。\n雖然怪物增加的理由尚未查明，但不能就這樣置之不理。請與撲滅小隊一同行動，潛入洞窟內。",
+    "EN": "We've found a new monster cave. The investigation team didn't mention in the report that monsters already started to breed, but somehow we see lots of them.\nAlthough it remains unclear why the monsters have multiplied, we still have to do something. Join the extermination team and enter the cave.",
+    "JA": "怪物の洞窟を新たに発見。調査チームからの報告では、怪物が繁殖を始めている形跡はないものの、何故か多数の怪物が確認できるとのことです。\n怪物が増えている理由は不明ですが、このまま放置するわけにはいきません。駆除チームに同行し、洞窟に進入してください。",
+    "KR": "괴물이 판 동굴을 추가로 발견했습니다.\n조사팀의 보고에 따르면 괴물이\n번식 중인 흔적은 보이지 않지만\n어째서인지 수많은 괴물이 확인되고\n있다고 합니다.\n\n괴물이 늘어난 이유는 알 수 없지만\n이대로 놔둘 수는 없습니다. 섬멸 팀과\n함께 동굴 안으로 진입해 주십시오.",
+    "SC": "发现新的怪物洞窟。虽然在调查小队的报告中，怪物似乎还尚未开始进行繁殖，但不知为何却发现了大量怪物。\n虽然怪物增加的理由尚未查明，但不能就这样置之不理。请与扑灭小队一同行动，潜入洞窟内。"
+   }
+  },
+  {
+   "path": "M063",
+   "progress": 0.8,
+   "title": {
+    "CN": "魔球步步進逼",
+    "EN": "Approaching Monster Balls ",
+    "JA": "押し寄せる魔球",
+    "KR": "밀려드는 마구",
+    "SC": "魔球步步进逼"
+   },
+   "brief": {
+    "CN": "在山區發現怪物。推測為γ型侵略生物。\n請與前往現場的撲滅小隊一同行動。",
+    "EN": "There are monsters in the mountain. We suspect them to be Aggressive Alien Species γ.\nPlease report to the extermination team on site and join force.",
+    "JA": "山岳部に怪物を確認。γ型侵略生物だと思われます。\n現地に向かう駆除チームに同行してください。",
+    "KR": "산악 지대에서 괴물을 확인했습니다.\nγ형 침략 생물로 추정됩니다.\n섬멸 팀과 함께 현지로 가 주십시오.",
+    "SC": "在山区发现怪物。推测为γ型侵略生物。\n请与前往现场的扑灭小队一同行动。"
+   }
+  },
+  {
+   "path": "M054",
+   "progress": 0.81,
+   "title": {
+    "CN": "無處不在的絲線",
+    "EN": "Threads Everywhere",
+    "JA": "巡らされた糸",
+    "KR": "도시를 둘러싼 실",
+    "SC": "无处不在的丝线"
+   },
+   "brief": {
+    "CN": "大事不妙。傳送錨塔掉落到居住區域了。似乎正在傳送厄拉尼亞過來。請立刻前往現場。",
+    "EN": "This is bad. The teleportation anchors have crashed down in a residential area. It looks like they're transporting Aranea. Head to the site at once.",
+    "JA": "大変です。居住区域にテレポーションアンカーが落下。アラネアが転送されているようです。ただちに現地に向かってください。",
+    "KR": "큰일입니다. 거주 지역에 낙하한\n텔레포테이션 앵커에서 아라네아가\n나타나고 있는 것 같습니다.\n즉시 현지로 가 주십시오.",
+    "SC": "大事不妙。传送锚塔掉落到居住区域了。似乎正在传送厄拉尼亚过来。请立刻前往现场。"
+   }
+  },
+  {
+   "path": "M039",
+   "progress": 0.82,
+   "title": {
+    "CN": "飛天型殲滅作戰",
+    "EN": "Flying-type Extermination",
+    "JA": "飛行型壊滅作戦",
+    "KR": "비행형 섬멸 작전",
+    "SC": "飞天型歼灭作战"
+   },
+   "brief": {
+    "CN": "本次作戰的目的是破壞飛天型侵略生物的巢。\n在成功消滅女王後，如今巢的防衛力應該大幅下降才對。其他女王也不在巢中。現在巢是無防備的狀態。正是攻擊的好機會。\n首先由戰鬥機體殲滅飛天型。之後再由重砲破壞巢。",
+    "EN": "The objective of this mission is to destroy the nest of the Flying Aggressors.\nSince their queens were wiped out, the defenses of the nest should be much lower. Perfect for us to attack. The powered exoskeletons can eliminate the flying-type first and then the heavy artillery follows to destroy the nest.",
+    "JA": "本作戦の目的は、飛行型侵略生物の巣を破壊することです。\nクイーンの壊滅に成功した今、巣の防衛力は大きく低下したはず。残っていたクイーンも巣を離れているようです。現在、巣は無防備な状態。攻撃するなら今しかありません。\nまずコンバットフレームが飛行型を殲滅。その後、重火砲によって巣を破壊します。",
+    "KR": "이 작전의 목적은 비행형 침략 생물의\n집을 파괴하는 것입니다. 퀸 제거에\n성공했으니 집의 방어력이 크게\n약화됐을 겁니다. 남아 있던 퀸도\n집을 비운 것으로 보입니다.\n\n지금 집은 무방비 상태입니다.\n공격하려면 지금밖에 없습니다.\n우선 컴배트 프레임으로 비행형을\n섬멸한 뒤 중화포로 집을\n파괴하겠습니다.",
+    "SC": "本次作战的目的是破坏飞天型侵略生物的巢。\n在成功消灭女王后，如今巢的防卫力应该大幅下降才对。其他女王也不在巢中。现在巢是无防备的状态。正是攻击的好机会。\n首先由战斗机体歼灭飞天型。之后再由重砲破坏巢。"
+   }
+  },
+  {
+   "path": "M049",
+   "progress": 0.83,
+   "title": {
+    "CN": "瓦解地區",
+    "EN": "Broken Land",
+    "JA": "瓦解地区",
+    "KR": "와해 지구",
+    "SC": "瓦解地区"
+   },
+   "brief": {
+    "CN": "防線在戰鬥機器人的攻擊下已經瓦解。市區也受到怪物入侵而陷入毀滅狀態。來不及逃走的市民已經沒有生存的希望，要進行救援也非常困難。這個區域雖然勉強撐住了……但可惜也即將毀滅了。現在城市被完全壓制住，無法組成能奪回城市的完整戰力。即使如此，也不能就這樣等著毀滅。我們將發動以步兵部隊為中心的奇襲作戰，奪回市區。",
+    "EN": "Our defense line was destroyed by battle robots; the city was set ablaze by the monsters. Citizens who failed to escape have given up all hope and it's nearly impossible to launch a rescue mission. For now, the enemy in this area has been held back, but destruction is nigh. They have pinned us down, and we are unable to assemble the necessary force to take back the city. But we can't just sit and wait for destruction. We'll launch a raid led by the infantry and reclaim the city.",
+    "JA": "戦闘ロボットの攻撃により防衛線は崩壊。さらに怪物が侵入し、市街地は壊滅状態です。もはや逃げ遅れた市民の生存は絶望的。救出も困難です。このエリアは、なんとか持ちこたえてきましたが……残念ながら、崩壊の時が来たようです。現在、街は完全に制圧されており、奪還に十分な戦力を整えることはできません。それでも、このまま破滅を待つことはできません。歩兵部隊を中心とした奇襲攻撃で市街地を奪還します。",
+    "KR": "전투 로봇의 공격으로 방어선은\n붕괴했으며, 괴물이 침입해 시가지는\n모두 파괴됐습니다.\n\n대피하지 못한 시민들의 생존 가능성은\n거의 없습니다. 구출도 어려운\n상황입니다.\n간신히 이 구역을 지켜 왔지만……\n안타깝게도 이젠 파멸의 순간이 온 것\n같습니다. 현재 도시는 완전히\n제압됐으며 탈환 작전에 투입할 전력도\n부족합니다.\n\n하지만 이대로 앉아서 멸망하기만을\n기다리고 있을 수는 없습니다.\n보병 부대를 중심으로 기습 공격을\n감행해 시가지를 탈환하겠습니다.",
+    "SC": "防线在战斗机器人的攻击下已经瓦解。市区也受到怪物入侵而陷入毁灭状态。来不及逃走的市民已经没有生存的希望，要进行救援也非常困难。这个区域虽然勉强撑住了……但可惜也即将毁灭了。现在城市被完全压制住，无法组成能夺回城市的完整战力。即使如此，也不能就这样等著毁灭。我们将发动以步兵部队为中心的奇袭作战，夺回市区。"
+   }
+  },
+  {
+   "path": "M062",
+   "progress": 0.84,
+   "title": {
+    "CN": "閃亮深淵",
+    "EN": "Sparkling Abyss",
+    "JA": "煌めく深淵",
+    "KR": "빛나는 심연",
+    "SC": "闪亮深渊"
+   },
+   "brief": {
+    "CN": "發現了怪物棲息的洞窟。雖然沒有怪物繁殖的跡象，但卻還是發現大量的怪物。請與撲滅小隊一同前往現場。",
+    "EN": "A cave with lurking monsters has been found. There's no sign of monsters breeding, yet we have still encountered a lot of them. Go to the site with the extermination team.",
+    "JA": "怪物の生息する洞窟が発見されました。怪物が繁殖している形跡はありませんが、それでも多数の怪物が確認されています。駆除チームに同行し、現地に向かってください。",
+    "KR": "괴물이 서식 중인 동굴을 발견했습니다.\n괴물이 번식한 흔적은 없지만\n다수의 괴물이 확인됐습니다.\n섬멸 팀과 함께 현지로 가 주십시오.",
+    "SC": "发现了怪物栖息的洞窟。虽然没有怪物繁殖的迹象，但却还是发现大量的怪物。请与扑灭小队一同前往现场。"
+   }
+  },
+  {
+   "path": "M069",
+   "progress": 0.84,
+   "title": {
+    "CN": "飛行船團全面進攻",
+    "EN": "Attack of the Flying Fleet",
+    "JA": "飛行船団大襲来",
+    "KR": "비행선단의 대습격",
+    "SC": "飞行船团全面进攻"
+   },
+   "brief": {
+    "CN": "飛行物體大軍正對市區發動攻擊。牠們不斷地展開攻擊，逐一將都市變為廢墟。\n請在行進路線上待命，對飛行物體發動攻擊。但我們沒有充分的戰力，只能靠步兵部隊進行作戰。",
+    "EN": "An army of flying objects is attacking the city. They keep striking, gradually turning it into ruins.\nWait on the projected path and attack the flying objects. We don't have enough combat strength, so we'll depend on the infantry unit.",
+    "JA": "飛行物体の大軍が市街地に侵攻。都市を次々と廃墟に変えながら進撃を続けています。\n進路上で待ち構え、飛行物体を攻撃してください。ただ、我々には十分な戦力がありません。歩兵部隊だけでの交戦です。",
+    "KR": "수많은 비행 물체가 시가지를 침공해\n도시를 초토화하면서 진격 중입니다.\n이동 경로에서 대기하다가 비행 물체를\n공격해 주십시오.\n\n단, 우리에게는 충분한 전력이 없어\n보병 부대만으로 응전해야 합니다.",
+    "SC": "飞行物体大军正对市区发动攻击。牠们不断地展开攻击，逐一将都市变为废墟。\n请在行进路线上待命，对飞行物体发动攻击。但我们没有充分的战力，只能靠步兵部队进行作战。"
+   }
+  },
+  {
+   "path": "M055",
+   "progress": 0.85,
+   "title": {
+    "CN": "群峰圍繞的陷阱",
+    "EN": "Mountain Traps",
+    "JA": "峰を包む罠",
+    "KR": "산 정상의 함정",
+    "SC": "群峰围绕的陷阱"
+   },
+   "brief": {
+    "CN": "厄拉尼亞正不斷地從掉落於山區的傳送錨塔中出現。撲滅小隊正往該處前進……但卻被厄拉尼亞的網子阻礙並陷入苦戰中。\n雖然需要後續部隊的支援，但能投入的人數相當少。請與部隊會合，消滅厄拉尼亞所保護的傳送錨塔。",
+    "EN": "Araneas keep rushing out from the teleportation anchors that was dropped in the mountain. The extermination team is heading to the site, but they are struggling with Araneas' webs. They need support from the follow-up force, but our manpower is limited. Please meet up with the follow-up force, and destroy those teleportation anchors protected by Araneas.",
+    "JA": "山岳部に落下したテレポーションアンカーがアラネアを出現させています。駆除チームが突入したものの……アラネアのネットに進路を阻まれ、苦戦中。\n後続部隊による支援が必要ですが、投入できるのは少数です。部隊に合流し、アラネアに守られたテレポーションアンカーを攻撃してください。",
+    "KR": "산악 지대에 낙하한 텔레포테이션\n앵커에서 아라네아가 나타나고\n있습니다.\n섬멸 팀이 돌입했지만…… 아라네아의\n그물로 진로가 가로막혀 고전 중입니다.\n\n후속 부대의 지원이 필요한 상황이지만\n투입할 수 있는 전력이 별로 없습니다.\n부대와 합류해 아라네아가 지키고 있는\n텔레포테이션 앵커를 공격해 주십시오.",
+    "SC": "厄拉尼亚正不断地从掉落于山区的传送锚塔中出现。扑灭小队正往该处前进……但却被厄拉尼亚的网子阻碍并陷入苦战中。\n虽然需要后续部队的支援，但能投入的人数相当少。请与部队会合，消灭厄拉尼亚所保护的传送锚塔。"
+   }
+  },
+  {
+   "path": "M075",
+   "progress": 0.86,
+   "title": {
+    "CN": "血戰時刻",
+    "EN": "Bloody Battle",
+    "JA": "血戦の刻",
+    "KR": "혈전의 순간",
+    "SC": "血战时刻"
+   },
+   "brief": {
+    "CN": "敵人步兵部隊開始進擊。外星生物率領著怪物，可說是數量相當龐大。我們計畫佈署於敵人行進路線上的市區，正面迎擊。\n\n……原本正面攻擊並非上策……但我們缺乏戰力，無法防衛大範圍的區域。除了集結剩餘戰力，給予外星生物嚴重打擊之外，就沒有其他方法守護這個區域了。\n會是一場嚴苛的戰役。祝你好運。",
+    "EN": "The enemy infantry begins to strike. Those aliens lead the monsters, forming a devastating legion. We intend to deploy forces in urban areas on the enemy's path and confront them.\n\nConfronting them isn't the best plan, but our combat strength is low and we can't defend a wide area. We can only assemble the remaining force and hit the aliens hard. That's the only way to protect this region.\nIt will be a tough battle. I'll pray for you.",
+    "JA": "敵歩兵部隊が進撃を開始。エイリアンは怪物を従え、かなりの大軍です。我々は敵進路上の市街地に展開。正面から迎え撃ちます。\n\n……本来なら正攻法は得策ではありませんが……すでに我々の戦力は乏しく、広域の守備を固めることはできません。残された力を結集し、エイリアンに大打撃を与える以外、このエリアを守る方法はないと思われます。\n厳しい戦いになることは間違いありません。健闘を祈ります。",
+    "KR": "적 보병 부대가 진격을 개시했습니다.\n괴물을 이끌고 있는 외계인\n대부대입니다.\n우리는 적의 이동 경로에 있는 시가지로\n이동해 정면으로 맞서 싸울 계획입니다.\n\n이런 상황에서 정공법을 쓰는 건\n좋은 생각은 아니지만……\n이미 아군의 전력이 바닥난 상태라\n광범위한 지역을 방어하기는\n불가능합니다. 남은 전력을 결집해\n외계인에게 치명타를 입히는 것 외에는\n이 구역을 지킬 방법이 없습니다.\n필시 힘든 싸움이 될 겁니다.\n건투를 빌겠습니다.",
+    "SC": "敌人步兵部队开始进击。外星生物率领著怪物，可说是数量相当庞大。我们计划布署于敌人行进路线上的市区，正面迎击。\n\n……原本正面攻击并非上策……但我们缺乏战力，无法防卫大范围的区域。除了集结剩余战力，给予外星生物严重打击之外，就没有其他方法守护这个区域了。\n会是一场严苛的战役。祝你好运。"
+   }
+  },
+  {
+   "path": "M066",
+   "progress": 0.87,
+   "title": {
+    "CN": "落下地點",
+    "EN": "Drop Location",
+    "JA": "落下地点",
+    "KR": "낙하지점",
+    "SC": "落下地点"
+   },
+   "brief": {
+    "CN": "已確認傳送錨塔的掉落位置。是山區。也就是目前位置的周遭。\n狀態相當危險。請密切注意上空。\n\n附近應該有突擊兵、飛翼潛行兵與劍兵的小隊。請與他們會合，消滅傳送錨塔。",
+    "EN": "We have confirmed the drop location of the anchors. It's in the mountain, which means it's around current location.\nThe situation is dangerous. Mind the sky.\n\nThere should be Rangers, Wing Divers, and Fencers nearby. Meet up with them and destroy the teleportation anchors.",
+    "JA": "テレポーションアンカーの落下位置を特定しました。山岳地帯。つまり現在位置の周辺だと思われます。\n非常に危険な状態です。上空に注意してください。\n\n周囲にはレンジャー、ウイングダイバー、フェンサーのチームがいるはずです。合流して、テレポーションアンカーを破壊してください。",
+    "KR": "텔레포테이션 앵커의 낙하 위치를\n알아냈습니다. 산악 지대.\n즉, 현재 위치 주변으로 추정됩니다.\n상당히 위험한 상황입니다.\n상공을 주의하시기 바랍니다.\n\n주변에 레인저, 윙 다이버, 펜서 팀이\n있을 겁니다. 합류해서 텔레포테이션\n앵커를 파괴해 주십시오.",
+    "SC": "已确认传送锚塔的掉落位置。是山区。也就是目前位置的周遭。\n状态相当危险。请密切注意上空。\n\n附近应该有突击兵、飞翼潜行兵与剑兵的小队。请与他们会合，消灭传送锚塔。"
+   }
+  },
+  {
+   "path": "M073_5",
+   "progress": 0.88,
+   "title": {
+    "CN": "怪物大地",
+    "EN": "Land of Monsters",
+    "JA": "怪物の大地",
+    "KR": "괴물의 대지",
+    "SC": "怪物大地"
+   },
+   "brief": {
+    "CN": "母體生物已經入侵市區。並於該區域發現了大量的卵。\n這還是第一次發現怪物在地面繁殖。恐怕牠們已經開始適應地球環境了。\n這樣下去，周遭被怪物淹沒也是遲早的事。請盡快開始進行撲滅。",
+    "EN": "Mother monsters have intruded the city. Lots of eggs are found.\nThis is the first time we find monsters laying eggs on the surface. I'm afraid they are getting used to the environment on Earth.\nIf this continues, this area will be covered by monsters sooner or later. Commence elimination asap.",
+    "JA": "マザーモンスターが市街地に侵入しました。そのエリアから多数の卵が発見されています。\n怪物が地上で繁殖するのは、初めてのことです。おそらく、しだいに地球環境に適応しつつあるのだと思われます。\nこのままでは、周辺が怪物で埋め尽くされるのも時間の問題です。早急に駆除を開始してください。",
+    "KR": "마더 몬스터가 시가지에 침입했습니다.\n해당 구역에서 수많은 알이\n발견됐습니다.\n\n괴물이 지상에서 번식한 건 이번이\n처음입니다. 아마도 점점 지구 환경에\n적응하고 있는 것으로 보입니다.\n\n이렇게 되면 주변 지역이 괴물로\n가득 차는 건 시간문제입니다.\n신속히 제거해 주십시오.",
+    "SC": "母体生物已经入侵市区。并于该区域发现了大量的卵。\n这还是第一次发现怪物在地面繁殖。恐怕牠们已经开始适应地球环境了。\n这样下去，周遭被怪物淹没也是迟早的事。请尽快开始进行扑灭。"
+   }
+  },
+  {
+   "path": "M054_5",
+   "progress": 0.88,
+   "title": {
+    "CN": "被絲線包圍的鐵線",
+    "EN": "Steel Covered by Threads",
+    "JA": "糸に抱かれた鉄線",
+    "KR": "실로 뒤덮인 철로",
+    "SC": "被丝线包围的铁线"
+   },
+   "brief": {
+    "CN": "居住地區已被厄拉尼亞入侵。該處是大量生還者所生活的區域。請立刻前往現場。",
+    "EN": "Araneas have invaded the residential area in which many survivors live. Please rush to the scene.",
+    "JA": "居住区域にアラネアが侵入しました。多数の生存者が生活しているエリアです。ただちに現地に向かってください。",
+    "KR": "거주 구역에 아라네아가 침입했습니다.\n다수의 생존자가 거주 중인 구역입니다.\n즉시 현지로 가 주십시오.",
+    "SC": "居住地区已被厄拉尼亚入侵。该处是大量生还者所生活的区域。请立刻前往现场。"
+   }
+  },
+  {
+   "path": "M046_2",
+   "progress": 0.89,
+   "title": {
+    "CN": "海岸防衛線",
+    "EN": "Coastal Defense Line",
+    "JA": "水際の防衛線",
+    "KR": "해안가의 방어선",
+    "SC": "海岸防卫线"
+   },
+   "brief": {
+    "CN": "原本在海上移動的９號母艦正接近沿岸地區。企圖要讓外星生物登陸。\n空軍的攻擊失敗，敵人已經開始登陸。雖然想從地面攻擊來阻止敵人……但部隊卻無法及時抵達，只能以佈署於現場附近的部隊展開戰鬥。在援軍到達以前，請阻止敵人登陸。",
+    "EN": "Mothership No.9, which was moving across the ocean, approached the shore and launched an alien invasion!\nThe air force attack has failed to stop the enemies from landing, and our main ground force can't get there in time. Deploying the units at site to fend off the enemy is our only option. Please hold off the enemy invasion until the reinforcement arrives.",
+    "JA": "海上を移動していたマザーシップ・ナンバー９が沿岸部に接近。目的は、エイリアンを上陸させることのようです。\n空軍の攻撃は失敗。敵は上陸を開始しつつあります。地上からの攻撃で敵を阻止したいところですが……部隊の到着が間に合いません。現地付近に展開していた部隊だけで戦闘を開始。援軍が到着するまで敵の上陸を防いでください。",
+    "KR": "해상을 이동 중이던 마더 십 넘버 9이\n연안 지역으로 접근 중입니다.\n외계인을 상륙시키려는 것 같습니다.\n\n공군의 공격은 실패했으며, 적은 상륙\n준비를 시작했습니다. 지상 공격으로\n적을 막고 싶지만……\n부대 도착이 늦어질 것 같습니다.\n\n일단 인근 지역 부대의 병력으로\n전투를 개시해 원군이 도착할 때까지\n적의 상륙을 막아 주십시오.",
+    "SC": "原本在海上移动的９号母舰正接近沿岸地区。企图要让外星生物登陆。\n空军的攻击失败，敌人已经开始登陆。虽然想从地面攻击来阻止敌人……但部队却无法及时抵达，只能以布署于现场附近的部队展开战斗。在援军到达以前，请阻止敌人登陆。"
+   }
+  },
+  {
+   "path": "M204",
+   "progress": 0.9,
+   "title": {
+    "CN": "地底激戰",
+    "EN": "Intense Battle Underground",
+    "JA": "地の底の激戦",
+    "KR": "땅속에서의 격전",
+    "SC": "地底激战"
+   },
+   "brief": {
+    "CN": "在傳送錨塔的落下地點附近發現了怪物的洞窟。推測深入地底的錨塔正在將怪物傳送到地底。\n先遣部隊已經進入洞窟之中，後續部隊立刻就會出發。請與部隊同行，給予支援。",
+    "EN": "We found a monster cave close to the drop location of those teleportation anchors. It's possible that the anchors diving deep underground are transporting monsters.\nThe vanguard has headed into the cave and the follow-up force will catch up soon. Go with the reinforcement and support them.",
+    "JA": "テレポーションアンカーの落下地点付近で、怪物の洞窟が発見されました。深く突き刺さったアンカーによって、怪物が地底に転送されていると考えられます。\nすでに先行部隊が洞窟に突入。すぐに後続部隊が出発します。部隊に同行し、援護してください。",
+    "KR": "텔레포테이션 앵커의 낙하지점\n부근에서 괴물이 판 동굴을\n발견했습니다.\n땅속 깊숙이 박힌 앵커를 통해\n괴물이 지하로 전송된 것 같습니다.\n\n이미 선행 부대가 동굴에 돌입했으며\n곧 후속 부대가 출발할 예정입니다.\n부대와 동행해 엄호해 주십시오.",
+    "SC": "在传送锚塔的落下地点附近发现了怪物的洞窟。推测深入地底的锚塔正在将怪物传送到地底。\n先遣部队已经进入洞窟之中，后续部队立刻就会出发。请与部队同行，给予支援。"
+   }
+  },
+  {
+   "path": "M079",
+   "progress": 0.91,
+   "title": {
+    "CN": "傾盡一切的激烈交戰",
+    "EN": "Greatest Final Confrontation",
+    "JA": "最大最後の激突",
+    "KR": "최대 최후의 격돌",
+    "SC": "倾尽一切的激烈交战"
+   },
+   "brief": {
+    "CN": "外星生物大軍正進軍中。不僅數量前所未見，還帶領了許多隻艾爾基努斯。敵人是打算結束在這塊區域上進行的戰鬥。\n決戰的時候到來了。我們的戰力不足，原本不該正面衝突。但我們握有為了這天所準備的最後王牌。\n調整為戰鬥用的移動式起重機「戰役巴爾加」。將投入所有機體以消滅艾爾基努斯。若是輸了這場戰役，我們便會失去未來。預定會盡可能投入所有ＥＭＣ與電磁砲。請務必獲得勝利。",
+    "EN": "A large alien army is approaching. They not only come in an unprecedented scale, but bring along several Erginuses. They are determined to end this war.\nIt's time for the showdown. With our limited battle force, we should have avoided direct confrontation, but we've got the final trump card especially prepared for this moment.\nI present to you the mobile cranes adapted for battle %dq%War Bargas.%dq% All of them will be deployed to eliminate Erginuses. If we lose this battle, we lose our future. We also plan to deploy as many EMCs and railguns as possible. Win by all means necessary.",
+    "JA": "エイリアンの大部隊が進軍中。かつてない大軍の上、複数のエルギヌスを従えています。敵はこのエリアでの戦いに終止符を打つつもりでしょう。\n決戦の時が来たようです。我々の戦力は乏しく、本来、正面からの激突は得策とはいえません。ですが、この日のために準備された切り札があります。\n戦闘用に調整された移動式クレーン「ウォーバルガ」。その全機を投入し、エルギヌスを撃破します。この戦いに負ければ、我々に明日はありません。ＥＭＣ、レールガンも可能な限り投入する予定です。必ず勝利を掴んでください。",
+    "KR": "외계인 대부대가 진군 중입니다.\n지금껏 본 적 없는 대군인 데다가\n에르기노스 여러 마리를 데리고\n있습니다.\n\n적은 이 구역에서의 전투에 종지부를\n찍을 심산인 것 같습니다.\n결전의 순간이 온 것 같습니다. 전력이\n바닥난 상태에서 적과 정면으로\n부딪치는 건 그리 현명한 방법은\n아닙니다. 하지만 이 날을 위해\n준비한 비장의 수단이 있습니다.\n\n전투용으로 개조한 이동식 크레인\n「워 바르가」 전량을 투입해\n에르기노스를 격파하겠습니다.\n이 전투에서 패배하면 우리에게\n내일은 없습니다. EMC, 레일건도\n최대한 많이 투입할 예정입니다.\n\n반드시 승리를 쟁취해 주십시오.",
+    "SC": "外星生物大军正进军中。不仅数量前所未见，还带领了许多只艾尔基努斯。敌人是打算结束在这块区域上进行的战斗。\n决战的时候到来了。我们的战力不足，原本不该正面冲突。但我们握有为了这天所准备的最后王牌。\n调整为战斗用的移动式起重机「战役巴尔加」。将投入所有机体以消灭艾尔基努斯。若是输了这场战役，我们便会失去未来。预定会尽可能投入所有ＥＭＣ与电磁砲。请务必获得胜利。"
+   }
+  },
+  {
+   "path": "M090",
+   "progress": 0.91,
+   "title": {
+    "CN": "邁向毀滅的城市",
+    "EN": "Crumbling City",
+    "JA": "崩れゆく街",
+    "KR": "무너지는 도시",
+    "SC": "迈向毁灭的城市"
+   },
+   "brief": {
+    "CN": "市區被怪物佔領了。怪物由地底衝破高樓，竄到地面來。城市轉眼間就要陷落。城市內應該還有市民存活，請立刻展開奪回作戰。",
+    "EN": "Monsters took over the city. They emerged from underground, breaking through buildings. The city will crumble in no time. There must be citizens who have survived. Now reclaim the city!",
+    "JA": "市街地が怪物に制圧されました。地下からビルを食い破り、地上へと出現。陥落まであっという間のできごとだったようです。まだ街には市民が残っているはず。ただちに奪還作戦を開始します。",
+    "KR": "시가지가 괴물에게 제압됐습니다.\n지하에서 빌딩을 파먹으면서 지상으로\n나타난 탓에 순식간에 함락됐다고\n합니다. 도시에는 아직 시민들이 남아\n있을 겁니다.\n\n즉시 탈환 작전을 개시하겠습니다.",
+    "SC": "市区被怪物占领了。怪物由地底冲破高楼，窜到地面来。城市转眼间就要陷落。城市内应该还有市民存活，请立刻展开夺回作战。"
+   }
+  },
+  {
+   "path": "M052",
+   "progress": 0.92,
+   "title": {
+    "CN": "強行進攻作戰",
+    "EN": "Forced Entry",
+    "JA": "強行突入作戦",
+    "KR": "강행 돌입 작전",
+    "SC": "强行进攻作战"
+   },
+   "brief": {
+    "CN": "許多艘母艦都射出了傳送錨塔。而錨塔正掉落到世界各地，在掉落地點造成混亂。\n我們所在的區域是集中掉落於山區。傳送過來的不僅是怪物，還有防護者。山區變為敵人的要塞。\n現在立刻組成攻擊部隊，展開錨塔的破壞作戰。",
+    "EN": "Multiple motherships have discharged teleportation anchors. The anchors are dropping all over the world, wreaking havoc in those areas.\nIn our area, they are being dropped intensively in the mountains. They teleport not only monsters, but shield bearers too. The mountain area is becoming an enemy fortress.\nAssemble a strike team and destroy the anchors.",
+    "JA": "複数のマザーシップからテレポーションアンカーが射出されました。アンカーは世界各地に落下。いたるところで混乱が広がっています。\n我々のエリアでは、山岳地帯に集中的に落下。怪物だけでなく、シールドべアラーまでが転送されてきました。山岳部は敵の要塞となりつつあります。\nただちに攻撃部隊を編成。アンカーの破壊作戦を実施します。",
+    "KR": "여러 대의 마더 십에서 텔레포테이션\n앵커가 사출됐습니다. 사출된 앵커는\n세계 각지에 떨어져 곳곳에서 혼란을\n일으키고 있습니다.\n\n우리 부대가 담당하고 있는 구역에서는\n앵커가 산악 지대에 집중적으로\n낙하하였으며 괴물뿐만 아니라\n실드 베어러까지 나타났습니다.\n현재 산악 지대는 적의 요새로\n변모하고 있습니다.\n\n즉시 공격 부대를 편성해\n앵커 파괴 작전을 개시하겠습니다.",
+    "SC": "许多艘母舰都射出了传送锚塔。而锚塔正掉落到世界各地，在掉落地点造成混乱。\n我们所在的区域是集中掉落于山区。传送过来的不仅是怪物，还有防护者。山区变为敌人的要塞。\n现在立刻组成攻击部队，展开锚塔的破坏作战。"
+   }
+  },
+  {
+   "path": "M060",
+   "progress": 0.93,
+   "title": {
+    "CN": "旋風",
+    "EN": "Tornado",
+    "JA": "旋風",
+    "KR": "회오리바람",
+    "SC": "旋风"
+   },
+   "brief": {
+    "CN": "發現外星生物帶領著怪物出現在山區。整個山區已經被佔領住。現在就立刻開始殲滅作戰。\n……但是與敵人的數量相比，我方的戰力並不充分。但即使如此也只能奮力一戰。要是讓怪物在山區繁殖，會造成無法挽回的局面。",
+    "EN": "We have confirmation that aliens are leading monsters in the mountain area. The whole mountain is now under enemy control. Let's commence operation extermination.\nOur current strength is no match to the enemy, but we must fight no matter what. If those monsters start to multiply in the mountain, all hope will be lost.",
+    "JA": "怪物を引き連れたエイリアンを山岳地帯で確認しました。すでに山岳部全体が占領されている状態です。ただちに、殲滅作戦を開始します。\n……しかし敵の数に比べ、我が方の戦力は十分とはいえない状況です。それでも戦うしかありません。怪物が山岳部で繁殖すれば、取り返しのつかない結果となるからです。",
+    "KR": "산악 지대에서 괴물을 데리고 있는\n외계인을 확인했습니다. 이미 산악 지대\n전체가 점령당한 상태입니다.\n\n즉시 섬멸 작전을 개시하겠습니다.\n…하지만 적의 숫자에 비해 우리 전력은\n턱없이 부족한 상황입니다.\n\n그렇다 해도 싸우는 수밖에 없습니다.\n괴물이 산악 지대에서 번식하면\n돌이킬 수 없는 사태가 벌어질 겁니다.",
+    "SC": "发现外星生物带领著怪物出现在山区。整个山区已经被占领住。现在就立刻开始歼灭作战。\n……但是与敌人的数量相比，我方的战力并不充分。但即使如此也只能奋力一战。要是让怪物在山区繁殖，会造成无法挽回的局面。"
+   }
+  },
+  {
+   "path": "M070",
+   "progress": 0.94,
+   "title": {
+    "CN": "奮力一搏",
+    "EN": "Against All Odds",
+    "JA": "滅びの車輪",
+    "KR": "멸망의 수레바퀴",
+    "SC": "奋力一搏"
+   },
+   "brief": {
+    "CN": "世界各地都出現了傳送飛船大軍。所有大都市都被投放出來的怪物毀滅。犧牲者不計其數。\n已經沒有能力迎擊了……一路奮戰的步兵部隊也被孤立於各地，正在怪物的攻擊下逐漸被殲滅。\n大量的傳送飛船也正在接近這個地區。請可戰鬥的部隊前往現場。",
+    "EN": "Teleportation ships appeared all over the world. All big cities are destructed by the dropping monsters; the number of victims is colossal.\nWe don't have the means to fight back...The infantry unit that has been fighting all the way got separated and is gradually perishing under the monsters' attack.\nThere are also many teleportation ships coming at us. All those who can fight should head out and engage.",
+    "JA": "世界中にテレポーションシップの大船団が飛来しています。投下された怪物によって、すべての大都市が壊滅状態。犠牲者の数は計り知れません。\n迎え撃つ力はもはや無く……奮闘を続けていた歩兵部隊も各地で孤立。怪物に囲まれて、殲滅されています。\nこのエリアにも多数のテレポーションシップが接近中です。戦闘可能な部隊は現地に向かってください。",
+    "KR": "전 세계에 대규모 텔레포테이션 십\n선단이 나타나고 있습니다.\n투하된 괴물들로 인해 모든 대도시는\n괴멸됐으며, 희생자 수는 헤아릴 수조차\n없습니다.\n\n이제는 응전할 여력도 없는 데다……\n끝까지 맞서 싸우던 보병 부대도\n각지에서 고립되어 결국 괴물에게 포위,\n섬멸당하고 있습니다.\n\n이 구역에도 다수의 텔레포테이션 십이\n접근 중입니다. 전투 가능한 부대는\n현지로 가 주십시오.",
+    "SC": "世界各地都出现了传送飞船大军。所有大都市都被投放出来的怪物毁灭。牺牲者不计其数。\n已经没有能力迎击了……一路奋战的步兵部队也被孤立于各地，正在怪物的攻击下逐渐被歼灭。\n大量的传送飞船也正在接近这个地区。请可战斗的部队前往现场。"
+   }
+  },
+  {
+   "path": "M078",
+   "progress": 0.95,
+   "title": {
+    "CN": "魔獸之宴",
+    "EN": "Monster Banquet",
+    "JA": "魔獣の宴",
+    "KR": "마수의 연회",
+    "SC": "魔兽之宴"
+   },
+   "brief": {
+    "CN": "市區出現了怪物。\n……我們無法撥出大規模的戰力。請佈署於現場周遭的部隊前往處理。\n詳細狀況……不明。\n已經派出偵查小隊。請與之會合，確認狀況。",
+    "EN": "There are monsters in the city.\nWe are incapable of deploying a massive fighting force. We request the troops close to the scene to deal with the situation.\nDetails...unknown.\nInvestigation team has been sent over. Meet up with them and confirm the situation.",
+    "JA": "市街地に怪物が出現。\n……大規模な戦力を割くのは不可能です。現地周辺に展開中の部隊で対処してください。\n詳しい状況は……不明。\n偵察チームを派遣してあります。合流し、状況を確認してください。",
+    "KR": "시가지에 괴물이 나타났습니다.\n……대규모 전력을 투입하는 건\n불가능합니다. 현지 주변에 파견되어\n있는 부대의 병력으로 응전해 주십시오.\n\n자세한 상황은…… 알 수 없습니다.\n정찰 팀을 파견했으니 합류해 상황을\n확인해 주십시오.",
+    "SC": "市区出现了怪物。\n……我们无法拨出大规模的战力。请布署于现场周遭的部队前往处理。\n详细状况……不明。\n已经派出侦查小队。请与之会合，确认状况。"
+   }
+  },
+  {
+   "path": "M071",
+   "progress": 0.95,
+   "title": {
+    "CN": "赴死之人",
+    "EN": "Suicide Squad",
+    "JA": "死にゆく者たち",
+    "KR": "죽어가는 자들",
+    "SC": "赴死之人"
+   },
+   "brief": {
+    "CN": "今日有怪物集團對市區發動攻擊。\n雖然展開了大規模的殲滅作戰，\n但結果卻是……敗北。\n部隊全滅。或許是因為損失了大半戰力，我們完全無法阻止怪物進攻。\n……很可惜，看來一切都要結束了。\n\n！？\n還有部隊正在與怪物交戰！\n是暴風４號！\n請可戰鬥的部隊立刻前往救援。",
+    "EN": "Today there's a monster army attacking the city.\nWe did carry out a big-scale extermination operation, but...we lost the battle.\nThe whole troop was wiped out. We couldn't hold off the monster attack, probably because we have lost most of our battle force.\nI'm sorry, but it looks like it's over.\n\nWhat!?\nThere is still a unit fighting against the monsters!\nIt's Storm 4!\nAll units capable of fighting head to the site.",
+    "JA": "本日、怪物の大群が市街地に侵攻。\n大規模な殲滅作戦が実施されました。\nしかし結果は……敗北です。\n部隊は全滅。戦力の大半を失ったばかりか、怪物の進撃を食い止めることもできませんでした。\n……残念ながら、チェックメイトの時が近づいているようです。\n\n！？\nまだ交戦を続けている部隊があります！\nストーム４です！\n戦闘可能な部隊は、ただちに救援に向かってください。",
+    "KR": "오늘 시가지를 침공한 괴물 무리를\n제거하고자 대규모 섬멸 작전을\n감행했습니다.\n\n하지만 결과는…… 패배로 끝났습니다.\n부대는 전멸.\n대부분의 전력을 잃었을 뿐만 아니라\n괴물의 진격을 막아내지도 못했습니다.\n……안타깝지만 우리의 패배가 점점 더\n가까워지고 있는 것 같습니다.\n\n!?\n아직 교전 중인 부대가 있습니다!\n스톰 4입니다!\n전투 가능한 부대는\n즉시 지원하러 가 주십시오.",
+    "SC": "今日有怪物集团对市区发动攻击。\n虽然展开了大规模的歼灭作战，\n但结果却是……败北。\n部队全灭。或许是因为损失了大半战力，我们完全无法阻止怪物进攻。\n……很可惜，看来一切都要结束了。\n\n！？\n还有部队正在与怪物交战！\n是暴风４号！\n请可战斗的部队立刻前往救援。"
+   }
+  },
+  {
+   "path": "M080",
+   "progress": 0.96,
+   "title": {
+    "CN": "侵略者大集結",
+    "EN": "Invader Assembly",
+    "JA": "侵略者大結集",
+    "KR": "침략자 대집결",
+    "SC": "侵略者大集结"
+   },
+   "brief": {
+    "CN": "已確認１１號母艦的降落地點。請可戰鬥的部隊，立刻前往該處。\n\n……但部隊已經是毀滅狀態。\n在連是否有人能生還都無法保證的狀況下，這樣的作戰根本就……",
+    "EN": "We have confirmed the landing location of Mothership No. 11. All those who can fight head out.\n\nBut our troops have been vanquished. It would be a miracle if anyone survived. This operation is doomed...",
+    "JA": "マザーシップ・ナンバー１１の降下地点が判明しました。戦闘可能な部隊は、ただちにその場所へ向かってください。\n\n……ですが、部隊は壊滅状態。\n生存者がいるかも怪しい状況で、こんな作戦など……。",
+    "KR": "마더 십 넘버 11의 강하 지점을\n알아냈습니다. 전투 가능한 부대는\n즉시 해당 지역으로 가 주십시오.\n\n…하지만 부대는 이미 괴멸상태입니다.\n생존자가 있는지도 알 수 없는 상황에서\n이런 작전을 실행해 봤자…….",
+    "SC": "已确认１１号母舰的降落地点。请可战斗的部队，立刻前往该处。\n\n……但部队已经是毁灭状态。\n在连是否有人能生还都无法保证的状况下，这样的作战根本就……"
+   }
+  },
+  {
+   "path": "M081",
+   "progress": 0.97,
+   "title": {
+    "CN": "烈焰大地",
+    "EN": "Scorched Earth",
+    "JA": "烈火の大地",
+    "KR": "불타는 대지",
+    "SC": "烈焰大地"
+   },
+   "brief": {
+    "CN": "敵人正接近作戰地點！\n數量龐大！\n\n居然……\n所有敵人都正往１１號母艦集結。",
+    "EN": "Enemies are approaching the war zone!\nIt's a whole army!\n\nWhat am I seeing here...\nAll enemies are gathering around Mothership No. 11.",
+    "JA": "作戦ポイントに敵が接近！\n大軍です！\n\nそんな……。\nすべての敵がマザーシップ・ナンバー１１の元に集結しようとしています。",
+    "KR": "적이 작전 포인트에 접근!\n대부대입니다!\n\n이럴 수가…….\n모든 적이 마더 십 넘버 11이\n있는 곳으로 모여들고 있습니다.",
+    "SC": "敌人正接近作战地点！\n数量庞大！\n\n居然……\n所有敌人都正往１１号母舰集结。"
+   }
+  },
+  {
+   "path": "M098",
+   "progress": 0.99,
+   "title": {
+    "CN": "第１１艘船",
+    "EN": "No. 11",
+    "JA": "第１１の船",
+    "KR": "11번째 배",
+    "SC": "第１１艘船"
+   },
+   "brief": {
+    "CN": "１１號母艦已經降落到市區上空。在完全毀滅這個區域之前，似乎不打算移動。\n\n不是我們滅絕，就是外星生物消滅。決戰的時刻到了。",
+    "EN": "Mothership No. 11 has arrived above the city. It won't move until it has completely destroyed the entire area.\n\nIt's either us or them. Time to find out.",
+    "JA": "マザーシップ・ナンバー１１が市街地上空に降下しました。このエリアを完全に消滅させるまで、移動するつもりはないようです。\n\n我々が消えるか、エイリアンが消えるか、決着の時が来たようです。",
+    "KR": "마더 십 넘버 11이 시가지 상공에\n나타났습니다.\n이 구역이 완전히 소멸할 때까지\n이동하지 않을 작정인 것 같습니다.\n\n인류가 사라질지, 외계인이 사라질지\n결판을 내야 할 때인 듯합니다.",
+    "SC": "１１号母舰已经降落到市区上空。在完全毁灭这个区域之前，似乎不打算移动。\n\n不是我们灭绝，就是外星生物消灭。决战的时刻到了。"
+   }
+  },
+  {
+   "path": "M099",
+   "progress": 1.0,
+   "title": {
+    "CN": "無名者",
+    "EN": "The Nameless",
+    "JA": "かの者",
+    "KR": "그자",
+    "SC": "无名者"
+   },
+   "brief": {
+    "CN": "星導者在世界各地的攻擊已經中斷。我們所擊落的，果然是敵人的指揮艦。原本等著敗北的人類，居然獲得了決定性的勝利。\n！？\n敵人指揮艦中出現了生命體！而且有著人類的外表。這底是怎麼一回事？\n但看來並未持有武器。步兵部隊請接近並捕捉生命體。若是對方進行反抗，格殺勿論。",
+    "EN": "The Primer's attack has stopped everywhere in the world. The ship that we shot down was actually the enemy's flagship. A lost cause turned into a surprise victory for humanity.\nBut wait?!\nA living entity in human form appears from the enemy ship. What on earth is going on?\nIt doesn't seem armed though. Infantry unit approach and capture the entity. If it resists, you have permission to shoot and kill.",
+    "JA": "世界中でプライマーが攻撃を中断しました。やはり、我々が撃墜したのは、敵の旗艦だったようです。敗北を待つだけのはずだった人類。しかし、ついに決定的な勝利を得たのです。\n！？\n敵旗艦の中から生命体が出現！　人の姿をしています。これはいったい？\nどうやら武装はしていないようです。歩兵部隊は生命体に接近。拘束してください。抵抗するようなら射殺を許可します。",
+    "KR": "전 세계에서 프라이머의 공격이\n중단됐습니다. 역시 우리가 격추한\n함선이 적의 기함이었던 것 같습니다.\n꼼짝없이 패배의 순간만을 기다렸던\n인류가 마침내 이번 전투로 승기를\n잡았습니다.\n\n!?\n적 기함 안에서 생명체가 나타났습니다!\n인간형 생물입니다. 저건 대체…?\n\n보아하니 무기는 없는 것 같습니다.\n보병 부대는 생명체에 접근한 후\n구속해 주십시오.\n저항하면 사살해도 상관없습니다.",
+    "SC": "星导者在世界各地的攻击已经中断。我们所击落的，果然是敌人的指挥舰。原本等著败北的人类，居然获得了决定性的胜利。\n！？\n敌人指挥舰中出现了生命体！而且有著人类的外表。这底是怎么一回事？\n但看来并未持有武器。步兵部队请接近并捕捉生命体。若是对方进行反抗，格杀勿论。"
+   }
+  }
+ ],
+ "dlc1": [
+  {
+   "path": "DLC/DM011",
+   "progress": 0.11,
+   "title": {
+    "CN": "對抗侵略生物１",
+    "EN": "Engage Aggressors 1",
+    "JA": "対侵略生物１",
+    "KR": "vs 침략 생물 1",
+    "SC": "对抗侵略生物１"
+   },
+   "brief": {
+    "CN": "攻略提示：眾多侵略生物潛伏於地底，務必提高警覺。",
+    "EN": "Hints and Tips: Aggressors are lurking underground. Stay on alert!",
+    "JA": "攻略のヒント：地底に多くの侵略生物が潜んでいる。警戒せよ。",
+    "KR": "공략 힌트:\n지하에 수많은 침략 생물이 숨어 있다.\n경계하라.",
+    "SC": "攻略提示：众多侵略生物潜伏于地底，务必提高警觉。"
+   }
+  },
+  {
+   "path": "DLC/DM013",
+   "progress": 0.17,
+   "title": {
+    "CN": "對抗侵略生物２",
+    "EN": "Engage Aggressors 2",
+    "JA": "対侵略生物２",
+    "KR": "vs 침략 생물 2",
+    "SC": "对抗侵略生物２"
+   },
+   "brief": {
+    "CN": "攻略提示：務必當心金黃色的侵略生物。",
+    "EN": "Hints and Tips: Watch out for golden aggressors!",
+    "JA": "攻略のヒント：黄金の侵略生物に注意せよ。",
+    "KR": "공략 힌트:\n금색 침략 생물을 주의하라.",
+    "SC": "攻略提示：务必当心金黄色的侵略生物。"
+   }
+  },
+  {
+   "path": "DLC/DM005",
+   "progress": 0.23,
+   "title": {
+    "CN": "空降敵兵",
+    "EN": "Airborne Enemies",
+    "JA": "敵部隊降下",
+    "KR": "적 부대 강하",
+    "SC": "空降敌兵"
+   },
+   "brief": {
+    "CN": "攻略提示：不需破壞傳送飛船，專心殲滅從天而降的敵人。",
+    "EN": "Hints and Tips: Ignore the teleportation ships and focus on the airborne enemies.",
+    "JA": "攻略のヒント：テレポーションシップは破壊不要。投下される敵のみ殲滅せよ。",
+    "KR": "공략 힌트:\n텔레포테이션 십은 파괴하지 않아도\n된다. 투하되는 적을 섬멸하라.",
+    "SC": "攻略提示：不需破坏传送飞船，专心歼灭从天而降的敌人。"
+   }
+  },
+  {
+   "path": "DLC/DM018",
+   "progress": 0.29,
+   "title": {
+    "CN": "奪回２３６基地",
+    "EN": "Reclaim Base 236",
+    "JA": "ベース２３６奪還",
+    "KR": "236 베이스 탈환",
+    "SC": "夺回２３６基地"
+   },
+   "brief": {
+    "CN": "攻略提示：殲滅敵人，奪回基地。",
+    "EN": "Hints and Tips: Exterminate the enemy and reclaim the base.",
+    "JA": "攻略のヒント：敵を殲滅し、基地を奪還せよ。",
+    "KR": "공략 힌트:\n적을 섬멸해 기지를 탈환하라.",
+    "SC": "攻略提示：歼灭敌人，夺回基地。"
+   }
+  },
+  {
+   "path": "DLC/DM019",
+   "progress": 0.35,
+   "title": {
+    "CN": "入侵２３６基地",
+    "EN": "Infiltrate Base 236",
+    "JA": "ベース２３６侵入",
+    "KR": "236 베이스 침입",
+    "SC": "入侵２３６基地"
+   },
+   "brief": {
+    "CN": "攻略提示：殲滅基地內的敵人。最深處的敵人相當強悍。",
+    "EN": "Hints and Tips: Exterminate the enemies inside the base. Powerful enemies are waiting in the deepest part.",
+    "JA": "攻略のヒント：基地内の敵を殲滅せよ。最深部にいる敵は強力だ。",
+    "KR": "공략 힌트:\n기지 안의 적을 섬멸하라.\n최심부에는 강력한 적이 있다.",
+    "SC": "攻略提示：歼灭基地内的敌人。最深处的敌人相当强悍。"
+   }
+  },
+  {
+   "path": "DLC/DM020",
+   "progress": 0.41,
+   "title": {
+    "CN": "防衛２３６基地",
+    "EN": "Defend Base 236",
+    "JA": "ベース２３６防衛",
+    "KR": "236 베이스 방어",
+    "SC": "防卫２３６基地"
+   },
+   "brief": {
+    "CN": "攻略提示：殲滅敵人，保衛基地。身著重裝甲的外星生物相當強悍，建議瞄準頭部狙殺敵人。",
+    "EN": "Hints and Tips: Exterminate the enemies and defend the base. The aliens are heavily armored so aim for their heads!",
+    "JA": "攻略のヒント：敵を殲滅し、基地を守れ。重装甲のエイリアンは強力だ。頭を狙って撃破せよ。",
+    "KR": "공략 힌트:\n적을 섬멸해 기지를 지켜라.\n중장갑형 외계인은 강력하다.\n머리를 공격해 격파하라.",
+    "SC": "攻略提示：歼灭敌人，保卫基地。身著重装甲的外星生物相当强悍，建议瞄准头部狙杀敌人。"
+   }
+  },
+  {
+   "path": "DLC/DM008",
+   "progress": 0.47,
+   "title": {
+    "CN": "對抗傳送錨塔１",
+    "EN": "Engage Teleportation Anchors 1",
+    "JA": "テレポーションアンカー１",
+    "KR": "vs 텔레포테이션 앵커 1",
+    "SC": "对抗传送锚塔１"
+   },
+   "brief": {
+    "CN": "攻略提示：務必裝備可破壞傳送錨塔的武器。",
+    "EN": "Hints and Tips: Make sure you are equipped with weapons that can take down teleportation anchors.",
+    "JA": "攻略のヒント：テレポーションアンカーを破壊可能な武器を装備せよ。",
+    "KR": "공략 힌트:\n텔레포테이션 앵커를 파괴할 수 있는\n무기를 장비하라.",
+    "SC": "攻略提示：务必装备可破坏传送锚塔的武器。"
+   }
+  },
+  {
+   "path": "DLC/DM003",
+   "progress": 0.54,
+   "title": {
+    "CN": "對抗外星生物１",
+    "EN": "Engage Aliens 1",
+    "JA": "対エイリアン１",
+    "KR": "vs 외계인 1",
+    "SC": "对抗外星生物１"
+   },
+   "brief": {
+    "CN": "攻略提示：重裝甲外星生物的弱點是頭部。",
+    "EN": "Hints and Tips: Shoot the heavy-armored aliens in the head! That's their weak spot!",
+    "JA": "攻略のヒント：重装甲のエイリアンは頭が弱点だ。",
+    "KR": "공략 힌트:\n중장갑형 외계인은 머리가 약점이다.",
+    "SC": "攻略提示：重装甲外星生物的弱点是头部。"
+   }
+  },
+  {
+   "path": "DLC/DM014",
+   "progress": 0.6,
+   "title": {
+    "CN": "對抗侵略生物３",
+    "EN": "Engage Aggressors 3",
+    "JA": "対侵略生物３",
+    "KR": "vs 침략 생물 3",
+    "SC": "对抗侵略生物３"
+   },
+   "brief": {
+    "CN": "攻略提示：銀色的侵略生物相當堅韌，務必特別當心。",
+    "EN": "Hints and Tips: The silver aggressors are tough to handle. Be extra careful.",
+    "JA": "攻略のヒント：銀色の侵略生物は強靭だ。十分に注意せよ。",
+    "KR": "공략 힌트:\n은색 침략 생물은 강력하다.\n각별히 주의하라.",
+    "SC": "攻略提示：银色的侵略生物相当坚韧，务必特别当心。"
+   }
+  },
+  {
+   "path": "DLC/DM003_2",
+   "progress": 0.66,
+   "title": {
+    "CN": "對抗外星生物２",
+    "EN": "Engage Aliens 2",
+    "JA": "対エイリアン２",
+    "KR": "vs 외계인 2",
+    "SC": "对抗外星生物２"
+   },
+   "brief": {
+    "CN": "攻略提示：攻擊頭部，就能打倒身著重裝甲的外星生物。",
+    "EN": "Hints and Tips: Aim for the head to defeat a heavy-armored alien.",
+    "JA": "攻略のヒント：頭を狙えば重装甲のエイリアンを倒せる。",
+    "KR": "공략 힌트:\n머리를 공격하면 중장갑형 외계인을\n쓰러뜨릴 수 있다.",
+    "SC": "攻略提示：攻击头部，就能打倒身著重装甲的外星生物。"
+   }
+  },
+  {
+   "path": "DLC/DM001",
+   "progress": 0.72,
+   "title": {
+    "CN": "地底１",
+    "EN": "Underground 1",
+    "JA": "地底１",
+    "KR": "지하 1",
+    "SC": "地底１"
+   },
+   "brief": {
+    "CN": "攻略提示：侵略生物大量湧現，務必提高警覺。",
+    "EN": "Hints and Tips: Massive amount of aggressors detected! Keep your guards up!",
+    "JA": "攻略のヒント：侵略生物は大群だ。十分に警戒せよ。",
+    "KR": "공략 힌트:\n침략 생물 대군이 몰려온다.\n각별히 경계하라.",
+    "SC": "攻略提示：侵略生物大量涌现，务必提高警觉。"
+   }
+  },
+  {
+   "path": "DLC/DM007",
+   "progress": 0.78,
+   "title": {
+    "CN": "地底２",
+    "EN": "Underground 2",
+    "JA": "地底２",
+    "KR": "지하 2",
+    "SC": "地底２"
+   },
+   "brief": {
+    "CN": "攻略提示：發現厄拉尼亞的蹤影，務必提高警覺。",
+    "EN": "Hints and Tips: Araneas detected. Stay on alert.",
+    "JA": "攻略のヒント：アラネアの姿が確認された。警戒せよ。",
+    "KR": "공략 힌트:\n아라네아가 있는 것이 확인됐다.\n경계하라.",
+    "SC": "攻略提示：发现厄拉尼亚的踪影，务必提高警觉。"
+   }
+  },
+  {
+   "path": "DLC/DM003_3",
+   "progress": 0.84,
+   "title": {
+    "CN": "對抗外星生物３",
+    "EN": "Engage Aliens 3",
+    "JA": "対エイリアン３",
+    "KR": "vs 외계인 3",
+    "SC": "对抗外星生物３"
+   },
+   "brief": {
+    "CN": "攻略提示：務必帶上對空裝備。",
+    "EN": "Hints and Tips: Make sure to take surface-to-air weaponry with you.",
+    "JA": "攻略のヒント：対空装備を忘れるな。",
+    "KR": "공략 힌트:\n대공 장비를 잊지 마라.",
+    "SC": "攻略提示：务必带上对空装备。"
+   }
+  },
+  {
+   "path": "DLC/DM013_2",
+   "progress": 0.9,
+   "title": {
+    "CN": "對抗侵略生物４",
+    "EN": "Engage Aggressors 4",
+    "JA": "対侵略生物４",
+    "KR": "vs 침략 생물 4",
+    "SC": "对抗侵略生物４"
+   },
+   "brief": {
+    "CN": "攻略提示：金黃色的侵略生物是相當難纏的強敵，祝好運。",
+    "EN": "Hints and Tips: The golden aggressors are powerful enemies. Good luck.",
+    "JA": "攻略のヒント：黄金の侵略生物は強敵だ。健闘を祈る。",
+    "KR": "공략 힌트:\n금색 침략 생물은 강적이다.\n건투를 빌겠다.",
+    "SC": "攻略提示：金黄色的侵略生物是相当难缠的强敌，祝好运。"
+   }
+  },
+  {
+   "path": "DLC/DM015",
+   "progress": 0.96,
+   "title": {
+    "CN": "對抗前哨基地",
+    "EN": "Engage Outpost Base",
+    "JA": "対前哨基地",
+    "KR": "vs 전초기지",
+    "SC": "对抗前哨基地"
+   },
+   "brief": {
+    "CN": "攻略提示：破壞前哨基地。",
+    "EN": "Hints and Tips: Destroy the outpost base.",
+    "JA": "攻略のヒント：前哨基地を破壊せよ。",
+    "KR": "공략 힌트:\n전초기지를 파괴하라.",
+    "SC": "攻略提示：破坏前哨基地。"
+   }
+  }
+ ],
+ "dlc2": [
+  {
+   "path": "DLC/DM005_2",
+   "progress": 0.68,
+   "title": {
+    "CN": "對抗傳送飛船",
+    "EN": "Engage Teleportation Ships",
+    "JA": "対テレポーションシップ",
+    "KR": "vs 텔레포테이션 십",
+    "SC": "对抗传送飞船"
+   },
+   "brief": {
+    "CN": "攻略提示：接近低空飛行的傳送飛船。",
+    "EN": "Hints and Tips: Approach the Teleportation Ships when they are flying low.",
+    "JA": "攻略のヒント：テレポーションシップは低空を飛行している。接近せよ。",
+    "KR": "공략 힌트:\n텔레포테이션 십이 저고도로\n비행 중이다. 접근하라.",
+    "SC": "攻略提示：接近低空飞行的传送飞船。"
+   }
+  },
+  {
+   "path": "DLC/DM002",
+   "progress": 0.7,
+   "title": {
+    "CN": "對抗外星生物４",
+    "EN": "Engage Aliens 4",
+    "JA": "対エイリアン４",
+    "KR": "vs 외계인 4",
+    "SC": "对抗外星生物４"
+   },
+   "brief": {
+    "CN": "攻略提示：外星生物手持新型武器，務必找好掩蔽。",
+    "EN": "Hints and Tips: The Aliens are carrying a new weapon. You better find cover.",
+    "JA": "攻略のヒント：エイリアンは新型の武器を持っている。身を隠すことを忘れるな。",
+    "KR": "공략 힌트:\n외계인은 신형 무기를 갖고 있다.\n엄폐하는 것을 잊지 마라.",
+    "SC": "攻略提示：外星生物手持新型武器，务必找好掩蔽。"
+   }
+  },
+  {
+   "path": "DLC/DM021",
+   "progress": 0.73,
+   "title": {
+    "CN": "對抗無人機",
+    "EN": "Engage Drones",
+    "JA": "対ドローン",
+    "KR": "vs 드론",
+    "SC": "对抗无人机"
+   },
+   "brief": {
+    "CN": "攻略提示：發現敵方派出了疑似爆擊機的物體，待在正下方相當危險，務必保持距離。",
+    "EN": "Hints and Tips: The enemy has dispatched bombers. Don't stay under it and keep a safe distance.",
+    "JA": "攻略のヒント：敵の爆撃機らしきものを確認した。真下は危険だ。距離をとれ。",
+    "KR": "공략 힌트:\n적 폭격기로 추정되는 물체를 확인했다.\n바로 밑에 있으면 위험하다.\n거리를 두고 싸워라.",
+    "SC": "攻略提示：发现敌方派出了疑似爆击机的物体，待在正下方相当危险，务必保持距离。"
+   }
+  },
+  {
+   "path": "DLC/DM006_2",
+   "progress": 0.75,
+   "title": {
+    "CN": "對抗外星生物部隊１",
+    "EN": "Engage Alien Troops 1",
+    "JA": "対エイリアン部隊１",
+    "KR": "vs 외계인 부대 1",
+    "SC": "对抗外星生物部队１"
+   },
+   "brief": {
+    "CN": "攻略提示：敵人躲在護盾之中，衝進去破壞掉吧。",
+    "EN": "Hints and Tips: The enemy is hiding behind their shields. Infiltrate and destroy it.",
+    "JA": "攻略のヒント：敵はシールドに守られている。突入して破壊せよ。",
+    "KR": "공략 힌트:\n적은 실드로 방어 중이다.\n돌입해서 파괴하라.",
+    "SC": "攻略提示：敌人躲在护盾之中，冲进去破坏掉吧。"
+   }
+  },
+  {
+   "path": "DLC/DM009",
+   "progress": 0.78,
+   "title": {
+    "CN": "對抗傳送錨塔２",
+    "EN": "Engage Teleportation Anchors 2",
+    "JA": "対テレポーションアンカー２",
+    "KR": "vs 텔레포테이션 앵커 2",
+    "SC": "对抗传送锚塔２"
+   },
+   "brief": {
+    "CN": "攻略提示：傳送裝置在進行破壞時會大型化，趁這時候破壞裝置吧。",
+    "EN": "Hints and Tips: The teleportation device will enlarge itself during an attack. Use the opportunity to destroy it.",
+    "JA": "攻略のヒント：転送装置は破壊する度に大型化する。その度に破壊せよ。",
+    "KR": "공략 힌트:\n전송 장치는 파괴할수록 커진다.\n그때마다 파괴하라.",
+    "SC": "攻略提示：传送装置在进行破坏时会大型化，趁这时候破坏装置吧。"
+   }
+  },
+  {
+   "path": "DLC/DM007_2",
+   "progress": 0.8,
+   "title": {
+    "CN": "地底３",
+    "EN": "Underground 3",
+    "JA": "地底３",
+    "KR": "지하 3",
+    "SC": "地底３"
+   },
+   "brief": {
+    "CN": "攻略提示：發現厄拉尼亞的蹤影，務必提高警覺。",
+    "EN": "Hints and Tips: Araneas detected. Stay on alert.",
+    "JA": "攻略のヒント：アラネアが確認されている。警戒せよ。",
+    "KR": "공략 힌트:\n아라네아가 있는 것이 확인됐다.\n경계하라.",
+    "SC": "攻略提示：发现厄拉尼亚的踪影，务必提高警觉。"
+   }
+  },
+  {
+   "path": "DLC/DM010",
+   "progress": 0.83,
+   "title": {
+    "CN": "對抗外星生物５",
+    "EN": "Engage Aliens 5",
+    "JA": "対エイリアン５",
+    "KR": "vs 외계인 5",
+    "SC": "对抗外星生物５"
+   },
+   "brief": {
+    "CN": "攻略提示：外星生物佔領了市區，並在街上來回巡邏。務必提高警覺。",
+    "EN": "Hints and Tips: The aliens have taken over the city and are patrolling the streets. Stay alert.",
+    "JA": "攻略のヒント：エイリアンが市街地を占領。街をパトロールしている。警戒せよ。",
+    "KR": "공략 힌트:\n외계인이 시가지를 점령, 순찰 중이다.\n경계하라.",
+    "SC": "攻略提示：外星生物占领了市区，并在街上来回巡逻。务必提高警觉。"
+   }
+  },
+  {
+   "path": "DLC/DM014_2",
+   "progress": 0.85,
+   "title": {
+    "CN": "對抗侵略生物５",
+    "EN": "Engage Aggressors 5",
+    "JA": "対侵略生物５",
+    "KR": "vs 침략 생물 5",
+    "SC": "对抗侵略生物５"
+   },
+   "brief": {
+    "CN": "攻略提示：乘上運送至海岸的高機動型戰鬥機體，進行作戰。",
+    "EN": "Hints and Tips: Enter the highly mobile powered exoskeletons that has arrived at the coast and commence operation.",
+    "JA": "攻略のヒント：海岸に高機動型コンバットフレームが輸送される。搭乗せよ。",
+    "KR": "공략 힌트:\n해안에 고기동형 컴배트 프레임이\n수송될 예정이다. 탑승하라.",
+    "SC": "攻略提示：乘上运送至海岸的高机动型战斗机体，进行作战。"
+   }
+  },
+  {
+   "path": "DLC/DM012",
+   "progress": 0.88,
+   "title": {
+    "CN": "對抗傳送錨塔３",
+    "EN": "Engage Teleportation Anchors 3",
+    "JA": "対テレポーションアンカー３",
+    "KR": "vs 텔레포테이션 앵커 3",
+    "SC": "对抗传送锚塔３"
+   },
+   "brief": {
+    "CN": "攻略提示：盡速破壞傳送錨塔，速度將是獲勝的關鍵。",
+    "EN": "Hints and Tips: Destroy the teleportation anchor as fast as possible. Speed is of the essence.",
+    "JA": "攻略のヒント：テレポーションアンカーを素早く破壊せよ。スピードこそが重要だ。",
+    "KR": "공략 힌트:\n텔레포테이션 앵커를 신속히 파괴하라.\n속도가 생명이다.",
+    "SC": "攻略提示：尽速破坏传送锚塔，速度将是获胜的关键。"
+   }
+  },
+  {
+   "path": "DLC/DM022",
+   "progress": 0.9,
+   "title": {
+    "CN": "對抗外星生物部隊２",
+    "EN": "Engage Alien Troops 2",
+    "JA": "対エイリアン部隊２",
+    "KR": "vs 외계인 부대 2",
+    "SC": "对抗外星生物部队２"
+   },
+   "brief": {
+    "CN": "攻略提示：這將會是一場硬仗，祝好運。",
+    "EN": "Hints and Tips: This will be a tough battle. Good luck.",
+    "JA": "攻略のヒント：厳しい戦いになる。健闘を祈る。",
+    "KR": "공략 힌트:\n힘든 싸움이 될 것이다. 건투를 빌겠다.",
+    "SC": "攻略提示：这将会是一场硬仗，祝好运。"
+   }
+  },
+  {
+   "path": "DLC/DM023",
+   "progress": 0.93,
+   "title": {
+    "CN": "對抗怪異生物",
+    "EN": "Engage Mysterious Monster",
+    "JA": "対怪生物",
+    "KR": "vs 괴생물",
+    "SC": "对抗怪异生物"
+   },
+   "brief": {
+    "CN": "攻略提示：我方雖然會不斷派出援軍，但裝備會越來越薄弱，別對他們抱太大的期望。",
+    "EN": "Hints and Tips: Reinforcements will keep coming in, but their equipment is inadequate. Don't get your hopes up.",
+    "JA": "攻略のヒント：味方は次々とやってくるが、だんだんと装備が貧弱になる。期待しすぎるな。",
+    "KR": "공략 힌트:\n아군은 계속 증원되겠지만\n장비는 점점 더 빈약해질 것이다.\n너무 기대하지 마라.",
+    "SC": "攻略提示：我方虽然会不断派出援军，但装备会越来越薄弱，别对他们抱太大的期望。"
+   }
+  },
+  {
+   "path": "DLC/DM024",
+   "progress": 0.95,
+   "title": {
+    "CN": "最後的挑戰１",
+    "EN": "The Last Stand 1",
+    "JA": "最後の挑戦１",
+    "KR": "마지막 도전 1",
+    "SC": "最后的挑战１"
+   },
+   "brief": {
+    "CN": "攻略提示：這將會是一場非常嚴苛的硬仗。務必將武器與鎧甲值強化至上限再進行挑戰。",
+    "EN": "Hints and Tips: This will be a tough fight. Raise your weapon and armor limit before you tackle this challenge.",
+    "JA": "攻略のヒント：とても厳しい戦いになるだろう。武器とアーマーを最大限に強化して挑め。",
+    "KR": "공략 힌트:\n매우 힘든 싸움이 될 것이다.\n무기와 아머 내구도를 최대한\n강화한 뒤에 도전하라.",
+    "SC": "攻略提示：这将会是一场非常严苛的硬仗。务必将武器与铠甲值强化至上限再进行挑战。"
+   }
+  },
+  {
+   "path": "DLC/DM017",
+   "progress": 0.98,
+   "title": {
+    "CN": "最後的挑戰２",
+    "EN": "The Last Stand 2",
+    "JA": "最後の挑戦２",
+    "KR": "마지막 도전 2",
+    "SC": "最后的挑战２"
+   },
+   "brief": {
+    "CN": "攻略提示：敵人會從各個方向進攻。務必將武器與鎧甲值強化至極限再進行挑戰。",
+    "EN": "Hints and Tips: Enemies will be coming from all sides. Raise your weapon and armor to the limit before you tackle this challenge.",
+    "JA": "攻略のヒント：敵はあらゆる方向から襲ってくる。武器とアーマーを限界まで強化して挑め。",
+    "KR": "공략 힌트:\n적은 사방에서 몰려온다.\n무기와 아머 내구도를 한계까지\n강화한 뒤에 도전하라.",
+    "SC": "攻略提示：敌人会从各个方向进攻。务必将武器与铠甲值强化至极限再进行挑战。"
+   }
+  },
+  {
+   "path": "DLC/DM016",
+   "progress": 1.0,
+   "title": {
+    "CN": "最後的挑戰３",
+    "EN": "The Last Stand 3",
+    "JA": "最後の挑戦３",
+    "KR": "마지막 도전 3",
+    "SC": "最后的挑战３"
+   },
+   "brief": {
+    "CN": "攻略提示：這是最後一場考驗，擊破母艦。",
+    "EN": "Hints and Tips: This is your final challenge. Take down the mothership.",
+    "JA": "攻略のヒント：これが最終試練だ。マザーシップを撃破せよ。",
+    "KR": "공략 힌트:\n이게 마지막 시련이다.\n마더 십을 격파하라.",
+    "SC": "攻略提示：这是最后一场考验，击破母舰。"
+   }
+  }
+ ]
+}

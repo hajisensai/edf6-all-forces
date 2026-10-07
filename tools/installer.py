@@ -382,6 +382,7 @@ def install(game: str) -> None:
     import make_artillery
     import make_bigmap
     import make_drill
+    import make_edf5_campaign
     import make_emc
     import make_chute
     import make_jets
@@ -426,6 +427,12 @@ def install(game: str) -> None:
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
+    print('生成 EDF5 战役（EDF5 的任务接在离线任务列表末尾，脚本和语音都是 EDF6 自带的；只读 Root.cpk）……')
+    try:
+        campaign = make_edf5_campaign.build(game)
+    except make_edf5_campaign.Refused as e:
+        campaign = None
+        print('！ 不安装 EDF5 战役：', e)
     print('\n全部生成完毕，开始写入。')
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
@@ -451,6 +458,13 @@ def install(game: str) -> None:
     install_autoturret(game, *turret)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
+    if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignRows there
+        for path in make_edf5_campaign.install(game, campaign):
+            print('写入', path)
+        print(f'EDF5 战役：{len(campaign[2]["rows"])} 关接在离线任务列表第 {campaign[1]} 关之后'
+              f'（打完 EDF6 第一关 M000B 后解锁）')
+        for group, path, why in campaign[2]['skipped']:
+            print('  跳过', group, path, why)
     if bigmap is not None:
         for path in make_bigmap.install(game, built=bigmap):
             print('写入', path)
@@ -529,6 +543,16 @@ def uninstall(game: str) -> None:
         uninstall_stock_stores(game)
     if gen.uninstall(game):
         print('删除测试场关卡')
+    # with 2 too: without the plugin the appended rows would move the ending past M152 and the clear ratio to 257 rows
+    import make_edf5_campaign
+    if make_edf5_campaign.installed(game):
+        print('EDF5 战役：任务列表还原成安装前的样子（存档里 EDF5 任务的通关记录还在，重新安装后照旧显示）。')
+        print('  如果存档最后停在一个 EDF5 任务上，选关游标会回到第一关。')
+        done, kept = make_edf5_campaign.remove(game)
+        for path in done:
+            print('还原', path)
+        for path in kept:
+            print('保留（之后被别的工具改过）', path)
     for path in make_bigmap.remove(game)[0]:
         print('删除', path)
     cache = os.path.join(game, 'Mods', buildcache.MANIFEST)
@@ -593,6 +617,9 @@ def check(game: str) -> bool:
     for k in changed:
         print('  被改过', k)
     ok &= check_range(game)
+    import make_edf5_campaign
+    print()
+    ok &= make_edf5_campaign.check(game)
     print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
     return ok
 
