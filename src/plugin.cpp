@@ -455,7 +455,8 @@ void LoadConfig() noexcept {
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
-    n.stockHeliStores=ReadBool(L"StockHeliStores",n.stockHeliStores);
+    // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
+    n.stockStores=ReadBool(L"StockVehicleStores",n.stockStores) || ReadBool(L"StockHeliStores",false);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
     n.seatNextKey=ReadInt(L"SeatNextKey",static_cast<DWORD>(n.seatNextKey));
     n.seatNumberKeys=ReadBool(L"SeatNumberKeys",n.seatNumberKeys);
@@ -598,7 +599,7 @@ void LoadConfig() noexcept {
         n.highCamBack,n.highCamPitch);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
-    Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockHeliStores,n.seatSwitch,
+    Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
     Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X mark=0x%X/0x%X salvo=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f arc %.0f block %.2f",
         n.proteus,n.proteusModeKey,n.proteusModeButton,n.proteusShieldKey,n.proteusShieldButton,n.proteusMarkKey,n.proteusMarkButton,n.proteusSalvoKey,
@@ -821,7 +822,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
     InstallGuidance();      // the stock homing rounds by proportional navigation
-    InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
+    InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
+    InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();

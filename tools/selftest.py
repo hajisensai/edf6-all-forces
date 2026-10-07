@@ -2784,6 +2784,11 @@ def pack_install_upgrade_uninstall() -> None:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
                 enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+            # the stock vehicles' stores (on by default): a vehicle and a request, gone again with the uninstall
+            stores = {'OBJECT/EDF6VC_FAKE_STORES.SGO': b'stores', 'WEAPON/FAKE_STORES_REQUEST.SGO': b'request'}
+            enter(patched(importlib.import_module('make_stock_stores'),
+                          build=lambda game, overlay=None: (dict(stores), [], {}),
+                          store_files=lambda: []))   # the fake make_jets writes no store weapons to need
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -2797,6 +2802,8 @@ def pack_install_upgrade_uninstall() -> None:
                 assert 'Gain=7.5' in at_text and 'Gain=3.0' not in at_text, 'the player\'s AutoTurret setting lost'
                 assert 'BurstVisualScale=2.5' in at_text and at_text.count('[AutoTurret]') == 1, 'missing key not added'
                 assert installer.check(game), 'check fails right after install'
+                for rel, data in stores.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'stores file {rel} not installed'
                 modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
                 assert not installer.check(game), 'check passes an old EDF6AutoTurret.dll'
                 # The upgrade: new DLLs, a setting the new ini adds.
@@ -3203,13 +3210,27 @@ def stock_payload_and_seats_wired() -> None:
     its stores are store weapons make_jets writes and src/stores.inc knows."""
     import make_stock_stores as mss
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline', 'SeatList')
+    keys = ('StockVehicleStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline', 'SeatList')
     for key in keys:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('SeatNextKey', 'SeatButton'):
         assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
-    assert re.search(r'^StockHeliStores=0', ini, re.M) and not mss.wanted(ini), 'StockHeliStores ships off'
-    assert mss.wanted('[VehicleCrew]\nStockHeliStores=1 ; on\n') and not mss.wanted('[Other]\nStockHeliStores=1\n')
+    assert re.search(r'^StockVehicleStores=1', ini, re.M) and mss.wanted(ini), 'StockVehicleStores ships on'
+    assert not mss.wanted('[VehicleCrew]\nStockVehicleStores=0\n'), 'the player can turn it off'
+    assert 'bool stockStores=true;' in src('src/crew.h'), 'the plugin defaults it on as the ini does'
+    assert mss.wanted('[VehicleCrew]\nStockVehicleStores=1 ; on\n') and not mss.wanted('[Other]\nStockVehicleStores=1\n')
+    # the older key (the helicopters alone) still turns it on, in the plugin and the installer alike
+    assert 'L"StockHeliStores"' in plugin and mss.wanted('[VehicleCrew]\nStockVehicleStores=0\nStockHeliStores=1\n')
+    # every stock vehicle's fire goes through the holder pull: payload.cpp takes it over (checked bytes), and the stock
+    # classes build their extra holders (stores.cpp kBuilds: one class each of the installer's BUILT_CLASSES but the 506)
+    payload, stores = src('src/payload.cpp'), src('src/stores.cpp')
+    assert 'kPull=0x62C000' in payload and 'bool InstallPayload()' in payload and 'InstallPayload();' in plugin
+    assert 'PullHook' in payload and 'kFireSecondary' not in payload, 'payload.cpp: the pull lands on the store picked'
+    builds = re.findall(r'\{0x[0-9A-F]+,0x[0-9A-F]+,"([0-9A-Za-z_]+)"\}', stores.split('const BuildClass kBuilds[]={', 1)[1].split('};', 1)[0])
+    want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
+                  for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
+    assert sorted(builds) == want, (builds, want)
+    assert 'IsLoadoutWeapon(w)' in payload and 'L"EDF6VC_"' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     order = [hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
     assert all(x >= 0 for x in order) and order == sorted(order), f'src/crew.cpp InputHook step order: {order}'
@@ -3270,21 +3291,57 @@ def stock_payload_and_seats_wired() -> None:
 
 
 @test
+def new_defaults_on_once() -> None:
+    """The settings whose default became on (the user, 2026-10-07: "还有什么默认是关的，都打开"): the shipped ini and the
+    plugin's own defaults have them on; an existing ini still holding the old default gets the new one, once (its mark
+    keeps a later install from undoing the player's own 0), a value the player set is kept; the install reads the ini as
+    it will be (player_ini_text), so the stores are built on the first install; the uninstall that keeps the call
+    weapons still takes the stores back, EDF6AutoTurret's flak requests rewritten first."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    for key, (old, new) in installer.NEW_DEFAULTS[installer.SECTION].items():
+        assert re.search(rf'^{key}={new}\b', ini, re.M), f'{key} ships {new}'
+    for field in ('DWORD heliLandMs=5000;', 'bool rescueAutoBoard=true;', 'bool stockStores=true;', 'bool seatSwitchOnline=true;'):
+        assert field in crew, field
+    user = '[VehicleCrew]\nEnabled=1\nHeliLandMs=0\nRescueAutoBoard=0 ; mine\nSeatSwitchOnline=1\nStockHeliStores=0\n'
+    text, flipped = installer.apply_new_defaults(user)
+    assert sorted(flipped) == ['HeliLandMs', 'RescueAutoBoard'], flipped
+    assert 'HeliLandMs=5000' in text and 'RescueAutoBoard=1 ; mine' in text and installer.DEFAULTS_MARK in text
+    again = text.replace('RescueAutoBoard=1', 'RescueAutoBoard=0')
+    assert installer.apply_new_defaults(again) == (again, []), 'a later install undid the player\'s own 0'
+    planned = installer.planned_ini(user, ini)
+    assert 'StockVehicleStores' in planned[1] and planned[3] and make_stock_stores_wanted(planned[0])
+    inst = src('tools/installer.py')
+    assert 'return planned_ini(' in inst.split('def player_ini_text(', 1)[1].split('\ndef ', 1)[0], 'the install reads the ini as it will be'
+    un = inst.split('def uninstall(game: str)', 1)[1].split('\ndef ', 1)[0]
+    assert "if choice == '2':" in un and 'uninstall_stock_stores(game)' in un, 'the plugin-only uninstall keeps the stores'
+    body = inst.split('def uninstall_stock_stores(', 1)[1].split('\ndef ', 1)[0]
+    assert body.index('install_autoturret(') < body.index('make_stock_stores.remove('), 'its requests rewritten before the vehicles go'
+
+
+def make_stock_stores_wanted(text: str) -> bool:
+    import make_stock_stores
+    return make_stock_stores.wanted(text)
+
+
+@test
 def stock_stores_build() -> None:
-    """With the game here (CI has none): every stock request that brings a 506-class helicopter of LOADOUTS gets a vehicle
-    whose holders and weapon list agree, the fuel tank fourth, the stores after it (make_stock_stores.check); only the
-    vehicle, the weapon list and the preload list change."""
+    """With the game here (CI has none): every stock request that brings a vehicle of LOADOUTS gets a vehicle whose
+    holders are its own and one a store (each a copy of the one it hangs beside) and lists a weapon a holder, the stores
+    last (make_stock_stores.check); only the vehicle, the weapon list and the preload list change; every vehicle's class
+    is one the plugin builds the extra holders of; EDF6AutoTurret's requests handed in come back with the stores."""
     import rootcpk
     import make_stock_stores as mss
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         return
     game = rootcpk.default()
     names = mss.requests(game)
-    assert names, 'no stock request brings a helicopter of LOADOUTS'
+    assert names, 'no stock request brings a vehicle of LOADOUTS'
+    rows = {stem: mss.stock_rows(game, stem) for stem in mss.LOADOUTS}
     files: dict[str, bytes] = {}
     stems = set()
     for name in names:
-        data, stem = mss.request_sgo(game.read('WEAPON', name), name)
+        data, stem = mss.request_sgo(game.read('WEAPON', name), name, rows)
         files[f'WEAPON/{name}'] = data
         stems.add(stem)
         before, after = dsgo.to_py(dsgo.parse(game.read('WEAPON', name)).root), dsgo.to_py(dsgo.parse(data).root)
@@ -3292,10 +3349,22 @@ def stock_stores_build() -> None:
         for k in before:
             if k not in ('Ammo_CustomParameter', 'resource'):
                 assert before[k] == after[k], (name, k)
-    assert stems == set(mss.LOADOUTS), stems
+    assert stems == set(mss.LOADOUTS), set(mss.LOADOUTS) - stems
     for stem in stems:
+        assert mss.vehicle_class(game, stem) in mss.BUILT_CLASSES, stem
         files[f'OBJECT/{mss.derived_name(stem)}'] = mss.derived_vehicle(game, stem)
-    mss.check(files)
+    mss.check(files, rows)
+    flak = 'WEAPON/AWEAPON346.SGO'
+    assert flak in files, 'the Kepler is one of them'
+    import build as at_build
+    turret = at_build.build_files()
+    assert flak in turret, 'EDF6AutoTurret writes the Kepler request'
+    handed = mss.build(rootcpk.DEFAULT_GAME,
+                       overlay={k: v for k, v in turret.items() if k.startswith('WEAPON/')})[2]
+    got = dsgo.to_py(dsgo.parse(handed[flak]).root)
+    mine = dsgo.to_py(dsgo.parse(turret[flak]).root)
+    assert [k for k in got if k not in ('Ammo_CustomParameter', 'resource')] == [k for k in mine if k not in ('Ammo_CustomParameter', 'resource')]
+    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_2.sgo' in str(got['resource'])
 
 
 @test

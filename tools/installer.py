@@ -20,9 +20,10 @@ What install does, with EDF6.exe closed:
      its slot), so everyone in an online room has the same map and the same objects (the user, 2026-10-05: one pack
      to play with others). The test range's forced loadout is never written: everyone picks their own class.
 
-With StockHeliStores=1 in the player's ini (off by default) install also gives the stock 506-class helicopters'
-requests the jets' rocket pod and Hellfires (tools/make_stock_stores.py); with it 0 it takes back what an earlier install
-gave them.
+With StockVehicleStores=1 (or the older StockHeliStores=1) in the player's ini (on by default) install also gives the
+stock vehicles' requests the stores they should carry (tools/make_stock_stores.py: the tanks, the missile launcher, the
+flak, the bikes, the helicopters; EDF6AutoTurret's flak requests get theirs through its own manifest); with it 0 it takes
+back what an earlier install gave them.
 
 Uninstall removes the plugins and, when asked, the call weapons (their rows become placeholders that keep the
 row numbers saves use), EDF6AutoTurret's vehicle data and the generated objects no other tool still needs.
@@ -60,6 +61,16 @@ PLUGIN_FILES = ('.dll', '.ini')            # shipped
 # (src/primer.cpp TraceFile, ini PrimerTrace).
 PLUGIN_RUNTIME = ('.log', '.log.1', '.primer.csv')
 ADDED_HEADER = '; ---- 新版本新增的设置（安装器补入，默认值）----'
+# Settings whose shipped default became on (the user, 2026-10-07: "还有什么默认是关的，都打开，都装mod了，肯定要打开啊"):
+# key -> (the old default, the new one). An existing ini still holding the old default gets the new one, once: the
+# marker line it gets keeps a later install from turning back on what the player has turned off since. The others at 0
+# are values, choices or debug logs, not features off (BigWorld is make_bigmap's to set with the big map).
+NEW_DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'HeliLandMs': ('0', '5000'), 'RescueAutoBoard': ('0', '1'), 'SeatSwitchOnline': ('0', '1'),
+              'StockVehicleStores': ('0', '1')},
+}
+DEFAULTS_MARK = '; edf6vc-defaults-2026-10-07：安装器已把仍是旧默认值 0 的 HeliLandMs、RescueAutoBoard、SeatSwitchOnline、' \
+                'StockVehicleStores 改成开启（想关就改回，之后安装不会再改）'
 
 
 def bundle_dir() -> str:
@@ -167,15 +178,51 @@ def merge_ini(user: str, shipped: str, section: str = SECTION) -> tuple[str, lis
     return nl.join(merged) + nl, added, gone
 
 
+def apply_new_defaults(text: str, section: str = SECTION) -> tuple[str, list[str]]:
+    """`text` (an ini) with each NEW_DEFAULTS key of [section] that still holds its old default given the new one, and
+    DEFAULTS_MARK after the section's head; nothing when the mark is there already. Returns (text, keys changed)."""
+    flips = NEW_DEFAULTS.get(section, {})
+    if not flips or DEFAULTS_MARK.split('：', 1)[0] in text:
+        return text, []
+    nl = '\r\n' if '\r\n' in text else '\n'
+    lines = text.splitlines()
+    have = _keys(lines, section)
+    changed: list[str] = []
+    for key, (old, new) in flips.items():
+        i = have.get(key.lower())
+        if i is None:
+            continue
+        name, _, rest = lines[i].partition('=')
+        value, sep, comment = rest.partition(';')
+        if value.strip() != old:
+            continue
+        lines[i] = f'{name}={new}' + (f' {sep}{comment}' if sep else '')
+        changed.append(key)
+    head = next((i for i, x in enumerate(lines) if (m := _SECTION.match(x)) and m.group(1).strip().lower() == section.lower()), None)
+    if head is None:
+        return text, []
+    lines.insert(head + 1, DEFAULTS_MARK)
+    return nl.join(lines) + nl, changed
+
+
+def planned_ini(user: str, shipped: str, section: str = SECTION) -> tuple[str, list[str], list[str], list[str]]:
+    """The player's ini as install_plugin writes it: merge_ini, then apply_new_defaults. (text, added, gone, turned on)."""
+    text, added, gone = merge_ini(user, shipped, section)
+    text, flipped = apply_new_defaults(text, section)
+    return text, added, gone, flipped
+
+
 def player_ini_text(game: str, shipped_ini: bytes) -> str:
-    """The ini the plugin will read after this install: the player's own (kept by install_plugin), else the shipped one."""
+    """The ini the plugin will read after this install: the player's own as install_plugin leaves it (planned_ini),
+    else the shipped one."""
     path = os.path.join(game, 'Mods', 'Plugins', PLUGIN + '.ini')
-    raw = shipped_ini
-    if os.path.isfile(path):
-        with open(path, 'rb') as f:
-            raw = f.read()
+    shipped = (shipped_ini[3:] if shipped_ini.startswith(b'\xef\xbb\xbf') else shipped_ini).decode('utf-8', errors='replace')
+    if not os.path.isfile(path):
+        return shipped
+    with open(path, 'rb') as f:
+        raw = f.read()
     raw = raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw
-    return raw.decode('utf-8', errors='replace')
+    return planned_ini(raw.decode('utf-8', errors='replace'), shipped)[0]
 
 
 def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN, section: str = SECTION) -> None:
@@ -191,12 +238,15 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
         raw = f.read()
     bom = raw.startswith(b'\xef\xbb\xbf')
     user = raw[3:].decode('utf-8') if bom else raw.decode('utf-8', errors='surrogateescape')
-    text, added, gone = merge_ini(user, shipped_ini.decode('utf-8'), section)
-    if added:
+    text, added, gone, flipped = planned_ini(user, shipped_ini.decode('utf-8'), section)
+    if added or flipped:
         modfiles.atomic_write(ini, (b'\xef\xbb\xbf' if bom else b'') + text.encode('utf-8', errors='surrogateescape'))
+    if added:
         print(f'保留你的 {ini}，补入新版本新增的设置：{", ".join(added)}')
-    else:
+    elif not flipped:
         print(f'保留你的 {ini}（没有需要补的新设置）')
+    if flipped:
+        print(f'  这些设置的默认值已改为开启，你的 ini 里还是旧默认值，已改成开启：{", ".join(flipped)}（想关就改回，之后安装不会再改）')
     if gone:
         print(f'  其中 {", ".join(gone)} 新版本已不再使用，可以手动删掉')
 
@@ -362,8 +412,12 @@ def install(game: str) -> None:
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     stock = None
     if stock_stores:
-        print('给原版直升机的请求加上火箭巢和地狱火导弹（ini StockHeliStores=1；读取 Root.cpk，不修改它）……')
-        stock = make_stock_stores.build(game)
+        print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
+        # EDF6AutoTurret's flak / Bohr requests are its own: built on from its bytes and written back through its manifest
+        files, skipped, handed = make_stock_stores.build(game, overlay={rel: data for rel, data in turret[0].items()
+                                                                       if rel.upper().startswith('WEAPON/')})
+        turret = ({**turret[0], **handed}, turret[1])
+        stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     print('\n全部生成完毕，开始写入。')
@@ -384,7 +438,7 @@ def install(game: str) -> None:
             print('跳过（别的 mod 已经放了自己的请求文件，保持原样）', rel)
     else:
         for path in make_stock_stores.remove(game)[0]:
-            print('删除（StockHeliStores=0：原版直升机的请求恢复原样）', path)
+            print('删除（StockVehicleStores=0：原版载具的请求恢复原样）', path)
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
     install_autoturret(game, *turret)
@@ -410,6 +464,24 @@ def install(game: str) -> None:
     print('\n安装完成。启动游戏即可。')
 
 
+def uninstall_stock_stores(game: str) -> None:
+    """The stock vehicles' stores taken back (make_stock_stores) while EDF6AutoTurret's data stays: its flak requests,
+    which bring this tool's vehicle with the stores, rewritten first as it builds them alone (through its manifest), so
+    no request is left bringing a vehicle that is gone."""
+    import make_stock_stores
+    import build as at_build
+    if os.path.isfile(os.path.join(game, 'Mods', at_build.MANIFEST)):
+        try:
+            install_autoturret(game, at_build.build_files(), False)
+        except SystemExit as e:   # a file of its changed by someone else since: it refuses, and the vehicle stays
+            print('！ 没能重写 EDF6AutoTurret 的防空车请求：', e)
+    deleted, kept = make_stock_stores.remove(game)
+    for path in deleted:
+        print('删除（原版载具的挂载要插件才能用，随插件一起删）', path)
+    for path in kept:
+        print('保留（之后被别的工具改过，或别的工具的请求还在用它）', path)
+
+
 def uninstall(game: str) -> None:
     import gen
     import make_artillery
@@ -428,7 +500,8 @@ def uninstall(game: str) -> None:
     print('卸载会删掉插件（EDF6VehicleCrew、EDF6AutoTurret）。呼叫武器可以一起删：武器表里它们的行会变成「已卸载」的占位行，')
     print('效果和原版 KM6 轰炸机呼叫（玩家喷气机请求则是原版 N9 Eros）相同，行号保住，存档装备着也不会崩溃。')
     choice = ask('输入 1 = 插件和呼叫武器、生成的模型、AutoTurret 的车辆数据一起删；'
-                 '输入 2 = 只删插件（武器、生成的模型和车辆数据留着，照原版 KM6 呼叫、炮照原版开火）；其它 = 取消：')
+                 '输入 2 = 只删插件（武器、生成的模型和车辆数据留着，照原版 KM6 呼叫、炮照原版开火；'
+                 '原版载具的额外挂载要插件才能用，照样删掉）；其它 = 取消：')
     if choice not in ('1', '2'):
         print('已取消。')
         return
@@ -444,6 +517,8 @@ def uninstall(game: str) -> None:
                 print('删除', path)
             for path in kept:
                 print('保留（之后被别的工具改过）', path)
+    if choice == '2':   # the stock vehicles' stores need the plugin to fire: they go with it (with 1 they went above)
+        uninstall_stock_stores(game)
     if gen.uninstall(game):
         print('删除测试场关卡')
     for path in make_bigmap.remove(game)[0]:
