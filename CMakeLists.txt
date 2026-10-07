@@ -403,6 +403,7 @@ target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permiss
 add_dependencies(offline_checks map_command_runtime_check)
 add_test(NAME map_command_runtime COMMAND map_command_runtime_check)
 add_test(NAME jet_player_rotor_suite COMMAND jet_obstacle_sim --player-rotor-suite)
+add_test(NAME jet_ground_settle COMMAND jet_obstacle_sim --ground-settle-suite)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME playerjet_catch COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_catch_check.py"
     --compiler "${CMAKE_CXX_COMPILER}")

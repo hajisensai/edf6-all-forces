@@ -317,7 +317,7 @@ void HoverTo(jet::Jet& e,const jet::Kind& k,const unsigned char* v,const float* 
 // The rotor craft's flight done: the player's record from its entry's, the nacelles, the doll; parked when it sits
 // still on the ground with nothing asked (`still`).
 void HoverDone(PJet& j,jet::Jet& e,const jet::Kind& k,unsigned char* v,const float* pos,float clear,bool still,float dt,ULONGLONG ms) noexcept {
-    jet::HoldOffGround(e,pos,clear,dt,ms);
+    jet::HoldOffGround(e,pos,clear,dt,ms,RestOver(v,pos));   // `clear` is its bottom's (FloorClear)
     if(k.pose==jet::Pose::thrusters)jet::Thrusters(e,k,v,dt,ms);
     jet::DollFrame(jet::IndexOf(e),v,clear);
     const bool down=clear!=kNoGround && clear<kTouch;

@@ -53,6 +53,23 @@ inline float TurnBank(float maxG,float corner,float minAir,float top) noexcept {
 inline float AimShare(float off) noexcept { return Clamp(off/kAimFine,kAimFineLeast,1.0f); }
 // rad/s it banks toward the aim's lift at `off` rad from it: from the gentle levelling rate on the aim to the path's
 // roll kAimRollFull off.
+// The ground's up under a wing rolling on it (playerjet.cpp Ground), from the floor's heights `fore` / `aft` along its
+// level unit `nose` and `right` / `left` along the level unit `side`, `span` m either side of its centre. The body
+// follows the slope its wheels stand on: held level on uneven ground it was turned against its contacts every physics
+// step and shook (the user, 2026-10-07: "the aircraft shake on the ground"). Tilted at most `most` rad: a steeper
+// floor than that is no runway (a rock, a wall's foot), the contacts alone have that.
+inline void GroundUp(float fore,float aft,float right,float left,float span,const float* nose,const float* side,float most,
+                     float* up) noexcept {
+    const float gf=(fore-aft)/(2.0f*span),gs=(right-left)/(2.0f*span);   // the rise a metre along nose / side
+    float n[3];
+    for(int i=0;i<3;++i)n[i]=-gf*nose[i]-gs*side[i];
+    n[1]+=1.0f;
+    const float h=std::sqrt(n[0]*n[0]+n[2]*n[2]);
+    if(h>std::tan(most)*n[1]){const float k=std::tan(most)*n[1]/h;n[0]*=k;n[2]*=k;}
+    const float l=std::sqrt(n[0]*n[0]+n[1]*n[1]+n[2]*n[2]);
+    for(int i=0;i<3;++i)up[i]=n[i]/l;
+}
+
 inline float AimRoll(float pathRoll,float off) noexcept {
     const float lo=std::fmin(kLevelRate,pathRoll),t=Clamp(off/kAimRollFull,0.0f,1.0f);
     return lo+(pathRoll-lo)*t;

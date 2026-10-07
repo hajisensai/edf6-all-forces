@@ -112,6 +112,9 @@ constexpr float kTaxiFull=25.0f;       // ...from this ground speed on (rate tim
 constexpr float kGroundBrake=12.0f;    // m/s^2 rolling with the throttle closed
 constexpr float kParkSpeed=0.5f;       // below this, throttle closed: parked (the stock code holds it)
 constexpr float kBellyBrake=10.0f;     // m/s^2 sliding on its belly (gear.cpp: landed with the gear not down)
+// The floor's slope a wing on the ground follows (Ground, pjet_handling.h GroundUp): its heights kGroundSpan m ahead,
+// behind and to either side of its centre; a slope over kGroundTilt rad is no runway (the contacts alone take that).
+constexpr float kGroundSpan=3.0f,kGroundTilt=0.35f;
 // The plane's own up (PJet::up), carried along its path: the roll rotates it about the nose at its kind's PathRoll; let go
 // it returns to the bank the turn stick asks for (its kind's TurnBank at full, a coordinated turn: Air), at most
 // kLevelRate, unless the pitch stick is held (kLevelPull: pulled through the top it loops, as in Ace Combat) or it points
@@ -547,7 +550,24 @@ void Lever(PJet& j,const unsigned char* v,const Stick& s,float dt) noexcept {
     }
 }
 
-// On the ground: it rolls along its nose (level), turns at the nose wheel's rate, speeds up with the throttle
+// The floor's up under a wing on the ground at `pos`, its level nose `nose` (pjet_handling.h GroundUp): straight up
+// where a probe finds no floor (water, the map's edge).
+void GroundUpAt(const float* pos,const float* nose,float* up) noexcept {
+    const float side[3]={-nose[2],0.0f,nose[0]};
+    const float* const dirs[2]={nose,side};
+    float h[4];
+    for(int d=0;d<2;++d)
+        for(int e=0;e<2;++e) {
+            const float s=e ? -kGroundSpan : kGroundSpan;
+            const float p[3]={pos[0]+dirs[d][0]*s,pos[1],pos[2]+dirs[d][2]*s};
+            const float clear=GroundClearance(p);
+            if(clear==kNoGround){up[0]=0.0f;up[1]=1.0f;up[2]=0.0f;return;}
+            h[d*2+e]=p[1]-clear;
+        }
+    handling::GroundUp(h[0],h[1],h[2],h[3],kGroundSpan,nose,side,kGroundTilt,up);
+}
+
+// On the ground: it rolls along its nose (along the slope under it), turns at the nose wheel's rate, speeds up with the throttle
 // and brakes with it closed; it lifts off at its rotate speed with the stick back, or kAutoRotate faster.
 void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) noexcept {
     const Kind& k=*j.kind;
@@ -568,8 +588,13 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
     const float vy=j.measured[1]<0.0f ? (j.measured[1]>-30.0f ? j.measured[1] : -30.0f) : 0.0f;
     for(int i=0;i<3;i+=2)j.vel[i]=turned[i]*speed;
     j.vel[1]=vy;
-    const float up[3]={0.0f,1.0f,0.0f};
-    BodyAttitude(v,turned,up,kAttGain,k.roll,j.omega);
+    float up[3],along[3];
+    GroundUpAt(reinterpret_cast<const float*>(v+kPosition),turned,up);
+    std::memcpy(along,turned,12);
+    const float lift=Dot(along,up);
+    for(int i=0;i<3;++i)along[i]-=up[i]*lift;   // its nose along the slope
+    if(!Normalize(along))std::memcpy(along,turned,12);
+    BodyAttitude(v,along,up,kAttGain,k.roll,j.omega);
     if(!belly && j.throttle>0.02f && speed>=k.rotate && (s.pitch>0.2f || (speed>=k.rotate+kAutoRotate && j.throttle>=kAutoThrottle))) {
         j.phase=Phase::air;j.vel[1]=kLiftOffClimb;j.hasAim=false;
         Log("PJET v=%p takeoff at %.0f m/s (throttle %.2f, stick %.2f)",v,speed,j.throttle,s.pitch);
@@ -825,10 +850,13 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     // The floor (ground or water): under it, out (it went through); touching it or about to within kFloorSweep
     // frames, a landing or a crash, its descent cut to stop kFloorGap over it (jet.cpp HoldOffGround).
     if(clear==kNoGround)return;
-    if(clear<0.0f){j.vel[1]=j.vel[1]>kUnderClimb ? j.vel[1] : kUnderClimb;return;}
+    // `clear` is its bottom's (FloorClear): through the ground is its position under the surface, not its wheels a
+    // few cm into a bump as it touches down (that is Touch's; jet_flight.cpp HoldOffGround).
+    const float rest=RestOver(v,pos);
+    if(clear< -rest){j.vel[1]=j.vel[1]>kUnderClimb ? j.vel[1] : kUnderClimb;return;}
     float floorY=pos[1]-clear;
     if(j.vel[1]<0.0f && !water) {
-        const float rest=RestOver(v,pos),from[3]={pos[0],pos[1]-rest,pos[2]};
+        const float from[3]={pos[0],pos[1]-rest,pos[2]};
         const float end[3]={pos[0]+j.vel[0]*dt*kFloorSweep,from[1]+j.vel[1]*dt*kFloorSweep-kFloorGap,pos[2]+j.vel[2]*dt*kFloorSweep};
         float hit[3];
         if(MapRay(from,end,hit)>=0.0f && hit[1]+rest>floorY && hit[1]<from[1])floorY=hit[1]+rest;
