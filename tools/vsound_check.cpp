@@ -4,8 +4,11 @@
 // punchier near than far), the mix's rules against cases (the revs, the tracks, the turret, the report's near / far fade
 // and its delay, which guns are main guns, the loader's cues against a fire interval and a magazine's reload), and a
 // scenario mixed down as the plugin mixes it frame by frame (a tank starting, idling, driving off, turning its turret,
-// firing near, reloading, a second gun firing far off), its peak under full scale; the Sazabi's clips, its mix's
-// rules and a scenario of its own the same way. No sound is played: the XAudio2 engine is never started.
+// firing near, reloading, a second gun firing far off), its peak under full scale; the calibres (vehmix.h kProfiles):
+// the stock weapons each told apart, their loaders' steps in order and inside their intervals, no case where there is
+// none, their reports and cases lower and longer the bigger they are, and a scenario of the big guns firing together;
+// the Sazabi's clips, its mix's rules and a scenario of its own the same way. No sound is played: the XAudio2 engine is
+// never started.
 //
 //   vsound_check [--out DIR]      (DIR: where the WAVs go; default %TEMP%\edf6_vsound_check)
 //
@@ -156,63 +159,93 @@ void Rules() {
     }
     Check(ok && std::fabs(g60.delay-kGunNear/kSoundSpeed)<1e-5f && std::fabs(g1500.delay-1500.0f/340.0f)<1e-4f,
           "the report: no jump anywhere in its fade, delayed by the distance at 340 m/s");
-    // The main guns (docs/sound-re.md §9): the stock tanks', the E551's beam shell, the howitzer; not the rest.
-    struct Case { const char* what; Round r; bool homing; int frames; bool looped; float volume; bool main; };
-    const Case cases[]={
-        {"the Blacker's cannon (RocketBullet01, 120 frames)",Round::cannon,false,120,false,0.8f,true},
-        {"the E551's (EfsBullet, 150 frames)",Round::beam,false,150,false,0.8f,true},
-        {"the howitzer (GrenadeBullet01, 300 frames)",Round::grenade,false,300,false,1.0f,true},
-        {"the Titan's sub cannon (RocketBullet01, 80 frames)",Round::cannon,false,80,false,0.9f,true},
-        {"the Kepler's gatling (SolidBullet01, 3 frames, looped)",Round::other,false,3,true,0.6f,false},
-        {"the Striker's cannon (RocketBullet01, 20 frames)",Round::cannon,false,20,false,0.75f,false},
-        {"the Begaruta's grenade (GrenadeBullet01, 40 frames)",Round::grenade,false,40,false,0.7f,false},
-        {"the drill (the Blacker's cannon, its fire sound silent)",Round::cannon,false,120,false,0.0f,false},
-        {"the Proteus' beam (EfsExposureBullet, looped)",Round::beam,false,1,true,0.4f,false},
-        {"a homing launcher",Round::other,true,300,false,0.8f,false},
-        {"the Barga's cannon (looped fire)",Round::cannon,false,180,true,1.0f,false},
+    // Every weapon's calibre (docs/sound-re.md §9.5): the stock vehicle weapons' and the generated ones' numbers (the
+    // dumps of Root.cpk; tools/make_artillery.py, make_katyusha.py, pylib/vcobjects.py): round, homing, looped fire sound,
+    // FireInterval, FireBurstCount, fire volume, AmmoDamage, AmmoExplosion, AmmoSpeed.
+    struct BoreCase { const char* what; GunFacts f; Bore bore; };
+    const BoreCase bores[]={
+        {"the Blacker's cannon (RocketBullet01, 120 frames, 350)",{Round::cannon,false,false,120,1,0.8f,350.0f,8.0f,8.0f},Bore::tank},
+        {"the E551's cannon (EfsBullet, 150 frames, 400)",{Round::beam,false,false,150,1,0.8f,400.0f,12.0f,8.0f},Bore::tank},
+        {"the Begaruta's long cannon (RocketBullet01, 160 frames, 400)",{Round::cannon,false,false,160,1,0.8f,400.0f,20.0f,6.0f},Bore::tank},
+        {"the Titan's main gun (RocketBullet01, 300 frames, 750, blast 30)",{Round::cannon,false,false,300,1,1.0f,750.0f,30.0f,6.0f},Bore::heavy},
+        {"the Titan's sub gun (RocketBullet01, 80 frames, 200)",{Round::cannon,false,false,80,1,0.9f,200.0f,8.0f,8.0f},Bore::medium},
+        {"the Begaruta's cannon (RocketBullet01, 80 frames, 100)",{Round::cannon,false,false,80,1,0.8f,100.0f,5.0f,8.0f},Bore::medium},
+        {"the 403's rail gun (SolidBullet01Rail, 180 frames, 600)",{Round::rail,false,false,180,1,0.9f,600.0f,0.0f,15.0f},Bore::rail},
+        {"the Blacker's rail gun (SolidBullet01Rail, 100 frames)",{Round::rail,false,false,100,1,0.9f,350.0f,0.0f,15.0f},Bore::rail},
+        {"the 403's four-round rail gun (burst 4)",{Round::rail,false,false,180,4,0.9f,200.0f,0.0f,15.0f},Bore::rail},
+        {"the Titan's sub rail gun (120 frames, 80)",{Round::rail,false,false,120,1,0.9f,80.0f,0.0f,15.0f},Bore::rail},
+        {"the howitzer (GrenadeBullet01, 300 frames, 2500)",{Round::grenade,false,false,300,1,1.0f,2500.0f,25.0f,4.0f},Bore::howitzer},
+        {"the Katyusha (GrenadeBullet01, 40 a ripple, 600 frames)",{Round::grenade,false,false,600,40,1.0f,300.0f,12.0f,2.0f},Bore::rocket},
+        {"the Titan's side launcher (GrenadeBullet01, 8 a salvo, 0.5 m a frame)",{Round::grenade,false,false,80,8,0.8f,120.0f,18.0f,0.5f},Bore::grenade},
+        {"the Begaruta's grenade (40 frames)",{Round::grenade,false,false,40,1,0.7f,80.0f,12.0f,2.0f},Bore::grenade},
+        {"the Begaruta's grenade pod (8 a salvo, 420 frames)",{Round::grenade,false,false,420,8,0.7f,60.0f,8.0f,2.0f},Bore::grenade},
+        {"the Blacker's DLC grenade cannon (180 frames, 90)",{Round::grenade,false,false,180,1,0.8f,90.0f,6.0f,3.0f},Bore::grenade},
+        {"the Kepler's grenade gun (5 frames)",{Round::grenade,false,false,5,1,0.53f,9.0f,4.0f,5.0f},Bore::mg},
+        {"the 409's bomb (0.25 m a frame: let fall)",{Round::grenade,false,false,240,4,0.8f,500.0f,20.0f,0.25f},Bore::stock},
+        {"a jet's Mk 82 (0.05 m a frame, 1500)",{Round::grenade,false,false,8,1,0.8f,1500.0f,25.0f,0.05f},Bore::stock},
+        {"the Kepler's gatling (3 frames, looped)",{Round::gun,false,true,3,1,0.6f,3.0f,0.0f,10.0f},Bore::mg},
+        {"the 506's door gatling (3 frames, looped)",{Round::gun,false,true,3,1,0.6f,10.0f,0.0f,10.0f},Bore::mg},
+        {"the 403's machine gun (4 frames, looped)",{Round::gun,false,true,4,1,0.64f,6.0f,0.0f,10.0f},Bore::mg},
+        {"the Striker's cannon (RocketBullet01, 20 frames)",{Round::cannon,false,false,20,1,0.75f,32.0f,5.0f,8.0f},Bore::autocannon},
+        {"the robot truck's rifle (SolidBullet01, 30 frames)",{Round::gun,false,false,30,1,0.75f,24.0f,0.0f,10.0f},Bore::autocannon},
+        {"the 410's heavy gun (SolidBullet01, 180 frames, 600)",{Round::gun,false,false,180,1,0.75f,600.0f,0.0f,10.0f},Bore::autocannon},
+        {"the heli's missile (MissileBullet01)",{Round::missile,false,false,300,4,0.9f,120.0f,12.0f,2.0f},Bore::missile},
+        {"the Naegling's rockets (MissileBullet01, 10 a salvo)",{Round::missile,false,false,240,10,0.71f,100.0f,8.0f,2.0f},Bore::missile},
+        {"a guided missile (homing)",{Round::missile,true,false,300,1,0.9f,120.0f,12.0f,2.0f},Bore::missile},
+        {"the 612's laser rifle (EfsExposureBullet, looped)",{Round::beam,false,true,1,1,0.6f,10.0f,0.0f,10.0f},Bore::stock},
+        {"the Proteus' beam (EfsExposureBullet, looped)",{Round::beam,false,true,1,1,0.4f,10.0f,0.0f,10.0f},Bore::stock},
+        {"the 506's laser cannon (LaserBullet01)",{Round::other,false,false,120,5,0.56f,100.0f,0.0f,10.0f},Bore::stock},
+        {"a flamethrower (FlameBullet02)",{Round::other,false,true,2,1,0.7f,6.0f,0.0f,1.0f},Bore::stock},
+        {"a homing laser (HomingLaserBullet01)",{Round::other,true,false,1,10,0.71f,20.0f,2.0f,2.0f},Bore::stock},
+        {"the Barga's cannon (looped fire, 180 frames)",{Round::cannon,false,true,180,1,1.0f,500.0f,10.0f,5.0f},Bore::stock},
+        {"the drill (the Blacker's cannon, silent)",{Round::cannon,false,false,120,1,0.0f,350.0f,8.0f,8.0f},Bore::stock},
     };
-    for(const Case& c:cases) {
-        char what[200];
-        sprintf_s(what,"%s: %s",c.what,c.main ? "a main gun" : "not a main gun");
-        Check(MainGun(c.r,c.homing,c.frames,c.looped,c.volume)==c.main,what);
+    const char* const boreNames[]={"stock","machine gun","autocannon","grenade launcher","75-105 mm gun","120 mm tank gun",
+                                   "155 mm howitzer","super-heavy gun","rail gun","rocket rails","missile"};
+    static_assert(sizeof(boreNames)/sizeof(boreNames[0])==static_cast<std::size_t>(Bore::count));
+    for(const BoreCase& c:bores) {
+        char what[220];
+        sprintf_s(what,"%s: %s",c.what,boreNames[static_cast<int>(c.bore)]);
+        Check(ProfileOf(c.f)==c.bore,what);
     }
-    // Every weapon's kind (docs/sound-re.md §9.4): the stock vehicle weapons' numbers (the dumps of Root.cpk).
-    struct KindCase { const char* what; Round r; bool homing; int frames; bool looped; float volume; GunKind kind; };
-    const KindCase kinds[]={
-        {"the Blacker's cannon",Round::cannon,false,120,false,0.8f,GunKind::main},
-        {"the Kepler's gatling (3 frames, looped)",Round::gun,false,3,true,0.6f,GunKind::rapid},
-        {"the 506's door gatling (3 frames, looped)",Round::gun,false,3,true,0.6f,GunKind::rapid},
-        {"the 403's machine gun (4 frames, looped)",Round::gun,false,4,true,0.64f,GunKind::rapid},
-        {"the Kepler's grenade gun (5 frames, one-shot)",Round::grenade,false,5,false,0.53f,GunKind::rapid},
-        {"the Striker's cannon (RocketBullet01, 20 frames)",Round::cannon,false,20,false,0.75f,GunKind::autocannon},
-        {"the robot truck's rifle (SolidBullet01, 30 frames)",Round::gun,false,30,false,0.75f,GunKind::autocannon},
-        {"the Begaruta's grenade (40 frames)",Round::grenade,false,40,false,0.7f,GunKind::autocannon},
-        {"the heli's missile (MissileBullet01)",Round::missile,false,300,false,0.9f,GunKind::missile},
-        {"the Naegling's rockets (MissileBullet01)",Round::missile,false,240,false,0.71f,GunKind::missile},
-        {"the 612's laser rifle (EfsExposureBullet, looped)",Round::beam,false,1,true,0.6f,GunKind::none},
-        {"the 506's laser cannon (LaserBullet01)",Round::other,false,120,false,0.56f,GunKind::none},
-        {"a flamethrower (FlameBullet02)",Round::other,false,2,true,0.7f,GunKind::none},
-        {"a homing laser (HomingLaserBullet01)",Round::other,true,1,false,0.71f,GunKind::none},
-        {"the Barga's cannon (looped fire, 180 frames)",Round::cannon,false,180,true,1.0f,GunKind::none},
-        {"the drill (silent)",Round::cannon,false,120,false,0.0f,GunKind::none},
-    };
-    for(const KindCase& c:kinds) {
-        char what[200];
-        const char* names[]={"stock","main gun","autocannon","rapid","missile"};
-        sprintf_s(what,"%s: %s",c.what,names[static_cast<int>(c.kind)]);
-        Check(KindOf(c.r,c.homing,c.frames,c.looped,c.volume)==c.kind,what);
+    // The table: each row its own calibre; a report has its near and far clips, a round its clip, a burst its two
+    // loops; the main guns in the gun group, the launches in the missile group; no case where the real one has none (a
+    // rail gun's, the rockets', a separate-loading gun's, a missile's), a case where it has one; a loader only on guns
+    // whose wait is a loader's; every step's clip a one-shot.
+    bool table=true,cases=true,steps=true;
+    for(int b=0;b<static_cast<int>(Bore::count);++b) {
+        const Profile& pf=kProfiles[b];
+        const bool report=pf.fire==Fire::report,burst=pf.fire==Fire::burst;
+        table=table && static_cast<int>(pf.bore)==b && (b==0)==(pf.fire==Fire::none) && (b==0)==(pf.group==Group::none) &&
+              (b==0 || (pf.nearClip>=0 && (report || burst)==(pf.farClip>=0) && pf.share>0.0f && pf.share<=1.0f && pf.ref>0.0f)) &&
+              (report==(pf.group==Group::main)) && (pf.steps>=0 && pf.steps<=kMostSteps);
+        for(int i=0;i<pf.steps;++i)steps=steps && pf.step[i].clip>=0 && !audio::kClipLoops[pf.step[i].clip] && pf.step[i].frames>0.0f &&
+                                         pf.step[i].pitch>0.5f && pf.step[i].pitch<2.0f;
+        if(pf.casing.clip>=0)cases=cases && (audio::kClipLoops[pf.casing.clip]==burst) && pf.casing.delay>=0.0f &&
+                                   pf.casing.muffle>=0.0f && pf.casing.muffle<1.0f;
     }
+    Check(table,"the calibres' table: each row its calibre, its clips and its group (a report: the main guns')");
+    const Bore none[]={Bore::rail,Bore::rocket,Bore::howitzer,Bore::heavy,Bore::missile},some[]={Bore::mg,Bore::autocannon,
+                       Bore::grenade,Bore::medium,Bore::tank};
+    for(const Bore b:none)cases=cases && ProfileFor(b).casing.clip<0;
+    for(const Bore b:some)cases=cases && ProfileFor(b).casing.clip>=0;
+    Check(cases,"the cases: none for a rail gun, rockets, a separate-loading gun (howitzer, super-heavy), a missile; one for the rest");
+    Check(steps && ProfileFor(Bore::mg).steps==0 && ProfileFor(Bore::autocannon).steps==0 && ProfileFor(Bore::missile).steps==0 &&
+          ProfileFor(Bore::tank).casing.muffle>0.0f,"the loaders: one-shot steps on the guns with a loader, none on a belt or a launch; "
+          "the tank gun's stub lands inside the turret (muffled)");
+    Check(!RemoteShot(0,0,0) && RemoteShot(5,6,5) && RemoteShot(5,8,5) && !RemoteShot(5,6,6) && !RemoteShot(6,6,3) && !RemoteShot(7,5,3),
+          "another machine's shot: its count sent past the copy's own (not a local shot sent, not a count going back)");
     Check(std::fabs(BurstRatio(60.0f/s::kMgRate,s::kMgRate)-1.0f)<1e-4f && BurstRatio(1.0f,s::kGatlingRate)==kBurstRatioHi &&
           BurstRatio(30.0f,s::kMgRate)==kBurstRatioLo,"a burst: as made at its own rate, its pitch held within its bounds");
     Check(Firing(0.0f,3.0f) && Firing(6.0f,3.0f) && !Firing(7.0f,3.0f) && Firing(4.0f,1.0f) && !Firing(5.0f,1.0f),
           "a gun fires its interval and kBurstHold frames past each round, no longer");
 }
 
-// The loader's cues of a gun waiting `interval` frames between shots, a magazine of `rounds` reloaded over `reload`
-// frames (0: none), as GunStep sees them frame by frame (the stock counters as 0x6981D6 sets them: the interval after a
-// shot, 20 frames after the last, then the reload). The frames each cue came on.
-struct Heard3 { int eject[8],load[8],close[8]; int ejects,loads,closes; };
-Heard3 Loader(int interval,int rounds,int reload,int shots) {
+// The loader's steps of a gun of calibre `pf` waiting `interval` frames between shots, a magazine of `rounds` reloaded
+// over `reload` frames (0: none), as GunStep sees them frame by frame (the stock counters as 0x6981D6 sets them: the
+// interval after a shot, 20 frames after the last, then the reload). The frames each step came on, and the shots'.
+struct Heard3 { int at[vmix::kMostSteps][8]; int n[vmix::kMostSteps]; int shotAt[8]; int shots; };
+Heard3 Loader(const vmix::Profile& pf,int interval,int rounds,int reload,int shots) {
     Heard3 h{};
     float wait=0.0f,before=0.0f,total=0.0f,since=1e9f;
     int ammo=rounds,left=0,fired=0;
@@ -228,34 +261,72 @@ Heard3 Loader(int interval,int rounds,int reload,int shots) {
         else if(left<0)left=reload;
         else if(left>0 && --left==0)ammo=rounds;
         wait=cooldown>0.0f || ammo>0 || reload<=0 ? cooldown : static_cast<float>(left>0 ? left : 0);
+        if(shot && h.shots<8)h.shotAt[h.shots++]=f;
         // GunStep's
         const float sinceBefore=since;
         if(wait>before+1.0f)total=wait;
         since=shot ? 0.0f : since+1.0f;
         const float cycle=std::fmax(total,static_cast<float>(interval));
-        const unsigned c=vmix::ReloadCues(before,wait,cycle,shot ? -1.0f : sinceBefore,since);
-        if((c&vmix::kCueEject) && h.ejects<8)h.eject[h.ejects++]=f;
-        if((c&vmix::kCueLoad) && h.loads<8)h.load[h.loads++]=f;
-        if((c&vmix::kCueClose) && h.closes<8)h.close[h.closes++]=f;
+        const unsigned c=vmix::ReloadCues(pf,before,wait,cycle,shot ? -1.0f : sinceBefore,since);
+        for(int i=0;i<pf.steps;++i)if((c&(1u<<i)) && h.n[i]<8)h.at[i][h.n[i]++]=f;
         before=wait;
     }
     return h;
 }
+// Each step heard once a shot, in the table's order, after the shot and before the next one is ready (the interval's
+// end, or the reload's).
+bool InOrder(const vmix::Profile& pf,const Heard3& h,int shots,int interval) {
+    bool ok=true;
+    for(int k=0;k<shots;++k) {
+        int last=h.shotAt[k];
+        for(int i=0;i<pf.steps;++i) {
+            ok=ok && h.n[i]==shots && h.at[i][k]>last && h.at[i][k]<=h.shotAt[k]+interval;
+            last=h.at[i][k];
+        }
+    }
+    return ok;
+}
 void Loaders() {
-    char what[220];
-    const Heard3 tank=Loader(180,25,0,3);   // the Blacker: a shot every 3 s
-    sprintf_s(what,"a tank gun, 180 frames a shot, 3 shots: cases out at %d/%d/%d, rammed at %d/%d, closed at %d/%d",tank.eject[0],tank.eject[1],tank.eject[2],
-              tank.load[0],tank.load[1],tank.close[0],tank.close[1]);
+    using vmix::Bore; using vmix::ProfileFor;
+    char what[260];
+    const vmix::Profile& tank=ProfileFor(Bore::tank);
+    const Heard3 t=Loader(tank,180,25,0,3);   // the Blacker: a shot every 3 s
+    sprintf_s(what,"a tank gun, 180 frames a shot, 3 shots: cases out at %d/%d/%d, rammed at %d/%d, closed at %d/%d",t.at[0][0],t.at[0][1],
+              t.at[0][2],t.at[1][0],t.at[1][1],t.at[2][0],t.at[2][1]);
     // shots at frames 0, 181, 362: the cases 24 frames after each; the next round rammed 54 frames before it is ready
     // (each wait's last 54 frames: 181 - 54 = 127), closed 16 before (165); the last shot's wait too (no shot follows,
     // but the gun is loaded again).
-    Check(tank.ejects==3 && tank.eject[0]==24 && tank.eject[1]==205 && tank.loads==3 && tank.load[0]==126 && tank.closes==3 &&
-          tank.close[0]==164 && tank.load[0]<tank.close[0],what);
-    const Heard3 fast=Loader(60,100,0,4);   // an autoloader's second: nothing
-    Check(fast.ejects==0 && fast.loads==0 && fast.closes==0,"a gun of 60 frames a shot: no loader to hear");
-    const Heard3 mag=Loader(40,2,300,2);    // two quick shots, then a 5 s reload
-    sprintf_s(what,"a two-round magazine reloaded over 300 frames: rammed %d time(s) at %d, closed at %d",mag.loads,mag.load[0],mag.close[0]);
-    Check(mag.loads==1 && mag.closes==1 && mag.load[0]>200 && mag.close[0]>mag.load[0],what);
+    Check(t.n[0]==3 && t.at[0][0]==24 && t.at[0][1]==205 && t.n[1]==3 && t.at[1][0]==126 && t.n[2]==3 && t.at[2][0]==164 &&
+          InOrder(tank,t,3,181),what);
+    const Heard3 fast=Loader(tank,60,100,0,4);   // an autoloader's second: nothing
+    Check(fast.n[0]==0 && fast.n[1]==0 && fast.n[2]==0,"a gun of 60 frames a shot: no loader to hear");
+    const Heard3 mag=Loader(tank,40,2,300,2);    // two quick shots, then a 5 s reload
+    sprintf_s(what,"a two-round magazine reloaded over 300 frames: rammed %d time(s) at %d, closed at %d",mag.n[1],mag.at[1][0],mag.at[2][0]);
+    Check(mag.n[1]==1 && mag.n[2]==1 && mag.at[1][0]>200 && mag.at[2][0]>mag.at[1][0],what);
+    // Each calibre's loader at the shortest interval it is given (docs/sound-re.md §9.5; the 75-105 mm guns' 80 frames
+    // are an autoloader's: from kReloadFrames) and at a longer one: every step once a shot, in order, inside the wait.
+    struct LoaderCase { Bore bore; int interval; };
+    const LoaderCase loaders[]={{Bore::medium,90},{Bore::medium,240},{Bore::tank,120},{Bore::tank,180},{Bore::howitzer,300},
+                                {Bore::howitzer,200},{Bore::heavy,300},{Bore::rail,100},{Bore::rail,180},{Bore::rocket,600},
+                                {Bore::rocket,300}};
+    for(const LoaderCase& c:loaders) {
+        const vmix::Profile& pf=ProfileFor(c.bore);
+        const Heard3 h=Loader(pf,c.interval,25,0,3);
+        int len=sprintf_s(what,"%s loader, %d frames a shot: ",c.bore==Bore::medium ? "a 75-105 mm gun's" : c.bore==Bore::tank ?
+                          "a tank gun's" : c.bore==Bore::howitzer ? "the howitzer's" : c.bore==Bore::heavy ? "the super-heavy gun's" :
+                          c.bore==Bore::rail ? "the rail gun's" : "the rocket rails'",c.interval);
+        for(int i=0;i<pf.steps && len>0 && len<200;++i)len+=sprintf_s(what+len,sizeof(what)-static_cast<std::size_t>(len),"%d ",h.at[i][0]);
+        Check(InOrder(pf,h,3,c.interval+1),what);
+    }
+    // The howitzer's separate loading in its order: breech open, the shell, three charges, breech closed, the primer.
+    const vmix::Profile& how=ProfileFor(Bore::howitzer);
+    Check(how.steps==7 && how.step[0].clip==audio::kClipBreechOpen && how.step[1].clip==audio::kClipShellRam &&
+          how.step[2].clip==audio::kClipCharge && how.step[3].clip==audio::kClipCharge && how.step[4].clip==audio::kClipCharge &&
+          how.step[5].clip==audio::kClipClose && how.step[6].clip==audio::kClipPrimer,
+          "the howitzer: breech opened, shell rammed, three charges, breech closed, primer (no case of its own)");
+    const vmix::Profile& rail=ProfileFor(Bore::rail);
+    Check(rail.steps==2 && rail.step[0].clip==audio::kClipRailCharge && std::fabs(rail.step[0].frames-s::kRailChargeSec*60.0f)<1.0f &&
+          rail.step[1].clip==audio::kClipRailReady,"the rail gun: its capacitors charging the clip's length before it is ready, then its click");
 }
 
 // --- The scenario ---
@@ -320,9 +391,12 @@ void Scenario(const std::wstring& dir) {
     const GunMix close=Gun(camera),away=Gun(900.0f);
     OneShot(out,clip[kClipGunNear],at(10.0f+close.delay),kGunShare*kPan*close.nearGain);
     OneShot(out,clip[kClipGunFar],at(10.0f+close.delay),kGunShare*kPan*close.farGain);
-    OneShot(out,clip[kClipEject],at(10.0f+vmix::kEjectFrames/60.0f),kReloadShare*kPan*atLoader);
-    OneShot(out,clip[kClipLoad],at(13.0f-vmix::kLoadFrames/60.0f),kReloadShare*kPan*atLoader);
-    OneShot(out,clip[kClipClose],at(13.0f-vmix::kCloseFrames/60.0f),kReloadShare*kPan*atLoader);
+    const Profile& tank=ProfileFor(Bore::tank);   // its loader's steps at a 180-frame interval (3 s), its stub case
+    for(int i=0;i<tank.steps;++i) {
+        const Step& st=tank.step[i];
+        OneShot(out,clip[st.clip],at(10.0f+(st.fromReady ? 3.0f-st.frames/60.0f : st.frames/60.0f)),kReloadShare*kPan*atLoader);
+    }
+    OneShot(out,clip[tank.casing.clip],at(10.0f+tank.casing.delay),kBrassShare*kPan*atLoader);
     OneShot(out,clip[kClipGunNear],at(12.0f+away.delay),kGunShare*kPan*away.nearGain);
     OneShot(out,clip[kClipGunFar],at(12.0f+away.delay),kGunShare*kPan*away.farGain);
     float peak=0.0f;
@@ -395,6 +469,134 @@ void SmallScenario(const std::wstring& dir) {
         pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));
     WriteWav(dir+L"\\scenario_small_guns.wav",pcmOut,2);
 }
+// --- The calibres (src/vehmix.h kProfiles, src/vsynth.h) ---
+// The spectral centroid (Hz) of `x` (from..to): its energy through octave bands 31.5 Hz .. 16 kHz, each band's at its
+// centre.
+double Centroid(const std::vector<float>& x,std::size_t from,std::size_t to) {
+    double num=0.0,den=1e-12;
+    for(float hz=31.5f;hz<17000.0f;hz*=2.0f) {
+        s::Biquad b=s::Bp(hz,1.41f);
+        double e=0.0;
+        for(std::size_t i=0;i<x.size() && i<to;++i){const float v=b.Run(x[i]);if(i>=from)e+=static_cast<double>(v)*v;}
+        num+=hz*e;den+=e;
+    }
+    return num/den;
+}
+// How long (s) `x`'s level (50 ms windows) takes to fall 30 dB under its loudest window, for good.
+double DecaySec(const std::vector<float>& x) {
+    const std::size_t w=static_cast<std::size_t>(s::kRate/20);
+    std::vector<double> level;
+    for(std::size_t from=0;from+w<=x.size();from+=w)level.push_back(Rms(x,from,from+w));
+    double top=0.0;
+    std::size_t at=0;
+    for(std::size_t i=0;i<level.size();++i)if(level[i]>top){top=level[i];at=i;}
+    std::size_t last=at;
+    for(std::size_t i=at;i<level.size();++i)if(level[i]>top*0.0316)last=i;
+    return static_cast<double>(last+1-at)*0.05;
+}
+void Calibres() {
+    using namespace audio;
+    char what[260];
+    // The reports, smallest to biggest: each lower (centroid of its first 0.5 s, near) and longer (its fall by 30 dB).
+    const int nearOf[4]={kClipGunMediumNear,kClipGunNear,kClipHowitzerNear,kClipGunHeavyNear},farOf[4]={kClipGunMediumFar,kClipGunFar,
+                         kClipHowitzerFar,kClipGunHeavyFar};
+    const char* const names[4]={"75-105 mm","120 mm","155 mm","super-heavy"};
+    double c[4],d[4],cf[4],df[4];
+    bool lower=true,longer=true;
+    int len=sprintf_s(what,"the reports lower and longer with the calibre (near: centroid / 30 dB fall; far centroid):");
+    for(int k=0;k<4;++k) {
+        const std::vector<float> nx=Floats(pcm[nearOf[k]]),fx=Floats(pcm[farOf[k]]);
+        c[k]=Centroid(nx,0,s::kRate/2);d[k]=DecaySec(nx);cf[k]=Centroid(fx,0,s::kRate);df[k]=DecaySec(fx);
+        if(k>0){lower=lower && c[k]<c[k-1] && cf[k]<cf[k-1];longer=longer && d[k]>d[k-1] && df[k]>=df[k-1];}
+        len+=sprintf_s(what+len,sizeof(what)-static_cast<std::size_t>(len)," %s %.0f Hz / %.2f s (%.0f Hz);",names[k],c[k],d[k],cf[k]);
+    }
+    Check(lower && longer,what);
+    // The rail gun: a crack and a zap, not a charge's boom: less under 120 Hz than the tank gun's, more over 2 kHz.
+    double rl,rh,tl,th;
+    Bands(Floats(pcm[kClipRailShot]),0,s::kRate/2,120.0f,2000.0f,&rl,&rh);
+    Bands(Floats(pcm[kClipGunNear]),0,s::kRate/2,120.0f,2000.0f,&tl,&th);
+    sprintf_s(what,"the rail gun's discharge: under 120 Hz %.0f%% (the tank gun's %.0f%%), over 2 kHz %.1f%% (%.1f%%)",rl*100.0,tl*100.0,rh*100.0,th*100.0);
+    Check(rl<tl*0.5 && rh>th*2.0,what);
+    const std::vector<float> charge=Floats(pcm[kClipRailCharge]);
+    const double c0=Centroid(charge,0,s::kRate*3/10),c1=Centroid(charge,charge.size()-s::kRate*4/10,charge.size()-s::kRate/10);
+    sprintf_s(what,"the rail gun's capacitors whining up as they charge (centroid %.0f Hz at first, %.0f Hz at the end)",c0,c1);
+    Check(c1>c0*3.0,what);
+    // The 40 mm grenade launcher: low pressure, no crack: duller than the autocannon's round.
+    double gl,gh,al,ah;
+    Bands(Floats(pcm[kClipGrenadeShot]),0,s::kRate/4,120.0f,2000.0f,&gl,&gh);
+    Bands(Floats(pcm[kClipAutocannon]),0,s::kRate/4,120.0f,2000.0f,&al,&ah);
+    sprintf_s(what,"the grenade launcher's thump duller than an autocannon's round (over 2 kHz %.1f%% against %.1f%%)",gh*100.0,ah*100.0);
+    Check(gh<ah,what);
+    // The rocket off its rail: shorter than a missile's launch (a ripple of them).
+    const double rocket=DecaySec(Floats(pcm[kClipRocketRail])),missile=DecaySec(Floats(pcm[kClipMissile]));
+    sprintf_s(what,"a rocket off its rail shorter than a missile's launch (%.2f s against %.2f s)",rocket,missile);
+    Check(rocket<missile,what);
+    // The cases: the bigger the lower (30-40 mm brass, a 75-105 mm brass case, the 120 mm stub's steel base); the stub a
+    // short clunk, the big brass case ringing and rolling on.
+    const double cs=Centroid(Floats(pcm[kClipCaseSmall]),0,s::kRate/10),cm=Centroid(Floats(pcm[kClipCaseMedium]),0,s::kRate/10),
+                 cb=Centroid(Floats(pcm[kClipCaseStub]),0,s::kRate/10);
+    const double ds=DecaySec(Floats(pcm[kClipCaseStub])),dm=DecaySec(Floats(pcm[kClipCaseMedium]));
+    sprintf_s(what,"the cases lower the bigger (centroid %.0f / %.0f / %.0f Hz), the stub's clunk shorter than the brass case's (%.2f / %.2f s)",
+              cs,cm,cb,ds,dm);
+    Check(cs>cm && cm>cb && ds<dm,what);
+    // The 155 mm shell rammed lower and longer than a tank gun's round; a charge module no ring of steel: shorter.
+    const double cr=Centroid(Floats(pcm[kClipShellRam]),0,pcm[kClipShellRam].size()),cl=Centroid(Floats(pcm[kClipLoad]),0,pcm[kClipLoad].size());
+    const double dc=DecaySec(Floats(pcm[kClipCharge])),dr=DecaySec(Floats(pcm[kClipShellRam])),dl=DecaySec(Floats(pcm[kClipLoad]));
+    sprintf_s(what,"the shell's ram lower and longer than a tank round's (%.0f / %.0f Hz, %.2f / %.2f s), a charge module's shorter (%.2f s)",
+              cr,cl,dr,dl,dc);
+    Check(cr<cl && dr>dl && dc<dr,what);
+}
+// The big guns together, as GunStep plays them (each shot's report near / far by its distance and delay, its case, its
+// loader's steps at their frames): a rail gun 20 m off charging and firing, the howitzer's pair 15 m off (one report)
+// with both loaders, a Katyusha rippling forty rockets 30 m off (one a rail every 4 frames) and latching on its next, a
+// tank gun 14 m off with its stub case, the super-heavy gun 25 m off. Its peak under full scale.
+void CalibreScenario(const std::wstring& dir) {
+    using namespace vmix;
+    using namespace audio;
+    constexpr float kSec=22.0f,kPan=0.70710678f;
+    std::vector<float> out(static_cast<std::size_t>(kSec*static_cast<float>(s::kRate)),0.0f);
+    std::vector<float> clip[kClipCount];
+    for(int c=0;c<kClipCount;++c)clip[c]=Floats(pcm[c]);
+    auto at=[&](float sec){ return static_cast<std::size_t>(sec*static_cast<float>(s::kRate)); };
+    // One shot of `pf` at `t` s, `d` m off, waiting `interval` frames: its report, its case, its loader.
+    auto fire=[&](const Profile& pf,float t,float d,float interval,int loaders) {
+        const GunMix m=Gun(d);
+        if(pf.fire==Fire::report) {
+            OneShot(out,clip[pf.nearClip],at(t+m.delay),pf.share*kPan*m.nearGain);
+            OneShot(out,clip[pf.farClip],at(t+m.delay),pf.share*kPan*m.farGain);
+        } else OneShot(out,clip[pf.nearClip],at(t+d/kSoundSpeed),pf.share*kPan*Falloff(d,pf.ref,1.0f));
+        const float by=Falloff(d,kReloadRef,1.3f);
+        if(pf.casing.clip>=0)OneShot(out,clip[pf.casing.clip],at(t+pf.casing.delay),kBrassShare*kPan*by);
+        const float k=StepScale(pf,interval);
+        for(int l=0;l<loaders;++l)
+            for(int i=0;i<pf.steps;++i) {
+                const Step& st=pf.step[i];
+                OneShot(out,clip[st.clip],at(t+(st.fromReady ? interval-st.frames*k : st.frames*k)/60.0f),kReloadShare*kPan*by);
+            }
+    };
+    fire(ProfileFor(Bore::rail),0.5f,20.0f,100.0f,1);
+    fire(ProfileFor(Bore::howitzer),2.5f,15.0f,300.0f,2);
+    for(int r=0;r<40;++r) {
+        Profile rocket=ProfileFor(Bore::rocket);
+        rocket.steps=r==39 ? rocket.steps : 0;   // the rails reloaded after the last
+        fire(rocket,8.5f+4.0f*static_cast<float>(r)/60.0f,30.0f,600.0f,1);
+    }
+    fire(ProfileFor(Bore::tank),12.0f,14.0f,180.0f,1);
+    fire(ProfileFor(Bore::heavy),15.0f,25.0f,300.0f,1);
+    float peak=0.0f;
+    for(float v:out)peak=std::fabs(v)>peak ? std::fabs(v) : peak;
+    char what[200];
+    sprintf_s(what,"the big guns' scenario at full volume: peak %.2f of full scale (each ear; under 1: no clipping)",peak);
+    Check(peak<1.0f && peak>0.3f,what);
+    const double ripple=Rms(out,at(9.0f),at(10.5f)),howitzer=Rms(out,at(2.55f),at(2.85f));
+    sprintf_s(what,"the ripple heard (rms %.3f) under the howitzer's report (%.3f)",ripple,howitzer);
+    Check(ripple>0.02 && howitzer>ripple,what);
+    std::vector<std::int16_t> pcmOut(out.size()*2);
+    for(std::size_t i=0;i<out.size();++i)
+        pcmOut[2*i]=pcmOut[2*i+1]=static_cast<std::int16_t>(std::lround((out[i]>1.0f ? 1.0f : out[i]<-1.0f ? -1.0f : out[i])*32767.0f));
+    WriteWav(dir+L"\\scenario_calibres.wav",pcmOut,2);
+}
+
 // --- The Sazabi (src/sazabi_sound.cpp; docs/sound-re.md §10) ---
 // What each of its clips is for, in its sound (their levels and loops are checked with the rest in Clips).
 void SazabiClips() {
@@ -539,6 +741,8 @@ int wmain(int argc,wchar_t** argv) {
     Loaders();
     Scenario(out);
     SmallScenario(out);
+    Calibres();
+    CalibreScenario(out);
     SazabiClips();
     SazabiRules();
     SazabiScenario(out);

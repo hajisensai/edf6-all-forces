@@ -24,7 +24,7 @@ import struct
 from dataclasses import replace
 from typing import Callable, Iterable
 
-from mdb import Bone, Mat, Mdb, Mesh, Object, Rab, RabFile, Texture, bind_world, insert_member, mmul, read_elem
+from mdb import Bone, Mat, Mdb, Mesh, Object, Rab, RabFile, Texture, bind_world, insert_member, mdb_read, mmul, read_elem
 from mdb_jet import link, pack_vertex, vertex_table
 
 Vec3 = tuple[float, float, float]
@@ -346,6 +346,34 @@ def texture_members(rab: Rab, filename: str) -> list[RabFile]:
     """Every archive member that is texture `filename` (e.g. 'x.DDS'): itself and its 'x.lod.DDS' variant."""
     stem = filename.rsplit('.', 1)[0].lower()
     return [f for f in rab.files if f.name.lower().rsplit('.', 1)[0] in (stem, stem + '.lod')]
+
+
+def is_texture_member(name: str) -> bool:
+    return name.lower().endswith('.dds')
+
+
+def prune_members(rab: Rab, models: Iterable[str]) -> list[str]:
+    """`rab` with every model member (.mdb) but `models` taken out, and every texture member (HD and .lod) that no
+    kept model's texture table names: what nothing loads once the archive's SGOs name only those models (the stock
+    archive a model is written into also carries the stock creature's LODs, debris and colour variants, which no
+    generated SGO names: they only took space). Members of any other kind stay; the rest keep their order. Returns
+    the names taken out, in archive order."""
+    keep = {m.lower() for m in models}
+    kept = [f for f in rab.files if f.name.lower() in keep]
+    assert len(kept) == len(keep), f'models {sorted(keep)}: {len(kept)} members'
+    need: set[str] = set()
+    for f in kept:
+        for t in mdb_read(f.data).textures:
+            found = texture_members(rab, t.filename)
+            assert found, f'{f.name}: texture {t.filename} is no member'
+            need |= {x.name.lower() for x in found}
+
+    def dead(f: RabFile) -> bool:
+        n = f.name.lower()
+        return (n.endswith('.mdb') and n not in keep) or (is_texture_member(n) and n not in need)
+    gone = [f.name for f in rab.files if dead(f)]
+    rab.files = [f for f in rab.files if not dead(f)]
+    return gone
 
 
 def copy_texture_members(host: Rab, donor: Rab, filenames: Iterable[str]) -> list[str]:

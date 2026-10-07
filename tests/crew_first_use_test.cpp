@@ -17,6 +17,7 @@ void* testVtable[80]{};
 int calls=0,failures=0,checks=0;
 bool testJet=false;
 float testDoor[3]={30.3f,0.0f,1.8f};
+bool testHail=false,testComing=false;float testHailAt[3]={500.0f,150.0f,0.0f};   // PlayerJetHailHint
 float testFloor=exitground::kNoFloor,warpedTo[3]{};int warpCount=0;   // ExitGroundTick's world
 void Check(bool value,const char* why){++checks;if(!value){++failures;std::printf("FAIL %s\n",why);}}
 void __fastcall Ride(void*,bool){++calls;}
@@ -51,6 +52,9 @@ bool PlayerJetBoardable(const void*) noexcept{return testJet;}
 unsigned char* PlayerHuman() noexcept{return testHuman;}
 bool SeatPoint(const unsigned char*,unsigned,float* point,float* reach) noexcept{std::memcpy(point,testDoor,12);*reach=2.3f;return true;}
 bool InstallNpcAi() noexcept{return false;}
+bool PlayerJetHailHint(const float*,float* at,float* distance,bool* coming) noexcept{
+    if(!testHail)return false;
+    std::memcpy(at,testHailAt,12);*distance=520.0f;*coming=testComing;return true;}
 bool MapGroundNear(float,float,float,float* h,bool) noexcept{if(testFloor==exitground::kNoFloor)return false;*h=testFloor;return true;}
 bool WarpHuman(unsigned char* h,const float* p) noexcept{std::memcpy(warpedTo,p,12);std::memcpy(h+kPosition,p,12);++warpCount;return true;}
 void NpcPostInput(unsigned char*) noexcept{}
@@ -139,6 +143,17 @@ int main(){
     Put<unsigned>(testHuman,0x31C,2);Check(!PlayerBoardingEntrance(&entry),"incompatible soldier class cannot receive a false entrance");
     Put<unsigned>(testHuman,0x31C,1);Time(5000);
     Check(!PlayerBoardingEntrance(&entry),"stale vehicle entry is not dereferenced for a cue");
+    // Nothing to board near them, one of ours up in the air: the hail hint on it (the carrier held 150 m up).
+    testHail=true;
+    Check(PlayerBoardingEntrance(&entry) && entry.hail && !entry.coming && !entry.inReach && entry.at[1]==150.0f,
+          "no boardable aircraft near: the hail key's aircraft is marked");
+    testComing=true;
+    Check(PlayerBoardingEntrance(&entry) && entry.hail && entry.coming,"a called aircraft is marked as coming down");
+    testComing=false;Time(100);Crew(testVehicle,0);
+    Check(PlayerBoardingEntrance(&entry) && !entry.hail,"a boardable entrance near them comes before the hail hint");
+    Put<void*>(testHuman,kHumanVehicleCtrl,testCtrl);
+    Check(!PlayerBoardingEntrance(&entry),"riding: no hail hint either");
+    Put<void*>(testHuman,kHumanVehicleCtrl,nullptr);testHail=false;
     // Off a vehicle, in the floor (exit_ground.h): put on it, inside the watch only, and only after a ride.
     auto exitCase=[&](float y,float floor,unsigned after,bool rode) {
         Setup();testFloor=floor;warpCount=0;

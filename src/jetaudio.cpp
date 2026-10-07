@@ -484,15 +484,21 @@ const wchar_t* const kClipName[kClipCount]={L"engine_heavy_idle",L"engine_heavy_
                                             L"sazabi_beam_shot",L"sazabi_beam_hit",L"sazabi_saber_on",L"sazabi_saber_off",
                                             L"sazabi_whoosh",L"sazabi_saber_hit",L"sazabi_cannon_shot",L"sazabi_funnel_launch",
                                             L"sazabi_funnel_shot",L"sazabi_funnel_dock",L"sazabi_footstep",L"sazabi_land",
-                                            L"sazabi_dash",L"sazabi_thrusters",L"sazabi_saber_hum",L"sazabi_cannon_charge"};
+                                            L"sazabi_dash",L"sazabi_thrusters",L"sazabi_saber_hum",L"sazabi_cannon_charge",
+                                            L"gun_medium_near",L"gun_medium_far",L"howitzer_near",L"howitzer_far",L"gun_heavy_near",
+                                            L"gun_heavy_far",L"railgun_shot",L"railgun_far",L"railgun_charge",L"railgun_ready",
+                                            L"grenade_shot",L"rocket_rail_launch",L"rocket_rail_load",L"case_medium",L"case_stub",
+                                            L"case_grenade",L"reload_breech_open",L"reload_shell_ram",L"reload_charge",L"reload_primer"};
 constexpr bool kClipLoops[kClipCount]={true,true,true,true,true,true,false,false,false,false,false,false,true,true,true,true,false,
                                        false,true,false,false,false,false,false,false,false,false,false,false,false,false,false,
-                                       false,false,true,true,true};
+                                       false,false,true,true,true,false,false,false,false,false,false,false,false,false,false,
+                                       false,false,false,false,false,false,false,false,false,false};
 // Peak of each clip as made, of full scale: the loops a little under (several play at once), the gun's report at the top.
 constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,0.95f,0.8f,0.8f,0.85f,0.8f,0.8f,0.85f,0.85f,0.8f,
                                        0.95f,0.6f,0.8f,0.9f,0.95f,0.9f,0.8f,0.8f,0.8f,0.95f,0.98f,0.8f,0.85f,0.8f,0.95f,0.98f,
-                                       0.9f,0.8f,0.7f,0.7f};
-constexpr int kLoops=96,kShots=48;   // the Sazabi's funnels fire six at once: room for them and the vehicles'
+                                       0.9f,0.8f,0.7f,0.7f,0.98f,0.95f,0.98f,0.95f,0.98f,0.95f,0.95f,0.9f,0.75f,0.7f,0.9f,0.9f,0.8f,
+                                       0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f};
+constexpr int kLoops=96,kShots=64;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets: room for them
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
 std::atomic<bool> clipsReady{false};
@@ -513,10 +519,10 @@ std::vector<float> MadeClip(int c) {
     case kClipTracks: return s::Tracks();
     case kClipTurret: return s::Turret();
     case kClipTurretStop: return s::TurretStop();
-    case kClipGunNear: return s::GunNear();
-    case kClipGunFar: return s::GunFar();
+    case kClipGunNear: return s::GunNear(s::kTankReport);
+    case kClipGunFar: return s::GunFar(s::kTankReport);
     case kClipEject: return s::ReloadEject();
-    case kClipLoad: return s::ReloadLoad();
+    case kClipLoad: return s::ReloadLoad(s::kRoundRam);
     case kClipClose: return s::ReloadClose();
     case kClipBikeIdle: return s::EngineLayer(s::kBikeEngine,false);
     case kClipBikeLoad: return s::EngineLayer(s::kBikeEngine,true);
@@ -525,7 +531,7 @@ std::vector<float> MadeClip(int c) {
     case kClipBurstTail: return s::BurstTail();
     case kClipAutocannon: return s::Autocannon();
     case kClipBrass: return s::Brass();
-    case kClipCaseSmall: return s::CaseSmall();
+    case kClipCaseSmall: return s::Case(s::kCaseSmall);
     case kClipSzBeamShot: return s::BeamShot();
     case kClipSzBeamHit: return s::BeamHit();
     case kClipSzSaberOn: return s::SaberOn();
@@ -542,6 +548,26 @@ std::vector<float> MadeClip(int c) {
     case kClipSzThrusters: return s::Thrusters();
     case kClipSzSaberHum: return s::SaberHum();
     case kClipSzCharge: return s::CannonCharge();
+    case kClipGunMediumNear: return s::GunNear(s::kMediumReport);
+    case kClipGunMediumFar: return s::GunFar(s::kMediumReport);
+    case kClipHowitzerNear: return s::GunNear(s::kHowitzerReport);
+    case kClipHowitzerFar: return s::GunFar(s::kHowitzerReport);
+    case kClipGunHeavyNear: return s::GunNear(s::kHeavyReport);
+    case kClipGunHeavyFar: return s::GunFar(s::kHeavyReport);
+    case kClipRailShot: return s::RailShot();
+    case kClipRailFar: return s::RailFar();
+    case kClipRailCharge: return s::RailCharge();
+    case kClipRailReady: return s::RailReady();
+    case kClipGrenadeShot: return s::GrenadeShot();
+    case kClipRocketRail: return s::RocketRail();
+    case kClipRocketLoad: return s::RocketLoad();
+    case kClipCaseMedium: return s::Case(s::kCaseMedium);
+    case kClipCaseStub: return s::Case(s::kCaseStub);
+    case kClipCaseGrenade: return s::Case(s::kCaseGrenade);
+    case kClipBreechOpen: return s::BreechOpen();
+    case kClipShellRam: return s::ReloadLoad(s::kShellRam);
+    case kClipCharge: return s::ChargeModule();
+    case kClipPrimer: return s::Primer();
     default: return s::MissileLaunch();
     }
 }

@@ -168,7 +168,8 @@ def jet_nozzles_on_their_models() -> None:
 @test
 def gear_legs_as_the_models_fold_them() -> None:
     """src/gear.cpp's legs (kLegNames, kLegUp) are pylib/jet_gear.py's (LEGS, LEG_UP): the plugin folds each leg by the
-    angle its model was measured to fold level at; every fixed-wing model recipe names a gear spec, hover craft none."""
+    angle its model was measured to fold level at; every fixed-wing model recipe names a gear spec, hover craft none
+    (the drone a skid spec instead)."""
     import jet_gear
     import jet_models
     text = src('src/gear.cpp')
@@ -180,9 +181,12 @@ def gear_legs_as_the_models_fold_them() -> None:
     assert tuple(got_names) == jet_gear.LEGS, f'{got_names} vs {jet_gear.LEGS}'
     assert all(abs(a - jet_gear.LEG_UP[n]) < 1e-4 for a, n in zip(got_ups, got_names)), f'{got_ups} vs {jet_gear.LEG_UP}'
     assert jet_models.ELEVON_GEAR in jet_gear.SPECS
+    import jet_skids
     for file, r in jet_models.MODELS.items():
         hover = file in ('EDF6VC_CARRIER.MRAB', 'EDF6VC_DRONE.MRAB')
         assert (r.gear is None) == hover and (r.gear is None or r.gear in jet_gear.SPECS), f'{file}: gear {r.gear}'
+        # the drone stands on fixed skids (jet_skids: its gun pod was its lowest point), the carrier on its pods
+        assert (r.skids is not None) == (file == 'EDF6VC_DRONE.MRAB') and (r.skids is None or r.skids in jet_skids.SPECS), file
 
 
 @test
@@ -530,6 +534,82 @@ def stores_inc_current() -> None:
     built = {w.split('/')[-1].upper() for w in vc.JETS['edf6tr_sub_carrier_mission'].weapons}
     assert listed and set(listed) <= built, (listed, built)
     assert f'kSgoHull={vc.JETS["edf6tr_sub_carrier_mission"].durability:.1f}f' in sub, 'subcarrier.cpp kSgoHull'
+
+@test
+def store_looks() -> None:
+    """Every store's round flies a model of its own at its weapon's real length (pylib/vcobjects.py STORE_MODELS, Look; the
+    user, 2026-10-07: 「不同挂载要有不同模型，射出去的时候也应该是对应模型」): each look's model is one of STORE_MODELS and its
+    AmmoSize gives the real length within STORE_LENGTH_SLACK; every model listed is used; the rounds one control cycles
+    never share a model (each jet's stores; a stock vehicle's stores on one holder, make_stock_stores.LOADOUTS, and with
+    the game the stock weapon of the holder they hang beside). With the game: each model measures as STORE_MODELS says on
+    Root.cpk (and _look refuses one that does not); each store SGO jet_guns writes fires its look's model at its size,
+    preloads exactly that model, keeps the template's contact sphere and every other value of the build without the look;
+    the Sazabi's shield missile (its look the template's) is that build byte for byte."""
+    import make_stock_stores as mss
+    looks = {kind: s.weapon.look for kind, s in vc.STORES.items()}
+    every = [*looks.values(), vc.SAZABI_MISSILE.weapon.look]
+    for look in every:
+        assert look.model in vc.STORE_MODELS and look.path == f'app:/WEAPON/{look.model}.rab', look
+        assert abs(look.size * vc.STORE_MODELS[look.model] - look.length) <= vc.STORE_LENGTH_SLACK, look
+    assert {look.model for look in every} == set(vc.STORE_MODELS), 'a model in STORE_MODELS no weapon flies'
+    assert make_katyusha.ROCKET_MODEL_LEN == vc.STORE_MODELS['bullet_rocket'], 'the Katyusha measures the same model'
+
+    def kind(weapon: str) -> str | None:
+        got = vc.store_of(weapon if weapon.startswith('app:/') else 'app:/weapon/' + weapon.lower())
+        return got[0] if got else None
+
+    def apart(where: object, models: list[str]) -> None:
+        assert len(models) == len(set(models)), f'{where}: rounds cycled on one control look alike: {models}'
+
+    for name, jet in vc.JETS.items():
+        apart(name, [looks[k].model for k in sorted({kind(w) for w in jet.weapons} - {None})])
+    beside: dict[tuple[str, int], list[str]] = {}
+    for stem, mounts in mss.LOADOUTS.items():
+        for m in mounts:
+            if kind(m.weapon):
+                beside.setdefault((stem, m.like), []).append(looks[kind(m.weapon)].model)
+    for where, models in beside.items():
+        apart(where, models)
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    for model, length in vc.STORE_MODELS.items():
+        assert abs(vc.model_length(game.read('WEAPON', f'{model}.rab')) - length) <= vc.STORE_MODEL_SLACK, model
+    built = vc.jet_guns(game)
+    with patched(vc, _look=lambda *_: None):
+        plain, plain_sazabi = vc.jet_guns(game), vc.sazabi_weapons(game)
+    assert vc.sazabi_weapons(game)[vc.SAZABI_MISSILE_FILE] == plain_sazabi[vc.SAZABI_MISSILE_FILE], 'the Sazabi missile changed'
+    shape = ('AmmoModel', 'AmmoSize', 'AmmoHitSizeAdjust', 'resource')
+    for name in vc.STORE_FILES:
+        look = looks[kind(name)]
+        got, was = (dsgo.to_py(dsgo.parse(files[name]).root) for files in (built, plain))
+        assert list(got) == list(was) and all(got[k] == was[k] for k in got if k not in shape), name
+        assert was['resource'] == [was['AmmoModel']], f'{name}: the template preloads its own model alone'
+        assert (got['AmmoModel'], got['resource'], got['AmmoSize']) == (look.path, [look.path], look.size), name
+        contact, stock = got['AmmoSize'] * got['AmmoHitSizeAdjust'], was['AmmoSize'] * was['AmmoHitSizeAdjust']
+        assert abs(contact - stock) < 1e-9, f'{name}: contact sphere {contact}, the template {stock}'
+    # The stock weapon on the holder a stock vehicle's stores hang beside: another model than theirs.
+    rows = {stem: mss.stock_rows(game, stem) for stem in mss.LOADOUTS}
+    for request in mss.requests(game):
+        entry, stem = mss._brought(dsgo.parse(game.read('WEAPON', request)))
+        stock = mss._request_list(entry, rows[stem], request)
+        for like in {m.like for m in mss.LOADOUTS[stem]}:
+            w = stock.items[like]
+            path = str(w.items[0] if isinstance(w, dsgo.Node) else w)
+            try:
+                own = dsgo.to_py(dsgo.parse(game.read('WEAPON', path.split('/')[-1])).root).get('AmmoModel')
+            except (KeyError, ValueError):
+                own = None   # no stock file of that name, or not a DSGO weapon: no round model to tell apart
+            mine = [vc.Look(m, 1.0).path.lower() for m in beside.get((stem, like), [])]
+            assert not isinstance(own, str) or own.lower() not in mine, (request, like, own)
+    with patched(vc, STORE_MODELS={**vc.STORE_MODELS, 'bullet_rpg': 1.2}):
+        try:
+            vc.jet_guns(game)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('_look took a model of another length than STORE_MODELS says')
 
 
 @test
@@ -1273,6 +1353,43 @@ def every_npc_aircraft_boardable() -> None:
     for key in ('PlayerJetAll', 'PlayerJetHailKey'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
 
+@test
+def boardable_seats_take_every_class() -> None:
+    """Every aircraft the player boards (src/playerjet_kinds.h kBoardable) takes every class into its seat, whatever SGO
+    brings it (the user, 2026-10-07: the carrier an NPC called took Rangers and Air Raiders only): pylib/vcobjects.py
+    BOARDABLE_MARKS is kBoardable's bodies' marks (src/jet_internal.h kBodies), every parked or requested twin is one of
+    them; with the game, seat 0 of every NPC and twin SGO jet_sgo makes, and of the bombers and the gunship make_jets makes
+    from the strike jet, is PLAYER_SEAT_POSE / PLAYER_SEAT_CLASSES (15) exactly when its mark is one of them, the 506's own
+    seat (506_HELI_DRIVER / 9) otherwise. The player jets' are tested by their own builds (always every class)."""
+    import sgo
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    marks = {body: float(mark) for body, mark in
+             re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
+    boardable = set(re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h')))
+    assert len(boardable) >= 13 and boardable <= set(marks), sorted(boardable - set(marks))
+    assert {marks[b] for b in boardable} == vc.BOARDABLE_MARKS, sorted({marks[b] for b in boardable} ^ vc.BOARDABLE_MARKS)
+    assert vc.PLAYER_SEAT_CLASSES == 15, 'R 1 | WD 2 | F 4 | AR 8'
+    for name, jet in vc.JETS.items():
+        assert not (jet.parked or jet.requested) or jet.mark in vc.BOARDABLE_MARKS, f'{name}: a twin the player cannot board'
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+
+    def seat(data: bytes) -> tuple[str, int]:
+        s = sgo.read(data)[1]['vehicle_riding_position'][0]
+        return s[3], s[4]
+
+    every = (vc.PLAYER_SEAT_POSE, vc.PLAYER_SEAT_CLASSES)
+    for name, jet in vc.JETS.items():
+        if not jet.player:
+            want = every if jet.mark in vc.BOARDABLE_MARKS else ('506_HELI_DRIVER', 9)
+            assert seat(vc.jet_sgo(game, name, make_jets.MODEL)) == want, name
+    for name in make_jets.BOMBERS:
+        assert seat(make_jets.bomber_sgo(game, name)) == every, name
+    gunship = make_jets.with_mark(make_jets.bomber_sgo(game, 'EDF6VC_BOMBER401.SGO'), make_jets.GUNSHIP_MARK)
+    assert seat(gunship) == every and make_jets.GUNSHIP_MARK in vc.BOARDABLE_MARKS, 'the gunship'
+
 
 @test
 def every_boardable_aircraft_requested() -> None:
@@ -2002,6 +2119,54 @@ def vehicle_sound_wired() -> None:
     check = src('tools/vsound_check.cpp')
     assert '#include "../src/jetaudio.cpp"' in check and '#include "../src/vehmix.h"' in check
     assert '#include "vsynth.h"' in audio and '#include "vehmix.h"' in code and 'vsound_check' in readme
+
+
+@test
+def vehicle_gun_calibres_wired() -> None:
+    """The vehicle guns heard by calibre (src/vehmix.h ProfileOf / kProfiles, src/vehsound.cpp; the user, 2026-10-07:
+    "closer to the real thing, by calibre and round: the loading, the shot, the case landing"; docs/sound-re.md §9.5): the
+    weapon's facts are read from the fields the doc gives (FireBurstCount +0x370, AmmoDamage +0x89C, AmmoExplosion +0x8B0,
+    ShellCase's factory +0x4E0, the shot count sent +0x1544 and fired +0xBD0) at signature-checked stores; the rail gun is
+    told apart by its round's class, not its HUD label; a weapon with a physical case of its own gets no case sound of
+    ours, and a case's sound is the profile's; every report, round, case and step clip is one jetaudio.cpp makes; the
+    howitzer's own case lands with the stock game's biggest case's sound (tools/make_artillery.py CASE_SE, not the rifle
+    case's it inherited), checked against the built SGO when the game is there; the offline check runs the calibres."""
+    import rootcpk
+    code, mix, doc, check, rounds = (src('src/vehsound.cpp'), src('src/vehmix.h'), src('docs/sound-re.md'), src('tools/vsound_check.cpp'),
+                                     src('src/rounds.cpp'))
+    assert 'kFireBurst=0x370,kWeaponDamage=0x89C,kWeaponBlast=0x8B0,kCaseFactory=0x4E0,kWeaponShots=0x1544,kWeaponFired=0xBD0' in code
+    sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
+    for rva in ('0x68CE85', '0x68D6EC', '0x68D82F', '0x68DC6D', '0x68DCA2', '0x690540', '0x690505', '0x690586', '0x6947AD'):
+        assert '{' + rva + ',' in sigs, f'src/vehsound.cpp kSigs: {rva}'
+        assert rva in doc, f'docs/sound-re.md: {rva}'
+    for field in ('+0x370', '+0x89C', '+0x8B0', '+0x4E0', '+0x1544', '+0xBD0'):
+        assert field in doc, f'docs/sound-re.md: {field}'
+    assert '".?AVFactory@SolidBullet01Rail@@"' in code and '.?AVFactory@SolidBullet01Rail@@' in rounds and 'm.rtti=c ? c->rtti' in rounds
+    case_of = code.split('void CaseOf(', 1)[1].split('\n}', 1)[0]
+    assert 'g.stockCase' in case_of and 'pf.casing.clip' in case_of, 'CaseOf: no case of ours over a physical one'
+    rapid = code.split('void Rapid(', 1)[1].split('\n}', 1)[0]
+    assert '!g.stockCase' in rapid and 'pf.casing.clip' in rapid, 'Rapid: the brass loop not over a physical case'
+    assert 'g.stockCase=At<const void*>(w,kCaseFactory)!=nullptr' in code
+    assert 'vmix::RemoteShot(g->shots,sent,At<std::int32_t>(w,kWeaponFired))' in code
+    # Every clip the table names is a Clip of jetaudio.h; the calibres the doc lists are the enum's.
+    clips = set(re.findall(r'\b(kClip\w+)\b', src('src/jetaudio.h').split('enum Clip : int {', 1)[1].split('}', 1)[0]))
+    table = mix.split('constexpr Profile kProfiles[', 1)[1].split('};', 1)[0]
+    assert set(re.findall(r'audio::(kClip\w+)', table)) <= clips
+    bores = re.search(r'enum class Bore : int \{([^}]*)\}', mix).group(1)
+    names = [b.strip() for b in bores.split(',') if b.strip() and b.strip() != 'count']
+    assert len(re.findall(r'^    \{Bore::(\w+),', table, re.M)) == len(names), 'kProfiles: one row a calibre'
+    assert re.findall(r'^    \{Bore::(\w+),', table, re.M) == names, 'kProfiles: rows in the enum\'s order'
+    for name in ('Calibres();', 'CalibreScenario(out);', 'scenario_calibres.wav'):
+        assert name in check, f'tools/vsound_check.cpp: {name}'
+    # The howitzer's case: the big case's landing sound, the rifle case's refused as the expected stock one.
+    assert make_artillery.CASE_SE[1] == 'weapon_Common_shell_huge' and make_artillery.STOCK_CASE_SE[1] == 'weapon_Common_shell_srifle'
+    assert make_artillery.same_se([0.0, 'x', 0.2000000029802, 0.8, 1.0, 5.0], [0.0, 'x', 0.2, 0.8, 1.0, 5.0])
+    assert not make_artillery.same_se([0.0, 'y', 0.2, 0.8, 1.0, 5.0], [0.0, 'x', 0.2, 0.8, 1.0, 5.0])
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        game = vc.Game(rootcpk.DEFAULT_GAME)
+        for stock in make_artillery.STOCK_GUNS:
+            g = dsgo.to_py(dsgo.parse(make_artillery.howitzer_sgo(game, stock)).root)
+            assert make_artillery.same_se(g['ShellCase'][2], make_artillery.CASE_SE), (stock, g['ShellCase'])
 
 
 @test
@@ -3103,8 +3268,10 @@ def obj_meshes_split_below_65536() -> None:
               VElem(12, 32, 0, 'TEXCOORD'), VElem(1, 40, 0, 'BLENDWEIGHT'), VElem(21, 56, 0, 'BLENDINDICES')]
     template = Mesh(bytes(4), 0, 0, 60, layout, 0, b'', b'')
     cube = _cube_part()
-    big = om.merge([om.Part('c', 'm', [om.Vertex(om.add(v.pos, (k * 2.0, 0.0, 0.0)), v.normal, v.uv) for v in cube.verts],
-                            cube.tris) for k in range(2800)])           # 67200 vertices
+    # 67200 vertices, the cubes 2 m apart in a block (in a row they reach 5.6 km, where half floats step 4 m: the far
+    # ones drawn as points, which build_meshes leaves out)
+    big = om.merge([om.Part('c', 'm', [om.Vertex(om.add(v.pos, (k % 14 * 2.0, k // 14 % 14 * 2.0, k // 196 * 2.0)), v.normal, v.uv)
+                                       for v in cube.verts], cube.tris) for k in range(2800)])
     meshes = om.build_meshes(template, [(big, om.rigid(big, 3))], material=2)
     assert len(meshes) == 2 and all(me.nverts < 0x10000 and me.material == 2 for me in meshes)
     assert sum(len(me.indices) // 6 for me in meshes) == len(big.tris)
@@ -3113,6 +3280,114 @@ def obj_meshes_split_below_65536() -> None:
     for n, t, b in zip(read_elem(me, 'NORMAL'), read_elem(me, 'TANGENT'), read_elem(me, 'BINORMAL')):
         assert abs(om.dot(n[:3], t[:3])) < 2e-3 and abs(om.dot(n[:3], b[:3])) < 2e-3, (n, t, b)
     assert max(st.unpack(f'<{len(me.indices) // 2}H', me.indices)) < me.nverts
+
+
+@test
+def obj_meshes_skip_what_draws_nothing() -> None:
+    """obj_model.build_meshes leaves out only triangles that draw nothing: one with two corners at one point (no area),
+    and one whose packed vertices repeat a written one's (any rotation: the same winding); the same triangle wound the
+    other way stays. Every written vertex is byte for byte what it was (its tangent frame still over every triangle of
+    its piece), and the written triangles cover every point the drawn input did (the silhouette is the same)."""
+    import struct as st
+    import obj_model as om
+    from mdb import Mesh, VElem
+    from mdb_jet import pack_vertex
+    layout = [VElem(7, 0, 0, 'BINORMAL'), VElem(7, 8, 0, 'TANGENT'), VElem(7, 16, 0, 'NORMAL'), VElem(7, 24, 0, 'POSITION'),
+              VElem(12, 32, 0, 'TEXCOORD'), VElem(1, 40, 0, 'BLENDWEIGHT'), VElem(21, 56, 0, 'BLENDINDICES')]
+    template = Mesh(bytes(4), 0, 0, 60, layout, 0, b'', b'')
+    cube = _cube_part()
+    verts = list(cube.verts)
+    a0 = verts[0]
+    verts.append(om.Vertex(a0.pos, a0.normal, (0.3, 0.7)))                  # 24: at vertex 0's point, another uv
+    verts += [om.Vertex(v.pos, v.normal, v.uv) for v in cube.verts[4:8]]   # 25..28: copies of face 1's 4..7
+    clean = list(cube.tris)
+    extra = [(0, 24, 1),          # no area: two corners at one point
+             (1, 2, 0),           # (0, 1, 2) again, rotated
+             (25, 26, 27), (25, 27, 28),   # face 1 again, from copied vertices
+             (2, 1, 0)]           # (0, 1, 2) wound the other way: the back face, kept
+    part = om.Part('cube', 'm', verts, clean + extra)
+    skins = om.rigid(part, 3)
+    (me,) = om.build_meshes(template, [(part, skins)], material=0)
+    frames = om.tangent_frames(part)
+    rows = [pack_vertex(layout, 60, om._row(layout, v, f, s)) for v, f, s in zip(verts, frames, skins)]
+    out = [me.vdata[k * 60:(k + 1) * 60] for k in range(me.nverts)]
+    tris = [tuple(out[i] for i in t) for t in st.iter_unpack('<3H', me.indices)]
+
+    def canon(r: tuple) -> tuple:
+        return min(r, r[1:] + r[:1], r[2:] + r[:2])
+    want = [canon(tuple(rows[i] for i in t)) for t in clean + [(2, 1, 0)]]
+    assert sorted(canon(t) for t in tris) == sorted(want), f'{len(tris)} triangles written, want {len(want)}'
+    assert set(out) <= set(rows), 'a written vertex is not what its piece makes of it'
+    drawn = {verts[i].pos for t in part.tris for i in t if len({verts[j].pos for j in t}) == 3}
+    pos = {st.unpack_from('<3e', r, 24) for r in out}
+    assert pos == {tuple(st.unpack('<3e', st.pack('<3e', *p))) for p in drawn}, 'the silhouette changed'
+
+
+@test
+def procmesh_poles_leave_no_empty_triangles() -> None:
+    """procmesh.grid writes no triangle with two corners at one point (an ellipsoid's poles), and the smooth normals and
+    tangents it gives (frames) are bit for bit those of the grid with them: they had no area to add."""
+    import numpy as np
+    import procmesh as pm
+    part = pm.Part(0)
+    pm.ellipsoid(part, (0.0, 0.0, 0.0), (1.0, 0.6, 2.0), [(0, 1.0)], rings=6, segs=8)
+    pos = np.array(part.pos)
+    for t in part.tris:
+        assert len({tuple(pos[i]) for i in t}) == 3, f'empty triangle {t}'
+    full = []
+    rows = [list(range(k * 8, k * 8 + 8)) for k in range(7)]
+    for a, b in zip(rows, rows[1:]):
+        for i in range(8):
+            j = (i + 1) % 8
+            full += [(a[i], b[i], b[j]), (a[i], b[j], a[j])]
+    assert len(full) - len(part.tris) == 2 * 8, (len(full), len(part.tris))   # a ring of each pole's
+    assert {i for t in part.tris for i in t} == set(range(len(pos))), 'a vertex lost its triangles'
+    for x, y in zip(pm.frames(pos, np.array(full)), pm.frames(pos, np.array(part.tris))):
+        assert np.array_equal(x, y)
+
+
+@test
+def prune_members_keeps_what_the_model_uses() -> None:
+    """graft_pure.prune_members takes out the other models and the textures (HD and .lod) only they name, and nothing a
+    kept model's texture table names; everything else keeps its order."""
+    import graft_pure as g
+    from mdb import Mdb, Rab, RabFile, Texture, mdb_write
+
+    def model(tex: list[str]) -> bytes:
+        return mdb_write(Mdb(0x20, ['mdl'], [], [], [], [Texture(k, f'{t}_DDS', t, 0) for k, t in enumerate(tex)]))
+    files = [RabFile('a.lod.DDS', 0, 0, b'1'), RabFile('b.lod.dds', 0, 0, b'2'), RabFile('c.lod.DDS', 0, 0, b'3'),
+             RabFile('keep.mdb', 1, 0, model(['a.DDS', 'c.DDS'])), RabFile('keep-lod1.mdb', 1, 0, model(['a.DDS', 'b.dds'])),
+             RabFile('debris.mdb', 1, 0, model(['b.dds'])), RabFile('a.DDS', 2, 1, b'4'), RabFile('b.dds', 2, 1, b'5'),
+             RabFile('c.DDS', 2, 1, b'6'), RabFile('other.bin', 2, 0, b'7')]
+    rab = Rab(0x110, ['TEXTURE', 'MODEL', 'HD-TEXTURE'], list(files))
+    gone = g.prune_members(rab, ['KEEP.mdb'])
+    assert gone == ['b.lod.dds', 'keep-lod1.mdb', 'debris.mdb', 'b.dds'], gone
+    assert [f.name for f in rab.files] == ['a.lod.DDS', 'c.lod.DDS', 'keep.mdb', 'a.DDS', 'c.DDS', 'other.bin']
+
+
+@test
+def skid_tubes_face_out_and_rails_rest_level() -> None:
+    """pylib/jet_skids.py's tubes: every triangle wound along its corners' normals (the skids are lit from outside), the
+    ring normals unit length across the tube, a rail's level stretch has a vertex straight under its axis over its whole
+    length (its contact line is exact) and its turned-up ends rise half the upturn radius (a 60 deg arc)."""
+    import math
+    import jet_skids as js
+    spec = js.SPECS['pd607']
+    shape = js.Shape([], [])
+    path = js.rail_path(spec, 0.4, 0.0)
+    js.tube(shape, path, spec.rail_r)
+    js.tube(shape, [(0.4, 0.0, 0.3), (0.33, 0.35, 0.3)], spec.strut_r)
+    for a, b, c in shape.tris:
+        pa, pb, pc = (shape.verts[i][0] for i in (a, b, c))
+        n = tuple(sum(shape.verts[i][1][k] for i in (a, b, c)) for k in range(3))
+        assert js._dot(js._cross(js._sub(pb, pa), js._sub(pc, pa)), n) > 0, (a, b, c)  # type: ignore[arg-type]
+    for _p, n, t in shape.verts:
+        assert abs(math.sqrt(js._dot(n, n)) - 1.0) < 1e-9 and abs(js._dot(n, t)) < 1e-9
+    low = min(p[1] for p, _n, _t in shape.verts)
+    assert abs(low + spec.rail_r) < 1e-6, low      # its level stretch's end rings lean a hair toward the arcs
+    flat = [p for p, _n, _t in shape.verts if abs(p[1] - low) < 1e-12]
+    assert min(p[2] for p in flat) <= spec.rail_z[0] + 1e-9 and max(p[2] for p in flat) >= spec.rail_z[1] - 1e-9
+    assert all(abs(e[1] - spec.upturn / 2) < 1e-9 for e in (path[0], path[-1])), (path[0], path[-1])
 
 
 @test

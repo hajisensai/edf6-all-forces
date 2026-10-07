@@ -1817,6 +1817,23 @@ bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     return false;
 }
 
+bool PlayerJetHailHint(const float* from,float* at,float* distance,bool* coming) noexcept {
+    if(!flyOk || !Cfg().enabled || !Cfg().playerJet || !Cfg().playerJetAll || !Cfg().playerJetHailKey)return false;
+    __try {
+        for(const auto& j:jets)
+            if(j.vehicle && j.hail.phase!=kHailNone && Live(j)) {
+                const float* p=reinterpret_cast<const float*>(j.vehicle+kPosition);
+                std::memcpy(at,p,12);*distance=vec::Dist(p,from);*coming=true;
+                return true;
+            }
+        float d=0.0f;
+        const jet::Jet* const e=HailChoice(from,nullptr,&d);
+        if(!e)return false;
+        std::memcpy(at,e->Vehicle()+kPosition,12);*distance=d;*coming=false;
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool PlayerJetBoardable(const void* vehicle) noexcept {
     __try { return BoardableNow(static_cast<const unsigned char*>(vehicle)); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}

@@ -39,13 +39,20 @@ bool Running() noexcept;   // Start succeeded (Beat keeps it going)
 // gatling's burst loops and a burst's tail, an autocannon's round, the cases raining and one landing; a launch. The
 // Sazabi's (sazabi_sound.cpp): its beams' shots and hits, its blade lit, put out, swung and biting, its chest cannon's
 // shot, its funnels leaving, firing and docking, its footfalls, landing and dash; its thrusters', blade's and cannon's
-// charge's loops (its missiles launch with kClipMissile).
+// charge's loops (its missiles launch with kClipMissile). Then each calibre's own (vehmix.h kProfiles): a 75-105 mm
+// gun's, a 155 mm howitzer's and a super-heavy gun's reports near and far (the 120 mm tank gun's are gun_near / gun_far),
+// a rail gun's discharge near and far, its capacitors charging and its ready click; a 40 mm grenade launcher's thump, a
+// rocket off its rail and the next one latched on; the cases landing (a medium gun's brass, a tank gun's stub base, a
+// grenade's aluminium); the separate loading's breech opening, shell rammed, charge module and primer.
 enum Clip : int { kClipHeavyIdle, kClipHeavyLoad, kClipLightIdle, kClipLightLoad, kClipTracks, kClipTurret, kClipTurretStop,
                   kClipGunNear, kClipGunFar, kClipEject, kClipLoad, kClipClose, kClipBikeIdle, kClipBikeLoad, kClipMg, kClipGatling,
                   kClipBurstTail, kClipAutocannon, kClipBrass, kClipCaseSmall, kClipMissile, kClipSzBeamShot, kClipSzBeamHit,
                   kClipSzSaberOn, kClipSzSaberOff, kClipSzWhoosh, kClipSzSaberHit, kClipSzCannonShot, kClipSzFunnelLaunch,
                   kClipSzFunnelShot, kClipSzFunnelDock, kClipSzFootstep, kClipSzLand, kClipSzDash, kClipSzThrusters,
-                  kClipSzSaberHum, kClipSzCharge, kClipCount };
+                  kClipSzSaberHum, kClipSzCharge, kClipGunMediumNear, kClipGunMediumFar, kClipHowitzerNear, kClipHowitzerFar,
+                  kClipGunHeavyNear, kClipGunHeavyFar, kClipRailShot, kClipRailFar, kClipRailCharge, kClipRailReady,
+                  kClipGrenadeShot, kClipRocketRail, kClipRocketLoad, kClipCaseMedium, kClipCaseStub, kClipCaseGrenade,
+                  kClipBreechOpen, kClipShellRam, kClipCharge, kClipPrimer, kClipCount };
 // The Sazabi's one-shots' clips in sazabi_sound.h SzSfx's order (its missiles the vehicles' launch), its loops' in SzLoop's.
 constexpr int kSazabiSfxClip[]={kClipSzBeamShot,kClipSzBeamHit,kClipSzSaberOn,kClipSzSaberOff,kClipSzWhoosh,kClipSzSaberHit,
                                 kClipSzCannonShot,kClipSzFunnelLaunch,kClipSzFunnelShot,kClipSzFunnelDock,kClipMissile,kClipSzFootstep,

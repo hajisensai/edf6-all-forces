@@ -309,6 +309,8 @@ HUDTEXT(areaAhead,L"AREA EDGE AHEAD: TURN BACK",L"前方边界：请返航",L"�
 HUDTEXT(warnArea,L"AREA EDGE",L"区域边界",L"區域邊界",L"エリア境界")
 HUDTEXT(boardingEntry,L"BOARDING ENTRANCE  %d m",L"登乘入口  %d m",L"登乘入口  %d m",L"搭乗口  %d m")
 HUDTEXT(boardingReady,L"BOARD AT THIS ENTRANCE",L"在此按上车键",L"在此按上車鍵",L"ここで搭乗ボタン")
+HUDTEXT(boardingHail,L"[%ls] CALL IT DOWN  %d m",L"[%ls] 呼叫降落  %d m",L"[%ls] 呼叫降落  %d m",L"[%ls] 着陸要請  %d m")
+HUDTEXT(boardingHailing,L"CALLED: LANDING  %d m",L"已呼叫：正在降落  %d m",L"已呼叫：正在降落  %d m",L"要請済み：着陸中  %d m")
 
 // Contextual aircraft weapon controls (physical bindings supplied by the flight / payload readout).
 HUDTEXT(controlUnbound,L"unbound",L"未绑定",L"未綁定",L"未割当")
