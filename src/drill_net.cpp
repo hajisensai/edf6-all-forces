@@ -22,11 +22,13 @@ struct Stream {
     Stream() { Fn<void*(__fastcall*)(void*,int)>(kConstruct)(bytes,0x40); }
     ~Stream() { Fn<void(__fastcall*)(void*)>(kDestroy)(bytes); }
 };
-// A live seat-0 rider, else its last rider, exactly the weak references 630F90 uses to select the authority.
-// No rider means the host fallback. Never ask the reference manager to create an id for an empty weak pointer.
-bool LiveWeak(const unsigned char* weak) noexcept {
+// The most recent REGISTERED driver identifies the control epoch. A host-only NPC dummy must never get a wire id:
+// its peers have no matching object. Skip it and use the last registered rider on every copy, else the -1 epoch.
+bool RegisteredWeak(const unsigned char* weak) noexcept {
     const auto c=At<const unsigned char*>(weak,8);
-    return At<const void*>(weak,0) && c && Readable(c,16) && At<long>(c,8)>0;
+    const auto rider=At<const unsigned char*>(weak,0);
+    return rider && c && Readable(c,16) && At<long>(c,8)>0 && Readable(rider,0x12A) &&
+        (At<std::uint16_t>(rider,0x128)&3)!=0;
 }
 bool Peek(void* reader,drill_net::State& out,bool& valid) {
     std::int64_t mark=0;
@@ -70,8 +72,8 @@ std::int32_t DrillNetController(unsigned char* v) noexcept {
     const unsigned char* seat=SeatAt(v,0);
     if(!seat)return -1;
     const unsigned char* weak=seat+kSeatRider;
-    if(!LiveWeak(weak))weak=seat+0x300;
-    if(!LiveWeak(weak))return -1;
+    if(!RegisteredWeak(weak))weak=seat+0x300;
+    if(!RegisteredWeak(weak))return -1;
     // 785050 takes weak_ptr BY VALUE: its epilogue (78511A..133) releases the argument's weak count. Passing the
     // seat's resident pair would consume its reference on every snapshot. Copy/addref exactly as its callers do.
     void* copy[2]={At<void*>(weak,0),At<void*>(weak,8)};

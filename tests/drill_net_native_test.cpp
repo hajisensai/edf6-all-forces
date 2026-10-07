@@ -102,5 +102,34 @@ int main(int argc,char** argv) {
     alignas(16) unsigned char badReader[0x600]{};Reader(bad.bytes,badReader);
     const int before=received;Receive(vehicle+0x120,badReader);
     Check(received==before,"truncated drill payload is consumed without replay");
+    // Run the REAL reference function with a world having no registry: its early path still destroys the incoming
+    // by-value weak pointer. No game entry point, mission, peer or allocator is needed for that path.
+    const unsigned char releaseWeak[]={0x49,0x8B,0x4E,0x08,0x48,0x85,0xC9,0x74,0x10,0xF0,0x0F,0xC1,0x79,0x0C,
+        0x83,0xFF,0x01,0x75,0x06,0x48,0x8B,0x01,0xFF,0x50,0x08};
+    Check(Matches(0x78511A,releaseWeak,sizeof(releaseWeak)),"native ReferenceId consumes the incoming weak reference");
+    alignas(16) unsigned char world[0xE0]{};
+    void* originalWorld=At<void*>(image,0x20B2AC0);Put<void*>(image,0x20B2AC0,world+0x98);
+    alignas(16) unsigned char seat[0x340]{},control[16]{};
+    Put<void*>(vehicle,kSeats,seat);Put<std::uint64_t>(vehicle,kSeatCount,1);
+    Put<void*>(seat,kSeatRider,vehicle);Put<void*>(seat,kSeatRider+8,control);
+    Put<LONG>(control,8,1);Put<LONG>(control,0xC,2);
+    std::int32_t noIdentity=0;
+    Fn<std::int32_t*(__fastcall*)(std::int32_t*,const void*)>(kReference)(&noIdentity,seat+kSeatRider);
+    Check(noIdentity==-1 && At<LONG>(control,0xC)==1,"negative control: native callee consumes an unowned resident weak");
+    Put<LONG>(control,0xC,2);
+    Check(DrillNetController(vehicle)==-1 && At<LONG>(control,0xC)==2,
+          "native current driver lookup consumes only an incremented temporary weak reference");
+    Put<void*>(seat,kSeatRider,nullptr);Put<void*>(seat,0x300,vehicle);Put<void*>(seat,0x308,control);
+    Check(DrillNetController(vehicle)==-1 && At<LONG>(control,0xC)==2,
+          "native last driver lookup preserves the seat's resident weak reference");
+    alignas(16) unsigned char dummy[0x130]{},dummyControl[16]{};
+    Put<LONG>(dummyControl,8,1);Put<LONG>(dummyControl,0xC,2);
+    Put<void*>(seat,kSeatRider,dummy);Put<void*>(seat,kSeatRider+8,dummyControl);
+    Check(!RegisteredWeak(seat+kSeatRider) && RegisteredWeak(seat+0x300),"unregistered host NPC does not become a wire driver identity");
+    Check(DrillNetController(vehicle)==-1 && At<LONG>(dummyControl,0xC)==2 && At<LONG>(control,0xC)==2,
+          "NPC takeover looks up only the previous registered driver and preserves both resident weak references");
+    Put<LONG>(control,8,0);
+    Check(DrillNetController(vehicle)==-1 && At<LONG>(control,0xC)==2,"expired last driver uses host fallback without a reference call");
+    Put<void*>(image,0x20B2AC0,originalWorld);
     std::printf("drill_net_native_test: %d checks passed\n",checks);
 }

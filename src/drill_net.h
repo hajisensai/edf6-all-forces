@@ -47,7 +47,8 @@ inline bool Decode(const void* data,std::size_t size,State& out) noexcept {
 // a driver change; a delayed packet from the previous driver cannot undo the new driver's launch or catch.
 struct Gate {
     struct Seen { std::uint64_t sender=0;std::uint32_t sequence=0; };
-    Seen seen[16]{};
+    static constexpr std::size_t kMaxSenders=1024; // the coop room's supported peer capacity
+    Seen seen[kMaxSenders]{};
     bool Admit(const State& s,bool session,bool authority,std::int32_t controller) noexcept {
         if(!session || authority || s.controller!=controller || !Valid(s))return false;
         Seen* empty=nullptr;

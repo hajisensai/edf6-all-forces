@@ -53,6 +53,14 @@ int main() {
     Check(wrap.Admit(launch,true,false,42),"sequence before wrap");
     launch.sequence=1;Check(wrap.Admit(launch,true,false,42),"sequence wrap skips zero");
     launch.sequence=0xFFFFFFFEu;Check(!wrap.Admit(launch,true,false,42),"old sequence across wrap");
+    Gate fullRoom;
+    launch.sequence=1;
+    for(std::uint64_t peer=1;peer<=Gate::kMaxSenders;++peer) {
+        launch.sender=peer;
+        Check(fullRoom.Admit(launch,true,false,42),"all 1024 supported peers can become driver");
+    }
+    launch.sender=17;Check(!fullRoom.Admit(launch,true,false,42),"17th driver's watermark survives full-room turnover");
+    launch.sequence=2;Check(fullRoom.Admit(launch,true,false,42),"17th driver can return after full-room turnover");
     Check(!Replicated(false,2) && !Replicated(true,0) && Replicated(true,1) && Replicated(true,2),
           "offline and unregistered objects keep their local simulation");
     const crew::online::Facts authority{true,true,true,2,true,false,0,1};
