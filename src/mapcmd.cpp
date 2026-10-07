@@ -114,18 +114,19 @@ bool Give(const Entry& e,const Command& c) noexcept {
     return false;
 }
 
-// The ground point along the ray from `eye` along unit `dir`: the map ray's hit, else the level plane at `level`.
+// The ground point along the ray from `eye` along unit `dir`: the first floor the map ray meets (a cave's roof seen from
+// above passed through: map_floor.h), else the level plane at `level`.
 bool GroundAlong(const float* eye,const float* dir,float level,float* point) noexcept {
     const float end[3]={eye[0]+dir[0]*kPointFar,eye[1]+dir[1]*kPointFar,eye[2]+dir[2]*kPointFar};
     float hit[3];
-    if(MapRay(eye,end,hit)>=0.0f && std::isfinite(hit[0]+hit[1]+hit[2])){std::memcpy(point,hit,12);return true;}
+    if(MapFloorRay(eye,end,hit)>=0.0f && std::isfinite(hit[0]+hit[1]+hit[2])){std::memcpy(point,hit,12);return true;}
     return mapcmd::RayLevel(eye,dir,level,point);
 }
-// The ground's height under (x, z), else `fallback`.
-float GroundAt(float x,float z,float fallback) noexcept {
-    const float top[3]={x,fallback+2000.0f,z},bottom[3]={x,fallback-2000.0f,z};
-    float hit[3];
-    return MapRay(top,bottom,hit)>=0.0f && std::isfinite(hit[1]) ? hit[1] : fallback;
+// The ground under (x, z) on the level of height `y` a unit can stand on (a formation slot round a guard point in a
+// cave: its floor, not the roof over it nor a level above; over a building: its roof, not the ground inside it), else `y`.
+float GroundAt(float x,float z,float y) noexcept {
+    float h;
+    return MapGroundNear(x,z,y,&h,true) ? h : y;
 }
 
 Keys ReadKeys(const MapCmdInput& in) noexcept {
