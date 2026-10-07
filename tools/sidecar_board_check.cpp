@@ -20,6 +20,7 @@ bool doorReadable=true;
 float doorReach=2.3f;
 int warps=0,failures=0;
 float floorAt=exitground::kNoFloor;   // MapGroundNear's floor (kNoFloor: none)
+float lowerFloor=exitground::kNoFloor;
 void __fastcall WarpRec(void* ctrl,const float* matrix) {
     auto h=static_cast<unsigned char*>(ctrl)-kHumanCtrl;
     std::memcpy(h+kPosition,matrix+12,12);
@@ -115,6 +116,12 @@ bool MapGroundNear(float,float,float,float* h,bool) noexcept {
     if(floorAt==exitground::kNoFloor)return false;
     *h=floorAt;return true;
 }
+float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
+    float y=exitground::kNoFloor;
+    for(float h:{floorAt,lowerFloor})if(h<=a[1] && h>=b[1] && h>y)y=h;
+    if(y==exitground::kNoFloor)return -1.0f;
+    hit[0]=a[0];hit[1]=y;hit[2]=a[2];return a[1]-y;
+}
 bool SidecarLevelHooked() noexcept { return false; }
 bool bulletHooked=true;   // the bullets' hook (jet_hooks.cpp InstallBulletPass) is in
 bool SidecarBulletHooked() noexcept { return bulletHooked; }
@@ -174,6 +181,11 @@ int main() {
                floor>0.0f ? "a step-off point 0.8 m in the floor puts them on it" : "a step-off point over the floor is kept");
         floorAt=exitground::kNoFloor;human[kHumanBoard]=0;MoveIntent(human);
     }
+    // A low overhead bridge must not pull a legal step-off through its deck.
+    Reset();HumanAt(kGunnerX,0.0f,kGunnerZ);SidecarBoard(bike,human);MoveIntent(human);
+    floorAt=2.0f;lowerFloor=0.0f;human[kHumanBoard]=1;MoveIntent(human);
+    Expect(!sidecars[0].gunner && At<float>(human,kPosition+4)<0.5f,"a sidecar exit below a bridge is not raised onto its deck");
+    floorAt=lowerFloor=exitground::kNoFloor;human[kHumanBoard]=0;MoveIntent(human);
     // Both split-screen players can press at once; one releasing must not clear the other's guard.
     Reset();Take(sidecars[0],bike,human,true);Take(sidecars[1],second,otherHuman,true);
     human[kHumanBoard]=1;otherHuman[kHumanBoard]=1;

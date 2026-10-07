@@ -159,6 +159,11 @@ void Validate(Config& n) noexcept {
     Fix("SazabiMouseTurn",n.sazabiMouseTurn,0.05f,10.0f);
     Fix("SazabiThrusterSec",n.sazabiThrusterSec,0.5f,120.0f);
     Fix("SazabiThrusterRegen",n.sazabiThrusterRegen,0.0f,5.0f);
+    Fix("SazabiAssistCone",n.sazabiAssistCone,0.5f,30.0f);
+    Fix("SazabiAssistRange",n.sazabiAssistRange,50.0f,800.0f);
+    Fix("SazabiAssistPull",n.sazabiAssistPull,0.0f,20.0f);
+    n.sazabiLockKey=static_cast<int>(FixInt("SazabiLockKey",n.sazabiLockKey,0,254));
+    n.sazabiLockButton=static_cast<int>(FixInt("SazabiLockButton",n.sazabiLockButton,0,255));
     n.sazabiDashKey=static_cast<int>(FixInt("SazabiDashKey",n.sazabiDashKey,0,254));
     n.sazabiDescendKey=static_cast<int>(FixInt("SazabiDescendKey",n.sazabiDescendKey,0,254));
     n.sazabiSwitchKey=static_cast<int>(FixInt("SazabiSwitchKey",n.sazabiSwitchKey,0,254));
@@ -423,6 +428,13 @@ void LoadConfig() noexcept {
     n.sazabiThrusterSec=ReadFloat(L"SazabiThrusterSec",n.sazabiThrusterSec);
     n.sazabiThrusterRegen=ReadFloat(L"SazabiThrusterRegen",n.sazabiThrusterRegen);
     n.sazabiInvertAim=ReadBool(L"SazabiInvertAim",n.sazabiInvertAim);
+    n.sazabiAimAssist=ReadBool(L"SazabiAimAssist",n.sazabiAimAssist);
+    n.sazabiAssistCone=ReadFloat(L"SazabiAssistCone",n.sazabiAssistCone);
+    n.sazabiAssistRange=ReadFloat(L"SazabiAssistRange",n.sazabiAssistRange);
+    n.sazabiAssistPull=ReadFloat(L"SazabiAssistPull",n.sazabiAssistPull);
+    n.sazabiAssistMousePull=ReadBool(L"SazabiAssistMousePull",n.sazabiAssistMousePull);
+    n.sazabiLockKey=ReadInt(L"SazabiLockKey",static_cast<DWORD>(n.sazabiLockKey));
+    n.sazabiLockButton=ReadInt(L"SazabiLockButton",static_cast<DWORD>(n.sazabiLockButton));
     n.sazabiDashKey=ReadInt(L"SazabiDashKey",static_cast<DWORD>(n.sazabiDashKey));
     n.sazabiDescendKey=ReadInt(L"SazabiDescendKey",static_cast<DWORD>(n.sazabiDescendKey));
     n.sazabiSwitchKey=ReadInt(L"SazabiSwitchKey",static_cast<DWORD>(n.sazabiSwitchKey));
@@ -461,6 +473,7 @@ void LoadConfig() noexcept {
     n.vehicleMgVolume=ReadFloat(L"VehicleMgVolume",n.vehicleMgVolume);
     n.vehicleMissileVolume=ReadFloat(L"VehicleMissileVolume",n.vehicleMissileVolume);
     n.bigWorld=ReadFloat(L"BigWorld",n.bigWorld);
+    n.terrainShare=ReadBool(L"TerrainShare",n.terrainShare);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
@@ -633,6 +646,8 @@ void LoadConfig() noexcept {
         n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiSwitchKey,
         n.sazabiSwitchButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
         n.sazabiAxeDamage,n.sazabiCannonDamage,n.sazabiFunnelDamage,n.sazabiTestBoard);
+    Log("CONFIG sazabi assist=%d cone=%.1f range=%.0f pull=%.1f mousePull=%d lock=0x%X/0x%X",n.sazabiAimAssist,n.sazabiAssistCone,
+        n.sazabiAssistRange,n.sazabiAssistPull,n.sazabiAssistMousePull,n.sazabiLockKey,n.sazabiLockButton);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
         n.playerJet,n.playerJetInvertPitch,n.playerJetRamDamage,n.playerJetBoostKey,n.playerJetBrakeKey,n.playerJetSwitchKey,n.playerJetMouseSpeed,
         n.playerRotorLift,n.jetSound,n.jetSoundVolume);
@@ -904,6 +919,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();
+    InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());

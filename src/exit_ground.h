@@ -9,7 +9,8 @@
 // the upward ray then takes the floor's underside and puts the rider a further metre under it, and they fall through.
 // The sidecar's step-off (sidecar.cpp StepOff) had no ray at all.
 //
-// The missing step: the floor nearest the soldier's own height (heli.cpp MapGroundNear), and the soldier lifted onto it
+// First preserve any floor below the exit point: a nearer floor above may be a bridge or a ceiling. Only with no
+// floor below, use the floor nearest the soldier's own height (heli.cpp MapGroundNear), and lift onto it
 // when they are more than kSunk and no more than kMostLift under it (deeper is another floor: the deck of a bridge the
 // vehicle stood under, a roof; a get-off point is no more than a few metres off its vehicle's bottom).
 // Pure arithmetic (no game state): the decision is LiftOnto; crew.cpp ExitGroundTick and sidecar.cpp StepOff find the
@@ -29,6 +30,18 @@ constexpr bool LiftOnto(float y,float floor,float* to) noexcept {
     if(floor==kNoFloor || !(y<floor-kSunk) || floor-y>kMostLift)return false;
     *to=floor+kLift;
     return true;
+}
+
+// A nearer surface overhead is not evidence of penetration. Query from the feet down before accepting an upward
+// correction. This intentionally leaves ambiguous multi-level penetration to the native movement code rather than
+// teleporting a legal exit through a ceiling. `ray` is MapFloorRay and `findNear` is MapGroundNear.
+template<class Ray,class Near>
+bool Correct(const float* at,Ray ray,Near findNear,float* to) noexcept {
+    const float below[3]={at[0],at[1]-4000.0f,at[2]};
+    float hit[3];
+    if(ray(at,below,hit)>=0.0f)return false;
+    float floor=kNoFloor;
+    return findNear(at[0],at[2],at[1],&floor,false) && LiftOnto(at[1],floor,to);
 }
 static_assert([] { float t=0.0f; return !LiftOnto(10.0f,10.1f,&t) && !LiftOnto(10.0f,kNoFloor,&t); }(),
               "a few cm into the slope, or no floor: left where they are");

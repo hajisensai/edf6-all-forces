@@ -29,9 +29,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace crew {
 namespace {
+void ResetGunnerInputs() noexcept;
 // --- The human (docs/npc-ai-design.md §3.1) ---
 constexpr std::size_t kMoveX=0xD50,kMoveY=0xD54,kMoveZ=0xD58,kMoveW=0xD5C;   // the move stick, local (x, 0, z, 1)
 constexpr std::size_t kLookPitch=0xD60,kLookYaw=0xD64;                       // the look's change this frame (rad)
@@ -1053,6 +1055,7 @@ bool InstallNpcAi() noexcept {
 }
 
 void ResetNpcAi() noexcept {
+    ResetGunnerInputs();
     for(auto& s:soldiers)s=Soldier{};
     for(auto& q:squads)q=Squad{};
     cooldowns=npc::Cooldowns<kMaxSquads>{};
@@ -1687,17 +1690,50 @@ void GunnerVisit(void* ctx,const void* object,const float* aim) {
 }
 }  // namespace
 
-bool AiGunner(const unsigned char* seat) noexcept {
-    if(!Cfg().enabled || !Cfg().npcGunners || InSession())return false;
+namespace {
+// Only inputs written by this module are reclaimed, including switch-off and authority transfer. Human seats
+// and a new rider at a reused address are never cleared. No-target frames cannot retain the NPC's last trigger.
+struct GunnerWrite { ObjRef vehicle,rider; unsigned seat; float values[3]; };
+std::vector<GunnerWrite> gunnerWrites;
+constexpr std::size_t kGunnerInputs[3]={0x2D0,0x2D4,0x2E4};
+void ResetGunnerInputs() noexcept { gunnerWrites.clear(); }
+void ReleaseGunnerInputs(unsigned char* v) noexcept {
+    for(auto it=gunnerWrites.begin();it!=gunnerWrites.end();) {
+        if(!Readable(it->vehicle.obj,kSelfCtrl+8) || !it->vehicle.Is(it->vehicle.obj)){it=gunnerWrites.erase(it);continue;}
+        if(it->vehicle.obj!=v){++it;continue;}
+        unsigned char* seat=it->seat<SeatCount(v) ? SeatAt(v,it->seat) : nullptr;
+        if(seat && !AnyPlayerIn(seat) && Readable(it->rider.obj,kSelfCtrl+8) && it->rider.Is(At<const void*>(seat,kSeatRider)))
+            for(int k=0;k<3;++k)if(At<float>(seat,kGunnerInputs[k])==it->values[k])Put<float>(seat,kGunnerInputs[k],0.0f);
+        it=gunnerWrites.erase(it);
+    }
+}
+void RememberGunnerInputs(unsigned char* v,unsigned index,const unsigned char* seat) {
+    GunnerWrite write{ObjRef::Of(v),ObjRef::Of(At<const void*>(seat,kSeatRider)),index,{}};
+    bool any=false;
+    for(int k=0;k<3;++k){write.values[k]=At<float>(seat,kGunnerInputs[k]);any=any || write.values[k]!=0.0f;}
+    if(any)gunnerWrites.push_back(write);
+}
+} // namespace
+
+bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept {
+    if(!Cfg().enabled || !Cfg().npcGunners || !seat)return false;
     const Rider who=SeatRider(seat);
-    if(who==Rider::dummy)return true;   // RideAi's rider, moved here by a bump or a seat swap: it never writes the seat
+    if(who==Rider::dummy) {
+        if(!InSession())return true;
+        // A registered vehicle's Dummy exists on the host only. Never pick the driver machine instead:
+        // native shots carry the NPC's firing event to every vehicle copy, including a remote driver's.
+        if(!Readable(vehicle,0x12A))return false;
+        if(online::LocalCopy(At<std::uint16_t>(vehicle,0x128)))return IsOnlineAuthority(vehicle);
+        return OnlineHostOnly();
+    }
     if(who!=Rider::other || !Cfg().customNpcAi || !Cfg().npcBoarding)return false;
     const auto rider=At<const unsigned char*>(seat,kSeatRider);
     return IsSoldierClass(rider) && !IsAnyPlayer(rider) && IsOnlineAuthority(rider);
 }
 
 void NpcGunnersInput(unsigned char* v) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().npcGunners || InSession() || v[kDead])return;
+    ReleaseGunnerInputs(v);
+    if(!ok || !Cfg().enabled || !Cfg().npcGunners || v[kDead])return;
     static int sig=0;
     if(!sig)sig=Matches(kSeatFire,kSeatFireSig,sizeof(kSeatFireSig)) ? 1 : -1;
     if(sig<0)return;
@@ -1705,7 +1741,8 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     if(!Readable(vt,(kSlotSeatFire+1)*8) || vt[kSlotSeatFire]!=image+kSeatFire)return;
     for(unsigned i=1;i<SeatCount(v);++i) {
         unsigned char* const seat=SeatAt(v,i);
-        if(!AiGunner(seat))continue;
+        if(!AiGunner(v,seat))continue;
+        for(const auto offset:kGunnerInputs)Put<float>(seat,offset,0.0f);
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(!n || n>8 || !Readable(holders,n*8))continue;
@@ -1720,7 +1757,10 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         const Enemy* const m=world.frame==GameFrame() ? MarkedEnemy() : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach)p.best=m->object;
         else VisitEnemies(v,&GunnerVisit,&p);
-        if(p.best)reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
+        if(p.best) {
+            reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
+            RememberGunnerInputs(v,i,seat);
+        }
     }
 }
 

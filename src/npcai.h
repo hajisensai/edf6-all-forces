@@ -51,7 +51,7 @@ void ResetNpcPosts() noexcept;   // a new mission
 bool NpcDrivable(const unsigned char* vehicle) noexcept;
 // The AI riders in a CarBase vehicle's gunner seats aim and fire (§7): each vehicle's input, before the stock input.
 void NpcGunnersInput(unsigned char* vehicle) noexcept;
-// The seat's rider is an AI that should work its gun (NpcGunners, offline): RideAi's DummyVehicleRider, or a local
-// soldier (CustomNpcAi and NpcBoarding on). Used by the ground gunners and the 410's door guns under a player pilot.
-bool AiGunner(const unsigned char* seat) noexcept;
+// NPC gun input belongs to the local NPC's machine, not necessarily the vehicle driver's. Registered-vehicle
+// Dummies run on the host; unregistered copies use their recorded owner. All human seats are excluded.
+bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept;
 }  // namespace crew

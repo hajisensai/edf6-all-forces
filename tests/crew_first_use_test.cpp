@@ -2,6 +2,7 @@
 #include "../src/crew.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 namespace crew {
 unsigned char* image=nullptr;PlayerFix player{};
 // Offline (online_authority.h): an NPC rider may be seated, through the vehicle's own RideAi (the fixture's vtable).
@@ -19,6 +20,7 @@ bool testJet=false;
 float testDoor[3]={30.3f,0.0f,1.8f};
 bool testHail=false,testComing=false;float testHailAt[3]={500.0f,150.0f,0.0f};   // PlayerJetHailHint
 float testFloor=exitground::kNoFloor,warpedTo[3]{};int warpCount=0;   // ExitGroundTick's world
+float testLower=exitground::kNoFloor;
 void Check(bool value,const char* why){++checks;if(!value){++failures;std::printf("FAIL %s\n",why);}}
 void __fastcall Ride(void*,bool){++calls;}
 void Time(unsigned ms){clock.game=3600000+ms;clock.wall=GetTickCount64();player.at=clock.game;}
@@ -56,6 +58,12 @@ bool PlayerJetHailHint(const float*,float* at,float* distance,bool* coming) noex
     if(!testHail)return false;
     std::memcpy(at,testHailAt,12);*distance=520.0f;*coming=testComing;return true;}
 bool MapGroundNear(float,float,float,float* h,bool) noexcept{if(testFloor==exitground::kNoFloor)return false;*h=testFloor;return true;}
+float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
+    float y=exitground::kNoFloor;
+    for(float h:{testFloor,testLower})if(h<=a[1] && h>=b[1] && h>y)y=h;
+    if(y==exitground::kNoFloor)return -1.0f;
+    hit[0]=a[0];hit[1]=y;hit[2]=a[2];return a[1]-y;
+}
 bool WarpHuman(unsigned char* h,const float* p) noexcept{std::memcpy(warpedTo,p,12);std::memcpy(h+kPosition,p,12);++warpCount;return true;}
 void NpcPostInput(unsigned char*) noexcept{}
 void NpcGunnersInput(unsigned char*) noexcept{}
@@ -168,6 +176,33 @@ int main(){
     Check(exitCase(0.0f,0.05f,0,true)==0,"feet a few cm in a slope are left standing");
     Check(exitCase(-1.0f,0.0f,0,false)==0,"no ride, no exit: a soldier walking is not touched");
     Check(exitCase(-12.0f,0.0f,0,true)==0,"a floor 12 m over them (a deck, a roof) is not theirs");
+    testLower=0.0f;
+    Check(exitCase(3.5f,6.0f,0,true)==0,"a legal bridge-under exit remains below the nearer deck");
+    Check(exitCase(6.5f,6.0f,0,true)==0,"an exit above a bridge stays above it");
+    testLower=exitground::kNoFloor;
+    {
+        Setup();testFloor=0.0f;warpCount=0;
+        Put<void*>(testHuman,kHumanVehicleCtrl,testCtrl);ExitGroundTick();
+        ResetCrew(); // the next mission may reuse the exact same Human allocation
+        Put<void*>(testHuman,kHumanVehicleCtrl,nullptr);Put<float>(testHuman,kPosition+4,-1.0f);ExitGroundTick();
+        Check(warpCount==0,"a mission reset cancels the old ride even when the Human address is reused");
+        testFloor=exitground::kNoFloor;
+    }
+    {
+        Setup();testFloor=0.0f;warpCount=0;
+        Put<void*>(testHuman,kHumanVehicleCtrl,testCtrl);ExitGroundTick();
+        testHuman[kDead]=1;ExitGroundTick();testHuman[kDead]=0;
+        Put<void*>(testHuman,kHumanVehicleCtrl,nullptr);Put<float>(testHuman,kPosition+4,-1.0f);ExitGroundTick();
+        Check(warpCount==0,"revival cannot inherit a pre-death exit watch");
+        testFloor=exitground::kNoFloor;
+    }
+    {
+        Setup();testFloor=0.0f;warpCount=0;
+        Put<void*>(testHuman,kHumanVehicleCtrl,testCtrl);ExitGroundTick();testConfig.enabled=false;
+        Put<void*>(testHuman,kHumanVehicleCtrl,nullptr);Put<float>(testHuman,kPosition+4,-1.0f);ExitGroundTick();
+        Check(warpCount==0,"disabling the plugin cancels the exit correction");
+        testFloor=exitground::kNoFloor;
+    }
     {   // in the floor only after the watch: not touched
         Setup();testFloor=0.0f;warpCount=0;
         Put<void*>(testHuman,kHumanVehicleCtrl,testCtrl);ExitGroundTick();

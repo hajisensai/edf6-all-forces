@@ -12,6 +12,8 @@ Config config{};
 ULONGLONG now=1000,frame=1;
 bool sessionOn=false,host=true,door=true;
 bool wall=false;
+const void* gunnerEnemy=nullptr;
+online::CopyOwner vehicleCopyOwner=online::kCopyHost;
 float doorAt[3]{},doorReach=3.0f;
 unsigned char human[0x2200]{},dead[0x2200]{},other[0x2200]{},vehicle[0x3000]{},seats[edf::kSeatStride*2]{};
 unsigned char head[0x18]{},node[0x18]{},ctrl[0x10]{};
@@ -78,6 +80,7 @@ void Reset() {
     Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,2);Put<void*>(vehicle,kSelfCtrl,ctrl);Put<int>(ctrl,8,1);
     Put<unsigned>(human,kHumanMask,1);Put<unsigned>(seats+edf::kSeatStride,kSeatClass,1);Put<unsigned>(seats+edf::kSeatStride,kSeatEnable,1);
     doorAt[0]=doorAt[1]=doorAt[2]=0;doorReach=3.0f;
+    gunnerEnemy=nullptr;vehicleCopyOwner=online::kCopyHost;
     ok=followOk=rideOk=true;world.frame=frame;config.npcSquadSuccession=true;
 }
 }
@@ -90,7 +93,7 @@ bool InSession() noexcept { return sessionOn; }
 bool OnlineHostOnly() noexcept { return !sessionOn || host; }
 // The real rules (online_authority.h) on the stand-in objects' flags: a soldier, no vehicle facts.
 bool IsOnlineAuthority(const void* o) noexcept {
-    return online::Authority(online::Facts{sessionOn,true,host,At<std::uint16_t>(o,0x128),false,false,online::kCopyHost,0});
+    return online::Authority(online::Facts{sessionOn,true,host,At<std::uint16_t>(o,0x128),false,false,o==vehicle ? vehicleCopyOwner : online::kCopyHost,0});
 }
 bool OnlineMaySeatNpc(const void*) noexcept { return !sessionOn || host; }
 unsigned char* PlayerHuman() noexcept { return playerObj; }
@@ -105,7 +108,10 @@ bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
     if(!door)return false;std::memcpy(at,doorAt,12);*reach=doorReach;return true;
 }
 bool VisitEnemiesOf(std::int32_t,EnemyVisitor,void*) noexcept { return true; }
-bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return true; }
+bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
+    if(gunnerEnemy){const float aim[3]={0,0,20};visit(ctx,gunnerEnemy,aim);}
+    return true;
+}
 }
 int main() {
     using namespace crew;

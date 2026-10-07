@@ -28,10 +28,13 @@
 #include "map.h"
 #include "memory.h"
 #include "sazabi_arms.h"
+#include "sazabi_assist.h"
 #include "sazabi_flames.h"
 #include "sazabi_flight.h"
 #include "sazabi_pose.h"
 #include "sazabi_sound.h"
+#include "sazabi_net.h"
+#include "online_authority.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -62,6 +65,15 @@ constexpr float kAirBlendRate=4.0f,kCrouchDecay=2.2f,kAimRate=3.0f;
 constexpr ULONGLONG kLogMs=1000;
 constexpr ULONGLONG kTestBoardMs=6000;   // SazabiTestBoard: this long after it is first seen (the player has landed)
 
+struct NetState {
+    sazabi_net::Gate gate;
+    sazabi_net::State state;
+    ULONGLONG sentAt=0,receivedAt=0,shotAt[6]{},soundAt[4]{};
+    std::uint32_t soundSerial=0,shotSeen[6]{},soundSeen[4]{};
+    std::uint64_t source=0;
+    bool networked=false,remote=false,dirty=false;
+};
+
 struct Mech {
     ObjRef ref;
     unsigned char* vehicle=nullptr;
@@ -76,14 +88,15 @@ struct Mech {
     unsigned char* rec[sazabi::kBoneCount]{};
     sazabi::Rig rig{};
     sazabi::PoseInput pose{};
+    sazabi::Pose posed{};             // this mech's last pose, also used before its next pose is composed
     exhaust::BodyTrack track{};         // the body's matrix last frame and now (sz_root's world carried: RootFrame)
     float root[16]{},rootInv[16]{};     // sz_root's world this frame, and its inverse
     bool rootOk=false;
     Arms arms{};
+    NetState net{};
 };
 constexpr int kMaxMechs=8;
 Mech mechs[kMaxMechs]{};
-sazabi::Pose scratch;   // game thread only
 bool installed=false;
 bool testBoarded=false;   // SazabiTestBoard: once a mission
 ULONGLONG firstSeenMs=0;
@@ -97,10 +110,11 @@ Mech* Find(const unsigned char* v) noexcept {
     for(auto& m:mechs)if(m.vehicle==v && m.ref.Is(v))return &m;
     return nullptr;
 }
+void DropLocalAim(Arms& a) noexcept;
 Mech* Make(unsigned char* v) noexcept {
     for(auto& m:mechs) {
         if(m.vehicle && Live(m))continue;
-        m=Mech{};m.ref=ObjRef::Of(v);m.vehicle=v;
+        DropLocalAim(m.arms);m=Mech{};m.ref=ObjRef::Of(v);m.vehicle=v;
         return &m;
     }
     static const void* refused=nullptr;
@@ -192,10 +206,10 @@ bool Rig(Mech& m,unsigned char* v) noexcept {
 
 void Pose(Mech& m,unsigned char* v) noexcept {
     if(!Rig(m,v))return;
-    sazabi::Animate(m.pose,m.rig,&scratch);
+    sazabi::Animate(m.pose,m.rig,&m.posed);
     for(int i=1;i<sazabi::kBoneCount;++i) {   // sz_root itself is the frame: its local (under body) stays the bind's
         float local[16];
-        sazabi::LocalMatrix(scratch,i,local);
+        sazabi::LocalMatrix(m.posed,i,local);
         std::memcpy(m.rec[i]+kBoneLocal506,local,sizeof local);
     }
 }
@@ -212,6 +226,7 @@ float FeetClear(const Mech& m) noexcept {
 #include "sazabi_arms.inc"
 #include "sazabi_pilot.inc"
 #include "sazabi_camera.inc"
+#include "sazabi_net.inc"
 
 // ------------------------------------------------------------------------------------------ driving
 void Board(Mech& m,unsigned char* v,bool npc) noexcept {
@@ -301,6 +316,7 @@ void Report(Mech& m,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
 void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dt=Measure(m,pos,ms);
+    if(NetworkFrame(m,v,ms))return; // before player keys, NPC targeting, flight integration and every damage producer
     m.feetClear=FeetClear(m);
     // who drives it: the player in seat 0, or an NPC crew.cpp seated (sazabi_pilot.inc); a change of driver boards anew
     const Rider rider=SeatCount(v)>0 ? SeatRider(SeatAt(v,0)) : Rider::none;
@@ -311,6 +327,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
         Animate(m,dt,false);
         ArmsPose(m,dt);
         Pose(m,v);
+        SendNetwork(m,v,ms);
         return;
     }
     if(!m.driven)Board(m,v,npc);
@@ -318,12 +335,13 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Controls c{};
     ArmsInput arms{};
     if(npc){Pilot(m,v,dt,&c,&arms);v[kFireGun]=0;v[kFireMissile]=0;}   // the 506 fires nothing of its own
-    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));}
+    else{c=Read(SeatAt(v,0),dt);arms=TakeButtons(v,SeatAt(v,0));LockInput(m,v,c,dt);}   // locked, the stick is the lock's
     m.yawRate=c.turn;
     m.heading+=c.turn*dt;
     if(m.heading>sazabi::kPi)m.heading-=2.0f*sazabi::kPi;
     if(m.heading<-sazabi::kPi)m.heading+=2.0f*sazabi::kPi;
     m.aimPitch=Clamp(m.aimPitch+c.pitch,-kAimMost,kAimMost);
+    if(!npc)Assist(m,v,dt);     // the lock-on's enemy or the aim assist's, the camera pulled onto it (sazabi_camera.inc)
     Fly(m,v,c,dt);
     const float nose[3]={std::sin(m.heading),0.0f,std::cos(m.heading)},up[3]={0.0f,1.0f,0.0f};
     BodyAttitude(v,nose,up,kAttitudeGain,kAttitudeMost,m.omega);
@@ -343,6 +361,7 @@ void Drive(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
     Footsteps(m);
     if(!npc)PublishCue(m);
     Report(m,v,c,ms);
+    SendNetwork(m,v,ms);
 }
 // SazabiTestBoard (tests only): kTestBoardMs after the first Sazabi is seen, the player on foot is put into it once.
 void TestBoard(const Mech& m,unsigned char* v) noexcept {
@@ -408,8 +427,9 @@ void SazabiFrame(unsigned char* v) noexcept {
 // The 506 physics step (body506.cpp), after the stock one: the walk's or the flight's velocity, the spin upright.
 bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     if(!Cfg().enabled || !Cfg().sazabi)return false;
+    if(drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v))return false;
     const Mech* m=Find(v);
-    if(!m || !m->active || !m->driven || v[kDead] || m->frame+1<GameFrame() || !At<void*>(v,kBody))return false;
+    if(!m || m->net.remote || !m->active || !m->driven || v[kDead] || m->frame+1<GameFrame() || !At<void*>(v,kBody))return false;
     for(int i=0;i<3;++i){lin[i]=m->fl.vel[i];ang[i]=m->omega[i];}
     return true;
 }
@@ -423,28 +443,39 @@ bool SazabiMessage(unsigned char* v,std::uint32_t msg,void* data,MessageRestore*
     constexpr std::size_t kHitPoint=0x30,kDamage=0x50;
     if(msg!=kMsgDamage || !data || v[kDead])return false;
     const Mech* m=Find(v);
-    if(!m || !m->driven || m->arms.guard<0.5f)return false;
+    if(!m || !m->driven || m->arms.guard<0.5f || (m->net.remote && !RemoteFresh(*m,v,GameMs())))return false;
+    if(!m->net.remote && drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v))return false;
     const float* hit=reinterpret_cast<const float*>(static_cast<unsigned char*>(data)+kHitPoint);
     const float* p=reinterpret_cast<const float*>(v+kPosition);
     if((hit[0]-p[0])*std::sin(m->heading)+(hit[2]-p[2])*std::cos(m->heading)<=0.0f)return false;   // from behind
     float* const damage=reinterpret_cast<float*>(static_cast<unsigned char*>(data)+kDamage);
     if(!(*damage>0.0f))return false;
     restore->at=damage;restore->was=*damage;
-    *damage*=Cfg().sazabiGuardShare;
+    *damage*=m->net.remote ? m->net.state.arms.guardShare : Cfg().sazabiGuardShare;
     return false;
 }
 
 bool InstallSazabi() noexcept {
     installed=Body506Ok();
     Log("HOOK sazabi body=%d (mark %.0f)",installed,kSazabiMark);
+    if(installed)InstallSazabiNet();
     return installed;
 }
 
 void ResetSazabi() noexcept {
-    for(auto& m:mechs)m=Mech{};
+    for(auto& m:mechs){DropLocalAim(m.arms);m=Mech{};}
     DropView();
     cueMs=0;
     testBoarded=false;
     firstSeenMs=0;
+}
+
+void SazabiNetReceived(unsigned char* v,const sazabi_net::State& state) noexcept {
+    if(!installed || !Cfg().enabled || !Cfg().sazabi || !IsSazabi(v) || v[kDead] ||
+       !drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))return;
+    Mech* m=Find(v);
+    if(!m && (m=Make(v))==nullptr)return;
+    if(!m->net.gate.Admit(state,true,IsOnlineAuthority(v),SazabiNetController(v)))return;
+    AcceptNetwork(*m,v,state,GameMs());
 }
 }  // namespace crew

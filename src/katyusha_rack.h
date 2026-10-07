@@ -5,11 +5,11 @@
 //    muzzle k (MUZZLES, at its tail). The weapon fires muzzle n % count for its n-th round since its full load (fire-start
 //    0x690C84 and the burst step 0x6940EA: AmmoCount - rounds left -> slot 16 0x6B3640: % the muzzle count): a salvo of
 //    16 (tools/make_katyusha.py ROCKETS) takes rocket 0, 1, .. 15 off in that order.
-//  - The salvo: the first round sets the burst's rounds still to come, FireBurstCount - 1 (0x690C75, weapon +0xE18), each
-//    further one takes one off (0x6940DF): the rockets fired so far are FireBurstCount - that. (Each round also takes one
+//  - The salvo: (AmmoCount - rounds left) % 16 is the number of fired rails. Each round takes one
 //    off the rounds left, 0x69820E, while weapon +0xBE4 is set: the weapon base's constructor sets it, 0x68E8A9, only
 //    another weapon class's clears it, 0x6AA657; so an NPC crew's launcher counts its rounds too and its salvos take the
-//    rockets in the same order.)
+//    rockets in the same order. Network replay 0x692540 -> 0x696FD0 reaches this same decrement, but never writes
+//    burstLeft (+0xE18). Using burstLeft would therefore start loading the entire rack on every remote shot.
 //  - The loading: after a salvo's last round the weapon waits FireInterval (+0x36C) frames (+0xE0C counts it down,
 //    0x6981E0 / 0x693A58) before the next: the rack is loaded over the first kLoadedBy of that wait, rocket 0 first, each
 //    one put on at its rail's back end and pushed kLoad forward onto its stop (every rocket on its stop before the next
@@ -26,8 +26,7 @@ constexpr float kLoadedBy=0.9f;     // the share of the wait (or the reload) the
 // What the weapon's state says (weapon offsets in src/katyusha.cpp).
 struct Launcher {
     int rounds;         // +0xBE8 rounds left of AmmoCount
-    int burst;          // +0x370 FireBurstCount
-    int burstLeft;      // +0xE18 rounds of this burst still to come
+    int capacity;       // +0x248 AmmoCount; the native muzzle selection uses capacity - rounds
     float wait;         // +0xE0C frames until it may fire again
     int interval;       // +0x36C FireInterval (frames)
     int reloadTime;     // +0x20C ReloadTime (frames; < 0 none)
@@ -44,10 +43,10 @@ inline void Rockets(const Launcher& w,float* on) noexcept {
     if(w.rounds<=0) {
         const bool reload=w.reloadTime>0 && w.reloadLeft>=0 && w.reloadLeft<=w.reloadTime;
         loaded=reload ? (1.0f-static_cast<float>(w.reloadLeft)/static_cast<float>(w.reloadTime))/kLoadedBy*kRockets : 0.0f;
-    } else if(w.burstLeft>0 && w.burst>w.burstLeft) {
-        fired=w.burst-w.burstLeft;
-    } else if(w.burstLeft==0 && w.interval>0 && w.wait>0.0f) {
-        loaded=(1.0f-w.wait/static_cast<float>(w.interval))/kLoadedBy*kRockets;
+    } else if(w.capacity>=w.rounds) {
+        fired=(w.capacity-w.rounds)%kRockets;
+        if(fired==0 && w.interval>0 && w.wait>0.0f)
+            loaded=(1.0f-w.wait/static_cast<float>(w.interval))/kLoadedBy*kRockets;
     }
     if(w.rounds>0 && w.rounds<kRockets && kRockets-w.rounds>fired)fired=kRockets-w.rounds;   // fewer rounds than rockets
     for(int k=0;k<kRockets;++k)on[k]=k<fired ? 0.0f : Clamp01(loaded-static_cast<float>(k));
