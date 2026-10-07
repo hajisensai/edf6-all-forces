@@ -563,9 +563,19 @@ struct SazabiCue {
     float funnelReady;       // 0..1 to the next launch
     bool guard,swinging,air; // the shield up, the tomahawk swinging, off its feet
     bool hasAim;
-    float aim[3];            // the rifle's aim point (world): the reticle
+    float aim[3];            // the aim point (world): what the screen's centre looks at, every weapon fires at it
     bool hasLock;
     float lock[3];           // the missiles' locked target (world)
+    // The flight (sazabi_flight.h) and the special weapon, for the reticle's gauges and readouts:
+    float altitude;          // m: its soles over what is under them (0 on its feet)
+    float speed;             // m/s over the ground
+    float climb;             // m/s up (+) / down (-)
+    bool boosting;           // the thrusters burning (a boost dash, a climb)
+    bool overheat;           // the thrusters spent: no boost until it lands and they cool
+    int special;             // the secondary's weapon: 0 shield missiles, 1 funnels, 2 mega particle cannon
+    float aimRange;          // m from the muzzle to the aim point
+    bool aimHit;             // the centre's ray meets something within the reticle's reach (else the aim is its far end)
+    bool centred;            // the camera is the Sazabi's own (sazabi.cpp): the aim point is the screen's centre
 };
 constexpr ULONGLONG kSazabiCueMs=250;
 bool PlayerSazabiCue(SazabiCue* out) noexcept;
