@@ -76,6 +76,7 @@ struct Mech {
     unsigned char* rec[sazabi::kBoneCount]{};
     sazabi::Rig rig{};
     sazabi::PoseInput pose{};
+    sazabi::Pose posed{};             // this mech's last pose, also used before its next pose is composed
     exhaust::BodyTrack track{};         // the body's matrix last frame and now (sz_root's world carried: RootFrame)
     float root[16]{},rootInv[16]{};     // sz_root's world this frame, and its inverse
     bool rootOk=false;
@@ -83,7 +84,6 @@ struct Mech {
 };
 constexpr int kMaxMechs=8;
 Mech mechs[kMaxMechs]{};
-sazabi::Pose scratch;   // game thread only
 bool installed=false;
 bool testBoarded=false;   // SazabiTestBoard: once a mission
 ULONGLONG firstSeenMs=0;
@@ -192,10 +192,10 @@ bool Rig(Mech& m,unsigned char* v) noexcept {
 
 void Pose(Mech& m,unsigned char* v) noexcept {
     if(!Rig(m,v))return;
-    sazabi::Animate(m.pose,m.rig,&scratch);
+    sazabi::Animate(m.pose,m.rig,&m.posed);
     for(int i=1;i<sazabi::kBoneCount;++i) {   // sz_root itself is the frame: its local (under body) stays the bind's
         float local[16];
-        sazabi::LocalMatrix(scratch,i,local);
+        sazabi::LocalMatrix(m.posed,i,local);
         std::memcpy(m.rec[i]+kBoneLocal506,local,sizeof local);
     }
 }

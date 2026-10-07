@@ -496,3 +496,11 @@ target_compile_options(online_authority_seat_test PRIVATE /W4 /WX /utf-8 /permis
 target_link_options(online_authority_seat_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks online_authority_seat_test)
 add_test(NAME online_authority_seat COMMAND online_authority_seat_test)
+
+add_executable(sazabi_runtime_test EXCLUDE_FROM_ALL tests/sazabi_runtime_test.cpp)
+target_link_libraries(sazabi_runtime_test PRIVATE edf6common user32)
+target_include_directories(sazabi_runtime_test PRIVATE src common)
+target_compile_options(sazabi_runtime_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(sazabi_runtime_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks sazabi_runtime_test)
+add_test(NAME sazabi_runtime COMMAND sazabi_runtime_test)

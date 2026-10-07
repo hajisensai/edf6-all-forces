@@ -81,11 +81,11 @@ void DirToRoot(const Mech& m,const float* d,float* out) noexcept {
     const float l=Len(out);
     if(l>1e-5f)for(int k=0;k<3;++k)out[k]/=l;
 }
-// Bone `b`'s joint in the world as last posed (scratch), and a point `off` in its frame.
+// Bone `b`'s joint in this mech's last pose, and a point `off` in its frame.
 void BoneAt(const Mech& m,int b,const float* off,float* out) noexcept {
     float local[3]={0.0f,0.0f,0.0f};
-    if(off)sazabi::Apply(off,scratch.modelRot[b],local);
-    const float p[3]={scratch.modelPos[b][0]+local[0],scratch.modelPos[b][1]+local[1],scratch.modelPos[b][2]+local[2]};
+    if(off)sazabi::Apply(off,m.posed.modelRot[b],local);
+    const float p[3]={m.posed.modelPos[b][0]+local[0],m.posed.modelPos[b][1]+local[1],m.posed.modelPos[b][2]+local[2]};
     ToWorld(m,p,out);
 }
 // Where funnel `k` sits in its pack (its bind offset from the pack, as the pack is posed), in the world.
@@ -104,8 +104,9 @@ void SeeEnemy(void* ctx,const void* object,const float* aim) {
     const float d[3]={aim[0]-e->from[0],aim[1]-e->from[1],aim[2]-e->from[2]};
     const float d2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
     if(d2>kFunnelRange*kFunnelRange)return;
-    int at=e->n<kMostTargets ? e->n++ : kMostTargets-1;   // kept nearest first
-    if(at==kMostTargets-1 && e->n==kMostTargets && d2>=e->d2[at])return;
+    const bool full=e->n==kMostTargets;
+    int at=full ? kMostTargets-1 : e->n++;   // kept nearest first; compare only an occupied tail slot
+    if(full && d2>=e->d2[at])return;
     while(at>0 && e->d2[at-1]>d2){e->obj[at]=e->obj[at-1];e->d2[at]=e->d2[at-1];std::memcpy(e->at[at],e->at[at-1],12);--at;}
     e->obj[at]=object;e->d2[at]=d2;std::memcpy(e->at[at],aim,12);
 }
@@ -314,7 +315,7 @@ void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
         const sazabi::Nozzle& z=sazabi::kNozzles[i];
         float at[3],local[3],dir[3];
         BoneAt(m,z.bone,z.at,at);
-        sazabi::Apply(z.dir,scratch.modelRot[z.bone],local);
+        sazabi::Apply(z.dir,m.posed.modelRot[z.bone],local);
         DirToWorld(m,local,dir);
         NozzleMatrix(at,dir,mats[i]);
         sizes[i][0]=z.flame[0];sizes[i][1]=z.flame[1];
@@ -410,7 +411,7 @@ void ArmsFire(Mech& m,unsigned char* v,const ArmsInput& in,float thrust,float dt
 void Footsteps(Mech& m) noexcept {
     for(int side=0;side<2;++side) {
         const sazabi::FootPlan f=sazabi::Plan(m.pose.gait,m.pose.stride,side);
-        const bool down=f.stance && !m.fl.air && scratch.gaitW>0.3f;
+        const bool down=f.stance && !m.fl.air && m.posed.gaitW>0.3f;
         if(down && !m.arms.stance[side] && m.rootOk) {
             float at[3];
             BoneAt(m,side==0 ? sazabi::kFootL : sazabi::kFootR,nullptr,at);
