@@ -520,7 +520,8 @@ void Toward(const float* pos,const float* goal,float* out) noexcept;
 void Level(const float* pos,const float* dir,float height,float* out) noexcept;
 bool Sense(Jet& j,const float* pos,ULONGLONG ms) noexcept;
 bool NearWall(const Jet& j,const float* pos,float range,ULONGLONG ms) noexcept;
-void Guard(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept;
+// `clear`: GroundClearance(pos) this frame (the frame step has it: no second ray).
+void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcept;
 // The soft edge (airbound.h) a jet of its kind keeps inside: the play edge (crew.h PlayEdge) less its band (ini
 // AirSoftEdge / AirSoftTurns: at least that many of its full-speed turn diameters); `band` gets the band's width.
 airbound::Box JetSoftBox(const Jet& j,float* band=nullptr) noexcept;
@@ -535,7 +536,8 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
 void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const float* goal,const float* face,float speed,float climb,
            float dt,float lift=0.0f,bool npcGoal=true) noexcept;
 // A wing's step toward `want` at `speed`: the path, the body's attitude onto it, its pose (elevons).
-void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* nose,float* want,float speed,float dt,ULONGLONG ms) noexcept;
+void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,float clear,const float* nose,float* want,float speed,float dt,
+          ULONGLONG ms) noexcept;
 void Thrusters(Jet& j,const Kind& k,unsigned char* v,float dt,ULONGLONG ms) noexcept;
 void ResetWalls() noexcept;
 constexpr float kHoverClimb=12.0f;     // m/s up or down at the most

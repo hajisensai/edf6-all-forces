@@ -27,7 +27,9 @@ constexpr unsigned kOnline=0x7748F0,kIsHost=0x784210,kSeatLocal=0x630DF0,kOperat
 constexpr std::size_t kNetFlagsWord=0x128;
 constexpr std::size_t kRxPos=0x1D60,kRxBlend=0x1D70,kRxSettled=0x1D74,kRxFrames=0x1D78,kTxThrottle=0x1D80,kTxFast=0x1D90;
 constexpr ULONGLONG kLogMs=1000;
-constexpr int kWatchCount=16;
+// Room for every vehicle (it was 16: past 16 helicopters each newcomer pushed the oldest out and logged at once, so
+// the once-a-second row came every frame, about 1000 rows/s with 22 helis, 2026-10-07 CPU audit).
+constexpr int kWatchCount=256;
 
 struct Sig { unsigned rva; unsigned char bytes[16]; };
 const Sig kSigs[]={
