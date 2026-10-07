@@ -4,6 +4,7 @@ user's Sketchfab export with it).
     scene = read(path)        every mesh primitive of the default scene, its node transforms applied: positions,
                               normals (when given), triangle indices into them, and each triangle's material
     scene.materials           name, base colour (linear RGBA), emissive colour (linear RGB)
+    scene.mesh                each triangle's mesh node (tools/prep_sazabi_rifle.py picks the rifle out by it)
 
 Only what a static, untextured export uses: no skins, no animations, no sparse accessors, no textures (a material's
 texture is ignored with its factors kept), triangle primitives (mode 4) only. Anything else is an error, not a guess.
@@ -42,6 +43,7 @@ class Scene:
     material: np.ndarray         # (m,) int64 into materials
     materials: list[Material]
     extras: dict                 # asset.extras (author, licence, source)
+    mesh: np.ndarray | None = None   # (m,) int64: each triangle's mesh node, in the scene's walk order
 
 
 def node_matrix(node: dict) -> np.ndarray:
@@ -102,12 +104,13 @@ def read(path: str) -> Scene:
         rows = np.lib.stride_tricks.as_strided(raw, (a['count'], dt.itemsize * n), (stride, 1))
         return rows.copy().view(dt).reshape(a['count'], n)
 
-    pos, nrm, tri, mat = [], [], [], []
+    pos, nrm, tri, mat, node_of = [], [], [], [], []
     has_normals = True
     base = 0
+    meshes = 0
 
     def walk(i: int, parent: np.ndarray) -> None:
-        nonlocal base, has_normals
+        nonlocal base, has_normals, meshes
         node = g['nodes'][i]
         if 'skin' in node:
             raise GltfError('skinned meshes are not read')
@@ -132,7 +135,9 @@ def read(path: str) -> Scene:
                     f = f[:, ::-1]   # a mirroring transform flips the winding
                 tri.append(f + base)
                 mat.append(np.full(len(f), p.get('material', 0), dtype=np.int64))
+                node_of.append(np.full(len(f), meshes, dtype=np.int64))
                 base += len(v)
+            meshes += 1
         for c in node.get('children', []):
             walk(c, world)
 
@@ -141,4 +146,4 @@ def read(path: str) -> Scene:
     if not pos:
         raise GltfError('no meshes')
     return Scene(np.vstack(pos), np.vstack(nrm) if has_normals else None, np.vstack(tri), np.concatenate(mat),
-                 _materials(g), g.get('asset', {}).get('extras', {}))
+                 _materials(g), g.get('asset', {}).get('extras', {}), np.concatenate(node_of))

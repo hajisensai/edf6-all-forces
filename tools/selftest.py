@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import re
 import shutil
@@ -617,6 +618,34 @@ def sazabi_bones_agree() -> None:
         assert (par == '-1') == (want == 'body') and (par == '-1' or names[enum.index(par)] == want), f'{name}: parent {par}'
     assert f'{{{vc.SAZABI_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Sazabi'
     assert f'kSazabiMark={vc.SAZABI_MARK:.1f}f' in src('src/sazabi.cpp'), 'src/sazabi.cpp kSazabiMark'
+
+
+
+@test
+def sazabi_rifle_files() -> None:
+    """The model folder's rifle (tools/prep_sazabi_rifle.py, pylib/sazabi_arms.py): neither file -> the rifle of boxes and
+    RIFLE_MUZZLE; both -> the OBJ on the right hand and sz_muzzle from the JSON; one without the other -> an error."""
+    import sazabi_arms
+    at = {'sz_hand_r': (1.0, 2.0, 3.0), 'sz_forearm_l': (4.0, 15.0, 0.0), 'sz_hand_l': (4.0, 11.0, 2.0)}
+    d = tempfile.mkdtemp(prefix='edf6vc-selftest-')
+    try:
+        assert sazabi_arms.rifle_files(d) is None and sazabi_arms.muzzle(None) == sazabi_arms.RIFLE_MUZZLE
+        assert sazabi_arms.joints(at, d)['sz_muzzle'] == (1.0, 2.25, 13.6)
+        with open(os.path.join(d, sazabi_arms.RIFLE_FILE), 'w', encoding='utf-8') as h:
+            h.write('\n'.join(['o sz_rifle', 'usemtl 07___Default', 'v 0 0 0', 'v 1 0 0', 'v 0 1 0', 'vn 0 0 1',
+                               'f 1//1 2//1 3//1']) + '\n')
+        try:
+            sazabi_arms.rifle(at, d)
+            raise AssertionError('an OBJ without its JSON is no error')
+        except FileNotFoundError:
+            pass
+        with open(os.path.join(d, sazabi_arms.RIFLE_INFO), 'w', encoding='utf-8') as h:
+            json.dump({'muzzle': [0.5, -2.0, 10.0]}, h)
+        assert sazabi_arms.joints(at, d)['sz_muzzle'] == (1.5, 0.0, 13.0)
+        parts = sazabi_arms.rifle(at, d)
+        assert [p.name for p in parts] == ['sz_rifle'] and parts[0].verts[1].pos == (2.0, 2.0, 3.0), parts
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 @test

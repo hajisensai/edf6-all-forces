@@ -193,7 +193,7 @@ def skeleton(folder: str) -> list[tuple[str, int, tuple[float, float, float]]]:
         at = json.load(h)
     _req(set(at) == set(BONE_NAMES), f'{SKELETON_FILE}: bones {sorted(set(at) ^ set(BONE_NAMES))} differ from SKELETON')
     pts = {n: (float(v[0]), float(v[1]), float(v[2])) for n, v in at.items()}
-    pts.update(sazabi_arms.joints(pts))
+    pts.update(sazabi_arms.joints(pts, folder))
     return [(n, BONE_NAMES.index(p) if p else -1, pts[n]) for n, p in SKELETON]
 
 
@@ -274,7 +274,7 @@ def build_model(game, folder: str) -> tuple[Mdb, dict[str, bytes], dict]:  # noq
     light_md, light_mesh = _host(game, LIGHT_HOST)
     pieces = parts(folder, colours, uv)
     at = {n: j for n, _, j in joints}
-    for p in sazabi_arms.parts(at):
+    for p in sazabi_arms.parts(at, folder):
         _req(p.material in colours, f'sazabi_arms: material {p.material} not in the palette')
         pieces.append((replace(p, verts=[replace(v, uv=uv[p.material]) for v in p.verts]), BONE_NAMES.index(p.name)))
     md = Mdb(body_md.version, [n for n, _, _ in joints], [], [], [], [])
