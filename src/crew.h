@@ -297,6 +297,10 @@ struct Config {
                                     // there) work their guns: ground vehicles (npcai.cpp), the 410's doors under a player pilot
     int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
     float npcMarkCone=8.0f;         // ...within this many degrees of the centre
+    int npcFormation=0;             // the recruited squads' march round the player (formation.h Shape: 0 stock, 1 column...)
+    int npcFormationKey=0x54;       // ...on foot: cycles it ('T'; 0: off; the map's T on a selected squad too)
+    float npcFormationSpacing=5.0f; // ...m between soldiers
+    int npcGuardFormation=0;        // a guard order's defence (0 stock radius, 10 perimeter, 5 line, 3 wedge)
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay
     float npcFreeRange=120.0f;      // ...a squad told to engage freely: m round where it stood it goes after enemies
     float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s

@@ -4230,6 +4230,31 @@ def stock_guidance_wired() -> None:
 
 
 @test
+def npc_formation_wired() -> None:
+    """The squads' formations (src/formation.h, npcai.cpp FormationMove, docs/npc-ai-design.md §6.4): the formation move
+    only when the soldier has nothing to fight (after the evade / board / fall-back / lane moves), its ini keys read,
+    range-checked, shipped and documented, the map's T and the on-foot key wired, the HUD names every shape, and
+    formation_check runs under CTest."""
+    code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
+    readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
+    drive = code.split('Plan Drive(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
+    form = drive.index('if(!t.e && FormationMove(')
+    for before in ('Evade(s,h,c,pos,ms,&p.move)', 'Board(s,h,pos,ms)', 'FallBack(s,h,pos,served,ms)', 'npc::LaneEscape('):
+        assert drive.index(before) < form, before
+    for key, default in (('NpcFormation', '0'), ('NpcFormationKey', '84'), ('NpcFormationSpacing', '5'), ('NpcGuardFormation', '0')):
+        assert f'L"{key}"' in plugin and (f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin), key
+        assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
+        assert key in readme and key in doc, key
+    assert 'FormationTick();' in code and 'k.formation=Down(\'T\')' in src('src/mapcmd.cpp')
+    table = src('src/hudtext.inc')
+    shapes = re.findall(r'^\s*(\w+),\s*//', src('src/formation.h').split('enum class Shape', 1)[1].split('};', 1)[0], re.M)
+    assert len(shapes) == 11, shapes
+    for s in shapes:
+        assert f'HUDTEXT(form{s[0].upper()}{s[1:]},' in table, s
+    assert 'EXCLUDE_FROM_ALL tools/formation_check.cpp' in cmake and 'formation_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
+
+
+@test
 def npc_ai_wired() -> None:
     """The friendly soldiers' own AI (src/npcai.cpp, docs/npc-ai-design.md): its Think hook runs the stock Think first and
     rewrites the intent block after it (§3.2), is installed with the inputs (after every plugin) and reset per mission;

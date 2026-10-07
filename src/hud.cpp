@@ -20,6 +20,7 @@
 // is the wall clock: a snapshot older than kFreshMs (loading, mission over) is not drawn; nothing is while the game is paused.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "formation.h"
 #include "boarding_entrance.h"
 #include "gear.h"
 #include "hudscale.h"
@@ -3459,6 +3460,24 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     else Label(text,lines,at,x,y+r+12.0f*s,1,kLineScale*0.7f,kAmber,L"%ls",Tr(Tx::npcMark));
 }
 
+// The march formation just cycled (npcai.cpp; the player's key on foot or the map's T): its name and the key, a moment
+// under the screen's centre.
+// The formation's name (formation.h Shape) as the HUD says it (mapcmd.cpp's notes too).
+const wchar_t* FormationText(int shape) noexcept {
+    using hudtext::Tx;
+    static const Tx kNames[]={Tx::formStock,Tx::formColumn,Tx::formStaggered,Tx::formWedge,Tx::formVee,Tx::formLine,
+                              Tx::formEchelonLeft,Tx::formEchelonRight,Tx::formDiamond,Tx::formBounding,Tx::formPerimeter};
+    static_assert(sizeof(kNames)/sizeof(kNames[0])==static_cast<std::size_t>(npc::formation::kShapes),"a name a shape");
+    return hudtext::Tr(shape>=0 && shape<npc::formation::kShapes ? kNames[shape] : Tx::formStock);
+}
+void FormationBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    FormationCue c{};
+    if(!PlayerFormationCue(&c))return;
+    wchar_t key[24];
+    KeyName(c.key,key,_countof(key));
+    Label(text,lines,at,width*0.5f,height*0.5f+190.0f*s,1,kLineScale,kCyan,Tr(Tx::formationCue),FormationText(c.shape),key);
+}
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
     // hold where the player left them.
@@ -3565,6 +3584,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        FormationBanner(t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

@@ -286,6 +286,10 @@ void Validate(Config& n) noexcept {
     Fix("NpcSquadJoinRange",n.npcSquadJoinRange,0.0f,2000.0f);
     n.npcMarkKey=static_cast<int>(FixInt("NpcMarkKey",n.npcMarkKey,0,254));
     Fix("NpcMarkCone",n.npcMarkCone,1.0f,45.0f);
+    n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,10));
+    n.npcFormationKey=static_cast<int>(FixInt("NpcFormationKey",n.npcFormationKey,0,254));
+    Fix("NpcFormationSpacing",n.npcFormationSpacing,2.0f,30.0f);
+    n.npcGuardFormation=static_cast<int>(FixInt("NpcGuardFormation",n.npcGuardFormation,0,10));
     Fix("NpcGuardRadius",n.npcGuardRadius,2.0f,500.0f);
     Fix("NpcFreeRange",n.npcFreeRange,10.0f,2000.0f);
     Fix("NpcRecruitCooldownSec",n.npcRecruitCooldownSec,0.0f,3600.0f);
@@ -590,6 +594,10 @@ void LoadConfig() noexcept {
     n.npcGunners=ReadBool(L"NpcGunners",n.npcGunners);
     n.npcMarkKey=ReadInt(L"NpcMarkKey",static_cast<DWORD>(n.npcMarkKey));
     n.npcMarkCone=ReadFloat(L"NpcMarkCone",n.npcMarkCone);
+    n.npcFormation=ReadInt(L"NpcFormation",static_cast<DWORD>(n.npcFormation));
+    n.npcFormationKey=ReadInt(L"NpcFormationKey",static_cast<DWORD>(n.npcFormationKey));
+    n.npcFormationSpacing=ReadFloat(L"NpcFormationSpacing",n.npcFormationSpacing);
+    n.npcGuardFormation=ReadInt(L"NpcGuardFormation",static_cast<DWORD>(n.npcGuardFormation));
     n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
     n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
     n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
@@ -638,6 +646,7 @@ void LoadConfig() noexcept {
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
+    Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
     Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);

@@ -175,6 +175,9 @@ bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;re
 // The NPCs' mark (npcai.cpp): none in these scenes but the ground one (GroundScene sets sceneMark).
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
+// The squads' formation banner (npcai.cpp PlayerFormationCue): on in the npc_formation scene.
+int sceneFormation=-1;
+bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return false;o->shape=sceneFormation;o->key=0x54;return true; }
 void MapCommandView(const float*,float,float) noexcept {}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -1151,6 +1154,25 @@ int Scenes(const std::wstring& dir) {
     sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
     sceneMarkOn=true;sceneMark[0]=ground[0]+25.0f;sceneMark[1]=ground[1]+6.0f;sceneMark[2]=ground[2]+180.0f;
     Scene(dir,L"npc_mark",ground);
+    // The formation banner just after the key (the longest name: bounding overwatch) with the mark up: on the screen,
+    // apart from the mark's text, naming the shape and the key.
+    sceneFormation=static_cast<int>(npc::formation::Shape::bounding);
+    Scene(dir,L"npc_formation",ground);
+    {
+        bool named=false,apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text.find(FormationText(sceneFormation))!=std::wstring::npos && p.text.find(L"[")!=std::wstring::npos)
+                named=p.x0>=0.0f && p.x1<=1920.0f && p.y1<=1080.0f;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        failed+=!(named && apart);
+        std::printf("%s  npc_formation: the banner named %d, no text overlapping %d\n",named && apart ? "ok  " : "FAIL",named,apart);
+    }
+    sceneFormation=-1;
     sceneMarkOn=false;hasHeli=heliWas;
     std::memcpy(sceneHeli.sym.nose,noseWas,12);
     // The map view (map.cpp): a medium view on keys, a high steep one on a pad, a low shallow one.

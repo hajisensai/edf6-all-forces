@@ -7,6 +7,9 @@ unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
 bool NpcMarked() noexcept { return false; }
+int CycleGuardFormation(const void*) noexcept {return -2;}
+int CycleMarchFormation() noexcept {return 0;}
+const wchar_t* FormationText(int) noexcept {return L"";}
 float MapRay(const float*,const float*,float*) noexcept { return -1; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1; }
 bool MapGroundNear(float,float,float,float*,bool) noexcept { return false; }

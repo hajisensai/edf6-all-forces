@@ -17,7 +17,9 @@
 // Online the commands are off (InSession): the plugin's AI runs on each machine for its own copies (the call aircraft
 // have no network identity, docs/online-re.md §1-3), so an order given here would change this machine's copy alone.
 #include "crew.h"
+#include "formation.h"
 #include "hudtext.h"
+#include "npcai.h"
 #include "layout.h"
 #include "memory.h"
 #include "map_cam.h"
@@ -44,7 +46,7 @@ enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
 struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
-             engage,focus,board,dismount,dismiss,recruit,digit[9]; };
+             engage,focus,board,dismount,dismiss,recruit,formation,digit[9]; };
 
 // --- The game thread's own ---
 struct Game {
@@ -135,7 +137,7 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
         k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);
         // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
-        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');
+        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
     }
     if(in.pad) {
@@ -267,6 +269,29 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     return given;
 }
 
+
+// T (the map open): the selected squads' formation. A squad guarding a point cycles its own defence; the others
+// (the player's recruited squads following them) the march, once however many are selected.
+void Formation(Game& g,bool allowed) noexcept {
+    using hudtext::Tr;
+    using hudtext::Tx;
+    if(!allowed){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
+    int guards=0,marching=0,shape=-1,marchShape=-1;
+    for(int i=0;i<g.count;++i) {
+        const Entry& e=g.list[i];
+        if(!g.sel.Has(e.u.v) || e.owner!=Owner::squad)continue;
+        const int r=CycleGuardFormation(e.u.v);
+        if(r>=0){shape=r;++guards;}
+        else if(r==-1)++marching;
+    }
+    if(marching)marchShape=CycleMarchFormation();
+    if(!guards && !marching){Note(g,L"%ls",Tr(Tx::cmdNoUnit));return;}
+    if(marching)Note(g,Tr(Tx::cmdFormationResult),FormationText(marchShape),marching);
+    else Note(g,Tr(Tx::cmdFormationResult),FormationText(shape),guards);
+    Log("MAPCMD formation: %d guarding squad(s) %s, the march %s",guards,shape>=0 ? npc::formation::Name(static_cast<npc::formation::Shape>(shape)) : "-",
+        marchShape>=0 ? npc::formation::Name(static_cast<npc::formation::Shape>(marchShape)) : "unchanged");
+}
+
 void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool pointer) noexcept {
     // The game's memory is read before the lock is taken: a fault in a read (a unit gone between its listing and here)
     // must not leave the lock held, which would block the draw thread for good.
@@ -345,6 +370,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
                           (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
                           k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
                           k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit};
+    const bool formation=k.formation && !g.was.formation;
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
@@ -367,6 +393,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],
             g.sel.n,given,g.count);
     }
+    if(formation)Formation(g,allowed);
     RememberSelection(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(!picked)return false;

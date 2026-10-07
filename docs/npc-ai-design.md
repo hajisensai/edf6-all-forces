@@ -212,6 +212,16 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 - 所有本机自由 / 已招募单位：标记目标满足 `MarkInReach(位置, 标记, 最长武器真实射程, 指令的移动半径)` 时取它为目标；接到「集中火力」的小队无论远近都取它。实现上不改写原版目标 `h+0x1CD0`：插件的瞄准、扳机、移动已经覆盖原版输出，改写原版目标还要经过它的 weak 引用赋值函数，收益为零。
 - 标记只在本机（插件状态，§2.3）；单位的开火结果按原版复制走。
 
+### 6.4 战术编队（2026-10-08 用户：「支持战术编队，支持各种现代编队行进/战术/防御方案」）
+
+- 纯逻辑 `src/formation.h`（离线 `tools/formation_check.cpp`）：形状（`Shape`）、每人槽位（`Offset`：编队锚点右 x、前 z 米）、世界坐标（`World`，右 = 游戏相机的水平右 (-f.z, f.x)）、行进朝向（`Track`：锚点走过 2 米才更新）、交替掩护（`Step`：两半轮流，到位或 `kBoundMost` 8 秒交换）、走不到位置时放弃（`GiveUp`：`kStuckMs` 3 秒内没接近 0.5 米则让给原版跟随 `kRestMs` 6 秒）。
+- 接入 `npcai.cpp` `Drive`：在躲避、上车、后撤、躲枪线之后，**没有目标时**走 `FormationMove`；有目标时照旧去交战位置。
+- **行进**（`NpcFormation`，步行键 `NpcFormationKey` T / 地图 T）：本机玩家招募的、没有地图指令的小队合成一份名单（`MarchRoster`：按小队表顺序、每队 `Members` 广度优先，只要步行的），玩家是锚点；名单每帧重建，阵亡后后面的人补位；士兵间距 `NpcFormationSpacing`（2~30 米，默认 5）。
+- **防御**（`NpcGuardFormation`，地图里选中警戒中的小队按 T）：每个警戒小队自己一份（`Members`），锚点 = 警戒点，朝向 = 下令时玩家→ 警戒点（`SquadCommand` 记在 `Squad::guardFwd`）。
+- 地图 T：选中的小队里警戒中的各自循环防御方案（`CycleGuardFormation`），其余（跟随玩家的）只循环一次行进编队（`CycleMarchFormation`），离线 `map_command_runtime_check` `FormationKey`。
+- 不寻路：和原版之外的其他插件移动一样，直推摇杆直线走；被挡住时 `GiveUp` 把士兵交还原版跟随（原版跟随会绕路）。
+- 联机：只驱动本机权威的 NPC（同 §9）；地图指令联机不可用，步行键的行进编队只影响本机玩家招募的小队。
+
 ## 7. 上下车（B6、C3，P6）
 
 - 原版没有让士兵上车的路径（脚本 `RideVehicle` 放的是 dummy，H）。插件用人物侧 `RideVehicle 0x5765E0(Human*, shared_ptr<Vehicle>* byValue, int seat)`：它自己做下旧车、写 `+0x1540/+0x1548/+0x1550`、`SeatRide(force=0)`、切乘车状态；**结束时释放一个强引用**，调用前先把 ctrl+8 加 1（H）。前置：活着、`+0x39C == 0`、座位空；不查队伍 / 掩码 / 距离，所以插件自己查。

@@ -31,6 +31,12 @@ int SquadRows(SquadRow*,int) noexcept {return 0;}
 bool SquadCommand(const void*,const Command&) noexcept {return false;}
 bool TankCommand(const void*,const Command&) noexcept {return false;}
 bool NpcMarked() noexcept {return false;}
+// The formations (npcai.cpp): a squad at `guardLeader` guards, the others follow; the calls counted.
+const void* guardLeader=nullptr;
+int guardCalls=0,marchCalls=0;
+int CycleGuardFormation(const void* leader) noexcept { ++guardCalls;return leader==guardLeader ? 10 : -1; }
+int CycleMarchFormation() noexcept { ++marchCalls;return 3; }
+const wchar_t* FormationText(int) noexcept { return L"SHAPE"; }
 namespace {
 int failures=0,cases=0;
 void Check(bool ok,const char* what) noexcept {
@@ -113,6 +119,25 @@ void PointerAndInput() noexcept {
     MapCommandView(vp,800,600);MapCommandFrame(in,centre);
     Check(game.pointer.x==400.0f && game.pointer.y==300.0f,"reopened small viewport starts inside at centre");
 }
+// T on the map: each selected squad that guards cycles its own defence, the march once however many follow; online
+// (orders refused) nothing changes.
+void FormationKey() noexcept {
+    static int a=0,b=0,c=0,d=0;
+    Game g{};
+    g.count=4;
+    const void* who[4]={&a,&b,&c,&d};
+    for(int i=0;i<4;++i){g.list[i]=Entry{CommandUnit{who[i],"squad",Command{}},Owner::squad};}
+    g.sel.Add(&a);g.sel.Add(&b);g.sel.Add(&c);   // d not selected
+    guardLeader=&a;guardCalls=marchCalls=0;
+    Formation(g,true);
+    Check(guardCalls==3 && marchCalls==1,"T: the guard squad cycled, the march once for two following squads");
+    guardCalls=marchCalls=0;
+    Formation(g,false);
+    Check(guardCalls==0 && marchCalls==0,"T online: nothing cycled");
+    g.sel.Clear();g.sel.Add(&a);guardCalls=marchCalls=0;
+    Formation(g,true);
+    Check(guardCalls==1 && marchCalls==0,"T on a guarding squad alone: the march untouched");
+}
 void CameraIsolation() noexcept {
     maphud::Record r{};int first=0,second=0;unsigned char shown=1;
     maphud::Step(r,&first,1,true,&shown);
@@ -125,7 +150,7 @@ void CameraIsolation() noexcept {
 }  // namespace
 }  // namespace crew
 int main() {
-    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();
+    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

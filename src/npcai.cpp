@@ -21,6 +21,7 @@
 #include "crew.h"
 #include "layout.h"
 #include "memory.h"
+#include "formation.h"
 #include "npc_logic.h"
 #include "online_authority.h"
 #include "vhud.h"
@@ -106,6 +107,7 @@ struct Soldier {
     ULONGLONG boardAt;
     float fallTo[3];         // the fall-back's point (re-picked every kFallMs)
     ULONGLONG fallAt;
+    npc::formation::Progress slotWay;   // its headway to its formation slot (formation.h GiveUp)
 };
 Soldier soldiers[kMaxSoldiers]{};
 ULONGLONG fullLoggedAt=0,listLoggedAt=0;
@@ -226,6 +228,46 @@ void MarkTick() noexcept {
     ReleaseSRWLockExclusive(&markLock);
 }
 
+// --- Formations (formation.h; the user, 2026-10-08) ---
+// The march: the player's recruited squads as one formation round the player (FormationKey cycles it, the map's T
+// too); a guard: each squad told to guard its own (NpcGuardFormation, the map's T on it).
+struct March {
+    npc::formation::Shape shape;
+    bool shapeSet,held;
+    ULONGLONG changedAt;          // wall clock: the HUD's banner
+    npc::formation::Heading heading;
+    npc::formation::Bound bound;
+    ULONGLONG frame;              // the roster's frame
+    int n;
+    const void* member[32];
+    int movers,pending,moversLast,pendingLast;   // bounding: this frame's and the last frame's
+};
+March march{};
+SRWLOCK marchLock=SRWLOCK_INIT;
+
+npc::formation::Shape MarchShape() noexcept {
+    if(!march.shapeSet) {
+        const npc::formation::Shape s=npc::formation::FromInt(Cfg().npcFormation);
+        march.shape=npc::formation::MarchShape(s) ? s : npc::formation::Shape::stock;
+        march.shapeSet=true;
+    }
+    return march.shape;
+}
+void SetMarchShape(npc::formation::Shape s,const char* by) noexcept {
+    AcquireSRWLockExclusive(&marchLock);
+    march.shape=s;march.shapeSet=true;march.changedAt=GetTickCount64();
+    march.bound=npc::formation::Bound{};
+    ReleaseSRWLockExclusive(&marchLock);
+    Log("NPCAI formation: %s (%s)",npc::formation::Name(s),by);
+}
+
+void FormationTick() noexcept {
+    unsigned char* const me=PlayerHuman();
+    const bool down=Cfg().npcFormationKey>0 && me && HumanOnFoot(me) && KeyHeld(Cfg().npcFormationKey);
+    if(down && !march.held)SetMarchShape(npc::formation::Next(MarchShape(),false),"the key");
+    march.held=down;
+}
+
 void Gather(std::int32_t team) noexcept {
     World& w=world;
     w.frame=GameFrame();w.team=team;w.enemies=w.friends=0;
@@ -243,6 +285,7 @@ void Gather(std::int32_t team) noexcept {
     }
     PlayerLane(w);
     MarkTick();
+    FormationTick();
 }
 
 Soldier* Entry(const unsigned char* h,ULONGLONG ms) noexcept {
@@ -586,6 +629,8 @@ struct Squad {
     std::uint8_t autoFollow;   // +0x540 before a dismissal (put back when its cooldown ends)
     bool dismissed;
     npc::ScriptWatch script;   // the end of a script's control over it (§4.4)
+    npc::formation::Shape guardShape;   // its defence on a guard point (formation.h; the ini's NpcGuardFormation)
+    float guardFwd[2];         // the way the guard faces: from where the player gave it towards the point
 };
 Squad squads[kMaxSquads]{};
 npc::Cooldowns<kMaxSquads> cooldowns;
@@ -717,6 +762,9 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     return true;
 }
 
+bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,const unsigned char* root,ULONGLONG ms,
+                   const char** move) noexcept;
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,const Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -761,6 +809,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     if(FallBack(s,h,pos,served,ms)){p.move="fall back";return p;}
     float out[3];
     if(world.lane && npc::LaneEscape(world.laneOf,pos,out)){Move(h,out,1.0f);p.move="out of the lane";return p;}
+    if(!t.e && FormationMove(s,h,pos,q,root,ms,&p.move))return p;
     if(t.e) {
         Spot(s,pos,t.e->aim,anchor,served.at,engage,o.leash,ms);
         MoveTo(h,pos,s.spot,kSpotStop);
@@ -1067,6 +1116,70 @@ int Members(unsigned char* top,unsigned char** out,int most) noexcept {
     return n;
 }
 
+// The march's roster this frame: the player's recruited squads with no order (on foot), squad by squad.
+void MarchRoster(ULONGLONG ms) noexcept {
+    if(march.frame==GameFrame())return;
+    march.frame=GameFrame();march.n=0;
+    march.moversLast=march.movers;march.pendingLast=march.pending;march.movers=march.pending=0;
+    if(MarchShape()==npc::formation::Shape::bounding)npc::formation::Step(march.bound,march.moversLast,march.pendingLast,ms);
+    unsigned char* const me=PlayerHuman();
+    if(!me)return;
+    for(const Squad& q:squads) {
+        if(!Live(q,ms) || q.control!=npc::Control::recruited || q.cmd.order!=Order::none)continue;
+        auto top=static_cast<unsigned char*>(const_cast<void*>(q.top.obj));
+        if(RootLeader(top)!=me)continue;
+        unsigned char* m[kMaxSquad];
+        const int k=Members(top,m,kMaxSquad);
+        for(int i=0;i<k && march.n<static_cast<int>(sizeof(march.member)/sizeof(march.member[0]));++i)
+            if(HumanOnFoot(m[i]))march.member[march.n++]=m[i];
+    }
+}
+
+// Walks the soldier to its formation slot (formation.h) and holds it there; false when it has none (stock shape,
+// not in a formation, its slot given up for a while: the stock follow and the guard's radius as before).
+bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,const unsigned char* root,ULONGLONG ms,
+                   const char** move) noexcept {
+    using namespace npc::formation;
+    const float spacing=Cfg().npcFormationSpacing;
+    Shape shape=Shape::stock;
+    const float* anchor=nullptr;
+    float fwd[2]={0.0f,1.0f};
+    int k=-1,n=0;
+    bool marching=false;
+    if(q && q->cmd.order==Order::guard && q->guardShape!=Shape::stock) {
+        shape=q->guardShape;anchor=q->cmd.at;fwd[0]=q->guardFwd[0];fwd[1]=q->guardFwd[1];
+        unsigned char* m[kMaxSquad];
+        const int c=Members(static_cast<unsigned char*>(const_cast<void*>(q->top.obj)),m,kMaxSquad);
+        for(int i=0;i<c;++i){if(!HumanOnFoot(m[i]))continue;if(m[i]==h)k=n;++n;}
+    } else if(s.control==npc::Control::recruited && root && root==PlayerHuman() && (!q || q->cmd.order==Order::none) &&
+              MarchShape()!=Shape::stock && world.player) {
+        MarchRoster(ms);
+        shape=MarchShape();anchor=world.playerAt;marching=true;
+        for(int i=0;i<march.n;++i)if(march.member[i]==h)k=i;
+        n=march.n;
+        const float look[2]={world.lookOk ? world.look[0] : 0.0f,world.lookOk ? world.look[2] : 1.0f};
+        Track(march.heading,anchor,look,2.0f);
+        fwd[0]=march.heading.fwd[0];fwd[1]=march.heading.fwd[1];
+    }
+    float x,z;
+    if(!anchor || k<0 || !Offset(shape,k,n,spacing,&x,&z))return false;
+    float slot[3];
+    npc::formation::World(anchor,fwd,x,z,slot);
+    const float d=npc::Horiz(pos,slot);
+    if(marching && shape==Shape::bounding) {
+        if(TeamOf(k)!=march.bound.moving && npc::Horiz(pos,anchor)<Cfg().npcLeash) {
+            Stand(h);*move="overwatch";   // the other half covers: it holds where it is
+            return true;
+        }
+        ++march.movers;
+        if(d>kArrive)++march.pending;
+    }
+    if(GiveUp(s.slotWay,d,ms))return false;
+    MoveTo(h,pos,slot,kArrive);
+    *move=marching ? "formation" : "guard formation";
+    return true;
+}
+
 int CancelBoarding(unsigned char* top) noexcept {
     unsigned char* members[kMaxSquad];
     const int n=Members(top,members,kMaxSquad);
@@ -1147,6 +1260,33 @@ bool DismountSquad(unsigned char* top) noexcept {
 // player's (the stock SetFollow, as the stock recruit does), refused during its dismissal's cooldown; dismiss lets go a
 // recruited squad where it stands and starts the cooldown (+0x540 cleared meanwhile, or the stock would take it back at
 // once). The squads of a mission script take none (§4.3).
+int CycleGuardFormation(const void* leader) noexcept {
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return -2;
+    Squad* const q=FindSquad(leader);
+    if(!q || npc::Scripted(q->control))return -2;
+    if(q->cmd.order!=Order::guard)return -1;
+    q->guardShape=npc::formation::Next(q->guardShape,true);
+    Log("NPCAI squad %p guard formation: %s",leader,npc::formation::Name(q->guardShape));
+    return static_cast<int>(q->guardShape);
+}
+
+int CycleMarchFormation() noexcept {
+    const npc::formation::Shape s=npc::formation::Next(MarchShape(),false);
+    SetMarchShape(s,"the map");
+    return static_cast<int>(s);
+}
+
+constexpr ULONGLONG kFormationCueMs=2500;
+bool PlayerFormationCue(FormationCue* out) noexcept {
+    AcquireSRWLockShared(&marchLock);
+    const ULONGLONG at=march.changedAt;
+    const int shape=static_cast<int>(march.shape);
+    ReleaseSRWLockShared(&marchLock);
+    if(!at || GetTickCount64()-at>kFormationCueMs)return false;
+    out->shape=shape;out->key=Cfg().npcFormationKey;
+    return true;
+}
+
 bool SquadCommand(const void* leader,const Command& c) noexcept {
     if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return false;
     __try {
@@ -1157,9 +1297,16 @@ bool SquadCommand(const void* leader,const Command& c) noexcept {
         if(!q->top.Is(top) || top[kDead] || !IsSoldierClass(top))return false;
         const bool recruited=q->control==npc::Control::recruited;
         switch(c.order) {
-        case Order::guard:
+        case Order::guard: {
             q->cmd=c;q->cmdLead=npc::LeadOf(q->control);
+            const npc::formation::Shape g=npc::formation::FromInt(Cfg().npcGuardFormation);
+            if(q->guardShape==npc::formation::Shape::stock)q->guardShape=npc::formation::GuardShape(g) ? g : npc::formation::Shape::stock;
+            float dir[3];
+            unsigned char* const me=PlayerHuman();
+            if(me && npc::HorizDir(Pos(me),c.at,dir)){q->guardFwd[0]=dir[0];q->guardFwd[1]=dir[2];}
+            else{q->guardFwd[0]=0.0f;q->guardFwd[1]=1.0f;}
             break;
+        }
         case Order::engage:
         case Order::focus:   // the mark (mapcmd refuses it with none)
             q->cmd=c;q->cmdLead=npc::LeadOf(q->control);std::memcpy(q->cmd.at,Pos(top),12);

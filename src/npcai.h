@@ -14,6 +14,15 @@ bool IsSoldierClass(const void* human) noexcept;
 bool NpcMarked() noexcept;
 // The mark for the HUD (draw thread): where it is; false with none (or none published lately).
 bool NpcMarkReadout(float* at) noexcept;
+// The squads' formations (formation.h): the map's T on a selected squad cycles a guarding squad's defence
+// (CycleGuardFormation: the new shape, -1 when it guards nothing, -2 when it takes no orders) or the march of the
+// player's recruited squads (CycleMarchFormation: the new shape). The HUD's banner: the march's shape, shown a
+// moment after it changes (wall clock), and the key that cycles it.
+int CycleGuardFormation(const void* leader) noexcept;
+int CycleMarchFormation() noexcept;
+struct FormationCue { int shape; int key; };
+bool PlayerFormationCue(FormationCue* out) noexcept;
+const wchar_t* FormationText(int shape) noexcept;   // hud.cpp: a shape's name as the HUD says it
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
 // reads seat 0's stick (crew.cpp InputHook).
