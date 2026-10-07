@@ -568,7 +568,8 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
         if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
             Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
         // the player's Sazabi: its own rig, the screen's centre its aim (sazabi.cpp, sazabi_camera.inc)
-        else if(SazabiCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
+        else if(SazabiCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,reinterpret_cast<const float*>(cam+kCamEye),
+                             reinterpret_cast<const float*>(cam+kCamLook),eye,look))
             Place(lookOut+12,lookOut+28,cam,eye,look);
         // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.
         else if(Cfg().enabled)ProteusViewLift(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,lookOut+28);

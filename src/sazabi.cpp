@@ -358,7 +358,7 @@ bool IsSazabi(const void* vehicle) noexcept { return BodyOf(vehicle)==PluginBody
 
 // The riding camera of seat `seat` when it is the player's Sazabi's (turretcam.cpp LookHook, whatever thread fetches the
 // camera): its eye and the point it looks at, on the centre ray the game thread aims along (sazabi_camera.inc).
-bool SazabiCamera(const unsigned char* seat,float* eye,float* look) noexcept {
+bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* wasLook,float* eye,float* look) noexcept {
     if(!seat || !Cfg().enabled || !Cfg().sazabi)return false;
     AcquireSRWLockShared(&viewLock);
     const View w=view;
@@ -368,6 +368,15 @@ bool SazabiCamera(const unsigned char* seat,float* eye,float* look) noexcept {
     float dir[3];
     ViewRay(w,reinterpret_cast<const float*>(w.vehicle+kPosition),eye,dir);
     for(int k=0;k<3;++k){look[k]=eye[k]+dir[k]*100.0f;if(!std::isfinite(eye[k]) || !std::isfinite(look[k]))return false;}
+    // Debug: what the camera held when fetched (the game's work on the last placement) against this placement
+    static ULONGLONG logAt=0;
+    if(Cfg().debug && now-logAt>=1000 && wasEye && wasLook) {
+        logAt=now;
+        const float* p=reinterpret_cast<const float*>(w.vehicle+kPosition);
+        Log("SAZABI camera: vehicle (%.1f,%.1f,%.1f) yaw %.0f pitch %.0f placed eye (%.1f,%.1f,%.1f) look (%.1f,%.1f,%.1f) held eye (%.1f,%.1f,%.1f) look (%.1f,%.1f,%.1f)",
+            p[0],p[1],p[2],w.yaw/sazabi::kDeg,w.pitch/sazabi::kDeg,eye[0],eye[1],eye[2],look[0],look[1],look[2],wasEye[0],wasEye[1],wasEye[2],
+            wasLook[0],wasLook[1],wasLook[2]);
+    }
     placedMs=now;
     return true;
 }

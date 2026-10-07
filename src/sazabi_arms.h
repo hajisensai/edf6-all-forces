@@ -24,11 +24,6 @@ constexpr float kFunnelSec=15.0f,kFunnelCool=20.0f,kFunnelRange=320.0f,kFunnelOr
 constexpr float kFunnelSpring=3.0f,kFunnelDamp=2.6f,kFunnelSpeed=90.0f,kFunnelShotSec=1.6f,kFunnelNear=15.0f;
 constexpr float kFunnelHome=10.0f,kFunnelHomeHigh=28.0f,kFunnelLaunchGap=0.12f,kFunnelDock=1.5f,kFunnelBackMost=6.0f;
 constexpr int kMostTargets=32;
-// the thrusters: the backpack's two throats (the model's thruster glow, tools/prep_sazabi.py's model folder), from the
-// backpack's joint in its frame, and the way each points
-constexpr float kNozzleAt[2][3]={{0.54f,-4.63f,-4.84f},{-0.54f,-4.63f,-4.84f}};
-constexpr float kNozzleDir[2][3]={{0.31f,0.22f,-0.92f},{-0.31f,0.22f,-0.92f}};
-
 enum class Special : int { missiles, funnels, cannon, count };
 enum class FunnelPhase : int { docked, launching, out, back };
 struct Funnel {

@@ -332,37 +332,28 @@ void NozzleMatrix(const float* at,const float* dir,float* out) noexcept {
     out[15]=1.0f;
 }
 
-// The flames (the user, 2026-10-07: 「飞行时喷气明显不对」: they were the flares' 4 m fires, trailing against the motion):
-//  - the main thrusters: the backpack's two thrust bells (the model's thruster glow, kNozzleAt / kNozzleDir), a flame
-//    out of each as long as kBellFlame at full thrust and as wide as the bell, burning with the thrust (`thrust` 0..1);
-//  - the soles: while it climbs or hangs in the air on its thrusters, a flame down out of each foot (kSoleFlame);
-//  - each flying funnel's small fire behind it (the flares' Booster set, FlareFlames).
+// The flames (the user, 2026-10-07: 「飞行时喷气明显不对」, then 「尾焰也没有根据实际喷气孔来」): a Booster flame out of
+// each of the model's own nozzles (sazabi_pose.h kNozzles: the legs' big bells, the backpack's, the calves', the rear
+// binders', the waist's), carried with its bone as posed, as long and wide as its bell makes it, burning with the thrust
+// (`thrust` 0..1; the burst ones only while it boosts or climbs); each flying funnel's small fire behind it.
 // Every frame (0 when idle: the flames burn down and their boosters wait for the next burst).
-constexpr float kBellFlame[2]={14.0f,2.4f},kSoleFlame[2]={7.0f,1.6f};
 void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
-    alignas(16) float mats[4][16];
-    const float sizes[4][2]={{kBellFlame[0],kBellFlame[1]},{kBellFlame[0],kBellFlame[1]},{kSoleFlame[0],kSoleFlame[1]},
-                             {kSoleFlame[0],kSoleFlame[1]}};
-    float bells[2][3];
-    for(int i=0;i<2;++i) {
-        float dir[3],local[3];
-        BoneAt(m,sazabi::kBackpack,kNozzleAt[i],bells[i]);
-        sazabi::Apply(kNozzleDir[i],scratch.modelRot[sazabi::kBackpack],local);
-        DirToWorld(m,local,dir);
-        NozzleMatrix(bells[i],dir,mats[i]);
-    }
-    constexpr int kFeet[2]={sazabi::kFootL,sazabi::kFootR};
-    for(int i=0;i<2;++i) {   // down out of the sole: the foot's own -y
-        const float down[3]={0.0f,-1.0f,0.0f},under[3]={0.0f,-1.8f,0.0f};   // the sole, 1.8 m under the ankle
+    alignas(16) float mats[sazabi::kNozzleCount][16];
+    float sizes[sazabi::kNozzleCount][2],levels[sazabi::kNozzleCount];
+    const bool burst=m.fl.boosting || m.fl.climbing;
+    float main[3]{};
+    for(int i=0;i<sazabi::kNozzleCount;++i) {
+        const sazabi::Nozzle& z=sazabi::kNozzles[i];
         float at[3],local[3],dir[3];
-        BoneAt(m,kFeet[i],under,at);
-        sazabi::Apply(down,scratch.modelRot[kFeet[i]],local);
+        BoneAt(m,z.bone,z.at,at);
+        sazabi::Apply(z.dir,scratch.modelRot[z.bone],local);
         DirToWorld(m,local,dir);
-        NozzleMatrix(at,dir,mats[2+i]);
+        NozzleMatrix(at,dir,mats[i]);
+        sizes[i][0]=z.flame[0];sizes[i][1]=z.flame[1];
+        levels[i]=z.burst && !burst ? 0.0f : thrust;
+        if(!z.burst)for(int k=0;k<3;++k)main[k]+=at[k]*0.25f;   // the four main ones' middle: the roar's
     }
-    const float sole=m.fl.air && (m.fl.climbing || m.fl.boosting) ? thrust : 0.0f;
-    const float levels[4]={thrust,thrust,sole,sole};
-    NozzleFlames(v,mats,4,sizes,levels,GameMs());
+    NozzleFlames(v,mats,sazabi::kNozzleCount,sizes,levels,GameMs());
     // the funnels
     float at[8][3],vel[8][3];
     int n=0;
@@ -373,11 +364,7 @@ void Flames(Mech& m,const unsigned char* v,float thrust) noexcept {
         ++n;
     }
     FlareFlames(v,at,vel,n,GameMs());
-    if(m.driven && !m.npc && thrust>0.05f) {
-        float mid[3];
-        for(int k=0;k<3;++k)mid[k]=0.5f*(bells[0][k]+bells[1][k]);
-        SazabiLoop(SzLoop::thrusters,mid,m.fl.vel,thrust);
-    }
+    if(m.driven && !m.npc && thrust>0.05f)SazabiLoop(SzLoop::thrusters,main,m.fl.vel,thrust);
 }
 
 // The pose's share: the swing, the guard, the brace, the funnels where they fly (in sz_root's frame).

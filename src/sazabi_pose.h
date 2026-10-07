@@ -55,6 +55,26 @@ inline constexpr int kFunnels[6]={kFunnelL1,kFunnelL2,kFunnelL3,kFunnelR1,kFunne
 // A funnel's nose (its glowing muzzle's end) at the bind, unit, the model's frame: every funnel lies along it in its pack
 // (the model folder's sz_funnel_* pieces' long axis, toward their glowing material: 0.035..0.061, 0.76, 0.645).
 inline constexpr float kFunnelNose[3]={0.048f,0.763f,0.645f};
+// The thrusters' nozzles, the model's own (the user, 2026-10-07: 「尾焰也没有根据实际喷气孔来」): each bell's exit
+// (its rim's centre) from its bone's joint and the way it opens, in the bone's own frame (the bind's: the model's axes),
+// found in the model folder's OBJ (bells: pieces shaped as surfaces of revolution flaring along their axis, and the
+// stacks of rings the small ones are made of; checked on renders of the model, the preview folder's
+// 20261007-nozzles); its flame's length and width (m: about nine exit radii long, the exit wide); `burst`: it burns
+// only while the mech boosts or climbs (the main ones, the legs' big bells and the backpack's, burn with any thrust).
+struct Nozzle { int bone; float at[3]; float dir[3]; float flame[2]; bool burst; };
+inline constexpr Nozzle kNozzles[]={
+    {kShinL,{3.256f,-1.821f,-4.619f},{0.641f,-0.261f,-0.722f},{12.4f,2.76f},false},   // the left leg main thruster (the big bell)
+    {kShinR,{-3.256f,-1.821f,-4.619f},{-0.641f,-0.261f,-0.722f},{12.4f,2.76f},false},   // the right leg main thruster
+    {kBackpack,{-0.500f,1.479f,-2.352f},{0.000f,-0.200f,-0.980f},{8.1f,1.80f},false},   // the backpack's upper cluster (three bells)
+    {kBackpack,{-0.400f,0.329f,-2.152f},{0.000f,-0.600f,-0.800f},{5.4f,1.20f},false},   // the backpack's lower bell
+    {kShinL,{-1.514f,-3.361f,-5.389f},{0.160f,0.130f,-0.979f},{4.6f,1.02f},true},   // the left calf's rear bell
+    {kShinR,{1.514f,-3.361f,-5.389f},{-0.160f,0.130f,-0.979f},{4.6f,1.02f},true},   // the right calf's rear bell
+    {kBackpack,{3.080f,-5.271f,-5.552f},{0.750f,-0.030f,-0.660f},{4.4f,0.98f},true},   // the left rear binder's bell
+    {kBackpack,{-3.080f,-5.271f,-5.552f},{-0.769f,-0.030f,-0.639f},{4.4f,0.98f},true},   // the right rear binder's bell
+    {kPelvis,{5.200f,1.192f,0.020f},{0.670f,-0.220f,-0.710f},{3.6f,0.80f},true},   // the left waist's bells
+    {kPelvis,{-4.830f,0.942f,-0.681f},{-0.632f,-0.733f,-0.251f},{3.6f,0.80f},true},   // the right waist's bells
+};
+inline constexpr int kNozzleCount=static_cast<int>(sizeof(kNozzles)/sizeof(kNozzles[0]));
 
 // ------------------------------------------------------------------------------------------ 3 x 3 rotations
 struct M3 { float m[9]; };

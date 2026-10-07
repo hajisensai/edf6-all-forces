@@ -36,7 +36,8 @@ constexpr std::size_t kLevel=0x3EC,kPulse=0x3F0,kHold=0x3F4,kObjFlags=0x18;
 constexpr unsigned char kObjDeleted=4;
 constexpr std::size_t kBoneWorld=0xB0;
 constexpr float kFront[2]={56.0f,16.0f},kBack[2]={40.0f,12.0f};   // V508's 35/10 and 25/7.5, x1.6
-constexpr int kMaxCarriers=64,kNozzles=4;   // carriers and jets (JetFlames) alike
+constexpr int kMaxCarriers=64,kNozzles=10;  // a vehicle's flames at most: the carriers' 4, the jets' 2, the Sazabi's 10
+constexpr int kCarrierNozzles=4;            // the carrier's (V508's) four boosters
 constexpr ULONGLONG kStaleMs=1000;
 
 const unsigned char kOpNewSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xEB,0x0F,0x48,0x8B,0xCB,0xE8,0x47};
@@ -190,7 +191,7 @@ void Make(Nozzle& z,const unsigned char* v,const float* size) noexcept {
 // model is scaled, its bone rows are not). The game makes the flame's matrix L x BoneWorld (0x6BB5A0, row
 // vectors) and the flame leaves along that matrix's +z (the Booster's direction (0,0,1), 0x1765B70): with the bone
 // alone, as here before, it blew out of the pod's front and from its pivot (docs/jet-model-re.md §8.1).
-constexpr float kNozzleAt[kNozzles][3]={{3.44f,-0.064f,-9.52f},{-3.44f,-0.064f,-9.52f},{2.32f,0.0f,-6.88f},{-2.32f,0.0f,-6.88f}};
+constexpr float kNozzleAt[kCarrierNozzles][3]={{3.44f,-0.064f,-9.52f},{-3.44f,-0.064f,-9.52f},{2.32f,0.0f,-6.88f},{-2.32f,0.0f,-6.88f}};
 
 // Nozzle `i`'s flame matrix from its pod bone's world matrix `world` (its record carried to this frame:
 // exhaust_pose.h): with unit rows (the scale is in the sizes), turned pi about its y (x and z negated) and moved to the
@@ -240,7 +241,7 @@ void Frame(const unsigned char* v,unsigned char* const* recs,float intensity,ULO
     if(!c)return;
     c->seen=ms;
     exhaust::Observe(c->track,GameFrame(),reinterpret_cast<const float*>(v+kMatrix));
-    for(int i=0;i<kNozzles;++i) {
+    for(int i=0;i<kCarrierNozzles;++i) {
         Nozzle& z=c->n[i];
         if(!recs[i] || !Readable(recs[i]+kBoneWorld,64))continue;
         float world[16];

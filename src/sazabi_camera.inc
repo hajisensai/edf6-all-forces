@@ -4,14 +4,15 @@
 // the plugin places the camera itself, through turretcam.cpp's look-at hook (LookHook -> SazabiCamera): a third-person
 // rig over the mech's right shoulder, turning with its heading and pitching with its aim, and the screen's centre is
 // the aim: every weapon fires at what the centre's ray meets (Aim). One ray, ViewRay, for both: the hook places the eye
-// on it each time the game fetches the camera, the game thread aims along it each frame (the vehicle's position as the
-// hook reads it then; both are the body's current one).
-// The rig (tools: camview/rig.png in the preview folder, 2026-10-07): its pivot kViewUp m over the collision box's centre
-// (the vehicle's position, 12.8 m over the soles: the pivot is at mid-height), the eye kViewBack m behind it along the
-// aim, kViewSide m to the right and kViewRise m up: the whole 25.6 m mech in view left of the centre, level, 20 deg up and
-// 20 deg down; never under kViewFloor m over the ground under the mech (looking up the eye would sink into it).
+// on it each time the game fetches the camera, the game thread aims along it each frame. Both place it off the vehicle's
+// position as they read it then (the body's current one) plus View::soles, where the soles are from that position (the
+// game thread's sz_root world): the position field is no fixed point of the mech (in game 1.2 m over its soles while
+// driven, 13.2 m parked: the camera that took it for the box's centre sat 3 m over the ground, 2026-10-07).
+// The rig (tools: camview/rig.png in the preview folder, 2026-10-07): its pivot kViewUp m over the soles (mid-height),
+// the eye kViewBack m behind it along the aim, kViewSide m to the right and kViewRise m up: the whole 25.6 m mech in view
+// left of the centre, level, 20 deg up and 20 deg down; never under kViewFloor m over the ground under the mech.
 
-constexpr float kViewUp=2.0f,kViewBack=45.0f,kViewSide=11.0f,kViewRise=1.0f,kViewFloor=3.0f;
+constexpr float kViewUp=14.8f,kViewBack=45.0f,kViewSide=11.0f,kViewRise=1.0f,kViewFloor=3.0f;
 constexpr ULONGLONG kViewFresh=250;   // ms: a published view older than this is no longer the Sazabi's (the stock camera)
 constexpr ULONGLONG kCentredMs=200;   // ms: the hook placed the camera this recently: the HUD's reticle is the centre
 
@@ -21,26 +22,36 @@ struct View {
     const unsigned char* seat=nullptr;
     float yaw=0.0f,pitch=0.0f;   // the mech's heading, the aim's pitch (rad; forward = (sin yaw, 0, cos yaw))
     float floor=-1e9f;           // the ground's height under the mech (world y)
+    float soles[3]{};            // the soles (sz_root's world) from the vehicle's position
     ULONGLONG ms=0;
 };
 SRWLOCK viewLock=SRWLOCK_INIT;
 View view{};
 volatile ULONGLONG placedMs=0;   // GameMs the hook last placed the camera at
 
-// The camera's eye and its centre ray's unit direction for `w` with the vehicle at `pos` (the box's centre).
+// The camera's eye and its centre ray's unit direction for `w` with the vehicle at `pos` (its position field).
 void ViewRay(const View& w,const float* pos,float* eye,float* dir) noexcept {
     const float cp=std::cos(w.pitch);
     dir[0]=std::sin(w.yaw)*cp;dir[1]=std::sin(w.pitch);dir[2]=std::cos(w.yaw)*cp;
     const float right[3]={-std::cos(w.yaw),0.0f,std::sin(w.yaw)};
-    for(int k=0;k<3;++k)eye[k]=pos[k]+(k==1 ? kViewUp+kViewRise : 0.0f)-dir[k]*kViewBack+right[k]*kViewSide;
+    for(int k=0;k<3;++k)eye[k]=pos[k]+w.soles[k]+(k==1 ? kViewUp+kViewRise : 0.0f)-dir[k]*kViewBack+right[k]*kViewSide;
     eye[1]=std::fmax(eye[1],w.floor+kViewFloor);
 }
 
-void PublishView(const Mech& m,unsigned char* v) noexcept {
+// The view of `m` now (no vehicle or seat): its heading, its aim's pitch, the ground under it, its soles from `v`'s position.
+View ViewOf(const Mech& m,const unsigned char* v) noexcept {
     View w;
-    w.vehicle=v;w.seat=SeatAt(v,0);w.yaw=m.heading;w.pitch=m.aimPitch;w.ms=GameMs();
-    if(m.rootOk)w.floor=m.root[13];   // sz_root: the soles, on the ground or over it
-    if(m.fl.air && m.feetClear!=kNoGround)w.floor-=m.feetClear;
+    w.yaw=m.heading;w.pitch=m.aimPitch;
+    if(!m.rootOk)return w;
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    for(int k=0;k<3;++k)w.soles[k]=m.root[12+k]-p[k];
+    w.floor=m.root[13]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f);
+    return w;
+}
+
+void PublishView(const Mech& m,unsigned char* v) noexcept {
+    View w=ViewOf(m,v);
+    w.vehicle=v;w.seat=SeatAt(v,0);w.ms=GameMs();
     AcquireSRWLockExclusive(&viewLock);
     view=w;
     ReleaseSRWLockExclusive(&viewLock);
@@ -60,9 +71,7 @@ void Aim(Mech& m,const unsigned char* v) noexcept {
     if(!m.rootOk)return;
     float from[3],dir[3];
     if(!m.npc) {
-        View w;
-        w.yaw=m.heading;w.pitch=m.aimPitch;w.floor=m.root[13]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f);
-        ViewRay(w,reinterpret_cast<const float*>(v+kPosition),from,dir);
+        ViewRay(ViewOf(m,v),reinterpret_cast<const float*>(v+kPosition),from,dir);
         a.centred=GameMs()-placedMs<=kCentredMs;
     } else {
         BoneAt(m,sazabi::kMuzzle,nullptr,from);
