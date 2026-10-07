@@ -6,6 +6,7 @@
 // parameters; it then flies at its strike point from the first frame.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "online_authority.h"
 #include <cstdio>
 #include <cwchar>
 
@@ -37,7 +38,6 @@ bool levelOk=false;
 bool preloaded[kBodyCount]{};   // the body's SGO was preloaded for this mission (PreloadJets)
 bool broken[kBodyCount]{};      // its spawn faulted in the game's init (CreateJet): off until the game restarts
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
-using RideAiFn=void(*)(void*,bool);
 
 // The heli's "body" part: its init (0x64E9D1) looks the part up by that name in the vehicle's parts
 // (vehicle+0x1320, 0x6EA4B0(parts, name) -> index or -1) and keeps the index at +0x1530, which slot 61
@@ -147,7 +147,7 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     if(bodyPartOk)FixBodyPart506(v,"JET");
     reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,team,true);
     LevelVehicle(v);
-    reinterpret_cast<RideAiFn*>(At<void**>(v,0))[kSlotRideAi](v,true);
+    SeatNpcRider(v,true);   // a copy this machine just made: never registered, so its own here (online_authority.h)
     const BodyRow& row=Row(b);
     const bool jet=row.mark>0.0f;
     Role role=Role::fighter;
@@ -167,6 +167,7 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     Facing(heading,start,m);
     unsigned char* const v=SpawnJet(b,m);
     if(!v)return nullptr;
+    NoteLocalCopy(v,source);   // whose its damage is online: its carrier's owner, else the call's (online_authority.h)
     Jet* const j=NewEntry(v,ms);
     if(!j){reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;}
     j->launched=true;j->mode=Mode::patrol;
@@ -329,7 +330,7 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 }
 
 unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) noexcept {
-    const Body b=as==HeliBody::brute410 ? Body::heli410 : Body::heli506;
+    const Body b=as==HeliBody::brute410 ? Body::heli410 : as==HeliBody::medic410 ? Body::heliMedic : Body::heli506;
     if(!spawnOk || !Preloaded(b) || !At<void*>(image,kObjectMgr))return nullptr;
     __try {
         float start[3]={from[0],from[1],from[2]};
@@ -337,6 +338,7 @@ unsigned char* HeliLaunch(HeliBody as,const float* from,const float* heading) no
         alignas(16) float m[16];
         Facing(heading,start,m);
         unsigned char* const v=SpawnJet(b,m);
+        NoteLocalCopy(v,nullptr);   // whose its damage is online: the call's / the rescue's (online_authority.h)
         if(v)Log("HELI v=%p launched: %ls at (%.0f,%.0f,%.0f)",v,Row(b).file,start[0],start[1],start[2]);
         return v;
     } __except(FaultLog("HELI launch",GetExceptionInformation())){return nullptr;}

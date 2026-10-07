@@ -6,6 +6,10 @@
 
 namespace crew {
 unsigned char* image=nullptr;
+// Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
+bool InSession() noexcept { return false; }
+bool OnlineRunsHere(const void*) noexcept { return true; }
+online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner; }
 Config inputConfig{};
 ULONGLONG inputTime=10000;
 bool testView=false;
@@ -37,6 +41,7 @@ bool IsSub(const void*) noexcept { MissingDependency();return false; }
 bool SubDeck(const float*,float*) noexcept { MissingDependency();return false; }
 float SubHullGap(const float*) noexcept { MissingDependency();return 0.0f; }
 bool IsPlayerJet(const void*) noexcept { MissingDependency();return false; }
+bool AiGunner(const unsigned char*) noexcept { MissingDependency();return false; }
 bool IsSazabi(const void*) noexcept { return false; }
 namespace jet { int LockersOf(const void*,float (*)[3],int) noexcept { MissingDependency();return 0; } }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingDependency();return 0; }

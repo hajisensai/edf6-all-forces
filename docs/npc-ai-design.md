@@ -79,7 +79,7 @@
 ### 3.3 每帧决策（`npcai.cpp` Decide，纯函数在 `npc_logic.h`）
 
 ```
-anchor  = 命令点（驻守 / 前往）| 玩家（已招募）| 原版队长（脚本或 NPC 队长）| 自身原地（自由）
+anchor  = 命令点（驻守 / 前往）| 招募它的那位玩家（已招募；联机时可能是另一台机器的玩家，见 §9）| 原版队长（脚本或 NPC 队长）| 自身原地（自由）
 threats = 每帧快照：本机玩家队伍的敌人锁定点（VisitEnemiesOf）
 friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5E11D0）
 1. 脚本控制（§4.2 判据）→ 只做 §3.4 的火线否决与 §3.5 的换枪，移动 / 目标全交原版
@@ -180,7 +180,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 ### 5.4 解除招募与冷却（C2，P4）
 
-- 解除：队长 `+0x540 = 0` → `SetFollow(队长, nullptr)` + vslot 39（取原版队长阵亡分支的写法，H）。小队停在原地（招募时原版已清掉路线），插件给它一个驻守点 = 解除时的位置。
+- 解除：队长 `+0x540 = 0` → `SetFollow(队长, nullptr)` + vslot 39（取原版队长阵亡分支的写法，H）。小队停在原地（招募时原版已清掉路线），插件给它一个驻守点 = 解除时的位置，这个驻守点属于「插件自己领导」：冷却结束后玩家走近、原版把它招募回去时自动作废，小队跟随玩家（见 §6.2 指令的领导归属）。
 - 冷却：`Cooldowns` 记 `NpcRecruitCooldownSec`；到时把 `+0x540` 置回 1，原版走近招募重新生效。冷却期间面板显示剩余秒数。
 - 单机限定（§2.3）。
 
@@ -203,6 +203,8 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 | 自由交战 | anchor = 当前位置，追击半径放大到 `NpcFreeRange`，打完回原地 |
 | 集中火力 | 全队目标 = 标记目标（§6.3），不限 MarkInReach，移动半径 = 自由交战的 |
 | 释放 | 回到原版行为（anchor 由原版决定） |
+
+指令的领导归属：面板指令只在下达时的领导者之下有效。领导者分三类（`npc::LeadOf`）：插件自己（free / 任意人数的 NPC 小队）、招募它的玩家、任务脚本。原版会自己换领导者（玩家走近自动招募、脚本接管），换了之后旧指令（驻守点、交战区）就作废，否则面板显示「已招募」而小队却被钉在一个新领导者从没要求过的点上。队员增减（free ↔ squad）不算换领导者。
 
 ### 6.3 Q 标记（C4，P5）
 
@@ -259,6 +261,11 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 | 上下车 / 炮手（§7） | 本机 | 原版乘车状态复制未核实 | 单机 |
 | 坦克回位（§8） | 房主 | 原版位姿复制（dummy 驾驶员的权威问题见 online-re §3.4） | 开（房主） |
 
+已招募小队的「玩家」是**招募它的那位玩家**（小队根队长，`IsPlayer` 对远端玩家同样成立），不是本机玩家：锚点、找目标范围、
+站位的侧翼参考、低血撤退都以那位玩家为准（`ServedBy`）。客人招募的小队由房主机器上的插件驱动（士兵归房主），所以这一点在
+联机里直接决定客人的小队会不会被拉向房主。远端玩家的镜头读不到：撤退的「身后」改为那位玩家背对最近威胁的一侧；
+枪线回避（§3.4）只对本机玩家有，远端玩家本人仍在友军射线检查里。
+
 ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
 
 ## 10. 分阶段计划与顺序
@@ -290,7 +297,7 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 | 坦克驻守点过期（玩家开走后 NPC 再接手，拉回旧点） | 0 号座不是 dummy 就作废记录；超过 2 s 没驾驶的记录从当前位置重建 |
 | 已招募小队队长死后剩 1 人被并进陌生 NPC 小队 | 已招募小队只并入同样跟着玩家的小队，否则留在玩家身边 |
 | 友军快照只取前 128 个，玩家可能不在里面 | 本机玩家固定放第一位；友军 512、敌人 1024 |
-| Fencer 第二只手（d71）不受火线否决 | 否决同时清 d70 / d71 |
+| Fencer 第二只手（d71）不受火线否决 | 每只手按自己 WeaponSet 拿的武器判（`h+0x1970` 数组步长 0x150，第 k 组扳机 d70+k，`0x59ACE2` / `0x59B15E`，H）；只有武器不明的那只手才按身上最大爆炸半径判。不能两手一起按最大半径清：那样手持步枪也会因为背着火箭筒而不开火 |
 | 对 500 ms 前计数的小队下令（队长可能已死） | 下令要求 100 ms 内计数过，并重核对象、死亡、士兵类 |
 | 队长不是士兵类时小队状态错误 | 链顶只走到士兵类；小队状态每帧从顶端士兵的字段读，不依赖顶端自己的 Think |
 | 冷却期内队长阵亡 / 关掉 AI | 继任时小队表项（指令、冷却、脚本观察）迁到新队长，冷却期内新队长 `+0x540` 也清；关掉 `CustomNpcAi` 后顶端士兵下一帧恢复 `+0x540`；60 s 没计数的冷却表项可复用 |

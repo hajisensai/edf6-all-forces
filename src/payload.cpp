@@ -1,5 +1,6 @@
 // The weapons of the local player's seat on a stock vehicle (payload.h, docs/stock-payload-re.md), and the stock
-// helicopters' switchable stores (the user, 2026-10-06: "原版载具也补充上可切换载荷的设定").
+// vehicles' switchable stores (the user, 2026-10-06: "原版载具也补充上可切换载荷的设定"; 2026-10-07: "给载具应有的多种挂载
+// 增加多种挂载。例如原版坦克、aa车、直升机等" "应该有的都得有，比如导弹车").
 //  - The readout: every frame the player sits in a stock vehicle (no plugin body: the plugin's aircraft have their
 //    cockpit, playerjet.cpp), the seat's weapons (seat +0xC8 holders, docs/aim-line-re.md) in holder order, the fuel tank
 //    every seat lists (V_FUEL01) left out: the weapon's own name (weapon +0x1B0, the game's language), its rounds and
@@ -12,15 +13,19 @@
 //    trigger holder i + 3 (0x5FFCA8), the flak 603 and the 503 bike holders 0 and 1 together (0x6214A4, 0x618239);
 //    another class's seat with one weapon fires it on the primary trigger (M: every class read does), with more the
 //    plugin has not read which (`other`: a mech's arms, each on a control of its own).
-//  - The stores (ini StockHeliStores; tools/make_stock_stores.py gives the stock 506 helis' requests the jets' rocket pod
-//    and Hellfires as holders 4 and on, after the fuel tank): the secondary button fires the store picked, and the
-//    jets' switch (PlayerJetSwitchKey R, pad LB) goes round the stock secondary weapon and the stores, as the player
-//    jets' does (playerjet.cpp Stores): its press to the next with rounds, one spent for good (no reload coming) to the
-//    next by itself. The 506's own fire byte is taken (as the jets take it) and the picked weapon's trigger pulled as
-//    the stock 0x62C000 pulls one (weapon +0x139, its holder alive). A store's lock beeps in the cockpit's tone
-//    (jetaudio.cpp LockTone: jetsound.cpp keeps the stores' stock lock beeps quiet), the stock missile's are its own;
-//    helisight.cpp's mark follows the pick (PayloadPicked). A seat with one secondary weapon is left to the stock input.
-//    Only the 506: its weapon build is the loop stores.cpp lets build every holder; the 409 builds three, unrolled.
+//  - The stores (ini StockVehicleStores, or the older StockHeliStores; tools/make_stock_stores.py hangs them on the
+//    requests of the tanks, the flak, the missile launcher, the Grape, the bikes and the helicopters, holders after the
+//    stock ones that stores.cpp builds): the plugin's weapons (EDF6VC_*, IsLoadoutWeapon) on the seat ride one stock
+//    control, the seat's second one when a stock weapon is on it (the helicopters' missile, the Titan's gatling), else
+//    its first (the gun). The jets' switch (PlayerJetSwitchKey R, pad LB) goes round that control's stock weapon and the
+//    stores as the player jets' does (playerjet.cpp Stores): its press to the next with rounds, one spent for good (no
+//    reload coming) to the next by itself. With a store picked the control still pulls its stock weapons' triggers
+//    (every stock vehicle fires through the holder pull 0x62C000, in whichever slot it fires: 55, 57, the bike's 5);
+//    the pull is taken over (PullHook) and lands on the store picked instead: the trigger latch (weapon +0x139) the
+//    weapon's own update reads and clears (0x6935B2). A store's lock beeps in the cockpit's tone (jetaudio.cpp
+//    LockTone: jetsound.cpp keeps the stores' stock lock beeps quiet), the stock missile's are its own; helisight.cpp's
+//    mark follows the pick (PayloadPicked). A seat with no store is left to the stock input, and so is a seat whose
+//    stores ride no stock weapon of a control read for its class.
 #include "crew.h"
 #include "jetaudio.h"
 #include "layout.h"
@@ -35,10 +40,8 @@ namespace crew {
 namespace {
 constexpr std::size_t kWeaponName=0x1B0,kWeaponTrigger=0x139,kWeaponCapacity=0x248,kWeaponReloadTime=0x20C,
                       kWeaponChargeNeed=0x22C,kWeaponReloadLeft=0xE68,kWeaponCharge=0xE7C;
-constexpr std::size_t kFireSecondary=0x2021;      // the 506's secondary fire byte (docs/heli-input-re.md §2b)
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 constexpr std::uint16_t kButtonLB=0x10;
-constexpr std::uint64_t kHolder506Stores=4;       // the 506's holders past the fuel tank (pylib/vcobjects.py FUEL_AT 3)
 constexpr ULONGLONG kFreshMs=200;                 // a readout this old (game ms) is gone: the player got out
 constexpr int kTracked=8;
 
@@ -122,13 +125,12 @@ std::int64_t HolderIndex(const unsigned char* v,const unsigned char* h) noexcept
     return off%kHolderStride==0 && off/kHolderStride<count ? static_cast<std::int64_t>(off/kHolderStride) : -1;
 }
 
+// `weapons`: the seat's stock weapons (its stores left out).
 PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char* w,int weapons) noexcept {
     const std::int64_t s=static_cast<std::int64_t>(seat);
+    if(IsLoadoutWeapon(w))return PayloadFire::store;
     switch(c) {
-        case Class::heli506:
-            if(holder==0 || holder==1)return PayloadFire::primary;
-            if(holder==2)return PayloadFire::secondary;
-            return holder>=static_cast<std::int64_t>(kHolder506Stores) && IsStoreWeapon(w) ? PayloadFire::store : PayloadFire::other;
+        case Class::heli506: return holder==0 || holder==1 ? PayloadFire::primary : holder==2 ? PayloadFire::secondary : PayloadFire::other;
         case Class::heli409: return holder==0 ? PayloadFire::primary : holder==1 ? PayloadFire::secondary : PayloadFire::other;
         case Class::tank403: return holder==s ? PayloadFire::primary : PayloadFire::other;
         case Class::tank404: return holder==s ? PayloadFire::primary : holder==s+3 ? PayloadFire::secondary : PayloadFire::other;
@@ -159,6 +161,8 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         index[count]=HolderIndex(v,holders[i]);
         ws[count++]=w;
     }
+    int stock=0;
+    for(int i=0;i<count;++i)stock+=IsLoadoutWeapon(ws[i]) ? 0 : 1;
     for(int i=0;i<count;++i) {
         PayloadEntry& e=r.entry[i];
         e=PayloadEntry{};
@@ -167,24 +171,10 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         e.rounds=rounds>0 ? rounds : 0;
         e.capacity=cap>0 ? cap : 0;
         Reload(ws[i],rounds,&e.ready,&e.reloadSec);
-        e.fire=FireOf(c,seat,index[i],ws[i],count);
+        e.fire=FireOf(c,seat,index[i],ws[i],stock);
         e.homing=At<std::int32_t>(ws[i],kWeaponLockon)==kHoming;
     }
     return count;
-}
-
-// The holder of weapon `w` alive (0x62C000's test: its control block's use count): its trigger may be pulled.
-bool HolderAlive(const unsigned char* v,const unsigned char* w) noexcept {
-    const auto base=At<const unsigned char*>(v,kHolders);
-    const auto count=At<std::uint64_t>(v,kHolderCount);
-    if(!base || count>64 || !Readable(base,count*kHolderStride))return false;
-    for(std::uint64_t i=0;i<count;++i) {
-        const unsigned char* h=base+i*kHolderStride;
-        if(At<const unsigned char*>(h,kHolderWeapon)!=w)continue;
-        const auto ctrl=At<const unsigned char*>(h,kHolderCtrl);
-        return ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)>0;
-    }
-    return false;
 }
 
 void Lock(unsigned char* w) noexcept {
@@ -194,22 +184,54 @@ void Lock(unsigned char* w) noexcept {
     audio::LockTone(lock,progress);
 }
 
-// The store switch on a 506's pilot seat (see the top). `ws` the seat's weapons, `r` their entries.
+// The pulls taken over (PullHook): each stock weapon of the control a store is picked on, and that store. Only the
+// local player's vehicle, rebuilt by its PayloadFrame every frame; older than kFreshMs it is gone (and so is the vehicle).
+struct Redirect { unsigned char* from; unsigned char* to; };
+Redirect redirect[kMostPayload]{};
+int redirects=0;
+const void* redirectVehicle=nullptr;
+ULONGLONG redirectMs=0;
+
+// Drops the redirects when they are `v`'s (nullptr: whosever).
+void ClearRedirect(const void* v) noexcept {
+    if(v && v!=redirectVehicle)return;
+    redirects=0;redirectVehicle=nullptr;
+}
+
+// The holder pull 0x62C000 (see the top), its own test kept: the holder's control block alive (its use count, +8).
+void __fastcall PullHook(unsigned char* holder) {
+    const auto ctrl=At<const unsigned char*>(holder,kHolderCtrl);
+    if(!ctrl || At<std::int32_t>(ctrl,8)==0)return;
+    unsigned char* w=At<unsigned char*>(holder,kHolderWeapon);
+    if(redirects && GameMs()-redirectMs<=kFreshMs)
+        for(int i=0;i<redirects;++i)if(redirect[i].from==w){w=redirect[i].to;break;}
+    w[kWeaponTrigger]=1;
+}
+constexpr unsigned kPull=0x62C000;
+const unsigned char kPullCode[]={0x48,0x8B,0x41,0x08,0x48,0x85,0xC0,0x74,0x11,0x83,0x78,0x08,0x00,0x74,0x0B,0x48,0x8B,0x41,0x10,
+                                 0xC6,0x80,0x39,0x01,0x00,0x00,0x01,0xC3};
+bool pullOk=false;
+
+// The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries.
 void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r) noexcept {
-    int list[kMostPayload],n=0;
-    for(int i=0;i<r.count;++i)
-        if(r.entry[i].fire==PayloadFire::secondary || r.entry[i].fire==PayloadFire::store)list[n++]=i;
+    PayloadFire ride=PayloadFire::primary;
+    for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
+    int stock[kMostPayload],ns=0,list[kMostPayload],n=0;
+    for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)stock[ns++]=i;
+    if(ns)list[n++]=stock[0];   // that control's stock weapon(s): one choice (the 603's pair fire together)
+    for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::store)list[n++]=i;
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
     const bool down=keys ? KeyDown(Cfg().playerJetSwitchKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     const bool press=down && !p.held;
     p.held=down;
-    if(n<2 || !Cfg().stockHeliStores){p.weapon=nullptr;return;}   // one secondary weapon: the stock input fires it
+    if(!pullOk || !Cfg().stockStores || ns==0 || n<2){p.weapon=nullptr;return;}   // nothing to switch: the stock input fires
     int at=0;
     for(int k=0;k<n;++k)if(ws[list[k]]==p.weapon)at=k;
     if(!p.weapon || ws[list[at]]!=p.weapon)at=0;
     if(!p.listed) {
         p.listed=true;
-        for(int k=0;k<n;++k)Log("PAYLOAD v=%p secondary %d: %ls (%d rounds)%s",v,k,r.entry[list[k]].name,r.entry[list[k]].rounds,k==at ? " [picked]" : "");
+        for(int k=0;k<n;++k)Log("PAYLOAD v=%p %s %d: %ls (%d rounds)%s",v,ride==PayloadFire::secondary ? "secondary" : "primary",k,
+                                r.entry[list[k]].name,r.entry[list[k]].rounds,k==at ? " [picked]" : "");
     }
     if(press || Spent(ws[list[at]])) {
         const int was=at;
@@ -218,22 +240,20 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
             if(!Spent(ws[list[next]]) || k==n){at=next;break;}
         }
         if(at!=was){ClearWeaponLock(ws[list[was]]);ClearWeaponLock(ws[list[at]]);}
-        if(press)Log("PAYLOAD v=%p secondary: %ls (%d rounds)",v,r.entry[list[at]].name,r.entry[list[at]].rounds);
+        if(press)Log("PAYLOAD v=%p picked: %ls (%d rounds)",v,r.entry[list[at]].name,r.entry[list[at]].rounds);
     }
     p.weapon=ws[list[at]];
     r.entry[list[at]].picked=true;
     r.picked=list[at];r.choices=n;r.switchButton=kButtonLB;
-    const bool fire=v[kFireSecondary]!=0;
-    v[kFireSecondary]=0;   // the stock slot 57 would fire holder 2 itself
-    if(fire && HolderAlive(v,p.weapon) && Readable(p.weapon+kWeaponTrigger,1,true))p.weapon[kWeaponTrigger]=1;
+    if(at>0)for(int k=0;k<ns && redirects<kMostPayload;++k)redirect[redirects++]=Redirect{ws[stock[k]],p.weapon};
     Lock(p.weapon);
 }
 }  // namespace
 
 void PayloadFrame(unsigned char* v) noexcept {
-    if(v[kDead] || BodyOf(v)!=PluginBody::none)return;
+    if(v[kDead] || BodyOf(v)!=PluginBody::none){ClearRedirect(v);return;}
     const int seat=PlayerSeatOf(v);
-    if(seat<0)return;
+    if(seat<0){ClearRedirect(v);return;}
     const ULONGLONG ms=GameMs();
     Pick* const p=PickFor(v,ms);
     if(!p)return;
@@ -245,8 +265,9 @@ void PayloadFrame(unsigned char* v) noexcept {
     r.count=ReadSeat(v,static_cast<unsigned>(seat),c,ws,r);
     const unsigned char* const s=SeatAt(v,static_cast<unsigned>(seat));
     r.keys=At<unsigned char>(s,kSeatPad)==0;
-    if(c==Class::heli506 && seat==0)Switch(v,s,*p,ws,r);
-    else p->weapon=nullptr;
+    ClearRedirect(v);
+    redirectVehicle=v;redirectMs=ms;
+    Switch(v,s,*p,ws,r);
     latest=r;latestMs=ms;
 }
 
@@ -261,7 +282,23 @@ unsigned char* PayloadPicked(const void* vehicle) noexcept {
     return p && p->weapon && GameMs()-p->seen<=kFreshMs ? p->weapon : nullptr;
 }
 
+bool InstallPayload() noexcept {
+    __try {
+        if(!Matches(kPull,kPullCode,sizeof(kPullCode))) {
+            Log("HOOK payload=0 (unexpected EDF.dll code at the holder pull: the stock vehicles' stores do not switch)");
+            return false;
+        }
+        unsigned char jump[14]={0xFF,0x25,0,0,0,0};
+        const auto to=reinterpret_cast<std::uintptr_t>(&PullHook);
+        std::memcpy(jump+6,&to,8);
+        pullOk=edf::PatchCode(image+kPull,kPullCode,jump,sizeof(jump));
+        Log("HOOK payload=%d (the holder pull lands on the store picked)",pullOk);
+        return pullOk;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 void ResetPayload() noexcept {
+    ClearRedirect(nullptr);
     for(auto& p:picks)p=Pick{};
     latest=PayloadReadout{};latestMs=0;
 }

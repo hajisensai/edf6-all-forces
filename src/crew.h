@@ -34,7 +34,7 @@ struct Config {
     DWORD heliMissileMs=4000;  // minimum gap between missiles
     // (The flight controller's own gains are constants in heli.cpp; the old HeliMoveGain / HeliBrakeGain /
     // HeliClimbGain / HeliHoverLearn keys are ignored, plugin.cpp LoadConfig.)
-    DWORD heliLandMs=0;        // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
+    DWORD heliLandMs=5000;     // it lands by a player who stood still, with no enemy near, this long; 0 = never (it orbits)
     float heliSpeed=25.0f;     // m/s at full stick (0 or below the stock speed: stock)
     float heliAgility=4.0f;    // seconds (time constant) to reach it
     float playerHeliStopSec=1.0f;// a stock heli the player flies: its horizontal speed's time constant (s; 0: stock)
@@ -43,6 +43,7 @@ struct Config {
     bool hideStockGauges=true;      // the stock weapon gauges (one panel a seat weapon, the fuel tank's too) go where our HUD lists the seat (stockgauge.cpp)
     float heliYawRate=50.0f;   // deg/s: the yaw rate limit is raised to this where lower
     bool heliDoorGuns=true;    // the 410's door guns are aimed and fired by the plugin
+    bool medicGunnerAim=true;  // the player in a medic heli's door seat: the gun aimed for them at hurt friends (heli.cpp)
     float heliGuardRadius=120.0f;// a guard heli circles its post this far out (0: it hovers over the post)
     float heliGuardSpeed=12.0f;// ...at this speed (m/s; at most 80% of its top speed)
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
@@ -61,7 +62,7 @@ struct Config {
     bool seaRescue=true;       // a heli comes for a local player in the sea and ferries them to a submarine carrier's deck
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool boardingGun=true;     // the boarding gun's rounds put the player into the friendly vehicle they hit (boarding.cpp)
-    bool rescueAutoBoard=false;// ...and, in the stock board reach of a free door seat, boards them by the stock board path
+    bool rescueAutoBoard=true; // ...and, in the stock board reach of a free door seat, boards them by the stock board path
     float subHullHp=100000.0f; // a submarine carrier's hull HP at the base tier (its SGO's is 30000), times its tier (25 at the highest); 0 = the game's
     float subHeavyHit=1500.0f; // a hit on its hull (no deck part) counts only from a heavy source, or from this much
                                // damage in one hit (0 = only the listed heavy sources, subcarrier.cpp kHeavy)
@@ -158,7 +159,16 @@ struct Config {
     float drillSpinDownSec=2.5f;    // ...seconds from the top RPM to still, let go
     float drillDamage=2000.0f;      // ...damage a second to an enemy it touches, at the top RPM (less in proportion)
     float drillBreak=600.0f;        // ...HP a second off a building or rock it bores into, at the top RPM
-    float drillHeatSec=12.0f;       // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster)
+    float drillOverheatSec=30.0f;   // ...seconds from cold to overheated turning at the top RPM (biting: kBiteHeat faster;
+                                    // the retired DrillHeatSec was this at 12 s: too soon, the user 2026-10-06)
+    float drillKillCool=0.1f;       // ...heat shed per enemy the drill kills (a share of the full heat)
+    bool drillLaunch=true;          // ...the launch: the drill flies out on its jet and back like a boomerang
+    int drillLaunchKey=0x52;        // ...its key ('R'; a Windows virtual-key code, 0: none)
+    int drillLaunchButton=0x08;     // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x08 Y; 0 none)
+    float drillLaunchRange=60.0f;   // ...m it flies out before it turns back (sooner when it meets the map)
+    float drillLaunchSpeed=70.0f;   // ...m/s it leaves at (slowing to a stop at the range) and comes back at, at most
+    float drillLaunchDamage=800.0f; // ...damage of each bite in flight (one every kFlightBiteSec while it touches an enemy)
+    float drillLaunchHeat=0.12f;    // ...heat a launch adds (a share of the full heat)
     float drillCoolSec=8.0f;        // ...seconds from overheated to cold standing still
     float drillResumeHeat=0.3f;     // ...overheated, it turns again once cooled to this share of its heat
     bool emcBeam=true;              // the EMC's trigger charges one thick beam that carries the stock burst's damage (emc.cpp)
@@ -189,14 +199,17 @@ struct Config {
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
-    bool stockHeliStores=false;     // the stock 506 helis' requests carry the jets' rockets and Hellfires (the installer,
-                                    // tools/make_stock_stores.py) and their secondary switches between them (payload.cpp)
+    bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
+                                    // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
     int seatButton=0x02;            // ...on a pad: the seat's button bit (docs/stores-re.md §4: 0x02 B; 0 none)
-    bool seatPilot=true;            // ...out of a stock helicopter's pilot seat: an NPC (the stock RideAi) takes the stick
-    bool seatSwitchOnline=false;    // ...in an online room too (off: offline only)
+    bool seatPilot=true;            // ...out of a stock helicopter's pilot seat (or a ground vehicle's with the stock driving
+                                    // AI: the tanks, the Titan, the Grape): an NPC (the stock RideAi) takes the stick
+    bool seatSwitchOnline=true;     // ...in an online room too (off: offline only)
+    bool seatList=true;             // the seats line shown the whole ride in a vehicle with more than one seat (who holds
+                                    // which), not only a moment after boarding / a move; with SeatSwitch off and online too
     // proteus.cpp: the Proteus rework (README 普罗透斯, docs/proteus-re.md), while a local player rides one.
     bool proteus=true;              // two stances (walk / deployed), two seats, shields, the field, the salvo; off: the stock Proteus
     int proteusModeKey=0x54;        // ...the driver's stance key ('T'; a Windows virtual-key code, 0: none)
@@ -277,6 +290,8 @@ struct Config {
     int npcSquadMax=8;              // ...a squad takes in others up to this many
     float npcSquadJoinRange=150.0f; // ...within this many m
     bool npcBoarding=true;          // ...squads board and leave friendly vehicles on a map order; soldiers in gunner seats shoot
+    bool npcGunners=true;           // AI riders in gunner seats (soldiers, and RideAi's riders a bump or a seat swap moved
+                                    // there) work their guns: ground vehicles (npcai.cpp), the 410's doors under a player pilot
     int npcMarkKey=0x51;            // ...on foot: marks the enemy nearest the screen's centre for the NPCs ('Q'; 0: off)
     float npcMarkCone=8.0f;         // ...within this many degrees of the centre
     float npcGuardRadius=15.0f;     // ...a squad told to guard a point (the map): m round it its members stay
@@ -450,7 +465,9 @@ using edf::PatchVtableSlot;
 // What sits in a seat (common/seat.cpp).
 using Rider=edf::Rider;
 inline Rider SeatRider(const unsigned char* seat) noexcept { return edf::SeatRider(image,seat); }
-using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer;
+// A player of any machine in the seat (Rider::player is this machine's only: common/seat.cpp).
+inline bool AnyPlayerIn(const unsigned char* seat) noexcept { return edf::AnyPlayerIn(image,seat); }
+using edf::SeatAt; using edf::SeatCount; using edf::IsPlayer; using edf::IsAnyPlayer;
 
 // The player as last seen (on foot through the prompt visitor, or riding through a vehicle input); `at` is
 // GameMs (0: never seen).
@@ -471,6 +488,9 @@ bool JetInLine(const float* from,const float* to,const void* self) noexcept;   /
 void JetFrame(unsigned char* vehicle) noexcept;    // from HeliFrame, NPC-crewed jets only
 void JetReap(const void* self) noexcept;           // deletes withdrawn jets; call from another object's update
 bool InstallJets() noexcept;
+// jet_hooks.cpp: the bullets' candidate hook (a jet's rounds through its wingmen, a passenger's through their own
+// bike), on its own signatures: before InstallJets and InstallSidecar, whichever profiles they have.
+bool InstallBulletPass() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
 bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
 bool InstallShields() noexcept;                    // shield.cpp: the Shield Bearer's shield lets slow things through
@@ -515,7 +535,7 @@ unsigned char* JetLaunchThrown(ThrownDrone what,const float* at,const float* hea
 bool JetFlying(const void* vehicle,const void* ctrl) noexcept;
 // A helicopter made at run time (EDF6VC_HELI_410 / _506.SGO, tools/make_jets.py) at `from` facing `heading`,
 // friend, NPC pilot: the vehicle, or nullptr (not preloaded this mission, the game failed to build it).
-enum class HeliBody { brute410, eros506 };
+enum class HeliBody { brute410, eros506, medic410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic)
 unsigned char* HeliLaunch(HeliBody body,const float* from,const float* heading) noexcept;
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
 // bay is set up from.
@@ -615,8 +635,9 @@ bool IsDrillTank(const void* vehicle) noexcept;
 void DrillInput(unsigned char* vehicle) noexcept;
 void DrillFrame(unsigned char* vehicle) noexcept;
 void ResetDrills() noexcept;
-// The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now. False with none.
-struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated; };
+// The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now, whether it is launched
+// (flying) and on its way back (returning). False with none.
+struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated,flying=false,returning=false; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
 
 // jet_bay.cpp: the EMC's rounds (emc.cpp; pylib/vcobjects.py EMC_*, tools/make_emc.py), DemoIndirectFire objects owned
@@ -662,7 +683,8 @@ bool SidecarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 bool SidecarHoldsPlayer(const void* vehicle) noexcept;
 // Projectile candidates and explosion targets: only this passenger's current bike and its native driver.
 bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtrl) noexcept;
-bool SidecarBulletHooked() noexcept;
+int SidecarPassengers() noexcept;     // passengers riding now (the bullets' hook's quick "nothing to pass" test)
+bool SidecarBulletHooked() noexcept;  // jet_hooks.cpp: the bullets' candidate hook is in (InstallBulletPass)
 void SidecarLevel(const void* body,float* w) noexcept;
 void ResetSidecars() noexcept;
 // physics.cpp: the car step's final setAngVel (0x6746C6) goes through the plugin (SidecarLevel), redirected at load.
@@ -771,9 +793,10 @@ struct GunnerOrder { bool centred; float at[3],home[3]; };
 bool PlayerGunnerOrder(const void* vehicle,GunnerOrder* out) noexcept;
 // The gunner's sight (hud.cpp GunnerMarks, game thread): where the screen's centre meets the ground (`ground`: within
 // the camera's reach), its range from the gunship and whether the picked gun reaches it, that gun's wait (s, 0: ready;
-// `ready`: its rounds are there and it is), the pylon turn's centre; `cannon`: the gun picked is the long-range cannon
-// (else the shells), `both`: the cannon is there to switch to. False with the player not at a gunship's gun.
-struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred,cannon,both; };
+// `ready`: its rounds are there and it is), the pylon turn's centre; `gun`: the gun picked (GunnerGun), `guns`: the
+// guns there to switch between (a bit each, 1 << GunnerGun; the shells always). False with the player not at a gunship's gun.
+enum class GunnerGun : int { shells, cannon, gatling, count };
+struct GunnerReadout { float sight[3]; bool ground,inReach,ready; float range,wait; float centre[3]; bool centred; GunnerGun gun; unsigned guns; };
 bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
@@ -840,9 +863,9 @@ struct PlayerJetReadout {
     float aim[3],path[3];
     int stores,store;
     int storeButton,targetButton; // actual seat-button masks used by this aircraft
-    const char* storeName[6];
-    int storeRounds[6];
-    int storeRole[6];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
+    const char* storeName[kMostStores];
+    int storeRounds[kMostStores];
+    int storeRole[kMostStores];            // each one's StoreRole (stores.h) as an int: its picture on the loadout strip (hud_cue.h)
     bool bomb,hasImpact;
     float impact[3];
     int lock;                    // the picked store's lock: 2 locked, 1 locking (lockProgress 0..1), 0 none (StoreLock)
@@ -909,12 +932,10 @@ void HeliSightFrame(unsigned char* vehicle) noexcept;
 // netprobe.cpp: Debug=1, online only: once a second per helicopter-class vehicle, which machine runs it and how its
 // pose replication stands (the NET lines, docs/online-re.md). Reads only.
 void NetProbe(unsigned char* vehicle) noexcept;
-// Whether this machine is in an online session (netprobe.cpp; true when the session function is not the one read).
+// Whether this machine is in an online session (netprobe.cpp; false when the session function is not the one read).
 // This is a session query, not proof that an object participates in replication: plugin call aircraft do not
 // register a network identity; delivered vehicles do (docs/online-re.md sections 1 and 2).
 bool InSession() noexcept;
-// Whether this machine is the room's host (offline: true; netprobe.cpp). False when its code is not the one read.
-bool IsRoomHost() noexcept;
 bool PlayerHeliSight(HeliSightReadout* out) noexcept;
 // crew.cpp: the seat's weapons whose stock aim line AimLines has hidden now (the walk it hides them by), at most
 // `most`; how many.

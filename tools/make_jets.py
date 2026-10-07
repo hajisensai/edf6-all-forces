@@ -15,7 +15,8 @@ weapons EDF6VC_CALL_PJET_* (tools/call_weapons.py) bring, and EDF6VC_FLY_<KIND>.
 Also the gunship (EDF6VC_JET_GUNSHIP.SGO: the strike jet in BOMBER401's model with the gunship's own mark and a gunner seat), the
 blast / doll drone carriers (EDF6VC_JET_BLAST_CARRIER / _DOLL_CARRIER.SGO: the carrier with their marks) and the
 impact charges a crash or a ground vehicle's ram sets off (src/jet_bay.cpp ImpactDamage): EDF6VC_IMPACT_08 / _16 / _32 / _64 / _02 / _04 / _12.SGO, and the gunship's
-long-range side cannon's round (src/jet_bay.cpp CannonShot): EDF6VC_GUNSHIP_CANNON.SGO.
+side guns' rounds (src/jet_bay.cpp GunShot): the long-range cannon's EDF6VC_GUNSHIP_CANNON.SGO and the 25 mm
+gatling's EDF6VC_GUNSHIP_GATLING.SGO.
 Also the Primer creatures, enemies (src/primer.cpp, docs/primer-plan.md): EDF6VC_CENTIPEDE / _DRAGONFLY.SGO, their
 own models EDF6VC_CENTIPEDE / _DRAGONFLY.MRAB (pylib/centipede_model.py, pylib/dragonfly_model.py) and their guns
 EDF6VC_PRIMER_SPIT / _NEEDLE.SGO.
@@ -32,8 +33,10 @@ fly) stays. The test range's own jets are its own: it gives them the elevon mode
 """
 from __future__ import annotations
 
+import copy
 import os
 import sys
+from dataclasses import dataclass
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
@@ -151,6 +154,42 @@ CANNON_REACH = 2500.0
 CANNON_SIZE = 0.8
 CANNON_HIT = 2.0
 CANNON_COLOR = (6.0, 3.0, 0.6, 1.0)
+# The gunship's 25 mm gatling (src/jet_bay.cpp kGatlingSgo, README 炮舰机的机炮; the user 2026-10-07: 「炮舰机的机炮等」
+# 应该有的挂载都要有, an AC-130's GAU-12/U beside the 40 mm and the 105 mm): the cannon's round made a 25 mm HEI round:
+# GATLING_SPEED m a frame (1020 m/s, the GAU-12's ~1040), no fall, GATLING_LIFE frames (past GATLING_REACH, src/jet_bay.cpp
+# kGatlingReach: shorter than the cannon's, a lighter round), a GATLING_RADIUS m blast (under 3 m: unlike the cannon's it
+# does not break buildings, docs/drill-re.md §3; a 25 mm shell's fragments reach a couple of metres), not penetrating, a
+# thinner, yellower tracer (#7 GATLING_SIZE, #8 GATLING_HIT, #12 GATLING_COLOR). The plugin writes its damage (12 a round, a
+# fifth of the cannon's, ten a second, times the gunship's tier), scatters the rounds round the aim (kGatlingSpread) and
+# fires them straight from the gunship.
+GATLING_FILE = 'EDF6VC_GUNSHIP_GATLING.SGO'
+GATLING_RADIUS = 2.0
+GATLING_SPEED = 17.0
+GATLING_LIFE = 100
+GATLING_REACH = 1500.0
+GATLING_SIZE = 0.4
+GATLING_HIT = 2.0
+GATLING_COLOR = (6.0, 4.5, 1.0, 1.0)
+
+
+@dataclass(frozen=True)
+class GunRound:
+    """A gunship side gun's round (src/jet_bay.cpp kSideGuns): its file, blast (m), speed (m a frame), life (frames), the
+    gun's reach (m), thickness (#7 AmmoSize x #8 AmmoHitSizeAdjust) and tracer colour (#12)."""
+    file: str
+    radius: float
+    speed: float
+    life: int
+    reach: float
+    size: float
+    hit: float
+    color: tuple[float, float, float, float]
+
+
+CANNON = GunRound(CANNON_FILE, CANNON_RADIUS, CANNON_SPEED, CANNON_LIFE, CANNON_REACH, CANNON_SIZE, CANNON_HIT, CANNON_COLOR)
+GATLING = GunRound(GATLING_FILE, GATLING_RADIUS, GATLING_SPEED, GATLING_LIFE, GATLING_REACH, GATLING_SIZE, GATLING_HIT,
+                   GATLING_COLOR)
+SIDE_GUNS: tuple[GunRound, ...] = (CANNON, GATLING)   # src/jet_bay.cpp kSideGuns' order
 # Where the gunship's rounds leave (src/gunmuzzle.h; the user, 2026-10-06: 「炮舰机的机炮会打到自己身上」): off its airframe,
 # the stock bomber401 model's whole box [centre, half extents] (jet_models.model_box, the vehicle's axes and origin), on
 # the line from the box's centre to the aim, a round's hit radius (#7 AmmoSize x #8 AmmoHitSizeAdjust) and a margin past
@@ -165,6 +204,28 @@ HELIS: dict[str, str] = {
     'EDF6VC_HELI_410.SGO': 'VEHICLE410_HELI',
     'EDF6VC_HELI_506.SGO': 'V506_HELI',
 }
+# The medic heli (the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，自瞄也是锁队友」; src/heli.cpp Medic):
+# the call-in Brute 410 made script-placeable like EDF6VC_HELI_410, its door guns' weapon MEDIC_GUN_STOCK swapped for
+# MEDIC_GUN_FILE. That gun fires the stock healing round (the user, 2026-10-06: 「不是有加血的子弹吗」): the Ranger's Reverse
+# Shooter T1's (MEDIC_ROUND_STOCK, aWeapon213 「リバースシューターＴ１」: a PlasmaBullet01 with a negative AmmoDamage and a
+# blast, healing the friends round where it bursts; the game has no other healing round, the Reverser's own is a flame
+# with a negative damage too). Its class, model, size, colour, hit sound and fuse (MEDIC_ROUND_FIELDS) on the door gun,
+# the door gun's flight kept (its speed, life and drop: its reach, which the plugin's aim reads off the weapon). The heal is
+# MEDIC_GUN_HEAL a round over MEDIC_GUN_BLAST m (T1: 1000 over 15 m, 5 rounds a reload; this one 2 a second), more rounds
+# (the plugin refills no called heli's guns: MEDIC_GUN_AMMO is two minutes of healing a gun). A round with a blast skips a
+# friend's body (docs/bullet-pass-re.md §3.2 step 4), so it bursts on the ground at their feet, where the gunners aim.
+# The plugin knows a medic by this negative damage (src/heli.cpp HealingGun): its gunners then aim at hurt friends, never
+# enemies, and the player's gun in one is aimed for them (ini MedicGunnerAim).
+MEDIC_HELI_FILE = 'EDF6VC_HELI_MEDIC.SGO'
+MEDIC_GUN_FILE = 'EDF6VC_MEDIC_GUN.SGO'
+MEDIC_GUN_STOCK = 'V_410HELI_GATLING01.SGO'
+MEDIC_ROUND_STOCK = 'AWEAPON213.SGO'
+MEDIC_ROUND_FIELDS = ('AmmoClass', 'AmmoModel', 'AmmoSize', 'AmmoHitSizeAdjust', 'AmmoColor', 'Ammo_CustomParameter',
+                      'AmmoHitSe', 'AmmoIsPenetration')
+MEDIC_GUN_HEAL = 150.0       # HP a round, at the base tier (the call's tier multiplies it as it does the stock 200 damage)
+MEDIC_GUN_BLAST = 8.0        # m
+MEDIC_GUN_AMMO = 240.0
+MEDIC_GUN_NAMES = {'ja': 'メディックガン', 'en': 'Medic Gun', 'cn': '救護機砲', 'kr': '메딕 건', 'sc': '救护机炮'}
 MODEL_FILE = vc.JET_ELEVON_FILE
 MODEL = vc.JET_ELEVON_MODEL
 
@@ -202,13 +263,52 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{GUNSHIP_FILE}'] = gunship
     for name, data in impact_charges(game).items():
         out[f'OBJECT/{name}'] = data
-    cannon = cannon_round(game)
-    check_cannon_round(cannon)
+    for gun in SIDE_GUNS:
+        data = gun_round(game, gun)
+        check_gun_round(data, gun)
+        out[f'OBJECT/{gun.file}'] = data
     check_gunship_muzzle(game)
-    out[f'OBJECT/{CANNON_FILE}'] = cannon
     for name, stock in HELIS.items():
         out[f'OBJECT/{name}'] = vc.as_mission_sgo(game.read('OBJECT', stock + '.SGO'))
+    out[f'WEAPON/{MEDIC_GUN_FILE}'] = medic_gun(game.read('WEAPON', MEDIC_GUN_STOCK), game.read('WEAPON', MEDIC_ROUND_STOCK))
+    out[f'OBJECT/{MEDIC_HELI_FILE}'] = medic_heli(out[f'OBJECT/EDF6VC_HELI_410.SGO'])
     return out
+
+
+def medic_gun(stock: bytes, round_stock: bytes) -> bytes:
+    """MEDIC_GUN_FILE from the stock door gun `stock` (MEDIC_GUN_STOCK's bytes) and the Reverse Shooter T1 `round_stock`
+    (MEDIC_ROUND_STOCK's): see MEDIC_HELI_FILE."""
+    import dsgo
+    doc, rnd = dsgo.parse(stock), dsgo.parse(round_stock).root
+    r = doc.root
+    if r.get('AmmoClass') != 'SolidBullet01' or not r.get('AmmoDamage') > 0 or r.get('AmmoExplosion') != 0:
+        raise ValueError(f'{MEDIC_GUN_STOCK} 不是预期的 410 门炮（实弹、无爆炸、正伤害）')
+    heal = rnd.get('AmmoDamage')
+    if rnd.get('AmmoClass') != 'PlasmaBullet01' or not (isinstance(heal, dsgo.Node) and heal.items[0] < 0):
+        raise ValueError(f'{MEDIC_ROUND_STOCK} 不是预期的回复射手（PlasmaBullet01、负伤害）')
+    for key in MEDIC_ROUND_FIELDS:
+        r.set(key, copy.deepcopy(rnd.get(key)))
+    for key, value in (('AmmoDamage', -MEDIC_GUN_HEAL), ('AmmoExplosion', MEDIC_GUN_BLAST), ('AmmoCount', MEDIC_GUN_AMMO)):
+        r.set(key, value)
+    for lang, name in MEDIC_GUN_NAMES.items():
+        r.set(f'name.{lang}', name)
+    return dsgo.write(doc)
+
+
+def medic_heli(heli410: bytes) -> bytes:
+    """MEDIC_HELI_FILE from EDF6VC_HELI_410.SGO's bytes: its door guns' weapon MEDIC_GUN_FILE, the rest as it is."""
+    import sgo
+    version, m = sgo.read(heli410)
+    stock, ours = f'app:/weapon/{MEDIC_GUN_STOCK.lower()}', f'app:/weapon/{MEDIC_GUN_FILE.lower()}'
+    weapons = m['mission_setup'][3]
+    swapped = 0
+    for w in weapons:
+        if isinstance(w, list) and w and isinstance(w[0], str) and w[0].lower() == stock:
+            w[0] = ours
+            swapped += 1
+    if swapped != 1:
+        raise ValueError(f'EDF6VC_HELI_410 的 mission_setup 武器表里 {stock} 出现 {swapped} 次（应为 1）')
+    return sgo.write(version, m)
 
 
 def bomber_sgo(game: vc.Game, name: str) -> bytes:
@@ -222,9 +322,9 @@ def bomber_sgo(game: vc.Game, name: str) -> bytes:
 def names() -> list[str]:
     """Every path under Mods this tool writes (whether or not installed)."""
     import aircraft_collision
-    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, CANNON_FILE, *HELIS, MODEL_FILE, *MODEL_FILES,
+    objects = [*FILES, *BOMBERS, GUNSHIP_FILE, *IMPACT_FILES, *(g.file for g in SIDE_GUNS), *HELIS, MEDIC_HELI_FILE, MODEL_FILE, *MODEL_FILES,
                *vc.PORTAL_LASER_FILES, *aircraft_collision.FILES.values()]
-    return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in vc.JET_WEAPON_FILES]
+    return [f'OBJECT/{n}' for n in objects] + [f'WEAPON/{n}' for n in (*vc.JET_WEAPON_FILES, MEDIC_GUN_FILE)]
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:
@@ -336,17 +436,17 @@ def impact_charges(game: vc.Game) -> dict[str, bytes]:
     return {name: impact_charge(game, radius) for name, radius in IMPACT_FILES.items()}
 
 
-def cannon_round(game: vc.Game) -> bytes:
-    """The gunship cannon's round (see CANNON_FILE): an impact charge with the cannon's blast, speed and life, a thin
-    orange tracer."""
+def gun_round(game: vc.Game, gun: GunRound) -> bytes:
+    """A gunship side gun's round (CANNON, GATLING): an impact charge with the gun's blast, speed and life, its tracer's
+    thickness and colour."""
     import sgo
-    version, m = sgo.read(impact_charge(game, CANNON_RADIUS, CANNON_SPEED, CANNON_LIFE))
+    version, m = sgo.read(impact_charge(game, gun.radius, gun.speed, gun.life))
     p = m['indirect_fire_param']
-    if (_number(p[7]) is None or _number(p[8]) is None or not isinstance(p[12], list) or len(p[12]) != len(CANNON_COLOR)
+    if (_number(p[7]) is None or _number(p[8]) is None or not isinstance(p[12], list) or len(p[12]) != len(gun.color)
             or any(_number(c) is None for c in p[12])):
         raise ValueError(f'{IMPACT_STOCK} 的弹体粗细 / 颜色不是预期的样子')
-    p[7], p[8] = float(CANNON_SIZE), float(CANNON_HIT)
-    p[12] = [float(c) for c in CANNON_COLOR]
+    p[7], p[8] = float(gun.size), float(gun.hit)
+    p[12] = [float(c) for c in gun.color]
     return sgo.write(version, m)
 
 
@@ -367,30 +467,31 @@ def check_gunship_muzzle(game: vc.Game) -> None:
         raise GunshipMuzzleError(f'{SHELL_STOCK} 的命中半径是 {hit}，不是 SHELL_HIT {SHELL_HIT}')
 
 
-class CannonRoundError(Exception):
-    """The gunship cannon's round is not what the plugin fires (check_cannon_round)."""
+class GunRoundError(Exception):
+    """A gunship side gun's round is not what the plugin fires (check_gun_round)."""
 
 
-def check_cannon_round(data: bytes) -> None:
-    """Re-read the cannon round and raise CannonRoundError unless it is a DemoIndirectFire firing one SolidBullet01 with
-    no scatter, no gap and no wait, CANNON_SPEED m a frame with no fall for CANNON_LIFE frames (at least CANNON_REACH),
-    a CANNON_RADIUS m blast, not penetrating, CANNON_SIZE x CANNON_HIT thick in CANNON_COLOR, its damage the plugin's (0)."""
+def check_gun_round(data: bytes, gun: GunRound) -> None:
+    """Re-read side gun `gun`'s round and raise GunRoundError unless it is a DemoIndirectFire firing one SolidBullet01
+    with no scatter (the plugin scatters the gatling's), no gap and no wait, gun.speed m a frame with no fall for gun.life
+    frames (at least gun.reach), a gun.radius m blast, not penetrating, gun.size x gun.hit thick in gun.color, its damage
+    the plugin's (0)."""
     import sgo
 
     def need(ok: bool, msg: str) -> None:
         if not ok:
-            raise CannonRoundError(f'{CANNON_FILE}: {msg}')
+            raise GunRoundError(f'{gun.file}: {msg}')
 
     _, m = sgo.read(data)
     p = m.get('indirect_fire_param')
     need(m.get('xgs_scene_object_class') == 'DemoIndirectFire' and isinstance(p, list) and len(p) == 19, '不是 DemoIndirectFire')
     need(p[4] == 'SolidBullet01', f'弹种应是 SolidBullet01，实际 {p[4]!r}')
     need([_number(x) for x in p[0]] == [0.0, 0.0], '应无散布')
-    want = {2: 1, 3: 0, 5: CANNON_SPEED, 6: 0, 7: CANNON_SIZE, 8: CANNON_HIT, 9: CANNON_RADIUS, 10: CANNON_LIFE, 11: 0, 15: 0}
+    want = {2: 1, 3: 0, 5: gun.speed, 6: 0, 7: gun.size, 8: gun.hit, 9: gun.radius, 10: gun.life, 11: 0, 15: 0}
     got = {i: _number(p[i]) for i in want}
     need(all(_same(got[i], v) for i, v in want.items()), f'参数不符：{got}')
-    need(len(p[12]) == len(CANNON_COLOR) and all(_same(_number(c), v) for c, v in zip(p[12], CANNON_COLOR)), '曳光颜色不符')
-    need(CANNON_SPEED * CANNON_LIFE >= CANNON_REACH, f'飞不到 {CANNON_REACH:.0f} m 的射程')
+    need(len(p[12]) == len(gun.color) and all(_same(_number(c), v) for c, v in zip(p[12], gun.color)), '曳光颜色不符')
+    need(gun.speed * gun.life >= gun.reach, f'飞不到 {gun.reach:.0f} m 的射程')
     need(_number(m.get('indirect_fire_damage')) == 0.0, '伤害应由插件写（SGO 里为 0）')
 
 

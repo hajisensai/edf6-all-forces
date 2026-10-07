@@ -29,6 +29,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/playarea.cpp)
 # The stock split missiles (MissileBullet02) split short of a big target's surface.
 target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
+# Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
+target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/drill_net.cpp)
 # Every stock homing round (MissileBullet01/02, HomingLaserBullet01) steers by proportional navigation (src/pn.h).
 target_sources(EDF6VehicleCrew PRIVATE src/guidance.cpp)
 # Every lock-on weapon's lock: the order it locks in (the player's nearest the view), the target cycle, reading it.
@@ -275,6 +278,12 @@ set_target_properties(map_cam_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 add_executable(map_cmd_check EXCLUDE_FROM_ALL tools/map_cmd_check.cpp)
 target_compile_options(map_cmd_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(map_cmd_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The Depth Crawler's driving on a floor, a wall and a ceiling (src/crawl_logic.h), offline (tools/crawl_check.cpp).
+# Not part of the plugin build:
+# cmake --build build --target crawl_check && build\crawl_check.exe
+add_executable(crawl_check EXCLUDE_FROM_ALL tools/crawl_check.cpp)
+target_compile_options(crawl_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(crawl_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # What the map marks of the friendly side (src/map_marks.h: team 5's walk, the aircraft's icon), offline
 # (tools/map_marks_check.cpp). Not part of the plugin build:
 # cmake --build build --target map_marks_check && build\map_marks_check.exe
@@ -347,6 +356,15 @@ set_target_properties(view_clip_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(split_fuse_test tests/split_fuse_test.cpp)
 target_compile_options(split_fuse_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME split_fuse COMMAND split_fuse_test)
+# The online gates (src/online_authority.h): their rules on every case, and a source guard that the plugin asks them.
+add_executable(online_authority_test tests/online_authority_test.cpp)
+target_compile_options(online_authority_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME online_authority COMMAND online_authority_test)
+add_executable(drill_net_test tests/drill_net_test.cpp)
+target_compile_options(drill_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME drill_net COMMAND drill_net_test)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME online_gate_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_guard.py")
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
 add_executable(pn_test tests/pn_test.cpp)
 target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -354,7 +372,7 @@ add_test(NAME pn COMMAND pn_test)
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check stab_check vsound_check map_cam_check map_cmd_check crawl_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check hover_lift_check view_clip_check npc_ai_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 foreach(check IN LISTS EDF6_OFFLINE_CHECKS)
     add_test(NAME ${check} COMMAND ${check})
@@ -425,10 +443,12 @@ target_compile_options(jetsound_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks jetsound_check)
 add_test(NAME jetsound_check COMMAND jetsound_check)
 add_test(NAME vehicle_cas COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_cas_pose.py")
+# The Begaruta family (Proteus too) chains its per-frame slot 4; with the game present, against EDF.dll.
+add_test(NAME begaruta_family_profile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/begaruta_family_native_profile_test.py")
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
-foreach(check IN ITEMS heli_command_test jet_command_test rocket_guide_prediction_test rocket_impact_readout_test npc_post_test map_command_identity_test)
+foreach(check IN ITEMS heli_command_test jet_command_test bullet_pass_test rocket_guide_prediction_test rocket_impact_readout_test npc_post_test map_command_identity_test)
     add_executable(${check} EXCLUDE_FROM_ALL tests/${check}.cpp)
     target_include_directories(${check} PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
     target_link_libraries(${check} PRIVATE edf6common user32)
@@ -450,3 +470,29 @@ add_dependencies(offline_checks npc_core_check)
 add_test(NAME npc_core_check COMMAND npc_core_check)
 add_test(NAME playerjet_recovery COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/playerjet_recovery_check.py"
     --build-dir "${CMAKE_BINARY_DIR}" --negative-controls)
+# Production launch heat and cooling, including the overheat latch before the launch frame's cooling.
+add_executable(drill_heat_test EXCLUDE_FROM_ALL tests/drill_heat_test.cpp)
+target_link_libraries(drill_heat_test PRIVATE edf6common user32)
+target_include_directories(drill_heat_test PRIVATE src common)
+target_compile_options(drill_heat_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(drill_heat_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks drill_heat_test)
+add_test(NAME drill_heat COMMAND drill_heat_test)
+add_executable(drill_sync_test EXCLUDE_FROM_ALL tests/drill_sync_test.cpp)
+target_link_libraries(drill_sync_test PRIVATE edf6common user32)
+target_include_directories(drill_sync_test PRIVATE src common)
+target_compile_options(drill_sync_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(drill_sync_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks drill_net_test drill_sync_test)
+add_test(NAME drill_sync COMMAND drill_sync_test)
+add_executable(drill_net_native_test EXCLUDE_FROM_ALL tests/drill_net_native_test.cpp)
+target_link_libraries(drill_net_native_test PRIVATE edf6common user32)
+target_include_directories(drill_net_native_test PRIVATE src common)
+target_compile_options(drill_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_executable(online_authority_seat_test EXCLUDE_FROM_ALL tests/online_authority_seat_test.cpp)
+target_link_libraries(online_authority_seat_test PRIVATE edf6common user32)
+target_include_directories(online_authority_seat_test PRIVATE src common)
+target_compile_options(online_authority_seat_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(online_authority_seat_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks online_authority_seat_test)
+add_test(NAME online_authority_seat COMMAND online_authority_seat_test)

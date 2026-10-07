@@ -706,7 +706,7 @@ def drill_copies_agree() -> None:
     assert f'kDrillBone[]=L"{drill_model.DRILL_BONE}"' in d, 'src/drill.cpp kDrillBone'
     assert f'kSpinBone[]=L"{drill_model.SPIN_BONE}"' in d, 'src/drill.cpp kSpinBone'
     m = re.search(r'kBoxHalfX=([\d.]+)f', d)
-    assert m and 2 * float(m.group(1)) <= 3.8 + 1e-6, 'the contact box is no wider than the 3.8 m hull'
+    assert m and 2 * float(m.group(1)) <= make_drill.HULL_WIDTH + 1e-6, 'the contact box is no wider than the hull'
     m = re.search(r'kHullFront=([\d.]+)f,kChargeFrom=([\d.]+)f', d)
     assert m and float(m.group(1)) < drill_model.DRILL_BASE[2] and float(m.group(2)) >= 3.4, m and m.groups()
     m = re.search(r'kDrillLength=([\d.]+)f,kDrillRadius=([\d.]+)f', d)
@@ -723,6 +723,21 @@ def drill_copies_agree() -> None:
     assert len(drills) == 1 and drills[0].vehicle == make_drill.VEHICLE.sgo and drills[0].mark == 0
     assert make_drill.OWNER in ledger.OWNERS and make_drill.VEHICLE.tool == 'make_drill'
     assert not drill_model.CONVERSION.mirrors() and drill_model.CONVERSION.point((1.0, 0.0, 0.0))[2] > 0, 'OBJ +X is forward'
+
+
+@test
+def drill_settings_documented() -> None:
+    """Every Drill* key src/plugin.cpp reads is in the shipped ini and the README; the retired DrillHeatSec (its 12 s
+    default overheated too soon; an installed ini keeps the old value, so the longer default came as the new key
+    DrillOverheatSec) is read by nobody, shipped by no ini and named in IgnoreRetired."""
+    plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    keys = set(re.findall(r'Read\w+\(L"(Drill\w*)"', plugin))
+    assert {'DrillOverheatSec', 'DrillKillCool', 'DrillLaunch', 'DrillLaunchKey', 'DrillLaunchButton'} <= keys, keys
+    for key in keys:
+        assert re.search(rf'^{key}=', ini, re.M), f'{key} not in EDF6VehicleCrew.ini'
+        assert key == 'Drill' or key in readme, f'{key} not in README.md'
+    assert 'DrillHeatSec' not in keys and not re.search(r'^DrillHeatSec=', ini, re.M)
+    assert '{L"DrillHeatSec",' in plugin.split('void IgnoreRetired', 1)[1].split('\n}', 1)[0]
 
 
 @test
@@ -823,6 +838,15 @@ def sidecar_copies_agree() -> None:
     assert 'SidecarLevel(body,spin)' in phys and '&ChassisSetAngVel' in phys and '&FinalAngProbe' not in phys
     assert 'src/sidecar.cpp' in src('CMakeLists.txt') and 'InstallSidecar();' in src('src/plugin.cpp')
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
+    # The passengers' rounds pass their own bike by the bullets' hook (jet_hooks.cpp InstallBulletPass): installed on
+    # its own, ahead of the heli profile's jets and the sidecar, never from InstallJets (a heli mismatch took it away),
+    # and no part of the sidecar's switch.
+    load = plugin.split('EML6_Load(', 1)[1]
+    assert load.index('InstallBulletPass();') < load.index('if(heli)') < load.index('InstallSidecar();'), 'InstallBulletPass'
+    jets = src('src/jet_hooks.cpp').split('bool InstallJets() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'kAddBodySlot' not in jets, 'the bullets hook installed from InstallJets'
+    switch = src('src/sidecar.cpp').split('ok=ok && moveOk', 1)[1].split(';', 1)[0]
+    assert 'Hooked' not in switch and 'blastOk' not in switch, 'a sidecar sub-channel in its master switch'
     for key in ('Sidecar', 'SidecarNpcGunner', 'SidecarNpcRange'):
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     assert 'Fix("SidecarNpcRange"' in plugin, 'SidecarNpcRange is not range-checked'
@@ -1639,7 +1663,7 @@ def nix_torso_wired() -> None:
     code, twist, crew, cmake = src('src/nix.cpp'), src('src/nix_twist.h'), src('src/crew.cpp'), src('CMakeLists.txt')
     assert 'L"NixTorsoTwist"' in plugin and re.search(r'^NixTorsoTwist=1', ini, re.M) and 'NixTorsoTwist' in readme
     vt = re.search(r'kVtNix=(0x[0-9A-F]+)', code).group(1)
-    assert re.search(rf'\{{{vt},0x[0-9A-F]+,"612_nix"\}}', crew), vt
+    assert re.search(rf'\{{{vt},0x644350,"612_nix",kFindSeat,4\}}', crew), vt   # the family's per-frame update (slot 4)
     assert 'target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)' in cmake
     assert 'add_executable(nix_twist_check EXCLUDE_FROM_ALL tools/nix_twist_check.cpp)' in cmake
     sigs = code.split('const Sig kSigs[]={', 1)[1].split('};', 1)[0]
@@ -1961,11 +1985,12 @@ def gunship_gunner_seat() -> None:
 
 @test
 def gunship_cannon_round() -> None:
-    """tools/make_jets.py cannon_round / check_cannon_round on a synthetic stock round (no game needed): the gunship
-    cannon's round is the stock gunship's solid round with the cannon's numbers, nothing else changed, and the check
-    refuses a round that falls short of the reach or penetrates. The C++ side fires the file the tool writes, with the
-    tool's reach and speed (src/jet_bay.cpp kCannon*), as a store of the gunship's (src/playerjet_board.inc CANNON); the
-    installer writes it (make_jets.names) and the README tells of it."""
+    """tools/make_jets.py gun_round / check_gun_round on a synthetic stock round (no game needed), for each side gun
+    (the long-range cannon and the 25 mm gatling): its round is the stock gunship's solid round with the gun's numbers,
+    nothing else changed, and the check refuses a round that falls short of the reach or penetrates. The C++ side fires
+    the files the tool writes, with the tool's reach and speed (src/jet_bay.cpp kCannon* / kGatling*), as stores of the
+    gunship's (src/playerjet_board.inc CANNON, GATLING); the installer writes them (make_jets.names) and the README tells
+    of them. The three guns carry the same damage a second (shells 300 / 2.5 s, cannon 60 x 2, gatling 12 x 10)."""
     import sgo
     stock = {'xgs_scene_object_class': 'DemoIndirectFire', 'indirect_fire_damage': 2000.0,
              'indirect_fire_param': [[1.2, 0.0], [800.0, 0.0], 1, 0, 'SolidBullet01', 20.0, 0.0, 10.0, 2.0, 0.0, 600, 1,
@@ -1977,34 +2002,51 @@ def gunship_cannon_round() -> None:
             assert (folder, name) == ('OBJECT', make_jets.IMPACT_STOCK), (folder, name)
             return sgo.write(0x102, stock)
 
-    data = make_jets.cannon_round(Game())
-    make_jets.check_cannon_round(data)
-    old, new = sgo.read(Game().read('OBJECT', make_jets.IMPACT_STOCK))[1], sgo.read(data)[1]
-    assert set(old) == set(new) and [k for k in old if old[k] != new[k]] == ['indirect_fire_damage', 'indirect_fire_param']
-    changed = [i for i, (a, b) in enumerate(zip(old['indirect_fire_param'], new['indirect_fire_param'])) if a != b]
-    assert changed == [0, 5, 7, 9, 10, 11, 12, 15], changed   # scatter, speed, size, blast, life, penetration, colour, wait
-    assert new['indirect_fire_param'][17] == old['indirect_fire_param'][17], 'the stock cannon fire sound kept'
-    for i, value, why in ((10, 100, 'a life short of the reach'), (11, 1, 'a penetrating round'), (9, 25.0, 'a whale-sized blast')):
-        version, bad = sgo.read(data)
-        bad['indirect_fire_param'][i] = value
-        try:
-            make_jets.check_cannon_round(sgo.write(version, bad))
-        except make_jets.CannonRoundError:
-            continue
-        raise AssertionError(f'check_cannon_round took {why}')
+    bay, board, readme = src('src/jet_bay.cpp'), src('src/playerjet_board.inc'), src('README.md')
+    for gun, cpp, name in ((make_jets.CANNON, 'Cannon', 'CANNON'), (make_jets.GATLING, 'Gatling', 'GATLING')):
+        data = make_jets.gun_round(Game(), gun)
+        make_jets.check_gun_round(data, gun)
+        old, new = sgo.read(Game().read('OBJECT', make_jets.IMPACT_STOCK))[1], sgo.read(data)[1]
+        assert set(old) == set(new) and [k for k in old if old[k] != new[k]] == ['indirect_fire_damage', 'indirect_fire_param']
+        changed = [i for i, (a, b) in enumerate(zip(old['indirect_fire_param'], new['indirect_fire_param'])) if a != b]
+        assert changed == [0, 5, 7, 9, 10, 11, 12, 15], (name, changed)   # scatter, speed, size, blast, life, penetration, colour, wait
+        assert new['indirect_fire_param'][17] == old['indirect_fire_param'][17], 'the stock cannon fire sound kept'
+        for i, value, why in ((10, 50, 'a life short of the reach'), (11, 1, 'a penetrating round'), (9, 25.0, 'a whale-sized blast')):
+            version, bad = sgo.read(data)
+            bad['indirect_fire_param'][i] = value
+            try:
+                make_jets.check_gun_round(sgo.write(version, bad), gun)
+            except make_jets.GunRoundError:
+                continue
+            raise AssertionError(f'check_gun_round ({name}) took {why}')
+        assert gun.speed * gun.life >= gun.reach, name
+        assert f'k{cpp}File[]=L"{gun.file}"' in bay, f'src/jet_bay.cpp k{cpp}File'
+        assert f'k{cpp}Sgo[]=L"app:/object/{gun.file.lower()}"' in bay, f'src/jet_bay.cpp k{cpp}Sgo'
+        m = re.search(rf'k{cpp}Reach=([\d.]+)f', bay)
+        assert m and float(m.group(1)) == gun.reach, f'src/jet_bay.cpp k{cpp}Reach'
+        m = re.search(rf'k{cpp}Speed=([\d.]+)f', bay)
+        assert m and float(m.group(1)) == gun.speed * 60.0, f'src/jet_bay.cpp k{cpp}Speed (m/s) is the round\'s speed a frame'
+        assert f'OBJECT/{gun.file}' in make_jets.names(), gun.file
+        assert '{L"","' + name + '",StoreRole::bomb' in board, f'src/playerjet_board.inc kSpecials {name}'
+        assert gun.file in readme, f'README.md: {gun.file}'
+    assert make_jets.SIDE_GUNS == (make_jets.CANNON, make_jets.GATLING), 'src/jet_bay.cpp kSideGuns\' order'
+    assert re.search(r'kSideGuns\[\]=\{\s*\{kCannonSgo,kCannonFile,[^}]*\},\s*\{kGatlingSgo,kGatlingFile,', bay), 'kSideGuns in that order'
     assert 3.0 <= make_jets.CANNON_RADIUS <= 6.0, 'a few metres of blast (and >= 3 m: as the drill charge, docs/drill-re.md §3)'
-    assert make_jets.CANNON_SPEED * make_jets.CANNON_LIFE >= make_jets.CANNON_REACH
-    bay = src('src/jet_bay.cpp')
-    assert f'kCannonFile[]=L"{make_jets.CANNON_FILE}"' in bay, 'src/jet_bay.cpp kCannonFile'
-    assert f'kCannonSgo[]=L"app:/object/{make_jets.CANNON_FILE.lower()}"' in bay, 'src/jet_bay.cpp kCannonSgo'
-    m = re.search(r'kCannonReach=([\d.]+)f', bay)
-    assert m and float(m.group(1)) == make_jets.CANNON_REACH, 'src/jet_bay.cpp kCannonReach'
-    m = re.search(r'kCannonSpeed=([\d.]+)f', bay)
-    assert m and float(m.group(1)) == make_jets.CANNON_SPEED * 60.0, 'src/jet_bay.cpp kCannonSpeed (m/s) is CANNON_SPEED a frame'
-    assert f'OBJECT/{make_jets.CANNON_FILE}' in make_jets.names()
-    assert '{L"","CANNON",StoreRole::bomb' in src('src/playerjet_board.inc'), 'src/playerjet_board.inc kSpecials CANNON'
-    readme = src('README.md')
-    assert make_jets.CANNON_FILE in readme and '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
+    assert make_jets.GATLING_RADIUS < 3.0, 'the 25 mm round does not break buildings (under the drill charge\'s 3 m)'
+    assert make_jets.GATLING_REACH < make_jets.CANNON_REACH and make_jets.GATLING_SIZE < make_jets.CANNON_SIZE
+    num = r'([\d.]+)f'
+    rate = {}
+    for cpp in ('Cannon', 'Gatling'):
+        gap = re.search(rf'constexpr ULONGLONG k{cpp}GapMs=(\d+);', bay)
+        dmg = re.search(rf'constexpr float k{cpp}Damage=' + num, bay)
+        assert gap and dmg, cpp
+        rate[cpp] = float(dmg.group(1)) * 1000.0 / float(gap.group(1))
+    gap = re.search(r'constexpr ULONGLONG kGunshipGapMs=(\d+);', bay)
+    dmg = re.search(r'constexpr float kGunshipDamage=' + num, bay)
+    assert gap and dmg
+    rate['Shells'] = float(dmg.group(1)) * 1000.0 / float(gap.group(1))
+    assert max(rate.values()) - min(rate.values()) < 1e-6, f'the three guns carry the same damage a second: {rate}'
+    assert '炮舰机的机炮' in readme, 'README.md: the gunship cannon'
 
 
 def _recoil_game(mission_weapon: str, mission_recoil: list, call_weapon: str, call_recoil: list,
@@ -2125,14 +2167,16 @@ def gunship_muzzle_wired() -> None:
     assert got == want, f'src/gunmuzzle.h kGunship {got}, tools/make_jets.py GUNSHIP_AIRFRAME {want}'
     m = re.search(r'kCannonHit=' + num, head)
     assert m and abs(float(m.group(1)) - make_jets.CANNON_SIZE * make_jets.CANNON_HIT) < 1e-6, 'src/gunmuzzle.h kCannonHit'
+    m = re.search(r'kGatlingHit=' + num, head)
+    assert m and abs(float(m.group(1)) - make_jets.GATLING_SIZE * make_jets.GATLING_HIT) < 1e-6, 'src/gunmuzzle.h kGatlingHit'
     m = re.search(r'kShellHit=' + num, head)
     assert m and float(m.group(1)) == make_jets.SHELL_HIT, 'src/gunmuzzle.h kShellHit'
     assert 'check_gunship_muzzle(game)' in src('tools/make_jets.py'), 'tools/make_jets.py build checks the muzzle numbers'
     bay = src('src/jet_bay.cpp')
     assert f'kGunshipSgo[]=L"app:/object/{make_jets.SHELL_STOCK.lower()}"' in bay, 'src/jet_bay.cpp kGunshipSgo is SHELL_STOCK'
-    fired = re.findall(r'Shell\((kGunshipSgo|kCannonSgo),(?:gunshipReady|cannonReady),v,(\w+),', bay)
+    fired = re.findall(r'Shell\((kGunshipSgo|gun\.sgo),(?:gunshipReady|gun\.ready),v,(\w+),', bay)
     assert len(fired) == 3 and all(f == 'muzzle' for _sgo, f in fired), f'the gunship fires from its muzzle: {fired}'
-    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the cannon, its sight line and both shells'
+    assert len(re.findall(r'GunshipMuzzle\(v,', bay)) == 4, 'GunshipMuzzle for the side guns, their sight line and both shells'
     assert re.search(r'MapRay\(muzzle,at,hit\)', bay), 'the NPC cannon looks along the line its round flies'
     make = bay.split('unsigned char* ShellMake(', 1)[1].split('\n}\n', 1)[0]
     assert 'if(ifcWaitOk)Put<std::int32_t>(ifc,kIfcWait,0);' in make, 'ShellMake zeroes the first-round wait'
@@ -2823,6 +2867,11 @@ def pack_install_upgrade_uninstall() -> None:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
                 enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+            # the stock vehicles' stores (on by default): a vehicle and a request, gone again with the uninstall
+            stores = {'OBJECT/EDF6VC_FAKE_STORES.SGO': b'stores', 'WEAPON/FAKE_STORES_REQUEST.SGO': b'request'}
+            enter(patched(importlib.import_module('make_stock_stores'),
+                          build=lambda game, overlay=None: (dict(stores), [], {}),
+                          store_files=lambda: []))   # the fake make_jets writes no store weapons to need
             with contextlib.redirect_stdout(io.StringIO()):
                 _pack_bundle(bundle, b'v1 ')
                 answers[:] = ['y']   # AT_C: back up the other mod's file and replace it
@@ -2836,6 +2885,8 @@ def pack_install_upgrade_uninstall() -> None:
                 assert 'Gain=7.5' in at_text and 'Gain=3.0' not in at_text, 'the player\'s AutoTurret setting lost'
                 assert 'BurstVisualScale=2.5' in at_text and at_text.count('[AutoTurret]') == 1, 'missing key not added'
                 assert installer.check(game), 'check fails right after install'
+                for rel, data in stores.items():
+                    assert _read(os.path.join(mods, *rel.split('/'))) == data, f'stores file {rel} not installed'
                 modfiles.atomic_write(os.path.join(plugins, 'EDF6AutoTurret.dll'), b'old autoturret, EML6_Load only')
                 assert not installer.check(game), 'check passes an old EDF6AutoTurret.dll'
                 # The upgrade: new DLLs, a setting the new ini adds.
@@ -3242,13 +3293,27 @@ def stock_payload_and_seats_wired() -> None:
     its stores are store weapons make_jets writes and src/stores.inc knows."""
     import make_stock_stores as mss
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
-    keys = ('StockHeliStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline')
+    keys = ('StockVehicleStores', 'SeatSwitch', 'SeatNextKey', 'SeatNumberKeys', 'SeatButton', 'SeatPilot', 'SeatSwitchOnline', 'SeatList')
     for key in keys:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}=', ini, re.M) and key in readme, key
     for key in ('SeatNextKey', 'SeatButton'):
         assert f'FixInt("{key}"' in plugin, f'{key} is not range-checked'
-    assert re.search(r'^StockHeliStores=0', ini, re.M) and not mss.wanted(ini), 'StockHeliStores ships off'
-    assert mss.wanted('[VehicleCrew]\nStockHeliStores=1 ; on\n') and not mss.wanted('[Other]\nStockHeliStores=1\n')
+    assert re.search(r'^StockVehicleStores=1', ini, re.M) and mss.wanted(ini), 'StockVehicleStores ships on'
+    assert not mss.wanted('[VehicleCrew]\nStockVehicleStores=0\n'), 'the player can turn it off'
+    assert 'bool stockStores=true;' in src('src/crew.h'), 'the plugin defaults it on as the ini does'
+    assert mss.wanted('[VehicleCrew]\nStockVehicleStores=1 ; on\n') and not mss.wanted('[Other]\nStockVehicleStores=1\n')
+    # the older key (the helicopters alone) still turns it on, in the plugin and the installer alike
+    assert 'L"StockHeliStores"' in plugin and mss.wanted('[VehicleCrew]\nStockVehicleStores=0\nStockHeliStores=1\n')
+    # every stock vehicle's fire goes through the holder pull: payload.cpp takes it over (checked bytes), and the stock
+    # classes build their extra holders (stores.cpp kBuilds: one class each of the installer's BUILT_CLASSES but the 506)
+    payload, stores = src('src/payload.cpp'), src('src/stores.cpp')
+    assert 'kPull=0x62C000' in payload and 'bool InstallPayload()' in payload and 'InstallPayload();' in plugin
+    assert 'PullHook' in payload and 'kFireSecondary' not in payload, 'payload.cpp: the pull lands on the store picked'
+    builds = re.findall(r'\{0x[0-9A-F]+,0x[0-9A-F]+,"([0-9A-Za-z_]+)"\}', stores.split('const BuildClass kBuilds[]={', 1)[1].split('};', 1)[0])
+    want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
+                  for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
+    assert sorted(builds) == want, (builds, want)
+    assert 'IsLoadoutWeapon(w)' in payload and 'L"EDF6VC_"' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     order = [hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
     assert all(x >= 0 for x in order) and order == sorted(order), f'src/crew.cpp InputHook step order: {order}'
@@ -3278,24 +3343,88 @@ def stock_payload_and_seats_wired() -> None:
     seat = src('src/seatswitch.cpp')
     for c in ('kAnnounce=0x5763E0', 'kSetAction=0x551C30', 'kRideAction=0x56C9F0', 'kReserve=0x633FE0', 'kClear=0x634940'):
         assert c in seat, c
+    # The seats line is a reading, not a move (the user 2026-10-07): SeatList lists them the whole ride, with SeatSwitch
+    # off too, and the keys ride along only in the prompt's moment.
+    assert re.search(r'^SeatList=1', ini, re.M), 'SeatList ships on'
+    frame = seat.split('void SeatSwitchFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert '!(ok && Cfg().seatSwitch) && !Cfg().seatList' in frame, 'SeatSwitchFrame: the list runs without the switch'
+    assert 'Cfg().seatList ? ms+kFreshMs' in seat, 'Publish: SeatList keeps the line up the whole ride'
+    assert 'const bool may=ok && Cfg().seatSwitch;' in seat and 'if(p.hints)SeatKeys(l,p);' in src('src/hud.cpp')
+    # The AI riders in gunner seats work their guns (the user 2026-10-07): RideAi's dummy riders a bump or a seat swap
+    # moved there too, and the 410's door seats under a player pilot, on the gun's own rounds.
+    npc = src('src/npcai.cpp')
+    assert 'if(who==Rider::dummy)return true;' in npc and 'if(!AiGunner(seat))continue;' in npc
+    heli = src('src/heli.cpp')
+    assert 'DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms)' in heli, 'the player-piloted 410: no refill, no hold'
+    assert 'PlayerHeli(vehicle);CrewDoorGuns(vehicle);' in heli
+    assert re.search(r'^NpcGunners=1', ini, re.M) and 'L"NpcGunners"' in plugin and 'NpcGunners' in readme
+    # Out of a ground vehicle's driver seat with the stock driving AI an NPC driver takes it (the user 2026-10-07: the map
+    # sends it off with the player aboard); Crew() never does while a player rides, so Pilot must.
+    pilot = seat.split('void Pilot(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!heli && !NpcDrivable(v))return;' in pilot and 'if(!SeatNpcRider(v,false))' in pilot
+    assert 'bool NpcDrivable(const unsigned char* v) noexcept { return FamilyOf(v)!=Family::none; }' in src('src/npcpost.cpp')
+    # Every vehicle an NPC can drive (the user 2026-10-07: "所有载具都要支持ai"): the unarmed trucks of the Grape's class
+    # too, and the CarBase classes whose slot 49 is a preferred-seat wrapper (the trucks 607 / 60X, the rescue 507).
+    crew_src = src('src/crew.cpp')
+    assert 'armedOnly' not in crew_src, 'an unarmed vehicle gets an NPC driver too'
+    for entry in ('{0x17DCAB0,0x65A390,"607_RoboTruck",0x65B910}', '{0x17DCFB8,0x65A390,"60X_Truck",0x65B910}',
+                  '{0x17DB590,0x61BFD0,"507_Rescuetank",0x61D310}'):
+        assert entry in crew_src, entry
+    assert 'if(moved && at==0)Pilot(v);' in seat
+
+
+@test
+def new_defaults_on_once() -> None:
+    """The settings whose default became on (the user, 2026-10-07: "还有什么默认是关的，都打开"): the shipped ini and the
+    plugin's own defaults have them on; an existing ini still holding the old default gets the new one, once (its mark
+    keeps a later install from undoing the player's own 0), a value the player set is kept; the install reads the ini as
+    it will be (player_ini_text), so the stores are built on the first install; the uninstall that keeps the call
+    weapons still takes the stores back, EDF6AutoTurret's flak requests rewritten first."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    for key, (old, new) in installer.NEW_DEFAULTS[installer.SECTION].items():
+        assert re.search(rf'^{key}={new}\b', ini, re.M), f'{key} ships {new}'
+    for field in ('DWORD heliLandMs=5000;', 'bool rescueAutoBoard=true;', 'bool stockStores=true;', 'bool seatSwitchOnline=true;'):
+        assert field in crew, field
+    user = '[VehicleCrew]\nEnabled=1\nHeliLandMs=0\nRescueAutoBoard=0 ; mine\nSeatSwitchOnline=1\nStockHeliStores=0\n'
+    text, flipped = installer.apply_new_defaults(user)
+    assert sorted(flipped) == ['HeliLandMs', 'RescueAutoBoard'], flipped
+    assert 'HeliLandMs=5000' in text and 'RescueAutoBoard=1 ; mine' in text and installer.DEFAULTS_MARK in text
+    again = text.replace('RescueAutoBoard=1', 'RescueAutoBoard=0')
+    assert installer.apply_new_defaults(again) == (again, []), 'a later install undid the player\'s own 0'
+    planned = installer.planned_ini(user, ini)
+    assert 'StockVehicleStores' in planned[1] and planned[3] and make_stock_stores_wanted(planned[0])
+    inst = src('tools/installer.py')
+    assert 'return planned_ini(' in inst.split('def player_ini_text(', 1)[1].split('\ndef ', 1)[0], 'the install reads the ini as it will be'
+    un = inst.split('def uninstall(game: str)', 1)[1].split('\ndef ', 1)[0]
+    assert "if choice == '2':" in un and 'uninstall_stock_stores(game)' in un, 'the plugin-only uninstall keeps the stores'
+    body = inst.split('def uninstall_stock_stores(', 1)[1].split('\ndef ', 1)[0]
+    assert body.index('install_autoturret(') < body.index('make_stock_stores.remove('), 'its requests rewritten before the vehicles go'
+
+
+def make_stock_stores_wanted(text: str) -> bool:
+    import make_stock_stores
+    return make_stock_stores.wanted(text)
 
 
 @test
 def stock_stores_build() -> None:
-    """With the game here (CI has none): every stock request that brings a 506-class helicopter of LOADOUTS gets a vehicle
-    whose holders and weapon list agree, the fuel tank fourth, the stores after it (make_stock_stores.check); only the
-    vehicle, the weapon list and the preload list change."""
+    """With the game here (CI has none): every stock request that brings a vehicle of LOADOUTS gets a vehicle whose
+    holders are its own and one a store (each a copy of the one it hangs beside) and lists a weapon a holder, the stores
+    last (make_stock_stores.check); only the vehicle, the weapon list and the preload list change; every vehicle's class
+    is one the plugin builds the extra holders of; EDF6AutoTurret's requests handed in come back with the stores."""
     import rootcpk
     import make_stock_stores as mss
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         return
     game = rootcpk.default()
     names = mss.requests(game)
-    assert names, 'no stock request brings a helicopter of LOADOUTS'
+    assert names, 'no stock request brings a vehicle of LOADOUTS'
+    rows = {stem: mss.stock_rows(game, stem) for stem in mss.LOADOUTS}
     files: dict[str, bytes] = {}
     stems = set()
     for name in names:
-        data, stem = mss.request_sgo(game.read('WEAPON', name), name)
+        data, stem = mss.request_sgo(game.read('WEAPON', name), name, rows)
         files[f'WEAPON/{name}'] = data
         stems.add(stem)
         before, after = dsgo.to_py(dsgo.parse(game.read('WEAPON', name)).root), dsgo.to_py(dsgo.parse(data).root)
@@ -3303,10 +3432,22 @@ def stock_stores_build() -> None:
         for k in before:
             if k not in ('Ammo_CustomParameter', 'resource'):
                 assert before[k] == after[k], (name, k)
-    assert stems == set(mss.LOADOUTS), stems
+    assert stems == set(mss.LOADOUTS), set(mss.LOADOUTS) - stems
     for stem in stems:
+        assert mss.vehicle_class(game, stem) in mss.BUILT_CLASSES, stem
         files[f'OBJECT/{mss.derived_name(stem)}'] = mss.derived_vehicle(game, stem)
-    mss.check(files)
+    mss.check(files, rows)
+    flak = 'WEAPON/AWEAPON346.SGO'
+    assert flak in files, 'the Kepler is one of them'
+    import build as at_build
+    turret = at_build.build_files()
+    assert flak in turret, 'EDF6AutoTurret writes the Kepler request'
+    handed = mss.build(rootcpk.DEFAULT_GAME,
+                       overlay={k: v for k, v in turret.items() if k.startswith('WEAPON/')})[2]
+    got = dsgo.to_py(dsgo.parse(handed[flak]).root)
+    mine = dsgo.to_py(dsgo.parse(turret[flak]).root)
+    assert [k for k in got if k not in ('Ammo_CustomParameter', 'resource')] == [k for k in mine if k not in ('Ammo_CustomParameter', 'resource')]
+    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_2.sgo' in str(got['resource'])
 
 
 @test
@@ -3349,11 +3490,9 @@ def vehicle_ram_wired() -> None:
     assert len(profiles) >= 16, profiles
     for vt, name in profiles:
         assert known.get(name) == int(vt, 16), f'src/vehicleram.h {name} {vt}: not as crew.cpp kClasses has it'
-    unhooked = dict(re.findall(r'\{(0x[0-9A-Fa-f]+),0,"(\w+)"\}', crew))
-    extras = re.findall(r'\{(0x[0-9A-Fa-f]+),4,0x[0-9A-Fa-f]+,\{[^}]*\},"(\w+)"\}', c)
-    assert sorted(n for _, n in extras) == ['501_FortressRobo'], extras
-    for vt, name in extras:
-        assert unhooked.get(vt) == name, f'{name}: crew.cpp hooks it (no own hook needed) or names it otherwise'
+    # The Barga is crew.cpp's now (its slot 4): no own update hook here, or the ram step would run twice a frame.
+    assert '{0x17D98C8,0x60AEC0,"501_FortressRobo",kFindSeat,4}' in crew
+    assert 'kExtras' not in c and 'ChainVtableSlot' not in c, 'src/vehicleram.cpp: an own update hook besides crew.cpp'
     hook = crew.split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     assert '&VehicleRamFrame,' in hook, 'src/crew.cpp InputHook: the ram step'
     assert 'ResetVehicleRams();' in src('src/mission.cpp') and 'InstallVehicleRam();' in src('src/plugin.cpp')
@@ -3485,7 +3624,7 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp', 'src/npcai.cpp', 'src/sazabi.cpp'):
+                'src/proteus.cpp', 'src/npcai.cpp', 'src/drill.cpp', 'src/sazabi.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
@@ -3498,7 +3637,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'GetAsyncKeyState' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'sazabi.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp']), f'a new key reader: make it give way to the map ({readers})'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -3689,11 +3828,14 @@ def npc_ai_wired() -> None:
     scripted = code.split('Plan Scripted(Soldier& s,', 1)[1].split('\n}\n', 1)[0]
     for write in ('Move(', 'MoveTo(', 'Look(', 'Stand(', 'kMoveX', 'kJumpPress'):
         assert write not in scripted, f"a scripted unit's moves are the stock AI's ({write})"
-    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,float blast,float reach) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger]=0;h[kTrigger+1]=0;' in veto, \
+    veto = code.split('void Veto(unsigned char* h,const Enemy* t,const float* eye,const Arms& a) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'Veto(h,' in scripted and '=1' not in scripted and '=1' not in veto and 'h[kTrigger+k]=0' in veto, \
         'a scripted unit: the trigger (both hands) only taken off'
+    assert 'k<kHands' in veto and 'a.held[k]' in veto and 'LargestBlast(a)' in veto, \
+        "each hand vetoed with its own WeaponSet's weapon; the largest blast only for a hand whose weapon is unknown"
+    assert 'LargestBlast(a),LongestReach(a)' not in code.replace(veto, ''), 'no caller vetoes both hands with the largest blast'
     think = code.split('void Think(unsigned char* h,int cls) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert '(At<std::uint8_t>(h,kNet)&1)' in think and 'IsPlayer(h)' in think, "only this machine's NPC soldiers"
+    assert '!IsOnlineAuthority(h)' in think and 'IsAnyPlayer(h)' in think, "only this machine's NPC soldiers (online_authority.h)"
     assert 'npc::Scripted(control) ? Scripted(' in think
     ensure = crew.split('void EnsureInputs() noexcept {', 1)[1].split('\n}', 1)[0]
     assert ensure.index('InstallInputs();') < ensure.index('InstallNpcAi();')
@@ -3715,15 +3857,22 @@ def npc_ai_wired() -> None:
     hook = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert hook.index('Guarded(kStepNpcPost,&NpcPostInput,') < hook.index('nextInput[I](vehicle,hasInput,a3,a4);')
     body = post.split('void NpcPostInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(At<const void*>(v,kRoute))' in body and 'if(InSession() && !IsRoomHost())return;' in body
-    assert body.index('StockDriving(seat)') < body.index('Put<float>(seat,kSeatSteer')
+    assert 'if(At<const void*>(v,kRoute))' in body and 'if(!OnlineHostOnly())return;' in body
+    assert body.index('StockDriving(v,f,*p)') < body.index('Write(v,f,*p,c0,c1);')
+    # Every family (2026-10-07): the mechs' turn-on-spot constant, the Barga by its stock walk, and the plugin's own
+    # last write never read as the stock AI driving, taken back when the drive ends.
+    assert 'f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot' in body and '(image+kBargaWalk)(v,block,point,1.0f,' in body
+    assert 'if(!s.active){TakeBack(v,f,*p);return;}' in body
+    stock = post.split('bool StockDriving(unsigned char* v,Family f,const Post& p) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'p.wrote && c0==p.last[0] && c1==p.last[1]' in stock
+    assert 'kBargaWalkSig[]={0x40,0x53,' in post, 'the Barga walk prologue (push rbx with REX)'
     assert 'ResetNpcPosts();' in mission and 'src/npcpost.cpp' in cmake
     # The leader's death (§5.3): before the stock Think (whose code splits the squad), host only, through the stock
     # SetFollow and its replication slot.
     hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
     assert hook.index('PreThink(static_cast<unsigned char*>(human))') < hook.index('nextThink[I](human,dt);')
     pre = code.split('void PreThink(unsigned char* h) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(InSession() && !IsRoomHost())return;' in pre and 'kAutoResurrect' in pre
+    assert 'if(!OnlineHostOnly())return;' in pre and 'kAutoResurrect' in pre
     follow = code.split('void Follow(unsigned char* h,unsigned char* leader) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'image+kSetFollow' in follow and 'vt[kSlotNetFollow]==image+kNetFollow' in follow
     for key, default in (('NpcSquadSuccession', '1'), ('NpcSquadMin', '2'), ('NpcSquadMax', '8'), ('NpcSquadJoinRange', '150')):
@@ -3760,7 +3909,10 @@ def npc_ai_wired() -> None:
     off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
     gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'IsSoldierClass(rider)' in gun
+    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(seat))continue;' in gun
+    who = code.split('bool AiGunner(const unsigned char* seat) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'IsSoldierClass(rider)' in who and '!IsAnyPlayer(rider)' in who and 'IsOnlineAuthority(rider)' in who, 'AiGunner: only local NPC soldiers'
+    assert 'Cfg().customNpcAi' in who and 'Cfg().npcBoarding' in who, 'AiGunner: the soldiers still under NpcBoarding'
     inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')
     assert f'L"NpcBoarding"' in plugin and re.search(r'^NpcBoarding=1\s*$', ini, re.M) and 'NpcBoarding' in readme and 'NpcBoarding' in doc

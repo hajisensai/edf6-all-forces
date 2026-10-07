@@ -4,6 +4,12 @@
 #include <cstdlib>
 namespace crew {
 unsigned char* image=nullptr;PlayerFix player{};
+// Offline (online_authority.h): an NPC rider may be seated, through the vehicle's own RideAi (the fixture's vtable).
+bool OnlineMaySeatNpc(const void*) noexcept { return true; }
+bool SeatNpcRider(unsigned char* v,bool spawned) noexcept {
+    reinterpret_cast<void(__fastcall* const*)(void*,bool)>(At<void* const*>(v,0))[kSlotRideAi](v,spawned);
+    return true;
+}
 namespace {
 Config testConfig{};
 unsigned char testVehicle[0x2000]{},testSeats[2*kSeatStride]{},testHuman[0x1600]{},testDummy[0x400]{},testCtrl[16]{};

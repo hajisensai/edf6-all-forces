@@ -11,8 +11,22 @@
 // (+0x25E0, set from the spawn position by slot 6 0x6731C0, kept while it has no route), else where it was first seen.
 // Online: the host alone (the NPC driver has no network identity: every machine takes itself for its authority,
 // docs/online-re.md §3.4; the plugin adds no second opinion).
+// The families (the user 2026-10-07: "所有载具都要支持ai"; docs/ground-ai-re.md): every one has a stock AI that only
+// follows a route or turns onto a target, never back to a spot.
+//  - CarBase (slot 72 0x661440): tanks, the Titan, the bikes, the Grape, the trucks, the rescue vehicle; as above.
+//  - the Begaruta family (slot 4 0x644350: 504, Begaruta, the 612 Nix, the Proteus): its AI think 0x63C1C0 writes seat
+//    0's stick by 0x63BDA0, the tanks' convention to the constant (steer -clamp(10 x bearing), throttle -1 / +1, the
+//    reverse past 2.199) but for turning on the spot past 0.9425 (0x17A3C00); the input 0x641800 (slot 4) reads it
+//    whoever sits. Written before the stock slot 4.
+//  - the Barga (501_FortressRobo): its AI (slot 7, 0x60A520) fills the vehicle's own block +0x1610 and slot 4 0x60AEC0
+//    copies that block when the vehicle is on the AI table, seat 0's sticks otherwise. Driven by the stock walk
+//    0x604400(vehicle, block, point, speed, radius) (its signs its own: turn +0x14 = +-1, forward +8 = speed), into the
+//    block and, mapped as the copy maps them, into seat 0 (forward = -LY, turn = -RX).
+// What the plugin wrote last is remembered: a stick still holding it is the plugin's, not the stock AI driving (a
+// frame without the AI pass clears nothing), and it is taken back when the drive ends.
 #include "crew.h"
 #include "layout.h"
+#include "online_authority.h"
 #include "memory.h"
 #include "npc_logic.h"
 #include <cmath>
@@ -20,21 +34,41 @@
 
 namespace crew {
 namespace {
-constexpr std::size_t kSlotAi=72;
+constexpr std::size_t kSlotAi=72,kSlotUpdate=4;
 constexpr unsigned kTankAi=0x661440;                 // CarBase's AI action: every tank, the Titan, the Grape
+// Stable class identities: InstallInputs replaces each family's slot 4 with its InputHook, so the
+// current slot value cannot identify the class once the plugin starts running.
+constexpr unsigned kBegarutaVtables[]={0x17DA960,0x17DD440,0x17DE0A8,0x17DEC40};
+constexpr unsigned kVtBarga=0x17D98C8;               // 501_FortressRobo
+constexpr unsigned kBargaWalk=0x604400;
+const unsigned char kBargaWalkSig[]={0x40,0x53,0x48,0x81,0xEC,0x80,0x00,0x00,0x00,0x0F,0x29,0x74,0x24,0x70,0x48,0x8B};
+constexpr std::size_t kBargaBlock=0x1610,kBargaForward=0x8,kBargaTurn=0x14;
+constexpr std::size_t kSeatRightX=0x2D0;
 constexpr std::size_t kRoute=0x4A8;
 constexpr std::size_t kStockGoal=0x25E0;             // the navigation target (the spawn position until a route)
 constexpr std::size_t kDriveMode=0x1AD0;             // bit 0 clear: slot 55 does not read the stick (dl = 0)
 constexpr std::size_t kSeatSteer=0x2C0,kSeatThrottle=0x2C4;
 constexpr float kBackAngle=2.199f;                  // 0x17DEBAC: the stock reverses past this off the nose
 constexpr float kTurnOnSpot=0.314159f;              // 0x17A3E04: the stock turns on the spot past this
+constexpr float kMechTurnOnSpot=0.9424778f;         // 0x17A3C00: the Begaruta family's (0x63BDA0)
 constexpr float kGoalNear=30.0f;                    // m: +0x25E0 this near when first seen is its spawn point
 constexpr ULONGLONG kStaleMs=2000,kLogMs=2000;
 constexpr int kMaxPosts=64;
 
-struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; };
+enum class Family : std::uint8_t { none, carBase, mech, barga };
+// wrote/last: the plugin's last write to the two channels it drives (steer / throttle, the Barga's turn / forward).
+struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; bool wrote; float last[2]; };
 Post posts[kMaxPosts]{};
 ULONGLONG fullLoggedAt=0;
+
+Family FamilyOf(const unsigned char* v) noexcept {
+    const auto vt=At<void* const*>(v,0);
+    if(!Readable(vt,(kSlotUpdate+1)*8))return Family::none;
+    if(vt==reinterpret_cast<void* const*>(image+kVtBarga))return Family::barga;          // 54 slots: no slot 72
+    for(const unsigned rva:kBegarutaVtables)
+        if(vt==reinterpret_cast<void* const*>(image+rva))return Family::mech;            // 57 slots: no slot 72
+    return Readable(vt,(kSlotAi+1)*8) && vt[kSlotAi]==image+kTankAi ? Family::carBase : Family::none;
+}
 
 Post* PostOf(const unsigned char* v,ULONGLONG ms) noexcept {
     Post* slot=nullptr;
@@ -52,29 +86,55 @@ Post* PostOf(const unsigned char* v,ULONGLONG ms) noexcept {
     *slot=Post{};
     slot->ref=ObjRef::Of(v);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
-    const float* goal=reinterpret_cast<const float*>(v+kStockGoal);
-    const bool spawn=!resumed && std::isfinite(goal[0]+goal[1]+goal[2]) && npc::Horiz(pos,goal)<kGoalNear;
+    const float* goal=reinterpret_cast<const float*>(v+kStockGoal);   // a CarBase's only
+    const bool spawn=!resumed && FamilyOf(v)==Family::carBase && std::isfinite(goal[0]+goal[1]+goal[2]) && npc::Horiz(pos,goal)<kGoalNear;
     std::memcpy(slot->at,spawn ? goal : pos,12);
     std::memcpy(slot->home,slot->at,12);
     Log("NPCPOST v=%p %s post (%.0f,%.0f,%.0f)",v,spawn ? "spawn" : "first-seen",slot->at[0],slot->at[1],slot->at[2]);
     return slot;
 }
 
-// Slot 7 clears the seat block (0x673330..0x673349), then runs the stock action. Respect what that action actually
-// wrote: 0x6616EB tests turret traversal, not weapon range, and 0x66172E turns towards an out-of-arc enemy.
-bool StockDriving(const unsigned char* seat) noexcept {
-    return At<float>(seat,kSeatSteer)!=0.0f || At<float>(seat,kSeatThrottle)!=0.0f;
+// The two channels the plugin drives: seat 0's steer / throttle, the Barga's block turn / forward.
+float* Channel(unsigned char* v,Family f,int i) noexcept {
+    if(f==Family::barga)return reinterpret_cast<float*>(v+kBargaBlock+(i==0 ? kBargaTurn : kBargaForward));
+    return reinterpret_cast<float*>(SeatAt(v,0)+(i==0 ? kSeatSteer : kSeatThrottle));
 }
 
-bool TankAi(const unsigned char* v) noexcept {
-    const auto vt=At<void* const*>(v,0);
-    return Readable(vt,(kSlotAi+1)*8) && vt[kSlotAi]==image+kTankAi;
+// Slot 7 clears the seat block (0x673330..0x673349; the Begaruta family's 0x643530 every seat's, the Barga's its block),
+// then runs the stock action. Respect what that action actually wrote (0x6616EB tests turret traversal, not weapon
+// range, and 0x66172E turns towards an out-of-arc enemy), not what the plugin left there itself.
+bool StockDriving(unsigned char* v,Family f,const Post& p) noexcept {
+    const float c0=*Channel(v,f,0),c1=*Channel(v,f,1);
+    if(c0==0.0f && c1==0.0f)return false;
+    return !(p.wrote && c0==p.last[0] && c1==p.last[1]);
+}
+
+void Write(unsigned char* v,Family f,Post& p,float c0,float c1) noexcept {
+    *Channel(v,f,0)=c0;*Channel(v,f,1)=c1;
+    if(f==Family::barga) {   // off the AI table slot 4 reads seat 0 instead: forward = -LY, turn = -RX
+        unsigned char* const seat=SeatAt(v,0);
+        Put<float>(seat,kSeatThrottle,-c1);Put<float>(seat,kSeatRightX,-c0);
+    }
+    p.wrote=c0!=0.0f || c1!=0.0f;p.last[0]=c0;p.last[1]=c1;
+}
+
+// The drive ended: what the plugin left is taken back (a frame without the AI pass would keep it going).
+void TakeBack(unsigned char* v,Family f,Post& p) noexcept {
+    if(p.wrote && *Channel(v,f,0)==p.last[0] && *Channel(v,f,1)==p.last[1])Write(v,f,p,0.0f,0.0f);
+    p.wrote=false;
+}
+
+using BargaWalkFn=bool(__fastcall*)(void*,void*,const float*,float,float);
+bool BargaWalkOk() noexcept {
+    static int ok=0;
+    if(!ok)ok=Matches(kBargaWalk,kBargaWalkSig,sizeof(kBargaWalkSig)) ? 1 : -1;
+    return ok>0;
 }
 
 bool Available(const Post& p,ULONGLONG ms) noexcept {
     const auto v=static_cast<const unsigned char*>(p.ref.obj);
     return Cfg().enabled && Cfg().customNpcAi && Cfg().tankReturnToPost && !InSession() &&
-        p.seen && ms-p.seen<=500 && Readable(v,kStockGoal+12) && p.ref.Is(v) && !v[kDead] && TankAi(v) &&
+        p.seen && ms-p.seen<=500 && Readable(v,kMatrix+64) && p.ref.Is(v) && !v[kDead] && FamilyOf(v)!=Family::none &&
         !At<const void*>(v,kRoute) && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy;
 }
 
@@ -86,32 +146,42 @@ void Relinquish(const unsigned char* v) noexcept {
 }
 }  // namespace
 
+bool NpcDrivable(const unsigned char* v) noexcept { return FamilyOf(v)!=Family::none; }
+
 void NpcPostInput(unsigned char* v) noexcept {
-    if(!Cfg().customNpcAi || !Cfg().tankReturnToPost || v[kDead] || !TankAi(v))return;
+    if(!Cfg().customNpcAi || !Cfg().tankReturnToPost || v[kDead])return;
+    const Family f=FamilyOf(v);
+    if(f==Family::none || (f==Family::barga && !BargaWalkOk()))return;
     if(SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy) {
         // Not NPC-driven (the player took the wheel, or nobody): its post is forgotten; an NPC later starts from where it is.
         Relinquish(v);
         return;
     }
     if(At<const void*>(v,kRoute)){Relinquish(v);return;} // even a short script route invalidates the old post
-    if(InSession() && !IsRoomHost())return;
+    if(!OnlineHostOnly())return;   // the NPC driver has no identity: the host alone (online_authority.h)
     const ULONGLONG ms=GameMs();
     Post* const p=PostOf(v,ms);
     if(!p)return;
     p->seen=ms;
-    unsigned char* const seat=SeatAt(v,0);
-    if(!(At<std::uint32_t>(v,kDriveMode)&1) || StockDriving(seat)){p->active=false;return;}
+    const bool reads=f!=Family::carBase || (At<std::uint32_t>(v,kDriveMode)&1);   // a CarBase's slot 55 reads the stick
+    if(!reads || StockDriving(v,f,*p)){p->active=false;p->wrote=false;return;}
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const npc::Steer s=npc::ReturnToPost(reinterpret_cast<const float*>(v+kPosition),m,m+8,p->at,Cfg().tankPostHold,
-                                         Cfg().tankReverseMax,kBackAngle,kTurnOnSpot);
+                                         Cfg().tankReverseMax,kBackAngle,f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot);
     if(s.active!=p->active)Log("NPCPOST v=%p %s (%.1f m off its post)",v,s.active ? "driving back" : "back at its post",s.dist);
     p->active=s.active;
-    if(!s.active)return;
-    Put<float>(seat,kSeatSteer,npc::SteerStick(s));
-    Put<float>(seat,kSeatThrottle,npc::ThrottleStick(s));
+    if(!s.active){TakeBack(v,f,*p);return;}
+    float c0=npc::SteerStick(s),c1=npc::ThrottleStick(s);
+    if(f==Family::barga) {   // the stock walk's own turn and pace (it stops inside the hold itself)
+        alignas(16) float block[8]{};
+        alignas(16) const float point[4]={p->at[0],p->at[1],p->at[2],1.0f};
+        reinterpret_cast<BargaWalkFn>(image+kBargaWalk)(v,block,point,1.0f,Cfg().tankPostHold);
+        c0=block[kBargaTurn/4];c1=block[kBargaForward/4];
+    }
+    Write(v,f,*p,c0,c1);
     if(Cfg().debug && ms-p->loggedAt>kLogMs) {
         p->loggedAt=ms;
-        Log("NPCPOST v=%p dist=%.1f bearing=%.2f reverse=%d steer=%.2f throttle=%.2f",v,s.dist,s.bearing,s.reverse,npc::SteerStick(s),npc::ThrottleStick(s));
+        Log("NPCPOST v=%p dist=%.1f bearing=%.2f reverse=%d ch=(%.2f,%.2f) family=%d",v,s.dist,s.bearing,s.reverse,c0,c1,static_cast<int>(f));
     }
 }
 
@@ -130,7 +200,10 @@ int TankCommandUnits(CommandUnit* out,int most) noexcept {
     const ULONGLONG ms=GameMs();
     int n=0;
     for(const auto& p:posts)
-        if(n<most && Available(p,ms) && ReadCommandUnit(p.ref,"TANK",p.cmd,false,&out[n])) { out[n].status=p.active ? "RETURNING" : "AT POST"; ++n; }
+        if(n<most && Available(p,ms) && ReadCommandUnit(p.ref,FamilyOf(static_cast<const unsigned char*>(p.ref.obj))==Family::carBase ?
+                                                          "TANK" : "MECH",p.cmd,false,&out[n])) {
+            out[n].status=p.active ? "RETURNING" : "AT POST";++n;
+        }
     return n;
 }
 bool TankCommand(const void* v,const Command& c) noexcept {

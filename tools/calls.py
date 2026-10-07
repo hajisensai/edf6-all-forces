@@ -152,7 +152,11 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_SIDECAR', 0, 'sidecar', False, 0, 4000, 1.0, 'vehicle', vehicle='EDF6VC_SIDECAR', ground='sidecar'),
     # Appended 2026-10-05: the boarding gun (src/boarding.cpp), a Ranger sniper rifle; no call, a row like the calls'.
     Call('EDF6VC_CALL_BOARDING_GUN', 7301, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='aWeapon081'),
-    # Appended 2026-10-06 (the user: 「增加高达」): the Sazabi (src/sazabi.cpp, tools/make_sazabi.py), a mobile suit the
+    # Appended 2026-10-06 (the user: 「增加救护直升机，射的子弹射到队友会回血，自瞄也是锁队友」): Brute 410s whose door guns
+    # heal (tools/make_jets.py MEDIC_HELI_FILE); their gunners aim at hurt friends (src/heli.cpp Medic).
+    Call('EDF6VC_CALL_MEDIC_HELI', 7120, 'medic_heli', False, 2, 1800, 0.5, 'helis', 'medic helis (guard)', 360, body='medic410'),
+    Call('EDF6VC_CALL_MEDIC_HELI_F', 7121, 'medic_heli', True, 2, 2000, 0.7, 'helis', 'medic helis (follow)', 360, body='medic410'),
+    # Appended 2026-10-07 (the user: 「增加高达」): the Sazabi (src/sazabi.cpp, tools/make_sazabi.py), a mobile suit the
     # player pilots, requested empty like the player jets; `mark` its body's (pylib/vcobjects.py SAZABI_MARK).
     Call('EDF6VC_CALL_SAZABI', 7401, 'sazabi', False, 0, 15000, 2.6, 'vehicle', vehicle='EDF6VC_SAZABI',
          jet='edf6tr_sazabi_mission'),
@@ -175,7 +179,8 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'aircraft to fly and air carriers (2026-10-06)': IDS[:35],
     'sidecar motorcycle (2026-10-06)': IDS[:36],
     'boarding gun (integrated 2026-10-06)': IDS[:37],
-    'Sazabi (2026-10-06)': IDS[:38],
+    'medic helis (2026-10-06)': IDS[:39],
+    'Sazabi (2026-10-07)': IDS[:40],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -513,6 +518,14 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'CN': ('人偶無人機母艦', '呼叫人偶無人機母艦：放出掛著會唱歌跳舞的人偶的無人機，慢慢飛到敵人中間吸引火力，然後自爆。'),
         'JA': ('人形ドローン母艦', '人形ドローン母艦を要請する。歌って踊る人形を吊るしたドローンが敵の中へ進み、注意を引いてから自爆する。'),
         'EN': ('Doll Drone Carrier', 'Calls a carrier whose drones carry a singing, dancing doll into the enemy, draw their fire, and blow up.'),
+    },
+    'medic_heli': {
+        'SC': ('救护直升机', '呼叫救护直升机：两侧门炮发射治疗弹，命中队友即回复体力；炮手自动瞄准受伤的队友（含玩家），不攻击敌人。'),
+        'CN': ('救護直升機', '呼叫救護直升機：兩側門砲發射治療彈，命中隊友即回復體力；砲手自動瞄準受傷的隊友（含玩家），不攻擊敵人。'),
+        'JA': ('救護ヘリ', '救護ヘリを要請する。両側のドアガンが回復弾を撃ち、命中した味方の体力を回復する。射手は負傷した味方'
+                         '（プレイヤーを含む）を自動で狙い、敵は攻撃しない。'),
+        'EN': ('Medic Helis', 'Calls medic helicopters whose door guns fire healing rounds: a friend they hit gets health '
+                              'back. Their gunners aim at hurt friends (you included) on their own and never at enemies.'),
     },
     'heli': {
         'SC': ('武装直升机', '呼叫武装直升机，攻击附近的敌人。'),

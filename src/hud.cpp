@@ -552,7 +552,7 @@ void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targe
 }
 void JetControls(Line& line,const PlayerJetReadout& j) noexcept {
     bool guided=false;
-    for(int i=0;i<j.stores && i<6;++i)guided=guided || j.storeRole[i]==static_cast<int>(StoreRole::air) ||
+    for(int i=0;i<j.stores && i<kMostStores;++i)guided=guided || j.storeRole[i]==static_cast<int>(StoreRole::air) ||
                                                         j.storeRole[i]==static_cast<int>(StoreRole::ground);
     AircraftControls(line,j.keys,j.stores,j.storeButton,j.targetButton,guided,j.stores>0 && Cfg().playerJetFlares>0);
 }
@@ -638,18 +638,12 @@ void HighCamHint(Text* text,float width,float height,float s,bool on,bool keys,L
     l.x=(width-l.w)*0.5f;l.y=height*0.86f+2.0f*s;
 }
 
-// The seats of the vehicle the player sits in (seatswitch.cpp, the user 2026-10-06): a line low on the screen, each seat's
-// number, what it is and who holds it, the player's in brackets, the keys that move them; amber a moment after a refused
-// press (the seat named taken, or no free seat), grey online with SeatSwitchOnline off.
-void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
-    if(*at>=kMaxLines || p.seats<2)return;
-    Line& l=lines[(*at)++];
-    Format(l,L"%ls",Tr(Tx::seats));
-    const wchar_t* const holders[]={L"-",Tr(Tx::holderYou),Tr(Tx::holderNpc),Tr(Tx::holderTaken)};
-    for(int i=0;i<p.seats && i<kMostSeatsShown;++i) {
-        const Tx what=i==0 ? (p.aircraft ? Tx::seatPilot : Tx::seatDriver) : p.gun[i] ? Tx::seatGun : Tx::seatOther;
-        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,Tr(what),holders[static_cast<int>(p.holder[i])&3]);
-    }
+// The seats of the vehicle the player sits in (seatswitch.cpp, the user 2026-10-06 / 2026-10-07): a line low on the
+// screen, each seat's number, what it is and who holds it, the player's in brackets. The prompt's moment (p.hints) adds
+// the keys that move them; amber a moment after a refused press (the seat named taken, or no free seat), grey online with
+// SeatSwitchOnline off. Outside it (SeatList: the whole ride) the bare list, dimmed.
+// The seats line's tail in the prompt's moment: the keys that move the player, or why they cannot (online).
+void SeatKeys(Line& l,const SeatPrompt& p) noexcept {
     if(p.locked)Append(l,L"%ls",Tr(Tx::seatOnlineLocked));
     else if(p.keys) {
         wchar_t key[32];
@@ -662,10 +656,23 @@ void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* line
         std::swprintf(button,32,Tr(Tx::padButton),Cfg().seatButton);
         Append(l,Tr(Tx::seatNextKey),button);
     }
+}
+
+void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* lines,int* at) noexcept {
+    if(*at>=kMaxLines || p.seats<2)return;
+    Line& l=lines[(*at)++];
+    Format(l,L"%ls",Tr(Tx::seats));
+    const wchar_t* const holders[]={L"-",Tr(Tx::holderYou),Tr(Tx::holderNpc),Tr(Tx::holderTaken)};
+    for(int i=0;i<p.seats && i<kMostSeatsShown;++i) {
+        const Tx what=i==0 ? (p.aircraft ? Tx::seatPilot : Tx::seatDriver) : p.gun[i] ? Tx::seatGun : Tx::seatOther;
+        Append(l,i==p.at ? L"  [%d %ls %ls]" : L"  %d %ls %ls",i+1,Tr(what),holders[static_cast<int>(p.holder[i])&3]);
+    }
+    if(p.hints)SeatKeys(l,p);
     if(p.refused==-2)Append(l,L"%ls",Tr(Tx::seatNoFree));
     else if(p.refused>=0)Append(l,Tr(Tx::seatTaken),p.refused+1);
     alignas(16) static const float kGrey[4]={0.7f,0.7f,0.7f,0.9f};
-    l.scale=kLineScale*0.85f;l.rgba=p.locked ? kGrey : p.refused!=-1 ? kWarn : kWhite;l.w=l.h=0.0f;
+    alignas(16) static const float kDim[4]={1.0f,1.0f,1.0f,0.7f};
+    l.scale=kLineScale*0.85f;l.rgba=!p.hints ? kDim : p.locked ? kGrey : p.refused!=-1 ? kWarn : kWhite;l.w=l.h=0.0f;
     if(text)MeasureAll(*text,&l,1);
     l.x=(width-l.w)*0.5f;l.y=height*0.82f;
 }
@@ -689,8 +696,9 @@ void TurretMark(void* drawer,void* ctx,const float* vp,float width,float height,
 }
 
 // The gunship's gun with the player at it (playerjet_crew.inc, README 炮舰机): the cross where a round of the picked gun
-// fired now lands (where the screen's centre meets the ground), red out of its reach; under it the gun (SHELLS or
-// CANNON, the other one named when the switch has one to go to), the range and READY or the gun's wait; a cyan square
+// fired now lands (where the screen's centre meets the ground), red out of its reach; under it the gun (SHELLS, CANNON
+// or GATLING in brackets, the others there named after it, in the switch's order), the range and READY or the gun's
+// wait; a cyan square
 // on the pylon turn's centre (the point last fired at). No ground under the centre: the line alone.
 void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const GunnerReadout& g,
                  Line* lines,int* at) noexcept {
@@ -708,11 +716,19 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
     if(*at>=kMaxLines)return;
     Line& line=lines[(*at)++];
-    wchar_t gun[48];
-    const wchar_t* const shells=Tr(Tx::gunnerShells);
-    const wchar_t* const cannon=Tr(Tx::gunnerCannon);
-    if(g.both)std::swprintf(gun,48,L"[%ls] %ls",g.cannon ? cannon : shells,g.cannon ? shells : cannon);
-    else std::swprintf(gun,48,L"%ls",shells);
+    wchar_t gun[64];
+    const wchar_t* const names[]={Tr(Tx::gunnerShells),Tr(Tx::gunnerCannon),Tr(Tx::gunnerGatling)};
+    static_assert(sizeof(names)/sizeof(names[0])==static_cast<std::size_t>(GunnerGun::count),"GunnerGun's names");
+    const int picked=static_cast<int>(g.gun),n=static_cast<int>(GunnerGun::count);
+    const bool more=(g.guns&~(1u<<picked))!=0;
+    int used=std::swprintf(gun,64,more ? L"[%ls]" : L"%ls",names[picked]);
+    for(int k=1;k<n && used>0;++k) {   // the others there, from the one the switch goes to next
+        const int i=(picked+k)%n;
+        if(!(g.guns&(1u<<i)))continue;
+        const int w=std::swprintf(gun+used,64-used,L" %ls",names[i]);
+        if(w<0)break;   // no room: the names so far
+        used+=w;
+    }
     if(!g.ground)Format(line,Tr(Tx::gunnerNoGround),gun);
     else if(!g.inReach)Format(line,Tr(Tx::gunnerOutOfRange),gun,static_cast<int>(std::lround(g.range)));
     else if(g.ready)Format(line,Tr(Tx::gunnerReady),gun,static_cast<int>(std::lround(g.range)));
@@ -762,7 +778,7 @@ void StoresText(wchar_t* text,std::size_t size,const PlayerJetReadout& j,bool na
         const int n=_snwprintf_s(text,size,_TRUNCATE,Tr(Tx::storesGun),j.gunRounds>0 ? j.gunRounds : 0);
         if(n>0)at=static_cast<std::size_t>(n);
     }
-    for(int i=0;names && i<j.stores && i<6;++i) {
+    for(int i=0;names && i<j.stores && i<kMostStores;++i) {
         const int n=_snwprintf_s(text+at,size-at,_TRUNCATE,i==j.store ? L"[%hs %d]  " : L"%hs %d  ",
                                  j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
         if(n<0)break;
@@ -1069,7 +1085,7 @@ void LoadoutBanner(void* drawer,void* ctx,Text* text,float width,float bottom,fl
 // dim; the picked one cyan.
 int JetCells(const PlayerJetReadout& j,LoadCell* cells) noexcept {
     int n=0;
-    for(int i=0;i<j.stores && i<6;++i) {
+    for(int i=0;i<j.stores && i<kMostStores;++i) {
         LoadCell& c=cells[n++];
         c.icon=hudcue::StoreIconOf(j.storeName[i],j.storeRole[i]);
         c.picked=i==j.store;
@@ -1529,7 +1545,7 @@ void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,flo
     const float armsH=arms.h>0.0f ? arms.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
     arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
     warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
-    LoadCell cells[6];
+    LoadCell cells[kMostStores];
     const int n=JetCells(j,cells);
     const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
     if(*at<kMaxLines) {
@@ -1731,13 +1747,19 @@ void HeliPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
 // bar, amber while it spins up or down, green at the top, "DRILLING" while it touches something; the heat's bar beside
 // it, yellow, amber past 70%, red past 90%; overheated, all red and "OVERHEAT" (it turns again once cooled).
 const float* HeatColour(float heat,bool over) noexcept { return over || heat>=0.9f ? kRed : heat>=0.7f ? kAmber : kYellow; }
+// The drill's state word (nullptr: none): overheated, launched (out / on its way back), or biting.
+const wchar_t* DrillState(const DrillCue& c) noexcept {
+    if(c.overheated)return Tr(Tx::overheat);
+    if(c.flying)return Tr(c.returning ? Tx::drillReturning : Tx::drillLaunched);
+    return c.touching && c.rpm>0.0f ? Tr(Tx::drilling) : nullptr;
+}
 void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const DrillCue& c,Line* lines,int* at) noexcept {
     if(*at>=kMaxLines || !(c.maxRpm>0.0f))return;
     Line& l=lines[(*at)++];
     const float share=Unit(c.rpm/c.maxRpm),heat=Unit(c.heat);
     const bool top=share>=0.99f;
     wchar_t state[32]=L"";
-    if(c.overheated || (c.touching && c.rpm>0.0f))std::swprintf(state,32,L"    %ls",Tr(c.overheated ? Tx::overheat : Tx::drilling));
+    if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"    %ls",word);
     Format(l,Tr(Tx::drillLine),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(heat*100.0f)),state);
     l.scale=kTitleScale;
     l.rgba=c.overheated ? kRed : top ? kGreen : share>0.0f ? kAmber : kCyan;
@@ -2500,7 +2522,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
         const DrillCue& c=*x.drill;
         const float share=Unit(c.rpm/c.maxRpm);
         wchar_t state[32]=L"";
-        if(c.overheated || (c.touching && c.rpm>0.0f))std::swprintf(state,32,L"  %ls",Tr(c.overheated ? Tx::overheat : Tx::drilling));
+        if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"  %ls",word);
         Format(*drill,Tr(Tx::drillLineShort),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(Unit(c.heat)*100.0f)),state);
         drill->scale=kLineScale*0.85f;
         drill->rgba=c.overheated ? kRed : c.heat>=0.7f ? HeatColour(Unit(c.heat),false) : share>=0.99f ? kGreen : share>0.0f ? kAmber : kCyan;
@@ -3366,7 +3388,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 if(Cfg().playerJetGunSight)GunSight(drawer,ctx,viewProj,width,height,s,snap.jet.sym);
                 wchar_t stores[128];
                 StoresText(stores,_countof(stores),snap.jet,false);
-                LoadCell cells[6];
+                LoadCell cells[kMostStores];
                 const int n=JetCells(snap.jet,cells);
                 Line controls{};JetControls(controls,snap.jet);
                 HeliStrip(drawer,ctx,t,width,height,s,snap.jet.heli,snap.jet.fuel,stores,cells,n,snap.jet.store,storeSwitched,lines,&at,&controls);

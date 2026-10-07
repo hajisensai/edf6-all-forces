@@ -1,11 +1,12 @@
 // The map's NPC commands (src/mapcmd_logic.h) checked offline: the screen and the ground (the centre's ray meets the
 // ground at the focus for every map view; a unit projected onto the screen and the ray under that screen point find it
-// again), the selection (Ctrl + drag box, Shift adding; a click picking one, Shift toggling, empty ground clearing; the
+// again), the floor in a cave (src/map_floor.h: the roof seen from above passed through, a lower level kept), the selection (Ctrl + drag box, Shift adding; a click picking one, Shift toggling, empty ground clearing; the
 // Tab / pad X cycle through one unit at a time and ALL; units gone dropped), what each key press comes to (a command to
 // the selection, or the refusal: no unit, no point, online), and the guard formation (slots apart, the first on the point).
 //   cmake --build build --target map_cmd_check && build\map_cmd_check.exe      (exit code 1 on a failure)
 #include "../src/map_cam.h"
 #include "../src/mapcmd_logic.h"
+#include "../src/map_floor.h"
 #include <cstdio>
 
 namespace {
@@ -17,6 +18,29 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
     std::printf("FAIL %s (%g, %g)\n",what,a,b);
 }
 bool Near(float a,float b,float tol) { return std::fabs(a-b)<=tol; }
+
+// A made-up cave for map_floor.h: horizontal faces, each a height and its own normal's y (+1 a floor, -1 a roof seen
+// from inside); the ray reports the hit's normal as the triangles' own, or turned to face the ray.
+struct Face { float y,ny; };
+struct Cave {
+    const Face* face; int n; bool facing;
+    float operator()(const float* a,const float* b,float* hit,float* normal) const {
+        float best=2.0f;int k=-1;
+        for(int i=0;i<n;++i) {
+            const float dy=b[1]-a[1];
+            if(std::fabs(dy)<1e-6f)continue;
+            const float t=(face[i].y-a[1])/dy;
+            if(t>=0.0f && t<=1.0f && t<best){best=t;k=i;}
+        }
+        if(k<0)return -1.0f;
+        float d[3],len=0.0f;
+        for(int i=0;i<3;++i){d[i]=b[i]-a[i];hit[i]=a[i]+d[i]*best;len+=d[i]*d[i];}
+        float ny=face[k].ny;
+        if(facing && ny*d[1]>0.0f)ny=-ny;
+        normal[0]=0.0f;normal[1]=ny;normal[2]=0.0f;
+        return best*std::sqrt(len);
+    }
+};
 
 // The map's camera as the HUD draws with it (tools/hud_view.cpp MapCamera: mapcam::Place, field of view 55 deg, the
 // game's level right (-f.z, 0, f.x)): a row-vector view-projection.
@@ -200,6 +224,80 @@ int main() {
         while(1+3*need*(need+1)<k)++need;   // rings of 6, 12, 18... round the point hold 1 + 3 r (r + 1)
         const float rings=static_cast<float>(need);
         Check(most<=30.0f*rings+0.01f,"slots within their rings",k,most);
+    }
+
+    // --- The floor in a cave (map_floor.h).
+    {
+        using mapfloor::Normals;
+        const Face cave[]={{0.0f,1.0f},{12.0f,-1.0f}};                            // a floor and its roof
+        const Face two[]={{0.0f,1.0f},{12.0f,-1.0f},{20.0f,1.0f},{32.0f,-1.0f}};     // two levels
+        const Cave own{cave,2,false},facing{cave,2,true},levels{two,4,false};
+        // Learn: a floor seen from above and from just under it, as heli.cpp LearnMapNormals casts.
+        auto learn=[](const Cave& c){
+            float h1[3],n1[3],h2[3],n2[3];
+            const float top[3]={0.0f,1.5f,0.0f},bottom[3]={0.0f,-20.0f,0.0f};
+            c(top,bottom,h1,n1);
+            const float u[3]={0.0f,h1[1]-0.08f,0.0f},o[3]={0.0f,h1[1]+0.08f,0.0f};
+            c(u,o,h2,n2);
+            return mapfloor::Learn(n1,n2);
+        };
+        Check(learn(own)==Normals::own,"learn: the triangles' own normals");
+        Check(learn(facing)==Normals::facing,"learn: normals facing the ray");
+        const float wall[3]={1.0f,0.0f,0.0f},down[3]={0.0f,-1.0f,0.0f};
+        Check(mapfloor::Learn(wall,down)==Normals::unknown,"learn: no floor, nothing learned");
+        // The pointer's ray from the map's eye over the cave: through the roof's back onto the floor.
+        float hit[3];
+        const float eye[3]={0.0f,300.0f,-200.0f},end[3]={0.0f,-300.0f,200.0f};
+        float m=mapfloor::Floor(eye,end,Normals::own,own,hit);
+        Check(m>0.0f && Near(hit[1],0.0f,0.01f) && Near(hit[2],0.0f,0.5f),"pick: the cave's floor, not its roof",hit[1],hit[2]);
+        Check(Near(m,std::sqrt(300.0f*300.0f+200.0f*200.0f),0.2f),"pick: metres from the eye to the floor",m);
+        m=mapfloor::Floor(eye,end,Normals::own,levels,hit);
+        Check(m>0.0f && Near(hit[1],20.0f,0.01f),"pick: the upper level's floor first",hit[1]);
+        m=mapfloor::Floor(eye,end,Normals::facing,own,hit);
+        Check(m>0.0f && Near(hit[1],12.0f,0.01f),"pick, normals facing the ray: the first hit as before",hit[1]);
+        m=mapfloor::Floor(eye,end,Normals::unknown,own,hit);
+        Check(m>0.0f && Near(hit[1],12.0f,0.01f),"pick, normals not known: the first hit as before",hit[1]);
+        // The ground under a point: of the floors there, the one nearest the height asked about.
+        const float top[3]={5.0f,4000.0f,5.0f},bottom[3]={5.0f,-4000.0f,5.0f};
+        float h=0.0f;
+        Check(mapfloor::Near(top,bottom,1.0f,Normals::own,own,&h) && h==0.0f,"ground: the cave's floor under a unit in it",h);
+        Check(mapfloor::Near(top,bottom,21.0f,Normals::own,levels,&h) && h==20.0f,"ground: the upper level for a unit up there",h);
+        Check(mapfloor::Near(top,bottom,3.0f,Normals::own,levels,&h) && h==0.0f,"ground: the lower level for a unit down there",h);
+        Check(mapfloor::Near(top,bottom,1.0f,Normals::facing,own,&h) && h==0.0f,"ground, normals facing: still the nearest (the floor)",h);
+        Check(mapfloor::Near(top,bottom,5000.0f,Normals::own,levels,&h) && h==20.0f,"ground: high over a cave, its top floor",h);
+        const Face flat[]={{3.0f,1.0f}};
+        const Cave open{flat,1,false};
+        Check(mapfloor::Near(top,bottom,50.0f,Normals::own,open,&h) && h==3.0f,"ground: open ground as before",h);
+        // A building on open ground: its roof, its underside half a metre up, the ground under it. A slot asked for at
+        // ground height but inside its footprint stands on the roof (the ground there has no room over it).
+        const Face building[]={{30.0f,1.0f},{0.5f,-1.0f},{0.0f,1.0f}};
+        const Cave block{building,3,false};
+        auto room=[&](const float* p){
+            float hh[3],nn[3];
+            const float lo[3]={p[0],p[1]+0.3f,p[2]},hi[3]={p[0],p[1]+2.5f,p[2]};
+            return block(lo,hi,hh,nn)<0.0f;
+        };
+        Check(mapfloor::Near(top,bottom,0.0f,Normals::own,block,room,&h) && h==30.0f,"slot: inside a building's footprint, on its roof",h);
+        Check(mapfloor::Near(top,bottom,0.0f,Normals::own,block,&h) && h==0.0f,"ground (any): the ground nearest",h);
+        // An obstructed floor just below the requested height must not stop the search: a lower cave floor can be
+        // nearer than the already accepted roof. The y=0 floor has only 1 m clearance; y=-5 has 4 m.
+        const Face obstructed[]={{30.0f,1.0f},{1.0f,-1.0f},{0.0f,1.0f},{-1.0f,-1.0f},{-5.0f,1.0f}};
+        const Cave lower{obstructed,5,false};
+        auto lowerRoom=[&](const float* p){
+            float hh[3],nn[3];
+            const float lo[3]={p[0],p[1]+0.3f,p[2]},hi[3]={p[0],p[1]+2.5f,p[2]};
+            return lower(lo,hi,hh,nn)<0.0f;
+        };
+        const bool lowerFound=mapfloor::Near(top,bottom,0.5f,Normals::own,lower,lowerRoom,&h);
+        Check(lowerFound && Near(h,-5.0f,0.01f),
+              "slot: skip an obstructed floor below the reference to find a nearer standable lower level",h);
+        // Five cave levels over the one asked about (two hits each from the sky): still found.
+        const Face deep[]={{0.0f,1.0f},{8.0f,-1.0f},{20.0f,1.0f},{28.0f,-1.0f},{40.0f,1.0f},{48.0f,-1.0f},{60.0f,1.0f},
+                           {68.0f,-1.0f},{80.0f,1.0f},{88.0f,-1.0f},{100.0f,1.0f},{108.0f,-1.0f}};
+        const Cave stack{deep,12,false};
+        Check(mapfloor::Near(top,bottom,1.0f,Normals::own,stack,&h) && Near(h,0.0f,0.01f),"ground: the bottom level under five more",h);
+        const Cave empty{flat,0,false};
+        Check(!mapfloor::Near(top,bottom,0.0f,Normals::own,empty,&h),"ground: none (off the world)");
     }
 
     std::printf("map_cmd_check: %d cases, %d failures\n",cases,failures);

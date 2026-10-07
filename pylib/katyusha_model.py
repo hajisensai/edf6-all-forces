@@ -6,7 +6,7 @@ numpy and PIL, both in the installer).
 
 The model: the Naegling (OBJECT/VEHICLE402_ROCKET.MRAB, Vehicle402_Rocket.mdb) with its hull and track geometry
 removed and the V607 robo-truck's truck (OBJECT/V607_ROBOTRUCK.MRAB, object 0 mesh 0: body + 6 tires; the robot
-and its cradle on the bed dropped) grafted in, with the bed's two sideboards removed; the rocket rack
+and its cradle on the bed dropped) grafted in, with the bed's rails (its two sideboards and its tailgate) removed; the rocket rack
 (Rocketcannon_base subtree) translated onto the bed,
 its launcher box (the geometry on Rocketcannon_main) replaced by a BM-13 rail pack: 8 I-beam rails, 16 M-13 rockets
 (launcher_parts; the weapon's muzzles at the rails' front ends: MUZZLES). The V607 stays the truck: of Root.cpk's
@@ -49,10 +49,13 @@ DONOR_ARC, DONOR_MDB = 'V607_ROBOTRUCK.MRAB', 'v607_robotruck.mdb'
 
 TRUCK_SCALE = 1.0               # the donor truck is 8.14 m long: already the ~8 m target
 DONOR_TRUCK_MESHES = {(0, 0)}   # donor object 0 mesh 0 = the truck; meshes 1/4 = robot cradle, 2/3 = robot
-# V607 donor-space landmarks of its removable bed sides (measured from the actual mesh).
-# Keep the bed/fenders below 1.62 m, the cab/headboard ahead of 1.05 m, and the tailgate
-# crossing the truck's centre. The panels and their top-mounted rear latches are outboard.
+# V607 donor-space landmarks of its removable bed rails (measured from the actual mesh).
+# Sideboards: outboard of 1.23 m, above the bed/fenders (1.62 m), behind the cab/headboard (1.05 m);
+# their top-mounted rear latches are outboard too.
 SIDEBOARD_INNER_X, SIDEBOARD_BOTTOM_Y, SIDEBOARD_FRONT_Z = 1.23, 1.62, 1.05
+# Tailgate: the panel behind the bed floor's rear edge (z -3.89; its faces reach -3.59, so never caught), from its
+# lower skin wrapping the floor's edge (1.57 m) up to 2.18 m, hinges at x +-1.4. Bumper and lights sit below 1.5 m.
+TAILGATE_INNER_Z, TAILGATE_BOTTOM_Y = -3.85, 1.50
 CAB_CLEARANCE = 0.15            # m between the rack's front (0 elevation) and the cab / headboard
 RAIL_CLEARANCE = 0.03           # m between the rack main box's underside and the bed side rails' top
 # donor tire bone -> host wheel bone (A front .. F rear; _l = +x on both models)
@@ -130,25 +133,97 @@ def sideboard_triangle(points: list[Vec3]) -> bool:
         p[1] > SIDEBOARD_BOTTOM_Y and p[2] < SIDEBOARD_FRONT_Z for p in points)
 
 
-def remove_sideboards(md: Mdb, body: int, offset: Vec3) -> tuple[Mdb, int]:
-    """Remove the grafted truck's two sideboards, keeping original rows of every retained face."""
-    meshes, removed = [], 0
+def tailgate_triangle(points: list[Vec3]) -> bool:
+    """A complete tailgate face in the original V607 coordinates; never the bed floor, bumper or lights."""
+    return all(p[2] < TAILGATE_INNER_Z and p[1] > TAILGATE_BOTTOM_Y for p in points)
+
+
+def bed_rail_triangle(points: list[Vec3]) -> bool:
+    """The bed's rails all round its open sides: the two sideboards and the tailgate."""
+    return sideboard_triangle(points) or tailgate_triangle(points)
+
+
+TAILGATE_CAP_SPLIT_Y = 1.60     # donor y between the bed floor's underside (1.57) and its top (1.64)
+
+
+def _ladder(bottom: list[int], top: list[int], xs: list[float]) -> list[tuple[int, int, int]]:
+    """Triangles stitching two chains of vertices, each sorted by x, into one strip."""
+    tris, i, j = [], 0, 0
+    while i < len(bottom) - 1 or j < len(top) - 1:
+        if j == len(top) - 1 or (i < len(bottom) - 1 and xs[bottom[i + 1]] <= xs[top[j + 1]]):
+            tris.append((bottom[i], bottom[i + 1], top[j]))
+            i += 1
+        else:
+            tris.append((bottom[i], top[j + 1], top[j]))
+            j += 1
+    return tris
+
+
+def tailgate_cap(keys: list[str], rows: list, points: list[Vec3], kept: list, gone: list,
+                 offset: Vec3) -> tuple[list, list[tuple[int, int, int]]]:
+    """The bed floor's rear edge, closed where the tailgate wrapped it: new vertex rows (copies of the seam's own,
+    facing rearward, one UV) appended after `rows`, and the faces over them. No seam, nothing to close."""
+    def key(v: int) -> tuple[float, ...]:
+        return tuple(round(c, 4) for c in points[v])
+
+    seam = {key(v) for t in gone for v in t} & {key(v) for t in kept for v in t}
+    if len(seam) < 4:
+        return [], []
+    first = {}
+    for t in kept:
+        for v in t:
+            first.setdefault(key(v), v)
+    seam_v = sorted((first[k] for k in seam), key=lambda v: points[v][0])
+    low = [v for v in seam_v if points[v][1] - offset[1] < TAILGATE_CAP_SPLIT_Y * TRUCK_SCALE]
+    high = [v for v in seam_v if v not in low]
+    _req(len(low) >= 2 and len(high) >= 2, 'tailgate seam is not two chains; donor layout changed')
+    uv_from = rows[low[len(low) // 2]]
+    rearward = {'normal': (0.0, 0.0, -1.0, 1.0), 'tangent': (-1.0, 0.0, 0.0, 1.0), 'binormal': (0.0, -1.0, 0.0, 1.0)}
+    new_rows = []
+    for v in seam_v:
+        row = list(rows[v])
+        for k, name in enumerate(keys):
+            elem = name.split(':')[0].lower()
+            if elem in rearward:
+                row[k] = rearward[elem][:len(row[k])]
+            elif elem == 'texcoord':
+                row[k] = uv_from[k]
+        new_rows.append(row)
+    local = {v: len(rows) + k for k, v in enumerate(seam_v)}
+    xs = {local[v]: points[v][0] for v in seam_v}
+    pos = {local[v]: np.array(points[v]) for v in seam_v}
+    tris = []
+    for a, b, c in _ladder([local[v] for v in low], [local[v] for v in high], xs):
+        n = np.cross(pos[b] - pos[a], pos[c] - pos[a])
+        tris.append((a, b, c) if n[2] < 0 else (a, c, b))   # (b-a)x(c-a) is a face's outward side
+    return new_rows, tris
+
+
+def remove_bed_rails(md: Mdb, body: int, offset: Vec3) -> tuple[Mdb, int, int]:
+    """Remove the grafted truck's sideboards and tailgate, keeping original rows of every retained face, and close
+    the bed floor's rear edge the tailgate used to cover."""
+    meshes, removed, capped = [], 0, 0
     for me in md.objects[0].meshes:
-        _keys, rows = vertex_table(me)
+        keys, rows = vertex_table(me)
         points, (bi, _bw) = g.mesh_positions(me), g.skin_columns(me)
-        kept = []
+        kept, gone = [], []
         for tri in g.triangles(me):
             donor = [tuple((points[v][c] - offset[c]) / TRUCK_SCALE for c in range(3)) for v in tri]
-            if all(int(bi[v][0]) == body for v in tri) and sideboard_triangle(donor):
+            if all(int(bi[v][0]) == body for v in tri) and bed_rail_triangle(donor):
                 removed += 1
+                if tailgate_triangle(donor):
+                    gone.append(tri)
             else:
                 kept.append(tri)
-        new = g.rebuild_mesh(me, rows, kept)
+        cap_rows, cap = tailgate_cap(keys, rows, points, kept, gone, offset)
+        capped += len(cap)
+        new = g.rebuild_mesh(me, rows + cap_rows, kept + cap)
         if new is not None:
             meshes.append(new)
-    _req(removed >= 200, f'only {removed} V607 sideboard faces identified; donor layout changed')
+    _req(removed >= 300, f'only {removed} V607 bed rail faces identified; donor layout changed')
+    _req(capped > 0, 'no tailgate seam found to close; donor layout changed')
     obj = replace(md.objects[0], meshes=meshes)
-    return replace(md, objects=[obj, *md.objects[1:]], buffer_order=None), removed
+    return replace(md, objects=[obj, *md.objects[1:]], buffer_order=None), removed, capped
 
 
 # ------------------------------------------------------------------------------------------ the elevation ram
@@ -661,7 +736,7 @@ def build_model(game) -> tuple[Mdb, Mdb, object, object, dict]:  # noqa: ANN001 
     # 5. rack onto the bed: front (0 elevation) CAB_CLEARANCE behind the cab, main box underside above the rails
     tg = truck_geometry(md, 0, hull_root)
     # Measure first so removing a visual panel cannot lower the rig or change its poses.
-    md, info['sideboard_faces_removed'] = remove_sideboards(md, hull_root, offset)
+    md, info['bed_rail_faces_removed'], info['tailgate_cap_faces'] = remove_bed_rails(md, hull_root, offset)
     w = bind_world(md)
     base_o = w[hb['Rocketcannon_base']][12:15]
     ahead = max(p[2] for p in object_positions(md, 1)) - base_o[2]

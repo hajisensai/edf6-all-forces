@@ -19,9 +19,9 @@
 //    kLeastDamage, at most one a kHitGapMs per enemy and vehicle.
 //  - The blast: the impact charge nearest the part's size (vehicleram.h BlastRadius), on the body's point nearest it.
 //  - Who: a vehicle with a driver in seat 0 (the player or an NPC); an empty one rolling on is nobody's ram.
-//  - Where it runs: every hooked class's input (crew.cpp InputHook, the Proteus's own slot 55 among them since
-//    proteus.cpp); the one class crew.cpp leaves alone, the Barga (501_FortressRobo, slot 4 0x60AEC0), gets a chained
-//    update of its own here (kExtras) that runs this alone.
+//  - Where it runs: every hooked class's input (crew.cpp InputHook). The Barga (501_FortressRobo, slot 4 0x60AEC0) had
+//    an update hook of its own here while crew.cpp left it alone; crew.cpp chains it since 2026-10-07 (an NPC drives it),
+//    so it runs from there too, once.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "body506.h"
@@ -241,49 +241,12 @@ bool Driven(unsigned char* v) noexcept {
     return rider==Rider::player || rider==Rider::dummy;
 }
 
-// The extra update hooks (see the file comment): the classes crew.cpp does not hook, each with its stock update's
-// first bytes as the signature.
-struct Extra { unsigned vtable; std::size_t slot; unsigned stock; unsigned char sig[16]; const char* name; };
-const Extra kExtras[]={
-    {0x17D98C8,4,0x60AEC0,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x68,0x10,0x48,0x89,0x70,0x18,0x48},"501_FortressRobo"},
-};
-constexpr int kExtraCount=static_cast<int>(sizeof(kExtras)/sizeof(kExtras[0]));
-edf::VehicleInputFn nextExtra[kExtraCount]{};
-
-int ExtraFault(const EXCEPTION_POINTERS* e) noexcept {
-    static ULONGLONG at=0;
-    const ULONGLONG now=GetTickCount64();
-    if(now-at>10000) {
-        at=now;
-        Log("FAULT ram update: %08lX at %p (skipped this frame)",e->ExceptionRecord->ExceptionCode,e->ExceptionRecord->ExceptionAddress);
-    }
-    return EXCEPTION_EXECUTE_HANDLER;
-}
-
-template<int I> void __fastcall ExtraHook(void* v,std::uintptr_t a2,void* a3,void* a4) {
-    nextExtra[I](v,a2,a3,a4);
-    if(!Cfg().enabled)return;
-    __try { VehicleRamFrame(static_cast<unsigned char*>(v)); } __except(ExtraFault(GetExceptionInformation())) {}
-}
-constexpr edf::VehicleInputFn kExtraHooks[]={&ExtraHook<0>};
-static_assert(sizeof(kExtraHooks)/sizeof(kExtraHooks[0])==kExtraCount,"one hook per extra class");
 }  // namespace
 
 bool InstallVehicleRam() noexcept {
     carMassOk=Matches(kCarMassStoreAt,kCarMassStore,sizeof(kCarMassStore)) && Matches(kCarMassReadAt,kCarMassRead,sizeof(kCarMassRead));
     if(!carMassOk)Log("RAM CarBase mass code not as expected: tanks, bikes and cars ram with their class's stock mass");
-    int hooked=0;
-    for(int i=0;i<kExtraCount;++i) {
-        const Extra& x=kExtras[i];
-        if(!Matches(x.stock,x.sig,sizeof(x.sig))){Log("RAM %s update at %#x not as expected: it does not ram",x.name,x.stock);continue;}
-        void** const slot=reinterpret_cast<void**>(image+x.vtable)+x.slot;
-        if(*slot!=image+x.stock)Log("RAM %s update slot holds %p (another plugin): chaining onto it",x.name,*slot);
-        void* next=nullptr;
-        if(!edf::ChainVtableSlot(slot,reinterpret_cast<void*>(kExtraHooks[i]),&next)){Log("RAM %s update slot patch failed: it does not ram",x.name);continue;}
-        nextExtra[i]=reinterpret_cast<edf::VehicleInputFn>(next);
-        ++hooked;
-    }
-    Log("HOOK vehicle ram: car mass=%d, own updates %d/%d (Barga)",carMassOk,hooked,kExtraCount);
+    Log("HOOK vehicle ram: car mass=%d (every class from crew.cpp's input hook)",carMassOk);
     return true;
 }
 

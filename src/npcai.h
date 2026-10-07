@@ -21,6 +21,12 @@ void NpcPostInput(unsigned char* vehicle) noexcept;
 // A tank's post moved to `at` (a map command); false when the vehicle keeps no post now.
 bool NpcPostCommand(const void* vehicle,const float* at) noexcept;
 void ResetNpcPosts() noexcept;   // a new mission
-// The soldiers in a CarBase vehicle's gunner seats aim and fire (§7): each vehicle's input, before the stock input.
+// A ground vehicle an NPC in seat 0 drives (and a map command sends to a post): the stock CarBase AI (0x661440: the
+// tanks, the Titan, the bikes, the Grape and the trucks of its class, the rescue vehicle), armed or not.
+bool NpcDrivable(const unsigned char* vehicle) noexcept;
+// The AI riders in a CarBase vehicle's gunner seats aim and fire (§7): each vehicle's input, before the stock input.
 void NpcGunnersInput(unsigned char* vehicle) noexcept;
+// The seat's rider is an AI that should work its gun (NpcGunners, offline): RideAi's DummyVehicleRider, or a local
+// soldier (CustomNpcAi and NpcBoarding on). Used by the ground gunners and the 410's door guns under a player pilot.
+bool AiGunner(const unsigned char* seat) noexcept;
 }  // namespace crew

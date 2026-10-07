@@ -48,16 +48,18 @@ STOCK_GUN = 'V_505TANK_CANNON01.SGO'
 BIT_FILE = VEHICLE.weapons[0].split('/')[-1].upper()
 # The camera (game_object_camera_setting [0] / [1], docs/drill-re.md §6). The stock ground vehicles put the pivot [0]
 # 1.2..1.5 times their hull's height up (Blacker 4 m over a 2.6 m hull, rescue tank 8 m over 6.7 m, Grape 4 m over
-# 3.0 m; the bikes and cars 0.7 m with [1] 3 m up) and [1] 10..25 m behind. The drill tank is 4.6 m tall with its drill
-# 3.37 m up in front: (0, 5.5..5.7, 0) put the pivot at 1.2 times its height and the user found the view too low twice
+# 3.0 m; the bikes and cars 0.7 m with [1] 3 m up) and [1] 10..25 m behind. The drill tank was 4.6 m tall with its drill
+# 3.37 m up in front (at 0.8 of its size; 5.74 m and 4.21 m since 2026-10-06, the camera scaled with it): (0, 5.5..5.7, 0)
+# put the pivot at 1.2 times its height and the user found the view too low twice
 # (2026-10-05 18:40 and 19:57: "视角太矮" / "载具的视角，感觉太低了，特别是钻头"). So the pivot goes to
 # PIVOT_SHARE (1.63) times the hull's height, over the stock tanks' ratios, and [1] well up and back, so that the
 # whole vehicle and the ground ahead of the drill are in view whichever way the engine reads [1]: as the camera's
 # position in the vehicle's frame (as the stock tanks' equal heights suggest: a level view) or as its offset from
 # the pivot (which of the two is not yet known: L). camera_check() works the view out under both readings.
-CAMERA = ([0.0, 7.5, 0.0], [0.0, 12.5, -17.0])
-HULL_HEIGHT = 4.6            # m: the drill tank's hull (pylib/drill_model.py's hull vertices)
-HULL_TOP = (4.6, 3.0)        # (y, z) m: the hull's front top edge in the model
+CAMERA = ([0.0, 9.4, 0.0], [0.0, 15.6, -21.0])
+HULL_HEIGHT = 5.74           # m: the drill tank's hull (pylib/drill_model.py's hull vertices)
+HULL_WIDTH = 4.8             # m: ...and its width (src/drill.cpp's contact box is no wider)
+HULL_TOP = (5.74, 3.5)       # (y, z) m: the hull's front top edge in the model
 HULL_BACK = -3.6             # m: the hull's rear end
 PIVOT_SHARE = 1.6            # the pivot at least this times the hull's height up (stock tanks 1.2..1.53)
 SIGHT_CLEAR = 0.3            # m the sight line to the drill's tip passes over the hull's front edge, at least

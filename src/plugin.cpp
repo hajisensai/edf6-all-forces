@@ -193,7 +193,12 @@ void Validate(Config& n) noexcept {
     Fix("DrillSpinDownSec",n.drillSpinDownSec,0.2f,20.0f);
     Fix("DrillDamage",n.drillDamage,0.0f,1.0e6f);
     Fix("DrillBreak",n.drillBreak,0.0f,1.0e6f);
-    Fix("DrillHeatSec",n.drillHeatSec,1.0f,600.0f);
+    Fix("DrillOverheatSec",n.drillOverheatSec,1.0f,600.0f);
+    Fix("DrillKillCool",n.drillKillCool,0.0f,1.0f);
+    Fix("DrillLaunchRange",n.drillLaunchRange,5.0f,300.0f);
+    Fix("DrillLaunchSpeed",n.drillLaunchSpeed,5.0f,400.0f);
+    Fix("DrillLaunchDamage",n.drillLaunchDamage,0.0f,1.0e6f);
+    Fix("DrillLaunchHeat",n.drillLaunchHeat,0.0f,1.0f);
     Fix("DrillCoolSec",n.drillCoolSec,1.0f,600.0f);
     Fix("DrillResumeHeat",n.drillResumeHeat,0.0f,0.95f);
     Fix("EmcChargeSec",n.emcChargeSec,0.5f,10.0f);
@@ -209,6 +214,8 @@ void Validate(Config& n) noexcept {
     Fix("HighCamPitch",n.highCamPitch,15.0f,85.0f);
     n.seatNextKey=static_cast<int>(FixInt("SeatNextKey",n.seatNextKey,0,254));
     n.seatButton=static_cast<int>(FixInt("SeatButton",n.seatButton,0,255));
+    n.drillLaunchKey=static_cast<int>(FixInt("DrillLaunchKey",n.drillLaunchKey,0,254));
+    n.drillLaunchButton=static_cast<int>(FixInt("DrillLaunchButton",n.drillLaunchButton,0,255));
     n.highCamClass=static_cast<int>(FixInt("HighCamClass",n.highCamClass,1,3));
     Fix("TurretCamRate",n.turretCamRate,10.0f,720.0f);
     n.freeLookKey=static_cast<int>(FixInt("FreeLookKey",n.freeLookKey,0,254));
@@ -288,11 +295,13 @@ void Validate(Config& n) noexcept {
 constexpr const char* kGainsFixed="the flight controller's gains are fixed";
 // Keys no longer read: an old ini that still sets them loads as before, the keys ignored (said once). The flight
 // controller's gains became constants (heli.cpp); the heli's mouse lever (HeliMousePitch) became the mouse-aim flight
-// (HeliMouseAim, heliaim.h).
+// (HeliMouseAim, heliaim.h). The drill's DrillHeatSec became DrillOverheatSec (a new key, so that an ini that still
+// has the old 12 s gets the longer default: the installer only adds keys, it never changes a player's value).
 void IgnoreRetired() noexcept {
     struct Retired { const wchar_t* key; const char* why; };
     static const Retired kRetired[]={{L"HeliMoveGain",kGainsFixed},{L"HeliBrakeGain",kGainsFixed},{L"HeliClimbGain",kGainsFixed},
-                                     {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"}};
+                                     {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"},
+                                     {L"DrillHeatSec","superseded by DrillOverheatSec (30 s by default: 12 s overheated too soon)"}};
     constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
     static bool said[kCount]{};
     for(int i=0;i<kCount;++i) {
@@ -333,6 +342,7 @@ void LoadConfig() noexcept {
     n.hideStockGauges=ReadBool(L"HideStockGauges",n.hideStockGauges);
     n.heliYawRate=ReadFloat(L"HeliYawRate",n.heliYawRate);
     n.heliDoorGuns=ReadBool(L"HeliDoorGuns",n.heliDoorGuns);
+    n.medicGunnerAim=ReadBool(L"MedicGunnerAim",n.medicGunnerAim);
     n.heliGuardRadius=ReadFloat(L"HeliGuardRadius",n.heliGuardRadius);
     n.heliGuardSpeed=ReadFloat(L"HeliGuardSpeed",n.heliGuardSpeed);
     n.jetPilot=ReadBool(L"JetPilot",n.jetPilot);
@@ -454,7 +464,15 @@ void LoadConfig() noexcept {
     n.drillSpinDownSec=ReadFloat(L"DrillSpinDownSec",n.drillSpinDownSec);
     n.drillDamage=ReadFloat(L"DrillDamage",n.drillDamage);
     n.drillBreak=ReadFloat(L"DrillBreak",n.drillBreak);
-    n.drillHeatSec=ReadFloat(L"DrillHeatSec",n.drillHeatSec);
+    n.drillOverheatSec=ReadFloat(L"DrillOverheatSec",n.drillOverheatSec);
+    n.drillKillCool=ReadFloat(L"DrillKillCool",n.drillKillCool);
+    n.drillLaunch=ReadBool(L"DrillLaunch",n.drillLaunch);
+    n.drillLaunchKey=ReadInt(L"DrillLaunchKey",static_cast<DWORD>(n.drillLaunchKey));
+    n.drillLaunchButton=ReadInt(L"DrillLaunchButton",static_cast<DWORD>(n.drillLaunchButton));
+    n.drillLaunchRange=ReadFloat(L"DrillLaunchRange",n.drillLaunchRange);
+    n.drillLaunchSpeed=ReadFloat(L"DrillLaunchSpeed",n.drillLaunchSpeed);
+    n.drillLaunchDamage=ReadFloat(L"DrillLaunchDamage",n.drillLaunchDamage);
+    n.drillLaunchHeat=ReadFloat(L"DrillLaunchHeat",n.drillLaunchHeat);
     n.drillCoolSec=ReadFloat(L"DrillCoolSec",n.drillCoolSec);
     n.drillResumeHeat=ReadFloat(L"DrillResumeHeat",n.drillResumeHeat);
     n.emcBeam=ReadBool(L"EmcBeam",n.emcBeam);
@@ -484,13 +502,15 @@ void LoadConfig() noexcept {
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
-    n.stockHeliStores=ReadBool(L"StockHeliStores",n.stockHeliStores);
+    // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
+    n.stockStores=ReadBool(L"StockVehicleStores",n.stockStores) || ReadBool(L"StockHeliStores",false);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
     n.seatNextKey=ReadInt(L"SeatNextKey",static_cast<DWORD>(n.seatNextKey));
     n.seatNumberKeys=ReadBool(L"SeatNumberKeys",n.seatNumberKeys);
     n.seatButton=ReadInt(L"SeatButton",static_cast<DWORD>(n.seatButton));
     n.seatPilot=ReadBool(L"SeatPilot",n.seatPilot);
     n.seatSwitchOnline=ReadBool(L"SeatSwitchOnline",n.seatSwitchOnline);
+    n.seatList=ReadBool(L"SeatList",n.seatList);
     n.proteus=ReadBool(L"ProteusRework",n.proteus);
     n.proteusModeKey=ReadInt(L"ProteusModeKey",static_cast<DWORD>(n.proteusModeKey));
     n.proteusModeButton=ReadInt(L"ProteusModeButton",static_cast<DWORD>(n.proteusModeButton));
@@ -562,6 +582,7 @@ void LoadConfig() noexcept {
     n.npcSquadMax=ReadInt(L"NpcSquadMax",static_cast<DWORD>(n.npcSquadMax));
     n.npcSquadJoinRange=ReadFloat(L"NpcSquadJoinRange",n.npcSquadJoinRange);
     n.npcBoarding=ReadBool(L"NpcBoarding",n.npcBoarding);
+    n.npcGunners=ReadBool(L"NpcGunners",n.npcGunners);
     n.npcMarkKey=ReadInt(L"NpcMarkKey",static_cast<DWORD>(n.npcMarkKey));
     n.npcMarkCone=ReadFloat(L"NpcMarkCone",n.npcMarkCone);
     n.npcGuardRadius=ReadFloat(L"NpcGuardRadius",n.npcGuardRadius);
@@ -581,8 +602,8 @@ void LoadConfig() noexcept {
         n.heliCombatRange,n.heliAvoid,n.heliFireHeight,n.heliFireCone,n.heliMissile,n.heliMissileMs,n.heliLandMs);
     Log("CONFIG playerHeliStopSec=%.2f gunSight=%d mouseAim=%d flightHud=%d",n.playerHeliStopSec,n.playerHeliGunSight,n.heliMouseAim,
         n.heliFlightHud);
-    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,n.heliAgility,n.heliYawRate,n.heliDoorGuns,
-        n.heliGuardRadius,n.heliGuardSpeed);
+    Log("CONFIG heli speed=%.1f agility=%.1fs yawRate=%.0f doorGuns=%d medicGunnerAim=%d guardRadius=%.0f guardSpeed=%.1f",n.heliSpeed,
+        n.heliAgility,n.heliYawRate,n.heliDoorGuns,n.medicGunnerAim,n.heliGuardRadius,n.heliGuardSpeed);
     Log("CONFIG soft edge: jets %.0f m / %.1f turns, ceiling %.0f m, helis %.0f m",n.airSoftEdge,n.airSoftTurns,n.airSoftCeil,n.heliSoftEdge);
     Log("CONFIG sub hullHp=%.0f heavyHit=%.0f",n.subHullHp,n.subHeavyHit);
     Log("CONFIG hud vehicles=%d count=%d range=%.0f stockVehicleHud=%d hideStockGauges=%d scale=%.2f language=%d",n.vehicleHud,
@@ -611,14 +632,17 @@ void LoadConfig() noexcept {
         n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
-    Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding);
+    Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
     Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs",n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
-    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s heat=%.0fs cool=%.0fs resume=%.0f%%",n.drill,
-        n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillHeatSec,n.drillCoolSec,n.drillResumeHeat*100.0f);
+    Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s overheat=%.0fs cool=%.0fs resume=%.0f%% "
+        "killCool=%.0f%%",n.drill,n.drillMaxRpm,n.drillSpinUpSec,n.drillSpinDownSec,n.drillDamage,n.drillBreak,n.drillOverheatSec,
+        n.drillCoolSec,n.drillResumeHeat*100.0f,n.drillKillCool*100.0f);
+    Log("CONFIG drillLaunch=%d key=0x%02X button=0x%02X range=%.0fm speed=%.0fm/s damage=%.0f heat=%.0f%%",n.drillLaunch,
+        n.drillLaunchKey,n.drillLaunchButton,n.drillLaunchRange,n.drillLaunchSpeed,n.drillLaunchDamage,n.drillLaunchHeat*100.0f);
     Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
     Log("CONFIG emcBeam=%d charge=%.1fs beam=%.1fs blast=%.0fm x%.2f break=%.0f/s",n.emcBeam,n.emcChargeSec,n.emcBeamSec,n.emcBlastRadius,
         n.emcBlastShare,n.emcBreak);
@@ -627,8 +651,8 @@ void LoadConfig() noexcept {
         n.highCamBack,n.highCamPitch);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
-    Log("CONFIG stockHeliStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d",n.stockHeliStores,n.seatSwitch,
-        n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline);
+    Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
+        n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
     Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X mark=0x%X/0x%X salvo=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f arc %.0f block %.2f",
         n.proteus,n.proteusModeKey,n.proteusModeButton,n.proteusShieldKey,n.proteusShieldButton,n.proteusMarkKey,n.proteusMarkButton,n.proteusSalvoKey,
         n.proteusTwoSeats,n.proteusWalkSpeed,n.proteusWalkTurn,n.proteusStepHeight,n.proteusShieldSlow,n.proteusShieldArc,n.proteusShieldBlock);
@@ -819,6 +843,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
+    InstallBulletPass();    // the bullets' candidate hook: the jets' wingmen and the sidecar's passengers, whatever the heli profile
     if(heli) {
         InstallDoorGuns();  // the 410's door guns are part of the heli pilot
         InstallJets();      // the jets and the carrier are flown from HeliFrame: no heli pilot, none of them
@@ -850,7 +875,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
     InstallGuidance();      // the stock homing rounds by proportional navigation
-    InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder
+    InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
+    InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallBigWorld();

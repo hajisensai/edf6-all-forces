@@ -33,11 +33,14 @@
 // dropped at a new mission (ResetHelis, with the player's track and the rescue) and reused only once its heli
 // has not been flown for kStaleMs: a full table takes on no new heli rather than drop a live one.
 #include "crew.h"
+#include "map_floor.h"
 #include "body506.h"
 #include "heliaim.h"
 #include "airbound.h"
 #include "layout.h"
 #include "memory.h"
+#include "online_authority.h"
+#include "npcai.h"
 #include "roundaim.h"
 #include "edf/weapon.h"
 #include "warn.h"
@@ -283,8 +286,9 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 // receives the point. `any`: the nearest hit of any kind instead (log only); `flags` gets its flags.
 // `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
 constexpr std::uint32_t kMapLayer=0x16;
+// `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn).
 float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
-              std::uint32_t filter=kMapLayer) noexcept {
+              std::uint32_t filter=kMapLayer,float* normal=nullptr) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
@@ -298,6 +302,7 @@ float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,st
     if(!std::isfinite(f) || f<0.0f || f>1.0f)return -1.0f;
     if(hit)std::memcpy(hit,col.raw+0x30,12);
     if(flags)std::memcpy(flags,col.raw+0x9C,4);
+    if(normal)std::memcpy(normal,col.raw+0x40,12);
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
     return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
 }
@@ -422,6 +427,7 @@ struct Heli {
     bool applied;         // params are on the heli now
     ULONGLONG circleUntil;// 409: circling for its turret until then (see kTurretCircleMs)
     Door doors[2];        // 410: left, right
+    bool medic;           // its door guns heal (Medic): it aims at hurt friends, never at enemies
     // A called heli (HeliCalled): its post (guard), when its sortie ends (game ms), leaving since leftAt, and
     // deleted from another object's update once reap is set (HeliReap).
     bool called,guard,leaving,reap;
@@ -586,6 +592,120 @@ template<class F> bool ForEachEnemy(const unsigned char* v,F&& f) noexcept {
     return ForEachEnemyOf(At<std::int32_t>(v,kTeam),v,static_cast<F&&>(f));
 }
 
+// ---- The medic heli (tools/make_jets.py MEDIC_HELI_FILE; the user, 2026-10-06: 「增加救护直升机，射的子弹射到队友会回血，
+// 自瞄也是锁队友」) ----
+// A heli whose door gun heals (its AmmoDamage, weapon +0x89C, negative: the stock Reverser's way; a round with no blast
+// skips the team check, docs/bullet-pass-re.md §3.2 step 4, so it hits a friend and its damage heals) aims at hurt friends
+// and never at enemies: its pilot circles the most hurt one in its range (PickTarget: as a 410 circles an enemy), its
+// gunners shoot the hurt friends they reach (DoorGun) and hold their fire while an enemy is near the line (the round would
+// hit it first: a heal for the enemy, or nothing; not checked which).
+// Friends: the soldiers (the four classes, the player's and the NPCs') of every team friendly to the heli's, through the
+// game's own walk 0x5E11D0(team manager, team, functor): under the manager's lock (EnterCriticalSection: reentrant), slot 1
+// (functor, object) for each object of each team whose relation to `team` is 1 (the board button's walk, docs/rescue-re.md).
+// On foot only (a soldier in a vehicle takes no rounds, the vehicle does), alive, below kHurt of its HP (GameObjectBase
+// +0x2F4 / +0x2F8, as a vehicle's). Walked once a frame for every medic (FriendsNow).
+constexpr std::size_t kWeaponDamage=0x89C;   // AmmoDamage (the SGO reader 0x68A920 at 0x68D6E3, docs/boarding-re.md)
+constexpr unsigned kVisitFriends=0x5E11D0;
+const unsigned char kVisitFriendsSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
+constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
+constexpr float kHurt=0.97f;        // below this share of its HP a friend is hurt
+constexpr float kAimOver=0.3f;      // m over a soldier's origin (its feet) the gunners aim: the healing round bursts there
+constexpr float kHurtWeight=200.0f; // m a friend counts farther per share of its HP it still has (the most hurt first)
+constexpr float kEnemyClear=5.0f;   // m: no healing round passes this near an enemy's lock point (plus the round's blast)
+constexpr std::size_t kWeaponBlast=0x8B0;   // AmmoExplosion, the blast radius (0x68D82F, docs/heli-input-re.md)
+constexpr int kMaxFriends=64;
+bool visitOk=false;                  // 0x5E11D0 is the walk read above (CheckHeliProfile)
+
+struct Friend { const void* object; float aim[3]; float share; };
+struct FriendList { Friend f[kMaxFriends]; int n; };
+struct FriendVisitor { const void* const* vtable; FriendList* list; };
+using VisitFriendsFn=void(__fastcall*)(void*,std::int32_t,FriendVisitor*);
+
+bool IsSoldier(const unsigned char* o) noexcept {
+    if(!Readable(o,8))return false;
+    const auto vt=At<const unsigned char*>(o,0);
+    for(const auto r:kSoldierVts)if(vt==image+r)return true;
+    return false;
+}
+
+void AddFriend(FriendList& l,const unsigned char* o) noexcept {
+    if(l.n>=kMaxFriends || !IsSoldier(o) || !Readable(o,kHumanVehicleCtrl+8) || o[kDead])return;
+    const auto ride=At<const unsigned char*>(o,kHumanVehicleCtrl);
+    if(ride && Readable(ride,0x10) && At<std::int32_t>(ride,8)!=0)return;   // in a vehicle (0x56D700's own test)
+    const float hp=At<float>(o,kHp),max=At<float>(o,kHpMax);
+    if(!std::isfinite(hp) || !std::isfinite(max) || !(max>0.0f) || !(hp>0.0f) || hp>=max*kHurt)return;
+    const float* p=reinterpret_cast<const float*>(o+kPosition);
+    if(!std::isfinite(p[0]+p[1]+p[2]))return;
+    Friend& f=l.f[l.n++];
+    f.object=o;f.aim[0]=p[0];f.aim[1]=p[1]+kAimOver;f.aim[2]=p[2];f.share=hp/max;
+}
+
+void __fastcall VisitorNone(FriendVisitor*) noexcept {}
+void __fastcall VisitFriend(FriendVisitor* self,const unsigned char* object) noexcept {
+    __try { AddFriend(*self->list,object); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+const void* const kFriendVisitorVtable[]={reinterpret_cast<const void*>(&VisitorNone),reinterpret_cast<const void*>(&VisitFriend)};
+
+struct FriendsCache { ULONGLONG frame; std::int32_t team; bool ok; FriendList list; };
+FriendsCache friendsCache{};
+
+// This frame's hurt friends of `team` (walked once a frame per team), or nullptr when the walk is not there.
+const FriendList* FriendsNow(std::int32_t team) noexcept {
+    if(!visitOk || team<0 || team>=kMaxTeam)return nullptr;
+    const ULONGLONG frame=GameFrame();
+    if(friendsCache.ok && friendsCache.frame==frame && friendsCache.team==team)return &friendsCache.list;
+    friendsCache.ok=false;friendsCache.frame=frame;friendsCache.team=team;friendsCache.list.n=0;
+    const auto teams=At<void*>(image,kTeams);
+    if(!teams)return nullptr;
+    FriendVisitor visitor{kFriendVisitorVtable,&friendsCache.list};
+    reinterpret_cast<VisitFriendsFn>(image+kVisitFriends)(teams,team,&visitor);
+    friendsCache.ok=true;
+    return &friendsCache.list;
+}
+
+// f(object, aim point, share of its HP) for every hurt friend of `v`'s side (a vehicle nobody owns: the player's).
+template<class F> bool ForEachHurtFriend(const unsigned char* v,F&& f) noexcept {
+    std::int32_t team=At<std::int32_t>(v,kTeam);
+    if(team==kTeamVehicle)team=player.team;
+    const FriendList* l=FriendsNow(team);
+    if(!l)return false;
+    for(int i=0;i<l->n;++i)f(l->f[i].object,l->f[i].aim,l->f[i].share);
+    return true;
+}
+
+// Whether `weapon`'s rounds heal (a negative AmmoDamage).
+bool HealingGun(const unsigned char* weapon) noexcept {
+    if(!Readable(weapon,kWeaponDamage+4))return false;
+    const float d=At<float>(weapon,kWeaponDamage);
+    return std::isfinite(d) && d<0.0f;
+}
+
+// Whether any of `v`'s weapons heals: a medic.
+bool Medic(const unsigned char* v) noexcept {
+    const auto holders=At<const unsigned char*>(v,kHolders);
+    const std::uint64_t count=At<std::uint64_t>(v,kHolderCount);
+    if(count==0 || count>8 || !Readable(holders,count*kHolderStride))return false;
+    for(std::uint64_t i=0;i<count;++i)
+        if(HealingGun(At<const unsigned char*>(holders+i*kHolderStride,kHolderWeapon)))return true;
+    return false;
+}
+
+// What `h` aims at: f(object, lock point, extra score in m). A medic: the hurt friends, the most hurt counting nearest;
+// any other: the enemies.
+template<class F> bool ForEachTarget(bool medic,const unsigned char* v,F&& f) noexcept {
+    if(medic)return ForEachHurtFriend(v,[&](const void* o,const float* a,float share) noexcept { f(o,a,share*kHurtWeight); });
+    return ForEachEnemy(v,[&](const void* o,const float* a) noexcept { f(o,a,0.0f); });
+}
+
+// Would a healing round of `weapon` from `from` to `to` pass within kEnemyClear of an enemy, or burst with one in its blast?
+bool EnemyInLine(const unsigned char* v,const unsigned char* weapon,const float* from,const float* to) noexcept {
+    const float blast=At<float>(weapon,kWeaponBlast);
+    const float clear=kEnemyClear+(std::isfinite(blast) && blast>0.0f && blast<50.0f ? blast : 0.0f);
+    bool close=false;
+    ForEachEnemy(v,[&](const void*,const float* p) noexcept { close=close || NearLine(from,to,p,clear); });
+    return close;
+}
+
 // The enemy lock point to engage, among the enemies within `range` of `around` (a guard's post, the
 // player it follows). Without a map command, the current target is chased beyond that range.
 // The one nearest to `from` (the heli: the shortest turn and flight) wins, the current
@@ -597,12 +717,12 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
     const ULONGLONG now=GameMs();
     const float speed=std::sqrt(Dot2(h.vel,h.vel));
     float best=0.0f,bestAim[3]{};const void* bestObject=nullptr;
-    ForEachEnemy(v,[&](const void* object,const float* a) noexcept {
+    ForEachTarget(h.medic,v,[&](const void* object,const float* a,float extra) noexcept {
         const float d[3]={a[0]-around[0],a[1]-around[1],a[2]-around[2]};
         const bool current=h.target.Is(object);
         if((!current || h.cmd.order!=Order::none) && d[0]*d[0]+d[1]*d[1]+d[2]*d[2]>range*range)return;
         const float f[3]={a[0]-from[0],a[1]-from[1],a[2]-from[2]};
-        float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2]);
+        float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2])+extra;
         if(current)score-=circler ? kCircleKeep : kKeepTarget;
         if(now<h.passedUntil && h.passed.Is(object))score+=kPassed;
         if(!circler && speed>3.0f && Dot2(f,f)>1.0f)
@@ -1169,11 +1289,16 @@ bool Reach(const unsigned char* v,const DoorAim& a,const float* from,const float
 
 // Writes door gun i's block: aims it at the best enemy it can reach (the pilot's target preferred) with
 // lead for its round, and pulls while on it. `hold`: aim but never fire.
-void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noexcept {
-    Door& g=h.doors[i];
+// `g` the gun's state, `share` the pilot's target (preferred; none under a player pilot), `refill` an emptied gun
+// refilled after kReloadGunMs (the NPC heli's own, as Arms does; not a called heli's, not a player's heli).
+void DoorGun(Door& g,const ObjRef& share,bool refill,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noexcept {
     unsigned char* blk=v+kDoorBlock+i*kDoorStride;
     unsigned char* seat=SeatAt(v,static_cast<unsigned>(i+1));
-    if(SeatRider(seat)==Rider::player){g.prevValid=false;return;}   // theirs: their stick, their trigger
+    // The player's gun: their stick, their trigger; a medic's (MedicGunnerAim): aimed for them at the hurt friend it
+    // reaches while there is one, the trigger still theirs (else their stick as it is).
+    const bool theirs=SeatRider(seat)==Rider::player;
+    if(AnyPlayerIn(seat) && !theirs){g.prevValid=false;return;}   // remote players own their gun input
+    if(theirs && !Cfg().medicGunnerAim){g.prevValid=false;return;}
     const auto triggers=At<unsigned char*>(v,kHolders);
     if(At<std::uint64_t>(v,kHolderCount)<=static_cast<std::uint64_t>(i) || !Readable(triggers+i*kHolderStride,kHolderStride))return;
     const auto trigger=triggers+i*kHolderStride;
@@ -1181,6 +1306,8 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)==0)return;
     const auto weapon=At<unsigned char*>(trigger,kHolderWeapon);
     if(!Readable(weapon,kWeaponAmmo+4,true))return;
+    const bool heals=HealingGun(weapon);
+    if(theirs && !heals){g.prevValid=false;return;}
     float gp[3],gd[3];
     if(!Barrel(v,weapon,gp,gd))return;
     // No weapon of the helis reloads: refill an emptied gun as Arms does.
@@ -1188,7 +1315,7 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     if(g.weapon!=weapon || g.weaponCtrl!=ctrl){g.weapon=weapon;g.weaponCtrl=ctrl;g.full=ammo;g.emptyAt=0;}
     if(ammo>g.full)g.full=ammo;
     g.ammo=ammo;g.ammoFrame=GameFrame();   // what LeaveReason counts (it never reads the weapon itself)
-    if(ammo<=0 && g.full>0 && !h.called) {
+    if(ammo<=0 && g.full>0 && refill) {
         if(!g.emptyAt)g.emptyAt=ms;
         else if(ms-g.emptyAt>kReloadGunMs){Put<std::int32_t>(weapon,kWeaponAmmo,g.full);g.emptyAt=0;}
     } else g.emptyAt=0;
@@ -1214,7 +1341,8 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
         if(g.k[k]<=0.0f)g.k[k]=kTurnPerInput;
         a.sign[k]=g.sign[k]>=0.0f ? 1.0f : -1.0f;
     }
-    // The target: the cheapest enemy in reach, the current one and the pilot's counting nearer.
+    // The target: the cheapest enemy in reach, the current one and the pilot's counting nearer (a healing gun: the cheapest
+    // hurt friend, the most hurt counting nearer; see Medic).
     const float speed=At<float>(weapon,kWeaponSpeed)*60.0f;
     const float reach=At<float>(weapon,kWeaponSpeed)*static_cast<float>(At<std::int32_t>(weapon,kWeaponAlive));
     const float range=std::isfinite(reach) && reach>0.0f && reach<kDoorRange ? reach : kDoorRange;
@@ -1222,14 +1350,14 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
     if(!std::isfinite(gravity) || gravity<0.0f)gravity=0.0f;
     const void* best=nullptr;float bestScore=0.0f,bestAt[3]{};
     if(std::isfinite(speed) && speed>1.0f)
-        ForEachEnemy(v,[&](const void* object,const float* p) noexcept {
+        ForEachTarget(heals,v,[&](const void* object,const float* p,float extra) noexcept {
             const float d[3]={p[0]-gp[0],p[1]-gp[1],p[2]-gp[2]};
             const float dist=std::sqrt(Dot3(d,d));
             float err[2],axis[2];
             if(dist>range || dist<kDoorMin || !Reach(v,a,gp,p,err,axis))return;
-            float score=dist+(std::fabs(err[0])+std::fabs(err[1]))*kDoorSlew;
+            float score=dist+extra+(std::fabs(err[0])+std::fabs(err[1]))*kDoorSlew;
             if(g.target.Is(object))score-=kDoorKeep;
-            if(h.target.Is(object))score-=kDoorShare;
+            if(share.Is(object))score-=kDoorShare;
             if(!best || score<bestScore){best=object;bestScore=score;std::memcpy(bestAt,p,12);}
         });
     float in[2]={0,0},err[2]={0,0},axis[2]={a.angle[0],a.angle[1]},lead[3]{},dist=0.0f;
@@ -1253,17 +1381,25 @@ void DoorGun(Heli& h,unsigned char* v,int i,bool hold,float dt,ULONGLONG ms) noe
         }
         const float wide=dist>1.0f ? std::atan(kHitRadius/dist) : 1.0f;
         const float cone=(wide>kDoorCone ? wide : kDoorCone)*(g.firing ? kDoorHold : 1.0f);
-        fire=!hold && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin && !PlayerInLine(gp,lead);
+        // A healing round onto the player is the point; one past an enemy is not (see Medic).
+        fire=!hold && !theirs && Cfg().heliFire && std::fabs(err[0])<cone && std::fabs(err[1])<cone && dist>kDoorMin &&
+             (heals ? !EnemyInLine(v,weapon,gp,lead) : !PlayerInLine(gp,lead));
     } else g.target=ObjRef{};
-    Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);blk[kDoorPull]=fire ? 1 : 0;
+    if(theirs && !best){g.prevValid=false;return;}   // nobody to heal: their own aim
+    Put<float>(blk,0,in[0]);Put<float>(blk,4,in[1]);
+    if(!theirs)blk[kDoorPull]=fire ? 1 : 0;
     g.firing=fire;
     for(int k=0;k<2;++k){g.in[k]=in[k];g.axisPrev[k]=a.angle[k];g.barrelPrev[k]=a.barrel[k];}
     g.prevValid=true;
     if(Cfg().debug && ms-g.loggedAt>1000) {
         g.loggedAt=ms;
-        Log("GUNNER410 v=%p gun=%d t=%p dist=%.0f barrel=(%.2f,%.2f) err=(%.3f,%.3f) axis=(%.2f,%.2f)->(%.2f,%.2f) lim=(%.2f..%.2f, %.2f..%.2f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d ammo=%d",
-            v,i,best,dist,a.barrel[0],a.barrel[1],err[0],err[1],a.angle[0],a.angle[1],axis[0],axis[1],a.lo[0],a.hi[0],a.lo[1],a.hi[1],
+        Log("GUNNER410 v=%p gun=%d%s t=%p dist=%.0f barrel=(%.2f,%.2f) err=(%.3f,%.3f) axis=(%.2f,%.2f)->(%.2f,%.2f) lim=(%.2f..%.2f, %.2f..%.2f) sign=(%+.0f,%+.0f) k=(%.4f,%.4f) in=(%.2f,%.2f) fire=%d ammo=%d",
+            v,i,heals ? (theirs ? " (heals, player's)" : " (heals)") : "",best,dist,a.barrel[0],a.barrel[1],err[0],err[1],a.angle[0],a.angle[1],axis[0],axis[1],a.lo[0],a.hi[0],a.lo[1],a.hi[1],
             a.sign[0],a.sign[1],g.k[0],g.k[1],in[0],in[1],fire,ammo);
+        // A medic's: the friend's HP now, a line a second (whether the rounds heal shows as it rising).
+        const auto friendObj=static_cast<const unsigned char*>(best);
+        if(heals && friendObj && Readable(friendObj,kHp+4))
+            Log("MEDIC v=%p gun=%d friend=%p hp %.0f/%.0f",v,i,best,At<float>(friendObj,kHp),At<float>(friendObj,kHpMax));
     }
 }
 
@@ -1599,6 +1735,9 @@ bool SenseFrame(Heli& h,unsigned char* v,bool playerAboard,Sense& s) noexcept {
     // Following the player it only takes on enemies its gun reaches from within heliCombatRange of them.
     const float gunRange=GunRange(*s.type);
     const float pick=s.follow && Cfg().heliCombatRange+gunRange<Cfg().heliRange ? Cfg().heliCombatRange+gunRange : Cfg().heliRange;
+    const bool medic=Medic(v);
+    if(medic!=h.medic)Log("HELI v=%p %s",v,medic ? "medic: its door guns heal, it aims at hurt friends" : "no longer a medic");
+    h.medic=medic;
     const bool moving=CommandMoving(h,pos,anchor);
     s.engage=!moving && !s.rescuing && !h.leaving && PickTarget(h,v,anchor,pos,pick,s.aim);
     if(s.engage) {
@@ -1923,7 +2062,7 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
     } else h.firing=false;
     if(s.type->guns==Guns::nose){s.v[kFireGun]=shot.gun;s.v[kFireMissile]=shot.missile;}
     else if(doorOk && Cfg().heliDoorGuns && SeatCount(s.v)>=3)
-        for(int i=0;i<2;++i)DoorGun(h,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
+        for(int i=0;i<2;++i)DoorGun(h.doors[i],h.target,!h.called,s.v,i,s.grounded || land || rescuing,s.dt,s.ms);
     return shot;
 }
 
@@ -1994,6 +2133,8 @@ void SoftEdge(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     if(w.height>top)w.height=top;
 }
 
+void MirrorStick(unsigned char* v,const Control& c) noexcept;   // online: the input block onto seat 0's stick (below)
+
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     Sense s{};
     if(!SenseFrame(h,v,playerAboard,s))return;
@@ -2002,6 +2143,7 @@ void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     Want w=FlyMode(h,s,mode);
     SoftEdge(h,s,mode,w);
     const Control c=Steer(h,s,mode,w);
+    MirrorStick(v,c);
     const Shot shot=Fire(h,s,mode);
     FlyLog(h,s,mode,w,c,shot);
 }
@@ -2389,6 +2531,29 @@ void PublishHud(const Pilot& p,unsigned char* v,const float* pos,bool grounded,f
     ReleaseSRWLockExclusive(&heliHudLock);
 }
 
+// The 410 under a player pilot: an AI rider in a door seat (AiGunner: an NPC soldier, or the NPC a seat swap moved
+// there; the user 2026-10-07: "上车的npc应该可以用对应的炮塔武器") works its gun as the NPC heli's DoorGun does, on the
+// gun's real rounds (no refill: the player's heli). An empty door seat stays silent (DoorGunUser lends the pilot's
+// user only under an NPC pilot); the player's own seat is theirs.
+struct CrewDoors { ObjRef ref; ULONGLONG lastMs; Door doors[2]; };
+CrewDoors crewDoors[4]{};
+constexpr ULONGLONG kCrewDoorsStaleMs=2000;
+
+void CrewDoorGuns(unsigned char* v) noexcept {
+    if(!doorOk || !Cfg().heliDoorGuns || At<const unsigned char*>(v,0)!=image+kVt410 || SeatCount(v)<3)return;
+    const ULONGLONG ms=GameMs();
+    CrewDoors* c=nullptr;
+    for(auto& e:crewDoors)if(e.ref.Is(v)){c=&e;break;}
+    if(!c)for(auto& e:crewDoors)if(!e.ref || ms-e.lastMs>kCrewDoorsStaleMs){e=CrewDoors{};e.ref=ObjRef::Of(v);e.lastMs=ms;c=&e;break;}
+    if(!c)return;
+    const float dt=GameStep(ms-c->lastMs);
+    c->lastMs=ms;
+    for(int i=0;i<2;++i) {
+        if(AiGunner(SeatAt(v,static_cast<unsigned>(i+1))))DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms);
+        else c->doors[i].prevValid=false;
+    }
+}
+
 // The player in seat 0 of a stock heli, each frame after PlayerAssist.
 void PlayerHeli(unsigned char* v) noexcept {
     if(!Cfg().heliMouseAim && !Cfg().heliFlightHud && !Cfg().warnAudio)return;
@@ -2421,20 +2586,100 @@ void PlayerHeli(unsigned char* v) noexcept {
     }
     if(Cfg().heliFlightHud || p->flying || Cfg().warnAudio)PublishHud(*p,v,pos,grounded,clear,keys);   // the aim's square drawn either way
 }
+// ---- Online: the NPC pilot's flight where the heli's authority is, its stick everywhere (docs/online-re.md §4-5) ----
+// The heli's replication sends seat 0's stick block (mask 4, slot 7 0x6559D0) from the machine that runs it, and every
+// other machine's copy flies on that stick through the stock flight law (slot 55 copies it to the input block while seat
+// 0 has a rider, slot 51 0x651F90 pulls the body to the pose it was sent). The plugin's pilot writes the input block
+// (+0x1540..), which is not replicated, so on its authority (OnlineRunsHere) the block it wrote is also put on seat 0's
+// stick the way the stock copy reads it back (MirrorStick: lateral = -LX, forward = -LY, yaw = -RX, throttle = the ascend
+// trigger; heli-input-re.md §2a). Elsewhere (Replay) the pilot does not fly it: its NPC exists on the authority only (a
+// RideAi rider has no network identity, so seat 0 is empty here, and slot 55 then zeroes the block), so the replicated
+// stick is copied to the input block as slot 55 would, under the same params Tune gives the pilot (ini HeliSpeed /
+// HeliAgility / HeliYawRate, the same on every machine with the same ini). A stick block all zero is no pilot's: the
+// stock zeroes it after 30 frames without a packet (slot 51 0x652259: the frame count +0x1D7C reaching 30 clears the
+// block by 0x62C120 and starts the count again at 0, so the count never stays up and tells nothing by itself), a heli
+// never flown has it zero from its constructor, and the pilot's hover throttle is never 0 in the air. Then the heli's own
+// params go back and its record goes (ReplicaOff), and nothing is written: the stock input stands.
+Heli replicas[8]{};
+
+void MirrorStick(unsigned char* v,const Control& c) noexcept {
+    if(!InSession() || SeatCount(v)==0)return;
+    unsigned char* const seat=SeatAt(v,0);
+    Put<float>(seat,kSeatLX,-c.stickL);Put<float>(seat,kSeatLY,-c.stickF);Put<float>(seat,kSeatRX,-c.yaw);
+    Put<float>(seat,kSeatAscend,Clamp(c.throttle,0.0f,1.0f));
+}
+
+// Seat 0's stick holds a value (see above: all zero is no pilot's).
+bool StickLive(const unsigned char* seat) noexcept {
+    return At<float>(seat,kSeatLX)!=0.0f || At<float>(seat,kSeatLY)!=0.0f || At<float>(seat,kSeatRX)!=0.0f || At<float>(seat,kSeatAscend)!=0.0f;
+}
+
+Heli* ReplicaOf(unsigned char* v,ULONGLONG ms) noexcept {
+    for(auto& h:replicas)if(h.ref.Is(v))return &h;
+    Heli* slot=nullptr;
+    for(auto& h:replicas)if(!slot && (!h.ref || ms-h.seen>kStaleMs))slot=&h;
+    if(!slot)return nullptr;
+    *slot=Heli{};slot->ref=ObjRef::Of(v);slot->type=TypeOf(v);slot->seen=ms;
+    Tune(*slot,v);
+    return slot;
+}
+
+// A stock heli (with seats) another machine runs whose seat 0 is empty here, or holds an NPC seated here (not its
+// authority's): no player of any machine at its stick.
+bool Replica(unsigned char* v) noexcept {
+    const Rider r=SeatRider(SeatAt(v,0));
+    return (r==Rider::none || r==Rider::dummy) && !OnlineRunsHere(v);
+}
+
+// Its replica record's params back, the record dropped: it is run here again (or by a player).
+void ReplicaOff(unsigned char* v) noexcept {
+    for(auto& h:replicas)if(h.ref.Is(v)){Restore(h,v);h=Heli{};}
+}
+
+// A Replica: its replicated stick into the input block, after the stock slot 55 (crew.cpp InputHook), under the
+// pilot's params.
+void Replay(unsigned char* v) noexcept {
+    // No stick coming in: no pilot's (a parked heli takes no record, so the table keeps room for the flown ones).
+    if(!StickLive(SeatAt(v,0))){ReplicaOff(v);return;}
+    const ULONGLONG ms=GameMs();
+    Heli* const h=ReplicaOf(v,ms);
+    if(!h)return;
+    h->seen=ms;
+    if(h->tuned) {
+        Put<float>(v,kSpeedGain,h->params[0]);Put<float>(v,kBlend,h->params[1]);
+        Put<float>(v,kMaxYaw,h->params[2]);Put<float>(v,kYawSmooth,h->params[3]);
+        h->applied=true;
+    }
+    const unsigned char* const seat=SeatAt(v,0);
+    Put<float>(v,kInLateral,-SeatAxis(seat,kSeatLX));Put<float>(v,kInForward,-SeatAxis(seat,kSeatLY));
+    Put<float>(v,kInThrottle,Clamp(At<float>(seat,kSeatAscend),0.0f,1.0f));Put<float>(v,kInW,1.0f);
+    Put<float>(v,kInYaw,-SeatAxis(seat,kSeatRX));
+}
 }  // namespace
 
 void HeliFrame(unsigned char* vehicle) noexcept {
     if(rescue.ref.Is(vehicle))rescue.seenFrame=GameFrame();   // RescueHeliAlive
     if(!profileOk || vehicle[kDead])return;
+    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
+    // Online, a stock heli another machine runs is flown there: here it flies on the stick it sends (Replay).
+    if(stockHeli && SeatCount(vehicle)>0 && Replica(vehicle)) {
+        if(Heli* h=Find(vehicle))Restore(*h,vehicle);
+        AssistOff(vehicle);
+        Replay(vehicle);
+        return;
+    }
+    ReplicaOff(vehicle);
     if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
-        const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
-        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player){PlayerAssist(vehicle);PlayerHeli(vehicle);}
+        if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player) {
+            PlayerAssist(vehicle);PlayerHeli(vehicle);CrewDoorGuns(vehicle);
+        }
         else AssistOff(vehicle);
         return;
     }
     AssistOff(vehicle);   // an NPC in its seat again: Tune's stock is the heli's own
-    if(IsJet(vehicle)){if(Cfg().jetPilot)JetFrame(vehicle);return;}
+    // The plugin's jets: its own copies, flown on every machine (OnlineRunsHere); a registered one only where it is run.
+    if(IsJet(vehicle)){if(Cfg().jetPilot && OnlineRunsHere(vehicle))JetFrame(vehicle);return;}
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(IsSazabi(vehicle))return;      // the Sazabi (sazabi.cpp): never flown as a heli
@@ -2444,7 +2689,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(!h)return;
     h->seen=GameMs();h->seenFrame=GameFrame();
     bool playerAboard=false;
-    for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || SeatRider(SeatAt(vehicle,i))==Rider::player;
+    for(unsigned i=1;i<SeatCount(vehicle);++i)playerAboard=playerAboard || AnyPlayerIn(SeatAt(vehicle,i));   // of any machine
     Fly(*h,vehicle,playerAboard);
 }
 
@@ -2629,7 +2874,9 @@ void StartRescue(unsigned char* human,ULONGLONG ms) noexcept {
     float dir[3]={p[0]-deck[0],0.0f,p[2]-deck[2]};
     const float away=std::sqrt(Dot2(dir,dir));
     if(away>1.0f){dir[0]/=away;dir[2]/=away;}else{dir[0]=0.0f;dir[2]=1.0f;}
+    const online::CopyOwner was=SetSpawnOwner(online::kCopyHere);   // this machine's player's rescue (online_authority.h)
     unsigned char* const v=HeliLaunch(HeliBody::brute410,from,dir);
+    SetSpawnOwner(was);
     if(!v) {
         Log("RESCUE no heli could be made (EDF6VC_HELI_410.SGO not installed or not preloaded this mission): retry in %llus",kRetryMs/1000);
         rescue.retryAt=ms+kRetryMs;
@@ -2778,7 +3025,7 @@ void RescueTick() noexcept {
     if(!profileOk || rescue.frame==GameFrame())return;   // it flies the heli through Fly; at most once a frame
     rescue.frame=GameFrame();
     __try { RescueStep(); }
-    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the rescue");RescueFault();}
+    __except(EXCEPTION_EXECUTE_HANDLER){Log("RESCUE fault: ending the rescue");SetSpawnOwner(online::kCopyHost);RescueFault();}
 }
 
 namespace {
@@ -2833,6 +3080,53 @@ bool InstallDoorGuns() noexcept {
 }
 
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+// The floor along a map ray (map_floor.h): the hits on a triangle's back skipped once the normals are known to be the
+// triangles' own. Learned from the player's floor (LearnMapNormals): `own` is kept for the run (it is the engine's, not
+// the map's); `facing` is asked again every kRelearnMs (a thin slab or a second body under the floor reads as facing).
+// Game thread only (the map's frame, the commands, the marks).
+namespace {
+mapfloor::Normals mapNormals=mapfloor::Normals::unknown;
+ULONGLONG normalsAskedAt=0;
+constexpr ULONGLONG kRelearnMs=1000;
+constexpr float kStandClear=2.5f;   // m of open air over a floor a unit can stand on
+float FloorHit(const float* from,const float* to,float* hit,float* normal) noexcept {
+    return CastRay(from,to,hit,false,nullptr,kMapLayer,normal);
+}
+}  // namespace
+void LearnMapNormals(const float* standing) noexcept {
+    if(mapNormals==mapfloor::Normals::own || !rayOk || !std::isfinite(standing[0]+standing[1]+standing[2]))return;
+    const ULONGLONG now=GetTickCount64();
+    if(mapNormals==mapfloor::Normals::facing && now-normalsAskedAt<kRelearnMs)return;
+    normalsAskedAt=now;
+    const float top[3]={standing[0],standing[1]+1.5f,standing[2]},bottom[3]={standing[0],standing[1]-20.0f,standing[2]};
+    float h1[3],n1[3];
+    if(CastRay(top,bottom,h1,false,nullptr,kMapLayer,n1)<0.0f)return;
+    // The same floor from just under it: its own normal still up, a facing one now down.
+    const float below[3]={h1[0],h1[1]-0.08f,h1[2]},above[3]={h1[0],h1[1]+0.08f,h1[2]};
+    float h2[3],n2[3];
+    if(CastRay(below,above,h2,false,nullptr,kMapLayer,n2)<0.0f || std::fabs(h2[1]-h1[1])>0.05f)return;
+    const mapfloor::Normals was=mapNormals;
+    const mapfloor::Normals learned=mapfloor::Learn(n1,n2);
+    if(learned==mapfloor::Normals::unknown)return;
+    mapNormals=learned;
+    if(mapNormals!=was)
+        Log("MAP ray normals: %s (a floor at y=%.1f: from above (%.2f,%.2f,%.2f), from below (%.2f,%.2f,%.2f))%s",
+            mapNormals==mapfloor::Normals::own ? "the triangles' own" : "facing the ray",h1[1],n1[0],n1[1],n1[2],n2[0],n2[1],n2[2],
+            mapNormals==mapfloor::Normals::own ? ": cave roofs seen from above are skipped" : ": cave roofs cannot be told apart");
+}
+float MapFloorRay(const float* a,const float* b,float* hit) noexcept {
+    return mapfloor::Floor(a,b,mapNormals,&FloorHit,hit);
+}
+bool MapGroundNear(float x,float z,float y,float* h,bool standable) noexcept {
+    const float top[3]={x,y+4000.0f,z},bottom[3]={x,y-4000.0f,z};
+    // Standable: open air over it (not the ground inside a building's or a rock's collision under its roof).
+    auto room=[standable](const float* p){
+        if(!standable)return true;
+        const float a[3]={p[0],p[1]+0.3f,p[2]},b[3]={p[0],p[1]+kStandClear,p[2]};
+        return CastRay(a,b)<0.0f;
+    };
+    return mapfloor::Near(top,bottom,y,mapNormals,&FloorHit,room,h) && std::isfinite(*h);
+}
 // Layer 27 (filter 0x1B) collides with layers 15, 16, 17, 18 and 20 alone (the CollisionFilter ctor 0x105510's pair
 // table, docs/emc-re.md §3): the layers the map objects' creation code puts buildings on (docs/raycast-re.md §3), not
 // 19 / 26 (the terrain's and the units' / vehicles'). With the plain nearest-hit collector: every hit on those layers.
@@ -2895,6 +3189,8 @@ bool CheckHeliProfile() noexcept {
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
+        visitOk=Matches(kVisitFriends,kVisitFriendsSig,sizeof(kVisitFriendsSig));
+        Log("HELI friends walk=%d%s",visitOk,visitOk ? "" : " (unexpected EDF.dll code: medic helis aim at nobody)");
         waterOk=true;
         for(const auto& s:kWaterSignatures)waterOk=waterOk && Matches(s.rva,s.bytes,s.size);
         Log("WATER probe=%d%s",waterOk,waterOk ? "" : " (unexpected EDF.dll code: the carrier surfaces anywhere)");

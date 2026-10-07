@@ -63,19 +63,38 @@ const unsigned char kPlayPresetSig[]={0x48,0x83,0xEC,0x48,0x48,0x8B,0x41,0x20,0x
 const unsigned char kLockSearchSig[]={0x48,0x8D,0x8B,0xC0,0x0C,0x00,0x00};
 const unsigned char kLockDoneSig[]={0x48,0x8D,0x8B,0x40,0x0D,0x00,0x00};
 
+// Whether the game thread is inside a call on the jets' voices (jetaudio.cpp): a fault there may be the voices'
+// own (a voice gone bad, the engine under them), and then nothing of theirs may be called again (Recover).
+bool inAudio=false;
+int OpenVoices() noexcept { inAudio=true;const int slot=audio::Open();inAudio=false;return slot; }
+void SetVoices(int slot,const audio::Mix& m) noexcept { inAudio=true;audio::Set(slot,m);inAudio=false; }
+void CloseVoices(int slot) noexcept { inAudio=true;audio::Close(slot);inAudio=false; }
+void BeatVoices(float volume) noexcept { inAudio=true;audio::Beat(volume);inAudio=false; }
+
+// The filter of every guarded call here: it runs before the stack unwinds, still inside the faulting call, so it
+// only logs and decides; the voices are stopped by the handler (Recover).
 int Fault(const EXCEPTION_POINTERS* e) noexcept {
     const auto r=e->ExceptionRecord;
-    Log("SOUND fault on a jet's engine sound (%08lX at EDF+%llX): jet sounds off until the game restarts",r->ExceptionCode,
-        static_cast<unsigned long long>(static_cast<const unsigned char*>(r->ExceptionAddress)-image));
+    Log("SOUND fault on a jet's engine sound (%08lX at EDF+%llX, %s): jet sounds off until the game restarts",r->ExceptionCode,
+        static_cast<unsigned long long>(static_cast<const unsigned char*>(r->ExceptionAddress)-image),
+        inAudio ? "in the voices: they are let go of, unstopped" : "in the game's memory");
     broken=true;
-    // Other audio consumers continue beating the shared engine after this fault.
-    // Stop our loops now; the watchdog cannot silence just these voices for us.
-    for(auto& s:sounds){audio::Close(s.slot);s=Sound{};}
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// The handler's half (the stack unwound): every jet's sound forgotten. Other audio consumers keep beating the shared
+// engine, so the watchdog never silences these loops: a fault in the game's memory leaves the voices sound and they
+// are closed here. A fault inside a voice call leaves no voice trustworthy (a bad pointer in the slots, or the engine
+// itself): calling DestroyVoice on one could fault again, outside any guard, so they are let go of untouched (their
+// slots stay taken in jetaudio; with `broken` no jet opens one again).
+void Recover() noexcept {
+    const bool voicesOk=!inAudio;
+    inAudio=false;
+    for(auto& s:sounds){if(voicesOk)CloseVoices(s.slot);s=Sound{};}
+}
+
 void Silence(Sound& s) noexcept {
-    audio::Close(s.slot);
+    CloseVoices(s.slot);
     s=Sound{};
 }
 
@@ -181,8 +200,8 @@ void Step(unsigned char* v) noexcept {
     }
     if(frame!=s->lastFrame){std::memcpy(s->last,pos,12);s->lastFrame=frame;}
     s->seen=ms;
-    if(s->slot<0)s->slot=audio::Open();   // a new jet, or all voices were in use: (again) now
-    audio::Set(s->slot,MixFor(v,pos,s->vel,engine));
+    if(s->slot<0)s->slot=OpenVoices();   // a new jet, or all voices were in use: (again) now
+    SetVoices(s->slot,MixFor(v,pos,s->vel,engine));
 }
 
 // Once a frame: the camera's place, matrix and velocity, the beat (at the game's volume), and every sound whose jet
@@ -204,7 +223,7 @@ void Tick() noexcept {
         }
         std::memcpy(listener,cam,sizeof(listener));listenerFrame=frame;hasListener=true;
     } else hasListener=false;
-    audio::Beat(GameVolume());
+    BeatVoices(GameVolume());
     for(auto& s:sounds)
         if(s.ref && ms-s.seen>kStaleMs)Silence(s);   // deleted, wrecked or gone with the mission
 }
@@ -260,7 +279,7 @@ void LockQuiet(unsigned char* v) noexcept {
 void LockSound(unsigned char* v) noexcept {
     if(!lockOk || broken)return;
     __try { LockQuiet(v); }
-    __except(Fault(GetExceptionInformation())) {}
+    __except(Fault(GetExceptionInformation())){Recover();}
 }
 
 bool InstallJetSound() noexcept {
@@ -282,7 +301,7 @@ void JetSound(unsigned char* v) noexcept {
     if(!started){started=true;audio::Start();}   // the first jet: the engine (it logs why when it cannot)
     __try {
         Step(v);
-    } __except(Fault(GetExceptionInformation())) {}
+    } __except(Fault(GetExceptionInformation())){Recover();}
 }
 
 void JetSoundTick() noexcept {
@@ -296,7 +315,7 @@ void JetSoundTick() noexcept {
         // it from their first jet on (started); the vehicles from the switch alone, a mission with no jet in it too.
         if((jets && started) || (Cfg().enabled && Cfg().vehicleSound))Tick();
         else hasListener=false;   // not kept: never a stale camera's place for a consumer switched on later
-    } __except(Fault(GetExceptionInformation())) {}
+    } __except(Fault(GetExceptionInformation())){Recover();}
 }
 
 // A new mission (mission.cpp MissionStart): the last mission's sounds stopped and their voices let go of.

@@ -74,6 +74,33 @@ class IncrementalTests(unittest.TestCase):
         cache.record(group, files)
         cache.save()
 
+    def check_default_migration_lifecycle(self, existing: bool) -> None:
+        shipped = (ROOT / 'EDF6VehicleCrew.ini').read_bytes()
+        path = self.game / 'Mods/Plugins/EDF6VehicleCrew.ini'
+        if existing:
+            path.parent.mkdir(parents=True)
+            path.write_bytes(shipped)
+        with redirect_stdout(io.StringIO()):
+            installer.install_plugin(str(self.game), b'plugin', shipped)
+        installed = path.read_text(encoding='utf-8-sig')
+        self.assertIn(installer.DEFAULTS_MARK, installed)
+        for key in installer.NEW_DEFAULTS[installer.SECTION]:
+            with self.subTest(existing=existing, key=key):
+                lines = installed.splitlines()
+                line = installer._keys(lines)[key.lower()]
+                lines[line] = f'{key}=0'
+                disabled = '\n'.join(lines) + '\n'
+                path.write_bytes(disabled.encode('utf-8'))
+                with redirect_stdout(io.StringIO()):
+                    installer.install_plugin(str(self.game), b'updated plugin', shipped)
+                self.assertEqual(path.read_bytes(), disabled.encode('utf-8'))
+
+    def test_fresh_install_keeps_later_disabled_features(self) -> None:
+        self.check_default_migration_lifecycle(existing=False)
+
+    def test_current_defaults_keep_later_disabled_features(self) -> None:
+        self.check_default_migration_lifecycle(existing=True)
+
     def test_current_and_changed_outputs(self) -> None:
         self.seed()
         self.assertTrue(buildcache.Cache(str(self.game)).current('chute'))

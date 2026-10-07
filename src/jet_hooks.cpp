@@ -2,6 +2,7 @@
 // flight's wingmen, and the install of the jet files.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "online_authority.h"
 #include <atomic>
 
 namespace crew {
@@ -13,6 +14,9 @@ namespace {
 // bullets' candidate collector (vtable kAddBodySlot, slot 0 addBody kAddBody) leaves out the body of a wingman
 // (kBodyObject: body id -> object) when the bullet's owner (core = collector+kCollectorCore, owner at
 // core+kBulletOwner) is a jet of the same flight; all else is the stock function's (friendly fire stays as it is).
+// The sidecar's passengers' rounds pass through their own bike and its driver (sidecar.cpp SidecarBulletPass) by the
+// same hook: it is installed on its own signatures (InstallBulletPass), not with the jets, whose profile is the heli
+// pilot's.
 constexpr unsigned kAddBodySlot=0x179E128,kAddBody=0x232AA0,kBodyObject=0x108260;
 constexpr std::size_t kCollectorCore=0x88,kBulletOwner=0x9A8;
 const unsigned char kAddBodySig[]={0x48,0x89,0x4C,0x24,0x08,0x53,0x55,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,
@@ -81,13 +85,33 @@ bool Candidate(void* collector,std::uint32_t body,const void** owner,const void*
     return *target!=nullptr;
 }
 
+// online_authority.h SparesRide for this candidate: the bullet's owner a player of this machine, the candidate the vehicle
+// they ride (human +0x1548, the ride's weak object: boarding.cpp). Offline keeps the stock fast path without looking up
+// the candidate. The owner's fields are read only once the candidate is that pointer.
+constexpr std::size_t kHumanVehicle=0x1548;
+bool SparesOwnRide(void* collector,std::uint32_t body) noexcept {
+    if(!InSession())return false;
+    const void* owner=nullptr;
+    const void* target=nullptr;
+    if(!Candidate(collector,body,&owner,&target) || !owner)return false;
+    const auto human=static_cast<const unsigned char*>(owner);
+    if(!Readable(human,kHumanVehicle+8) || At<const void*>(human,kHumanVehicle)!=target)return false;
+    return online::SparesRide(true,IsPlayer(human),target,target);
+}
+
 void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
     // A slow round through the Shield Bearer's shield (shield.cpp), whoever fired it.
     bool through=false;
     __try { through=ShieldLetsThrough(collector,body); } __except(FaultLog("SHIELD round",GetExceptionInformation())) { through=false; }
     if(through)return;
+    // A round a player of this machine fired from their vehicle, named theirs online (online_authority.h SparesRide).
+    bool spare=false;
+    __try { spare=SparesOwnRide(collector,body); } __except(FaultLog("BULLET own ride",GetExceptionInformation())) { spare=false; }
+    if(spare)return;
     bool pass=false;
-    {
+    // Only while something can be passed: a plugin jet flown (Publish) or a passenger in a sidecar (sidecar.cpp, kept
+    // by who boards and leaves). Every other round keeps the stock path, with no body lookup and no lock.
+    if(flown.load(std::memory_order_relaxed) || SidecarPassengers()) {
         const void* owner=nullptr;
         const void* target=nullptr;
         bool found=false;
@@ -140,6 +164,23 @@ bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     return true;
 }
 
+// The bullets' candidate collector (see Flights): its own signatures only, before the jets and the sidecar, which
+// both pass rounds through it; without it a jet's rounds hit its wingmen and a passenger's their own bike, as stock.
+bool InstallBulletPass() noexcept {
+    __try {
+        const auto passSlot=reinterpret_cast<void**>(image+kAddBodySlot);
+        if(Matches(kAddBody,kAddBodySig,sizeof(kAddBodySig)) && Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) &&
+           Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2)) && *passSlot) {
+            void* const was=*passSlot;
+            if(was!=image+kAddBody)Log("BULLET addBody chaining onto %p (another plugin)",was);
+            nextAddBody=reinterpret_cast<AddBodyFn>(was);
+            passOk=PatchVtableSlot(passSlot,was,reinterpret_cast<void*>(&AddBodyHook));
+        }
+    } __except(FaultLog("BULLET pass install",GetExceptionInformation())){passOk=false;}
+    Log("HOOK bullet pass-through (wingmen, sidecar passengers)=%d",passOk);
+    return passOk;
+}
+
 bool InstallJets() noexcept {
     __try {
         if(!Body506Ok()){Log("JET: no 506 physics hook (body506): jets off");return false;}
@@ -152,14 +193,6 @@ bool InstallJets() noexcept {
         const bool bay=InstallBay(spawn);
         const bool dolls=spawn && InstallDolls();
         const bool farOn=InstallFarRender();
-        const auto passSlot=reinterpret_cast<void**>(image+kAddBodySlot);
-        if(Matches(kAddBody,kAddBodySig,sizeof(kAddBodySig)) && Matches(kBodyObject,kBodyObjectSig,sizeof(kBodyObjectSig)) &&
-           Matches(kBodyObject+11,kBodyObjectSig2,sizeof(kBodyObjectSig2)) && *passSlot) {
-            void* const was=*passSlot;
-            if(was!=image+kAddBody)Log("JET bullets: addBody chaining onto %p (another plugin)",was);
-            nextAddBody=reinterpret_cast<AddBodyFn>(was);
-            passOk=PatchVtableSlot(passSlot,was,reinterpret_cast<void*>(&AddBodyHook));
-        }
         Log("HOOK jets physics=%d spawn=%d bay=%d wingmenPass=%d dolls=%d farRender=%d",hooksOk,spawn,bay,passOk,dolls,farOn);
         return hooksOk;
     } __except(FaultLog("JET install",GetExceptionInformation())){return false;}

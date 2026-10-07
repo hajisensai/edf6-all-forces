@@ -8,6 +8,8 @@ void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
 bool NpcMarked() noexcept { return false; }
 float MapRay(const float*,const float*,float*) noexcept { return -1; }
+float MapFloorRay(const float*,const float*,float*) noexcept { return -1; }
+bool MapGroundNear(float,float,float,float*,bool) noexcept { return false; }
 bool HeliSharesPost() noexcept { return false; }
 int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }

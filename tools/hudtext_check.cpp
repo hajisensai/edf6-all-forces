@@ -7,6 +7,7 @@
 #include "../src/hudtext.h"
 #include <cstdio>
 #include <cwchar>
+#include <cwctype>
 #include <string>
 #include <vector>
 
@@ -109,10 +110,27 @@ void Languages() {
 }
 }  // namespace
 
+// The texts drawn only as the optional tail of another (its last %ls, empty when there is nothing to add): each must
+// begin with its own separator, or the two run together ("3 UNIT(S)1 CANNOT"). Checked on the composed result.
+void Tails() {
+    for(int l=0;l<kLangs;++l) {
+        const Lang lang=static_cast<Lang>(l);
+        wchar_t tail[40]{},line[160]{};
+        std::swprintf(tail,_countof(tail),Tr(Tx::cmdCannot,lang),1);
+        std::swprintf(line,_countof(line),Tr(Tx::cmdOrderResult,lang),L"X",3,tail);
+        const std::wstring all=line;
+        const auto at=all.rfind(tail);
+        if(at==std::wstring::npos || at==0)Fail("tail not at the end of its result","cmdCannot",l);
+        else if(std::iswalnum(all[at-1]) && std::iswalnum(tail[0]))Fail("tail runs into its result with no separator","cmdCannot",l);
+        else if(std::iswalnum(tail[0]) || tail[0]==L' ')Fail("tail does not begin with its separator","cmdCannot",l);
+    }
+}
+
 int main() {
     Table();
     Words();
     Languages();
+    Tails();
     std::printf(failed ? "hudtext: %d FAILED\n" : "hudtext: all ok\n",failed);
     return failed ? 1 : 0;
 }

@@ -11,7 +11,8 @@ constexpr int kMostPayload=8;
 // Which of the seat's controls fires a weapon, as the vehicle class's own input does (docs/stock-payload-re.md §2):
 // `primary` the seat's primary trigger (seat +0x2E4 >= 0.8), `secondary` its second fire control (the 506's / 409's
 // button bit 0x20, fire byte +0x2021; the Titan's left trigger +0x2E0), `store` one of the stores the secondary fires
-// when it is the one picked, `other` a control the plugin has not read for this class (a mech's arms).
+// when it is the one picked (any of the plugin's weapons hung on the seat: they ride the seat's secondary when a stock
+// weapon is on it, else its primary), `other` a control the plugin has not read for this class (a mech's arms).
 enum class PayloadFire : std::uint8_t { other, primary, secondary, store };
 struct PayloadEntry {
     wchar_t name[32];          // the weapon's own name in the game's language (weapon +0x1B0), or its store's
@@ -40,6 +41,7 @@ bool PlayerPayload(PayloadReadout* out) noexcept;
 // it), else nullptr: the stock weapon stands.
 unsigned char* PayloadPicked(const void* vehicle) noexcept;
 void ResetPayload() noexcept;
+bool InstallPayload() noexcept;                       // at load: the holder pull 0x62C000 taken over (checked)
 
 // --- Seat switching (seatswitch.cpp) ---
 constexpr int kMostSeatsShown=8;
@@ -52,9 +54,11 @@ struct SeatPrompt {
     bool aircraft;             // a helicopter or one of the plugin's aircraft: seat 0 is the pilot's
     bool locked;               // no move now: online, with SeatSwitchOnline off
     int refused;               // the seat a press asked for and could not have, shown a moment (-1 none, -2 no seat free)
+    bool hints;                // the prompt's moment (boarding, a move, the key held, a refusal): the keys / lock shown
 };
 void SeatSwitchFrame(unsigned char* vehicle) noexcept; // every vehicle's input, after the crew step
-// The prompt while it is shown (after boarding a vehicle with more than one seat, after a move, the key held).
+// The prompt while it is shown: the whole ride with SeatList, else after boarding a vehicle with more than one seat,
+// after a move, the key held.
 bool PlayerSeatPrompt(SeatPrompt* out) noexcept;
 bool InstallSeatSwitch() noexcept;                     // at load: the stock functions it calls checked
 void ResetSeatSwitch() noexcept;
