@@ -29,6 +29,14 @@ bool PlayerFormationCue(FormationCue* out) noexcept;
 // The box sweep (the player's NpcPickupKey): going (`on`: the boxes still to fetch `left`) or just over, the boxes
 // brought in so far (`taken`), the key.
 struct SweepCue { bool on; int left,taken,key; };
+// The map's buttons (mapcmd.cpp): the sweep started for the squads whose tops are `tops` (`n` 0: the player's
+// recruited squads) or called back (the new state); the health-box switch flipped (the new state: hurt soldiers may
+// take them); the states and the march's formation for the buttons' labels.
+bool NpcSweepToggle(const void* const* tops,int n) noexcept;
+bool NpcSweepOn() noexcept;
+bool NpcPickupHealthToggle() noexcept;
+bool NpcPickupHealthOn() noexcept;
+int NpcMarchShape() noexcept;
 bool PlayerSweepCue(SweepCue* out) noexcept;
 const wchar_t* FormationText(int shape) noexcept;   // hud.cpp: a shape's name as the HUD says it
 

@@ -18,6 +18,7 @@
 // have no network identity, docs/online-re.md §1-3), so an order given here would change this machine's copy alone.
 #include "crew.h"
 #include "formation.h"
+#include "map_buttons.h"
 #include "hudtext.h"
 #include "npcai.h"
 #include "layout.h"
@@ -46,7 +47,7 @@ enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
 struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
-             engage,focus,board,dismount,dismiss,recruit,formation,split,merge,digit[9]; };
+             engage,focus,board,dismount,dismiss,recruit,formation,split,merge,sweep,health,digit[9]; };
 
 // --- The game thread's own ---
 struct Game {
@@ -61,12 +62,14 @@ struct Game {
     float bx,by,moved;
     wchar_t note[80];
     ULONGLONG noteAt;
+    int button;                 // the button a click let go on this frame (mapbtn::Id), -1 none
+    bool guardArmed,guardClick; // the guard button clicked: the next click on the ground (guardClick) is its point
 };
 Game game{};
 std::atomic<bool> boxingNow{false};
 
 // --- The view the HUD last drew the map with (under `viewLock`) ---
-struct View { float vp[16],w,h; ULONGLONG at; };
+struct View { float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount]; };
 View view{};
 SRWLOCK viewLock=SRWLOCK_INIT;
 
@@ -137,7 +140,7 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
         k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);
         // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
-        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.split=Down('P');k.merge=Down('L');
+        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.split=Down('P');k.merge=Down('L');k.sweep=Down('Y');k.health=Down('O');
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
     }
     if(in.pad) {
@@ -229,7 +232,10 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     const int n=Marks(g,*v,in,marks);
     const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
     const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
-    if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
+    const int hit=click && !g.boxing ? mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y) : -1;
+    if(hit>=0)g.button=v->id[hit];   // a button: not a unit's click
+    else if(click && g.guardArmed && !g.boxing)g.guardClick=true;   // the armed guard's point
+    else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
     else if(click)mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
     g.boxing=g.pressing=false;
 }
@@ -313,6 +319,28 @@ void Teams(Game& g,bool allowed,bool split) noexcept {
     Log("MAPCMD %s: %d of %d selected squads",split ? "split" : "merge",done,squads);
 }
 
+// Y / the sweep button: the selected squads (none: the player's recruited squads) out for the boxes, or called back.
+void Sweep(Game& g) noexcept {
+    using hudtext::Tr;
+    using hudtext::Tx;
+    const void* tops[16];
+    int n=0;
+    for(int i=0;i<g.count && n<16;++i)if(g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad)tops[n++]=g.list[i].u.v;
+    const bool was=NpcSweepOn();
+    const bool on=NpcSweepToggle(tops,n);
+    if(on)Note(g,Tr(Tx::cmdSweepOn),n);
+    else Note(g,L"%ls",Tr(was ? Tx::cmdSweepOff : Tx::cmdSweepUnavailable));
+    Log("MAPCMD box sweep: %s (%d selected squads)",on ? "out" : "called back",n);
+}
+
+// O / the health-box button: health boxes for the hurt soldiers, or left for the player.
+void Health(Game& g) noexcept {
+    using hudtext::Tr;
+    using hudtext::Tx;
+    const bool on=NpcPickupHealthToggle();
+    Note(g,L"%ls%ls",Tr(on ? Tx::btnHealthOn : Tx::btnHealthOff),on && InSession() ? Tr(Tx::cmdHealthOnline) : L"");
+}
+
 void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool pointer) noexcept {
     // The game's memory is read before the lock is taken: a fault in a read (a unit gone between its listing and here)
     // must not leave the lock held, which would block the draw thread for good.
@@ -336,6 +364,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     std::memcpy(r.squad,rows,sizeof(rows));
     for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
     std::memcpy(r.note,g.note,sizeof(r.note));
+    r.sweepOn=NpcSweepOn();r.healthOn=NpcPickupHealthOn();r.guardArmed=g.guardArmed;r.march=NpcMarchShape();
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     readoutAt=GetTickCount64();
     ReleaseSRWLockExclusive(&lock);
@@ -354,7 +383,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
     if(now-g.frameAt>kFreshMs) {
-        g.was=k;g.boxing=g.pressing=false;
+        g.was=k;g.boxing=g.pressing=false;g.guardArmed=false;
         g.pointer=mapcmd::PointerPosition{};
     }
     g.frameAt=now;
@@ -367,7 +396,14 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     const void* ids[kCmdUnits];
     for(int i=0;i<g.count;++i)ids[i]=g.list[i].u.v;
     KeepSelection(g,ids);
+    g.button=-1;g.guardClick=false;
     Pointer(g,in,k,haveView ? &v : nullptr);
+    using mapbtn::Id;
+    const auto clicked=[&](Id b){return g.button==static_cast<int>(b);};
+    if(clicked(Id::guard)) {   // armed: the next click on the ground; clicked again: not
+        g.guardArmed=!g.guardArmed;
+        if(g.guardArmed)Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdGuardArmed));
+    }
     boxingNow.store(g.boxing);
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
     bool picked=false;
@@ -386,12 +422,19 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         mapcmd::Keep(g.sel,ids,g.count);
         picked=g.sel.n==1;
     }
-    const mapcmd::Press p{next,prev,(k.guard && !g.was.guard) || (k.padGuard && !g.was.padGuard),
+    mapcmd::Press p{next,prev,(k.guard && !g.was.guard) || (k.padGuard && !g.was.padGuard),
                           (k.follow && !g.was.follow) || (k.padFollow && !g.was.padFollow),
                           (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
                           k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
                           k.dismount && !g.was.dismount,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit};
-    const bool formation=k.formation && !g.was.formation,split=k.split && !g.was.split,merge=k.merge && !g.was.merge;
+    p.guard=p.guard || g.guardClick;
+    if(g.guardClick)g.guardArmed=false;
+    p.follow=p.follow || clicked(Id::follow);p.release=p.release || clicked(Id::release);p.engage=p.engage || clicked(Id::engage);
+    p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);p.dismount=p.dismount || clicked(Id::dismount);
+    p.dismiss=p.dismiss || clicked(Id::dismiss);p.recruit=p.recruit || clicked(Id::recruit);
+    const bool formation=(k.formation && !g.was.formation) || clicked(Id::formation),split=(k.split && !g.was.split) || clicked(Id::split),
+               merge=(k.merge && !g.was.merge) || clicked(Id::merge),sweep=(k.sweep && !g.was.sweep) || clicked(Id::sweep),
+               health=(k.health && !g.was.health) || clicked(Id::health);
     g.was=k;
     float point[3];
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
@@ -416,6 +459,8 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     if(formation)Formation(g,allowed);
     if(split || merge)Teams(g,allowed,split);
+    if(sweep)Sweep(g);
+    if(health)Health(g);
     RememberSelection(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
     if(!picked)return false;
@@ -436,6 +481,15 @@ void ResetMapCommands() noexcept {
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
+    ReleaseSRWLockExclusive(&viewLock);
+}
+
+void MapCommandButtons(const float* rects,const int* ids,int n) noexcept {
+    if(n<0)n=0;
+    if(n>mapbtn::kCount)n=mapbtn::kCount;
+    AcquireSRWLockExclusive(&viewLock);
+    view.buttons=n;
+    for(int i=0;i<n;++i){view.button[i]=mapbtn::Rect{rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.id[i]=ids[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
 

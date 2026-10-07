@@ -1228,8 +1228,11 @@ void* const kQuietVtable[8]={reinterpret_cast<void*>(&QuietNone),reinterpret_cas
 struct QuietCallback { void* const* vt; void* owner; };
 
 struct SweepBox { void* unit; float pos[3]; int kind; };
+constexpr int kSweepTops=16;
 struct Sweep {
     bool on,held,logged;
+    ObjRef top[kSweepTops];   // the squads sent (the map's selection; none: the player's recruited squads)
+    int tops;
     ULONGLONG until,frame;
     int taken,left;
     ULONGLONG endedAt;    // wall clock: the HUD's closing line
@@ -1285,6 +1288,47 @@ void ResetSweep() noexcept {
     ReleaseSRWLockExclusive(&sweepLock);
 }
 
+// The player's choice of health boxes this session: the ini's NpcPickupHealth until the map's switch flips it.
+int healthPick=-1;
+bool PickupHealth() noexcept { return healthPick<0 ? Cfg().npcPickupHealth : healthPick!=0; }
+
+// Starts the sweep: the squads whose tops are `tops` (`n` 0: the player's recruited squads with no order).
+void StartSweep(const void* const* tops,int n,const char* by) noexcept {
+    const Config& c=Cfg();
+    if(!boxesOk) {
+        if(!sweep.logged){sweep.logged=true;Log("NPCAI box sweep: the item boxes are not as docs/itembox-re.md reads them: off");}
+        return;
+    }
+    AcquireSRWLockExclusive(&sweepLock);
+    sweep.on=true;sweep.taken=0;sweep.left=0;sweep.endedAt=0;
+    sweep.until=GameMs()+static_cast<ULONGLONG>(c.npcPickupSec*1000.0f);
+    sweep.tops=0;
+    for(int i=0;i<n && sweep.tops<kSweepTops;++i)if(tops[i])sweep.top[sweep.tops++]=ObjRef::Of(tops[i]);
+    ReleaseSRWLockExclusive(&sweepLock);
+    Log("NPCAI box sweep (%s): %s out for the boxes within %.0f m (health boxes %s)",by,sweep.tops ? "the selected squads" : "the recruited squads",
+        c.npcPickupRange,PickupHealth() && !InSession() ? "too, for the hurt" : "left alone");
+}
+
+// The soldiers the sweep sends (on foot): its squads' when it was given some, else the march's roster.
+int SweepRoster(ULONGLONG ms,const void** out,int most) noexcept {
+    int n=0;
+    if(!sweep.tops) {
+        MarchRoster(ms);
+        for(int i=0;i<march.n && n<most;++i)out[n++]=march.member[i];
+        return n;
+    }
+    for(int i=0;i<sweep.tops;++i) {
+        auto t=static_cast<unsigned char*>(const_cast<void*>(sweep.top[i].obj));
+        if(!sweep.top[i].Is(t) || t[kDead])continue;
+        const Squad* q=FindSquad(t);
+        if(!q || !Live(*q,ms) || npc::Scripted(q->control))continue;
+        unsigned char* m[kMaxSquad];
+        const int k=Members(t,m,kMaxSquad);
+        for(int j=0;j<k && n<most;++j)if(HumanOnFoot(m[j]))out[n++]=m[j];
+    }
+    return n;
+}
+
 void SweepFrame() noexcept {
     const Config& c=Cfg();
     unsigned char* const me=PlayerHuman();
@@ -1292,14 +1336,7 @@ void SweepFrame() noexcept {
     const ULONGLONG ms=GameMs();
     if(down && !sweep.held) {
         if(sweep.on)EndSweep("called back by the key");
-        else if(!boxesOk){if(!sweep.logged){sweep.logged=true;Log("NPCAI box sweep: the item boxes are not as docs/itembox-re.md reads them: off");}}
-        else {
-            AcquireSRWLockExclusive(&sweepLock);
-            sweep.on=true;sweep.taken=0;sweep.left=0;sweep.endedAt=0;sweep.until=ms+static_cast<ULONGLONG>(c.npcPickupSec*1000.0f);
-            ReleaseSRWLockExclusive(&sweepLock);
-            Log("NPCAI box sweep: out for the boxes within %.0f m (health boxes %s)",c.npcPickupRange,
-                c.npcPickupHealth && !InSession() ? "too, for the hurt" : "left alone");
-        }
+        else StartSweep(nullptr,0,"the key");
     }
     sweep.held=down;
     if(!sweep.on)return;
@@ -1307,17 +1344,17 @@ void SweepFrame() noexcept {
     if(ms>=sweep.until){EndSweep("its time is up");return;}
     SweepBox boxes[kMaxBoxes];
     const int nb=Boxes(boxes,kMaxBoxes);
-    MarchRoster(ms);
+    const void* who[32];
+    const int np=SweepRoster(ms,who,32);
     npc::pickup::Box b[kMaxBoxes];
     for(int i=0;i<nb;++i){std::memcpy(b[i].pos,boxes[i].pos,12);b[i].kind=boxes[i].kind;}
     npc::pickup::Picker p[32];
-    const int np=march.n;
     for(int i=0;i<np;++i) {
-        auto h=static_cast<const unsigned char*>(march.member[i]);
+        auto h=static_cast<const unsigned char*>(who[i]);
         std::memcpy(p[i].pos,Pos(h),12);
         p[i].hp=At<float>(h,kHumanHp);p[i].hpMax=At<float>(h,kHumanHpMax);
     }
-    npc::pickup::Rules r{c.npcPickupHealth,InSession(),c.npcPickupRange,{world.playerAt[0],world.playerAt[1],world.playerAt[2]}};
+    npc::pickup::Rules r{PickupHealth(),InSession(),c.npcPickupRange,{world.playerAt[0],world.playerAt[1],world.playerAt[2]}};
     int out[32];
     const int given=npc::pickup::Assign(b,nb,p,np,r,out);
     int left=0;
@@ -1326,7 +1363,7 @@ void SweepFrame() noexcept {
     if(!given){EndSweep(np ? "no box left within reach" : "no soldier to send");return;}
     for(int k=0;k<np;++k) {
         if(out[k]<0)continue;
-        Soldier* s=Entry(static_cast<const unsigned char*>(march.member[k]),ms);
+        Soldier* s=Entry(static_cast<const unsigned char*>(who[k]),ms);
         if(!s)continue;
         const SweepBox& x=boxes[out[k]];
         s->pickUnit=x.unit;std::memcpy(s->pickPos,x.pos,12);s->pickKind=x.kind;s->pickFrame=GameFrame();
@@ -1356,7 +1393,7 @@ bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {
     Stand(h);
     if(npc::pickup::IsHeal(s.pickKind)) {
         const float hpMax=At<float>(h,kHumanHpMax);
-        if(!Cfg().npcPickupHealth || InSession() || !(At<float>(h,kHumanHp)<hpMax))return true;   // healed meanwhile: leave it
+        if(!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax))return true;   // healed meanwhile: leave it
         u[kBoxTaken]=1;
         reinterpret_cast<HealHumanFn>(image+kHealHuman)(h,npc::pickup::HealShare(s.pickKind)*hpMax);
         ++sweep.taken;
@@ -1530,6 +1567,21 @@ bool PlayerSweepCue(SweepCue* out) noexcept {
     *out=c;
     return true;
 }
+
+bool NpcSweepToggle(const void* const* tops,int n) noexcept {
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return false;
+    if(sweep.on){EndSweep("called back from the map");return false;}
+    StartSweep(tops,n,"the map");
+    return sweep.on;
+}
+bool NpcSweepOn() noexcept { return sweep.on; }
+bool NpcPickupHealthToggle() noexcept {
+    healthPick=PickupHealth() ? 0 : 1;
+    Log("NPCAI health boxes: %s (the map)",healthPick ? "hurt soldiers may take them" : "left for the player");
+    return healthPick!=0;
+}
+bool NpcPickupHealthOn() noexcept { return PickupHealth(); }
+int NpcMarchShape() noexcept { return static_cast<int>(MarchShape()); }
 
 constexpr ULONGLONG kFormationCueMs=2500;
 bool PlayerFormationCue(FormationCue* out) noexcept {

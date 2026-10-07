@@ -182,6 +182,12 @@ bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return f
 bool sceneSweepOn=false;SweepCue sceneSweep{};
 bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
 void MapCommandView(const float*,float,float) noexcept {}
+// The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
+int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
+void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
+    sceneButtons=n;
+    for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
@@ -408,6 +414,25 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     };
     shown(Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys),true);
     if(!pad)shown(Tr(Tx::squadKeys));
+    // The command buttons (mouse only): every one placed, on the screen, and no text but its own label in it.
+    if(pad) {
+        if(sceneButtons){++textFailed;std::printf("FAIL map buttons with a pad: %d\n",sceneButtons);}
+    } else {
+        if(sceneButtons!=mapbtn::kCount){++textFailed;std::printf("FAIL map buttons: %d of %d placed\n",sceneButtons,mapbtn::kCount);}
+        for(int i=0;i<sceneButtons;++i) {
+            const float* b=sceneButton[i];
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL map button %d off the screen\n",i);}
+            int own=0;
+            for(const Drew& d:drew) {
+                if(d.text.empty() || !(d.x0<b[2] && b[0]<d.x1 && d.y0<b[3] && b[1]<d.y1))continue;
+                const float cx=(d.x0+d.x1)*0.5f,cy=(d.y0+d.y1)*0.5f;
+                const bool inside=cx>b[0] && cx<b[2] && cy>b[1] && cy<b[3] && d.x0>=b[0]-1.0f && d.x1<=b[2]+1.0f;
+                if(inside)++own;
+                else{++textFailed;std::printf("FAIL map button %d covers %s\n",sceneButtonId[i],Narrow(d.text).c_str());}
+            }
+            if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
+        }
+    }
     for(int i=0;i<sceneCmd.squads;++i) {
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));

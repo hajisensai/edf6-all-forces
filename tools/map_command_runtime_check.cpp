@@ -38,6 +38,12 @@ int CycleGuardFormation(const void* leader) noexcept { ++guardCalls;return leade
 int CycleMarchFormation() noexcept { ++marchCalls;return 3; }
 int SplitSquad(const void*) noexcept {return -1;}
 bool MergeSquads(const void*,const void*) noexcept {return false;}
+int sweepCalls=0,healthCalls=0;bool sweepState=false,healthState=false;
+bool NpcSweepToggle(const void* const*,int) noexcept { ++sweepCalls;sweepState=!sweepState;return sweepState; }
+bool NpcSweepOn() noexcept { return sweepState; }
+bool NpcPickupHealthToggle() noexcept { ++healthCalls;healthState=!healthState;return healthState; }
+bool NpcPickupHealthOn() noexcept { return healthState; }
+int NpcMarchShape() noexcept { return 0; }
 const wchar_t* FormationText(int) noexcept { return L"SHAPE"; }
 namespace {
 int failures=0,cases=0;
@@ -140,6 +146,40 @@ void FormationKey() noexcept {
     Formation(g,true);
     Check(guardCalls==1 && marchCalls==0,"T on a guarding squad alone: the march untouched");
 }
+// The map's buttons (hud.cpp draws them and hands their rectangles over): a click on the sweep's button runs it and
+// selects nothing; the guard's arms the next click on the ground (no unit picked by it), clicked again disarms it;
+// Y and O do what the sweep's and the health switch's buttons do.
+void ButtonClicks() noexcept {
+    ResetMapCommands();view=View{};
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;
+    float centre[3]{};
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    MapCommandView(vp,1280,720);
+    MapCommandFrame(in,centre);   // the pointer placed at the centre (640, 360)
+    const float rects[8]={600,340,680,380, 700,340,780,380};
+    const int ids[2]={static_cast<int>(mapbtn::Id::sweep),static_cast<int>(mapbtn::Id::guard)};
+    MapCommandButtons(rects,ids,2);
+    sweepCalls=healthCalls=0;sweepState=healthState=false;
+    const auto click=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
+    click();
+    Check(sweepCalls==1 && sweepState && game.sel.n==0,"a click on the sweep's button runs it, nothing selected by it");
+    // The pointer onto the guard's button (100 px right): armed; again: disarmed.
+    in.dx=100.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
+    click();
+    Check(game.guardArmed,"the guard's button arms the next click on the ground");
+    click();
+    Check(!game.guardArmed,"clicked again: disarmed");
+    click();
+    in.dy=150.0f/kPointerGain/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dy=0.0f;   // off the buttons, on the ground
+    click();
+    Check(!game.guardArmed && game.sel.n==0,"armed, a click on the ground is the guard's point (taken, disarmed), no unit picked");
+    inputstub::keys['Y']=true;MapCommandFrame(in,centre);inputstub::keys['Y']=false;MapCommandFrame(in,centre);
+    Check(sweepCalls==2 && !sweepState,"Y as the sweep's button: called back");
+    inputstub::keys['O']=true;MapCommandFrame(in,centre);inputstub::keys['O']=false;MapCommandFrame(in,centre);
+    Check(healthCalls==1 && healthState,"O flips the health-box switch");
+    MapCommandReadout r{};
+    Check(PlayerMapCommands(&r) && r.healthOn && !r.sweepOn,"the readout carries the switches for the buttons' labels");
+}
 void CameraIsolation() noexcept {
     maphud::Record r{};int first=0,second=0;unsigned char shown=1;
     maphud::Step(r,&first,1,true,&shown);
@@ -152,7 +192,7 @@ void CameraIsolation() noexcept {
 }  // namespace
 }  // namespace crew
 int main() {
-    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();
+    crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

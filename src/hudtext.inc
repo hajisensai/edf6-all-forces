@@ -341,6 +341,21 @@ HUDTEXT(squadKeys,L"SQUADS: 1-9 pick   J engage   H focus (Q mark)   K dismiss  
         L"小队：1-9 选择   J 交战   H 集火（Q 标记）   K 解散   U 招募   B 上车   N 下车   T 编队   P 分组   L 合并",
         L"小隊：1-9 選擇   J 交戰   H 集火（Q 標記）   K 解散   U 招募   B 上車   N 下車   T 編隊   P 分組   L 合併",
         L"分隊：1-9 選択   J 交戦   H 集中攻撃（Q マーク）   K 解散   U 加入   B 搭乗   N 降車   T 隊形   P 分割   L 合流")
+// The map's command buttons (hud.cpp MapButtons; map_buttons.h).
+HUDTEXT(btnFormation,L"FORMATION: %ls",L"编队：%ls",L"編隊：%ls",L"隊形：%ls")
+HUDTEXT(btnSplit,L"SPLIT",L"分组",L"分組",L"分割")
+HUDTEXT(btnMerge,L"JOIN",L"合并",L"合併",L"合流")
+HUDTEXT(btnSweep,L"FETCH BOXES",L"拾取箱子",L"拾取箱子",L"アイテム回収")
+HUDTEXT(btnSweepStop,L"CALL BACK",L"召回",L"召回",L"呼び戻し")
+HUDTEXT(btnHealthOff,L"HEALTH BOXES: FOR THE PLAYER",L"回复箱：留给玩家",L"回復箱：留給玩家",L"回復箱：プレイヤー用")
+HUDTEXT(btnHealthOn,L"HEALTH BOXES: HURT NPCS TOO",L"回复箱：受伤 NPC 可捡",L"回復箱：受傷 NPC 可撿",L"回復箱：負傷 NPC も")
+HUDTEXT(cmdGuardArmed,L"CLICK THE GROUND TO GUARD (THE BUTTON AGAIN: CANCEL)",L"点击地面选择警戒位置（再点一次按钮取消）",
+        L"點擊地面選擇警戒位置（再點一次按鈕取消）",L"地面をクリックして警戒地点を指定（もう一度押すと取消）")
+HUDTEXT(cmdSweepOn,L"FETCHING BOXES (%d SELECTED SQUADS; 0: YOUR SQUADS)",L"拾取箱子（%d 个选中的小队；0 = 跟着你的小队）",
+        L"拾取箱子（%d 個選中的小隊；0 = 跟著你的小隊）",L"アイテム回収（選択 %d 分隊、0 = 同行分隊）")
+HUDTEXT(cmdSweepOff,L"CALLED BACK",L"已召回",L"已召回",L"呼び戻し")
+HUDTEXT(cmdSweepUnavailable,L"BOX SWEEP UNAVAILABLE (SEE THE LOG)",L"拾取不可用（见日志）",L"拾取不可用（見日誌）",L"回収は使用不可（ログ参照）")
+HUDTEXT(cmdHealthOnline,L" (NOT ONLINE)",L"（联机时不捡）",L"（連線時不撿）",L"（オンラインでは無効）")
 HUDTEXT(cmdSplitResult,L"SPLIT: %d SQUAD(S), %d TOO SMALL",L"分组：%d 个小队，%d 个人数不够",L"分組：%d 個小隊，%d 個人數不夠",L"分割：%d 分隊、%d 分隊は人数不足")
 HUDTEXT(cmdMergeResult,L"JOINED: %d SQUAD(S), %d CANNOT",L"合并：%d 个小队，%d 个无法合并",L"合併：%d 個小隊，%d 個無法合併",L"合流：%d 分隊、%d 分隊は不可")
 // The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText).

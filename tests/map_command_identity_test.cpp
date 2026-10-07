@@ -11,6 +11,11 @@ int CycleGuardFormation(const void*) noexcept {return -2;}
 int CycleMarchFormation() noexcept {return 0;}
 int SplitSquad(const void*) noexcept {return -1;}
 bool MergeSquads(const void*,const void*) noexcept {return false;}
+bool NpcSweepToggle(const void* const*,int) noexcept {return false;}
+bool NpcSweepOn() noexcept {return false;}
+bool NpcPickupHealthToggle() noexcept {return false;}
+bool NpcPickupHealthOn() noexcept {return false;}
+int NpcMarchShape() noexcept {return 0;}
 const wchar_t* FormationText(int) noexcept {return L"";}
 float MapRay(const float*,const float*,float*) noexcept { return -1; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1; }

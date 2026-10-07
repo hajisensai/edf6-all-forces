@@ -227,6 +227,12 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 - 火力组就是一个独立的小队（原版跟随树，§5.1）：`SplitSquad` 按 `Members` 顺序单双号对半，奇数位的第一人当新组长、跟原小队队长的上级（招募的跟玩家、自由的没有），其余奇数位跟新组长，偶数位跟原队长——每人都显式重新 `Follow`，不会把某人的下级连带拖走；`MergeSquads` 把另一个小队的队长挂到这个队长下面（合计 ≤ `kMaxSquad` 16）。之后两组各是普通小队：面板各一行、各自的指令和编队。
 - 地图键：P 分组（选中的每个小队）、L 合并（并到第一个选中的）；联机拒绝（同 §9 地图指令）。离线 `npc_core_check` 用假的跟随树核对重挂关系。
 
+### 6.4.2 地图按钮（2026-10-08 用户：「这个要在m里面设置。还有事m里面进行操作要支持。最好能直接点击hud那种」）
+
+- `src/map_buttons.h`（离线 `tools/map_buttons_check.cpp`）：按钮 `Id`（9 个指令 + 编队、分组、合并、拾取、回复箱开关）、`Flow` 按标签宽度排成居中的行（放不下换行，向上叠）、`Hit` 点中哪个。
+- `hud.cpp` `MapButtons` 按实际画出的标签量宽度排版、画出，把矩形交给 `mapcmd.cpp` `MapCommandButtons`；`Pointer` 在松开左键时先测按钮（点中按钮不算点单位），警戒按钮先「上膛」（`guardArmed`），下一次点地面就是警戒点。按钮与键共用同一套动作（`Press`、`Formation`、`Teams`、`Sweep`、`Health`）。离线 `map_command_runtime_check` `ButtonClicks` 用真实的 `MapCommandFrame` 走一遍点击。
+- 回复箱开关是运行时状态（`npcai.cpp` `healthPick`：-1 = 用 ini 的 `NpcPickupHealth`），地图里切换后整局有效；地图里拾取可以只派选中的小队（`Sweep::top`）。
+
 ### 6.5 分散拾取道具箱（2026-10-08 用户：「一键分散拾取箱子。支持开启和禁止拾取医疗箱（因为玩家也需要这个回血，满血的时候也不会拾取）」）
 
 - 逆向见 `docs/itembox-re.md`：箱子不是游戏对象，是 `DropItemManager`（`*(EDF+0x20B2988)`）里的链表（`+0xDE0`），类型 `+0xC0`（0 武器 1 护甲 2 小回复 3 大回复）、已拾取 `+0xC4`；原版只有带手柄对象（`+0x340`）的玩家能捡，NPC 走上去不会捡。

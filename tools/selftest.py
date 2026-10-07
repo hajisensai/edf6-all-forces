@@ -4242,7 +4242,13 @@ def npc_pickup_wired() -> None:
     assert drive.index('npc::LaneEscape(') < run < drive.index('Spot(s,pos,t.e->aim')
     pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '(m,me,at,kBoxGrab,0.0f,&quiet)' in pick and 'alignas(16) float at[4]' in pick
-    assert '!Cfg().npcPickupHealth || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
+    assert '!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
+    assert 'healthPick<0 ? Cfg().npcPickupHealth' in code, 'the ini is the default until the map flips it'
+    # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; Y and O keys.
+    mapcmd, hud = src('src/mapcmd.cpp'), src('src/hud.cpp')
+    assert 'mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
+    assert "k.sweep=Down('Y');k.health=Down('O');" in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
+    assert 'EXCLUDE_FROM_ALL tools/map_buttons_check.cpp' in cmake and 'map_buttons_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
     assert 'kBoxGrab=0.05f' in code and 'InstallBoxes();' in code
     for key, default in (('NpcPickupKey', '89'), ('NpcPickupRange', '80'), ('NpcPickupSec', '90'), ('NpcPickupHealth', '0')):
         assert f'L"{key}"' in plugin, key
