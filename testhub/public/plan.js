@@ -100,6 +100,7 @@ function rowsHtml() {
         h('span', { class: 'tag' }, m.series), h('b', {}, ' ', code(m), ' ', m.sc), ' ', h('span', { class: 'muted' }, m.ja),
         m.n ? h('span', { class: 'muted' }, ` · 游戏里第 ${m.n} 关`) : h('span', { class: 'bad' }, ' · 游戏里没有（', m.missing || '缺资源', '）'),
         h('span', { class: 'acts' },
+          state.digests.includes(m.key) ? button('看脚本', () => openDigest(m)) : null,
           n ? button(`意见 ${n}`, () => showOnly(m.key)) : null,
           button('写意见', () => startProposal('edit', m.key)),
           moveButton(r, missionName(m))));
@@ -208,7 +209,8 @@ function proposalCard(p, m, replies) {
   const input = h('textarea', { class: 'replyBox', maxlength: 4000, placeholder: '回复……' });
   return h('div', { class: 'report' },
     h('div', { class: 'row' },
-      h('span', { class: `tag ${p.kind}` }, KIND[p.kind]), m ? h('span', { class: 'muted' }, missionName(m)) : null, status,
+      h('span', { class: `tag ${p.kind}` }, KIND[p.kind]), m ? h('span', { class: 'muted' }, missionName(m)) : null,
+      m && state.digests.includes(m.key) ? button('看脚本', () => openDigest(m)) : null, status,
       h('span', { class: 'muted' }, `#${p.id} · ${p.author} · ${when(p.created_at)}`, p.updated_at !== p.created_at ? ` · 改于 ${when(p.updated_at)}` : '')),
     h('h3', {}, p.title),
     p.body ? h('pre', {}, p.body) : null,
@@ -227,6 +229,28 @@ function proposalCard(p, m, replies) {
         if (confirm('删掉这条意见和它的回复？（放进大纲的新关卡也会一起拿掉）')) act('/api/plan/proposal-delete', { id: p.id }).catch(() => {});
       })) : null);
 }
+
+// ------------------------------------------------------------ script digests
+
+// A digest line starting with DEAD is a dropped idea (tools/make_mission_digest.py): shown greyed, hideable.
+const DEAD = '⊘ ';
+
+async function openDigest(m) {
+  $('digestTitle').textContent = missionName(m);
+  $('digestBody').replaceChildren(document.createTextNode('加载中……'));
+  $('digest').showModal();
+  try {
+    const d = await api('/api/plan/digest?mission=' + encodeURIComponent(m.key));
+    $('digestBody').replaceChildren(...d.body.split('\n').map((line) => line.startsWith(DEAD)
+      ? h('div', { class: 'dead' }, line.slice(DEAD.length))
+      : h('div', {}, line || '\u00a0')));
+  } catch (e) {
+    $('digestBody').replaceChildren(document.createTextNode('读取失败：' + e.message));
+  }
+}
+
+$('digestClose').addEventListener('click', () => $('digest').close());
+$('showDead').addEventListener('change', () => $('digestBody').classList.toggle('hideDead', !$('showDead').checked));
 
 // ------------------------------------------------------------ the form
 

@@ -73,3 +73,11 @@ select.small { width: auto; padding: 2px 6px; font-size: 13px; }
 .reply { border-left: 3px solid var(--line); padding: 2px 10px; margin: 6px 0; }
 .replyBox { min-height: 44px; flex: 1 1 260px; width: auto; }
 .p-open { color: var(--info); } .p-accepted { color: var(--warn); } .p-done { color: var(--ok); } .p-rejected { color: var(--muted); }
+dialog.digestBox { width: min(1000px, calc(100vw - 32px)); max-height: calc(100vh - 32px); border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel); color: var(--ink); padding: 14px; }
+dialog.digestBox::backdrop { background: rgb(0 0 0 / .45); }
+dialog.digestBox .row label.inline { margin-left: auto; font-weight: 500; }
+.digestText { font: 13px/1.55 ui-monospace, Consolas, "Microsoft YaHei", monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--code); border-radius: 6px; padding: 10px; }
+.digestText .dead { color: var(--muted); opacity: .6; }
+.digestText.hideDead .dead { display: none; }

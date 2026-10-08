@@ -85,3 +85,12 @@ CREATE TABLE IF NOT EXISTS write_log (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS write_log_a ON write_log(author, at);
+
+-- Readable digests of the stock mission scripts (tools/make_mission_digest.py), uploaded by a developer
+-- (tools/testhub.py digests) and readable by every logged-in account. Made from the game's own files: they live
+-- only here, never in the repository.
+CREATE TABLE IF NOT EXISTS mission_digests (
+  mission TEXT PRIMARY KEY,           -- src/missions.json key
+  body TEXT NOT NULL,
+  at INTEGER NOT NULL
+);

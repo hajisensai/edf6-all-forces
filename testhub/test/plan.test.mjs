@@ -23,7 +23,7 @@ const order = async (e, grp) => (await e.DB.prepare('SELECT * FROM outline WHERE
 const status = async (p) => { try { await p; return 200; } catch (e) { if (e instanceof HttpError) return e.status; throw e; } };
 
 test('clean drops invisible and control characters, keeps lines, bounds length', () => {
-  assert.equal(clean('a‮b⁦c​d\u0007e﻿', 100), 'abcde');
+  assert.equal(clean('a\u202Eb\u2066c\u200Bd\u0007e\uFEFF', 100), 'abcde');
   assert.equal(clean(' x\r\ny\tz\n\n\n\n\nw ', 100), 'x\ny\tz\n\n\nw');
   assert.equal(clean('😀😀😀', 2), '😀😀');
   assert.equal(clean(null, 10), '');
@@ -98,7 +98,7 @@ test('groups: another group sees nothing and can touch nothing; only authors and
   assert.equal(st.proposals[0].status, 'accepted');
   assert.equal(st.replies[0].body, '同意');
   assert.equal(await status(m.saveProposal('a', { kind: 'edit', mission: 'EDF7/M001', title: 'x' })), 400);
-  assert.equal(await status(m.saveProposal('a', { kind: 'new', title: ' ​ ' })), 400);
+  assert.equal(await status(m.saveProposal('a', { kind: 'new', title: ' \u200B ' })), 400);
 });
 
 test('every write is rate limited per account', async () => {
@@ -158,4 +158,31 @@ test('worker: a player asking for another group gets their own; the developer se
   assert.equal(devView.proposals[0].title, 'a 组的');
   assert.deepEqual(devView.groups, ['', 'a', 'b']);
   assert.ok(devView.missions.length > 280);   // EDF6 and EDF5
+});
+
+test('worker: script digests are uploaded by developers and read by every account', async () => {
+  const e = wenv();
+  const put = (user, text) => worker.fetch(new Request('https://edf6.test/api/plan/digest?mission=EDF6%2FM001', {
+    method: 'PUT', body: text, headers: { authorization: 'Basic ' + btoa(user + ':pw'), 'content-type': 'text/plain' },
+  }), e);
+  assert.equal((await call(e, '/api/plan/digest?mission=EDF6%2FM001')).status, 404);
+  assert.equal((await put('alice', 'x')).status, 403);
+  assert.equal((await put('dev', '■ [0] 開始\n⊘ old')).status, 200);
+  const d = await (await call(e, '/api/plan/digest?mission=EDF6%2FM001', { user: 'bob' })).json();
+  assert.equal(d.body, '■ [0] 開始\n⊘ old');
+  assert.deepEqual((await (await call(e, '/api/plan')).json()).digests, ['EDF6/M001']);
+  assert.equal((await call(e, '/api/plan/digest?mission=EDF7%2FM001')).status, 400);
+});
+
+// Hidden characters in the site's own source would defeat reading it for exactly the tricks the plan strips from
+// players' text (escape them as \uXXXX instead).
+test('source holds no invisible or direction characters', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const hidden = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\uFFF9-\uFFFB]/u;
+  for (const dir of ['src', 'public', 'test']) {
+    for (const name of readdirSync(new URL(`../${dir}/`, import.meta.url))) {
+      const text = readFileSync(new URL(`../${dir}/${name}`, import.meta.url), 'utf8');
+      assert.ok(!hidden.test(text), `${dir}/${name} holds an invisible character`);
+    }
+  }
 });

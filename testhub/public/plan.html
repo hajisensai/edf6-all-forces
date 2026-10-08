@@ -60,6 +60,18 @@
     <div id="proposals" class="muted">加载中……</div>
   </section>
 </main>
+<dialog id="digest" class="digestBox">
+  <div class="row">
+    <b id="digestTitle"></b>
+    <label class="inline"><input type="checkbox" id="showDead" checked> 显示废案（灰色）</label>
+    <button class="btn ghost small" id="digestClose" type="button">关闭</button>
+  </div>
+  <p class="muted">
+    原版脚本的整理：去掉了加载、灯光、动画、镜头这些和讨论无关的部分，语音换成了中文字幕。灰色是废案：
+    开发组注释掉的代码、调试用的临时文字、台词的旧稿。触发条件里看不懂的保留了原来的写法。
+  </p>
+  <div id="digestBody" class="digestText"></div>
+</dialog>
 <script src="/plan.js"></script>
 </body>
 </html>

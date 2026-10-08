@@ -11,12 +11,12 @@ import { HttpError, body } from './http.js';
 
 export const KINDS = ['new', 'edit'];
 export const PSTATUS = ['open', 'accepted', 'done', 'rejected'];
-export const LIMIT = { title: 100, body: 10000, reply: 4000, note: 60, proposals: 3000, replies: 500 };
+export const LIMIT = { title: 100, body: 10000, reply: 4000, note: 60, proposals: 3000, replies: 500, digest: 1 << 20 };
 export const RATE = [[10 * 60e3, 60], [864e5, 600]];   // [window ms, writes] per account
 
 // C0/C1 controls except \t \n, zero-width and direction marks/overrides/isolates, word joiner .. invisible
 // operators, BOM, interlinear annotation: invisible characters that reorder or hide text.
-const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F​-‏‪-‮⁠-⁩﻿￹-￻]/gu;
+const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\uFFF9-\uFFFB]/gu;
 
 export function clean(value, max) {
   const text = String(value ?? '').normalize('NFC').replace(/\r\n?/g, '\n').replace(INVISIBLE, '')
@@ -54,15 +54,16 @@ export class Plan {
 
   async state(grp, groups) {
     await this.seed(grp);
-    const [outline, proposals, replies] = await Promise.all([
+    const [outline, proposals, replies, digests] = await Promise.all([
       this.db.prepare('SELECT id, kind, mission, proposal_id, note, author, at FROM outline WHERE grp = ?1 ORDER BY sort, id').bind(grp).all(),
       this.db.prepare('SELECT * FROM proposals WHERE grp = ?1 ORDER BY id DESC').bind(grp).all(),
       this.db.prepare('SELECT r.* FROM proposal_replies r JOIN proposals p ON p.id = r.proposal_id WHERE p.grp = ?1 ORDER BY r.id').bind(grp).all(),
+      this.db.prepare('SELECT mission FROM mission_digests').all(),
     ]);
     return {
       me: { user: this.me.user, role: this.me.role, group: this.me.group }, group: grp, groups: this.dev ? groups : [grp],
       missions: this.missions, outline: outline.results, proposals: proposals.results.map(({ grp: _, ...p }) => p),
-      replies: replies.results,
+      replies: replies.results, digests: digests.results.map((d) => d.mission),
     };
   }
 
@@ -224,6 +225,24 @@ export class Plan {
     await this.db.batch(rows.results.map((r, i) => this.db.prepare('UPDATE outline SET sort = ?2 WHERE id = ?1').bind(r.id, i)));
   }
 
+  // ------------------------------------------------------------ script digests (shared by every group)
+
+  async digest(key) {
+    const d = await this.db.prepare('SELECT mission, body, at FROM mission_digests WHERE mission = ?1').bind(this.mission(key)).first();
+    if (!d) throw new HttpError(404, '这一关的脚本还没有上传');
+    return d;
+  }
+
+  async putDigest(key, text) {
+    if (!this.dev) throw new HttpError(403, 'developer only');
+    const mission = this.mission(key);
+    if (!text || text.length > LIMIT.digest) throw new HttpError(400, `digest must be 1..${LIMIT.digest} characters`);
+    await this.db.prepare(
+      'INSERT INTO mission_digests (mission, body, at) VALUES (?1, ?2, ?3) ON CONFLICT(mission) DO UPDATE SET body = ?2, at = ?3',
+    ).bind(mission, text, Date.now()).run();
+    return { mission, size: text.length };
+  }
+
   // ------------------------------------------------------------ helpers
 
   mission(key) {
@@ -273,6 +292,11 @@ const ACTIONS = {
 export async function planRoute(request, env, me, missions, groups, path, url) {
   const plan = new Plan(env, me, missions);
   if (path === '/api/plan' && request.method === 'GET') return plan.state(scope(me, url.searchParams.get('group')), groups);
+  if (path === '/api/plan/digest' && request.method === 'GET') return plan.digest(url.searchParams.get('mission'));
+  if (path === '/api/plan/digest' && request.method === 'PUT') {
+    if (me.role !== 'dev') throw new HttpError(403, 'developer only');   // before reading the body
+    return plan.putDigest(url.searchParams.get('mission'), await request.text());
+  }
   const name = path.slice('/api/plan/'.length);
   const action = path.startsWith('/api/plan/') && request.method === 'POST' && Object.hasOwn(ACTIONS, name) ? ACTIONS[name] : null;
   if (!action) return null;
