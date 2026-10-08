@@ -46,6 +46,8 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float* matrix
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*) noexcept {++activated;return true;}
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {if(ref)++deleted;return true;}
 bool SupportSoldiersReady() noexcept {return allReady;}
+const wchar_t* soldierFailure=L"支援兵员创建发生异常，本局已停用";
+const wchar_t* SupportSoldierFailureText() noexcept {return soldierFailure;}
 bool ApplySupportSoldierSpawn(const float* matrix,bool,const unsigned char*,ObjRef* out) noexcept {
     if(nativeFail)return false;*out=Make();std::memcpy(static_cast<unsigned char*>(const_cast<void*>(out->obj))+kPosition,matrix+12,12);return true;
 }
@@ -198,6 +200,20 @@ int main() {
     testOnline=false;SupportCallAt(0,target,note,128);SupportCallStatus(note,128);
     check(std::wcsstr(note,L"正在安排")!=nullptr && !localRequest.shown,"offline request restores its detailed planner channel");
     ResetSupportDispatch();SupportCallStatus(note,128);check(!note[0],"mission reset clears old request notices");
+    allReady=false;
+    const int madeBeforeFailure=made;
+    check(SupportCallAt(0,target,note,128),"unavailable-soldier request still enters the real planner");
+    SupportDispatchTick();SupportCallStatus(note,128);
+    check(std::wcscmp(note,soldierFailure)==0 && made==madeBeforeFailure,
+          "native creation failure survives the planner/UI boundary without becoming resource unavailable");
+    soldierFailure=L"支援兵员资源尚未预载";
+    ++fixtureMs;SupportCallAt(0,target,note,128);SupportDispatchTick();SupportCallStatus(note,128);
+    check(std::wcscmp(note,soldierFailure)==0,"actual preload failure retains its separate diagnostic");
+    config.customNpcAi=false;
+    ++fixtureMs;SupportCallAt(0,target,note,128);SupportDispatchTick();SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"NPC 指挥功能未启用")!=nullptr && std::wcscmp(note,soldierFailure)!=0 && made==madeBeforeFailure,
+          "disabled NPC configuration takes precedence over soldier resource or constructor failure");
+    config.customNpcAi=true;allReady=true;
     float footY=0;
     terrainSea=Sea::water;waterSurface=1;
     check(!Foot(0,0,0,footY),"soldier collection point cannot use a submerged floor as dry ground");
