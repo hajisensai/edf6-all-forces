@@ -48,8 +48,9 @@ bool KnownVehicle(const void* vehicle) noexcept;
 // (seat+0xC8, the order the HUD lists them in), -1 for none. Not called for a few frames: no selection is shown.
 void SetStockSelectedStore(const void* vehicle,unsigned seat,int store) noexcept;
 
-constexpr int kStockArms=6,kStockThreats=6;
+constexpr int kStockArms=8,kStockThreats=6;
 struct StockArm {
+    wchar_t name[32];            // installed weapon name, not just its projectile category
     char label[12];
     std::int32_t ammo,ammoMax;   // rounds left and the magazine (AmmoCount)
     float reload;                // 0..1 share reloaded while it reloads (ammo 0); 1 not reloading

@@ -137,6 +137,14 @@ int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
 const void* lockOf=nullptr;float lockAt[3]{};
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
+unsigned char* chosenGunnerWeapon=nullptr;
+PayloadFire chosenGunnerFire=PayloadFire::primary;
+unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
+    if(fire)*fire=chosenGunnerFire;
+    if(chosenGunnerWeapon)return chosenGunnerWeapon;
+    const auto list=At<unsigned char**>(SeatAt(v,seat),kSeatWeapons);
+    return list && At<std::uint64_t>(SeatAt(v,seat),kSeatWeaponCount) ? At<unsigned char*>(list[0],kHolderWeapon) : nullptr;
+}
 bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     if(gunnerEnemy){const float aim[3]={0,0,20};visit(ctx,gunnerEnemy,aim);}
     return true;

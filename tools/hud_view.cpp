@@ -1202,6 +1202,16 @@ int Scenes(const std::wstring& dir) {
     StockTank(ground);
     Scene(dir,L"stock_tank",ground);
     Scene(dir,L"stock_tank_219",ground,2520);
+    const StockHudReadout savedStock=sceneStock;
+    sceneStock.arms=kStockArms;sceneStock.selected=7;
+    for(int i=0;i<kStockArms;++i) {
+        sceneStock.arm[i]=StockArm{};sceneStock.arm[i].kind=RoundKind::homing;
+        wcscpy_s(sceneStock.arm[i].name,L"真实挂载武器名称超长显示测试导弹弹药数量与当前选择");
+        strcpy_s(sceneStock.arm[i].label,"MSL");sceneStock.arm[i].ammo=24;sceneStock.arm[i].ammoMax=48;
+    }
+    Prime(ground);
+    Scene(dir,L"ground_stores_eight",ground);
+    sceneStock=savedStock;
     failed+=TankSightScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);

@@ -1038,7 +1038,7 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
 constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's, EDF6AutoTurret's aim mode's)
 constexpr float kCellW=112.0f,kCellH=48.0f;   // px at 1080 lines: a strip's cell
 constexpr float kRows3[]={-4.0f,0.0f,4.0f};   // a glyph's three rows (the pod's rockets, the gun's rounds)
-struct LoadCell { hudcue::StoreIcon icon; wchar_t text[40]; const float* rgba; bool picked; };
+struct LoadCell { hudcue::StoreIcon icon; wchar_t text[64]; const float* rgba; bool picked; };
 
 // A store's silhouette round (cx, cy), the nose to the right, `k` px a unit (some 36 x 14 units).
 void StoreGlyph(void* drawer,void* ctx,float cx,float cy,float k,hudcue::StoreIcon icon,const float* rgba) noexcept {
@@ -1087,6 +1087,14 @@ float LoadoutStrip(void* drawer,void* ctx,Text* text,float width,float y,float s
     for(int i=0;i<n;++i) {   // the texts first: their widths size the cells
         line[i]=*at;
         Label(text,lines,at,0.0f,y+37.0f*s,1,kLineScale*0.75f,cells[i].rgba,L"%ls",cells[i].text);
+        if(text && line[i]<*at) {
+            Line& l=lines[line[i]];
+            const float limit=width/static_cast<float>(n)-32.0f*s;
+            if(limit>0.0f && l.w>limit) {
+                l.scale*=limit/l.w*0.95f;MeasureAll(*text,&l,1);
+                l.y=y+37.0f*s-l.h*0.5f;
+            }
+        }
         const float tw=line[i]<*at ? lines[line[i]].w : 0.0f;
         w[i]=tw+16.0f*s>kCellW*s ? tw+16.0f*s : kCellW*s;
         total+=w[i];
@@ -2780,7 +2788,8 @@ int StockCells(const StockHudReadout& r,LoadCell* cells) noexcept {
         LoadCell& c=cells[n++];
         c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed);
         c.picked=i==r.selected;
-        wcsncpy_s(c.text,_countof(c.text),l.text,_TRUNCATE);
+        if(r.arm[i].name[0])_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls %d/%d",r.arm[i].name,r.arm[i].ammo,r.arm[i].ammoMax);
+        else wcsncpy_s(c.text,_countof(c.text),l.text,_TRUNCATE);
         c.rgba=c.picked && l.rgba==kHud ? kCyan : l.rgba;
     }
     return n;
@@ -3682,9 +3691,9 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // A switch the player makes shows for a moment (hud_cue.h Change, kSwitchMs): the picked store (forgotten while no
         // aircraft's stores show, so boarding shows none) and EDF6AutoTurret's aim mode.
         static hudcue::Change storePick{},aimMode{};
-        const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly);
+        const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly || snap.stock);
         if(!storesShown)storePick.seen=false;
-        const int picked=snap.cockpit ? snap.jet.store : snap.stock && snap.stockHud.heli ? snap.stockHud.selected : -1;
+        const int picked=snap.cockpit ? snap.jet.store : snap.stock ? snap.stockHud.selected : -1;
         const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
         const bool aimFlipped=fresh && snap.turret && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
@@ -3749,6 +3758,19 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr};
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
+            LoadCell cells[kStockArms];
+            const int n=StockCells(snap.stockHud,cells);
+            const int first=n>4 ? 4 : n;
+            const float y=height-110.0f*s-(n>4 ? kCellH*s : 0.0f);
+            LoadoutStrip(drawer,ctx,t,width,y,s,cells,first,lines,&at);
+            if(n>4)LoadoutStrip(drawer,ctx,t,width,y+kCellH*s,s,cells+4,n-4,lines,&at);
+            if(snap.payload) {
+                Line controls{};
+                AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
+                if(controls.text[0])Label(t,lines,&at,width*0.5f,y-24.0f*s,1,kLineScale*0.75f,kHud,L"%ls",controls.text);
+            }
+            if(storeSwitched && snap.stockHud.selected>=0 && snap.stockHud.selected<n)
+                LoadoutBanner(drawer,ctx,t,width,y-35.0f*s,s,cells[snap.stockHud.selected],lines,&at);
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);

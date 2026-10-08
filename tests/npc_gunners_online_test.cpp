@@ -5,15 +5,18 @@
 namespace crew {
 namespace {
 int fired=0,lastSeat=-1;
+const void* aimedWeapon=nullptr;
 unsigned char weapon[0x1600]{},holder[0x80]{};
 unsigned char* holders[1]={holder};
 void __fastcall GunFireRec(void* v,int seat,const void*) {
     ++fired;lastSeat=seat;
     auto* s=SeatAt(static_cast<unsigned char*>(v),static_cast<unsigned>(seat));
+    const auto current=At<unsigned char**>(s,kSeatWeapons);
+    aimedWeapon=current ? At<void*>(current[0],kHolderWeapon) : nullptr;
     Put<float>(s,0x2D0,0.25f);Put<float>(s,0x2D4,-0.5f);Put<float>(s,0x2E4,1.0f);
 }
 void SetupGunner(bool dummy,bool remote=false) {
-    Reset();fired=0;lastSeat=-1;
+    Reset();fired=0;lastSeat=-1;chosenGunnerWeapon=nullptr;chosenGunnerFire=PayloadFire::primary;
     sessionOn=true;host=true;
     Put<void*>(vehicle,0,image+0x1000);
     Put<void*>(image+0x1000,kSlotSeatFire*8,image+kSeatFire);
@@ -71,6 +74,18 @@ int main() {
     Expect(At<float>(SeatAt(vehicle,1),0x2D0)==0.75f,"cleanup preserves inputs subsequently changed by another owner");
     SetupGunner(false);NpcGunnersInput(vehicle);Put<void*>(vehicle,kSelfCtrl,vehicle+0x2800);config.npcGunners=false;NpcGunnersInput(vehicle);
     Expect(At<float>(SeatAt(vehicle,1),0x2E4)==1.0f,"reused vehicle identity does not inherit old input cleanup");
+    SetupGunner(false);
+    unsigned char alternate[0x1600]{},alternateHolder[0x80]{};
+    unsigned char* both[]={holder,alternateHolder};
+    Put<void*>(alternateHolder,kHolderWeapon,alternate);Put<float>(alternate,kArmReach,100.0f);
+    Put<void*>(SeatAt(vehicle,1),kSeatWeapons,both);Put<std::uint64_t>(SeatAt(vehicle,1),kSeatWeaponCount,2);
+    chosenGunnerWeapon=alternate;chosenGunnerFire=PayloadFire::secondary;
+    NpcGunnersInput(vehicle);
+    Expect(aimedWeapon==alternate,"native aim reads the selected real holder rather than the old primary ballistics");
+    Expect(At<void*>(SeatAt(vehicle,1),kSeatWeapons)==both && both[0]==holder,"native aiming restores original holder list and order");
+    Expect(At<float>(SeatAt(vehicle,1),0x2E4)==0.0f && At<float>(SeatAt(vehicle,1),0x2E0)==1.0f,"selected secondary uses native left trigger instead of firing primary");
+    gunnerEnemy=nullptr;NpcGunnersInput(vehicle);
+    Expect(At<float>(SeatAt(vehicle,1),0x2E0)==0.0f,"target loss also releases owned secondary trigger");
     ResetGunnerInputs();
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_gunners_online: %d failures\n",failures);

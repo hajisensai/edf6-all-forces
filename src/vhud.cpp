@@ -141,6 +141,8 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
 
 // One weapon's line and its impact point (see the top). `aim`: work the point out (not for a heli's).
 void Arm(const unsigned char* w,bool aim,StockArm& a) noexcept {
+    const auto name=At<const wchar_t*>(w,0x1B0);
+    if(name)for(std::size_t i=0;i+1<_countof(a.name) && Readable(name+i,sizeof(wchar_t)) && name[i];++i)a.name[i]=name[i];
     RoundModel m{};
     if(!ReadRound(w,&m))m.label="WPN";
     strncpy_s(a.label,m.label ? m.label : "WPN",_TRUNCATE);
@@ -251,9 +253,11 @@ void StockHudFrame(unsigned char* v) noexcept {
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
     const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     int pickedArm=-1,storeArm=-1;
-    if(n<=8 && Readable(holders,n*8))
+    if(n<=16 && Readable(holders,n*8))
         for(std::uint64_t i=0;i<n && r.arms<kStockArms;++i) {
             if(!Readable(holders[i],kHolderWeapon+8))continue;
+            const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
+            if(!Readable(ctrl,12) || At<std::int32_t>(ctrl,8)<=0)continue;
             const unsigned char* const w=At<const unsigned char*>(holders[i],kHolderWeapon);
             if(!Readable(w,kChargeLeft+4) || IsFuelTank(w))continue;
             if(picked && w==picked)pickedArm=r.arms;

@@ -32,6 +32,7 @@
 #include "memory.h"
 #include "lockon.h"
 #include "stores.h"
+#include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -43,7 +44,7 @@ constexpr std::size_t kWeaponName=0x1B0,kWeaponTrigger=0x139,kWeaponCapacity=0x2
 constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 constexpr std::uint16_t kButtonLB=0x10;
 constexpr ULONGLONG kFreshMs=200;                 // a readout this old (game ms) is gone: the player got out
-constexpr int kTracked=8;
+constexpr int kTracked=64;
 
 // The classes whose fire was read (§2); the vtables as crew.cpp kClasses has them.
 enum class Class { other, heli506, heli409, tank403, tank404, flak603, bike503 };
@@ -55,22 +56,22 @@ Class ClassOf(const void* v) noexcept {
 }
 
 // The switch's state per vehicle the player sits in: the weapon picked, the switch down last frame.
-struct Pick { ObjRef ref; unsigned char* weapon; bool held,listed; ULONGLONG seen; };
+struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; bool held,listed,npc; ULONGLONG seen; unsigned char* from[kMostPayload]; int redirects; };
 Pick picks[kTracked]{};
 PayloadReadout latest{};
 ULONGLONG latestMs=0;
 
-Pick* PickFor(const void* v,ULONGLONG ms) noexcept {
+Pick* PickFor(const void* v,unsigned seat,ULONGLONG ms) noexcept {
     Pick* slot=nullptr;
     for(auto& p:picks) {
-        if(p.ref.Is(v))return &p;
-        if(!slot && (!p.ref || p.ref.obj==v || ms-p.seen>kFreshMs*10))slot=&p;
+        if(p.ref.Is(v) && p.seat==seat)return &p;
+        if(!slot && (!p.ref || (p.ref.obj==v && !p.ref.Is(v)) || ms-p.seen>kFreshMs*10))slot=&p;
     }
-    if(slot)*slot=Pick{ObjRef::Of(v),nullptr,false,false,ms};
+    if(slot){*slot=Pick{};slot->ref=ObjRef::Of(v);slot->seat=seat;slot->seen=ms;}
     return slot;
 }
 Pick* FindPick(const void* v) noexcept {
-    for(auto& p:picks)if(p.ref.Is(v))return &p;
+    for(auto& p:picks)if(p.ref.Is(v) && !p.npc && p.seat<SeatCount(static_cast<const unsigned char*>(v)) && SeatRider(SeatAt(static_cast<unsigned char*>(const_cast<void*>(v)),p.seat))==Rider::player)return &p;
     return nullptr;
 }
 
@@ -156,6 +157,8 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
     int count=0;
     for(std::uint64_t i=0;i<n && count<kMostPayload;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
+        if(!Readable(ctrl,12) || At<std::int32_t>(ctrl,8)<=0)continue;
         unsigned char* const w=At<unsigned char*>(holders[i],kHolderWeapon);
         if(!Readable(w,kWeaponCharge+4) || IsFuelTank(w))continue;
         index[count]=HolderIndex(v,holders[i]);
@@ -184,28 +187,32 @@ void Lock(unsigned char* w) noexcept {
     audio::LockTone(lock,progress);
 }
 
-// The pulls taken over (PullHook): each stock weapon of the control a store is picked on, and that store. Only the
-// local player's vehicle, rebuilt by its PayloadFrame every frame; older than kFreshMs it is gone (and so is the vehicle).
-struct Redirect { unsigned char* from; unsigned char* to; };
-Redirect redirect[kMostPayload]{};
-int redirects=0;
-const void* redirectVehicle=nullptr;
-ULONGLONG redirectMs=0;
-
-// Drops the redirects when they are `v`'s (nullptr: whosever).
+// Redirects belong to one live vehicle and seat; NPC and local-player seats coexist.
 void ClearRedirect(const void* v) noexcept {
-    if(v && v!=redirectVehicle)return;
-    redirects=0;redirectVehicle=nullptr;
+    for(auto& p:picks)if(!v || p.ref.obj==v)p.redirects=0;
 }
-
-// The holder pull 0x62C000 (see the top), its own test kept: the holder's control block alive (its use count, +8).
 void __fastcall PullHook(unsigned char* holder) {
     const auto ctrl=At<const unsigned char*>(holder,kHolderCtrl);
     if(!ctrl || At<std::int32_t>(ctrl,8)==0)return;
     unsigned char* w=At<unsigned char*>(holder,kHolderWeapon);
-    if(redirects && GameMs()-redirectMs<=kFreshMs)
-        for(int i=0;i<redirects;++i)if(redirect[i].from==w){w=redirect[i].to;break;}
-    w[kWeaponTrigger]=1;
+    const ULONGLONG ms=GameMs();
+    __try {
+    if(Cfg().enabled && Cfg().stockStores)for(const auto& p:picks) {
+        if(!p.redirects || ms-p.seen>kFreshMs || !Readable(p.ref.obj,kSelfCtrl+8) || !p.ref.Is(p.ref.obj))continue;
+        const auto v=static_cast<unsigned char*>(const_cast<void*>(p.ref.obj));
+        if(p.seat>=SeatCount(v) || v[kDead])continue;
+        const auto seat=SeatAt(v,p.seat);
+        if(p.npc ? !AiGunner(v,seat) : SeatRider(seat)!=Rider::player)continue;
+        const auto list=At<unsigned char* const*>(seat,kSeatWeapons);
+        const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+        bool installed=false;
+        if(count<=16 && Readable(list,count*8))for(std::uint64_t i=0;i<count;++i)
+            if(Readable(list[i],kHolderWeapon+8) && At<unsigned char*>(list[i],kHolderWeapon)==p.weapon)installed=true;
+        if(!installed)continue;
+        for(int i=0;i<p.redirects;++i)if(p.from[i]==w){w=p.weapon;break;}
+    }
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return; }
+    if(Readable(w,kWeaponTrigger+1))w[kWeaponTrigger]=1;
 }
 constexpr unsigned kPull=0x62C000;
 const unsigned char kPullCode[]={0x48,0x8B,0x41,0x08,0x48,0x85,0xC0,0x74,0x11,0x83,0x78,0x08,0x00,0x74,0x0B,0x48,0x8B,0x41,0x10,
@@ -245,7 +252,7 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     p.weapon=ws[list[at]];
     r.entry[list[at]].picked=true;
     r.picked=list[at];r.choices=n;r.switchButton=kButtonLB;
-    if(at>0)for(int k=0;k<ns && redirects<kMostPayload;++k)redirect[redirects++]=Redirect{ws[stock[k]],p.weapon};
+    if(at>0)for(int k=0;k<ns && p.redirects<kMostPayload;++k)p.from[p.redirects++]=ws[stock[k]];
     Lock(p.weapon);
 }
 }  // namespace
@@ -253,11 +260,11 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
 void PayloadFrame(unsigned char* v) noexcept {
     if(v[kDead] || BodyOf(v)!=PluginBody::none){ClearRedirect(v);return;}
     const int seat=PlayerSeatOf(v);
-    if(seat<0){ClearRedirect(v);return;}
+    if(seat<0)return;
     const ULONGLONG ms=GameMs();
-    Pick* const p=PickFor(v,ms);
+    Pick* const p=PickFor(v,static_cast<unsigned>(seat),ms);
     if(!p)return;
-    p->seen=ms;
+    p->seen=ms;p->npc=false;
     const Class c=ClassOf(v);
     PayloadReadout r{};
     unsigned char* ws[kMostPayload]{};
@@ -265,10 +272,69 @@ void PayloadFrame(unsigned char* v) noexcept {
     r.count=ReadSeat(v,static_cast<unsigned>(seat),c,ws,r);
     const unsigned char* const s=SeatAt(v,static_cast<unsigned>(seat));
     r.keys=At<unsigned char>(s,kSeatPad)==0;
-    ClearRedirect(v);
-    redirectVehicle=v;redirectMs=ms;
+    p->redirects=0;
     Switch(v,s,*p,ws,r);
     latest=r;latestMs=ms;
+}
+
+// Select only loaded weapons already attached to this seat. The native caller owns
+// aiming/firing; no shot or weapon object is fabricated here.
+unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bool airborne,PayloadFire* fire) noexcept {
+    if(fire)*fire=PayloadFire::other;
+    if(!pullOk || !Cfg().enabled || !Cfg().stockStores || !Cfg().npcGunners || !v || v[kDead] ||
+       BodyOf(v)!=PluginBody::none || seat>=SeatCount(v))return nullptr;
+    const auto s=SeatAt(v,seat);
+    if(!AiGunner(v,s))return nullptr;
+    Pick* const p=PickFor(v,seat,GameMs());
+    if(!p)return nullptr;
+    const auto previous=p->weapon;
+    p->seen=GameMs();p->npc=true;p->redirects=0;p->weapon=nullptr;
+    if(!std::isfinite(distance) || distance<=0.0f)return nullptr;
+    PayloadReadout r{};unsigned char* ws[kMostPayload]{};
+    r.count=ReadSeat(v,seat,ClassOf(v),ws,r);
+    PayloadFire ride=PayloadFire::primary;
+    for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
+    int best=-1;float score=-1.0f;
+    for(int i=0;i<r.count;++i) {
+        if(r.entry[i].fire==PayloadFire::other || r.entry[i].rounds<=0)continue;
+        const auto w=ws[i];
+        if(!(At<float>(w,0x89C)>0.0f))continue; // healers never target enemies
+        float muzzle[3],dir[3];RoundModel m{};
+        if(!edf::MeanMuzzle(w,64,muzzle,dir) || !ReadRound(w,&m) || m.kind==RoundKind::none)continue;
+        // Native NPC engagement reach. Guided stores also need a reachable lock; an
+        // accelerating rocket must not be limited to its initial speed times lifetime.
+        float reach=At<float>(w,0x224);
+        if(!std::isfinite(reach) || reach<=0.0f)continue;
+        if(m.kind==RoundKind::homing) {
+            const float lockReach=At<float>(w,0x6D0);
+            if(!std::isfinite(lockReach) || lockReach<=0.0f)continue;
+            reach=std::fmin(reach,lockReach);
+        } else if(m.kind==RoundKind::arc) {
+            if(!std::isfinite(m.speed) || m.speed<=0.0f || m.alive<=0)continue;
+            reach=std::fmin(reach,m.speed*static_cast<float>(m.alive));
+        }
+        if(!std::isfinite(reach) || reach<distance)continue;
+        const float blast=At<float>(w,0x8B0);
+        if(!std::isfinite(blast) || (blast>0.0f && distance<=blast*2.0f))continue;
+        const StoreSpec* const spec=StoreOf(w);
+        const auto mark=At<std::int32_t>(w,edf::kWeaponMark);
+        if(spec && ((airborne && (spec->role==StoreRole::ground || spec->role==StoreRole::bomb || spec->role==StoreRole::rocket)) ||
+                    (!airborne && spec->role==StoreRole::air)))continue;
+        if(airborne && (m.lobbed || mark==edf::kMarkGround || mark==edf::kMarkLofted))continue;
+        if(!airborne && mark==edf::kMarkAir)continue;
+        // Guided fire at long range, direct fire close up, splash against ground targets.
+        float rank=m.kind==RoundKind::homing ? (distance>150.0f ? 4.0f : 2.0f) : airborne ? 3.0f : blast>0.0f ? 3.5f : 2.5f;
+        if(ws[i]==previous)rank+=0.1f;
+        if(rank>score){score=rank;best=i;}
+    }
+    if(best<0)return nullptr;
+    p->weapon=ws[best];
+    if(r.entry[best].fire==PayloadFire::store)
+        for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)p->from[p->redirects++]=ws[i];
+    if(r.entry[best].fire==PayloadFire::store && !p->redirects){p->weapon=nullptr;return nullptr;}
+    if(previous && previous!=p->weapon && Readable(previous,kWeaponCharge+4))ClearWeaponLock(previous);
+    if(fire)*fire=r.entry[best].fire==PayloadFire::store ? ride : r.entry[best].fire;
+    return p->weapon;
 }
 
 bool PlayerPayload(PayloadReadout* out) noexcept {

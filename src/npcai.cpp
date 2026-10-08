@@ -1765,9 +1765,9 @@ void GunnerVisit(void* ctx,const void* object,const float* aim) {
 namespace {
 // Only inputs written by this module are reclaimed, including switch-off and authority transfer. Human seats
 // and a new rider at a reused address are never cleared. No-target frames cannot retain the NPC's last trigger.
-struct GunnerWrite { ObjRef vehicle,rider; unsigned seat; float values[3]; };
+struct GunnerWrite { ObjRef vehicle,rider; unsigned seat; float values[4]; };
 std::vector<GunnerWrite> gunnerWrites;
-constexpr std::size_t kGunnerInputs[3]={0x2D0,0x2D4,0x2E4};
+constexpr std::size_t kGunnerInputs[4]={0x2D0,0x2D4,0x2E4,0x2E0};
 void ResetGunnerInputs() noexcept { gunnerWrites.clear(); }
 void ReleaseGunnerInputs(unsigned char* v) noexcept {
     for(auto it=gunnerWrites.begin();it!=gunnerWrites.end();) {
@@ -1775,14 +1775,14 @@ void ReleaseGunnerInputs(unsigned char* v) noexcept {
         if(it->vehicle.obj!=v){++it;continue;}
         unsigned char* seat=it->seat<SeatCount(v) ? SeatAt(v,it->seat) : nullptr;
         if(seat && !AnyPlayerIn(seat) && Readable(it->rider.obj,kSelfCtrl+8) && it->rider.Is(At<const void*>(seat,kSeatRider)))
-            for(int k=0;k<3;++k)if(At<float>(seat,kGunnerInputs[k])==it->values[k])Put<float>(seat,kGunnerInputs[k],0.0f);
+            for(int k=0;k<4;++k)if(At<float>(seat,kGunnerInputs[k])==it->values[k])Put<float>(seat,kGunnerInputs[k],0.0f);
         it=gunnerWrites.erase(it);
     }
 }
 void RememberGunnerInputs(unsigned char* v,unsigned index,const unsigned char* seat) {
     GunnerWrite write{ObjRef::Of(v),ObjRef::Of(At<const void*>(seat,kSeatRider)),index,{}};
     bool any=false;
-    for(int k=0;k<3;++k){write.values[k]=At<float>(seat,kGunnerInputs[k]);any=any || write.values[k]!=0.0f;}
+    for(int k=0;k<4;++k){write.values[k]=At<float>(seat,kGunnerInputs[k]);any=any || write.values[k]!=0.0f;}
     if(any)gunnerWrites.push_back(write);
 }
 } // namespace
@@ -1801,6 +1801,41 @@ bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept {
     if(who!=Rider::other || !Cfg().customNpcAi || !Cfg().npcBoarding)return false;
     const auto rider=At<const unsigned char*>(seat,kSeatRider);
     return IsSoldierClass(rider) && !IsAnyPlayer(rider) && IsOnlineAuthority(rider);
+}
+
+namespace {
+// 0x65F74F and 0x65FF90 use the seat's first holder for native aiming, lock and
+// safety tests. Supply the chosen existing holder for this synchronous call, then
+// restore the original list even on an exception. Weapon/holder ownership is unchanged.
+void AimSelectedGunner(unsigned char* v,unsigned index,const void* target,unsigned char* weapon,PayloadFire fire) {
+    static bool aiming=false; // game thread; a nested callback must not borrow another stack list
+    if(aiming)return;
+    auto seat=SeatAt(v,index);
+    auto original=At<unsigned char**>(seat,kSeatWeapons);
+    const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(!count || count>16 || !Readable(original,count*8))return;
+    unsigned char* selected[16]{};
+    std::memcpy(selected,original,count*8);
+    bool found=false;
+    for(std::uint64_t i=0;i<count;++i)if(Readable(original[i],kHolderWeapon+8) && At<unsigned char*>(original[i],kHolderWeapon)==weapon) {
+        selected[0]=original[i];found=true;break;
+    }
+    if(!found)return;
+    __try {
+        aiming=true;
+        Put<void*>(seat,kSeatWeapons,selected);
+        reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(index),target);
+    } __finally { Put<void*>(seat,kSeatWeapons,original);aiming=false; }
+    if(fire==PayloadFire::secondary) {
+        Put<float>(seat,0x2E0,At<float>(seat,0x2E4));Put<float>(seat,0x2E4,0.0f);
+    }
+}
+bool GunnerAirTarget(const void* target) noexcept {
+    if(!Readable(target,kPosition+12))return false;
+    const auto p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(target)+kPosition);
+    const float from[3]={p[0],p[1]+1.0f,p[2]},end[3]={p[0],p[1]-512.0f,p[2]};float hit[3];
+    return MapFloorRay(from,end,hit)>=0.0f && p[1]-hit[1]>15.0f;
+}
 }
 
 void NpcGunnersInput(unsigned char* v) noexcept {
@@ -1827,10 +1862,15 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         if(!(reach>0.0f))continue;
         GunnerPick p{Pos(v),reach,nullptr,1e30f};
         const Enemy* const m=world.frame==GameFrame() ? MarkedEnemy() : nullptr;   // the soldiers' list of this frame only
-        if(m && npc::Dist(Pos(v),m->aim)<=reach)p.best=m->object;
+        if(m && npc::Dist(Pos(v),m->aim)<=reach){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else VisitEnemies(v,&GunnerVisit,&p);
         if(p.best) {
-            reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
+            if(Cfg().stockStores) {
+                PayloadFire fire=PayloadFire::other;
+                const auto w=NpcPayloadSelect(v,i,p.bestD,GunnerAirTarget(p.best),&fire);
+                if(!w)continue;
+                AimSelectedGunner(v,i,p.best,w,fire);
+            } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
             RememberGunnerInputs(v,i,seat);
         }
     }
