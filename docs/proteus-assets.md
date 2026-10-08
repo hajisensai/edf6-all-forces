@@ -10,4 +10,8 @@
 
 安装接线：`make_proteus.OWNER='proteus'`，`build(root)` / `install(root, files)` / `remove(root)` 与其它资源组一致，需要进入安装器、卸载器、构建缓存 recipe 和冻结打包 import 集合。文件依赖与输出应交由 ledger/cache 保持同步。
 
+安装事务另有 `Mods/.edf6vc_proteus.json` 写前日志和 `.edf6vc_proteus_backup/` 原文件备份。每次覆盖前持久化原始哈希、原 ledger 项和 pending 哈希，文件或 ledger 提交后中断均可恢复。已有原版模型的第三方 SGO 只改模型/动画引用，其余字段保留；第三方自定义模型不接管，安装后改过的文件重装也不覆盖。卸载先恢复未改动的消费者，再扫描剩余 loose SGO 对私有模型/CAS的引用，保留仍被引用的整对资源及其他 owner 需要的资源。备份作为可恢复记录保留。
+
+测试场不能直接从 Root 复制 Proteus SGO 后仍指原版资源。生成写入处应调用 `data, needs = make_proteus.range_vehicle(led, game, data, OWNER)`，把 needs 加入本轮 held 集合，再 `led.put(OWNER, ..., data)`。该入口与主安装共用 `redirect(data)`；已安装资源登记 need，独立测试场在资源缺失时生成同一 MRAB/CAS。务必传当前持久使用的同一个 Ledger 实例，避免旧实例保存时覆盖依赖登记。
+
 `python tools/test_proteus_assets.py` 包含可在无游戏机器运行的 CANM 和几何测试；本机 Root.cpk 存在时另核对完整生成结果。2026-10-08 共 6 项通过，无跳过。未启动游戏，未把生成资源写入游戏目录；原生 CAS 加载器与实际屏幕呈现仍须另行验收，文件解析成功不能代替渲染验证。

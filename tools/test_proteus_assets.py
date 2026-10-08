@@ -133,6 +133,18 @@ class StockAssetsTests(AnimationTests):
             count += 1
         self.assertEqual(count, 10)
 
+    def test_range_redirect_uses_identical_generated_resource_schema(self) -> None:
+        import sys
+        sys.path.insert(0, str(ROOT / 'testrange'))
+        import gen
+        name = 'v614_proteus_mk2_mission'
+        stock = gen.vehicle_sgo(self.game, name)
+        made, needs = make_proteus.redirect(stock)
+        self.assertEqual(made, self.files['OBJECT/' + name.upper() + '.SGO'])
+        self.assertEqual(set(needs), {'OBJECT/EDF6VC_V614_PROTEUS_MK2.MRAB',
+                                     'OBJECT/EDF6VC_V614_PROTEUS_MK2.CAS'})
+        self.assertTrue(all(rel in self.files for rel in needs))
+
 
 if __name__ == '__main__':
     unittest.main()
