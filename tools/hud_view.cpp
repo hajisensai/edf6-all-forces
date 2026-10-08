@@ -164,7 +164,12 @@ bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
 bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
-bool PlayerHeliSight(HeliSightReadout*) noexcept { return false; }
+// The stock heli gun's sight (helisight.cpp): on in the heli_gun_ladder scenes.
+bool hasHeliSight=false;HeliSightReadout sceneHeliSight{};
+bool PlayerHeliSight(HeliSightReadout* o) noexcept { if(hasHeliSight)*o=sceneHeliSight;return hasHeliSight; }
+// The sight's magnification (sightzoom.cpp): the zoomed scenes set it (and narrow sceneFov to match).
+float sceneZoom=1.0f;
+float SightZoomNow(const void*) noexcept { return sceneZoom; }
 bool hasGunner=false;GunnerReadout sceneGunner{};
 bool PlayerGunnerHud(GunnerReadout* o) noexcept { if(hasGunner)*o=sceneGunner;return hasGunner; }
 bool PlayerHighCam(bool*,bool*) noexcept { return false; }
@@ -700,13 +705,13 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
                     ok ? "ok  " : "FAIL",name,lrf,ticks,wantTicks,order,apart);
     };
     check(L"stock_tank_sight",0);
-    sceneFov=55.0f/3.0f;sceneStock.zoom=3.0f;   // the sight at 3x (sightzoom.cpp: the camera's field of view a third)
+    sceneFov=55.0f/3.0f;sceneStock.zoom=3.0f;sceneZoom=3.0f;   // the sight at 3x (sightzoom.cpp: the camera's field of view a third)
     check(L"stock_tank_sight_zoom",1);
     bool named=false;
     for(const Drew& d:drew)named=named || d.text.find(L"3x")!=std::wstring::npos;
     failed+=!named;
     std::printf("%s  stock_tank_sight_zoom: the magnification named (3x) %d\n",named ? "ok  " : "FAIL",named);
-    sceneFov=55.0f;sceneStock.zoom=1.0f;
+    sceneFov=55.0f;sceneStock.zoom=1.0f;sceneZoom=1.0f;
     StockTank(ground);
     return failed;
 }
@@ -725,6 +730,7 @@ int GunshipSightScenes(const std::wstring& dir,const float* ground) {
         sceneGunner.sight[0]=ground[0];sceneGunner.sight[1]=ground[1]+5.0f;sceneGunner.sight[2]=ground[2]+19.0f;   // the camera's centre ray at the ground
         sceneGunner.gun=static_cast<GunnerGun>(g);sceneGunner.guns=7u;
         sceneGunner.zoom=g==2 ? 6.0f : 1.0f;   // the gatling's sight at 6x: its magnification over the frame
+        sceneZoom=sceneGunner.zoom;             // ...and the sensor's dark round its field
         StockTank(ground);   // its camera only (Scene looks along sceneStock.hull when hasStock; with it off, along the jet's nose)
         sceneJet.sym.nose[0]=0.0f;sceneJet.sym.nose[1]=0.0f;sceneJet.sym.nose[2]=1.0f;
         Scene(dir,names[g],ground);
@@ -743,7 +749,53 @@ int GunshipSightScenes(const std::wstring& dir,const float* ground) {
         failed+=!ok;
         std::printf("%s  %ls: gun line %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",names[g],line,apart);
     }
-    hasGunner=false;
+    hasGunner=false;sceneZoom=1.0f;
+    return failed;
+}
+
+// A magnified sight on the other sighted seats (hud.cpp ScopeShade, LadderTicks): a stock heli's gun at 1x and 3x (its
+// range ladder under the boresight; a stand-in round: 10 m/frame, the world's gravity, 2 s) and a player jet at 3x.
+// Checked: the magnification named once (the scope's own label), no two texts overlapping, the heli gun's ladder
+// numbered at 3x; at 1x no scope.
+int ZoomScenes(const std::wstring& dir,const float* ground) {
+    int failed=0;
+    const auto check=[&](const wchar_t* name,int wantX,int wantLabels){
+        Scene(dir,name,ground);
+        int named=0,labels=0;bool apart=true;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& p=drew[i];
+            if(p.text==L"3x")++named;
+            if(p.text.size()<=2 && !p.text.empty() && p.text[0]>=L'1' && p.text[0]<=L'9' && p.text.back()!=L'x')++labels;
+            for(std::size_t k=i+1;k<drew.size();++k) {
+                const Drew& q=drew[k];
+                if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1)apart=false;
+            }
+        }
+        const bool ok=named==wantX && labels>=wantLabels && apart;
+        failed+=!ok;
+        std::printf("%s  %ls: magnification named %d (want %d), ladder labels %d (want >= %d), no text overlapping %d\n",
+                    ok ? "ok  " : "FAIL",name,named,wantX,labels,wantLabels,apart);
+    };
+    const bool jetWas=hasJet,heliWas=hasHeli,stockWas=hasStock;
+    hasJet=hasHeli=hasStock=false;
+    sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
+    hasHeliSight=true;sceneHeliSight=HeliSightReadout{};
+    sceneHeliSight.gun=sceneHeliSight.hit=true;
+    float bore[3]={0.0f,0.006f,1.0f};vec::Normalize(bore);
+    std::memcpy(sceneHeliSight.bore,bore,12);
+    const float muzzle[3]={ground[0],ground[1]+4.0f,ground[2]-20.0f};   // by the camera (5 m up, 24 m back), as a heli's gun by its view
+    const roundaim::Round round{10.0f,{0.0f,-9.8f/3600.0f,0.0f},1.0f,120};
+    const float still[3]={0.0f,0.0f,0.0f};
+    sceneHeliSight.ladder=gunsight::Of(round,muzzle,bore,still);
+    sceneHeliSight.pipper[0]=ground[0];sceneHeliSight.pipper[1]=ground[1];sceneHeliSight.pipper[2]=ground[2]+700.0f;sceneHeliSight.range=700.0f;
+    check(L"heli_gun_ladder",0,0);
+    sceneFov=55.0f/3.0f;sceneZoom=3.0f;
+    check(L"heli_gun_ladder_zoom",1,1);
+    hasHeliSight=false;
+    hasJet=true;
+    check(L"jet_zoom",1,0);
+    sceneFov=55.0f;sceneZoom=1.0f;
+    hasJet=jetWas;hasHeli=heliWas;hasStock=stockWas;
     return failed;
 }
 
@@ -1137,6 +1189,7 @@ int Scenes(const std::wstring& dir) {
     Scene(dir,L"stock_tank_219",ground,2520);
     failed+=TankSightScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
+    failed+=ZoomScenes(dir,ground);
     hasDrill=true;
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
     strcpy_s(sceneStock.kind,"DrillTank");
