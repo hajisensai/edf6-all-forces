@@ -201,6 +201,18 @@ void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
     sceneButtons=n;
     for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
 }
+float sceneUiPanels[16][4]{};int sceneUiCount=0;
+float sceneSquadButtons[9][4]{};int sceneSquadButtonCount=0;
+float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
+void MapCommandUiPanels(const float* r,int n) noexcept {
+    sceneUiCount=n;for(int i=0;i<n;++i)std::memcpy(sceneUiPanels[i],r+i*4,16);
+}
+void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
+    sceneSquadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(sceneSquadButtons[i],r+i*4,16);
+}
+void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n) noexcept {
+    scenePayloadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(scenePayloadButtons[i],r+i*4,16);
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;

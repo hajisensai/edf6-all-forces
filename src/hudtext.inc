@@ -422,3 +422,5 @@ HUDTEXT(cmdSupportPlace,L"Choose a destination on the map (click CALL again to c
 HUDTEXT(cmdSupportNoPoint,L"No support destination found",L"无法确定支援目的地",L"無法確定支援目的地",L"支援先を確認できません")
 HUDTEXT(supportInfantryTransferred,L"Infantry support is now under its new squad orders",L"步兵支援已交由新的小队命令控制",L"步兵支援已交由新的小隊命令控制",L"歩兵支援は新しい部隊命令に従います")
 HUDTEXT(supportInfantryArrived,L"Infantry support has arrived and is guarding the destination",L"步兵支援已抵达并守卫目的地",L"步兵支援已抵達並守衛目的地",L"歩兵支援が到着し目的地を警戒しています")
+
+HUDTEXT(mapPayloadTitle,L"LOADOUT - click bright rows to select",L"挂载：点击亮色条目切换",L"掛載：點擊亮色項目切換",L"兵装：明るい行をクリックして選択")

@@ -3110,12 +3110,13 @@ void MapScale(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     if(!Project(vp,m.focus,width,height,&x0,&y0,&depth) || !Project(vp,b,width,height,&x1,&y1,&depth))return;
     const float len=std::sqrt((x1-x0)*(x1-x0)+(y1-y0)*(y1-y0));
     if(!(len>4.0f) || len>width*0.5f)return;
-    const float x=40.0f*s,y=height-110.0f*s;
-    Rect(drawer,ctx,x,y-2.0f*s,x+len,y+2.0f*s,kWhite);
+    const float drawn=std::fmin(len,width*0.40f-20.0f*s);
+    const float x=width*0.55f,y=184.0f*s;
+    Rect(drawer,ctx,x,y-2.0f*s,x+drawn,y+2.0f*s,kWhite);
     Rect(drawer,ctx,x-1.0f*s,y-8.0f*s,x+1.0f*s,y+8.0f*s,kWhite);
-    Rect(drawer,ctx,x+len-1.0f*s,y-8.0f*s,x+len+1.0f*s,y+8.0f*s,kWhite);
-    wchar_t d[24];MapDistance(d,_countof(d),step);
-    Label(text,lines,at,x+len*0.5f,y-18.0f*s,1,kLineScale*0.75f,kWhite,L"%ls",d);
+    Rect(drawer,ctx,x+drawn-1.0f*s,y-8.0f*s,x+drawn+1.0f*s,y+8.0f*s,kWhite);
+    wchar_t d[24];MapDistance(d,_countof(d),step*drawn/len);
+    Label(text,lines,at,x+drawn*0.5f,y-18.0f*s,1,kLineScale*0.75f,kWhite,L"%ls",d);
 }
 
 // A hollow square / diamond of half size `h` round (x, y).
@@ -3360,12 +3361,12 @@ void MapSquadStatus(const SquadRow& r,wchar_t* out,std::size_t size) noexcept {
     else hudtext::WordTo(r.status,out,size);
 }
 void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,const MapCommandReadout& c,Line* lines,int* at) noexcept {
-    if(c.squads<=0)return;
+    if(c.squads<=0){MapCommandSquadButtons(nullptr,nullptr,0);return;}
     // Top left, under the title band and over the legend (which starts some 270 px down at 1080 lines); the compass
     // has the top right.
     const float x0=16.0f*s,rowH=22.0f*s,top=56.0f*s;
     const int rows=c.squads<9 ? c.squads : 9;
-    if(*at+rows+1>kMaxLines)return;
+    if(*at+rows+1>kMaxLines){MapCommandSquadButtons(nullptr,nullptr,0);return;}
     const int first=*at;
     Line& title=lines[(*at)++];Format(title,L"%ls",Tr(pad ? Tx::squadTitle : Tx::squadTitleKeys));
     title.rgba=kMapOrder;
@@ -3388,7 +3389,41 @@ void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pa
     }
     const float left=x0-8.0f*s,right=x0+panelW+8.0f*s,bottom=top+rowH*static_cast<float>(rows+1)+4.0f*s;
     MapUiBox(drawer,ctx,left,top-6.0f*s,right,bottom,lines,first);
+    float rects[9*4]{};ObjRef identities[9]{};
+    for(int i=0;i<rows;++i) {
+        const auto& row=lines[first+i+1];auto* hit=rects+i*4;
+        hit[0]=left;hit[1]=row.y;hit[2]=right;hit[3]=row.y+rowH;
+        identities[i]=c.squad[i].identity;
+        if(c.pointer && c.px>=left && c.px<right && c.py>=hit[1] && c.py<hit[3])
+            Rect(drawer,ctx,left,hit[1],right,hit[3],kMapBoxFill);
+    }
+    MapCommandSquadButtons(pad ? nullptr : rects,pad ? nullptr : identities,pad ? 0 : rows);
 
+}
+
+// A map-only interactive loadout keeps left-click firing and camera aim untouched outside M.
+void MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,
+                     const MapCommandReadout& commands,Line* lines,int* at) noexcept {
+    PayloadReadout r{};
+    if(!PlayerPayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return;}
+    const int count=r.count<kMostPayload ? r.count : kMostPayload;
+    const float right=width-16.0f*s,left=right-std::fmin(460.0f*s,width*0.46f-32.0f*s),top=216.0f*s,rowH=30.0f*s;
+    MapUiBox(drawer,ctx,left-8.0f*s,top-14.0f*s,right+8.0f*s,top+rowH*static_cast<float>(count+1),lines,*at);
+    Label(text,lines,at,left,top,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::mapPayloadTitle));
+    if(*at)MapFitLabel(text,lines[*at-1],left,right);
+    float rects[kMostPayload*4]{};int entries[kMostPayload]{};int hits=0;
+    for(int i=0;i<count;++i) {
+        const auto& e=r.entry[i];const float y=top+rowH*static_cast<float>(i+1);
+        const bool hover=!pad && commands.pointer && commands.px>=left && commands.px<right && commands.py>=y-12*s && commands.py<y+12*s;
+        if(e.picked || (e.selectable && hover))Rect(drawer,ctx,left-3*s,y-12*s,right+3*s,y+12*s,kMapBoxFill);
+        Label(text,lines,at,left+10*s,y,0,kLineScale*0.70f,e.selectable ? kWhite : kMapLocked,L"%ls  %d/%d",e.name,e.rounds,e.capacity);
+        if(*at)MapFitLabel(text,lines[*at-1],left+10*s,right);
+        if(e.picked)Rect(drawer,ctx,left,y-7*s,left+3*s,y+7*s,kCyan);
+        if(!pad && e.selectable && r.selectionToken) {
+            auto* hit=rects+4*hits;hit[0]=left;hit[1]=y-12*s;hit[2]=right;hit[3]=y+12*s;entries[hits++]=i;
+        }
+    }
+    MapCommandPayloadButtons(rects,r.selectionToken,r.seat,entries,hits);
 }
 
 // The map's command buttons (map_buttons.h; the user, 2026-10-08: "the M map should do all of it, best by clicking the
@@ -3454,7 +3489,10 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
 
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
-    if(!PlayerMapCommands(&c))return;
+    if(!PlayerMapCommands(&c)){
+        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);
+        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return;
+    }
     const mapcam::View view{{m.focus[0],m.focus[1],m.focus[2]},m.yaw,m.pitch,m.height};
     const float pin=mapcam::PinHeight(mapcam::Distance(view),m.pitch);
     const float* tint=c.allowed && c.count ? kMapOrder : kMapOrderDim;
@@ -3509,6 +3547,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         }
     }
     MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
+    MapPayloadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
     MapButtons(drawer,ctx,text,width,height,s,m.pad,c,lines,at);
     // The band over the keys: how many are selected, the keys (the squads' own on a second line).
     Rect(drawer,ctx,0.0f,height-104.0f*s,width,height-46.0f*s,kMapBand);
@@ -3583,7 +3622,10 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 // The map view open: its marks drawn (true), nothing else of the HUD.
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
-    if(!PlayerMap(&m))return false;
+    if(!PlayerMap(&m)){
+        MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);
+        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandUiPanels(nullptr,0);return false;
+    }
     s=std::fmin(s,std::fmin(width/960.0f,height/1080.0f));
     if(text)text->s=s;
     mapUiPanelCount=0;
@@ -3593,8 +3635,19 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     NpcMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // which enemy the NPCs are set on, on the map too
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapUiBox(drawer,ctx,width-134*s,54*s,width-6*s,174*s,lines,*at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
+    MapCommandUiPanels(mapUiPanels,mapUiPanelCount);
+    MapCommandReadout pointer{};
+    if(PlayerMapCommands(&pointer) && pointer.pointer && !m.pad) {
+        for(int i=0;i<mapUiPanelCount;++i) {
+            const auto* r=mapUiPanels+4*i;
+            if(pointer.px<r[0] || pointer.px>=r[2] || pointer.py<r[1] || pointer.py>=r[3])continue;
+            // Keep the pointer above opaque controls, rather than hiding the map crosshair behind them.
+            Tri(drawer,ctx,pointer.px+9*s,pointer.py+13*s,pointer.px,pointer.py,5*s,kWhite);break;
+        }
+    }
     return true;
 }
 // The NPCs' mark (npcai.cpp, the user's Q on foot; docs/npc-ai-design.md §6.3): an amber diamond round it, MARK and its
