@@ -98,4 +98,4 @@ DLL 输出到 `build\Mods\Plugins\`（构建产物，不进仓库）。每次 pu
 MIT，见 [LICENSE](LICENSE)。随附：仓库根目录的 `third_party/EDFModLoader/PluginAPI.h`（MIT），以及仓库根目录 `pylib/` 里的 `cpk.py` / `crilayla.py`（来自 momotori01 的 EDF6MultiSlot 的 CPK / CRILAYLA 读取器，公有领域，见 `pylib/LICENSE.edf6-cpk`）。
 
 
-配合当前 VehicleCrew，Z 留给有效实体瞄具。旧 INI 的 AimModeKey=Z 冲突时自瞄实际使用 V，不改写用户 INI；HUD 显示实际键以及“瞄具 Z / 自瞄 V”。手柄模式键冲突时不占用该键。俯瞰观察及返回过渡中自动瞄准不转动玩家炮位，NPC 炮手行为不变。
+配合当前 VehicleCrew，Z 留给有效实体瞄具。旧 INI 的 AimModeKey=Z 冲突时自瞄实际使用 V，不改写用户 INI；HUD 显示实际键以及“瞄具 Z / 自瞄 V”。手柄模式键冲突时不占用该键。俯瞰观察、返回过渡以及实体瞄具开启期间，自动瞄准不转动玩家炮位（已锁定或未锁定都一样）；进出瞄具不改变用户选择的自瞄模式。NPC 炮手行为不变。

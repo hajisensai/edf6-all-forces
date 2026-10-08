@@ -63,6 +63,7 @@ constexpr char kSteers[]="EDF6AutoTurret_SteersV2";
 
 // Optional, additive input arbitration. Existing V1/V2 layouts and exports stay unchanged.
 // Queries are made on the game thread for the real local player's current seat.
+// TurretObserver reserves the axes for overhead observation, its blend, or an active physical optic.
 using BindingReservedFn=bool(__cdecl*)(const void* vehicle,unsigned seat,bool keys,int binding);
 constexpr char kSightBinding[]="EDF6VehicleCrew_SightBindingV1";
 constexpr char kTurretObserver[]="EDF6VehicleCrew_TurretObserverV1";
@@ -102,7 +103,7 @@ inline float PriorityWeight(const PriorityZoneV1& z,const float* pos,const void*
 
 // V1, the map view holds the player's keys (EDF6VehicleCrew src/map.cpp MapHoldsKeys): while it is open, and until the key
 // that closed it is let go, the keyboard is the map's (Q / E turn it, R / F tilt it, W A S D pan it): EDF6AutoTurret
-// reads no key of its own then (its LockKey Q, its AimModeKey Z). The pad needs no asking: the hold clears the seat's
+// reads no key of its own then (its LockKey Q, its AimModeKey V). The pad needs no asking: the hold clears the seat's
 // buttons before either plugin reads them. False: not held (or no EDF6VehicleCrew).
 using InputHeldFn=bool(__cdecl*)();
 constexpr char kInputHeld[]="EDF6VehicleCrew_InputHeldV1";

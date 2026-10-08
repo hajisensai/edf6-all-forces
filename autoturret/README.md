@@ -155,4 +155,4 @@ in `pylib/` at the repository root, `cpk.py` / `crilayla.py` (CPK / CRILAYLA rea
 momotori01, public domain, `pylib/LICENSE.edf6-cpk`).
 
 
-With current VehicleCrew, Z belongs to a valid vehicle sight. A legacy colliding AimModeKey=Z uses V for auto-aim without rewriting the ini; the HUD shows the effective key and SIGHT/AUTO conflict hint. A conflicting pad mode button is left unbound. In overhead observation and its return blend, AutoTurret does not turn the player's gun. NPC gunner behavior is unchanged.
+With current VehicleCrew, Z belongs to a valid vehicle sight. A legacy colliding AimModeKey=Z uses V for auto-aim without rewriting the ini; the HUD shows the effective key and SIGHT/AUTO conflict hint. A conflicting pad mode button is left unbound. In overhead observation, its return blend, and an active physical scope, AutoTurret does not turn the player's gun (locked or unlocked). Entering/exiting a scope does not change the selected auto-aim mode. NPC gunner behavior is unchanged.

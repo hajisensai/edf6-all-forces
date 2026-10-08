@@ -86,12 +86,11 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_SightBindingV1(con
     __try {
         if(!Cfg().enabled || !Cfg().sightZoom || binding<=0 || !CurrentTurretPlayer(vehicle,seat))return false;
         if(binding!=(keys ? Cfg().sightZoomKey : Cfg().sightZoomButton))return false;
-        const auto kind=SightZoomView(vehicle);
-        return sightzoom::Magnifies(kind);
+        return SightZoomCanMount(vehicle,seat);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_TurretObserverV1(const void* vehicle,unsigned seat) {
     using namespace crew;
-    __try {return Cfg().enabled && CurrentTurretPlayer(vehicle,seat) && (HighCamOn(vehicle) || TurretCamHighTransition(vehicle));}
+    __try {return Cfg().enabled && CurrentTurretPlayer(vehicle,seat) && (HighCamOn(vehicle) || TurretCamHighTransition(vehicle) || SightZoomMounted(vehicle));}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
