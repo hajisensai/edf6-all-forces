@@ -9,11 +9,11 @@ This does not exercise peer receipt, world objects or live multiplayer.
 import sys
 from pathlib import Path
 import hashlib
-import pefile
 import ctypes as C,struct
 if not __debug__: raise RuntimeError('Run without -O')
 if sys.platform!='win32' or C.sizeof(C.c_void_p)!=8 or len(sys.argv)<2 or not Path(sys.argv[1]).is_file():
  print('SKIP: Windows x64 and supported EDF.dll path required');raise SystemExit(77)
+import pefile
 p=pefile.PE(sys.argv[1],fast_load=True)
 assert p.FILE_HEADER.TimeDateStamp==0x678CCB46 and p.OPTIONAL_HEADER.SizeOfImage==0x22CE000
 assert hashlib.sha256(p.get_data(0x5763e0,452)).hexdigest()=='65696120506e70af4ecbc70ed7d74729ea2f0068c635e1fbb562226bb9d5dbd4'
