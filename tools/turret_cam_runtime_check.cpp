@@ -34,6 +34,8 @@ int AutoTurretSteers(const void*,unsigned) noexcept { return owner; }
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
 bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
+bool mountedOptic=false;
+bool SightZoomMounted(const void*) noexcept{return mountedOptic;}
 bool highOn=true;
 bool HighCamOn(const void*) noexcept { return highOn; }
 int cameraReads=0;
@@ -216,6 +218,17 @@ void Run() {
     std::memcpy(otherVehicle,vehicle,sizeof(vehicle));std::memcpy(otherSeat,seat,sizeof(seat));
     Put<void*>(otherVehicle,kSeats,otherSeat);Put<void*>(otherSeat,kSeatRider,otherHuman);otherHuman[kHumanPlayer]=1;Put<void*>(otherHuman,kHumanPad,control);
     for(int i=0;i<3;++i){TurretCamFrame(otherVehicle);Check(shared.v==vehicle && shared.take==take && TurretCamLarge(vehicle),"another local player's frame cannot replace camera owner or large rig");TurretCamFrame(vehicle);}
+    mountedOptic=true;cameraReads=0;game.hasAim=game.steer.hasWant=true;
+    shared.high=false;shared.observing=false;shared.highView=false;shared.view=shared.decoupled=shared.steering=true;
+    owner=1;Aim(seat,input,command);
+    Check(command[0]==input[0] && command[1]==input[1],"mounted optic preserves native or external aim input without scaling it");
+    Check(!game.hasAim && !game.steer.hasWant && !shared.view && !shared.steering && !shared.decoupled && cameraReads==0,
+          "mounted optic cannot feed its own CameraRay into the turret controller");
+    camSide.owned=true;camSide.seat=seat;float opticTarget[20]{};unsigned char opticCamera[0x700]{};
+    Camera(seat,opticTarget,opticCamera);Check(!camSide.owned,"mounted optic bypasses third-person camera placement and blend");
+    TurretCamFrame(vehicle);Check(cameraReads==0&&!shared.decoupled,"frame sampler stays off the mounted optic ray");
+    mountedOptic=false;owner=0;TurretCamFrame(vehicle);Aim(seat,input,command);
+    Check(cameraReads>0 && shared.view,"leaving optic reinitializes the regular view from current camera state");
     image=nullptr;
 }
 }  // namespace

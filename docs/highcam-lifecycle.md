@@ -23,3 +23,7 @@ Launcher 与其他武器读取统一支持 16 holders，只跟随实际已选 lo
 联合生产回归 `camera_payload_lifecycle`：真实 resource node → stores.cpp 分类 → PayloadSightWeapons → TurretCamFrame/LauncherFrame，覆盖实际钻头/喀秋莎文件名、Root.cpk 存在的 `V_407BIGBEGARUTA_CANNON.SGO` 以及自定义炮边界。原始 main 的 payload/turretcam 在 61 条中 27 条失败，恢复修复后 61/61 通过。Proteus 原版炮未被本轮改模型或替换资源；该夹具验证保留其正常功能，不宣称日志证明它与钻头同一个前缀问题。
 
 最终插件 `/W4 /WX` 并行 3 构建通过，7 项定向 CTest 零失败/零 skip；4 项相关 selftest（含真实 Root.cpk 的喀秋莎生成检查）通过。未重复运行无关全量测试，交由主集成统一验证。
+
+## 挂载瞄具与炮塔镜头互斥
+
+`SightZoomMounted(vehicle)` 由实际挂载瞄具模块提供。返回 true 时，炮塔输入原样交给原生轴与稳定器，停止读取该瞄具自身的上一帧 CameraRay 作为新炮塔目标，并清掉自由观察/返回/第三人称镜头接管状态。Camera 不再写同一相机的第三人称位置。退出开镜后重新初始化普通视野；不会对外部自动炮塔命令做倍率缩放。桥接回归共 55 条炮塔运行时 + 61 条真实 payload 生命周期通过；最终 DLL 需与提供该 API 的瞄具提交一起链接。

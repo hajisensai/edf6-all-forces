@@ -50,6 +50,8 @@
 #include <cstring>
 
 namespace crew {
+// Implemented by the mounted-optic camera (sightzoom.cpp); camera-space rays must not steer that same gun.
+bool SightZoomMounted(const void* vehicle) noexcept;
 namespace {
 using tcam::kPi;
 // The seat aim (VehicleWeaponAimAddSe) and its step; the axes' params {brake, accel, top} and an axis' rate (rad/frame).
@@ -345,6 +347,22 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     ReleaseSRWLockExclusive(&lock);
     if(seat!=s.seat || !s.v)return;
     s.aimMs=GameMs();
+    if(!s.high && SightZoomMounted(s.v)) {
+        // The sightzoom camera follows the actual barrel. Feeding its own last-frame ray back into the
+        // decoupled controller pins the view or creates a feedback loop. Keep the native/stabilizer input.
+        cmd[0]=in[0];cmd[1]=in[1];
+        game.hasAim=false;game.aimHit=false;game.steer.hasWant=false;game.held=FreeHeld(seat);
+        s.view=false;s.decoupled=false;s.free=false;s.returning=false;s.steering=false;s.highView=false;s.observing=false;
+        ShotFocus(s);
+        AcquireSRWLockExclusive(&lock);
+        if(shared.seat==seat) {
+            shared.aimMs=s.aimMs;shared.view=false;shared.decoupled=false;shared.free=false;shared.returning=false;
+            shared.steering=false;shared.highView=false;shared.observing=false;
+        }
+        ReleaseSRWLockExclusive(&lock);
+        if(s.focusValid)Readout(seat,s,s.focusHit,s.focus,false);
+        return;
+    }
     const bool held=FreeHeld(seat);
     const bool leavingHigh=s.highView && !s.high;
     const bool press=held && (!game.held || leavingHigh),release=!held && game.held && !leavingHigh;
@@ -535,6 +553,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const bool viewed=aimed && (s.decoupled || s.free || s.returning);
     const bool own=live && (viewed || s.high);
     if(!live){camSide=CamSide{};PublishObservation(seat,false);return;}
+    if(!s.high && SightZoomMounted(s.v)){camSide=CamSide{};PublishObservation(seat,false);return;}
     // Another take (the player left the seat and came back, Drop between: this hook does not run while nobody is
     // served, so it never saw them go): its camera starts from the stock one again, easing in.
     if(camSide.owned && camSide.take!=s.take)camSide=CamSide{};
@@ -691,12 +710,13 @@ void TurretCamFrame(unsigned char* v) noexcept {
     AcquireSRWLockShared(&lock);
     const bool observing=shared.highView || shared.observing;
     ReleaseSRWLockShared(&lock);
-    game.hasAim=!high && !observing && AimPoint(game.aim,&game.aimHit);
+    const bool mounted=!high && SightZoomMounted(v);
+    game.hasAim=!high && !observing && !mounted && AimPoint(game.aim,&game.aimHit);
     const auto freedom=weaponmount::OfWeapon(v,seat,Gun(shared.v,seat));
     AcquireSRWLockExclusive(&lock);
     shared.seat=seat;shared.seenMs=GameMs();
     shared.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
-    shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly;
+    shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly && !mounted;
     shared.high=high;shared.focusValid=shot.focusValid;shared.focusHit=shot.focusHit;
     std::memcpy(shared.focus,shot.focus,sizeof(shared.focus));
     if(!shared.decoupled && !shared.free && !shared.returning)shared.view=false;
