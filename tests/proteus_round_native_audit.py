@@ -13,8 +13,13 @@ import sys
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('edf_dll', nargs='?', type=Path)
 args = parser.parse_args()
+if args.edf_dll is None:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
+    import gamedir
+    game = gamedir.find_or_dev()
+    args.edf_dll = Path(game) / 'EDF.dll' if game else None
 if sys.platform != 'win32' or C.sizeof(C.c_void_p) != 8 or not args.edf_dll or not args.edf_dll.is_file():
-    print('SKIP: requires Windows x64 and explicit supported EDF.dll path')
+    print('SKIP: requires Windows x64 and supported EDF.dll')
     raise SystemExit(77)
 if not __debug__:
     raise RuntimeError('Run without -O: native preconditions must remain enabled')

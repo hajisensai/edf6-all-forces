@@ -311,7 +311,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 
 18. **EMC 蓄力光束**（`src/emc.cpp`，ini `EmcBeam` / `EmcChargeSec` / `EmcBeamSec` / `EmcBlastRadius` / `EmcBlastShare` / `EmcBreak`，逆向与设计 `docs/emc-re.md`）：EMC 的射击键改成蓄力，蓄满射出一道贯穿沿线敌人和建筑的粗光束，终点大爆炸，伤害等于原版一次 1000 发连射的总和；详见下面「EMC 蓄力光束」。
 
-19. **普罗透斯重构**（`src/proteus.cpp`，ini `ProteusRework` 和其它 `Proteus*`，逆向笔记 `docs/proteus-re.md`；2026-10-06 用户需求）：你坐进普罗透斯时，它变成两个座位（驾驶员 + 炮手）、两种姿态的机甲：行走模式移速和步高提高、有手动开关的正面护盾（打开时减速，友军优先攻击它附近的敌人），炮偏散偏慢、不能用导弹；架设模式有硬直、架好后镜头升高，展开减伤 / 增伤 / 射速 / 回能的力场，有自身恢复护盾和带热量的单向盾，炮又准又快，驾驶员有机炮和标记后呼叫的导弹齐射。详见下文「普罗透斯」。
+19. **普罗透斯重构**（`src/proteus.cpp`，ini `ProteusRework` 和其它 `Proteus*`，逆向笔记 `docs/proteus-re.md`；2026-10-06 用户需求）：你坐进普罗透斯时，它变成两个座位（驾驶员 + 炮手）、两种姿态的机甲：行走模式移速和步高提高、有手动开关的正面护盾（打开时减速，友军优先攻击它附近的敌人），炮偏散偏慢、不能用导弹；架设模式有硬直、架设时真实落下支撑桩，护盾有透明模型，镜头升高，展开减伤 / 增伤 / 射速 / 回能的力场，有自身恢复护盾和带热量的单向盾，炮又准又快，驾驶员有机炮和标记后呼叫的导弹齐射。详见下文「普罗透斯」。
 
 20. **沙扎比（MSN-04）**（`src/sazabi.cpp`、`src/sazabi_pose.h`，模型 `pylib/sazabi_model.py`，ini `Sazabi` 和其它 `Sazabi*`，计划与逆向 `docs/gundam-plan.md`、`docs/sazabi-re.md`；2026-10-06 用户：「增加高达」「全新做一个」「按原设身高」）：空袭兵请求来一台全高 25.6 米的沙扎比，玩家坐进去自己驾驶：走、跑、推进器跳跃 / 飞行 / 冲刺，全身每个关节由插件逐帧摆出姿态（步态、落地屈膝、飞行前倾、举枪瞄准），单眼、推进器口、胸灯自发光。详见下文「沙扎比」。
 
@@ -709,7 +709,7 @@ python testrange/run_test.py --heli --act "wait:3 key:z:300 wait:60 shot:t60"
 - **按键**（驾驶员；键盘 / 手柄，ini 可改）：切换行走 / 架设 **T** / **RB**（`ProteusModeKey` / `ProteusModeButton`）；
   护盾开关 **B** / **LB**（`ProteusShieldKey` / `ProteusShieldButton`）；标记目标 **Q** / **X**（`ProteusMarkKey` / `ProteusMarkButton`：
   屏幕中心 8° 内最近的敌人，再按一次同一个目标就取消）；导弹齐射 **鼠标右键** / **LT**（`ProteusSalvoKey`）；
-  架设时驾驶员的机炮 **鼠标左键** / **RT**。手柄键位选的是驾驶员原本空着的键：A、B、L3 是原版的跳跃（`docs/proteus-re.md` §3），Y 留给上下车，L3 / R3 另有观察键 / 高视角。
+  架设时驾驶员遥控右炮 **鼠标左键** / **RT**（仅炮手席无人时，炮手入座后优先使用双炮）。手柄键位选的是驾驶员原本空着的键：A、B、L3 是原版的跳跃（`docs/proteus-re.md` §3），Y 留给上下车，L3 / R3 另有观察键 / 高视角。
 - **行走模式**：移速和起步加速 ×1.6、转向 ×1.3（`ProteusWalkSpeed` / `ProteusWalkTurn`），能迈上去的台阶从约 1.2 米提高到
   2.6 米（`ProteusStepHeight`；同时能走的最陡坡从 40° 变成约 61°），靠高腿跨地形、抢位置。
   - **正面护盾**（护盾键开关）：车头左右各 60°（`ProteusShieldArc`）内打来的伤害全挡（`ProteusShieldBlock`），打开时移速和转向
@@ -942,3 +942,5 @@ NPC 驾驶时的单次音效照常能听到，HUD 只在你自己驾驶时显示
 - **测试**：`tools/selftest.py` 的 `edf5_campaign_*`：生成结果、和别的 MOD 列表共存的安装 / 重装 / 卸载、两种拒绝情况、插件调用点逐字节核对。
 
 **待实机确认**：EDF5 的 BVM 脚本能否在 EDF6 里从开始跑到结算（执行器 `MissionScriptBVMImplement` 还在，脚本也被开发组维护过，但没有在游戏里跑过）；有问题的关可以从列表里剔除，不影响其它关。缩略图、`flags`（照 EDF6 里 EDF5 时代任务的取值 8）的效果同样待确认。
+
+普罗透斯 2026-10-08 修正：座位提示和召唤说明显示默认驾驶员 + 炮手两席；架设 / 收起驱动实物支撑桩，开启护盾显示透明能量盾。齐射逐真实管口发弹，碰撞半径匹配原版导弹；无炮口不造弹。整机升高腿部 IK 及游戏 / 双机画面尚未验收，详见 `docs/proteus-assets.md` 与 `docs/proteus-rounds-feedback.md`。

@@ -34,6 +34,13 @@ int main(){
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if(!image)return 2;
+    const unsigned char setWorldCode[]={0xC6,0x81,0xB0,0,0,0,1,0x0F,0x28,0x02};
+    std::memcpy(image+kSetModelWorld,setWorldCode,sizeof(setWorldCode));
+    Put<const void*>(image,kProteusPoseSlot,image+kProteusPoseFn);
+    Check(InstallProteusPose() && nextProteusPose==image+kProteusPoseFn &&
+          At<const void*>(image,kProteusPoseSlot)==reinterpret_cast<const void*>(&ProteusPoseHook),
+          "production install chains only the actual BigBegaruta pose slot");
+    Check(!InstallProteusPose(),"unexpected already-hooked pose slot is not blindly overwritten");
     ok=true;config.debug=false;config.proteusDriverGun=false;config.proteusFieldRadius=0;
     Put<const void*>(vehicle,0,image+kVtBig);Put<void*>(vehicle,kSelfCtrl,ctrl);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,4);
     Put<float>(vehicle,kWalk,10);Put<float>(vehicle,kWalkEase,0.1f);Put<float>(vehicle,kTurn,0.2f);Put<float>(vehicle,kJump,8);Put<float>(vehicle,kStepNormal,0.76f);

@@ -20,13 +20,13 @@
 //    read every frame / every shot, written by nothing else for this class): walking loose and slow, deployed tight and
 //    quick. The stock launcher is held (+0xE10 0, its countdown parked at kProteusHoldCountdown) in either stance while the
 //    salvo takes its place (the shells preloaded, its seat closed), and given back the frame either is not so (Guns).
-//  - Deployed, the driver's own gun (ProteusDriverGun): a round of the gunship's 40 mm cannon (jet_bay.cpp) at the
-//    screen's centre, at the marked target led when it is near the centre (the anti-air turret); the salvo (the second
+//  - Deployed, the driver's remote gun (ProteusDriverGun): only with both gunner seats empty, the right cannon
+//    follows the driver's native aim and fires along its physical muzzle; a marked target near the bore is led. The salvo (the second
 //    trigger, a target marked, the cooldown over): ProteusSalvoCount rounds of the gunship's shells on their arcs at the
 //    marked target, led.
 //  - The shields and the barrier (proteus_logic.h Absorb) on every hit through the damage call (0x54A586 -> 0x547C30:
 //    vehicles and soldiers alike, GameDamageInfo +0x50 the damage, +0x30 where it hit). The front shield / directional
-//    shield face the hull's nose (deployed it turns on the spot to face a threat).
+//    shield faces the hull's nose while walking, and the driver's horizontal view while deployed. Its model and damage test share that direction.
 //  - Deployed, the field (ProteusFieldRadius): every soldier and vehicle of its side within the radius, each frame,
 //    through the team manager's walk of the side's friends (0x5E11D0): damage taken x (1 - ProteusFieldDefense) (object
 //    +0x384, the per-update multiplier 0x54BE40 folds into +0x394 and resets), a soldier's damage dealt x (1 +
@@ -587,7 +587,7 @@ void Publish(const Unit& u,const unsigned char* v,bool driver,const unsigned cha
     ProteusReadout r{};
     r.vehicle=v;
     std::memcpy(r.pos,Pos(v),12);
-    std::memcpy(r.hull,v+kMatrix+32,12);
+    std::memcpy(r.hull,u.shieldNose,12);
     r.seat=u.playerSeat;r.driver=driver;
     r.mode=u.st.mode;r.stagger=proteus::StaggerShare(u.st,TunablesOf(c));
     r.shieldOn=u.st.shieldOn;r.shieldUp=proteus::ShieldUp(u.st);r.dirShield=proteus::ShieldFollowsView(u.st);
