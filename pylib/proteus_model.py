@@ -36,7 +36,11 @@ def animation(data: bytes) -> bytes:
     if set(SHIELD_BONES) & set(pose.names):
         raise ValueError('Proteus shield is already bound')
     out = bytearray(data)
-    out.extend(bytes((-len(out)) % 4))
+    # Channel rows contain SIMD vectors, not just scalar offsets. EDF.dll's
+    # 0x1160500 evaluator reads constant quaternions with MOVAPS at 0x1160620
+    # (and quantized vectors with aligned arithmetic in 0x1160200). The CAS
+    # allocation is aligned; preserve that alignment for every 48-byte row.
+    out.extend(bytes((-len(out)) % 16))
     points = len(out)
     for i in range(pose.channel_count):
         old_at = pose.points + i * 48

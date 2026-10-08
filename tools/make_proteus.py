@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import ledger
 import dsgo
 import proteus_model
+import cas_pose
 import rootcpk
 import sgo
 import modfiles
@@ -89,6 +90,13 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
             entry = state['files'].get(rel)
         current = modfiles.sha256_file(path)
         if entry and current not in (entry.get('written'), entry.get('pending'), entry.get('original')):
+            if rel.endswith('.CAS'):
+                try:
+                    unsafe = cas_pose.CasPose(Path(path).read_bytes()).points % 16 != 0
+                except (ValueError, IndexError, KeyError) as error:
+                    raise RuntimeError(f'普罗透斯动画被其他程序改过且格式损坏，已保留原文件：{rel}') from error
+                if unsafe:
+                    raise RuntimeError(f'普罗透斯旧动画被其他程序改过，无法安全自动升级；请先备份并移走该文件，再重新安装：{rel}')
             continue  # somebody changed this file after installation; retain it
         if rel.endswith('.SGO'):
             # Apply only the model redirect to a pre-existing loose SGO. Rebuilds
@@ -194,8 +202,22 @@ def range_vehicle(led: ledger.Ledger, game, data: bytes, owner: str = 'testrange
     made, needs = redirect(data)
     if not needs:
         return made, ()
+    host = Path(needs[0]).stem.removeprefix('EDF6VC_')
+    animation_path = led.disk(needs[1])
+    if os.path.isfile(animation_path):
+        try:
+            pose = cas_pose.CasPose(Path(animation_path).read_bytes())
+        except (ValueError, IndexError, KeyError) as error:
+            raise RuntimeError('普罗透斯动画资源损坏；请先运行全军出击安装器更新资源') from error
+        if pose.points % 16:
+            # Upgrade only our own unchanged standalone-range output. A full
+            # install has its separate write-ahead restore journal; bypassing it
+            # here would make a later uninstall misidentify the new bytes.
+            if set(led.owners(needs[1])) != {owner} or led.changed(needs[1]) or not set(proteus_model.SHIELD_BONES) <= set(pose.names):
+                raise RuntimeError('普罗透斯动画仍是旧版未对齐资源；请先运行全军出击安装器更新资源（已保留共享或第三方修改文件）')
+            corrected = proteus_model.animation(game.read('OBJECT', host + '.CAS'))
+            led.put(owner, needs[1], corrected)
     if any(not os.path.isfile(led.disk(rel)) for rel in needs):
-        host = Path(needs[0]).stem.removeprefix('EDF6VC_')
         model, animation = proteus_model.build_model(game, host)
         for rel, content in zip(needs, (model, animation)):
             if not os.path.isfile(led.disk(rel)):
