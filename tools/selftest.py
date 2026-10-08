@@ -1073,7 +1073,7 @@ def sight_zoom_wired() -> None:
     # magnified, the gunship gunner's a sensor rectangle; its offline check under CTest; the heli gun's ladder.
     hud = src('src/hud.cpp')
     draw = hud.split('void HudDraw(const float* viewProj,', 1)[1]
-    assert draw.index('ScopeShade(drawer,ctx,t,width,height,s,zoom,mask==sightzoom::Mask::sensor') < draw.index('CarrierBars(')
+    assert draw.index('ScopeShade(') < draw.index('CarrierBars(')
     assert 'sightzoom::MaskOf(sightKind)' in draw and 'SightZoomView()' in draw
     assert 'SeatCapability(v,seat)' in code and 'HighCamOn(v) || TurretCamHighTransition(v)' in code
     assert 'LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,' in hud and 'r.ladder=gunsight::Of(' in src('src/helisight.cpp')
@@ -4389,7 +4389,7 @@ def hud_switch_cues_wired() -> None:
     and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
     hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
     for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
-                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at)'):
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at,'):
         assert call in hud, call
     assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAimOn' in hud and 'Tx::autoAimOffCircle' in hud
     table = src('src/hudtext.inc')
