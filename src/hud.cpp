@@ -3408,7 +3408,7 @@ void MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pa
 void MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,
                      const MapCommandReadout& commands,Line* lines,int* at) noexcept {
     PayloadReadout r{};
-    if(!PlayerPayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return;}
+    if(!PlayerSelectablePayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return;}
     const int count=r.count<kMostPayload ? r.count : kMostPayload;
     const float right=width-16.0f*s,left=right-std::fmin(460.0f*s,width*0.46f-32.0f*s),top=216.0f*s,rowH=30.0f*s;
     MapUiBox(drawer,ctx,left-8.0f*s,top-14.0f*s,right+8.0f*s,top+rowH*static_cast<float>(count+1),lines,*at);
@@ -3635,8 +3635,9 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
     NpcMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // which enemy the NPCs are set on, on the map too
-    MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    MapUiBox(drawer,ctx,width*0.55f-8*s,146*s,width-12*s,198*s,lines,*at);
+    MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUiBox(drawer,ctx,width-134*s,54*s,width-6*s,174*s,lines,*at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
