@@ -8,11 +8,23 @@ namespace {
 Config config{};ULONGLONG now=3600000,frame=1;
 unsigned char vehicle[0x3000]{},seats[4*kSeatStride]{},human[0x400]{},ctrl[16]{};
 int failures=0,checks=0,gunShots=0,salvoShots=0;
+bool netSession=false,netAuthority=true;
+std::int32_t netDriver=42;
+int controlSends=0,defenseSends=0;
+proteus_net::State lastControl,lastDefense;
 float lastFrom[3]{},lastAt[3]{};bool roundSucceeds=true;
+unsigned char* testPoseBones=nullptr;
 void Check(bool pass,const char* what){++checks;if(!pass){++failures;std::printf("FAIL %s\n",what);}}
 void Tick(){++frame;now+=100;ProteusFrame(vehicle);}
 }
 const Config& Cfg() noexcept{return config;}
+bool InSession() noexcept{return netSession;}
+bool IsOnlineAuthority(const void*) noexcept{return netAuthority;}
+bool InstallProteusNet() noexcept{return true;}
+std::int32_t ProteusNetController(unsigned char*) noexcept{return netDriver;}
+bool ProteusNetSend(unsigned char*,proteus_net::State s) noexcept{
+    if(s.kind==proteus_net::Kind::control){++controlSends;lastControl=s;}else{++defenseSends;lastDefense=s;}return true;
+}
 ULONGLONG GameMs() noexcept{return now;}ULONGLONG GameFrame() noexcept{return frame;}
 void Log(const char*,...) noexcept{}
 bool MapHoldsKeys() noexcept{return false;}
@@ -22,7 +34,12 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept{return true;
 float MapRay(const float*,const float*,float*) noexcept{return -1.0f;}
 unsigned char* PlayerHuman() noexcept{return human;}
 void ProteusRoundsReady(bool* gun,bool* salvo) noexcept{if(gun)*gun=false;if(salvo)*salvo=false;}
-unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept{return nullptr;}
+unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
+    if(!testPoseBones)return nullptr;
+    if(!std::wcscmp(name,L"pile_l"))return testPoseBones+36*kBoneStride;
+    if(std::wcsncmp(name,L"vc_ps_",6))return nullptr;
+    const int i=_wtoi(name+6);return i>=0 && i<36 ? testPoseBones+static_cast<std::size_t>(i)*kBoneStride : nullptr;
+}
 bool ProteusGunRound(const unsigned char*,const float* from,const float* at,float) noexcept{
     ++gunShots;std::memcpy(lastFrom,from,12);std::memcpy(lastAt,at,12);return roundSucceeds;
 }

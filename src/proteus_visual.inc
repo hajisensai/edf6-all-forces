@@ -39,7 +39,7 @@ void ProteusModelPose(unsigned char* v) noexcept {
     if(!BoneRecord506(inst,L"vc_ps_00"))return;
     const Unit* u=ActiveOf(v);
     const bool active=u && Cfg().enabled && Cfg().proteus && !v[kDead];
-    const float deployed=active ? proteus::pose::Deployed(u->st,TunablesOf(Cfg())) : 0.0f;
+    const float deployed=active ? proteus::pose::Deployed(u->st,RulesOf(*u)) : 0.0f;
     unsigned char* piles[6]{};
     float bind[6][16]{};
     for(int i=0;i<6;++i) {
@@ -71,7 +71,8 @@ void ProteusModelPose(unsigned char* v) noexcept {
     for(int i=0;i<proteus::pose::kPanels;++i) {
         wchar_t name[16];swprintf_s(name,L"vc_ps_%02d",i);
         if(auto rec=BoneRecord506(inst,name)) {
-            float local[16];proteus::pose::Panel(i,Cfg().proteusShieldArc,yaw,up,local);
+            const float arc=u && u->net.remote ? u->net.control.shieldArc : Cfg().proteusShieldArc;
+            float local[16];proteus::pose::Panel(i,arc,yaw,up,local);
             std::memcpy(rec+kBoneLocal506,local,64);
         }
     }
