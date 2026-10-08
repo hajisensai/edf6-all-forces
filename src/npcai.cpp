@@ -834,7 +834,10 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
         // Project only within that trigger's vertical reach, never onto a roof or another floor.
         const float above[3]={at[0],at[1]+0.3f,at[2]},below[3]={at[0],at[1]-reach,at[2]};
         float walkAt[3];
-        if(MapFloorRay(above,below,walkAt)<0.0f || npc::Dist(walkAt,at)>=reach)return true;
+        if(MapFloorRay(above,below,walkAt)<0.0f || npc::Dist(walkAt,at)>=reach) {
+            Stand(h); // nextThink already wrote native movement; a rejected entrance must hold, not reuse that intent.
+            return true;
+        }
         MoveTo(h,pos,walkAt,0.5f);
         return true;
     }

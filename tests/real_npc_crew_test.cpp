@@ -13,6 +13,9 @@ void __fastcall RideMoveRec(void* h,SharedRef* ref,int index) {
 }
 int originalThinks=0;
 void __fastcall ThinkRecord(void*,const float*) {++originalThinks;}
+void __fastcall MovingThinkRecord(void* h,const float*) {
+    ++originalThinks;Put<float>(h,kMoveX,1.0f);Put<float>(h,kMoveZ,0.5f);
+}
 void CrewSetup() {
     Reset();config.scriptNpcSettleSec=0;
     Put<void*>(human,kLeader,nullptr);Put<void*>(human,kSelfCtrl,human+0x2100);
@@ -82,6 +85,17 @@ int main() {
            "held support actor cannot run native AI, move or shoot before all peers exist");
     heldSupportActor=nullptr;ThinkHook<0>(human,nullptr);
     Expect(originalThinks==1,"activated support actor resumes native AI");
+    for(bool wrongFloor:{false,true}) {
+        CrewSetup();world.friends=1;originalThinks=0;nextThink[0]=&MovingThinkRecord;
+        human[kListFlags]|=kInAiList;doorAt[0]=10.0f;rayOn=wrongFloor;
+        Expect(NpcRequestCrew(vehicle),"assign a real driver before validating the walking entrance");
+        // MapFloorRay either rejects the door altogether or returns the fixture's (0,0,30), outside this door's reach.
+        ThinkHook<0>(human,nullptr);
+        Expect(originalThinks==1 && rides==0 && Entry(human,now)->boardV.Is(vehicle),
+               "native Think ran, rejected entrance keeps a pending boarding request without teleporting");
+        Expect(At<float>(human,kMoveX)==0.0f && At<float>(human,kMoveZ)==0.0f,
+               "rejected boarding floor must not leak the native Think's old movement around the navigation gate");
+    }
     CrewSetup();Put<void*>(human,kHumanSeat,seats);Put<void*>(human,kHumanRiding,vehicle);
     Jump(kRideVehicle,reinterpret_cast<const void*>(&RideMoveRec));
     Expect(NpcRestoreMissionSeat(vehicle,human) && At<void*>(seats,kSeatRider)==human,
