@@ -96,6 +96,9 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
                 --budget;
                 if(e==Edge::open && std::fabs(projected.y-s.goal.y)<=p.step) {
                     if(!Path(s,s.active,projected)){Fail(s,ms);return Result::blocked;}
+                    // Planning is not failed movement. A long bounded search may itself take over
+                    // the stuck interval; start that clock only once there is a route to follow.
+                    s.progress=from;s.progressAt=ms;
                     // First path edge is checked from the actor's CURRENT position on
                     // the next call, since it may have moved while search was pending.
                     return Result::pending;

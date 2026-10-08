@@ -74,5 +74,15 @@ void Fairness() {
     bool every=true;for(int i=0;i<32;++i)every &= states[i].count>1;
     Check(every,"budget rotation eventually serves every actor, including update-list tail");
 }
+void LongSearch() {
+    auto s=std::make_unique<State>();Scene(0,crew::Sea::land);Profile profile;profile.cell=4;
+    const float from[3]={0,0,0},to[3]={900,0,0};float next[3]{};
+    const auto began=frame*16;
+    Check(Advance(*s,from,to,next,profile,2000)==Result::moving && frame*16-began>1500,
+        "900m complete route survives planning longer than the movement-stall interval");
+    const int plannedNodes=s->count;frame+=100;queries=0;
+    Check(crew::GroundNavigate(*s,from,to,0.1f,frame*16,next,profile)!=Result::moving && s->count<plannedNodes,
+        "an actor actually stuck after route creation still replans");
 }
-int main(){Water();Corners();Fairness();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
+}
+int main(){Water();Corners();LongSearch();Fairness();std::printf("ground navigation runtime: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
