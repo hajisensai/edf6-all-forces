@@ -133,3 +133,10 @@ faults are setup failures rather than mislabeled creation failures. Fail-closed 
 remains: `119486E` increments the manager's construction depth before the factory call,
 and `119487D` decrements only after normal return. An old constructor exception may leave
 native partial state; clearing the disabled flag and retrying in that process is not safe.
+
+The first native exception cause is retained for the process lifetime: constructor faults
+remain `create`, post-construction faults `setup`, preload faults `mission`. Readiness,
+later requests and mission reset do not turn it into an unsupported-profile error or clear
+the stop flag. The user-facing diagnostic names the failed stage and requires restarting
+the game. A normal null creation without an exception remains an ordinary creation failure
+and does not acquire this process-wide stop/restart diagnosis.

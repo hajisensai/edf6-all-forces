@@ -28,6 +28,11 @@ DeriveFn deriveId=nullptr;
 bool profile=false,preloaded=false,faulted=false;
 void* missionManager=nullptr;
 SupportSpawnFailure failure=SupportSpawnFailure::none;
+SupportSpawnFailure firstFault=SupportSpawnFailure::none;
+void RecordFault(SupportSpawnFailure cause) noexcept {
+    if(!faulted)firstFault=cause;
+    faulted=true;failure=firstFault;
+}
 struct Owned { ObjRef ref; unsigned epoch=0; bool held=false; };
 constexpr unsigned kOwnedLimit=96;
 Owned owned[kOwnedLimit]{};
@@ -65,9 +70,10 @@ bool Matrix(const float* m) noexcept {
     return determinant>0.99f;
 }
 bool Gate(bool replicated=false) noexcept {
+    if(faulted){failure=firstFault;return false;}
     failure=SupportSpawnFailure::none;
     if(!Cfg().enabled){failure=SupportSpawnFailure::disabled;return false;}
-    if(!profile || faulted){failure=SupportSpawnFailure::profile;return false;}
+    if(!profile){failure=SupportSpawnFailure::profile;return false;}
     if(!preloaded || !missionManager || At<void*>(image,kObjectManager)!=missionManager){failure=SupportSpawnFailure::mission;return false;}
     // CreateObject does not replicate creation. Until a reliable, ID-bound spawn event is installed,
     // registering just a host object would create an invisible client NPC and is deliberately rejected.
@@ -132,7 +138,7 @@ bool Spawn(const float* matrix,bool leader,ObjRef* out,const unsigned char* netI
         return true;
     } __except(SpawnFault(stage,GetExceptionInformation(),matrix,nativeInput,soldier)) {
         // A constructor fault may leave a partial object in the engine. Never retry that profile this process.
-        faulted=true;failure=soldier ? SupportSpawnFailure::setup : SupportSpawnFailure::create;
+        RecordFault(soldier ? SupportSpawnFailure::setup : SupportSpawnFailure::create);
     }
     if(soldier) {
         __try { destroy(soldier); } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -185,7 +191,9 @@ void PreloadSupportSoldiers() noexcept {
         if(!mgr || !missionManager)return;
         for(const wchar_t* path:kBodies)preload(mgr,path,2,-1);
         preloaded=true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){preloaded=false;faulted=true;}
+    } __except(SpawnFault("preload",GetExceptionInformation(),nullptr,nullptr,nullptr)) {
+        preloaded=false;RecordFault(SupportSpawnFailure::mission);
+    }
 }
 bool SupportSoldiersReady() noexcept { return support_native::Gate(true); }
 bool HoldSupportSoldier(const ObjRef& soldier,bool held) noexcept {
@@ -208,8 +216,16 @@ bool SupportSoldierHeld(const void* soldier) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     return false;
 }
-SupportSpawnFailure SupportSoldierLastFailure() noexcept { return support_native::failure; }
+SupportSpawnFailure SupportSoldierLastFailure() noexcept { return support_native::faulted ? support_native::firstFault : support_native::failure; }
 const wchar_t* SupportSoldierFailureText() noexcept {
+    if(support_native::faulted) {
+        switch(support_native::firstFault) {
+        case SupportSpawnFailure::create:return L"本进程因支援士兵构造异常已停止生成，请重启游戏";
+        case SupportSpawnFailure::setup:return L"本进程因支援士兵配置异常已停止生成，请重启游戏";
+        case SupportSpawnFailure::mission:return L"本进程因支援资源预载异常已停止生成，请重启游戏";
+        default:return L"本进程因支援异常已停止生成，请重启游戏";
+        }
+    }
     switch(support_native::failure) {
     case SupportSpawnFailure::none:return L"";
     case SupportSpawnFailure::disabled:return L"支援已关闭";

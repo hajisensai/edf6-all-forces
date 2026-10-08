@@ -38,6 +38,11 @@ void __fastcall Team(void* o,int t,bool children){Check(t==2 && children,"native
 void __fastcall Level(void*,float n){Check(n==1,"native difficulty multiplier");}
 void __fastcall Follow(void* o,void* leader,bool keep){Check(!keep,"native follow keepOffset=false");Put<void*>(o,0x548,leader);}
 void __fastcall Preload(void*,const wchar_t*,int kind,int all){Check(kind==2 && all==-1,"stock resource preload flags");++preloads;}
+unsigned char* __fastcall FaultCreate(void*,const float*,const wchar_t*,support_native::InitParam*) {
+    RaiseException(0xE0420001,0,0,nullptr);return nullptr;
+}
+void __fastcall FaultTeam(void*,int,bool) { RaiseException(0xE0420002,0,0,nullptr); }
+void __fastcall FaultPreload(void*,const wchar_t*,int,int) { RaiseException(0xE0420003,0,0,nullptr); }
 const unsigned char* __fastcall Register(void*,ObjRef* weak,const unsigned char* id) {
     // Native 781950 consumes the caller's weak argument once.
     InterlockedDecrement(reinterpret_cast<volatile LONG*>(const_cast<unsigned char*>(static_cast<const unsigned char*>(weak->ctrl))+12));
@@ -49,7 +54,8 @@ const unsigned char* __fastcall Register(void*,ObjRef* weak,const unsigned char*
 void Setup() {
     using namespace support_native;
     ResetSupportSoldiers();made=deleted=preloads=0;failAt=-1;wrong=false;session=false;host=true;
-    profile=true;faulted=false;create=&Create;destroy=&Delete;team=&Team;level=&Level;follow=&Follow;preload=&Preload;registerObject=&Register;
+    profile=true;faulted=false;firstFault=SupportSpawnFailure::none;failure=SupportSpawnFailure::none;
+    create=&Create;destroy=&Delete;team=&Team;level=&Level;follow=&Follow;preload=&Preload;registerObject=&Register;
     Put<void*>(image,kObjectManager,objects);Put<void*>(image,kPreloadManager,controls);Put<void*>(image,kNetworkManager,registeredId);
     PreloadSupportSoldiers();
 }
@@ -124,6 +130,31 @@ int main() {
     Put<LONG>(netCtrl,0,1);Put<void*>(netCtrl,8,netEntry);Put<void*>(playerSample,0x130,netCtrl);Put<unsigned>(playerSample,0x128,2);
     std::memcpy(netEntry+8,id,32);std::memset(netEntry+28,0xA5,4);
     Check(ReadNativeObjectId(playerSample,readId) && std::memcmp(readId,id,32)==0,"native ID read canonicalizes unspecified padding");
+    Setup();failAt=0;
+    Check(!SpawnSupportSoldier(poses[0],&one) && !support_native::faulted && !wcsstr(SupportSoldierFailureText(),L"重启"),
+          "ordinary null creation is not mislabeled as a process-wide native exception");
+    Setup();support_native::create=&FaultCreate;
+    Check(!SpawnSupportSoldier(poses[0],&one) && SupportSoldierLastFailure()==SupportSpawnFailure::create,
+          "first constructor SEH cause is captured");
+    Check(!SupportSoldiersReady() && SupportSoldierLastFailure()==SupportSpawnFailure::create &&
+          wcsstr(SupportSoldierFailureText(),L"构造异常") && wcsstr(SupportSoldierFailureText(),L"重启游戏"),
+          "readiness preserves constructor cause and explains process stop/restart");
+    ResetSupportSoldiers();PreloadSupportSoldiers();
+    Check(!SupportSoldiersReady() && support_native::faulted && SupportSoldierLastFailure()==SupportSpawnFailure::create,
+          "mission reset and preload cannot erase constructor fault or resume native spawning");
+    support_native::RecordFault(SupportSpawnFailure::setup);
+    Check(SupportSoldierLastFailure()==SupportSpawnFailure::create,"later fault reporting cannot replace first cause");
+    Setup();support_native::team=&FaultTeam;
+    Check(!SpawnSupportSoldier(poses[0],&one) && deleted==1 && SupportSoldierLastFailure()==SupportSpawnFailure::setup,
+          "post-construction SEH rolls back and records setup cause");
+    Check(!SupportSoldiersReady() && SupportSoldierLastFailure()==SupportSpawnFailure::setup &&
+          wcsstr(SupportSoldierFailureText(),L"配置异常") && wcsstr(SupportSoldierFailureText(),L"重启游戏"),
+          "readiness preserves setup cause and restart diagnosis");
+    Setup();support_native::preload=&FaultPreload;PreloadSupportSoldiers();
+    Check(!SupportSoldiersReady() && SupportSoldierLastFailure()==SupportSpawnFailure::mission &&
+          wcsstr(SupportSoldierFailureText(),L"预载异常") && wcsstr(SupportSoldierFailureText(),L"重启游戏"),
+          "preload SEH is a persistent mission-resource fault, not unsupported native profile");
+    const int oldMade=made;Check(!SpawnSupportSoldier(poses[0],&one) && made==oldMade,"preload fault does not retry construction");
     ResetSupportSoldiers();VirtualFree(image,0,MEM_RELEASE);
     std::printf("support_soldier_test: %d checks passed\n",checks);
 }
