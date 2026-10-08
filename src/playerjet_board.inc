@@ -122,17 +122,17 @@ bool Sight(float* out) noexcept {
 
 // --- Its own weapon, as one more store (see the file comment) ---
 // No weapon behind them (Store::weapon null): stores.cpp's lock, trigger and cycle calls pass them by; FireSpecial
-// fires them. Their role: bomb draws the cockpit's impact cross (the bay's CCIP; the shells', cannon's and drones' aim
-// point). The gunship has up to three (SHELLS, then CANNON and GATLING each when its round is installed: jet_bay.cpp
+// fires them. Only the bay is a bomb; guns, drones and detonation retain distinct roles.
+// SpecialFrame supplies their real aim/order points independently of a falling bomb's CCIP. The gunship has up to three (SHELLS, then CANNON and GATLING each when its round is installed: jet_bay.cpp
 // kSideGuns; an install from before has the guns it had, the preload logs the one missing), every other aircraft one at
 // most (SpecialRoom).
 constexpr StoreSpec kSpecials[]={
     {L"","BOMB BAY",StoreRole::bomb,0.0f,0.0f},
-    {L"","SHELLS",StoreRole::bomb,0.0f,0.0f},
-    {L"","DRONES",StoreRole::bomb,0.0f,0.0f},
-    {L"","CHARGE",StoreRole::ground,0.0f,0.0f},
-    {L"","CANNON",StoreRole::bomb,0.0f,0.0f},
-    {L"","GATLING",StoreRole::bomb,0.0f,0.0f},
+    {L"","SHELLS",StoreRole::gun,0.0f,0.0f},
+    {L"","DRONES",StoreRole::drone,0.0f,0.0f},
+    {L"","CHARGE",StoreRole::charge,0.0f,0.0f},
+    {L"","CANNON",StoreRole::gun,0.0f,0.0f},
+    {L"","GATLING",StoreRole::gun,0.0f,0.0f},
 };
 constexpr int kBay=0,kShells=1,kDrones=2,kCharge=3,kCannon=4,kGatling=5;
 // The gunship's side guns as stores, in jet::SideGun's order, each listed while its round is there (jet::SideGunReady).

@@ -11,9 +11,14 @@ namespace crew {
 // arc: a ballistic round (rounds::Arc); rocket: MissileBullet01 flying straight (rounds::Motor); homing: it steers at
 // what its weapon locks (MissileBullet01 / 02 guided, HomingLaserBullet01): no path to show, its lock is.
 enum class RoundKind : std::uint8_t { none, arc, rocket, homing };
+// Weapon behavior/presentation is separate from its projectile integrator: a beam
+// factory may still advance straight segments using the core arc update.
+enum class WeaponStyle : std::uint8_t { projectile, laser, beam, maser };
+constexpr bool EnergyWeapon(WeaponStyle style) noexcept { return style!=WeaponStyle::projectile; }
 // A weapon's label on the HUD (by its round's class: rounds.cpp kLabels), "WPN" for a class not in the list.
 struct RoundModel {
     RoundKind kind;
+    WeaponStyle style;
     bool lobbed;                 // a grenade / mortar class: its point is drawn as the artillery's cross
     const char* label;
     const char* rtti;            // its factory's class (".?AVFactory@SolidBullet01Rail@@"), nullptr for one not in the list
@@ -50,6 +55,7 @@ void SetStockSelectedStore(const void* vehicle,unsigned seat,int store) noexcept
 
 constexpr int kStockArms=8,kStockThreats=6;
 struct StockArm {
+    WeaponStyle style;
     wchar_t name[32];            // installed weapon name, not just its projectile category
     char label[12];
     std::int32_t ammo,ammoMax;   // rounds left and the magazine (AmmoCount)

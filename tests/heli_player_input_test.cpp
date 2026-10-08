@@ -173,6 +173,9 @@ int main() {
     CheckMedicPermission();
     Check(!InstallPlayerAttitude() && !playerAttitudeNext,"unknown attitude entry leaves the hook off");
     std::memcpy(image+kPlayerAttitude,kPlayerAttitudeSig,sizeof(kPlayerAttitudeSig));
+    Check(!InstallPlayerAttitude(),"unknown native yaw contract leaves mouse flight off");
+    std::memcpy(image+kPlayerYawUpdate,kPlayerYawUpdateSig,sizeof(kPlayerYawUpdateSig));
+    std::memcpy(image+kPlayerYawConvert,kPlayerYawConvertSig,sizeof(kPlayerYawConvertSig));
     Check(InstallPlayerAttitude() && playerAttitudeNext,"matching prologue installs the attitude trampoline");
     Check(image[kPlayerAttitude]==0xFF && image[kPlayerAttitude+1]==0x25,"absolute detour installed");
     auto trampoline=reinterpret_cast<void*>(playerAttitudeNext);
@@ -183,11 +186,36 @@ int main() {
     Put<const void*>(inputSeat,kSeatRider,inputHuman);Put<const void*>(inputSeat,kSeatRiderCtrl,inputCtrl);
     Put<int>(inputCtrl,8,1);Put<const void*>(inputHuman,kHumanPad,inputHuman);inputHuman[kHumanPlayer]=1;
     Put<float>(inputVehicle,kPlayerMaxTilt,0.6f);Put<float>(inputVehicle,kMaxYaw,1.0f);
+    Put<float>(inputVehicle,0x1620,0.15f);Put<float>(inputVehicle,kYawSmooth,0.005f);
     Put<float>(inputVehicle,kSpeedGain,20.0f);Put<float>(inputVehicle,kBlend,1.0f);Put<float>(inputVehicle,kDamp,0.99f);
     Put<float>(inputVehicle,kRotor,0.424f);
     Pilot& pilot=pilots[0];pilot=Pilot{};pilot.ref=ObjRef::Of(inputVehicle);pilot.lastMs=inputTime;
     pilot.aim[2]=1.0f;pilot.hover=0.424f;
     const float pos[3]={0.0f,0.0f,0.0f},forward[3]={0.0f,0.0f,1.0f},right[3]={-1.0f,0.0f,0.0f};
+    // Actual native angular pipeline: lagged angle +1604, then angle*spring*60 with the body's
+    // angular blending. The previous test treated maxYaw as rad/s and missed the Brute's oscillation.
+    for(float smoothing:{0.005f,0.03f})for(float sign:{1.0f,-1.0f}) {
+        const float raw=sign*50.0f*kPi/180.0f,angularBlend=smoothing<0.01f ? 0.025f : 0.125f;
+        Put<float>(inputVehicle,kMaxYaw,raw);Put<float>(inputVehicle,kYawSmooth,smoothing);
+        Put<float>(inputVehicle,0x1604,0.0f);
+        pilot.aim[0]=std::sin(0.4f);pilot.aim[1]=0.0f;pilot.aim[2]=std::cos(0.4f);
+        pilot.yawRate=0.0f;
+        float heading=0.0f,bodyRate=0.0f,lastError=0.0f,lastRate=0.0f;
+        for(int frame=0;frame<1200;++frame) {
+            const float nose[3]={std::sin(heading),0.0f,std::cos(heading)};
+            const float side[3]={-std::cos(heading),0.0f,std::sin(heading)};
+            AimFly(pilot,inputVehicle,inputSeat,pos,nose,side,false,100.0f,1.0f/60.0f,inputTime);
+            float state=At<float>(inputVehicle,0x1604);
+            state+=(raw*At<float>(inputVehicle,kInYaw)-state)*smoothing;
+            Put<float>(inputVehicle,0x1604,state);
+            bodyRate+=(state*0.15f*60.0f-bodyRate)*angularBlend;
+            heading+=bodyRate/60.0f;pilot.yawRate+=(bodyRate-pilot.yawRate)*0.3f;
+            if(frame>=600){lastError=std::fmax(lastError,std::fabs(heading-0.4f));lastRate=std::fmax(lastRate,std::fabs(bodyRate));}
+        }
+        Check(lastError<0.01f && lastRate<0.01f,"released mouse settles without repeated yaw reversals under real native lag/gain");
+    }
+    pilot.aim[0]=pilot.aim[1]=0.0f;pilot.aim[2]=1.0f;pilot.yawRate=0.0f;
+    Put<float>(inputVehicle,kMaxYaw,1.0f);Put<float>(inputVehicle,kYawSmooth,0.005f);Put<float>(inputVehicle,0x1604,0.0f);
     // Actual Root.cpk Heron YG10E request parameters (AWEAPON371) and N9 Eros. Exercise the production
     // controller through full acceleration/braking, including the original high-damping failure.
     for(float damp:{0.99f,0.999f}) {

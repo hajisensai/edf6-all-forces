@@ -116,6 +116,17 @@ struct Hold {
     bool slipping;    // the reference was dragged (the drive could not keep up)
 };
 
+// A native velocity-joint readback replaces its previous target with the measured angle before the
+// next input step. Reconcile that actuator tracking difference in the PREVIOUS pose basis, rather
+// than treating it as another hull correction. Do not update last/seen: the following Step must still
+// compensate this frame's parent motion and apply the player's/NPC's new command independently.
+inline void Readback(Hold& h,const Stops& stops,int axis,float commanded,float measured) noexcept {
+    if(!h.live || axis<0 || axis>1 || !std::isfinite(commanded) || !std::isfinite(measured))return;
+    const float delta=Diff(stops,measured,commanded);
+    if(delta==0.0f)return;
+    float ref[2];Angles(h.seen,h.ref,ref);ref[axis]+=delta;Dir(h.seen,ref,h.ref);
+}
+
 // One step after the stock one. `stops` the axes' ends, `before` / `after` the angles around the stock step (its turn
 // is the command), `top` the turret's top rate (rad/frame), `f` the mount's frame now (the command's), `seen` the one
 // the drawn gun will be seen in (f, or f a frame ahead). `out` the angles to set.

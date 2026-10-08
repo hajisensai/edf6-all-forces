@@ -87,7 +87,7 @@ bool NetworkFrame(Unit& u,unsigned char* v,bool live,int playerSeat,ULONGLONG ms
         GiveBack(u,v,"network control expired");u.st.mode=proteus::Mode::walk;u.st.shieldOn=false;u.lift=0;
         if(zone.z.vehicle==v){AcquireSRWLockExclusive(&zoneLock);zone.on=false;ReleaseSRWLockExclusive(&zoneLock);}
     } else {
-        TakeReplica(u,v);ApplyControl(u,u.net.control);
+        TakeReplica(u,v);RefreshWeapons(u,v);ApplyControl(u,u.net.control);
         u.playerSeat=playerSeat>=0 ? static_cast<unsigned>(playerSeat) : static_cast<unsigned>(-1);
         const bool localGunner=LocalGunner(v);
         if(u.net.control.flags&proteus_net::kTwoSeats)TwoSeats(u,v,localGunner);

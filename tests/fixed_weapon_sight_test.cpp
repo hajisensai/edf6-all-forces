@@ -27,7 +27,8 @@ bool IsSub(const void*) noexcept{return false;}
 bool IsPlayerJet(const void*) noexcept{return false;}
 namespace jet {int LockersOf(const void*,float (*)[3],int) noexcept{return 0;}}
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept{return 0;}
-unsigned char* PlayerHuman() noexcept{return nullptr;}
+unsigned char* hudHuman=nullptr;
+unsigned char* PlayerHuman() noexcept{return hudHuman;}
 bool IsHelicopter(const void*) noexcept{return false;}
 bool VisitEnemies(const unsigned char*,void(*)(void*,const void*,const float*),void*) noexcept{return false;}
 const char* VehicleClassName(const void*) noexcept{return "fixture";}
@@ -37,6 +38,12 @@ bool IsFuelTank(const unsigned char*) noexcept{return false;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;}
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return nullptr;}
 int PayloadSightWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
+bool proteusDriver=false;const unsigned char* proteusPair=nullptr;
+const unsigned char* ProteusSightWeapon(const unsigned char*,unsigned seat) noexcept{return seat==1 ? proteusPair : nullptr;}
+bool ProteusDriverSight(const unsigned char*,StockArm* arm) noexcept{
+    if(!proteusDriver)return false;
+    *arm=StockArm{};arm->aimed=true;arm->physicalOnly=true;arm->coFired=true;arm->bore[0]=1;arm->kind=RoundKind::arc;return true;
+}
 namespace {
 int checks=0,failed=0;
 void Check(bool b,const char* name){++checks;if(!b){++failed;std::printf("FAIL %s\n",name);}}
@@ -99,7 +106,48 @@ void Run(){
     Put<float>(f.weapon,edf::kWeaponAmmoOwnerMove,1);Put<float>(f.weapon,edf::kWeaponOwnerVel,12);StockArm moving{};Arm(f.weapon,true,moving);
     Check(moving.at[0]>sky.at[0]+50,"physical path retains inherited vehicle velocity");
     Put<std::uint64_t>(f.weapon,edf::kMuzzleCount,0);StockArm absent{};Arm(f.weapon,true,absent);Check(!absent.aimed&&!absent.paths,"missing muzzle has no fictitious point");
-    image=nullptr;
+    // Feed production ReadRound with checked factory RTTI, then production Arm/GunMarkOf.
+    const auto named=[&](unsigned vt,const char* name,unsigned scratch) {
+        Put<void*>(image,vt-8,image+scratch);Put<unsigned>(image+scratch,0xC,scratch+0x40);
+        strcpy_s(reinterpret_cast<char*>(image+scratch+0x50),100,name);
+    };
+    named(0x179ECA8,".?AVFactory@EfsExposureBullet@@",0x10000);
+    named(0x179FC60,".?AVFactory@LaserBullet01@@",0x10200);
+    named(0x17A3E90,".?AVFactory@SolidBullet01@@",0x10400);
+    named(0x17E5E40,".?AVWeapon_VehicleMaser@@",0x10600);
+    InstallRounds();
+    unsigned char factory[16]{};Put<void*>(f.weapon,0x7F8,factory);Put<std::uint64_t>(f.weapon,edf::kMuzzleCount,2);
+    Put<float>(f.weapon,edf::kWeaponAmmoOwnerMove,0);Put<float>(f.weapon,edf::kWeaponAmmoGravity,0);
+    Put<float>(f.weapon,edf::kWeaponAmmoSpeed,10);Put<int>(f.weapon,edf::kWeaponAmmoAlive,30);
+    Put<void*>(factory,0,image+0x179ECA8);StockArm nixBeam{};nixBeam.physicalOnly=false;Arm(f.weapon,true,nixBeam);
+    Check(nixBeam.style==WeaponStyle::beam && nixBeam.paths==2 && nixBeam.ladder.ticks==0 && !nixBeam.ranged,
+          "Nix EfsExposure beam retains real muzzle endpoints without ballistic ladder or target lead");
+    Put<void*>(factory,0,image+0x179FC60);StockArm laser{};laser.physicalOnly=false;Arm(f.weapon,true,laser);
+    Check(laser.style==WeaponStyle::laser && laser.paths==2 && laser.ladder.ticks==0 && !laser.ranged,
+          "native LaserBullet gun has energy semantics and no artificial drop marks");
+    Put<void*>(factory,0,image+0x17A3E90);Put<void*>(f.weapon,0,image+0x17E5E40);
+    StockArm maser{};maser.physicalOnly=false;Arm(f.weapon,true,maser);
+    Check(maser.style==WeaponStyle::maser && !std::strcmp(maser.label,"MASER") && maser.ladder.ticks==0,
+          "actual Weapon_VehicleMaser wins over SolidBullet carrier class and does not become a machine gun");
+    Put<void*>(f.weapon,0,nullptr);StockArm ordinary{};ordinary.physicalOnly=false;Arm(f.weapon,true,ordinary);
+    Check(ordinary.style==WeaponStyle::projectile && !std::strcmp(ordinary.label,"GUN") && ordinary.ladder.ticks>0,
+          "ordinary SolidBullet gun retains its genuine gun semantics and range ladder");
+    // The production HUD consumer must expose the custom driver's real sight even though native seat 0 has no holder.
+    unsigned char human[0x400]{},riderCtrl[16]{},hudSeats[2*kSeatStride]{};
+    human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);Put<int>(riderCtrl,8,1);hudHuman=human;
+    Put<void*>(f.vehicle,kSeats,hudSeats);Put<std::uint64_t>(f.vehicle,kSeatCount,2);
+    Put<void*>(hudSeats,kSeatRider,human);Put<void*>(hudSeats,kSeatRiderCtrl,riderCtrl);
+    config.stockVehicleHud=true;proteusDriver=true;StockHudFrame(f.vehicle);StockHudReadout hud{};
+    Check(PlayerStockHud(&hud) && hud.seat==0 && hud.arms==1 && hud.sight==0 && hud.aimOk && hud.arm[0].bore[0]==1,
+          "driver no-holder HUD consumes Proteus real-bore fallback instead of disappearing");
+    proteusDriver=false;StockHudFrame(f.vehicle);PlayerStockHud(&hud);
+    Check(hud.arms==0 && !hud.aimOk,"inactive Proteus cannot leave a stale custom-driver sight");
+    Put<void*>(hudSeats,kSeatRider,nullptr);Put<void*>(hudSeats,kSeatRiderCtrl,nullptr);
+    Put<void*>(hudSeats+kSeatStride,kSeatRider,human);Put<void*>(hudSeats+kSeatStride,kSeatRiderCtrl,riderCtrl);
+    Put<std::uint64_t>(f.weapon,edf::kMuzzleCount,2);proteusPair=f.weapon;StockHudFrame(f.vehicle);PlayerStockHud(&hud);
+    Check(hud.seat==1 && hud.arms==1 && hud.arm[0].coFired && hud.arm[0].aimed && hud.arm[0].paths==2,
+          "gunner HUD appends the paired actual right cannon's firing paths");
+    proteusPair=nullptr;hudHuman=nullptr;image=nullptr;
 }
 }}
 int main(){crew::Run();std::printf("fixed_weapon_sight: %d checks, %d failed\n",crew::checks,crew::failed);return crew::failed ? 1 : 0;}

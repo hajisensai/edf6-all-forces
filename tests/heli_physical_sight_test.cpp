@@ -17,6 +17,8 @@ PluginBody BodyOf(const void*) noexcept { UnexpectedSightBoundary();return Plugi
 int HiddenAimGuns(const unsigned char*,const unsigned char**,int) noexcept { UnexpectedSightBoundary();return 0; }
 bool IsHelicopter(const void*) noexcept { UnexpectedSightBoundary();return false; }
 unsigned char* PayloadPicked(const void*) noexcept { UnexpectedSightBoundary();return nullptr; }
+unsigned char* PlayerHuman() noexcept { UnexpectedSightBoundary();return nullptr; }
+unsigned char* PayloadSightPicked(const void*,unsigned) noexcept { UnexpectedSightBoundary();return nullptr; }
 int WeaponLock(const unsigned char*,float*,float*) noexcept { UnexpectedSightBoundary();return 0; }
 bool CameraRay(float*,float*) noexcept { UnexpectedSightBoundary();return false; }
 bool HighCamOn(const void*) noexcept { UnexpectedSightBoundary();return false; }

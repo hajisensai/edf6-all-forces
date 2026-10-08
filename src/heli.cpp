@@ -2338,10 +2338,9 @@ Assist* AssistOf(unsigned char* v) noexcept {
     return a;
 }
 
-// The mouse-aim flight's turn (ini HeliMouseAim, keyboard and mouse): the heading chases an aim the mouse moves, so the
-// heli turns at least HeliYawRate (the NPC pilot's, Tune) with the NPC's quicker smoothing; flown on the stock input
-// (a pad, HeliMouseAim 0), its own. The stock 506 turns at most 23.5 deg/s with the smoothing 0.0011: the user's log
-// (2026-10-06 15:01) shows it at 5-17 deg/s behind the aim, "the mouse moves and nothing changes".
+// Give mouse flight enough native angle authority/smoothing to track its rate command (AimFly inverts
+// that angle-state lag). +1634 is NOT rad/s: the native spring converts the angle to angular velocity.
+// HeliYawRate remains the player's desired rate limit; stock pad flight restores the original parameters.
 void PlayerYawTune(unsigned char* v,bool mouse) noexcept {
     Assist* const a=AssistOf(v);
     if(!a)return;
@@ -2350,7 +2349,8 @@ void PlayerYawTune(unsigned char* v,bool mouse) noexcept {
     if(!mouse || !(want>std::fabs(yaw))){Put<float>(v,kMaxYaw,yaw);Put<float>(v,kYawSmooth,smooth);return;}
     Put<float>(v,kMaxYaw,want*aim::YawSign(yaw));Put<float>(v,kYawSmooth,smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth);
     if(!a->yawSaid && (a->yawSaid=true))
-        Log("HELI v=%p player turn: %.0f deg/s, smoothing %.4f (its own %.0f deg/s, %.4f)",v,want*180.0f/kPi,
+        Log("HELI v=%p player turn limit %.0f deg/s: native angle authority %.0f deg, smoothing %.4f (its own %.0f deg, %.4f)",v,
+            Cfg().heliYawRate,want*180.0f/kPi,
             smooth<kTunedYawSmooth ? kTunedYawSmooth : smooth,yaw*180.0f/kPi,smooth);
 }
 
@@ -2411,6 +2411,11 @@ Pilot pilots[4];
 // for forward velocity (0x651E2F). Keep those uses separate only for this frame's local mouse pilot.
 constexpr std::size_t kPlayerAttitude=0x654A80,kPlayerAttitudeCopied=14,kPlayerMaxTilt=0x1640;
 const unsigned char kPlayerAttitudeSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x56,0x41,0x57};
+constexpr std::size_t kPlayerYawUpdate=0x654E3F,kPlayerYawConvert=0x6CE9C1,kPlayerYawState=0x1604,kPlayerYawSpring=0x1620;
+const unsigned char kPlayerYawUpdateSig[]={0xF3,0x0F,0x10,0x4B,0x74,0x44,0x0F,0x28,0xDB,0xF3,0x0F,0x59,0x4F,0x10,
+    0xF3,0x0F,0x10,0xA3,0x84,0,0,0,0xF3,0x0F,0x5C,0x4B,0x44,0xF3,0x0F,0x59,0x4B,0x78,0xF3,0x0F,0x58,0x4B,0x44,
+    0xF3,0x0F,0x11,0x4B,0x44};
+const unsigned char kPlayerYawConvertSig[]={0xF3,0x41,0x0F,0x59,0xD1,0xF3,0x0F,0x5E,0x15,0x8A,0x09,0x0D,0x01};
 using PlayerAttitudeFn=void(__fastcall*)(unsigned char*,void*,const float*,const unsigned char*);
 PlayerAttitudeFn playerAttitudeNext=nullptr;
 
@@ -2444,6 +2449,8 @@ void __fastcall PlayerAttitudeHook(unsigned char* attitude,void* body,const floa
 bool InstallPlayerAttitude() noexcept {
     if(playerAttitudeNext)return true;
     if(!Matches(kPlayerAttitude,kPlayerAttitudeSig,sizeof(kPlayerAttitudeSig)))return false;
+    if(!Matches(kPlayerYawUpdate,kPlayerYawUpdateSig,sizeof(kPlayerYawUpdateSig)) ||
+       !Matches(kPlayerYawConvert,kPlayerYawConvertSig,sizeof(kPlayerYawConvertSig)))return false;
     unsigned char trampoline[kPlayerAttitudeCopied+14];
     std::memcpy(trampoline,kPlayerAttitudeSig,kPlayerAttitudeCopied);
     const unsigned char jump[6]={0xFF,0x25,0,0,0,0};
@@ -2517,11 +2524,12 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     aim::StockStick(w.vel,p.vel,top,kBrakeGain,fwd,right,&forward,&lateral);
     if(lifting)forward=lateral=0.0f;
     const float heading=std::atan2(fwd[0],fwd[2]);
-    // Turned by its own max yaw rate's sign (aim::YawSign): the NPC learns its sign from how it turns (Sense's votes); the
-    // player's flight reads it, the turn right from the first frame. The rate asked toward the aim (aim::PlayerYaw) is
-    // at most its max yaw rate (PlayerYawTune's).
+    // The native yaw channel is a lagged heading offset, not a rate. Compensate its current state and
+    // the native spring conversion before writing input; see aim::PlayerYawInput.
     const float maxYaw=At<float>(v,kMaxYaw);
-    const float yaw=aim::PlayerYaw(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,std::fabs(maxYaw))*aim::YawSign(maxYaw);
+    const float spring=At<float>(v,kPlayerYawSpring),blend=At<float>(v,kYawSmooth),state=At<float>(v,kPlayerYawState);
+    const float rateLimit=Cfg().heliYawRate>0.0f ? Cfg().heliYawRate*kPi/180.0f : std::fabs(maxYaw)*spring*60.0f;
+    const float yaw=aim::PlayerYawInput(Wrap(std::atan2(w.face[0],w.face[2])-heading),p.yawRate,rateLimit,maxYaw,state,blend,spring);
     Put<float>(v,kInLateral,lateral);Put<float>(v,kInForward,forward);Put<float>(v,kInW,1.0f);Put<float>(v,kInYaw,yaw);
     if(!grounded) {   // on the ground the stock throttle (the ascend key) lifts it off
         const bool learn=p.hold.holding && std::fabs(p.hold.y-pos[1])<6.0f;
@@ -2531,8 +2539,8 @@ void AimFly(Pilot& p,unsigned char* v,const unsigned char* seat,const float* pos
     if(Cfg().debug && ms-p.inputLogAt>=1000) {
         p.inputLogAt=ms;
         Log("HELI INPUT v=%p keys mouse=(%.3f,%.3f) fore=%.1f set=%.2f aim=(%.3f,%.3f,%.3f) pitch=%.3f move=%.3f yaw=%.3f "
-            "ground=%d lift=%d",v,mx,my,keys.fore,p.hold.speed,p.aim[0],p.aim[1],p.aim[2],
-            aim::PitchInput(p.aim,At<float>(v,kPlayerMaxTilt)),forward,yaw,grounded,lifting);
+            "rate=%.3f state=%.4f ground=%d lift=%d",v,mx,my,keys.fore,p.hold.speed,p.aim[0],p.aim[1],p.aim[2],
+            aim::PitchInput(p.aim,At<float>(v,kPlayerMaxTilt)),forward,yaw,p.yawRate,state,grounded,lifting);
     }
     p.flying=true;
 }

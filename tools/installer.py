@@ -331,7 +331,9 @@ def build_autoturret(game: str) -> tuple[dict[str, bytes], bool] | None:
     whether install_autoturret may back up and overwrite the Mods files it replaces that are not its own (another
     mod's, or its own changed since: build.py --force, here asked). None: cancelled, nothing written."""
     import build as at_build
-    files = at_build.build_files()
+    import make_optics
+    files = {rel: make_optics.redirect(data)[0] if rel.upper().startswith('OBJECT/') and rel.upper().endswith('.SGO') else data
+             for rel, data in at_build.build_files().items()}
     problems = at_build.foreign(os.path.join(game, 'Mods'), files)
     if not problems:
         return files, False
@@ -349,7 +351,20 @@ def install_autoturret(game: str, files: dict[str, bytes], force: bool) -> None:
     import build as at_build
     print('写入 EDF6AutoTurret 的车辆数据（防空车、玻尔斯、关卡防空车、NPC 泰坦副炮和它们的武器说明行；'
           '记录在 Mods/.edf6at_data.json）……')
-    at_build.install(os.path.join(game, 'Mods'), text=True, force=force, files=files, proteus=True)
+    import make_optics
+    import ledger
+    import rootcpk
+    led, source = ledger.Ledger(game), None
+    final = {}
+    for rel, data in files.items():
+        if rel.upper().startswith('OBJECT/') and rel.upper().endswith('.SGO'):
+            data, needs = make_optics.redirect(data)
+            if needs:
+                if source is None:
+                    source = rootcpk.Game(game)
+                data, _ = make_optics.range_vehicle(led, source, data, make_optics.OWNER)
+        final[rel] = data
+    at_build.install(os.path.join(game, 'Mods'), text=True, force=force, files=final, proteus=True)
 
 
 def remove_autoturret(game: str) -> None:
@@ -363,14 +378,14 @@ def remove_autoturret(game: str) -> None:
     at_build.uninstall(mods, force=False)
 
 
-def build_asset(cache: Any, module: ModuleType, label: str) -> Any:
+def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None) -> Any:
     """Only regenerate an asset group when its recipe, inputs or installed outputs changed."""
     started = time.perf_counter()
     if cache.current(module.OWNER):
         print(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）', flush=True)
         return None
     print(f'{label}：生成中（首次安装或输入/输出发生变化）……', flush=True)
-    built = module.build(cache.game)
+    built = (builder or module.build)(cache.game)
     print(f'{label}：生成完成（{time.perf_counter() - started:.1f} 秒）', flush=True)
     return built
 
@@ -389,6 +404,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_katyusha
     import make_sazabi
     import make_proteus
+    import make_optics
     import make_stock_stores
     import make_sidecar
     import make_sub
@@ -410,6 +426,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('已取消，没有写入任何文件。')
         return
     cache = buildcache.Cache(game)
+    optics = build_asset(cache, make_optics, '载具实体瞄具模型', make_optics.build_models)
     jets = build_asset(cache, make_jets, '战机、直升机、无人机')
     sub = build_asset(cache, make_sub, '潜水母舰')
     katyusha = build_asset(cache, make_katyusha, '喀秋莎火箭炮车')
@@ -442,6 +459,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
         make_edf5_campaign.remove(game)
         if make_edf5_campaign.enabled(game):
             raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
+    for path in (make_optics.install_models(game, optics) if optics is not None else []):
+        print('写入', path)
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
             (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
@@ -465,6 +484,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
     print('写入呼叫武器（武器表只动本插件的行，其它行不动；全部写完或全部不写）……')
     call_weapons.install(game, weapons)
     install_autoturret(game, *turret)
+    # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
+    # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
+    stock_optics = {rel: data for rel, data in make_optics.build_stock_redirects(game).items()
+                    if rel.upper() not in {p.upper() for p in turret[0]}}
+    for path in make_optics.install_stock_redirects(game, stock_optics):
+        print('写入', path)
     for name, section in PLUGINS:
         install_plugin(game, *plugins[name], name, section)
     if campaign is not None:   # after the plugin's ini: it sets EDF5CampaignRows there
@@ -480,7 +505,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sazabi', sazabi), ('proteus', proteus)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -493,7 +518,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('  ', line)
     print('\n安装完成。启动游戏即可。')
     print('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。')
-    print('本次模型、挂载和测试场资源已重新生成；更新时请运行安装器，不要只替换 DLL。')
+    print('本次模型、挂载、实体瞄具和测试场资源已校验并安装；更新时请运行安装器，不要只替换 DLL。')
 
 
 def uninstall_stock_stores(game: str) -> None:
@@ -525,6 +550,7 @@ def uninstall(game: str) -> None:
     import make_katyusha
     import make_sazabi
     import make_proteus
+    import make_optics
     import make_stock_stores
     import make_sidecar
     import make_sub
@@ -547,6 +573,8 @@ def uninstall(game: str) -> None:
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
             return
+        # First detach stock paths, preserving other writers' fields; consumers keep shared optic models.
+        make_optics.remove(game)
         remove_autoturret(game)
         for remove in (make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove,
                        make_sub.remove, make_jets.remove):
@@ -571,6 +599,9 @@ def uninstall(game: str) -> None:
             print('保留（之后被别的工具改过）', path)
     for path in make_bigmap.remove(game)[0]:
         print('删除', path)
+    if choice == '1':
+        for path in make_optics.remove(game)[0]:
+            print('还原/删除瞄具资源', path)
     cache = os.path.join(game, 'Mods', buildcache.MANIFEST)
     if choice == '1' and os.path.isfile(cache):   # what it describes is gone; with 2 the models stay and it holds
         os.remove(cache)

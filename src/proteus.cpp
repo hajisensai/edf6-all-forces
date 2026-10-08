@@ -22,7 +22,7 @@
 //    quick. The stock launcher is held (+0xE10 0, its countdown parked at kProteusHoldCountdown) in either stance while the
 //    salvo takes its place (the shells preloaded, its seat closed), and given back the frame either is not so (Guns).
 //  - Deployed, the driver's remote gun (ProteusDriverGun): only with both gunner seats empty, the right cannon
-//    follows the driver's native aim and fires along its physical muzzle; a marked target near the bore is led. The salvo (the second
+//    follows the driver's native aim and fires along its physical muzzle; its physical sight shows the constrained bore. The salvo (the second
 //    trigger, a target marked, the cooldown over): ProteusSalvoCount rounds of the gunship's shells on their arcs at the
 //    marked target, led.
 //  - The shields and the barrier (proteus_logic.h Absorb) on every hit through the damage call (0x54A586 -> 0x547C30:
@@ -65,12 +65,13 @@ constexpr std::size_t kMove=0x1950,kTurnNow=0x1974,kWalk=0x1978,kWalkEase=0x197C
 constexpr std::size_t kCtrl=0x1720,kJump=kCtrl+0x290,kStepNormal=kCtrl+0xD4;
 constexpr float kFootRadius=5.0f;   // m: begaruta_rigid_body[1] of every VehicleBigBegaruta SGO (the capsule's, 0x63FE86)
 // The seats (docs/proteus-re.md §4): 0 the driver (no weapon), 1 / 2 the left / right cannon, 3 the missile launcher.
-constexpr unsigned kGunnerSeat=1,kRightSeat=2,kLauncherSeat=3,kProteusSeats=4;
+constexpr unsigned kLeftSeat=1,kRightSeat=2,kLauncherSeat=3,kProteusSeats=4;
 constexpr std::size_t kSeatClassMask=0x30,kSeatPad=0x2B0,kSeatButtons=0x2E8,kSeatFire=0x2E4,kSeatFire2=0x2E0;
 constexpr float kTriggerOn=0.8f;
 // A weapon (docs/proteus-re.md §5): the trigger latch and its held copy, the shot countdown, its rate, the cone's scale.
 constexpr std::size_t kPull=0x139,kHeld=0x13A,kCountdown=0xE0C,kRate=0xE10,kSpread=0xE14;
 constexpr unsigned kPullFn=0x62C000;
+constexpr unsigned kNativeMuzzle=0x6969A0;
 constexpr unsigned kAimVt=0x17D8A68,kAimSeVt=0x17D8A90,kAxisApply=0x5FC280;
 constexpr float kHoldCountdown=kProteusHoldCountdown;   // frames: the stock launcher held (proteus.h: vehsound.cpp reads it)
 // The weapon user (heli.cpp DoorGunUser's): the vehicle's interface at +0x120, its slot 11 (0x62D950).
@@ -94,7 +95,6 @@ constexpr std::size_t kSearcher=0x8,kSearchBest=0x10,kSearchFound=0x18,kEnemyTar
 constexpr float kDurability=7500.0f;    // every VehicleBigBegaruta SGO's game_object_durability (the tier's base)
 constexpr ULONGLONG kStaleMs=1500,kLogMs=2000,kRingMs=500,kSalvoGapMs=90,kReadoutMs=250;
 constexpr float kMarkCone=0.14f;        // rad (8 deg) off the screen's centre a mark is taken within
-constexpr float kLeadCone=0.10f;        // rad: the marked target this near the centre is led by the driver's gun
 constexpr float kGunReach=2000.0f,kRoundSpeed=960.0f,kShellSpeed=480.0f;   // m; m/s (make_jets.py, the gunship shell)
 constexpr float kSalvoSpread=6.0f;      // m round the led point the salvo's rounds fall
 constexpr float kPi=3.14159265f;
@@ -156,6 +156,9 @@ using SeatFn=void(__fastcall*)(void*,void*);
 using AimFn=void(__fastcall*)(void*,const float*);
 using AxisApplyFn=void(__fastcall*)(void*,bool);
 void* nextAim[2]{};   // ChainVtableSlot fills the continuation before publishing our hook
+using BuildMuzzleFn=void(__fastcall*)(void*,const void*);
+BuildMuzzleFn buildMuzzle=nullptr;
+bool weaponPhaseReady=false;
 UserFn nextUser=nullptr;
 SearchFn nextSearch=nullptr;
 const unsigned char* damageThunk=nullptr;   // where the redirected damage call goes now (the near thunk to DamageHook)
@@ -193,6 +196,9 @@ struct Unit {
     int ringCount;
     float ring[kProteusRing][3];
     unsigned playerSeat;              // first local control seat (aim/fire); HUD independently follows PlayerHuman
+    ObjRef queuedDriver;
+    ULONGLONG queuedFireFrame=0,flushedFireFrame=0;
+    bool driverFireRequested=false;
     // The damage it took this second (Debug): blocked by a shield, taken by the barrier, through to the hull.
     float blocked,barred,through;
     float shieldNose[3];             // the same direction for the visible shield and the damage test
@@ -307,6 +313,7 @@ void GiveBack(Unit& u,unsigned char* v,const char* why) noexcept {
         if(s==kLauncherSeat && At<float>(w,kCountdown)>=kHoldCountdown*0.5f)Put<float>(w,kCountdown,0.0f);
     }
     u.launcherHeld=false;
+    u.queuedDriver=ObjRef{};u.queuedFireFrame=0;u.driverFireRequested=false;
     const float barrier=u.st.barrier,quiet=u.st.quiet;
     u.st=proteus::State{};
     if(u.net.networked){u.st.barrier=barrier;u.st.quiet=quiet;}
@@ -337,7 +344,7 @@ void Legs(Unit& u,unsigned char* v,const Config& c) noexcept {
 void Guns(Unit& u,bool salvo,const Config& c) noexcept {
     const bool deployed=u.st.mode==proteus::Mode::deployed;
     const float rate=deployed ? c.proteusDeployGunRate : c.proteusWalkGunRate,spread=deployed ? c.proteusDeployGunSpread : c.proteusWalkGunSpread;
-    for(unsigned s=kGunnerSeat;s<=kRightSeat;++s) {
+    for(unsigned s=kLeftSeat;s<=kRightSeat;++s) {
         unsigned char* const w=u.weapon[s];
         if(!w)continue;
         Put<float>(w,kRate,rate);Put<float>(w,kSpread,spread);
@@ -357,10 +364,10 @@ void Guns(Unit& u,bool salvo,const Config& c) noexcept {
 
 // Seats 2 and 3 closed, their dummy gunners sent off; the right cannon follows the left one.
 bool LocalGunner(const unsigned char* v) noexcept {
-    if(SeatCount(v)<=kGunnerSeat)return false;
-    const auto seat=SeatAt(const_cast<unsigned char*>(v),kGunnerSeat);
-    const auto rider=SeatRider(seat);
-    if(rider==Rider::none || rider==Rider::dummy)return false;
+    if(SeatCount(v)<=kLeftSeat)return false;
+    const auto seat=SeatAt(const_cast<unsigned char*>(v),kLeftSeat);
+    const Rider rider=SeatRider(seat);
+    if(rider==Rider::none || rider==Rider::dummy || !edf::LivingSoldierInSeat(image,seat))return false;
     const auto object=At<const void*>(seat,kSeatRider);
     return !InSession() || IsOnlineAuthority(object); // a real local NPC counts; a copied remote player/NPC does not
 }
@@ -374,16 +381,12 @@ void TwoSeats(Unit& u,unsigned char* v,bool localGunner=true) noexcept {
         u.closed=true;
         Log("PROTEUS v=%p: two seats (seats 2, 3 closed; masks were %#x %#x)",v,u.seatMask[kRightSeat],u.seatMask[kLauncherSeat]);
     }
-    for(unsigned s=kRightSeat;(!u.net.remote || localGunner) && s<kProteusSeats;++s)
+    for(unsigned s=kRightSeat;(!u.net.remote || localGunner || DefenseOwner(v)) && s<kProteusSeats;++s)
         if(SeatRider(SeatAt(v,s))==Rider::dummy) {
             reinterpret_cast<SeatFn>(image+kSeatKick)(v,SeatAt(v,s));
             Log("PROTEUS v=%p: the NPC gunner of seat %u sent off (two seats)",v,s);
         }
-    // Aim follows in AimHook after the left seat's step, before this frame's fire.
-    // ...and its trigger: pulled whenever the left one is.
-    unsigned char* const lw=u.weapon[kGunnerSeat];
-    if(localGunner && lw && u.holder[kRightSeat] && (lw[kPull] || lw[kHeld]) && HolderAlive(u.holder[kRightSeat]))
-        reinterpret_cast<PullFn>(image+kPullFn)(u.holder[kRightSeat]);
+    // Activation and the paired trigger belong to the native slot-5 weapon policy, after its empty-seat check.
 }
 
 // --- the driver's keys ---
@@ -459,16 +462,25 @@ void Led(const Unit& u,const float* from,float speed,float* at) noexcept {
 // Missing weapon/bone data means there is no muzzle to fire from.
 bool RoundFrom(const Unit& u,unsigned seat,unsigned shot,float* from,float* dir) noexcept {
     const unsigned char* const w=u.weapon[seat];
-    if(!Readable(w,edf::kMuzzleCount+8))return false;
+    if(!buildMuzzle || !Readable(w,edf::kMuzzleCount+8))return false;
     const auto count=At<std::uint64_t>(w,edf::kMuzzleCount);
     const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
     if(count==0 || count>64 || !Readable(muzzles,count*edf::kMuzzleStride))return false;
-    return edf::MuzzleFrame(w,muzzles+(shot%count)*edf::kMuzzleStride,from,dir) && vec::Normalize(dir);
+    const auto muzzle=muzzles+(shot%count)*edf::kMuzzleStride;
+    if(!Readable(At<const void*>(muzzle,0),edf::kBoneRows+64))return false;
+    const int mode=At<int>(muzzle,edf::kMuzzleMode);
+    if(mode<0 || mode>2)return false;
+    // The native fire builder includes mode 2's explicit FireVector. Work on a copy so reading a muzzle never
+    // changes the weapon's cached shot matrices (and never substitutes an average/vehicle-origin muzzle).
+    alignas(16) unsigned char built[edf::kMuzzleStride];std::memcpy(built,muzzle,sizeof(built));
+    buildMuzzle(built,w+edf::kWeaponMatrix);
+    std::memcpy(from,built+0x80,12);std::memcpy(dir,built+0x70,12);
+    return std::isfinite(from[0]+from[1]+from[2]) && vec::Normalize(dir);
 }
 
 // The driver's remote use of the right cannon gives way to either real gunner.
 bool DriverCannonFree(const unsigned char* v) noexcept {
-    return SeatCount(v)>=kProteusSeats && SeatRider(SeatAt(const_cast<unsigned char*>(v),kGunnerSeat))==Rider::none &&
+    return SeatCount(v)>=kProteusSeats && SeatRider(SeatAt(const_cast<unsigned char*>(v),kLeftSeat))==Rider::none &&
            SeatRider(SeatAt(const_cast<unsigned char*>(v),kRightSeat))==Rider::none;
 }
 
@@ -478,7 +490,7 @@ float Tier(const unsigned char* v) noexcept {
 }
 
 // The driver remotely operates the unoccupied right cannon, along its real barrel.
-// A marked target near that bore may be led; the camera cannot fire backwards through the hull.
+// The physical sight and shot share this bore; marking never silently bends a round away from the barrel.
 void DriverGun(Unit& u,unsigned char* v,const unsigned char* seat,ULONGLONG ms,const Config& c) noexcept {
     if(!c.proteusDriverGun || !u.closed || !DriverCannonFree(v) || c.proteusGunRate<=0.0f || u.st.mode!=proteus::Mode::deployed)return;
     if(At<float>(seat,kSeatFire)<kTriggerOn)return;
@@ -486,27 +498,14 @@ void DriverGun(Unit& u,unsigned char* v,const unsigned char* seat,ULONGLONG ms,c
     if(ms-u.gunAt<gap)return;
     float dir[3],from[3],at[3];
     if(!RoundFrom(u,kRightSeat,0,from,dir))return;
-    bool led=false;
-    if(u.mark) {
-        const float d[3]={u.markAt[0]-from[0],u.markAt[1]-from[1],u.markAt[2]-from[2]};
-        const float l=std::sqrt(Dot3(d,d));
-        led=l>1.0f && std::acos(vec::Clamp(Dot3(d,dir)/l,-1.0f,1.0f))<=kLeadCone;
-    }
-    if(led) {
-        Led(u,from,kRoundSpeed,at);
-        const float delta[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
-        const float distance=std::sqrt(Dot3(delta,delta));
-        led=distance>1.0f && Dot3(delta,dir)/distance>=std::cos(kLeadCone);
-    }
-    if(!led) {
-        const float end[3]={from[0]+dir[0]*kGunReach,from[1]+dir[1]*kGunReach,from[2]+dir[2]*kGunReach};
-        if(MapRay(from,end,at)<0.0f)std::memcpy(at,end,12);
-    }
+    const float end[3]={from[0]+dir[0]*kGunReach,from[1]+dir[1]*kGunReach,from[2]+dir[2]*kGunReach};
+    if(MapRay(from,end,at)<0.0f)std::memcpy(at,end,12);
     if(ProteusGunRound(v,from,at,c.proteusGunDamage*Tier(v)))u.gunAt=ms;
 }
 
 // The salvo: its rounds one every kSalvoGapMs at the mark, led, spread round it.
 void Salvo(Unit& u,unsigned char* v,ULONGLONG ms,const Config& c) noexcept {
+    if(u.st.mode!=proteus::Mode::deployed){u.salvoLeft=0;return;}
     if(u.salvoLeft<=0 || ms-u.salvoAt<kSalvoGapMs)return;
     if(!u.mark || SeatCount(v)<=kLauncherSeat || SeatRider(SeatAt(v,kLauncherSeat))!=Rider::none){u.salvoLeft=0;return;}
     float from[3],at[3],dir[3];
@@ -516,10 +515,15 @@ void Salvo(Unit& u,unsigned char* v,ULONGLONG ms,const Config& c) noexcept {
     const float r=kSalvoSpread*std::sqrt(static_cast<float>(u.salvoLeft%c.proteusSalvoCount+1)/static_cast<float>(c.proteusSalvoCount));
     at[0]+=r*std::cos(a);at[2]+=r*std::sin(a);
     const float delta[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
-    if(Dot3(delta,dir)<=0.0f){u.salvoLeft=0;return;}   // never fire back through the launcher
+    const float distance=std::sqrt(Dot3(delta,delta));
+    // Artillery may compensate elevation, but it cannot swing away from its physical tube or through a stop.
+    // Keep the marked point in the current launcher cone; off-axis marks cancel rather than launch sideways.
+    if(!(distance>1.0f) || Dot3(delta,dir)/distance<std::cos(15.0f*kPi/180.0f)){u.salvoLeft=0;return;}
     if(ProteusSalvoRound(v,from,at,c.proteusSalvoDamage*Tier(v))){u.salvoAt=ms;--u.salvoLeft;}
     else u.salvoLeft=0;
 }
+
+#include "proteus_weapons.inc"
 
 // --- the field ---
 bool SoldierVt(const void* vt,unsigned* which) noexcept {
@@ -712,6 +716,7 @@ void Frame(unsigned char* v) noexcept {
             playerSeat,SeatCount(v),u->walk,u->turn,u->jump,u->stepNormal,proteus::StepOf(u->stepNormal,kFootRadius),u->weapon[1],u->weapon[2],u->weapon[3]);
     }
     u->seen=ms;u->playerSeat=static_cast<unsigned>(playerSeat);
+    RefreshWeapons(*u,v);
     const float dt=vec::Clamp(static_cast<float>(ms-u->lastMs)*0.001f,0.0f,0.1f);
     u->lastMs=ms;
     const bool driver=playerSeat==0;
@@ -743,8 +748,7 @@ void Frame(unsigned char* v) noexcept {
         u->closed=false;
     }
     Guns(*u,salvoReady,c);   // after the seats: whether seat 3 is closed decides the launcher's
-    if(driver)DriverGun(*u,v,driverSeat,ms,c);
-    Salvo(*u,v,ms,c);
+    QueueWeapons(*u,v,driver,driverSeat);
     FieldFrame(*u,v,dt,c);
     Ring(*u,v,ms,c);
     std::memcpy(u->shieldNose,v+kMatrix+32,12);
@@ -770,18 +774,21 @@ void FollowCannon(void* aim) noexcept {
     for(const auto& u:units) {
         if(!u.active || !u.closed)continue;
         auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(u.ref.obj));
-        if(!u.ref.Is(v) || v[kDead] || SeatCount(v)<kProteusSeats)continue;
-        if(u.net.remote && !LocalGunner(v))continue;
+        if(!u.ref.Is(v) || !ActiveOf(v) || v[kDead] || SeatCount(v)<kProteusSeats)continue;
         auto right=seataim::Object(SeatAt(v,kRightSeat));
         const auto launcher=seataim::Object(SeatAt(v,kLauncherSeat));
-        if(aim==launcher && u.playerSeat==0 && u.st.mode==proteus::Mode::deployed) {
+        const bool driverAim=u.st.mode==proteus::Mode::deployed && AnyPlayerIn(SeatAt(v,0));
+        if(aim==launcher && driverAim && SeatRider(SeatAt(v,kLauncherSeat))==Rider::none) {
             seataim::Follow(seataim::Object(SeatAt(v,0)),launcher,[](unsigned char* axis) noexcept {
                 reinterpret_cast<AxisApplyFn>(image+kAxisApply)(axis,true);
             });
             return;
         }
         if(aim!=right)continue;
-        const unsigned source=Cfg().proteusDriverGun && u.playerSeat==0 && u.st.mode==proteus::Mode::deployed && DriverCannonFree(v) ? 0 : kGunnerSeat;
+        if(SeatRider(SeatAt(v,kRightSeat))!=Rider::none)continue; // never overwrite an existing real right-seat rider
+        const bool driverCannon=driverAim && Cfg().proteusDriverGun && DriverCannonFree(v);
+        if(!driverCannon && (!userOk || !nextUser || !edf::LivingSoldierInSeat(image,SeatAt(v,kLeftSeat))))continue;
+        const unsigned source=driverCannon ? 0 : kLeftSeat;
         const auto left=seataim::Object(SeatAt(v,source));
         seataim::Follow(left,right,[](unsigned char* axis) noexcept {
             reinterpret_cast<AxisApplyFn>(image+kAxisApply)(axis,true);
@@ -840,13 +847,29 @@ void __fastcall DamageHook(void* object,void* gdi) {
 }
 
 const void* __fastcall UserHook(void* iface,const void* weapon) noexcept {
-    const void* const user=nextUser(iface,weapon);
-    if(user)return user;
+    if(!nextUser)return nullptr;
     __try {
-        const Unit* const u=ActiveOf(static_cast<unsigned char*>(iface)-kUserIface);
-        if(u && u->closed && weapon==u->weapon[kRightSeat] && u->weapon[kGunnerSeat])return nextUser(iface,u->weapon[kGunnerSeat]);
+        auto v=static_cast<unsigned char*>(iface)-kUserIface;
+        const Unit* const u=ActiveOf(v);
+        if(Cfg().enabled && Cfg().proteus && u && u->closed && weapon==u->weapon[kRightSeat] && SeatCount(v)>kRightSeat &&
+           SeatRider(SeatAt(v,kRightSeat))==Rider::none) {
+            // Native 62D950 may return a non-null LAST rider for this empty seat. The paired cannon belongs to
+            // the current left gunner, even when that stale native result names a different machine.
+            return edf::LivingSoldierInSeat(image,SeatAt(v,kLeftSeat)) && u->weapon[kLeftSeat] ? nextUser(iface,u->weapon[kLeftSeat]) : nullptr;
+        }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
-    return user;
+    return nextUser(iface,weapon);
+}
+
+// Pairing may only activate a right cannon after this hook establishes its current operator. A signature or
+// chain failure leaves the native empty-seat callback in charge, rather than firing as the seat's LAST rider.
+bool InstallProteusUser() noexcept {
+    userOk=false;
+    if(!Matches(kUserSig.rva,kUserSig.bytes,kUserSig.size))return false;
+    void* next=nullptr;
+    if(!edf::ChainVtableSlot(reinterpret_cast<void**>(image+kUserSlotRva),reinterpret_cast<void*>(&UserHook),&next))return false;
+    nextUser=reinterpret_cast<UserFn>(next);
+    userOk=true;return true;
 }
 
 // Whether the soldier searching (`f`) is on the zone's side and `cand` is an enemy the zone puts first.
@@ -895,6 +918,39 @@ bool IsProteus(const void* vehicle) noexcept {
     __try { return vehicle && Big(vehicle); } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+const unsigned char* ProteusSightWeapon(const unsigned char* vehicle,unsigned seat) noexcept {
+    __try {
+        if(!ok || !Cfg().enabled || !Cfg().proteus || !vehicle || !Big(vehicle) || vehicle[kDead])return nullptr;
+        auto u=ActiveOf(vehicle);
+        if(!u || !u->closed || SeatCount(vehicle)<kProteusSeats)return nullptr;
+        if(seat==0) {
+            bool ready=false;ProteusRoundsReady(&ready,nullptr);
+            if(!ready || !Cfg().proteusDriverGun || u->st.mode!=proteus::Mode::deployed || !DriverCannonFree(vehicle))return nullptr;
+        } else if(!userOk || !nextUser || seat!=kLeftSeat || !edf::LivingSoldierInSeat(image,SeatAt(const_cast<unsigned char*>(vehicle),kLeftSeat)) ||
+                  SeatRider(SeatAt(const_cast<unsigned char*>(vehicle),kRightSeat))!=Rider::none)return nullptr;
+        unsigned char* holder=nullptr;
+        return SeatWeapon(const_cast<unsigned char*>(vehicle),kRightSeat,&holder);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+}
+bool ProteusDriverSight(const unsigned char* vehicle,StockArm* outArm) noexcept {
+    __try {
+        if(!outArm || !ProteusSightWeapon(vehicle,0))return false;
+        auto u=ActiveOf(vehicle);if(!u)return false;
+        RefreshWeapons(*u,const_cast<unsigned char*>(vehicle));
+        float from[3],dir[3];if(!RoundFrom(*u,kRightSeat,0,from,dir))return false;
+        StockArm a{};wcscpy_s(a.name,L"PROTEUS");strcpy_s(a.label,"GUN");
+        a.ammo=a.ammoMax=-1;a.reload=1;a.reloadSec=-1;
+        a.kind=RoundKind::arc;a.physicalOnly=true;a.coFired=true;a.aimed=true;
+        std::memcpy(a.bore,dir,12);
+        float end[3];for(int i=0;i<3;++i)end[i]=from[i]+dir[i]*kGunReach;
+        a.hit=MapRay(from,end,a.at)>=0.0f;if(!a.hit)std::memcpy(a.at,end,12);
+        a.range=vec::Dist(from,a.at);a.flight=a.range/kRoundSpeed;a.paths=1;
+        std::memcpy(a.path[0].at,a.at,12);a.path[0].range=a.range;a.path[0].seconds=a.flight;a.path[0].hit=a.hit;
+        // A stop-limited bore is explicitly physical-only: no camera-centred lead or fictitious hit confirmation.
+        *outArm=a;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 unsigned ProteusVisibleSeats(const unsigned char* vehicle,unsigned count) noexcept {
     const Unit* u=ActiveOf(vehicle);
     if(!u || !u->closed || count!=kProteusSeats)return count;
@@ -909,6 +965,7 @@ bool InstallProteus() noexcept {
     __try {
         ok=AllMatch(kSigs,sizeof(kSigs)/sizeof(kSigs[0]),"the rework");
         if(!ok){Log("PROTEUS off: the Proteus stays stock");return false;}
+        if(!InstallProteusWeapons()){ok=false;return false;}
         InstallProteusPose();
         InstallProteusNet();
         // Installed after the turret camera and stabilizer: retain their hooks.
@@ -936,12 +993,7 @@ bool InstallProteus() noexcept {
             std::memcpy(&rel,image+kDamageCall+1,4);
             damageThunk=image+kDamageCall+5+rel;
         }
-        if(Matches(kUserSig.rva,kUserSig.bytes,kUserSig.size)) {
-            void** const slot=reinterpret_cast<void**>(image+kUserSlotRva);
-            void* next=nullptr;
-            userOk=edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&UserHook),&next);
-            if(userOk)nextUser=reinterpret_cast<UserFn>(next);
-        }
+        InstallProteusUser();
         fieldOk=AllMatch(kFieldSigs,sizeof(kFieldSigs)/sizeof(kFieldSigs[0]),"the field");
         if(AllMatch(kSearchSigs,sizeof(kSearchSigs)/sizeof(kSearchSigs[0]),"the allies' priority")) {
             void** const slot=reinterpret_cast<void**>(image+kSearchSlotRva);

@@ -50,6 +50,8 @@
 #include <cstring>
 
 namespace crew {
+// Implemented by the mounted-optic camera (sightzoom.cpp); camera-space rays must not steer that same gun.
+bool SightZoomMounted(const void* vehicle) noexcept;
 namespace {
 using tcam::kPi;
 // The seat aim (VehicleWeaponAimAddSe) and its step; the axes' params {brake, accel, top} and an axis' rate (rad/frame).
@@ -156,30 +158,28 @@ const float* AxisAt(const unsigned char* seat,int i) noexcept {
     return reinterpret_cast<const float*>(seat+kSeatAim+kAimAxes+static_cast<std::size_t>(i)*kAxisStride);
 }
 
-// The selected payload when it belongs to this seat, otherwise its first weapon with muzzles.
-const unsigned char* Gun(const unsigned char* seat) noexcept {
+// Resolve the same active optic before and after acquisition; no bind/drop fallback loop.
+const unsigned char* Gun(const unsigned char* vehicle,const unsigned char* seat) noexcept {
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
     if(!count || count>16 || !Readable(holders,count*8))return nullptr;
-    const auto selected=shared.seat==seat ? PayloadSightPicked(shared.v,0) : nullptr;
-    if(shared.seat==seat && !selected)return nullptr;
-    const unsigned char* first=nullptr;
+    const auto selected=PayloadSightPicked(vehicle,0);
+    if(!selected)return nullptr;
     for(std::uint64_t i=0;i<count;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
         if(Readable(w,edf::kWeaponAccuracyScale+4) && At<std::uint64_t>(w,edf::kMuzzleCount)>0) {
             if(w==selected)return w;
-            if(!first)first=w;
         }
     }
-    return shared.seat==seat ? nullptr : first;
+    return nullptr;
 }
 
 // Same shot model and muzzle transform as the vehicle HUD. No camera ray participates in this prediction.
 // RoundLands also returns the flight endpoint on a miss; an unreadable/guided model uses the actual bore path.
 void ShotFocus(Shared& s) noexcept {
     s.focusValid=false;s.focusHit=false;
-    const auto gun=Gun(s.seat);
+    const auto gun=Gun(s.v,s.seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,64,muzzle,dir) || !vec::Normalize(dir))return;
     for(int i=0;i<3;++i)s.focus[i]=muzzle[i]+dir[i]*kAimFar;
@@ -196,7 +196,7 @@ void ShotFocus(Shared& s) noexcept {
 // does not (the self-propelled howitzer's turret is fixed, tools/make_artillery.py TURRET_LIMITS: its rider still picks
 // the target with the view and takes the high view; the guns only elevate, the hull is turned to lay them).
 bool Turret(const unsigned char* v,const unsigned char* seat) noexcept {
-    if(IsHelicopter(v) || IsPlayerJet(v) || At<std::int32_t>(seat,kSeatCamType)!=1 || !Gun(seat))return false;
+    if(IsHelicopter(v) || IsPlayerJet(v) || At<std::int32_t>(seat,kSeatCamType)!=1 || !Gun(v,seat))return false;
     const float* yaw=AxisAt(seat,0);
     return std::isfinite(yaw[0]) && std::isfinite(yaw[1]) && (yaw[1]-yaw[0]>kMinTraverse || IndirectFireSeat(seat));
 }
@@ -268,7 +268,7 @@ bool TurretPivot(const unsigned char* seat,const float* muzzle,float* pivot) noe
 // `ballistic` the low arc for a gun whose rounds drop (a lofted launcher's arc is katyusha.cpp's: it gets the line), else
 // the bore line (turretcam.h BallisticAim).
 bool Wants(const unsigned char* seat,const float* frame,const float* p,bool ballistic,float* want) noexcept {
-    const unsigned char* gun=Gun(seat);
+    const unsigned char* gun=Gun(shared.v,seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,16,muzzle,dir))return false;
     float pivot[3],origin[3];
@@ -314,7 +314,7 @@ void Readout(const unsigned char* seat,const Shared& s,bool on,const float* hold
     TurretCamReadout r{};
     r.physicalOnly=s.physicalOnly;
     r.decoupled=s.decoupled;r.freeLook=s.free || s.returning;r.high=s.high;r.onTarget=on;
-    const unsigned char* gun=Gun(seat);
+    const unsigned char* gun=Gun(s.v,seat);
     float muzzle[3],dir[3];
     if(!gun || !edf::MeanMuzzle(gun,64,muzzle,dir))return;
     std::memcpy(r.aim,holdAt,12);
@@ -347,6 +347,22 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     ReleaseSRWLockExclusive(&lock);
     if(seat!=s.seat || !s.v)return;
     s.aimMs=GameMs();
+    if(!s.high && SightZoomMounted(s.v)) {
+        // The sightzoom camera follows the actual barrel. Feeding its own last-frame ray back into the
+        // decoupled controller pins the view or creates a feedback loop. Keep the native/stabilizer input.
+        cmd[0]=in[0];cmd[1]=in[1];
+        game.hasAim=false;game.aimHit=false;game.steer.hasWant=false;game.held=FreeHeld(seat);
+        s.view=false;s.decoupled=false;s.free=false;s.returning=false;s.steering=false;s.highView=false;s.observing=false;
+        ShotFocus(s);
+        AcquireSRWLockExclusive(&lock);
+        if(shared.seat==seat) {
+            shared.aimMs=s.aimMs;shared.view=false;shared.decoupled=false;shared.free=false;shared.returning=false;
+            shared.steering=false;shared.highView=false;shared.observing=false;
+        }
+        ReleaseSRWLockExclusive(&lock);
+        if(s.focusValid)Readout(seat,s,s.focusHit,s.focus,false);
+        return;
+    }
     const bool held=FreeHeld(seat);
     const bool leavingHigh=s.highView && !s.high;
     const bool press=held && (!game.held || leavingHigh),release=!held && game.held && !leavingHigh;
@@ -537,6 +553,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const bool viewed=aimed && (s.decoupled || s.free || s.returning);
     const bool own=live && (viewed || s.high);
     if(!live){camSide=CamSide{};PublishObservation(seat,false);return;}
+    if(!s.high && SightZoomMounted(s.v)){camSide=CamSide{};PublishObservation(seat,false);return;}
     // Another take (the player left the seat and came back, Drop between: this hook does not run while nobody is
     // served, so it never saw them go): its camera starts from the stock one again, easing in.
     if(camSide.owned && camSide.take!=s.take)camSide=CamSide{};
@@ -676,7 +693,7 @@ void TurretCamFrame(unsigned char* v) noexcept {
     if(!lookOk)return;
     if(!c.enabled || SeatCount(v)==0){if(mine)Drop(c.enabled ? "no seat" : "plugin off");return;}
     unsigned char* seat=SeatAt(v,0);
-    const bool driven=!v[kDead] && SeatRider(seat)==Rider::player && Turret(v,seat);
+    const bool driven=!v[kDead] && SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman() && Turret(v,seat);
     if(!driven){if(mine)Drop(v[kDead] ? "the vehicle is wrecked" : "the player got out");return;}
     if(!mine || !shared.ref.Is(v)) {
         if(shared.v)Drop("another vehicle");
@@ -693,12 +710,13 @@ void TurretCamFrame(unsigned char* v) noexcept {
     AcquireSRWLockShared(&lock);
     const bool observing=shared.highView || shared.observing;
     ReleaseSRWLockShared(&lock);
-    game.hasAim=!high && !observing && AimPoint(game.aim,&game.aimHit);
-    const auto freedom=weaponmount::OfWeapon(v,seat,Gun(seat));
+    const bool mounted=!high && SightZoomMounted(v);
+    game.hasAim=!high && !observing && !mounted && AimPoint(game.aim,&game.aimHit);
+    const auto freedom=weaponmount::OfWeapon(v,seat,Gun(shared.v,seat));
     AcquireSRWLockExclusive(&lock);
     shared.seat=seat;shared.seenMs=GameMs();
     shared.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
-    shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly;
+    shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly && !mounted;
     shared.high=high;shared.focusValid=shot.focusValid;shared.focusHit=shot.focusHit;
     std::memcpy(shared.focus,shot.focus,sizeof(shared.focus));
     if(!shared.decoupled && !shared.free && !shared.returning)shared.view=false;

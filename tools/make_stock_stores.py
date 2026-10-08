@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import copy
 import os
+from pathlib import Path
 import re
 import sys
 from dataclasses import dataclass
@@ -207,7 +208,9 @@ def derived_vehicle(game: vc.Game, stem: str) -> bytes:
     cls = vehicle_class(game, stem)
     if cls not in BUILT_CLASSES:
         raise ValueError(f'{stem}: 载具类 {cls} 的额外挂点插件不会造（src/stores.cpp kBuilds）')
-    return _derived_dsgo(data, stem) if data[:4] == b'DSGO' else _derived_sgo(data, stem)
+    made = _derived_dsgo(data, stem) if data[:4] == b'DSGO' else _derived_sgo(data, stem)
+    import make_optics
+    return make_optics.redirect(made)[0]
 
 
 def stock_rows(game: vc.Game, stem: str) -> int:
@@ -364,9 +367,26 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
     for f in store_files():
         led.need(OWNER, f'WEAPON/{f}')
     before = set(led.owned_by(OWNER))
-    paths = [led.put(OWNER, rel, data) for rel, data in files.items()]
-    keep = {ledger.key(rel) for rel in files} | {ledger.key(f'WEAPON/{f}') for f in store_files()}
-    led.release(OWNER, sorted(before - keep))
+    import make_optics
+    game = None
+    paths, dependencies = [], set()
+    for rel, data in files.items():
+        changed_object = rel.upper().startswith('OBJECT/') and rel.upper().endswith('.SGO') and led.changed(rel)
+        if changed_object:
+            data = Path(led.disk(rel)).read_bytes()  # retain the foreign edit and its original ledger fingerprint
+        if rel.upper().startswith('OBJECT/') and rel.upper().endswith('.SGO'):
+            # This owner's bytes are redirected before its one authoritative ledger write.
+            data, needs = make_optics.redirect(data)
+            if needs:
+                if game is None:
+                    game = vc.Game(root)
+                data, needs = make_optics.range_vehicle(led, game, data, OWNER)
+            dependencies.update(ledger.key(dep) for dep in needs)
+        if not changed_object:
+            paths.append(led.put(OWNER, rel, data))
+    keep = {ledger.key(rel) for rel in files} | {ledger.key(f'WEAPON/{f}') for f in store_files()} | dependencies
+    obsolete = before - keep
+    led.release(OWNER, sorted(obsolete - _held_outputs(root, led, list(obsolete))))
     return paths
 
 
@@ -394,13 +414,28 @@ def _still_brought(root: str, rels: list[str]) -> set[str]:
     return out
 
 
+def _held_outputs(root: str, led: ledger.Ledger, rels: list[str]) -> set[str]:
+    hold = _still_brought(root, rels)
+    import make_optics
+    for rel in rels:
+        if not rel.endswith('.SGO') or not rel.startswith('OBJECT/') or not os.path.isfile(led.disk(rel)):
+            continue
+        if rel in hold or led.changed(rel):
+            raw = Path(led.disk(rel)).read_bytes()
+            _, needs = make_optics.redirect(raw)
+            if needs:
+                hold.add(rel)
+                hold.update(ledger.key(dep) for dep in needs)
+    return hold
+
+
 def remove(root: str) -> tuple[list[str], list[str]]:
     """Releases this tool's files: (deleted, kept because someone else changed them since, or another tool's request
     still brings the vehicle). Its own were all written under the ledger, and the store weapons are only needed:
     neither is a writer's release (the jets' stay)."""
     led = ledger.Ledger(root)
     owned = list(led.owned_by(OWNER))
-    hold = _still_brought(root, owned)
+    hold = _held_outputs(root, led, owned)
     deleted, kept = led.release(OWNER, [r for r in owned if r not in hold])
     return deleted, kept + sorted(hold)
 

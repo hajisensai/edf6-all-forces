@@ -25,6 +25,8 @@ ULONGLONG GameMs() noexcept { return 1000; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
 unsigned char* selectedGun=nullptr;
+unsigned char* localHuman=nullptr;
+unsigned char* PlayerHuman() noexcept{return localHuman;}
 unsigned char* PayloadPicked(const void*) noexcept { return nullptr; } // legacy payload choice is not the sight target
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept { return selectedGun; }
 int owner=0;
@@ -32,6 +34,8 @@ int AutoTurretSteers(const void*,unsigned) noexcept { return owner; }
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
 bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
+bool mountedOptic=false;
+bool SightZoomMounted(const void*) noexcept{return mountedOptic;}
 bool highOn=true;
 bool HighCamOn(const void*) noexcept { return highOn; }
 int cameraReads=0;
@@ -71,14 +75,14 @@ void Matrix(void* to,float x=0,float y=0,float z=0) {
 const float* __fastcall Gravity(void*) { static float g[4]={0,-9.8f,0,0};return g; }
 void __fastcall UnexpectedAim(void*,const float*) { Unexpected(); }
 struct Weapon {
-    unsigned char data[0x1100]{},muzzle[edf::kMuzzleStride]{},bone[0x110]{},holder[0x20]{};
+    unsigned char data[0x1100]{},muzzle[edf::kMuzzleStride]{},bone[0x110]{},holder[0x20]{},weaponControl[0x10]{};
     Weapon(float x,float speed,float elev) {
         Put<const void*>(data,edf::kMuzzles,muzzle);Put<std::uint64_t>(data,edf::kMuzzleCount,1);
         Put<const void*>(muzzle,0,bone);Put<int>(muzzle,edf::kMuzzleMode,1);
         Matrix(muzzle+edf::kMuzzleLocal);Matrix(bone+edf::kBoneRows,x,8,10);Matrix(data+edf::kWeaponMatrix);
         Put<float>(bone,edf::kBoneRows+0x24,std::sin(elev));Put<float>(bone,edf::kBoneRows+0x28,std::cos(elev));
         Put<float>(data,edf::kWeaponAmmoSpeed,speed);Put<float>(data,edf::kWeaponAmmoGravity,1);
-        Put<int>(data,edf::kWeaponAmmoAlive,1200);Put<void*>(holder,kHolderWeapon,data);
+        Put<int>(data,edf::kWeaponAmmoAlive,1200);Put<void*>(holder,kHolderWeapon,data);Put<void*>(holder,kHolderCtrl,weaponControl);Put<int>(weaponControl,8,1);
     }
 };
 void Run() {
@@ -88,6 +92,7 @@ void Run() {
     void* gravityVtable[]={reinterpret_cast<void*>(&Gravity)};
     Put<void*>(image,0x20B2958,world);Put<void*>(world,0x68,physics);Put<void*>(physics,0x20,gravityVtable);
     unsigned char vehicle[0x1100]{},vehicleBones[0x220]{},axisMap[2][0x38]{},seat[kSeatStride]{},human[0x360]{},control[0x10]{};
+    localHuman=human;
     Matrix(vehicle+kMatrix);Put<void*>(vehicle,kSeats,seat);Put<std::uint64_t>(vehicle,kSeatCount,1);
     Put<void*>(seat,kSeatRider,human);Put<void*>(seat,kSeatRiderCtrl,control);Put<int>(control,edf::kCtrlUses,1);
     human[kHumanPlayer]=1;Put<void*>(human,kHumanPad,control);
@@ -107,8 +112,8 @@ void Run() {
     Put<void*>(seat,kSeatWeapons,holders);Put<std::uint64_t>(seat,kSeatWeaponCount,2);
     shared=Shared{};shared.v=vehicle;shared.seat=seat;shared.high=true;shared.decoupled=true;shared.seenMs=GameMs();
     selectedGun=picked.data;
-    Check(Gun(seat)==picked.data,"selected payload belongs to the seat");
-    selectedGun=elsewhere.data;Check(Gun(seat)==nullptr,"invalid fire-control target cannot silently select a different gun");
+    Check(Gun(vehicle,seat)==picked.data,"selected payload belongs to the seat");
+    selectedGun=elsewhere.data;Check(Gun(vehicle,seat)==nullptr,"invalid fire-control target cannot silently select a different gun");
     selectedGun=picked.data;ShotFocus(shared);
     Check(shared.focusValid && shared.focusHit,"real muzzle round reaches lowered terrain");
     Check(std::fabs(shared.focus[1]-floorY)<0.001f && shared.focus[2]>300,"focus is high-arc impact, not camera ground point");
@@ -204,6 +209,26 @@ void Run() {
     Put<float>(seat,kSeatAim+kAimAxes,0);Put<float>(seat,kSeatAim+kAimAxes+4,0);
     TurretCamFrame(vehicle);float input[2]={.2f,-.2f},command[2]{};Aim(seat,input,command);
     Check(shared.physicalOnly && !shared.decoupled && !shared.steering,"pitch-only artillery cannot acquire a freely movable camera aim");
+    // The hooked frame runs for every vehicle. An unavailable current optic must not oscillate take/drop.
+    ResetTurretCam();lookOk=true;selectedGun=nullptr;
+    for(int i=0;i<3;++i){TurretCamFrame(vehicle);Check(!TurretCamServes(vehicle),"unavailable optic never alternates initial fallback and bound rejection");}
+    selectedGun=primary.data;TurretCamFrame(vehicle);const unsigned take=shared.take;
+    rigInfo.v=vehicle;rigInfo.normalRadius=30;
+    unsigned char otherVehicle[0x1100]{},otherSeat[kSeatStride]{},otherHuman[0x500]{};
+    std::memcpy(otherVehicle,vehicle,sizeof(vehicle));std::memcpy(otherSeat,seat,sizeof(seat));
+    Put<void*>(otherVehicle,kSeats,otherSeat);Put<void*>(otherSeat,kSeatRider,otherHuman);otherHuman[kHumanPlayer]=1;Put<void*>(otherHuman,kHumanPad,control);
+    for(int i=0;i<3;++i){TurretCamFrame(otherVehicle);Check(shared.v==vehicle && shared.take==take && TurretCamLarge(vehicle),"another local player's frame cannot replace camera owner or large rig");TurretCamFrame(vehicle);}
+    mountedOptic=true;cameraReads=0;game.hasAim=game.steer.hasWant=true;
+    shared.high=false;shared.observing=false;shared.highView=false;shared.view=shared.decoupled=shared.steering=true;
+    owner=1;Aim(seat,input,command);
+    Check(command[0]==input[0] && command[1]==input[1],"mounted optic preserves native or external aim input without scaling it");
+    Check(!game.hasAim && !game.steer.hasWant && !shared.view && !shared.steering && !shared.decoupled && cameraReads==0,
+          "mounted optic cannot feed its own CameraRay into the turret controller");
+    camSide.owned=true;camSide.seat=seat;float opticTarget[20]{};unsigned char opticCamera[0x700]{};
+    Camera(seat,opticTarget,opticCamera);Check(!camSide.owned,"mounted optic bypasses third-person camera placement and blend");
+    TurretCamFrame(vehicle);Check(cameraReads==0&&!shared.decoupled,"frame sampler stays off the mounted optic ray");
+    mountedOptic=false;owner=0;TurretCamFrame(vehicle);Aim(seat,input,command);
+    Check(cameraReads>0 && shared.view,"leaving optic reinitializes the regular view from current camera state");
     image=nullptr;
 }
 }  // namespace

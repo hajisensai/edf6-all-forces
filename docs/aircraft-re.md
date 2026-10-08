@@ -82,7 +82,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。全部是静态分析，
 
 ### 姿态（`0x654A80`，rbx = `veh+0x15C0`，H）
 
-- `yawRate(+0x1604) = lerp(yawRate, maxYaw·yawIn, 0x1638)`。
+- **2026-10-08 更正：** `+0x1604` 是滞后的目标航向角偏移，不是 rad/s。`yawOffset = lerp(yawOffset, maxYawAngle·yawIn, 0x1638)`；`0x654ECA` 将它加到目标航向，`0x6CE9C1` 才乘姿态增益并除以 1/60 得到角速度，随后还经过 `+0x1624` 的角速度混合。上文把 `+0x1634` 标为“最大偏航”的数值不能直接当成角速度上限。
 - `pitch(+0x1600) = lerp(pitch, maxTilt·fwd, 0x1644)`。
 - `roll(+0x1608) = lerp(roll, −maxTilt·lat, 0x1644)`。
 - 任何接触（bit0）都会把俯仰和横滚清零；bit1 时跳过输入。
@@ -92,6 +92,8 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。全部是静态分析，
   - 经 `0x11B1760` 写入。
 - 倾角只影响外观，因为速度是直接写的。
 - 实测偏航（maxYaw 0.26–0.70 对应 45–70°/s）比 maxYaw 的线性增长慢，说明姿态弹簧 `0x1620/0x1624` 也在限速（M）。
+
+玩家控制现在按实际 `yawOffset`、混合系数和姿态增益反算下一原生步所需输入。`tests/heli_yaw_native_audit.py` 在私有映像执行完整 `0x654A80` 和 `0x6CE8D0`；Havok 读写角速度由夹具记录，旋转矩阵按记录角速度积分。Brute 的鼠标停止场景，旧控制器在第 20–30 秒仍有最大 69.152° 航向误差，修复后 0.004°。这不等于游戏内或双机验收。
 
 ## 3. 调参建议
 

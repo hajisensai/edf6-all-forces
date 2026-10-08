@@ -12,6 +12,10 @@
 //    stabilizer adds the turn that keeps the gun on its world line (stab.h Step), then maps the angles onto the bones
 //    again (0x5FC280 with the corrected angle). The axis' rate is left as the stock step made it: the stock easing
 //    goes on from the command alone.
+//  - CarBase velocity-joint feedback is a separate writer: 669A52 -> 5FC140 replaces the previous axis target with
+//    the actual physical angle before the next input step. ReadbackHook reconciles that local tracking displacement
+//    in the previous pose basis, so the stabilizer does not become a second position servo fighting the native motor.
+//    It does not replace either stored hull basis: the next step still compensates real hull motion and player input.
 //  - Which gun, how well (the class table kClasses; the reasons in docs/camera-re.md §7): the main guns of the tanks
 //    (Blacker 403, Titan 404, the single-seat tank 601, the E551 505) and of the Kepler (603), the Grape's turret (Car),
 //    the gunner seats of the tanks and the mechs; not the artillery (402, a 603 with an indirect-fire weapon), the drill,
@@ -40,6 +44,13 @@ using stab::Frame;
 // map it jumps to; the angle (+8) and rate (+0xC) the step writes.
 constexpr unsigned kPlainAimVtable=0x17D8A68,kPlainAimStep=0x5FBDA0,kAxisStepEnd=0x5FBD78,kAxisMap=0x5FC280;
 constexpr unsigned kAxisAngleWrite=0x5FBD12,kAxisRateWrite=0x5FBCE8;
+// CarBase's velocity motors read back their actual joint angle before the aim step. This is the only
+// direct caller of 5FC140; position motors do not take it (669A1F requires motor type 1).
+constexpr unsigned kReadbackCall=0x669A52,kReadback=0x5FC140;
+const unsigned char kReadbackCode[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x40,0x0F,0x29,0x74,0x24,0x30,0x0F};
+const unsigned char kReadbackCallCode[]={0xE8,0xE9,0x26,0xF9,0xFF,0x4C,0x8D,0x9C,0x24,0x90,0x01,0,0};
+const unsigned char kReadbackWriteCode[]={0xF3,0x0F,0x11,0x5F,0x18,0xF3,0x0F,0x5C,0xDA,0xF3,0x0F,0x11,0x5F,0x20};
+const unsigned char kVelocityMotorGateCode[]={0x83,0xFB,0x01,0x75,0x33};
 constexpr std::size_t kAimStepSlot=2,kAimParams=0x90,kAimNetwork=0xC0,kAxisRate=0xC;
 const unsigned char kPlainAimStepCode[]={0x40,0x53,0x55,0x56,0x57,0x48,0x83,0xEC,0x78,0x80,0xB9,0xC0,0x00,0x00,0x00,0x00,0x48,0x8B,0xF1,0x75,0x47};
 const unsigned char kAxisStepEndCode[]={0xB2,0x01,0x0F,0x28,0x74,0x24,0x40,0x0F,0x28,0x7C,0x24,0x30,0x44,0x0F,0x28,0x44,0x24,0x20,0x48,0x83,0xC4,0x58,0xE9,0xED,0x04,0x00,0x00};
@@ -50,6 +61,7 @@ constexpr std::uint64_t kMostMuzzles=16;
 constexpr ULONGLONG kLogMs=1000;
 
 using AxisMapFn=void(__fastcall*)(void*,bool);
+using ReadbackFn=void(__fastcall*)(void*,int,int,float);
 
 // The classes (vtables as crew.cpp kClasses has them) whose guns have a stabilizer, the main gun's (seat 0) and the
 // gunner seats' (stab::Perf: lag s, slip rad; lag 0 = none). Why each: docs/camera-re.md §7.
@@ -126,6 +138,7 @@ constexpr ULONGLONG kStaleFrames=4;   // registered no later than this many fram
 bool hooked=false,plainHooked=false;
 AxisMapFn axisMap=nullptr;
 AimStepFn nextPlain=nullptr;
+ReadbackFn nextReadback=nullptr;
 
 std::size_t Slot(const void* aim) noexcept { return (reinterpret_cast<std::uintptr_t>(aim)>>4)%kEntries; }
 
@@ -215,6 +228,18 @@ void Frames(const stab::Choice& c,const Frame& hull,const Frame* prev,float seat
 
 stab::Stops StopsAt(const unsigned char* aim,int i) noexcept { const float* x=AxisOf(aim,i);return stab::StopsOf(x[0],x[1]); }
 
+void __fastcall ReadbackHook(void* aim,int axis,int bone,float measuredJoint) noexcept {
+    auto* a=static_cast<unsigned char*>(aim);
+    const bool knownAxis=axis>=0 && axis<2;
+    const float commanded=knownAxis ? AxisOf(a,axis)[2] : 0.0f;
+    nextReadback(aim,axis,bone,measuredJoint);
+    __try {
+        Entry* e=hooked && knownAxis ? Find(aim) : nullptr;
+        if(e && e->active && e->hold.live && GameFrame()-e->stepFrame<=1 && Wanted(*e,a-kSeatAim))
+            stab::Readback(e->hold,StopsAt(a,axis),axis,commanded,AxisOf(a,axis)[2]);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
 // After the stock step of a seat's aim: the probe fed, the gun held (see the top).
 void Hold(Entry& e,unsigned char* aim,const float* before) noexcept {
     const unsigned char* seat=aim-kSeatAim;
@@ -284,9 +309,19 @@ bool InstallStabilizer() noexcept {
     __try {
         if(!Matches(kAxisStepEnd,kAxisStepEndCode,sizeof(kAxisStepEndCode)) || !Matches(kAxisMap,kAxisMapCode,sizeof(kAxisMapCode)) ||
            !Matches(kAxisAngleWrite,kAxisAngleWriteCode,sizeof(kAxisAngleWriteCode)) ||
-           !Matches(kAxisRateWrite,kAxisRateWriteCode,sizeof(kAxisRateWriteCode))) {
+           !Matches(kAxisRateWrite,kAxisRateWriteCode,sizeof(kAxisRateWriteCode)) ||
+           !Matches(kReadback,kReadbackCode,sizeof(kReadbackCode)) ||
+           !Matches(0x5FC230,kReadbackWriteCode,sizeof(kReadbackWriteCode)) ||
+           !Matches(0x669A1F,kVelocityMotorGateCode,sizeof(kVelocityMotorGateCode)) ||
+           !Matches(kReadbackCall,kReadbackCallCode,sizeof(kReadbackCallCode))) {
+            hooked=false;
             Log("STAB the aim axis' step changed: no gun stabilizer");
             return false;
+        }
+        nextReadback=reinterpret_cast<ReadbackFn>(image+kReadback);
+        bool changed=false;
+        if(!RedirectCall(image+kReadbackCall,image+kReadback,reinterpret_cast<void*>(&ReadbackHook),changed) || !changed) {
+            hooked=false;Log("STAB native joint readback unavailable: stabilizer disabled");return false;
         }
         axisMap=reinterpret_cast<AxisMapFn>(image+kAxisMap);
         hooked=true;   // the AddSe step comes through turretcam.cpp's hook (StabStep)

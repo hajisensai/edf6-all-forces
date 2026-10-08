@@ -7,7 +7,7 @@ source = code_only((root / 'src/proteus.cpp').read_text(encoding='utf-8'))
 network = code_only((root / 'src/proteus_net.inc').read_text(encoding='utf-8'))
 field = code_only((root / 'src/proteus_field.inc').read_text(encoding='utf-8'))
 frame = body(source, 'void Frame(')
-assert frame.index('NetworkFrame(') < min(frame.index('Pressed('), frame.index('proteus::Step('), frame.index('Legs('), frame.index('Salvo('))
+assert frame.index('NetworkFrame(') < min(frame.index('Pressed('), frame.index('proteus::Step('), frame.index('Legs('), frame.index('QueueWeapons('))
 remote = body(network, 'bool NetworkFrame(')
 for forbidden in ('Pressed(', 'Mark(', 'Legs(', 'DriverGun(', 'Salvo(', 'proteus::Step('):
     assert forbidden not in remote, forbidden
@@ -24,3 +24,14 @@ assert 'std::fmin(taken,1-p.defense)' in field and 'extra-t.extraGiven' in field
 assert 'RestoreFieldMultiplier' in body(field, 'void RefreshFieldWrites(')
 assert 'contribution.source.Is(v)' in field, 'reused source slots must not retain old field identity'
 print('proteus_net_guard: control, pose/defense ownership, replica fire isolation and field dedup passed')
+
+weapons = code_only((root / 'src/proteus_weapons.inc').read_text(encoding='utf-8'))
+flush = body(weapons, 'void FlushWeapons(')
+assert flush.index('IsOnlineAuthority(v)') < flush.index('DriverGun(')
+assert 'u->net.remote' in flush and 'u->queuedDriver.Is(' in flush and 'u->queuedFireFrame!=GameFrame()' in flush
+post = body(weapons, 'void __fastcall ProteusWeaponPost(')
+assert post.index('nextWeaponPost)(object,step)') < post.index('FlushWeapons(v)')
+
+vhud = code_only((root / 'src/vhud.cpp').read_text(encoding='utf-8'))
+assert 'ProteusDriverSight(v,&r.arm[0])' in vhud and 'ProteusSightWeapon(v,r.seat)' in vhud
+assert 'a.physicalOnly=true;a.coFired=true' in vhud, 'paired physical cannon must have a displayed firing path'

@@ -1071,8 +1071,9 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     const int uiStore=ApplyAircraftPayloadChoice(j,v,st,n);
     const bool next=s.nextTarget && !j.targetHeld;
     j.targetHeld=s.nextTarget;
-    if(next && st[j.store].spec->role!=StoreRole::bomb){NextLockTarget(st[j.store].weapon);Log("PJET v=%p target: the next one",v);}
-    j.lock=st[j.store].spec->role==StoreRole::bomb ? 0 : WeaponLock(st[j.store].weapon,j.lockAt,&j.lockProgress);
+    const bool guided=st[j.store].weapon && (st[j.store].spec->role==StoreRole::air || st[j.store].spec->role==StoreRole::ground);
+    if(next && guided){NextLockTarget(st[j.store].weapon);Log("PJET v=%p target: the next one",v);}
+    j.lock=guided ? WeaponLock(st[j.store].weapon,j.lockAt,&j.lockProgress) : 0;
     audio::LockTone(j.lock,j.lockProgress);
     // Being locked on (the user, 2026-10-05: "being locked on should sound a warning too"): a missile homing on it
     // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.

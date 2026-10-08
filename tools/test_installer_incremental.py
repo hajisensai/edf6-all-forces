@@ -174,14 +174,17 @@ class IncrementalTests(unittest.TestCase):
             builders = {}
             for group in buildcache.GROUPS:
                 module = importlib.import_module('make_' + group)
-                files = {f'OBJECT/{group}.SGO': group.encode()}
+                files = {f'OBJECT/{group}.MRAB' if group == 'optics' else f'OBJECT/{group}.SGO': group.encode()}
+                if group == 'optics':
+                    stack.enter_context(patch.object(module, 'build_stock_redirects', return_value={}))
+                    stack.enter_context(patch.object(module, 'install_stock_redirects', return_value=[]))
                 value = (b'mac', {'part': b'map'}) if group == 'bigmap' else files
-                builders[group] = stack.enter_context(patch.object(module, 'build', return_value=value))
+                builders[group] = stack.enter_context(patch.object(module, 'build_models' if group == 'optics' else 'build', return_value=value))
                 if group != 'bigmap':
                     def write(game: str, data: dict[str, bytes], owner: str = group) -> list[str]:
                         led = ledger.Ledger(game)
                         return [led.put(owner, p, b) for p, b in data.items()]
-                    stack.enter_context(patch.object(module, 'install', write))
+                    stack.enter_context(patch.object(module, 'install_models' if group == 'optics' else 'install', write))
             installer.install(str(self.game))
             paths = list((self.game / 'Mods/OBJECT').glob('*')) + list((self.game / 'Mods/MAP').glob('*'))
             timestamps = {p: p.stat().st_mtime_ns for p in paths}

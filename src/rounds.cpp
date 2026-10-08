@@ -58,7 +58,7 @@ const Sig kSigs[]={
 };
 
 // The round classes by their factory's vtable (RTTI ".?AVFactory@<class>@@", checked at load) and how the HUD shows them.
-enum class Cls : std::uint8_t { arc, lobbed, missile, homing };
+enum class Cls : std::uint8_t { arc, lobbed, missile, homing, laser, beam };
 struct ClassInfo { unsigned vtable; const char* rtti; const char* label; Cls cls; };
 const ClassInfo kClasses[]={
     {0x17A3E90,".?AVFactory@SolidBullet01@@","GUN",Cls::arc},
@@ -69,17 +69,18 @@ const ClassInfo kClasses[]={
     {0x17A16C8,".?AVFactory@GrenadeBullet01_MapNoDamage@@","GREN",Cls::lobbed},
     {0x17A1BD0,".?AVFactory@MissileBullet01@@","MSL",Cls::missile},
     {0x17A1DA8,".?AVFactory@MissileBullet02@@","MSL",Cls::homing},
-    {0x179FC60,".?AVFactory@LaserBullet01@@","LASER",Cls::arc},
+    {0x179FC60,".?AVFactory@LaserBullet01@@","LASER",Cls::laser},
     {0x179F9D8,".?AVFactory@HomingLaserBullet01@@","HLASER",Cls::homing},
-    {0x179E2D0,".?AVFactory@EfsBullet@@","BEAM",Cls::arc},
-    {0x179ECA8,".?AVFactory@EfsExposureBullet@@","BEAM",Cls::arc},
+    {0x179E2D0,".?AVFactory@EfsBullet@@","BEAM",Cls::beam},
+    {0x179ECA8,".?AVFactory@EfsExposureBullet@@","BEAM",Cls::beam},
     {0x17A12F0,".?AVFactory@FlameBullet02@@","FLAME",Cls::arc},
     {0x17A20A0,".?AVFactory@AcidBullet01@@","ACID",Cls::arc},
     {0x17A14A0,".?AVFactory@NapalmBullet01@@","NAPALM",Cls::lobbed},
 };
 constexpr int kClassCount=static_cast<int>(sizeof(kClasses)/sizeof(kClasses[0]));
 bool classOk[kClassCount]{};
-bool customOk=false,statusOk=false;
+bool customOk=false,statusOk=false,maserOk=false;
+constexpr unsigned kMaserWeaponVtable=0x17E5E40;
 // The weapon status the stock gauge reads (0x692100), whose fields vhud.cpp shows: rounds, ReloadTime, the cooldown, the
 // charge time and its count, the reload's count, the magazine (and the SGO read that fills it, 0x68C55C).
 const Sig kStatusSigs[]={
@@ -156,6 +157,7 @@ bool InstallRounds() noexcept {
         bool status=true;
         for(const auto& s:kStatusSigs)status=status && Matches(s.rva,s.bytes,s.size);
         statusOk=status;
+        maserOk=VtableNamed(kMaserWeaponVtable,".?AVWeapon_VehicleMaser@@");
         int named=0;
         for(int i=0;i<kClassCount;++i)named+=classOk[i]=VtableNamed(kClasses[i].vtable,kClasses[i].rtti);
         Log("HOOK rounds custom=%d classes=%d/%d status=%d (rockets flown as the game flies them: custom=1 and MissileBullet01's class;"
@@ -174,6 +176,10 @@ bool ReadRound(const unsigned char* w,RoundModel* out) noexcept {
     const ClassInfo* c=ClassOf(w);
     m.label=c ? c->label : "WPN";
     m.rtti=c ? c->rtti : nullptr;
+    m.style=c && (c->cls==Cls::laser || c->vtable==0x179F9D8) ? WeaponStyle::laser : c && c->cls==Cls::beam ? WeaponStyle::beam : WeaponStyle::projectile;
+    // The atomic ray cannon deliberately fires SolidBullet01 in the stock SGO.
+    // Its actual weapon class, not that carrier projectile, owns the beam behavior.
+    if(maserOk && At<const unsigned char*>(w,0)==image+kMaserWeaponVtable){m.style=WeaponStyle::maser;m.label="MASER";}
     m.kind=At<std::int32_t>(w,kWeaponLockon)==kHoming ? RoundKind::homing : RoundKind::arc;
     if(c && c->cls==Cls::homing)m.kind=RoundKind::homing;
     m.lobbed=c && c->cls==Cls::lobbed;

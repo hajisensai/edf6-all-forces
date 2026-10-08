@@ -121,7 +121,7 @@ void RangeTarget(const unsigned char* v,const StockHudReadout& r,const float* ey
 void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const float* dir,StockArm& a) noexcept {
     roundaim::Round round{};
     float shooter[3];
-    if(a.physicalOnly || m.lobbed || !ArcRoundOf(w,m,&round,shooter))return;
+    if(a.physicalOnly || EnergyWeapon(m.style) || m.lobbed || !ArcRoundOf(w,m,&round,shooter))return;
     a.ladder=gunsight::Of(round,pos,dir,shooter);
     const roundaim::GunMark g=roundaim::GunSight(round,pos,dir,shooter,a.hit,a.at,a.flight*60.0f,target.ok ? target.at : nullptr,
                                                  target.vel);
@@ -144,7 +144,7 @@ void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true) noex
     a.ammoMax=WeaponStatusOk() ? At<std::int32_t>(w,kAmmoMax) : -1;
     if(WeaponStatusOk())Reload(w,a);
     else{a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;}
-    a.kind=m.kind;a.lobbed=m.lobbed;
+    a.kind=m.kind;a.style=m.style;a.lobbed=m.lobbed;
     a.lofted=At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted;
     if(a.lofted)strncpy_s(a.label,"ROCKETS",_TRUNCATE);
     if(!aim || a.lofted || m.kind==RoundKind::none)return;
@@ -278,6 +278,16 @@ void StockHudFrame(unsigned char* v) noexcept {
             Arm(w,!r.heli && a.coFired,a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)));
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
+    // Proteus seat 0 owns no stock holder. Its custom gun borrows the physical right cannon; never substitute
+    // the stock cannon's speed/ammo for that custom round. Seat 1 also shows the paired right barrel's path.
+    if(r.seat==0 && !r.arms && ProteusDriverSight(v,&r.arm[0])) {
+        r.arms=1;r.sight=0;r.aimOk=true;std::memcpy(r.aim,r.arm[0].bore,12);
+    } else if(r.seat==1 && r.arms<kStockArms) {
+        if(const auto paired=ProteusSightWeapon(v,r.seat)) {
+            auto& a=r.arm[r.arms++];a.physicalOnly=true;a.coFired=true;
+            Arm(paired,true,a,false);
+        }
+    }
     r.selected=pickedArm>=0 ? pickedArm : storeArm;
     FuelGauge(v,&r.fuel);
     Threats(v,r);

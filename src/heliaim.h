@@ -220,6 +220,19 @@ inline float PlayerYaw(float off,float rate,float most) noexcept {
     return vec::Clamp((want+(want-rate)*kRateGain)/most,-1.0f,1.0f);
 }
 
+// Native +0x1604 is a lagged heading OFFSET, not rad/s: 654E3F eases it toward maxAngle*input;
+// 654ECA adds that offset to the target heading, then 6CE9C1 scales the angular error by spring*60.
+// Invert that lag for the next native step. Otherwise the outer rate controller adds feedback around
+// an unmodelled gain of ~9 and several seconds of lag (Brute), driving alternate full-stick turns.
+inline float PlayerYawInput(float off,float rate,float rateLimit,float maxAngle,float state,float blend,float spring) noexcept {
+    if(!std::isfinite(off+rate+rateLimit+maxAngle+state+blend+spring) || rateLimit<=0.0f ||
+       std::fabs(maxAngle)<1e-4f || blend<=0.0f || blend>1.0f || spring<=0.0f)return 0.0f;
+    const float gain=spring*60.0f;
+    const float most=std::fmin(rateLimit,std::fabs(maxAngle)*gain);
+    const float wanted=PlayerYaw(off,rate,most)*most/gain;
+    return vec::Clamp((wanted-state*(1.0f-blend))/(maxAngle*blend),-1.0f,1.0f);
+}
+
 // The rotor that holds a stock heli's height, for its lift per rotor `lift` (veh+0x1610, the SGO's heli_movement[0][1]
 // / 60: docs/aircraft-re.md) and mass factor `mass` (+0x161C): kHoverRotor at the 506's lift (34 / 60), as the NPC
 // pilot learns it holding its height (the logs: 0.42-0.43), the less the more lift. The old guess took +0x1610 as 70

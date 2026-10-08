@@ -1966,8 +1966,8 @@ def heli_mouse_aim_wired() -> None:
     for law in ('aim::StockStick(', 'aim::StockThrottle('):
         assert law in steer and law in fly, law
     # The yaw is the one law apart (2026-10-06, the user: the mouse did not turn the heli): the NPC damps its turn
-    # (StockYaw), the player's heading chases the mouse's aim (PlayerYaw) at the turn rate PlayerYawTune raises.
-    assert 'aim::StockYaw(' in steer and 'aim::PlayerYaw(' in fly and 'aim::StockYaw(' not in fly
+    # (StockYaw), the player compensates the native angle-state lag/spring (PlayerYawInput).
+    assert 'aim::StockYaw(' in steer and 'aim::PlayerYawInput(' in fly and 'aim::StockYaw(' not in fly
     assert 'aim::MoveOnScreen(' in fly, 'heli.cpp AimFly: the mouse kept on the screen axis by axis'
     player = heli.split('void PlayerHeli(', 1)[1].split('\n}\n', 1)[0]
     assert 'PlayerYawTune(v,' in player and 'kMaxYaw,a.yaw' in heli.split('void AssistOff(', 1)[1].split('\n}\n', 1)[0]
@@ -2434,7 +2434,7 @@ def gunship_cannon_round() -> None:
         m = re.search(rf'k{cpp}Speed=([\d.]+)f', bay)
         assert m and float(m.group(1)) == gun.speed * 60.0, f'src/jet_bay.cpp k{cpp}Speed (m/s) is the round\'s speed a frame'
         assert f'OBJECT/{gun.file}' in make_jets.names(), gun.file
-        assert '{L"","' + name + '",StoreRole::bomb' in board, f'src/playerjet_board.inc kSpecials {name}'
+        assert '{L"","' + name + '",StoreRole::gun' in board, f'src/playerjet_board.inc kSpecials {name}'
         assert gun.file in readme, f'README.md: {gun.file}'
     assert make_jets.SIDE_GUNS == (make_jets.CANNON, make_jets.GATLING), 'src/jet_bay.cpp kSideGuns\' order'
     assert re.search(r'kSideGuns\[\]=\{\s*\{kCannonSgo,kCannonFile,[^}]*\},\s*\{kGatlingSgo,kGatlingFile,', bay), 'kSideGuns in that order'
@@ -3284,8 +3284,8 @@ def installer_removes_what_it_writes() -> None:
     install_Y( -> remove_Y(; the call weapons go through retire_weapons (placeholders keep their rows)."""
     inst = src('tools/installer.py')
     body, undo = _function(inst, 'install'), _function(inst, 'uninstall')
-    modules = set(re.findall(r'\b(\w+)\.install\(', body))
-    helpers = set(re.findall(r'\binstall_(\w+)\(', body))
+    modules = set(re.findall(r'\b(\w+)\.install(?:_\w+)?\(', body))
+    helpers = set(re.findall(r'(?<![\w.])install_(\w+)\(', body))
     assert {'make_jets', 'gen', 'call_weapons'} <= modules and {'plugin', 'autoturret'} <= helpers, (modules, helpers)
     lacking = sorted(m for m in modules - {'call_weapons'} if f'{m}.remove' not in undo and f'{m}.uninstall(' not in undo)
     lacking += sorted(f'install_{h}' for h in helpers if f'remove_{h}(' not in undo)
@@ -3382,6 +3382,10 @@ def pack_install_upgrade_uninstall() -> None:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
                 enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+            # Geometry/SGO parsing are generator boundaries; scoped optic journals/install/remove stay real.
+            import make_optics
+            enter(patched(make_optics, build_models=lambda game: {'OBJECT/EDF6VC_OPTIC_FAKE.MRAB': b'optic'},
+                          build_stock_redirects=lambda game: {}, redirect=lambda data: (data, ())))
             # the stock vehicles' stores (on by default): a vehicle and a request, gone again with the uninstall
             stores = {'OBJECT/EDF6VC_FAKE_STORES.SGO': b'stores', 'WEAPON/FAKE_STORES_REQUEST.SGO': b'request'}
             enter(patched(importlib.import_module('make_stock_stores'),
@@ -3942,9 +3946,12 @@ def stock_payload_and_seats_wired() -> None:
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
-    assert 'IsLoadoutWeapon(w)' in payload and 'L"EDF6VC_"' in stores
+    assert 'if(IsStoreWeapon(w))return PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    order = [hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
+    # The disabled branch also calls AimLines to restore native lines. Check the
+    # enabled pipeline's ordering, not that earlier ownership-cleanup call.
+    enabled_hook = hook[hook.index('FrameTick();'):]
+    order = [enabled_hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
     assert all(x >= 0 for x in order) and order == sorted(order), f'src/crew.cpp InputHook step order: {order}'
     assert 'PayloadPicked(v)' in src('src/helisight.cpp')
     assert 'PlayerSeatPrompt(&s.seatPrompt)' in src('src/hud.cpp') and 'void SeatLine(' in src('src/hud.cpp')

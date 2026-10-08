@@ -5,6 +5,11 @@
 int main() {
     using namespace crew;int bridgeChecks=0,failed=0;
     auto check=[&](bool yes,const char* msg){++bridgeChecks;if(!yes){++failed;std::printf("FAIL %s\n",msg);}};
+    check(kSpecials[kDrones].role==StoreRole::drone && kSpecials[kBay].role==StoreRole::bomb,
+          "production carrier deployment is a drone capability; bomber bay remains a bomb");
+    check(kSpecials[kShells].role==StoreRole::gun && kSpecials[kCannon].role==StoreRole::gun &&
+          kSpecials[kGatling].role==StoreRole::gun && kSpecials[kCharge].role==StoreRole::charge,
+          "special gun and detonation actions no longer borrow bomb/missile roles");
     payloadScenario=true;recoveryConfig.enabled=recoveryConfig.playerJet=true;
     unsigned char vehicle[0x3000]{},weapons[2][0x1800]{},seats[edf::kSeatStride*2]{},human[0x400]{},ctrl[16]{};
     Put<void*>(vehicle,kSelfCtrl,ctrl);Put<void*>(vehicle,kSeats,seats);Put<std::uint64_t>(vehicle,kSeatCount,2);

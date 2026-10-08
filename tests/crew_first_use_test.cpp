@@ -133,7 +133,7 @@ void WarnTick(void) noexcept{unexpectedHook();return;}
 }
 int main(){
     using namespace crew;
-    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if(!image)return 2;
     Setup();Crew(testVehicle,0);Time(10000);Crew(testVehicle,0);
     Check(calls==0,"unused parked ground vehicle stays empty after crew delay");
@@ -216,6 +216,43 @@ int main(){
         Time(100+kExitWatchMs+500);Put<float>(testHuman,kPosition+4,-1.0f);ExitGroundTick();
         testFloor=exitground::kNoFloor;
         Check(warpCount==0,"past the exit watch the soldier is the game's again");
+    }
+    {   // Turning off the plugin must give back its own line counts even in empty seats.
+        Setup();Crew(testVehicle,0);
+        unsigned char line[0x200]{}, weapon[0x2000]{}, holder[0x100]{};
+        unsigned char* holders[9]{};float points[8*4]{};
+        Put<void*>(line,0,image+kAimLineVtable);
+        Put<int>(line,kAimLineSegments,8);
+        Put<void*>(line,kAimLinePoints+8,points);
+        Put<std::uint64_t>(line,kAimLinePoints+0x10,8);
+        Put<void*>(weapon,kWeaponAimLine,line);Put<void*>(holder,kHolderWeapon,weapon);
+        holders[8]=holder;
+        Put<void*>(testSeats,kSeatWeapons,holders);Put<std::uint64_t>(testSeats,kSeatWeaponCount,9);
+        SetLine(*FindState(testVehicle),line,LineWant::hide,reinterpret_cast<float*>(testVehicle+kPosition));
+        Check(At<int>(line,kAimLineSegments)==0,"production hide owns the native count");
+        testConfig.enabled=false;AimLines(testVehicle);
+        Check(At<int>(line,kAimLineSegments)==8,"disabled restores empty-seat ninth-holder line without querying custom HUD");
+        Check(HiddenOf(*FindState(testVehicle),line)==nullptr,"restoration releases ownership");
+        Put<int>(line,kAimLineSegments,5);AimLines(testVehicle);
+        Check(At<int>(line,kAimLineSegments)==5,"disabled does not replace another owner's native count");
+    }
+    {
+        unsigned char system[0xD00]{};int scene=0;
+        Put<void*>(image,kSystem,system);Put<void*>(system,0,image+kSystemVtable);
+        Put<void*>(system,0x68,&scene);Put<std::uint32_t>(system,0xCE0,123);
+        frameClockOk=true;frameClock.Reset();SeeFrame(testVehicle);
+        const auto first=GameFrame();
+        for(unsigned i=0;i<1024;++i)SeeFrame(reinterpret_cast<void*>(std::uintptr_t{0x10000}+i*16));
+        Check(GameFrame()==first,"1024 different vehicles in one native scene step advance no extra frame");
+        Put<std::uint32_t>(system,0xCE0,124);SeeFrame(testHuman);
+        Check(GameFrame()==first+1,"entire previous population replaced still advances on native step");
+        Put<std::uint32_t>(system,0xCE0,0);SeeFrame(testVehicle);
+        Check(GameFrame()==first+2,"native scene reset in same allocation stays monotonic");
+        frameClock.native=0xffffffffu;Put<std::uint32_t>(system,0xCE0,0);SeeFrame(testVehicle);
+        Check(GameFrame()==first+3,"native counter wrap advances one frame");
+        const auto before=GameFrame();tickFrame=before;ResetCrew();
+        Check(GameFrame()>before && tickFrame==0,"mission reset invalidates frame consumers and native baseline");
+        frameClockOk=false;Put<void*>(image,kSystem,nullptr);
     }
     std::printf("crew_first_use_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;

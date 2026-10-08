@@ -1348,6 +1348,10 @@ int Scenes(const std::wstring& dir) {
     Prime(pos);
     sceneJet.store=3;
     Scene(dir,L"jet_switch",pos);
+    const PlayerJetReadout beforeDrone=sceneJet;
+    sceneJet.storeName[1]="DRONES";sceneJet.storeRole[1]=static_cast<int>(StoreRole::drone);sceneJet.store=1;sceneJet.bomb=false;
+    Scene(dir,L"carrier_drone_store",pos);
+    sceneJet=beforeDrone;
     Line controls{};JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
     sceneJet.keys=true;
     Scene(dir,L"jet_controls_keyboard",pos);JetControls(controls,sceneJet);failed+=AircraftControlsDrawn(controls);
@@ -1422,6 +1426,16 @@ int Scenes(const std::wstring& dir) {
     }
     Prime(ground);
     Scene(dir,L"ground_stores_eight",ground);
+    sceneStock=savedStock;
+    sceneStock.arm[0].style=WeaponStyle::beam;strcpy_s(sceneStock.arm[0].label,"BEAM");sceneStock.arm[0].ladder.ticks=0;
+    sceneStock.arm[0].ranged=false;sceneStock.arm[0].physicalOnly=false;sceneStock.sight=0;
+    sceneStock.arm[0].aimed=true;sceneStock.arm[0].bore[2]=1.0f;sceneStock.arm[0].hit=true;sceneStock.arm[0].range=90.0f;
+    failed+=SightGun(sceneStock,false)!=0; // energy reticle does not need a bogus ballistic ladder to exist
+    LoadCell energyCells[kStockArms];StockCells(sceneStock,energyCells);
+    failed+=energyCells[0].icon!=hudcue::StoreIcon::energy;
+    Scene(dir,L"nix_energy_weapon",ground);
+    sceneStock.arm[0].style=WeaponStyle::maser;strcpy_s(sceneStock.arm[0].label,"MASER");
+    Scene(dir,L"emc_atomic_ray",ground);
     sceneStock=savedStock;
     failed+=TankSightScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
