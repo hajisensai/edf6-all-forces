@@ -3,6 +3,7 @@
 #include "coop_extension_api.h"
 #include "crew.h"
 #include "online_authority.h"
+#include "mission_participants.h"
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -21,9 +22,9 @@ AdmissionReadyFn transportAdmissionReady=nullptr;
 bool running=false,blockedUntilMission=false;
 ULONGLONG nextResolve=0,lastTick=~0ULL;
 SRWLOCK worldLock=SRWLOCK_INIT;
-EDF6AFMissionParticipants world{};
+EDF6AFMissionParticipants world{sizeof(EDF6AFMissionParticipants),0,0,0,1,{}};
 bool worldFrozen=false,worldCreationSeen=false;
-std::uint64_t worldSerial=0;
+std::uint64_t worldSerial=1;
 std::uint32_t worldPhase=0;
 ObjRef worldCreated[support_net::kMaxPeers]{};
 ULONGLONG nextWorldRead=0;
@@ -192,6 +193,8 @@ bool SupportParticipantAllowed(void* puid) noexcept {
 std::uint32_t GetMissionParticipants(std::uint32_t version,std::uint32_t size,EDF6AFMissionParticipants* out) noexcept {
     if(!out || version!=EDF6AF_MISSION_PARTICIPANTS_VERSION || size!=sizeof(*out))return 0;
     AcquireSRWLockShared(&worldLock);*out=world;ReleaseSRWLockShared(&worldLock);
+    unsigned location=0;
+    if(!ReadNativeMissionLocation(&location) || location!=4)out->ready=0;
     return 1;
 }
 std::uint32_t AllowMissionPlayer(std::int32_t index) noexcept {
@@ -234,9 +237,20 @@ std::uint32_t GetMissionAdmissionState(std::uint32_t version,std::uint32_t size,
     if(!out || version!=EDF6AF_MISSION_ADMISSION_VERSION || size!=sizeof(*out))return 0;
     AcquireSRWLockShared(&worldLock);
     *out={};out->size=sizeof(*out);out->phase=worldPhase;out->worldEpoch=world.worldEpoch;
+    const bool sealed=worldFrozen;
     out->participantCount=world.participantCount;
     std::memcpy(out->participants,world.participants,sizeof(world.participants));
-    ReleaseSRWLockShared(&worldLock);return 1;
+    ReleaseSRWLockShared(&worldLock);
+    // This verified script-owned location is available in menus before any
+    // preload/configuration callback. Never infer Lobby from !ready or deaths.
+    unsigned location=0;
+    if(!ReadNativeMissionLocation(&location))out->phase=0;
+    else if(location==2 || location==3)out->phase=1;
+    else if(location==5)out->phase=2;
+    else if(location==4)out->phase=sealed ? 3u : 2u;
+    else out->phase=0;
+    if(out->phase!=3) {out->participantCount=0;std::memset(out->participants,0,sizeof(out->participants));}
+    return 1;
 }
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {
     SupportNetTick();

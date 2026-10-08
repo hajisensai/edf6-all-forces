@@ -11,6 +11,8 @@ namespace fixture {
 ULONGLONG tick=10000;
 bool installed=true,ready=true,host=true,online=true,stale=false;
 bool gateReady=false;
+bool locationReadable=true;
+unsigned location=4;
 unsigned actors=0,expectedActors=0;
 const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
@@ -38,6 +40,7 @@ const Config& Cfg() noexcept { config.enabled=true;return config; }
 bool InSession() noexcept { return fixture::online; }
 bool OnlineHostOnly() noexcept { return fixture::host; }
 void Log(const char*,...) noexcept {}
+bool ReadNativeMissionLocation(unsigned* out) noexcept { *out=fixture::location;return fixture::locationReadable; }
 }
 namespace fixture {
 using namespace crew::support_net;
@@ -126,13 +129,21 @@ void WorldParticipants() {
     EDF6AFMissionAdmissionState policy{};
     Check(EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy) && policy.phase==3 && policy.participantCount==2,
         "host admission policy exposes sealed world independently of transport readiness");
+    location=5;EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy);
+    Check(policy.phase==2 && !policy.participantCount,"native loading cannot leak previous sealed roster");
+    location=3;EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy);
+    Check(policy.phase==1 && !policy.participantCount,"verified native MENU_ROOM yields lobby before another preload");
+    EDF6AF_GetMissionParticipants(1,sizeof(state),&state);Check(!state.ready,"room menu is not an active mission quorum");
+    locationReadable=false;EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy);
+    Check(policy.phase==0,"native phase read failure is unknown, never lobby");
+    locationReadable=true;location=4;
     Check(!EDF6AF_GetMissionParticipants(2,sizeof(state),&state),"world snapshot ABI rejects unsupported version");
     crew::ResetSupportNet();actors=4;expectedActors=4;crew::SupportMissionPlayerAllowed(0);
     NoteCreations();
     tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==3 && state.worldEpoch!=epoch && crew::SupportMissionPlayerAllowed(2),
         "next explicit mission admits prior lobby-only player into new frozen world");
-    crew::SupportMissionReturnedToLobby();EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy);
+    crew::SupportMissionReturnedToLobby();location=3;EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy);
     Check(policy.phase==1 && !policy.participantCount && policy.worldEpoch!=state.worldEpoch,
         "only explicit verified lobby notification clears sealed admission policy");
     crew::ResetSupportNet();
@@ -140,6 +151,9 @@ void WorldParticipants() {
 }
 int main() {
     using namespace fixture;
+    EDF6AFMissionAdmissionState initial{};location=3;
+    Check(EDF6AF_GetMissionAdmissionState(1,sizeof(initial),&initial) && initial.phase==1 && initial.worldEpoch,
+        "initial native lobby is visible before dispatcher preload configuration");location=4;
     crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive});
     wchar_t note[256]{};const float at[3]={0,1,2};
     Check(crew::SubmitSupportRequest(1,at,note,256),"production dynamic ABI accepts host request");Step();

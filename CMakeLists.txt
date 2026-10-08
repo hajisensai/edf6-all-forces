@@ -742,6 +742,7 @@ add_test(NAME support_soldier_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SO
 set_tests_properties(support_soldier_native PROPERTIES SKIP_RETURN_CODE 77)
 # Reliable host-authoritative map support protocol (also compiled in production).
 target_sources(EDF6VehicleCrew PRIVATE src/support_protocol.cpp src/support_net.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/mission_participants.cpp)
 add_executable(support_protocol_test tests/support_protocol_test.cpp src/support_protocol.cpp)
 target_compile_options(support_protocol_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_protocol COMMAND support_protocol_test)

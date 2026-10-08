@@ -93,11 +93,15 @@ before entry. No mid-world actor/seat catchup is claimed or substituted with
 invisible local-only actors.
 
 `EDF6AF_GetMissionAdmissionState` exposes lifecycle independently of extension
-readiness: Unknown, verified Lobby, Loading, Sealed and Invalid. Reset is Loading;
-successful actor sealing is Sealed. Only `SupportMissionReturnedToLobby`, called
-by a verified native lobby transition, may publish Lobby. Missing actors or a
-false readiness bit are never interpreted as a lobby. Consumers must keep a fresh
-joiner waiting when this lifecycle state is unknown or unverified.
+readiness. It directly reads the verified `Network_SetLocation` state, available
+in menus before dispatcher preload: MENU_LOBBY(2)/MENU_ROOM(3) mean Lobby,
+GAME_LOADING(5) means Loading, GAME_PLAYING(4) becomes Sealed only after matching
+created actors. Unreadable/boot state is Unknown. Actual Root `MAINSCRIPT.AS`
+sets MENU_ROOM only after Mission returns, FreeGroup(Scene) and Network_Session_End.
+The helper checks both native setter signatures and reads the aligned state only
+while its lock is clear, without modifying the game. Missing actors or a false
+readiness bit are never interpreted as a lobby. Consumers keep fresh joiners
+waiting when this lifecycle state is unknown or unverified.
 
 The host-internal `SubmitPreparedSupportPlan` handles existing mission vehicles
 through the same protocol. It accepts reserved catalog 1023 and exactly one
