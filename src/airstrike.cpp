@@ -662,6 +662,9 @@ support::Refusal PlanAirSupport(int catalog,const float* target,const float* obs
             const float z=from[2]+dz/d*along-dx/d*halfWidth*static_cast<float>(lane);
             float ground;
             if(!MapGroundNear(x,z,floor,&ground,true) || std::fabs(ground-floor)>0.5f)return false;
+            // Map collision rays see the seabed, not the water surface. A level seabed is no runway.
+            float surface=0.0f;const Sea sea=SeaAt(x,z,&surface);
+            if(sea==Sea::unknown || (sea==Sea::water && (!std::isfinite(surface) || surface>ground)))return false;
             const float a[3]={x,ground+0.2f,z},b[3]={x,ground+25.0f,z};float hit[3];
             if(MapRay(a,b,hit)>=0.0f)return false;
         }

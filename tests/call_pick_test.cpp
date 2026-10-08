@@ -9,6 +9,8 @@ unsigned char* image=nullptr;
 Config config{};
 PlayerFix player{};
 bool supportSky=true,supportGround=true,supportMeasured=true;
+Sea supportSea=Sea::land;
+Sea SeaAt(float,float,float* surface) noexcept {*surface=1;return supportSea;}
 PlayArea MapPlayArea() noexcept { return {{-1500,-1500},{1500,1500},supportMeasured,0,true}; }
 float MapRay(const float* from,const float* to,float* hit) noexcept {
     if(!supportSky && from[1]<10 && to[1]>10){hit[0]=from[0];hit[1]=10;hit[2]=from[2];return 0.5f;}
@@ -189,6 +191,11 @@ int main() {
     supportGround=true;supportMeasured=false;
     Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noArea,"unmeasured bounds cannot be used as actual entry ground");
     supportMeasured=true;
+    supportSea=Sea::water;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"a flat seabed cannot be used as an aircraft runway");
+    supportSea=Sea::unknown;
+    Check(PlanAirSupport(0,supportTarget,observer,&route)==support::Refusal::noEntry,"unknown water geometry cannot authorize ground deployment of aircraft");
+    supportSea=Sea::land;
     Check(PlanAirSupport(16,supportTarget,observer,&route)==support::Refusal::unsupported,"stationary submarine model cannot fake a physical entry");
     std::printf("call picker: %d checks passed\n",checks);
     return 0;

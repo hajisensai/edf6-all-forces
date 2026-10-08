@@ -101,6 +101,8 @@ void Matrix(const float* at,const float* heading,float* out) noexcept {
 }
 bool Foot(float x,float z,float level,float& floor,float height=2.0f) noexcept {
     if(!MapGroundNear(x,z,level,&floor,true) || !std::isfinite(floor))return false;
+    float surface=0.0f;const Sea sea=SeaAt(x,z,&surface);
+    if(sea==Sea::unknown || (sea==Sea::water && (!std::isfinite(surface) || surface-floor>npc::navigation::Profile{}.maxWaterDepth)))return false;
     const float from[3]={x,floor+0.08f,z},to[3]={x,floor+height,z};float hit[3];
     return MapRay(from,to,hit)<0;
 }

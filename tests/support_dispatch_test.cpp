@@ -18,6 +18,10 @@ int held=0;bool transactionActive=false;
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
 bool HoldSupportSoldier(const ObjRef&,bool hold) noexcept {held+=hold ? 1 : -1;return true;}
 bool allReady=true,terrain=true,nativeFail=false;
+#ifndef SUPPORT_ROUTE_NATIVE_TEST
+Sea terrainSea=Sea::land;float waterSurface=0;
+Sea SeaAt(float,float,float* out) noexcept {*out=waterSurface;return terrainSea;}
+#endif
 npc::navigation::Result routeResult=npc::navigation::Result::pending;
 ObjRef Make(bool vehicle=false) noexcept {
     const int slot=made++;auto* o=objects[slot];std::memset(o,0,sizeof(objects[slot]));
@@ -192,6 +196,12 @@ int main() {
     testOnline=false;SupportCallAt(0,target,note,128);SupportCallStatus(note,128);
     check(std::wcsstr(note,L"正在安排")!=nullptr && !localRequest.shown,"offline request restores its detailed planner channel");
     ResetSupportDispatch();SupportCallStatus(note,128);check(!note[0],"mission reset clears old request notices");
+    float footY=0;
+    terrainSea=Sea::water;waterSurface=1;
+    check(!Foot(0,0,0,footY),"soldier collection point cannot use a submerged floor as dry ground");
+    waterSurface=0.2f;check(Foot(0,0,0,footY),"shallow wading matches the navigation allowance");
+    terrainSea=Sea::unknown;check(!Foot(0,0,0,footY),"unknown water state is not treated as a safe entry");
+    terrainSea=Sea::land;
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
 #endif
