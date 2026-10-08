@@ -543,6 +543,12 @@ add_executable(proteus_net_native_test EXCLUDE_FROM_ALL tests/proteus_net_native
 target_include_directories(proteus_net_native_test PRIVATE src common)
 target_link_libraries(proteus_net_native_test PRIVATE edf6common user32)
 target_compile_options(proteus_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_library(proteus_damage_gate_bridge SHARED EXCLUDE_FROM_ALL tests/proteus_damage_gate_bridge.cpp)
+target_compile_options(proteus_damage_gate_bridge PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks proteus_damage_gate_bridge)
+add_test(NAME proteus_damage_gate_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_damage_native_audit.py"
+    --gate-dll "$<TARGET_FILE:proteus_damage_gate_bridge>")
+set_tests_properties(proteus_damage_gate_native PROPERTIES SKIP_RETURN_CODE 77)
 target_link_libraries(gunner_aim_object_test PRIVATE edf6common)
 target_link_libraries(heli_player_input_test PRIVATE edf6common user32)
 add_executable(jetsound_check EXCLUDE_FROM_ALL tools/jetsound_check.cpp)

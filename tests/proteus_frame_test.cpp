@@ -9,6 +9,7 @@ Config config{};ULONGLONG now=3600000,frame=1;
 unsigned char vehicle[0x3000]{},seats[4*kSeatStride]{},human[0x400]{},ctrl[16]{};
 int failures=0,checks=0,gunShots=0,salvoShots=0;
 bool netSession=false,netAuthority=true;
+const void* localNpcAuthority=nullptr;
 std::int32_t netDriver=42;
 int controlSends=0,defenseSends=0;
 proteus_net::State lastControl,lastDefense;
@@ -19,7 +20,11 @@ void Tick(){++frame;now+=100;ProteusFrame(vehicle);}
 }
 const Config& Cfg() noexcept{return config;}
 bool InSession() noexcept{return netSession;}
-bool IsOnlineAuthority(const void*) noexcept{return netAuthority;}
+bool IsOnlineAuthority(const void* object) noexcept{
+    if(!object)return false;
+    if(Big(object))return netAuthority;
+    return object==localNpcAuthority || (At<std::uint16_t>(object,0x128)&3)==2;
+}
 bool InstallProteusNet() noexcept{return true;}
 std::int32_t ProteusNetController(unsigned char*) noexcept{return netDriver;}
 bool ProteusNetSend(unsigned char*,proteus_net::State s) noexcept{

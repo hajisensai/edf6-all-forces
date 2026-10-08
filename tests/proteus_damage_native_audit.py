@@ -18,6 +18,10 @@ parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('edf_dll',nargs='?',type=Path)
 parser.add_argument('--gate-dll',type=Path)
 args=parser.parse_args()
+if not args.edf_dll:
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'pylib'))
+    import gamedir
+    args.edf_dll=Path(gamedir.find_or_dev())/'EDF.dll'
 if not __debug__:
     raise RuntimeError('Run without -O: native preconditions must stay enabled')
 if not args.edf_dll or not args.edf_dll.is_file() or not args.gate_dll or not args.gate_dll.is_file():

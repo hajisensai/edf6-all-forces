@@ -11,7 +11,7 @@ bool Read(const void* p,std::size_t offset,void* out,std::size_t size) noexcept 
 }
 }
 extern "C" __declspec(dllexport) bool ProteusDamageEligible(const void* object,const void* gdi,const void* team) noexcept {
-    crew::proteus::damage_gate::Facts facts{};
-    return crew::proteus::damage_gate::ReadFacts(&Read,object,gdi,team,facts) &&
-           crew::proteus::damage_gate::Eligible(facts);
+    crew::proteus_damage_gate::Facts facts{};
+    return crew::proteus_damage_gate::ReadFacts(&Read,object,gdi,team,facts) &&
+           crew::proteus_damage_gate::Eligible(facts);
 }

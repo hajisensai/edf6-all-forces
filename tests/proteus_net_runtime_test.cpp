@@ -42,8 +42,15 @@ int main(){
         "remote frame never runs Legs, driver fire or salvo");
     Check(At<int>(seats+2*kSeatStride,kSeatClassMask)==0,"replicated seat layout closes slots without firing them");
     s.sequence=2;s.mode=2;s.stagger=0;ProteusNetReceived(vehicle,s);
-    alignas(16) unsigned char hit[0x100]{};Put<float>(hit,kDmgAt,-20);Put<float>(hit,kDmgAmount,1000);
+    alignas(16) unsigned char hit[0x100]{},team[0x100]{},teamRows[0x38]{};int relation[1]={2};
+    Put<void*>(image,kTeamManager,team);Put<void*>(team,0x38,teamRows);Put<void*>(teamRows,0x18,relation);
+    Put<float>(hit,kDmgAt,-20);Put<float>(hit,kDmgAmount,1000);
     float was=0;const int before=defenseSends;
+    relation[0]=1;
+    Check(!Shield(vehicle,hit,&was) && u->st.barrier==1 && defenseSends==before,"rejected friendly hit cannot consume or publish barrier");
+    relation[0]=2;Put<std::uint32_t>(vehicle,0x380,1);
+    Check(!Shield(vehicle,hit,&was) && u->st.barrier==1 && defenseSends==before,"native invulnerability cannot consume or publish barrier");
+    Put<std::uint32_t>(vehicle,0x380,0);
     Check(Shield(vehicle,hit,&was)!=nullptr && At<float>(hit,kDmgAmount)==0 && was==1000,"legal rear hit is fully caught by the owner barrier");
     const float consumed=u->st.barrier;
     Check(consumed<1 && defenseSends==before+1 && lastDefense.barrier==consumed,"full absorption with zero HP loss still broadcasts defense consumption");
@@ -65,7 +72,7 @@ int main(){
     Put<float>(ally,kEnergyMax,100);Put<float>(ally,kEnergy,10);Put<void*>(ally,kHumanWeapons,weapons);Put<std::uint64_t>(ally,kHumanWeaponCount,1);
     Put<float>(weapon,kCountdown,100);Put<float>(weapon,kRate,1);
     const auto walk=reinterpret_cast<std::uintptr_t>(&WalkField);std::memcpy(jump+2,&walk,8);std::memcpy(image+kTeamWalk,jump,12);
-    Put<void*>(image,kTeamManager,ctrl);fieldOk=true;
+    fieldOk=true;
     s.sequence=4;s.fieldRadius=50;s.fieldDefense=.3f;s.fieldAttack=.2f;s.fieldFireRate=2;s.fieldEnergy=.1f;
     ProteusNetReceived(vehicle,s);FieldFrame(*u,vehicle,.1f,config);
     Check(std::fabs(At<float>(ally,kTakenMul)-.7f)<1e-5f && At<float>(ally,kEnergy)==11 && At<float>(weapon,kCountdown)==94,
@@ -102,6 +109,21 @@ int main(){
     Check(!ActiveOf(vehicle),"empty host snapshot deactivates old pilot deployment");
     vehicle[kDead]=1;s.flags=proteus_net::kActive|proteus_net::kShieldOn;s.sequence=2;ProteusNetReceived(vehicle,s);
     Check(!ActiveOf(vehicle) && !Shield(vehicle,hit,&was),"destroyed vehicle cannot resurrect protection from a packet");
+    vehicle[kDead]=0;
+    alignas(16) unsigned char realNpc[0x400]{},npcControl[16]{};
+    Put<void*>(realNpc,0,image+kVtRanger);Put<std::uint16_t>(realNpc,0x128,2);Put<int>(npcControl,8,1);
+    Put<void*>(seats+kSeatStride,kSeatRider,realNpc);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,npcControl);
+    Check(LocalGunner(vehicle),"host-owned real NPC gunner may operate the paired native cannon on the host replica");
+    Put<std::uint16_t>(realNpc,0x128,1);Check(!LocalGunner(vehicle),"remote copy of that NPC cannot trigger another paired shot");
+    Put<void*>(realNpc,0,image+kDummyRiderVtable);Check(!LocalGunner(vehicle),"unregistered Dummy is never promoted to real gunner ownership");
+    Put<void*>(realNpc,0,image+kVtRanger);Put<std::uint16_t>(realNpc,0x128,2);
+    Put<void*>(seats,kSeatRider,realNpc);Put<void*>(seats,kSeatRiderCtrl,npcControl);
+    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
+    netAuthority=true;netDriver=99;Tick();
+    Check(u->active && !u->net.remote && (lastControl.flags&proteus_net::kActive),
+          "real NPC host driver publishes active state while a guest human gunner remains aboard");
+    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);Tick();
+    Check(!u->active && !(lastControl.flags&proteus_net::kActive),"last human leaving an NPC-driven vehicle clears special deployment state");
     ResetProteus();Check(!UnitOf(vehicle,false),"mission reset discards object-bound replay");
     std::printf("proteus_net_runtime_test: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }

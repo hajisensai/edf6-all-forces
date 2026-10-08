@@ -89,14 +89,14 @@ bool NetworkFrame(Unit& u,unsigned char* v,bool live,int playerSeat,ULONGLONG ms
     } else {
         TakeReplica(u,v);ApplyControl(u,u.net.control);
         u.playerSeat=playerSeat>=0 ? static_cast<unsigned>(playerSeat) : static_cast<unsigned>(-1);
-        if(u.net.control.flags&proteus_net::kTwoSeats)TwoSeats(u,v,playerSeat==static_cast<int>(kGunnerSeat));
+        const bool localGunner=LocalGunner(v);
+        if(u.net.control.flags&proteus_net::kTwoSeats)TwoSeats(u,v,localGunner);
         else if(u.closed) {
             for(unsigned s=kRightSeat;s<kProteusSeats && s<SeatCount(v);++s)Put<std::int32_t>(SeatAt(v,s),kSeatClassMask,u.seatMask[s]);
             u.closed=false;
         }
-        if(playerSeat==static_cast<int>(kGunnerSeat)) {
-            Guns(u,false,Cfg());Ring(u,v,ms,Cfg());Publish(u,v,false,SeatAt(v,0),Cfg());
-        }
+        if(localGunner)Guns(u,false,Cfg());
+        if(playerSeat==static_cast<int>(kGunnerSeat)){Ring(u,v,ms,Cfg());Publish(u,v,false,SeatAt(v,0),Cfg());}
         FieldFrame(u,v,dt,Cfg()); // only target-owner support effects; no remote pilot/fire simulation
     }
     DefenseTick(u,v,ms);

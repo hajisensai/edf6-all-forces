@@ -14,6 +14,7 @@ for forbidden in ('Pressed(', 'Mark(', 'Legs(', 'DriverGun(', 'Salvo(', 'proteus
 assert 'FieldFrame(u,v,dt,Cfg())' in remote
 shield = body(source, 'float* Shield(')
 assert shield.index('DefenseOwner(') < shield.index('proteus::Absorb(')
+assert shield.index('proteus_damage_gate::Eligible(') < shield.index('proteus::Absorb('), 'native-rejected damage cannot consume the barrier'
 assert 'SendDefense(' in shield
 apply = body(network, 'void ApplyControl(')
 assert '.barrier=' not in apply and '.quiet=' not in apply, 'pilot state cannot reset the damage owner pool'
@@ -21,4 +22,5 @@ assert 'DefenseOwner(v)' in body(network, 'void DefenseTick(')
 assert 'FieldOwnedHere(o)' in body(source, 'void __fastcall FieldVisit(')
 assert 'std::fmin(taken,1-p.defense)' in field and 'extra-t.extraGiven' in field and 'energy-t.energyGiven' in field
 assert 'RestoreFieldMultiplier' in body(field, 'void RefreshFieldWrites(')
+assert 'contribution.source.Is(v)' in field, 'reused source slots must not retain old field identity'
 print('proteus_net_guard: control, pose/defense ownership, replica fire isolation and field dedup passed')

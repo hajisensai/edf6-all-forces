@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace crew::proteus::damage_gate {
+namespace crew::proteus_damage_gate {
 struct Facts {
     float damage=0.0f;
     std::uint8_t sceneFlags=0;       // object+18; bit 04: 547C76
@@ -77,4 +77,4 @@ inline bool ReadFacts(Reader read,const void* object,const void* gdi,const void*
     out=f;
     return true;
 }
-} // namespace crew::proteus::damage_gate
+} // namespace crew::proteus_damage_gate

@@ -47,6 +47,7 @@
 #include "body506.h"
 #include "proteus_pose.h"
 #include "proteus_net.h"
+#include "proteus_damage_gate.h"
 #include "online_authority.h"
 #include "seat_aim.h"
 #include "edf/aimlink.h"
@@ -124,6 +125,11 @@ const Sig kDamageSigs[]={
     {0x54A579,{0x0F,0xB6,0x9F,0xE8,0x02,0x00,0x00,0x48,0x8B,0xD6,0x48,0x8B,0xCF,0xE8,0xA5,0xD6,0xFF,0xFF},18},
     {0x547C70,{0x4C,0x8B,0xEA},3},                                    // the GameDamageInfo kept
     {0x548109,{0xF3,0x41,0x0F,0x10,0x75,0x50},6},                     // ...its damage read
+    {0x547C76,{0xF6,0x41,0x18,0x04,0x0F,0x85,0xA5,0x09},8},          // scene veto before HP
+    {0x547D9C,{0xF6,0x47,0x1A,0x08,0x0F,0x85,0x7F,0x08},8},          // blocked self hit
+    {0x547DEB,{0x41,0xF6,0x45,0x60,0x20,0x75,0x10,0xF7},8},          // friendly permission
+    {0x548075,{0xF7,0x87,0x80,0x03,0,0,0,0x08},8},                   // damage-disabled target
+    {0x5480F8,{0xF6,0x87,0x80,0x03,0,0,0x01,0x74},8},                // invulnerability before HP
 };
 const Sig kFieldSigs[]={
     {0x5E11D0,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57},16},   // the team walk
@@ -350,6 +356,14 @@ void Guns(Unit& u,bool salvo,const Config& c) noexcept {
 }
 
 // Seats 2 and 3 closed, their dummy gunners sent off; the right cannon follows the left one.
+bool LocalGunner(const unsigned char* v) noexcept {
+    if(SeatCount(v)<=kGunnerSeat)return false;
+    const auto seat=SeatAt(const_cast<unsigned char*>(v),kGunnerSeat);
+    const auto rider=SeatRider(seat);
+    if(rider==Rider::none || rider==Rider::dummy)return false;
+    const auto object=At<const void*>(seat,kSeatRider);
+    return !InSession() || IsOnlineAuthority(object); // a real local NPC counts; a copied remote player/NPC does not
+}
 void TwoSeats(Unit& u,unsigned char* v,bool localGunner=true) noexcept {
     if(SeatCount(v)<kProteusSeats)return;
     if(!u.closed) {
@@ -360,7 +374,7 @@ void TwoSeats(Unit& u,unsigned char* v,bool localGunner=true) noexcept {
         u.closed=true;
         Log("PROTEUS v=%p: two seats (seats 2, 3 closed; masks were %#x %#x)",v,u.seatMask[kRightSeat],u.seatMask[kLauncherSeat]);
     }
-    for(unsigned s=kRightSeat;localGunner && s<kProteusSeats;++s)
+    for(unsigned s=kRightSeat;(!u.net.remote || localGunner) && s<kProteusSeats;++s)
         if(SeatRider(SeatAt(v,s))==Rider::dummy) {
             reinterpret_cast<SeatFn>(image+kSeatKick)(v,SeatAt(v,s));
             Log("PROTEUS v=%p: the NPC gunner of seat %u sent off (two seats)",v,s);
@@ -651,13 +665,16 @@ void DebugLog(Unit& u,const unsigned char* v) noexcept {
 void Frame(unsigned char* v) noexcept {
     const Config& c=Cfg();
     const bool live=ok && c.enabled && c.proteus && !v[kDead] && SeatCount(v)>=1;
-    int playerSeat=-1;
-    for(unsigned s=0;live && s<SeatCount(v);++s)if(SeatRider(SeatAt(v,s))==Rider::player){playerSeat=static_cast<int>(s);break;}
+    int playerSeat=-1;bool anyPlayer=false;
+    for(unsigned s=0;live && s<SeatCount(v);++s) {
+        const auto seat=SeatAt(v,s);anyPlayer=anyPlayer || AnyPlayerIn(seat);
+        if(playerSeat<0 && SeatRider(seat)==Rider::player)playerSeat=static_cast<int>(s);
+    }
     Unit* const u=UnitOf(v,live && (playerSeat>=0 || RegisteredProteus(v)));
     if(!u)return;
     const ULONGLONG ms=GameMs();
     if(NetworkFrame(*u,v,live,playerSeat,ms))return;
-    if(!live || playerSeat<0) {
+    if(!live || !anyPlayer) {
         const bool wasActive=u->active;
         GiveBack(*u,v,!c.enabled || !c.proteus ? "the plugin or ProteusRework off" : v[kDead] ? "wrecked" : "no player aboard");
         if(zone.z.vehicle==v){AcquireSRWLockExclusive(&zoneLock);zone.on=false;ReleaseSRWLockExclusive(&zoneLock);}
@@ -708,7 +725,7 @@ void Frame(unsigned char* v) noexcept {
     }
     if(o.salvoFired){u->salvoLeft=c.proteusSalvoCount;u->salvoAt=0;Log("PROTEUS v=%p: salvo of %d at %.0f m",v,u->salvoLeft,vec::Dist(u->markAt,Pos(v)));}
     Legs(*u,v,c);
-    if(c.proteusTwoSeats)TwoSeats(*u,v);
+    if(c.proteusTwoSeats)TwoSeats(*u,v,LocalGunner(v));
     else if(u->closed) {
         for(unsigned s=kRightSeat;s<kProteusSeats;++s)Put<std::int32_t>(SeatAt(v,s),kSeatClassMask,u->seatMask[s]);
         u->closed=false;
@@ -729,7 +746,7 @@ void Frame(unsigned char* v) noexcept {
     const float liftWant=u->st.mode==proteus::Mode::deployed ? c.proteusViewLift : 0.0f;
     u->lift+=(liftWant-u->lift)*vec::Clamp(dt*2.0f,0.0f,1.0f);
     PublishZone(*u,v,c);
-    Publish(*u,v,driver,driverSeat,c);
+    if(playerSeat>=0)Publish(*u,v,driver,driverSeat,c);
     DebugLog(*u,v);
     DefenseTick(*u,v,ms);
     SendControl(*u,v,ms,o.modeChanged || in.shield);
@@ -739,9 +756,10 @@ void Frame(unsigned char* v) noexcept {
 void FollowCannon(void* aim) noexcept {
     if(!Cfg().enabled || !Cfg().proteus)return;
     for(const auto& u:units) {
-        if(!u.active || !u.closed || (u.net.remote && u.playerSeat!=kGunnerSeat))continue;
+        if(!u.active || !u.closed)continue;
         auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(u.ref.obj));
         if(!u.ref.Is(v) || v[kDead] || SeatCount(v)<kProteusSeats)continue;
+        if(u.net.remote && !LocalGunner(v))continue;
         auto right=seataim::Object(SeatAt(v,kRightSeat));
         const auto launcher=seataim::Object(SeatAt(v,kLauncherSeat));
         if(aim==launcher && u.playerSeat==0 && u.st.mode==proteus::Mode::deployed) {
@@ -765,8 +783,14 @@ template<int I> void __fastcall AimHook(void* aim,const float* input) {
     __try { FollowCannon(aim); } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+bool DamageGateRead(const void* base,std::size_t offset,void* copied,std::size_t size) noexcept {
+    if(!base || offset>UINTPTR_MAX-reinterpret_cast<std::uintptr_t>(base))return false;
+    const auto at=reinterpret_cast<const unsigned char*>(reinterpret_cast<std::uintptr_t>(base)+offset);
+    if(!Readable(at,size))return false;
+    std::memcpy(copied,at,size);return true;
+}
 float* Shield(void* object,void* gdi,float* was) noexcept {
-    if(!DefenseOwner(object))return nullptr;
+    if(!object || !Big(object) || !DefenseOwner(object))return nullptr;
     Unit* const u=ActiveOf(object);
     if(!u || !damageOk)return nullptr;
     auto o=static_cast<unsigned char*>(object);
@@ -774,6 +798,9 @@ float* Shield(void* object,void* gdi,float* was) noexcept {
     if(o[kDead] || !Readable(g,kDmgAmount+4,true))return nullptr;
     float* const dmg=reinterpret_cast<float*>(g+kDmgAmount);
     if(!(*dmg>0.0f) || !std::isfinite(*dmg))return nullptr;
+    proteus_damage_gate::Facts facts;
+    if(!proteus_damage_gate::ReadFacts(&DamageGateRead,object,gdi,At<const void*>(image,kTeamManager),facts) ||
+       !proteus_damage_gate::Eligible(facts))return nullptr;
     const Config& c=Cfg();
     const float* hit=reinterpret_cast<const float*>(g+kDmgAt);
     const float* p=Pos(o);
@@ -889,7 +916,8 @@ bool InstallProteus() noexcept {
             }
         }
         bool changed=false;
-        damageOk=AllMatch(kDamageSigs,sizeof(kDamageSigs)/sizeof(kDamageSigs[0]),"shields") &&
+        damageOk=At<const void*>(image,kVtBig+16*8)==image+0x54AA40 && At<const void*>(image,kVtBig+17*8)==image+0x54AA30 &&
+            AllMatch(kDamageSigs,sizeof(kDamageSigs)/sizeof(kDamageSigs[0]),"shields") &&
                  RedirectCall(image+kDamageCall,image+kDamageFn,reinterpret_cast<void*>(&DamageHook),changed);
         if(damageOk) {   // the call's new target, for subcarrier.cpp's check of the same call (ProteusDamageThunk)
             std::int32_t rel=0;
