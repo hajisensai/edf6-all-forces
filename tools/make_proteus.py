@@ -127,6 +127,9 @@ def _load(root: str) -> dict:
 
 
 def _save(root: str, state: dict) -> None:
+    if not state['files']:
+        Path(root, 'Mods', MANIFEST).unlink(missing_ok=True)
+        return
     modfiles.atomic_write(os.path.join(root, 'Mods', MANIFEST), json.dumps(state, sort_keys=True).encode('utf-8'))
 
 

@@ -46,6 +46,7 @@ class Transaction(unittest.TestCase):
         self.assertEqual(self.path(VEHICLE).read_bytes(), self.original)
         self.assertEqual(self.path(MODEL).read_bytes(), b'previous model')
         self.assertFalse(self.path(CAS).exists())
+        self.assertFalse(self.path(mp.MANIFEST).exists())
 
     def test_changed_consumer_keeps_pair_and_is_not_overwritten_on_reinstall(self):
         mp.install(self.root, self.files)
@@ -56,6 +57,7 @@ class Transaction(unittest.TestCase):
         self.assertEqual(self.path(VEHICLE).read_bytes(), altered)
         self.assertTrue(self.path(MODEL).exists() and self.path(CAS).exists())
         self.assertEqual(len(kept), 3)
+        self.assertTrue(self.path(mp.MANIFEST).exists())
 
     def test_external_range_reference_survives_uninstall(self):
         mp.install(self.root, self.files)
