@@ -2423,7 +2423,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 // (a line in the block instead of DrillPanel), the EMC's charged beam (a line and its bar: emc.cpp), and whether
 // EDF6AutoTurret's lead circle is on the seat's own gun (the
 // seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
-struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; };
+struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; bool high=false; };
 // --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to five
 // lines with a bar under some: the stance (and the stagger's progress), the shield (deployed its heat), the barrier, the
 // salvo (its cooldown, the mark's range), the field (its allies) and the driver's gun; the bindings named where the
@@ -2533,7 +2533,7 @@ int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
         const StockArm& a=r.arm[i];
         return a.aimed && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && a.ladder.ticks>0 && !(i==0 && leadGun);
     };
-    if(r.selected>=0 && r.selected<r.arms && r.selected<kStockArms && sights(r.selected))return r.selected;
+    if(r.selected>=0 && r.selected<r.arms && r.selected<kStockArms)return sights(r.selected) ? r.selected : -1;
     for(int i=0;i<r.arms && i<kStockArms;++i)
         if(sights(i))return i;
     return -1;
@@ -2541,10 +2541,22 @@ int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
 
 void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
                 const StockExtras& x,Line* lines,int* at) noexcept {
-    const int sightGun=SightGun(r,x.leadGun);
+    const int sightGun=x.high ? -1 : SightGun(r,x.leadGun);
+    // One selected weapon owns the fire-control marks. A missile/rocket selection must not leave the main gun's
+    // optical reticle underneath it; lofted launchers have their dedicated impact/spread marks.
+    int selected=r.selected>=0 && r.selected<r.arms && r.selected<kStockArms ? r.selected : -1;
+    if(selected<0)for(int i=0;i<r.arms && i<kStockArms;++i)
+        if(r.arm[i].aimed || r.arm[i].lofted){selected=i;break;}
     for(int i=0;i<r.arms && i<kStockArms;++i) {
+        if(i!=selected)continue;
         const StockArm& a=r.arm[i];
         if(!a.aimed || a.lofted)continue;
+        if(x.high) {
+            float sx,sy;
+            if(a.hit && ImpactCross(drawer,ctx,vp,width,height,s,a.at,&sx,&sy))
+                Label(text,lines,at,sx,sy+26.0f*s,1,kLineScale*0.85f,kYellow,L"%.0f m   %.1f s",a.range,a.flight);
+            continue;
+        }
         if(i==0 && x.leadGun && a.kind!=RoundKind::homing)continue;   // the lead circle's gun
         bool twin=false;
         for(int k=0;k<i && !twin && i!=r.selected;++k) {
@@ -3681,10 +3693,13 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // view they were not made for. Nothing, like the stock HUD (its switch held until the camera is back).
         if(MapOwnsView()){FreeText(text);return;}
         const ULONGLONG now=GetTickCount64();
-        {   // the magnified sight's picture first: every mark over it
+        const sightzoom::Kind sightKind=SightZoomView();
+        {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
             const float zoom=SightZoomNow(nullptr);
-            if(zoom>1.0f && now-z.tick<=kFreshMs)ScopeShade(drawer,ctx,t,width,height,s,zoom,z.gunner && !z.cockpit,lines,&at);
+            const sightzoom::Mask mask=sightzoom::MaskOf(sightKind);
+            if(zoom>1.0f && mask!=sightzoom::Mask::none && now-z.tick<=kFreshMs)
+                ScopeShade(drawer,ctx,t,width,height,s,zoom,mask==sightzoom::Mask::sensor,lines,&at);
         }
         for(int i=0;i<count && i<3;++i)CarrierBars(drawer,ctx,t,viewProj,width,height,s,panels[i],lines,&at,now);
         const Snapshot& snap=Latest();
@@ -3744,19 +3759,27 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kSazabiCueMs && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
             SazabiHud(drawer,ctx,t,viewProj,width,height,s,snap.sazabiCue,lines,&at);
         }
-        if(now-snap.tick<=kFreshMs && snap.heliSight && !snap.cockpit)HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.launcher)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
+        const bool gunnerSight=fresh && snap.gunner && !snap.cockpit;
+        const bool mechSight=fresh && snap.sazabi && !snap.cockpit;
+        const bool overhead=fresh && ((snap.highCam && snap.highCamOn) || sightKind==sightzoom::Kind::indirect);
+        const int stockPick=stockHud && snap.stockHud.selected>=0 && snap.stockHud.selected<snap.stockHud.arms ? snap.stockHud.selected : 0;
+        const bool launcherSight=stockHud && snap.stockHud.arms>stockPick && snap.stockHud.arm[stockPick].lofted;
+        if(fresh && snap.heliSight && !snap.cockpit && !gunnerSight && !mechSight)
+            HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
+        if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.turretCamOk && !snap.cockpit)TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
-        if(now-snap.tick<=kFreshMs && snap.gunner && !snap.cockpit)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
-        if(now-snap.tick<=kFreshMs && snap.turret && !snap.cockpit)TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
+        if(fresh && snap.turretCamOk && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
+            TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
+        if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
+        if(fresh && snap.turret && !snap.cockpit && (!stockHud || stockPick==0) && !launcherSight && !overhead && !gunnerSight && !mechSight)
+            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
-                                snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
+                                stockPick==0 && snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
-                                fresh && snap.proteus ? &snap.proteusRo : nullptr};
+                                fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead};
             StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
             LoadCell cells[kStockArms];
             const int n=StockCells(snap.stockHud,cells);

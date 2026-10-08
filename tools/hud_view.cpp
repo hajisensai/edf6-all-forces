@@ -28,6 +28,7 @@
 //
 //   hud_view [--out DIR] [--lang en|zh-CN|zh-TW|ja]      (default %TEMP%\edf6_hud_view, every language), then:
 //   python tools/hud_view.py DIR
+#include "../src/turretcam.h"
 #include "../src/hud.cpp"
 #include "../src/map_cam.h"
 #include <cstdio>
@@ -72,6 +73,7 @@ void Grow(float x,float y) {
     box.x0=std::fmin(box.x0,x);box.y0=std::fmin(box.y0,y);box.x1=std::fmax(box.x1,x);box.y1=std::fmax(box.y1,y);
 }
 std::FILE* out=nullptr;
+int scopePieces=0;
 float fontScale=1.0f,tallest=0.0f;   // the font scale begun; the tallest glyph drawn since `tallest` was zeroed
 // The game's screen hud.cpp reads (kUiScreen): the global points at a holder, the holder's +0x10 at the screen, its
 // width and height at +0x20 / +0x24.
@@ -109,6 +111,7 @@ struct PanelBox { float x0,y0,x1,y1; };
 std::vector<PanelBox> panels;   // the scene's panels (the HUD's kPanel rects) while `recording`
 bool recording=false;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
+    if(rgba==kScopeDark)++scopePieces;
     float p[4][2];
     for(int i=0;i<n && i<4;++i){p[i][0]=v[i*3]*m[0]+v[i*3+1]*m[4]+m[12];p[i][1]=v[i*3]*m[1]+v[i*3+1]*m[5]+m[13];}
     if(recording && n==4 && std::memcmp(rgba,kPanel,16)==0 && p[0][1]==p[1][1] && p[0][0]==p[2][0])
@@ -163,16 +166,20 @@ bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
-bool PlayerLauncher(LauncherReadout*) noexcept { return false; }
+bool hasLauncher=false;LauncherReadout sceneLauncher{};
+bool PlayerLauncher(LauncherReadout* o) noexcept {if(hasLauncher)*o=sceneLauncher;return hasLauncher;}
 // The stock heli gun's sight (helisight.cpp): on in the heli_gun_ladder scenes.
 bool hasHeliSight=false;HeliSightReadout sceneHeliSight{};
 bool PlayerHeliSight(HeliSightReadout* o) noexcept { if(hasHeliSight)*o=sceneHeliSight;return hasHeliSight; }
 // The sight's magnification (sightzoom.cpp): the zoomed scenes set it (and narrow sceneFov to match).
 float sceneZoom=1.0f;
 float SightZoomNow(const void*) noexcept { return sceneZoom; }
+sightzoom::Kind sceneSight=sightzoom::Kind::optical;
+sightzoom::Kind SightZoomView(const void*) noexcept { return sceneSight; }
 bool hasGunner=false;GunnerReadout sceneGunner{};
 bool PlayerGunnerHud(GunnerReadout* o) noexcept { if(hasGunner)*o=sceneGunner;return hasGunner; }
-bool PlayerHighCam(bool*,bool*) noexcept { return false; }
+bool hasHighView=false;
+bool PlayerHighCam(bool* on,bool* keys) noexcept {*on=hasHighView;*keys=true;return hasHighView;}
 bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap || mapEasing; }
 MapCommandReadout sceneCmd{};
@@ -239,6 +246,15 @@ void MapCamera(const MapReadout& m,float width,float height,float* vp) {
     auto dot=[](const float* a,const float* b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
+}
+// The production overhead placement with synthetic impact inputs; not a game screenshot.
+void ImpactCamera(const float* origin,const float* impact,float width,float height,float* vp) {
+    float eye[3],look[3];tcam::ImpactPlace(origin,impact,0,45,35,0,0,eye,look);
+    float f[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(f);
+    float r[3]={-f[2],0,f[0]};vec::Normalize(r);float u[3];vec::Cross(r,f,u);
+    const float fy=1/std::tan(0.5f*sceneFov*kDeg),fx=fy/(width/height),a=20000.0f/19999.0f;
+    for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*a;vp[i*4+3]=f[i];}
+    vp[12]=-vec::Dot(eye,r)*fx;vp[13]=-vec::Dot(eye,u)*fy;vp[14]=-vec::Dot(eye,f)*a-a;vp[15]=-vec::Dot(eye,f);
 }
 // What a scene's text did, per language: the pairs of its lines that overlap (by draw order), English's kept to compare.
 struct SceneText { std::set<std::pair<int,int>> overlaps; std::vector<std::wstring> texts; };
@@ -469,6 +485,7 @@ void Scene(const std::wstring& dir,const wchar_t* name,const float* pos,int widt
     float vp[16];
     const float* fwd=hasStock ? sceneStock.hull : hasJet ? sceneJet.sym.nose : sceneHeli.sym.nose;
     Camera(pos,fwd,static_cast<float>(width),1080.0f,vp);
+    if(hasHighView && hasLauncher)ImpactCamera(pos,sceneLauncher.impact,static_cast<float>(width),1080,vp);
     HudPublish();
     struct { std::int32_t x,y,w,h; } viewport{0,0,width,1080};
     Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},width);
@@ -733,6 +750,7 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
 // mark, the impact cross 1500 m off on the ground under the centre, the gun line under it. Checked: the gun line is
 // drawn, inside the screen, apart from every other text.
 int GunshipSightScenes(const std::wstring& dir,const float* ground) {
+    sceneSight=sightzoom::Kind::sensor;
     hasStock=false;hasGunner=true;
     int failed=0;
     static const wchar_t* names[]={L"gunship_sight_shells",L"gunship_sight_cannon",L"gunship_sight_gatling"};
@@ -762,7 +780,7 @@ int GunshipSightScenes(const std::wstring& dir,const float* ground) {
         failed+=!ok;
         std::printf("%s  %ls: gun line %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",names[g],line,apart);
     }
-    hasGunner=false;sceneZoom=1.0f;
+    hasGunner=false;sceneZoom=1.0f;sceneSight=sightzoom::Kind::optical;
     return failed;
 }
 
@@ -806,13 +824,55 @@ int ZoomScenes(const std::wstring& dir,const float* ground) {
     check(L"heli_gun_ladder_zoom",1,1);
     hasHeliSight=false;
     hasJet=true;
-    check(L"jet_zoom",1,0);
+    sceneSight=sightzoom::Kind::flight;
+    check(L"jet_zoom",0,0);
     sceneFov=55.0f;sceneZoom=1.0f;
+    sceneSight=sightzoom::Kind::optical;
     hasJet=jetWas;hasHeli=heliWas;hasStock=stockWas;
     return failed;
 }
 
 // hudscale::Of against what it must give: the game's screen (uiW x uiH), the viewport drawn in, the ini's HudScale.
+int FireControlScenes(const std::wstring& dir,const float* ground) {
+    int failed=0;
+    hasJet=hasHeli=hasWarn=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasGunner=hasHeliSight=hasTurret=false;
+    hasStock=true;
+    const sightzoom::Kind kinds[]={sightzoom::Kind::optical,sightzoom::Kind::missile,sightzoom::Kind::rocket,
+                                  sightzoom::Kind::indirect,sightzoom::Kind::none};
+    const wchar_t* names[]={L"firecontrol_cannon",L"firecontrol_missile",L"firecontrol_rocket",L"firecontrol_katyusha_overhead",L"firecontrol_unarmed"};
+    for(int i=0;i<5;++i) {
+        StockTank(ground);sceneStock.threats=0;
+        sceneSight=kinds[i];sceneZoom=sightzoom::Magnifies(sceneSight) ? 3.0f : 1.0f;sceneFov=55.0f/sceneZoom;
+        sceneStock.zoom=sceneZoom;
+        StockArm& gun=sceneStock.arm[0];gun.aimed=gun.hit=true;gun.bore[2]=1;gun.ladder.ticks=1;
+        gun.ladder.at[0][2]=700;gun.ladder.range[0]=700;gun.at[2]=700;gun.range=700;
+        sceneStock.selected=(i==1 || i==2) ? 1 : 0;
+        StockArm& selected=sceneStock.arm[sceneStock.selected];
+        selected.aimed=selected.hit=true;selected.bore[2]=1;selected.at[2]=600;selected.range=600;
+        selected.kind=i==1 ? RoundKind::homing : i==2 ? RoundKind::rocket : RoundKind::arc;
+        if(i==1){strcpy_s(selected.label,"MISSILE");sceneStock.arms=2;}
+        if(i==2){strcpy_s(selected.label,"RKT");sceneStock.arms=2;}
+        if(i==3){strcpy_s(sceneStock.kind,"Katyusha");strcpy_s(selected.label,"ROCKETS");sceneStock.arms=1;}
+        if(i==4)strcpy_s(sceneStock.kind,"Transport");
+        selected.lofted=i==3;selected.lock=i==1 ? 2 : 0;selected.lockProgress=1;
+        if(i==4)sceneStock.arms=0;
+        hasHighView=hasLauncher=i==3;sceneLauncher=LauncherReadout{};
+        sceneLauncher.reach=true;sceneLauncher.impact[2]=600;sceneLauncher.range=600;sceneLauncher.flight=4;
+        if(i==3) {
+            sceneLauncher.elevation=45;sceneLauncher.rings=kLauncherRing;
+            for(int k=0;k<kLauncherRing;++k){const float angle=2*tcam::kPi*k/kLauncherRing;sceneLauncher.ring[k][0]=12*std::cos(angle);sceneLauncher.ring[k][2]=600+12*std::sin(angle);}
+        }
+        scopePieces=0;Scene(dir,names[i],ground);
+        const int want=i==0 ? scopeview::kSides : i==1 || i==2 ? 4 : 0;
+        const bool right=scopePieces==want && (i==0 ? SightGun(sceneStock,false)==0 : SightGun(sceneStock,false)==-1);
+        failed+=!right;
+        std::printf("%s fire-control owner %ls: scope quads %d/%d, no fallback optical reticle\n",right ? "ok" : "FAIL",names[i],scopePieces,want);
+    }
+    hasHighView=hasLauncher=false;sceneSight=sightzoom::Kind::optical;sceneZoom=1;sceneFov=55;
+    StockTank(ground);
+    return failed;
+}
+
 int ScaleOfChecks() {
     struct Case { const char* what; int uiW,uiH,viewW,viewH; float user,want; };
     const Case cases[]={
@@ -1215,6 +1275,7 @@ int Scenes(const std::wstring& dir) {
     failed+=TankSightScenes(dir,ground);
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);
+    failed+=FireControlScenes(dir,ground);
     hasDrill=true;
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
     strcpy_s(sceneStock.kind,"DrillTank");

@@ -1,6 +1,6 @@
 // The high camera's toggle (README 高视角; docs/camera-re.md §5): while the player drives a vehicle turretcam.cpp places
 // the camera of, a key (ini HighCamKey, 'C') or pad button (ini HighCamButton, R3) switches between the vehicle's view and
-// a high one looking down over the ground ahead. Which vehicles offer it (HighCamClass): 1 those with an indirect-fire
+// an observation view over the current weapon's real predicted endpoint. Which vehicles offer it (HighCamClass): 1 those with an indirect-fire
 // weapon (the Katyusha, the self-propelled howitzer), 2 also the big ones (turretcam.cpp TurretCamLarge: a camera rig
 // kLargeRig m long or more: the Titan, the drill tank, the Proteus, the big mechs), 3 every vehicle turretcam.cpp serves.
 //  - How (H, docs/camera-re.md §3b): the riding camera follows the seat's MAB camera locators, not the vehicle's
@@ -52,7 +52,7 @@ bool KeyHeld(int vk) noexcept {
 bool IndirectFireSeat(const unsigned char* seat) noexcept {
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
-    if(!count || count>8 || !Readable(holders,count*8))return false;
+    if(!count || count>16 || !Readable(holders,count*8))return false;
     for(std::uint64_t i=0;i<count;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
         const auto w=At<const unsigned char*>(holders[i],kHolderWeapon);
@@ -100,7 +100,7 @@ void HighCamFrame(unsigned char* v) noexcept {
     const bool mine=cam.ref.Is(v);
     if(!c.enabled || !c.highCam || SeatCount(v)==0){if(mine)Off(c.enabled ? "HighCam=0" : "plugin off");return;}
     const unsigned char* seat=SeatAt(v,0);
-    const bool driven=!v[kDead] && SeatRider(seat)==Rider::player && Offered(v,seat);
+    const bool driven=!v[kDead] && SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman() && Offered(v,seat);
     if(!driven){if(mine)Off(v[kDead] ? "the vehicle is wrecked" : "the player got out, or the view is not offered");return;}
     if(!mine) {   // a vehicle the player has just taken
         cam.ref=ObjRef::Of(v);cam.v=v;cam.on=false;cam.held=true;   // a key held while boarding is no press
@@ -108,7 +108,8 @@ void HighCamFrame(unsigned char* v) noexcept {
             c.highCamKey,c.highCamButton);
     }
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
-    if(Pressed(seat,keys)) {
+    if(MapHoldsKeys())cam.held=true;
+    else if(Pressed(seat,keys)) {
         cam.want=!cam.want;
         Log("HIGHCAM v=%p %s by the %s",v,cam.want ? "on" : "off",keys ? "key" : "pad button");
     }
@@ -122,6 +123,7 @@ bool HighCamOffered(unsigned char* v) noexcept {
 }
 
 bool HighCamOn(const void* vehicle) noexcept {
+    if(!Cfg().enabled || !Cfg().highCam)return false;
     AcquireSRWLockShared(&cueLock);
     const Cue c=cue;
     ReleaseSRWLockShared(&cueLock);

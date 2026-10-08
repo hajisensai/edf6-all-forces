@@ -13,6 +13,7 @@
 #include "layout.h"
 #include "sightzoom.h"
 #include "edf/patch.h"
+#include "edf/weapon.h"
 #include "memory.h"
 
 namespace crew {
@@ -31,14 +32,51 @@ using CamStepFn=void(__fastcall*)(void*,void*);
 CamStepFn nextCamStep=nullptr;
 bool installed=false;
 
-struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; ULONGLONG at; };   // at: its last frame
+struct Capability { sightzoom::Kind kind; const void* weapon; };
+struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; ULONGLONG at; Capability sight; };
 Toggle toggle{};
 // Publish the entire seat identity together: a camera must not combine another seat's zoom and timestamp.
-struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; ULONGLONG at; };
+struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; ULONGLONG at; Capability sight; };
 Cue cue{};
 SRWLOCK cueLock=SRWLOCK_INIT;
 // Camera-thread state only. The original step may leave FOV untouched when its target expires.
 struct Applied { void* camera; float before,written; } applied{};
+
+Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
+    using sightzoom::Kind;
+    if(!HudReady() || index>=SeatCount(v))return {};
+    // Virtual weapons have explicit providers; do not mistake a transport seat/fuel holder for one of them.
+    if(IsSazabi(v))return Cfg().sazabi && index==0 ? Capability{Kind::mech,nullptr} : Capability{};
+    if(index==kGunnerSeat && GunshipCrewSeats(v))return {Kind::sensor,nullptr};
+    const bool aircraft=PlayerJetOwnSight(v),heli=BodyOf(v)==PluginBody::none && IsHelicopter(v);
+    if((heli && !Cfg().playerHeliGunSight) || (!aircraft && !heli && !Cfg().stockVehicleHud))return {};
+    const auto seat=SeatAt(const_cast<unsigned char*>(v),index);
+    const auto holders=At<const unsigned char* const*>(seat,kSeatWeapons);
+    const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
+    if(!n || n>16 || !Readable(holders,n*sizeof(void*)))return {};
+    const unsigned char* picked=PayloadPicked(v);
+    Capability first{},selected{};bool pickedHere=false;
+    for(std::uint64_t i=0;i<n;++i) {
+        if(!Readable(holders[i],kHolderWeapon+8))continue;
+        const auto weapon=At<const unsigned char*>(holders[i],kHolderWeapon);
+        if(weapon==picked && picked)pickedHere=true;
+        RoundModel round{};float muzzle[3],direction[3];
+        if(!Readable(weapon,edf::kWeaponAmmoGravity+4) || IsFuelTank(weapon) || !ReadRound(weapon,&round) ||
+           !round.rtti || round.kind==RoundKind::none || !edf::MeanMuzzle(weapon,64,muzzle,direction))continue;
+        if(!std::isfinite(muzzle[0]+muzzle[1]+muzzle[2]+direction[0]+direction[1]+direction[2]))continue;
+        const int mark=At<std::int32_t>(weapon,edf::kWeaponMark);
+        const bool indirect=(round.lobbed && round.alive>=600) || mark==edf::kMarkLofted ||
+            (round.kind==RoundKind::arc && mark==edf::kMarkGround && round.alive>=600);
+        const Kind kind=indirect ? Kind::indirect : aircraft || (heli && index==0) ? Kind::flight :
+            round.kind==RoundKind::homing ? Kind::missile : round.kind==RoundKind::rocket || round.lobbed ? Kind::rocket : Kind::optical;
+        const Capability found{kind,weapon};
+        if(first.kind==Kind::none)first=found;
+        if(weapon==picked)selected=found;
+    }
+    Capability found=pickedHere ? selected : first;
+    if(found.kind!=Kind::none && (HighCamOn(v) || TurretCamHighTransition(v)))found.kind=Kind::indirect;
+    return found;
+}
 
 Cue Snapshot() noexcept {
     AcquireSRWLockShared(&cueLock);
@@ -56,7 +94,9 @@ bool Current(const Cue& c) noexcept {
     const auto v=At<unsigned char*>(human,kHumanVehicleCtrl-8);
     if(!c.vehicle.Is(v) || v[kDead] || c.seat>=SeatCount(v))return false;
     const unsigned char* seat=SeatAt(v,c.seat);
-    return SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==human;
+    if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=human)return false;
+    const Capability now=SeatCapability(v,c.seat);
+    return now.kind!=sightzoom::Kind::none && now.kind==c.sight.kind && now.weapon==c.sight.weapon;
 }
 
 bool KeyHeld(int vk) noexcept {
@@ -67,7 +107,7 @@ bool KeyHeld(int vk) noexcept {
 }
 
 void Publish(unsigned char* v,unsigned seat,float zoom) noexcept {
-    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,GetTickCount64()};
+    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,GetTickCount64(),toggle.sight};
     AcquireSRWLockExclusive(&cueLock);
     cue=next;
     ReleaseSRWLockExclusive(&cueLock);
@@ -118,11 +158,15 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     if(!v || v[kDead] || seat>=SeatCount(v))return;
     const unsigned char* s=SeatAt(v,seat);
     if(SeatRider(s)!=Rider::player || At<const void*>(s,kSeatRider)!=PlayerHuman())return;
+    const Capability sight=SeatCapability(v,seat);
+    if(sight.kind==sightzoom::Kind::none){ResetSightZoom();return;}
     const ULONGLONG now=GetTickCount64();
     // A seat just taken (another one, or this one again after a break): 1x, a key held while boarding no press.
-    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat || now-toggle.at>kCueMs)
-        toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,now};
+    if(!toggle.ref.Is(v) || !toggle.human.Is(PlayerHuman()) || toggle.seat!=seat || now-toggle.at>kCueMs ||
+       toggle.sight.kind!=sight.kind || toggle.sight.weapon!=sight.weapon)
+        toggle=Toggle{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),v,seat,0,true,now,sight};
     toggle.at=now;
+    if(!sightzoom::Magnifies(sight.kind)){toggle.step=0;toggle.held=true;Publish(v,seat,1.0f);return;}
     const bool keys=At<unsigned char>(s,kSeatPad)==0;
     const bool down=keys ? KeyHeld(c.sightZoomKey)
                          : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0;
@@ -155,6 +199,14 @@ float SightZoomNow(const void* vehicle) noexcept {
         if((vehicle && c.vehicle.obj!=vehicle) || !Current(c))return 1.0f;
         return c.zoom;
     } __except(EXCEPTION_EXECUTE_HANDLER) {return 1.0f;}
+}
+
+sightzoom::Kind SightZoomView(const void* vehicle) noexcept {
+    if(MapOwnsView())return sightzoom::Kind::none;
+    const Cue c=Snapshot();
+    __try {
+        return (!vehicle || c.vehicle.obj==vehicle) && Current(c) ? c.sight.kind : sightzoom::Kind::none;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return sightzoom::Kind::none;}
 }
 
 void ResetSightZoom() noexcept {

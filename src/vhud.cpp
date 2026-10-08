@@ -140,7 +140,7 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
 }
 
 // One weapon's line and its impact point (see the top). `aim`: work the point out (not for a heli's).
-void Arm(const unsigned char* w,bool aim,StockArm& a) noexcept {
+void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true) noexcept {
     const auto name=At<const wchar_t*>(w,0x1B0);
     if(name)for(std::size_t i=0;i+1<_countof(a.name) && Readable(name+i,sizeof(wchar_t)) && name[i];++i)a.name[i]=name[i];
     RoundModel m{};
@@ -167,7 +167,7 @@ void Arm(const unsigned char* w,bool aim,StockArm& a) noexcept {
     }
     a.hit=RoundLands(w,m,pos,dir,kReach,a.at,&a.flight);
     a.range=vec::Dist(pos,a.at);
-    if(m.kind==RoundKind::arc)GunMarkOf(w,m,pos,dir,a);
+    if(m.kind==RoundKind::arc && rangeTarget)GunMarkOf(w,m,pos,dir,a);
 }
 
 void Kind(const unsigned char* v,StockHudReadout& r) noexcept {
@@ -263,7 +263,7 @@ void StockHudFrame(unsigned char* v) noexcept {
             if(picked && w==picked)pickedArm=r.arms;
             if(static_cast<int>(i)==store)storeArm=r.arms;
             StockArm& a=r.arm[r.arms++];
-            Arm(w,!r.heli,a);
+            Arm(w,!r.heli,a,!(HighCamOn(v) || TurretCamHighTransition(v)));
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     r.selected=pickedArm>=0 ? pickedArm : storeArm;

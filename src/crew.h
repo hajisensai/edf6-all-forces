@@ -8,6 +8,7 @@
 #include "edf/layout.h"
 #include "edf/patch.h"
 #include "gunsight.h"
+#include "sightzoom.h"
 #include "stores.h"
 #include "edf/seat.h"
 
@@ -729,6 +730,7 @@ bool SidecarLevelHooked() noexcept;
 void HighCamFrame(unsigned char* vehicle) noexcept;
 bool PlayerHighCam(bool* on,bool* keys) noexcept;
 bool HighCamOn(const void* vehicle) noexcept;   // turretcam.cpp: the high view is on in `vehicle` now
+bool TurretCamHighTransition(const void* vehicle) noexcept; // includes the return from overhead to the normal camera
 // The seat holds an indirect-fire weapon (the Katyusha's rockets, the howitzer's shells: lofted or ground marked, rounds
 // living 10 s or more): its high view (HighCamClass 1) and no gun stabilizer (stab.cpp: it fires from a halt).
 bool IndirectFireSeat(const unsigned char* seat) noexcept;
@@ -744,6 +746,8 @@ bool InstallSightZoom() noexcept;
 void SightZoomFrame(unsigned char* vehicle,unsigned seat,bool padButton) noexcept;
 void SightZoomStock(unsigned char* vehicle) noexcept;
 float SightZoomNow(const void* vehicle) noexcept;
+// Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
+sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
 void ResetSightZoom() noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding

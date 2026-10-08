@@ -11,6 +11,14 @@
 
 namespace crew {
 namespace sightzoom {
+// The seat's actual fire-control surface, not the vehicle class or the fact that a player is aboard.
+enum class Kind { none, optical, missile, rocket, indirect, sensor, flight, mech };
+enum class Mask { none, round, sensor };
+constexpr bool Magnifies(Kind k) noexcept { return k!=Kind::none && k!=Kind::indirect; }
+constexpr Mask MaskOf(Kind k) noexcept {
+    return k==Kind::optical ? Mask::round :
+        k==Kind::sensor || k==Kind::missile || k==Kind::rocket ? Mask::sensor : Mask::none;
+}
 constexpr float kSteps[]={1.0f,3.0f,6.0f};
 constexpr int kStepCount=static_cast<int>(sizeof(kSteps)/sizeof(kSteps[0]));
 constexpr float kBaseFov=0.785398163f;   // the stock camera's (the constant at 0x1765A20, pi/4)

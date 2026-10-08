@@ -169,7 +169,10 @@ void LauncherFrame(unsigned char* v) noexcept {
     const unsigned char* weapon=LoftedLauncher(seat);
     if(!weapon)return;
     float want=0.0f,sight=0.0f;
-    const bool aim=LoftWant(v,seat,weapon,&want,&sight);
+    // The high camera observes the real rail's projectile. Feeding that observation back into LoftWant would
+    // override the player's native pitch and move the rail again as the camera blends. Release the held loft;
+    // katyusha.cpp eases it back to the native pose at its stock rate, which the impact prediction follows.
+    const bool aim=!HighCamOn(v) && !TurretCamHighTransition(v) && LoftWant(v,seat,weapon,&want,&sight);
     SetLauncherLoft(v,aim,want);
     LauncherReadout r{};
     if(!Solve(weapon,r)) {
