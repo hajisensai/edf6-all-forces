@@ -257,5 +257,3 @@ int main(){
     std::printf("crew_first_use_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
-
-
