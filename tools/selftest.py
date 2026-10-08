@@ -4152,7 +4152,7 @@ def map_commands_wired() -> None:
     assert 'Down(VK_RBUTTON) && !MapCommandPointerCaptured()' in mapc
     assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
     assert 'ResetMapCommands();' in mapc.split('void ResetMap()', 1)[1].split('\n}', 1)[0]
-    assert 'const bool allowed=!InSession();' in code
+    assert 'const bool allowed=Cfg().enabled;' in code, 'online requests must reach per-unit authority checks, not a global offline veto'
     assert 'src/mapcmd.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/map_cmd_check.cpp' in cmake
     assert re.search(r'EDF6_OFFLINE_CHECKS[^)]*\bmap_cmd_check\b', cmake), 'map_cmd_check is not run by CTest'
     jet, heli, ground = src('src/jet.cpp'), src('src/heli.cpp'), src('src/ground.cpp')
@@ -4582,8 +4582,9 @@ def npc_ai_wired() -> None:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     # The squads on the map (§5.4, §6): a script's squad takes no order; a dismissal clears +0x540 (or the stock takes the
     # squad back at once) and starts the cooldown, whose end puts +0x540 back; vehicles take only their three orders.
-    cmd = code.split('bool SquadCommand(const void* leader,const Command& c) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'npc::Scripted(q->control)' in cmd.split('switch', 1)[0], "a script's squad takes no order"
+    cmd = code.split('NpcCommandResult NpcSquadCommandForRequester(', 1)[1].split('\n}\n', 1)[0]
+    assert '!IsOnlineAuthority(top)' in cmd and 'root!=caller' in cmd and 'CommandActor(requester,true)' in cmd
+    assert 'npc::Scripted(control)' in cmd.split('switch', 1)[0], "a script's squad takes no order"
     dismiss = cmd.split('case Order::dismiss:', 1)[1].split('break;', 1)[0]
     assert dismiss.index('top[kAutoFollow]=0;') < dismiss.index('Follow(top,nullptr);') < dismiss.index('cooldowns.Start(')
     see = code.split('Squad* SeeSquad(', 1)[1].split('\n}\n', 1)[0]
@@ -4591,7 +4592,7 @@ def npc_ai_wired() -> None:
     mapc = src('src/mapcmd.cpp')
     takes = mapc.split('bool Takes(const Entry& e,Order o) noexcept {', 1)[1].split('\n}', 1)[0]
     assert 'if(e.u.locked)return false;' in takes and 'mapcmd::VehicleOrder(o)' in takes
-    assert 'if(!Takes(e,cmd.order)){++*skipped;continue;}' in mapc
+    assert 'if(!Takes(e,cmd.order))' in mapc and 'NpcCommandReason::unsupported' in mapc
     for key, default in (('NpcGuardRadius', '15'), ('NpcFreeRange', '120'), ('NpcRecruitCooldownSec', '60')):
         assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
         assert key in readme and key in doc, key
@@ -4606,17 +4607,17 @@ def npc_ai_wired() -> None:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     # Boarding (§7): real soldiers may drive seat 0 only through the verified native driver path; one strong reference
     # is taken before RideVehicle (callee-consumed). Existing riders/reservations and ownership stay protected.
-    board = code.split('bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    board = code.split('bool BoardSquad(', 1)[1].split('\n}\n', 1)[0]
     assert 'AssignBoard(v,m[i],ms)' in board, 'squad boarding uses the shared real-seat allocator'
     assign = code.split('bool AssignBoard(', 1)[1].split('\n}\n', 1)[0]
-    assert 'for(unsigned k=0;' in assign and 'Reserved(v,k,ms)' in assign and '!SeatTakes(v,k,h)' in assign
+    assert 'for(unsigned k=0;' in assign and 'Reserved(v,k,ms,h)' in assign and '!SeatTakes(v,k,h)' in assign
     assert '!IsOnlineAuthority(h)' in assign and '!OnlineMaySeatNpc(v)' in assign
     takes_seat = code.split('bool SeatTakes(', 1)[1].split('\n}\n', 1)[0]
     assert 'SeatRider(seat)!=Rider::none' in takes_seat and '(i==0 && !RealDriverNativeReady())' in takes_seat
     ride = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert ride.index('s.boardSeat==0 && !PrepareNpcVehicle(v,false)') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
     assert ride.index('_InterlockedIncrement(') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
-    off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    off = code.split('bool DismountSquad(', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
     gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(v,seat))continue;' in gun
