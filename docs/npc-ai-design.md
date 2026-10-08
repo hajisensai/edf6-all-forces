@@ -218,12 +218,14 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 ### 6.4 战术编队（2026-10-08 用户：「支持战术编队，支持各种现代编队行进/战术/防御方案」）
 
-- 纯逻辑 `src/formation.h`（离线 `tools/formation_check.cpp`）：形状（`Shape`）、每人槽位（`Offset`：编队锚点右 x、前 z 米）、世界坐标（`World`，右 = 游戏相机的水平右 (-f.z, f.x)）、行进朝向（`Track`：锚点走过 2 米才更新）、交替掩护（`Step`：两半轮流，到位或 `kBoundMost` 8 秒交换）、走不到位置时放弃（`GiveUp`：`kStuckMs` 3 秒内没接近 0.5 米则让给原版跟随 `kRestMs` 6 秒）。
+- 纯逻辑 `src/formation.h`（离线 `tools/formation_check.cpp`）：形状（`Shape`）、每人槽位（`Offset`：编队锚点右 x、前 z 米）、世界坐标（`World`，右 = 游戏相机的水平右 (-f.z, f.x)）、行进朝向（`Track`：锚点走过 2 米才更新）、交替掩护（`Step`：两半轮流，到位或 `kBoundMost` 8 秒交换）；旧 `GiveUp` 工具保留兼容测试，运行时已由下面的地面路径规划替代。
 - 接入 `npcai.cpp` `Drive`：在躲避、上车、后撤、躲枪线之后，**没有目标时**走 `FormationMove`；有目标时照旧去交战位置。
 - **行进**（`NpcFormation`，步行键 `NpcFormationKey` T / 地图 T）：本机玩家招募的、没有地图指令的小队合成一份名单（`MarchRoster`：按小队表顺序、每队 `Members` 广度优先，只要步行的），玩家是锚点；名单每帧重建，阵亡后后面的人补位；士兵间距 `NpcFormationSpacing`（2~30 米，默认 5）。
 - **防御**（`NpcGuardFormation`，地图里选中警戒中的小队按 T）：每个警戒小队自己一份（`Members`），锚点 = 警戒点，朝向 = 下令时玩家→ 警戒点（`SquadCommand` 记在 `Squad::guardFwd`）。
 - 地图 T：选中的小队里警戒中的各自循环防御方案（`CycleGuardFormation`），其余（跟随玩家的）只循环一次行进编队（`CycleMarchFormation`），离线 `map_command_runtime_check` `FormationKey`。
-- 不寻路：和原版之外的其他插件移动一样，直推摇杆直线走；被挡住时 `GiveUp` 把士兵交还原版跟随（原版跟随会绕路）。
+- 地面寻路：`src/ground_navigation.h` 的增量 A* + `ground_navigation.cpp` 的实际 `MapFloorRay` / `MapRay` 查询，统一接入 `MoveTo`（编队、驻守、交战位置、拾箱、登车）。只改输入方向，不瞬移，不写位置。脚底每 0.5 米沿连接地面采样，左右身体宽度和中心检查支撑、竖直净空及足/腰/头轨迹；单步落差不超过 0.55 米，不能通过同 XZ 的上下层切换楼层。
+- 每次最多 4 条边，所有调用共享每帧 4096 次逻辑碰撞查询预算，预算耗尽的首个调用者下一帧优先，避免 NPC 更新顺序使队尾永久饥饿。1536 节点、512 路径点和空间范围均有上限；复杂/过长路线超出上限会明确等待，不声称求解任意全图路线。状态跟 Soldier 的 ObjRef 生命周期重置；小幅移动目标先完成已验证路线，目标移动超过 16 米或改变楼层立即重算。
+- 缓存路径每 100ms 复查下一段；1.5 秒没有移动 0.3 米时重规划；找不到路径等待 1 秒后重试。`pending/blocked` 只站立，不回退原版跟随。打仗仍先散开交战，目标消失再归队。离线 `ground_navigation_test` 执行同一规划器/净空采样，覆盖墙、L 拐角、缺口、低顶、上下层、动态阻挡与预算恢复。没有做游戏内验收；射线采样不是完整 Havok 胶囊扫掠，不宣称对任意小障碍完全精确。
 - 联机：只驱动本机权威的 NPC（同 §9）；地图指令联机不可用，步行键的行进编队只影响本机玩家招募的小队。
 
 ### 6.4.1 编组（2026-10-08 用户：「支持编组」）

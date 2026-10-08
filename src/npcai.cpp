@@ -22,6 +22,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "formation.h"
+#include "ground_navigation.h"
 #include "pickup.h"
 #include "npc_logic.h"
 #include "npc_mark.h"
@@ -111,7 +112,7 @@ struct Soldier {
     ULONGLONG boardAt;
     float fallTo[3];         // the fall-back's point (re-picked every kFallMs)
     ULONGLONG fallAt;
-    npc::formation::Progress slotWay;   // its headway to its formation slot (formation.h GiveUp)
+    npc::navigation::State navigation;   // connected ground route, tied to this ObjRef lifetime
     void* pickUnit;          // the box it goes for (the sweep: DropItemManager::Unit*), this frame's (pickFrame)
     float pickPos[3];
     int pickKind;
@@ -485,10 +486,13 @@ void Move(unsigned char* h,const float* dir,float magnitude) noexcept {
 }
 void Stand(unsigned char* h) noexcept { Put<float>(h,kMoveX,0.0f);Put<float>(h,kMoveY,0.0f);Put<float>(h,kMoveZ,0.0f);Put<float>(h,kMoveW,1.0f); }
 void MoveTo(unsigned char* h,const float* pos,const float* to,float stop) noexcept {
-    float dir[3];
-    const float d=npc::Horiz(pos,to);
-    if(d<=stop || !npc::HorizDir(pos,to,dir)){Stand(h);return;}
-    Move(h,dir,(d-stop)/6.0f+0.3f);
+    const ULONGLONG ms=GameMs();
+    Soldier* const soldier=Entry(h,ms);
+    float waypoint[3],dir[3];
+    if(!soldier || GroundNavigate(soldier->navigation,pos,to,stop,ms,waypoint)!=npc::navigation::Result::moving ||
+       !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
+    const float d=npc::Horiz(pos,waypoint);
+    Move(h,dir,d/6.0f+0.3f);
 }
 void Look(unsigned char* h,const float* dir) noexcept {
     float d[2];
@@ -1210,7 +1214,7 @@ void MarchRoster(ULONGLONG ms) noexcept {
 }
 
 // Walks the soldier to its formation slot (formation.h) and holds it there; false when it has none (stock shape,
-// not in a formation, its slot given up for a while: the stock follow and the guard's radius as before).
+// not in a formation). Blocked routes wait/replan inside MoveTo; they never fall back to walking through a wall.
 bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,const unsigned char* root,ULONGLONG ms,
                    const char** move) noexcept {
     using namespace npc::formation;
@@ -1248,8 +1252,13 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
         ++march.movers;
         if(d>kArrive)++march.pending;
     }
-    if(GiveUp(s.slotWay,d,ms))return false;
-    MoveTo(h,pos,slot,kArrive);
+    // World() inherits the anchor's height, which is only a hint on a slope.
+    // Project locally; never search the whole vertical map and choose a roof.
+    const float top[3]={slot[0],slot[1]+0.55f,slot[2]},bottom[3]={slot[0],slot[1]-2.0f,slot[2]};
+    float floor[3];
+    if(MapFloorRay(top,bottom,floor)>=0.0f && std::isfinite(floor[1])) {
+        slot[1]=floor[1];MoveTo(h,pos,slot,kArrive);
+    } else Stand(h);
     *move=marching ? "formation" : "guard formation";
     return true;
 }
@@ -1438,14 +1447,23 @@ bool BoxStill(const void* unit,float* at4) noexcept {
     return false;
 }
 
+// A dropped box's centre is not necessarily a foot point. The walking target
+// must be ground inside its 3D pickup sphere; collecting still checks the box.
+void MoveToBox(unsigned char* h,const float* pos,const float* box) noexcept {
+    const float top[3]={box[0],box[1]+0.1f,box[2]},bottom[3]={box[0],box[1]-npc::pickup::kReach,box[2]};
+    float at[3];
+    if(MapFloorRay(top,bottom,at)<0.0f || !std::isfinite(at[1]) || npc::Dist(at,box)>npc::pickup::kReach){Stand(h);return;}
+    MoveTo(h,pos,at,0.2f);
+}
+
 // Runs to its box and takes it there; false when the box is gone (someone took it): the soldier's other moves then.
 bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {
     if(!sweep.on || !IsOnlineAuthority(h) || h[kDead])return false;
-    if(npc::Dist(pos,s.pickPos)>npc::pickup::kReach){MoveTo(h,pos,s.pickPos,0.5f);return true;}
+    if(npc::Dist(pos,s.pickPos)>npc::pickup::kReach){MoveToBox(h,pos,s.pickPos);return true;}
     alignas(16) float at[4];
     auto u=static_cast<unsigned char*>(s.pickUnit);
     if(!boxesOk || !BoxStill(u,at))return false;
-    if(npc::Dist(pos,at)>npc::pickup::kReach){MoveTo(h,pos,at,0.5f);return true;}
+    if(npc::Dist(pos,at)>npc::pickup::kReach){MoveToBox(h,pos,at);return true;}
     s.pickUnit=nullptr;
     Stand(h);
     if(npc::pickup::IsHeal(s.pickKind)) {
