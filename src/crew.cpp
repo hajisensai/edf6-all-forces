@@ -25,6 +25,7 @@
 #include "exit_ground.h"
 #include "body506.h"
 #include "game_clock.h"
+#include "game_frame.h"
 #include "edf/host.h"
 #include "heli.h"
 #include "layout.h"
@@ -69,14 +70,15 @@ bool GamePaused() noexcept {
 // It starts an hour in: 0 is "never" for the timestamps it fills (crashAt, missileAt, launchAt, ...).
 namespace { gameclock::Clock clock; }
 ULONGLONG GameMs() noexcept { return gameclock::Read(clock,GetTickCount64(),GamePaused()); }
-// The frame: every vehicle's input runs once a frame, so the first vehicle of a frame coming round again
-// starts the next one. If it is deleted, the next repeat of any vehicle seen this frame does.
-namespace { constexpr int kFrameSeen=128; const void* frameSeen[kFrameSeen]{}; int frameSeenCount=0; ULONGLONG frame=1; }
-ULONGLONG GameFrame() noexcept { return frame; }
-void SeeFrame(const void* vehicle) noexcept {
-    for(int i=0;i<frameSeenCount;++i)
-        if(frameSeen[i]==vehicle){++frame;frameSeenCount=0;break;}
-    if(frameSeenCount<kFrameSeen)frameSeen[frameSeenCount++]=vehicle;
+// System increments +CE0 once before the scene's complete input/update traversal.
+// Reading this on the game thread avoids guessing frame boundaries from vehicle order.
+namespace { gameframe::Clock frameClock; bool frameClockOk=false; }
+ULONGLONG GameFrame() noexcept { return frameClock.logical; }
+void SeeFrame(const void*) noexcept {
+    if(!frameClockOk)return;
+    const auto system=At<const unsigned char*>(image,kSystem);
+    if(!Readable(system,0xCE4) || At<const void*>(system,0)!=image+kSystemVtable)return;
+    frameClock.Observe(system,At<const void*>(system,0x68),At<std::uint32_t>(system,0xCE0));
 }
 namespace {
 using FindSeatFn=unsigned char*(__fastcall*)(void*,void*);
@@ -304,13 +306,14 @@ void AimLines(unsigned char* vehicle) noexcept {
     if(!st)return;
     const unsigned count=SeatCount(vehicle);
     const bool npcDriven=count>0 && SeatRider(SeatAt(vehicle,0))==Rider::dummy;
-    const bool ownSight=PlayerJetOwnSight(vehicle) || PlayerHeliOwnSight(vehicle) || PlayerStockOwnSight(vehicle);
+    const bool enabled=Cfg().enabled;
+    const bool ownSight=enabled && (PlayerJetOwnSight(vehicle) || PlayerHeliOwnSight(vehicle) || PlayerStockOwnSight(vehicle));
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
-        const LineWant want=Want(SeatRider(seat),npcDriven,ownSight);
+        const LineWant want=enabled ? Want(SeatRider(seat),npcDriven,ownSight) : LineWant::show;
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
-        if(want==LineWant::keep || n>8 || !Readable(holders,n*8))continue;
+        if(want==LineWant::keep || n>16 || !Readable(holders,n*8))continue;
         for(std::uint64_t w=0;w<n;++w)
             if(auto line=AimLineOf(holders,w))SetLine(*st,line,want,reinterpret_cast<const float*>(vehicle+kPosition));
     }
@@ -796,7 +799,10 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
     GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
     GuardedTick(kStepSazabi,&SazabiSoundTick);      // the plugin off too: the Sazabi's loops stop then (once a frame)
-    if(!Cfg().enabled){Guarded(kStepSightZoom,&SightZoomStock,v);return;}
+    if(!Cfg().enabled){
+        Guarded(kStepAimLines,&AimLines,v); // restore only our saved native lines, including empty/NPC seats
+        Guarded(kStepSightZoom,&SightZoomStock,v);return;
+    }
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);
     Guarded(kStepSeats,&SeatSwitchFrame,v);    // before the steps that read who sits where this frame
@@ -858,6 +864,10 @@ void EnsureInputs() noexcept {
 }
 
 bool InstallCrew() noexcept {
+    constexpr unsigned char counterCode[]={0x41,0x8B,0x8E,0xE0,0x0C,0x00,0x00,0x8D,0x41,0x01,0x41,0x89,0x86,0xE0,0x0C,0x00,0x00};
+    constexpr unsigned char resetCode[]={0x48,0xC7,0x87,0xE0,0x0C,0x00,0x00,0x00,0x00,0x00,0x00};
+    frameClockOk=Matches(0x1198FD0,counterCode,sizeof(counterCode)) && Matches(0x1193551,resetCode,sizeof(resetCode));
+    if(!frameClockOk){Log("HOOK crew: native scene step counter changed: crew off");return false;}
     // Without the game's SetTeam the plugin does not change a team at all (SetObjectTeam): no crew.
     setTeamOk=Matches(kSetTeam,kSetTeamSig,sizeof(kSetTeamSig));
     if(!setTeamOk){Log("HOOK crew: SetTeam not as expected: crew off");return false;}
@@ -955,6 +965,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
+    frameClock.Reset();tickFrame=0;
     ResetMissionCrew();
     exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};
