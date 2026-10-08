@@ -474,11 +474,11 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         const bool following=clicked(Id::supportNext) || (k.supportNext && !g.was.supportNext);
         if(previous || following) {
             g.supportPick=(g.supportPick+(previous ? -1 : 1)+supportCount)%supportCount;
-            Note(g,L"支援：%ls",SupportCallName(g.supportPick));
+            Note(g,hudtext::Tr(hudtext::Tx::cmdSupportPicked),SupportCallName(g.supportPick));
         }
         if(clicked(Id::supportCall)) {
             g.guardArmed=false;g.supportArmed=!g.supportArmed;
-            if(g.supportArmed)Note(g,L"选择地图上的支援目的地（再次点击呼叫取消）");
+            if(g.supportArmed)Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportPlace));
         }
     }
     Hover(g,in,haveView ? &v : nullptr);
@@ -522,7 +522,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(supportPress) {
         g.supportArmed=false;
         if(pointOk){SupportCallAt(g.supportPick,point,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
-        else Note(g,L"无法确定支援目的地");
+        else Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportNoPoint));
     }
     using hudtext::Tr;
     using hudtext::Tx;

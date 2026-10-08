@@ -3404,9 +3404,9 @@ void MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float
     _snwprintf_s(name[static_cast<int>(Id::merge)],64,_TRUNCATE,L"%ls",Tr(Tx::btnMerge));
     _snwprintf_s(name[static_cast<int>(Id::sweep)],64,_TRUNCATE,L"%ls",Tr(c.sweepOn ? Tx::btnSweepStop : Tx::btnSweep));
     _snwprintf_s(name[static_cast<int>(Id::health)],64,_TRUNCATE,L"%ls",Tr(c.healthOn ? Tx::btnHealthOn : Tx::btnHealthOff));
-    _snwprintf_s(name[static_cast<int>(Id::supportPrev)],64,_TRUNCATE,L"上一支援");
-    _snwprintf_s(name[static_cast<int>(Id::supportNext)],64,_TRUNCATE,L"下一支援");
-    _snwprintf_s(name[static_cast<int>(Id::supportCall)],64,_TRUNCATE,L"%ls %ls",c.supportArmed ? L"取消" : L"呼叫",c.supportName);
+    _snwprintf_s(name[static_cast<int>(Id::supportPrev)],64,_TRUNCATE,L"%ls",Tr(Tx::btnSupportPrev));
+    _snwprintf_s(name[static_cast<int>(Id::supportNext)],64,_TRUNCATE,L"%ls",Tr(Tx::btnSupportNext));
+    _snwprintf_s(name[static_cast<int>(Id::supportCall)],64,_TRUNCATE,Tr(c.supportArmed ? Tx::btnSupportCancel : Tx::btnSupportCall),c.supportName);
     const float scale=kLineScale*0.7f;
     float w[n];
     for(int i=0;i<n;++i) {
