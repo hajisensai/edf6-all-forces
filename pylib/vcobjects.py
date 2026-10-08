@@ -11,6 +11,7 @@ import os
 import re
 import struct
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 import dsgo
 import sgo
@@ -629,11 +630,44 @@ def on_origin(box) -> list[list[float]]:
 # model's origin included, once it has landed), DOOR_OUT m outside its right side (hx), at the stock door's z within its
 # length (docs/player-jet-re.md §15). Its radius makes it reachable from DOOR_STEP m across the ground, from the human's
 # feet or HUMAN_HEIGHT over them (which of the two its position is, is not settled). The stock radius is never cut.
+# With a mesh-derived compound, a high wing's full-span box no longer blocks a person under it. walkup_box moves
+# that doorway beside the fuselage only after checking the entire approach against the actual collision cells.
 DOOR_SLACK = 0.5      # EDF.dll 0x1C36990
 DOOR_OUT = 0.6        # m: outside the box's side, where a human standing against it is
 DOOR_STEP = 1.0       # m: across the ground from the door point, still in reach
 HUMAN_HEIGHT = 1.0    # m: a human's position is at its feet or up to this over them
 DOOR_MARGIN = 0.05    # m: of reach to spare
+DOOR_HEADROOM = 2.5   # a standing armoured soldier, including clearance above the head
+DOOR_HALF_WIDTH = 0.5 # walking corridor half width (not the locator's interaction radius)
+
+
+@lru_cache(maxsize=32)
+def walkup_box(game: Game, file: str | None, box: tuple) -> tuple:
+    """Use the fuselage side if a person can actually walk under the outer wing.
+
+    The flight collision's full span is not an entrance: the carrier's wingtip
+    put its door 23 m from the hull. Keep the full box's frame/ground height, but
+    measure access against the SAME conservative convex cells Havok receives.
+    Low wings, nacelles or landing pods across the approach retain the outside
+    door. No collision is removed to make this path pass.
+    """
+    import aircraft_collision as ac
+    import jet_models
+    if file not in jet_models.MODELS:
+        return box
+    hull = jet_models.fuselage_box(game, file)
+    if hull[1][0] >= box[1][0]:
+        return box
+    x = box[0][0] + hull[1][0] + DOOR_OUT
+    z = box[0][2] + min(1.8, box[1][2])
+    floor = box[0][1] - box[1][1]
+    cells = ac.mesh_cells(ac.triangles(jet_models._model_of(game, file)))
+    for lo, hi in cells:
+        if (hi[0] >= x - DOOR_HALF_WIDTH and lo[0] <= box[0][0] + box[1][0] + DOOR_OUT + DOOR_STEP
+                and hi[2] >= z - DOOR_HALF_WIDTH and lo[2] <= z + DOOR_HALF_WIDTH
+                and lo[1] < floor + DOOR_HEADROOM and hi[1] > floor):
+            return box
+    return box[0], (hull[1][0], box[1][1], box[1][2])
 
 
 class DoorError(Exception):
@@ -732,17 +766,18 @@ def move_door(m: dict, box, mdl=None) -> None:
     m['animation_model'][2] = bytes(mab)
 
 
-def check_door(data: bytes, mdl=None) -> None:
+def check_door(data: bytes, mdl=None, access_box=None) -> None:
     """Re-read a jet SGO and raise DoorError unless its door (on `mdl`, the collision box's centre) is at its collision
     box's (heli_rigid_body) bottom, the ground, outside its right side by DOOR_OUT, within its length, and a human standing
-    DOOR_STEP m from it on that ground (its position at its feet or HUMAN_HEIGHT over them) is in reach."""
+    DOOR_STEP m from it on that ground (its position at its feet or HUMAN_HEIGHT over them) is in reach.
+    access_box is walkup_box's proven clear footprint; it retains the rigid body's centre and ground height."""
     _, m = sgo.read(data)
     mab = m['animation_model'][2]
     name = door_name(m)
     vec, rad = mab_locator(mab, name)
     x, y, z = struct.unpack_from('<3f', mab, vec)
     reach = struct.unpack_from('<f', mab, rad)[0] + DOOR_SLACK
-    box = [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
+    box = access_box or [[float(_value(v)) for v in row] for row in m['heli_rigid_body'][:2]]
     (cx, cy, cz), (hx, hy, hz) = box
     if mdl is not None:   # from `mdl` to the box's centre
         x, y, z = x + mdl[0] - cx, y + mdl[1] - cy, z + mdl[2] - cz
@@ -1030,8 +1065,10 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['heli_rigid_body'] = [box[0], box[1], rb[2]]
     door = _moves_door(jet)
     bounds = heli = None
+    access_box = box
     if door:
-        move_door(m, box, mdl_at(jet))
+        access_box = walkup_box(game, jet.file or jet.box_model, tuple(tuple(r) for r in box))
+        move_door(m, access_box, mdl_at(jet))
         # The models jet_models measures (the ones the player boards): the seat camera and the ragdoll on the box's
         # centre, where `mdl` is (seat_camera, _jet_ragdoll).
         bounds = jet_models.model_bounds(game, jet.file or jet.box_model)
@@ -1058,7 +1095,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         m['vehicle_damage_effect'] = [0.0]   # the 506's damage smoke: none (a scale of 1.0 when the key is missing)
     out = sgo.write(version, m)
     if door:
-        check_door(out, mdl_at(jet))
+        check_door(out, mdl_at(jet), access_box)
         if jet.seat_camera is None:
             check_camera(out, bounds)
         else:

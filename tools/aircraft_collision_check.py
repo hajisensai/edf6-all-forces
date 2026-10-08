@@ -113,6 +113,42 @@ class GameAssets(unittest.TestCase):
         from rootcpk import default
         cls.game = default()
 
+    def test_carrier_door_is_reachable_beside_hull_not_wingtip(self):
+        import vcobjects as vc
+        import sgo
+        key = 'EDF6VC_CARRIER.MRAB'
+        full = jet_models.model_box(self.game, key)
+        hull = jet_models.fuselage_box(self.game, key)
+        for name in ('edf6tr_jet_carrier_mission', 'edf6tr_jet_blast_carrier_mission',
+                     'edf6tr_jet_doll_carrier_mission'):
+            m = sgo.read(vc.jet_sgo(self.game, name))[1]
+            mab = m['animation_model'][2]
+            at, _ = vc.mab_locator(mab, vc.door_name(m))
+            x, y, z = struct.unpack_from('<3f', mab, at)
+            self.assertAlmostEqual(x, hull[1][0] + vc.DOOR_OUT, places=3)
+            self.assertLess(x, full[1][0] - 20)
+            self.assertAlmostEqual(y, -full[1][1], places=3)
+            self.assertAlmostEqual(z, 1.8, places=3)
+            # The doorway is in mdl's frame, while model/collision samples are
+            # in the hull frame. Applying the true full centre returns y=0.
+            self.assertAlmostEqual(y + full[0][1], 0, places=3)
+
+    def test_low_wings_keep_door_outside_the_wings(self):
+        import vcobjects as vc
+        for key in ('EDF6VC_INTERCEPTOR.MRAB', 'EDF6VC_MULTIROLE.MRAB'):
+            box = tuple(tuple(r) for r in jet_models.model_box(self.game, key))
+            self.assertEqual(vc.walkup_box(self.game, key, box), box)
+
+    def test_obstructed_carrier_walkway_does_not_move_door_inward(self):
+        from unittest.mock import patch
+        import vcobjects as vc
+        key = 'EDF6VC_CARRIER.MRAB'
+        box = tuple(tuple(r) for r in jet_models.model_box(self.game, key))
+        vc.walkup_box.cache_clear()
+        with patch.object(ac, 'mesh_cells', return_value=[((10, 0, -2), (12, 3, 0))]):
+            self.assertEqual(vc.walkup_box(self.game, key, box), box)
+        vc.walkup_box.cache_clear()
+
     def test_all_written_shapes_match_model_surfaces(self):
         for key in ac.FILES:
             with self.subTest(model=key):
