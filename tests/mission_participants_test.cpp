@@ -41,6 +41,17 @@ int main() {
     Check(wrongRange.count==2 && !IndicesInRange(wrongRange,2),"expected two actors cannot seal indices zero and nine");
     wrongRange.indices[1]=1;
     Check(IndicesInRange(wrongRange,2),"unique in-range indices cover the expected world when counts match");
+    Put<int>(user[1],0x48,1);Put<void*>(actor[0],kSelfCtrl,ctrl[0]);Put<void*>(actor[1],kSelfCtrl,ctrl[1]);
+    const ObjRef fresh[]={ObjRef::Of(actor[0]),ObjRef::Of(actor[1])};
+    Visitor matches{kVisitorVtable,puids,8,0,false,{},{},fresh,2};Visit(&matches,actor[0]);Visit(&matches,actor[1]);
+    Check(!matches.failed && matches.count==2,"every current-world index matches its newly constructed actor identity");
+    ObjRef stale[]={fresh[0],ObjRef{actor[1],ctrl[2]}};
+    Visitor oldScene{kVisitorVtable,puids,8,0,false,{},{},stale,2};Visit(&oldScene,actor[0]);Visit(&oldScene,actor[1]);
+    Check(oldScene.failed,"same player pointer with previous-scene control block cannot seal new world");
+    stale[1]=ObjRef{};
+    Visitor missing{kVisitorVtable,puids,8,0,false,{},{},stale,2};Visit(&missing,actor[0]);Visit(&missing,actor[1]);
+    Check(missing.failed,"player not observed successfully created in this epoch cannot seal");
+    Check(!MissionParticipantCreationsMatch(nullptr,2),"missing creation ledger rejected");
     unsigned count=9,expected=9;
     Check(!ReadMissionParticipants(nullptr,8,&count,&expected) && !count && !expected,"failure clears output counts");
     std::printf("mission_participants_test: %d checks passed\n",checks);

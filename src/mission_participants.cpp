@@ -15,6 +15,8 @@ struct Visitor {
     bool failed;
     const void* actors[kMaxActors];
     unsigned indices[kMaxActors];
+    const ObjRef* expectedActors=nullptr;
+    unsigned expectedCount=0;
 };
 void __fastcall Ignore(void*) noexcept {}
 void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
@@ -31,6 +33,10 @@ void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
         if(index<0)return; // lobby user has not received a mission slot
         void* puid=At<void*>(user,0x18);
         if(!puid || static_cast<unsigned>(index)>=kMaxActors){v->failed=true;return;}
+        if(v->expectedActors && (static_cast<unsigned>(index)>=v->expectedCount ||
+            v->expectedActors[index].obj!=object || v->expectedActors[index].ctrl!=At<const void*>(object,kSelfCtrl))) {
+            v->failed=true;return;
+        }
         for(unsigned i=0;i<v->count;++i) {
             if(v->actors[i]==object)return; // avoid duplicate visitation, not duplicate PUIDs
             if(v->indices[i]==static_cast<unsigned>(index)){v->failed=true;return;}
@@ -47,7 +53,8 @@ bool IndicesInRange(const Visitor& visitor,unsigned expected) noexcept {
 }
 }
 
-bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsigned* expectedPlayers) noexcept {
+static bool ReadMissionParticipantsChecked(void** puids,unsigned capacity,unsigned* count,unsigned* expectedPlayers,
+                                          const ObjRef* created=nullptr,unsigned createdCount=0) noexcept {
     using namespace mission_participants;
     if(count)*count=0;
     if(expectedPlayers)*expectedPlayers=0;
@@ -59,7 +66,7 @@ bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsi
         if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
         const unsigned expected=At<unsigned>(status,0x14FF8);
         if(!expected || expected>kMaxActors || !Readable(At<void*>(mgr,0x38),7*0x38))return false;
-        Visitor visitor{kVisitorVtable,puids,capacity,0,false,{},{}};
+        Visitor visitor{kVisitorVtable,puids,capacity,0,false,{},{},created,createdCount};
         reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
         // Snapshot invalidated by scene replacement or a mission-count change during native traversal.
         if(visitor.failed || !IndicesInRange(visitor,expected) || At<void*>(image,kTeamManager)!=mgr || At<const void*>(image,kGameStatus)!=status ||
@@ -67,5 +74,16 @@ bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsi
         *count=visitor.count;*expectedPlayers=expected;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool ReadMissionParticipants(void** puids,unsigned capacity,unsigned* count,unsigned* expectedPlayers) noexcept {
+    return ReadMissionParticipantsChecked(puids,capacity,count,expectedPlayers);
+}
+bool MissionParticipantCreationsMatch(const ObjRef* created,unsigned expected) noexcept {
+    using namespace mission_participants;
+    if(!created || !expected || expected>kMaxActors || !Readable(created,expected*sizeof(ObjRef)))return false;
+    void* puids[kMaxActors]{};
+    unsigned count=0,nativeExpected=0;
+    return ReadMissionParticipantsChecked(puids,expected,&count,&nativeExpected,created,expected) &&
+        count==expected && nativeExpected==expected;
 }
 }
