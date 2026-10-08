@@ -13,5 +13,6 @@ bool MissionParticipantCreationsMatch(const ObjRef* createdByIndex,unsigned expe
 // 0 booting, 1 boot complete, 2 lobby menu, 3 room menu, 4 playing, 5 loading.
 // Root MainScript sets 5 BEFORE loading and 3 AFTER scene release + Network_Session_End.
 // May be read from EOS or game thread: atomic aligned volatile state/lock loads and manager identity recheck.
+// Before EML_Load, locally identifies an already loaded supported EDF.dll without setting crew::image.
 bool ReadNativeMissionLocation(unsigned* location) noexcept;
 }

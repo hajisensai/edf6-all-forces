@@ -1,6 +1,7 @@
 #include "mission_participants.h"
 #include "crew.h"
 #include "memory.h"
+#include "edf/host.h"
 
 namespace crew {
 namespace mission_participants {
@@ -93,9 +94,12 @@ bool ReadNativeMissionLocation(unsigned* location) noexcept {
     using namespace mission_participants;
     if(!location)return false;
     __try {
-        if(!Matches(kLocationSetter+0x1A,kLocationLoad,sizeof(kLocationLoad)) ||
-           !Matches(kLocationSetter+0x66,kLocationStore,sizeof(kLocationStore)))return false;
-        const auto managerSlot=reinterpret_cast<const unsigned char* const volatile*>(image+kNetworkManager);
+        // The admission ABI can be queried before EML_Load. Identify an already loaded supported EDF.dll
+        // locally; never initialize the plugin, install hooks or publish a global image from this read.
+        const auto base=image ? image : edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
+        if(!base || !edf::Matches(base,kLocationSetter+0x1A,kLocationLoad,sizeof(kLocationLoad)) ||
+           !edf::Matches(base,kLocationSetter+0x66,kLocationStore,sizeof(kLocationStore)))return false;
+        const auto managerSlot=reinterpret_cast<const unsigned char* const volatile*>(base+kNetworkManager);
         const auto mgr=*managerSlot;
         if(!Readable(mgr,0x1648))return false;
         const auto lock=reinterpret_cast<const volatile LONG*>(mgr+0x1644);

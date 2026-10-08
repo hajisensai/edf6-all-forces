@@ -54,6 +54,9 @@ int main() {
     Check(!MissionParticipantCreationsMatch(nullptr,2),"missing creation ledger rejected");
     unsigned count=9,expected=9;
     Check(!ReadMissionParticipants(nullptr,8,&count,&expected) && !count && !expected,"failure clears output counts");
+    unsigned earlyLocation=99;
+    Check(!GetModuleHandleW(L"EDF.dll") && !ReadNativeMissionLocation(&earlyLocation) && earlyLocation==99 && image==nullptr,
+          "pre-load read with no EDF module fails without initializing global image");
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x20C0000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     Check(image!=nullptr,"private native-location image");
     std::memcpy(image+kLocationSetter+0x1A,kLocationLoad,sizeof(kLocationLoad));
