@@ -74,7 +74,7 @@ struct ChoiceContext {
 };
 ChoiceContext choiceContext{};
 PayloadReadout selectableLatest{};
-ULONGLONG selectableMs=0;
+ULONGLONG selectableAt=0; // wall time; protected with the complete readout by choiceLock
 std::uint64_t nextChoiceToken=0; // never reset across missions: delayed UI clicks cannot alias a new snapshot
 struct ChoiceRequest { std::uint64_t token; int seat,entry; ULONGLONG posted; };
 struct ChoicePublication { std::uint64_t token; int seat,count; bool selectable[kMostPayload]; ULONGLONG at; };
@@ -83,8 +83,9 @@ ChoiceRequest choiceRequest{};
 ChoicePublication choicePublication{};
 void ClearChoiceContext(const void* vehicle=nullptr) noexcept {
     if(vehicle && choiceContext.vehicle.obj!=vehicle)return;
-    choiceContext=ChoiceContext{};selectableLatest=PayloadReadout{};selectableMs=0;
+    choiceContext=ChoiceContext{};
     AcquireSRWLockExclusive(&choiceLock);
+    selectableLatest=PayloadReadout{};selectableAt=0;
     choiceRequest=ChoiceRequest{};choicePublication=ChoicePublication{};
     ReleaseSRWLockExclusive(&choiceLock);
 }
@@ -112,12 +113,18 @@ void PublishChoices(unsigned char* v,unsigned char* const* ws,PayloadReadout& r,
     else next.token=choiceContext.token;
     choiceContext=next;
     r.selectionToken=next.enabled ? next.token : 0;
+}
+// Publish only after the selection result is final. Request admission metadata and
+// the complete UI readout share one lock/epoch; the draw thread sees no game pointers.
+void PublishSelectableSnapshot(const PayloadReadout& r) noexcept {
     AcquireSRWLockExclusive(&choiceLock);
+    selectableLatest=r;selectableAt=GetTickCount64();
     choicePublication=ChoicePublication{};choicePublication.token=r.selectionToken;choicePublication.seat=r.seat;
-    choicePublication.count=r.count;choicePublication.at=GetTickCount64();
+    choicePublication.count=r.count;choicePublication.at=selectableAt;
     for(int i=0;i<r.count;++i)choicePublication.selectable[i]=r.entry[i].selectable;
     ReleaseSRWLockExclusive(&choiceLock);
 }
+
 int ConsumeChoice(const PayloadReadout& r) noexcept {
     AcquireSRWLockExclusive(&choiceLock);
     const auto request=choiceRequest;choiceRequest=ChoiceRequest{};
@@ -344,6 +351,7 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
 }  // namespace
 
 void PayloadFrame(unsigned char* v) noexcept {
+    if(!Cfg().enabled){ClearRedirect(v);ClearChoiceContext(v);return;}
     if(v[kDead]){ClearRedirect(v);ClearChoiceContext(v);return;}
     if(BodyOf(v)!=PluginBody::none){ClearRedirect(v);if(!choiceContext.aircraft)ClearChoiceContext(v);return;}
     const int seat=PlayerSeatOf(v);
@@ -380,7 +388,7 @@ void PayloadFrame(unsigned char* v) noexcept {
         else if(chose)sightPick.control=PayloadFire::store;
     }
     sightPick.primaryHeld=primary;sightPick.secondaryHeld=secondary;
-    latest=r;latestMs=ms;selectableLatest=r;selectableMs=ms;
+    latest=r;latestMs=ms;PublishSelectableSnapshot(r);
 }
 
 // Select only loaded weapons already attached to this seat. The native caller owns
@@ -461,16 +469,14 @@ bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
 }
 
 bool PlayerSelectablePayload(PayloadReadout* out) noexcept {
-    if(!out || !selectableMs || GameMs()-selectableMs>kFreshMs || !Cfg().enabled)return false;
-    __try {
-        auto v=static_cast<unsigned char*>(const_cast<void*>(choiceContext.vehicle.obj));
-        if(!Readable(v,kSeatCount+8) || !choiceContext.vehicle.Is(v) || !choiceContext.human.Is(PlayerHuman()) || v[kDead] ||
-           choiceContext.seat<0 || static_cast<unsigned>(choiceContext.seat)>=SeatCount(v))return false;
-        const auto seat=SeatAt(v,static_cast<unsigned>(choiceContext.seat));
-        if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())return false;
-        *out=selectableLatest;return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    if(!out)return false;
+    AcquireSRWLockShared(&choiceLock);
+    const bool fresh=selectableAt && GetTickCount64()-selectableAt<=kFreshMs;
+    if(fresh)*out=selectableLatest;
+    ReleaseSRWLockShared(&choiceLock);
+    return fresh;
 }
+
 void ForgetAircraftPayload(const void* vehicle) noexcept {
     if(choiceContext.aircraft)ClearChoiceContext(vehicle);
 }
@@ -506,7 +512,7 @@ int AircraftPayloadChoice(unsigned char* v,const Store* stores,int count,int pic
     PublishChoices(v,ws,r,true,stores);
     const int chosen=ConsumeChoice(r);
     if(chosen>=0){r.picked=chosen;for(int i=0;i<count;++i)r.entry[i].picked=i==chosen;}
-    selectableLatest=r;selectableMs=GameMs();
+    PublishSelectableSnapshot(r);
     return chosen;
 }
 
