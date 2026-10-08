@@ -20,6 +20,11 @@ const Config& Cfg() noexcept { return commandConfig; }
 ULONGLONG GameMs() noexcept { return 10000; }
 ULONGLONG GameFrame() noexcept { return 600; }
 void Log(const char*,...) noexcept {}
+const wchar_t* WeaponFile(const unsigned char*,std::size_t* length) noexcept {
+    constexpr wchar_t file[]=L"V_410HELI_GATLING01.SGO";
+    *length=sizeof(file)/sizeof(file[0])-1;
+    return L"V_410HELI_GATLING01.SGO";
+}
 bool CommandVehicleLive(const ObjRef& r) noexcept { return static_cast<bool>(r); }
 // Fail closed if this command-only scenario reaches any unavailable game service.
 void MissingDependency() noexcept { void(*volatile stop)()=std::abort;stop(); }

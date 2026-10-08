@@ -17,11 +17,19 @@ online::CopyOwner SetSpawnOwner(online::CopyOwner owner) noexcept { return owner
 Config inputConfig{};
 ULONGLONG inputTime=10000;
 bool testView=false;
+const wchar_t* shotFile=L"EDF6VC_MEDIC_GUN.SGO";
+std::size_t shotFileLength=std::wcslen(shotFile);
+int fileQueries=0,obsoleteWarnings=0;
+const wchar_t* WeaponFile(const unsigned char*,std::size_t* length) noexcept {
+    ++fileQueries;*length=shotFileLength;return shotFile;
+}
 float inputVP[16]{};
 const Config& Cfg() noexcept { return inputConfig; }
 ULONGLONG GameMs() noexcept { return inputTime; }
 bool MapHoldsKeys() noexcept { return false; }
-void Log(const char*,...) noexcept {}
+void Log(const char* format,...) noexcept {
+    if(std::strstr(format,"obsolete EDF6VC_COAX_MG.SGO"))++obsoleteWarnings;
+}
 bool LastViewProj(float* out) noexcept {
     if(testView)std::memcpy(out,inputVP,sizeof(inputVP));
     return testView;
@@ -99,6 +107,7 @@ void __fastcall StockMedicShot(unsigned char* weapon,unsigned muzzle,void* overr
     Check(weapon==medicWeapon && muzzle==3 && overrideParam==(replay ? inputSeat : nullptr) && counter==&shotCounter,
           "shot forwards all register arguments unchanged");
     ++shotCalls;shotReplay=replay;shotPermission=weapon[kWeaponFriendlyDamage];
+    Put<int>(weapon,0xBD4,1); // Native fire's recoil marker, reached only if the hook permits the shot.
 }
 
 void CheckMedicPermission() {
@@ -120,6 +129,25 @@ void CheckMedicPermission() {
         Check(shotPermission==1,"permission restored before local or replay parameter consumption");
     }
     Check(shotCalls==2,"native shot called exactly once per invocation");
+    const int before=shotCalls;
+    for(const wchar_t* file:{L"EDF6VC_COAX_MG.SGO",L"edf6vc_coax_mg.sgo"})for(bool replay:{false,true}) {
+        shotFile=file;shotFileLength=std::wcslen(file);Put<int>(medicWeapon,0xBD4,0);
+        reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
+        Check(shotCalls==before && At<int>(medicWeapon,0xBD4)==0,"retired local/replay shot cannot reach native recoil marker");
+    }
+    Check(obsoleteWarnings==1,"old data prompts one installer-regeneration diagnostic");
+    for(const wchar_t* file:{L"V_403TANK_MACHINEGUN.SGO",L"EDF6VC_COAX_MG.SGO.NEW",L"OTHER_COAX_MG.SGO"}) {
+        shotFile=file;shotFileLength=std::wcslen(file);
+        for(bool replay:{false,true}) {
+            const int oldCalls=shotCalls;Put<int>(medicWeapon,0xBD4,0);
+            reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
+            Check(shotCalls==oldCalls+1 && At<int>(medicWeapon,0xBD4)==1,"stock and other custom machine guns retain local/replay fire");
+        }
+    }
+    shotFile=L"EDF6VC_COAX_MG.SGO";shotFileLength=std::wcslen(shotFile)-1;
+    Check(!RetiredLoadout(medicWeapon),"a truncated resource name is not the retired file");
+    shotFile=L"EDF6VC_MEDIC_GUN.SGO";shotFileLength=std::wcslen(shotFile);
+    Check(fileQueries>0,"shot guard consults the actual resource-file adapter");
     for(float damage:{150.0f,0.0f,std::numeric_limits<float>::quiet_NaN(),-std::numeric_limits<float>::infinity()}) {
         Put<float>(medicWeapon,kWeaponDamage,damage);medicWeapon[kWeaponFriendlyDamage]=0;
         MedicShotHook(medicWeapon,3,nullptr,&shotCounter,false);

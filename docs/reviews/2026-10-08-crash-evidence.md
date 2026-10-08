@@ -30,7 +30,12 @@
 
 安装器每次都会重建 stockstores 请求（不走模型缓存）；新请求不再含旧机枪。
 ledger 会释放此前由 stockstores 写入且仍无人共享的旧 COAX 文件。只换 DLL
-不能更新武器请求数据，应通过安装器完成升级。其它工具或用户改写的文件遵循
+不能更新武器请求数据，应通过安装器完成升级。运行时另设窄兼容边界：只按真实资源
+文件名（长度及大小写不敏感精确匹配）退役 `EDF6VC_COAX_MG.SGO`。`ReadSeat`
+不再把它列入玩家/NPC 选择；公共 `0x696FD0` 发射入口在本地或远端重放前拒绝它，
+不进入会设置 native recoil `+0xBD4` 的原生函数。检测时全进程仅记录一次重跑安装器
+提示。原版机枪、相近文件名和其它自定义武器照常通过，不伪造 BodyRecoil 或修改伤害。
+其它工具或用户改写的文件遵循
 既有 ledger 保护，不强行覆盖。
 
 ## 验证边界
@@ -44,4 +49,9 @@ ledger 会释放此前由 stockstores 写入且仍无人共享的旧 COAX 文件
   保留原武器、无虚构机枪、拒绝旧 AimRecoil、升级请求及旧资源释放。
 - `tools/selftest.py::stock_stores_build` 对真实 Root.cpk 的请求/模型和
   AutoTurret overlay 校验通过。
+- `heli_player_input_test` 执行已安装的生产发射入口，记录文件名查询、native 下游
+  调用与 recoil 标记，验证退役文件的 local/replay 都被拒绝、相近名和原版机枪照常
+  通过、提示只记一次。`payload_runtime` 验证玩家和 NPC 选择均排除旧 COAX；相关
+  `heli_command_test` 一并通过，插件完整编译通过。这里的 shot 下游是 recording stub，
+  不把它当作真实游戏发射验收。
 - 未在游戏内重复用户操作，未执行 projectile flight 或双机验收。

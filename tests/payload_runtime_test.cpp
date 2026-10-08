@@ -1,5 +1,6 @@
 #include "../src/payload.cpp"
 #include <cstdio>
+#include <initializer_list>
 namespace crew {
 unsigned char* image=nullptr;
 Config cfg;
@@ -17,7 +18,10 @@ bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char*) noexcept { return false; }
 const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept { return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : nullptr; }
-const wchar_t* WeaponFile(const unsigned char*,std::size_t* n) noexcept { *n=0;return nullptr; }
+int fileQueries=0;
+const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
+    ++fileQueries;const auto file=At<const wchar_t*>(w,0x08);*n=file ? std::wcslen(file) : 0;return file;
+}
 void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 bool ReadRound(const unsigned char* w,RoundModel* m) noexcept {
@@ -45,10 +49,15 @@ int main() {
             w[0x100]=i ? 2 : 0;w[0x101]=static_cast<unsigned char>(i);
             Put<int>(w,kWeaponAmmo,10);Put<int>(w,kWeaponCapacity,10);Put<int>(w,kWeaponReloadTime,-1);
             Put<float>(w,0x224,1000);Put<float>(w,0x89C,10);Put<float>(w,0x6D0,1000);Put<const wchar_t*>(w,kWeaponName,i ? L"missile" : L"cannon");
+            Put<const wchar_t*>(w,0x08,i ? L"EDF6VC_AAM_S_2.SGO" : L"V_403TANK_CANNON01.SGO");
         }
         Put<void*>(seat,kSeatWeapons,seatHolders[j]);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
     }
     check(NpcPayloadSelect(vehicles[0],0,400,true)==weapons[0][1],"air target selects actual AA store");
+    Put<const wchar_t*>(weapons[0][1],0x08,L"EDF6VC_COAX_MG.SGO");
+    check(NpcPayloadSelect(vehicles[0],0,400,true)==weapons[0][0],"NPC excludes exact retired coax resource");
+    Put<const wchar_t*>(weapons[0][1],0x08,L"EDF6VC_AAM_S_2.SGO");
+    NpcPayloadSelect(vehicles[0],0,400,true);
     PullHook(holders[0][0]);check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"native pull redirected once to selected weapon");
     check(NpcPayloadSelect(vehicles[1],0,400,false)==weapons[1][2],"second vehicle independently selects ground missile");
     PullHook(holders[0][0]);PullHook(holders[1][0]);check(weapons[0][1][kWeaponTrigger] && weapons[1][2][kWeaponTrigger],"multiple vehicle selections coexist");
@@ -81,6 +90,13 @@ int main() {
     PayloadFrame(vehicles[0]);PayloadReadout readout{};
     check(PlayerPayload(&readout) && readout.count==3 && readout.choices==3,"player HUD lists three real mounted weapons");
     check(readout.entry[0].rounds==0 && !wcscmp(readout.entry[0].name,L"cannon"),"HUD reports weapon identity and actual remaining rounds");
+    Put<const wchar_t*>(weapons[0][1],0x08,L"edf6vc_coax_mg.sgo");PayloadFrame(vehicles[0]);
+    check(PlayerPayload(&readout) && readout.count==2 && readout.choices==2,"player HUD and switching exclude retired coax data");
+    for(const wchar_t* file:{L"V_403TANK_MACHINEGUN.SGO",L"EDF6VC_COAX_MG.SGO.OTHER"}) {
+        Put<const wchar_t*>(weapons[0][1],0x08,file);PayloadFrame(vehicles[0]);
+        check(PlayerPayload(&readout) && readout.count==3,"stock machine gun and other custom filenames remain mounted");
+    }
+    check(fileQueries>0,"selection queries real resource filenames");
     Put<std::uint64_t>(SeatAt(vehicles[0],0),kSeatWeaponCount,1);PayloadFrame(vehicles[0]);
     check(PlayerPayload(&readout) && readout.count==1 && readout.choices==0,"vehicle without additional mounts has no invented switch choices");
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");

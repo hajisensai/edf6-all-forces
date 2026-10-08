@@ -32,6 +32,7 @@
 #include "memory.h"
 #include "lockon.h"
 #include "stores.h"
+#include "retired_loadout.h"
 #include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
@@ -161,6 +162,7 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         if(!Readable(ctrl,12) || At<std::int32_t>(ctrl,8)<=0)continue;
         unsigned char* const w=At<unsigned char*>(holders[i],kHolderWeapon);
         if(!Readable(w,kWeaponCharge+4) || IsFuelTank(w))continue;
+        if(RetiredLoadout(w)){ReportRetiredLoadout();continue;}
         index[count]=HolderIndex(v,holders[i]);
         ws[count++]=w;
     }

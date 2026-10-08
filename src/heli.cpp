@@ -45,6 +45,7 @@
 #include "roundaim.h"
 #include "edf/weapon.h"
 #include "warn.h"
+#include "retired_loadout.h"
 #include <cmath>
 
 namespace crew {
@@ -699,7 +700,12 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
     // RideAi 0x6330C9 and later script setup 0x632DA0 clear +8B6 even on healing guns. Both the blast filter
     // and HP handler need its GDI bit 0x20. The common local/replay shot entry repairs it before parameter copying.
     // Weapon semantics are independent of AI/aim settings and network ownership; positive guns stay untouched.
-    __try { RestoreMedicPermission(weapon); }
+    __try {
+        // Old requests can survive a DLL-only upgrade. Reject the retired plugin
+        // weapon before either local or replay fire sets native recoil +BD4.
+        if(RetiredLoadout(weapon)){ReportRetiredLoadout();return;}
+        RestoreMedicPermission(weapon);
+    }
     __except(EXCEPTION_EXECUTE_HANDLER) {}
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
 }
