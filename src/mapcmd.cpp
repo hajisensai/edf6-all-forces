@@ -504,6 +504,13 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,g.count);r.selected=g.sel.n;r.pointOk=pointOk;
+    r.allowedOrders=0;r.selectedSquads=0;
+    for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v)) {
+        const auto& entry=g.list[i];
+        if(entry.owner==Owner::squad && !entry.u.locked)++r.selectedSquads;
+        if(allowed)for(unsigned order=0;order<=static_cast<unsigned>(Order::recruit);++order)
+            if(Takes(entry,static_cast<Order>(order)))r.allowedOrders|=std::uint32_t{1}<<order;
+    }
     std::memcpy(r.point,point,12);
     r.pointer=pointer;r.px=g.pointer.x;r.py=g.pointer.y;r.boxing=pointer && g.boxing;r.bx=g.bx;r.by=g.by;
     r.count=g.count;
