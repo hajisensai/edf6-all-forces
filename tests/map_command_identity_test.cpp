@@ -16,6 +16,14 @@ bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
 unsigned char* image=nullptr;
+bool NpcDriver(const unsigned char* v) noexcept {
+    if(!v || !SeatCount(v))return false;
+    auto* seat=SeatAt(const_cast<unsigned char*>(v),0);const auto who=SeatRider(seat);
+    if(who==Rider::dummy)return true;
+    const auto* human=At<const unsigned char*>(seat,kSeatRider);
+    return who==Rider::other && !AnyPlayerIn(seat) && human && At<const void*>(human,0)==image+0x17CDF28;
+}
+
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
 bool NpcMarked() noexcept { return false; }

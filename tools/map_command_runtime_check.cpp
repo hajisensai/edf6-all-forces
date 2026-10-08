@@ -25,6 +25,14 @@ bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
 unsigned char* image=nullptr;
+bool NpcDriver(const unsigned char* v) noexcept {
+    if(!v || !SeatCount(v))return false;
+    auto* seat=SeatAt(const_cast<unsigned char*>(v),0);const auto who=SeatRider(seat);
+    if(who==Rider::dummy)return true;
+    const auto* human=At<const unsigned char*>(seat,kSeatRider);
+    return who==Rider::other && !AnyPlayerIn(seat) && human && At<const void*>(human,0)==image+0x17CDF28;
+}
+
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
@@ -417,6 +425,19 @@ void UiCaptureAndSnapshots() noexcept {
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
     MapCommandPayloadButtons(row,78,2,&entry,1);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
     Check(payloadRequests==1,"payload topology changing during a click cancels the old hitbox action");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);in.front=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1 && !game.uiLeft,"losing foreground cancels UI press instead of treating it as a click release");
+    in.front=true;MapCommandFrame(in,centre);
+    Check(MapCommandPointerCaptured(),"restored foreground suppresses the old held gesture until release");
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1,"foreground restoration cannot replay a cancelled press");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);view.at=0;MapCommandFrame(in,centre);
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1,"stale rendered view cancels an in-progress click even when the same token returns");
+    MapCommandView(vp,1920,1080);
+    Check(!view.buttons && !view.squads && !view.payloads && !view.panels,"viewport resize invalidates every old-layout hitbox before new panels are published");
+    MapCommandView(vp,1280,720);MapCommandUiPanels(panel,1);MapCommandPayloadButtons(row,78,2,&entry,1);
     inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);
     Check(MapCommandPointerCaptured(),"right press on panel captures camera turning");
     in.dx=700;MapCommandFrame(in,centre);in.dx=0;

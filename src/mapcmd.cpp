@@ -81,7 +81,7 @@ struct Game {
     enum class UiKind : std::uint8_t { none,command,squad,payload,panel };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; };
     UiHit uiPress{};
-    bool uiLeft=false,uiRight=false,rowPicked=false;
+    bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
 };
 Game game{};
 std::atomic<bool> boxingNow{false};
@@ -278,9 +278,16 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
 // UI owns presses that began on a rendered panel, including its inert background. Capture remains
 // until release outside the panel; a changed identity/token between press and release cancels action.
 void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept {
+    if(!in.front) {
+        g.boxing=g.pressing=g.uiLeft=g.uiRight=false;g.uiPress={};
+        g.suppressLeft=g.suppressRight=true;pointerCaptured.store(false);return;
+    }
+    if(!k.left)g.suppressLeft=false;
+    if(!k.right)g.suppressRight=false;
     if(!v) {
-        g.boxing=g.pressing=false;g.uiLeft=g.uiLeft && k.left;g.uiRight=g.uiRight && k.right;
-        pointerCaptured.store(g.uiLeft || g.uiRight);return;
+        g.boxing=g.pressing=g.uiLeft=g.uiRight=false;g.uiPress={};
+        g.suppressLeft=g.suppressLeft || k.left;g.suppressRight=g.suppressRight || k.right;
+        pointerCaptured.store((g.suppressLeft && k.left) || (g.suppressRight && k.right));return;
     }
     if(mapcmd::FitPointer(g.pointer,v->w,v->h)) {
         g.boxing=g.pressing=false;
@@ -292,15 +299,15 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
         g.pointer.y=mapcam::Clamp(g.pointer.y+in.dy*kPointerGain*s,0.0f,v->h-1.0f);
     }
     if(in.mouse && (g.pressing || g.uiLeft))g.moved+=std::fabs(in.dx)+std::fabs(in.dy);
-    if(k.right && !g.was.right)g.uiRight=UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none;
+    if(k.right && !g.was.right && !g.suppressRight)g.uiRight=UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none;
     if(!k.right)g.uiRight=false;
-    if(k.left && !g.was.left) {
+    if(k.left && !g.was.left && !g.suppressLeft) {
         g.uiPress=UiAt(*v,g.pointer.x,g.pointer.y);g.uiLeft=g.uiPress.kind!=Game::UiKind::none;g.moved=0;
         if(g.uiLeft)g.boxing=g.pressing=false;
         else if(k.ctrl){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
         else g.pressing=true;
     }
-    pointerCaptured.store(g.uiLeft || g.uiRight);
+    pointerCaptured.store(g.uiLeft || g.uiRight || (g.suppressLeft && k.left) || (g.suppressRight && k.right));
     if(k.left || !g.was.left)return;
     if(g.uiLeft) {
         if(g.moved<kClickMove && SameUi(g.uiPress,UiAt(*v,g.pointer.x,g.pointer.y)))UiClick(g,g.uiPress,k.shift);
@@ -626,6 +633,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
+    if(view.w!=width || view.h!=height)view.buttons=view.squads=view.payloads=view.panels=0;
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
     ReleaseSRWLockExclusive(&viewLock);
 }
