@@ -278,11 +278,11 @@ bool Assign(Deployment& deployed) noexcept {
 }
 void Configure() noexcept {
     if(configured)return;
-    InstallMissionParticipantGate(&SupportMissionPlayerAllowed);
+    InstallMissionParticipantGate(&SupportMissionPlayerAllowed,&NoteSupportMissionPlayerCreated);
     ConfigureSupportNet({Plan,Validate,Spawn,Destroy,
         [](std::uint32_t ordinal,unsigned char* out) noexcept {
             return OnlineHostOnly() && DeriveSupportSoldierNetId(PlayerHuman(),ordinal,out);
-        },&ReadMissionParticipants,&MissionParticipantGateReady});
+        },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch});
     InstallMissionCrewSupport();configured=true;
 }
 }

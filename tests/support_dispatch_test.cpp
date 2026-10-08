@@ -54,9 +54,14 @@ unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const floa
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
 support_net::Hooks configuredHooks{};int netConfigured=0,gatesInstalled=0;
 bool creationSeen=false,gateBeforeNetwork=false;
-bool InstallMissionParticipantGate(MissionParticipantAdmission) noexcept {++gatesInstalled;return true;}
+MissionPlayerCreated installedCreatedObserver=nullptr;
+bool InstallMissionParticipantGate(MissionParticipantAdmission,MissionPlayerCreated created) noexcept {
+    ++gatesInstalled;installedCreatedObserver=created;return true;
+}
 bool MissionParticipantGateReady() noexcept {return true;}
 bool SupportMissionPlayerAllowed(int) noexcept {return true;}
+void NoteSupportMissionPlayerCreated(int,const ObjRef&) noexcept {creationSeen=true;}
+bool MissionParticipantCreationsMatch(const ObjRef*,unsigned) noexcept {return true;}
 bool ReadMissionParticipants(void**,unsigned,unsigned*,unsigned*) noexcept {return true;}
 void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept {
     configuredHooks=hooks;++netConfigured;gateBeforeNetwork=gatesInstalled>0;creationSeen=false;
@@ -92,7 +97,9 @@ int main() {
     check(configured && netConfigured==1 && gateBeforeNetwork,"mission preload installs admission gate before configuring support networking");
     check(configuredHooks.participants==&ReadMissionParticipants && configuredHooks.admissionReady==&MissionParticipantGateReady,
           "network quorum reads actual mission actors and the verified upper admission gate");
-    creationSeen=true;
+    check(installedCreatedObserver==&NoteSupportMissionPlayerCreated && configuredHooks.createdMatches==&MissionParticipantCreationsMatch,
+          "successful native actor creation observer and exact identity matcher are both wired before creation");
+    installedCreatedObserver(0,ObjRef{});
     check(SupportCallAt(0,target,note,128) && made==0,"request only queues: no objects materialise on click");
     SupportDispatchTick();
     check(creationSeen && netConfigured==1,"first frame does not reset creation observations already collected during mission start");
