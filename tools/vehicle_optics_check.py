@@ -291,6 +291,10 @@ class RealModels(unittest.TestCase):
                             m['game_object_durability'] = revision
                             payload = sgo.write(version, m)
                         expected[n] = make_stock_stores._read_any(payload)
+                        # The integrated stock-store writer now opts into the optic model.
+                        # Removing optics must restore the original model path while retaining
+                        # that writer's added holders and latest durability, not retain its optic path.
+                        expected[n]['animation_model'][0][0] = optics.model_path(self.game.read('OBJECT', n+'.SGO'))
                         ledger.Ledger(tmp).put('stockstores', 'OBJECT/'+n+'.SGO', payload)
                     make_optics.install_stock_redirects(tmp, make_optics.build_stock_redirects(tmp))
                     # Cached model installation cannot prune mutable consumers.
