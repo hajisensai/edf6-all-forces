@@ -34,6 +34,14 @@ def fixture() -> bytes:
 
 
 class AnimationTests(unittest.TestCase):
+    def test_channel_alignment_for_every_source_tail_residue(self) -> None:
+        # Real stock files end at residues 4 and 8; the old synthetic fixture
+        # ended at 0 and therefore hid the faulty four-byte padding on CI.
+        for residue in range(16):
+            with self.subTest(residue=residue):
+                source = fixture() + bytes(residue)
+                self.check_extension(source, pm.animation(source))
+
     def check_extension(self, source: bytes, target: bytes) -> None:
         old, new = cas_pose.CasPose(source), cas_pose.CasPose(target)
         self.assertEqual(new.names, old.names + pm.SHIELD_BONES)
