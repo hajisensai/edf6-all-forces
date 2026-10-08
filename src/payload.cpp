@@ -552,9 +552,12 @@ int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,i
         if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())return 0;
         PayloadReadout r{};unsigned char* ws[kMostPayload]{};
         r.count=ReadSeat(v,index,ClassOf(v),ws,r);
-        const Pick* pick=nullptr;
-        for(const auto& p:picks)if(!p.npc && p.ref.Is(v) && p.seat==index && GameMs()-p.seen<=kFreshMs){pick=&p;break;}
         const bool current=sightPick.vehicle.Is(v) && sightPick.human.Is(PlayerHuman()) && sightPick.seat==index;
+        const Pick* pick=nullptr;
+        // Selection ownership lasts until identity/seat/weapon changes, not until a HUD timer expires.
+        // Every returned weapon still comes from the live ReadSeat set below. Fire redirects retain
+        // their separate kFreshMs guard in PullHook; a slow/pause frame never grants a stale shot.
+        if(current)for(const auto& p:picks)if(!p.npc && p.ref.Is(v) && p.seat==index){pick=&p;break;}
         const PayloadFire want=current ? sightPick.control : PayloadFire::primary;
         const auto usable=[&](int i) -> bool {return !Spent(ws[i]);}; // reloading guns retain their sight; permanently spent ones do not
         const auto redirected=[&](unsigned char* w) -> unsigned char* {

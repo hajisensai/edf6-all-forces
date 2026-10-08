@@ -175,7 +175,14 @@ int main() {
     Check(Sight(c)==c.weapon[0],"vehicle object reused at same address loses old sight identity immediately");
     Tick(c);Check(Sight(c)==c.weapon[0],"reused vehicle does not carry old secondary-control edge");
     SetUp();Tick(c);sightinput::keys['R']=true;Tick(c);now+=201;
-    Check(Sight(c)==c.weapon[3] && !PayloadPicked(c.vehicle),"expired payload preview falls back to currently live native secondary");
+    Check(Sight(c)==c.weapon[6] && !PayloadPicked(c.vehicle),"slow frame retains live optical store owner while HUD readout still expires");
+    PullHook(c.holders[3]);Check(!c.weapon[6][kWeaponTrigger] && c.weapon[3][kWeaponTrigger],"optical retention does not extend the firing redirect freshness window");
+    c.weapon[3][kWeaponTrigger]=0;
+    const auto pausedGameTime=now;Sleep(250);
+    Check(now==pausedGameTime && Sight(c)==c.weapon[6],"paused game clock and real wall-time gap retain the same optical weapon without a vehicle tick");
+    Board(c,0,1);Check(Sight(c)==c.weapon[0],"new player identity cannot inherit slow-frame optical store selection");
+    Board(c,0,0);Put<int>(c.weaponCtrl[6],8,0);
+    Check(Sight(c)==c.weapon[0],"retained optical selection never returns an expired weapon holder");
     Check(NoShots(c),"read-only sight queries and expiration never generate shots");
 
     SetUp();Tick(c);
@@ -219,7 +226,9 @@ int main() {
     Check(SightWeapons(c,nullptr),"empty native group does not substitute an unselected store");
 
     SetUp();Flak(c);Tick(c);sightinput::keys['R']=true;Tick(c);now+=201;
-    Check(SightWeapons(c,c.weapon[0],c.weapon[1]),"expired flak store redirects fall back to both live native guns");
+    Check(SightWeapons(c,c.weapon[6]),"slow frame retains one selected flak store rather than changing optic owner to two native guns");
+    Board(c,0,1);
+    Check(SightWeapons(c,c.weapon[0],c.weapon[1]),"new human cannot inherit old flak optical redirects before next input tick");
     SetUp();Tick(c);sightinput::keys['R']=true;Tick(c);Put<int>(c.weaponCtrl[6],8,0);
     Check(SightWeapons(c,c.weapon[0]),"removed selected store never leaks stale pointer into cofire output");
     SetUp();Flak(c);Tick(c);sightinput::keys['R']=true;Tick(c);
