@@ -52,10 +52,18 @@ bool RegisterSupportObject(const void*,const unsigned char*) noexcept {return tr
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*) noexcept {return nullptr;}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
-void ConfigureSupportNet(const support_net::Hooks&) noexcept {}
+support_net::Hooks configuredHooks{};int netConfigured=0,gatesInstalled=0;
+bool creationSeen=false,gateBeforeNetwork=false;
+bool InstallMissionParticipantGate(MissionParticipantAdmission) noexcept {++gatesInstalled;return true;}
+bool MissionParticipantGateReady() noexcept {return true;}
+bool SupportMissionPlayerAllowed(int) noexcept {return true;}
+bool ReadMissionParticipants(void**,unsigned,unsigned*,unsigned*) noexcept {return true;}
+void ConfigureSupportNet(const support_net::Hooks& hooks) noexcept {
+    configuredHooks=hooks;++netConfigured;gateBeforeNetwork=gatesInstalled>0;creationSeen=false;
+}
 bool SubmitSupportRequest(int,const float*,wchar_t*,std::size_t) noexcept {++netRequests;return true;}
 void SupportNetTick() noexcept {}
-void ResetSupportNet() noexcept {}
+void ResetSupportNet() noexcept {creationSeen=false;}
 bool ValidateMissionCrewPlan(const SupportPlan&) noexcept {return false;}
 bool ApplyMissionCrewPlan(std::uint64_t,const SupportPlan&,bool) noexcept {return false;}
 void DestroyMissionCrewPlan(std::uint64_t) noexcept {}
@@ -80,8 +88,14 @@ int main() {
     using namespace crew;
     int checks=0;const auto check=[&](bool condition,const char* why){++checks;if(!condition){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}};
     float target[3]={0,0,0};wchar_t note[128];
+    ResetSupportDispatch();
+    check(configured && netConfigured==1 && gateBeforeNetwork,"mission preload installs admission gate before configuring support networking");
+    check(configuredHooks.participants==&ReadMissionParticipants && configuredHooks.admissionReady==&MissionParticipantGateReady,
+          "network quorum reads actual mission actors and the verified upper admission gate");
+    creationSeen=true;
     check(SupportCallAt(0,target,note,128) && made==0,"request only queues: no objects materialise on click");
     SupportDispatchTick();
+    check(creationSeen && netConfigured==1,"first frame does not reset creation observations already collected during mission start");
     check(made==2 && boardRequests==1 && activated==0,"hull and genuine crew requested at entry, waiting for actual boarding");
     check(At<float>(objects[0],kPosition)==-1400,"hull starts at planned edge, not target or caller");
     now+=100;SupportDispatchTick();check(activated==0,"assignment alone cannot authorize flight");

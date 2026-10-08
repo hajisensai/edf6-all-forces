@@ -8,6 +8,8 @@
 #include "support_spawn.h"
 #include "support_net.h"
 #include "mission_crew_support.h"
+#include "mission_participants.h"
+#include "mission_participant_gate.h"
 #include "ground_navigation.h"
 #include "npcai.h"
 #include "online_authority.h"
@@ -255,10 +257,11 @@ bool Assign(Deployment& deployed) noexcept {
 }
 void Configure() noexcept {
     if(configured)return;
+    InstallMissionParticipantGate(&SupportMissionPlayerAllowed);
     ConfigureSupportNet({Plan,Validate,Spawn,Destroy,
         [](std::uint32_t ordinal,unsigned char* out) noexcept {
             return OnlineHostOnly() && DeriveSupportSoldierNetId(PlayerHuman(),ordinal,out);
-        }});
+        },&ReadMissionParticipants,&MissionParticipantGateReady});
     InstallMissionCrewSupport();configured=true;
 }
 }
@@ -385,5 +388,8 @@ void ResetSupportDispatch() noexcept {
     dispatchFrame=~ULONGLONG{0};
     ResetMissionCrewSupport();
     ResetSupportNet();
+    // MissionStart runs during preload, before native players are created. Installing lazily on the
+    // first player frame would miss the creation callback and discard its admission observation.
+    Configure();
 }
 } // namespace crew
