@@ -9,16 +9,12 @@
 //  - the seat's weapons (holders seat+0xC8, at most kStockArms): label by the round's class (rounds.cpp), rounds left of
 //    the magazine (+0xBE8 / AmmoCount +0x248), the reload as the stock gauge reads it (weapon status 0x692100: once
 //    empty, 1 - left / ReloadTime: +0xE68 / +0x20C, or +0xE7C / +0x22C where that one is set);
-//  - each weapon's impact point from its own muzzles (edf::MeanMuzzle, as fire builds the shot): rounds.cpp RoundLands
-//    flies its round as the game does (an arc, or the rockets' motor) to the first ground within kReach; a homing one's
-//    lock as the jets' stores read it (lockon.h WeaponLock), else its LockonRange. The Katyusha's lofted launcher is launcher.cpp's
-//    (its cross and ripple ring): listed here, not aimed twice;
-//  - an arc gun's sight against the enemy under the view (Target: picked within kPickCone of the screen's centre, kept
-//    while within kKeepCone, its velocity measured off its lock point): the pipper where the round passes it and the
-//    lead mark where it is then (roundaim.h GunSight, the jets' gun sight's convention), unless the round meets the map
-//    first; neither (the sky, nothing there): only the boresight. It used to put the pipper where the round crossed
-//    kReach, which in the sky is a point fixed under the boresight (the user, 2026-10-06: "it never moves and does not
-//    match", a cannon aimed at a flying saucer);
+//  - each firing weapon's actual muzzles: up to four independent RoundLands paths, never a mean muzzle. Hit means a
+//    predicted terrain/building intersection; no hit retains the finite path endpoint and is drawn differently.
+//  - weapon_mount.h matches the holder's vehicle-bone ancestry to native seat-axis mappings. Only a proven
+//    independently yaw/pitch movable mount gets optional target lead guides and a range ladder. The target never
+//    overwrites physical at/hit/flight; fixed/body and pitch-only artillery retain real bore and ground prediction.
+//  - PayloadSightWeapons is the active trigger's co-fired group. Each weapon keeps its path, with one optic owner.
 //  - the selected store, where something lets the player pick one (SetStockSelectedStore; feat/ov-payload);
 //  - the fuel tank (v_fuel01, which every seat of a heli or a bike lists): no weapon, so not among the arms; its FuelTank
 //    is read instead (stockgauge.cpp FuelGauge: the share left and the time at its burn);
@@ -32,6 +28,7 @@
 #include "stores.h"
 #include "vecmath.h"
 #include "edf/weapon.h"
+#include "weapon_mount.h"
 #include <cmath>
 #include <cstring>
 
@@ -124,20 +121,16 @@ void RangeTarget(const unsigned char* v,const StockHudReadout& r,const float* ey
 void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const float* dir,StockArm& a) noexcept {
     roundaim::Round round{};
     float shooter[3];
-    if(m.lobbed || !ArcRoundOf(w,m,&round,shooter)) {
-        if(!a.hit)a.range=0.0f;   // no ground: no pipper (rounds that are not ranged keep the boresight alone)
-        return;
-    }
+    if(a.physicalOnly || m.lobbed || !ArcRoundOf(w,m,&round,shooter))return;
     a.ladder=gunsight::Of(round,pos,dir,shooter);
     const roundaim::GunMark g=roundaim::GunSight(round,pos,dir,shooter,a.hit,a.at,a.flight*60.0f,target.ok ? target.at : nullptr,
                                                  target.vel);
-    if(g.mark==roundaim::SightMark::none){a.range=0.0f;return;}   // `at` stays where the round ends (twin guns told apart by it)
+    if(g.mark!=roundaim::SightMark::ranged)return;
     a.ranged=g.mark==roundaim::SightMark::ranged;
-    a.hit=g.mark==roundaim::SightMark::ground;
     a.inReach=g.inReach;
-    std::memcpy(a.at,g.pipper,12);std::memcpy(a.lead,g.lead,12);
-    a.flight=g.frames/60.0f;
-    a.range=vec::Dist(pos,a.lead);
+    // A target guide is not where this shot hits terrain. Keep RoundLands' physical endpoint/hit/time intact.
+    std::memcpy(a.lead,g.lead,12);
+    a.targetRange=vec::Dist(pos,a.lead);
 }
 
 // One weapon's line and its impact point (see the top). `aim`: work the point out (not for a heli's).
@@ -155,8 +148,11 @@ void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true) noex
     a.lofted=At<std::int32_t>(w,edf::kWeaponMark)==edf::kMarkLofted;
     if(a.lofted)strncpy_s(a.label,"ROCKETS",_TRUNCATE);
     if(!aim || a.lofted || m.kind==RoundKind::none)return;
+    const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
+    const auto muzzleCount=At<std::uint64_t>(w,edf::kMuzzleCount);
+    if(!muzzleCount || muzzleCount>kMostMuzzles || !Readable(muzzles,muzzleCount*edf::kMuzzleStride))return;
     float pos[3],dir[3];
-    if(!edf::MeanMuzzle(w,kMostMuzzles,pos,dir) || !vec::Normalize(dir))return;
+    if(!edf::MuzzleFrame(w,muzzles,pos,dir) || !vec::Normalize(dir))return;
     std::memcpy(a.bore,dir,12);
     a.aimed=true;
     if(m.kind==RoundKind::homing) {
@@ -166,8 +162,16 @@ void Arm(const unsigned char* w,bool aim,StockArm& a,bool rangeTarget=true) noex
         if(a.lock)a.range=vec::Dist(pos,a.at);
         return;
     }
-    a.hit=RoundLands(w,m,pos,dir,kReach,a.at,&a.flight);
-    a.range=vec::Dist(pos,a.at);
+    float gravity[3];
+    if(!edf::WorldGravity(image,gravity)){a.aimed=false;return;}
+    for(std::uint64_t i=0;i<muzzleCount && a.paths<roundaim::kSightPaths;++i) {
+        float p[3],d[3];
+        if(!edf::MuzzleFrame(w,muzzles+i*edf::kMuzzleStride,p,d) || !vec::Normalize(d))continue;
+        auto& path=a.path[a.paths++];
+        path.hit=RoundLands(w,m,p,d,kReach,path.at,&path.seconds);path.range=vec::Dist(p,path.at);
+    }
+    if(!a.paths){a.aimed=false;return;}
+    a.hit=a.path[0].hit;std::memcpy(a.at,a.path[0].at,12);a.flight=a.path[0].seconds;a.range=a.path[0].range;
     if(m.kind==RoundKind::arc && rangeTarget)GunMarkOf(w,m,pos,dir,a);
 }
 
@@ -252,6 +256,8 @@ void StockHudFrame(unsigned char* v) noexcept {
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
     const unsigned char* const picked=PayloadPicked(v);
     const unsigned char* const sight=PayloadSightPicked(v,r.seat);
+    unsigned char* fired[kStockArms]{};
+    const int firing=PayloadSightWeapons(v,r.seat,fired,kStockArms);
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
     const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     int pickedArm=-1,storeArm=-1;
@@ -266,7 +272,10 @@ void StockHudFrame(unsigned char* v) noexcept {
             if(sight && w==sight)r.sight=r.arms;
             if(static_cast<int>(i)==store)storeArm=r.arms;
             StockArm& a=r.arm[r.arms++];
-            Arm(w,!r.heli,a,!(HighCamOn(v) || TurretCamHighTransition(v)));
+            const auto freedom=weaponmount::Of(v,seat,holders[i]);
+            a.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
+            for(int k=0;k<firing;++k)if(fired[k]==w)a.coFired=true;
+            Arm(w,!r.heli && a.coFired,a,w==sight && !(HighCamOn(v) || TurretCamHighTransition(v)));
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     r.selected=pickedArm>=0 ? pickedArm : storeArm;

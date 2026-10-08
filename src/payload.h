@@ -59,6 +59,10 @@ unsigned char* PayloadPicked(const void* vehicle) noexcept;
 // Independent fire-control target: default native primary, most recent trigger edge, or explicit R/LB payload choice.
 // Read-only, validates live holders; retains a reloading weapon but safely falls back from a spent/removed one.
 unsigned char* PayloadSightPicked(const void* vehicle,unsigned seat) noexcept;
+// The same fire-control view, including all known native weapons fired by that control.
+// Applies live store redirects and deduplicates final weapons; the first is the single optic owner above.
+// Returns entries written (at most capacity); null output/nonpositive capacity returns 0. Does not fire.
+int PayloadSightWeapons(const void* vehicle,unsigned seat,unsigned char** out,int capacity) noexcept;
 // Authoritative NPC seat: choose an existing, loaded, reachable weapon for this target.
 // Call before native seat aiming/firing; writes no trigger. nullptr means none is usable.
 // `fire` reports the native trigger control to use (primary or secondary).

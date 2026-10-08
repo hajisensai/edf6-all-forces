@@ -686,6 +686,7 @@ void SeatLine(Text* text,float width,float height,const SeatPrompt& p,Line* line
 // vehicles' HUD is up and its gun's boresight and pipper already show where the gun is against the screen's centre
 // (one gun, one mark).
 void TurretMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const TurretCamReadout& r,bool square) noexcept {
+    if(r.physicalOnly)return;
     float sx,sy;
     if(square && !r.onTarget && sight::ToScreen(vp,r.gun,1.0f,width,height,&sx,&sy)) {
         const float h=9.0f*s,t=2.0f*s;
@@ -1397,18 +1398,32 @@ void RocketDiamond(void* drawer,void* ctx,float x,float y,float s,const float* r
     Seg(drawer,ctx,x,y-r,x+r,y,t,rgba);Seg(drawer,ctx,x+r,y,x,y+r,t,rgba);
     Seg(drawer,ctx,x,y+r,x-r,y,t,rgba);Seg(drawer,ctx,x-r,y,x,y-r,t,rgba);
 }
+// Each marker is one actual barrel's predicted terrain intersection or finite path end.
+// An open dash is never presented as an enemy hit confirmation.
+void PhysicalPaths(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
+                   const roundaim::Impact* paths,int count,bool label,Line* lines,int* at) noexcept {
+    for(int i=0;i<count && i<roundaim::kSightPaths;++i) {
+        const auto& p=paths[i];float x,y;
+        if(!sight::ToScreen(vp,p.at,1.0f,width,height,&x,&y))continue;
+        if(p.hit)ImpactCross(drawer,ctx,vp,width,height,s,p.at,&x,&y);
+        else {
+            Seg(drawer,ctx,x-12*s,y,x-5*s,y,2*s,kHudDim);
+            Seg(drawer,ctx,x+5*s,y,x+12*s,y,2*s,kHudDim);
+        }
+        if(label && i==0)Label(text,lines,at,x,y+26*s,1,kLineScale*0.75f,p.hit ? kYellow : kHudDim,
+                              Tr(p.hit ? Tx::predictedGround : Tx::noGroundHit),p.range,p.seconds);
+    }
+}
 void HeliGunSight(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliSightReadout& h,
                   Line* lines,int* at) noexcept {
     float x,y;
     const float note=kLineScale*0.85f;
     if(h.gun) {
-        const float* c=h.hit ? kHud : kHudDim;
         Boresight(drawer,ctx,vp,width,height,s,h.bore);
         float bx,by;
-        if(h.ladder.ticks>0 && sight::ToScreen(vp,h.bore,0.0f,width,height,&bx,&by))   // its range ladder under the cross
+        if(!h.physicalOnly && h.ladder.ticks>0 && sight::ToScreen(vp,h.bore,0.0f,width,height,&bx,&by))
             LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,bx,by+12.0f*s,lines,at);
-        if(Pipper(drawer,ctx,vp,width,height,s,h.pipper,c,&x,&y))
-            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%d m",static_cast<int>(std::lround(h.range)));
+        PhysicalPaths(drawer,ctx,text,vp,width,height,s,h.path,h.paths,true,lines,at);
     }
     if(h.arm==HeliArm::missile) {
         if(LockAt(drawer,ctx,vp,width,height,s,h.lock,h.armAt,h.lockProgress,&x,&y))
@@ -2360,7 +2375,6 @@ void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float widt
 //    weapon (rounds of the magazine; RELOAD and its share and seconds; EMPTY when it never reloads), and over it the warning (a missile, a lock, the hull critical, out of ammo);
 //  - the threat ring of the aircraft (ThreatRing) round the screen's middle. ---
 constexpr float kLobSec=2.5f;        // s: a round in the air longer than this is lobbed (the cross, with its flight time)
-constexpr float kSamePoint=2.0f;     // m: two weapons' points this near and of one label are drawn once
 constexpr float kIndicatorR=34.0f;   // px (1080 lines): the hull / turret indicator's ring
 const char kStockHpKey=0;            // the HP bar's damage trail's key (an address of our own: never a vehicle's)
 
@@ -2439,8 +2453,9 @@ void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     LadderTicks(drawer,ctx,text,vp,width,height,s,a.ladder,cx,cy+c*0.85f,lines,at);
     const float over=cy-16.0f*s,note=kLineScale*0.85f;
     Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
-    if(a.range>0.0f && (a.hit || a.ranged))
-        Label(text,lines,at,cx+in,over,0,note,a.ranged && !a.inReach ? kHudDim : kHud,Tr(Tx::sightRange),static_cast<int>(std::lround(a.range)));
+    const float measured=a.ranged ? a.targetRange : a.range;
+    if(measured>0.0f && (a.hit || a.ranged))
+        Label(text,lines,at,cx+in,over,0,note,a.ranged && !a.inReach ? kHudDim : kHud,Tr(Tx::sightRange),static_cast<int>(std::lround(measured)));
     else Label(text,lines,at,cx+in,over,0,note,kHudDim,L"%ls",Tr(Tx::sightNoRange));
 }
 
@@ -2469,32 +2484,10 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         }
         return;
     }
-    if(a.ranged) {
-        const float* c=a.inReach ? kHud : kHudDim;
-        if(reticle)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
-        else Boresight(drawer,ctx,vp,width,height,s,a.bore);
-        LeadMark(drawer,ctx,vp,width,height,s,a.lead,c);
-        if(Pipper(drawer,ctx,vp,width,height,s,a.at,c,&x,&y) && !reticle)
-            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,c,L"%ls %d m",name,metres);
-        return;
-    }
-    if((a.lobbed || a.flight>kLobSec) && a.hit) {
-        if(ImpactCross(drawer,ctx,vp,width,height,s,a.at,&x,&y))
-            Label(text,lines,at,x,y+26.0f*s,1,note,kYellow,L"%ls %d m   %.1f s",name,metres,a.flight);
-        return;
-    }
-    if(reticle) {
-        GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
-        if(a.hit)Pipper(drawer,ctx,vp,width,height,s,a.at,kHud,&x,&y);
-        return;
-    }
-    Boresight(drawer,ctx,vp,width,height,s,a.bore);
-    if(a.hit) {
-        if(Pipper(drawer,ctx,vp,width,height,s,a.at,kHud,&x,&y))
-            Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,kHud,L"%ls %d m",name,metres);
-    } else if(sight::ToScreen(vp,a.bore,0.0f,width,height,&x,&y)) {
-        Label(text,lines,at,x+(kPipper+8.0f)*s,y,0,note,kHudDim,L"%ls",name);   // the sky: nothing to range it on
-    }
+    if(reticle && !a.physicalOnly)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
+    else Boresight(drawer,ctx,vp,width,height,s,a.bore);
+    if(a.ranged && !a.physicalOnly)LeadMark(drawer,ctx,vp,width,height,s,a.lead,a.inReach ? kHud : kHudDim);
+    PhysicalPaths(drawer,ctx,text,vp,width,height,s,a.path,a.paths,!reticle,lines,at);
 }
 
 // What the stock vehicles' HUD takes from the other readouts: the Nix's legs and torso (its ring), the drill tank's drill
@@ -2609,7 +2602,7 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
 int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
     const auto sights=[&](int i){
         const StockArm& a=r.arm[i];
-        return a.aimed && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && a.ladder.ticks>0 && !(i==0 && leadGun);
+        return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && a.ladder.ticks>0 && !(i==0 && leadGun);
     };
     return r.sight>=0 && r.sight<r.arms && r.sight<kStockArms && sights(r.sight) ? r.sight : -1;
 }
@@ -2621,22 +2614,14 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     // optical reticle underneath it; lofted launchers have their dedicated impact/spread marks.
     const int selected=r.sight>=0 && r.sight<r.arms && r.sight<kStockArms ? r.sight : -1;
     for(int i=0;i<r.arms && i<kStockArms;++i) {
-        if(i!=selected)continue;
         const StockArm& a=r.arm[i];
+        if(i!=selected && !a.coFired)continue;
         if(!a.aimed || a.lofted)continue;
-        if(x.high) {
-            float sx,sy;
-            if(a.hit && ImpactCross(drawer,ctx,vp,width,height,s,a.at,&sx,&sy))
-                Label(text,lines,at,sx,sy+26.0f*s,1,kLineScale*0.85f,kYellow,L"%.0f m   %.1f s",a.range,a.flight);
+        if(x.high || i!=selected) {
+            PhysicalPaths(drawer,ctx,text,vp,width,height,s,a.path,a.paths,i==selected,lines,at);
             continue;
         }
-        if(i==0 && x.leadGun && a.kind!=RoundKind::homing)continue;   // the lead circle's gun
-        bool twin=false;
-        for(int k=0;k<i && !twin && i!=r.selected;++k) {
-            const StockArm& b=r.arm[k];
-            twin=b.aimed && !b.lofted && b.kind==a.kind && std::strcmp(a.label,b.label)==0 && vec::Dist(a.at,b.at)<kSamePoint;
-        }
-        if(twin)continue;
+        if(i==0 && x.leadGun && !a.physicalOnly && a.kind!=RoundKind::homing)continue;
         wchar_t name[32];
         ArmName(a,i==r.selected,name,_countof(name));
         StockMark(drawer,ctx,text,vp,width,height,s,a,name,i==sightGun,lines,at);
@@ -3953,6 +3938,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const bool mechSight=fresh && snap.sazabi && !snap.cockpit;
         const bool overhead=fresh && ((snap.highCam && snap.highCamOn) || sightKind==sightzoom::Kind::indirect);
         const int stockPick=stockHud ? snap.stockHud.sight : -1;
+        const bool physicalSight=(stockHud && stockPick>=0 && stockPick<snap.stockHud.arms && stockPick<kStockArms && snap.stockHud.arm[stockPick].physicalOnly) ||
+                                 (fresh && snap.heliSight && snap.heliAim.gun && snap.heliAim.physicalOnly);
         const bool launcherSight=stockHud && stockPick>=0 && stockPick<snap.stockHud.arms && snap.stockHud.arm[stockPick].lofted;
         if(fresh && snap.heliSight && !snap.cockpit && !gunnerSight && !mechSight)
             HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
@@ -3963,11 +3950,11 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && snap.turretCamOk && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
-        if(fresh && snap.turret && !snap.cockpit && (!stockHud || stockPick==0) && !launcherSight && !overhead && !gunnerSight && !mechSight)
+        if(fresh && snap.turret && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || stockPick==0) && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at);
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
-                                stockPick==0 && snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
+                                !physicalSight && stockPick==0 && snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead};
             StockDockHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,snap.payload ? &snap.payloadHud : nullptr,

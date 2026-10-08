@@ -16,6 +16,9 @@
 
 namespace crew {
 namespace roundaim {
+// A path prediction is not a hit confirmation. `hit` only reports a terrain/building intersection of that path.
+constexpr int kSightPaths=4;
+struct Impact { float at[3],range,seconds; bool hit; };
 // A round as its weapon fires it: AmmoSpeed (m/frame), the frame's fall (m/frame^2, a world vector: AmmoGravityFactor x
 // gravity / 3600), AmmoOwnerMove (the share of the shooter's velocity it keeps) and AmmoAlive (frames).
 struct Round { float speed,drop[3],ownerMove; int alive; };

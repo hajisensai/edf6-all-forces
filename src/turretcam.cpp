@@ -40,6 +40,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "turretcam.h"
+#include "weapon_mount.h"
 #include "stab.h"
 #include "sight.h"
 #include "sightzoom.h"
@@ -93,6 +94,7 @@ struct Shared {
     unsigned char* seat;
     ULONGLONG seenMs,aimMs;    // the frame saw the player there / the aim hook stepped that seat's aim
     bool decoupled,high;       // DecoupledTurretCam / highcam.cpp's toggle, this frame
+    bool physicalOnly=true;
     bool free,returning;       // free look held / swinging back
     bool view;                 // yaw / pitch hold the plugin's view
     bool steering;             // the aim's last step had the camera's command (not the stick's, not another plugin's)
@@ -310,6 +312,7 @@ bool Steer(const unsigned char* seat,const Steering& s,const float* want,float* 
 
 void Readout(const unsigned char* seat,const Shared& s,bool on,const float* holdAt,bool ballistic) noexcept {
     TurretCamReadout r{};
+    r.physicalOnly=s.physicalOnly;
     r.decoupled=s.decoupled;r.freeLook=s.free || s.returning;r.high=s.high;r.onTarget=on;
     const unsigned char* gun=Gun(seat);
     float muzzle[3],dir[3];
@@ -691,9 +694,11 @@ void TurretCamFrame(unsigned char* v) noexcept {
     const bool observing=shared.highView || shared.observing;
     ReleaseSRWLockShared(&lock);
     game.hasAim=!high && !observing && AimPoint(game.aim,&game.aimHit);
+    const auto freedom=weaponmount::OfWeapon(v,seat,Gun(seat));
     AcquireSRWLockExclusive(&lock);
     shared.seat=seat;shared.seenMs=GameMs();
-    shared.decoupled=c.decoupledTurretCam && nextAim;
+    shared.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
+    shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly;
     shared.high=high;shared.focusValid=shot.focusValid;shared.focusHit=shot.focusHit;
     std::memcpy(shared.focus,shot.focus,sizeof(shared.focus));
     if(!shared.decoupled && !shared.free && !shared.returning)shared.view=false;

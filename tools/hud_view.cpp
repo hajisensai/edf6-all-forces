@@ -707,7 +707,7 @@ void StockTank(const float* pos) {
     static const char* names[]={"CANNON","MG","MISSILE"};
     sceneStock.arms=3;sceneStock.selected=0;sceneStock.sight=0;
     for(int i=0;i<3;++i) {
-        StockArm& a=sceneStock.arm[i];
+        StockArm& a=sceneStock.arm[i];a.physicalOnly=false;
         strcpy_s(a.label,names[i]);a.ammo=10-i;a.ammoMax=10;a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;a.kind=RoundKind::arc;
     }
     sceneStock.threats=2;
@@ -845,7 +845,7 @@ int ZoomScenes(const std::wstring& dir,const float* ground) {
     hasJet=hasHeli=hasStock=false;
     sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
     hasHeliSight=true;sceneHeliSight=HeliSightReadout{};
-    sceneHeliSight.gun=sceneHeliSight.hit=true;
+    sceneHeliSight.gun=sceneHeliSight.hit=true;sceneHeliSight.physicalOnly=false;
     float bore[3]={0.0f,0.006f,1.0f};vec::Normalize(bore);
     std::memcpy(sceneHeliSight.bore,bore,12);
     const float muzzle[3]={ground[0],ground[1]+4.0f,ground[2]-20.0f};   // by the camera (5 m up, 24 m back), as a heli's gun by its view
@@ -867,6 +867,33 @@ int ZoomScenes(const std::wstring& dir,const float* ground) {
 }
 
 // hudscale::Of against what it must give: the game's screen (uiW x uiH), the viewport drawn in, the ini's HudScale.
+// Mock readouts rendered through the production HUD; not game screenshots.
+int FixedFireScenes(const std::wstring& dir,const float* ground) {
+    hasJet=hasHeli=hasWarn=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasGunner=hasHeliSight=hasTurret=false;
+    hasHighView=hasLauncher=false;hasStock=true;sceneSight=sightzoom::Kind::optical;sceneZoom=1;sceneFov=55;
+    StockTank(ground);sceneStock.threats=0;sceneStock.arms=2;
+    for(int i=0;i<2;++i){auto& a=sceneStock.arm[i];a.aimed=a.physicalOnly=a.coFired=true;a.bore[2]=1;a.paths=1;
+        a.path[0]={{ground[0]+(i ? 6.f : -6.f),ground[1],ground[2]+450.f},450,3,true};}
+    strcpy_s(sceneStock.kind,"Twin artillery");Scene(dir,L"fixed_artillery_two_impacts_mock",ground);
+    sceneStock.arm[1].path[0].hit=false;sceneStock.arm[1].path[0].at[1]+=12;
+    Scene(dir,L"fixed_artillery_one_miss_mock",ground);
+    sceneStock.arms=1;strcpy_s(sceneStock.kind,"Fixed gun");strcpy_s(sceneStock.arm[0].label,"MG");
+    Scene(dir,L"fixed_machinegun_ground_mock",ground);
+    sceneStock.arm[0].path[0].hit=false;sceneStock.arm[0].path[0].at[1]+=10;
+    Scene(dir,L"fixed_machinegun_no_ground_mock",ground);
+    hasStock=false;hasHeliSight=true;sceneHeliSight=HeliSightReadout{};sceneHeliSight.gun=true;sceneHeliSight.bore[2]=1;sceneHeli.sym.nose[2]=1;
+    sceneHeliSight.paths=2;sceneHeliSight.path[0]={{ground[0]-5,ground[1],ground[2]+500},500,2,true};
+    sceneHeliSight.path[1]={{ground[0]+5,ground[1]+10,ground[2]+550},550,3,false};
+    Scene(dir,L"fixed_heli_left_hit_right_end_mock",ground);hasHeliSight=false;hasStock=true;
+    // Actual marker primitives: two hits=8 cross arms; hit+no-hit=6, no circular pipper.
+    float vp[16];Camera(ground,sceneStock.hull,1920,1080,vp);Line lines[kMaxLines]{};int at=0;
+    roundaim::Impact paths[2]={{{ground[0]-6,ground[1],ground[2]+450},450,3,true},{{ground[0]+6,ground[1],ground[2]+450},450,3,true}};
+    boxing=true;drawn=0;PhysicalPaths(image,nullptr,nullptr,vp,1920,1080,1,paths,2,false,lines,&at);const int two=drawn;
+    drawn=0;paths[1].hit=false;PhysicalPaths(image,nullptr,nullptr,vp,1920,1080,1,paths,2,false,lines,&at);const int one=drawn;boxing=false;
+    const bool good=two==8 && one==6;std::printf("%s fixed physical markers: two hits=%d, one no-hit=%d, zero pipper circles\n",good ? "ok" : "FAIL",two,one);
+    StockTank(ground);return good ? 0 : 1;
+}
+
 int FireControlScenes(const std::wstring& dir,const float* ground) {
     int failed=0;
     hasJet=hasHeli=hasWarn=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasGunner=hasHeliSight=hasTurret=false;
@@ -1379,6 +1406,7 @@ int Scenes(const std::wstring& dir) {
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);
     failed+=FireControlScenes(dir,ground);
+    failed+=FixedFireScenes(dir,ground);
     hasDrill=true;
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
     strcpy_s(sceneStock.kind,"DrillTank");

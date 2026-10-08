@@ -532,34 +532,63 @@ unsigned char* PayloadPicked(const void* vehicle) noexcept {
 }
 
 unsigned char* PayloadSightPicked(const void* vehicle,unsigned index) noexcept {
+    unsigned char* weapon=nullptr;
+    return PayloadSightWeapons(vehicle,index,&weapon,1)>0 ? weapon : nullptr;
+}
+
+int PayloadSightWeapons(const void* vehicle,unsigned index,unsigned char** out,int capacity) noexcept {
+    if(!out || capacity<=0)return 0;
     __try {
         auto* v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
-        if(!v || !Readable(v,kSeatCount+8) || v[kDead] || index>=SeatCount(v))return nullptr;
+        if(!v || !Readable(v,kSeatCount+8) || v[kDead] || index>=SeatCount(v))return 0;
         const auto seat=SeatAt(v,index);
-        if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())return nullptr;
+        if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())return 0;
         PayloadReadout r{};unsigned char* ws[kMostPayload]{};
         r.count=ReadSeat(v,index,ClassOf(v),ws,r);
         const Pick* pick=nullptr;
         for(const auto& p:picks)if(!p.npc && p.ref.Is(v) && p.seat==index && GameMs()-p.seen<=kFreshMs){pick=&p;break;}
         const bool current=sightPick.vehicle.Is(v) && sightPick.human.Is(PlayerHuman()) && sightPick.seat==index;
         const PayloadFire want=current ? sightPick.control : PayloadFire::primary;
-        const auto usable=[&](int i){return !Spent(ws[i]);}; // reloading guns retain their sight; permanently spent ones do not
-        const auto redirected=[&](unsigned char* w) {
-            if(pick && Cfg().stockStores)for(int k=0;k<pick->redirects;++k)if(pick->from[k]==w) {
+        const auto usable=[&](int i) -> bool {return !Spent(ws[i]);}; // reloading guns retain their sight; permanently spent ones do not
+        const auto redirected=[&](unsigned char* w) -> unsigned char* {
+            if(pick && Cfg().enabled && Cfg().stockStores)for(int k=0;k<pick->redirects;++k)if(pick->from[k]==w) {
                 for(int j=0;j<r.count;++j)if(ws[j]==pick->weapon && usable(j))return ws[j];
                 return static_cast<unsigned char*>(nullptr);
             }
-            return w;
+            return Spent(w) ? nullptr : w;
         };
-        if(want==PayloadFire::store && pick && pick->weapon)
-            for(int i=0;i<r.count;++i)if(ws[i]==pick->weapon && usable(i))return ws[i];
         PayloadFire group=want==PayloadFire::store ? PayloadFire::secondary : want;
-        for(int i=0;i<r.count;++i)if(r.entry[i].fire==group && usable(i))if(auto w=redirected(ws[i]))return w;
+        if(want==PayloadFire::store && pick && pick->weapon && Cfg().enabled && Cfg().stockStores)
+            for(int i=0;i<r.count;++i)if(ws[i]==pick->weapon && usable(i)) {
+                // A stock choice represents its whole native trigger group (e.g. both 603 guns).
+                group=r.entry[i].fire;
+                if(group==PayloadFire::store) {
+                    // Stores ride the native secondary if present, otherwise the primary (Switch).
+                    // Enumerating that group also requires a live source holder before returning a store.
+                    group=PayloadFire::primary;
+                    for(int j=0;j<r.count;++j)if(r.entry[j].fire==PayloadFire::secondary)group=PayloadFire::secondary;
+                }
+                break;
+            }
+        const auto collect=[&](PayloadFire fire) -> int {
+            int count=0;
+            for(int i=0;i<r.count && count<capacity;++i)if(r.entry[i].fire==fire) {
+                // Resolve first: an empty native gun can still pull the selected, loaded store.
+                auto* w=redirected(ws[i]);
+                if(!w)continue;
+                bool duplicate=false;
+                for(int j=0;j<count;++j)if(out[j]==w)duplicate=true;
+                if(!duplicate)out[count++]=w;
+            }
+            return count;
+        };
+        if(const int count=collect(group))return count;
         // Missing/expired/spent secondary falls back to a real usable primary, never to an old weapon pointer.
-        for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::primary && usable(i))if(auto w=redirected(ws[i]))return w;
-        for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::other && usable(i))return ws[i];
+        if(group!=PayloadFire::primary)if(const int count=collect(PayloadFire::primary))return count;
+        // Unknown controls have no proven cofire relationship: keep just their existing optic owner.
+        for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::other && usable(i)){out[0]=ws[i];return 1;}
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    return nullptr;
+    return 0;
 }
 
 bool InstallPayload() noexcept {

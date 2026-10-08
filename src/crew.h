@@ -768,7 +768,7 @@ void ResetTurretCam() noexcept;
 // is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds
 // in free look), `gun` where the gun's round would be at that point's range as it points now (on its arc), the muzzle
 // and its direction; `onTarget` both axes within half a degree of their want.
-struct TurretCamReadout { bool decoupled,freeLook,high,onTarget; float aim[3],gun[3],muzzle[3],gunDir[3]; };
+struct TurretCamReadout { bool decoupled,freeLook,high,onTarget; float aim[3],gun[3],muzzle[3],gunDir[3]; bool physicalOnly=true; };
 bool PlayerTurretCam(TurretCamReadout* out) noexcept;
 
 // stab.cpp: the gun stabilizer (README 炮管稳定器, docs/camera-re.md §7). InstallStabilizer at load (the plain seat aim's
@@ -976,6 +976,9 @@ bool PlayerJetOwnSight(const void* vehicle) noexcept;
 enum class HeliArm : std::uint8_t { none, missile, rockets };
 struct HeliSightReadout {
     bool gun,hit;
+    bool physicalOnly=true;
+    int paths=0;
+    roundaim::Impact path[roundaim::kSightPaths]{};
     float bore[3],pipper[3],range;
     HeliArm arm;
     bool armHit;

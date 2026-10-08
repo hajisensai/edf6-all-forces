@@ -426,3 +426,5 @@ HUDTEXT(supportInfantryTransferred,L"Infantry support is now under its new squad
 HUDTEXT(supportInfantryArrived,L"Infantry support has arrived and is guarding the destination",L"步兵支援已抵达并守卫目的地",L"步兵支援已抵達並守衛目的地",L"歩兵支援が到着し目的地を警戒しています")
 
 HUDTEXT(mapPayloadTitle,L"LOADOUT - click bright rows to select",L"挂载：点击亮色条目切换",L"掛載：點擊亮色項目切換",L"兵装：明るい行をクリックして選択")
+HUDTEXT(predictedGround,L"GROUND %.0f m  %.1f s",L"预测地形落点 %.0f 米  %.1f 秒",L"預測地形落點 %.0f 公尺  %.1f 秒",L"予測地形着弾 %.0f m  %.1f 秒")
+HUDTEXT(noGroundHit,L"NO TERRAIN HIT  %.0f m  %.1f s",L"无地形命中  %.0f 米  %.1f 秒",L"無地形命中  %.0f 公尺  %.1f 秒",L"地形着弾なし  %.0f m  %.1f 秒")
