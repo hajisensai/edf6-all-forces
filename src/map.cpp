@@ -633,6 +633,7 @@ bool Frame(unsigned char* human) noexcept {
     // The NPC commands (mapcmd.cpp): a unit selected by its key centres the map on it.
     float onto[3];
     MapCmdInput in{front,pad,game.pad,false,pad ? padState.Gamepad.wButtons : static_cast<WORD>(0),0.0f,0.0f,{},{}};
+    in.requester=ObjRef::Of(human); // the player owning this map, including a local split-screen viewport
     in.mouse=front && MouseDelta(human,&in.dx,&in.dy);
     std::memcpy(in.eye,eye,12);std::memcpy(in.look,look,12);
     (void)MapCommandEats(front); // latch the mark-key press before MapCommandFrame consumes its edge
