@@ -4,9 +4,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-namespace crew { unsigned char* image=nullptr; }
+#include <string>
+#include <cstdarg>
+namespace crew { unsigned char* image=nullptr; std::string lastLog; void Log(const char* format,...) noexcept {char text[1024]{};va_list args;va_start(args,format);vsnprintf(text,sizeof(text),format,args);va_end(args);lastLog=text;} }
 namespace {
-int failures=0,joins=0,releases=0,result=-999;
+int failures=0,joins=0,releases=0,result=-999,dependencyMode=5,notices=0,worldQueries=0;
+std::wstring notice;
 std::vector<crew::Data> writes;
 crew::Data value{1,"SEARCH_TYPE",0x93,1};
 crew::Attribute attribute{1,&value,0};
@@ -18,8 +21,33 @@ void RecordRelease(crew::Attribute*){++releases;}
 void RecordJoined(void*,const crew::JoinOptions*,void*,crew::Callback){++joins;}
 void RecordCallback(const crew::Info* info){result=info->result;Check(info->client==reinterpret_cast<void*>(9),"refusal preserves client data");}
 }
+namespace {
+uint32_t DummySnapshot(EDF6CoopSnapshot*){++worldQueries;return 0;}
+uint32_t DummyPeer(uint64_t,uint32_t,EDF6CoopPeer*){++worldQueries;return 0;}
+uint32_t DummySend(uint64_t,const EDF6CoopPeer*,const void*,uint32_t){return 0;}
+uint32_t DummyPoll(uint64_t,EDF6CoopPeer*,void*,uint32_t,uint32_t*){return 0;}
+uint32_t BridgeApi(uint32_t version,uint32_t size,EDF6CoopExtensionApi* out){
+    Check(version==1 && size==sizeof(*out),"menu requests extension ABI v1");
+    if(dependencyMode==1)return 0;
+    *out={sizeof(*out),1,&DummySnapshot,&DummyPeer,&DummySend,&DummyPoll};
+    if(dependencyMode==4)out->poll=nullptr;
+    return 1;
+}
+uint32_t Admission(){return dependencyMode==3 ? 0u : 1u;}
+uint32_t Identity(int32_t,EDF6CoopPeer*){++worldQueries;return 0;}
+FARPROC ResolveDependency(const char* name) noexcept {
+    if(dependencyMode==0)return nullptr;
+    if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&BridgeApi);
+    if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&Admission);
+    if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return dependencyMode==2 ? nullptr : reinterpret_cast<FARPROC>(&Identity);
+    return nullptr;
+}
+void RecordNotice(const wchar_t* text) noexcept {++notices;notice=text;}
+void RecordCreated(void*,const void*,void*,crew::Callback){++joins;}
+}
 int main(int argc,char** argv){
     using namespace crew;
+    resolveCoop=&ResolveDependency;showDependencyProblem=&RecordNotice;create=&RecordCreated;
     add=&RecordPut;filter=&RecordPut;copy=&RecordCopy;rawCopy=&RecordRaw;release=&RecordRelease;join=&RecordJoined;
     const JoinOptions jo{4,reinterpret_cast<void*>(1),nullptr};
     const IndexOptions index{1,0};
@@ -40,7 +68,7 @@ int main(int argc,char** argv){
     if(base){
         image=base;
         const char* names[]={"EOS_LobbyModification_AddAttribute","EOS_LobbySearch_SetParameter","EOS_LobbyDetails_CopyAttributeByIndex","EOS_Lobby_JoinLobby","EOS_Lobby_CreateLobby"};
-        void* recorders[]={reinterpret_cast<void*>(&RecordPut),reinterpret_cast<void*>(&RecordPut),reinterpret_cast<void*>(&RecordCopy),reinterpret_cast<void*>(&RecordJoined),reinterpret_cast<void*>(&RecordJoined)};
+        void* recorders[]={reinterpret_cast<void*>(&RecordPut),reinterpret_cast<void*>(&RecordPut),reinterpret_cast<void*>(&RecordCopy),reinterpret_cast<void*>(&RecordJoined),reinterpret_cast<void*>(&RecordCreated)};
         for(unsigned i=0;i<5;++i){auto slot=Slot(names[i]);Check(slot!=nullptr,"real EDF import exists");
             if(slot)Check(edf::PatchVtableSlot(slot,*slot,recorders[i]),"recording endpoint installed in private IAT");}
         Check(InstallHooks(),"production isolation installs into real EDF IAT");
@@ -80,6 +108,28 @@ int main(int argc,char** argv){
     Check(releases==17,"copied EOS attributes released on accept and refusal");
     Data other{1,"DIFFICULTY",2,1};const Options otherOptions{2,&other,0};writes.clear();publish(nullptr,&otherOptions);
     Check(writes.size()==1 && writes[0].value==2,"unrelated metadata untouched");
+    // Both native entry points must reject missing/old/incomplete/uninitialized
+    // Coop while a matching bridge is usable in the menu (world still absent).
+    const auto make=base ? reinterpret_cast<crew::Create>(*Slot("EOS_Lobby_CreateLobby")) : &CreateRoom;
+    for(int mode=0;mode<5;++mode){
+        dependencyMode=mode;Check(!EDF6AF_RoomIsolationReady(),"Coop virtual admission sees failed online prerequisites");
+        const auto oldJoins=joins,oldNotices=notices;result=-999;
+        make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);
+        Check(joins==oldJoins && result==10 && notices==oldNotices+1 && !notice.empty(),"dependency failure refuses create with visible explanation");
+        value.value=kAllForcesRoomPrefix+0x93;result=-999;
+        enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
+        Check(joins==oldJoins && result==10 && notices==oldNotices+2,"dependency failure refuses join with visible explanation");
+        Check(crew::lastLog.find("matching EDF6Coop required")!=std::string::npos,"dependency failure logged explicitly");
+    }
+    dependencyMode=0;Check(!EDF6AF_RoomIsolationReady(),"AF loaded before Coop refuses until dependency appears");
+    dependencyMode=5;Check(EDF6AF_RoomIsolationReady(),"late Coop load is re-evaluated without cached refusal");
+    dependencyMode=3;Check(!EDF6AF_RoomIsolationReady(),"Coop loaded before admission hook cannot permit a room yet");
+    dependencyMode=5;Check(EDF6AF_RoomIsolationReady(),"late admission initialization unlocks without mission readiness");
+    const auto beforeMenu=joins;
+    make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);
+    value.value=kAllForcesRoomPrefix+0x93;enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
+    Check(joins==beforeMenu+2,"matching installed Coop permits menu create and join");
+    Check(worldQueries==0,"menu gate never queries world readiness or mission identity");
     ready.store(false);result=-999;
     const auto deniedBefore=joins;
     CreateRoom(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);

@@ -32,3 +32,24 @@ matrix, including already-decoded attributes and removal of All Forces.
 
 Breaking resource compatibility must allocate a new protocol prefix/profile;
 this value is a compatibility family, not an arbitrary plugin version string.
+
+## Required Coop bridge for online play
+
+The real-crew/support protocol now requires the matching EDF6Coop installation.
+Before either native CreateLobby or JoinLobby, All Forces checks extension ABI v1
+(including every callback), the installed mission-admission hook readiness, and
+the mission player/PUID resolver export. Missing, old, incomplete or uninitialized
+Coop is rejected before invoking EOS, with a Chinese dependency dialog and a
+specific UTF-8 log entry. Offline play is unchanged.
+
+This is a **menu prerequisite**, not a mission quorum check: it never queries
+world readiness, participant identities or the mission extension snapshot. Thus a
+fully installed bridge can create/join a room before any mission exists. The test
+matrix exercises both IAT entry points and verifies that no world/identity query
+was made. The ABI header is shared with the support transport consumer.
+
+The existing `EDF6AF_RoomIsolationReady` export includes these same prerequisites,
+so Coop cannot bypass the native guard through a synthetic/full-lobby join when
+it is the outer wrapper. The check is dynamic on every request: loading Coop later
+or finishing its admission-hook installation clears an earlier refusal without
+requiring a mission or caching the startup's false result.
