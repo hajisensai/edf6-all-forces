@@ -112,3 +112,7 @@ std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {
     return running && OnlineHostOnly() ? session.SubmitPrepared(plan,GetTickCount64()) : 0;
 }
 } // namespace crew
+
+// The transport advertises af-support/1 only when this production protocol is
+// actually loaded, not merely when the older room-isolation marker exists.
+extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_SupportProtocolVersion() noexcept { return 1; }
