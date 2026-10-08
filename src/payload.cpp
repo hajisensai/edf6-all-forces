@@ -67,12 +67,14 @@ ULONGLONG latestMs=0;
 
 // UI request transport: only immutable numbers cross threads. Native identities are
 // kept on the game thread and compared again before a queued selection is applied.
-struct ChoiceIdentity { const void* weapon; const void* holder; const void* ctrl; PayloadFire fire; bool selectable; };
+struct ChoiceIdentity { const void* weapon; const void* holder; const void* ctrl; const void* spec; PayloadFire fire; bool selectable; };
 struct ChoiceContext {
-    ObjRef vehicle,human; const void* seatObject; int seat,count; Class kind; bool enabled;
+    ObjRef vehicle,human; const void* seatObject; int seat,count; Class kind; bool enabled,aircraft;
     ChoiceIdentity entry[kMostPayload]; std::uint64_t token;
 };
 ChoiceContext choiceContext{};
+PayloadReadout selectableLatest{};
+ULONGLONG selectableMs=0;
 std::uint64_t nextChoiceToken=0; // never reset across missions: delayed UI clicks cannot alias a new snapshot
 struct ChoiceRequest { std::uint64_t token; int seat,entry; ULONGLONG posted; };
 struct ChoicePublication { std::uint64_t token; int seat,count; bool selectable[kMostPayload]; ULONGLONG at; };
@@ -81,28 +83,29 @@ ChoiceRequest choiceRequest{};
 ChoicePublication choicePublication{};
 void ClearChoiceContext(const void* vehicle=nullptr) noexcept {
     if(vehicle && choiceContext.vehicle.obj!=vehicle)return;
-    choiceContext=ChoiceContext{};
+    choiceContext=ChoiceContext{};selectableLatest=PayloadReadout{};selectableMs=0;
     AcquireSRWLockExclusive(&choiceLock);
     choiceRequest=ChoiceRequest{};choicePublication=ChoicePublication{};
     ReleaseSRWLockExclusive(&choiceLock);
 }
-void PublishChoices(unsigned char* v,unsigned char* const* ws,PayloadReadout& r) noexcept {
+void PublishChoices(unsigned char* v,unsigned char* const* ws,PayloadReadout& r,bool aircraft=false,const Store* stores=nullptr) noexcept {
     ChoiceContext next{};
+    next.aircraft=aircraft;
     next.vehicle=ObjRef::Of(v);next.human=ObjRef::Of(PlayerHuman());next.seat=r.seat;
     next.seatObject=SeatAt(v,static_cast<unsigned>(r.seat));next.count=r.count;next.kind=ClassOf(v);
     const auto holders=At<unsigned char* const*>(next.seatObject,kSeatWeapons);
     const auto count=At<std::uint64_t>(next.seatObject,kSeatWeaponCount);
     bool same=choiceContext.vehicle.Is(v) && choiceContext.human.Is(PlayerHuman()) && choiceContext.seat==next.seat &&
-              choiceContext.seatObject==next.seatObject && choiceContext.count==next.count && choiceContext.kind==next.kind;
+              choiceContext.seatObject==next.seatObject && choiceContext.count==next.count && choiceContext.kind==next.kind && choiceContext.aircraft==next.aircraft;
     for(int i=0;i<r.count;++i) {
-        auto& e=next.entry[i];e.weapon=ws[i];e.fire=r.entry[i].fire;e.selectable=r.entry[i].selectable;
+        auto& e=next.entry[i];e.weapon=ws[i];e.spec=stores ? stores[i].spec : nullptr;e.fire=r.entry[i].fire;e.selectable=r.entry[i].selectable;
         next.enabled=next.enabled || e.selectable;
         if(count<=16 && Readable(holders,count*8))for(std::uint64_t h=0;h<count;++h)
             if(Readable(holders[h],kHolderWeapon+8) && At<const void*>(holders[h],kHolderWeapon)==ws[i]) {
                 e.holder=holders[h];e.ctrl=At<const void*>(holders[h],kHolderCtrl);break;
             }
         const auto& old=choiceContext.entry[i];
-        same=same && e.weapon==old.weapon && e.holder==old.holder && e.ctrl==old.ctrl && e.fire==old.fire && e.selectable==old.selectable;
+        same=same && e.weapon==old.weapon && e.holder==old.holder && e.ctrl==old.ctrl && e.spec==old.spec && e.fire==old.fire && e.selectable==old.selectable;
     }
     same=same && next.enabled==choiceContext.enabled;
     if(!same){if(++nextChoiceToken==0)++nextChoiceToken;next.token=nextChoiceToken;}
@@ -341,7 +344,8 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
 }  // namespace
 
 void PayloadFrame(unsigned char* v) noexcept {
-    if(v[kDead] || BodyOf(v)!=PluginBody::none){ClearRedirect(v);ClearChoiceContext(v);return;}
+    if(v[kDead]){ClearRedirect(v);ClearChoiceContext(v);return;}
+    if(BodyOf(v)!=PluginBody::none){ClearRedirect(v);if(!choiceContext.aircraft)ClearChoiceContext(v);return;}
     const int seat=PlayerSeatOf(v);
     if(seat<0){if(sightPick.vehicle.Is(v))sightPick=SightPick{};ClearChoiceContext(v);return;}
     const ULONGLONG ms=GameMs();
@@ -376,7 +380,7 @@ void PayloadFrame(unsigned char* v) noexcept {
         else if(chose)sightPick.control=PayloadFire::store;
     }
     sightPick.primaryHeld=primary;sightPick.secondaryHeld=secondary;
-    latest=r;latestMs=ms;
+    latest=r;latestMs=ms;selectableLatest=r;selectableMs=ms;
 }
 
 // Select only loaded weapons already attached to this seat. The native caller owns
@@ -454,6 +458,72 @@ bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     if(valid)choiceRequest=ChoiceRequest{token,seat,entry,now};
     ReleaseSRWLockExclusive(&choiceLock);
     return valid;
+}
+
+bool PlayerSelectablePayload(PayloadReadout* out) noexcept {
+    if(!out || !selectableMs || GameMs()-selectableMs>kFreshMs || !Cfg().enabled)return false;
+    __try {
+        auto v=static_cast<unsigned char*>(const_cast<void*>(choiceContext.vehicle.obj));
+        if(!Readable(v,kSeatCount+8) || !choiceContext.vehicle.Is(v) || !choiceContext.human.Is(PlayerHuman()) || v[kDead] ||
+           choiceContext.seat<0 || static_cast<unsigned>(choiceContext.seat)>=SeatCount(v))return false;
+        const auto seat=SeatAt(v,static_cast<unsigned>(choiceContext.seat));
+        if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())return false;
+        *out=selectableLatest;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void ForgetAircraftPayload(const void* vehicle) noexcept {
+    if(choiceContext.aircraft)ClearChoiceContext(vehicle);
+}
+int AircraftPayloadChoice(unsigned char* v,const Store* stores,int count,int picked) noexcept {
+    if(!Cfg().enabled || !Cfg().playerJet || !v || v[kDead] || SeatCount(v)==0 || count<=0 || count>kMostPayload || !stores ||
+       SeatRider(SeatAt(v,0))!=Rider::player || At<const void*>(SeatAt(v,0),kSeatRider)!=PlayerHuman()) {
+        ForgetAircraftPayload(v);return -1;
+    }
+    PayloadReadout r{};r.seat=0;r.seats=static_cast<int>(SeatCount(v));r.count=count;r.picked=picked;
+    r.keys=At<unsigned char>(SeatAt(v,0),kSeatPad)==0;r.switchButton=kButtonLB;
+    unsigned char* ws[kMostPayload]{};
+    const auto holders=At<unsigned char* const*>(SeatAt(v,0),kSeatWeapons);
+    const auto n=At<std::uint64_t>(SeatAt(v,0),kSeatWeaponCount);
+    for(int i=0;i<count;++i) {
+        const auto& st=stores[i];auto& e=r.entry[i];ws[i]=st.weapon;e.fire=PayloadFire::store;e.picked=i==picked;
+        if(st.spec && st.spec->name)_snwprintf_s(e.name,_countof(e.name),_TRUNCATE,L"%hs",st.spec->name);
+        e.rounds=st.ammo>0 ? st.ammo : 0;e.capacity=e.rounds;e.ready=e.rounds>0 ? 1.0f : 0.0f;
+        e.homing=st.spec && (st.spec->role==StoreRole::air || st.spec->role==StoreRole::ground);
+        bool installed=false;
+        if(st.weapon && n<=16 && Readable(holders,n*8))for(std::uint64_t h=0;h<n;++h) {
+            if(!Readable(holders[h],kHolderWeapon+8) || At<unsigned char*>(holders[h],kHolderWeapon)!=st.weapon)continue;
+            const auto ctrl=At<const void*>(holders[h],kHolderCtrl);
+            installed=Readable(ctrl,12) && At<int>(ctrl,8)>0;break;
+        }
+        // Spec identity and native ammo are re-read, rather than trusting a cached Store readout.
+        if(installed && Readable(st.weapon,kWeaponAmmo+4) && StoreOf(st.weapon)==st.spec && st.spec) {
+            const auto rounds=At<std::int32_t>(st.weapon,kWeaponAmmo),capacity=At<std::int32_t>(st.weapon,kWeaponCapacity);
+            e.rounds=rounds>0 ? rounds : 0;e.capacity=capacity>0 ? capacity : 0;e.ready=e.rounds>0 ? 1.0f : 0.0f;
+            e.selectable=count>1 && e.rounds>0;
+        }
+        if(e.selectable)++r.choices;
+    }
+    PublishChoices(v,ws,r,true,stores);
+    const int chosen=ConsumeChoice(r);
+    if(chosen>=0){r.picked=chosen;for(int i=0;i<count;++i)r.entry[i].picked=i==chosen;}
+    selectableLatest=r;selectableMs=GameMs();
+    return chosen;
+}
+
+void PumpPayloadUi(unsigned char* human) noexcept {
+    if(!MapHoldsKeys() || human!=PlayerHuman())return;
+    __try {
+        if(!Cfg().enabled || !Readable(human,kHumanVehicleCtrl+8) || !IsPlayer(human) || human[kDead]) {
+            ClearChoiceContext();return;
+        }
+        const auto ctrl=At<const void*>(human,kHumanVehicleCtrl);
+        const auto v=At<unsigned char*>(human,kHumanVehicleCtrl-8);
+        if(!Readable(ctrl,12) || At<int>(ctrl,8)<=0 || !Readable(v,kSeatCount+8) || At<const void*>(v,kSelfCtrl)!=ctrl || v[kDead]) {
+            ClearChoiceContext();return;
+        }
+        if(BodyOf(v)==PluginBody::none)PayloadFrame(v);
+        else PumpAircraftPayloadUi(v);
+    } __except(EXCEPTION_EXECUTE_HANDLER) { ClearChoiceContext(); }
 }
 
 unsigned char* PayloadPicked(const void* vehicle) noexcept {

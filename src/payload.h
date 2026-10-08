@@ -43,6 +43,16 @@ bool PlayerPayload(PayloadReadout* out) noexcept;
 // Does not read game objects or fire. Caller must route only an explicit mouse UI (currently map M).
 // PayloadFrame revalidates identity, topology, live holder and availability, including while the map owns keys.
 bool RequestPayloadSelection(std::uint64_t selectionToken,int seat,int entry) noexcept;
+// Unified map panel: current stock seat or plugin-aircraft pilot stores; same token/request API.
+bool PlayerSelectablePayload(PayloadReadout* out) noexcept;
+struct Store;
+// playerjet.cpp game-thread bridge. Returns requested store index or -1; never fires.
+// Null-weapon special actions may be shown, but are never clickable weapon selections.
+int AircraftPayloadChoice(unsigned char* vehicle,const Store* stores,int count,int picked) noexcept;
+void ForgetAircraftPayload(const void* vehicle=nullptr) noexcept;
+// MapHumanFrame game thread, after map command input: processes UI only, never a vehicle flight/fire frame.
+void PumpPayloadUi(unsigned char* human) noexcept;
+void PumpAircraftPayloadUi(unsigned char* vehicle) noexcept; // playerjet.cpp bridge, called only by PumpPayloadUi
 // The weapon the secondary fires now on `vehicle` when its seat's stores are switched (helisight.cpp's mark follows
 // it), else nullptr: the stock weapon stands.
 unsigned char* PayloadPicked(const void* vehicle) noexcept;

@@ -25,13 +25,16 @@ const Config& Cfg() noexcept { return cfg; }
 ULONGLONG GameMs() noexcept { return now; }
 bool MapHoldsKeys() noexcept { return mapHeld; }
 unsigned char* PlayerHuman() noexcept { return localHuman; }
-PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
+void PumpAircraftPayloadUi(unsigned char*) noexcept {}
+PluginBody sightBody=PluginBody::none;
+PluginBody BodyOf(const void*) noexcept { return sightBody; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char*) noexcept { return false; }
-const StoreSpec* StoreOf(const unsigned char*) noexcept { return nullptr; }
+const StoreSpec* sightStoreSpec=nullptr;
+const StoreSpec* StoreOf(const unsigned char* w) noexcept { return w && w[0x100]==2 ? sightStoreSpec : nullptr; }
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
     const auto f=At<const wchar_t*>(w,8);*n=f ? std::wcslen(f) : 0;return f;
 }
@@ -48,7 +51,7 @@ struct VehicleFixture {
     unsigned char holders[8][kHolderStride]{},weapon[8][0x1600]{},weaponCtrl[8][16]{};
     unsigned char* seatHolders[3][4]{};
 } cars[2];
-unsigned char people[3][0x400]{},personCtrl[3][16]{};
+unsigned char people[3][0x1800]{},personCtrl[3][16]{};
 int checks=0,failed=0;
 void Check(bool yes,const char* message) { ++checks;if(!yes){++failed;std::printf("FAIL: %s\n",message);} }
 void Tick(VehicleFixture& c) { ++now;PayloadFrame(c.vehicle); }
@@ -68,6 +71,7 @@ bool NoShots(const VehicleFixture& c) { for(const auto& w:c.weapon)if(w[kWeaponT
 void SetUp() {
     ResetPayload();std::memset(cars,0,sizeof(cars));std::memset(people,0,sizeof(people));std::memset(personCtrl,0,sizeof(personCtrl));
     std::memset(sightinput::keys,0,sizeof(sightinput::keys));mapHeld=false;
+    sightBody=PluginBody::none;sightStoreSpec=nullptr;
     cfg.enabled=cfg.stockStores=true;cfg.playerJetSwitchKey='R';pullOk=true;
     for(int i=0;i<3;++i) {
         Put<void*>(people[i],0,image+0x17CDF28);Put<void*>(people[i],kSelfCtrl,personCtrl[i]);

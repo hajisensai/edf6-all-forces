@@ -74,6 +74,14 @@ int main() {
     r=Read(c);Check(r.entry[0].selectable && r.entry[1].selectable,"single-control vehicle exposes native primary and actual added store");
     Queue(r,1);Tick(c);PlayerPayload(&after);Queue(after,0);Tick(c);
     Check(PayloadPicked(c.vehicle)==c.weapon[0] && Sight(c)==c.weapon[0] && NoShots(c),"single-control vehicle can click back to real primary without a shot");
+    // Explicit M tick processes UI even when no vehicle input/flight frame runs.
+    SetUp();mapHeld=true;Put<int>(c.vehicleCtrl,8,1);Put<void*>(people[0],kHumanVehicleCtrl,c.vehicleCtrl);
+    Put<void*>(people[0],kHumanVehicleCtrl-8,c.vehicle);PumpPayloadUi(people[0]);PlayerSelectablePayload(&r);
+    Check(r.selectionToken && Queue(r,2),"map-only pump publishes a clickable stock snapshot");
+    PumpPayloadUi(people[1]);Check(PlayerSelectablePayload(&after) && after.selectionToken==r.selectionToken,"unrelated human map tick cannot invalidate current player's queued click");
+    PumpPayloadUi(people[0]);Check(PayloadPicked(c.vehicle)==c.weapon[6] && NoShots(c),"map-only pump consumes click without a native vehicle frame or shot");
+    Put<void*>(people[0],kHumanVehicleCtrl,nullptr);PumpPayloadUi(people[0]);
+    Check(!PlayerSelectablePayload(&r),"map-only dismount clears the selectable publication");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("payload click: %d checks, %d failures\n",checks,failed);return failed ? 1 : 0;
 }
