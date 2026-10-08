@@ -2678,7 +2678,7 @@ Heli* ReplicaOf(unsigned char* v,ULONGLONG ms) noexcept {
 // authority's): no player of any machine at its stick.
 bool Replica(unsigned char* v) noexcept {
     const Rider r=SeatRider(SeatAt(v,0));
-    return (r==Rider::none || r==Rider::dummy) && !OnlineRunsHere(v);
+    return (r==Rider::none || NpcDriver(v)) && !OnlineRunsHere(v);
 }
 
 // Its replica record's params back, the record dropped: it is run here again (or by a player).
@@ -2713,7 +2713,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
     // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
     // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
-    if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))!=Rider::dummy)CrewDoorGuns(vehicle);
+    if(stockHeli && SeatCount(vehicle)>0 && !NpcDriver(vehicle))CrewDoorGuns(vehicle);
     // Online, a stock heli another machine runs is flown there: here it flies on the stick it sends (Replay).
     if(stockHeli && SeatCount(vehicle)>0 && Replica(vehicle)) {
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
@@ -2722,7 +2722,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
         return;
     }
     ReplicaOff(vehicle);
-    if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy) {   // only NPC pilots
+    if(!NpcDriver(vehicle)) {   // only NPC pilots
         if(Heli* h=Find(vehicle))Restore(*h,vehicle);
         if(stockHeli && SeatCount(vehicle)>0 && SeatRider(SeatAt(vehicle,0))==Rider::player) {
             PlayerAssist(vehicle);PlayerHeli(vehicle);

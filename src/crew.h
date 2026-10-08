@@ -17,7 +17,7 @@ extern unsigned char* image;
 struct Config {
     bool enabled=true;
     bool debug=true;
-    bool autoCrew=true;        // an empty friendly vehicle gets an NPC driver (the stock RideAi)
+    bool autoCrew=true;        // an eligible empty friendly vehicle recruits an existing soldier to walk aboard
     DWORD crewDelayMs=3000;    // ...after it has stood empty this long
     float crewRange=600.0f;    // metres from the player; 0 = any distance
     bool bump=true;            // the player can board a seat an NPC holds

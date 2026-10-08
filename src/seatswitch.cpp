@@ -113,7 +113,7 @@ SeatHolder HolderOf(const unsigned char* seat,const unsigned char* human) noexce
         case Rider::none: return SeatHolder::empty;
         case Rider::dummy: return SeatHolder::npc;
         case Rider::player: return At<const unsigned char*>(seat,kSeatRider)==human ? SeatHolder::you : SeatHolder::other;
-        default: return SeatHolder::other;
+        default: return NpcCanYieldSeat(seat) ? SeatHolder::npc : SeatHolder::other;
     }
 }
 

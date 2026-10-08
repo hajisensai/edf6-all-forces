@@ -27,6 +27,7 @@
 #include "npc_logic.h"
 #include "npc_mark.h"
 #include "online_authority.h"
+#include "real_driver_native.h"
 #include "vhud.h"
 #include <cmath>
 #include <cstdio>
@@ -782,8 +783,8 @@ Orders OrdersOf(const Squad* q,const float* anchor) noexcept {
 // RideVehicle 0x5765E0(human, shared_ptr<vehicle>* by value, seat) does all of it (off the old vehicle, +0x1540/+0x1548/
 // +0x1550, SeatRide with force 0, the ride state) and releases one strong reference at its end (0x57690D), so the caller
 // takes one first. It checks neither team, nor class mask, nor reach: the plugin does (a free seat whose masks take the
-// soldier's class, the seat's riding point within reach). Never seat 0: a soldier at the wheel clears its own seat's
-// block each frame (0x573A7C), the stock driver's output among it; seat 0 stays AutoCrew's.
+// soldier's class, the seat's riding point within reach). Driver input is preserved by the narrow native
+// seat-clear hook; real soldiers occupy driver seats as well as gunner and passenger seats.
 constexpr unsigned kRideVehicle=0x5765E0;
 constexpr std::size_t kHumanMask=0x31C,kSeatClass=0x30,kSeatEnable=0x34,kHumanSeat=0x1540,kHumanRiding=0x1548;
 constexpr ULONGLONG kBoardMs=20000;        // a board order not done in this long is dropped
@@ -793,17 +794,27 @@ bool rideOk=false;
 struct SharedRef { void* obj; void* ctrl; };
 using RideFn=void(__fastcall*)(void*,SharedRef*,int);
 
+bool OwnsNpcSeatInput(unsigned char* seat) noexcept {
+    if(!Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || !Readable(seat,kSeatRiderCtrl+8) ||
+       SeatRider(seat)!=Rider::other)return false;
+    auto* h=At<unsigned char*>(seat,kSeatRider);
+    if(!IsSoldierClass(h) || IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h) ||
+       At<const void*>(h,kHumanSeat)!=seat)return false;
+    auto* v=At<unsigned char*>(h,kHumanRiding);
+    return Readable(v,kSeatCount+8) && !v[kDead] && SeatCount(v)>0 && SeatAt(v,0)==seat && IsOnlineAuthority(v);
+}
+
 bool SeatTakes(const unsigned char* v,unsigned i,const unsigned char* h) noexcept {
     const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),i);
-    if(SeatRider(seat)!=Rider::none)return false;
+    if(SeatRider(seat)!=Rider::none || (i==0 && !RealDriverNativeReady()))return false;
     return (At<std::uint32_t>(h,kHumanMask)&At<std::uint32_t>(seat,kSeatClass)&At<std::uint32_t>(seat,kSeatEnable))!=0;
 }
 
 // Walks to its seat's riding point and boards there; false once the order is over (done, gone, timed out).
 bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     auto v=static_cast<unsigned char*>(const_cast<void*>(s.boardV.obj));
-    if(!s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<1 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
-       !SeatTakes(v,static_cast<unsigned>(s.boardSeat),h)) {
+    if(!s.boardV.Is(v) || v[kDead] || ms-s.boardAt>kBoardMs || s.boardSeat<0 || static_cast<unsigned>(s.boardSeat)>=SeatCount(v) ||
+       !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) || !SeatTakes(v,static_cast<unsigned>(s.boardSeat),h)) {
         Log("NPCAI soldier %p: board order dropped (%s)",h,ms-s.boardAt>kBoardMs ? "too long" : "the seat or the vehicle is gone");
         s.boardV=ObjRef{};
         return false;
@@ -816,13 +827,19 @@ bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {
     // RideVehicle does not check distance itself. Match the seat's real spherical reach, including height;
     // horizontal distance alone would seat a soldier standing on a different floor.
     if(npc::Dist(pos,at)>=reach) {
-        MoveTo(h,pos,at,0.5f);
+        // The native riding point is a trigger centre, not necessarily a walkable foot position.
+        // Project only within that trigger's vertical reach, never onto a roof or another floor.
+        const float above[3]={at[0],at[1]+0.3f,at[2]},below[3]={at[0],at[1]-reach,at[2]};
+        float walkAt[3];
+        if(MapFloorRay(above,below,walkAt)<0.0f || npc::Dist(walkAt,at)>=reach)return true;
+        MoveTo(h,pos,walkAt,0.5f);
         return true;
     }
     auto ctrl=At<unsigned char*>(v,kSelfCtrl);
     if(!rideOk || !ctrl || At<std::int32_t>(ctrl,8)==0){s.boardV=ObjRef{};return false;}
     // The by-value shared_ptr's reference: RideVehicle (callee-destroyed argument) lets go of it on every return, the
     // seated or refused path at 0x57690D and the already-in-that-seat one through 0x8DF40 (0x576723), so none leaks.
+    if(s.boardSeat==0 && !PrepareNpcVehicle(v,false)){s.boardV=ObjRef{};return false;}
     _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
     SharedRef ref{v,ctrl};
     reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,s.boardSeat);
@@ -921,6 +938,7 @@ void Think(unsigned char* h,int cls) noexcept {
         s->control=control;s->controlSet=true;
         std::memcpy(s->home,pos,12);s->homeSet=true;s->spotSet=false;
     }
+    if(s->boardV && Board(*s,h,pos,ms))return; // boarding does not depend on readable hand weapons
     const Arms a=ArmsOf(h);
     if(a.n==0) {   // its weapons cannot be read: nothing to fight with that the plugin knows of, so all of it stays stock
         if(Cfg().debug && ms-s->loggedAt>kLogMs){s->loggedAt=ms;Log("NPCAI %s %p: weapons unreadable, left stock",kSoldiers[cls].name,h);}
@@ -1096,6 +1114,7 @@ bool InstallNpcAi() noexcept {
     __except(EXCEPTION_EXECUTE_HANDLER){rideOk=false;}
     if(!rideOk)Log("NPCAI RideVehicle not as read: squads do not board vehicles");
     if(!followOk)Log("NPCAI SetFollow not as read: squads are not reorganized when a leader dies");
+    InstallRealDriverNative(&OwnsNpcSeatInput);
     InstallBoxes();
     int hooked=0;
     for(int i=0;i<kClasses;++i) {
@@ -1504,7 +1523,7 @@ unsigned char* BoardTarget(const unsigned char* top) noexcept {
     if(me && !HumanOnFoot(me)) {
         const auto v=At<unsigned char*>(me,kHumanRiding);
         if(v && Readable(v,kDead+1) && !v[kDead]) {
-            for(unsigned i=1;i<SeatCount(v);++i)if(SeatTakes(v,i,top))return v;
+            for(unsigned i=0;i<SeatCount(v);++i)if(SeatTakes(v,i,top))return v;
         }
     }
     unsigned char* best=nullptr;float bestD=kBoardFar;
@@ -1513,30 +1532,45 @@ unsigned char* BoardTarget(const unsigned char* top) noexcept {
         if(!KnownVehicle(o) || o[kDead])continue;
         const float d=npc::Horiz(Pos(top),Pos(o));
         if(d>=bestD)continue;
-        for(unsigned k=1;k<SeatCount(o);++k)if(SeatTakes(o,k,top)){best=o;bestD=d;break;}
+        for(unsigned k=0;k<SeatCount(o);++k)if(SeatTakes(o,k,top)){best=o;bestD=d;break;}
     }
     return best;
 }
 
-// Each member on foot gets a free seat (not seat 0) its class may take; false when none did.
+// Pending walkers reserve their seats across squads and automatic recruitment. Stale/dead/reused
+// soldiers cannot reserve a seat, and a seat occupied before arrival cancels the pending order.
+bool Reserved(const unsigned char* v,unsigned seat,ULONGLONG ms) noexcept {
+    for(const auto& s:soldiers)
+        if(s.boardV.Is(v) && s.boardSeat==static_cast<int>(seat) && ms-s.boardAt<=kBoardMs &&
+           Readable(s.ref.obj,kDead+1) && s.ref.Is(s.ref.obj) && !At<unsigned char>(s.ref.obj,kDead))return true;
+    return false;
+}
+
+int SeatPriority(const unsigned char* v,unsigned seat) noexcept {
+    return seat==0 ? 0 : At<std::uint64_t>(SeatAt(const_cast<unsigned char*>(v),seat),kSeatWeaponCount)>0 ? 1 : 2;
+}
+
+bool AssignBoard(unsigned char* v,unsigned char* h,ULONGLONG ms) noexcept {
+    if(!HumanOnFoot(h) || !IsOnlineAuthority(h) || !OnlineMaySeatNpc(v) ||
+       npc::Scripted(ControlOf(h,RootLeader(h))))return false;
+    Soldier* const s=Entry(h,ms);
+    if(!s || s->boardV)return false;
+    for(int priority=0;priority<3;++priority)for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
+        if(SeatPriority(v,k)!=priority || Reserved(v,k,ms) || !SeatTakes(v,k,h))continue;
+        s->seen=ms;s->boardV=ObjRef::Of(v);s->boardSeat=static_cast<int>(k);s->boardAt=ms;
+        return true;
+    }
+    return false;
+}
+
+// Driver first, then actual armed seats, then passengers. Assignment never creates a rider.
 bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {
     unsigned char* const v=BoardTarget(top);
     if(!v){Log("NPCAI squad %p: no friendly vehicle with a seat for it within %.0f m",top,kBoardFar);return false;}
     unsigned char* m[kMaxSquad];
     const int n=Members(top,m,kMaxSquad);
-    bool taken[edf::kMaxSeats]{};
     int given=0;
-    for(int i=0;i<n;++i) {
-        if(!HumanOnFoot(m[i]))continue;
-        Soldier* const s=Entry(m[i],ms);
-        if(!s)continue;
-        s->seen=ms;   // a new entry must not be taken back by the next member's Entry
-        for(unsigned k=1;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
-            if(taken[k] || !SeatTakes(v,k,m[i]))continue;
-            taken[k]=true;s->boardV=ObjRef::Of(v);s->boardSeat=static_cast<int>(k);s->boardAt=ms;++given;
-            break;
-        }
-    }
+    for(int i=0;i<n;++i)given+=AssignBoard(v,m[i],ms);
     Log("NPCAI squad %p boards v=%p: %d of %d members have a seat",top,v,given,n);
     return given>0;
 }
@@ -1561,6 +1595,73 @@ bool DismountSquad(unsigned char* top) noexcept {
     return off>0 || cancelled>0;
 }
 }  // namespace
+
+int NpcBoardCrew(unsigned char* v,unsigned char* const* humans,int count) noexcept {
+    if(!ok || !rideOk || !Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || !v ||
+       !Readable(v,kDead+1) || v[kDead] || !humans || count<=0 || !OnlineMaySeatNpc(v))return 0;
+    int assigned=0;
+    const ULONGLONG ms=GameMs();
+    for(int i=0;i<count;++i) {
+        auto* h=humans[i];
+        if(!IsSoldierClass(h) || IsAnyPlayer(h) || h[kDead])continue;
+        const auto team=At<std::int32_t>(v,kTeam),theirTeam=At<std::int32_t>(h,kTeam);
+        if(theirTeam!=team && !(theirTeam==kTeamFriend && (team==0 || team==kTeamVehicle)))continue;
+        assigned+=AssignBoard(v,h,ms);
+    }
+    return assigned;
+}
+
+// Recruit only real, already registered soldiers from the world's friendly roster. A request is
+// asynchronous: they walk to the native entry point and RideVehicle consumes its shared_ptr there.
+bool NpcRequestCrew(unsigned char* v,bool /*spawned*/) noexcept {
+    if(!ok || !rideOk || !Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || !v ||
+       !Readable(v,kDead+1) || v[kDead] || !OnlineMaySeatNpc(v))return false;
+    const ULONGLONG ms=GameMs();
+    bool pending=false;
+    for(const auto& s:soldiers)pending=pending || (s.boardV.Is(v) && ms-s.boardAt<=kBoardMs);
+    if(pending)return true;
+    if(world.frame!=GameFrame())Gather(At<std::int32_t>(v,kTeam)==kTeamVehicle ? player.team : At<std::int32_t>(v,kTeam));
+    int given=0;
+    for(int i=0;i<world.friends;++i) {
+        auto* const h=static_cast<unsigned char*>(const_cast<void*>(world.frObject[i]));
+        if(!IsSoldierClass(h) || IsAnyPlayer(h) || h[kDead] || npc::Dist(Pos(h),Pos(v))>kBoardFar)continue;
+        given+=AssignBoard(v,h,ms);
+    }
+    if(given)Log("CREW v=%p: %d existing soldiers walking to their seats",v,given);
+    return given>0;
+}
+
+bool NpcCanYieldSeat(const unsigned char* seat) noexcept {
+    if(!seat || SeatRider(seat)!=Rider::other)return false;
+    auto* h=At<unsigned char*>(seat,kSeatRider);
+    return IsSoldierClass(h) && !IsAnyPlayer(h) && !h[kDead] && IsOnlineAuthority(h) &&
+        !npc::Scripted(ControlOf(h,RootLeader(h)));
+}
+
+bool NpcMoveSeat(unsigned char* v,unsigned from,int to) noexcept {
+    auto* seat=SeatAt(v,from);
+    if(!rideOk || !NpcCanYieldSeat(seat) || !OnlineMaySeatNpc(v))return false;
+    auto* h=At<unsigned char*>(seat,kSeatRider);
+    if(to<0) {
+        reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kSeatKick)(v,seat);
+        return SeatRider(seat)==Rider::none;
+    }
+    if(static_cast<unsigned>(to)>=SeatCount(v) || !SeatTakes(v,static_cast<unsigned>(to),h))return false;
+    auto* ctrl=At<unsigned char*>(v,kSelfCtrl);
+    if(!ctrl || At<std::int32_t>(ctrl,8)<=0 || (to==0 && !PrepareNpcVehicle(v,false)))return false;
+    _InterlockedIncrement(reinterpret_cast<volatile long*>(ctrl+8));
+    SharedRef ref{v,ctrl};
+    reinterpret_cast<RideFn>(image+kRideVehicle)(h,&ref,to);
+    return SeatRider(seat)==Rider::none && At<const void*>(SeatAt(v,static_cast<unsigned>(to)),kSeatRider)==h;
+}
+
+bool NpcDriver(const unsigned char* v) noexcept {
+    if(!v || SeatCount(v)==0)return false;
+    const auto* seat=SeatAt(const_cast<unsigned char*>(v),0);
+    if(SeatRider(seat)==Rider::dummy)return true; // original mission-script crew, never fabricated here
+    const auto* h=At<const unsigned char*>(seat,kSeatRider);
+    return SeatRider(seat)==Rider::other && IsSoldierClass(h) && !IsAnyPlayer(h) && !h[kDead];
+}
 
 // An order to a squad (§6.2): guard / engage / release change what its members work round; follow / recruit make it the
 // player's (the stock SetFollow, as the stock recruit does), refused during its dismissal's cooldown; dismiss lets go a

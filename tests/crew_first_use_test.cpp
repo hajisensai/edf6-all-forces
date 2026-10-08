@@ -4,6 +4,8 @@
 #include <cstdlib>
 #include <initializer_list>
 namespace crew {
+bool NpcCanYieldSeat(const unsigned char*) noexcept { return false; }
+bool NpcMoveSeat(unsigned char*,unsigned,int) noexcept { return false; }
 unsigned char* image=nullptr;PlayerFix player{};
 // Offline (online_authority.h): an NPC rider may be seated, through the vehicle's own RideAi (the fixture's vtable).
 bool OnlineMaySeatNpc(const void*) noexcept { return true; }

@@ -3,6 +3,7 @@
 #include "crew.h"
 #include "gunnerrecoil.h"
 #include "memory.h"
+#include "real_driver_native.h"
 
 namespace crew {
 namespace {
@@ -13,7 +14,6 @@ const unsigned char kIsHostSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0
 const unsigned char kOperatorSig[]={0x48,0x89,0x5C,0x24,0x20,0x44,0x88,0x44,0x24,0x18,0x88,0x54,0x24,0x10,0x55,0x56};
 using IsHostFn=bool(__fastcall*)(const void*);
 using OperatorFn=int(__fastcall*)(void*,bool,bool);
-using RideAiFn=void(__fastcall*)(void*,bool);
 
 // Both functions are the ones read (checked once; logged once when not: online, nothing is then this machine's).
 bool Known() noexcept {
@@ -143,7 +143,7 @@ bool VehicleAuthority(unsigned char* vehicle) noexcept { return IsOnlineAuthorit
 
 bool SeatNpcRider(unsigned char* vehicle,bool spawned) noexcept {
     if(!OnlineMaySeatNpc(vehicle))return false;
-    reinterpret_cast<RideAiFn*>(At<void**>(vehicle,0))[kSlotRideAi](vehicle,spawned);
-    return true;
+    if(!PrepareNpcVehicle(vehicle,spawned))return false;
+    return NpcRequestCrew(vehicle,spawned);
 }
 }  // namespace crew

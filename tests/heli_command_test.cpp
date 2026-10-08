@@ -5,6 +5,8 @@
 #include <cstdlib>
 
 namespace crew {
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
+
 unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
 bool gunnerFixture=false,gunnerSession=false,gunnerReady=true;

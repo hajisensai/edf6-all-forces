@@ -5,6 +5,8 @@
 #include <cstring>
 
 namespace crew {
+bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy; }
+
 unsigned char* image=nullptr;
 Config config{};
 ULONGLONG now=1000;
@@ -13,6 +15,7 @@ const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return now; }
 bool InSession() noexcept { return sessionOn; }
 bool OnlineHostOnly() noexcept { return !sessionOn || host; }
+bool IsOnlineAuthority(const void*) noexcept { return !sessionOn || host; }
 void Log(const char*,...) noexcept {}
 }
 namespace {
@@ -103,6 +106,16 @@ int main() {
     Check(At<float>(mseat,0x2C0)==0 && At<float>(mseat,0x2C4)==0 && !posts[0].active,"back on its post: the stick taken back");
     Put<float>(m,kPosition+8,-40);Put<float>(mseat,0x2C0,0.7f);++now;NpcPostInput(m);
     Check(At<float>(mseat,0x2C0)==0.7f && At<float>(mseat,0x2C4)==0,"the stock AI's own turn owns the frame");
+    ResetNpcPosts();Put<void*>(mseat,kSeatRiderCtrl,nullptr);
+    const float arrival[3]={0,0,120};
+    Check(NpcPrepareVehiclePost(m,arrival),"support arrival accepted before its real driver boards");
+    ++now;NpcPostInput(m);
+    Check(pendingPosts[0].ref.Is(m),"empty vehicle keeps its pending arrival without moving");
+    Put<void*>(mseat,kSeatRiderCtrl,mctrl);Put<float>(mseat,0x2C0,0);Put<float>(mseat,0x2C4,0);
+    ++now;NpcPostInput(m);
+    Check(!pendingPosts[0].ref && posts[0].at[2]==120 && posts[0].commanded,
+          "arrival transfers to vehicle controller only once crew is seated");
+    ResetNpcPosts();Check(!pendingPosts[0].ref,"new mission drops pending support destinations");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_post_test: %d checks passed\n",checks);
 }

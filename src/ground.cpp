@@ -297,7 +297,7 @@ bool IsGroundRobo(const void* vehicle) noexcept {
 
 void GroundFrame(unsigned char* vehicle) noexcept {
     if(!profileOk || !Cfg().groundPilot || vehicle[kDead])return;
-    if(SeatCount(vehicle)==0 || SeatRider(SeatAt(vehicle,0))!=Rider::dummy)return;   // only NPC drivers
+    if(!NpcDriver(vehicle))return;   // only NPC drivers
     // Online, only where the crawler is run (online_authority.h: the host for an NPC driver): elsewhere its copy is driven
     // by what that machine replicates, and a second driver here would steer it against that.
     if(!OnlineRunsHere(vehicle))return;

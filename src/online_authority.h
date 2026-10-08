@@ -117,8 +117,8 @@ bool OnlineHostOnly() noexcept;                        // offline, or this machi
 bool IsOnlineAuthority(const void* object) noexcept;   // the result of this object's plugin work counts here
 bool OnlineRunsHere(const void* object) noexcept;      // this machine runs the object's own simulation
 bool OnlineMaySeatNpc(const void* vehicle) noexcept;   // an NPC rider may be seated in it here
-// The stock RideAi (VehicleBase slot 50, 0x633030) behind OnlineMaySeatNpc: the one way the plugin seats an NPC rider.
-// `spawned`: the call's flag (true for a vehicle just made, as CreateFriend passes). False when not seated here.
+// Request existing soldiers to walk to this vehicle behind OnlineMaySeatNpc. Never calls RideAi.
+// True means boarding is pending, not that a pilot is seated; callers must inspect the actual seat.
 bool SeatNpcRider(unsigned char* vehicle,bool spawned) noexcept;
 // Whether a round fired from `owner` by `by` deals its damage here (online::ShotCounts).
 bool OnlineShotCounts(const void* owner,online::Shooter by) noexcept;

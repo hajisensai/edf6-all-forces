@@ -1,9 +1,8 @@
 // NPC crews for friendly vehicles, and the player bumping them out.
 //
-// Auto-crew: a friendly vehicle with nobody aboard gets the stock NPC driver (VehicleBase slot 50,
-// RideAi, the same call the mission scripts make for the NPC tank columns). The game seats a
-// DummyVehicleRider in seat 0 and the vehicle AI (slot 72) drives and fires. Helicopters have no
-// such AI; heli.cpp flies the ones crewed here.
+// Auto-crew recruits existing real soldiers through NpcRequestCrew. They walk to the native entry
+// and use Human::RideVehicle; no DummyVehicleRider is created. Original mission-script Dummies
+// retain their native task lifecycle. Vehicle AI and the helicopter controller accept real drivers.
 //
 // Bump: the stock code never lets anyone board an occupied seat. The on-foot prompt (0x62DCB0) and
 // the board button (vehicle slot 49, 0x633B80 -> 0x6346D0) both skip a seat whose rider's use count
@@ -339,7 +338,7 @@ template<class F> bool WithRidersHidden(unsigned char* vehicle,F check) noexcept
     const unsigned count=SeatCount(vehicle);
     for(unsigned i=0;i<count && i<16;++i) {
         auto seat=SeatAt(vehicle,i);
-        if(SeatRider(seat)!=Rider::dummy)continue;
+        if(SeatRider(seat)!=Rider::dummy && !NpcCanYieldSeat(seat))continue;
         saved[i]=At<void*>(seat,kSeatRiderCtrl);Put<void*>(seat,kSeatRiderCtrl,nullptr);
     }
     bool ok=false;
@@ -377,6 +376,7 @@ bool LeaveSeat(unsigned char* vehicle,unsigned char* from,unsigned char* to) noe
 // The NPC in seat `from` to seat `to` (seat, then clear: LeaveSeat pairs them). False: not moved, the NPC still where
 // it was (the seat refused it, or the clear faulted and the seating was undone).
 bool MoveRider(unsigned char* vehicle,unsigned from,unsigned to) noexcept {
+    if(NpcCanYieldSeat(SeatAt(vehicle,from)))return NpcMoveSeat(vehicle,from,static_cast<int>(to));
     auto seat=SeatAt(vehicle,from);
     auto rider=const_cast<void*>(RiderObject(seat));
     auto dest=reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,static_cast<int>(to),false);
@@ -391,6 +391,7 @@ bool Bump(unsigned char* vehicle,unsigned index) noexcept {
     auto seat=SeatAt(vehicle,index);
     auto rider=const_cast<void*>(RiderObject(seat));
     const int gunner=Cfg().bumpToGunner ? FreeGunnerSeat(vehicle,index) : -1;
+    if(NpcCanYieldSeat(seat))return NpcMoveSeat(vehicle,index,gunner);
     bool freed=false;
     if(gunner>=0) {
         if(auto to=reinterpret_cast<SeatRideFn>(image+kSeatRide)(vehicle,rider,gunner,false)) {
@@ -421,10 +422,10 @@ unsigned char* GunshipSeat(unsigned char* v,void* human) noexcept {
     const unsigned want=GunshipBoardSeat();
     auto seat=SeatAt(v,want);
     const Rider rider=SeatRider(seat);
-    if(rider!=Rider::none && rider!=Rider::dummy)return nullptr;
+    if(rider!=Rider::none && rider!=Rider::dummy && !NpcCanYieldSeat(seat))return nullptr;
     const auto canRide=[&]{ return reinterpret_cast<CanRideSeatFn>(image+kCanRideSeat)(v,human,seat); };
     if(!WithDummiesHidden(v,canRide))return nullptr;   // out of reach, or its class may not sit there
-    if(rider==Rider::dummy && !Bump(v,want))return nullptr;
+    if(rider!=Rider::none && !Bump(v,want))return nullptr;
     return WithTeamField(v,OwnTeam(v),[&]()->unsigned char* {   // the stock seat check's team (see WithTeamField)
         if(!canRide())return nullptr;
         reinterpret_cast<ReserveSeatFn>(image+kReserveSeat)(v,human,seat);
@@ -466,7 +467,7 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
         const unsigned count=SeatCount(v);
         for(unsigned i=0;i<count;++i) {
             auto s=SeatAt(v,i);
-            if(SeatRider(s)!=Rider::dummy)continue;
+            if(SeatRider(s)!=Rider::dummy && !NpcCanYieldSeat(s))continue;
             const bool ok=WithDummiesHidden(v,[&]{ return reinterpret_cast<CanRideSeatFn>(image+kCanRideSeat)(v,human,s); });
             if(!ok)continue;
             // the stock slot 49 re-checks the team (see WithTeamField)
@@ -524,7 +525,7 @@ void __fastcall PromptHook(void* functor,void* object) {
            IsSub(object))return;
         auto v=static_cast<unsigned char*>(object);
         bool any=false;
-        for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy;
+        for(unsigned i=0;i<SeatCount(v);++i)any=any || SeatRider(SeatAt(v,i))==Rider::dummy || NpcCanYieldSeat(SeatAt(v,i));
         if(any && WithDummiesHidden(v,[&]{ return reinterpret_cast<CanRideFn>(image+kCanRide)(v,human); }))
             f[kFunctorResult]=1;
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
@@ -585,14 +586,10 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     const auto team=OwnTeam(vehicle);
     if(!player.at || now-player.at>10000 || (team!=player.team && team!=kTeamVehicle))return;
     if(Cfg().crewRange>0.0f && Distance2(vehicle,player.pos)>Cfg().crewRange*Cfg().crewRange)return;
-    // The NPC that moved to a gunner seat when the player boarded goes with the driver seat:
-    // the vehicle gets a fresh driver from the stock RideAi rather than a hand-moved one.
-    for(unsigned i=0;i<count && dummies;++i)
-        if(SeatRider(SeatAt(vehicle,i))==Rider::dummy)reinterpret_cast<SeatFn>(image+kSeatKick)(vehicle,SeatAt(vehicle,i));
+    // Existing soldiers walk to the entrance; an empty vehicle never creates a new occupant.
     if(!SeatNpcRider(vehicle,false))return;
     st.crewedAt=now;st.emptySince=0;st.ownTeam=team;
-    // false (its table full): logged there, the heli sits. The Sazabi is a 506 but its NPC walks it (sazabi_pilot.inc).
-    if(IsHelicopter(vehicle) && !IsSazabi(vehicle))HeliCrewed(vehicle);
+    // HeliFrame starts piloting only after the assigned real soldier actually boards.
     Log("CREW v=%p %s seats=%u driver=%d",vehicle,kClasses[cls].name,count,SeatRider(SeatAt(vehicle,0))==Rider::dummy);
 }
 

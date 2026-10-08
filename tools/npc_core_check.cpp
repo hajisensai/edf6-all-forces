@@ -18,6 +18,9 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 #include <initializer_list>
 
 namespace crew {
+bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
+bool RealDriverNativeReady() noexcept { return true; }
+bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
 unsigned char* image=nullptr;
 PlayerFix player{};
 namespace {

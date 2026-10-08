@@ -566,6 +566,7 @@ Rider Aboard(unsigned char* v) noexcept {
         const Rider s=SeatRider(SeatAt(v,i));
         if(AnyPlayerIn(SeatAt(v,i)))return Rider::player;   // a player of any machine: never deleted under them
         if(s==Rider::dummy)r=s;
+        else if(s==Rider::other)return s; // a real soldier aboard must never be deleted with the aircraft
     }
     return r;
 }

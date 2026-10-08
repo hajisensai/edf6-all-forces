@@ -59,6 +59,8 @@ enum class Family : std::uint8_t { none, carBase, mech, barga };
 // wrote/last: the plugin's last write to the two channels it drives (steer / throttle, the Barga's turn / forward).
 struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; bool wrote; float last[2]; };
 Post posts[kMaxPosts]{};
+struct PendingPost { ObjRef ref; float at[3]; };
+PendingPost pendingPosts[kMaxPosts]{};
 ULONGLONG fullLoggedAt=0;
 
 Family FamilyOf(const unsigned char* v) noexcept {
@@ -135,7 +137,7 @@ bool Available(const Post& p,ULONGLONG ms) noexcept {
     const auto v=static_cast<const unsigned char*>(p.ref.obj);
     return Cfg().enabled && Cfg().customNpcAi && Cfg().tankReturnToPost && !InSession() &&
         p.seen && ms-p.seen<=500 && Readable(v,kMatrix+64) && p.ref.Is(v) && !v[kDead] && FamilyOf(v)!=Family::none &&
-        !At<const void*>(v,kRoute) && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::dummy;
+        !At<const void*>(v,kRoute) && NpcDriver(v);
 }
 
 void Relinquish(const unsigned char* v) noexcept {
@@ -152,17 +154,22 @@ void NpcPostInput(unsigned char* v) noexcept {
     if(!Cfg().customNpcAi || !Cfg().tankReturnToPost || v[kDead])return;
     const Family f=FamilyOf(v);
     if(f==Family::none || (f==Family::barga && !BargaWalkOk()))return;
-    if(SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::dummy) {
+    if(!NpcDriver(v)) {
         // Not NPC-driven (the player took the wheel, or nobody): its post is forgotten; an NPC later starts from where it is.
         Relinquish(v);
         return;
     }
     if(At<const void*>(v,kRoute)){Relinquish(v);return;} // even a short script route invalidates the old post
-    if(!OnlineHostOnly())return;   // the NPC driver has no identity: the host alone (online_authority.h)
+    if(!IsOnlineAuthority(v))return; // the real driver determines vehicle authority
     const ULONGLONG ms=GameMs();
     Post* const p=PostOf(v,ms);
     if(!p)return;
     p->seen=ms;
+    for(auto& request:pendingPosts)if(request.ref.Is(v)) {
+        std::memcpy(p->at,request.at,12);p->commanded=true;
+        p->cmd=Command{Order::guard,{request.at[0],request.at[1],request.at[2]}};
+        request=PendingPost{};break;
+    }
     const bool reads=f!=Family::carBase || (At<std::uint32_t>(v,kDriveMode)&1);   // a CarBase's slot 55 reads the stick
     if(!reads || StockDriving(v,f,*p)){p->active=false;p->wrote=false;return;}
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -183,6 +190,19 @@ void NpcPostInput(unsigned char* v) noexcept {
         p->loggedAt=ms;
         Log("NPCPOST v=%p dist=%.1f bearing=%.2f reverse=%d ch=(%.2f,%.2f) family=%d",v,s.dist,s.bearing,s.reverse,c0,c1,static_cast<int>(f));
     }
+}
+
+bool NpcPrepareVehiclePost(unsigned char* v,const float* at) noexcept {
+    if(!v || !at || !Readable(v,kMatrix+64) || v[kDead] || FamilyOf(v)==Family::none ||
+       !std::isfinite(at[0]+at[1]+at[2]) || At<const void*>(v,kRoute) || !IsOnlineAuthority(v))return false;
+    PendingPost* free=nullptr;
+    for(auto& request:pendingPosts) {
+        if(request.ref.Is(v)){free=&request;break;}
+        if(!free && (!request.ref || !Readable(request.ref.obj,kSelfCtrl+8) || !request.ref.Is(request.ref.obj)))free=&request;
+    }
+    if(!free)return false;
+    free->ref=ObjRef::Of(v);std::memcpy(free->at,at,12);
+    return true;
 }
 
 bool NpcPostCommand(const void* v,const float* at) noexcept {
@@ -214,6 +234,7 @@ bool TankCommand(const void* v,const Command& c) noexcept {
 }
 
 void ResetNpcPosts() noexcept {
+    for(auto& p:pendingPosts)p=PendingPost{};
     for(auto& p:posts)p=Post{};
     fullLoggedAt=0;
 }

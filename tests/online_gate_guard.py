@@ -95,11 +95,11 @@ def check_rvas(root: str, files: list[str]) -> None:
 
 def check_ride_ai(root: str, files: list[str]) -> None:
     for rel in files:
-        if '[kSlotRideAi]' in code_only(read(root, rel)) and rel != 'src/online_authority.cpp':
+        if '[kSlotRideAi]' in code_only(read(root, rel)) :
             fail(f'{rel}: calls the stock RideAi itself; seat NPC riders through SeatNpcRider (online_authority.h)')
     seat = body(code_only(read(root, 'src/online_authority.cpp')), 'bool SeatNpcRider(')
-    if not before(seat, 'OnlineMaySeatNpc(', '[kSlotRideAi]'):
-        fail('src/online_authority.cpp SeatNpcRider: RideAi is not behind OnlineMaySeatNpc')
+    if not before(seat, 'OnlineMaySeatNpc(', 'NpcRequestCrew('):
+        fail('src/online_authority.cpp SeatNpcRider: real crew recruitment is not behind OnlineMaySeatNpc')
     crew = body(code_only(read(root, 'src/crew.cpp')), 'void Crew(unsigned char* vehicle,int cls)')
     if not before(crew, 'OnlineMaySeatNpc(vehicle)', 'SeatNpcRider('):
         fail('src/crew.cpp Crew: AutoCrew seats a driver without asking OnlineMaySeatNpc first')

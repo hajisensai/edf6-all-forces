@@ -6,6 +6,16 @@ namespace crew {
 // The soldier classes' Think (vtable slot 7) wrapped, chained after any other plugin's: once, from EnsureInputs
 // (every plugin loaded by then). False when the intent block's code is not as read (the AI stays stock).
 bool InstallNpcAi() noexcept;
+// Ask existing friendly soldiers to walk to free seats; true means an assignment is pending.
+// No soldier or dummy is created. Driver seats precede armed seats, then passengers.
+bool NpcRequestCrew(unsigned char* vehicle,bool spawned=false) noexcept;
+// Explicit support crew assignment; the supplied real soldiers still walk to the entry and board.
+int NpcBoardCrew(unsigned char* vehicle,unsigned char* const* humans,int count) noexcept;
+// A real NPC driver, or a legacy mission-script Dummy (never made by the plugin).
+bool NpcDriver(const unsigned char* vehicle) noexcept;
+bool NpcCanYieldSeat(const unsigned char* seat) noexcept;
+// Already aboard: native Human seat transition, or dismount for to=-1.
+bool NpcMoveSeat(unsigned char* vehicle,unsigned from,int to) noexcept;
 // A new mission (mission.cpp MissionStart): the last mission's soldiers are gone.
 void ResetNpcAi() noexcept;
 // Whether `human` is one of the four soldier classes (AssultSoldier, PaleWing, HeavyArmor, Engineer).
@@ -59,6 +69,8 @@ bool NpcPingReadout(NpcPing* out) noexcept;
 void NpcPostInput(unsigned char* vehicle) noexcept;
 // A tank's post moved to `at` (a map command); false when the vehicle keeps no post now.
 bool NpcPostCommand(const void* vehicle,const float* at) noexcept;
+// Store an arrival destination until the assigned real driver boards the support vehicle.
+bool NpcPrepareVehiclePost(unsigned char* vehicle,const float* at) noexcept;
 void ResetNpcPosts() noexcept;   // a new mission
 // A ground vehicle an NPC in seat 0 drives (and a map command sends to a post): the stock CarBase AI (0x661440: the
 // tanks, the Titan, the bikes, the Grape and the trucks of its class, the rescue vehicle), armed or not.
