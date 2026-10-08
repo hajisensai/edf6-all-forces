@@ -86,6 +86,23 @@ int main() {
     Expect(At<float>(SeatAt(vehicle,1),0x2E4)==0.0f && At<float>(SeatAt(vehicle,1),0x2E0)==1.0f,"selected secondary uses native left trigger instead of firing primary");
     gunnerEnemy=nullptr;NpcGunnersInput(vehicle);
     Expect(At<float>(SeatAt(vehicle,1),0x2E0)==0.0f,"target loss also releases owned secondary trigger");
+    // The integrated payload reader accepts up to 16 holders. A ninth holder must not disable the whole seat.
+    SetupGunner(false);
+    unsigned char extraWeapons[8][0x1600]{},extraHolders[8][0x80]{};
+    unsigned char* nine[9]={holder};
+    Put<float>(weapon,kArmReach,0.0f);
+    for(int i=0;i<8;++i) {
+        Put<void*>(extraHolders[i],kHolderWeapon,extraWeapons[i]);nine[i+1]=extraHolders[i];
+        Put<float>(extraWeapons[i],kArmReach,i==7 ? 100.0f : 0.0f);
+    }
+    Put<void*>(SeatAt(vehicle,1),kSeatWeapons,nine);Put<std::uint64_t>(SeatAt(vehicle,1),kSeatWeaponCount,9);
+    chosenGunnerWeapon=extraWeapons[7];chosenGunnerFire=PayloadFire::secondary;
+    NpcGunnersInput(vehicle);
+    Expect(fired==1 && aimedWeapon==extraWeapons[7],"nine-holder gunner seat reaches and aims its ninth live weapon");
+    Expect(At<void*>(SeatAt(vehicle,1),kSeatWeapons)==nine && nine[0]==holder &&
+           At<float>(SeatAt(vehicle,1),0x2E0)==1.0f,"large holder list restores ownership and fires the selected secondary");
+    gunnerEnemy=nullptr;NpcGunnersInput(vehicle);
+    Expect(fired==1 && At<float>(SeatAt(vehicle,1),0x2E0)==0.0f,"nine-holder seat still releases fire on target loss");
     ResetGunnerInputs();
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc_gunners_online: %d failures\n",failures);

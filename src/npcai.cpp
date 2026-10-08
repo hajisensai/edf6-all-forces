@@ -2086,7 +2086,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         for(const auto offset:kGunnerInputs)Put<float>(seat,offset,0.0f);
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
-        if(!n || n>8 || !Readable(holders,n*8))continue;
+        if(!n || n>16 || !Readable(holders,n*8))continue; // same holder limit as ReadSeat/AimSelectedGunner
         float reach=0.0f;
         for(std::uint64_t k=0;k<n;++k) {
             if(!Readable(holders[k],kHolderWeapon+8))continue;
