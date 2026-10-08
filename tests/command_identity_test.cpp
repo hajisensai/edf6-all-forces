@@ -139,6 +139,7 @@ int main(int argc,char** argv) {
     for(int m=1;m<=8;++m){mutation=m;Rejected("snapshot mutation rejected");Reset();}
     image[kEnumAllTeams]^=1;Rejected("unsupported native walker rejected");
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
-    if(argc>1)Native(argv[1]);
+    if(argc>1 && argv[1][0])Native(argv[1]);
+    else std::puts("SKIP optional native walker: no EDF.dll supplied; production resolver checks still ran");
     std::printf("command_identity_test: %d checks passed\n",checks);
 }
