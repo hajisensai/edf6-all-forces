@@ -127,6 +127,9 @@ void WorldParticipants() {
     Check(!state.ready,"creation attempt alone cannot seal old world actors");
     NoteCreations();tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==2 && !std::strcmp(state.participants[0].id,"client"),"complete native world deduplicates split-screen PUIDs");
+    Check(crew::SupportCommandRequesterMatches(const_cast<char*>(actorPuids[1]),"client"),"command authentication accepts native PUID of an admitted world player");
+    Check(!crew::SupportCommandRequesterMatches(const_cast<char*>(actorPuids[1]),"host"),"command authentication cannot borrow another transport identity");
+    Check(!crew::SupportCommandRequesterMatches(const_cast<char*>(actorPuids[3]),"lobby-only"),"lobby-only identity cannot issue world commands");
     const auto epoch=state.worldEpoch;
     Check(crew::SupportMissionPlayerAllowed(0) && crew::SupportMissionPlayerAllowed(1),"existing mission players may respawn");
     Check(!crew::SupportMissionPlayerAllowed(2),"lobby-only player cannot enter sealed current world");

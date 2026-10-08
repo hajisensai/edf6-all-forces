@@ -40,7 +40,7 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
         else if(!IsOnlineAuthority(ids.units[i].obj))result={NpcCommandReason::notAuthority,0};
         else result=executor(ids.units[i],request.command,ids.requester,ids.focus);
         if(result.reason>=NpcCommandReason::count || result.affected>256 ||
-           (result.reason==NpcCommandReason::none && !result.affected))result={NpcCommandReason::failed,0};
+           ((result.reason==NpcCommandReason::none)!=(result.affected>0)))result={NpcCommandReason::failed,0};
         out[i]={static_cast<std::uint32_t>(result.reason),result.affected};
     }
 }

@@ -78,12 +78,18 @@ void Protocol() {
 
     r.Step();r.drop=1;r.nodes[1]->session->Submit(Make(),r.Name(1),r.now);r.Pump();
     auto spoof=Find(r,Kind::result,0);spoof.from=2;spoof.to=1;spoof.message.sequence=r.nodes[1]->session->Result().request;
+    spoof.message.request.count=r.nodes[1]->session->Result().count;
     r.Deliver(spoof);Check(r.nodes[1]->session->Result().state==CommandNetworkState::pending,"other client cannot forge host result");
     r.Step(10001);Check(r.nodes[1]->session->Result().state==CommandNetworkState::timedOut,"missing acknowledgement has a real bounded RPC deadline");
     r.drop=99;r.Pump();Check(r.nodes[1]->session->Result().state==CommandNetworkState::timedOut,"late result cannot reopen a completed UI deadline");
     const auto count=r.nodes[0]->executed;++r.epoch;r.Step();r.Deliver(req);r.Pump();Check(r.nodes[0]->executed==count,"old mission request ignored even if id reused");
     Room old(2,false);Check(!old.nodes[1]->session->Ready() && !old.nodes[1]->session->Submit(Make(),old.Name(1),old.now),
         "old or disabled host capability cannot silently accept a command");
+    Room rebound(2);rebound.nodes[1]->session->Submit(Make(),rebound.Name(1),rebound.now);rebound.Pump();rebound.Step();
+    auto impostor=Find(rebound,Kind::request,1);++impostor.message.sequence;
+    const auto packets=rebound.sent.size();
+    rebound.nodes[0]->session->Receive(1,"different-authenticated-user",impostor.message,rebound.now);
+    Check(rebound.nodes[0]->executed==1 && rebound.sent.size()==packets,"peer index cannot inherit another PUID's capability or result cache");
 }
 }
 int main(){Codec();Protocol();std::printf("command protocol: %d checks passed\n",checks);}

@@ -19,8 +19,11 @@ bool Valid(const Message& m) noexcept {
         (m.rpc==Rpc::none || (m.kind==Kind::capability && m.rpc==Rpc::unsupported));
     if(!m.sequence || !m.request.count || m.request.count>kCommandNetUnits)return false;
     if(m.kind==Kind::request)return m.rpc==Rpc::none && ValidRequest(m.request);
-    for(std::uint32_t i=0;i<m.request.count;++i)if(m.results[i].reason>=static_cast<std::uint32_t>(NpcCommandReason::count) ||
-        m.results[i].affected>256)return false;
+    for(std::uint32_t i=0;i<m.request.count;++i) {
+        const auto& r=m.results[i];
+        if(r.reason>=static_cast<std::uint32_t>(NpcCommandReason::count) || r.affected>256)return false;
+        if(m.rpc==Rpc::none && ((r.reason==0)!=(r.affected>0)))return false;
+    }
     return true;
 }
 void U32(unsigned char*& p,std::uint32_t value) noexcept {for(unsigned i=0;i<4;++i)*p++=static_cast<unsigned char>(value>>(i*8));}

@@ -909,3 +909,10 @@ target_compile_options(payload_snapshot_test PRIVATE /W4 /WX /utf-8 /permissive-
 target_link_options(payload_snapshot_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks payload_snapshot_test)
 add_test(NAME payload_snapshot COMMAND payload_snapshot_test)
+add_executable(command_native_dispatch_test tests/command_native_dispatch_test.cpp tests/command_native_id_reader.cpp
+    src/command_net.cpp src/command_identity.cpp src/command_protocol.cpp src/ground_navigation.cpp)
+target_link_libraries(command_native_dispatch_test PRIVATE edf6common user32)
+target_include_directories(command_native_dispatch_test PRIVATE src common third_party/EDFModLoader)
+target_compile_options(command_native_dispatch_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(command_native_dispatch_test PRIVATE /OPT:REF)
+add_test(NAME command_native_dispatch COMMAND command_native_dispatch_test)
