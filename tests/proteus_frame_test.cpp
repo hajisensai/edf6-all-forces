@@ -7,6 +7,7 @@ unsigned char* image=nullptr;PlayerFix player{};
 namespace {
 Config config{};ULONGLONG now=3600000,frame=1;
 unsigned char vehicle[0x3000]{},seats[4*kSeatStride]{},human[0x400]{},ctrl[16]{};
+unsigned char* observerHuman=human;
 int failures=0,checks=0,gunShots=0,salvoShots=0;
 bool netSession=false,netAuthority=true;
 const void* localNpcAuthority=nullptr;
@@ -37,7 +38,7 @@ bool KnownVehicle(const void*) noexcept{return false;}
 bool CameraRay(float*,float*) noexcept{return false;}
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept{return true;}
 float MapRay(const float*,const float*,float*) noexcept{return -1.0f;}
-unsigned char* PlayerHuman() noexcept{return human;}
+unsigned char* PlayerHuman() noexcept{return observerHuman;}
 void ProteusRoundsReady(bool* gun,bool* salvo) noexcept{if(gun)*gun=false;if(salvo)*salvo=false;}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
     if(!testPoseBones)return nullptr;
@@ -82,6 +83,22 @@ int main(){
     Put<std::uint16_t>(seats,kSeatButtons,0);for(int i=0;i<35;++i)Tick();
     Check(PlayerProteus(&ro) && ro.mode==proteus::Mode::deployed,"native player frames advance deployment to completion");
     Check(At<float>(vehicle,kWalk)==0 && At<float>(vehicle,kJump)==0,"deployed leg and jump parameters change in real object");
+    // Both riders are local. Seat 0 must keep controlling the vehicle while PlayerHuman observes seat 1.
+    alignas(16) unsigned char gunnerHuman[0x400]{},gunnerCtrl[16]{};
+    gunnerHuman[edf::kHumanPlayer]=1;Put<void*>(gunnerHuman,edf::kHumanPad,gunnerHuman);Put<int>(gunnerCtrl,8,1);
+    Put<void*>(seats+kSeatStride,kSeatRider,gunnerHuman);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,gunnerCtrl);
+    seats[kSeatStride+kSeatPad]=0;observerHuman=gunnerHuman;
+    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusModeButton));Tick();
+    Check(PlayerProteus(&ro) && ro.seat==1 && !ro.driver && ro.keys,"split-screen gunner sees their own seat/device and no driver-only hints");
+    Check(UnitOf(vehicle,false)->playerSeat==0 && ro.mode==proteus::Mode::stowing,
+          "observing the gunner does not steal seat 0 deployment control");
+    Put<std::uint16_t>(seats,kSeatButtons,0);
+    Put<std::uint16_t>(seats+kSeatStride,kSeatButtons,static_cast<std::uint16_t>(config.proteusShieldButton));Tick();
+    Check(!UnitOf(vehicle,false)->st.shieldOn,"gunner's shield button is not mistaken for driver input");
+    observerHuman=human;Tick();
+    Check(PlayerProteus(&ro) && ro.seat==0 && ro.driver && !ro.keys,"driver observer regains driver hints and their pad binding mode");
+    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
+    observerHuman=human;
     config.proteus=false;Tick();
     Check(At<float>(vehicle,kWalk)==10 && At<float>(vehicle,kJump)==8,"setting off restores stock legs through same native tick");
     Check(At<int>(seats+2*kSeatStride,kSeatClassMask)==15 && At<int>(seats+3*kSeatStride,kSeatClassMask)==15,"setting off restores original seat masks");
@@ -134,6 +151,22 @@ int main(){
     Check(fire.gunAt==old,"failed cannon creation does not consume cooldown");
     Put<std::uint64_t>(weapon,edf::kMuzzleCount,0);fire.salvoLeft=2;Salvo(fire,vehicle,now+8000,config);
     Check(fire.salvoLeft==0 && !RoundFrom(fire,kLauncherSeat,0,from,dir),"missing muzzle never spawns from imaginary hull position");
+    // Remote driver + this machine's gunner: publish the observer, but never turn replay into driver authority.
+    ResetProteus();config.proteus=true;netSession=true;netAuthority=false;
+    Put<std::uint16_t>(vehicle,0x128,1);Put<std::uint16_t>(human,0x128,1);Put<std::uint16_t>(gunnerHuman,0x128,2);
+    Put<void*>(seats+kSeatStride,kSeatRider,gunnerHuman);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,gunnerCtrl);
+    observerHuman=gunnerHuman;
+    proteus_net::State remote;remote.sender=7;remote.sequence=1;remote.controller=netDriver;
+    remote.flags=proteus_net::kActive;remote.mode=2;
+    ProteusNetReceived(vehicle,remote);
+    const int oldGunShots=gunShots,oldSalvoShots=salvoShots,oldControlSends=controlSends;
+    const float stockWalk=At<float>(vehicle,kWalk);
+    Put<std::uint16_t>(seats,kSeatButtons,static_cast<std::uint16_t>(config.proteusModeButton));Tick();
+    Check(PlayerProteus(&ro) && ro.seat==1 && !ro.driver && ro.keys,"remote deployment uses the actual local gunner HUD seat");
+    Check(UnitOf(vehicle,false)->net.remote && ro.mode==proteus::Mode::deployed && At<float>(vehicle,kWalk)==stockWalk &&
+          gunShots==oldGunShots && salvoShots==oldSalvoShots && controlSends==oldControlSends,
+          "observer selection does not run remote driver input, movement, fire or control publication");
+    observerHuman=human;Check(ObserverSeat(vehicle)==-1,"a copied remote rider cannot become the local HUD observer");
     std::printf("proteus_frame_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures?1:0;
 }

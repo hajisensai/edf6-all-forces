@@ -96,7 +96,7 @@ bool NetworkFrame(Unit& u,unsigned char* v,bool live,int playerSeat,ULONGLONG ms
             u.closed=false;
         }
         if(localGunner)Guns(u,false,Cfg());
-        if(playerSeat==static_cast<int>(kGunnerSeat)){Ring(u,v,ms,Cfg());Publish(u,v,false,SeatAt(v,0),Cfg());}
+        if(ObserverSeat(v)>=0){Ring(u,v,ms,Cfg());Publish(u,v,Cfg());}
         FieldFrame(u,v,dt,Cfg()); // only target-owner support effects; no remote pilot/fire simulation
     }
     DefenseTick(u,v,ms);

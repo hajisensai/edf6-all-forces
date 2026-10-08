@@ -192,7 +192,7 @@ struct Unit {
     int allies;
     int ringCount;
     float ring[kProteusRing][3];
-    unsigned playerSeat;
+    unsigned playerSeat;              // first local control seat (aim/fire); HUD independently follows PlayerHuman
     // The damage it took this second (Debug): blocked by a shield, taken by the barrier, through to the hull.
     float blocked,barred,through;
     float shieldNose[3];             // the same direction for the visible shield and the damage test
@@ -617,12 +617,24 @@ void PublishZone(const Unit& u,const unsigned char* v,const Config& c) noexcept 
     ReleaseSRWLockExclusive(&zoneLock);
 }
 
-void Publish(const Unit& u,const unsigned char* v,bool driver,const unsigned char* driverSeat,const Config& c) noexcept {
+int ObserverSeat(const unsigned char* v) noexcept {
+    const unsigned char* human=PlayerHuman();
+    if(!human)return -1;
+    for(unsigned i=0;i<SeatCount(v);++i) {
+        const auto seat=SeatAt(const_cast<unsigned char*>(v),i);
+        if(SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==human)return static_cast<int>(i);
+    }
+    return -1;
+}
+void Publish(const Unit& u,const unsigned char* v,const Config& c) noexcept {
+    const int observer=ObserverSeat(v);
+    if(observer<0)return;
+    const auto observerSeat=SeatAt(const_cast<unsigned char*>(v),static_cast<unsigned>(observer));
     ProteusReadout r{};
     r.vehicle=v;
     std::memcpy(r.pos,Pos(v),12);
     std::memcpy(r.hull,u.shieldNose,12);
-    r.seat=u.playerSeat;r.driver=driver;
+    r.seat=static_cast<unsigned>(observer);r.driver=observer==0;
     r.mode=u.st.mode;r.stagger=proteus::StaggerShare(u.st,RulesOf(u));
     r.shieldOn=u.st.shieldOn;r.shieldUp=proteus::ShieldUp(u.st);r.dirShield=proteus::ShieldFollowsView(u.st);
     r.overheated=u.st.overheated;r.heat=u.st.heat;r.shieldHalfArc=RulesOf(u).shieldHalfArc;
@@ -639,7 +651,7 @@ void Publish(const Unit& u,const unsigned char* v,bool driver,const unsigned cha
     r.allies=u.allies;
     r.ringCount=u.ringCount;
     std::memcpy(r.ring,u.ring,sizeof(r.ring));
-    r.keys=driverSeat && At<unsigned char>(driverSeat,kSeatPad)==0;
+    r.keys=At<unsigned char>(observerSeat,kSeatPad)==0;
     r.modeKey=c.proteusModeKey;r.modeButton=c.proteusModeButton;r.shieldKey=c.proteusShieldKey;r.shieldButton=c.proteusShieldButton;
     r.markKey=c.proteusMarkKey;r.markButton=c.proteusMarkButton;r.salvoKey=c.proteusSalvoKey;
     AcquireSRWLockExclusive(&readoutLock);
@@ -746,7 +758,7 @@ void Frame(unsigned char* v) noexcept {
     const float liftWant=u->st.mode==proteus::Mode::deployed ? c.proteusViewLift : 0.0f;
     u->lift+=(liftWant-u->lift)*vec::Clamp(dt*2.0f,0.0f,1.0f);
     PublishZone(*u,v,c);
-    if(playerSeat>=0)Publish(*u,v,driver,driverSeat,c);
+    if(playerSeat>=0)Publish(*u,v,c);
     DebugLog(*u,v);
     DefenseTick(*u,v,ms);
     SendControl(*u,v,ms,o.modeChanged || in.shield);
