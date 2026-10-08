@@ -29,6 +29,16 @@ IDs. Host-only AI, steering, native seating and damage authority remain the nati
 adapter's responsibility. The plan's `role` names the parent vehicle unit by index
 plus one; it never carries a pointer or resource path.
 
+Request outcomes have their own authenticated request-number channel, independent
+of actor transaction IDs. Accepted, active, refused, timeout, cancelled and
+interrupted are bounded enum values; there are no peer-supplied UI strings. A
+host refusal before any begin/spawn still returns a terminal outcome. The notice
+hook updates only this machine's latest request, so remote work does not replace
+the host's own request status. Duplicate replies, non-host replies, old epochs and
+an older transaction's cancellation cannot finish a newer request. Host planning
+and confirmation deadlines produce timeout replies; a real transport suspension
+produces interrupted rather than leaving the UI waiting indefinitely.
+
 Native side effects remain held until `SupportTransactionActive(token)` is true.
 The host sets this only after every peer's successful spawn/register result; it
 then sends a separate reliable activate message, retried until acknowledged.

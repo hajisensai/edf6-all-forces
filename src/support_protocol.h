@@ -4,7 +4,7 @@
 
 namespace crew::support_net {
 constexpr std::uint32_t kMagic=0x54525053,kVersion=2;
-enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated };
+enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 struct Message {
     Kind kind=Kind::hello;
     std::uint64_t epoch=0,challenge=0;
@@ -35,7 +35,7 @@ public:
     std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
     void Receive(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Tick(std::uint64_t now) noexcept;
-    void Failed(std::uint64_t token) noexcept;
+    void Failed(std::uint64_t token,RequestStatus reason=RequestStatus::cancelled) noexcept;
     bool IsActive(std::uint64_t token) const noexcept;
     bool Ready() const noexcept;
     std::uint64_t Epoch() const noexcept { return epoch_; }
@@ -47,6 +47,7 @@ private:
         bool external=false;
         bool cancelConfirmed=false;
         bool spawned=false;
+        RequestStatus failure=RequestStatus::cancelled;
         std::uint64_t token=0;
         Plan plan{};
         std::uint32_t requester=0,request=0,received=0;
@@ -66,14 +67,20 @@ private:
     std::array<std::uint64_t,kMaxPeers+1> challenges_{},lastRequestAt_{};
     std::array<std::uint32_t,kMaxPeers+1> requests_{};
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
+    struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
+    std::array<Reply,kMaxPeers+1> replies_{};
+    Reply localReply_{};
     std::array<Transaction,kMaxTransactions> transactions_{};
     bool Send(std::uint32_t peer,Message message) noexcept;
     bool Broadcast(Message message) noexcept;
-    void Cancel(std::uint32_t id,bool broadcast) noexcept;
+    void Cancel(std::uint32_t id,bool broadcast,RequestStatus reason=RequestStatus::cancelled) noexcept;
     void ClearTransactions() noexcept;
     bool HasSpawned() const noexcept;
     void Welcome(std::uint32_t peer) noexcept;
     void HostRequest(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Advance(std::uint32_t id,std::uint64_t now) noexcept;
+    void Publish(std::uint32_t peer,std::uint32_t request,RequestStatus status) noexcept;
+    void Notice(std::uint32_t request,RequestStatus status) noexcept;
+    void ReplyTo(std::uint32_t peer) noexcept;
 };
 } // namespace crew::support_net

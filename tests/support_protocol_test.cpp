@@ -15,12 +15,13 @@ struct Room;
 struct Node {
     Room* room=nullptr;unsigned id=0;
     std::unique_ptr<Session> session=std::make_unique<Session>();
-    bool reject=false,failSpawn=false,pending=false;
+    bool reject=false,failSpawn=false,pending=false,refusePlan=false;
     unsigned spawns=0,destroys=0,plans=0;
     std::uint64_t nonce=0;
     bool active[kMaxTransactions+1]{};
     Plan last{};
     bool remote=false;
+    std::vector<std::pair<std::uint32_t,RequestStatus>> notices;
 };
 Node* current=nullptr;
 struct Packet { unsigned from,to;Message message; };
@@ -65,6 +66,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
 std::uint64_t Nonce(void* ctx) noexcept { return ++static_cast<Node*>(ctx)->nonce; }
 PlanResult PlanCall(std::uint32_t catalog,const float* at,Plan* p) noexcept {
     ++current->plans;
+    if(current->refusePlan)return PlanResult::refused;
     if(current->pending)return PlanResult::pending;
     *p=Plan{};p->catalogId=catalog;p->count=16;std::memcpy(p->target,at,sizeof(p->target));
     for(unsigned i=0;i<p->count;++i) {
@@ -88,10 +90,12 @@ bool Derive(std::uint32_t ordinal,unsigned char* out) noexcept {
     std::memset(out,0,32);std::memcpy(out+4,&ordinal,4);out[0]=42;out[12]=5;
     std::memcpy(out+24,&ordinal,4);return true;
 }
+void Notice(std::uint32_t request,RequestStatus status) noexcept { current->notices.emplace_back(request,status); }
 Room::Room(unsigned count) {
     for(unsigned i=0;i<count;++i) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
         Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
+        b.hooks.notice=&Notice;
         n->session->Configure(b);nodes.push_back(std::move(n));
     }
     for(unsigned i=0;i<count;++i){With(i);current->session->Start(i==0,count-1,i==0 ? 0 : Peer(i,0),now);}
@@ -193,5 +197,34 @@ void Existing() {
     }
     r.With(0);Check(!r.nodes[0]->session->SubmitPrepared(p,r.now),"same registered vehicle cannot receive duplicate crew transaction");
 }
+void RequestOutcomes() {
+    Room r(3);r.nodes[0]->refusePlan=true;Check(r.Submit(),"client request queued before host environment refusal");
+    Packet forged{2,1,{}};forged.message.kind=Kind::requestStatus;forged.message.epoch=r.nodes[1]->session->Epoch();
+    forged.message.request=1;forged.message.index=static_cast<std::uint32_t>(RequestStatus::refused);
+    r.Deliver(forged);Check(r.nodes[1]->notices.size()==1 && r.nodes[1]->notices.back().second==RequestStatus::accepted,
+        "another client cannot forge a refusal");
+    r.Settle();
+    Check(r.nodes[1]->spawns==0 && r.nodes[1]->notices.size()==2 &&
+        r.nodes[1]->notices.back()==std::make_pair(1u,RequestStatus::refused),"pre-begin refusal has an authenticated correlated terminal outcome");
+    Check(r.nodes[0]->notices.empty() && r.nodes[2]->notices.empty(),"remote planner outcome does not overwrite host or unrelated client UI");
+    Packet refused{};
+    for(const auto& p:r.history)if(p.to==1 && p.message.kind==Kind::requestStatus &&
+        p.message.index==static_cast<std::uint32_t>(RequestStatus::refused))refused=p;
+    r.Deliver(refused);r.Deliver(refused);r.Deliver(Find(r,Kind::request,0));r.Pump();
+    Check(r.nodes[1]->notices.size()==2,"duplicate terminal replies and replayed request notify once");
+    for(unsigned i=0;i<3;++i) {
+        r.With(i);r.nodes[i]->session->Stop();r.nodes[i]->session->Start(i==0,2,i==0 ? 0 : r.Peer(i,0),r.now);
+    }
+    r.Settle();r.nodes[0]->refusePlan=false;r.nodes[0]->pending=true;r.Step(2500);r.Submit();
+    const auto notices=r.nodes[1]->notices.size();r.Deliver(refused);
+    Check(r.nodes[1]->notices.size()==notices && r.nodes[1]->notices.back().second==RequestStatus::accepted,
+        "old epoch refusal cannot terminate new epoch request with the same request number");
+    r.Settle();r.Step(121000);r.Settle();
+    Check(r.nodes[1]->notices.back().second==RequestStatus::timeout,"host planning deadline produces real timeout status, not arbitrary UI timer");
+
+    Room newer(2);newer.Submit();newer.Settle();newer.Step(2500);newer.Submit();
+    newer.With(0);newer.nodes[0]->session->Failed(1);newer.Settle();
+    Check(newer.nodes[1]->notices.back()==std::make_pair(2u,RequestStatus::active),"previous transaction cancel cannot be misreported as the newer request outcome");
 }
-int main() { Codec();Success();Failure();Epoch();Existing();ActivationAndTransport();std::printf("support protocol: %d checks passed\n",checks); }
+}
+int main() { Codec();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }

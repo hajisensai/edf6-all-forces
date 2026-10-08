@@ -18,6 +18,7 @@ struct Plan {
     Unit units[kMaxUnits]{};
 };
 enum class PlanResult { pending,ready,refused };
+enum class RequestStatus : std::uint32_t { accepted,active,refused,timeout,cancelled,interrupted };
 struct Hooks {
     PlanResult (*plan)(std::uint32_t,const float*,Plan*) noexcept=nullptr;
     bool (*validate)(const Plan&) noexcept=nullptr;
@@ -29,6 +30,7 @@ struct Hooks {
     bool (*participants)(void**,std::uint32_t,std::uint32_t*,std::uint32_t*) noexcept=nullptr;
     bool (*admissionReady)() noexcept=nullptr;
     bool (*createdMatches)(const ObjRef*,std::uint32_t) noexcept=nullptr;
+    void (*notice)(std::uint32_t,RequestStatus) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
