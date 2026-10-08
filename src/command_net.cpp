@@ -36,9 +36,20 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
     // point of mutation and uses this exact authenticated player for follow/board.
     for(unsigned i=0;i<request.count;++i) {
         NpcCommandResult result{NpcCommandReason::unsupported,0};
+        auto command=request.command;
+        bool ground=true;
+        if(command.order==mapcmd::Order::guard) {
+            const auto total=request.formationTotal ? request.formationTotal : request.count;
+            const auto slot=request.formationTotal ? request.formationSlots[i] : i;
+            mapcmd::Formation(static_cast<int>(slot),static_cast<int>(total),request.command.at,mapcmd::kFormationSpacing,command.at);
+            float y=0;
+            ground=MapGroundNear(command.at[0],command.at[2],command.at[1],&y,true) && std::isfinite(y);
+            if(ground)command.at[1]=y;
+        }
         if(!IsSoldierClass(ids.units[i].obj))result={NpcCommandReason::unsupported,0};
         else if(!IsOnlineAuthority(ids.units[i].obj))result={NpcCommandReason::notAuthority,0};
-        else result=executor(ids.units[i],request.command,ids.requester,ids.focus);
+        else if(!ground)result={NpcCommandReason::noTarget,0};
+        else result=executor(ids.units[i],command,ids.requester,ids.focus);
         if(result.reason>=NpcCommandReason::count || result.affected>256 ||
            ((result.reason==NpcCommandReason::none)!=(result.affected>0)))result={NpcCommandReason::failed,0};
         out[i]={static_cast<std::uint32_t>(result.reason),result.affected};
@@ -73,11 +84,15 @@ bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {
     if(!out)return false;*out=commands.Result();return out->request!=0;
 }
 std::uint32_t SubmitMapCommand(const ObjRef& requester,const ObjRef* units,unsigned count,
-    const mapcmd::Command& command,const ObjRef& focus,wchar_t* note,std::size_t noteSize) noexcept {
+    const mapcmd::Command& command,const ObjRef& focus,wchar_t* note,std::size_t noteSize,
+    const std::uint32_t* formationSlots,std::uint32_t formationTotal) noexcept {
     SupportNetTick();
     if(!commands.Ready()) {Note(note,noteSize,L"房主尚未启用联机 NPC 指挥，请确认版本并等待本关同步");return 0;}
     if(!units || !count || count>kCommandNetUnits) {Note(note,noteSize,L"请选择 1～16 个 NPC 小队，超出数量不会截断执行");return 0;}
     command_net::Request request;request.count=count;request.command=command;
+    if(formationSlots && formationTotal) {
+        request.formationTotal=formationTotal;std::memcpy(request.formationSlots,formationSlots,count*sizeof(std::uint32_t));
+    } else if(formationSlots || formationTotal) {Note(note,noteSize,L"守点阵形选择已失效，请重新选择");return 0;}
     if(!Id(requester,request.requester)) {Note(note,noteSize,L"当前玩家缺少有效的本关联机身份");return 0;}
     for(unsigned i=0;i<count;++i)if(!Id(units[i],request.units[i])) {
         Note(note,noteSize,L"所选单位已失效或没有联机身份，请重新选择");return 0;

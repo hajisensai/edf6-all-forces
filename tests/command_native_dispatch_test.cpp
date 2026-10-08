@@ -1,5 +1,7 @@
 // Real command bytes -> production RPC receiver -> native ID resolver -> actual
 // npcai.cpp ForRequester -> recording native follow/ride entry points. No game.
+#define NPC_CORE_EXTERNAL_COMMAND_NETWORK
+#define NPC_CORE_EXTERNAL_COMMAND_IDENTITY
 #define main ExistingNpcCoreChecks
 #include "../tools/npc_core_check.cpp"
 #undef main
@@ -14,6 +16,7 @@ const char authClient[65]="client-one",authHost[65]="host";
 unsigned char* actors[5]{};
 std::vector<command_net::Message> replies;
 unsigned executed=0;
+bool projectionOk=true;
 std::uint64_t wall=10000;
 constexpr unsigned kAllTeams=0x5E0C80,kTeamsGlobal=0x20B2978,kStatusGlobal=0x20B2890;
 const unsigned char enumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83};
@@ -45,7 +48,7 @@ NpcCommandResult Actual(const ObjRef& unit,const mapcmd::Command& command,const 
     ++executed;return NpcSquadCommandForRequester(unit,command,requester,target);
 }
 void Setup() {
-    Reset();ResetCommandNetwork();replies.clear();executed=0;wall+=1000;
+    Reset();ResetCommandNetwork();replies.clear();executed=0;projectionOk=true;wall+=1000;
     std::memset(ownerPlayer,0,sizeof(ownerPlayer));std::memset(enemy,0,sizeof(enemy));
     std::memset(users,0,sizeof(users));std::memset(userControls,0,sizeof(userControls));
     std::memset(controls,0,sizeof(controls));std::memset(netControls,0,sizeof(netControls));
@@ -78,6 +81,7 @@ command_net::Message Dispatch(const command_net::Message& request) {
 }
 namespace crew {
 void SupportNetTick() noexcept {}
+bool MapGroundNear(float,float,float,float* out,bool) noexcept { *out=0;return rpc_fixture::projectionOk; }
 bool SupportCommandRequesterMatches(void* puid,const char* sender) noexcept {
     return puid==rpc_fixture::users[1] && !std::strcmp(sender,rpc_fixture::authClient);
 }
@@ -105,6 +109,17 @@ int main() {
     for(int tick=0;tick<100 && At<float>(human,kMoveX)==0;++tick) {now+=16;++frame;world.frame=frame;Drive(*soldier,human,kSoldiers[0],arms,nullptr,eye,Pos(human),q,now);}
     Check(reply.results[0].reason==0 && q->cmd.order==Order::guard && At<float>(human,kMoveX)>0,
         "serialized guard reaches real NPC navigation and movement intent");
+    Setup();auto pair=Request(Order::guard);pair.request.count=2;std::memcpy(pair.request.units[1],ids[4],32);
+    pair.request.formationTotal=4;pair.request.formationSlots[0]=1;pair.request.formationSlots[1]=3;
+    reply=Dispatch(pair);float first[3],second[3];
+    mapcmd::Formation(1,4,pair.request.command.at,mapcmd::kFormationSpacing,first);
+    mapcmd::Formation(3,4,pair.request.command.at,mapcmd::kFormationSpacing,second);
+    Check(reply.results[0].reason==0 && reply.results[1].reason==0 &&
+        !std::memcmp(FindSquad(human)->cmd.at,first,12) && !std::memcmp(FindSquad(dead)->cmd.at,second,12) &&
+        std::memcmp(first,second,12),"two remote squads keep distinct verified guard slots from a mixed local/remote selection");
+    Setup();projectionOk=false;reply=Dispatch(Request(Order::guard));
+    Check(reply.results[0].reason==static_cast<unsigned>(NpcCommandReason::noTarget) && !executed,
+        "host rejects an unverified guard floor before mutating NPC orders");
     Setup();markEnemy=enemy;reply=Dispatch(Request(Order::focus));
     Check(reply.results[0].reason==0 && FindSquad(human)->commandFocus.Is(enemy) && !mark.obj,
         "focus RPC targets its explicit enemy without overwriting host global mark");

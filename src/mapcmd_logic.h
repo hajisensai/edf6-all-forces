@@ -16,6 +16,8 @@
 #include <cstdint>
 
 namespace mapcmd {
+inline constexpr float kFormationSpacing=30.0f;
+inline constexpr unsigned kMaxFormationUnits=96;
 // none: the unit does what it did before any command (a call's own guard point or escort, a crewed heli's follow...).
 // The squads' own (docs/npc-ai-design.md §6.2): engage (fight freely round where it stands, a wider reach), focus (every
 // member on the marked enemy), board / dismount (the nearest friendly vehicle with room), dismiss (no longer the

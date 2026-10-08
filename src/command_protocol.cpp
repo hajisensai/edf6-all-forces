@@ -11,7 +11,8 @@ bool Puid(const char* text) noexcept {
 }
 bool Same(const Request& a,const Request& b) noexcept {
     return a.count==b.count && a.command.order==b.command.order && !std::memcmp(a.command.at,b.command.at,12) &&
-        !std::memcmp(a.requester,b.requester,32) && !std::memcmp(a.focus,b.focus,32) && !std::memcmp(a.units,b.units,sizeof(a.units));
+        !std::memcmp(a.requester,b.requester,32) && !std::memcmp(a.focus,b.focus,32) && !std::memcmp(a.units,b.units,sizeof(a.units)) &&
+        a.formationTotal==b.formationTotal && !std::memcmp(a.formationSlots,b.formationSlots,sizeof(a.formationSlots));
 }
 bool Valid(const Message& m) noexcept {
     if(!m.epoch || m.kind<Kind::hello || m.kind>Kind::result || m.rpc>=Rpc::count)return false;
@@ -43,6 +44,14 @@ bool ValidRequest(const Request& r) noexcept {
         for(std::uint32_t j=0;j<i;++j)if(!std::memcmp(r.units[i],r.units[j],32))return false;
     }
     for(std::uint32_t i=r.count;i<kCommandNetUnits;++i)if(!Empty(r.units[i]))return false;
+    if(r.formationTotal) {
+        if(r.command.order!=mapcmd::Order::guard || r.formationTotal<r.count || r.formationTotal>mapcmd::kMaxFormationUnits)return false;
+        for(std::uint32_t i=0;i<r.count;++i) {
+            if(r.formationSlots[i]>=r.formationTotal)return false;
+            for(std::uint32_t j=0;j<i;++j)if(r.formationSlots[i]==r.formationSlots[j])return false;
+        }
+    }
+    for(std::uint32_t i=r.formationTotal ? r.count : 0;i<kCommandNetUnits;++i)if(r.formationSlots[i])return false;
     return true;
 }
 bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
@@ -53,6 +62,7 @@ bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     for(float f:m.request.command.at){std::uint32_t bits;std::memcpy(&bits,&f,4);U32(p,bits);}U32(p,0);
     std::memcpy(p,m.request.requester,32);p+=32;std::memcpy(p,m.request.focus,32);p+=32;
     std::memcpy(p,m.request.units,sizeof(m.request.units));p+=sizeof(m.request.units);
+    U32(p,m.request.formationTotal);for(auto slot:m.request.formationSlots)U32(p,slot);
     for(const auto& r:m.results){U32(p,r.reason);U32(p,r.affected);}return true;
 }
 bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
@@ -65,6 +75,7 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     for(float& f:m.request.command.at){const auto bits=U32(p);std::memcpy(&f,&bits,4);}if(U32(p))return false;
     std::memcpy(m.request.requester,p,32);p+=32;std::memcpy(m.request.focus,p,32);p+=32;
     std::memcpy(m.request.units,p,sizeof(m.request.units));p+=sizeof(m.request.units);
+    m.request.formationTotal=U32(p);for(auto& slot:m.request.formationSlots)slot=U32(p);
     for(auto& r:m.results){r.reason=U32(p);r.affected=U32(p);}if(!Valid(m))return false;out=m;return true;
 }
 bool Owned(const void* bytes,std::size_t size) noexcept {

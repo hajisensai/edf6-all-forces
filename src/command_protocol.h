@@ -2,14 +2,15 @@
 #include "command_net.h"
 #include <array>
 namespace crew::command_net {
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=1,kMaxPeers=1024;
-constexpr std::size_t kWireSize=760;
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=2,kMaxPeers=1024;
+constexpr std::size_t kWireSize=828;
 enum class Kind : std::uint32_t { hello=1,capability,request,result };
 enum class Rpc : std::uint32_t { none,notReady,unsupported,invalid,stale,rateLimited,timeout,interrupted,count };
 struct Request {
     std::uint32_t count=0;
     mapcmd::Command command{};
     unsigned char requester[32]{},focus[32]{},units[kCommandNetUnits][32]{};
+    std::uint32_t formationTotal=0,formationSlots[kCommandNetUnits]{};
 };
 struct Message {
     Kind kind=Kind::hello;

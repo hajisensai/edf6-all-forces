@@ -17,7 +17,8 @@ struct CommandNetworkResult {
 // Nonzero means queued, never that the native order executed. Read the correlated
 // result below. More than 16 units is rejected, never silently truncated.
 std::uint32_t SubmitMapCommand(const ObjRef& requester,const ObjRef* units,unsigned count,
-    const mapcmd::Command& command,const ObjRef& focus,wchar_t* note,std::size_t noteSize) noexcept;
+    const mapcmd::Command& command,const ObjRef& focus,wchar_t* note,std::size_t noteSize,
+    const std::uint32_t* formationSlots=nullptr,std::uint32_t formationTotal=0) noexcept;
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept;
 bool MapCommandNetworkReady() noexcept;
 

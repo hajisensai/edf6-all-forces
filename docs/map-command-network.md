@@ -3,7 +3,7 @@
 Map commands use the existing authenticated Coop extension transport and the
 single `support_net.cpp` poll. There is no second consumer, socket, player slot
 fabrication, or client-side write to host NPC state. Command messages have a
-separate `NCMD` magic, version 1, and explicit 760-byte little-endian encoding.
+separate `NCMD` magic, version 2, and explicit 828-byte little-endian encoding.
 They fit the existing 1024-byte extension ABI; Coop changes are not required.
 
 The command capability is negotiated with the host inside the already accepted
@@ -20,6 +20,12 @@ accepted on the wire. The existing native all-team walker resolves the live
 objects in one pass, including their current weak identities. Requester must be
 a genuine current-mission player. Its native User PUID must equal the transport's
 authenticated sender and appear in the sealed world participant set.
+
+Guard batches retain each unit's global formation slot and the complete eligible
+selection count, including locally executed units. The host validates distinct
+slots within the map's 96-unit capacity, uses the shared 30 m spacing and formation
+function, then verifies a nearby standable floor before dispatch. Remote squads
+therefore do not collapse onto one point or get a second client-side offset.
 
 Only the host invokes the configured `NpcSquadCommandForRequester` executor. It
 receives the actual requester ObjRef, not `PlayerHuman()` on the host. That
