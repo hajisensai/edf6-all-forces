@@ -3318,7 +3318,10 @@ void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* l
 void MapFitLabel(Text* text,Line& row,float left,float right) noexcept {
     if(!text || !(row.w>right-left))return;
     const float mid=row.y+row.h*0.5f;
-    row.scale*=std::fmax(0.01f,(right-left)/row.w);MeasureAll(*text,&row,1);
+    // Native fonts quantize pixel sizes; remeasure instead of assuming one proportional shrink fits.
+    for(int pass=0;pass<4 && row.w>right-left;++pass) {
+        row.scale*=std::fmax(0.01f,(right-left)/row.w)*0.96f;MeasureAll(*text,&row,1);
+    }
     row.x=std::fmax(left,std::fmin(row.x,right-row.w));row.y=mid-row.h*0.5f;
 }
 
@@ -3563,8 +3566,7 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     else Label(text,lines,at,width*0.5f,y,1,kLineScale*0.75f,kWhite,Tr(m.pad ? Tx::npcPadKeys : Tx::npcMouseKeys),sel);
     if(c.noteFresh)Label(text,lines,at,width*0.5f,height-124.0f*s,1,kLineScale*0.8f,kAmber,L"%ls",c.note);
     for(int i=footerFirst;i<*at;++i) {
-        Line& row=lines[i];const float centre=row.y+row.h*0.5f,most=width-32.0f*s;
-        if(text && row.w>most){row.scale*=most/row.w;MeasureAll(*text,&row,1);row.x=(width-row.w)*0.5f;row.y=centre-row.h*0.5f;}
+        Line& row=lines[i];MapFitLabel(text,row,16.0f*s,width-16.0f*s);row.x=(width-row.w)*0.5f;
     }
 }
 

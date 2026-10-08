@@ -54,6 +54,7 @@ bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
 ULONGLONG sceneTick=0;
 bool mapEasing=false;   // the map's camera easing back to the player: its view, no readout (map.cpp Camera)
 MapReadout sceneMap{};
+bool hasMapPayload=false;PayloadReadout sceneMapPayload{};
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
@@ -157,7 +158,7 @@ bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; 
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
-bool PlayerPayload(PayloadReadout* o) noexcept { if(hasHeli){*o=PayloadReadout{};o->choices=3;o->switchButton=0x10;o->keys=sceneHeli.f.keys;}return hasHeli; }
+bool PlayerPayload(PayloadReadout* o) noexcept { if(hasMapPayload){*o=sceneMapPayload;return true;}if(hasHeli){*o=PayloadReadout{};o->choices=3;o->switchButton=0x10;o->keys=sceneHeli.f.keys;}return hasHeli; }
 bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
@@ -345,7 +346,12 @@ void Dot(float x,float y,float z,std::uint8_t flags) {
 }
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
-void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920) {
+void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false) {
+    const float previousScale=config.hudScale;config.hudScale=uiScale;
+    hasMapPayload=payload;sceneMapPayload=PayloadReadout{};
+    if(payload){sceneMapPayload.count=kMostPayload;sceneMapPayload.selectionToken=111;sceneMapPayload.seat=1;
+        for(int i=0;i<kMostPayload;++i){auto& e=sceneMapPayload.entry[i];e.selectable=i>0 && i!=5;e.picked=i==2;e.rounds=12-i;e.capacity=12;
+            _snwprintf_s(e.name,_countof(e.name),_TRUNCATE,L"%ls %ls %ls %d",Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),i+1);}}
     sceneMap=MapReadout{};
     sceneMap.pad=pad;sceneMap.follow=true;
     sceneMap.yaw=yawDeg*kDeg;sceneMap.pitch=pitchDeg*kDeg;sceneMap.height=height;
@@ -413,6 +419,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     row("RANGER",6,"SCRIPT",Order::none,true,false);
     row("AIR RAIDER",3,"WAIT 42s",Order::guard,false,false);
     sceneCmd.squad[sceneCmd.squads-1].cooldown=42;
+    if(payload){wcscpy_s(sceneCmd.supportName,L"SUPPORT AIRCRAFT LONG DISPLAY NAME");
+        wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");}
     if(squadCount==9) {
         row("WING DIVER",12,"RECRUITED",Order::focus,false,false);
         row("AIR RAIDER",8,"ESCORT",Order::board,true,false);
@@ -472,8 +480,19 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
         Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));shown(expected.text);
     }
+    if(sceneSquadButtonCount!=(pad ? 0 : (sceneCmd.squads<9 ? sceneCmd.squads : 9))) {++textFailed;std::puts("FAIL map squad clickable rows");}
+    if(scenePayloadButtonCount!=(payload && !pad ? 6 : 0)){++textFailed;std::puts("FAIL map payload clickable rows");}
+    for(std::size_t i=0;i<drew.size();++i) {
+        const auto& a=drew[i];if(a.text.empty())continue;bool panelText=false;
+        for(int q=0;q<sceneUiCount;++q){const auto* r=sceneUiPanels[q];
+            panelText=panelText || (a.x0<r[2] && a.x1>r[0] && a.y0<r[3] && a.y1>r[1]);}
+        if(!panelText)continue;
+        for(std::size_t j=0;j<i;++j){const auto& b=drew[j];if(b.text.empty())continue;
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1){++textFailed;
+                std::printf("FAIL map UI overlay: %s / %s\n",Narrow(a.text).c_str(),Narrow(b.text).c_str());}}
+    }
     std::fclose(out);out=nullptr;
-    hasMap=false;
+    hasMap=false;hasMapPayload=false;config.hudScale=previousScale;
     std::printf("%ls\n",path.c_str());
 }
 void Symbols(PlayerJetSymbols& y,const float* pos,float pitchDeg,float pathDeg) {
@@ -1381,6 +1400,9 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_nine_squads",700.0f,60.0f,20.0f,false,9);
     MapScene(dir,L"map_nine_squads_narrow",700.0f,60.0f,20.0f,false,9,1280);
     MapScene(dir,L"map_nine_squads_pad",700.0f,60.0f,20.0f,true,9);
+    MapScene(dir,L"map_clickable_payload",700.0f,60.0f,20.0f,false,9,1920,1.0f,true);
+    MapScene(dir,L"map_clickable_payload_narrow",700.0f,60.0f,20.0f,false,9,960,1.75f,true);
+    MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
     hasStock=false;

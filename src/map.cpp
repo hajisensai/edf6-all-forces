@@ -635,6 +635,7 @@ bool Frame(unsigned char* human) noexcept {
     MapCmdInput in{front,pad,game.pad,false,pad ? padState.Gamepad.wButtons : static_cast<WORD>(0),0.0f,0.0f,{},{}};
     in.mouse=front && MouseDelta(human,&in.dx,&in.dy);
     std::memcpy(in.eye,eye,12);std::memcpy(in.look,look,12);
+    (void)MapCommandEats(front); // latch the mark-key press before MapCommandFrame consumes its edge
     if(MapCommandFrame(in,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
     game.pad=in.usingPad;
     // Pointer capture must be established before this frame's camera drag, including the first press.
