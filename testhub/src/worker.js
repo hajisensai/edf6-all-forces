@@ -26,13 +26,15 @@ export default {
   },
 };
 
-// Every response: no framing, no sniffing, no referrer, and for pages only the site's own script and style (no
+// Every response: no framing, no sniffing, no referrer leaving the site, and for pages only the site's own script and style (no
 // inline script at all, so text a player wrote can never run even if some page forgot to treat it as text).
 const SECURITY = {
   'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; "
     + "form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
+  // same-origin, not no-referrer: under no-referrer the browser sends `Origin: null` with its own form posts (the
+  // login), which the cross-site check below would refuse.
+  'referrer-policy': 'same-origin',
   'x-frame-options': 'DENY',
 };
 

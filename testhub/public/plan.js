@@ -77,13 +77,11 @@ function rowsHtml() {
   const out = [];
   if (pending) out.push(slot(null));
   let seq = 0;
-  let loops = 0;
   for (const r of state.outline) {
     let el;
     if (r.kind === 'loop') {
-      loops += 1;
       el = h('li', { class: 'loop' },
-        h('span', {}, `—— 第 ${loops} 条分隔：`, r.note, ' ——'),
+        h('span', {}, '—— ', r.note, ' ——'),
         h('span', { class: 'acts' },
           button('改说明', () => {
             const note = prompt('分隔线的说明', r.note);
