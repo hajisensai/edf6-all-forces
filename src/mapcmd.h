@@ -46,7 +46,9 @@ bool SquadCommand(const void* leader,const Command& c) noexcept;
 int TankCommandUnits(CommandUnit* out,int most) noexcept;
 bool TankCommand(const void* v,const Command& c) noexcept;
 // The panel's row of a squad (hud.cpp MapCommands): its members alive, the seconds left of its dismissal's cooldown.
-struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked; };
+struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
+    ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
+};
 int SquadRows(SquadRow* out,int most) noexcept;
 bool HeliSharesPost() noexcept;   // heli.cpp: guard helis on one post share its orbit (HeliGuardRadius > 0)
 
@@ -68,6 +70,14 @@ void ResetMapCommands() noexcept;   // map.cpp ResetMap: a new mission (the sele
 void MapCommandView(const float* viewProj,float width,float height) noexcept;
 // hud.cpp: the command buttons as drawn this frame (map_buttons.h; `id` each one's mapbtn::Id), for the clicks.
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
+// Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
+// Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
+void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
+void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept; // up to 16
+void MapCommandUiPanels(const float* rects,int n) noexcept; // up to 16 complete background rectangles
+// Game thread, after MapCommandFrame and before map camera steering. A press begun on UI stays
+// captured until its own release, even outside that panel (left, Ctrl-left, and right mouse).
+bool MapCommandPointerCaptured() noexcept;
 // The left drag is the box's, not the map's pan (Ctrl held when it began): map.cpp Steer leaves the ground alone.
 bool MapCommandBoxing() noexcept;
 // map.cpp Close: discard hover, pending presses and the rendered view immediately, preserving selected units.
@@ -89,7 +99,7 @@ constexpr int kCmdUnits=96;
 constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; };
 struct MapCommandReadout {
-    bool allowed;              // commands work (offline: InSession false)
+    bool allowed;              // command framework enabled; each target still validates authority and execution
     bool all;                  // every unit selected (more than one)
     int selected;              // how many are
     bool pointOk;
