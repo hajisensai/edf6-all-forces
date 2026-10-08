@@ -59,7 +59,6 @@ SIDEBOARD_INNER_X, SIDEBOARD_BOTTOM_Y, SIDEBOARD_FRONT_Z = 1.23, 1.62, 1.05
 # lower skin wrapping the floor's edge (1.57 m) up to 2.18 m, hinges at x +-1.4. Bumper and lights sit below 1.5 m.
 TAILGATE_INNER_Z, TAILGATE_BOTTOM_Y = -3.85, 1.50
 CAB_CLEARANCE = 0.15            # m between the rack's front (0 elevation) and the cab / headboard
-RAIL_CLEARANCE = 0.03           # m between the rack main box's underside and the bed side rails' top
 # donor tire bone -> host wheel bone (A front .. F rear; _l = +x on both models)
 WHEEL_MAP = {'tireF_l': 'tire_moveA_l', 'tireF_r': 'tire_moveA_r',
              'tireB0_l': 'tire_moveC_l', 'tireB0_r': 'tire_moveC_r',
@@ -143,6 +142,47 @@ def tailgate_triangle(points: list[Vec3]) -> bool:
 def bed_rail_triangle(points: list[Vec3]) -> bool:
     """The bed's rails all round its open sides: the two sideboards and the tailgate."""
     return sideboard_triangle(points) or tailgate_triangle(points)
+
+
+def mount_contacts(md: Mdb) -> list[tuple[Vec3, float]]:
+    """Each turntable foot vertex and the actual truck surface immediately below it.
+
+    A median of the truck vertices includes the underside of its bed; the removed
+    sideboards are higher still. Neither is the mounting surface. Intersect the
+    retained body's triangles vertically at the base's lowest vertices instead.
+    """
+    body, base = md.bone_index('body'), md.bone_index('Rocketcannon_base')
+    base_points = g.skinned_points(md)[base]
+    bottom = min(p[1] for p in base_points)
+    feet = sorted({p for p in base_points if p[1] < bottom + 0.002})
+    surfaces = []
+    for me in md.objects[0].meshes:
+        points, (bi, _bw) = g.mesh_positions(me), g.skin_columns(me)
+        surfaces.extend(tuple(points[v] for v in tri) for tri in g.triangles(me)
+                        if all(int(bi[v][0]) == body for v in tri))
+    contacts = []
+    for p in feet:
+        x, _y, z = p
+        hits = []
+        for a, b, c in surfaces:
+            d = (b[2] - c[2]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[2] - c[2])
+            if abs(d) < 1e-8:
+                continue
+            u = ((b[2] - c[2]) * (x - c[0]) + (c[0] - b[0]) * (z - c[2])) / d
+            v = ((c[2] - a[2]) * (x - c[0]) + (a[0] - c[0]) * (z - c[2])) / d
+            if min(u, v, 1 - u - v) >= -1e-6:
+                hits.append(u * a[1] + v * b[1] + (1 - u - v) * c[1])
+        _req(bool(hits), f'turntable foot {p} has no truck surface below it')
+        contacts.append((p, max(hits)))
+    _req(len(contacts) >= 4, 'turntable has fewer than four mount contacts')
+    return contacts
+
+
+def check_mount(md: Mdb) -> None:
+    """The decoded mesh's feet touch its retained deck (half-float tolerance)."""
+    gaps = [p[1] - y for p, y in mount_contacts(md)]
+    _req(max(abs(gap) for gap in gaps) <= 0.003,
+         f'turntable is not seated on the truck: gaps {min(gaps):.4f}..{max(gaps):.4f} m')
 
 
 TAILGATE_CAP_SPLIT_Y = 1.60     # donor y between the bed floor's underside (1.57) and its top (1.64)
@@ -819,10 +859,10 @@ def check_launcher(md: Mdb, muzzles: list[tuple[str, Vec3]] | None = None, tol: 
 def launcher_clearance(md: Mdb, stop_deg: float = PITCH_STOP_DEG, step: int = 5) -> list[tuple[int, float]]:
     """Per elevation 0..stop_deg (every `step` deg): how far the raised launcher's lowest point is over the truck's bed
     floor (m); its rockets both on their stops and slid LOAD back to the breech, as they are loaded (src/katyusha.cpp)."""
-    main, body = md.bone_index('Rocketcannon_main'), md.bone_index('body')
+    main = md.bone_index('Rocketcannon_main')
     w = bind_world(md)
     M: Vec3 = (w[main][12], w[main][13], w[main][14])
-    floor = truck_geometry(md, 0, body)['bed_floor_y']
+    floor = max(y for _p, y in mount_contacts(md))
     on = g.skinned_points(md)
     rockets = [p for n in ROCKET_BONES for p in on.get(md.bone_index(n), [])]
     pts = on[main] + rockets + [(p[0], p[1], p[2] - LOAD) for p in rockets]
@@ -888,18 +928,24 @@ def build_model(game) -> tuple[Mdb, Mdb, object, object, dict]:  # noqa: ANN001 
     # 4b. lossless clean-up: the triangles that cover nothing (before anything is measured or picked off the truck)
     md, info['zero_area_triangles'] = drop_zero_area(md)
 
-    # 5. rack onto the bed: front (0 elevation) CAB_CLEARANCE behind the cab, main box underside above the rails
-    tg = truck_geometry(md, 0, hull_root)
-    # Measure first so removing a visual panel cannot lower the rig or change its poses.
+    # 5. rack onto the retained bed, with its front behind the cab. The old
+    # sideboard-height clearance left the entire turntable floating after the
+    # sideboards were removed. Seat its feet on actual retained deck triangles.
     md, info['bed_rail_faces_removed'], info['tailgate_cap_faces'] = remove_bed_rails(md, hull_root, offset)
+    tg = truck_geometry(md, 0, hull_root)
     w = bind_world(md)
     base_o = w[hb['Rocketcannon_base']][12:15]
     ahead = max(p[2] for p in object_positions(md, 1)) - base_o[2]
-    main_under = min(p[1] for p in g.skinned_points(md)[hb['Rocketcannon_main']]) - base_o[1]
-    new_base = (0.0, max(tg['bed_floor_y'], tg['rail_top_y'] + RAIL_CLEARANCE - main_under),
+    new_base = (0.0, base_o[1],
                 tg['cab_z'] - CAB_CLEARANCE - ahead)
     delta: Vec3 = (new_base[0] - base_o[0], new_base[1] - base_o[1], new_base[2] - base_o[2])
     md = g.move_bones(md, rack, delta)
+    contacts = mount_contacts(md)
+    gaps = [p[1] - y for p, y in contacts]
+    _req(max(gaps) - min(gaps) < 0.003, 'truck deck is not planar under the turntable')
+    lowering = sum(gaps) / len(gaps)
+    md = g.move_bones(md, rack, (0.0, -lowering, 0.0))
+    delta = (delta[0], delta[1] - lowering, delta[2])
     info['truck'] = tg
     info['rack_delta'] = delta
 
@@ -1076,6 +1122,7 @@ def check(arc: bytes) -> None:
     _req(len(deltas) == len(RACK), 'rack bones missing')
     _req(all(max(abs(d[c] - deltas[0][c]) for c in range(3)) < 1e-4 for d in deltas), 'rack bones moved apart')
     check_ram(md)
+    check_mount(md)
     check_launcher(md)
     low = min(launcher_clearance(md), key=lambda r: r[1])
     _req(low[1] >= BED_CLEARANCE, f'the launcher raised {low[0]} deg is {low[1]:.3f} m over the bed (< {BED_CLEARANCE})')
