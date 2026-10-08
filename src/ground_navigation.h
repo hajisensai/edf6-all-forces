@@ -8,7 +8,12 @@ namespace npc::navigation {
 struct Point { float x{},y{},z{}; };
 inline float Horizontal(Point a,Point b) noexcept {return std::hypot(a.x-b.x,a.z-b.z);}
 inline bool Finite(Point p) noexcept {return std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z);}
-struct Profile { float radius=0.65f,height=1.8f,step=0.55f,cell=2.0f; };
+constexpr float kWaypointReach=0.45f;
+struct Profile {
+    float radius=0.65f,height=1.8f,step=0.55f,cell=2.0f;
+    float maxWaterDepth=0.35f; // conservative wading allowance, not swimming/amphibious navigation
+    float waypointRadius=kWaypointReach; // intermediate corners; final arrival still uses the caller's stop
+};
 enum class Edge { blocked,open,pending };
 enum class Result { pending,moving,arrived,blocked };
 constexpr int kNodes=1536,kPath=512;
@@ -43,10 +48,15 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
     next=from;
     if(!Finite(from)||!Finite(goal)||!std::isfinite(stop)||!(p.cell>0.0f && p.cell<=8.0f)||
        !(p.step>0.0f && p.step<=1.0f)||!(p.radius>0.0f && p.radius<=10.0f)||
-       !(p.height>p.step && p.height<=20.0f))return Result::blocked;
-    if(Horizontal(from,goal)<=stop && std::fabs(from.y-goal.y)<=p.step)return Result::arrived;
+       !(p.height>p.step && p.height<=20.0f)||!(p.maxWaterDepth>=0.0f && p.maxWaterDepth<=2.0f)||
+       !(p.waypointRadius>0.0f && p.waypointRadius<=p.cell))return Result::blocked;
+    if(Horizontal(from,goal)<=stop && std::fabs(from.y-goal.y)<=p.step) {
+        Point supported{};const Edge e=edge(from,from,supported);
+        return e==Edge::open ? Result::arrived : e==Edge::pending ? Result::pending : Result::blocked;
+    }
     const bool changed=!s.initialized||Horizontal(goal,s.goal)>p.cell*8.0f||std::fabs(goal.y-s.goal.y)>p.step||
         p.radius!=s.profile.radius||p.height!=s.profile.height||p.step!=s.profile.step||p.cell!=s.profile.cell||
+        p.maxWaterDepth!=s.profile.maxWaterDepth||p.waypointRadius!=s.profile.waypointRadius||
         ms<s.lastAt||ms-s.lastAt>2000;
     if(changed)Begin(s,from,goal,p,ms);
     s.lastAt=ms;
@@ -54,7 +64,7 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
     if(Horizontal(from,s.progress)>0.3f) {s.progress=from;s.progressAt=ms;}
     else if(s.length && ms-s.progressAt>=1500)Begin(s,from,goal,p,ms);
     if(s.length) {
-        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length ? stop : 0.45f) &&
+        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length ? stop : p.waypointRadius) &&
               std::fabs(from.y-s.path[s.cursor].y)<=p.step){++s.cursor;s.checked=false;}
         if(s.cursor==s.length){Begin(s,from,goal,p,ms);}
         else {

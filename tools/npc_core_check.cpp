@@ -140,6 +140,7 @@ bool VisitEnemiesOf(std::int32_t,EnemyVisitor visit,void* ctx) noexcept {
     if(markEnemy){const float at[3]={0,0,20};visit(ctx,markEnemy,at);}return true;
 }
 float MapFloorRay(const float*,const float*,float* at) noexcept { at[0]=at[1]=0;at[2]=30;return rayOn ? 30.0f : -1.0f; }
+Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
 const void* lockOf=nullptr;float lockAt[3]{};

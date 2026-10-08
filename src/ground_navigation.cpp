@@ -24,19 +24,29 @@ npc::navigation::Result GroundNavigate(npc::navigation::State& state,const float
         const float distance=Horizontal(a,b);
         if(distance>profile.cell*3.0f)return Edge::blocked;
         const int steps=(std::max)(1,static_cast<int>(std::ceil(distance/0.5f)));
-        const int worst=steps*16;
+        const int worst=steps*20; // 16 floor/clearance queries plus four water queries
         if(queries+worst>4096){if(!nextStart)nextStart=&state;return Edge::pending;}
         queries+=worst;
-        auto ground=[](Point at,float step,float& y) noexcept {
+        bool waterUnknown=false;
+        auto ground=[&](Point at,float step,float& y) noexcept {
             const float top[3]={at.x,at.y+step,at.z},bottom[3]={at.x,at.y-step,at.z};float hit[3];
             if(MapFloorRay(top,bottom,hit)<0.0f || !std::isfinite(hit[1]))return false;
+            float surface=0.0f;
+            const Sea sea=SeaAt(at.x,at.z,&surface);
+            // A valid empty water-area list yields land, including dry caves.
+            // unknown means the native probe is unavailable, not "underground".
+            if(sea==Sea::unknown || (sea==Sea::water && !std::isfinite(surface))) {
+                waterUnknown=true;return false;
+            }
+            if(sea==Sea::water && surface-hit[1]>profile.maxWaterDepth)return false;
             y=hit[1];return true;
         };
         auto clear=[](Point a0,Point b0) noexcept {
             const float a1[3]={a0.x,a0.y,a0.z},b1[3]={b0.x,b0.y,b0.z};float hit[3];
             return MapRay(a1,b1,hit)<0.0f;
         };
-        return WalkEdge(a,b,out,profile,ground,clear) ? Edge::open : Edge::blocked;
+        const bool walkable=WalkEdge(a,b,out,profile,ground,clear);
+        return walkable ? Edge::open : waterUnknown ? Edge::pending : Edge::blocked;
     };
     Point next{};
     const Result result=Navigate(state,{from[0],from[1],from[2]},{to[0],to[1],to[2]},stop,ms,next,edge,profile);
