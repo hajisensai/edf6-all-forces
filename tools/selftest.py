@@ -2182,6 +2182,7 @@ def hud_scale_one_source() -> None:
     draw = hud.split('void HudDraw(', 1)[1].split('\n}', 1)[0]
     assert 's=HudScaleOf(w,h)' in draw and 'text.s=s' in draw
     assert 'hudscale::Of(uiW,uiH,w,h,Cfg().hudScale)' in hud
+    assert 's=hudscale::FitMap(s,width,height);' in hud and 'if(text)text->s=s;' in hud, 'map panel fitting must share geometry and font scale'
     for fn in ('void Measure(Text& t,Line& l)', 'void Draw(Text& t,const Line& l)'):
         assert 'Font(t,hudscale::Font(l.scale,t.s))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
     assert 'for(const auto& u:kUiSigs)' in hud and '0x94E24F' in hud
@@ -2619,7 +2620,9 @@ def stock_vehicle_hud_wired() -> None:
     assert 'PlayerStockOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the stock HUD hides the player\'s line'
     hud = src('src/hud.cpp')
     assert 'PlayerStockHud(&s.stockHud)' in hud.split('void HudPublish(', 1)[1].split('\n}\n', 1)[0]
-    assert 'StockVehicleHud(drawer' in hud.split('void HudDraw(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StockDockHud(drawer' in hud.split('void HudDraw(', 1)[1].split('\n}\n', 1)[0]
+    dock = hud.split('void StockDockHud(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StockVehicleHud(drawer' in dock and 'LoadoutDockOf(' in dock and 'LoadoutStrip(' in dock
     sight = src('src/helisight.cpp').split('bool SolveArm(', 1)[1].split('\n}\n', 1)[0]
     assert 'RoundLands(' in sight and 'kRocketStep' not in sight, 'src/helisight.cpp: the rockets flown as the game flies them'
     rounds, doc = src('src/rounds.cpp'), src('docs/hud-re.md')

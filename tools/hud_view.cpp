@@ -932,6 +932,12 @@ int ScaleOfChecks() {
         failed+=!ok;
         std::printf("%s  scale %-46s %.4f (want %.4f)\n",ok ? "ok  " : "FAIL",c.what,got,c.want);
     }
+    const float maps[][4]={{1.5f,1920,1080,1},{2,1920,540,0.5f},{3,640,1080,2.0f/3.0f},{0.5f,1920,1080,0.5f},{3,3840,2160,2}};
+    for(const auto& m:maps) {
+        const float got=hudscale::FitMap(m[0],m[1],m[2]);
+        if(std::fabs(got-m[3])>0.001f){++failed;std::printf("FAIL fitted map scale %.3f expected %.3f\n",got,m[3]);}
+    }
+
     return failed;
 }
 

@@ -35,6 +35,8 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。可信度：H = 反汇�
 各模块只写设计值。宽屏（如 21:9）原版文字横向被拉宽（x、y 两个缩放不同），插件保持等比、按高度缩放（圆和字不变形）。
 `InstallHud` 核对 `0x94E24F` 与 `0x8044B1` 的读取序列，对不上时 `screen=0`，退回视口高。
 
+2026-10-08 后续反馈：交互地图通过 `hudscale::FitMap` 限制面板最大占用，以保证大 HUD 比例和分屏下小队、图例、挂载、命令均留在当前视口内；输入仍来自上述统一比例，只做上限收缩，字体和图形使用同一结果。常态载具挂载、状态和提示采用共享区域预算，详见 `reviews/2026-10-08-loadout-layout.md`。
+
 ## 1. 四边形 `0xC2FB0`（血条的底框和填充都用它）
 
 `0xC2FB0(drawer = *(EDF+0x2139A78), ctx, const float m[16], const float rgba[4], int topology = 5, const float* xyz, int count = 4, void* tex = 0)`

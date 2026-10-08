@@ -3734,7 +3734,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);
         MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandUiPanels(nullptr,0);return false;
     }
-    s=std::fmin(s,std::fmin(width/960.0f,height/1080.0f));
+    s=hudscale::FitMap(s,width,height);
     if(text)text->s=s;
     mapUiPanelCount=0;
     MapGrid(drawer,ctx,text,vp,width,height,s,m,lines,at);
