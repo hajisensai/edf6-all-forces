@@ -25,6 +25,13 @@ IDs. Host-only AI, steering, native seating and damage authority remain the nati
 adapter's responsibility. The plan's `role` names the parent vehicle unit by index
 plus one; it never carries a pointer or resource path.
 
+Native side effects remain held until `SupportTransactionActive(token)` is true.
+The host sets this only after every peer's successful spawn/register result; it
+then sends a separate reliable activate message, retried until acknowledged.
+Clients become active only on that authenticated message, never merely because
+their own creation succeeded. This closes the cross-channel race where native
+ride/follow events arrived before another peer knew their object IDs.
+
 Any validation, send, create or later deployment failure cancels the entire
 transaction. `ReportSupportFailure` also covers a real crew's boarding/ingress
 failure after creation. Cancellation retries until all peers acknowledge; a
@@ -35,15 +42,27 @@ rollback and must not delete a newly allocated object at an old address.
 
 Mission challenges are process-random and echoed by the authenticated host.
 Monotonic per-process mission/host-era counters reject older handshakes. A change
-in the transport generation, readiness, mission, host or roster destroys the
-previous support ledger. The host changes the shared epoch when a member enters a
-new mission; periodic challenge handshakes recover a temporarily failed welcome
+in transport generation/readiness suspends new work and retains already created
+actors and their ledger. It must not delete an occupied or delivered vehicle.
+Only an explicit mission reset owns whole-ledger teardown. A changed peer mission
+challenge also suspends an established actor set instead of silently replacing
+it. Periodic challenge handshakes recover a temporarily failed welcome
 enqueue. Old-epoch packets and committed/cancelled replays cannot recreate units.
 Host terrain planning has a 120-second deadline; network prepare/commit phases
 time out after 20 seconds. IDs use the native derivation with
 monotonic ordinals in `[0x40000000,0x80000000)`; ordinals are never reset across
 mission/roster changes and fail closed at exhaustion. Native hash space remains
 the game's own finite identity space, not a mathematical collision guarantee.
+Callback tokens are separate process-monotonic 64-bit identities and never reset
+with the wire epoch; a late failure callback cannot cancel a new transaction that
+reuses wire slot 1. Both dispatchers retain tokens as keys, not array indexes.
+
+The current transport supplies an EOS room roster rather than a proven frozen
+current-mission participant set. Consequently a roster/readiness change suspends
+further calls until explicit mission reset. Existing actors are retained, but this
+is not late-join actor/seat catchup and must not be presented as such. Determining
+which lobby members actually participate in the current mission remains necessary
+before ordinary lobby churn can safely reopen the support protocol.
 
 The host-internal `SubmitPreparedSupportPlan` handles existing mission vehicles
 through the same protocol. It accepts reserved catalog 1023 and exactly one

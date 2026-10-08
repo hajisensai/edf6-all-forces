@@ -4,7 +4,7 @@
 
 namespace crew::support_net {
 constexpr std::uint32_t kMagic=0x54525053,kVersion=1;
-enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel };
+enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated };
 struct Message {
     Kind kind=Kind::hello;
     std::uint64_t epoch=0,challenge=0;
@@ -29,11 +29,14 @@ public:
     void Configure(const Backend& backend) noexcept { backend_=backend; }
     void Start(bool host,std::uint32_t peers,std::uint32_t hostPeer,std::uint64_t now) noexcept;
     void Stop() noexcept;
+    void Suspend() noexcept;
+    bool Suspended() const noexcept { return suspended_; }
     bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now) noexcept;
-    std::uint32_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
+    std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
     void Receive(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Tick(std::uint64_t now) noexcept;
-    void Failed(std::uint32_t transaction) noexcept;
+    void Failed(std::uint64_t token) noexcept;
+    bool IsActive(std::uint64_t token) const noexcept;
     bool Ready() const noexcept;
     std::uint64_t Epoch() const noexcept { return epoch_; }
     std::uint32_t ActiveCount() const noexcept;
@@ -43,13 +46,16 @@ private:
         Phase phase=Phase::empty;
         bool external=false;
         bool cancelConfirmed=false;
+        bool spawned=false;
+        std::uint64_t token=0;
         Plan plan{};
         std::uint32_t requester=0,request=0,received=0;
         std::uint64_t since=0;
-        std::array<unsigned char,kMaxPeers+1> ready{},result{};
+        std::array<unsigned char,kMaxPeers+1> ready{},result{},activated{};
     };
     Backend backend_{};
-    bool running_=false,host_=false;
+    bool running_=false,host_=false,suspended_=false;
+    std::uint64_t nextToken_=0;
     std::uint32_t peers_=0,hostPeer_=0,nextTransaction_=0,nextRequest_=0;
     std::uint32_t epochSerial_=0,seenEpochSerial_=0;
     std::uint32_t missionSerial_=0;
@@ -65,6 +71,7 @@ private:
     bool Broadcast(Message message) noexcept;
     void Cancel(std::uint32_t id,bool broadcast) noexcept;
     void ClearTransactions() noexcept;
+    bool HasSpawned() const noexcept;
     void Welcome(std::uint32_t peer) noexcept;
     void HostRequest(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Advance(std::uint32_t id,std::uint64_t now) noexcept;

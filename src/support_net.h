@@ -20,6 +20,8 @@ enum class PlanResult { pending,ready,refused };
 struct Hooks {
     PlanResult (*plan)(std::uint32_t,const float*,Plan*) noexcept=nullptr;
     bool (*validate)(const Plan&) noexcept=nullptr;
+    // Tokens are process-monotonic and local, not wire indexes. Retain them
+    // verbatim; never use a token as a bounded array index.
     bool (*spawn)(std::uint64_t,const Plan&,bool remote) noexcept=nullptr;
     void (*destroy)(std::uint64_t) noexcept=nullptr;
     bool (*deriveId)(std::uint32_t,unsigned char*) noexcept=nullptr;
@@ -32,6 +34,7 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
 void SupportNetTick() noexcept;
 void ResetSupportNet() noexcept;
 void ReportSupportFailure(std::uint64_t transaction) noexcept;
+bool SupportTransactionActive(std::uint64_t transaction) noexcept;
 // Host-internal mission vehicle migration. Existing-vehicle units carry their
 // canonical registered ID and are resolved, never created or destroyed.
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept;

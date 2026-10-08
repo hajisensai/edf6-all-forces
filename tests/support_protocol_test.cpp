@@ -147,16 +147,37 @@ void Epoch() {
     Room r(3);r.Submit();r.Settle();
     const auto commit=Find(r,Kind::commit,1),hello=Find(r,Kind::hello,0),welcome=Find(r,Kind::welcome,1);
     const auto oldEpoch=r.nodes[0]->session->Epoch();
-    r.With(1);r.nodes[1]->session->Start(false,2,1,r.now);r.Settle();
-    Check(r.nodes[0]->session->Epoch()!=oldEpoch,"client mission change rotates host epoch");
-    for(const auto& n:r.nodes)Check(!n->active[1],"epoch rotation destroys previous support");
+    for(unsigned i=0;i<3;++i) {
+        r.With(i);r.nodes[i]->session->Stop();
+        r.nodes[i]->session->Start(i==0,2,i==0 ? 0 : r.Peer(i,0),r.now);
+    }
+    r.Settle();
+    Check(r.nodes[0]->session->Epoch()!=oldEpoch,"explicit mission reset rotates host epoch");
+    for(const auto& n:r.nodes)Check(!n->active[1],"explicit mission reset releases previous support");
     const auto epoch=r.nodes[0]->session->Epoch();r.Deliver(hello);r.Deliver(welcome);r.Deliver(commit);r.Settle();
     Check(r.nodes[0]->session->Epoch()==epoch && r.nodes[1]->session->Epoch()==epoch,"stale hello/welcome cannot roll back epoch");
     Check(r.nodes[1]->spawns==1,"previous level commit never respawns");
     r.Step(2500);Check(r.Submit(),"new epoch accepts request");r.Settle();
+    r.With(0);r.nodes[0]->session->Failed(1);r.Settle();
+    Check(r.nodes[0]->active[2] && r.nodes[0]->session->IsActive(2),"old asynchronous failure token cannot cancel a new mission transaction");
     const auto& previous=commit.message;static_cast<void>(previous);
     Check(r.nodes[0]->last.units[0].netId[4]==16,"native ordinals not reused after epoch reset");
-    for(unsigned i=0;i<3;++i){r.With(i);r.nodes[i]->session->Stop();Check(!r.nodes[i]->active[1],"disconnect removes support owned by ended session");}
+    for(unsigned i=0;i<3;++i){r.With(i);r.nodes[i]->session->Stop();Check(!r.nodes[i]->active[2],"explicit mission teardown removes support");}
+}
+void ActivationAndTransport() {
+    Room r(3);r.dropTo=0;r.dropKind=Kind::result;r.Submit();r.Settle();
+    for(const auto& n:r.nodes)Check(n->spawns==1 && !n->session->IsActive(1),"native seating gate stays closed before all spawn results");
+    r.dropTo=999;
+    for(const auto& p:r.history)if(p.message.kind==Kind::result && p.message.ok)r.Deliver(p);
+    r.failTo=2;r.failKind=Kind::activate;r.Settle();
+    Check(r.nodes[0]->session->IsActive(1) && r.nodes[1]->session->IsActive(1) && !r.nodes[2]->session->IsActive(1),
+        "only host all-peer finalize activates a client");
+    r.failTo=999;r.Step(1100);r.Settle();Check(r.nodes[2]->session->IsActive(1),"failed finalize enqueue is retried until acknowledgement");
+    r.With(0);r.nodes[0]->session->Start(true,3,0,r.now);
+    Check(r.nodes[0]->active[1] && r.nodes[0]->session->IsActive(1) && !r.nodes[0]->session->Ready(),
+        "roster rebind preserves active actor and blocks requests instead of clearing ledger");
+    r.nodes[0]->session->Failed(1);Check(r.nodes[0]->active[1],"transport suspension cannot perform unilateral actor rollback");
+    r.With(1);r.nodes[1]->session->Suspend();Check(r.nodes[1]->active[1],"quiet link or lobby churn preserves delivered actors");
 }
 void Existing() {
     Room r(3);Plan p;p.catalogId=kMissionCrewCatalog;p.count=2;
@@ -173,4 +194,4 @@ void Existing() {
     r.With(0);Check(!r.nodes[0]->session->SubmitPrepared(p,r.now),"same registered vehicle cannot receive duplicate crew transaction");
 }
 }
-int main() { Codec();Success();Failure();Epoch();Existing();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { Codec();Success();Failure();Epoch();Existing();ActivationAndTransport();std::printf("support protocol: %d checks passed\n",checks); }

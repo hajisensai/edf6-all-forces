@@ -15,7 +15,7 @@ EDF6CoopExtensionApi api{};
 EDF6CoopSnapshot snapshot{};
 EDF6CoopPeer peers[support_net::kMaxPeers+1]{};
 HMODULE module=nullptr;
-bool running=false;
+bool running=false,blockedUntilMission=false;
 ULONGLONG nextResolve=0,lastTick=~0ULL;
 
 std::uint64_t Nonce(void*) noexcept {
@@ -45,7 +45,7 @@ bool Resolve(ULONGLONG now) noexcept {
     module=current;return true;
 }
 bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
-    session.Stop();running=false;
+    running=false;
     if(!PeerValid(next.local) || !PeerValid(next.host) || next.peerCount>support_net::kMaxPeers ||
        !next.generation || next.isHost>1 || (next.isHost!=0)!=OnlineHostOnly())return false;
     peers[0]=next.local;
@@ -69,15 +69,21 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     session.Configure({nullptr,&Send,&Nonce,hooks});
 }
 void ResetSupportNet() noexcept {
-    session.Stop();running=false;snapshot={};lastTick=~0ULL;
+    session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;
+}
+void SuspendSupportNet() noexcept {
+    session.Suspend();running=false;blockedUntilMission=true;
+    Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
 void SupportNetTick() noexcept {
     const ULONGLONG now=GetTickCount64();
     if(lastTick==now)return;lastTick=now;
-    if(!Cfg().enabled || !InSession() || !Resolve(now)) {if(running)ResetSupportNet();return;}
+    if(blockedUntilMission)return;
+    if(!Cfg().enabled || !InSession() || !Resolve(now)) {if(running)SuspendSupportNet();return;}
     EDF6CoopSnapshot next{};next.size=sizeof(next);
-    if(!api.snapshot(&next) || !next.ready || next.size!=sizeof(next)) {if(running)ResetSupportNet();return;}
-    if(!running || snapshot.generation!=next.generation)if(!Start(next,now))return;
+    if(!api.snapshot(&next) || !next.ready || next.size!=sizeof(next)) {if(running)SuspendSupportNet();return;}
+    if(running && snapshot.generation!=next.generation){SuspendSupportNet();return;}
+    if(!running && !Start(next,now))return;
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
     for(unsigned received=0;received<128;++received) {
@@ -90,9 +96,13 @@ void SupportNetTick() noexcept {
         if(peer && support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
     }
     session.Tick(now);
+    if(session.Suspended())SuspendSupportNet();
 }
 bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size) noexcept {
     SupportNetTick();
+    if(blockedUntilMission) {
+        Note(note,size,L"联机参与者同步已暂停，现有支援保留；重新开始关卡后可再呼叫");return false;
+    }
     if(catalogId<0 || !running || !session.Ready()) {
         Note(note,size,L"联机支援尚未就绪：需全房同版全军出击与联机扩展，并完成关卡同步");return false;
     }
@@ -102,11 +112,12 @@ bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::s
     Note(note,size,L"支援请求已排队，等待房主验证与全员确认");return true;
 }
 void ReportSupportFailure(std::uint64_t transaction) noexcept {
-    if(transaction && transaction<=support_net::kMaxTransactions) {
+    if(transaction) {
         Log("SUPPORT NET rollback transaction=%llu",static_cast<unsigned long long>(transaction));
-        session.Failed(static_cast<std::uint32_t>(transaction));
+        session.Failed(transaction);
     }
 }
+bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {
     SupportNetTick();
     return running && OnlineHostOnly() ? session.SubmitPrepared(plan,GetTickCount64()) : 0;

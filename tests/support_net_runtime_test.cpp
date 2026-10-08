@@ -74,8 +74,11 @@ int main() {
     wchar_t note[256]{};const float at[3]={0,1,2};
     Check(crew::SubmitSupportRequest(1,at,note,256),"production dynamic ABI accepts host request");Step();
     Check(spawnCount==1,"production frame runs planner and native callback");
-    ready=false;Step();Check(destroyCount>0,"not-ready snapshot rolls back active objects");
-    ready=true;generation++;peerCount=1;stale=true;Step();
+    const unsigned before=destroyCount;
+    ready=false;Step();Check(destroyCount==before && crew::SupportTransactionActive(1),"not-ready snapshot preserves delivered actors and activation");
+    ready=true;generation++;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"restored link does not silently reopen a changed participant epoch");
+    crew::ResetSupportNet();Check(destroyCount>before,"explicit mission reset owns actor teardown");
+    generation++;peerCount=1;stale=true;Step();
     Check(!crew::SubmitSupportRequest(1,at,note,256),"peer roster changed during snapshot fails closed");
     stale=false;generation++;Step();
     Message hello;hello.kind=Kind::hello;hello.challenge=9;hello.request=1;

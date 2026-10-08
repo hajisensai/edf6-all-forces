@@ -37,7 +37,7 @@ std::uint32_t Read32(const unsigned char*& p) noexcept {
 void Float(unsigned char*& p,float f) noexcept { std::uint32_t v;std::memcpy(&v,&f,4);Store32(p,v); }
 float Float(const unsigned char*& p) noexcept { const auto v=Read32(p);float f;std::memcpy(&f,&v,4);return f; }
 bool ValidMessage(const Message& m) noexcept {
-    if(m.kind<Kind::hello || m.kind>Kind::cancel || m.transaction>kMaxTransactions || m.catalog>=1024 ||
+    if(m.kind<Kind::hello || m.kind>Kind::activated || m.transaction>kMaxTransactions || m.catalog>=1024 ||
        m.count>kMaxUnits || m.index>=kMaxUnits || m.ok>1 || !Point(m.target))return false;
     if(m.kind==Kind::hello)return m.challenge!=0 && m.request!=0;
     if(!m.epoch)return false;
@@ -89,13 +89,28 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
 }
 void Session::ClearTransactions() noexcept {
     for(std::uint32_t i=0;i<kMaxTransactions;++i) {
-        if(transactions_[i].phase!=Phase::empty && backend_.hooks.destroy)backend_.hooks.destroy(i+1);
+        if(transactions_[i].token && backend_.hooks.destroy)backend_.hooks.destroy(transactions_[i].token);
         transactions_[i]=Transaction{};
     }
     nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;
 }
-void Session::Stop() noexcept { ClearTransactions();running_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0); }
+void Session::Stop() noexcept { ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0); }
+bool Session::HasSpawned() const noexcept {
+    for(const auto& t:transactions_)if(t.spawned && t.phase!=Phase::cancelled)return true;
+    return false;
+}
+void Session::Suspend() noexcept {
+    // A transport generation is not an actor lifetime. Preserve constructed
+    // copies, including those awaiting finalize: another peer may already have
+    // activated them. Only the explicit mission reset may clear that ledger.
+    running_=false;suspended_=true;
+    for(std::uint32_t i=0;i<kMaxTransactions;++i) {
+        auto& t=transactions_[i];
+        if(!t.spawned && t.phase!=Phase::empty && t.phase!=Phase::cancelled)Cancel(i+1,false);
+    }
+}
 void Session::Start(bool host,std::uint32_t peers,std::uint32_t hostPeer,std::uint64_t now) noexcept {
+    if(running_ || suspended_){Suspend();return;}
     Stop();if(peers>kMaxPeers || (!host && (!hostPeer || hostPeer>peers)) || !backend_.nonce ||
         epochSerial_==UINT32_MAX || missionSerial_==UINT32_MAX)return;
     host_=host;peers_=peers;hostPeer_=hostPeer;challenge_=backend_.nonce(backend_.context);
@@ -122,14 +137,17 @@ void Session::Cancel(std::uint32_t id,bool broadcast) noexcept {
     if(!id || id>kMaxTransactions)return;
     auto& t=transactions_[id-1];
     if(t.phase!=Phase::cancelled) {
-        if(backend_.hooks.destroy)backend_.hooks.destroy(id);
+        if(t.token && backend_.hooks.destroy)backend_.hooks.destroy(t.token);
         t.result.fill(0);t.result[0]=1;t.since=0;t.cancelConfirmed=false;
     }
     t.phase=Phase::cancelled;
     if(broadcast){Message m;m.kind=Kind::cancel;m.transaction=id;Broadcast(m);}
 }
-void Session::Failed(std::uint32_t id) noexcept {
-    if(!running_ || !id || id>kMaxTransactions)return;
+void Session::Failed(std::uint64_t token) noexcept {
+    if(!running_ || !token)return;
+    std::uint32_t id=0;
+    for(std::uint32_t i=0;i<kMaxTransactions;++i)if(transactions_[i].token==token){id=i+1;break;}
+    if(!id)return;
     if(host_)Cancel(id,true);
     else {Cancel(id,false);Message m;m.kind=Kind::result;m.transaction=id;Send(hostPeer_,m);}
 }
@@ -145,13 +163,14 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
     requests_[peer]=m.request; // consume even rejected requests; they cannot be replayed later
     if(lastRequestAt_[peer] && now-lastRequestAt_[peer]<2000)return;
     lastRequestAt_[peer]=now;
-    if(nextTransaction_>=kMaxTransactions)return;
+    if(nextTransaction_>=kMaxTransactions || nextToken_==UINT64_MAX)return;
     for(const auto& t:transactions_)if(t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning)return;
-    auto& t=transactions_[nextTransaction_++];t.phase=Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
+    auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
     t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));
 }
-std::uint32_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexcept {
-    if(!host_ || !Ready() || plan.catalogId!=kMissionCrewCatalog || !ValidPlan(plan,false) || nextTransaction_>=kMaxTransactions)return 0;
+std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexcept {
+    if(!host_ || !Ready() || plan.catalogId!=kMissionCrewCatalog || !ValidPlan(plan,false) ||
+       nextTransaction_>=kMaxTransactions || nextToken_==UINT64_MAX)return 0;
     unsigned existing=0;
     for(std::uint32_t i=0;i<plan.count;++i)if(plan.units[i].resourceId==kExistingVehicle) {
         ++existing;if(!ValidUnit(plan.units[i],true))return 0;
@@ -161,8 +180,8 @@ std::uint32_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexce
     }
     if(existing!=1)return 0;
     for(const auto& t:transactions_)if(t.phase==Phase::planning || t.phase==Phase::prepared || t.phase==Phase::spawning)return 0;
-    auto& t=transactions_[nextTransaction_++];t.phase=Phase::planning;t.external=true;t.plan=plan;t.since=now;
-    return nextTransaction_;
+    auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.external=true;t.plan=plan;t.since=now;
+    return t.token;
 }
 void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
     auto& t=transactions_[id-1];
@@ -191,12 +210,13 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.ready[i])return;
         t.phase=Phase::spawning;t.since=now;
         Message m;m.kind=Kind::commit;m.transaction=id;
-        if(!Broadcast(m) || !backend_.hooks.spawn(id,t.plan,false)){Cancel(id,true);return;}
-        t.result[0]=1;
+        if(!Broadcast(m) || !backend_.hooks.spawn(t.token,t.plan,false)){Cancel(id,true);return;}
+        t.spawned=true;t.result[0]=1;
     }
     if(t.phase==Phase::spawning) {
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.result[i])return;
-        t.phase=Phase::active;
+        t.phase=Phase::active;t.activated[0]=1;t.since=now;
+        Message m;m.kind=Kind::activate;m.transaction=id;Broadcast(m);
     }
 }
 void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noexcept {
@@ -205,6 +225,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         if(m.request<peerMissions_[peer] || (m.request==peerMissions_[peer] && challenges_[peer]!=m.challenge))return;
         peerMissions_[peer]=m.request;
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
+            if(HasSpawned()){Suspend();return;}
             if(epochSerial_==UINT32_MAX){Stop();return;}
             ClearTransactions();epoch_=backend_.nonce(backend_.context);++epochSerial_;
             if(!epoch_){Stop();return;}
@@ -215,7 +236,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     }
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
-        if(epoch_!=m.epoch){ClearTransactions();epoch_=m.epoch;}
+        if(epoch_!=m.epoch){if(HasSpawned()){Suspend();return;}ClearTransactions();epoch_=m.epoch;}
         seenEpochSerial_=m.request;
         return;
     }
@@ -225,6 +246,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         if(m.kind==Kind::request){HostRequest(peer,m,now);return;}
         if(!m.transaction)return;
         auto& t=transactions_[m.transaction-1];
+        if(m.kind==Kind::activated && t.phase==Phase::active){t.activated[peer]=1;return;}
         if(m.kind==Kind::result && !m.ok && t.phase==Phase::cancelled) {t.result[peer]=1;return;}
         if(m.kind==Kind::ready && t.phase==Phase::prepared) {
             if(!m.ok){Cancel(m.transaction,true);return;}t.ready[peer]=1;
@@ -240,22 +262,30 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         Message reply;reply.kind=Kind::result;reply.transaction=m.transaction;Send(hostPeer_,reply);return;
     }
     if(m.kind==Kind::begin && t.phase==Phase::empty) {
+        if(nextToken_==UINT64_MAX){Suspend();return;}
+        t.token=++nextToken_;
         t.phase=Phase::assembling;t.since=now;t.plan.catalogId=m.catalog;t.plan.count=m.count;
         std::memcpy(t.plan.target,m.target,sizeof(m.target));
     } else if(m.kind==Kind::unit && t.phase==Phase::assembling && m.index<t.plan.count) {
         const auto bit=1u<<m.index;
-        if((t.received&bit) && std::memcmp(&t.plan.units[m.index],&m.unit,sizeof(Unit))) {Failed(m.transaction);return;}
+        if((t.received&bit) && std::memcmp(&t.plan.units[m.index],&m.unit,sizeof(Unit))) {Failed(t.token);return;}
         t.plan.units[m.index]=m.unit;t.received|=bit;
     } else if(m.kind==Kind::prepare && t.phase==Phase::assembling) {
         Message reply;reply.kind=Kind::ready;reply.transaction=m.transaction;
         reply.ok=t.received==((1u<<t.plan.count)-1) && ValidPlan(t.plan) && backend_.hooks.validate && backend_.hooks.validate(t.plan);
-        t.phase=reply.ok ? Phase::prepared : Phase::cancelled;Send(hostPeer_,reply);
-    } else if(m.kind==Kind::commit && (t.phase==Phase::prepared || t.phase==Phase::active)) {
+        t.phase=reply.ok ? Phase::prepared : Phase::cancelled;t.since=now;Send(hostPeer_,reply);
+    } else if(m.kind==Kind::commit && (t.phase==Phase::prepared || t.phase==Phase::spawning || t.phase==Phase::active)) {
         Message reply;reply.kind=Kind::result;reply.transaction=m.transaction;
-        reply.ok=t.phase==Phase::active || (backend_.hooks.spawn && backend_.hooks.spawn(m.transaction,t.plan,true));
-        t.phase=reply.ok ? Phase::active : Phase::cancelled;
-        if(!reply.ok && backend_.hooks.destroy)backend_.hooks.destroy(m.transaction);
+        const bool alreadySpawned=t.spawned;
+        reply.ok=alreadySpawned || (backend_.hooks.spawn && backend_.hooks.spawn(t.token,t.plan,true));
+        t.spawned=reply.ok!=0;
+        if(!alreadySpawned)t.since=now;
+        if(t.phase!=Phase::active)t.phase=reply.ok ? Phase::spawning : Phase::cancelled;
+        if(!reply.ok && backend_.hooks.destroy)backend_.hooks.destroy(t.token);
         Send(hostPeer_,reply);
+    } else if(m.kind==Kind::activate && t.spawned && (t.phase==Phase::spawning || t.phase==Phase::active)) {
+        t.phase=Phase::active;
+        Message reply;reply.kind=Kind::activated;reply.transaction=m.transaction;Send(hostPeer_,reply);
     }
 }
 void Session::Tick(std::uint64_t now) noexcept {
@@ -267,6 +297,11 @@ void Session::Tick(std::uint64_t now) noexcept {
     }
     for(std::uint32_t id=1;id<=kMaxTransactions;++id) {
         auto& t=transactions_[id-1];
+        if(t.phase==Phase::active && host_ && now-t.since>=1000) {
+            Message m;m.kind=Kind::activate;m.transaction=id;
+            for(std::uint32_t peer=1;peer<=peers_;++peer)if(!t.activated[peer])Send(peer,m);
+            t.since=now;
+        }
         if(t.phase==Phase::cancelled) {
             if(now-t.since>=1000) {
                 bool confirmed=t.cancelConfirmed;
@@ -283,12 +318,23 @@ void Session::Tick(std::uint64_t now) noexcept {
         }
         const std::uint64_t timeout=t.phase==Phase::planning ? 120000 : 20000;
         if(t.phase!=Phase::empty && t.phase!=Phase::active && t.phase!=Phase::cancelled && now-t.since>timeout) {
-            Failed(id);continue;
+            if(!host_ && t.spawned) {
+                // Only the host may cancel an all-peer transaction. A lost
+                // finalize enqueue is retried; never delete a registered copy
+                // merely because another transport channel is late.
+                Message m;m.kind=Kind::result;m.transaction=id;m.ok=1;Send(hostPeer_,m);t.since=now;continue;
+            }
+            Failed(t.token);continue;
         }
         if(host_ && Ready())Advance(id,now);
     }
 }
 std::uint32_t Session::ActiveCount() const noexcept {
     std::uint32_t result=0;for(const auto& t:transactions_)if(t.phase==Phase::active)++result;return result;
+}
+bool Session::IsActive(std::uint64_t token) const noexcept {
+    if(!token)return false;
+    for(const auto& t:transactions_)if(t.token==token)return t.phase==Phase::active;
+    return false;
 }
 } // namespace crew::support_net
