@@ -428,13 +428,18 @@ def install(game: str, campaign_requested: bool = False) -> None:
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     campaign = None
-    if campaign_requested or make_edf5_campaign.enabled(game):
+    if campaign_requested or make_edf5_campaign.wanted(game):
         print('生成可选实验 EDF5 战役（追加离线任务；原始 BVM 脚本尚未逐关验证，缺少资源的 4 关不会安装）……')
         try:
             campaign = make_edf5_campaign.build(game)
         except make_edf5_campaign.Refused as e:
             print('！ 不安装 EDF5 战役：', e)
     print('\n全部生成完毕，开始写入。')
+    if campaign is None and not make_edf5_campaign.wanted(game):
+        # Finish an interrupted opt-out before updating the rest of the installation.
+        make_edf5_campaign.remove(game)
+        if make_edf5_campaign.enabled(game):
+            raise make_edf5_campaign.Refused('无法完成 EDF5 战役停用：任务列表已被其他工具修改，已保留依赖文件。')
     for path in (make_jets.install(game, jets) if jets is not None else []) + \
             (make_sub.install(game, sub) if sub is not None else []) + \
             (make_katyusha.install(game, katyusha) if katyusha is not None else []) + \
@@ -664,7 +669,7 @@ def send_logs() -> int:
 def manage_campaign(game: str) -> int:
     """Menu 6: explicit experimental campaign opt-in or removal, without uninstalling the plugins."""
     import make_edf5_campaign
-    print('EDF5 战役是可选实验：默认关闭。启用会在离线任务列表末尾追加任务。')
+    print('EDF5 战役默认开启：普通安装 / 更新会在离线任务列表末尾追加任务；手动停用后保留停用选择。')
     print('原始 BVM 脚本尚未逐关验证，不能保证所有任务可以正常游玩；缺少资源的 4 关不会安装。')
     print('当前状态：' + ('已启用' if make_edf5_campaign.enabled(game) else '未启用'))
     choice = ask('输入 1 启用 / 更新实验战役（同时更新插件），2 停用战役（保留插件），其它 = 取消：')
@@ -672,7 +677,7 @@ def manage_campaign(game: str) -> int:
         install(game, campaign_requested=True)
         return 0 if make_edf5_campaign.enabled(game) and make_edf5_campaign.check(game) else 1
     if choice == '2':
-        done, kept = make_edf5_campaign.remove(game)
+        done, kept = make_edf5_campaign.remove(game, remember_disabled=True)
         for path in done:
             print('还原', path)
         for path in kept:

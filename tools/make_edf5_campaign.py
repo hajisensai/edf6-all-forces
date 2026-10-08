@@ -53,6 +53,7 @@ import sgo  # noqa: E402
 TEXT = (os.path.join(sys._MEIPASS, 'edf5campaign', 'missions.json') if getattr(sys, 'frozen', False)  # type: ignore[attr-defined]
         else os.path.join(HERE, '..', 'edf5campaign', 'missions.json'))   # the installer exe: tools/build_release.py
 MANIFEST = '.edf5campaign.json'
+DISABLED = '.edf5campaign-disabled'
 INI = os.path.join('Plugins', 'EDF6VehicleCrew.ini')
 INI_KEY = 'EDF5CampaignRows'
 LANGS = ('CN', 'EN', 'JA', 'KR', 'SC')
@@ -86,6 +87,11 @@ def ours(entry: dict | None, data: bytes | None) -> bool:
     """`data` is a file this tool wrote: the manifest's sha, or while an install is writing (the manifest saved before
     the files) also the one it is replacing (`also`), so a run cut short leaves every file recognised either way."""
     return bool(entry) and data is not None and modfiles.sha256(data) in (entry['sha'], *entry.get('also', ()))
+
+
+def restored(entry: dict | None, data: bytes | None) -> bool:
+    """Removal already restored this backup before an interruption left its ledger entry behind."""
+    return bool(entry) and entry['original'] is not None and data == base64.b64decode(entry['original'])
 
 
 def base_bytes(root: str, game: rootcpk.Game, rel: str, manifest: dict) -> bytes:
@@ -301,7 +307,7 @@ def removal_blocked(root: str) -> bool:
     """A changed campaign list may still index its text/thumbnail files and require the plugin's cap."""
     entry = load_manifest(root).get('files', {}).get(LIST)
     data = modfiles.read(rel_path(root, LIST))
-    return entry is not None and data is not None and not ours(entry, data)
+    return entry is not None and data is not None and not ours(entry, data) and not restored(entry, data)
 
 
 def install(root: str, built: tuple[dict[str, bytes], int, dict] | None = None) -> list[str]:
@@ -324,6 +330,11 @@ def install(root: str, built: tuple[dict[str, bytes], int, dict] | None = None) 
         entries[rel] = entry
     # The manifest first, accepting the old bytes and the new: a run cut short leaves every file recognised (and
     # what it replaced on record); once all are written only the new ones are ours.
+    # Commit enable intent before the first resource mutation. If writing fails, ordinary updates must repair
+    # the manifest's partial install rather than treating the earlier opt-out as still in force.
+    disabled = os.path.join(root, 'Mods', DISABLED)
+    if os.path.isfile(disabled):
+        os.remove(disabled)
     modfiles.save_json(mpath, {'version': 1, 'rows': base, 'files': entries})
     paths = []
     for rel, data in files.items():
@@ -339,7 +350,7 @@ def install(root: str, built: tuple[dict[str, bytes], int, dict] | None = None) 
     return paths
 
 
-def remove(root: str) -> tuple[list[str], list[str]]:
+def remove(root: str, *, remember_disabled: bool = False) -> tuple[list[str], list[str]]:
     """Puts back what each file was before (deleted if there was none): (restored or deleted, kept changed).
     A changed list preserves the whole dependency group and its recovery records. Other changed files stay
     with their manifest entry (what they replaced is only there)."""
@@ -351,12 +362,15 @@ def remove(root: str) -> tuple[list[str], list[str]]:
         # appended-row reads indexing the shorter stock tables. Keep the recovery metadata too.
         return [], [rel_path(root, rel) for rel in manifest.get('files', {})
                     if os.path.isfile(rel_path(root, rel))]
+    if remember_disabled:
+        # Record the choice before removing files: an interrupted removal must not opt back in on update.
+        modfiles.atomic_write(os.path.join(root, 'Mods', DISABLED), b'Disabled by the user.\n')
     done, kept = [], []
     left: dict[str, dict] = {}
     for rel, entry in manifest.get('files', {}).items():
         path = rel_path(root, rel)
         data = modfiles.read(path)
-        if data is None:
+        if data is None or restored(entry, data):
             continue
         if not ours(entry, data):
             kept.append(path)
@@ -380,8 +394,13 @@ def remove(root: str) -> tuple[list[str], list[str]]:
 
 
 def enabled(root: str) -> bool:
-    """The owned list records opt-in; leftover edited image/text files do not re-enable it."""
+    """The owned list records installation; leftover edited image/text files do not count."""
     return LIST in load_manifest(root).get('files', {})
+
+
+def wanted(root: str) -> bool:
+    """Install by default, unless the user explicitly disabled the campaign."""
+    return not os.path.isfile(os.path.join(root, 'Mods', DISABLED))
 
 
 def installed(root: str) -> bool:
@@ -416,7 +435,7 @@ def main(argv: list[str]) -> int:
     args = [a for a in argv if not a.startswith('--')]
     root = args[0] if args else rootcpk.DEFAULT_GAME
     if '--remove' in argv:
-        done, kept = remove(root)
+        done, kept = remove(root, remember_disabled=True)
         for path in done:
             print('还原', path)
         for path in kept:
