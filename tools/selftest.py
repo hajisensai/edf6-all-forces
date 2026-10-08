@@ -3944,7 +3944,10 @@ def stock_payload_and_seats_wired() -> None:
     assert sorted(builds) == want, (builds, want)
     assert 'if(IsStoreWeapon(w))return PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
-    order = [hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
+    # The disabled branch also calls AimLines to restore native lines. Check the
+    # enabled pipeline's ordering, not that earlier ownership-cleanup call.
+    enabled_hook = hook[hook.index('FrameTick();'):]
+    order = [enabled_hook.find(f'&{f},') for f in ('CrewStep<I>', 'SeatSwitchFrame', 'AimLines', 'PlayerJetFrame', 'PayloadFrame', 'HeliSightFrame')]
     assert all(x >= 0 for x in order) and order == sorted(order), f'src/crew.cpp InputHook step order: {order}'
     assert 'PayloadPicked(v)' in src('src/helisight.cpp')
     assert 'PlayerSeatPrompt(&s.seatPrompt)' in src('src/hud.cpp') and 'void SeatLine(' in src('src/hud.cpp')
