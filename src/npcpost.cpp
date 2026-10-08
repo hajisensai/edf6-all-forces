@@ -57,9 +57,9 @@ constexpr int kMaxPosts=64;
 
 enum class Family : std::uint8_t { none, carBase, mech, barga };
 // wrote/last: the plugin's last write to the two channels it drives (steer / throttle, the Barga's turn / forward).
-struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; bool wrote; float last[2]; };
+struct Post { ObjRef ref; ULONGLONG seen,loggedAt; float at[3],home[3]; bool commanded; bool active; Command cmd; bool wrote; float last[2]; float routeArrival; };
 Post posts[kMaxPosts]{};
-struct PendingPost { ObjRef ref; float at[3]; };
+struct PendingPost { ObjRef ref; float at[3]; float routeArrival; };
 PendingPost pendingPosts[kMaxPosts]{};
 ULONGLONG fullLoggedAt=0;
 
@@ -140,6 +140,14 @@ bool Available(const Post& p,ULONGLONG ms) noexcept {
         !At<const void*>(v,kRoute) && NpcDriver(v);
 }
 
+void DropPending(const unsigned char* v) noexcept {
+    for(auto& p:pendingPosts)if(p.ref.Is(v))p=PendingPost{};
+}
+bool HadRoutePost(const unsigned char* v) noexcept {
+    for(const auto& p:posts)if(p.ref.Is(v) && p.seen && p.routeArrival>0)return true;
+    return false;
+}
+
 void Relinquish(const unsigned char* v) noexcept {
     for(auto& p:posts)if(p.ref.Is(v)) {
         const ObjRef ref=p.ref;
@@ -156,24 +164,29 @@ void NpcPostInput(unsigned char* v) noexcept {
     if(f==Family::none || (f==Family::barga && !BargaWalkOk()))return;
     if(!NpcDriver(v)) {
         // Not NPC-driven (the player took the wheel, or nobody): its post is forgotten; an NPC later starts from where it is.
+        const auto* driver=SeatCount(v)>0 ? SeatAt(v,0) : nullptr;
+        if(HadRoutePost(v) || (driver && AnyPlayerIn(driver)))DropPending(v);
         Relinquish(v);
         return;
     }
-    if(At<const void*>(v,kRoute)){Relinquish(v);return;} // even a short script route invalidates the old post
+    if(At<const void*>(v,kRoute)){DropPending(v);Relinquish(v);return;} // even a short script route invalidates the old post
     if(!IsOnlineAuthority(v))return; // the real driver determines vehicle authority
     const ULONGLONG ms=GameMs();
     Post* const p=PostOf(v,ms);
     if(!p)return;
     p->seen=ms;
     for(auto& request:pendingPosts)if(request.ref.Is(v)) {
-        std::memcpy(p->at,request.at,12);p->commanded=true;
+        std::memcpy(p->at,request.at,12);p->commanded=true;p->routeArrival=request.routeArrival;
         p->cmd=Command{Order::guard,{request.at[0],request.at[1],request.at[2]}};
         request=PendingPost{};break;
     }
     const bool reads=f!=Family::carBase || (At<std::uint32_t>(v,kDriveMode)&1);   // a CarBase's slot 55 reads the stick
     if(!reads || StockDriving(v,f,*p)){p->active=false;p->wrote=false;return;}
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    const npc::Steer s=npc::ReturnToPost(reinterpret_cast<const float*>(v+kPosition),m,m+8,p->at,Cfg().tankPostHold,
+    // A navigation waypoint is not an area guard post. The route planner supplies its arrival
+    // contract; using the ordinary 6 m guard radius would swallow a 4 m grid edge without driving.
+    const float arrival=p->routeArrival>0 ? p->routeArrival : Cfg().tankPostHold;
+    const npc::Steer s=npc::ReturnToPost(reinterpret_cast<const float*>(v+kPosition),m,m+8,p->at,arrival,
                                          Cfg().tankReverseMax,kBackAngle,f==Family::mech ? kMechTurnOnSpot : kTurnOnSpot);
     if(s.active!=p->active)Log("NPCPOST v=%p %s (%.1f m off its post)",v,s.active ? "driving back" : "back at its post",s.dist);
     p->active=s.active;
@@ -182,7 +195,7 @@ void NpcPostInput(unsigned char* v) noexcept {
     if(f==Family::barga) {   // the stock walk's own turn and pace (it stops inside the hold itself)
         alignas(16) float block[8]{};
         alignas(16) const float point[4]={p->at[0],p->at[1],p->at[2],1.0f};
-        reinterpret_cast<BargaWalkFn>(image+kBargaWalk)(v,block,point,1.0f,Cfg().tankPostHold);
+        reinterpret_cast<BargaWalkFn>(image+kBargaWalk)(v,block,point,1.0f,arrival);
         c0=block[kBargaTurn/4];c1=block[kBargaForward/4];
     }
     Write(v,f,*p,c0,c1);
@@ -192,23 +205,33 @@ void NpcPostInput(unsigned char* v) noexcept {
     }
 }
 
-bool NpcPrepareVehiclePost(unsigned char* v,const float* at) noexcept {
+namespace {
+bool PrepareVehiclePost(unsigned char* v,const float* at,float routeArrival) noexcept {
     if(!v || !at || !Readable(v,kMatrix+64) || v[kDead] || FamilyOf(v)==Family::none ||
        !std::isfinite(at[0]+at[1]+at[2]) || At<const void*>(v,kRoute) || !IsOnlineAuthority(v))return false;
+    if(routeArrival>0 && SeatCount(v)>0 && AnyPlayerIn(SeatAt(v,0)))return false;
     PendingPost* free=nullptr;
     for(auto& request:pendingPosts) {
         if(request.ref.Is(v)){free=&request;break;}
         if(!free && (!request.ref || !Readable(request.ref.obj,kSelfCtrl+8) || !request.ref.Is(request.ref.obj)))free=&request;
     }
     if(!free)return false;
-    free->ref=ObjRef::Of(v);std::memcpy(free->at,at,12);
+    free->ref=ObjRef::Of(v);std::memcpy(free->at,at,12);free->routeArrival=routeArrival;
     return true;
+}
+
+} // namespace
+bool NpcPrepareVehiclePost(unsigned char* v,const float* at) noexcept {
+    return PrepareVehiclePost(v,at,0.0f);
+}
+bool NpcPrepareVehicleRoutePost(unsigned char* v,const float* at,float arrivalRadius) noexcept {
+    return std::isfinite(arrivalRadius) && arrivalRadius>0 && PrepareVehiclePost(v,at,arrivalRadius);
 }
 
 bool NpcPostCommand(const void* v,const float* at) noexcept {
     for(auto& p:posts) {
         if(!p.ref.Is(v) || !Available(p,GameMs()))continue;
-        std::memcpy(p.at,at ? at : p.home,12);p.commanded=at!=nullptr;
+        std::memcpy(p.at,at ? at : p.home,12);p.commanded=at!=nullptr;p.routeArrival=0.0f;DropPending(static_cast<const unsigned char*>(v));
         Log("NPCPOST v=%p post %s (%.0f,%.0f,%.0f) by a command",v,at ? "moved to" : "back on its spawn",p.at[0],p.at[1],p.at[2]);
         return true;
     }

@@ -75,6 +75,10 @@ void NpcPostInput(unsigned char* vehicle) noexcept;
 bool NpcPostCommand(const void* vehicle,const float* at) noexcept;
 // Store an arrival destination until the assigned real driver boards the support vehicle.
 bool NpcPrepareVehiclePost(unsigned char* vehicle,const float* at) noexcept;
+// Verified navigation waypoint: stop within this explicit radius, independent of TankPostHold.
+// The caller must use a radius no larger than the planner's waypoint advancement radius.
+// at=current position requests a controlled stop; ordinary guard commands clear route mode.
+bool NpcPrepareVehicleRoutePost(unsigned char* vehicle,const float* at,float arrivalRadius) noexcept;
 void ResetNpcPosts() noexcept;   // a new mission
 // A ground vehicle an NPC in seat 0 drives (and a map command sends to a post): the stock CarBase AI (0x661440: the
 // tanks, the Titan, the bikes, the Grape and the trucks of its class, the rescue vehicle), armed or not.
