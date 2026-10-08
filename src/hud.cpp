@@ -1828,6 +1828,13 @@ const wchar_t* DrillState(const DrillCue& c) noexcept {
     if(c.flying)return Tr(c.returning ? Tx::drillReturning : Tx::drillLaunched);
     return c.touching && c.rpm>0.0f ? Tr(Tx::drilling) : nullptr;
 }
+void DrillLaunchHint(Line& line,const DrillCue& c) noexcept {
+    if(!Cfg().drillLaunch)return;
+    wchar_t binding[64];
+    if(c.keys)KeyName(Cfg().drillLaunchKey,binding,_countof(binding));
+    else SeatButtonName(Cfg().drillLaunchButton,binding,_countof(binding));
+    Append(line,L"    ");Append(line,Tr(Tx::drillLaunchHint),binding);
+}
 void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float s,const DrillCue& c,Line* lines,int* at) noexcept {
     if(*at>=kMaxLines || !(c.maxRpm>0.0f))return;
     Line& l=lines[(*at)++];
@@ -1836,6 +1843,7 @@ void DrillPanel(void* drawer,void* ctx,Text* text,float width,float height,float
     wchar_t state[32]=L"";
     if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"    %ls",word);
     Format(l,Tr(Tx::drillLine),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(heat*100.0f)),state);
+    DrillLaunchHint(l,c);
     l.scale=kTitleScale;
     l.rgba=c.overheated ? kRed : top ? kGreen : share>0.0f ? kAmber : kCyan;
     l.w=l.h=0.0f;
@@ -2680,6 +2688,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
         wchar_t state[32]=L"";
         if(const wchar_t* const word=DrillState(c))std::swprintf(state,32,L"  %ls",word);
         Format(*drill,Tr(Tx::drillLineShort),static_cast<int>(std::lround(c.rpm)),static_cast<int>(std::lround(Unit(c.heat)*100.0f)),state);
+        DrillLaunchHint(*drill,c);
         drill->scale=kLineScale*0.85f;
         drill->rgba=c.overheated ? kRed : c.heat>=0.7f ? HeatColour(Unit(c.heat),false) : share>=0.99f ? kGreen : share>0.0f ? kAmber : kCyan;
     }

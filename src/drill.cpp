@@ -61,14 +61,14 @@ constexpr std::size_t kSeatPad=0x2B0,kSeatButtons=0x2E8;
 const wchar_t kDrillBone[]=L"edf6vc_drill";
 const wchar_t kSpinBone[]=L"catapi_body";
 const wchar_t kParentBone[]=L"body";
-constexpr float kDrillLength=4.71f,kDrillRadius=1.21f;
-constexpr float kDrillBaseY=4.21f,kDrillBaseZ=5.18f;
+constexpr float kDrillLength=6.55f,kDrillRadius=1.55f;
+constexpr float kDrillBaseY=4.21f,kDrillBaseZ=3.35f;
 constexpr std::size_t kModelInst=kModelInst506,kBoneLocal=kBoneLocal506,kBoneWorld=kBoneWorld506;
 constexpr std::size_t kRecIndex=0x0C,kInstPose=0x30,kInstPoseCount=0x40,kPoseStride=0x40;
 // The hull's front (m along the vehicle's forward: the model's hull vertices under the drill end at z 3.7; the
-// Blacker's collision shapes, which the drill tank keeps, reach ~3.4). Pressed against a wall the hull stops there
-// with the drill's base (kDrillBaseZ) already ~1.8 m inside it: a map ray started there starts inside the building's
-// shape and finds nothing. So the map rays start over the vehicle's origin (inside the hull: the hull keeps the walls
+// Blacker's collision shapes, which the drill tank keeps, reach ~3.4). Pressed against a wall most of the drill is
+// inside it (the old partial drill's base was already ~1.8 m inside): a ray from the bit can start inside the building
+// and find nothing. So the map rays start over the vehicle's origin (inside the hull: the hull keeps the walls
 // out), and a charge starts no farther back than kChargeFrom (past the collision shapes: it must not meet the tank).
 constexpr float kHullFront=3.7f,kChargeFrom=3.5f;
 // What the drill reaches (2026-10-05 19:56 play: rammed into ants at 300 rpm, not one bite: the nearest lock points
@@ -109,8 +109,9 @@ constexpr float kBiteHeat=0.5f;
 // last place (at the launch: over the vehicle's origin, inside the hull, as kRays) to its next: a hit is a bite on
 // the map there and the turn back. Back: from rest, speeding up as evenly to DrillLaunchSpeed, straight at the drill's
 // place on the hull (where the vehicle is now); caught within kCatchM (or the step), or snapped home after kBackMostMs.
-// Its axis: out, the launch's direction; back, turned toward the vehicle's forward over the last kAlignM.
+// Its axis: out, the launch's direction; back, nose toward the hull, then aligned with the socket over kAlignM.
 constexpr float kOutStop=0.05f,kCatchM=1.0f,kAlignM=15.0f;
+constexpr float kReturnTurnRate=2.0f*kPi; // rad/s: half a second to reverse, including exactly opposite axes
 constexpr ULONGLONG kBackMostMs=12000;
 // In flight it bites every kFlightBiteSec the enemy whose body (root..lock point) is nearest its axis, within its
 // radius + kBodyPad; not one within kNearHullM of the vehicle's origin (the charge would start in or meet the tank).
@@ -150,6 +151,7 @@ struct Drill {
     Victim victims[kVictims];
     drill_net::Gate received;
     bool networked;
+    bool keys=true;               // input device used by the local pilot; the HUD labels the actual launch binding
     ULONGLONG sentAt,receivedAt;
     Flight sentFlight;
 };
@@ -175,6 +177,19 @@ bool Unit(const float* a,float* out) noexcept {
     if(!(l>1e-6f))return false;
     for(int i=0;i<3;++i)out[i]=a[i]/l;
     return true;
+}
+// A unit-axis interpolation that also defines the half-turn (a linear blend of +Z/-Z collapses at its midpoint).
+void BlendAxis(const float* from,const float* to,const float* up,float amount,float* out) noexcept {
+    const float dot=Clamp(Dot(from,to),-1.0f,1.0f),angle=std::acos(dot);
+    if(angle<1e-5f){std::memcpy(out,to,12);return;}
+    float tangent[3];
+    for(int i=0;i<3;++i)tangent[i]=to[i]-from[i]*dot;
+    if(!Unit(tangent,tangent)) {
+        Cross(up,from,tangent);
+        if(!Unit(tangent,tangent)) { const float side[3]={1,0,0};Cross(side,from,tangent);Unit(tangent,tangent); }
+    }
+    const float a=angle*Clamp(amount,0.0f,1.0f);
+    for(int i=0;i<3;++i)out[i]=from[i]*std::cos(a)+tangent[i]*std::sin(a);
 }
 // How far p is from the segment a..b.
 float SegmentGap(const float* p,const float* a,const float* b) noexcept {
@@ -593,7 +608,8 @@ void FlyOut(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
     if(d.flown>=c.drillLaunchRange || d.speed<=kOutStop*c.drillLaunchSpeed)TurnBack(v,d,ms,"at its range");
 }
 
-// Back one frame: toward its place on the hull, speeding up; its axis turned to the vehicle's forward near it.
+// Back one frame: turn the WHOLE drill nose-first toward the hull. Near its socket, turn back to the vehicle's
+// forward so it docks in its bind orientation. The rear jet follows this same axis rather than jumping to the tip.
 void FlyBack(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
     const auto& c=Cfg();
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -606,10 +622,14 @@ void FlyBack(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
     if(gap<=kCatchM+step){Catch(v,d,ms,"caught");return;}
     if(ms-d.backAt>kBackMostMs){Catch(v,d,ms,"snapped: too long on its way back");return;}
     for(int i=0;i<3;++i)d.pos[i]+=to[i]/gap*step;
-    const float w=Clamp((gap-step)/kAlignM,0.0f,1.0f);
-    float axis[3];
-    for(int i=0;i<3;++i)axis[i]=m[8+i]*(1.0f-w)+d.dir[i]*w;
-    if(!Unit(axis,d.axis))std::memcpy(d.axis,m+8,12);
+    const float align=std::fmax(kAlignM,d.speed*kPi/kReturnTurnRate+kDrillLength);
+    const float w=Clamp((gap-step)/align,0.0f,1.0f);
+    float homeDir[3],axis[3],next[3];
+    for(int i=0;i<3;++i)homeDir[i]=to[i]/gap;
+    BlendAxis(homeDir,m+8,m+4,1.0f-w,axis);
+    const float turn=std::acos(Clamp(Dot(d.axis,axis),-1.0f,1.0f));
+    BlendAxis(d.axis,axis,m+4,turn>1e-5f ? std::fmin(1.0f,kReturnTurnRate*dt/turn) : 1.0f,next);
+    std::memcpy(d.axis,next,12);
 }
 
 // The enemy nearest the flying drill's axis (EnemyVisitor): its body (root..lock point) within the drill's radius +
@@ -644,19 +664,12 @@ void FlightBite(unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
     Charge(v,d,from,s.at,Cfg().drillLaunchDamage,s.who,"enemy (launched)",ms);
 }
 
-// The jet: a flame at the drill's trailing end, against its motion (out: its base; back: its tip, it flies tail first).
+// The jet is physically attached to the same rear socket throughout flight, oriented by the drawn drill axis.
 void Jet(const unsigned char* v,Drill& d,ULONGLONG ms) noexcept {
     float at[1][3],vel[1][3];
     const float s=d.speed>1.0f ? d.speed : 1.0f;
-    if(d.flight==Flight::out) {
-        std::memcpy(at[0],d.pos,12);
-        for(int i=0;i<3;++i)vel[0][i]=d.dir[i]*s;
-    } else {
-        float home[3];HomeBase(v,home);
-        float to[3]={home[0]-d.pos[0],home[1]-d.pos[1],home[2]-d.pos[2]};
-        if(!Unit(to,to))std::memcpy(to,d.axis,12);
-        for(int i=0;i<3;++i){at[0][i]=d.pos[i]+d.axis[i]*kDrillLength;vel[0][i]=to[i]*s;}
-    }
+    std::memcpy(at[0],d.pos,12);
+    for(int i=0;i<3;++i)vel[0][i]=d.axis[i]*s;
     FlareFlames(v,at,vel,1,ms);
     d.flaming=true;
 }
@@ -678,7 +691,7 @@ void Fly(unsigned char* v,Drill& d,float dt,ULONGLONG ms) noexcept {
 void Publish(const Drill& d) noexcept {
     AcquireSRWLockExclusive(&cueLock);
     cue=DrillCue{d.rpm,Cfg().drillMaxRpm,d.heat,GameMs()-d.touchAt<=500,d.overheated,d.flight!=Flight::home,
-                 d.flight==Flight::back};
+                 d.flight==Flight::back,d.keys};
     cueAt=GetTickCount64();
     ReleaseSRWLockExclusive(&cueLock);
 }
@@ -724,6 +737,7 @@ void DrillInput(unsigned char* v) noexcept {
     *trigger=0.0f;
     const auto& c=Cfg();
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
+    d->keys=keys;
     const bool down=keys ? KeyHeld(c.drillLaunchKey)
                          : (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(c.drillLaunchButton))!=0;
     if(down && !d->launchHeld)d->launchAsked=true;

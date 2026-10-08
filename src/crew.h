@@ -667,7 +667,7 @@ void DrillFrame(unsigned char* vehicle) noexcept;
 void ResetDrills() noexcept;
 // The local player's drill (hud.cpp): its RPM, the top RPM, whether it touches something now, whether it is launched
 // (flying) and on its way back (returning). False with none.
-struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated,flying=false,returning=false; };
+struct DrillCue { float rpm,maxRpm,heat; bool touching,overheated,flying=false,returning=false,keys=true; };
 bool PlayerDrillCue(DrillCue* out) noexcept;
 
 // jet_bay.cpp: the EMC's rounds (emc.cpp; pylib/vcobjects.py EMC_*, tools/make_emc.py), DemoIndirectFire objects owned
