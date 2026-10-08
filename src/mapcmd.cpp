@@ -39,6 +39,7 @@
 #include <cstring>
 
 namespace crew {
+bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept;
 namespace {
 constexpr ULONGLONG kFreshMs=300;        // a readout older than this (wall) is the map closed
 constexpr ULONGLONG kNoteMs=3000;        // the last command's word shown this long
@@ -52,7 +53,7 @@ constexpr float kFormationSpacing=30.0f; // m between the slots of a formation r
 enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
 
-struct Keys { bool tab,shift,ctrl,guard,follow,release,left,padNext,padGuard,padFollow,padRelease,
+struct Keys { bool tab,shift,ctrl,guard,follow,release,left,right,padNext,padGuard,padFollow,padRelease,
              engage,focus,board,dismount,dismiss,recruit,mark,formation,split,merge,sweep,health,digit[9],supportPrev,supportNext,supportCall; };
 
 // --- The game thread's own ---
@@ -77,12 +78,24 @@ struct Game {
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
     ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
+    enum class UiKind : std::uint8_t { none,command,squad,payload,panel };
+    struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; };
+    UiHit uiPress{};
+    bool uiLeft=false,uiRight=false,rowPicked=false;
 };
 Game game{};
 std::atomic<bool> boxingNow{false};
+std::atomic<bool> pointerCaptured{false};
 
 // --- The view the HUD last drew the map with (under `viewLock`) ---
-struct View { float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount]; };
+constexpr int kUiItems=16;
+struct View {
+    float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
+    int squads=0,payloads=0,panels=0;
+    mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kUiItems]{};
+    ObjRef squadIdentity[kUiItems]{};
+    std::uint64_t payloadToken=0;int payloadSeat=-1,payloadEntry[kUiItems]{};
+};
 View view{};
 SRWLOCK viewLock=SRWLOCK_INIT;
 
@@ -151,7 +164,7 @@ Keys ReadKeys(const MapCmdInput& in) noexcept {
     Keys k{};
     if(in.front) {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
-        k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);
+        k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);k.right=Down(VK_RBUTTON);
         // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
         k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.split=Down('P');k.merge=Down('L');k.sweep=Down('Y');k.health=Down('O');
         k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
@@ -230,32 +243,75 @@ int Marks(const Game& g,const View& v,const MapCmdInput& in,mapcmd::Mark* out) n
     return g.count;
 }
 
-// The pointer, the box and the clicks (the mouse; `v`: the view, or nullptr while the HUD has drawn none).
+Game::UiHit UiAt(const View& v,float x,float y) noexcept {
+    Game::UiHit hit;
+    int i=mapbtn::Hit(v.button,v.buttons,x,y);
+    if(i>=0){hit.kind=Game::UiKind::command;hit.id=v.id[i];return hit;}
+    i=mapbtn::Hit(v.squad,v.squads,x,y);
+    if(i>=0){hit.kind=Game::UiKind::squad;hit.identity=v.squadIdentity[i];return hit;}
+    i=mapbtn::Hit(v.payload,v.payloads,x,y);
+    if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
+    if(mapbtn::Hit(v.panel,v.panels,x,y)>=0)hit.kind=Game::UiKind::panel;
+    return hit;
+}
+bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
+    return a.kind==b.kind && a.id==b.id && a.identity.obj==b.identity.obj && a.identity.ctrl==b.identity.ctrl &&
+        a.token==b.token && a.seat==b.seat && a.entry==b.entry;
+}
+void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
+    if(hit.kind==Game::UiKind::command){g.button=hit.id;return;}
+    if(hit.kind==Game::UiKind::payload) {
+        const bool queued=RequestPayloadSelection(hit.token,hit.seat,hit.entry);
+        Note(g,L"%ls",hudtext::Tr(queued ? hudtext::Tx::cmdPayloadQueued : hudtext::Tx::cmdPayloadStale));return;
+    }
+    if(hit.kind!=Game::UiKind::squad)return;
+    // Resolve the original rendered identity in this frame's validated list. Never recapture from
+    // its raw address or reinterpret a row number after sort/recruitment changes the next snapshot.
+    for(int i=0;i<g.count;++i)if(g.list[i].owner==Owner::squad && g.list[i].u.v==hit.identity.obj) {
+        if(!Readable(hit.identity.obj,kSelfCtrl+sizeof(void*)) || !hit.identity.Is(hit.identity.obj))return;
+        if(!shift)g.sel.Clear();
+        if(shift && g.sel.Has(hit.identity.obj))g.sel.Remove(hit.identity.obj);else g.sel.Add(hit.identity.obj);
+        g.rowPicked=g.sel.n==1;return;
+    }
+}
+
+// UI owns presses that began on a rendered panel, including its inert background. Capture remains
+// until release outside the panel; a changed identity/token between press and release cancels action.
 void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept {
-    if(!v){g.boxing=g.pressing=false;return;}
-    if(mapcmd::FitPointer(g.pointer,v->w,v->h))g.boxing=g.pressing=false;
+    if(!v) {
+        g.boxing=g.pressing=false;g.uiLeft=g.uiLeft && k.left;g.uiRight=g.uiRight && k.right;
+        pointerCaptured.store(g.uiLeft || g.uiRight);return;
+    }
+    if(mapcmd::FitPointer(g.pointer,v->w,v->h)) {
+        g.boxing=g.pressing=false;
+        if(g.uiLeft)g.uiPress=Game::UiHit{Game::UiKind::panel};
+    }
     const float s=v->h/1080.0f;
-    // The pointer moves with the mouse unless a button moves the map (the ground slides under it); a box drags it.
-    const bool right=in.front && Down(VK_RBUTTON);
-    if(in.mouse && (g.boxing || (!k.left && !right))) {
+    if(in.mouse && (g.uiLeft || g.uiRight || g.boxing || (!k.left && !k.right))) {
         g.pointer.x=mapcam::Clamp(g.pointer.x+in.dx*kPointerGain*s,0.0f,v->w-1.0f);
         g.pointer.y=mapcam::Clamp(g.pointer.y+in.dy*kPointerGain*s,0.0f,v->h-1.0f);
     }
-    if(in.mouse && g.pressing)g.moved+=std::fabs(in.dx)+std::fabs(in.dy);
+    if(in.mouse && (g.pressing || g.uiLeft))g.moved+=std::fabs(in.dx)+std::fabs(in.dy);
+    if(k.right && !g.was.right)g.uiRight=UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none;
+    if(!k.right)g.uiRight=false;
     if(k.left && !g.was.left) {
-        if(k.ctrl){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
-        else{g.pressing=true;g.moved=0.0f;}
+        g.uiPress=UiAt(*v,g.pointer.x,g.pointer.y);g.uiLeft=g.uiPress.kind!=Game::UiKind::none;g.moved=0;
+        if(g.uiLeft)g.boxing=g.pressing=false;
+        else if(k.ctrl){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
+        else g.pressing=true;
     }
+    pointerCaptured.store(g.uiLeft || g.uiRight);
     if(k.left || !g.was.left)return;
-    // Let go: a box, or a click (a Ctrl box too small to be one, or a plain press that did not pan).
-    mapcmd::Mark marks[kCmdUnits];
-    const int n=Marks(g,*v,in,marks);
+    if(g.uiLeft) {
+        if(g.moved<kClickMove && SameUi(g.uiPress,UiAt(*v,g.pointer.x,g.pointer.y)))UiClick(g,g.uiPress,k.shift);
+        g.uiLeft=false;g.uiPress={};g.boxing=g.pressing=false;pointerCaptured.store(g.uiRight);return;
+    }
+    mapcmd::Mark marks[kCmdUnits];const int n=Marks(g,*v,in,marks);
     const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
     const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
-    const int hit=click && !g.boxing ? mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y) : -1;
-    if(hit>=0)g.button=v->id[hit];   // a button: not a unit's click
+    if(click && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none){} // release over UI never selects what is underneath
     else if(click && g.supportArmed && !g.boxing)g.supportClick=true;
-    else if(click && g.guardArmed && !g.boxing)g.guardClick=true;   // the armed guard's point
+    else if(click && g.guardArmed && !g.boxing)g.guardClick=true;
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
     else if(click)mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
     g.boxing=g.pressing=false;
@@ -293,7 +349,7 @@ void SeeEnemyMark(void* ctx,const void* object,const float* aim) {
 void Hover(Game& g,const MapCmdInput& in,const View* v) noexcept {
     npcmark::Assign(g.hover,{});
     if(!v || !npcmark::Enabled())return;
-    if(!in.usingPad && mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y)>=0)return;
+    if(!in.usingPad && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none)return;
     EnemyMarks& e=enemyMarks;
     e.v=v;e.pin=PinOf(in);e.n=0;
     VisitEnemiesOf(player.team,&SeeEnemyMark,&e);
@@ -447,7 +503,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     // The first frame after a gap (the map just opened): what is held now is no press (the key that opened it, a key
     // held from before), the pointer at the centre.
     if(now-g.frameAt>kFreshMs) {
-        g.was=k;g.boxing=g.pressing=false;g.guardArmed=g.supportArmed=false;npcmark::Assign(g.hover,{});
+        g.was=k;g.boxing=g.pressing=g.uiLeft=g.uiRight=false;g.uiPress={};pointerCaptured.store(false);g.guardArmed=g.supportArmed=false;npcmark::Assign(g.hover,{});
         g.pointer=mapcmd::PointerPosition{};
     }
     g.frameAt=now;
@@ -459,7 +515,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
     const void* ids[kCmdUnits];
     Refresh(g,ids);
-    g.button=-1;g.guardClick=g.supportClick=false;
+    g.button=-1;g.guardClick=g.supportClick=false;g.rowPicked=false;
     Pointer(g,in,k,haveView ? &v : nullptr);
     using mapbtn::Id;
     const auto clicked=[&](Id b){return g.button==static_cast<int>(b);};
@@ -484,7 +540,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     Hover(g,in,haveView ? &v : nullptr);
     boxingNow.store(g.boxing);
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
-    bool picked=false;
+    bool picked=g.rowPicked;
     if(next || prev) {
         mapcmd::Cycle(g.sel,ids,g.count,next ? 1 : -1);
         picked=g.sel.n==1;
@@ -562,7 +618,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
 void ResetMapCommands() noexcept {
     npcmark::Assign(game.hover,{});npcmark::Assign(game.eatHover,{});
     game=Game{};
-    boxingNow.store(false);
+    boxingNow.store(false);pointerCaptured.store(false);
     AcquireSRWLockExclusive(&lock);
     readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
@@ -584,14 +640,34 @@ void MapCommandButtons(const float* rects,const int* ids,int n) noexcept {
 }
 
 bool MapCommandBoxing() noexcept { return boxingNow.load(); }
+bool MapCommandPointerCaptured() noexcept { return pointerCaptured.load(); }
+
+void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept {
+    n=rects && identities ? (std::max)(0,(std::min)(n,kUiItems)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.squads=n;
+    for(int i=0;i<n;++i){view.squad[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.squadIdentity[i]=identities[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
+void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept {
+    n=rects && entries && token && seat>=0 ? (std::max)(0,(std::min)(n,kUiItems)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.payloads=n;view.payloadToken=token;view.payloadSeat=seat;
+    for(int i=0;i<n;++i){view.payload[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.payloadEntry[i]=entries[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
+void MapCommandUiPanels(const float* rects,int n) noexcept {
+    n=rects ? (std::max)(0,(std::min)(n,kUiItems)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.panels=n;
+    for(int i=0;i<n;++i)view.panel[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};
+    ReleaseSRWLockExclusive(&viewLock);
+}
 
 void SuspendMapCommands() noexcept {
     // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
     Game& g=game;
     npcmark::Assign(g.hover,{});npcmark::Assign(g.eatHover,{});
-    g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=false;g.guardArmed=g.guardClick=false;g.supportArmed=g.supportClick=false;g.button=-1;
-    boxingNow.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=0;ReleaseSRWLockExclusive(&viewLock);
+    g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=false;g.guardArmed=g.guardClick=false;g.supportArmed=g.supportClick=false;g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};
+    boxingNow.store(false);pointerCaptured.store(false);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=0;ReleaseSRWLockExclusive(&viewLock);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }
 

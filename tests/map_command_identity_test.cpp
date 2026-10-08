@@ -11,6 +11,10 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
 }
+int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=0;
+bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
+    ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
+}
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }

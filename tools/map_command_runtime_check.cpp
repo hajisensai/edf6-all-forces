@@ -20,6 +20,10 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
 }
+int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=0;
+bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
+    ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
+}
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return false; }
@@ -387,12 +391,53 @@ void SupportInput() noexcept {
     game.supportArmed=true;SuspendMapCommands();Check(!game.supportArmed,"closing map cancels pending support placement");
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));ResetMapCommands();
 }
+void UiCaptureAndSnapshots() noexcept {
+    ResetMapCommands();view=View{};config=Config{};
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=true;payloadRequests=0;
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100;float centre[3]{};
+    const float vp[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    const float panel[4]={500,300,900,500},row[4]={600,340,680,380};
+    MapCommandUiPanels(panel,1);ObjRef identity=ObjRef::Of(squadObj);MapCommandSquadButtons(row,&identity,1);
+    inputstub::keys[VK_CONTROL]=true;inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    Check(MapCommandPointerCaptured() && !MapCommandBoxing(),"Ctrl-left begun on a squad row captures UI instead of drawing a map box");
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.sel.Has(squadObj) && !MapCommandPointerCaptured(),"click selects the published squad identity and releases capture");
+    inputstub::keys[VK_CONTROL]=false;game.sel.Clear();RememberSelection(game);
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    unsigned char replacement[0x10]{};Put<void*>(squadObj,kSelfCtrl,replacement);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!game.sel.n,"a rendered row cannot select a replacement at a recycled address");
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);MapCommandSquadButtons(nullptr,nullptr,0);
+    const int entry=3;MapCommandPayloadButtons(row,77,2,&entry,1);
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1 && payloadToken==77 && payloadSeat==2 && payloadEntry==3 && !game.sel.n,
+        "payload click submits the exact rendered token/seat/entry and never selects a world object");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    MapCommandPayloadButtons(row,78,2,&entry,1);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1,"payload topology changing during a click cancels the old hitbox action");
+    inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);
+    Check(MapCommandPointerCaptured(),"right press on panel captures camera turning");
+    in.dx=700;MapCommandFrame(in,centre);in.dx=0;
+    Check(MapCommandPointerCaptured() && game.pointer.x>900,"UI capture keeps a free pointer and stays captured outside the panel");
+    inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!MapCommandPointerCaptured(),"right release ends its capture");
+    in.dx=(550-game.pointer.x)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0;
+    game.guardArmed=true;inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.guardArmed && !game.guardClick,"inert panel background does not consume the armed world's guard destination");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);SuspendMapCommands();
+    Check(!MapCommandPointerCaptured() && !view.squads && !view.payloads && !view.panels,"closing map drops captures and all stale UI snapshots");
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;ResetMapCommands();
+}
 }  // namespace
 }  // namespace crew
 int main() {
     crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
+    crew::UiCaptureAndSnapshots();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

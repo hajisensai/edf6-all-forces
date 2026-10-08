@@ -1223,6 +1223,7 @@ int SquadRows(SquadRow* out,int most) noexcept {
         if(!Live(q,ms))continue;
         SquadRow& r=out[n++];
         r.leader=q.top.obj;
+        r.identity=q.top;
         std::snprintf(r.name,sizeof(r.name),"%s",kClassWords[q.cls]);
         char buf[16];
         std::snprintf(r.status,sizeof(r.status),"%s",StatusOf(q,ms,buf,sizeof(buf)));
