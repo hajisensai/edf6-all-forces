@@ -199,13 +199,34 @@ bool Validate(const SupportPlan& plan) noexcept {
 }
 void Destroy(std::uint64_t id) noexcept {
     for(auto& deployed:deployments)if(deployed.used && deployed.id==id) {
-        // Remove crew first so native seat ownership is released before deleting hulls.
-        for(unsigned i=0;i<deployed.plan.count;++i)if(deployed.plan.units[i].resourceId<kAircraft)DeleteSupportSoldier(deployed.objects[i]);
+        bool preserve[support_net::kMaxUnits]{};
+        bool occupied=false;
+        // A player can board a newly visible hull before support becomes Active. Cancellation must
+        // not invalidate that player's live ride, including a player replicated from another peer.
         for(unsigned i=0;i<deployed.plan.count;++i) {
+            if(!Live(deployed.objects[i]))continue;
+            auto* object=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj));
+            if(deployed.plan.units[i].resourceId<kAircraft)preserve[i]=edf::IsAnyPlayer(object);
+            else for(unsigned seat=0;seat<SeatCount(object);++seat)
+                preserve[i]=preserve[i] || AnyPlayerIn(SeatAt(object,seat));
+            occupied=occupied || preserve[i];
+        }
+        // Keep the real crew attached to a retained hull, releasing deployment holds. Do not kick
+        // or delete its passengers as a side effect of rolling back unrelated, still-empty units.
+        for(unsigned i=0;i<deployed.plan.count;++i) {
+            const auto parent=deployed.plan.units[i].role;
+            if(parent && parent<=deployed.plan.count && preserve[parent-1])preserve[i]=true;
+            if(preserve[i] && deployed.plan.units[i].resourceId<kAircraft)HoldSupportSoldier(deployed.objects[i],false);
+        }
+        // Remove crew first so native seat ownership is released before deleting hulls.
+        for(unsigned i=0;i<deployed.plan.count;++i)
+            if(!preserve[i] && deployed.plan.units[i].resourceId<kAircraft)DeleteSupportSoldier(deployed.objects[i]);
+        for(unsigned i=0;i<deployed.plan.count;++i) {
+            if(preserve[i])continue;
             if(deployed.plan.units[i].resourceId>=kVehicle && Live(deployed.objects[i]))DeleteSupportVehicle(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)));
             else if(deployed.plan.units[i].resourceId>=kAircraft)DeleteSupportAircraft(deployed.objects[i]);
         }
-        deployed={};Status(L"支援部署取消，已撤销未完成的部署");return;
+        deployed={};Status(occupied ? L"部署已取消，保留玩家已经登乘的车辆及其机组" : L"支援部署取消，已撤销未完成的部署");return;
     }
     DestroyMissionCrewPlan(id);
 }

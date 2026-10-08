@@ -132,5 +132,16 @@ int main() {
     check(held==1 && boardRequests==0 && !deployments[0].assigned,"spawn before all-peer ACK holds native AI and emits no boarding request");
     transactionActive=true;++now;SupportDispatchTick();
     check(held==0 && boardRequests==1 && deployments[0].assigned,"all-peer active barrier releases held crew and starts boarding exactly once");
+    // Rollback must respect a real player's independent boarding action, on either machine.
+    for(bool remotePlayer:{false,true}) {
+        ResetSupportDispatch();made=deleted=held=0;transactionActive=false;
+        check(Spawn(20,networkPlan,false),"prepare rollback occupancy fixture");
+        unsigned char human[0x400]{},control[32]{};
+        Put<unsigned char>(human,kHumanPlayer,1);Put<void*>(human,kHumanPad,human);
+        if(remotePlayer)Put<unsigned char>(human,edf::kRiderNet+edf::kNetFlags,1);
+        Put<long>(control,edf::kCtrlUses,1);Put<void*>(seats[0],kSeatRider,human);Put<void*>(seats[0],kSeatRiderCtrl,control);
+        Destroy(20);
+        check(!deleted && !held && !deployments[0].used,"cancel preserves occupied hull and real crew, releases their holds, and drops deployment ownership");
+    }
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }

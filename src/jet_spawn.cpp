@@ -286,7 +286,11 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
 
 bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
     for(auto& own:supportAircraft)if(own.obj==ref.obj && own.ctrl==ref.ctrl && own.obj) {
-        if(Alive(own))reinterpret_cast<DeleteFn>(image+kDelete)(const_cast<void*>(own.obj));
+        if(Alive(own)) {
+            auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(own.obj));
+            for(unsigned seat=0;seat<SeatCount(vehicle);++seat)if(AnyPlayerIn(SeatAt(vehicle,seat)))return false;
+            reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);
+        }
         own={};return true;
     }
     return false;
