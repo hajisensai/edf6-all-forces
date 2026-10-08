@@ -16,7 +16,20 @@ bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
 unsigned char* PlayerHuman() noexcept {return nullptr;}
-bool IsOnlineAuthority(const void*) noexcept {return true;}
+const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
+bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}
+CommandNetworkResult networkReply{};unsigned networkSubmits=0,networkUnits=0,networkTotal=0;
+std::uint32_t networkSlots[kCommandNetUnits]{};ObjRef networkIdentities[kCommandNetUnits]{};Command networkCommand{};
+std::uint32_t SubmitMapCommand(const ObjRef&,const ObjRef* ids,unsigned count,const mapcmd::Command& command,const ObjRef&,
+    wchar_t* note,std::size_t size,const std::uint32_t* slots,std::uint32_t total) noexcept {
+    ++networkSubmits;networkUnits=count;networkTotal=total;networkCommand=command;
+    for(unsigned i=0;i<count && i<kCommandNetUnits;++i){networkIdentities[i]=ids[i];networkSlots[i]=slots ? slots[i] : 0;}
+    networkReply={};networkReply.request=91;networkReply.state=CommandNetworkState::pending;networkReply.count=count;
+    _snwprintf_s(note,size,_TRUNCATE,L"queued");return 91;
+}
+bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=networkReply;return out->request!=0;}
+bool MapCommandNetworkReady() noexcept {return true;}
+
 ObjRef NpcMarkedIdentity() noexcept {return {};}
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {
     return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
@@ -31,7 +44,7 @@ bool NpcDriver(const unsigned char* v) noexcept {
 }
 
 void Log(const char*,...) noexcept {}
-bool InSession() noexcept { return false; }
+bool InSession() noexcept { return mapOnline; }
 bool NpcMarked() noexcept { return false; }
 int CycleGuardFormation(const void*) noexcept {return -2;}
 int CycleMarchFormation() noexcept {return 0;}

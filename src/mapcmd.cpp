@@ -18,14 +18,16 @@
 //    focuses on the mark there is (made on foot or here).
 // The pointer's point: the map ray under it (mapcmd_logic.h ScreenRay on the view the HUD last drew), else that ray's
 // meeting with the level ground through the focus (RayLevel).
-// Online the commands are off (InSession): the plugin's AI runs on each machine for its own copies (the call aircraft
-// have no network identity, docs/online-re.md §1-3), so an order given here would change this machine's copy alone.
+// Online, owned units execute through their real AI authority. Replica squads are selected by native identity and
+// requested through command_net; accepted transport is displayed separately from the correlated authority result.
+// Remote vehicle commands are not fabricated by writing a local copy.
 #include "crew.h"
 #include "formation.h"
 #include "map_buttons.h"
 #include "hudtext.h"
 #include "npcai.h"
 #include "npc_command.h"
+#include "command_net.h"
 #include "online_authority.h"
 #include "layout.h"
 #include "memory.h"
@@ -50,7 +52,6 @@ constexpr float kPointerGain=1.0f;       // px (at 1080 lines) a mouse unit
 constexpr float kClickMove=6.0f;         // mouse units: a left press that moved less is a click, not a pan
 constexpr float kClickBox=6.0f;          // px: a Ctrl box smaller than this both ways is a click
 constexpr float kClickRadius=22.0f;      // px (at 1080 lines) round a unit's icon a click takes it
-constexpr float kFormationSpacing=30.0f; // m between the slots of a formation round a guard point
 
 enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
@@ -87,6 +88,9 @@ struct Game {
     ObjRef requester{},focus{};
     NpcCommandReason failure=NpcCommandReason::none;
     unsigned affected=0;
+    std::uint32_t networkRequest=0;unsigned networkQueued=0;
+    Order networkOrder=Order::none;
+    wchar_t networkMessage[128]{};
 };
 Game game{};
 std::atomic<bool> boxingNow{false};
@@ -163,13 +167,6 @@ bool GroundAlong(const float* eye,const float* dir,float level,float* point) noe
     if(MapFloorRay(eye,end,hit)>=0.0f && std::isfinite(hit[0]+hit[1]+hit[2])){std::memcpy(point,hit,12);return true;}
     return mapcmd::RayLevel(eye,dir,level,point);
 }
-// The ground under (x, z) on the level of height `y` a unit can stand on (a formation slot round a guard point in a
-// cave: its floor, not the roof over it nor a level above; over a building: its roof, not the ground inside it), else `y`.
-float GroundAt(float x,float z,float y) noexcept {
-    float h;
-    return MapGroundNear(x,z,y,&h,true) ? h : y;
-}
-
 Keys ReadKeys(const MapCmdInput& in) noexcept {
     Keys k{};
     if(in.front) {
@@ -404,24 +401,71 @@ void Refresh(Game& g,const void** ids) noexcept {
     for(int i=0;i<g.count;++i)ids[i]=g.list[i].u.v;
     KeepSelection(g,ids);
 }
+void CommandNetworkReply(Game& g) noexcept {
+    if(!g.networkRequest)return;
+    CommandNetworkResult result;
+    if(!ReadMapCommandNetworkResult(&result) || result.request!=g.networkRequest || result.state==CommandNetworkState::pending)return;
+    using hudtext::Tx;using hudtext::Tr;
+    if(result.state==CommandNetworkState::completed) {
+        unsigned accepted=0,affected=0;NpcCommandReason failure=NpcCommandReason::none;
+        for(unsigned i=0;i<result.count && i<kCommandNetUnits;++i) {
+            if(result.units[i].Accepted()){++accepted;affected+=result.units[i].affected;}
+            else if(failure==NpcCommandReason::none)failure=result.units[i].reason;
+        }
+        if(!accepted)Note(g,L"%ls",CommandFailureText(failure));
+        else Note(g,Tr(Tx::cmdNpcNetworkDone),OrderText(g.networkOrder),accepted,result.count,affected,
+            failure==NpcCommandReason::none ? L"" : CommandFailureText(failure));
+    } else Note(g,L"%ls",Tr(result.state==CommandNetworkState::timedOut ? Tx::cmdNpcNetworkTimeout :
+        result.state==CommandNetworkState::interrupted || result.state==CommandNetworkState::stale ? Tx::cmdNpcNetworkInterrupted : Tx::cmdNpcNetworkUnavailable));
+    g.networkRequest=0;
+}
 
 // The command to every selected unit; a guard's formation round the point (helis sharing one orbit stay on it).
 int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
     int k=0;
     g.failure=NpcCommandReason::none;g.affected=0;
+    g.networkQueued=0;g.networkMessage[0]=0;
     *skipped=0;
     for(int i=0;i<g.count;++i)k+=g.sel.Has(g.list[i].u.v) && Takes(g.list[i],cmd.order) ? 1 : 0;
+    ObjRef remote[kCommandNetUnits];std::uint32_t remoteSlots[kCommandNetUnits]{};unsigned remotes=0;
     const bool share=HeliSharesPost();
-    int given=0,slot=0;
+    std::uint32_t slots[kCmdUnits]{};std::uint32_t slot=0;
+    for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v) && Takes(g.list[i],cmd.order)) {
+        slots[i]=slot;
+        if(!(g.list[i].owner==Owner::heli && share))++slot;
+    }
+    if(InSession())for(int i=0;i<g.count;++i) {
+        const auto& e=g.list[i];
+        if(g.sel.Has(e.u.v) && e.owner==Owner::squad && Takes(e,cmd.order) && !IsOnlineAuthority(e.u.v)) {
+            if(remotes<kCommandNetUnits){remote[remotes]=ObjRef::Of(e.u.v);remoteSlots[remotes]=slots[i];}++remotes;
+        }
+    }
+    if(remotes>kCommandNetUnits) {
+        *skipped=k;g.failure=NpcCommandReason::unsupported;
+        _snwprintf_s(g.networkMessage,_countof(g.networkMessage),_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::cmdNpcNetworkLimit));return 0;
+    }
+    if(remotes) {
+        const auto request=SubmitMapCommand(g.requester,remote,remotes,cmd,g.focus,g.networkMessage,_countof(g.networkMessage),
+            cmd.order==Order::guard ? remoteSlots : nullptr,cmd.order==Order::guard ? static_cast<std::uint32_t>(k) : 0);
+        if(request){g.networkRequest=request;g.networkQueued=remotes;g.networkOrder=cmd.order;}
+    }
+    int given=0;
     for(int i=0;i<g.count;++i) {
         Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v))continue;
         if(!Takes(e,cmd.order)){g.failure=e.u.locked ? NpcCommandReason::scripted : NpcCommandReason::unsupported;++*skipped;continue;}
-        if(!IsOnlineAuthority(e.u.v)){g.failure=NpcCommandReason::notAuthority;++*skipped;continue;}
+        if(!IsOnlineAuthority(e.u.v)) {
+            if(e.owner==Owner::squad && g.networkQueued)continue;
+            g.failure=NpcCommandReason::notAuthority;++*skipped;continue;
+        }
         Command c=cmd;
         if(cmd.order==Order::guard && !(e.owner==Owner::heli && share)) {
-            mapcmd::Formation(slot++,k,cmd.at,kFormationSpacing,c.at);
-            c.at[1]=GroundAt(c.at[0],c.at[2],cmd.at[1]);
+            mapcmd::Formation(static_cast<int>(slots[i]),k,cmd.at,mapcmd::kFormationSpacing,c.at);
+            float ground;
+            if(!MapGroundNear(c.at[0],c.at[2],cmd.at[1],&ground,true) || !std::isfinite(ground)) {
+                g.failure=NpcCommandReason::noTarget;++*skipped;continue;
+            }
+            c.at[1]=ground;
         }
         if(!Give(g,e,c)){if(g.failure==NpcCommandReason::none)g.failure=NpcCommandReason::failed;++*skipped;continue;}
         e.u.now=c;
@@ -541,6 +585,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
 bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     Game& g=game;
     g.requester=in.requester.obj ? in.requester : ObjRef::Of(PlayerHuman());
+    CommandNetworkReply(g);
     const ULONGLONG now=GetTickCount64();
     const Keys k=ReadKeys(in);
     View v{};
@@ -646,7 +691,9 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         const int given=Issue(g,s.cmd,&skipped);
         wchar_t tail[40]{};
         if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
-        if(!given && g.failure!=NpcCommandReason::none)Note(g,L"%ls",CommandFailureText(g.failure));
+        if(g.networkQueued)Note(g,Tr(Tx::cmdNpcNetworkQueued),OrderText(s.cmd.order),g.networkQueued,given);
+        else if(!given && g.networkMessage[0])Note(g,L"%ls",g.networkMessage);
+        else if(!given && g.failure!=NpcCommandReason::none)Note(g,L"%ls",CommandFailureText(g.failure));
         else if(s.cmd.order==Order::board)Note(g,Tr(Tx::cmdBoardAssigned),g.affected,tail);
         else if(s.cmd.order==Order::guard)Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);

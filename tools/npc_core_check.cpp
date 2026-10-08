@@ -24,6 +24,16 @@ bool PrepareNpcVehicle(unsigned char*,bool) noexcept { return true; }
 int announcedBoards=0;
 bool AnnounceNpcBoarding(unsigned char*) noexcept { ++announcedBoards;return true; }
 bool AnnounceNpcDismount(unsigned char*) noexcept { return true; }
+#ifndef NPC_CORE_EXTERNAL_COMMAND_NETWORK
+NpcCommandExecutor configuredExecutor=nullptr;
+void ConfigureNpcCommandNetwork(NpcCommandExecutor execute) noexcept {configuredExecutor=execute;}
+#endif
+#ifndef NPC_CORE_EXTERNAL_COMMAND_IDENTITY
+bool ReadNativeObjectId(const unsigned char* object,unsigned char* id) noexcept {
+    if(!object || !id)return false;std::memset(id,0,32);
+    const auto value=reinterpret_cast<std::uintptr_t>(object);std::memcpy(id,&value,sizeof(value));id[24]=5;return true;
+}
+#endif
 unsigned char* image=nullptr;
 PlayerFix player{};
 const void* heldSupportActor=nullptr;
@@ -297,6 +307,18 @@ int main() {
     Expect(q->cmd.order==Order::guard,"a recruited squad told to guard keeps guarding while the player still leads it");
     ++frame;++now;SeeSquad(human,human,0,npc::Control::script,now);
     Expect(q->cmd.order==Order::none,"a script taking the squad drops the player's order");
+    // Replicas are visible for RPC selection without being inserted into this peer's AI tables.
+    {
+        Reset();sessionOn=true;host=false;Put<void*>(human,kLeader,nullptr);Put<void*>(human,kSelfCtrl,ctrl);
+        Put<unsigned char>(human,edf::kRiderNet+edf::kNetFlags,1);Put<float>(human,kMoveX,0.37f);human[kTrigger]=1;
+        const int previousFollows=follows;CommandSquadVisit(nullptr,human);remoteSquadFrame=frame;
+        CommandUnit units[2]{};SquadRow rows[2]{};
+        Expect(SquadCommandUnits(units,2)==1 && units[0].v==human && SquadRows(rows,2)==1 && rows[0].identity.ctrl==ctrl,
+            "read-only remote snapshot publishes actual native squad identity without local Think");
+        Expect(!FindSquad(human) && follows==previousFollows && At<float>(human,kMoveX)==0.37f && human[kTrigger]==1,
+            "remote listing never creates local AI state or changes move/fire/follow intents");
+        ResetNpcAi();Expect(remoteSquadCount==0,"mission reset drops the replica selection snapshot");
+    }
     // Commands use physical ownership and one consistent visible/dispatch freshness window.
     {
         Reset();Put<void*>(human,kLeader,nullptr);playerObj=other;
@@ -383,7 +405,7 @@ int main() {
         }
         Expect(result.Accepted() && std::strcmp(behavior.move,"at its post")==0 && At<float>(human,kMoveX)>0,
             "guard command runs production MoveTo/navigation and writes actual movement intent");
-        unsigned char enemy[0x300]{},enemyCtrl[0x10]{};Put<void*>(enemy,kSelfCtrl,enemyCtrl);Put<long>(enemyCtrl,8,1);
+        unsigned char enemy[0x300]{},enemyCtrl[0x10]{};Put<void*>(enemy,kSelfCtrl,enemyCtrl);Put<long>(enemyCtrl,8,1);Put<long>(enemyCtrl,12,1);
         world.enemies=1;world.enemy[0]=Enemy{enemy,{0,0,20},1};++frame;SeeSquad(human,human,0,npc::Control::free,now);
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
         behavior=Drive(*soldier,human,kSoldiers[0],available,nullptr,eyePoint,Pos(human),commandSquad,now);
@@ -393,6 +415,9 @@ int main() {
         result=NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::focus,{}},ObjRef::Of(other),ObjRef::Of(enemy));
         Expect(result.Accepted() && commandSquad->commandFocus.Is(enemy) && !NpcMarked(),
             "requester's explicit attack target belongs to that squad and does not replace host's global marker");
+        Expect(At<long>(enemyCtrl,12)==2,"squad focus pins the borrowed RPC target identity between frames");
+        NpcSquadCommandForRequester(ObjRef::Of(human),Command{Order::engage,{}},ObjRef::Of(other),{});
+        Expect(At<long>(enemyCtrl,12)==1 && !commandSquad->commandFocus,"replacing focus releases exactly its weak identity reference");
     }
     // The player a soldier fights for is the one who recruited its squad, whichever machine's (this harness's
     // PlayerHuman is nullptr: `other` stands for another machine's player).

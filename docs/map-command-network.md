@@ -69,3 +69,13 @@ executor separately and through the command dispatch regression.
 No running game, game installation write or two-machine gameplay test is part of
 these checks. Real movement, boarding animations and remote convergence remain
 gameplay acceptance boundaries.
+
+## 地图接线与实际执行
+
+客户端地图通过独立只读原生友军遍历列出远端小队，不调用这些副本的 Think、Gather 或 SeeSquad，也不修改移动、射击、跟随关系。小队行传递绘制时的 ObjRef，重新排序、对象更换或失焦不会把旧点击应用给别的行。只有当前选择真正支持的命令才在 HUD 中启用。
+
+本机拥有 AI 权威的单位走真实执行入口；远端小队通过一次最多 16 队的 RPC 请求执行。混合选择先按同一排序计算全局 guard 阵形槽和总数，远端报文传槽号，不预先偏移坐标；本机及房主均使用相同间距并要求真实近地面命中。UI 区分排队与权威端逐项受理，显示过期、归属、脚本控制、无车辆、无兼容空座和超时原因，不把发送成功当作完成登车。
+
+ForRequester 使用消息认证后的真实玩家，而非房主 PlayerHuman。原生跟随另一名玩家的队伍不可抢占；上下车逐成员核验 authority 与实际空席。队长职业不再代表所有队员，车辆选择按成员可用的实际座位入口距离；队员已在执行有效登车任务时不重复清空或延长任务。host 所有的 NPC 可通过原有 host 登车权限进入 guest 控制车辆的空副席，已占驾驶席保持不变。每队明确攻击目标使用独立弱引用，不覆盖房主的全局 Q 标记；换令、回收小队记录与任务重置释放引用。
+
+验证包括生产 MapCommandFrame/Issue 的 UI 捕获、失焦与视口变更、混合阵形与结果关联；实际 npcai ForRequester→Board→原生 Ride 调用/公告入口，以及 guard→MoveTo、engage→目标取得/战斗移动。网络完整认证/去重/原生 ID 跨层测试另由 command_native_dispatch_test 执行。离线夹具不代替双机游戏验收。

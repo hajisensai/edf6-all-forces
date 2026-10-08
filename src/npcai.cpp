@@ -20,6 +20,7 @@
 // does (§2.1).
 #include "crew.h"
 #include "npc_command.h"
+#include "command_net.h"
 #include "layout.h"
 #include "memory.h"
 #include "formation.h"
@@ -290,6 +291,7 @@ void KeepMark() noexcept {
 
 void SweepFrame() noexcept;   // the box sweep (below): its key and who goes for which box, once a frame
 void ResetSweep() noexcept;   // ...over, a new mission
+void ResetCommandSnapshots() noexcept;
 void InstallBoxes() noexcept;   // ...at load: the item boxes' code checked
 
 // --- Formations (formation.h; the user, 2026-10-08) ---
@@ -743,7 +745,7 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
         for(auto& e:squads)if(!e.top || (ms-e.seen>kSquadSeenMs*4 && (!e.dismissed || ms-e.seen>kDismissedGoneMs))){q=&e;break;}
         if(!q)return nullptr;
         if(q->dismissed)--dismissedCount;
-        *q=Squad{};q->top=ObjRef::Of(top);q->cls=cls;
+        npcmark::Assign(q->commandFocus,{});*q=Squad{};q->top=ObjRef::Of(top);q->cls=cls;
     }
     if(h==top)q->cls=cls;
     ++q->counting;
@@ -759,6 +761,7 @@ Squad* SeeSquad(unsigned char* top,const unsigned char* h,int cls,npc::Control c
         if(q->cmd.order!=Order::none && npc::LeadOf(q->control)!=q->cmdLead) {
             Log("NPCAI squad %p: led by %s now, its order dropped",top,ControlName(q->control));
             q->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
+            npcmark::Assign(q->commandFocus,{});
         }
         // The script let it go (its route ended, it was unfollowed, its position freed) and has not taken it back
         // within ScriptNpcSettleSec: a squad of the plugin's now; with ScriptNpcRecruit the player may recruit it.
@@ -881,7 +884,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     Pick t=engage>0.0f ? PickTarget(s,eye,anchor,o.leash+engage) : Pick{nullptr,0.0f};
     // The mark first (§6.3): always for a squad told to focus on it, else when within its reach plus its leash.
     const Enemy* commandTarget=nullptr;
-    if(q && q->cmd.order==Order::focus && q->commandFocus) {
+    if(q && q->cmd.order==Order::focus && npcmark::Alive(q->commandFocus)) {
         for(int i=0;i<world.enemies;++i)if(q->commandFocus.Is(world.enemy[i].object)){commandTarget=&world.enemy[i];break;}
     }
     if(const Enemy* m=commandTarget ? commandTarget : MarkedEnemy()) {
@@ -1167,13 +1170,15 @@ bool InstallNpcAi() noexcept {
     ok=hooked==kClasses;
     Log("NPCAI soldiers' Think hooked %d/%d%s",hooked,kClasses,ok ? "" : ": the custom AI stays off");
     if(ok)InstallDriverPayload();
+    ConfigureNpcCommandNetwork(ok ? &NpcSquadCommandForRequester : nullptr);
     return ok;
 }
 
 void ResetNpcAi() noexcept {
+    ResetCommandSnapshots();
     ResetGunnerInputs();ResetDriverPayload();
     for(auto& s:soldiers)s=Soldier{};
-    for(auto& q:squads)q=Squad{};
+    for(auto& q:squads){npcmark::Assign(q.commandFocus,{});q=Squad{};}
     cooldowns=npc::Cooldowns<kMaxSquads>{};
     dismissedCount=0;
     npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};
@@ -1187,10 +1192,52 @@ void ResetNpcAi() noexcept {
 
 // --- The squads on the map (§6) ---
 namespace {
-char squadNames[kMaxSquads][24];
+char squadNames[kMaxSquads*2][24];
 const char* kClassWords[kClasses]={"RANGER","WING DIVER","FENCER","AIR RAIDER"};
 // Counted by its soldiers' Think within kSquadSeenMs: alive then (the map reads no object it has not seen lately).
-bool Live(const Squad& q,ULONGLONG ms) noexcept { return q.top && q.seen && ms-q.seen<=kSquadSeenMs; }
+bool Live(const Squad& q,ULONGLONG ms) noexcept {
+    __try {
+        const auto* top=static_cast<const unsigned char*>(q.top.obj);
+        return q.top && q.seen && ms-q.seen<=kSquadSeenMs && Readable(top,kHumanVehicleCtrl+8) &&
+            q.top.Is(top) && !top[kDead] && !(top[kObjectFlags]&4) && IsSoldierClass(top) && !IsAnyPlayer(top);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+struct RemoteSquad {
+    ObjRef top{};int cls=0,alive=0;npc::Control control=npc::Control::free;float pos[3]{};
+};
+RemoteSquad remoteSquads[kMaxSquads]{};int remoteSquadCount=0;ULONGLONG remoteSquadFrame=~ULONGLONG{0};
+void ResetCommandSnapshots() noexcept {remoteSquadCount=0;remoteSquadFrame=~ULONGLONG{0};}
+struct CommandSquadVisitor { const void* const* vtable; };
+void __fastcall CommandSquadIgnore(void*) noexcept {}
+void __fastcall CommandSquadVisit(CommandSquadVisitor*,unsigned char* human) noexcept {
+    __try {
+        if(!IsSoldierClass(human) || !Readable(human,kHumanVehicleCtrl+8) || IsAnyPlayer(human) || human[kDead] || (human[kObjectFlags]&4))return;
+        auto* top=TopNpc(human);
+        if(!top || !Readable(top,kHumanVehicleCtrl+8) || top[kDead] || IsOnlineAuthority(top))return;
+        const auto identity=ObjRef::Of(top);
+        unsigned char nativeId[32];if(!identity.ctrl || !ReadNativeObjectId(top,nativeId))return;
+        for(int i=0;i<remoteSquadCount;++i)if(remoteSquads[i].top.obj==top && remoteSquads[i].top.ctrl==identity.ctrl){++remoteSquads[i].alive;return;}
+        if(remoteSquadCount==kMaxSquads)return;
+        auto& row=remoteSquads[remoteSquadCount++];row={};row.top=identity;row.alive=1;
+        const auto vt=At<const unsigned char*>(top,0);
+        for(int i=0;i<kClasses;++i)if(vt==image+kSoldiers[i].vtable)row.cls=i;
+        row.control=ControlOf(top,RootLeader(top));std::memcpy(row.pos,Pos(top),12);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+void RefreshCommandSnapshots() noexcept {
+    if(!InSession() || !ok || !Cfg().enabled || !Cfg().customNpcAi){remoteSquadCount=0;return;}
+    if(remoteSquadFrame==GameFrame())return;
+    remoteSquadFrame=GameFrame();remoteSquadCount=0;
+    // This read-only scene walk must not call SeeSquad/Think/Gather on replicas. They have no local
+    // AI table entry, but their actual native identity is sufficient to select and request authority.
+    constexpr unsigned char sig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57};
+    __try {
+        if(!Matches(kTeamWalk,sig,sizeof(sig)))return;
+        auto* manager=At<void*>(image,kTeamManager);if(!Readable(manager,0x50))return;
+        static const void* const table[]={reinterpret_cast<const void*>(&CommandSquadIgnore),reinterpret_cast<const void*>(&CommandSquadVisit)};
+        CommandSquadVisitor visitor{table};reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,player.team,&visitor);
+    } __except(EXCEPTION_EXECUTE_HANDLER){remoteSquadCount=0;}
+}
 const char* StatusOf(const Squad& q,ULONGLONG ms,char* buf,std::size_t size) noexcept {
     if(q.dismissed){std::snprintf(buf,size,"WAIT %llus",static_cast<unsigned long long>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000));return buf;}
     switch(q.control) {
@@ -1209,13 +1256,20 @@ int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     if(!ok || !Cfg().customNpcAi)return 0;
     const ULONGLONG ms=GameMs();
     int n=0;
-    static char status[kMaxSquads][16];
+    RefreshCommandSnapshots();
+    static char status[kMaxSquads*2][16];
     for(int i=0;i<kMaxSquads && n<most;++i) {
         const Squad& q=squads[i];
-        if(!Live(q,ms))continue;
-        std::snprintf(squadNames[i],sizeof(squadNames[i]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
-        out[n]=CommandUnit{q.top.obj,squadNames[i],q.cmd,false,{},npc::Scripted(q.control),StatusOf(q,ms,status[i],sizeof(status[i]))};
+        if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
+        std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive>0 ? q.alive : 1);
+        out[n]=CommandUnit{q.top.obj,squadNames[n],q.cmd,false,{},npc::Scripted(q.control),StatusOf(q,ms,status[n],sizeof(status[n]))};
         std::memcpy(out[n++].pos,static_cast<const unsigned char*>(q.top.obj)+kPosition,12);
+    }
+    for(int i=0;i<remoteSquadCount && n<most && n<kMaxSquads*2;++i) {
+        const auto& q=remoteSquads[i];
+        std::snprintf(squadNames[n],sizeof(squadNames[n]),"%s x%d",kClassWords[q.cls],q.alive);
+        out[n]={q.top.obj,squadNames[n],{},false,{},npc::Scripted(q.control),"REMOTE"};
+        std::memcpy(out[n++].pos,q.pos,12);
     }
     return n;
 }
@@ -1224,9 +1278,10 @@ int SquadRows(SquadRow* out,int most) noexcept {
     if(!ok || !Cfg().customNpcAi)return 0;
     const ULONGLONG ms=GameMs();
     int n=0;
+    RefreshCommandSnapshots();
     for(int i=0;i<kMaxSquads && n<most;++i) {
         const Squad& q=squads[i];
-        if(!Live(q,ms))continue;
+        if(!Live(q,ms) || (InSession() && !IsOnlineAuthority(q.top.obj)))continue;
         SquadRow& r=out[n++];
         r.leader=q.top.obj;
         r.identity=q.top;
@@ -1236,6 +1291,11 @@ int SquadRows(SquadRow* out,int most) noexcept {
         r.alive=q.alive>0 ? q.alive : 1;
         r.cooldown=q.dismissed ? static_cast<int>((cooldowns.Left(SquadKey(q.top.obj),ms)+999)/1000) : 0;
         r.now=q.cmd;r.locked=npc::Scripted(q.control);
+    }
+    for(int i=0;i<remoteSquadCount && n<most;++i) {
+        const auto& q=remoteSquads[i];auto& row=out[n++];row={};
+        row.leader=q.top.obj;row.identity=q.top;row.alive=q.alive;row.locked=npc::Scripted(q.control);
+        std::snprintf(row.name,sizeof(row.name),"%s",kClassWords[q.cls]);std::snprintf(row.status,sizeof(row.status),"%s",row.locked ? "SCRIPT" : "REMOTE");
     }
     return n;
 }
@@ -1829,7 +1889,7 @@ bool MergeSquads(const void* into,const void* from) noexcept {
         if(na+nb>kMaxSquad || !CanRegroup(aMembers,na) || !CanRegroup(bMembers,nb))return false;
         CancelBoarding(other);
         Follow(other,top);
-        *b=Squad{};   // no stale panel/roster entry may command the former top and form a follow cycle
+        npcmark::Assign(b->commandFocus,{});*b=Squad{};   // no stale panel/roster entry may command the former top and form a follow cycle
         Log("NPCAI squad %p joins squad %p",other,top);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -1987,7 +2047,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             if(!focus.obj || !Readable(focus.obj,kDead+1) || static_cast<const unsigned char*>(focus.obj)[kDead])return CommandResult(Reason::noTarget);
             CommandFocusCheck checked{focus};VisitEnemiesOf(caller ? callerTeam : team,&SeeCommandFocus,&checked);
             if(!checked.found)return CommandResult(Reason::noTarget);
-            q->cmd=c;q->cmdLead=npc::LeadOf(control);std::memcpy(q->cmd.at,checked.at,12);q->commandFocus=focus;break;
+            q->cmd=c;q->cmdLead=npc::LeadOf(control);std::memcpy(q->cmd.at,checked.at,12);npcmark::Assign(q->commandFocus,focus);break;
         }
         case Order::none:q->cmd={};break;
         case Order::follow:
@@ -2012,7 +2072,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             if(!DismountSquad(top,&affected))return CommandResult(Reason::noSeat);break;
         default:return CommandResult(Reason::unsupported);
         }
-        if(c.order!=Order::focus)q->commandFocus={};
+        if(c.order!=Order::focus)npcmark::Assign(q->commandFocus,{});
         if(c.order!=Order::board)CancelBoarding(top);
         q->routeActive=false;q->routeCancelled=true;
         return CommandResult(Reason::none,static_cast<unsigned>(affected));
