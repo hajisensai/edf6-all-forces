@@ -731,13 +731,22 @@ void HailTick() noexcept {
     Hail(*best,ms);
 }
 
-// crew.cpp's question (PlayerJetBoardable): one of ours of our side, alive, not leaving, low and slow.
-bool BoardableNow(const unsigned char* v) noexcept {
+// The supported, live friendly aircraft, before walking reach/speed checks.
+bool BoardingSupported(const unsigned char* v) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet || v[kDead] || !BoardRowOf(v))return false;
     const std::int32_t team=At<std::int32_t>(v,kTeam);
     if(team!=jet::kTeamFriend && team!=kTeamVehicle && team!=player.team)return false;
     const jet::Jet* const e=jet::FindJet(v);
     if(e && (e->reap || e->drone.blastAt))return false;
+    return true;
+}
+
+bool BoardableNow(const unsigned char* v) noexcept {
+    if(!BoardingSupported(v))return false;
+    // The gun has already made an actual collision with this exact aircraft. The
+    // transient stock-button call supplies its seat point; walking reach is irrelevant.
+    if(BoardingOnly()==v)return true;
+    const jet::Jet* const e=jet::FindJet(v);
     // The catch's (Left: it came back for the parachuting player) is boarded in the air at its speed, as the player
     // jet's catch is: the low-and-slow gate below is for one standing by, and turned the catch's every board press
     // down (no seat for them: "not aboard yet" under the parachute for 45 s, then handed back to its NPC).

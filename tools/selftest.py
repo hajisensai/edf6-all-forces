@@ -460,10 +460,13 @@ def calls_table_consistent() -> None:
 def boarding_tag_in_plugin() -> None:
     """The boarding gun's tag: src/boarding.cpp compares the bits call_weapons.gun_tag writes (1 + mark ulps)."""
     guns = [c for c in calls.CALLS if c.brings == 'gun']
-    assert len(guns) == 1, 'one boarding gun'
+    assert len(guns) == 4 and len({c.gun for c in guns}) == 4, 'one native gun per class'
+    assert {c.mark for c in guns} == {7301, 7302, 7303, 7304}, 'one reserved collision tag per class'
+    assert 'bits>=kTagBits && bits<=kTagBits+3u' in src('src/boarding.cpp')
     bits = re.search(r'kTagBits=0x3F800000u\+(\d+)u;', src('src/boarding.cpp'))
     assert bits and int(bits.group(1)) == int(guns[0].mark) == guns[0].mark, "src/boarding.cpp kTagBits is not the gun's mark"
     assert cw.gun_tag_bits(guns[0].mark) == 0x3F800000 + int(guns[0].mark)
+    assert [c.gun for c in guns] == ['aWeapon081', 'pWeapon127', 'eWeapon120', 'hCannon01']
     assert '#include' in src('src/boarding.cpp') and 'src/boarding.cpp' in src('CMakeLists.txt')
 
 
@@ -479,6 +482,9 @@ def boarding_debug_gun_parameters_and_text() -> None:
         curves[key] = [base, float(i + 10), 0.5, 2.0, 1.0]
         root.set(key, dsgo.Node(curves[key].copy()))
     root.set('AmmoAlive', 40.0)
+    for key in cw.GUN_SCALARS:
+        if key not in root.names.values():
+            root.set(key, 0.0)
     root.set('FireRecoil', 3.0)
     root.set('AmmoColor', dsgo.Node([0.25, 0.5, 0.75, 1.0]))
     template = dsgo.write(dsgo.Document(root, []))
@@ -503,6 +509,39 @@ def boarding_debug_gun_parameters_and_text() -> None:
         changed = cw._text_row(row, gun, lang, gun=cw.gun_stats(template))
         assert [st.items[2].items[0] for st in changed.items[2].items] == expected, lang
         assert changed.items[2].items[-1] == damage, 'damage and its star parameters stay unchanged'
+
+
+@test
+def boarding_all_classes_stock_resources() -> None:
+    """When Root.cpk is available, generate actual class-native weapons and every locale's menu rows."""
+    import rootcpk
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.DEFAULT_GAME
+    rows = cw._rows(dsgo.parse(cw.stock(game, cw.TABLE)), cw.TABLE)
+    ids = [r.items[0] for r in rows]
+    expected = [('aWeapon081', 2, 'Weapon_BasicShoot'),
+                ('pWeapon127', 104, 'Weapon_PreChargeShoot'),
+                ('eWeapon120', 303, 'Weapon_BasicShoot'),
+                ('hCannon01', 204, 'Weapon_HeavyShoot')]
+    guns = [c for c in calls.CALLS if c.brings == 'gun']
+    for call, (name, category, weapon_class) in zip(guns, expected):
+        template = cw.stock(game, f'WEAPON/{name.upper()}.SGO')
+        original = dsgo.parse(template).root
+        weapon = dsgo.parse(cw.gun_sgo(template, call)).root
+        index = ids.index(name)
+        row = cw._table_row(rows[index], call)
+        assert row.items[2] == category and row.items[0] == call.id
+        assert weapon.get('xgs_scene_object_class') == weapon_class
+        for key in ('animation_model', 'ModelConstraint', 'Sight_animation_model'):
+            assert dsgo.to_py(weapon.get(key)) == dsgo.to_py(original.get(key)), (call.id, key)
+        assert weapon.get('AmmoClass') == 'SolidBullet01'
+        assert weapon.get('AmmoExplosion') == weapon.get('AmmoGravityFactor') == 0
+        assert weapon.get('SecondaryFire_Type') == 1
+        assert weapon.get('Ammo_CustomParameter').items == []
+        for lang, rel in zip(cw.LANGS, cw.TEXTS):
+            texts = cw._rows(dsgo.parse(cw.stock(game, rel)), rel)
+            cw._text_row(texts[index], call, lang, gun=cw.gun_stats(template))
 
 
 @test

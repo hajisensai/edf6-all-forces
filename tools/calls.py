@@ -161,6 +161,10 @@ CALLS: tuple[Call, ...] = (
     # player pilots, requested empty like the player jets; `mark` its body's (pylib/vcobjects.py SAZABI_MARK).
     Call('EDF6VC_CALL_SAZABI', 7401, 'sazabi', False, 0, 15000, 2.6, 'vehicle', vehicle='EDF6VC_SAZABI',
          jet='edf6tr_sazabi_mission'),
+    # Append-only: retain each class's native weapon model, handling and equipment category.
+    Call('EDF6VC_CALL_BOARDING_GUN_WING', 7302, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='pWeapon127'),
+    Call('EDF6VC_CALL_BOARDING_GUN_RAIDER', 7303, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='eWeapon120'),
+    Call('EDF6VC_CALL_BOARDING_GUN_FENCER', 7304, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='hCannon01'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -182,6 +186,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'boarding gun (integrated 2026-10-06)': IDS[:37],
     'medic helis (2026-10-06)': IDS[:39],
     'Sazabi (2026-10-07)': IDS[:40],
+    'all-class boarding rifles (2026-10-08)': IDS[:43],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -401,17 +406,17 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                              'through buildings and rock. Melee: it fires no shells.'),
     },
     'boarding_gun': {
-        'SC': ('登车狙击枪', '调试用。装有激光瞄准器和 5.5 倍狙击镜的狙击枪：子弹瞬间到达（1500 米约 0.03 秒）、没有散布和后坐力，'
+        'SC': ('登车狙击枪', '调试用。使用本职业武器模型、瞄具和射击操作的狙击枪：子弹瞬间到达（1500 米约 0.03 秒）、没有散布和后坐力，'
                         '弹匣 999 发、1 帧换弹、每秒 10 发。子弹打中己方载具时不造成伤害，而是让你立刻坐进那台载具'
                         '（优先驾驶座；NPC 驾驶的载具，NPC 挪到副座或下车）。对敌人照常造成伤害。'),
-        'CN': ('登車狙擊槍', '除錯用。裝有雷射瞄準器和 5.5 倍狙擊鏡的狙擊槍：子彈瞬間到達（1500 公尺約 0.03 秒）、沒有散布和後座力，'
+        'CN': ('登車狙擊槍', '除錯用。使用本職業武器模型、瞄具和射擊操作的狙擊槍：子彈瞬間到達（1500 公尺約 0.03 秒）、沒有散布和後座力，'
                         '彈匣 999 發、1 幀換彈、每秒 10 發。子彈打中己方載具時不造成傷害，而是讓你立刻坐進那台載具'
                         '（優先駕駛座；NPC 駕駛的載具，NPC 挪到副座或下車）。對敵人照常造成傷害。'),
-        'JA': ('搭乗狙撃銃', 'デバッグ用。レーザーサイトと 5.5 倍スコープ付きの狙撃銃。弾は一瞬で届き（1500 m を約 0.03 秒）、'
+        'JA': ('搭乗狙撃銃', 'デバッグ用。兵科固有のモデル・スコープ・射撃操作を使う狙撃銃。弾は一瞬で届き（1500 m を約 0.03 秒）、'
                         '弾のばらつきと反動はなく、装弾数 999・リロード 1 フレーム・毎秒 10 発。味方のビークルに命中すると、'
                         'ダメージを与えずにそのビークルへ即座に搭乗する（運転席を優先。NPC が運転中なら NPC は副座へ移るか降車する）。'
                         '敵には通常どおりダメージを与える。'),
-        'EN': ('Boarding Rifle', 'A debugging tool: a sniper rifle with a laser sight and a 5.5x scope whose rounds '
+        'EN': ('Boarding Rifle', 'A debugging tool: a sniper rifle retaining the class-specific model, scope and firing controls, whose rounds '
                                  'arrive at once (1500 m in about 0.03 s), with no spread and no recoil, 999 rounds, a '
                                  'one-frame reload and 10 shots a second. A round that hits a friendly vehicle does it '
                                  'no harm and puts you in it at once (the driver seat first; an NPC driver moves to a '

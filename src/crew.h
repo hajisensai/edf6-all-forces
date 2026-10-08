@@ -851,6 +851,7 @@ bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the
 // vehicle. Broadphase candidates alone never request boarding; FrameTick handles the pending actual hit.
+bool PlayerJetBoardingSupported(const void* vehicle) noexcept; // aircraft controls, without the on-foot reach/speed gate
 void BoardingTick() noexcept;
 bool InstallBoarding() noexcept;   // after CheckHeliProfile (the board button)
 void ResetBoarding() noexcept;

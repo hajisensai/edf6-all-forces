@@ -1909,6 +1909,11 @@ bool PlayerJetHailHint(const float* from,float* at,float* distance,bool* coming)
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+bool PlayerJetBoardingSupported(const void* vehicle) noexcept {
+    __try { return BoardingSupported(static_cast<const unsigned char*>(vehicle)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool PlayerJetBoardable(const void* vehicle) noexcept {
     __try { return BoardableNow(static_cast<const unsigned char*>(vehicle)); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
