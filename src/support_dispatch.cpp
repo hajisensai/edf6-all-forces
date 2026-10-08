@@ -22,6 +22,8 @@ bool NpcPrepareVehiclePost(unsigned char*,const float*) noexcept;
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept;
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept;
 void ReportSupportFailure(std::uint64_t) noexcept;
+bool SupportTransactionActive(std::uint64_t) noexcept;
+bool HoldSupportSoldier(const ObjRef&,bool) noexcept;
 namespace {
 constexpr std::uint32_t kSoldier=kSupportRangerResource,kLeader=kSupportLeaderResource,
     kAircraft=kSupportAircraftResource,kVehicle=kSupportVehicleResource;
@@ -33,7 +35,7 @@ struct Planning {
 };
 Planning planning{};
 struct Deployment {
-    bool used=false,remote=false,started=false,delivered=false,networked=false;
+    bool used=false,remote=false,started=false,delivered=false,networked=false,assigned=false;
     std::uint64_t id=0;ULONGLONG born=0;
     SupportPlan plan{};ObjRef objects[support_net::kMaxUnits]{};
     npc::navigation::State navigation{};
@@ -215,6 +217,8 @@ bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
         const auto& unit=plan.units[i];ObjRef object;
         if(unit.resourceId<kAircraft) {
             if(!ApplySupportSoldierSpawn(unit.matrix,unit.resourceId==kLeader,InSession() ? unit.netId : nullptr,&object)){Destroy(id);return false;}
+            deployed->objects[i]=object;
+            if(!HoldSupportSoldier(object,true)){Destroy(id);return false;}
         } else {
             unsigned char* vehicle=nullptr;
             if(unit.resourceId<kVehicle) {
@@ -230,17 +234,24 @@ bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
         }
         deployed->objects[i]=object;
     }
-    ObjRef leader;
+    Status(L"支援已在入口集结，等待所有玩家确认对象");return true;
+}
+bool Assign(Deployment& deployed) noexcept {
+    const auto& plan=deployed.plan;ObjRef leader;
+    // Native ride/follow events use a different channel. Never emit one until every peer has ACKed
+    // construction, or it can arrive before that peer knows the soldier/vehicle's native identity.
+    for(unsigned i=0;i<plan.count;++i)if(plan.units[i].resourceId<kAircraft)
+        if(!HoldSupportSoldier(deployed.objects[i],false))return false;
     for(unsigned i=0;i<plan.count;++i) {
         const auto& unit=plan.units[i];
-        if(unit.resourceId==kLeader){leader=deployed->objects[i];continue;}
-        if(unit.resourceId==kSoldier && !unit.role && leader && !FollowSupportSoldier(deployed->objects[i],leader)){Destroy(id);return false;}
-        if(unit.resourceId<kAircraft || remote)continue;
+        if(unit.resourceId==kLeader){leader=deployed.objects[i];continue;}
+        if(unit.resourceId==kSoldier && !unit.role && leader && !FollowSupportSoldier(deployed.objects[i],leader))return false;
+        if(unit.resourceId<kAircraft || deployed.remote)continue;
         unsigned char* crew[support_net::kMaxUnits];int count=0;
-        for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)crew[count++]=static_cast<unsigned char*>(const_cast<void*>(deployed->objects[k].obj));
-        if(NpcBoardCrew(static_cast<unsigned char*>(const_cast<void*>(deployed->objects[i].obj)),crew,count)!=count){Destroy(id);return false;}
+        for(unsigned k=0;k<plan.count;++k)if(plan.units[k].role==i+1)crew[count++]=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[k].obj));
+        if(NpcBoardCrew(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)),crew,count)!=count)return false;
     }
-    Status(L"支援已在地图边缘集结，真实人员正在登车");return true;
+    deployed.assigned=true;Status(L"全员已确认，真实机组正在登车");return true;
 }
 void Configure() noexcept {
     if(configured)return;
@@ -290,7 +301,17 @@ void SupportDispatchTick() noexcept {
         }
     }
     for(auto& deployed:deployments) {
-        if(!deployed.used || deployed.remote || deployed.delivered)continue;
+        if(!deployed.used)continue;
+        bool anyLive=false;
+        for(unsigned i=0;i<deployed.plan.count;++i)anyLive=anyLive || Live(deployed.objects[i]);
+        if(!anyLive){deployed={};continue;}
+        if(!deployed.assigned) {
+            if(deployed.networked && !SupportTransactionActive(deployed.id))continue;
+            if(!Assign(deployed)) {
+                const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);continue;
+            }
+        }
+        if(deployed.remote || deployed.delivered)continue;
         bool alive=true,boarded=true;
         for(unsigned i=0;i<deployed.plan.count;++i) {
             alive=alive && Live(deployed.objects[i]);
@@ -300,6 +321,10 @@ void SupportDispatchTick() noexcept {
             for(unsigned seat=0;seat<SeatCount(vehicle);++seat)
                 seated=seated || At<const void*>(SeatAt(vehicle,seat),kSeatRider)==deployed.objects[i].obj;
             boarded=boarded && seated;
+        }
+        if(!alive && deployed.started) {
+            // Once in the field, losses are gameplay. Never despawn the surviving deployed units.
+            deployed.delivered=true;Status(L"支援途中遭受损失，存活单位继续执行任务");continue;
         }
         if(!alive || (!deployed.started && GameMs()-deployed.born>kBoardLimit)) {
             const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);continue;

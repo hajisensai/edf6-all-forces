@@ -14,6 +14,9 @@ std::uint64_t GameFrame() noexcept {return now;}
 void Log(const char*,...) noexcept {}
 unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStride*3]{};
 int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0;
+int held=0;bool transactionActive=false;
+bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
+bool HoldSupportSoldier(const ObjRef&,bool hold) noexcept {held+=hold ? 1 : -1;return true;}
 bool allReady=true,terrain=true,nativeFail=false;
 npc::navigation::Result routeResult=npc::navigation::Result::pending;
 ObjRef Make(bool vehicle=false) noexcept {
@@ -109,5 +112,11 @@ int main() {
     check(!offlinePending && !made,"entering an online session cancels an uncommitted offline request");
     ResetSupportDispatch();testOnline=true;made=0;
     check(SupportCallAt(0,target,note,128) && netRequests==1 && !made,"online click uses reliable request rather than local spawn");
+    ResetSupportDispatch();made=boardRequests=0;held=0;SupportPlan networkPlan;
+    check(Plan(0,target,&networkPlan)==support_net::PlanResult::ready && Spawn(10,networkPlan,false),"committed online plan creates registered stand-ins");
+    SupportDispatchTick();
+    check(held==1 && boardRequests==0 && !deployments[0].assigned,"spawn before all-peer ACK holds native AI and emits no boarding request");
+    transactionActive=true;++now;SupportDispatchTick();
+    check(held==0 && boardRequests==1 && deployments[0].assigned,"all-peer active barrier releases held crew and starts boarding exactly once");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
 }
