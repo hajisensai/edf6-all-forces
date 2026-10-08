@@ -139,8 +139,10 @@ DERIVED_PREFIX = 'edf6tr_'
 # are private, so uninstalling a range never overwrites a loose stock SGO.
 PROTEUS_MISSION = {name: DERIVED_PREFIX + name for name in
                    ('v614_proteus_mk2_mission', 'vehicle407_bigbegaruta_mission')}
+OPTIC_MISSION = {name: DERIVED_PREFIX + name for name in
+                 ('vehicle403_tank_mission', 'vehicle404_bigtank', 'v505_tank_mission')}
 DERIVED: dict[str, str] = {
-    **{private: source.upper() for source, private in PROTEUS_MISSION.items()},
+    **{private: source.upper() for source, private in {**PROTEUS_MISSION, **OPTIC_MISSION}.items()},
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
     'edf6tr_drill_mission': 'EDF6VC_DRILL',
@@ -372,7 +374,7 @@ def placements(plan: Plan) -> list[tuple[str, bool]]:
 
 def mission_vehicle(name: str) -> str:
     """Actual script resource, independent of the stable plan/spacing identity."""
-    return PROTEUS_MISSION.get(name, name)
+    return PROTEUS_MISSION.get(name, OPTIC_MISSION.get(name, name))
 
 
 def small_count(plan: Plan) -> int:
@@ -925,6 +927,8 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
     if sgo_name in PROTEUS_MISSION.values():
         import make_proteus
         return make_proteus.redirect(game.read('OBJECT', DERIVED[sgo_name] + '.SGO'))[0]
+    if sgo_name in OPTIC_MISSION.values():
+        return game.read('OBJECT', DERIVED[sgo_name] + '.SGO')
     if sgo_name in GROUND_MISSION:
         import importlib
         data = importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game)
@@ -998,8 +1002,8 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             held.add(ledger.key(rel))
     for name in sorted(wanted):
         rel = f'OBJECT/{name.upper()}.SGO'
-        changed_proteus = name in PROTEUS_MISSION.values() and led.changed(rel)
-        if changed_proteus:
+        changed_consumer = name in {*PROTEUS_MISSION.values(), *OPTIC_MISSION.values()} and led.changed(rel)
+        if changed_consumer:
             # Retain the original ledger fingerprint so a later uninstall still
             # recognizes this file as somebody else's edit.
             with open(led.disk(rel), 'rb') as file:
@@ -1010,14 +1014,18 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             import make_proteus
             data, needs = make_proteus.range_vehicle(led, game, data, OWNER)
             held.update(ledger.key(rel) for rel in needs)
-        if not changed_proteus:
+        if name in OPTIC_MISSION.values():
+            import make_optics
+            data, needs = make_optics.range_vehicle(led, game, data, OWNER)
+            held.update(ledger.key(dep) for dep in needs)
+        if not changed_consumer:
             led.put(OWNER, rel, data)
     _release_derived(led, before - held)
     _remove_legacy(game_root, keep=wanted)
 
 
 def _release_derived(led: ledger.Ledger, rels: set[str]) -> tuple[list[str], list[str]]:
-    """An edited Proteus consumer keeps its model schema and ledger record.
+    """An edited Proteus/optic consumer keeps its model schema and ledger record.
 
     Keeping the record also protects it from the pre-ledger prefix cleanup.
     """
@@ -1031,6 +1039,14 @@ def _release_derived(led: ledger.Ledger, rels: set[str]) -> tuple[list[str], lis
             for source in PROTEUS_MISSION:
                 host = source.upper().removesuffix('_MISSION')
                 protected.update(f'OBJECT/EDF6VC_{host}.{ext}' for ext in ('MRAB', 'CAS'))
+    import make_optics
+    for private in OPTIC_MISSION.values():
+        rel = f'OBJECT/{private.upper()}.SGO'
+        if rel in rels and led.changed(rel):
+            protected.add(rel)
+            with open(led.disk(rel), 'rb') as file:
+                _, needs = make_optics.redirect(file.read())
+            protected.update(ledger.key(dep) for dep in needs)
     deleted, kept = led.release(OWNER, sorted(rels - protected))
     return deleted, kept + [led.disk(rel) for rel in sorted(protected) if os.path.isfile(led.disk(rel))]
 

@@ -20,7 +20,7 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
-GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'bigmap', 'sazabi', 'proteus')
+GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'bigmap', 'sazabi', 'proteus', 'optics')
 MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi'}
 
 
@@ -76,6 +76,10 @@ def inputs(game: str, group: str) -> dict[str, Any]:
     archive = Path(game) / ('Chunk02.cpk' if group == 'bigmap' else 'Root.cpk')
     st = archive.stat()
     result: dict[str, Any] = {'archive': [str(archive.resolve()), st.st_size, st.st_mtime_ns, st.st_ctime_ns]}
+    if group == 'optics':
+        import vehicle_optics
+        result['loose_models'] = {spec.stem: sha256_file(str(Path(game, 'Mods', 'OBJECT', spec.stem+'.MRAB')))
+                                  for spec in vehicle_optics.MODELS}
     if group in MODEL_INPUTS:
         import obj_model
         folder = obj_model.model_dir(MODEL_INPUTS[group])
@@ -142,7 +146,8 @@ class Cache:
         if not isinstance(outputs, dict) or not outputs:
             return False
         led = ledger.Ledger(self.game)
-        if set(outputs) != set(led.owned_by(group)):
+        owned = {rel for rel in led.owned_by(group) if group != 'optics' or rel.endswith('.MRAB')}
+        if set(outputs) != owned:
             return False
         for rel, digest in outputs.items():
             # Only ledger-owned relative paths are read, never arbitrary paths from the cache.

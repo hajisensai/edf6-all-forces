@@ -3284,8 +3284,8 @@ def installer_removes_what_it_writes() -> None:
     install_Y( -> remove_Y(; the call weapons go through retire_weapons (placeholders keep their rows)."""
     inst = src('tools/installer.py')
     body, undo = _function(inst, 'install'), _function(inst, 'uninstall')
-    modules = set(re.findall(r'\b(\w+)\.install\(', body))
-    helpers = set(re.findall(r'\binstall_(\w+)\(', body))
+    modules = set(re.findall(r'\b(\w+)\.install(?:_\w+)?\(', body))
+    helpers = set(re.findall(r'(?<![\w.])install_(\w+)\(', body))
     assert {'make_jets', 'gen', 'call_weapons'} <= modules and {'plugin', 'autoturret'} <= helpers, (modules, helpers)
     lacking = sorted(m for m in modules - {'call_weapons'} if f'{m}.remove' not in undo and f'{m}.uninstall(' not in undo)
     lacking += sorted(f'install_{h}' for h in helpers if f'remove_{h}(' not in undo)
@@ -3382,6 +3382,10 @@ def pack_install_upgrade_uninstall() -> None:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
                 enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+            # Geometry/SGO parsing are generator boundaries; scoped optic journals/install/remove stay real.
+            import make_optics
+            enter(patched(make_optics, build_models=lambda game: {'OBJECT/EDF6VC_OPTIC_FAKE.MRAB': b'optic'},
+                          build_stock_redirects=lambda game: {}, redirect=lambda data: (data, ())))
             # the stock vehicles' stores (on by default): a vehicle and a request, gone again with the uninstall
             stores = {'OBJECT/EDF6VC_FAKE_STORES.SGO': b'stores', 'WEAPON/FAKE_STORES_REQUEST.SGO': b'request'}
             enter(patched(importlib.import_module('make_stock_stores'),
