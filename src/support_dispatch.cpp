@@ -20,7 +20,7 @@
 namespace crew {
 // Implemented by the real-crew adapter; no imaginary rider participates in deployment.
 int NpcBoardCrew(unsigned char*,unsigned char* const*,int) noexcept;
-bool NpcPrepareVehiclePost(unsigned char*,const float*) noexcept;
+bool NpcPrepareVehicleRoutePost(unsigned char*,const float*,float) noexcept;
 bool NpcReleaseVehicleCrew(unsigned char*) noexcept;
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept;
 void ReportSupportFailure(std::uint64_t) noexcept;
@@ -31,6 +31,8 @@ constexpr std::uint32_t kSoldier=kSupportRangerResource,kLeader=kSupportLeaderRe
     kAircraft=kSupportAircraftResource,kVehicle=kSupportVehicleResource;
 constexpr int kDeployments=16;
 constexpr ULONGLONG kBoardLimit=120000,kCallCooldown=30000;
+constexpr float kVehicleWaypointRadius=1.5f,kVehicleDriverHold=1.0f,kVehicleArrival=5.0f;
+static_assert(kVehicleDriverHold<kVehicleWaypointRadius,"a route must advance before its driver stops");
 struct Planning {
     bool active=false;std::uint32_t catalog=0;float target[3]{};
     int edge=0;npc::navigation::State navigation{};
@@ -41,6 +43,7 @@ struct Deployment {
     std::uint64_t id=0;ULONGLONG born=0;
     SupportPlan plan{};ObjRef objects[support_net::kMaxUnits]{};
     npc::navigation::State navigation{};
+    float vehicleSample[3]{};ULONGLONG vehicleSampleAt=0;
 };
 Deployment deployments[kDeployments]{};
 bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
@@ -82,6 +85,12 @@ bool GroundCatalog(std::uint32_t id,SupportVehicleKind& kind,SupportCrewMode& mo
     if(index<0 || index>=kSupportVehicleCount*2)return false;
     kind=static_cast<SupportVehicleKind>(index/2);
     mode=index%2 ? SupportCrewMode::unmanned : SupportCrewMode::soldiers;return true;
+}
+npc::navigation::Profile VehicleRouteProfile(const SupportVehicleSpec& spec) noexcept {
+    npc::navigation::Profile profile;
+    profile.radius=std::hypot(spec.halfWidth,spec.halfLength);profile.height=spec.height;profile.cell=4;
+    profile.waypointRadius=kVehicleWaypointRadius;
+    return profile;
 }
 bool Live(const ObjRef& ref) noexcept {
     return ref && Readable(ref.obj,kDead+1) && ref.Is(ref.obj) && !static_cast<const unsigned char*>(ref.obj)[kDead];
@@ -163,7 +172,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,SupportPl
     }
     if(vehicle && (!spec || !Cfg().npcBoarding || !SupportVehicleReady(kind,mode))){Status(L"该车辆的资源或交付能力不可用");return PlanResult::refused;}
     npc::navigation::Profile profile{};profile.cell=4.0f;
-    if(spec){profile.radius=std::hypot(spec->halfWidth,spec->halfLength);profile.height=spec->height;}
+    if(spec)profile=VehicleRouteProfile(*spec);
     float waypoint[3];
     const auto path=GroundNavigate(planning.navigation,entry,target,2.0f,GameMs(),waypoint,profile);
     if(path==npc::navigation::Result::pending){Status(L"正在核实支援入口及可达路线");return PlanResult::pending;}
@@ -403,7 +412,8 @@ void SupportDispatchTick() noexcept {
                 if(resource>=kAircraft && resource<kVehicle) {
                     SupportAircraft spec;SupportAircraftSpec(static_cast<int>(deployed.plan.catalogId),&spec);
                     started=ActivateSupportAircraft(object,spec,deployed.plan.target) && started;
-                } else if(resource>=kVehicle)started=NpcPrepareVehiclePost(object,deployed.plan.target) && started;
+                } else if(resource>=kVehicle)started=NpcPrepareVehicleRoutePost(object,
+                    reinterpret_cast<const float*>(object+kPosition),kVehicleDriverHold) && started;
                 else if(resource==kLeader)started=SquadCommand(object,Command{Order::guard,{deployed.plan.target[0],deployed.plan.target[1],deployed.plan.target[2]}}) && started;
             }
             if(started){deployed.started=true;Status(L"支援已出发，正在沿路线入场");}
@@ -415,11 +425,19 @@ void SupportDispatchTick() noexcept {
         if(GroundCatalog(deployed.plan.catalogId,kind,mode)) {
             auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
             const float* position=reinterpret_cast<const float*>(vehicle+kPosition);float waypoint[3];
-            const auto* spec=SupportVehicleInfo(kind);npc::navigation::Profile profile{};
-            profile.radius=std::hypot(spec->halfWidth,spec->halfLength);profile.height=spec->height;profile.cell=4;
-            const auto path=GroundNavigate(deployed.navigation,position,deployed.plan.target,5,GameMs(),waypoint,profile);
-            if(path==npc::navigation::Result::moving)NpcPrepareVehiclePost(vehicle,waypoint);
+            const auto profile=VehicleRouteProfile(*SupportVehicleInfo(kind));
+            const ULONGLONG now=GameMs();
+            float speed=1e9f;
+            if(deployed.vehicleSampleAt && now>=deployed.vehicleSampleAt) {
+                const float dt=now>deployed.vehicleSampleAt ? std::fmin(static_cast<float>(now-deployed.vehicleSampleAt)*0.001f,1.0f/60.0f) : 1.0f/60.0f;
+                const float dx=position[0]-deployed.vehicleSample[0],dy=position[1]-deployed.vehicleSample[1],dz=position[2]-deployed.vehicleSample[2];
+                speed=std::sqrt(dx*dx+dy*dy+dz*dz)/dt;
+            }
+            std::memcpy(deployed.vehicleSample,position,12);deployed.vehicleSampleAt=now;
+            const auto path=GroundNavigate(deployed.navigation,position,deployed.plan.target,kVehicleArrival,now,waypoint,profile);
+            if(path==npc::navigation::Result::moving)NpcPrepareVehicleRoutePost(vehicle,waypoint,kVehicleDriverHold);
             else if(path==npc::navigation::Result::arrived) {
+                if(!NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold) || !(speed<=0.5f))continue;
                 if(mode==SupportCrewMode::unmanned && !NpcReleaseVehicleCrew(vehicle))continue;
                 if(mode==SupportCrewMode::unmanned) {
                     const auto playerRef=ObjRef::Of(PlayerHuman());
@@ -427,7 +445,7 @@ void SupportDispatchTick() noexcept {
                         FollowSupportSoldier(deployed.objects[i],playerRef);
                 }
                 deployed.delivered=true;Status(mode==SupportCrewMode::unmanned ? L"空车已到达交付点，司机已下车" : L"支援车辆已抵达目的地");
-            } else NpcPrepareVehiclePost(vehicle,position); // wait for a verified route; never drive through the obstacle
+            } else NpcPrepareVehicleRoutePost(vehicle,position,kVehicleDriverHold); // wait for a verified route; never drive through the obstacle
         } else {
             bool arrived=true;
             for(unsigned i=0;i<deployed.plan.count;++i)if(!deployed.plan.units[i].role) {
