@@ -989,11 +989,30 @@ void Arc(void* drawer,void* ctx,float cx,float cy,float r,float from,float span,
         Seg(drawer,ctx,cx+r*std::cos(a0),cy+r*std::sin(a0),cx+r*std::cos(a1),cy+r*std::sin(a1),t,rgba);
     }
 }
+constexpr float kBoxOff=280.0f,kBoxW=120.0f,kBoxH=34.0f,kBoxRow=30.0f;
+// Central instruments end above the lower dock; the remaining 6% separates its
+// measured status rows from the projected pitch geometry.
+constexpr float kFlightRegionBottom=0.58f,kLoadoutRegionShare=0.36f;
 // The world directions `a` and `b` joined on the screen (both in front of the eye); `dashes` > 0: that many dashes.
 void DirSeg(void* drawer,void* ctx,const float* vp,float width,float height,const float* a,const float* b,float t,int dashes,
             const float* rgba) noexcept {
     float x0,y0,x1,y1;
     if(!sight::ToScreen(vp,a,0.0f,width,height,&x0,&y0) || !sight::ToScreen(vp,b,0.0f,width,height,&x1,&y1))return;
+    // Pitch geometry owns the central flight window. Clip entire segments, not
+    // just their degree labels, clear of the instruments and lower dock.
+    const float scale=t*0.5f,half=(kBoxOff-kBoxW*0.5f-18.0f)*scale;
+    const float dx=x1-x0,dy=y1-y0;
+    float enter=0.0f,leave=1.0f;
+    auto clip=[&](float p,float q) {
+        if(std::fabs(p)<1e-6f)return q>=0.0f;
+        const float r=q/p;
+        if(p<0.0f){if(r>leave)return false;enter=std::fmax(enter,r);}
+        else{if(r<enter)return false;leave=std::fmin(leave,r);}
+        return true;
+    };
+    if(!clip(-dx,x0-(width*0.5f-half)) || !clip(dx,width*0.5f+half-x0) ||
+       !clip(-dy,y0) || !clip(dy,height*kFlightRegionBottom-y0))return;
+    x1=x0+dx*leave;y1=y0+dy*leave;x0+=dx*enter;y0+=dy*enter;
     if(dashes<=0){Seg(drawer,ctx,x0,y0,x1,y1,t,rgba);return;}
     const int pieces=2*dashes-1;
     for(int i=0;i<pieces;i+=2) {
@@ -1076,44 +1095,86 @@ void StoreGlyph(void* drawer,void* ctx,float cx,float cy,float k,hudcue::StoreIc
     }
 }
 
-// The strip: `n` cells side by side, centred on the screen's middle, from `y` down; a cell kCellW wide, wider for a
-// longer text (a stock weapon's reload). Its height.
-float LoadoutStrip(void* drawer,void* ctx,Text* text,float width,float y,float s,const LoadCell* cells,int n,Line* lines,int* at) noexcept {
-    if(n<=0)return 0.0f;
-    constexpr int kMost=8;
-    float w[kMost],total=0.0f;
-    int line[kMost];
-    if(n>kMost)n=kMost;
-    for(int i=0;i<n;++i) {   // the texts first: their widths size the cells
-        line[i]=*at;
-        Label(text,lines,at,0.0f,y+37.0f*s,1,kLineScale*0.75f,cells[i].rgba,L"%ls",cells[i].text);
-        if(text && line[i]<*at) {
-            Line& l=lines[line[i]];
-            const float limit=width/static_cast<float>(n)-32.0f*s;
-            if(limit>0.0f && l.w>limit) {
-                l.scale*=limit/l.w*0.95f;MeasureAll(*text,&l,1);
-                l.y=y+37.0f*s-l.h*0.5f;
-            }
+// Every lower HUD group measures with its fitted scale, and records that scale on
+// the lines handed back to the final DrawAll. Geometry and text stay in one space.
+struct HudRegionText {
+    Text copy{}; Text* text; Line* lines; int* at; int first; float ratio;
+    HudRegionText(Text* source,float requested,float fitted,Line* l,int* n) noexcept
+        : text(source),lines(l),at(n),first(*n),ratio(fitted/requested) {
+        if(source) {
+            if(!source->made && textOk && source->mgr)MakeText(*source);
+            copy=*source;copy.s*=ratio;text=&copy;
         }
-        const float tw=line[i]<*at ? lines[line[i]].w : 0.0f;
-        w[i]=tw+16.0f*s>kCellW*s ? tw+16.0f*s : kCellW*s;
-        total+=w[i];
     }
-    const float h=kCellH*s,t=2.0f*s;
-    float x=(width-total)*0.5f;
+    ~HudRegionText(){for(int i=first;i<*at;++i)lines[i].scale*=ratio;}
+};
+struct LoadoutGrid { int columns,rows; float cell,width,height; };
+LoadoutGrid LoadoutGridOf(Text* text,float width,float s,const LoadCell* cells,int n) noexcept {
+    n=n<8 ? n : 8;
+    if(n<=0)return {};
+    const float available=std::fmax(1.0f,width-32.0f*s);
+    float cell=kCellW*s;
     for(int i=0;i<n;++i) {
-        const LoadCell& c=cells[i];
-        const float cx=x+w[i]*0.5f,x1=x+w[i];
-        if(line[i]<*at)lines[line[i]].x=cx-lines[line[i]].w*0.5f;
-        if(c.picked) {
-            Rect(drawer,ctx,x+2.0f*s,y,x1-2.0f*s,y+h,kPanel);
-            Seg(drawer,ctx,x+2.0f*s,y,x1-2.0f*s,y,t,kCyan);Seg(drawer,ctx,x+2.0f*s,y+h,x1-2.0f*s,y+h,t,kCyan);
-            Seg(drawer,ctx,x+2.0f*s,y,x+2.0f*s,y+h,t,kCyan);Seg(drawer,ctx,x1-2.0f*s,y,x1-2.0f*s,y+h,t,kCyan);
-        }
-        StoreGlyph(drawer,ctx,cx,y+15.0f*s,1.4f*s,c.icon,c.rgba);
-        x=x1;
+        Line l{};Format(l,L"%ls",cells[i].text);l.scale=kLineScale*0.75f;
+        if(text)MeasureAll(*text,&l,1);
+        cell=std::fmax(cell,l.w+20.0f*s);
     }
-    return h;
+    cell=std::fmin(cell,available);
+    int columns=static_cast<int>(available/cell);
+    columns=columns<1 ? 1 : columns>4 ? 4 : columns;
+    if(columns>n)columns=n;
+    const int rows=(n+columns-1)/columns;
+    return {columns,rows,cell,cell*columns,(kCellH*rows+8.0f*(rows-1))*s};
+}
+struct LoadoutDock { float scale,y,footer,top,bannerBottom; };
+LoadoutDock LoadoutDockOf(Text* text,float width,float height,float s,const LoadCell* cells,int n,int footers) noexcept {
+    if(text && !text->made && textOk && text->mgr)MakeText(*text);
+    float fitted=s;
+    LoadoutGrid grid{};
+    // The lower dock owns at most 36% of the viewport: cells, the switch banner
+    // and all control rows. Long translated names determine columns before fit.
+    for(int pass=0;pass<5;++pass) {
+        Text local{};Text* t=text;
+        if(text){local=*text;local.s*=fitted/s;t=&local;}
+        grid=LoadoutGridOf(t,width,fitted,cells,n);
+        const float need=grid.height+(24.0f+72.0f+24.0f*footers+8.0f)*fitted;
+        if(need<=height*kLoadoutRegionShare)break;
+        fitted*=height*kLoadoutRegionShare/need;
+    }
+    Text local{};Text* t=text;
+    if(text){local=*text;local.s*=fitted/s;t=&local;}
+    grid=LoadoutGridOf(t,width,fitted,cells,n);
+    const float footer=height-(24.0f+24.0f*footers)*fitted;
+    const float y=footer-8.0f*fitted-grid.height;
+    return {fitted,y,footer,y-72.0f*fitted,y-8.0f*fitted};
+}
+
+// A measured grid, at most four columns, without a minimum width that can push
+// the first/last cell off screen. Every row includes its own text and glyphs.
+float LoadoutStrip(void* drawer,void* ctx,Text* text,float width,float y,float s,const LoadCell* cells,int n,Line* lines,int* at) noexcept {
+    n=n<8 ? n : 8;
+    const LoadoutGrid grid=LoadoutGridOf(text,width,s,cells,n);
+    if(!grid.columns)return 0.0f;
+    for(int i=0;i<n;++i) {
+        const int row=i/grid.columns,col=i%grid.columns;
+        const int left=n-row*grid.columns,columns=grid.columns<left ? grid.columns : left;
+        const float x=(width-grid.cell*columns)*0.5f+col*grid.cell,cy=y+row*(kCellH+8.0f)*s;
+        const float cx=x+grid.cell*0.5f,x1=x+grid.cell,h=kCellH*s,t=2.0f*s;
+        const int line=*at;
+        Label(text,lines,at,cx,cy+37.0f*s,1,kLineScale*0.75f,cells[i].rgba,L"%ls",cells[i].text);
+        if(text && line<*at && lines[line].w>grid.cell-16.0f*s) {
+            Line& l=lines[line];l.scale*=(grid.cell-16.0f*s)/l.w*0.97f;MeasureAll(*text,&l,1);
+            l.x=cx-l.w*0.5f;l.y=cy+37.0f*s-l.h*0.5f;
+        }
+        const LoadCell& c=cells[i];
+        if(c.picked) {
+            Rect(drawer,ctx,x+2.0f*s,cy,x1-2.0f*s,cy+h,kPanel);
+            Seg(drawer,ctx,x+2.0f*s,cy,x1-2.0f*s,cy,t,kCyan);Seg(drawer,ctx,x+2.0f*s,cy+h,x1-2.0f*s,cy+h,t,kCyan);
+            Seg(drawer,ctx,x+2.0f*s,cy,x+2.0f*s,cy+h,t,kCyan);Seg(drawer,ctx,x1-2.0f*s,cy,x1-2.0f*s,cy+h,t,kCyan);
+        }
+        StoreGlyph(drawer,ctx,cx,cy+15.0f*s,1.4f*s,c.icon,c.rgba);
+    }
+    return grid.height;
 }
 
 // The picked store large, over the strip, for kSwitchMs after a switch: its picture twice the size, its name and rounds.
@@ -1122,7 +1183,11 @@ float LoadoutStrip(void* drawer,void* ctx,Text* text,float width,float y,float s
 void LoadoutBanner(void* drawer,void* ctx,Text* text,float width,float bottom,float s,const LoadCell& c,Line* lines,int* at) noexcept {
     const int first=*at;
     Label(text,lines,at,0.0f,0.0f,0,kTitleScale,kCyan,L"%ls",c.text);
-    const float textW=*at>first ? lines[first].w : 0.0f,textX=116.0f*s,right=24.0f*s;
+    const float textX=116.0f*s,right=24.0f*s;
+    if(text && *at>first && lines[first].w>width-32.0f*s-textX-right) {
+        Line& l=lines[first];l.scale*=std::fmax(1.0f,width-32.0f*s-textX-right)/l.w*0.97f;MeasureAll(*text,&l,1);
+    }
+    const float textW=*at>first ? lines[first].w : 0.0f;
     const float w=std::fmax(300.0f*s,textX+textW+right),h=64.0f*s,x0=(width-w)*0.5f,y0=bottom-h;
     Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
     Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kCyan);
@@ -1183,7 +1248,7 @@ void Ladder(void* drawer,void* ctx,Text* text,const float* vp,float width,float 
             DirSeg(drawer,ctx,vp,width,height,b,tab,t,0,kHud);
             float lx,ly;
             // The lower fixed readouts and control rows own this space; projected pitch labels must not cover them.
-            if(sight::ToScreen(vp,b,0.0f,width,height,&lx,&ly) && lx>0.0f && lx<width && ly>0.0f && ly<height*0.80f-30.0f*s)
+            if(sight::ToScreen(vp,b,0.0f,width,height,&lx,&ly) && lx>0.0f && lx<width && ly>0.0f && ly<height*kFlightRegionBottom)
                 Label(text,lines,at,lx+k*8.0f*s,ly,side>0 ? 0 : 2,kLineScale*0.85f,kHud,L"%d",e);
         }
     }
@@ -1222,7 +1287,6 @@ void HeadingTape(void* drawer,void* ctx,Text* text,float width,float height,floa
 // The boxes left and right of the middle: the speed (km/h) with `under` under it (the jets' g, the helis' speed set), the
 // height over the floor (ALT*: over the world's zero, nothing under it) with the climb under it. The landing gear's
 // indicator (branch feat/jet-gear) has the row under the left one: (width / 2 - kBoxOff * s, height / 2 + 2 * kBoxRow * s).
-constexpr float kBoxOff=280.0f,kBoxW=120.0f,kBoxH=34.0f,kBoxRow=30.0f;
 constexpr float kBarHalf=100.0f;   // px: the half length of the bars beside the boxes (a heli's height, a jet's lift)
 void Boxes(void* drawer,void* ctx,Text* text,float width,float height,float s,float speed,const wchar_t* under,const float* underRgba,
            float clear,bool ground,float climb,Line* lines,int* at,bool heli=false) noexcept {
@@ -1397,10 +1461,14 @@ void RwrCentre(float width,float height,float s,float side,float* cx,float* cy) 
     *cy=height*0.80f-(kRwrR+10.0f)*s;
 }
 void RwrScope(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetSymbols& y,ULONGLONG launchAt,
-              ULONGLONG now,float side,Line* lines,int* at) noexcept {
+              ULONGLONG now,float side,Line* lines,int* at,float bottom=-1.0f) noexcept {
     const float r=kRwrR*s,t=2.0f*s;
     float cx,cy;
     RwrCentre(width,height,s,side,&cx,&cy);
+    if(bottom>=0.0f) {
+        cx=vec::Clamp(cx,(kRwrR+24.0f)*s,width-(kRwrR+24.0f)*s);
+        cy=bottom-(kRwrR+10.0f)*s;
+    }
     const bool launch=launchAt && now-launchAt<kLaunchMs,blink=(now/125)%2==0;
     Arc(drawer,ctx,cx,cy,r,0.0f,kTurn,launch ? 3.0f*s : t,48,launch && blink ? kRed : y.threats>0 ? kHud : kHudDim);
     Arc(drawer,ctx,cx,cy,r*0.5f,0.0f,kTurn,t,32,kHudDim);
@@ -1612,6 +1680,10 @@ void FighterHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const PlayerJetReadout& j,bool switched,Line* lines,
                   int* at) noexcept {
     if(*at+2>kMaxLines)return;
+    LoadCell cells[kMostStores];
+    const int n=JetCells(j,cells);
+    const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,1);
+    HudRegionText region(text,s,dock.scale,lines,at);text=region.text;s=dock.scale;
     Line& warn=lines[(*at)++];
     Line& arms=lines[(*at)++];
     wchar_t cue[64],stores[128],fuel[32];
@@ -1626,16 +1698,14 @@ void CockpitStrip(void* drawer,void* ctx,Text* text,float width,float height,flo
     warn.w=warn.h=arms.w=arms.h=0.0f;
     if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&arms,1);}
     const float armsH=arms.h>0.0f ? arms.h : 18.0f*s,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
-    arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
+    arms.x=(width-arms.w)*0.5f;arms.y=dock.top-armsH-8.0f*s;
     warn.x=(width-warn.w)*0.5f;warn.y=arms.y-warnH-6.0f*s;
-    LoadCell cells[kMostStores];
-    const int n=JetCells(j,cells);
-    const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
+    LoadoutStrip(drawer,ctx,text,width,dock.y,s,cells,n,lines,at);
     if(*at<kMaxLines) {
         Line& keys=lines[(*at)++];JetControls(keys,j);
-        ControlRow(text,width,height*0.80f+(stripH>0 ? stripH+12.0f*s : 4.0f*s),s,keys);
+        ControlRow(text,width,dock.footer,s,keys);
     }
-    if(switched && j.store>=0 && j.store<n)LoadoutBanner(drawer,ctx,text,width,warn.y-8.0f*s,s,cells[j.store],lines,at);
+    if(switched && j.store>=0 && j.store<n)LoadoutBanner(drawer,ctx,text,width,dock.bannerBottom,s,cells[j.store],lines,at);
 }
 
 // --- The helicopter HUD (the user, 2026-10-05: "a helicopter HUD": the flight instruments, the weapons' aim, the hover's
@@ -1689,6 +1759,8 @@ void HeightBar(void* drawer,void* ctx,float width,float height,float s,const Hel
 // caller's.
 void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const HeliFlight& f,
              const PlayerJetSymbols& y,ULONGLONG launchAt,Line* lines,int* at) noexcept {
+    const float fitted=std::fmin(s,width/(2.0f*(kBoxOff+kBoxW*0.5f+60.0f+2.0f*kRwrR+24.0f)));
+    HudRegionText region(text,s,fitted,lines,at);text=region.text;s=fitted;
     if(!f.landed)Ladder(drawer,ctx,text,vp,width,height,s,y,lines,at);
     if(y.moving && !f.landed)FlightPath(drawer,ctx,vp,width,height,s,y);
     if(!f.landed && (f.speed<kDriftShown || (f.ground && f.clear<kLowHover)))DriftMark(drawer,ctx,width,height,s,f,y);
@@ -1699,9 +1771,12 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
     HeightBar(drawer,ctx,width,height,s,f);
     GroundCue(drawer,ctx,text,vp,width,height,s,y,f.gpws,f.impactIn,lines,at);
     if(Cfg().playerJetThreatHud) {
+        const float bottom=height*kFlightRegionBottom;
         float cx,cy;RwrCentre(width,height,s,-1.0f,&cx,&cy);
+        cx=vec::Clamp(cx,(kRwrR+24.0f)*s,width-(kRwrR+24.0f)*s);cy=bottom-(kRwrR+10.0f)*s;
         Label(text,lines,at,cx,cy+kRwrR*s+18.0f*s,1,kLineScale*0.7f,kHudDim,L"%ls",Tr(Tx::heliThreatScope));
-        Threats(drawer,ctx,text,vp,width,height,s,y,launchAt,lines,at);
+        RwrScope(drawer,ctx,text,width,height,s,y,launchAt,GetTickCount64(),-1.0f,lines,at,bottom);
+        ThreatMarks(drawer,ctx,vp,width,height,s,y);
     }
 }
 
@@ -1715,6 +1790,9 @@ void HeliHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float
 void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float s,const HeliFlight& f,const FuelReading& fuel,
                const wchar_t* stores,const LoadCell* cells,int n,int picked,bool switched,Line* lines,int* at,const Line* controls=nullptr) noexcept {
     if(*at+4>kMaxLines)return;
+    const int footers=(f.keys && f.aiming ? 1 : 0)+(controls && controls->text[0] ? 1 : 0);
+    const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,footers);
+    HudRegionText region(text,s,dock.scale,lines,at);text=region.text;s=dock.scale;
     Line& warn=lines[(*at)++];
     Line& info=lines[(*at)++];
     Line& arms=lines[(*at)++];
@@ -1743,19 +1821,19 @@ void HeliStrip(void* drawer,void* ctx,Text* text,float width,float height,float 
     help.scale=kLineScale*0.85f;help.rgba=kCyan;
     warn.w=warn.h=info.w=info.h=arms.w=arms.h=help.w=help.h=0.0f;
     if(text){MeasureAll(*text,&warn,1);MeasureAll(*text,&info,1);MeasureAll(*text,&arms,1);MeasureAll(*text,&help,1);}
-    help.x=(width-help.w)*0.5f;
+    ControlRow(text,width,0.0f,s,help);
     const float lineH=18.0f*s,armsH=arms.h>0.0f ? arms.h : (arms.text[0] ? lineH : 0.0f);
     const float infoH=info.h>0.0f ? info.h : lineH,warnH=warn.h>0.0f ? warn.h : 24.0f*s;
-    arms.x=(width-arms.w)*0.5f;arms.y=height*0.80f-armsH;
+    arms.x=(width-arms.w)*0.5f;arms.y=dock.top-armsH-8.0f*s;
     info.x=(width-info.w)*0.5f;info.y=arms.y-infoH-(arms.text[0] ? 4.0f*s : 0.0f);
     warn.x=(width-warn.w)*0.5f;warn.y=info.y-warnH-6.0f*s;
-    const float stripH=LoadoutStrip(drawer,ctx,text,width,height*0.80f+4.0f*s,s,cells,n,lines,at);
-    help.y=height*0.80f+(stripH>0.0f ? stripH+12.0f*s : 4.0f*s);   // the keys under the loadout strip, not over it
+    LoadoutStrip(drawer,ctx,text,width,dock.y,s,cells,n,lines,at);
+    help.y=dock.footer;   // the keys under the loadout strip, not over it
     if(controls && controls->text[0] && *at<kMaxLines) {
         Line& keys=lines[(*at)++];keys=*controls;
         ControlRow(text,width,help.y+(help.text[0] ? (help.h>0 ? help.h : 18.0f*s)+6.0f*s : 0.0f),s,keys);
     }
-    if(switched && picked>=0 && picked<n)LoadoutBanner(drawer,ctx,text,width,warn.y-8.0f*s,s,cells[picked],lines,at);
+    if(switched && picked>=0 && picked<n)LoadoutBanner(drawer,ctx,text,width,dock.bannerBottom,s,cells[picked],lines,at);
 }
 
 // The landing gear (gear.cpp GearHudLatest; the jets with gear only), at the screen's right over the cockpit's line: its
@@ -2651,10 +2729,10 @@ float HeadingOfYaw(float yaw) noexcept {
 // as many weapons as fit, then the extras that fit whole; never the whole block dropped (with the stock gauge hidden,
 // stockgauge.cpp, it is the vehicle's only readout).
 void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float s,const StockHudReadout& r,const StockExtras& x,
-                Line* lines,int* at) noexcept {
+                Line* lines,int* at,float bottom=-1.0f,bool compact=false) noexcept {
     int room=kMaxLines-*at-3;   // the head's three lines first
     if(room<0)return;
-    const int want=r.arms<kStockArms ? r.arms : kStockArms;
+    const int want=compact ? 0 : r.arms<kStockArms ? r.arms : kStockArms;
     const int arms=want<room ? want : room;
     room-=arms;
     const bool drillOn=x.drill && x.drill->maxRpm>0.0f && room>0;
@@ -2674,9 +2752,9 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     const int prots=protLines ? ProteusLinesOf(*prot,&lines[*at],pl) : 0;
     *at+=prots;
     const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;   // the Nix readout is this vehicle's
-    bool missile=false,locked=false,dry=arms>0;
+    bool missile=false,locked=false,dry=r.arms>0;
     for(int i=0;i<r.threats && i<kStockThreats;++i){missile=missile || r.threatKind[i]==2;locked=locked || r.threatKind[i]==1;}
-    for(int i=0;i<arms;++i)dry=dry && r.arm[i].ammo<=0 && !r.arm[i].canReload;
+    for(int i=0;i<r.arms && i<kStockArms;++i)dry=dry && r.arm[i].ammo<=0 && !r.arm[i].canReload;
     const float hp=r.hpMax>0.0f ? Unit(r.hp/r.hpMax) : 0.0f;
     const bool blink=(GetTickCount64()/125)%2==0;
     if(missile){Format(warn,L"%ls",Tr(Tx::missileBang));warn.rgba=blink ? kRed : kWhite;}
@@ -2725,8 +2803,8 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     if(drill)h+=(drill->h>0.0f ? drill->h : lineH)+gap;
     if(emcLine)h+=(emcLine->h>0.0f ? emcLine->h : lineH)+gap+barH+gap;
     for(int i=0;i<prots;++i)h+=(pl[i].line->h>0.0f ? pl[i].line->h : lineH)+gap+(pl[i].bar ? barH+gap : 0.0f);
-    const float cx=width*0.5f-460.0f*s,tx=cx+kIndicatorR*s+18.0f*s;
-    float y=height*0.80f-h;
+    const float cx=compact ? (kIndicatorR+24.0f)*s : width*0.5f-460.0f*s,tx=cx+kIndicatorR*s+18.0f*s;
+    float y=(bottom>=0.0f ? bottom : height*0.80f)-h;
     float hull=sight::HeadingOf(r.hull),gun=r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
     const float look=r.lookOk ? sight::HeadingOf(r.look) : -1.0f;
     float stops[2]={-1.0f,-1.0f};
@@ -2765,7 +2843,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
 
 // The stock vehicle HUD, part by part (see above). A stock heli's are elsewhere (HeliHud, HeliGunSight, StockCells).
 void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
-                     const StockExtras& x,Line* lines,int* at) noexcept {
+                     const StockExtras& x,Line* lines,int* at,const LoadoutDock* dock=nullptr) noexcept {
     StockMarks(drawer,ctx,text,vp,width,height,s,r,x,lines,at);
     if(x.proteus && vec::Dist(x.proteus->pos,r.pos)<2.0f)ProteusMarks(drawer,ctx,text,vp,width,height,s,*x.proteus,lines,at);
     const bool nix=x.nix && vec::Dist(x.nix->at,r.pos)<2.0f;
@@ -2773,7 +2851,10 @@ void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float wid
     const float gun=nix ? sight::HeadingOf(x.nix->dir) : r.aimOk ? sight::HeadingOf(r.aim) : -1.0f;
     if(gun>=0.0f)StockTape(drawer,ctx,text,width,height,s,gun,hull,lines,at);
     else if(hull>=0.0f)StockTape(drawer,ctx,text,width,height,s,hull,-1.0f,lines,at);
-    StockBlock(drawer,ctx,text,width,height,s,r,x,lines,at);
+    if(dock) {
+        HudRegionText region(text,s,dock->scale,lines,at);
+        StockBlock(drawer,ctx,region.text,width,height,dock->scale,r,x,lines,at,dock->top-12.0f*dock->scale,true);
+    } else StockBlock(drawer,ctx,text,width,height,s,r,x,lines,at);
     if(Cfg().playerJetThreatHud && r.threats>0) {
         PlayerJetSymbols y{};
         std::memcpy(y.pos,r.pos,12);
@@ -2781,7 +2862,11 @@ void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float wid
         for(int i=0;i<y.threats && i<kStockThreats;++i){std::memcpy(y.threatAt[i],r.threatAt[i],12);y.threatKind[i]=r.threatKind[i];}
         std::memcpy(y.nose,r.lookOk ? r.look : r.hull,12);   // the scope's up: where the player looks (else the hull)
         // The warnings' RWR scope and the marks (no launch cue: ours); the scope right of the centre, clear of the block.
-        Threats(drawer,ctx,text,vp,width,height,s,y,0,lines,at,1.0f);
+        const float fitted=std::fmin(dock ? dock->scale : s,width/(2.0f*(kBoxOff+kBoxW*0.5f+60.0f+2.0f*kRwrR+24.0f)));
+        HudRegionText region(text,s,fitted,lines,at);
+        RwrScope(drawer,ctx,region.text,width,height,fitted,y,0,GetTickCount64(),1.0f,lines,at,
+                 dock ? dock->top-12.0f*fitted : -1.0f);
+        ThreatMarks(drawer,ctx,vp,width,height,s,y);
     }
 }
 
@@ -2795,11 +2880,32 @@ int StockCells(const StockHudReadout& r,LoadCell* cells) noexcept {
         LoadCell& c=cells[n++];
         c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed);
         c.picked=i==r.selected;
-        if(r.arm[i].name[0])_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls %d/%d",r.arm[i].name,r.arm[i].ammo,r.arm[i].ammoMax);
+        if(r.arm[i].name[0]) {
+            if(r.arm[i].ammo<=0 && r.arm[i].canReload)_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls  %ls",r.arm[i].name,l.text);
+            else _snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls %d/%d",r.arm[i].name,r.arm[i].ammo,r.arm[i].ammoMax);
+        }
         else wcsncpy_s(c.text,_countof(c.text),l.text,_TRUNCATE);
         c.rgba=c.picked && l.rgba==kHud ? kCyan : l.rgba;
     }
     return n;
+}
+
+void StockDockHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
+                  const StockHudReadout& r,const StockExtras& x,const PayloadReadout* payload,bool switched,Line* lines,int* at) noexcept {
+    LoadCell cells[kStockArms];
+    const int n=StockCells(r,cells);
+    Line controls{};
+    if(payload)AircraftControls(controls,payload->keys,payload->choices,payload->switchButton,0,false,false);
+    const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,controls.text[0] ? 1 : 0);
+    StockVehicleHud(drawer,ctx,text,vp,width,height,s,r,x,lines,at,&dock);
+    HudRegionText region(text,s,dock.scale,lines,at);
+    LoadoutStrip(drawer,ctx,region.text,width,dock.y,dock.scale,cells,n,lines,at);
+    if(controls.text[0] && *at<kMaxLines) {
+        Line& keys=lines[(*at)++];keys=controls;
+        ControlRow(region.text,width,dock.footer,dock.scale,keys);
+    }
+    if(switched && r.selected>=0 && r.selected<n)
+        LoadoutBanner(drawer,ctx,region.text,width,dock.bannerBottom,dock.scale,cells[r.selected],lines,at);
 }
 
 // The game's screen (kUiScreen): 0 x 0 when it is not there to read (hudscale.h then takes the viewport's).
@@ -3864,20 +3970,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                                 stockPick==0 && snap.turret && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead};
-            StockVehicleHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);
-            LoadCell cells[kStockArms];
-            const int n=StockCells(snap.stockHud,cells);
-            const int first=n>4 ? 4 : n;
-            const float y=height-110.0f*s-(n>4 ? kCellH*s : 0.0f);
-            LoadoutStrip(drawer,ctx,t,width,y,s,cells,first,lines,&at);
-            if(n>4)LoadoutStrip(drawer,ctx,t,width,y+kCellH*s,s,cells+4,n-4,lines,&at);
-            if(snap.payload) {
-                Line controls{};
-                AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
-                if(controls.text[0])Label(t,lines,&at,width*0.5f,y-24.0f*s,1,kLineScale*0.75f,kHud,L"%ls",controls.text);
-            }
-            if(storeSwitched && snap.stockHud.selected>=0 && snap.stockHud.selected<n)
-                LoadoutBanner(drawer,ctx,t,width,y-35.0f*s,s,cells[snap.stockHud.selected],lines,&at);
+            StockDockHud(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,snap.payload ? &snap.payloadHud : nullptr,
+                         storeSwitched,lines,&at);
         }
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);

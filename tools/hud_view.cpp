@@ -123,7 +123,8 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
         std::fprintf(out,"T %.1f %.1f %.1f %.1f %.1f %.1f %.3f %.3f %.3f %.3f\n",p[i][0],p[i][1],p[i+1][0],p[i+1][1],p[i+2][0],p[i+2][1],
                      rgba[0],rgba[1],rgba[2],rgba[3]);
 }
-void* __fastcall MakeRec(void*,void* r) { return r; }
+int activeTextRenderers=0;
+void* __fastcall MakeRec(void*,void* r) { ++activeTextRenderers;return r; }
 void __fastcall BeginRec(void*,void*,void* font) { fontScale=*reinterpret_cast<const float*>(static_cast<unsigned char*>(font)+4); }
 void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bool) {
     size[0]=Width(text);size[1]=kGlyphH*fontScale;
@@ -142,7 +143,7 @@ void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar
     std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",m[12],m[13],kGlyphH*fontScale,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
 }
 void __fastcall EndRec(void*,void*) {}
-void __fastcall FreeRec(void*) {}
+void __fastcall FreeRec(void*) { --activeTextRenderers; }
 void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
     unsigned char* p=image+rva;
     p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0;
@@ -158,7 +159,7 @@ bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; 
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
-bool PlayerPayload(PayloadReadout* o) noexcept { if(hasMapPayload){*o=sceneMapPayload;return true;}if(hasHeli){*o=PayloadReadout{};o->choices=3;o->switchButton=0x10;o->keys=sceneHeli.f.keys;}return hasHeli; }
+bool PlayerPayload(PayloadReadout* o) noexcept { if(hasMapPayload){*o=sceneMapPayload;return true;}if(hasHeli || hasStock){*o=PayloadReadout{};o->choices=hasStock ? sceneStock.arms : 3;o->switchButton=0x10;o->keys=hasHeli ? sceneHeli.f.keys : true;}return hasHeli || hasStock; }
 bool PlayerSelectablePayload(PayloadReadout* o) noexcept { return PlayerPayload(o); }
 bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
@@ -227,7 +228,8 @@ bool IsGroundRobo(const void*) noexcept { return false; }
 bool IsDrillTank(const void*) noexcept { return false; }
 bool JetHud(const void*,JetHudInfo*) noexcept { return false; }
 bool HeliFuel(const void*,float*) noexcept { return false; }
-void SetStockGaugeCover(bool) noexcept {}
+bool gaugeCovered=false;
+void SetStockGaugeCover(bool covered) noexcept { gaugeCovered=covered; }
 }  // namespace crew
 
 using namespace crew;
@@ -1180,9 +1182,71 @@ int SazabiScenes(const std::wstring& dir,const float* pos) {
     hasSazabi=false;
     return failed;
 }
+// The actual complete draw, not isolated panels: long translated stores with
+// all controls and an active switch banner in the same frame.
+int FullLoadoutScenes(const std::wstring& dir) {
+    int failed=0;
+    const float pos[3]={0,120,0};
+    struct Case { int w,h;float scale; };
+    const Case cases[]={{1920,1080,1},{1440,1080,1.5f},{1024,768,1.5f},{960,1080,2.0f},{1920,1080,3.0f}};
+    hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasTurret=false;
+    hasLauncher=hasHeliSight=hasHighView=hasGunner=false;
+    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;
+    for(int heli=0;heli<2;++heli)for(const Case& c:cases) {
+        hasStock=true;hasHeli=heli!=0;StockTank(pos);sceneStock.heli=hasHeli;
+        sceneStock.arms=kStockArms;sceneStock.selected=0;sceneStock.sight=-1;
+        sceneStock.aimOk=false;sceneStock.threats=1;sceneStock.threatKind[0]=1;
+        sceneStock.threatAt[0][0]=500;sceneStock.threatAt[0][1]=120;sceneStock.threatAt[0][2]=500;
+        for(int i=0;i<kStockArms;++i) {
+            sceneStock.arm[i]=StockArm{};sceneStock.arm[i].kind=RoundKind::homing;
+            std::swprintf(sceneStock.arm[i].name,_countof(sceneStock.arm[i].name),L"反装甲多目标制导导弹超长挂载名称%d",i+1);
+            strcpy_s(sceneStock.arm[i].label,"MSL");sceneStock.arm[i].ammo=24+i;sceneStock.arm[i].ammoMax=48;
+        }
+        sceneHeli=PlayerHeliReadout{};sceneHeli.f.keys=true;sceneHeli.f.aiming=true;sceneHeli.f.holding=true;
+        sceneHeli.f.speed=20;sceneHeli.f.setSpeed=20;sceneHeli.f.clear=120;sceneHeli.f.ground=true;
+        Symbols(sceneHeli.sym,pos,0,0);sceneHeli.sym.moving=true;
+        config.hudScale=c.scale;SetScreen(c.w,c.h);
+        float vp[16];Camera(pos,sceneStock.hull,static_cast<float>(c.w),static_cast<float>(c.h),vp);
+        struct { std::int32_t x,y,w,h; } viewport{0,0,c.w,c.h};
+        HudPublish();HudDraw(vp,image,&viewport,nullptr,0);sceneStock.selected=7;HudPublish();
+        wchar_t name[96];std::swprintf(name,_countof(name),L"full_loadout_%ls_%dx%d_scale%.1f",heli ? L"heli" : L"ground",c.w,c.h,c.scale);
+        const std::wstring path=dir+L"\\"+name+L".txt";
+        _wfopen_s(&out,path.c_str(),L"w");if(!out){++failed;continue;}
+        std::fprintf(out,"W %d %d\n",c.w,c.h);
+        const int renderers=activeTextRenderers;
+        Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},c.w,c.h);
+        if(activeTextRenderers!=renderers){++failed;std::printf("FAIL full loadout renderer lifecycle: %ls\n",name);}
+        std::fclose(out);out=nullptr;
+        int stores=0,overlaps=0;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& a=drew[i];if(a.text.empty())continue;
+            if(a.text.find(L"反装甲")!=std::wstring::npos)++stores;
+            for(std::size_t j=i+1;j<drew.size();++j) {
+                const Drew& b=drew[j];if(b.text.empty())continue;
+                if(a.x0<b.x1-1 && b.x0<a.x1-1 && a.y0<b.y1-1 && b.y0<a.y1-1) {
+                    ++overlaps;std::printf("FAIL full loadout %ls: %s / %s\n",name,Narrow(a.text).c_str(),Narrow(b.text).c_str());
+                }
+            }
+        }
+        if(!heli) {
+            int status=0;for(const Drew& d:drew)if(d.text==L"403_Tank")++status;
+            if(status!=1){++failed;std::printf("FAIL full loadout status hidden by banner: %ls\n",name);}
+        }
+        Line expected{};AircraftControls(expected,true,kStockArms,0x10,0,false,false);
+        int controls=0;for(const Drew& d:drew)if(d.text==expected.text)++controls;
+        if(controls!=1 || !gaugeCovered){++failed;std::printf("FAIL full loadout controls or native ammo replacement: %ls %d %d\n",name,controls,gaugeCovered);}
+        if(stores!=9){++failed;std::printf("FAIL full loadout %ls: %d store labels, expected 8 cells + banner\n",name,stores);}
+        failed+=overlaps;
+        std::printf("%s full loadout %ls: %d labels, %d text collisions\n",overlaps ? "FAIL" : "ok",name,stores,overlaps);
+    }
+    config.hudScale=1;hasStock=hasHeli=false;
+    return failed;
+}
+
 // Every scene and the layout checks in the language in use (hudtext::InUse), written into `dir`: the failures.
 int Scenes(const std::wstring& dir) {
     int failed=AircraftBindingChecks();
+    failed+=FullLoadoutScenes(dir);
     hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=false;   // as the first run began
     sceneMarkOn=false;
     const ULONGLONG now=GetTickCount64();
