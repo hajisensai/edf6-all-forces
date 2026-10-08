@@ -54,7 +54,7 @@ Result Navigate(State& s,Point from,Point goal,float stop,std::uint64_t ms,Point
     if(Horizontal(from,s.progress)>0.3f) {s.progress=from;s.progressAt=ms;}
     else if(s.length && ms-s.progressAt>=1500)Begin(s,from,goal,p,ms);
     if(s.length) {
-        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<0.45f &&
+        while(s.cursor<s.length && Horizontal(from,s.path[s.cursor])<=(s.cursor+1==s.length ? stop : 0.45f) &&
               std::fabs(from.y-s.path[s.cursor].y)<=p.step){++s.cursor;s.checked=false;}
         if(s.cursor==s.length){Begin(s,from,goal,p,ms);}
         else {

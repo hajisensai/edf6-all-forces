@@ -66,6 +66,14 @@ void Routing() {
     *s={};ms=1;w={};w.wall=false;
     const auto r=Navigate(*s,from,to,0.2f,ms,next,[&](Point a,Point b,Point& c){return w(a,b,c);},{},2);
     Check(r==Result::pending&&w.calls==2,"per-call edge budget enforced");
+    *s={};w={};w.wall=false;ms=1;
+    Check(Plan(*s,w,from,{1,0,0},next,ms)==Result::moving,"short route available");
+    const Result finalApproach=Navigate(*s,{0.7f,0,0},{1,0,0},0.1f,ms+16,next,
+        [&](Point a,Point b,Point& c){return w(a,b,c);});
+    Check(finalApproach==Result::moving && next.x==1.0f,"final waypoint uses arrival tolerance, not intermediate corner tolerance");
+    const Result arrival=Navigate(*s,{0.95f,0,0},{1,0,0},0.1f,ms+32,next,
+        [&](Point a,Point b,Point& c){return w(a,b,c);});
+    Check(arrival==Result::arrived,"final approach can finish without planning forever");
 }
 }
 int main(){Routing();std::printf("ground navigation: %d checks, %d failures\n",cases,failures);return failures ? 1 : 0;}
