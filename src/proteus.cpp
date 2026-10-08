@@ -402,11 +402,21 @@ void Led(const Unit& u,const float* from,float speed,float* at) noexcept {
     }
 }
 
-// The rounds' start: over the launcher on its back (the seat 3 weapon's muzzles), else 16 m over the origin.
-void RoundFrom(const Unit& u,const unsigned char* v,float* from) noexcept {
-    float dir[3];
-    if(u.weapon[kLauncherSeat] && edf::MeanMuzzle(u.weapon[kLauncherSeat],64,from,dir)){from[1]+=2.0f;return;}
-    std::memcpy(from,Pos(v),12);from[1]+=16.0f;
+// Use one physical barrel, never the mean of a launcher's tubes (that point can be in its hull).
+// Missing weapon/bone data means there is no muzzle to fire from.
+bool RoundFrom(const Unit& u,unsigned seat,unsigned shot,float* from,float* dir) noexcept {
+    const unsigned char* const w=u.weapon[seat];
+    if(!Readable(w,edf::kMuzzleCount+8))return false;
+    const auto count=At<std::uint64_t>(w,edf::kMuzzleCount);
+    const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
+    if(count==0 || count>64 || !Readable(muzzles,count*edf::kMuzzleStride))return false;
+    return edf::MuzzleFrame(w,muzzles+(shot%count)*edf::kMuzzleStride,from,dir) && vec::Normalize(dir);
+}
+
+// The driver's remote use of the right cannon gives way to either real gunner.
+bool DriverCannonFree(const unsigned char* v) noexcept {
+    return SeatCount(v)>=kProteusSeats && SeatRider(SeatAt(const_cast<unsigned char*>(v),kGunnerSeat))==Rider::none &&
+           SeatRider(SeatAt(const_cast<unsigned char*>(v),kRightSeat))==Rider::none;
 }
 
 float Tier(const unsigned char* v) noexcept {
@@ -414,42 +424,48 @@ float Tier(const unsigned char* v) noexcept {
     return std::isfinite(hpMax) && hpMax>0.0f ? hpMax/kDurability : 1.0f;
 }
 
-// The driver's gun (deployed): a round at the screen's centre's point, or at the mark led when it is near the centre.
+// The driver remotely operates the unoccupied right cannon, along its real barrel.
+// A marked target near that bore may be led; the camera cannot fire backwards through the hull.
 void DriverGun(Unit& u,unsigned char* v,const unsigned char* seat,ULONGLONG ms,const Config& c) noexcept {
-    if(!c.proteusDriverGun || c.proteusGunRate<=0.0f || u.st.mode!=proteus::Mode::deployed)return;
+    if(!c.proteusDriverGun || !u.closed || !DriverCannonFree(v) || c.proteusGunRate<=0.0f || u.st.mode!=proteus::Mode::deployed)return;
     if(At<float>(seat,kSeatFire)<kTriggerOn)return;
     const ULONGLONG gap=static_cast<ULONGLONG>(1000.0f/c.proteusGunRate);
     if(ms-u.gunAt<gap)return;
-    float eye[3],dir[3],from[3],at[3];
-    if(!CameraRay(eye,dir))return;
-    RoundFrom(u,v,from);
+    float dir[3],from[3],at[3];
+    if(!RoundFrom(u,kRightSeat,0,from,dir))return;
     bool led=false;
     if(u.mark) {
-        const float d[3]={u.markAt[0]-eye[0],u.markAt[1]-eye[1],u.markAt[2]-eye[2]};
+        const float d[3]={u.markAt[0]-from[0],u.markAt[1]-from[1],u.markAt[2]-from[2]};
         const float l=std::sqrt(Dot3(d,d));
         led=l>1.0f && std::acos(vec::Clamp(Dot3(d,dir)/l,-1.0f,1.0f))<=kLeadCone;
     }
-    if(led)Led(u,from,kRoundSpeed,at);
-    else {
-        const float end[3]={eye[0]+dir[0]*kGunReach,eye[1]+dir[1]*kGunReach,eye[2]+dir[2]*kGunReach};
-        if(MapRay(eye,end,at)<0.0f)std::memcpy(at,end,12);
+    if(led) {
+        Led(u,from,kRoundSpeed,at);
+        const float delta[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
+        const float distance=std::sqrt(Dot3(delta,delta));
+        led=distance>1.0f && Dot3(delta,dir)/distance>=std::cos(kLeadCone);
     }
-    u.gunAt=ms;
-    ProteusGunRound(v,from,at,c.proteusGunDamage*Tier(v));
+    if(!led) {
+        const float end[3]={from[0]+dir[0]*kGunReach,from[1]+dir[1]*kGunReach,from[2]+dir[2]*kGunReach};
+        if(MapRay(from,end,at)<0.0f)std::memcpy(at,end,12);
+    }
+    if(ProteusGunRound(v,from,at,c.proteusGunDamage*Tier(v)))u.gunAt=ms;
 }
 
 // The salvo: its rounds one every kSalvoGapMs at the mark, led, spread round it.
 void Salvo(Unit& u,unsigned char* v,ULONGLONG ms,const Config& c) noexcept {
     if(u.salvoLeft<=0 || ms-u.salvoAt<kSalvoGapMs)return;
-    if(!u.mark){u.salvoLeft=0;return;}
-    float from[3],at[3];
-    RoundFrom(u,v,from);
+    if(!u.mark || SeatCount(v)<=kLauncherSeat || SeatRider(SeatAt(v,kLauncherSeat))!=Rider::none){u.salvoLeft=0;return;}
+    float from[3],at[3],dir[3];
+    if(!RoundFrom(u,kLauncherSeat,static_cast<unsigned>(u.salvoLeft),from,dir)){u.salvoLeft=0;return;}
     Led(u,from,kShellSpeed,at);
     const float a=static_cast<float>(u.salvoLeft)*2.39996f;   // the golden angle: the rounds fall round the point
     const float r=kSalvoSpread*std::sqrt(static_cast<float>(u.salvoLeft%c.proteusSalvoCount+1)/static_cast<float>(c.proteusSalvoCount));
     at[0]+=r*std::cos(a);at[2]+=r*std::sin(a);
-    u.salvoAt=ms;--u.salvoLeft;
-    ProteusSalvoRound(v,from,at,c.proteusSalvoDamage*Tier(v));
+    const float delta[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
+    if(Dot3(delta,dir)<=0.0f){u.salvoLeft=0;return;}   // never fire back through the launcher
+    if(ProteusSalvoRound(v,from,at,c.proteusSalvoDamage*Tier(v))){u.salvoAt=ms;--u.salvoLeft;}
+    else u.salvoLeft=0;
 }
 
 // --- the field ---
@@ -583,7 +599,7 @@ void Publish(const Unit& u,const unsigned char* v,bool driver,const unsigned cha
     bool gun=false,salvo=false;
     ProteusRoundsReady(&gun,&salvo);
     r.salvoArmed=salvo;
-    r.gun=c.proteusDriverGun && gun && u.st.mode==proteus::Mode::deployed;
+    r.gun=c.proteusDriverGun && gun && u.closed && DriverCannonFree(v) && u.st.mode==proteus::Mode::deployed;
     r.priority=proteus::ShieldUp(u.st) && u.st.mode!=proteus::Mode::deployed && c.proteusPriority<1.0f;
     r.fieldRadius=u.st.mode==proteus::Mode::deployed ? c.proteusFieldRadius : 0.0f;
     r.allies=u.allies;
@@ -696,8 +712,16 @@ void FollowCannon(void* aim) noexcept {
         auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(u.ref.obj));
         if(!u.ref.Is(v) || v[kDead] || SeatCount(v)<kProteusSeats)continue;
         auto right=seataim::Object(SeatAt(v,kRightSeat));
+        const auto launcher=seataim::Object(SeatAt(v,kLauncherSeat));
+        if(aim==launcher && u.playerSeat==0 && u.st.mode==proteus::Mode::deployed) {
+            seataim::Follow(seataim::Object(SeatAt(v,0)),launcher,[](unsigned char* axis) noexcept {
+                reinterpret_cast<AxisApplyFn>(image+kAxisApply)(axis,true);
+            });
+            return;
+        }
         if(aim!=right)continue;
-        const auto left=seataim::Object(SeatAt(v,kGunnerSeat));
+        const unsigned source=Cfg().proteusDriverGun && u.playerSeat==0 && u.st.mode==proteus::Mode::deployed && DriverCannonFree(v) ? 0 : kGunnerSeat;
+        const auto left=seataim::Object(SeatAt(v,source));
         seataim::Follow(left,right,[](unsigned char* axis) noexcept {
             reinterpret_cast<AxisApplyFn>(image+kAxisApply)(axis,true);
         });

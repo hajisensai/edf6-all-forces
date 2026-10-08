@@ -679,11 +679,18 @@ bool ProteusGunRound(const unsigned char* by,const float* from,const float* at,f
 // The Proteus's salvo (proteus.cpp): a round of the gunship's shells, on the arc its IFC solves onto `at`.
 bool ProteusSalvoRound(const unsigned char* by,const float* from,const float* at,float damage) noexcept {
     if(!by || !from || !at || !std::isfinite(from[0]+from[1]+from[2]+at[0]+at[1]+at[2]) || !std::isfinite(damage) || damage<=0.0f)return false;
-    return Shell(kGunshipSgo,gunshipReady,by,from,at,damage,false,"Proteus salvo");
+    // The off-screen gunship uses a 10 m collision sphere. The Proteus's actual missile is 1.6 m
+    // (Root.cpk V_407BIGBEGARUTA_MISSILE: AmmoSize 1.6, AmmoHitSizeAdjust 1).
+    // Set the private IFC before its first step; damage and explosion radius stay unchanged.
+    if(!ifcAmmoOk)return false;
+    unsigned char* const o=ShellMake(kGunshipSgo,gunshipReady,by,from,at,damage,false,"Proteus salvo");
+    if(!o)return false;
+    Put<float>(o+kDemoIfc,kIfcAmmoSize,1.6f);
+    return true;
 }
 void ProteusRoundsReady(bool* gun,bool* salvo) noexcept {
     if(gun)*gun=cannonReady && shellsOk;
-    if(salvo)*salvo=gunshipReady && shellsOk;
+    if(salvo)*salvo=gunshipReady && shellsOk && ifcAmmoOk;
 }
 // A bite of the drill tank's drill (drill.cpp): the drill charge fired by `by` straight from `from` (the drill's base)
 // at `at` (what it touches) with `damage`; its team's enemies hurt, its kills, the map's buildings and rocks too.

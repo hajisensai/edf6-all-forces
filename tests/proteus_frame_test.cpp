@@ -7,7 +7,8 @@ unsigned char* image=nullptr;PlayerFix player{};
 namespace {
 Config config{};ULONGLONG now=3600000,frame=1;
 unsigned char vehicle[0x3000]{},seats[4*kSeatStride]{},human[0x400]{},ctrl[16]{};
-int failures=0,checks=0;
+int failures=0,checks=0,gunShots=0,salvoShots=0;
+float lastFrom[3]{},lastAt[3]{};bool roundSucceeds=true;
 void Check(bool pass,const char* what){++checks;if(!pass){++failures;std::printf("FAIL %s\n",what);}}
 void Tick(){++frame;now+=100;ProteusFrame(vehicle);}
 }
@@ -21,9 +22,13 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept{return true;
 float MapRay(const float*,const float*,float*) noexcept{return -1.0f;}
 unsigned char* PlayerHuman() noexcept{return human;}
 void ProteusRoundsReady(bool* gun,bool* salvo) noexcept{if(gun)*gun=false;if(salvo)*salvo=false;}
-bool ProteusGunRound(const unsigned char*,const float*,const float*,float) noexcept{return false;}
-bool ProteusSalvoRound(const unsigned char*,const float*,const float*,float) noexcept{return false;}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept{return nullptr;}
+bool ProteusGunRound(const unsigned char*,const float* from,const float* at,float) noexcept{
+    ++gunShots;std::memcpy(lastFrom,from,12);std::memcpy(lastAt,at,12);return roundSucceeds;
+}
+bool ProteusSalvoRound(const unsigned char*,const float* from,const float* at,float) noexcept{
+    ++salvoShots;std::memcpy(lastFrom,from,12);std::memcpy(lastAt,at,12);return roundSucceeds;
+}
 }
 int main(){
     using namespace crew;
@@ -70,6 +75,36 @@ int main(){
     Check(std::fabs(proteus::pose::Deployed(poseState,proteus::Tunables{})-.5f)<.0001f,"deployment model progresses halfway through real stagger");
     poseState.mode=proteus::Mode::stowing;
     Check(std::fabs(proteus::pose::Deployed(poseState,proteus::Tunables{})-.5f)<.0001f,"stowing reverses deployment model");
+    // Production firing paths, with real MuzzleFrame reading separate physical tubes and native bone matrices.
+    unsigned char weapon[0xF00]{},muzzles[2*edf::kMuzzleStride]{},bone[0x100]{};
+    Put<void*>(weapon,edf::kMuzzles,muzzles);Put<std::uint64_t>(weapon,edf::kMuzzleCount,2);
+    for(int k=0;k<4;++k)Put<float>(bone,edf::kBoneRows+k*20,1);
+    for(int i=0;i<2;++i){
+        auto m=muzzles+i*edf::kMuzzleStride;Put<void*>(m,0,bone);Put<int>(m,edf::kMuzzleMode,1);
+        for(int k=0;k<4;++k)Put<float>(m,edf::kMuzzleLocal+k*20,1);
+        Put<float>(m,edf::kMuzzleLocal+48,i==0 ? -3.0f : 3.0f);
+        Put<float>(m,edf::kMuzzleLocal+52,10.0f);Put<float>(m,edf::kMuzzleLocal+56,9.0f);
+    }
+    Unit fire{};fire.weapon[kRightSeat]=weapon;fire.weapon[kLauncherSeat]=weapon;
+    fire.st.mode=proteus::Mode::deployed;fire.closed=true;config.proteusDriverGun=true;
+    Put<float>(seats,kSeatFire,1);float from[3],dir[3];
+    Check(RoundFrom(fire,kLauncherSeat,0,from,dir) && from[0]==-3 && from[1]==10,"salvo selects first real tube without arbitrary height offset");
+    Check(RoundFrom(fire,kLauncherSeat,1,from,dir) && from[0]==3,"salvo selects next real tube rather than midpoint in hull");
+    DriverGun(fire,vehicle,seats,now,config);
+    Check(gunShots==1 && lastFrom[0]==-3 && lastAt[2]>lastFrom[2],"driver cannon follows real barrel even when camera ray unavailable");
+    Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,ctrl);
+    DriverGun(fire,vehicle,seats,now+2000,config);Check(gunShots==1,"occupied gunner has exclusive cannon ownership");
+    Put<void*>(seats+kSeatStride,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,nullptr);
+    fire.mark=human;fire.markAt[2]=200;fire.salvoLeft=2;Salvo(fire,vehicle,now,config);
+    Check(salvoShots==1 && fire.salvoLeft==1 && lastFrom[0]==-3,"salvo creates a round from actual tube and consumes one on success");
+    fire.markAt[2]=-200;Salvo(fire,vehicle,now+2000,config);
+    Check(salvoShots==1 && fire.salvoLeft==0,"target behind launcher cannot fire through its hull");
+    fire.markAt[2]=200;fire.salvoLeft=2;roundSucceeds=false;Salvo(fire,vehicle,now+4000,config);
+    Check(fire.salvoLeft==0,"failed round creation stops the salvo");
+    const auto old=fire.gunAt;DriverGun(fire,vehicle,seats,now+6000,config);
+    Check(fire.gunAt==old,"failed cannon creation does not consume cooldown");
+    Put<std::uint64_t>(weapon,edf::kMuzzleCount,0);fire.salvoLeft=2;Salvo(fire,vehicle,now+8000,config);
+    Check(fire.salvoLeft==0 && !RoundFrom(fire,kLauncherSeat,0,from,dir),"missing muzzle never spawns from imaginary hull position");
     std::printf("proteus_frame_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures?1:0;
 }
