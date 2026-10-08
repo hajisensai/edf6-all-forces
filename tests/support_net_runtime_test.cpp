@@ -84,6 +84,15 @@ bool Participants(void** out,std::uint32_t capacity,std::uint32_t* count,std::ui
     *count=actors;*expected=expectedActors;return true;
 }
 bool AdmissionReady() noexcept { return gateReady; }
+bool CreationsMatch(const crew::ObjRef* created,std::uint32_t count) noexcept {
+    for(std::uint32_t i=0;i<count;++i)if(created[i].obj!=actorPuids[i] ||
+        created[i].ctrl!=reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i+100)))return false;
+    return count==actors;
+}
+void NoteCreations() {
+    for(unsigned i=0;i<actors;++i)EDF6AF_MissionPlayerCreated(static_cast<int>(i),actorPuids[i],
+        reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i+100)));
+}
 PlanResult PlanCall(std::uint32_t id,const float* target,Plan* plan) noexcept {
     *plan={};plan->catalogId=id;plan->count=1;std::memcpy(plan->target,target,12);
     auto& u=plan->units[0];u.resourceId=1;u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;return PlanResult::ready;
@@ -95,7 +104,7 @@ bool Derive(std::uint32_t ordinal,unsigned char* bytes) noexcept { std::memset(b
 void Step() { tick+=100;crew::SupportNetTick(); }
 void WorldParticipants() {
     installed=true;online=true;ready=false;actors=2;expectedActors=3;gateReady=false;
-    crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive,&Participants,&AdmissionReady});
+    crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive,&Participants,&AdmissionReady,&CreationsMatch});
     EDF6AFMissionParticipants state{};
     gateReady=true;actors=3;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(!state.ready,"preload cannot seal leftover actors before player creation begins");
@@ -105,6 +114,8 @@ void WorldParticipants() {
     gateReady=true;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(!state.ready,"partial player construction cannot become ACK quorum");
     actors=3;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
+    Check(!state.ready,"creation attempt alone cannot seal old world actors");
+    NoteCreations();tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==2 && !std::strcmp(state.participants[0].id,"client"),"complete native world deduplicates split-screen PUIDs");
     const auto epoch=state.worldEpoch;
     Check(crew::SupportMissionPlayerAllowed(0) && crew::SupportMissionPlayerAllowed(1),"existing mission players may respawn");
@@ -112,11 +123,18 @@ void WorldParticipants() {
     Check(!crew::SupportMissionPlayerAllowed(99),"failed pre-create identity read fails closed");
     actors=0;tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==2 && state.worldEpoch==epoch,"death/removal observations cannot redefine frozen quorum");
+    EDF6AFMissionAdmissionState policy{};
+    Check(EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy) && policy.phase==3 && policy.participantCount==2,
+        "host admission policy exposes sealed world independently of transport readiness");
     Check(!EDF6AF_GetMissionParticipants(2,sizeof(state),&state),"world snapshot ABI rejects unsupported version");
     crew::ResetSupportNet();actors=4;expectedActors=4;crew::SupportMissionPlayerAllowed(0);
+    NoteCreations();
     tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==3 && state.worldEpoch!=epoch && crew::SupportMissionPlayerAllowed(2),
         "next explicit mission admits prior lobby-only player into new frozen world");
+    crew::SupportMissionReturnedToLobby();EDF6AF_GetMissionAdmissionState(1,sizeof(policy),&policy);
+    Check(policy.phase==1 && !policy.participantCount && policy.worldEpoch!=state.worldEpoch,
+        "only explicit verified lobby notification clears sealed admission policy");
     crew::ResetSupportNet();
 }
 }

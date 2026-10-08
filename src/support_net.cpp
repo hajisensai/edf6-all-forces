@@ -24,6 +24,8 @@ SRWLOCK worldLock=SRWLOCK_INIT;
 EDF6AFMissionParticipants world{};
 bool worldFrozen=false,worldCreationSeen=false;
 std::uint64_t worldSerial=0;
+std::uint32_t worldPhase=0;
+ObjRef worldCreated[support_net::kMaxPeers]{};
 ULONGLONG nextWorldRead=0;
 
 bool PuidText(void* puid,EDF6CoopPeer& out) noexcept {
@@ -40,12 +42,13 @@ bool PuidText(void* puid,EDF6CoopPeer& out) noexcept {
 }
 void ResetWorld() noexcept {
     AcquireSRWLockExclusive(&worldLock);
-    world={};world.size=sizeof(world);worldFrozen=false;worldCreationSeen=false;
+    world={};world.size=sizeof(world);worldFrozen=false;worldCreationSeen=false;worldPhase=2;
+    for(auto& actor:worldCreated)actor={};
     if(worldSerial!=UINT64_MAX)world.worldEpoch=++worldSerial;
     ReleaseSRWLockExclusive(&worldLock);nextWorldRead=0;
 }
 void WorldTick(ULONGLONG now) noexcept {
-    if(!hooks.participants || !hooks.admissionReady || !hooks.admissionReady() ||
+    if(!hooks.participants || !hooks.createdMatches || !hooks.admissionReady || !hooks.admissionReady() ||
        !world.worldEpoch || !worldCreationSeen || now<nextWorldRead)return;
     nextWorldRead=now+250;
     // Only the game thread writes worldFrozen. Once sealed, deaths, respawns,
@@ -55,6 +58,7 @@ void WorldTick(ULONGLONG now) noexcept {
     std::uint32_t count=0,expected=0;
     if(!hooks.participants(puids,support_net::kMaxPeers,&count,&expected) ||
        !expected || expected>support_net::kMaxPeers || count!=expected)return;
+    if(!hooks.createdMatches(worldCreated,expected))return;
     EDF6AFMissionParticipants next{};next.size=sizeof(next);next.worldEpoch=world.worldEpoch;
     for(std::uint32_t i=0;i<count;++i)if(!PuidText(puids[i],next.participants[i]))return;
     auto less=[](const EDF6CoopPeer& a,const EDF6CoopPeer& b){return std::strcmp(a.id,b.id)<0;};
@@ -66,7 +70,7 @@ void WorldTick(ULONGLONG now) noexcept {
     // must have existed before deduplicating them into a network ACK quorum.
     for(std::uint32_t i=next.participantCount;i<count;++i)next.participants[i]={};
     next.ready=1;
-    AcquireSRWLockExclusive(&worldLock);world=next;worldFrozen=true;ReleaseSRWLockExclusive(&worldLock);
+    AcquireSRWLockExclusive(&worldLock);world=next;worldFrozen=true;worldPhase=3;ReleaseSRWLockExclusive(&worldLock);
     Log("SUPPORT world participants sealed: actors=%u peers=%u epoch=%llu",count,next.participantCount,
         static_cast<unsigned long long>(next.worldEpoch));
 }
@@ -212,6 +216,28 @@ std::uint32_t AllowMissionPlayer(std::int32_t index) noexcept {
     return allowed ? 1u : 0u;
 }
 bool SupportMissionPlayerAllowed(int index) noexcept { return AllowMissionPlayer(index)!=0; }
+void NoteSupportMissionPlayerCreated(int index,const ObjRef& object) noexcept {
+    if(index<0 || static_cast<unsigned>(index)>=support_net::kMaxPeers || !object.obj || !object.ctrl)return;
+    AcquireSRWLockExclusive(&worldLock);
+    worldCreated[index]=object;worldCreationSeen=true;
+    ReleaseSRWLockExclusive(&worldLock);
+}
+void SupportMissionReturnedToLobby() noexcept {
+    SuspendSupportNet();
+    AcquireSRWLockExclusive(&worldLock);
+    world={};world.size=sizeof(world);worldPhase=1;worldFrozen=false;worldCreationSeen=false;
+    if(worldSerial!=UINT64_MAX)world.worldEpoch=++worldSerial;
+    for(auto& actor:worldCreated)actor={};
+    ReleaseSRWLockExclusive(&worldLock);
+}
+std::uint32_t GetMissionAdmissionState(std::uint32_t version,std::uint32_t size,EDF6AFMissionAdmissionState* out) noexcept {
+    if(!out || version!=EDF6AF_MISSION_ADMISSION_VERSION || size!=sizeof(*out))return 0;
+    AcquireSRWLockShared(&worldLock);
+    *out={};out->size=sizeof(*out);out->phase=worldPhase;out->worldEpoch=world.worldEpoch;
+    out->participantCount=world.participantCount;
+    std::memcpy(out->participants,world.participants,sizeof(world.participants));
+    ReleaseSRWLockShared(&worldLock);return 1;
+}
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {
     SupportNetTick();
     return running && OnlineHostOnly() ? session.SubmitPrepared(plan,GetTickCount64()) : 0;
@@ -227,4 +253,11 @@ extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_GetMissionParticip
 }
 extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_AllowMissionPlayer(std::int32_t index) noexcept {
     return crew::AllowMissionPlayer(index);
+}
+extern "C" __declspec(dllexport) void __cdecl EDF6AF_MissionPlayerCreated(std::int32_t index,const void* object,const void* ctrl) noexcept {
+    crew::NoteSupportMissionPlayerCreated(index,crew::ObjRef{object,ctrl});
+}
+extern "C" __declspec(dllexport) std::uint32_t __cdecl EDF6AF_GetMissionAdmissionState(
+    std::uint32_t version,std::uint32_t size,EDF6AFMissionAdmissionState* out) noexcept {
+    return crew::GetMissionAdmissionState(version,size,out);
 }

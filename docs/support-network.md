@@ -66,6 +66,12 @@ set and local world epoch. It is sealed only after the native all-team visitor
 finds every expected player Soldier (including dead players); split-screen PUIDs
 are deduplicated only after that completeness check. The lifetime must also have
 observed player creation begin, so preload cannot seal the previous world actors.
+Every index must additionally match the exact `(object, weak-control)` identity
+reported by the successful native creation wrappers in this epoch. An attempted
+creation or a leftover object at an old address is insufficient. The Coop wrapper
+notifies `EDF6AF_MissionPlayerCreated`; AF's upper wrapper uses
+`NoteSupportMissionPlayerCreated`. `MissionParticipantCreationsMatch` checks the
+final complete all-team enumeration against these records.
 A new lobby user is not a
 world player. Coop validates and routes only this frozen subset, so a lobby-only
 join or leave does not change the support generation or ACK quorum. A genuine
@@ -85,6 +91,13 @@ alone do not prove that the joiner cannot load the host's already running world.
 That requires a verified upper mission-entry rule or trusted host world policy
 before entry. No mid-world actor/seat catchup is claimed or substituted with
 invisible local-only actors.
+
+`EDF6AF_GetMissionAdmissionState` exposes lifecycle independently of extension
+readiness: Unknown, verified Lobby, Loading, Sealed and Invalid. Reset is Loading;
+successful actor sealing is Sealed. Only `SupportMissionReturnedToLobby`, called
+by a verified native lobby transition, may publish Lobby. Missing actors or a
+false readiness bit are never interpreted as a lobby. Consumers must keep a fresh
+joiner waiting when this lifecycle state is unknown or unverified.
 
 The host-internal `SubmitPreparedSupportPlan` handles existing mission vehicles
 through the same protocol. It accepts reserved catalog 1023 and exactly one

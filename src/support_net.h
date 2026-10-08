@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace crew {
+struct ObjRef;
 namespace support_net {
 constexpr std::uint32_t kMaxUnits=16,kMaxPeers=1024,kMaxTransactions=128;
 constexpr std::uint32_t kExistingVehicle=0xFFFF0001u,kMissionCrewCatalog=1023;
@@ -27,6 +28,7 @@ struct Hooks {
     bool (*deriveId)(std::uint32_t,unsigned char*) noexcept=nullptr;
     bool (*participants)(void**,std::uint32_t,std::uint32_t*,std::uint32_t*) noexcept=nullptr;
     bool (*admissionReady)() noexcept=nullptr;
+    bool (*createdMatches)(const ObjRef*,std::uint32_t) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
@@ -41,6 +43,10 @@ bool SupportTransactionActive(std::uint64_t transaction) noexcept;
 // actual participant PUIDs. A newly joined lobby member waits for the next world.
 bool SupportParticipantAllowed(void* puid) noexcept;
 bool SupportMissionPlayerAllowed(int missionIndex) noexcept;
+void NoteSupportMissionPlayerCreated(int missionIndex,const ObjRef& object) noexcept;
+// Only a verified native return-to-lobby transition may call this; readiness
+// loss, a disappeared actor, and InSession() are not evidence of a lobby.
+void SupportMissionReturnedToLobby() noexcept;
 // Host-internal mission vehicle migration. Existing-vehicle units carry their
 // canonical registered ID and are resolved, never created or destroyed.
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept;
