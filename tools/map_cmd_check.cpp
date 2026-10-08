@@ -147,6 +147,14 @@ int main() {
     Check(Click(s,marks,4,150.0f,110.0f,22.0f,false)==nullptr,"a unit behind the eye is never clicked");
     const Mark close[]={{&a,100.0f,100.0f,true},{&b,112.0f,100.0f,true}};
     Check(Click(s,close,2,109.0f,100.0f,22.0f,false)==&b,"two in reach: the nearer");
+    // The enemy under the pointer (mapcmd.cpp Hover): an enemy has a mark at its lock point and one up its pin; either
+    // under the pointer finds it, behind the eye never, out of reach none.
+    const Mark foes[]={{&a,400.0f,300.0f,true},{&a,400.0f,240.0f,true},{&b,600.0f,300.0f,true},{&b,600.0f,240.0f,false}};
+    Check(Nearest(foes,4,402.0f,244.0f,22.0f)==1,"hover: an enemy found up its pin");
+    Check(Nearest(foes,4,398.0f,305.0f,22.0f)==0,"hover: an enemy found at its lock point");
+    Check(Nearest(foes,4,600.0f,242.0f,22.0f)<0,"hover: a mark behind the eye is never under the pointer");
+    Check(Nearest(foes,4,500.0f,300.0f,22.0f)<0,"hover: nothing within reach");
+    Check(Nearest(foes,0,400.0f,300.0f,22.0f)<0,"hover: no enemies");
     {   // A box on a real map view: the left half of the screen takes exactly the units drawn there.
         const mapcam::View v{{0.0f,0.0f,0.0f},0.6f,mapcam::kStartPitch,mapcam::kStartHeight};
         float vp[16];

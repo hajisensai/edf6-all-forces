@@ -24,14 +24,17 @@
 #include "formation.h"
 #include "pickup.h"
 #include "npc_logic.h"
+#include "npc_mark.h"
 #include "online_authority.h"
 #include "vhud.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace crew {
 namespace {
+void ResetGunnerInputs() noexcept;
 // --- The human (docs/npc-ai-design.md §3.1) ---
 constexpr std::size_t kMoveX=0xD50,kMoveY=0xD54,kMoveZ=0xD58,kMoveW=0xD5C;   // the move stick, local (x, 0, z, 1)
 constexpr std::size_t kLookPitch=0xD60,kLookYaw=0xD64;                       // the look's change this frame (rad)
@@ -179,57 +182,103 @@ void PlayerLane(World& w) noexcept {
 
 // --- The mark (§6.3) ---
 // On foot, the map shut, the game in front: NpcMarkKey marks the enemy lock point nearest the screen's centre within
-// NpcMarkCone degrees (the same one again: the mark let go). Kept while that enemy is in the frame's enemy list. The
-// squads told to focus fire all take it; every other soldier takes it first when it is within its longest reach plus
-// how far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
+// NpcMarkCone degrees (the same one again: the mark let go; another: the mark moves to it). With no enemy within
+// kPointClear times that cone it is a point instead: the units selected on the map (mapcmd.cpp) guard where the centre
+// meets the ground (MapCommandGuardAt), the mark kept; between the two (a near miss) nothing is done but a word that the
+// key marks what it is aimed at. In the map the key marks the enemy under the pointer (mapcmd.cpp NpcMarkEnemy).
+// The key is read on the player's own frame (map.cpp MapHumanFrame -> NpcMarkFrame), not in a soldier's Think: the point
+// order is for any unit the map commands (helis, jets, tanks), with or without a friendly soldier in the mission.
+// The mark is kept until that enemy dies or is gone (the user, 2026-10-07: "标记效果应该先打死才换吧"): not only while its
+// lock point is lockable (the frame's enemy list holds the lockable ones alone: an enemy out of sight or out of lock range
+// for a moment dropped the mark). Gone: its control block's strong count spent, another object at its address, or the
+// object deleted (removed without dying: a script's despawn); jet.cpp Alive's test. The squads told to focus fire all
+// take it while it is in the enemy list; every other soldier takes it first when it is within its longest reach plus how
+// far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
 struct MarkState { ObjRef obj; float at[3]; bool held; };
 MarkState mark{};
-struct MarkPub { bool on; float at[3]; ULONGLONG wall; };
+struct MarkPub { bool on; float at[3]; ULONGLONG wall; NpcPing ping; };
 MarkPub markPub{};
+NpcPing ping{};
 SRWLOCK markLock=SRWLOCK_INIT;
-constexpr float kMarkFar=2000.0f;   // m: no mark past this
-
-bool KeyHeld(int vk) noexcept {
-    if(vk<=0 || MapHoldsKeys())return false;   // the map view holds the player's keys (map.cpp)
-    DWORD pid=0;
-    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
-    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
-}
+constexpr float kMarkFar=2000.0f;   // m: no mark past this, no point past this
+constexpr float kPointClear=3.0f;   // the point needs no enemy within this many times NpcMarkCone of the centre
+constexpr ULONGLONG kPingMs=3000;   // wall ms a point's ring and its result are shown
 
 const Enemy* MarkedEnemy() noexcept {
-    if(!mark.obj)return nullptr;
-    for(int i=0;i<world.enemies;++i)if(world.enemy[i].object==mark.obj.obj)return &world.enemy[i];
+    if(!npcmark::Alive(mark.obj))return nullptr;
+    for(int i=0;i<world.enemies;++i)if(mark.obj.Is(world.enemy[i].object))return &world.enemy[i];
     return nullptr;
 }
 
-void ToggleMark() noexcept {
+// The marked object still the one marked and in the game (jet.cpp Alive) and alive.
+bool MarkAlive() noexcept {
+    return npcmark::Alive(mark.obj);
+}
+
+// Where the marked enemy's lock point is now (lockable or not); where it was when it has none.
+struct LastSeen { const ObjRef* ref; float* at; };
+void SeeMarked(void* ctx,const void* object,const float* aim) {
+    auto& l=*static_cast<LastSeen*>(ctx);
+    if(object==l.ref->obj)std::memcpy(l.at,aim,12);
+}
+
+void Mark(const void* object,const float* at) noexcept {
+    npcmark::Assign(mark.obj,npcmark::Capture(object));
+    if(at)std::memcpy(mark.at,at,12);
+}
+
+void Ping(const float* at,int given) noexcept { ping=NpcPing{true,{at[0],at[1],at[2]},given,GetTickCount64()}; }
+
+// The point under the screen's centre the selected units are sent to (no enemy near the centre).
+void SendToPoint(const float* eye,const float* dir) noexcept {
+    const float end[3]={eye[0]+dir[0]*kMarkFar,eye[1]+dir[1]*kMarkFar,eye[2]+dir[2]*kMarkFar};
+    float hit[3];
+    if(!(MapFloorRay(eye,end,hit)>=0.0f) || !std::isfinite(hit[0]+hit[1]+hit[2])) {
+        Log("NPCAI mark: nothing near the screen's centre to mark, no ground under it");
+        return;
+    }
+    const int given=MapCommandGuardAt(hit);
+    Ping(hit,given);
+    Log("NPCAI mark: no enemy near the screen's centre: the point (%.0f,%.0f,%.0f) -> %d",hit[0],hit[1],hit[2],given);
+}
+
+// The enemy lock point nearest the centre's ray (the lock registry's lockable ones of the player's side's enemies).
+struct Aimed { const float* eye; const float* dir; const void* best; float off; float at[3]; };
+void SeeAimed(void* ctx,const void* object,const float* aim) {
+    auto& a=*static_cast<Aimed*>(ctx);
+    const float to[3]={aim[0]-a.eye[0],aim[1]-a.eye[1],aim[2]-a.eye[2]};
+    const float d=npc::Len(to);
+    if(d<1.0f || d>kMarkFar)return;
+    const float off=std::acos(npc::Clamp(npc::Dot(to,a.dir)/d,-1.0f,1.0f));
+    if(off<a.off){a.off=off;a.best=object;std::memcpy(a.at,aim,12);}
+}
+
+void ToggleMark(std::int32_t team) noexcept {
     float eye[3],dir[3];
     if(!CameraRay(eye,dir))return;
     const float cone=Cfg().npcMarkCone*npc::kPi/180.0f;
-    const Enemy* best=nullptr;float bestOff=cone;
-    for(int i=0;i<world.enemies;++i) {
-        const Enemy& e=world.enemy[i];
-        const float to[3]={e.aim[0]-eye[0],e.aim[1]-eye[1],e.aim[2]-eye[2]};
-        const float d=npc::Len(to);
-        if(d<1.0f || d>kMarkFar)continue;
-        const float off=std::acos(npc::Clamp(npc::Dot(to,dir)/d,-1.0f,1.0f));
-        if(off<bestOff){bestOff=off;best=&e;}
+    Aimed a{eye,dir,nullptr,cone*kPointClear,{}};
+    VisitEnemiesOf(team,&SeeAimed,&a);
+    if(!a.best){SendToPoint(eye,dir);return;}   // a miss never lets the mark go: only the same enemy again does
+    if(a.off>cone) {                             // near an enemy, not on it: neither a mark nor a point
+        Ping(a.at,kPingNearEnemy);
+        Log("NPCAI mark: an enemy %.1f deg off the centre (the mark takes %.1f): nothing done",a.off*180.0f/npc::kPi,Cfg().npcMarkCone);
+        return;
     }
-    const bool same=best && mark.obj.obj==best->object;
-    if(best && !same){mark.obj=ObjRef::Of(best->object);std::memcpy(mark.at,best->aim,12);}
-    else mark.obj=ObjRef{};
-    Log("NPCAI mark: %s",best ? (same ? "let go" : "an enemy marked") : "nothing near the screen's centre to mark");
+    const bool same=mark.obj.Is(a.best);
+    if(same)npcmark::Assign(mark.obj,{});
+    else Mark(a.best,a.at);
+    Log("NPCAI mark: %s",same ? "let go" : "an enemy marked");
 }
 
-void MarkTick() noexcept {
-    unsigned char* const me=PlayerHuman();
-    const bool down=Cfg().npcMarkKey>0 && me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey);
-    if(down && !mark.held)ToggleMark();
-    mark.held=down;
-    if(const Enemy* e=MarkedEnemy())std::memcpy(mark.at,e->aim,12);
-    else if(mark.obj){mark.obj=ObjRef{};Log("NPCAI mark: the marked enemy is gone");}
+// The mark kept while its enemy is in the game, at its lock point; published for the HUD.
+void KeepMark() noexcept {
+    if(MarkAlive()){LastSeen l{&mark.obj,mark.at};VisitLockPoints(&SeeMarked,&l);}
+    else if(mark.obj){npcmark::Assign(mark.obj,{});Log("NPCAI mark: the marked enemy is dead or gone");}
     AcquireSRWLockExclusive(&markLock);
-    markPub.on=static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    markPub.on=npcmark::Enabled() && static_cast<bool>(mark.obj);std::memcpy(markPub.at,mark.at,12);markPub.wall=GetTickCount64();
+    markPub.ping=ping;
+    if(!npcmark::Enabled())markPub.ping.on=false;
     ReleaseSRWLockExclusive(&markLock);
 }
 
@@ -270,10 +319,17 @@ void SetMarchShape(npc::formation::Shape s,const char* by) noexcept {
     Log("NPCAI formation: %s (%s)",npc::formation::Name(s),by);
 }
 
+bool KeyHeld(int vk) noexcept {
+    if(vk<=0)return false;
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    return pid==GetCurrentProcessId() && (GetAsyncKeyState(vk)&0x8000)!=0;
+}
+
 void FormationTick() noexcept {
     unsigned char* const me=PlayerHuman();
     const bool down=Cfg().npcFormationKey>0 && me && HumanOnFoot(me) && KeyHeld(Cfg().npcFormationKey);
-    if(down && !march.held)SetMarchShape(npc::formation::Next(MarchShape(),false),"the key");
+    if(down && !march.held && !MapHoldsKeys())SetMarchShape(npc::formation::Next(MarchShape(),false),"the key");
     march.held=down;
 }
 
@@ -293,7 +349,6 @@ void Gather(std::int32_t team) noexcept {
         reinterpret_cast<WalkFn>(image+kTeamWalk)(manager,team,&f);
     }
     PlayerLane(w);
-    MarkTick();
     FormationTick();
     SweepFrame();
 }
@@ -1053,11 +1108,13 @@ bool InstallNpcAi() noexcept {
 }
 
 void ResetNpcAi() noexcept {
+    ResetGunnerInputs();
     for(auto& s:soldiers)s=Soldier{};
     for(auto& q:squads)q=Squad{};
     cooldowns=npc::Cooldowns<kMaxSquads>{};
     dismissedCount=0;
-    mark=MarkState{};
+    npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};
+    AcquireSRWLockExclusive(&markLock);markPub=MarkPub{};ReleaseSRWLockExclusive(&markLock);
     world=World{};
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
     march.movers=march.pending=march.moversLast=march.pendingLast=0;
@@ -1143,11 +1200,12 @@ void MarchRoster(ULONGLONG ms) noexcept {
     for(const Squad& q:squads) {
         if(!Live(q,ms) || q.control!=npc::Control::recruited || q.cmd.order!=Order::none)continue;
         auto top=static_cast<unsigned char*>(const_cast<void*>(q.top.obj));
-        if(RootLeader(top)!=me)continue;
+        if(!q.top.Is(top) || top[kDead] || TopNpc(top)!=top || RootLeader(top)!=me)continue;
         unsigned char* m[kMaxSquad];
         const int k=Members(top,m,kMaxSquad);
         for(int i=0;i<k && march.n<static_cast<int>(sizeof(march.member)/sizeof(march.member[0]));++i)
-            if(HumanOnFoot(m[i]))march.member[march.n++]=m[i];
+            if(HumanOnFoot(m[i]) && IsOnlineAuthority(m[i]) && !npc::Scripted(ControlOf(m[i],RootLeader(m[i]))))
+                march.member[march.n++]=m[i];
     }
 }
 
@@ -1200,32 +1258,23 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
 // The player's key (NpcPickupKey, on foot) sends the recruited squads with no order out for the item boxes within
 // NpcPickupRange of the player, one soldier a box (pickup::Assign), until none is left or NpcPickupSec is up (the key
 // again calls them back). The boxes are DropItemManager's list (H): not objects, read where they are each frame.
-//  - Weapon and armour boxes are taken the stock way: Collect 0x2C8AC0 with the player as the one who picks (its
-//    gate is the player's pad, +0x340), the box's own position and a 5 cm reach, so only that box: the game counts it
-//    for the mission, plays its sound, and online asks the host as it does for a player's own (§4.4). The callback
-//    is a quiet one (its slot 5 says no effect: the stock's would flash on the player, far from the box).
+//  - Weapon and armour boxes use Collect's per-box body: Notify 0x2C7D50, Apply 0x2C7540, then mark this Unit taken.
+//    The radius-based Collect itself can consume overlapping health boxes, even with a tiny radius. These native
+//    calls preserve the player's mission credit, sound and online arbitration without touching adjacent boxes.
 //  - A health box heals the soldier that took it (the plugin marks it taken and calls the stock heal 0x547870 on
 //    that soldier with the box's share of its full health); offline only, NpcPickupHealth on, a hurt soldier.
-constexpr unsigned kDropManager=0x20B2988,kBoxVtable=0x17A6C18,kCollect=0x2C8AC0,kHealHuman=0x547870,kNodePos=0x11B15B0;
-constexpr std::size_t kBoxList=0xDE0,kBoxNodeUnit=0x18,kBoxModel=0xB0,kBoxKind=0xC0,kBoxTaken=0xC4;
+constexpr unsigned kDropManager=0x20B2988,kBoxVtable=0x17A6C18,kNotifyBox=0x2C7D50,kApplyBox=0x2C7540,kHealHuman=0x547870,kNodePos=0x11B15B0;
+constexpr std::size_t kBoxList=0xDE0,kBoxNodeUnit=0x18,kBoxModel=0xB0,kBoxKind=0xC0,kBoxTaken=0xC4,kBoxId=0xC8;
 constexpr int kMaxBoxes=128;
-constexpr float kBoxGrab=0.05f;      // m: the reach handed to Collect round the box's own position
-const unsigned char kCollectSig[]={0x4C,0x8B,0xDC,0x55,0x41,0x56,0x41,0x57,0x48,0x83,0xEC,0x60,0x48,0x83,0xBA,0x40,0x03,0x00,0x00,0x00};
+const unsigned char kNotifyBoxSig[]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x48,0x81,0xEC,0x60,0x06,0x00,0x00};
+const unsigned char kApplyBoxSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x0F,0x29,0x74,0x24,0x20};
 const unsigned char kHealHumanSig[]={0x80,0xB9,0xE8,0x02,0x00,0x00,0x00,0x75,0x20,0xF3,0x0F,0x58,0x89,0xF8,0x02,0x00,0x00,0xF3,0x0F,0x5D};
 const unsigned char kNodePosSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x8B,0x91,0xF0,0x00,0x00,0x00,0x48,0x8B,0x48};
-using CollectFn=void(__fastcall*)(void*,void*,const float*,float,float,void*);
+using NotifyBoxFn=void(__fastcall*)(void*,std::int32_t,std::int32_t,void*);
+using ApplyBoxFn=void(__fastcall*)(void*,void*,std::int32_t,float);
 using HealHumanFn=void(__fastcall*)(void*,float);
 using NodePosFn=const float*(__fastcall*)(const void*);
 bool boxesOk=false;
-
-// Collect's callback (a 16-byte {vtable, owner} on the caller's stack): slot 5 asked whether to play the pick-up's
-// effect (no), slot 1 the effect (never called then); the others never called by Collect.
-bool __fastcall QuietAsk(void*) { return false; }
-void __fastcall QuietNone(void*) {}
-void* const kQuietVtable[8]={reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),
-                             reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietAsk),
-                             reinterpret_cast<void*>(&QuietNone),reinterpret_cast<void*>(&QuietNone)};
-struct QuietCallback { void* const* vt; void* owner; };
 
 struct SweepBox { void* unit; float pos[3]; int kind; };
 constexpr int kSweepTops=16;
@@ -1255,7 +1304,7 @@ int Boxes(SweepBox* out,int most) noexcept {
     for(auto node=At<unsigned char*>(head,0);node && node!=head && n<most && guard<kMaxBoxes*2;node=At<unsigned char*>(node,0),++guard) {
         if(!Readable(node,0x20))break;
         auto u=At<unsigned char*>(node,kBoxNodeUnit);
-        if(!Readable(u,kBoxTaken+1) || At<const void*>(u,0)!=image+kBoxVtable || u[kBoxTaken])continue;
+        if(!Readable(u,kBoxId+sizeof(std::int32_t)) || At<const void*>(u,0)!=image+kBoxVtable || u[kBoxTaken])continue;
         const int kind=At<std::int32_t>(u,kBoxKind);
         const void* const model=At<const void*>(u,kBoxModel);
         if(kind<0 || kind>3 || !model)continue;
@@ -1276,7 +1325,8 @@ void EndSweep(const char* why) noexcept {
 
 void InstallBoxes() noexcept {
     __try {
-        boxesOk=Matches(kCollect,kCollectSig,sizeof(kCollectSig)) && Matches(kHealHuman,kHealHumanSig,sizeof(kHealHumanSig)) &&
+        boxesOk=Matches(kNotifyBox,kNotifyBoxSig,sizeof(kNotifyBoxSig)) && Matches(kApplyBox,kApplyBoxSig,sizeof(kApplyBoxSig)) &&
+                Matches(kHealHuman,kHealHumanSig,sizeof(kHealHumanSig)) &&
                 Matches(kNodePos,kNodePosSig,sizeof(kNodePosSig));
     } __except(EXCEPTION_EXECUTE_HANDLER){boxesOk=false;}
     if(!boxesOk)Log("NPCAI the item boxes' code is not as docs/itembox-re.md reads it: no box sweep");
@@ -1299,11 +1349,13 @@ void StartSweep(const void* const* tops,int n,const char* by) noexcept {
         if(!sweep.logged){sweep.logged=true;Log("NPCAI box sweep: the item boxes are not as docs/itembox-re.md reads them: off");}
         return;
     }
+    ObjRef selected[kSweepTops];int count=0;
+    for(int i=0;i<n && count<kSweepTops;++i)if(tops[i])selected[count++]=ObjRef::Of(tops[i]);
     AcquireSRWLockExclusive(&sweepLock);
     sweep.on=true;sweep.taken=0;sweep.left=0;sweep.endedAt=0;
     sweep.until=GameMs()+static_cast<ULONGLONG>(c.npcPickupSec*1000.0f);
-    sweep.tops=0;
-    for(int i=0;i<n && sweep.tops<kSweepTops;++i)if(tops[i])sweep.top[sweep.tops++]=ObjRef::Of(tops[i]);
+    sweep.tops=count;
+    for(int i=0;i<count;++i)sweep.top[i]=selected[i];
     ReleaseSRWLockExclusive(&sweepLock);
     Log("NPCAI box sweep (%s): %s out for the boxes within %.0f m (health boxes %s)",by,sweep.tops ? "the selected squads" : "the recruited squads",
         c.npcPickupRange,PickupHealth() && !InSession() ? "too, for the hurt" : "left alone");
@@ -1321,10 +1373,13 @@ int SweepRoster(ULONGLONG ms,const void** out,int most) noexcept {
         auto t=static_cast<unsigned char*>(const_cast<void*>(sweep.top[i].obj));
         if(!sweep.top[i].Is(t) || t[kDead])continue;
         const Squad* q=FindSquad(t);
-        if(!q || !Live(*q,ms) || npc::Scripted(q->control))continue;
+        if(!q || !Live(*q,ms) || q->dismissed || TopNpc(t)!=t || npc::Scripted(ControlOf(t,RootLeader(t))))continue;
+        const unsigned char* const root=RootLeader(t);
+        if(InSession() && root && IsAnyPlayer(root) && root!=PlayerHuman())continue;
         unsigned char* m[kMaxSquad];
         const int k=Members(t,m,kMaxSquad);
-        for(int j=0;j<k && n<most;++j)if(HumanOnFoot(m[j]))out[n++]=m[j];
+        for(int j=0;j<k && n<most;++j)
+            if(HumanOnFoot(m[j]) && IsOnlineAuthority(m[j]) && !npc::Scripted(ControlOf(m[j],RootLeader(m[j]))))out[n++]=m[j];
     }
     return n;
 }
@@ -1334,7 +1389,7 @@ void SweepFrame() noexcept {
     unsigned char* const me=PlayerHuman();
     const bool down=c.npcPickupKey>0 && me && HumanOnFoot(me) && KeyHeld(c.npcPickupKey);
     const ULONGLONG ms=GameMs();
-    if(down && !sweep.held) {
+    if(down && !sweep.held && !MapHoldsKeys()) {
         if(sweep.on)EndSweep("called back by the key");
         else StartSweep(nullptr,0,"the key");
     }
@@ -1359,7 +1414,7 @@ void SweepFrame() noexcept {
     const int given=npc::pickup::Assign(b,nb,p,np,r,out);
     int left=0;
     for(int i=0;i<nb;++i)for(int k=0;k<np;++k)if(npc::pickup::Takes(b[i],p[k],r)){++left;break;}
-    sweep.left=left;
+    AcquireSRWLockExclusive(&sweepLock);sweep.left=left;ReleaseSRWLockExclusive(&sweepLock);
     if(!given){EndSweep(np ? "no box left within reach" : "no soldier to send");return;}
     for(int k=0;k<np;++k) {
         if(out[k]<0)continue;
@@ -1370,7 +1425,7 @@ void SweepFrame() noexcept {
     }
 }
 
-// The box still lying where the sweep saw it this frame (not taken since): its exact position for Collect.
+// The box still lying where the sweep saw it this frame (not taken since): its current position.
 bool BoxStill(const void* unit,float* at4) noexcept {
     SweepBox boxes[kMaxBoxes];
     const int n=Boxes(boxes,kMaxBoxes);
@@ -1385,28 +1440,31 @@ bool BoxStill(const void* unit,float* at4) noexcept {
 
 // Runs to its box and takes it there; false when the box is gone (someone took it): the soldier's other moves then.
 bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {
-    if(npc::pickup::Level(pos,s.pickPos)>npc::pickup::kReach){MoveTo(h,pos,s.pickPos,0.5f);return true;}
+    if(!sweep.on || !IsOnlineAuthority(h) || h[kDead])return false;
+    if(npc::Dist(pos,s.pickPos)>npc::pickup::kReach){MoveTo(h,pos,s.pickPos,0.5f);return true;}
     alignas(16) float at[4];
     auto u=static_cast<unsigned char*>(s.pickUnit);
-    s.pickUnit=nullptr;
     if(!boxesOk || !BoxStill(u,at))return false;
+    if(npc::Dist(pos,at)>npc::pickup::kReach){MoveTo(h,pos,at,0.5f);return true;}
+    s.pickUnit=nullptr;
     Stand(h);
     if(npc::pickup::IsHeal(s.pickKind)) {
         const float hpMax=At<float>(h,kHumanHpMax);
         if(!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax))return true;   // healed meanwhile: leave it
         u[kBoxTaken]=1;
         reinterpret_cast<HealHumanFn>(image+kHealHuman)(h,npc::pickup::HealShare(s.pickKind)*hpMax);
-        ++sweep.taken;
+        AcquireSRWLockExclusive(&sweepLock);++sweep.taken;ReleaseSRWLockExclusive(&sweepLock);
         Log("NPCAI soldier %p took a health box: %.0f/%.0f",h,At<float>(h,kHumanHp),hpMax);
         return true;
     }
     unsigned char* const me=PlayerHuman();
     void* const m=DropManager();
     if(!me || !m || !At<const void*>(me,0x340))return true;
-    QuietCallback quiet{kQuietVtable,me};
-    reinterpret_cast<CollectFn>(image+kCollect)(m,me,at,kBoxGrab,0.0f,&quiet);
-    if(u[kBoxTaken]){++sweep.taken;Log("NPCAI soldier %p brought in a %s box",h,s.pickKind==npc::pickup::kWeapon ? "weapon" : "armour");}
-    else Log("NPCAI soldier %p at a box Collect did not take (at %.1f,%.1f,%.1f)",h,at[0],at[1],at[2]);
+    reinterpret_cast<NotifyBoxFn>(image+kNotifyBox)(m,At<std::int32_t>(u,kBoxId),s.pickKind,me);
+    reinterpret_cast<ApplyBoxFn>(image+kApplyBox)(m,me,s.pickKind,0.0f);
+    u[kBoxTaken]=1;   // Notify/Apply do not take a Unit pointer; deletion is deferred to the manager's update
+    AcquireSRWLockExclusive(&sweepLock);++sweep.taken;ReleaseSRWLockExclusive(&sweepLock);
+    Log("NPCAI soldier %p brought in a %s box",h,s.pickKind==npc::pickup::kWeapon ? "weapon" : "armour");
     return true;
 }
 
@@ -1503,7 +1561,15 @@ Squad* Commandable(const void* leader) noexcept {
     Squad* const q=FindSquad(leader);
     if(!q || npc::Scripted(q->control) || q->dismissed || GameMs()-q->seen>kOrderSeenMs)return nullptr;
     auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
-    return q->top.Is(top) && !top[kDead] && IsSoldierClass(top) ? q : nullptr;
+    return q->top.Is(top) && !top[kDead] && IsSoldierClass(top) && TopNpc(top)==top &&
+           !npc::Scripted(ControlOf(top,RootLeader(top))) ? q : nullptr;
+}
+
+// A mission can take control of a follower independently of its top. Reparenting changes every affected tree,
+// so reject the whole operation before its first native call when any member belongs to a mission script.
+bool CanRegroup(unsigned char* const* members,int n) noexcept {
+    for(int i=0;i<n;++i)if(npc::Scripted(ControlOf(members[i],RootLeader(members[i]))))return false;
+    return true;
 }
 }  // namespace
 
@@ -1514,12 +1580,12 @@ int SplitSquad(const void* leader) noexcept {
         auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
         unsigned char* m[kMaxSquad];
         const int n=Members(top,m,kMaxSquad);
-        if(n<2)return -1;
+        if(n<2 || !CanRegroup(m,n))return -1;
         unsigned char* const above=At<unsigned char*>(top,kLeader);
         unsigned char* const second=m[1];
+        CancelBoarding(top);   // both halves, before the native follow lists are changed
         Follow(second,above);
         for(int i=2;i<n;++i)Follow(m[i],i%2 ? second : top);
-        CancelBoarding(top);
         Log("NPCAI squad %p split: %d stay, %d go with %p",top,(n+1)/2,n/2,second);
         return n/2;
     } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
@@ -1532,10 +1598,12 @@ bool MergeSquads(const void* into,const void* from) noexcept {
         if(!a || !b || a==b)return false;
         auto top=static_cast<unsigned char*>(const_cast<void*>(into));
         auto other=static_cast<unsigned char*>(const_cast<void*>(from));
-        unsigned char* m[kMaxSquad];
-        if(Members(top,m,kMaxSquad)+Members(other,m,kMaxSquad)>kMaxSquad)return false;   // the panel's squad size
+        unsigned char* aMembers[kMaxSquad];unsigned char* bMembers[kMaxSquad];
+        const int na=Members(top,aMembers,kMaxSquad),nb=Members(other,bMembers,kMaxSquad);
+        if(na+nb>kMaxSquad || !CanRegroup(aMembers,na) || !CanRegroup(bMembers,nb))return false;
+        CancelBoarding(other);
         Follow(other,top);
-        b->cmd=Command{Order::none,{0.0f,0.0f,0.0f}};
+        *b=Squad{};   // no stale panel/roster entry may command the former top and form a follow cycle
         Log("NPCAI squad %p joins squad %p",other,top);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -1676,17 +1744,50 @@ void GunnerVisit(void* ctx,const void* object,const float* aim) {
 }
 }  // namespace
 
-bool AiGunner(const unsigned char* seat) noexcept {
-    if(!Cfg().enabled || !Cfg().npcGunners || InSession())return false;
+namespace {
+// Only inputs written by this module are reclaimed, including switch-off and authority transfer. Human seats
+// and a new rider at a reused address are never cleared. No-target frames cannot retain the NPC's last trigger.
+struct GunnerWrite { ObjRef vehicle,rider; unsigned seat; float values[3]; };
+std::vector<GunnerWrite> gunnerWrites;
+constexpr std::size_t kGunnerInputs[3]={0x2D0,0x2D4,0x2E4};
+void ResetGunnerInputs() noexcept { gunnerWrites.clear(); }
+void ReleaseGunnerInputs(unsigned char* v) noexcept {
+    for(auto it=gunnerWrites.begin();it!=gunnerWrites.end();) {
+        if(!Readable(it->vehicle.obj,kSelfCtrl+8) || !it->vehicle.Is(it->vehicle.obj)){it=gunnerWrites.erase(it);continue;}
+        if(it->vehicle.obj!=v){++it;continue;}
+        unsigned char* seat=it->seat<SeatCount(v) ? SeatAt(v,it->seat) : nullptr;
+        if(seat && !AnyPlayerIn(seat) && Readable(it->rider.obj,kSelfCtrl+8) && it->rider.Is(At<const void*>(seat,kSeatRider)))
+            for(int k=0;k<3;++k)if(At<float>(seat,kGunnerInputs[k])==it->values[k])Put<float>(seat,kGunnerInputs[k],0.0f);
+        it=gunnerWrites.erase(it);
+    }
+}
+void RememberGunnerInputs(unsigned char* v,unsigned index,const unsigned char* seat) {
+    GunnerWrite write{ObjRef::Of(v),ObjRef::Of(At<const void*>(seat,kSeatRider)),index,{}};
+    bool any=false;
+    for(int k=0;k<3;++k){write.values[k]=At<float>(seat,kGunnerInputs[k]);any=any || write.values[k]!=0.0f;}
+    if(any)gunnerWrites.push_back(write);
+}
+} // namespace
+
+bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept {
+    if(!Cfg().enabled || !Cfg().npcGunners || !seat)return false;
     const Rider who=SeatRider(seat);
-    if(who==Rider::dummy)return true;   // RideAi's rider, moved here by a bump or a seat swap: it never writes the seat
+    if(who==Rider::dummy) {
+        if(!InSession())return true;
+        // A registered vehicle's Dummy exists on the host only. Never pick the driver machine instead:
+        // native shots carry the NPC's firing event to every vehicle copy, including a remote driver's.
+        if(!Readable(vehicle,0x12A))return false;
+        if(online::LocalCopy(At<std::uint16_t>(vehicle,0x128)))return IsOnlineAuthority(vehicle);
+        return OnlineHostOnly();
+    }
     if(who!=Rider::other || !Cfg().customNpcAi || !Cfg().npcBoarding)return false;
     const auto rider=At<const unsigned char*>(seat,kSeatRider);
     return IsSoldierClass(rider) && !IsAnyPlayer(rider) && IsOnlineAuthority(rider);
 }
 
 void NpcGunnersInput(unsigned char* v) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().npcGunners || InSession() || v[kDead])return;
+    ReleaseGunnerInputs(v);
+    if(!ok || !Cfg().enabled || !Cfg().npcGunners || v[kDead])return;
     static int sig=0;
     if(!sig)sig=Matches(kSeatFire,kSeatFireSig,sizeof(kSeatFireSig)) ? 1 : -1;
     if(sig<0)return;
@@ -1694,7 +1795,8 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     if(!Readable(vt,(kSlotSeatFire+1)*8) || vt[kSlotSeatFire]!=image+kSeatFire)return;
     for(unsigned i=1;i<SeatCount(v);++i) {
         unsigned char* const seat=SeatAt(v,i);
-        if(!AiGunner(seat))continue;
+        if(!AiGunner(v,seat))continue;
+        for(const auto offset:kGunnerInputs)Put<float>(seat,offset,0.0f);
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(!n || n>8 || !Readable(holders,n*8))continue;
@@ -1709,11 +1811,36 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         const Enemy* const m=world.frame==GameFrame() ? MarkedEnemy() : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach)p.best=m->object;
         else VisitEnemies(v,&GunnerVisit,&p);
-        if(p.best)reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
+        if(p.best) {
+            reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
+            RememberGunnerInputs(v,i,seat);
+        }
     }
 }
 
-bool NpcMarked() noexcept { return mark.obj.obj!=nullptr; }
+bool NpcMarked() noexcept { return npcmark::Enabled() && MarkAlive(); }
+
+bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
+    if(!npcmark::Enabled() || !npcmark::Capture(object))return false;
+    const bool same=mark.obj.Is(object);
+    if(toggle && same){npcmark::Assign(mark.obj,{});Log("NPCAI mark: let go (the map)");return false;}
+    if(!same)Log("NPCAI mark: an enemy marked (the map)");
+    Mark(object,at);
+    return true;
+}
+
+void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
+    const Config& c=Cfg();
+    DWORD pid=0;
+    GetWindowThreadProcessId(GetForegroundWindow(),&pid);
+    const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (GetAsyncKeyState(c.npcMarkKey)&0x8000)!=0;
+    // Held is followed while the map holds the keys too: a press made in the map (mapcmd.cpp) and still down when it
+    // closes is not a second press on foot.
+    if(down && !mark.held && !mapOpen && !MapHoldsKeys() && c.enabled && c.customNpcAi && HumanOnFoot(human))
+        ToggleMark(At<std::int32_t>(human,kTeam));
+    mark.held=down;
+    KeepMark();
+}
 
 bool NpcMarkReadout(float* at) noexcept {
     AcquireSRWLockShared(&markLock);
@@ -1721,5 +1848,12 @@ bool NpcMarkReadout(float* at) noexcept {
     if(on)std::memcpy(at,markPub.at,12);
     ReleaseSRWLockShared(&markLock);
     return on;
+}
+
+bool NpcPingReadout(NpcPing* out) noexcept {
+    AcquireSRWLockShared(&markLock);
+    *out=markPub.ping;
+    ReleaseSRWLockShared(&markLock);
+    return out->on && GetTickCount64()-out->wall<=kPingMs;
 }
 }  // namespace crew

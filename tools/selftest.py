@@ -67,6 +67,13 @@ def src(rel: str) -> str:
         return f.read()
 
 
+def disabled_return_offset(hook: str) -> int:
+    """The early return may first restore native state, such as the vehicle's zoom."""
+    branch = re.search(r'if\(!Cfg\(\)\.enabled\)\s*(?:return;|\{[^}]*\breturn;[^}]*\})', hook)
+    assert branch, 'InputHook keeps a plugin-disabled return (with optional native-state cleanup)'
+    return branch.start()
+
+
 # ---------------------------------------------------------------- the code
 
 
@@ -457,6 +464,44 @@ def boarding_tag_in_plugin() -> None:
     assert bits and int(bits.group(1)) == int(guns[0].mark) == guns[0].mark, "src/boarding.cpp kTagBits is not the gun's mark"
     assert cw.gun_tag_bits(guns[0].mark) == 0x3F800000 + int(guns[0].mark)
     assert '#include' in src('src/boarding.cpp') and 'src/boarding.cpp' in src('CMakeLists.txt')
+
+
+@test
+def boarding_debug_gun_parameters_and_text() -> None:
+    """The debug gun changes the intended fields and every locale's numeric rows, keeping star curves and tag."""
+    gun = next(c for c in calls.CALLS if c.brings == 'gun')
+    root = dsgo.Node([])
+    old = {'AmmoSpeed': 25.0, 'FireAccuracy': 0.125, 'AmmoCount': 8.0,
+           'ReloadTime': 360.0, 'FireInterval': 90.0}
+    curves = {}
+    for i, (key, base) in enumerate(old.items()):
+        curves[key] = [base, float(i + 10), 0.5, 2.0, 1.0]
+        root.set(key, dsgo.Node(curves[key].copy()))
+    root.set('AmmoAlive', 40.0)
+    root.set('FireRecoil', 3.0)
+    root.set('AmmoColor', dsgo.Node([0.25, 0.5, 0.75, 1.0]))
+    template = dsgo.write(dsgo.Document(root, []))
+    actual = dsgo.parse(cw.gun_sgo(template, gun)).root
+    for key, base in cw.GUN_CURVES.items():
+        assert actual.get(key).items == [base, *curves[key][1:]], key
+    for key, value in cw.GUN_SCALARS.items():
+        assert actual.get(key) == value, key
+    import struct
+    alpha = actual.get(cw.GUN_TAG).items[3]
+    assert struct.unpack('<I', struct.pack('<f', alpha))[0] == cw.gun_tag_bits(gun.mark)
+    units = {'AmmoCount': 1.0, 'FireInterval': 1.0, 'ReloadTime': 1.0 / cw.FPS,
+             'AmmoSpeed': cw.FPS, 'FireAccuracy': 1.0}
+    lines = [dsgo.Node([f'label-{i}', '', dsgo.Node([curves[key][0] * unit, *curves[key][1:-1], -1.0])])
+             for i, (key, unit) in enumerate(units.items())]
+    lines.append(dsgo.Node(['range', '', dsgo.Node([1000.0, *curves['AmmoSpeed'][1:-1], -1.0])]))
+    damage = dsgo.Node(['damage', '', dsgo.Node([242.0, 999.0, 0.5, 2.0, -1.0])])
+    lines.append(damage)
+    row = dsgo.Node(['title', 'description', dsgo.Node(lines)])
+    expected = [cw.GUN_CURVES[key] * unit for key, unit in units.items()] + [1500.0, 242.0]
+    for lang in cw.LANGS:
+        changed = cw._text_row(row, gun, lang, gun=cw.gun_stats(template))
+        assert [st.items[2].items[0] for st in changed.items[2].items] == expected, lang
+        assert changed.items[2].items[-1] == damage, 'damage and its star parameters stay unchanged'
 
 
 @test
@@ -859,7 +904,7 @@ def emc_copies_agree() -> None:
     i_in, i_stock, i_frame = hook.find('&EmcInput,'), hook.find('nextInput[I]('), hook.find('&EmcFrame,')
     assert 0 <= i_in < i_stock < i_frame, 'src/crew.cpp InputHook: EmcInput before the stock input, EmcFrame after'
     # The plugin off mid-charge: the frame and the tick still run (the charge let go, a gone EMC's loop stopped).
-    off = hook.find('if(!Cfg().enabled)return;')
+    off = disabled_return_offset(hook)
     assert i_frame < off and 0 <= hook.find('&EmcTick)') < off, 'EmcFrame / EmcTick run with the plugin off'
     assert 'Cfg().enabled && Cfg().emcBeam' in emc, 'emc.cpp Ready: off with the plugin'
     # The HUD's EMC line is the EMC's own vehicle's (its position), as the Proteus readout is.
@@ -1999,7 +2044,7 @@ def proteus_wired() -> None:
         assert rva in doc, f'docs/proteus-re.md does not mention {rva}'
     assert 'ResetProteus();' in src('src/mission.cpp') and 'InstallProteus();' in plugin
     frame = crew.split('void __fastcall InputHook', 1)[1]
-    assert frame.index('&ProteusFrame') < frame.index('if(!Cfg().enabled)return;'), 'the Proteus step must run with the plugin off'
+    assert frame.index('&ProteusFrame') < disabled_return_offset(frame), 'the Proteus step must run with the plugin off'
     assert frame.index('&ProteusFrame') < frame.index('&SeatSwitchFrame'), 'the seats it closes are closed before the seat switch asks'
     # The stock launcher is the salvo's only while the salvo can be fired and its seat is closed, decided each frame after
     # the seats; what is given back is what was taken.
@@ -2137,7 +2182,7 @@ def vehicle_sound_wired() -> None:
         named = re.search(rf'(\w+)={rva}\b', code)
         assert rva in sigs or (named and (named.group(1) in sigs or f'Matches({named.group(1)},' in code)), f'{rva} is not checked'
     hook = crew.split('void __fastcall InputHook(', 1)[1]
-    assert 0 <= hook.find('&VehicleSound,v') < hook.find('if(!Cfg().enabled)return;'), 'VehicleSound before the Enabled test'
+    assert 0 <= hook.find('&VehicleSound,v') < disabled_return_offset(hook), 'VehicleSound before the Enabled test'
     assert 'ResetVehicleSound();' in mission and 'InstallVehicleSound();' in plugin
     # The listener is the camera's for the vehicles too: placed whenever VehicleSound is on (not only once a jet sounded),
     # and a stock sound is held only while ours can be heard (the clips made and the listener placed).
@@ -2210,7 +2255,7 @@ def sazabi_sound_wired() -> None:
     crew, mission, code, audio_h, check = (src('src/crew.cpp'), src('src/mission.cpp'), src('src/sazabi_sound.cpp'),
                                            src('src/jetaudio.h'), src('tools/vsound_check.cpp'))
     hook = crew.split('void __fastcall InputHook(', 1)[1]
-    assert 0 <= hook.find('&SazabiSoundTick);') < hook.find('if(!Cfg().enabled)return;'), 'SazabiSoundTick before the Enabled test'
+    assert 0 <= hook.find('&SazabiSoundTick);') < disabled_return_offset(hook), 'SazabiSoundTick before the Enabled test'
     assert 'ResetSazabiSound();' in mission and '#include "sazabi_sound.h"' in mission
     assert 'constexpr int kSazabiSfxClip[]=' in audio_h and 'constexpr int kSazabiLoopClip[]=' in audio_h
     assert 'static_assert(sizeof(kSazabiSfxClip)' in code and 'kSfxClip[' not in code.replace('kSazabiSfxClip[', '')
@@ -2970,6 +3015,19 @@ def autoturret_pending_files_protect_foreign_edits() -> None:
             assert os.path.isfile(os.path.join(mods, at_build.MANIFEST))
 
 
+def _sazabi_request_template() -> bytes:
+    """A stock Eros request with distinguishable setup/resource values for the fallback contract."""
+    n = dsgo.Node
+    weapons = n([n([f'app:/weapon/v_506heli_gatling01_{side}.sgo', n([0.01, 0.1])]) for side in ('l', 'r')]
+                + [n(['app:/weapon/v_506heli_missile01.sgo', n([0.01, 0.1])]), n(['app:/weapon/v_fuel01.sgo'])])
+    setup = n([n([1.3, 1.4]), n([0.002, 0.0003]), n([100.0, 1.0]), weapons])
+    vehicle = 'app:/object/v506_heli.sgo'
+    root = n([n([5.0]), n([0.0, 0.0, 0.0, 0.0, n(['transport', 'box', vehicle, setup, 'voice'])]),
+              n([vehicle] + [w.items[0] for w in weapons.items]), 'Eros'],
+             {0: 'ReloadTime', 1: 'Ammo_CustomParameter', 2: 'resource', 3: 'name.en'})
+    return dsgo.write(dsgo.Document(root, []))
+
+
 def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     """What call_weapons.stack would give (shape only), and the jets the vehicle requests need."""
     for c in calls.CALLS:
@@ -2979,7 +3037,95 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
     files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS})
+    for c in calls.CALLS:
+        if c.jet == vc.SAZABI_JET:
+            files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
     return files
+
+
+@test
+def sazabi_fallback_install_upgrade() -> None:
+    """Clean no-model install, then model install/removal, retain the request row and actual dependencies."""
+    import make_sazabi
+    import sazabi_model
+    import sgo
+    call = next(c for c in calls.CALLS if c.jet == vc.SAZABI_JET)
+    template = _sazabi_request_template()
+    original = dsgo.parse(template).root.get('Ammo_CustomParameter').items[4].items[3]
+    stock_object = sgo.write(0x102, {'animation_model': [['app:/object/v506_heli.mrab', 'v506_heli.mdb']],
+                                  'game_object_durability': 1000.0})
+    class Game:
+        def read(self, folder: str, name: str) -> bytes:
+            assert (folder, name) == ('OBJECT', 'V506_HELI.SGO')
+            return stock_object
+
+    with tempfile.TemporaryDirectory(prefix='edf6vc-sazabi-') as game, \
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+            patched(sazabi_model, model_dir=lambda: None), patched(vc, Game=lambda root: Game()):
+        files = _call_files(game, STOCK + list(calls.IDS))
+        arms = {f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.SAZABI_WEAPONS}
+        for rel in arms:
+            os.remove(_mods(game, rel))  # clean CI package: no Sazabi weapons have ever been installed
+        fallback = make_sazabi.build(game)
+        assert fallback == {cw.vehicle_file(call): stock_object}
+        make_sazabi.install(game, fallback)
+        request = cw.vehicle_sgo(template, call, (2.0, 3.0), fallback=True)
+        r = dsgo.parse(request).root
+        assert dsgo.dump(r.get('Ammo_CustomParameter').items[4].items[3]) == dsgo.dump(original)
+        assert r.get('Ammo_CustomParameter').items[4].items[2] == cw._object_path(call)
+        assert not any('edf6vc_sz_' in p for p in r.get('resource').items)
+        assert cw.vehicle_needs(call, request) == [cw.vehicle_file(call)]
+        files[cw.sgo_file(call)] = request
+        cw.install(game, files)
+        row = cw.load_manifest(game)['rows'][call.id]
+        assert cw.check(game)
+        # The installed request is authoritative even if today's model folder differs.
+        with patched(sazabi_model, model_dir=lambda: 'new model folder'):
+            assert cw.check(game)
+        generated = {cw.vehicle_file(call): b'model vehicle', **{rel: b'weapon' for rel in arms}}
+        make_sazabi.install(game, generated)
+        files[cw.sgo_file(call)] = cw.vehicle_sgo(template, call, (2.0, 3.0))
+        cw.install(game, files)
+        assert cw.load_manifest(game)['rows'][call.id] == row
+        assert {ledger.key(p) for p in arms} <= set(ledger.Ledger(game).owned_by(cw.OWNER))
+        make_sazabi.install(game, fallback)
+        files[cw.sgo_file(call)] = request
+        cw.install(game, files)
+        assert cw.load_manifest(game)['rows'][call.id] == row
+        assert not any(os.path.exists(_mods(game, p)) for p in arms)
+        assert cw.check(game)
+
+
+@test
+def sazabi_range_shared_assets() -> None:
+    """Standalone Sazabi ranges own every dependency; either writer can go while the other still uses it."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    import make_sazabi
+    import sazabi_model
+    weapons = {vc.SAZABI_RIFLE_FILE: b'rifle', vc.SAZABI_MISSILE_FILE: b'missile'}
+    rounds = {f: f.encode() for f in vc.SAZABI_ROUND_FILES}
+    shared = {f'WEAPON/{n}': d for n, d in weapons.items()} | {f'OBJECT/{n}': d for n, d in rounds.items()}
+    shared[f'OBJECT/{sazabi_model.OUT_ARC}'] = b'model'
+    mission = f'OBJECT/{vc.SAZABI_JET.upper()}.SGO'
+    install_files = {**shared, f'OBJECT/{make_sazabi.SGO_FILE}': b'requested object'}
+    with tempfile.TemporaryDirectory(prefix='edf6vc-sazabi-range-') as game, \
+            patched(gen, jet_guns=lambda game: {}, vehicle_sgo=lambda *args: b'mission object'), \
+            patched(vc, sazabi_weapons=lambda game: weapons, sazabi_rounds=lambda game: rounds), \
+            patched(sazabi_model, model_dir=lambda: 'model folder', build_archive=lambda *args: (b'model', {})):
+        gen._write_derived(game, object(), {vc.SAZABI_JET})
+        assert set(ledger.Ledger(game).owned_by(gen.OWNER)) == {ledger.key(n) for n in [*shared, mission]}
+        for n, data in shared.items():
+            assert _read(_mods(game, n)) == data
+        make_sazabi.install(game, install_files)
+        make_sazabi.remove(game)
+        assert all(_read(_mods(game, n)) == data for n, data in shared.items())
+        make_sazabi.install(game, install_files)
+        gen._write_derived(game, object(), set())
+        assert not os.path.exists(_mods(game, mission))
+        assert all(_read(_mods(game, n)) == data for n, data in shared.items())
+        make_sazabi.remove(game)
+        assert not any(os.path.exists(_mods(game, n)) for n in shared)
 
 
 @test
@@ -3777,10 +3923,10 @@ def stock_payload_and_seats_wired() -> None:
     # The AI riders in gunner seats work their guns (the user 2026-10-07): RideAi's dummy riders a bump or a seat swap
     # moved there too, and the 410's door seats under a player pilot, on the gun's own rounds.
     npc = src('src/npcai.cpp')
-    assert 'if(who==Rider::dummy)return true;' in npc and 'if(!AiGunner(seat))continue;' in npc
+    assert 'if(who==Rider::dummy)' in npc and 'if(!AiGunner(v,seat))continue;' in npc
     heli = src('src/heli.cpp')
     assert 'DoorGun(c->doors[i],ObjRef{},false,v,i,false,dt,ms)' in heli, 'the player-piloted 410: no refill, no hold'
-    assert 'PlayerHeli(vehicle);CrewDoorGuns(vehicle);' in heli
+    assert heli.index('CrewDoorGuns(vehicle);', heli.index('void HeliFrame(')) < heli.index('Replica(vehicle)', heli.index('void HeliFrame(')), 'NPC gunner authority is independent of the local player pilot'
     assert re.search(r'^NpcGunners=1', ini, re.M) and 'L"NpcGunners"' in plugin and 'NpcGunners' in readme
     # Out of a ground vehicle's driver seat with the stock driving AI an NPC driver takes it (the user 2026-10-07: the map
     # sends it off with the player aboard); Crew() never does while a player rides, so Pilot must.
@@ -4048,8 +4194,15 @@ def map_wired() -> None:
     assert 'if(game.draining){game.draining=false;holds.store(false);}' in code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     # Every key the plugin reads gives way to the map.
     for rel in ('src/heli.cpp', 'src/highcam.cpp', 'src/payload.cpp', 'src/playerjet.cpp', 'src/seatswitch.cpp', 'src/turretcam.cpp',
-                'src/proteus.cpp', 'src/npcai.cpp', 'src/drill.cpp', 'src/sazabi.cpp'):
+                'src/proteus.cpp', 'src/drill.cpp', 'src/sazabi.cpp'):
         assert 'if(vk<=0 || MapHoldsKeys())return false;' in src(rel), rel
+    # NPC marking moved from a soldier's KeyHeld/MarkTick into the local player's frame. Track the held key while
+    # hidden, but dispatch neither behind the map nor while its close/TV input hold is active.
+    mark_frame = src('src/npcai.cpp').split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
+    assert '!mapOpen && !MapHoldsKeys()' in mark_frame and 'mark.held=down;' in mark_frame
+    assert 'NpcMarkFrame(human,open && game.open);' in code
+    close = code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
+    assert 'SuspendMapCommands();' in close, 'closing invalidates the hover/view without waiting for the stale timer'
     assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
     held = re.search(r'kInputHeld\[\]="(\w+)"', src('common/edf/aimlink.h')).group(1)
@@ -4241,8 +4394,8 @@ def stock_guidance_wired() -> None:
 @test
 def npc_pickup_wired() -> None:
     """The squad's box sweep (src/pickup.h, npcai.cpp SweepFrame / PickUp, docs/itembox-re.md): the run to a box
-    after the lane move and before the combat spot; weapon / armour through the stock Collect with the player as
-    the one who picks and the 5 cm reach, health boxes only offline, allowed and hurt; the code it calls checked at
+    after the lane move and before the combat spot; weapon / armour through the stock per-box Notify and Apply with the player as
+    the one who picks, health boxes only offline, allowed and hurt; the code it calls checked at
     load; its ini keys read, range-checked, shipped and documented; pickup_check under CTest."""
     code, plugin, ini = src('src/npcai.cpp'), src('src/plugin.cpp'), src('EDF6VehicleCrew.ini')
     readme, doc, cmake = src('README.md'), src('docs/npc-ai-design.md'), src('CMakeLists.txt')
@@ -4250,7 +4403,9 @@ def npc_pickup_wired() -> None:
     run = drive.index('PickUp(s,h,pos)')
     assert drive.index('npc::LaneEscape(') < run < drive.index('Spot(s,pos,t.e->aim')
     pick = code.split('bool PickUp(Soldier& s,unsigned char* h,const float* pos) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert '(m,me,at,kBoxGrab,0.0f,&quiet)' in pick and 'alignas(16) float at[4]' in pick
+    assert 'reinterpret_cast<NotifyBoxFn>' in pick and 'reinterpret_cast<ApplyBoxFn>' in pick
+    assert pick.index('image+kNotifyBox') < pick.index('image+kApplyBox')
+    assert 'npc::Dist(pos,at)>npc::pickup::kReach' in pick
     assert '!PickupHealth() || InSession() || !(At<float>(h,kHumanHp)<hpMax)' in pick
     assert 'healthPick<0 ? Cfg().npcPickupHealth' in code, 'the ini is the default until the map flips it'
     # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; Y and O keys.
@@ -4258,7 +4413,7 @@ def npc_pickup_wired() -> None:
     assert 'mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
     assert "k.sweep=Down('Y');k.health=Down('O');" in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
     assert 'EXCLUDE_FROM_ALL tools/map_buttons_check.cpp' in cmake and 'map_buttons_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
-    assert 'kBoxGrab=0.05f' in code and 'InstallBoxes();' in code
+    assert 'kNotifyBoxSig' in code and 'kApplyBoxSig' in code and 'InstallBoxes();' in code
     for key, default in (('NpcPickupKey', '89'), ('NpcPickupRange', '80'), ('NpcPickupSec', '90'), ('NpcPickupHealth', '0')):
         assert f'L"{key}"' in plugin, key
         assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
@@ -4374,8 +4529,9 @@ def npc_ai_wired() -> None:
         assert key in readme and key in doc, key
     # The mark (§6.3): its key read on foot only (in a vehicle Q is the vehicle's: Proteus, the jets, the turrets), drawn
     # by the HUD; the focus order needs it.
-    tick = code.split('void MarkTick() noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'me && HumanOnFoot(me) && KeyHeld(Cfg().npcMarkKey)' in tick
+    tick = code.split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
+    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys()' in tick
+    assert 'c.enabled && c.customNpcAi && HumanOnFoot(human)' in tick and 'KeepMark();' in tick
     assert 'NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);' in src('src/hud.cpp')
     assert 'mapcmd::Decide(g.sel.n,p,allowed,point,pointOk,NpcMarked())' in mapc
     for key, default in (('NpcMarkKey', '81'), ('NpcMarkCone', '8')):
@@ -4389,9 +4545,12 @@ def npc_ai_wired() -> None:
     off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
     gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(seat))continue;' in gun
-    who = code.split('bool AiGunner(const unsigned char* seat) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(v,seat))continue;' in gun
+    who = code.split('bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'IsSoldierClass(rider)' in who and '!IsAnyPlayer(rider)' in who and 'IsOnlineAuthority(rider)' in who, 'AiGunner: only local NPC soldiers'
+    assert 'OnlineHostOnly()' in who and 'IsOnlineAuthority(vehicle)' in who, 'Dummy ownership follows registered host or copy owner'
+    assert '|| InSession())return' not in who and '|| InSession() ||' not in gun, 'online NPC gunners are enabled'
+    assert gun.index('ReleaseGunnerInputs(v)') < gun.index('if(!ok'), 'disable/ownership changes release our previous inputs'
     assert 'Cfg().customNpcAi' in who and 'Cfg().npcBoarding' in who, 'AiGunner: the soldiers still under NpcBoarding'
     inputs = crew.split('template<int I> void __fastcall InputHook(', 1)[1].split('\n}', 1)[0]
     assert inputs.index('Guarded(kStepNpcGunners,&NpcGunnersInput,') < inputs.index('nextInput[I](vehicle,hasInput,a3,a4);')

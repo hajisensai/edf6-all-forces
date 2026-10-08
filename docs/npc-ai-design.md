@@ -208,7 +208,11 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 ### 6.3 Q 标记（C4，P5）
 
-- 步行、地图关着、游戏在前台时按 `NpcMarkKey`（默认 Q，0x51）：取镜头中心 `NpcMarkCone` 度内最近的敌人锁定点（与普罗透斯 `Mark` 同法），再按一次同一目标取消。HUD 画标记框。
+- 步行、地图关着、游戏在前台时按 `NpcMarkKey`（默认 Q，0x51）：取镜头中心 `NpcMarkCone` 度内最近的敌人锁定点（与普罗透斯 `Mark` 同法），再按一次同一目标取消，对着别的敌人按则换目标。HUD 画标记框。
+- 按键在玩家自己的每帧（`map.cpp MapHumanFrame` → `NpcMarkFrame`）读，不在士兵 Think 里，所以任务里没有友军士兵时也有效；地图打开期间也照常记录「按住」，地图里的一次按下关地图后不会再触发。
+- 镜头中心 `NpcMarkCone` 的 3 倍内有敌人但不在锥内：既不标记也不派兵（提示对准敌人）。再远处才算没有敌人：不动标记，改为把准星对着的地面点（`MapFloorRay`，2000 m 内）交给 `MapCommandGuardAt`：地图里当前选中的单位驻守该点（同地图 G，队形散开）。HUD 画落点圈和结果约 3 秒（`NpcPingReadout`）。
+- 地图打开时同一个键由 `mapcmd.cpp` 处理：指针（手柄：屏幕中心）22 px 内有敌人锁定点（锁定点本身或其上图钉高度处）就标记它（`NpcMarkEnemy`，同目标切换），这一下地图不转向（`MapCommandEats`）；H 在指针指着敌人时先标记它再下「集中火力」。
+- 标记的生命周期：保留到被标记的对象死亡（`kDead`）、被删除（`+0x18` 的 deleted 位，脚本移除）、控制块强引用归零或已不是同一个对象（`ObjRef` 的 weak 控制块变了）为止（同 `jet.cpp Alive`）。它不在本帧敌人表里（敌人表只收「可锁定」的锁定点）时位置取锁定注册表里仍有效的锁定点，取不到就停在最后的位置；这期间士兵和炮手按普通目标选择交战。旧实现只要一帧不在敌人表里就清掉标记，敌人被挡住或离开锁定距离就丢失（2026-10-07 用户报「标记还很快消失」）。
 - 所有本机自由 / 已招募单位：标记目标满足 `MarkInReach(位置, 标记, 最长武器真实射程, 指令的移动半径)` 时取它为目标；接到「集中火力」的小队无论远近都取它。实现上不改写原版目标 `h+0x1CD0`：插件的瞄准、扳机、移动已经覆盖原版输出，改写原版目标还要经过它的 weak 引用赋值函数，收益为零。
 - 标记只在本机（插件状态，§2.3）；单位的开火结果按原版复制走。
 
@@ -237,10 +241,10 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 - 逆向见 `docs/itembox-re.md`：箱子不是游戏对象，是 `DropItemManager`（`*(EDF+0x20B2988)`）里的链表（`+0xDE0`），类型 `+0xC0`（0 武器 1 护甲 2 小回复 3 大回复）、已拾取 `+0xC4`；原版只有带手柄对象（`+0x340`）的玩家能捡，NPC 走上去不会捡。
 - 纯逻辑 `src/pickup.h`（离线 `tools/pickup_check.cpp`）：`Assign` 每次在剩下的人和箱子里取最近的一对，一人一箱、一箱一人；`Takes`：离玩家 `NpcPickupRange` 以内，武器 / 护甲谁都行，回复箱要 `NpcPickupHealth`、不联机、这名士兵没满血。
-- 游戏侧 `npcai.cpp`：`NpcPickupKey`（步行）开 / 召回；`SweepFrame`（每帧一次，`Gather` 里）读箱子、拿跟随玩家的名单（同 §6.4 的 `MarchRoster`）分配；`Drive` 里在躲枪线之后、交战位置之前跑向箱子（开火照常）；`PickUp` 到 1.5 米内时：武器 / 护甲调原版 `Collect 0x2C8AC0`（拾取者 = 本机玩家、点 = 箱子自己的位置（16 字节对齐）、半径 0.05 m、回调的第 5 槽返回 false 不播特效），回复箱置 `+0xC4` 后对这名士兵调原版加耐久 `0x547870`（比例 × 最大耐久）。离线 `npc_core_check` 用假的管理器和记录器核对这几条路径。
+- 游戏侧 `npcai.cpp`：`NpcPickupKey`（步行）开 / 召回；`SweepFrame`（每帧一次，`Gather` 里）读箱子、拿跟随玩家的名单（同 §6.4 的 `MarchRoster`）分配；`Drive` 里在躲枪线之后、交战位置之前跑向箱子（开火照常）；`PickUp` 到当前箱子位置的三维距离 1.5 米内时：武器 / 护甲执行原版 Collect 的单箱处理顺序 `Notify 0x2C7D50(mgr,id,kind,本机玩家)` → `Apply 0x2C7540(mgr,本机玩家,kind,0)` → 标记该箱子已拾取（不调用半径遍历，以免误吃重叠的回复箱），回复箱置 `+0xC4` 后对这名士兵调原版加耐久 `0x547870`（比例 × 最大耐久）。离线 `npc_core_check` 用假的管理器和记录器核对生产路径；`item_pickup_native_audit.py` 在 EDF.dll 私有映射中执行真实拾取、音效请求、序列化和回血函数，仍不等于游戏或双机实测。
 - 结束：没有可捡的箱子、`NpcPickupSec` 到、再按一次键、玩家没了、换任务。
 - 联机：武器 / 护甲走原版路径（客机由房主仲裁，同玩家自己捡）；回复箱不捡。
-- 安全：`Collect`、加耐久、模型位置三个函数入口按字节核对（`InstallBoxes`），不符整项关闭；箱子的 vtable 必须是 `0x17A6C18`。
+- 安全：`Notify`、`Apply`、加耐久、模型位置四个函数入口按字节核对（`InstallBoxes`），不符整项关闭；箱子的 vtable 必须是 `0x17A6C18`。
 
 ## 7. 上下车（B6、C3，P6）
 
@@ -276,6 +280,13 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 4. `0x660490(veh, dl)`：dl = 有路线 + 有下一点 + 导航代理 `+0xE10` 非空（更正）。
 5. 0 号座有武器：`+0x518/+0x520` 目标；开火门 `0x6616AA..0x661791`（TacticsMode `+0xE08`、交战 `+0x4A0`、攻击许可 `+0xE09`）；无路线且炮塔转动范围检查失败 → `0x661020(veh, 目标, r8b=1)` 只转车身；slot 70 `0x65F6F0(veh, 0, 目标)` 瞄准开火。
 6. 驾驶输出写 0 号座摇杆块（见 §8.1）。
+
+## 标记与地图输入生命周期审查（2026-10-08）
+
+- 地图跨帧 hover、按键锁存和长期标记保存对象地址及原始 weak-this 控制块身份，并按 `jet.cpp` 相同契约持有控制块弱引用（`+0xC` 增减、最后一次释放走 vtable slot 1），防止对象与控制块地址同时复用；不延长敌人实体寿命。使用前重新验证强引用、删除/死亡状态和身份，页保护改变时局部拒绝该目标，不中断整帧地图输入。
+- `Enabled` / `CustomNpcAi` 关闭时，地图不显示或接受敌人标记，不吞标记键；已有活目标暂时不发布，重新开启后可继续使用。死亡目标在玩家下一次刷新前也不能被集火指令接受；任务重置立即清除发布状态。
+- 关闭地图立即撤销 hover、按键锁存和旧渲染视图，保留已选单位供地图外守点指令使用；在 300 ms 内重新打开也不复用旧目标。地图、关闭按键排空和 TV 输入占用时只更新 Q 的按住状态，不向步行标记逻辑再发一次按下事件。
+- 验证使用 `map_command_runtime_check` / `npc_core_check` 直接执行生产实现；窗口输入由夹具提供，没有运行游戏或改变用户安装。
 
 ## 9. 联机与开关汇总
 
@@ -360,3 +371,28 @@ ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLa
 ### 实机验收清单（用户）
 
 见 README「NPC 自制 AI」一节末尾，随阶段补充。
+
+### 2026-10-08 PR #83 审查修正
+
+- 扫箱名单每帧重新检查脚本、NPC 权威和当前队长身份，联机不改变其他玩家招募的小队；召回立即使当帧已分配拾箱失效。
+- 拆组在修改原生跟随链前取消双方登车请求；合并立即注销旧队长条目，禁止反向合并形成跟随环。任一受影响成员由任务脚本控制时，整次重编组拒绝。
+- 原版半径拾取即便半径只有 0.05 米，也会消费同坐标的回复箱。精确单箱路径保留原版房主仲裁和计数，邻箱不变；三维到达判据避免隔楼层收箱。
+
+
+### NPC gunner seats online (2026-10-07)
+
+`NpcGunners` runs on the actual NPC's machine, independently of the driver's machine. A registered vehicle's
+DummyVehicleRider is host-only; an unregistered copy follows its recorded copy owner. Real NPC soldiers retain
+`IsOnlineAuthority(rider)`, `CustomNpcAi` and `NpcBoarding`; all human seats, local or remote, stay untouched.
+The map's boarding and squad-command operations keep their separate offline gate.
+
+Ground seats continue to use native `0x65F6F0`. Only this module's prior inputs are reclaimed on target loss,
+disable or ownership change, without clearing a new rider or an input subsequently changed elsewhere. Brute door
+NPC checks run before the local-pilot/replica split, so a remote pilot does not suppress host NPC gunners. No new
+shot protocol or duplicated projectile spawn is added: native weapon events already reach all vehicle copies.
+
+The 410's native aim-mode call at `0x6525E5` used mode 1, which overwrote received aim on an empty client seat.
+`npc_gunner_aim.cpp` selects the native CarBase mode 0 only for online 410s with NpcGunners enabled, before those
+fields can be overwritten. Its signature/profile guard leaves the enhanced online door-gunner path off on failure.
+The native audit checks local/remote/Dummy/empty seat ownership, fire-start gating and both aim modes on a private
+EDF.dll mapping; no live game or installation is modified. Actual two-machine gameplay remains an E2E boundary.

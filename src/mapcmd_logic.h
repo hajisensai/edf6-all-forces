@@ -151,16 +151,24 @@ inline void Box(Selection& s,const Mark* m,int n,float x0,float y0,float x1,floa
     for(int i=0;i<n;++i)if(m[i].on && m[i].x>=lx && m[i].x<=hx && m[i].y>=ly && m[i].y<=hy)s.Add(m[i].id);
 }
 
-// A click at (x, y): the unit whose icon is nearest within `radius` px becomes the selection (`add`, Shift: it is added,
-// or taken out when it is in); none there clears it (Shift: left as it is). The unit clicked, or nullptr.
-inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float radius,bool add) noexcept {
-    const void* best=nullptr;
+// The mark on the screen nearest (x, y) within `radius` px: its index, or -1. A unit's icon under a click, the enemy under
+// the pointer (an enemy may have several marks: its lock points, each at its point and up its pin).
+inline int Nearest(const Mark* m,int n,float x,float y,float radius) noexcept {
+    int best=-1;
     float bestD2=radius*radius;
     for(int i=0;i<n;++i) {
         if(!m[i].on)continue;
         const float dx=m[i].x-x,dy=m[i].y-y,d2=dx*dx+dy*dy;
-        if(d2<=bestD2){bestD2=d2;best=m[i].id;}
+        if(d2<=bestD2){bestD2=d2;best=i;}
     }
+    return best;
+}
+
+// A click at (x, y): the unit whose icon is nearest within `radius` px becomes the selection (`add`, Shift: it is added,
+// or taken out when it is in); none there clears it (Shift: left as it is). The unit clicked, or nullptr.
+inline const void* Click(Selection& s,const Mark* m,int n,float x,float y,float radius,bool add) noexcept {
+    const int i=Nearest(m,n,x,y,radius);
+    const void* best=i>=0 ? m[i].id : nullptr;
     if(!add)s.Clear();
     if(best && add && s.Has(best))s.Remove(best);
     else if(best)s.Add(best);

@@ -3,6 +3,8 @@
 EDF.dll TimeDateStamp 0x678CCB46。计划见 `gundam-plan.md`，代码 `src/sazabi.cpp`、`pylib/sazabi_model.py`、`tools/make_sazabi.py`、
 `tools/prep_sazabi.py`。置信度：H = 反汇编里看得到 / 文件逐字节核对过，M = 推断，L = 猜测或待实机。
 
+联机动作、盾、浮游炮的复制协议、原生封装预算与验证边界见 [sazabi-online.md](sazabi-online.md)。
+
 ## 1. 模型来源与资产管线
 
 来源：用户提供的 Sketchfab「P-Japran color ver」（glTF：`scene.gltf` + `scene.bin`）。glTF 的 `asset.extras` 写明原模型是

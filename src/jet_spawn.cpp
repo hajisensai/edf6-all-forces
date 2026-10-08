@@ -242,8 +242,12 @@ void PreloadJets() noexcept {
         char line[512];
         int at=0;
         for(int k=0;k<kBodyCount;++k) {
-            // The Primer creatures only come from a mission, which preloads them itself (docs/primer-plan.md).
-            const bool missionOnly=kBodies[k].body==Body::centipede || kBodies[k].body==Body::dragonfly;
+            // The hostile bodies only come from a mission, which preloads them itself (docs/primer-plan.md): the Primer
+            // creatures, and the enemy and Primer fighters (no launch of the plugin's flies them; the Primer fighter alone
+            // was 14 MB a mission, 2026-10-07 memory audit).
+            const Body body=kBodies[k].body;
+            const bool missionOnly=body==Body::centipede || body==Body::dragonfly || body==Body::enemyFighter ||
+                                   body==Body::primerFighter;
             preloaded[k]=!broken[k] && !missionOnly && ModFileThere(kBodies[k].file);
             if(preloaded[k])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kBodies[k].sgo,2,-1);
             const int n=sprintf_s(line+at,sizeof(line)-at,"%s%s=%d",k ? " " : "",kBodies[k].name,preloaded[k]);

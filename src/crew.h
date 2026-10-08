@@ -112,6 +112,13 @@ struct Config {
     float sazabiThrusterSec=8.0f;   // s of boost or climb a full gauge holds
     float sazabiThrusterRegen=0.4f; // of a full gauge a second, on its feet (three times that just after landing)
     bool sazabiInvertAim=false;     // the aim's up and down the other way
+    bool sazabiAimAssist=true;      // aim assist (sazabi_assist.h): an enemy within SazabiAssistCone of the reticle is aimed at
+    float sazabiAssistCone=8.0f;    // deg round the screen's centre an enemy is picked within
+    float sazabiAssistRange=600.0f; // m: the farthest enemy picked
+    float sazabiAssistPull=4.0f;    // 1/s: the camera eased onto the picked enemy (a pad's lock-on feel; 0: the shots alone)
+    bool sazabiAssistMousePull=false; // ...the camera eased with the mouse too (off: on the mouse the shots alone)
+    int sazabiLockKey=0x04;         // the lock-on (Sekiro's): pressed, the enemy nearest the reticle held, the camera on it (VK_MBUTTON; 0 none)
+    int sazabiLockButton=0x80;      // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
     int sazabiDashKey=0x10;         // ...on the keyboard: the dash (VK_SHIFT; a pad's is A)
     int sazabiDescendKey=0x11;      // ...on the keyboard: down faster in the air (VK_CONTROL)
     int sazabiSwitchKey=0x52;       // the special the secondary fires: shield missiles, funnels, cannon (R; a pad's LB)
@@ -259,6 +266,7 @@ struct Config {
     float proteusSalvoRange=1500.0f;// ...the farthest mark it goes at (m)
     float proteusPriority=0.3f;     // ...the front shield up: the allies weigh enemies near it or after it this share of their distance (1: off)
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
+    bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -366,7 +374,12 @@ void ResetMissiles() noexcept;    // missile.cpp
 // What the plugin spawns is scaled to the mission's difficulty as a script's CreateFriend scales it (jet_spawn.cpp).
 void LevelVehicle(unsigned char* vehicle) noexcept;
 void ResetBigWorld() noexcept;    // bigworld.cpp
+bool InstallTerrainShare() noexcept;   // fieldshare.cpp
+void ResetTerrainShare() noexcept;
 void BigWorldProbe() noexcept;
+// The process's memory and the machine's, one log row (bigworld.cpp): at the mission's start and once its map is in, so
+// a map's cost shows in the log (the 3 x 3 big map ran an 8 GB machine out of memory, testhub report #3).
+void LogMemory(const char* when) noexcept;
 // What a jet ran into (impact.cpp), logged when it is held back ("blocked"): the nearest map surface round `pos`
 // (terrain or a building) and the nearest objects (class, team, distance). `who` "JET" / "PJET", `way` its velocity.
 void LogImpact(const char* who,const void* self,const float* pos,const float* way) noexcept;
@@ -610,6 +623,9 @@ struct SazabiCue {
     float aimRange;          // m from the muzzle to the aim point
     bool aimHit;             // the centre's ray meets something within the reticle's reach (else the aim is its far end)
     bool centred;            // the camera is the Sazabi's own (sazabi.cpp): the aim point is the screen's centre
+    bool hasAssist;
+    float assist[3];         // the aim assist's enemy (its lock point, world): the aim point is it (sazabi_assist.h)
+    bool lockOn;             // ...held by the lock-on (its key pressed: the camera follows it)
 };
 constexpr ULONGLONG kSazabiCueMs=250;
 bool PlayerSazabiCue(SazabiCue* out) noexcept;

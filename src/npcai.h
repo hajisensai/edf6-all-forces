@@ -39,6 +39,20 @@ bool NpcPickupHealthOn() noexcept;
 int NpcMarchShape() noexcept;
 bool PlayerSweepCue(SweepCue* out) noexcept;
 const wchar_t* FormationText(int shape) noexcept;   // hud.cpp: a shape's name as the HUD says it
+// The mark key on foot (marking the enemy at the screen's centre, or sending the map's selection to the ground there) and
+// the mark kept while its enemy is in the game: every frame of the local player `human` (map.cpp MapHumanFrame, game
+// thread), `mapOpen` while the map view is (the key is the map's then).
+void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept;
+// The map marks an enemy (mapcmd.cpp: the mark key or the focus order with the pointer on it; game thread): `object` an
+// enemy's, `at` its lock point. `toggle`: the one marked already is let go. True when it is marked now.
+bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept;
+// The mark key on foot with no enemy near the screen's centre: the point the selected units were sent to and how many took
+// it (MapCommandGuardAt's result: -1 none selected, -2 online; kPingNearEnemy: an enemy near the centre but outside the
+// mark's cone, nothing sent), `wall` when (GetTickCount64).
+constexpr int kPingNearEnemy=-3;
+struct NpcPing { bool on; float at[3]; int given; ULONGLONG wall; };
+// The last point for the HUD (draw thread): false when there is none shown now.
+bool NpcPingReadout(NpcPing* out) noexcept;
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
 // reads seat 0's stick (crew.cpp InputHook).
@@ -51,7 +65,7 @@ void ResetNpcPosts() noexcept;   // a new mission
 bool NpcDrivable(const unsigned char* vehicle) noexcept;
 // The AI riders in a CarBase vehicle's gunner seats aim and fire (§7): each vehicle's input, before the stock input.
 void NpcGunnersInput(unsigned char* vehicle) noexcept;
-// The seat's rider is an AI that should work its gun (NpcGunners, offline): RideAi's DummyVehicleRider, or a local
-// soldier (CustomNpcAi and NpcBoarding on). Used by the ground gunners and the 410's door guns under a player pilot.
-bool AiGunner(const unsigned char* seat) noexcept;
+// NPC gun input belongs to the local NPC's machine, not necessarily the vehicle driver's. Registered-vehicle
+// Dummies run on the host; unregistered copies use their recorded owner. All human seats are excluded.
+bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept;
 }  // namespace crew

@@ -186,6 +186,7 @@ bool PlayerFormationCue(FormationCue* o) noexcept { if(sceneFormation<0)return f
 // The box sweep banner (npcai.cpp PlayerSweepCue): on in the npc_sweep scenes.
 bool sceneSweepOn=false;SweepCue sceneSweep{};
 bool PlayerSweepCue(SweepCue* o) noexcept { if(sceneSweepOn)*o=sceneSweep;return sceneSweepOn; }
+bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 void MapCommandView(const float*,float,float) noexcept {}
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
@@ -711,6 +712,18 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
     for(const Drew& d:drew)named=named || d.text.find(L"3x")!=std::wstring::npos;
     failed+=!named;
     std::printf("%s  stock_tank_sight_zoom: the magnification named (3x) %d\n",named ? "ok  " : "FAIL",named);
+    // A 250 m ladder must say 2.5 / 7.5 hundreds, not truncate those ranges to 2 / 7.
+    a.ladder={};a.ladder.step=250.0f;a.ladder.ticks=2;
+    for(int i=0;i<2;++i) {
+        a.ladder.range[i]=i ? 750.0f : 250.0f;
+        a.ladder.at[i][0]=ground[0];a.ladder.at[i][1]=ground[1]-(i ? 45.0f : 10.0f);
+        a.ladder.at[i][2]=ground[2]+a.ladder.range[i];
+    }
+    Scene(dir,L"stock_tank_sight_fractional_ranges",ground);
+    bool half250=false,half750=false;
+    for(const Drew& d:drew){half250=half250 || d.text==L"2.5";half750=half750 || d.text==L"7.5";}
+    failed+=!(half250 && half750);
+    std::printf("%s  250 m ladder labels preserve half hundreds\n",half250 && half750 ? "ok  " : "FAIL");
     sceneFov=55.0f;sceneStock.zoom=1.0f;sceneZoom=1.0f;
     StockTank(ground);
     return failed;
@@ -915,8 +928,10 @@ void SazabiState(int k,const float* pos) {
     SazabiCue& c=sceneSazabi;
     if(k==1){c.guard=c.air=c.swinging=c.overheat=true;c.hasLock=true;c.missileLock=1.0f;c.thruster=0.0f;c.special=2;c.cannonCharge=0.62f;
              c.altitude=9999.0f;c.speed=99.0f;c.climb=-30.0f;c.aimRange=99999.0f;}
-    if(k==2){c.special=1;c.funnelsOut=4;c.funnelReady=0.3f;}
-    if(k==3){c.air=c.boosting=true;c.altitude=312.0f;c.speed=48.0f;c.climb=14.0f;c.thruster=0.2f;c.hasLock=true;c.missileLock=0.5f;}
+    if(k==2){c.special=1;c.funnelsOut=4;c.funnelReady=0.3f;
+             c.hasAssist=true;c.assist[0]=pos[0]-6.0f;c.assist[1]=pos[1]+18.0f;c.assist[2]=pos[2]+240.0f;}   // the aim assist's enemy
+    if(k==3){c.hasAssist=c.lockOn=true;c.assist[0]=pos[0]+20.0f;c.assist[1]=pos[1]+30.0f;c.assist[2]=pos[2]+260.0f;   // locked on
+             c.air=c.boosting=true;c.altitude=312.0f;c.speed=48.0f;c.climb=14.0f;c.thruster=0.2f;c.hasLock=true;c.missileLock=0.5f;}
 }
 constexpr int kSazabiStates=4;
 // A box in design px from the screen's centre (the Sazabi's gauges' anchor).

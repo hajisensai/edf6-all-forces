@@ -601,9 +601,10 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
 constexpr double kSlowMs=8.0;
 void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
     static ULONGLONG at=0;
-    LARGE_INTEGER f;QueryPerformanceFrequency(&f);
-    const double s=static_cast<double>(stock)*1000.0/static_cast<double>(f.QuadPart),p=static_cast<double>(plugin)*1000.0/static_cast<double>(f.QuadPart);
-    if(!Cfg().debug || (s<kSlowMs && p<kSlowMs))return;
+    static const double msPerTick=[]{LARGE_INTEGER f;QueryPerformanceFrequency(&f);return 1000.0/static_cast<double>(f.QuadPart);}();
+    if(!Cfg().debug)return;
+    const double s=static_cast<double>(stock)*msPerTick,p=static_cast<double>(plugin)*msPerTick;
+    if(s<kSlowMs && p<kSlowMs)return;
     const ULONGLONG now=GetTickCount64();
     if(now-at<1000)return;
     at=now;
@@ -663,16 +664,19 @@ constexpr float kProbeUp=400.0f,kUnder=2.5f,kUnderFloor=20.0f;
 constexpr ULONGLONG kUnderLogMs=5000,kUnderEveryMs=100;
 constexpr std::size_t kHumanSupport=0x711;   // CharacterControl_Walk +0x91: 2 on the ground, 1 sliding, 0 in the air
 struct UnderWatch { const void* object; float y; ULONGLONG ms,loggedAt; bool under; };
-UnderWatch underWatch[64]{};
+// Room for every vehicle and the player at once; when full, the one probed longest ago gives way (it used to be
+// slot 0 whenever none was stale: past 64 objects the newcomers and slot 0 took each other's place every frame,
+// each time with no probe time, so they cast both rays every frame, 2026-10-07 CPU audit).
+UnderWatch underWatch[256]{};
 
-UnderWatch& WatchOf(const void* object,ULONGLONG ms) noexcept {
-    UnderWatch* free=&underWatch[0];
+UnderWatch& WatchOf(const void* object) noexcept {
+    UnderWatch* oldest=&underWatch[0];
     for(auto& w:underWatch) {
         if(w.object==object)return w;
-        if(ms-w.ms>kUnderLogMs*4 && ms-free->ms<=kUnderLogMs*4)free=&w;
+        if(w.ms<oldest->ms)oldest=&w;
     }
-    *free=UnderWatch{object,0.0f,0,0,false};
-    return *free;
+    *oldest=UnderWatch{object,0.0f,0,0,false};
+    return *oldest;
 }
 
 bool UnderTerrain(const float* p,float* top) noexcept {
@@ -688,7 +692,7 @@ void WatchUnder(const unsigned char* object,const char* what,const unsigned char
     const float* p=reinterpret_cast<const float*>(object+kPosition);
     if(!std::isfinite(p[0]+p[1]+p[2]))return;
     const ULONGLONG ms=GameMs();
-    UnderWatch& w=WatchOf(object,ms);
+    UnderWatch& w=WatchOf(object);
     if(w.ms && ms-w.ms<kUnderEveryMs)return;   // two rays an object a kUnderEveryMs, not a frame
     float top=0.0f;
     const bool under=UnderTerrain(p,&top);
@@ -712,9 +716,10 @@ void UnderPlayer() noexcept {
 constexpr ULONGLONG kExitWatchMs=1000;
 struct ExitWatch { const void* human; bool riding; ULONGLONG off; } exitWatch{};
 void ExitGroundTick() noexcept {
+    if(!Cfg().enabled){exitWatch=ExitWatch{};return;}
     unsigned char* const human=PlayerHuman();
     if(human!=exitWatch.human)exitWatch=ExitWatch{human,false,0};
-    if(!human || human[kDead])return;
+    if(!human || human[kDead]){exitWatch=ExitWatch{};return;}
     const auto ctrl=At<const unsigned char*>(human,kHumanVehicleCtrl);
     if(ctrl && Readable(ctrl,0x10) && At<std::int32_t>(ctrl,8)!=0){exitWatch.riding=true;exitWatch.off=0;return;}
     const ULONGLONG ms=GameMs();
@@ -722,11 +727,11 @@ void ExitGroundTick() noexcept {
     if(!exitWatch.off)return;
     if(ms-exitWatch.off>kExitWatchMs){exitWatch.off=0;return;}
     const float* p=reinterpret_cast<const float*>(human+kPosition);
-    float floor=exitground::kNoFloor,to=0.0f;
-    if(!std::isfinite(p[0]+p[1]+p[2]) || !MapGroundNear(p[0],p[2],p[1],&floor) || !exitground::LiftOnto(p[1],floor,&to))return;
+    float to=0.0f;
+    if(!std::isfinite(p[0]+p[1]+p[2]) || !exitground::Correct(p,&MapFloorRay,&MapGroundNear,&to))return;
     const float at[3]={p[0],to,p[2]};
     const float was=p[1];
-    if(WarpHuman(human,at))Log("EXIT the player put down %.2f m in the floor at (%.1f,%.1f,%.1f): put on it",floor-was,at[0],at[1],at[2]);
+    if(WarpHuman(human,at))Log("EXIT the player put down %.2f m in the floor at (%.1f,%.1f,%.1f): put on it",to-exitground::kLift-was,at[0],at[1],at[2]);
 }
 
 void UnderVehicle(unsigned char* v) noexcept {
@@ -778,7 +783,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     // An NPC tank pushed off its post drives back: seat 0's stick written before the stock input reads it (npcpost.cpp).
     if(Cfg().enabled)Guarded(kStepNpcPost,&NpcPostInput,static_cast<unsigned char*>(vehicle));
     // The NPC soldiers in its gunner seats aim and fire, before the stock input reads the seats (npcai.cpp).
-    if(Cfg().enabled)Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle));
+    Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle)); // also releases our last inputs when disabled
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
@@ -792,7 +797,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepEmc,&EmcFrame,v);                  // the plugin off too: a charge going is let go then (its loop, its glow)
     GuardedTick(kStepEmc,&EmcTick);                 // the plugin off too: an EMC gone mid-charge has its loop stopped
     GuardedTick(kStepSazabi,&SazabiSoundTick);      // the plugin off too: the Sazabi's loops stop then (once a frame)
-    if(!Cfg().enabled)return;
+    if(!Cfg().enabled){Guarded(kStepSightZoom,&SightZoomStock,v);return;}
     FrameTick();
     Guarded(kStepCrew,&CrewStep<I>,v);
     Guarded(kStepSeats,&SeatSwitchFrame,v);    // before the steps that read who sits where this frame
@@ -946,6 +951,7 @@ const char* VehicleClassName(const void* vehicle) noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone, their lines with them.
 void ResetCrew() noexcept {
+    exitWatch=ExitWatch{};
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
     for(auto& p:doorLogged)p=nullptr;

@@ -231,11 +231,17 @@ def vehicle_weapons(call: Call) -> tuple[str, ...]:
     return vc.GROUND_VEHICLES[call.ground].weapons if call.ground else vc.JETS[call.jet].weapons
 
 
-def vehicle_needs(call: Call) -> list[str]:
+def vehicle_needs(call: Call, request: bytes | None = None) -> list[str]:
     """What a vehicle request's SGO names and so needs installed (by tools/make_jets.py, or the ground vehicle's own
     tool): the vehicle SGO and its weapons of ours (EDF6VC_*). A stock weapon it keeps (the sidecar bike's guns and
     fuel tank) is the game's own, in Root.cpk: nothing to install."""
-    ours = [w for w in vehicle_weapons(call) if w.split('/')[-1].upper().startswith('EDF6VC_')]
+    weapons = vehicle_weapons(call)
+    if call.jet == vc.SAZABI_JET and request is not None:
+        # Follow the prepared/installed request, not today's model directory: the model may have been
+        # added or removed since these bytes were built. The stock-Eros fallback has only stock weapons.
+        setup = dsgo.parse(request).root.get('Ammo_CustomParameter').items[4].items[3]
+        weapons = tuple(w.items[0] for w in setup.items[3].items)
+    ours = [w for w in weapons if w.split('/')[-1].upper().startswith('EDF6VC_')]
     return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in ours]
 
 
@@ -284,7 +290,7 @@ def request_tier(curve: list[tuple[float, float, float]], level: float) -> tuple
     return curve[-1][1], curve[-1][2]
 
 
-def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float]) -> bytes:
+def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallback: bool = False) -> bytes:
     """The N9 Eros request bringing the player jet. Ammo_CustomParameter[4] = [transport, box, vehicle SGO,
     vehicle setup [multipliers, heli params (first: the speed gain k = the jet's mark), fuel, weapons],
     voice lines]; `resource` preloads the same paths."""
@@ -294,6 +300,18 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float]) -> bytes
     req = r.get('Ammo_CustomParameter').items[4]
     stock_vehicle = req.items[2]
     req.items[2] = _object_path(call)
+    if fallback:
+        # make_sazabi writes an unchanged V506_HELI under this stable alias. Keep the Eros request's
+        # mark, holder count, weapons and multipliers too; its setup overrides the object's on spawn.
+        if call.jet != vc.SAZABI_JET:
+            raise ValueError('only the Sazabi has a stock vehicle fallback')
+        res = r.get('resource')
+        res.items = [_object_path(call) if x.lower() == stock_vehicle.lower() else x for x in res.items]
+        for lang in LANGS:
+            key = f'name.{lang.lower()}'
+            if key in r.names.values():
+                r.set(key, call_name(call, lang))
+        return dsgo.write(doc)
     setup = req.items[3]
     setup.items[0].items[0], setup.items[0].items[1] = tier   # request_tier: its level's on its family's curve
     if not call.ground:
@@ -352,8 +370,16 @@ def throw_sgo(template: bytes, call: Call) -> bytes:
     return dsgo.write(doc)
 
 
-# The boarding gun (Call.brings 'gun'): the template's rounds fly GUN_RANGE times as long (AmmoAlive), so as far.
-GUN_RANGE = 1.6
+# The boarding gun (Call.brings 'gun'), a debugging tool (the user, 2026-10-07: "it should arrive at once, with no
+# spread, reload at once or never run out"): each curve's base (the star curves keep their template's shape) and
+# scalar set here. Its rounds go 750 m a frame for 2 frames: 1500 m in 33 ms (the stock shape cast still decides what
+# it hits, src/boarding.cpp); no spread, no recoil; 999 rounds a magazine, reloaded
+# in a frame, 10 shots a second (the stock bolt waits 90 frames).
+GUN_CURVES = {'AmmoSpeed': 750.0, 'FireAccuracy': 0.0, 'AmmoCount': 999.0, 'ReloadTime': 1.0, 'FireInterval': 6.0}
+GUN_SCALARS = {'AmmoAlive': 2.0, 'FireRecoil': 0.0}
+FPS = 60.0   # the menu shows m/frame as m/s, frames as seconds
+
+
 # ...and carry its tag in AmmoColor's alpha: the float 1 + mark ulps (src/boarding.cpp kTagBits compares the bits). The
 # colour is the one bullet parameter copied as it is (no star curve, no fire modifier) that only the drawing reads.
 GUN_TAG = 'AmmoColor'
@@ -374,11 +400,14 @@ def gun_tag(color: Node, mark: float) -> Node:
 
 def gun_sgo(template: bytes, call: Call) -> bytes:
     """The boarding gun: the stock sniper rifle (laser sight, scope) under its own name, its rounds tagged with the
-    call's mark (GUN_TAG, which src/boarding.cpp reads off the bullet) and reaching GUN_RANGE times as far."""
+    call's mark (GUN_TAG, which src/boarding.cpp reads off the bullet), GUN_CURVES / GUN_SCALARS set."""
     doc = dsgo.parse(template)
     r = doc.root
     r.set(GUN_TAG, gun_tag(r.get(GUN_TAG), call.mark))
-    r.set('AmmoAlive', float(r.get('AmmoAlive')) * GUN_RANGE)
+    for key, base in GUN_CURVES.items():
+        r.get(key).items[0] = float(base)
+    for key, value in GUN_SCALARS.items():
+        r.set(key, float(value))
     for lang in LANGS:
         key = f'name.{lang.lower()}'
         if key in r.names.values():
@@ -386,11 +415,12 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
     return dsgo.write(doc)
 
 
-def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None) -> bytes:
+def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None,
+               *, fallback: bool = False) -> bytes:
     if call.brings == 'gun':
         return gun_sgo(template, call)
     if call.brings == 'vehicle':
-        return vehicle_sgo(template, call, request_tier(curve or [], call.level))
+        return vehicle_sgo(template, call, request_tier(curve or [], call.level), fallback=fallback)
     if call.brings == 'throw':
         return throw_sgo(template, call)
     doc = dsgo.parse(template)
@@ -419,14 +449,23 @@ def _table_row(template: Node, call: Call) -> Node:
     return row
 
 
-def gun_range(template: bytes) -> float:
-    """A hand weapon's range as its menu shows it: AmmoSpeed (m a frame, the base of its star curve) times AmmoAlive."""
+def gun_stats(template: bytes) -> list[tuple[float, list, float]]:
+    """What the gun's menu lines become: (the template line's base, its curve's star parameters, the gun's base). A
+    line shows a curve in its own unit (the base times 1, FPS or 1/FPS: rounds, ROF, damage, accuracy, reload seconds,
+    shot speed m/s) or the range (AmmoSpeed's base times AmmoAlive), its star parameters the field's."""
     r = dsgo.parse(template).root
-    return float(r.get('AmmoSpeed').items[0]) * float(r.get('AmmoAlive'))
+    out = []
+    for key, base in GUN_CURVES.items():
+        curve = [float(x) for x in r.get(key).items]
+        for f in (1.0, FPS, 1.0 / FPS):
+            out.append((curve[0] * f, curve[1:-1], float(base) * f))
+    speed = [float(x) for x in r.get('AmmoSpeed').items]
+    out.append((speed[0] * float(r.get('AmmoAlive')), speed[1:-1], GUN_CURVES['AmmoSpeed'] * GUN_SCALARS['AmmoAlive']))
+    return out
 
 
 def _text_row(template: Node, call: Call, lang: str, durability: float | None = None,
-              gun_range_base: float = 0.0) -> Node:
+              gun: list[tuple[float, list, float]] | None = None) -> Node:
     row = copy.deepcopy(template)
     row.items[0] = call_name(call, lang)
     row.items[1] = calls.call_description(call, lang)
@@ -438,13 +477,20 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
         stats[1].items[1] = f'{durability:.0f}'
     if call.brings == 'gun':
-        # A gun keeps its template's stats but the range line (gun_sgo: AmmoAlive times GUN_RANGE), told by its value
-        # (gun_range: the labels differ by language), which must be there once.
-        lines = [st for st in row.items[2].items if len(st.items) == 3 and isinstance(st.items[2], Node)
-                 and float(st.items[2].items[0]) == gun_range_base]
-        if len(lines) != 1:
-            raise ValueError(f'{call.id} {lang}: {len(lines)} range lines of {gun_range_base} m in its template text')
-        lines[0].items[2].items[0] = gun_range_base * GUN_RANGE
+        # A gun's lines that show a field it sets (gun_stats), told by their values (the labels differ by language).
+        # The last star parameter differs between a field and its line (the menu's own direction flag): not compared.
+        changed = 0
+        for st in row.items[2].items:
+            if len(st.items) != 3 or not isinstance(st.items[2], Node):
+                continue
+            curve = [float(x) for x in st.items[2].items]
+            for old, stars, new in gun or []:
+                if curve[1:-1] == stars and abs(curve[0] - old) <= 1e-6 * max(1.0, abs(old)):
+                    st.items[2].items[0] = new
+                    changed += 1
+                    break
+        if changed < 5:
+            raise ValueError(f'{call.id} {lang}: only {changed} of its template text lines matched its fields')
         return row
     # The stat list stays KM6's, except the reload line's curve, which the game shows as $0pt
     # from that list: it must be the weapon's own ReloadTime or the menu shows KM6's 1020.
@@ -518,7 +564,10 @@ def stack(game_root: str) -> dict[str, bytes]:
     tpl = {t: _template_index(before, t) for t in templates()}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
     curves = {request_family(c): request_curve(game_root, request_family(c)) for c in CALLS if c.brings == 'vehicle'}
-    out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c, curves.get(request_family(c)))
+    import sazabi_model
+    fallback = sazabi_model.model_dir() is None
+    out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c, curves.get(request_family(c)),
+                                                fallback=fallback and c.jet == vc.SAZABI_JET)
                              for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
     rows = s.rows
@@ -527,12 +576,19 @@ def stack(game_root: str) -> dict[str, bytes]:
         _put(rows, plan.at[c.id], _table_row(row_template[c.id], c))
     out[TABLE] = dsgo.compact(s.table)
     durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
-    ranges = {c.id: gun_range(template_sgo[template_of(c)]) for c in CALLS if c.brings == 'gun'}
+    if fallback:
+        import sgo
+        hp = float(sgo.load(data=stock(game_root, 'OBJECT/V506_HELI.SGO'))['game_object_durability'])
+        mult = dsgo.parse(template_sgo[VEHICLE_TEMPLATE]).root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0]
+        for c in CALLS:
+            if c.jet == vc.SAZABI_JET:
+                durability[c.id] = hp * float(mult)
+    stats = {c.id: gun_stats(template_sgo[template_of(c)]) for c in CALLS if c.brings == 'gun'}
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
         for c in order:
-            _put(text, plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id], ranges.get(c.id, 0.0)))
+            _put(text, plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id], stats.get(c.id)))
         out[rel] = dsgo.compact(s.texts[rel])
     verify(game_root, out, plan)
     return out
@@ -697,7 +753,8 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     if recover(game_root):
         print('rolled back the weapon table files of an earlier run that did not finish')
     files = stack(game_root) if files is None else files
-    missing = [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c) if not os.path.isfile(_mods(game_root, rel))]
+    needs = {rel for c in CALLS if c.vehicle for rel in vehicle_needs(c, files[sgo_file(c)])}
+    missing = [rel for rel in sorted(needs) if not os.path.isfile(_mods(game_root, rel))]
     if missing:
         raise SystemExit(f'{", ".join(missing)} not installed: run python tools/make_jets.py first')
     manifest = load_manifest(game_root)
@@ -715,10 +772,10 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
         print(f'WARNING: {c} was row {was}, now {now}: another tool rewrote the weapon table without it; a save '
               f'that had it equipped or owned refers to row {was}')
     led = ledger.Ledger(game_root)
-    for c in CALLS:
-        if c.vehicle:
-            for rel in vehicle_needs(c):   # what its request names (vehicle_sgo): kept while the request is
-                led.need(OWNER, rel)
+    before = set(led.owned_by(OWNER))
+    for rel in sorted(needs):
+        led.need(OWNER, rel)
+    led.release(OWNER, sorted(before - {ledger.key(rel) for rel in needs}))
     return dict(manifest['written'])
 
 
@@ -760,7 +817,7 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
     commit(game_root, {**changes, MANIFEST: _manifest_bytes(manifest) if left else None})
     for rel, data in changes.items():
         print(f'{"removed" if data is None else "wrote"} {rel}')
-    ledger.Ledger(game_root).release(OWNER, [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c)])
+    ledger.Ledger(game_root).release(OWNER)
     if left:
         print(f'{len(left)} rows are placeholders now (EDF6VC_RETIRED_*, stock weapons), keeping their row numbers')
         return
@@ -786,7 +843,7 @@ def repair(game_root: str) -> list[str]:
             changes[rel] = None
     commit(game_root, {**changes, MANIFEST: None})
     shutil.rmtree(_mods(game_root, BACKUP), ignore_errors=True)
-    ledger.Ledger(game_root).release(OWNER, [rel for c in CALLS if c.vehicle for rel in vehicle_needs(c)])
+    ledger.Ledger(game_root).release(OWNER)
     return sorted(changes)
 
 
@@ -820,7 +877,12 @@ def check(game_root: str) -> bool:
         if state == 'in' and not os.path.isfile(_mods(game_root, sgo_file(c))):
             print(f'        {sgo_file(c)} missing')
             ok = False
-        if state == 'in' and c.vehicle and any(not os.path.isfile(_mods(game_root, rel)) for rel in vehicle_needs(c)):
+        request_path = _mods(game_root, sgo_file(c))
+        request = None
+        if state == 'in' and c.vehicle and os.path.isfile(request_path):
+            with open(request_path, 'rb') as f:
+                request = f.read()
+        if state == 'in' and c.vehicle and any(not os.path.isfile(_mods(game_root, rel)) for rel in vehicle_needs(c, request)):
             print(f'        {vehicle_file(c)} missing (python tools/make_jets.py)')
             ok = False
     return ok

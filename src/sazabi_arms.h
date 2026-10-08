@@ -42,6 +42,15 @@ struct Arms {
     bool hasAim=false,hasLock=false,aimHit=false,centred=false;
     float aimRange=0.0f;
     float aim[3]{},lock[3]{};
+    // the aim assist (sazabi_camera.inc Assist): the enemy picked round the reticle and its lock point this frame
+    const void* assistObj=nullptr;
+    bool hasAssist=false;
+    float assist[3]{};
+    // the lock-on (sazabi_camera.inc LockInput): the enemy held while it lives, its key's state, the flick toward the
+    // next one, how long it has been out of sight
+    ObjRef lockOnTarget{}; // owns one weak via AssignLockTarget; clear before overwriting Arms/Mech
+    bool lockOn=false,lockKeyHeld=false;
+    float flick=0.0f,flickCool=0.0f,lockHidden=0.0f;
     bool stance[2]{true,true};   // each foot on the ground last frame (its footstep when it comes down)
 };
 }  // namespace crew::szarms

@@ -578,7 +578,7 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
 // kLookAhead seconds along its track; sinking, the lowest it gets is where a maxG pull-out started
 // kReact seconds from now bottoms out (so a dive runs down to kMinAlt instead of pulling up 100 m early);
 // climbing, the ceiling is checked kLookAhead seconds out.
-void Guard(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
+void Guard(Jet& j,const float* pos,float clear,float* want,ULONGLONG ms) noexcept {
     const Kind& k=KindOf(j);
     const float s=Len(j.m.vel);
     // A building (or a ridge) Ahead found on its track: a floor too (below), climbed from where it is now (`rise` over
@@ -603,7 +603,7 @@ void Guard(Jet& j,const float* pos,float* want,ULONGLONG ms) noexcept {
     SoftEdge(j,pos,want);
     const float ahead[3]={pos[0]+j.m.vel[0]*kLookAhead,pos[1]+j.m.vel[1]*kLookAhead,pos[2]+j.m.vel[2]*kLookAhead};
     const float probe[3]={ahead[0],pos[1]>ahead[1] ? pos[1] : ahead[1],ahead[2]};
-    const float here=GroundClearance(pos),there=GroundClearance(probe);
+    const float here=clear,there=GroundClearance(probe);
     // Neither ray finding ground (past the map's terrain) left it no floor at all: an interceptor rolled over
     // there and flew on to -1100 (2026-10-04). It keeps the surface it last saw under it then.
     const float seen=j.m.groundSeen ? j.m.groundY : -1e9f;
@@ -760,12 +760,13 @@ float Patrol(const Jet& j,const float* pos,const float* anchor,float height,floa
     return Clamp(std::sqrt(r*kG*kLoiterTan),k.minSpeed*kLoiterMin,k.cruise);
 }
 
-void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,const float* nose,float* want,float speed,float dt,ULONGLONG ms) noexcept {
+void Wing(Jet& j,const Kind& k,unsigned char* v,const float* pos,float clear,const float* nose,float* want,float speed,float dt,
+          ULONGLONG ms) noexcept {
     // A play area too small for its turns at full speed: no faster than turns inside it (TightSpeed). A bomber on its
     // run keeps its run's speed.
     if(j.mode!=Mode::bomb){const float most=TightSpeed(k,airbound::HalfOf(PlayBox()));if(speed>most)speed=most;}
     Ahead(j,pos,ms);
-    Guard(j,pos,want,ms);
+    Guard(j,pos,clear,want,ms);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     float up[3];
     float bodyUp[3]={m[4],m[5],m[6]};

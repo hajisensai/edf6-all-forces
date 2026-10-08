@@ -1309,7 +1309,9 @@ void LadderTicks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Seg(drawer,ctx,lx-h,ly,lx+h,ly,t,kHud);
         const int metres=static_cast<int>(std::lround(l.range[k]));
         if(ly>=labelled+kLabelApart*s) {   // its number where there is room for it (a tick too near the last one's: none)
-            Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",l.step>=100.0f ? metres/100 : metres);
+            if(l.step>=100.0f && metres%100!=0)   // a 250 m step: 2.5, 7.5 hundreds, not 2, 7
+                Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%.1f",metres/100.0);
+            else Label(text,lines,at,lx-h-5.0f*s,ly,2,kLineScale*0.7f,kHud,L"%d",l.step>=100.0f ? metres/100 : metres);
             labelled=ly;
         }
         if(any)Seg(drawer,ctx,lastX,last,lx,ly,1.0f*s,kHudDim);
@@ -1915,6 +1917,20 @@ void SazabiReticle(void* drawer,void* ctx,const float* vp,float width,float heig
     Rect(drawer,ctx,x-dot,y-dot,x+dot,y+dot,ink);
     if(locked)Arc(drawer,ctx,x,y,out+4.0f*s,0.0f,kTurn,1.5f*s,40,ink);
 }
+// The aim assist's enemy (cue.hasAssist, sazabi_assist.h): four pink corner brackets round its lock point, the shots'
+// point; held by the lock-on (cue.lockOn) they are red, thicker and tighter, with a dot on the point.
+void SazabiAssistMark(void* drawer,void* ctx,const float* vp,float width,float height,float s,const SazabiCue& c) noexcept {
+    float x,y,depth;
+    if(!c.hasAssist || !Project(vp,c.assist,width,height,&x,&y,&depth))return;
+    const float* const ink=c.lockOn ? kSazabiLocked : kSazabiPink;
+    const float h=(c.lockOn ? 20.0f : 26.0f)*s,arm=(c.lockOn ? 11.0f : 9.0f)*s,t=(c.lockOn ? 3.0f : 2.0f)*s;
+    for(int i=0;i<4;++i) {
+        const float sx=i&1 ? 1.0f : -1.0f,sy=i&2 ? 1.0f : -1.0f,cx=x+sx*h,cy=y+sy*h;
+        Rect(drawer,ctx,std::fmin(cx,cx-sx*arm),cy-t*0.5f,std::fmax(cx,cx-sx*arm),cy+t*0.5f,ink);
+        Rect(drawer,ctx,cx-t*0.5f,std::fmin(cy,cy-sy*arm),cx+t*0.5f,std::fmax(cy,cy-sy*arm),ink);
+    }
+    if(c.lockOn)Rect(drawer,ctx,x-2.5f*s,y-2.5f*s,x+2.5f*s,y+2.5f*s,ink);
+}
 // The range under the reticle (see the top).
 void SazabiRange(Text* text,const float* vp,float width,float height,float s,const SazabiCue& c,Line* lines,int* at) noexcept {
     float x,y;
@@ -2116,6 +2132,7 @@ void SazabiHud(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
                Line* lines,int* at) noexcept {
     float x,y;
     if(c.hasLock)LockAt(drawer,ctx,vp,width,height,s,c.missileLock>=1.0f ? 2 : 1,c.lock,Unit(c.missileLock),&x,&y);
+    SazabiAssistMark(drawer,ctx,vp,width,height,s,c);
     SazabiReticle(drawer,ctx,vp,width,height,s,c);
     SazabiRange(text,vp,width,height,s,c,lines,at);
     SazabiThrusterArc(drawer,ctx,text,width,height,s,c,lines,at);
@@ -3405,6 +3422,12 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         Seg(drawer,ctx,x0,y0,x1,y0,1.5f*s,kMapOrder);Seg(drawer,ctx,x1,y0,x1,y1,1.5f*s,kMapOrder);
         Seg(drawer,ctx,x1,y1,x0,y1,1.5f*s,kMapOrder);Seg(drawer,ctx,x0,y1,x0,y0,1.5f*s,kMapOrder);
     }
+    // The enemy under the pointer: amber brackets on it, what Q and H do with it.
+    float hx,hy,hd;
+    if(c.hover && Project(vp,c.hoverAt,width,height,&hx,&hy,&hd)) {
+        MapBrackets(drawer,ctx,hx,hy,20.0f*s,2.0f*s,kAmber);
+        Label(text,lines,at,hx,hy-30.0f*s,1,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::cmdHoverEnemy));
+    }
     wchar_t one[64]{};
     for(int i=0;i<c.count && i<kCmdUnits;++i) {
         const CmdMark& u=c.unit[i];
@@ -3500,6 +3523,8 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
     Label(text,lines,at,60.0f*s,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
 }
 
+void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
+
 // The map view open: its marks drawn (true), nothing else of the HUD.
 bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     static MapReadout m;   // the draw thread's (too big for its stack)
@@ -3508,13 +3533,12 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
+    NpcMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // which enemy the NPCs are set on, on the map too
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCompass(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapText(drawer,ctx,text,width,height,s,m,lines,at);
     return true;
 }
-}  // namespace
-
 // The NPCs' mark (npcai.cpp, the user's Q on foot; docs/npc-ai-design.md §6.3): an amber diamond round it, MARK and its
 // distance under it.
 void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
@@ -3531,6 +3555,8 @@ void NpcMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
 // The march formation just cycled (npcai.cpp; the player's key on foot or the map's T): its name and the key, a moment
 // under the screen's centre.
 // The formation's name (formation.h Shape) as the HUD says it (mapcmd.cpp's notes too).
+}  // namespace
+
 const wchar_t* FormationText(int shape) noexcept {
     using hudtext::Tx;
     static const Tx kNames[]={Tx::formStock,Tx::formColumn,Tx::formStaggered,Tx::formWedge,Tx::formVee,Tx::formLine,
@@ -3538,6 +3564,7 @@ const wchar_t* FormationText(int shape) noexcept {
     static_assert(sizeof(kNames)/sizeof(kNames[0])==static_cast<std::size_t>(npc::formation::kShapes),"a name a shape");
     return hudtext::Tr(shape>=0 && shape<npc::formation::kShapes ? kNames[shape] : Tx::formStock);
 }
+namespace {
 void FormationBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
     FormationCue c{};
     if(!PlayerFormationCue(&c))return;
@@ -3556,6 +3583,21 @@ void SweepBanner(Text* text,float width,float height,float s,Line* lines,int* at
     if(c.on)Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kAmber,Tr(Tx::sweepOn),c.left,c.taken,key);
     else Label(text,lines,at,width*0.5f,height*0.5f+222.0f*s,1,kLineScale,kGreen,Tr(Tx::sweepDone),c.taken);
 }
+// The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): a ring where it points, for a moment, and
+// what came of it (the selected units sent there, how many; none selected; online).
+void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    NpcPing p{};
+    float x,y,depth;
+    if(!NpcPingReadout(&p) || !Project(vp,p.at,width,height,&x,&y,&depth))return;
+    const float* tint=p.given>0 ? kMapOrder : kAmber;
+    Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
+    Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
+    if(p.given>=0)Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
+    else Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
+               Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
+}
+
+}  // namespace
 
 // A magnified sight's picture (scopeview.h; sightzoom.cpp): while the sight is magnified the screen outside its field
 // dark; a round field for an optical sight with its rim and three posts (left, right, under: the aim stays clear), the
@@ -3702,6 +3744,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         NpcMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
+        NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
             if(now-snap.tick<=kFreshMs)at=Readouts(drawer,ctx,t,viewProj,width,height,s,lines,at,snap,&shown,now);
             float top=height*0.28f;

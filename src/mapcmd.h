@@ -70,6 +70,16 @@ void MapCommandView(const float* viewProj,float width,float height) noexcept;
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
 // The left drag is the box's, not the map's pan (Ctrl held when it began): map.cpp Steer leaves the ground alone.
 bool MapCommandBoxing() noexcept;
+// map.cpp Close: discard hover, pending presses and the rendered view immediately, preserving selected units.
+void SuspendMapCommands() noexcept;
+// The mark key (NpcMarkKey) pressed with the pointer on an enemy marks it instead of what the map does with that key (Q: the
+// camera's turn left): map.cpp Steer asks every frame before it reads its keys (`front`: the game window in front). True
+// while that press lasts; the enemy is the one under the pointer when it began (MapCommandFrame marks that one). Game
+// thread.
+bool MapCommandEats(bool front) noexcept;
+// npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
+// on the map, in a formation round it). How many took it; -1 none selected, -2 online (InSession). Game thread.
+int MapCommandGuardAt(const float* at) noexcept;
 
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.
@@ -98,6 +108,8 @@ struct MapCommandReadout {
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
     bool guardArmed;           // the guard button clicked: the next click on the ground is its point
     int march;                 // the march's formation (formation.h Shape)
+    bool hover;                // an enemy under the pointer (the screen centre with a pad): Q marks it, H focuses on it
+    float hoverAt[3];          // its lock point
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 }  // namespace crew
