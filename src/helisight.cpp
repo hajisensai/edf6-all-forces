@@ -8,16 +8,16 @@
 // heli.cpp Arms's rule for the NPC: homing, the slow rockets, the guns):
 //  - The gun: the first weapons of the player's seat with a stock aim line, that line hidden now (crew.cpp
 //    HiddenAimGuns; the line is what a Weapon_VehicleShoot gun has, docs/aim-line-re.md), the second only when its
-//    rounds are the first's (the 506's left and right guns: their mean). A seat whose gun makes no line (the 409's
+//    real muzzles are flown independently (the 506's left and right guns are never averaged). A seat whose gun makes no line (the 409's
 //    turret gatling: custom_parameter []) gets its fastest gun instead (until 2026-10-05 it got no sight at all).
-//  - The boresight: the way its muzzles point (common/edf/weapon.h MeanMuzzle, the frame fire builds a shot from:
+//  - The boresight: the first actual muzzle direction (common/edf/weapon.h MuzzleFrame, the frame fire builds a shot from:
 //    a door gun's follows its turret, the 409's its turret), drawn as a direction (far).
 //  - The pipper: the round's real arc, as the game spawns and steps it (autoturret/docs/re-notes.md "Rounds in
 //    flight"): velocity = muzzle row 2 x AmmoSpeed + the shooter's velocity x AmmoOwnerMove / 60 (m/frame; 0x691FA0
 //    reads weapon+0x190 and +0x24C, edf::kWeaponOwnerVel / kWeaponAmmoOwnerMove; the stock heli guns' AmmoOwnerMove is
 //    0, read anyway), falling AmmoGravityFactor x the world gravity / 3600 each frame, for AmmoAlive frames. Where a
 //    map ray first finds the ground along it (crew.h RoundImpact: terrain and buildings, not water or vehicles) is the
-//    pipper; none within its life, the round's place at its end (sight::RoundAfter), drawn dim. Its distance from
+//    predicted ground cross; none within its life, the round's place at its end (sight::RoundAfter), drawn as dim open dashes. Its distance from
 //    the muzzle goes next to it. No lead: the stock heli guns lock nothing.
 //  - The missile (the 506's and 602's: LockonType 1, a MissileBullet01 homing on what the weapon's own lock list
 //    holds): the lock as the jets' stores read it (lockon.h WeaponLock: the weapon's lock list +0xC60 and the lock in
@@ -42,6 +42,7 @@
 #include "lockon.h"
 #include "stores.h"
 #include "edf/weapon.h"
+#include "weapon_mount.h"
 #include <cmath>
 
 namespace crew {
@@ -67,24 +68,6 @@ bool RoundOf(const unsigned char* gun,Round* r) noexcept {
     return std::isfinite(r->speed) && r->speed>0.0f && std::isfinite(r->factor) && r->alive>0;
 }
 
-// The guns' mean muzzle (position and unit direction): the first gun's, and the second's with the same round.
-bool Muzzle(const unsigned char* const* guns,int n,const Round& first,float* pos,float* dir) noexcept {
-    float p[3]={0.0f,0.0f,0.0f},d[3]={0.0f,0.0f,0.0f};
-    int used=0;
-    for(int k=0;k<n;++k) {
-        Round r{};
-        if(!RoundOf(guns[k],&r) || r.speed!=first.speed || r.factor!=first.factor || r.alive!=first.alive)continue;
-        float mp[3],md[3];
-        if(!edf::MeanMuzzle(guns[k],kMostMuzzles,mp,md))continue;
-        for(int i=0;i<3;++i){p[i]+=mp[i];d[i]+=md[i];}
-        ++used;
-    }
-    if(!used || !vec::Normalize(d))return false;
-    for(int i=0;i<3;++i)pos[i]=p[i]/static_cast<float>(used);
-    std::memcpy(dir,d,12);
-    return true;
-}
-
 // The shooter's velocity a round takes on (m/frame): 0x691FA0's weapon+0x190 x AmmoOwnerMove / 60.
 void Inherited(const unsigned char* gun,float* out) noexcept {
     const float share=At<float>(gun,edf::kWeaponAmmoOwnerMove);
@@ -96,15 +79,35 @@ void Inherited(const unsigned char* gun,float* out) noexcept {
 bool SolveGun(const unsigned char* const* guns,int n,HeliSightReadout& r) noexcept {
     Round round{};
     float pos[3],dir[3],g[3],owner[3];
-    if(!RoundOf(guns[0],&round) || !Muzzle(guns,n,round,pos,dir) || !edf::WorldGravity(image,g))return false;
+    if(!guns || n<=0 || !RoundOf(guns[0],&round))return false;
+    const auto firstMuzzle=At<const unsigned char*>(guns[0],edf::kMuzzles);
+    if(!RoundOf(guns[0],&round) || !At<std::uint64_t>(guns[0],edf::kMuzzleCount) ||
+       !Readable(firstMuzzle,edf::kMuzzleStride) || !edf::MuzzleFrame(guns[0],firstMuzzle,pos,dir) ||
+       !vec::Normalize(dir) || !edf::WorldGravity(image,g))return false;
     Inherited(guns[0],owner);
-    float vel[3],drop[3];
-    for(int i=0;i<3;++i){vel[i]=dir[i]*round.speed+owner[i];drop[i]=g[i]*round.factor/3600.0f;}
+    float drop[3];
+    for(int i=0;i<3;++i)drop[i]=g[i]*round.factor/3600.0f;
     std::memcpy(r.bore,dir,12);
     float took=0.0f;
-    r.hit=RoundImpact(pos,vel,drop,round.alive,r.pipper,&took);
-    if(!r.hit)sight::RoundAfter(pos,vel,drop,static_cast<float>(round.alive),r.pipper);
-    r.range=vec::Dist(pos,r.pipper);
+    // Each real gun/muzzle has its own path. The old mean point could lie between two shots, on neither one.
+    for(int k=0;k<n && r.paths<roundaim::kSightPaths;++k) {
+        Round own{};if(!RoundOf(guns[k],&own))continue;
+        float ownDrop[3];for(int c=0;c<3;++c)ownDrop[c]=g[c]*own.factor/3600.0f;
+        const auto muzzles=At<const unsigned char*>(guns[k],edf::kMuzzles);const auto count=At<std::uint64_t>(guns[k],edf::kMuzzleCount);
+        if(!count || count>kMostMuzzles || !Readable(muzzles,count*edf::kMuzzleStride))continue;
+        for(std::uint64_t i=0;i<count && r.paths<roundaim::kSightPaths;++i) {
+            float p[3],d[3],inherited[3];
+            if(!edf::MuzzleFrame(guns[k],muzzles+i*edf::kMuzzleStride,p,d) || !vec::Normalize(d))continue;
+            Inherited(guns[k],inherited);
+            float velocity[3];for(int c=0;c<3;++c)velocity[c]=d[c]*own.speed+inherited[c];
+            auto& path=r.path[r.paths++];
+            path.hit=RoundImpact(p,velocity,ownDrop,own.alive,path.at,&took);
+            if(!path.hit){took=static_cast<float>(own.alive);sight::RoundAfter(p,velocity,ownDrop,took,path.at);}
+            path.range=vec::Dist(p,path.at);path.seconds=took/60.0f;
+            if(r.paths==1){std::memcpy(r.bore,d,12);std::memcpy(r.pipper,path.at,12);r.hit=path.hit;r.range=path.range;}
+        }
+    }
+    if(!r.paths)return false;
     // Its range ladder: the same round (the inherited velocity already in m/frame: as a shooter at 60x it with all of it kept).
     const roundaim::Round ladder{round.speed,{drop[0],drop[1],drop[2]},1.0f,round.alive};
     const float shooter[3]={owner[0]*60.0f,owner[1]*60.0f,owner[2]*60.0f};
@@ -198,6 +201,10 @@ void HeliSightFrame(unsigned char* v) noexcept {
     if(!n && gun){guns[0]=gun;n=1;}   // no stock line to replace (the 409's turret gun): its fastest gun
     HeliSightReadout r{};
     const bool gunOk=n && SolveGun(guns,n,r);
+    if(gunOk) {
+        const auto freedom=weaponmount::OfWeapon(v,seat,guns[0]);
+        r.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
+    }
     const bool armOk=arm && SolveArm(arm,homing,r);
     if(!gunOk && !armOk)return;
     latest=r;latestMs=GameMs();

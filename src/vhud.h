@@ -60,9 +60,12 @@ struct StockArm {
     bool lobbed,lofted;          // lofted: the Katyusha's launcher (launcher.cpp draws its point)
     bool aimed;                  // `bore` and the rest below were worked out this frame
     bool hit;                    // `at` is where it meets the map
-    bool ranged,inReach;         // an arc gun's pipper `at` ranged on the target under the view, `lead` where that target
-                                 // is when the round passes it (roundaim.h GunSight); inReach: the round gets there
-    float bore[3],at[3],lead[3],range,flight;   // range: to the map hit / the target (0: neither, only the boresight)
+    bool ranged,inReach;         // optional articulated-gun target lead; independent of physical `at`/`hit`
+    float bore[3],at[3],lead[3],range,flight;   // first real barrel path; at/range/flight never replaced by target selection
+    bool physicalOnly=true,coFired=false; // fixed/partial/unknown mount; this weapon shares the active trigger
+    float targetRange=0;         // optional articulated-gun lead cue, never replaces physical path data above
+    int paths=0;
+    roundaim::Impact path[roundaim::kSightPaths]{};
     int lock;                    // homing: 2 locked / 1 locking (lockProgress) on `at`, 0 none (LockonRange `range`)
     float lockProgress;
     gunsight::Ladder ladder;     // a direct-fire arc gun's range ladder (gunsight.h; no ticks: none), hud.cpp GunReticle

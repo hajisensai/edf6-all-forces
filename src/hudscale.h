@@ -32,6 +32,13 @@ inline float ClampUser(float user) noexcept {
 inline float Of(int uiW,int uiH,int viewW,int viewH,float user) noexcept {
     return BasisHeight(uiW,uiH,viewW,viewH)/kDesignH*ClampUser(user);
 }
+// Interactive map panels must fit inside their own viewport, including split-screen.
+// This only caps the common requested scale; text and geometry use the same result.
+inline float FitMap(float requested,float width,float height) noexcept {
+    const float horizontal=width/960.0f,vertical=height/kDesignH;
+    const float limit=horizontal<vertical ? horizontal : vertical;
+    return requested<limit ? requested : limit;
+}
 // A font scale for a design font scale (the game's glyphs are rasterized at a fixed size, docs/hud-re.md §2.1:
 // the font is scaled as everything else is).
 inline float Font(float design,float s) noexcept { return design*s; }

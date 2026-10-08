@@ -1031,16 +1031,34 @@ void Flares(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
 // A missile's lock point this close to the jet is a missile coming for it (missile.cpp MissileHoming).
 constexpr float kThreatRadius=20.0f;
 
+bool AircraftSwitchHeld(unsigned char* v,bool sampled) noexcept {
+    if(!MapHoldsKeys())return sampled;
+    const auto seat=SeatAt(v,0);
+    if(At<unsigned char>(seat,kSeatPad)!=0)return (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
+    const int key=Cfg().playerJetSwitchKey;
+    return key>0 && (GetAsyncKeyState(key)&0x8000)!=0; // drain physical edge while the map owns input
+}
+
+int ApplyAircraftPayloadChoice(PJet& j,unsigned char* v,const Store* st,int n) noexcept {
+    const int selected=AircraftPayloadChoice(v,st,n,j.store);
+    if(selected>=0 && selected!=j.store) {
+        if(j.store>=0 && j.store<n)ClearWeaponLock(st[j.store].weapon);
+        ClearWeaponLock(st[selected].weapon);j.store=selected;
+    }
+    return selected;
+}
+
 void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Store st[kMostStores];
     const int real=ReadStores(v,st,j.board ? kMostStores-SpecialRoom(j) : kMostStores);
     const int n=real+SpecialStore(j,v,st+real);   // the aircraft's own weapons as more stores (playerjet_board.inc)
     j.stores=n;j.bomb=j.hasImpact=false;j.lock=0;
     j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,real);
-    if(n==0)return;   // none known: the 506's own fire bytes stand
+    if(n==0){ForgetAircraftPayload(v);return;}   // no clickable aircraft stores
     if(j.store>=n || j.store<0)j.store=0;
-    const bool press=s.switchStore && !j.switchHeld;
-    j.switchHeld=s.switchStore;
+    const bool held=AircraftSwitchHeld(v,s.switchStore);
+    const bool press=!MapHoldsKeys() && held && !j.switchHeld;
+    j.switchHeld=held;
     if(press || st[j.store].ammo<=0) {
         const int was=j.store;
         for(int k=1;k<=n;++k) {
@@ -1050,6 +1068,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
         if(j.store!=was){ClearWeaponLock(st[was].weapon);ClearWeaponLock(st[j.store].weapon);}   // no lock left on the store put away
         if(press)Log("PJET v=%p store: %s (%d left)",v,st[j.store].spec->name,st[j.store].ammo);
     }
+    const int uiStore=ApplyAircraftPayloadChoice(j,v,st,n);
     const bool next=s.nextTarget && !j.targetHeld;
     j.targetHeld=s.nextTarget;
     if(next && st[j.store].spec->role!=StoreRole::bomb){NextLockTarget(st[j.store].weapon);Log("PJET v=%p target: the next one",v);}
@@ -1071,7 +1090,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
         if(ReadRound(weapon,&model) && edf::MeanMuzzle(weapon,kMostBombMuzzles,from,dir) && Normalize(dir))
             j.hasImpact=RoundLands(weapon,model,from,dir,3000.0f,j.impact,&seconds);
     }
-    const bool fire=v[kFireStore]!=0;
+    const bool fire=!MapHoldsKeys() && uiStore<0 && v[kFireStore]!=0;
     v[kFireStore]=0;
     if(fire && st[j.store].weapon)TriggerStore(st[j.store]);
     else if(fire)FireSpecial(j,v,st[j.store],pos);
@@ -1794,6 +1813,25 @@ void GunRounds(const unsigned char* v,PlayerJetReadout& r) noexcept {
 }
 }  // namespace
 
+void PumpAircraftPayloadUi(unsigned char* v) noexcept {
+    __try {
+        PJet* const j=Find(v);
+        if(!flyOk || !Cfg().enabled || !Cfg().playerJet || !j || !j->driven || !j->kind || !j->ref.Is(v) || v[kDead] ||
+           SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::player || At<const void*>(SeatAt(v,0),kSeatRider)!=PlayerHuman()) {
+            ForgetAircraftPayload(v);return;
+        }
+        if(MapHoldsKeys()){j->switchHeld=AircraftSwitchHeld(v,false);v[kFireStore]=0;}
+        Store st[kMostStores]{};
+        const int real=ReadStores(v,st,j->board ? kMostStores-SpecialRoom(*j) : kMostStores);
+        const int n=real+SpecialStore(*j,v,st+real);
+        if(!n){ForgetAircraftPayload(v);return;}
+        if(j->store<0 || j->store>=n)j->store=0;
+        ApplyAircraftPayloadChoice(*j,v,st,n);
+        j->stores=n;
+        for(int i=0;i<n;++i){j->storeName[i]=st[i].spec->name;j->storeRounds[i]=st[i].ammo;j->storeRole[i]=static_cast<int>(st[i].spec->role);}
+    } __except(EXCEPTION_EXECUTE_HANDLER) { ForgetAircraftPayload(v); }
+}
+
 bool PlayerJetHud(PlayerJetReadout* out) noexcept {
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet)return false;
     for(const auto& j:jets) {
@@ -1937,6 +1975,8 @@ void CatchWhy(const unsigned char* v,int why) noexcept {
 }
 
 void PlayerJetFrame(unsigned char* v) noexcept {
+    if(!flyOk || !Cfg().playerJet || v[kDead] || SeatCount(v)==0 || SeatRider(SeatAt(v,0))!=Rider::player ||
+       At<const void*>(SeatAt(v,0),kSeatRider)!=PlayerHuman())ForgetAircraftPayload(v);
     if(!flyOk || !Cfg().playerJet)return;
     GunnerFrame(v);   // the gunship's gunner seat (playerjet_crew.inc): before Held, which taking the gun may end
     // An NPC aircraft is the player's only while they fly it, it comes down for them, catches them or waits for them
@@ -1976,6 +2016,7 @@ bool InstallPlayerJets() noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's jets are gone with it.
 void ResetPlayerJets() noexcept {
+    ForgetAircraftPayload();
     for(auto& j:jets)j=PJet{};
     ChuteForget();
 }

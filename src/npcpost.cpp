@@ -135,7 +135,7 @@ bool BargaWalkOk() noexcept {
 
 bool Available(const Post& p,ULONGLONG ms) noexcept {
     const auto v=static_cast<const unsigned char*>(p.ref.obj);
-    return Cfg().enabled && Cfg().customNpcAi && Cfg().tankReturnToPost && !InSession() &&
+    return Cfg().enabled && Cfg().customNpcAi && Cfg().tankReturnToPost && IsOnlineAuthority(v) &&
         p.seen && ms-p.seen<=500 && Readable(v,kMatrix+64) && p.ref.Is(v) && !v[kDead] && FamilyOf(v)!=Family::none &&
         !At<const void*>(v,kRoute) && NpcDriver(v);
 }

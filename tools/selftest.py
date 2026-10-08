@@ -2182,6 +2182,7 @@ def hud_scale_one_source() -> None:
     draw = hud.split('void HudDraw(', 1)[1].split('\n}', 1)[0]
     assert 's=HudScaleOf(w,h)' in draw and 'text.s=s' in draw
     assert 'hudscale::Of(uiW,uiH,w,h,Cfg().hudScale)' in hud
+    assert 's=hudscale::FitMap(s,width,height);' in hud and 'if(text)text->s=s;' in hud, 'map panel fitting must share geometry and font scale'
     for fn in ('void Measure(Text& t,Line& l)', 'void Draw(Text& t,const Line& l)'):
         assert 'Font(t,hudscale::Font(l.scale,t.s))' in hud.split(fn, 1)[1].split('\n}', 1)[0], fn
     assert 'for(const auto& u:kUiSigs)' in hud and '0x94E24F' in hud
@@ -2619,7 +2620,9 @@ def stock_vehicle_hud_wired() -> None:
     assert 'PlayerStockOwnSight(vehicle)' in aim, 'src/crew.cpp AimLines: the stock HUD hides the player\'s line'
     hud = src('src/hud.cpp')
     assert 'PlayerStockHud(&s.stockHud)' in hud.split('void HudPublish(', 1)[1].split('\n}\n', 1)[0]
-    assert 'StockVehicleHud(drawer' in hud.split('void HudDraw(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StockDockHud(drawer' in hud.split('void HudDraw(', 1)[1].split('\n}\n', 1)[0]
+    dock = hud.split('void StockDockHud(', 1)[1].split('\n}\n', 1)[0]
+    assert 'StockVehicleHud(drawer' in dock and 'LoadoutDockOf(' in dock and 'LoadoutStrip(' in dock
     sight = src('src/helisight.cpp').split('bool SolveArm(', 1)[1].split('\n}\n', 1)[0]
     assert 'RoundLands(' in sight and 'kRocketStep' not in sight, 'src/helisight.cpp: the rockets flown as the game flies them'
     rounds, doc = src('src/rounds.cpp'), src('docs/hud-re.md')
@@ -2641,11 +2644,8 @@ def stock_vehicle_hud_wired() -> None:
 
 @test
 def stock_gun_sight_ranged() -> None:
-    """The stock vehicles' gun sight in the sky (the user 2026-10-06, an E551's cannon at a flying saucer, "CANNON 3132 m":
-    "这个好像一直不动也对不上"): an arc gun's marks come from roundaim.h GunSight (ranged on the enemy under the view:
-    pipper and lead mark; the map hit; else none), not from the point its round crosses the 3000 m reach; hud.cpp draws
-    the ranged pipper with the lead mark and, with nothing to range on, the boresight alone; tools/rounds_check.cpp
-    flies the E551 gun Root.cpk has (re-read when the game is there) and lays both sights on a saucer."""
+    """Articulated guns retain target lead guides, independently of actual muzzle/terrain prediction.
+    Fixed/partial mounts use physical paths only. Runtime fixtures cover this contract; this guard checks wiring."""
     import rootcpk
     vhud, hud, check = src('src/vhud.cpp'), src('src/hud.cpp'), src('tools/rounds_check.cpp')
     arm = vhud.split('void Arm(', 1)[1].split('\n}\n', 1)[0]
@@ -2654,10 +2654,10 @@ def stock_gun_sight_ranged() -> None:
     assert 'roundaim::GunSight(' in mark and 'target.ok ? target.at : nullptr' in mark
     assert 'RangeTarget(v,r,eye,ms);' in vhud.split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
     stock = hud.split('void StockMark(', 1)[1].split('\n}\n', 1)[0]
-    ranged = stock.split('if(a.ranged) {', 1)[1].split('return;', 1)[0]
-    assert 'LeadMark(' in ranged and 'Pipper(' in ranged, 'src/hud.cpp StockMark: the ranged pipper with its lead mark'
-    tail = stock.split('Boresight(drawer,ctx,vp,width,height,s,a.bore);\n    if(a.hit)', 1)
-    assert len(tail) == 2 and 'kHudDim' not in tail[1].split('} else', 1)[0], 'StockMark: no dim pipper at the reach any more'
+    assert 'a.ranged && !a.physicalOnly' in stock and 'LeadMark(' in stock
+    assert 'PhysicalPaths(' in stock and 'Pipper(' not in stock, 'physical endpoint is distinct from target lead cue'
+    assert 'a.physicalOnly ||' in mark and 'a.targetRange=' in mark
+    assert 'memcpy(a.at' not in mark and 'a.hit=' not in mark, 'lead selection cannot overwrite physical terrain result'
     assert 'SkySight();' in check.split('int main()', 1)[1]
     row = re.search(r'kE551Gun=\{"(V_\w+) \([^)]*\)",([\d.]+)f,([\d.]+)f,([\d.]+)f,(\d+)\}', check)
     assert row, 'tools/rounds_check.cpp: kE551Gun'
@@ -4147,10 +4147,12 @@ def map_commands_wired() -> None:
     frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
     assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
     # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").
-    assert 'if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing()){mapcam::Drag(v,dx,dy);' in mapc
+    assert 'if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured()){mapcam::Drag(v,dx,dy);' in mapc
+    assert frame.index('MapCommandEats(front)') < frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture and mark edges precede camera drag; map requests pump while native inputs are held'
+    assert 'Down(VK_RBUTTON) && !MapCommandPointerCaptured()' in mapc
     assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
     assert 'ResetMapCommands();' in mapc.split('void ResetMap()', 1)[1].split('\n}', 1)[0]
-    assert 'const bool allowed=!InSession();' in code
+    assert 'const bool allowed=Cfg().enabled;' in code, 'online requests must reach per-unit authority checks, not a global offline veto'
     assert 'src/mapcmd.cpp' in cmake and 'EXCLUDE_FROM_ALL tools/map_cmd_check.cpp' in cmake
     assert re.search(r'EDF6_OFFLINE_CHECKS[^)]*\bmap_cmd_check\b', cmake), 'map_cmd_check is not run by CTest'
     jet, heli, ground = src('src/jet.cpp'), src('src/heli.cpp'), src('src/ground.cpp')
@@ -4158,7 +4160,7 @@ def map_commands_wired() -> None:
     assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
     cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c)', 1)[1].split('\n}\n', 1)[0]
     assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
-    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', 'OFFLINE ONLY', '框选'):
+    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', '联机指令', '框选'):
         assert key in readme, key
     assert '指挥 NPC' in readme
 
@@ -4469,7 +4471,9 @@ def npc_pickup_wired() -> None:
     assert 'healthPick<0 ? Cfg().npcPickupHealth' in code, 'the ini is the default until the map flips it'
     # The map: every command as a button (map_buttons.h), clicks tested against the rectangles drawn; Y and O keys.
     mapcmd, hud = src('src/mapcmd.cpp'), src('src/hud.cpp')
-    assert 'mapbtn::Hit(v->button,v->buttons,g.pointer.x,g.pointer.y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
+    assert 'mapbtn::Hit(v.button,v.buttons,x,y)' in mapcmd and 'MapCommandButtons(rects,ids,placed);' in hud
+    assert 'SameUi(g.uiPress,UiAt(' in mapcmd and 'MapCommandUiPanels(mapUiPanels,mapUiPanelCount);' in hud
+    assert 'PlayerSelectablePayload(&r)' in hud and 'MapCommandPayloadButtons(rects,r.selectionToken,r.seat,entries,hits);' in hud
     assert "k.sweep=Down('Y');k.health=Down('O');" in mapcmd and 'if(sweep)Sweep(g);' in mapcmd and 'if(health)Health(g);' in mapcmd
     assert 'EXCLUDE_FROM_ALL tools/map_buttons_check.cpp' in cmake and 'map_buttons_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
     assert 'kNotifyBoxSig' in code and 'kApplyBoxSig' in code and 'InstallBoxes();' in code
@@ -4578,8 +4582,9 @@ def npc_ai_wired() -> None:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     # The squads on the map (§5.4, §6): a script's squad takes no order; a dismissal clears +0x540 (or the stock takes the
     # squad back at once) and starts the cooldown, whose end puts +0x540 back; vehicles take only their three orders.
-    cmd = code.split('bool SquadCommand(const void* leader,const Command& c) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'npc::Scripted(q->control)' in cmd.split('switch', 1)[0], "a script's squad takes no order"
+    cmd = code.split('NpcCommandResult NpcSquadCommandForRequester(', 1)[1].split('\n}\n', 1)[0]
+    assert '!IsOnlineAuthority(top)' in cmd and 'root!=caller' in cmd and 'CommandActor(requester,true)' in cmd
+    assert 'npc::Scripted(control)' in cmd.split('switch', 1)[0], "a script's squad takes no order"
     dismiss = cmd.split('case Order::dismiss:', 1)[1].split('break;', 1)[0]
     assert dismiss.index('top[kAutoFollow]=0;') < dismiss.index('Follow(top,nullptr);') < dismiss.index('cooldowns.Start(')
     see = code.split('Squad* SeeSquad(', 1)[1].split('\n}\n', 1)[0]
@@ -4587,7 +4592,7 @@ def npc_ai_wired() -> None:
     mapc = src('src/mapcmd.cpp')
     takes = mapc.split('bool Takes(const Entry& e,Order o) noexcept {', 1)[1].split('\n}', 1)[0]
     assert 'if(e.u.locked)return false;' in takes and 'mapcmd::VehicleOrder(o)' in takes
-    assert 'if(!Takes(e,cmd.order)){++*skipped;continue;}' in mapc
+    assert 'if(!Takes(e,cmd.order))' in mapc and 'NpcCommandReason::unsupported' in mapc
     for key, default in (('NpcGuardRadius', '15'), ('NpcFreeRange', '120'), ('NpcRecruitCooldownSec', '60')):
         assert f'L"{key}"' in plugin and f'Fix("{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M), key
         assert key in readme and key in doc, key
@@ -4602,17 +4607,17 @@ def npc_ai_wired() -> None:
         assert f'L"{key}"' in plugin and re.search(rf'^{key}={re.escape(default)}\s*$', ini, re.M) and key in readme and key in doc, key
     # Boarding (§7): real soldiers may drive seat 0 only through the verified native driver path; one strong reference
     # is taken before RideVehicle (callee-consumed). Existing riders/reservations and ownership stay protected.
-    board = code.split('bool BoardSquad(unsigned char* top,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    board = code.split('bool BoardSquad(', 1)[1].split('\n}\n', 1)[0]
     assert 'AssignBoard(v,m[i],ms)' in board, 'squad boarding uses the shared real-seat allocator'
     assign = code.split('bool AssignBoard(', 1)[1].split('\n}\n', 1)[0]
-    assert 'for(unsigned k=0;' in assign and 'Reserved(v,k,ms)' in assign and '!SeatTakes(v,k,h)' in assign
+    assert 'for(unsigned k=0;' in assign and 'Reserved(v,k,ms,h)' in assign and '!SeatTakes(v,k,h)' in assign
     assert '!IsOnlineAuthority(h)' in assign and '!OnlineMaySeatNpc(v)' in assign
     takes_seat = code.split('bool SeatTakes(', 1)[1].split('\n}\n', 1)[0]
     assert 'SeatRider(seat)!=Rider::none' in takes_seat and '(i==0 && !RealDriverNativeReady())' in takes_seat
     ride = code.split('bool Board(Soldier& s,unsigned char* h,const float* pos,ULONGLONG ms) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert ride.index('s.boardSeat==0 && !PrepareNpcVehicle(v,false)') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
     assert ride.index('_InterlockedIncrement(') < ride.index('(image+kRideVehicle)(h,&ref,s.boardSeat)')
-    off = code.split('bool DismountSquad(unsigned char* top) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    off = code.split('bool DismountSquad(', 1)[1].split('\n}\n', 1)[0]
     assert 'At<const void*>(seat,kSeatRider)!=m[i]' in off and 'kSeatKick' in off
     gun = code.split('void NpcGunnersInput(unsigned char* v) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'vt[kSlotSeatFire]!=image+kSeatFire' in gun and 'for(unsigned i=1;' in gun and 'if(!AiGunner(v,seat))continue;' in gun

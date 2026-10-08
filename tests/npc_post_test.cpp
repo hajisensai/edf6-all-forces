@@ -66,7 +66,7 @@ int main() {
     neutral();NpcPostInput(v);sessionOn=true;host=false;neutral();NpcPostInput(v);
     Check(At<float>(seat,0x2C4)==0 && !TankCommand(v,guard),"client cannot drive or command");
     host=true;Put<float>(v,kPosition+8,45);neutral();NpcPostInput(v);
-    Check(At<float>(seat,0x2C4)>0 && listed()==0,"host returns tank but cannot use offline map commands");
+    Check(At<float>(seat,0x2C4)>0 && listed()==1,"AI authority can return and command its tank online");
     sessionOn=false;config.customNpcAi=false;Check(listed()==0 && !TankCommand(v,guard),"disabled AI cannot be commanded");
     ResetNpcPosts();Check(!posts[0].ref,"mission reset drops identity and orders");
     // A mech of the Begaruta family (slot 4 0x644350, no slot 72): no CarBase drive bit, and frames with no AI pass

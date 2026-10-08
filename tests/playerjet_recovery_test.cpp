@@ -4,6 +4,11 @@
 #include <cstdlib>
 
 namespace crew {
+bool payloadScenario=false,payloadMap=false;
+Store payloadStores[kMostStores]{};int payloadCount=0,payloadChoice=-1,payloadTriggers=0,payloadForgets=0;
+unsigned char* payloadHuman=nullptr;
+int AircraftPayloadChoice(unsigned char*,const Store*,int,int) noexcept { return payloadScenario ? payloadChoice : -1; }
+void ForgetAircraftPayload(const void*) noexcept { if(payloadScenario)++payloadForgets; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
 bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::other; }
 
@@ -33,7 +38,7 @@ ULONGLONG GameMs() noexcept { return recoveryTime; }
 ULONGLONG GameFrame() noexcept { return recoveryTime/16; }
 float GameStep(ULONGLONG) noexcept { return 1.0f/60.0f; }
 void Log(const char*,...) noexcept {}
-bool MapHoldsKeys() noexcept { return false; }
+bool MapHoldsKeys() noexcept { return payloadScenario && payloadMap; }
 const void* BoardingOnly() noexcept {return nullptr;}
 bool GearDown(const void*) noexcept { return testGearDown; }
 float GearDragShare(const void*) noexcept { return 0.0f; }
@@ -55,9 +60,12 @@ bool SeatPoint(const unsigned char* v,unsigned,float* at,float* reach) noexcept 
 void PressBoardButton(unsigned char*) noexcept { ++boardPresses; }
 // Unrelated stores, weapons, spawning and NPC paths must not be reached by these recovery scenarios.
 void MissingRecoveryDependency() noexcept { void(*volatile stop)()=std::abort;stop(); }
-int ReadStores(unsigned char*,Store*,int) noexcept { MissingRecoveryDependency();return 0; }
-void TriggerStore(const Store&) noexcept { MissingRecoveryDependency(); }
-Burden BurdenOf(float,const Store*,int) noexcept { MissingRecoveryDependency();return Burden{1.0f,0.0f}; }
+int ReadStores(unsigned char*,Store* out,int most) noexcept {
+    if(!payloadScenario){MissingRecoveryDependency();return 0;}
+    const int n=payloadCount<most ? payloadCount : most;for(int i=0;i<n;++i)out[i]=payloadStores[i];return n;
+}
+void TriggerStore(const Store&) noexcept { if(payloadScenario){++payloadTriggers;return;}MissingRecoveryDependency(); }
+Burden BurdenOf(float,const Store*,int) noexcept { if(!payloadScenario)MissingRecoveryDependency();return Burden{1.0f,0.0f}; }
 const JetMass* JetMassOf(float) noexcept { if(!ramScenario)MissingRecoveryDependency();return &ramMass; }
 bool IsStoreWeapon(const unsigned char*) noexcept { MissingRecoveryDependency();return false; }
 void LevelVehicle(unsigned char*) noexcept { MissingRecoveryDependency(); }
@@ -82,13 +90,13 @@ bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
     return true;
 }
 bool RoundImpact(const float*,const float*,const float*,int,float*,float*) noexcept { MissingRecoveryDependency();return false; }
-bool MissileHoming(const float*,float) noexcept { MissingRecoveryDependency();return false; }
+bool MissileHoming(const float*,float) noexcept { if(!payloadScenario)MissingRecoveryDependency();return false; }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
 void FlareDrop(const void*,const float*,const float*,const float*,bool) noexcept { MissingRecoveryDependency(); }
 void FlaresStep() noexcept { MissingRecoveryDependency(); }
-int FlaresOf(const void*,float (*)[3],float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
-void FlareFlames(const unsigned char*,const float (*)[3],const float (*)[3],int,ULONGLONG) noexcept { MissingRecoveryDependency(); }
-unsigned char* PlayerHuman() noexcept { MissingRecoveryDependency();return nullptr; }
+int FlaresOf(const void*,float (*)[3],float (*)[3],int) noexcept { if(!payloadScenario)MissingRecoveryDependency();return 0; }
+void FlareFlames(const unsigned char*,const float (*)[3],const float (*)[3],int,ULONGLONG) noexcept { if(!payloadScenario)MissingRecoveryDependency(); }
+unsigned char* PlayerHuman() noexcept { if(payloadScenario)return payloadHuman;MissingRecoveryDependency();return nullptr; }
 bool FuelGauge(const void*,FuelReading*) noexcept { MissingRecoveryDependency();return false; }
 bool IsFuelTank(const unsigned char*) noexcept { MissingRecoveryDependency();return false; }
 bool FixBodyPart506(unsigned char*,const char*) noexcept { MissingRecoveryDependency();return false; }
@@ -100,18 +108,18 @@ bool Die506(unsigned char* v) noexcept {
     ++ramDeaths;if(ramDeathWorks){v[kDead]=1;Put<float>(v,kHp,0.0f);}return ramDeathWorks;
 }
 bool Die506Ok() noexcept { MissingRecoveryDependency();return false; }
-int WeaponLock(const unsigned char*,float*,float*) noexcept { MissingRecoveryDependency();return 0; }
-void ClearWeaponLock(unsigned char*) noexcept { MissingRecoveryDependency(); }
+int WeaponLock(const unsigned char*,float*,float*) noexcept { if(!payloadScenario)MissingRecoveryDependency();return 0; }
+void ClearWeaponLock(unsigned char*) noexcept { if(!payloadScenario)MissingRecoveryDependency(); }
 void NextLockTarget(unsigned char*) noexcept { MissingRecoveryDependency(); }
 GearState PlayerGear(unsigned char*,bool,bool,bool,float,float,float,float) noexcept { MissingRecoveryDependency();return GearState{}; }
 float ClosureIn(const float*,const float*,float,float,float,float,bool*) noexcept { MissingRecoveryDependency();return -1.0f; }
 Gpws GpwsOf(float,bool) noexcept { MissingRecoveryDependency();return Gpws::none; }
-namespace audio { void LockTone(int,float) noexcept { MissingRecoveryDependency(); } }
+namespace audio { void LockTone(int,float) noexcept { if(!payloadScenario)MissingRecoveryDependency(); } }
 namespace jet {
 Jet jets[kMaxJets]{};
 bool SpawnReady() noexcept { MissingRecoveryDependency();return false; }
 bool ModFileThere(const wchar_t*) noexcept { MissingRecoveryDependency();return false; }
-bool LockingOn(const void*) noexcept { MissingRecoveryDependency();return false; }
+bool LockingOn(const void*) noexcept { if(!payloadScenario)MissingRecoveryDependency();return false; }
 int BreakLocks(const void*,float) noexcept { MissingRecoveryDependency();return 0; }
 int LockersOf(const void*,float (*)[3],int) noexcept { MissingRecoveryDependency();return 0; }
 bool Alive(const ObjRef& r) noexcept {return r && r.Is(r.obj) && !At<unsigned char>(r.obj,kDead);}

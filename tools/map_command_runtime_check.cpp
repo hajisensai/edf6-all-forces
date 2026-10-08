@@ -20,12 +20,44 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);
     _snwprintf_s(note,capacity,_TRUNCATE,L"support received");return true;
 }
+int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=0;
+bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
+    ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
+}
+unsigned char* PlayerHuman() noexcept {return nullptr;}
+const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
+bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}
+CommandNetworkResult networkReply{};unsigned networkSubmits=0,networkUnits=0,networkTotal=0;
+std::uint32_t networkSlots[kCommandNetUnits]{};ObjRef networkIdentities[kCommandNetUnits]{};Command networkCommand{};
+std::uint32_t SubmitMapCommand(const ObjRef&,const ObjRef* ids,unsigned count,const mapcmd::Command& command,const ObjRef&,
+    wchar_t* note,std::size_t size,const std::uint32_t* slots,std::uint32_t total) noexcept {
+    ++networkSubmits;networkUnits=count;networkTotal=total;networkCommand=command;
+    for(unsigned i=0;i<count && i<kCommandNetUnits;++i){networkIdentities[i]=ids[i];networkSlots[i]=slots ? slots[i] : 0;}
+    networkReply={};networkReply.request=91;networkReply.state=CommandNetworkState::pending;networkReply.count=count;
+    _snwprintf_s(note,size,_TRUNCATE,L"queued");return 91;
+}
+bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=networkReply;return out->request!=0;}
+bool MapCommandNetworkReady() noexcept {return true;}
+
+ObjRef NpcMarkedIdentity() noexcept {return {};}
+NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {
+    return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
+}
 unsigned char* image=nullptr;
+bool NpcDriver(const unsigned char* v) noexcept {
+    if(!v || !SeatCount(v))return false;
+    auto* seat=SeatAt(const_cast<unsigned char*>(v),0);const auto who=SeatRider(seat);
+    if(who==Rider::dummy)return true;
+    const auto* human=At<const unsigned char*>(seat,kSeatRider);
+    return who==Rider::other && !AnyPlayerIn(seat) && human && At<const void*>(human,0)==image+0x17CDF28;
+}
+
 void Log(const char*,...) noexcept {}
-bool InSession() noexcept { return false; }
+bool InSession() noexcept { return mapOnline; }
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1.0f; }
-bool MapGroundNear(float,float,float,float*,bool) noexcept { return false; }
+bool groundReady=false;
+bool MapGroundNear(float,float,float level,float* out,bool) noexcept {*out=level;return groundReady;}
 int HeliCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int JetCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
@@ -114,6 +146,8 @@ void UnitLifetime() noexcept {
     Check(!ReadCommandUnit(ref,"test",Command{},false,&unit),"player takeover rejected before next NPC input");
     Put<const void*>(rider,0,image+edf::kDummyRiderVtable);
     Check(ReadCommandUnit(ref,"test",Command{},false,&unit),"NPC unit sampled again");
+    Put<const void*>(rider,0,image+0x17CDF28);Put<unsigned char>(rider,edf::kHumanPlayer,0);Put<void*>(rider,edf::kHumanPad,nullptr);
+    Check(ReadCommandUnit(ref,"real NPC",Command{},false,&unit),"vehicle with a real soldier driver stays visible and commandable after dummy removal");
     DWORD old=0;
     const bool protectedPage=VirtualProtect(vehicle,4096,PAGE_NOACCESS,&old)!=FALSE;
     Check(protectedPage,"make formerly live unit inaccessible");
@@ -287,12 +321,12 @@ void MarkFromMap() noexcept {
     inputstub::keys['H']=true;MapCommandFrame(in,centre);inputstub::keys['H']=false;MapCommandFrame(in,centre);
     Check(marked==foe && squadOrders==1 && squadGot.order==Order::focus,"H on an enemy marks it and the squad focuses on it");
     // On foot: the point goes to the selection kept from the map.
-    const float at[3]={50.0f,2.0f,-80.0f};
+    const float at[3]={50.0f,2.0f,-80.0f};groundReady=true;
     Check(MapCommandGuardAt(at)==1 && squadOrders==2 && squadGot.order==Order::guard && squadGot.at[0]==50.0f &&
           squadGot.at[2]==-80.0f,"the mark key's point: the selected squad guards it");
     game.sel.Clear();
     Check(MapCommandGuardAt(at)==-1 && squadOrders==2,"the mark key's point with nothing selected: no order");
-    squadOn=false;stubEnemyCount=0;ResetMapCommands();
+    squadOn=false;stubEnemyCount=0;groundReady=false;ResetMapCommands();
     Check(At<long>(foeCtrl,0xC)==1,"map reset balances both hover and press weak references");
 }
 
@@ -387,12 +421,106 @@ void SupportInput() noexcept {
     game.supportArmed=true;SuspendMapCommands();Check(!game.supportArmed,"closing map cancels pending support placement");
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));ResetMapCommands();
 }
+void UiCaptureAndSnapshots() noexcept {
+    ResetMapCommands();view=View{};config=Config{};
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=true;payloadRequests=0;
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100;float centre[3]{};
+    const float vp[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    const float panel[4]={500,300,900,500},row[4]={600,340,680,380};
+    MapCommandUiPanels(panel,1);ObjRef identity=ObjRef::Of(squadObj);MapCommandSquadButtons(row,&identity,1);
+    inputstub::keys[VK_CONTROL]=true;inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    Check(MapCommandPointerCaptured() && !MapCommandBoxing(),"Ctrl-left begun on a squad row captures UI instead of drawing a map box");
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.sel.Has(squadObj) && !MapCommandPointerCaptured(),"click selects the published squad identity and releases capture");
+    inputstub::keys[VK_CONTROL]=false;game.sel.Clear();RememberSelection(game);
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    unsigned char replacement[0x10]{};Put<void*>(squadObj,kSelfCtrl,replacement);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!game.sel.n,"a rendered row cannot select a replacement at a recycled address");
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);MapCommandSquadButtons(nullptr,nullptr,0);
+    const int entry=3;MapCommandPayloadButtons(row,77,2,&entry,1);
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1 && payloadToken==77 && payloadSeat==2 && payloadEntry==3 && !game.sel.n,
+        "payload click submits the exact rendered token/seat/entry and never selects a world object");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    MapCommandPayloadButtons(row,78,2,&entry,1);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1,"payload topology changing during a click cancels the old hitbox action");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);in.front=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1 && !game.uiLeft,"losing foreground cancels UI press instead of treating it as a click release");
+    in.front=true;MapCommandFrame(in,centre);
+    Check(MapCommandPointerCaptured(),"restored foreground suppresses the old held gesture until release");
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1,"foreground restoration cannot replay a cancelled press");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);view.at=0;MapCommandFrame(in,centre);
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(payloadRequests==1,"stale rendered view cancels an in-progress click even when the same token returns");
+    MapCommandView(vp,1920,1080);
+    Check(!view.buttons && !view.squads && !view.payloads && !view.panels,"viewport resize invalidates every old-layout hitbox before new panels are published");
+    MapCommandView(vp,1280,720);MapCommandUiPanels(panel,1);MapCommandPayloadButtons(row,78,2,&entry,1);
+    inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);
+    Check(MapCommandPointerCaptured(),"right press on panel captures camera turning");
+    in.dx=700;MapCommandFrame(in,centre);in.dx=0;
+    Check(MapCommandPointerCaptured() && game.pointer.x>900,"UI capture keeps a free pointer and stays captured outside the panel");
+    inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
+    Check(!MapCommandPointerCaptured(),"right release ends its capture");
+    in.dx=(550-game.pointer.x)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0;
+    game.guardArmed=true;inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.guardArmed && !game.guardClick,"inert panel background does not consume the armed world's guard destination");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);SuspendMapCommands();
+    Check(!MapCommandPointerCaptured() && !view.squads && !view.payloads && !view.panels,"closing map drops captures and all stale UI snapshots");
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;ResetMapCommands();
+}
+void RemoteCommandResults() noexcept {
+    ResetMapCommands();mapOnline=true;groundReady=true;networkSubmits=0;squadOrders=0;squadOn=true;
+    unsigned char remote[0x100]{},remoteCtrl[0x10]{};Put<void*>(squadObj,kSelfCtrl,squadCtrl);Put<void*>(remote,kSelfCtrl,remoteCtrl);
+    remoteAuthority=remote;
+    Game mixed{};mixed.count=2;
+    mixed.list[0]={CommandUnit{squadObj,"local",{},false,{}},Owner::squad};
+    mixed.list[1]={CommandUnit{remote,"remote",{},false,{}},Owner::squad};
+    mixed.sel.Add(squadObj);mixed.sel.Add(remote);int skipped=0;
+    Check(Issue(mixed,Command{Order::guard,{10,2,20}},&skipped)==1 && !skipped && mixed.networkQueued==1,
+        "mixed selection executes only local authority immediately and queues its remote squad");
+    Check(networkSubmits==1 && networkUnits==1 && networkSlots[0]==1 && networkTotal==2 &&
+          networkCommand.at[0]==10 && networkCommand.at[2]==20 && networkIdentities[0].ctrl==remoteCtrl,
+        "remote guard carries original global formation slot/total and unshifted target identity");
+    float expected[3];mapcmd::Formation(0,2,networkCommand.at,mapcmd::kFormationSpacing,expected);
+    Check(squadOrders==1 && squadGot.at[0]==expected[0] && squadGot.at[2]==expected[2] && mixed.list[1].u.now.order==Order::none,
+        "local guard uses matching global slot while remote snapshot is not fabricated as executed");
+    networkReply.state=CommandNetworkState::completed;networkReply.units[0]={NpcCommandReason::none,3};
+    CommandNetworkReply(mixed);
+    Check(!mixed.networkRequest && mixed.noteAt && squadOrders==1,"authority result updates feedback without executing another local command");
+    mixed.networkRequest=92;networkReply.request=92;networkReply.units[0]={NpcCommandReason::notOwner,0};CommandNetworkReply(mixed);
+    Check(std::wcscmp(mixed.note,CommandFailureText(NpcCommandReason::notOwner))==0,"remote ownership refusal displays the actual reason");
+    mixed.networkRequest=94;networkReply.request=93;CommandNetworkReply(mixed);
+    Check(mixed.networkRequest==94,"late result cannot replace another pending request");
+    networkReply.request=94;networkReply.state=CommandNetworkState::timedOut;CommandNetworkReply(mixed);
+    Check(!mixed.networkRequest && std::wcscmp(mixed.note,hudtext::Tr(hudtext::Tx::cmdNpcNetworkTimeout))==0,"timeout ends waiting with a concrete message");
+    unsigned char many[17][0x100]{},controls[17][0x10]{};Game over{};over.count=17;allRemote=true;
+    for(int i=0;i<17;++i){Put<void*>(many[i],kSelfCtrl,controls[i]);over.list[i]={CommandUnit{many[i],"remote",{},false,{}},Owner::squad};over.sel.Add(many[i]);}
+    Check(Issue(over,Command{Order::engage,{}},&skipped)==0 && skipped==17 && networkSubmits==1,
+        "more than sixteen remote squads are rejected before any partial submission");
+    allRemote=false;remoteAuthority=nullptr;mapOnline=false;groundReady=false;squadOn=false;ResetMapCommands();
+}
+void SelectionCapabilityMask() noexcept {
+    Game selection{};selection.count=1;selection.list[0]={CommandUnit{squadObj,"tank",{},false,{}},Owner::tank};selection.sel.Add(squadObj);
+    const float point[3]{};Publish(selection,true,true,point,true);MapCommandReadout r{};PlayerMapCommands(&r);
+    Check(r.allowedOrders==((1u<<static_cast<unsigned>(Order::guard))|1u) && !r.selectedSquads,
+        "tank selection enables only actual guard/release actions");
+    selection.list[0].owner=Owner::squad;selection.list[0].u.locked=true;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
+    Check(!r.allowedOrders && !r.selectedSquads,"script locked squad exposes no executable buttons");
+}
 }  // namespace
 }  // namespace crew
 int main() {
     crew::UnitLifetime();crew::PointerAndInput();crew::CameraIsolation();crew::FormationKey();crew::ButtonClicks();
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
+    crew::UiCaptureAndSnapshots();
+    crew::RemoteCommandResults();crew::SelectionCapabilityMask();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

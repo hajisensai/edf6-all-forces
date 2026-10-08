@@ -542,8 +542,8 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         if(MouseDelta(human,&dx,&dy) && (dx!=0.0f || dy!=0.0f)) {
             if(!game.loggedMouse && Cfg().debug){game.loggedMouse=true;Log("MAP mouse delta (%.1f,%.1f) a frame",dx,dy);}
             // Ctrl + left drag is the NPC commands' selection box (mapcmd.cpp), not a pan.
-            if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing()){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
-            else if(Down(VK_RBUTTON)){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
+            if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured()){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
+            else if(Down(VK_RBUTTON) && !MapCommandPointerCaptured()){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
         }
     }
     const int notches=wheel.exchange(0);
@@ -619,7 +619,6 @@ bool Frame(unsigned char* human) noexcept {
         game.pad=k.padMap && !k.map;
     }
     if(centre)game.follow=true;
-    Steer(human,dt,front,pad ? &padState : nullptr);
     mapcam::View& v=game.view;
     const float* me=PosOf(Body(human));
     LearnMapNormals(me);   // once: which side a map hit's normal faces (map_floor.h), for the cave floors below
@@ -634,10 +633,18 @@ bool Frame(unsigned char* human) noexcept {
     // The NPC commands (mapcmd.cpp): a unit selected by its key centres the map on it.
     float onto[3];
     MapCmdInput in{front,pad,game.pad,false,pad ? padState.Gamepad.wButtons : static_cast<WORD>(0),0.0f,0.0f,{},{}};
+    in.requester=ObjRef::Of(human); // the player owning this map, including a local split-screen viewport
     in.mouse=front && MouseDelta(human,&in.dx,&in.dy);
     std::memcpy(in.eye,eye,12);std::memcpy(in.look,look,12);
+    (void)MapCommandEats(front); // latch the mark-key press before MapCommandFrame consumes its edge
     if(MapCommandFrame(in,onto)){v.focus[0]=onto[0];v.focus[2]=onto[2];game.follow=false;}
     game.pad=in.usingPad;
+    // Pointer capture must be established before this frame's camera drag, including the first press.
+    Steer(human,dt,front,pad ? &padState : nullptr);
+    PumpPayloadUi(human);
+    mapcam::Place(v,eye,look);
+    const float movedUnder=TopAt(eye[0],eye[2],eye[1]-v.height);
+    if(eye[1]<movedUnder+kEyeClear)eye[1]=movedUnder+kEyeClear;
     if(now-game.gatherAt>=kGatherMs){game.gatherAt=now;Gather(game,human);}
     Publish(game,human,eye,look);
     ViewMapClip(true,c.mapViewDistance,vec::Clamp(mapcam::Distance(v)*0.004f,0.5f,5.0f));

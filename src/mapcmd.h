@@ -46,7 +46,9 @@ bool SquadCommand(const void* leader,const Command& c) noexcept;
 int TankCommandUnits(CommandUnit* out,int most) noexcept;
 bool TankCommand(const void* v,const Command& c) noexcept;
 // The panel's row of a squad (hud.cpp MapCommands): its members alive, the seconds left of its dismissal's cooldown.
-struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked; };
+struct SquadRow { const void* leader; char name[24]; char status[16]; int alive; int cooldown; Command now; bool locked;
+    ObjRef identity{}; // game-thread snapshot; the draw passes this unchanged, never recaptures from leader
+};
 int SquadRows(SquadRow* out,int most) noexcept;
 bool HeliSharesPost() noexcept;   // heli.cpp: guard helis on one post share its orbit (HeliGuardRadius > 0)
 
@@ -58,6 +60,7 @@ struct MapCmdInput {
     WORD buttons;
     float dx,dy;
     float eye[3],look[3];
+    ObjRef requester{}; // the player owning this map viewport, supplied by map.cpp
 };
 // True when the map should centre on `centre` (a unit just selected by Tab / pad X). Updates in.usingPad to the
 // source of this frame's command or pointer input so the map keeps the same mode next frame. Game thread.
@@ -68,6 +71,14 @@ void ResetMapCommands() noexcept;   // map.cpp ResetMap: a new mission (the sele
 void MapCommandView(const float* viewProj,float width,float height) noexcept;
 // hud.cpp: the command buttons as drawn this frame (map_buttons.h; `id` each one's mapbtn::Id), for the clicks.
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
+// Draw-thread hitboxes: four floats per rectangle (x0,y0,x1,y1), published every draw.
+// Pass n=0 when a panel is absent. These calls copy snapshots and never read game objects.
+void MapCommandSquadButtons(const float* rects,const ObjRef* identities,int n) noexcept; // up to 16 rows
+void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept; // up to 16
+void MapCommandUiPanels(const float* rects,int n) noexcept; // up to 16 complete background rectangles
+// Game thread, after MapCommandFrame and before map camera steering. A press begun on UI stays
+// captured until its own release, even outside that panel (left, Ctrl-left, and right mouse).
+bool MapCommandPointerCaptured() noexcept;
 // The left drag is the box's, not the map's pan (Ctrl held when it began): map.cpp Steer leaves the ground alone.
 bool MapCommandBoxing() noexcept;
 // map.cpp Close: discard hover, pending presses and the rendered view immediately, preserving selected units.
@@ -78,20 +89,23 @@ void SuspendMapCommands() noexcept;
 // thread.
 bool MapCommandEats(bool front) noexcept;
 // npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
-// on the map, in a formation round it). How many took it; -1 none selected, -2 online (InSession). Game thread.
+// on the map, in a formation round it). How many accepted it; -1 none selected. Authority is checked per unit.
 int MapCommandGuardAt(const float* at) noexcept;
 
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.
-constexpr int kCmdUnits=96;
+constexpr int kCmdUnits=static_cast<int>(mapcmd::kMaxFormationUnits);
 // A unit's mark: `name` its kind as the plugin names it (a jet's role, a heli's type, CRAWLER: hud.cpp shows it in the
 // HUD's language, hudtext.h Word), `owner` whose unit it is (the HUD names a heli's and a jet's so).
 constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; };
 struct MapCommandReadout {
-    bool allowed;              // commands work (offline: InSession false)
+    bool allowed;              // command framework enabled; each target still validates authority and execution
     bool all;                  // every unit selected (more than one)
     int selected;              // how many are
+    std::uint32_t allowedOrders=0; // union of this selection's supported Order bits (keyboard still explains refusals)
+    int selectedSquads=0;      // selected, unlocked NPC squads for formation/team controls
+    bool squadToolsAllowed=false; // regroup/formation editors do not have a remote execution protocol
     bool pointOk;
     float point[3];            // where G sends them (the pointer's ground point; the screen centre's with a pad)
     bool pointer;              // the mouse pointer shown at (px, py)

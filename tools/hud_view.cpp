@@ -54,6 +54,7 @@ bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
 ULONGLONG sceneTick=0;
 bool mapEasing=false;   // the map's camera easing back to the player: its view, no readout (map.cpp Camera)
 MapReadout sceneMap{};
+bool hasMapPayload=false;PayloadReadout sceneMapPayload{};
 ProteusReadout sceneProteus{};
 PlayerJetReadout sceneJet{};
 PlayerHeliReadout sceneHeli{};
@@ -122,7 +123,8 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
         std::fprintf(out,"T %.1f %.1f %.1f %.1f %.1f %.1f %.3f %.3f %.3f %.3f\n",p[i][0],p[i][1],p[i+1][0],p[i+1][1],p[i+2][0],p[i+2][1],
                      rgba[0],rgba[1],rgba[2],rgba[3]);
 }
-void* __fastcall MakeRec(void*,void* r) { return r; }
+int activeTextRenderers=0;
+void* __fastcall MakeRec(void*,void* r) { ++activeTextRenderers;return r; }
 void __fastcall BeginRec(void*,void*,void* font) { fontScale=*reinterpret_cast<const float*>(static_cast<unsigned char*>(font)+4); }
 void __fastcall MeasureRec(void*,float* size,const wchar_t* text,std::int64_t,bool) {
     size[0]=Width(text);size[1]=kGlyphH*fontScale;
@@ -141,7 +143,7 @@ void __fastcall DrawRec(void*,void*,const float* m,const float* rgba,const wchar
     std::fprintf(out,"S %.1f %.1f %.1f %.3f %.3f %.3f %.3f %s\n",m[12],m[13],kGlyphH*fontScale,rgba[0],rgba[1],rgba[2],rgba[3],narrow);
 }
 void __fastcall EndRec(void*,void*) {}
-void __fastcall FreeRec(void*) {}
+void __fastcall FreeRec(void*) { --activeTextRenderers; }
 void Jump(unsigned rva,const void* to) {   // mov rax, to; jmp rax
     unsigned char* p=image+rva;
     p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0;
@@ -157,7 +159,8 @@ bool WarnLatest(Warnings* o) noexcept { if(hasWarn)*o=sceneWarn;return hasWarn; 
 bool PlayerHeliCue(HeliCue*) noexcept { return false; }
 bool PlayerDrillCue(DrillCue* o) noexcept { if(hasDrill)*o=sceneDrill;return hasDrill; }
 bool PlayerEmcCue(EmcCue* o) noexcept { if(hasEmc)*o=sceneEmc;return hasEmc; }
-bool PlayerPayload(PayloadReadout* o) noexcept { if(hasHeli){*o=PayloadReadout{};o->choices=3;o->switchButton=0x10;o->keys=sceneHeli.f.keys;}return hasHeli; }
+bool PlayerPayload(PayloadReadout* o) noexcept { if(hasMapPayload){*o=sceneMapPayload;return true;}if(hasHeli || hasStock){*o=PayloadReadout{};o->choices=hasStock ? sceneStock.arms : 3;o->switchButton=0x10;o->keys=hasHeli ? sceneHeli.f.keys : true;}return hasHeli || hasStock; }
+bool PlayerSelectablePayload(PayloadReadout* o) noexcept { return PlayerPayload(o); }
 bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;return hasStock; }
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
@@ -201,6 +204,18 @@ void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
     sceneButtons=n;
     for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
 }
+float sceneUiPanels[16][4]{};int sceneUiCount=0;
+float sceneSquadButtons[9][4]{};int sceneSquadButtonCount=0;
+float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
+void MapCommandUiPanels(const float* r,int n) noexcept {
+    sceneUiCount=n;for(int i=0;i<n;++i)std::memcpy(sceneUiPanels[i],r+i*4,16);
+}
+void MapCommandSquadButtons(const float* r,const ObjRef*,int n) noexcept {
+    sceneSquadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(sceneSquadButtons[i],r+i*4,16);
+}
+void MapCommandPayloadButtons(const float* r,std::uint64_t,int,const int*,int n) noexcept {
+    scenePayloadButtonCount=n;for(int i=0;i<n;++i)std::memcpy(scenePayloadButtons[i],r+i*4,16);
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
@@ -213,7 +228,8 @@ bool IsGroundRobo(const void*) noexcept { return false; }
 bool IsDrillTank(const void*) noexcept { return false; }
 bool JetHud(const void*,JetHudInfo*) noexcept { return false; }
 bool HeliFuel(const void*,float*) noexcept { return false; }
-void SetStockGaugeCover(bool) noexcept {}
+bool gaugeCovered=false;
+void SetStockGaugeCover(bool covered) noexcept { gaugeCovered=covered; }
 }  // namespace crew
 
 using namespace crew;
@@ -333,7 +349,12 @@ void Dot(float x,float y,float z,std::uint8_t flags) {
 }
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
-void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920) {
+void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false,bool online=false) {
+    const float previousScale=config.hudScale;config.hudScale=uiScale;
+    hasMapPayload=payload;sceneMapPayload=PayloadReadout{};
+    if(payload){sceneMapPayload.count=kMostPayload;sceneMapPayload.selectionToken=111;sceneMapPayload.seat=1;
+        for(int i=0;i<kMostPayload;++i){auto& e=sceneMapPayload.entry[i];e.selectable=i>0 && i!=5;e.picked=i==2;e.rounds=12-i;e.capacity=12;
+            _snwprintf_s(e.name,_countof(e.name),_TRUNCATE,L"%ls %ls %ls %d",Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),i+1);}}
     sceneMap=MapReadout{};
     sceneMap.pad=pad;sceneMap.follow=true;
     sceneMap.yaw=yawDeg*kDeg;sceneMap.pitch=pitchDeg*kDeg;sceneMap.height=height;
@@ -364,7 +385,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
-    sceneCmd.allowed=true;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
+    sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<9)-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
         CmdMark& c=sceneCmd.unit[sceneCmd.count++];
@@ -401,6 +422,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     row("RANGER",6,"SCRIPT",Order::none,true,false);
     row("AIR RAIDER",3,"WAIT 42s",Order::guard,false,false);
     sceneCmd.squad[sceneCmd.squads-1].cooldown=42;
+    if(payload){wcscpy_s(sceneCmd.supportName,L"SUPPORT AIRCRAFT LONG DISPLAY NAME");
+        wcscpy_s(sceneCmd.supportStatus,L"Support route ready - select a visible entry on the map");}
     if(squadCount==9) {
         row("WING DIVER",12,"RECRUITED",Order::focus,false,false);
         row("AIR RAIDER",8,"ESCORT",Order::board,true,false);
@@ -411,6 +434,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         sceneCmd.selected=1;
     }
     std::swprintf(sceneCmd.note,_countof(sceneCmd.note),Tr(Tx::cmdGuardResult),Tr(Tx::orderGuard),60.0,420.0,2,L"");
+    if(vehicleOnly) {
+        for(int i=0;i<sceneCmd.count;++i)sceneCmd.unit[i].selected=i==2;
+        for(bool& selected:sceneCmd.squadSelected)selected=false;
+        sceneCmd.selected=1;sceneCmd.selectedSquads=0;
+        sceneCmd.allowedOrders=(1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::follow));
+    }
     sceneCmd.noteFresh=true;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
@@ -460,8 +489,34 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
         Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));shown(expected.text);
     }
+    if(online && !pad) {
+        bool board=false;
+        for(int i=0;i<sceneButtons;++i) {
+            board=board || sceneButtonId[i]==static_cast<int>(mapbtn::Id::board);
+            if(sceneButtonId[i]>=static_cast<int>(mapbtn::Id::formation) && sceneButtonId[i]<=static_cast<int>(mapbtn::Id::merge)) {
+                ++textFailed;std::puts("FAIL unsupported online squad editor is clickable");
+            }
+        }
+        if(!board){++textFailed;std::puts("FAIL online basic boarding command was hidden");}
+    }
+    if(vehicleOnly) {
+        for(int i=0;i<sceneButtons;++i)if(sceneButtonId[i]==static_cast<int>(mapbtn::Id::board) || sceneButtonId[i]==static_cast<int>(mapbtn::Id::engage)) {
+            ++textFailed;std::puts("FAIL unsupported vehicle order is clickable");
+        }
+    }
+    if(sceneSquadButtonCount!=(pad ? 0 : (sceneCmd.squads<9 ? sceneCmd.squads : 9))) {++textFailed;std::puts("FAIL map squad clickable rows");}
+    if(scenePayloadButtonCount!=(payload && !pad ? 6 : 0)){++textFailed;std::puts("FAIL map payload clickable rows");}
+    for(std::size_t i=0;i<drew.size();++i) {
+        const auto& a=drew[i];if(a.text.empty())continue;bool panelText=false;
+        for(int q=0;q<sceneUiCount;++q){const auto* r=sceneUiPanels[q];
+            panelText=panelText || (a.x0<r[2] && a.x1>r[0] && a.y0<r[3] && a.y1>r[1]);}
+        if(!panelText)continue;
+        for(std::size_t j=0;j<i;++j){const auto& b=drew[j];if(b.text.empty())continue;
+            if(a.x0<b.x1 && b.x0<a.x1 && a.y0<b.y1 && b.y0<a.y1){++textFailed;
+                std::printf("FAIL map UI overlay: %s / %s\n",Narrow(a.text).c_str(),Narrow(b.text).c_str());}}
+    }
     std::fclose(out);out=nullptr;
-    hasMap=false;
+    hasMap=false;hasMapPayload=false;config.hudScale=previousScale;
     std::printf("%ls\n",path.c_str());
 }
 void Symbols(PlayerJetSymbols& y,const float* pos,float pitchDeg,float pathDeg) {
@@ -673,7 +728,7 @@ void StockTank(const float* pos) {
     static const char* names[]={"CANNON","MG","MISSILE"};
     sceneStock.arms=3;sceneStock.selected=0;sceneStock.sight=0;
     for(int i=0;i<3;++i) {
-        StockArm& a=sceneStock.arm[i];
+        StockArm& a=sceneStock.arm[i];a.physicalOnly=false;
         strcpy_s(a.label,names[i]);a.ammo=10-i;a.ammoMax=10;a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;a.kind=RoundKind::arc;
     }
     sceneStock.threats=2;
@@ -811,7 +866,7 @@ int ZoomScenes(const std::wstring& dir,const float* ground) {
     hasJet=hasHeli=hasStock=false;
     sceneHeli.sym.nose[0]=0.0f;sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
     hasHeliSight=true;sceneHeliSight=HeliSightReadout{};
-    sceneHeliSight.gun=sceneHeliSight.hit=true;
+    sceneHeliSight.gun=sceneHeliSight.hit=true;sceneHeliSight.physicalOnly=false;
     float bore[3]={0.0f,0.006f,1.0f};vec::Normalize(bore);
     std::memcpy(sceneHeliSight.bore,bore,12);
     const float muzzle[3]={ground[0],ground[1]+4.0f,ground[2]-20.0f};   // by the camera (5 m up, 24 m back), as a heli's gun by its view
@@ -833,6 +888,33 @@ int ZoomScenes(const std::wstring& dir,const float* ground) {
 }
 
 // hudscale::Of against what it must give: the game's screen (uiW x uiH), the viewport drawn in, the ini's HudScale.
+// Mock readouts rendered through the production HUD; not game screenshots.
+int FixedFireScenes(const std::wstring& dir,const float* ground) {
+    hasJet=hasHeli=hasWarn=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasGunner=hasHeliSight=hasTurret=false;
+    hasHighView=hasLauncher=false;hasStock=true;sceneSight=sightzoom::Kind::optical;sceneZoom=1;sceneFov=55;
+    StockTank(ground);sceneStock.threats=0;sceneStock.arms=2;
+    for(int i=0;i<2;++i){auto& a=sceneStock.arm[i];a.aimed=a.physicalOnly=a.coFired=true;a.bore[2]=1;a.paths=1;
+        a.path[0]={{ground[0]+(i ? 6.f : -6.f),ground[1],ground[2]+450.f},450,3,true};}
+    strcpy_s(sceneStock.kind,"Twin artillery");Scene(dir,L"fixed_artillery_two_impacts_mock",ground);
+    sceneStock.arm[1].path[0].hit=false;sceneStock.arm[1].path[0].at[1]+=12;
+    Scene(dir,L"fixed_artillery_one_miss_mock",ground);
+    sceneStock.arms=1;strcpy_s(sceneStock.kind,"Fixed gun");strcpy_s(sceneStock.arm[0].label,"MG");
+    Scene(dir,L"fixed_machinegun_ground_mock",ground);
+    sceneStock.arm[0].path[0].hit=false;sceneStock.arm[0].path[0].at[1]+=10;
+    Scene(dir,L"fixed_machinegun_no_ground_mock",ground);
+    hasStock=false;hasHeliSight=true;sceneHeliSight=HeliSightReadout{};sceneHeliSight.gun=true;sceneHeliSight.bore[2]=1;sceneHeli.sym.nose[2]=1;
+    sceneHeliSight.paths=2;sceneHeliSight.path[0]={{ground[0]-5,ground[1],ground[2]+500},500,2,true};
+    sceneHeliSight.path[1]={{ground[0]+5,ground[1]+10,ground[2]+550},550,3,false};
+    Scene(dir,L"fixed_heli_left_hit_right_end_mock",ground);hasHeliSight=false;hasStock=true;
+    // Actual marker primitives: two hits=8 cross arms; hit+no-hit=6, no circular pipper.
+    float vp[16];Camera(ground,sceneStock.hull,1920,1080,vp);Line lines[kMaxLines]{};int at=0;
+    roundaim::Impact paths[2]={{{ground[0]-6,ground[1],ground[2]+450},450,3,true},{{ground[0]+6,ground[1],ground[2]+450},450,3,true}};
+    boxing=true;drawn=0;PhysicalPaths(image,nullptr,nullptr,vp,1920,1080,1,paths,2,false,lines,&at);const int two=drawn;
+    drawn=0;paths[1].hit=false;PhysicalPaths(image,nullptr,nullptr,vp,1920,1080,1,paths,2,false,lines,&at);const int one=drawn;boxing=false;
+    const bool good=two==8 && one==6;std::printf("%s fixed physical markers: two hits=%d, one no-hit=%d, zero pipper circles\n",good ? "ok" : "FAIL",two,one);
+    StockTank(ground);return good ? 0 : 1;
+}
+
 int FireControlScenes(const std::wstring& dir,const float* ground) {
     int failed=0;
     hasJet=hasHeli=hasWarn=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasGunner=hasHeliSight=hasTurret=false;
@@ -898,6 +980,12 @@ int ScaleOfChecks() {
         failed+=!ok;
         std::printf("%s  scale %-46s %.4f (want %.4f)\n",ok ? "ok  " : "FAIL",c.what,got,c.want);
     }
+    const float maps[][4]={{1.5f,1920,1080,1},{2,1920,540,0.5f},{3,640,1080,2.0f/3.0f},{0.5f,1920,1080,0.5f},{3,3840,2160,2}};
+    for(const auto& m:maps) {
+        const float got=hudscale::FitMap(m[0],m[1],m[2]);
+        if(std::fabs(got-m[3])>0.001f){++failed;std::printf("FAIL fitted map scale %.3f expected %.3f\n",got,m[3]);}
+    }
+
     return failed;
 }
 
@@ -1148,9 +1236,71 @@ int SazabiScenes(const std::wstring& dir,const float* pos) {
     hasSazabi=false;
     return failed;
 }
+// The actual complete draw, not isolated panels: long translated stores with
+// all controls and an active switch banner in the same frame.
+int FullLoadoutScenes(const std::wstring& dir) {
+    int failed=0;
+    const float pos[3]={0,120,0};
+    struct Case { int w,h;float scale; };
+    const Case cases[]={{1920,1080,1},{1440,1080,1.5f},{1024,768,1.5f},{960,1080,2.0f},{1920,1080,3.0f}};
+    hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=hasTurret=false;
+    hasLauncher=hasHeliSight=hasHighView=hasGunner=false;
+    sceneFormation=-1;sceneSweepOn=false;sceneMarkOn=false;
+    for(int heli=0;heli<2;++heli)for(const Case& c:cases) {
+        hasStock=true;hasHeli=heli!=0;StockTank(pos);sceneStock.heli=hasHeli;
+        sceneStock.arms=kStockArms;sceneStock.selected=0;sceneStock.sight=-1;
+        sceneStock.aimOk=false;sceneStock.threats=1;sceneStock.threatKind[0]=1;
+        sceneStock.threatAt[0][0]=500;sceneStock.threatAt[0][1]=120;sceneStock.threatAt[0][2]=500;
+        for(int i=0;i<kStockArms;++i) {
+            sceneStock.arm[i]=StockArm{};sceneStock.arm[i].kind=RoundKind::homing;
+            std::swprintf(sceneStock.arm[i].name,_countof(sceneStock.arm[i].name),L"反装甲多目标制导导弹超长挂载名称%d",i+1);
+            strcpy_s(sceneStock.arm[i].label,"MSL");sceneStock.arm[i].ammo=24+i;sceneStock.arm[i].ammoMax=48;
+        }
+        sceneHeli=PlayerHeliReadout{};sceneHeli.f.keys=true;sceneHeli.f.aiming=true;sceneHeli.f.holding=true;
+        sceneHeli.f.speed=20;sceneHeli.f.setSpeed=20;sceneHeli.f.clear=120;sceneHeli.f.ground=true;
+        Symbols(sceneHeli.sym,pos,0,0);sceneHeli.sym.moving=true;
+        config.hudScale=c.scale;SetScreen(c.w,c.h);
+        float vp[16];Camera(pos,sceneStock.hull,static_cast<float>(c.w),static_cast<float>(c.h),vp);
+        struct { std::int32_t x,y,w,h; } viewport{0,0,c.w,c.h};
+        HudPublish();HudDraw(vp,image,&viewport,nullptr,0);sceneStock.selected=7;HudPublish();
+        wchar_t name[96];std::swprintf(name,_countof(name),L"full_loadout_%ls_%dx%d_scale%.1f",heli ? L"heli" : L"ground",c.w,c.h,c.scale);
+        const std::wstring path=dir+L"\\"+name+L".txt";
+        _wfopen_s(&out,path.c_str(),L"w");if(!out){++failed;continue;}
+        std::fprintf(out,"W %d %d\n",c.w,c.h);
+        const int renderers=activeTextRenderers;
+        Record(name,[&]{HudDraw(vp,image,&viewport,nullptr,0);},c.w,c.h);
+        if(activeTextRenderers!=renderers){++failed;std::printf("FAIL full loadout renderer lifecycle: %ls\n",name);}
+        std::fclose(out);out=nullptr;
+        int stores=0,overlaps=0;
+        for(std::size_t i=0;i<drew.size();++i) {
+            const Drew& a=drew[i];if(a.text.empty())continue;
+            if(a.text.find(L"反装甲")!=std::wstring::npos)++stores;
+            for(std::size_t j=i+1;j<drew.size();++j) {
+                const Drew& b=drew[j];if(b.text.empty())continue;
+                if(a.x0<b.x1-1 && b.x0<a.x1-1 && a.y0<b.y1-1 && b.y0<a.y1-1) {
+                    ++overlaps;std::printf("FAIL full loadout %ls: %s / %s\n",name,Narrow(a.text).c_str(),Narrow(b.text).c_str());
+                }
+            }
+        }
+        if(!heli) {
+            int status=0;for(const Drew& d:drew)if(d.text==L"403_Tank")++status;
+            if(status!=1){++failed;std::printf("FAIL full loadout status hidden by banner: %ls\n",name);}
+        }
+        Line expected{};AircraftControls(expected,true,kStockArms,0x10,0,false,false);
+        int controls=0;for(const Drew& d:drew)if(d.text==expected.text)++controls;
+        if(controls!=1 || !gaugeCovered){++failed;std::printf("FAIL full loadout controls or native ammo replacement: %ls %d %d\n",name,controls,gaugeCovered);}
+        if(stores!=9){++failed;std::printf("FAIL full loadout %ls: %d store labels, expected 8 cells + banner\n",name,stores);}
+        failed+=overlaps;
+        std::printf("%s full loadout %ls: %d labels, %d text collisions\n",overlaps ? "FAIL" : "ok",name,stores,overlaps);
+    }
+    config.hudScale=1;hasStock=hasHeli=false;
+    return failed;
+}
+
 // Every scene and the layout checks in the language in use (hudtext::InUse), written into `dir`: the failures.
 int Scenes(const std::wstring& dir) {
     int failed=AircraftBindingChecks();
+    failed+=FullLoadoutScenes(dir);
     hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=false;   // as the first run began
     sceneMarkOn=false;
     const ULONGLONG now=GetTickCount64();
@@ -1277,6 +1427,7 @@ int Scenes(const std::wstring& dir) {
     failed+=GunshipSightScenes(dir,ground);
     failed+=ZoomScenes(dir,ground);
     failed+=FireControlScenes(dir,ground);
+    failed+=FixedFireScenes(dir,ground);
     hasDrill=true;
     sceneDrill=DrillCue{1180.0f,1200.0f,0.93f,true,true};
     strcpy_s(sceneStock.kind,"DrillTank");
@@ -1369,6 +1520,11 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_nine_squads",700.0f,60.0f,20.0f,false,9);
     MapScene(dir,L"map_nine_squads_narrow",700.0f,60.0f,20.0f,false,9,1280);
     MapScene(dir,L"map_nine_squads_pad",700.0f,60.0f,20.0f,true,9);
+    MapScene(dir,L"map_clickable_payload",700.0f,60.0f,20.0f,false,9,1920,1.0f,true);
+    MapScene(dir,L"map_clickable_payload_narrow",700.0f,60.0f,20.0f,false,9,960,1.75f,true);
+    MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
+    MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
+    MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
     hasStock=false;

@@ -53,7 +53,8 @@ void SetLauncherLoft(const void*,bool aim,float) noexcept { ++loftCalls;loftWant
 bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
 void Unexpected() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 bool SazabiCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
-bool IndirectFireSeat(const unsigned char*) noexcept { Unexpected();return false; }
+bool indirectFixture=false;
+bool IndirectFireSeat(const unsigned char*) noexcept { if(!indirectFixture)Unexpected();return true; }
 void StabStep(void*,const float*,AimStepFn) noexcept { Unexpected(); }
 bool IsPlayerJet(const void*) noexcept { return false; }
 bool IsHelicopter(const void*) noexcept { return false; }
@@ -70,7 +71,7 @@ void Matrix(void* to,float x=0,float y=0,float z=0) {
 const float* __fastcall Gravity(void*) { static float g[4]={0,-9.8f,0,0};return g; }
 void __fastcall UnexpectedAim(void*,const float*) { Unexpected(); }
 struct Weapon {
-    unsigned char data[0xF00]{},muzzle[edf::kMuzzleStride]{},bone[0x100]{},holder[0x20]{};
+    unsigned char data[0x1100]{},muzzle[edf::kMuzzleStride]{},bone[0x110]{},holder[0x20]{};
     Weapon(float x,float speed,float elev) {
         Put<const void*>(data,edf::kMuzzles,muzzle);Put<std::uint64_t>(data,edf::kMuzzleCount,1);
         Put<const void*>(muzzle,0,bone);Put<int>(muzzle,edf::kMuzzleMode,1);
@@ -86,13 +87,22 @@ void Run() {
     image=module.data();unsigned char world[0x80]{},physics[0x30]{};
     void* gravityVtable[]={reinterpret_cast<void*>(&Gravity)};
     Put<void*>(image,0x20B2958,world);Put<void*>(world,0x68,physics);Put<void*>(physics,0x20,gravityVtable);
-    unsigned char vehicle[0x700]{},seat[kSeatStride]{},human[0x360]{},control[0x10]{};
+    unsigned char vehicle[0x1100]{},vehicleBones[0x220]{},axisMap[2][0x38]{},seat[kSeatStride]{},human[0x360]{},control[0x10]{};
     Matrix(vehicle+kMatrix);Put<void*>(vehicle,kSeats,seat);Put<std::uint64_t>(vehicle,kSeatCount,1);
     Put<void*>(seat,kSeatRider,human);Put<void*>(seat,kSeatRiderCtrl,control);Put<int>(control,edf::kCtrlUses,1);
     human[kHumanPlayer]=1;Put<void*>(human,kHumanPad,control);
     seat[kSeatPad]=1;Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
     Put<float>(seat,kSeatAim+kAimAxes+kAxisStride,-1.5f);Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+4,0.5f);
     Weapon primary(-4,2,0.2f),picked(7,1.6f,1.15f),elsewhere(30,1,0);
+    // Native vehicle/weapon model bridge and axis mappings: this fixture is a genuinely articulated turret.
+    Put<void*>(vehicle,weaponmount::kVehicleModel+0x10,vehicleBones);Put<int>(vehicle,weaponmount::kVehicleModel+0x20,2);
+    Put<int>(vehicleBones,0xC,0);Put<int>(vehicleBones,0x10,-1);Put<int>(vehicleBones+0x110,0xC,1);Put<int>(vehicleBones+0x110,0x10,0);
+    for(int i=0;i<2;++i){auto axis=seat+kSeatAim+kAimAxes+i*kAxisStride;Put<void*>(axis,0x28,axisMap[i]);Put<std::uint64_t>(axis,0x38,1);Put<int>(axisMap[i],0,1);Put<float>(axisMap[i],4,-1);Put<float>(axisMap[i],8,1);}
+    for(auto w:{&primary,&picked}) {
+        Put<void*>(w->holder,0x18,vehicleBones+0x110);Put<void*>(w->data,0xE88,vehicleBones+0x110);Put<void*>(w->data,0xF40,w->bone);
+        Put<void*>(w->data,weaponmount::kWeaponModel+0x10,w->bone);Put<int>(w->data,weaponmount::kWeaponModel+0x20,1);
+        Put<int>(w->bone,0xC,0);Put<int>(w->bone,0x10,-1);
+    }
     unsigned char* holders[]={primary.holder,picked.holder};
     Put<void*>(seat,kSeatWeapons,holders);Put<std::uint64_t>(seat,kSeatWeaponCount,2);
     shared=Shared{};shared.v=vehicle;shared.seat=seat;shared.high=true;shared.decoupled=true;shared.seenMs=GameMs();
@@ -190,6 +200,10 @@ void Run() {
         Aim(seat,input,cmd);
         Check(shared.steering==decoupled,"normal camera ownership resumes after the return blend");
     }
+    indirectFixture=true;config.decoupledTurretCam=true;shared.high=false;shared.highView=false;shared.observing=false;shared.returning=false;
+    Put<float>(seat,kSeatAim+kAimAxes,0);Put<float>(seat,kSeatAim+kAimAxes+4,0);
+    TurretCamFrame(vehicle);float input[2]={.2f,-.2f},command[2]{};Aim(seat,input,command);
+    Check(shared.physicalOnly && !shared.decoupled && !shared.steering,"pitch-only artillery cannot acquire a freely movable camera aim");
     image=nullptr;
 }
 }  // namespace

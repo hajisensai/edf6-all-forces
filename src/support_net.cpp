@@ -4,6 +4,7 @@
 #include "crew.h"
 #include "online_authority.h"
 #include "mission_participants.h"
+#include "command_net.h"
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -20,6 +21,7 @@ HMODULE module=nullptr;
 using AdmissionReadyFn=std::uint32_t(__cdecl*)();
 AdmissionReadyFn transportAdmissionReady=nullptr;
 bool running=false,blockedUntilMission=false;
+std::uint32_t commandHostPeer=0;
 ULONGLONG nextResolve=0,lastTick=~0ULL;
 SRWLOCK worldLock=SRWLOCK_INIT;
 EDF6AFMissionParticipants world{sizeof(EDF6AFMissionParticipants),0,0,0,1,{}};
@@ -86,6 +88,15 @@ bool Send(void*,std::uint32_t peer,const support_net::Message& message) noexcept
     return support_net::Encode(message,bytes,sizeof(bytes)) &&
         api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(sizeof(bytes)))!=0;
 }
+bool SendCommand(std::uint32_t peer,const void* bytes,std::size_t count) noexcept {
+    return running && peer && peer<=snapshot.peerCount && bytes && count &&
+        count<=EDF6COOP_EXTENSION_MAX_PAYLOAD && api.send &&
+        api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count))!=0;
+}
+void CommandContext(ULONGLONG now) noexcept {
+    UpdateCommandNetwork({running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
+        snapshot.peerCount,snapshot.local.id,&SendCommand},now);
+}
 bool PeerValid(const EDF6CoopPeer& peer) noexcept {
     return peer.id[0] && std::memchr(peer.id,0,sizeof(peer.id));
 }
@@ -117,6 +128,7 @@ bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
     }
     if((next.isHost && std::strcmp(next.local.id,next.host.id)) || (!next.isHost && !hostPeer))return false;
     snapshot=next;running=true;
+    commandHostPeer=hostPeer;
     session.Start(next.isHost!=0,next.peerCount,hostPeer,now);
     return true;
 }
@@ -130,9 +142,11 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 }
 void ResetSupportNet() noexcept {
     session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
+    commandHostPeer=0;ResetCommandNetwork();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
+    CommandContext(GetTickCount64());
     Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
 void SupportNetTick() noexcept {
@@ -145,6 +159,7 @@ void SupportNetTick() noexcept {
     if(!api.snapshot(&next) || !next.ready || next.size!=sizeof(next)) {if(running)SuspendSupportNet();return;}
     if(running && snapshot.generation!=next.generation){SuspendSupportNet();return;}
     if(!running && !Start(next,now))return;
+    CommandContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
     for(unsigned received=0;received<128;++received) {
@@ -153,10 +168,15 @@ void SupportNetTick() noexcept {
         if(!PeerValid(sender))continue;
         std::uint32_t peer=0;
         for(std::uint32_t i=1;i<=snapshot.peerCount;++i)if(!std::strcmp(sender.id,peers[i].id)){peer=i;break;}
-        support_net::Message message;
-        if(peer && support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
+        if(peer) {
+            CommandContext(now);
+            if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
+            support_net::Message message;
+            if(support_net::Decode(bytes,count,message))session.Receive(peer,message,now);
+        }
     }
     session.Tick(now);
+    CommandContext(now);
     if(session.Suspended())SuspendSupportNet();
 }
 bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size) noexcept {
@@ -179,6 +199,16 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
     }
 }
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
+bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
+    if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
+    EDF6CoopPeer peer;
+    if(!PuidText(puid,peer) || std::strcmp(peer.id,authenticatedPuid))return false;
+    AcquireSRWLockShared(&worldLock);
+    bool accepted=false;
+    if(worldFrozen && world.ready)for(std::uint32_t i=0;i<world.participantCount;++i)
+        accepted=accepted || !std::strcmp(peer.id,world.participants[i].id);
+    ReleaseSRWLockShared(&worldLock);return accepted;
+}
 bool SupportParticipantAllowed(void* puid) noexcept {
     AcquireSRWLockShared(&worldLock);
     const bool frozen=worldFrozen;ReleaseSRWLockShared(&worldLock);

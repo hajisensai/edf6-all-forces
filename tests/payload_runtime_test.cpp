@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <initializer_list>
 namespace crew {
+void PumpAircraftPayloadUi(unsigned char*) noexcept {}
 unsigned char* image=nullptr;
 Config cfg;
 ULONGLONG now=100;

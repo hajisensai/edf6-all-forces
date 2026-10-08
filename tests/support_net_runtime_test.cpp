@@ -17,6 +17,7 @@ unsigned actors=0,expectedActors=0;
 const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
 unsigned spawnCount=0,destroyCount=0,sendCount=0,peerCount=0;
+unsigned commandPackets=0,commandContexts=0;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
 struct Packet { EDF6CoopPeer sender;unsigned char bytes[176]; };
 std::deque<Packet> incoming;
@@ -41,6 +42,12 @@ bool InSession() noexcept { return fixture::online; }
 bool OnlineHostOnly() noexcept { return fixture::host; }
 void Log(const char*,...) noexcept {}
 bool ReadNativeMissionLocation(unsigned* out) noexcept { *out=fixture::location;return fixture::locationReadable; }
+void ResetCommandNetwork() noexcept {}
+void UpdateCommandNetwork(const CommandNetworkContext&,std::uint64_t) noexcept {++fixture::commandContexts;}
+bool ReceiveCommandNetwork(std::uint32_t,const char*,const void* bytes,std::size_t size,std::uint64_t) noexcept {
+    if(size<4 || std::memcmp(bytes,"NCMD",4))return false;
+    ++fixture::commandPackets;return true;
+}
 }
 namespace fixture {
 using namespace crew::support_net;
@@ -120,6 +127,9 @@ void WorldParticipants() {
     Check(!state.ready,"creation attempt alone cannot seal old world actors");
     NoteCreations();tick+=300;Step();EDF6AF_GetMissionParticipants(1,sizeof(state),&state);
     Check(state.ready && state.participantCount==2 && !std::strcmp(state.participants[0].id,"client"),"complete native world deduplicates split-screen PUIDs");
+    Check(crew::SupportCommandRequesterMatches(const_cast<char*>(actorPuids[1]),"client"),"command authentication accepts native PUID of an admitted world player");
+    Check(!crew::SupportCommandRequesterMatches(const_cast<char*>(actorPuids[1]),"host"),"command authentication cannot borrow another transport identity");
+    Check(!crew::SupportCommandRequesterMatches(const_cast<char*>(actorPuids[3]),"lobby-only"),"lobby-only identity cannot issue world commands");
     const auto epoch=state.worldEpoch;
     Check(crew::SupportMissionPlayerAllowed(0) && crew::SupportMissionPlayerAllowed(1),"existing mission players may respawn");
     Check(!crew::SupportMissionPlayerAllowed(2),"lobby-only player cannot enter sealed current world");
@@ -169,6 +179,8 @@ int main() {
     Packet packet{};packet.sender=Peer("intruder");Check(Encode(hello,packet.bytes,sizeof(packet.bytes)),"encode handshake");
     incoming.push_back(packet);Step();Check(sendCount==0,"unknown authenticated sender absent from roster cannot handshake");
     packet.sender=Peer("client");incoming.push_back(packet);Step();Check(sendCount==1,"roster peer receives welcome");
+    auto commandPacket=packet;std::memcpy(commandPacket.bytes,"NCMD",4);incoming.push_back(commandPacket);Step();
+    Check(commandPackets==1 && commandContexts>0 && sendCount==1,"shared extension poll routes command packets once without consuming a support message");
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();
