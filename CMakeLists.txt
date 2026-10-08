@@ -543,7 +543,7 @@ add_executable(proteus_net_native_test EXCLUDE_FROM_ALL tests/proteus_net_native
 target_include_directories(proteus_net_native_test PRIVATE src common)
 target_link_libraries(proteus_net_native_test PRIVATE edf6common user32)
 target_compile_options(proteus_net_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
-add_library(proteus_damage_gate_bridge SHARED EXCLUDE_FROM_ALL tests/proteus_damage_gate_bridge.cpp)
+add_library(proteus_damage_gate_bridge MODULE EXCLUDE_FROM_ALL tests/proteus_damage_gate_bridge.cpp)
 target_compile_options(proteus_damage_gate_bridge PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks proteus_damage_gate_bridge)
 add_test(NAME proteus_damage_gate_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/proteus_damage_native_audit.py"
@@ -742,7 +742,6 @@ add_test(NAME support_soldier_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SO
 set_tests_properties(support_soldier_native PROPERTIES SKIP_RETURN_CODE 77)
 # Reliable host-authoritative map support protocol (also compiled in production).
 target_sources(EDF6VehicleCrew PRIVATE src/support_protocol.cpp src/support_net.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/mission_participants.cpp)
 add_executable(support_protocol_test tests/support_protocol_test.cpp src/support_protocol.cpp)
 target_compile_options(support_protocol_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_protocol COMMAND support_protocol_test)
@@ -804,7 +803,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/mission_participants.cpp src/mission_
 add_test(NAME stock_store_recoil COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_stock_store_recoil.py")
 add_test(NAME stock_store_recoil_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/stock_store_recoil_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(stock_store_recoil_native PROPERTIES SKIP_RETURN_CODE 77)
-add_test(NAME katyusha_mount COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_mount_check.py" --game "${EDF6_GAME_DIR}")
+add_test(NAME katyusha_mount COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/katyusha_mount_check.py" "${EDF6_GAME_DIR}")
 set_tests_properties(katyusha_mount PROPERTIES SKIP_RETURN_CODE 77)
 foreach(check IN ITEMS mission_participants_test mission_participant_gate_test)
     add_executable(${check} EXCLUDE_FROM_ALL tests/${check}.cpp)
