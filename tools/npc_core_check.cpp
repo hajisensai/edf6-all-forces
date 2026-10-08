@@ -145,9 +145,11 @@ int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
 const void* lockOf=nullptr;float lockAt[3]{};
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
 unsigned char* chosenGunnerWeapon=nullptr;
+bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
     if(fire)*fire=chosenGunnerFire;
+    if(suppressGunnerChoice)return nullptr;
     if(chosenGunnerWeapon)return chosenGunnerWeapon;
     const auto list=At<unsigned char**>(SeatAt(v,seat),kSeatWeapons);
     return list && At<std::uint64_t>(SeatAt(v,seat),kSeatWeaponCount) ? At<unsigned char*>(list[0],kHolderWeapon) : nullptr;

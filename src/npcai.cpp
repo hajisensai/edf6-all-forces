@@ -38,6 +38,8 @@
 namespace crew {
 namespace {
 void ResetGunnerInputs() noexcept;
+bool InstallDriverPayload() noexcept;
+void ResetDriverPayload() noexcept;
 // --- The human (docs/npc-ai-design.md §3.1) ---
 constexpr std::size_t kMoveX=0xD50,kMoveY=0xD54,kMoveZ=0xD58,kMoveW=0xD5C;   // the move stick, local (x, 0, z, 1)
 constexpr std::size_t kLookPitch=0xD60,kLookYaw=0xD64;                       // the look's change this frame (rad)
@@ -1141,11 +1143,12 @@ bool InstallNpcAi() noexcept {
     }
     ok=hooked==kClasses;
     Log("NPCAI soldiers' Think hooked %d/%d%s",hooked,kClasses,ok ? "" : ": the custom AI stays off");
+    if(ok)InstallDriverPayload();
     return ok;
 }
 
 void ResetNpcAi() noexcept {
-    ResetGunnerInputs();
+    ResetGunnerInputs();ResetDriverPayload();
     for(auto& s:soldiers)s=Soldier{};
     for(auto& q:squads)q=Squad{};
     cooldowns=npc::Cooldowns<kMaxSquads>{};
@@ -1982,9 +1985,94 @@ bool GunnerAirTarget(const void* target) noexcept {
     const float from[3]={p[0],p[1]+1.0f,p[2]},end[3]={p[0],p[1]-512.0f,p[2]};float hit[3];
     return MapFloorRay(from,end,hit)>=0.0f && p[1]-hit[1]>15.0f;
 }
+
+// CarBase's stock AI calls slot 70 for seat 0 after deciding its target and driving
+// inputs. Wrap those calls, rather than running a second driver fire pass in InputHook.
+constexpr unsigned kDriverAimCalls[]={0x66173E,0x6617DB};
+constexpr unsigned char kDriverAimCall[]={0xFF,0x90,0x30,0x02,0,0};
+constexpr unsigned char kDriverAimContext[2][17]={
+    {0x48,0x8B,0x03,0x4C,0x8B,0xC5,0x33,0xD2,0x48,0x8B,0xCB,0xFF,0x90,0x30,0x02,0,0},
+    {0x48,0x8B,0x03,0x45,0x33,0xC0,0x33,0xD2,0x48,0x8B,0xCB,0xFF,0x90,0x30,0x02,0,0}};
+bool driverPayloadReady=false;
+struct DriverWrite { ObjRef vehicle,rider; float fire[2]; ULONGLONG at; };
+std::vector<DriverWrite> driverWrites;
+void ResetDriverPayload() noexcept { driverWrites.clear(); }
+bool RealPayloadDriver(unsigned char* v) noexcept {
+    return Cfg().enabled && Cfg().stockStores && !v[kDead] && SeatCount(v)>0 &&
+        edf::LivingSoldierInSeat(image,SeatAt(v,0)) && AiGunner(v,SeatAt(v,0));
+}
+void ReleaseDriverPayload(unsigned char* v,bool replace) noexcept {
+    for(auto it=driverWrites.begin();it!=driverWrites.end();) {
+        if(!Readable(it->vehicle.obj,kSelfCtrl+8) || !it->vehicle.Is(it->vehicle.obj)){it=driverWrites.erase(it);continue;}
+        if(it->vehicle.obj!=v){++it;continue;}
+        if(!replace && RealPayloadDriver(v) && GameMs()-it->at<=200){++it;continue;}
+        auto seat=SeatCount(v) ? SeatAt(v,0) : nullptr;
+        if(seat && !AnyPlayerIn(seat) && Readable(it->rider.obj,kSelfCtrl+8) && it->rider.Is(At<const void*>(seat,kSeatRider))) {
+            constexpr std::size_t offsets[]={0x2E4,0x2E0};
+            for(int k=0;k<2;++k)if(At<float>(seat,offsets[k])==it->fire[k])Put<float>(seat,offsets[k],0.0f);
+        }
+        it=driverWrites.erase(it);
+    }
+}
+void RememberDriverPayload(unsigned char* v) {
+    const auto seat=SeatAt(v,0);
+    driverWrites.push_back({ObjRef::Of(v),ObjRef::Of(At<const void*>(seat,kSeatRider)),
+                           {At<float>(seat,0x2E4),At<float>(seat,0x2E0)},GameMs()});
+}
+void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) noexcept {
+    const auto vt=At<void* const*>(v,0);
+    const auto native=reinterpret_cast<SeatFireFn>(vt[kSlotSeatFire]);
+    // Preserve the original virtual dispatch on unmodified classes and occupants.
+    if(!driverPayloadReady || !ok || index!=0 || native!=reinterpret_cast<SeatFireFn>(image+kSeatFire) || !RealPayloadDriver(v)) {
+        native(v,index,target);return;
+    }
+    __try {
+        ReleaseDriverPayload(v,true);
+        const auto seat=SeatAt(v,0);
+        PayloadFire fire=PayloadFire::other;
+        unsigned char* weapon=nullptr;
+        if(target && Readable(target,kPosition+12))
+            weapon=NpcPayloadSelect(v,0,npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))),GunnerAirTarget(target),&fire);
+        else NpcPayloadSelect(v,0,0.0f,false,&fire); // clear the old redirect on target loss
+        Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        if(weapon)AimSelectedGunner(v,0,target,weapon,fire);
+        else {
+            native(v,0,target); // keep native tracking/idle behavior, but no unavailable shot
+            Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        }
+        RememberDriverPayload(v);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        // The selected-list helper restores its temporary pointer in __finally.
+        if(SeatCount(v)){Put<float>(SeatAt(v,0),0x2E4,0.0f);Put<float>(SeatAt(v,0),0x2E0,0.0f);}
+    }
+}
+bool InstallDriverPayload() noexcept {
+    if(driverPayloadReady)return true;
+    __try {
+        if(!Matches(kSeatFire,kSeatFireSig,sizeof(kSeatFireSig)))return false;
+        for(int i=0;i<2;++i)if(!Matches(kDriverAimCalls[i]-11,kDriverAimContext[i],sizeof(kDriverAimContext[i])))return false;
+        unsigned char patch[2][6]{};
+        for(int i=0;i<2;++i) {
+            const auto at=image+kDriverAimCalls[i];
+            const auto thunk=AllocateNearThunk(at,reinterpret_cast<void*>(&DriverPayloadAim));
+            if(!thunk)return false;
+            const auto rel=reinterpret_cast<std::intptr_t>(thunk)-reinterpret_cast<std::intptr_t>(at+5);
+            if(rel<INT32_MIN || rel>INT32_MAX)return false;
+            patch[i][0]=0xE8;const auto rel32=static_cast<std::int32_t>(rel);std::memcpy(patch[i]+1,&rel32,4);patch[i][5]=0x90;
+        }
+        if(!edf::PatchCode(image+kDriverAimCalls[0],kDriverAimCall,patch[0],6))return false;
+        if(!edf::PatchCode(image+kDriverAimCalls[1],kDriverAimCall,patch[1],6)) {
+            edf::PatchCode(image+kDriverAimCalls[0],patch[0],kDriverAimCall,6);return false;
+        }
+        driverPayloadReady=true;Log("NPCAI driver payload: wraps both native seat-0 aim calls");
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 }
 
 void NpcGunnersInput(unsigned char* v) noexcept {
+    ReleaseDriverPayload(v,false); // never erase this frame's still-valid stock driver aim
     ReleaseGunnerInputs(v);
     if(!ok || !Cfg().enabled || !Cfg().npcGunners || v[kDead])return;
     static int sig=0;

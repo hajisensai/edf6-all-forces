@@ -53,6 +53,11 @@ int main() {
         }
         Put<void*>(seat,kSeatWeapons,seatHolders[j]);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
     }
+    check(NpcPayloadSelect(vehicles[0],0,75,false)==weapons[0][0],"driver uses loaded main cannon at close ground range");
+    check(NpcPayloadSelect(vehicles[0],0,800,false)==weapons[0][2],"driver uses ground missile beyond cannon lifetime range");
+    Put<int>(weapons[0][2],kWeaponAmmo,0);
+    check(!NpcPayloadSelect(vehicles[0],0,800,false),"exhausted ground missile cannot be replaced by out-of-range cannon or AA missile");
+    Put<int>(weapons[0][2],kWeaponAmmo,10);
     check(NpcPayloadSelect(vehicles[0],0,400,true)==weapons[0][1],"air target selects actual AA store");
     Put<const wchar_t*>(weapons[0][1],0x08,L"EDF6VC_COAX_MG.SGO");
     check(NpcPayloadSelect(vehicles[0],0,400,true)==weapons[0][0],"NPC excludes exact retired coax resource");
