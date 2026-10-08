@@ -242,12 +242,102 @@ def readable(stmt: str) -> str:
     return NUM_F.sub(r'\1', re.sub(r'"app:/(?:object|Object)/([^"]+?)\.sgo"', r'\1', stmt))
 
 
+# Spawning calls: for each object argument (by position), where its count is: an argument position, or ONE.
+# Positions come from the editor's own argument labels (作成数 / 発生数 / 数 / 部下の数) in the stock scripts.
+ONE = -1
+SPAWNS: dict[str, dict[int, int]] = {
+    'CreateEnemy': {1: ONE}, 'CreateEnemy2': {1: ONE}, 'CreateFriend': {1: ONE}, 'CreateNeutral': {1: ONE},
+    'CreateVehicle': {1: ONE}, 'CreateVehicle2': {1: ONE}, 'EDF6_GrandMother_CreateParts': {2: ONE},
+    'CreateEnemyGroup_Area': {1: 2}, 'CreateFlyingEnemyGroup_Area': {1: 2}, 'CreateEnemyGroup_Area_Spawn': {1: 2},
+    'InstantGenerateEnemy_Area': {1: 2}, 'EDF6_TimeShip_CreatePodCrue': {1: 2},
+    'CreateEnemyGroup': {2: 3}, 'CreateEnemyGroupUG': {2: 3}, 'CreateFriendGroup': {2: 3}, 'CreateColonelSquad': {2: 3},
+    'CreateFlyingEnemyGroup_OnRoute': {2: 3},
+    'CreateFriendSquad': {2: ONE, 3: 4}, 'CreateLieutenantSquad': {2: ONE, 3: 4}, 'CreateEscapeSquad': {2: ONE, 3: 4},
+    'CreateEnemySquad': {2: ONE, 4: 5}, 'CreateFlyingEnemySquad_Area': {1: ONE, 3: 4},
+    'DropBoat_SetCrew': {0: ONE, 2: 3}, 'SetDropBoatCrew': {1: ONE, 3: 4},
+    'SetInstantEnemyGenerator': {1: 2},
+}
+GENERATORS = {'SetEnemyGenerator': (1, 2)}   # object, count per wave: it keeps spawning waves
+
+
+@dataclass
+class Count:
+    n: int = 0             # objects spawned by literal counts, added over every live call
+    unknown: bool = False  # some count is a variable or an expression
+    waves: list[int | str] = field(default_factory=list)   # a generator's count per wave
+
+
+def _object(arg: str) -> str | None:
+    m = re.fullmatch(r'"app:/object/([^"]+?)\.sgo"', arg.strip(), flags=re.I)
+    return m.group(1) if m else None
+
+
+def _one_call(s: str, open_at: int) -> str | None:
+    """'(...)' of the call whose '(' is at open_at, up to its own ')' (not a chained call's)."""
+    depth, quote = 0, False
+    for i in range(open_at, len(s)):
+        ch = s[i]
+        if ch == '"':
+            quote = not quote
+        elif not quote and ch == '(':
+            depth += 1
+        elif not quote and ch == ')':
+            depth -= 1
+            if depth == 0:
+                return s[open_at:i + 1]
+    return None
+
+
+def spawn_counts(live: str) -> dict[str, Count]:
+    out: dict[str, Count] = {}
+    for _, s in statements(live):
+        if s.startswith('//'):
+            continue
+        for m in re.finditer(r'\b(\w+)\s*\(', s):
+            fn = m.group(1)
+            if fn not in SPAWNS and fn not in GENERATORS:
+                continue
+            call = _one_call(s, m.end() - 1)
+            if call is None:
+                continue
+            args = [re.sub(r'/\*.*?\*/', '', a).strip() for a in _args(call)]
+            pairs = SPAWNS.get(fn) or {GENERATORS[fn][0]: GENERATORS[fn][1]}
+            for at, count_at in pairs.items():
+                obj = _object(args[at]) if at < len(args) else None
+                if not obj:
+                    continue
+                c = out.setdefault(obj, Count())
+                raw = '1' if count_at == ONE else args[count_at] if count_at < len(args) else ''
+                literal = NUM_F.sub(r'\1', raw)
+                if fn in GENERATORS:
+                    c.waves.append(int(literal) if literal.isdigit() else literal or '?')
+                elif literal.isdigit():
+                    c.n += int(literal)
+                else:
+                    c.unknown = True
+    return out
+
+
+def count_text(c: Count) -> str:
+    parts = [f'×{c.n}' if c.n else '']
+    if c.unknown:
+        parts.append('另有数量写成变量的' if c.n else '数量写成变量')
+    if c.waves:
+        parts.append('生成器每波 ' + '/'.join(str(w) for w in c.waves) + ' 只、持续刷出')
+    return '，'.join(p for p in parts if p)
+
+
 def summary(text: str) -> list[str]:
-    """The map and every object the live script creates or spawns, before the event walk."""
+    """The map and every object the live script creates or spawns (with how many), before the event walk."""
     maps = sorted(set(re.findall(r'\bMap\(\s*"app:/map/([^"]+?)\.mac"\s*,\s*"([^"]*)"', text, flags=re.I)))
-    objects = sorted(set(re.findall(r'"app:/object/([^"]+?)\.sgo"', text, flags=re.I)), key=str.lower)
-    return ['地图：' + ('、'.join(f'{m}（{w}）' for m, w in maps) or '（无）'),
-            '出场对象：' + ('、'.join(objects) or '（无）'), '']
+    counts = spawn_counts(text)
+    others = sorted({o for o in re.findall(r'"app:/object/([^"]+?)\.sgo"', text, flags=re.I)} - counts.keys(), key=str.lower)
+    out = ['地图：' + ('、'.join(f'{m}（{w}）' for m, w in maps) or '（无）'), '',
+           '出场对象（数量是脚本里每一处刷出相加；按难度分支、循环没有展开，只作参考）：']
+    out += [f'    {o}  {count_text(c)}' for o, c in sorted(counts.items(), key=lambda kv: kv[0].lower())] or ['    （无）']
+    if others:
+        out.append('其它引用到的对象（预载、特效、变量里的写法等，数量不明）：' + '、'.join(others))
+    return out + ['']
 
 
 def part(body: str, table: Voices) -> Part:
