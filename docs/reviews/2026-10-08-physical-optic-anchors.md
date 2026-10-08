@@ -20,6 +20,7 @@
 
 - 505/601 主驾驶 camera locator 在炮骨 local `(0,2,-10)`；404 主炮 `(0,6.3,-40.45)`；EMC510 的 cannon_top `(0,20,-50)`；Flak603 的 cannon_l `(-0.75,3,-10)`。这些都是第三人称取景点，不是光学眼位。
 - 抽查这些型号的原版载具武器 SGO 均为 `SecondaryFire_Type=0`、`SecondaryFire_Parameter=[0]`，没有 `Sight_animation_model`。不能凭此字段给所有武器生成开镜能力。
+- 对照真实步兵武器：aWeapon081/pWeapon127/eWeapon120/hCannon01 的 `Sight_animation_model` 分别引用 `app:/HUD/sight05/10/13/17.rab`；对应 MDB 只有 mdl/SightXX 两骨，所有顶点 z=0，是 HUD 平面准星资源，不提供物理镜头眼位。eWeapon120 为 SecondaryFire type 3 仍有 Sight13，HUD 字段也不是开镜能力判据。
 - Proteus 的 `照準１..４` 被 `begaruta_aiming_shape` 使用，位置在 body/gun_mount/missile_launcher 枢轴，不能据此认定是镜片。
 - 403 主炮没有确认到实际镜片；EMC510、Flak603、Proteus 本轮没有登记真实光学点。404 hull `front_gun`、烟幕和换了自制模型的钻头/喀秋莎不能借同类 vtable 取得主炮瞄具。
 
