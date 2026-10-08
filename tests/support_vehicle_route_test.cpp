@@ -11,10 +11,12 @@ bool NpcDriver(const unsigned char* vehicle) noexcept {
 bool IsOnlineAuthority(const void*) noexcept {return true;}
 bool ReadCommandUnit(const ObjRef&,const char*,const Command&,bool,CommandUnit*) noexcept {return false;}
 bool wall=false;
+bool bridge=false;
 float MapRay(const float*,const float*,float*) noexcept {return wall ? 1.0f : -1.0f;}
 float MapFloorRay(const float* from,const float* to,float* hit) noexcept {
-    if(from[1]<0 || to[1]>0)return -1;
-    hit[0]=from[0];hit[1]=0;hit[2]=from[2];return from[1];
+    const float floor=bridge && from[1]>=6 && to[1]<=6 ? 6.0f : 0.0f;
+    if(from[1]<floor || to[1]>floor)return -1;
+    hit[0]=from[0];hit[1]=floor;hit[2]=from[2];return from[1]-floor;
 }
 Sea SeaAt(float,float,float*) noexcept {return Sea::land;}
 }
@@ -56,6 +58,28 @@ int main() {
     check(!d.delivered && releases==0 && At<float>(seats[0],0x2C4)==0,"entering final radius requests parking but never unloads a moving vehicle");
     Put<float>(v,kPosition+8,20.2f);step();check(releases==0,"coasting vehicle keeps its real driver aboard");
     step();check(d.delivered && releases==1 && followed==1,"only observed stop completes empty delivery and returns its driver");
+    // The audited native transform reconstructs the model root (near wheel bottom), not COM.
+    // Do not guess a half-height offset or let a long downward ray choose another bridge level.
+    const auto restartRoute=[&](float originY,float targetY) {
+        d.delivered=false;d.started=true;d.navigation={};d.vehicleSampleAt=0;releases=0;
+        Put<float>(v,kPosition+8,0);Put<float>(v,kPosition+4,originY);d.plan.target[1]=targetY;
+        Put<float>(seats[0],0x2C0,0);Put<float>(seats[0],0x2C4,0);
+        ResetNpcPosts();
+    };
+    restartRoute(0.65f,0);for(int i=0;i<50;++i)step();
+    check(At<float>(seats[0],0x2C4)==0 && !d.navigation.length && !releases,
+          "root outside the supported floor-step interval waits rather than inventing a COM offset");
+    bridge=true;restartRoute(6.1f,6);
+    for(int i=0;i<200 && At<float>(seats[0],0x2C4)==0;++i)step();
+    check(d.navigation.length>0 && d.navigation.path[0].y==6 && At<float>(seats[0],0x2C4)<0,
+          "vehicle just above bridge deck routes on that deck, never the ground underneath");
+    restartRoute(0.1f,0);
+    for(int i=0;i<200 && At<float>(seats[0],0x2C4)==0;++i)step();
+    check(d.navigation.length>0 && d.navigation.path[0].y==0,
+          "vehicle below bridge keeps the lower connected ground layer");
+    restartRoute(6.8f,6);for(int i=0;i<50;++i)step();
+    check(!d.navigation.length && At<float>(seats[0],0x2C4)==0 && !releases,
+          "airborne vehicle is not declared grounded by projecting to the lower bridge or terrain");
     ResetSupportDispatch();ResetNpcPosts();VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     std::printf("support_vehicle_route_test: %d checks passed\n",checks);
 }
