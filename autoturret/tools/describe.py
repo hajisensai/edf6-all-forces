@@ -19,6 +19,7 @@ from functools import lru_cache
 import dsgo
 import rootcpk
 import vehicle_setup
+import proteus_describe
 from dsgo import Node
 
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
@@ -165,7 +166,7 @@ class Texts:
     rows: dict[str, dict[str, tuple]]    # path -> row id -> (row before, row written), dsgo values
 
 
-def build_texts(vehicles: list[Vehicle], files: dict[str, bytes], mods: str) -> Texts:
+def build_texts(vehicles: list[Vehicle], files: dict[str, bytes], mods: str, *, proteus: bool = False) -> Texts:
     stock = stock_ids()
     ids = table_ids(mods)
     out = Texts({}, {})
@@ -183,6 +184,8 @@ def build_texts(vehicles: list[Vehicle], files: dict[str, bytes], mods: str) -> 
             new = _node(_describe(dsgo.to_py(stock_rows[stock.index(row_id)]), v, lang, files, blast_tpl))
             changed[row_id] = (rows[at], new)
             rows[at] = new
+        if proteus:
+            changed.update(proteus_describe.apply(rows, ids, lang))
         out.files[rel] = dsgo.compact(doc)   # no stale strings in the pool: a rerun writes the same bytes
         out.rows[rel] = changed
     return out

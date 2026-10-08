@@ -269,11 +269,11 @@ def build_files(legacy: bool = False) -> dict[str, bytes]:
     return files
 
 
-def build_texts(files: dict[str, bytes], mods: str) -> describe.Texts:
+def build_texts(files: dict[str, bytes], mods: str, *, proteus: bool = False) -> describe.Texts:
     vehicles = [describe.Vehicle(c, f'V603_FLAK_GUN{t}_L.SGO', 'flak') for c, t in CALLS.items()]
     vehicles.append(describe.Vehicle(HV_CALL, HV_GUN.format(side='L'), 'air'))
     vehicles += [describe.Vehicle(c, BOHR_GUN.format(side='L'), 'ground') for c in BOHR_CALLS]
-    return describe.build_texts(vehicles, files, mods)
+    return describe.build_texts(vehicles, files, mods, proteus=proteus)
 
 
 # ---------------------------------------------------------------- Mods folder
@@ -373,12 +373,14 @@ def installed(mods: str) -> bool:
     return os.path.isfile(_manifest_path(mods))
 
 
-def install(mods: str, text: bool, force: bool, files: dict[str, bytes] | None = None) -> None:
+def install(mods: str, text: bool, force: bool, files: dict[str, bytes] | None = None,
+            *, proteus: bool = False) -> None:
     """`files`: build_files() made earlier (tools/installer.py builds everything before it writes anything)."""
     _refuse_while_running(mods)
     manifest = _load_manifest(mods) or {'version': MANIFEST_VERSION, 'files': {}, 'texts': {}}
     files = build_files() if files is None else files
-    texts = build_texts(files, mods) if text else describe.Texts({}, {})
+    texts = (build_texts(files, mods, **({'proteus': True} if proteus else {}))
+             if text else describe.Texts({}, {}))
     built = Built(files)
     problems = {rel: p for rel in files if (p := _foreign(mods, rel, manifest, built))}
     if problems and not force:
