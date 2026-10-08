@@ -650,8 +650,9 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     // ever (the auto-aim, the lead circle the player's own). Holding the aim stick then aims by hand (the stock input
     // already turned it); letting go hands the turret back at once, to a target near where it was dragged, never the
     // one dragged away from. With the camera the stick turns the view: no drag.
-    const edf::aimlink::PlayerGun rule=pilot ? edf::aimlink::PlayerGunRule(CameraTurret(vehicle,0),LeadCircle(),only!=nullptr)
+    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,0,LeadCircle(),only!=nullptr)
                                              : edf::aimlink::PlayerGun{true,true};
+    if(pilot && !rule.steer)track->steered=0; // observation camera cannot drive this gun
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
     const bool drag=rule.drag && cfg.dragDeadzone>0.0f && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
     if(drag && !track->dragging && track->target){track->dropped=track->target;track->droppedUntil=now+cfg.dragDropMs;}

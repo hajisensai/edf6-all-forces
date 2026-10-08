@@ -979,3 +979,11 @@ add_test(NAME optic_install_integration COMMAND "${Python3_EXECUTABLE}" "${CMAKE
 
 add_test(NAME highcam_collision_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/highcam_collision_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(highcam_collision_native PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(autoturret_binding_test EXCLUDE_FROM_ALL tests/autoturret_binding_test.cpp src/turretaim.cpp)
+target_include_directories(autoturret_binding_test PRIVATE src common)
+target_link_libraries(autoturret_binding_test PRIVATE edf6common user32)
+target_compile_options(autoturret_binding_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(autoturret_binding_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks autoturret_binding_test)
+add_test(NAME autoturret_binding COMMAND autoturret_binding_test)

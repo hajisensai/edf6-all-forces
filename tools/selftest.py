@@ -1415,16 +1415,16 @@ def turret_aim_wired() -> None:
     steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
     put = steer.find('Put<float>(vehicle,kTurn')
     assert 0 <= steer.find('if(!rule.steer)return flight;') < put < steer.find('track->steered=Frame();'), 'Steer: the rule gates the turn'
-    assert 'PlayerGunRule(CameraTurret(vehicle,0),LeadCircle(),only!=nullptr)' in steer
+    assert 'PlayerControlRule(vehicle,0,LeadCircle(),only!=nullptr)' in steer
     gunner = src('autoturret/src/gunner.cpp')
     seat = gunner.split('void SteerSeat(', 1)[1].split('\n}\n', 1)[0]
     put = seat.find('Put<float>(vehicle,kTurn')
     assert 0 <= seat.find('if(!rule.steer)return;') < put < seat.find('track.steered=autoturret::Frame();'), 'SteerSeat: the rule gates the turn'
-    assert 'PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)' in seat
+    assert 'PlayerControlRule(vehicle,s,LeadCircle(),only!=nullptr)' in seat
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
     assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at

@@ -46,6 +46,8 @@ Config config{};
 // The scene: what the stubs hand the HUD.
 bool hasTurret=false;
 edf::aimlink::TurretReadoutV1 sceneTurret{};
+TurretCamReadout sceneMouseIntent{};bool hasMouseIntent=false,hasMountedOptic=false;
+edf::aimlink::ModeBindingV1 sceneModeBinding{};bool hasModeBinding=false;
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false,
      hasSazabi=false;
 bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
@@ -111,10 +113,15 @@ std::set<std::pair<wchar_t,int>> glyphs;
 struct PanelBox { float x0,y0,x1,y1; };
 std::vector<PanelBox> panels;   // the scene's panels (the HUD's kPanel rects) while `recording`
 bool recording=false;
+bool probeIntent=false;float intentX=0,intentY=0;int intentQuads=0;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     if(rgba==kScopeDark)++scopePieces;
     float p[4][2];
     for(int i=0;i<n && i<4;++i){p[i][0]=v[i*3]*m[0]+v[i*3+1]*m[4]+m[12];p[i][1]=v[i*3]*m[1]+v[i*3+1]*m[5]+m[13];}
+    if(probeIntent && n==4 && rgba==kWhite) {
+        float x=0,y=0;for(int i=0;i<4;++i){x+=p[i][0]*0.25f;y+=p[i][1]*0.25f;}
+        if(std::fabs(x-intentX)<17.0f && std::fabs(y-intentY)<17.0f)++intentQuads;
+    }
     if(recording && n==4 && std::memcmp(rgba,kPanel,16)==0 && p[0][1]==p[1][1] && p[0][0]==p[2][0])
         panels.push_back(PanelBox{p[0][0],p[0][1],p[3][0],p[3][1]});
     if(boxing){++drawn;for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);}
@@ -165,7 +172,9 @@ bool PlayerStockHud(StockHudReadout* o) noexcept { if(hasStock)*o=sceneStock;ret
 bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix; }
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerSazabiCue(SazabiCue* o) noexcept { if(hasSazabi)*o=sceneSazabi;return hasSazabi; }
-bool PlayerTurretCam(TurretCamReadout*) noexcept { return false; }
+bool PlayerTurretCam(TurretCamReadout* value) noexcept { if(hasMouseIntent)*value=sceneMouseIntent;return hasMouseIntent; }
+bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
+bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* value) noexcept { if(hasModeBinding)*value=sceneModeBinding;return hasModeBinding; }
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
@@ -1298,8 +1307,26 @@ int FullLoadoutScenes(const std::wstring& dir) {
 }
 
 // Every scene and the layout checks in the language in use (hudtext::InUse), written into `dir`: the failures.
+int MouseIntentChecks() {
+    const float pos[3]={0,0,0},look[3]={0,0,1};float vp[16];Camera(pos,look,1920,1080,vp);
+    TurretCamReadout r{};r.decoupled=r.aimValid=true;r.physicalOnly=false;
+    r.aim[0]=80;r.aim[1]=10;r.aim[2]=500;r.gun[0]=-140;r.gun[1]=10;r.gun[2]=500;
+    float ax,ay;sight::ToScreen(vp,r.aim,1,1920,1080,&ax,&ay);
+    const auto draw=[&]{box=Box{};boxing=true;drawn=0;TurretMark(At<void*>(image,kQuadDrawer),image,vp,1920,1080,1,r,false);boxing=false;return drawn;};
+    int failed=0;
+    const int visible=draw();failed+=visible!=28 || !box.any || std::fabs((box.x0+box.x1)*0.5f-ax)>0.1f || std::fabs((box.y0+box.y1)*0.5f-ay)>0.1f;
+    r.gun[0]=200;draw();failed+=std::fabs((box.x0+box.x1)*0.5f-ax)>0.1f;
+    r.aimValid=false;failed+=draw()!=0;r.aimValid=true;
+    r.physicalOnly=true;failed+=draw()!=0;r.physicalOnly=false;
+    r.high=true;failed+=draw()!=0;r.high=false;
+    r.decoupled=false;failed+=draw()!=0;r.freeLook=true;failed+=draw()!=28;
+    std::printf("%s mouse intent: verified command point only; independent of barrel; no invalid/fixed/high-view cursor\n",failed ? "FAIL" : "ok");
+    return failed;
+}
+
 int Scenes(const std::wstring& dir) {
-    int failed=AircraftBindingChecks();
+    int failed=AircraftBindingChecks()+MouseIntentChecks();
+    hasMouseIntent=hasMountedOptic=hasModeBinding=false;
     failed+=FullLoadoutScenes(dir);
     hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=false;   // as the first run began
     sceneMarkOn=false;
@@ -1453,13 +1480,23 @@ int Scenes(const std::wstring& dir) {
     hasTurret=true;
     sceneTurret=edf::aimlink::TurretReadoutV1{};
     sceneTurret.mode=edf::aimlink::Mode::autoAim;sceneTurret.keys=true;sceneTurret.ownGun=true;
-    sceneTurret.modeKey=0x5A;sceneTurret.lockKey=0x51;sceneTurret.modeButton=0;sceneTurret.lockButton=0x04;
+    sceneTurret.modeKey=0x56;sceneTurret.lockKey=0x51;sceneTurret.modeButton=0;sceneTurret.lockButton=0x04;
     Prime(ground);
     Scene(dir,L"stock_turret_auto",ground);
     sceneTurret.mode=edf::aimlink::Mode::leadCircle;
     Scene(dir,L"stock_turret_lead_switch",ground);
     failed+=!TurretLayoutApart(1920);
     failed+=!TurretLayoutApart(2520);
+    hasMouseIntent=hasModeBinding=true;sceneModeBinding={true,true,'Z','V'};
+    sceneMouseIntent=TurretCamReadout{};sceneMouseIntent.decoupled=sceneMouseIntent.aimValid=true;sceneMouseIntent.physicalOnly=false;
+    sceneMouseIntent.aim[0]=80;sceneMouseIntent.aim[1]=10;sceneMouseIntent.aim[2]=500;
+    sceneMouseIntent.gun[0]=-140;sceneMouseIntent.gun[1]=10;sceneMouseIntent.gun[2]=500;
+    float cursorVp[16];Camera(ground,sceneStock.hull,1920,1080,cursorVp);
+    sight::ToScreen(cursorVp,sceneMouseIntent.aim,1,1920,1080,&intentX,&intentY);
+    probeIntent=true;intentQuads=0;Scene(dir,L"mouse_command_circle",ground);failed+=intentQuads!=28;
+    hasMountedOptic=true;intentQuads=0;Scene(dir,L"mounted_scope_no_auto_overlay",ground);failed+=intentQuads!=0;
+    for(const auto& line:drew)failed+=line.text.find(Tr(Tx::autoAimOffCircle))!=std::wstring::npos;
+    probeIntent=false;hasMouseIntent=hasMountedOptic=hasModeBinding=false;
     hasTurret=false;
     hasDrill=false;
     // The EMC charging (62%) and firing (1.4 s of its beam left).

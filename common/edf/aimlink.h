@@ -61,6 +61,15 @@ using SeatQueryFn=bool(__cdecl*)(const void* vehicle,unsigned seat);
 constexpr char kCameraTurret[]="EDF6VehicleCrew_CameraTurretV2";
 constexpr char kSteers[]="EDF6AutoTurret_SteersV2";
 
+// Optional, additive input arbitration. Existing V1/V2 layouts and exports stay unchanged.
+// Queries are made on the game thread for the real local player's current seat.
+using BindingReservedFn=bool(__cdecl*)(const void* vehicle,unsigned seat,bool keys,int binding);
+constexpr char kSightBinding[]="EDF6VehicleCrew_SightBindingV1";
+constexpr char kTurretObserver[]="EDF6VehicleCrew_TurretObserverV1";
+struct ModeBindingV1 { bool conflict,keys; std::int32_t requested,effective; };
+using ModeBindingFn=bool(__cdecl*)(ModeBindingV1* out);
+constexpr char kModeBinding[]="EDF6AutoTurret_ModeBindingV1";
+
 // V3, the gun stabilizer (EDF6VehicleCrew src/stab.cpp, 2026-10-06): after a seat's stock aim step EDF6VehicleCrew may
 // turn its axes further, to keep the gun on its line in the world while the hull pitches and turns; the step's own turn
 // (the input) moves that line. A controller of the gun steers in the stabilizer's frame, or it fights it (the hull's turn

@@ -336,8 +336,9 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     // Who turns the gun (common/edf/aimlink.h PlayerGunRule): an AI seat's this plugin; the player's as the flak's
     // (plugin.cpp Steer). A player holding the stick (no turret camera on the seat) aims by hand; letting go hands the
     // gun back, never to the target it was dragged away from.
-    const edf::aimlink::PlayerGun rule=pilot ? edf::aimlink::PlayerGunRule(CameraTurret(vehicle,s),LeadCircle(),only!=nullptr)
+    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,s,LeadCircle(),only!=nullptr)
                                              : edf::aimlink::PlayerGun{true,false};
+    if(pilot && !rule.steer)track.steered=0; // observation camera cannot drive this gun
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
     const bool drag=rule.drag && cfg.dragDeadzone>0.0f
         && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
