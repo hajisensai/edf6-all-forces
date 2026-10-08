@@ -61,7 +61,8 @@ bool PlayerJetOwnSight(const void*) noexcept{return aircraft;}
 bool GunshipCrewSeats(const void*) noexcept{return gunship;}
 PluginBody BodyOf(const void*) noexcept{return aircraft ? PluginBody::jet : sazabiVehicle ? PluginBody::sazabi : PluginBody::none;}
 bool IsFuelTank(const unsigned char*) noexcept{return fuel;}
-unsigned char* PayloadPicked(const void*) noexcept{return const_cast<unsigned char*>(pickedWeapon);}
+unsigned char* PayloadPicked(const void*) noexcept{return nullptr;} // store selection is not the fire-control selection
+unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return const_cast<unsigned char*>(pickedWeapon ? pickedWeapon : weapon);}
 bool ReadRound(const unsigned char* w,RoundModel* r) noexcept {
     *r=RoundModel{};r->kind=roundKind;r->rtti=knownRound ? "test factory" : nullptr;r->lobbed=lobbed;r->alive=At<int>(w,edf::kWeaponAmmoAlive);
     return true;

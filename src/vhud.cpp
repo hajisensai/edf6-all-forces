@@ -65,7 +65,8 @@ bool StockVehicle(const void* v) noexcept {
 // The seat the player sits in (its index), or -1.
 int PlayerSeatOf(unsigned char* v) noexcept {
     const unsigned count=SeatCount(v);
-    for(unsigned i=0;i<count;++i)if(SeatRider(SeatAt(v,i))==Rider::player)return static_cast<int>(i);
+    for(unsigned i=0;i<count;++i)if(SeatRider(SeatAt(v,i))==Rider::player &&
+        At<const void*>(SeatAt(v,i),kSeatRider)==PlayerHuman())return static_cast<int>(i);
     return -1;
 }
 
@@ -250,6 +251,7 @@ void StockHudFrame(unsigned char* v) noexcept {
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
     const unsigned char* const picked=PayloadPicked(v);
+    const unsigned char* const sight=PayloadSightPicked(v,r.seat);
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
     const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     int pickedArm=-1,storeArm=-1;
@@ -261,6 +263,7 @@ void StockHudFrame(unsigned char* v) noexcept {
             const unsigned char* const w=At<const unsigned char*>(holders[i],kHolderWeapon);
             if(!Readable(w,kChargeLeft+4) || IsFuelTank(w))continue;
             if(picked && w==picked)pickedArm=r.arms;
+            if(sight && w==sight)r.sight=r.arms;
             if(static_cast<int>(i)==store)storeArm=r.arms;
             StockArm& a=r.arm[r.arms++];
             Arm(w,!r.heli,a,!(HighCamOn(v) || TurretCamHighTransition(v)));

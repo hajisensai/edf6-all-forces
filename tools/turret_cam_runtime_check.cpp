@@ -25,7 +25,8 @@ ULONGLONG GameMs() noexcept { return 1000; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
 unsigned char* selectedGun=nullptr;
-unsigned char* PayloadPicked(const void*) noexcept { return selectedGun; }
+unsigned char* PayloadPicked(const void*) noexcept { return nullptr; } // legacy payload choice is not the sight target
+unsigned char* PayloadSightPicked(const void*,unsigned) noexcept { return selectedGun; }
 int owner=0;
 int AutoTurretSteers(const void*,unsigned) noexcept { return owner; }
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; }
@@ -97,7 +98,7 @@ void Run() {
     shared=Shared{};shared.v=vehicle;shared.seat=seat;shared.high=true;shared.decoupled=true;shared.seenMs=GameMs();
     selectedGun=picked.data;
     Check(Gun(seat)==picked.data,"selected payload belongs to the seat");
-    selectedGun=elsewhere.data;Check(Gun(seat)==primary.data,"another seat's payload cannot replace this gun");
+    selectedGun=elsewhere.data;Check(Gun(seat)==nullptr,"invalid fire-control target cannot silently select a different gun");
     selectedGun=picked.data;ShotFocus(shared);
     Check(shared.focusValid && shared.focusHit,"real muzzle round reaches lowered terrain");
     Check(std::fabs(shared.focus[1]-floorY)<0.001f && shared.focus[2]>300,"focus is high-arc impact, not camera ground point");

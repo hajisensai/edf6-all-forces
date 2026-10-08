@@ -78,7 +78,8 @@ struct StockHudReadout {
     float zoom;                  // the sight's magnification (sightzoom.cpp SightZoomNow: 1 none)
     int stab;                    // the seat's gun stabilizer (stab.cpp StabState): 1 holding, 2 outrun by the hull, 0 none
     FuelReading fuel;            // its fuel tank (a bike's; a heli's is HeliStrip's, PlayerHeliReadout), not among the arms
-    int arms,selected;           // selected: SetStockSelectedStore's (-1 none)
+    int arms,selected;           // selected: secondary payload/list selection (-1 none)
+    int sight=-1;               // independently selected actual primary/secondary fire-control weapon
     StockArm arm[kStockArms];
     int threats;                 // 2 a missile homing on it, 1 a jet's lock (missile.cpp, jet.cpp: as the jets' threat ring)
     float threatAt[kStockThreats][3];

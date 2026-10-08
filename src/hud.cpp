@@ -2533,10 +2533,7 @@ int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
         const StockArm& a=r.arm[i];
         return a.aimed && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && a.ladder.ticks>0 && !(i==0 && leadGun);
     };
-    if(r.selected>=0 && r.selected<r.arms && r.selected<kStockArms)return sights(r.selected) ? r.selected : -1;
-    for(int i=0;i<r.arms && i<kStockArms;++i)
-        if(sights(i))return i;
-    return -1;
+    return r.sight>=0 && r.sight<r.arms && r.sight<kStockArms && sights(r.sight) ? r.sight : -1;
 }
 
 void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
@@ -2544,9 +2541,7 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     const int sightGun=x.high ? -1 : SightGun(r,x.leadGun);
     // One selected weapon owns the fire-control marks. A missile/rocket selection must not leave the main gun's
     // optical reticle underneath it; lofted launchers have their dedicated impact/spread marks.
-    int selected=r.selected>=0 && r.selected<r.arms && r.selected<kStockArms ? r.selected : -1;
-    if(selected<0)for(int i=0;i<r.arms && i<kStockArms;++i)
-        if(r.arm[i].aimed || r.arm[i].lofted){selected=i;break;}
+    const int selected=r.sight>=0 && r.sight<r.arms && r.sight<kStockArms ? r.sight : -1;
     for(int i=0;i<r.arms && i<kStockArms;++i) {
         if(i!=selected)continue;
         const StockArm& a=r.arm[i];
@@ -3767,8 +3762,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const bool gunnerSight=fresh && snap.gunner && !snap.cockpit;
         const bool mechSight=fresh && snap.sazabi && !snap.cockpit;
         const bool overhead=fresh && ((snap.highCam && snap.highCamOn) || sightKind==sightzoom::Kind::indirect);
-        const int stockPick=stockHud && snap.stockHud.selected>=0 && snap.stockHud.selected<snap.stockHud.arms ? snap.stockHud.selected : 0;
-        const bool launcherSight=stockHud && snap.stockHud.arms>stockPick && snap.stockHud.arm[stockPick].lofted;
+        const int stockPick=stockHud ? snap.stockHud.sight : -1;
+        const bool launcherSight=stockHud && stockPick>=0 && stockPick<snap.stockHud.arms && snap.stockHud.arm[stockPick].lofted;
         if(fresh && snap.heliSight && !snap.cockpit && !gunnerSight && !mechSight)
             HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);

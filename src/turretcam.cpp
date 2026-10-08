@@ -159,7 +159,8 @@ const unsigned char* Gun(const unsigned char* seat) noexcept {
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
     if(!count || count>16 || !Readable(holders,count*8))return nullptr;
-    const auto selected=shared.seat==seat ? PayloadPicked(shared.v) : nullptr;
+    const auto selected=shared.seat==seat ? PayloadSightPicked(shared.v,0) : nullptr;
+    if(shared.seat==seat && !selected)return nullptr;
     const unsigned char* first=nullptr;
     for(std::uint64_t i=0;i<count;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;
@@ -169,7 +170,7 @@ const unsigned char* Gun(const unsigned char* seat) noexcept {
             if(!first)first=w;
         }
     }
-    return first;
+    return shared.seat==seat ? nullptr : first;
 }
 
 // Same shot model and muzzle transform as the vehicle HUD. No camera ray participates in this prediction.

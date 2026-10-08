@@ -725,6 +725,13 @@ target_compile_options(payload_runtime_test PRIVATE /W4 /WX /utf-8 /permissive- 
 target_link_options(payload_runtime_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks payload_runtime_test)
 add_test(NAME payload_runtime COMMAND payload_runtime_test)
+add_executable(payload_sight_test EXCLUDE_FROM_ALL tests/payload_sight_test.cpp)
+target_include_directories(payload_sight_test PRIVATE src common)
+target_link_libraries(payload_sight_test PRIVATE edf6common user32)
+target_compile_options(payload_sight_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(payload_sight_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks payload_sight_test)
+add_test(NAME payload_sight COMMAND payload_sight_test)
 
 add_executable(real_turret_crew_test EXCLUDE_FROM_ALL tests/real_turret_crew_test.cpp)
 target_include_directories(real_turret_crew_test PRIVATE common)

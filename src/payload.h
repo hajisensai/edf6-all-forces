@@ -40,6 +40,9 @@ bool PlayerPayload(PayloadReadout* out) noexcept;
 // The weapon the secondary fires now on `vehicle` when its seat's stores are switched (helisight.cpp's mark follows
 // it), else nullptr: the stock weapon stands.
 unsigned char* PayloadPicked(const void* vehicle) noexcept;
+// Independent fire-control target: default native primary, most recent trigger edge, or explicit R/LB payload choice.
+// Read-only, validates live holders; retains a reloading weapon but safely falls back from a spent/removed one.
+unsigned char* PayloadSightPicked(const void* vehicle,unsigned seat) noexcept;
 // Authoritative NPC seat: choose an existing, loaded, reachable weapon for this target.
 // Call before native seat aiming/firing; writes no trigger. nullptr means none is usable.
 // `fire` reports the native trigger control to use (primary or secondary).

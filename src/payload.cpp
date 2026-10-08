@@ -59,6 +59,9 @@ Class ClassOf(const void* v) noexcept {
 // The switch's state per vehicle the player sits in: the weapon picked, the switch down last frame.
 struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; bool held,listed,npc; ULONGLONG seen; unsigned char* from[kMostPayload]; int redirects; };
 Pick picks[kTracked]{};
+// One tracked local player's fire-control view. Store selection remains independent and keeps its old contract.
+struct SightPick { ObjRef vehicle,human; unsigned seat; PayloadFire control=PayloadFire::primary; bool primaryHeld,secondaryHeld; };
+SightPick sightPick{};
 PayloadReadout latest{};
 ULONGLONG latestMs=0;
 
@@ -72,7 +75,9 @@ Pick* PickFor(const void* v,unsigned seat,ULONGLONG ms) noexcept {
     return slot;
 }
 Pick* FindPick(const void* v) noexcept {
-    for(auto& p:picks)if(p.ref.Is(v) && !p.npc && p.seat<SeatCount(static_cast<const unsigned char*>(v)) && SeatRider(SeatAt(static_cast<unsigned char*>(const_cast<void*>(v)),p.seat))==Rider::player)return &p;
+    for(auto& p:picks)if(p.ref.Is(v) && !p.npc && p.seat<SeatCount(static_cast<const unsigned char*>(v)) &&
+        SeatRider(SeatAt(static_cast<unsigned char*>(const_cast<void*>(v)),p.seat))==Rider::player &&
+        At<const void*>(SeatAt(static_cast<unsigned char*>(const_cast<void*>(v)),p.seat),kSeatRider)==PlayerHuman())return &p;
     return nullptr;
 }
 
@@ -144,7 +149,8 @@ PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char
 // The seat the first local player sits in, -1 with none.
 int PlayerSeatOf(unsigned char* v) noexcept {
     const unsigned count=SeatCount(v);
-    for(unsigned i=0;i<count;++i)if(SeatRider(SeatAt(v,i))==Rider::player)return static_cast<int>(i);
+    for(unsigned i=0;i<count;++i)if(SeatRider(SeatAt(v,i))==Rider::player &&
+        At<const void*>(SeatAt(v,i),kSeatRider)==PlayerHuman())return static_cast<int>(i);
     return -1;
 }
 
@@ -208,8 +214,11 @@ void __fastcall PullHook(unsigned char* holder) {
         const auto list=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
         bool installed=false;
-        if(count<=16 && Readable(list,count*8))for(std::uint64_t i=0;i<count;++i)
-            if(Readable(list[i],kHolderWeapon+8) && At<unsigned char*>(list[i],kHolderWeapon)==p.weapon)installed=true;
+        if(count<=16 && Readable(list,count*8))for(std::uint64_t i=0;i<count;++i) {
+            if(!Readable(list[i],kHolderWeapon+8))continue;
+            const auto targetCtrl=At<const unsigned char*>(list[i],kHolderCtrl);
+            if(Readable(targetCtrl,12) && At<std::int32_t>(targetCtrl,8)>0 && At<unsigned char*>(list[i],kHolderWeapon)==p.weapon)installed=true;
+        }
         if(!installed)continue;
         for(int i=0;i<p.redirects;++i)if(p.from[i]==w){w=p.weapon;break;}
     }
@@ -222,7 +231,7 @@ const unsigned char kPullCode[]={0x48,0x8B,0x41,0x08,0x48,0x85,0xC0,0x74,0x11,0x
 bool pullOk=false;
 
 // The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries.
-void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r) noexcept {
+bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r) noexcept {
     PayloadFire ride=PayloadFire::primary;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
     int stock[kMostPayload],ns=0,list[kMostPayload],n=0;
@@ -230,10 +239,13 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     if(ns)list[n++]=stock[0];   // that control's stock weapon(s): one choice (the 603's pair fire together)
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::store)list[n++]=i;
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
-    const bool down=keys ? KeyDown(Cfg().playerJetSwitchKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
-    const bool press=down && !p.held;
+    // During a map hold follow the physical key only to drain its edge; do not replay it on close.
+    const int vk=Cfg().playerJetSwitchKey;
+    const bool down=keys ? (MapHoldsKeys() ? vk>0 && (GetAsyncKeyState(vk)&0x8000)!=0 : KeyDown(vk)) :
+        (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
+    const bool press=!MapHoldsKeys() && down && !p.held;
     p.held=down;
-    if(!pullOk || !Cfg().stockStores || ns==0 || n<2){p.weapon=nullptr;return;}   // nothing to switch: the stock input fires
+    if(!pullOk || !Cfg().stockStores || ns==0 || n<2){p.weapon=nullptr;return pullOk && Cfg().stockStores && ns>0 && press;}
     int at=0;
     for(int k=0;k<n;++k)if(ws[list[k]]==p.weapon)at=k;
     if(!p.weapon || ws[list[at]]!=p.weapon)at=0;
@@ -256,16 +268,18 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     r.picked=list[at];r.choices=n;r.switchButton=kButtonLB;
     if(at>0)for(int k=0;k<ns && p.redirects<kMostPayload;++k)p.from[p.redirects++]=ws[stock[k]];
     Lock(p.weapon);
+    return press;
 }
 }  // namespace
 
 void PayloadFrame(unsigned char* v) noexcept {
     if(v[kDead] || BodyOf(v)!=PluginBody::none){ClearRedirect(v);return;}
     const int seat=PlayerSeatOf(v);
-    if(seat<0)return;
+    if(seat<0){if(sightPick.vehicle.Is(v))sightPick=SightPick{};return;}
     const ULONGLONG ms=GameMs();
     Pick* const p=PickFor(v,static_cast<unsigned>(seat),ms);
     if(!p)return;
+    const bool takeover=p->npc;
     p->seen=ms;p->npc=false;
     const Class c=ClassOf(v);
     PayloadReadout r{};
@@ -274,8 +288,24 @@ void PayloadFrame(unsigned char* v) noexcept {
     r.count=ReadSeat(v,static_cast<unsigned>(seat),c,ws,r);
     const unsigned char* const s=SeatAt(v,static_cast<unsigned>(seat));
     r.keys=At<unsigned char>(s,kSeatPad)==0;
+    const bool primary=At<float>(s,0x2E4)>=0.8f;
+    const bool secondary=(c==Class::heli506 || c==Class::heli409) ?
+        (At<std::uint16_t>(s,kSeatButtons)&0x20)!=0 : At<float>(s,0x2E0)>=0.8f;
+    const bool fresh=!sightPick.vehicle.Is(v) || !sightPick.human.Is(PlayerHuman()) || sightPick.seat!=static_cast<unsigned>(seat) || takeover;
+    if(fresh) {
+        sightPick={ObjRef::Of(v),ObjRef::Of(PlayerHuman()),static_cast<unsigned>(seat),PayloadFire::primary,primary,secondary};
+        p->held=true; // a switch/trigger already held while entering is not a new action
+        if(takeover)p->weapon=nullptr;
+    }
     p->redirects=0;
-    Switch(v,s,*p,ws,r);
+    const bool chose=Switch(v,s,*p,ws,r);
+    if(!MapHoldsKeys()) {
+        // Same-frame trigger edges prefer the primary. Explicit R/LB selection aims the selected payload without firing.
+        if(primary && !sightPick.primaryHeld)sightPick.control=PayloadFire::primary;
+        else if(secondary && !sightPick.secondaryHeld)sightPick.control=PayloadFire::secondary;
+        else if(chose)sightPick.control=PayloadFire::store;
+    }
+    sightPick.primaryHeld=primary;sightPick.secondaryHeld=secondary;
     latest=r;latestMs=ms;
 }
 
@@ -350,6 +380,37 @@ unsigned char* PayloadPicked(const void* vehicle) noexcept {
     return p && p->weapon && GameMs()-p->seen<=kFreshMs ? p->weapon : nullptr;
 }
 
+unsigned char* PayloadSightPicked(const void* vehicle,unsigned index) noexcept {
+    __try {
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
+        if(!v || !Readable(v,kSeatCount+8) || v[kDead] || index>=SeatCount(v))return nullptr;
+        const auto seat=SeatAt(v,index);
+        if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())return nullptr;
+        PayloadReadout r{};unsigned char* ws[kMostPayload]{};
+        r.count=ReadSeat(v,index,ClassOf(v),ws,r);
+        const Pick* pick=nullptr;
+        for(const auto& p:picks)if(!p.npc && p.ref.Is(v) && p.seat==index && GameMs()-p.seen<=kFreshMs){pick=&p;break;}
+        const bool current=sightPick.vehicle.Is(v) && sightPick.human.Is(PlayerHuman()) && sightPick.seat==index;
+        const PayloadFire want=current ? sightPick.control : PayloadFire::primary;
+        const auto usable=[&](int i){return !Spent(ws[i]);}; // reloading guns retain their sight; permanently spent ones do not
+        const auto redirected=[&](unsigned char* w) {
+            if(pick && Cfg().stockStores)for(int k=0;k<pick->redirects;++k)if(pick->from[k]==w) {
+                for(int j=0;j<r.count;++j)if(ws[j]==pick->weapon && usable(j))return ws[j];
+                return static_cast<unsigned char*>(nullptr);
+            }
+            return w;
+        };
+        if(want==PayloadFire::store && pick && pick->weapon)
+            for(int i=0;i<r.count;++i)if(ws[i]==pick->weapon && usable(i))return ws[i];
+        PayloadFire group=want==PayloadFire::store ? PayloadFire::secondary : want;
+        for(int i=0;i<r.count;++i)if(r.entry[i].fire==group && usable(i))if(auto w=redirected(ws[i]))return w;
+        // Missing/expired/spent secondary falls back to a real usable primary, never to an old weapon pointer.
+        for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::primary && usable(i))if(auto w=redirected(ws[i]))return w;
+        for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::other && usable(i))return ws[i];
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return nullptr;
+}
+
 bool InstallPayload() noexcept {
     __try {
         if(!Matches(kPull,kPullCode,sizeof(kPullCode))) {
@@ -369,5 +430,6 @@ void ResetPayload() noexcept {
     ClearRedirect(nullptr);
     for(auto& p:picks)p=Pick{};
     latest=PayloadReadout{};latestMs=0;
+    sightPick=SightPick{};
 }
 }  // namespace crew

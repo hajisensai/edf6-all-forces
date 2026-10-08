@@ -54,7 +54,8 @@ Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
     const auto holders=At<const unsigned char* const*>(seat,kSeatWeapons);
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
     if(!n || n>16 || !Readable(holders,n*sizeof(void*)))return {};
-    const unsigned char* picked=PayloadPicked(v);
+    const unsigned char* picked=PayloadSightPicked(v,index);
+    if(!picked)return {}; // no live fire-control weapon, not a request to fall back to an arbitrary holder
     Capability first{},selected{};bool pickedHere=false;
     for(std::uint64_t i=0;i<n;++i) {
         if(!Readable(holders[i],kHolderWeapon+8))continue;

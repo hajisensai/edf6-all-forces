@@ -671,7 +671,7 @@ void StockTank(const float* pos) {
     std::memcpy(sceneStock.look,sceneStock.hull,12);sceneStock.lookOk=true;
     sceneStock.speed=12.0f;sceneStock.hp=3000.0f;sceneStock.hpMax=4000.0f;
     static const char* names[]={"CANNON","MG","MISSILE"};
-    sceneStock.arms=3;sceneStock.selected=0;
+    sceneStock.arms=3;sceneStock.selected=0;sceneStock.sight=0;
     for(int i=0;i<3;++i) {
         StockArm& a=sceneStock.arm[i];
         strcpy_s(a.label,names[i]);a.ammo=10-i;a.ammoMax=10;a.reload=1.0f;a.reloadSec=-1.0f;a.canReload=true;a.kind=RoundKind::arc;
@@ -847,6 +847,7 @@ int FireControlScenes(const std::wstring& dir,const float* ground) {
         StockArm& gun=sceneStock.arm[0];gun.aimed=gun.hit=true;gun.bore[2]=1;gun.ladder.ticks=1;
         gun.ladder.at[0][2]=700;gun.ladder.range[0]=700;gun.at[2]=700;gun.range=700;
         sceneStock.selected=(i==1 || i==2) ? 1 : 0;
+        sceneStock.sight=sceneStock.selected;
         StockArm& selected=sceneStock.arm[sceneStock.selected];
         selected.aimed=selected.hit=true;selected.bore[2]=1;selected.at[2]=600;selected.range=600;
         selected.kind=i==1 ? RoundKind::homing : i==2 ? RoundKind::rocket : RoundKind::arc;

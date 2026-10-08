@@ -6,6 +6,8 @@ unsigned char* image=nullptr;
 Config cfg;
 ULONGLONG now=100;
 bool authority=true;
+unsigned char* trackedHuman=nullptr;
+unsigned char* PlayerHuman() noexcept { return trackedHuman; }
 Config& MutableConfig() { return cfg; }
 const Config& Cfg() noexcept { return cfg; }
 ULONGLONG GameMs() noexcept { return now; }
@@ -91,6 +93,7 @@ int main() {
     Put<int>(ctrl[0],8,1);
     // Real human control must never be selected by the NPC path.
     riders[0][edf::kHumanPlayer]=1;Put<void*>(riders[0],edf::kHumanPad,riders[0]);
+    trackedHuman=riders[0];
     check(!NpcPayloadSelect(vehicles[0],0,400,true),"local human seat remains player controlled");
     PayloadFrame(vehicles[0]);PayloadReadout readout{};
     check(PlayerPayload(&readout) && readout.count==3 && readout.choices==3,"player HUD lists three real mounted weapons");
