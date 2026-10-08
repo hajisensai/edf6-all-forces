@@ -43,12 +43,15 @@
 #include "layout.h"
 #include "memory.h"
 #include "vecmath.h"
+#include "body506.h"
+#include "proteus_pose.h"
 #include "seat_aim.h"
 #include "edf/aimlink.h"
 #include "edf/weapon.h"
 #include <cfloat>
 #include <cmath>
 #include <cstring>
+#include <cwchar>
 
 namespace crew {
 namespace {
@@ -176,6 +179,7 @@ struct Unit {
     unsigned playerSeat;
     // The damage it took this second (Debug): blocked by a shield, taken by the barrier, through to the hull.
     float blocked,barred,through;
+    float shieldNose[3];             // the same direction for the visible shield and the damage test
 };
 Unit units[kMaxUnits]{};
 
@@ -223,6 +227,8 @@ Unit* ActiveOf(const void* v) noexcept {
     for(auto& u:units)if(u.active && u.ref.Is(v))return &u;   // the same object, not a new one at its address
     return nullptr;
 }
+
+#include "proteus_visual.inc"
 
 // Seat `s`'s first weapon and its holder (nullptr: none).
 unsigned char* SeatWeapon(unsigned char* v,unsigned s,unsigned char** holder) noexcept {
@@ -667,6 +673,14 @@ void Frame(unsigned char* v) noexcept {
     Salvo(*u,v,ms,c);
     FieldFrame(*u,v,dt,c);
     Ring(*u,v,ms,c);
+    std::memcpy(u->shieldNose,v+kMatrix+32,12);
+    if(driver && proteus::ShieldFollowsView(u->st)) {
+        float eye[3],nose[3];
+        if(CameraRay(eye,nose)) {
+            nose[1]=0.0f;
+            if(vec::Normalize(nose))std::memcpy(u->shieldNose,nose,12);
+        }
+    }
     const float liftWant=u->st.mode==proteus::Mode::deployed ? c.proteusViewLift : 0.0f;
     u->lift+=(liftWant-u->lift)*vec::Clamp(dt*2.0f,0.0f,1.0f);
     PublishZone(*u,v,c);
@@ -707,7 +721,7 @@ float* Shield(void* object,void* gdi,float* was) noexcept {
     const Config& c=Cfg();
     const float* hit=reinterpret_cast<const float*>(g+kDmgAt);
     const float* p=Pos(o);
-    const float* nose=reinterpret_cast<const float*>(o+kMatrix+32);
+    const float* nose=u->shieldNose;
     const proteus::Tunables k=TunablesOf(c);
     const bool inArc=std::isfinite(hit[0]+hit[2]) && proteus::InArc(nose[0],nose[2],hit[0]-p[0],hit[2]-p[2],k.shieldHalfArc);
     const float before=u->st.barrier;
@@ -783,10 +797,21 @@ bool IsProteus(const void* vehicle) noexcept {
     __try { return vehicle && Big(vehicle); } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+unsigned ProteusVisibleSeats(const unsigned char* vehicle,unsigned count) noexcept {
+    const Unit* u=ActiveOf(vehicle);
+    if(!u || !u->closed || count!=kProteusSeats)return count;
+    // Another player or a real soldier who boarded before the rework keeps their
+    // place, and must remain visible until they leave it.
+    for(unsigned i=kRightSeat;i<kProteusSeats;++i)
+        if(At<const void*>(SeatAt(const_cast<unsigned char*>(vehicle),i),kSeatRider))return count;
+    return 2;
+}
+
 bool InstallProteus() noexcept {
     __try {
         ok=AllMatch(kSigs,sizeof(kSigs)/sizeof(kSigs[0]),"the rework");
         if(!ok){Log("PROTEUS off: the Proteus stays stock");return false;}
+        InstallProteusPose();
         // Installed after the turret camera and stabilizer: retain their hooks.
         if(!AllMatch(kAimSigs,sizeof(kAimSigs)/sizeof(kAimSigs[0]),"the paired cannons")){ok=false;return false;}
         const unsigned tables[2]={kAimVt,kAimSeVt};
