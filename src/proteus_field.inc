@@ -13,7 +13,7 @@ bool FieldOwnedHere(const unsigned char* o) noexcept {
     const auto flags=At<std::uint16_t>(o,0x128);
     return online::LocalCopy(flags) ? IsOnlineAuthority(o) : (flags&1)==0;
 }
-struct FieldContribution { bool present=false;float dt=0;int points=0;std::int32_t team=0; };
+struct FieldContribution { bool present=false;float dt=0;int points=0;std::int32_t team=0;ObjRef source; };
 struct FieldTarget {
     ObjRef ref;
     ULONGLONG frame=0;
@@ -40,7 +40,7 @@ void SetFieldMultiplier(unsigned char* o,std::size_t offset,float factor,bool& w
 bool FieldSourceActive(int index,const unsigned char* o,const FieldContribution& contribution) noexcept {
     if(!Cfg().enabled || !Cfg().proteus)return false;
     const auto& u=units[index];const auto v=static_cast<const unsigned char*>(u.ref.obj);
-    if(!u.ref || !Readable(v,kHpMax+4) || !u.ref.Is(v) || v[kDead] || ActiveOf(v)!=&u || u.st.mode!=proteus::Mode::deployed)return false;
+    if(!u.ref || !Readable(v,kHpMax+4) || !u.ref.Is(v) || !contribution.source.Is(v) || v[kDead] || ActiveOf(v)!=&u || u.st.mode!=proteus::Mode::deployed)return false;
     const auto p=FieldParameters(u);
     return contribution.team==p.team && p.radius>0 && vec::Dist(Pos(v),Pos(o))<=p.radius;
 }
@@ -99,5 +99,5 @@ void RecordField(const Field& f,unsigned char* o,bool human,unsigned soldier) no
     FieldTarget* found=nullptr,*free=nullptr;
     for(auto& t:fieldTargets){if(t.ref.Is(o)){found=&t;break;}if(!free && !t.ref)free=&t;}
     if(!found){found=free;if(!found)return;*found=FieldTarget{};found->ref=ObjRef::Of(o);found->frame=GameFrame();found->human=human;found->soldier=soldier;}
-    found->sources[source]={true,f.dt,f.points,FieldParameters(*f.source).team};RecomputeField(*found);
+    found->sources[source]={true,f.dt,f.points,FieldParameters(*f.source).team,f.source->ref};RecomputeField(*found);
 }

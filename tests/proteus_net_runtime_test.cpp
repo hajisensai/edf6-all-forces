@@ -78,6 +78,8 @@ int main(){
     FieldFrame(*u,vehicle,.1f,config);FieldFrame(*u2,vehicle2,.1f,config);
     Check(At<float>(ally,kTakenMul)==.5f && At<float>(ally,kEnergy)==12 && At<float>(weapon,kCountdown)==88,
           "repeated visits in one frame neither stack nor re-award support");
+    FieldContribution oldSource{true,.1f,0,0,ObjRef{vehicle2,ctrl}};
+    Check(!FieldSourceActive(static_cast<int>(u2-units),ally,oldSource),"reused source slot cannot inherit another ObjRef's field contribution");
     second.sequence=2;second.mode=0;ProteusNetReceived(vehicle2,second);
     Check(std::fabs(At<float>(ally,kTakenMul)-.7f)<1e-5f,"stowing one field immediately retains only the other field's protection");
     Put<std::uint16_t>(ally,0x128,1);FieldFrame(*u,vehicle,.1f,config);
