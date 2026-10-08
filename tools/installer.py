@@ -492,6 +492,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     for line in gen.install(game, gen.target_range(gen.Plan())):
         print('  ', line)
     print('\n安装完成。启动游戏即可。')
+    print('联机请同时更新配套 EDF Coop：全军出击房间仅对兼容的 MOD 玩家开放。')
+    print('本次模型、挂载和测试场资源已重新生成；更新时请运行安装器，不要只替换 DLL。')
 
 
 def uninstall_stock_stores(game: str) -> None:
